@@ -89,6 +89,14 @@ export interface SpotlightTourProps {
    * real first plugin task without a dead-end UX transition.
    */
   onComplete?: (scenarioId: string) => void;
+  /**
+   * Z onboarding chain — fires when the user dismisses the tour
+   * BEFORE reaching the last step (Esc, backdrop click, "건너뛰기").
+   * The chain reducer uses this to still advance to the
+   * PluginShowcase stage so an early-skip user is not stranded on
+   * a half-finished chain.
+   */
+  onDismiss?: (scenarioId: string) => void;
 }
 
 interface SpotlightRect {
@@ -244,6 +252,7 @@ export function SpotlightTour({
   scenarios = DEFAULT_TOUR_SCENARIOS,
   initialScenarioId,
   onComplete,
+  onDismiss,
 }: SpotlightTourProps) {
   const [activeScenarioId, setActiveScenarioId] = useState<string | null>(
     initialScenarioId ?? null,
@@ -377,8 +386,16 @@ export function SpotlightTour({
         });
       }
       setActiveScenarioId(null);
+      // Z onboarding chain — notify the host so the chain reducer
+      // can still advance to PluginShowcase even when the user
+      // dismissed the tour early (Esc / backdrop / "건너뛰기").
+      try {
+        onDismiss?.(id);
+      } catch {
+        /* host callback failure stays local */
+      }
     },
-    [api],
+    [api, onDismiss],
   );
 
   const handleNext = useCallback(() => {

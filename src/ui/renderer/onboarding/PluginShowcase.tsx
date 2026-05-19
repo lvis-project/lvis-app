@@ -1,0 +1,297 @@
+/**
+ * PluginShowcase (Z onboarding chain step 6) — installed-plugin tour.
+ *
+ * Mounted right after `SpotlightTour` completes (`tourCompleted=true`).
+ * Surfaces a short carded explanation of every installed plugin so the
+ * user understands what each plugin *does* before being dropped into
+ * an empty chat surface. Each card has two actions:
+ *   - "둘러보기" — fires the per-plugin walkthrough via `api.tour.start`.
+ *   - "지금은 닫기" — dismisses the card silently.
+ * A separate "끝내기 →" footer button closes the entire showcase and
+ * marks onboarding complete.
+ *
+ * Catalog model:
+ *   - The component receives the installed-plugin id list as a prop and
+ *     filters the static `PLUGIN_DESCRIPTIONS` table to the intersection.
+ *     Plugins without an entry render a generic fallback card so the
+ *     user is never shown an empty surface even on a non-standard install.
+ *   - The static descriptions are intentionally short (1 sentence each)
+ *     to fit the 460×840 narrow window without scroll-shenanigans.
+ *
+ * The component is presentational only — install/uninstall lifecycle is
+ * not its concern; it just reflects the host's current pluginCards list.
+ */
+import { useCallback, useEffect, useMemo, useState } from "react";
+import { Button } from "../../../components/ui/button.js";
+import {
+  Dialog,
+  DialogContent,
+  DialogDescription,
+  DialogHeader,
+  DialogTitle,
+} from "../../../components/ui/dialog.js";
+
+export interface PluginShowcaseApi {
+  tour: {
+    start: (scenarioId: string) => Promise<unknown> | unknown;
+  };
+}
+
+export interface PluginShowcaseProps {
+  open: boolean;
+  /**
+   * Installed plugin id list — typically `pluginCards.map(c => c.id)`
+   * from App.tsx. Used to filter the static description catalog so the
+   * showcase only mentions plugins the user actually has.
+   */
+  installedPluginIds: readonly string[];
+  api: PluginShowcaseApi;
+  /** Called when the user closes the showcase (끝내기 / skip / close). */
+  onClose: () => void;
+}
+
+interface PluginDescription {
+  /** Plugin id as it appears in pluginCards / manifests. */
+  id: string;
+  emoji: string;
+  /** Korean display name (short, ≤ 12 chars). */
+  label: string;
+  /** One-sentence Korean description (~80 chars). */
+  body: string;
+  /** Spotlight tour id for the per-plugin walkthrough. */
+  tourScenarioId: string;
+}
+
+/**
+ * Static catalog — keyed by the canonical plugin id (NOT the marketplace
+ * slug; the runtime PluginCard.id uses the bare manifest id).
+ * Order is the intended introduction order: meeting → docs → work →
+ * multi-agent → others. New plugins land at the bottom until a designer
+ * decides where to slot them.
+ */
+const PLUGIN_DESCRIPTIONS: readonly PluginDescription[] = [
+  {
+    id: "meeting",
+    emoji: "🎙️",
+    label: "회의 자동 요약",
+    body: "회의 녹음 → 자동 STT → 요약과 액션 아이템 추출까지 한 번에 처리합니다.",
+    tourScenarioId: "meeting-walkthrough",
+  },
+  {
+    id: "local-indexer",
+    emoji: "📚",
+    label: "로컬 문서 검색",
+    body: "PDF·Word·마크다운을 로컬에서 인덱싱하고 자연어로 답합니다. 문서는 외부로 나가지 않습니다.",
+    tourScenarioId: "indexer-walkthrough",
+  },
+  {
+    id: "work-proactive",
+    emoji: "💼",
+    label: "업무 도우미",
+    body: "이메일·일정에서 액션 아이템 후보를 추출해 적절한 시점에 카드로 알려줍니다.",
+    tourScenarioId: "proactive-walkthrough",
+  },
+  {
+    id: "agent-hub",
+    emoji: "🤖",
+    label: "Multi-agent",
+    body: "여러 에이전트가 작업을 분산해 처리하고 결과를 다시 합성합니다.",
+    tourScenarioId: "multi-agent-tour",
+  },
+  {
+    id: "ms-graph",
+    emoji: "📅",
+    label: "MS Graph 연동",
+    body: "Microsoft 365 의 이메일·캘린더와 연결해 LVIS 가 일정과 메일을 활용하도록 합니다.",
+    tourScenarioId: "first-boot-essentials",
+  },
+  {
+    id: "lge-api",
+    emoji: "🏢",
+    label: "LGE 내부 API",
+    body: "LGE 내부 시스템과 연동해 사내 데이터·도구를 LVIS 에서 함께 사용합니다.",
+    tourScenarioId: "first-boot-essentials",
+  },
+];
+
+const PLUGIN_DESCRIPTION_BY_ID = new Map<string, PluginDescription>(
+  PLUGIN_DESCRIPTIONS.map((entry) => [entry.id, entry] as const),
+);
+
+/**
+ * Resolve the ordered list of cards to render. Installed plugins matching
+ * the catalog come first (in catalog order); unknown installed plugins
+ * append a generic fallback card so the user always sees something for
+ * each installed plugin.
+ *
+ * Pure for unit-testability — caller passes the raw id list.
+ */
+export function resolveShowcaseCards(
+  installedPluginIds: readonly string[],
+): readonly PluginDescription[] {
+  const installed = new Set(installedPluginIds);
+  const known: PluginDescription[] = [];
+  for (const entry of PLUGIN_DESCRIPTIONS) {
+    if (installed.has(entry.id)) known.push(entry);
+  }
+  const unknown: PluginDescription[] = [];
+  for (const id of installedPluginIds) {
+    if (PLUGIN_DESCRIPTION_BY_ID.has(id)) continue;
+    unknown.push({
+      id,
+      emoji: "🧩",
+      label: id,
+      body: "사용자가 추가로 설치한 플러그인입니다. 설정 → 플러그인에서 자세히 확인할 수 있어요.",
+      tourScenarioId: "first-boot-essentials",
+    });
+  }
+  return [...known, ...unknown];
+}
+
+function usePrefersReducedMotion(): boolean {
+  const [reduce, setReduce] = useState<boolean>(() => {
+    if (typeof window === "undefined" || typeof window.matchMedia !== "function") {
+      return false;
+    }
+    return window.matchMedia("(prefers-reduced-motion: reduce)").matches;
+  });
+  useEffect(() => {
+    if (typeof window === "undefined" || typeof window.matchMedia !== "function") {
+      return;
+    }
+    const mq = window.matchMedia("(prefers-reduced-motion: reduce)");
+    const onChange = () => setReduce(mq.matches);
+    if (typeof mq.addEventListener === "function") {
+      mq.addEventListener("change", onChange);
+      return () => mq.removeEventListener("change", onChange);
+    }
+    mq.addListener(onChange);
+    return () => mq.removeListener(onChange);
+  }, []);
+  return reduce;
+}
+
+export function PluginShowcase({
+  open,
+  installedPluginIds,
+  api,
+  onClose,
+}: PluginShowcaseProps) {
+  const reduceMotion = usePrefersReducedMotion();
+  const cards = useMemo(
+    () => resolveShowcaseCards(installedPluginIds),
+    [installedPluginIds],
+  );
+
+  const handleExplore = useCallback(
+    (scenarioId: string) => {
+      try {
+        void api.tour.start(scenarioId);
+      } catch {
+        // Tour failures are non-fatal — the user can still close the
+        // showcase and reach chat.
+      }
+    },
+    [api],
+  );
+
+  const handleClose = useCallback(() => {
+    onClose();
+  }, [onClose]);
+
+  return (
+    <Dialog open={open} onOpenChange={(next) => { if (!next) handleClose(); }}>
+      <DialogContent
+        size="sm"
+        data-testid="plugin-showcase"
+        data-reduce-motion={reduceMotion ? "true" : "false"}
+        className="p-0 overflow-hidden"
+      >
+        <DialogHeader className="px-6 pt-6 pb-3 space-y-0">
+          <div className="flex items-center gap-2">
+            <span
+              aria-hidden
+              className="grid h-7 w-7 place-items-center rounded-md text-[11px] text-primary-foreground"
+              style={{
+                background:
+                  "linear-gradient(135deg, hsl(var(--p-purple-500)), hsl(var(--p-blue-500)))",
+              }}
+            >
+              ✦
+            </span>
+            <div className="min-w-0">
+              <DialogTitle className="text-sm font-medium">
+                설치된 플러그인 둘러보기
+              </DialogTitle>
+              <DialogDescription className="text-[11px]">
+                각 플러그인이 무엇을 도와드리는지 1줄로 소개합니다.
+              </DialogDescription>
+            </div>
+          </div>
+        </DialogHeader>
+
+        <div className="px-6 pb-6 space-y-3">
+          {cards.length === 0 ? (
+            <p
+              data-testid="plugin-showcase:empty"
+              className="rounded-lg bg-[hsl(var(--muted))] px-3 py-3 text-[12.5px] leading-relaxed text-muted-foreground"
+            >
+              현재 설치된 플러그인이 없어요. 설정 → 마켓플레이스에서 필요한
+              도구를 추가할 수 있습니다.
+            </p>
+          ) : (
+            <div
+              data-testid="plugin-showcase:list"
+              className="space-y-2 max-h-[420px] overflow-y-auto pr-1"
+            >
+              {cards.map((card) => (
+                <div
+                  key={card.id}
+                  data-testid={`plugin-showcase:card:${card.id}`}
+                  className="rounded-lg border border-border/70 bg-[hsl(var(--muted))] px-3 py-3"
+                >
+                  <div className="flex items-start gap-2">
+                    <span className="text-base leading-none" aria-hidden="true">
+                      {card.emoji}
+                    </span>
+                    <div className="min-w-0 flex-1">
+                      <div className="text-[12.5px] font-medium">{card.label}</div>
+                      <div className="mt-1 text-[10.5px] leading-snug text-muted-foreground">
+                        {card.body}
+                      </div>
+                      <div className="mt-2 flex items-center gap-2">
+                        <Button
+                          type="button"
+                          variant="secondary"
+                          size="sm"
+                          className="h-6 px-2 text-[10.5px]"
+                          data-testid={`plugin-showcase:card:${card.id}:explore`}
+                          onClick={() => handleExplore(card.tourScenarioId)}
+                        >
+                          둘러보기 →
+                        </Button>
+                      </div>
+                    </div>
+                  </div>
+                </div>
+              ))}
+            </div>
+          )}
+
+          <Button
+            type="button"
+            data-testid="plugin-showcase:close"
+            onClick={handleClose}
+            className="w-full text-primary-foreground"
+            style={{
+              background:
+                "linear-gradient(135deg, hsl(var(--p-purple-500)), hsl(var(--p-blue-500)))",
+            }}
+          >
+            끝내기 →
+          </Button>
+        </div>
+      </DialogContent>
+    </Dialog>
+  );
+}

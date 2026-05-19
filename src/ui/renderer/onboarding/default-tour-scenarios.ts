@@ -90,12 +90,16 @@ export interface TourScenario {
 }
 
 /**
- * `first-boot-essentials` — the canonical first-login tour. Mirrors the
- * Onb V2 mockup step body verbatim where practical (the mockup shows
- * step 2 of 4 = "먼저 한 줄로 시작해보세요"); the other three steps are
- * the rest of the §Onb V2 storyline ① 한국어 입력 ② 도구 승인 ③ ⌘K
- * 팔레트 — extended with a closing "튜토리얼 끝" step so the tour has a
- * natural exit point.
+ * `first-boot-essentials` — the canonical first-login tour.
+ *
+ * Z onboarding chain extension (2026-05-19): the tour grew from 4 → 7
+ * steps so the user lands with a full mental model of the host UI
+ * before plugins are introduced. New steps cover the help-shortcut hint
+ * (4), recent chat history (5), the Settings/menu entry (6), and the
+ * vendor/model status-bar indicator (7). Each anchor is pinned to a
+ * `data-tour-anchor=` attribute on a production DOM element so renderer
+ * refactors break the tour visibly (test in
+ * `__tests__/tour-anchors-trigger.test.tsx`).
  */
 const FIRST_BOOT_ESSENTIALS: TourScenario = {
   id: "first-boot-essentials",
@@ -114,7 +118,7 @@ const FIRST_BOOT_ESSENTIALS: TourScenario = {
     {
       anchorSelector: '[data-tour-anchor="input-action-bar"]',
       title: "2단계 · 도구는 항상 사용자 승인",
-      body: "LVIS 가 파일을 읽거나 명령을 실행할 때마다 승인 카드가 표시됩니다. 한 번 허용/거부하면 그 결정이 현재 세션에 기억되어 같은 도구는 다시 묻지 않습니다.",
+      body: "LVIS 가 파일을 읽거나 명령을 실행할 때마다 승인 카드가 이 영역에 표시됩니다. 한 번 허용/거부하면 그 결정이 현재 세션에 기억되어 같은 도구는 다시 묻지 않습니다.",
       completionTrigger: { kind: "manual" },
     },
     {
@@ -125,10 +129,29 @@ const FIRST_BOOT_ESSENTIALS: TourScenario = {
       completionTrigger: { kind: "keypress", combo: "⌘+K" },
     },
     {
-      anchorSelector: '[data-tour-anchor="composer-input"]',
-      title: "4단계 · 가이드 다시 보기",
-      body: "이 가이드는 언제든 ⌘+? 로 다시 열 수 있어요. 이제 새 대화를 시작해 LVIS 를 직접 사용해 보세요.",
+      anchorSelector: '[data-tour-anchor="help-shortcut-hint"]',
+      title: "4단계 · ⌘+? 도움말 단축키",
+      body: "이 가이드는 언제든 ⌘+? 로 다시 열 수 있어요. 상단 우측의 ⌘+? 칩이 항상 같은 자리에 있어 길을 잃지 않습니다.",
       keyHint: ["⌘+?"],
+      completionTrigger: { kind: "manual" },
+    },
+    {
+      anchorSelector: '[data-tour-anchor="chat-history"]',
+      title: "5단계 · 최근 대화와 즐겨찾기",
+      body: "검색 아이콘을 누르면 최근 대화 / 즐겨찾기 / 본문 검색이 한 번에 열립니다. 단축키 ⌘+F 로도 같은 패널이 뜹니다.",
+      keyHint: ["⌘+F"],
+      completionTrigger: { kind: "manual" },
+    },
+    {
+      anchorSelector: '[data-tour-anchor="settings-entry"]',
+      title: "6단계 · 설정 · 루틴 · 메모리",
+      body: "이 햄버거 메뉴 안에 설정, 루틴, 메모리, 내보내기가 모여 있어요. 모델 변경이나 권한 조정도 여기서 시작합니다.",
+      completionTrigger: { kind: "manual" },
+    },
+    {
+      anchorSelector: '[data-tour-anchor="status-bar-vendor"]',
+      title: "7단계 · 활성 LLM 벤더 · 모델",
+      body: "하단 상태바는 지금 사용 중인 벤더와 모델을 항상 표시합니다. 클릭하면 곧바로 설정 → LLM 으로 이동해요. 이제 플러그인 소개로 넘어갈게요.",
       completionTrigger: { kind: "manual" },
     },
   ],
