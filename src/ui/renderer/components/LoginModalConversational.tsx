@@ -152,19 +152,16 @@ export function LoginModalConversational({
   // decrypt/persist fails; `activating` blocks the submit button while
   // the IPC roundtrip is in flight. The whole sub-state resets when the
   // dialog re-opens so a cancelled flow starts from the cold prompt.
+  //
+  // No `activationConfirmed` latch exists: activation success
+  // synchronously kicks off `runAuthMockup`, which flips `submitting`
+  // true on entry. That single flag governs both the collapsing of the
+  // activation block and the assistant bubble copy swap, so there is no
+  // transitional "activation done · waiting for user to proceed" state.
   const [activationOpen, setActivationOpen] = useState(false);
   const [activationCode, setActivationCode] = useState("");
   const [activationError, setActivationError] = useState<string | null>(null);
   const [activating, setActivating] = useState(false);
-  // Activation-success latch. Flips true the moment the activation IPC
-  // resolves OK. The renderer immediately chains into `runAuthMockup`,
-  // so the latch only lives long enough for the assistant bubble copy
-  // to swap to "활성 완료 · 인증 시작합니다…" before `submitting` flips
-  // true and the auth checklist takes over. (The earlier F5 "press Enter
-  // to begin" interstitial — separate ack button — was removed
-  // 2026-05-19 because the extra keystroke read as friction, not as a
-  // confirmation moment.)
-  const [activationConfirmed, setActivationConfirmed] = useState(false);
 
   // Reset the conversational flow on every open so a re-entry starts
   // from the cold "어떤 방식으로 시작할까요?" prompt.
@@ -179,7 +176,6 @@ export function LoginModalConversational({
       setActivationCode("");
       setActivationError(null);
       setActivating(false);
-      setActivationConfirmed(false);
     }
   }, [open]);
 
@@ -282,7 +278,6 @@ export function LoginModalConversational({
     try {
       const result = await api.demo.activate(trimmed);
       if (result.ok) {
-        setActivationConfirmed(true);
         // Chain straight into the auth transcript — no extra Enter press
         // required. `runAuthMockup` flips `submitting` true on entry, which
         // collapses the activation block (gated by `!submitting`) and lets
@@ -477,7 +472,7 @@ export function LoginModalConversational({
                 className="rounded-lg rounded-tl-sm bg-muted px-3 py-2 text-[12.5px] leading-relaxed text-foreground"
                 data-testid="login-modal:assistant-prompt"
               >
-                {submitting || activationConfirmed
+                {submitting
                   ? "활성 완료 · 데모 자격증명으로 인증을 시작합니다…"
                   : "데모 활성 코드를 받으셨나요? 한 줄로 붙여넣어 주세요. 형식은 `LVIS-DEMO:v1:...` 입니다."}
               </p>
@@ -488,7 +483,7 @@ export function LoginModalConversational({
                   has clean visual space. The textarea accepts a multi-line
                   paste defensively (some chat clients wrap long links) but
                   the codec only inspects the trimmed payload. */}
-              {activationOpen && !submitting && !activationConfirmed && (
+              {activationOpen && !submitting && (
                 <div
                   data-testid="login-modal:activation-input"
                   className="space-y-1.5"
@@ -554,11 +549,11 @@ export function LoginModalConversational({
                 </div>
               )}
 
-              {/* F5 (2026-05-19) — activation success now chains directly
-                  into `runAuthMockup` so there is no idle "press Enter to
-                  begin" interstitial. The checklist below takes over the
-                  visual lane within a tick of activationConfirmed flipping
-                  true. */}
+              {/* Activation success chains directly into `runAuthMockup` —
+                  there is no idle "press Enter to begin" interstitial.
+                  `submitting` flips true synchronously when the auth chain
+                  starts, so the checklist below takes over the same visual
+                  lane without an intermediate ack state. */}
 
               {checklistRevealed > 0 && (
                 <pre
