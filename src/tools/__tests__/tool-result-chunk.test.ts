@@ -86,10 +86,38 @@ describe("read_tool_result_chunk", () => {
             originalBytes: 30000,
             trimmedAt: "2026-05-19T00:00:00.000Z",
           },
+          serializedStub: true,
         },
       })),
     );
     expect(result.isError).toBe(true);
     expect(JSON.parse(result.output).error).toContain("no longer available");
+  });
+
+  it("allows raw host-truncated content that happens to start with a stub prefix", async () => {
+    const content = `[tool_result truncated by host but this is real output]\n${"row\n".repeat(200)}`;
+    const tool = createReadToolResultChunkTool();
+    const result = await tool.execute(
+      { toolUseId: "toolu_prefix", chunkIndex: 0, maxChars: 500 },
+      ctx((toolUseId) => ({
+        toolUseId,
+        toolName: "lge_lgenie_query",
+        content,
+        meta: {
+          truncated: {
+            originalLines: 201,
+            originalTokens: 600,
+            originalBytes: content.length,
+            trimmedAt: "2026-05-19T00:00:00.000Z",
+          },
+        },
+      })),
+    );
+
+    expect(result.isError).toBe(false);
+    expect(JSON.parse(result.output)).toMatchObject({
+      toolUseId: "toolu_prefix",
+      chunk: content.slice(0, 500),
+    });
   });
 });

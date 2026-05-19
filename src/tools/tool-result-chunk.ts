@@ -124,8 +124,9 @@ export function createReadToolResultChunkTool(): Tool {
         return unavailable("tool result is not host-truncated or compacted");
       }
       if (
-        result.content.startsWith("[tool_result stripped:") ||
-        result.content.startsWith("[tool_result truncated by host")
+        result.meta?.serializedStub === true &&
+        (result.content.startsWith("[tool_result stripped:") ||
+          result.content.startsWith("[tool_result truncated by host"))
       ) {
         return unavailable("verbatim tool result is no longer available; the session likely reloaded from disk");
       }
