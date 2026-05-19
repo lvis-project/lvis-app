@@ -33,6 +33,16 @@ describe("onboardingChainReducer", () => {
     );
   });
 
+  it("showcase → done via probe-skip (boot-time default initial = showcase)", () => {
+    // Fresh boots now initialise the reducer at "showcase" so the intro
+    // mounts on first paint. Returning users (existing key or
+    // onboardingCompleted=true) must still self-cancel through probe-skip
+    // without flickering the Dialog.
+    expect(
+      onboardingChainReducer("showcase", { type: "probe-skip" }),
+    ).toBe("done");
+  });
+
   it("full happy-path traversal", () => {
     const result = transition("idle", [
       { type: "probe-start" },
@@ -127,5 +137,21 @@ describe("onboardingChainReducer", () => {
         onboardingChainReducer(stage, { type: "force-finish" }),
       ).toBe("done");
     }
+  });
+
+  it("boot-time default 'showcase' → happy path traversal still terminates at done", () => {
+    // First-boot users start at "showcase" (not "idle"). Verify the full
+    // forward traversal from that initial state still ends at `done` so
+    // the chain reaches `markOnboardingCompleted` and the persistence
+    // side-effect fires.
+    const result = transition("showcase", [
+      { type: "showcase-start" },
+      { type: "login-success" },
+      { type: "welcome-accept" },
+      { type: "memory-finish" },
+      { type: "tour-finish" },
+      { type: "plugins-close" },
+    ]);
+    expect(result).toBe("done");
   });
 });
