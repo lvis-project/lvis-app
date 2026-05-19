@@ -685,9 +685,21 @@ export function App() {
   //   - done stage:    flip `features.onboardingCompleted=true` once so
   //                    the next boot skips the entire chain (idempotent
   //                    via the markOnboardingCompleted helper above).
+  //
+  // Both side-effects are guarded by a per-run ref so React 18 StrictMode's
+  // double-invoked dev-mode effects (mount → cleanup → mount) cannot
+  // broadcast `tour.start` twice — without the guard the second mount
+  // re-fires the IPC, which re-enters the SpotlightTour subscriber and
+  // visibly resets the scenario to step 0 ("스팟하이라이트 시퀀스가 2번 노출"
+  // — user report 2026-05-19). The ref also protects against incidental
+  // re-renders that change `api` / `markOnboardingCompleted` while
+  // `chainStage === "tour"` stays pinned.
   const chainCompletionPersistedRef = useRef(false);
+  const chainTourBroadcastRef = useRef(false);
   useEffect(() => {
     if (chainStage === "tour") {
+      if (chainTourBroadcastRef.current) return;
+      chainTourBroadcastRef.current = true;
       try {
         void api.tour.start("first-boot-essentials");
       } catch {
