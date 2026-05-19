@@ -710,6 +710,17 @@ export type LvisApi = {
   getRuntimeCounts: () => Promise<{ tools: number; plugins: number; mcps: number }>;
   getRuntimeEnv: () => Promise<{ platform: string; hostname: string; user: string }>;
   pingMarketplace: () => Promise<{ configured: boolean; online: boolean }>;
+  /**
+   * Settings "일반" dashboard host metadata. SoT is electron
+   * `app.getVersion()` + `process.platform`; the renderer never duplicates
+   * either value.
+   */
+  getAppInfo: () => Promise<{
+    version: string;
+    platform: NodeJS.Platform;
+    arch: string;
+    userDataPath: string;
+  }>;
   registerPluginWebview: (payload: { webContentsId: number; pluginId: string; entryUrl: string }) => Promise<{ ok: boolean; error?: string }>;
   onViewActivate: (h: (k: string) => void) => () => void;
   getUsageSummary: (days?: number) => Promise<UsageSummaryShape>;
