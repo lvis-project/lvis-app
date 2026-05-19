@@ -8,6 +8,7 @@ import { validateSender, UNAUTHORIZED_FRAME, auditUnauthorized } from "../gated.
 import type { IpcDeps } from "../types.js";
 import type { RoutineExecution, RoutineFiredPayload, RoutineSchedule } from "../../shared/routines-types.js";
 import { ROUTINES_V2, OVERLAY_V1 } from "../../shared/ipc-channels.js";
+import { getLvisAppVersion } from "../../shared/app-version.js";
 import { createLogger } from "../../lib/logger.js";
 const log = createLogger("lvis");
 
@@ -166,11 +167,11 @@ export function registerMiscHandlers(deps: IpcDeps): void {
   // ─── App info ────────────────────────────────────
   // Read-only host metadata for the Settings "일반" tab dashboard. Returns:
   //   - `version`: LVIS package.json version (single source of truth).
-  //     `app.getVersion()` is intentionally avoided because in dev mode
-  //     (running unpackaged via `electron .`) it returns the Electron binary
-  //     version instead of the project version. We resolve the project
-  //     package.json relative to `app.getAppPath()` so both packaged
-  //     (`app.asar/package.json`) and dev (`<repo>/package.json`) work.
+  //     Resolved via `shared/app-version.ts` so dev and packaged use the
+  //     same logic that the bootstrap splash already relies on. We avoid
+  //     `app.getVersion()` because in dev mode (running unpackaged via
+  //     `electron dist/src/main/main.js`) it returns the Electron binary
+  //     version instead of the LVIS project version.
   //   - `electronVersion` / `nodeVersion` / `chromeVersion` / `v8Version`:
   //     stack info from `process.versions` (visible in 시스템 섹션).
   //   - `platform` / `arch` / `userDataPath`: host environment used by the
@@ -179,23 +180,8 @@ export function registerMiscHandlers(deps: IpcDeps): void {
   // `lvis:settings:get` / `lvis:audit:stats`).
   ipcMain.handle("lvis:app:info", async () => {
     const { app } = await import("electron");
-    const { readFile } = await import("node:fs/promises");
-    const path = await import("node:path");
-    let appVersion = "unknown";
-    try {
-      const pkgPath = path.join(app.getAppPath(), "package.json");
-      const raw = await readFile(pkgPath, "utf8");
-      const parsed = JSON.parse(raw) as { version?: unknown };
-      if (typeof parsed.version === "string" && parsed.version.length > 0) {
-        appVersion = parsed.version;
-      }
-    } catch (err) {
-      log.warn(
-        `lvis:app:info package.json read failed: ${(err as Error)?.message ?? String(err)}`,
-      );
-    }
     return {
-      version: appVersion,
+      version: getLvisAppVersion(),
       electronVersion: process.versions.electron ?? "",
       nodeVersion: process.versions.node ?? "",
       chromeVersion: process.versions.chrome ?? "",

@@ -43,6 +43,7 @@ import { resolveAppIconPath } from "./main/app-icon.js";
 import { WindowManager, type DetachedWindowOptions } from "./main/window-manager.js";
 import { createLogger } from "./lib/logger.js";
 import { LVIS_LOGO_PATH, LVIS_LOGO_VIEW_BOX } from "./shared/lvis-logo.js";
+import { getLvisAppVersion } from "./shared/app-version.js";
 import { normalizeSettingsTab } from "./shared/settings-tabs.js";
 import { preparePythonRuntimeForInstalledPlugin, withPluginInstallLock } from "./plugins/install-lifecycle.js";
 import { ensureWorkspaceCwd } from "./main/ensure-workspace-cwd.js";
@@ -1328,9 +1329,12 @@ const BOOTSTRAP_SPLASH = `<!DOCTYPE html>
   .dot:nth-child(3){animation-delay:.36s}
   .version{
     position:fixed;right:14px;bottom:10px;
-    color:rgba(44,44,44,.34);font-size:10.5px;
+    color:rgba(44,44,44,.5);font-size:10px;line-height:1.35;
     font-variant-numeric:tabular-nums;letter-spacing:.02em;
+    text-align:right;opacity:.85;
+    display:flex;flex-direction:column;gap:1px;
   }
+  .version span{display:block}
 
   @keyframes lvis-splash-enter{from{opacity:0}to{opacity:1}}
   @keyframes lvis-splash-breathing{0%,100%{transform:scale(1)}50%{transform:scale(1.035)}}
@@ -1345,7 +1349,7 @@ const BOOTSTRAP_SPLASH = `<!DOCTYPE html>
     .name{color:#ff5b8f}
     .status{color:rgba(255,141,178,.72)}
     .dot{background:#ff5b8f}
-    .version{color:rgba(240,230,255,.32)}
+    .version{color:rgba(240,230,255,.5)}
   }
 
   /* Reduced motion — disable scale, breathing, bounce; keep entrance fade only */
@@ -1371,7 +1375,13 @@ const BOOTSTRAP_SPLASH = `<!DOCTYPE html>
       <div class="dots" aria-hidden="true"><span class="dot"></span><span class="dot"></span><span class="dot"></span></div>
     </div>
   </div>
-  <div class="version">v${app.getVersion()}</div>
+  <div class="version" aria-label="버전 정보">
+    <span>LVIS v${getLvisAppVersion()}</span>
+    <span>Electron v${process.versions.electron ?? ""}</span>
+    <span>Node v${process.versions.node ?? ""}</span>
+    <span>Chromium v${process.versions.chrome ?? ""}</span>
+    <span>V8 v${process.versions.v8 ?? ""}</span>
+  </div>
   <script>
     const messages = ${JSON.stringify(BOOTSTRAP_STATUS_MESSAGES)};
     const statusEl = document.getElementById("status");
