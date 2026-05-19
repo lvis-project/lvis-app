@@ -98,7 +98,10 @@ describe("auth:login-mockup IPC handler (#893 top-level)", () => {
 
   it("returns no-demo-key when the active vendor's env var is missing", async () => {
     delete process.env.LVIS_DEMO_KEY_OPENAI;
-    // LVIS_DEMO_VENDOR defaults to "openai" — apiKey env is absent → no-demo-key.
+    // Path 2 hotfix: default vendor is now azure-foundry; force openai for
+    // this scenario so the test's "missing key" assertion stays meaningful
+    // for the historical openai default.
+    process.env.LVIS_DEMO_VENDOR = "openai";
     const deps = makeDeps();
     const { registerAuthHandlers } = await loadAuthModule();
     registerAuthHandlers(deps as never);
@@ -111,7 +114,10 @@ describe("auth:login-mockup IPC handler (#893 top-level)", () => {
     expect(deps.settingsService.setSecret).not.toHaveBeenCalled();
   });
 
-  it("uses LVIS_DEMO_VENDOR to pick the active vendor (default openai)", async () => {
+  it("uses LVIS_DEMO_VENDOR to pick the active vendor (default azure-foundry, overridable)", async () => {
+    // Path 2 hotfix: default is now azure-foundry. The test explicitly
+    // sets LVIS_DEMO_VENDOR=openai to exercise the override path.
+    process.env.LVIS_DEMO_VENDOR = "openai";
     process.env.LVIS_DEMO_KEY_OPENAI = "sk-demo-test";
     const deps = makeDeps();
     const { registerAuthHandlers } = await loadAuthModule();
@@ -275,6 +281,9 @@ describe("auth:login-mockup IPC handler (#893 top-level)", () => {
   it("registers handler in packaged builds when LVIS_DEMO_ENABLED=1 was captured pre-scrub", async () => {
     _isPackaged = true;
     process.env.LVIS_DEMO_ENABLED = "1";
+    // Path 2 hotfix: default vendor is now azure-foundry; pin to openai
+    // to preserve the historical assertion shape.
+    process.env.LVIS_DEMO_VENDOR = "openai";
     process.env.LVIS_DEMO_KEY_OPENAI = "sk-demo-prod-test";
     const deps = makeDeps();
     const { registerAuthHandlers } = await loadAuthModule();
@@ -301,6 +310,9 @@ describe("auth:login-mockup IPC handler (#893 top-level)", () => {
 
   // PR #894 review T1-10 — audit log fingerprint redaction
   it("redacts keySource from the audit log to `present` on successful login", async () => {
+    // Path 2 hotfix: pin vendor to openai to preserve historical scenario
+    // (default vendor changed to azure-foundry).
+    process.env.LVIS_DEMO_VENDOR = "openai";
     process.env.LVIS_DEMO_KEY_OPENAI = "sk-redact-test";
     const deps = makeDeps();
     const { registerAuthHandlers } = await loadAuthModule();
