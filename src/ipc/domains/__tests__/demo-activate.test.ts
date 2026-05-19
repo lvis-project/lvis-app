@@ -20,12 +20,21 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 
 const handlers = new Map<string, (...args: unknown[]) => unknown>();
+const relaunchMock = vi.fn();
+const exitMock = vi.fn();
 
 vi.mock("electron", () => ({
   ipcMain: {
     handle: vi.fn((channel: string, fn: (...args: unknown[]) => unknown) => {
       handlers.set(channel, fn);
     }),
+  },
+  // v0.2.1 hotfix — demo activation now triggers `app.relaunch()` +
+  // `app.exit(0)` on first-activation to heal the host-resolver-rules
+  // race. The mocks prevent the test runner from actually exiting.
+  app: {
+    relaunch: relaunchMock,
+    exit: exitMock,
   },
 }));
 
@@ -59,6 +68,8 @@ let tempHome: string;
 
 beforeEach(() => {
   handlers.clear();
+  relaunchMock.mockReset();
+  exitMock.mockReset();
   tempHome = mkdtempSync(join(tmpdir(), "lvis-demo-activate-test-"));
   process.env.LVIS_HOME = tempHome;
   // Wipe inherited LVIS_DEMO_* so tests are isolated.
@@ -92,9 +103,20 @@ describe("lvis:demo:activate — happy path", () => {
     const result = (await invoke("lvis:demo:activate", { code })) as {
       ok: true;
       vendor: string;
+      requiresRelaunch?: boolean;
     };
     expect(result.ok).toBe(true);
     expect(result.vendor).toBe("azure-foundry");
+
+    // v0.2.1 hotfix — first-activation (boot capture empty) MUST
+    // request relaunch so Chromium command-line picks up
+    // host-resolver-rules with the freshly-injected hostmap.
+    expect(result.requiresRelaunch).toBe(true);
+    // The relaunch fires from setImmediate so the IPC response can
+    // arrive before the process exits. Flush the microtask queue.
+    await new Promise<void>((resolve) => setImmediate(resolve));
+    expect(relaunchMock).toHaveBeenCalledOnce();
+    expect(exitMock).toHaveBeenCalledWith(0);
 
     // File persisted under ~/.lvis/secrets/.env.demo (via LVIS_HOME override).
     const persisted = readFileSync(
@@ -121,6 +143,36 @@ describe("lvis:demo:activate — happy path", () => {
         input: expect.stringContaining("[demo-activation] activated"),
       }),
     );
+  });
+});
+
+describe("lvis:demo:activate — first-activation relaunch (v0.2.1 hotfix)", () => {
+  it("omits requiresRelaunch and skips app.relaunch when demo was already effective at boot", async () => {
+    // Simulate the second-boot path: `.env.demo` already on disk →
+    // `captureDemoCredentials` ran with the right env → `isDemoEnabled()`
+    // returns true → activation handler captures `demoWasEffectiveAtBoot=true`.
+    process.env.LVIS_DEMO_ENABLED = "1";
+    process.env.LVIS_DEMO_VENDOR = "azure-foundry";
+    const { codec, credsMod, demoMod } = await loadDemoModule();
+    // captureDemoCredentials before registerDemoHandlers — mirrors the
+    // real boot order in main.ts.
+    credsMod.captureDemoCredentials();
+    expect(credsMod.isDemoEnabled()).toBe(true);
+
+    const code = codec.encryptActivationPayload(SAMPLE_ENV);
+    const deps = makeDeps();
+    demoMod.registerDemoHandlers(deps as never);
+
+    const result = (await invoke("lvis:demo:activate", { code })) as {
+      ok: true;
+      vendor: string;
+      requiresRelaunch?: boolean;
+    };
+    expect(result.ok).toBe(true);
+    expect(result.requiresRelaunch).toBeUndefined();
+    await new Promise<void>((resolve) => setImmediate(resolve));
+    expect(relaunchMock).not.toHaveBeenCalled();
+    expect(exitMock).not.toHaveBeenCalled();
   });
 });
 
