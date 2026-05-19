@@ -2,7 +2,19 @@
 
 This guide covers the internal organization demo loop (Path 2). Demo mode lets a new
 user click **"데모 자격증명으로 30초 안에 체험"** in the Login modal and have the
-app silently provision an LLM key + endpoint without typing anything.
+app provision an LLM key + endpoint.
+
+There are **two activation paths**:
+
+| Path | When to use |
+|---|---|
+| **A. Local `.env.demo` file** (this document) | You cloned the repo and run `bun run start` locally. Drop a `.env.demo` at the repo root; `scripts/run-electron.mjs` auto-loads it. |
+| **B. Activation code** (see [`demo-activation.md`](./demo-activation.md)) | You received the LVIS packaged app + a single-line `LVIS-DEMO:v1:<...>` activation string through an internal channel. The Login modal accepts the string and persists the decrypted `.env.demo` to `~/.lvis/secrets/.env.demo` for subsequent boots. |
+
+Both paths converge on the same runtime — once the env vars are in place
+(via `.env.demo` autoload OR activation-string decrypt), the same
+`captureDemoCredentials()` pipeline observes them and the same
+`loginMockup` IPC handler provisions the keys.
 
 > **Host mapping is handled at the app level — no `/etc/hosts` edits, no
 > sudo.** When `LVIS_DEMO_VENDOR=azure-foundry` and `LVIS_DEMO_HOST_MAP`

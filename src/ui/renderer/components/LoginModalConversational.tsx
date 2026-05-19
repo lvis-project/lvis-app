@@ -5,17 +5,24 @@
  * hotfix 2026-05-19): the modal is a pure chip-driven choice surface.
  *
  *   chip 1 — 데모 자격증명으로 30초 안에 체험
- *            Auto-invokes `api.loginMockup({ username: "demo",
- *            password: "demo123" })` — the demo username/password are
- *            hard-coded mockup credentials (matching `DEFAULT_DEMO_USER`
- *            / `DEFAULT_DEMO_PASS` in `ipc/domains/auth.ts`). The user
- *            never sees, types, or sets a password.
+ *            Opens an **activation-input sub-state** in the same chat
+ *            transcript. The user pastes a `LVIS-DEMO:v1:<...>` activation
+ *            string (distributed through an internal channel — Confluence,
+ *            SharePoint, chat). On submit the renderer invokes
+ *            `api.demo.activate(code)`, which decrypts the string into the
+ *            original `.env.demo` payload, persists it under
+ *            `~/.lvis/secrets/.env.demo`, and injects the keys into
+ *            `process.env`. The renderer then runs the existing
+ *            `loginMockup` chain. The hard-coded mockup username/password
+ *            (`demo` / `demo123`) still gate the IPC handler — the
+ *            activation string is the *credentials-provisioning* step, not
+ *            the auth step.
  *   chip 2 — 제가 발급받은 API 키가 있어요
  *            Opens Settings → LLM tab via `openSettingsWindow("llm")`.
  *   chip 3 — 조직 SSO (disabled placeholder, "곧 지원 예정").
  *
  * Behavioural parity with the original LoginModal:
- *   - Calls `api.loginMockup(...)` over IPC.
+ *   - Calls `api.loginMockup(...)` over IPC after activation succeeds.
  *   - The renderer translates kebab-case English `error` codes into the
  *     Korean user-facing message; the IPC handler must never embed
  *     Korean (project CLAUDE.md error-language rule).
@@ -60,6 +67,28 @@ function errorMessage(code: string): string {
 }
 
 /**
+ * Renderer-side translation of activation IPC error codes. Mirrors the
+ * `errorMessage` contract above — IPC stays English (kebab-case), UI
+ * surfaces Korean. The activation step has its own error surface because
+ * the failure modes are distinct from auth: a bad code is a typo / wrong
+ * paste rather than a wrong password.
+ */
+function activationErrorMessage(code: string): string {
+  switch (code) {
+    case "invalid-code":
+      return "활성 코드가 올바르지 않아요. `LVIS-DEMO:v1:` 로 시작하는 한 줄 코드를 다시 확인해 주세요.";
+    case "no-vendor":
+      return "활성 코드에 vendor 정보가 빠져 있어요. 발급자에게 다시 요청해 주세요.";
+    case "persist-failed":
+      return "활성 코드를 저장하지 못했어요. 디스크 공간 또는 권한을 확인한 뒤 다시 시도해 주세요.";
+    case "unauthorized-frame":
+      return "잘못된 요청 경로입니다. 앱을 재시작한 뒤 다시 시도해 주세요.";
+    default:
+      return "활성에 실패했습니다.";
+  }
+}
+
+/**
  * Type-on checklist lines for the auth progress (F2 fallback). Rendered
  * after the demo chip is selected when the live IPC progress is not yet
  * active — the steps reveal one at a time with a short stagger so the
@@ -74,11 +103,15 @@ const CHECKLIST_LINES: readonly { mark: string; label: string }[] = Object.freez
 
 /**
  * Stagger between checklist line reveals (ms). Y1 (pace): increased from
- * 280ms → 720ms so the user has enough dwell time to read each line before
- * the next one types on. Korean reading speed ~250 wpm = ~600ms/short
- * phrase, so 720ms keeps the cursor on a line long enough to register.
+ * 280ms → 720ms → 900ms so the user has enough dwell time to read each
+ * line before the next one types on. The activation step ahead of the
+ * checklist already added perceived load (~3–5s for paste + decrypt), so
+ * the post-activation checklist needs longer per-line dwell to feel
+ * deliberate rather than rushed. Korean reading speed ~250 wpm ≈
+ * 600ms/short phrase; 900ms keeps the cursor visible on each line long
+ * enough for an unhurried read.
  */
-const CHECKLIST_STAGGER_MS = 720;
+const CHECKLIST_STAGGER_MS = 900;
 
 /**
  * Y1 (pace) — extra dwell time AFTER all checklist lines have rendered
@@ -112,6 +145,25 @@ export function LoginModalConversational({
   // window elapses and the modal closes.
   const [successConfirmed, setSuccessConfirmed] = useState(false);
 
+  // Activation sub-state. The chip 1 click opens an inline activation
+  // input rather than firing `loginMockup` directly. `activationOpen`
+  // gates the input UI; `activationCode` is the user-typed string;
+  // `activationError` carries the kebab-case → Korean translation when
+  // decrypt/persist fails; `activating` blocks the submit button while
+  // the IPC roundtrip is in flight. The whole sub-state resets when the
+  // dialog re-opens so a cancelled flow starts from the cold prompt.
+  const [activationOpen, setActivationOpen] = useState(false);
+  const [activationCode, setActivationCode] = useState("");
+  const [activationError, setActivationError] = useState<string | null>(null);
+  const [activating, setActivating] = useState(false);
+  // F5 — explicit ack between activation success and the auth transcript.
+  // When the activation IPC resolves OK we paint a "활성 완료, 인증 시작합니다…"
+  // confirmation bubble and reveal an Enter button; the auth checklist
+  // only starts after the user presses Enter (or hits the Enter key).
+  // This gives the activation step a clean terminal state separate from
+  // the auth step's "✓ sandbox 준비 완료".
+  const [activationConfirmed, setActivationConfirmed] = useState(false);
+
   // Reset the conversational flow on every open so a re-entry starts
   // from the cold "어떤 방식으로 시작할까요?" prompt.
   useEffect(() => {
@@ -121,6 +173,11 @@ export function LoginModalConversational({
       setChecklistRevealed(0);
       setSuccessConfirmed(false);
       setError(null);
+      setActivationOpen(false);
+      setActivationCode("");
+      setActivationError(null);
+      setActivating(false);
+      setActivationConfirmed(false);
     }
   }, [open]);
 
@@ -137,26 +194,44 @@ export function LoginModalConversational({
   }, [assistantReply, checklistRevealed]);
 
   /**
-   * Demo chip handler — fires `loginMockup` with the hard-coded demo
-   * credentials directly. The user never types a password; the chip
-   * IS the submit. Errors surface in the inline error region.
+   * Demo chip handler — opens the activation-input sub-state. The chip
+   * no longer fires `loginMockup` directly: the user must first paste
+   * a `LVIS-DEMO:v1:<...>` activation string distributed through an
+   * internal channel. The renderer surfaces the input inline (chat-style)
+   * and only after a successful activation does the auth transcript begin.
    *
-   * Y1 (pace) — on success, dwell for SUCCESS_DWELL_MS BEFORE handing
-   * off to the next dialog so the user sees the "✓ sandbox 준비 완료"
-   * confirmation rather than the modal vanishing instantly.
+   * The user-bubble + assistant-reply painting still happens here so the
+   * chat continues to read like a conversation rather than the chip
+   * vanishing into a modal-within-a-modal.
    */
-  const activateDemoChip = useCallback(async () => {
-    if (submitting) return;
-    setUserTurnVisible(true);
+  const activateDemoChip = useCallback(() => {
+    if (submitting || activating) return;
     setError(null);
+    setActivationError(null);
+    setActivationOpen(true);
+    setUserTurnVisible(true);
     // Defer the assistant reply by one tick so the user bubble paints
     // first — matches the mockup's "user types → assistant responds"
     // perceived ordering.
     window.setTimeout(() => {
       setAssistantReply(true);
     }, 220);
+  }, [submitting, activating]);
 
+  /**
+   * Run the existing loginMockup chain after activation has succeeded.
+   * Factored out of the original `activateDemoChip` so the auth-step
+   * pacing (checklist + dwell + onSuccess hand-off) lives in one place
+   * and is reachable from both:
+   *   (a) the activation Enter button (`proceedToAuth`), and
+   *   (b) the Enter-key shortcut once `activationConfirmed === true`.
+   */
+  const runAuthMockup = useCallback(async () => {
+    if (submitting) return;
     setSubmitting(true);
+    setError(null);
+    setChecklistRevealed(0);
+    setSuccessConfirmed(false);
     try {
       const result = await api.loginMockup({
         username: DEMO_USERNAME,
@@ -184,27 +259,83 @@ export function LoginModalConversational({
     }
   }, [api, onSuccess, onOpenChange, submitting]);
 
+  /**
+   * Submit the activation code. On success the renderer paints an
+   * explicit ack bubble + Enter button (F5 pace requirement); the auth
+   * transcript only fires after the user presses Enter via
+   * `proceedToAuth`. Failure paints a chat-style error bubble inside the
+   * activation block and leaves the input editable for retry.
+   */
+  const submitActivation = useCallback(async () => {
+    if (activating || submitting) return;
+    const trimmed = activationCode.trim();
+    if (trimmed.length === 0) {
+      setActivationError(activationErrorMessage("invalid-code"));
+      return;
+    }
+    setActivating(true);
+    setActivationError(null);
+    try {
+      const result = await api.demo.activate(trimmed);
+      if (result.ok) {
+        setActivationConfirmed(true);
+        return;
+      }
+      setActivationError(activationErrorMessage(result.error));
+    } catch (err) {
+      setActivationError("활성 처리 중 오류가 발생했습니다.");
+      // eslint-disable-next-line no-console
+      console.error("demo.activate IPC failed", err);
+    } finally {
+      setActivating(false);
+    }
+  }, [api, activationCode, activating, submitting]);
+
+  /**
+   * Hand off from activation to auth. Triggered by the explicit Enter
+   * button OR the Enter key when `activationConfirmed === true`. Resets
+   * `activationConfirmed` first so the ack bubble does not linger inside
+   * the now-active auth transcript.
+   */
+  const proceedToAuth = useCallback(() => {
+    if (!activationConfirmed || submitting) return;
+    void runAuthMockup();
+  }, [activationConfirmed, submitting, runAuthMockup]);
+
   // F2 — 1/2/3 keybindings for chip activation. Mirrors the
   // "위 선택지를 클릭하거나 `1`~`3` 키로 빠른 선택" footer hint.
+  // When `activationConfirmed === true` the Enter key proceeds to the auth
+  // transcript (F5 — explicit user ack between activation and auth).
   useEffect(() => {
     if (!open) return;
     const onKey = (e: KeyboardEvent) => {
       if (e.defaultPrevented || e.isComposing) return;
       if (e.metaKey || e.ctrlKey || e.altKey) return;
       const target = e.target as HTMLElement | null;
-      // Don't hijack typing inside any incidental inputs (Settings tab
-      // navigation chip may briefly hand focus to a child input).
-      if (
+      // Enter on the activation textarea submits the code (with Shift+Enter
+      // reserved for newlines — though the codec output is single-line, a
+      // wrapping clipboard could paste a stray `\n`). The textarea itself
+      // wires Enter via its own onKeyDown so we don't hijack from here.
+      const isInputTarget =
         target &&
         (target.tagName === "INPUT" ||
           target.tagName === "TEXTAREA" ||
-          target.isContentEditable)
-      ) {
+          target.isContentEditable);
+      // Once the activation step has resolved OK, Enter (from anywhere
+      // except a focused input) proceeds to the auth transcript.
+      if (e.key === "Enter" && activationConfirmed && !isInputTarget) {
+        e.preventDefault();
+        proceedToAuth();
+        return;
+      }
+      // Don't hijack typing inside any incidental inputs (Settings tab
+      // navigation chip may briefly hand focus to a child input).
+      if (isInputTarget) {
         return;
       }
       if (e.key === "1") {
         e.preventDefault();
-        void activateDemoChip();
+        activateDemoChip();
       } else if (e.key === "2") {
         e.preventDefault();
         void api.openSettingsWindow?.("llm");
@@ -217,7 +348,7 @@ export function LoginModalConversational({
     };
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
-  }, [open, activateDemoChip, api, onOpenChange]);
+  }, [open, activateDemoChip, api, onOpenChange, activationConfirmed, proceedToAuth]);
 
   const isLastChecklistLine =
     checklistRevealed > 0 && checklistRevealed <= CHECKLIST_LINES.length;
@@ -265,8 +396,8 @@ export function LoginModalConversational({
           <button
             type="button"
             data-testid="login-modal:chip-demo"
-            onClick={() => void activateDemoChip()}
-            disabled={submitting}
+            onClick={() => activateDemoChip()}
+            disabled={submitting || activating || activationOpen}
             className="w-full rounded-lg border border-primary/40 bg-primary/10 px-3 py-2 text-left text-[12px] text-primary hover:bg-primary/15 disabled:opacity-60"
           >
             <span className="mr-1">⚡</span>
@@ -347,9 +478,118 @@ export function LoginModalConversational({
               ✦
             </div>
             <div className="space-y-1.5">
-              <p className="rounded-lg rounded-tl-sm bg-muted px-3 py-2 text-[12.5px] leading-relaxed text-foreground">
-                좋아요. 데모 자격증명으로 인증 중이에요…
+              {/* Stage 1 — activation prompt (default), Stage 2 — activation
+                  in-flight, Stage 3 — auth transcript. The bubble copy adapts
+                  to whichever stage is active so the conversation reads
+                  end-to-end without the assistant suddenly switching
+                  topics. */}
+              <p
+                className="rounded-lg rounded-tl-sm bg-muted px-3 py-2 text-[12.5px] leading-relaxed text-foreground"
+                data-testid="login-modal:assistant-prompt"
+              >
+                {submitting
+                  ? "좋아요. 데모 자격증명으로 인증 중이에요…"
+                  : activationConfirmed
+                    ? "활성 완료. 인증을 시작할 준비가 됐어요. Enter 키를 누르거나 아래 버튼을 클릭하세요."
+                    : "데모 활성 코드를 받으셨나요? 한 줄로 붙여넣어 주세요. 형식은 `LVIS-DEMO:v1:...` 입니다."}
               </p>
+
+              {/* F2 — Activation input sub-state. Painted while the user is
+                  in the activation step (before submitting auth). The block
+                  collapses once `submitting` flips true so the auth checklist
+                  has clean visual space. The textarea accepts a multi-line
+                  paste defensively (some chat clients wrap long links) but
+                  the codec only inspects the trimmed payload. */}
+              {activationOpen && !submitting && !activationConfirmed && (
+                <div
+                  data-testid="login-modal:activation-input"
+                  className="space-y-1.5"
+                >
+                  <textarea
+                    value={activationCode}
+                    onChange={(ev) => setActivationCode(ev.target.value)}
+                    onKeyDown={(ev) => {
+                      // Enter (without Shift) submits; Shift+Enter keeps the
+                      // newline behaviour for the rare wrapped-paste case.
+                      if (
+                        ev.key === "Enter" &&
+                        !ev.shiftKey &&
+                        !ev.nativeEvent.isComposing
+                      ) {
+                        ev.preventDefault();
+                        void submitActivation();
+                      }
+                    }}
+                    disabled={activating}
+                    rows={2}
+                    placeholder="LVIS-DEMO:v1:..."
+                    aria-label="데모 활성 코드"
+                    data-testid="login-modal:activation-code-input"
+                    className="w-full rounded-md border border-border bg-background px-3 py-2 font-mono text-[11.5px] leading-snug text-foreground placeholder:text-muted-foreground/60 focus:outline-none focus:ring-2 focus:ring-primary/40 disabled:opacity-60"
+                  />
+                  <div className="flex items-center gap-2">
+                    <Button
+                      type="button"
+                      size="sm"
+                      data-testid="login-modal:activation-submit"
+                      onClick={() => void submitActivation()}
+                      disabled={activating || activationCode.trim().length === 0}
+                    >
+                      {activating ? "활성 중…" : "활성 →"}
+                    </Button>
+                    <Button
+                      type="button"
+                      size="sm"
+                      variant="ghost"
+                      data-testid="login-modal:activation-cancel"
+                      onClick={() => {
+                        setActivationOpen(false);
+                        setActivationCode("");
+                        setActivationError(null);
+                        setUserTurnVisible(false);
+                        setAssistantReply(false);
+                      }}
+                      disabled={activating}
+                    >
+                      취소
+                    </Button>
+                  </div>
+                  {activationError && (
+                    <p
+                      data-testid="login-modal:activation-error"
+                      role="alert"
+                      className="rounded-md bg-destructive/10 px-2 py-1.5 text-[11.5px] leading-relaxed text-destructive"
+                    >
+                      {activationError}
+                    </p>
+                  )}
+                </div>
+              )}
+
+              {/* F5 — Explicit user ack between activation success and the
+                  auth transcript. The "인증 시작" button gives the user a
+                  beat to register that activation succeeded BEFORE the
+                  auth checklist starts streaming. Enter key also fires
+                  via the global keydown listener. */}
+              {activationConfirmed && !submitting && (
+                <div
+                  data-testid="login-modal:activation-ack"
+                  className="flex items-center gap-2"
+                >
+                  <Button
+                    type="button"
+                    size="sm"
+                    data-testid="login-modal:proceed-to-auth"
+                    onClick={() => proceedToAuth()}
+                  >
+                    Enter · 인증 시작
+                  </Button>
+                  <span className="text-[10.5px] text-muted-foreground">
+                    Enter 키로도 진행할 수 있어요.
+                  </span>
+                </div>
+              )}
+
               {checklistRevealed > 0 && (
                 <pre
                   data-testid="login-modal:auth-checklist"

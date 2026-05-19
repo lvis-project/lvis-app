@@ -51,6 +51,7 @@ import { uninstallPluginWithLifecycle } from "./plugins/uninstall-lifecycle.js";
 import { lvisHome } from "./shared/lvis-home.js";
 import { runShutdownRoutines } from "./main/shutdown-routines.js";
 import { captureDemoCredentials } from "./main/demo-credentials.js";
+import { loadPersistedDemoActivationSync } from "./main/demo-activation-loader.js";
 import { applyDemoHostResolverRules } from "./main/demo-host-resolver.js";
 import { forceKillManagedChildProcesses } from "./main/managed-child-processes.js";
 import {
@@ -158,6 +159,14 @@ function applyRuntimeAppIcon() {
 // `LVIS_DEV_NO_SANDBOX`, which made it incorrectly look like a dev flag;
 // the rename moves it out of the dev mask but it's still hard-gated on
 // `!app.isPackaged` by `dev-flags.ts:devNoSandboxAllowed()`.
+// Demo activation code system — on packaged-app boot, if the user has
+// previously activated via the LoginModal chip 1 (paste activation string),
+// the decrypted `.env.demo` payload was persisted under
+// `~/.lvis/secrets/.env.demo`. Inject those values into `process.env` BEFORE
+// `captureDemoCredentials()` runs so the existing boot-time capture pipeline
+// observes them identically to a dev-mode `.env.demo` on disk. Sync I/O so
+// the capture sees the values without an awaited boot path.
+loadPersistedDemoActivationSync();
 // #893 / PR #894 B1 — Capture `LVIS_DEMO_*` BEFORE the scrub so the mockup
 // auth handler can still consume the demo keys + enable flag through an
 // internal channel, while the renderer/preload/workers never observe them
