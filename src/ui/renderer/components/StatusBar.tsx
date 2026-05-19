@@ -85,6 +85,12 @@ export function StatusBar(props: StatusBarProps) {
                 </span>
               </>
             );
+            // Z onboarding chain — the vendor/model cell is the final
+            // SpotlightTour anchor (step 7). Tagging it here keeps the
+            // anchor close to the rendered DOM rather than requiring a
+            // separate wrapper component.
+            const tourAnchor =
+              item.id === "vendor:llm" ? "status-bar-vendor" : undefined;
             return (
               <span key={item.id} className="flex min-w-0 items-center truncate">
                 {idx > 0 && (
@@ -95,12 +101,17 @@ export function StatusBar(props: StatusBarProps) {
                     type="button"
                     onClick={item.onClick}
                     title={item.tooltip}
+                    data-tour-anchor={tourAnchor}
                     className="flex items-center gap-1 truncate cursor-pointer hover:opacity-80 focus:outline-none focus-visible:ring-1 focus-visible:ring-ring"
                   >
                     {inner}
                   </button>
                 ) : (
-                  <span className="flex items-center gap-1 truncate" title={item.tooltip}>
+                  <span
+                    className="flex items-center gap-1 truncate"
+                    title={item.tooltip}
+                    data-tour-anchor={tourAnchor}
+                  >
                     {inner}
                   </span>
                 )}

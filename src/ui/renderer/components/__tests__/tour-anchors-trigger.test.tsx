@@ -20,6 +20,8 @@ import { TooltipProvider } from "../../../../components/ui/tooltip.js";
 import { Composer, type ComposerHandle } from "../Composer.js";
 import { InputActionBar } from "../InputActionBar.js";
 import { CommandPopover } from "../CommandPopover.js";
+import { MainToolbar } from "../../MainToolbar.js";
+import { StatusBar } from "../StatusBar.js";
 import type { Attachment } from "../../types/attachments.js";
 import type { RolePreset } from "../../../../data/role-presets.js";
 import {
@@ -106,11 +108,13 @@ describe("Tutorial-C PR #983 follow-up: tour anchors", () => {
   });
 
   it("first-boot-essentials scenario selectors match live anchors", () => {
-    // Mounts all three host components in one tree so the SpotlightTour
-    // selectors can be evaluated against the same DOM that production
-    // ships. This is the regression gate for the dead-state critic raised:
-    // if a refactor drops or renames an anchor, this test fails.
-    const props: Parameters<typeof InputActionBar>[0] = {
+    // Mounts every host component the Z onboarding chain (2026-05-19)
+    // expanded tour references in one tree so the SpotlightTour
+    // selectors can be evaluated against the same DOM production ships.
+    // Regression gate for the original dead-state critic + the Z chain
+    // expansion (7 steps): if a refactor drops or renames an anchor,
+    // this test fails loudly.
+    const inputActionBarProps: Parameters<typeof InputActionBar>[0] = {
       plugins: [],
       onSelectPlugin: vi.fn(),
       onInsertSlashCommand: vi.fn(),
@@ -133,14 +137,46 @@ describe("Tutorial-C PR #983 follow-up: tour anchors", () => {
       enableThinkingChat: false,
       onToggleThinking: vi.fn(),
     };
+    const toolbarProps: Parameters<typeof MainToolbar>[0] = {
+      activeView: "home",
+      streaming: false,
+      hasApiKey: true,
+      isCurrentSessionStarred: false,
+      onNewChat: vi.fn(),
+      onToggleCurrentSessionStar: vi.fn(),
+      onExport: vi.fn(),
+      onOpenHome: vi.fn(),
+      onOpenRoutinesView: vi.fn(),
+      onOpenMemoryView: vi.fn(),
+      onOpenSettings: vi.fn(),
+      onOpenUnifiedSearch: vi.fn(),
+      onOpenStarredView: vi.fn(),
+      onOpenDetachedView: vi.fn(),
+    };
     render(
       <TooltipProvider>
+        <MainToolbar {...toolbarProps} />
         <ComposerHarness />
-        <InputActionBar {...props} />
+        <InputActionBar {...inputActionBarProps} />
+        <StatusBar
+          persistent={[
+            {
+              id: "vendor:llm",
+              severity: "info",
+              label: "✦",
+              value: "Claude · sonnet-4",
+              onClick: vi.fn(),
+            },
+          ]}
+          visibleToast={null}
+        />
       </TooltipProvider>,
     );
     const scenario = getTourScenario("first-boot-essentials");
     expect(scenario).toBeTruthy();
+    // Z chain expansion — must be 7 steps. Hard-pin so a future
+    // re-trim cannot silently revert without test diff.
+    expect(scenario!.steps).toHaveLength(7);
     for (const step of scenario!.steps) {
       const found = document.querySelector(step.anchorSelector);
       expect(
@@ -148,13 +184,21 @@ describe("Tutorial-C PR #983 follow-up: tour anchors", () => {
         `step '${step.title}' selector ${step.anchorSelector} must match a live DOM node`,
       ).not.toBeNull();
     }
-    // Sanity: the scenario must reference every distinct anchor we wired.
+    // Sanity: every anchor the Z chain references must appear in the
+    // scenario. The set guarantees a refactor that drops a step still
+    // surfaces here.
     const anchors = new Set(scenario!.steps.map((s) => s.anchorSelector));
     expect(anchors.has('[data-tour-anchor="composer-input"]')).toBe(true);
     expect(anchors.has('[data-tour-anchor="input-action-bar"]')).toBe(true);
     expect(
       anchors.has('[data-tour-anchor="command-palette-toggle"]'),
     ).toBe(true);
+    expect(
+      anchors.has('[data-tour-anchor="help-shortcut-hint"]'),
+    ).toBe(true);
+    expect(anchors.has('[data-tour-anchor="chat-history"]')).toBe(true);
+    expect(anchors.has('[data-tour-anchor="settings-entry"]')).toBe(true);
+    expect(anchors.has('[data-tour-anchor="status-bar-vendor"]')).toBe(true);
   });
 });
 
