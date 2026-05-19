@@ -20,18 +20,9 @@ function makeApi(
     | { ok: false; error: string }
   >,
 ) {
-  // Tutorial-A — LoginModal is a variant-aware wrapper that calls
-  // `loginPrefsGet` on mount. Stub the prefs surface so the wrapper
-  // mounts the conversational variant deterministically.
   return {
     loginMockup: vi.fn(impl),
     openSettingsWindow: vi.fn(),
-    loginPrefsGet: vi.fn(async () => ({
-      ok: true as const,
-      prefs: { loginVariant: "conversational" as const },
-    })),
-    loginPrefsSet: vi.fn(),
-    onLoginPrefsChanged: vi.fn(() => () => {}),
   } as unknown as Parameters<typeof LoginModal>[0]["api"];
 }
 
@@ -60,7 +51,7 @@ describe("LoginModal — chip-driven demo flow (Path 2 hotfix)", () => {
     }));
     render(<LoginModal api={api} open onOpenChange={() => {}} />);
 
-    // Wait for the conversational variant to mount (it does a loginPrefsGet)
+    // Wait for the modal to mount.
     await waitFor(() => {
       expect(document.querySelector('[data-testid="login-modal:chip-demo"]')).toBeTruthy();
     });

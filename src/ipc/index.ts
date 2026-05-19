@@ -9,7 +9,6 @@
  * Domain → channel prefix mapping:
  *   settings     lvis:settings:*, lvis:shell:*, lvis:telemetry:consent-answer
  *   auth         lvis:auth:* (#893 mockup login)
- *   login-prefs  lvis:login-prefs:* — login screen variant toggle
  *   tour         lvis:tour:*        — Tutorial-C SpotlightTour state + broadcast
  *   tutorial     lvis:tutorial:*    — Tutorial-D Discovery Swipe state + open trigger
  *   chat         lvis:chat:*, lvis:routines:*, lvis:routine:*, lvis:trigger:*,
@@ -28,7 +27,6 @@ import { initDlpAudit } from "../audit/dlp-filter.js";
 import { getIsPackaged } from "../boot/dev-flags.js";
 import { registerSettingsHandlers } from "./domains/settings.js";
 import { registerAuthHandlers } from "./domains/auth.js";
-import { registerLoginPrefsHandlers } from "./domains/login-prefs.js";
 import { registerTourHandlers } from "./domains/tour.js";
 import { registerTutorialHandlers } from "./domains/tutorial.js";
 import { registerChatHandlers } from "./domains/chat.js";
@@ -67,7 +65,6 @@ export function registerIpcHandlers(
 
   registerSettingsHandlers(deps);
   registerAuthHandlers(deps);
-  registerLoginPrefsHandlers(deps);
   registerTourHandlers(deps);
   registerTutorialHandlers(deps);
   registerChatHandlers(deps);
