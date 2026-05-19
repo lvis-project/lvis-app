@@ -1,7 +1,7 @@
 /**
  * Tutorial-C — `lvis:tour:*` IPC handler tests.
  *
- * Mirrors the shape of `login-prefs.test.ts`: vitest fakes
+ * Mirrors the shape of the other domain handler tests: vitest fakes
  * `electron.ipcMain.handle` so each `registerTourHandlers` call lands in
  * a `Map<channel, handler>`, then the test invokes the handler with a
  * fabricated `IpcMainInvokeEvent` shape.

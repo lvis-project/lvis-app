@@ -177,17 +177,6 @@ export type AppSettings = {
 };
 
 /**
- * Tutorial-A — Login screen variant. Mirrors `LoginVariant` from the
- * host-side `src/main/login-prefs-store.ts`. Renderer keeps a separate
- * literal so a host-only refactor never leaks node imports into the
- * renderer bundle; values must stay in lockstep.
- */
-export type LoginVariant = "conversational" | "cli-agent";
-export interface LoginPrefs {
-  loginVariant: LoginVariant;
-}
-
-/**
  * Tutorial-D — Discovery Swipe outcome. Mirrors `TutorialAction` from
  * the host-side `src/main/tutorial-store.ts`. Renderer keeps a separate
  * literal so a host-only refactor never leaks node imports into the
@@ -323,23 +312,6 @@ export type LvisApi = {
       }) => void,
     ) => () => void;
   };
-  /**
-   * Tutorial-A — login screen variant preference. The host persists the
-   * variant under `~/.lvis/login-prefs/login-prefs.json`; `loginPrefsGet`
-   * never rejects on parse error (it returns the default), while
-   * `loginPrefsSet` returns a kebab-case `error` code on validation /
-   * write failure. `onLoginPrefsChanged` fires after every successful set
-   * so siblings remount their LoginModal without an app restart.
-   */
-  loginPrefsGet: () => Promise<
-    | { ok: true; prefs: LoginPrefs }
-    | { ok: false; error: string; message: string }
-  >;
-  loginPrefsSet: (payload: LoginPrefs) => Promise<
-    | { ok: true; prefs: LoginPrefs }
-    | { ok: false; error: string; message: string }
-  >;
-  onLoginPrefsChanged: (handler: (prefs: LoginPrefs) => void) => () => void;
   /**
    * Tutorial-C — SpotlightTour state + broadcast bridge. The host persists
    * the tour state under `~/.lvis/onboarding/tour-state.json` (Storage
