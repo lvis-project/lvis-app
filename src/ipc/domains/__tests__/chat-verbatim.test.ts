@@ -51,17 +51,19 @@ function makeToolResultMsg(opts: {
     originalBytes: number;
     trimmedAt: string;
   };
+  serializedStub?: boolean;
 }) {
   return {
     role: "tool_result" as const,
     toolUseId: opts.toolUseId,
     toolName: opts.toolName ?? "Read",
     content: opts.content,
-    ...(opts.compactedAt !== undefined || opts.truncated !== undefined
+    ...(opts.compactedAt !== undefined || opts.truncated !== undefined || opts.serializedStub === true
       ? {
           meta: {
             ...(opts.compactedAt !== undefined ? { compactedAt: opts.compactedAt } : {}),
             ...(opts.truncated !== undefined ? { truncated: opts.truncated } : {}),
+            ...(opts.serializedStub === true ? { serializedStub: true } : {}),
           },
         }
       : {}),
@@ -204,6 +206,7 @@ describe("lvis:chat:get-verbatim-tool-result", () => {
         toolUseId: "tu-1",
         content: "[tool_result stripped: tool=Read, origLen=12345]",
         compactedAt: "2026-05-08T00:00:00Z",
+        serializedStub: true,
       }),
     ]);
     await setupHandlers(loop);
@@ -223,6 +226,7 @@ describe("lvis:chat:get-verbatim-tool-result", () => {
           originalBytes: 12345,
           trimmedAt: "2026-05-19T00:00:00.000Z",
         },
+        serializedStub: true,
       }),
     ]);
     await setupHandlers(loop);
@@ -288,6 +292,26 @@ describe("lvis:chat:get-verbatim-tool-result", () => {
     await setupHandlers(loop);
 
     const result = invoke(CHANNEL, { sessionId: SESSION_ID, toolUseId: "tu-1" });
+    expect(result).toEqual({ content, lineCount: 2 });
+  });
+
+  it("returns in-memory verbatim when raw size-capped content starts with a stub prefix", async () => {
+    const content = "[tool_result truncated by host but real output]\nline two";
+    const loop = makeConversationLoop(SESSION_ID, [
+      makeToolResultMsg({
+        toolUseId: "tu-prefix",
+        content,
+        truncated: {
+          originalLines: 2,
+          originalTokens: 20,
+          originalBytes: content.length,
+          trimmedAt: "2026-05-19T00:00:00.000Z",
+        },
+      }),
+    ]);
+    await setupHandlers(loop);
+
+    const result = invoke(CHANNEL, { sessionId: SESSION_ID, toolUseId: "tu-prefix" });
     expect(result).toEqual({ content, lineCount: 2 });
   });
 
