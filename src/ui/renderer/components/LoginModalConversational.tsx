@@ -133,6 +133,7 @@ const CHECKLIST_STAGGER_MS = 900;
  * the moment auth succeeds.
  */
 const SUCCESS_DWELL_MS = 1800;
+const ACTIVATION_RELAUNCH_DWELL_MS = 5000;
 
 export function LoginModalConversational({
   api,
@@ -165,15 +166,15 @@ export function LoginModalConversational({
   // the IPC roundtrip is in flight. The whole sub-state resets when the
   // dialog re-opens so a cancelled flow starts from the cold prompt.
   //
-  // No `activationConfirmed` latch exists: activation success
-  // synchronously kicks off `runAuthMockup`, which flips `submitting`
-  // true on entry. That single flag governs both the collapsing of the
-  // activation block and the assistant bubble copy swap, so there is no
-  // transitional "activation done · waiting for user to proceed" state.
+  // Activation success either synchronously kicks off `runAuthMockup` or,
+  // on first activation, holds a visible relaunch notice for 5s while the
+  // main process relaunch contract remains armed behind IPC.
   const [activationOpen, setActivationOpen] = useState(false);
   const [activationCode, setActivationCode] = useState("");
   const [activationError, setActivationError] = useState<string | null>(null);
+  const [activationNotice, setActivationNotice] = useState<string | null>(null);
   const [activating, setActivating] = useState(false);
+  const [activationRelaunching, setActivationRelaunching] = useState(false);
 
   // Reset the conversational flow on every open so a re-entry starts
   // from the cold "어떤 방식으로 시작할까요?" prompt.
@@ -187,9 +188,33 @@ export function LoginModalConversational({
       setActivationOpen(false);
       setActivationCode("");
       setActivationError(null);
+      setActivationNotice(null);
       setActivating(false);
+      setActivationRelaunching(false);
     }
   }, [open]);
+
+  useEffect(() => {
+    if (!activationRelaunching) return;
+    const timer = window.setTimeout(() => {
+      void api.demo
+        .relaunchAfterActivation()
+        .then((result) => {
+          if (result.ok) return;
+          setActivationRelaunching(false);
+          setActivationNotice(null);
+          setActivationError("재시작 요청에 실패했습니다. LVIS 를 수동으로 재시작한 뒤 다시 시도해 주세요.");
+        })
+        .catch((err) => {
+          setActivationRelaunching(false);
+          setActivationNotice(null);
+          setActivationError("재시작 요청 중 오류가 발생했습니다. LVIS 를 수동으로 재시작한 뒤 다시 시도해 주세요.");
+          // eslint-disable-next-line no-console
+          console.error("demo.relaunchAfterActivation IPC failed", err);
+        });
+    }, ACTIVATION_RELAUNCH_DWELL_MS);
+    return () => window.clearTimeout(timer);
+  }, [api, activationRelaunching]);
 
   // Drive the checklist reveal once the assistant reply has rendered.
   // Each line is staggered by CHECKLIST_STAGGER_MS so the user reads
@@ -215,9 +240,10 @@ export function LoginModalConversational({
    * vanishing into a modal-within-a-modal.
    */
   const activateDemoChip = useCallback(() => {
-    if (submitting || activating) return;
+    if (submitting || activating || activationRelaunching) return;
     setError(null);
     setActivationError(null);
+    setActivationNotice(null);
     setActivationOpen(true);
     setUserTurnVisible(true);
     // Defer the assistant reply by one tick so the user bubble paints
@@ -226,7 +252,7 @@ export function LoginModalConversational({
     window.setTimeout(() => {
       setAssistantReply(true);
     }, 220);
-  }, [submitting, activating]);
+  }, [submitting, activating, activationRelaunching]);
 
   /**
    * Run the existing loginMockup chain after activation has succeeded.
@@ -279,7 +305,7 @@ export function LoginModalConversational({
    * input editable for retry.
    */
   const submitActivation = useCallback(async () => {
-    if (activating || submitting) return;
+    if (activating || submitting || activationRelaunching) return;
     const trimmed = activationCode.trim();
     if (trimmed.length === 0) {
       setActivationError(activationErrorMessage("invalid-code"));
@@ -287,16 +313,15 @@ export function LoginModalConversational({
     }
     setActivating(true);
     setActivationError(null);
+    setActivationNotice(null);
     try {
       const result = await api.demo.activate(trimmed);
       if (result.ok) {
-        // v0.2.1 hotfix — first-activation race: main process needs to
-        // relaunch so Chromium command-line picks up host-resolver-rules
-        // with the freshly-injected hostmap. Surface a brief "재시작 중…"
-        // message so the user knows what's happening, then yield — the
-        // main process will `app.exit(0)` within ~10ms.
         if (result.requiresRelaunch) {
-          setActivationError("활성 완료. LVIS 를 재시작합니다…");
+          setActivationNotice(
+            "활성화 적용을 위해 5초 후 자동으로 다시 시작합니다. 다시 시작 후 AI 연결 상태를 확인합니다.",
+          );
+          setActivationRelaunching(true);
           return;
         }
         // Chain straight into the auth transcript — no extra Enter press
@@ -314,7 +339,7 @@ export function LoginModalConversational({
     } finally {
       setActivating(false);
     }
-  }, [api, activationCode, activating, submitting, runAuthMockup]);
+  }, [api, activationCode, activating, submitting, activationRelaunching, runAuthMockup]);
 
   // F2 — 1/2/3 keybindings for chip activation. Mirrors the
   // "위 선택지를 클릭하거나 `1`~`3` 키로 빠른 선택" footer hint.
@@ -361,9 +386,13 @@ export function LoginModalConversational({
   const lastLineIsSpinner =
     isLastChecklistLine &&
     CHECKLIST_LINES[checklistRevealed - 1]?.mark === "⟳";
+  const handleDialogOpenChange = useCallback((next: boolean) => {
+    if (activationRelaunching && !next) return;
+    onOpenChange(next);
+  }, [activationRelaunching, onOpenChange]);
 
   return (
-    <Dialog open={open} onOpenChange={onOpenChange}>
+    <Dialog open={open} onOpenChange={handleDialogOpenChange}>
       <DialogContent size="sm" data-testid="login-modal" data-variant="conversational">
         <DialogHeader>
           <DialogTitle>LVIS — Welcome</DialogTitle>
@@ -403,7 +432,7 @@ export function LoginModalConversational({
             type="button"
             data-testid="login-modal:chip-demo"
             onClick={() => activateDemoChip()}
-            disabled={submitting || activating || activationOpen}
+            disabled={submitting || activating || activationRelaunching || activationOpen}
             className="w-full rounded-lg border border-primary/40 bg-primary/10 px-3 py-2 text-left text-[12px] text-primary hover:bg-primary/15 disabled:opacity-60"
           >
             <span className="mr-1">⚡</span>
@@ -426,7 +455,7 @@ export function LoginModalConversational({
               void api.openSettingsWindow?.("llm");
               onOpenChange(false);
             }}
-            disabled={submitting}
+            disabled={submitting || activationRelaunching}
             className="w-full rounded-lg border border-border bg-muted/40 px-3 py-2 text-left text-[12px] text-foreground hover:bg-muted/60 disabled:opacity-60"
           >
             <span className="mr-1">🔑</span>
@@ -495,7 +524,9 @@ export function LoginModalConversational({
               >
                 {submitting
                   ? "활성 완료 · 데모 자격증명으로 인증을 시작합니다…"
-                  : "데모 활성 코드를 받으셨나요? 한 줄로 붙여넣어 주세요. 형식은 `LVIS-DEMO:v1:...` 입니다."}
+                  : activationRelaunching
+                    ? "활성 완료 · 호스트 적용을 위해 5초 후 자동으로 재시작합니다…"
+                    : "데모 활성 코드를 받으셨나요? 한 줄로 붙여넣어 주세요. 형식은 `LVIS-DEMO:v1:...` 입니다."}
               </p>
 
               {/* F2 — Activation input sub-state. Painted while the user is
@@ -524,7 +555,7 @@ export function LoginModalConversational({
                         void submitActivation();
                       }
                     }}
-                    disabled={activating}
+                    disabled={activating || activationRelaunching}
                     rows={2}
                     placeholder="LVIS-DEMO:v1:..."
                     aria-label="데모 활성 코드"
@@ -537,9 +568,9 @@ export function LoginModalConversational({
                       size="sm"
                       data-testid="login-modal:activation-submit"
                       onClick={() => void submitActivation()}
-                      disabled={activating || activationCode.trim().length === 0}
+                      disabled={activating || activationRelaunching || activationCode.trim().length === 0}
                     >
-                      {activating ? "활성 중…" : "활성 →"}
+                      {activationRelaunching ? "재시작 대기…" : activating ? "활성 중…" : "활성 →"}
                     </Button>
                     <Button
                       type="button"
@@ -553,7 +584,7 @@ export function LoginModalConversational({
                         setUserTurnVisible(false);
                         setAssistantReply(false);
                       }}
-                      disabled={activating}
+                      disabled={activating || activationRelaunching}
                     >
                       취소
                     </Button>
@@ -565,6 +596,15 @@ export function LoginModalConversational({
                       className="rounded-md bg-destructive/10 px-2 py-1.5 text-[11.5px] leading-relaxed text-destructive"
                     >
                       {activationError}
+                    </p>
+                  )}
+                  {activationNotice && (
+                    <p
+                      data-testid="login-modal:activation-notice"
+                      role="status"
+                      className="rounded-md bg-success/10 px-2 py-1.5 text-[11.5px] leading-relaxed text-success"
+                    >
+                      {activationNotice}
                     </p>
                   )}
                 </div>
@@ -676,10 +716,10 @@ export function LoginModalConversational({
             variant="ghost"
             size="sm"
             onClick={() => onOpenChange(false)}
-            disabled={submitting}
+            disabled={submitting || activationRelaunching}
             data-testid="login-modal:cancel"
           >
-            {submitting ? "인증 중…" : "취소"}
+            {activationRelaunching ? "재시작 대기…" : submitting ? "인증 중…" : "취소"}
           </Button>
         </div>
 
