@@ -528,6 +528,16 @@ export function SpotlightTour({
         aria-describedby={bodyId}
         data-testid="spotlight-tour:card"
         data-step-index={stepIndex}
+        // Y2 — slide-up + fade entrance keyframe smooths the hand-off
+        // from MemorySeedDialog/TutorialDialog → SpotlightTour so the
+        // tour card doesn't pop into place. The shared `lvis-anim-slide-up`
+        // utility collapses to opacity-only fade under
+        // prefers-reduced-motion (styles.css §290).
+        className="lvis-anim-slide-up"
+        // Step transitions inside the same scenario also benefit from a
+        // light re-mount fade — keying the card on the step index gives
+        // React a unique key so the animation re-runs on advance.
+        key={`${scenario.id}-${stepIndex}`}
         style={{
           ...card,
           zIndex: 9002,
