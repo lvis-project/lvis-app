@@ -25,7 +25,7 @@ import { stubMarkedToolResults } from "./wire-serialize.js";
 import { stripSuggestedReplies } from "./suggested-replies.js";
 import { createProvider, secretKeyFor } from "./llm/provider-factory.js";
 import { FallbackProvider, type FallbackStatus } from "./llm/vercel/fallback-chain.js";
-import type { LLMProvider, ToolSchema, TokenUsage } from "./llm/types.js";
+import type { GenericMessage, LLMProvider, ToolSchema, TokenUsage } from "./llm/types.js";
 import { collectRoundStream } from "./turn/stream-collector.js";
 import {
   handleRequestPlugin,
@@ -39,6 +39,7 @@ import type { KeywordEngine } from "../core/keyword-engine.js";
 import type { RouteEngine } from "../core/route-engine.js";
 import type { ToolRegistry } from "../tools/registry.js";
 import type { ToolTrustOrigin } from "../tools/types.js";
+import type { ReadableToolResult } from "../tools/tool-result-chunk.js";
 import type { MemoryManager, SessionKind } from "../memory/memory-manager.js";
 import type { SettingsService } from "../data/settings-store.js";
 import type { ActiveRolePrompt } from "../data/role-presets.js";
@@ -689,6 +690,22 @@ export class ConversationLoop {
 
   getHistory(): ConversationHistory {
     return this.history;
+  }
+
+  private readToolResultForChunk(toolUseId: string): ReadableToolResult | null {
+    const match = this.history
+      .getMessages()
+      .find((m): m is Extract<GenericMessage, { role: "tool_result" }> =>
+        m.role === "tool_result" && m.toolUseId === toolUseId,
+      );
+    if (!match) return null;
+    return {
+      toolUseId: match.toolUseId,
+      toolName: match.toolName,
+      content: match.content,
+      isError: match.isError,
+      meta: match.meta,
+    };
   }
 
   getSessionId(): string {
@@ -1901,6 +1918,7 @@ export class ConversationLoop {
           // (`ask_user_question`) honor the user's 중단 button instead of
           // hanging until their internal timeout.
           abortSignal,
+          toolResultChunkReader: (toolUseId) => this.readToolResultForChunk(toolUseId),
           permissionContext: {
             headless: this.deps.headless,
             allowedPluginIds: new Set(scope.activePluginIds),

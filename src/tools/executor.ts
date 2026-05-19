@@ -68,6 +68,10 @@ import {
   type ShellPathPolicyViolation,
 } from "./shell-path-policy.js";
 import { createLogger } from "../lib/logger.js";
+import {
+  TOOL_RESULT_CHUNK_READER_METADATA_KEY,
+  type ToolResultChunkReader,
+} from "./tool-result-chunk.js";
 const log = createLogger("executor");
 
 export interface ToolCallMeta {
@@ -325,6 +329,7 @@ export interface ExecuteOptions {
    */
   spawnDepth?: number;
   abortSignal?: AbortSignal;
+  toolResultChunkReader?: ToolResultChunkReader;
   permissionContext?: ToolPermissionContext;
 }
 
@@ -967,6 +972,7 @@ export class ToolExecutor {
       overlayTriggerOrigin,
       spawnDepth,
       abortSignal,
+      toolResultChunkReader,
       permissionContext,
     } = opts;
     const startTime = Date.now();
@@ -1867,6 +1873,9 @@ export class ToolExecutor {
         // 라이프사이클 이벤트에 함께 실어 보냄.
         toolUseId: toolUse.id,
         trustOrigin: invocationPermissionContext.trustOrigin,
+        ...(toolResultChunkReader
+          ? { [TOOL_RESULT_CHUNK_READER_METADATA_KEY]: toolResultChunkReader }
+          : {}),
       },
       abortSignal,
     };

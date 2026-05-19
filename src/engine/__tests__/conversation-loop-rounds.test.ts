@@ -6,6 +6,7 @@ import { ConversationLoop } from "../conversation-loop.js";
 import type { GenericMessage, LLMProvider, StreamEvent } from "../llm/types.js";
 import { ToolRegistry } from "../../tools/registry.js";
 import { createDynamicTool } from "../../tools/base.js";
+import { createReadToolResultChunkTool } from "../../tools/tool-result-chunk.js";
 import { fakeLlmSettings } from "../../shared/__tests__/fake-llm-settings.js";
 import { SessionTodoStore } from "../../main/session-todo-store.js";
 
@@ -529,5 +530,85 @@ describe("ConversationLoop queryLoop", () => {
       (m) => (m as { toolUseId: string }).toolUseId,
     );
     expect(resultIds.sort()).toEqual(persistedIds.slice().sort());
+  });
+
+  it("lets the model read host-truncated tool_result chunks through the builtin chunk tool", async () => {
+    const toolRegistry = new ToolRegistry();
+    const longContent = Array.from(
+      { length: 160 },
+      (_, i) => `row-${i.toString().padStart(3, "0")}: ${"x".repeat(20)}`,
+    ).join("\n");
+    toolRegistry.register(createDynamicTool({
+      name: "long_tool",
+      description: "returns a long result",
+      source: "builtin",
+      category: "read",
+      isReadOnly: () => true,
+      jsonSchema: { type: "object", properties: {} },
+      execute: async () => ({ output: longContent, isError: false }),
+    }));
+    toolRegistry.register(createReadToolResultChunkTool());
+
+    const provider = new FakeProvider([
+      [
+        { type: "tool_call", id: "long-1", name: "long_tool", input: {} },
+        { type: "message_complete", stopReason: "tool_use" },
+      ],
+      [
+        {
+          type: "tool_call",
+          id: "chunk-1",
+          name: "read_tool_result_chunk",
+          input: { toolUseId: "long-1", chunkIndex: 0, maxChars: 500 },
+        },
+        { type: "message_complete", stopReason: "tool_use" },
+      ],
+      [
+        { type: "text_delta", text: "done" },
+        { type: "message_complete", stopReason: "end_turn" },
+      ],
+    ]);
+    const loop = new ConversationLoop(({
+      settingsService: {
+        get: () => fakeLlmSettings(),
+        getSecret: () => "test-key",
+      },
+      systemPromptBuilder: { build: () => "system" },
+      keywordEngine: new KeywordEngine(),
+      routeEngine: new RouteEngine({ toolRegistry }),
+      toolRegistry,
+      memoryManager: {
+        saveSession: () => {},
+        listSessions: () => [],
+      },
+      disableSessionPersistence: true,
+    } as unknown) as ConstructorParameters<typeof ConversationLoop>[0]);
+    (loop as { provider: LLMProvider | null }).provider = provider;
+
+    await loop.runTurn("call long tool then read chunk", undefined, undefined, { inputOrigin: "user-keyboard" });
+
+    const messages = loop.getHistory().getMessages();
+    const longResult = messages.find(
+      (m): m is Extract<GenericMessage, { role: "tool_result" }> =>
+        m.role === "tool_result" && m.toolUseId === "long-1",
+    );
+    expect(longResult?.meta?.truncated).toBeDefined();
+    expect(longResult?.content).toBe(longContent);
+
+    const chunkResult = messages.find(
+      (m): m is Extract<GenericMessage, { role: "tool_result" }> =>
+        m.role === "tool_result" && m.toolUseId === "chunk-1",
+    );
+    expect(chunkResult?.isError).toBeUndefined();
+    const parsed = JSON.parse(chunkResult!.content) as Record<string, unknown>;
+    expect(parsed).toMatchObject({
+      toolUseId: "long-1",
+      toolName: "long_tool",
+      chunkIndex: 0,
+      startChar: 0,
+      endChar: 500,
+      hasMore: true,
+      chunk: longContent.slice(0, 500),
+    });
   });
 });

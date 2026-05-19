@@ -33,21 +33,25 @@ import { buildToolResultStub } from "./auto-compact.js";
  * vector via a hostile tool name.
  */
 function buildToolResultTruncatedStub(
+  toolUseId: string,
   toolName: string | undefined,
   info: NonNullable<NonNullable<GenericMessage["meta"]>["truncated"]>,
 ): string {
   const safeName = (toolName ?? "?").replace(/[^A-Za-z0-9_-]/g, "?");
+  const safeToolUseId = toolUseId.replace(/[^A-Za-z0-9_.:-]/g, "?");
   const lineLabel = info.originalLines === -1 ? "scan-skipped" : `${info.originalLines}`;
   const tokenLabel = info.originalTokens === -1 ? "scan-skipped" : `${info.originalTokens}`;
   return (
     `[tool_result truncated by host (Issue #902):` +
     ` tool=${safeName},` +
+    ` toolUseId=${safeToolUseId},` +
     ` originalLines=${lineLabel},` +
     ` originalTokens=${tokenLabel},` +
     ` originalBytes=${info.originalBytes}.` +
     ` The full response exceeded the per-result size cap` +
-    ` and was dropped from history to protect TPM / context window.` +
-    ` Retry with pagination / narrower filter to see the contents.]`
+    ` and was dropped from provider history to protect TPM / context window.` +
+    ` The current session still keeps the verbatim result in memory.` +
+    ` Call read_tool_result_chunk with toolUseId="${safeToolUseId}" and chunkIndex=0, then increment chunkIndex while hasMore=true.]`
   );
 }
 
@@ -116,7 +120,7 @@ export function stubMarkedToolResults(messages: GenericMessage[]): GenericMessag
       const stubContent =
         msg.meta.compactedAt !== undefined
           ? buildToolResultStub(msg.toolName, msg.meta.truncated?.originalBytes ?? msg.content.length)
-          : buildToolResultTruncatedStub(msg.toolName, msg.meta.truncated!);
+          : buildToolResultTruncatedStub(msg.toolUseId, msg.toolName, msg.meta.truncated!);
       out.push({
         role: "tool_result",
         toolUseId: msg.toolUseId,
