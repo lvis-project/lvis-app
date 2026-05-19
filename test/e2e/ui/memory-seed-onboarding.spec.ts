@@ -6,9 +6,15 @@
  *      causes the wizard to auto-mount.
  *   2. Filling in 호칭 + 자기소개 → "기억하고 시작하기" dismisses the
  *      wizard and seeds `~/.lvis/memories/MEMORY.md` Urgent Memory.
- *   3. After dismissal the SpotlightTour spotlight visibly mounts
- *      (proves the `api.tour.start("first-boot-essentials")` broadcast
- *      reached the renderer).
+ *   3. After dismissal the SpotlightTour spotlight visibly mounts. The
+ *      production trigger is the Z chain-effect (App.tsx:699-711) firing
+ *      `api.tour.start("first-boot-essentials")` on stage="tour" — the
+ *      MemorySeed wizard's own `startTour()` is intentionally swallowed
+ *      by an App.tsx-side `tour.start` wrapper to prevent a double-fire
+ *      that would visibly reset the SpotlightTour to step 0 (regression
+ *      from PR #1019; fix in #1029). This spec validates the *chain-effect
+ *      driven* trigger path — the wizard's own startTour() lives only as
+ *      a defensive secondary call for the dev-mode swallow-failure case.
  *   4. Subsequent boots do NOT re-show the wizard
  *      (`features.onboardingCompleted` flipped).
  */
@@ -61,7 +67,7 @@ test.describe("memory seed onboarding wizard", () => {
     if (tempHome) rmSync(tempHome, { recursive: true, force: true });
   });
 
-  test("auto-opens on first boot, seeds MEMORY.md, and triggers the tour", async () => {
+  test("auto-opens on first boot, seeds MEMORY.md, and the chain-effect tour broadcast mounts the SpotlightTour", async () => {
     await page.setViewportSize({ width: 460, height: 840 });
 
     const dialog = page.getByTestId("memory-seed-dialog");
@@ -79,8 +85,13 @@ test.describe("memory seed onboarding wizard", () => {
     await dialog.getByTestId("memory-seed-dialog:submit").click();
     await expect(dialog).toBeHidden({ timeout: 10_000 });
 
-    // SpotlightTour root mounts only after a `lvis:tour:start` broadcast —
-    // its visibility is the canonical proof the wizard chained into the tour.
+    // SpotlightTour root mounts only after a `lvis:tour:start` broadcast.
+    // Trigger origin is the chain-effect at App.tsx (stage="tour" branch),
+    // NOT the wizard's internal startTour() — that path is intentionally
+    // swallowed by the App.tsx-side `tour.start` wrapper to prevent the
+    // double-mount regression (PR #1029). The chain-effect is the canonical
+    // production trigger: this assertion proves the wizard's onDismissed →
+    // dispatchChain("memory-finish") → stage="tour" → broadcast pipeline.
     await page
       .getByTestId("spotlight-tour")
       .first()
