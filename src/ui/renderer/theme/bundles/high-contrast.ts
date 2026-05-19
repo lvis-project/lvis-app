@@ -42,6 +42,7 @@ export const highContrastBundle: ThemeBundle = {
     border:                   "0 0% 100%",
     input:                    "0 0% 100%",
     ring:                     "60 100% 50%",
+    "ui-line":                "0 0% 46.0%",
     "message-user-bg":        "60 100% 50%",
     "message-user-fg":        "0 0% 0%",
     "input-bar-bg":           "0 0% 0%",

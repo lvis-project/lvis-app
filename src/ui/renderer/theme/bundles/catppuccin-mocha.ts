@@ -42,6 +42,7 @@ export const catppuccinMochaBundle: ThemeBundle = {
     border:                   "234 13% 31%",
     input:                    "234 13% 31%",
     ring:                     "267 84% 81%",
+    "ui-line":                "234 13% 57.0%",
     "message-user-bg":        "267 84% 81%",
     "message-user-fg":        "240 21% 12%",
     "input-bar-bg":           "234 13% 24%",

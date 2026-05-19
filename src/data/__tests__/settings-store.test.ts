@@ -17,6 +17,7 @@ vi.mock("electron", () => ({
 
 import { SettingsService } from "../settings-store.js";
 import { DEFAULT_ROLE_PRESETS } from "../role-presets.js";
+import { DEFAULT_BUNDLE_ID } from "../../shared/theme-bundles.js";
 
 describe("SettingsService marketplace defaults", () => {
   let userDataPath: string;
@@ -483,9 +484,9 @@ describe("SettingsService appearance v2 — fresh install defaults", () => {
     rmSync(userDataPath, { recursive: true, force: true });
   });
 
-  it("fresh install returns schemaVersion:2 with bundleId=tokyo-night", () => {
+  it("fresh install returns schemaVersion:2 with DEFAULT_BUNDLE_ID", () => {
     const service = new SettingsService({ userDataPath });
-    expect(service.get("appearance")).toEqual({ schemaVersion: 2, bundleId: "tokyo-night" });
+    expect(service.get("appearance")).toEqual({ schemaVersion: 2, bundleId: DEFAULT_BUNDLE_ID });
   });
 
   it("v2 appearance round-trips across restart", async () => {
@@ -502,24 +503,24 @@ describe("SettingsService appearance v2 — fresh install defaults", () => {
     expect(reloaded.get("appearance")).toEqual({ schemaVersion: 2, bundleId: "violet-light", followSystem: true });
   });
 
-  it("unknown bundleId coerces to tokyo-night", () => {
+  it("unknown bundleId coerces to DEFAULT_BUNDLE_ID", () => {
     writeFileSync(
       join(userDataPath, "lvis-settings.json"),
       JSON.stringify({ appearance: { schemaVersion: 2, bundleId: "nonexistent-bundle" } }),
       "utf-8",
     );
     const service = new SettingsService({ userDataPath });
-    expect(service.get("appearance")).toEqual({ schemaVersion: 2, bundleId: "tokyo-night" });
+    expect(service.get("appearance")).toEqual({ schemaVersion: 2, bundleId: DEFAULT_BUNDLE_ID });
   });
 
-  it("appearance block absent (pre-theme system install) → default tokyo-night", () => {
+  it("appearance block absent (pre-theme system install) → DEFAULT_BUNDLE_ID", () => {
     writeFileSync(
       join(userDataPath, "lvis-settings.json"),
       JSON.stringify({ chat: { systemPrompt: "preserved", autoCompact: false } }),
       "utf-8",
     );
     const service = new SettingsService({ userDataPath });
-    expect(service.get("appearance")).toEqual({ schemaVersion: 2, bundleId: "tokyo-night" });
+    expect(service.get("appearance")).toEqual({ schemaVersion: 2, bundleId: DEFAULT_BUNDLE_ID });
     // Unrelated section preserved
     expect(service.get("chat").systemPrompt).toBe("preserved");
   });
@@ -608,10 +609,10 @@ describe("SettingsService appearance v1 → v2 migration", () => {
     expect(s.get("appearance")).toEqual({ schemaVersion: 2, bundleId: "high-contrast" });
   });
 
-  it("invalid theme string → tokyo-night (DEFAULT_BUNDLE_ID)", () => {
+  it("invalid theme string → DEFAULT_BUNDLE_ID", () => {
     writeV1({ theme: "sepia", chatTheme: "default", codeTheme: "auto" });
     const s = new SettingsService({ userDataPath });
-    expect(s.get("appearance")).toEqual({ schemaVersion: 2, bundleId: "tokyo-night" });
+    expect(s.get("appearance")).toEqual({ schemaVersion: 2, bundleId: DEFAULT_BUNDLE_ID });
   });
 
   it("v1 write-back: migrated appearance is written to disk as v2", async () => {
@@ -643,10 +644,10 @@ describe("SettingsService appearance v1 → v2 migration", () => {
 
   // Main process has no window.matchMedia — system theme must not crash and must
   // produce a deterministic DEFAULT_BUNDLE_ID result (no silent OS-scheme access).
-  it("system + default → tokyo-night (main process: no matchMedia needed)", () => {
+  it("system + default → DEFAULT_BUNDLE_ID (main process: no matchMedia needed)", () => {
     writeV1({ theme: "system", chatTheme: "default", codeTheme: "auto" });
     const s = new SettingsService({ userDataPath });
-    expect(s.get("appearance")).toEqual({ schemaVersion: 2, bundleId: "tokyo-night" });
+    expect(s.get("appearance")).toEqual({ schemaVersion: 2, bundleId: DEFAULT_BUNDLE_ID });
   });
 
   it("system + lg → violet-dark + followSystem:true (main process: renderer will track OS)", () => {
