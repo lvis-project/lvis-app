@@ -312,12 +312,9 @@ describe("useStatusBar — install lifecycle producer", () => {
 // ─────────────────────────────────────────────────────────────────────────────
 // Case 6 — Vendor producer (PR-X1)
 //
-// `useStatusBarRuntime` (tools/plugins/mcps counts) and
-// `useStatusBarMarketplace` (마켓플레이스 ping) producers were unwired from
-// `useStatusBar` so the status bar carries only vendor/model + toasts; the
-// migrated stats live in Settings → General. The corresponding race-token /
-// focus-blur / configured=false tests retired with them and the new vendor
-// producer below replaces that surface area.
+// The status bar keeps the provider/model cell in the left strip. Connection
+// dots are separate producers so the visual state can distinguish marketplace
+// reachability from the active LLM provider ping.
 // ─────────────────────────────────────────────────────────────────────────────
 describe("useStatusBar — vendor producer", () => {
   it("upserts vendor:llm with the active provider + model from getSettings", async () => {
@@ -403,6 +400,64 @@ describe("useStatusBar — vendor producer", () => {
     expect(item?.onClick).toBeDefined();
     item?.onClick?.();
     expect(openSettingsWindow).toHaveBeenCalledWith("llm");
+  });
+});
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Case 7 — AI provider ping producer
+// ─────────────────────────────────────────────────────────────────────────────
+describe("useStatusBar — AI provider ping producer", () => {
+  it("renders a success dot immediately before vendor:llm only after provider ping succeeds", async () => {
+    const api = makeApi({
+      getSettings: vi.fn(async () => ({
+        llm: fakeLlmSettings({ provider: "openai", model: "gpt-5.4" }),
+        chat: { systemPrompt: "", autoCompact: false },
+        webSearch: { provider: "none" },
+        roles: { presets: [] },
+      })),
+      pingAiProvider: vi.fn(async () => ({
+        configured: true as const,
+        online: true as const,
+        vendor: "openai",
+        model: "gpt-5.4",
+        latencyMs: 12,
+      })),
+    });
+
+    const { result } = renderHook(() => useStatusBar({ api }));
+
+    await waitFor(() => {
+      const ids = result.current.persistent.map((p) => p.id);
+      expect(ids).toContain("provider:llm-ping");
+      expect(ids).toContain("vendor:llm");
+    });
+
+    const ids = result.current.persistent.map((p) => p.id);
+    expect(ids.indexOf("provider:llm-ping")).toBeLessThan(ids.indexOf("vendor:llm"));
+    const ping = result.current.persistent.find((p) => p.id === "provider:llm-ping");
+    expect(ping?.dot).toBe(true);
+    expect(ping?.severity).toBe("success");
+    expect(ping?.tooltip).toContain("Connected");
+  });
+
+  it("keeps the provider ping dot non-green when the model ping fails", async () => {
+    const api = makeApi({
+      pingAiProvider: vi.fn(async () => ({
+        configured: true as const,
+        online: false as const,
+        vendor: "openai",
+        model: "gpt-5.4",
+        error: "timeout",
+        latencyMs: 8000,
+      })),
+    });
+
+    const { result } = renderHook(() => useStatusBar({ api }));
+
+    await waitFor(() => {
+      const ping = result.current.persistent.find((p) => p.id === "provider:llm-ping");
+      expect(ping?.severity).toBe("error");
+    });
   });
 });
 

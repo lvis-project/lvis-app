@@ -26,6 +26,7 @@ import type {
   AssistantContextMenuAction,
   AssistantContextMenuPayload,
 } from "./shared/assistant-context-menu.js";
+import type { AiProviderPingResult } from "./shared/ai-provider-ping.js";
 
 // ─── Deterministic plugin webview asset URLs ────────────────────────────────
 // `__dirname` here resolves to the host preload's bundled location
@@ -334,6 +335,11 @@ const api = {
       ipcRenderer.invoke("lvis:demo:activate", { code }) as Promise<
         | { ok: true; vendor: string; requiresRelaunch?: boolean }
         | { ok: false; error: "invalid-code" | "no-vendor" | "persist-failed" | "unauthorized-frame" }
+      >,
+    relaunchAfterActivation: async () =>
+      ipcRenderer.invoke("lvis:demo:relaunch-after-activation") as Promise<
+        | { ok: true }
+        | { ok: false; error: "not-armed" | "unauthorized-frame" }
       >,
   },
   // Tutorial-C — SpotlightTour state bridge. Host stores tour completion
@@ -971,6 +977,11 @@ const api = {
       configured: boolean;
       online: boolean;
     }>,
+  // Status bar — active LLM provider reachability probe. This performs a
+  // tiny one-shot model call from the main process so "connected" means the
+  // provider itself answered, not only that the marketplace backend is online.
+  pingAiProvider: async () =>
+    ipcRenderer.invoke("lvis:llm:ping") as Promise<AiProviderPingResult>,
 
   // Settings "일반" dashboard — host metadata. SoT for `version` is the
   // LVIS project package.json (resolved by the main process via
