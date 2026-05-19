@@ -103,6 +103,15 @@ export interface MessageMeta {
     trimmedAt: string;
   };
   /**
+   * Set when a host-truncated tool_result was too large to retain as a local
+   * file-backed artifact. The JSONL stub remains small and explicit, but
+   * read_tool_result_chunk cannot recover the original payload after reload.
+   */
+  artifactUnavailable?: {
+    reason: "artifact-too-large";
+    maxBytes: number;
+  };
+  /**
    * Per-turn role prompt metadata selected by the user for this user message.
    * Stored so retry/edit-resend can replay the same system-prompt role without
    * embedding role instructions into visible user text.
