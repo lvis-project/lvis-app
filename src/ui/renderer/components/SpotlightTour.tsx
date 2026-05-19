@@ -81,6 +81,13 @@ export interface SpotlightTourProps {
    * production renders pass `undefined`.
    */
   initialScenarioId?: string;
+  /**
+   * Tutorial-X5 — fired right after the user reaches the last step of a
+   * scenario and the tour closes (NOT on early-dismissal). The host's
+   * `PostTourFirstTask` listens for this so it can offer the user a
+   * real first plugin task without a dead-end UX transition.
+   */
+  onComplete?: (scenarioId: string) => void;
 }
 
 interface SpotlightRect {
@@ -207,6 +214,7 @@ export function SpotlightTour({
   api,
   scenarios = DEFAULT_TOUR_SCENARIOS,
   initialScenarioId,
+  onComplete,
 }: SpotlightTourProps) {
   const [activeScenarioId, setActiveScenarioId] = useState<string | null>(
     initialScenarioId ?? null,
@@ -279,8 +287,18 @@ export function SpotlightTour({
         });
       }
       setActiveScenarioId(null);
+      // Tutorial-X5 — notify the host the scenario completed so a
+      // post-tour first-task offer can render. Wrapped in try/catch
+      // because consumer code lives outside this component's
+      // reliability envelope; a thrown callback must not block tour
+      // close-out.
+      try {
+        onComplete?.(id);
+      } catch {
+        /* host callback failure stays local */
+      }
     },
-    [api],
+    [api, onComplete],
   );
 
   const closeAfterDismissal = useCallback(
