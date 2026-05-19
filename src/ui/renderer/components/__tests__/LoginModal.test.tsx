@@ -1,7 +1,7 @@
 // @vitest-environment jsdom
 import "../../../../../test/renderer/setup.ts";
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
-import { render, fireEvent, waitFor } from "@testing-library/react";
+import { act, render, fireEvent, waitFor } from "@testing-library/react";
 import { LoginModal } from "../LoginModal.js";
 
 /**
@@ -24,7 +24,11 @@ function makeApi(
     | { ok: false; error: string }
   >,
   activateImpl?: () => Promise<
-    | { ok: true; vendor: string }
+    | { ok: true; vendor: string; requiresRelaunch?: boolean }
+    | { ok: false; error: string }
+  >,
+  relaunchImpl?: () => Promise<
+    | { ok: true }
     | { ok: false; error: string }
   >,
 ) {
@@ -34,6 +38,9 @@ function makeApi(
     demo: {
       activate: vi.fn(
         activateImpl ?? (async () => ({ ok: true, vendor: "azure-foundry" })),
+      ),
+      relaunchAfterActivation: vi.fn(
+        relaunchImpl ?? (async () => ({ ok: true })),
       ),
     },
   } as unknown as Parameters<typeof LoginModal>[0]["api"];
@@ -214,5 +221,67 @@ describe("LoginModal — chip-driven demo flow (activation → auth)", () => {
     expect(
       (api as unknown as { loginMockup: ReturnType<typeof vi.fn> }).loginMockup,
     ).not.toHaveBeenCalled();
+  });
+
+  it("shows the 5s relaunch notice and then requests armed relaunch", async () => {
+    vi.useFakeTimers({
+      shouldAdvanceTime: true,
+      toFake: ["setTimeout", "clearTimeout", "Date"],
+    });
+    try {
+      const api = makeApi(
+        async () => ({ ok: true, vendor: "azure-foundry", fieldsApplied: ["apiKey"] }),
+        async () => ({ ok: true, vendor: "azure-foundry", requiresRelaunch: true }),
+        async () => ({ ok: true }),
+      );
+      render(<LoginModal api={api} open onOpenChange={() => {}} />);
+
+      await waitFor(() => {
+        expect(document.querySelector('[data-testid="login-modal:chip-demo"]')).toBeTruthy();
+      });
+      clickDemoChip();
+      await waitFor(() => {
+        expect(
+          document.querySelector(
+            '[data-testid="login-modal:activation-code-input"]',
+          ),
+        ).toBeTruthy();
+      });
+      const textarea = document.querySelector(
+        '[data-testid="login-modal:activation-code-input"]',
+      ) as HTMLTextAreaElement;
+      fireEvent.change(textarea, { target: { value: FAKE_ACTIVATION_CODE } });
+      const submit = document.querySelector(
+        '[data-testid="login-modal:activation-submit"]',
+      ) as HTMLButtonElement;
+      fireEvent.click(submit);
+
+      await waitFor(() => {
+        const notice = document.querySelector(
+          '[data-testid="login-modal:activation-notice"]',
+        );
+        expect(notice?.textContent).toContain("호스트 적용을 위해 자동으로 재시작됩니다");
+      });
+      expect(
+        (api as unknown as { loginMockup: ReturnType<typeof vi.fn> }).loginMockup,
+      ).not.toHaveBeenCalled();
+      expect(
+        (api as unknown as { demo: { relaunchAfterActivation: ReturnType<typeof vi.fn> } }).demo
+          .relaunchAfterActivation,
+      ).not.toHaveBeenCalled();
+
+      await act(async () => {
+        vi.advanceTimersByTime(5000);
+      });
+
+      await waitFor(() => {
+        expect(
+          (api as unknown as { demo: { relaunchAfterActivation: ReturnType<typeof vi.fn> } }).demo
+            .relaunchAfterActivation,
+        ).toHaveBeenCalledOnce();
+      });
+    } finally {
+      vi.useRealTimers();
+    }
   });
 });

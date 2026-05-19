@@ -6,6 +6,7 @@ import { useStatusBarNotifications } from "./status-bar/use-status-bar-notificat
 import { useStatusBarInstall } from "./status-bar/use-status-bar-install.js";
 import { useStatusBarVendor } from "./status-bar/use-status-bar-vendor.js";
 import { useStatusBarMarketplace } from "./status-bar/use-status-bar-marketplace.js";
+import { useStatusBarProviderPing } from "./status-bar/use-status-bar-provider-ping.js";
 
 // Re-export shared types so existing call sites (App.tsx, StatusBar.tsx, tests)
 // continue to import from this module without changes.
@@ -123,16 +124,13 @@ export function useStatusBar(opts: UseStatusBarOptions) {
   useStatusBarNotifications({ api, pushToast });
   useStatusBarInstall({ api, pushToast });
   // Producer registration order determines left-to-right render order in
-  // the status bar (StatusBar.tsx maps the persistent array as-is). The
-  // marketplace dot is registered first so it sits leftmost — the
-  // connection indicator anchors the strip, with the vendor/model label
-  // to its right (e.g. `●dot 🔷 Azure · gpt-4o`).
-  //
-  // Marketplace reachability — dot-only indicator (no Korean label). The
-  // tooltip ("Marketplace: Online" / "Marketplace: Offline") carries the
-  // meaning so the status bar stays compact even on narrow windows.
-  useStatusBarMarketplace({ api, upsertPersistent, removePersistent });
+  // the status bar (StatusBar.tsx maps the persistent array as-is). The AI
+  // provider ping dot is registered immediately before the provider/model
+  // cell so green means the configured LLM answered a tiny probe, not only
+  // that the marketplace backend is reachable.
+  useStatusBarProviderPing({ api, upsertPersistent });
   useStatusBarVendor({ api, upsertPersistent });
+  useStatusBarMarketplace({ api, upsertPersistent, removePersistent });
 
   return {
     persistent,
