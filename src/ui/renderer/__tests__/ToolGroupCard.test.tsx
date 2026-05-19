@@ -328,6 +328,29 @@ describe("ToolGroupCard", () => {
     expect(container.textContent).not.toContain("[tool_result stripped:");
   });
 
+  it("single tool with host-truncated stub + sessionId → renders CompactedToolResult", () => {
+    const stubResult = "[tool_result truncated by host (Issue #902): tool=lge_lgenie_query, toolUseId=tu-truncated, originalLines=180, originalTokens=9000, originalBytes=45000. Call read_tool_result_chunk with toolUseId=\"tu-truncated\" and chunkIndex=0.]";
+    vi.stubGlobal("lvisApi", {
+      chatGetVerbatimToolResult: vi.fn(() => new Promise(() => {})),
+    });
+    const group = makeGroup({
+      tools: [
+        {
+          toolUseId: "tu-truncated",
+          name: "lge_lgenie_query",
+          input: { query: "긴 규정 답변" },
+          result: stubResult,
+          status: "done",
+          displayOrder: 0,
+        },
+      ],
+    });
+    const { container } = render(<ToolGroupCard group={group} sessionId="session-1" />);
+    expect(container.textContent).toContain("[펼치기]");
+    expect(container.textContent).toContain("45.0K chars");
+    expect(container.textContent).not.toContain("[tool_result truncated by host");
+  });
+
   it("single tool with stub result but NO sessionId → renders ToolPayloadBlock (raw stub shown)", () => {
     const stubResult = "[tool_result stripped: tool=Read, origLen=5000]";
     const group = makeGroup({

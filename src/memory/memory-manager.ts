@@ -13,10 +13,17 @@
  * - 세션 독립: 파일은 영속, 인메모리는 휘발
  */
 import { existsSync, mkdirSync, readFileSync, readdirSync, writeFileSync, unlinkSync, rmSync, statSync, renameSync, watch, type FSWatcher } from "node:fs";
+import { createHash } from "node:crypto";
 import { join, resolve, basename } from "node:path";
 import { withFileLock } from "../lib/with-file-lock.js";
 import { createLogger } from "../lib/logger.js";
 import { lvisHome } from "../shared/lvis-home.js";
+import {
+  buildToolResultStrippedStub,
+  buildToolResultTruncatedStub,
+  isToolResultStubContent,
+  type ToolResultTruncatedInfo,
+} from "../shared/tool-result-stub.js";
 const log = createLogger("memory");
 
 function escapeRegExp(value: string): string {
@@ -46,6 +53,15 @@ export interface SessionSearchEntry {
   matchedMessage: string;
   timestamp: string;
   sessionKind: SessionKind;
+}
+
+export interface ToolResultArtifact {
+  toolUseId: string;
+  toolName?: string;
+  content: string;
+  truncated: ToolResultTruncatedInfo;
+  sha256: string;
+  createdAt: string;
 }
 
 export type SessionKind = "main" | "routine";
@@ -229,6 +245,50 @@ const SESSION_ID_REGEX = /^[a-zA-Z0-9_\-]+$/;
  */
 function isValidSessionId(id: unknown): id is string {
   return typeof id === "string" && SESSION_ID_REGEX.test(id);
+}
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return value !== null && typeof value === "object" && !Array.isArray(value);
+}
+
+function isToolResultRecord(value: unknown): value is Record<string, unknown> & {
+  role: "tool_result";
+  toolUseId: string;
+  content: string;
+} {
+  return (
+    isRecord(value) &&
+    value.role === "tool_result" &&
+    typeof value.toolUseId === "string" &&
+    typeof value.content === "string"
+  );
+}
+
+function normalizeTruncatedInfo(value: unknown): ToolResultTruncatedInfo | null {
+  if (!isRecord(value)) return null;
+  const { originalLines, originalTokens, originalBytes, trimmedAt } = value;
+  if (
+    typeof originalLines !== "number" ||
+    typeof originalTokens !== "number" ||
+    typeof originalBytes !== "number" ||
+    !Number.isFinite(originalLines) ||
+    !Number.isFinite(originalTokens) ||
+    !Number.isFinite(originalBytes)
+  ) return null;
+  return {
+    originalLines,
+    originalTokens,
+    originalBytes,
+    trimmedAt: typeof trimmedAt === "string" ? trimmedAt : new Date(0).toISOString(),
+  };
+}
+
+function sha256Text(content: string): string {
+  return createHash("sha256").update(content, "utf8").digest("hex");
+}
+
+function toolUseArtifactKey(toolUseId: string): string {
+  return createHash("sha256").update(toolUseId, "utf8").digest("hex").slice(0, 32);
 }
 
 /** Valid trigger values for strict narrowing. */
@@ -605,9 +665,11 @@ export class MemoryManager {
       throw new Error(`saveSession: invalid sessionId "${sessionId}"`);
     }
     const targetPath = join(this.sessionsDir, `${sessionId}.jsonl`);
-    const lines = messages.map((m) => JSON.stringify(m)).join("\n") + "\n";
     await withFileLock(targetPath, async () => {
+      const prepared = this.prepareSessionMessagesForDisk(sessionId, messages);
+      const lines = prepared.messages.map((m) => JSON.stringify(m)).join("\n") + "\n";
       writeFileSync(targetPath, lines, "utf-8");
+      this.cleanupToolResultArtifacts(sessionId, prepared.keepArtifactKeys);
     });
   }
 
@@ -624,8 +686,9 @@ export class MemoryManager {
     const sessionSnapshotDir = join(this.checkpointsDir, sessionId);
     mkdirSync(sessionSnapshotDir, { recursive: true });
     const targetPath = join(sessionSnapshotDir, `${compactNum}.jsonl`);
-    const lines = messages.map((m) => JSON.stringify(m)).join("\n") + "\n";
     await withFileLock(targetPath, async () => {
+      const prepared = this.prepareSessionMessagesForDisk(sessionId, messages);
+      const lines = prepared.messages.map((m) => JSON.stringify(m)).join("\n") + "\n";
       writeFileSync(targetPath, lines, "utf-8");
     });
   }
@@ -662,6 +725,58 @@ export class MemoryManager {
       }
     }
     return messages;
+  }
+
+  loadToolResultArtifact(sessionId: string, toolUseId: string): ToolResultArtifact | null {
+    if (!isValidSessionId(sessionId) || typeof toolUseId !== "string" || toolUseId.length === 0) {
+      return null;
+    }
+    const paths = this.toolResultArtifactPaths(sessionId, toolUseId);
+    if (!existsSync(paths.contentPath) || !existsSync(paths.metaPath)) return null;
+    try {
+      const content = readFileSync(paths.contentPath, "utf-8");
+      const meta = JSON.parse(readFileSync(paths.metaPath, "utf-8")) as Record<string, unknown>;
+      if (meta.toolUseId !== toolUseId) return null;
+      const truncated = normalizeTruncatedInfo(meta.truncated);
+      const sha256 = typeof meta.sha256 === "string" ? meta.sha256 : "";
+      if (!truncated || sha256.length === 0 || sha256Text(content) !== sha256) return null;
+      return {
+        toolUseId,
+        ...(typeof meta.toolName === "string" ? { toolName: meta.toolName } : {}),
+        content,
+        truncated,
+        sha256,
+        createdAt: typeof meta.createdAt === "string" ? meta.createdAt : new Date(0).toISOString(),
+      };
+    } catch (err) {
+      log.warn(`loadToolResultArtifact failed for ${sessionId}/${toolUseId}: %s`, (err as Error).message);
+      return null;
+    }
+  }
+
+  rehydrateToolResultArtifacts(sessionId: string, messages: unknown[]): unknown[] {
+    if (!isValidSessionId(sessionId)) return messages;
+    let changed = false;
+    const hydrated = messages.map((message) => {
+      if (!isToolResultRecord(message) || !isToolResultStubContent(message.content)) {
+        return message;
+      }
+      const artifact = this.loadToolResultArtifact(sessionId, message.toolUseId);
+      if (!artifact) return message;
+      const meta = isRecord(message.meta) ? message.meta : {};
+      const { serializedStub: _serializedStub, ...restMeta } = meta;
+      changed = true;
+      return {
+        ...message,
+        toolName: artifact.toolName ?? message.toolName,
+        content: artifact.content,
+        meta: {
+          ...restMeta,
+          truncated: artifact.truncated,
+        },
+      };
+    });
+    return changed ? hydrated : messages;
   }
 
   async saveSessionMetadata(sessionId: string, metadata: SessionMetadata): Promise<void> {
@@ -985,6 +1100,153 @@ export class MemoryManager {
         log.warn(`deleteSession: failed to remove diff cache dir ${diffCacheDir}: ${(err as Error).message}`);
       }
     }
+  }
+
+  private toolResultArtifactsDir(sessionId: string): string {
+    return join(this.sessionsDir, sessionId, "tool-results");
+  }
+
+  private toolResultArtifactPaths(sessionId: string, toolUseId: string): { key: string; contentPath: string; metaPath: string } {
+    const key = toolUseArtifactKey(toolUseId);
+    const dir = this.toolResultArtifactsDir(sessionId);
+    return {
+      key,
+      contentPath: join(dir, `${key}.txt`),
+      metaPath: join(dir, `${key}.json`),
+    };
+  }
+
+  private writeToolResultArtifact(
+    sessionId: string,
+    message: { toolUseId: string; toolName?: unknown; content: string },
+    truncated: ToolResultTruncatedInfo,
+  ): void {
+    const paths = this.toolResultArtifactPaths(sessionId, message.toolUseId);
+    mkdirSync(this.toolResultArtifactsDir(sessionId), { recursive: true, mode: 0o700 });
+    const sha256 = sha256Text(message.content);
+    writeFileSync(paths.contentPath, message.content, { encoding: "utf-8", mode: 0o600 });
+    writeFileSync(
+      paths.metaPath,
+      JSON.stringify({
+        toolUseId: message.toolUseId,
+        ...(typeof message.toolName === "string" ? { toolName: message.toolName } : {}),
+        truncated,
+        sha256,
+        createdAt: new Date().toISOString(),
+      }, null, 2),
+      { encoding: "utf-8", mode: 0o600 },
+    );
+  }
+
+  private prepareSessionMessagesForDisk(sessionId: string, messages: unknown[]): {
+    messages: unknown[];
+    keepArtifactKeys: Set<string>;
+  } {
+    const keepArtifactKeys = new Set<string>();
+    const prepared = messages.map((message) => {
+      if (!isToolResultRecord(message)) return message;
+
+      const meta = isRecord(message.meta) ? message.meta : {};
+      let truncated = normalizeTruncatedInfo(meta.truncated);
+      const compactedAt = typeof meta.compactedAt === "string" ? meta.compactedAt : undefined;
+      const hasStubPrefix = isToolResultStubContent(message.content);
+      const isSerializedStub = hasStubPrefix && (meta.serializedStub === true || !truncated);
+
+      if (truncated) {
+        const paths = this.toolResultArtifactPaths(sessionId, message.toolUseId);
+        keepArtifactKeys.add(paths.key);
+        if (!isSerializedStub) {
+          this.writeToolResultArtifact(sessionId, message, truncated);
+        }
+      } else if (isSerializedStub) {
+        const paths = this.toolResultArtifactPaths(sessionId, message.toolUseId);
+        const artifact = this.loadToolResultArtifact(sessionId, message.toolUseId);
+        if (artifact) {
+          keepArtifactKeys.add(paths.key);
+          truncated = artifact.truncated;
+          if (compactedAt === undefined) {
+            return {
+              ...message,
+              content: buildToolResultTruncatedStub(message.toolUseId, message.toolName as string | undefined, artifact.truncated),
+              meta: {
+                ...meta,
+                truncated: artifact.truncated,
+                serializedStub: true,
+              },
+            };
+          }
+        }
+      }
+
+      if (!truncated && compactedAt === undefined) return message;
+
+      const content =
+        compactedAt !== undefined
+          ? buildToolResultStrippedStub(
+              typeof message.toolName === "string" ? message.toolName : undefined,
+              truncated?.originalBytes ?? message.content.length,
+            )
+          : buildToolResultTruncatedStub(
+              message.toolUseId,
+              typeof message.toolName === "string" ? message.toolName : undefined,
+              truncated!,
+            );
+      return {
+        ...message,
+        content,
+        meta: {
+          ...meta,
+          ...(truncated ? { truncated } : {}),
+          serializedStub: true,
+        },
+      };
+    });
+
+    return { messages: prepared, keepArtifactKeys };
+  }
+
+  private cleanupToolResultArtifacts(sessionId: string, keepArtifactKeys: Set<string>): void {
+    const dir = this.toolResultArtifactsDir(sessionId);
+    if (!existsSync(dir)) return;
+    const checkpointKeys = this.loadCheckpointToolResultArtifactKeys(sessionId);
+    for (const entry of readdirSync(dir)) {
+      const key = entry.replace(/\.(txt|json)$/u, "");
+      if (keepArtifactKeys.has(key) || checkpointKeys.has(key)) continue;
+      try {
+        unlinkSync(join(dir, entry));
+      } catch (err) {
+        log.warn(`cleanupToolResultArtifacts: failed to remove ${entry}: ${(err as Error).message}`);
+      }
+    }
+  }
+
+  private loadCheckpointToolResultArtifactKeys(sessionId: string): Set<string> {
+    const keys = new Set<string>();
+    const dir = join(this.checkpointsDir, sessionId);
+    if (!existsSync(dir)) return keys;
+    for (const entry of readdirSync(dir)) {
+      if (!entry.endsWith(".jsonl")) continue;
+      const path = join(dir, entry);
+      try {
+        const lines = readFileSync(path, "utf-8").trim().split("\n").filter(Boolean);
+        for (const line of lines) {
+          let parsed: unknown;
+          try {
+            parsed = JSON.parse(line);
+          } catch {
+            continue;
+          }
+          if (!isToolResultRecord(parsed)) continue;
+          const meta = isRecord(parsed.meta) ? parsed.meta : {};
+          if (isToolResultStubContent(parsed.content) || normalizeTruncatedInfo(meta.truncated)) {
+            keys.add(toolUseArtifactKey(parsed.toolUseId));
+          }
+        }
+      } catch (err) {
+        log.warn(`loadCheckpointToolResultArtifactKeys: failed to scan ${entry}: ${(err as Error).message}`);
+      }
+    }
+    return keys;
   }
 
   private ensureStructure(): void {
