@@ -383,6 +383,91 @@ describe("SettingsService webView (B1 — external URL viewer policy)", () => {
   });
 });
 
+describe("SettingsService system — close behavior (PR #1032)", () => {
+  let userDataPath: string;
+
+  beforeEach(() => {
+    userDataPath = mkdtempSync(join(tmpdir(), "settings-store-system-"));
+    mockedElectron.safeStorage.isEncryptionAvailable.mockReturnValue(false);
+  });
+
+  afterEach(() => {
+    vi.clearAllMocks();
+    rmSync(userDataPath, { recursive: true, force: true });
+  });
+
+  it("defaults closeBehavior to 'hide-to-tray' on a fresh install", () => {
+    const service = new SettingsService({ userDataPath });
+    expect(service.get("system")).toEqual({ closeBehavior: "hide-to-tray" });
+  });
+
+  it("applies default 'hide-to-tray' when system field is absent on disk (legacy settings.json)", () => {
+    writeFileSync(
+      join(userDataPath, "lvis-settings.json"),
+      JSON.stringify({ marketplace: { backend: "real-cloud" } }),
+      "utf-8",
+    );
+    const service = new SettingsService({ userDataPath });
+    expect(service.get("system")).toEqual({ closeBehavior: "hide-to-tray" });
+  });
+
+  it("round-trips a 'quit' preference across restart", async () => {
+    const service = new SettingsService({ userDataPath });
+    await service.patch({ system: { closeBehavior: "quit" } });
+    expect(service.get("system")).toEqual({ closeBehavior: "quit" });
+
+    const reloaded = new SettingsService({ userDataPath });
+    expect(reloaded.get("system")).toEqual({ closeBehavior: "quit" });
+  });
+
+  // Critic M1 — schema-invalid value on disk falls back to default for THIS
+  // field only; other settings sections must remain intact.
+  it.each([
+    ["string-not-in-enum", "yes"],
+    ["null", null],
+    ["number", 42],
+    ["array", ["quit"]],
+  ])("falls back to default when closeBehavior is invalid on disk (%s) without resetting unrelated settings", (_label, badValue) => {
+    writeFileSync(
+      join(userDataPath, "lvis-settings.json"),
+      JSON.stringify({
+        system: { closeBehavior: badValue },
+        chat: { systemPrompt: "preserved-prompt", autoCompact: false },
+        marketplace: { backend: "real-cloud", realCloudBaseUrl: "https://preserved.example" },
+      }),
+      "utf-8",
+    );
+    const service = new SettingsService({ userDataPath });
+    expect(service.get("system")).toEqual({ closeBehavior: "hide-to-tray" });
+    expect(service.get("chat").systemPrompt).toBe("preserved-prompt");
+    expect(service.get("chat").autoCompact).toBe(false);
+    expect(service.get("marketplace").realCloudBaseUrl).toBe("https://preserved.example");
+  });
+
+  it("falls back to default when system block is not an object", () => {
+    writeFileSync(
+      join(userDataPath, "lvis-settings.json"),
+      JSON.stringify({ system: "garbage" }),
+      "utf-8",
+    );
+    const service = new SettingsService({ userDataPath });
+    expect(service.get("system")).toEqual({ closeBehavior: "hide-to-tray" });
+  });
+
+  // Critic N1 — patch-merge must NOT clobber a valid prior preference when
+  // an invalid value arrives via the renderer/IPC layer. Field-level guard
+  // mirrors the `appearance` block's behavior.
+  it("ignores invalid closeBehavior patch and preserves prior 'quit' preference", async () => {
+    const service = new SettingsService({ userDataPath });
+    await service.patch({ system: { closeBehavior: "quit" } });
+    expect(service.get("system").closeBehavior).toBe("quit");
+
+    // Patch with garbage — should be a no-op on the closeBehavior field.
+    await service.patch({ system: { closeBehavior: "invalid-value" as never } });
+    expect(service.get("system").closeBehavior).toBe("quit");
+  });
+});
+
 // ─── Appearance v2 schema ────────────────────────────────────────────────────
 
 describe("SettingsService appearance v2 — fresh install defaults", () => {
