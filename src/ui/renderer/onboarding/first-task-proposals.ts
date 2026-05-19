@@ -62,11 +62,15 @@ export const FIRST_TASK_PROPOSALS: readonly FirstTaskProposal[] = [
     composerSeed: "인덱싱할 문서 폴더를 추가해줘",
   },
   {
+    // The marketplace package slug is `lvis-plugin-work-proactive`
+    // (the published repo name); the user-facing brand is 업무 도우미
+    // (work-assistant). The pluginId field here matches the marketplace
+    // slug so the installed-plugin map lookup succeeds.
     pluginId: "lvis-plugin-work-proactive",
     priority: 30,
     headlineKo: "오늘 처리할 일을 정리해드릴까요?",
     bodyKo:
-      "받은편지함을 스캔해 액션 아이템 후보를 정리합니다. 모든 결과는 사용자 승인 후에만 LVIS 작업이 됩니다.",
+      "업무 도우미가 받은편지함을 스캔해 액션 아이템 후보를 정리합니다. 모든 결과는 사용자 승인 후에만 LVIS 작업이 됩니다.",
     ctaKo: "받은 메일 정리",
     composerSeed: "오늘 처리할 일을 정리해줘",
   },
