@@ -36,6 +36,7 @@ export const tokyoNightBundle: ThemeBundle = {
     border:                   "217 33% 17%",
     input:                    "217 33% 17%",
     ring:                     "224.3 76.3% 48%",
+    "ui-line":                "217 33% 51.4%",
     "message-user-bg":        "217.2 91.2% 59.8%",
     "message-user-fg":        "0 0% 5%",
     "input-bar-bg":           "222.2 84% 7%",

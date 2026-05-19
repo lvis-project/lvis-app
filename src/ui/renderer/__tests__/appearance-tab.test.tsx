@@ -14,7 +14,7 @@ import { describe, it, expect, vi, afterEach } from "vitest";
 import { fireEvent, render, waitFor } from "@testing-library/react";
 import { ThemeProvider } from "../theme/ThemeProvider.js";
 import { AppearanceTab } from "../tabs/AppearanceTab.js";
-import { BUNDLES } from "../theme/index.js";
+import { BUNDLES, DEFAULT_BUNDLE_ID } from "../theme/index.js";
 
 afterEach(() => {
   document.documentElement.removeAttribute("data-theme-bundle");
@@ -25,7 +25,7 @@ afterEach(() => {
   vi.unstubAllGlobals();
 });
 
-function renderWithBundle(initialBundleId = "tokyo-night") {
+function renderWithBundle(initialBundleId = DEFAULT_BUNDLE_ID) {
   return render(
     <ThemeProvider initialBundleId={initialBundleId}>
       <AppearanceTab />
@@ -51,8 +51,8 @@ describe("AppearanceTab — bundle card grid", () => {
   });
 
   it("the default bundle card has aria-checked=true", () => {
-    const { getByRole } = renderWithBundle("tokyo-night");
-    const card = getByRole("radio", { name: /테마: Tokyo Night/ });
+    const { getByRole } = renderWithBundle();
+    const card = getByRole("radio", { name: /테마: Cherry Blossom/ });
     expect(card.getAttribute("aria-checked")).toBe("true");
   });
 

@@ -88,6 +88,11 @@ const CHIP_PAIRS: Array<[keyof BundleTokens, keyof BundleTokens]> = [
   ["emphasis", "emphasis-foreground"],
 ];
 
+const UI_LINE_BACKDROPS: Array<keyof BundleTokens> = [
+  "background",
+  "input-bar-bg",
+];
+
 describe("Theme contrast — body-text surfaces (WCAG AA 4.5:1)", () => {
   for (const bundle of BUNDLES) {
     for (const [bgKey, fgKey] of BODY_PAIRS) {
@@ -110,6 +115,20 @@ describe("Theme contrast — chip/badge surfaces (WCAG AA Large 3:1)", () => {
         expect(
           ratio,
           `${bundle.id} ${String(bgKey)}=${bundle.tokens[bgKey]} vs ${String(fgKey)}=${bundle.tokens[fgKey]} ratio ${ratio.toFixed(2)}`,
+        ).toBeGreaterThanOrEqual(3.0);
+      });
+    }
+  }
+});
+
+describe("Theme contrast — visible UI line token (non-text 3:1)", () => {
+  for (const bundle of BUNDLES) {
+    for (const bgKey of UI_LINE_BACKDROPS) {
+      it(`${bundle.id}: ui-line against ${String(bgKey)} ≥ 3.0`, () => {
+        const ratio = ratioFor(bundle.tokens[bgKey], bundle.tokens["ui-line"]);
+        expect(
+          ratio,
+          `${bundle.id} ${String(bgKey)}=${bundle.tokens[bgKey]} vs ui-line=${bundle.tokens["ui-line"]} ratio ${ratio.toFixed(2)}`,
         ).toBeGreaterThanOrEqual(3.0);
       });
     }

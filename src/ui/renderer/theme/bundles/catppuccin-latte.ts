@@ -40,6 +40,7 @@ export const catppuccinLatteBundle: ThemeBundle = {
     border:                   "225 14% 77%",
     input:                    "225 14% 77%",
     ring:                     "266 85% 58%",
+    "ui-line":                "223 16% 46.0%",
     "message-user-bg":        "266 85% 58%",
     "message-user-fg":        "0 0% 100%",
     "input-bar-bg":           "0 0% 100%",
