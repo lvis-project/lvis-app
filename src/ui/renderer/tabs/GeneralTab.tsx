@@ -14,6 +14,8 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { Badge } from "../../../components/ui/badge.js";
 import { Button } from "../../../components/ui/button.js";
+import { Label } from "../../../components/ui/label.js";
+import { RadioGroup, RadioGroupItem } from "../../../components/ui/radio-group.js";
 import {
   Brain,
   Puzzle,
@@ -181,6 +183,17 @@ export function GeneralTab({ api, onNavigate }: GeneralTabProps) {
     void navigator.clipboard?.writeText(appInfo.userDataPath);
   }, [appInfo]);
 
+  // Default mirrors `DEFAULT_SETTINGS.system.closeBehavior` so the radio
+  // group renders the correct selection even before `settings` arrives.
+  const closeBehavior = settings?.system?.closeBehavior ?? "hide-to-tray";
+  const onCloseBehaviorChange = useCallback(
+    (value: string) => {
+      if (value !== "hide-to-tray" && value !== "quit") return;
+      void api.updateSettings({ system: { closeBehavior: value } });
+    },
+    [api],
+  );
+
   return (
     <div className="space-y-6">
       <SettingsPageHeader
@@ -335,6 +348,37 @@ export function GeneralTab({ api, onNavigate }: GeneralTabProps) {
             <span className="text-sm font-medium">{marketplaceStatus.label}</span>
           </div>
         </button>
+      </SettingsSection>
+
+      {/* ── 시스템 동작 ─────────────────────────────── */}
+      <SettingsSection
+        title="시스템 동작"
+        description="창 닫기 버튼을 눌렀을 때의 동작을 선택합니다."
+      >
+        <RadioGroup
+          value={closeBehavior}
+          onValueChange={onCloseBehaviorChange}
+          className="gap-3"
+        >
+          <div className="flex items-start gap-3 rounded-md border bg-card/50 p-3">
+            <RadioGroupItem value="hide-to-tray" id="close-hide-to-tray" className="mt-0.5" />
+            <Label htmlFor="close-hide-to-tray" className="cursor-pointer">
+              <div className="font-medium">트레이로 숨김 (기본)</div>
+              <div className="text-xs text-muted-foreground">
+                창을 닫아도 LVIS 가 시스템 트레이에서 계속 실행됩니다. 루틴, 브리핑, 플러그인 백그라운드 작업이 유지됩니다.
+              </div>
+            </Label>
+          </div>
+          <div className="flex items-start gap-3 rounded-md border bg-card/50 p-3">
+            <RadioGroupItem value="quit" id="close-quit" className="mt-0.5" />
+            <Label htmlFor="close-quit" className="cursor-pointer">
+              <div className="font-medium">즉시 종료</div>
+              <div className="text-xs text-muted-foreground">
+                창을 닫으면 일반 앱처럼 LVIS 가 완전히 종료됩니다. 백그라운드 작업도 함께 중단됩니다.
+              </div>
+            </Label>
+          </div>
+        </RadioGroup>
       </SettingsSection>
 
       {/* ── 시스템 정보 ─────────────────────────────── */}

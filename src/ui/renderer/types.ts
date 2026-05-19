@@ -155,6 +155,10 @@ export type AppSettings = {
   webView?: {
     preferredFlow: "in-app" | "system-browser";
   };
+  /** Window close-button behaviour. SOT: `SystemSettings` in settings-store. */
+  system?: {
+    closeBehavior: "hide-to-tray" | "quit";
+  };
   /** Experimental feature flags — all default false. */
   features?: {
     idlePreferenceRefresh?: boolean;
