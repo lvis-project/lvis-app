@@ -310,190 +310,99 @@ describe("useStatusBar — install lifecycle producer", () => {
 });
 
 // ─────────────────────────────────────────────────────────────────────────────
-// Case 6 — Counts producer race token
+// Case 6 — Vendor producer (PR-X1)
+//
+// `useStatusBarRuntime` (tools/plugins/mcps counts) and
+// `useStatusBarMarketplace` (마켓플레이스 ping) producers were unwired from
+// `useStatusBar` so the status bar carries only vendor/model + toasts; the
+// migrated stats live in Settings → General. The corresponding race-token /
+// focus-blur / configured=false tests retired with them and the new vendor
+// producer below replaces that surface area.
 // ─────────────────────────────────────────────────────────────────────────────
-describe("useStatusBar — counts producer race token", () => {
-  it("second getRuntimeCounts result wins even when first resolves last", async () => {
-    let resolveFirst!: (v: { tools: number; plugins: number; mcps: number }) => void;
-    let resolveSecond!: (v: { tools: number; plugins: number; mcps: number }) => void;
-    let call = 0;
+describe("useStatusBar — vendor producer", () => {
+  it("upserts vendor:llm with the active provider + model from getSettings", async () => {
+    const api = makeApi({
+      getSettings: vi.fn(async () => ({
+        llm: fakeLlmSettings({ provider: "openai", model: "gpt-5.4" }),
+        chat: { systemPrompt: "", autoCompact: false },
+        webSearch: { provider: "none" },
+        roles: { presets: [] },
+      })),
+      openSettingsWindow: vi.fn(async () => ({ ok: true as const, windowId: 1 })),
+    });
 
-    let installHandler: (() => void) | null = null;
+    const { result } = renderHook(() => useStatusBar({ api }));
+
+    await waitFor(() => {
+      const item = result.current.persistent.find((p) => p.id === "vendor:llm");
+      expect(item).toBeDefined();
+      expect(item?.value).toContain("OpenAI");
+      expect(item?.value).toContain("gpt-5.4");
+    });
+  });
+
+  it("reactively updates vendor:llm when onSettingsUpdated fires with a new provider", async () => {
+    let capturedHandler: ((settings: unknown) => void) | null = null;
 
     const api = makeApi({
-      getRuntimeCounts: vi.fn(() => {
-        call++;
-        if (call === 1) {
-          return new Promise<{ tools: number; plugins: number; mcps: number }>((res) => {
-            resolveFirst = res;
-          });
-        }
-        return new Promise<{ tools: number; plugins: number; mcps: number }>((res) => {
-          resolveSecond = res;
-        });
-      }),
-      onPluginInstallResult: vi.fn((h) => {
-        installHandler = h as () => void;
+      getSettings: vi.fn(async () => ({
+        llm: fakeLlmSettings({ provider: "openai", model: "gpt-5.4" }),
+        chat: { systemPrompt: "", autoCompact: false },
+        webSearch: { provider: "none" },
+        roles: { presets: [] },
+      })),
+      onSettingsUpdated: vi.fn((h) => {
+        capturedHandler = h as (s: unknown) => void;
         return noop();
       }),
-      onPluginUninstallResult: vi.fn((_h) => noop()),
     });
 
     const { result } = renderHook(() => useStatusBar({ api }));
 
-    // Wait for mount to trigger first getRuntimeCounts call (call=1).
     await waitFor(() => {
-      expect(call).toBeGreaterThanOrEqual(1);
+      const item = result.current.persistent.find((p) => p.id === "vendor:llm");
+      expect(item?.value).toContain("OpenAI");
     });
 
-    // Trigger a second fetch via a simulated install-result event (call=2).
+    // Simulate the settings broadcast — user switched provider in Settings.
     act(() => {
-      installHandler?.();
+      capturedHandler?.({
+        llm: fakeLlmSettings({ provider: "claude", model: "claude-sonnet-4-6" }),
+        chat: { systemPrompt: "", autoCompact: false },
+        webSearch: { provider: "none" },
+        roles: { presets: [] },
+      });
     });
 
     await waitFor(() => {
-      expect(call).toBe(2);
+      const item = result.current.persistent.find((p) => p.id === "vendor:llm");
+      expect(item?.value).toContain("Claude");
+      expect(item?.value).toContain("claude-sonnet-4-6");
     });
-
-    // Resolve second call first → tools: 2.
-    await act(async () => {
-      resolveSecond({ tools: 2, plugins: 0, mcps: 0 });
-    });
-
-    await waitFor(() => {
-      const item = result.current.persistent.find((p) => p.id === "runtime:tools");
-      expect(item?.value).toBe("2");
-    });
-
-    // Resolve first call (stale) → tools: 1. Race token should discard this.
-    await act(async () => {
-      resolveFirst({ tools: 1, plugins: 0, mcps: 0 });
-    });
-
-    // Yield one microtask cycle to let any pending setState settle.
-    await act(async () => { await Promise.resolve(); });
-
-    const item = result.current.persistent.find((p) => p.id === "runtime:tools");
-    expect(item?.value).toBe("2");
-  });
-});
-
-// ─────────────────────────────────────────────────────────────────────────────
-// Case 7 — Marketplace producer focus/blur
-// ─────────────────────────────────────────────────────────────────────────────
-describe("useStatusBar — marketplace producer focus/blur", () => {
-  it("pauses interval on blur and resumes on focus", async () => {
-    const pingFn = vi.fn(async () => ({
-      configured: true as const,
-      online: true as const,
-    }));
-
-    const hasFocusSpy = vi.spyOn(document, "hasFocus").mockReturnValue(true);
-
-    const api = makeApi({
-      pingMarketplace: pingFn,
-    });
-
-    const { result } = renderHook(() => useStatusBar({ api }));
-
-    // Allow the initial ping to complete.
-    await act(async () => { await Promise.resolve(); });
-
-    await waitFor(() => {
-      expect(result.current.persistent.find((p) => p.id === "marketplace:online")).toBeDefined();
-    });
-
-    const pingCountAfterMount = pingFn.mock.calls.length;
-    expect(pingCountAfterMount).toBeGreaterThanOrEqual(1);
-
-    // Blur → interval should stop.
-    act(() => {
-      window.dispatchEvent(new Event("blur"));
-    });
-
-    // Advance 35 s — no additional pings should fire after blur.
-    await act(async () => {
-      vi.advanceTimersByTime(35_000);
-    });
-
-    expect(pingFn.mock.calls.length).toBe(pingCountAfterMount);
-
-    // Focus → interval should restart (immediate ping).
-    act(() => {
-      window.dispatchEvent(new Event("focus"));
-    });
-    await act(async () => { await Promise.resolve(); });
-
-    await waitFor(() => {
-      expect(pingFn.mock.calls.length).toBeGreaterThan(pingCountAfterMount);
-    });
-
-    hasFocusSpy.mockRestore();
-  });
-});
-
-// ─────────────────────────────────────────────────────────────────────────────
-// Case 8 — Marketplace producer respects configured: false
-// ─────────────────────────────────────────────────────────────────────────────
-describe("useStatusBar — marketplace producer configured=false", () => {
-  it("does not upsert marketplace:online when pingMarketplace returns configured=false", async () => {
-    const hasFocusSpy = vi.spyOn(document, "hasFocus").mockReturnValue(true);
-    const pingFn = vi.fn(async () => ({
-      configured: false as const,
-      online: false as const,
-    }));
-
-    const api = makeApi({
-      pingMarketplace: pingFn,
-    });
-
-    const { result } = renderHook(() => useStatusBar({ api }));
-
-    await act(async () => { await Promise.resolve(); });
-
-    await waitFor(() => {
-      expect(pingFn).toHaveBeenCalled();
-    });
-
-    // marketplace:online must not appear in persistent state.
-    expect(result.current.persistent.find((p) => p.id === "marketplace:online")).toBeUndefined();
-
-    hasFocusSpy.mockRestore();
   });
 
-  it("removes marketplace:online if it was present and a subsequent ping returns configured=false", async () => {
-    const hasFocusSpy = vi.spyOn(document, "hasFocus").mockReturnValue(true);
-
-    let call = 0;
-    const pingFn = vi.fn(async () => {
-      call++;
-      if (call === 1) return { configured: true as const, online: true as const };
-      return { configured: false as const, online: false as const };
-    });
-
+  it("wires onClick to openSettingsWindow(\"llm\") when the API is available", async () => {
+    const openSettingsWindow = vi.fn(async () => ({ ok: true as const, windowId: 1 }));
     const api = makeApi({
-      pingMarketplace: pingFn,
+      getSettings: vi.fn(async () => ({
+        llm: fakeLlmSettings({ provider: "claude", model: "claude-sonnet-4-6" }),
+        chat: { systemPrompt: "", autoCompact: false },
+        webSearch: { provider: "none" },
+        roles: { presets: [] },
+      })),
+      openSettingsWindow,
     });
 
     const { result } = renderHook(() => useStatusBar({ api }));
 
-    // Wait for first ping (configured=true → item appears).
-    await act(async () => { await Promise.resolve(); });
     await waitFor(() => {
-      expect(result.current.persistent.find((p) => p.id === "marketplace:online")).toBeDefined();
+      expect(result.current.persistent.find((p) => p.id === "vendor:llm")).toBeDefined();
     });
 
-    // Advance 30 s to trigger the second ping interval.
-    await act(async () => {
-      vi.advanceTimersByTime(30_000);
-      await Promise.resolve();
-    });
-
-    await waitFor(() => {
-      expect(result.current.persistent.find((p) => p.id === "marketplace:online")).toBeUndefined();
-    });
-
-    hasFocusSpy.mockRestore();
+    const item = result.current.persistent.find((p) => p.id === "vendor:llm");
+    expect(item?.onClick).toBeDefined();
+    item?.onClick?.();
+    expect(openSettingsWindow).toHaveBeenCalledWith("llm");
   });
 });
 
