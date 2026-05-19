@@ -30,6 +30,7 @@ import {
   ShellMismatchError,
 } from "../lib/shell-resolver.js";
 import { createLogger } from "../lib/logger.js";
+import { trackManagedChildProcess } from "../main/managed-child-processes.js";
 import {
   DEFAULT_HOOK_TIMEOUT_MS,
   MAX_HOOK_STDOUT_BYTES,
@@ -102,6 +103,10 @@ export async function runOneHookScript(
       // entire descendant tree (sh → script → sleep). Without this the
       // child shell dies but its descendants keep running.
       detached: process.platform !== "win32",
+    });
+    trackManagedChildProcess(child, {
+      label: "hook:script",
+      killProcessGroup: process.platform !== "win32",
     });
 
     const stdoutChunks: Buffer[] = [];
