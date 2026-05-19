@@ -49,7 +49,7 @@ export function SuggestedRepliesChipRow({
       data-testid="suggested-replies-chip-row"
       role="toolbar"
       aria-label="대체 답변 추천"
-      className="mx-3 mb-1 flex gap-2 overflow-x-auto transition-opacity duration-150 motion-safe:animate-in motion-safe:fade-in motion-safe:slide-in-from-bottom-1"
+      className="mx-3 mt-3 mb-1 flex gap-2 overflow-x-auto transition-opacity duration-150 motion-safe:animate-in motion-safe:fade-in motion-safe:slide-in-from-bottom-1"
     >
       {alternates.map((text, idx) => {
         const isFocused = focusedIdx === idx;
