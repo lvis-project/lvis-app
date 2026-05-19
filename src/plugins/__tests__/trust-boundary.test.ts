@@ -121,7 +121,7 @@ describe("Phase 1 — plugin trust boundary", () => {
         registryPath,
         pluginsRoot,
       });
-      await runtime.load();
+      await runtime.startAll();
       expect(runtime.listPluginIds()).toContain("tb-user");
     });
 
@@ -137,7 +137,7 @@ describe("Phase 1 — plugin trust boundary", () => {
         registryPath,
         pluginsRoot,
       });
-      await runtime.load();
+      await runtime.startAll();
       expect(runtime.listPluginIds()).not.toContain("tb-host");
     });
 
@@ -530,10 +530,11 @@ describe("Phase 1 — plugin trust boundary", () => {
         pluginsRoot,
         installReceiptCacheRoot: cacheRoot,
       });
-      await runtime.load();
+      await runtime.startAll();
       expect(runtime.listPluginIds()).toContain("tb-restart-dev-signer");
 
-      // Switch to packaged mode — restart should now reject
+      // Switch to packaged mode — restart should reject the replacement but
+      // preserve the already-running instance until an explicit unload path.
       delete process.env.LVIS_DEV;
       setIsPackaged(true);
       const auditCalls: Array<{ level: string; message: string }> = [];
@@ -541,7 +542,8 @@ describe("Phase 1 — plugin trust boundary", () => {
         (level, message) => auditCalls.push({ level, message });
 
       await runtime.restartPlugin("tb-restart-dev-signer");
-      expect(runtime.listPluginIds()).not.toContain("tb-restart-dev-signer");
+      expect(runtime.listPluginIds()).toContain("tb-restart-dev-signer");
+      await expect(runtime.call("tb_ping")).resolves.toBe("pong");
       expect(auditCalls).toContainEqual(
         expect.objectContaining({ level: "error", message: "plugin_integrity_rejected" }),
       );

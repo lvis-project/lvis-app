@@ -9,7 +9,7 @@ describe("main process plugin lifecycle regression guards", () => {
   it("reports lvis:// install success only after runtime activation succeeds", async () => {
     const source = await readSource("../main.ts");
     const lifecycleSection = source.match(
-      /const installLockId[\s\S]*?\.catch\(\(err: Error\) => \{/,
+      /let installProgressSlug = params\.slug[\s\S]*?\n}\n\nfunction activateView/,
     )?.[0];
 
     expect(lifecycleSection, "deep-link install lifecycle section must be present").toBeTruthy();
@@ -17,26 +17,35 @@ describe("main process plugin lifecycle regression guards", () => {
 
     const lockIndex = lifecycleSection!.indexOf("withPluginInstallLock(installLockId");
     const canonicalIdIndex = lifecycleSection!.indexOf("item.id === params.slug || item.slug === params.slug");
-    const pythonPrepIndex = lifecycleSection!.indexOf("await preparePythonRuntimeForInstalledPlugin(pluginId");
-    const addIndex = lifecycleSection!.indexOf("await activeServices.pluginRuntime.addPlugin(pluginId)");
-    const rollbackIndex = lifecycleSection!.indexOf("await activeServices.pluginMarketplace.uninstall(pluginId)");
+    const progressAliasIndex = lifecycleSection!.indexOf("let installProgressSlug = params.slug");
+    const progressCanonicalIndex = lifecycleSection!.indexOf("installProgressSlug = installLockId");
+    const canonicalProgressIndex = lifecycleSection!.indexOf('slug: installLockId');
+    const catchResultIndex = source.indexOf('slug: installProgressSlug');
+    const lifecycleHelperIndex = lifecycleSection!.indexOf("await startInstalledPluginWithLifecycle({");
     const failureIndex = lifecycleSection!.indexOf(
-      'broadcastPluginLifecycleEvent("lvis:plugins:install-result", { slug: lifecycleSlug, success: false, error: message })',
+      'broadcastPluginLifecycleEvent("lvis:plugins:install-result", { slug: pluginId, success: false, error: message })',
     );
-    const successIndex = lifecycleSection!.indexOf(
-      'broadcastPluginLifecycleEvent("lvis:plugins:install-result", { slug: lifecycleSlug, success: true })',
-    );
+    const successIndex = lifecycleSection!.indexOf("success: true", lifecycleHelperIndex);
 
     expect(lockIndex).toBeGreaterThanOrEqual(0);
     expect(canonicalIdIndex).toBeGreaterThanOrEqual(0);
-    expect(pythonPrepIndex).toBeGreaterThanOrEqual(0);
-    expect(addIndex).toBeGreaterThanOrEqual(0);
-    expect(rollbackIndex).toBeGreaterThanOrEqual(0);
+    expect(progressAliasIndex).toBeGreaterThanOrEqual(0);
+    expect(progressCanonicalIndex).toBeGreaterThanOrEqual(0);
+    expect(canonicalProgressIndex).toBeGreaterThanOrEqual(0);
+    expect(catchResultIndex).toBeGreaterThanOrEqual(0);
+    expect(lifecycleSection).not.toContain('broadcastPluginLifecycleEvent("lvis:plugins:install-progress", { slug: params.slug');
+    expect(lifecycleSection).not.toContain('broadcastPluginLifecycleEvent("lvis:plugins:install-result", { slug: params.slug');
+    expect(lifecycleSection).not.toContain("preparePythonRuntimeForInstalledPlugin");
+    expect(lifecycleHelperIndex).toBeGreaterThanOrEqual(0);
+    expect(lifecycleSection).toContain('rollbackMode: "marketplace"');
+    expect(lifecycleSection).toContain("pluginRuntime: activeServices.pluginRuntime");
+    expect(lifecycleSection).toContain("pluginMarketplace: activeServices.pluginMarketplace");
+    expect(lifecycleSection).not.toContain("activeServices.pluginRuntime.addPlugin(pluginId)");
+    expect(lifecycleSection).not.toContain("activeServices.pluginMarketplace.uninstall(pluginId)");
     expect(failureIndex).toBeGreaterThanOrEqual(0);
     expect(successIndex).toBeGreaterThanOrEqual(0);
-    expect(pythonPrepIndex).toBeLessThan(addIndex);
-    expect(addIndex).toBeLessThan(successIndex);
-    expect(rollbackIndex).toBeLessThan(failureIndex);
+    expect(lifecycleHelperIndex).toBeLessThan(successIndex);
+    expect(lifecycleHelperIndex).toBeLessThan(failureIndex);
   });
 
   it("replaces plugin event bridge subscriptions when the main window is recreated", async () => {

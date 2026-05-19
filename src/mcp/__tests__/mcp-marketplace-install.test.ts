@@ -7,6 +7,7 @@
  * `PluginArtifactStore` tests; here we stub the store so we can verify
  * the install path's contract without spinning up a real fetcher.
  */
+import AdmZip from "adm-zip";
 import { describe, expect, it, vi } from "vitest";
 import { mkdtempSync, rmSync } from "node:fs";
 import { mkdir, writeFile } from "node:fs/promises";
@@ -16,6 +17,7 @@ import {
   buildMcpServerConfig,
   installMcpFromMarketplace,
   readRuntimeFromInstalledManifest,
+  readRuntimeFromVerifiedZip,
   substituteRuntimeTokens,
 } from "../mcp-marketplace-install.js";
 import { MAX_MCP_MANIFEST_BYTES } from "../safe-names.js";
@@ -342,14 +344,78 @@ describe("readRuntimeFromInstalledManifest", () => {
   });
 });
 
+describe("readRuntimeFromVerifiedZip", () => {
+  function zipWithPluginJson(content: Buffer | string): Buffer {
+    const zip = new AdmZip();
+    zip.addFile("plugin.json", Buffer.isBuffer(content) ? content : Buffer.from(content, "utf-8"));
+    return zip.toBuffer();
+  }
+
+  it("reads runtime from the verified zip before extraction", () => {
+    const zip = zipWithPluginJson(JSON.stringify({
+      id: "weather",
+      version: "1.0.0",
+      runtime: { transport: "stdio", command: "node", args: ["server.js"] },
+    }));
+    expect(readRuntimeFromVerifiedZip("weather", zip)).toEqual({
+      transport: "stdio",
+      command: "node",
+      args: ["server.js"],
+    });
+  });
+
+  it("throws when the verified zip has no root plugin.json", () => {
+    const zip = new AdmZip();
+    zip.addFile("nested/plugin.json", Buffer.from("{}"));
+    expect(() => readRuntimeFromVerifiedZip("weather", zip.toBuffer())).toThrow(
+      /manifest not found/,
+    );
+  });
+
+  it("enforces the manifest byte cap before extraction", () => {
+    const zip = zipWithPluginJson(Buffer.alloc(MAX_MCP_MANIFEST_BYTES + 1, "x"));
+    expect(() => readRuntimeFromVerifiedZip("weather", zip)).toThrow(/byte cap/);
+  });
+});
+
 describe("installMcpFromMarketplace", () => {
-  function makeStubStore(installDir: string): PluginArtifactStore {
+  function makeMcpZip(manifest: Record<string, unknown>): Buffer {
+    const zip = new AdmZip();
+    zip.addFile("plugin.json", Buffer.from(JSON.stringify(manifest), "utf-8"));
+    return zip.toBuffer();
+  }
+
+  function defaultManifest(): Record<string, unknown> {
+    return {
+      id: "weather",
+      version: "1.0.0",
+      runtime: {
+        transport: "stdio",
+        command: "$NODE",
+        args: ["$PLUGIN_DIR/dist/server.js"],
+        auth: "none",
+      },
+    };
+  }
+
+  function makeStubStore(
+    installDir: string,
+    manifest: Record<string, unknown> = defaultManifest(),
+  ): PluginArtifactStore {
     return {
       installDirFor: vi.fn(() => installDir),
-      downloadVerifiedZip: vi.fn(async () => Buffer.alloc(0)),
-      extractZip: vi.fn(async () => undefined),
+      downloadVerifiedZip: vi.fn(async () => makeMcpZip(manifest)),
+      extractZip: vi.fn(async () => []),
+      extractZipWithCommit: vi.fn(async (_slug, _zip, commit) => ({
+        files: [],
+        result: await commit(installDir, []),
+      })),
       appendHistory: vi.fn(async () => undefined),
     } as unknown as PluginArtifactStore;
+  }
+
+  function makeRegisterConfig() {
+    return vi.fn(async () => ({ connected: true }));
   }
 
   function makeStubFetcher(detail: PluginMarketplaceItem | null): MarketplaceFetcher {
@@ -374,7 +440,11 @@ describe("installMcpFromMarketplace", () => {
         version: "1.0.0",
         pluginType: "plugin",
       });
-      await expect(installMcpFromMarketplace("regular-plugin", { fetcher, store })).rejects.toThrow(
+      await expect(installMcpFromMarketplace("regular-plugin", {
+        fetcher,
+        store,
+        registerConfig: makeRegisterConfig(),
+      })).rejects.toThrow(
         /is a plugin entry/,
       );
     } finally {
@@ -387,7 +457,11 @@ describe("installMcpFromMarketplace", () => {
     try {
       const store = makeStubStore(tmp);
       const fetcher = makeStubFetcher(null);
-      await expect(installMcpFromMarketplace("does-not-exist", { fetcher, store })).rejects.toThrow(
+      await expect(installMcpFromMarketplace("does-not-exist", {
+        fetcher,
+        store,
+        registerConfig: makeRegisterConfig(),
+      })).rejects.toThrow(
         /no entry for slug/,
       );
     } finally {
@@ -399,11 +473,7 @@ describe("installMcpFromMarketplace", () => {
     const tmp = makeTmpDir();
     try {
       await mkdir(tmp, { recursive: true });
-      // Stub `extractZip` would normally write the manifest. Pre-write it
-      // so `readRuntimeFromInstalledManifest` finds something.
-      await writeFile(
-        join(tmp, "plugin.json"),
-        JSON.stringify({
+      const store = makeStubStore(tmp, {
           id: "weather",
           version: "1.0.0",
           runtime: {
@@ -412,10 +482,7 @@ describe("installMcpFromMarketplace", () => {
             args: ["$PLUGIN_DIR/dist/server.js"],
             auth: "api-key",
           },
-        }),
-      );
-
-      const store = makeStubStore(tmp);
+      });
       const fetcher = makeStubFetcher({
         id: "weather",
         name: "Weather MCP",
@@ -426,11 +493,13 @@ describe("installMcpFromMarketplace", () => {
         version: "1.0.0",
         pluginType: "mcp",
       });
+      const registerConfig = makeRegisterConfig();
       const result = await installMcpFromMarketplace("weather", {
         fetcher,
         store,
         nodePath: "/usr/bin/node",
         pythonPath: "/usr/bin/python3",
+        registerConfig,
       });
 
       // Token substitution is pure string replace — `$PLUGIN_DIR` becomes
@@ -448,10 +517,236 @@ describe("installMcpFromMarketplace", () => {
       expect(result.installDir).toBe(tmp);
       expect(result.needsCredential).toBe(true);
       expect(result.authMode).toBe("api-key");
+      expect(result.connected).toBe(true);
+      expect(registerConfig).toHaveBeenCalledWith(result.config);
       expect(store.appendHistory).toHaveBeenCalledWith(
         "weather",
         expect.objectContaining({ version: "1.0.0" }),
       );
+      expect(store.extractZipWithCommit).toHaveBeenCalledWith(
+        "weather",
+        expect.any(Buffer),
+        expect.any(Function),
+      );
+    } finally {
+      rmSync(tmp, { recursive: true, force: true });
+    }
+  });
+
+  it("rejects $PYTHON runtime tokens unless the caller provides an explicit interpreter", async () => {
+    const tmp = makeTmpDir();
+    try {
+      await mkdir(tmp, { recursive: true });
+      const store = makeStubStore(tmp, {
+          id: "python-mcp",
+          version: "1.0.0",
+          runtime: {
+            transport: "stdio",
+            command: "$PYTHON",
+            args: ["server.py"],
+            auth: "none",
+          },
+      });
+      const fetcher = makeStubFetcher({
+        id: "python-mcp",
+        name: "Python MCP",
+        description: "",
+        packageSpec: "python-mcp@1.0.0",
+        packageName: "python-mcp",
+        tools: [],
+        version: "1.0.0",
+        pluginType: "mcp",
+      });
+
+      const registerConfig = makeRegisterConfig();
+      await expect(installMcpFromMarketplace("python-mcp", {
+        fetcher,
+        store,
+        registerConfig,
+      })).rejects.toThrow(
+        /does not provide an app-global Python runtime/,
+      );
+      expect(store.extractZipWithCommit).not.toHaveBeenCalled();
+      expect(registerConfig).not.toHaveBeenCalled();
+    } finally {
+      rmSync(tmp, { recursive: true, force: true });
+    }
+  });
+
+  it("rejects unsafe slugs before marketplace lookup", async () => {
+    const tmp = makeTmpDir();
+    try {
+      const store = makeStubStore(tmp);
+      const fetcher = makeStubFetcher({
+        id: "weather",
+        name: "Weather MCP",
+        description: "",
+        packageSpec: "weather-mcp@1.0.0",
+        packageName: "weather-mcp",
+        tools: [],
+        version: "1.0.0",
+        pluginType: "mcp",
+      });
+      await expect(installMcpFromMarketplace("../weather", {
+        fetcher,
+        store,
+        registerConfig: makeRegisterConfig(),
+      })).rejects.toThrow(
+        /invalid artifact slug/,
+      );
+      expect(fetcher.getPluginDetail).not.toHaveBeenCalled();
+    } finally {
+      rmSync(tmp, { recursive: true, force: true });
+    }
+  });
+
+  it("rejects unpinned marketplace uvx runtimes before extraction", async () => {
+    const tmp = makeTmpDir();
+    try {
+      const store = makeStubStore(tmp, {
+        id: "browser-use",
+        version: "0.12.6",
+        runtime: {
+          transport: "stdio",
+          command: "uvx",
+          args: ["--from", "browser-use[cli]", "browser-use", "--mcp"],
+          auth: "api-key",
+          apiKeyEnv: "OPENAI_API_KEY",
+        },
+      });
+      const fetcher = makeStubFetcher({
+        id: "browser-use",
+        name: "Browser Use MCP",
+        description: "",
+        packageSpec: "browser-use[cli]==0.12.6",
+        packageName: "browser-use",
+        tools: [],
+        version: "0.12.6",
+        pluginType: "mcp",
+      });
+
+      const registerConfig = makeRegisterConfig();
+      await expect(installMcpFromMarketplace("browser-use", {
+        fetcher,
+        store,
+        registerConfig,
+      })).rejects.toThrow(
+        /must pin the executed package/,
+      );
+      expect(store.extractZipWithCommit).not.toHaveBeenCalled();
+      expect(registerConfig).not.toHaveBeenCalled();
+    } finally {
+      rmSync(tmp, { recursive: true, force: true });
+    }
+  });
+
+  it("rejects malformed uvx exact pins before extraction", async () => {
+    for (const packageSpec of ["==0.12.6", "browser-use>=0.1==0.2"]) {
+      const tmp = makeTmpDir();
+      try {
+        const store = makeStubStore(tmp, {
+          id: "browser-use",
+          version: "0.12.6",
+          runtime: {
+            transport: "stdio",
+            command: "uvx",
+            args: ["--from", packageSpec, "browser-use", "--mcp"],
+            auth: "api-key",
+            apiKeyEnv: "OPENAI_API_KEY",
+          },
+        });
+        const fetcher = makeStubFetcher({
+          id: "browser-use",
+          name: "Browser Use MCP",
+          description: "",
+          packageSpec,
+          packageName: "browser-use",
+          tools: [],
+          version: "0.12.6",
+          pluginType: "mcp",
+        });
+        await expect(installMcpFromMarketplace("browser-use", {
+          fetcher,
+          store,
+          registerConfig: makeRegisterConfig(),
+        })).rejects.toThrow(/must pin the executed package/);
+        expect(store.extractZipWithCommit).not.toHaveBeenCalled();
+      } finally {
+        rmSync(tmp, { recursive: true, force: true });
+      }
+    }
+  });
+
+  it("accepts exact-pinned marketplace uvx runtimes", async () => {
+    const tmp = makeTmpDir();
+    try {
+      const store = makeStubStore(tmp, {
+        id: "browser-use",
+        version: "0.12.6",
+        runtime: {
+          transport: "stdio",
+          command: "uvx",
+          args: ["--from", "browser-use[cli]==0.12.6", "browser-use", "--mcp"],
+          auth: "api-key",
+          apiKeyEnv: "OPENAI_API_KEY",
+        },
+      });
+      const fetcher = makeStubFetcher({
+        id: "browser-use",
+        name: "Browser Use MCP",
+        description: "",
+        packageSpec: "browser-use[cli]==0.12.6",
+        packageName: "browser-use",
+        tools: [],
+        version: "0.12.6",
+        pluginType: "mcp",
+      });
+
+      await expect(installMcpFromMarketplace("browser-use", {
+        fetcher,
+        store,
+        registerConfig: makeRegisterConfig(),
+      })).resolves.toMatchObject({
+        config: {
+          id: "browser-use",
+          command: "uvx",
+          args: ["--from", "browser-use[cli]==0.12.6", "browser-use", "--mcp"],
+        },
+      });
+      expect(store.extractZipWithCommit).toHaveBeenCalledWith(
+        "browser-use",
+        expect.any(Buffer),
+        expect.any(Function),
+      );
+    } finally {
+      rmSync(tmp, { recursive: true, force: true });
+    }
+  });
+
+  it("does not record history when config registration fails after extraction promotion", async () => {
+    const tmp = makeTmpDir();
+    try {
+      const store = makeStubStore(tmp);
+      const registerConfig = vi.fn(async () => {
+        throw new Error("duplicate MCP id");
+      });
+      const fetcher = makeStubFetcher({
+        id: "weather",
+        name: "Weather MCP",
+        description: "",
+        packageSpec: "weather-mcp@1.0.0",
+        packageName: "weather-mcp",
+        tools: [],
+        version: "1.0.0",
+        pluginType: "mcp",
+      });
+
+      await expect(installMcpFromMarketplace("weather", {
+        fetcher,
+        store,
+        registerConfig,
+      })).rejects.toThrow(/duplicate MCP id/);
+      expect(store.appendHistory).not.toHaveBeenCalled();
     } finally {
       rmSync(tmp, { recursive: true, force: true });
     }
@@ -461,9 +756,7 @@ describe("installMcpFromMarketplace", () => {
     const tmp = makeTmpDir();
     try {
       await mkdir(tmp, { recursive: true });
-      await writeFile(
-        join(tmp, "plugin.json"),
-        JSON.stringify({
+      const store = makeStubStore(tmp, {
           id: "remote-docs",
           version: "1.0.0",
           runtime: {
@@ -478,10 +771,7 @@ describe("installMcpFromMarketplace", () => {
               clientRegistration: "client-id-metadata-document",
             },
           },
-        }),
-      );
-
-      const store = makeStubStore(tmp);
+      });
       const fetcher = makeStubFetcher({
         id: "remote-docs",
         name: "Remote Docs MCP",
@@ -492,7 +782,11 @@ describe("installMcpFromMarketplace", () => {
         version: "1.0.0",
         pluginType: "mcp",
       });
-      const result = await installMcpFromMarketplace("remote-docs", { fetcher, store });
+      const result = await installMcpFromMarketplace("remote-docs", {
+        fetcher,
+        store,
+        registerConfig: makeRegisterConfig(),
+      });
 
       expect(result.config).toEqual({
         id: "remote-docs",

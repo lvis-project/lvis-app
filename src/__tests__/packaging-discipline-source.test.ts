@@ -68,7 +68,18 @@ describe("installer smoke and packaging discipline", () => {
     const buildInstallers = readRepoFile("scripts/build-installers.mjs");
     const afterPack = readRepoFile("scripts/electron-after-pack.cjs");
     const packageFootprint = readRepoFile("scripts/check-package-footprint.mjs");
+    const runtimeAssets = readRepoFile("scripts/packaged-runtime-assets.mjs");
 
+    expect(runtimeAssets).toContain("HOST_PACKAGED_RUNTIME_ASSETS");
+    expect(runtimeAssets).toContain("PLUGIN_MANAGED_RUNTIME_ASSETS");
+    expect(runtimeAssets).toContain("resources/uv-runtime");
+    expect(runtimeAssets).toContain("resources/licenses/uv");
+    expect(runtimeAssets).toContain("better-sqlite3-native-binding");
+    expect(runtimeAssets).toContain("python-wheelhouse");
+    expect(buildInstallers).toContain("hostRuntimeAssetSummary(target)");
+    expect(buildInstallers).toContain("required runtime assets");
+    expect(buildInstallers).toContain("checkPackageFootprint(target, fast)");
+    expect(buildInstallers).toContain("expected exactly one packaged app.asar");
     expect(buildInstallers).toContain("assertUvRuntimePayload(target)");
     expect(buildInstallers).toContain("staged uv runtime must contain only");
     expect(buildInstallers).toContain("compressed uv archive missing from staged runtime");

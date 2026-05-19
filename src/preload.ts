@@ -884,7 +884,7 @@ const api = {
   // start and `restarting` after the install completes. The result event clears
   // the in-flight state. Renderer renders a skeleton card.
   onPluginInstallProgress: (handler: (payload:
-    | { slug: string; phase: "installing" | "restarting" | "verifying" | "registering" }
+    | { slug: string; phase: "installing" | "restarting" | "verifying" | "registering" | "preparing" }
     | { slug: string; phase: "downloading"; bytesDownloaded: number; bytesTotal: number | null }
   ) => void) => {
     const listener = (_event: unknown, payload: Parameters<typeof handler>[0]) => handler(payload);
