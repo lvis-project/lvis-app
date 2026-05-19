@@ -243,6 +243,16 @@ describe("Composer", () => {
     expect(ghost.textContent).toContain("Tab to fill");
   });
 
+  it("suppresses the fallback placeholder while ghost text is visible", () => {
+    render(
+      <Harness
+        suggestedReplies={{ best: "네", alternates: [], isDismissed: false }}
+      />,
+    );
+    const textarea = screen.getByTestId("composer-textarea") as HTMLTextAreaElement;
+    expect(textarea.getAttribute("placeholder")).toBe("");
+  });
+
   it("hides ghost text once user types 1+ chars", () => {
     render(
       <Harness
@@ -282,6 +292,15 @@ describe("Composer", () => {
     const chips = screen.getAllByTestId("suggested-replies-chip");
     expect(chips).toHaveLength(2);
     expect(chips.map((c) => c.textContent)).toEqual(["아니오", "나중에"]);
+  });
+
+  it("adds top inset to the chip row inside the composer surface", () => {
+    render(
+      <Harness
+        suggestedReplies={{ best: "네", alternates: ["아니오"], isDismissed: false }}
+      />,
+    );
+    expect(screen.getByTestId("suggested-replies-chip-row")).toHaveClass("mt-3");
   });
 
   it("hides chip row when alternates empty", () => {
