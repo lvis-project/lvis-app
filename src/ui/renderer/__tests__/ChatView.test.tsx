@@ -8,6 +8,10 @@ import "../../../../test/renderer/setup.js";
 import { describe, it, expect, vi, afterEach } from "vitest";
 import { act, fireEvent, waitFor } from "@testing-library/react";
 import { renderApp } from "../../../../test/renderer/render-app.js";
+import {
+  __resetSuggestedRepliesStoreForTests,
+  __teardownSuggestedRepliesIpcForTests,
+} from "../hooks/use-suggested-replies.js";
 
 function deferred<T>() {
   let resolve!: (value: T) => void;
@@ -43,6 +47,27 @@ describe("ChatView", () => {
     const { container } = await renderApp({ hasApiKey: true });
     await waitFor(() => {
       expect(container.textContent).toContain("LVIS 에이전트가 준비되었습니다");
+    });
+  });
+
+  it("hides the empty-state hint while suggested replies are visible", async () => {
+    const { container, emitChatStream } = await renderApp({ hasApiKey: true });
+    await waitFor(() => {
+      expect(container.textContent).toContain("LVIS 에이전트가 준비되었습니다");
+    });
+
+    await act(async () => {
+      emitChatStream({
+        type: "suggested_replies",
+        replies: ["다음 작업 진행", "나중에 할게요"],
+      });
+    });
+
+    await waitFor(() => {
+      expect(container.querySelector('[data-testid="suggested-replies-ghost"]')).not.toBeNull();
+      expect(container.textContent).not.toContain("LVIS 에이전트가 준비되었습니다");
+      const textarea = container.querySelector('[data-testid="composer-textarea"]') as HTMLTextAreaElement | null;
+      expect(textarea?.getAttribute("placeholder")).toBe("");
     });
   });
 
@@ -1287,6 +1312,8 @@ describe("ChatView — userApprovalHit disclosure toast (#793 + cluster MAJOR-2/
 });
 
 afterEach(() => {
+  __resetSuggestedRepliesStoreForTests();
+  __teardownSuggestedRepliesIpcForTests();
   vi.restoreAllMocks();
   vi.unstubAllGlobals();
 });
