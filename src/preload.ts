@@ -26,7 +26,7 @@ import type {
   AssistantContextMenuAction,
   AssistantContextMenuPayload,
 } from "./shared/assistant-context-menu.js";
-import type { AiProviderPingResult } from "./shared/ai-provider-ping.js";
+import type { AiProviderPingIpcResult } from "./shared/ai-provider-ping.js";
 
 // ─── Deterministic plugin webview asset URLs ────────────────────────────────
 // `__dirname` here resolves to the host preload's bundled location
@@ -981,7 +981,7 @@ const api = {
   // tiny one-shot model call from the main process so "connected" means the
   // provider itself answered, not only that the marketplace backend is online.
   pingAiProvider: async () =>
-    ipcRenderer.invoke("lvis:llm:ping") as Promise<AiProviderPingResult>,
+    ipcRenderer.invoke("lvis:llm:ping") as Promise<AiProviderPingIpcResult>,
 
   // Settings "일반" dashboard — host metadata. SoT for `version` is the
   // LVIS project package.json (resolved by the main process via

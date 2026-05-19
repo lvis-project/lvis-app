@@ -260,7 +260,7 @@ describe("LoginModal — chip-driven demo flow (activation → auth)", () => {
         const notice = document.querySelector(
           '[data-testid="login-modal:activation-notice"]',
         );
-        expect(notice?.textContent).toContain("호스트 적용을 위해 자동으로 재시작됩니다");
+        expect(notice?.textContent).toContain("활성화 적용을 위해 5초 후 자동으로 다시 시작합니다");
       });
       expect(
         (api as unknown as { loginMockup: ReturnType<typeof vi.fn> }).loginMockup,
