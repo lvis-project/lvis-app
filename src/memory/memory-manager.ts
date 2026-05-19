@@ -21,10 +21,13 @@ import { lvisHome } from "../shared/lvis-home.js";
 import {
   buildToolResultStrippedStub,
   buildToolResultTruncatedStub,
+  type ToolResultArtifactUnavailableInfo,
   isToolResultStubContent,
   type ToolResultTruncatedInfo,
 } from "../shared/tool-result-stub.js";
 const log = createLogger("memory");
+
+export const MAX_TOOL_RESULT_ARTIFACT_BYTES = 5_000_000;
 
 function escapeRegExp(value: string): string {
   return value.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
@@ -281,6 +284,15 @@ function normalizeTruncatedInfo(value: unknown): ToolResultTruncatedInfo | null 
     originalBytes,
     trimmedAt: typeof trimmedAt === "string" ? trimmedAt : new Date(0).toISOString(),
   };
+}
+
+function normalizeArtifactUnavailable(value: unknown): ToolResultArtifactUnavailableInfo | null {
+  if (!isRecord(value)) return null;
+  if (value.reason !== "artifact-too-large") return null;
+  if (typeof value.maxBytes !== "number" || !Number.isFinite(value.maxBytes) || value.maxBytes <= 0) {
+    return null;
+  }
+  return { reason: "artifact-too-large", maxBytes: value.maxBytes };
 }
 
 function sha256Text(content: string): string {
@@ -756,15 +768,16 @@ export class MemoryManager {
 
   rehydrateToolResultArtifacts(sessionId: string, messages: unknown[]): unknown[] {
     if (!isValidSessionId(sessionId)) return messages;
-    let changed = false;
-    const hydrated = messages.map((message) => {
-      if (!isToolResultRecord(message) || !isToolResultStubContent(message.content)) {
-        return message;
-      }
-      const artifact = this.loadToolResultArtifact(sessionId, message.toolUseId);
-      if (!artifact) return message;
-      const meta = isRecord(message.meta) ? message.meta : {};
-      const { serializedStub: _serializedStub, ...restMeta } = meta;
+	    let changed = false;
+	    const hydrated = messages.map((message) => {
+	      if (!isToolResultRecord(message) || !isToolResultStubContent(message.content)) {
+	        return message;
+	      }
+	      const meta = isRecord(message.meta) ? message.meta : {};
+	      if (normalizeArtifactUnavailable(meta.artifactUnavailable)) return message;
+	      const artifact = this.loadToolResultArtifact(sessionId, message.toolUseId);
+	      if (!artifact) return message;
+	      const { serializedStub: _serializedStub, ...restMeta } = meta;
       changed = true;
       return {
         ...message,
@@ -1120,7 +1133,20 @@ export class MemoryManager {
     sessionId: string,
     message: { toolUseId: string; toolName?: unknown; content: string },
     truncated: ToolResultTruncatedInfo,
-  ): void {
+  ): boolean {
+    const byteLength = Buffer.byteLength(message.content, "utf8");
+    if (byteLength > MAX_TOOL_RESULT_ARTIFACT_BYTES) {
+      log.warn(
+        {
+          sessionId,
+          toolUseId: message.toolUseId,
+          byteLength,
+          maxBytes: MAX_TOOL_RESULT_ARTIFACT_BYTES,
+        },
+        "tool_result artifact skipped because it exceeds the host storage cap",
+      );
+      return false;
+    }
     const paths = this.toolResultArtifactPaths(sessionId, message.toolUseId);
     mkdirSync(this.toolResultArtifactsDir(sessionId), { recursive: true, mode: 0o700 });
     const sha256 = sha256Text(message.content);
@@ -1136,6 +1162,7 @@ export class MemoryManager {
       }, null, 2),
       { encoding: "utf-8", mode: 0o600 },
     );
+    return true;
   }
 
   private prepareSessionMessagesForDisk(sessionId: string, messages: unknown[]): {
@@ -1149,14 +1176,24 @@ export class MemoryManager {
       const meta = isRecord(message.meta) ? message.meta : {};
       let truncated = normalizeTruncatedInfo(meta.truncated);
       const compactedAt = typeof meta.compactedAt === "string" ? meta.compactedAt : undefined;
+      let artifactUnavailable = normalizeArtifactUnavailable(meta.artifactUnavailable);
       const hasStubPrefix = isToolResultStubContent(message.content);
       const isSerializedStub = hasStubPrefix && (meta.serializedStub === true || !truncated);
 
       if (truncated) {
         const paths = this.toolResultArtifactPaths(sessionId, message.toolUseId);
-        keepArtifactKeys.add(paths.key);
         if (!isSerializedStub) {
-          this.writeToolResultArtifact(sessionId, message, truncated);
+          if (this.writeToolResultArtifact(sessionId, message, truncated)) {
+            keepArtifactKeys.add(paths.key);
+            artifactUnavailable = null;
+          } else {
+            artifactUnavailable = {
+              reason: "artifact-too-large",
+              maxBytes: MAX_TOOL_RESULT_ARTIFACT_BYTES,
+            };
+          }
+        } else if (!artifactUnavailable) {
+          keepArtifactKeys.add(paths.key);
         }
       } else if (isSerializedStub) {
         const paths = this.toolResultArtifactPaths(sessionId, message.toolUseId);
@@ -1171,6 +1208,7 @@ export class MemoryManager {
               meta: {
                 ...meta,
                 truncated: artifact.truncated,
+                ...(artifactUnavailable ? { artifactUnavailable } : {}),
                 serializedStub: true,
               },
             };
@@ -1190,6 +1228,7 @@ export class MemoryManager {
               message.toolUseId,
               typeof message.toolName === "string" ? message.toolName : undefined,
               truncated!,
+              artifactUnavailable ? { artifactUnavailable } : undefined,
             );
       return {
         ...message,
@@ -1197,6 +1236,7 @@ export class MemoryManager {
         meta: {
           ...meta,
           ...(truncated ? { truncated } : {}),
+          ...(artifactUnavailable ? { artifactUnavailable } : {}),
           serializedStub: true,
         },
       };
@@ -1236,11 +1276,12 @@ export class MemoryManager {
           } catch {
             continue;
           }
-          if (!isToolResultRecord(parsed)) continue;
-          const meta = isRecord(parsed.meta) ? parsed.meta : {};
-          if (isToolResultStubContent(parsed.content) || normalizeTruncatedInfo(meta.truncated)) {
-            keys.add(toolUseArtifactKey(parsed.toolUseId));
-          }
+	          if (!isToolResultRecord(parsed)) continue;
+	          const meta = isRecord(parsed.meta) ? parsed.meta : {};
+	          if (normalizeArtifactUnavailable(meta.artifactUnavailable)) continue;
+	          if (isToolResultStubContent(parsed.content) || normalizeTruncatedInfo(meta.truncated)) {
+	            keys.add(toolUseArtifactKey(parsed.toolUseId));
+	          }
         }
       } catch (err) {
         log.warn(`loadCheckpointToolResultArtifactKeys: failed to scan ${entry}: ${(err as Error).message}`);

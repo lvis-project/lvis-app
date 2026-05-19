@@ -4,7 +4,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 
-import { MemoryManager } from "../memory-manager.js";
+import { MAX_TOOL_RESULT_ARTIFACT_BYTES, MemoryManager } from "../memory-manager.js";
 
 const SESSION_ID = "artifact-session-0001";
 const TRUNCATED = {
@@ -30,7 +30,7 @@ function artifactMessage(content: string) {
   return {
     role: "tool_result" as const,
     toolUseId: "toolu_artifact_1",
-    toolName: "lge_lgenie_query",
+    toolName: "long_output_query",
     content,
     meta: {
       truncated: TRUNCATED,
@@ -60,7 +60,7 @@ describe("MemoryManager file-backed tool_result artifacts", () => {
     const artifact = mm.loadToolResultArtifact(SESSION_ID, "toolu_artifact_1");
     expect(artifact).toMatchObject({
       toolUseId: "toolu_artifact_1",
-      toolName: "lge_lgenie_query",
+      toolName: "long_output_query",
       content: raw,
       truncated: TRUNCATED,
       sha256: createHash("sha256").update(raw, "utf8").digest("hex"),
@@ -120,6 +120,47 @@ describe("MemoryManager file-backed tool_result artifacts", () => {
     expect(mm.loadToolResultArtifact(SESSION_ID, "toolu_artifact_1")?.content).toBe(raw);
   });
 
+  it("skips file-backed artifact persistence when content exceeds the artifact cap", async () => {
+    await mm.saveSession(SESSION_ID, [artifactMessage("stale artifact\n".repeat(150))]);
+    expect(mm.loadToolResultArtifact(SESSION_ID, "toolu_artifact_1")).not.toBeNull();
+
+    const raw = "x".repeat(MAX_TOOL_RESULT_ARTIFACT_BYTES + 1);
+
+    await mm.saveSession(SESSION_ID, [artifactMessage(raw)]);
+
+    const saved = mm.loadSession(SESSION_ID)?.[0] as { content: string; meta?: Record<string, unknown> };
+    expect(saved.content).toContain("artifact storage cap");
+    expect(saved.content).not.toContain("read_tool_result_chunk");
+    expect(saved.meta?.artifactUnavailable).toMatchObject({
+      reason: "artifact-too-large",
+      maxBytes: MAX_TOOL_RESULT_ARTIFACT_BYTES,
+    });
+    expect(mm.loadToolResultArtifact(SESSION_ID, "toolu_artifact_1")).toBeNull();
+  });
+
+  it("does not rehydrate unavailable stubs even if a stale artifact is present", async () => {
+    const raw = "stale artifact\n".repeat(150);
+    await mm.saveSession(SESSION_ID, [artifactMessage(raw)]);
+    const unavailableStub = {
+      role: "tool_result" as const,
+      toolUseId: "toolu_artifact_1",
+      toolName: "long_output_query",
+      content: "[tool_result truncated by host (Issue #902): tool=long_output_query, toolUseId=\"toolu_artifact_1\", originalBytes=5000001. The verbatim artifact was not retained because it exceeded the host artifact storage cap (5000000 bytes).]",
+      meta: {
+        truncated: TRUNCATED,
+        serializedStub: true,
+        artifactUnavailable: {
+          reason: "artifact-too-large",
+          maxBytes: MAX_TOOL_RESULT_ARTIFACT_BYTES,
+        },
+      },
+    };
+
+    const hydrated = mm.rehydrateToolResultArtifacts(SESSION_ID, [unavailableStub]);
+
+    expect(hydrated[0]).toBe(unavailableStub);
+  });
+
   it("preserves exact opaque toolUseIds in the recovery instruction", async () => {
     const opaqueId = "toolu weird/opaque?id=1";
     const raw = "opaque result\n".repeat(160);
@@ -163,7 +204,7 @@ describe("MemoryManager file-backed tool_result artifacts", () => {
   it("keeps checkpoint artifact content after the main session is compacted away", async () => {
     const raw = "checkpoint result\n".repeat(180);
     await mm.saveCheckpointSnapshot(SESSION_ID, 1, [
-      { role: "assistant", content: "calling", toolCalls: [{ id: "toolu_artifact_1", name: "lge_lgenie_query", input: {} }] },
+      { role: "assistant", content: "calling", toolCalls: [{ id: "toolu_artifact_1", name: "long_output_query", input: {} }] },
       artifactMessage(raw),
     ]);
     await mm.saveSession(SESSION_ID, [{ role: "assistant", content: "compact summary only" }]);
