@@ -106,6 +106,12 @@ export interface TourScenario {
 const FIRST_BOOT_ESSENTIALS: TourScenario = {
   id: "first-boot-essentials",
   title: "LVIS 첫 사용 안내",
+  // 2026-05-20: the ⌘+? 도움말 step (formerly step 4) is moved to the
+  // very end of the array so the user only sees "이 가이드를 다시 여는 법"
+  // *after* they've already finished the rest of the tour — re-entry
+  // discovery belongs at the natural conclusion of the first walkthrough,
+  // not as an interruption in the middle. Relative order of the other
+  // steps is preserved.
   steps: [
     {
       anchorSelector: '[data-tour-anchor="composer-input"]',
@@ -131,35 +137,35 @@ const FIRST_BOOT_ESSENTIALS: TourScenario = {
       completionTrigger: { kind: "keypress", combo: "⌘+K" },
     },
     {
-      anchorSelector: '[data-tour-anchor="help-shortcut-hint"]',
-      title: "4단계 · ⌘+? 도움말 단축키",
-      body: "이 가이드는 언제든 ⌘+? 로 다시 열 수 있어요. 상단 우측의 ⌘+? 칩이 항상 같은 자리에 있어 길을 잃지 않습니다.",
-      keyHint: ["⌘+?"],
-      completionTrigger: { kind: "manual" },
-    },
-    {
       anchorSelector: '[data-tour-anchor="chat-history"]',
-      title: "5단계 · 최근 대화와 즐겨찾기",
+      title: "4단계 · 최근 대화와 즐겨찾기",
       body: "검색 아이콘을 누르면 최근 대화 / 즐겨찾기 / 본문 검색이 한 번에 열립니다. 단축키 ⌘+F 로도 같은 패널이 뜹니다.",
       keyHint: ["⌘+F"],
       completionTrigger: { kind: "manual" },
     },
     {
       anchorSelector: '[data-tour-anchor="settings-entry"]',
-      title: "6단계 · 설정 · 루틴 · 메모리",
+      title: "5단계 · 설정 · 루틴 · 메모리",
       body: "이 햄버거 메뉴 안에 설정, 루틴, 메모리, 내보내기가 모여 있어요. 모델 변경이나 권한 조정도 여기서 시작합니다.",
       completionTrigger: { kind: "manual" },
     },
     {
       anchorSelector: '[data-tour-anchor="status-bar-vendor"]',
-      title: "7단계 · 활성 LLM 벤더 · 모델",
+      title: "6단계 · 활성 LLM 벤더 · 모델",
       body: "하단 상태바는 지금 사용 중인 벤더와 모델을 항상 표시합니다. 클릭하면 곧바로 설정 → LLM 으로 이동해요.",
       completionTrigger: { kind: "manual" },
     },
     {
       anchorSelector: '[data-tour-anchor="plugin-entry"]',
-      title: "8단계 · 플러그인 — 회의·문서·업무 도우미",
+      title: "7단계 · 플러그인 — 회의·문서·업무 도우미",
       body: "여기서 플러그인을 설치하고 사용할 수 있어요. 회의 녹음·요약, 로컬 문서 검색, 받은편지함 → 할 일 자동화 등 LVIS 기능을 그리드 안에서 확장합니다. 끝에 있는 '마켓' 셀로 새 플러그인을 추가할 수 있어요.",
+      completionTrigger: { kind: "manual" },
+    },
+    {
+      anchorSelector: '[data-tour-anchor="help-shortcut-hint"]',
+      title: "8단계 · ⌘+? 도움말 단축키",
+      body: "이 가이드는 언제든 ⌘+? 로 다시 열 수 있어요. 상단 우측의 ⌘+? 칩이 항상 같은 자리에 있어 길을 잃지 않습니다.",
+      keyHint: ["⌘+?"],
       completionTrigger: { kind: "manual" },
     },
   ],
