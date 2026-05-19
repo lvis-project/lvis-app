@@ -108,8 +108,8 @@ const PLUGIN_DESCRIPTIONS: readonly PluginDescription[] = [
   {
     id: "lge-api",
     emoji: "🏢",
-    label: "LGE 내부 API",
-    body: "LGE 내부 시스템과 연동해 사내 데이터·도구를 LVIS 에서 함께 사용합니다.",
+    label: "사내 API 연동",
+    body: "사내 내부 시스템과 연동해 조직 데이터·도구를 LVIS 에서 함께 사용합니다.",
     tourScenarioId: "first-boot-essentials",
   },
 ];

@@ -29,7 +29,7 @@ export type LLMVendor = (typeof LLM_VENDORS)[number];
  * silently.
  *
  * 2026-05-19 — flipped from `"claude"` to `"azure-foundry"` so the
- * default install lands on the LGE internal demo target. The Z onboarding
+ * default install lands on the internal organization demo target. The Z onboarding
  * chain ScenarioShowcase + LoginModal still let the user pick any vendor
  * during first-boot; this is purely the seed for `settings.json` writes
  * + every boundary-narrowing fallback. Production builds shipping with
