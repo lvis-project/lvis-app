@@ -207,19 +207,59 @@ export function TutorialDialog({
     return () => window.removeEventListener("keydown", onKey);
   }, [open, finished, recordAction, undoAction]);
 
-  // When the deck empties, dispatch the chosen scenario exactly once.
-  React.useEffect(() => {
-    if (!open || !finished || submitted) return;
+  // U2 — Dispatch the chosen scenario ONLY when the user explicitly
+  // clicks "가이드 시작" on the FinishedSummary screen. Auto-firing the
+  // tour while the Dialog was still mounted caused the SpotlightTour to
+  // paint backdrop+ring behind the Radix Dialog portal — the user saw
+  // a purple ring floating in empty space (the composer was hidden
+  // behind the modal).
+  //
+  // We pre-compute `chosenScenarioId` so the test (and the click
+  // handler) read a deterministic value from history.
+  const chosenScenarioId = React.useMemo(() => {
     const likedIds = new Set(
       history.filter((h) => h.action === "liked").map((h) => h.cardIndex),
     );
     const preferred = cards.find((_, idx) => likedIds.has(idx));
-    const scenarioId = preferred ? resolveScenarioId(preferred) : FALLBACK_SCENARIO_ID;
-    setSubmitted(true);
-    void api.tour.start(scenarioId).catch(() => {
-      /* renderer keeps the summary visible even if the dispatch fails */
+    return preferred ? resolveScenarioId(preferred) : FALLBACK_SCENARIO_ID;
+  }, [cards, history]);
+
+  // Sequential close-then-start: close the Dialog first, then dispatch
+  // tour.start after a short delay so Radix has time to unmount the
+  // portal. Without this, SpotlightTour mounts while DialogContent is
+  // still in the DOM and `getBoundingClientRect` of the anchor returns
+  // a rect occluded by the modal.
+  const handleStartTour = React.useCallback(
+    (scenarioId: string) => {
+      if (submitted) return;
+      setSubmitted(true);
+      onOpenChange(false);
+      // 80ms is enough for Radix's exit animation + portal unmount in
+      // both reduced-motion and full-motion modes. Verified manually
+      // against the 200ms Radix default animation duration.
+      window.setTimeout(() => {
+        void api.tour.start(scenarioId).catch(() => {
+          /* renderer keeps the chat surface visible even if the
+             dispatch fails — there's no useful recovery action. */
+        });
+      }, 80);
+    },
+    [api, onOpenChange, submitted],
+  );
+
+  // U7 — "실행하기" CTA on each active deck card: lets the user run a
+  // scenario directly without finishing the swipe deck. Persists the
+  // implicit "liked" preference for the chosen card and then drives the
+  // same close-then-start transition as the FinishedSummary CTA.
+  const handleRunCurrent = React.useCallback(() => {
+    if (finished || submitted) return;
+    const card = cards[cursor];
+    if (!card) return;
+    void api.tutorialRecord({ cardId: card.id, action: "liked" }).catch(() => {
+      /* see recordAction comment */
     });
-  }, [open, finished, submitted, history, cards, api]);
+    handleStartTour(resolveScenarioId(card));
+  }, [api, cards, cursor, finished, submitted, handleStartTour]);
 
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
@@ -244,11 +284,13 @@ export function TutorialDialog({
             onDislike={() => recordAction("disliked")}
             onUndo={undoAction}
             canUndo={history.length > 0}
+            onRun={handleRunCurrent}
           />
         ) : (
           <FinishedSummary
             cards={cards}
             history={history}
+            onStart={() => handleStartTour(chosenScenarioId)}
             onClose={() => onOpenChange(false)}
           />
         )}
@@ -265,6 +307,8 @@ interface ActiveDeckProps {
   onDislike: () => void;
   onUndo: () => void;
   canUndo: boolean;
+  /** U7 — "실행하기" CTA on the visible top card. */
+  onRun: () => void;
 }
 
 function ActiveDeck({
@@ -275,9 +319,139 @@ function ActiveDeck({
   onDislike,
   onUndo,
   canUndo,
+  onRun,
 }: ActiveDeckProps) {
   const total = cards.length;
   const reduceMotion = usePrefersReducedMotion();
+
+  // U9 — Swipe animation state. `exitDirection` drives the swipe-out
+  // transform on the top card when the user commits to a like / dislike;
+  // we delay the actual cursor advance (via `onLike` / `onDislike`) until
+  // the exit animation completes so the visual feedback is preserved.
+  // `dragOffset` tracks live drag-by-pointer translation so the card
+  // follows the cursor and reveals a ✓ / ✕ stamp.
+  type ExitDirection = "left" | "right" | null;
+  const [exitDirection, setExitDirection] = React.useState<ExitDirection>(null);
+  const [dragOffset, setDragOffset] = React.useState({ x: 0, y: 0 });
+  const dragStartRef = React.useRef<{ x: number; y: number } | null>(null);
+  const cardRef = React.useRef<HTMLDivElement | null>(null);
+  // Reset transient swipe state when the card id changes — fresh deck
+  // entry should never inherit the prior card's drag offset.
+  React.useEffect(() => {
+    setExitDirection(null);
+    setDragOffset({ x: 0, y: 0 });
+    dragStartRef.current = null;
+  }, [card.id]);
+
+  const SWIPE_THRESHOLD = 100;
+  // Under reduced motion the swipe-out animation collapses to a fast
+  // opacity fade — vestibular users still see *something* happen, but
+  // without the translate/rotate that they would experience as motion.
+  const EXIT_DURATION_MS = reduceMotion ? 150 : 300;
+
+  const commit = React.useCallback(
+    (direction: "left" | "right") => {
+      if (exitDirection) return;
+      setExitDirection(direction);
+      window.setTimeout(() => {
+        if (direction === "right") {
+          onLike();
+        } else {
+          onDislike();
+        }
+      }, EXIT_DURATION_MS);
+    },
+    [exitDirection, onLike, onDislike, EXIT_DURATION_MS],
+  );
+
+  // ─── Pointer-drag handlers ──────────────────────────────────────
+  // We bind pointermove/up on `window` once drag starts so the user can
+  // continue dragging even if the cursor leaves the card bounds. This
+  // matches Tinder/Hinge ergonomics — once you commit to a swipe, you
+  // shouldn't have to keep the cursor pinned to the card.
+  const handlePointerDown = (e: React.PointerEvent<HTMLDivElement>) => {
+    if (exitDirection) return;
+    if (e.button !== 0) return;
+    // Don't hijack drag on the "실행하기" / nested buttons — they have
+    // their own click semantics.
+    const tag = (e.target as HTMLElement | null)?.tagName;
+    if (tag === "BUTTON") return;
+    dragStartRef.current = { x: e.clientX, y: e.clientY };
+    e.currentTarget.setPointerCapture(e.pointerId);
+  };
+  const handlePointerMove = (e: React.PointerEvent<HTMLDivElement>) => {
+    if (!dragStartRef.current || exitDirection) return;
+    const dx = e.clientX - dragStartRef.current.x;
+    const dy = e.clientY - dragStartRef.current.y;
+    setDragOffset({ x: dx, y: dy });
+  };
+  const handlePointerUp = (e: React.PointerEvent<HTMLDivElement>) => {
+    if (!dragStartRef.current) return;
+    const dx = e.clientX - dragStartRef.current.x;
+    dragStartRef.current = null;
+    try {
+      e.currentTarget.releasePointerCapture(e.pointerId);
+    } catch {
+      /* ignore */
+    }
+    if (dx > SWIPE_THRESHOLD) {
+      commit("right");
+      return;
+    }
+    if (dx < -SWIPE_THRESHOLD) {
+      commit("left");
+      return;
+    }
+    // Spring-back — let the CSS transition animate the card back to
+    // centre via the `transition` style applied below when not dragging.
+    setDragOffset({ x: 0, y: 0 });
+  };
+
+  // ─── Compute live transform for the top card ────────────────────
+  let topCardStyle: React.CSSProperties = {};
+  let stampOpacity = 0;
+  let stampSide: "left" | "right" | null = null;
+  if (exitDirection) {
+    // Exit animation — fully off-screen + rotate + fade.
+    if (reduceMotion) {
+      topCardStyle = {
+        opacity: 0,
+        transition: `opacity ${EXIT_DURATION_MS}ms ease-out`,
+      };
+    } else {
+      const sign = exitDirection === "right" ? 1 : -1;
+      topCardStyle = {
+        transform: `translate(${sign * 120}%, -10%) rotate(${sign * 15}deg)`,
+        opacity: 0,
+        transition: `transform ${EXIT_DURATION_MS}ms ease-out, opacity ${EXIT_DURATION_MS}ms ease-out`,
+      };
+    }
+    stampOpacity = 1;
+    stampSide = exitDirection;
+  } else if (dragOffset.x !== 0 || dragOffset.y !== 0) {
+    // Drag follow — translate + rotate proportional to drag-X.
+    if (reduceMotion) {
+      topCardStyle = {
+        opacity: Math.max(0.5, 1 - Math.abs(dragOffset.x) / 600),
+      };
+    } else {
+      const rot = dragOffset.x / 18; // ~16deg max at 280px drag
+      topCardStyle = {
+        transform: `translate(${dragOffset.x}px, ${dragOffset.y * 0.3}px) rotate(${rot}deg)`,
+        transition: "none",
+      };
+    }
+    if (Math.abs(dragOffset.x) > 16) {
+      stampOpacity = Math.min(1, Math.abs(dragOffset.x) / SWIPE_THRESHOLD);
+      stampSide = dragOffset.x > 0 ? "right" : "left";
+    }
+  } else {
+    // Idle — apply spring-back transition when offset resets to zero so
+    // the card glides home after a non-committed drag.
+    topCardStyle = reduceMotion
+      ? {}
+      : { transition: "transform 200ms ease-out" };
+  }
 
   // F5 — under reduced-motion, the decorative back/middle cards drop
   // their `rotate(...)` transform and shift to opacity-only fades so a
@@ -289,6 +463,9 @@ function ActiveDeck({
   const middleCardStyle: React.CSSProperties = reduceMotion
     ? { opacity: 0.75, top: "16%" }
     : { transform: "rotate(2deg) translate(8px, 6px)", top: "16%" };
+
+  const handleLikeClick = () => commit("right");
+  const handleDislikeClick = () => commit("left");
 
   return (
     <div
@@ -307,7 +484,7 @@ function ActiveDeck({
           관심 있는 시나리오를 선택하세요
         </h2>
         <p className="mt-0.5 text-[10.5px] text-muted-foreground">
-          ⬆ 시도해볼래요 · ⬇ 별로예요 · ⎵ 건너뛰기 · z 되돌리기
+          드래그 또는 ⬆⬇ · ⎵ 건너뛰기 · z 되돌리기 · "실행하기" 로 즉시 가이드
         </p>
       </div>
 
@@ -324,19 +501,53 @@ function ActiveDeck({
           className="absolute h-[60%] w-[85%] rounded-2xl border border-border bg-card"
           style={middleCardStyle}
         />
-        {/* top card */}
+        {/* top card — drag-interactive */}
         <div
+          ref={cardRef}
           data-testid="tutorial-dialog:top-card"
           data-card-id={card.id}
+          onPointerDown={handlePointerDown}
+          onPointerMove={handlePointerMove}
+          onPointerUp={handlePointerUp}
+          onPointerCancel={handlePointerUp}
+          style={{ ...topCardStyle, touchAction: "none", cursor: "grab" }}
           className={cn(
-            "relative w-[90%] overflow-hidden rounded-2xl border bg-card",
+            "relative w-[90%] overflow-hidden rounded-2xl border bg-card select-none",
             "border-[hsl(var(--p-purple-500)/0.5)]",
             "shadow-[0_20px_50px_-10px_hsl(var(--p-purple-500)/0.3)]",
             "ring-1 ring-[hsl(var(--p-purple-500)/0.6)]",
           )}
         >
+          {/* U9 — ✓ / ✕ stamp overlay that fades in during drag and is
+              fully visible at the moment of commit. The stamp is purely
+              decorative; it never accepts pointer events. */}
+          {stampSide ? (
+            <div
+              aria-hidden
+              data-testid="tutorial-dialog:stamp"
+              data-stamp-side={stampSide}
+              style={{
+                position: "absolute",
+                top: 18,
+                ...(stampSide === "right" ? { right: 18 } : { left: 18 }),
+                opacity: stampOpacity,
+                transform: `rotate(${stampSide === "right" ? -15 : 15}deg)`,
+                padding: "4px 12px",
+                fontSize: 18,
+                fontWeight: 800,
+                letterSpacing: "0.1em",
+                border: `3px solid ${stampSide === "right" ? "hsl(var(--success))" : "hsl(var(--destructive))"}`,
+                color: stampSide === "right" ? "hsl(var(--success))" : "hsl(var(--destructive))",
+                borderRadius: 6,
+                pointerEvents: "none",
+                zIndex: 2,
+              }}
+            >
+              {stampSide === "right" ? "LIKE" : "NOPE"}
+            </div>
+          ) : null}
           <div
-            className="flex h-32 items-center justify-center text-5xl"
+            className="flex h-28 items-center justify-center text-5xl"
             style={{
               background:
                 "linear-gradient(135deg, hsl(var(--p-purple-500)), hsl(var(--p-blue-500)))",
@@ -371,6 +582,50 @@ function ActiveDeck({
                 </span>
               ))}
             </div>
+            {/* U7 — Preview steps mini-list. Shows the user *what* the
+                spotlight tour will demonstrate before they commit to
+                running it. Each step is numbered so the visual mirrors
+                the SpotlightTour `step / total` badge. */}
+            {card.previewSteps && card.previewSteps.length > 0 ? (
+              <ol
+                data-testid="tutorial-dialog:preview-steps"
+                className="mt-2 space-y-0.5 text-[10.5px] text-muted-foreground"
+              >
+                {card.previewSteps.map((step, i) => (
+                  <li key={`${card.id}-step-${i}`} className="flex gap-1.5">
+                    <span
+                      className="inline-flex h-3.5 w-3.5 shrink-0 items-center justify-center rounded-full text-[9px] font-bold"
+                      style={{
+                        background: "hsl(var(--p-purple-500) / 0.18)",
+                        color: "hsl(var(--p-purple-500))",
+                      }}
+                      aria-hidden
+                    >
+                      {i + 1}
+                    </span>
+                    <span>{step}</span>
+                  </li>
+                ))}
+              </ol>
+            ) : null}
+            {/* U7 — Per-card "실행하기" CTA. Skips the swipe loop and
+                jumps straight into the SpotlightTour for this scenario. */}
+            <button
+              type="button"
+              data-testid="tutorial-dialog:run"
+              onClick={onRun}
+              className={cn(
+                "mt-3 w-full rounded-md py-1.5 text-[11.5px] font-semibold text-primary-foreground transition",
+                "hover:opacity-90 disabled:cursor-not-allowed disabled:opacity-50",
+              )}
+              style={{
+                background:
+                  "linear-gradient(135deg, hsl(var(--p-purple-500)), hsl(var(--p-blue-500)))",
+              }}
+              disabled={exitDirection !== null}
+            >
+              실행하기 →
+            </button>
           </div>
         </div>
       </div>
@@ -380,11 +635,12 @@ function ActiveDeck({
           type="button"
           aria-label="별로예요"
           data-testid="tutorial-dialog:dislike"
-          onClick={onDislike}
+          onClick={handleDislikeClick}
+          disabled={exitDirection !== null}
           className={cn(
             "grid h-12 w-12 place-items-center rounded-full text-xl transition",
             "bg-destructive/15 border border-destructive/40 text-destructive",
-            "hover:bg-destructive/25",
+            "hover:bg-destructive/25 disabled:cursor-not-allowed disabled:opacity-50",
           )}
         >
           ✕
@@ -393,7 +649,7 @@ function ActiveDeck({
           type="button"
           aria-label="되돌리기"
           data-testid="tutorial-dialog:undo"
-          disabled={!canUndo}
+          disabled={!canUndo || exitDirection !== null}
           onClick={onUndo}
           className={cn(
             "grid h-10 w-10 place-items-center rounded-full text-base transition",
@@ -407,11 +663,12 @@ function ActiveDeck({
           type="button"
           aria-label="시도해볼래요"
           data-testid="tutorial-dialog:like"
-          onClick={onLike}
+          onClick={handleLikeClick}
+          disabled={exitDirection !== null}
           className={cn(
             "grid h-12 w-12 place-items-center rounded-full text-xl transition",
             "bg-success/15 border border-success/40 text-success",
-            "hover:bg-success/25",
+            "hover:bg-success/25 disabled:cursor-not-allowed disabled:opacity-50",
           )}
         >
           ✓
@@ -419,7 +676,7 @@ function ActiveDeck({
       </div>
 
       <div className="border-t border-border p-2 text-center text-[10px] text-muted-foreground">
-        ↑↓ 키보드 · 또는 ⎵ 로 건너뛰기
+        ↑↓ 키보드 · ⎵ 건너뛰기 · 카드를 좌/우 드래그
       </div>
     </div>
   );
@@ -428,10 +685,12 @@ function ActiveDeck({
 interface FinishedSummaryProps {
   cards: readonly DiscoveryCard[];
   history: HistoryEntry[];
+  /** U2 — explicit user-gated tour start. Closes dialog + fires tour. */
+  onStart: () => void;
   onClose: () => void;
 }
 
-function FinishedSummary({ cards, history, onClose }: FinishedSummaryProps) {
+function FinishedSummary({ cards, history, onStart, onClose }: FinishedSummaryProps) {
   const likedCards = history
     .filter((entry) => entry.action === "liked")
     .map((entry) => cards[entry.cardIndex])
@@ -442,13 +701,21 @@ function FinishedSummary({ cards, history, onClose }: FinishedSummaryProps) {
       className="flex h-[640px] min-w-0 flex-col"
       data-testid="tutorial-dialog:finished"
     >
-      <div className="px-4 pt-6 pb-2 text-center">
+      <div
+        className="px-4 pt-6 pb-2 text-center"
+        // U9 (light) — gradient sweep on entry signals "completed" state.
+        style={{
+          background:
+            "linear-gradient(180deg, hsl(var(--p-purple-500) / 0.10), transparent)",
+        }}
+      >
         <div className="text-[10px] uppercase tracking-wider text-muted-foreground">
           {cards.length} / {cards.length}
         </div>
-        <h2 className="mt-1 text-[16px] font-semibold">추천 완료</h2>
+        <h2 className="mt-1 text-[16px] font-semibold">추천 완료 ✨</h2>
         <p className="mt-1 text-[11px] text-muted-foreground">
-          선택하신 시나리오로 LVIS 가이드를 시작합니다.
+          선택하신 시나리오로 LVIS 가이드를 시작합니다. "가이드 시작" 을
+          누르면 SpotlightTour 가 단계별로 안내해요.
         </p>
       </div>
 
@@ -480,17 +747,32 @@ function FinishedSummary({ cards, history, onClose }: FinishedSummaryProps) {
         )}
       </div>
 
-      <div className="border-t border-border px-6 py-4">
+      <div className="space-y-2 border-t border-border px-6 py-4">
+        <button
+          type="button"
+          data-testid="tutorial-dialog:start"
+          onClick={onStart}
+          className={cn(
+            "w-full rounded-lg py-2 text-[12px] font-semibold text-primary-foreground transition",
+            "hover:opacity-90",
+          )}
+          style={{
+            background:
+              "linear-gradient(135deg, hsl(var(--p-purple-500)), hsl(var(--p-blue-500)))",
+          }}
+        >
+          가이드 시작 →
+        </button>
         <button
           type="button"
           data-testid="tutorial-dialog:close"
           onClick={onClose}
           className={cn(
-            "w-full rounded-lg py-2 text-[12px] font-semibold transition",
-            "bg-primary text-primary-foreground hover:opacity-90",
+            "w-full rounded-lg py-1.5 text-[11px] transition",
+            "bg-transparent text-muted-foreground hover:bg-muted",
           )}
         >
-          가이드 시작
+          끝내기
         </button>
       </div>
     </div>
