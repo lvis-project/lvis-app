@@ -154,13 +154,11 @@ function stampCreatedAt(message: GenericMessage): GenericMessage {
  * Non-tool_result messages pass through unchanged. Sub-cap content passes
  * through with reference equality.
  *
- * Why meta-only (no content swap here): `wire-serialize.stubMarkedToolResults`
- * already runs on every send (`stream-collector.ts`) and every disk write
- * (`saveSession` call sites in `conversation-loop.ts`/`ipc/domains/chat.ts`/
- * `hooks/post-turn-hook-chain.ts`). Centralising the actual stub swap there
- * means in-memory content stays raw verbatim for the UI / inspection, and
- * the same stub form lands in both the LLM wire payload and the jsonl —
- * matching the existing `compactedAt` marker's behaviour exactly.
+ * Why meta-only (no content swap here): provider sends run through
+ * `wire-serialize.stubMarkedToolResults`, while `MemoryManager.saveSession`
+ * writes a stub JSONL row plus a file-backed artifact for oversized raw
+ * content. This keeps in-memory content raw verbatim for the UI / inspection
+ * while protecting both provider context and session JSONL size.
  *
  * Called from both `.append` (live executor → loop push) and `.restore`
  * (session jsonl rehydrate). Single chokepoint guarantees future append
@@ -193,7 +191,7 @@ function applyToolResultCap(
     return { ...message, meta: cleanMeta };
   }
   // Over-cap: write the freshly-computed truncated info, drop any prior
-  // serializedStub claim (will be re-set by wire-serialize on next send).
+  // serializedStub claim (will be re-set by serialization on next send/save).
   const { serializedStub: _s, ...preservedMeta } = message.meta ?? {};
   return {
     ...message,

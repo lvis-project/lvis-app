@@ -104,12 +104,13 @@ describe("PostTurnHookChain", () => {
     expect(marked.length).toBeGreaterThan(0);
     for (const m of marked) {
       if (m.role === "tool_result") {
-        // memory 의 content 는 *원본 그대로* (3000자) — wire-serialize 가 직렬화 시 stub 변환
+        // memory 의 content 는 *원본 그대로* (3000자) — saveSession 이 직렬화 시 stub/artifact 처리
         expect(m.content.length).toBeGreaterThan(2000);
         expect(m.content).not.toContain("[tool_result stripped");
       }
     }
-    // saveSession 은 *stub 변환된* 형태 받음 — content 짧음
+    // saveSession 은 raw marked history 를 받고, MemoryManager.saveSession 이
+    // JSONL stub + file-backed artifact 직렬화를 담당한다.
     expect(saveSession).toHaveBeenCalledTimes(1);
     const persisted = saveSession.mock.calls[0]?.[1] as GenericMessage[];
     expect(persisted).toBeDefined();
@@ -117,9 +118,8 @@ describe("PostTurnHookChain", () => {
     expect(persistedMarked.length).toBeGreaterThan(0);
     for (const m of persistedMarked) {
       if (m.role === "tool_result") {
-        // disk 형태는 stub
-        expect(m.content).toContain("[tool_result stripped");
-        expect(m.content.length).toBeLessThan(200);
+        expect(m.content.length).toBeGreaterThan(2000);
+        expect(m.content).not.toContain("[tool_result stripped");
       }
     }
   });
