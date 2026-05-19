@@ -36,7 +36,11 @@ describe("TutorialDialog (Tutorial-D)", () => {
     const api = makeApi();
     render(<TutorialDialog open onOpenChange={() => {}} api={api} />);
     fireEvent.click(screen.getByTestId("tutorial-dialog:like"));
-    await flushAll();
+    // U9 — swipe-out animation has a 300ms (or 150ms under reduced
+    // motion) exit delay before the cursor advances. Fake timers would
+    // be heavier here than a real-timer wait — vitest fakeTimers leaks
+    // into matchMedia and breaks the reduced-motion hook fallback.
+    await act(() => new Promise((r) => setTimeout(r, 320)));
     expect(api.tutorialRecord).toHaveBeenCalledWith({
       cardId: DISCOVERY_CARDS[0].id,
       action: "liked",
@@ -49,7 +53,7 @@ describe("TutorialDialog (Tutorial-D)", () => {
     const api = makeApi();
     render(<TutorialDialog open onOpenChange={() => {}} api={api} />);
     fireEvent.click(screen.getByTestId("tutorial-dialog:dislike"));
-    await flushAll();
+    await act(() => new Promise((r) => setTimeout(r, 320)));
     expect(api.tutorialRecord).toHaveBeenCalledWith({
       cardId: DISCOVERY_CARDS[0].id,
       action: "disliked",
@@ -60,13 +64,13 @@ describe("TutorialDialog (Tutorial-D)", () => {
     const api = makeApi();
     render(<TutorialDialog open onOpenChange={() => {}} api={api} />);
     fireEvent.keyDown(window, { key: "ArrowUp" });
-    await flushAll();
+    await act(() => new Promise((r) => setTimeout(r, 320)));
     expect(api.tutorialRecord).toHaveBeenCalledWith({
       cardId: DISCOVERY_CARDS[0].id,
       action: "liked",
     });
     fireEvent.keyDown(window, { key: "ArrowDown" });
-    await flushAll();
+    await act(() => new Promise((r) => setTimeout(r, 320)));
     expect(api.tutorialRecord).toHaveBeenCalledWith({
       cardId: DISCOVERY_CARDS[1].id,
       action: "disliked",
@@ -87,7 +91,7 @@ describe("TutorialDialog (Tutorial-D)", () => {
     const api = makeApi();
     render(<TutorialDialog open onOpenChange={() => {}} api={api} />);
     fireEvent.click(screen.getByTestId("tutorial-dialog:like"));
-    await flushAll();
+    await act(() => new Promise((r) => setTimeout(r, 320)));
     fireEvent.click(screen.getByTestId("tutorial-dialog:undo"));
     await flushAll();
     expect(api.tutorialRecord).toHaveBeenLastCalledWith({
@@ -98,34 +102,76 @@ describe("TutorialDialog (Tutorial-D)", () => {
     expect(top.getAttribute("data-card-id")).toBe(DISCOVERY_CARDS[0].id);
   });
 
-  it("calls tour.start with the first liked scenario when the deck empties", async () => {
+  it("calls tour.start with the first liked scenario when the user clicks 가이드 시작 (U2)", async () => {
     const api = makeApi();
-    render(<TutorialDialog open onOpenChange={() => {}} api={api} />);
+    const onOpenChange = vi.fn();
+    render(<TutorialDialog open onOpenChange={onOpenChange} api={api} />);
     // Card 1 disliked, Card 2 (doc-search) liked, rest skipped.
     fireEvent.click(screen.getByTestId("tutorial-dialog:dislike"));
-    await flushAll();
+    await act(() => new Promise((r) => setTimeout(r, 320)));
     fireEvent.click(screen.getByTestId("tutorial-dialog:like"));
-    await flushAll();
+    await act(() => new Promise((r) => setTimeout(r, 320)));
     for (let i = 2; i < DISCOVERY_CARDS.length; i += 1) {
       fireEvent.keyDown(window, { key: " ", code: "Space" });
       // eslint-disable-next-line no-await-in-loop
       await flushAll();
     }
+    // U2 — the FinishedSummary screen must be visible AND tour.start
+    // must NOT have been called yet. Only an explicit click on the
+    // "가이드 시작" CTA triggers the spotlight tour.
     expect(screen.getByTestId("tutorial-dialog:finished")).toBeTruthy();
+    expect(api.tour.start).not.toHaveBeenCalled();
+    // Click the explicit "가이드 시작" CTA.
+    fireEvent.click(screen.getByTestId("tutorial-dialog:start"));
+    // The handler closes the dialog first, then dispatches the tour
+    // after an 80ms portal-unmount delay.
+    expect(onOpenChange).toHaveBeenCalledWith(false);
+    await act(() => new Promise((r) => setTimeout(r, 120)));
     expect(api.tour.start).toHaveBeenCalledWith(
       DISCOVERY_CARDS[1].spotlightScenarioId,
     );
   });
 
-  it("falls back to first-boot-essentials when the user did not like any card", async () => {
+  it("falls back to first-boot-essentials when the user did not like any card (U2)", async () => {
     const api = makeApi();
     render(<TutorialDialog open onOpenChange={() => {}} api={api} />);
     for (let i = 0; i < DISCOVERY_CARDS.length; i += 1) {
       fireEvent.click(screen.getByTestId("tutorial-dialog:dislike"));
       // eslint-disable-next-line no-await-in-loop
-      await flushAll();
+      await act(() => new Promise((r) => setTimeout(r, 320)));
     }
+    expect(screen.getByTestId("tutorial-dialog:finished")).toBeTruthy();
+    expect(api.tour.start).not.toHaveBeenCalled();
+    fireEvent.click(screen.getByTestId("tutorial-dialog:start"));
+    await act(() => new Promise((r) => setTimeout(r, 120)));
     expect(api.tour.start).toHaveBeenCalledWith(FALLBACK_SCENARIO_ID);
+  });
+
+  it("U7 — '실행하기' on a card fires tour.start for that card's scenario", async () => {
+    const api = makeApi();
+    const onOpenChange = vi.fn();
+    render(<TutorialDialog open onOpenChange={onOpenChange} api={api} />);
+    // Top card is DISCOVERY_CARDS[0] (meeting-summary).
+    fireEvent.click(screen.getByTestId("tutorial-dialog:run"));
+    expect(onOpenChange).toHaveBeenCalledWith(false);
+    await act(() => new Promise((r) => setTimeout(r, 120)));
+    expect(api.tour.start).toHaveBeenCalledWith(
+      DISCOVERY_CARDS[0].spotlightScenarioId,
+    );
+    expect(api.tutorialRecord).toHaveBeenCalledWith({
+      cardId: DISCOVERY_CARDS[0].id,
+      action: "liked",
+    });
+  });
+
+  it("U7 — preview steps render for every card", () => {
+    const api = makeApi();
+    render(<TutorialDialog open onOpenChange={() => {}} api={api} />);
+    const steps = screen.getByTestId("tutorial-dialog:preview-steps");
+    // The first card (meeting-summary) has 4 preview steps.
+    expect(steps.querySelectorAll("li").length).toBe(
+      DISCOVERY_CARDS[0].previewSteps.length,
+    );
   });
 
   it("does not render when open is false", () => {
