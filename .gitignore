@@ -21,6 +21,7 @@ release-fast/
 # Resources 번들 대상(개발 시 fetch-uv.mjs가 다운로드)
 resources/uv/
 resources/uv-runtime/
+resources/uv-archives/
 
 # Playwright UI E2E artifacts
 test-results/
