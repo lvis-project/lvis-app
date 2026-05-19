@@ -63,9 +63,9 @@ beforeEach(async () => {
   handlers.clear();
   _isPackaged = false;
   vi.resetModules();
-  // Default: enable demo so handler registers. Individual tests override.
-  process.env.LVIS_DEMO_ENABLED = "1";
-  process.env.LVIS_DEMO_KEY_OPENAI = process.env.LVIS_DEMO_KEY_OPENAI ?? "";
+  // Default: a captured demo key signals demo activation. Individual
+  // tests override (delete the key to simulate "no activation captured").
+  process.env.LVIS_DEMO_KEY_OPENAI = process.env.LVIS_DEMO_KEY_OPENAI ?? "sk-default-test";
   const mod = await import("../../../main/demo-credentials.js");
   mod.resetDemoCredentialsForTesting();
 });
@@ -268,9 +268,9 @@ describe("auth:login-mockup IPC handler (#893 top-level)", () => {
   });
 
   // PR #894 review B1 — production gate
-  it("skips handler registration in packaged builds when LVIS_DEMO_ENABLED is unset", async () => {
+  it("skips handler registration in packaged builds when no demo activation was captured", async () => {
     _isPackaged = true;
-    delete process.env.LVIS_DEMO_ENABLED;
+    delete process.env.LVIS_DEMO_KEY_OPENAI;
     const deps = makeDeps();
     const { registerAuthHandlers } = await loadAuthModule();
     registerAuthHandlers(deps as never);
@@ -278,9 +278,8 @@ describe("auth:login-mockup IPC handler (#893 top-level)", () => {
     expect(handlers.has("lvis:auth:login-mockup")).toBe(false);
   });
 
-  it("registers handler in packaged builds when LVIS_DEMO_ENABLED=1 was captured pre-scrub", async () => {
+  it("registers handler in packaged builds when demo key was captured pre-scrub", async () => {
     _isPackaged = true;
-    process.env.LVIS_DEMO_ENABLED = "1";
     // Path 2 hotfix: default vendor is now azure-foundry; pin to openai
     // to preserve the historical assertion shape.
     process.env.LVIS_DEMO_VENDOR = "openai";
@@ -297,10 +296,9 @@ describe("auth:login-mockup IPC handler (#893 top-level)", () => {
     expect(result).toMatchObject({ ok: true, vendor: "openai" });
   });
 
-  it("registers handler in dev builds even when LVIS_DEMO_ENABLED is unset", async () => {
+  it("registers handler in dev builds even when no demo activation was captured", async () => {
     _isPackaged = false;
-    delete process.env.LVIS_DEMO_ENABLED;
-    process.env.LVIS_DEMO_KEY_OPENAI = "sk-dev-test";
+    delete process.env.LVIS_DEMO_KEY_OPENAI;
     const deps = makeDeps();
     const { registerAuthHandlers } = await loadAuthModule();
     registerAuthHandlers(deps as never);

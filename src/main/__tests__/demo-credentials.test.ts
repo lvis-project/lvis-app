@@ -27,7 +27,6 @@ afterEach(() => {
 
 describe("captureDemoCredentials — baseUrl / model env vars", () => {
   it("captures LVIS_DEMO_BASEURL_<VENDOR> and exposes it via getDemoVendorConfig", () => {
-    process.env.LVIS_DEMO_ENABLED = "1";
     process.env.LVIS_DEMO_KEY_AZURE_FOUNDRY = "sk-azure-key";
     process.env.LVIS_DEMO_BASEURL_AZURE_FOUNDRY = "https://my-resource.openai.azure.com/";
     captureDemoCredentials();
@@ -39,7 +38,6 @@ describe("captureDemoCredentials — baseUrl / model env vars", () => {
   });
 
   it("captures LVIS_DEMO_MODEL_<VENDOR> and exposes it via getDemoVendorConfig", () => {
-    process.env.LVIS_DEMO_ENABLED = "1";
     process.env.LVIS_DEMO_KEY_OPENAI = "sk-openai-key";
     process.env.LVIS_DEMO_MODEL_OPENAI = "gpt-5";
     captureDemoCredentials();
@@ -50,7 +48,6 @@ describe("captureDemoCredentials — baseUrl / model env vars", () => {
   });
 
   it("returns null from getDemoVendorConfig when apiKey is absent even if other fields are present", () => {
-    process.env.LVIS_DEMO_ENABLED = "1";
     process.env.LVIS_DEMO_BASEURL_AZURE_FOUNDRY = "https://some.endpoint.com/";
     // No LVIS_DEMO_KEY_AZURE_FOUNDRY set. Option 2 (Path 3): no baked-in
     // fallback — env vars are the only valid key source. The .env.demo file
@@ -61,7 +58,6 @@ describe("captureDemoCredentials — baseUrl / model env vars", () => {
   });
 
   it("omits baseUrl and model from config when env vars are absent", () => {
-    process.env.LVIS_DEMO_ENABLED = "1";
     process.env.LVIS_DEMO_KEY_OPENAI = "sk-openai-only";
     captureDemoCredentials();
 
@@ -74,7 +70,6 @@ describe("captureDemoCredentials — baseUrl / model env vars", () => {
 
 describe("captureDemoCredentials — vertex-ai env vars", () => {
   it("captures LVIS_DEMO_VERTEX_PROJECT and LVIS_DEMO_VERTEX_LOCATION for vertex-ai", () => {
-    process.env.LVIS_DEMO_ENABLED = "1";
     process.env.LVIS_DEMO_KEY_VERTEX_AI = "ignored-for-vertex";
     process.env.LVIS_DEMO_VERTEX_PROJECT = "my-gcp-project";
     process.env.LVIS_DEMO_VERTEX_LOCATION = "us-central1";
@@ -87,7 +82,6 @@ describe("captureDemoCredentials — vertex-ai env vars", () => {
   });
 
   it("does not expose vertexProject/vertexLocation on non-vertex-ai vendors", () => {
-    process.env.LVIS_DEMO_ENABLED = "1";
     process.env.LVIS_DEMO_KEY_OPENAI = "sk-openai-key";
     process.env.LVIS_DEMO_VERTEX_PROJECT = "my-gcp-project";
     captureDemoCredentials();
@@ -99,7 +93,6 @@ describe("captureDemoCredentials — vertex-ai env vars", () => {
   });
 
   it("omits vertexProject and vertexLocation when env vars are absent", () => {
-    process.env.LVIS_DEMO_ENABLED = "1";
     process.env.LVIS_DEMO_KEY_VERTEX_AI = "ignored";
     // No LVIS_DEMO_VERTEX_PROJECT or LVIS_DEMO_VERTEX_LOCATION.
     captureDemoCredentials();
@@ -113,7 +106,6 @@ describe("captureDemoCredentials — vertex-ai env vars", () => {
 
 describe("captureDemoCredentials — LVIS_DEMO_VENDOR (#893 top-level)", () => {
   it("captures LVIS_DEMO_VENDOR and exposes it via getDemoActiveVendor", () => {
-    process.env.LVIS_DEMO_ENABLED = "1";
     process.env.LVIS_DEMO_VENDOR = "claude";
     captureDemoCredentials();
     expect(getDemoActiveVendor()).toBe("claude");
@@ -123,21 +115,18 @@ describe("captureDemoCredentials — LVIS_DEMO_VENDOR (#893 top-level)", () => {
   // "openai" to "azure-foundry" so the internal organization demo loop
   // activates by default. The two tests below assert the new default.
   it("defaults to azure-foundry when LVIS_DEMO_VENDOR is absent", () => {
-    process.env.LVIS_DEMO_ENABLED = "1";
     delete process.env.LVIS_DEMO_VENDOR;
     captureDemoCredentials();
     expect(getDemoActiveVendor()).toBe("azure-foundry");
   });
 
   it("falls back to azure-foundry when LVIS_DEMO_VENDOR is not a known vendor", () => {
-    process.env.LVIS_DEMO_ENABLED = "1";
     process.env.LVIS_DEMO_VENDOR = "not-a-vendor";
     captureDemoCredentials();
     expect(getDemoActiveVendor()).toBe("azure-foundry");
   });
 
   it("accepts every known LLM vendor", () => {
-    process.env.LVIS_DEMO_ENABLED = "1";
     process.env.LVIS_DEMO_VENDOR = "azure-foundry";
     captureDemoCredentials();
     expect(getDemoActiveVendor()).toBe("azure-foundry");
@@ -146,7 +135,6 @@ describe("captureDemoCredentials — LVIS_DEMO_VENDOR (#893 top-level)", () => {
 
 describe("captureDemoCredentials — idempotency and backward compat", () => {
   it("is idempotent — second call after env mutation has no effect", () => {
-    process.env.LVIS_DEMO_ENABLED = "1";
     process.env.LVIS_DEMO_KEY_OPENAI = "first-key";
     captureDemoCredentials();
 
@@ -158,7 +146,6 @@ describe("captureDemoCredentials — idempotency and backward compat", () => {
   });
 
   it("getDemoKey still works alongside getDemoVendorConfig (backward compat)", () => {
-    process.env.LVIS_DEMO_ENABLED = "1";
     process.env.LVIS_DEMO_KEY_CLAUDE = "sk-ant-demo";
     captureDemoCredentials();
 
@@ -167,20 +154,18 @@ describe("captureDemoCredentials — idempotency and backward compat", () => {
     expect(config?.apiKey).toBe("sk-ant-demo");
   });
 
-  it("isDemoEnabled reflects LVIS_DEMO_ENABLED=1", () => {
-    process.env.LVIS_DEMO_ENABLED = "1";
+  it("isDemoEnabled is true when at least one LVIS_DEMO_KEY_<VENDOR> is captured", () => {
+    process.env.LVIS_DEMO_KEY_OPENAI = "sk-test";
     captureDemoCredentials();
     expect(isDemoEnabled()).toBe(true);
   });
 
-  it("isDemoEnabled is false when LVIS_DEMO_ENABLED is absent", () => {
-    delete process.env.LVIS_DEMO_ENABLED;
+  it("isDemoEnabled is false when no LVIS_DEMO_KEY_<VENDOR> entries are present", () => {
     captureDemoCredentials();
     expect(isDemoEnabled()).toBe(false);
   });
 
   it("resetDemoCredentialsForTesting clears all captured state", () => {
-    process.env.LVIS_DEMO_ENABLED = "1";
     process.env.LVIS_DEMO_KEY_OPENAI = "sk-openai-key";
     process.env.LVIS_DEMO_BASEURL_OPENAI = "https://proxy.example.com/";
     captureDemoCredentials();

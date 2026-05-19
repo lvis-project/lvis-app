@@ -1,5 +1,4 @@
 LVIS 설치 안내 / LVIS Installation Guide
-========================================
 
 [한국어]
 1. 왼쪽의 'LVIS.app' 을 오른쪽 'Applications' 폴더로 드래그하세요.
@@ -8,6 +7,8 @@ LVIS 설치 안내 / LVIS Installation Guide
       - Finder 에서 'setup.command' 를 우클릭 → "열기"
       - 확인 창에서 다시 "열기" 클릭
 3. Terminal 이 열리고 LVIS 가 자동으로 실행됩니다.
+4. 제거가 필요하면 'uninstall.command' 를 실행하세요.
+   앱만 제거할지, 로컬 데이터까지 제거할지 직접 선택합니다.
 
 [English]
 1. Drag 'LVIS.app' on the left to the 'Applications' folder on the right.
@@ -16,8 +17,10 @@ LVIS 설치 안내 / LVIS Installation Guide
       - In Finder, right-click 'setup.command' → "Open"
       - Click "Open" again to confirm
 3. Terminal opens and LVIS launches automatically.
+4. To uninstall, run 'uninstall.command'.
+   It asks whether to remove only the app or local LVIS data too.
 
-----
+Notes:
 
 왜 이 단계가 필요한가요? / Why this extra step?
 
