@@ -1,75 +1,75 @@
 import type { ThemeBundle } from "./types.js";
 
 /**
- * Cherry Blossom (체리 블라썸) — light shell with the LVIS loading-splash
- * key colors as the accent system.
+ * Cherry Blossom (체리 블라썸) — the default light shell with a crisp petal
+ * palette and LVIS loading-splash accents.
  *
  * Background: pure white per user request — the loading-splash gradient
  * (`#fdfafa → #ffdce4 → #ffb4c6 → #fff`) is intentionally NOT used as the
  * chat background to keep long reading sessions calm.
- * Accent:    splash brand red `#ef0b4c` (343 92% 49%) — the wordmark color.
- * Secondary: splash brand magenta `#d900ff` (291 100% 50%) — the logo
- *            gradient endpoint, routed through --action-view + --link-fg.
- * Bubble:    lilac-pink (321 65% 78%) sampled from the cherry-petal interior
- *            so user messages read as soft pink against the white shell.
+ * Accent:    refined cherry red — strong enough for controls, calmer than
+ *            splash red for sustained UI use.
+ * Secondary: blossom wash + darker magenta link/action accents.
+ * Bubble:    pale petal pink with plum text, preserving contrast on white.
  */
 export const cherryBlossomBundle: ThemeBundle = {
   id: "cherry-blossom",
   name: "Cherry Blossom",
-  description: "라이트 셸 + 체리 레드 액센트 + 스플래시 브랜드 팔레트",
+  description: "라이트 셸 + 체리 블라썸 팔레트 + 선명한 인터랙션 라인",
   shell: "light",
   highContrast: false,
   tokens: {
     background:               "0 0% 100%",
-    foreground:               "0 0% 10%",
-    card:                     "340 60% 99%",   /* very pale blush */
-    "card-foreground":        "0 0% 10%",
+    foreground:               "342 26% 12%",
+    card:                     "345 70% 98%",   /* white with a petal tint */
+    "card-foreground":        "342 26% 12%",
     popover:                  "0 0% 100%",
-    "popover-foreground":     "0 0% 10%",
-    primary:                  "343 92% 49%",   /* #ef0b4c — splash wordmark */
+    "popover-foreground":     "342 26% 12%",
+    primary:                  "343 78% 44%",   /* refined cherry red */
     "primary-foreground":     "0 0% 100%",
-    secondary:                "340 50% 95%",
-    "secondary-foreground":   "0 0% 10%",
-    muted:                    "340 30% 96%",
-    "muted-foreground":       "340 10% 45%",
-    accent:                   "340 40% 92%",
-    "accent-foreground":      "0 0% 10%",
-    destructive:              "0 100% 50%",    /* #FF0000 — splash gradient start */
+    secondary:                "348 72% 95%",
+    "secondary-foreground":   "342 32% 18%",
+    muted:                    "342 45% 96%",
+    "muted-foreground":       "340 18% 36%",
+    accent:                   "332 74% 92%",
+    "accent-foreground":      "342 36% 16%",
+    destructive:              "355 78% 44%",
     "destructive-foreground": "0 0% 100%",
-    warning:                  "35 91% 45%",
-    "warning-foreground":     "0 0% 5%",
-    success:                  "142 65% 50%",
-    "success-foreground":     "0 0% 5%",
-    info:                     "220 90% 55%",
+    warning:                  "35 92% 43%",
+    "warning-foreground":     "342 26% 12%",
+    success:                  "150 52% 36%",
+    "success-foreground":     "0 0% 100%",
+    info:                     "220 78% 48%",
     "info-foreground":        "0 0% 100%",
-    emphasis:                 "35 91% 50%",    /* gold star on white shell */
-    "emphasis-foreground":    "0 0% 5%",
-    border:                   "340 20% 88%",
-    input:                    "340 20% 88%",
-    ring:                     "343 92% 49%",
-    "message-user-bg":        "321 65% 78%",   /* lilac petal pink */
-    "message-user-fg":        "0 0% 10%",
+    emphasis:                 "41 91% 50%",    /* warm pollen gold */
+    "emphasis-foreground":    "342 26% 12%",
+    border:                   "340 30% 84%",
+    input:                    "340 30% 84%",
+    ring:                     "343 78% 44%",
+    "ui-line":                "343 52% 43%",
+    "message-user-bg":        "342 78% 86%",   /* pale petal pink */
+    "message-user-fg":        "342 34% 14%",
     "input-bar-bg":           "0 0% 100%",
-    overlay:                  "340 30% 12%",   /* dark plum dim */
-    "hover-overlay":          "0 0% 0%",
-    "focus-ring":             "343 92% 49%",
-    "link-fg":                "291 100% 45%",  /* #D900FF darker for legibility */
-    "selection-bg":           "321 65% 78%",
-    "selection-fg":           "0 0% 10%",
-    "scrollbar-thumb":        "340 25% 75%",
-    "scrollbar-track":        "340 30% 96%",
-    "kbd-bg":                 "340 30% 96%",
-    "kbd-border":             "340 20% 88%",
-    "code-bg":                "340 50% 98%",
-    "code-fg":                "0 0% 10%",
-    "code-border":            "340 20% 88%",
-    "chart-1":                "343 92% 49%",   /* cherry red */
-    "chart-2":                "291 100% 50%",  /* magenta */
-    "chart-3":                "142 55% 42%",   /* leaf green */
-    "chart-4":                "220 90% 55%",   /* blue */
-    "chart-5":                "35 91% 50%",    /* gold */
-    "action-view":            "291 100% 50%",  /* splash magenta */
-    "action-branch":          "35 91% 45%",
-    "action-compact":         "343 92% 49%",
+    overlay:                  "342 36% 10%",   /* dark plum dim */
+    "hover-overlay":          "342 26% 12%",
+    "focus-ring":             "343 78% 44%",
+    "link-fg":                "291 82% 38%",
+    "selection-bg":           "342 78% 86%",
+    "selection-fg":           "342 34% 14%",
+    "scrollbar-thumb":        "340 34% 62%",
+    "scrollbar-track":        "342 45% 96%",
+    "kbd-bg":                 "345 60% 97%",
+    "kbd-border":             "340 30% 84%",
+    "code-bg":                "345 60% 98%",
+    "code-fg":                "342 26% 12%",
+    "code-border":            "340 30% 84%",
+    "chart-1":                "343 78% 44%",   /* cherry red */
+    "chart-2":                "291 82% 42%",   /* magenta */
+    "chart-3":                "150 52% 36%",   /* leaf green */
+    "chart-4":                "220 78% 48%",   /* lake blue */
+    "chart-5":                "41 91% 50%",    /* pollen gold */
+    "action-view":            "291 82% 42%",
+    "action-branch":          "35 92% 43%",
+    "action-compact":         "343 78% 44%",
   },
 };

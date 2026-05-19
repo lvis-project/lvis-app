@@ -44,6 +44,7 @@ export const violetLightBundle: ThemeBundle = {
     border:                   "30 14% 75%",    /* warm grey border — visible against 92% bg */
     input:                    "30 14% 75%",
     ring:                     "263 70% 50%",
+    "ui-line":                "40 22% 38.5%",
     "message-user-bg":        "271 76% 76%",   /* #c497ef — lilac user bubble */
     "message-user-fg":        "0 0% 15%",      /* dark on light lilac (was white → contrast ~1.5 fail) */
     "input-bar-bg":           "0 0% 100%",     /* white composer */

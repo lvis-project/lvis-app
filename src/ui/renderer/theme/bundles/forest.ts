@@ -36,6 +36,7 @@ export const forestBundle: ThemeBundle = {
     border:                   "214 32% 91%",
     input:                    "214 32% 91%",
     ring:                     "170 70% 35%",
+    "ui-line":                "210 40% 47.5%",
     "message-user-bg":        "170 70% 45%",
     "message-user-fg":        "0 0% 5%",
     "input-bar-bg":           "0 0% 100%",

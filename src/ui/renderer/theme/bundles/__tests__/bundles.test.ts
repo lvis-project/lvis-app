@@ -15,7 +15,7 @@ const REQUIRED_TOKEN_KEYS: ReadonlyArray<keyof BundleTokens> = [
   "destructive", "destructive-foreground",
   "warning", "warning-foreground",
   "success", "success-foreground",
-  "border", "input", "ring",
+  "border", "input", "ring", "ui-line",
   "message-user-bg", "message-user-fg",
   "input-bar-bg",
   /* Tier B' — status / state */
@@ -51,6 +51,12 @@ describe("bundle registry", () => {
 
   it("default bundle ID resolves to a bundle", () => {
     expect(findBundle(DEFAULT_BUNDLE_ID)).toBeDefined();
+  });
+
+  it("starts fresh installs on the Cherry Blossom light bundle", () => {
+    expect(DEFAULT_BUNDLE_ID).toBe("cherry-blossom");
+    expect(BUNDLES[0].id).toBe("cherry-blossom");
+    expect(findBundle(DEFAULT_BUNDLE_ID)?.shell).toBe("light");
   });
 
   it("findBundle returns undefined for unknown id", () => {
