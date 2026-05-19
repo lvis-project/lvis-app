@@ -4,9 +4,7 @@ import { LONG_TOAST_TTL_MS } from "../constants.js";
 import type { PersistentItem, ToastItem } from "./status-bar/types.js";
 import { useStatusBarNotifications } from "./status-bar/use-status-bar-notifications.js";
 import { useStatusBarInstall } from "./status-bar/use-status-bar-install.js";
-import { useStatusBarRuntime } from "./status-bar/use-status-bar-runtime.js";
-import { useStatusBarMarketplace } from "./status-bar/use-status-bar-marketplace.js";
-import { useStatusBarOs } from "./status-bar/use-status-bar-os.js";
+import { useStatusBarVendor } from "./status-bar/use-status-bar-vendor.js";
 
 // Re-export shared types so existing call sites (App.tsx, StatusBar.tsx, tests)
 // continue to import from this module without changes.
@@ -115,11 +113,15 @@ export function useStatusBar(opts: UseStatusBarOptions) {
   }, []);
 
   // ── Producers (each in its own file under status-bar/)
+  // PR-X1 — status bar surface is intentionally pared down to the items that
+  // belong in a one-line context strip: active LLM vendor/model + toasts.
+  // Plugin / tool / MCP counts, OS marker, and marketplace ping moved to
+  // Settings → General (PR-X2 follow-up). Their producer hooks still exist in
+  // status-bar/ for now so the follow-up PR can re-mount them in the Settings
+  // pane without re-implementing the IPC plumbing.
   useStatusBarNotifications({ api, pushToast });
   useStatusBarInstall({ api, pushToast });
-  useStatusBarRuntime({ api, upsertPersistent });
-  useStatusBarMarketplace({ api, upsertPersistent, removePersistent });
-  useStatusBarOs({ api, upsertPersistent });
+  useStatusBarVendor({ api, upsertPersistent });
 
   return {
     persistent,
