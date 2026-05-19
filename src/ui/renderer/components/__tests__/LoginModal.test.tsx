@@ -10,10 +10,12 @@ import { LoginModal } from "../LoginModal.js";
  * Demo activation flow (2026-05-19): the conversational variant funnels
  * chip 1 through an **activation-input sub-state** before the auth step.
  * The user pastes a `LVIS-DEMO:v1:<...>` activation string, the renderer
- * invokes `api.demo.activate(code)`, then the assistant bubble paints an
- * explicit ack ("활성 완료, 인증 시작합니다…") with an Enter button. Only
- * after that click does `api.loginMockup({ username: "demo", password:
- * "demo123" })` fire. These tests exercise the full chain.
+ * invokes `api.demo.activate(code)`, and on success the renderer
+ * *automatically* chains into `api.loginMockup({ username: "demo",
+ * password: "demo123" })` — no extra user keystroke required. The
+ * earlier "press Enter to begin" ack button was removed because the
+ * extra paper-cut read as friction; the activation bubble now flows
+ * straight into the auth checklist. These tests exercise the full chain.
  */
 
 function makeApi(
@@ -76,17 +78,10 @@ describe("LoginModal — chip-driven demo flow (activation → auth)", () => {
       '[data-testid="login-modal:activation-submit"]',
     ) as HTMLButtonElement;
     fireEvent.click(submit);
-
-    // Wait for the ack to appear, then click "Enter · 인증 시작".
-    await waitFor(() => {
-      expect(
-        document.querySelector('[data-testid="login-modal:proceed-to-auth"]'),
-      ).toBeTruthy();
-    });
-    const proceed = document.querySelector(
-      '[data-testid="login-modal:proceed-to-auth"]',
-    ) as HTMLButtonElement;
-    fireEvent.click(proceed);
+    // Auto-advance: the activation success now chains straight into the
+    // auth transcript via `runAuthMockup()` — no explicit Enter click
+    // required. The `waitFor(loginMockup)` in the caller paces the test
+    // around the IPC roundtrip.
   }
 
   it("fires loginMockup with hard-coded demo credentials after activation", async () => {

@@ -156,12 +156,14 @@ export function LoginModalConversational({
   const [activationCode, setActivationCode] = useState("");
   const [activationError, setActivationError] = useState<string | null>(null);
   const [activating, setActivating] = useState(false);
-  // F5 — explicit ack between activation success and the auth transcript.
-  // When the activation IPC resolves OK we paint a "활성 완료, 인증 시작합니다…"
-  // confirmation bubble and reveal an Enter button; the auth checklist
-  // only starts after the user presses Enter (or hits the Enter key).
-  // This gives the activation step a clean terminal state separate from
-  // the auth step's "✓ sandbox 준비 완료".
+  // Activation-success latch. Flips true the moment the activation IPC
+  // resolves OK. The renderer immediately chains into `runAuthMockup`,
+  // so the latch only lives long enough for the assistant bubble copy
+  // to swap to "활성 완료 · 인증 시작합니다…" before `submitting` flips
+  // true and the auth checklist takes over. (The earlier F5 "press Enter
+  // to begin" interstitial — separate ack button — was removed
+  // 2026-05-19 because the extra keystroke read as friction, not as a
+  // confirmation moment.)
   const [activationConfirmed, setActivationConfirmed] = useState(false);
 
   // Reset the conversational flow on every open so a re-entry starts
@@ -221,10 +223,10 @@ export function LoginModalConversational({
   /**
    * Run the existing loginMockup chain after activation has succeeded.
    * Factored out of the original `activateDemoChip` so the auth-step
-   * pacing (checklist + dwell + onSuccess hand-off) lives in one place
-   * and is reachable from both:
-   *   (a) the activation Enter button (`proceedToAuth`), and
-   *   (b) the Enter-key shortcut once `activationConfirmed === true`.
+   * pacing (checklist + dwell + onSuccess hand-off) lives in one place.
+   * Called directly from `submitActivation` once the activation IPC
+   * resolves OK — the earlier "press Enter to begin" interstitial was
+   * removed 2026-05-19.
    */
   const runAuthMockup = useCallback(async () => {
     if (submitting) return;
@@ -260,11 +262,13 @@ export function LoginModalConversational({
   }, [api, onSuccess, onOpenChange, submitting]);
 
   /**
-   * Submit the activation code. On success the renderer paints an
-   * explicit ack bubble + Enter button (F5 pace requirement); the auth
-   * transcript only fires after the user presses Enter via
-   * `proceedToAuth`. Failure paints a chat-style error bubble inside the
-   * activation block and leaves the input editable for retry.
+   * Submit the activation code. On success the renderer paints a brief
+   * "활성 완료 · 인증 시작" ack bubble and *immediately* chains into the
+   * auth transcript via `runAuthMockup` — the previous "press Enter to
+   * proceed" gate (F5) was removed 2026-05-19 because the extra user
+   * action read as a paper-cut rather than a confirmation. Failure paints
+   * a chat-style error bubble inside the activation block and leaves the
+   * input editable for retry.
    */
   const submitActivation = useCallback(async () => {
     if (activating || submitting) return;
@@ -279,6 +283,11 @@ export function LoginModalConversational({
       const result = await api.demo.activate(trimmed);
       if (result.ok) {
         setActivationConfirmed(true);
+        // Chain straight into the auth transcript — no extra Enter press
+        // required. `runAuthMockup` flips `submitting` true on entry, which
+        // collapses the activation block (gated by `!submitting`) and lets
+        // the checklist take over the same visual lane.
+        void runAuthMockup();
         return;
       }
       setActivationError(activationErrorMessage(result.error));
@@ -289,47 +298,28 @@ export function LoginModalConversational({
     } finally {
       setActivating(false);
     }
-  }, [api, activationCode, activating, submitting]);
-
-  /**
-   * Hand off from activation to auth. Triggered by the explicit Enter
-   * button OR the Enter key when `activationConfirmed === true`. Resets
-   * `activationConfirmed` first so the ack bubble does not linger inside
-   * the now-active auth transcript.
-   */
-  const proceedToAuth = useCallback(() => {
-    if (!activationConfirmed || submitting) return;
-    void runAuthMockup();
-  }, [activationConfirmed, submitting, runAuthMockup]);
+  }, [api, activationCode, activating, submitting, runAuthMockup]);
 
   // F2 — 1/2/3 keybindings for chip activation. Mirrors the
   // "위 선택지를 클릭하거나 `1`~`3` 키로 빠른 선택" footer hint.
-  // When `activationConfirmed === true` the Enter key proceeds to the auth
-  // transcript (F5 — explicit user ack between activation and auth).
+  // Note (2026-05-19): the previous F5 "Enter to proceed" shortcut was
+  // removed — activation success now chains directly into the auth
+  // transcript, so there is no idle "ready to begin" state requiring a
+  // second user keystroke.
   useEffect(() => {
     if (!open) return;
     const onKey = (e: KeyboardEvent) => {
       if (e.defaultPrevented || e.isComposing) return;
       if (e.metaKey || e.ctrlKey || e.altKey) return;
       const target = e.target as HTMLElement | null;
-      // Enter on the activation textarea submits the code (with Shift+Enter
-      // reserved for newlines — though the codec output is single-line, a
-      // wrapping clipboard could paste a stray `\n`). The textarea itself
-      // wires Enter via its own onKeyDown so we don't hijack from here.
       const isInputTarget =
         target &&
         (target.tagName === "INPUT" ||
           target.tagName === "TEXTAREA" ||
           target.isContentEditable);
-      // Once the activation step has resolved OK, Enter (from anywhere
-      // except a focused input) proceeds to the auth transcript.
-      if (e.key === "Enter" && activationConfirmed && !isInputTarget) {
-        e.preventDefault();
-        proceedToAuth();
-        return;
-      }
       // Don't hijack typing inside any incidental inputs (Settings tab
-      // navigation chip may briefly hand focus to a child input).
+      // navigation chip may briefly hand focus to a child input, and the
+      // activation textarea wires its own Enter handler).
       if (isInputTarget) {
         return;
       }
@@ -348,7 +338,7 @@ export function LoginModalConversational({
     };
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
-  }, [open, activateDemoChip, api, onOpenChange, activationConfirmed, proceedToAuth]);
+  }, [open, activateDemoChip, api, onOpenChange]);
 
   const isLastChecklistLine =
     checklistRevealed > 0 && checklistRevealed <= CHECKLIST_LINES.length;
@@ -487,11 +477,9 @@ export function LoginModalConversational({
                 className="rounded-lg rounded-tl-sm bg-muted px-3 py-2 text-[12.5px] leading-relaxed text-foreground"
                 data-testid="login-modal:assistant-prompt"
               >
-                {submitting
-                  ? "좋아요. 데모 자격증명으로 인증 중이에요…"
-                  : activationConfirmed
-                    ? "활성 완료. 인증을 시작할 준비가 됐어요. Enter 키를 누르거나 아래 버튼을 클릭하세요."
-                    : "데모 활성 코드를 받으셨나요? 한 줄로 붙여넣어 주세요. 형식은 `LVIS-DEMO:v1:...` 입니다."}
+                {submitting || activationConfirmed
+                  ? "활성 완료 · 데모 자격증명으로 인증을 시작합니다…"
+                  : "데모 활성 코드를 받으셨나요? 한 줄로 붙여넣어 주세요. 형식은 `LVIS-DEMO:v1:...` 입니다."}
               </p>
 
               {/* F2 — Activation input sub-state. Painted while the user is
@@ -566,29 +554,11 @@ export function LoginModalConversational({
                 </div>
               )}
 
-              {/* F5 — Explicit user ack between activation success and the
-                  auth transcript. The "인증 시작" button gives the user a
-                  beat to register that activation succeeded BEFORE the
-                  auth checklist starts streaming. Enter key also fires
-                  via the global keydown listener. */}
-              {activationConfirmed && !submitting && (
-                <div
-                  data-testid="login-modal:activation-ack"
-                  className="flex items-center gap-2"
-                >
-                  <Button
-                    type="button"
-                    size="sm"
-                    data-testid="login-modal:proceed-to-auth"
-                    onClick={() => proceedToAuth()}
-                  >
-                    Enter · 인증 시작
-                  </Button>
-                  <span className="text-[10.5px] text-muted-foreground">
-                    Enter 키로도 진행할 수 있어요.
-                  </span>
-                </div>
-              )}
+              {/* F5 (2026-05-19) — activation success now chains directly
+                  into `runAuthMockup` so there is no idle "press Enter to
+                  begin" interstitial. The checklist below takes over the
+                  visual lane within a tick of activationConfirmed flipping
+                  true. */}
 
               {checklistRevealed > 0 && (
                 <pre
