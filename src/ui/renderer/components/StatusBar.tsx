@@ -68,21 +68,36 @@ export function StatusBar(props: StatusBarProps) {
           </span>
         ) : (
           persistent.map((item, idx) => {
-            const inner = (
+            const inner = item.dot === true ? (
               <>
                 {item.a11yLabel !== undefined && (
                   <span className="sr-only">{item.a11yLabel}</span>
                 )}
                 <span
-                  style={{ fontFamily: EMOJI_FONT_STACK }}
-                  className="shrink-0 leading-none"
+                  data-testid={`status-bar-dot-${item.id}`}
+                  className={`h-2 w-2 shrink-0 rounded-full ${SEVERITY_DOT[item.severity]}`}
                   aria-hidden="true"
-                >
-                  {item.label}
-                </span>
-                <span className={`truncate tabular-nums ${SEVERITY_TEXT[item.severity]}`}>
-                  {item.value}
-                </span>
+                />
+              </>
+            ) : (
+              <>
+                {item.a11yLabel !== undefined && (
+                  <span className="sr-only">{item.a11yLabel}</span>
+                )}
+                {item.label !== undefined && item.label.length > 0 && (
+                  <span
+                    style={{ fontFamily: EMOJI_FONT_STACK }}
+                    className="shrink-0 leading-none"
+                    aria-hidden="true"
+                  >
+                    {item.label}
+                  </span>
+                )}
+                {item.value !== undefined && item.value.length > 0 && (
+                  <span className={`truncate tabular-nums ${SEVERITY_TEXT[item.severity]}`}>
+                    {item.value}
+                  </span>
+                )}
               </>
             );
             return (
