@@ -50,6 +50,15 @@
   --color-border: hsl(var(--border));
   --color-input: hsl(var(--input));
   --color-ring: hsl(var(--ring));
+  /*
+   * --ui-line: a deliberately visible "active UI line" token for slider
+   * tracks, scroll-area thumbs, and intentional separators. Distinct from
+   * --border (subtle card outline) and --muted (subtle hover bg) which
+   * intentionally sit ~1-2:1 against background per shadcn convention.
+   * Every theme bundle declares this with ≥3:1 contrast against
+   * --background so UI elements remain visible regardless of skin.
+   */
+  --color-ui-line: hsl(var(--ui-line));
 
   --radius-lg: var(--radius);
   --radius-md: calc(var(--radius) - 2px);
@@ -387,6 +396,7 @@
 
   /* ── 1. tokyo-night ─────────────────────────── dark + blue accent ── */
   :root[data-theme-bundle="tokyo-night"] {
+    --ui-line:                  217 33% 39.9%;
     --background:               222.2 84% 4.9%;
     --foreground:               210 40% 98%;
     --card:                     222.2 84% 7%;
@@ -443,6 +453,7 @@
 
   /* ── 2. midnight ──────────────────────────── dark + magenta accent ── */
   :root[data-theme-bundle="midnight"] {
+    --ui-line:                  217 33% 39.9%;
     --background:               222.2 84% 4.9%;
     --foreground:               210 40% 98%;
     --card:                     222.2 84% 7%;
@@ -499,6 +510,7 @@
 
   /* ── 3. forest ─────────────────────────────── light + teal accent ── */
   :root[data-theme-bundle="forest"] {
+    --ui-line:                  210 40% 59.5%;
     --background:               0 0% 100%;
     --foreground:               222 47% 11%;
     --card:                     0 0% 100%;
@@ -555,6 +567,7 @@
 
   /* ── 4. violet-light ─ light + warm-grey + vivid purple ─── */
   :root[data-theme-bundle="violet-light"] {
+    --ui-line:                  40 22% 49.0%;
     --background:               40 25% 92%;    /* Grey 6  #F0ECE4 — canvas */
     --foreground:               0 0% 15%;      /* Grey 1  #262626 */
     --card:                     40 35% 96%;    /* lifted warm ivory */
@@ -611,6 +624,7 @@
 
   /* ── 5. violet-dark ── dark + warm-grey-1 + vivid purple ── */
   :root[data-theme-bundle="violet-dark"] {
+    --ui-line:                  15 5% 44.0%;
     --background:               0 0% 15%;      /* Grey 1  #262626 — canvas */
     --foreground:               44 37% 94%;    /* Grey 7  #F6F3EB */
     --card:                     30 8% 20%;     /* warm-grey lifted card */
@@ -667,6 +681,7 @@
 
   /* ── 6. high-contrast ─── black + yellow primary (WCAG AA+) ────────── */
   :root[data-theme-bundle="high-contrast"] {
+    --ui-line:                  0 0% 35.0%;
     --background:               0 0% 0%;
     --foreground:               0 0% 100%;
     --card:                     0 0% 0%;
@@ -723,6 +738,7 @@
 
   /* ── 7. catppuccin-mocha ─── dark pastel + mauve accent ─────────────── */
   :root[data-theme-bundle="catppuccin-mocha"] {
+    --ui-line:                  234 13% 45.5%;
     --background:               240 21% 15%;
     --foreground:               226 64% 88%;
     --card:                     240 23% 12%;
@@ -779,6 +795,7 @@
 
   /* ── 8. catppuccin-latte ─── light pastel + mauve accent ────────────── */
   :root[data-theme-bundle="catppuccin-latte"] {
+    --ui-line:                  223 16% 57.5%;
     --background:               220 23% 95%;
     --foreground:               234 16% 35%;
     --card:                     220 22% 92%;
@@ -835,6 +852,7 @@
 
   /* ── 9. nord ─────────────────── dark + arctic frost + aurora ────────── */
   :root[data-theme-bundle="nord"] {
+    --ui-line:                  222 16% 52.5%;
     --background:               220 16% 22%;
     --foreground:               219 28% 88%;
     --card:                     222 16% 28%;
@@ -891,6 +909,7 @@
 
   /* ── 10. gruvbox-dark-hard ─── dark + warm orange + retro vim ────────── */
   :root[data-theme-bundle="gruvbox-dark-hard"] {
+    --ui-line:                  18 6% 42.0%;
     --background:               195 7% 12%;
     --foreground:               43 59% 81%;
     --card:                     0 0% 16%;
@@ -947,6 +966,7 @@
 
   /* ── 11. solarized-light ── light + Schoonover beige + balanced blue ── */
   :root[data-theme-bundle="solarized-light"] {
+    --ui-line:                  46 42% 45.0%;
     --background:               44 87% 94%;
     --foreground:               196 22% 22%;
     --card:                     44 87% 94%;
@@ -1003,6 +1023,7 @@
 
   /* ── 12. rose-pine ─────────── dark + iris/foam/gold + soho rose ────── */
   :root[data-theme-bundle="rose-pine"] {
+    --ui-line:                  248 25% 49.0%;
     --background:               249 22% 12%;
     --foreground:               245 50% 91%;
     --card:                     247 23% 15%;
@@ -1059,6 +1080,7 @@
 
   /* ── 13. cherry-blossom ── light + splash key red + brand magenta ───── */
   :root[data-theme-bundle="cherry-blossom"] {
+    --ui-line:                  340 30% 63.0%;
     --background:               0 0% 100%;
     --foreground:               0 0% 10%;
     --card:                     340 60% 99%;
