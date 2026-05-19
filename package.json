@@ -1,6 +1,6 @@
 {
   "name": "lvis-app",
-  "version": "0.1.8",
+  "version": "0.2.1",
   "private": true,
   "type": "module",
   "imports": {
@@ -200,6 +200,22 @@
         "to": "icon.png"
       },
       {
+        "from": "build/tray-icon.png",
+        "to": "tray-icon.png"
+      },
+      {
+        "from": "build/tray-icon@2x.png",
+        "to": "tray-icon@2x.png"
+      },
+      {
+        "from": "build/tray-iconTemplate.png",
+        "to": "tray-iconTemplate.png"
+      },
+      {
+        "from": "build/tray-iconTemplate@2x.png",
+        "to": "tray-iconTemplate@2x.png"
+      },
+      {
         "from": "resources/uv-runtime",
         "to": "uv"
       },
@@ -227,6 +243,7 @@
         { "x": 140, "y": 130, "type": "file" },
         { "x": 400, "y": 130, "type": "link", "path": "/Applications" },
         { "x": 140, "y": 290, "type": "file", "path": "build/dmg-extras/setup.command" },
+        { "x": 270, "y": 290, "type": "file", "path": "build/dmg-extras/uninstall.command" },
         { "x": 400, "y": 290, "type": "file", "path": "build/dmg-extras/README.txt" }
       ]
     },
@@ -259,6 +276,8 @@
       "differentialPackage": true,
       "createDesktopShortcut": "always",
       "createStartMenuShortcut": true,
+      "deleteAppDataOnUninstall": false,
+      "uninstallDisplayName": "LVIS",
       "shortcutName": "LVIS",
       "artifactName": "${productName}-${version}-windows-${arch}-setup.${ext}"
     }

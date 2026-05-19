@@ -43,7 +43,7 @@ import { useChatContext, type ChatContextValue } from "./context/ChatContext.js"
 import { InputActionBar } from "./components/InputActionBar.js";
 import { Composer, type ComposerHandle } from "./components/Composer.js";
 import { useSuggestedReplies } from "./hooks/use-suggested-replies.js";
-import { computeComposerPlaceholder } from "./utils/composer-placeholder.js";
+import { computeComposerPlaceholder, hasActiveSuggestedReplies } from "./utils/composer-placeholder.js";
 import { DeferredApprovalChip } from "./components/DeferredApprovalChip.js";
 import {
   ATTACH_MAX_COUNT,
@@ -201,6 +201,7 @@ export function ChatView({ api, onAsk, onEditSave, onFork, onToggleStar, onRetry
   const debugStreamEnabled = isDebugStreamEnabled();
   const composerRef = useRef<ComposerHandle | null>(null);
   const suggestedReplies = useSuggestedReplies();
+  const suggestedRepliesActive = hasActiveSuggestedReplies(suggestedReplies);
   const {
     entries, streaming, editingEntryIdx, setEditingEntryIdx, editBusy,
     question, setQuestion, chatEndRef, currentSessionId,
@@ -897,7 +898,7 @@ export function ChatView({ api, onAsk, onEditSave, onFork, onToggleStar, onRetry
             "준비되었습니다" copy so the user never sees a "로그인된 척" race
             where the empty state paints before the boot probe resolves
             (#1014 tracer: Stage B). */}
-        {visibleEntries.length === 0 && hasApiKey === true && !hasAskQuestions && <div className="py-12 text-center text-sm text-muted-foreground">LVIS 에이전트가 준비되었습니다. 질문을 입력하거나 /command를 사용하세요.</div>}
+        {visibleEntries.length === 0 && hasApiKey === true && !hasAskQuestions && !suggestedRepliesActive && <div className="py-12 text-center text-sm text-muted-foreground">LVIS 에이전트가 준비되었습니다. 질문을 입력하거나 /command를 사용하세요.</div>}
         {(() => {
           // Three-way entry classification eliminates retroactive-reclassification flicker.
           //

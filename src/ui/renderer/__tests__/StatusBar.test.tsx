@@ -169,6 +169,29 @@ describe("StatusBar", () => {
     expect(screen.getByText("Marketplace: Offline")).toBeInTheDocument();
   });
 
+  it("joins the AI provider ping dot directly before the LLM provider label", () => {
+    const pingItem: PersistentItem = {
+      id: "provider:llm-ping",
+      severity: "success",
+      dot: true,
+      a11yLabel: "AI provider: Connected",
+      tooltip: "AI provider: Connected",
+    };
+    const { container } = render(
+      <StatusBar
+        persistent={[
+          pingItem,
+          persistent({ id: "vendor:llm", label: "🔷", value: "Azure · gpt-4o" }),
+        ]}
+        visibleToast={null}
+      />,
+    );
+    expect(container.querySelector('[data-testid="status-bar"]')?.textContent).not.toContain("|");
+    const dot = container.querySelector('[data-testid="status-bar-dot-provider:llm-ping"]');
+    expect(dot?.className).toContain("bg-success");
+    expect(screen.getByText("Azure · gpt-4o")).toBeInTheDocument();
+  });
+
   it("uses role=status with aria-live=polite for screen-reader updates", () => {
     const { container } = render(<StatusBar persistent={[]} visibleToast={null} />);
     // Query the footer directly — rendering surfaces it with role="status".

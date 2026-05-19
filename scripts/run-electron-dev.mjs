@@ -26,6 +26,10 @@ import { spawn, spawnSync } from "node:child_process";
 import { createHash } from "node:crypto";
 import { existsSync, watch, copyFileSync, mkdirSync, readFileSync } from "node:fs";
 import { waitForAllFirstBuilds } from "./lib/dev-watcher-gate.mjs";
+import {
+  classifyElectronExit,
+  DEMO_ACTIVATION_DEV_RELAUNCH_EXIT_CODE,
+} from "./lib/dev-electron-exit.mjs";
 import { homedir } from "node:os";
 import { basename, dirname, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -613,7 +617,29 @@ function launchElectron() {
   electronProc.on("exit", (code, signal) => {
     log("electron", `exited code=${code} signal=${signal ?? "-"}`);
     electronProc = null;
-    if (!shuttingDown && !restartInFlight && signal !== "SIGTERM" && signal !== "SIGKILL") {
+    const exitAction = classifyElectronExit({
+      code,
+      signal,
+      shuttingDown,
+      restartInFlight,
+    });
+    if (exitAction === "restart") {
+      restartInFlight = true;
+      void (async () => {
+        try {
+          log(
+            "electron",
+            `demo activation requested dev relaunch (code=${DEMO_ACTIVATION_DEV_RELAUNCH_EXIT_CODE}) -> restarting (grace=${RESTART_DELAY_MS}ms)`,
+          );
+          await sleep(RESTART_DELAY_MS);
+          if (!shuttingDown) launchElectron();
+        } finally {
+          restartInFlight = false;
+        }
+      })();
+      return;
+    }
+    if (exitAction === "shutdown") {
       // If electron exited on its own (window closed), shut down dev loop.
       shutdown(0);
     }

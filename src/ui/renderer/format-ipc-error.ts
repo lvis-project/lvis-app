@@ -126,6 +126,12 @@ export const COMMON_IPC_ERROR_MESSAGES: Readonly<Record<string, string>> = {
   "invalid-vendor": "지원하지 않는 벤더입니다.",
   "no-demo-key": "이 벤더의 데모 API 키가 환경 변수에 설정되어 있지 않습니다.",
   "reviewer-rewire-failed": "권한 검토 모델을 새 설정으로 연결하지 못했습니다. 설정이 이전 상태로 되돌려졌습니다.",
+  // v0.2.1 hotfix — Step 2 (llm-key-issuing) try/catch surfaces this
+  // when setSecret / patch fails (disk full, Keychain locked, etc.).
+  // The "sandbox 준비 중" transcript fail in the user-reported repro
+  // was previously bubbling through as the generic "로그인 처리 중
+  // 오류" toast because the IPC promise rejected unhandled.
+  "llm-key-issuing-failed": "LLM 키 저장 중 오류가 발생했어요. 디스크 권한 또는 Keychain 상태를 확인해주세요.",
   // ── Demo activation (lvis:demo:activate — 2026-05-19) ──
   // The LoginModal carries its own activationErrorMessage() that prefers
   // a longer "활성 코드..." string with paste instructions. These default
@@ -134,6 +140,7 @@ export const COMMON_IPC_ERROR_MESSAGES: Readonly<Record<string, string>> = {
   "invalid-code": "활성 코드가 올바르지 않습니다.",
   "no-vendor": "활성 코드에 vendor 정보가 누락되었습니다.",
   "persist-failed": "활성 코드를 저장하지 못했습니다.",
+  "not-armed": "재시작 준비 상태가 아닙니다. 활성 코드를 다시 제출해 주세요.",
   // ── Tutorial-C — tour:{start,mark-complete,dismiss} validation ──
   "invalid-scenario-id": "선택한 가이드 투어 항목이 올바르지 않습니다.",
   "write-failed": "설정을 저장하지 못했습니다.",

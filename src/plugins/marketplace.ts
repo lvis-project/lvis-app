@@ -9,7 +9,7 @@ import type { MarketplaceFetcher } from "./marketplace-fetcher.js";
 import { toRegistryRelativeManifestPath, type PluginPaths } from "./plugin-paths.js";
 import { assertMockMarketplaceAllowed, isDevModeUnlocked } from "../boot/dev-flags.js";
 import type { PluginAccessSpec, PluginManifest, PluginMarketplaceItem, PluginRegistryEntryInstallSource, PluginUiExtension } from "./types.js";
-import { MissingDependenciesError } from "./types.js";
+import { MissingDependenciesError, MissingPluginDependenciesError } from "./types.js";
 import { resolveDependencies } from "./dependency-resolver.js";
 import { getCachedCatalog, isOfflineCacheEnabled, setCachedCatalog } from "./offline-cache.js";
 import type { InstallerProgressEvent } from "./marketplace-installer.js";
@@ -389,7 +389,7 @@ export class PluginMarketplaceService {
       touchedEntries: new Map(),
     };
     try {
-      return await this.installWithDependencies(pluginId, actor, new Set<string>(), null, state, onProgress);
+      return await this.installWithDependencies(pluginId, actor, new Set<string>(), state, onProgress);
     } catch (error) {
       await this.rollbackInstallOperation(state);
       throw error;
@@ -400,7 +400,6 @@ export class PluginMarketplaceService {
     pluginId: string,
     actor: "user" | "it-admin",
     seen: Set<string>,
-    bundleRootId: string | null,
     state: InstallOperationState,
     onProgress?: (event: InstallerProgressEvent) => void,
   ): Promise<{ pluginId: string; installed: true }> {
@@ -428,20 +427,35 @@ export class PluginMarketplaceService {
       }
     }
 
-    const activeBundleRootId =
-      bundleRootId ?? (normalizeDependencies(plugin).length > 0
-        ? plugin.id
-        : null);
+    // Lazy-cached registry snapshot — shared by the plugin-id preflight
+    // (issue #92) and the S14 capability preflight below. Avoids walking
+    // the installed-manifests list twice when both branches fire.
+    let installedManifestsCache: PluginManifest[] | null = null;
+    const getInstalledManifests = async (): Promise<PluginManifest[]> => {
+      if (installedManifestsCache === null) {
+        installedManifestsCache = await this.loadInstalledManifests();
+      }
+      return installedManifestsCache;
+    };
 
-    for (const dependency of normalizeDependencies(plugin)) {
-      await this.installWithDependencies(
-        dependency.pluginId,
-        actor,
-        seen,
-        activeBundleRootId,
-        state,
-        onProgress,
-      );
+    // Issue #92 — plugin-id dependencies declared via `dependencies[]` are
+    // NOT auto-installed. Soft (`required: false` or unset) dependencies are
+    // informational only — the consumer plugin must degrade its feature
+    // surface at runtime when a soft dependency is absent. Hard
+    // (`required: true`, including the legacy string-form `"<id>"` which
+    // `normalizeDependencies` coerces to `required: true`) dependencies must
+    // already be installed by the time the consumer plugin is installed;
+    // missing ones surface a clear error to the user instead of silently
+    // cascading admin-policy failures.
+    const deps = normalizeDependencies(plugin);
+    if (deps.length > 0) {
+      const installedIds = new Set((await getInstalledManifests()).map((m) => m.id));
+      const missingRequired = deps
+        .filter((d) => d.required && !installedIds.has(d.pluginId))
+        .map((d) => d.pluginId);
+      if (missingRequired.length > 0) {
+        throw new MissingPluginDependenciesError(missingRequired);
+      }
     }
 
     const existingEntry = await this.getInstalledRegistryEntry(plugin.id);
@@ -460,7 +474,10 @@ export class PluginMarketplaceService {
       const receiptValidation = await this.getInstallReceiptValidation(plugin.id, manifestPath);
       const isSameArtifact = this.installedArtifactMatchesCatalog(plugin, receiptValidation);
       if (isSameVersion && receiptValidation.ok && isSameArtifact) {
-        await this.touchInstalledRegistryEntry(plugin.id, activeBundleRootId, actor, plugin.pluginAccess, state);
+        // Pass `null` as `bundleRootId` — auto-install of `dependencies[]`
+        // is gone (issue #92), so no plugin is ever installed as a bundle
+        // child of another. `mergeBundleRefs` treats `null` as no-op.
+        await this.touchInstalledRegistryEntry(plugin.id, null, actor, plugin.pluginAccess, state);
         return { pluginId: plugin.id, installed: true };
       }
       if (isSameVersion && !receiptValidation.ok) {
@@ -475,11 +492,11 @@ export class PluginMarketplaceService {
       }
     }
 
-    // S14: dependency preflight — evaluate after declared dependencies have
-    // been auto-installed so providers can satisfy their own requires.capabilities.
+    // S14 — capability preflight. `requires.capabilities[]` is a separate
+    // contract from plugin-id `dependencies[]`: any installed plugin that
+    // advertises a matching `capabilities[]` tag satisfies the requirement.
     if (plugin.requires && plugin.requires.capabilities.length > 0) {
-      const installedManifests = await this.loadInstalledManifests();
-      const result = resolveDependencies(plugin.requires.capabilities, installedManifests);
+      const result = resolveDependencies(plugin.requires.capabilities, await getInstalledManifests());
       if (!result.ok) {
         throw new MissingDependenciesError(result.missing);
       }
@@ -498,6 +515,10 @@ export class PluginMarketplaceService {
     await this.artifactStore.cacheVersionFromManifest(pluginId, manifestAbsPath);
 
     // §M1 F-round: atomic read-modify-write under registry lock.
+    // Issue #92 — `bundleRootId` is always `null` here: the host no longer
+    // auto-installs dependencies, so no plugin is installed as a "bundle
+    // child" of another. `bundleRefs` itself is retained on entries for
+    // back-compat with prior installs (uninstall path still honors it).
     await updatePluginRegistry(this.registryPath, (registry) => {
       const existing = registry.plugins.find((x) => x.id === plugin.id);
       if (existing) {
@@ -506,7 +527,7 @@ export class PluginMarketplaceService {
         // A marketplace install always supersedes any prior install
         // source (local-dev, ...).
         existing.installSource = actor === "it-admin" ? "admin" : "user";
-        existing.bundleRefs = this.mergeBundleRefs(existing.bundleRefs, activeBundleRootId, plugin.id);
+        existing.bundleRefs = this.mergeBundleRefs(existing.bundleRefs, null, plugin.id);
         existing.approvedPluginAccess = plugin.pluginAccess;
       } else {
         registry.plugins.push({
@@ -514,7 +535,7 @@ export class PluginMarketplaceService {
           manifestPath,
           enabled: true,
           installSource: actor === "it-admin" ? "admin" : "user",
-          bundleRefs: this.mergeBundleRefs([], activeBundleRootId, plugin.id),
+          bundleRefs: this.mergeBundleRefs([], null, plugin.id),
           approvedPluginAccess: plugin.pluginAccess,
         });
       }
@@ -569,7 +590,7 @@ export class PluginMarketplaceService {
           touchedEntries: new Map(),
         };
         try {
-          await this.installWithDependencies(plugin.id, "it-admin", new Set<string>(), null, state);
+          await this.installWithDependencies(plugin.id, "it-admin", new Set<string>(), state);
         } catch (innerErr) {
           await this.rollbackInstallOperation(state);
           throw innerErr;
