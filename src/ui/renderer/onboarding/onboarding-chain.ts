@@ -6,7 +6,7 @@
  * effects. Pure because the unit test pins every transition without
  * mounting React.
  *
- * States:
+ * Stages:
  *   idle      — initial state. The async boot probe in App.tsx fires
  *               exactly one of `probe-start` → showcase (fresh boot) or
  *               `probe-skip` → done (returning user). Starting at `idle`
@@ -21,10 +21,21 @@
  *   plugins   — PluginShowcase mounted (per-plugin descriptions).
  *   done      — chain complete; chat empty-state visible.
  *
+ * Chain context (Option A — 2026-05-19):
+ *   `selectedScenarioId` carries the ScenarioShowcase card the user
+ *   chose to "start with" (e.g. "meeting" / "docs" / "work" /
+ *   "multi-agent"). Downstream stages (MemorySeed recommendations,
+ *   PluginShowcase ordering, intro placeholder) read it via the
+ *   exposed state so the chain is personalised by the user's first
+ *   click. `null` means the user skipped the showcase or no card was
+ *   clicked.
+ *
  * Events:
  *   probe-skip            — boot probe found an existing key (skip whole chain).
  *   probe-start           — boot probe says first-boot; mount Showcase.
- *   showcase-start        — user pressed "시작하기" in Showcase.
+ *   showcase-start        — user pressed "이 시나리오로 시작 →" inside the
+ *                           showcase. Carries the picked `scenarioId` so
+ *                           the chain context records the selection.
  *   showcase-skip         — user pressed "건너뛰기" in Showcase.
  *   login-success         — LoginModal onSuccess fired.
  *   login-skip            — LoginModal closed without success.
@@ -36,7 +47,7 @@
  *   plugins-close         — PluginShowcase closed (or skipped).
  *
  * Skipping at any stage advances to `done` so the user never gets
- * trapped. The reducer never returns to a prior state — strict forward
+ * trapped. The reducer never returns to a prior stage — strict forward
  * progress — so a stale onSuccess event from a re-mounted LoginModal
  * cannot reanimate the chain.
  */
@@ -51,10 +62,30 @@ export type OnboardingChainStage =
   | "plugins"
   | "done";
 
+/**
+ * Chain state — wraps the FSM stage with carry-along context so the
+ * reducer remains a pure `(state, event) => state` function while still
+ * threading the picked scenario through every downstream stage.
+ */
+export interface OnboardingChainState {
+  stage: OnboardingChainStage;
+  /**
+   * Scenario id (ScenarioShowcase card) the user chose to start with.
+   * Read by downstream stages to personalise recommendations + tour.
+   * `null` when no card was picked (skip path or returning user).
+   */
+  selectedScenarioId: string | null;
+}
+
+export const initialOnboardingChainState: OnboardingChainState = {
+  stage: "idle",
+  selectedScenarioId: null,
+};
+
 export type OnboardingChainEvent =
   | { type: "probe-skip" }
   | { type: "probe-start" }
-  | { type: "showcase-start" }
+  | { type: "showcase-start"; scenarioId?: string | null }
   | { type: "showcase-skip" }
   | { type: "login-success" }
   | { type: "login-skip" }
@@ -74,69 +105,91 @@ export type OnboardingChainEvent =
   | { type: "force-finish" };
 
 /**
- * Pure reducer for the Z onboarding chain.
+ * Pure stage transition. Unknown / out-of-order events are no-ops —
+ * the stage stays at its current value. This protects against
+ * duplicate IPC events (e.g. MemorySeed firing both onDismissed and a
+ * delayed onSuccess) and keeps the funnel deterministic.
  *
- * Unknown / out-of-order events are no-ops — the state stays at its
- * current value. This protects against duplicate IPC events (e.g.
- * MemorySeed firing both onDismissed and a delayed onSuccess) and
- * keeps the funnel deterministic.
+ * Exported so the unit test can pin every transition without
+ * constructing a chain state record.
  */
-export function onboardingChainReducer(
-  state: OnboardingChainStage,
+export function nextOnboardingStage(
+  stage: OnboardingChainStage,
   event: OnboardingChainEvent,
 ): OnboardingChainStage {
-  // External collapse — always honored. Lets the demo / kill-switch
-  // jump the chain straight to `done` from any stage.
   if (event.type === "force-finish") return "done";
-  switch (state) {
+  switch (stage) {
     case "idle":
       if (event.type === "probe-skip") return "done";
       if (event.type === "probe-start") return "showcase";
-      return state;
+      return stage;
 
     case "showcase":
       if (event.type === "showcase-start") return "login";
       if (event.type === "showcase-skip") return "done";
-      // `probe-skip` is intentionally NOT accepted from `showcase`. Initial
-      // state is `idle`; the async boot probe explicitly dispatches either
-      // `probe-start` (mount showcase) or `probe-skip` (skip to done) from
-      // `idle`, so an in-flight probe can never collapse a freshly-mounted
-      // showcase. This eliminates the closet-flash race where a stale
-      // probe-skip arriving after showcase mount would dismiss the intro
-      // for genuinely fresh-state users (#1014).
-      return state;
+      // `probe-skip` is intentionally NOT accepted from `showcase`.
+      // Initial stage is `idle`; the async boot probe explicitly
+      // dispatches either `probe-start` (mount showcase) or
+      // `probe-skip` (skip to done) from `idle`, so an in-flight probe
+      // can never collapse a freshly-mounted showcase. This eliminates
+      // the closet-flash race where a stale probe-skip arriving after
+      // showcase mount would dismiss the intro for genuinely
+      // fresh-state users (#1014).
+      return stage;
 
     case "login":
       if (event.type === "login-success") return "welcome";
       if (event.type === "login-skip") return "welcome";
-      return state;
+      return stage;
 
     case "welcome":
       if (event.type === "welcome-accept") return "memory";
       if (event.type === "welcome-skip") return "done";
-      return state;
+      return stage;
 
     case "memory":
       if (event.type === "memory-finish") return "tour";
-      return state;
+      return stage;
 
     case "tour":
       if (event.type === "tour-finish") return "plugins";
       if (event.type === "tour-skip") return "plugins";
-      return state;
+      return stage;
 
     case "plugins":
       if (event.type === "plugins-close") return "done";
-      return state;
+      return stage;
 
     case "done":
-      return state;
+      return stage;
   }
 }
 
 /**
- * Convenience predicate set — keeps App.tsx JSX free of `state === "..."`
- * litter and makes intent obvious at the call site.
+ * Pure reducer for the Z onboarding chain.
+ *
+ * Threads `selectedScenarioId` through the chain so downstream stages
+ * (MemorySeed recommendations, PluginShowcase ordering, etc.) can read
+ * what the user clicked in the ScenarioShowcase.
+ */
+export function onboardingChainReducer(
+  state: OnboardingChainState,
+  event: OnboardingChainEvent,
+): OnboardingChainState {
+  const stage = nextOnboardingStage(state.stage, event);
+  let selectedScenarioId = state.selectedScenarioId;
+  if (event.type === "showcase-start") {
+    if (typeof event.scenarioId === "string" && event.scenarioId.length > 0) {
+      selectedScenarioId = event.scenarioId;
+    }
+  }
+  return { stage, selectedScenarioId };
+}
+
+/**
+ * Convenience predicate set — keeps App.tsx JSX free of
+ * `state.stage === "..."` litter and makes intent obvious at the call
+ * site.
  */
 export const onboardingChainHelpers = {
   isShowcase: (s: OnboardingChainStage) => s === "showcase",

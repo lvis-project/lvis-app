@@ -48,6 +48,40 @@ export interface PluginShowcaseProps {
   api: PluginShowcaseApi;
   /** Called when the user closes the showcase (끝내기 / skip / close). */
   onClose: () => void;
+  /**
+   * ScenarioShowcase carry (Option A) — when set, the matching plugin
+   * is hoisted to the top of the showcase list so the user lands on
+   * the same scenario they picked at the start of the chain. `null`
+   * preserves the catalog order.
+   *
+   * Scenario id → plugin id map:
+   *   meeting       → meeting
+   *   docs          → local-indexer
+   *   work          → work-proactive
+   *   multi-agent   → agent-hub
+   */
+  prioritizedScenarioId?: string | null;
+}
+
+/**
+ * ScenarioShowcase id → PluginShowcase plugin id. Pure for unit
+ * testability. Unknown ids → null (caller treats as no-op).
+ */
+export function scenarioToPluginId(
+  scenarioId: string | null | undefined,
+): string | null {
+  switch (scenarioId) {
+    case "meeting":
+      return "meeting";
+    case "docs":
+      return "local-indexer";
+    case "work":
+      return "work-proactive";
+    case "multi-agent":
+      return "agent-hub";
+    default:
+      return null;
+  }
 }
 
 interface PluginDescription {
@@ -124,10 +158,16 @@ const PLUGIN_DESCRIPTION_BY_ID = new Map<string, PluginDescription>(
  * append a generic fallback card so the user always sees something for
  * each installed plugin.
  *
- * Pure for unit-testability — caller passes the raw id list.
+ * When `prioritizedPluginId` is set the matching card is hoisted to the
+ * top so a Showcase Option A user lands on the plugin they picked
+ * earlier in the chain.
+ *
+ * Pure for unit-testability — caller passes the raw id list + optional
+ * priority plugin id.
  */
 export function resolveShowcaseCards(
   installedPluginIds: readonly string[],
+  prioritizedPluginId: string | null = null,
 ): readonly PluginDescription[] {
   const installed = new Set(installedPluginIds);
   const known: PluginDescription[] = [];
@@ -145,7 +185,12 @@ export function resolveShowcaseCards(
       tourScenarioId: "first-boot-essentials",
     });
   }
-  return [...known, ...unknown];
+  const ordered = [...known, ...unknown];
+  if (!prioritizedPluginId) return ordered;
+  const idx = ordered.findIndex((card) => card.id === prioritizedPluginId);
+  if (idx <= 0) return ordered;
+  const head = ordered[idx];
+  return [head, ...ordered.slice(0, idx), ...ordered.slice(idx + 1)];
 }
 
 function usePrefersReducedMotion(): boolean {
@@ -176,11 +221,16 @@ export function PluginShowcase({
   installedPluginIds,
   api,
   onClose,
+  prioritizedScenarioId = null,
 }: PluginShowcaseProps) {
   const reduceMotion = usePrefersReducedMotion();
+  const prioritizedPluginId = useMemo(
+    () => scenarioToPluginId(prioritizedScenarioId),
+    [prioritizedScenarioId],
+  );
   const cards = useMemo(
-    () => resolveShowcaseCards(installedPluginIds),
-    [installedPluginIds],
+    () => resolveShowcaseCards(installedPluginIds, prioritizedPluginId),
+    [installedPluginIds, prioritizedPluginId],
   );
 
   const handleExplore = useCallback(
