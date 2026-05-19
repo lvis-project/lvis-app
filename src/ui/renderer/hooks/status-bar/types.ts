@@ -20,10 +20,22 @@ export interface NotificationToastMeta {
 export interface PersistentItem {
   id: string;
   severity: StatusBarSeverity;
-  /** Short label (left of dot) — e.g. "다음 루틴", or an emoji glyph. */
-  label: string;
+  /**
+   * Short label (left of dot) — e.g. "다음 루틴", or an emoji glyph. Optional
+   * when `dot` is true: dot-only producers (마켓플레이스 online ping) omit
+   * both `label` and `value` so the status bar shows nothing but the colored
+   * dot + tooltip.
+   */
+  label?: string;
   /** Variable value (right of dot) — e.g. "04:42 KST". */
-  value: string;
+  value?: string;
+  /**
+   * When true the StatusBar renders this item as a small colored circle only
+   * (severity → background class). `label` / `value` are ignored. Used by
+   * binary indicators like marketplace online/offline where the dot itself
+   * is the entire visual payload and the meaning lives in the `tooltip`.
+   */
+  dot?: boolean;
   /**
    * Screen-reader text. When `label` is an emoji glyph the SR would read its
    * Unicode name ("wrench") which loses semantic meaning; producers supply a

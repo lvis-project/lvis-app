@@ -5,6 +5,7 @@ import type { PersistentItem, ToastItem } from "./status-bar/types.js";
 import { useStatusBarNotifications } from "./status-bar/use-status-bar-notifications.js";
 import { useStatusBarInstall } from "./status-bar/use-status-bar-install.js";
 import { useStatusBarVendor } from "./status-bar/use-status-bar-vendor.js";
+import { useStatusBarMarketplace } from "./status-bar/use-status-bar-marketplace.js";
 
 // Re-export shared types so existing call sites (App.tsx, StatusBar.tsx, tests)
 // continue to import from this module without changes.
@@ -122,6 +123,10 @@ export function useStatusBar(opts: UseStatusBarOptions) {
   useStatusBarNotifications({ api, pushToast });
   useStatusBarInstall({ api, pushToast });
   useStatusBarVendor({ api, upsertPersistent });
+  // Marketplace reachability — dot-only indicator (no Korean label). The
+  // tooltip ("Marketplace: Online" / "Marketplace: Offline") carries the
+  // meaning so the status bar stays compact even on narrow windows.
+  useStatusBarMarketplace({ api, upsertPersistent, removePersistent });
 
   return {
     persistent,
