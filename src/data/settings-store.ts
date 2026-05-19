@@ -584,7 +584,22 @@ export class SettingsService {
       this.settings.webView = { ...this.settings.webView, ...partial.webView };
     }
     if (partial.system) {
-      this.settings.system = normalizeSystem({ ...this.settings.system, ...partial.system });
+      // Field-level validation (mirrors `appearance` pattern): invalid
+      // `closeBehavior` is silently dropped so an existing valid preference
+      // is not clobbered by a malformed renderer / IPC payload (critic N1
+      // in PR #1032 cluster review). The disk-load path's `normalizeSystem`
+      // still backfills missing fields with defaults.
+      const next: SystemSettings = { ...this.settings.system };
+      const rawBehavior = partial.system.closeBehavior;
+      if (typeof rawBehavior === "string" && (VALID_CLOSE_BEHAVIORS as readonly string[]).includes(rawBehavior)) {
+        next.closeBehavior = rawBehavior as SystemCloseBehavior;
+      } else if (rawBehavior !== undefined) {
+        log.warn(
+          `system.closeBehavior patch ignored (received ${JSON.stringify(rawBehavior)}), keeping %s`,
+          this.settings.system.closeBehavior,
+        );
+      }
+      this.settings.system = next;
     }
     if (partial.pluginConfigs) {
       const sanitized: Record<string, PluginConfigRecord> = {};
