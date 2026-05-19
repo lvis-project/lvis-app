@@ -1533,13 +1533,24 @@ function createWindow(options: { showBootstrapSplash?: boolean } = {}) {
   win.on("close", (event) => {
     if (appShutdownStarted || appShutdownCompleted || !tray || win.isDestroyed()) return;
     // Honour user's close-button preference. The default is `hide-to-tray`
-    // (keeps routine scheduler / briefing engine / plugin background work
-    // alive); a user who picks `quit` in Settings → 일반 → 시스템 gets the
-    // conventional Windows behaviour (close button terminates the app).
-    // Defensive `?? "hide-to-tray"` on the rare case `services` is unset
-    // (very early boot races) — defaults match `DEFAULT_SETTINGS.system`.
+    // (keeps routine scheduler + plugin background work alive); a user who
+    // picks `quit` in Settings → 일반 → 시스템 동작 gets the conventional
+    // Windows behaviour (close button terminates the app).
+    //
+    // Defensive `?? "hide-to-tray"` covers two real cases:
+    //   (1) very early boot before `services` is assigned;
+    //   (2) older settings.json from a pre-PR version with no `system`
+    //       block — the renderer-side AppSettings types `system?` as
+    //       optional, mirroring this fallback.
     const behavior = services?.settingsService.getAll().system?.closeBehavior ?? "hide-to-tray";
     if (behavior === "quit") {
+      // Gate the destroy through `before-quit` so the cleanup pipeline
+      // owns shutdown ordering — calling `app.quit()` without preventDefault
+      // races the window's default destroy against the async cleanup queue
+      // and can leave the user staring at an invisible-but-not-yet-exited
+      // process for up to `cleanupTimeoutMs` on slow shutdowns (architect
+      // MAJOR-1 in PR #1032 cluster review).
+      event.preventDefault();
       app.quit();
       return;
     }
