@@ -852,8 +852,10 @@ export function registerChatHandlers(deps: IpcDeps): void {
       await memoryManager.saveSession(conversationLoop.getSessionId(), current);
     }
     const newId = crypto.randomUUID();
-    await memoryManager.saveSession(newId, slice);
-    const currentMeta = memoryManager.loadSessionMetadata(conversationLoop.getSessionId());
+    const sourceSessionId = conversationLoop.getSessionId();
+    const forkSlice = memoryManager.rehydrateToolResultArtifacts(sourceSessionId, slice) as GenericMessage[];
+    await memoryManager.saveSession(newId, forkSlice);
+    const currentMeta = memoryManager.loadSessionMetadata(sourceSessionId);
     await memoryManager.saveSessionMetadata(newId, {
       sessionKind: currentMeta?.sessionKind ?? conversationLoop.getSessionKind(),
       ...(currentMeta?.routineId ? { routineId: currentMeta.routineId } : {}),

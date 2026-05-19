@@ -63,34 +63,6 @@ const SESSION_ID_REGEX = /^[a-zA-Z0-9_\-]+$/;
 function isSafeSessionId(sessionId: unknown): sessionId is string {
   return typeof sessionId === "string" && SESSION_ID_REGEX.test(sessionId);
 }
-
-function rehydrateToolResultArtifactsForFork(
-  memoryManager: MemoryManager,
-  sourceSessionId: string,
-  messages: GenericMessage[],
-): GenericMessage[] {
-  let changed = false;
-  const hydrated = messages.map((message) => {
-    if (message.role !== "tool_result" || !isToolResultStubContent(message.content)) {
-      return message;
-    }
-    const artifact = memoryManager.loadToolResultArtifact(sourceSessionId, message.toolUseId);
-    if (!artifact) return message;
-    const { serializedStub: _serializedStub, ...meta } = message.meta ?? {};
-    changed = true;
-    return {
-      ...message,
-      toolName: artifact.toolName ?? message.toolName,
-      content: artifact.content,
-      meta: {
-        ...meta,
-        truncated: artifact.truncated,
-      },
-    };
-  });
-  return changed ? hydrated : messages;
-}
-
 const FILE_CONTENT_RESULT_TOOLS = new Set([
   "read_file",
   "grep_files",
@@ -818,7 +790,7 @@ export class ConversationLoop {
       );
     }
 
-    const forkMessages = rehydrateToolResultArtifactsForFork(this.deps.memoryManager, this.sessionId, repaired);
+    const forkMessages = this.deps.memoryManager.rehydrateToolResultArtifacts(this.sessionId, repaired) as GenericMessage[];
     await this.deps.memoryManager.saveSession(newSessionId, forkMessages);
 
     // 브랜치 세션 metadata — checkpoint/fork provenance + prior summary.
