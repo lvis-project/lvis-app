@@ -53,6 +53,25 @@ export const TOOL_TIMEOUT_POLICY = {
   mcpRequestMaxMs: 120_000,
   networkFetchDefaultMs: 15_000,
   approvalGateUserWaitMs: 5 * 60 * 1000,
+  // Hard ceiling for the Electron `before-quit` cleanup chain
+  // (runShutdownRoutines → svc.shutdown → pluginRuntime.stopAll →
+  //  windowManager.persistAll). On expiry the host force-kills tracked
+  //  child processes and calls `app.exit(0)`. Override via env
+  //  `LVIS_SHUTDOWN_CLEANUP_TIMEOUT_MS` (legacy alias
+  //  `LVIS_SHUTDOWN_TIMEOUT_MS` deprecated, removed by 2026-08-01).
+  shutdownCleanupMs: 15_000,
+  // Inner timeout for `forceKillProcessTree` between SIGTERM and SIGKILL on
+  // a single tracked child. Bounded so shutdown never hangs on a stubborn
+  // grandchild while still giving graceful exits a window.
+  processTreeKillMs: 1_000,
+  // Polling interval for detached process-group disposal. The total wall
+  // clock for retries is bounded by `processGroupDisposalMaxMs` below.
+  processGroupPollMs: 1_000,
+  // Maximum wall-clock for `scheduleProcessGroupDisposal` retries before
+  // forcing dispose. Prevents the managed-children Map from leaking entries
+  // when a detached process group becomes orphaned into an unkillable
+  // foreign uid.
+  processGroupDisposalMaxMs: 5 * 60 * 1000,
 } as const;
 
 // Load-time invariant — fail loudly if the shell keys drift to a non-divisible
