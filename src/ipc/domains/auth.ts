@@ -27,6 +27,18 @@
  *     `demo123` mockup credentials and persisting an attacker-controlled
  *     "demo" key under `llm.apiKey.<vendor>`.
  *
+ * Step 2/3 error handling (v0.2.1 hotfix):
+ *   - Step 2 `llm-key-issuing` wraps `settingsService.setSecret` +
+ *     `settingsService.patch` in try/catch and returns
+ *     `{ ok: false, error: "llm-key-issuing-failed" }` on disk/Keychain
+ *     failures. Without this the IPC promise rejected and the renderer
+ *     surfaced the generic "로그인 처리 중 오류" toast with no actionable
+ *     hint about Keychain/disk permission.
+ *   - Step 3 `sandbox-preparing` rollback inner — `replaceLlm` /
+ *     `setSecret` / `deleteSecret` are wrapped in try/catch so a partial
+ *     rollback failure still returns `reviewer-rewire-failed` to the
+ *     renderer (preserving the IPC contract) instead of throwing.
+ *
  * Credential override:
  *   `LVIS_DEMO_USER` / `LVIS_DEMO_PASS` — let local dev rotate the demo
  *   credentials without rebuilding. Production builds rely on the defaults.
@@ -155,48 +167,83 @@ export function registerAuthHandlers(deps: IpcDeps): void {
       // Step 2 — llm-key-issuing. Encapsulates the secret-store write +
       // top-level settings patch so the renderer sees "키 발급" run until
       // the persistent state is durable on disk.
+      //
+      // v0.2.1 hotfix — wrap in try/catch so disk / Keychain failures
+      // emit `llm-key-issuing-failed` instead of bubbling as an IPC
+      // promise rejection. This is the user-visible "sandbox 준비 중"
+      // failure path the renderer transcript was hitting on first boot.
       const apiKeySecretKey = `llm.apiKey.${vendor}`;
       const prevApiKey = settingsService.getSecret(apiKeySecretKey);
       const prevLlm = settingsService.get("llm");
-      await progress.runStep(
-        "llm-key-issuing",
-        async () => {
-          await settingsService.setSecret(apiKeySecretKey, demoConfig.apiKey);
+      try {
+        await progress.runStep(
+          "llm-key-issuing",
+          async () => {
+            await settingsService.setSecret(apiKeySecretKey, demoConfig.apiKey);
 
-          // Build vendor settings patch for optional fields (baseUrl / model
-          // / vertex). Only apply fields the demo config actually provides
-          // so apiKey-only login still works as before.
-          const vendorPatch: Record<string, unknown> = {};
-          if (demoConfig.baseUrl !== undefined) {
-            vendorPatch.baseUrl = demoConfig.baseUrl;
-            fieldsApplied.push("baseUrl");
+            // Build vendor settings patch for optional fields (baseUrl / model
+            // / vertex). Only apply fields the demo config actually provides
+            // so apiKey-only login still works as before.
+            const vendorPatch: Record<string, unknown> = {};
+            if (demoConfig.baseUrl !== undefined) {
+              vendorPatch.baseUrl = demoConfig.baseUrl;
+              fieldsApplied.push("baseUrl");
+            }
+            if (demoConfig.model !== undefined) {
+              vendorPatch.model = demoConfig.model;
+              fieldsApplied.push("model");
+            }
+            if (demoConfig.vertexProject !== undefined) {
+              vendorPatch.vertexProject = demoConfig.vertexProject;
+              fieldsApplied.push("vertexProject");
+            }
+            if (demoConfig.vertexLocation !== undefined) {
+              vendorPatch.vertexLocation = demoConfig.vertexLocation;
+              fieldsApplied.push("vertexLocation");
+            }
+            // #893 — single combined patch: flip top-level authMode + provider
+            // AND apply the active vendor's optional config block.
+            await settingsService.patch({
+              llm: {
+                authMode: "login",
+                provider: vendor,
+                ...(Object.keys(vendorPatch).length > 0
+                  ? { vendors: { [vendor]: vendorPatch } }
+                  : {}),
+              },
+            });
+          },
+          vendor,
+        );
+      } catch (err) {
+        // setSecret / patch failed — secret store may have a partial
+        // write. Best-effort restore prevents the next login attempt
+        // from inheriting a half-applied key.
+        //
+        // v0.2.1 hotfix — main-process log.error so the failure stack
+        // lands in `~/Library/Logs/LVIS/main.log` (macOS) /
+        // `%APPDATA%/LVIS/logs/main.log` (Windows) for user-driven
+        // support escalations.
+        log.error(
+          `loginMockup llm-key-issuing failed: ${(err as Error).message}`,
+        );
+        try {
+          if (prevApiKey === null) {
+            await settingsService.deleteSecret(apiKeySecretKey);
+          } else {
+            await settingsService.setSecret(apiKeySecretKey, prevApiKey);
           }
-          if (demoConfig.model !== undefined) {
-            vendorPatch.model = demoConfig.model;
-            fieldsApplied.push("model");
-          }
-          if (demoConfig.vertexProject !== undefined) {
-            vendorPatch.vertexProject = demoConfig.vertexProject;
-            fieldsApplied.push("vertexProject");
-          }
-          if (demoConfig.vertexLocation !== undefined) {
-            vendorPatch.vertexLocation = demoConfig.vertexLocation;
-            fieldsApplied.push("vertexLocation");
-          }
-          // #893 — single combined patch: flip top-level authMode + provider
-          // AND apply the active vendor's optional config block.
-          await settingsService.patch({
-            llm: {
-              authMode: "login",
-              provider: vendor,
-              ...(Object.keys(vendorPatch).length > 0
-                ? { vendors: { [vendor]: vendorPatch } }
-                : {}),
-            },
-          });
-        },
-        vendor,
-      );
+          await settingsService.replaceLlm(prevLlm);
+        } catch (rollbackErr) {
+          // Rollback itself failed (e.g. Keychain unavailable). The
+          // outer return below preserves the IPC contract; the user
+          // will see the actionable Korean toast and can retry.
+          log.error(
+            `loginMockup llm-key-issuing rollback failed: ${(rollbackErr as Error).message}`,
+          );
+        }
+        return { ok: false, error: "llm-key-issuing-failed" };
+      }
 
       // Step 3 — sandbox-preparing. Captures the reviewer-agent rewire +
       // provider refresh so the user sees the agent sandbox spin up. On
@@ -215,18 +262,50 @@ export function registerAuthHandlers(deps: IpcDeps): void {
           },
           vendor,
         );
-      } catch {
-        await settingsService.replaceLlm(prevLlm);
-        if (prevApiKey === null) {
-          await settingsService.deleteSecret(apiKeySecretKey);
-        } else {
-          await settingsService.setSecret(apiKeySecretKey, prevApiKey);
+      } catch (err) {
+        // v0.2.1 hotfix — wrap the rollback inner in try/catch so a
+        // partial-rollback failure (e.g. Keychain unavailable during
+        // restore) still resolves to `reviewer-rewire-failed` rather
+        // than throwing through the IPC channel. The renderer's
+        // transcript depends on the contract that this handler always
+        // returns `{ok:false, error}` on failure paths.
+        //
+        // Main-process log.error so the failure stack lands in the
+        // user-visible log file for support escalations.
+        log.error(
+          `loginMockup sandbox-preparing failed: ${(err as Error).message}`,
+        );
+        try {
+          await settingsService.replaceLlm(prevLlm);
+        } catch (rollbackErr) {
+          // Partial settings rollback — the persisted on-disk state may
+          // still reflect the new vendor. The user can re-login or
+          // restart; either path heals the state.
+          log.error(
+            `loginMockup replaceLlm rollback failed: ${(rollbackErr as Error).message}`,
+          );
+        }
+        try {
+          if (prevApiKey === null) {
+            await settingsService.deleteSecret(apiKeySecretKey);
+          } else {
+            await settingsService.setSecret(apiKeySecretKey, prevApiKey);
+          }
+        } catch (rollbackErr) {
+          // Secret-store rollback failed. Same observation as above —
+          // re-login or restart heals.
+          log.error(
+            `loginMockup secret rollback failed: ${(rollbackErr as Error).message}`,
+          );
         }
         try {
           deps.rewireReviewerAgent?.();
-        } catch {
+        } catch (rewireErr) {
           // Rolled back to the previous active LLM settings. Keep returning
           // the machine-readable error so the renderer can surface retry UI.
+          log.error(
+            `loginMockup post-rollback rewire failed: ${(rewireErr as Error).message}`,
+          );
         }
         deps.conversationLoop?.refreshProvider?.();
         deps.refreshActiveLlmWildcard?.();
