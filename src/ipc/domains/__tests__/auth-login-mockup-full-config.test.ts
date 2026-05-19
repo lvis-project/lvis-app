@@ -63,7 +63,6 @@ beforeEach(async () => {
   handlers.clear();
   _isPackaged = false;
   vi.resetModules();
-  process.env.LVIS_DEMO_ENABLED = "1";
   const mod = await import("../../../main/demo-credentials.js");
   mod.resetDemoCredentialsForTesting();
 });

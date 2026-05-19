@@ -54,6 +54,12 @@ function invoke(channel: string, ...args: unknown[]): Promise<unknown> {
   );
 }
 
+function invokeWithEvent(channel: string, event: unknown, ...args: unknown[]): Promise<unknown> {
+  const fn = handlers.get(channel);
+  if (!fn) throw new Error(`No handler registered for: ${channel}`);
+  return Promise.resolve(fn(event, ...args));
+}
+
 function makeDeps() {
   return {
     auditLogger: { log: vi.fn() },
@@ -61,7 +67,6 @@ function makeDeps() {
 }
 
 const SAMPLE_ENV = [
-  "LVIS_DEMO_ENABLED=1",
   "LVIS_DEMO_VENDOR=azure-foundry",
   "LVIS_DEMO_KEY_AZURE_FOUNDRY=sk-activated-key",
   "LVIS_DEMO_BASEURL_AZURE_FOUNDRY=https://example.openai.azure.com/openai/v1/",
@@ -184,8 +189,9 @@ describe("lvis:demo:activate — first-activation relaunch (v0.2.1 hotfix)", () 
     // Simulate the second-boot path: `.env.demo` already on disk →
     // `captureDemoCredentials` ran with the right env → `isDemoEnabled()`
     // returns true → activation handler captures `demoWasEffectiveAtBoot=true`.
-    process.env.LVIS_DEMO_ENABLED = "1";
     process.env.LVIS_DEMO_VENDOR = "azure-foundry";
+    process.env.LVIS_DEMO_KEY_AZURE_FOUNDRY = "sk-boot-key";
+    process.env.LVIS_DEMO_BASEURL_AZURE_FOUNDRY = "https://example.openai.azure.com/openai/v1/";
     const { codec, credsMod, demoMod } = await loadDemoModule();
     // captureDemoCredentials before registerDemoHandlers — mirrors the
     // real boot order in main.ts.
@@ -212,6 +218,21 @@ describe("lvis:demo:activate — first-activation relaunch (v0.2.1 hotfix)", () 
 });
 
 describe("lvis:demo:activate — invalid-code", () => {
+  it("rejects an untrusted sender frame", async () => {
+    const { codec, demoMod } = await loadDemoModule();
+    const deps = makeDeps();
+    demoMod.registerDemoHandlers(deps as never);
+    const code = codec.encryptActivationPayload(SAMPLE_ENV);
+    const result = await invokeWithEvent(
+      "lvis:demo:activate",
+      { senderFrame: { url: "https://evil.example/app" } },
+      { code },
+    );
+    expect(result).toEqual({ ok: false, error: "unauthorized-frame" });
+    expect(relaunchMock).not.toHaveBeenCalled();
+    expect(exitMock).not.toHaveBeenCalled();
+  });
+
   it("rejects an empty string", async () => {
     const { demoMod } = await loadDemoModule();
     const deps = makeDeps();
@@ -268,10 +289,25 @@ describe("lvis:demo:activate — invalid-code", () => {
   });
 });
 
+describe("lvis:demo:relaunch-after-activation — sender guard", () => {
+  it("rejects an untrusted sender frame before checking armed state", async () => {
+    const { demoMod } = await loadDemoModule();
+    const deps = makeDeps();
+    demoMod.registerDemoHandlers(deps as never);
+    const result = await invokeWithEvent(
+      "lvis:demo:relaunch-after-activation",
+      { senderFrame: { url: "https://evil.example/app" } },
+    );
+    expect(result).toEqual({ ok: false, error: "unauthorized-frame" });
+    expect(relaunchMock).not.toHaveBeenCalled();
+    expect(exitMock).not.toHaveBeenCalled();
+  });
+});
+
 describe("lvis:demo:activate — no-vendor", () => {
   it("rejects a payload missing LVIS_DEMO_VENDOR", async () => {
     const { codec, demoMod } = await loadDemoModule();
-    const payloadWithoutVendor = "LVIS_DEMO_ENABLED=1\nLVIS_DEMO_KEY_OPENAI=k\n";
+    const payloadWithoutVendor = "LVIS_DEMO_KEY_OPENAI=k\n";
     const code = codec.encryptActivationPayload(payloadWithoutVendor);
 
     const deps = makeDeps();
