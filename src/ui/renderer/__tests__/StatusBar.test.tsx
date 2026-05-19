@@ -106,6 +106,30 @@ describe("StatusBar", () => {
     expect(onToastClick).not.toHaveBeenCalled();
   });
 
+  it("renders a clickable persistent item as a button and invokes onClick (PR-X1)", () => {
+    const onClick = vi.fn();
+    render(
+      <StatusBar
+        persistent={[persistent({ id: "vendor:llm", label: "🟧", value: "Claude · sonnet-4-6", onClick })]}
+        visibleToast={null}
+      />,
+    );
+    const btn = screen.getByRole("button", { name: /Claude · sonnet-4-6/ });
+    fireEvent.click(btn);
+    expect(onClick).toHaveBeenCalledTimes(1);
+  });
+
+  it("renders a persistent item without onClick as a plain span", () => {
+    render(
+      <StatusBar
+        persistent={[persistent({ id: "vendor:llm", label: "🟧", value: "Claude · sonnet-4-6" })]}
+        visibleToast={null}
+      />,
+    );
+    expect(screen.queryByRole("button")).toBeNull();
+    expect(screen.getByText("Claude · sonnet-4-6")).toBeInTheDocument();
+  });
+
   it("uses role=status with aria-live=polite for screen-reader updates", () => {
     const { container } = render(<StatusBar persistent={[]} visibleToast={null} />);
     // Query the footer directly — rendering surfaces it with role="status".

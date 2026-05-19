@@ -32,6 +32,18 @@ export interface PersistentItem {
    * labels can omit this and rely on `label` being read directly.
    */
   a11yLabel?: string;
+  /**
+   * Optional click handler. When set, the StatusBar renders this item as a
+   * button (focus-visible ring + hover affordance) so users can navigate to a
+   * related Settings tab. Producers like vendor/model use this to open
+   * Settings → LLM. Items without onClick render as a plain span.
+   */
+  onClick?: () => void;
+  /**
+   * Optional title text shown on hover. Useful when `value` is abbreviated
+   * (e.g. truncated model name) and the full string improves discoverability.
+   */
+  tooltip?: string;
 }
 
 export interface ToastItem {
