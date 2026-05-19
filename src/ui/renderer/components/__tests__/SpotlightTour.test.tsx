@@ -221,6 +221,78 @@ describe("SpotlightTour", () => {
     expect(card.getAttribute("data-step-index")).toBe("0");
   });
 
+  // U6 — when a Radix Dialog is already mounted, the tour.start broadcast
+  // is queued. The MutationObserver inside SpotlightTour flushes the
+  // queued scenario when every dialog closes.
+  it("U6 — queues tour.start when a modal dialog is already open", async () => {
+    // Mount a stand-in modal first.
+    const modal = document.createElement("div");
+    modal.setAttribute("role", "dialog");
+    modal.setAttribute("data-state", "open");
+    document.body.appendChild(modal);
+    const { api, fireStart } = makeApi();
+    const { queryByTestId, findByTestId } = render(
+      <SpotlightTour api={api} scenarios={FIXTURE_REGISTRY} />,
+    );
+    fireStart("test-scenario");
+    // Tour must NOT mount yet — a modal is open.
+    expect(queryByTestId("spotlight-tour:card")).toBeNull();
+    // Close the modal. The MutationObserver should pick this up and
+    // flush the queued scenario.
+    await act(async () => {
+      modal.setAttribute("data-state", "closed");
+      // Give the observer one microtask to fire.
+      await new Promise((r) => setTimeout(r, 0));
+    });
+    const card = await findByTestId("spotlight-tour:card");
+    expect(card.getAttribute("data-step-index")).toBe("0");
+    document.body.removeChild(modal);
+  });
+
+  // U8 — auto-advance on declared completion trigger. Typing in the
+  // composer matching the step's input selector should fire `handleNext`
+  // automatically without the user clicking 다음.
+  it("U8 — input trigger auto-advances when the user types in the anchor", async () => {
+    const SCENARIO_WITH_INPUT_TRIGGER: TourScenario = {
+      id: "input-scenario",
+      title: "Input scenario",
+      steps: [
+        {
+          anchorSelector: "#composer-fake",
+          title: "Type something",
+          body: "Composer body",
+          completionTrigger: { kind: "input", selector: "#composer-fake" },
+        },
+        {
+          anchorSelector: "#composer-fake",
+          title: "Done",
+          body: "Final body",
+        },
+      ],
+    };
+    const REGISTRY: Readonly<Record<string, TourScenario>> = Object.freeze({
+      [SCENARIO_WITH_INPUT_TRIGGER.id]: SCENARIO_WITH_INPUT_TRIGGER,
+    });
+    // Inject the anchor target.
+    const composer = document.createElement("input");
+    composer.id = "composer-fake";
+    document.body.appendChild(composer);
+    const { api, fireStart } = makeApi();
+    const { findByTestId } = render(
+      <SpotlightTour api={api} scenarios={REGISTRY} />,
+    );
+    fireStart("input-scenario");
+    let card = await findByTestId("spotlight-tour:card");
+    expect(card.getAttribute("data-step-index")).toBe("0");
+    // Fire an input event on the anchor.
+    act(() => {
+      fireEvent.input(composer, { target: { value: "hello" } });
+    });
+    card = await findByTestId("spotlight-tour:card");
+    expect(card.getAttribute("data-step-index")).toBe("1");
+    document.body.removeChild(composer);
+  });
+
   // F5 — `prefers-reduced-motion: reduce` swaps the animated drop-shadow
   // glow for an opacity-only static border. We assert the
   // `data-reduce-motion` attribute on the tour root so future renders can

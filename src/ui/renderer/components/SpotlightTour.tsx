@@ -35,6 +35,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
   DEFAULT_TOUR_SCENARIOS,
   getTourScenario,
+  type CompletionTrigger,
   type TourScenario,
   type TourStep,
 } from "../onboarding/default-tour-scenarios.js";
@@ -427,6 +428,60 @@ export function SpotlightTour({
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
   }, [scenario, handleNext, handlePrev, closeAfterDismissal]);
+
+  // U8 — Interactive auto-advance. When the current step declares a
+  // `completionTrigger`, attach a listener that fires `handleNext` the
+  // moment the user performs the matching action. This is what makes
+  // the tour "쫓아다닌다" (follow the user) — typing in the composer or
+  // pressing ⌘+K advances the tour without the user clicking "다음".
+  const triggerForStep: CompletionTrigger | undefined =
+    scenario?.steps[stepIndex]?.completionTrigger;
+  useEffect(() => {
+    if (!scenario) return;
+    if (!triggerForStep || triggerForStep.kind === "manual") return;
+
+    let cleanup: (() => void) | null = null;
+
+    if (triggerForStep.kind === "keypress") {
+      const combo = triggerForStep.combo;
+      const onKey = (e: KeyboardEvent) => {
+        if (e.isComposing) return;
+        const meta = e.metaKey || e.ctrlKey;
+        if (!meta) return;
+        if (combo === "⌘+K" && e.key.toLowerCase() === "k") {
+          handleNext();
+        } else if (
+          combo === "⌘+?" &&
+          e.shiftKey &&
+          (e.key === "?" || e.key === "/")
+        ) {
+          handleNext();
+        } else if (combo === "⌘+Enter" && e.key === "Enter") {
+          handleNext();
+        }
+      };
+      window.addEventListener("keydown", onKey);
+      cleanup = () => window.removeEventListener("keydown", onKey);
+    } else if (triggerForStep.kind === "input") {
+      const selector = triggerForStep.selector;
+      const target = document.querySelector<HTMLElement>(selector);
+      if (!target) return;
+      const onInput = () => handleNext();
+      target.addEventListener("input", onInput);
+      cleanup = () => target.removeEventListener("input", onInput);
+    } else if (triggerForStep.kind === "click") {
+      const selector = triggerForStep.selector;
+      const target = document.querySelector<HTMLElement>(selector);
+      if (!target) return;
+      const onClick = () => handleNext();
+      target.addEventListener("click", onClick);
+      cleanup = () => target.removeEventListener("click", onClick);
+    }
+
+    return () => {
+      if (cleanup) cleanup();
+    };
+  }, [scenario, stepIndex, triggerForStep, handleNext]);
 
   const reduceMotion = usePrefersReducedMotion();
   if (!scenario || !currentStep) return null;
