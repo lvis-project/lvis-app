@@ -130,6 +130,45 @@ describe("StatusBar", () => {
     expect(screen.getByText("Claude · sonnet-4-6")).toBeInTheDocument();
   });
 
+  it("renders a dot-only persistent item with severity color + tooltip (marketplace)", () => {
+    // Marketplace online — green dot, English tooltip, no visible 마켓 text.
+    const onlineItem: PersistentItem = {
+      id: "marketplace:online",
+      severity: "success",
+      dot: true,
+      a11yLabel: "Marketplace: Online",
+      tooltip: "Marketplace: Online",
+    };
+    const { container, rerender } = render(
+      <StatusBar persistent={[onlineItem]} visibleToast={null} />,
+    );
+    // No "마켓" text — only the colored dot + sr-only a11y label.
+    expect(screen.queryByText("마켓")).toBeNull();
+    expect(screen.getByText("Marketplace: Online")).toBeInTheDocument();
+    const dot = container.querySelector(
+      '[data-testid="status-bar-dot-marketplace:online"]',
+    );
+    expect(dot).not.toBeNull();
+    expect(dot?.className).toContain("bg-success");
+    // Tooltip wires through to `title` on the wrapping span.
+    const wrapper = container.querySelector('[title="Marketplace: Online"]');
+    expect(wrapper).not.toBeNull();
+
+    // Flip offline — dot turns destructive, tooltip swaps.
+    const offlineItem: PersistentItem = {
+      ...onlineItem,
+      severity: "error",
+      a11yLabel: "Marketplace: Offline",
+      tooltip: "Marketplace: Offline",
+    };
+    rerender(<StatusBar persistent={[offlineItem]} visibleToast={null} />);
+    const dotOffline = container.querySelector(
+      '[data-testid="status-bar-dot-marketplace:online"]',
+    );
+    expect(dotOffline?.className).toContain("bg-destructive");
+    expect(screen.getByText("Marketplace: Offline")).toBeInTheDocument();
+  });
+
   it("uses role=status with aria-live=polite for screen-reader updates", () => {
     const { container } = render(<StatusBar persistent={[]} visibleToast={null} />);
     // Query the footer directly — rendering surfaces it with role="status".
