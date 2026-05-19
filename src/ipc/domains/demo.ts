@@ -56,6 +56,9 @@ import {
 import type { IpcDeps } from "../types.js";
 
 const log = createLogger("demo-activation-ipc");
+// Keep in sync with scripts/lib/dev-electron-exit.mjs. In `bun run dev`,
+// the parent watcher owns relaunching so it can keep all watch processes alive.
+const DEMO_ACTIVATION_DEV_RELAUNCH_EXIT_CODE = 42;
 
 /**
  * Inject the parsed `.env.demo` key/value pairs into `process.env`. Mirrors
@@ -214,7 +217,9 @@ export function registerDemoHandlers(deps: IpcDeps): void {
       // `applyDemoHostResolverRules()` runs, so host-resolver-rules is
       // armed with the right hostmap by the time renderer code starts.
       // Therefore: on activation success, ask the renderer to surface a
-      // brief "재시작 중…" message, then `app.relaunch + app.exit(0)`.
+      // brief "재시작 중…" message, then relaunch. In `bun run dev`,
+      // the watcher owns that relaunch via a special exit code so it can keep
+      // main/preload/renderer/style watchers alive instead of shutting down.
       //
       // `requiresRelaunch=true` is the renderer's cue; the actual
       // relaunch fires from `setImmediate` so the IPC return value
@@ -223,6 +228,10 @@ export function registerDemoHandlers(deps: IpcDeps): void {
       if (shouldRelaunch) {
         setImmediate(() => {
           try {
+            if (process.env.LVIS_DEV === "1" && app.isPackaged === false) {
+              app.exit(DEMO_ACTIVATION_DEV_RELAUNCH_EXIT_CODE);
+              return;
+            }
             app.relaunch();
             app.exit(0);
           } catch (err) {
