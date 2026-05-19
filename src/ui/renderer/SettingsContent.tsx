@@ -14,6 +14,7 @@ import {
   Server,
   Puzzle,
   Store,
+  LayoutDashboard,
 } from "lucide-react";
 import { SavedToastFloating, SavedToastProvider } from "./contexts/saved-toast.js";
 import type { LvisApi } from "./types.js";
@@ -29,6 +30,7 @@ import { WebTab } from "./tabs/WebTab.js";
 import { McpTab } from "./tabs/McpTab.js";
 import { PluginConfigTab } from "./tabs/PluginConfigTab.js";
 import { MarketplaceTab } from "./tabs/MarketplaceTab.js";
+import { GeneralTab } from "./tabs/GeneralTab.js";
 import { LoginModal } from "./components/LoginModal.js";
 import { useSettingsOrchestration } from "./hooks/use-settings-orchestration.js";
 import { useDebouncedSave } from "./hooks/use-debounced-save.js";
@@ -67,7 +69,7 @@ function TabSaveBar({
 export function SettingsContent({
   api,
   onSaved,
-  initialTab = "llm",
+  initialTab = "general",
 }: {
   api: LvisApi;
   onSaved: () => void;
@@ -239,6 +241,10 @@ export function SettingsContent({
         // the override unambiguous.
         className="flex flex-1 flex-col items-stretch justify-start gap-1 overflow-y-auto rounded-none bg-transparent p-2"
       >
+        <TabsTrigger value="general" className={sideTriggerCls}>
+          <LayoutDashboard className={navIconCls} aria-hidden="true" />
+          일반
+        </TabsTrigger>
         <TabsTrigger value="llm" className={sideTriggerCls}>
           <Brain className={navIconCls} aria-hidden="true" />
           모델
@@ -338,6 +344,13 @@ export function SettingsContent({
             </button>
           </div>
         )}
+
+          <TabsContent value="general" className="flex-1 min-h-0 outline-none">
+            <GeneralTab
+              api={api}
+              onNavigate={(nextTab) => setTab(normalizeSettingsTab(nextTab))}
+            />
+          </TabsContent>
 
           <TabsContent value="llm" className="flex-1 min-h-0 outline-none">
             <LlmTab

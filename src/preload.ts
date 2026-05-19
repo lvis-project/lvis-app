@@ -979,6 +979,17 @@ const api = {
       online: boolean;
     }>,
 
+  // Settings "일반" dashboard — host metadata. Single source of truth is
+  // electron `app.getVersion()` + `process.platform`; the renderer never
+  // hard-codes either value.
+  getAppInfo: async () =>
+    ipcRenderer.invoke("lvis:app:info") as Promise<{
+      version: string;
+      platform: NodeJS.Platform;
+      arch: string;
+      userDataPath: string;
+    }>,
+
   // ─── Plugin Events ──────────────────────────────
   onPluginEvent: (
     eventType: string,
