@@ -622,10 +622,11 @@ export function App() {
         );
         if (cancelled) return;
         if (anyKey.some(Boolean)) {
-          // User already has a key — skip LoginModal, but still surface
-          // MemorySeed so they get the identity-seed step.
-          setNeedsMemorySeed(true);
-          setOnboardingOpen(true);
+          // User already has a vendor key persisted. Preserve the
+          // legacy behavior: skip both LoginModal and MemorySeed so the
+          // existing-install flow is unchanged. The MemorySeed wizard
+          // is only shown on a clean first-boot (no keys) so existing
+          // users are never prompted to re-seed their identity.
           return;
         }
         // U1 — open the LoginModal alone. Mark MemorySeed as pending so
