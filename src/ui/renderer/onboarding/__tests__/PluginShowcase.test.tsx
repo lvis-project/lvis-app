@@ -78,6 +78,12 @@ describe("resolveShowcaseCards", () => {
     );
     expect(cards.map((c) => c.id)).toEqual(["meeting", "local-indexer"]);
   });
+
+  it("catalog entries declare scenarios for inline expansion", () => {
+    const cards = resolveShowcaseCards(["meeting"]);
+    const meeting = cards.find((c) => c.id === "meeting");
+    expect(meeting?.scenarios.length).toBeGreaterThan(0);
+  });
 });
 
 describe("scenarioToPluginId", () => {
@@ -139,7 +145,7 @@ describe("PluginShowcase", () => {
     ).toBeTruthy();
   });
 
-  it("'둘러보기' fires api.tour.start with the per-plugin scenarioId", () => {
+  it("'펼쳐보기 ↓' toggles inline scenario list without firing api.tour.start", () => {
     const { api, tourStart } = makeApi();
     render(
       <PluginShowcase
@@ -149,8 +155,51 @@ describe("PluginShowcase", () => {
         onClose={() => {}}
       />,
     );
-    fireEvent.click(screen.getByTestId("plugin-showcase:card:meeting:explore"));
-    expect(tourStart).toHaveBeenCalledWith("meeting-walkthrough");
+    const card = screen.getByTestId("plugin-showcase:card:meeting");
+    expect(card.getAttribute("data-expanded")).toBe("false");
+    expect(
+      screen.queryByTestId("plugin-showcase:card:meeting:scenarios"),
+    ).toBeNull();
+
+    fireEvent.click(screen.getByTestId("plugin-showcase:card:meeting:expand"));
+    expect(card.getAttribute("data-expanded")).toBe("true");
+    const scenarios = screen.getByTestId(
+      "plugin-showcase:card:meeting:scenarios",
+    );
+    expect(scenarios.children.length).toBeGreaterThan(0);
+
+    // Toggle off.
+    fireEvent.click(screen.getByTestId("plugin-showcase:card:meeting:expand"));
+    expect(card.getAttribute("data-expanded")).toBe("false");
+    expect(
+      screen.queryByTestId("plugin-showcase:card:meeting:scenarios"),
+    ).toBeNull();
+
+    // No tour broadcast should fire from the inline expand path.
+    expect(tourStart).not.toHaveBeenCalled();
+  });
+
+  it("toggling one card's scenarios does not affect siblings", () => {
+    const { api } = makeApi();
+    render(
+      <PluginShowcase
+        open
+        installedPluginIds={["meeting", "local-indexer"]}
+        api={api}
+        onClose={() => {}}
+      />,
+    );
+    fireEvent.click(screen.getByTestId("plugin-showcase:card:meeting:expand"));
+    expect(
+      screen
+        .getByTestId("plugin-showcase:card:meeting")
+        .getAttribute("data-expanded"),
+    ).toBe("true");
+    expect(
+      screen
+        .getByTestId("plugin-showcase:card:local-indexer")
+        .getAttribute("data-expanded"),
+    ).toBe("false");
   });
 
   it("'끝내기 →' fires onClose", () => {

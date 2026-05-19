@@ -9,18 +9,20 @@
  *   1. Default grid (no active scenario) — 4 clickable cards
  *      illustrate the canonical LVIS scenarios (meeting / docs / work /
  *      multi-agent). Clicking a card switches the dialog into demo
- *      mode for that scenario. A small "건너뛰기 →" ghost link below
- *      the grid lets the user skip the whole intro.
+ *      mode for that scenario. 2026-05-20: the "건너뛰기" link was removed
+ *      from the grid — the user MUST pick one of the 4 cards before the
+ *      chain advances. There is no skip path; closing the dialog is a
+ *      no-op via Radix until a card is chosen.
  *
  *   2. Inline demo (activeScenarioId set) — the picked card's scripted
  *      turn plays inside the same dialog via the shared
  *      `ScriptedTurnEngine`. Header shows "← 다른 시나리오" + a pulsing
  *      "● DEMO" indicator; footer offers two CTAs:
- *        - "이 시나리오로 시작 →" — dispatches `showcase-start` with
+ *        - "로그인하에 LVIS 시작하기" — dispatches `showcase-start` with
  *           the picked scenarioId so the onboarding chain advances to
  *           LoginModal carrying the user's choice.
- *        - "다른 시나리오" — resets the active scenario, returning to
- *           the grid.
+ *        - "뒤로가기" — resets the active scenario, returning to the
+ *           grid (replaces the older "다른 시나리오" copy).
  *
  * Trust boundary stays identical to the standalone DemoAutoplayView:
  * the inline engine NEVER calls `ConversationLoop` or any real tool;
@@ -51,14 +53,13 @@ import { getScriptByScenarioId } from "../../../engine/demo-autoplay/scripts-reg
 export interface ScenarioShowcaseProps {
   open: boolean;
   /**
-   * Called when the user clicks "이 시나리오로 시작 →". Carries the
+   * Called when the user clicks "로그인하에 LVIS 시작하기". Carries the
    * picked scenarioId so the onboarding chain can personalise the
    * downstream stages (MemorySeed recommendations, PluginShowcase
-   * ordering, intro placeholder).
+   * ordering, intro placeholder). Always invoked from the inline demo
+   * footer — the grid no longer has a skip-equivalent button.
    */
   onStart: (scenarioId: string | null) => void;
-  /** Called when the user clicks "건너뛰기" — skips directly past login + tour. */
-  onSkip: () => void;
 }
 
 interface ScenarioCard {
@@ -118,7 +119,7 @@ function usePrefersReducedMotion(): boolean {
   return reduce;
 }
 
-export function ScenarioShowcase({ open, onStart, onSkip }: ScenarioShowcaseProps) {
+export function ScenarioShowcase({ open, onStart }: ScenarioShowcaseProps) {
   const reduceMotion = usePrefersReducedMotion();
   /**
    * Currently-previewed scenario id. `null` means the default 2×2
@@ -134,10 +135,6 @@ export function ScenarioShowcase({ open, onStart, onSkip }: ScenarioShowcaseProp
   const handleStart = useCallback(() => {
     onStart(activeScenarioId);
   }, [activeScenarioId, onStart]);
-
-  const handleSkip = useCallback(() => {
-    onSkip();
-  }, [onSkip]);
 
   const handleCardClick = useCallback((scenarioId: string) => {
     setActiveScenarioId(scenarioId);
@@ -158,7 +155,9 @@ export function ScenarioShowcase({ open, onStart, onSkip }: ScenarioShowcaseProp
   );
 
   return (
-    <Dialog open={open} onOpenChange={(next) => { if (!next) handleSkip(); }}>
+    // Forced choice — closing via outside-click / Esc is a no-op until
+    // the user picks a card and confirms.
+    <Dialog open={open} onOpenChange={() => { /* forced choice */ }}>
       <DialogContent
         size="sm"
         data-testid="scenario-showcase"
@@ -177,8 +176,6 @@ export function ScenarioShowcase({ open, onStart, onSkip }: ScenarioShowcaseProp
           <ScenarioShowcaseGrid
             cards={cards}
             onCardClick={handleCardClick}
-            onStart={handleStart}
-            onSkip={handleSkip}
           />
         )}
       </DialogContent>
@@ -191,17 +188,17 @@ export function ScenarioShowcase({ open, onStart, onSkip }: ScenarioShowcaseProp
  * mockup. Cards are now *buttons* (the entire surface is clickable);
  * the "▶ demo 시연" affordance under each label communicates that the
  * click leads to a live preview rather than a hidden tab switch.
+ *
+ * 2026-05-20: skip / proceed-without-pick buttons removed — user MUST
+ * pick one of the 4 cards before advancing. The inline demo footer
+ * is now the sole path forward.
  */
 function ScenarioShowcaseGrid({
   cards,
   onCardClick,
-  onStart,
-  onSkip,
 }: {
   cards: readonly ScenarioCard[];
   onCardClick: (scenarioId: string) => void;
-  onStart: () => void;
-  onSkip: () => void;
 }) {
   return (
     <>
@@ -259,30 +256,9 @@ function ScenarioShowcaseGrid({
           ))}
         </div>
 
-        {/* Primary CTA — proceeds without picking a scenario (chain
-            still records null selection so downstream uses default
-            ordering). */}
-        <Button
-          type="button"
-          data-testid="scenario-showcase:start"
-          onClick={onStart}
-          className="w-full text-primary-foreground"
-          style={{
-            background:
-              "linear-gradient(135deg, hsl(var(--p-purple-500)), hsl(var(--p-blue-500)))",
-          }}
-        >
-          시작하기 →
-        </Button>
-        <Button
-          type="button"
-          variant="ghost"
-          data-testid="scenario-showcase:skip"
-          onClick={onSkip}
-          className="w-full text-[11px]"
-        >
-          건너뛰기
-        </Button>
+        {/* 2026-05-20: skip + proceed-without-pick buttons removed. The
+            user must pick one of the 4 cards to proceed; the inline
+            demo footer is the sole path forward. */}
       </div>
     </>
   );
@@ -316,7 +292,7 @@ function ScenarioShowcaseInlineDemo({
           onClick={onBack}
           className="text-[10.5px] text-muted-foreground transition hover:text-foreground"
         >
-          ← 다른 시나리오
+          ← 뒤로가기
         </button>
         <span
           className="ml-2 text-[11px] font-medium text-foreground"
@@ -358,9 +334,6 @@ function ScenarioShowcaseInlineDemo({
             border: "1px solid hsl(var(--p-purple-500) / 0.5)",
           }}
         >
-          <div className="mb-2.5 text-[12px]">
-            이런 식으로 동작해요. 이 시나리오로 시작해볼까요?
-          </div>
           <div className="flex justify-center gap-2">
             <Button
               type="button"
@@ -373,16 +346,16 @@ function ScenarioShowcaseInlineDemo({
                   "linear-gradient(135deg, hsl(var(--p-purple-500)), hsl(var(--p-blue-500)))",
               }}
             >
-              이 시나리오로 시작 →
+              로그인하에 LVIS 시작하기
             </Button>
             <Button
               type="button"
               size="sm"
               variant="secondary"
-              data-testid="scenario-showcase:inline-demo:other"
+              data-testid="scenario-showcase:inline-demo:back-cta"
               onClick={onBack}
             >
-              다른 시나리오
+              뒤로가기
             </Button>
           </div>
         </div>

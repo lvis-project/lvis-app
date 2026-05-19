@@ -4,16 +4,14 @@ import { describe, it, expect, vi } from "vitest";
 import { fireEvent, render, screen } from "@testing-library/react";
 import { ScenarioShowcase } from "../ScenarioShowcase.js";
 
-describe("ScenarioShowcase (Option A — interactive demo launcher)", () => {
+describe("ScenarioShowcase (Option A — interactive demo launcher, 2026-05-20)", () => {
   it("renders nothing when open=false", () => {
-    render(
-      <ScenarioShowcase open={false} onStart={() => {}} onSkip={() => {}} />,
-    );
+    render(<ScenarioShowcase open={false} onStart={() => {}} />);
     expect(screen.queryByTestId("scenario-showcase")).toBeNull();
   });
 
   it("renders 4 scenario cards in catalog order when open", () => {
-    render(<ScenarioShowcase open onStart={() => {}} onSkip={() => {}} />);
+    render(<ScenarioShowcase open onStart={() => {}} />);
     expect(screen.getByTestId("scenario-showcase")).toBeTruthy();
     const grid = screen.getByTestId("scenario-showcase:grid");
     expect(grid.children.length).toBe(4);
@@ -25,33 +23,20 @@ describe("ScenarioShowcase (Option A — interactive demo launcher)", () => {
     ).toBeTruthy();
   });
 
-  it("default '시작하기 →' button fires onStart with null scenario", () => {
-    const onStart = vi.fn();
-    render(
-      <ScenarioShowcase open onStart={onStart} onSkip={() => {}} />,
-    );
-    fireEvent.click(screen.getByTestId("scenario-showcase:start"));
-    expect(onStart).toHaveBeenCalledTimes(1);
-    expect(onStart).toHaveBeenCalledWith(null);
-  });
-
-  it("'건너뛰기' fires onSkip", () => {
-    const onSkip = vi.fn();
-    render(
-      <ScenarioShowcase open onStart={() => {}} onSkip={onSkip} />,
-    );
-    fireEvent.click(screen.getByTestId("scenario-showcase:skip"));
-    expect(onSkip).toHaveBeenCalledTimes(1);
+  it("grid does NOT expose skip / proceed-without-pick buttons (forced choice)", () => {
+    render(<ScenarioShowcase open onStart={() => {}} />);
+    expect(screen.queryByTestId("scenario-showcase:start")).toBeNull();
+    expect(screen.queryByTestId("scenario-showcase:skip")).toBeNull();
   });
 
   it("cards are interactive buttons (Option A — click → inline demo)", () => {
-    render(<ScenarioShowcase open onStart={() => {}} onSkip={() => {}} />);
+    render(<ScenarioShowcase open onStart={() => {}} />);
     const card = screen.getByTestId("scenario-showcase:card:meeting");
     expect(card.tagName).toBe("BUTTON");
   });
 
   it("clicking a card mounts the inline demo for that scenario", () => {
-    render(<ScenarioShowcase open onStart={() => {}} onSkip={() => {}} />);
+    render(<ScenarioShowcase open onStart={() => {}} />);
     fireEvent.click(screen.getByTestId("scenario-showcase:card:meeting"));
     expect(screen.getByTestId("scenario-showcase:inline-demo")).toBeTruthy();
     expect(
@@ -61,8 +46,8 @@ describe("ScenarioShowcase (Option A — interactive demo launcher)", () => {
     expect(screen.queryByTestId("scenario-showcase:grid")).toBeNull();
   });
 
-  it("inline demo header '← 다른 시나리오' returns to the grid", () => {
-    render(<ScenarioShowcase open onStart={() => {}} onSkip={() => {}} />);
+  it("inline demo header '← 뒤로가기' returns to the grid", () => {
+    render(<ScenarioShowcase open onStart={() => {}} />);
     fireEvent.click(screen.getByTestId("scenario-showcase:card:docs"));
     expect(screen.getByTestId("scenario-showcase:inline-demo")).toBeTruthy();
     fireEvent.click(screen.getByTestId("scenario-showcase:inline-demo:back"));
@@ -70,25 +55,25 @@ describe("ScenarioShowcase (Option A — interactive demo launcher)", () => {
     expect(screen.getByTestId("scenario-showcase:grid")).toBeTruthy();
   });
 
-  it("inline demo footer '이 시나리오로 시작 →' fires onStart with picked scenarioId", () => {
+  it("inline demo footer '로그인하에 LVIS 시작하기' fires onStart with the picked scenarioId", () => {
     const onStart = vi.fn();
-    render(<ScenarioShowcase open onStart={onStart} onSkip={() => {}} />);
+    render(<ScenarioShowcase open onStart={onStart} />);
     fireEvent.click(screen.getByTestId("scenario-showcase:card:work"));
     fireEvent.click(screen.getByTestId("scenario-showcase:inline-demo:start"));
     expect(onStart).toHaveBeenCalledTimes(1);
     expect(onStart).toHaveBeenCalledWith("work");
   });
 
-  it("inline demo footer '다른 시나리오' returns to the grid", () => {
-    render(<ScenarioShowcase open onStart={() => {}} onSkip={() => {}} />);
+  it("inline demo footer '뒤로가기' returns to the grid", () => {
+    render(<ScenarioShowcase open onStart={() => {}} />);
     fireEvent.click(screen.getByTestId("scenario-showcase:card:multi-agent"));
-    fireEvent.click(screen.getByTestId("scenario-showcase:inline-demo:other"));
+    fireEvent.click(screen.getByTestId("scenario-showcase:inline-demo:back-cta"));
     expect(screen.queryByTestId("scenario-showcase:inline-demo")).toBeNull();
     expect(screen.getByTestId("scenario-showcase:grid")).toBeTruthy();
   });
 
   it("data-active-scenario reflects the currently-previewed card", () => {
-    render(<ScenarioShowcase open onStart={() => {}} onSkip={() => {}} />);
+    render(<ScenarioShowcase open onStart={() => {}} />);
     expect(
       screen.getByTestId("scenario-showcase").getAttribute("data-active-scenario"),
     ).toBe("");
