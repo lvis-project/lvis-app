@@ -308,6 +308,74 @@ describe("auth:login-mockup IPC handler (#893 top-level)", () => {
     expect(handlers.has("lvis:auth:login-mockup")).toBe(true);
   });
 
+  // v0.2.1 hotfix — Step 2 (llm-key-issuing) try/catch + Step 3
+  // rollback inner try/catch. The user-reported "sandbox 준비 중" fail
+  // was rooted in an unhandled throw from setSecret / replaceLlm.
+  it("returns llm-key-issuing-failed when setSecret throws (Step 2)", async () => {
+    process.env.LVIS_DEMO_VENDOR = "openai";
+    process.env.LVIS_DEMO_KEY_OPENAI = "sk-issuing-fail-test";
+    const deps = makeDeps();
+    deps.settingsService.setSecret.mockImplementationOnce(async () => {
+      throw new Error("EACCES: keychain access denied");
+    });
+    const { registerAuthHandlers } = await loadAuthModule();
+    registerAuthHandlers(deps as never);
+
+    const result = await invoke("lvis:auth:login-mockup", {
+      username: "demo",
+      password: "demo123",
+    });
+    expect(result).toEqual({ ok: false, error: "llm-key-issuing-failed" });
+    // Best-effort rollback ran (no prior key → deleteSecret path).
+    expect(deps.settingsService.deleteSecret).toHaveBeenCalledWith(
+      "llm.apiKey.openai",
+    );
+    // Step 3 (rewireReviewerAgent) MUST NOT run after Step 2 failed.
+    expect(deps.rewireReviewerAgent).not.toHaveBeenCalled();
+  });
+
+  it("returns llm-key-issuing-failed when settings.patch throws (Step 2)", async () => {
+    process.env.LVIS_DEMO_VENDOR = "openai";
+    process.env.LVIS_DEMO_KEY_OPENAI = "sk-patch-fail-test";
+    const deps = makeDeps();
+    deps.settingsService.patch.mockImplementationOnce(async () => {
+      throw new Error("ENOSPC: disk full");
+    });
+    const { registerAuthHandlers } = await loadAuthModule();
+    registerAuthHandlers(deps as never);
+
+    const result = await invoke("lvis:auth:login-mockup", {
+      username: "demo",
+      password: "demo123",
+    });
+    expect(result).toEqual({ ok: false, error: "llm-key-issuing-failed" });
+    expect(deps.rewireReviewerAgent).not.toHaveBeenCalled();
+  });
+
+  it("still returns reviewer-rewire-failed when Step 3 rollback replaceLlm throws", async () => {
+    process.env.LVIS_DEMO_VENDOR = "claude";
+    process.env.LVIS_DEMO_KEY_CLAUDE = "sk-ant-rollback-throw";
+    const deps = makeDeps();
+    deps.rewireReviewerAgent
+      .mockImplementationOnce(() => {
+        throw new Error("missing reviewer provider");
+      })
+      .mockImplementationOnce(() => undefined);
+    // Simulate the rollback inner throwing — IPC contract MUST still
+    // resolve to the kebab-case error envelope, never reject.
+    deps.settingsService.replaceLlm.mockImplementationOnce(async () => {
+      throw new Error("EACCES: settings file locked");
+    });
+    const { registerAuthHandlers } = await loadAuthModule();
+    registerAuthHandlers(deps as never);
+
+    const result = await invoke("lvis:auth:login-mockup", {
+      username: "demo",
+      password: "demo123",
+    });
+    expect(result).toEqual({ ok: false, error: "reviewer-rewire-failed" });
+  });
+
   // PR #894 review T1-10 — audit log fingerprint redaction
   it("redacts keySource from the audit log to `present` on successful login", async () => {
     // Path 2 hotfix: pin vendor to openai to preserve historical scenario
