@@ -69,12 +69,7 @@ export function trackManagedChildProcess(
     child,
     label: options.label ?? "child-process",
     killProcessGroup: options.killProcessGroup === true,
-    processGroupId: options.killProcessGroup === true &&
-      process.platform !== "win32" &&
-      typeof child.pid === "number" &&
-      child.pid > 0
-      ? child.pid
-      : undefined,
+    processGroupId: resolveProcessGroupId(child, options),
     dispose: () => {},
     onSettled: () => {},
   };
@@ -107,6 +102,23 @@ export function getManagedChildProcessCount(): number {
   return managedChildren.size;
 }
 
+/**
+ * Resolve the process group id for a tracked child. Returns `undefined`
+ * on Windows (where the concept does not apply) or when the caller did
+ * not opt into group-kill semantics. The id is the same as the child pid
+ * because `spawn(..., { detached: true })` makes the child the leader of
+ * a new process group.
+ */
+function resolveProcessGroupId(
+  child: ChildProcess,
+  options: TrackManagedChildProcessOptions,
+): number | undefined {
+  if (options.killProcessGroup !== true) return undefined;
+  if (process.platform === "win32") return undefined;
+  if (typeof child.pid !== "number" || child.pid <= 0) return undefined;
+  return child.pid;
+}
+
 export function forceKillManagedChildProcesses(reason: string): number {
   let killed = 0;
 
@@ -123,13 +135,27 @@ export function forceKillManagedChildProcesses(reason: string): number {
       killed += 1;
       log.warn({ pid: pid ?? null, label, killProcessGroup, reason }, "shutdown: force killed managed child process");
     } catch (err) {
-      log.warn({
+      // ESRCH = already dead = expected (silently dispose).
+      // EPERM = unkillable foreign uid = real problem (log error).
+      // Anything else = unknown filesystem/kernel state (log warn).
+      const code = (err as NodeJS.ErrnoException).code;
+      const logFields = {
         pid: child.pid ?? null,
         label,
         killProcessGroup,
         reason,
+        code: code ?? null,
         err: err instanceof Error ? err.message : String(err),
-      }, "shutdown: managed child process force kill failed");
+      };
+      if (code === "ESRCH") {
+        // Already gone — count it as effectively killed for accounting,
+        // do not pollute the warn channel.
+        killed += 1;
+      } else if (code === "EPERM") {
+        log.error(logFields, "shutdown: managed child process force kill blocked by EPERM");
+      } else {
+        log.warn(logFields, "shutdown: managed child process force kill failed");
+      }
     } finally {
       entry.dispose();
     }
@@ -227,6 +253,11 @@ function forceKillProcessTree(
       timeout: PROCESS_TREE_KILL_TIMEOUT_MS,
     });
     if (result.status === 0) return;
+    log.warn({
+      pid,
+      status: result.status ?? null,
+      signal: result.signal ?? null,
+    }, "managed-child: taskkill /T /F non-zero — falling back to child.kill(SIGKILL)");
   } else {
     for (const descendantPid of collectDescendantPids(pid).reverse()) {
       try {
