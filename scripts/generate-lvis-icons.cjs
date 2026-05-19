@@ -14,8 +14,8 @@ const LOGO_SAFE_PADDING = 192;
 const ICON_BACKGROUND = [255, 255, 255, 255];
 const TRAY_ICON_BASE_SIZE = 18;
 const TRAY_ICON_SCALE_FACTORS = [1, 2];
-const TRAY_ICON_PADDING_RATIO = 0.18;
-const TRAY_ICON_STROKE_RATIO = 0.045;
+const TRAY_ICON_PADDING_RATIO = 0.12;
+const TRAY_ICON_STROKE_RATIO = 0.028;
 const GRADIENT_STOPS = [
   { at: 0, color: [255, 75, 46] },
   { at: 0.56, color: [255, 63, 110] },
@@ -364,7 +364,7 @@ function rasterizeTrayLineIcon(logoPath, viewBox, targetSize, color) {
   const sourceSize = targetSize * factor;
   const padding = targetSize * TRAY_ICON_PADDING_RATIO;
   const geometry = iconGeometry(viewBox, targetSize, padding);
-  const strokeWidth = Math.max(0.8, targetSize * TRAY_ICON_STROKE_RATIO) * factor;
+  const strokeWidth = Math.max(0.5, targetSize * TRAY_ICON_STROKE_RATIO) * factor;
   const radiusSquared = (strokeWidth / 2) * (strokeWidth / 2);
   const buffer = Buffer.alloc(sourceSize * sourceSize * 4);
   const transformPoint = (point) => ({
