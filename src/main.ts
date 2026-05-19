@@ -50,6 +50,7 @@ import { uninstallPluginWithLifecycle } from "./plugins/uninstall-lifecycle.js";
 import { lvisHome } from "./shared/lvis-home.js";
 import { runShutdownRoutines } from "./main/shutdown-routines.js";
 import { captureDemoCredentials } from "./main/demo-credentials.js";
+import { applyDemoHostResolverRules } from "./main/demo-host-resolver.js";
 const log = createLogger("lvis");
 
 function errorMessage(err: unknown): string {
@@ -125,6 +126,15 @@ function applyRuntimeAppIcon() {
 // via inherited `process.env`. Capture is idempotent; the scrub below
 // runs unconditionally to close the env side-channel.
 captureDemoCredentials();
+// Path 2 hotfix — when `LVIS_DEMO_VENDOR=azure-foundry` and
+// `LVIS_DEMO_HOST_MAP` is non-empty, install a Chromium `host-resolver-rules`
+// switch so the demo Azure Foundry hostnames resolve to the LGE intranet
+// IPs *inside Electron only* (no `/etc/hosts` mutation, no sudo).
+// MUST be called before `app.whenReady()` — done here so the switch is
+// installed before any network service initialisation. Also runs BEFORE
+// the env scrub for the same reason as `captureDemoCredentials()`: the
+// vendor + map env vars are wiped immediately after.
+applyDemoHostResolverRules(app);
 
 if (app.isPackaged) {
   for (const key of Object.keys(process.env)) {
