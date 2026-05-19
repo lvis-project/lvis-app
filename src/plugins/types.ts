@@ -65,6 +65,25 @@ export type OpenAuthWindowFinalUrlResult = {
   finalUrl: string;
 };
 
+/**
+ * Marketplace install preflight metadata. The host does NOT auto-install
+ * declared dependencies (issue #92, 2026-05).
+ *
+ * - `required: true` (default — `required` 누락 object 와 legacy
+ *   string-form `"<pluginId>"` 모두 `normalizeDependencies` 가 동일
+ *   의미로 정규화): the referenced plugin MUST already be installed
+ *   when this plugin is installed, otherwise marketplace install
+ *   throws `MissingPluginDependenciesError` and aborts.
+ * - `required: false`: informational only. Install proceeds even if
+ *   the referenced plugin is absent; the consumer plugin MUST
+ *   runtime-degrade its feature surface (e.g. detector idle, tool
+ *   returns `{status:'<dep>_unavailable'}` envelope) when the dep is
+ *   missing.
+ *
+ * Cross-plugin tool/event access is governed separately via
+ * `PluginAccessSpec` — prefer `dependencies: [{ pluginId, required: false }]`
+ * paired with `pluginAccess.plugins[]` for soft cross-plugin integration.
+ */
 export interface DependencySpec {
   pluginId: string;
   versionRange?: string;
@@ -485,6 +504,25 @@ export class MissingDependenciesError extends Error {
     );
     this.missing = missing;
     this.name = "MissingDependenciesError";
+  }
+}
+
+/**
+ * Thrown by marketplace install preflight when a plugin declares
+ * `dependencies[].required = true` and the referenced plugin id is not
+ * present in the installed registry. `required: false` entries are
+ * informational — the host does NOT auto-install dependencies (issue #92),
+ * the consumer plugin must degrade its feature surface when a soft
+ * dependency is absent.
+ */
+export class MissingPluginDependenciesError extends Error {
+  readonly missing: string[];
+  constructor(missing: string[]) {
+    super(
+      `Plugin requires the following plugins to be installed first: ${missing.join(", ")}`,
+    );
+    this.missing = missing;
+    this.name = "MissingPluginDependenciesError";
   }
 }
 

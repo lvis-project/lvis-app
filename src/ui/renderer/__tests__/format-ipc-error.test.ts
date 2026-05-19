@@ -50,4 +50,17 @@ describe("formatIpcError (SOT — #830)", () => {
       "활성 사용자 입력",
     );
   });
+
+  // v0.2.1 hotfix — Step 2 (llm-key-issuing) error path mapping.
+  it("maps llm-key-issuing-failed to the Keychain/disk hint", () => {
+    const out = formatIpcError("llm-key-issuing-failed", undefined);
+    expect(out).toContain("LLM 키 저장");
+    expect(out).toContain("Keychain");
+  });
+
+  it("maps reviewer-rewire-failed to the Korean rollback message", () => {
+    expect(formatIpcError("reviewer-rewire-failed", undefined)).toContain(
+      "권한 검토 모델",
+    );
+  });
 });
