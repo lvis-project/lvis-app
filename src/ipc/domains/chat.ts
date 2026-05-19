@@ -1172,14 +1172,14 @@ export function registerChatHandlers(deps: IpcDeps): void {
   });
 
   // ─── Verbatim tool_result lazy-load ────────────────────────────────────
-  // Returns the in-memory verbatim content for a compacted tool_result.
+  // Returns the in-memory verbatim content for a compacted or size-capped tool_result.
   // Only works for the currently-active session — other sessions have been
   // stubbed to disk and the verbatim is gone. Returns null when:
   //   - sessionId does not match the active session
   //   - toolUseId not found in history
-  //   - message has NOT been compacted (meta.compactedAt not set) — callers
-  //     should only request verbatim for compacted (stubbed) tool results
-  //   - message is already a disk stub (content starts with "[tool_result stripped:")
+  //   - message has NOT been compacted or size-capped — callers should only
+  //     request verbatim for stubbed tool results
+  //   - message is already a disk stub
   // lineCount is computed here so the renderer never has to split on "\n".
   ipcMain.handle(
     "lvis:chat:get-verbatim-tool-result",
@@ -1195,13 +1195,16 @@ export function registerChatHandlers(deps: IpcDeps): void {
           m.role === "tool_result" && m.toolUseId === toolUseId,
       );
       if (!msg) return null;
-      // only serve verbatim for messages that have been compacted
-      if (msg.meta?.compactedAt === undefined) return null;
+      // only serve verbatim for messages that have been compacted or size-capped
+      if (msg.meta?.compactedAt === undefined && msg.meta?.truncated === undefined) return null;
       // content is always string on tool_result messages
       const content = msg.content;
       if (typeof content !== "string") return null;
       // already stub text → verbatim lost
-      if (content.startsWith("[tool_result stripped:")) return null;
+      if (
+        content.startsWith("[tool_result stripped:") ||
+        content.startsWith("[tool_result truncated by host")
+      ) return null;
       // zero-allocation line count
       let lineCount = 1;
       for (let i = 0; i < content.length; i++) {

@@ -45,14 +45,25 @@ function makeToolResultMsg(opts: {
   content: string;
   toolName?: string;
   compactedAt?: string;
+  truncated?: {
+    originalLines: number;
+    originalTokens: number;
+    originalBytes: number;
+    trimmedAt: string;
+  };
 }) {
   return {
     role: "tool_result" as const,
     toolUseId: opts.toolUseId,
     toolName: opts.toolName ?? "Read",
     content: opts.content,
-    ...(opts.compactedAt !== undefined
-      ? { meta: { compactedAt: opts.compactedAt } }
+    ...(opts.compactedAt !== undefined || opts.truncated !== undefined
+      ? {
+          meta: {
+            ...(opts.compactedAt !== undefined ? { compactedAt: opts.compactedAt } : {}),
+            ...(opts.truncated !== undefined ? { truncated: opts.truncated } : {}),
+          },
+        }
       : {}),
   };
 }
@@ -199,6 +210,25 @@ describe("lvis:chat:get-verbatim-tool-result", () => {
     expect(result).toBeNull();
   });
 
+  it("returns null when content is already a host-truncated stub (verbatim lost)", async () => {
+    const loop = makeConversationLoop(SESSION_ID, [
+      makeToolResultMsg({
+        toolUseId: "tu-1",
+        content: "[tool_result truncated by host (Issue #902): tool=Read, originalBytes=12345]",
+        truncated: {
+          originalLines: 200,
+          originalTokens: 5000,
+          originalBytes: 12345,
+          trimmedAt: "2026-05-19T00:00:00.000Z",
+        },
+      }),
+    ]);
+    await setupHandlers(loop);
+
+    const result = invoke(CHANNEL, { sessionId: SESSION_ID, toolUseId: "tu-1" });
+    expect(result).toBeNull();
+  });
+
   it("returns null for non-compacted tool_result (meta.compactedAt not set)", async () => {
     // A tool_result that was never compacted should NOT be served via this IPC.
     // Only messages that have gone through the compact pipeline are valid callers.
@@ -209,6 +239,26 @@ describe("lvis:chat:get-verbatim-tool-result", () => {
 
     const result = invoke(CHANNEL, { sessionId: SESSION_ID, toolUseId: "tu-1" });
     expect(result).toBeNull();
+  });
+
+  it("returns verbatim for size-capped tool_result that still has in-memory content", async () => {
+    const content = "verbatim capped content\nline two";
+    const loop = makeConversationLoop(SESSION_ID, [
+      makeToolResultMsg({
+        toolUseId: "tu-1",
+        content,
+        truncated: {
+          originalLines: 2,
+          originalTokens: 20,
+          originalBytes: content.length,
+          trimmedAt: "2026-05-19T00:00:00.000Z",
+        },
+      }),
+    ]);
+    await setupHandlers(loop);
+
+    const result = invoke(CHANNEL, { sessionId: SESSION_ID, toolUseId: "tu-1" });
+    expect(result).toEqual({ content, lineCount: 2 });
   });
 
   it("returns verbatim for compacted tool_result that still has verbatim content", async () => {

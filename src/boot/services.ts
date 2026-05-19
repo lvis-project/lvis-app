@@ -15,6 +15,7 @@ import { ToolRegistry } from "../tools/registry.js";
 import { BashTool } from "../tools/bash.js";
 import { createFileTools } from "../tools/file-tools.js";
 import { PowerShellTool } from "../tools/powershell.js";
+import { createReadToolResultChunkTool } from "../tools/tool-result-chunk.js";
 import { BashAstValidator } from "../main/bash-ast-validator.js";
 import { AuditService } from "../main/audit-service.js";
 import { AuditLogger } from "../audit/audit-logger.js";
@@ -87,6 +88,7 @@ export async function bootstrapCoreServices(mainWindow: BrowserWindow): Promise<
   // (Layer 3 + Bash AST validation gate at executor Step 2.5).
   toolRegistry.register(new BashTool());
   toolRegistry.register(new PowerShellTool());
+  toolRegistry.register(createReadToolResultChunkTool());
   for (const tool of createFileTools()) {
     toolRegistry.register(tool);
   }
