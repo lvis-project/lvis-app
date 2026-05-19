@@ -590,14 +590,27 @@ export function App() {
   // `features.onboardingCompleted = true` so subsequent boots skip the
   // dialog even if the user closes Settings without saving a key.
   //
-  // Tutorial-A fix (F1): when no vendor key is persisted, surface the
-  // LoginModal (L-X1/L-X2 demo onboarding) before the MemorySeed wizard.
-  // The LoginModal handles credential issue → demo key auto-provisioning
-  // and only then does MemorySeed open via onSuccess → the flow is:
-  //   first-boot → LoginModal → onSuccess → MemorySeedDialog → tour.start
-  // `features.onboardingCompleted` still gates re-entry so an existing
-  // install with a key but cleared onboarding flag does not re-prompt.
+  // Tutorial-A fix (F1) + U1 (onboarding-completion fix): when no vendor
+  // key is persisted, surface the LoginModal (L-X1/L-X2 demo onboarding)
+  // SEQUENTIALLY before the MemorySeed wizard — never simultaneously.
+  //
+  // Previous bug: setAppLoginOpen(true) AND setOnboardingOpen(true) fired
+  // in the same probe; both Radix Dialogs mounted on the first frame and
+  // MemorySeed (rendered above LoginModal in JSX z-stack) made it look
+  // like the LoginModal "flashed and closed". The visual flicker confused
+  // users into thinking the credential-issue scenario never completed.
+  //
+  // Fixed flow:
+  //   first-boot → LoginModal (only) → onSuccess → MemorySeed → tour.start
+  // The probe uses a ref-guarded gate so the effect runs exactly once per
+  // mount, even under React 18 StrictMode double-invocation. MemorySeed
+  // is only opened from `onSuccess` or after the user explicitly closes
+  // LoginModal (i.e., chooses to bypass the demo gate).
+  const firstBootProbedRef = useRef(false);
+  const [needsMemorySeed, setNeedsMemorySeed] = useState(false);
   useEffect(() => {
+    if (firstBootProbedRef.current) return;
+    firstBootProbedRef.current = true;
     let cancelled = false;
     void (async () => {
       try {
@@ -608,17 +621,18 @@ export function App() {
           LLM_VENDORS.map((v) => api.hasApiKey(v).catch(() => false)),
         );
         if (cancelled) return;
-        if (anyKey.some(Boolean)) return;
-        // #893 — top-level login wraps vendor selection; the LoginModal
-        // backend decides the vendor (LVIS_DEMO_VENDOR), so we no longer
-        // need to seed an onboarding vendor here.
-        //
-        // F1 — open the LoginModal first; on success it triggers the
-        // MemorySeedDialog. If the user dismisses LoginModal without
-        // logging in, MemorySeed still opens (legacy path) so existing
-        // BYOK users are not blocked behind the demo gate.
+        if (anyKey.some(Boolean)) {
+          // User already has a vendor key persisted. Preserve the
+          // legacy behavior: skip both LoginModal and MemorySeed so the
+          // existing-install flow is unchanged. The MemorySeed wizard
+          // is only shown on a clean first-boot (no keys) so existing
+          // users are never prompted to re-seed their identity.
+          return;
+        }
+        // U1 — open the LoginModal alone. Mark MemorySeed as pending so
+        // it opens when LoginModal resolves (onSuccess or close).
+        setNeedsMemorySeed(true);
         setAppLoginOpen(true);
-        setOnboardingOpen(true);
       } catch {
         // Probe failure is non-fatal — chat still works once a key exists.
       }
@@ -1310,9 +1324,26 @@ export function App() {
       <LoginModal
         api={api}
         open={appLoginOpen}
-        onOpenChange={setAppLoginOpen}
+        onOpenChange={(open) => {
+          setAppLoginOpen(open);
+          // U1 — when LoginModal closes (success or skip), chain to
+          // MemorySeed sequentially. The probe sets `needsMemorySeed` on
+          // first-boot; if the user already had a key MemorySeed was
+          // opened directly. Skipping LoginModal still surfaces
+          // MemorySeed so the user always reaches the identity-seed step.
+          if (!open && needsMemorySeed) {
+            setNeedsMemorySeed(false);
+            // Defer a tick so Radix can fully unmount LoginModal portal
+            // before MemorySeed mounts — prevents focus-trap collision
+            // between two simultaneous Dialogs.
+            window.setTimeout(() => setOnboardingOpen(true), 60);
+          }
+        }}
         onSuccess={() => {
           void checkApiKey();
+          // Don't open MemorySeed here — `onOpenChange(false)` fires
+          // immediately after `onSuccess` and that path handles the
+          // chained mount. Opening it twice causes a remount race.
         }}
       />
       {/* Tutorial-C — SpotlightTour mounts always; it stays invisible until

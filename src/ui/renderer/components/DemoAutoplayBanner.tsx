@@ -38,7 +38,7 @@ export function DemoAutoplayBanner({ titleKo, onTakeOver }: DemoAutoplayBannerPr
     >
       <span
         aria-hidden="true"
-        className="grid h-6 w-6 place-items-center rounded-md text-[11px] text-white"
+        className="grid h-6 w-6 place-items-center rounded-md text-[11px] text-primary-foreground"
         style={{
           background:
             "linear-gradient(135deg, hsl(var(--action-view)), hsl(217 91% 60%))",
