@@ -313,6 +313,24 @@ export type LvisApi = {
     ) => () => void;
   };
   /**
+   * Demo activation bridge. Wraps the `lvis:demo:activate` IPC channel
+   * exposed by the preload. The renderer's LoginModal calls this from the
+   * activation-input sub-state (chip 1 → paste code → submit) before the
+   * existing `loginMockup` chain runs. The main process decrypts the
+   * activation string back into the original `.env.demo` payload, persists
+   * it under `~/.lvis/secrets/.env.demo`, and injects the keys so the
+   * downstream auth handler can see them.
+   *
+   * Error codes are kebab-case English; the renderer translates each into
+   * a Korean message in the LoginModal.
+   */
+  demo: {
+    activate: (code: string) => Promise<
+      | { ok: true; vendor: string }
+      | { ok: false; error: "invalid-code" | "no-vendor" | "persist-failed" | "unauthorized-frame" }
+    >;
+  };
+  /**
    * Tutorial-C — SpotlightTour state + broadcast bridge. The host persists
    * the tour state under `~/.lvis/onboarding/tour-state.json` (Storage
    * Namespace per Feature). `tour.start` fans out to every open window

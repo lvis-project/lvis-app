@@ -313,6 +313,29 @@ const api = {
       return () => ipcRenderer.removeListener("lvis:auth:progress", listener);
     },
   },
+  /**
+   * Demo activation bridge. The LoginModal chip 1 funnels through here
+   * before invoking `loginMockup`: the user pastes a `LVIS-DEMO:v1:<...>`
+   * activation string, the main process decrypts it back into the original
+   * `.env.demo` payload, persists it under `~/.lvis/secrets/.env.demo`
+   * (0o600), and re-runs the demo-credentials capture so the subsequent
+   * `loginMockup` call observes the freshly-injected vendor keys.
+   *
+   * Error codes (kebab-case English per CLAUDE.md):
+   *   - `invalid-code`     bad prefix, corrupt base64, auth-tag mismatch,
+   *                        or empty input.
+   *   - `no-vendor`        decrypted payload missing `LVIS_DEMO_VENDOR`.
+   *   - `persist-failed`   filesystem write failure (permission/disk).
+   *   - `unauthorized-frame` rejected sender frame (shared with gated IPC).
+   * The renderer translates each into the Korean user-facing message.
+   */
+  demo: {
+    activate: async (code: string) =>
+      ipcRenderer.invoke("lvis:demo:activate", { code }) as Promise<
+        | { ok: true; vendor: string }
+        | { ok: false; error: "invalid-code" | "no-vendor" | "persist-failed" | "unauthorized-frame" }
+      >,
+  },
   // Tutorial-C — SpotlightTour state bridge. Host stores tour completion
   // under `~/.lvis/onboarding/tour-state.json`; `tour.start` broadcasts a
   // `lvis:tour:start` event to every open window so detached panes also
