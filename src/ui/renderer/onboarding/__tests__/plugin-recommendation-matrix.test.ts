@@ -4,10 +4,10 @@ import { inferRecommendedPlugins } from "../plugin-recommendation-matrix.js";
 describe("inferRecommendedPlugins", () => {
   it("returns the chat-basics fallback for empty input", () => {
     expect(inferRecommendedPlugins("")).toEqual([
-      { pluginId: "chat-basics", label: "chat 기본 사용", emoji: "💬" },
+      { pluginId: "chat-basics", label: "chat 기본 사용", emoji: "💬", marketplaceSlug: null },
     ]);
     expect(inferRecommendedPlugins("   \n\t")).toEqual([
-      { pluginId: "chat-basics", label: "chat 기본 사용", emoji: "💬" },
+      { pluginId: "chat-basics", label: "chat 기본 사용", emoji: "💬", marketplaceSlug: null },
     ]);
   });
 

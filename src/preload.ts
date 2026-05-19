@@ -262,6 +262,57 @@ const api = {
         }
       | { ok: false; error: string }
     >,
+  // Tutorial-X1 — Auth progress IPC. The host emits `lvis:auth:progress`
+  // events at each real step of `loginMockup` (credentials-validating →
+  // llm-key-issuing → sandbox-preparing → complete) so the LoginModal
+  // checklist animates against actual main-process work instead of a
+  // renderer `setTimeout` illusion. Channel is one-way (main → renderer);
+  // each event payload is `{ step, status, vendor?, error? }` where
+  // `step`/`status` are kebab-case English (CLAUDE.md error-language).
+  auth: {
+    onProgress: (
+      handler: (event: {
+        step: "credentials-validating" | "llm-key-issuing" | "sandbox-preparing" | "complete";
+        status: "running" | "done" | "failed";
+        vendor?: string;
+        error?: string;
+      }) => void,
+    ) => {
+      const validSteps = new Set([
+        "credentials-validating",
+        "llm-key-issuing",
+        "sandbox-preparing",
+        "complete",
+      ]);
+      const validStatuses = new Set(["running", "done", "failed"]);
+      const listener = (
+        _event: unknown,
+        payload: {
+          step?: unknown;
+          status?: unknown;
+          vendor?: unknown;
+          error?: unknown;
+        },
+      ) => {
+        const step = payload?.step;
+        const status = payload?.status;
+        if (typeof step !== "string" || !validSteps.has(step)) return;
+        if (typeof status !== "string" || !validStatuses.has(status)) return;
+        handler({
+          step: step as
+            | "credentials-validating"
+            | "llm-key-issuing"
+            | "sandbox-preparing"
+            | "complete",
+          status: status as "running" | "done" | "failed",
+          ...(typeof payload?.vendor === "string" ? { vendor: payload.vendor } : {}),
+          ...(typeof payload?.error === "string" ? { error: payload.error } : {}),
+        });
+      };
+      ipcRenderer.on("lvis:auth:progress", listener);
+      return () => ipcRenderer.removeListener("lvis:auth:progress", listener);
+    },
+  },
   // Tutorial-A — login screen variant preference. The host stores the
   // chosen variant under `~/.lvis/login-prefs/login-prefs.json`; reading
   // returns the persisted value or the default. The `onChanged` channel
@@ -379,6 +430,42 @@ const api = {
   tutorialShowContextMenu: async () =>
     ipcRenderer.invoke("lvis:tutorial:show-context-menu") as Promise<
       { ok: true } | { ok: false; error: string; message: string }
+    >,
+  // Tutorial-X2 — Discovery Swipe + Memory Seed plugin install bridge.
+  // Delegates to the canonical `lvis:plugins:install` IPC (same handler
+  // the marketplace UI uses); the renderer wraps the response into the
+  // tutorial result shape so the dialogs can react to success/failure
+  // without depending on the marketplace `PluginMarketplaceActionResult`
+  // schema. Errors come back as kebab-case English (CLAUDE.md).
+  tutorialInstallPlugin: async (pluginId: string) => {
+    const raw = (await ipcRenderer.invoke(
+      "lvis:plugins:install",
+      pluginId,
+    )) as {
+      ok?: boolean;
+      pluginId?: string;
+      error?: string;
+      message?: string;
+    } | null;
+    if (raw && raw.ok === true && typeof raw.pluginId === "string") {
+      return { ok: true as const, pluginId: raw.pluginId };
+    }
+    return {
+      ok: false as const,
+      error: typeof raw?.error === "string" ? raw.error : "install-failed",
+      message: typeof raw?.message === "string" ? raw.message : "plugin install failed",
+    };
+  },
+  // Tutorial-X4 — Onboarding Context writer. Called once by the renderer
+  // after the Memory Seed wizard dismisses with a short markdown block
+  // (호칭 + 자기소개 + installed plugin slugs). The host writes the file
+  // under `~/.lvis/onboarding/onboarding-context.md`; the SystemPromptBuilder
+  // then injects it as section id=9.86 "User Onboarding Context" on each
+  // subsequent turn until the user clears it.
+  onboardingContextSet: async (content: string) =>
+    ipcRenderer.invoke("lvis:onboarding:context:set", { content }) as Promise<
+      | { ok: true }
+      | { ok: false; error: string; message: string }
     >,
   onTutorialOpen: (handler: (payload: { source: string }) => void) => {
     const listener = (_event: unknown, payload: { source?: unknown }) => {
