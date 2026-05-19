@@ -196,3 +196,35 @@ describe("lvis:demo:activate — no-vendor", () => {
     expect(existsSync(join(tempHome, "secrets", ".env.demo"))).toBe(false);
   });
 });
+
+describe("lvis:demo:activate — persist-failed audit", () => {
+  it("emits a warn audit row when disk persistence fails (M3)", async () => {
+    // critic MAJOR M3 (2026-05-19): persist-failed branch previously
+    // returned the error without writing an audit row, leaving partial-
+    // state activations invisible to forensic timelines. This regression
+    // guard asserts symmetry with the invalid-code audit row.
+    const { codec, demoMod } = await loadDemoModule();
+    const code = codec.encryptActivationPayload(SAMPLE_ENV);
+
+    // Force the persist path to fail by pointing LVIS_HOME at a regular file
+    // so mkdir(<LVIS_HOME>/secrets, {recursive:true}) inside writeEnvDemoFile
+    // raises ENOTDIR. lvisHome() reads LVIS_HOME and returns it verbatim;
+    // the handler then resolves <LVIS_HOME>/secrets/.env.demo.
+    const { writeFileSync } = await import("node:fs");
+    const blockingFile = join(tempHome, "blocked-lvis-home");
+    writeFileSync(blockingFile, "not-a-dir");
+    process.env.LVIS_HOME = blockingFile;
+
+    const deps = makeDeps();
+    demoMod.registerDemoHandlers(deps as never);
+
+    const result = await invoke("lvis:demo:activate", { code });
+    expect(result).toEqual({ ok: false, error: "persist-failed" });
+    expect(deps.auditLogger.log).toHaveBeenCalledWith(
+      expect.objectContaining({
+        type: "warn",
+        input: expect.stringContaining("persist-failed"),
+      }),
+    );
+  });
+});

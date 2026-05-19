@@ -148,6 +148,20 @@ export function registerDemoHandlers(deps: IpcDeps): void {
         log.error(
           `failed to persist .env.demo: ${(err as Error).message}`,
         );
+        // Audit trail for the partial-state outcome (critic MAJOR M3
+        // 2026-05-19): the decrypted payload was valid but disk write
+        // failed — without an audit row the renderer's "persist-failed"
+        // toast is the only forensic evidence. invalid-code branch above
+        // already emits a warn row; symmetry across error branches keeps
+        // the audit timeline complete for support escalations.
+        try {
+          auditLogger.log({
+            timestamp: new Date().toISOString(),
+            sessionId: "auth",
+            type: "warn",
+            input: "[demo-activation] persist-failed",
+          });
+        } catch { /* audit must not break IPC */ }
         return { ok: false, error: "persist-failed" };
       }
 
