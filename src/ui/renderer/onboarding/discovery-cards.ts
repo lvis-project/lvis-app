@@ -38,6 +38,13 @@ export interface DiscoveryCard {
    * so the dialog can look up the package by id without a second probe.
    */
   pluginId: string | null;
+  /**
+   * U7 — Per-card scenario preview. Mini step list shown on the active
+   * card so the user understands what the tour will demonstrate BEFORE
+   * pressing "실행하기 →". Keep each step ≤ 18 chars to fit the 460-wide
+   * card body without wrapping.
+   */
+  previewSteps: readonly string[];
 }
 
 export const DISCOVERY_CARDS: readonly DiscoveryCard[] = [
@@ -50,6 +57,12 @@ export const DISCOVERY_CARDS: readonly DiscoveryCard[] = [
     tags: ["5분 시연", "한국어 STT", "로컬 저장"],
     spotlightScenarioId: "meeting-walkthrough",
     pluginId: "lvis-plugin-meeting",
+    previewSteps: [
+      "회의 시작 버튼",
+      "자동 STT 진행",
+      "요약 + 할 일 생성",
+      "메모리에 저장",
+    ],
   },
   {
     id: "doc-search",
@@ -60,6 +73,12 @@ export const DISCOVERY_CARDS: readonly DiscoveryCard[] = [
     tags: ["오프라인", "한국어 RRF", "PII 마스킹"],
     spotlightScenarioId: "indexer-walkthrough",
     pluginId: "lvis-plugin-local-indexer",
+    previewSteps: [
+      "폴더 선택",
+      "백그라운드 인덱싱",
+      "자연어 질문",
+      "출처 표시 답변",
+    ],
   },
   {
     id: "proactive-work",
@@ -70,6 +89,12 @@ export const DISCOVERY_CARDS: readonly DiscoveryCard[] = [
     tags: ["오버레이", "알림", "수동 승인"],
     spotlightScenarioId: "proactive-walkthrough",
     pluginId: "lvis-plugin-work-proactive",
+    previewSteps: [
+      "이메일 연결",
+      "스캔 + 후보 추출",
+      "오버레이 알림",
+      "수동 승인 또는 무시",
+    ],
   },
   {
     id: "multi-agent",
@@ -80,6 +105,12 @@ export const DISCOVERY_CARDS: readonly DiscoveryCard[] = [
     tags: ["병렬", "비용 가시화", "감사"],
     spotlightScenarioId: "multi-agent-tour",
     pluginId: "lvis-plugin-agent-hub",
+    previewSteps: [
+      "에이전트 선택",
+      "작업 dispatch",
+      "병렬 진행 모니터",
+      "결과 합성",
+    ],
   },
   {
     id: "chat-basics",
@@ -90,6 +121,12 @@ export const DISCOVERY_CARDS: readonly DiscoveryCard[] = [
     tags: ["⌘K", "도구 승인", "한국어"],
     spotlightScenarioId: "first-boot-essentials",
     pluginId: null,
+    previewSteps: [
+      "한 줄 입력",
+      "도구 승인 모달",
+      "⌘K 명령 팔레트",
+      "⌘? 도움말",
+    ],
   },
 ] as const;
 
