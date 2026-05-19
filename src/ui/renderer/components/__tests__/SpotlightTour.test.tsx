@@ -331,4 +331,33 @@ describe("SpotlightTour", () => {
       window.matchMedia = originalMatchMedia;
     }
   });
+
+  // 2026-05-19 — "스팟하이라이트 시퀀스가 2번 노출" regression. The Z chain
+  // side-effect + React 18 StrictMode dev double-mount + the modal-queue
+  // flush path can all deliver the same `tour.start` scenario id more
+  // than once. Without a same-scenario guard the second broadcast re-runs
+  // `setActiveScenarioId(id)`, which retriggers the
+  // `useEffect [activeScenarioId]` reset (stepIndex → 0, dismissedRef
+  // cleared), visibly re-mounting the tour at step 0 mid-flight. This
+  // spec advances the tour to step 1 and then re-fires the same scenario
+  // id; the tour must stay on step 1.
+  it("ignores a duplicate tour.start for the already-active scenario", async () => {
+    const { api, fireStart } = makeApi();
+    const { findByTestId } = render(
+      <SpotlightTour api={api} scenarios={FIXTURE_REGISTRY} />,
+    );
+    fireStart("test-scenario");
+    let card = await findByTestId("spotlight-tour:card");
+    expect(card.getAttribute("data-step-index")).toBe("0");
+    // Advance past step 0 so a regression to "reset on duplicate" is
+    // observable in the assertion below.
+    fireEvent.click(await findByTestId("spotlight-tour:next"));
+    card = await findByTestId("spotlight-tour:card");
+    expect(card.getAttribute("data-step-index")).toBe("1");
+    // Duplicate broadcast for the same scenario must be a no-op — no
+    // re-mount, no step reset.
+    fireStart("test-scenario");
+    card = await findByTestId("spotlight-tour:card");
+    expect(card.getAttribute("data-step-index")).toBe("1");
+  });
 });
