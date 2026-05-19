@@ -150,6 +150,11 @@ export function PluginGridButton({
               className="h-7 w-7 p-0"
               aria-label="플러그인 열기"
               data-testid="plugin-grid-button"
+              // SpotlightTour anchor — step 8 ("플러그인 — 회의·문서·업무 도우미")
+              // in `first-boot-essentials` pins to this trigger. See
+              // `default-tour-scenarios.ts` and the live-anchor regression
+              // gate in `__tests__/tour-anchors-trigger.test.tsx`.
+              data-tour-anchor="plugin-entry"
             >
               {triggerInner}
             </Button>
