@@ -1,5 +1,13 @@
 # Changelog
 
+## Unreleased
+
+### Internal
+
+- **Demo activation: `LVIS_DEMO_ENABLED` 환경변수 폐기**. `captureDemoCredentials()` 가 `LVIS_DEMO_KEY_<VENDOR>` 의 존재만으로 demo 활성을 판정 — activation code (수동 발급) 자체가 유일한 gate. master gate env var 가 누락된 `.env.demo` 가 demo activation 후에도 `isDemoEnabled()=false` 로 떨어지면서 onboarding chain 이 skip → ChatView empty-state 로 떨어지던 SOT divergence 해소.
+- `whitelist-registry` 의 demo snapshot 분기도 `useDemoSnapshot` 옵션만 read — env fallback 제거. caller (`boot/steps/whitelist-bootstrap.ts`) 가 항상 `isDemoEnabled()` 결과 명시 전달.
+- 영향 file: `demo-credentials.ts`, `auth.ts`, `whitelist-bootstrap.ts`, `whitelist-registry.ts` + 5 test + `.env.demo.example` + `docs/onboarding/local-demo-setup.md`.
+
 ## v0.2.1 — 2026-05-19 (hotfix)
 
 ### Critical fix
