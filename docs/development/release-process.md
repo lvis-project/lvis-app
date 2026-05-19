@@ -70,9 +70,11 @@ awk '/^## vX.Y.Z/{flag=1} /^---$/{if(flag){flag=0; exit}} flag' CHANGELOG.md \
   | gh release edit vX.Y.Z -R lvis-project/lvis-app --notes-file - --draft=false
 ```
 
-## Partial release 복구
+## Partial release 복구 (legacy — v0.2.3+ 부터 자동 해소)
 
-electron-builder publisher 가 race / timeout 으로 일부 asset 만 upload 한 경우 (`mac-arm64.dmg.blockmap` 만 있고 본체 없음 등):
+> **Note (v0.2.3+)**: Workflow 가 *atomic single-publish job* 으로 재설계됨 (PR #1047 이후). matrix 3 job 이 동시에 같은 Release 에 publish 하던 race 가 사라져, partial asset 사고 자체가 발생하지 않음. 이 절차는 v0.2.1 / v0.2.2 release 사이클의 *historic mitigation* — 다시 사용 안 함.
+
+(legacy) electron-builder publisher 가 race / timeout 으로 일부 asset 만 upload 한 경우:
 
 1. **누락 식별** — 위 5번의 asset list 와 비교
 2. **Workflow artifact 직접 다운로드**:
@@ -85,6 +87,14 @@ electron-builder publisher 가 race / timeout 으로 일부 asset 만 upload 한
    ```
 
 partial asset 삭제 후 workflow re-run 방식도 가능하지만, **electron-builder publisher 는 기존 asset 있으면 skip** — re-run 단독으로는 누락 보충 안 됨.
+
+### 새 atomic publish flow (현재)
+
+`.github/workflows/build-installers.yml`:
+- `installers` matrix job: 3 platform 각각 build + smoke + `actions/upload-artifact` (no GH publish)
+- `publish-release` single job (`needs: installers`, `if: tag-push only`): 모든 platform artifact `actions/download-artifact` → `softprops/action-gh-release` 으로 atomic upload
+
+→ partial 발생 불가능. 사고 시 *workflow re-run* 만으로 충분.
 
 ## 알려진 정책 / 한계
 
