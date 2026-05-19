@@ -278,7 +278,7 @@ describe("usage-stats", () => {
         ].join("\n") + "\n",
         "utf-8",
       );
-      const read = readAuditEntries(dir, 30);
+      const read = readAuditEntries(dir, 365);
       expect(read.length).toBe(2);
       expect(read.every((e) => e.type === "turn")).toBe(true);
     } finally {
