@@ -257,6 +257,9 @@
       "perMachine": false,
       "runAfterFinish": true,
       "differentialPackage": true,
+      "createDesktopShortcut": "always",
+      "createStartMenuShortcut": true,
+      "shortcutName": "LVIS",
       "artifactName": "${productName}-${version}-windows-${arch}-setup.${ext}"
     }
   }
