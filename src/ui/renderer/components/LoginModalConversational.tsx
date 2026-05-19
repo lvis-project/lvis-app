@@ -34,12 +34,6 @@ import {
 } from "../../../components/ui/dialog.js";
 import { Button } from "../../../components/ui/button.js";
 import type { LoginModalProps } from "./LoginModal.js";
-import {
-  AUTH_STEP_LABEL_KO,
-  AUTH_STEP_ORDER,
-  useAuthProgress,
-  type AuthProgressStatus,
-} from "../hooks/use-auth-progress.js";
 
 /**
  * Hard-coded demo credentials. Match `DEFAULT_DEMO_USER` / `DEFAULT_DEMO_PASS`
@@ -54,7 +48,10 @@ function errorMessage(code: string): string {
     case "invalid-credentials":
       return "데모 자격증명이 올바르지 않습니다.";
     case "no-demo-key":
-      return "데모 API 키가 환경 변수에 설정되어 있지 않습니다. docs/onboarding/local-demo-setup.md 참조.";
+      // F3 — Path 3 hotfix: this should no longer fire for the LGE
+      // azure-foundry demo loop (baked-in creds now wired). If it does
+      // fire, the user is on a non-azure-foundry vendor without env keys.
+      return "데모 모드 설정 확인이 필요해요. 환경 변수 `LVIS_DEMO_VENDOR=azure-foundry` 를 설정한 뒤 다시 시도하세요. (docs/onboarding/local-demo-setup.md 참조)";
     case "reviewer-rewire-failed":
       return "에이전트 sandbox 초기화에 실패했습니다. 다시 시도해 주세요.";
     default:
@@ -78,23 +75,6 @@ const CHECKLIST_LINES: readonly { mark: string; label: string }[] = Object.freez
 /** Stagger between checklist line reveals (ms). */
 const CHECKLIST_STAGGER_MS = 280;
 
-/**
- * Tutorial-X1 — single-character icon for each auth-progress row. Kept
- * out of the JSX so the checklist's render expression stays declarative.
- */
-function progressIcon(status: AuthProgressStatus | undefined): string {
-  switch (status) {
-    case "done":
-      return "✓";
-    case "failed":
-      return "✕";
-    case "running":
-      return "⟳";
-    default:
-      return "·";
-  }
-}
-
 export function LoginModalConversational({
   api,
   open,
@@ -103,9 +83,6 @@ export function LoginModalConversational({
 }: LoginModalProps) {
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState<string | null>(null);
-  // Tutorial-X1 — subscribe to real `lvis:auth:progress` events so the
-  // checklist below paints ✓ marks against actual main-process steps.
-  const progress = useAuthProgress(api, open);
 
   // F2 — 2-turn conversational flow that fires when the demo chip is
   // selected. `userTurnVisible` shows the user bubble, `assistantReply`
@@ -375,61 +352,38 @@ export function LoginModalConversational({
           </div>
         )}
 
-        {/* Tutorial-X1 — real IPC progress checklist. Renders only after
-            the first `lvis:auth:progress` event arrives so the form layout
-            is stable in the idle state. Each row's icon tracks the latest
-            `status` for that step (running → spinner, done → ✓, failed → ✕).
-            Kebab-case English step ids stay in the IPC payload; the
-            Korean labels are renderer-owned (CLAUDE.md error-language). */}
-        {progress.active && (
-          <ul
-            data-testid="login-modal:progress"
-            className="pl-9 mt-1 space-y-0.5 text-[11px]"
-          >
-            {AUTH_STEP_ORDER.map((step) => {
-              const status = progress.steps[step];
-              return (
-                <li
-                  key={step}
-                  data-testid={`login-modal:progress:${step}`}
-                  data-status={status ?? "pending"}
-                  className="flex items-center gap-1.5"
-                >
-                  <span aria-hidden="true">{progressIcon(status)}</span>
-                  <span
-                    className={
-                      status === "done"
-                        ? "text-success"
-                        : status === "failed"
-                          ? "text-destructive"
-                          : status === "running"
-                            ? "text-primary"
-                            : "text-muted-foreground"
-                    }
-                  >
-                    {AUTH_STEP_LABEL_KO[step]}
-                    {step === "llm-key-issuing" && progress.vendor
-                      ? ` (${progress.vendor})`
-                      : null}
-                  </span>
-                </li>
-              );
-            })}
-          </ul>
-        )}
+        {/* Path 3 hotfix — the previous "real IPC progress checklist"
+            (✓✗·· ul rendered below the transcript bubble) duplicated the
+            type-on checklist already painted inside the assistantReply
+            bubble above. Path 2 missed this when removing the form. The
+            canonical surface is the type-on block inside the transcript
+            bubble; IPC progress events still flow through `useAuthProgress`
+            so future surfaces (e.g. a status badge) can subscribe without
+            re-introducing the duplicate widget. */}
 
-        {/* Inline error region — used for IPC failures from the demo chip
-            (no-demo-key, invalid-credentials, reviewer-rewire-failed,
-            transient IPC rejection). The error is renderer-translated; the
-            IPC payload only carries kebab-case English codes. */}
+        {/* Inline error region — surfaces inside the assistant bubble
+            stream as a follow-up message so the user reads the failure in
+            the same visual lane as the type-on checklist (no separate
+            widget). Covers no-demo-key, invalid-credentials,
+            reviewer-rewire-failed, and transient IPC rejection. The error
+            is renderer-translated; the IPC payload only carries kebab-case
+            English codes. */}
         {error && (
-          <p
-            data-testid="login-modal:error"
-            className="pl-9 pt-2 text-xs text-destructive"
-            role="alert"
-          >
-            {error}
-          </p>
+          <div className="flex gap-2 pt-1" data-testid="login-modal:error-bubble">
+            <div
+              className="grid size-7 shrink-0 place-items-center rounded-md bg-destructive text-[11px] text-destructive-foreground"
+              aria-hidden="true"
+            >
+              !
+            </div>
+            <p
+              data-testid="login-modal:error"
+              className="rounded-lg rounded-tl-sm bg-destructive/10 px-3 py-2 text-[12.5px] leading-relaxed text-destructive"
+              role="alert"
+            >
+              {error}
+            </p>
+          </div>
         )}
 
         {/* Cancel-only footer button — there is no submit, the chips ARE
