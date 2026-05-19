@@ -953,7 +953,11 @@ function refreshTrayMenu(): void {
 }
 
 function createTrayIcon() {
-  const svg = `<svg xmlns="http://www.w3.org/2000/svg" viewBox="${LVIS_LOGO_VIEW_BOX}"><path fill="#f8fafc" d="${LVIS_LOGO_PATH}"/></svg>`;
+  // Per Apple HIG, macOS template images render using the alpha channel only —
+  // AppKit tints them to match menubar text color, so source color is moot. On
+  // Windows / Linux, the tray surface shows the source RGB directly, so we use
+  // pure white for the LVIS person silhouette per the corporate-demo brief.
+  const svg = `<svg xmlns="http://www.w3.org/2000/svg" viewBox="${LVIS_LOGO_VIEW_BOX}"><path fill="#ffffff" d="${LVIS_LOGO_PATH}"/></svg>`;
   const icon = nativeImage.createFromDataURL(`data:image/svg+xml;base64,${Buffer.from(svg).toString("base64")}`);
   const resized = icon.isEmpty() ? icon : icon.resize({ width: 18, height: 18 });
   if (process.platform === "darwin") {
@@ -1528,6 +1532,17 @@ function createWindow(options: { showBootstrapSplash?: boolean } = {}) {
   });
   win.on("close", (event) => {
     if (appShutdownStarted || appShutdownCompleted || !tray || win.isDestroyed()) return;
+    // Honour user's close-button preference. The default is `hide-to-tray`
+    // (keeps routine scheduler / briefing engine / plugin background work
+    // alive); a user who picks `quit` in Settings → 일반 → 시스템 gets the
+    // conventional Windows behaviour (close button terminates the app).
+    // Defensive `?? "hide-to-tray"` on the rare case `services` is unset
+    // (very early boot races) — defaults match `DEFAULT_SETTINGS.system`.
+    const behavior = services?.settingsService.getAll().system?.closeBehavior ?? "hide-to-tray";
+    if (behavior === "quit") {
+      app.quit();
+      return;
+    }
     event.preventDefault();
     win.hide();
     refreshApplicationMenu();
