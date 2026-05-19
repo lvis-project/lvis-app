@@ -234,7 +234,7 @@ function DemoEntryView({ entry }: { entry: DemoEntry }) {
           </div>
           <div className="mt-2 flex items-center gap-1.5 text-[10.5px]">
             <span
-              className="rounded px-2 py-1 text-white"
+              className="rounded px-2 py-1 text-primary-foreground"
               style={{ background: "hsl(142 71% 45%)" }}
             >
               {entry.status === "done" ? "승인됨 ✓" : "승인 (자동) ✓"}
@@ -275,7 +275,7 @@ function DemoEntryView({ entry }: { entry: DemoEntry }) {
 function BotAvatar({ invisible = false }: { invisible?: boolean }) {
   return (
     <div
-      className="grid h-7 w-7 shrink-0 place-items-center rounded-md text-[11px] text-white"
+      className="grid h-7 w-7 shrink-0 place-items-center rounded-md text-[11px] text-primary-foreground"
       style={{
         background: invisible
           ? "transparent"

@@ -252,7 +252,7 @@ export function MemorySeedDialog({
           <div className="flex items-center gap-2">
             <span
               aria-hidden
-              className="grid h-7 w-7 place-items-center rounded-md text-[11px] text-white"
+              className="grid h-7 w-7 place-items-center rounded-md text-[11px] text-primary-foreground"
               style={{
                 background:
                   "linear-gradient(135deg, hsl(var(--p-purple-500)), hsl(var(--p-blue-500)))",
@@ -383,7 +383,7 @@ export function MemorySeedDialog({
           {/* CTAs */}
           <Button
             type="button"
-            className={cn("w-full text-white")}
+            className={cn("w-full text-primary-foreground")}
             data-testid="memory-seed-dialog:submit"
             onClick={handleSubmit}
             disabled={submitting}

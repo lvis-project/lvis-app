@@ -31,6 +31,25 @@
  * keeps the storage namespace minimal.
  */
 
+/**
+ * U8 — Auto-advance trigger declaration. When a step declares a
+ * `completionTrigger`, the SpotlightTour attaches a listener for the
+ * matching DOM event and advances to the next step the moment the user
+ * performs the action. Without a trigger the user must click "다음 →"
+ * manually.
+ *
+ * Variants:
+ *   - { kind: "keypress"; combo: "⌘+K" }   — global hotkey detection.
+ *   - { kind: "input"; selector }          — typing in the matching element.
+ *   - { kind: "click"; selector }          — clicking the matching element.
+ *   - { kind: "manual" }                   — explicit "다음 →" only (default).
+ */
+export type CompletionTrigger =
+  | { kind: "keypress"; combo: "⌘+K" | "⌘+?" | "⌘+Enter" }
+  | { kind: "input"; selector: string }
+  | { kind: "click"; selector: string }
+  | { kind: "manual" };
+
 export interface TourStep {
   /**
    * Stable CSS selector pinned to a `data-tour-anchor="…"` attribute on
@@ -51,6 +70,14 @@ export interface TourStep {
    * `"shortcut: <label>"` so screen-readers announce them properly.
    */
   keyHint?: string[];
+  /**
+   * U8 — Interactive auto-advance trigger. When omitted or `kind: "manual"`,
+   * the user must click "다음 →" to proceed. With any other variant the
+   * tour advances automatically the moment the user performs the
+   * declared action (e.g. types in the composer, presses ⌘+K, clicks a
+   * button). The user can still skip via "다음 →" if they prefer.
+   */
+  completionTrigger?: CompletionTrigger;
 }
 
 export interface TourScenario {
@@ -77,25 +104,32 @@ const FIRST_BOOT_ESSENTIALS: TourScenario = {
     {
       anchorSelector: '[data-tour-anchor="composer-input"]',
       title: "1단계 · 한국어로 자유롭게 입력",
-      body: "이 텍스트 박스가 LVIS 와 대화하는 시작점입니다. 한국어로 자유롭게 입력하면 LVIS 가 답하고, 진행 중인 답을 멈추려면 ⌘+Enter 를 누르세요. 지금 한 줄 적어보세요.",
+      body: "이 텍스트 박스가 LVIS 와 대화하는 시작점입니다. 한국어로 자유롭게 입력하면 LVIS 가 답하고, 진행 중인 답을 멈추려면 ⌘+Enter 를 누르세요. 지금 한 줄 적어보세요 — 입력이 감지되면 다음 단계로 자동 이동합니다.",
       keyHint: ["⌘+Enter"],
+      completionTrigger: {
+        kind: "input",
+        selector: '[data-tour-anchor="composer-input"]',
+      },
     },
     {
       anchorSelector: '[data-tour-anchor="input-action-bar"]',
       title: "2단계 · 도구는 항상 사용자 승인",
       body: "LVIS 가 파일을 읽거나 명령을 실행할 때마다 승인 카드가 표시됩니다. 한 번 허용/거부하면 그 결정이 현재 세션에 기억되어 같은 도구는 다시 묻지 않습니다.",
+      completionTrigger: { kind: "manual" },
     },
     {
       anchorSelector: '[data-tour-anchor="command-palette-toggle"]',
       title: "3단계 · ⌘+K 명령 팔레트",
-      body: "어디서든 ⌘+K 를 눌러 명령 팔레트를 여세요. 세션 전환, 설정, 플러그인 실행 — 모두 한 곳에서. 닫으려면 Esc 를 누릅니다.",
+      body: "어디서든 ⌘+K 를 눌러 명령 팔레트를 여세요. 세션 전환, 설정, 플러그인 실행 — 모두 한 곳에서. 지금 한 번 눌러 보면 다음 단계로 자동 이동합니다.",
       keyHint: ["⌘+K"],
+      completionTrigger: { kind: "keypress", combo: "⌘+K" },
     },
     {
       anchorSelector: '[data-tour-anchor="composer-input"]',
       title: "4단계 · 가이드 다시 보기",
       body: "이 가이드는 언제든 ⌘+? 로 다시 열 수 있어요. 이제 새 대화를 시작해 LVIS 를 직접 사용해 보세요.",
       keyHint: ["⌘+?"],
+      completionTrigger: { kind: "manual" },
     },
   ],
 };
