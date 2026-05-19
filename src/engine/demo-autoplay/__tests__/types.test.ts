@@ -39,7 +39,7 @@ describe("shouldActivateDemoAutoplay", () => {
     ).toBe(true);
   });
 
-  it("activates when flag is explicitly true (developer/QA opt-in), regardless of onboarding state", () => {
+  it("activates when flag is explicitly true AND onboarding has completed (developer/QA opt-in, post-onboard)", () => {
     expect(
       shouldActivateDemoAutoplay({
         flagEnabled: true,
@@ -47,20 +47,28 @@ describe("shouldActivateDemoAutoplay", () => {
         demoVendorPresent: true,
       }),
     ).toBe(true);
+  });
+
+  it("M2 — defers explicit flag=true to showcase chain when onboardingCompleted is not yet true", () => {
+    // critic MAJOR (2026-05-19): a fresh-state user carrying flag=true
+    // (e.g. profile snapshot, QA fixture) would otherwise paint demo over
+    // the Z chain reducer mid-stage and the chain would never advance to
+    // `markOnboardingCompleted`, looping the user back into the demo every
+    // boot. Both fresh-state branches must defer to the showcase chain.
     expect(
       shouldActivateDemoAutoplay({
         flagEnabled: true,
         onboardingCompleted: false,
         demoVendorPresent: true,
       }),
-    ).toBe(true);
+    ).toBe(false);
     expect(
       shouldActivateDemoAutoplay({
         flagEnabled: true,
         onboardingCompleted: undefined,
         demoVendorPresent: true,
       }),
-    ).toBe(true);
+    ).toBe(false);
   });
 
   it("skips when user explicitly opted out (flag=false), even for returning users", () => {
