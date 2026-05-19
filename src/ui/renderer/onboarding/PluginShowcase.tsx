@@ -4,9 +4,13 @@
  * Mounted right after `SpotlightTour` completes (`tourCompleted=true`).
  * Surfaces a short carded explanation of every installed plugin so the
  * user understands what each plugin *does* before being dropped into
- * an empty chat surface. Each card has two actions:
- *   - "둘러보기" — fires the per-plugin walkthrough via `api.tour.start`.
- *   - "지금은 닫기" — dismisses the card silently.
+ * an empty chat surface. 2026-05-20 redesign — each card now has a
+ * "펼쳐보기 ↓" toggle that *inline-expands* a short list of the plugin's
+ * onboarding scenarios. The previous "둘러보기" button dispatched
+ * `api.tour.start` (external navigation) and visibly retriggered the
+ * SpotlightTour on top of the showcase — the new inline expansion path
+ * removes that double-tour artefact.
+ *
  * A separate "끝내기 →" footer button closes the entire showcase and
  * marks onboarding complete.
  *
@@ -94,6 +98,13 @@ interface PluginDescription {
   body: string;
   /** Spotlight tour id for the per-plugin walkthrough. */
   tourScenarioId: string;
+  /**
+   * Short list of onboarding scenarios the plugin can run. Rendered inline
+   * inside the card when the user clicks "펼쳐보기 ↓". Each entry is a
+   * 1-line Korean phrase describing a concrete first task the plugin
+   * supports — surfaces the plugin's value without an external navigation.
+   */
+  scenarios: readonly string[];
 }
 
 /**
@@ -110,6 +121,12 @@ const PLUGIN_DESCRIPTIONS: readonly PluginDescription[] = [
     label: "회의 자동 요약",
     body: "회의 녹음 → 자동 STT → 요약과 액션 아이템 추출까지 한 번에 처리합니다.",
     tourScenarioId: "meeting-walkthrough",
+    scenarios: [
+      "회의 녹음을 시작하고 실시간 STT 로 텍스트화",
+      "회의 종료 후 자동 요약과 핵심 결정사항 정리",
+      "추출된 액션 아이템을 LVIS 할 일로 등록",
+      "지난 회의 검색 — '지난주 PM 회의 요약 보여줘'",
+    ],
   },
   {
     id: "local-indexer",
@@ -117,13 +134,25 @@ const PLUGIN_DESCRIPTIONS: readonly PluginDescription[] = [
     label: "로컬 문서 검색",
     body: "PDF·Word·마크다운을 로컬에서 인덱싱하고 자연어로 답합니다. 문서는 외부로 나가지 않습니다.",
     tourScenarioId: "indexer-walkthrough",
+    scenarios: [
+      "폴더를 추가하면 PDF / Word / 마크다운 자동 인덱싱",
+      "자연어 검색 — '지난 분기 보안 정책 요약'",
+      "검색 결과에 원문 출처 표시 (페이지 / 섹션)",
+      "민감 정보 PII 자동 마스킹 후 인덱싱",
+    ],
   },
   {
     id: "work-proactive",
     emoji: "💼",
     label: "업무 도우미",
     body: "이메일·일정에서 액션 아이템 후보를 추출해 적절한 시점에 카드로 알려줍니다.",
-    tourScenarioId: "proactive-walkthrough",
+    tourScenarioId: "work-assistant-walkthrough",
+    scenarios: [
+      "받은편지함 자동 스캔 → 액션 아이템 후보 추출",
+      "오버레이 카드로 후보 검토 → 한 번에 승인/무시",
+      "발신자·키워드별 우선순위 규칙 설정",
+      "캘린더와 연결 — 미팅 1시간 전 사전 브리핑",
+    ],
   },
   {
     id: "agent-hub",
@@ -131,6 +160,12 @@ const PLUGIN_DESCRIPTIONS: readonly PluginDescription[] = [
     label: "Multi-agent",
     body: "여러 에이전트가 작업을 분산해 처리하고 결과를 다시 합성합니다.",
     tourScenarioId: "multi-agent-tour",
+    scenarios: [
+      "리서치 / 분석을 여러 에이전트에게 동시 dispatch",
+      "에이전트별 LLM·도구 권한 분리 설정",
+      "토큰 / 비용 실시간 추적 + 한도 관리",
+      "결과를 자동 합성 → 단일 보고서로 정리",
+    ],
   },
   {
     id: "ms-graph",
@@ -138,6 +173,11 @@ const PLUGIN_DESCRIPTIONS: readonly PluginDescription[] = [
     label: "MS Graph 연동",
     body: "Microsoft 365 의 이메일·캘린더와 연결해 LVIS 가 일정과 메일을 활용하도록 합니다.",
     tourScenarioId: "first-boot-essentials",
+    scenarios: [
+      "Microsoft 365 계정 OAuth 연결",
+      "Outlook 받은편지함 → LVIS 컨텍스트로 활용",
+      "캘린더 이벤트 기반 자동 브리핑",
+    ],
   },
   {
     id: "lge-api",
@@ -145,6 +185,11 @@ const PLUGIN_DESCRIPTIONS: readonly PluginDescription[] = [
     label: "사내 API 연동",
     body: "사내 내부 시스템과 연동해 조직 데이터·도구를 LVIS 에서 함께 사용합니다.",
     tourScenarioId: "first-boot-essentials",
+    scenarios: [
+      "사내 SSO 로 내부 API 연결",
+      "조직 데이터 검색 (사번 / 부서 / 프로젝트)",
+      "사내 도구를 LVIS 에서 직접 호출",
+    ],
   },
 ];
 
@@ -183,6 +228,10 @@ export function resolveShowcaseCards(
       label: id,
       body: "사용자가 추가로 설치한 플러그인입니다. 설정 → 플러그인에서 자세히 확인할 수 있어요.",
       tourScenarioId: "first-boot-essentials",
+      scenarios: [
+        "설정 → 플러그인에서 자세한 동작 확인",
+        "플러그인 manifest 의 소개 페이지 열기",
+      ],
     });
   }
   const ordered = [...known, ...unknown];
@@ -219,10 +268,16 @@ function usePrefersReducedMotion(): boolean {
 export function PluginShowcase({
   open,
   installedPluginIds,
-  api,
+  api: _api,
   onClose,
   prioritizedScenarioId = null,
 }: PluginShowcaseProps) {
+  // `api` was previously used to fire `api.tour.start` from the
+  // "둘러보기 →" button. 2026-05-20 redesign — that path is removed in
+  // favour of inline scenario expansion (no external navigation), so
+  // the prop is intentionally unused. Kept on the public interface so
+  // existing call sites compile without changes.
+  void _api;
   const reduceMotion = usePrefersReducedMotion();
   const prioritizedPluginId = useMemo(
     () => scenarioToPluginId(prioritizedScenarioId),
@@ -233,17 +288,26 @@ export function PluginShowcase({
     [installedPluginIds, prioritizedPluginId],
   );
 
-  const handleExplore = useCallback(
-    (scenarioId: string) => {
-      try {
-        void api.tour.start(scenarioId);
-      } catch {
-        // Tour failures are non-fatal — the user can still close the
-        // showcase and reach chat.
+  // 2026-05-20: inline scenario expansion. Each card has a "펼쳐보기 ↓"
+  // toggle; the expanded set lives in local state so toggling one card
+  // doesn't affect the others. Closing the showcase resets the set.
+  const [expandedIds, setExpandedIds] = useState<Set<string>>(() => new Set());
+
+  useEffect(() => {
+    if (!open) setExpandedIds(new Set());
+  }, [open]);
+
+  const handleToggleExpand = useCallback((cardId: string) => {
+    setExpandedIds((prev) => {
+      const next = new Set(prev);
+      if (next.has(cardId)) {
+        next.delete(cardId);
+      } else {
+        next.add(cardId);
       }
-    },
-    [api],
-  );
+      return next;
+    });
+  }, []);
 
   const handleClose = useCallback(() => {
     onClose();
@@ -294,37 +358,63 @@ export function PluginShowcase({
               data-testid="plugin-showcase:list"
               className="space-y-2 max-h-[420px] overflow-y-auto pr-1"
             >
-              {cards.map((card) => (
-                <div
-                  key={card.id}
-                  data-testid={`plugin-showcase:card:${card.id}`}
-                  className="rounded-lg border border-border/70 bg-[hsl(var(--muted))] px-3 py-3"
-                >
-                  <div className="flex items-start gap-2">
-                    <span className="text-base leading-none" aria-hidden="true">
-                      {card.emoji}
-                    </span>
-                    <div className="min-w-0 flex-1">
-                      <div className="text-[12.5px] font-medium">{card.label}</div>
-                      <div className="mt-1 text-[10.5px] leading-snug text-muted-foreground">
-                        {card.body}
-                      </div>
-                      <div className="mt-2 flex items-center gap-2">
-                        <Button
-                          type="button"
-                          variant="secondary"
-                          size="sm"
-                          className="h-6 px-2 text-[10.5px]"
-                          data-testid={`plugin-showcase:card:${card.id}:explore`}
-                          onClick={() => handleExplore(card.tourScenarioId)}
-                        >
-                          둘러보기 →
-                        </Button>
+              {cards.map((card) => {
+                const expanded = expandedIds.has(card.id);
+                return (
+                  <div
+                    key={card.id}
+                    data-testid={`plugin-showcase:card:${card.id}`}
+                    data-expanded={expanded ? "true" : "false"}
+                    className="rounded-lg border border-border/70 bg-[hsl(var(--muted))] px-3 py-3"
+                  >
+                    <div className="flex items-start gap-2">
+                      <span className="text-base leading-none" aria-hidden="true">
+                        {card.emoji}
+                      </span>
+                      <div className="min-w-0 flex-1">
+                        <div className="text-[12.5px] font-medium">{card.label}</div>
+                        <div className="mt-1 text-[10.5px] leading-snug text-muted-foreground">
+                          {card.body}
+                        </div>
+                        <div className="mt-2 flex items-center gap-2">
+                          <Button
+                            type="button"
+                            variant="secondary"
+                            size="sm"
+                            className="h-6 px-2 text-[10.5px]"
+                            data-testid={`plugin-showcase:card:${card.id}:expand`}
+                            aria-expanded={expanded}
+                            onClick={() => handleToggleExpand(card.id)}
+                          >
+                            {expanded ? "접기 ↑" : "펼쳐보기 ↓"}
+                          </Button>
+                        </div>
+                        {expanded && (
+                          <ul
+                            data-testid={`plugin-showcase:card:${card.id}:scenarios`}
+                            className="mt-2 space-y-1 rounded-md bg-background/40 px-2 py-2 text-[10.5px] leading-snug text-muted-foreground"
+                          >
+                            {card.scenarios.map((scenario) => (
+                              <li
+                                key={scenario}
+                                className="flex items-start gap-1.5"
+                              >
+                                <span
+                                  aria-hidden="true"
+                                  style={{ color: "hsl(var(--p-purple-500))" }}
+                                >
+                                  •
+                                </span>
+                                <span>{scenario}</span>
+                              </li>
+                            ))}
+                          </ul>
+                        )}
                       </div>
                     </div>
                   </div>
-                </div>
-              ))}
+                );
+              })}
             </div>
           )}
 
