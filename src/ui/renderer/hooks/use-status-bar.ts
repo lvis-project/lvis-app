@@ -122,11 +122,17 @@ export function useStatusBar(opts: UseStatusBarOptions) {
   // pane without re-implementing the IPC plumbing.
   useStatusBarNotifications({ api, pushToast });
   useStatusBarInstall({ api, pushToast });
-  useStatusBarVendor({ api, upsertPersistent });
+  // Producer registration order determines left-to-right render order in
+  // the status bar (StatusBar.tsx maps the persistent array as-is). The
+  // marketplace dot is registered first so it sits leftmost — the
+  // connection indicator anchors the strip, with the vendor/model label
+  // to its right (e.g. `●dot 🔷 Azure · gpt-4o`).
+  //
   // Marketplace reachability — dot-only indicator (no Korean label). The
   // tooltip ("Marketplace: Online" / "Marketplace: Offline") carries the
   // meaning so the status bar stays compact even on narrow windows.
   useStatusBarMarketplace({ api, upsertPersistent, removePersistent });
+  useStatusBarVendor({ api, upsertPersistent });
 
   return {
     persistent,

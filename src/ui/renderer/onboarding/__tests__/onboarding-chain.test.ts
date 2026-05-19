@@ -33,14 +33,15 @@ describe("onboardingChainReducer", () => {
     );
   });
 
-  it("showcase → done via probe-skip (boot-time default initial = showcase)", () => {
-    // Fresh boots now initialise the reducer at "showcase" so the intro
-    // mounts on first paint. Returning users (existing key or
-    // onboardingCompleted=true) must still self-cancel through probe-skip
-    // without flickering the Dialog.
+  it("showcase ignores stray probe-skip (#1014 race guard)", () => {
+    // Boot reducer initial state reverted to `idle`. The async boot
+    // probe dispatches exactly one of probe-start / probe-skip from
+    // `idle`, so a stale probe-skip arriving after showcase has been
+    // mounted must NOT collapse the Dialog — that produced the
+    // closet-flash bug for genuinely fresh-state users.
     expect(
       onboardingChainReducer("showcase", { type: "probe-skip" }),
-    ).toBe("done");
+    ).toBe("showcase");
   });
 
   it("full happy-path traversal", () => {
@@ -139,11 +140,11 @@ describe("onboardingChainReducer", () => {
     }
   });
 
-  it("boot-time default 'showcase' → happy path traversal still terminates at done", () => {
-    // First-boot users start at "showcase" (not "idle"). Verify the full
-    // forward traversal from that initial state still ends at `done` so
-    // the chain reaches `markOnboardingCompleted` and the persistence
-    // side-effect fires.
+  it("showcase → happy path traversal terminates at done", () => {
+    // Verify forward traversal starting from showcase (after the boot
+    // probe dispatched probe-start) still ends at `done` so the chain
+    // reaches `markOnboardingCompleted` and the persistence side-effect
+    // fires.
     const result = transition("showcase", [
       { type: "showcase-start" },
       { type: "login-success" },
