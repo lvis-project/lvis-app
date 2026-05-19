@@ -18,10 +18,12 @@ import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 import { mkdtempSync, rmSync, readFileSync, existsSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
+import { DEMO_ACTIVATION_DEV_RELAUNCH_EXIT_CODE } from "../../../../scripts/lib/dev-electron-exit.mjs";
 
 const handlers = new Map<string, (...args: unknown[]) => unknown>();
 const relaunchMock = vi.fn();
 const exitMock = vi.fn();
+let appIsPackaged = true;
 
 vi.mock("electron", () => ({
   ipcMain: {
@@ -33,6 +35,9 @@ vi.mock("electron", () => ({
   // `app.exit(0)` on first-activation to heal the host-resolver-rules
   // race. The mocks prevent the test runner from actually exiting.
   app: {
+    get isPackaged() {
+      return appIsPackaged;
+    },
     relaunch: relaunchMock,
     exit: exitMock,
   },
@@ -76,6 +81,8 @@ beforeEach(() => {
   for (const k of Object.keys(process.env)) {
     if (k.startsWith("LVIS_DEMO_")) delete process.env[k];
   }
+  delete process.env.LVIS_DEV;
+  appIsPackaged = true;
   vi.resetModules();
 });
 
@@ -147,6 +154,26 @@ describe("lvis:demo:activate — happy path", () => {
 });
 
 describe("lvis:demo:activate — first-activation relaunch (v0.2.1 hotfix)", () => {
+  it("uses the dev-runner managed relaunch exit code under bun run dev", async () => {
+    process.env.LVIS_DEV = "1";
+    appIsPackaged = false;
+    const { codec, demoMod } = await loadDemoModule();
+    const code = codec.encryptActivationPayload(SAMPLE_ENV);
+    const deps = makeDeps();
+    demoMod.registerDemoHandlers(deps as never);
+
+    const result = (await invoke("lvis:demo:activate", { code })) as {
+      ok: true;
+      vendor: string;
+      requiresRelaunch?: boolean;
+    };
+    expect(result.ok).toBe(true);
+    expect(result.requiresRelaunch).toBe(true);
+    await new Promise<void>((resolve) => setImmediate(resolve));
+    expect(relaunchMock).not.toHaveBeenCalled();
+    expect(exitMock).toHaveBeenCalledWith(DEMO_ACTIVATION_DEV_RELAUNCH_EXIT_CODE);
+  });
+
   it("omits requiresRelaunch and skips app.relaunch when demo was already effective at boot", async () => {
     // Simulate the second-boot path: `.env.demo` already on disk →
     // `captureDemoCredentials` ran with the right env → `isDemoEnabled()`
