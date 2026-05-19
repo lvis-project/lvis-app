@@ -393,3 +393,13 @@ Relevant sections: 1 (Boot), 2 (ConversationLoop), 6 (Core Engines), 9 (Plugin S
 - PR #832 — 3 more missed (`permission-manager.ts:587/631` + `sandbox-audit.ts:119`)
 
 누계 **16+ 사이트 across 3 separate PRs**. PR #786 시점에 `grep -rn '"low"\|"medium"\|"high"' src/permissions src/audit` 전수 sweep + SOT 도입 했다면 한 PR 으로 종료. Cluster review 가 발견한 누락분이 매번 follow-up PR 발생 → field 추가 PR 의 *checklist 의무화* 가 process-level 방어선.
+
+## Release Process
+
+Release 발행 절차는 `docs/development/release-process.md` 가 SOT.
+
+- **Main 직접 push 금지** — `[DEFAULT_BRANCH_DIRECT_PUSH]` guard (dev-tools PR #14) 가 release commit 도 거부. `chore/release-vX.Y.Z` branch + PR 머지 강제.
+- **Squash 금지** — `gh pr merge --merge` 만. tag 가 가리키는 commit SHA 보존 위해.
+- **Partial release 복구** — electron-builder publisher race 로 일부 asset 누락 시 workflow artifact (`gh run download`) 다운로드 후 `gh release upload` 수동 보충. re-run 만으로는 skip-if-exists 때문에 미보충.
+- **Mac x64 (Intel) 미산출** — intentional. CI runner = macOS arm64, Apple Silicon 만 공식 지원.
+- **`git -C <abs-path>` 강제** — multi-repo workspace 에서 Bash session cwd drift 로 다른 sibling repo 에 명령 적용되는 사고 방어. `cd` 누적 금지.
