@@ -91,24 +91,37 @@ export interface DemoActivationInputs {
  * §7 of the proposal: activation predicate. Spelled out so the truth table
  * is testable in isolation.
  *
+ * Intent: autoplay is a *returning-user re-engage* surface, NOT a first-run
+ * onboarding path. On a fresh install the user MUST see the
+ * `ScenarioShowcase` chain — autoplay activating before showcase mounts
+ * causes the boot probe to flip the chain straight to `done` via
+ * force-finish, producing the closet-flash regression that motivated
+ * PR #1019 and this follow-up. Explicit `demoAutoplayEnabled = true` still
+ * activates (developer / QA override path).
+ *
  * Demo activates iff:
- *   (A) `demoAutoplayEnabled === true` OR `onboardingCompleted` is not yet true
+ *   (A) `LVIS_DEMO_VENDOR` is present
  *   AND
- *   (B) `LVIS_DEMO_VENDOR` is present
+ *   (B) user did NOT explicitly opt out (`demoAutoplayEnabled === false`)
  *   AND
- *   (C) user did NOT explicitly opt out (`demoAutoplayEnabled === false`)
+ *   (C) `demoAutoplayEnabled === true` (explicit opt-in)
+ *      OR
+ *      `onboardingCompleted === true` (returning user re-engage)
  *
  * Resulting truth table (encoded for tests):
- *   flag=true    + completed=*    + vendor=true  → activate
- *   flag=undef   + completed=undef + vendor=true → activate (first run)
- *   flag=undef   + completed=true  + vendor=true → skip (already onboarded)
- *   flag=false   + completed=*    + vendor=true  → skip (explicit opt-out)
- *   *            + *              + vendor=false → skip (production dead path)
+ *   flag=true    + completed=*     + vendor=true  → activate (explicit enable)
+ *   flag=undef   + completed=true  + vendor=true → activate (returning user)
+ *   flag=undef   + completed=false + vendor=true → skip (first-run → showcase)
+ *   flag=undef   + completed=undef + vendor=true → skip (first-run → showcase)
+ *   flag=false   + completed=*     + vendor=true  → skip (explicit opt-out)
+ *   *            + *               + vendor=false → skip (production dead path)
  */
 export function shouldActivateDemoAutoplay(inputs: DemoActivationInputs): boolean {
   if (!inputs.demoVendorPresent) return false;
   if (inputs.flagEnabled === false) return false;
   if (inputs.flagEnabled === true) return true;
-  // flag undefined → first-run gate
-  return inputs.onboardingCompleted !== true;
+  // flag undefined → returning-user gate: only activate when onboarding
+  // has explicitly completed. First-run users (onboardingCompleted false
+  // or undefined) must see the ScenarioShowcase chain first.
+  return inputs.onboardingCompleted === true;
 }
