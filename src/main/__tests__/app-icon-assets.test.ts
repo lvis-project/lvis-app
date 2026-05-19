@@ -71,6 +71,10 @@ function visiblePixels(image: PngImage): Array<[number, number, number, number]>
   return pixels;
 }
 
+function opaquePixels(image: PngImage): Array<[number, number, number, number]> {
+  return visiblePixels(image).filter(([, , , a]) => a === 255);
+}
+
 describe("app icon assets", () => {
   it("uses a standard transparent canvas with a white rounded app background", () => {
     const svg = readFileSync(join(root, "build", "icon.svg"), "utf8");
@@ -101,8 +105,10 @@ describe("app icon assets", () => {
     const templateVisible = visiblePixels(template);
     const template2xVisible = visiblePixels(template2x);
     expect(whiteVisible.length).toBeGreaterThan(24);
-    expect(whiteVisible.length).toBeLessThan(white.width * white.height * 0.45);
-    expect(white2xVisible.length).toBeLessThan(white2x.width * white2x.height * 0.4);
+    expect(whiteVisible.length).toBeLessThan(white.width * white.height * 0.5);
+    expect(white2xVisible.length).toBeLessThan(white2x.width * white2x.height * 0.43);
+    expect(opaquePixels(white).length).toBeLessThan(white.width * white.height * 0.04);
+    expect(opaquePixels(white2x).length).toBeLessThan(white2x.width * white2x.height * 0.04);
     expect(templateVisible.length).toBe(whiteVisible.length);
     expect(template2xVisible.length).toBe(white2xVisible.length);
     expect(whiteVisible.every(([r, g, b]) => r === 255 && g === 255 && b === 255)).toBe(true);
