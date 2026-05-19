@@ -14,7 +14,10 @@
  *   4. The handler calls `recaptureDemoCredentialsAfterActivation()` so the
  *      auth IPC handler's subsequent `loginMockup` call observes the
  *      freshly-injected demo keys instead of the empty boot-time capture.
- *   5. The renderer then proceeds with the existing `loginMockup` chain.
+ *   5. If activation was already effective at boot, the renderer proceeds
+ *      with the existing `loginMockup` chain. First activation instead arms
+ *      a relaunch; the renderer shows a 5s onboarding notice, then calls the
+ *      relaunch IPC so Chromium boots with the new host resolver rules.
  *
  * Why a separate IPC handler (not folded into `auth.ts`):
  *   - The activation step is a *prerequisite* to `loginMockup`. Folding it
@@ -39,7 +42,7 @@
  *   a credentials artifact and lives alongside the encrypted secret store
  *   blob. Directory mode 0o700, file mode 0o600.
  */
-import { ipcMain } from "electron";
+import { app, ipcMain } from "electron";
 import { promises as fs } from "node:fs";
 import { dirname } from "node:path";
 import { validateSender, UNAUTHORIZED_FRAME, auditUnauthorized } from "../gated.js";
@@ -49,10 +52,33 @@ import {
   parseEnvDemoText,
 } from "../../main/demo-activation-codec.js";
 import { persistedEnvDemoPath } from "../../main/demo-activation-loader.js";
-import { recaptureDemoCredentialsAfterActivation } from "../../main/demo-credentials.js";
+import {
+  isDemoEnabled,
+  recaptureDemoCredentialsAfterActivation,
+} from "../../main/demo-credentials.js";
 import type { IpcDeps } from "../types.js";
 
 const log = createLogger("demo-activation-ipc");
+// Keep in sync with scripts/lib/dev-electron-exit.mjs. In `bun run dev`,
+// the parent watcher owns relaunching so it can keep all watch processes alive.
+const DEMO_ACTIVATION_DEV_RELAUNCH_EXIT_CODE = 42;
+
+function requestDemoActivationRelaunch(): void {
+  setImmediate(() => {
+    try {
+      if (process.env.LVIS_DEV === "1" && app.isPackaged === false) {
+        app.exit(DEMO_ACTIVATION_DEV_RELAUNCH_EXIT_CODE);
+        return;
+      }
+      app.relaunch();
+      app.exit(0);
+    } catch (err) {
+      log.error(
+        `auto-relaunch failed after activation: ${(err as Error).message}`,
+      );
+    }
+  });
+}
 
 /**
  * Inject the parsed `.env.demo` key/value pairs into `process.env`. Mirrors
@@ -88,6 +114,18 @@ async function writeEnvDemoFile(path: string, contents: string): Promise<void> {
 
 export function registerDemoHandlers(deps: IpcDeps): void {
   const { auditLogger } = deps;
+  let relaunchArmed = false;
+
+  // v0.2.1 hotfix — snapshot whether demo capture was already populated
+  // by boot-time `captureDemoCredentials()`. If yes, `.env.demo` was on
+  // disk pre-boot and `applyDemoHostResolverRules()` already wired the
+  // Azure Foundry hostmap into Chromium's net stack. If no, the current
+  // activation is the *first* activation; Chromium command-line is
+  // frozen, so retroactive host-resolver-rules cannot apply and we must
+  // relaunch on success. Captured at register time (called early during
+  // boot, before any activation IPC) so a subsequent activation cannot
+  // flip the snapshot.
+  const demoWasEffectiveAtBoot = isDemoEnabled();
 
   ipcMain.handle(
     "lvis:demo:activate",
@@ -95,7 +133,7 @@ export function registerDemoHandlers(deps: IpcDeps): void {
       e,
       payload: { code?: unknown },
     ): Promise<
-      | { ok: true; vendor: string }
+      | { ok: true; vendor: string; requiresRelaunch?: boolean }
       | { ok: false; error: "invalid-code" | "persist-failed" | "no-vendor" | "unauthorized-frame" }
     > => {
       if (!validateSender(e)) {
@@ -182,7 +220,64 @@ export function registerDemoHandlers(deps: IpcDeps): void {
       } catch { /* audit must not break IPC */ }
 
       log.info(`demo activation succeeded: vendor=${vendor}`);
-      return { ok: true, vendor };
+
+      // v0.2.1 hotfix — First-activation race fix.
+      //
+      // Chromium command-line switches (host-resolver-rules, used by
+      // `applyDemoHostResolverRules` to map the internal Azure Foundry
+      // hostname onto the 10.182.192.0/24 intranet) are frozen after
+      // `app.whenReady()`. We only call `applyDemoHostResolverRules` once
+      // at boot. If `.env.demo` was absent at boot (i.e. this is the very
+      // first activation), retroactive `injectDemoEnv` mutates
+      // `process.env` but cannot rewire the Chromium net stack — the
+      // subsequent `loginMockup` → `refreshProvider` path probes the
+      // Azure Foundry endpoint and trips `ENOTFOUND`.
+      //
+      // The next boot path is correct: `loadPersistedDemoActivationSync()`
+      // hydrates `process.env` from `~/.lvis/secrets/.env.demo` BEFORE
+      // `applyDemoHostResolverRules()` runs, so host-resolver-rules is
+      // armed with the right hostmap by the time renderer code starts.
+      // Therefore: on activation success, ask the renderer to surface a
+      // brief "재시작 중…" message, then relaunch. In `bun run dev`,
+      // the watcher owns that relaunch via a special exit code so it can keep
+      // main/preload/renderer/style watchers alive instead of shutting down.
+      //
+      // `requiresRelaunch=true` is the renderer's cue. The renderer owns
+      // the 5s onboarding dwell, then calls `lvis:demo:relaunch-after-activation`
+      // to execute the already-armed relaunch. This keeps the message visible
+      // before the process exits while preserving the main-process-only
+      // relaunch authority.
+      const shouldRelaunch = !demoWasEffectiveAtBoot;
+      if (shouldRelaunch) {
+        relaunchArmed = true;
+      }
+
+      return {
+        ok: true,
+        vendor,
+        ...(shouldRelaunch ? { requiresRelaunch: true } : {}),
+      };
+    },
+  );
+
+  ipcMain.handle(
+    "lvis:demo:relaunch-after-activation",
+    async (
+      e,
+    ): Promise<
+      | { ok: true }
+      | { ok: false; error: "not-armed" | "unauthorized-frame" }
+    > => {
+      if (!validateSender(e)) {
+        auditUnauthorized(auditLogger, "lvis:demo:relaunch-after-activation", e);
+        return { ok: false, error: UNAUTHORIZED_FRAME.error };
+      }
+      if (!relaunchArmed) {
+        return { ok: false, error: "not-armed" };
+      }
+      relaunchArmed = false;
+      requestDemoActivationRelaunch();
+      return { ok: true };
     },
   );
 }

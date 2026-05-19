@@ -50,6 +50,7 @@ import { PostTurnHookChain } from "../hooks/post-turn-hook-chain.js";
 import type { ToolCallMeta } from "../tools/executor.js";
 import type { ChatInputOrigin } from "../shared/chat-origin.js";
 import { isUserKeyboardOrigin } from "../shared/chat-origin.js";
+import type { AiProviderPingResult } from "../shared/ai-provider-ping.js";
 import type { PermissionReviewEvent } from "../shared/permission-review-status.js";
 import { stripLeadingSlash } from "../shared/slash-sanitizer.js";
 import { createTracer, type ConversationTracer } from "../observability/conversation-trace.js";
@@ -58,6 +59,7 @@ const log = createLogger("lvis");
 
 const INLINE_PASTED_TEXT_RE = /(^|\n)-{5} Pasted text #\d+ \(\d+ lines\) -{5}\n/;
 const SESSION_ID_REGEX = /^[a-zA-Z0-9_\-]+$/;
+const AI_PROVIDER_PING_TIMEOUT_MS = 8_000;
 
 function isSafeSessionId(sessionId: unknown): sessionId is string {
   return typeof sessionId === "string" && SESSION_ID_REGEX.test(sessionId);
@@ -630,6 +632,78 @@ export class ConversationLoop {
     // Plugins and routines consume generateText() return verbatim — strip the
     // suggested-replies block so it never reaches non-chat-stream callers.
     return stripSuggestedReplies(text).trim();
+  }
+
+  /**
+   * Status-bar connectivity probe. This is intentionally independent from
+   * chat history: a tiny one-shot LLM request proves the configured provider
+   * can answer after activation/restart without adding a visible turn.
+   */
+  async pingProvider(timeoutMs = AI_PROVIDER_PING_TIMEOUT_MS): Promise<AiProviderPingResult> {
+    const llm = this.deps.settingsService.get("llm");
+    const vendor = llm.provider;
+    const model = llm.vendors[vendor]?.model ?? "";
+    if (!this.provider) {
+      return {
+        configured: false,
+        online: false,
+        vendor,
+        ...(model ? { model } : {}),
+        error: "not-configured",
+      };
+    }
+
+    const startedAt = Date.now();
+    const ctrl = new AbortController();
+    const timer = setTimeout(() => ctrl.abort(), timeoutMs);
+    try {
+      for await (const ev of this.provider.streamTurn({
+        systemPrompt: "You are a connectivity probe. Reply with PONG only.",
+        messages: [{ role: "user", content: "ping" }],
+        tools: [],
+        model,
+        abortSignal: ctrl.signal,
+      })) {
+        if (ev.type === "error") {
+          return {
+            configured: true,
+            online: false,
+            vendor,
+            model,
+            error: ev.error,
+            latencyMs: Date.now() - startedAt,
+          };
+        }
+        if (ev.type === "message_complete") {
+          return {
+            configured: true,
+            online: true,
+            vendor,
+            model,
+            latencyMs: Date.now() - startedAt,
+          };
+        }
+      }
+      return {
+        configured: true,
+        online: false,
+        vendor,
+        model,
+        error: "stream-ended",
+        latencyMs: Date.now() - startedAt,
+      };
+    } catch (err) {
+      return {
+        configured: true,
+        online: false,
+        vendor,
+        model,
+        error: ctrl.signal.aborted ? "timeout" : (err as Error).message,
+        latencyMs: Date.now() - startedAt,
+      };
+    } finally {
+      clearTimeout(timer);
+    }
   }
 
   /** 현재 벤더 이름 */

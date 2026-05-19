@@ -12,7 +12,7 @@
  *   demo         lvis:demo:* (activation-code → .env.demo decrypt + persist)
  *   tour         lvis:tour:*        — Tutorial-C SpotlightTour state + broadcast
  *   tutorial     lvis:tutorial:*    — Tutorial-D Discovery Swipe state + open trigger
- *   chat         lvis:chat:*, lvis:routines:*, lvis:routine:*, lvis:trigger:*,
+ *   chat         lvis:chat:*, lvis:llm:*, lvis:routines:*, lvis:routine:*, lvis:trigger:*,
  *                lvis:memory:*, lvis:starred:*, lvis:feedback:*, lvis:ask-user-question:*
  *   plugins      lvis:plugins:*, lvis:bootstrap:*, lvis:runtime:*, lvis:marketplace:*,
  *                lvis:mcp:*, lvis:plugin:*, lvis:file:*, lvis:notification:clicked
