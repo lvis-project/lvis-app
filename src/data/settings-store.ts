@@ -114,6 +114,23 @@ export interface FeatureFlags {
    * patch flow — no separate disk file.
    */
   onboardingCompleted?: boolean;
+  /**
+   * O-X1 Live Auto-play (proposal: docs/architecture/proposals/live-autoplay.md).
+   * Demo-only flag. When true *and* `process.env.LVIS_DEMO_VENDOR` is set,
+   * ChatView mounts in demo-autoplay mode on first run. After the user takes
+   * over (any keystroke or "키 잡기 →" click) the flag is flipped to false so
+   * the demo never re-runs. In packaged production builds with `LVIS_DEMO_VENDOR`
+   * unset this entire path is dead — the demo cannot silently activate.
+   */
+  demoAutoplayEnabled?: boolean;
+  /**
+   * Tutorial-X3 — index into the `DEMO_SCRIPTS` rotation. Each install
+   * boot picks `DEMO_SCRIPTS[index % len]`, then bumps the index. The
+   * value is best-effort: `undefined` falls back to 0, out-of-range
+   * values are wrapped modulo the catalog length. A single int avoids a
+   * dedicated namespace for one counter.
+   */
+  demoAutoplayRotationIndex?: number;
 }
 
 export interface AppSettings {
@@ -396,6 +413,13 @@ const DEFAULT_SETTINGS: AppSettings = {
   pluginConfigs: {},
   features: {
     idlePreferenceRefresh: false,
+    // Fresh installs MUST start the Z onboarding chain. Persisting an
+    // explicit `false` (instead of relying on `undefined`) keeps the
+    // contract obvious: the flag flips to `true` exactly once, from
+    // `markOnboardingCompleted` after the user finishes (or skips) the
+    // chain. Any other path that wants to suppress the chain must set
+    // this to `true` deliberately — no "missing key === skipped" trap.
+    onboardingCompleted: false,
   },
 };
 
@@ -1010,6 +1034,20 @@ function normalizeFeatureFlags(input: unknown): FeatureFlags {
   const result: FeatureFlags = {};
   if (typeof obj.idlePreferenceRefresh === "boolean") {
     result.idlePreferenceRefresh = obj.idlePreferenceRefresh;
+  }
+  if (typeof obj.onboardingCompleted === "boolean") {
+    result.onboardingCompleted = obj.onboardingCompleted;
+  }
+  if (typeof obj.demoAutoplayEnabled === "boolean") {
+    result.demoAutoplayEnabled = obj.demoAutoplayEnabled;
+  }
+  // Tutorial-X3 — accept the int rotation index; drop NaN / non-finite
+  // values so a corrupted on-disk state never crashes the autoplay path.
+  if (
+    typeof obj.demoAutoplayRotationIndex === "number" &&
+    Number.isFinite(obj.demoAutoplayRotationIndex)
+  ) {
+    result.demoAutoplayRotationIndex = obj.demoAutoplayRotationIndex;
   }
   return result;
 }

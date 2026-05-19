@@ -1,0 +1,27 @@
+{
+  "id": "multi-agent-demo",
+  "titleKo": "멀티 에이전트 시연",
+  "userMessage": "이 PRD 의 시장 분석 + 경쟁사 비교 한 번에 처리해줘",
+  "toolCalls": [
+    {
+      "toolName": "agent_dispatch",
+      "labelKo": "market-analyst 시작",
+      "fakeResultKo": "market-analyst 실행 중 — TAM/SAM/SOM + 페르소나 2 + 트렌드 3 추정",
+      "delayMs": 500
+    },
+    {
+      "toolName": "agent_dispatch",
+      "labelKo": "competitor-tracker 시작",
+      "fakeResultKo": "competitor-tracker 실행 중 — 직접 경쟁사 3 + 인접 솔루션 4 비교",
+      "delayMs": 500
+    },
+    {
+      "toolName": "agent_collect",
+      "labelKo": "결과 합성",
+      "fakeResultKo": "2/2 완료. 시장 분석 + 경쟁사 비교 통합 보고서 1건",
+      "delayMs": 700
+    }
+  ],
+  "assistantResponse": "Market analyst 와 Competitor tracker 2개 agent 병렬 실행 완료.\n\n종합:\n① 시장 — TAM ₩2.4조, SAM ₩620억, 페르소나 2 + 트렌드 3\n② 경쟁사 — 직접 경쟁사 3 + 인접 솔루션 4, 차별점 5건\n③ 추천 — Q2 안에 ProductHunt 진입 + 인접 솔루션 1건과 통합 검토\n\n각 agent 결과는 ⌘K → '에이전트' 에서 따로 볼 수 있어요.",
+  "typeOnMsPerChar": 22
+}

@@ -43,6 +43,7 @@ import { resolveAppIconPath } from "./main/app-icon.js";
 import { WindowManager, type DetachedWindowOptions } from "./main/window-manager.js";
 import { createLogger } from "./lib/logger.js";
 import { LVIS_LOGO_PATH, LVIS_LOGO_VIEW_BOX } from "./shared/lvis-logo.js";
+import { getLvisAppVersion } from "./shared/app-version.js";
 import { normalizeSettingsTab } from "./shared/settings-tabs.js";
 import { preparePythonRuntimeForInstalledPlugin, withPluginInstallLock } from "./plugins/install-lifecycle.js";
 import { ensureWorkspaceCwd } from "./main/ensure-workspace-cwd.js";
@@ -50,6 +51,8 @@ import { uninstallPluginWithLifecycle } from "./plugins/uninstall-lifecycle.js";
 import { lvisHome } from "./shared/lvis-home.js";
 import { runShutdownRoutines } from "./main/shutdown-routines.js";
 import { captureDemoCredentials } from "./main/demo-credentials.js";
+import { loadPersistedDemoActivationSync } from "./main/demo-activation-loader.js";
+import { applyDemoHostResolverRules } from "./main/demo-host-resolver.js";
 import { forceKillManagedChildProcesses } from "./main/managed-child-processes.js";
 import {
   resolveShutdownCleanupTimeoutMs,
@@ -156,12 +159,29 @@ function applyRuntimeAppIcon() {
 // `LVIS_DEV_NO_SANDBOX`, which made it incorrectly look like a dev flag;
 // the rename moves it out of the dev mask but it's still hard-gated on
 // `!app.isPackaged` by `dev-flags.ts:devNoSandboxAllowed()`.
+// Demo activation code system — on packaged-app boot, if the user has
+// previously activated via the LoginModal chip 1 (paste activation string),
+// the decrypted `.env.demo` payload was persisted under
+// `~/.lvis/secrets/.env.demo`. Inject those values into `process.env` BEFORE
+// `captureDemoCredentials()` runs so the existing boot-time capture pipeline
+// observes them identically to a dev-mode `.env.demo` on disk. Sync I/O so
+// the capture sees the values without an awaited boot path.
+loadPersistedDemoActivationSync();
 // #893 / PR #894 B1 — Capture `LVIS_DEMO_*` BEFORE the scrub so the mockup
 // auth handler can still consume the demo keys + enable flag through an
 // internal channel, while the renderer/preload/workers never observe them
 // via inherited `process.env`. Capture is idempotent; the scrub below
 // runs unconditionally to close the env side-channel.
 captureDemoCredentials();
+// Path 2 hotfix — when `LVIS_DEMO_VENDOR=azure-foundry` and
+// `LVIS_DEMO_HOST_MAP` is non-empty, install a Chromium `host-resolver-rules`
+// switch so the demo Azure Foundry hostnames resolve to the internal
+// intranet IPs *inside Electron only* (no `/etc/hosts` mutation, no sudo).
+// MUST be called before `app.whenReady()` — done here so the switch is
+// installed before any network service initialisation. Also runs BEFORE
+// the env scrub for the same reason as `captureDemoCredentials()`: the
+// vendor + map env vars are wiped immediately after.
+applyDemoHostResolverRules(app);
 
 if (app.isPackaged) {
   for (const key of Object.keys(process.env)) {
@@ -976,6 +996,38 @@ function createDisplayMenu(): MenuItemConstructorOptions {
   };
 }
 
+/**
+ * Tutorial-D — broadcast the Discovery Swipe open signal to every open
+ * BrowserWindow so the dialog mounts on top of any active surface
+ * (chat, settings, plugin webview). Used by the Help menu item and the
+ * chat empty-area context menu.
+ */
+function broadcastTutorialOpen(source: string): void {
+  const payload = { source };
+  for (const win of BrowserWindow.getAllWindows()) {
+    if (win.isDestroyed()) continue;
+    try {
+      win.webContents.send("lvis:tutorial:open", payload);
+    } catch {
+      /* one window's send failure must not block the others */
+    }
+  }
+}
+
+function createHelpMenu(): MenuItemConstructorOptions {
+  return {
+    label: "도움말",
+    role: "help",
+    submenu: [
+      {
+        label: "튜토리얼",
+        accelerator: "CommandOrControl+Shift+T",
+        click: () => broadcastTutorialOpen("menu"),
+      },
+    ],
+  };
+}
+
 function createEditMenu(): MenuItemConstructorOptions {
   return {
     label: "편집",
@@ -998,6 +1050,7 @@ function refreshApplicationMenu() {
   const settingsMenuItem = createSettingsMenuItem();
   const editMenu = createEditMenu();
   const displayMenu = createDisplayMenu();
+  const helpMenu = createHelpMenu();
   const template: MenuItemConstructorOptions[] =
     process.platform === "darwin"
       ? [
@@ -1015,12 +1068,14 @@ function refreshApplicationMenu() {
           editMenu,
           createViewMenu(),
           displayMenu,
+          helpMenu,
         ]
       : [
           { label: "앱", submenu: [createAlwaysOnTopMenuItem(), settingsMenuItem, { type: "separator" }, { role: "quit" }] },
           editMenu,
           createViewMenu(),
           displayMenu,
+          helpMenu,
         ];
   Menu.setApplicationMenu(Menu.buildFromTemplate(template));
 }
@@ -1283,9 +1338,12 @@ const BOOTSTRAP_SPLASH = `<!DOCTYPE html>
   .dot:nth-child(3){animation-delay:.36s}
   .version{
     position:fixed;right:14px;bottom:10px;
-    color:rgba(44,44,44,.34);font-size:10.5px;
+    color:rgba(44,44,44,.5);font-size:10px;line-height:1.35;
     font-variant-numeric:tabular-nums;letter-spacing:.02em;
+    text-align:right;opacity:.85;
+    display:flex;flex-direction:column;gap:1px;
   }
+  .version span{display:block}
 
   @keyframes lvis-splash-enter{from{opacity:0}to{opacity:1}}
   @keyframes lvis-splash-breathing{0%,100%{transform:scale(1)}50%{transform:scale(1.035)}}
@@ -1300,7 +1358,7 @@ const BOOTSTRAP_SPLASH = `<!DOCTYPE html>
     .name{color:#ff5b8f}
     .status{color:rgba(255,141,178,.72)}
     .dot{background:#ff5b8f}
-    .version{color:rgba(240,230,255,.32)}
+    .version{color:rgba(240,230,255,.5)}
   }
 
   /* Reduced motion — disable scale, breathing, bounce; keep entrance fade only */
@@ -1326,7 +1384,13 @@ const BOOTSTRAP_SPLASH = `<!DOCTYPE html>
       <div class="dots" aria-hidden="true"><span class="dot"></span><span class="dot"></span><span class="dot"></span></div>
     </div>
   </div>
-  <div class="version">v${app.getVersion()}</div>
+  <div class="version" aria-label="버전 정보">
+    <span>LVIS v${getLvisAppVersion()}</span>
+    <span>Electron v${process.versions.electron ?? ""}</span>
+    <span>Node v${process.versions.node ?? ""}</span>
+    <span>Chromium v${process.versions.chrome ?? ""}</span>
+    <span>V8 v${process.versions.v8 ?? ""}</span>
+  </div>
   <script>
     const messages = ${JSON.stringify(BOOTSTRAP_STATUS_MESSAGES)};
     const statusEl = document.getElementById("status");

@@ -39,6 +39,16 @@ export default defineConfig({
     globalSetup: ["./vitest.globalSetup.ts"],
     testTimeout: 45000,
     hookTimeout: 45000,
+    // Cap concurrent workers. Default = CPU count, which on 8-10 core macs
+    // multiplied by per-test subprocess fanout (bash.test.ts /
+    // executor.test.ts / script-hook-runner.test.ts each spawn shell
+    // children) saturates the CPU and causes timing flakes:
+    //   - shell stdout chunks arrive late → assertion sees partial output
+    //   - script hooks receive stdin slowly → decision flips to deny
+    //   - executor Layer-1 approvals race the audit-log subprocess
+    // maxWorkers=4 keeps moderate parallelism for the rest of the suite
+    // while leaving headroom for each test's spawned subprocesses.
+    maxWorkers: 4,
     // Node v25 enabled experimental WebStorage by default. Its
     // `localStorage` getter trips `Warning: --localstorage-file was
     // provided without a valid path` and shadows the jsdom implementation,

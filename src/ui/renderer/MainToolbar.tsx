@@ -138,10 +138,40 @@ export function MainToolbar({
         {/* ── Spacer pushes remaining items to the right ─────────────── */}
         <div className="flex-1" />
 
-        {/* ── Unified search — opens the top-attached search panel ─────── */}
+        {/* ── Help shortcut hint — small kbd chip exposing the ⌘+? gate
+            for the SpotlightTour. The Z onboarding chain step 4 spotlight
+            anchors on this so users physically see where the help hint
+            lives. The chip is not interactive on its own — pressing the
+            chord still triggers the tour through the App-level keydown
+            handler. */}
+        <span
+          data-tour-anchor="help-shortcut-hint"
+          aria-label="가이드 다시 열기 (⌘+?)"
+          title="가이드 다시 열기 (⌘+?)"
+          className="ml-1 hidden items-center gap-1 rounded-md border border-border/60 px-1.5 py-0.5 text-[10px] text-muted-foreground sm:inline-flex"
+        >
+          <span aria-hidden="true">⌘</span>
+          <span aria-hidden="true">+</span>
+          <span aria-hidden="true">?</span>
+          <span className="sr-only">도움말 단축키</span>
+        </span>
+
+        {/* ── Unified search — opens the top-attached search panel ───────
+            Z onboarding chain — this button anchors the "chat-history"
+            spotlight step. The Unified Search panel surfaces both saved
+            and recent sessions, which is the "최근 대화 목록" the tour
+            references.  */}
         <Tooltip>
           <TooltipTrigger asChild>
-            <Button variant="ghost" size="sm" className="h-7 w-7 p-0" onClick={onOpenUnifiedSearch} title="통합 검색 (Cmd/Ctrl+F)" aria-label="통합 검색 (Cmd/Ctrl+F)">
+            <Button
+              variant="ghost"
+              size="sm"
+              className="h-7 w-7 p-0"
+              onClick={onOpenUnifiedSearch}
+              title="통합 검색 (Cmd/Ctrl+F)"
+              aria-label="통합 검색 (Cmd/Ctrl+F)"
+              data-tour-anchor="chat-history"
+            >
               <Search className="h-3.5 w-3.5" />
             </Button>
           </TooltipTrigger>
@@ -171,12 +201,17 @@ export function MainToolbar({
           <Tooltip>
             <TooltipTrigger asChild>
               <DropdownMenuTrigger asChild>
+                {/* Z onboarding chain — spotlight anchor for the
+                    "settings-entry" step. Settings + Routines + Memory
+                    + Export all live inside this menu, so anchoring
+                    the trigger is the stable selector. */}
                 <Button
                   variant="ghost"
                   size="sm"
                   className="h-7 w-7 p-0"
                   title="더 많은 메뉴"
                   aria-label="더 많은 메뉴"
+                  data-tour-anchor="settings-entry"
                 >
                   <Menu className="h-3.5 w-3.5" />
                 </Button>

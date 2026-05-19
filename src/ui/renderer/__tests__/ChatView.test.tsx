@@ -73,7 +73,7 @@ describe("ChatView", () => {
       emitChatStream({
         type: "permission_review",
         reviewStatus: "reviewing",
-        name: "lge_lgenie_query",
+        name: "internal_kb_query",
         toolCategory: "network",
         source: "plugin",
         groupId: "g-review",
@@ -98,7 +98,7 @@ describe("ChatView", () => {
       emitChatStream({
         type: "permission_review",
         reviewStatus: "needs_approval",
-        name: "lge_lgenie_query",
+        name: "internal_kb_query",
         toolCategory: "network",
         source: "plugin",
         groupId: "g-review",
@@ -119,7 +119,7 @@ describe("ChatView", () => {
     await act(async () => {
       emitChatStream({
         type: "tool_start",
-        name: "lge_lgenie_query",
+        name: "internal_kb_query",
         groupId: "g-review",
         toolUseId: "t-review",
       });

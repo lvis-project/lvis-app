@@ -52,7 +52,9 @@ describe("captureDemoCredentials — baseUrl / model env vars", () => {
   it("returns null from getDemoVendorConfig when apiKey is absent even if other fields are present", () => {
     process.env.LVIS_DEMO_ENABLED = "1";
     process.env.LVIS_DEMO_BASEURL_AZURE_FOUNDRY = "https://some.endpoint.com/";
-    // No LVIS_DEMO_KEY_AZURE_FOUNDRY set.
+    // No LVIS_DEMO_KEY_AZURE_FOUNDRY set. Option 2 (Path 3): no baked-in
+    // fallback — env vars are the only valid key source. The .env.demo file
+    // (gitignored) provides the key for local dev; see local-demo-setup.md.
     captureDemoCredentials();
 
     expect(getDemoVendorConfig("azure-foundry")).toBeNull();
@@ -117,18 +119,21 @@ describe("captureDemoCredentials — LVIS_DEMO_VENDOR (#893 top-level)", () => {
     expect(getDemoActiveVendor()).toBe("claude");
   });
 
-  it("defaults to openai when LVIS_DEMO_VENDOR is absent", () => {
+  // Path 2 hotfix (2026-05-19): the default fallback vendor changed from
+  // "openai" to "azure-foundry" so the internal organization demo loop
+  // activates by default. The two tests below assert the new default.
+  it("defaults to azure-foundry when LVIS_DEMO_VENDOR is absent", () => {
     process.env.LVIS_DEMO_ENABLED = "1";
     delete process.env.LVIS_DEMO_VENDOR;
     captureDemoCredentials();
-    expect(getDemoActiveVendor()).toBe("openai");
+    expect(getDemoActiveVendor()).toBe("azure-foundry");
   });
 
-  it("falls back to openai when LVIS_DEMO_VENDOR is not a known vendor", () => {
+  it("falls back to azure-foundry when LVIS_DEMO_VENDOR is not a known vendor", () => {
     process.env.LVIS_DEMO_ENABLED = "1";
     process.env.LVIS_DEMO_VENDOR = "not-a-vendor";
     captureDemoCredentials();
-    expect(getDemoActiveVendor()).toBe("openai");
+    expect(getDemoActiveVendor()).toBe("azure-foundry");
   });
 
   it("accepts every known LLM vendor", () => {

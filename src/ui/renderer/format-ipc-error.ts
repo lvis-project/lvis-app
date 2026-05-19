@@ -53,6 +53,8 @@ export const COMMON_IPC_ERROR_MESSAGES: Readonly<Record<string, string>> = {
   "invalid-text": "잘못된 텍스트 입력입니다.",
   "empty-text": "텍스트가 비어 있습니다.",
   "empty": "값이 비어 있습니다.",
+  "content-too-large": "요청한 내용이 허용 크기를 초과했습니다.",
+  "invalid-content": "내용 형식이 올바르지 않습니다.",
   "missing-tokens": "토큰 정보가 누락되었습니다.",
 
   // ── Args / canonicalization ──
@@ -124,6 +126,22 @@ export const COMMON_IPC_ERROR_MESSAGES: Readonly<Record<string, string>> = {
   "invalid-vendor": "지원하지 않는 벤더입니다.",
   "no-demo-key": "이 벤더의 데모 API 키가 환경 변수에 설정되어 있지 않습니다.",
   "reviewer-rewire-failed": "권한 검토 모델을 새 설정으로 연결하지 못했습니다. 설정이 이전 상태로 되돌려졌습니다.",
+  // ── Demo activation (lvis:demo:activate — 2026-05-19) ──
+  // The LoginModal carries its own activationErrorMessage() that prefers
+  // a longer "활성 코드..." string with paste instructions. These default
+  // mappings exist for callers that surface IPC errors generically via
+  // formatIpcError() (e.g. inline error toasts).
+  "invalid-code": "활성 코드가 올바르지 않습니다.",
+  "no-vendor": "활성 코드에 vendor 정보가 누락되었습니다.",
+  "persist-failed": "활성 코드를 저장하지 못했습니다.",
+  // ── Tutorial-C — tour:{start,mark-complete,dismiss} validation ──
+  "invalid-scenario-id": "선택한 가이드 투어 항목이 올바르지 않습니다.",
+  "write-failed": "설정을 저장하지 못했습니다.",
+  // ── Tutorial-D — Discovery Swipe validation + dispatch failures ──
+  "invalid-card-id": "잘못된 카드 식별자입니다.",
+  "no-window": "현재 창을 찾을 수 없습니다. 앱을 다시 시작해 주세요.",
+  // ── Audit demo throttle (pre-existing in audit.ts) ──
+  "rate-limited": "요청이 너무 잦습니다. 잠시 후 다시 시도해 주세요.",
 
   // ── Misc IO / system ──
   "invalid-request-id": "잘못된 요청 ID입니다.",

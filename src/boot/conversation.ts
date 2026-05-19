@@ -2,7 +2,10 @@
  * Boot §4.2 Step 7 — ConversationLoop + dependencies (hooks, approval gate,
  * permission manager, PostTurnHookChain, callLlm sanitiser).
  */
+import { existsSync, readFileSync } from "node:fs";
+import { join } from "node:path";
 import type { BrowserWindow } from "electron";
+import { lvisHome } from "../shared/lvis-home.js";
 import type { SettingsService } from "../data/settings-store.js";
 import type { MemoryManager } from "../memory/memory-manager.js";
 import type { KeywordEngine } from "../core/keyword-engine.js";
@@ -25,6 +28,27 @@ import type { NotificationService } from "../main/notification-service.js";
 import type { SessionTodoStore } from "../main/session-todo-store.js";
 import { createLogger } from "../lib/logger.js";
 const log = createLogger("lvis");
+
+/**
+ * Tutorial-X4 — read the user-onboarding-context markdown file synth-
+ * esized by the renderer wizard. Returns "" when the file is absent or
+ * empty so the SystemPromptBuilder source drops out — there is no cost
+ * on steady-state turns. The file lives under
+ * `~/.lvis/onboarding/onboarding-context.md` (CLAUDE.md storage-namespace
+ * rule — domain-specific resource stays inside the `onboarding/`
+ * directory). The reader is fully tolerant: read failures swallow to ""
+ * so a corrupt file never blocks the chat loop.
+ */
+function readOnboardingContext(): string {
+  try {
+    const path = join(lvisHome(), "onboarding", "onboarding-context.md");
+    if (!existsSync(path)) return "";
+    const raw = readFileSync(path, "utf-8");
+    return raw.trim();
+  } catch {
+    return "";
+  }
+}
 
 export function createSystemPromptBuilder(opts: {
   memoryManager: MemoryManager;
@@ -54,6 +78,11 @@ export function createSystemPromptBuilder(opts: {
     // Phase 1.5 Option C — 비활성 plugin 카탈로그 공급.
     getPluginCards: () => pluginRuntime.listPluginCards(toolRegistry),
     getActiveSkillsSection,
+    // Tutorial-X4 — User Onboarding Context source. Renderer writes the
+    // synthesized markdown after MemorySeedDialog dismissal; reader is
+    // file-backed so the conversation loop has no dependency on the
+    // renderer state. Empty return drops the section entirely.
+    getOnboardingContext: readOnboardingContext,
   });
 }
 
