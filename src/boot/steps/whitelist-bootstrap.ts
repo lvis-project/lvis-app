@@ -28,7 +28,7 @@ const log = createLogger("whitelist-bootstrap");
 
 export interface WhitelistBootstrapInput {
   bootAuditLogger: AuditLogger;
-  /** Online toggle — disabled in tests + when `LVIS_DEMO_ENABLED=1`. */
+  /** Online toggle — disabled in tests + when `isDemoEnabled()` is true. */
   online?: boolean;
   /**
    * Cluster review optional fix — app-shutdown AbortSignal. When the app

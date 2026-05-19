@@ -73,8 +73,8 @@ export interface WhitelistInitOptions {
   userDataDir: string;
   /**
    * Path to the demo whitelist snapshot baked into asar. When set AND
-   * `useDemoSnapshot === true` (or legacy `LVIS_DEMO_ENABLED=1`), the
-   * registry loads this file exclusively and skips the network fetch entirely.
+   * `useDemoSnapshot === true`, the registry loads this file exclusively
+   * and skips the network fetch entirely.
    * Demo path bypasses the monotonicity guard so a kiosk re-launch doesn't
    * reject the snapshot.
    */
@@ -166,8 +166,10 @@ class WhitelistRegistry {
     const telemetry = opts.telemetry ?? (() => {});
 
     // Demo snapshot path — kiosk / pre-prod / offline trade show.
-    const useDemoSnapshot =
-      opts.useDemoSnapshot ?? process.env.LVIS_DEMO_ENABLED === "1";
+    // Caller (boot/steps/whitelist-bootstrap.ts) supplies `useDemoSnapshot`
+    // from `isDemoEnabled()` after `captureDemoCredentials()` runs; no env
+    // fallback is honored.
+    const useDemoSnapshot = opts.useDemoSnapshot === true;
     if (opts.demoSnapshotPath && useDemoSnapshot) {
       const loaded = await this.tryLoadDemoSnapshot(opts.demoSnapshotPath);
       if (loaded) {
@@ -176,7 +178,7 @@ class WhitelistRegistry {
         telemetry("whitelist_fetch_ok", { source: "demo-snapshot" });
         return;
       }
-      log.warn("LVIS_DEMO_ENABLED set but demo snapshot failed to load — falling through to cache/remote");
+      log.warn("demo mode active but demo snapshot failed to load — falling through to cache/remote");
     }
 
     const cache = new WhitelistCache(opts.userDataDir);
@@ -404,8 +406,9 @@ class WhitelistRegistry {
    *
    * Production catalog (the live `lvis-project/marketplace-whitelist` repo)
    * uses a rolling 90-day expiry and is fetched + verified at boot via
-   * `whitelist-fetcher.ts`. The demo path is gated behind
-   * `LVIS_DEMO_ENABLED=1` so production builds never load this snapshot.
+   * `whitelist-fetcher.ts`. The demo path is gated behind `useDemoSnapshot`
+   * (derived from `isDemoEnabled()` at boot) so production builds without
+   * a captured demo activation never load this snapshot.
    *
    * Do NOT shorten the demo snapshot's `expiresAt` to match production —
    * that is an environment-policy decision, not a security regression.
