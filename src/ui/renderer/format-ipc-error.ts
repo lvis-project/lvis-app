@@ -53,6 +53,8 @@ export const COMMON_IPC_ERROR_MESSAGES: Readonly<Record<string, string>> = {
   "invalid-text": "잘못된 텍스트 입력입니다.",
   "empty-text": "텍스트가 비어 있습니다.",
   "empty": "값이 비어 있습니다.",
+  "content-too-large": "요청한 내용이 허용 크기를 초과했습니다.",
+  "invalid-content": "내용 형식이 올바르지 않습니다.",
   "missing-tokens": "토큰 정보가 누락되었습니다.",
 
   // ── Args / canonicalization ──
