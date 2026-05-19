@@ -12,6 +12,10 @@ const ICON_CARD_INSET = 64;
 const ICON_CARD_RADIUS = 192;
 const LOGO_SAFE_PADDING = 192;
 const ICON_BACKGROUND = [255, 255, 255, 255];
+const TRAY_ICON_BASE_SIZE = 18;
+const TRAY_ICON_SCALE_FACTORS = [1, 2];
+const TRAY_ICON_PADDING_RATIO = 0.16;
+const TRAY_ICON_STROKE_RATIO = 0.105;
 const GRADIENT_STOPS = [
   { at: 0, color: [255, 75, 46] },
   { at: 0.56, color: [255, 63, 110] },
@@ -26,13 +30,13 @@ function readLogoConst(source, name) {
   return match[1];
 }
 
-function iconGeometry(viewBox) {
+function iconGeometry(viewBox, targetSize = TARGET_SIZE, safePadding = LOGO_SAFE_PADDING) {
   const [, , logoWidthText, logoHeightText] = viewBox.split(/\s+/);
   const logoWidth = Number(logoWidthText);
   const logoHeight = Number(logoHeightText);
-  const scale = (TARGET_SIZE - LOGO_SAFE_PADDING * 2) / Math.max(logoWidth, logoHeight);
-  const x = (TARGET_SIZE - logoWidth * scale) / 2;
-  const y = (TARGET_SIZE - logoHeight * scale) / 2;
+  const scale = (targetSize - safePadding * 2) / Math.max(logoWidth, logoHeight);
+  const x = (targetSize - logoWidth * scale) / 2;
+  const y = (targetSize - logoHeight * scale) / 2;
   return { logoWidth, logoHeight, x, y, scale };
 }
 
@@ -309,11 +313,11 @@ function rasterizeIcon(logoPath, geometry) {
   return downsample(buffer, size, factor);
 }
 
-function downsample(source, sourceSize, factor) {
-  const target = Buffer.alloc(TARGET_SIZE * TARGET_SIZE * 4);
+function downsample(source, sourceSize, factor, targetSize = TARGET_SIZE, solidColor = null) {
+  const target = Buffer.alloc(targetSize * targetSize * 4);
   const samples = factor * factor;
-  for (let y = 0; y < TARGET_SIZE; y += 1) {
-    for (let x = 0; x < TARGET_SIZE; x += 1) {
+  for (let y = 0; y < targetSize; y += 1) {
+    for (let x = 0; x < targetSize; x += 1) {
       const totals = [0, 0, 0, 0];
       for (let sy = 0; sy < factor; sy += 1) {
         for (let sx = 0; sx < factor; sx += 1) {
@@ -324,14 +328,77 @@ function downsample(source, sourceSize, factor) {
           totals[3] += source[sourceOffset + 3];
         }
       }
-      const targetOffset = (y * TARGET_SIZE + x) * 4;
-      target[targetOffset] = Math.round(totals[0] / samples);
-      target[targetOffset + 1] = Math.round(totals[1] / samples);
-      target[targetOffset + 2] = Math.round(totals[2] / samples);
-      target[targetOffset + 3] = Math.round(totals[3] / samples);
+      const alpha = Math.round(totals[3] / samples);
+      const targetOffset = (y * targetSize + x) * 4;
+      if (solidColor && alpha > 0) {
+        target[targetOffset] = solidColor[0];
+        target[targetOffset + 1] = solidColor[1];
+        target[targetOffset + 2] = solidColor[2];
+      } else {
+        target[targetOffset] = Math.round(totals[0] / samples);
+        target[targetOffset + 1] = Math.round(totals[1] / samples);
+        target[targetOffset + 2] = Math.round(totals[2] / samples);
+      }
+      target[targetOffset + 3] = alpha;
     }
   }
   return target;
+}
+
+function distanceSquaredToSegment(px, py, ax, ay, bx, by) {
+  const vx = bx - ax;
+  const vy = by - ay;
+  const wx = px - ax;
+  const wy = py - ay;
+  const lengthSquared = vx * vx + vy * vy;
+  const t = lengthSquared === 0 ? 0 : Math.max(0, Math.min(1, (wx * vx + wy * vy) / lengthSquared));
+  const cx = ax + t * vx;
+  const cy = ay + t * vy;
+  const dx = px - cx;
+  const dy = py - cy;
+  return dx * dx + dy * dy;
+}
+
+function rasterizeTrayLineIcon(logoPath, viewBox, targetSize, color) {
+  const factor = 4;
+  const sourceSize = targetSize * factor;
+  const padding = targetSize * TRAY_ICON_PADDING_RATIO;
+  const geometry = iconGeometry(viewBox, targetSize, padding);
+  const strokeWidth = Math.max(1.8, targetSize * TRAY_ICON_STROKE_RATIO) * factor;
+  const radiusSquared = (strokeWidth / 2) * (strokeWidth / 2);
+  const buffer = Buffer.alloc(sourceSize * sourceSize * 4);
+  const transformPoint = (point) => ({
+    x: (geometry.x + point.x * geometry.scale) * factor,
+    y: (geometry.y + point.y * geometry.scale) * factor,
+  });
+  const segments = [];
+
+  for (const subpath of parsePath(logoPath)) {
+    for (let index = 1; index < subpath.length; index += 1) {
+      const from = transformPoint(subpath[index - 1]);
+      const to = transformPoint(subpath[index]);
+      segments.push({ from, to });
+    }
+  }
+
+  for (let y = 0; y < sourceSize; y += 1) {
+    for (let x = 0; x < sourceSize; x += 1) {
+      const px = x + 0.5;
+      const py = y + 0.5;
+      let insideStroke = false;
+      for (const segment of segments) {
+        if (distanceSquaredToSegment(px, py, segment.from.x, segment.from.y, segment.to.x, segment.to.y) <= radiusSquared) {
+          insideStroke = true;
+          break;
+        }
+      }
+      if (insideStroke) {
+        setPixel(buffer, sourceSize, x, y, color);
+      }
+    }
+  }
+
+  return downsample(buffer, sourceSize, factor, targetSize, color.slice(0, 3));
 }
 
 function crc32(buffer) {
@@ -392,9 +459,23 @@ function main() {
   const pngPath = join(buildDir, "icon.png");
   writeFileSync(svgPath, buildIconSvg(logoPath, geometry));
   writeFileSync(pngPath, encodePng(TARGET_SIZE, TARGET_SIZE, rasterizeIcon(logoPath, geometry)));
+  for (const scaleFactor of TRAY_ICON_SCALE_FACTORS) {
+    const targetSize = TRAY_ICON_BASE_SIZE * scaleFactor;
+    const suffix = scaleFactor === 1 ? "" : "@2x";
+    writeFileSync(
+      join(buildDir, `tray-icon${suffix}.png`),
+      encodePng(targetSize, targetSize, rasterizeTrayLineIcon(logoPath, viewBox, targetSize, [255, 255, 255, 255])),
+    );
+    writeFileSync(
+      join(buildDir, `tray-iconTemplate${suffix}.png`),
+      encodePng(targetSize, targetSize, rasterizeTrayLineIcon(logoPath, viewBox, targetSize, [0, 0, 0, 255])),
+    );
+  }
 
   console.log(`Generated ${svgPath}`);
   console.log(`Generated ${pngPath}`);
+  console.log(`Generated ${join(buildDir, "tray-icon.png")}`);
+  console.log(`Generated ${join(buildDir, "tray-iconTemplate.png")}`);
 }
 
 main();
