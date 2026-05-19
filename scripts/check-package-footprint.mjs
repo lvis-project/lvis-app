@@ -8,9 +8,11 @@
  */
 
 import * as asar from "@electron/asar";
-import { existsSync, readdirSync, statSync } from "node:fs";
+import { createHash } from "node:crypto";
+import { existsSync, readFileSync, readdirSync, statSync } from "node:fs";
 import { basename, dirname, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
+import { gunzipSync } from "node:zlib";
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const root = resolve(__dirname, "..");
@@ -249,6 +251,22 @@ if (uvFiles.has(uvBin)) fail("raw packaged uv binary leaked; expected compressed
 if (!uvFiles.has(`${uvBin}.gz`)) fail("compressed packaged uv binary missing", [...uvFiles]);
 if (!uvFiles.has("uv.meta.json")) fail("packaged uv metadata missing", [...uvFiles]);
 
+const uvMetaPath = resolve(uvTargetDir, "uv.meta.json");
+const uvCompressedBin = resolve(uvTargetDir, `${uvBin}.gz`);
+const uvMeta = JSON.parse(readFileSync(uvMetaPath, "utf8"));
+if (typeof uvMeta.binarySha256 !== "string" || !/^[0-9a-f]{64}$/.test(uvMeta.binarySha256)) {
+  fail(`packaged uv metadata has invalid binarySha256: ${uvMetaPath}`);
+}
+const actualUvBinarySha256 = sha256Hex(gunzipSync(readFileSync(uvCompressedBin)));
+if (actualUvBinarySha256 !== uvMeta.binarySha256) {
+  fail(`packaged uv binary SHA mismatch: expected ${uvMeta.binarySha256}, got ${actualUvBinarySha256}`, [
+    uvCompressedBin,
+  ]);
+}
+
+const uvLicense = resolve(resourcesDir, "licenses", "uv", "LICENSE-MIT");
+if (!existsSync(uvLicense)) fail(`uv license notice missing: ${uvLicense}`);
+
 const localeCount = isMacAppPackage() ? validateMacElectronLocales() : validatePakElectronLocales();
 
 if (isLinuxUnpackedPackage()) {
@@ -309,3 +327,7 @@ process.stdout.write(
     `locales=${localeCount}`,
   ].join(" ") + "\n",
 );
+
+function sha256Hex(buffer) {
+  return createHash("sha256").update(buffer).digest("hex");
+}

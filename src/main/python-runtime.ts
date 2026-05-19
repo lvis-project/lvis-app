@@ -11,11 +11,8 @@
  */
 
 import { spawn } from "node:child_process";
-import * as fsSync from "node:fs";
 import * as fs from "node:fs/promises";
 import * as path from "node:path";
-import { fileURLToPath } from "node:url";
-import { gunzipSync } from "node:zlib";
 import type { BrowserWindow } from "electron";
 import { createLogger } from "../lib/logger.js";
 import { resolvePluginPaths } from "../plugins/plugin-paths.js";
@@ -24,10 +21,8 @@ import { getSandboxRunner } from "../permissions/sandbox-runner.js";
 import { resolveUvTarget, type UvTarget } from "../../scripts/uv-targets.mjs";
 import { lvisHome } from "../shared/lvis-home.js";
 import { trackManagedChildProcess } from "./managed-child-processes.js";
+import { isPackagedUvRuntime, resolveBundledUvBinaryPath } from "./uv-runtime.js";
 const log = createLogger("python-runtime");
-
-const __filename = fileURLToPath(import.meta.url);
-const __dirname = path.dirname(__filename);
 
 // ─── 타입 ────────────────────────────────────────────
 
@@ -108,6 +103,10 @@ export class PythonRuntimeBootstrapper {
   async ensureReady(mainWindow: BrowserWindow): Promise<RuntimeResult> {
     this.mainWindow = mainWindow;
     this.getCurrentUvTarget();
+    const packagedUvPath = this.ensurePackagedUvReady();
+    if (packagedUvPath) {
+      await this.log(`[python-runtime] packaged uv ready: ${packagedUvPath}`);
+    }
 
     const pythonPath = this.getPythonPath();
     const result: RuntimeResult = { pythonPath, venvPath: VENV_DIR };
@@ -131,6 +130,16 @@ export class PythonRuntimeBootstrapper {
     // 첫 부팅 셋업
     await this.setup();
     return result;
+  }
+
+  /**
+   * Packaged builds must materialize uv before plugin execution can start.
+   * This is intentionally lighter than ensureReady(): it does not download
+   * Python or sync plugin dependencies, it only proves the bundled uv payload.
+   */
+  ensurePackagedUvReady(): string | null {
+    if (!isPackagedUvRuntime()) return null;
+    return this.getUvBinaryPath();
   }
 
   /**
@@ -264,65 +273,14 @@ export class PythonRuntimeBootstrapper {
   // ─── private: uv binary path ──────────────────────
 
   private getUvBinaryPath(): string {
-    const uvTarget = this.getCurrentUvTarget();
-
-    // dev/prod 분기:
-    //   - dev electron: process.defaultApp === true (Electron이 source 모드에서 set)
-    //   - vitest 등 plain Node: process.resourcesPath === undefined
-    //   - packaged electron: defaultApp 없음 + resourcesPath 있음
-    // process.resourcesPath만 가지고 분기하면 dev에서도 Electron Helper.app/Contents/Resources/
-    // 가 truthy이라 prod 경로로 빠지는 버그가 발생한다 (이 fix 이전 동작).
-    const isDev =
-      !!(process as { defaultApp?: boolean }).defaultApp || !process.resourcesPath;
-
-    if (isDev) {
-      // dist/src/main/python-runtime.js 기준 → lvis-app/resources/uv/...
-      // (fetch-uv.mjs가 dev/postinstall에서 현재 플랫폼만 다운로드한 경로와 일치)
-      return path.join(
-        __dirname, "..", "..", "..", "resources", "uv",
-        uvTarget.dir, uvTarget.bin,
-      );
-    }
-
-    // production: build-installers.mjs packages a compressed target uv binary.
-    // Materialize it into the user runtime cache so Electron installers do not
-    // carry the 30MB+ raw executable while uv can still be spawned normally.
-    return this.materializePackagedUvBinary(uvTarget);
+    return resolveBundledUvBinaryPath({
+      requireDevBinary: false,
+      uvRuntimeDir: this.options.uvRuntimeDir,
+    });
   }
 
   private getCurrentUvTarget(): UvTarget {
     return resolveUvTarget(process.platform, process.arch);
-  }
-
-  private materializePackagedUvBinary(uvTarget: UvTarget): string {
-    const packagedDir = path.join(process.resourcesPath, "uv", uvTarget.dir);
-    const compressedBin = path.join(packagedDir, `${uvTarget.bin}.gz`);
-    const metaPath = path.join(packagedDir, "uv.meta.json");
-    let binarySha256 = "unverified";
-    try {
-      const meta = JSON.parse(fsSync.readFileSync(metaPath, "utf8")) as { binarySha256?: unknown };
-      if (typeof meta.binarySha256 === "string" && meta.binarySha256.length > 0) {
-        binarySha256 = meta.binarySha256;
-      }
-    } catch {
-      // Missing metadata is handled by the compressed binary access below.
-    }
-
-    const runtimeUvDir = this.options.uvRuntimeDir ?? path.join(LVIS_RUNTIME_DIR, "uv");
-    const targetDir = path.join(runtimeUvDir, uvTarget.dir, binarySha256);
-    const targetBin = path.join(targetDir, uvTarget.bin);
-    if (!fsSync.existsSync(targetBin)) {
-      if (!fsSync.existsSync(compressedBin)) {
-        throw new Error(`packaged uv archive를 찾을 수 없습니다: ${compressedBin}`);
-      }
-      fsSync.mkdirSync(targetDir, { recursive: true });
-      fsSync.writeFileSync(targetBin, gunzipSync(fsSync.readFileSync(compressedBin)), { mode: 0o600 });
-      if (process.platform !== "win32") {
-        // Executable bit required for uv binary; 0o700 = owner-only rwx (no world-read).
-        fsSync.chmodSync(targetBin, 0o700);
-      }
-    }
-    return targetBin;
   }
 
   // ─── private: lock file 위치 ──────────────────────
