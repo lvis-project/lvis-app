@@ -65,6 +65,25 @@ export type OpenAuthWindowFinalUrlResult = {
   finalUrl: string;
 };
 
+/**
+ * Marketplace install preflight metadata. The host does NOT auto-install
+ * declared dependencies (issue #92, 2026-05).
+ *
+ * - `required: true` (default — `required` 누락 object 와 legacy
+ *   string-form `"<pluginId>"` 모두 `normalizeDependencies` 가 동일
+ *   의미로 정규화): the referenced plugin MUST already be installed
+ *   when this plugin is installed, otherwise marketplace install
+ *   throws `MissingPluginDependenciesError` and aborts.
+ * - `required: false`: informational only. Install proceeds even if
+ *   the referenced plugin is absent; the consumer plugin MUST
+ *   runtime-degrade its feature surface (e.g. detector idle, tool
+ *   returns `{status:'<dep>_unavailable'}` envelope) when the dep is
+ *   missing.
+ *
+ * Cross-plugin tool/event access is governed separately via
+ * `PluginAccessSpec` — prefer `dependencies: [{ pluginId, required: false }]`
+ * paired with `pluginAccess.plugins[]` for soft cross-plugin integration.
+ */
 export interface DependencySpec {
   pluginId: string;
   versionRange?: string;
