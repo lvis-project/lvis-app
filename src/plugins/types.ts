@@ -489,6 +489,25 @@ export class MissingDependenciesError extends Error {
 }
 
 /**
+ * Thrown by marketplace install preflight when a plugin declares
+ * `dependencies[].required = true` and the referenced plugin id is not
+ * present in the installed registry. `required: false` entries are
+ * informational — the host does NOT auto-install dependencies (issue #92),
+ * the consumer plugin must degrade its feature surface when a soft
+ * dependency is absent.
+ */
+export class MissingPluginDependenciesError extends Error {
+  readonly missing: string[];
+  constructor(missing: string[]) {
+    super(
+      `Plugin requires the following plugins to be installed first: ${missing.join(", ")}`,
+    );
+    this.missing = missing;
+    this.name = "MissingPluginDependenciesError";
+  }
+}
+
+/**
  * Mirror of the `runtime` block from `mcp.schema.json` (lvis-marketplace#52).
  * Two transport branches; tokens in `args` (`$PLUGIN_DIR`, `$PYTHON`, `$NODE`)
  * are substituted by the host at install time.
