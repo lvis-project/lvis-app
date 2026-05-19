@@ -43,6 +43,10 @@ export interface GeneralTabProps {
 
 interface AppInfo {
   version: string;
+  electronVersion: string;
+  nodeVersion: string;
+  chromeVersion: string;
+  v8Version: string;
   platform: NodeJS.Platform;
   arch: string;
   userDataPath: string;
@@ -354,6 +358,41 @@ export function GeneralTab({ api, onNavigate }: GeneralTabProps) {
               <dt className="text-[11px] uppercase tracking-wide text-muted-foreground">앱 버전</dt>
               <dd className="font-mono text-xs" data-testid="general-tab-app-version">
                 {appInfo ? `v${appInfo.version}` : "확인 중…"}
+              </dd>
+            </div>
+          </div>
+          <div
+            className="flex items-start gap-3 rounded-md border bg-card/50 p-3 sm:col-span-2"
+            data-testid="general-tab-stack-info"
+          >
+            <Cpu className="mt-0.5 size-4 shrink-0 text-muted-foreground" aria-hidden={true} />
+            <div className="min-w-0 flex-1">
+              <dt className="text-[11px] uppercase tracking-wide text-muted-foreground">기반 기술</dt>
+              <dd className="mt-1 grid grid-cols-2 gap-x-4 gap-y-1 font-mono text-[11px] sm:grid-cols-4">
+                <div className="flex items-baseline gap-1.5">
+                  <span className="text-muted-foreground">Electron</span>
+                  <span data-testid="general-tab-stack-electron">
+                    {appInfo?.electronVersion ? `v${appInfo.electronVersion}` : "—"}
+                  </span>
+                </div>
+                <div className="flex items-baseline gap-1.5">
+                  <span className="text-muted-foreground">Node</span>
+                  <span data-testid="general-tab-stack-node">
+                    {appInfo?.nodeVersion ? `v${appInfo.nodeVersion}` : "—"}
+                  </span>
+                </div>
+                <div className="flex items-baseline gap-1.5">
+                  <span className="text-muted-foreground">Chromium</span>
+                  <span data-testid="general-tab-stack-chrome">
+                    {appInfo?.chromeVersion ? `v${appInfo.chromeVersion}` : "—"}
+                  </span>
+                </div>
+                <div className="flex items-baseline gap-1.5">
+                  <span className="text-muted-foreground">V8</span>
+                  <span data-testid="general-tab-stack-v8">
+                    {appInfo?.v8Version ? `v${appInfo.v8Version}` : "—"}
+                  </span>
+                </div>
               </dd>
             </div>
           </div>

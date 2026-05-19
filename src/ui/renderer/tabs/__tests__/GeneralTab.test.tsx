@@ -32,6 +32,10 @@ function makeApi(overrides: Partial<LvisApi> = {}): LvisApi {
     pingMarketplace: vi.fn().mockResolvedValue({ configured: true, online: true }),
     getAppInfo: vi.fn().mockResolvedValue({
       version: "0.2.3",
+      electronVersion: "41.6.1",
+      nodeVersion: "22.4.0",
+      chromeVersion: "131.0.6778.0",
+      v8Version: "13.1.201.13",
       platform: "darwin",
       arch: "arm64",
       userDataPath: "/Users/test/Library/Application Support/LVIS",
@@ -87,6 +91,21 @@ describe("GeneralTab", () => {
     // The data path is informational text; assert presence via the
     // user-facing copy.
     await findByText("/Users/test/Library/Application Support/LVIS");
+  });
+
+  it("renders the resolved 기반 기술 stack (Electron / Node / Chromium / V8)", async () => {
+    const api = makeApi();
+    const { findByTestId } = render(<GeneralTab api={api} onNavigate={() => {}} />);
+    const electron = await findByTestId("general-tab-stack-electron");
+    const node = await findByTestId("general-tab-stack-node");
+    const chrome = await findByTestId("general-tab-stack-chrome");
+    const v8 = await findByTestId("general-tab-stack-v8");
+    await waitFor(() => {
+      expect(electron.textContent).toContain("41.6.1");
+      expect(node.textContent).toContain("22.4.0");
+      expect(chrome.textContent).toContain("131.0.6778.0");
+      expect(v8.textContent).toContain("13.1.201.13");
+    });
   });
 
   it("renders 미연결 when marketplace is not configured", async () => {
