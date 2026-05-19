@@ -117,18 +117,21 @@ describe("captureDemoCredentials — LVIS_DEMO_VENDOR (#893 top-level)", () => {
     expect(getDemoActiveVendor()).toBe("claude");
   });
 
-  it("defaults to openai when LVIS_DEMO_VENDOR is absent", () => {
+  // Path 2 hotfix (2026-05-19): the default fallback vendor changed from
+  // "openai" to "azure-foundry" so the LGE internal demo loop activates
+  // by default. The two tests below assert the new default.
+  it("defaults to azure-foundry when LVIS_DEMO_VENDOR is absent", () => {
     process.env.LVIS_DEMO_ENABLED = "1";
     delete process.env.LVIS_DEMO_VENDOR;
     captureDemoCredentials();
-    expect(getDemoActiveVendor()).toBe("openai");
+    expect(getDemoActiveVendor()).toBe("azure-foundry");
   });
 
-  it("falls back to openai when LVIS_DEMO_VENDOR is not a known vendor", () => {
+  it("falls back to azure-foundry when LVIS_DEMO_VENDOR is not a known vendor", () => {
     process.env.LVIS_DEMO_ENABLED = "1";
     process.env.LVIS_DEMO_VENDOR = "not-a-vendor";
     captureDemoCredentials();
-    expect(getDemoActiveVendor()).toBe("openai");
+    expect(getDemoActiveVendor()).toBe("azure-foundry");
   });
 
   it("accepts every known LLM vendor", () => {
