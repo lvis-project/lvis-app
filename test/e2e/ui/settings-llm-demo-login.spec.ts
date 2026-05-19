@@ -50,9 +50,11 @@ test('LLM tab: demo Login click persists host-managed key and plugin resolveApiK
 
   await settingsWindow.getByTestId('llm-tab:open-login').click();
   await expect(settingsWindow.getByTestId('login-modal')).toBeVisible();
-  await settingsWindow.getByTestId('login-modal:username').fill('demo');
-  await settingsWindow.getByTestId('login-modal:password').fill('demo123');
-  await settingsWindow.getByTestId('login-modal:submit').click();
+  // Path 2 hotfix: the conversational variant is form-less. The demo chip
+  // auto-fires `loginMockup({ username: "demo", password: "demo123" })`,
+  // so a single click on `login-modal:chip-demo` replaces the legacy
+  // fill+submit dance.
+  await settingsWindow.getByTestId('login-modal:chip-demo').click();
 
   const loginSection = settingsWindow.getByTestId('llm-tab:login-section');
   await expect(settingsWindow.getByTestId('login-modal')).toHaveCount(0);
