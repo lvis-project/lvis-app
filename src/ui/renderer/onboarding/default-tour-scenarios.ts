@@ -76,25 +76,147 @@ const FIRST_BOOT_ESSENTIALS: TourScenario = {
   steps: [
     {
       anchorSelector: '[data-tour-anchor="composer-input"]',
-      title: "먼저 한 줄로 시작해보세요",
-      body: "아무 질문이나 자유롭게 한국어로 입력하면 LVIS 가 답합니다. 즉시 인터럽트하려면 Cmd + Enter 를 누르세요.",
+      title: "1단계 · 한국어로 자유롭게 입력",
+      body: "이 텍스트 박스가 LVIS 와 대화하는 시작점입니다. 한국어로 자유롭게 입력하면 LVIS 가 답하고, 진행 중인 답을 멈추려면 ⌘+Enter 를 누르세요. 지금 한 줄 적어보세요.",
       keyHint: ["⌘+Enter"],
     },
     {
       anchorSelector: '[data-tour-anchor="input-action-bar"]',
-      title: "도구 사용은 사용자 승인 후",
-      body: "LVIS 가 파일을 읽거나 명령을 실행할 때마다 확인 카드가 떠요. 한 번 허용/거부하면 그 결정이 세션 내내 기억됩니다.",
+      title: "2단계 · 도구는 항상 사용자 승인",
+      body: "LVIS 가 파일을 읽거나 명령을 실행할 때마다 승인 카드가 표시됩니다. 한 번 허용/거부하면 그 결정이 현재 세션에 기억되어 같은 도구는 다시 묻지 않습니다.",
     },
     {
       anchorSelector: '[data-tour-anchor="command-palette-toggle"]',
-      title: "Cmd + K 커맨드 팔레트",
-      body: "어디서든 Cmd + K 를 누르면 명령 팔레트가 열립니다. 세션 전환, 설정, 플러그인 실행 — 모두 한 곳에서.",
+      title: "3단계 · ⌘+K 명령 팔레트",
+      body: "어디서든 ⌘+K 를 눌러 명령 팔레트를 여세요. 세션 전환, 설정, 플러그인 실행 — 모두 한 곳에서. 닫으려면 Esc 를 누릅니다.",
       keyHint: ["⌘+K"],
     },
     {
       anchorSelector: '[data-tour-anchor="composer-input"]',
-      title: "튜토리얼 완료",
-      body: "이제 새 대화를 시작해 보세요. 가이드 투어는 설정 → 도움말에서 언제든 다시 열 수 있어요.",
+      title: "4단계 · 가이드 다시 보기",
+      body: "이 가이드는 언제든 ⌘+? 로 다시 열 수 있어요. 이제 새 대화를 시작해 LVIS 를 직접 사용해 보세요.",
+      keyHint: ["⌘+?"],
+    },
+  ],
+};
+
+/**
+ * U7 — Per-card scenario tours. Each Discovery Swipe card's
+ * "실행하기 →" CTA dispatches into one of these (or the fallback
+ * `first-boot-essentials` when the plugin-specific anchors are not
+ * mounted yet). Plugin-specific anchors live in the owning plugin
+ * package; when the plugin is not installed, `readRect` returns null
+ * and the SpotlightTour centres the card so the user still sees the
+ * narrative.
+ */
+const MEETING_SUMMARY_TOUR: TourScenario = {
+  id: "meeting-summary-tour",
+  title: "회의 자동 요약 가이드",
+  steps: [
+    {
+      anchorSelector: '[data-tour-anchor="meeting-start"]',
+      title: "1단계 · 회의 시작",
+      body: "회의 플러그인의 시작 버튼을 눌러 녹음을 시작합니다. (플러그인이 설치되어 있지 않으면 마켓플레이스에서 'meeting' 을 먼저 설치하세요.)",
+    },
+    {
+      anchorSelector: '[data-tour-anchor="meeting-stop"]',
+      title: "2단계 · 자동 STT 진행",
+      body: "회의가 진행되는 동안 청크 단위로 음성을 텍스트로 변환합니다. 정지 버튼을 누르면 STT 결과가 모두 누적되어 표시됩니다.",
+    },
+    {
+      anchorSelector: '[data-tour-anchor="meeting-summary-panel"]',
+      title: "3단계 · 요약과 할 일 추출",
+      body: "정지 후 LVIS 가 회의 내용을 요약하고 액션 아이템을 추출합니다. 결과는 ~/.lvis/plugins/meeting/ 로 저장되어 다음 세션에서 다시 열 수 있습니다.",
+    },
+    {
+      anchorSelector: '[data-tour-anchor="composer-input"]',
+      title: "4단계 · 회의 결과 활용",
+      body: "추출된 액션 아이템을 챗 입력창에 붙여넣어 후속 작업을 LVIS 에게 시킬 수 있어요. 가이드는 ⌘+? 로 다시 열 수 있습니다.",
+      keyHint: ["⌘+?"],
+    },
+  ],
+};
+
+const DOC_SEARCH_TOUR: TourScenario = {
+  id: "doc-search-tour",
+  title: "로컬 문서 검색 가이드",
+  steps: [
+    {
+      anchorSelector: '[data-tour-anchor="indexer-folder-picker"]',
+      title: "1단계 · 인덱싱 폴더 선택",
+      body: "local-indexer 플러그인의 폴더 선택 버튼을 눌러 인덱싱할 디렉토리를 지정하세요. PDF / Word / 마크다운 / 코드 파일이 자동 감지됩니다.",
+    },
+    {
+      anchorSelector: '[data-tour-anchor="indexer-progress"]',
+      title: "2단계 · 백그라운드 인덱싱",
+      body: "선택한 폴더가 백그라운드에서 청크 단위로 인덱싱됩니다. 진행률 표시기가 100% 가 되면 검색 준비가 끝납니다.",
+    },
+    {
+      anchorSelector: '[data-tour-anchor="composer-input"]',
+      title: "3단계 · 자연어로 질문",
+      body: "챗 입력창에 자연어로 질문하면 인덱싱된 문서에서 답을 찾아 출처와 함께 표시합니다. 예) '지난 분기 마케팅 보고서 요약해줘'",
+    },
+    {
+      anchorSelector: '[data-tour-anchor="composer-input"]',
+      title: "4단계 · 가이드 완료",
+      body: "이제 자유롭게 질문해 보세요. 인덱싱 폴더는 설정 → 플러그인에서 언제든 추가/삭제할 수 있습니다.",
+      keyHint: ["⌘+?"],
+    },
+  ],
+};
+
+const PROACTIVE_WORK_TOUR: TourScenario = {
+  id: "proactive-work-tour",
+  title: "이메일 → 할 일 가이드",
+  steps: [
+    {
+      anchorSelector: '[data-tour-anchor="work-proactive-connect"]',
+      title: "1단계 · 이메일 계정 연결",
+      body: "work-proactive 플러그인에서 이메일 계정 (MS Graph 등) 을 연결합니다. 인증은 시스템 브라우저에서 진행돼요.",
+    },
+    {
+      anchorSelector: '[data-tour-anchor="work-proactive-scan"]',
+      title: "2단계 · 받은편지함 스캔",
+      body: "주기적으로 받은편지함을 스캔해 액션 아이템 후보를 추출합니다. 모든 후보는 오버레이 카드로 표시되어 사용자가 검토할 수 있습니다.",
+    },
+    {
+      anchorSelector: '[data-tour-anchor="work-proactive-overlay"]',
+      title: "3단계 · 후보 승인 또는 무시",
+      body: "오버레이 카드에서 '✓ 채택' 을 누르면 LVIS 가 후속 작업을 자동 시작합니다. 무시하면 후보는 사라지고 audit 로그에 기록됩니다.",
+    },
+    {
+      anchorSelector: '[data-tour-anchor="composer-input"]',
+      title: "4단계 · 가이드 완료",
+      body: "이메일 스캔 주기는 설정 → 플러그인 → work-proactive 에서 조정할 수 있어요.",
+      keyHint: ["⌘+?"],
+    },
+  ],
+};
+
+const MULTI_AGENT_TOUR: TourScenario = {
+  id: "multi-agent-tour",
+  title: "멀티 에이전트 가이드",
+  steps: [
+    {
+      anchorSelector: '[data-tour-anchor="agent-hub-list"]',
+      title: "1단계 · 에이전트 선택",
+      body: "agent-hub 플러그인에서 사용할 에이전트를 선택합니다. 각 에이전트는 다른 LLM / 다른 도구 권한을 가질 수 있어요.",
+    },
+    {
+      anchorSelector: '[data-tour-anchor="agent-hub-dispatch"]',
+      title: "2단계 · 작업 dispatch",
+      body: "선택한 에이전트들에게 작업을 dispatch 하면 각자 독립적으로 진행합니다. 토큰 / 비용은 실시간으로 추적됩니다.",
+    },
+    {
+      anchorSelector: '[data-tour-anchor="agent-hub-monitor"]',
+      title: "3단계 · 병렬 진행 모니터",
+      body: "에이전트들의 진행 상태가 한 화면에 표시됩니다. 특정 에이전트의 결과를 클릭하면 상세 세션으로 이동할 수 있습니다.",
+    },
+    {
+      anchorSelector: '[data-tour-anchor="composer-input"]',
+      title: "4단계 · 가이드 완료",
+      body: "에이전트별 권한 / 비용 한도는 설정 → 권한 / 에이전트 탭에서 세밀하게 조정할 수 있습니다.",
+      keyHint: ["⌘+?"],
     },
   ],
 };
@@ -195,12 +317,22 @@ const PROACTIVE_WALKTHROUGH: TourScenario = {
  * Registry — `SpotlightTour` consumes this map to resolve `scenarioId`
  * payloads received over `lvis:tour:start`. New scenarios are added here;
  * the host-side store is unaware of the contents.
+ *
+ * U7 — Per-card tours dispatched from the Discovery Swipe "실행하기 →"
+ * CTA. Plugin-specific tours degrade gracefully when the owning plugin
+ * is not installed: `readRect` returns null for the missing anchor and
+ * `SpotlightTour.cardPlacement` centres the step card so the narrative
+ * is still legible.
  */
 export const DEFAULT_TOUR_SCENARIOS: Readonly<Record<string, TourScenario>> = Object.freeze({
   [FIRST_BOOT_ESSENTIALS.id]: FIRST_BOOT_ESSENTIALS,
   [MEETING_WALKTHROUGH.id]: MEETING_WALKTHROUGH,
   [INDEXER_WALKTHROUGH.id]: INDEXER_WALKTHROUGH,
   [PROACTIVE_WALKTHROUGH.id]: PROACTIVE_WALKTHROUGH,
+  [MEETING_SUMMARY_TOUR.id]: MEETING_SUMMARY_TOUR,
+  [DOC_SEARCH_TOUR.id]: DOC_SEARCH_TOUR,
+  [PROACTIVE_WORK_TOUR.id]: PROACTIVE_WORK_TOUR,
+  [MULTI_AGENT_TOUR.id]: MULTI_AGENT_TOUR,
 });
 
 export function getTourScenario(id: string): TourScenario | undefined {
