@@ -108,7 +108,7 @@ export interface PluginCard {
   /** Install policy declared in the manifest: "admin" (IT-managed) or "user" (anyone). */
   installPolicy?: "admin" | "user";
   /** Runtime load status derived from loaded/failed/disabled runtime state. */
-  loadStatus: "loaded" | "failed" | "disabled";
+  loadStatus: "loaded" | "preparing" | "failed" | "disabled";
   version?: string;
   publisher?: string;
   configSchema?: PluginConfigSchema;
@@ -170,6 +170,13 @@ export type PluginToolInvocationDelegate = (
   context: PluginToolInvocationContext,
 ) => Promise<unknown>;
 
+export interface PluginStartPreparationContext {
+  pluginId: string;
+  manifest: PluginManifest;
+  manifestPath: string;
+  pluginRoot: string;
+}
+
 export interface PluginRuntimeOptions {
   hostRoot: string;
   manifestPaths?: string[];
@@ -209,7 +216,24 @@ export interface PluginRuntimeOptions {
    * one-shot registration. See `architecture.md §9.3a`.
    */
   onEnable?: (pluginId: string) => void;
+  /**
+   * Optional dependency preparation gate. When this returns a Promise, plugin
+   * loading/start is deferred without blocking app boot; calls into the
+   * plugin fail with a clear "preparing" message until the Promise resolves.
+   */
+  preparePluginStart?: (context: PluginStartPreparationContext) => Promise<void> | void | null | undefined;
 }
+
+interface PendingPreparedStart {
+  generation: number;
+  task: Promise<void>;
+  ready: Promise<void>;
+  resolveReady: () => void;
+  rejectReady: (err: Error) => void;
+}
+
+type SinglePluginStartResult = "started" | "deferred" | "failed" | "cancelled";
+type RestartPluginResult = "started" | "deferred" | "failed" | undefined;
 
 export class PluginRuntime {
   private readonly hostRoot: string;
@@ -223,6 +247,7 @@ export class PluginRuntime {
   private readonly auditLog?: (level: "info" | "warn" | "error", message: string, data?: unknown) => void;
   private readonly onDisable?: (pluginId: string) => void;
   private readonly onEnable?: (pluginId: string) => void;
+  private readonly preparePluginStart?: (context: PluginStartPreparationContext) => Promise<void> | void | null | undefined;
   private readonly plugins = new Map<string, LoadedPlugin>();
   private readonly methodMap = new Map<string, { pluginId: string; handler: PluginToolHandler }>();
   private readonly perfStats = new Map<string, PluginPerfStats>();
@@ -235,6 +260,13 @@ export class PluginRuntime {
   private readonly failedPluginIds = new Set<string>();
   private readonly failedPluginStubs = new Map<string, { name: string; description: string }>();
   private readonly disabledPluginIds = new Set<string>();
+  private readonly preparingPluginIds = new Set<string>();
+  private readonly preparationFailures = new Map<string, string>();
+  private readonly pendingPreparedStarts = new Map<string, PendingPreparedStart>();
+  private readonly pendingRestarts = new Map<string, Promise<RestartPluginResult>>();
+  private readonly pendingRestartPreparations = new Map<string, Promise<void>>();
+  private readonly preparationGenerations = new Map<string, number>();
+  private nextPreparationGeneration = 0;
   private toolInvocationDelegate: PluginToolInvocationDelegate | null = null;
   private loaded = false;
   /** Sprint 4-B §B-1 — lazily-compiled AJV validator for plugin.schema.json. */
@@ -254,6 +286,7 @@ export class PluginRuntime {
     this.auditLog = options.auditLog;
     this.onDisable = options.onDisable;
     this.onEnable = options.onEnable;
+    this.preparePluginStart = options.preparePluginStart;
   }
 
   // ─── Manifest Validator (lazy) ─────────────────────────────────────────────
@@ -364,6 +397,109 @@ export class PluginRuntime {
 
   // ─── Lifecycle ─────────────────────────────────────────────────────────────
 
+  private deferPluginStartUntilPrepared(
+    plan: ManifestLoadPlan,
+    manifest: PluginManifest,
+    approvedPluginAccess: PluginAccessSpec | undefined,
+    startOpts: { cacheBust?: boolean } = {},
+  ): boolean {
+    if (!this.preparePluginStart) return false;
+    if (this.pendingPreparedStarts.has(manifest.id)) return true;
+    const pluginRoot = dirname(plan.manifestPath);
+    let result: Promise<void> | void | null | undefined;
+    try {
+      result = this.preparePluginStart({
+        pluginId: manifest.id,
+        manifest,
+        manifestPath: plan.manifestPath,
+        pluginRoot,
+      });
+    } catch (err) {
+      this.markPreparationFailed(manifest, err);
+      return true;
+    }
+    if (!result || typeof (result as Promise<void>).then !== "function") {
+      return false;
+    }
+
+    this.preparingPluginIds.add(manifest.id);
+    this.preparationFailures.delete(manifest.id);
+    const generation = ++this.nextPreparationGeneration;
+    this.preparationGenerations.set(manifest.id, generation);
+    let resolveReady!: () => void;
+    let rejectReady!: (err: Error) => void;
+    const ready = new Promise<void>((resolve, reject) => {
+      resolveReady = resolve;
+      rejectReady = reject;
+    });
+    const task = Promise.resolve(result)
+      .then(async () => {
+        if (this.preparationGenerations.get(manifest.id) !== generation) return;
+        const startResult = await this.instantiateAndStartSinglePlugin(plan, manifest, approvedPluginAccess, {
+          skipPreparation: true,
+          cacheBust: startOpts.cacheBust,
+          shouldCommit: () => this.preparationGenerations.get(manifest.id) === generation,
+        });
+        if (this.preparationGenerations.get(manifest.id) !== generation) {
+          return;
+        }
+        if (startResult !== "started") {
+          const err = new Error(`plugin '${manifest.id}' failed to start after runtime dependencies were prepared`);
+          this.markPreparationFailed(manifest, err);
+          rejectReady(err);
+          return;
+        }
+        this.preparingPluginIds.delete(manifest.id);
+        this.preparationFailures.delete(manifest.id);
+        resolveReady();
+      })
+      .catch((err: unknown) => {
+        if (this.preparationGenerations.get(manifest.id) !== generation) return;
+        this.markPreparationFailed(manifest, err);
+        rejectReady(err instanceof Error ? err : new Error(String(err)));
+      })
+      .finally(() => {
+        if (this.pendingPreparedStarts.get(manifest.id)?.generation === generation) {
+          this.pendingPreparedStarts.delete(manifest.id);
+        }
+      });
+    this.pendingPreparedStarts.set(manifest.id, { generation, task, ready, resolveReady, rejectReady });
+    void ready.catch(() => {});
+    return true;
+  }
+
+  private markPreparationFailed(manifest: PluginManifest, err: unknown): void {
+    const message = err instanceof Error ? err.message : String(err);
+    this.preparingPluginIds.delete(manifest.id);
+    this.preparationFailures.set(manifest.id, message);
+    this.markFailed(manifest.id, {
+      name: manifest.name,
+      description: `Plugin dependencies failed: ${message}`,
+    });
+    this.onDisable?.(manifest.id);
+    plog("error", { pluginId: manifest.id, phase: PluginPhase.START_FAIL, reason: message }, "plugin dependency preparation failed");
+  }
+
+  private clearPluginPreparationState(pluginId: string): void {
+    const pending = this.pendingPreparedStarts.get(pluginId);
+    pending?.rejectReady(new Error(`plugin '${pluginId}' runtime dependency preparation was cancelled`));
+    this.preparationGenerations.set(pluginId, ++this.nextPreparationGeneration);
+    this.preparingPluginIds.delete(pluginId);
+    this.preparationFailures.delete(pluginId);
+    this.pendingPreparedStarts.delete(pluginId);
+  }
+
+  waitForPluginReady(pluginId: string): Promise<void> {
+    if (this.plugins.has(pluginId)) return Promise.resolve();
+    const pending = this.pendingPreparedStarts.get(pluginId);
+    if (pending) {
+      return pending.ready;
+    }
+    const failure = this.preparationFailures.get(pluginId);
+    if (failure) return Promise.reject(new Error(failure));
+    return Promise.reject(new Error(`plugin '${pluginId}' is not preparing or loaded`));
+  }
+
   async load(): Promise<void> {
     if (this.loaded) return;
     const loadPlan = await this.resolveManifestLoadPlanInternal();
@@ -418,6 +554,8 @@ export class PluginRuntime {
       // Reassign to manifest.id so all subsequent phases use the canonical id.
       pluginId = manifest.id;
       this.rememberPluginInstallAlias(manifest.id, plan.pluginIdHint);
+      const approvedPluginAccess =
+        enabledManifestSnapshots.get(manifest.id)?.approvedPluginAccess ?? plan.approvedPluginAccess;
       this.knownPluginManifests.set(manifest.id, manifest);
       this.failedPluginStubs.delete(manifest.id);
       if (!plan.enabled) {
@@ -446,6 +584,9 @@ export class PluginRuntime {
           });
           continue;
         }
+      }
+      if (this.deferPluginStartUntilPrepared(plan, manifest, approvedPluginAccess)) {
+        continue;
       }
       let entryPath: string;
       try {
@@ -524,7 +665,8 @@ export class PluginRuntime {
         pluginRoot,
         instance,
         methods,
-        approvedPluginAccess: plan.approvedPluginAccess,
+        approvedPluginAccess,
+        started: false,
       });
       this.failedPluginIds.delete(manifest.id);
       this.disabledPluginIds.delete(manifest.id);
@@ -552,6 +694,7 @@ export class PluginRuntime {
         try {
           if (!plugin.instance.start) {
             this.perfStats.get(id)!.startupMs = Date.now() - startedAt;
+            plugin.started = true;
             return;
           }
           await runStartWithTimeout(
@@ -564,6 +707,7 @@ export class PluginRuntime {
         const elapsed = Date.now() - startedAt;
         const stats = this.perfStats.get(id);
         if (stats) stats.startupMs = elapsed;
+        plugin.started = true;
         if (elapsed > SLOW_THRESHOLD_MS) {
           plog("warn", { pluginId: id, phase: PluginPhase.START_SLOW, elapsedMs: elapsed }, "plugin start slow");
         } else {
@@ -628,12 +772,165 @@ export class PluginRuntime {
   /**
    * US-3c.2 — Targeted single-plugin restart.
    */
-  async restartPlugin(pluginId: string): Promise<void> {
+  async restartPlugin(
+    pluginId: string,
+    opts: { skipPreparation?: boolean } = {},
+  ): Promise<RestartPluginResult> {
+    const pending = this.pendingRestarts.get(pluginId);
+    if (pending) return pending;
+    const restart = this.restartPluginInternal(pluginId, opts).finally(() => {
+      if (this.pendingRestarts.get(pluginId) === restart) {
+        this.pendingRestarts.delete(pluginId);
+      }
+    });
+    this.pendingRestarts.set(pluginId, restart);
+    return restart;
+  }
+
+  private async restartPluginInternal(
+    pluginId: string,
+    opts: { skipPreparation?: boolean } = {},
+  ): Promise<RestartPluginResult> {
     plog("info", { pluginId, phase: PluginPhase.RESTART_REQUEST }, "restart requested");
     const plugin = this.plugins.get(pluginId);
     if (!plugin) {
       plog("warn", { pluginId, phase: PluginPhase.RESTART_REQUEST, reason: "not_loaded" }, "restart no-op — plugin not loaded");
-      return;
+      return undefined;
+    }
+
+    const loadPlan = await this.resolveManifestLoadPlanInternal();
+    const enabledSnapshots = await this.readSnapshotsInternal(loadPlan);
+    const snapshot = enabledSnapshots.get(pluginId);
+    const targetPlan = loadPlan.find(
+      (p) =>
+        p.pluginIdHint === pluginId ||
+        (p.enabled && this.matchesManifestPath(p.manifestPath, pluginId)),
+    );
+    const pluginRoot = targetPlan ? dirname(targetPlan.manifestPath) : plugin.pluginRoot;
+    const approvedPluginAccess =
+      snapshot?.approvedPluginAccess ??
+      targetPlan?.approvedPluginAccess ??
+      plugin.approvedPluginAccess ??
+      this.knownPluginAccessGrants.get(pluginId);
+    const integrityResult = await this.verifyReceiptAndDevGuard(pluginId, pluginRoot);
+    if (!integrityResult.ok) {
+      return "failed";
+    }
+    let manifest: PluginManifest;
+    try {
+      manifest =
+        snapshot?.manifest ??
+        (await this.readManifest(targetPlan?.manifestPath ?? resolve(pluginRoot, "plugin.json")));
+    } catch (err) {
+      plog("error", { pluginId, phase: PluginPhase.RESTART_RELOAD_FAIL, err, reason: "manifest_read" }, "manifest read failed during restart");
+      return "failed";
+    }
+    const restartPlan: ManifestLoadPlan = targetPlan ?? {
+      pluginIdHint: pluginId,
+      manifestPath: resolve(pluginRoot, "plugin.json"),
+      enabled: true,
+      approvedPluginAccess,
+    };
+
+    if (!opts.skipPreparation && this.preparePluginStart) {
+      const pluginRootForPreparation = dirname(restartPlan.manifestPath);
+      let result: Promise<void> | void | null | undefined;
+      let preparation = this.pendingRestartPreparations.get(pluginId);
+      if (!preparation) {
+        try {
+          result = this.preparePluginStart({
+            pluginId: manifest.id,
+            manifest,
+            manifestPath: restartPlan.manifestPath,
+            pluginRoot: pluginRootForPreparation,
+          });
+        } catch (err) {
+          plog("error", { pluginId, phase: PluginPhase.START_FAIL, err, reason: "restart_dependency_prepare" }, "restart dependency preparation failed");
+          return "failed";
+        }
+        if (result && typeof (result as Promise<void>).then === "function") {
+          preparation = Promise.resolve(result);
+          this.pendingRestartPreparations.set(pluginId, preparation);
+          void preparation.finally(() => {
+            if (this.pendingRestartPreparations.get(pluginId) === preparation) {
+              this.pendingRestartPreparations.delete(pluginId);
+            }
+          }).catch(() => {});
+        }
+      }
+      if (preparation) {
+        try {
+          await preparation;
+        } catch (err) {
+          plog("error", { pluginId, phase: PluginPhase.START_FAIL, err, reason: "restart_dependency_prepare" }, "restart dependency preparation failed");
+          return "failed";
+        }
+      }
+    }
+
+    const entryPath = this.resolveEntryPathForPlugin(pluginRoot, manifest.entry);
+    const resolvedEntryPath = resolveRealEntryPath(entryPath);
+    // Cache-bust: Node ESM loader memoizes by URL — without it
+    // restart re-runs createPlugin against the OLD module's closures
+    // even when the on-disk bundle changed. Mirrors `reloadPlugin`.
+    const importUrl = buildImportUrl(resolvedEntryPath, true);
+
+    let module: { default?: RuntimePluginFactory; createPlugin?: RuntimePluginFactory };
+    try {
+      module = (await import(importUrl)) as {
+        default?: RuntimePluginFactory;
+        createPlugin?: RuntimePluginFactory;
+      };
+      plog("debug", { pluginId, phase: PluginPhase.RESTART_RELOAD_OK }, "module re-imported");
+    } catch (err) {
+      plog("error", { pluginId, phase: PluginPhase.RESTART_RELOAD_FAIL, err }, "module re-import failed");
+      return "failed";
+    }
+
+    const createPlugin = module.default ?? module.createPlugin;
+    if (!createPlugin) {
+      plog("error", { pluginId, phase: PluginPhase.RESTART_RELOAD_FAIL, reason: "no_default_export" }, "entry does not export default/createPlugin after restart");
+      return "failed";
+    }
+
+    const pluginDataDir = this.ensureDataDir(pluginId, pluginRoot);
+    const hostApi = this.buildHostApi(pluginId, manifest, pluginDataDir);
+
+    let instance: RuntimePlugin;
+    try {
+      instance = await createPlugin(
+        buildPluginContext({
+          pluginId,
+          pluginRoot,
+          hostRoot: this.hostRoot,
+          pluginDataDir,
+          manifest,
+          configOverrides: this.configOverrides,
+          hostApi,
+        }),
+      );
+    } catch (err) {
+      plog("error", { pluginId, phase: PluginPhase.RESTART_RELOAD_FAIL, err, reason: "createPlugin_failed" }, "createPlugin failed during restart");
+      return "failed";
+    }
+
+    const methods = new Map<string, PluginToolHandler>();
+    for (const toolName of manifest.tools) {
+      const handler = instance.handlers[toolName];
+      if (!handler) {
+        plog("warn", { pluginId, phase: PluginPhase.REGISTER_TOOL_SKIP, toolName, reason: "missing_handler" }, "tool disabled — missing handler after restart");
+        continue;
+      }
+      methods.set(toolName, handler);
+    }
+
+    try {
+      await instance.start?.();
+      plog("debug", { pluginId, phase: PluginPhase.RESTART_START_OK }, "restart complete");
+    } catch (err) {
+      plog("error", { pluginId, phase: PluginPhase.RESTART_START_FAIL, err }, "start after restart failed");
+      await this.stopAfterStartFailure(pluginId, instance);
+      throw new Error(`restartPlugin failed for ${pluginId}: ${(err as Error).message}`);
     }
 
     try {
@@ -660,121 +957,25 @@ export class PluginRuntime {
 
     this.onDisable?.(pluginId);
 
-    const loadPlan = await this.resolveManifestLoadPlanInternal();
-    const enabledSnapshots = await this.readSnapshotsInternal(loadPlan);
-    const snapshot = enabledSnapshots.get(pluginId);
-    const targetPlan = loadPlan.find(
-      (p) =>
-        p.pluginIdHint === pluginId ||
-        (p.enabled && this.matchesManifestPath(p.manifestPath, pluginId)),
-    );
-    const pluginRoot = targetPlan ? dirname(targetPlan.manifestPath) : plugin.pluginRoot;
-    const approvedPluginAccess =
-      snapshot?.approvedPluginAccess ??
-      targetPlan?.approvedPluginAccess ??
-      plugin.approvedPluginAccess ??
-      this.knownPluginAccessGrants.get(pluginId);
-    const integrityResult = await this.verifyReceiptAndDevGuard(pluginId, pluginRoot);
-    if (!integrityResult.ok) {
-      this.markFailed(pluginId);
-      return;
-    }
-    let manifest: PluginManifest;
-    try {
-      manifest =
-        snapshot?.manifest ??
-        (await this.readManifest(targetPlan?.manifestPath ?? resolve(pluginRoot, "plugin.json")));
-    } catch (err) {
-      plog("error", { pluginId, phase: PluginPhase.RESTART_RELOAD_FAIL, err, reason: "manifest_read" }, "manifest read failed during restart");
-      this.markFailed(pluginId);
-      return;
-    }
     this.rememberPluginManifest(pluginId, manifest, approvedPluginAccess);
-    const entryPath = this.resolveEntryPathForPlugin(pluginRoot, manifest.entry);
-    const resolvedEntryPath = resolveRealEntryPath(entryPath);
-    // Cache-bust: Node ESM loader memoizes by URL — without it
-    // restart re-runs createPlugin against the OLD module's closures
-    // even when the on-disk bundle changed. Mirrors `reloadPlugin`.
-    const importUrl = buildImportUrl(resolvedEntryPath, true);
-
-    let module: { default?: RuntimePluginFactory; createPlugin?: RuntimePluginFactory };
-    try {
-      module = (await import(importUrl)) as {
-        default?: RuntimePluginFactory;
-        createPlugin?: RuntimePluginFactory;
-      };
-      plog("debug", { pluginId, phase: PluginPhase.RESTART_RELOAD_OK }, "module re-imported");
-    } catch (err) {
-      plog("error", { pluginId, phase: PluginPhase.RESTART_RELOAD_FAIL, err }, "module re-import failed");
-      this.markFailed(pluginId);
-      return;
-    }
-
-    const createPlugin = module.default ?? module.createPlugin;
-    if (!createPlugin) {
-      plog("error", { pluginId, phase: PluginPhase.RESTART_RELOAD_FAIL, reason: "no_default_export" }, "entry does not export default/createPlugin after restart");
-      this.markFailed(pluginId);
-      return;
-    }
-
-    const pluginDataDir = this.ensureDataDir(pluginId, pluginRoot);
-    const hostApi = this.buildHostApi(pluginId, manifest, pluginDataDir);
-
-    let instance: RuntimePlugin;
-    try {
-      instance = await createPlugin(
-        buildPluginContext({
-          pluginId,
-          pluginRoot,
-          hostRoot: this.hostRoot,
-          pluginDataDir,
-          manifest,
-          configOverrides: this.configOverrides,
-          hostApi,
-        }),
-      );
-    } catch (err) {
-      plog("error", { pluginId, phase: PluginPhase.RESTART_RELOAD_FAIL, err, reason: "createPlugin_failed" }, "createPlugin failed during restart");
-      this.markFailed(pluginId);
-      return;
-    }
-
-    const methods = new Map<string, PluginToolHandler>();
-    for (const toolName of manifest.tools) {
-      const handler = instance.handlers[toolName];
-      if (!handler) {
-        plog("warn", { pluginId, phase: PluginPhase.REGISTER_TOOL_SKIP, toolName, reason: "missing_handler" }, "tool disabled — missing handler after restart");
-        continue;
-      }
-      methods.set(toolName, handler);
+    for (const [toolName, handler] of methods) {
       this.methodMap.set(toolName, { pluginId, handler });
     }
-
     if (manifest.keywords && manifest.keywords.length > 0) {
       hostApi.registerKeywords(manifest.keywords);
     }
-
     this.plugins.set(pluginId, {
       manifest,
       pluginRoot,
       instance,
       methods,
       approvedPluginAccess,
+      started: true,
     });
     this.failedPluginIds.delete(pluginId);
     this.disabledPluginIds.delete(pluginId);
-
-    try {
-      await instance.start?.();
-      plog("debug", { pluginId, phase: PluginPhase.RESTART_START_OK }, "restart complete");
-    } catch (err) {
-      plog("error", { pluginId, phase: PluginPhase.RESTART_START_FAIL, err }, "start after restart failed");
-      this.markFailed(pluginId);
-      this.cleanupFailedStartRuntimeState(pluginId, methods);
-      await this.stopAfterStartFailure(pluginId, instance);
-      throw new Error(`restartPlugin failed for ${pluginId}: ${(err as Error).message}`);
-    }
     this.onEnable?.(pluginId);
+    return "started";
   }
 
   setConfigOverride(pluginId: string, config: Record<string, unknown>): void {
@@ -840,15 +1041,19 @@ export class PluginRuntime {
   /**
    * US-A3 — Targeted single-plugin add for install / install-local paths.
    */
-  async addPlugin(pluginId: string): Promise<void> {
+  async addPlugin(pluginId: string): Promise<"started" | "preparing"> {
     if (this.plugins.has(pluginId)) {
       try {
-        await this.restartPlugin(pluginId);
+        const restartResult = await this.restartPlugin(pluginId);
+        if (restartResult === "deferred") return "preparing";
+        if (restartResult === "failed") {
+          throw new Error(`restartPlugin failed for ${pluginId}`);
+        }
       } catch (err) {
         throw new Error(`addPlugin failed for ${pluginId}: ${(err as Error).message}`);
       }
       this.throwIfPluginFailedAfterAdd(pluginId);
-      return;
+      return "started";
     }
 
     const loadPlan = await this.resolveManifestLoadPlanInternal();
@@ -878,18 +1083,21 @@ export class PluginRuntime {
       this.knownEventOwners.set(eventType, pluginId);
     }
 
-    await this.instantiateAndStartSinglePlugin(targetPlan, manifest, approvedPluginAccess);
+    const startResult = await this.instantiateAndStartSinglePlugin(targetPlan, manifest, approvedPluginAccess);
+    if (startResult === "deferred") return "preparing";
 
     // Throw if the plugin landed in failed state — caller (IPC install
     // handler) catches to roll back marketplace state. boot-time `load()`
     // doesn't take this path; it inlines its own iteration.
     this.throwIfPluginFailedAfterAdd(pluginId);
+    return "started";
   }
 
   /**
    * US-A3 — Targeted single-plugin remove for uninstall paths.
    */
   async removePlugin(pluginId: string): Promise<void> {
+    this.clearPluginPreparationState(pluginId);
     delete this.configOverrides[pluginId];
     // Plugin may be in one of three states when uninstall is requested:
     //   - loaded (`this.plugins` has it) → run stop + dispose, then clean
@@ -1027,7 +1235,8 @@ export class PluginRuntime {
     plan: ManifestLoadPlan,
     manifest: PluginManifest,
     approvedPluginAccess: PluginAccessSpec | undefined,
-  ): Promise<void> {
+    opts: { skipPreparation?: boolean; cacheBust?: boolean; shouldCommit?: () => boolean } = {},
+  ): Promise<SinglePluginStartResult> {
     const pluginRoot = dirname(plan.manifestPath);
     this.rememberPluginInstallAlias(manifest.id, plan.pluginIdHint);
     if (plan.pluginIdHint) {
@@ -1037,7 +1246,7 @@ export class PluginRuntime {
       );
       if (!integrityResult.ok) {
         this.markFailed(plan.pluginIdHint);
-        return;
+        return "failed";
       }
     }
 
@@ -1058,8 +1267,12 @@ export class PluginRuntime {
           name: manifest.name,
           description: `Missing capabilities: ${dependencyResult.missing.join(", ")}`,
         });
-        return;
+        return "failed";
       }
+    }
+
+    if (!opts.skipPreparation && this.deferPluginStartUntilPrepared(plan, manifest, approvedPluginAccess, opts)) {
+      return "deferred";
     }
 
     let entryPath: string;
@@ -1074,13 +1287,13 @@ export class PluginRuntime {
         reason,
       });
       this.markFailed(manifest.id);
-      return;
+      return "failed";
     }
     const resolvedEntryPath = resolveRealEntryPath(entryPath);
 
     let module: { default?: RuntimePluginFactory; createPlugin?: RuntimePluginFactory };
     try {
-      module = (await import(buildImportUrl(resolvedEntryPath))) as {
+      module = (await import(buildImportUrl(resolvedEntryPath, opts.cacheBust))) as {
         default?: RuntimePluginFactory;
         createPlugin?: RuntimePluginFactory;
       };
@@ -1091,13 +1304,13 @@ export class PluginRuntime {
         reason: (err as Error).message,
       });
       this.markFailed(manifest.id);
-      return;
+      return "failed";
     }
     const createPlugin = module.default ?? module.createPlugin;
     if (!createPlugin) {
       log.error(`${manifest.id} entry does not export default/createPlugin — skipped`);
       this.markFailed(manifest.id);
-      return;
+      return "failed";
     }
 
     const pluginDataDir = this.ensureDataDir(manifest.id, pluginRoot);
@@ -1119,7 +1332,7 @@ export class PluginRuntime {
     } catch (err) {
       log.error(`${manifest.id} createPlugin failed: %s`, (err as Error).message);
       this.markFailed(manifest.id);
-      return;
+      return "failed";
     }
 
     const methods = new Map<string, PluginToolHandler>();
@@ -1133,6 +1346,41 @@ export class PluginRuntime {
       if (this.methodMap.has(toolName)) {
         throw new Error(`Duplicate plugin method registered: ${toolName}`);
       }
+    }
+
+    if (opts.shouldCommit && !opts.shouldCommit()) {
+      await this.stopAfterStartFailure(manifest.id, instance);
+      return "cancelled";
+    }
+
+    let startupMs = 0;
+    if (instance.start) {
+      const startedAt = Date.now();
+      try {
+        await runStartWithTimeout(instance.start.bind(instance), manifest.startupTimeoutMs);
+        startupMs = Date.now() - startedAt;
+      } catch (err) {
+        if (opts.shouldCommit && !opts.shouldCommit()) {
+          await this.stopAfterStartFailure(manifest.id, instance);
+          return "cancelled";
+        }
+        log.error(`start during addPlugin failed: %s`, (err as Error).message);
+        this.markFailed(manifest.id);
+        await this.stopAfterStartFailure(manifest.id, instance);
+        return "failed";
+      }
+    }
+    if (opts.shouldCommit && !opts.shouldCommit()) {
+      await this.stopAfterStartFailure(manifest.id, instance);
+      return "cancelled";
+    }
+    for (const toolName of methods.keys()) {
+      if (this.methodMap.has(toolName)) {
+        await this.stopAfterStartFailure(manifest.id, instance);
+        throw new Error(`Duplicate plugin method registered: ${toolName}`);
+      }
+    }
+    for (const [toolName, handler] of methods) {
       this.methodMap.set(toolName, { pluginId: manifest.id, handler });
     }
 
@@ -1146,28 +1394,18 @@ export class PluginRuntime {
       instance,
       methods,
       approvedPluginAccess,
+      started: true,
     });
     this.failedPluginIds.delete(manifest.id);
     this.disabledPluginIds.delete(manifest.id);
 
     if (!this.perfStats.has(manifest.id)) {
-      this.perfStats.set(manifest.id, { startupMs: 0, toolCallCount: 0, errorCount: 0, totalExecMs: 0, lastCallAt: null });
-    }
-
-    if (instance.start) {
-      const startedAt = Date.now();
-      try {
-        await runStartWithTimeout(instance.start.bind(instance), manifest.startupTimeoutMs);
-        this.perfStats.get(manifest.id)!.startupMs = Date.now() - startedAt;
-      } catch (err) {
-        log.error(`start during addPlugin failed: %s`, (err as Error).message);
-        this.markFailed(manifest.id);
-        this.cleanupFailedStartRuntimeState(manifest.id, methods);
-        await this.stopAfterStartFailure(manifest.id, instance);
-        return;
-      }
+      this.perfStats.set(manifest.id, { startupMs, toolCallCount: 0, errorCount: 0, totalExecMs: 0, lastCallAt: null });
+    } else {
+      this.perfStats.get(manifest.id)!.startupMs = startupMs;
     }
     this.onEnable?.(manifest.id);
+    return "started";
   }
 
   /**
@@ -1186,8 +1424,10 @@ export class PluginRuntime {
       log.error(`stop during reload failed: %s`, (err as Error).message);
     }
 
-    for (const method of plugin.methods.keys()) {
-      this.methodMap.delete(method);
+    if (plugin) {
+      for (const method of plugin.methods.keys()) {
+        this.methodMap.delete(method);
+      }
     }
     this.plugins.delete(pluginId);
     const pluginDisposers = this.disposers.get(pluginId);
@@ -1249,10 +1489,12 @@ export class PluginRuntime {
       instance,
       methods,
       approvedPluginAccess: this.plugins.get(pluginId)?.approvedPluginAccess ?? this.knownPluginAccessGrants.get(pluginId),
+      started: false,
     });
 
     try {
       await instance.start?.();
+      this.plugins.get(pluginId)!.started = true;
     } catch (err) {
       log.error(`start after reload failed: %s`, (err as Error).message);
       this.markFailed(pluginId);
@@ -1327,9 +1569,11 @@ export class PluginRuntime {
   async call(method: string, payload?: unknown): Promise<unknown> {
     const entry = this.methodMap.get(method);
     if (!entry) {
+      this.throwIfToolOwnerNotReady(method);
       throw new Error(`Plugin method not found: ${method}`);
     }
     const { pluginId } = entry;
+    this.throwIfPluginNotStarted(pluginId);
     let stats = this.perfStats.get(pluginId);
     if (!stats) {
       stats = { startupMs: 0, toolCallCount: 0, errorCount: 0, totalExecMs: 0, lastCallAt: null };
@@ -1401,9 +1645,11 @@ export class PluginRuntime {
   async callFromUi(method: string, payload?: unknown): Promise<unknown> {
     const entry = this.methodMap.get(method);
     if (!entry) {
+      this.throwIfToolOwnerNotReady(method);
       throw new Error(`Plugin method not found: ${method}`);
     }
     const plugin = this.plugins.get(entry.pluginId);
+    this.throwIfPluginNotStarted(entry.pluginId);
     const uiCallable = plugin?.manifest.uiCallable ?? [];
     if (!uiCallable.includes(method)) {
       throw new Error(
@@ -1462,6 +1708,7 @@ export class PluginRuntime {
       pluginRoot: "/tmp/test-inject",
       instance: {} as import("../types.js").RuntimePlugin,
       methods: new Map([[toolName, handler as import("../types.js").PluginToolHandler]]),
+      started: true,
     };
     this.plugins.set(pluginId, stub);
     this.methodMap.set(toolName, { pluginId, handler: handler as import("../types.js").PluginToolHandler });
@@ -1511,9 +1758,11 @@ export class PluginRuntime {
       : null;
     const cards = new Map<string, PluginCard>();
     for (const [pluginId, manifest] of this.knownPluginManifests) {
-      const loadStatus = this.plugins.has(pluginId)
-        ? "loaded"
-        : this.failedPluginIds.has(pluginId)
+      const loadStatus = this.preparingPluginIds.has(pluginId)
+        ? "preparing"
+        : this.plugins.has(pluginId)
+          ? "loaded"
+          : this.failedPluginIds.has(pluginId)
           ? "failed"
           : this.disabledPluginIds.has(pluginId)
             ? "disabled"
@@ -1538,6 +1787,10 @@ export class PluginRuntime {
 
   listPluginManifests(): Array<{ pluginId: string; manifest: PluginManifest }> {
     const result: Array<{ pluginId: string; manifest: PluginManifest }> = [];
+    for (const pluginId of this.preparingPluginIds) {
+      const manifest = this.knownPluginManifests.get(pluginId);
+      if (manifest) result.push({ pluginId, manifest });
+    }
     for (const [pluginId, plugin] of this.plugins) {
       result.push({ pluginId, manifest: plugin.manifest });
     }
@@ -1653,6 +1906,16 @@ export class PluginRuntime {
     this.failedPluginIds.clear();
     this.failedPluginStubs.clear();
     this.disabledPluginIds.clear();
+    for (const [pluginId, pending] of this.pendingPreparedStarts) {
+      pending.rejectReady(new Error(`plugin '${pluginId}' runtime dependency preparation was cancelled by runtime reset`));
+      this.preparationGenerations.set(pluginId, ++this.nextPreparationGeneration);
+    }
+    this.preparingPluginIds.clear();
+    this.preparationFailures.clear();
+    this.pendingPreparedStarts.clear();
+    this.pendingRestarts.clear();
+    this.pendingRestartPreparations.clear();
+    this.preparationGenerations.clear();
     this.loaded = false;
   }
 
@@ -1710,6 +1973,29 @@ export class PluginRuntime {
     const stub = this.failedPluginStubs.get(pluginId);
     const reason = stub?.description ?? "plugin failed to load (see prior log)";
     throw new Error(`addPlugin failed for ${pluginId}: ${reason}`);
+  }
+
+  private throwIfToolOwnerNotReady(toolName: string): void {
+    const pluginId = this.knownToolOwners.get(toolName);
+    if (!pluginId) return;
+    if (this.preparingPluginIds.has(pluginId)) {
+      throw new Error(
+        `Plugin '${pluginId}' is still installing its runtime dependencies. ` +
+        `Try again after the plugin is ready.`,
+      );
+    }
+    const failure = this.preparationFailures.get(pluginId);
+    if (failure) {
+      throw new Error(`Plugin '${pluginId}' runtime dependency install failed: ${failure}`);
+    }
+  }
+
+  private throwIfPluginNotStarted(pluginId: string): void {
+    const plugin = this.plugins.get(pluginId);
+    if (!plugin || plugin.started !== false) return;
+    throw new Error(
+      `Plugin '${pluginId}' is still starting. Try again after the plugin is ready.`,
+    );
   }
 
   private markFailed(

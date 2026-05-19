@@ -2,6 +2,7 @@ import { createHash, generateKeyPairSync, sign as cryptoSign } from "node:crypto
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import AdmZip from "adm-zip";
 import { mkdir, readFile, rm, writeFile } from "node:fs/promises";
+import { existsSync } from "node:fs";
 import { tmpdir } from "node:os";
 
 import { isAbsolute, join, resolve } from "node:path";
@@ -179,6 +180,59 @@ describe("PluginMarketplaceService install()", () => {
     ) as { version: string; entry: string };
     expect(manifest.version).toBe("1.2.3");
     expect(manifest.entry).toBe("./dist/hostPlugin.js");
+  });
+
+  it("cleans a fresh extracted marketplace install when receipt finalization fails", async () => {
+    const signingKey = freshEd25519();
+    mockedPublisherKeys.getBundledPublicKeys.mockReturnValue({
+      "test-v1": signingKey.publicKey,
+    });
+    const plugin: PluginMarketplaceItem = {
+      id: "test-plugin",
+      slug: "test-plugin",
+      name: "Test Plugin",
+      description: "A test plugin",
+      version: "1.2.3",
+      packageSpec: "@lvis/test-plugin@1.2.3",
+      packageName: "@lvis/test-plugin",
+      tools: ["ping"],
+    };
+    const zipBuffer = makePluginZip({
+      id: plugin.id,
+      name: plugin.name,
+      version: plugin.version,
+      entry: "./dist/hostPlugin.js",
+      tools: plugin.tools,
+    });
+    const fetcher: MarketplaceFetcher & {
+      downloadArtifact: () => Promise<{ body: Buffer; sha256Header: string; status: number }>;
+      fetchSignatureEnvelope: () => Promise<ReturnType<typeof makeEnvelope>>;
+    } = {
+      listPlugins: async () => [plugin],
+      getPluginDetail: async () => plugin,
+      downloadVersion: async () => {
+        throw new Error("downloadVersion should not be called for signed installs");
+      },
+      downloadArtifact: async () => ({
+        body: zipBuffer,
+        sha256Header: createHash("sha256").update(zipBuffer).digest("hex"),
+        status: 200,
+      }),
+      fetchSignatureEnvelope: async () => makeEnvelope(zipBuffer, signingKey.privateKey),
+    };
+
+    const { service } = makeService(fetcher);
+    const store = (service as unknown as {
+      artifactStore: { writeInstallReceipt: (...args: unknown[]) => Promise<unknown> };
+    }).artifactStore;
+    vi.spyOn(store, "writeInstallReceipt").mockRejectedValueOnce(new Error("receipt write failed"));
+
+    await expect(service.install("test-plugin")).rejects.toThrow("receipt write failed");
+
+    expect(existsSync(join(installedDir, "test-plugin"))).toBe(false);
+    expect(existsSync(join(cacheRoot, "test-plugin", "install-receipt.json"))).toBe(false);
+    const registry = JSON.parse(await readFile(registryPath, "utf-8"));
+    expect(registry.plugins).toHaveLength(0);
   });
 
   it("reinstalls the same marketplace version when the install receipt is missing", async () => {
