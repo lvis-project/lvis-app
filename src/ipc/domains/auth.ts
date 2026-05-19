@@ -22,7 +22,8 @@
  * Production gate (PR #894 review B1):
  *   - Demo credentials live in `LVIS_DEMO_*` env vars captured at boot,
  *     then scrubbed from `process.env`. In packaged builds, the handler
- *     refuses to register unless `LVIS_DEMO_ENABLED=1` was set at boot.
+ *     refuses to register unless `isDemoEnabled()` (i.e. a non-empty
+ *     captured `LVIS_DEMO_KEY_*` set) was true at boot.
  *   - This prevents a shipped binary from accepting the literal `demo` /
  *     `demo123` mockup credentials and persisting an attacker-controlled
  *     "demo" key under `llm.apiKey.<vendor>`.
@@ -81,11 +82,12 @@ export function registerAuthHandlers(deps: IpcDeps): void {
   const { settingsService, auditLogger } = deps;
 
   // PR #894 B1 — Production safety gate. In packaged builds the mockup
-  // login handler must not register unless `LVIS_DEMO_ENABLED=1` was set
-  // at boot (captured pre-scrub). Dev builds always register so local
-  // engineering still has the demo loop.
+  // login handler must not register unless `isDemoEnabled()` is true
+  // (i.e. `captureDemoCredentials()` saw a non-empty `LVIS_DEMO_KEY_*`
+  // set pre-scrub). Dev builds always register so local engineering still
+  // has the demo loop.
   if (getIsPackaged() && !isDemoEnabled()) {
-    log.info("mockup login handler skipped (production build, LVIS_DEMO_ENABLED unset)");
+    log.info("mockup login handler skipped (production build, no demo activation captured)");
     return;
   }
 
