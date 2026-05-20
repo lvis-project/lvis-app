@@ -245,7 +245,12 @@ export function useChatState(api: LvisApi) {
         // so the StatusBar item doesn't stick when compact_notice never arrives.
         setIsCompacting(false);
         setEntries((p) =>
-          setAssistantError(dropPermissionReviewEntries(p), `오류: ${ev.error || "알 수 없는 오류"}`, thoughtRef.current),
+          setAssistantError(
+            dropPermissionReviewEntries(p),
+            `오류: ${ev.error || "알 수 없는 오류"}`,
+            thoughtRef.current,
+            ev.systemNotice,
+          ),
         );
         streamRef.current = "";
         thoughtRef.current = "";

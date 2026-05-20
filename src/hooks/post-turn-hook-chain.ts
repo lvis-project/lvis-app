@@ -59,6 +59,11 @@ export interface PostTurnHookResult {
   compactedMessages: GenericMessage[] | null;
   /** detect-checkpoint 결과. output에 마커가 없으면 default 값. */
   detector: DetectorResult;
+  /**
+   * Canonical message array that this hook persisted for transcript replay.
+   * It includes mark-stale compaction and marker-stripped assistant output.
+   */
+  messagesForPersistence: GenericMessage[];
 }
 
 export class PostTurnHookChain {
@@ -71,6 +76,7 @@ export class PostTurnHookChain {
    */
   async run(ctx: PostTurnHookContext): Promise<PostTurnHookResult> {
     let compactedMessages: GenericMessage[] | null = null;
+    let messagesForPersistence = ctx.messages;
 
     // 1. markStaleToolResults (LLM-free, lazy, 항상).
     // Token preflight (`runPreflightGuard`) 가 *next turn 진입 전* 구조적
@@ -123,13 +129,13 @@ export class PostTurnHookChain {
     // 세션 영속화
     try {
       const baseMessages = compactedMessages ?? ctx.messages;
-      const messagesToSave =
+      messagesForPersistence =
         outputForPersistence !== ctx.output
           ? replaceLastAssistantOutput(baseMessages, ctx.output, outputForPersistence)
           : baseMessages;
       // saveSession owns JSONL stubbing + file-backed tool_result artifacts.
       // caller (engine) 의 in-memory verbatim 은 변경 안 됨.
-      await this.deps.memoryManager?.saveSession(ctx.sessionId, messagesToSave);
+      await this.deps.memoryManager?.saveSession(ctx.sessionId, messagesForPersistence);
     } catch (err) {
       log.warn("saveSession failed: %s", err);
     }
@@ -206,7 +212,7 @@ export class PostTurnHookChain {
       log.warn("idle poke failed: %s", err);
     }
 
-    return { compactedMessages, detector };
+    return { compactedMessages, detector, messagesForPersistence };
   }
 }
 

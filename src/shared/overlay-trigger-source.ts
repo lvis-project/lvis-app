@@ -21,6 +21,14 @@ export function isOverlayTriggerOrigin(source: string | null | undefined): boole
 const IMPORTED_TRIGGER_ENVELOPE_PATTERN =
   /^<imported-from-proactive\s+source="(overlay:[a-z][a-z0-9-]*)"\s*>/;
 
+const IMPORTED_TRIGGER_ENVELOPE_FULL_PATTERN =
+  /^<imported-from-proactive\s+source="(overlay:[a-z][a-z0-9-]*)"\s*>\s*([\s\S]*?)\s*<\/imported-from-proactive>\s*$/;
+
+export interface ImportedTriggerEnvelope {
+  source: string;
+  body: string;
+}
+
 /**
  * Parses an `<imported-from-proactive source="overlay:...">` envelope prefix.
  * Returns the source tag (e.g. `"overlay:meeting-detection"`) if present,
@@ -29,4 +37,20 @@ const IMPORTED_TRIGGER_ENVELOPE_PATTERN =
 export function parseImportedTriggerEnvelope(input: string): string | null {
   const m = input.trimStart().match(IMPORTED_TRIGGER_ENVELOPE_PATTERN);
   return m ? m[1] : null;
+}
+
+/**
+ * Parses the full proactive import envelope into structured provenance and
+ * prompt body. This is the transcript migration/parser used by persisted
+ * history replay; new messages should persist the same shape in MessageMeta.
+ */
+export function parseImportedTriggerEnvelopePayload(input: string): ImportedTriggerEnvelope | null {
+  const trimmed = input.trim();
+  const full = trimmed.match(IMPORTED_TRIGGER_ENVELOPE_FULL_PATTERN);
+  if (full) {
+    return { source: full[1], body: full[2].trim() };
+  }
+  const source = parseImportedTriggerEnvelope(trimmed);
+  if (!source) return null;
+  return { source, body: trimmed.replace(IMPORTED_TRIGGER_ENVELOPE_PATTERN, "").trim() };
 }
