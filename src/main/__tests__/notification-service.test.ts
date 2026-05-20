@@ -584,6 +584,155 @@ describe("NotificationService — bypassFocusGate (#843)", () => {
   });
 });
 
+describe("NotificationService — alwaysFireOs (per-event OS dual-fire opt-in)", () => {
+  it("alwaysFireOs=true + focused window → toast AND OS both fire (dual delivery)", () => {
+    const win = makeMockWindow({ focused: true, minimized: false });
+    const factoryStub = makeNotificationFactoryStub();
+    const auditLogger = makeMockAuditLogger();
+    const svc = new NotificationService({
+      getMainWindow: () => win as unknown as Electron.BrowserWindow,
+      auditLogger,
+      notificationFactory: factoryStub.factory,
+      isReady: () => true,
+      isTestEnv: () => false,
+      isAnyWindowFocused: () => true,
+    });
+    svc.fire({
+      kind: "plugin",
+      title: "alert",
+      body: "needs attention",
+      alwaysFireOs: true,
+    });
+    // Both surfaces invoked
+    expect(win.webContents.send).toHaveBeenCalledWith(
+      IPC_NOTIFICATION_TOAST,
+      expect.objectContaining({ kind: "plugin", title: "alert" }),
+    );
+    expect(factoryStub.calls.length).toBe(1);
+  });
+
+  it("alwaysFireOs=false (default) + focused window → toast only (existing focus gate)", () => {
+    const win = makeMockWindow({ focused: true, minimized: false });
+    const factoryStub = makeNotificationFactoryStub();
+    const svc = new NotificationService({
+      getMainWindow: () => win as unknown as Electron.BrowserWindow,
+      notificationFactory: factoryStub.factory,
+      isReady: () => true,
+      isTestEnv: () => false,
+      isAnyWindowFocused: () => true,
+    });
+    svc.fire({ kind: "plugin", title: "regular", body: "no dual fire" });
+    expect(win.webContents.send).toHaveBeenCalled();
+    expect(factoryStub.calls.length).toBe(0);
+  });
+
+  it("alwaysFireOs=true + unfocused window → OS only (toast suppressed when window not visible)", () => {
+    const win = makeMockWindow({ focused: false, minimized: true });
+    const factoryStub = makeNotificationFactoryStub();
+    const svc = new NotificationService({
+      getMainWindow: () => win as unknown as Electron.BrowserWindow,
+      notificationFactory: factoryStub.factory,
+      isReady: () => true,
+      isTestEnv: () => false,
+    });
+    svc.fire({ kind: "plugin", title: "x", body: "y", alwaysFireOs: true });
+    expect(win.webContents.send).not.toHaveBeenCalledWith(
+      IPC_NOTIFICATION_TOAST,
+      expect.anything(),
+    );
+    expect(factoryStub.calls.length).toBe(1);
+  });
+
+  it("dual-fire audit row includes dualFireOs:true (forensic visibility of OS leg)", () => {
+    const win = makeMockWindow({ focused: true, minimized: false });
+    const factoryStub = makeNotificationFactoryStub();
+    const auditLogger = makeMockAuditLogger();
+    const svc = new NotificationService({
+      getMainWindow: () => win as unknown as Electron.BrowserWindow,
+      auditLogger,
+      notificationFactory: factoryStub.factory,
+      isReady: () => true,
+      isTestEnv: () => false,
+      isAnyWindowFocused: () => true,
+    });
+    svc.fire({ kind: "plugin", title: "dual", body: "fire", alwaysFireOs: true });
+    expect(factoryStub.calls.length).toBe(1);
+    const log = (auditLogger.log as unknown as ReturnType<typeof vi.fn>).mock.calls[0][0];
+    const parsed = JSON.parse(log.input);
+    expect(parsed.gate).toBe("in-app");
+    expect(parsed.dualFireOs).toBe(true);
+  });
+
+  it("bypassFocusGate=true + alwaysFireOs=true → OS only (bypass wins, alwaysFireOs is dead branch)", () => {
+    const win = makeMockWindow({ focused: true, minimized: false });
+    const factoryStub = makeNotificationFactoryStub();
+    const auditLogger = makeMockAuditLogger();
+    const svc = new NotificationService({
+      getMainWindow: () => win as unknown as Electron.BrowserWindow,
+      auditLogger,
+      notificationFactory: factoryStub.factory,
+      isReady: () => true,
+      isTestEnv: () => false,
+      isAnyWindowFocused: () => true,
+    });
+    svc.fire({
+      kind: "plugin",
+      title: "critical",
+      body: "deadline",
+      bypassFocusGate: true,
+      alwaysFireOs: true,
+    });
+    // bypassFocusGate routes to OS-only path; toast must NOT fire
+    expect(factoryStub.calls.length).toBe(1);
+    expect(win.webContents.send).not.toHaveBeenCalledWith(
+      IPC_NOTIFICATION_TOAST,
+      expect.anything(),
+    );
+    const log = (auditLogger.log as unknown as ReturnType<typeof vi.fn>).mock.calls[0][0];
+    const parsed = JSON.parse(log.input);
+    expect(parsed.gate).toBe("os");
+    expect(parsed.dualFireOs).toBeUndefined();
+  });
+
+  it("alwaysFireOs=true does NOT bypass per-kind cooldown (5s plugin window still suppresses subsequent fires)", () => {
+    const win = makeMockWindow({ focused: true, minimized: false });
+    const factoryStub = makeNotificationFactoryStub();
+    const auditLogger = makeMockAuditLogger();
+    const svc = new NotificationService({
+      getMainWindow: () => win as unknown as Electron.BrowserWindow,
+      auditLogger,
+      notificationFactory: factoryStub.factory,
+      isReady: () => true,
+      isTestEnv: () => false,
+      isAnyWindowFocused: () => true,
+    });
+    const perfBase = performance.now();
+    vi.spyOn(performance, "now").mockImplementation(() => perfBase);
+    svc.fire({ kind: "plugin", title: "a", body: "1", alwaysFireOs: true });
+    vi.spyOn(performance, "now").mockImplementation(() => perfBase + 1_000);
+    svc.fire({ kind: "plugin", title: "b", body: "2", alwaysFireOs: true }); // suppressed
+    expect(factoryStub.calls.length).toBe(1); // only first dual-fired
+    vi.restoreAllMocks();
+  });
+
+  it("kind=turn-end + focused window (default alwaysFireOs=false) → toast only — regression guard for non-plugin kinds", () => {
+    const win = makeMockWindow({ focused: true, minimized: false });
+    const factoryStub = makeNotificationFactoryStub();
+    const svc = new NotificationService({
+      getMainWindow: () => win as unknown as Electron.BrowserWindow,
+      notificationFactory: factoryStub.factory,
+      isReady: () => true,
+      isTestEnv: () => false,
+      isAnyWindowFocused: () => true,
+    });
+    for (const kind of ["turn-end", "routine", "approval", "ask-user"] as const) {
+      svc.fire({ kind, title: `t-${kind}`, body: `b-${kind}` });
+    }
+    // 4 toasts, 0 OS notifications — alwaysFireOs default behavior preserved
+    expect(factoryStub.calls.length).toBe(0);
+  });
+});
+
 describe("NotificationService — plugin kind cooldown (#841)", () => {
   it("plugin: 5s cooldown coalesces back-to-back fires", () => {
     const win = makeMockWindow({ focused: false, minimized: false });

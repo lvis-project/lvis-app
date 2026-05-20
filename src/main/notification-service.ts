@@ -70,6 +70,20 @@ export interface FireOptions {
    * (silent: !urgent still applies).
    */
   bypassFocusGate?: boolean;
+  /**
+   * When true, the OS notification fires in addition to the in-app toast
+   * even while the window is focused (dual delivery). The default focus-
+   * aware routing (focused → toast only, unfocused → OS only) still applies
+   * otherwise. Routed from manifest's `notificationEvents[i].alwaysFireOs`,
+   * so in practice this only ever arrives with `kind: "plugin"`; other
+   * kinds (turn-end / routine / approval / ask-user) get the default false.
+   *
+   * Cooldown gate still applies — dual-fire does not bypass the per-kind
+   * 5s suppression. Distinct from `bypassFocusGate` which forces OS-only
+   * routing and skips cooldown; when both are true `bypassFocusGate` wins
+   * (focus-state branch is short-circuited so this field becomes a no-op).
+   */
+  alwaysFireOs?: boolean;
 }
 
 /**
@@ -364,6 +378,7 @@ export class NotificationService {
     const anyFocused = this.isAnyWindowFocused();
     const focusGateActive = !opts.bypassFocusGate && mainAlive && anyFocused;
     const gate: "os" | "in-app" = focusGateActive ? "in-app" : "os";
+    let dualFireOs = false;
 
     if (focusGateActive && win) {
       const payload: ToastPayload = {
@@ -385,11 +400,19 @@ export class NotificationService {
         this.audit("os", opts.kind, cleanTitle);
         return;
       }
+      // alwaysFireOs: opt-in dual delivery (toast + OS) for focused windows.
+      // bypassFocusGate=true causes focusGateActive=false above, so the else
+      // branch handles that case as OS-only — this if-branch only runs for
+      // the "focused, no bypass" path, making alwaysFireOs purely additive.
+      if (opts.alwaysFireOs) {
+        this.fireOsNotification(opts, cleanTitle, truncatedPlainBody, urgent);
+        dualFireOs = true;
+      }
     } else {
       this.fireOsNotification(opts, cleanTitle, truncatedPlainBody, urgent);
     }
 
-    this.audit(gate, opts.kind, cleanTitle);
+    this.audit(gate, opts.kind, cleanTitle, dualFireOs);
   }
 
   private fireOsNotification(opts: FireOptions, title: string, body: string, urgent: boolean): void {
@@ -432,7 +455,12 @@ export class NotificationService {
     }
   }
 
-  private audit(gate: "os" | "in-app", kind: NotificationKind, title: string): void {
+  private audit(
+    gate: "os" | "in-app",
+    kind: NotificationKind,
+    title: string,
+    dualFireOs = false,
+  ): void {
     if (!this.auditLogger) return;
     try {
       this.auditLogger.log({
@@ -448,6 +476,11 @@ export class NotificationService {
           event: "notification.fired",
           kind,
           gate,
+          // dualFireOs surfaces the alwaysFireOs opt-in path so forensics can
+          // tell a "in-app + OS" delivery apart from a pure "in-app" toast
+          // — without this the OS leg is invisible to audit. Only emitted
+          // when the in-app branch dual-fired the OS leg (default omit).
+          ...(dualFireOs ? { dualFireOs: true } : {}),
           // reuses body cap as title cap — same 80-char limit applies to
           // audit fields.
           title: title.slice(0, BODY_MAX_CHARS),

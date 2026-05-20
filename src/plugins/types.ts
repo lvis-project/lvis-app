@@ -244,6 +244,8 @@ export interface PluginManifest {
     titleField?: string;
     bodyField?: string;
     bypassFocusGate?: boolean;
+    /** When true, OS notification fires even while a window is focused (dual delivery: toast + OS). */
+    alwaysFireOs?: boolean;
   }>;
   installPolicy?: InstallPolicy;
   dependencies?: Array<string | DependencySpec>;
@@ -601,6 +603,8 @@ export interface PluginMarketplaceItem {
     titleField?: string;
     bodyField?: string;
     bypassFocusGate?: boolean;
+    /** When true, OS notification fires even while a window is focused (dual delivery: toast + OS). */
+    alwaysFireOs?: boolean;
   }>;
   installPolicy?: InstallPolicy;
   dependencies?: Array<string | DependencySpec>;

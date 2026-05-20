@@ -61,7 +61,7 @@
     "@ai-sdk/google-vertex": "^4.0.112",
     "@ai-sdk/openai": "^3.0.53",
     "@ai-sdk/openai-compatible": "~2.0.41",
-    "@lvis/plugin-sdk": "github:lvis-project/lvis-plugin-sdk#840092f73fa323598a231bd72a6827267461d552",
+    "@lvis/plugin-sdk": "github:lvis-project/lvis-plugin-sdk#51cf8002c2b959c93828b06aa5cd512892567503",
     "adm-zip": "^0.5.16",
     "ai": "~6.0.168",
     "ajv": "^8.18.0",

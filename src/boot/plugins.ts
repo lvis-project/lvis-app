@@ -290,12 +290,16 @@ export function registerPluginNotifications(
         log.warn(`boot: notificationEvents[${event}].bypassFocusGate must be boolean, skipped`);
         continue;
       }
+      if (spec.alwaysFireOs !== undefined && typeof spec.alwaysFireOs !== "boolean") {
+        log.warn(`boot: notificationEvents[${event}].alwaysFireOs must be boolean, skipped`);
+        continue;
+      }
       if (registeredEvents.has(event)) {
         log.warn(`boot: duplicate notificationEvents entry for "${event}" — keeping first, skipping rest`);
         continue;
       }
       registeredEvents.add(event);
-      const { titleField, bodyField, bypassFocusGate } = spec;
+      const { titleField, bodyField, bypassFocusGate, alwaysFireOs } = spec;
       const handler: EventHandler = (data) => {
         // Defensive: if the main window is destroyed between plugin emit and
         // dispatch, the click-restore inside NotificationService no-ops, but
@@ -339,6 +343,7 @@ export function registerPluginNotifications(
           title,
           body,
           bypassFocusGate: bypassFocusGate === true,
+          alwaysFireOs: alwaysFireOs === true,
         });
       };
       onEvent(event, handler);
