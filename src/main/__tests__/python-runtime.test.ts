@@ -244,7 +244,7 @@ describe("PythonRuntimeBootstrapper", () => {
     expectArgsToContainPath(pipSyncCall![1] as string[], declaredLockFilePath);
   });
 
-  it("registry discovery ignores Python lockfiles from non-document-indexer plugins", async () => {
+  it("registry discovery uses host-managed Python lockfiles without document-indexer hardcoding", async () => {
     const registryPath = "/registry/plugins.json";
     mockedReadFile.mockImplementation(async (filePath) => {
       const path = String(filePath);
@@ -293,8 +293,7 @@ describe("PythonRuntimeBootstrapper", () => {
       ([, args]) => (args as string[]).includes("pip") && (args as string[]).includes("sync"),
     );
     expect(pipSyncCall).toBeDefined();
-    expectArgsToContainPath(pipSyncCall![1] as string[], "/installed/local-indexer/python-requirements.lock");
-    expectArgsNotToContainPath(pipSyncCall![1] as string[], "/installed/other/python-requirements.lock");
+    expectArgsToContainPath(pipSyncCall![1] as string[], "/installed/other/python-requirements.lock");
   });
 
   it("plugin.json이 선언한 절대 lockfile 경로는 거부하고 plugin 디렉토리 기본 lockfile만 사용한다", async () => {
@@ -327,14 +326,18 @@ describe("PythonRuntimeBootstrapper", () => {
   it("first-session plugin install can prepare runtime from the newly installed manifest", async () => {
     const manifestPath = "/installed/local-indexer/plugin.json";
     const declaredLockFilePath = "/installed/local-indexer/requirements/python.lock";
-    mockedReadFile.mockResolvedValue(JSON.stringify({
-      runtime: { python: { requirementsLock: "requirements/python.lock" } },
-    }));
-    mockedAccess
-      .mockResolvedValueOnce(undefined) // preflight declared lock exists
-      .mockRejectedValueOnce(Object.assign(new Error("ENOENT"), { code: "ENOENT" })) // sentinel 없음
-      .mockResolvedValueOnce(undefined) // uv binary 존재
-      .mockResolvedValueOnce(undefined); // declared lock file 존재
+    mockedReadFile.mockImplementation(async (filePath) => {
+      if (String(filePath) === declaredLockFilePath) return "pymupdf==1.26.0\n";
+      return JSON.stringify({
+        runtime: { python: { requirementsLock: "requirements/python.lock" } },
+      });
+    });
+    mockedAccess.mockImplementation(async (filePath) => {
+      const normalized = normalizePathForAssert(String(filePath));
+      if (normalized === normalizePathForAssert(declaredLockFilePath)) return undefined;
+      if (normalized.includes(".ready")) throw Object.assign(new Error("ENOENT"), { code: "ENOENT" });
+      return undefined;
+    });
     mockedSpawn
       .mockReturnValueOnce(makeSpawnMock("uv 0.7.3\n"))
       .mockReturnValueOnce(makeSpawnMock(""))
@@ -345,11 +348,85 @@ describe("PythonRuntimeBootstrapper", () => {
     const result = await bootstrapper.ensureReadyForPluginManifest(manifestPath, makeBrowserWindow());
 
     expect(result?.pythonPath).toBeTruthy();
+    expect(normalizePathForAssert(result!.venvPath)).toContain("/python-envs/");
     const pipSyncCall = mockedSpawn.mock.calls.find(
       ([, args]) => (args as string[]).includes("pip") && (args as string[]).includes("sync"),
     );
     expect(pipSyncCall).toBeDefined();
     expectArgsToContainPath(pipSyncCall![1] as string[], declaredLockFilePath);
+  });
+
+  it("deduplicates concurrent setup for plugins with the same lockfile content", async () => {
+    const manifestA = "/installed/a/plugin.json";
+    const manifestB = "/installed/b/plugin.json";
+    const lockA = "/installed/a/python-requirements.lock";
+    const lockB = "/installed/b/python-requirements.lock";
+    mockedReadFile.mockImplementation(async (filePath) => {
+      const p = normalizePathForAssert(String(filePath));
+      if (p === normalizePathForAssert(manifestA) || p === normalizePathForAssert(manifestB)) {
+        return JSON.stringify({ python: { managedBy: "lvis-app" } });
+      }
+      if (p === normalizePathForAssert(lockA) || p === normalizePathForAssert(lockB)) {
+        return "shared-package==1.0.0\n";
+      }
+      throw Object.assign(new Error("ENOENT"), { code: "ENOENT" });
+    });
+    mockedAccess.mockImplementation(async (filePath) => {
+      const p = normalizePathForAssert(String(filePath));
+      if (p.includes(".ready")) throw Object.assign(new Error("ENOENT"), { code: "ENOENT" });
+      return undefined;
+    });
+    mockedSpawn.mockImplementation(() => makeSpawnMock("3.12.3\n"));
+
+    const bootstrapper = new PythonRuntimeBootstrapper();
+    const [runtimeA, runtimeB] = await Promise.all([
+      bootstrapper.ensureReadyForPluginManifest(manifestA, makeBrowserWindow()),
+      bootstrapper.ensureReadyForPluginManifest(manifestB, makeBrowserWindow()),
+    ]);
+
+    expect(runtimeA?.venvPath).toBe(runtimeB?.venvPath);
+    expect(mockedSpawn).toHaveBeenCalledTimes(4);
+    const pipSyncCalls = mockedSpawn.mock.calls.filter(
+      ([, args]) => (args as string[]).includes("pip") && (args as string[]).includes("sync"),
+    );
+    expect(pipSyncCalls).toHaveLength(1);
+  });
+
+  it("keeps concurrent setup separate for different lockfile content", async () => {
+    const manifestA = "/installed/a/plugin.json";
+    const manifestB = "/installed/b/plugin.json";
+    const lockA = "/installed/a/python-requirements.lock";
+    const lockB = "/installed/b/python-requirements.lock";
+    mockedReadFile.mockImplementation(async (filePath) => {
+      const p = normalizePathForAssert(String(filePath));
+      if (p === normalizePathForAssert(manifestA) || p === normalizePathForAssert(manifestB)) {
+        return JSON.stringify({ python: { managedBy: "lvis-app" } });
+      }
+      if (p === normalizePathForAssert(lockA)) return "package-a==1.0.0\n";
+      if (p === normalizePathForAssert(lockB)) return "package-b==1.0.0\n";
+      throw Object.assign(new Error("ENOENT"), { code: "ENOENT" });
+    });
+    mockedAccess.mockImplementation(async (filePath) => {
+      const p = normalizePathForAssert(String(filePath));
+      if (p.includes(".ready")) throw Object.assign(new Error("ENOENT"), { code: "ENOENT" });
+      return undefined;
+    });
+    mockedSpawn.mockImplementation(() => makeSpawnMock("3.12.3\n"));
+
+    const bootstrapper = new PythonRuntimeBootstrapper();
+    const [runtimeA, runtimeB] = await Promise.all([
+      bootstrapper.ensureReadyForPluginManifest(manifestA, makeBrowserWindow()),
+      bootstrapper.ensureReadyForPluginManifest(manifestB, makeBrowserWindow()),
+    ]);
+
+    expect(runtimeA?.venvPath).toBeTruthy();
+    expect(runtimeB?.venvPath).toBeTruthy();
+    expect(runtimeA?.venvPath).not.toBe(runtimeB?.venvPath);
+    expect(mockedSpawn).toHaveBeenCalledTimes(8);
+    const pipSyncCalls = mockedSpawn.mock.calls.filter(
+      ([, args]) => (args as string[]).includes("pip") && (args as string[]).includes("sync"),
+    );
+    expect(pipSyncCalls).toHaveLength(2);
   });
 
   it("packaged Electron에서는 gzip uv archive를 사용자 런타임 캐시에 materialize한다", async () => {
@@ -418,7 +495,7 @@ describe("PythonRuntimeBootstrapper", () => {
     }
   });
 
-  it("packaged Electron에서 .ready sentinel이 있어도 uv를 먼저 materialize한다", async () => {
+  it("packaged Electron에서 .ready sentinel이 있으면 uv materialize 없이 resolve한다", async () => {
     const resourcesPath = mkdtempSync(path.join(tmpdir(), "lvis-packaged-ready-resources-"));
     const uvRuntimeDir = mkdtempSync(path.join(tmpdir(), "lvis-packaged-ready-uv-"));
     const targetDirName = `${process.platform}-${process.arch}`;
@@ -441,8 +518,7 @@ describe("PythonRuntimeBootstrapper", () => {
       const bootstrapper = new PythonRuntimeBootstrapper({ uvRuntimeDir });
       await bootstrapper.ensureReady(makeBrowserWindow());
 
-      expect(existsSync(expectedUvBin)).toBe(true);
-      expect(readFileSync(expectedUvBin, "utf8")).toBe("ready-uv-bin");
+      expect(existsSync(expectedUvBin)).toBe(false);
       expect(mockedSpawn).not.toHaveBeenCalled();
     } finally {
       (process as { defaultApp?: boolean }).defaultApp = originalDefaultApp;
@@ -472,7 +548,7 @@ describe("PythonRuntimeBootstrapper", () => {
     mockedAccess.mockResolvedValue(undefined);
 
     try {
-      const bootstrapper = new PythonRuntimeBootstrapper({ uvRuntimeDir });
+      const bootstrapper = new PythonRuntimeBootstrapper({ uvRuntimeDir, forceSetup: true });
       await expect(bootstrapper.ensureReady(makeBrowserWindow())).rejects.toThrow(/SHA mismatch/);
       expect(mockedSpawn).not.toHaveBeenCalled();
     } finally {
@@ -486,6 +562,7 @@ describe("PythonRuntimeBootstrapper", () => {
   it("packaged uv 캐시 파일 SHA가 다르면 archive에서 다시 materialize한다", async () => {
     const resourcesPath = mkdtempSync(path.join(tmpdir(), "lvis-packaged-cache-sha-resources-"));
     const uvRuntimeDir = mkdtempSync(path.join(tmpdir(), "lvis-packaged-cache-sha-uv-"));
+    const pluginRoot = mkdtempSync(path.join(tmpdir(), "lvis-packaged-cache-sha-plugin-"));
     const targetDirName = `${process.platform}-${process.arch}`;
     const binName = process.platform === "win32" ? "uv.exe" : "uv";
     const packagedUvDir = path.join(resourcesPath, "uv", targetDirName);
@@ -497,24 +574,35 @@ describe("PythonRuntimeBootstrapper", () => {
     writeFileSync(path.join(packagedUvDir, `${binName}.gz`), gzipSync(Buffer.from("ready-uv-bin")));
     writeFileSync(path.join(packagedUvDir, "uv.meta.json"), JSON.stringify({ binarySha256: uvSha }));
     writeFileSync(expectedUvBin, "stale-uv-bin");
+    writeFileSync(path.join(pluginRoot, "python-requirements.lock"), "");
 
     const originalDefaultApp = (process as { defaultApp?: boolean }).defaultApp;
     const originalResourcesPath = (process as NodeJS.Process & { resourcesPath?: string }).resourcesPath;
     (process as { defaultApp?: boolean }).defaultApp = false;
     (process as NodeJS.Process & { resourcesPath?: string }).resourcesPath = resourcesPath;
     mockedAccess.mockResolvedValue(undefined);
+    mockedSpawn
+      .mockReturnValueOnce(makeSpawnMock("uv 0.7.3\n"))
+      .mockReturnValueOnce(makeSpawnMock(""))
+      .mockReturnValueOnce(makeSpawnMock(""))
+      .mockReturnValueOnce(makeSpawnMock("3.12.3\n"));
 
     try {
-      const bootstrapper = new PythonRuntimeBootstrapper({ uvRuntimeDir });
+      const bootstrapper = new PythonRuntimeBootstrapper({
+        pluginRoots: [pluginRoot],
+        uvRuntimeDir,
+        forceSetup: true,
+      });
       await bootstrapper.ensureReady(makeBrowserWindow());
 
       expect(readFileSync(expectedUvBin, "utf8")).toBe("ready-uv-bin");
-      expect(mockedSpawn).not.toHaveBeenCalled();
+      expect(mockedSpawn.mock.calls[0]?.[0]).toBe(expectedUvBin);
     } finally {
       (process as { defaultApp?: boolean }).defaultApp = originalDefaultApp;
       (process as NodeJS.Process & { resourcesPath?: string }).resourcesPath = originalResourcesPath;
       rmSync(resourcesPath, { recursive: true, force: true });
       rmSync(uvRuntimeDir, { recursive: true, force: true });
+      rmSync(pluginRoot, { recursive: true, force: true });
     }
   });
 

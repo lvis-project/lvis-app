@@ -16,16 +16,21 @@
  *     existing api-key / SSO / OAuth flows after the server entry is registered.
  */
 
+import AdmZip from "adm-zip";
 import { readFile, stat } from "node:fs/promises";
 import { resolve } from "node:path";
 
-import type { PluginArtifactStore } from "../plugins/plugin-artifact-store.js";
+import {
+  assertSafeArtifactSlug,
+  type PluginArtifactStore,
+} from "../plugins/plugin-artifact-store.js";
 import type { MarketplaceFetcher } from "../plugins/marketplace-fetcher.js";
 import { parseMcpRuntimeSpec } from "../plugins/mcp-runtime-spec.js";
 import type { McpRuntimeSpec, PluginMarketplaceItem } from "../plugins/types.js";
 import type { McpServerConfig } from "./types.js";
 import type { InstallerProgressEvent } from "../plugins/marketplace-installer.js";
 import { MAX_MCP_MANIFEST_BYTES } from "./safe-names.js";
+import { sanitizeZipEntryPath } from "../plugins/zip-entry-path.js";
 
 export interface InstallMcpResult {
   config: McpServerConfig;
@@ -34,6 +39,8 @@ export interface InstallMcpResult {
   /** True if `runtime.auth !== "none"` — caller prompts for credentials. */
   needsCredential: boolean;
   authMode: "none" | "api-key" | "sso" | "oauth";
+  connected: boolean;
+  warning?: string;
 }
 
 export interface InstallMcpOptions {
@@ -44,50 +51,70 @@ export interface InstallMcpOptions {
   /** Optional substitution overrides — see {@link substituteRuntimeTokens}. */
   nodePath?: string;
   pythonPath?: string;
+  /** Registers the generated config while the artifact store can still roll back payload promotion. */
+  registerConfig: (config: McpServerConfig) => Promise<{ connected: boolean; warning?: string }>;
 }
 
 export async function installMcpFromMarketplace(
   slug: string,
   opts: InstallMcpOptions,
 ): Promise<InstallMcpResult> {
-  const detail = await opts.fetcher.getPluginDetail(slug);
+  const safeSlug = assertSafeArtifactSlug(slug);
+  const detail = await opts.fetcher.getPluginDetail(safeSlug);
   if (!detail) {
-    throw new Error(`marketplace catalog has no entry for slug "${slug}"`);
+    throw new Error(`marketplace catalog has no entry for slug "${safeSlug}"`);
   }
   if (detail.pluginType && detail.pluginType !== "mcp") {
     throw new Error(
-      `slug "${slug}" is a ${detail.pluginType} entry — use the regular plugin install path instead`,
+      `slug "${safeSlug}" is a ${detail.pluginType} entry — use the regular plugin install path instead`,
     );
   }
   const version = detail.version;
   if (!version) {
-    throw new Error(`marketplace entry "${slug}" has no published version`);
+    throw new Error(`marketplace entry "${safeSlug}" has no published version`);
   }
 
   const zipBuffer = await opts.store.downloadVerifiedZip(detail, version, opts.onProgress);
-  await opts.store.extractZip(slug, zipBuffer);
-  const installDir = opts.store.installDirFor(slug);
-
-  // Manifest is the trust anchor: the verified zip extracted by the store
-  // is the only source of `runtime`. Catalog row is advisory.
-  const runtime = await readRuntimeFromInstalledManifest(installDir);
+  // Manifest is the trust anchor: read it from the verified zip before
+  // extraction so invalid launch specs never leave executable payloads on disk.
+  const runtime = readRuntimeFromVerifiedZip(safeSlug, zipBuffer);
+  if (!opts.pythonPath && runtimeUsesPythonToken(runtime)) {
+    throw new Error(
+      `MCP runtime for "${safeSlug}" uses $PYTHON, but LVIS does not provide an app-global Python runtime. ` +
+      `Publish the server as a uvx command or provide an explicit Python interpreter.`,
+    );
+  }
+  assertMarketplaceUvxRuntimePinned(safeSlug, runtime);
+  const installDir = opts.store.installDirFor(safeSlug);
   const tokens = {
     pluginDir: installDir,
     nodePath: opts.nodePath ?? process.execPath,
-    pythonPath: opts.pythonPath ?? "python",
+    pythonPath: opts.pythonPath ?? "",
   };
   const substituted = substituteRuntimeTokens(runtime, tokens);
-  const config = buildMcpServerConfig(slug, substituted);
+  const config = buildMcpServerConfig(safeSlug, substituted);
   const authMode = substituted.auth ?? "none";
+  const { result: registration } = await opts.store.extractZipWithCommit(
+    safeSlug,
+    zipBuffer,
+    async () => opts.registerConfig(config),
+  );
 
   // Record install in the store's history journal so the orchestrator
   // can later support MCP rollback when (#265's) lifecycle mutex lands.
-  await opts.store.appendHistory(slug, {
+  await opts.store.appendHistory(safeSlug, {
     version,
     installedAt: new Date().toISOString(),
   });
 
-  return { config, installDir, needsCredential: authMode !== "none", authMode };
+  return {
+    config,
+    installDir,
+    needsCredential: authMode !== "none",
+    authMode,
+    connected: registration.connected,
+    warning: registration.warning,
+  };
 }
 
 /**
@@ -113,21 +140,58 @@ export async function readRuntimeFromInstalledManifest(installDir: string): Prom
       `MCP manifest not found at ${manifestPath}: ${(err as Error).message}`,
     );
   }
+  return parseRuntimeManifest(raw, `MCP manifest at ${manifestPath}`);
+}
+
+export function readRuntimeFromVerifiedZip(slug: string, zipBuffer: Buffer): McpRuntimeSpec {
+  const safeSlug = assertSafeArtifactSlug(slug);
+  let zip: AdmZip;
+  try {
+    zip = new AdmZip(zipBuffer);
+  } catch (err) {
+    throw new Error(`invalid MCP zip for "${safeSlug}": ${(err as Error).message}`);
+  }
+
+  for (const entry of zip.getEntries()) {
+    if (entry.isDirectory) continue;
+    const safeEntryPath = sanitizeZipEntryPath(safeSlug, entry.entryName);
+    if (safeEntryPath?.split("\\").join("/") !== "plugin.json") continue;
+    if (entry.header.size > MAX_MCP_MANIFEST_BYTES) {
+      throw new Error(
+        `MCP manifest exceeds ${MAX_MCP_MANIFEST_BYTES} byte cap: ` +
+        `${entry.header.size} bytes in verified zip for "${safeSlug}"`,
+      );
+    }
+    const data = entry.getData();
+    if (data.byteLength > MAX_MCP_MANIFEST_BYTES) {
+      throw new Error(
+        `MCP manifest exceeds ${MAX_MCP_MANIFEST_BYTES} byte cap: ` +
+        `${data.byteLength} bytes in verified zip for "${safeSlug}"`,
+      );
+    }
+    return parseRuntimeManifest(
+      data.toString("utf-8"),
+      `MCP manifest in verified zip for "${safeSlug}"`,
+    );
+  }
+
+  throw new Error(`MCP manifest not found in verified zip for "${safeSlug}"`);
+}
+
+function parseRuntimeManifest(raw: string, source: string): McpRuntimeSpec {
   let parsed: unknown;
   try {
     parsed = JSON.parse(raw);
   } catch (err) {
-    throw new Error(
-      `MCP manifest at ${manifestPath} is not valid JSON: ${(err as Error).message}`,
-    );
+    throw new Error(`${source} is not valid JSON: ${(err as Error).message}`);
   }
   if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) {
-    throw new Error(`MCP manifest at ${manifestPath} is not an object`);
+    throw new Error(`${source} is not an object`);
   }
   const runtime = parseMcpRuntimeSpec((parsed as Record<string, unknown>).runtime);
   if (!runtime) {
     throw new Error(
-      `MCP manifest at ${manifestPath} is missing a valid \`runtime\` block — required by lvis-marketplace#52 schema`,
+      `${source} is missing a valid \`runtime\` block — required by lvis-marketplace#52 schema`,
     );
   }
   return runtime;
@@ -137,7 +201,7 @@ export async function readRuntimeFromInstalledManifest(installDir: string): Prom
  * Replace host substitution tokens in args + env values:
  *   - `$PLUGIN_DIR` → extracted install directory
  *   - `$NODE`       → process.execPath (Electron helper / node binary)
- *   - `$PYTHON`     → caller-supplied python interpreter
+ *   - `$PYTHON`     → explicit caller-supplied python interpreter
  *
  * Only stdio runtime has token-bearing fields; http runtime URLs are
  * passed through unchanged so the publisher can't host-substitute the
@@ -169,6 +233,35 @@ export function substituteRuntimeTokens(
     return out;
   }
   return { ...runtime };
+}
+
+function runtimeUsesPythonToken(runtime: McpRuntimeSpec): boolean {
+  if (runtime.transport !== "stdio") return false;
+  const values = [
+    runtime.command,
+    ...(runtime.args ?? []),
+    ...Object.values(runtime.env ?? {}),
+  ];
+  return values.some((value) => value.includes("$PYTHON"));
+}
+
+function assertMarketplaceUvxRuntimePinned(slug: string, runtime: McpRuntimeSpec): void {
+  if (runtime.transport !== "stdio") return;
+  const commandParts = runtime.command.trim().split(/\s+/).filter(Boolean);
+  const executable = commandParts[0];
+  if (executable !== "uvx" && executable !== "uvx.exe") return;
+  const uvxArgs = [...commandParts.slice(1), ...(runtime.args ?? [])];
+  const fromIndex = uvxArgs.indexOf("--from");
+  const packageSpec = fromIndex >= 0 ? uvxArgs[fromIndex + 1] : uvxArgs.find((arg) => !arg.startsWith("-"));
+  if (packageSpec && isExactPythonPackageSpec(packageSpec)) return;
+  throw new Error(
+    `MCP uvx runtime for "${slug}" must pin the executed package with an exact version ` +
+    `(--from <package==version> or <package==version>).`,
+  );
+}
+
+function isExactPythonPackageSpec(value: string): boolean {
+  return /^[A-Za-z0-9][A-Za-z0-9._-]*(?:\[[A-Za-z0-9][A-Za-z0-9._-]*(?:,[A-Za-z0-9][A-Za-z0-9._-]*)*\])?(?:==|===)[A-Za-z0-9][A-Za-z0-9.!+_*~-]*$/.test(value);
 }
 
 export function buildMcpServerConfig(slug: string, runtime: McpRuntimeSpec): McpServerConfig {

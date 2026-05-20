@@ -25,7 +25,7 @@ import { plog, PluginPhase } from "../../plugins/lifecycle-log.js";
 import { redactFsPath, redactAuditPayload } from "../../audit/dlp-filter.js";
 import { LVIS_TOKEN_NAMES } from "../../shared/plugin-ui-tokens.js";
 import { pluginAssetUrlFromRealPath } from "../../main/plugin-asset-protocol.js";
-import { preparePythonRuntimeForInstalledPlugin, withPluginInstallLock } from "../../plugins/install-lifecycle.js";
+import { startInstalledPluginWithLifecycle, withPluginInstallLock } from "../../plugins/install-lifecycle.js";
 import { uninstallPluginWithLifecycle } from "../../plugins/uninstall-lifecycle.js";
 import { lvisHome } from "../../shared/lvis-home.js";
 const log = createLogger("lvis");
@@ -284,7 +284,6 @@ export function registerPluginsHandlers(deps: IpcDeps): void {
       sendToWindow(win, channel, payload, log);
     }
   };
-
   // Phase 2d FU — bootstrap retry
   ipcMain.handle("lvis:bootstrap:retry", async (e) => {
     if (!validateSender(e)) {
@@ -325,51 +324,23 @@ export function registerPluginsHandlers(deps: IpcDeps): void {
             broadcastPluginLifecycleEvent("lvis:plugins:install-progress", { slug: lifecycleSlug, phase: evt.phase });
           }
         });
-        broadcastPluginLifecycleEvent("lvis:plugins:install-progress", { slug: lifecycleSlug, phase: "restarting" });
-        // Atomic install — marketplace.install() has already extracted the
-        // artifact + written the registry entry. If addPlugin throws (import
-        // smoke fail, capability mismatch, start exception, …), roll back
-        // via marketplace.uninstall() so the user sees the real error
-        // instead of a ghost plugin in their list. The whole install → addPlugin
-        // → (rollback if needed) sequence is wrapped in `withPluginInstallLock` so
-        // a second click on the same pluginId can't race the rollback.
-        await preparePythonRuntimeForInstalledPlugin(result.pluginId, deps);
-        await pluginRuntime.addPlugin(result.pluginId);
+        await startInstalledPluginWithLifecycle({
+          pluginId: result.pluginId,
+          source: "marketplace",
+          rollbackMode: "marketplace",
+          pluginRuntime,
+          pluginMarketplace,
+          broadcastInstallProgress: (payload) =>
+            broadcastPluginLifecycleEvent("lvis:plugins:install-progress", {
+              ...payload,
+              slug: lifecycleSlug,
+            }),
+          emitPluginInstalled: (payload) => emitHostEvent("plugin.installed", payload),
+          refreshPluginNotifications,
+          log,
+        });
       } catch (err) {
         const message = errMessage(err) || "addPlugin failed";
-        const installed = result;
-        if (installed) {
-          try {
-            // Lifecycle ordering parity with the user-driven uninstall path:
-            // addPlugin may have partially started (opened DB, spawned worker)
-            // before throwing. Run runtime cleanup first so handles are
-            // released before marketplace.uninstall hits rm. removePlugin is
-            // best-effort here — failure shouldn't block the rm rollback.
-            await pluginRuntime.removePlugin(installed.pluginId).catch((rmPluginErr) => {
-              // Structured log for forensic correlation — parity with the
-              // register-webview auto-purge path. log.warn alone would be a
-              // free-text breadcrumb that's hard to grep against the audit
-              // trail of the larger install attempt.
-              plog(
-                "warn",
-                {
-                  pluginId: installed.pluginId,
-                  phase: PluginPhase.STOP_FAIL,
-                  reason: "install-rollback-removePlugin-failed",
-                  error: errMessage(rmPluginErr),
-                },
-                "install rollback removePlugin failed (best-effort, marketplace.uninstall continues)",
-              );
-            });
-            await pluginMarketplace.uninstall(installed.pluginId);
-          } catch (rollbackErr) {
-            // Rollback failure is logged; original error still surfaces
-            // — the user needs the actual install error, not the rollback noise.
-            log.warn(
-              `install rollback uninstall failed for ${installed.pluginId}: ${errMessage(rollbackErr)}`,
-            );
-          }
-        }
         broadcastPluginLifecycleEvent("lvis:plugins:install-result", {
           slug: lifecycleSlug,
           success: false,
@@ -377,8 +348,6 @@ export function registerPluginsHandlers(deps: IpcDeps): void {
         });
         throw err;
       }
-      emitHostEvent("plugin.installed", { pluginId: result.pluginId, source: "marketplace" });
-      refreshPluginNotifications?.();
       broadcastPluginLifecycleEvent("lvis:plugins:install-result", { slug: lifecycleSlug, success: true });
       return result;
     });
@@ -438,38 +407,20 @@ export function registerPluginsHandlers(deps: IpcDeps): void {
     // double-clicking the dialog button) but the lock costs nothing.
     return await withPluginInstallLock(result.pluginId, async () => {
       try {
-        await preparePythonRuntimeForInstalledPlugin(result.pluginId, deps);
-        await pluginRuntime.addPlugin(result.pluginId);
+        await startInstalledPluginWithLifecycle({
+          pluginId: result.pluginId,
+          source: "local-dev",
+          rollbackMode: "local-dev",
+          pluginRuntime,
+          pluginMarketplace,
+          broadcastInstallProgress: (payload) =>
+            broadcastPluginLifecycleEvent("lvis:plugins:install-progress", payload),
+          emitPluginInstalled: (payload) => emitHostEvent("plugin.installed", payload),
+          refreshPluginNotifications,
+          log,
+        });
       } catch (err) {
         const message = errMessage(err) || "addPlugin failed";
-        try {
-          // Lifecycle ordering parity with the user-driven uninstall path:
-          // addPlugin may have partially started (opened DB, spawned worker)
-          // before throwing. Run runtime cleanup first so handles are
-          // released before marketplace.uninstall hits rm. removePlugin is
-          // best-effort here — failure shouldn't block the rm rollback.
-          await pluginRuntime.removePlugin(result.pluginId).catch((rmPluginErr) => {
-            // Structured log for forensic correlation — parity with the
-            // register-webview auto-purge path. log.warn alone would be a
-            // free-text breadcrumb that's hard to grep against the audit
-            // trail of the larger install attempt.
-            plog(
-              "warn",
-              {
-                pluginId: result.pluginId,
-                phase: PluginPhase.STOP_FAIL,
-                reason: "install-rollback-removePlugin-failed",
-                error: errMessage(rmPluginErr),
-              },
-              "install rollback removePlugin failed (best-effort, marketplace.uninstall continues)",
-            );
-          });
-          await pluginMarketplace.uninstall(result.pluginId);
-        } catch (rollbackErr) {
-          log.warn(
-            `install-local rollback uninstall failed for ${result.pluginId}: ${errMessage(rollbackErr)}`,
-          );
-        }
         broadcastPluginLifecycleEvent("lvis:plugins:install-result", {
           slug: result.pluginId,
           success: false,
@@ -477,8 +428,6 @@ export function registerPluginsHandlers(deps: IpcDeps): void {
         });
         throw err;
       }
-      emitHostEvent("plugin.installed", { pluginId: result.pluginId, source: "local-dev" });
-      refreshPluginNotifications?.();
       // Mirror the marketplace install path's renderer broadcast so
       // `App.tsx` `onPluginInstallResult` listener fires `refreshViews()`.
       broadcastPluginLifecycleEvent("lvis:plugins:install-result", {
@@ -986,14 +935,14 @@ export function registerPluginsHandlers(deps: IpcDeps): void {
       const result = await installMcpFromMarketplace(slug.trim(), {
         fetcher: pluginMarketplace.getFetcher(),
         store: mcpArtifactStore,
+        registerConfig: (config) => deps.mcpManager.addConfig(config),
       });
-      const addResult = await deps.mcpManager.addConfig(result.config);
       return {
         ok: true as const,
         slug: slug.trim(),
         installDir: result.installDir,
-        connected: addResult.connected,
-        warning: addResult.warning,
+        connected: result.connected,
+        warning: result.warning,
         needsCredential: result.needsCredential,
         authMode: result.authMode,
       };

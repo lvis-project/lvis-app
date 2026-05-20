@@ -12,6 +12,7 @@ import { cpSync, existsSync, mkdirSync, readFileSync, readdirSync, rmSync, write
 import { dirname, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { gunzipSync, gzipSync } from "node:zlib";
+import { hostRuntimeAssetSummary } from "./packaged-runtime-assets.mjs";
 import { installerUvTargetFor } from "./uv-targets.mjs";
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
@@ -258,6 +259,49 @@ function builderArgsFor(target, { publish, dirOnly, skipNativeRebuild, fast }) {
   return args;
 }
 
+function collectPackagedAppAsarCandidates(target, fast) {
+  const outputRoot = resolve(root, fast ? fastOutputDir : "release");
+  if (!existsSync(outputRoot)) return [];
+
+  if (target === "mac") {
+    const candidates = [];
+    for (const entry of readdirSync(outputRoot, { withFileTypes: true })) {
+      if (!entry.isDirectory()) continue;
+      const releaseChildDir = resolve(outputRoot, entry.name);
+      for (const child of readdirSync(releaseChildDir, { withFileTypes: true })) {
+        if (!child.isDirectory() || !child.name.endsWith(".app")) continue;
+        const appAsar = resolve(releaseChildDir, child.name, "Contents", "Resources", "app.asar");
+        if (existsSync(appAsar)) candidates.push(appAsar);
+      }
+    }
+    return candidates;
+  }
+
+  if (target === "win") {
+    const appAsar = resolve(outputRoot, "win-unpacked", "resources", "app.asar");
+    return existsSync(appAsar) ? [appAsar] : [];
+  }
+
+  const candidates = [];
+  for (const entry of readdirSync(outputRoot, { withFileTypes: true })) {
+    if (!entry.isDirectory()) continue;
+    if (entry.name !== "linux-unpacked" && !/^linux-.+-unpacked$/.test(entry.name)) continue;
+    const appAsar = resolve(outputRoot, entry.name, "resources", "app.asar");
+    if (existsSync(appAsar)) candidates.push(appAsar);
+  }
+  return candidates;
+}
+
+function checkPackageFootprint(target, fast) {
+  const candidates = collectPackagedAppAsarCandidates(target, fast);
+  if (candidates.length !== 1) {
+    throw new Error(
+      `expected exactly one packaged app.asar for ${target}; found ${candidates.length}: ${candidates.join(", ")}`,
+    );
+  }
+  run("node", ["scripts/check-package-footprint.mjs", candidates[0]]);
+}
+
 async function main() {
   const { selected, publish, skipBuild, skipCodeSign, skipNativeRebuild, fast, dirOnly } = parseArgs(
     process.argv.slice(2),
@@ -301,8 +345,10 @@ async function main() {
 
   try {
     for (const target of selected) {
+      process.stdout.write(`[installer] required runtime assets for ${target}: ${hostRuntimeAssetSummary(target)}\n`);
       prepareUvRuntime(target);
       run("bunx", builderArgsFor(target, { publish, dirOnly, skipNativeRebuild, fast }), { env });
+      checkPackageFootprint(target, fast);
     }
   } finally {
     cleanUvRuntime();
