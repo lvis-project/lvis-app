@@ -64,6 +64,9 @@ export function historyToEntries(
           kind: "checkpoint",
           removedMessages: m.checkpointMeta.removedMessages,
           freedTokens: m.checkpointMeta.freedTokens,
+          ...(m.checkpointMeta.compactNum !== undefined
+            ? { compactNum: m.checkpointMeta.compactNum }
+            : {}),
           ...(m.checkpointMeta.trigger ? { trigger: m.checkpointMeta.trigger } : {}),
           ...(m.checkpointMeta.compactStatus
             ? { compactStatus: m.checkpointMeta.compactStatus }
