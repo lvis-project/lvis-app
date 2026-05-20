@@ -280,7 +280,8 @@
       "differentialPackage": true,
       "createDesktopShortcut": "always",
       "createStartMenuShortcut": true,
-      "deleteAppDataOnUninstall": false,
+      "deleteAppDataOnUninstall": true,
+      "include": "build/installer.nsh",
       "uninstallDisplayName": "LVIS",
       "shortcutName": "LVIS",
       "artifactName": "${productName}-${version}-windows-${arch}-setup.${ext}"
