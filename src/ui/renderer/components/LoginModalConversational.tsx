@@ -57,9 +57,9 @@ function errorMessage(code: string): string {
     case "invalid-credentials":
       return "데모 자격증명이 올바르지 않습니다.";
     case "no-demo-key":
-      // F3 — Path 3 hotfix: this should no longer fire for the internal
-      // azure-foundry demo loop (baked-in creds now wired). If it does
-      // fire, the user is on a non-azure-foundry vendor without env keys.
+      // This should no longer fire for a valid activation: Azure Foundry
+      // payloads require both API key and endpoint before persistence.
+      // If it does fire, the captured demo payload is incomplete.
       return "데모 모드 설정 확인이 필요해요. 환경 변수 `LVIS_DEMO_VENDOR=azure-foundry` 를 설정한 뒤 다시 시도하세요. (docs/onboarding/local-demo-setup.md 참조)";
     // v0.2.1 hotfix — Step 2 (llm-key-issuing) try/catch surfaces this
     // when setSecret / patch fails (disk full, Keychain locked, etc.).
@@ -97,6 +97,10 @@ function activationErrorMessage(code: string): string {
       return "활성 코드에 vendor 정보가 빠져 있어요. 발급자에게 다시 요청해 주세요.";
     case "invalid-vendor":
       return "활성 코드의 vendor 정보가 올바르지 않아요. 발급자에게 다시 요청해 주세요.";
+    case "no-demo-key":
+      return "활성 코드에 데모 API 키가 빠져 있어요. 발급자에게 새 활성 코드를 요청해 주세요.";
+    case "missing-foundry-endpoint":
+      return "활성 코드에 Azure Foundry endpoint 정보가 빠져 있어요. 발급자에게 새 활성 코드를 요청해 주세요.";
     case "invalid-foundry-endpoint":
       return "데모 endpoint 형식이 올바르지 않아요. 발급자에게 새 활성 코드를 요청해 주세요.";
     case "persist-failed":

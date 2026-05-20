@@ -18,8 +18,9 @@
  *   3. Advancing fake timers past the 1-second window resets the counter
  *      so subsequent calls succeed again.
  *
- * Activation: the handler is only registered when `LVIS_DEMO_VENDOR` is
- * set at process start. The test sets it in `beforeEach`.
+ * Activation: the handler is only registered when main captured demo
+ * credentials at boot. The test sets LVIS_DEMO_* and runs the real capture
+ * before registering handlers.
  */
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 
@@ -75,7 +76,7 @@ const ORIGINAL_ENV = { ...process.env };
 beforeEach(() => {
   handlers.clear();
   vi.resetModules();
-  process.env.LVIS_DEMO_VENDOR = "anthropic";
+  scrubDemoEnv();
 });
 
 afterEach(() => {
@@ -84,7 +85,25 @@ afterEach(() => {
 });
 
 async function loadModule() {
-  return import("../audit.js");
+  const credsMod = await import("../../../main/demo-credentials.js");
+  credsMod.resetDemoCredentialsForTesting();
+  return {
+    auditMod: await import("../audit.js"),
+    credsMod,
+  };
+}
+
+function setDemoEnv(): void {
+  process.env.LVIS_DEMO_VENDOR = "azure-foundry";
+  process.env.LVIS_DEMO_KEY_AZURE_FOUNDRY = "sk-demo-key";
+  process.env.LVIS_DEMO_BASEURL_AZURE_FOUNDRY =
+    "https://example.openai.azure.com/openai/v1/";
+}
+
+function scrubDemoEnv(): void {
+  delete process.env.LVIS_DEMO_VENDOR;
+  delete process.env.LVIS_DEMO_KEY_AZURE_FOUNDRY;
+  delete process.env.LVIS_DEMO_BASEURL_AZURE_FOUNDRY;
 }
 
 describe("audit:log-demo-autoplay IPC rate limit (F6)", () => {
@@ -92,8 +111,10 @@ describe("audit:log-demo-autoplay IPC rate limit (F6)", () => {
     vi.useFakeTimers();
     vi.setSystemTime(new Date("2026-01-01T00:00:00Z"));
     const deps = makeDeps();
-    const { registerAuditHandlers } = await loadModule();
-    registerAuditHandlers(deps as never);
+    const { auditMod, credsMod } = await loadModule();
+    setDemoEnv();
+    credsMod.captureDemoCredentials();
+    auditMod.registerAuditHandlers(deps as never);
 
     expect(handlers.has("lvis:audit:log-demo-autoplay")).toBe(true);
 
@@ -111,8 +132,10 @@ describe("audit:log-demo-autoplay IPC rate limit (F6)", () => {
     vi.useFakeTimers();
     vi.setSystemTime(new Date("2026-01-01T00:00:00Z"));
     const deps = makeDeps();
-    const { registerAuditHandlers } = await loadModule();
-    registerAuditHandlers(deps as never);
+    const { auditMod, credsMod } = await loadModule();
+    setDemoEnv();
+    credsMod.captureDemoCredentials();
+    auditMod.registerAuditHandlers(deps as never);
 
     // Burn the entire budget without advancing the clock so the 31st
     // call lands in the same 1-second window.
@@ -140,8 +163,10 @@ describe("audit:log-demo-autoplay IPC rate limit (F6)", () => {
     vi.useFakeTimers();
     vi.setSystemTime(new Date("2026-01-01T00:00:00Z"));
     const deps = makeDeps();
-    const { registerAuditHandlers } = await loadModule();
-    registerAuditHandlers(deps as never);
+    const { auditMod, credsMod } = await loadModule();
+    setDemoEnv();
+    credsMod.captureDemoCredentials();
+    auditMod.registerAuditHandlers(deps as never);
 
     // Burn the budget.
     for (let i = 0; i < 30; i++) {
@@ -170,11 +195,28 @@ describe("audit:log-demo-autoplay IPC rate limit (F6)", () => {
     expect(deps.auditLogger.log).toHaveBeenCalledTimes(31);
   });
 
-  it("skips handler registration when LVIS_DEMO_VENDOR is unset", async () => {
-    delete process.env.LVIS_DEMO_VENDOR;
+  it("skips handler registration when demo credentials were not captured", async () => {
+    scrubDemoEnv();
     const deps = makeDeps();
-    const { registerAuditHandlers } = await loadModule();
-    registerAuditHandlers(deps as never);
+    const { auditMod } = await loadModule();
+    auditMod.registerAuditHandlers(deps as never);
     expect(handlers.has("lvis:audit:log-demo-autoplay")).toBe(false);
+  });
+
+  it("registers after captured demo state even when LVIS_DEMO env is scrubbed", async () => {
+    const deps = makeDeps();
+    const { auditMod, credsMod } = await loadModule();
+    setDemoEnv();
+    credsMod.captureDemoCredentials();
+    scrubDemoEnv();
+    auditMod.registerAuditHandlers(deps as never);
+
+    expect(handlers.has("lvis:audit:log-demo-autoplay")).toBe(true);
+    const result = await invoke("lvis:audit:log-demo-autoplay", {
+      scriptId: "meeting-summary-demo",
+      phase: "started",
+    });
+    expect(result).toEqual({ ok: true });
+    expect(deps.auditLogger.log).toHaveBeenCalledTimes(1);
   });
 });

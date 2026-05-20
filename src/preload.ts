@@ -328,6 +328,8 @@ const api = {
    *                        or empty input.
    *   - `no-vendor`        decrypted payload missing `LVIS_DEMO_VENDOR`.
    *   - `invalid-vendor`   decrypted payload has an unknown `LVIS_DEMO_VENDOR`.
+   *   - `no-demo-key`      decrypted payload missing the active vendor key.
+   *   - `missing-foundry-endpoint` Azure Foundry endpoint missing.
    *   - `invalid-foundry-endpoint` Azure Foundry endpoint rejected by the
    *                        shared endpoint validator.
    *   - `persist-failed`   filesystem write failure (permission/disk).
@@ -343,7 +345,7 @@ const api = {
     activate: async (code: string) =>
       ipcRenderer.invoke("lvis:demo:activate", { code }) as Promise<
         | { ok: true; vendor: string; requiresRelaunch?: boolean }
-        | { ok: false; error: "invalid-code" | "no-vendor" | "invalid-vendor" | "invalid-foundry-endpoint" | "persist-failed" | "unauthorized-frame" }
+        | { ok: false; error: "invalid-code" | "no-vendor" | "invalid-vendor" | "no-demo-key" | "missing-foundry-endpoint" | "invalid-foundry-endpoint" | "persist-failed" | "unauthorized-frame" }
       >,
     relaunchAfterActivation: async () =>
       ipcRenderer.invoke("lvis:demo:relaunch-after-activation") as Promise<
@@ -1616,9 +1618,9 @@ contextBridge.exposeInMainWorld("lvis", {
       process.env.VITE_DEBUG_STREAM === "1" ||
       (process.env.LVIS_DEV === "1" && process.env.LVIS_DEV_CONSOLE === "1"),
     /**
-     * Live Auto-play (proposal §7) — vendor id pre-staged by env. Surfaced
-     * to the renderer so `useDemoAutoplay()` can short-circuit when
-     * `LVIS_DEMO_VENDOR` is unset (production dead-path).
+     * Legacy dev/debug surface only. Demo activation decisions now use
+     * `api.demo.status()` because packaged builds scrub `LVIS_DEMO_*`
+     * before preload inherits env.
      */
     demoVendor: typeof process.env.LVIS_DEMO_VENDOR === "string" ? process.env.LVIS_DEMO_VENDOR : null,
   },
