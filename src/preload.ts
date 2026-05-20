@@ -1420,7 +1420,7 @@ const api = {
     };
   }) => ipcRenderer.invoke("lvis:notification:clicked", payload),
 
-  // ─── Window management (tab detach + magnetic snap) ──────────────────────
+  // ─── Window management (tab detach + optional magnetic snap) ─────────────
   window: {
     /** Open viewKey in a new detached BrowserWindow. */
     openDetached: async (viewKey: string) =>
