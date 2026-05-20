@@ -768,6 +768,32 @@ describe("saveSession / loadSession — invalid sessionId protection", () => {
   it("returns null for path-traversal sessionId on load", () => {
     expect(mm.loadSession("../etc/passwd")).toBeNull();
   });
+
+  it("recovers the latest checkpoint user when a capped session lost every user row", async () => {
+    const sessionId = SESSION_A;
+    await mm.saveCheckpointSnapshot(sessionId, 1, [
+      { role: "user", content: "older question" },
+      { role: "assistant", content: "older answer" },
+      { role: "user", content: "폴더 전체를 삭제" },
+    ]);
+    await mm.saveSessionMetadata(sessionId, {
+      checkpoints: [
+        makeCheckpoint({
+          compactNum: 1,
+          messageCountAtTrigger: 3,
+          summary: "summary",
+        }),
+      ],
+    });
+    await mm.saveSession(sessionId, [
+      { role: "assistant", content: "정리해보니 delete_file 은 디렉터리에 쓸 수 없습니다." },
+    ]);
+
+    expect(mm.loadSession(sessionId)).toEqual([
+      { role: "user", content: "폴더 전체를 삭제" },
+      { role: "assistant", content: "정리해보니 delete_file 은 디렉터리에 쓸 수 없습니다." },
+    ]);
+  });
 });
 
 describe("loadSessionMetadata — invalid sessionId throws", () => {

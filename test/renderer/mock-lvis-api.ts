@@ -351,6 +351,8 @@ export function makeMockLvisApi(overrides: ApiOverrides = {}): {
       listDetached: vi.fn(async () => []),
       onSnapEdge: vi.fn(() => () => {}),
       onDetachedNavigate: vi.fn(() => () => {}),
+      loadSessionInMain: vi.fn(async () => ({ ok: true })),
+      onLoadSessionInMain: vi.fn(() => () => {}),
     },
 
     getRecentNotes: vi.fn(async () => []),

@@ -87,7 +87,20 @@ function DetachedContent({ viewKey }: ContentProps) {
   }
 
   if (viewKey === "memory") {
-    return <MemorySearchPanel api={api} />;
+    return (
+      <MemorySearchPanel
+        api={api}
+        onOpenSession={async (sessionId) => {
+          const result = await api.window?.loadSessionInMain(sessionId);
+          if (!result?.ok) {
+            console.warn("[detached] failed to load memory session in main window", result?.error);
+            return false;
+          }
+          void api.window?.closeDetached();
+          return true;
+        }}
+      />
+    );
   }
 
   if (viewKey === "starred") {
