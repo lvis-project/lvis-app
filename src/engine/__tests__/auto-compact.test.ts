@@ -8,6 +8,7 @@ import { describe, it, expect } from "vitest";
 import {
   markStaleToolResults,
   estimateTokens,
+  estimateMessagesTokens,
   countHangul,
   getModelPreflightThreshold,
   setRuntimePreflightOverride,
@@ -227,6 +228,57 @@ describe("estimateTokens — chars/4 + 1 with Korean weighting (P11)", () => {
     const weighted = estimateTokens(longHangul);
     expect(weighted).toBeGreaterThan(naive);
     expect(weighted).toBe(Math.ceil(200 * 1.3 / 4) + 1); // 66
+  });
+});
+
+describe("estimateMessagesTokens — provider-wire shape", () => {
+  it("counts compacted tool_results as serialization stubs, not verbatim memory", () => {
+    const messages = synth();
+    const rawEstimate = estimateMessagesTokens(messages);
+    const { messages: marked } = markStaleToolResults(messages, {
+      preserveRecentToolResults: 4,
+    });
+
+    const wireEstimate = estimateMessagesTokens(marked);
+
+    expect(wireEstimate).toBeLessThan(rawEstimate);
+    expect(wireEstimate).toBeLessThan(rawEstimate - 5_000);
+    const firstMarked = marked.find((m) => m.role === "tool_result" && m.meta?.compactedAt !== undefined);
+    expect(firstMarked?.role).toBe("tool_result");
+    if (firstMarked?.role === "tool_result") {
+      expect(firstMarked.content.length).toBeGreaterThan(1_000);
+      expect(estimateMessagesTokens([firstMarked])).toBeLessThan(100);
+    }
+  });
+
+  it("counts host-truncated tool_results as chunk-reference stubs", () => {
+    const verbatim = "x".repeat(20_000);
+    const msg: GenericMessage = {
+      role: "tool_result",
+      toolUseId: "toolu_big",
+      toolName: "search",
+      content: verbatim,
+      meta: {
+        truncated: {
+          originalLines: 1,
+          originalTokens: 5_001,
+          originalBytes: verbatim.length,
+          trimmedAt: "2026-05-20T00:00:00.000Z",
+        },
+      },
+    };
+
+    const rawEquivalent = estimateTokens(JSON.stringify({
+      role: "tool_result",
+      toolUseId: "toolu_big",
+      toolName: "search",
+      content: verbatim,
+      isError: false,
+    }));
+    const wireEstimate = estimateMessagesTokens([msg]);
+
+    expect(wireEstimate).toBeLessThan(rawEquivalent / 10);
+    expect(msg.content).toBe(verbatim);
   });
 });
 

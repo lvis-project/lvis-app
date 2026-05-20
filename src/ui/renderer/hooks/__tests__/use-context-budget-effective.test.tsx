@@ -28,6 +28,15 @@ describe("useContextBudget — effectiveBudget (Issue #912)", () => {
     expect(result.current.effectiveBudget).toBe(result.current.contextBudget);
   });
 
+  it("uses OpenAI model spec for Azure OpenAI deployment ids", () => {
+    const { result } = renderHook(() =>
+      useContextBudget({ entries: [], llmVendor: "azure-foundry", llmModel: "gpt-5.4-mini" }),
+    );
+    expect(result.current.tpmLimit).toBeUndefined();
+    expect(result.current.contextBudget).toBe(360_000);
+    expect(result.current.effectiveBudget).toBe(360_000);
+  });
+
   it("keeps contextBudget when tpmLimit happens to exceed it (defensive)", () => {
     // Synthetic scenario via unknown model: lookupPricing falls back to a
     // baseline contextWindow. Even if a future model registers tpmDefault
