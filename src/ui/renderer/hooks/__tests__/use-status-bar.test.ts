@@ -313,8 +313,8 @@ describe("useStatusBar — install lifecycle producer", () => {
 // Case 6 — Vendor producer (PR-X1)
 //
 // The status bar keeps the provider/model cell in the left strip. Connection
-// dots are separate producers so the visual state can distinguish marketplace
-// reachability from the active LLM provider ping.
+// state is a single health dot directly before the provider/model label, with
+// tooltip detail for LLM + marketplace reachability.
 // ─────────────────────────────────────────────────────────────────────────────
 describe("useStatusBar — vendor producer", () => {
   it("upserts vendor:llm with the active provider + model from getSettings", async () => {
@@ -404,10 +404,10 @@ describe("useStatusBar — vendor producer", () => {
 });
 
 // ─────────────────────────────────────────────────────────────────────────────
-// Case 7 — AI provider ping producer
+// Case 7 — combined LLM + marketplace health producer
 // ─────────────────────────────────────────────────────────────────────────────
-describe("useStatusBar — AI provider ping producer", () => {
-  it("renders a success dot immediately before vendor:llm only after provider ping succeeds", async () => {
+describe("useStatusBar — combined health producer", () => {
+  it("renders one success dot immediately before vendor:llm when LLM and marketplace are online", async () => {
     const api = makeApi({
       getSettings: vi.fn(async () => ({
         llm: fakeLlmSettings({ provider: "openai", model: "gpt-5.4" }),
@@ -422,25 +422,32 @@ describe("useStatusBar — AI provider ping producer", () => {
         model: "gpt-5.4",
         latencyMs: 12,
       })),
+      pingMarketplace: vi.fn(async () => ({
+        configured: true,
+        online: true,
+      })),
     });
 
     const { result } = renderHook(() => useStatusBar({ api }));
 
     await waitFor(() => {
       const ids = result.current.persistent.map((p) => p.id);
-      expect(ids).toContain("provider:llm-ping");
+      expect(ids).toContain("health:services");
       expect(ids).toContain("vendor:llm");
     });
 
     const ids = result.current.persistent.map((p) => p.id);
-    expect(ids.indexOf("provider:llm-ping")).toBeLessThan(ids.indexOf("vendor:llm"));
-    const ping = result.current.persistent.find((p) => p.id === "provider:llm-ping");
-    expect(ping?.dot).toBe(true);
-    expect(ping?.severity).toBe("success");
-    expect(ping?.tooltip).toContain("Connected");
+    expect(ids.indexOf("health:services")).toBeLessThan(ids.indexOf("vendor:llm"));
+    expect(ids).not.toContain("provider:llm-ping");
+    expect(ids).not.toContain("marketplace:online");
+    const health = result.current.persistent.find((p) => p.id === "health:services");
+    expect(health?.dot).toBe(true);
+    expect(health?.severity).toBe("success");
+    expect(health?.tooltip).toContain("LLM: online");
+    expect(health?.tooltip).toContain("Market: online");
   });
 
-  it("keeps the provider ping dot non-green when the model ping fails", async () => {
+  it("keeps the combined health dot non-green when the model ping fails", async () => {
     const api = makeApi({
       pingAiProvider: vi.fn(async () => ({
         configured: true as const,
@@ -450,13 +457,19 @@ describe("useStatusBar — AI provider ping producer", () => {
         error: "timeout",
         latencyMs: 8000,
       })),
+      pingMarketplace: vi.fn(async () => ({
+        configured: true,
+        online: true,
+      })),
     });
 
     const { result } = renderHook(() => useStatusBar({ api }));
 
     await waitFor(() => {
-      const ping = result.current.persistent.find((p) => p.id === "provider:llm-ping");
-      expect(ping?.severity).toBe("error");
+      const health = result.current.persistent.find((p) => p.id === "health:services");
+      expect(health?.severity).toBe("error");
+      expect(health?.tooltip).toContain("LLM: offline");
+      expect(health?.tooltip).toContain("Market: online");
     });
   });
 
@@ -466,14 +479,43 @@ describe("useStatusBar — AI provider ping producer", () => {
         ok: false as const,
         error: "unauthorized-frame" as const,
       })),
+      pingMarketplace: vi.fn(async () => ({
+        configured: true,
+        online: true,
+      })),
     });
 
     const { result } = renderHook(() => useStatusBar({ api }));
 
     await waitFor(() => {
-      const ping = result.current.persistent.find((p) => p.id === "provider:llm-ping");
-      expect(ping?.severity).toBe("error");
-      expect(ping?.tooltip).toBe("AI provider: Unauthorized");
+      const health = result.current.persistent.find((p) => p.id === "health:services");
+      expect(health?.severity).toBe("error");
+      expect(health?.tooltip).toBe("LLM: unauthorized\nMarket: online");
+    });
+  });
+
+  it("uses warning when marketplace is not configured even if the LLM is online", async () => {
+    const api = makeApi({
+      pingAiProvider: vi.fn(async () => ({
+        configured: true as const,
+        online: true as const,
+        vendor: "azure-foundry",
+        model: "gpt-5.4-mini",
+        latencyMs: 1615,
+      })),
+      pingMarketplace: vi.fn(async () => ({
+        configured: false,
+        online: false,
+      })),
+    });
+
+    const { result } = renderHook(() => useStatusBar({ api }));
+
+    await waitFor(() => {
+      const health = result.current.persistent.find((p) => p.id === "health:services");
+      expect(health?.severity).toBe("warning");
+      expect(health?.tooltip).toContain("LLM: online");
+      expect(health?.tooltip).toContain("Market: not configured");
     });
   });
 });
