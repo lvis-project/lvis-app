@@ -5,7 +5,14 @@
  * Also exports registerWindowEventListeners (re-used by main.ts).
  */
 import { BrowserWindow, ipcMain, type BrowserWindow as ElectronBrowserWindow, type IpcMainInvokeEvent } from "electron";
-import { validateSender, auditUnauthorized } from "../gated.js";
+import { resolveAppIconPath } from "../../main/app-icon.js";
+import {
+  normalizeOpenHtmlPreviewWindowPayload,
+  RENDER_HTML_PARTITION,
+  wrapRenderHtmlDocument,
+  type OpenHtmlPreviewWindowResult,
+} from "../../shared/render-html-preview.js";
+import { validateSender, auditUnauthorized, UNAUTHORIZED_FRAME } from "../gated.js";
 import type { IpcDeps } from "../types.js";
 import { isWindowControlOwned } from "../window-control-registry.js";
 
@@ -70,6 +77,63 @@ export function registerWindowHandlers(deps: IpcDeps): void {
     } catch (err) {
       if ((err as Error).message.includes("Titlebar overlay is not enabled")) return;
       throw err;
+    }
+  });
+
+  ipcMain.handle("lvis:window:open-html-preview", async (e, payload): Promise<OpenHtmlPreviewWindowResult> => {
+    if (!validateSender(e)) {
+      auditUnauthorized(auditLogger, "lvis:window:open-html-preview", e);
+      return { ok: false, error: UNAUTHORIZED_FRAME.error };
+    }
+
+    const normalized = normalizeOpenHtmlPreviewWindowPayload(payload);
+    if ((normalized as { ok?: false }).ok === false) {
+      return { ok: false, error: (normalized as { error: string }).error };
+    }
+    const previewPayload = normalized as Exclude<typeof normalized, { ok: false; error: string }>;
+
+    const parent = getSenderWindow(e) ?? getMainWindow() ?? undefined;
+    const title = previewPayload.title ?? "HTML 렌더";
+    const documentHtml = wrapRenderHtmlDocument(previewPayload.html, previewPayload.allowScripts === true);
+    const dataUrl = `data:text/html;charset=utf-8,${encodeURIComponent(documentHtml)}`;
+    const win = new BrowserWindow({
+      parent,
+      width: previewPayload.width,
+      height: previewPayload.height,
+      title,
+      icon: resolveAppIconPath(),
+      autoHideMenuBar: true,
+      show: false,
+      webPreferences: {
+        nodeIntegration: false,
+        contextIsolation: true,
+        sandbox: true,
+        webSecurity: true,
+        webviewTag: false,
+        javascript: previewPayload.allowScripts === true,
+        partition: RENDER_HTML_PARTITION,
+      },
+    });
+
+    if (typeof win.setMenu === "function") win.setMenu(null);
+    win.webContents.setWindowOpenHandler(() => ({ action: "deny" }));
+    win.webContents.on("will-attach-webview", (event) => {
+      event.preventDefault();
+    });
+    win.webContents.on("will-navigate", (event, url) => {
+      if (url !== dataUrl) event.preventDefault();
+    });
+
+    try {
+      await win.loadURL(dataUrl);
+      if (!win.isDestroyed()) win.show();
+      return { ok: true, windowId: win.id };
+    } catch (err) {
+      if (!win.isDestroyed()) win.close();
+      return {
+        ok: false,
+        error: err instanceof Error ? err.message : "html-preview-load-failed",
+      };
     }
   });
 }

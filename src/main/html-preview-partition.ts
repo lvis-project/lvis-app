@@ -19,6 +19,7 @@
 import { createRequire } from "node:module";
 import { dirname, normalize, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
+import { RENDER_HTML_PARTITION } from "../shared/render-html-preview.js";
 import { installPluginAssetProtocolHandler, PLUGIN_ASSET_SCHEME } from "./plugin-asset-protocol.js";
 
 // ESM equivalent of CommonJS `__dirname`. The original code referenced
@@ -154,7 +155,7 @@ export function installPluginPartitionPolicy(
 
 export function installHtmlPreviewPartitionBlock(sessionApi: SessionApi = getElectronSession()): void {
   // ── 1. LLM-authored HTML: strict inline-only partition ──
-  installStrictInlineOnly(sessionApi.fromPartition("lvis-render-html"));
+  installStrictInlineOnly(sessionApi.fromPartition(RENDER_HTML_PARTITION));
 
   // ── 2. MCP App HTML: trusted plugin UI with limited CDN allowlist ──
   installCdnAllowlist(sessionApi.fromPartition("lvis-mcp-app"));

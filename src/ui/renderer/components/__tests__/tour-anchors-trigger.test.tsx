@@ -174,10 +174,10 @@ describe("Tutorial-C PR #983 follow-up: tour anchors", () => {
     );
     const scenario = getTourScenario("first-boot-essentials");
     expect(scenario).toBeTruthy();
-    // Z chain expansion — must be 8 steps (7 host UI + 1 plugin entry,
-    // added 2026-05-19). Hard-pin so a future re-trim cannot silently
+    // Z chain expansion — must be 7 steps (host UI + plugin entry).
+    // Hard-pin so a future re-trim cannot silently
     // revert without test diff.
-    expect(scenario!.steps).toHaveLength(8);
+    expect(scenario!.steps).toHaveLength(7);
     for (const step of scenario!.steps) {
       const found = document.querySelector(step.anchorSelector);
       expect(
@@ -193,9 +193,6 @@ describe("Tutorial-C PR #983 follow-up: tour anchors", () => {
     expect(anchors.has('[data-tour-anchor="input-action-bar"]')).toBe(true);
     expect(
       anchors.has('[data-tour-anchor="command-palette-toggle"]'),
-    ).toBe(true);
-    expect(
-      anchors.has('[data-tour-anchor="help-shortcut-hint"]'),
     ).toBe(true);
     expect(anchors.has('[data-tour-anchor="chat-history"]')).toBe(true);
     expect(anchors.has('[data-tour-anchor="settings-entry"]')).toBe(true);

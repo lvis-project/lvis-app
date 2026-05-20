@@ -349,6 +349,7 @@ export function makeMockLvisApi(overrides: ApiOverrides = {}): {
       openDetached: vi.fn(async () => ({ ok: true, windowId: 1 })),
       closeDetached: vi.fn(async () => ({ ok: true })),
       listDetached: vi.fn(async () => []),
+      openHtmlPreview: vi.fn(async () => ({ ok: true, windowId: 2 })),
       onSnapEdge: vi.fn(() => () => {}),
       onDetachedNavigate: vi.fn(() => () => {}),
       loadSessionInMain: vi.fn(async () => ({ ok: true })),

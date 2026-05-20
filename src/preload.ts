@@ -27,6 +27,10 @@ import type {
   AssistantContextMenuPayload,
 } from "./shared/assistant-context-menu.js";
 import type { AiProviderPingIpcResult } from "./shared/ai-provider-ping.js";
+import type {
+  OpenHtmlPreviewWindowPayload,
+  OpenHtmlPreviewWindowResult,
+} from "./shared/render-html-preview.js";
 
 // ─── Deterministic plugin webview asset URLs ────────────────────────────────
 // `__dirname` here resolves to the host preload's bundled location
@@ -1439,6 +1443,9 @@ const api = {
       ipcRenderer.invoke("lvis:window:load-session-in-main", sessionId) as Promise<
         { ok: true } | { ok: false; error: string }
       >,
+    /** Open a render_html result in an isolated BrowserWindow. */
+    openHtmlPreview: async (payload: OpenHtmlPreviewWindowPayload) =>
+      ipcRenderer.invoke("lvis:window:open-html-preview", payload) as Promise<OpenHtmlPreviewWindowResult>,
     /**
      * Subscribe to snap-edge highlight events sent from the main process
      * when a child window enters/exits the snap zone.

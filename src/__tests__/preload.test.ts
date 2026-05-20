@@ -108,6 +108,22 @@ describe("preload — plugin webview asset URLs", () => {
     expect(url as string).toMatch(/\/plugin-ui-shell\.html$/i);
   });
 
+  it("bridges render_html previews through the exact window IPC channel", async () => {
+    mockInvoke.mockResolvedValueOnce({ ok: true, windowId: 9 });
+    const api = await loadLvisApi();
+    const windowApi = api["window"] as Record<string, unknown>;
+    const payload = {
+      html: "<main>preview</main>",
+      title: "Preview",
+      allowScripts: true,
+    };
+
+    const result = await (windowApi["openHtmlPreview"] as (value: typeof payload) => Promise<unknown>)(payload);
+
+    expect(result).toEqual({ ok: true, windowId: 9 });
+    expect(mockInvoke).toHaveBeenCalledWith("lvis:window:open-html-preview", payload);
+  });
+
   it("plugin asset URLs are static strings, not functions", async () => {
     const api = await loadLvisApi();
 

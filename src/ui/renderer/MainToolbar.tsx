@@ -138,24 +138,6 @@ export function MainToolbar({
         {/* ── Spacer pushes remaining items to the right ─────────────── */}
         <div className="flex-1" />
 
-        {/* ── Help shortcut hint — small kbd chip exposing the ⌘+? gate
-            for the SpotlightTour. The Z onboarding chain step 4 spotlight
-            anchors on this so users physically see where the help hint
-            lives. The chip is not interactive on its own — pressing the
-            chord still triggers the tour through the App-level keydown
-            handler. */}
-        <span
-          data-tour-anchor="help-shortcut-hint"
-          aria-label="가이드 다시 열기 (⌘+?)"
-          title="가이드 다시 열기 (⌘+?)"
-          className="ml-1 hidden items-center gap-1 rounded-md border border-border/60 px-1.5 py-0.5 text-[10px] text-muted-foreground sm:inline-flex"
-        >
-          <span aria-hidden="true">⌘</span>
-          <span aria-hidden="true">+</span>
-          <span aria-hidden="true">?</span>
-          <span className="sr-only">도움말 단축키</span>
-        </span>
-
         {/* ── Unified search — opens the top-attached search panel ───────
             Z onboarding chain — this button anchors the "chat-history"
             spotlight step. The Unified Search panel surfaces both saved
