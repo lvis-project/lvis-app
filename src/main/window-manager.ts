@@ -1,13 +1,14 @@
 /**
  * WindowManager — tab detach + magnetic snap
  *
- * Manages detached child BrowserWindows that can be snapped to edges of the
- * main window (KakaoTalk image-viewer style). The main window is always
- * windowId 0 (the Electron BrowserWindow.id assigned at creation).
+ * Manages detached child BrowserWindows. Built-in detached views can be snapped
+ * to edges of the main window (KakaoTalk image-viewer style). Plugin detached
+ * windows keep the same initial near-main placement, but remain independently
+ * movable/resizable after creation.
  *
  * Snap rules:
- *  - While a child window is dragged within SNAP_THRESHOLD_DIP of a main
- *    window edge it snaps: its position is locked relative to that edge.
+ *  - While a built-in child window is dragged within SNAP_THRESHOLD_DIP of a
+ *    main window edge it snaps: its position is locked relative to that edge.
  *  - When the main window moves, all snapped children follow.
  *  - When the child is dragged away more than SNAP_THRESHOLD_DIP it detaches.
  *  - Maximising the main window hides locked (permanently snapped) children
@@ -97,6 +98,21 @@ function normalizeDetachedWindowOptions(options: DetachedWindowOptions | undefin
     minHeight: integerInRange(options?.minHeight, DETACHED_WINDOW_LIMITS.minHeight.min, DETACHED_WINDOW_LIMITS.minHeight.max),
     resizable: typeof options?.resizable === "boolean" ? options.resizable : undefined,
     alwaysOnTop: typeof options?.alwaysOnTop === "boolean" ? options.alwaysOnTop : undefined,
+  };
+}
+
+function normalizeDetachedWindowOptionsForViewKey(
+  viewKey: string,
+  options: DetachedWindowOptions | undefined
+): NormalizedDetachedWindowOptions {
+  const normalized = normalizeDetachedWindowOptions(options);
+  if (!isPluginViewKey(viewKey)) return normalized;
+
+  return {
+    ...normalized,
+    minWidth: undefined,
+    minHeight: undefined,
+    resizable: true,
   };
 }
 
@@ -409,7 +425,10 @@ export class WindowManager {
       } else {
         if (this._detachedShellViewKey !== viewKey) {
           this._detachedShellViewKey = viewKey;
-          const nextOptions = normalizeDetachedWindowOptions(this._resolveDetachedWindowOptions?.(viewKey));
+          const nextOptions = normalizeDetachedWindowOptionsForViewKey(
+            viewKey,
+            this._resolveDetachedWindowOptions?.(viewKey)
+          );
           const nextBounds = detachedBoundsForViewKey(viewKey, nextOptions);
           applyDetachedWindowOptions(shell, nextOptions);
           shell.setSize(nextBounds.width, nextBounds.height);
@@ -418,20 +437,27 @@ export class WindowManager {
           if (entry) entry.viewKey = viewKey;
           shell.setTitle(`LVIS — ${viewKeyLabel(viewKey)}`);
           shell.webContents.send("lvis:detached:navigate", { viewKey });
-          this._snapToLeftEdge(shell.id);
+          if (!isPluginViewKey(viewKey)) {
+            this._snapToLeftEdge(shell.id);
+          }
+        }
+        if (isPluginViewKey(viewKey)) {
+          const entry = this._children.get(shell.id);
+          if (entry) this._unsnap(entry);
         }
         shell.focus();
         return shell;
       }
     }
 
-    // Restore saved size (width/height) if available.
-    // Position (x/y) is intentionally NOT restored here: every detached window
-    // is snapped to the main window edge by _snapToLeftEdge() inside
-    // ready-to-show before it becomes visible, so any saved x/y would be
-    // immediately overwritten and would only create a misleading impression
-    // that the persisted position matters.
-    const windowOptions = normalizeDetachedWindowOptions(this._resolveDetachedWindowOptions?.(viewKey));
+    // Restore saved size (width/height) if available. Position (x/y) is still
+    // intentionally not restored here: built-in detached views snap to the main
+    // window, and plugin detached views use the same near-main initial placement
+    // without staying attached afterwards.
+    const windowOptions = normalizeDetachedWindowOptionsForViewKey(
+      viewKey,
+      this._resolveDetachedWindowOptions?.(viewKey)
+    );
     const bounds = detachedBoundsForViewKey(viewKey, windowOptions);
     const childOptions: BrowserWindowConstructorOptions = {
       width: bounds.width,
@@ -565,7 +591,12 @@ export class WindowManager {
 
     child.once("ready-to-show", () => {
       const main = this.getMainWindow();
-      if (main?.isMaximized()) {
+      if (isPluginViewKey(viewKey)) {
+        // Keep the established initial spawn location, but do not lock plugins
+        // to the main window after creation.
+        this._placeNearMainLeftEdge(child.id);
+        child.show();
+      } else if (main?.isMaximized()) {
         // Main is maximized; mark as locked but keep hidden.
         // Also register in _hiddenByMaximize so the unmaximize handler will
         // restore this panel when the main window un-maximises (just like a
@@ -631,6 +662,14 @@ export class WindowManager {
   private _onChildMove(childId: number): void {
     const entry = this._children.get(childId);
     if (!entry || entry.window.isDestroyed()) return;
+
+    if (isPluginViewKey(entry.viewKey)) {
+      const main = this.getMainWindow();
+      if (main && !main.isDestroyed()) {
+        main.webContents.send("lvis:window:snap-edge", null);
+      }
+      return;
+    }
 
     // setMovable(false) is advisory-only on Linux: some compositors still
     // allow the user to drag the panel.  Re-snap it back to its locked
@@ -709,11 +748,18 @@ export class WindowManager {
     }
   }
 
-  private _snapToLeftEdge(childId: number): void {
+  private _leftEdgePlacement(childId: number): {
+    entry: ChildEntry;
+    childBounds: Rect;
+    x: number;
+    y: number;
+    snapDeltaX: number;
+    snapDeltaY: number;
+  } | null {
     const entry = this._children.get(childId);
-    if (!entry || entry.window.isDestroyed()) return;
+    if (!entry || entry.window.isDestroyed()) return null;
     const main = this.getMainWindow();
-    if (!main || main.isDestroyed()) return;
+    if (!main || main.isDestroyed()) return null;
 
     const mainBounds = main.getBounds();
     const childBounds = entry.window.getBounds();
@@ -747,7 +793,6 @@ export class WindowManager {
       hostDisplay.bounds.x,
       Math.min(leftX, hostDisplay.bounds.x + hostDisplay.bounds.width - childBounds.width)
     );
-    const snapEdge: SnapEdge = "w";
     // "w" edge: snappedPosition computes x = main.x + dx.
     // Store the desired gutter delta, even when the initial placement must be
     // clamped at the display edge. When the main window later moves right far
@@ -761,11 +806,33 @@ export class WindowManager {
       Math.min(mainBounds.y, hostDisplay.bounds.y + hostDisplay.bounds.height - childBounds.height)
     );
 
+    return {
+      entry,
+      childBounds,
+      x,
+      y,
+      snapDeltaX,
+      snapDeltaY: y - mainBounds.y,
+    };
+  }
+
+  private _placeNearMainLeftEdge(childId: number): void {
+    const placement = this._leftEdgePlacement(childId);
+    if (!placement) return;
+    this._setChildPositionIfChanged(placement.entry, placement.x, placement.y, placement.childBounds);
+  }
+
+  private _snapToLeftEdge(childId: number): void {
+    const placement = this._leftEdgePlacement(childId);
+    if (!placement) return;
+    const { entry, childBounds, x, y, snapDeltaX, snapDeltaY } = placement;
+    const snapEdge: SnapEdge = "w";
+
     // Record snap state.
     entry.snappedTo = this._mainWindowId!;
     entry.snapEdge = snapEdge;
     entry.snapDeltaX = snapDeltaX;
-    entry.snapDeltaY = y - mainBounds.y;
+    entry.snapDeltaY = snapDeltaY;
     entry.locked = true;
 
     // Prevent the user from independently dragging the panel away.
