@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { ChevronDown, ChevronRight, Loader2, Wrench } from "lucide-react";
 import { ScrollArea } from "../../../components/ui/scroll-area.js";
 
@@ -153,6 +153,15 @@ function SingleToolInline({
   const isError = tool.status === "error";
   const [open, setOpen] = useState(false);
   const [scriptAllowed, setScriptAllowed] = useState(false);
+  const previousToolRef = useRef({ toolUseId: tool.toolUseId, status: tool.status });
+  const shouldAutoOpenHtml =
+    previousToolRef.current.toolUseId === tool.toolUseId &&
+    previousToolRef.current.status === "running" &&
+    tool.status === "done";
+
+  useEffect(() => {
+    previousToolRef.current = { toolUseId: tool.toolUseId, status: tool.status };
+  }, [tool.status, tool.toolUseId]);
 
   // Stub result — render collapsible CompactedToolResult instead of raw block.
   // Compaction marks tool_results by role+length, independent of error status,
@@ -257,7 +266,12 @@ function SingleToolInline({
               </Button>
             </div>
           )}
-          <HtmlPreview payload={htmlPayload} allowScripts={scriptAllowed} />
+          <HtmlPreview
+            payload={htmlPayload}
+            allowScripts={scriptAllowed}
+            autoOpen={shouldAutoOpenHtml}
+            autoOpenKey={tool.toolUseId}
+          />
         </div>
       )}
       {fileDiff && (
@@ -286,6 +300,24 @@ export function ToolGroupCard({
   const [open, setOpen] = useState(false);
   const [expandedTools, setExpandedTools] = useState<Set<string>>(() => new Set());
   const [scriptAllowed, setScriptAllowed] = useState<Set<string>>(new Set());
+  const previousStatusesRef = useRef<Map<string, string>>(
+    new Map(tools.map((tool) => [tool.toolUseId, tool.status])),
+  );
+  const autoOpenHtmlToolIds = useMemo(
+    () => new Set(
+      tools
+        .filter((tool) =>
+          tool.name === "render_html" &&
+          tool.status === "done" &&
+          previousStatusesRef.current.get(tool.toolUseId) === "running")
+        .map((tool) => tool.toolUseId),
+    ),
+    [tools],
+  );
+
+  useEffect(() => {
+    previousStatusesRef.current = new Map(tools.map((tool) => [tool.toolUseId, tool.status]));
+  }, [tools]);
 
   // Single tool: render inline without group wrapper
   if (group.tools.length === 1 && group.tools[0]) {
@@ -457,6 +489,8 @@ export function ToolGroupCard({
               <HtmlPreview
                 payload={p.payload}
                 allowScripts={scriptAllowed.has(p.toolUseId)}
+                autoOpen={autoOpenHtmlToolIds.has(p.toolUseId)}
+                autoOpenKey={p.toolUseId}
               />
             </div>
           ))}

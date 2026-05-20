@@ -1,16 +1,15 @@
 /**
  * render_html — 대화형 HTML 렌더링 툴 (네트워크 차단, 스크립트 허용).
  *
- * LLM이 작성한 HTML을 채팅창 내 Electron <webview>로 삽입한다.
+ * LLM이 작성한 HTML을 별도 Electron BrowserWindow로 표시한다.
  * 보안 모델 (다중 방어):
- *   1) 프로세스 격리: renderer가 payload를 Electron <webview>(별도 webContents /
- *      별도 OS 프로세스)로 로드한다. HTML 안의 무한 루프·heavy compute가 발생해도
- *      메인 UI는 영향을 받지 않는다 — webview 프로세스만 느려지거나 죽을 뿐.
- *   2) 원천 격리 옵션: webpreferences="contextIsolation=yes, sandbox=yes,
- *      nodeIntegration=no" — Node API 미노출, opaque origin.
- *   3) 네비게이션 차단: main 프로세스의 app.on("web-contents-created") 훅이
- *      webview webContents의 will-navigate를 막아 data: 로딩 이후 모든 외부
- *      이동을 거부. setWindowOpenHandler도 deny로 잠금.
+ *   1) 프로세스 격리: main 프로세스가 payload를 전용 BrowserWindow(별도
+ *      webContents / 별도 OS 프로세스)로 로드한다. HTML 안의 무한 루프·heavy
+ *      compute가 발생해도 메인 UI는 영향을 받지 않는다.
+ *   2) 원천 격리 옵션: BrowserWindow webPreferences="contextIsolation=true,
+ *      sandbox=true, nodeIntegration=false" — Node API 미노출, opaque origin.
+ *   3) 네비게이션 차단: preview window의 will-navigate와 setWindowOpenHandler를
+ *      잠가 data: 로딩 이후 모든 외부 이동을 거부한다.
  *   4) CSP <meta>: default-src 'none' 으로 모든 네트워크 요청(fetch / XHR /
  *      WebSocket / <img src=http> / <script src=http> / font / form submit)을
  *      원천 차단. script-src 'unsafe-inline' 'unsafe-eval' 만 허용해 인라인
@@ -48,7 +47,7 @@ export interface RenderHtmlResult {
   kind: "lvis.render_html";
   title?: string;
   height: number;
-  /** CSP-wrapped, sanitized HTML document ready for the webview data URL. */
+  /** CSP-wrapped, sanitized HTML document ready for the preview-window data URL. */
   html: string;
   warnings: string[];
 }
@@ -57,7 +56,7 @@ export function createRenderHtmlTool(): Tool {
   return createDynamicTool({
     name: "render_html",
     description:
-      "HTML을 채팅창에 삽입해 사용자에게 시각적으로 보여줍니다. Electron webview(별도 프로세스) + 엄격한 CSP로 격리되며, 무한 루프가 있어도 메인 UI는 멈추지 않고 모든 네트워크 요청은 차단됩니다. " +
+      "HTML을 별도 창으로 열어 사용자에게 시각적으로 보여줍니다. Electron BrowserWindow(별도 프로세스) + 엄격한 CSP로 격리되며, 무한 루프가 있어도 메인 UI는 멈추지 않고 모든 네트워크 요청은 차단됩니다. " +
       "허용: 인라인 CSS, data: URI 이미지/폰트, 인라인 <script>, on* 이벤트 핸들러, Function/eval, <input>/<canvas>/<svg> 등을 이용한 동적 상호작용(슬라이더로 차트 갱신 등). " +
       "불가: 외부 URL 로드(script/css/img/font/fetch/WebSocket 전부), 부모 문서 접근, 폼 제출, top-level navigation, <a> 외부 링크, localStorage. " +
       "차트·대시보드·인터랙티브 데모·표·다이어그램처럼 마크다운으로 표현하기 어려운 결과에 사용하세요. 라이브러리가 필요하면 코드 전체를 인라인으로 포함시켜야 합니다.",
@@ -75,7 +74,7 @@ export function createRenderHtmlTool(): Tool {
         },
         title: {
           type: "string",
-          description: "채팅창 프리뷰 상단에 표시할 제목 (60자 이내).",
+          description: "HTML 창 제목 (60자 이내).",
         },
         height: {
           type: "integer",
