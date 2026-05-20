@@ -27,7 +27,7 @@ export const LLM_VENDOR_LABELS: Record<LLMVendor, string> = {
 
 export const LLM_DEFAULT_MODELS: Record<LLMVendor, string> = {
   claude: "claude-sonnet-4-6",   // Claude Sonnet 4.6 — 1M context (2026-02)
-  openai: "gpt-5.4",             // GPT-5.4 — 1.05M context, OpenAI 최신 (2026-03)
+  openai: "gpt-5.4-mini",        // GPT-5.4 mini — default OpenAI settings model
   gemini: "gemini-2.5-flash",    // Gemini 2.5 Flash — 1M context (2025)
   copilot: "gpt-4.1",            // GitHub Copilot 기본 모델 (2025-05)
   "azure-foundry": "gpt-4o",     // Azure deployment name — user must override with their own deployment
