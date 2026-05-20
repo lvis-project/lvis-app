@@ -61,6 +61,7 @@ import {
   getDemoVendorConfig,
   isDemoEnabled,
 } from "../../main/demo-credentials.js";
+import { validateFoundryEndpoint } from "../../permissions/reviewer/provider-adapters.js";
 import { LoginProgressEmitter } from "../../main/login-progress-emitter.js";
 import type { IpcDeps } from "../types.js";
 
@@ -162,6 +163,17 @@ export function registerAuthHandlers(deps: IpcDeps): void {
       if (demoConfig === null) {
         progress.fail("llm-key-issuing", "no-demo-key", vendor);
         return { ok: false, error: "no-demo-key" };
+      }
+      if (vendor === "azure-foundry" && demoConfig.baseUrl !== undefined) {
+        try {
+          validateFoundryEndpoint(demoConfig.baseUrl);
+        } catch (err) {
+          progress.fail("llm-key-issuing", "invalid-foundry-endpoint", vendor);
+          log.warn(
+            `loginMockup invalid azure-foundry baseUrl: ${(err as Error).message}`,
+          );
+          return { ok: false, error: "invalid-foundry-endpoint" };
+        }
       }
 
       const fieldsApplied: string[] = ["apiKey"];

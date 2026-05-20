@@ -54,10 +54,10 @@ export interface ScenarioShowcaseProps {
   open: boolean;
   /**
    * Called when the user clicks "로그인하여 LVIS 시작하기". Carries the
-   * picked scenarioId so the onboarding chain can personalise the
-   * downstream stages (MemorySeed recommendations, PluginShowcase
-   * ordering, intro placeholder). Always invoked from the inline demo
-   * footer — the grid no longer has a skip-equivalent button.
+   * picked scenarioId when started from an inline preview, or `null` when
+   * the user starts login directly from the grid CTA. Downstream stages
+   * use the non-null id to personalise MemorySeed recommendations,
+   * PluginShowcase ordering, and the intro placeholder.
    */
   onStart: (scenarioId: string | null) => void;
 }

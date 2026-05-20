@@ -143,7 +143,7 @@ describe("auth:login-mockup — full vendor config application (#893)", () => {
   it("applies apiKey + baseUrl when activation provides LVIS_DEMO_ENDPOINT_<VENDOR>", async () => {
     process.env.LVIS_DEMO_VENDOR = "azure-foundry";
     process.env.LVIS_DEMO_KEY_AZURE_FOUNDRY = "sk-azure-key";
-    process.env.LVIS_DEMO_ENDPOINT_AZURE_FOUNDRY = "https://endpoint.example/openai/v1/";
+    process.env.LVIS_DEMO_ENDPOINT_AZURE_FOUNDRY = "https://endpoint.openai.azure.com/openai/v1/";
     const deps = makeDeps();
     const { registerAuthHandlers } = await loadAuthModule();
     registerAuthHandlers(deps as never);
@@ -166,11 +166,29 @@ describe("auth:login-mockup — full vendor config application (#893)", () => {
         provider: "azure-foundry",
         vendors: {
           "azure-foundry": expect.objectContaining({
-            baseUrl: "https://endpoint.example/openai/v1/",
+            baseUrl: "https://endpoint.openai.azure.com/openai/v1/",
           }),
         },
       },
     });
+  });
+
+  it("rejects azure-foundry demo baseUrl that fails the settings endpoint validator", async () => {
+    process.env.LVIS_DEMO_VENDOR = "azure-foundry";
+    process.env.LVIS_DEMO_KEY_AZURE_FOUNDRY = "sk-azure-key";
+    process.env.LVIS_DEMO_ENDPOINT_AZURE_FOUNDRY = "https://endpoint.example/openai/v1/";
+    const deps = makeDeps();
+    const { registerAuthHandlers } = await loadAuthModule();
+    registerAuthHandlers(deps as never);
+
+    const result = await invoke("lvis:auth:login-mockup", {
+      username: "demo",
+      password: "demo123",
+    }) as { ok: boolean; error?: string };
+
+    expect(result).toEqual({ ok: false, error: "invalid-foundry-endpoint" });
+    expect(deps.settingsService.setSecret).not.toHaveBeenCalled();
+    expect(deps.settingsService.patch).not.toHaveBeenCalled();
   });
 
   it("applies apiKey + model when LVIS_DEMO_MODEL_<VENDOR> is set", async () => {
