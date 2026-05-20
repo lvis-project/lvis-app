@@ -431,16 +431,19 @@ export function App() {
   // without first opening Settings.
   const pluginEntries = useMemo<PluginEntry[]>(
     () =>
-      pluginViews.map((view) => ({
-        viewKey: toViewKey(view),
-        pluginId: view.pluginId,
-        installAliases: getPluginInstallAliases(view.pluginId),
-        label: getPluginViewLabel(view),
-        icon: view.icon,
-        iconText: view.iconText,
-        unauthed: pluginAuthStatuses.get(view.pluginId)?.kind === "unauthed",
-      })),
-    [pluginViews, pluginAuthStatuses],
+      pluginViews.map((view) => {
+        const card = pluginCards.find((candidate) => candidate.id === view.pluginId);
+        return {
+          viewKey: toViewKey(view),
+          pluginId: view.pluginId,
+          installAliases: getPluginInstallAliases(view.pluginId, card?.installAliases),
+          label: getPluginViewLabel(view),
+          icon: view.icon,
+          iconText: view.iconText,
+          unauthed: pluginAuthStatuses.get(view.pluginId)?.kind === "unauthed",
+        };
+      }),
+    [pluginViews, pluginAuthStatuses, pluginCards],
   );
 
   // Track in-flight plugin installs for the grid overlay spinner.

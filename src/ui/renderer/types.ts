@@ -86,6 +86,8 @@ export type PluginCardSummary = {
   configSchema?: PluginConfigSchemaSummary;
   /** Optional declarative auth contract for the host UI surface. */
   auth?: PluginAuthSummary;
+  /** Marketplace request slugs that should collapse onto this installed plugin. */
+  installAliases?: string[];
 };
 
 /**
