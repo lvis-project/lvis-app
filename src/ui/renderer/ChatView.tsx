@@ -207,7 +207,7 @@ export function ChatView({ api, onAsk, onEditSave, onFork, onToggleStar, onRetry
     question, setQuestion, chatEndRef, currentSessionId,
     hasApiKey, onOpenSettings,
     searchOpen, searchMatches, searchMatchSet, searchIdx, searchHighlight,
-    contextOverflowPct, usedTokens, effectiveBudget,
+    contextOverflowPct, usedTokens, contextBudget, effectiveBudget,
     tpmLimit, tpmPct,
     rolePresets, activePreset, activePresetId, setActivePresetId,
     agentOptions, skillOptions, activeAgentName, setActiveAgentName,
@@ -1556,7 +1556,12 @@ export function ChatView({ api, onAsk, onEditSave, onFork, onToggleStar, onRetry
           <BottomActionRow
             tokenSlot={
               <div className="flex min-w-0 items-center gap-2">
-                <TokenProgressRing used={usedTokens} budget={effectiveBudget} />
+                <TokenProgressRing
+                  used={usedTokens}
+                  budget={effectiveBudget}
+                  contextBudget={contextBudget}
+                  tpmLimit={tpmLimit}
+                />
                 <Tooltip>
                   <TooltipTrigger asChild>
                     <span className={`text-[11px] font-mono ${costBadgeClass}`} title="예상 비용">
