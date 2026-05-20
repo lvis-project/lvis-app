@@ -116,6 +116,26 @@ function ImmediateBadge() {
   );
 }
 
+function getVendorInfo(vendorId: string): (typeof VENDORS)[number] {
+  return VENDORS.find((v) => v.id === vendorId) ?? VENDORS[0]!;
+}
+
+function modelOptionsFor(vendorId: string, selectedModel: string): string[] {
+  const info = getVendorInfo(vendorId);
+  const options = [...info.modelOptions];
+  const defaultModel = info.defaultModel.trim();
+  if (defaultModel && !options.includes(defaultModel)) {
+    options.unshift(defaultModel);
+  }
+
+  const currentModel = selectedModel.trim();
+  if (currentModel && !options.includes(currentModel)) {
+    options.unshift(currentModel);
+  }
+
+  return options;
+}
+
 export function LlmTab(props: LlmTabProps) {
   const {
     api,
@@ -150,8 +170,10 @@ export function LlmTab(props: LlmTabProps) {
     saving = false,
     settingsLoaded = true,
   } = props;
-  const vendorInfo = VENDORS.find((v) => v.id === vendor) ?? VENDORS[0];
+  const vendorInfo = getVendorInfo(vendor);
   const hasOnSave = typeof onSave === "function";
+  const activeModelValue = model.trim() || vendorInfo.defaultModel;
+  const activeModelOptions = modelOptionsFor(vendor, activeModelValue);
 
   return (
     <div className="space-y-6">
@@ -267,7 +289,7 @@ export function LlmTab(props: LlmTabProps) {
                     <p className="text-[11px] text-muted-foreground">
                       Azure AI Foundry 엔드포인트 형식:
                       {" "}<code>https://{"{resource}"}.openai.azure.com/openai/deployments/{"{deployment}"}/</code>
-                      {" "}— 모델 필드에는 deployment 이름을 입력합니다.
+                      {" "}— 모델 드롭다운은 알려진 deployment/model 이름과 현재 저장된 사용자 지정 값을 표시합니다.
                     </p>
                   )}
                   {(vendor === "openai" || vendor === "copilot") && (
@@ -312,7 +334,23 @@ export function LlmTab(props: LlmTabProps) {
                   <Input data-testid="llm-api-key-input" type="password" placeholder={hasKey ? "새 키로 교체" : vendorInfo.placeholder} value={keyInput} onChange={(e) => setKeyInput(e.target.value)} />
                 </div>
               )}
-              <div className="space-y-2"><Label className="text-sm font-medium">모델</Label><Input data-testid="llm-model-input" value={model} onChange={(e) => setModel(e.target.value)} placeholder={vendorInfo.defaultModel} /></div>
+              <div className="space-y-2">
+                <Label htmlFor="model-select" className="text-sm font-medium">모델</Label>
+                <Select value={activeModelValue} onValueChange={setModel}>
+                  <SelectTrigger
+                    id="model-select"
+                    className="w-full"
+                    data-testid="llm-model-select"
+                  >
+                    <SelectValue placeholder={vendorInfo.defaultModel} />
+                  </SelectTrigger>
+                  <SelectContent>
+                    {activeModelOptions.map((option) => (
+                      <SelectItem key={option} value={option}>{option}</SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+              </div>
             </div>
           )}
           {hasOnSave && (
@@ -401,48 +439,68 @@ export function LlmTab(props: LlmTabProps) {
           {fallbackOpen && (
             <div className="space-y-3">
               <p className="text-[11px] text-muted-foreground">첫 응답이 1초 안에 오지 않거나 5xx/429/네트워크 오류가 나면 같은 모델을 5회 시도한 뒤 순서대로 전환할 벤더·모델 목록입니다.</p>
-              {fallbackChain.map((entry, idx) => (
-                <div key={idx} className="flex gap-2">
-                  <Select
-                    value={entry.provider}
-                    onValueChange={(value) => {
-                      const next = [...fallbackChain];
-                      next[idx] = { ...next[idx]!, provider: value };
-                      setFallbackChain(next);
-                    }}
-                  >
-                    <SelectTrigger className="w-36 text-xs">
-                      <SelectValue />
-                    </SelectTrigger>
-                    <SelectContent>
-                      {VENDORS.map((v) => <SelectItem key={v.id} value={v.id}>{v.label}</SelectItem>)}
-                    </SelectContent>
-                  </Select>
-                  <Input
-                    className="h-8 text-xs"
-                    value={entry.model}
-                    placeholder="모델 이름"
-                    onChange={(e) => {
-                      const next = [...fallbackChain];
-                      next[idx] = { ...next[idx]!, model: e.target.value };
-                      setFallbackChain(next);
-                    }}
-                  />
-                  <Button
-                    size="sm"
-                    variant="ghost"
-                    className="h-8 text-xs text-destructive"
-                    onClick={() => setFallbackChain((c) => c.filter((_, i) => i !== idx))}
-                  >
-                    삭제
-                  </Button>
-                </div>
-              ))}
+              {fallbackChain.map((entry, idx) => {
+                const fallbackVendorInfo = getVendorInfo(entry.provider);
+                const fallbackModelValue = entry.model.trim() || fallbackVendorInfo.defaultModel;
+                const fallbackModelOptions = modelOptionsFor(entry.provider, fallbackModelValue);
+                return (
+                  <div key={idx} className="flex gap-2">
+                    <Select
+                      value={entry.provider}
+                      onValueChange={(value) => {
+                        const nextVendorInfo = getVendorInfo(value);
+                        const next = [...fallbackChain];
+                        next[idx] = {
+                          ...next[idx]!,
+                          provider: value,
+                          model: nextVendorInfo.defaultModel,
+                        };
+                        setFallbackChain(next);
+                      }}
+                    >
+                      <SelectTrigger className="w-36 text-xs">
+                        <SelectValue />
+                      </SelectTrigger>
+                      <SelectContent>
+                        {VENDORS.map((v) => <SelectItem key={v.id} value={v.id}>{v.label}</SelectItem>)}
+                      </SelectContent>
+                    </Select>
+                    <Select
+                      value={fallbackModelValue}
+                      onValueChange={(value) => {
+                        const next = [...fallbackChain];
+                        next[idx] = { ...next[idx]!, model: value };
+                        setFallbackChain(next);
+                      }}
+                    >
+                      <SelectTrigger className="min-w-0 flex-1 text-xs">
+                        <SelectValue placeholder={fallbackVendorInfo.defaultModel} />
+                      </SelectTrigger>
+                      <SelectContent>
+                        {fallbackModelOptions.map((option) => (
+                          <SelectItem key={option} value={option}>{option}</SelectItem>
+                        ))}
+                      </SelectContent>
+                    </Select>
+                    <Button
+                      size="sm"
+                      variant="ghost"
+                      className="h-8 text-xs text-destructive"
+                      onClick={() => setFallbackChain((c) => c.filter((_, i) => i !== idx))}
+                    >
+                      삭제
+                    </Button>
+                  </div>
+                );
+              })}
               <Button
                 size="sm"
                 variant="outline"
                 className="h-8 text-xs"
-                onClick={() => setFallbackChain((c) => [...c, { provider: "openai", model: "" }])}
+                onClick={() => setFallbackChain((c) => [
+                  ...c,
+                  { provider: "openai", model: getVendorInfo("openai").defaultModel },
+                ])}
               >
                 + 추가
               </Button>
