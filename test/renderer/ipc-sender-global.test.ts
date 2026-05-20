@@ -40,6 +40,7 @@ const CHANNEL_MANIFEST: Record<string, "mutating" | "sensitive" | "public-read">
   "lvis:chat:get-history": "public-read",
   "lvis:chat:edit-resend": "sensitive",
   "lvis:chat:fork": "sensitive",
+  "lvis:chat:continue-last-user": "sensitive",
   "lvis:chat:retry-effort": "sensitive",
   "lvis:chat:export": "sensitive",
   // Memory

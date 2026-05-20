@@ -111,6 +111,7 @@ export interface ChatViewProps {
   onFork: (idx: number) => void | Promise<void>;
   onToggleStar: (idx: number) => void | Promise<void>;
   onRetryEffort: () => void | Promise<void>;
+  onContinueFromLastUser?: (sessionId: string) => void | Promise<void>;
   isEntryStarred: (idx: number) => string | null;
   /** B4: abort current streaming turn */
   onAbort: () => void | Promise<void>;
@@ -195,7 +196,7 @@ function AskUserAnswerBubble({
   );
 }
 
-export function ChatView({ api, onAsk, onEditSave, onFork, onToggleStar, onRetryEffort, isEntryStarred, onAbort, onGuide, onGuideError, onFeedback, subAgentSpawns, loadedSkills, hasAskQuestions, askQuestions, onResolveAskQuestion, plugins, onSelectPlugin, currentSessionKind = "main", currentSessionTitle, sessions, onLoadSession, onRefreshSessions, commandActions, commandPopoverOpen, onCommandPopoverOpenChange, installingPlugins, onOpenMarketplace, marketplaceUrlReady, onPluginPrimaryAction, onRoutineAcknowledge, onOpenPermissionQueue }: ChatViewProps) {
+export function ChatView({ api, onAsk, onEditSave, onFork, onToggleStar, onRetryEffort, onContinueFromLastUser, isEntryStarred, onAbort, onGuide, onGuideError, onFeedback, subAgentSpawns, loadedSkills, hasAskQuestions, askQuestions, onResolveAskQuestion, plugins, onSelectPlugin, currentSessionKind = "main", currentSessionTitle, sessions, onLoadSession, onRefreshSessions, commandActions, commandPopoverOpen, onCommandPopoverOpenChange, installingPlugins, onOpenMarketplace, marketplaceUrlReady, onPluginPrimaryAction, onRoutineAcknowledge, onOpenPermissionQueue }: ChatViewProps) {
   // We still need the api for SessionTodoPanel; obtain it via singleton.
   const workflowApi = getApi();
   const debugStreamEnabled = isDebugStreamEnabled();
@@ -310,6 +311,10 @@ export function ChatView({ api, onAsk, onEditSave, onFork, onToggleStar, onRetry
   const visibleEntries = useMemo(
     () => viewMode ? entries.slice(0, viewMode.slicedRangeEnd) : entries,
     [entries, viewMode],
+  );
+  const hasActiveStreamingEntry = useMemo(
+    () => visibleEntries.some((entry) => "streaming" in entry && entry.streaming === true),
+    [visibleEntries],
   );
 
   // Calendar's in-session day jump indexer — derived from visibleEntries with
@@ -444,17 +449,32 @@ export function ChatView({ api, onAsk, onEditSave, onFork, onToggleStar, onRetry
   }, [api, scrollChatToBottom]);
 
   const handleBranchFrom = useCallback(async (compactNum: number) => {
+    if (streaming || hasActiveStreamingEntry) {
+      if (forkToastTimerRef.current) clearTimeout(forkToastTimerRef.current);
+      setForkToast("응답이 끝난 뒤 이 시점에서 다시 시작할 수 있습니다");
+      forkToastTimerRef.current = setTimeout(() => setForkToast(null), SHORT_TOAST_TTL_MS);
+      return;
+    }
     const result = await api.chatBranchFromCheckpoint?.(currentSessionId, compactNum);
     if (!result || "error" in result) return;
     // Exit view-mode before loading the new session so it opens in live mode.
     setViewMode(null);
     // Load the branched session
-    await onLoadSession?.(result.newSessionId);
+    if (!onLoadSession) return;
+    const loaded = await onLoadSession(result.newSessionId);
+    if (loaded === false) return;
     // Show fork-success toast (shorter than default — single-line confirmation needs less time)
     if (forkToastTimerRef.current) clearTimeout(forkToastTimerRef.current);
-    setForkToast(`checkpoint #${compactNum} 에서 새 분기를 시작했습니다`);
+    setForkToast(
+      result.shouldAutoContinue
+        ? `checkpoint #${compactNum} 에서 새 분기를 시작했습니다. 마지막 질문의 답변을 이어서 생성합니다`
+        : `checkpoint #${compactNum} 에서 새 분기를 시작했습니다`,
+    );
     forkToastTimerRef.current = setTimeout(() => setForkToast(null), SHORT_TOAST_TTL_MS); // single-line fork confirmation needs less read time
-  }, [api, currentSessionId, onLoadSession]);
+    if (result.shouldAutoContinue) {
+      await onContinueFromLastUser?.(result.newSessionId);
+    }
+  }, [api, currentSessionId, hasActiveStreamingEntry, onContinueFromLastUser, onLoadSession, streaming]);
 
   useEffect(() => {
     setShowJumpToBottom(false);

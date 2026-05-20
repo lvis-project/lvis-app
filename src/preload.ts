@@ -568,6 +568,8 @@ const api = {
   chatEditResend: async (messageIndex: number, newText: string) =>
     ipcRenderer.invoke("lvis:chat:edit-resend", messageIndex, newText),
   chatFork: async (messageIndex: number) => ipcRenderer.invoke("lvis:chat:fork", messageIndex),
+  chatContinueLastUser: async (sessionId: string) =>
+    ipcRenderer.invoke("lvis:chat:continue-last-user", { sessionId }) as Promise<{ ok: boolean; error?: string }>,
   chatRetryEffort: async (opts?: { thinkingBudgetTokens?: number; enableThinking?: boolean }) =>
     ipcRenderer.invoke("lvis:chat:retry-effort", opts),
   chatExport: async (format: "markdown" | "json") => ipcRenderer.invoke("lvis:chat:export", format),
@@ -582,7 +584,11 @@ const api = {
     ipcRenderer.invoke("lvis:chat:exit-checkpoint-view") as Promise<{ ok: boolean }>,
   chatBranchFromCheckpoint: async (sessionId: string, compactNum: number) =>
     ipcRenderer.invoke("lvis:chat:branch-from-checkpoint", { sessionId, compactNum }) as Promise<
-      { newSessionId: string } | { error: string }
+      {
+        newSessionId: string;
+        lastMessageRole: "user" | "assistant" | "tool_result" | null;
+        shouldAutoContinue: boolean;
+      } | { error: string }
     >,
   chatAbort: async () => ipcRenderer.invoke("lvis:chat:abort") as Promise<{ ok: boolean }>,
   // Lazy-load verbatim tool_result content (in-session only).
