@@ -216,13 +216,28 @@ export const DEFAULT_PRICING: Record<PricingVendor, Record<string, ModelPricing>
   },
 
   // ── Azure AI Foundry / Vertex AI ───────────────────────────────────────────
-  // Deployment-name routed — pricing is account-specific. Populate via env
-  // override (`LVIS_PRICING_OVERRIDE`). Without an override every model on
-  // these vendors falls through to FALLBACK_PRICING, which means UI ring +
-  // token preflight is denominated at 128K regardless of the actual deployment
-  // capability — explicit override is REQUIRED for context-window math, not
-  // just cost accuracy.
-  "azure-foundry": {},
+  // Deployment-name routed — site-specific pricing may differ from these
+  // defaults, so customer deployments should still override via
+  // `LVIS_PRICING_OVERRIDE`. The entries below are populated for OpenAI
+  // models that Azure Foundry hosts under deployment names matching the
+  // upstream model id (the standard naming when the operator names the
+  // deployment after the model, as in the internal organization demo).
+  // Pricing + contextWindow mirror the `openai` vendor entries because the
+  // underlying model is identical; the Azure billing relationship is the
+  // separate dimension. UI ring / token preflight / cost-display math read
+  // (vendor, model) directly from this table — without these entries the
+  // lookup falls through to `FALLBACK_PRICING` (128K) and the status bar
+  // denominates a 400K-tier deployment at 98K usable. Observed user report
+  // 2026-05-20.
+  "azure-foundry": {
+    "gpt-5.4":          { inputPer1M: 2.5,  outputPer1M: 15,   contextWindow: 1_050_000, surchargeInputThreshold: 272_000, surchargeInputMultiplier: 2,   surchargeOutputMultiplier: 1.5 },
+    "gpt-5.4-mini":     { inputPer1M: 0.75, outputPer1M: 4.5,  contextWindow:   400_000 },
+    "gpt-5.4-nano":     { inputPer1M: 0.2,  outputPer1M: 1.25, contextWindow:   400_000, tpmDefault: 200_000 },
+    "gpt-5.4-pro":      { inputPer1M: 30,   outputPer1M: 180,  contextWindow: 1_100_000, surchargeInputThreshold: 272_000, surchargeInputMultiplier: 2,   surchargeOutputMultiplier: 1.5 },
+    "gpt-4o":           { inputPer1M: 2.5,  outputPer1M: 10,   contextWindow:   128_000 },
+    "gpt-4o-mini":      { inputPer1M: 0.15, outputPer1M: 0.6,  contextWindow:   128_000 },
+  },
+  // Vertex AI deployments remain operator-routed — populate via override.
   "vertex-ai": {},
 };
 
