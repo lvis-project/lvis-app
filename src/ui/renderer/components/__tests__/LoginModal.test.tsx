@@ -57,6 +57,7 @@ describe("LoginModal — chip-driven demo flow (activation → auth)", () => {
     originalConsoleError = console.error;
     // suppress the expected console.error during the rejection test
     console.error = vi.fn();
+    delete (window as unknown as { lvis?: unknown }).lvis;
   });
   afterEach(() => {
     console.error = originalConsoleError;
@@ -116,6 +117,36 @@ describe("LoginModal — chip-driven demo flow (activation → auth)", () => {
       (api as unknown as { demo: { activate: ReturnType<typeof vi.fn> } }).demo
         .activate,
     ).toHaveBeenCalledWith(FAKE_ACTIVATION_CODE);
+  });
+
+  it("skips activation input and runs loginMockup when demo env was loaded at boot", async () => {
+    (window as unknown as { lvis: { env: { demoVendor: string } } }).lvis = {
+      env: { demoVendor: "azure-foundry" },
+    };
+    const api = makeApi(async () => ({
+      ok: true,
+      vendor: "azure-foundry",
+      fieldsApplied: ["apiKey", "baseUrl"],
+    }));
+    render(<LoginModal api={api} open onOpenChange={() => {}} />);
+
+    await waitFor(() => {
+      expect(document.querySelector('[data-testid="login-modal:chip-demo"]')).toBeTruthy();
+    });
+    clickDemoChip();
+
+    await waitFor(() => {
+      expect(
+        (api as unknown as { loginMockup: ReturnType<typeof vi.fn> }).loginMockup,
+      ).toHaveBeenCalledWith({ username: "demo", password: "demo123" });
+    });
+    expect(
+      document.querySelector('[data-testid="login-modal:activation-code-input"]'),
+    ).toBeNull();
+    expect(
+      (api as unknown as { demo: { activate: ReturnType<typeof vi.fn> } }).demo
+        .activate,
+    ).not.toHaveBeenCalled();
   });
 
   it("displays a Korean error message when the auth IPC call rejects", async () => {

@@ -326,6 +326,7 @@ const api = {
    *   - `invalid-code`     bad prefix, corrupt base64, auth-tag mismatch,
    *                        or empty input.
    *   - `no-vendor`        decrypted payload missing `LVIS_DEMO_VENDOR`.
+   *   - `invalid-vendor`   decrypted payload has an unknown `LVIS_DEMO_VENDOR`.
    *   - `persist-failed`   filesystem write failure (permission/disk).
    *   - `unauthorized-frame` rejected sender frame (shared with gated IPC).
    * The renderer translates each into the Korean user-facing message.
@@ -334,7 +335,7 @@ const api = {
     activate: async (code: string) =>
       ipcRenderer.invoke("lvis:demo:activate", { code }) as Promise<
         | { ok: true; vendor: string; requiresRelaunch?: boolean }
-        | { ok: false; error: "invalid-code" | "no-vendor" | "persist-failed" | "unauthorized-frame" }
+        | { ok: false; error: "invalid-code" | "no-vendor" | "invalid-vendor" | "persist-failed" | "unauthorized-frame" }
       >,
     relaunchAfterActivation: async () =>
       ipcRenderer.invoke("lvis:demo:relaunch-after-activation") as Promise<

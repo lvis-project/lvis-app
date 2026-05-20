@@ -56,6 +56,7 @@ import {
   isDemoEnabled,
   recaptureDemoCredentialsAfterActivation,
 } from "../../main/demo-credentials.js";
+import { isLLMVendor } from "../../shared/llm-vendor-defaults.js";
 import type { IpcDeps } from "../types.js";
 
 const log = createLogger("demo-activation-ipc");
@@ -134,7 +135,7 @@ export function registerDemoHandlers(deps: IpcDeps): void {
       payload: { code?: unknown },
     ): Promise<
       | { ok: true; vendor: string; requiresRelaunch?: boolean }
-      | { ok: false; error: "invalid-code" | "persist-failed" | "no-vendor" | "unauthorized-frame" }
+      | { ok: false; error: "invalid-code" | "persist-failed" | "no-vendor" | "invalid-vendor" | "unauthorized-frame" }
     > => {
       if (!validateSender(e)) {
         auditUnauthorized(auditLogger, "lvis:demo:activate", e);
@@ -175,6 +176,10 @@ export function registerDemoHandlers(deps: IpcDeps): void {
       if (typeof vendor !== "string" || vendor.length === 0) {
         log.warn("activation payload missing LVIS_DEMO_VENDOR");
         return { ok: false, error: "no-vendor" };
+      }
+      if (!isLLMVendor(vendor)) {
+        log.warn(`activation payload has invalid LVIS_DEMO_VENDOR: ${vendor}`);
+        return { ok: false, error: "invalid-vendor" };
       }
 
       // Step 3 — persist to disk so the next boot auto-activates. The file
