@@ -13,7 +13,7 @@
  *     index is one int).
  *   - Selecting a script bumps the index. `useDemoAutoplay` increments
  *     when it picks the script, before passing it to the engine.
- *   - When `LVIS_DEMO_VENDOR` is set and the index is unreadable the
+ *   - When main reports demo activation and the index is unreadable, the
  *     fallback is the first script in `DEMO_SCRIPTS`.
  *
  * Why an array of imports rather than a directory glob:

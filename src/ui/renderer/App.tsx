@@ -717,17 +717,17 @@ export function App() {
   }, [api, chainStage, markOnboardingCompleted]);
 
   // Live Auto-play (proposal: docs/architecture/proposals/live-autoplay.md).
-  // Activates for returning users (onboardingCompleted=true) when
-  // `LVIS_DEMO_VENDOR` env is set OR when the user explicitly opts in via
-  // `features.demoAutoplayEnabled = true`. In packaged production builds
-  // without the env var this is a dead path. On a fresh install the demo
-  // is gated behind onboarding so the ScenarioShowcase chain is always
-  // shown first — see `shouldActivateDemoAutoplay` (engine/demo-autoplay/
-  // types.ts §7) for the activation truth table.
+  // Activates for returning users (onboardingCompleted=true) only when the
+  // host reports captured demo activation through `lvis:demo:status`.
+  // `features.demoAutoplayEnabled=false` is the explicit opt-out. On a fresh
+  // install the demo is gated behind onboarding so the ScenarioShowcase chain
+  // is always shown first — see `shouldActivateDemoAutoplay`
+  // (engine/demo-autoplay/types.ts §7) for the truth table.
   const demoAutoplay = useDemoAutoplay(api);
-  // When the demo is active we collapse the rest of the Z chain — the demo
-  // re-engages a returning user and reasserts onboardingCompleted when it
-  // terminates. Exceptions:
+  // When the demo is active we collapse the rest of the Z chain because the
+  // demo is a returning-user re-engage surface. `onFinished` only disables
+  // future autoplay; onboardingCompleted is set solely by explicit chain
+  // completion. Exceptions:
   //   - `idle` / `done`: no chain to collapse.
   //   - `showcase`: the user has started seeing the ScenarioShowcase
   //     intro. Demo MUST NOT yank it out from under them — if both

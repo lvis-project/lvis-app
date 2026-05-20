@@ -4,6 +4,7 @@
  */
 import { ipcMain } from "electron";
 import { validateSender, UNAUTHORIZED_FRAME, auditUnauthorized } from "../gated.js";
+import { isDemoEnabled } from "../../main/demo-credentials.js";
 import type { IpcDeps } from "../types.js";
 
 /**
@@ -11,8 +12,8 @@ import type { IpcDeps } from "../types.js";
  * here so a buggy renderer can't slip a non-prefixed entry through. All
  * fields are coerced to strings and length-capped to keep audit lines bounded.
  *
- * Security gate: handler is registered ONLY when `LVIS_DEMO_VENDOR` was
- * present at process start. Production builds without the env var never
+ * Security gate: handler is registered ONLY when main captured demo
+ * credentials at boot. Production builds without captured activation never
  * expose this channel — a malicious renderer can't spam fake demo audit
  * lines because `ipcMain.handle` was never called.
  */
@@ -52,12 +53,10 @@ export function registerAuditHandlers(deps: IpcDeps): void {
   // (so search filters work) and forces `type: "info"` so demo entries
   // never pollute the `turn` / `tool_call` / `approval` analytics channels.
   //
-  // Activation gate (security): only register when the env var that
-  // enables the demo entirely is present at boot. In packaged production
-  // without `LVIS_DEMO_VENDOR`, the channel does not exist at all → a
-  // compromised renderer can't probe / spam it.
-  const demoVendor = typeof process.env.LVIS_DEMO_VENDOR === "string" ? process.env.LVIS_DEMO_VENDOR : null;
-  if (demoVendor === null || demoVendor.length === 0) {
+  // Activation gate (security): only register when main captured demo
+  // credentials at boot. Packaged builds scrub `LVIS_DEMO_*` before preload
+  // inherits env, so this must use the host-owned captured state.
+  if (!isDemoEnabled()) {
     return;
   }
 
