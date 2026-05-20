@@ -60,13 +60,17 @@ describe("desktop packaging", () => {
     expect(script).not.toContain("LVIS_HOME:-");
   });
 
-  it("keeps Windows uninstall registered without deleting user data by default", () => {
+  it("removes user data on Windows uninstall (Roaming + ~/.lvis cleanup wired)", () => {
     const pkg = readPackageJson();
     expect(pkg.build.nsis).toMatchObject({
       oneClick: true,
       createStartMenuShortcut: true,
       uninstallDisplayName: "LVIS",
-      deleteAppDataOnUninstall: false,
+      // electron-builder auto-removes `%APPDATA%\LVIS\` (Roaming userData).
+      deleteAppDataOnUninstall: true,
+      // Custom NSIS hook covers what `deleteAppDataOnUninstall` cannot —
+      // `%USERPROFILE%\.lvis\` (LVIS_HOME) and `%LOCALAPPDATA%\LVIS\` residuals.
+      include: "build/installer.nsh",
     });
   });
 });
