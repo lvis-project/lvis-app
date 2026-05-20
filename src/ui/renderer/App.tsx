@@ -13,6 +13,7 @@ import { ThemeProvider } from "./theme/index.js";
 // ─── Phase 2 split: types / constants / helpers / components / tabs ──
 import { getApi, getPluginViewLabel, toViewKey } from "./api-client.js";
 import type { PluginEntry } from "./components/PluginGridButton.js";
+import { getPluginInstallAliases } from "./utils/plugin-install-aliases.js";
 import { ApprovalDialog } from "./dialogs/ApprovalDialog.js";
 import { DeferredQueueDialog } from "./dialogs/DeferredQueueDialog.js";
 import { MemorySeedDialog } from "./dialogs/MemorySeedDialog.js";
@@ -433,6 +434,7 @@ export function App() {
       pluginViews.map((view) => ({
         viewKey: toViewKey(view),
         pluginId: view.pluginId,
+        installAliases: getPluginInstallAliases(view.pluginId),
         label: getPluginViewLabel(view),
         icon: view.icon,
         iconText: view.iconText,
