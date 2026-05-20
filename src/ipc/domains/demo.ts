@@ -23,10 +23,11 @@
  *   - The activation step is a *prerequisite* to `loginMockup`. Folding it
  *     into auth.ts would conflate "I have credentials, please log me in"
  *     with "I need to install credentials before logging in".
- *   - The packaged-build path also calls the same activation handler on
- *     first run, AND on subsequent boots when `~/.lvis/secrets/.env.demo`
- *     already exists (see `loadPersistedDemoActivation` below). Auth is
- *     downstream of activation; clean separation keeps the wiring honest.
+ *   - The packaged-build path calls this activation handler on first run.
+ *     Subsequent boots load `~/.lvis/secrets/.env.demo` before capture; the
+ *     renderer then calls `lvis:demo:status` and proceeds to auth directly.
+ *     Auth remains downstream of activation; clean separation keeps the
+ *     wiring honest.
  *
  * Error contract (CLAUDE.md):
  *   - IPC error codes are kebab-case English. Renderer translates to Korean.
@@ -35,6 +36,12 @@
  *   - `persist-failed` covers: filesystem write failures (permission,
  *     disk full, parent dir missing).
  *   - `no-vendor` covers: decrypted payload missing `LVIS_DEMO_VENDOR`.
+ *   - `invalid-vendor` covers: decrypted payload has an unknown vendor.
+ *   - `no-demo-key` covers: decrypted payload missing the active vendor key.
+ *   - `missing-foundry-endpoint` covers: Azure Foundry payload endpoint
+ *     missing.
+ *   - `invalid-foundry-endpoint` covers: Azure Foundry payload endpoint
+ *     rejected by the shared settings endpoint validator.
  *
  * Storage namespace (project CLAUDE.md "Storage Namespace per Feature"):
  *   The persisted `.env.demo` lives under `~/.lvis/secrets/` (cross-cutting
@@ -53,15 +60,22 @@ import {
 } from "../../main/demo-activation-codec.js";
 import { persistedEnvDemoPath } from "../../main/demo-activation-loader.js";
 import {
+  getDemoActiveVendor,
   isDemoEnabled,
   recaptureDemoCredentialsAfterActivation,
 } from "../../main/demo-credentials.js";
+import { validateFoundryEndpoint } from "../../permissions/reviewer/provider-adapters.js";
+import { isLLMVendor } from "../../shared/llm-vendor-defaults.js";
 import type { IpcDeps } from "../types.js";
 
 const log = createLogger("demo-activation-ipc");
 // Keep in sync with scripts/lib/dev-electron-exit.mjs. In `bun run dev`,
 // the parent watcher owns relaunching so it can keep all watch processes alive.
 const DEMO_ACTIVATION_DEV_RELAUNCH_EXIT_CODE = 42;
+
+function demoKeyEnvVar(vendor: string): string {
+  return `LVIS_DEMO_KEY_${vendor.toUpperCase().replace(/-/g, "_")}`;
+}
 
 function requestDemoActivationRelaunch(): void {
   setImmediate(() => {
@@ -112,6 +126,40 @@ async function writeEnvDemoFile(path: string, contents: string): Promise<void> {
   await fs.rename(tmp, path);
 }
 
+function validateActivationPayloadEndpoint(
+  vendor: string,
+  parsed: Record<string, string>,
+): "missing-foundry-endpoint" | "invalid-foundry-endpoint" | null {
+  if (vendor !== "azure-foundry") return null;
+  const baseUrl =
+    parsed.LVIS_DEMO_BASEURL_AZURE_FOUNDRY ??
+    parsed.LVIS_DEMO_ENDPOINT_AZURE_FOUNDRY;
+  if (typeof baseUrl !== "string" || baseUrl.length === 0) {
+    log.warn("activation payload missing azure-foundry endpoint");
+    return "missing-foundry-endpoint";
+  }
+  try {
+    validateFoundryEndpoint(baseUrl);
+    return null;
+  } catch (err) {
+    log.warn(
+      `activation payload has invalid azure-foundry endpoint: ${(err as Error).message}`,
+    );
+    return "invalid-foundry-endpoint";
+  }
+}
+
+function validateActivationPayloadKey(
+  vendor: string,
+  parsed: Record<string, string>,
+): "no-demo-key" | null {
+  const keyEnv = demoKeyEnvVar(vendor);
+  const apiKey = parsed[keyEnv];
+  if (typeof apiKey === "string" && apiKey.length > 0) return null;
+  log.warn(`activation payload missing ${keyEnv}`);
+  return "no-demo-key";
+}
+
 export function registerDemoHandlers(deps: IpcDeps): void {
   const { auditLogger } = deps;
   let relaunchArmed = false;
@@ -128,13 +176,34 @@ export function registerDemoHandlers(deps: IpcDeps): void {
   const demoWasEffectiveAtBoot = isDemoEnabled();
 
   ipcMain.handle(
+    "lvis:demo:status",
+    async (
+      e,
+    ): Promise<
+      | { ok: true; activated: boolean; vendor: string | null }
+      | { ok: false; error: "unauthorized-frame" }
+    > => {
+      if (!validateSender(e)) {
+        auditUnauthorized(auditLogger, "lvis:demo:status", e);
+        return { ok: false, error: UNAUTHORIZED_FRAME.error };
+      }
+      const activated = isDemoEnabled();
+      return {
+        ok: true,
+        activated,
+        vendor: activated ? getDemoActiveVendor() : null,
+      };
+    },
+  );
+
+  ipcMain.handle(
     "lvis:demo:activate",
     async (
       e,
       payload: { code?: unknown },
     ): Promise<
       | { ok: true; vendor: string; requiresRelaunch?: boolean }
-      | { ok: false; error: "invalid-code" | "persist-failed" | "no-vendor" | "unauthorized-frame" }
+      | { ok: false; error: "invalid-code" | "persist-failed" | "no-vendor" | "invalid-vendor" | "no-demo-key" | "missing-foundry-endpoint" | "invalid-foundry-endpoint" | "unauthorized-frame" }
     > => {
       if (!validateSender(e)) {
         auditUnauthorized(auditLogger, "lvis:demo:activate", e);
@@ -175,6 +244,18 @@ export function registerDemoHandlers(deps: IpcDeps): void {
       if (typeof vendor !== "string" || vendor.length === 0) {
         log.warn("activation payload missing LVIS_DEMO_VENDOR");
         return { ok: false, error: "no-vendor" };
+      }
+      if (!isLLMVendor(vendor)) {
+        log.warn(`activation payload has invalid LVIS_DEMO_VENDOR: ${vendor}`);
+        return { ok: false, error: "invalid-vendor" };
+      }
+      const keyError = validateActivationPayloadKey(vendor, parsed);
+      if (keyError !== null) {
+        return { ok: false, error: keyError };
+      }
+      const endpointError = validateActivationPayloadEndpoint(vendor, parsed);
+      if (endpointError !== null) {
+        return { ok: false, error: endpointError };
       }
 
       // Step 3 — persist to disk so the next boot auto-activates. The file

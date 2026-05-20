@@ -35,8 +35,8 @@
  *   "multi-agent"). Downstream stages (MemorySeed recommendations,
  *   PluginShowcase ordering, intro placeholder) read it via the
  *   exposed state so the chain is personalised by the user's first
- *   click. `null` means the user skipped the showcase or no card was
- *   clicked.
+ *   click. `null` means the user used the grid's direct
+ *   "로그인하여 LVIS 시작하기" CTA without previewing a card.
  *
  *   `memorySeed` carries the 호칭 + 자기소개 the user typed into the
  *   MemorySeedDialog so the downstream `personalized_welcome` stage
@@ -45,9 +45,10 @@
  * Events:
  *   probe-skip                  — boot probe found an existing key (skip whole chain).
  *   probe-start                 — boot probe says first-boot; mount Showcase.
- *   showcase-start              — user pressed "로그인하에 LVIS 시작하기" inside
+ *   showcase-start              — user pressed "로그인하여 LVIS 시작하기" inside
  *                                 the showcase. Carries the picked `scenarioId`
- *                                 so the chain context records the selection.
+ *                                 from an inline preview, or `null` from the
+ *                                 grid's direct-login CTA.
  *   login-success               — LoginModal onSuccess fired.
  *   login-skip                  — LoginModal closed without success.
  *   memory-finish               — MemorySeed onDismissed fired (success or skip).
@@ -60,7 +61,8 @@
  *   plugins-close               — PluginShowcase closed (or skipped).
  *
  * `showcase-skip` was removed 2026-05-20 — the showcase no longer offers a
- * skip path; the user MUST pick one of the 4 cards before advancing.
+ * dismiss-style skip path. The user either previews one of the 4 cards or
+ * advances through the grid's direct-login CTA.
  *
  * The reducer never returns to a prior stage — strict forward
  * progress — so a stale onSuccess event from a re-mounted LoginModal
@@ -98,7 +100,7 @@ export interface OnboardingChainState {
   /**
    * Scenario id (ScenarioShowcase card) the user chose to start with.
    * Read by downstream stages to personalise recommendations + tour.
-   * `null` when no card was picked (skip path or returning user).
+   * `null` when no card was picked (direct-login CTA or returning user).
    */
   selectedScenarioId: string | null;
   /**
