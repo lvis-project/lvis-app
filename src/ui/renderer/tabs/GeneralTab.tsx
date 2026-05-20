@@ -234,9 +234,11 @@ export function GeneralTab({
         try {
           await api.deleteApiKey(activeVendor);
         } catch {
-          // active vendor 키 삭제 실패는 비치명적 — demo clear 와 onboarding
-          // reset 은 계속 진행. logout 의 user intent 는 "현재 인증을 끊는다"
-          // 이므로 key 삭제 실패해도 onboarding 회귀가 더 중요.
+          // Logout is a credential-deletion operation. If the active vendor
+          // secret remains, resetting onboarding would create a false logged-
+          // out state while privileged credentials are still present.
+          setLogoutError("API 키 삭제 중 오류가 발생했습니다. 다시 시도해 주세요.");
+          return;
         }
       }
       const cleared = await api.demo.clearDemo();
