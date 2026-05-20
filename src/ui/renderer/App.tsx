@@ -15,7 +15,6 @@ import { getApi, getPluginViewLabel, toViewKey } from "./api-client.js";
 import type { PluginEntry } from "./components/PluginGridButton.js";
 import { ApprovalDialog } from "./dialogs/ApprovalDialog.js";
 import { DeferredQueueDialog } from "./dialogs/DeferredQueueDialog.js";
-import { TutorialDialog } from "./dialogs/TutorialDialog.js";
 import { MemorySeedDialog } from "./dialogs/MemorySeedDialog.js";
 import { SpotlightTour } from "./components/SpotlightTour.js";
 import { PostTourFirstTask } from "./onboarding/PostTourFirstTask.js";
@@ -150,11 +149,6 @@ export function App() {
   const memorySeedNickname = chainState.memorySeed.nickname;
   const memorySeedIntroduction = chainState.memorySeed.introduction;
   const [deferredQueueOpen, setDeferredQueueOpen] = useState(false);
-  // Tutorial-D — Discovery Swipe dialog open state. Main process
-  // broadcasts `lvis:tutorial:open` from the menu / chat context menu,
-  // and the renderer flips this flag to mount the dialog on top of any
-  // active surface.
-  const [tutorialOpen, setTutorialOpen] = useState(false);
   // Z chain — `tourCompleted` is derived from the chain reducer. The
   // PostTourFirstTask still receives a boolean prop so its existing
   // contract is unchanged; downstream consumers see `true` only after
@@ -282,14 +276,6 @@ export function App() {
         })
       : () => {};
     return () => { unsubShow(); unsubDismiss(); };
-  }, [api]);
-
-  // Tutorial-D — listen for the broadcast emitted by the menu builder
-  // and the chat empty-area context menu. Flipping `tutorialOpen` true
-  // mounts the Discovery Swipe dialog from anywhere in the app.
-  useEffect(() => {
-    if (typeof api.onTutorialOpen !== "function") return;
-    return api.onTutorialOpen(() => setTutorialOpen(true));
   }, [api]);
 
   // Plugin overlay primary action handler (user confirm → main chat insert).
@@ -1398,11 +1384,6 @@ export function App() {
         </div>
       )}
       <DeferredQueueDialog open={deferredQueueOpen} onOpenChange={setDeferredQueueOpen} />
-      <TutorialDialog
-        open={tutorialOpen}
-        onOpenChange={setTutorialOpen}
-        api={api}
-      />
       <ApprovalDialog queue={approvalQueue} onDecide={handleApprovalDecide} />
       {/* Z onboarding chain — staged sequence of dialogs.
           The chain reducer guarantees only one of these dialogs is
