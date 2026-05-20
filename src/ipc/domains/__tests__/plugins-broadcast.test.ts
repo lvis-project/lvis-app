@@ -62,11 +62,16 @@ async function setup() {
         return { pluginId: "agent-hub", installed: true };
       }),
       uninstall: vi.fn(async (pluginId: string) => ({ pluginId, uninstalled: true })),
+      rollbackPlugin: vi.fn(async (pluginId: string) => ({ pluginId, rolledBackTo: "0.0.1" })),
+      rollbackLocalInstall: vi.fn(async (pluginId: string) => ({ pluginId, rolledBack: true })),
+      clearLocalInstallRollback: vi.fn(async () => undefined),
       installLocal: vi.fn(async () => ({ pluginId: "local-plugin", installed: true })),
     },
     pluginRuntime: {
-      addPlugin: vi.fn(async () => undefined),
+      addPlugin: vi.fn(async (): Promise<"started" | "preparing" | undefined> => undefined),
+      waitForPluginReady: vi.fn(async () => undefined),
       removePlugin: vi.fn(async () => undefined),
+      listPluginIds: vi.fn((): string[] => []),
       mergeConfigOverride: vi.fn(),
       getPluginManifest: vi.fn(() => ({
         configSchema: {
@@ -131,6 +136,63 @@ describe("plugins IPC lifecycle broadcast", () => {
     }
   });
 
+  it("uses the requested marketplace slug for every install lifecycle event when it resolves to a different plugin id", async () => {
+    const { deps, appWindows } = await setup();
+    deps.pluginMarketplace.install.mockImplementationOnce(async (...args: unknown[]) => {
+      emitRegisteringProgress(args);
+      return { pluginId: "meeting", installed: true };
+    });
+
+    await invoke("lvis:plugins:install", "lvis-plugin-meeting");
+
+    expect(deps.pluginRuntime.addPlugin).toHaveBeenCalledWith("meeting");
+    for (const win of appWindows) {
+      expect(win.webContents.send).toHaveBeenCalledWith(
+        "lvis:plugins:install-progress",
+        { slug: "lvis-plugin-meeting", phase: "installing" },
+      );
+      expect(win.webContents.send).toHaveBeenCalledWith(
+        "lvis:plugins:install-progress",
+        { slug: "lvis-plugin-meeting", phase: "registering" },
+      );
+      expect(win.webContents.send).toHaveBeenCalledWith(
+        "lvis:plugins:install-progress",
+        { slug: "lvis-plugin-meeting", phase: "restarting" },
+      );
+      expect(win.webContents.send).toHaveBeenCalledWith(
+        "lvis:plugins:install-result",
+        { slug: "lvis-plugin-meeting", success: true },
+      );
+      expect(win.webContents.send).not.toHaveBeenCalledWith(
+        "lvis:plugins:install-progress",
+        expect.objectContaining({ slug: "meeting" }),
+      );
+      expect(win.webContents.send).not.toHaveBeenCalledWith(
+        "lvis:plugins:install-result",
+        expect.objectContaining({ slug: "meeting" }),
+      );
+    }
+  });
+
+  it("broadcasts marketplace install failure with the requested slug when install throws before a canonical plugin id exists", async () => {
+    const { deps, appWindows } = await setup();
+    deps.pluginMarketplace.install.mockRejectedValueOnce(new Error("download failed"));
+
+    await expect(invoke("lvis:plugins:install", "lvis-plugin-meeting")).rejects.toThrow("download failed");
+
+    expect(deps.pluginRuntime.addPlugin).not.toHaveBeenCalled();
+    for (const win of appWindows) {
+      expect(win.webContents.send).toHaveBeenCalledWith(
+        "lvis:plugins:install-progress",
+        { slug: "lvis-plugin-meeting", phase: "installing" },
+      );
+      expect(win.webContents.send).toHaveBeenCalledWith(
+        "lvis:plugins:install-result",
+        { slug: "lvis-plugin-meeting", success: false, error: "download failed" },
+      );
+    }
+  });
+
   it("broadcasts marketplace install failure when runtime add rolls back", async () => {
     const { deps, appWindows } = await setup();
     deps.pluginRuntime.addPlugin.mockRejectedValueOnce(new Error("runtime failed"));
@@ -142,6 +204,77 @@ describe("plugins IPC lifecycle broadcast", () => {
       expect(win.webContents.send).toHaveBeenCalledWith(
         "lvis:plugins:install-result",
         { slug: "agent-hub", success: false, error: "runtime failed" },
+      );
+    }
+  });
+
+  it("delays marketplace install success until async dependency preparation finishes", async () => {
+    const { deps, appWindows } = await setup();
+    let resolveReady!: () => void;
+    const readyPromise = new Promise<void>((resolve) => {
+      resolveReady = resolve;
+    });
+    deps.pluginRuntime.addPlugin.mockResolvedValueOnce("preparing");
+    deps.pluginRuntime.waitForPluginReady.mockReturnValueOnce(readyPromise);
+
+    const installPromise = invoke("lvis:plugins:install", "agent-hub");
+    await new Promise((resolve) => setTimeout(resolve, 0));
+
+    for (const win of appWindows) {
+      expect(win.webContents.send).toHaveBeenCalledWith(
+        "lvis:plugins:install-progress",
+        { slug: "agent-hub", phase: "preparing" },
+      );
+      expect(win.webContents.send).not.toHaveBeenCalledWith(
+        "lvis:plugins:install-result",
+        { slug: "agent-hub", success: true },
+      );
+    }
+
+    resolveReady();
+    await expect(installPromise).resolves.toMatchObject({
+      pluginId: "agent-hub",
+      installed: true,
+    });
+
+    for (const win of appWindows) {
+      expect(win.webContents.send).toHaveBeenCalledWith(
+        "lvis:plugins:install-result",
+        { slug: "agent-hub", success: true },
+      );
+    }
+  });
+
+  it("rolls back marketplace install when async dependency preparation fails", async () => {
+    const { deps, appWindows } = await setup();
+    deps.pluginRuntime.addPlugin.mockResolvedValueOnce("preparing");
+    deps.pluginRuntime.waitForPluginReady.mockRejectedValueOnce(new Error("prepare failed"));
+
+    await expect(invoke("lvis:plugins:install", "agent-hub")).rejects.toThrow("prepare failed");
+
+    expect(deps.pluginMarketplace.uninstall).toHaveBeenCalledWith("agent-hub");
+    for (const win of appWindows) {
+      expect(win.webContents.send).toHaveBeenCalledWith(
+        "lvis:plugins:install-result",
+        { slug: "agent-hub", success: false, error: "prepare failed" },
+      );
+    }
+  });
+
+  it("rolls back a marketplace update without removing the loaded plugin when restart fails", async () => {
+    const { deps, appWindows } = await setup();
+    deps.pluginRuntime.listPluginIds.mockReturnValue(["agent-hub"]);
+    deps.pluginRuntime.addPlugin.mockRejectedValueOnce(new Error("prepare failed"));
+
+    await expect(invoke("lvis:plugins:install", "agent-hub")).rejects.toThrow("prepare failed");
+
+    expect(deps.pluginMarketplace.rollbackPlugin).toHaveBeenCalledWith("agent-hub");
+    expect(deps.pluginRuntime.removePlugin).not.toHaveBeenCalledWith("agent-hub");
+    expect(deps.pluginMarketplace.uninstall).not.toHaveBeenCalledWith("agent-hub");
+    for (const win of appWindows) {
+      expect(win.webContents.send).toHaveBeenCalledWith(
+        "lvis:plugins:install-result",
+        { slug: "agent-hub", success: false, error: "prepare failed" },
       );
     }
   });
@@ -295,6 +428,27 @@ describe("plugins IPC lifecycle broadcast", () => {
     }
   });
 
+  it("rolls back local reinstall on disk when loaded plugin activation fails", async () => {
+    const { deps, appWindows } = await setup();
+    electronMocks.showOpenDialog.mockResolvedValueOnce({
+      canceled: false,
+      filePaths: ["/tmp/local-plugin"],
+    });
+    deps.pluginRuntime.listPluginIds.mockReturnValueOnce(["local-plugin"]);
+    deps.pluginRuntime.addPlugin.mockRejectedValueOnce(new Error("local runtime failed"));
+
+    await expect(invoke("lvis:plugins:install-local")).rejects.toThrow("local runtime failed");
+
+    expect(deps.pluginMarketplace.rollbackLocalInstall).toHaveBeenCalledWith("local-plugin");
+    expect(deps.pluginMarketplace.uninstall).not.toHaveBeenCalledWith("local-plugin");
+    for (const win of appWindows) {
+      expect(win.webContents.send).toHaveBeenCalledWith(
+        "lvis:plugins:install-result",
+        { slug: "local-plugin", success: false, error: "local runtime failed" },
+      );
+    }
+  });
+
   it("skips destroyed app windows during lifecycle broadcast", async () => {
     handlers.clear();
     vi.clearAllMocks();
@@ -310,11 +464,16 @@ describe("plugins IPC lifecycle broadcast", () => {
           return { pluginId: "agent-hub", installed: true };
         }),
         uninstall: vi.fn(async (pluginId: string) => ({ pluginId, uninstalled: true })),
+        rollbackPlugin: vi.fn(async (pluginId: string) => ({ pluginId, rolledBackTo: "0.0.1" })),
+        rollbackLocalInstall: vi.fn(async (pluginId: string) => ({ pluginId, rolledBack: true })),
+        clearLocalInstallRollback: vi.fn(async () => undefined),
         installLocal: vi.fn(async () => ({ pluginId: "local-plugin", installed: true })),
       },
       pluginRuntime: {
-        addPlugin: vi.fn(async () => undefined),
+        addPlugin: vi.fn(async (): Promise<"started" | "preparing" | undefined> => undefined),
+        waitForPluginReady: vi.fn(async () => undefined),
         removePlugin: vi.fn(async () => undefined),
+        listPluginIds: vi.fn((): string[] => []),
         mergeConfigOverride: vi.fn(),
       },
       settingsService: {

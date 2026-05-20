@@ -93,6 +93,7 @@ export const COMMON_IPC_ERROR_MESSAGES: Readonly<Record<string, string>> = {
   "invalid-memory-sections": "잘못된 메모리 섹션 정보입니다.",
   "routine-not-found": "루틴을 찾을 수 없습니다.",
   "no-user-message": "사용자 메시지를 찾을 수 없습니다.",
+  "last-message-not-user": "마지막 메시지가 사용자 질문이 아니어서 이어서 생성할 수 없습니다.",
   "no-scheduler": "스케줄러가 활성화되지 않았습니다.",
 
   // ── Plugin / marketplace / bundle ──
@@ -147,13 +148,11 @@ export const COMMON_IPC_ERROR_MESSAGES: Readonly<Record<string, string>> = {
   // ── Tutorial-C — tour:{start,mark-complete,dismiss} validation ──
   "invalid-scenario-id": "선택한 가이드 투어 항목이 올바르지 않습니다.",
   "write-failed": "설정을 저장하지 못했습니다.",
-  // ── Tutorial-D — Discovery Swipe validation + dispatch failures ──
-  "invalid-card-id": "잘못된 카드 식별자입니다.",
-  "no-window": "현재 창을 찾을 수 없습니다. 앱을 다시 시작해 주세요.",
   // ── Audit demo throttle (pre-existing in audit.ts) ──
   "rate-limited": "요청이 너무 잦습니다. 잠시 후 다시 시도해 주세요.",
 
   // ── Misc IO / system ──
+  "no-window": "현재 창을 찾을 수 없습니다. 앱을 다시 시작해 주세요.",
   "invalid-request-id": "잘못된 요청 ID입니다.",
   "invalid-webcontents-id": "잘못된 webContents ID입니다.",
   "invalid-foundry-endpoint": "잘못된 Foundry 엔드포인트입니다.",

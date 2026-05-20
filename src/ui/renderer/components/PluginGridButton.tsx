@@ -13,12 +13,15 @@ const PHASE_LABEL: Record<InstallPhase, string> = {
   installing: "설치",
   registering: "등록",
   restarting: "재시작",
+  preparing: "준비",
 };
 
 export interface PluginEntry {
   viewKey: string;
   /** Plugin id owning the view — drives auth-state lookup. @optional */
   pluginId?: string;
+  /** Request slugs that install/update this plugin, including marketplace aliases. */
+  installAliases?: string[];
   label: string;
   /** Lucide icon name from the plugin manifest (PascalCase, e.g. "Mic"). */
   icon?: string;
@@ -115,9 +118,11 @@ export function PluginGridButton({
   // Slugs that are installing but not yet registered as PluginEntry — render
   // them as placeholder cells so the user sees their click registered the
   // moment the install pipeline starts, before the runtime emits a view.
-  const registeredIds = new Set(
-    plugins.map((p) => p.pluginId ?? p.viewKey.split(":")[1] ?? ""),
-  );
+  const installKeysFor = (plugin: PluginEntry): string[] => {
+    const pluginId = plugin.pluginId ?? plugin.viewKey.split(":")[1] ?? "";
+    return [pluginId, ...(plugin.installAliases ?? [])].filter((key) => key.length > 0);
+  };
+  const registeredIds = new Set(plugins.flatMap(installKeysFor));
   const placeholderInstalls: Array<[string, InstallPhase]> = installingPlugins
     ? Array.from(installingPlugins.entries()).filter(([slug]) => !registeredIds.has(slug))
     : [];
@@ -213,14 +218,12 @@ export function PluginGridButton({
             data-testid="plugin-grid"
           >
             {plugins.map((p) => {
-              // Use explicit pluginId from PluginEntry when available; fall back
-              // to deriving from viewKey for cases where the caller omits it.
-              // pluginId drives the install-phase lookup; viewKey drives the
-              // testid so a single plugin exposing multiple plugin UI
-              // extensions still gets unique cells.
-              const pluginId = p.pluginId ?? p.viewKey.split(":")[1] ?? "";
+              // viewKey drives the testid so a single plugin exposing multiple
+              // plugin UI extensions still gets unique cells.
               const cellTestId = p.viewKey.replace(/:/g, "-");
-              const phase = installingPlugins?.get(pluginId);
+              const phase = installKeysFor(p)
+                .map((key) => installingPlugins?.get(key))
+                .find((value): value is InstallPhase => value !== undefined);
               const isInstalling = phase !== undefined;
               const Icon = pluginIconFor({ icon: p.icon, iconText: p.iconText });
 

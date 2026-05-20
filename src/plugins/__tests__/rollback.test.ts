@@ -31,11 +31,13 @@ const SAMPLE_ITEM: PluginMarketplaceItem = {
 };
 
 class StubFetcher implements MarketplaceFetcher {
+  item: PluginMarketplaceItem = { ...SAMPLE_ITEM };
+
   async listPlugins() {
-    return [SAMPLE_ITEM];
+    return [this.item];
   }
   async getPluginDetail(id: string) {
-    return id === SAMPLE_ITEM.id ? SAMPLE_ITEM : null;
+    return id === this.item.id ? this.item : null;
   }
   async downloadVersion() {
     throw new Error("downloadVersion stub — installArtifact is mocked in this test file");
@@ -69,9 +71,9 @@ describe("PluginMarketplaceService install → update → rollback", () => {
     _resetForTest();
   });
 
-  function makeService() {
+  function makeService(fetcher = new StubFetcher()) {
     const paths = makeTestPluginPaths({ rootDir: testDir, cacheRoot });
-    const svc = new PluginMarketplaceService(paths, new StubFetcher());
+    const svc = new PluginMarketplaceService(paths, fetcher);
     // Stub installArtifact: write a versioned plugin.json under the live
     // install dir and return the registry-relative path. Mirrors the
     // post-extraction state of the real signed-zip pipeline.
@@ -96,6 +98,23 @@ describe("PluginMarketplaceService install → update → rollback", () => {
     expect(JSON.parse(await readFile(join(pluginDir, "plugin.json"), "utf-8")).version).toBe("1.0.0");
 
     await svc.installPlugin("example-sample", "1.1.0");
+    expect(JSON.parse(await readFile(join(pluginDir, "plugin.json"), "utf-8")).version).toBe("1.1.0");
+
+    const result = await svc.rollbackPlugin("example-sample");
+    expect(result.rolledBackTo).toBe("1.0.0");
+    expect(JSON.parse(await readFile(join(pluginDir, "plugin.json"), "utf-8")).version).toBe("1.0.0");
+  });
+
+  it("normal install records history so lifecycle rollback can restore the prior version", async () => {
+    const fetcher = new StubFetcher();
+    const svc = makeService(fetcher);
+
+    fetcher.item = { ...SAMPLE_ITEM, version: "1.0.0" };
+    await svc.install("example-sample");
+    expect(JSON.parse(await readFile(join(pluginDir, "plugin.json"), "utf-8")).version).toBe("1.0.0");
+
+    fetcher.item = { ...SAMPLE_ITEM, version: "1.1.0" };
+    await svc.install("example-sample");
     expect(JSON.parse(await readFile(join(pluginDir, "plugin.json"), "utf-8")).version).toBe("1.1.0");
 
     const result = await svc.rollbackPlugin("example-sample");

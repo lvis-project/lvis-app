@@ -246,6 +246,35 @@ describe("PluginConfigTab", () => {
     });
     expect(screen.queryByText("Endpoint")).toBeNull();
   });
+
+  it("does not render duplicate in-flight rows for marketplace alias slugs", async () => {
+    let installProgressHandler: ((payload: { slug: string; phase: "installing" | "restarting" }) => void) | null = null;
+    Object.defineProperty(window, "lvisApi", {
+      value: {
+        onPluginInstallProgress: vi.fn((handler: (payload: { slug: string; phase: "installing" | "restarting" }) => void) => {
+          installProgressHandler = handler;
+          return () => undefined;
+        }),
+        onPluginInstallResult: vi.fn(() => () => undefined),
+        onPluginUninstallResult: vi.fn(() => () => undefined),
+      },
+      writable: true,
+      configurable: true,
+    });
+
+    render(<PluginConfigTab />);
+
+    await waitFor(() => {
+      expect(mockCards).toHaveBeenCalledOnce();
+      expect(screen.getAllByText("Meeting").length).toBeGreaterThan(0);
+    });
+
+    await act(async () => {
+      installProgressHandler?.({ slug: "lvis-plugin-meeting", phase: "restarting" });
+    });
+
+    expect(screen.queryByLabelText("lvis-plugin-meeting 설치 진행 중")).toBeNull();
+  });
 });
 
 describe("PluginConfigTab — §9.2 Track B configSchema rendering", () => {
