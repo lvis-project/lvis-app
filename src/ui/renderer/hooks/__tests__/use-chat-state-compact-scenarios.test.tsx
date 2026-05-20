@@ -257,4 +257,22 @@ describe("useChatState — compact lifecycle scenarios", () => {
 
     expect(result.current.isCompacting).toBe(false);
   });
+
+  it("S9: error event propagates systemNotice for live/reload alert parity", () => {
+    const { api, streamHandler } = makeCapturedApi();
+    const { result } = renderHook(() => useChatState(api));
+
+    dispatchEvent(streamHandler, {
+      type: "error",
+      error: "Resource not found",
+      systemNotice: "stream-error",
+    } as StreamEvent);
+
+    const assistant = result.current.entries.at(-1);
+    expect(assistant).toMatchObject({
+      kind: "assistant",
+      text: "오류: Resource not found",
+      systemNotice: "stream-error",
+    });
+  });
 });
