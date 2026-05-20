@@ -782,7 +782,7 @@ export function App() {
     // optional chaining 으로 graceful degradation. production preload 는 항상
     // 두 메서드를 정의하고, undefined 일 때는 listener 만 비활성 (전체 effect 가
     // throw 하지 않는다).
-    const unsubLogout = api.auth.onLogoutReset?.(() => {
+    const unsubLogout = api.auth?.onLogoutReset?.(() => {
       dispatchChain({ type: "logout-reset" });
       chainTourBroadcastRef.current = false;
       chainCompletionPersistedRef.current = false;
@@ -794,7 +794,7 @@ export function App() {
       setBootProbeGen((g) => g + 1);
       void checkApiKey();
     });
-    const unsubReactivate = api.auth.onReactivateDemo?.(() => {
+    const unsubReactivate = api.auth?.onReactivateDemo?.(() => {
       setReactivationOpen(true);
     });
     return () => {
