@@ -35,6 +35,9 @@
  *   - `persist-failed` covers: filesystem write failures (permission,
  *     disk full, parent dir missing).
  *   - `no-vendor` covers: decrypted payload missing `LVIS_DEMO_VENDOR`.
+ *   - `invalid-vendor` covers: decrypted payload has an unknown vendor.
+ *   - `invalid-foundry-endpoint` covers: Azure Foundry payload endpoint
+ *     rejected by the shared settings endpoint validator.
  *
  * Storage namespace (project CLAUDE.md "Storage Namespace per Feature"):
  *   The persisted `.env.demo` lives under `~/.lvis/secrets/` (cross-cutting
@@ -53,9 +56,11 @@ import {
 } from "../../main/demo-activation-codec.js";
 import { persistedEnvDemoPath } from "../../main/demo-activation-loader.js";
 import {
+  getDemoActiveVendor,
   isDemoEnabled,
   recaptureDemoCredentialsAfterActivation,
 } from "../../main/demo-credentials.js";
+import { validateFoundryEndpoint } from "../../permissions/reviewer/provider-adapters.js";
 import { isLLMVendor } from "../../shared/llm-vendor-defaults.js";
 import type { IpcDeps } from "../types.js";
 
@@ -113,6 +118,26 @@ async function writeEnvDemoFile(path: string, contents: string): Promise<void> {
   await fs.rename(tmp, path);
 }
 
+function validateActivationPayloadEndpoint(
+  vendor: string,
+  parsed: Record<string, string>,
+): "invalid-foundry-endpoint" | null {
+  if (vendor !== "azure-foundry") return null;
+  const baseUrl =
+    parsed.LVIS_DEMO_BASEURL_AZURE_FOUNDRY ??
+    parsed.LVIS_DEMO_ENDPOINT_AZURE_FOUNDRY;
+  if (typeof baseUrl !== "string" || baseUrl.length === 0) return null;
+  try {
+    validateFoundryEndpoint(baseUrl);
+    return null;
+  } catch (err) {
+    log.warn(
+      `activation payload has invalid azure-foundry endpoint: ${(err as Error).message}`,
+    );
+    return "invalid-foundry-endpoint";
+  }
+}
+
 export function registerDemoHandlers(deps: IpcDeps): void {
   const { auditLogger } = deps;
   let relaunchArmed = false;
@@ -129,13 +154,34 @@ export function registerDemoHandlers(deps: IpcDeps): void {
   const demoWasEffectiveAtBoot = isDemoEnabled();
 
   ipcMain.handle(
+    "lvis:demo:status",
+    async (
+      e,
+    ): Promise<
+      | { ok: true; activated: boolean; vendor: string | null }
+      | { ok: false; error: "unauthorized-frame" }
+    > => {
+      if (!validateSender(e)) {
+        auditUnauthorized(auditLogger, "lvis:demo:status", e);
+        return { ok: false, error: UNAUTHORIZED_FRAME.error };
+      }
+      const activated = isDemoEnabled();
+      return {
+        ok: true,
+        activated,
+        vendor: activated ? getDemoActiveVendor() : null,
+      };
+    },
+  );
+
+  ipcMain.handle(
     "lvis:demo:activate",
     async (
       e,
       payload: { code?: unknown },
     ): Promise<
       | { ok: true; vendor: string; requiresRelaunch?: boolean }
-      | { ok: false; error: "invalid-code" | "persist-failed" | "no-vendor" | "invalid-vendor" | "unauthorized-frame" }
+      | { ok: false; error: "invalid-code" | "persist-failed" | "no-vendor" | "invalid-vendor" | "invalid-foundry-endpoint" | "unauthorized-frame" }
     > => {
       if (!validateSender(e)) {
         auditUnauthorized(auditLogger, "lvis:demo:activate", e);
@@ -180,6 +226,10 @@ export function registerDemoHandlers(deps: IpcDeps): void {
       if (!isLLMVendor(vendor)) {
         log.warn(`activation payload has invalid LVIS_DEMO_VENDOR: ${vendor}`);
         return { ok: false, error: "invalid-vendor" };
+      }
+      const endpointError = validateActivationPayloadEndpoint(vendor, parsed);
+      if (endpointError !== null) {
+        return { ok: false, error: endpointError };
       }
 
       // Step 3 — persist to disk so the next boot auto-activates. The file
