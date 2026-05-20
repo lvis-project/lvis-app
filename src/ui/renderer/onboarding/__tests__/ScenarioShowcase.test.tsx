@@ -23,10 +23,21 @@ describe("ScenarioShowcase (Option A — interactive demo launcher, 2026-05-20)"
     ).toBeTruthy();
   });
 
-  it("grid does NOT expose skip / proceed-without-pick buttons (forced choice)", () => {
+  it("grid exposes direct login CTA but no skip button", () => {
     render(<ScenarioShowcase open onStart={() => {}} />);
-    expect(screen.queryByTestId("scenario-showcase:start")).toBeNull();
+    expect(screen.getAllByText("▶ 시나리오 구경하기")).toHaveLength(4);
+    expect(screen.getByTestId("scenario-showcase:start").textContent).toContain(
+      "로그인하여 LVIS 시작하기",
+    );
     expect(screen.queryByTestId("scenario-showcase:skip")).toBeNull();
+  });
+
+  it("grid direct login CTA fires onStart with no picked scenario", () => {
+    const onStart = vi.fn();
+    render(<ScenarioShowcase open onStart={onStart} />);
+    fireEvent.click(screen.getByTestId("scenario-showcase:start"));
+    expect(onStart).toHaveBeenCalledTimes(1);
+    expect(onStart).toHaveBeenCalledWith(null);
   });
 
   it("cards are interactive buttons (Option A — click → inline demo)", () => {
@@ -55,7 +66,7 @@ describe("ScenarioShowcase (Option A — interactive demo launcher, 2026-05-20)"
     expect(screen.getByTestId("scenario-showcase:grid")).toBeTruthy();
   });
 
-  it("inline demo footer '로그인하에 LVIS 시작하기' fires onStart with the picked scenarioId", () => {
+  it("inline demo footer '로그인하여 LVIS 시작하기' fires onStart with the picked scenarioId", () => {
     const onStart = vi.fn();
     render(<ScenarioShowcase open onStart={onStart} />);
     fireEvent.click(screen.getByTestId("scenario-showcase:card:work"));

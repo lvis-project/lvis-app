@@ -9,16 +9,16 @@
  *   1. Default grid (no active scenario) — 4 clickable cards
  *      illustrate the canonical LVIS scenarios (meeting / docs / work /
  *      multi-agent). Clicking a card switches the dialog into demo
- *      mode for that scenario. 2026-05-20: the "건너뛰기" link was removed
- *      from the grid — the user MUST pick one of the 4 cards before the
- *      chain advances. There is no skip path; closing the dialog is a
- *      no-op via Radix until a card is chosen.
+ *      mode for that scenario. A primary "로그인하여 LVIS 시작하기"
+ *      button advances directly to LoginModal with no selected scenario.
+ *      There is still no skip path; closing the dialog is a no-op via
+ *      Radix until the user either previews a scenario or starts login.
  *
  *   2. Inline demo (activeScenarioId set) — the picked card's scripted
  *      turn plays inside the same dialog via the shared
  *      `ScriptedTurnEngine`. Header shows "← 다른 시나리오" + a pulsing
  *      "● DEMO" indicator; footer offers two CTAs:
- *        - "로그인하에 LVIS 시작하기" — dispatches `showcase-start` with
+ *        - "로그인하여 LVIS 시작하기" — dispatches `showcase-start` with
  *           the picked scenarioId so the onboarding chain advances to
  *           LoginModal carrying the user's choice.
  *        - "뒤로가기" — resets the active scenario, returning to the
@@ -53,7 +53,7 @@ import { getScriptByScenarioId } from "../../../engine/demo-autoplay/scripts-reg
 export interface ScenarioShowcaseProps {
   open: boolean;
   /**
-   * Called when the user clicks "로그인하에 LVIS 시작하기". Carries the
+   * Called when the user clicks "로그인하여 LVIS 시작하기". Carries the
    * picked scenarioId so the onboarding chain can personalise the
    * downstream stages (MemorySeed recommendations, PluginShowcase
    * ordering, intro placeholder). Always invoked from the inline demo
@@ -176,6 +176,7 @@ export function ScenarioShowcase({ open, onStart }: ScenarioShowcaseProps) {
           <ScenarioShowcaseGrid
             cards={cards}
             onCardClick={handleCardClick}
+            onStart={handleStart}
           />
         )}
       </DialogContent>
@@ -186,19 +187,20 @@ export function ScenarioShowcase({ open, onStart }: ScenarioShowcaseProps) {
 /**
  * Grid view — passive-illustration layout updated to the Option A
  * mockup. Cards are now *buttons* (the entire surface is clickable);
- * the "▶ demo 시연" affordance under each label communicates that the
- * click leads to a live preview rather than a hidden tab switch.
+ * the "▶ 시나리오 구경하기" affordance under each label communicates
+ * that the click leads to a live preview rather than a hidden tab switch.
  *
- * 2026-05-20: skip / proceed-without-pick buttons removed — user MUST
- * pick one of the 4 cards before advancing. The inline demo footer
- * is now the sole path forward.
+ * 2026-05-20: the skip path stays removed. The user can preview one of
+ * the 4 cards or continue directly to login through the primary CTA.
  */
 function ScenarioShowcaseGrid({
   cards,
   onCardClick,
+  onStart,
 }: {
   cards: readonly ScenarioCard[];
   onCardClick: (scenarioId: string) => void;
+  onStart: () => void;
 }) {
   return (
     <>
@@ -219,7 +221,7 @@ function ScenarioShowcaseGrid({
               LVIS Studio
             </DialogTitle>
             <DialogDescription className="text-[11px]">
-              어떤 작업이 가장 자주이세요? 카드를 누르면 즉시 시연합니다.
+              어떤 작업이 가장 자주이세요? 카드를 누르면 시나리오를 구경할 수 있습니다.
             </DialogDescription>
           </div>
         </div>
@@ -237,7 +239,7 @@ function ScenarioShowcaseGrid({
               data-testid={`scenario-showcase:card:${card.id}`}
               onClick={() => onCardClick(card.id)}
               className="rounded-lg border border-border/70 bg-[hsl(var(--muted))] px-3 py-3 text-left transition hover:border-[hsl(var(--p-purple-500)/0.6)] hover:bg-[hsl(var(--muted))]/80 focus:outline-none focus:ring-2 focus:ring-[hsl(var(--p-purple-500))]"
-              aria-label={`${card.title} — ${card.body}. 클릭하면 데모가 시연됩니다.`}
+              aria-label={`${card.title} — ${card.body}. 클릭하면 시나리오를 구경합니다.`}
             >
               <div className="text-lg leading-none" aria-hidden="true">
                 {card.icon}
@@ -250,15 +252,24 @@ function ScenarioShowcaseGrid({
                 className="mt-2 text-[10px] font-medium"
                 style={{ color: "hsl(var(--p-purple-500))" }}
               >
-                ▶ demo 시연
+                ▶ 시나리오 구경하기
               </div>
             </button>
           ))}
         </div>
 
-        {/* 2026-05-20: skip + proceed-without-pick buttons removed. The
-            user must pick one of the 4 cards to proceed; the inline
-            demo footer is the sole path forward. */}
+        <Button
+          type="button"
+          data-testid="scenario-showcase:start"
+          onClick={onStart}
+          className="w-full text-primary-foreground"
+          style={{
+            background:
+              "linear-gradient(135deg, hsl(var(--p-purple-500)), hsl(var(--p-blue-500)))",
+          }}
+        >
+          로그인하여 LVIS 시작하기
+        </Button>
       </div>
     </>
   );
@@ -346,7 +357,7 @@ function ScenarioShowcaseInlineDemo({
                   "linear-gradient(135deg, hsl(var(--p-purple-500)), hsl(var(--p-blue-500)))",
               }}
             >
-              로그인하에 LVIS 시작하기
+              로그인하여 LVIS 시작하기
             </Button>
             <Button
               type="button"
