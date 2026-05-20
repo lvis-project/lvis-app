@@ -23,6 +23,7 @@ export type StreamEvent = {
   thought?: string;
   name?: string;
   error?: string;
+  systemNotice?: "context-error" | "stream-error";
   result?: string;
   isError?: boolean;
   input?: Record<string, unknown>;

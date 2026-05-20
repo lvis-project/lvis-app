@@ -359,7 +359,8 @@ async function runStreamedTurn(
         }),
       onToolEnd: (name, toolResult, isError, meta, uiPayload, durationMs) =>
         send({ type: "tool_end", name, result: toolResult, isError, ...meta, ...(uiPayload && { uiPayload }), durationMs }),
-      onError: (error) => send({ type: "error", error }),
+      onError: (error, systemNotice) =>
+        send({ type: "error", error, ...(systemNotice ? { systemNotice } : {}) }),
       onPermissionModeChanged: (mode) => send({ type: "permission_mode_changed", mode }),
       onCompactStarted: ({ triggerSource, estimatedBefore, preflight }) =>
         send({

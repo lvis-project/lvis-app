@@ -999,6 +999,71 @@ describe("ChatView", () => {
     });
   });
 
+  it("places bulk-loaded history at the bottom without smooth replay scrolling", async () => {
+    const scrollToSpy = vi.fn();
+    Object.defineProperty(HTMLElement.prototype, "scrollTo", {
+      configurable: true,
+      value: scrollToSpy,
+    });
+    vi.stubGlobal("requestAnimationFrame", (cb: FrameRequestCallback) => {
+      cb(0);
+      return 1;
+    });
+    vi.stubGlobal("cancelAnimationFrame", vi.fn());
+
+    const { container } = await renderApp({
+      mainActiveState: {
+        mainActiveSessionId: "sess-default",
+        mainActiveMode: "resume",
+        updatedAt: new Date().toISOString(),
+      },
+      history: {
+        sessionId: "sess-default",
+        messages: [
+          { index: 0, role: "user", content: "오래된 질문" },
+          { index: 1, role: "assistant", content: "마지막 답변" },
+        ],
+      },
+    });
+
+    await waitFor(() => {
+      expect(container.textContent).toContain("마지막 답변");
+      expect(scrollToSpy).toHaveBeenCalledWith(expect.objectContaining({ behavior: "auto" }));
+    });
+    const lastScrollArg = scrollToSpy.mock.calls.at(-1)?.[0] as ScrollToOptions | undefined;
+    expect(lastScrollArg?.behavior).toBe("auto");
+  });
+
+  it("keeps a pinned transcript at the bottom when streaming text grows in place", async () => {
+    const scrollToSpy = vi.fn();
+    Object.defineProperty(HTMLElement.prototype, "scrollTo", {
+      configurable: true,
+      value: scrollToSpy,
+    });
+    vi.stubGlobal("requestAnimationFrame", (cb: FrameRequestCallback) => {
+      cb(0);
+      return 1;
+    });
+    vi.stubGlobal("cancelAnimationFrame", vi.fn());
+
+    const { container, emitChatStream } = await renderApp({ hasApiKey: true });
+    await submitUser(container, "긴 답변 줘");
+    await act(async () => {
+      emitChatStream({ type: "text_delta", text: "첫 문단" });
+    });
+    await waitFor(() => expect(container.textContent).toContain("첫 문단"));
+    scrollToSpy.mockClear();
+
+    await act(async () => {
+      emitChatStream({ type: "text_delta", text: "\n\n두 번째 문단이 같은 assistant entry에 추가됩니다." });
+    });
+
+    await waitFor(() => {
+      expect(container.textContent).toContain("두 번째 문단");
+      expect(scrollToSpy).toHaveBeenCalledWith(expect.objectContaining({ behavior: "smooth" }));
+    });
+  });
+
   it("moves a tool_use assistant round into the active WorkGroup before tool events arrive", async () => {
     const { container, api, emitChatStream } = await renderApp({ hasApiKey: true });
     const pendingSend = deferred<{ ok: true }>();
