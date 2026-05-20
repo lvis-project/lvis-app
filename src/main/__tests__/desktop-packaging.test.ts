@@ -99,9 +99,13 @@ describe("desktop packaging", () => {
   it("persists only LVIS_HOME from the Windows installer and does not force subprocess homes", () => {
     const script = readFileSync(join(root, "build", "installer.nsh"), "utf8");
     expect(script).toContain("customPageAfterChangeDir");
+    expect(script).toContain("!include MUI2.nsh");
     expect(script).toContain("installer-progress.bmp");
     expect(script).toContain("${__FILEDIR__}\\installer-progress.bmp");
     expect(script).not.toContain("BUILD_RESOURCES_DIR");
+    expect(script).toContain('!define /ifndef INSTALL_REGISTRY_KEY "Software\\${APP_GUID}"');
+    expect(script.indexOf("!ifndef BUILD_UNINSTALLER")).toBeLessThan(script.indexOf("Var LvisHomePage"));
+    expect(script.indexOf("Var LvisHomeProgressImage")).toBeLessThan(script.indexOf("Function lvisReadHomeDefault"));
     expect(script).toContain('WriteRegExpandStr HKCU "Environment" "LVIS_HOME" "$LvisHomeSelected"');
     expect(script).toContain(".lvis-data-home");
     expect(script).toContain("Function lvisCanUseHomePath");
@@ -120,6 +124,8 @@ describe("desktop packaging", () => {
       expect(script.slice(script.indexOf(message), script.indexOf(message) + 220)).toContain("Abort");
     }
     expect(script).toContain("Function un.lvisCanRemoveHome");
+    expect(script.indexOf("!ifdef BUILD_UNINSTALLER")).toBeLessThan(script.indexOf("Function un.lvisReadInstalledHome"));
+    expect(script.indexOf("!macro customUnInstall")).toBeLessThan(script.indexOf("!endif", script.indexOf("!macro customUnInstall")));
     expect(script.indexOf("${isUpdated}")).toBeLessThan(script.indexOf('RMDir /r "$LvisHomeSelected"'));
     expect(script).toContain("${AndIfNot} ${isDeleteAppData}");
     expect(script).toContain("Goto lvis_delete_userdata");

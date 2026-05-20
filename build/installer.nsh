@@ -15,9 +15,13 @@
 ; MCP subprocesses keep their OS/user tool home semantics.
 
 !include LogicLib.nsh
+!include MUI2.nsh
 !include nsDialogs.nsh
 !include WinMessages.nsh
 
+; electron-builder defines this in multiUser.nsh for the main installer path,
+; but the uninstaller prebuild can include custom hooks before that template.
+!define /ifndef INSTALL_REGISTRY_KEY "Software\${APP_GUID}"
 !ifndef IMAGE_BITMAP
   !define IMAGE_BITMAP 0
 !endif
@@ -35,12 +39,13 @@
 !endif
 
 Var LvisHomeSelected
+
+!ifndef BUILD_UNINSTALLER
 Var LvisHomePage
 Var LvisHomeInput
 Var LvisHomeBrowseButton
 Var LvisHomeProgressImage
 
-!ifndef BUILD_UNINSTALLER
 Function lvisReadHomeDefault
   ReadRegStr $LvisHomeSelected SHELL_CONTEXT "${INSTALL_REGISTRY_KEY}" "LvisHome"
   ${If} $LvisHomeSelected == ""
@@ -212,6 +217,7 @@ FunctionEnd
 !macroend
 !endif
 
+!ifdef BUILD_UNINSTALLER
 Function un.lvisReadInstalledHome
   ReadRegStr $LvisHomeSelected SHELL_CONTEXT "${INSTALL_REGISTRY_KEY}" "LvisHome"
   ${If} $LvisHomeSelected == ""
@@ -304,3 +310,4 @@ FunctionEnd
 
   lvis_skip_userdata:
 !macroend
+!endif
