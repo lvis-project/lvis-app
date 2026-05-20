@@ -155,6 +155,11 @@ export function App() {
   // and the renderer flips this flag to mount the dialog on top of any
   // active surface.
   const [tutorialOpen, setTutorialOpen] = useState(false);
+  // 2026-05-20 — Settings → "데모 자격증명 재입력" 클릭 시 main window 가
+  // LoginModal 을 forceActivation=true 로 mount 하도록 하는 flag.
+  // `lvis:auth:reactivate-demo` broadcast 가 도착하면 true 로 flip 되고,
+  // LoginModal 이 close 되면 false 로 reset.
+  const [reactivationOpen, setReactivationOpen] = useState(false);
   // Z chain — `tourCompleted` is derived from the chain reducer. The
   // PostTourFirstTask still receives a boolean prop so its existing
   // contract is unchanged; downstream consumers see `true` only after
@@ -630,10 +635,14 @@ export function App() {
   // subsequent transitions are driven by user actions on the in-chain
   // dialogs (NOT by additional IPC probes), so the funnel is fully
   // deterministic and easy to reason about.
-  const firstBootProbedRef = useRef(false);
+  // `bootProbeGen` is the explicit re-run gate. Initial mount fires the
+  // probe once at gen=0; the logout broadcast bumps the generation so the
+  // same effect re-evaluates `onboardingCompleted` / vendor keys on top of
+  // the freshly-cleared state. Without this the original `firstBootProbedRef`
+  // boolean gate (now removed) prevented logout from re-entering the
+  // ScenarioShowcase.
+  const [bootProbeGen, setBootProbeGen] = useState(0);
   useEffect(() => {
-    if (firstBootProbedRef.current) return;
-    firstBootProbedRef.current = true;
     let cancelled = false;
     void (async () => {
       try {
@@ -667,7 +676,7 @@ export function App() {
       }
     })();
     return () => { cancelled = true; };
-  }, [api, checkApiKey]);
+  }, [api, checkApiKey, bootProbeGen]);
 
   const markOnboardingCompleted = useCallback(async () => {
     try {
@@ -755,6 +764,44 @@ export function App() {
       void refreshLlmSettings();
     });
   }, [api, checkApiKey, refreshLlmSettings]);
+
+  // 2026-05-20 — Settings 의 로그아웃 / 데모 자격증명 재입력 broadcast 수신.
+  //
+  // 로그아웃 cue:
+  //   1. chain reducer 에 `logout-reset` dispatch → 모든 stage 가 `idle` 로 collapse
+  //   2. boot-probe ref 를 리셋해 onboardingCompleted=false 가 다시 평가됨
+  //   3. side-effect ref (`chainTourBroadcastRef`, `chainCompletionPersistedRef`)
+  //      도 reset 해서 재진입 chain 의 tour broadcast / completion persist 가
+  //      한 번씩 다시 동작 가능하게 됨
+  //   4. `hasApiKey` 를 다시 평가
+  //
+  // 재입력 cue:
+  //   LoginModal 을 `forceActivation=true` 로 mount.
+  useEffect(() => {
+    // 일부 test fixture 가 `api.auth` 의 broadcast 메서드를 mock 하지 않으므로
+    // optional chaining 으로 graceful degradation. production preload 는 항상
+    // 두 메서드를 정의하고, undefined 일 때는 listener 만 비활성 (전체 effect 가
+    // throw 하지 않는다).
+    const unsubLogout = api.auth.onLogoutReset?.(() => {
+      dispatchChain({ type: "logout-reset" });
+      chainTourBroadcastRef.current = false;
+      chainCompletionPersistedRef.current = false;
+      // Bump the boot-probe generation so the existing probe effect re-runs
+      // against the now-cleared settings (`onboardingCompleted=false`) and
+      // wipes-clear vendor keys. Without this the chain would stay at `idle`
+      // forever because `dispatchChain({logout-reset})` collapses to idle
+      // but no follow-up `probe-start` ever fires.
+      setBootProbeGen((g) => g + 1);
+      void checkApiKey();
+    });
+    const unsubReactivate = api.auth.onReactivateDemo?.(() => {
+      setReactivationOpen(true);
+    });
+    return () => {
+      unsubLogout?.();
+      unsubReactivate?.();
+    };
+  }, [api, checkApiKey]);
 
   // Tutorial-C SpotlightTour trigger (PR #983 follow-up). ⌘+Shift+/ ("⌘?")
   // is the canonical "help" shortcut on macOS; on Windows/Linux Ctrl+Shift+/
@@ -1428,6 +1475,23 @@ export function App() {
         onSuccess={() => {
           void checkApiKey();
           dispatchChain({ type: "login-success" });
+        }}
+      />
+      {/* 2026-05-20 — Settings 의 "데모 자격증명 재입력" entry. onboarding
+          chain 과는 독립된 modal — 사용자가 이미 onboarding 을 끝낸
+          returning user 의 *자발적 재입력 path*. LoginModal 의 forceActivation
+          prop 으로 chip 1/2/3 surface 를 우회하고 곧장 activation 입력
+          page 를 mount 한다. */}
+      <LoginModal
+        api={api}
+        open={reactivationOpen}
+        forceActivation
+        onOpenChange={(next) => {
+          if (!next) setReactivationOpen(false);
+        }}
+        onSuccess={() => {
+          void checkApiKey();
+          setReactivationOpen(false);
         }}
       />
       {/* Tutorial-B (O-X2) — Memory Seed Onboarding Wizard. 2026-05-20:
