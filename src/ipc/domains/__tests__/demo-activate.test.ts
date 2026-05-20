@@ -237,6 +237,24 @@ describe("lvis:demo:status", () => {
     const result = await invoke("lvis:demo:status");
     expect(result).toEqual({ ok: true, activated: false, vendor: null });
   });
+
+  it("rejects an untrusted sender frame without leaking activation state", async () => {
+    const { credsMod, demoMod } = await loadDemoModule();
+    process.env.LVIS_DEMO_VENDOR = "azure-foundry";
+    process.env.LVIS_DEMO_KEY_AZURE_FOUNDRY = "sk-activated-key";
+    process.env.LVIS_DEMO_BASEURL_AZURE_FOUNDRY =
+      "https://example.openai.azure.com/openai/v1/";
+    credsMod.captureDemoCredentials();
+
+    const deps = makeDeps();
+    demoMod.registerDemoHandlers(deps as never);
+
+    const result = await invokeWithEvent(
+      "lvis:demo:status",
+      { senderFrame: { url: "https://evil.example/app" } },
+    );
+    expect(result).toEqual({ ok: false, error: "unauthorized-frame" });
+  });
 });
 
 describe("lvis:demo:activate — first-activation relaunch (v0.2.1 hotfix)", () => {

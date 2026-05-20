@@ -23,10 +23,11 @@
  *   - The activation step is a *prerequisite* to `loginMockup`. Folding it
  *     into auth.ts would conflate "I have credentials, please log me in"
  *     with "I need to install credentials before logging in".
- *   - The packaged-build path also calls the same activation handler on
- *     first run, AND on subsequent boots when `~/.lvis/secrets/.env.demo`
- *     already exists (see `loadPersistedDemoActivation` below). Auth is
- *     downstream of activation; clean separation keeps the wiring honest.
+ *   - The packaged-build path calls this activation handler on first run.
+ *     Subsequent boots load `~/.lvis/secrets/.env.demo` before capture; the
+ *     renderer then calls `lvis:demo:status` and proceeds to auth directly.
+ *     Auth remains downstream of activation; clean separation keeps the
+ *     wiring honest.
  *
  * Error contract (CLAUDE.md):
  *   - IPC error codes are kebab-case English. Renderer translates to Korean.
