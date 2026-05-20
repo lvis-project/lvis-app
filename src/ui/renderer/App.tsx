@@ -388,13 +388,15 @@ export function App() {
       }
       try {
         setActiveView("home");
-        return await sessionLoad(sessionId, streaming, applyLoadedSession);
+        const loaded = await sessionLoad(sessionId, streaming, applyLoadedSession);
+        if (loaded !== false) await refreshSessions();
+        return loaded;
       } catch (err) {
         console.warn("[lvis] openRoutineSession failed:", (err as Error).message);
         return false;
       }
     },
-    [applyLoadedSession, sessionLoad, streaming],
+    [applyLoadedSession, refreshSessions, sessionLoad, streaming],
   );
 
   useEffect(() => {
@@ -413,13 +415,21 @@ export function App() {
     starredIsEntry, starredToggle,
   });
 
+  const handleLoadSessionAndRefresh = useCallback(async (sessionId: string) => {
+    const loaded = await handleLoadSession(sessionId);
+    if (loaded !== false) {
+      await refreshSessions();
+    }
+    return loaded;
+  }, [handleLoadSession, refreshSessions]);
+
   useEffect(() => {
     const unsubscribe = api.window?.onLoadSessionInMain?.((sessionId) => {
       setActiveView("home");
-      void handleLoadSession(sessionId);
+      return handleLoadSessionAndRefresh(sessionId);
     });
     return unsubscribe;
-  }, [api, handleLoadSession]);
+  }, [api, handleLoadSessionAndRefresh]);
 
   // LLM settings + context budget (single source of truth: src/shared/pricing-data.ts)
   const { llmVendor, llmModel, enableThinkingChat, refresh: refreshLlmSettings, toggleThinking } = useSettings(api);
@@ -1067,8 +1077,13 @@ export function App() {
 
   const handleNewChat = useCallback(async () => {
     if (streaming) { console.warn("new chat blocked during streaming"); return; }
-    await api.chatNew(); clearForNewChat(); resetForNewSession(); void refreshSessionId();
-  }, [api, streaming, refreshSessionId, clearForNewChat, resetForNewSession]);
+    await api.chatNew();
+    clearForNewChat();
+    resetForNewSession();
+    setActiveView("home");
+    await refreshSessionId();
+    await refreshSessions();
+  }, [api, streaming, refreshSessionId, refreshSessions, clearForNewChat, resetForNewSession]);
 
   // ─── Effects ──────────────────────────────────
   const toggleCommandPopover = useCallback(() => {
@@ -1300,7 +1315,7 @@ export function App() {
               onOpen={searchOpenOverlay}
               onClose={searchCloseOverlay}
               onLoadSession={async (sessionId) => {
-                const loaded = await handleLoadSession(sessionId);
+                const loaded = await handleLoadSessionAndRefresh(sessionId);
                 if (loaded !== false) setActiveView("home");
                 return loaded;
               }}
@@ -1372,7 +1387,7 @@ export function App() {
             sessions={sessions}
             refreshStarred={refreshStarred}
             onActivateHome={() => setActiveView("home")}
-            onJumpToSession={handleLoadSession}
+            onJumpToSession={handleLoadSessionAndRefresh}
             onRefreshSessions={refreshSessions}
             chatContextValue={chatContextValue}
             onAsk={(q, intent, opts) => handleAsk(q, "default", intent, opts)}

@@ -656,30 +656,34 @@ export async function compactWithBoundary(
     // Tool-pair safety: surviving 의 첫 메시지가 orphan tool_result 가 되지
     // 않도록 dropCount 를 앞으로 민다. 그렇지 않으면 provider 가 400
     // (tool_use_id 미스매치) 으로 거부 — 원래 C1 deadlock fix 의도 회귀.
-    const dropCount = adjustForwardToToolBoundary(toPreserve, rawDropCount);
-    const droppedSlice = toPreserve.slice(0, dropCount);
-    const survivingPreserve = toPreserve.slice(dropCount);
-    const forcedArchiveDir = await archiveDroppedMessages(
-      droppedSlice,
-      sessionId,
-      compactNum,
-      "forced-drop",
-    );
-    newHistory = [stubMessage, ...survivingPreserve];
-    estimatedAfter = estimateMessagesTokens(newHistory);
-    const finalTruncDir = forcedArchiveDir || reverseBudgetDir || perMessageTruncDir || "";
-    const finalTruncCount = totalTruncatedCount + dropCount;
-    const forcedRemoved = finalToCompact.length + reverseBudgetResult.droppedCount + dropCount;
-    log.warn(`compact: status=reduced_insufficient_forced removed=${forcedRemoved} truncated=${finalTruncCount} estimatedAfter=${estimatedAfter} preflight=${preflightTokens} compactNum=${compactNum}`);
-    return {
-      status: CompressionStatus.REDUCED_INSUFFICIENT_FORCED,
-      boundary,
-      newHistory,
-      removedCount: forcedRemoved,
-      estimatedAfter,
-      truncatedCount: finalTruncCount,
-      ...(finalTruncDir !== "" ? { truncatedDir: finalTruncDir } : {}),
-    };
+    const toolSafeDropCount = adjustForwardToToolBoundary(toPreserve, rawDropCount);
+    const dropCount = clampDropBeforeLatestRenderableUser(toPreserve, toolSafeDropCount);
+    if (dropCount > 0) {
+      const droppedSlice = toPreserve.slice(0, dropCount);
+      const survivingPreserve = toPreserve.slice(dropCount);
+      const forcedArchiveDir = await archiveDroppedMessages(
+        droppedSlice,
+        sessionId,
+        compactNum,
+        "forced-drop",
+      );
+      newHistory = [stubMessage, ...survivingPreserve];
+      estimatedAfter = estimateMessagesTokens(newHistory);
+      const finalTruncDir = forcedArchiveDir || reverseBudgetDir || perMessageTruncDir || "";
+      const finalTruncCount = totalTruncatedCount + dropCount;
+      const forcedRemoved = finalToCompact.length + reverseBudgetResult.droppedCount + dropCount;
+      log.warn(`compact: status=reduced_insufficient_forced removed=${forcedRemoved} truncated=${finalTruncCount} estimatedAfter=${estimatedAfter} preflight=${preflightTokens} compactNum=${compactNum}`);
+      return {
+        status: CompressionStatus.REDUCED_INSUFFICIENT_FORCED,
+        boundary,
+        newHistory,
+        removedCount: forcedRemoved,
+        estimatedAfter,
+        truncatedCount: finalTruncCount,
+        ...(finalTruncDir !== "" ? { truncatedDir: finalTruncDir } : {}),
+      };
+    }
+    log.warn(`compact: forced drop skipped to preserve latest user message (estimatedAfter=${estimatedAfter} preflight=${preflightTokens} compactNum=${compactNum})`);
   }
 
   // SUMMARIZED — 정상 경로. CONTENT_TRUNCATED 는 위쪽 early-return 에서 이미
@@ -844,6 +848,16 @@ function adjustForwardToToolBoundary(messages: GenericMessage[], idx: number): n
     }
   }
   return cur;
+}
+
+function clampDropBeforeLatestRenderableUser(messages: GenericMessage[], dropCount: number): number {
+  for (let i = messages.length - 1; i >= 0; i -= 1) {
+    const message = messages[i];
+    if (message.role === "user" && message.meta?.compactBoundary !== true) {
+      return Math.min(dropCount, i);
+    }
+  }
+  return dropCount;
 }
 
 /** Conversation 직렬화 — LLM 프롬프트 본문용. trimmed per-message + role marker. */
