@@ -139,6 +139,7 @@ export const COMMON_IPC_ERROR_MESSAGES: Readonly<Record<string, string>> = {
   // formatIpcError() (e.g. inline error toasts).
   "invalid-code": "활성 코드가 올바르지 않습니다.",
   "no-vendor": "활성 코드에 vendor 정보가 누락되었습니다.",
+  "missing-foundry-endpoint": "활성 코드에 Azure Foundry 엔드포인트 정보가 누락되었습니다.",
   "persist-failed": "활성 코드를 저장하지 못했습니다.",
   "not-armed": "재시작 준비 상태가 아닙니다. 활성 코드를 다시 제출해 주세요.",
   // ── Tutorial-C — tour:{start,mark-complete,dismiss} validation ──
