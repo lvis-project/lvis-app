@@ -130,52 +130,50 @@ describe("StatusBar", () => {
     expect(screen.getByText("Claude · sonnet-4-6")).toBeInTheDocument();
   });
 
-  it("renders a dot-only persistent item with severity color + tooltip (marketplace)", () => {
-    // Marketplace online — green dot, English tooltip, no visible 마켓 text.
+  it("renders a dot-only persistent item with severity color + top tooltip trigger", () => {
     const onlineItem: PersistentItem = {
-      id: "marketplace:online",
+      id: "health:services",
       severity: "success",
       dot: true,
-      a11yLabel: "Marketplace: Online",
-      tooltip: "Marketplace: Online",
+      a11yLabel: "LLM: online, Market: online",
+      tooltip: "LLM: online\nMarket: online",
     };
     const { container, rerender } = render(
       <StatusBar persistent={[onlineItem]} visibleToast={null} />,
     );
-    // No "마켓" text — only the colored dot + sr-only a11y label.
-    expect(screen.queryByText("마켓")).toBeNull();
-    expect(screen.getByText("Marketplace: Online")).toBeInTheDocument();
+    expect(screen.queryByText("Market")).toBeNull();
+    expect(screen.getByText("LLM: online, Market: online")).toBeInTheDocument();
     const dot = container.querySelector(
-      '[data-testid="status-bar-dot-marketplace:online"]',
+      '[data-testid="status-bar-dot-health:services"]',
     );
     expect(dot).not.toBeNull();
     expect(dot?.className).toContain("bg-success");
-    // Tooltip wires through to `title` on the wrapping span.
-    const wrapper = container.querySelector('[title="Marketplace: Online"]');
+    const wrapper = [...container.querySelectorAll("[title]")]
+      .find((el) => el.getAttribute("title") === "LLM: online\nMarket: online");
     expect(wrapper).not.toBeNull();
 
-    // Flip offline — dot turns destructive, tooltip swaps.
+    // Flip offline — dot turns destructive, a11y text swaps.
     const offlineItem: PersistentItem = {
       ...onlineItem,
       severity: "error",
-      a11yLabel: "Marketplace: Offline",
-      tooltip: "Marketplace: Offline",
+      a11yLabel: "LLM: offline, Market: online",
+      tooltip: "LLM: offline\nMarket: online",
     };
     rerender(<StatusBar persistent={[offlineItem]} visibleToast={null} />);
     const dotOffline = container.querySelector(
-      '[data-testid="status-bar-dot-marketplace:online"]',
+      '[data-testid="status-bar-dot-health:services"]',
     );
     expect(dotOffline?.className).toContain("bg-destructive");
-    expect(screen.getByText("Marketplace: Offline")).toBeInTheDocument();
+    expect(screen.getByText("LLM: offline, Market: online")).toBeInTheDocument();
   });
 
-  it("joins the AI provider ping dot directly before the LLM provider label", () => {
+  it("joins the combined health dot directly before the LLM provider label", () => {
     const pingItem: PersistentItem = {
-      id: "provider:llm-ping",
+      id: "health:services",
       severity: "success",
       dot: true,
-      a11yLabel: "AI provider: Connected",
-      tooltip: "AI provider: Connected",
+      a11yLabel: "LLM: online, Market: online",
+      tooltip: "LLM: online\nMarket: online",
     };
     const { container } = render(
       <StatusBar
@@ -187,7 +185,7 @@ describe("StatusBar", () => {
       />,
     );
     expect(container.querySelector('[data-testid="status-bar"]')?.textContent).not.toContain("|");
-    const dot = container.querySelector('[data-testid="status-bar-dot-provider:llm-ping"]');
+    const dot = container.querySelector('[data-testid="status-bar-dot-health:services"]');
     expect(dot?.className).toContain("bg-success");
     expect(screen.getByText("Azure · gpt-4o")).toBeInTheDocument();
   });
