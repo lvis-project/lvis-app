@@ -1,4 +1,4 @@
-import { afterEach, beforeEach, describe, expect, it } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { existsSync, mkdtempSync } from "node:fs";
 import { mkdir, readFile, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
@@ -197,6 +197,65 @@ describe("PluginMarketplaceService.installLocal", () => {
 
     const { verifyInstallReceipt } = await import("../plugin-install-receipt.js");
     const installDir = join(pluginsDir, "test-plugin");
+    const result = await verifyInstallReceipt(cacheRoot, "test-plugin", installDir);
+    expect(result.ok).toBe(true);
+  });
+
+  it("cleans fresh local install dir, registry, and receipt when finalization fails", async () => {
+    const service = makeService();
+    const store = (service as unknown as {
+      artifactStore: { writeInstallReceipt: (...args: unknown[]) => Promise<unknown> };
+    }).artifactStore;
+    vi.spyOn(store, "writeInstallReceipt").mockRejectedValueOnce(new Error("receipt write failed"));
+
+    await expect(service.installLocal(sourceDir)).rejects.toThrow("receipt write failed");
+
+    expect(existsSync(join(pluginsDir, "test-plugin"))).toBe(false);
+    expect(existsSync(join(cacheRoot, "test-plugin", "install-receipt.json"))).toBe(false);
+
+    const reg = JSON.parse(await readFile(registryPath, "utf-8"));
+    expect(reg.plugins).toHaveLength(0);
+  });
+
+  it("rollbackLocalInstall restores the previous install receipt with disk and registry state", async () => {
+    const service = makeService();
+    await service.installLocal(sourceDir);
+
+    await writeFile(
+      join(sourceDir, "plugin.json"),
+      JSON.stringify(
+        {
+          id: "test-plugin",
+          name: "Test Plugin",
+          version: "2.0.0",
+          description: "fixture v2",
+          publisher: "tests",
+          entry: "dist/hostPlugin.js",
+        },
+        null,
+        2,
+      ),
+      "utf-8",
+    );
+    await writeFile(
+      join(sourceDir, "dist", "hostPlugin.js"),
+      "export default { version: '2.0.0' };\n",
+      "utf-8",
+    );
+
+    await service.installLocal(sourceDir);
+    await service.rollbackLocalInstall("test-plugin");
+
+    const installDir = join(pluginsDir, "test-plugin");
+    const manifest = JSON.parse(await readFile(join(installDir, "plugin.json"), "utf-8"));
+    expect(manifest.version).toBe("1.2.3");
+
+    const receipt = JSON.parse(
+      await readFile(join(cacheRoot, "test-plugin", "install-receipt.json"), "utf-8"),
+    );
+    expect(receipt.version).toBe("1.2.3");
+
+    const { verifyInstallReceipt } = await import("../plugin-install-receipt.js");
     const result = await verifyInstallReceipt(cacheRoot, "test-plugin", installDir);
     expect(result.ok).toBe(true);
   });

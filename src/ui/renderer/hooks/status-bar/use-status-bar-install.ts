@@ -9,10 +9,10 @@ interface Options {
 }
 
 type InstallProgressPayload =
-  | { slug: string; phase: "installing" | "restarting" | "verifying" | "registering" }
+  | { slug: string; phase: "installing" | "restarting" | "verifying" | "registering" | "preparing" }
   | { slug: string; phase: "downloading"; bytesDownloaded: number; bytesTotal: number | null };
 
-type InstallResultPayload = { slug: string; success: boolean; error?: string };
+type InstallResultPayload = { slug: string; success: boolean; preparing?: boolean; error?: string };
 
 function formatBytes(bytes: number): string {
   if (bytes >= 1_048_576) {
@@ -45,6 +45,8 @@ export function useStatusBarInstall({ api, pushToast }: Options): void {
         message = `${target} 등록 중…`;
       } else if (payload.phase === "restarting") {
         message = `${target} 재시작 중…`;
+      } else if (payload.phase === "preparing") {
+        message = `${target} 런타임 준비 중…`;
       } else {
         message = `${target} 설치 중…`;
       }

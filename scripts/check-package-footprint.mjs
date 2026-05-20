@@ -58,7 +58,7 @@ function isCurrentPlatformCandidate(candidate) {
     return /\/win-unpacked\/resources\/app\.asar$/.test(normalized);
   }
   if (process.platform === "linux") {
-    return /\/linux-.+-unpacked\/resources\/app\.asar$/.test(normalized);
+    return /\/(?:linux-unpacked|linux-.+-unpacked)\/resources\/app\.asar$/.test(normalized);
   }
   return false;
 }
@@ -95,7 +95,7 @@ function isMacAppPackage() {
 }
 
 function isLinuxUnpackedPackage() {
-  return /^linux-.+-unpacked$/.test(basename(appOutDir));
+  return basename(appOutDir) === "linux-unpacked" || /^linux-.+-unpacked$/.test(basename(appOutDir));
 }
 
 function validateMacElectronLocales() {

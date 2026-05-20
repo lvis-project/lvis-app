@@ -23,6 +23,7 @@ import { onEvent as onHostEvent } from "../types.js";
 import { normalizeAllowedHosts } from "../../main/host-allow-list.js";
 import { AuditLogger, type AuditEntry } from "../../audit/audit-logger.js";
 import { PluginRuntime } from "../../plugins/runtime.js";
+import type { PythonRuntimeBootstrapper } from "../../main/python-runtime.js";
 import { currentInvocationOrigin } from "../../plugins/runtime/origin-chain.js";
 import { startPluginDevWatcher } from "../../plugins/dev-watcher.js";
 import { PluginDeploymentGuard } from "../../plugins/deployment-guard.js";
@@ -63,7 +64,6 @@ import type { MemoryManager } from "../../memory/memory-manager.js";
 import { emitEvent, onEvent } from "../types.js";
 import {
   buildPluginConfigOverrides,
-  registerPluginTools,
   syncPluginToolRegistry,
   syncPluginToolRegistryForPlugin,
 } from "../plugins.js";
@@ -85,6 +85,20 @@ import {
   ApprovalOriginError,
 } from "../../permissions/agent-action-requester.js";
 const log = createLogger("lvis");
+
+export function declaresHostManagedPythonRuntime(manifest: PluginManifest): boolean {
+  const pluginManifest = manifest as PluginManifest & {
+    python?: { managedBy?: unknown; requirementsLock?: unknown };
+    pythonRequirementsLock?: unknown;
+    runtime?: { python?: { requirementsLock?: unknown } };
+    config?: { pythonRequirementsLock?: unknown };
+  };
+  return pluginManifest.python?.managedBy === "lvis-app" ||
+    typeof pluginManifest.python?.requirementsLock === "string" ||
+    typeof pluginManifest.pythonRequirementsLock === "string" ||
+    typeof pluginManifest.runtime?.python?.requirementsLock === "string" ||
+    typeof pluginManifest.config?.pythonRequirementsLock === "string";
+}
 
 /**
  * AC1.5 audit helper — logs an approval violation then re-throws the original
@@ -752,8 +766,10 @@ export interface InitPluginRuntimeInput {
   keywordEngine: KeywordEngine;
   toolRegistry: ToolRegistry;
   pythonPath: string | undefined;
+  pythonRuntime?: PythonRuntimeBootstrapper;
   bootAuditLogger: AuditLogger;
   mainWindow: BrowserWindow;
+  getMainWindow?: () => BrowserWindow | null;
   openAuthWindowService: (
     parent: BrowserWindow,
     opts: OpenAuthWindowBaseOptions & { returnFinalUrl?: boolean },
@@ -839,8 +855,10 @@ export async function initPluginRuntime(
     keywordEngine,
     toolRegistry,
     pythonPath,
+    pythonRuntime,
     bootAuditLogger,
     mainWindow,
+    getMainWindow,
     openAuthWindowService,
     openLinkWindowService,
     openAuthPartitionViewerService,
@@ -1003,6 +1021,18 @@ export async function initPluginRuntime(
           output: data === undefined ? undefined : JSON.stringify(data).slice(0, 500),
         });
       } catch {}
+    },
+    preparePluginStart: ({ pluginId, manifest, manifestPath }) => {
+      if (!pythonRuntime || !declaresHostManagedPythonRuntime(manifest)) return undefined;
+      const win = getMainWindow?.() ?? mainWindow;
+      return (async () => {
+        const runtime = await pythonRuntime.ensureReadyForPluginManifest(manifestPath, win);
+        if (!runtime) {
+          throw new Error(`plugin '${pluginId}' declares host-managed Python but no accessible lockfile was found`);
+        }
+        pluginRuntime.mergeConfigOverride(pluginId, { pythonExecutable: runtime.pythonPath });
+        log.info("plugin dependency runtime ready: %s -> %s", pluginId, runtime.pythonPath);
+      })();
     },
     onDisable: (pluginId) => {
       keywordEngine.unregisterByPlugin(pluginId);
@@ -1862,8 +1892,10 @@ export async function initPluginRuntime(
     void refreshInstallSourceCache();
   });
 
-  // 플러그인 메서드를 ToolRegistry에 등록
-  registerPluginTools(pluginRuntime, toolRegistry);
+  // 플러그인 메서드를 ToolRegistry에 등록. Async dependency preparation may
+  // finish between startAll() and this point, so use idempotent sync instead
+  // of duplicate-sensitive append registration.
+  syncPluginToolRegistry(pluginRuntime, toolRegistry);
 
   // I2 — Dev-mode live-reload watcher. No-op unless LVIS_DEV_RELOAD=1.
   // ToolRegistry resync runs through the runtime's `onEnable` callback wired
