@@ -118,10 +118,6 @@ export function useSessions(
     try {
       const r = await api.chatSessions({ kind: "main" });
       setSessions(r.sessions);
-      const h = await api.chatGetHistory();
-      setCurrentSessionId(h.sessionId);
-      setCurrentSessionKind(h.sessionKind ?? "main");
-      setCurrentSessionTitle(h.sessionTitle);
     } catch { /* ignore */ }
   }, [api]);
 
@@ -169,6 +165,7 @@ export function useSessions(
         if (res.ok) {
           truncateToEntry(entryIdx);
           await refreshSessionId();
+          await refreshSessions();
           return { ok: true };
         }
         return { ok: false };
@@ -177,7 +174,7 @@ export function useSessions(
         return { ok: false };
       }
     },
-    [api, refreshSessionId],
+    [api, refreshSessionId, refreshSessions],
   );
 
   return {

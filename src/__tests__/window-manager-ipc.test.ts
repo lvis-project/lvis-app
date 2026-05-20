@@ -11,6 +11,7 @@ import type { IpcMainInvokeEvent } from "electron";
 // ── Electron mock ──────────────────────────────────────────────────────────
 
 const handleMap = new Map<string, (event: IpcMainInvokeEvent, ...args: unknown[]) => unknown>();
+const listenerMap = new Map<string, (event: IpcMainInvokeEvent, ...args: unknown[]) => unknown>();
 const fromId = vi.hoisted(() => vi.fn());
 
 vi.mock("electron", () => ({
@@ -21,6 +22,12 @@ vi.mock("electron", () => ({
   ipcMain: {
     handle: vi.fn((channel: string, fn: (e: IpcMainInvokeEvent, ...a: unknown[]) => unknown) => {
       handleMap.set(channel, fn);
+    }),
+    on: vi.fn((channel: string, fn: (e: IpcMainInvokeEvent, ...a: unknown[]) => unknown) => {
+      listenerMap.set(channel, fn);
+    }),
+    removeListener: vi.fn((channel: string, fn: (e: IpcMainInvokeEvent, ...a: unknown[]) => unknown) => {
+      if (listenerMap.get(channel) === fn) listenerMap.delete(channel);
     }),
   },
   screen: {
@@ -104,6 +111,7 @@ describe("WindowManager IPC — validateSender guard", () => {
 
   beforeEach(async () => {
     handleMap.clear();
+    listenerMap.clear();
     fromId.mockReset();
     vi.resetModules();
     // Re-import so handleMap gets freshly registered handlers
@@ -154,7 +162,7 @@ describe("WindowManager IPC — validateSender guard", () => {
   });
 
   describe("lvis:window:load-session-in-main", () => {
-    it("forwards a valid session id to the registered main window", async () => {
+    it("forwards a valid session id to the registered main window and waits for renderer acknowledgement", async () => {
       const mainWebContents = { send: vi.fn() };
       const mainWindow = {
         id: 7,
@@ -168,15 +176,47 @@ describe("WindowManager IPC — validateSender guard", () => {
       fromId.mockReturnValueOnce(mainWindow);
 
       const handler = handleMap.get("lvis:window:load-session-in-main")!;
-      const result = await handler(trustedEvent(), "sess_star-1");
+      const resultPromise = Promise.resolve(handler(trustedEvent(), "sess_star-1"));
 
-      expect(result).toEqual({ ok: true });
       expect(mainWindow.show).toHaveBeenCalledOnce();
       expect(mainWindow.focus).toHaveBeenCalledOnce();
+      const sentPayload = mainWebContents.send.mock.calls[0]?.[1] as { sessionId: string; requestId: string };
       expect(mainWebContents.send).toHaveBeenCalledWith(
         "lvis:window:load-session-in-main",
-        { sessionId: "sess_star-1" },
+        expect.objectContaining({ sessionId: "sess_star-1", requestId: expect.any(String) }),
       );
+      const ack = listenerMap.get("lvis:window:load-session-in-main-result");
+      expect(ack).toBeDefined();
+      ack?.({ ...trustedEvent(), sender: mainWebContents } as never, {
+        requestId: sentPayload.requestId,
+        ok: true,
+      });
+
+      await expect(resultPromise).resolves.toEqual({ ok: true });
+    });
+
+    it("returns a failure when the main renderer rejects detached session loading", async () => {
+      const mainWebContents = { send: vi.fn() };
+      const mainWindow = {
+        id: 7,
+        on: vi.fn(),
+        isDestroyed: vi.fn(() => false),
+        show: vi.fn(),
+        focus: vi.fn(),
+        webContents: mainWebContents,
+      };
+      wm.registerMainWindow(mainWindow as never);
+      fromId.mockReturnValueOnce(mainWindow);
+
+      const handler = handleMap.get("lvis:window:load-session-in-main")!;
+      const resultPromise = Promise.resolve(handler(trustedEvent(), "sess_star-1"));
+      const sentPayload = mainWebContents.send.mock.calls[0]?.[1] as { requestId: string };
+      listenerMap.get("lvis:window:load-session-in-main-result")?.(
+        { ...trustedEvent(), sender: mainWebContents } as never,
+        { requestId: sentPayload.requestId, ok: false, error: "load-session-failed" },
+      );
+
+      await expect(resultPromise).resolves.toEqual({ ok: false, error: "load-session-failed" });
     });
 
     it("rejects malformed session ids", async () => {

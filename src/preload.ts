@@ -1462,9 +1462,27 @@ const api = {
       ipcRenderer.on("lvis:detached:navigate", listener);
       return () => ipcRenderer.removeListener("lvis:detached:navigate", listener);
     },
-    onLoadSessionInMain: (handler: (sessionId: string) => void) => {
+    onLoadSessionInMain: (handler: (sessionId: string) => boolean | void | Promise<boolean | void>) => {
       const listener = (_event: unknown, payload: { sessionId?: unknown }) => {
-        if (typeof payload?.sessionId === "string") handler(payload.sessionId);
+        if (typeof payload?.sessionId !== "string") return;
+        void Promise.resolve()
+          .then(() => handler(payload.sessionId))
+          .then((loaded) => {
+            if (typeof (payload as { requestId?: unknown }).requestId !== "string") return;
+            ipcRenderer.send("lvis:window:load-session-in-main-result", {
+              requestId: (payload as { requestId: string }).requestId,
+              ok: loaded !== false,
+              ...(loaded === false ? { error: "load-session-failed" } : {}),
+            });
+          })
+          .catch((err: unknown) => {
+            if (typeof (payload as { requestId?: unknown }).requestId !== "string") return;
+            ipcRenderer.send("lvis:window:load-session-in-main-result", {
+              requestId: (payload as { requestId: string }).requestId,
+              ok: false,
+              error: err instanceof Error ? err.message : "load-session-failed",
+            });
+          });
       };
       ipcRenderer.on("lvis:window:load-session-in-main", listener);
       return () => ipcRenderer.removeListener("lvis:window:load-session-in-main", listener);

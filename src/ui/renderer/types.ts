@@ -555,8 +555,8 @@ export type LvisApi = {
   memoryGetIndex: () => Promise<string>;
   memoryUpdateIndexIfUnchanged: (expectedContent: string, nextContent: string) => Promise<boolean>;
   memoryUpdateIndexSections: (sections: { urgentMemory?: string; references?: string }) => Promise<unknown>;
-  memoryListSessions: () => Promise<Array<{ sessionId: string; matchedMessage: string; timestamp: string }>>;
-  memorySearchSessions: (q: string) => Promise<Array<{ sessionId: string; matchedMessage: string; timestamp: string }>>;
+  memoryListSessions: () => Promise<Array<{ sessionId: string; title?: string; matchedMessage: string; timestamp: string }>>;
+  memorySearchSessions: (q: string) => Promise<Array<{ sessionId: string; title?: string; matchedMessage: string; timestamp: string }>>;
   memoryGetAgentsMd: () => Promise<string>;
   memoryUpdateAgentsMd: (content: string) => Promise<unknown>;
   memoryGetLvisMd: () => Promise<string>;
@@ -832,7 +832,7 @@ export type LvisApi = {
     onSnapEdge: (handler: (edge: "n" | "s" | "e" | "w" | null) => void) => () => void;
     /** Subscribe to in-place navigation (single-instance shell content swap). */
     onDetachedNavigate: (handler: (viewKey: string) => void) => () => void;
-    onLoadSessionInMain: (handler: (sessionId: string) => void) => () => void;
+    onLoadSessionInMain: (handler: (sessionId: string) => boolean | void | Promise<boolean | void>) => () => void;
   };
   /**
    * Dev tools bridge — only useful in non-production NODE_ENV. Renderer

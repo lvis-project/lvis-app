@@ -1,9 +1,8 @@
 /**
- * ConversationHistory — capacity / append / restore lifecycle.
+ * ConversationHistory — append / restore lifecycle.
  *
- * Round-5 added `getCapacityRemaining()` for the trigger-import path;
- * round-6 covers the off-by-one + clamp behaviour directly so the
- * integration test in `trigger-executor.test.ts` is not the only proof.
+ * Message-count caps are opt-in. Default chat history must not trim the
+ * persisted transcript; token preflight / auto-compact owns context control.
  */
 import { describe, expect, it } from "vitest";
 import { ConversationHistory } from "../conversation-history.js";
@@ -43,9 +42,13 @@ describe("ConversationHistory.getCapacityRemaining", () => {
     expect(h.getCapacityRemaining()).toBe(0);
   });
 
-  it("uses the default maxMessages (50) when no option is provided", () => {
+  it("does not impose a message-count cap by default", () => {
     const h = new ConversationHistory();
-    expect(h.getCapacityRemaining()).toBe(50);
+    for (let i = 0; i < 55; i += 1) {
+      h.append({ role: "user", content: `message ${i}` });
+    }
+    expect(h.length).toBe(55);
+    expect(h.getCapacityRemaining()).toBe(Number.POSITIVE_INFINITY);
   });
 });
 
