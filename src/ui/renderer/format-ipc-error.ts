@@ -93,6 +93,7 @@ export const COMMON_IPC_ERROR_MESSAGES: Readonly<Record<string, string>> = {
   "invalid-memory-sections": "잘못된 메모리 섹션 정보입니다.",
   "routine-not-found": "루틴을 찾을 수 없습니다.",
   "no-user-message": "사용자 메시지를 찾을 수 없습니다.",
+  "last-message-not-user": "마지막 메시지가 사용자 질문이 아니어서 이어서 생성할 수 없습니다.",
   "no-scheduler": "스케줄러가 활성화되지 않았습니다.",
 
   // ── Plugin / marketplace / bundle ──
