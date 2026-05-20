@@ -30,6 +30,7 @@ describe("shared pricing-data", () => {
         ["claude", "claude-haiku-4-5"],
         ["openai", "gpt-5.4"],
         ["openai", "gpt-5.4-mini"],
+        ["azure-foundry", "gpt-5.4-mini"],
         ["openai", "gpt-4.1"],
         ["gemini", "gemini-2.5-flash"],
         ["copilot", "gpt-4.1"],
@@ -103,6 +104,7 @@ describe("engine pricing env-override (Node-only layer)", () => {
     // shows "no pricing available" instead of an inaccurate $0 estimate.
     expect(lookupPricingOptional("openai", "no-such-model-xyz")).toBeUndefined();
     expect(lookupPricingOptional("azure-foundry", "any-deployment")).toBeUndefined();
+    expect(lookupPricingOptional("azure-foundry", "gpt-5.4-mini")?.contextWindow).toBe(400_000);
     // Known model still resolves
     expect(lookupPricingOptional("claude", "claude-sonnet-4-6")?.inputPer1M).toBe(3);
   });
@@ -142,6 +144,12 @@ describe("engine pricing env-override (Node-only layer)", () => {
       const p = lookupPricing("copilot", "gpt-5.4-mini");
       expect(p.inputPer1M).toBe(0);
       expect(p.outputPer1M).toBe(0);
+      expect(p.contextWindow).toBe(400_000);
+    });
+    it("Azure OpenAI deployment id gpt-5.4-mini inherits the OpenAI model spec", () => {
+      const p = lookupPricing("azure-foundry", "gpt-5.4-mini");
+      expect(p.inputPer1M).toBe(0.75);
+      expect(p.outputPer1M).toBe(4.5);
       expect(p.contextWindow).toBe(400_000);
     });
   });

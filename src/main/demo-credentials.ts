@@ -235,6 +235,24 @@ export function getDemoVendorConfig(vendor: string): DemoVendorConfig | null {
 
 /** Test-only reset. Production code must never call this. */
 export function resetDemoCredentialsForTesting(): void {
+  resetDemoCredentialsInternal();
+}
+
+/**
+ * Production-safe reset. Wipes the module-scoped capture so a subsequent
+ * `captureDemoCredentials()` re-reads `process.env` from a clean slate.
+ * Called from the `lvis:demo:clear` IPC handler after `.env.demo` is
+ * removed from disk and `LVIS_DEMO_*` is scrubbed from `process.env`, so
+ * the auth IPC handler immediately observes an inactive demo state.
+ *
+ * Distinct name from `resetDemoCredentialsForTesting` so the production
+ * call site does not look like a test affordance escaping into runtime.
+ */
+export function resetDemoCredentials(): void {
+  resetDemoCredentialsInternal();
+}
+
+function resetDemoCredentialsInternal(): void {
   captured = {
     enabled: false,
     activeVendor: DEFAULT_DEMO_VENDOR,
