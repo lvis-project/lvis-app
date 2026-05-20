@@ -910,6 +910,95 @@ describe("ChatView", () => {
     expect(scrolledToMarker).toBe(false);
   });
 
+  it("auto-continues after branching from a checkpoint when the branch ends with a user turn", async () => {
+    const { container, api, emitChatStream } = await renderApp({
+      hasApiKey: true,
+      currentSession: "sess-source",
+      history: {
+        sessionId: "sess-source",
+        messages: [],
+      },
+      historyBySession: {
+        "sess-branch-1": {
+          messages: [
+            { index: 0, role: "user", content: "마지막 질문" },
+          ],
+        },
+      },
+    });
+    api.chatBranchFromCheckpoint.mockResolvedValueOnce({
+      newSessionId: "sess-branch-1",
+      lastMessageRole: "user",
+      shouldAutoContinue: true,
+    });
+
+    await act(async () => {
+      emitChatStream({
+        type: "compact_notice",
+        removedMessages: 37,
+        freedTokens: 1200,
+        trigger: "auto-compact",
+        compactNum: 2,
+      });
+    });
+
+    const forkButton = await waitFor(() => {
+      const button = container.querySelector('[data-testid="ck-btn-fork"]') as HTMLButtonElement | null;
+      expect(button).not.toBeNull();
+      return button!;
+    });
+    await act(async () => {
+      fireEvent.click(forkButton);
+    });
+
+    await waitFor(() => {
+      expect(api.chatBranchFromCheckpoint).toHaveBeenCalledWith("sess-source", 2);
+      expect(api.chatSessionResume).toHaveBeenCalledWith("sess-branch-1");
+      expect(api.chatSessionHistory).toHaveBeenCalledWith("sess-branch-1");
+      expect(api.chatContinueLastUser).toHaveBeenCalledWith("sess-branch-1");
+      expect(api.chatRetryEffort).not.toHaveBeenCalled();
+      expect(container.textContent).toContain("마지막 질문");
+      expect(container.textContent).toContain("이 지점부터 다시 시작했습니다. 마지막 질문에 대한 답변을 이어서 생성합니다.");
+    });
+  });
+
+  it("does not create a checkpoint branch while a turn is streaming", async () => {
+    const { container, api, emitChatStream } = await renderApp({
+      hasApiKey: true,
+      currentSession: "sess-source",
+      history: {
+        sessionId: "sess-source",
+        messages: [],
+      },
+    });
+
+    await act(async () => {
+      emitChatStream({
+        type: "compact_notice",
+        removedMessages: 12,
+        freedTokens: 800,
+        trigger: "auto-compact",
+        compactNum: 3,
+      });
+      emitChatStream({ type: "text_delta", text: "응답 작성 중" });
+    });
+
+    const forkButton = await waitFor(() => {
+      const button = container.querySelector('[data-testid="ck-btn-fork"]') as HTMLButtonElement | null;
+      expect(button).not.toBeNull();
+      return button!;
+    });
+    await act(async () => {
+      fireEvent.click(forkButton);
+    });
+
+    await waitFor(() => {
+      expect(api.chatBranchFromCheckpoint).not.toHaveBeenCalled();
+      expect(api.chatSessionResume).not.toHaveBeenCalledWith("sess-branch-1");
+      expect(container.textContent).toContain("응답이 끝난 뒤 이 시점에서 다시 시작할 수 있습니다");
+    });
+  });
+
   it("moves a tool_use assistant round into the active WorkGroup before tool events arrive", async () => {
     const { container, api, emitChatStream } = await renderApp({ hasApiKey: true });
     const pendingSend = deferred<{ ok: true }>();

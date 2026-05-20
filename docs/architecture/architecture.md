@@ -368,39 +368,36 @@ graph TB
 
 ### 4.2 Boot Sequence — 부팅 시 동적 업데이트
 
-> **Phase 1 갱신 (2026-04-13)**: Step 0 (Python Runtime Bootstrap) 추가. `SettingsService` 초기화 이전 맨 첫 단계로 실행된다.
+> **Phase 1 갱신 (2026-04-13)**: Python Runtime Bootstrap 추가.
+> **Runtime ownership 갱신 (2026-05-20)**: 앱 installer 는 OS별 host-owned runtime asset(`uv`, native binding)을 포함하고 검증하지만, 앱 부트는 `uv` materialize 나 Python dependency sync 를 수행하지 않는다. host-managed Python dependency install/venv sync 는 플러그인 start 전 `PluginRuntime.preparePluginStart` 가 비동기로 수행하되, venv 는 플러그인 id 별이 아니라 lockfile content + OS/arch 별 공유 env 로 관리한다. 준비 중 신규 플러그인은 `loadStatus=preparing` 으로 호출을 방어한다.
 > **Wave B/C 정렬 (2026-05-11)**: 세부 로직은 `src/boot/*.ts` 모듈로 분리되어 있으며 (`services.ts`, `plugins.ts`, `conversation.ts`, `tools.ts`, `types.ts`), overlay trigger 는 별도 background engine 이 아니다. `host:overlay` capability 를 가진 플러그인이 `hostApi.triggerConversation()` 으로 overlay item staging 을 요청하고, 사용자가 CTA 를 수락한 뒤에만 main chat 으로 import 된다. PostTurnHookChain 은 세션 저장, memory extraction, title/checkpoint, audit, idle-poke 를 처리하며 overlay prompt 를 자동 생성하지 않는다.
 
-**부팅 소요 시간 (Phase 1 실측 추정):**
+**런타임 준비 경계:**
 
-| 시나리오 | 소요 시간 | 비고 |
+| 단계 | 책임 | 비고 |
 | --- | --- | --- |
-| 첫 부팅 (cold) | ~40-50초 | `uv` Python 3.12 설치 + venv 생성 + deps 설치 |
-| 두 번째 이후 부팅 (warm) | <1.5초 | `.ready` sentinel 통과 → 즉시 skip |
+| App packaging | OS별 packaged `uv` archive + license + host native asset 검증 | 누락은 build/package gate 에서 fail-closed |
+| App boot | runtime coordinator 인스턴스 주입 | `uv` materialize, Python install, dependency sync 를 기다리지 않는다 |
+| Plugin install/start | plugin manifest 의 host-managed Python 선언 확인 | `python.managedBy === "lvis-app"` 또는 `requirementsLock` |
+| Plugin prepare | packaged `uv` lazy materialize 후 `~/.lvis/runtime/python-envs/<os-arch-py-lockHash>/venv` 생성/sync | lockfile 이 같으면 공유, 성공 후 plugin-specific `pythonExecutable` 주입 |
+| Plugin ready | `start()` 완료 후 tool/UI refresh | 실패 시 install-result failure 와 rollback |
 
 ```mermaid
 sequenceDiagram
     participant App as LVIS Client
-    participant PythonRT as PythonRuntimeBootstrapper
+    participant HostRT as Host Runtime Assets
     participant Config as Config Loader
     participant Auth as Auth (SSO/LDAP)
     participant Policy as Policy Engine
     participant PluginMgr as Plugin Manager
+    participant PythonRT as Plugin Python Runtime
     participant Market as Marketplace Hub
     participant AgentHub as Agent Hub
     participant the LLM backend as the LLM backend (LLM)
 
-    App->>PythonRT: 0. Python Runtime Bootstrap (python-runtime.ts)
-    Note over PythonRT: ~/.lvis/runtime/venv/.ready 존재?
-    alt 첫 부팅 (cold — ~40-50초)
-        PythonRT->>PythonRT: uv python install 3.12.x
-        PythonRT->>PythonRT: uv venv ~/.lvis/runtime/venv
-        PythonRT->>PythonRT: uv pip sync --frozen python-requirements.lock
-        PythonRT->>PythonRT: touch .ready
-    else 두 번째 이후 부팅 (warm — <1.5초)
-        PythonRT-->>App: .ready 확인 → 즉시 resolve
-    end
-    PythonRT-->>App: { pythonPath, venvPath }
+    App->>HostRT: 0. Runtime coordinator wire-up
+    Note over HostRT: packaged asset presence/SHA/license gate already ran during packaging
+    HostRT-->>App: { coordinatorReady }
 
     App->>Config: 1. Load local config and cached state
     Config->>Auth: 2. SSO/LDAP 인증
@@ -411,7 +408,7 @@ sequenceDiagram
     par 동적 업데이트 (부팅마다 실행)
         Config->>Market: 4a. Plugin manifest diff
         Market-->>PluginMgr: 신규·업데이트 플러그인
-        PluginMgr->>PluginMgr: Install / Update / Remove
+        PluginMgr->>PluginMgr: Install / Update / Remove registry/artifacts only
     and
         Config->>AgentHub: 4b. Skill and Agent registry sync
         AgentHub-->>App: Updated skills and agent configs
@@ -420,7 +417,9 @@ sequenceDiagram
         the LLM backend-->>App: Session ID + model config + 세션 복원
     end
 
-    PluginMgr->>App: 5. Register plugin UI slots + Skills + Tools + Keywords
+    PluginMgr->>PythonRT: 5a. host-managed plugin prepare on install/start
+    PythonRT-->>PluginMgr: plugin-specific pythonExecutable
+    PluginMgr->>App: 5b. Register plugin UI slots + Skills + Tools + Keywords
     App->>App: 6. Initialize Core Engines (KW · Route · Index · Memory)
 
     App->>App: 7. Wire OverlayContext + host:overlay gate
@@ -551,7 +550,7 @@ Layer B — 지능형 인덱싱 (local-indexer)
 | 지원 포맷 | PDF · DOCX · PPTX · XLSX · HTML · MD · TXT | `pymupdf4llm`(PDF) + `markitdown`(Office / HTML) + 직접 읽기(텍스트). PPTX / XLSX 이미지 OCR은 Phase 2 Vision |
 | LLM 의존성 | 임베딩은 OpenAI `text-embedding-3-small` 사용 | Phase 1은 OpenAI API key 필요. Phase 2는 BAAI / bge-m3 또는 the LLM backend 후속 경로 검토 |
 | 온라인 전제 | 인덱싱 시 임베딩 API 호출 필요 | Phase 1은 외부 임베딩 경로, Phase 2는 로컬 / enterprise 임베딩으로 오프라인화 목표 |
-| Python 런타임 | `uv` + venv 자동 셋업 (Step 0) | 첫 부팅 ~40-50초, 이후 <1.5초. 사용자 PC에 Python 수동 설치 불필요 |
+| Python 런타임 | plugin start-scoped packaged `uv` lazy materialize + shared venv prepare | 앱 부트는 `uv` materialize/dependency sync 를 기다리지 않는다. host-managed Python 플러그인이 install/start 될 때 lockfile content + OS/arch keyed shared venv 를 준비하고 `pythonExecutable` 을 주입한다 |
 
 #### 4.4.1 Phase 1 Production Upgrade — 완료 (2026-04-13)
 
@@ -559,7 +558,7 @@ Phase 1에서 §4.4 Layer A·B 명세를 production 수준으로 끌어올리는
 
 | 항목 | Phase 1 변경 |
 | --- | --- |
-| **Python 런타임 자동 셋업** | `uv` standalone binary 번들 후 첫 부팅에 `uv python install 3.12` + `uv venv` + `uv pip sync --frozen` 수행. 이후 warm boot는 `.ready` sentinel로 즉시 skip |
+| **Python 런타임 준비 경계** | 앱 installer 는 host-owned `uv` runtime asset 과 license 만 포함한다. `uv` materialize 와 Python interpreter/venv dependency sync 는 plugin manifest 의 host-managed Python 선언을 기준으로 plugin install/start 전 lazy 수행하며, venv 는 `~/.lvis/runtime/python-envs/<os-arch-py-lockHash>/venv` 로 공유한다 |
 | **Layer A 파서** | PDF는 `pymupdf4llm`, DOCX / PPTX / XLSX / HTML은 Microsoft `markitdown` 단일 API 사용 |
 | **PageIndex 통합** | `pageindex==0.2.8`은 검색 메서드가 없으므로 LVIS가 function calling으로 `document_structure` + `document_page_content`를 도구 노출해 agentic 탐색을 직접 구현 |
 | **한국어 BM25** | `kiwipiepy 0.23.1` 형태소 추출 → `content_ko` 컬럼 → SQLite FTS5 `unicode61` 패턴으로 한국어 recall 보강 |
@@ -3117,7 +3116,8 @@ graph TB
 **Boot Sequence 확장 (§4.2 보강)**
 
 ```
-Step 0:    Python Runtime Bootstrap                       [Phase 1 완료]
+Step 0:    Runtime Coordinator Wire-up                    [Phase 1 완료]
+           └─ host-owned runtime coordinator 인스턴스만 주입
 Step 0.5:  Managed Policy Sync                            [Phase 1.5 설계]
            ├─ ssoToken 확보 (§14.2 Auth)
            ├─ fetchPolicy(sso) from IT Admin API
@@ -3131,6 +3131,11 @@ Step 0.6:  Managed Plugin Installer                       [Phase 1.5 설계]
            └─ 실패 시 기존 버전 유지 + 사용자 알림
 Step 1-8:  기존 boot sequence
 ```
+
+`uv` materialize 와 Python dependency sync 는 앱 부팅 Step 0 이 아니라, plugin
+install/start 경계에서 해당 플러그인의 `python-requirements.lock` content +
+OS/arch key 기반 공유 venv 로 준비한다. 따라서 managed/user plugin 설치 정책은
+host asset 배포와 plugin-owned runtime dependency 준비를 분리해서 다룬다.
 
 **Runtime 제약**: `PluginRuntime.uninstall(id)` 및 `disable(id)`는 `PluginDeploymentGuard` 통과 후만 실행된다. managed 플러그인은 기본적으로 uninstall / disable 요청을 거부한다.
 

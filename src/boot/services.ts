@@ -2,7 +2,7 @@
  * Boot §4.2 Step 0–1+5 — Core service wiring.
  *
  * Instantiates services that have no plugin dependency and must exist
- * before plugin loading (settings, memory, audit, python runtime,
+ * before plugin loading (settings, memory, audit, python runtime coordinator,
  * keyword/route/tool registry + native builtin tools).
  */
 import { app } from "electron";
@@ -36,16 +36,11 @@ export interface CoreServices {
 }
 
 export async function bootstrapCoreServices(mainWindow: BrowserWindow): Promise<CoreServices> {
-  // §4.2 Step 0: Python Runtime Bootstrap (Agent 1)
+  // Python runtime coordination is app-owned, but runtime assets and plugin
+  // dependencies are materialized lazily by plugin-level async prepare.
   const pythonRuntime = new PythonRuntimeBootstrapper();
   let pythonPath: string | undefined;
-  try {
-    const runtimeResult = await pythonRuntime.ensureReady(mainWindow);
-    pythonPath = runtimeResult.pythonPath;
-    log.info("boot: python runtime ready: %s", pythonPath);
-  } catch (err) {
-    log.warn("boot: python runtime setup failed (non-fatal): %s", (err as Error).message);
-  }
+  void mainWindow;
 
   // §4.2 Step 0.5: Governance Services (Agent 6)
   const bashAstValidator = new BashAstValidator({ mode: "deny" });

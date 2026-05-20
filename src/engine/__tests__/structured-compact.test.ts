@@ -329,6 +329,7 @@ describe("compactWithBoundary — LLM call integration", () => {
     expect(r.newHistory[0].role).toBe("user");
     expect(r.newHistory[0].meta?.compactBoundary).toBe(true);
     expect(r.newHistory[0].meta?.compactNum).toBe(1);
+    expect(r.newHistory[0].meta?.checkpointMeta?.compactNum).toBe(1);
     expect(r.newHistory[0].meta?.boundary).toBe(r.boundary);
     expect(Object.isFrozen(r.boundary!)).toBe(true);
     expect(r.boundary!.structuredSummary.sections.Goal).toBe("auth refactor");

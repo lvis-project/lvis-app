@@ -161,6 +161,7 @@ export interface MessageMeta {
   checkpointMeta?: {
     removedMessages: number;
     freedTokens: number;
+    compactNum?: number;
     trigger?: "auto-compact" | "manual";
     compactStatus?: "summarized" | "content_truncated" | "noop" | "reduced_insufficient_forced";
     summary?: string;
