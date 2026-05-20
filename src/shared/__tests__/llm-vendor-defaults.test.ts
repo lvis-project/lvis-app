@@ -3,6 +3,7 @@ import {
   isLLMVendor,
   LLM_VENDORS,
   LLM_VENDOR_DEFAULTS,
+  LLM_VENDOR_MODEL_OPTIONS,
   freshVendorBlocks,
 } from "../llm-vendor-defaults.js";
 
@@ -56,6 +57,32 @@ describe("LLMVendorSettings — #893 top-level authMode promotion", () => {
     const blocks = freshVendorBlocks();
     for (const v of LLM_VENDORS) {
       expect("authMode" in blocks[v]).toBe(false);
+    }
+  });
+});
+
+describe("LLM vendor defaults", () => {
+  it("uses gpt-5.4-mini as the OpenAI default model", () => {
+    expect(LLM_VENDOR_DEFAULTS.openai.model).toBe("gpt-5.4-mini");
+  });
+
+  it("enables thinking by default for every provider", () => {
+    for (const v of LLM_VENDORS) {
+      expect(LLM_VENDOR_DEFAULTS[v].enableThinking).toBe(true);
+    }
+  });
+
+  it("freshVendorBlocks() preserves the default thinking-enabled blocks", () => {
+    const blocks = freshVendorBlocks();
+    expect(blocks.openai.model).toBe("gpt-5.4-mini");
+    for (const v of LLM_VENDORS) {
+      expect(blocks[v].enableThinking).toBe(true);
+    }
+  });
+
+  it("includes each provider's default model in its dropdown options", () => {
+    for (const v of LLM_VENDORS) {
+      expect(LLM_VENDOR_MODEL_OPTIONS[v]).toContain(LLM_VENDOR_DEFAULTS[v].model);
     }
   });
 });

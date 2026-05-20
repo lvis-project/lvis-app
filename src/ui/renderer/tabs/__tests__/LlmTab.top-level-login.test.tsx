@@ -3,7 +3,7 @@
  *
  * Verifies that when `authMode === "login"` the LlmTab renders only the
  * Login status + Login button — the vendor dropdown and every per-vendor
- * field (baseUrl, vertex, API key, model) must be removed from the DOM.
+ * field (baseUrl, vertex, API key, model selector) must be removed from the DOM.
  * When `authMode === "manual"` the full per-vendor form returns.
  */
 import "../../../../../test/renderer/setup.js";
@@ -22,12 +22,12 @@ function Harness({ initialAuthMode }: { initialAuthMode: "manual" | "login" }) {
   const [authMode, setAuthMode] = useState<"manual" | "login">(initialAuthMode);
   const [vendor, setVendor] = useState("openai");
   const [keyInput, setKeyInput] = useState("");
-  const [model, setModel] = useState("gpt-4o");
+  const [model, setModel] = useState("gpt-5.4-mini");
   const [baseUrl, setBaseUrl] = useState("");
   const [vertexProject, setVertexProject] = useState("");
   const [vertexLocation, setVertexLocation] = useState("");
   const [hasKey, setHasKey] = useState(false);
-  const [enableThinking, setEnableThinking] = useState(false);
+  const [enableThinking, setEnableThinking] = useState(true);
   const [thinkingBudget, setThinkingBudget] = useState(10_000);
   const [fallbackChain, setFallbackChain] = useState<FallbackEntry[]>([]);
   const [fallbackOpen, setFallbackOpen] = useState(false);
@@ -73,8 +73,8 @@ describe("LlmTab — #893 top-level login toggle UI", () => {
     expect(container.querySelector('#vendor-select')).toBeNull();
     // Manual section absent.
     expect(container.querySelector('[data-testid="llm-tab:manual-section"]')).toBeNull();
-    // Model input gone.
-    expect(container.querySelector('[data-testid="llm-model-input"]')).toBeNull();
+    // Model selector gone.
+    expect(container.querySelector('[data-testid="llm-model-select"]')).toBeNull();
     // Login button present.
     expect(container.querySelector('[data-testid="llm-tab:open-login"]')).not.toBeNull();
   });
@@ -83,7 +83,8 @@ describe("LlmTab — #893 top-level login toggle UI", () => {
     const { container } = render(<Harness initialAuthMode="manual" />);
     expect(container.querySelector('[data-testid="llm-tab:manual-section"]')).not.toBeNull();
     expect(container.querySelector('#vendor-select')).not.toBeNull();
-    expect(container.querySelector('[data-testid="llm-model-input"]')).not.toBeNull();
+    expect(container.querySelector('[data-testid="llm-model-select"]')).not.toBeNull();
+    expect(container.querySelector('[data-testid="llm-model-input"]')).toBeNull();
     expect(container.querySelector('[data-testid="llm-tab:login-section"]')).toBeNull();
   });
 
