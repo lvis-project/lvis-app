@@ -29,6 +29,24 @@ describe("resolvePluginPaths", () => {
     expect(paths.cacheRoot).toBe(resolve(expected, ".cache"));
   });
 
+  it("moves the managed plugin root when LVIS_HOME is changed", () => {
+    const originalLvisHome = process.env.LVIS_HOME;
+    process.env.LVIS_HOME = "/tmp/lvis-portable-home";
+    try {
+      const paths = resolvePluginPaths();
+      const expected = resolve("/tmp/lvis-portable-home", "plugins");
+      expect(paths.pluginsRoot).toBe(expected);
+      expect(paths.registryPath).toBe(resolve(expected, "registry.json"));
+      expect(paths.cacheRoot).toBe(resolve(expected, ".cache"));
+    } finally {
+      if (originalLvisHome === undefined) {
+        delete process.env.LVIS_HOME;
+      } else {
+        process.env.LVIS_HOME = originalLvisHome;
+      }
+    }
+  });
+
   it("explicit pluginsRoot wins over the homedir default", () => {
     const paths = resolvePluginPaths({ pluginsRoot: "/tmp/explicit" });
     expect(paths.pluginsRoot).toBe(resolve("/tmp/explicit"));

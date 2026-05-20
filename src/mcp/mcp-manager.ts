@@ -28,7 +28,9 @@ import { createLogger } from "../lib/logger.js";
 import { lvisHome } from "../shared/lvis-home.js";
 const log = createLogger("mcp-manager");
 
-const DEFAULT_CONFIG_PATH = join(lvisHome(), "mcp", "servers.json");
+function defaultConfigPath(): string {
+  return join(lvisHome(), "mcp", "servers.json");
+}
 
 export class McpManager {
   private readonly clients = new Map<string, McpClient>();
@@ -59,7 +61,7 @@ export class McpManager {
     private readonly permissionManager?: PermissionManager,
     private readonly auditLogger?: AuditLogger,
   ) {
-    this.configPath = configPath ?? DEFAULT_CONFIG_PATH;
+    this.configPath = configPath ?? defaultConfigPath();
     this.configLockPath = `${this.configPath}.guard`;
   }
 
