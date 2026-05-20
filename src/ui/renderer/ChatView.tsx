@@ -756,37 +756,9 @@ export function ChatView({ api, onAsk, onEditSave, onFork, onToggleStar, onRetry
     return () => window.removeEventListener("keydown", handler);
   }, [streaming, onAbort]);
 
-  // Tutorial-D — chat empty-area right-click opens the system menu with
-  // a "튜토리얼 보기" entry. Right-clicks that originate inside an
-  // interactive descendant (button, anchor, contenteditable, input,
-  // textarea) keep their existing behaviour — we only intercept the
-  // "background" right-click that would otherwise land on Electron's
-  // default empty menu.
-  const handleChatBackgroundContextMenu = useCallback(
-    (event: React.MouseEvent<HTMLDivElement>) => {
-      const target = event.target as HTMLElement | null;
-      if (target) {
-        const interactive = target.closest(
-          "a, button, input, textarea, select, [contenteditable=\"true\"], [data-skip-tutorial-context]",
-        );
-        if (interactive) return;
-      }
-      event.preventDefault();
-      const show = window.lvisApi?.tutorialShowContextMenu;
-      if (typeof show === "function") {
-        void show().catch(() => {
-          /* renderer keeps the chat view interactive even if the menu
-             dispatch fails — the user can still use the Help menu. */
-        });
-      }
-    },
-    [],
-  );
-
   return (
     <div
       className="relative flex min-h-0 min-w-0 w-full flex-1 flex-col overflow-hidden"
-      onContextMenu={handleChatBackgroundContextMenu}
       data-testid="chat-view-root"
     >
       {hasApiKey === false && (
