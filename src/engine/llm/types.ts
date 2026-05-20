@@ -42,6 +42,28 @@ export const LLM_DEFAULT_MODELS: Record<LLMVendor, string> = {
  */
 export interface MessageMeta {
   /**
+   * User-visible text for this message. The stored `content` may include
+   * routing/provenance wrappers that are prompt-bearing but must not be
+   * replayed as the user's own visible bubble.
+   */
+  displayText?: string;
+  /** Skill routing provenance for a user turn. */
+  routeSkill?: { skillId: string };
+  /** Structured provenance for plugin/proactive imported trigger turns. */
+  importedTrigger?: {
+    sessionId: string;
+    source: string;
+    prompt: string;
+    summary: string;
+    toolCallCount: number;
+    importedAt: string;
+  };
+  /** Renderer display metadata for tool_result replay parity. */
+  toolDisplay?: {
+    durationMs?: number;
+    uiPayload?: import("../../mcp/types.js").McpUiPayload;
+  };
+  /**
    * Tool-result stubbing + LLM compact 양쪽의 단일 marker — set 시 의미:
    *   - tool_result message: provider send / session save serialization 시
    *     content 를 stub 으로 변환해야 함 (memory verbatim, serialization stub)

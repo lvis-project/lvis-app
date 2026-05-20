@@ -10,6 +10,10 @@ import {
 } from "../../../lib/chat-stream-state.js";
 import { detectFromStream } from "../../../lib/stream-markers.js";
 import type { SerializedHistoryMessage } from "../../../shared/chat-history.js";
+import {
+  isOverlayTriggerOrigin,
+  parseImportedTriggerEnvelopePayload,
+} from "../../../shared/overlay-trigger-source.js";
 
 export type PersistedHistoryMessage = SerializedHistoryMessage;
 
@@ -51,6 +55,7 @@ export function historyToEntries(
         toolUseId,
         result: textContent(m.content),
         isError: m.isError,
+        durationMs: m.toolDisplay?.durationMs,
       });
       continue;
     }
@@ -80,9 +85,14 @@ export function historyToEntries(
         });
         continue;
       }
+      const importedTrigger = importedTriggerFromMessage(m);
+      if (importedTrigger) {
+        out.push(importedTrigger);
+        continue;
+      }
       out.push({
         kind: "user",
-        text: textContent(m.content),
+        text: visibleUserText(m),
         ...(m.createdAt !== undefined ? { createdAt: m.createdAt } : {}),
       });
     } else if (m.role === "assistant") {
@@ -105,7 +115,7 @@ export function historyToEntries(
         visibleText,
         {
           ...(m.createdAt !== undefined ? { createdAt: m.createdAt } : {}),
-          ...(m.systemNotice !== undefined && m.systemNotice !== "interrupted"
+          ...(isReplayableSystemNotice(m.systemNotice)
             ? { systemNotice: m.systemNotice }
             : {}),
         },
@@ -162,4 +172,55 @@ function nextToolOrder(orderByGroupId: Map<string, number>, groupId: string): nu
 
 function textContent(content: PersistedHistoryMessage["content"]): string {
   return content;
+}
+
+function visibleUserText(message: PersistedHistoryMessage): string {
+  if (message.displayText !== undefined) return message.displayText;
+  const content = textContent(message.content);
+  return legacySkillVisibleText(content);
+}
+
+const LEGACY_SKILL_PREFIX_PATTERN = /^\[스킬:\s*([^\]]+)\]\s*/;
+
+function legacySkillVisibleText(content: string): string {
+  const match = content.match(LEGACY_SKILL_PREFIX_PATTERN);
+  return match ? content.slice(match[0].length) : content;
+}
+
+function importedTriggerFromMessage(
+  message: PersistedHistoryMessage,
+): Extract<ChatEntry, { kind: "imported_trigger" }> | null {
+  if (message.importedTrigger) {
+    if (!isOverlayTriggerOrigin(message.importedTrigger.source)) return null;
+    return {
+      kind: "imported_trigger",
+      sessionId: message.importedTrigger.sessionId,
+      source: message.importedTrigger.source,
+      prompt: message.importedTrigger.prompt,
+      summary: message.importedTrigger.summary,
+      toolCallCount: message.importedTrigger.toolCallCount,
+      importedAt: message.importedTrigger.importedAt,
+    };
+  }
+  const content = textContent(message.content);
+  if (!content.trim().endsWith("</imported-from-proactive>")) return null;
+  const parsed = parseImportedTriggerEnvelopePayload(content);
+  if (!parsed) return null;
+  return {
+    kind: "imported_trigger",
+    sessionId: `history-imported-${message.index}`,
+    source: parsed.source,
+    prompt: textContent(message.content),
+    summary: parsed.body,
+    toolCallCount: 0,
+    importedAt: message.createdAt !== undefined
+      ? new Date(message.createdAt).toISOString()
+      : new Date(0).toISOString(),
+  };
+}
+
+function isReplayableSystemNotice(
+  value: PersistedHistoryMessage["systemNotice"],
+): value is Exclude<NonNullable<PersistedHistoryMessage["systemNotice"]>, "interrupted"> {
+  return value === "context-error" || value === "stream-error";
 }
