@@ -102,6 +102,17 @@ const REVIEWER_RENAME_NOTICE_TEXT =
   "권한 리뷰어 설정은 자동(헤드리스) 실행과 대화형 채팅 모두에 적용됩니다. " +
   "이 패널에서 정책을 한 번 조정하면 두 영역에 동일하게 반영됩니다.";
 
+function preserveSettingsScrollPosition(): () => void {
+  const scroller = document.querySelector<HTMLElement>(".lvis-settings-scroll");
+  if (!scroller) return () => undefined;
+  const top = scroller.scrollTop;
+  return () => {
+    requestAnimationFrame(() => {
+      scroller.scrollTop = top;
+    });
+  };
+}
+
 export function PermissionsTab() {
   // ── 로딩 상태 ─────────────────────────────────────
   const [loading, setLoading] = useState(true);
@@ -455,6 +466,7 @@ export function PermissionsTab() {
   };
 
   const handleRemoveDirectory = async (dir: string) => {
+    const restoreScroll = preserveSettingsScrollPosition();
     setDirsBusy(true);
     try {
       const res = await window.lvis.permission.dirDispatch(`deny ${formatPermissionDirArg(dir)}`);
@@ -467,6 +479,7 @@ export function PermissionsTab() {
       showBanner("error", `디렉터리 삭제 중 오류: ${(e as Error).message}`);
     } finally {
       setDirsBusy(false);
+      restoreScroll();
     }
   };
 
