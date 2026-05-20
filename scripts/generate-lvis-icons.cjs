@@ -448,6 +448,192 @@ function encodePng(width, height, rgba) {
   ]);
 }
 
+function setPixelAt(buffer, width, x, y, color) {
+  if (x < 0 || y < 0) return;
+  const height = buffer.length / (width * 4);
+  if (x >= width || y >= height) return;
+  const offset = (y * width + x) * 4;
+  buffer[offset] = color[0];
+  buffer[offset + 1] = color[1];
+  buffer[offset + 2] = color[2];
+  buffer[offset + 3] = color[3] ?? 255;
+}
+
+function blendPixelAt(buffer, width, x, y, color) {
+  if (x < 0 || y < 0) return;
+  const height = buffer.length / (width * 4);
+  if (x >= width || y >= height) return;
+  const offset = (y * width + x) * 4;
+  const alpha = (color[3] ?? 255) / 255;
+  const inverse = 1 - alpha;
+  buffer[offset] = Math.round(color[0] * alpha + buffer[offset] * inverse);
+  buffer[offset + 1] = Math.round(color[1] * alpha + buffer[offset + 1] * inverse);
+  buffer[offset + 2] = Math.round(color[2] * alpha + buffer[offset + 2] * inverse);
+  buffer[offset + 3] = 255;
+}
+
+function mixColor(a, b, t) {
+  return [
+    Math.round(a[0] + (b[0] - a[0]) * t),
+    Math.round(a[1] + (b[1] - a[1]) * t),
+    Math.round(a[2] + (b[2] - a[2]) * t),
+    Math.round((a[3] ?? 255) + ((b[3] ?? 255) - (a[3] ?? 255)) * t),
+  ];
+}
+
+function fillGradient(buffer, width, height, topColor, bottomColor) {
+  for (let y = 0; y < height; y += 1) {
+    const t = height <= 1 ? 0 : y / (height - 1);
+    const color = mixColor(topColor, bottomColor, t);
+    for (let x = 0; x < width; x += 1) {
+      setPixelAt(buffer, width, x, y, color);
+    }
+  }
+}
+
+function fillRect(buffer, width, x, y, rectWidth, rectHeight, color) {
+  for (let yy = Math.max(0, y); yy < y + rectHeight; yy += 1) {
+    for (let xx = Math.max(0, x); xx < x + rectWidth; xx += 1) {
+      blendPixelAt(buffer, width, xx, yy, color);
+    }
+  }
+}
+
+const FONT_5X7 = {
+  A: ["01110", "10001", "10001", "11111", "10001", "10001", "10001"],
+  D: ["11110", "10001", "10001", "10001", "10001", "10001", "11110"],
+  E: ["11111", "10000", "10000", "11110", "10000", "10000", "11111"],
+  I: ["11111", "00100", "00100", "00100", "00100", "00100", "11111"],
+  L: ["10000", "10000", "10000", "10000", "10000", "10000", "11111"],
+  O: ["01110", "10001", "10001", "10001", "10001", "10001", "01110"],
+  P: ["11110", "10001", "10001", "11110", "10000", "10000", "10000"],
+  R: ["11110", "10001", "10001", "11110", "10100", "10010", "10001"],
+  S: ["01111", "10000", "10000", "01110", "00001", "00001", "11110"],
+  T: ["11111", "00100", "00100", "00100", "00100", "00100", "00100"],
+  U: ["10001", "10001", "10001", "10001", "10001", "10001", "01110"],
+  V: ["10001", "10001", "10001", "10001", "10001", "01010", "00100"],
+  Y: ["10001", "10001", "01010", "00100", "00100", "00100", "00100"],
+  " ": ["00000", "00000", "00000", "00000", "00000", "00000", "00000"],
+};
+
+function textWidth(text, scale) {
+  return text.length === 0 ? 0 : text.length * 5 * scale + (text.length - 1) * scale;
+}
+
+function drawText(buffer, width, x, y, text, scale, color) {
+  let cursor = x;
+  for (const char of text.toUpperCase()) {
+    const glyph = FONT_5X7[char] ?? FONT_5X7[" "];
+    for (let gy = 0; gy < glyph.length; gy += 1) {
+      for (let gx = 0; gx < glyph[gy].length; gx += 1) {
+        if (glyph[gy][gx] !== "1") continue;
+        fillRect(buffer, width, cursor + gx * scale, y + gy * scale, scale, scale, color);
+      }
+    }
+    cursor += 6 * scale;
+  }
+}
+
+function drawCenteredText(buffer, width, y, text, scale, color) {
+  drawText(buffer, width, Math.round((width - textWidth(text, scale)) / 2), y, text, scale, color);
+}
+
+function composite(buffer, width, image, imageWidth, imageHeight, x, y) {
+  for (let yy = 0; yy < imageHeight; yy += 1) {
+    for (let xx = 0; xx < imageWidth; xx += 1) {
+      const offset = (yy * imageWidth + xx) * 4;
+      const alpha = image[offset + 3];
+      if (alpha === 0) continue;
+      blendPixelAt(buffer, width, x + xx, y + yy, [
+        image[offset],
+        image[offset + 1],
+        image[offset + 2],
+        alpha,
+      ]);
+    }
+  }
+}
+
+function encodeBmp(width, height, rgba) {
+  const rowStride = Math.ceil((width * 3) / 4) * 4;
+  const pixelBytes = rowStride * height;
+  const fileSize = 14 + 40 + pixelBytes;
+  const bmp = Buffer.alloc(fileSize);
+  bmp.write("BM", 0, "ascii");
+  bmp.writeUInt32LE(fileSize, 2);
+  bmp.writeUInt32LE(54, 10);
+  bmp.writeUInt32LE(40, 14);
+  bmp.writeInt32LE(width, 18);
+  bmp.writeInt32LE(height, 22);
+  bmp.writeUInt16LE(1, 26);
+  bmp.writeUInt16LE(24, 28);
+  bmp.writeUInt32LE(pixelBytes, 34);
+
+  for (let y = 0; y < height; y += 1) {
+    const sourceY = height - 1 - y;
+    const destRow = 54 + y * rowStride;
+    for (let x = 0; x < width; x += 1) {
+      const sourceOffset = (sourceY * width + x) * 4;
+      const destOffset = destRow + x * 3;
+      bmp[destOffset] = rgba[sourceOffset + 2];
+      bmp[destOffset + 1] = rgba[sourceOffset + 1];
+      bmp[destOffset + 2] = rgba[sourceOffset];
+    }
+  }
+  return bmp;
+}
+
+function createInstallerSidebar(logoPath, viewBox, uninstall = false) {
+  const width = 164;
+  const height = 314;
+  const buffer = Buffer.alloc(width * height * 4);
+  fillGradient(buffer, width, height, [22, 24, 34, 255], [46, 19, 42, 255]);
+  fillRect(buffer, width, 0, 0, 4, height, uninstall ? [255, 123, 92, 255] : [255, 66, 107, 255]);
+  fillRect(buffer, width, 20, 32, 124, 1, [255, 255, 255, 52]);
+  fillRect(buffer, width, 20, 246, 124, 1, [255, 255, 255, 44]);
+
+  const iconSize = 82;
+  const icon = rasterizeTrayLineIcon(logoPath, viewBox, iconSize, [255, 255, 255, 255]);
+  composite(buffer, width, icon, iconSize, iconSize, Math.round((width - iconSize) / 2), 72);
+  drawCenteredText(buffer, width, 184, "LVIS", 4, [255, 255, 255, 255]);
+  drawCenteredText(buffer, width, 222, uninstall ? "UNINSTALL" : "AI STUDIO", 2, [255, 217, 226, 255]);
+  return { width, height, buffer };
+}
+
+function createInstallerHeader(logoPath, viewBox) {
+  const width = 150;
+  const height = 57;
+  const buffer = Buffer.alloc(width * height * 4);
+  fillGradient(buffer, width, height, [255, 250, 250, 255], [251, 240, 247, 255]);
+  fillRect(buffer, width, 0, height - 3, width, 3, [255, 66, 107, 255]);
+  const iconSize = 34;
+  const icon = rasterizeTrayLineIcon(logoPath, viewBox, iconSize, [255, 66, 107, 255]);
+  composite(buffer, width, icon, iconSize, iconSize, 10, 10);
+  drawText(buffer, width, 52, 13, "LVIS", 3, [34, 35, 44, 255]);
+  drawText(buffer, width, 53, 39, "SETUP", 1, [122, 75, 96, 255]);
+  return { width, height, buffer };
+}
+
+function createInstallerProgress(logoPath, viewBox) {
+  const width = 320;
+  const height = 180;
+  const buffer = Buffer.alloc(width * height * 4);
+  fillGradient(buffer, width, height, [255, 246, 248, 255], [247, 239, 252, 255]);
+  fillRect(buffer, width, 0, 0, width, 4, [255, 66, 107, 255]);
+  fillRect(buffer, width, 20, 24, 280, 132, [255, 255, 255, 230]);
+  fillRect(buffer, width, 20, 154, 280, 2, [219, 206, 218, 255]);
+  const iconSize = 76;
+  const icon = rasterizeTrayLineIcon(logoPath, viewBox, iconSize, [255, 66, 107, 255]);
+  composite(buffer, width, icon, iconSize, iconSize, 38, 52);
+  drawText(buffer, width, 136, 48, "LVIS", 5, [34, 35, 44, 255]);
+  drawText(buffer, width, 138, 88, "READY", 2, [112, 71, 94, 255]);
+  fillRect(buffer, width, 138, 118, 132, 8, [232, 222, 232, 255]);
+  fillRect(buffer, width, 138, 118, 92, 8, [255, 66, 107, 255]);
+  fillRect(buffer, width, 138, 132, 84, 3, [255, 169, 183, 255]);
+  fillRect(buffer, width, 138, 140, 112, 3, [225, 213, 226, 255]);
+  return { width, height, buffer };
+}
+
 function main() {
   mkdirSync(buildDir, { recursive: true });
 
@@ -472,10 +658,22 @@ function main() {
     );
   }
 
+  const installerAssets = [
+    ["installer-sidebar.bmp", createInstallerSidebar(logoPath, viewBox)],
+    ["uninstaller-sidebar.bmp", createInstallerSidebar(logoPath, viewBox, true)],
+    ["installer-header.bmp", createInstallerHeader(logoPath, viewBox)],
+    ["installer-progress.bmp", createInstallerProgress(logoPath, viewBox)],
+  ];
+  for (const [name, asset] of installerAssets) {
+    writeFileSync(join(buildDir, name), encodeBmp(asset.width, asset.height, asset.buffer));
+  }
+
   console.log(`Generated ${svgPath}`);
   console.log(`Generated ${pngPath}`);
   console.log(`Generated ${join(buildDir, "tray-icon.png")}`);
   console.log(`Generated ${join(buildDir, "tray-iconTemplate.png")}`);
+  console.log(`Generated ${join(buildDir, "installer-sidebar.bmp")}`);
+  console.log(`Generated ${join(buildDir, "installer-progress.bmp")}`);
 }
 
 main();

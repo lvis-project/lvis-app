@@ -55,7 +55,9 @@ interface ReadySentinel {
 
 // ─── 상수 ────────────────────────────────────────────
 
-const LVIS_RUNTIME_DIR = path.join(lvisHome(), "runtime");
+function defaultRuntimeDir(): string {
+  return path.join(lvisHome(), "runtime");
+}
 // Co-locate uv cache with the venv so hardlinks from cache → site-packages stay
 // on the same physical volume. NTFS hardlinks fail cross-volume with EXDEV
 // (issue #713) when ~/.lvis and %LOCALAPPDATA% live on different drives via
@@ -100,7 +102,7 @@ export class PythonRuntimeBootstrapper {
   constructor(private readonly options: PythonRuntimeBootstrapperOptions = {}) {}
 
   private runtimeDir(): string {
-    return this.options.runtimeDir ?? LVIS_RUNTIME_DIR;
+    return this.options.runtimeDir ?? defaultRuntimeDir();
   }
 
   private venvDir(): string {
@@ -412,7 +414,7 @@ export class PythonRuntimeBootstrapper {
     const lockBytes = Buffer.isBuffer(lockFile) ? lockFile : Buffer.from(lockFile);
     const lockHash = createHash("sha256").update(lockBytes).digest("hex").slice(0, 24);
     const uvTarget = this.getCurrentUvTarget();
-    return path.join(LVIS_RUNTIME_DIR, "python-envs", `${uvTarget.dir}-py312-${lockHash}`);
+    return path.join(this.runtimeDir(), "python-envs", `${uvTarget.dir}-py312-${lockHash}`);
   }
 
   // ─── private: 실행 헬퍼 ──────────────────────────

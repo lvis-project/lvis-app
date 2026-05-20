@@ -1,5 +1,5 @@
-import { describe, it, expect, vi, beforeEach } from "vitest";
-import { mkdtempSync } from "node:fs";
+import { describe, it, expect, vi, beforeEach, afterEach, afterAll } from "vitest";
+import { existsSync, mkdirSync, mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { PERMISSIONS } from "../../../shared/ipc-channels.js";
@@ -7,6 +7,8 @@ import { UNAUTHORIZED_FRAME } from "../../gated.js";
 
 const handlers = new Map<string, (...args: unknown[]) => unknown>();
 const USER_INTENT = { inputOrigin: "user-keyboard", userActivation: true };
+const ORIGINAL_LVIS_HOME = process.env.LVIS_HOME;
+const TEST_LVIS_HOME = mkdtempSync(join(tmpdir(), "lvis-permissions-ipc-home-"));
 
 vi.mock("electron", () => ({
   ipcMain: {
@@ -136,8 +138,31 @@ async function setup(options: Parameters<typeof makeDeps>[0] = {}) {
   return { deps, permissionManager, appWindows };
 }
 
-beforeEach(() => {
+async function resetUserApprovalStoreForTest(): Promise<void> {
+  const { __resetSessionStoreForTest } = await import("../../../permissions/user-approval-store.js");
+  __resetSessionStoreForTest();
+}
+
+beforeEach(async () => {
+  process.env.LVIS_HOME = TEST_LVIS_HOME;
+  rmSync(TEST_LVIS_HOME, { recursive: true, force: true });
+  mkdirSync(TEST_LVIS_HOME, { recursive: true });
   handlers.clear();
+  await resetUserApprovalStoreForTest();
+});
+
+afterEach(async () => {
+  await resetUserApprovalStoreForTest();
+  rmSync(TEST_LVIS_HOME, { recursive: true, force: true });
+});
+
+afterAll(() => {
+  rmSync(TEST_LVIS_HOME, { recursive: true, force: true });
+  if (ORIGINAL_LVIS_HOME === undefined) {
+    delete process.env.LVIS_HOME;
+  } else {
+    process.env.LVIS_HOME = ORIGINAL_LVIS_HOME;
+  }
 });
 
 describe("permissions IPC handlers", () => {
@@ -787,6 +812,7 @@ describe("CRITICAL-2: user-approval-record HIGH verdict IPC enforcement", () => 
     });
 
     expect(result).toMatchObject({ ok: true });
+    expect(existsSync(join(TEST_LVIS_HOME, "permissions", "user-approvals.json"))).toBe(true);
   });
 
   it("rejects non-JSON args with args-not-json error (security-M2 No Fallback Code)", async () => {
