@@ -19,7 +19,7 @@
 import { describe, it, expect, vi } from "vitest";
 import { existsSync, mkdtempSync, readFileSync, realpathSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
-import { basename, dirname, join, resolve as pathResolve } from "node:path";
+import { join, resolve as pathResolve } from "node:path";
 
 import { ToolExecutor } from "../executor.js";
 import { ToolRegistry } from "../registry.js";
@@ -38,6 +38,10 @@ import { pluginToolsForRegistration } from "../../plugins/plugin-tool-adapter.js
 import type { PluginManifest } from "../../plugins/types.js";
 import type { PluginRuntime } from "../../plugins/runtime.js";
 import { mcpToolToTool } from "../../mcp/mcp-tool-adapter.js";
+import {
+  canonicalizePathForMatch,
+  caseFoldForMatch,
+} from "../../permissions/sensitive-paths.js";
 
 // ─── Helpers ─────────────────────────────────────────
 
@@ -68,25 +72,17 @@ function userPermissionContext(
 }
 
 function comparablePath(path: string | undefined): string {
-  // macOS `/var` is a symlink to `/private/var`; production code paths go
-  // through `realpathSync` so the canonical form is `/private/var/...`.
-  // Tests call this helper on raw `mkdtempSync` output (still `/var/...` on
-  // macOS) and on file paths that don't exist yet (e.g. target file before
-  // the tool writes it), so canonicalise via the closest existing ancestor
-  // and re-join the missing tail.
+  // Keep test comparisons aligned with the executor's canonical path helper.
+  // Non-path strings are approval messages; normalize separators/case only.
   const raw = path ?? "";
   if (!raw) return "";
-  let canonical = raw;
-  try {
-    canonical = realpathSync(raw);
-  } catch {
-    try {
-      canonical = join(realpathSync(dirname(raw)), basename(raw));
-    } catch {
-      canonical = raw;
-    }
+  const pathish = process.platform === "win32"
+    ? /^[a-z]:[\\/]/i.test(raw) || raw.startsWith("\\\\")
+    : raw.startsWith("/");
+  if (!pathish) {
+    return raw.replace(/\\/g, "/").toLowerCase();
   }
-  return canonical.replace(/\\/g, "/").toLowerCase();
+  return caseFoldForMatch(canonicalizePathForMatch(raw)).replace(/\\/g, "/").toLowerCase();
 }
 
 function makeReadFileTool(
