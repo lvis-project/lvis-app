@@ -1,12 +1,13 @@
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 
 import { KeywordEngine } from "../../core/keyword-engine.js";
 import { RouteEngine } from "../../core/route-engine.js";
 import { ConversationLoop } from "../conversation-loop.js";
-import type { LLMProvider, StreamEvent } from "../llm/types.js";
+import type { GenericMessage, LLMProvider, StreamEvent } from "../llm/types.js";
 import { ToolRegistry } from "../../tools/registry.js";
 import { createDynamicTool } from "../../tools/base.js";
 import { fakeLlmSettings } from "../../shared/__tests__/fake-llm-settings.js";
+import { PostTurnHookChain } from "../../hooks/post-turn-hook-chain.js";
 
 class FakeProvider implements LLMProvider {
   readonly vendor = "openai" as const;
@@ -19,7 +20,11 @@ class FakeProvider implements LLMProvider {
   }
 }
 
-function createLoopWithRegistry(provider: FakeProvider, toolRegistry: ToolRegistry): ConversationLoop {
+function createLoopWithRegistry(
+  provider: FakeProvider,
+  toolRegistry: ToolRegistry,
+  overrides: Partial<ConstructorParameters<typeof ConversationLoop>[0]> = {},
+): ConversationLoop {
   const keywordEngine = new KeywordEngine();
   const routeEngine = new RouteEngine({ toolRegistry });
   const loop = new ConversationLoop(({
@@ -35,6 +40,7 @@ function createLoopWithRegistry(provider: FakeProvider, toolRegistry: ToolRegist
       saveSession: () => {},
       listSessions: () => [],
     },
+    ...overrides,
   } as unknown) as ConstructorParameters<typeof ConversationLoop>[0]);
   (loop as { provider: LLMProvider | null }).provider = provider;
   return loop;
@@ -145,6 +151,171 @@ describe("ConversationLoop onTurnSummary", () => {
     // Turn produced no assistant text → footer suppressed (mirrors the
     // notification-gate so dropped/aborted turns don't render footers).
     expect(calls).toBe(0);
+  });
+
+  it("persists turnSummary on the final post-summary save", async () => {
+    const toolRegistry = new ToolRegistry();
+    const provider = new FakeProvider([
+      [
+        { type: "text_delta", text: "저장된 답변" },
+        { type: "message_complete", stopReason: "end_turn", usage: { inputTokens: 42, outputTokens: 7 } },
+      ],
+    ]);
+    const saveSession = vi.fn(async () => {});
+    const loop = createLoopWithRegistry(provider, toolRegistry, {
+      memoryManager: {
+        saveSession,
+        listSessions: () => [],
+      } as never,
+    });
+
+    await loop.runTurn("질문", {}, undefined, { inputOrigin: "user-keyboard" });
+
+    expect(saveSession).toHaveBeenCalled();
+    const lastCall = saveSession.mock.calls.at(-1);
+    const savedMessages = lastCall?.[1] as GenericMessage[] | undefined;
+    const finalAssistant = savedMessages?.slice().reverse().find((message) => message.role === "assistant");
+    expect(finalAssistant?.meta?.turnSummary).toMatchObject({
+      tokensIn: 42,
+      tokensOut: 7,
+      freshInputTokens: 42,
+    });
+  });
+
+  it("persists turnSummary on the marker-stripped post-turn transcript", async () => {
+    const toolRegistry = new ToolRegistry();
+    const provider = new FakeProvider([
+      [
+        { type: "text_delta", text: "정리 완료<title>숨김 제목</title>[checkpoint]" },
+        { type: "message_complete", stopReason: "end_turn", usage: { inputTokens: 30, outputTokens: 6 } },
+      ],
+    ]);
+    const saveSession = vi.fn(async () => {});
+    const memoryManager = {
+      saveSession,
+      listSessions: () => [],
+      loadSessionMetadata: () => ({}),
+      saveSessionMetadata: vi.fn(async () => {}),
+    };
+    const settingsService = {
+      get: () => fakeLlmSettings(),
+      getSecret: () => "test-key",
+    };
+    const loop = createLoopWithRegistry(provider, toolRegistry, {
+      settingsService,
+      memoryManager,
+      postTurnHookChain: new PostTurnHookChain({
+        memoryManager: memoryManager as never,
+        settingsService: settingsService as never,
+      }),
+    });
+
+    await loop.runTurn("질문", {}, undefined, { inputOrigin: "user-keyboard" });
+
+    const savedMessages = saveSession.mock.calls.at(-1)?.[1] as GenericMessage[] | undefined;
+    const finalAssistant = savedMessages?.slice().reverse().find((message) => message.role === "assistant");
+    expect(finalAssistant?.content).toBe("정리 완료");
+    expect(finalAssistant?.content).not.toContain("<title>");
+    expect(finalAssistant?.content).not.toContain("[checkpoint]");
+    expect(finalAssistant?.meta?.turnSummary).toMatchObject({
+      tokensIn: 30,
+      tokensOut: 6,
+      freshInputTokens: 30,
+    });
+  });
+
+  it("does not emit a turnSummary footer when the durable final save fails", async () => {
+    const toolRegistry = new ToolRegistry();
+    const provider = new FakeProvider([
+      [
+        { type: "text_delta", text: "저장 실패 답변" },
+        { type: "message_complete", stopReason: "end_turn", usage: { inputTokens: 9, outputTokens: 2 } },
+      ],
+    ]);
+    const saveSession = vi.fn(async () => {
+      throw new Error("disk unavailable");
+    });
+    const memoryManager = {
+      saveSession,
+      listSessions: () => [],
+    };
+    const settingsService = {
+      get: () => fakeLlmSettings(),
+      getSecret: () => "test-key",
+    };
+    const loop = createLoopWithRegistry(provider, toolRegistry, {
+      settingsService,
+      memoryManager,
+      postTurnHookChain: new PostTurnHookChain({
+        memoryManager: memoryManager as never,
+        settingsService: settingsService as never,
+      }),
+    });
+    let summaryCalls = 0;
+
+    const result = await loop.runTurn("질문", {
+      onTurnSummary: () => {
+        summaryCalls += 1;
+      },
+    }, undefined, { inputOrigin: "user-keyboard" });
+
+    expect(result.text).toBe("저장 실패 답변");
+    expect(summaryCalls).toBe(0);
+    expect(saveSession).toHaveBeenCalled();
+  });
+
+  it("persists imported trigger provenance on plugin-emitted user turns", async () => {
+    const toolRegistry = new ToolRegistry();
+    const provider = new FakeProvider([
+      [
+        { type: "text_delta", text: "처리했습니다" },
+        { type: "message_complete", stopReason: "end_turn", usage: { inputTokens: 10, outputTokens: 3 } },
+      ],
+    ]);
+    const saveSession = vi.fn(async () => {});
+    const loop = createLoopWithRegistry(provider, toolRegistry, {
+      memoryManager: { saveSession, listSessions: () => [] } as never,
+    });
+    const input = '<imported-from-proactive source="overlay:daily-briefing">\n오늘 브리핑\n</imported-from-proactive>';
+
+    await loop.runTurn(input, {}, undefined, { inputOrigin: "plugin-emitted" });
+
+    const savedMessages = saveSession.mock.calls.at(-1)?.[1] as GenericMessage[] | undefined;
+    const savedUser = savedMessages?.find((message) => message.role === "user");
+    expect(savedUser?.meta?.displayText).toBe("오늘 브리핑");
+    expect(savedUser?.meta?.importedTrigger).toMatchObject({
+      source: "overlay:daily-briefing",
+      prompt: input,
+      summary: "오늘 브리핑",
+      toolCallCount: 0,
+    });
+  });
+
+  it("persists skill routing provenance separately from visible user text", async () => {
+    const toolRegistry = new ToolRegistry();
+    const provider = new FakeProvider([
+      [
+        { type: "text_delta", text: "메일을 확인했습니다" },
+        { type: "message_complete", stopReason: "end_turn", usage: { inputTokens: 12, outputTokens: 4 } },
+      ],
+    ]);
+    const saveSession = vi.fn(async () => {});
+    const loop = createLoopWithRegistry(provider, toolRegistry, {
+      keywordEngine: {
+        classify: () => ({ type: "skill", text: "지금 메일 읽어줘" }),
+        matchAllPluginIds: () => new Set<string>(),
+      } as never,
+      routeEngine: { route: () => ({ route: "skill", skillId: "msgraph_email_list" }) } as never,
+      memoryManager: { saveSession, listSessions: () => [] } as never,
+    });
+
+    await loop.runTurn("지금 메일 읽어줘", {}, undefined, { inputOrigin: "user-keyboard" });
+
+    const savedMessages = saveSession.mock.calls.at(-1)?.[1] as GenericMessage[] | undefined;
+    const savedUser = savedMessages?.find((message) => message.role === "user");
+    expect(savedUser?.content).toBe("[스킬: msgraph_email_list] 지금 메일 읽어줘");
+    expect(savedUser?.meta?.displayText).toBe("지금 메일 읽어줘");
+    expect(savedUser?.meta?.routeSkill?.skillId).toBe("msgraph_email_list");
   });
 
   it("does not emit a summary or notification when stopReason is context-error", async () => {

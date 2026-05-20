@@ -1,6 +1,7 @@
 import type { GenericMessage, MessageMeta } from "../engine/llm/types.js";
 import { userContentText } from "../engine/llm/types.js";
 import { maskSensitiveData } from "./dlp.js";
+import { isOverlayTriggerOrigin } from "./overlay-trigger-source.js";
 
 export type SerializedHistoryToolCall = {
   id: string;
@@ -18,6 +19,10 @@ export type SerializedTurnSummary = NonNullable<MessageMeta["turnSummary"]>;
 
 /** Checkpoint metrics carried on the compactBoundary user message. */
 export type SerializedCheckpointMeta = NonNullable<MessageMeta["checkpointMeta"]>;
+export type SerializedImportedTriggerMeta = NonNullable<MessageMeta["importedTrigger"]>;
+export type SerializedToolDisplayMeta = {
+  durationMs?: number;
+};
 
 // Exact IPC payload emitted by serializeHistoryMessage() for renderer history
 // replay: multimodal content is flattened at the boundary, while persisted
@@ -33,6 +38,14 @@ export type SerializedHistoryMessage = {
   isError?: boolean;
   /** Wall-clock epoch ms when the message was created (see MessageMeta.createdAt). */
   createdAt?: number;
+  /** User-visible text when durable content carries routing/provenance wrappers. */
+  displayText?: string;
+  /** Skill route provenance for user-turn replay. */
+  routeSkill?: NonNullable<MessageMeta["routeSkill"]>;
+  /** Proactive/plugin imported-trigger provenance for card replay. */
+  importedTrigger?: SerializedImportedTriggerMeta;
+  /** Tool result display metadata for live/reload parity. */
+  toolDisplay?: SerializedToolDisplayMeta;
   /** Turn-aggregate stats — only on turn-final assistant messages. */
   turnSummary?: SerializedTurnSummary;
   /** Checkpoint metrics — only on compactBoundary user messages. */
@@ -52,11 +65,25 @@ export function serializeHistoryMessage(
       : m.role === "tool_result"
         ? maskSensitiveData(m.content).masked
         : m.content;
+  const meta = m.meta as MessageMeta | undefined;
+  const toolDisplay = serializeToolDisplay(meta?.toolDisplay);
+  const importedTrigger = serializeImportedTrigger(meta?.importedTrigger);
+  const systemNotice = serializeSystemNotice(meta?.systemNotice);
+  const routeSkill = serializeRouteSkill(meta?.routeSkill);
+  const displayText = typeof meta?.displayText === "string" ? meta.displayText : undefined;
+  const createdAt =
+    typeof meta?.createdAt === "number" && Number.isFinite(meta.createdAt)
+      ? meta.createdAt
+      : undefined;
   const metaFields = {
-    ...(m.meta?.createdAt !== undefined ? { createdAt: m.meta.createdAt } : {}),
+    ...(createdAt !== undefined ? { createdAt } : {}),
+    ...(displayText !== undefined ? { displayText } : {}),
+    ...(routeSkill !== undefined ? { routeSkill } : {}),
+    ...(importedTrigger !== undefined ? { importedTrigger } : {}),
+    ...(toolDisplay !== undefined ? { toolDisplay } : {}),
     ...(m.meta?.turnSummary !== undefined ? { turnSummary: m.meta.turnSummary } : {}),
     ...(m.meta?.checkpointMeta !== undefined ? { checkpointMeta: m.meta.checkpointMeta } : {}),
-    ...(m.meta?.systemNotice !== undefined ? { systemNotice: m.meta.systemNotice } : {}),
+    ...(systemNotice !== undefined ? { systemNotice } : {}),
   };
   const base = {
     index,
@@ -86,4 +113,65 @@ export function serializeHistoryMessage(
   }
 
   return base;
+}
+
+function serializeRouteSkill(
+  routeSkill: MessageMeta["routeSkill"] | undefined,
+): NonNullable<MessageMeta["routeSkill"]> | undefined {
+  if (!routeSkill || typeof routeSkill.skillId !== "string") return undefined;
+  if (!/^[a-zA-Z0-9_-]+$/.test(routeSkill.skillId)) return undefined;
+  return { skillId: routeSkill.skillId };
+}
+
+function serializeImportedTrigger(
+  importedTrigger: MessageMeta["importedTrigger"] | undefined,
+): SerializedImportedTriggerMeta | undefined {
+  if (!importedTrigger) return undefined;
+  if (!isOverlayTriggerOrigin(importedTrigger.source)) return undefined;
+  if (
+    typeof importedTrigger.sessionId !== "string" ||
+    typeof importedTrigger.prompt !== "string" ||
+    typeof importedTrigger.summary !== "string" ||
+    typeof importedTrigger.importedAt !== "string" ||
+    typeof importedTrigger.toolCallCount !== "number" ||
+    !Number.isInteger(importedTrigger.toolCallCount) ||
+    importedTrigger.toolCallCount < 0
+  ) {
+    return undefined;
+  }
+  return {
+    sessionId: importedTrigger.sessionId,
+    source: importedTrigger.source,
+    prompt: importedTrigger.prompt,
+    summary: importedTrigger.summary,
+    toolCallCount: importedTrigger.toolCallCount,
+    importedAt: importedTrigger.importedAt,
+  };
+}
+
+function serializeToolDisplay(
+  toolDisplay: MessageMeta["toolDisplay"] | undefined,
+): SerializedToolDisplayMeta | undefined {
+  if (!toolDisplay) return undefined;
+  // Persisted JSONL is user-writable. Replaying uiPayload would mount MCP UI
+  // resources and cross back into host IPC without proof that this row came from
+  // an actual tool execution, so persisted replay keeps only inert timing data.
+  if (
+    typeof toolDisplay.durationMs === "number" &&
+    Number.isFinite(toolDisplay.durationMs) &&
+    toolDisplay.durationMs >= 0
+  ) {
+    return { durationMs: toolDisplay.durationMs };
+  }
+  return undefined;
+}
+
+function serializeSystemNotice(
+  systemNotice: MessageMeta["systemNotice"] | undefined,
+): NonNullable<MessageMeta["systemNotice"]> | undefined {
+  return systemNotice === "context-error" ||
+    systemNotice === "stream-error" ||
+    systemNotice === "interrupted"
+    ? systemNotice
+    : undefined;
 }
