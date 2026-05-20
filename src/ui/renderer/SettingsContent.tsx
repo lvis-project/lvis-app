@@ -349,6 +349,20 @@ export function SettingsContent({
             <GeneralTab
               api={api}
               onNavigate={(nextTab) => setTab(normalizeSettingsTab(nextTab))}
+              onLogout={() => {
+                // 2026-05-20 — Settings 는 별도 BrowserWindow 이므로 main window 의
+                // onboarding chain 에 직접 dispatch 못한다. Broadcast IPC 로 main
+                // window 에 cue 를 보내고, 본 Settings window 는 그대로 둔다
+                // (사용자가 닫기를 누르거나 main window 가 close 명령을 보낼 때까지).
+                void api.auth.broadcastLogoutReset?.();
+              }}
+              onReactivateDemo={() => {
+                // Settings dialog 를 명시적으로 닫고 main window 에 LoginModal
+                // 의 activation page 를 mount 하도록 cue 한다. window 가 detached
+                // 인 경우 close 후 main window 가 focus 를 받는다.
+                void api.auth.broadcastReactivateDemo?.();
+                void api.window?.closeDetached?.();
+              }}
             />
           </TabsContent>
 

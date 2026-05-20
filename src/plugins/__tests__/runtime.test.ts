@@ -1477,7 +1477,8 @@ export default async function createPlugin({ hostApi }) {
 
     resolvePrepare();
 
-    await expect(waitUntil(() => runtime.call("p_deferred_ping"))).resolves.toBe("hi-p-deferred-1");
+    await expect(runtime.waitForPluginReady("p-deferred")).resolves.toBeUndefined();
+    expect(await runtime.call("p_deferred_ping")).toBe("hi-p-deferred-1");
     expect(runtime.listPluginCards().find((card) => card.id === "p-deferred")?.loadStatus).toBe("loaded");
   });
 
@@ -1523,7 +1524,8 @@ export default async function createPlugin({ hostApi }) {
 
     resolvePrepare();
 
-    await expect(waitUntil(() => runtime.call("p_new_ping"))).resolves.toBe("hi-p-new-1");
+    await expect(runtime.waitForPluginReady("p-new")).resolves.toBeUndefined();
+    expect(await runtime.call("p_new_ping")).toBe("hi-p-new-1");
     expect(await runtime.call("p_existing_ping")).toBe("hi-p-existing-1");
   });
 

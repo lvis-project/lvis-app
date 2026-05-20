@@ -63,6 +63,7 @@ import {
   getDemoActiveVendor,
   isDemoEnabled,
   recaptureDemoCredentialsAfterActivation,
+  resetDemoCredentials,
 } from "../../main/demo-credentials.js";
 import { validateFoundryEndpoint } from "../../permissions/reviewer/provider-adapters.js";
 import { isLLMVendor } from "../../shared/llm-vendor-defaults.js";
@@ -72,6 +73,24 @@ const log = createLogger("demo-activation-ipc");
 // Keep in sync with scripts/lib/dev-electron-exit.mjs. In `bun run dev`,
 // the parent watcher owns relaunching so it can keep all watch processes alive.
 const DEMO_ACTIVATION_DEV_RELAUNCH_EXIT_CODE = 42;
+
+/**
+ * 2026-05-20 — cross-window logout / reactivate broadcast channels.
+ *
+ * Settings 가 별도 BrowserWindow 로 mount 되기 때문에 GeneralTab 의
+ * "로그아웃" / "데모 자격증명 재입력" 클릭은 main window 의 onboarding chain
+ * + LoginModal 에 도달하지 못한다. 두 채널 모두 *one-way main → renderer*
+ * fan-out 이며 payload 가 없는 단순 trigger 이다.
+ *
+ *   `lvis:auth:logout-reset`            — main window 가 onboarding chain
+ *                                         reducer 에 `logout-reset` event 를
+ *                                         dispatch 하도록 cue.
+ *   `lvis:auth:reactivate-demo`         — main window 가 LoginModal 을
+ *                                         `forceActivation=true` 로 mount
+ *                                         하도록 cue.
+ */
+export const AUTH_LOGOUT_RESET_CHANNEL = "lvis:auth:logout-reset";
+export const AUTH_REACTIVATE_DEMO_CHANNEL = "lvis:auth:reactivate-demo";
 
 function demoKeyEnvVar(vendor: string): string {
   return `LVIS_DEMO_KEY_${vendor.toUpperCase().replace(/-/g, "_")}`;
@@ -158,6 +177,18 @@ function validateActivationPayloadKey(
   if (typeof apiKey === "string" && apiKey.length > 0) return null;
   log.warn(`activation payload missing ${keyEnv}`);
   return "no-demo-key";
+}
+
+function broadcastAuthEvent(deps: IpcDeps, channel: string): void {
+  const targets = deps.getAppWindows?.() ?? [deps.getMainWindow()];
+  for (const win of targets) {
+    if (!win || win.isDestroyed?.()) continue;
+    try {
+      win.webContents.send(channel);
+    } catch {
+      /* one window's send failure must not block the others */
+    }
+  }
 }
 
 export function registerDemoHandlers(deps: IpcDeps): void {
@@ -338,6 +369,99 @@ export function registerDemoHandlers(deps: IpcDeps): void {
         vendor,
         ...(shouldRelaunch ? { requiresRelaunch: true } : {}),
       };
+    },
+  );
+
+  ipcMain.handle(
+    "lvis:demo:clear",
+    async (
+      e,
+    ): Promise<
+      | { ok: true }
+      | { ok: false; error: "clear-failed" | "unauthorized-frame" }
+    > => {
+      if (!validateSender(e)) {
+        auditUnauthorized(auditLogger, "lvis:demo:clear", e);
+        return { ok: false, error: UNAUTHORIZED_FRAME.error };
+      }
+      // 2026-05-20 Settings → "데모 자격증명 재입력" 의 보조 path. Logout 버튼이
+      // 이 handler 를 호출해 .env.demo + process.env LVIS_DEMO_* + captured
+      // 모듈 state 를 한 번에 비운다. 다음 `lvis:demo:status` 호출은 `activated=false`
+      // 를 반환하므로 LoginModal 의 activation page 가 다시 mount 된다.
+      //
+      // 첫 활성 시점의 host-resolver-rules race 와 달리 본 handler 는 Chromium
+      // 명령행을 다시 만지지 않는다 — Azure Foundry endpoint 의 hostmap 은 boot
+      // 시점 일회성이므로 재활성 시 다시 첫 활성 경로(relaunch 요구) 를 거치게
+      // 된다. 본 handler 는 *credential 삭제만* 담당하고 relaunch 는 후속
+      // activate handler 가 책임진다.
+      relaunchArmed = false;
+      try {
+        const envDemoPath = persistedEnvDemoPath();
+        await fs.rm(envDemoPath, { force: true });
+        for (const k of Object.keys(process.env)) {
+          if (k.startsWith("LVIS_DEMO_")) {
+            delete process.env[k];
+          }
+        }
+        resetDemoCredentials();
+        try {
+          auditLogger.log({
+            timestamp: new Date().toISOString(),
+            sessionId: "auth",
+            type: "info",
+            input: "[demo-activation] cleared",
+          });
+        } catch { /* audit must not break IPC */ }
+        log.info("demo credentials cleared");
+        return { ok: true };
+      } catch (err) {
+        log.error(
+          `demo clear failed: ${(err as Error).message}`,
+        );
+        try {
+          auditLogger.log({
+            timestamp: new Date().toISOString(),
+            sessionId: "auth",
+            type: "warn",
+            input: "[demo-activation] clear-failed",
+          });
+        } catch { /* audit must not break IPC */ }
+        return { ok: false, error: "clear-failed" };
+      }
+    },
+  );
+
+  ipcMain.handle(
+    "lvis:auth:logout-broadcast",
+    async (
+      e,
+    ): Promise<
+      | { ok: true }
+      | { ok: false; error: "unauthorized-frame" }
+    > => {
+      if (!validateSender(e)) {
+        auditUnauthorized(auditLogger, "lvis:auth:logout-broadcast", e);
+        return { ok: false, error: UNAUTHORIZED_FRAME.error };
+      }
+      broadcastAuthEvent(deps, AUTH_LOGOUT_RESET_CHANNEL);
+      return { ok: true };
+    },
+  );
+
+  ipcMain.handle(
+    "lvis:auth:reactivate-broadcast",
+    async (
+      e,
+    ): Promise<
+      | { ok: true }
+      | { ok: false; error: "unauthorized-frame" }
+    > => {
+      if (!validateSender(e)) {
+        auditUnauthorized(auditLogger, "lvis:auth:reactivate-broadcast", e);
+        return { ok: false, error: UNAUTHORIZED_FRAME.error };
+      }
+      broadcastAuthEvent(deps, AUTH_REACTIVATE_DEMO_CHANNEL);
+      return { ok: true };
     },
   );
 

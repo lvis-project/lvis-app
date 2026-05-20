@@ -138,7 +138,16 @@ export type OnboardingChainEvent =
    * unconditionally finish. Unlike the per-stage skip events this is
    * always honored regardless of current stage.
    */
-  | { type: "force-finish" };
+  | { type: "force-finish" }
+  /**
+   * 2026-05-20 — Settings → 로그아웃. 모든 인증 상태를 초기화한 뒤
+   * 첫 부팅 화면(ScenarioShowcase) 으로 복귀하기 위한 reducer event.
+   * 모든 stage → `idle` 로 collapse 한다. 다음 useEffect 의 boot probe
+   * 가 `probe-start` 를 발사해 ScenarioShowcase 가 재진입한다.
+   * `selectedScenarioId` + `memorySeed` 도 같이 초기화한다 — 로그아웃은
+   * 사용자의 *모든* 첫 부팅 상태를 잊는 행위이기 때문.
+   */
+  | { type: "logout-reset" };
 
 /**
  * Pure stage transition. Unknown / out-of-order events are no-ops —
@@ -154,6 +163,7 @@ export function nextOnboardingStage(
   event: OnboardingChainEvent,
 ): OnboardingChainStage {
   if (event.type === "force-finish") return "done";
+  if (event.type === "logout-reset") return "idle";
   switch (stage) {
     case "idle":
       if (event.type === "probe-skip") return "done";
@@ -212,6 +222,17 @@ export function onboardingChainReducer(
   event: OnboardingChainEvent,
 ): OnboardingChainState {
   const stage = nextOnboardingStage(state.stage, event);
+  // 2026-05-20 — 로그아웃은 chain context 전체를 초기화한다. selectedScenarioId
+  // 와 memorySeed 가 이전 boot 의 흔적을 남기면 재진입한 ScenarioShowcase /
+  // MemorySeed 가 "이미 채워진" 상태로 mount 돼서 사용자가 fresh boot UX 를
+  // 받지 못함.
+  if (event.type === "logout-reset") {
+    return {
+      stage,
+      selectedScenarioId: null,
+      memorySeed: { nickname: "", introduction: "" },
+    };
+  }
   let selectedScenarioId = state.selectedScenarioId;
   let memorySeed = state.memorySeed;
   if (event.type === "showcase-start") {
