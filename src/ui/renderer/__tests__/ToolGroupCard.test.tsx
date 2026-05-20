@@ -5,7 +5,7 @@
  */
 import "../../../../test/renderer/setup.js";
 import { describe, it, expect, vi, afterEach } from "vitest";
-import { render, fireEvent } from "@testing-library/react";
+import { render, fireEvent, waitFor } from "@testing-library/react";
 import type { ReactNode } from "react";
 import { ToolGroupCard } from "../components/ToolGroupCard.js";
 import type { ChatEntry } from "../../../lib/chat-stream-state.js";
@@ -51,6 +51,21 @@ function makeMultiGroup(overrides: Partial<ToolGroupEntry> = {}): ToolGroupEntry
     ],
     ...overrides,
   };
+}
+
+function installHtmlPreviewWindowMock() {
+  const openHtmlPreview = vi.fn(async () => ({ ok: true as const, windowId: 2 }));
+  Object.defineProperty(window, "lvisApi", {
+    configurable: true,
+    value: {
+      ...(window.lvisApi ?? {}),
+      window: {
+        ...(window.lvisApi?.window ?? {}),
+        openHtmlPreview,
+      },
+    },
+  });
+  return openHtmlPreview;
 }
 
 describe("ToolGroupCard", () => {
@@ -394,8 +409,9 @@ describe("ToolGroupCard", () => {
   // Regression: PR #299 introduced single-tool inline early-return that bypassed
   // the HtmlPreview area for render_html, so single render_html calls rendered
   // only the collapsible indicator with raw JSON. SingleToolInline must now also
-  // render the iframe preview when the tool is a successful render_html call.
-  it("single render_html: renders HtmlPreview area inline", () => {
+  // render the dedicated window launcher when the tool succeeds.
+  it("single render_html: renders an HTML window launcher", async () => {
+    const openHtmlPreview = installHtmlPreviewWindowMock();
     const group = makeGroup({
       tools: [
         {
@@ -416,7 +432,66 @@ describe("ToolGroupCard", () => {
     });
     const { container } = render(<ToolGroupCard group={group} />);
     expect(container.textContent).toContain("차트 미리보기");
-    expect(container.querySelector("webview")).toBeTruthy();
+    expect(container.querySelector("webview")).toBeNull();
+    expect(openHtmlPreview).not.toHaveBeenCalled();
+
+    const openButton = Array.from(container.querySelectorAll("button"))
+      .find((button) => button.textContent?.includes("창 열기"));
+    expect(openButton).toBeTruthy();
+    fireEvent.click(openButton as HTMLButtonElement);
+
+    await waitFor(() => expect(openHtmlPreview).toHaveBeenCalledOnce());
+    expect(openHtmlPreview).toHaveBeenCalledWith(expect.objectContaining({
+      html: "<p>hi</p>",
+      title: "차트 미리보기",
+      allowScripts: false,
+    }));
+  });
+
+  it("single render_html running → done: auto-opens the HTML window once", async () => {
+    const openHtmlPreview = installHtmlPreviewWindowMock();
+    const running = makeGroup({
+      status: "running",
+      tools: [
+        {
+          toolUseId: "tu-html-auto",
+          name: "render_html",
+          input: { html: "<p>live</p>" },
+          status: "running",
+          displayOrder: 0,
+        },
+      ],
+    });
+    const done = makeGroup({
+      status: "done",
+      tools: [
+        {
+          toolUseId: "tu-html-auto",
+          name: "render_html",
+          input: { html: "<p>live</p>" },
+          result: JSON.stringify({
+            kind: "lvis.render_html",
+            title: "자동 미리보기",
+            height: 320,
+            html: "<p>live</p>",
+            warnings: [],
+          }),
+          status: "done",
+          displayOrder: 0,
+        },
+      ],
+    });
+    const { rerender } = render(<ToolGroupCard group={running} />);
+
+    expect(openHtmlPreview).not.toHaveBeenCalled();
+    rerender(<ToolGroupCard group={done} />);
+
+    await waitFor(() => expect(openHtmlPreview).toHaveBeenCalledOnce());
+    expect(openHtmlPreview).toHaveBeenCalledWith(expect.objectContaining({
+      html: "<p>live</p>",
+      title: "자동 미리보기",
+      allowScripts: false,
+    }));
   });
 
   it("single render_html with <script>: shows JavaScript permission button", () => {

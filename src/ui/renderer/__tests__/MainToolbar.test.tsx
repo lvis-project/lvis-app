@@ -45,6 +45,8 @@ describe("MainToolbar", () => {
     renderWithProvider(defaultProps());
     expect(screen.getByTitle("홈")).toBeTruthy();
     expect(screen.getByTitle("더 많은 메뉴")).toBeTruthy();
+    expect(screen.queryByText("⌘ + ?")).toBeNull();
+    expect(document.querySelector("[data-tour-anchor='help-shortcut-hint']")).toBeNull();
     expect(screen.queryByText("새 대화")).toBeNull();
     await openHamburger();
     expect(screen.getByText("새 대화")).toBeTruthy();

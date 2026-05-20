@@ -94,24 +94,17 @@ export interface TourScenario {
  *
  * Z onboarding chain extension (2026-05-19): the tour grew from 4 → 7
  * steps so the user lands with a full mental model of the host UI
- * before plugins are introduced. New steps cover the help-shortcut hint
- * (4), recent chat history (5), the Settings/menu entry (6), and the
- * vendor/model status-bar indicator (7). A follow-up 8th step (2026-05-19)
- * introduces the plugin grid entry so the user discovers the plugin
- * surface during the first-boot tour rather than stumbling on it
- * later. Each anchor is pinned to a `data-tour-anchor=` attribute on a
+ * before plugins are introduced. Steps cover recent chat history, the
+ * Settings/menu entry, the vendor/model status-bar indicator, and the
+ * plugin grid entry so the user discovers the plugin surface during the
+ * first-boot tour rather than stumbling on it later. Each anchor is pinned
+ * to a `data-tour-anchor=` attribute on a
  * production DOM element so renderer refactors break the tour visibly
  * (test in `__tests__/tour-anchors-trigger.test.tsx`).
  */
 const FIRST_BOOT_ESSENTIALS: TourScenario = {
   id: "first-boot-essentials",
   title: "LVIS 첫 사용 안내",
-  // 2026-05-20: the ⌘+? 도움말 step (formerly step 4) is moved to the
-  // very end of the array so the user only sees "이 가이드를 다시 여는 법"
-  // *after* they've already finished the rest of the tour — re-entry
-  // discovery belongs at the natural conclusion of the first walkthrough,
-  // not as an interruption in the middle. Relative order of the other
-  // steps is preserved.
   steps: [
     {
       anchorSelector: '[data-tour-anchor="composer-input"]',
@@ -159,13 +152,6 @@ const FIRST_BOOT_ESSENTIALS: TourScenario = {
       anchorSelector: '[data-tour-anchor="plugin-entry"]',
       title: "7단계 · 플러그인 — 회의·문서·업무 도우미",
       body: "여기서 플러그인을 설치하고 사용할 수 있어요. 회의 녹음·요약, 로컬 문서 검색, 받은편지함 → 할 일 자동화 등 LVIS 기능을 그리드 안에서 확장합니다. 끝에 있는 '마켓' 셀로 새 플러그인을 추가할 수 있어요.",
-      completionTrigger: { kind: "manual" },
-    },
-    {
-      anchorSelector: '[data-tour-anchor="help-shortcut-hint"]',
-      title: "8단계 · ⌘+? 도움말 단축키",
-      body: "이 가이드는 언제든 ⌘+? 로 다시 열 수 있어요. 상단 우측의 ⌘+? 칩이 항상 같은 자리에 있어 길을 잃지 않습니다.",
-      keyHint: ["⌘+?"],
       completionTrigger: { kind: "manual" },
     },
   ],
