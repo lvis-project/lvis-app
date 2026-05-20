@@ -10,12 +10,11 @@ import { LoginModal } from "../LoginModal.js";
  * Demo activation flow (2026-05-19): the conversational variant funnels
  * chip 1 through an **activation-input sub-state** before the auth step.
  * The user pastes a `LVIS-DEMO:v1:<...>` activation string, the renderer
- * invokes `api.demo.activate(code)`, and on success the renderer
- * *automatically* chains into `api.loginMockup({ username: "demo",
- * password: "demo123" })` — no extra user keystroke required. The
- * earlier "press Enter to begin" ack button was removed because the
- * extra paper-cut read as friction; the activation bubble now flows
- * straight into the auth checklist. These tests exercise the full chain.
+ * invokes `api.demo.activate(code)`. First activation shows the 5s relaunch
+ * notice instead of starting auth; once `.env.demo` is loaded at boot,
+ * chip 1 reads `api.demo.status()` and chains into
+ * `api.loginMockup({ username: "demo", password: "demo123" })` — no extra
+ * user keystroke required. These tests exercise both branches.
  */
 
 function makeApi(
@@ -31,11 +30,18 @@ function makeApi(
     | { ok: true }
     | { ok: false; error: string }
   >,
+  statusImpl?: () => Promise<
+    | { ok: true; activated: boolean; vendor: string | null }
+    | { ok: false; error: string }
+  >,
 ) {
   return {
     loginMockup: vi.fn(loginImpl),
     openSettingsWindow: vi.fn(),
     demo: {
+      status: vi.fn(
+        statusImpl ?? (async () => ({ ok: true, activated: false, vendor: null })),
+      ),
       activate: vi.fn(
         activateImpl ?? (async () => ({ ok: true, vendor: "azure-foundry" })),
       ),
@@ -57,6 +63,7 @@ describe("LoginModal — chip-driven demo flow (activation → auth)", () => {
     originalConsoleError = console.error;
     // suppress the expected console.error during the rejection test
     console.error = vi.fn();
+    delete (window as unknown as { lvis?: unknown }).lvis;
   });
   afterEach(() => {
     console.error = originalConsoleError;
@@ -80,15 +87,16 @@ describe("LoginModal — chip-driven demo flow (activation → auth)", () => {
     const textarea = document.querySelector(
       '[data-testid="login-modal:activation-code-input"]',
     ) as HTMLTextAreaElement;
+    expect(document.activeElement).toBe(textarea);
     fireEvent.change(textarea, { target: { value: FAKE_ACTIVATION_CODE } });
     const submit = document.querySelector(
       '[data-testid="login-modal:activation-submit"]',
     ) as HTMLButtonElement;
     fireEvent.click(submit);
-    // Auto-advance: the activation success now chains straight into the
-    // auth transcript via `runAuthMockup()` — no explicit Enter click
-    // required. The `waitFor(loginMockup)` in the caller paces the test
-    // around the IPC roundtrip.
+    // Auto-advance when no relaunch is required: activation success chains
+    // straight into the auth transcript via `runAuthMockup()` — no explicit
+    // Enter click required. The `waitFor(loginMockup)` in the caller paces
+    // the test around the IPC roundtrip.
   }
 
   it("fires loginMockup with hard-coded demo credentials after activation", async () => {
@@ -116,6 +124,42 @@ describe("LoginModal — chip-driven demo flow (activation → auth)", () => {
       (api as unknown as { demo: { activate: ReturnType<typeof vi.fn> } }).demo
         .activate,
     ).toHaveBeenCalledWith(FAKE_ACTIVATION_CODE);
+  });
+
+  it("skips activation input and runs loginMockup when demo env was loaded at boot", async () => {
+    const api = makeApi(
+      async () => ({
+        ok: true,
+        vendor: "azure-foundry",
+        fieldsApplied: ["apiKey", "baseUrl"],
+      }),
+      undefined,
+      undefined,
+      async () => ({ ok: true, activated: true, vendor: "azure-foundry" }),
+    );
+    render(<LoginModal api={api} open onOpenChange={() => {}} />);
+
+    await waitFor(() => {
+      expect(document.querySelector('[data-testid="login-modal:chip-demo"]')).toBeTruthy();
+    });
+    clickDemoChip();
+
+    await waitFor(() => {
+      expect(
+        (api as unknown as { loginMockup: ReturnType<typeof vi.fn> }).loginMockup,
+      ).toHaveBeenCalledWith({ username: "demo", password: "demo123" });
+    });
+    expect(
+      document.querySelector('[data-testid="login-modal:activation-code-input"]'),
+    ).toBeNull();
+    expect(
+      (api as unknown as { demo: { activate: ReturnType<typeof vi.fn> } }).demo
+        .activate,
+    ).not.toHaveBeenCalled();
+    expect(
+      (api as unknown as { demo: { status: ReturnType<typeof vi.fn> } }).demo
+        .status,
+    ).toHaveBeenCalledOnce();
   });
 
   it("displays a Korean error message when the auth IPC call rejects", async () => {
@@ -182,6 +226,61 @@ describe("LoginModal — chip-driven demo flow (activation → auth)", () => {
     expect(document.querySelector('[data-testid="login-modal:password"]')).toBeNull();
     expect(document.querySelector('[data-testid="login-modal:submit"]')).toBeNull();
     expect(document.querySelector('[data-testid="login-modal:form"]')).toBeNull();
+  });
+
+  it("keeps demo activation inside the chat transcript instead of a dedicated page", async () => {
+    const api = makeApi(async () => ({
+      ok: true,
+      vendor: "azure-foundry",
+      fieldsApplied: ["apiKey"],
+    }));
+    render(<LoginModal api={api} open onOpenChange={() => {}} />);
+
+    await waitFor(() => {
+      expect(document.querySelector('[data-testid="login-modal:chip-demo"]')).toBeTruthy();
+    });
+    clickDemoChip();
+
+    await waitFor(() => {
+      expect(document.querySelector('[data-testid="login-modal:user-turn"]')).toBeTruthy();
+      expect(document.querySelector('[data-testid="login-modal:assistant-reply"]')).toBeTruthy();
+      expect(
+        document.querySelector('[data-testid="login-modal:activation-code-input"]'),
+      ).toBeTruthy();
+    });
+    expect(document.querySelector('[data-page="activation"]')).toBeNull();
+    expect(document.querySelector('[data-testid="login-modal"]')).toBeTruthy();
+  });
+
+  it("does not reveal the auth checklist before the activation code is submitted", async () => {
+    vi.useFakeTimers({
+      toFake: ["setTimeout", "clearTimeout", "Date"],
+    });
+    try {
+      const api = makeApi(async () => ({
+        ok: true,
+        vendor: "azure-foundry",
+        fieldsApplied: ["apiKey"],
+      }));
+      render(<LoginModal api={api} open onOpenChange={() => {}} />);
+
+      clickDemoChip();
+      await act(async () => {
+        vi.advanceTimersByTime(3000);
+      });
+
+      expect(
+        document.querySelector('[data-testid="login-modal:activation-code-input"]'),
+      ).toBeTruthy();
+      expect(
+        document.querySelector('[data-testid="login-modal:auth-checklist"]'),
+      ).toBeNull();
+      expect(
+        (api as unknown as { loginMockup: ReturnType<typeof vi.fn> }).loginMockup,
+      ).not.toHaveBeenCalled();
+    } finally {
+      vi.useRealTimers();
+    }
   });
 
   it("shows a Korean activation error when demo.activate rejects with invalid-code", async () => {

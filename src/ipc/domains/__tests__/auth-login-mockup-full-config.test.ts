@@ -140,6 +140,74 @@ describe("auth:login-mockup — full vendor config application (#893)", () => {
     });
   });
 
+  it("applies apiKey + baseUrl when activation provides LVIS_DEMO_ENDPOINT_<VENDOR>", async () => {
+    process.env.LVIS_DEMO_VENDOR = "azure-foundry";
+    process.env.LVIS_DEMO_KEY_AZURE_FOUNDRY = "sk-azure-key";
+    process.env.LVIS_DEMO_ENDPOINT_AZURE_FOUNDRY = "https://endpoint.openai.azure.com/openai/v1/";
+    const deps = makeDeps();
+    const { registerAuthHandlers } = await loadAuthModule();
+    registerAuthHandlers(deps as never);
+
+    const result = await invoke("lvis:auth:login-mockup", {
+      username: "demo",
+      password: "demo123",
+    }) as { ok: boolean; vendor: string; fieldsApplied?: string[] };
+
+    expect(result.ok).toBe(true);
+    expect(result.fieldsApplied).toContain("apiKey");
+    expect(result.fieldsApplied).toContain("baseUrl");
+    expect(deps.settingsService.setSecret).toHaveBeenCalledWith(
+      "llm.apiKey.azure-foundry",
+      "sk-azure-key",
+    );
+    expect(deps.settingsService.patch).toHaveBeenCalledWith({
+      llm: {
+        authMode: "login",
+        provider: "azure-foundry",
+        vendors: {
+          "azure-foundry": expect.objectContaining({
+            baseUrl: "https://endpoint.openai.azure.com/openai/v1/",
+          }),
+        },
+      },
+    });
+  });
+
+  it("rejects azure-foundry demo baseUrl that fails the settings endpoint validator", async () => {
+    process.env.LVIS_DEMO_VENDOR = "azure-foundry";
+    process.env.LVIS_DEMO_KEY_AZURE_FOUNDRY = "sk-azure-key";
+    process.env.LVIS_DEMO_ENDPOINT_AZURE_FOUNDRY = "https://endpoint.example/openai/v1/";
+    const deps = makeDeps();
+    const { registerAuthHandlers } = await loadAuthModule();
+    registerAuthHandlers(deps as never);
+
+    const result = await invoke("lvis:auth:login-mockup", {
+      username: "demo",
+      password: "demo123",
+    }) as { ok: boolean; error?: string };
+
+    expect(result).toEqual({ ok: false, error: "invalid-foundry-endpoint" });
+    expect(deps.settingsService.setSecret).not.toHaveBeenCalled();
+    expect(deps.settingsService.patch).not.toHaveBeenCalled();
+  });
+
+  it("rejects azure-foundry demo config without a baseUrl before writing secrets", async () => {
+    process.env.LVIS_DEMO_VENDOR = "azure-foundry";
+    process.env.LVIS_DEMO_KEY_AZURE_FOUNDRY = "sk-azure-key";
+    const deps = makeDeps();
+    const { registerAuthHandlers } = await loadAuthModule();
+    registerAuthHandlers(deps as never);
+
+    const result = await invoke("lvis:auth:login-mockup", {
+      username: "demo",
+      password: "demo123",
+    }) as { ok: boolean; error?: string };
+
+    expect(result).toEqual({ ok: false, error: "missing-foundry-endpoint" });
+    expect(deps.settingsService.setSecret).not.toHaveBeenCalled();
+    expect(deps.settingsService.patch).not.toHaveBeenCalled();
+  });
+
   it("applies apiKey + model when LVIS_DEMO_MODEL_<VENDOR> is set", async () => {
     // Path 2 hotfix: pin vendor to openai (default is now azure-foundry).
     process.env.LVIS_DEMO_VENDOR = "openai";
