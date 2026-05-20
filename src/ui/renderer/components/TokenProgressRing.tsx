@@ -3,6 +3,8 @@ import { Tooltip, TooltipContent, TooltipTrigger } from "../../../components/ui/
 interface TokenProgressRingProps {
   used: number;
   budget: number;
+  contextBudget?: number;
+  tpmLimit?: number;
 }
 
 /**
@@ -12,8 +14,19 @@ interface TokenProgressRingProps {
  * tooltip. Color tiers match the former chip: emerald < 50%, amber 50-80%,
  * rose > 80%. Sized at 26px to align with Warp-style toolbar buttons.
  */
-export function TokenProgressRing({ used, budget }: TokenProgressRingProps) {
+export function TokenProgressRing({ used, budget, contextBudget, tpmLimit }: TokenProgressRingProps) {
   const pct = Math.min(100, Math.round((used / Math.max(1, budget)) * 100));
+  const displayBudget = Math.max(0, budget);
+  const remaining = Math.max(0, displayBudget - used);
+  const contextPct =
+    typeof contextBudget === "number" && contextBudget > 0
+      ? Math.min(100, Math.round((used / contextBudget) * 100))
+      : pct;
+  const tpmPct =
+    typeof tpmLimit === "number" && tpmLimit > 0
+      ? Math.min(100, Math.round((used / tpmLimit) * 100))
+      : undefined;
+  const isTpmBound = typeof tpmLimit === "number" && tpmLimit > 0 && tpmLimit < (contextBudget ?? Number.POSITIVE_INFINITY);
 
   const radius = 10;
   const strokeWidth = 2.5;
@@ -35,6 +48,7 @@ export function TokenProgressRing({ used, budget }: TokenProgressRingProps) {
           className="flex items-center justify-center rounded-md p-1 hover:bg-muted/60 transition-colors cursor-default focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-foreground focus-visible:ring-offset-1"
           style={{ width: 28, height: 28 }}
           data-testid="token-progress-ring"
+          title="컨텍스트 사용량"
           aria-label={`Token usage ${pct} percent`}
           role="img"
           tabIndex={0}
@@ -72,10 +86,40 @@ export function TokenProgressRing({ used, budget }: TokenProgressRingProps) {
           </svg>
         </div>
       </TooltipTrigger>
-      <TooltipContent side="bottom">
-        <span className="font-mono text-xs">
-          {used.toLocaleString()} / {budget.toLocaleString()} tokens ({pct}%)
-        </span>
+      <TooltipContent side="top" className="min-w-[220px] text-xs tabular-nums">
+        <div className="mb-1 text-[10px] uppercase tracking-wider opacity-60">context breakdown</div>
+        <div className="space-y-0.5">
+          <div className="flex justify-between gap-3">
+            <span>used:</span>
+            <span>{used.toLocaleString()}</span>
+          </div>
+          <div className="flex justify-between gap-3">
+            <span>{isTpmBound ? "effective limit (TPM):" : "effective limit:"}</span>
+            <span>{displayBudget.toLocaleString()}</span>
+          </div>
+          <div className="flex justify-between gap-3">
+            <span>remaining:</span>
+            <span>{remaining.toLocaleString()}</span>
+          </div>
+        </div>
+        <div className="mt-1 border-t border-border/40 pt-1 space-y-0.5">
+          <div className="flex justify-between gap-3 font-semibold">
+            <span>usage:</span>
+            <span>{pct}%</span>
+          </div>
+          {typeof contextBudget === "number" && contextBudget > 0 && contextBudget !== displayBudget && (
+            <div className="flex justify-between gap-3 opacity-70">
+              <span>context window:</span>
+              <span>{contextBudget.toLocaleString()} ({contextPct}%)</span>
+            </div>
+          )}
+          {typeof tpmPct === "number" && (
+            <div className={`flex justify-between gap-3 ${isTpmBound ? "text-warning" : "opacity-70"}`}>
+              <span>TPM:</span>
+              <span>{tpmLimit!.toLocaleString()} ({tpmPct}%)</span>
+            </div>
+          )}
+        </div>
       </TooltipContent>
     </Tooltip>
   );

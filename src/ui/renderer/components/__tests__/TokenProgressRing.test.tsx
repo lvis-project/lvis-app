@@ -27,4 +27,10 @@ describe("TokenProgressRing", () => {
     const ring = getByTestId("token-progress-ring");
     expect(ring).toHaveAttribute("role", "img");
   });
+
+  it("exposes a compact native hint label like the cost badge", () => {
+    const { getByTestId } = renderWithProvider(<TokenProgressRing used={250} budget={1000} />);
+    const ring = getByTestId("token-progress-ring");
+    expect(ring).toHaveAttribute("title", "컨텍스트 사용량");
+  });
 });
