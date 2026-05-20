@@ -114,6 +114,13 @@ export interface PluginCard {
   configSchema?: PluginConfigSchema;
   /** Optional declarative auth contract — see architecture.md §9.4a "Plugin-Owned OAuth — Host UI Surface". */
   auth?: PluginAuthSpec;
+  /**
+   * Request slugs that can address this installed plugin in marketplace
+   * lifecycle events. This is derived from registry hints, not plugin-specific
+   * host knowledge, so renderer surfaces can collapse in-flight install rows
+   * onto the canonical plugin card.
+   */
+  installAliases?: string[];
 }
 
 /**
@@ -222,6 +229,7 @@ export class PluginRuntime {
   private readonly disposers = new Map<string, Array<() => void>>();
   private readonly knownPluginManifests = new Map<string, PluginManifest>();
   private readonly knownPluginAccessGrants = new Map<string, PluginAccessSpec | undefined>();
+  private readonly knownInstallAliases = new Map<string, Set<string>>();
   private readonly knownToolOwners = new Map<string, string>();
   private readonly knownEventOwners = new Map<string, string>();
   private readonly failedPluginIds = new Set<string>();
@@ -336,6 +344,24 @@ export class PluginRuntime {
     }
   }
 
+  private rememberPluginInstallAlias(pluginId: string, alias: string | undefined): void {
+    const normalizedPluginId = pluginId.trim();
+    const normalizedAlias = alias?.trim();
+    if (!normalizedPluginId || !normalizedAlias || normalizedAlias === normalizedPluginId) return;
+    let aliases = this.knownInstallAliases.get(normalizedPluginId);
+    if (!aliases) {
+      aliases = new Set<string>();
+      this.knownInstallAliases.set(normalizedPluginId, aliases);
+    }
+    aliases.add(normalizedAlias);
+  }
+
+  private getPluginInstallAliases(pluginId: string): string[] | undefined {
+    const aliases = this.knownInstallAliases.get(pluginId);
+    if (!aliases || aliases.size === 0) return undefined;
+    return [...aliases].sort();
+  }
+
   // ─── Lifecycle ─────────────────────────────────────────────────────────────
 
   async load(): Promise<void> {
@@ -344,6 +370,7 @@ export class PluginRuntime {
     const enabledManifestSnapshots = await this.readSnapshotsInternal(loadPlan);
     for (const [pluginId, snapshot] of enabledManifestSnapshots) {
       const { manifest, approvedPluginAccess } = snapshot;
+      this.rememberPluginInstallAlias(manifest.id, pluginId);
       this.knownPluginManifests.set(pluginId, manifest);
       this.knownPluginAccessGrants.set(pluginId, approvedPluginAccess);
       for (const toolName of manifest.tools ?? []) {
@@ -390,6 +417,7 @@ export class PluginRuntime {
       }
       // Reassign to manifest.id so all subsequent phases use the canonical id.
       pluginId = manifest.id;
+      this.rememberPluginInstallAlias(manifest.id, plan.pluginIdHint);
       this.knownPluginManifests.set(manifest.id, manifest);
       this.failedPluginStubs.delete(manifest.id);
       if (!plan.enabled) {
@@ -840,6 +868,7 @@ export class PluginRuntime {
     }
 
     const { manifest, approvedPluginAccess } = snapshot;
+    this.rememberPluginInstallAlias(manifest.id, pluginId);
     this.knownPluginManifests.set(pluginId, manifest);
     this.knownPluginAccessGrants.set(pluginId, approvedPluginAccess);
     for (const toolName of manifest.tools ?? []) {
@@ -1000,6 +1029,7 @@ export class PluginRuntime {
     approvedPluginAccess: PluginAccessSpec | undefined,
   ): Promise<void> {
     const pluginRoot = dirname(plan.manifestPath);
+    this.rememberPluginInstallAlias(manifest.id, plan.pluginIdHint);
     if (plan.pluginIdHint) {
       const integrityResult = await this.verifyReceiptAndDevGuard(
         plan.pluginIdHint,
@@ -1742,6 +1772,7 @@ export class PluginRuntime {
       publisher: manifest.publisher,
       configSchema: manifest.configSchema,
       auth: manifest.auth,
+      installAliases: this.getPluginInstallAliases(pluginId),
     };
   }
 

@@ -157,4 +157,24 @@ describe("PluginRuntime.listPluginCards — Phase 1.5 Option C catalog", () => {
       expect.objectContaining({ id: "example-failed", loadStatus: "failed" }),
     ]);
   });
+
+  it("surfaces registry ids as install aliases when the manifest id differs", async () => {
+    const manifestPath = writePlugin(tmp, "manifest-owned-id", {
+      name: "Alias Fixture",
+      tools: ["alias_ping"],
+    });
+    const registryPath = writeRegistry(tmp, [
+      { id: "marketplace-package-slug", manifestPath, enabled: true },
+    ]);
+
+    const runtime = new PluginRuntime({ hostRoot: tmp, registryPath, pluginsRoot: tmp });
+    await runtime.load();
+
+    expect(runtime.listPluginCards()).toEqual([
+      expect.objectContaining({
+        id: "manifest-owned-id",
+        installAliases: ["marketplace-package-slug"],
+      }),
+    ]);
+  });
 });

@@ -23,10 +23,10 @@ export interface PluginRecommendation {
   /** Leading emoji in the chip. */
   emoji: string;
   /**
-   * Tutorial-X2 — marketplace package slug for `lvis:plugins:install`.
-   * `null` for the `chat-basics` fallback (a meta recommendation that
-   * has no installable plugin). When set, clicking the chip in the
-   * MemorySeedDialog triggers the canonical plugin-install pipeline.
+   * Marketplace package slug for `lvis:plugins:install`. `null` for the
+   * `chat-basics` fallback (a meta recommendation that has no installable
+   * plugin). When set, clicking the chip in the MemorySeedDialog triggers
+   * the canonical plugin-install pipeline.
    */
   marketplaceSlug: string | null;
 }
