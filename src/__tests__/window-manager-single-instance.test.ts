@@ -193,8 +193,8 @@ describe("WindowManager — single-instance detached shell", () => {
     const opts = mockWindowInstances[0].opts;
     expect(opts["width"]).toBe(980);
     expect(opts["height"]).toBe(980);
-    expect(opts["minWidth"]).toBe(480);
-    expect(opts["minHeight"]).toBe(560);
+    expect(opts["minWidth"]).toBeUndefined();
+    expect(opts["minHeight"]).toBeUndefined();
     expect(opts["resizable"]).toBe(true);
     expect(opts["alwaysOnTop"]).toBe(true);
   });
@@ -220,8 +220,8 @@ describe("WindowManager — single-instance detached shell", () => {
     configured.openDetachedTab("plugin:agent-hub:team-board");
 
     expect(mockWindowInstances).toHaveLength(1);
-    expect(mockWindowInstances[0].setMinimumSize).toHaveBeenCalledWith(520, 600);
-    expect(mockWindowInstances[0].setResizable).toHaveBeenCalledWith(false);
+    expect(mockWindowInstances[0].setMinimumSize).toHaveBeenCalledWith(0, 0);
+    expect(mockWindowInstances[0].setResizable).toHaveBeenCalledWith(true);
     expect(mockWindowInstances[0].setAlwaysOnTop).toHaveBeenCalledWith(true);
     expect(mockWindowInstances[0].setSize).toHaveBeenCalledWith(1040, 900);
   });
