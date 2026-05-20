@@ -127,6 +127,7 @@ import { registerPluginEventBridge } from "./boot/steps/ipc-bridge.js";
 import { wireReleasePrep, wireUpdateCheck } from "./boot/steps/post-boot.js";
 import { wireReviewerAgent } from "./boot/steps/reviewer-wiring.js";
 import { wireHookSystem } from "./boot/steps/hook-system-wiring.js";
+import { createPluginSurfacePermissionScope } from "./boot/plugin-surface-permissions.js";
 import { readPermissionSettings } from "./permissions/permission-settings-store.js";
 import { migrateCanonicalization } from "./permissions/user-approval-store.js";
 import { createProvider, secretKeyFor } from "./engine/llm/provider-factory.js";
@@ -699,6 +700,12 @@ export async function bootstrap(
     scriptHookManager,
     bootAuditLogger,
   );
+  const pluginSurfacePermissionScope = createPluginSurfacePermissionScope({
+    readPersistedDirectories: () => readPermissionSettings().permissions.additionalDirectories,
+    onSessionDirectoryAdded: () => {
+      broadcastPermissionConfigChangedFromIpc({ getMainWindow, getAppWindows: () => BrowserWindowValue.getAllWindows() } as Parameters<typeof broadcastPermissionConfigChangedFromIpc>[0]);
+    },
+  });
   const invokePluginTool = async (
     toolName: string,
     payload: unknown,
@@ -721,15 +728,14 @@ export async function bootstrap(
         }],
         {
           sessionId: pluginInvocationSessionId(context),
-          permissionContext: {
+          permissionContext: pluginSurfacePermissionScope.createPermissionContext(context, {
             // headless follows the *effective* chain origin (#664 P2):
             // a UI-rooted chain keeps `headless: false` even after one or
             // more `ctx.callTool` hops, so the user's outer approval is
             // honoured and the reviewer lane is not re-engaged.
             headless: effectiveOrigin !== "ui",
-            additionalDirectories: readPermissionSettings().permissions.additionalDirectories,
             trustOrigin: "plugin-emitted",
-          },
+          }),
         },
       );
       if (!result) {

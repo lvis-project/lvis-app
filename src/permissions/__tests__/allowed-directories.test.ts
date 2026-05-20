@@ -5,9 +5,10 @@
  */
 import { describe, it, expect } from "vitest";
 import { execFileSync } from "node:child_process";
-import { mkdtempSync, rmSync } from "node:fs";
-import { homedir } from "node:os";
+import { existsSync, mkdtempSync, rmSync } from "node:fs";
+import { homedir, tmpdir } from "node:os";
 import {
+  join,
   parse as pathParse,
   relative as pathRelative,
   resolve as pathResolve,
@@ -63,6 +64,15 @@ function mountedVolumeNamespacePathFor(existingPath: string): string | null {
     }
   }
 
+  return null;
+}
+
+function findFreeWindowsDriveLetter(): string | null {
+  if (process.platform !== "win32") return null;
+  for (const letter of "ZYXWVUTSRQPONMLKJIHGFED".split("")) {
+    const drive = `${letter}:`;
+    if (!existsSync(`${drive}\\`)) return drive;
+  }
   return null;
 }
 
@@ -378,11 +388,32 @@ describe("sanitizeAllowedDirectories", () => {
     expect(cache.ok).toBe(true);
     if (cache.ok) expect(cache.adjacencyWarnings.some((w) => w.includes("node_modules"))).toBe(true);
   });
+
+  it.runIf(process.platform === "win32")("allows a drive-letter alias after the real target directory is granted", () => {
+    const drive = findFreeWindowsDriveLetter();
+    if (!drive) return;
+
+    const target = mkdtempSync(join(tmpdir(), "lvis-drive-alias-"));
+    try {
+      execFileSync("subst", [drive, target], { windowsHide: true });
+      const allowed = sanitizeAllowedDirectories([target]);
+      const aliasChild = fold(`${drive}\\nested\\report.docx`);
+
+      expect(isPathAllowed(aliasChild, { directories: allowed })).toBe(true);
+    } finally {
+      try {
+        execFileSync("subst", [drive, "/D"], { windowsHide: true });
+      } catch {
+        // Cleanup best effort; CI runners sometimes detach subst drives during teardown.
+      }
+      rmSync(target, { recursive: true, force: true });
+    }
+  });
 });
 
 describe("runtime allowed directories", () => {
   it("preserves canonical filesystem case for native sandbox validators", () => {
-    const root = mkdtempSync("/tmp/LVIS-Runtime-Scope-");
+    const root = mkdtempSync(join(tmpdir(), "LVIS-Runtime-Scope-"));
     try {
       const [runtime] = sanitizeRuntimeAllowedDirectories([root]);
       expect(runtime).toBe(canonicalizePathForMatch(root));
