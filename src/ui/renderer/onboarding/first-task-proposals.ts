@@ -22,9 +22,8 @@
  *   - Pre-seeding the composer (instead of dispatching a hidden tool
  *     call) keeps the user in control and matches LVIS's tool-approval
  *     contract. The user sees the prompt that will run.
- *   - The catalog is plugin-keyed (not card-keyed) so it works for any
- *     installation source — Discovery Swipe ✓, Memory Seed chip click,
- *     or direct marketplace install all converge on the same proposal.
+ *   - The catalog is plugin-keyed so Memory Seed chip clicks and direct
+ *     marketplace installs converge on the same proposal.
  */
 
 export interface FirstTaskProposal {

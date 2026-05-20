@@ -172,13 +172,10 @@ const FIRST_BOOT_ESSENTIALS: TourScenario = {
 };
 
 /**
- * U7 — Per-card scenario tours. Each Discovery Swipe card's
- * "실행하기 →" CTA dispatches into one of these (or the fallback
- * `first-boot-essentials` when the plugin-specific anchors are not
- * mounted yet). Plugin-specific anchors live in the owning plugin
- * package; when the plugin is not installed, `readRect` returns null
- * and the SpotlightTour centres the card so the user still sees the
- * narrative.
+ * Plugin-specific scenario tours. These can be launched directly by an
+ * onboarding surface or via `lvis:tour:start`; when plugin-specific anchors
+ * are not mounted yet, `readRect` returns null and the SpotlightTour centres
+ * the card so the user still sees the narrative.
  */
 const MEETING_SUMMARY_TOUR: TourScenario = {
   id: "meeting-summary-tour",
@@ -395,11 +392,10 @@ const WORK_ASSISTANT_WALKTHROUGH: TourScenario = {
  * payloads received over `lvis:tour:start`. New scenarios are added here;
  * the host-side store is unaware of the contents.
  *
- * U7 — Per-card tours dispatched from the Discovery Swipe "실행하기 →"
- * CTA. Plugin-specific tours degrade gracefully when the owning plugin
- * is not installed: `readRect` returns null for the missing anchor and
- * `SpotlightTour.cardPlacement` centres the step card so the narrative
- * is still legible.
+ * Plugin-specific tours degrade gracefully when the owning plugin is not
+ * installed: `readRect` returns null for the missing anchor and
+ * `SpotlightTour.cardPlacement` centres the step card so the narrative is
+ * still legible.
  */
 export const DEFAULT_TOUR_SCENARIOS: Readonly<Record<string, TourScenario>> = Object.freeze({
   [FIRST_BOOT_ESSENTIALS.id]: FIRST_BOOT_ESSENTIALS,

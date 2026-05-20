@@ -414,39 +414,12 @@ const api = {
       return () => ipcRenderer.removeListener("lvis:tour:start", listener);
     },
   },
-  // Tutorial-D — Discovery Swipe IPC bridges. The host persists the
-  // outcome under `~/.lvis/tutorial/preferences.json` and broadcasts an
-  // `open` signal to every window so the dialog mounts on top of any
-  // surface (chat, settings, plugin webview). The dialog itself routes
-  // the final scenario dispatch through the Tutorial-C `tour.start`
-  // bridge above so there is one SpotlightTour entry point.
-  tutorialGetPreferences: async () =>
-    ipcRenderer.invoke("lvis:tutorial:get-preferences") as Promise<
-      | { ok: true; prefs: { liked: string[]; disliked: string[]; lastShownAt: string } }
-      | { ok: false; error: string; message: string }
-    >,
-  tutorialRecord: async (payload: {
-    cardId: string;
-    action: "liked" | "disliked" | "skipped" | "undone";
-  }) =>
-    ipcRenderer.invoke("lvis:tutorial:record", payload) as Promise<
-      | { ok: true; prefs: { liked: string[]; disliked: string[]; lastShownAt: string } }
-      | { ok: false; error: string; message: string }
-    >,
-  tutorialOpen: async () =>
-    ipcRenderer.invoke("lvis:tutorial:open") as Promise<
-      { ok: true } | { ok: false; error: string; message: string }
-    >,
-  tutorialShowContextMenu: async () =>
-    ipcRenderer.invoke("lvis:tutorial:show-context-menu") as Promise<
-      { ok: true } | { ok: false; error: string; message: string }
-    >,
-  // Tutorial-X2 — Discovery Swipe + Memory Seed plugin install bridge.
+  // Memory Seed plugin install bridge.
   // Delegates to the canonical `lvis:plugins:install` IPC (same handler
-  // the marketplace UI uses); the renderer wraps the response into the
-  // tutorial result shape so the dialogs can react to success/failure
-  // without depending on the marketplace `PluginMarketplaceActionResult`
-  // schema. Errors come back as kebab-case English (CLAUDE.md).
+  // the marketplace UI uses); the renderer wraps the response so onboarding
+  // dialogs can react to success/failure without depending on the marketplace
+  // `PluginMarketplaceActionResult` schema. Errors come back as kebab-case
+  // English (CLAUDE.md).
   tutorialInstallPlugin: async (pluginId: string) => {
     const raw = (await ipcRenderer.invoke(
       "lvis:plugins:install",
@@ -477,35 +450,6 @@ const api = {
       | { ok: true }
       | { ok: false; error: string; message: string }
     >,
-  onTutorialOpen: (handler: (payload: { source: string }) => void) => {
-    const listener = (_event: unknown, payload: { source?: unknown }) => {
-      const source = typeof payload?.source === "string" ? payload.source : "ipc";
-      handler({ source });
-    };
-    ipcRenderer.on("lvis:tutorial:open", listener);
-    return () => ipcRenderer.removeListener("lvis:tutorial:open", listener);
-  },
-  onTutorialPreferencesChanged: (
-    handler: (prefs: { liked: string[]; disliked: string[]; lastShownAt: string }) => void,
-  ) => {
-    const listener = (
-      _event: unknown,
-      payload: { liked?: unknown; disliked?: unknown; lastShownAt?: unknown },
-    ) => {
-      const liked = Array.isArray(payload?.liked)
-        ? payload.liked.filter((v): v is string => typeof v === "string")
-        : [];
-      const disliked = Array.isArray(payload?.disliked)
-        ? payload.disliked.filter((v): v is string => typeof v === "string")
-        : [];
-      const lastShownAt =
-        typeof payload?.lastShownAt === "string" ? payload.lastShownAt : "";
-      handler({ liked, disliked, lastShownAt });
-    };
-    ipcRenderer.on("lvis:tutorial:preferences-changed", listener);
-    return () =>
-      ipcRenderer.removeListener("lvis:tutorial:preferences-changed", listener);
-  },
   openSettingsWindow: async (initialTab?: string) =>
     ipcRenderer.invoke("lvis:settings-window:open", initialTab) as Promise<
       { ok: true; windowId: number } | { ok: false; error: string }

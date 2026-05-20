@@ -16,6 +16,7 @@ import { PluginConfigSchemaForm } from "./PluginConfigSchemaForm.js";
 import { DEFAULT_TOAST_TTL_MS } from "../constants.js";
 import { useNotifySaved } from "../contexts/saved-toast.js";
 import { MARKDOWN_REMARK_PLUGINS } from "../utils/markdown-plugins.js";
+import { isPluginInstallKey } from "../utils/plugin-install-aliases.js";
 import { SettingsPageHeader } from "../components/SettingsPageHeader.js";
 
 type KV = { key: string; value: string };
@@ -441,7 +442,7 @@ export function PluginConfigTab() {
                     when the install-result event lands and `refreshPlugins`
                     promotes it into a real `plugins` entry. */}
                 {Object.entries(installInFlight)
-                  .filter(([slug]) => !plugins.some((p) => p.id === slug))
+                  .filter(([slug]) => !plugins.some((p) => isPluginInstallKey(p.id, slug, p.installAliases)))
                   .map(([slug, phase]) => (
                     <div
                       key={`in-flight:${slug}`}
