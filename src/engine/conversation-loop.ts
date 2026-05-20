@@ -831,7 +831,11 @@ export class ConversationLoop {
    * Checkpoint branch — 체크포인트 #compactNum 지점에서 새 세션을 fork.
    * history 를 slicing 하고 wire-serialize 후 disk 영속화. 새 sessionId 반환.
    */
-  public async branchFromCheckpoint(compactNum: number): Promise<{ newSessionId: string }> {
+  public async branchFromCheckpoint(compactNum: number): Promise<{
+    newSessionId: string;
+    lastMessageRole: GenericMessage["role"] | null;
+    shouldAutoContinue: boolean;
+  }> {
     const checkpoints = this.deps.memoryManager.loadSessionMetadata(this.sessionId)?.checkpoints ?? [];
     const target = checkpoints.find((c) => c.compactNum === compactNum);
     if (!target) throw new Error(`Checkpoint #${compactNum} not found in session ${this.sessionId}`);
@@ -880,8 +884,11 @@ export class ConversationLoop {
       branchedAt: new Date().toISOString(),
     });
 
+    const lastMessageRole = forkMessages[forkMessages.length - 1]?.role ?? null;
+    const shouldAutoContinue = lastMessageRole === "user";
+
     log.info(`branchFromCheckpoint: new session ${newSessionId} from ${this.sessionId} @ compact #${compactNum}`);
-    return { newSessionId };
+    return { newSessionId, lastMessageRole, shouldAutoContinue };
   }
 
   getSessionRoutineId(): string | null {

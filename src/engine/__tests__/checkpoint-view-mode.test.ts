@@ -9,6 +9,7 @@
  *  5. branchFromCheckpoint throws when snapshot is null (not saved yet)
  *  6. branchFromCheckpoint throws when snapshot is shorter than messageCountAtTrigger
  *  7. branchFromCheckpoint loads from snapshot, slices to messageCountAtTrigger, persists branch metadata
+ *  8. branchFromCheckpoint marks user-ended branches for automatic continuation
  */
 import { describe, it, expect, vi } from "vitest";
 
@@ -158,13 +159,16 @@ describe("ConversationLoop branchFromCheckpoint", () => {
     // In-memory history is intentionally empty (simulates post-compaction state)
     // to confirm the implementation reads from snapshot, not this.history
 
-    const { newSessionId } = await loop.branchFromCheckpoint(1);
+    const result = await loop.branchFromCheckpoint(1);
+    const { newSessionId } = result;
 
     // loadCheckpointSnapshot was called for the current session and compactNum
     expect(memoryManager.loadCheckpointSnapshot).toHaveBeenCalledWith(loop.getSessionId(), 1);
 
     // New session id is a UUID
     expect(newSessionId).toMatch(/^[0-9a-f-]{36}$/);
+    expect(result.lastMessageRole).toBe("assistant");
+    expect(result.shouldAutoContinue).toBe(false);
 
     // Saved messages are sliced to exactly messageCountAtTrigger (2) from snapshot
     const saved = savedSessions.get(newSessionId) as unknown[] | undefined;
@@ -254,5 +258,19 @@ describe("ConversationLoop branchFromCheckpoint", () => {
 
     const meta = savedMetadata.get(newSessionId) as Record<string, unknown> | undefined;
     expect(meta?.summaryPreamble).toBe("요약된 이전 맥락");
+  });
+
+  it("marks a branch ending at a user message for automatic continuation", async () => {
+    const { loop, savedSessions } = makeLoop([
+      { compactNum: 1, messageCountAtTrigger: 3 },
+    ]);
+
+    const result = await loop.branchFromCheckpoint(1);
+
+    expect(result.lastMessageRole).toBe("user");
+    expect(result.shouldAutoContinue).toBe(true);
+    expect((savedSessions.get(result.newSessionId) as unknown[] | undefined)?.at(-1)).toMatchObject({
+      role: "user",
+    });
   });
 });
