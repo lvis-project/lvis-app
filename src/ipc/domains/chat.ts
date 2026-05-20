@@ -879,15 +879,22 @@ export function registerChatHandlers(deps: IpcDeps): void {
     return { ok: loaded, sessionId: loaded ? newId : null };
   });
 
-  ipcMain.handle("lvis:chat:retry-effort", async (
-    e,
-    opts?: { thinkingBudgetTokens?: number; enableThinking?: boolean },
-  ) => {
-    if (!validateSender(e)) { auditUnauthorized(auditLogger, "lvis:chat:retry-effort", e); return UNAUTHORIZED_FRAME; }
-    const messages = conversationLoop.getHistory().getMessages() as GenericMessage[];
-    let lastUserIdx = -1;
-    for (let i = messages.length - 1; i >= 0; i--) {
-      if (messages[i].role === "user") { lastUserIdx = i; break; }
+  const continueFromLastUserTurn = async (opts: {
+    requireTerminalUser: boolean;
+    restoreOnFailure: boolean;
+  }) => {
+    const messages = [...(conversationLoop.getHistory().getMessages() as GenericMessage[])];
+    if (messages.length === 0) return { ok: false, error: "no-user-message" };
+    let lastUserIdx = messages.length - 1;
+    if (opts.requireTerminalUser) {
+      if (messages[lastUserIdx]?.role !== "user") {
+        return { ok: false, error: "last-message-not-user" };
+      }
+    } else {
+      lastUserIdx = -1;
+      for (let i = messages.length - 1; i >= 0; i--) {
+        if (messages[i].role === "user") { lastUserIdx = i; break; }
+      }
     }
     if (lastUserIdx < 0) return { ok: false, error: "no-user-message" };
     const lastUser = messages[lastUserIdx] as Extract<GenericMessage, { role: "user" }>;
@@ -905,7 +912,30 @@ export function registerChatHandlers(deps: IpcDeps): void {
       : undefined;
     const rolePrompt = rolePromptFromUserMessage(lastUser);
     conversationLoop.getHistory().truncate(lastUserIdx);
+    try {
+      const result = await streamTurn(lastUserText, lastUserAttachments, rolePrompt);
+      return { ok: true, result };
+    } catch (err) {
+      if (opts.restoreOnFailure) {
+        conversationLoop.getHistory().restore(messages);
+      }
+      throw err;
+    }
+  };
 
+  ipcMain.handle("lvis:chat:continue-last-user", async (e, payload: unknown) => {
+    if (!validateSender(e)) { auditUnauthorized(auditLogger, "lvis:chat:continue-last-user", e); return UNAUTHORIZED_FRAME; }
+    const p = payload as { sessionId?: unknown };
+    if (typeof p?.sessionId !== "string") return { ok: false, error: "invalid-args" };
+    if (p.sessionId !== conversationLoop.getSessionId()) return { ok: false, error: "session-mismatch" };
+    return continueFromLastUserTurn({ requireTerminalUser: true, restoreOnFailure: true });
+  });
+
+  ipcMain.handle("lvis:chat:retry-effort", async (
+    e,
+    opts?: { thinkingBudgetTokens?: number; enableThinking?: boolean },
+  ) => {
+    if (!validateSender(e)) { auditUnauthorized(auditLogger, "lvis:chat:retry-effort", e); return UNAUTHORIZED_FRAME; }
     const prevLlm = settingsService.get("llm");
     const provider = prevLlm.provider;
     const prevBlock = prevLlm.vendors[provider];
@@ -922,8 +952,7 @@ export function registerChatHandlers(deps: IpcDeps): void {
     });
     conversationLoop.refreshProvider();
     try {
-      const result = await streamTurn(lastUserText, lastUserAttachments, rolePrompt);
-      return { ok: true, result };
+      return await continueFromLastUserTurn({ requireTerminalUser: false, restoreOnFailure: false });
     } finally {
       await settingsService.patch({
         llm: { vendors: { [provider]: prevBlock } },
@@ -1007,6 +1036,7 @@ export function registerChatHandlers(deps: IpcDeps): void {
 
   ipcMain.handle("lvis:chat:branch-from-checkpoint", async (e, payload: unknown) => {
     if (!validateSender(e)) { auditUnauthorized(auditLogger, "lvis:chat:branch-from-checkpoint", e); return UNAUTHORIZED_FRAME; }
+    if (activeStreamTurn) return { error: "streaming-active" };
     const p = payload as { sessionId?: unknown; compactNum?: unknown };
     if (typeof p?.sessionId !== "string" || !Number.isSafeInteger(p?.compactNum) || (p.compactNum as number) < 0) {
       return { error: "invalid-args" };

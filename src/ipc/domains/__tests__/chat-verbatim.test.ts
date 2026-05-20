@@ -74,16 +74,24 @@ function makeConversationLoop(
   sessionId: string,
   messages: Array<ReturnType<typeof makeToolResultMsg> | Record<string, unknown>>,
 ) {
+  const history = {
+    length: messages.length,
+    getMessages: vi.fn(() => messages),
+    truncate: vi.fn((count: number) => {
+      messages.splice(count);
+      history.length = messages.length;
+    }),
+    restore: vi.fn((restoredMessages: typeof messages) => {
+      messages.splice(0, messages.length, ...restoredMessages);
+      history.length = messages.length;
+    }),
+  };
   return {
     getSessionId: vi.fn(() => sessionId),
     getSessionKind: vi.fn(() => "main"),
     getSessionRoutineId: vi.fn(() => null),
     getSessionRoutineTitle: vi.fn(() => null),
-    getHistory: vi.fn(() => ({
-      length: messages.length,
-      getMessages: vi.fn(() => messages),
-      truncate: vi.fn(),
-    })),
+    getHistory: vi.fn(() => history),
     hasProvider: vi.fn(() => true),
     runTurn: vi.fn(),
     newConversation: vi.fn(),
@@ -552,6 +560,52 @@ describe("lvis:chat:fork", () => {
       result.sessionId,
       expect.arrayContaining([expect.objectContaining({ toolUseId: "tu-art", content: rawContent })]),
     );
+  });
+});
+
+describe("lvis:chat:continue-last-user", () => {
+  const CHANNEL = "lvis:chat:continue-last-user";
+  const SESSION_ID = "session-continue";
+
+  it("rejects stale session ids before replaying the last user turn", async () => {
+    const loop = makeConversationLoop(SESSION_ID, [
+      { role: "user", content: "question" },
+    ]);
+    await setupHandlers(loop);
+
+    const result = await invoke(CHANNEL, { sessionId: "other-session" });
+
+    expect(result).toEqual({ ok: false, error: "session-mismatch" });
+    expect(loop.runTurn).not.toHaveBeenCalled();
+    expect(loop.getHistory().truncate).not.toHaveBeenCalled();
+  });
+
+  it("fails closed when the active session no longer ends with a user message", async () => {
+    const loop = makeConversationLoop(SESSION_ID, [
+      { role: "user", content: "question" },
+      { role: "assistant", content: "answer" },
+    ]);
+    await setupHandlers(loop);
+
+    const result = await invoke(CHANNEL, { sessionId: SESSION_ID });
+
+    expect(result).toEqual({ ok: false, error: "last-message-not-user" });
+    expect(loop.runTurn).not.toHaveBeenCalled();
+    expect(loop.getHistory().truncate).not.toHaveBeenCalled();
+  });
+
+  it("restores the terminal user message when turn startup fails", async () => {
+    const terminalUser = { role: "user", content: "question" };
+    const loop = makeConversationLoop(SESSION_ID, [terminalUser]);
+    loop.runTurn.mockRejectedValueOnce(new Error("provider missing"));
+    await setupHandlers(loop);
+    const history = loop.getHistory();
+
+    await expect(invoke(CHANNEL, { sessionId: SESSION_ID })).rejects.toThrow("provider missing");
+
+    expect(history.truncate).toHaveBeenCalledWith(0);
+    expect(history.restore).toHaveBeenCalledWith([terminalUser]);
+    expect(history.getMessages()).toEqual([terminalUser]);
   });
 });
 
