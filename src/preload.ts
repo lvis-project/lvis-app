@@ -315,27 +315,35 @@ const api = {
     },
   },
   /**
-   * Demo activation bridge. The LoginModal chip 1 funnels through here
-   * before invoking `loginMockup`: the user pastes a `LVIS-DEMO:v1:<...>`
-   * activation string, the main process decrypts it back into the original
-   * `.env.demo` payload, persists it under `~/.lvis/secrets/.env.demo`
-   * (0o600), and re-runs the demo-credentials capture so the subsequent
-   * `loginMockup` call observes the freshly-injected vendor keys.
+   * Demo activation bridge. `status` reads main's captured demo state after
+   * packaged env scrub. `activate` receives a pasted `LVIS-DEMO:v1:<...>`
+   * activation string, decrypts it back into the original `.env.demo`
+   * payload, persists it under `~/.lvis/secrets/.env.demo` (0o600), and
+   * re-runs the demo-credentials capture. First activation then relaunches;
+   * a later chip 1 click sees `status.activated=true` and invokes
+   * `loginMockup`.
    *
    * Error codes (kebab-case English per CLAUDE.md):
    *   - `invalid-code`     bad prefix, corrupt base64, auth-tag mismatch,
    *                        or empty input.
    *   - `no-vendor`        decrypted payload missing `LVIS_DEMO_VENDOR`.
    *   - `invalid-vendor`   decrypted payload has an unknown `LVIS_DEMO_VENDOR`.
+   *   - `invalid-foundry-endpoint` Azure Foundry endpoint rejected by the
+   *                        shared endpoint validator.
    *   - `persist-failed`   filesystem write failure (permission/disk).
    *   - `unauthorized-frame` rejected sender frame (shared with gated IPC).
    * The renderer translates each into the Korean user-facing message.
    */
   demo: {
+    status: async () =>
+      ipcRenderer.invoke("lvis:demo:status") as Promise<
+        | { ok: true; activated: boolean; vendor: string | null }
+        | { ok: false; error: "unauthorized-frame" }
+      >,
     activate: async (code: string) =>
       ipcRenderer.invoke("lvis:demo:activate", { code }) as Promise<
         | { ok: true; vendor: string; requiresRelaunch?: boolean }
-        | { ok: false; error: "invalid-code" | "no-vendor" | "invalid-vendor" | "persist-failed" | "unauthorized-frame" }
+        | { ok: false; error: "invalid-code" | "no-vendor" | "invalid-vendor" | "invalid-foundry-endpoint" | "persist-failed" | "unauthorized-frame" }
       >,
     relaunchAfterActivation: async () =>
       ipcRenderer.invoke("lvis:demo:relaunch-after-activation") as Promise<
