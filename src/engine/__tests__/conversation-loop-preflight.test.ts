@@ -5,6 +5,8 @@
  * - estimate-based trigger: estimateMessagesTokens ≥ threshold → compact called
  * - actual-tokensIn-based trigger: last provider input ≥ threshold even when
  *   estimate is below (undercount scenario for code-heavy English content)
+ * - message-count trigger: 50-message threshold starts compact instead of
+ *   trimming the persisted session transcript
  * - autoCompact OFF → preflight skipped even when tokens exceed threshold
  * - disableSessionPersistence → preflight skipped
  * - threshold values: 2026-05 lowered percentages
@@ -278,6 +280,42 @@ describe("runPreflightGuard — actual-tokensIn secondary trigger", () => {
 
     expect(compactWithBoundary).not.toHaveBeenCalled();
     expect(compactOccurredCb).not.toHaveBeenCalled();
+  });
+});
+
+describe("runPreflightGuard — message-count trigger", () => {
+  it("calls compactWithBoundary at 50 messages even when token estimates are below threshold", async () => {
+    const settings = makeSettings(true, "claude-sonnet-4-5", "claude");
+    const threshold = getModelPreflightThreshold("claude", "claude-sonnet-4-5");
+    const history: GenericMessage[] = Array.from({ length: 49 }, (_, i) => ({
+      role: i % 2 === 0 ? "user" : "assistant",
+      content: `short ${i}`,
+    }));
+    expect(estimateMessagesTokens(history)).toBeLessThan(threshold);
+
+    const mem = makeMemoryManager(history);
+    const loop = new ConversationLoop(makeDeps({ settingsService: settings, memoryManager: mem }));
+    loop.resetAndResume("sess-1");
+
+    const fakeProvider = makeTurnProvider();
+    (loop as unknown as { provider: typeof fakeProvider }).provider = fakeProvider;
+    (loop as unknown as { lastProviderInputTokens: number })
+      .lastProviderInputTokens = threshold - 1_000;
+
+    vi.mocked(compactWithBoundary).mockResolvedValueOnce(makeSyntheticCompactResult(history));
+
+    const compactStartedCb = vi.fn();
+    await loop.runTurn(
+      "message 50",
+      { onCompactStarted: compactStartedCb },
+      undefined,
+      { inputOrigin: "user-keyboard" },
+    );
+
+    expect(compactWithBoundary).toHaveBeenCalled();
+    expect(compactStartedCb).toHaveBeenCalledWith(
+      expect.objectContaining({ triggerSource: "message-count" }),
+    );
   });
 });
 

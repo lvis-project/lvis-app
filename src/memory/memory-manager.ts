@@ -53,6 +53,7 @@ export interface MemoryIndexSectionsPatch {
 
 export interface SessionSearchEntry {
   sessionId: string;
+  title?: string;
   matchedMessage: string;
   timestamp: string;
   sessionKind: SessionKind;
@@ -252,6 +253,27 @@ function isValidSessionId(id: unknown): id is string {
 
 function isRecord(value: unknown): value is Record<string, unknown> {
   return value !== null && typeof value === "object" && !Array.isArray(value);
+}
+
+function isCompactBoundaryRecord(value: unknown): boolean {
+  if (!isRecord(value)) return false;
+  const meta = isRecord(value.meta) ? value.meta : {};
+  return value.role === "user" && meta.compactBoundary === true;
+}
+
+function isRenderableUserRecord(value: unknown): value is Record<string, unknown> & {
+  role: "user";
+  content: unknown;
+} {
+  return isRecord(value) && value.role === "user" && "content" in value && !isCompactBoundaryRecord(value);
+}
+
+function findLatestRenderableUserRecord(messages: readonly unknown[]): unknown | null {
+  for (let i = messages.length - 1; i >= 0; i -= 1) {
+    const message = messages[i];
+    if (isRenderableUserRecord(message)) return message;
+  }
+  return null;
 }
 
 function isToolResultRecord(value: unknown): value is Record<string, unknown> & {
@@ -523,6 +545,7 @@ export class MemoryManager {
               const excerpt = content.slice(start, end);
               results.push({
                 sessionId: stem,
+                title: this.readSessionSummary(stem).title,
                 matchedMessage: excerpt,
                 timestamp,
                 sessionKind: metadata?.sessionKind ?? normalizeSessionKind(undefined),
@@ -550,6 +573,7 @@ export class MemoryManager {
       .filter((session) => UUID_RE.test(session.id))
       .map((session) => ({
         sessionId: session.id,
+        title: session.title,
         matchedMessage: session.preview,
         timestamp: session.modifiedAt.toISOString(),
         sessionKind: session.sessionKind,
@@ -736,7 +760,38 @@ export class MemoryManager {
         log.warn({ sessionId }, "skipping malformed session line");
       }
     }
-    return messages;
+    return this.recoverLatestCheckpointUserIfMissing(sessionId, messages);
+  }
+
+  private recoverLatestCheckpointUserIfMissing(sessionId: string, messages: unknown[]): unknown[] {
+    if (messages.some(isRenderableUserRecord)) return messages;
+    let metadata: SessionMetadata | null = null;
+    try {
+      metadata = this.loadSessionMetadata(sessionId);
+    } catch {
+      return messages;
+    }
+    const checkpoints = metadata?.checkpoints ?? [];
+    const latestCompactNum = checkpoints
+      .map((checkpoint) => checkpoint.compactNum)
+      .filter((compactNum): compactNum is number =>
+        typeof compactNum === "number" && Number.isInteger(compactNum) && compactNum >= 0,
+      )
+      .sort((a, b) => b - a)[0];
+    if (latestCompactNum === undefined) return messages;
+
+    const snapshot = this.loadCheckpointSnapshot(sessionId, latestCompactNum);
+    if (!snapshot) return messages;
+    const latestUser = findLatestRenderableUserRecord(snapshot);
+    if (!latestUser) return messages;
+
+    const firstNonBoundaryIndex = messages.findIndex((message) => !isCompactBoundaryRecord(message));
+    const insertAt = firstNonBoundaryIndex < 0 ? messages.length : firstNonBoundaryIndex;
+    return [
+      ...messages.slice(0, insertAt),
+      latestUser,
+      ...messages.slice(insertAt),
+    ];
   }
 
   loadToolResultArtifact(sessionId: string, toolUseId: string): ToolResultArtifact | null {

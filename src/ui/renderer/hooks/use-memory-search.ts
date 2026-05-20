@@ -10,6 +10,7 @@ export interface NoteResult {
 
 export interface SessionResult {
   sessionId: string;
+  title?: string;
   matchedMessage: string;
   timestamp: string;
 }
