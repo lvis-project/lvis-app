@@ -442,7 +442,7 @@ export function PluginConfigTab() {
                     when the install-result event lands and `refreshPlugins`
                     promotes it into a real `plugins` entry. */}
                 {Object.entries(installInFlight)
-                  .filter(([slug]) => !plugins.some((p) => isPluginInstallKey(p.id, slug)))
+                  .filter(([slug]) => !plugins.some((p) => isPluginInstallKey(p.id, slug, p.installAliases)))
                   .map(([slug, phase]) => (
                     <div
                       key={`in-flight:${slug}`}
