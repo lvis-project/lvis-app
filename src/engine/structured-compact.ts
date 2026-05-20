@@ -639,6 +639,7 @@ export async function compactWithBoundary(
       checkpointMeta: {
         removedMessages: stubRemovedMessages,
         freedTokens: stubFreedTokens,
+        compactNum,
         trigger: "auto-compact",
         ...(summary.raw ? { summary: summary.raw.slice(0, 200) } : {}),
       },
