@@ -6,6 +6,7 @@ import { ConversationLoop } from "../conversation-loop.js";
 import type { LLMProvider, StreamEvent, StreamTurnParams } from "../llm/types.js";
 import { ToolRegistry } from "../../tools/registry.js";
 import { fakeLlmSettings } from "../../shared/__tests__/fake-llm-settings.js";
+import { LLM_VENDOR_DEFAULTS } from "../../shared/llm-vendor-defaults.js";
 
 class FakeProvider implements LLMProvider {
   readonly vendor = "openai" as const;
@@ -100,7 +101,7 @@ describe("ConversationLoop.pingProvider", () => {
       configured: false,
       online: false,
       vendor: "openai",
-      model: "gpt-4o",
+      model: LLM_VENDOR_DEFAULTS.openai.model,
       error: "not-configured",
     });
   });
@@ -116,7 +117,7 @@ describe("ConversationLoop.pingProvider", () => {
       configured: true,
       online: true,
       vendor: "openai",
-      model: "gpt-4o",
+      model: LLM_VENDOR_DEFAULTS.openai.model,
     });
     expect(result.latencyMs).toBeGreaterThanOrEqual(0);
     expect(provider.lastParams?.messages).toEqual([{ role: "user", content: "ping" }]);
@@ -132,7 +133,7 @@ describe("ConversationLoop.pingProvider", () => {
       configured: true,
       online: false,
       vendor: "openai",
-      model: "gpt-4o",
+      model: LLM_VENDOR_DEFAULTS.openai.model,
       error: "rate_limit",
     });
   });

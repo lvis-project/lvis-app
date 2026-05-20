@@ -25,6 +25,7 @@ export const LONG_TOAST_TTL_MS = 5000;
 import type { ExecMode } from "./types.js";
 import {
   LLM_VENDOR_DEFAULTS,
+  LLM_VENDOR_MODEL_OPTIONS,
   LLM_VENDORS,
   type LLMVendor,
 } from "../../shared/llm-vendor-defaults.js";
@@ -53,7 +54,7 @@ export const SOURCE_BADGE: Record<string, string> = {
 // so adding a new entry to `LLM_VENDORS` without updating this object is
 // a compile error — keeps the dropdown in lockstep with the canonical
 // vendor list. `defaultModel` derives from LLM_VENDOR_DEFAULTS so the
-// placeholder stays in sync with the data layer's seed values.
+// model selector stays in sync with the data layer's seed values.
 interface VendorUiMeta {
   label: string;
   placeholder: string;
@@ -83,6 +84,7 @@ export const VENDORS = LLM_VENDORS.map((id) => ({
   id,
   ...VENDOR_UI[id],
   defaultModel: LLM_VENDOR_DEFAULTS[id].model,
+  modelOptions: LLM_VENDOR_MODEL_OPTIONS[id],
 }));
 
 export const WEB_PROVIDERS = [
