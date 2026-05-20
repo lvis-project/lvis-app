@@ -2,12 +2,10 @@
  * Single source of truth for the LLM vendor list and per-vendor default
  * configuration block. Consumed by `data/settings-store.ts` (to seed
  * DEFAULT_SETTINGS.llm.vendors) and by the renderer's `VENDORS` constant
- * (for the model placeholder shown in the settings dialog).
+ * (for the model dropdown shown in the settings dialog).
  *
  * Pure, browser-safe — no Electron / Node imports.
  */
-
-import { vendorSupportsThinking } from "./vendor-capabilities.js";
 
 export const LLM_VENDORS = [
   "claude",
@@ -90,18 +88,68 @@ export interface LLMVendorSettings {
 
 const DEFAULT_MODEL: Record<LLMVendor, string> = {
   claude: "claude-sonnet-4-6",
-  openai: "gpt-4o",
+  openai: "gpt-5.4-mini",
   gemini: "gemini-2.0-flash",
   copilot: "gpt-4o",
   "azure-foundry": "gpt-4o",
   "vertex-ai": "gemini-2.5-flash",
 };
 
+export const LLM_VENDOR_MODEL_OPTIONS: Readonly<Record<LLMVendor, readonly string[]>> =
+  Object.freeze({
+    claude: [
+      "claude-sonnet-4-6",
+      "claude-opus-4-6",
+      "claude-haiku-4-5",
+      "claude-sonnet-4-5",
+      "claude-opus-4-5",
+    ],
+    openai: [
+      "gpt-5.4-mini",
+      "gpt-5.4",
+      "gpt-5.4-nano",
+      "gpt-5.4-pro",
+      "gpt-4.1",
+      "gpt-4.1-mini",
+      "o4-mini",
+      "o3",
+      "gpt-4o",
+    ],
+    gemini: [
+      "gemini-2.0-flash",
+      "gemini-2.5-flash",
+      "gemini-2.5-pro",
+      "gemini-2.5-flash-lite",
+      "gemini-2.0-flash-lite",
+    ],
+    copilot: [
+      "gpt-4o",
+      "gpt-5.4-mini",
+      "gpt-5.4",
+      "gpt-4.1",
+      "gpt-4.1-mini",
+      "claude-sonnet-4-6",
+    ],
+    "azure-foundry": [
+      "gpt-4o",
+      "gpt-5.4-mini",
+      "gpt-5.4",
+      "gpt-4.1",
+      "gpt-4.1-mini",
+    ],
+    "vertex-ai": [
+      "gemini-2.5-flash",
+      "gemini-2.5-pro",
+      "gemini-2.0-flash",
+      "gemini-2.5-flash-lite",
+    ],
+  });
+
 function defaultBlock(vendor: LLMVendor): LLMVendorSettings {
   const model = DEFAULT_MODEL[vendor];
   return {
     model,
-    enableThinking: vendorSupportsThinking(vendor, model),
+    enableThinking: true,
     thinkingBudgetTokens: 10_000,
   };
 }
