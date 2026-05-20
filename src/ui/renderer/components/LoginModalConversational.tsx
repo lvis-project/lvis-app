@@ -32,7 +32,7 @@
  * etc.) so the modal adapts to every bundle (tokyo-night, forest,
  * violet-*, …).
  */
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
 import {
   Dialog,
   DialogContent,
@@ -73,6 +73,8 @@ function errorMessage(code: string): string {
     // by relaunch (e.g. VPN/intranet not connected post-relaunch).
     case "endpoint-unreachable":
       return "내부망 endpoint 에 연결할 수 없어요. VPN 또는 내부망 연결을 확인해주세요.";
+    case "invalid-foundry-endpoint":
+      return "데모 endpoint 형식이 올바르지 않아요. 발급자에게 새 활성 코드를 요청해 주세요.";
     default:
       return "로그인에 실패했습니다.";
   }
@@ -91,6 +93,8 @@ function activationErrorMessage(code: string): string {
       return "활성 코드가 올바르지 않아요. `LVIS-DEMO:v1:` 로 시작하는 한 줄 코드를 다시 확인해 주세요.";
     case "no-vendor":
       return "활성 코드에 vendor 정보가 빠져 있어요. 발급자에게 다시 요청해 주세요.";
+    case "invalid-vendor":
+      return "활성 코드의 vendor 정보가 올바르지 않아요. 발급자에게 다시 요청해 주세요.";
     case "persist-failed":
       return "활성 코드를 저장하지 못했어요. 디스크 공간 또는 권한을 확인한 뒤 다시 시도해 주세요.";
     case "unauthorized-frame":
@@ -135,12 +139,21 @@ const CHECKLIST_STAGGER_MS = 900;
 const SUCCESS_DWELL_MS = 1800;
 const ACTIVATION_RELAUNCH_DWELL_MS = 5000;
 
+function demoWasActivatedAtBoot(): boolean {
+  const w = window as unknown as {
+    lvis?: { env?: { demoVendor?: string | null } };
+  };
+  const vendor = w?.lvis?.env?.demoVendor;
+  return typeof vendor === "string" && vendor.length > 0;
+}
+
 export function LoginModalConversational({
   api,
   open,
   onOpenChange,
   onSuccess,
 }: LoginModalProps) {
+  const demoActivatedAtBoot = useMemo(() => demoWasActivatedAtBoot(), []);
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
@@ -230,32 +243,6 @@ export function LoginModalConversational({
   }, [assistantReply, submitting, checklistRevealed]);
 
   /**
-   * Demo chip handler — opens the activation-input sub-state. The chip
-   * no longer fires `loginMockup` directly: the user must first paste
-   * a `LVIS-DEMO:v1:<...>` activation string distributed through an
-   * internal channel. The renderer surfaces the input inline (chat-style)
-   * and only after a successful activation does the auth transcript begin.
-   *
-   * The user-bubble + assistant-reply painting still happens here so the
-   * chat continues to read like a conversation rather than the chip
-   * vanishing into a modal-within-a-modal.
-   */
-  const activateDemoChip = useCallback(() => {
-    if (submitting || activating || activationRelaunching) return;
-    setError(null);
-    setActivationError(null);
-    setActivationNotice(null);
-    setActivationOpen(true);
-    setUserTurnVisible(true);
-    // Defer the assistant reply by one tick so the user bubble paints
-    // first — matches the mockup's "user types → assistant responds"
-    // perceived ordering.
-    window.setTimeout(() => {
-      setAssistantReply(true);
-    }, 220);
-  }, [submitting, activating, activationRelaunching]);
-
-  /**
    * Run the existing loginMockup chain after activation has succeeded.
    * Factored out of the original `activateDemoChip` so the auth-step
    * pacing (checklist + dwell + onSuccess hand-off) lives in one place.
@@ -300,13 +287,42 @@ export function LoginModalConversational({
   }, [api, onSuccess, onOpenChange, submitting]);
 
   /**
-   * Submit the activation code. On success the renderer paints a brief
-   * "활성 완료 · 인증 시작" ack bubble and *immediately* chains into the
-   * auth transcript via `runAuthMockup` — the previous "press Enter to
-   * proceed" gate (F5) was removed 2026-05-19 because the extra user
-   * action read as a paper-cut rather than a confirmation. Failure paints
-   * a chat-style error bubble inside the activation block and leaves the
-   * input editable for retry.
+   * Demo chip handler. Fresh installs open the activation-input sub-state;
+   * subsequent launches with `.env.demo` already loaded at boot skip the
+   * code prompt and run the auth transcript immediately.
+   */
+  const activateDemoChip = useCallback(() => {
+    if (submitting || activating || activationRelaunching) return;
+    setError(null);
+    setActivationError(null);
+    setActivationNotice(null);
+    setUserTurnVisible(true);
+    setActivationCode("");
+    setActivationOpen(!demoActivatedAtBoot);
+    // Defer the assistant reply by one tick so the user bubble paints
+    // first — matches the mockup's "user types → assistant responds"
+    // perceived ordering.
+    window.setTimeout(() => {
+      setAssistantReply(true);
+      if (demoActivatedAtBoot) {
+        void runAuthMockup();
+      }
+    }, 220);
+  }, [
+    submitting,
+    activating,
+    activationRelaunching,
+    demoActivatedAtBoot,
+    runAuthMockup,
+  ]);
+
+  /**
+   * Submit the activation code. First activation persists `.env.demo`,
+   * shows the 5s relaunch notice, and lets the armed IPC restart apply the
+   * new host resolver env. If no relaunch is required, the auth transcript
+   * starts immediately via `runAuthMockup`. Failure paints a chat-style
+   * error bubble inside the activation block and leaves the input editable
+   * for retry.
    */
   const submitActivation = useCallback(async () => {
     if (activating || submitting || activationRelaunching) return;
