@@ -1085,10 +1085,6 @@ export function App() {
     setActiveView,
     toggleCommandPopover,
   });
-  useEffect(() => {
-    chatEndRef.current?.scrollIntoView({ behavior: "smooth" });
-  }, [entries]);
-
   // Refresh plugin views + marketplace catalog when a lvis:// deep-link
   // install completes in the main process, so new plugin entries appear
   // (and uninstalled ones disappear) without requiring an app restart.

@@ -24,7 +24,7 @@ import { CompressionStatus } from "../shared/compact-status.js";
 import { stripSuggestedReplies } from "./suggested-replies.js";
 import { createProvider, secretKeyFor } from "./llm/provider-factory.js";
 import { FallbackProvider, type FallbackStatus } from "./llm/vercel/fallback-chain.js";
-import type { GenericMessage, LLMProvider, ToolSchema, TokenUsage } from "./llm/types.js";
+import type { GenericMessage, LLMProvider, MessageMeta, ToolSchema, TokenUsage } from "./llm/types.js";
 import { collectRoundStream } from "./turn/stream-collector.js";
 import {
   handleRequestPlugin,
@@ -52,6 +52,7 @@ import type { ChatInputOrigin } from "../shared/chat-origin.js";
 import { isUserKeyboardOrigin } from "../shared/chat-origin.js";
 import type { AiProviderPingResult } from "../shared/ai-provider-ping.js";
 import type { PermissionReviewEvent } from "../shared/permission-review-status.js";
+import { parseImportedTriggerEnvelopePayload } from "../shared/overlay-trigger-source.js";
 import { stripLeadingSlash } from "../shared/slash-sanitizer.js";
 import { isToolResultStubContent } from "../shared/tool-result-stub.js";
 import { createTracer, type ConversationTracer } from "../observability/conversation-trace.js";
@@ -136,7 +137,7 @@ export interface TurnCallbacks {
   }) => void;
   onTurnComplete?: (fullText: string) => void;
   onPermissionModeChanged?: (mode: "default" | "strict" | "auto" | "allow") => void;
-  onError?: (error: string) => void;
+  onError?: (error: string, systemNotice?: "context-error" | "stream-error") => void;
   onCompactOccurred?: (result: {
     removedMessages: number;
     freedTokens: number;
@@ -1299,11 +1300,33 @@ export class ConversationLoop {
           systemPromptAdd: options.rolePrompt.systemPromptAdd,
         }
       : undefined;
+    const importedTrigger = inputOrigin === "plugin-emitted"
+      ? parseImportedTriggerEnvelopePayload(turnInput)
+      : null;
+    const userMeta: MessageMeta = {
+      ...(rolePromptMeta ? { activeRolePrompt: rolePromptMeta } : {}),
+      ...(routeResult.route === "skill"
+        ? { displayText: turnInput, routeSkill: { skillId: routeResult.skillId } }
+        : {}),
+      ...(importedTrigger
+        ? {
+            displayText: importedTrigger.body,
+            importedTrigger: {
+              sessionId: `history-imported-${this.sessionId}-${turnStartedAt}`,
+              source: importedTrigger.source,
+              prompt: turnInput,
+              summary: importedTrigger.body,
+              toolCallCount: 0,
+              importedAt: new Date(turnStartedAt).toISOString(),
+            },
+          }
+        : {}),
+    };
 
     this.history.append({
       role: "user",
       content: userContent,
-      ...(rolePromptMeta ? { meta: { activeRolePrompt: rolePromptMeta } } : {}),
+      ...(Object.keys(userMeta).length > 0 ? { meta: userMeta } : {}),
     });
     // §4.5.2 step 5 — HISTORY_APPEND
     this.tracer.step("HISTORY_APPEND", { role: "user", historySize: this.history.length });
@@ -1415,15 +1438,21 @@ export class ConversationLoop {
         vendorProvider: turnVendorProvider,
         vendorModel: turnVendorModel,
       });
-      // compact가 발생했으면 history 교체
-      if (hookResult.compactedMessages) {
+      // PostTurnHookChain owns the durable transcript projection: mark-stale
+      // compaction plus marker-stripped assistant output. Keep in-memory history
+      // aligned before the turn_summary final save, otherwise that final save can
+      // reintroduce raw <title>/[checkpoint] output over the cleaned transcript.
+      const shouldRestoreHookHistory =
+        hookResult.compactedMessages !== null ||
+        hookResult.detector.cleanedText !== result.text;
+      if (shouldRestoreHookHistory) {
         const beforeCount = this.history.getMessages().length;
-        const afterCount = hookResult.compactedMessages.length;
+        const afterCount = hookResult.messagesForPersistence.length;
         log.info(
-          `post-turn: history mutation — ${beforeCount} → ${afterCount} msgs (compact applied to history reference)`,
+          `post-turn: history mutation — ${beforeCount} → ${afterCount} msgs (canonical persistence applied to history reference)`,
         );
         this.history.clear();
-        this.history.restore(hookResult.compactedMessages);
+        this.history.restore(hookResult.messagesForPersistence);
       }
       // Cleaned text (markers stripped) replaces raw output for caller.
       if (hookResult.detector.cleanedText !== result.text) {
@@ -1535,21 +1564,34 @@ export class ConversationLoop {
         ...(turnCacheWrite > 0 ? { cacheWriteTokens: turnCacheWrite } : {}),
         ...(breakdown ? { breakdown } : {}),
       };
-      try {
-        callbacks?.onTurnSummary?.(turnSummaryPayload);
-      } catch {
-        // Summary emission must never break turn completion.
-      }
       // Persist turn-aggregate stats onto the turn-final assistant message so
       // a reload reconstructs the same TokenCostBadge / TurnSummaryFooter
       // numbers without re-running the loop. historyToEntries reads this
       // meta and emits a `kind: "turn_summary"` ChatEntry after the last
       // assistant entry of the turn. Silent on history with no assistant
       // (rare tool-only termination) — nothing to attach to.
+      let attachedTurnSummary = false;
       try {
-        this.history.attachTurnSummaryToLastAssistant(turnSummaryPayload);
+        attachedTurnSummary = this.history.attachTurnSummaryToLastAssistant(turnSummaryPayload);
       } catch {
         // Meta attach must never break turn completion either.
+      }
+      let turnSummaryDurable =
+        attachedTurnSummary && this.deps.disableSessionPersistence === true;
+      if (attachedTurnSummary && !this.deps.disableSessionPersistence) {
+        try {
+          await this.deps.memoryManager.saveSession(this.sessionId, this.history.getMessages());
+          turnSummaryDurable = true;
+        } catch (err) {
+          log.warn("turn_summary final save failed: %s", err);
+        }
+      }
+      if (turnSummaryDurable) {
+        try {
+          callbacks?.onTurnSummary?.(turnSummaryPayload);
+        } catch {
+          // Summary emission must never break turn completion.
+        }
       }
     }
 
@@ -1746,7 +1788,7 @@ export class ConversationLoop {
         // 메시지를 전달함 (issue #900).
         const userMsg =
           "대화 이력이 모델 한도를 초과했습니다. 새 메시지를 보내면 자동 압축이 다시 시도됩니다.";
-        callbacks?.onError?.(userMsg);
+        callbacks?.onError?.(userMsg, "context-error");
         // Issue #911: mark as systemNotice so the UI renders a destructive
         // banner (red border + warning icon) instead of a normal assistant
         // reply. Without this marker the user cannot distinguish a real LLM
@@ -1769,7 +1811,7 @@ export class ConversationLoop {
         log.warn(
           `queryLoop: EARLY-EXIT(stream-error) — round=${roundIndex} userMessage="${stream.userMessage.slice(0, 100)}"`,
         );
-        callbacks?.onError?.(stream.userMessage);
+        callbacks?.onError?.(stream.userMessage, "stream-error");
         this.history.append({
           role: "assistant",
           content: stream.userMessage,
@@ -2057,12 +2099,19 @@ export class ConversationLoop {
       // tool_result 히스토리 append → loop back
       const allResults = [...toolResults, ...capResult.blocked];
       for (const tr of allResults) {
+        const toolDisplay = "durationMs" in tr
+          ? {
+              durationMs: tr.durationMs,
+              ...("uiPayload" in tr && tr.uiPayload ? { uiPayload: tr.uiPayload } : {}),
+            }
+          : undefined;
         this.history.append({
           role: "tool_result",
           toolUseId: tr.tool_use_id,
           toolName: pluginOutcome.remaining.find((tu) => tu.id === tr.tool_use_id)?.name,
           content: tr.content,
           ...(tr.is_error && { isError: true }),
+          ...(toolDisplay ? { meta: { toolDisplay } } : {}),
         });
       }
     }
