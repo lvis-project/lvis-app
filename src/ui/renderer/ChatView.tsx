@@ -72,6 +72,29 @@ function isTurnStartEntry(entry: ChatEntry | undefined): boolean {
   return entry?.kind === "user" || entry?.kind === "imported_trigger";
 }
 
+function bottomFollowSignature(entries: ChatEntry[]): string {
+  const last = entries.at(-1);
+  if (!last) return "empty";
+  switch (last.kind) {
+    case "user":
+    case "system":
+      return `${entries.length}:${last.kind}:${last.text.length}`;
+    case "reasoning":
+    case "assistant":
+      return `${entries.length}:${last.kind}:${last.text.length}:${last.streaming ? "streaming" : "done"}`;
+    case "tool_group":
+      return `${entries.length}:tool_group:${last.status}:${last.tools
+        .map((tool) => `${tool.toolUseId}:${tool.status}:${tool.result?.length ?? 0}:${tool.durationMs ?? ""}`)
+        .join("|")}`;
+    case "turn_summary":
+      return `${entries.length}:turn_summary:${last.tokensIn}:${last.tokensOut}:${last.toolCount}`;
+    case "checkpoint":
+      return `${entries.length}:checkpoint:${last.compactNum ?? ""}:${last.freedTokens}`;
+    default:
+      return `${entries.length}:${last.kind}`;
+  }
+}
+
 function ImportedTriggerCard({ entry }: { entry: ImportedTriggerEntry }) {
   // Parse envelope source tag to confirm overlay trigger provenance.
   // title + summary fields are already clean (set at insert time).
@@ -389,6 +412,10 @@ export function ChatView({ api, onAsk, onEditSave, onFork, onToggleStar, onRetry
   );
 
   const scrollViewportRef = useRef<HTMLDivElement | null>(null);
+  const previousEntryCountRef = useRef(entries.length);
+  const previousSessionIdRef = useRef(currentSessionId);
+  const pinnedToBottomRef = useRef(true);
+  const scrollFollowSignature = useMemo(() => bottomFollowSignature(entries), [entries]);
   const [showJumpToBottom, setShowJumpToBottom] = useState(false);
 
   const isNearBottom = useCallback(() => {
@@ -408,6 +435,7 @@ export function ChatView({ api, onAsk, onEditSave, onFork, onToggleStar, onRetry
     } else {
       chatEndRef.current?.scrollIntoView({ behavior });
     }
+    pinnedToBottomRef.current = true;
     setShowJumpToBottom(false);
   }, [chatEndRef, scrollViewportRef]);
 
@@ -732,20 +760,35 @@ export function ChatView({ api, onAsk, onEditSave, onFork, onToggleStar, onRetry
   useEffect(() => {
     const viewport = scrollViewportRef.current;
     if (!viewport) return;
-    const onScroll = () => setShowJumpToBottom(!isNearBottom());
+    const onScroll = () => {
+      const nearBottom = isNearBottom();
+      pinnedToBottomRef.current = nearBottom;
+      setShowJumpToBottom(!nearBottom);
+    };
     onScroll();
     viewport.addEventListener("scroll", onScroll, { passive: true });
     return () => viewport.removeEventListener("scroll", onScroll);
   }, [isNearBottom, scrollViewportRef]);
 
   useEffect(() => {
+    const previousEntryCount = previousEntryCountRef.current;
+    const previousSessionId = previousSessionIdRef.current;
+    previousEntryCountRef.current = entries.length;
+    previousSessionIdRef.current = currentSessionId;
     // Suppress auto-scroll while in view-mode so new live entries don't
     // yank the viewport away from the frozen checkpoint slice the user is reading.
     if (viewMode) return;
-    if (isNearBottom()) {
+    if (
+      entries.length > 1 &&
+      (previousEntryCount === 0 || previousSessionId !== currentSessionId)
+    ) {
+      requestAnimationFrame(() => scrollChatToBottom("auto"));
+      return;
+    }
+    if (pinnedToBottomRef.current || isNearBottom()) {
       requestAnimationFrame(() => scrollChatToBottom("smooth"));
     }
-  }, [entries.length, isNearBottom, scrollChatToBottom, viewMode]);
+  }, [currentSessionId, entries.length, isNearBottom, scrollChatToBottom, scrollFollowSignature, viewMode]);
 
   const activeDayKey = getKoreaDateKey(new Date());
 
