@@ -79,13 +79,15 @@ export type PluginCardSummary = {
   isManaged?: boolean;
   /** Install policy from the plugin manifest: "admin" (IT-managed only) or "user" (anyone). */
   installPolicy?: "admin" | "user";
-  loadStatus?: "loaded" | "failed" | "disabled";
+  loadStatus?: "loaded" | "preparing" | "failed" | "disabled";
   version?: string;
   publisher?: string;
   /** Declarative settings schema, when the manifest declares one. */
   configSchema?: PluginConfigSchemaSummary;
   /** Optional declarative auth contract for the host UI surface. */
   auth?: PluginAuthSummary;
+  /** Marketplace request slugs that should collapse onto this installed plugin. */
+  installAliases?: string[];
 };
 
 /**
@@ -180,19 +182,6 @@ export type AppSettings = {
     demoAutoplayRotationIndex?: number;
   };
 };
-
-/**
- * Tutorial-D — Discovery Swipe outcome. Mirrors `TutorialAction` from
- * the host-side `src/main/tutorial-store.ts`. Renderer keeps a separate
- * literal so a host-only refactor never leaks node imports into the
- * renderer bundle; values must stay in lockstep.
- */
-export type TutorialAction = "liked" | "disliked" | "skipped" | "undone";
-export interface TutorialPreferences {
-  liked: string[];
-  disliked: string[];
-  lastShownAt: string;
-}
 
 export type IpcErrorResult = { ok: false; error: string; message?: string };
 export type SettingsUpdateResult = AppSettings | IpcErrorResult;
@@ -376,10 +365,7 @@ export type LvisApi = {
    * Tutorial-C — SpotlightTour state + broadcast bridge. The host persists
    * the tour state under `~/.lvis/onboarding/tour-state.json` (Storage
    * Namespace per Feature). `tour.start` fans out to every open window
-   * so a Settings → "도움말" button pressed in the main window also
-   * launches the tour inside a detached pane. Tutorial-D's Discovery
-   * Swipe dialog also calls `tour.start` after the deck empties so the
-   * Spotlight engine is the single tour entry point.
+   * so any renderer surface can launch the tour without owning tour state.
    */
   tour: {
     getState: () => Promise<
@@ -422,39 +408,11 @@ export type LvisApi = {
     onStart: (handler: (payload: { scenarioId: string }) => void) => () => void;
   };
   /**
-   * Tutorial-D — Discovery Swipe IPC surface. The host persists the
-   * outcome under `~/.lvis/tutorial/preferences.json`; reads never throw
-   * and fall back to the empty default. `tutorialOpen` broadcasts the
-   * open signal so every window mounts the dialog without an app
-   * restart. The dialog itself dispatches the final scenario via
-   * Tutorial-C's `tour.start` so the Spotlight engine remains the one
-   * place that owns the tour entry contract.
-   */
-  tutorialGetPreferences: () => Promise<
-    | { ok: true; prefs: TutorialPreferences }
-    | { ok: false; error: string; message: string }
-  >;
-  tutorialRecord: (
-    payload: { cardId: string; action: TutorialAction },
-  ) => Promise<
-    | { ok: true; prefs: TutorialPreferences }
-    | { ok: false; error: string; message: string }
-  >;
-  tutorialOpen: () => Promise<
-    | { ok: true }
-    | { ok: false; error: string; message: string }
-  >;
-  tutorialShowContextMenu: () => Promise<
-    | { ok: true }
-    | { ok: false; error: string; message: string }
-  >;
-  /**
-   * Tutorial-X2 — install a plugin from the Discovery Swipe / Memory Seed
-   * recommendation flows. Delegates to the canonical `lvis:plugins:install`
-   * channel so the tutorial path reuses the entire marketplace install
-   * pipeline (download → verify → register → restart broadcasts) rather
-   * than forking a tutorial-only install loop. Error codes are
-   * kebab-case English; the renderer translates for the user.
+   * Install a plugin from the Memory Seed recommendation flow. Delegates to
+   * the canonical `lvis:plugins:install` channel so onboarding reuses the
+   * entire marketplace install pipeline (download → verify → register →
+   * restart broadcasts) rather than forking an onboarding-only install loop.
+   * Error codes are kebab-case English; the renderer translates for the user.
    */
   tutorialInstallPlugin: (pluginId: string) => Promise<
     | { ok: true; pluginId: string }
@@ -473,10 +431,6 @@ export type LvisApi = {
     | { ok: true }
     | { ok: false; error: string; message: string }
   >;
-  onTutorialOpen: (handler: (payload: { source: string }) => void) => () => void;
-  onTutorialPreferencesChanged: (
-    handler: (prefs: TutorialPreferences) => void,
-  ) => () => void;
   openSettingsWindow: (initialTab?: string) => Promise<{ ok: true; windowId: number } | { ok: false; error: string }>;
   notifySettingsWindowSaved: () => Promise<{ ok: true } | { ok: false; error: string }>;
   onSettingsWindowSaved: (handler: () => void) => () => void;
@@ -559,6 +513,7 @@ export type LvisApi = {
   }>;
   chatEditResend: (messageIndex: number, newText: string) => Promise<{ ok: boolean; error?: string }>;
   chatFork: (messageIndex: number) => Promise<{ ok: boolean; sessionId: string | null }>;
+  chatContinueLastUser: (sessionId: string) => Promise<{ ok: boolean; error?: string }>;
   chatRetryEffort: (opts?: { thinkingBudgetTokens?: number; enableThinking?: boolean }) => Promise<{ ok: boolean; error?: string }>;
   chatExport: (format: "markdown" | "json") => Promise<{ ok: boolean; filePath?: string; canceled?: boolean; error?: string }>;
   chatCompact: () => Promise<{ compacted: boolean; compactedAt: string | null; summary: string; removedMessageCount: number }>;
@@ -568,7 +523,11 @@ export type LvisApi = {
   // standard { ok: boolean } pattern. Callers guard with `"error" in result`.
   chatEnterCheckpointView: (sessionId: string, compactNum: number) => Promise<{ messageIndexAtCreation: number } | { error: string }>;
   chatExitCheckpointView: () => Promise<{ ok: boolean }>;
-  chatBranchFromCheckpoint: (sessionId: string, compactNum: number) => Promise<{ newSessionId: string } | { error: string }>;
+  chatBranchFromCheckpoint: (sessionId: string, compactNum: number) => Promise<{
+    newSessionId: string;
+    lastMessageRole: "user" | "assistant" | "tool_result" | null;
+    shouldAutoContinue: boolean;
+  } | { error: string }>;
   chatAbort: () => Promise<{ ok: boolean }>;
   /** Lazy-load in-session verbatim content for a compacted tool_result.
    * Returns null when: session changed, toolUseId not found, verbatim
@@ -711,7 +670,7 @@ export type LvisApi = {
     ) => void,
   ) => () => void;
   retryBootstrap: () => Promise<{ ok: true } | { ok: false; error: string }>;
-  onPluginInstallResult: (h: (payload: { slug: string; success: boolean; error?: string }) => void) => () => void;
+  onPluginInstallResult: (h: (payload: { slug: string; success: boolean; preparing?: boolean; error?: string }) => void) => () => void;
   onPluginUninstallResult: (h: (payload: { slug: string; success: boolean; error?: string }) => void) => () => void;
   onAgentInstallResult: (h: (payload: { slug: string; success: boolean; agentId?: string; error?: string }) => void) => () => void;
   onAgentUninstallResult: (h: (payload: { slug: string; success: boolean; agentId?: string; error?: string }) => void) => () => void;
@@ -728,7 +687,7 @@ export type LvisApi = {
    */
   installLocalPlugin: () => Promise<{ pluginId: string; installed: true } | null>;
   onPluginInstallProgress: (h: (payload:
-    | { slug: string; phase: "installing" | "restarting" | "verifying" | "registering" }
+    | { slug: string; phase: "installing" | "restarting" | "verifying" | "registering" | "preparing" }
     | { slug: string; phase: "downloading"; bytesDownloaded: number; bytesTotal: number | null }
   ) => void) => () => void;
   onAgentInstallProgress: (h: (payload:

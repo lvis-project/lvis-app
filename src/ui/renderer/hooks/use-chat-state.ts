@@ -621,6 +621,24 @@ export function useChatState(api: LvisApi) {
     setEntries((p) => upsertStreamingAssistant(p, content));
   }, []);
 
+  const handleContinueFromLastUser = useCallback(async (sessionId: string) => {
+    const requestId = beginStreamingRequest();
+    streamRef.current = "";
+    thoughtRef.current = "";
+    activeStreamIdRef.current = null;
+    appendAssistantStatus("이 지점부터 다시 시작했습니다. 마지막 질문에 대한 답변을 이어서 생성합니다.");
+    try {
+      const res = await api.chatContinueLastUser(sessionId);
+      if (!res?.ok) {
+        setErrorWithThought(`이어 생성 실패: ${res?.error ?? "알 수 없는 오류"}`);
+      }
+    } catch (err) {
+      setErrorWithThought(`오류: ${(err as Error).message}`);
+    } finally {
+      finishStreamingRequest(requestId);
+    }
+  }, [api, beginStreamingRequest, finishStreamingRequest, appendAssistantStatus, setErrorWithThought]);
+
   const appendSystemEntry = useCallback((text: string): void => {
     if (text.length === 0) return;
     setEntries((p) => [...p, { kind: "system", text }]);
@@ -683,6 +701,7 @@ export function useChatState(api: LvisApi) {
     fallbackToast,
     handleEditSave,
     handleRetryEffort,
+    handleContinueFromLastUser,
     resetStreamAccumulators,
     setErrorWithThought,
     handleCompactCommand,

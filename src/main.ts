@@ -44,7 +44,7 @@ import { createLogger } from "./lib/logger.js";
 import { LVIS_LOGO_PATH, LVIS_LOGO_VIEW_BOX } from "./shared/lvis-logo.js";
 import { getLvisAppVersion } from "./shared/app-version.js";
 import { normalizeSettingsTab } from "./shared/settings-tabs.js";
-import { preparePythonRuntimeForInstalledPlugin, withPluginInstallLock } from "./plugins/install-lifecycle.js";
+import { startInstalledPluginWithLifecycle, withPluginInstallLock } from "./plugins/install-lifecycle.js";
 import { ensureWorkspaceCwd } from "./main/ensure-workspace-cwd.js";
 import { uninstallPluginWithLifecycle } from "./plugins/uninstall-lifecycle.js";
 import { lvisHome } from "./shared/lvis-home.js";
@@ -546,12 +546,12 @@ async function handleMcpMarketplaceAction(
       throw new Error("MCP marketplace install is unavailable: marketplace backend is disabled in this build.");
     }
     const { installMcpFromMarketplace } = await import("./mcp/mcp-marketplace-install.js");
-    const result = await installMcpFromMarketplace(params.slug, {
+    await installMcpFromMarketplace(params.slug, {
       fetcher: activeServices.pluginMarketplace.getFetcher(),
       store: activeServices.mcpArtifactStore,
       pythonPath: activeServices.pythonPath,
+      registerConfig: (config) => activeServices.mcpManager.addConfig(config),
     });
-    await activeServices.mcpManager.addConfig(result.config);
   })().catch((err: Error) => {
     log.error({ slug: params.slug, error: err.message, stack: err.stack }, "lvis:// MCP install failed");
   });
@@ -585,12 +585,12 @@ async function handleMcpLoginAction(
       throw new Error("MCP marketplace login is unavailable: marketplace backend is disabled in this build.");
     }
     const { installMcpFromMarketplace } = await import("./mcp/mcp-marketplace-install.js");
-    const result = await installMcpFromMarketplace(params.slug, {
+    await installMcpFromMarketplace(params.slug, {
       fetcher: activeServices.pluginMarketplace.getFetcher(),
       store: activeServices.mcpArtifactStore,
       pythonPath: activeServices.pythonPath,
+      registerConfig: (config) => activeServices.mcpManager.addConfig(config),
     });
-    await activeServices.mcpManager.addConfig(result.config);
     openSettingsWindow("mcp");
   })().catch((err: Error) => {
     log.error({ slug: params.slug, error: err.message, stack: err.stack }, "lvis:// MCP login failed");
@@ -795,24 +795,27 @@ async function handleLvisUri(url: string) {
   lvisDevLog("[lvis] handleLvisUri: dialog response", { slug: params.slug, response });
   if (response !== 0) return;
   lvisDevLog("[lvis] handleLvisUri: starting install", { slug: params.slug });
-  // Renderer renders a skeleton card while these phase events fire — see
-  // PluginConfigTab + plugin grid progress UI.
-  broadcastPluginLifecycleEvent("lvis:plugins:install-progress", { slug: params.slug, phase: "installing" });
+  let installProgressSlug = params.slug;
   void (async () => {
     const catalogItems = await activeServices.pluginMarketplace.list();
     const installLockId =
       catalogItems.find((item) => item.id === params.slug || item.slug === params.slug)?.id ?? params.slug;
+    installProgressSlug = installLockId;
+    // Renderer renders a skeleton card while these phase events fire — see
+    // PluginConfigTab + plugin grid progress UI. Key every phase by the
+    // canonical plugin id so alias deep-links don't leave stale in-flight rows.
+    broadcastPluginLifecycleEvent("lvis:plugins:install-progress", { slug: installLockId, phase: "installing" });
     return await withPluginInstallLock(installLockId, async () => {
       const result = await activeServices.pluginMarketplace.install(params.slug, (evt) => {
         if (evt.phase === "downloading") {
           broadcastPluginLifecycleEvent("lvis:plugins:install-progress", {
-            slug: params.slug,
+            slug: installLockId,
             phase: "downloading",
             bytesDownloaded: evt.bytesDownloaded,
             bytesTotal: evt.bytesTotal,
           });
         } else {
-          broadcastPluginLifecycleEvent("lvis:plugins:install-progress", { slug: params.slug, phase: evt.phase });
+          broadcastPluginLifecycleEvent("lvis:plugins:install-progress", { slug: installLockId, phase: evt.phase });
         }
       });
       const pluginId = result.pluginId;
@@ -820,42 +823,32 @@ async function handleLvisUri(url: string) {
       // Mirror the post-install steps from the lvis:plugins:install IPC handler
       // so deep-link installs behave identically to in-app installs.
       try {
-        broadcastPluginLifecycleEvent("lvis:plugins:install-progress", { slug: pluginId, phase: "restarting" });
-        await preparePythonRuntimeForInstalledPlugin(pluginId, {
-          pythonRuntime: activeServices.pythonRuntime,
+        await startInstalledPluginWithLifecycle({
+          pluginId,
+          source: "marketplace",
+          rollbackMode: "marketplace",
           pluginRuntime: activeServices.pluginRuntime,
-          getMainWindow: () => mainWindow,
+          pluginMarketplace: activeServices.pluginMarketplace,
+          broadcastInstallProgress: (payload) =>
+            broadcastPluginLifecycleEvent("lvis:plugins:install-progress", payload),
+          emitPluginInstalled: (payload) => emitHostEvent("plugin.installed", payload),
+          refreshPluginNotifications: activeServices.refreshPluginNotifications,
+          log,
         });
-        // US-A3 — single-plugin lifecycle: only the deep-link-installed
-        // plugin starts up. Other plugins keep their in-memory state.
-        await activeServices.pluginRuntime.addPlugin(pluginId);
-        emitHostEvent("plugin.installed", { pluginId, source: "marketplace" });
-        activeServices.refreshPluginNotifications?.();
       } catch (err) {
         const message = errorMessage(err) || "addPlugin failed";
         log.error({ pluginId, err }, "post-install steps failed for lvis:// install");
-        try {
-          await activeServices.pluginRuntime.removePlugin(pluginId).catch((rmPluginErr) => {
-            log.warn(
-              { pluginId, rmPluginErr },
-              "lvis:// install rollback removePlugin failed",
-            );
-          });
-          await activeServices.pluginMarketplace.uninstall(pluginId);
-        } catch (rollbackErr) {
-          log.warn(
-            { pluginId, rollbackErr },
-            "lvis:// install rollback uninstall failed",
-          );
-        }
         broadcastPluginLifecycleEvent("lvis:plugins:install-result", { slug: pluginId, success: false, error: message });
         return;
       }
-      broadcastPluginLifecycleEvent("lvis:plugins:install-result", { slug: pluginId, success: true });
+      broadcastPluginLifecycleEvent("lvis:plugins:install-result", {
+        slug: pluginId,
+        success: true,
+      });
     });
   })().catch((err: Error) => {
     log.error({ slug: params.slug, error: err.message, stack: err.stack }, "lvis:// install failed");
-    broadcastPluginLifecycleEvent("lvis:plugins:install-result", { slug: params.slug, success: false, error: err.message });
+    broadcastPluginLifecycleEvent("lvis:plugins:install-result", { slug: installProgressSlug, success: false, error: err.message });
   });
 }
 
@@ -990,35 +983,11 @@ function createDisplayMenu(): MenuItemConstructorOptions {
   };
 }
 
-/**
- * Tutorial-D — broadcast the Discovery Swipe open signal to every open
- * BrowserWindow so the dialog mounts on top of any active surface
- * (chat, settings, plugin webview). Used by the Help menu item and the
- * chat empty-area context menu.
- */
-function broadcastTutorialOpen(source: string): void {
-  const payload = { source };
-  for (const win of BrowserWindow.getAllWindows()) {
-    if (win.isDestroyed()) continue;
-    try {
-      win.webContents.send("lvis:tutorial:open", payload);
-    } catch {
-      /* one window's send failure must not block the others */
-    }
-  }
-}
-
 function createHelpMenu(): MenuItemConstructorOptions {
   return {
     label: "도움말",
     role: "help",
-    submenu: [
-      {
-        label: "튜토리얼",
-        accelerator: "CommandOrControl+Shift+T",
-        click: () => broadcastTutorialOpen("menu"),
-      },
-    ],
+    submenu: [],
   };
 }
 

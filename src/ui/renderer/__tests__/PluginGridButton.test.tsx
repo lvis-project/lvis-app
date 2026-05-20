@@ -144,6 +144,19 @@ describe("PluginGridButton v3", () => {
     expect(screen.queryByTestId("plugin-cell-installing-test-0")).not.toBeInTheDocument();
   });
 
+  it("maps marketplace alias slugs onto the registered plugin cell", () => {
+    const plugins = makePlugins(2);
+    plugins[0].installAliases = ["lvis-plugin-test-0"];
+    const installingPlugins = new Map<string, InstallPhase>([["lvis-plugin-test-0", "restarting"]]);
+    renderGrid(plugins, { installingPlugins });
+    fireEvent.click(screen.getByTestId("plugin-grid-button"));
+
+    const installingCell = screen.getByTestId("plugin-cell-plugin-test-0-main");
+    expect(installingCell).toHaveAttribute("aria-busy", "true");
+    expect(screen.getByTestId("plugin-cell-plugin-test-0-main-phase").textContent).toBe("재시작");
+    expect(screen.queryByTestId("plugin-cell-installing-lvis-plugin-test-0")).not.toBeInTheDocument();
+  });
+
   it("calls onOpenMarketplace when the marketplace cell is clicked", () => {
     const plugins = makePlugins(2);
     const onOpenMarketplace = vi.fn();

@@ -7,7 +7,7 @@ import { Separator } from "../../../components/ui/separator.js";
 import { sanitizePluginConfig, sanitizePluginConfigKey } from "../../../shared/plugin-config.js";
 import { getApi } from "../api-client.js";
 import { getHostMarketplaceApi } from "../host-marketplace-api.js";
-import type { InstallInFlight } from "../hooks/use-plugin-marketplace.js";
+import type { InstallInFlight, InstallPhase } from "../hooks/use-plugin-marketplace.js";
 import type { PluginCardSummary } from "../types.js";
 import { PluginAuthSection } from "../components/PluginAuthSection.js";
 import { usePluginAuthStatuses } from "../hooks/use-plugin-auth-status.js";
@@ -16,9 +16,19 @@ import { PluginConfigSchemaForm } from "./PluginConfigSchemaForm.js";
 import { DEFAULT_TOAST_TTL_MS } from "../constants.js";
 import { useNotifySaved } from "../contexts/saved-toast.js";
 import { MARKDOWN_REMARK_PLUGINS } from "../utils/markdown-plugins.js";
+import { isPluginInstallKey } from "../utils/plugin-install-aliases.js";
 import { SettingsPageHeader } from "../components/SettingsPageHeader.js";
 
 type KV = { key: string; value: string };
+
+const INSTALL_PHASE_LABEL: Record<InstallPhase, string> = {
+  installing: "설치 중…",
+  downloading: "다운로드 중…",
+  verifying: "검증 중…",
+  registering: "등록 중…",
+  restarting: "재시작 중…",
+  preparing: "준비 중…",
+};
 
 function configToEntries(config: Record<string, unknown>): KV[] {
   return Object.entries(config).map(([key, value]) => ({
@@ -414,6 +424,9 @@ export function PluginConfigTab() {
                       {p.loadStatus === "loaded" && (
                         <span className="inline-block rounded-full bg-success/15 px-1.5 py-px text-[9px] font-medium text-success">로드됨</span>
                       )}
+                      {p.loadStatus === "preparing" && (
+                        <span className="inline-block rounded-full bg-warning/15 px-1.5 py-px text-[9px] font-medium text-warning">준비 중</span>
+                      )}
                       {p.loadStatus === "failed" && (
                         <span className="inline-block rounded-full bg-destructive/15 px-1.5 py-px text-[9px] font-medium text-destructive">실패</span>
                       )}
@@ -441,7 +454,7 @@ export function PluginConfigTab() {
                     when the install-result event lands and `refreshPlugins`
                     promotes it into a real `plugins` entry. */}
                 {Object.entries(installInFlight)
-                  .filter(([slug]) => !plugins.some((p) => p.id === slug))
+                  .filter(([slug]) => !plugins.some((p) => isPluginInstallKey(p.id, slug, p.installAliases)))
                   .map(([slug, phase]) => (
                     <div
                       key={`in-flight:${slug}`}
@@ -456,7 +469,7 @@ export function PluginConfigTab() {
                       <span className="flex min-w-0 flex-col">
                         <span className="truncate">{slug}</span>
                         <span className="truncate text-[9px] opacity-70">
-                          {phase === "installing" ? "설치 중…" : "재시작 중…"}
+                          {INSTALL_PHASE_LABEL[phase]}
                         </span>
                       </span>
                     </div>
@@ -500,6 +513,8 @@ export function PluginConfigTab() {
                       {selectedPlugin.loadStatus && (
                         selectedPlugin.loadStatus === "loaded" ? (
                           <span className="inline-block rounded-full bg-success/15 px-1.5 py-px text-[9px] font-medium text-success">로드됨</span>
+                        ) : selectedPlugin.loadStatus === "preparing" ? (
+                          <span className="inline-block rounded-full bg-warning/15 px-1.5 py-px text-[9px] font-medium text-warning">준비 중</span>
                         ) : selectedPlugin.loadStatus === "failed" ? (
                           <span className="inline-block rounded-full bg-destructive/15 px-1.5 py-px text-[9px] font-medium text-destructive">실패</span>
                         ) : (

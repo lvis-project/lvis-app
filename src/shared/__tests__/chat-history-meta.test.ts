@@ -74,4 +74,21 @@ describe("serializeHistoryMessage createdAt + turnSummary projection", () => {
     const s: SerializedHistoryMessage = serializeHistoryMessage(m, 4);
     expect(s.systemNotice).toBeUndefined();
   });
+
+  it("projects checkpoint compactNum through serialization", () => {
+    const m: GenericMessage = {
+      role: "user",
+      content: "[compact boundary]",
+      meta: {
+        checkpointMeta: {
+          removedMessages: 37,
+          freedTokens: 1200,
+          compactNum: 4,
+          trigger: "auto-compact",
+        },
+      },
+    };
+    const s: SerializedHistoryMessage = serializeHistoryMessage(m, 5);
+    expect(s.checkpointMeta?.compactNum).toBe(4);
+  });
 });

@@ -220,10 +220,9 @@ export default async function createPlugin() {
 
     await runtime.restartPlugin("lc-fail-manifest");
 
-    // Plugin should be unloaded after failed restart
-    expect(runtime.listPluginIds()).not.toContain("lc-fail-manifest");
-    // Tool should no longer be callable
-    await expect(runtime.call("lc_fail_manifest_ping")).rejects.toThrow("Plugin method not found");
+    // Failed restart preserves the previously running instance.
+    expect(runtime.listPluginIds()).toContain("lc-fail-manifest");
+    await expect(runtime.call("lc_fail_manifest_ping")).resolves.toBe("ok");
   });
 
   it("restartAll re-loads all plugins", async () => {

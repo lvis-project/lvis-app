@@ -66,6 +66,7 @@ vi.mock("../../../plugins/plugin-paths.js", () => ({
 
 import {
   auditApprovalViolation,
+  declaresHostManagedPythonRuntime,
   deriveOverlaySummaryForDisplay,
   formatPluginPendingPrompt,
   initPluginRuntime,
@@ -119,6 +120,34 @@ describe("auditApprovalViolation (Group C — audit logger try-catch swallow)", 
     ).toThrow(unexpectedErr);
 
     expect(brokenLogger.log).toHaveBeenCalledOnce();
+  });
+});
+
+describe("declaresHostManagedPythonRuntime", () => {
+  it("uses the same lockfile declaration shapes as Python runtime discovery", () => {
+    const manifest = (overrides: Record<string, unknown>) => ({
+      id: "test-plugin",
+      name: "Test Plugin",
+      version: "1.0.0",
+      entry: "index.js",
+      tools: [],
+      description: "",
+      ...overrides,
+    } as unknown as Parameters<typeof declaresHostManagedPythonRuntime>[0]);
+
+    expect(declaresHostManagedPythonRuntime(manifest({
+      python: { managedBy: "lvis-app" },
+    }))).toBe(true);
+    expect(declaresHostManagedPythonRuntime(manifest({
+      pythonRequirementsLock: "requirements/python.lock",
+    }))).toBe(true);
+    expect(declaresHostManagedPythonRuntime(manifest({
+      runtime: { python: { requirementsLock: "requirements/python.lock" } },
+    }))).toBe(true);
+    expect(declaresHostManagedPythonRuntime(manifest({
+      config: { pythonRequirementsLock: "requirements/python.lock" },
+    }))).toBe(true);
+    expect(declaresHostManagedPythonRuntime(manifest({}))).toBe(false);
   });
 });
 
@@ -214,6 +243,7 @@ describe("initPluginRuntime partition policy", () => {
         unregisterByPlugin: vi.fn(),
         register: vi.fn(),
         listAll: vi.fn(() => []),
+        listPluginIds: vi.fn(() => []),
         replacePluginTools: vi.fn(),
       } as never,
       pythonPath: undefined,
@@ -270,7 +300,9 @@ describe("initPluginRuntime HostApi factory", () => {
         unregisterByPlugin: vi.fn(),
         register: vi.fn(),
         listAll: vi.fn(() => []),
-      } as never,
+      listPluginIds: vi.fn(() => []),
+      replacePluginTools: vi.fn(),
+} as never,
       pythonPath: undefined,
       bootAuditLogger: bootAuditLogger as never,
       mainWindow: {} as never,
@@ -361,7 +393,9 @@ describe("initPluginRuntime HostApi factory", () => {
         unregisterByPlugin: vi.fn(),
         register: vi.fn(),
         listAll: vi.fn(() => []),
-      } as never,
+      listPluginIds: vi.fn(() => []),
+      replacePluginTools: vi.fn(),
+} as never,
       pythonPath: undefined,
       bootAuditLogger: bootAuditLogger as never,
       mainWindow: {} as never,
@@ -447,7 +481,9 @@ describe("initPluginRuntime HostApi factory", () => {
         unregisterByPlugin: vi.fn(),
         register: vi.fn(),
         listAll: vi.fn(() => []),
-      } as never,
+      listPluginIds: vi.fn(() => []),
+      replacePluginTools: vi.fn(),
+} as never,
       pythonPath: undefined,
       bootAuditLogger: { log: vi.fn() } as never,
       mainWindow: {} as never,
@@ -527,7 +563,9 @@ describe("initPluginRuntime HostApi factory", () => {
         unregisterByPlugin: vi.fn(),
         register: vi.fn(),
         listAll: vi.fn(() => []),
-      } as never,
+      listPluginIds: vi.fn(() => []),
+      replacePluginTools: vi.fn(),
+} as never,
       pythonPath: undefined,
       bootAuditLogger: { log: vi.fn() } as never,
       mainWindow: {} as never,
@@ -687,7 +725,9 @@ describe("initPluginRuntime HostApi factory", () => {
         unregisterByPlugin: vi.fn(),
         register: vi.fn(),
         listAll: vi.fn(() => []),
-      } as never,
+      listPluginIds: vi.fn(() => []),
+      replacePluginTools: vi.fn(),
+} as never,
       pythonPath: undefined,
       bootAuditLogger: bootAuditLogger as never,
       mainWindow: {} as never,
@@ -764,7 +804,9 @@ describe("initPluginRuntime HostApi factory", () => {
         unregisterByPlugin: vi.fn(),
         register: vi.fn(),
         listAll: vi.fn(() => []),
-      } as never,
+      listPluginIds: vi.fn(() => []),
+      replacePluginTools: vi.fn(),
+} as never,
       pythonPath: undefined,
       bootAuditLogger: bootAuditLogger as never,
       mainWindow: {} as never,

@@ -42,6 +42,7 @@ export interface MainContentProps {
   onFork: (entryIdx: number) => Promise<void>;
   onToggleStar: (entryIdx: number) => void;
   onRetryEffort: Parameters<typeof ChatView>[0]["onRetryEffort"];
+  onContinueFromLastUser: NonNullable<Parameters<typeof ChatView>[0]["onContinueFromLastUser"]>;
   isEntryStarred: (entryIdx: number) => string | null;
   onAbort: () => Promise<void>;
   onGuide: Parameters<typeof ChatView>[0]["onGuide"];
@@ -96,6 +97,7 @@ function HomeChatPane(props: MainContentProps) {
         onFork={props.onFork}
         onToggleStar={props.onToggleStar}
         onRetryEffort={props.onRetryEffort}
+        onContinueFromLastUser={props.onContinueFromLastUser}
         isEntryStarred={props.isEntryStarred}
         onAbort={props.onAbort}
         onGuide={props.onGuide}

@@ -117,7 +117,8 @@
 
 `/Users/ken/workspace/GIT/github/lvis-project/lvis-plugin-pageindex/python-requirements.lock`
 
-번들 동봉, 첫 부팅 시 `uv pip sync --frozen`. 네이티브 빌드 0, 모두 wheel.
+플러그인이 lockfile 을 동봉하고, 앱은 플러그인 start 준비 시점에 packaged uv 로
+lockfile-keyed shared env 를 준비한다. 앱 첫 부팅의 전역 venv sync 단계는 없다.
 
 ```text
 # Core indexing
@@ -157,33 +158,33 @@ structlog==24.2.0
 
 ```
 t=0.00s  Electron main 시작 → main.ts
-t=0.10s  PythonRuntimeBootstrapper.ensureReady()
-         ├─ ~/.lvis/runtime/venv/.ready 부재 확인
-         └─ IPC 'bootstrap.status' progress UI
-t=0.15s  uv python install 3.12.x --install-dir ~/.lvis/runtime/python
-t=25s    Python 3.12 설치 완료
-t=25.1s  uv venv ~/.lvis/runtime/venv --python 3.12
-t=26s    uv pip sync --frozen python-requirements.lock
-t=38s    의존성 설치 완료
-t=38.1s  touch ~/.lvis/runtime/venv/.ready
-t=38.3s  boot.ts bootstrap() 본체 진입
-t=39.0s  LvisPageIndexPlugin.start() → spawn worker
+t=0.10s  Runtime coordinator 생성 (uv/Python/venv 설치는 실행하지 않음)
+t=0.20s  boot.ts bootstrap() 본체 진입
+t=0.80s  host-managed Python 선언 플러그인 발견
+t=0.85s  플러그인 start 전 dependency prepare 비동기 시작
+         ├─ packaged uv materialize
+         ├─ lockfile content + OS/arch key로 shared env 선택
+         └─ IPC/plugin status 'preparing'
+t=25s    Python 3.12 설치 완료(필요 시)
+t=26s    uv venv ~/.lvis/runtime/python-envs/<os-arch-py-lockHash>/venv
+t=38s    uv pip sync <plugin lockfile>
+t=38.1s  touch shared env .ready
+t=39.0s  LvisPageIndexPlugin.start() → prepared pythonExecutable 주입
 t=41s    worker /health 200, registerPluginTools
-t=41.2s  IdleSchedulerService.start()
-t=41.3s  PostTurnHookChain wired
-t=41.5s  [boot 완료]
+t=41.5s  [plugin ready]
 
-총 첫 부팅: macOS Apple Silicon ~40-50초 (R3 추정 35-50초)
+앱 부팅은 Python 설치를 기다리지 않는다. Python 비용은 해당 플러그인 준비
+상태로 귀속되고, 같은 lockfile content 를 쓰는 플러그인은 shared env 를 재사용한다.
 ```
 
 ### 두 번째 이후 부팅
 
 ```
 t=0.00s  Electron main 시작
-t=0.05s  ensureReady() → .ready 통과 → 즉시 resolve
-t=0.20s  boot.ts 본체
-t=0.80s  worker spawn → /health ~500ms
-t=1.30s  [boot 완료]
+t=0.10s  Runtime coordinator 생성
+t=0.80s  플러그인 prepare → shared env .ready 통과
+t=1.30s  worker spawn → /health ~500ms
+t=1.80s  [plugin ready]
 ```
 
 ---
@@ -251,7 +252,7 @@ t=1.30s  [boot 완료]
 
 | 파일 | 변경 |
 |---|---|
-| `lvis-app/src/boot.ts` | 맨 앞 `await pythonRuntime.ensureReady()`. IdleScheduler/Audit/HybridRetriever 등록. registerBuiltinTools에 4 도구 추가 |
+| `lvis-app/src/boot.ts` | Python runtime coordinator wiring. 앱 부팅 단계에서는 `ensureReady()` 를 호출하지 않고, host-managed Python 플러그인 start 직전에 lockfile-keyed shared env prepare 를 수행 |
 | `lvis-app/src/agent/tool-executor.ts` | Step 2.5 Bash-AST Validator 삽입(line 149 직후). AuditService 주입 |
 | `lvis-app/src/agent/conversation-loop.ts` | §4.5 11번째 단계 후 PostTurnHookChain.run(). IdleScheduler turn-ended 신호 |
 | `lvis-plugin-pageindex/src/hostPlugin.ts` | scoreText/rankSnippets/evaluateDocument를 폴백으로 강등. chat.preview를 hybridRetriever + agentic 루프로 재작성. 도메인 부스터(보안/로드맵/지원) 제거 |
@@ -294,12 +295,14 @@ t=1.30s  [boot 완료]
 ┌──── Electron Main (TypeScript) ────────────────────────────────┐
 │  main.ts                                                        │
 │    ▼                                                            │
-│  PythonRuntimeBootstrapper ─▶ ~/.lvis/runtime/venv/.ready       │
+│  PythonRuntimeBootstrapper (coordinator only at app boot)       │
 │    ▼                                                            │
 │  boot.ts bootstrap()                                            │
 │    ├── SettingsService / MemoryManager / ToolRegistry           │
 │    ├── AuditService ──── ~/.lvis/audit/audit.ndjson             │
 │    ├── PluginRuntime                                            │
+│    │     └── prepare host-managed Python plugin start           │
+│    │         └── ~/.lvis/runtime/python-envs/<lockHash>/venv    │
 │    │     └── lvis-plugin-pageindex (hostPlugin.ts)              │
 │    │           ├── FolderAutoIndexer (chokidar)                 │
 │    │           │     └─▶ IdleScheduler.enqueue(P0)              │
@@ -461,7 +464,7 @@ Day 5 ──── Phase 1 끝
 
 | 위험 | 심각도 | 완화 |
 |---|---|---|
-| 느린 네트워크 첫 부팅 3-6분 | High | 진행률 UI, runtime.offlineBundle 옵션, enterprise PyPI mirror (Phase 1.5) |
+| 느린 네트워크 플러그인 준비 3-6분 | High | 플러그인 preparing 상태 표시, packaged uv, enterprise PyPI mirror (Phase 1.5) |
 | kiwipiepy wheel 누락 플랫폼 | Medium | `pip download --platform` 5종 선제 검증 |
 | OpenAI 임베딩 장애 | High | indexer.pause, FTS5만 동작, degraded 배너 |
 | FTS5 corruption | Medium | WAL + integrity_check, indexState.ndjson 재구성 |
@@ -562,7 +565,7 @@ Day 5 ──── Phase 1 끝
 Phase 3 (QA) — 지금 바로 실행 가능
   1. npx tsx lvis-app/scripts/e2e-phase1.ts S2 S5 S6 S7 S8  (mock 시나리오)
   2. OPENAI_API_KEY 설정 후 S3 S4
-  3. 네트워크 환경에서 S1 (첫 부팅 60초 이내 검증)
+  3. 네트워크 환경에서 S1 (앱 부팅 비차단 + 플러그인 준비 상태 검증)
 
 Phase 4 (Validation) — QA green 후
   1. Architect (Opus) — §4.4 + §13.3 일치 검증
