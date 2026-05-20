@@ -45,7 +45,7 @@
  * Events:
  *   probe-skip                  — boot probe found an existing key (skip whole chain).
  *   probe-start                 — boot probe says first-boot; mount Showcase.
- *   showcase-start              — user pressed "로그인하에 LVIS 시작하기" inside
+ *   showcase-start              — user pressed "로그인하여 LVIS 시작하기" inside
  *                                 the showcase. Carries the picked `scenarioId`
  *                                 so the chain context records the selection.
  *   login-success               — LoginModal onSuccess fired.
