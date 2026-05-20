@@ -5,8 +5,7 @@ import type { PersistentItem, ToastItem } from "./status-bar/types.js";
 import { useStatusBarNotifications } from "./status-bar/use-status-bar-notifications.js";
 import { useStatusBarInstall } from "./status-bar/use-status-bar-install.js";
 import { useStatusBarVendor } from "./status-bar/use-status-bar-vendor.js";
-import { useStatusBarMarketplace } from "./status-bar/use-status-bar-marketplace.js";
-import { useStatusBarProviderPing } from "./status-bar/use-status-bar-provider-ping.js";
+import { useStatusBarHealth } from "./status-bar/use-status-bar-health.js";
 
 // Re-export shared types so existing call sites (App.tsx, StatusBar.tsx, tests)
 // continue to import from this module without changes.
@@ -124,13 +123,11 @@ export function useStatusBar(opts: UseStatusBarOptions) {
   useStatusBarNotifications({ api, pushToast });
   useStatusBarInstall({ api, pushToast });
   // Producer registration order determines left-to-right render order in
-  // the status bar (StatusBar.tsx maps the persistent array as-is). The AI
-  // provider ping dot is registered immediately before the provider/model
-  // cell so green means the configured LLM answered a tiny probe, not only
-  // that the marketplace backend is reachable.
-  useStatusBarProviderPing({ api, upsertPersistent });
+  // the status bar (StatusBar.tsx maps the persistent array as-is). The
+  // combined health dot sits immediately before the provider/model cell so
+  // one green indicator means both the LLM provider and marketplace are live.
+  useStatusBarHealth({ api, upsertPersistent, removePersistent });
   useStatusBarVendor({ api, upsertPersistent });
-  useStatusBarMarketplace({ api, upsertPersistent, removePersistent });
 
   return {
     persistent,

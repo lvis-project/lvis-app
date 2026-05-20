@@ -1,5 +1,6 @@
 import type { PersistentItem, StatusBarSeverity, ToastItem } from "../hooks/use-status-bar.js";
 import { LvisLogo } from "./LvisLogo.js";
+import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "../../../components/ui/tooltip.js";
 
 const EMOJI_FONT_STACK =
   "'Apple Color Emoji', 'Segoe UI Emoji', 'Noto Color Emoji', 'Twemoji Mozilla', sans-serif";
@@ -54,6 +55,7 @@ export function StatusBar(props: StatusBarProps) {
   const { persistent, visibleToast, pendingCount = 0, onToastClick } = props;
 
   return (
+    <TooltipProvider>
     <footer
       className="flex h-6 shrink-0 items-center justify-between gap-3 border-t bg-background px-3 text-[11px] text-muted-foreground"
       data-testid="status-bar"
@@ -70,7 +72,7 @@ export function StatusBar(props: StatusBarProps) {
           persistent.map((item, idx) => {
             const previous = idx > 0 ? persistent[idx - 1] : undefined;
             const joinWithPrevious =
-              previous?.id === "provider:llm-ping" && item.id === "vendor:llm";
+              previous?.id === "health:services" && item.id === "vendor:llm";
             const inner = item.dot === true ? (
               <>
                 {item.a11yLabel !== undefined && (
@@ -109,6 +111,25 @@ export function StatusBar(props: StatusBarProps) {
             // separate wrapper component.
             const tourAnchor =
               item.id === "vendor:llm" ? "status-bar-vendor" : undefined;
+            const trigger = item.onClick !== undefined ? (
+              <button
+                type="button"
+                onClick={item.onClick}
+                title={item.tooltip}
+                data-tour-anchor={tourAnchor}
+                className="flex items-center gap-1 truncate cursor-pointer hover:opacity-80 focus:outline-none focus-visible:ring-1 focus-visible:ring-ring"
+              >
+                {inner}
+              </button>
+            ) : (
+              <span
+                className="flex items-center gap-1 truncate"
+                title={item.tooltip}
+                data-tour-anchor={tourAnchor}
+              >
+                {inner}
+              </span>
+            );
             return (
               <span
                 key={item.id}
@@ -117,24 +138,17 @@ export function StatusBar(props: StatusBarProps) {
                 {idx > 0 && !joinWithPrevious && (
                   <span className="px-2 opacity-30" aria-hidden="true">|</span>
                 )}
-                {item.onClick !== undefined ? (
-                  <button
-                    type="button"
-                    onClick={item.onClick}
-                    title={item.tooltip}
-                    data-tour-anchor={tourAnchor}
-                    className="flex items-center gap-1 truncate cursor-pointer hover:opacity-80 focus:outline-none focus-visible:ring-1 focus-visible:ring-ring"
-                  >
-                    {inner}
-                  </button>
+                {item.tooltip !== undefined && item.tooltip.length > 0 ? (
+                  <Tooltip>
+                    <TooltipTrigger asChild>
+                      {trigger}
+                    </TooltipTrigger>
+                    <TooltipContent side="top" className="whitespace-pre-line text-left">
+                      {item.tooltip}
+                    </TooltipContent>
+                  </Tooltip>
                 ) : (
-                  <span
-                    className="flex items-center gap-1 truncate"
-                    title={item.tooltip}
-                    data-tour-anchor={tourAnchor}
-                  >
-                    {inner}
-                  </span>
+                  trigger
                 )}
               </span>
             );
@@ -183,5 +197,6 @@ export function StatusBar(props: StatusBarProps) {
         })()}
       </div>
     </footer>
+    </TooltipProvider>
   );
 }
