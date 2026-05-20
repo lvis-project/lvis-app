@@ -17,6 +17,12 @@ import { Button } from "../../../components/ui/button.js";
 import { Label } from "../../../components/ui/label.js";
 import { RadioGroup, RadioGroupItem } from "../../../components/ui/radio-group.js";
 import {
+  Dialog,
+  DialogContent,
+  DialogHeader,
+  DialogTitle,
+} from "../../../components/ui/dialog.js";
+import {
   Brain,
   Puzzle,
   Wrench,
@@ -27,6 +33,8 @@ import {
   Cpu,
   FolderOpen,
   RefreshCw,
+  LogOut,
+  KeyRound,
 } from "lucide-react";
 import type { LvisApi, AppSettings } from "../types.js";
 import { SettingsPageHeader } from "../components/SettingsPageHeader.js";
@@ -41,6 +49,15 @@ export interface GeneralTabProps {
    * to deep-link into the detail tab when the user clicks a count card.
    */
   onNavigate: (tab: SettingsTab) => void;
+  /**
+   * 2026-05-20 — 로그아웃 / 데모 자격증명 재입력 surfaces. host App.tsx 가
+   * `onLogout` 으로 onboarding chain reducer 에 `logout-reset` 을 dispatch
+   * 하고, `onReactivateDemo` 로 settings dialog 를 닫은 뒤 LoginModal 의
+   * activation page 를 직접 mount 한다. 두 callback 은 *optional* 이라
+   * 기존 호출 사이트 (SettingsContent unit test 등) 가 깨지지 않는다.
+   */
+  onLogout?: () => void;
+  onReactivateDemo?: () => void;
 }
 
 interface AppInfo {
@@ -114,7 +131,12 @@ function StatCard({ label, count, icon: Icon, onClick, loading, testId }: StatCa
   );
 }
 
-export function GeneralTab({ api, onNavigate }: GeneralTabProps) {
+export function GeneralTab({
+  api,
+  onNavigate,
+  onLogout,
+  onReactivateDemo,
+}: GeneralTabProps) {
   const { stats, loading, refresh } = useWorkspaceStats(api);
   const [settings, setSettings] = useState<AppSettings | null>(null);
   const [userPrefs, setUserPrefs] = useState<string>("");
@@ -182,6 +204,66 @@ export function GeneralTab({ api, onNavigate }: GeneralTabProps) {
     if (!appInfo) return;
     void navigator.clipboard?.writeText(appInfo.userDataPath);
   }, [appInfo]);
+
+  // 2026-05-20 — 로그아웃 / 데모 자격증명 재입력 surfaces.
+  //
+  // 로그아웃 흐름 (Deliverable 1):
+  //   1. 사용자 confirm dialog 동의 →
+  //   2. `lvis:settings:delete-api-key` 로 active vendor 의 secret 삭제
+  //      (다른 vendor key 는 보존 — multi-vendor 사용자가 잃을 자산 없음)
+  //   3. `lvis:demo:clear` 로 .env.demo + LVIS_DEMO_* + main capture 비움
+  //   4. `lvis:settings:update` 로 features.onboardingCompleted=false 회귀
+  //   5. App.tsx 의 onLogout callback 으로 onboarding chain reducer 에
+  //      `logout-reset` dispatch → 첫 부팅 ScenarioShowcase 재진입
+  //
+  // 재입력 흐름 (Deliverable 2):
+  //   1. App.tsx 의 onReactivateDemo callback 으로 Settings dialog 닫고
+  //      LoginModal 을 `forceActivation=true` 로 mount
+  //   2. 사용자가 새 활성 코드 paste → 기존 lvis:demo:activate path 그대로
+  const [logoutConfirmOpen, setLogoutConfirmOpen] = useState(false);
+  const [loggingOut, setLoggingOut] = useState(false);
+  const [logoutError, setLogoutError] = useState<string | null>(null);
+
+  const performLogout = useCallback(async () => {
+    if (loggingOut) return;
+    setLoggingOut(true);
+    setLogoutError(null);
+    try {
+      const activeVendor = settings?.llm.provider ?? "";
+      if (activeVendor.length > 0) {
+        try {
+          await api.deleteApiKey(activeVendor);
+        } catch {
+          // Logout is a credential-deletion operation. If the active vendor
+          // secret remains, resetting onboarding would create a false logged-
+          // out state while privileged credentials are still present.
+          setLogoutError("API 키 삭제 중 오류가 발생했습니다. 다시 시도해 주세요.");
+          return;
+        }
+      }
+      const cleared = await api.demo.clearDemo();
+      if (!cleared.ok) {
+        setLogoutError("데모 자격증명 삭제 중 오류가 발생했습니다. 다시 시도해 주세요.");
+        return;
+      }
+      await api.updateSettings({ features: { onboardingCompleted: false } });
+      setLogoutConfirmOpen(false);
+      onLogout?.();
+    } catch {
+      setLogoutError("로그아웃 처리 중 오류가 발생했습니다. 다시 시도해 주세요.");
+    } finally {
+      setLoggingOut(false);
+    }
+  }, [api, loggingOut, onLogout, settings?.llm.provider]);
+
+  const handleLogoutClick = useCallback(() => {
+    setLogoutError(null);
+    setLogoutConfirmOpen(true);
+  }, []);
+
+  const handleReactivateClick = useCallback(() => {
+    onReactivateDemo?.();
+  }, [onReactivateDemo]);
 
   // Default mirrors `DEFAULT_SETTINGS.system.closeBehavior` so the radio
   // group renders the correct selection even before `settings` arrives.
@@ -257,6 +339,82 @@ export function GeneralTab({ api, onNavigate }: GeneralTabProps) {
           </div>
         </div>
       </SettingsSection>
+
+      {/* ── 인증 관리 ───────────────────────────────── */}
+      {/* 2026-05-20: PR #1044 onboarding UX 재설계가 activation 입력 필드를
+          first-boot LoginModal fullscreen page 로 옮기면서 첫 활성 이후
+          *재입력 path* 가 사라졌다. 두 surface 로 복원:
+            · 데모 자격증명 재입력 — LoginModal activation page 직접 mount
+            · 로그아웃 — 모든 인증 + 데모 + onboarding state 초기화 →
+              첫 부팅 ScenarioShowcase 재진입 */}
+      <SettingsSection
+        title="인증 관리"
+        description="활성 코드를 다시 입력하거나, 모든 인증 정보를 삭제하고 첫 부팅 화면으로 돌아갈 수 있습니다."
+      >
+        <div className="flex flex-col gap-2">
+          <Button
+            type="button"
+            variant="outline"
+            className="justify-start"
+            onClick={handleReactivateClick}
+            disabled={!onReactivateDemo}
+            data-testid="general-tab-reactivate-demo"
+          >
+            <KeyRound className="mr-2 size-4" aria-hidden={true} />
+            데모 자격증명 재입력
+          </Button>
+          <Button
+            type="button"
+            variant="destructive"
+            className="justify-start"
+            onClick={handleLogoutClick}
+            disabled={!onLogout || loggingOut}
+            data-testid="general-tab-logout"
+          >
+            <LogOut className="mr-2 size-4" aria-hidden={true} />
+            로그아웃 (모든 인증 정보 삭제)
+          </Button>
+        </div>
+      </SettingsSection>
+
+      <Dialog open={logoutConfirmOpen} onOpenChange={setLogoutConfirmOpen}>
+        <DialogContent size="sm" data-testid="general-tab-logout-confirm">
+          <DialogHeader>
+            <DialogTitle>로그아웃 하시겠습니까?</DialogTitle>
+          </DialogHeader>
+          <p className="text-sm text-muted-foreground">
+            모든 인증 정보 + 데모 활성 상태가 삭제되고 첫 부팅 화면으로 돌아갑니다. 진행하시겠습니까?
+          </p>
+          {logoutError && (
+            <p
+              role="alert"
+              className="rounded-md bg-destructive/10 px-3 py-2 text-sm text-destructive"
+              data-testid="general-tab-logout-error"
+            >
+              {logoutError}
+            </p>
+          )}
+          <div className="flex justify-end gap-2 pt-2">
+            <Button
+              type="button"
+              variant="ghost"
+              onClick={() => setLogoutConfirmOpen(false)}
+              disabled={loggingOut}
+            >
+              취소
+            </Button>
+            <Button
+              type="button"
+              variant="destructive"
+              onClick={() => void performLogout()}
+              disabled={loggingOut}
+              data-testid="general-tab-logout-confirm-button"
+            >
+              {loggingOut ? "처리 중…" : "로그아웃"}
+            </Button>
+          </div>
+        </DialogContent>
+      </Dialog>
 
       {/* ── 워크스페이스 통계 ─────────────────────────── */}
       <SettingsSection

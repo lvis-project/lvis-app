@@ -305,6 +305,26 @@ export type LvisApi = {
         error?: string;
       }) => void,
     ) => () => void;
+    /**
+     * 2026-05-20 — Settings 가 별도 BrowserWindow 로 mount 되기 때문에 GeneralTab
+     * 의 로그아웃 / 데모 자격증명 재입력 entry 는 cross-window broadcast 가 필요.
+     * `broadcast*` 는 main 프로세스에서 모든 window 로 fan-out 하고, `on*` 은
+     * main window 의 App.tsx 가 subscribe 한다. payload 가 없는 단순 cue.
+     *
+     * Optional 로 선언한 이유: 다수 test fixture 가 `api.auth` 를 `onProgress`
+     * 만 mock 한 채 LvisApi 로 cast 한다. production preload 는 항상 정의하므로
+     * runtime presence 는 보장되지만 strict-typed test 가 깨지지 않도록 optional.
+     */
+    broadcastLogoutReset?: () => Promise<
+      | { ok: true }
+      | { ok: false; error: "unauthorized-frame" }
+    >;
+    broadcastReactivateDemo?: () => Promise<
+      | { ok: true }
+      | { ok: false; error: "unauthorized-frame" }
+    >;
+    onLogoutReset?: (handler: () => void) => () => void;
+    onReactivateDemo?: (handler: () => void) => () => void;
   };
   /**
    * Demo activation bridge. `status` exposes only the captured activation
@@ -329,6 +349,16 @@ export type LvisApi = {
     relaunchAfterActivation: () => Promise<
       | { ok: true }
       | { ok: false; error: "not-armed" | "unauthorized-frame" }
+    >;
+    /**
+     * 2026-05-20 — Logout / 데모 자격증명 재입력 path. 활성 상태(`.env.demo`
+     * + `LVIS_DEMO_*` + main 의 captured demo state) 를 한 번에 비운다. 다음
+     * `status()` 호출은 `activated=false` 를 반환하므로 LoginModal 의 activation
+     * 입력 화면이 다시 mount 될 수 있다.
+     */
+    clearDemo: () => Promise<
+      | { ok: true }
+      | { ok: false; error: "clear-failed" | "unauthorized-frame" }
     >;
   };
   /**

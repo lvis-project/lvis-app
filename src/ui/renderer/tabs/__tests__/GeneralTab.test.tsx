@@ -41,8 +41,16 @@ function makeApi(overrides: Partial<LvisApi> = {}): LvisApi {
       userDataPath: "/Users/test/Library/Application Support/LVIS",
     }),
     hasApiKey: vi.fn().mockResolvedValue(true),
+    deleteApiKey: vi.fn().mockResolvedValue({ ok: true }),
+    updateSettings: vi.fn().mockResolvedValue({}),
     memoryGetUserPrefs: vi.fn().mockResolvedValue("- 사용자 호칭: 미정\n자기소개 한 줄"),
     onSettingsUpdated: vi.fn(() => () => {}),
+    demo: {
+      status: vi.fn(),
+      activate: vi.fn(),
+      relaunchAfterActivation: vi.fn(),
+      clearDemo: vi.fn().mockResolvedValue({ ok: true }),
+    },
     ...overrides,
   };
   return base as unknown as LvisApi;
@@ -115,5 +123,94 @@ describe("GeneralTab", () => {
     const { findByTestId } = render(<GeneralTab api={api} onNavigate={() => {}} />);
     const status = await findByTestId("general-tab-marketplace-status");
     await waitFor(() => expect(status.textContent).toContain("미연결"));
+  });
+
+  // 2026-05-20 — 인증 관리 section: 로그아웃 / 데모 자격증명 재입력
+  it("renders 인증 관리 buttons (reactivate + logout)", async () => {
+    const api = makeApi();
+    const { findByTestId } = render(
+      <GeneralTab api={api} onNavigate={() => {}} onLogout={() => {}} onReactivateDemo={() => {}} />,
+    );
+    const reactivate = await findByTestId("general-tab-reactivate-demo");
+    const logout = await findByTestId("general-tab-logout");
+    expect(reactivate.textContent).toContain("데모 자격증명 재입력");
+    expect(logout.textContent).toContain("로그아웃");
+  });
+
+  it("invokes onReactivateDemo when the 데모 자격증명 재입력 button is clicked", async () => {
+    const api = makeApi();
+    const onReactivateDemo = vi.fn();
+    const { findByTestId } = render(
+      <GeneralTab api={api} onNavigate={() => {}} onReactivateDemo={onReactivateDemo} />,
+    );
+    fireEvent.click(await findByTestId("general-tab-reactivate-demo"));
+    expect(onReactivateDemo).toHaveBeenCalledTimes(1);
+  });
+
+  it("로그아웃 클릭 → confirm dialog → 확인 시 active vendor 의 deleteApiKey + demo clear + onboardingCompleted=false + onLogout", async () => {
+    const api = makeApi();
+    const onLogout = vi.fn();
+    const { findByTestId, queryByTestId } = render(
+      <GeneralTab api={api} onNavigate={() => {}} onLogout={onLogout} onReactivateDemo={() => {}} />,
+    );
+    // settings 가 fetch 되어 provider 가 채워진 뒤 클릭하도록 stat card 가
+    // 먼저 render 되었는지 기다린다.
+    await findByTestId("general-tab-card-plugin");
+
+    fireEvent.click(await findByTestId("general-tab-logout"));
+    const confirm = await findByTestId("general-tab-logout-confirm-button");
+    fireEvent.click(confirm);
+
+    await waitFor(() => {
+      expect(api.deleteApiKey).toHaveBeenCalledWith("openai");
+      expect(api.demo.clearDemo).toHaveBeenCalledTimes(1);
+      expect(api.updateSettings).toHaveBeenCalledWith({
+        features: { onboardingCompleted: false },
+      });
+      expect(onLogout).toHaveBeenCalledTimes(1);
+    });
+    // confirm dialog 가 닫혔는지
+    await waitFor(() =>
+      expect(queryByTestId("general-tab-logout-confirm")).toBeNull(),
+    );
+  });
+
+  it("clearDemo 가 실패하면 onLogout 을 호출하지 않고 error 메시지를 노출", async () => {
+    const api = makeApi({
+      demo: {
+        status: vi.fn(),
+        activate: vi.fn(),
+        relaunchAfterActivation: vi.fn(),
+        clearDemo: vi.fn().mockResolvedValue({ ok: false, error: "clear-failed" }),
+      } as unknown as LvisApi["demo"],
+    });
+    const onLogout = vi.fn();
+    const { findByTestId } = render(
+      <GeneralTab api={api} onNavigate={() => {}} onLogout={onLogout} />,
+    );
+    await findByTestId("general-tab-card-plugin");
+    fireEvent.click(await findByTestId("general-tab-logout"));
+    fireEvent.click(await findByTestId("general-tab-logout-confirm-button"));
+    await findByTestId("general-tab-logout-error");
+    expect(onLogout).not.toHaveBeenCalled();
+  });
+
+  it("active vendor 키 삭제가 실패하면 demo clear/onLogout 없이 fail-closed", async () => {
+    const api = makeApi({
+      deleteApiKey: vi.fn().mockRejectedValue(new Error("keychain failed")),
+    });
+    const onLogout = vi.fn();
+    const { findByTestId } = render(
+      <GeneralTab api={api} onNavigate={() => {}} onLogout={onLogout} />,
+    );
+    await findByTestId("general-tab-card-plugin");
+    fireEvent.click(await findByTestId("general-tab-logout"));
+    fireEvent.click(await findByTestId("general-tab-logout-confirm-button"));
+
+    const err = await findByTestId("general-tab-logout-error");
+    expect(err.textContent).toContain("API 키 삭제");
+    expect(api.demo.clearDemo).not.toHaveBeenCalled();
+    expect(api.updateSettings).not.toHaveBeenCalled();
+    expect(onLogout).not.toHaveBeenCalled();
   });
 });

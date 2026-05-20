@@ -3,7 +3,7 @@
  *
  * Covers:
  * - estimate-based trigger: estimateMessagesTokens ≥ threshold → compact called
- * - actual-tokensIn-based trigger: cumulativeUsage.inputTokens ≥ threshold even when
+ * - actual-tokensIn-based trigger: last provider input ≥ threshold even when
  *   estimate is below (undercount scenario for code-heavy English content)
  * - autoCompact OFF → preflight skipped even when tokens exceed threshold
  * - disableSessionPersistence → preflight skipped
@@ -203,7 +203,7 @@ describe("runPreflightGuard — estimate-based trigger", () => {
 });
 
 describe("runPreflightGuard — actual-tokensIn secondary trigger", () => {
-  it("calls compactWithBoundary when cumulativeUsage.inputTokens >= threshold even if estimate is below", async () => {
+  it("calls compactWithBoundary when last provider input >= threshold even if estimate is below", async () => {
     // Scenario: estimator undercount — history text is code-heavy and the
     // actual provider-reported tokensIn exceeds threshold while
     // estimateMessagesTokens is still below (chars/4 undercount).
@@ -226,9 +226,9 @@ describe("runPreflightGuard — actual-tokensIn secondary trigger", () => {
     const fakeProvider = makeTurnProvider();
     (loop as unknown as { provider: typeof fakeProvider }).provider = fakeProvider;
 
-    // Simulate prior turn having set actualTokensIn above threshold.
-    (loop as unknown as { cumulativeUsage: { inputTokens: number; outputTokens: number } })
-      .cumulativeUsage = { inputTokens: threshold + 1_000, outputTokens: 500 };
+    // Simulate prior turn having reported an actual prompt size above threshold.
+    (loop as unknown as { lastProviderInputTokens: number })
+      .lastProviderInputTokens = threshold + 1_000;
 
     // Configure mock: return a compact result (with removedCount > 0) so
     // applyBoundaryToSession fires and onCompactOccurred is emitted.
@@ -245,6 +245,39 @@ describe("runPreflightGuard — actual-tokensIn secondary trigger", () => {
     // Secondary trigger must have fired compactWithBoundary even though estimate was below.
     expect(compactWithBoundary).toHaveBeenCalled();
     expect(compactOccurredCb).toHaveBeenCalled();
+  });
+
+  it("does NOT compact only because cumulative input billing crossed threshold", async () => {
+    const settings = makeSettings(true, "claude-sonnet-4-5", "claude");
+    const threshold = getModelPreflightThreshold("claude", "claude-sonnet-4-5");
+
+    const shortHistory: GenericMessage[] = [
+      { role: "user", content: "short message" },
+      { role: "assistant", content: "ok" },
+    ];
+    expect(estimateMessagesTokens(shortHistory)).toBeLessThan(threshold);
+
+    const mem = makeMemoryManager(shortHistory);
+    const loop = new ConversationLoop(makeDeps({ settingsService: settings, memoryManager: mem }));
+    loop.resetAndResume("sess-1");
+
+    const fakeProvider = makeTurnProvider();
+    (loop as unknown as { provider: typeof fakeProvider }).provider = fakeProvider;
+    (loop as unknown as { cumulativeUsage: { inputTokens: number; outputTokens: number } })
+      .cumulativeUsage = { inputTokens: threshold + 1_000, outputTokens: 500 };
+    (loop as unknown as { lastProviderInputTokens: number })
+      .lastProviderInputTokens = threshold - 1_000;
+
+    const compactOccurredCb = vi.fn();
+    await loop.runTurn(
+      "next turn",
+      { onCompactOccurred: compactOccurredCb },
+      undefined,
+      { inputOrigin: "user-keyboard" },
+    );
+
+    expect(compactWithBoundary).not.toHaveBeenCalled();
+    expect(compactOccurredCb).not.toHaveBeenCalled();
   });
 });
 
