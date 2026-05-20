@@ -194,4 +194,23 @@ describe("GeneralTab", () => {
     await findByTestId("general-tab-logout-error");
     expect(onLogout).not.toHaveBeenCalled();
   });
+
+  it("active vendor 키 삭제가 실패하면 demo clear/onLogout 없이 fail-closed", async () => {
+    const api = makeApi({
+      deleteApiKey: vi.fn().mockRejectedValue(new Error("keychain failed")),
+    });
+    const onLogout = vi.fn();
+    const { findByTestId } = render(
+      <GeneralTab api={api} onNavigate={() => {}} onLogout={onLogout} />,
+    );
+    await findByTestId("general-tab-card-plugin");
+    fireEvent.click(await findByTestId("general-tab-logout"));
+    fireEvent.click(await findByTestId("general-tab-logout-confirm-button"));
+
+    const err = await findByTestId("general-tab-logout-error");
+    expect(err.textContent).toContain("API 키 삭제");
+    expect(api.demo.clearDemo).not.toHaveBeenCalled();
+    expect(api.updateSettings).not.toHaveBeenCalled();
+    expect(onLogout).not.toHaveBeenCalled();
+  });
 });
