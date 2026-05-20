@@ -21,6 +21,10 @@ import type {
   AssistantContextMenuPayload,
 } from "../../shared/assistant-context-menu.js";
 import type { AiProviderPingIpcResult } from "../../shared/ai-provider-ping.js";
+import type {
+  OpenHtmlPreviewWindowPayload,
+  OpenHtmlPreviewWindowResult,
+} from "../../shared/render-html-preview.js";
 
 // Re-export MCP types for renderer-side consumers (type-only, no main-process runtime)
 export type { McpServerConfig, McpServerConfigDto, McpServerState };
@@ -829,6 +833,7 @@ export type LvisApi = {
     closeDetached: () => Promise<{ ok: true } | { ok: false; error: string }>;
     listDetached: () => Promise<Array<{ windowId: number; viewKey: string; snapped: boolean }>>;
     loadSessionInMain: (sessionId: string) => Promise<{ ok: true } | { ok: false; error: string }>;
+    openHtmlPreview: (payload: OpenHtmlPreviewWindowPayload) => Promise<OpenHtmlPreviewWindowResult>;
     onSnapEdge: (handler: (edge: "n" | "s" | "e" | "w" | null) => void) => () => void;
     /** Subscribe to in-place navigation (single-instance shell content swap). */
     onDetachedNavigate: (handler: (viewKey: string) => void) => () => void;
