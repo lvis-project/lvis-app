@@ -131,6 +131,63 @@ describe("plugins IPC lifecycle broadcast", () => {
     }
   });
 
+  it("uses the requested marketplace slug for every install lifecycle event when it resolves to a different plugin id", async () => {
+    const { deps, appWindows } = await setup();
+    deps.pluginMarketplace.install.mockImplementationOnce(async (...args: unknown[]) => {
+      emitRegisteringProgress(args);
+      return { pluginId: "meeting", installed: true };
+    });
+
+    await invoke("lvis:plugins:install", "lvis-plugin-meeting");
+
+    expect(deps.pluginRuntime.addPlugin).toHaveBeenCalledWith("meeting");
+    for (const win of appWindows) {
+      expect(win.webContents.send).toHaveBeenCalledWith(
+        "lvis:plugins:install-progress",
+        { slug: "lvis-plugin-meeting", phase: "installing" },
+      );
+      expect(win.webContents.send).toHaveBeenCalledWith(
+        "lvis:plugins:install-progress",
+        { slug: "lvis-plugin-meeting", phase: "registering" },
+      );
+      expect(win.webContents.send).toHaveBeenCalledWith(
+        "lvis:plugins:install-progress",
+        { slug: "lvis-plugin-meeting", phase: "restarting" },
+      );
+      expect(win.webContents.send).toHaveBeenCalledWith(
+        "lvis:plugins:install-result",
+        { slug: "lvis-plugin-meeting", success: true },
+      );
+      expect(win.webContents.send).not.toHaveBeenCalledWith(
+        "lvis:plugins:install-progress",
+        expect.objectContaining({ slug: "meeting" }),
+      );
+      expect(win.webContents.send).not.toHaveBeenCalledWith(
+        "lvis:plugins:install-result",
+        expect.objectContaining({ slug: "meeting" }),
+      );
+    }
+  });
+
+  it("broadcasts marketplace install failure with the requested slug when install throws before a canonical plugin id exists", async () => {
+    const { deps, appWindows } = await setup();
+    deps.pluginMarketplace.install.mockRejectedValueOnce(new Error("download failed"));
+
+    await expect(invoke("lvis:plugins:install", "lvis-plugin-meeting")).rejects.toThrow("download failed");
+
+    expect(deps.pluginRuntime.addPlugin).not.toHaveBeenCalled();
+    for (const win of appWindows) {
+      expect(win.webContents.send).toHaveBeenCalledWith(
+        "lvis:plugins:install-progress",
+        { slug: "lvis-plugin-meeting", phase: "installing" },
+      );
+      expect(win.webContents.send).toHaveBeenCalledWith(
+        "lvis:plugins:install-result",
+        { slug: "lvis-plugin-meeting", success: false, error: "download failed" },
+      );
+    }
+  });
+
   it("broadcasts marketplace install failure when runtime add rolls back", async () => {
     const { deps, appWindows } = await setup();
     deps.pluginRuntime.addPlugin.mockRejectedValueOnce(new Error("runtime failed"));

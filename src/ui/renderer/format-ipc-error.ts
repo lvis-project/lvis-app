@@ -145,13 +145,11 @@ export const COMMON_IPC_ERROR_MESSAGES: Readonly<Record<string, string>> = {
   // ── Tutorial-C — tour:{start,mark-complete,dismiss} validation ──
   "invalid-scenario-id": "선택한 가이드 투어 항목이 올바르지 않습니다.",
   "write-failed": "설정을 저장하지 못했습니다.",
-  // ── Tutorial-D — Discovery Swipe validation + dispatch failures ──
-  "invalid-card-id": "잘못된 카드 식별자입니다.",
-  "no-window": "현재 창을 찾을 수 없습니다. 앱을 다시 시작해 주세요.",
   // ── Audit demo throttle (pre-existing in audit.ts) ──
   "rate-limited": "요청이 너무 잦습니다. 잠시 후 다시 시도해 주세요.",
 
   // ── Misc IO / system ──
+  "no-window": "현재 창을 찾을 수 없습니다. 앱을 다시 시작해 주세요.",
   "invalid-request-id": "잘못된 요청 ID입니다.",
   "invalid-webcontents-id": "잘못된 webContents ID입니다.",
   "invalid-foundry-endpoint": "잘못된 Foundry 엔드포인트입니다.",

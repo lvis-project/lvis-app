@@ -797,7 +797,8 @@ async function handleLvisUri(url: string) {
   lvisDevLog("[lvis] handleLvisUri: starting install", { slug: params.slug });
   // Renderer renders a skeleton card while these phase events fire — see
   // PluginConfigTab + plugin grid progress UI.
-  broadcastPluginLifecycleEvent("lvis:plugins:install-progress", { slug: params.slug, phase: "installing" });
+  const lifecycleSlug = params.slug;
+  broadcastPluginLifecycleEvent("lvis:plugins:install-progress", { slug: lifecycleSlug, phase: "installing" });
   void (async () => {
     const catalogItems = await activeServices.pluginMarketplace.list();
     const installLockId =
@@ -806,13 +807,13 @@ async function handleLvisUri(url: string) {
       const result = await activeServices.pluginMarketplace.install(params.slug, (evt) => {
         if (evt.phase === "downloading") {
           broadcastPluginLifecycleEvent("lvis:plugins:install-progress", {
-            slug: params.slug,
+            slug: lifecycleSlug,
             phase: "downloading",
             bytesDownloaded: evt.bytesDownloaded,
             bytesTotal: evt.bytesTotal,
           });
         } else {
-          broadcastPluginLifecycleEvent("lvis:plugins:install-progress", { slug: params.slug, phase: evt.phase });
+          broadcastPluginLifecycleEvent("lvis:plugins:install-progress", { slug: lifecycleSlug, phase: evt.phase });
         }
       });
       const pluginId = result.pluginId;
@@ -820,7 +821,7 @@ async function handleLvisUri(url: string) {
       // Mirror the post-install steps from the lvis:plugins:install IPC handler
       // so deep-link installs behave identically to in-app installs.
       try {
-        broadcastPluginLifecycleEvent("lvis:plugins:install-progress", { slug: pluginId, phase: "restarting" });
+        broadcastPluginLifecycleEvent("lvis:plugins:install-progress", { slug: lifecycleSlug, phase: "restarting" });
         await preparePythonRuntimeForInstalledPlugin(pluginId, {
           pythonRuntime: activeServices.pythonRuntime,
           pluginRuntime: activeServices.pluginRuntime,
@@ -848,14 +849,14 @@ async function handleLvisUri(url: string) {
             "lvis:// install rollback uninstall failed",
           );
         }
-        broadcastPluginLifecycleEvent("lvis:plugins:install-result", { slug: pluginId, success: false, error: message });
+        broadcastPluginLifecycleEvent("lvis:plugins:install-result", { slug: lifecycleSlug, success: false, error: message });
         return;
       }
-      broadcastPluginLifecycleEvent("lvis:plugins:install-result", { slug: pluginId, success: true });
+      broadcastPluginLifecycleEvent("lvis:plugins:install-result", { slug: lifecycleSlug, success: true });
     });
   })().catch((err: Error) => {
     log.error({ slug: params.slug, error: err.message, stack: err.stack }, "lvis:// install failed");
-    broadcastPluginLifecycleEvent("lvis:plugins:install-result", { slug: params.slug, success: false, error: err.message });
+    broadcastPluginLifecycleEvent("lvis:plugins:install-result", { slug: lifecycleSlug, success: false, error: err.message });
   });
 }
 
@@ -990,35 +991,11 @@ function createDisplayMenu(): MenuItemConstructorOptions {
   };
 }
 
-/**
- * Tutorial-D — broadcast the Discovery Swipe open signal to every open
- * BrowserWindow so the dialog mounts on top of any active surface
- * (chat, settings, plugin webview). Used by the Help menu item and the
- * chat empty-area context menu.
- */
-function broadcastTutorialOpen(source: string): void {
-  const payload = { source };
-  for (const win of BrowserWindow.getAllWindows()) {
-    if (win.isDestroyed()) continue;
-    try {
-      win.webContents.send("lvis:tutorial:open", payload);
-    } catch {
-      /* one window's send failure must not block the others */
-    }
-  }
-}
-
 function createHelpMenu(): MenuItemConstructorOptions {
   return {
     label: "도움말",
     role: "help",
-    submenu: [
-      {
-        label: "튜토리얼",
-        accelerator: "CommandOrControl+Shift+T",
-        click: () => broadcastTutorialOpen("menu"),
-      },
-    ],
+    submenu: [],
   };
 }
 
