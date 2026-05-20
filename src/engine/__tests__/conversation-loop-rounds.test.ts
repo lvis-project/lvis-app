@@ -29,7 +29,12 @@ function withoutRuntimeMeta(messages: ReadonlyArray<GenericMessage>) {
   return messages.map((message) => {
     const { meta, ...rest } = message;
     if (!meta) return rest;
-    const { createdAt: _createdAt, turnSummary: _turnSummary, ...stableMeta } = meta;
+    const {
+      createdAt: _createdAt,
+      turnSummary: _turnSummary,
+      toolDisplay: _toolDisplay,
+      ...stableMeta
+    } = meta;
     return Object.keys(stableMeta).length > 0 ? { ...rest, meta: stableMeta } : rest;
   });
 }

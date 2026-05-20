@@ -29,6 +29,7 @@ const TOOL_DISPLAY_NAMES: Record<string, string> = {
   move_file: "파일 이동",
   delete_file: "파일 삭제",
   request_plugin: "플러그인 실행",
+  read_tool_result_chunk: "도구 결과 청크 읽기",
 
   // Misc
   skill_load: "스킬 로드",

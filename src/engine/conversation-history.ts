@@ -41,14 +41,15 @@ export class ConversationHistory {
    */
   attachTurnSummaryToLastAssistant(
     turnSummary: NonNullable<NonNullable<GenericMessage["meta"]>["turnSummary"]>,
-  ): void {
+  ): boolean {
     for (let i = this.messages.length - 1; i >= 0; i--) {
       const m = this.messages[i];
       if (m.role === "assistant") {
         m.meta = { ...(m.meta ?? {}), turnSummary };
-        return;
+        return true;
       }
     }
+    return false;
   }
 
   /**

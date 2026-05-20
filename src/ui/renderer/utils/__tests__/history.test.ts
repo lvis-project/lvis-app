@@ -127,6 +127,130 @@ describe("historyToEntries", () => {
     });
   });
 
+  it("replays imported proactive envelopes as imported_trigger cards", () => {
+    const entries = historyToEntries([
+      {
+        index: 0,
+        role: "user",
+        content: '<imported-from-proactive source="overlay:work-assistant">오늘 일정 브리핑</imported-from-proactive>',
+        importedTrigger: {
+          sessionId: "trigger-1",
+          source: "overlay:work-assistant",
+          prompt: '<imported-from-proactive source="overlay:work-assistant">오늘 일정 브리핑</imported-from-proactive>',
+          summary: "오늘 일정 브리핑",
+          toolCallCount: 0,
+          importedAt: "2026-05-20T00:00:00.000Z",
+        },
+      },
+    ]);
+
+    expect(entries).toHaveLength(1);
+    expect(entries[0]).toMatchObject({
+      kind: "imported_trigger",
+      sessionId: "trigger-1",
+      source: "overlay:work-assistant",
+      summary: "오늘 일정 브리핑",
+    });
+  });
+
+  it("migrates full legacy proactive envelopes into imported_trigger cards", () => {
+    const entries = historyToEntries([
+      {
+        index: 0,
+        role: "user",
+        content: '<imported-from-proactive source="overlay:daily-briefing">\n오늘 데일리 브리핑\n</imported-from-proactive>',
+        createdAt: 1_700_000_000_000,
+      },
+    ]);
+
+    expect(entries[0]).toMatchObject({
+      kind: "imported_trigger",
+      sessionId: "history-imported-0",
+      source: "overlay:daily-briefing",
+      summary: "오늘 데일리 브리핑",
+      importedAt: "2023-11-14T22:13:20.000Z",
+    });
+  });
+
+  it("does not treat partial proactive-looking user text as imported trigger provenance", () => {
+    const entries = historyToEntries([
+      {
+        index: 0,
+        role: "user",
+        content: '<imported-from-proactive source="overlay:daily-briefing">사용자가 직접 입력한 텍스트',
+      },
+    ]);
+
+    expect(entries[0]).toMatchObject({
+      kind: "user",
+      text: '<imported-from-proactive source="overlay:daily-briefing">사용자가 직접 입력한 텍스트',
+    });
+  });
+
+  it("uses persisted displayText for skill-routed user messages", () => {
+    const entries = historyToEntries([
+      {
+        index: 0,
+        role: "user",
+        content: "[스킬: msgraph_email_list] 지금 메일 읽어줘",
+        displayText: "지금 메일 읽어줘",
+        routeSkill: { skillId: "msgraph_email_list" },
+      },
+    ]);
+
+    expect(entries[0]).toMatchObject({ kind: "user", text: "지금 메일 읽어줘" });
+  });
+
+  it("migrates legacy skill prefixes out of visible user bubbles", () => {
+    const entries = historyToEntries([
+      {
+        index: 0,
+        role: "user",
+        content: "[스킬: msgraph_email_list] 지금 메일 읽어줘",
+      },
+    ]);
+
+    expect(entries[0]).toMatchObject({ kind: "user", text: "지금 메일 읽어줘" });
+  });
+
+  it("replays inert tool result display metadata onto tool rows", () => {
+    const entries = historyToEntries([
+      {
+        index: 0,
+        role: "assistant",
+        content: "",
+        toolCalls: [{ id: "t1", name: "read_tool_result_chunk", input: { toolUseId: "long-1" } }],
+      },
+      {
+        index: 1,
+        role: "tool_result",
+        toolUseId: "t1",
+        toolName: "read_tool_result_chunk",
+        content: "chunk",
+        toolDisplay: {
+          durationMs: 456,
+          uiPayload: {
+            serverId: "srv",
+            resourceUri: "ui://result",
+          },
+        } as never,
+      },
+    ]);
+
+    const group = entries.find((entry) => entry.kind === "tool_group");
+    expect(group).toMatchObject({
+      kind: "tool_group",
+      tools: [
+        {
+          toolUseId: "t1",
+          name: "read_tool_result_chunk",
+          durationMs: 456,
+        },
+      ],
+    });
+    expect(group?.kind === "tool_group" ? group.tools[0] : undefined).not.toHaveProperty("uiPayload");
+  });
+
   it("replays ask_user_question answers as a visible answer recap bubble", () => {
     const entries = historyToEntries([
       { index: 0, role: "user", content: "뉴스 정리해줘" },

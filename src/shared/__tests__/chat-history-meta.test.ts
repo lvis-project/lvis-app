@@ -66,6 +66,84 @@ describe("serializeHistoryMessage createdAt + turnSummary projection", () => {
     expect(s.systemNotice).toBe("context-error");
   });
 
+  it("projects user display/provenance meta for transcript replay", () => {
+    const m: GenericMessage = {
+      role: "user",
+      content: "[스킬: msgraph_email_list] 지금 메일 읽어줘",
+      meta: {
+        displayText: "지금 메일 읽어줘",
+        routeSkill: { skillId: "msgraph_email_list" },
+      },
+    };
+    const s = serializeHistoryMessage(m, 5);
+    expect(s.content).toContain("[스킬:");
+    expect(s.displayText).toBe("지금 메일 읽어줘");
+    expect(s.routeSkill?.skillId).toBe("msgraph_email_list");
+  });
+
+  it("projects imported trigger and tool display metadata", () => {
+    const imported: GenericMessage = {
+      role: "user",
+      content: '<imported-from-proactive source="overlay:work-assistant">오늘 일정</imported-from-proactive>',
+      meta: {
+        importedTrigger: {
+          sessionId: "trigger-1",
+          source: "overlay:work-assistant",
+          prompt: '<imported-from-proactive source="overlay:work-assistant">오늘 일정</imported-from-proactive>',
+          summary: "오늘 일정",
+          toolCallCount: 0,
+          importedAt: "2026-05-20T00:00:00.000Z",
+        },
+      },
+    };
+    const tool: GenericMessage = {
+      role: "tool_result",
+      toolUseId: "t1",
+      toolName: "read_tool_result_chunk",
+      content: "chunk",
+      meta: {
+        toolDisplay: {
+          durationMs: 123,
+          uiPayload: { serverId: "srv", resourceUri: "ui://forged" },
+        },
+      },
+    };
+
+    expect(serializeHistoryMessage(imported, 6).importedTrigger?.source).toBe("overlay:work-assistant");
+    expect(serializeHistoryMessage(tool, 7).toolDisplay?.durationMs).toBe(123);
+    expect(serializeHistoryMessage(tool, 7).toolDisplay).not.toHaveProperty("uiPayload");
+  });
+
+  it("drops invalid persisted provenance metadata at the history IPC boundary", () => {
+    const imported = {
+      role: "user",
+      content: "spoofed",
+      meta: {
+        displayText: 123,
+        routeSkill: { skillId: "../bad" },
+        importedTrigger: {
+          sessionId: "trigger-1",
+          source: "plugin:fake",
+          prompt: "spoofed",
+          summary: "spoofed",
+          toolCallCount: 0,
+          importedAt: "2026-05-20T00:00:00.000Z",
+        },
+      },
+    } as unknown as GenericMessage;
+    const notice = {
+      role: "assistant",
+      content: "normal",
+      meta: { systemNotice: "critical-alert" },
+    } as unknown as GenericMessage;
+
+    const serializedImported = serializeHistoryMessage(imported, 8);
+    expect(serializedImported.displayText).toBeUndefined();
+    expect(serializedImported.routeSkill).toBeUndefined();
+    expect(serializedImported.importedTrigger).toBeUndefined();
+    expect(serializeHistoryMessage(notice, 9).systemNotice).toBeUndefined();
+  });
+
   it("omits systemNotice field when meta has no marker", () => {
     const m: GenericMessage = {
       role: "assistant",
