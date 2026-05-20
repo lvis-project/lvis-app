@@ -20,7 +20,7 @@ function noop() {
 }
 
 type ProgressPayload =
-  | { slug: string; phase: "installing" | "restarting" | "verifying" | "registering" }
+  | { slug: string; phase: "installing" | "restarting" | "verifying" | "registering" | "preparing" }
   | { slug: string; phase: "downloading"; bytesDownloaded: number; bytesTotal: number | null };
 
 type ResultPayload = { slug: string; success: boolean; error?: string };

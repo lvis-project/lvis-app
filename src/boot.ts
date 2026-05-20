@@ -386,8 +386,10 @@ export async function bootstrap(
     keywordEngine,
     toolRegistry,
     pythonPath,
+    pythonRuntime,
     bootAuditLogger,
     mainWindow,
+    getMainWindow,
     openAuthWindowService,
     openLinkWindowService,
     openAuthPartitionViewerService: (_parent, opts) => openAuthPartitionViewerService(opts),
@@ -535,7 +537,9 @@ export async function bootstrap(
     setWildcardConfigOverride: (config) => pluginRuntime.setWildcardConfigOverride(config),
     clearWildcardConfigOverride: (keys) => pluginRuntime.clearWildcardConfigOverride(keys),
     listPluginIds: () => pluginRuntime.listPluginIds(),
-    restartPlugin: (pid) => pluginRuntime.restartPlugin(pid),
+    restartPlugin: async (pid) => {
+      await pluginRuntime.restartPlugin(pid);
+    },
   });
   refreshActiveLlmWildcard();
 

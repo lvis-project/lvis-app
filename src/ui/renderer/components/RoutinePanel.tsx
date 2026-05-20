@@ -217,7 +217,7 @@ export function AddRoutineModal({ api, onClose, onAdded }: AddRoutineModalProps)
         if (cancelled) return;
         setPluginCards(
           cards
-            .filter((card) => card.loadStatus !== "disabled" && card.tools.length > 0)
+            .filter((card) => card.loadStatus === "loaded" && card.tools.length > 0)
             .sort((a, b) => a.name.localeCompare(b.name)),
         );
         setPluginScopeError("");
