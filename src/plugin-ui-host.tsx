@@ -44,7 +44,7 @@ export type PluginUiExtensionView = {
     tool?: string;
     /**
      * Detached window defaults. `defaultMode: "detached"` opens the extension
-     * in a magnetic-snap BrowserWindow rather than rendering it inline.
+     * in a separate BrowserWindow rather than rendering it inline.
      */
     window?: {
       width?: number;
