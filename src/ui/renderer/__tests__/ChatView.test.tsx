@@ -50,6 +50,15 @@ describe("ChatView", () => {
     });
   });
 
+  it("uses the stable scoped chat scroll surface", async () => {
+    const { container } = await renderApp({ hasApiKey: true });
+    await waitFor(() => {
+      const scrollRoot = container.querySelector(".lvis-chat-scroll");
+      expect(scrollRoot).not.toBeNull();
+      expect(scrollRoot?.querySelector("[data-radix-scroll-area-viewport]")).not.toBeNull();
+    });
+  });
+
   it("hides the empty-state hint while suggested replies are visible", async () => {
     const { container, emitChatStream } = await renderApp({ hasApiKey: true });
     await waitFor(() => {

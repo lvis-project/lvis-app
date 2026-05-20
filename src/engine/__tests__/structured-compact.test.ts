@@ -2,7 +2,10 @@
  * Structured Compact tests — LLM compact interface + parser + freeze invariant + LLM call.
  * `compactWithBoundary()` 는 `ConversationLoop.runPreflightGuard` 에서 호출됨.
  */
-import { describe, it, expect } from "vitest";
+import { mkdtempSync, rmSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
+import { afterEach, beforeEach, describe, it, expect } from "vitest";
 import {
   SUMMARY_TEMPLATE_HEADERS_V1,
   SUMMARY_TEMPLATE_PROMPT_V1,
@@ -13,6 +16,27 @@ import {
   type CompactBoundary,
 } from "../structured-compact.js";
 import type { GenericMessage, LLMProvider, StreamEvent } from "../llm/types.js";
+
+let originalLvisHome: string | undefined;
+let testLvisHome: string | null = null;
+
+beforeEach(() => {
+  originalLvisHome = process.env.LVIS_HOME;
+  testLvisHome = mkdtempSync(join(tmpdir(), "lvis-structured-compact-"));
+  process.env.LVIS_HOME = testLvisHome;
+});
+
+afterEach(() => {
+  if (testLvisHome) {
+    rmSync(testLvisHome, { recursive: true, force: true });
+  }
+  testLvisHome = null;
+  if (originalLvisHome === undefined) {
+    delete process.env.LVIS_HOME;
+  } else {
+    process.env.LVIS_HOME = originalLvisHome;
+  }
+});
 
 // ─── parseSummary ──────────────────────────────────────
 
@@ -573,6 +597,36 @@ describe("compactWithBoundary — LLM call integration", () => {
     expect(r.status).toBe("reduced_insufficient_forced");
     expect(r.boundary).not.toBeNull();
     expect(r.removedCount).toBeGreaterThan(0);
+  });
+
+  it("REDUCED_INSUFFICIENT_FORCED never drops the latest user message from preserve", async () => {
+    const llm = makeMockLlm([makeFullSummaryText()]);
+    const messages: GenericMessage[] = [];
+    for (let i = 0; i < 30; i++) {
+      messages.push({ role: "user", content: "x".repeat(2_000) });
+      messages.push({ role: "assistant", content: "y".repeat(2_000) });
+    }
+    messages.push({ role: "assistant", content: "recent assistant context" });
+    messages.push({ role: "user", content: "message 50 must stay visible" });
+
+    const r = await compactWithBoundary({
+      messages,
+      llm,
+      model: "claude-sonnet-4-6",
+      preserveRecentTokens: 10_000,
+      sessionId: "test-sess-forced-current-user",
+      preflightTokens: 5_000,
+      compactNum: 1,
+    });
+
+    expect(r.status).toBe("reduced_insufficient_forced");
+    expect(
+      r.newHistory.some((message) =>
+        message.role === "user" &&
+        message.meta?.compactBoundary !== true &&
+        message.content === "message 50 must stay visible",
+      ),
+    ).toBe(true);
   });
 });
 

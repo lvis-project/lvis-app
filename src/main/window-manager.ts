@@ -18,7 +18,8 @@
  * BrowserWindow.getBounds() always returns DIP values.
  */
 
-import { BrowserWindow, ipcMain, screen, type BrowserWindowConstructorOptions, type IpcMainInvokeEvent } from "electron";
+import { BrowserWindow, ipcMain, screen, type BrowserWindowConstructorOptions, type IpcMainEvent, type IpcMainInvokeEvent } from "electron";
+import { randomUUID } from "node:crypto";
 import { existsSync, readFileSync, writeFileSync, renameSync } from "node:fs";
 import { join } from "node:path";
 import { validateSender, auditUnauthorized, UNAUTHORIZED_FRAME } from "../ipc-bridge.js";
@@ -995,7 +996,7 @@ export class WindowManager {
       return this.listChildren();
     });
 
-    ipcMain.handle("lvis:window:load-session-in-main", (event: IpcMainInvokeEvent, sessionId: unknown) => {
+    ipcMain.handle("lvis:window:load-session-in-main", async (event: IpcMainInvokeEvent, sessionId: unknown) => {
       if (!validateSender(event)) {
         auditUnauthorized(auditLogger, "lvis:window:load-session-in-main", event);
         return UNAUTHORIZED_FRAME;
@@ -1007,8 +1008,34 @@ export class WindowManager {
       if (!main || main.isDestroyed()) return { ok: false, error: "main-window-not-found" };
       main.show();
       main.focus();
-      main.webContents.send("lvis:window:load-session-in-main", { sessionId });
-      return { ok: true };
+      const requestId = randomUUID();
+      return await new Promise<{ ok: true } | { ok: false; error: string }>((resolve) => {
+        const timeout = setTimeout(() => {
+          cleanup();
+          resolve({ ok: false, error: "load-session-timeout" });
+        }, 12_000);
+        const cleanup = () => {
+          clearTimeout(timeout);
+          ipcMain.removeListener("lvis:window:load-session-in-main-result", listener);
+        };
+        const listener = (ackEvent: IpcMainEvent, payload: unknown) => {
+          if (!validateSender(ackEvent)) {
+            auditUnauthorized(auditLogger, "lvis:window:load-session-in-main-result", ackEvent);
+            return;
+          }
+          if (ackEvent.sender !== main.webContents) return;
+          const ack = payload as { requestId?: unknown; ok?: unknown; error?: unknown };
+          if (ack?.requestId !== requestId) return;
+          cleanup();
+          if (ack.ok === true) {
+            resolve({ ok: true });
+            return;
+          }
+          resolve({ ok: false, error: typeof ack.error === "string" ? ack.error : "load-session-failed" });
+        };
+        ipcMain.on("lvis:window:load-session-in-main-result", listener);
+        main.webContents.send("lvis:window:load-session-in-main", { sessionId, requestId });
+      });
     });
   }
 }
