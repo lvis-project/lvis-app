@@ -567,6 +567,58 @@ describe("PermissionsTab hook quarantine notice", () => {
     expect(api.permission.dirDispatch).toHaveBeenCalledWith("deny /tmp/lvis-extra");
   });
 
+  it("keeps the settings pane scroll position after removing an additional directory", async () => {
+    const api = installApi([[]]);
+    api.permission.dirDispatch.mockImplementation(async (rawArgs: string) => {
+      if (rawArgs === "list") {
+        return {
+          ok: true as const,
+          verb: "list" as const,
+          defaults: [],
+          userAdditions: ["/tmp/a", "/tmp/b", "/tmp/c"],
+          effective: ["/tmp/a", "/tmp/b", "/tmp/c"],
+        };
+      }
+      if (rawArgs === "deny /tmp/b") {
+        return {
+          ok: true as const,
+          verb: "deny" as const,
+          persisted: ["/tmp/a", "/tmp/c"],
+        };
+      }
+      throw new Error(`unexpected dirDispatch: ${rawArgs}`);
+    });
+    const requestAnimationFrameSpy = vi
+      .spyOn(window, "requestAnimationFrame")
+      .mockImplementation((cb: FrameRequestCallback) => {
+        cb(0);
+        return 1;
+      });
+
+    await act(async () => {
+      render(
+        <div className="lvis-settings-scroll">
+          <PermissionsTab />
+        </div>,
+      );
+    });
+
+    const scroller = document.querySelector<HTMLElement>(".lvis-settings-scroll")!;
+    scroller.scrollTop = 720;
+    const row = screen.getByText("/tmp/b").closest("tr")!;
+    const removeButton = row.querySelector("button")!;
+
+    await act(async () => {
+      fireEvent.click(removeButton);
+    });
+
+    expect(api.permission.dirDispatch).toHaveBeenCalledWith("deny /tmp/b");
+    expect(screen.queryByText("/tmp/b")).toBeNull();
+    expect(scroller.scrollTop).toBe(720);
+
+    requestAnimationFrameSpy.mockRestore();
+  });
+
   it("requires an explicit warning acknowledgement before saving risky directories", async () => {
     const api = installApi([[]]);
     api.permission.dirDispatch.mockImplementation(async (rawArgs: string) => {
