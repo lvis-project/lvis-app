@@ -1,14 +1,13 @@
 /**
  * Live Auto-play activation hook.
  *
- * Probes `getSettings()` + the env-derived `LVIS_DEMO_VENDOR` flag exposed
- * by preload (`window.lvis.env.demoVendorPresent`) and returns the active
- * scripted turn when the demo should run. Owns the *decision* only — the
- * actual playback lives in `DemoAutoplayView`.
+ * Probes `getSettings()` + main's captured demo activation state and returns
+ * the active scripted turn when the demo should run. Owns the *decision* only
+ * — the actual playback lives in `DemoAutoplayView`.
  *
  * Proposal: `docs/architecture/proposals/live-autoplay.md` §7 + §8.
  */
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import type { LvisApi } from "../types.js";
 import {
   shouldActivateDemoAutoplay,
@@ -18,18 +17,6 @@ import {
   nextRotationIndex,
   pickScript,
 } from "../../../engine/demo-autoplay/scripts-registry.js";
-
-interface DemoEnvProbe {
-  demoVendorPresent: boolean;
-}
-
-function readDemoEnv(): DemoEnvProbe {
-  const w = window as unknown as {
-    lvis?: { env?: { demoVendor?: string | null } };
-  };
-  const vendor = w?.lvis?.env?.demoVendor;
-  return { demoVendorPresent: typeof vendor === "string" && vendor.length > 0 };
-}
 
 interface DemoAuditApi {
   audit?: {
@@ -66,7 +53,6 @@ export function useDemoAutoplay(api: LvisApi): UseDemoAutoplayResult {
   // only protects engine-internal emission; the React side still needs
   // to defend against double-finalization racing the settings patch.
   const finishedRef = useRef(false);
-  const env = useMemo(() => readDemoEnv(), []);
 
   // Probe once on mount. Tutorial-X3 picks the script from the rotation
   // catalog and stores the script ref in state so onFinished can audit
@@ -75,14 +61,18 @@ export function useDemoAutoplay(api: LvisApi): UseDemoAutoplayResult {
     let cancelled = false;
     void (async () => {
       try {
-        const settings = await api.getSettings();
+        const [settings, demoStatus] = await Promise.all([
+          api.getSettings(),
+          api.demo.status(),
+        ]);
         if (cancelled) return;
+        if (!demoStatus.ok) return;
         const flagEnabled = settings.features?.demoAutoplayEnabled;
         const onboardingCompleted = settings.features?.onboardingCompleted;
         const active = shouldActivateDemoAutoplay({
           flagEnabled,
           onboardingCompleted,
-          demoVendorPresent: env.demoVendorPresent,
+          demoActivated: demoStatus.activated,
         });
         if (!active) return;
         const rotationIndex = settings.features?.demoAutoplayRotationIndex;
@@ -107,7 +97,7 @@ export function useDemoAutoplay(api: LvisApi): UseDemoAutoplayResult {
     return () => {
       cancelled = true;
     };
-  }, [api, env.demoVendorPresent]);
+  }, [api]);
 
   const onFinished = useCallback(
     (reason: string) => {
