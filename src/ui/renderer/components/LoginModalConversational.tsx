@@ -11,18 +11,20 @@
  *            SharePoint, chat). On submit the renderer invokes
  *            `api.demo.activate(code)`, which decrypts the string into the
  *            original `.env.demo` payload, persists it under
- *            `~/.lvis/secrets/.env.demo`, and injects the keys into
- *            `process.env`. The renderer then runs the existing
- *            `loginMockup` chain. The hard-coded mockup username/password
- *            (`demo` / `demo123`) still gate the IPC handler — the
- *            activation string is the *credentials-provisioning* step, not
- *            the auth step.
+ *            `~/.lvis/secrets/.env.demo`, and injects the keys into the main
+ *            process capture. First activation then relaunches after a 5s
+ *            notice so host resolver rules apply. On later boots, chip 1
+ *            checks `api.demo.status()` and enters the existing `loginMockup`
+ *            chain directly. The hard-coded mockup username/password
+ *            (`demo` / `demo123`) still gate the IPC handler — the activation
+ *            string is the *credentials-provisioning* step, not the auth step.
  *   chip 2 — 제가 발급받은 API 키가 있어요
  *            Opens Settings → LLM tab via `openSettingsWindow("llm")`.
  *   chip 3 — 조직 SSO (disabled placeholder, "곧 지원 예정").
  *
  * Behavioural parity with the original LoginModal:
- *   - Calls `api.loginMockup(...)` over IPC after activation succeeds.
+ *   - Calls `api.loginMockup(...)` over IPC after boot-loaded activation is
+ *     present, or after activation succeeds without needing relaunch.
  *   - The renderer translates kebab-case English `error` codes into the
  *     Korean user-facing message; the IPC handler must never embed
  *     Korean (project CLAUDE.md error-language rule).
@@ -32,7 +34,7 @@
  * etc.) so the modal adapts to every bundle (tokyo-night, forest,
  * violet-*, …).
  */
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useState } from "react";
 import {
   Dialog,
   DialogContent,
@@ -95,6 +97,8 @@ function activationErrorMessage(code: string): string {
       return "활성 코드에 vendor 정보가 빠져 있어요. 발급자에게 다시 요청해 주세요.";
     case "invalid-vendor":
       return "활성 코드의 vendor 정보가 올바르지 않아요. 발급자에게 다시 요청해 주세요.";
+    case "invalid-foundry-endpoint":
+      return "데모 endpoint 형식이 올바르지 않아요. 발급자에게 새 활성 코드를 요청해 주세요.";
     case "persist-failed":
       return "활성 코드를 저장하지 못했어요. 디스크 공간 또는 권한을 확인한 뒤 다시 시도해 주세요.";
     case "unauthorized-frame":
@@ -139,21 +143,12 @@ const CHECKLIST_STAGGER_MS = 900;
 const SUCCESS_DWELL_MS = 1800;
 const ACTIVATION_RELAUNCH_DWELL_MS = 5000;
 
-function demoWasActivatedAtBoot(): boolean {
-  const w = window as unknown as {
-    lvis?: { env?: { demoVendor?: string | null } };
-  };
-  const vendor = w?.lvis?.env?.demoVendor;
-  return typeof vendor === "string" && vendor.length > 0;
-}
-
 export function LoginModalConversational({
   api,
   open,
   onOpenChange,
   onSuccess,
 }: LoginModalProps) {
-  const demoActivatedAtBoot = useMemo(() => demoWasActivatedAtBoot(), []);
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
@@ -188,6 +183,7 @@ export function LoginModalConversational({
   const [activationNotice, setActivationNotice] = useState<string | null>(null);
   const [activating, setActivating] = useState(false);
   const [activationRelaunching, setActivationRelaunching] = useState(false);
+  const [checkingDemoStatus, setCheckingDemoStatus] = useState(false);
 
   // Reset the conversational flow on every open so a re-entry starts
   // from the cold "어떤 방식으로 시작할까요?" prompt.
@@ -288,31 +284,56 @@ export function LoginModalConversational({
 
   /**
    * Demo chip handler. Fresh installs open the activation-input sub-state;
-   * subsequent launches with `.env.demo` already loaded at boot skip the
-   * code prompt and run the auth transcript immediately.
+   * subsequent launches with `.env.demo` already loaded at boot ask the main
+   * process for captured demo status and run the auth transcript immediately.
+   * The renderer intentionally does not infer this from `window.lvis.env`:
+   * packaged builds scrub `LVIS_DEMO_*` before preload inherits env.
    */
   const activateDemoChip = useCallback(() => {
-    if (submitting || activating || activationRelaunching) return;
+    if (submitting || activating || activationRelaunching || checkingDemoStatus) {
+      return;
+    }
     setError(null);
     setActivationError(null);
     setActivationNotice(null);
     setUserTurnVisible(true);
     setActivationCode("");
-    setActivationOpen(!demoActivatedAtBoot);
+    setActivationOpen(false);
+    setCheckingDemoStatus(true);
     // Defer the assistant reply by one tick so the user bubble paints
     // first — matches the mockup's "user types → assistant responds"
     // perceived ordering.
     window.setTimeout(() => {
       setAssistantReply(true);
-      if (demoActivatedAtBoot) {
-        void runAuthMockup();
-      }
     }, 220);
+    void (async () => {
+      try {
+        const status = await api.demo.status();
+        if (!status.ok) {
+          setError(activationErrorMessage(status.error));
+          return;
+        }
+        if (status.activated) {
+          window.setTimeout(() => {
+            void runAuthMockup();
+          }, 220);
+          return;
+        }
+        setActivationOpen(true);
+      } catch (err) {
+        setError("데모 활성 상태 확인 중 오류가 발생했습니다.");
+        // eslint-disable-next-line no-console
+        console.error("demo.status IPC failed", err);
+      } finally {
+        setCheckingDemoStatus(false);
+      }
+    })();
   }, [
     submitting,
     activating,
     activationRelaunching,
-    demoActivatedAtBoot,
+    checkingDemoStatus,
+    api,
     runAuthMockup,
   ]);
 
@@ -363,10 +384,9 @@ export function LoginModalConversational({
 
   // F2 — 1/2/3 keybindings for chip activation. Mirrors the
   // "위 선택지를 클릭하거나 `1`~`3` 키로 빠른 선택" footer hint.
-  // Note (2026-05-19): the previous F5 "Enter to proceed" shortcut was
-  // removed — activation success now chains directly into the auth
-  // transcript, so there is no idle "ready to begin" state requiring a
-  // second user keystroke.
+  // Note (2026-05-20): the previous F5 "Enter to proceed" shortcut was
+  // removed. First activation relaunches after the 5s notice; later boots
+  // enter auth directly from chip 1 with no second user keystroke.
   useEffect(() => {
     if (!open) return;
     const onKey = (e: KeyboardEvent) => {
@@ -456,7 +476,13 @@ export function LoginModalConversational({
             type="button"
             data-testid="login-modal:chip-demo"
             onClick={() => activateDemoChip()}
-            disabled={submitting || activating || activationRelaunching || activationOpen}
+            disabled={
+              submitting ||
+              activating ||
+              activationRelaunching ||
+              checkingDemoStatus ||
+              activationOpen
+            }
             className="w-full rounded-lg border border-primary/40 bg-primary/10 px-3 py-2 text-left text-[12px] text-primary hover:bg-primary/15 disabled:opacity-60"
           >
             <span className="mr-1">⚡</span>
@@ -545,7 +571,9 @@ export function LoginModalConversational({
                   ? "활성 완료 · 데모 자격증명으로 인증을 시작합니다…"
                   : activationRelaunching
                     ? "활성 완료 · 호스트 적용을 위해 5초 후 자동으로 재시작합니다…"
-                    : "데모 활성 코드를 받으셨나요? 한 줄로 붙여넣어 주세요. 형식은 `LVIS-DEMO:v1:...` 입니다."}
+                    : checkingDemoStatus
+                      ? "데모 활성 상태를 확인합니다…"
+                      : "데모 활성 코드를 받으셨나요? 한 줄로 붙여넣어 주세요. 형식은 `LVIS-DEMO:v1:...` 입니다."}
               </p>
 
               {activationOpen && !submitting && (
@@ -554,6 +582,7 @@ export function LoginModalConversational({
                   className="space-y-1.5"
                 >
                   <textarea
+                    autoFocus
                     value={activationCode}
                     onChange={(ev) => setActivationCode(ev.target.value)}
                     onKeyDown={(ev) => {

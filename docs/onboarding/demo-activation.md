@@ -132,6 +132,7 @@ translates each to a Korean message inside the activation input bubble:
 | `invalid-code` | Wrong prefix, corrupt base64, GCM auth-tag mismatch (wrong passphrase / tampered ciphertext), empty input | "활성 코드가 올바르지 않아요. `LVIS-DEMO:v1:` 로 시작하는 한 줄 코드를 다시 확인해 주세요." |
 | `no-vendor` | Decrypted payload missing `LVIS_DEMO_VENDOR` | "활성 코드에 vendor 정보가 빠져 있어요. 발급자에게 다시 요청해 주세요." |
 | `invalid-vendor` | Decrypted payload has an unknown `LVIS_DEMO_VENDOR` | "활성 코드의 vendor 정보가 올바르지 않아요. 발급자에게 다시 요청해 주세요." |
+| `invalid-foundry-endpoint` | Azure Foundry endpoint fails the shared endpoint validator before persistence | "데모 endpoint 형식이 올바르지 않아요. 발급자에게 새 활성 코드를 요청해 주세요." |
 | `persist-failed` | Filesystem write failure (permission/disk) | "활성 코드를 저장하지 못했어요. 디스크 공간 또는 권한을 확인한 뒤 다시 시도해 주세요." |
 | `unauthorized-frame` | IPC sender frame rejected (should never happen in production) | "잘못된 요청 경로입니다. 앱을 재시작한 뒤 다시 시도해 주세요." |
 
@@ -146,6 +147,6 @@ typo and retry without re-entering chip 1.
 | `src/ipc/domains/demo.ts` | `lvis:demo:activate` IPC handler — decrypt + persist + inject + recapture. |
 | `src/main/demo-credentials.ts` | Adds `recaptureDemoCredentialsAfterActivation()` for post-activation env re-scan. |
 | `src/main.ts` | Calls `loadPersistedDemoActivationSync()` before `captureDemoCredentials()` at boot. |
-| `src/preload.ts` | Exposes `api.demo.activate(code)` to the renderer. |
-| `src/ui/renderer/components/LoginModalConversational.tsx` | Activation input sub-state + Korean error translation + F5 explicit ack. |
+| `src/preload.ts` | Exposes `api.demo.status()`, `api.demo.activate(code)`, and relaunch IPC to the renderer. |
+| `src/ui/renderer/components/LoginModalConversational.tsx` | Activation input sub-state + 5s relaunch notice + Korean error translation. |
 | `scripts/encrypt-demo-credentials.mjs` | CLI tool to turn a `.env.demo` file into an activation string. |
