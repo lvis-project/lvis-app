@@ -69,7 +69,7 @@ describe("PluginRuntime config overrides", () => {
       },
     });
 
-    await runtime.load();
+    await runtime.startAll();
     await expect(runtime.call("config_echo")).resolves.toBe("before");
 
     runtime.setConfigOverride("config-plugin", { apiKey: "after" });
@@ -125,7 +125,7 @@ describe("PluginRuntime config overrides", () => {
       },
     });
 
-    await runtime.load();
+    await runtime.startAll();
     await expect(runtime.call("remove_config_echo")).resolves.toBe("stale");
 
     await runtime.removePlugin("remove-config-plugin");
@@ -187,7 +187,7 @@ describe("PluginRuntime config overrides", () => {
       }),
     });
 
-    await runtime.load();
+    await runtime.startAll();
     events.length = 0;
     await runtime.restartAll();
 
@@ -251,7 +251,7 @@ describe("PluginRuntime config overrides", () => {
       pluginsRoot: installedDir,
       configOverrides: {},
     });
-    await runtime.load();
+    await runtime.startAll();
     await expect(runtime.call("schema_default_echo")).resolves.toBe(
       "https://example.test",
     );
@@ -310,7 +310,7 @@ describe("PluginRuntime config overrides", () => {
         "override-wins-plugin": { hubServerUrl: "https://override.test" },
       },
     });
-    await runtime.load();
+    await runtime.startAll();
     await expect(runtime.call("override_wins_echo")).resolves.toBe(
       "https://override.test",
     );

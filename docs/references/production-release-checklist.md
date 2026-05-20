@@ -109,7 +109,9 @@ Perform on each platform artifact before uploading:
 - electron-updater / electron-builder: minor 고정, patch 자동 (`~`).
 - Plugin native deps (better-sqlite3 등): electron-rebuild 재실행 필수 →
   `bun install` postinstall 에서 처리됨.
-- Python 런타임: `python-requirements.lock` 파일로 고정. 릴리스마다 변경 diff 검토.
+- Python 런타임: host-managed Python 플러그인의 lockfile content + OS/arch 로
+  shared env 를 고정. 릴리스마다 active plugin lockfile diff 와 패키징 자산
+  경계(uv 포함, venv/wheelhouse/model cache 제외)를 검토.
 
 ## Publish (Later — NOT part of scaffolding)
 

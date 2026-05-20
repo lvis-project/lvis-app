@@ -96,6 +96,17 @@ export interface ArtifactStoreOptions {
 
 type VerifiedMarketplaceFetcher = MarketplaceFetcher & MarketplaceHttp;
 
+export const SAFE_ARTIFACT_SLUG_RE = /^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$/;
+
+export function assertSafeArtifactSlug(slug: string): string {
+  if (!SAFE_ARTIFACT_SLUG_RE.test(slug)) {
+    throw new Error(
+      `invalid artifact slug "${slug}" — expected ${SAFE_ARTIFACT_SLUG_RE.source}`,
+    );
+  }
+  return slug;
+}
+
 function isVerifiedMarketplaceFetcher(fetcher: MarketplaceFetcher): fetcher is VerifiedMarketplaceFetcher {
   return (
     typeof (fetcher as Partial<VerifiedMarketplaceFetcher>).downloadArtifact === "function" &&
@@ -127,7 +138,12 @@ export class PluginArtifactStore {
 
   /** `{installRoot}/{slug}` — exposed for callers that need to know the path before download. */
   installDirFor(slug: string): string {
-    return resolve(this.installRoot, slug);
+    const safeSlug = assertSafeArtifactSlug(slug);
+    const installDir = resolve(this.installRoot, safeSlug);
+    if (!isWithin(resolve(this.installRoot), installDir)) {
+      throw new Error(`artifact slug "${slug}" escapes install root`);
+    }
+    return installDir;
   }
 
   /**
@@ -149,7 +165,7 @@ export class PluginArtifactStore {
     version: string,
     onProgress?: (event: InstallerProgressEvent) => void,
   ): Promise<VerifiedArtifact> {
-    const slug = plugin.slug ?? plugin.id;
+    const slug = assertSafeArtifactSlug(plugin.slug ?? plugin.id);
     if (!isVerifiedMarketplaceFetcher(this.fetcher)) {
       throw new Error(
         `marketplace fetcher for "${plugin.id}" does not support signed artifact verification`,
@@ -180,8 +196,26 @@ export class PluginArtifactStore {
    * against `..` traversal that slipped through `sanitizeZipEntryPath`).
    */
   async extractZip(slug: string, zipBuffer: Buffer): Promise<string[]> {
-    const installDir = this.installDirFor(slug);
-    const stageDir = resolve(this.installRoot, `.${slug}.stage-${randomUUID()}`);
+    return (await this.extractZipWithCommit(slug, zipBuffer, async () => undefined)).files;
+  }
+
+  /**
+   * Extract and promote a zip, then run a caller-supplied commit action before
+   * deleting the previous install directory. If commit fails, restore the old
+   * directory or remove the fresh install so external state (for example MCP
+   * config registration) cannot fail after the executable payload changed.
+   */
+  async extractZipWithCommit<T>(
+    slug: string,
+    zipBuffer: Buffer,
+    commit: (installDir: string, files: string[]) => Promise<T>,
+  ): Promise<{ files: string[]; result: T }> {
+    const safeSlug = assertSafeArtifactSlug(slug);
+    const installDir = this.installDirFor(safeSlug);
+    const stageDir = resolve(this.installRoot, `.${safeSlug}.stage-${randomUUID()}`);
+    if (!isWithin(resolve(this.installRoot), stageDir)) {
+      throw new Error(`artifact slug "${slug}" escapes install root`);
+    }
     await rm(stageDir, { recursive: true, force: true });
     await mkdir(stageDir, { recursive: true });
     const extractedFiles: string[] = [];
@@ -191,15 +225,15 @@ export class PluginArtifactStore {
       try {
         zip = new AdmZip(zipBuffer);
       } catch (err) {
-        throw new Error(`invalid zip format for "${slug}": ${(err as Error).message}`);
+        throw new Error(`invalid zip format for "${safeSlug}": ${(err as Error).message}`);
       }
 
       for (const entry of zip.getEntries()) {
-        const safeEntryPath = sanitizeZipEntryPath(slug, entry.entryName);
+        const safeEntryPath = sanitizeZipEntryPath(safeSlug, entry.entryName);
         if (!safeEntryPath) continue;
         const targetPath = resolve(stageDir, safeEntryPath);
         if (!isWithin(stageDir, targetPath)) {
-          throw new Error(`"${slug}" zip entry escapes install root: ${entry.entryName}`);
+          throw new Error(`"${safeSlug}" zip entry escapes install root: ${entry.entryName}`);
         }
         if (entry.isDirectory) {
           await mkdir(targetPath, { recursive: true });
@@ -214,7 +248,7 @@ export class PluginArtifactStore {
       // .old before promoting stageDir, so a half-promoted state is never
       // observable. `rename()` refuses to overwrite a non-empty directory
       // on Windows; macOS/Linux would also reject the no-op rename.
-      const oldDir = resolve(this.installRoot, `.${slug}.old-${randomUUID()}`);
+      const oldDir = resolve(this.installRoot, `.${safeSlug}.old-${randomUUID()}`);
       let hadOldDir = false;
       try {
         await rename(installDir, oldDir);
@@ -230,10 +264,21 @@ export class PluginArtifactStore {
         }
         throw renameErr;
       }
+      const files = extractedFiles.sort();
+      let result: T;
+      try {
+        result = await commit(installDir, files);
+      } catch (commitErr) {
+        await rm(installDir, { recursive: true, force: true }).catch(() => undefined);
+        if (hadOldDir) {
+          await rename(oldDir, installDir).catch(() => undefined);
+        }
+        throw commitErr;
+      }
       if (hadOldDir) {
         await rm(oldDir, { recursive: true, force: true }).catch(() => undefined);
       }
-      return extractedFiles.sort();
+      return { files, result };
     } catch (err) {
       if (existsSync(stageDir)) {
         await rm(stageDir, { recursive: true, force: true }).catch(() => undefined);
@@ -253,10 +298,11 @@ export class PluginArtifactStore {
       installedAt?: string;
     },
   ): Promise<PluginInstallReceipt> {
-    const pluginRoot = this.installDirFor(slug);
+    const safeSlug = assertSafeArtifactSlug(slug);
+    const pluginRoot = this.installDirFor(safeSlug);
     const receipt: PluginInstallReceipt = {
       schemaVersion: 2,
-      pluginId: slug,
+      pluginId: safeSlug,
       version: input.version,
       installSource: input.installSource,
       artifactSha256: input.artifactSha256,
@@ -279,10 +325,11 @@ export class PluginArtifactStore {
    */
   async cacheVersionFromManifest(slug: string, manifestPath: string): Promise<void> {
     try {
+      const safeSlug = assertSafeArtifactSlug(slug);
       const raw = await readFile(manifestPath, "utf-8");
       const parsed = JSON.parse(raw) as { version?: string };
       const version = parsed.version ?? "unknown";
-      const dir = resolve(this.cacheRoot, slug, version);
+      const dir = resolve(this.cacheRoot, safeSlug, version);
       await mkdir(dir, { recursive: true });
       await writeFile(resolve(dir, "plugin.json"), raw, "utf-8");
     } catch (err) {
@@ -301,11 +348,12 @@ export class PluginArtifactStore {
    */
   async appendHistory(slug: string, entry: ArtifactStoreHistoryEntry): Promise<void> {
     try {
-      const dir = resolve(this.cacheRoot, slug);
+      const safeSlug = assertSafeArtifactSlug(slug);
+      const dir = resolve(this.cacheRoot, safeSlug);
       await mkdir(dir, { recursive: true });
-      const entries = await this.readHistory(slug);
+      const entries = await this.readHistory(safeSlug);
       entries.push(entry);
-      await writeFile(this.historyPath(slug), `${JSON.stringify({ entries }, null, 2)}\n`, "utf-8");
+      await writeFile(this.historyPath(safeSlug), `${JSON.stringify({ entries }, null, 2)}\n`, "utf-8");
     } catch (err) {
       log.warn(
         `appendHistory failed for ${slug}: ${(err as Error).message}`,
@@ -338,13 +386,14 @@ export class PluginArtifactStore {
     slug: string,
     currentVersion?: string,
   ): Promise<string | null> {
-    const entries = await this.readHistory(slug);
+    const safeSlug = assertSafeArtifactSlug(slug);
+    const entries = await this.readHistory(safeSlug);
     if (entries.length === 0) return null;
     for (let i = entries.length - 1; i >= 0; i--) {
       const candidate = entries[i].version;
       if (!candidate || typeof candidate !== "string" || candidate.trim().length === 0) continue;
       if (candidate === currentVersion) continue;
-      const cachedManifest = resolve(this.cacheRoot, slug, candidate, "plugin.json");
+      const cachedManifest = resolve(this.cacheRoot, safeSlug, candidate, "plugin.json");
       try {
         const raw = await readFile(cachedManifest, "utf-8");
         const parsed = JSON.parse(raw) as { version?: string };
@@ -358,7 +407,7 @@ export class PluginArtifactStore {
   }
 
   private historyPath(slug: string): string {
-    return resolve(this.cacheRoot, slug, "history.json");
+    return resolve(this.cacheRoot, assertSafeArtifactSlug(slug), "history.json");
   }
 }
 

@@ -95,7 +95,7 @@ describe("PluginRuntime.reloadPlugin", () => {
     await writeRegistry([{ id: "p-reload", manifestPath }]);
 
     const runtime = new PluginRuntime({ hostRoot: testDir, registryPath, pluginsRoot: installedDir });
-    await runtime.load();
+    await runtime.startAll();
 
     expect(await runtime.call("p_reload_hello")).toBe("v-a");
 
@@ -134,7 +134,7 @@ describe("PluginRuntime.reloadPlugin", () => {
       pluginsRoot: installedDir,
       onDisable: (id) => disabled.push(id),
     });
-    await runtime.load();
+    await runtime.startAll();
 
     await runtime.reloadPlugin("p-hook");
 
@@ -154,7 +154,7 @@ describe("PluginRuntime.reloadPlugin", () => {
       pluginsRoot: installedDir,
       onDisable: (id) => disabled.push(id),
     });
-    await runtime.load();
+    await runtime.startAll();
     expect(runtime.listPluginIds()).toContain("p-reload-fail");
 
     await writePlugin("p-reload-fail", "b", {
@@ -172,7 +172,7 @@ describe("PluginRuntime.reloadPlugin", () => {
   it("reload on unknown plugin throws", async () => {
     await writeRegistry([]);
     const runtime = new PluginRuntime({ hostRoot: testDir, registryPath, pluginsRoot: installedDir });
-    await runtime.load();
+    await runtime.startAll();
     await expect(runtime.reloadPlugin("missing")).rejects.toThrow(/not loaded/);
   });
 
@@ -180,7 +180,7 @@ describe("PluginRuntime.reloadPlugin", () => {
     const manifestPath = await writePlugin("p-dir", "a");
     await writeRegistry([{ id: "p-dir", manifestPath }]);
     const runtime = new PluginRuntime({ hostRoot: testDir, registryPath, pluginsRoot: installedDir });
-    await runtime.load();
+    await runtime.startAll();
     const dir = runtime.getPluginEntryDir("p-dir");
     expect(dir).toBe(join(installedDir, "p-dir"));
     expect(runtime.getPluginEntryDir("missing")).toBeUndefined();
@@ -191,7 +191,7 @@ describe("PluginRuntime.reloadPlugin", () => {
     await writeRegistry([{ id: "p-realpath", manifestPath }]);
 
     const runtime = new PluginRuntime({ hostRoot: testDir, registryPath, pluginsRoot: installedDir });
-    await runtime.load();
+    await runtime.startAll();
 
     // Clear call history accumulated during load() so we only observe calls
     // that happen inside the reloadPlugin() invocation below.

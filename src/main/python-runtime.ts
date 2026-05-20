@@ -1,9 +1,10 @@
 /**
- * PythonRuntimeBootstrapper — §4.2 Step 0 (Phase 1)
+ * PythonRuntimeBootstrapper — host-managed plugin Python runtime coordinator
  *
- * uv standalone binary로 Python 3.12 venv를 자동 셋업한다.
- * 사용자 PC에 Python을 직접 설치하지 않음.
- * 첫 부팅에만 실행 (sentinel 확인 → 이후 즉시 skip).
+ * Host-managed Python plugins use this coordinator during plugin start
+ * preparation. The app boot path wires the coordinator only; packaged uv
+ * materialization, Python acquisition, and dependency sync happen lazily when
+ * a plugin with an accessible lockfile needs a non-ready runtime.
  *
  * Plugins that need Python dependencies must ship their lockfile in the
  * installed plugin/manifest directory (or declare a relative lockfile path in
@@ -11,6 +12,7 @@
  */
 
 import { spawn } from "node:child_process";
+import { createHash } from "node:crypto";
 import * as fs from "node:fs/promises";
 import * as path from "node:path";
 import type { BrowserWindow } from "electron";
@@ -21,7 +23,7 @@ import { getSandboxRunner } from "../permissions/sandbox-runner.js";
 import { resolveUvTarget, type UvTarget } from "../../scripts/uv-targets.mjs";
 import { lvisHome } from "../shared/lvis-home.js";
 import { trackManagedChildProcess } from "./managed-child-processes.js";
-import { isPackagedUvRuntime, resolveBundledUvBinaryPath } from "./uv-runtime.js";
+import { resolveBundledUvBinaryPath } from "./uv-runtime.js";
 const log = createLogger("python-runtime");
 
 // ─── 타입 ────────────────────────────────────────────
@@ -54,19 +56,14 @@ interface ReadySentinel {
 // ─── 상수 ────────────────────────────────────────────
 
 const LVIS_RUNTIME_DIR = path.join(lvisHome(), "runtime");
-const VENV_DIR = path.join(LVIS_RUNTIME_DIR, "venv");
-const PYTHON_INSTALL_DIR = path.join(LVIS_RUNTIME_DIR, "python");
 // Co-locate uv cache with the venv so hardlinks from cache → site-packages stay
 // on the same physical volume. NTFS hardlinks fail cross-volume with EXDEV
 // (issue #713) when ~/.lvis and %LOCALAPPDATA% live on different drives via
 // junction / OneDrive redirect / profile migration.
-const UV_CACHE_DIR_PATH = path.join(LVIS_RUNTIME_DIR, "uv-cache");
-const LOGS_DIR = path.join(LVIS_RUNTIME_DIR, "logs");
-const SETUP_LOG = path.join(LOGS_DIR, "setup.log");
-const READY_SENTINEL = path.join(VENV_DIR, ".ready");
 
 // requirements.lock 위치: 설치된 플러그인 manifest 디렉토리 또는 명시 선언.
 const LOCK_FILE_RESOURCE_NAME = "python-requirements.lock";
+const runtimeSetupLocks = new Map<string, Promise<RuntimeResult>>();
 
 export interface PythonRuntimeBootstrapperOptions {
   /**
@@ -82,6 +79,12 @@ export interface PythonRuntimeBootstrapperOptions {
   lockFileName?: string;
   /** Mostly for tests; defaults to ~/.lvis/runtime/uv. */
   uvRuntimeDir?: string;
+  /** Runtime root. Host-managed Python envs use ~/.lvis/runtime/python-envs/<lockHash>. */
+  runtimeDir?: string;
+  /** Exact lockfile selected by a plugin prepare path. */
+  lockFilePath?: string;
+  /** Force uv pip sync even when a ready sentinel exists. */
+  forceSetup?: boolean;
 }
 
 function isWithinDirectory(candidatePath: string, directoryPath: string): boolean {
@@ -96,6 +99,34 @@ export class PythonRuntimeBootstrapper {
 
   constructor(private readonly options: PythonRuntimeBootstrapperOptions = {}) {}
 
+  private runtimeDir(): string {
+    return this.options.runtimeDir ?? LVIS_RUNTIME_DIR;
+  }
+
+  private venvDir(): string {
+    return path.join(this.runtimeDir(), "venv");
+  }
+
+  private pythonInstallDir(): string {
+    return path.join(this.runtimeDir(), "python");
+  }
+
+  private uvCacheDir(): string {
+    return path.join(this.runtimeDir(), "uv-cache");
+  }
+
+  private logsDir(): string {
+    return path.join(this.runtimeDir(), "logs");
+  }
+
+  private setupLogPath(): string {
+    return path.join(this.logsDir(), "setup.log");
+  }
+
+  private readySentinelPath(): string {
+    return path.join(this.venvDir(), ".ready");
+  }
+
   /**
    * Python 런타임이 준비될 때까지 기다린다.
    * .ready sentinel이 있으면 즉시 resolve (두 번째 이후 부팅 < 50ms).
@@ -103,13 +134,8 @@ export class PythonRuntimeBootstrapper {
   async ensureReady(mainWindow: BrowserWindow): Promise<RuntimeResult> {
     this.mainWindow = mainWindow;
     this.getCurrentUvTarget();
-    const packagedUvPath = this.ensurePackagedUvReady();
-    if (packagedUvPath) {
-      await this.log(`[python-runtime] packaged uv ready: ${packagedUvPath}`);
-    }
-
     const pythonPath = this.getPythonPath();
-    const result: RuntimeResult = { pythonPath, venvPath: VENV_DIR };
+    const result: RuntimeResult = { pythonPath, venvPath: this.venvDir() };
 
     // Repair file modes on existing files (#717 follow-up). Pre-fix, files
     // created with default umask 0o644 are world-readable on shared corp
@@ -119,27 +145,7 @@ export class PythonRuntimeBootstrapper {
     // not block boot. Windows: fs.chmod is a no-op for mode bits, harmless.
     await this.repairLegacyFileModes();
 
-    // sentinel 확인
-    const sentinelExists = await this.checkSentinel();
-    if (sentinelExists) {
-      this.sendStatus({ phase: "ready", msg: "Python 런타임 준비 완료 (캐시)", pct: 100 });
-      await this.log("[python-runtime] .ready sentinel 확인 — skip setup");
-      return result;
-    }
-
-    // 첫 부팅 셋업
-    await this.setup();
-    return result;
-  }
-
-  /**
-   * Packaged builds must materialize uv before plugin execution can start.
-   * This is intentionally lighter than ensureReady(): it does not download
-   * Python or sync plugin dependencies, it only proves the bundled uv payload.
-   */
-  ensurePackagedUvReady(): string | null {
-    if (!isPackagedUvRuntime()) return null;
-    return this.getUvBinaryPath();
+    return this.ensureSetupOnce(result);
   }
 
   /**
@@ -153,27 +159,31 @@ export class PythonRuntimeBootstrapper {
   ): Promise<RuntimeResult | null> {
     const lockFileName = this.options.lockFileName ?? LOCK_FILE_RESOURCE_NAME;
     const candidates = await this.lockCandidatesFromManifest(manifestPath, lockFileName);
-    let hasLockFile = false;
+    let selectedLockFile: string | undefined;
     for (const candidate of candidates) {
       try {
         await fs.access(candidate);
-        hasLockFile = true;
+        selectedLockFile = candidate;
         break;
       } catch {
         // try next candidate
       }
     }
-    if (!hasLockFile) {
+    if (!selectedLockFile) {
       await this.log(`[python-runtime] plugin has no accessible Python lockfile — skip runtime prepare (${manifestPath})`);
       return null;
     }
 
+    const runtimeDir = await this.runtimeDirForLockFile(selectedLockFile);
     const bootstrapper = new PythonRuntimeBootstrapper({
       ...this.options,
       pluginManifestPaths: [
         manifestPath,
         ...(this.options.pluginManifestPaths ?? []).filter((p) => p !== manifestPath),
       ],
+      lockFilePath: selectedLockFile,
+      runtimeDir,
+      forceSetup: false,
     });
     return bootstrapper.ensureReady(mainWindow);
   }
@@ -182,7 +192,7 @@ export class PythonRuntimeBootstrapper {
 
   private async checkSentinel(): Promise<boolean> {
     try {
-      await fs.access(READY_SENTINEL);
+      await fs.access(this.readySentinelPath());
       return true;
     } catch {
       return false;
@@ -195,10 +205,37 @@ export class PythonRuntimeBootstrapper {
       uvVersion,
       pythonVersion,
     };
-    await fs.writeFile(READY_SENTINEL, JSON.stringify(data, null, 2), { encoding: "utf8", mode: 0o600 });
+    await fs.writeFile(this.readySentinelPath(), JSON.stringify(data, null, 2), { encoding: "utf8", mode: 0o600 });
   }
 
   // ─── private: setup pipeline ─────────────────────
+
+  private async ensureSetupOnce(result: RuntimeResult): Promise<RuntimeResult> {
+    const lockKey = path.resolve(this.runtimeDir());
+    const existing = runtimeSetupLocks.get(lockKey);
+    if (existing) return await existing;
+
+    const setupTask = this.setupIfStillNeeded(result);
+    runtimeSetupLocks.set(lockKey, setupTask);
+    try {
+      return await setupTask;
+    } finally {
+      if (runtimeSetupLocks.get(lockKey) === setupTask) {
+        runtimeSetupLocks.delete(lockKey);
+      }
+    }
+  }
+
+  private async setupIfStillNeeded(result: RuntimeResult): Promise<RuntimeResult> {
+    if (!this.options.forceSetup && await this.checkSentinel()) {
+      this.sendStatus({ phase: "ready", msg: "Python 런타임 준비 완료 (캐시)", pct: 100 });
+      await this.log("[python-runtime] .ready sentinel 확인 — skip setup");
+      return result;
+    }
+
+    await this.setup();
+    return result;
+  }
 
   private async setup(): Promise<void> {
     await this.ensureDirs();
@@ -222,16 +259,16 @@ export class PythonRuntimeBootstrapper {
     const uvVersion = await this.runUv(uvBin, [
       "python", "install", "3.12",
     ], {
-      UV_PYTHON_INSTALL_DIR: PYTHON_INSTALL_DIR,
+      UV_PYTHON_INSTALL_DIR: this.pythonInstallDir(),
     });
 
     // Step 3: venv 생성
     this.sendStatus({ phase: "installing-python", msg: "Python venv 생성 중...", pct: 30 });
     await this.log("[python-runtime] Step 2: uv venv");
     await this.runUv(uvBin, [
-      "venv", VENV_DIR, "--python", "3.12",
+      "venv", this.venvDir(), "--python", "3.12",
     ], {
-      UV_PYTHON_INSTALL_DIR: PYTHON_INSTALL_DIR,
+      UV_PYTHON_INSTALL_DIR: this.pythonInstallDir(),
     });
 
     // Step 4: pip sync (requirements.lock)
@@ -245,7 +282,7 @@ export class PythonRuntimeBootstrapper {
       "pip", "sync", lockFile,
       "--python", this.getPythonPath(),
     ], {
-      UV_PYTHON_INSTALL_DIR: PYTHON_INSTALL_DIR,
+      UV_PYTHON_INSTALL_DIR: this.pythonInstallDir(),
     });
 
     // Step 5: import 검증
@@ -265,9 +302,9 @@ export class PythonRuntimeBootstrapper {
 
   getPythonPath(): string {
     if (process.platform === "win32") {
-      return path.join(VENV_DIR, "Scripts", "python.exe");
+      return path.join(this.venvDir(), "Scripts", "python.exe");
     }
-    return path.join(VENV_DIR, "bin", "python");
+    return path.join(this.venvDir(), "bin", "python");
   }
 
   // ─── private: uv binary path ──────────────────────
@@ -288,7 +325,6 @@ export class PythonRuntimeBootstrapper {
   private async lockCandidatesFromManifest(
     manifestPath: string,
     lockFileName: string,
-    requiredCapability?: string,
   ): Promise<string[]> {
     const manifestDir = path.dirname(manifestPath);
     const candidates: string[] = [];
@@ -301,12 +337,6 @@ export class PythonRuntimeBootstrapper {
         runtime?: { python?: { requirementsLock?: unknown } };
         config?: { pythonRequirementsLock?: unknown };
       };
-      if (requiredCapability) {
-        const capabilities = Array.isArray(manifest.capabilities) ? manifest.capabilities : [];
-        if (!capabilities.includes(requiredCapability)) {
-          return candidates;
-        }
-      }
       const declared =
         typeof manifest.python?.requirementsLock === "string"
           ? manifest.python.requirementsLock
@@ -351,7 +381,7 @@ export class PythonRuntimeBootstrapper {
     try {
       const registry = await readPluginRegistry(registryPath);
       for (const manifestPath of resolveManifestPathsFromRegistry(registryPath, registry.plugins)) {
-        candidates.push(...await this.lockCandidatesFromManifest(manifestPath, lockFileName, "document-indexer"));
+        candidates.push(...await this.lockCandidatesFromManifest(manifestPath, lockFileName));
       }
     } catch (err) {
       await this.log(`[python-runtime] registry lockfile discovery skipped (${registryPath}): ${(err as Error).message}`);
@@ -361,6 +391,7 @@ export class PythonRuntimeBootstrapper {
   }
 
   private async findLockFile(): Promise<string> {
+    if (this.options.lockFilePath) return this.options.lockFilePath;
     const candidates = await this.collectLockFileCandidates();
     for (const candidate of candidates) {
       try {
@@ -374,6 +405,14 @@ export class PythonRuntimeBootstrapper {
       `python-requirements.lock 파일을 찾을 수 없습니다.\n` +
       `검색 경로:\n${candidates.length > 0 ? candidates.map((candidate) => `- ${candidate}`).join("\n") : "- (없음)"}`
     );
+  }
+
+  private async runtimeDirForLockFile(lockFilePath: string): Promise<string> {
+    const lockFile = await fs.readFile(lockFilePath);
+    const lockBytes = Buffer.isBuffer(lockFile) ? lockFile : Buffer.from(lockFile);
+    const lockHash = createHash("sha256").update(lockBytes).digest("hex").slice(0, 24);
+    const uvTarget = this.getCurrentUvTarget();
+    return path.join(LVIS_RUNTIME_DIR, "python-envs", `${uvTarget.dir}-py312-${lockHash}`);
   }
 
   // ─── private: 실행 헬퍼 ──────────────────────────
@@ -415,7 +454,7 @@ export class PythonRuntimeBootstrapper {
       // Default uv cache co-located with the LVIS runtime; user-provided
       // UV_CACHE_DIR (via the whitelist above or extraEnv) takes precedence.
       if (env.UV_CACHE_DIR === undefined) {
-        env.UV_CACHE_DIR = UV_CACHE_DIR_PATH;
+        env.UV_CACHE_DIR = this.uvCacheDir();
       }
 
       // §691 PR-A4: SandboxRunner adoption gate for uv spawn.
@@ -532,15 +571,13 @@ export class PythonRuntimeBootstrapper {
   private async verifyImports(): Promise<string> {
     const pythonBin = this.getPythonPath();
     const verifyScript = [
-      "import fitz, lancedb, kiwipiepy",
       "import sys",
       "print(sys.version.split()[0])",
     ].join("; ");
 
     const version = await this.runPython(pythonBin, ["-c", verifyScript]).catch((err: Error) => {
       throw new Error(
-        `필수 라이브러리 import 검증 실패.\n` +
-        `fitz (pymupdf), lancedb, kiwipiepy가 설치되어 있는지 확인하세요.\n` +
+        `Python 런타임 검증 실패.\n` +
         `원인: ${err.message}`
       );
     });
@@ -562,9 +599,10 @@ export class PythonRuntimeBootstrapper {
 
   private async ensureDirs(): Promise<void> {
     // ~/.lvis/<feature>/ namespace rule: directories owner-only (0o700).
-    await fs.mkdir(LOGS_DIR, { recursive: true, mode: 0o700 });
-    await fs.mkdir(PYTHON_INSTALL_DIR, { recursive: true, mode: 0o700 });
-    await fs.mkdir(UV_CACHE_DIR_PATH, { recursive: true, mode: 0o700 });
+    await fs.mkdir(this.runtimeDir(), { recursive: true, mode: 0o700 });
+    await fs.mkdir(this.logsDir(), { recursive: true, mode: 0o700 });
+    await fs.mkdir(this.pythonInstallDir(), { recursive: true, mode: 0o700 });
+    await fs.mkdir(this.uvCacheDir(), { recursive: true, mode: 0o700 });
   }
 
   /**
@@ -578,17 +616,17 @@ export class PythonRuntimeBootstrapper {
 
     // Files: 0o600 (owner-only rw)
     const fileTargets: Array<{ path: string; mode: number }> = [
-      { path: READY_SENTINEL, mode: 0o600 },
-      { path: SETUP_LOG, mode: 0o600 },
+      { path: this.readySentinelPath(), mode: 0o600 },
+      { path: this.setupLogPath(), mode: 0o600 },
     ];
     // Directories: 0o700 (owner-only rwx). Pre-fix dirs created at default
     // 0o755 are world-traversable — minor info leak (directory listing only,
     // not contents), but tightening matches the namespace rule.
     const dirTargets: Array<{ path: string; mode: number }> = [
-      { path: LVIS_RUNTIME_DIR, mode: 0o700 },
-      { path: VENV_DIR, mode: 0o700 },
-      { path: LOGS_DIR, mode: 0o700 },
-      { path: UV_CACHE_DIR_PATH, mode: 0o700 },
+      { path: this.runtimeDir(), mode: 0o700 },
+      { path: this.venvDir(), mode: 0o700 },
+      { path: this.logsDir(), mode: 0o700 },
+      { path: this.uvCacheDir(), mode: 0o700 },
     ];
 
     for (const { path: target, mode } of [...fileTargets, ...dirTargets]) {
@@ -604,7 +642,7 @@ export class PythonRuntimeBootstrapper {
     // Materialized uv binaries: walk `<uvRuntimeDir>/<arch>/<sha>/<bin>`
     // and chmod each to 0o700. Pre-fix legacy installs left these at 0o755
     // (world-read+exec). Owner-only is the contract going forward.
-    const uvRuntimeDir = this.options.uvRuntimeDir ?? path.join(LVIS_RUNTIME_DIR, "uv");
+    const uvRuntimeDir = this.options.uvRuntimeDir ?? path.join(this.runtimeDir(), "uv");
     await this.repairLegacyUvBinaryModes(uvRuntimeDir);
   }
 
@@ -656,8 +694,8 @@ export class PythonRuntimeBootstrapper {
   private async log(msg: string): Promise<void> {
     const line = `[${new Date().toISOString()}] ${msg}\n`;
     try {
-      await fs.mkdir(LOGS_DIR, { recursive: true, mode: 0o700 });
-      await fs.appendFile(SETUP_LOG, line, { encoding: "utf8", mode: 0o600 });
+      await fs.mkdir(this.logsDir(), { recursive: true, mode: 0o700 });
+      await fs.appendFile(this.setupLogPath(), line, { encoding: "utf8", mode: 0o600 });
     } catch {
       // 로그 실패는 무시 (non-fatal)
     }

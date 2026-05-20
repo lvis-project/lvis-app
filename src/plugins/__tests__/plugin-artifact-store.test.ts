@@ -15,12 +15,13 @@
  * focus on the journaling primitives that previously lived in the god
  * class with no direct coverage.
  */
+import AdmZip from "adm-zip";
 import { describe, expect, it } from "vitest";
 import { mkdtempSync, rmSync } from "node:fs";
-import { mkdir, writeFile } from "node:fs/promises";
+import { mkdir, readFile, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
-import { PluginArtifactStore } from "../plugin-artifact-store.js";
+import { assertSafeArtifactSlug, PluginArtifactStore } from "../plugin-artifact-store.js";
 import type { MarketplaceFetcher } from "../marketplace-fetcher.js";
 
 function makeStore(tmpDir: string): PluginArtifactStore {
@@ -179,6 +180,64 @@ describe("PluginArtifactStore — installDirFor", () => {
     } finally {
       rmSync(tmp, { recursive: true, force: true });
     }
+  });
+
+  it("rejects slugs that could escape the install root", () => {
+    const tmp = makeTmpDir();
+    try {
+      const store = makeStore(tmp);
+      for (const slug of ["../evil", "/tmp/evil", "evil/path", ".hidden", "bad:slug", ""]) {
+        expect(() => store.installDirFor(slug)).toThrow(/invalid artifact slug/);
+      }
+    } finally {
+      rmSync(tmp, { recursive: true, force: true });
+    }
+  });
+});
+
+describe("PluginArtifactStore — extractZip", () => {
+  it("rejects unsafe slugs before staging zip contents", async () => {
+    const tmp = makeTmpDir();
+    try {
+      const store = makeStore(tmp);
+      const zip = new AdmZip();
+      zip.addFile("plugin.json", Buffer.from(JSON.stringify({ id: "evil" })));
+      await expect(store.extractZip("../evil", zip.toBuffer())).rejects.toThrow(
+        /invalid artifact slug/,
+      );
+    } finally {
+      rmSync(tmp, { recursive: true, force: true });
+    }
+  });
+
+  it("restores the prior install dir when commit fails after promotion", async () => {
+    const tmp = makeTmpDir();
+    try {
+      const store = makeStore(tmp);
+      const installDir = store.installDirFor("acme");
+      await mkdir(installDir, { recursive: true });
+      await writeFile(resolve(installDir, "plugin.json"), JSON.stringify({ id: "acme", version: "old" }));
+
+      const zip = new AdmZip();
+      zip.addFile("plugin.json", Buffer.from(JSON.stringify({ id: "acme", version: "new" })));
+
+      await expect(
+        store.extractZipWithCommit("acme", zip.toBuffer(), async () => {
+          throw new Error("config registration failed");
+        }),
+      ).rejects.toThrow(/config registration failed/);
+
+      const restored = JSON.parse(await readFile(resolve(installDir, "plugin.json"), "utf-8"));
+      expect(restored.version).toBe("old");
+    } finally {
+      rmSync(tmp, { recursive: true, force: true });
+    }
+  });
+});
+
+describe("assertSafeArtifactSlug", () => {
+  it("accepts marketplace-safe slugs", () => {
+    expect(assertSafeArtifactSlug("browser-use_mcp.1")).toBe("browser-use_mcp.1");
   });
 });
 
