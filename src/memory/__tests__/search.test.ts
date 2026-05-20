@@ -257,6 +257,7 @@ describe("MemoryManager.searchSessions", () => {
     const results = mm.searchSessions("quarterly");
     expect(results.length).toBe(1);
     expect(results[0].sessionId).toBe(sessionId);
+    expect(results[0].title).toBe("quarterly report 분석 요청");
     expect(results[0].matchedMessage).toContain("quarterly");
   });
 
@@ -283,6 +284,7 @@ describe("MemoryManager.listSessionEntries", () => {
     const results = mm.listSessionEntries();
     expect(results.length).toBe(1);
     expect(results[0].sessionId).toBe(sessionId);
+    expect(results[0].title).toBe("first message");
     expect(results[0].matchedMessage).toContain("latest answer preview");
   });
 

@@ -139,7 +139,14 @@ export function MainContent(props: MainContentProps): ReactNode {
   if (activeView === "memory") {
     return (
       <MainPaneShell>
-        <MemorySearchPanel api={api} />
+        <MemorySearchPanel
+          api={api}
+          onOpenSession={async (sessionId) => {
+            const loaded = await props.onJumpToSession(sessionId);
+            if (loaded !== false) props.onActivateHome();
+            return loaded;
+          }}
+        />
       </MainPaneShell>
     );
   }

@@ -888,7 +888,7 @@ export function ChatView({ api, onAsk, onEditSave, onFork, onToggleStar, onRetry
           {currentSessionTitle ? <span className="ml-2 text-muted-foreground">{currentSessionTitle}</span> : null}
         </div>
       )}
-      <ScrollArea className="lvis-chat-scroll h-full min-h-0 min-w-0 max-w-full" viewportRef={scrollViewportRef}><div className="min-w-0 w-full max-w-full overflow-x-hidden space-y-3 px-3 py-4">
+      <ScrollArea type="always" className="lvis-chat-scroll h-full min-h-0 min-w-0 max-w-full" viewportRef={scrollViewportRef}><div className="min-w-0 w-full max-w-full overflow-x-hidden space-y-3 px-3 py-4">
         {/* Today's date badge stays a selector for explicit session loads only.
             currentSessionEntries enables in-session day jumping via
             SessionCalendarPopover Step 4 — pass entries with createdAt + index.
