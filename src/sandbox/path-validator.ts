@@ -69,7 +69,7 @@ export function validateSandboxPath(
 function canonicalize(path: string): string {
   const absolute = pathResolve(expandTilde(path));
   if (existsSync(absolute)) {
-    return realpathSync(absolute);
+    return realpathSync.native(absolute);
   }
 
   const suffix: string[] = [];
@@ -83,7 +83,7 @@ function canonicalize(path: string): string {
     cursor = parent;
   }
 
-  const canonicalParent = realpathSync(cursor);
+  const canonicalParent = realpathSync.native(cursor);
   return suffix.length > 0 ? join(canonicalParent, ...suffix) : canonicalParent;
 }
 
