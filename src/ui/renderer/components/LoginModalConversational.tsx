@@ -34,7 +34,7 @@
  * etc.) so the modal adapts to every bundle (tokyo-night, forest,
  * violet-*, …).
  */
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import {
   Dialog,
   DialogContent,
@@ -152,6 +152,7 @@ export function LoginModalConversational({
   open,
   onOpenChange,
   onSuccess,
+  forceActivation = false,
 }: LoginModalProps) {
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -386,6 +387,23 @@ export function LoginModalConversational({
     }
   }, [api, activationCode, activating, submitting, activationRelaunching, runAuthMockup]);
 
+  // 2026-05-20 — Settings 의 "데모 자격증명 재입력" entry. forceActivation 가
+  // true 인 동안 modal 이 열리면 chip selection 화면을 우회하고 activateDemoChip
+  // path 를 한 번만 자동 실행한다. `activateDemoChip` 내부에서 `demo.status` 를
+  // 다시 확인하므로, 이미 활성된 상태라면 곧장 auth transcript 로 진입하고
+  // 비활성 상태라면 activation 입력 page 가 mount 된다.
+  const forceActivationFiredRef = useRef(false);
+  useEffect(() => {
+    if (!open) {
+      forceActivationFiredRef.current = false;
+      return;
+    }
+    if (!forceActivation) return;
+    if (forceActivationFiredRef.current) return;
+    forceActivationFiredRef.current = true;
+    activateDemoChip();
+  }, [open, forceActivation, activateDemoChip]);
+
   // F2 — 1/2/3 keybindings for chip activation. Mirrors the
   // "위 선택지를 클릭하거나 `1`~`3` 키로 빠른 선택" footer hint.
   // Note (2026-05-20): the previous F5 "Enter to proceed" shortcut was
@@ -432,13 +450,14 @@ export function LoginModalConversational({
     CHECKLIST_LINES[checklistRevealed - 1]?.mark === "⟳";
   const handleDialogOpenChange = useCallback((next: boolean) => {
     if (activationRelaunching && !next) return;
-    // 2026-05-20 Deliverable 3: forced choice — user must pick 1/2/3.
-    // Block outside-click / Esc dismissal from the chip page. The parent
-    // closes the dialog programmatically by passing `open=false` after
-    // successful auth or success state transitions.
-    if (!next) return;
+    // 2026-05-20 — first-boot onboarding 에서는 1/2/3 forced choice 라 outside-
+    // click / Esc dismissal 을 차단한다. 하지만 Settings → "데모 자격증명 재입력"
+    // entry (`forceActivation=true`) 는 returning-user 의 *자발적 재입력 path*
+    // 이므로 dismiss 가능해야 한다. 차이가 없으면 사용자가 wrong code 를 paste
+    // 했다가 빠져나올 길이 없음.
+    if (!next && !forceActivation) return;
     onOpenChange(next);
-  }, [activationRelaunching, onOpenChange]);
+  }, [activationRelaunching, forceActivation, onOpenChange]);
 
   return (
     <Dialog open={open} onOpenChange={handleDialogOpenChange}>
