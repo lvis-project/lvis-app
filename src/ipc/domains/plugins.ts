@@ -305,68 +305,73 @@ export function registerPluginsHandlers(deps: IpcDeps): void {
   ipcMain.handle("lvis:plugins:install", async (e, pluginId: string) => {
     if (!validateSender(e)) { auditUnauthorized(auditLogger, "lvis:plugins:install", e); return UNAUTHORIZED_FRAME; }
     return withPluginInstallLock(pluginId, async () => {
+      const lifecycleSlug = pluginId;
+      let result: { pluginId: string; installed: true } | null = null;
       // IPC is pure transport — actor decisions live inside
       // PluginMarketplaceService.install (catalog → admin escalation).
       // deployment-guard §7.3: "IPC 핸들러에서 actor를 직접 받지 말 것 —
       // 'it-admin'은 ManagedPluginInstaller 같은 내부 플로우에서만 사용."
-      broadcastPluginLifecycleEvent("lvis:plugins:install-progress", { slug: pluginId, phase: "installing" });
-      const result = await pluginMarketplace.install(pluginId, (evt) => {
-        if (evt.phase === "downloading") {
-          broadcastPluginLifecycleEvent("lvis:plugins:install-progress", {
-            slug: pluginId,
-            phase: "downloading",
-            bytesDownloaded: evt.bytesDownloaded,
-            bytesTotal: evt.bytesTotal,
-          });
-        } else {
-          broadcastPluginLifecycleEvent("lvis:plugins:install-progress", { slug: pluginId, phase: evt.phase });
-        }
-      });
-      broadcastPluginLifecycleEvent("lvis:plugins:install-progress", { slug: pluginId, phase: "restarting" });
-      // Atomic install — marketplace.install() has already extracted the
-      // artifact + written the registry entry. If addPlugin throws (import
-      // smoke fail, capability mismatch, start exception, …), roll back
-      // via marketplace.uninstall() so the user sees the real error
-      // instead of a ghost plugin in their list. The whole install → addPlugin
-      // → (rollback if needed) sequence is wrapped in `withPluginInstallLock` so
-      // a second click on the same pluginId can't race the rollback.
       try {
+        broadcastPluginLifecycleEvent("lvis:plugins:install-progress", { slug: lifecycleSlug, phase: "installing" });
+        result = await pluginMarketplace.install(pluginId, (evt) => {
+          if (evt.phase === "downloading") {
+            broadcastPluginLifecycleEvent("lvis:plugins:install-progress", {
+              slug: lifecycleSlug,
+              phase: "downloading",
+              bytesDownloaded: evt.bytesDownloaded,
+              bytesTotal: evt.bytesTotal,
+            });
+          } else {
+            broadcastPluginLifecycleEvent("lvis:plugins:install-progress", { slug: lifecycleSlug, phase: evt.phase });
+          }
+        });
+        broadcastPluginLifecycleEvent("lvis:plugins:install-progress", { slug: lifecycleSlug, phase: "restarting" });
+        // Atomic install — marketplace.install() has already extracted the
+        // artifact + written the registry entry. If addPlugin throws (import
+        // smoke fail, capability mismatch, start exception, …), roll back
+        // via marketplace.uninstall() so the user sees the real error
+        // instead of a ghost plugin in their list. The whole install → addPlugin
+        // → (rollback if needed) sequence is wrapped in `withPluginInstallLock` so
+        // a second click on the same pluginId can't race the rollback.
         await preparePythonRuntimeForInstalledPlugin(result.pluginId, deps);
         await pluginRuntime.addPlugin(result.pluginId);
       } catch (err) {
         const message = errMessage(err) || "addPlugin failed";
-        try {
-          // Lifecycle ordering parity with the user-driven uninstall path:
-          // addPlugin may have partially started (opened DB, spawned worker)
-          // before throwing. Run runtime cleanup first so handles are
-          // released before marketplace.uninstall hits rm. removePlugin is
-          // best-effort here — failure shouldn't block the rm rollback.
-          await pluginRuntime.removePlugin(result.pluginId).catch((rmPluginErr) => {
-            // Structured log for forensic correlation — parity with the
-            // register-webview auto-purge path. log.warn alone would be a
-            // free-text breadcrumb that's hard to grep against the audit
-            // trail of the larger install attempt.
-            plog(
-              "warn",
-              {
-                pluginId: result.pluginId,
-                phase: PluginPhase.STOP_FAIL,
-                reason: "install-rollback-removePlugin-failed",
-                error: errMessage(rmPluginErr),
-              },
-              "install rollback removePlugin failed (best-effort, marketplace.uninstall continues)",
+        const installed = result;
+        if (installed) {
+          try {
+            // Lifecycle ordering parity with the user-driven uninstall path:
+            // addPlugin may have partially started (opened DB, spawned worker)
+            // before throwing. Run runtime cleanup first so handles are
+            // released before marketplace.uninstall hits rm. removePlugin is
+            // best-effort here — failure shouldn't block the rm rollback.
+            await pluginRuntime.removePlugin(installed.pluginId).catch((rmPluginErr) => {
+              // Structured log for forensic correlation — parity with the
+              // register-webview auto-purge path. log.warn alone would be a
+              // free-text breadcrumb that's hard to grep against the audit
+              // trail of the larger install attempt.
+              plog(
+                "warn",
+                {
+                  pluginId: installed.pluginId,
+                  phase: PluginPhase.STOP_FAIL,
+                  reason: "install-rollback-removePlugin-failed",
+                  error: errMessage(rmPluginErr),
+                },
+                "install rollback removePlugin failed (best-effort, marketplace.uninstall continues)",
+              );
+            });
+            await pluginMarketplace.uninstall(installed.pluginId);
+          } catch (rollbackErr) {
+            // Rollback failure is logged; original error still surfaces
+            // — the user needs the actual install error, not the rollback noise.
+            log.warn(
+              `install rollback uninstall failed for ${installed.pluginId}: ${errMessage(rollbackErr)}`,
             );
-          });
-          await pluginMarketplace.uninstall(result.pluginId);
-        } catch (rollbackErr) {
-          // Rollback failure is logged; original error still surfaces
-          // — the user needs the actual install error, not the rollback noise.
-          log.warn(
-            `install rollback uninstall failed for ${result.pluginId}: ${errMessage(rollbackErr)}`,
-          );
+          }
         }
         broadcastPluginLifecycleEvent("lvis:plugins:install-result", {
-          slug: result.pluginId,
+          slug: lifecycleSlug,
           success: false,
           error: message,
         });
@@ -374,7 +379,7 @@ export function registerPluginsHandlers(deps: IpcDeps): void {
       }
       emitHostEvent("plugin.installed", { pluginId: result.pluginId, source: "marketplace" });
       refreshPluginNotifications?.();
-      broadcastPluginLifecycleEvent("lvis:plugins:install-result", { slug: result.pluginId, success: true });
+      broadcastPluginLifecycleEvent("lvis:plugins:install-result", { slug: lifecycleSlug, success: true });
       return result;
     });
   });
