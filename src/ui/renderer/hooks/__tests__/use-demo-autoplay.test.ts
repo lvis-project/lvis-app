@@ -20,21 +20,33 @@ import { renderHook, act } from "@testing-library/react";
 import { useDemoAutoplay } from "../use-demo-autoplay.js";
 import type { LvisApi } from "../../types.js";
 
-function makeApi(): { api: LvisApi; updateSettings: ReturnType<typeof vi.fn> } {
+function makeApi(options: {
+  demoActivated?: boolean;
+  onboardingCompleted?: boolean;
+  demoAutoplayEnabled?: boolean;
+} = {}): { api: LvisApi; updateSettings: ReturnType<typeof vi.fn>; getSettings: ReturnType<typeof vi.fn>; demoStatus: ReturnType<typeof vi.fn> } {
   const updateSettings = vi.fn().mockResolvedValue({ ok: true });
   const getSettings = vi.fn().mockResolvedValue({
     features: {
       // Fresh-install shape — both flags undefined. The hook should still
       // refuse to touch `onboardingCompleted` even when activation succeeds.
-      demoAutoplayEnabled: undefined,
-      onboardingCompleted: undefined,
+      demoAutoplayEnabled: options.demoAutoplayEnabled,
+      onboardingCompleted: options.onboardingCompleted,
     },
+  });
+  const demoStatus = vi.fn().mockResolvedValue({
+    ok: true,
+    activated: options.demoActivated ?? false,
+    vendor: options.demoActivated ? "azure-foundry" : null,
   });
   const api = {
     getSettings,
     updateSettings,
+    demo: {
+      status: demoStatus,
+    },
   } as unknown as LvisApi;
-  return { api, updateSettings };
+  return { api, updateSettings, getSettings, demoStatus };
 }
 
 describe("useDemoAutoplay.onFinished — onboarding chain decoupling", () => {
@@ -74,5 +86,43 @@ describe("useDemoAutoplay.onFinished — onboarding chain decoupling", () => {
       await Promise.resolve();
     });
     expect(updateSettings.mock.calls.length).toBe(callsAfterFirst);
+  });
+
+  it("activates from main demo.status even when renderer env is scrubbed", async () => {
+    const { api, updateSettings, demoStatus } = makeApi({
+      demoActivated: true,
+      onboardingCompleted: true,
+    });
+
+    const { result } = renderHook(() => useDemoAutoplay(api));
+
+    await act(async () => {
+      await Promise.resolve();
+    });
+
+    expect(demoStatus).toHaveBeenCalledOnce();
+    expect(result.current.turn?.id).toBeTruthy();
+    expect(updateSettings).toHaveBeenCalledWith({
+      features: { demoAutoplayRotationIndex: expect.any(Number) },
+    });
+  });
+
+  it("does not activate when main demo.status reports inactive", async () => {
+    const { api, updateSettings, demoStatus } = makeApi({
+      demoActivated: false,
+      onboardingCompleted: true,
+    });
+
+    const { result } = renderHook(() => useDemoAutoplay(api));
+
+    await act(async () => {
+      await Promise.resolve();
+    });
+
+    expect(demoStatus).toHaveBeenCalledOnce();
+    expect(result.current.turn).toBeNull();
+    expect(updateSettings).not.toHaveBeenCalledWith({
+      features: { demoAutoplayRotationIndex: expect.any(Number) },
+    });
   });
 });

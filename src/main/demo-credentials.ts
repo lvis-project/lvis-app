@@ -35,13 +35,10 @@
  *                                  Read via `getDemoActiveVendor()`.
  *
  * Path 2 hotfix (internal organization demo):
- *   When `LVIS_DEMO_KEY_AZURE_FOUNDRY` / `LVIS_DEMO_BASEURL_AZURE_FOUNDRY`
- *   are absent and `getDemoVendorConfig("azure-foundry")` would otherwise
- *   return `null`, a baked-in internal-issued endpoint + key is returned.
- *   This is *security-reviewed user-authorized hardcoding* — see the PR
- *   description for the constraint envelope (internal organization demo
- *   only, reachable only via the Electron `host-resolver-rules` switch
- *   that maps to the 10.182.192.0/24 intranet block).
+ *   Azure Foundry remains the default demo vendor, but the actual API key
+ *   and endpoint must come from launch env or persisted `.env.demo`
+ *   activation. `getDemoVendorConfig("azure-foundry")` returns `null`
+ *   without a captured key.
  */
 import { createLogger } from "../lib/logger.js";
 import { isLLMVendor, type LLMVendor } from "../shared/llm-vendor-defaults.js";
@@ -176,7 +173,7 @@ export function isDemoEnabled(): boolean {
 
 /**
  * #893 — Vendor the top-level Login button should activate. Captured from
- * `LVIS_DEMO_VENDOR`; defaults to `"openai"` when absent or invalid.
+ * `LVIS_DEMO_VENDOR`; defaults to `"azure-foundry"` when absent or invalid.
  *
  * The auth IPC handler reads this to decide which vendor to persist the
  * demo apiKey under; the renderer never has to pick a vendor when the user
