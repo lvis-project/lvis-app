@@ -216,12 +216,12 @@ export const DEFAULT_PRICING: Record<PricingVendor, Record<string, ModelPricing>
   },
 
   // ── Azure AI Foundry / Vertex AI ───────────────────────────────────────────
-  // Deployment-name routed — pricing is account-specific. Populate via env
-  // override (`LVIS_PRICING_OVERRIDE`). Without an override every model on
-  // these vendors falls through to FALLBACK_PRICING, which means UI ring +
-  // token preflight is denominated at 128K regardless of the actual deployment
-  // capability — explicit override is REQUIRED for context-window math, not
-  // just cost accuracy.
+  // Deployment-name routed. Azure OpenAI deployments whose deployment id is a
+  // known OpenAI model name inherit the OpenAI model spec through
+  // `lookupPricingOptional` below so context-window math does not collapse to
+  // the conservative 128K fallback. Custom deployment aliases still require
+  // `LVIS_PRICING_OVERRIDE` because there is no reliable model identity to
+  // infer from the alias alone.
   "azure-foundry": {},
   "vertex-ai": {},
 };
@@ -269,7 +269,13 @@ export function lookupPricingOptional(
       bestKey = key;
     }
   }
-  return bestKey !== undefined ? vendorTable[bestKey] : undefined;
+  if (bestKey !== undefined) return vendorTable[bestKey];
+
+  if (vendor === "azure-foundry") {
+    return lookupPricingOptional("openai", model, table);
+  }
+
+  return undefined;
 }
 
 /**
