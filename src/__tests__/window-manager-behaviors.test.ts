@@ -7,6 +7,7 @@
  *   3. left attach — default detached shell stays on the west edge with a gap
  *   4. ready-to-show while main is maximized — snap is deferred; child stays hidden
  *      (tested end-to-end via the actual openDetachedTab() handler, not a reimplementation)
+ *   5. plugin detached windows keep initial placement but remain free-floating
  */
 
 import { describe, it, expect, vi, beforeEach } from "vitest";
@@ -167,7 +168,7 @@ function injectChild(
   type Children = Map<number, { window: MockWindow; viewKey: string; locked?: boolean; snappedTo?: number; snapEdge?: string }>;
   (wm as unknown as { _children: Children })._children.set(win.id, {
     window: win,
-    viewKey: "plugin:test:panel",
+    viewKey: "reminders",
     ...extra,
   });
 }
@@ -500,7 +501,7 @@ describe("WindowManager — magnetic snap behaviors", () => {
   // openDetachedTab(), not a reimplementation of its logic.
 
   describe("ready-to-show while main is maximized", () => {
-    it("marks child locked and keeps it hidden when main is maximized at open time", () => {
+    it("marks built-in child locked and keeps it hidden when main is maximized at open time", () => {
       const maximizedMain = makeMockWin({
         id: 300,
         bounds: { x: 0, y: 0, width: 1920, height: 1080 },
@@ -515,7 +516,7 @@ describe("WindowManager — magnetic snap behaviors", () => {
       deferWm.registerMainWindow(maximizedMain as never);
 
       const bwSizeBefore = bwStore.size;
-      deferWm.openDetachedTab("plugin:sample-plugin:panel");
+      deferWm.openDetachedTab("reminders");
 
       expect(bwStore.size).toBeGreaterThan(bwSizeBefore);
       const childId = [...bwStore.keys()].find(
@@ -535,7 +536,47 @@ describe("WindowManager — magnetic snap behaviors", () => {
       ).toBe(true);
     });
 
-    it("snaps and shows child when main is NOT maximized at open time", () => {
+    it("places and shows plugin child without locking it when main is maximized at open time", () => {
+      const maximizedMain = makeMockWin({
+        id: 310,
+        bounds: { x: 0, y: 0, width: 1920, height: 1080 },
+        maximized: true,
+      });
+      bwStore.set(maximizedMain.id, maximizedMain);
+
+      const pluginWm = new WindowManager({
+        preloadPath: "/fake/preload.cjs",
+        distRoot: "/fake/dist",
+      });
+      pluginWm.registerMainWindow(maximizedMain as never);
+
+      pluginWm.openDetachedTab("plugin:sample-plugin:panel");
+
+      const childId = [...bwStore.keys()].find(
+        (id) => id !== maximizedMain.id && id !== mainWin.id
+      )!;
+      const child = bwStore.get(childId)!;
+
+      (child.getBounds as ReturnType<typeof vi.fn>).mockReturnValue({
+        x: 100,
+        y: 100,
+        width: 400,
+        height: 800,
+      });
+
+      (child as unknown as { emit: (e: string) => void }).emit("ready-to-show");
+
+      expect((child as unknown as MockWindow).show).toHaveBeenCalledOnce();
+      expect((child as unknown as MockWindow).setMovable).not.toHaveBeenCalledWith(false);
+      const entry = wmChildren(pluginWm).get(childId);
+      expect(entry?.locked).not.toBe(true);
+      expect(entry?.snappedTo).toBeUndefined();
+      expect(
+        (pluginWm as unknown as { _hiddenByMaximize: Set<number> })._hiddenByMaximize.has(childId)
+      ).toBe(false);
+    });
+
+    it("snaps and shows built-in child when main is NOT maximized at open time", () => {
       // Verifies the normal open path: ready-to-show must lock/snap the child
       // before show(), avoiding a visible jump from the BrowserWindow's
       // constructor position to the magnetic position.
@@ -553,7 +594,7 @@ describe("WindowManager — magnetic snap behaviors", () => {
       normalWm.registerMainWindow(normalMain as never);
 
       const bwSizeBefore = bwStore.size;
-      normalWm.openDetachedTab("plugin:sample-plugin:panel");
+      normalWm.openDetachedTab("reminders");
 
       const childId = [...bwStore.keys()].find(
         (id) => id !== normalMain.id && id !== mainWin.id && id >= 301
@@ -582,6 +623,73 @@ describe("WindowManager — magnetic snap behaviors", () => {
       const entry = wmChildren(normalWm).get(childId);
       expect(entry?.locked).toBe(true);
       expect((child as unknown as MockWindow).setMovable).toHaveBeenCalledWith(false);
+    });
+
+    it("places and shows plugin child without snap state when main is NOT maximized at open time", () => {
+      const normalMain = makeMockWin({
+        id: 320,
+        bounds: { x: 800, y: 24, width: 800, height: 900 },
+        maximized: false,
+      });
+      bwStore.set(normalMain.id, normalMain);
+
+      const pluginWm = new WindowManager({
+        preloadPath: "/fake/preload.cjs",
+        distRoot: "/fake/dist",
+      });
+      pluginWm.registerMainWindow(normalMain as never);
+
+      pluginWm.openDetachedTab("plugin:sample-plugin:panel");
+
+      const childId = [...bwStore.keys()].find(
+        (id) => id !== normalMain.id && id !== mainWin.id
+      )!;
+      const child = bwStore.get(childId)!;
+
+      (child.getBounds as ReturnType<typeof vi.fn>).mockReturnValue({
+        x: 100,
+        y: 100,
+        width: 400,
+        height: 800,
+      });
+      const callOrder: string[] = [];
+      (child.setPosition as ReturnType<typeof vi.fn>).mockImplementation(() => {
+        callOrder.push("setPosition");
+      });
+      (child.show as ReturnType<typeof vi.fn>).mockImplementation(() => {
+        callOrder.push("show");
+      });
+
+      (child as unknown as { emit: (e: string) => void }).emit("ready-to-show");
+
+      expect(callOrder).toEqual(["setPosition", "show"]);
+      expect((child.setPosition as ReturnType<typeof vi.fn>).mock.calls[0]).toEqual([388, 24]);
+      const entry = wmChildren(pluginWm).get(childId);
+      expect(entry?.locked).not.toBe(true);
+      expect(entry?.snappedTo).toBeUndefined();
+      expect(pluginWm.listChildren()[0].snapped).toBe(false);
+      expect((child as unknown as MockWindow).setMovable).not.toHaveBeenCalledWith(false);
+    });
+  });
+
+  describe("plugin detached free movement", () => {
+    it("does not magnetic-snap a plugin child when it moves near the main window", () => {
+      const child = makeMockWin({
+        id: 160,
+        bounds: { x: 400, y: 100, width: 400, height: 800 },
+      });
+      injectChild(wm, child, {
+        viewKey: "plugin:test:panel",
+        locked: false,
+        snappedTo: undefined,
+      });
+
+      (wm as unknown as { _onChildMove: (id: number) => void })._onChildMove(child.id);
+
+      expect(child.setPosition).not.toHaveBeenCalled();
+      const entry = wmChildren(wm).get(child.id);
+      expect(entry?.snappedTo).toBeUndefined();
+      expect(mainWin.webContents.send).toHaveBeenCalledWith("lvis:window:snap-edge", null);
     });
   });
 
@@ -1032,7 +1140,7 @@ describe("WindowManager — magnetic snap behaviors", () => {
         moveWm.registerMainWindow(moveMain as never);
         const moveSpy = vi.spyOn(moveWm as unknown as { _onChildMove: (id: number) => void }, "_onChildMove");
 
-        moveWm.openDetachedTab("plugin:sample-plugin:work-board");
+        moveWm.openDetachedTab("reminders");
         const child = [...bwStore.values()].find((win) => win.id !== moveMain.id && win.id >= 1000)!;
         let childBounds = { x: 1000, y: 200, width: 400, height: 800 };
         (child.getBounds as ReturnType<typeof vi.fn>).mockImplementation(() => childBounds);
