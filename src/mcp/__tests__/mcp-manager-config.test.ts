@@ -158,6 +158,28 @@ describe("McpManager — getConfigs()", () => {
     const mgr = await makeManager();
     expect(mgr.getConfigPath()).toBe(testConfigPath);
   });
+
+  it("defaults the config path under the current LVIS_HOME", async () => {
+    const originalLvisHome = process.env.LVIS_HOME;
+    const portableHome = join(testDir, "portable-home");
+    process.env.LVIS_HOME = portableHome;
+    try {
+      const { McpGovernance } = await import("../mcp-governance.js");
+      const { ToolRegistry } = await import("../../tools/registry.js");
+      const mgr = new McpManager(
+        new (McpGovernance as new () => InstanceType<typeof McpGovernance>)(),
+        new (ToolRegistry as new () => InstanceType<typeof ToolRegistry>)(),
+      );
+
+      expect(mgr.getConfigPath()).toBe(join(portableHome, "mcp", "servers.json"));
+    } finally {
+      if (originalLvisHome === undefined) {
+        delete process.env.LVIS_HOME;
+      } else {
+        process.env.LVIS_HOME = originalLvisHome;
+      }
+    }
+  });
 });
 
 describe("McpManager — addConfig()", () => {

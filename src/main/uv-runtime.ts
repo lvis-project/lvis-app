@@ -10,7 +10,9 @@ import { lvisHome } from "../shared/lvis-home.js";
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
 
-const DEFAULT_RUNTIME_UV_DIR = path.join(lvisHome(), "runtime", "uv");
+function defaultRuntimeUvDir(): string {
+  return path.join(lvisHome(), "runtime", "uv");
+}
 
 export interface BundledUvRuntimeOptions {
   defaultApp?: boolean;
@@ -70,7 +72,7 @@ function materializePackagedUvBinary(uvTarget: UvTarget, options: BundledUvRunti
   const compressedBin = path.join(packagedDir, `${uvTarget.bin}.gz`);
   const metaPath = path.join(packagedDir, "uv.meta.json");
   const { binarySha256 } = readPackagedUvMetadata(metaPath);
-  const runtimeUvDir = options.uvRuntimeDir ?? DEFAULT_RUNTIME_UV_DIR;
+  const runtimeUvDir = options.uvRuntimeDir ?? defaultRuntimeUvDir();
   const targetDir = path.join(runtimeUvDir, uvTarget.dir, binarySha256);
   const targetBin = path.join(targetDir, uvTarget.bin);
 

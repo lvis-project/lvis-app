@@ -5,6 +5,7 @@
  * node:fs/promises, node:child_process를 mock하여 실제 uv/Python 없이 검증.
  */
 
+import { createHash } from "node:crypto";
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 import type { SpawnOptionsWithoutStdio } from "node:child_process";
 import type { EventEmitter } from "node:events";
@@ -104,6 +105,7 @@ function makeSpawnFailMock(exitCode = 1, stderrMsg = "some error") {
 // ─── 테스트 대상 import (mock 설정 이후) ──────────────────────────────────────
 // dynamic import를 사용하지 않고 상단에서 import → vi.mock hoisting에 의존
 import { PythonRuntimeBootstrapper } from "../python-runtime.js";
+import { resolveBundledUvBinaryPath } from "../uv-runtime.js";
 
 // ─── BrowserWindow stub ───────────────────────────────────────────────────────
 function makeBrowserWindow() {
@@ -356,6 +358,47 @@ describe("PythonRuntimeBootstrapper", () => {
     expectArgsToContainPath(pipSyncCall![1] as string[], declaredLockFilePath);
   });
 
+  it("plugin lazy prepare stores lockfile-keyed Python envs under the current LVIS_HOME", async () => {
+    const originalLvisHome = process.env.LVIS_HOME;
+    const portableHome = path.join(tmpdir(), "lvis-python-plugin-home");
+    const manifestPath = "/installed/local-indexer/plugin.json";
+    const declaredLockFilePath = "/installed/local-indexer/requirements/python.lock";
+    process.env.LVIS_HOME = portableHome;
+    mockedReadFile.mockImplementation(async (filePath) => {
+      if (String(filePath) === declaredLockFilePath) return "pymupdf==1.26.0\n";
+      return JSON.stringify({
+        runtime: { python: { requirementsLock: "requirements/python.lock" } },
+      });
+    });
+    mockedAccess.mockImplementation(async (filePath) => {
+      const normalized = normalizePathForAssert(String(filePath));
+      if (normalized === normalizePathForAssert(declaredLockFilePath)) return undefined;
+      if (normalized.includes(".ready")) throw Object.assign(new Error("ENOENT"), { code: "ENOENT" });
+      return undefined;
+    });
+    mockedSpawn
+      .mockReturnValueOnce(makeSpawnMock("uv 0.7.3\n"))
+      .mockReturnValueOnce(makeSpawnMock(""))
+      .mockReturnValueOnce(makeSpawnMock(""))
+      .mockReturnValueOnce(makeSpawnMock("3.12.3\n"));
+
+    try {
+      const bootstrapper = new PythonRuntimeBootstrapper();
+      const result = await bootstrapper.ensureReadyForPluginManifest(manifestPath, makeBrowserWindow());
+
+      expect(result?.venvPath).toBeTruthy();
+      expect(normalizePathForAssert(result!.venvPath)).toContain(
+        normalizePathForAssert(path.join(portableHome, "runtime", "python-envs")),
+      );
+    } finally {
+      if (originalLvisHome === undefined) {
+        delete process.env.LVIS_HOME;
+      } else {
+        process.env.LVIS_HOME = originalLvisHome;
+      }
+    }
+  });
+
   it("deduplicates concurrent setup for plugins with the same lockfile content", async () => {
     const manifestA = "/installed/a/plugin.json";
     const manifestB = "/installed/b/plugin.json";
@@ -606,6 +649,43 @@ describe("PythonRuntimeBootstrapper", () => {
     }
   });
 
+  it("packaged uv materializes under the current LVIS_HOME when no uvRuntimeDir override is supplied", () => {
+    const resourcesPath = mkdtempSync(path.join(tmpdir(), "lvis-packaged-current-home-resources-"));
+    const portableHome = mkdtempSync(path.join(tmpdir(), "lvis-packaged-current-home-"));
+    const targetDirName = "linux-x64";
+    const binName = "uv";
+    const packagedUvDir = path.join(resourcesPath, "uv", targetDirName);
+    const binaryBytes = Buffer.from("portable-home-uv-bin");
+    const uvSha = createHash("sha256").update(binaryBytes).digest("hex");
+    const expectedUvBin = path.join(portableHome, "runtime", "uv", targetDirName, uvSha, binName);
+    const originalLvisHome = process.env.LVIS_HOME;
+
+    mkdirSync(packagedUvDir, { recursive: true });
+    writeFileSync(path.join(packagedUvDir, `${binName}.gz`), gzipSync(binaryBytes));
+    writeFileSync(path.join(packagedUvDir, "uv.meta.json"), JSON.stringify({ binarySha256: uvSha }));
+    process.env.LVIS_HOME = portableHome;
+
+    try {
+      const uvBin = resolveBundledUvBinaryPath({
+        defaultApp: false,
+        resourcesPath,
+        platform: "linux",
+        arch: "x64",
+      });
+
+      expect(uvBin).toBe(expectedUvBin);
+      expect(readFileSync(expectedUvBin, "utf8")).toBe("portable-home-uv-bin");
+    } finally {
+      if (originalLvisHome === undefined) {
+        delete process.env.LVIS_HOME;
+      } else {
+        process.env.LVIS_HOME = originalLvisHome;
+      }
+      rmSync(resourcesPath, { recursive: true, force: true });
+      rmSync(portableHome, { recursive: true, force: true });
+    }
+  });
+
   // ─── issue #713: uv cache co-located with venv (cross-volume hardlink fix) ─
 
   describe("issue #713 — uv cache cross-volume hardlink fix", () => {
@@ -645,6 +725,45 @@ describe("PythonRuntimeBootstrapper", () => {
       for (const env of envs) {
         expect(env.UV_CACHE_DIR).toBeDefined();
         expect(normalizePathForAssert(String(env.UV_CACHE_DIR))).toContain("/.lvis/runtime/uv-cache");
+      }
+    });
+
+    it("LVIS_HOME 변경 시 host-managed Python env와 uv cache를 새 data root 아래에 둔다", async () => {
+      const originalEnv = {
+        LVIS_HOME: process.env.LVIS_HOME,
+        UV_CACHE_DIR: process.env.UV_CACHE_DIR,
+        UV_LINK_MODE: process.env.UV_LINK_MODE,
+      };
+      const portableHome = path.join(tmpdir(), "lvis-python-portable-home");
+      process.env.LVIS_HOME = portableHome;
+      delete process.env.UV_CACHE_DIR;
+      delete process.env.UV_LINK_MODE;
+      setupSetupSpawns();
+
+      try {
+        const bootstrapper = new PythonRuntimeBootstrapper({
+          pluginManifestPaths: ["/installed/local-indexer/plugin.json"],
+        });
+        const result = await bootstrapper.ensureReady(makeBrowserWindow());
+
+        expect(normalizePathForAssert(result.venvPath)).toContain(
+          normalizePathForAssert(path.join(portableHome, "runtime", "venv")),
+        );
+        const envs = uvSpawnEnvs();
+        expect(envs.length).toBeGreaterThan(0);
+        for (const env of envs) {
+          expect(normalizePathForAssert(String(env.UV_CACHE_DIR))).toContain(
+            normalizePathForAssert(path.join(portableHome, "runtime", "uv-cache")),
+          );
+        }
+      } finally {
+        for (const [key, value] of Object.entries(originalEnv)) {
+          if (value === undefined) {
+            delete process.env[key];
+          } else {
+            process.env[key] = value;
+          }
+        }
       }
     });
 

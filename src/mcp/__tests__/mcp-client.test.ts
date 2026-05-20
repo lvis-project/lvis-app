@@ -922,6 +922,66 @@ describe("StdioTransport — regression", () => {
     await client.disconnect();
   });
 
+  it("does not redirect MCP stdio HOME or uvx cache to LVIS_HOME", async () => {
+    const fake = new FakeChildProcess();
+    fake.responses = {
+      initialize: (id) => ({
+        id,
+        protocolVersion: "2024-11-05",
+        capabilities: { tools: {} },
+        serverInfo: { name: "home-check", version: "1.0.0" },
+      }),
+      "tools/list": () => ({ tools: [] }),
+    };
+    spawnMock.mockReturnValueOnce(fake);
+
+    const originalEnv = {
+      HOME: process.env.HOME,
+      USERPROFILE: process.env.USERPROFILE,
+      LVIS_HOME: process.env.LVIS_HOME,
+      UV_CACHE_DIR: process.env.UV_CACHE_DIR,
+    };
+    process.env.HOME = "/Users/ken";
+    process.env.USERPROFILE = "C:\\Users\\Ken";
+    process.env.LVIS_HOME = "/Volumes/LVISData";
+    delete process.env.UV_CACHE_DIR;
+
+    try {
+      const gov = governanceWithPolicy(
+        buildPolicy([stdioApproval("home-check", "uvx")]),
+      );
+      const client = new McpClient(
+        {
+          id: "home-check",
+          transport: "stdio",
+          command: "uvx",
+          args: ["--from", "home-check==1.0.0", "home-check", "--mcp"],
+        },
+        gov,
+        new ToolRegistry(),
+      );
+
+      await client.connect();
+
+      const spawnEnv = (spawnMock.mock.calls[0]?.[2] as { env?: Record<string, unknown> })?.env ?? {};
+      expect(spawnEnv.HOME).toBe("/Users/ken");
+      expect(spawnEnv.USERPROFILE).toBe("C:\\Users\\Ken");
+      expect(spawnEnv.LVIS_HOME).toBeUndefined();
+      expect(spawnEnv.UV_CACHE_DIR).toBeUndefined();
+      expect(Object.values(spawnEnv).map(String)).not.toContain("/Volumes/LVISData");
+
+      await client.disconnect();
+    } finally {
+      for (const [key, value] of Object.entries(originalEnv)) {
+        if (value === undefined) {
+          delete process.env[key];
+        } else {
+          process.env[key] = value;
+        }
+      }
+    }
+  });
+
   it("stdio — apiKey does NOT leak into environment when apiKeyEnv is absent (HIGH-3/HIGH-4)", async () => {
     const fake = new FakeChildProcess();
     fake.responses = {
