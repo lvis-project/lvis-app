@@ -483,6 +483,7 @@ export type LvisApi = {
   }>;
   chatEditResend: (messageIndex: number, newText: string) => Promise<{ ok: boolean; error?: string }>;
   chatFork: (messageIndex: number) => Promise<{ ok: boolean; sessionId: string | null }>;
+  chatContinueLastUser: (sessionId: string) => Promise<{ ok: boolean; error?: string }>;
   chatRetryEffort: (opts?: { thinkingBudgetTokens?: number; enableThinking?: boolean }) => Promise<{ ok: boolean; error?: string }>;
   chatExport: (format: "markdown" | "json") => Promise<{ ok: boolean; filePath?: string; canceled?: boolean; error?: string }>;
   chatCompact: () => Promise<{ compacted: boolean; compactedAt: string | null; summary: string; removedMessageCount: number }>;
@@ -492,7 +493,11 @@ export type LvisApi = {
   // standard { ok: boolean } pattern. Callers guard with `"error" in result`.
   chatEnterCheckpointView: (sessionId: string, compactNum: number) => Promise<{ messageIndexAtCreation: number } | { error: string }>;
   chatExitCheckpointView: () => Promise<{ ok: boolean }>;
-  chatBranchFromCheckpoint: (sessionId: string, compactNum: number) => Promise<{ newSessionId: string } | { error: string }>;
+  chatBranchFromCheckpoint: (sessionId: string, compactNum: number) => Promise<{
+    newSessionId: string;
+    lastMessageRole: "user" | "assistant" | "tool_result" | null;
+    shouldAutoContinue: boolean;
+  } | { error: string }>;
   chatAbort: () => Promise<{ ok: boolean }>;
   /** Lazy-load in-session verbatim content for a compacted tool_result.
    * Returns null when: session changed, toolUseId not found, verbatim

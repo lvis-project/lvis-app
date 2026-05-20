@@ -92,7 +92,7 @@ export function App() {
   // Chat state + stream lifecycle (useChatState is the sole owner of entries).
   const {
     entries, streaming, isCompacting, beginStreamingRequest, finishStreamingRequest, editingEntryIdx, setEditingEntryIdx, editBusy,
-    entryIndexToHistoryIndex, handleEditSave, handleRetryEffort,
+    entryIndexToHistoryIndex, handleEditSave, handleRetryEffort, handleContinueFromLastUser,
     resetStreamAccumulators, setErrorWithThought, handleCompactCommand,
     clearForNewChat, appendUserEntry, appendAssistantStatus, appendSystemEntry, applyInitialSession, applyLoadedSession, truncateToEntry,
     fallbackToast,
@@ -1339,6 +1339,7 @@ export function App() {
             onFork={handleFork}
             onToggleStar={handleToggleStar}
             onRetryEffort={handleRetryEffort}
+            onContinueFromLastUser={handleContinueFromLastUser}
             isEntryStarred={isEntryStarred}
             onAbort={handleAbort}
             onGuide={handleGuide}
