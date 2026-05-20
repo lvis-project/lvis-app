@@ -405,6 +405,12 @@ export class ConversationLoop {
    * 와 다른 metric.
    */
   private lastRoundInputTokens = 0;
+  /**
+   * Latest provider-reported raw input size. Unlike `cumulativeUsage`, this
+   * is a context-window metric, not a session billing sum. Preflight uses it
+   * as the actual-token secondary signal when the local estimator undercounts.
+   */
+  private lastProviderInputTokens = 0;
   /** B4: current turn's AbortController — abortCurrentTurn() calls .abort() */
   currentAbortController: AbortController | null = null;
   /**
@@ -436,9 +442,9 @@ export class ConversationLoop {
   /**
    * Issue #910 / #900 약속 정합 — `context_error` / `stream_error` 발생 직
    * 후 user-facing 메시지가 "새 메시지를 보내면 자동 압축이 다시 시도됩니
-   * 다" 라고 약속. 그러나 기본 `runPreflightGuard` 는 cumulativeUsage /
-   * estimateMessagesTokens 임계 기반인데, *Forbidden 시도는 cumulative
-   * 에 기록 안 됨* + estimate 가 chars/4 으로 15-25% 과소 → 다음 turn
+   * 다" 라고 약속. 그러나 기본 `runPreflightGuard` 는 provider-reported
+   * last input / estimateMessagesTokens 임계 기반인데, *Forbidden 시도는
+   * provider usage 에 기록 안 됨* + estimate 가 chars/4 으로 15-25% 과소 → 다음 turn
    * preflight 가 미발동, compact 도 NOOP 반환 → 약속 깨짐. 이 flag 는
    * 다음 turn 의 preflight 가 임계 무시 + preserve=0 으로 force trigger
    * 하도록 한다. 성공/실패/NOOP 모두 finally 에서 clear.
@@ -730,6 +736,8 @@ export class ConversationLoop {
     this.turnAdditionalDirectories = [];
     this.history.clear();
     this.cumulativeUsage = { inputTokens: 0, outputTokens: 0 };
+    this.lastRoundInputTokens = 0;
+    this.lastProviderInputTokens = 0;
     this.sessionPluginExpansions = 0;
     this.compactNum = 0;
     this.tracer = createTracer(this.sessionId);
@@ -956,6 +964,8 @@ export class ConversationLoop {
     this.history.clear();
     this.history.restore(normalized.messages);
     this.cumulativeUsage = { inputTokens: 0, outputTokens: 0 };
+    this.lastRoundInputTokens = 0;
+    this.lastProviderInputTokens = 0;
     this.sessionPluginExpansions = 0;
     this.sessionAdditionalDirectories = [];
     this.turnAdditionalDirectories = [];
@@ -1009,6 +1019,8 @@ export class ConversationLoop {
       inputTokens: estimateMessagesTokens(this.history.getMessages()),
       outputTokens: 0,
     };
+    this.lastRoundInputTokens = 0;
+    this.lastProviderInputTokens = 0;
 
     return {
       ok: true,
@@ -1299,7 +1311,7 @@ export class ConversationLoop {
     // ─── Token Preflight (same-session checkpoint compaction) ───
     // step 5 (HISTORY_APPEND) 직후 / step 6 (PROMPT_ASSEMBLE) 직전. estimateMessagesTokens
     // 가 model 의 preflight threshold 도달 시 차단형으로 LLM compact 실행.
-    // 결과: summary preamble 갱신 + history 교체 + cumulativeUsage reset → 후속 step 6 build() 가
+    // 결과: summary preamble 갱신 + history 교체 + context-size tracker reset → 후속 step 6 build() 가
     // 새 compact 결과를 반영. mid-loop reactive compact 영구 예방.
     if (this.provider && !this.deps.disableSessionPersistence) {
       await this.runPreflightGuard(turnSignal, callbacks);
@@ -1818,6 +1830,7 @@ export class ConversationLoop {
         // emit 이 read). turn_summary.tokensIn 의 size 의도. billing 합산은
         // turnUsage.inputTokens / cumulativeUsage 가 별도 추적.
         this.lastRoundInputTokens = u.inputTokens;
+        this.lastProviderInputTokens = u.inputTokens;
 
         turnUsage = {
           inputTokens: (turnUsage?.inputTokens ?? 0) + u.inputTokens,
@@ -2082,7 +2095,7 @@ export class ConversationLoop {
    *   1. `compactNum` 증가
    *   2. `history` 교체 (boundary stub + recentVerbatim)
    *   3. `setSummaryPreamble` 로 prior-context summary 갱신
-   *   4. `cumulativeUsage.inputTokens = estimatedAfter` reset
+   *   4. context-size trackers reset to `estimatedAfter`
    *   5. checkpoint append + saveSessionMetadata 영속화
    *   6. `callbacks.onCompactOccurred` surface (사용자 가시 compact_notice)
    *
@@ -2112,6 +2125,7 @@ export class ConversationLoop {
         ...this.cumulativeUsage,
         inputTokens: result.estimatedAfter,
       };
+      this.lastProviderInputTokens = result.estimatedAfter;
       callbacks?.onCompactOccurred?.({
         removedMessages: result.removedCount,
         freedTokens: Math.max(0, estimatedBefore - result.estimatedAfter),
@@ -2151,6 +2165,7 @@ export class ConversationLoop {
       ...(this.cumulativeUsage.cacheReadTokens !== undefined && { cacheReadTokens: 0 }),
       ...(this.cumulativeUsage.cacheWriteTokens !== undefined && { cacheWriteTokens: 0 }),
     };
+    this.lastProviderInputTokens = result.estimatedAfter;
 
     // Same-session checkpoint chain.
     // ctxUsageAtTrigger 분모는 *usable context window* (LVIS reservation 적용).
@@ -2199,7 +2214,7 @@ export class ConversationLoop {
    *   1. `compactNum` 증가
    *   2. `history` 교체 (boundary stub + recentVerbatim)
    *   3. `setSummaryPreamble` 로 prior-context summary 갱신
-   *   4. `cumulativeUsage.inputTokens = estimatedAfter` (의미 정합 reset)
+   *   4. context-size trackers reset to `estimatedAfter`
    *   5. `onCompactOccurred` 콜백 surface
    *
    * `isCompacting` lock per ConversationLoop instance. 동시 turn 에서
@@ -2254,12 +2269,12 @@ export class ConversationLoop {
 
     const messagesBefore = this.history.getMessages();
     const estimated = estimateMessagesTokens(messagesBefore);
-    // Two-signal preflight: estimateMessagesTokens (chars/4 heuristic) undercounts
-    // real provider tokens by 15-25% on code-heavy English content. Pair it with
-    // the actual provider-reported tokensIn from the prior turn so compact fires
-    // even when the local estimate is below threshold but the live billing said
-    // the next round will overflow.
-    const actualTokensIn = this.cumulativeUsage.inputTokens;
+    // Two-signal preflight: estimateMessagesTokens (chars/4 heuristic) can
+    // undercount real provider tokens on code-heavy content. Pair it with the
+    // last provider-reported prompt size. Do not use cumulativeUsage here:
+    // session billing sums grow every turn and are not a context-window fill
+    // metric.
+    const actualTokensIn = this.lastProviderInputTokens;
     if (!forceRecover && estimated < preflight && actualTokensIn < preflight) return;
     const triggerSource: "estimate" | "actual-tokensIn" | "force-recover" = forceRecover
       ? "force-recover"
@@ -2278,7 +2293,7 @@ export class ConversationLoop {
     });
     try {
       log.info(
-        `preflight: TRIGGER — estimated=${estimated} >= preflight=${preflight} (model=${provider}/${model}) → LLM compact #${this.compactNum + 1}`,
+        `preflight: TRIGGER — source=${triggerSource} estimated=${estimated} actualTokensIn=${actualTokensIn} preflight=${preflight} (model=${provider}/${model}) → LLM compact #${this.compactNum + 1}`,
       );
       // Adaptive preserve budget — usagePct 가 높을수록 더 공격적으로 줄여서
       // compact 가 항상 reduce 보장. red zone (usage >= 100%) 에서는 preserve=0
@@ -2306,6 +2321,7 @@ export class ConversationLoop {
 
       if (compactResult.status === CompressionStatus.NOOP) {
         log.info("preflight: LLM compact returned NOOP (history within preserveRecentTokens) — no mutation");
+        this.lastProviderInputTokens = estimated;
         return;
       }
 

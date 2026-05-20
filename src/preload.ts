@@ -313,6 +313,30 @@ const api = {
       ipcRenderer.on("lvis:auth:progress", listener);
       return () => ipcRenderer.removeListener("lvis:auth:progress", listener);
     },
+    // 2026-05-20 — Settings 가 별도 BrowserWindow 로 mount 되기 때문에 main
+    // window 의 onboarding chain / LoginModal 에 직접 dispatch 하지 못한다.
+    // `broadcast*` 는 main 에서 모든 window 로 fan-out 하는 cue, `on*` 은
+    // main window 의 App.tsx 가 subscribe 하는 listener. payload 가 없다.
+    broadcastLogoutReset: async () =>
+      ipcRenderer.invoke("lvis:auth:logout-broadcast") as Promise<
+        | { ok: true }
+        | { ok: false; error: "unauthorized-frame" }
+      >,
+    broadcastReactivateDemo: async () =>
+      ipcRenderer.invoke("lvis:auth:reactivate-broadcast") as Promise<
+        | { ok: true }
+        | { ok: false; error: "unauthorized-frame" }
+      >,
+    onLogoutReset: (handler: () => void) => {
+      const listener = () => handler();
+      ipcRenderer.on("lvis:auth:logout-reset", listener);
+      return () => ipcRenderer.removeListener("lvis:auth:logout-reset", listener);
+    },
+    onReactivateDemo: (handler: () => void) => {
+      const listener = () => handler();
+      ipcRenderer.on("lvis:auth:reactivate-demo", listener);
+      return () => ipcRenderer.removeListener("lvis:auth:reactivate-demo", listener);
+    },
   },
   /**
    * Demo activation bridge. `status` reads main's captured demo state after
@@ -351,6 +375,14 @@ const api = {
       ipcRenderer.invoke("lvis:demo:relaunch-after-activation") as Promise<
         | { ok: true }
         | { ok: false; error: "not-armed" | "unauthorized-frame" }
+      >,
+    // 2026-05-20 — Settings 의 로그아웃 path. .env.demo 파일 + process.env
+    // LVIS_DEMO_* + captured demo state 를 한 번에 비워 다음 `status` 호출이
+    // `activated=false` 를 반환하도록 한다.
+    clearDemo: async () =>
+      ipcRenderer.invoke("lvis:demo:clear") as Promise<
+        | { ok: true }
+        | { ok: false; error: "clear-failed" | "unauthorized-frame" }
       >,
   },
   // Tutorial-C — SpotlightTour state bridge. Host stores tour completion

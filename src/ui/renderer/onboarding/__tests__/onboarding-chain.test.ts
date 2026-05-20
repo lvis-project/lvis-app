@@ -131,6 +131,27 @@ describe("nextOnboardingStage", () => {
     }
   });
 
+  it("logout-reset collapses chain to idle from any stage", () => {
+    // 2026-05-20 — Settings → 로그아웃 path. 모든 stage 가 idle 로 회귀해야
+    // 후속 boot probe 가 ScenarioShowcase 를 재진입시킨다. `done` 도 포함 —
+    // 사용자가 onboarding 완료 후 로그아웃 했다면 다시 idle 로 보내야 함.
+    const stages: OnboardingChainStage[] = [
+      "idle",
+      "showcase",
+      "login",
+      "memory",
+      "personalized_welcome",
+      "tour",
+      "plugins",
+      "done",
+    ];
+    for (const stage of stages) {
+      expect(nextOnboardingStage(stage, { type: "logout-reset" })).toBe(
+        "idle",
+      );
+    }
+  });
+
   it("showcase → happy path traversal terminates at done", () => {
     const result = transitionStage("showcase", [
       { type: "showcase-start" },
@@ -258,6 +279,25 @@ describe("onboardingChainReducer (state record)", () => {
       stage: "done",
       selectedScenarioId: "multi-agent",
       memorySeed: { nickname: "Ken", introduction: "PM" },
+    });
+  });
+
+  it("logout-reset collapses to idle and wipes selection + memory seed", () => {
+    // 2026-05-20 — 로그아웃은 chain context 전체를 fresh boot 처럼 회귀시킨다.
+    // selectedScenarioId 와 memorySeed 가 살아남으면 재진입한 ScenarioShowcase /
+    // MemorySeed 가 "이미 채워진" 상태로 mount 되어 신규 부팅 UX 가 손상됨.
+    const next = onboardingChainReducer(
+      {
+        stage: "done",
+        selectedScenarioId: "multi-agent",
+        memorySeed: { nickname: "Ken", introduction: "PM" },
+      },
+      { type: "logout-reset" },
+    );
+    expect(next).toEqual({
+      stage: "idle",
+      selectedScenarioId: null,
+      memorySeed: { nickname: "", introduction: "" },
     });
   });
 });

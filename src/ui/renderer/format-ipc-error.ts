@@ -143,6 +143,8 @@ export const COMMON_IPC_ERROR_MESSAGES: Readonly<Record<string, string>> = {
   "missing-foundry-endpoint": "활성 코드에 Azure Foundry 엔드포인트 정보가 누락되었습니다.",
   "persist-failed": "활성 코드를 저장하지 못했습니다.",
   "not-armed": "재시작 준비 상태가 아닙니다. 활성 코드를 다시 제출해 주세요.",
+  // 2026-05-20 — Settings 로그아웃 path (`lvis:demo:clear`) 의 디스크 삭제 실패.
+  "clear-failed": "데모 자격증명 삭제에 실패했습니다. 다시 시도해 주세요.",
   // ── Tutorial-C — tour:{start,mark-complete,dismiss} validation ──
   "invalid-scenario-id": "선택한 가이드 투어 항목이 올바르지 않습니다.",
   "write-failed": "설정을 저장하지 못했습니다.",

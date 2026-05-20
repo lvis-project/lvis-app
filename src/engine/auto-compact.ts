@@ -13,7 +13,7 @@ import type { GenericMessage, TokenUsage, LLMVendor, UserContentPart } from "./l
 import { serializeMessageForEstimation, userContentText } from "./llm/types.js";
 import { lookupPricing, effectiveContextWindow } from "../shared/pricing-data.js";
 import { getUsableContext, getPreflightThreshold } from "../shared/context-budget.js";
-import { buildToolResultStrippedStub } from "../shared/tool-result-stub.js";
+import { buildToolResultStrippedStub, buildToolResultTruncatedStub } from "../shared/tool-result-stub.js";
 
 
 // ─── Context Window Registry ─────────────────────────
@@ -166,11 +166,35 @@ export function estimateTokens(text: string): number {
 export function estimateMessagesTokens(messages: GenericMessage[]): number {
   let total = 0;
   for (const msg of messages) {
-    // Estimate tokens from the complete canonical serialization so that
-    // assistant thinkingBlocks (extended thinking) are counted as well.
-    total += estimateTokens(serializeMessageForEstimation(msg));
+    // Estimate tokens from the provider-wire shape, not the verbatim
+    // in-memory shape. Marked tool_results keep raw content in memory for UI
+    // and checkpoint inspection, but stream-collector stubs them immediately
+    // before provider send. Counting the raw content here makes preflight and
+    // session-load rings fire far earlier than the actual payload.
+    total += estimateTokens(serializeMessageForWireEstimate(msg));
   }
   return total;
+}
+
+function serializeMessageForWireEstimate(message: GenericMessage): string {
+  if (message.role !== "tool_result") {
+    return serializeMessageForEstimation(message);
+  }
+  if (message.meta?.serializedStub === true) {
+    return serializeMessageForEstimation(message);
+  }
+
+  const content =
+    message.meta?.compactedAt !== undefined
+      ? buildToolResultStub(message.toolName, message.meta.truncated?.originalBytes ?? message.content.length)
+      : message.meta?.truncated !== undefined
+        ? buildToolResultTruncatedStub(message.toolUseId, message.toolName, message.meta.truncated)
+        : message.content;
+
+  return serializeMessageForEstimation({
+    ...message,
+    content,
+  });
 }
 
 
