@@ -582,6 +582,36 @@ describe("useSessions (streaming guard)", () => {
     expect(result.current.currentSessionId).toBe("manual-sess");
   });
 
+  it("refreshSessions only refreshes the list and does not overwrite the loaded session metadata", async () => {
+    const { api } = makeMockLvisApi({
+      historyBySession: {
+        "manual-sess": {
+          sessionId: "manual-sess",
+          sessionTitle: "Manual",
+          messages: [{ index: 0, role: "user", content: "manual session" }],
+        },
+      },
+    });
+    const applyLoaded = vi.fn();
+    const { result } = renderHook(() => useSessions(api as unknown as LvisApi));
+
+    await act(async () => {
+      await result.current.handleLoadSession("manual-sess", false, applyLoaded);
+    });
+
+    expect(result.current.currentSessionId).toBe("manual-sess");
+    expect(result.current.currentSessionTitle).toBe("Manual");
+    api.chatGetHistory.mockClear();
+
+    await act(async () => {
+      await result.current.refreshSessions();
+    });
+
+    expect(api.chatGetHistory).not.toHaveBeenCalled();
+    expect(result.current.currentSessionId).toBe("manual-sess");
+    expect(result.current.currentSessionTitle).toBe("Manual");
+  });
+
   it("hydrates the explicit active main session on startup when active loop is empty", async () => {
     const { api } = makeMockLvisApi({
       currentSession: "fresh-empty",

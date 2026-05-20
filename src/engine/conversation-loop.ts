@@ -179,7 +179,7 @@ export interface TurnCallbacks {
    * which fires on completion.
    */
   onCompactStarted?: (info: {
-    triggerSource: "estimate" | "actual-tokensIn" | "manual" | "force-recover";
+    triggerSource: "estimate" | "actual-tokensIn" | "message-count" | "manual" | "force-recover";
     estimatedBefore: number;
     preflight: number;
   }) => void;
@@ -368,6 +368,7 @@ export interface ConversationLoopDeps {
 // 수용하면서 *진정한 무한 루프* 는 여전히 차단. SubAgentRunner 는 자기 maxRounds
 // 로 clamp 하므로 영향 없음 (line 902 `Math.min`).
 const MAX_TOOL_ROUNDS = 30;
+const MESSAGE_COUNT_COMPACT_THRESHOLD = 50;
 /**
  * C3(a): per-round cap on the number of tool calls an assistant round can
  * issue. Pathological round-emitting many tool_use blocks at once would
@@ -2318,18 +2319,21 @@ export class ConversationLoop {
 
     const messagesBefore = this.history.getMessages();
     const estimated = estimateMessagesTokens(messagesBefore);
+    const messageCountReached = messagesBefore.length >= MESSAGE_COUNT_COMPACT_THRESHOLD;
     // Two-signal preflight: estimateMessagesTokens (chars/4 heuristic) can
     // undercount real provider tokens on code-heavy content. Pair it with the
     // last provider-reported prompt size. Do not use cumulativeUsage here:
     // session billing sums grow every turn and are not a context-window fill
     // metric.
     const actualTokensIn = this.lastProviderInputTokens;
-    if (!forceRecover && estimated < preflight && actualTokensIn < preflight) return;
-    const triggerSource: "estimate" | "actual-tokensIn" | "force-recover" = forceRecover
+    if (!forceRecover && estimated < preflight && actualTokensIn < preflight && !messageCountReached) return;
+    const triggerSource: "estimate" | "actual-tokensIn" | "message-count" | "force-recover" = forceRecover
       ? "force-recover"
       : estimated >= preflight
         ? "estimate"
-        : "actual-tokensIn";
+        : actualTokensIn >= preflight
+          ? "actual-tokensIn"
+          : "message-count";
 
     this.isCompacting = true;
     // Notify renderer immediately so it can show a "자동 압축 중..." indicator
@@ -2352,11 +2356,20 @@ export class ConversationLoop {
       // 직접 거부한 상황이므로 보수적 preserve 가 의미 없음. 약속한 compact
       // 를 가장 공격적으로 수행하는 게 사용자 약속 정합.
       const usagePct = preflight > 0 ? estimated / preflight : 0;
-      const preserveRecentTokens = forceRecover || usagePct >= 1.0
+      const basePreserveRecentTokens = forceRecover || usagePct >= 1.0 || triggerSource === "message-count"
         ? 0
         : usagePct >= 0.8
           ? Math.max(1_000, Math.floor(preflight * 0.2))
           : Math.max(1_000, Math.floor(preflight * 0.4));
+      const latestMessage = messagesBefore.at(-1);
+      const currentUserPreserveTokens = latestMessage?.role === "user"
+        ? Math.max(1, estimateMessagesTokens([latestMessage]))
+        : 0;
+      // Step 5 appends the current user turn before preflight runs. Even in
+      // red-zone / force-recover compaction, that just-entered user message is
+      // part of the visible transcript contract and must survive as verbatim
+      // context; otherwise the UI can show an assistant answer with no question.
+      const preserveRecentTokens = Math.max(basePreserveRecentTokens, currentUserPreserveTokens);
       const compactResult = await compactWithBoundary({
         messages: messagesBefore,
         llm: this.provider,

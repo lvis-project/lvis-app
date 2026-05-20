@@ -40,18 +40,59 @@ function NoteRow({ note }: { note: NoteResult }) {
   );
 }
 
-function SessionRow({ session }: { session: SessionResult }) {
+function SessionRow({
+  session,
+  onOpenSession,
+}: {
+  session: SessionResult;
+  onOpenSession?: (sessionId: string) => void | boolean | Promise<void | boolean>;
+}) {
   const [expanded, setExpanded] = useState(false);
+  const [loading, setLoading] = useState(false);
+  const [failed, setFailed] = useState(false);
+
+  const handleClick = async () => {
+    setFailed(false);
+    if (!onOpenSession) {
+      setExpanded((v) => !v);
+      return;
+    }
+    setLoading(true);
+    try {
+      const loaded = await onOpenSession(session.sessionId);
+      if (loaded === false) {
+        setFailed(true);
+        setExpanded(true);
+      }
+    } catch {
+      setFailed(true);
+      setExpanded(true);
+    } finally {
+      setLoading(false);
+    }
+  };
+
   return (
     <Button
       type="button"
       variant="ghost"
       className="h-auto w-full flex-col items-stretch justify-start rounded-none border-b border-border/50 px-3 py-2 text-left last:border-0 hover:bg-muted/50"
-      onClick={() => setExpanded((v) => !v)}
+      onClick={() => void handleClick()}
+      aria-label={`채팅 열기: ${session.title ?? session.sessionId.slice(0, 8)}`}
     >
       <div className="flex min-w-0 items-baseline justify-between gap-2">
-        <span className="min-w-0 flex-1 truncate font-mono text-[10px] text-muted-foreground">{session.sessionId.slice(0, 8)}</span>
+        <span className="min-w-0 flex-1 truncate text-sm font-medium">
+          {session.title || `세션 ${session.sessionId.slice(0, 8)}`}
+        </span>
         <span className="text-[10px] text-muted-foreground shrink-0">{relativeTime(session.timestamp)}</span>
+      </div>
+      <div className="mt-0.5 flex min-w-0 items-center justify-between gap-2">
+        <span className="min-w-0 truncate font-mono text-[10px] text-muted-foreground">
+          {session.sessionId.slice(0, 8)}
+        </span>
+        <span className="shrink-0 text-[10px] text-muted-foreground">
+          {loading ? "불러오는 중..." : failed ? "로드 실패" : onOpenSession ? "클릭하여 열기" : "클릭하여 펼치기"}
+        </span>
       </div>
       <p className={`text-xs text-muted-foreground mt-0.5 ${expanded ? "whitespace-pre-wrap break-words" : "truncate"}`}>
         {session.matchedMessage}
@@ -62,9 +103,10 @@ function SessionRow({ session }: { session: SessionResult }) {
 
 export interface MemorySearchPanelProps {
   api: LvisApi;
+  onOpenSession?: (sessionId: string) => void | boolean | Promise<void | boolean>;
 }
 
-export function MemorySearchPanel({ api }: MemorySearchPanelProps) {
+export function MemorySearchPanel({ api, onOpenSession }: MemorySearchPanelProps) {
   const { query, setQuery, noteResults, sessionResults, loading } = useMemorySearch(api);
 
   return (
@@ -87,7 +129,7 @@ export function MemorySearchPanel({ api }: MemorySearchPanelProps) {
               기억{noteResults.length > 0 ? ` (${noteResults.length})` : ""}
             </TabsTrigger>
             <TabsTrigger value="sessions" className="flex-1">
-              세션{sessionResults.length > 0 ? ` (${sessionResults.length})` : ""}
+              채팅 목록{sessionResults.length > 0 ? ` (${sessionResults.length})` : ""}
             </TabsTrigger>
           </TabsList>
           <TabsContent value="notes" className="mt-2 flex-1 min-h-0 overflow-hidden">
@@ -112,7 +154,13 @@ export function MemorySearchPanel({ api }: MemorySearchPanelProps) {
                   {query === "" ? "저장된 세션이 없습니다" : "결과 없음"}
                 </p>
               ) : (
-                sessionResults.map((s) => <SessionRow key={s.sessionId + s.timestamp} session={s} />)
+                sessionResults.map((s) => (
+                  <SessionRow
+                    key={s.sessionId + s.timestamp}
+                    session={s}
+                    onOpenSession={onOpenSession}
+                  />
+                ))
               )}
             </ScrollArea>
           </TabsContent>

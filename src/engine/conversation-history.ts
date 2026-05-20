@@ -11,12 +11,14 @@ export interface ConversationHistoryOptions {
   maxMessages?: number;
 }
 
+const DEFAULT_MAX_MESSAGES = Number.POSITIVE_INFINITY;
+
 export class ConversationHistory {
   private messages: GenericMessage[] = [];
   private readonly maxMessages: number;
 
   constructor(options?: ConversationHistoryOptions) {
-    this.maxMessages = options?.maxMessages ?? 50;
+    this.maxMessages = normalizeMaxMessages(options?.maxMessages);
   }
 
   append(message: GenericMessage): void {
@@ -110,10 +112,12 @@ export class ConversationHistory {
 
   /**
    * How many more messages can be appended before `trim()` would start
-   * dropping the oldest entries. Used by the trigger-import path to refuse
-   * imports that would silently evict user chat history.
+   * dropping the oldest entries. The default conversation has no message-count
+   * cap; token preflight / auto-compact owns context control so persisted
+   * session transcript rows are not silently evicted.
    */
   getCapacityRemaining(): number {
+    if (!Number.isFinite(this.maxMessages)) return Number.POSITIVE_INFINITY;
     return Math.max(0, this.maxMessages - this.messages.length);
   }
 
@@ -126,7 +130,7 @@ export class ConversationHistory {
   }
 
   private trim(): void {
-    if (this.messages.length > this.maxMessages) {
+    if (Number.isFinite(this.maxMessages) && this.messages.length > this.maxMessages) {
       this.messages = this.messages.slice(-this.maxMessages);
       this.messages = normalizeToolPairInvariant(this.messages, { preserveOpenToolTail: true }).messages;
     }
@@ -148,6 +152,12 @@ interface NormalizeToolPairOptions {
 function stampCreatedAt(message: GenericMessage): GenericMessage {
   if (message.meta?.createdAt !== undefined) return message;
   return { ...message, meta: { ...(message.meta ?? {}), createdAt: Date.now() } };
+}
+
+function normalizeMaxMessages(maxMessages: number | undefined): number {
+  if (maxMessages === undefined) return DEFAULT_MAX_MESSAGES;
+  if (!Number.isFinite(maxMessages) || maxMessages <= 0) return DEFAULT_MAX_MESSAGES;
+  return Math.floor(maxMessages);
 }
 
 /**
