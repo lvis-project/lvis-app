@@ -6,8 +6,10 @@
  *      env inject → recapture of demo credentials.
  *   2. Invalid code / tampered ciphertext → `invalid-code` error.
  *   3. Payload missing `LVIS_DEMO_VENDOR` → `no-vendor` error.
- *   4. Filesystem write failure → `persist-failed` error.
- *   5. Empty/whitespace input → `invalid-code` (renderer-friendly).
+ *   4. Unknown vendor / missing vendor key / invalid Azure Foundry endpoint
+ *      → fail closed before persistence or env mutation.
+ *   5. Filesystem write failure → `persist-failed` error.
+ *   6. Empty/whitespace input → `invalid-code` (renderer-friendly).
  *
  * The codec module is used as-is — round-tripping through the real
  * encrypt/decrypt path catches any drift between the two sides without
@@ -70,6 +72,20 @@ const SAMPLE_ENV = [
   "LVIS_DEMO_VENDOR=azure-foundry",
   "LVIS_DEMO_KEY_AZURE_FOUNDRY=sk-activated-key",
   "LVIS_DEMO_BASEURL_AZURE_FOUNDRY=https://example.openai.azure.com/openai/v1/",
+  "",
+].join("\n");
+
+const SAMPLE_ENV_ENDPOINT_ALIAS = [
+  "LVIS_DEMO_VENDOR=azure-foundry",
+  "LVIS_DEMO_KEY_AZURE_FOUNDRY=sk-activated-key",
+  "LVIS_DEMO_ENDPOINT_AZURE_FOUNDRY=https://endpoint.openai.azure.com/openai/v1/",
+  "",
+].join("\n");
+
+const SAMPLE_ENV_INVALID_ENDPOINT_ALIAS = [
+  "LVIS_DEMO_VENDOR=azure-foundry",
+  "LVIS_DEMO_KEY_AZURE_FOUNDRY=sk-activated-key",
+  "LVIS_DEMO_ENDPOINT_AZURE_FOUNDRY=https://endpoint.example/openai/v1/",
   "",
 ].join("\n");
 
@@ -158,6 +174,86 @@ describe("lvis:demo:activate — happy path", () => {
         input: expect.stringContaining("[demo-activation] activated"),
       }),
     );
+  });
+
+  it("recaptures endpoint alias payloads into azure-foundry baseUrl", async () => {
+    const { codec, credsMod, demoMod } = await loadDemoModule();
+    const code = codec.encryptActivationPayload(SAMPLE_ENV_ENDPOINT_ALIAS);
+
+    const deps = makeDeps();
+    demoMod.registerDemoHandlers(deps as never);
+
+    const result = (await invoke("lvis:demo:activate", { code })) as {
+      ok: true;
+      vendor: string;
+      requiresRelaunch?: boolean;
+    };
+    expect(result.ok).toBe(true);
+    expect(result.vendor).toBe("azure-foundry");
+
+    const persisted = readFileSync(
+      join(tempHome, "secrets", ".env.demo"),
+      "utf8",
+    );
+    expect(persisted).toBe(SAMPLE_ENV_ENDPOINT_ALIAS);
+    expect(process.env.LVIS_DEMO_ENDPOINT_AZURE_FOUNDRY).toBe(
+      "https://endpoint.openai.azure.com/openai/v1/",
+    );
+
+    const cfg = credsMod.getDemoVendorConfig("azure-foundry");
+    expect(cfg?.apiKey).toBe("sk-activated-key");
+    expect(cfg?.baseUrl).toBe("https://endpoint.openai.azure.com/openai/v1/");
+  });
+});
+
+describe("lvis:demo:status", () => {
+  it("reports captured demo activation even after LVIS_DEMO env is scrubbed", async () => {
+    const { credsMod, demoMod } = await loadDemoModule();
+    process.env.LVIS_DEMO_VENDOR = "azure-foundry";
+    process.env.LVIS_DEMO_KEY_AZURE_FOUNDRY = "sk-activated-key";
+    process.env.LVIS_DEMO_BASEURL_AZURE_FOUNDRY =
+      "https://example.openai.azure.com/openai/v1/";
+    credsMod.captureDemoCredentials();
+    delete process.env.LVIS_DEMO_VENDOR;
+    delete process.env.LVIS_DEMO_KEY_AZURE_FOUNDRY;
+    delete process.env.LVIS_DEMO_BASEURL_AZURE_FOUNDRY;
+
+    const deps = makeDeps();
+    demoMod.registerDemoHandlers(deps as never);
+
+    const result = await invoke("lvis:demo:status");
+    expect(result).toEqual({
+      ok: true,
+      activated: true,
+      vendor: "azure-foundry",
+    });
+  });
+
+  it("reports inactive when no demo credentials were captured at boot", async () => {
+    const { demoMod } = await loadDemoModule();
+    const deps = makeDeps();
+    demoMod.registerDemoHandlers(deps as never);
+
+    const result = await invoke("lvis:demo:status");
+    expect(result).toEqual({ ok: true, activated: false, vendor: null });
+  });
+
+  it("rejects an untrusted sender frame without leaking activation state", async () => {
+    const { credsMod, demoMod } = await loadDemoModule();
+    process.env.LVIS_DEMO_VENDOR = "azure-foundry";
+    process.env.LVIS_DEMO_KEY_AZURE_FOUNDRY = "sk-activated-key";
+    process.env.LVIS_DEMO_BASEURL_AZURE_FOUNDRY =
+      "https://example.openai.azure.com/openai/v1/";
+    credsMod.captureDemoCredentials();
+
+    const deps = makeDeps();
+    demoMod.registerDemoHandlers(deps as never);
+
+    const result = await invokeWithEvent(
+      "lvis:demo:status",
+      { senderFrame: { url: "https://evil.example/app" } },
+    );
+    expect(result).toEqual({ ok: false, error: "unauthorized-frame" });
   });
 });
 
@@ -317,6 +413,96 @@ describe("lvis:demo:activate — no-vendor", () => {
     expect(result).toEqual({ ok: false, error: "no-vendor" });
     // No persistence on validation failure.
     expect(existsSync(join(tempHome, "secrets", ".env.demo"))).toBe(false);
+  });
+
+  it("rejects a payload with an unknown LVIS_DEMO_VENDOR", async () => {
+    const { codec, demoMod } = await loadDemoModule();
+    const code = codec.encryptActivationPayload(
+      "LVIS_DEMO_VENDOR=not-a-vendor\nLVIS_DEMO_KEY_AZURE_FOUNDRY=sk-key\n",
+    );
+
+    const deps = makeDeps();
+    demoMod.registerDemoHandlers(deps as never);
+
+    const result = await invoke("lvis:demo:activate", { code });
+    expect(result).toEqual({ ok: false, error: "invalid-vendor" });
+    expect(existsSync(join(tempHome, "secrets", ".env.demo"))).toBe(false);
+    expect(relaunchMock).not.toHaveBeenCalled();
+    expect(exitMock).not.toHaveBeenCalled();
+  });
+});
+
+describe("lvis:demo:activate — invalid endpoint", () => {
+  it("rejects missing active vendor key before persistence, env injection, or relaunch arming", async () => {
+    const { codec, credsMod, demoMod } = await loadDemoModule();
+    const code = codec.encryptActivationPayload(
+      [
+        "LVIS_DEMO_VENDOR=azure-foundry",
+        "LVIS_DEMO_BASEURL_AZURE_FOUNDRY=https://example.openai.azure.com/openai/v1/",
+        "",
+      ].join("\n"),
+    );
+
+    const deps = makeDeps();
+    demoMod.registerDemoHandlers(deps as never);
+
+    const result = await invoke("lvis:demo:activate", { code });
+    expect(result).toEqual({ ok: false, error: "no-demo-key" });
+    expect(existsSync(join(tempHome, "secrets", ".env.demo"))).toBe(false);
+    expect(process.env.LVIS_DEMO_VENDOR).toBeUndefined();
+    expect(process.env.LVIS_DEMO_BASEURL_AZURE_FOUNDRY).toBeUndefined();
+    expect(credsMod.isDemoEnabled()).toBe(false);
+    expect(credsMod.getDemoVendorConfig("azure-foundry")).toBeNull();
+
+    const relaunch = await invoke("lvis:demo:relaunch-after-activation");
+    expect(relaunch).toEqual({ ok: false, error: "not-armed" });
+    expect(relaunchMock).not.toHaveBeenCalled();
+    expect(exitMock).not.toHaveBeenCalled();
+  });
+
+  it("rejects missing Azure Foundry endpoint before persistence, env injection, or relaunch arming", async () => {
+    const { codec, credsMod, demoMod } = await loadDemoModule();
+    const code = codec.encryptActivationPayload(
+      "LVIS_DEMO_VENDOR=azure-foundry\nLVIS_DEMO_KEY_AZURE_FOUNDRY=sk-key\n",
+    );
+
+    const deps = makeDeps();
+    demoMod.registerDemoHandlers(deps as never);
+
+    const result = await invoke("lvis:demo:activate", { code });
+    expect(result).toEqual({ ok: false, error: "missing-foundry-endpoint" });
+    expect(existsSync(join(tempHome, "secrets", ".env.demo"))).toBe(false);
+    expect(process.env.LVIS_DEMO_VENDOR).toBeUndefined();
+    expect(process.env.LVIS_DEMO_KEY_AZURE_FOUNDRY).toBeUndefined();
+    expect(credsMod.isDemoEnabled()).toBe(false);
+    expect(credsMod.getDemoVendorConfig("azure-foundry")).toBeNull();
+
+    const relaunch = await invoke("lvis:demo:relaunch-after-activation");
+    expect(relaunch).toEqual({ ok: false, error: "not-armed" });
+    expect(relaunchMock).not.toHaveBeenCalled();
+    expect(exitMock).not.toHaveBeenCalled();
+  });
+
+  it("rejects invalid Azure Foundry endpoint before persistence, env injection, or relaunch arming", async () => {
+    const { codec, credsMod, demoMod } = await loadDemoModule();
+    const code = codec.encryptActivationPayload(SAMPLE_ENV_INVALID_ENDPOINT_ALIAS);
+
+    const deps = makeDeps();
+    demoMod.registerDemoHandlers(deps as never);
+
+    const result = await invoke("lvis:demo:activate", { code });
+    expect(result).toEqual({ ok: false, error: "invalid-foundry-endpoint" });
+    expect(existsSync(join(tempHome, "secrets", ".env.demo"))).toBe(false);
+    expect(process.env.LVIS_DEMO_VENDOR).toBeUndefined();
+    expect(process.env.LVIS_DEMO_KEY_AZURE_FOUNDRY).toBeUndefined();
+    expect(process.env.LVIS_DEMO_ENDPOINT_AZURE_FOUNDRY).toBeUndefined();
+    expect(credsMod.isDemoEnabled()).toBe(false);
+    expect(credsMod.getDemoVendorConfig("azure-foundry")).toBeNull();
+
+    const relaunch = await invoke("lvis:demo:relaunch-after-activation");
+    expect(relaunch).toEqual({ ok: false, error: "not-armed" });
+    expect(relaunchMock).not.toHaveBeenCalled();
+    expect(exitMock).not.toHaveBeenCalled();
   });
 });
 

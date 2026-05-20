@@ -14,7 +14,7 @@ describe("shouldActivateDemoAutoplay", () => {
       shouldActivateDemoAutoplay({
         flagEnabled: undefined,
         onboardingCompleted: undefined,
-        demoVendorPresent: true,
+        demoActivated: true,
       }),
     ).toBe(false);
   });
@@ -24,17 +24,17 @@ describe("shouldActivateDemoAutoplay", () => {
       shouldActivateDemoAutoplay({
         flagEnabled: undefined,
         onboardingCompleted: false,
-        demoVendorPresent: true,
+        demoActivated: true,
       }),
     ).toBe(false);
   });
 
-  it("activates for returning users (onboardingCompleted=true) when vendor env is present", () => {
+  it("activates for returning users (onboardingCompleted=true) when demo activation is captured", () => {
     expect(
       shouldActivateDemoAutoplay({
         flagEnabled: undefined,
         onboardingCompleted: true,
-        demoVendorPresent: true,
+        demoActivated: true,
       }),
     ).toBe(true);
   });
@@ -44,7 +44,7 @@ describe("shouldActivateDemoAutoplay", () => {
       shouldActivateDemoAutoplay({
         flagEnabled: true,
         onboardingCompleted: true,
-        demoVendorPresent: true,
+        demoActivated: true,
       }),
     ).toBe(true);
   });
@@ -59,14 +59,14 @@ describe("shouldActivateDemoAutoplay", () => {
       shouldActivateDemoAutoplay({
         flagEnabled: true,
         onboardingCompleted: false,
-        demoVendorPresent: true,
+        demoActivated: true,
       }),
     ).toBe(false);
     expect(
       shouldActivateDemoAutoplay({
         flagEnabled: true,
         onboardingCompleted: undefined,
-        demoVendorPresent: true,
+        demoActivated: true,
       }),
     ).toBe(false);
   });
@@ -76,24 +76,24 @@ describe("shouldActivateDemoAutoplay", () => {
       shouldActivateDemoAutoplay({
         flagEnabled: false,
         onboardingCompleted: undefined,
-        demoVendorPresent: true,
+        demoActivated: true,
       }),
     ).toBe(false);
     expect(
       shouldActivateDemoAutoplay({
         flagEnabled: false,
         onboardingCompleted: true,
-        demoVendorPresent: true,
+        demoActivated: true,
       }),
     ).toBe(false);
   });
 
-  it("skips in packaged production (no LVIS_DEMO_VENDOR)", () => {
+  it("skips in packaged production (no captured demo activation)", () => {
     expect(
       shouldActivateDemoAutoplay({
         flagEnabled: true,
         onboardingCompleted: undefined,
-        demoVendorPresent: false,
+        demoActivated: false,
       }),
     ).toBe(false);
   });

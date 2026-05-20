@@ -83,8 +83,8 @@ export interface DemoActivationInputs {
   flagEnabled: boolean | undefined;
   /** `settings.features.onboardingCompleted` */
   onboardingCompleted: boolean | undefined;
-  /** Whether `process.env.LVIS_DEMO_VENDOR` was set at boot. */
-  demoVendorPresent: boolean;
+  /** Whether main captured demo credentials at boot. */
+  demoActivated: boolean;
 }
 
 /**
@@ -100,7 +100,7 @@ export interface DemoActivationInputs {
  * activates (developer / QA override path).
  *
  * Demo activates iff:
- *   (A) `LVIS_DEMO_VENDOR` is present
+ *   (A) main has captured demo activation state
  *   AND
  *   (B) user did NOT explicitly opt out (`demoAutoplayEnabled === false`)
  *   AND
@@ -119,17 +119,17 @@ export interface DemoActivationInputs {
  *   `onboardingCompleted === true` activate the demo.
  *
  * Resulting truth table (encoded for tests):
- *   flag=true    + completed=true  + vendor=true → activate (explicit enable, post-onboard)
- *   flag=true    + completed=false + vendor=true → skip (first-run → showcase)
- *   flag=true    + completed=undef + vendor=true → skip (first-run → showcase)
- *   flag=undef   + completed=true  + vendor=true → activate (returning user)
- *   flag=undef   + completed=false + vendor=true → skip (first-run → showcase)
- *   flag=undef   + completed=undef + vendor=true → skip (first-run → showcase)
- *   flag=false   + completed=*     + vendor=true → skip (explicit opt-out)
- *   *            + *               + vendor=false → skip (production dead path)
+ *   flag=true    + completed=true  + activated=true → activate (explicit enable, post-onboard)
+ *   flag=true    + completed=false + activated=true → skip (first-run → showcase)
+ *   flag=true    + completed=undef + activated=true → skip (first-run → showcase)
+ *   flag=undef   + completed=true  + activated=true → activate (returning user)
+ *   flag=undef   + completed=false + activated=true → skip (first-run → showcase)
+ *   flag=undef   + completed=undef + activated=true → skip (first-run → showcase)
+ *   flag=false   + completed=*     + activated=true → skip (explicit opt-out)
+ *   *            + *               + activated=false → skip (production dead path)
  */
 export function shouldActivateDemoAutoplay(inputs: DemoActivationInputs): boolean {
-  if (!inputs.demoVendorPresent) return false;
+  if (!inputs.demoActivated) return false;
   if (inputs.flagEnabled === false) return false;
   // First-run gate: activate only when onboarding has explicitly completed.
   // Applies to BOTH explicit opt-in (`flagEnabled === true`) and the
