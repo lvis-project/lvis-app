@@ -184,6 +184,61 @@ describe("LoginModal — chip-driven demo flow (activation → auth)", () => {
     expect(document.querySelector('[data-testid="login-modal:form"]')).toBeNull();
   });
 
+  it("keeps demo activation inside the chat transcript instead of a dedicated page", async () => {
+    const api = makeApi(async () => ({
+      ok: true,
+      vendor: "azure-foundry",
+      fieldsApplied: ["apiKey"],
+    }));
+    render(<LoginModal api={api} open onOpenChange={() => {}} />);
+
+    await waitFor(() => {
+      expect(document.querySelector('[data-testid="login-modal:chip-demo"]')).toBeTruthy();
+    });
+    clickDemoChip();
+
+    await waitFor(() => {
+      expect(document.querySelector('[data-testid="login-modal:user-turn"]')).toBeTruthy();
+      expect(document.querySelector('[data-testid="login-modal:assistant-reply"]')).toBeTruthy();
+      expect(
+        document.querySelector('[data-testid="login-modal:activation-code-input"]'),
+      ).toBeTruthy();
+    });
+    expect(document.querySelector('[data-page="activation"]')).toBeNull();
+    expect(document.querySelector('[data-testid="login-modal"]')).toBeTruthy();
+  });
+
+  it("does not reveal the auth checklist before the activation code is submitted", async () => {
+    vi.useFakeTimers({
+      toFake: ["setTimeout", "clearTimeout", "Date"],
+    });
+    try {
+      const api = makeApi(async () => ({
+        ok: true,
+        vendor: "azure-foundry",
+        fieldsApplied: ["apiKey"],
+      }));
+      render(<LoginModal api={api} open onOpenChange={() => {}} />);
+
+      clickDemoChip();
+      await act(async () => {
+        vi.advanceTimersByTime(3000);
+      });
+
+      expect(
+        document.querySelector('[data-testid="login-modal:activation-code-input"]'),
+      ).toBeTruthy();
+      expect(
+        document.querySelector('[data-testid="login-modal:auth-checklist"]'),
+      ).toBeNull();
+      expect(
+        (api as unknown as { loginMockup: ReturnType<typeof vi.fn> }).loginMockup,
+      ).not.toHaveBeenCalled();
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
   it("shows a Korean activation error when demo.activate rejects with invalid-code", async () => {
     const api = makeApi(
       async () => ({ ok: true, vendor: "azure-foundry", fieldsApplied: ["apiKey"] }),

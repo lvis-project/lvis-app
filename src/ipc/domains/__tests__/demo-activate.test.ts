@@ -73,6 +73,13 @@ const SAMPLE_ENV = [
   "",
 ].join("\n");
 
+const SAMPLE_ENV_ENDPOINT_ALIAS = [
+  "LVIS_DEMO_VENDOR=azure-foundry",
+  "LVIS_DEMO_KEY_AZURE_FOUNDRY=sk-activated-key",
+  "LVIS_DEMO_ENDPOINT_AZURE_FOUNDRY=https://endpoint.example/openai/v1/",
+  "",
+].join("\n");
+
 const ORIGINAL_ENV = { ...process.env };
 let tempHome: string;
 
@@ -158,6 +165,35 @@ describe("lvis:demo:activate — happy path", () => {
         input: expect.stringContaining("[demo-activation] activated"),
       }),
     );
+  });
+
+  it("recaptures endpoint alias payloads into azure-foundry baseUrl", async () => {
+    const { codec, credsMod, demoMod } = await loadDemoModule();
+    const code = codec.encryptActivationPayload(SAMPLE_ENV_ENDPOINT_ALIAS);
+
+    const deps = makeDeps();
+    demoMod.registerDemoHandlers(deps as never);
+
+    const result = (await invoke("lvis:demo:activate", { code })) as {
+      ok: true;
+      vendor: string;
+      requiresRelaunch?: boolean;
+    };
+    expect(result.ok).toBe(true);
+    expect(result.vendor).toBe("azure-foundry");
+
+    const persisted = readFileSync(
+      join(tempHome, "secrets", ".env.demo"),
+      "utf8",
+    );
+    expect(persisted).toBe(SAMPLE_ENV_ENDPOINT_ALIAS);
+    expect(process.env.LVIS_DEMO_ENDPOINT_AZURE_FOUNDRY).toBe(
+      "https://endpoint.example/openai/v1/",
+    );
+
+    const cfg = credsMod.getDemoVendorConfig("azure-foundry");
+    expect(cfg?.apiKey).toBe("sk-activated-key");
+    expect(cfg?.baseUrl).toBe("https://endpoint.example/openai/v1/");
   });
 });
 
