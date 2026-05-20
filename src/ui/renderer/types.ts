@@ -278,8 +278,8 @@ export type LvisApi = {
    * #893 — Top-level mockup credential login. On `ok: true` the host has
    * installed the demo API key into the encrypted secret store AND flipped
    * top-level settings (`authMode = "login"`, `provider = <vendor>`). The
-   * vendor is decided by the backend (`LVIS_DEMO_VENDOR`, default
-   * `"openai"`) — the renderer never sends one. The `error` codes are
+   * vendor is decided by the backend (captured `LVIS_DEMO_VENDOR`, default
+   * `"azure-foundry"`) — the renderer never sends one. The `error` codes are
    * kebab-case English (`invalid-credentials`, `no-demo-key`); the
    * user-facing Korean text is constructed in the caller.
    */
@@ -335,7 +335,7 @@ export type LvisApi = {
     >;
     activate: (code: string) => Promise<
       | { ok: true; vendor: string; requiresRelaunch?: boolean }
-      | { ok: false; error: "invalid-code" | "no-vendor" | "invalid-vendor" | "invalid-foundry-endpoint" | "persist-failed" | "unauthorized-frame" }
+      | { ok: false; error: "invalid-code" | "no-vendor" | "invalid-vendor" | "no-demo-key" | "missing-foundry-endpoint" | "invalid-foundry-endpoint" | "persist-failed" | "unauthorized-frame" }
     >;
     relaunchAfterActivation: () => Promise<
       | { ok: true }

@@ -8,7 +8,7 @@
  *
  * Top-level login (#893):
  *   The renderer no longer sends a `vendor` — Login wraps vendor selection.
- *   The backend reads `LVIS_DEMO_VENDOR` (default `"openai"`) via
+ *   The backend reads captured `LVIS_DEMO_VENDOR` (default `"azure-foundry"`) via
  *   `getDemoActiveVendor()`, persists the matching key, applies the full
  *   vendor config (baseUrl / model / vertex), and flips top-level settings
  *   `authMode = "login"` + `provider = <vendor>` in a single patch so the
@@ -134,7 +134,7 @@ export function registerAuthHandlers(deps: IpcDeps): void {
       const password = typeof payload?.password === "string" ? payload.password : "";
 
       // #893 top-level login — vendor is decided by the backend
-      // (LVIS_DEMO_VENDOR env, default "openai"), not by the renderer.
+      // (captured LVIS_DEMO_VENDOR env, default "azure-foundry"), not by the renderer.
       const vendor = getDemoActiveVendor();
 
       // Step 1 — credentials-validating. Emits `running` before the
@@ -164,7 +164,12 @@ export function registerAuthHandlers(deps: IpcDeps): void {
         progress.fail("llm-key-issuing", "no-demo-key", vendor);
         return { ok: false, error: "no-demo-key" };
       }
-      if (vendor === "azure-foundry" && demoConfig.baseUrl !== undefined) {
+      if (vendor === "azure-foundry") {
+        if (typeof demoConfig.baseUrl !== "string" || demoConfig.baseUrl.length === 0) {
+          progress.fail("llm-key-issuing", "missing-foundry-endpoint", vendor);
+          log.warn("loginMockup missing azure-foundry baseUrl");
+          return { ok: false, error: "missing-foundry-endpoint" };
+        }
         try {
           validateFoundryEndpoint(demoConfig.baseUrl);
         } catch (err) {
