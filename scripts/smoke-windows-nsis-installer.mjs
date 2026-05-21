@@ -8,10 +8,11 @@
  */
 
 import { spawn } from "node:child_process";
-import { existsSync, mkdtempSync, readdirSync, rmSync, statSync } from "node:fs";
+import { existsSync, mkdtempSync, readFileSync, readdirSync, rmSync, statSync } from "node:fs";
 import { basename, join, resolve } from "node:path";
 import { tmpdir } from "node:os";
 
+const packageJson = JSON.parse(readFileSync(new URL("../package.json", import.meta.url), "utf8"));
 const WINDOWS_SAFE_GPU_FLAGS = [
   "--disable-gpu",
   "--disable-software-rasterizer",
@@ -127,12 +128,23 @@ function findInstaller(options) {
 function defaultInstallDir() {
   const localAppData = process.env.LOCALAPPDATA;
   if (!localAppData) throw new Error("LOCALAPPDATA is not set");
-  return join(localAppData, "Programs", "LVIS");
+  if (typeof packageJson.name !== "string" || packageJson.name.length === 0) {
+    throw new Error("package.json name is required for NSIS one-click install path");
+  }
+  return join(localAppData, "Programs", packageJson.name);
 }
 
 function appendOutput(current, chunk) {
   const next = current + chunk.toString("utf8");
   return next.length > MAX_OUTPUT_CHARS ? next.slice(next.length - MAX_OUTPUT_CHARS) : next;
+}
+
+function removeTempDirBestEffort(dir) {
+  try {
+    rmSync(dir, { recursive: true, force: true });
+  } catch (err) {
+    process.stderr.write(`[windows-installer-smoke] warning: could not remove temp dir ${dir}: ${err.message}\n`);
+  }
 }
 
 async function runProcess(command, args, { timeoutMs, env = process.env } = {}) {
@@ -185,6 +197,15 @@ async function waitForFile(file, timeoutMs) {
     await new Promise((resolvePromise) => setTimeout(resolvePromise, 500));
   }
   throw new Error(`timed out waiting for file: ${file}`);
+}
+
+async function waitForFileRemoved(file, timeoutMs) {
+  const startedAt = Date.now();
+  while (Date.now() - startedAt < timeoutMs) {
+    if (!existsSync(file)) return;
+    await new Promise((resolvePromise) => setTimeout(resolvePromise, 500));
+  }
+  throw new Error(`timed out waiting for file removal: ${file}`);
 }
 
 async function launchSmoke(executable, timeoutMs) {
@@ -240,7 +261,7 @@ async function launchSmoke(executable, timeoutMs) {
       });
     });
   } finally {
-    rmSync(userDataDir, { recursive: true, force: true });
+    removeTempDirBestEffort(userDataDir);
   }
 }
 
@@ -279,9 +300,7 @@ async function main() {
   } finally {
     const uninstaller = findUninstaller(installDir);
     await runProcess(uninstaller, ["/S", "/KEEP_APP_DATA"], { timeoutMs: options.uninstallTimeoutMs });
-    if (existsSync(installedExe)) {
-      throw new Error(`uninstall completed but installed executable remains: ${installedExe}`);
-    }
+    await waitForFileRemoved(installedExe, 30_000);
   }
 }
 
