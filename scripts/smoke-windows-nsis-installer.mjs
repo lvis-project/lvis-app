@@ -21,14 +21,12 @@ import {
 } from "node:fs";
 import { basename, join, resolve } from "node:path";
 import { tmpdir } from "node:os";
+import {
+  prepareElectronLaunchArgs,
+  prepareElectronLaunchEnv,
+} from "./lib/electron-launch-options.mjs";
 
 const packageJson = JSON.parse(readFileSync(new URL("../package.json", import.meta.url), "utf8"));
-const WINDOWS_SAFE_GPU_FLAGS = [
-  "--disable-gpu",
-  "--disable-software-rasterizer",
-  "--disable-gpu-compositing",
-];
-const SANDBOX_BYPASS_FLAG = "--no-sandbox";
 const MAX_OUTPUT_CHARS = 16_000;
 const DESTRUCTIVE_SMOKE_ENV = "LVIS_ALLOW_DESTRUCTIVE_UNINSTALL_SMOKE";
 
@@ -297,19 +295,17 @@ function assertUserDataTargetsRemoved() {
 
 async function startInstalledApp(executable, timeoutMs) {
   const userDataDir = mkdtempSync(join(tmpdir(), "lvis-nsis-smoke-user-data-"));
-  const env = {
+  const env = prepareElectronLaunchEnv({
     ...process.env,
     ELECTRON_ENABLE_LOGGING: "1",
     LVIS_DEV_CONSOLE: "0",
     LVIS_USER_DATA_DIR: userDataDir,
-  };
-  delete env.ELECTRON_RUN_AS_NODE;
+  });
 
-  const args = [
-    `--user-data-dir=${userDataDir}`,
-    ...WINDOWS_SAFE_GPU_FLAGS,
-    SANDBOX_BYPASS_FLAG,
-  ];
+  const args = prepareElectronLaunchArgs([], env, {
+    profileName: "LVIS",
+    platform: "win32",
+  });
 
   try {
     return await new Promise((resolvePromise, reject) => {

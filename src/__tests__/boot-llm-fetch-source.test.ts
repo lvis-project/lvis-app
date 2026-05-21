@@ -10,7 +10,8 @@ describe("boot LLM fetch wiring regression guards", () => {
     const bootSource = await readSource("../boot.ts");
 
     expect(bootSource).toContain('import { createSafeLlmFetch } from "./main/safe-llm-fetch.js";');
-    expect(bootSource).toContain("const llmFetch = createSafeLlmFetch(net.fetch.bind(net));");
+    expect(bootSource).toContain("const electronNetFetch = net.fetch.bind(net);");
+    expect(bootSource).toContain("const llmFetch = createSafeLlmFetch(electronNetFetch);");
     expect(bootSource).not.toContain("net.fetch.bind(net) as typeof fetch");
   });
 
