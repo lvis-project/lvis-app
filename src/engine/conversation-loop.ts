@@ -368,7 +368,7 @@ export interface ConversationLoopDeps {
   auditLogger?: AuditLogger;
   /** Rebuilds reviewer classifier/cache bindings after `/permission reviewer ...`. */
   rewireReviewerAgent?: () => void;
-  /** Main-process fetch implementation for SDK-backed LLM calls. */
+  /** Main-process fetch implementation for Azure Foundry private-endpoint calls. */
   llmFetch?: typeof fetch;
 }
 
@@ -592,7 +592,9 @@ export class ConversationLoop {
       const createLoopProvider = (config: ProviderConfig): LLMProvider =>
         createProvider({
           ...config,
-          ...(this.deps.llmFetch ? { fetch: this.deps.llmFetch } : {}),
+          ...(config.vendor === "azure-foundry" && this.deps.llmFetch
+            ? { fetch: this.deps.llmFetch }
+            : {}),
         });
 
       const primary = createLoopProvider({
