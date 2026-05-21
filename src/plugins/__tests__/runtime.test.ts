@@ -1482,6 +1482,110 @@ export default async function createPlugin({ hostApi }) {
     expect(runtime.listPluginCards().find((card) => card.id === "p-deferred")?.loadStatus).toBe("loaded");
   });
 
+  it("surfaces dependency preparation progress on plugin cards", async () => {
+    const manifestPath = await writePlugin("p-progress");
+    await writeFile(
+      registryPath,
+      JSON.stringify({
+        version: 1,
+        plugins: [{ id: "p-progress", manifestPath, enabled: true }],
+      }),
+      "utf-8",
+    );
+
+    let resolvePrepare!: () => void;
+    const preparePromise = new Promise<void>((resolve) => {
+      resolvePrepare = resolve;
+    });
+    const runtime = makeRuntimeWithPreparation(({ pluginId, reportProgress }) => {
+      if (pluginId !== "p-progress") return undefined;
+      reportProgress?.({
+        phase: "installing-deps",
+        message: "의존성 설치 중 (최초 1회)...",
+        progressPct: 40.4,
+      });
+      return preparePromise;
+    });
+
+    await runtime.startAll();
+
+    const preparingCard = runtime.listPluginCards().find((card) => card.id === "p-progress");
+    expect(preparingCard?.loadStatus).toBe("preparing");
+    expect(preparingCard?.preparationStatus).toMatchObject({
+      phase: "installing-deps",
+      message: "의존성 설치 중 (최초 1회)...",
+      progressPct: 40,
+    });
+
+    resolvePrepare();
+    await expect(runtime.waitForPluginReady("p-progress")).resolves.toBeUndefined();
+    const loadedCard = runtime.listPluginCards().find((card) => card.id === "p-progress");
+    expect(loadedCard?.loadStatus).toBe("loaded");
+    expect(loadedCard?.preparationStatus).toBeUndefined();
+  });
+
+  it("ignores stale dependency preparation progress from cancelled generations", async () => {
+    const manifestPath = await writePlugin("p-stale-progress");
+    await writeFile(
+      registryPath,
+      JSON.stringify({
+        version: 1,
+        plugins: [{ id: "p-stale-progress", manifestPath, enabled: true }],
+      }),
+      "utf-8",
+    );
+
+    const progressReporters: Array<NonNullable<Parameters<
+      NonNullable<ConstructorParameters<typeof PluginRuntime>[0]["preparePluginStart"]>
+    >[0]["reportProgress"]>> = [];
+    const prepareResolves: Array<() => void> = [];
+    const runtime = makeRuntimeWithPreparation(({ pluginId, reportProgress }) => {
+      if (pluginId !== "p-stale-progress") return undefined;
+      if (reportProgress) progressReporters.push(reportProgress);
+      return new Promise<void>((resolve) => {
+        prepareResolves.push(resolve);
+      });
+    });
+
+    await expect(runtime.addPlugin("p-stale-progress")).resolves.toBe("preparing");
+    progressReporters[0]?.({
+      phase: "installing-deps",
+      message: "첫 번째 준비 작업",
+      progressPct: 20,
+    });
+    expect(runtime.listPluginCards().find((card) => card.id === "p-stale-progress")?.preparationStatus)
+      .toMatchObject({ phase: "installing-deps", message: "첫 번째 준비 작업", progressPct: 20 });
+
+    await runtime.removePlugin("p-stale-progress");
+    await writeFile(
+      registryPath,
+      JSON.stringify({
+        version: 1,
+        plugins: [{ id: "p-stale-progress", manifestPath, enabled: true }],
+      }),
+      "utf-8",
+    );
+
+    await expect(runtime.addPlugin("p-stale-progress")).resolves.toBe("preparing");
+    progressReporters[1]?.({
+      phase: "verifying",
+      message: "두 번째 준비 작업",
+      progressPct: 70,
+    });
+    progressReporters[0]?.({
+      phase: "error",
+      message: "취소된 이전 작업의 늦은 이벤트",
+      progressPct: 99,
+    });
+
+    expect(runtime.listPluginCards().find((card) => card.id === "p-stale-progress")?.preparationStatus)
+      .toMatchObject({ phase: "verifying", message: "두 번째 준비 작업", progressPct: 70 });
+
+    prepareResolves[1]?.();
+    await expect(runtime.waitForPluginReady("p-stale-progress")).resolves.toBeUndefined();
+    prepareResolves[0]?.();
+  });
+
   it("addPlugin returns while dependency preparation continues asynchronously", async () => {
     const existingPath = await writePlugin("p-existing");
     await writeFile(
@@ -1625,7 +1729,8 @@ export default async function createPlugin({ hostApi }) {
     resolveRemoved();
     resolveKept();
 
-    await expect(waitUntil(() => runtime.call("p_keep_one_ping"))).resolves.toBe("hi-p-keep-one-1");
+    await expect(runtime.waitForPluginReady("p-keep-one")).resolves.toBeUndefined();
+    expect(await runtime.call("p_keep_one_ping")).toBe("hi-p-keep-one-1");
     expect(runtime.listPluginIds()).toEqual(["p-keep-one"]);
     expect(runtime.listPluginCards().find((card) => card.id === "p-remove-one")).toBeUndefined();
     await expect(runtime.call("p_remove_one_ping")).rejects.toThrow(/Plugin method not found/);

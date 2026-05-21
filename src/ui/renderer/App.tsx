@@ -444,25 +444,52 @@ export function App() {
   // current statusTool result is `kind: "unauthed"`. The grid renders a
   // small 🔒 indicator on those entries so users see the missing-auth state
   // without first opening Settings.
-  const pluginEntries = useMemo<PluginEntry[]>(
-    () =>
-      pluginViews.map((view) => {
-        const card = pluginCards.find((candidate) => candidate.id === view.pluginId);
-        return {
-          viewKey: toViewKey(view),
-          pluginId: view.pluginId,
-          installAliases: getPluginInstallAliases(view.pluginId, card?.installAliases),
-          label: getPluginViewLabel(view),
-          icon: view.icon,
-          iconText: view.iconText,
-          unauthed: pluginAuthStatuses.get(view.pluginId)?.kind === "unauthed",
-        };
-      }),
-    [pluginViews, pluginAuthStatuses, pluginCards],
-  );
+  const pluginEntries = useMemo<PluginEntry[]>(() => {
+    const viewEntries: PluginEntry[] = pluginViews.map((view): PluginEntry => {
+      const card = pluginCards.find((candidate) => candidate.id === view.pluginId);
+      return {
+        viewKey: toViewKey(view),
+        pluginId: view.pluginId,
+        installAliases: getPluginInstallAliases(view.pluginId, card?.installAliases),
+        loadStatus: card?.loadStatus,
+        preparationStatus: card?.preparationStatus,
+        label: getPluginViewLabel(view),
+        icon: view.icon,
+        iconText: view.iconText,
+        unauthed: pluginAuthStatuses.get(view.pluginId)?.kind === "unauthed",
+      };
+    });
+    const viewKeys = new Set(viewEntries.map((entry) => entry.viewKey));
+    const preparingCardEntries = pluginCards.flatMap((card) => {
+      if (card.loadStatus !== "preparing") return [];
+      return (card.uiExtensions ?? [])
+        .map((extension): PluginEntry | null => {
+          const viewKey = `plugin:${card.id}:${extension.id}`;
+          if (viewKeys.has(viewKey)) return null;
+          return {
+            viewKey,
+            pluginId: card.id,
+            installAliases: getPluginInstallAliases(card.id, card.installAliases),
+            loadStatus: card.loadStatus,
+            preparationStatus: card.preparationStatus,
+            label: extension.displayName?.trim() || extension.title || card.name,
+            icon: card.icon,
+            iconText: card.iconText,
+            unauthed: false,
+          };
+        })
+        .filter((entry): entry is PluginEntry => entry !== null);
+    });
+    return [...viewEntries, ...preparingCardEntries];
+  }, [pluginViews, pluginAuthStatuses, pluginCards]);
 
   // Track in-flight plugin installs for the grid overlay spinner.
   const installingPlugins = useInstallingPlugins(api);
+
+  const hasPreparingPlugin = useMemo(() => {
+    if (pluginCards.some((card) => card.loadStatus === "preparing")) return true;
+    return Array.from(installingPlugins.values()).some((phase) => phase === "preparing");
+  }, [installingPlugins, pluginCards]);
 
   // Marketplace URL — sourced from settings (marketplace.realCloudBaseUrl).
   const { marketplaceUrl, loaded: marketplaceUrlLoaded } = useMarketplaceUrl(api);
@@ -476,6 +503,11 @@ export function App() {
     if (!marketplaceUrlReady) return;
     void api.openExternalUrl(marketplaceUrl);
   }, [api, marketplaceUrl, marketplaceUrlReady]);
+
+  const refreshPluginSurfaces = useCallback(() => {
+    void refreshCards();
+    void refreshViews();
+  }, [refreshCards, refreshViews]);
 
   const openDetachedPluginView = useCallback(
     async (viewKey: string): Promise<boolean> => {
@@ -1114,6 +1146,27 @@ export function App() {
     return unsubscribe;
   }, [api, refreshViews, refreshMarketplace, refreshCards]);
 
+  useEffect(() => {
+    if (typeof api.onPluginInstallProgress !== "function") return;
+    const unsubscribe = api.onPluginInstallProgress((payload) => {
+      if (payload.phase !== "preparing") return;
+      void refreshCards();
+      void refreshViews();
+    });
+    return unsubscribe;
+  }, [api, refreshViews, refreshCards]);
+
+  useEffect(() => {
+    if (!hasPreparingPlugin) return;
+    const refresh = () => {
+      void refreshCards();
+      void refreshViews();
+    };
+    refresh();
+    const interval = window.setInterval(refresh, 750);
+    return () => window.clearInterval(interval);
+  }, [hasPreparingPlugin, refreshViews, refreshCards]);
+
   // Same lifecycle for uninstall — PluginConfigTab and any other surface
   // drive uninstall through the IPC handler which now broadcasts a result
   // event. Without this subscription plugin entry state would stay stale
@@ -1410,6 +1463,7 @@ export function App() {
             onResolveAskQuestion={dismissAskQuestion}
             plugins={pluginEntries}
             onSelectPlugin={handleViewSelect}
+            onRefreshPlugins={refreshPluginSurfaces}
             commandActions={commandActions}
             commandPopoverOpen={commandPopoverOpen}
             onCommandPopoverOpenChange={setCommandPopoverOpen}
