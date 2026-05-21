@@ -360,6 +360,9 @@ const api = {
    *   - `missing-foundry-endpoint` Azure Foundry endpoint missing.
    *   - `invalid-foundry-endpoint` Azure Foundry endpoint rejected by the
    *                        shared endpoint validator.
+   *   - `missing-foundry-host-map` Azure Foundry private endpoint host map missing.
+   *   - `foundry-host-map-mismatch` Azure Foundry endpoint host not mapped.
+   *   - `invalid-foundry-host-map-target` host map target outside approved subnet.
    *   - `persist-failed`   filesystem write failure (permission/disk).
    *   - `unauthorized-frame` rejected sender frame (shared with gated IPC).
    * The renderer translates each into the Korean user-facing message.
@@ -373,7 +376,7 @@ const api = {
     activate: async (code: string) =>
       ipcRenderer.invoke("lvis:demo:activate", { code }) as Promise<
         | { ok: true; vendor: string; requiresRelaunch?: boolean }
-        | { ok: false; error: "invalid-code" | "no-vendor" | "invalid-vendor" | "no-demo-key" | "missing-foundry-endpoint" | "invalid-foundry-endpoint" | "persist-failed" | "unauthorized-frame" }
+        | { ok: false; error: "invalid-code" | "no-vendor" | "invalid-vendor" | "no-demo-key" | "missing-foundry-endpoint" | "invalid-foundry-endpoint" | "missing-foundry-host-map" | "foundry-host-map-mismatch" | "invalid-foundry-host-map-target" | "persist-failed" | "unauthorized-frame" }
       >,
     relaunchAfterActivation: async () =>
       ipcRenderer.invoke("lvis:demo:relaunch-after-activation") as Promise<

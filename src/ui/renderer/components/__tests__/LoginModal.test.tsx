@@ -162,6 +162,46 @@ describe("LoginModal — chip-driven demo flow (activation → auth)", () => {
     ).toHaveBeenCalledOnce();
   });
 
+  it("forceActivation opens the activation input even when demo status is already active", async () => {
+    const api = makeApi(
+      async () => ({
+        ok: true,
+        vendor: "azure-foundry",
+        fieldsApplied: ["apiKey", "baseUrl"],
+      }),
+      undefined,
+      undefined,
+      async () => ({ ok: true, activated: true, vendor: "azure-foundry" }),
+    );
+    render(
+      <LoginModal
+        api={api}
+        open
+        forceActivation
+        onOpenChange={() => {}}
+      />,
+    );
+
+    await waitFor(() => {
+      expect(
+        document.querySelector(
+          '[data-testid="login-modal:activation-code-input"]',
+        ),
+      ).toBeTruthy();
+    });
+    expect(
+      (api as unknown as { loginMockup: ReturnType<typeof vi.fn> }).loginMockup,
+    ).not.toHaveBeenCalled();
+    expect(
+      (api as unknown as { demo: { activate: ReturnType<typeof vi.fn> } }).demo
+        .activate,
+    ).not.toHaveBeenCalled();
+    expect(
+      (api as unknown as { demo: { status: ReturnType<typeof vi.fn> } }).demo
+        .status,
+    ).toHaveBeenCalledOnce();
+  });
+
   it("displays a Korean error message when the auth IPC call rejects", async () => {
     const api = makeApi(async () => {
       throw new Error("IPC channel disconnected");

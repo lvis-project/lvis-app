@@ -113,6 +113,7 @@ describe("auth:login-mockup — full vendor config application (#893)", () => {
     process.env.LVIS_DEMO_VENDOR = "azure-foundry";
     process.env.LVIS_DEMO_KEY_AZURE_FOUNDRY = "sk-azure-key";
     process.env.LVIS_DEMO_BASEURL_AZURE_FOUNDRY = "https://my-resource.openai.azure.com/";
+    process.env.LVIS_DEMO_HOST_MAP = "my-resource.openai.azure.com=10.182.192.20";
     const deps = makeDeps();
     const { registerAuthHandlers } = await loadAuthModule();
     registerAuthHandlers(deps as never);
@@ -144,6 +145,7 @@ describe("auth:login-mockup — full vendor config application (#893)", () => {
     process.env.LVIS_DEMO_VENDOR = "azure-foundry";
     process.env.LVIS_DEMO_KEY_AZURE_FOUNDRY = "sk-azure-key";
     process.env.LVIS_DEMO_ENDPOINT_AZURE_FOUNDRY = "https://endpoint.openai.azure.com/openai/v1/";
+    process.env.LVIS_DEMO_HOST_MAP = "endpoint.openai.azure.com=10.182.192.21";
     const deps = makeDeps();
     const { registerAuthHandlers } = await loadAuthModule();
     registerAuthHandlers(deps as never);
@@ -171,6 +173,62 @@ describe("auth:login-mockup — full vendor config application (#893)", () => {
         },
       },
     });
+  });
+
+  it("rejects azure-foundry demo config when the private endpoint host map is missing", async () => {
+    process.env.LVIS_DEMO_VENDOR = "azure-foundry";
+    process.env.LVIS_DEMO_KEY_AZURE_FOUNDRY = "sk-azure-key";
+    process.env.LVIS_DEMO_ENDPOINT_AZURE_FOUNDRY = "https://endpoint.openai.azure.com/openai/v1/";
+    const deps = makeDeps();
+    const { registerAuthHandlers } = await loadAuthModule();
+    registerAuthHandlers(deps as never);
+
+    const result = await invoke("lvis:auth:login-mockup", {
+      username: "demo",
+      password: "demo123",
+    }) as { ok: boolean; error?: string };
+
+    expect(result).toEqual({ ok: false, error: "missing-foundry-host-map" });
+    expect(deps.settingsService.setSecret).not.toHaveBeenCalled();
+    expect(deps.settingsService.patch).not.toHaveBeenCalled();
+  });
+
+  it("rejects azure-foundry demo config when the host map does not cover the endpoint", async () => {
+    process.env.LVIS_DEMO_VENDOR = "azure-foundry";
+    process.env.LVIS_DEMO_KEY_AZURE_FOUNDRY = "sk-azure-key";
+    process.env.LVIS_DEMO_ENDPOINT_AZURE_FOUNDRY = "https://endpoint.openai.azure.com/openai/v1/";
+    process.env.LVIS_DEMO_HOST_MAP = "other.openai.azure.com=10.182.192.23";
+    const deps = makeDeps();
+    const { registerAuthHandlers } = await loadAuthModule();
+    registerAuthHandlers(deps as never);
+
+    const result = await invoke("lvis:auth:login-mockup", {
+      username: "demo",
+      password: "demo123",
+    }) as { ok: boolean; error?: string };
+
+    expect(result).toEqual({ ok: false, error: "foundry-host-map-mismatch" });
+    expect(deps.settingsService.setSecret).not.toHaveBeenCalled();
+    expect(deps.settingsService.patch).not.toHaveBeenCalled();
+  });
+
+  it("rejects azure-foundry demo config when the host map target is outside the approved subnet", async () => {
+    process.env.LVIS_DEMO_VENDOR = "azure-foundry";
+    process.env.LVIS_DEMO_KEY_AZURE_FOUNDRY = "sk-azure-key";
+    process.env.LVIS_DEMO_ENDPOINT_AZURE_FOUNDRY = "https://endpoint.openai.azure.com/openai/v1/";
+    process.env.LVIS_DEMO_HOST_MAP = "endpoint.openai.azure.com=169.254.169.254";
+    const deps = makeDeps();
+    const { registerAuthHandlers } = await loadAuthModule();
+    registerAuthHandlers(deps as never);
+
+    const result = await invoke("lvis:auth:login-mockup", {
+      username: "demo",
+      password: "demo123",
+    }) as { ok: boolean; error?: string };
+
+    expect(result).toEqual({ ok: false, error: "invalid-foundry-host-map-target" });
+    expect(deps.settingsService.setSecret).not.toHaveBeenCalled();
+    expect(deps.settingsService.patch).not.toHaveBeenCalled();
   });
 
   it("rejects azure-foundry demo baseUrl that fails the settings endpoint validator", async () => {
@@ -270,6 +328,7 @@ describe("auth:login-mockup — full vendor config application (#893)", () => {
     process.env.LVIS_DEMO_KEY_AZURE_FOUNDRY = "sk-full-config";
     process.env.LVIS_DEMO_BASEURL_AZURE_FOUNDRY = "https://resource.openai.azure.com/";
     process.env.LVIS_DEMO_MODEL_AZURE_FOUNDRY = "gpt-4o-deployment";
+    process.env.LVIS_DEMO_HOST_MAP = "resource.openai.azure.com=10.182.192.22";
     const deps = makeDeps();
     const { registerAuthHandlers } = await loadAuthModule();
     registerAuthHandlers(deps as never);
