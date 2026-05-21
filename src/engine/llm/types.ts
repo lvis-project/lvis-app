@@ -350,6 +350,12 @@ export interface ProviderConfig {
   apiKey: string;
   model?: string;
   baseUrl?: string;
+  /**
+   * Optional fetch implementation for SDK-backed providers. Electron main
+   * passes `net.fetch` so private-endpoint/demo host mappings use Chromium's
+   * network stack instead of Node's resolver.
+   */
+  fetch?: typeof fetch;
   /** Vertex AI — GCP project ID (required for vendor="vertex-ai"). */
   vertexProject?: string;
   /** Vertex AI — GCP region (default "us-central1"). */
