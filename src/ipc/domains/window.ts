@@ -7,9 +7,9 @@
 import { BrowserWindow, ipcMain, type BrowserWindow as ElectronBrowserWindow, type IpcMainInvokeEvent } from "electron";
 import { resolveAppIconPath } from "../../main/app-icon.js";
 import {
+  buildRenderHtmlPreviewShell,
   normalizeOpenHtmlPreviewWindowPayload,
   RENDER_HTML_PARTITION,
-  wrapRenderHtmlDocument,
   type OpenHtmlPreviewWindowResult,
 } from "../../shared/render-html-preview.js";
 import { validateSender, auditUnauthorized, UNAUTHORIZED_FRAME } from "../gated.js";
@@ -94,7 +94,14 @@ export function registerWindowHandlers(deps: IpcDeps): void {
 
     const parent = getSenderWindow(e) ?? getMainWindow() ?? undefined;
     const title = previewPayload.title ?? "HTML 렌더";
-    const documentHtml = wrapRenderHtmlDocument(previewPayload.html, previewPayload.allowScripts === true);
+    const documentHtml = buildRenderHtmlPreviewShell({
+      html: previewPayload.html,
+      title,
+      allowScripts: previewPayload.allowScripts === true,
+      requiresScripts: previewPayload.requiresScripts === true,
+      warnings: previewPayload.warnings,
+      themeTokens: previewPayload.themeTokens,
+    });
     const dataUrl = `data:text/html;charset=utf-8,${encodeURIComponent(documentHtml)}`;
     const win = new BrowserWindow({
       parent,
@@ -110,7 +117,10 @@ export function registerWindowHandlers(deps: IpcDeps): void {
         sandbox: true,
         webSecurity: true,
         webviewTag: false,
-        javascript: previewPayload.allowScripts === true,
+        // JavaScript stays enabled for the host-owned toolbar shell. The
+        // untrusted render_html document is isolated in a sandboxed iframe,
+        // and the in-window toggle only changes that iframe's script sandbox.
+        javascript: true,
         partition: RENDER_HTML_PARTITION,
       },
     });
