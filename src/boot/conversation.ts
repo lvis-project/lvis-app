@@ -188,6 +188,8 @@ export interface ConversationDeps {
   auditLogger?: AuditLogger;
   /** Rebuild the Layer 5 reviewer after persisted reviewer settings change. */
   rewireReviewerAgent?: () => void;
+  /** Main-process fetch implementation for SDK-backed LLM calls. */
+  llmFetch?: typeof fetch;
 }
 
 /**
@@ -217,6 +219,7 @@ export type RoutineConversationLoopDeps = Pick<
   | "scriptHookManager"
   | "bashAstValidator"
   | "pluginRuntime"
+  | "llmFetch"
   | "auditLogger"
 >;
 
@@ -266,6 +269,7 @@ export function createRoutineConversationLoop(
     bashAstValidator: deps.bashAstValidator,
     pluginRuntime: deps.pluginRuntime,
     auditLogger: deps.auditLogger,
+    llmFetch: deps.llmFetch,
     allowedPluginIds,
     forcedActivePluginIds,
     additionalDirectories: scope?.directories ?? [],
@@ -303,6 +307,7 @@ export function createConversationLoop(deps: ConversationDeps): ConversationLoop
     notificationService: deps.notificationService,
     auditLogger: deps.auditLogger,
     rewireReviewerAgent: deps.rewireReviewerAgent,
+    llmFetch: deps.llmFetch,
   });
 }
 

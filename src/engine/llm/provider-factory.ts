@@ -52,7 +52,7 @@ class LazyVercelProvider implements LLMProvider {
               cfg.vendor,
               cfg.apiKey,
               baseUrl,
-              undefined,
+              cfg.fetch,
               {
                 vertexProject: cfg.vertexProject,
                 vertexLocation: cfg.vertexLocation,

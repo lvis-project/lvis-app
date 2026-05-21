@@ -37,7 +37,7 @@
  * No plugin-specific code lives here — all plugins register themselves via the
  * HostApi manufactured in `steps/plugin-runtime.ts`.
  */
-import { app, powerMonitor } from "electron";
+import { app, net, shell } from "electron";
 import type { BrowserWindow } from "electron";
 import { BrowserWindow as BrowserWindowValue } from "electron";
 import { randomUUID } from "node:crypto";
@@ -71,7 +71,6 @@ import {
 } from "./main/plugin-auth-partition-store.js";
 import { openLinkWindow as openLinkWindowService } from "./main/link-window-service.js";
 import { openAuthPartitionViewer as openAuthPartitionViewerService } from "./main/auth-partition-viewer-service.js";
-import { shell } from "electron";
 
 import { type AppServices, emitEvent, onEvent } from "./boot/types.js";
 import { PERMISSIONS, ROUTINES_V2 } from "./shared/ipc-channels.js";
@@ -92,6 +91,7 @@ import { RoutinesScheduler } from "./main/routines-scheduler.js";
 import { SessionTodoStore } from "./main/session-todo-store.js";
 import { AskUserQuestionGate, IPC_ASK_USER_QUESTION_REQUEST } from "./main/ask-user-question-gate.js";
 import { NotificationService } from "./main/notification-service.js";
+import { createSafeLlmFetch } from "./main/safe-llm-fetch.js";
 import { PreferenceRefreshService } from "./memory/preference-refresh-service.js";
 import { SkillStore } from "./main/skill-store.js";
 import { SkillOverlay } from "./main/skill-overlay.js";
@@ -174,6 +174,7 @@ export async function bootstrap(
   getMainWindow: () => BrowserWindow | null = () => mainWindow,
 ): Promise<AppServices> {
   log.info("boot: starting...");
+  const llmFetch = createSafeLlmFetch(net.fetch.bind(net));
 
   // Seed user-facing docs into `~/.lvis/` before any other component reads
   // home state. AGENTS.md is the LLM-facing system reference; on first boot
@@ -605,6 +606,7 @@ export async function bootstrap(
       vendor: llmVendor,
       apiKey: apiKey ?? "",
       model: block.model,
+      ...(llmVendor === "azure-foundry" ? { fetch: llmFetch } : {}),
       ...(block.baseUrl ? { baseUrl: block.baseUrl } : {}),
       ...(block.vertexProject ? { vertexProject: block.vertexProject } : {}),
       ...(block.vertexLocation ? { vertexLocation: block.vertexLocation } : {}),
@@ -771,6 +773,7 @@ export async function bootstrap(
     bashAstValidator,
     pluginRuntime,
     auditLogger: bootAuditLogger,
+    llmFetch,
   };
   const routineEngine = createRoutineEngine({
     createConversationLoop: (input) => createRoutineConversationLoop(
@@ -837,6 +840,7 @@ export async function bootstrap(
     notificationService,
     auditLogger: bootAuditLogger,
     rewireReviewerAgent,
+    llmFetch,
   });
 
   // Late-binding 주입 — ConversationLoop 생성 직후.
