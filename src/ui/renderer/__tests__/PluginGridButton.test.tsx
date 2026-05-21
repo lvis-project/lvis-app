@@ -18,6 +18,7 @@ function renderGrid(
   opts: {
     installingPlugins?: Map<string, InstallPhase>;
     onSelect?: (k: string) => void;
+    onRefreshPlugins?: () => void;
     onOpenMarketplace?: () => void;
     marketplaceUrlReady?: boolean;
   } = {},
@@ -32,6 +33,7 @@ function renderGrid(
         plugins={plugins}
         installingPlugins={opts.installingPlugins}
         onSelect={onSelect}
+        onRefreshPlugins={opts.onRefreshPlugins}
         onOpenMarketplace={onOpenMarketplace}
         marketplaceUrlReady={marketplaceUrlReady}
       />
@@ -51,6 +53,13 @@ describe("PluginGridButton v3", () => {
     renderGrid(plugins);
     fireEvent.click(screen.getByTestId("plugin-grid-button"));
     expect(screen.getByTestId("plugin-grid-popover")).toBeInTheDocument();
+  });
+
+  it("requests fresh plugin cards and views when the popover opens", () => {
+    const onRefreshPlugins = vi.fn();
+    renderGrid(makePlugins(1), { onRefreshPlugins });
+    fireEvent.click(screen.getByTestId("plugin-grid-button"));
+    expect(onRefreshPlugins).toHaveBeenCalledOnce();
   });
 
   it("renders plugins in a fluid auto-fill grid", () => {
@@ -101,6 +110,25 @@ describe("PluginGridButton v3", () => {
     expect(installingCell.className).toContain("cursor-default");
     // Phase label sits inside the spinner ring.
     expect(screen.getByTestId("plugin-cell-plugin-test-1-main-phase").textContent).toBe("재시작");
+  });
+
+  it("shows preparation detail for preparing registered plugin cells", () => {
+    const plugins = makePlugins(2);
+    plugins[0].loadStatus = "preparing";
+    plugins[0].preparationStatus = {
+      phase: "installing-deps",
+      message: "의존성 설치 중 (최초 1회)...",
+      progressPct: 40,
+      updatedAt: "2026-05-21T00:00:00.000Z",
+    };
+    renderGrid(plugins);
+    fireEvent.click(screen.getByTestId("plugin-grid-button"));
+
+    const preparingCell = screen.getByTestId("plugin-cell-plugin-test-0-main");
+    expect(preparingCell).toHaveAttribute("aria-busy", "true");
+    expect(screen.getByTestId("plugin-cell-plugin-test-0-main-phase").textContent).toBe("준비");
+    expect(screen.getByTestId("plugin-cell-plugin-test-0-main-preparation").textContent).toBe("라이브러리 40%");
+    expect(preparingCell).toHaveAttribute("title", expect.stringContaining("의존성 설치 중"));
   });
 
   it("disables click on installing plugin cells", () => {

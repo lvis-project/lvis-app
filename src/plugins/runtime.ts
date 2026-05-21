@@ -19,6 +19,8 @@ export {
 export type {
   PluginCard,
   PluginPerfStats,
+  PluginPreparationProgressInput,
+  PluginPreparationStatus,
   PluginToolInvocationContext,
   PluginToolInvocationDelegate,
   PluginRuntimeOptions,

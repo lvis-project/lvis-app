@@ -6,6 +6,7 @@ import { Popover, PopoverContent, PopoverTrigger } from "../../../components/ui/
 import { Tooltip, TooltipContent, TooltipTrigger } from "../../../components/ui/tooltip.js";
 import { pluginIconFor } from "../utils/plugin-icon.js";
 import type { InstallPhase } from "../hooks/use-plugin-marketplace.js";
+import type { PluginCardSummary } from "../types.js";
 
 const PHASE_LABEL: Record<InstallPhase, string> = {
   downloading: "다운로드",
@@ -16,12 +17,40 @@ const PHASE_LABEL: Record<InstallPhase, string> = {
   preparing: "준비",
 };
 
+const PREPARATION_SHORT_LABEL: Record<string, string> = {
+  pending: "준비",
+  "installing-python": "Python",
+  "installing-deps": "라이브러리",
+  verifying: "검증",
+  ready: "완료",
+  error: "실패",
+};
+
+function formatPreparationText(status: PluginCardSummary["preparationStatus"]): string | null {
+  if (!status) return null;
+  const label = PREPARATION_SHORT_LABEL[status.phase] ?? status.phase;
+  const pct = typeof status.progressPct === "number" && Number.isFinite(status.progressPct)
+    ? ` ${Math.max(0, Math.min(100, Math.round(status.progressPct)))}%`
+    : "";
+  return `${label}${pct}`;
+}
+
+function formatPreparationTitle(status: PluginCardSummary["preparationStatus"]): string | null {
+  if (!status) return null;
+  const text = formatPreparationText(status);
+  return [text, status.message].filter(Boolean).join(" · ");
+}
+
 export interface PluginEntry {
   viewKey: string;
   /** Plugin id owning the view — drives auth-state lookup. @optional */
   pluginId?: string;
   /** Request slugs that install/update this plugin, including marketplace aliases. */
   installAliases?: string[];
+  /** Runtime card status for surfacing host-managed dependency preparation. */
+  loadStatus?: PluginCardSummary["loadStatus"];
+  /** Current dependency/runtime preparation step while loadStatus is "preparing". */
+  preparationStatus?: PluginCardSummary["preparationStatus"];
   label: string;
   /** Lucide icon name from the plugin manifest (PascalCase, e.g. "Mic"). */
   icon?: string;
@@ -50,6 +79,8 @@ interface PluginGridButtonProps {
    */
   installingPlugins?: ReadonlyMap<string, InstallPhase>;
   onSelect: (viewKey: string) => void;
+  /** Refresh host plugin cards/views when the popover is opened. */
+  onRefreshPlugins?: () => void;
   /** Called when the user clicks the marketplace cell or the empty-state CTA. */
   onOpenMarketplace: () => void;
   /** `true` once the marketplace URL has finished loading and is non-empty; false while loading or when settings provided no URL. */
@@ -60,6 +91,7 @@ export function PluginGridButton({
   plugins,
   installingPlugins,
   onSelect,
+  onRefreshPlugins,
   onOpenMarketplace,
   marketplaceUrlReady = false,
 }: PluginGridButtonProps) {
@@ -113,6 +145,11 @@ export function PluginGridButton({
     onSelect(viewKey);
   };
 
+  const handleOpenChange = (nextOpen: boolean) => {
+    setOpen(nextOpen);
+    if (nextOpen) onRefreshPlugins?.();
+  };
+
   const isEmpty = plugins.length === 0 && (!installingPlugins || installingPlugins.size === 0);
 
   // Slugs that are installing but not yet registered as PluginEntry — render
@@ -144,7 +181,7 @@ export function PluginGridButton({
   );
 
   return (
-    <Popover open={open} onOpenChange={setOpen}>
+    <Popover open={open} onOpenChange={handleOpenChange}>
       <Tooltip>
         <TooltipTrigger asChild>
           <PopoverTrigger asChild>
@@ -223,8 +260,12 @@ export function PluginGridButton({
               const cellTestId = p.viewKey.replace(/:/g, "-");
               const phase = installKeysFor(p)
                 .map((key) => installingPlugins?.get(key))
-                .find((value): value is InstallPhase => value !== undefined);
+                .find((value): value is InstallPhase => value !== undefined)
+                ?? (p.loadStatus === "preparing" ? "preparing" : undefined);
               const isInstalling = phase !== undefined;
+              const phaseLabel = phase ? PHASE_LABEL[phase] : undefined;
+              const preparationText = formatPreparationText(p.preparationStatus);
+              const preparationTitle = formatPreparationTitle(p.preparationStatus);
               const Icon = pluginIconFor({ icon: p.icon, iconText: p.iconText });
 
               return (
@@ -239,8 +280,10 @@ export function PluginGridButton({
                   aria-busy={isInstalling}
                   aria-describedby={p.unauthed ? `${p.viewKey}-unauthed` : undefined}
                   title={
-                    isInstalling
-                      ? `${p.label} ${PHASE_LABEL[phase]} 중...`
+                    isInstalling && phaseLabel
+                      ? preparationTitle
+                        ? `${p.label} ${phaseLabel} 중 — ${preparationTitle}`
+                        : `${p.label} ${phaseLabel} 중...`
                       : p.unauthed
                         ? `${p.label} — 클릭하여 로그인`
                         : undefined
@@ -264,7 +307,7 @@ export function PluginGridButton({
                           className="absolute inset-0 flex items-center justify-center text-[8px] font-semibold text-foreground leading-none z-10 pointer-events-none"
                           data-testid={`plugin-cell-${cellTestId}-phase`}
                         >
-                          {PHASE_LABEL[phase]}
+                          {phaseLabel}
                         </span>
                       </>
                     )}
@@ -279,6 +322,14 @@ export function PluginGridButton({
                     )}
                   </span>
                   <span className="text-[11px] font-bold truncate max-w-[64px]">{p.label}</span>
+                  {preparationText && (
+                    <span
+                      className="max-w-[72px] truncate text-[9px] font-medium text-warning"
+                      data-testid={`plugin-cell-${cellTestId}-preparation`}
+                    >
+                      {preparationText}
+                    </span>
+                  )}
                 </button>
               );
             })}

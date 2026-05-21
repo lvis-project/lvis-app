@@ -85,6 +85,8 @@ export interface PythonRuntimeBootstrapperOptions {
   lockFilePath?: string;
   /** Force uv pip sync even when a ready sentinel exists. */
   forceSetup?: boolean;
+  /** Optional observer for status surfaces that need scoped progress. */
+  onStatus?: (status: BootstrapStatus) => void;
 }
 
 function isWithinDirectory(candidatePath: string, directoryPath: string): boolean {
@@ -156,6 +158,7 @@ export class PythonRuntimeBootstrapper {
   async ensureReadyForPluginManifest(
     manifestPath: string,
     mainWindow: BrowserWindow,
+    onStatus?: (status: BootstrapStatus) => void,
   ): Promise<RuntimeResult | null> {
     const lockFileName = this.options.lockFileName ?? LOCK_FILE_RESOURCE_NAME;
     const candidates = await this.lockCandidatesFromManifest(manifestPath, lockFileName);
@@ -184,6 +187,7 @@ export class PythonRuntimeBootstrapper {
       lockFilePath: selectedLockFile,
       runtimeDir,
       forceSetup: false,
+      onStatus: onStatus ?? this.options.onStatus,
     });
     return bootstrapper.ensureReady(mainWindow);
   }
@@ -588,6 +592,11 @@ export class PythonRuntimeBootstrapper {
   // ─── private: IPC 상태 발행 ───────────────────────
 
   private sendStatus(status: BootstrapStatus): void {
+    try {
+      this.options.onStatus?.(status);
+    } catch (err) {
+      log.warn("python runtime status observer failed: %s", (err as Error).message);
+    }
     try {
       this.mainWindow?.webContents.send("bootstrap.status", status);
     } catch {

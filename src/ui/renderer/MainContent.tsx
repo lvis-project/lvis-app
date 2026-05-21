@@ -59,6 +59,7 @@ export interface MainContentProps {
   // plugin grid for InputActionBar
   plugins: PluginEntry[];
   onSelectPlugin: (viewKey: string) => void;
+  onRefreshPlugins?: () => void;
   // command popover
   commandActions: QuickAction[];
   commandPopoverOpen: boolean;
@@ -110,6 +111,7 @@ function HomeChatPane(props: MainContentProps) {
         onResolveAskQuestion={props.onResolveAskQuestion}
         plugins={props.plugins}
         onSelectPlugin={props.onSelectPlugin}
+        onRefreshPlugins={props.onRefreshPlugins}
         currentSessionKind={props.currentSessionKind}
         currentSessionTitle={props.currentSessionTitle}
         sessions={props.sessions}

@@ -16,6 +16,17 @@ import { PluginRuntime } from "../runtime.js";
 function writePlugin(root: string, id: string, opts: {
   name: string;
   tools: string[];
+  icon?: string;
+  iconText?: string;
+  ui?: Array<{
+    id: string;
+    slot: "sidebar";
+    kind: "embedded-module" | "embedded-page" | "info-card" | "action";
+    title: string;
+    displayName?: string;
+    entry?: string;
+    exportName?: string;
+  }>;
   toolSchemas?: Record<string, {
     description: string;
     category: "read" | "write" | "shell" | "network";
@@ -31,7 +42,10 @@ function writePlugin(root: string, id: string, opts: {
     description: "Test fixture.",
     publisher: "Test fixture",
     entry: "index.mjs",
+    icon: opts.icon,
+    iconText: opts.iconText,
     tools: opts.tools,
+    ui: opts.ui,
     toolSchemas: opts.toolSchemas,
   };
   writeFileSync(join(dir, "plugin.json"), JSON.stringify(manifest));
@@ -88,6 +102,42 @@ describe("PluginRuntime.listPluginCards — Phase 1.5 Option C catalog", () => {
     // Per-tool descriptions from toolSchemas are still accessible via toolDescriptions.
     expect(cards[0].toolDescriptions?.["meeting_start"]).toContain("회의 시작");
     expect(cards[0].toolDescriptions?.["meeting_push_chunk"]).toContain("오디오 청크 전송");
+  });
+
+  it("surfaces manifest sidebar UI metadata on plugin cards", async () => {
+    const manifestA = writePlugin(tmp, "example-indexer", {
+      name: "Local Indexer",
+      tools: ["index_scan"],
+      icon: "Plug",
+      iconText: "LI",
+      ui: [
+        {
+          id: "local-indexer-control",
+          slot: "sidebar",
+          kind: "embedded-module",
+          title: "Local Indexer",
+          entry: "dist/ui/indexer-control.js",
+          exportName: "PluginUi",
+        },
+      ],
+    });
+
+    const runtime = new PluginRuntime({ hostRoot: tmp, manifestPaths: [manifestA] });
+    await runtime.load();
+
+    const card = runtime.listPluginCards()[0];
+    expect(card.icon).toBe("Plug");
+    expect(card.iconText).toBe("LI");
+    expect(card.uiExtensions).toEqual([
+      expect.objectContaining({
+        id: "local-indexer-control",
+        slot: "sidebar",
+        kind: "embedded-module",
+        title: "Local Indexer",
+        entry: "dist/ui/indexer-control.js",
+        exportName: "PluginUi",
+      }),
+    ]);
   });
 
   it("uses manifest description when toolSchemas absent", async () => {
