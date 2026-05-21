@@ -447,6 +447,88 @@ describe("useStatusBar — combined health producer", () => {
     expect(health?.tooltip).toContain("Market: online");
   });
 
+  it("keeps the last online health visible while a background refresh is in flight", async () => {
+    let resolveSecondLlm: (value: {
+      configured: true;
+      online: true;
+      vendor: string;
+      model: string;
+      latencyMs: number;
+    }) => void = () => undefined;
+    let resolveSecondMarket: (value: { configured: boolean; online: boolean }) => void =
+      () => undefined;
+
+    const pingAiProvider = vi
+      .fn()
+      .mockResolvedValueOnce({
+        configured: true as const,
+        online: true as const,
+        vendor: "openai",
+        model: "gpt-5.4",
+        latencyMs: 12,
+      })
+      .mockImplementationOnce(
+        () =>
+          new Promise<{
+            configured: true;
+            online: true;
+            vendor: string;
+            model: string;
+            latencyMs: number;
+          }>((resolve) => {
+            resolveSecondLlm = resolve;
+          }),
+      );
+    const pingMarketplace = vi
+      .fn()
+      .mockResolvedValueOnce({ configured: true, online: true })
+      .mockImplementationOnce(
+        () =>
+          new Promise<{ configured: boolean; online: boolean }>((resolve) => {
+            resolveSecondMarket = resolve;
+          }),
+      );
+
+    const api = makeApi({
+      pingAiProvider,
+      pingMarketplace,
+    });
+
+    const { result } = renderHook(() => useStatusBar({ api }));
+
+    await waitFor(() => {
+      const health = result.current.persistent.find((p) => p.id === "health:services");
+      expect(health?.severity).toBe("success");
+      expect(health?.tooltip).toContain("LLM: online");
+      expect(health?.tooltip).toContain("Market: online");
+    });
+
+    await act(async () => {
+      vi.advanceTimersByTime(30_000);
+      await Promise.resolve();
+    });
+
+    expect(pingAiProvider).toHaveBeenCalledTimes(2);
+    expect(pingMarketplace).toHaveBeenCalledTimes(2);
+    const healthDuringRefresh = result.current.persistent.find((p) => p.id === "health:services");
+    expect(healthDuringRefresh?.severity).toBe("success");
+    expect(healthDuringRefresh?.tooltip).toContain("LLM: online");
+    expect(healthDuringRefresh?.tooltip).toContain("Market: online");
+    expect(healthDuringRefresh?.tooltip).not.toContain("checking");
+
+    await act(async () => {
+      resolveSecondLlm({
+        configured: true,
+        online: true,
+        vendor: "openai",
+        model: "gpt-5.4",
+        latencyMs: 18,
+      });
+      resolveSecondMarket({ configured: true, online: true });
+      await Promise.resolve();
+    });
+  });
+
   it("ignores stale marketplace ping results after settings updates start a new health generation", async () => {
     const settingsHandlers: Array<(settings: unknown) => void> = [];
     let resolveInitialMarketPing: (value: { configured: boolean; online: boolean }) => void =
