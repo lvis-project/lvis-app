@@ -494,7 +494,8 @@ describe("ToolGroupCard", () => {
     }));
   });
 
-  it("single render_html with <script>: shows JavaScript permission button", () => {
+  it("single render_html with <script>: sends JavaScript permission to the preview window", async () => {
+    const openHtmlPreview = installHtmlPreviewWindowMock();
     const group = makeGroup({
       tools: [
         {
@@ -513,7 +514,18 @@ describe("ToolGroupCard", () => {
       ],
     });
     const { container } = render(<ToolGroupCard group={group} />);
-    expect(container.textContent).toContain("JavaScript 허용");
+    expect(container.textContent).not.toContain("JavaScript 허용");
+    expect(container.textContent).toContain("JS 창에서 설정");
+
+    const openButton = Array.from(container.querySelectorAll("button"))
+      .find((button) => button.textContent?.includes("창 열기"));
+    fireEvent.click(openButton as HTMLButtonElement);
+
+    await waitFor(() => expect(openHtmlPreview).toHaveBeenCalledOnce());
+    expect(openHtmlPreview).toHaveBeenCalledWith(expect.objectContaining({
+      allowScripts: false,
+      requiresScripts: true,
+    }));
   });
 
   // File edit diff UI — edit_file / apply_patch / write_file render an inline

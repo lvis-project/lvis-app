@@ -35,7 +35,6 @@ function shouldConstrainPayload(value: string): boolean {
   return estimatedVisualLines > 5;
 }
 import { Badge } from "../../../components/ui/badge.js";
-import { Button } from "../../../components/ui/button.js";
 import type { ChatEntry } from "../../../lib/chat-stream-state.js";
 import { parseRenderHtmlResult } from "../utils/html-preview.js";
 import { extractFileEditDiff } from "../utils/file-diff.js";
@@ -152,7 +151,6 @@ function SingleToolInline({
   const isRunning = tool.status === "running";
   const isError = tool.status === "error";
   const [open, setOpen] = useState(false);
-  const [scriptAllowed, setScriptAllowed] = useState(false);
   const previousToolRef = useRef({ toolUseId: tool.toolUseId, status: tool.status });
   const shouldAutoOpenHtml =
     previousToolRef.current.toolUseId === tool.toolUseId &&
@@ -253,22 +251,9 @@ function SingleToolInline({
       )}
       {htmlPayload && (
         <div className="space-y-2 border-t px-3 py-2">
-          {htmlNeedsJavaScript && (
-            <div className="flex items-center justify-between gap-3 rounded border border-dashed px-3 py-2 text-[11px] text-muted-foreground">
-              <span>이 HTML은 JavaScript가 필요할 수 있습니다. 실행을 허용할까요?</span>
-              <Button
-                type="button"
-                size="sm"
-                variant={scriptAllowed ? "secondary" : "outline"}
-                onClick={() => setScriptAllowed((v) => !v)}
-              >
-                {scriptAllowed ? "JavaScript 차단" : "JavaScript 허용"}
-              </Button>
-            </div>
-          )}
           <HtmlPreview
             payload={htmlPayload}
-            allowScripts={scriptAllowed}
+            requiresScripts={htmlNeedsJavaScript}
             autoOpen={shouldAutoOpenHtml}
             autoOpenKey={tool.toolUseId}
           />
@@ -299,7 +284,6 @@ export function ToolGroupCard({
   const tools = [...group.tools].sort((a, b) => a.displayOrder - b.displayOrder);
   const [open, setOpen] = useState(false);
   const [expandedTools, setExpandedTools] = useState<Set<string>>(() => new Set());
-  const [scriptAllowed, setScriptAllowed] = useState<Set<string>>(new Set());
   const previousStatusesRef = useRef<Map<string, string>>(
     new Map(tools.map((tool) => [tool.toolUseId, tool.status])),
   );
@@ -466,29 +450,9 @@ export function ToolGroupCard({
         <div className="border-t px-3 py-2">
           {htmlPreviews.map((p) => (
             <div key={p.toolUseId} className="space-y-2">
-              {previewNeedsJavaScript(p.payload) && (
-                <div className="flex items-center justify-between gap-3 rounded border border-dashed px-3 py-2 text-[11px] text-muted-foreground">
-                  <span>이 HTML은 JavaScript가 필요할 수 있습니다. 실행을 허용할까요?</span>
-                  <Button
-                    type="button"
-                    size="sm"
-                    variant={scriptAllowed.has(p.toolUseId) ? "secondary" : "outline"}
-                    onClick={() => {
-                      setScriptAllowed((prev) => {
-                        const next = new Set(prev);
-                        if (next.has(p.toolUseId)) next.delete(p.toolUseId);
-                        else next.add(p.toolUseId);
-                        return next;
-                      });
-                    }}
-                  >
-                    {scriptAllowed.has(p.toolUseId) ? "JavaScript 차단" : "JavaScript 허용"}
-                  </Button>
-                </div>
-              )}
               <HtmlPreview
                 payload={p.payload}
-                allowScripts={scriptAllowed.has(p.toolUseId)}
+                requiresScripts={previewNeedsJavaScript(p.payload)}
                 autoOpen={autoOpenHtmlToolIds.has(p.toolUseId)}
                 autoOpenKey={p.toolUseId}
               />
