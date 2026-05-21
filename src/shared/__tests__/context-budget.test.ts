@@ -50,34 +50,28 @@ describe("getUsableContext — LVIS tier-fixed reservations", () => {
 });
 
 describe("getPreflightThreshold — token preflight trigger", () => {
-  it("64K → floor(37K × 45%) = 16,650", () => {
-    // usable = 37,000, pct = 0.45 (lowered from 0.50 to compensate estimator undercount)
-    expect(getPreflightThreshold(64_000)).toBe(16_650);
+  it("64K → floor(37K × 80%) = 29,600", () => {
+    expect(getPreflightThreshold(64_000)).toBe(29_600);
   });
 
-  it("128K → floor(98K × 50%) = 49,000", () => {
-    // usable = 98,000, pct = 0.50 (lowered from 0.55)
-    expect(getPreflightThreshold(128_000)).toBe(49_000);
+  it("128K → floor(98K × 80%) = 78,400", () => {
+    expect(getPreflightThreshold(128_000)).toBe(78_400);
   });
 
-  it("200K → floor(160K × 55%) = 88,000", () => {
-    // usable = 160,000, pct = 0.55 — Anthropic default tier (lowered from 0.60)
-    expect(getPreflightThreshold(200_000)).toBe(88_000);
+  it("200K → floor(160K × 80%) = 128,000", () => {
+    expect(getPreflightThreshold(200_000)).toBe(128_000);
   });
 
-  it("1M → floor(960K × 60%) = 576,000", () => {
-    // usable = 960,000, pct = 0.60 (lowered from 0.65)
-    expect(getPreflightThreshold(1_000_000)).toBe(576_000);
+  it("1M → floor(960K × 80%) = 768,000", () => {
+    expect(getPreflightThreshold(1_000_000)).toBe(768_000);
   });
 
-  it("Other (>1M) → 55% bucket", () => {
-    // 2M → usable 1,960,000, pct = 0.55 → floor = 1,078,000
-    expect(getPreflightThreshold(2_000_000)).toBe(1_078_000);
+  it("Other (>1M) → 80% of usable", () => {
+    expect(getPreflightThreshold(2_000_000)).toBe(1_568_000);
   });
 
-  it("Boundary <=64K (e.g. 32K small) → 45% bucket", () => {
-    // 32K → usable 25,600, pct = 0.45 → floor = 11,520
-    expect(getPreflightThreshold(32_000)).toBe(11_520);
+  it("Boundary <=64K (e.g. 32K small) → 80% of usable", () => {
+    expect(getPreflightThreshold(32_000)).toBe(20_480);
   });
 
   it("invalid inputs return 0", () => {
@@ -94,11 +88,10 @@ describe("getPreflightThreshold — token preflight trigger", () => {
     }
   });
 
-  it("threshold percentage is conservative (45%–60% of usable)", () => {
+  it("threshold percentage is exactly 80% of usable", () => {
     for (const ctx of [64_000, 128_000, 200_000, 1_000_000, 2_000_000]) {
       const ratio = getPreflightThreshold(ctx) / getUsableContext(ctx);
-      expect(ratio).toBeLessThanOrEqual(0.60);
-      expect(ratio).toBeGreaterThanOrEqual(0.45);
+      expect(ratio).toBe(0.8);
     }
   });
 });

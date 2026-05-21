@@ -291,12 +291,22 @@ const TOOL_BOUNDARY_LEDGER_K = 5;
 /** Tool ledger 의 결과 요지 trim 길이. */
 const LEDGER_RESULT_MAX = 200;
 
+/** Recent user turns that must survive compaction verbatim. */
+export const DEFAULT_PRESERVE_RECENT_TURNS = 5;
+
 export interface CompactWithBoundaryArgs {
   messages: GenericMessage[];
   llm: LLMProvider;
   model: string;
   /** LVIS preserve-recent-tokens — `getModelPreflightThreshold()` 의 일부 또는 별도 설정. */
   preserveRecentTokens: number;
+  /**
+   * Minimum number of recent user turns to keep verbatim regardless of the token
+   * ceiling. If compaction runs immediately after a new user question is
+   * appended, that pending question is preserved in addition to the previous
+   * completed turns.
+   */
+  preserveRecentTurns?: number;
   compactNum: number;
   /**
    * Session id — 단일 거대 메시지 truncation pre-pass 가 원본 content 를
@@ -498,7 +508,7 @@ async function dropOldestUntilUnderBudget(
  * Structured compact with LLM call + opaque-state slot.
  *
  * 알고리즘:
- *   1. preserveRecentTokens 로 split (toCompact / toPreserve), tool_use/tool_result 무결성 보존
+ *   1. preserveRecentTokens + preserveRecentTurns 로 split (toCompact / toPreserve), tool_use/tool_result 무결성 보존
  *   2. SUMMARY_TEMPLATE_PROMPT_V1 LLM call — 동일 vendor 동급 모델
  *   3. parseSummary (실패 시 1회 재시도, 그래도 실패 시 raw fallback)
  *   4. pinnedArtifacts 수집 (skill / lock=true)
@@ -512,15 +522,29 @@ async function dropOldestUntilUnderBudget(
 export async function compactWithBoundary(
   args: CompactWithBoundaryArgs,
 ): Promise<CompactWithBoundaryResult> {
-  const { messages, llm, model, preserveRecentTokens, compactNum, sessionId, preflightTokens, abortSignal } = args;
+  const {
+    messages,
+    llm,
+    model,
+    preserveRecentTokens,
+    preserveRecentTurns = DEFAULT_PRESERVE_RECENT_TURNS,
+    compactNum,
+    sessionId,
+    preflightTokens,
+    abortSignal,
+  } = args;
 
   // 0. Per-message truncation pre-pass.
   //    단일 거대 메시지 (>30K tokens) 가 LLM input context 초과하는 케이스 방지.
   const { messages: workingMessages, truncatedCount, truncatedDir: perMessageTruncDir } =
     await truncateOversizeMessages(messages, sessionId, compactNum);
 
-  // 1. Split — 끝에서부터 preserveRecentTokens 만큼 보존, tool 페어 안전.
-  const { toCompact, toPreserve } = splitForBoundary(workingMessages, preserveRecentTokens);
+  // 1. Split — token budget plus protected recent user-turn floor, tool 페어 안전.
+  const { toCompact, toPreserve, protectedPreserveCount } = splitForBoundary(
+    workingMessages,
+    preserveRecentTokens,
+    preserveRecentTurns,
+  );
 
   if (toCompact.length === 0) {
     if (truncatedCount > 0) {
@@ -649,15 +673,18 @@ export async function compactWithBoundary(
   let estimatedAfter = estimateMessagesTokens(newHistory);
 
   // 7a. REDUCED_INSUFFICIENT_FORCED — post-compact 이 preflight × 0.8 초과.
-  //     last-resort 로 toPreserve 의 oldest 50% 강제 drop. **사용자 contract
-  //     "원본 보존" 충족 위해 dropped slice 도 archive 파일로 격리.**
-  if (preflightTokens > 0 && estimatedAfter > preflightTokens * 0.8 && toPreserve.length > 0) {
-    const rawDropCount = Math.ceil(toPreserve.length / 2);
+  //     last-resort 로 toPreserve 의 oldest 50% 를 강제 drop 하되, 최근
+  //     preserveRecentTurns user turn 은 보호한다. **사용자 contract "원본 보존"
+  //     충족 위해 dropped slice 도 archive 파일로 격리.**
+  const forcedDropCap = Math.max(0, toPreserve.length - protectedPreserveCount);
+  if (preflightTokens > 0 && estimatedAfter > preflightTokens * 0.8 && forcedDropCap > 0) {
+    const rawDropCount = Math.min(Math.ceil(toPreserve.length / 2), forcedDropCap);
     // Tool-pair safety: surviving 의 첫 메시지가 orphan tool_result 가 되지
     // 않도록 dropCount 를 앞으로 민다. 그렇지 않으면 provider 가 400
     // (tool_use_id 미스매치) 으로 거부 — 원래 C1 deadlock fix 의도 회귀.
-    const toolSafeDropCount = adjustForwardToToolBoundary(toPreserve, rawDropCount);
-    const dropCount = clampDropBeforeLatestRenderableUser(toPreserve, toolSafeDropCount);
+    const boundarySafeDropCount = adjustForwardToToolBoundary(toPreserve, rawDropCount);
+    const protectedSafeDropCount = boundarySafeDropCount <= forcedDropCap ? boundarySafeDropCount : 0;
+    const dropCount = clampDropBeforeLatestRenderableUser(toPreserve, protectedSafeDropCount);
     if (dropCount > 0) {
       const droppedSlice = toPreserve.slice(0, dropCount);
       const survivingPreserve = toPreserve.slice(dropCount);
@@ -683,7 +710,7 @@ export async function compactWithBoundary(
         ...(finalTruncDir !== "" ? { truncatedDir: finalTruncDir } : {}),
       };
     }
-    log.warn(`compact: forced drop skipped to preserve latest user message (estimatedAfter=${estimatedAfter} preflight=${preflightTokens} compactNum=${compactNum})`);
+    log.warn(`compact: forced-drop skipped to preserve last ${preserveRecentTurns} turn(s) and latest user message (estimatedAfter=${estimatedAfter} preflight=${preflightTokens} compactNum=${compactNum})`);
   }
 
   // SUMMARIZED — 정상 경로. CONTENT_TRUNCATED 는 위쪽 early-return 에서 이미
@@ -747,13 +774,16 @@ export function renderBoundaryAsPreamble(boundary: CompactBoundary): string {
 // ─── Private helpers ────────────────────────────────
 
 /**
- * Token-aware split — 끝에서부터 preserveRecentTokens 까지 보존, 나머지는 compact.
+ * Token-aware split — 끝에서부터 preserveRecentTokens 까지 보존하되, 최근
+ * preserveRecentTurns user turn 은 반드시 보존하고 나머지는 compact.
  *
  * Contract (compact 가 어떤 input 에도 reduce 보장하기 위한 의미):
  *   - preserveRecentTokens 는 **ceiling** — preserve 영역의 누적 토큰이 이 값을
  *     초과하면 더 이상 메시지를 포함시키지 않는다.
  *   - 단일 메시지가 preserveRecentTokens 를 단독으로 초과하면 preserve 는 빈
  *     배열이 되고 그 메시지를 포함한 전체가 compact 대상이 된다.
+ *   - 단, 최근 user turn floor 는 token ceiling 보다 우선한다. 마지막 메시지가
+ *     pending user question 이면 그 질문은 이전 5 completed turns 에 더해 보존한다.
  *   - tool_use/tool_result 페어가 boundary 에 의해 갈리는 경우
  *     `adjustToToolBoundary` 가 최대 3 step backward walk 하여 페어를 같은
  *     쪽으로 정렬한다. 더 깊은 tool chain 이면 partial-pair 허용 (LLM summary
@@ -762,21 +792,28 @@ export function renderBoundaryAsPreamble(boundary: CompactBoundary): string {
 function splitForBoundary(
   messages: GenericMessage[],
   preserveRecentTokens: number,
-): { toCompact: GenericMessage[]; toPreserve: GenericMessage[] } {
+  preserveRecentTurns = DEFAULT_PRESERVE_RECENT_TURNS,
+): { toCompact: GenericMessage[]; toPreserve: GenericMessage[]; protectedPreserveCount: number } {
   if (messages.length === 0) {
-    return { toCompact: [], toPreserve: [] };
+    return { toCompact: [], toPreserve: [], protectedPreserveCount: 0 };
   }
-  if (preserveRecentTokens <= 0) {
-    return { toCompact: messages, toPreserve: [] };
+  const turnPreserveStart = findRecentTurnPreserveStart(messages, preserveRecentTurns);
+  const protectedPreserveCount =
+    turnPreserveStart < messages.length ? messages.length - turnPreserveStart : 0;
+  if (preserveRecentTokens <= 0 && turnPreserveStart >= messages.length) {
+    return { toCompact: messages, toPreserve: [], protectedPreserveCount: 0 };
   }
   let preserveStart = messages.length;
   let preservedTokens = 0;
-  for (let i = messages.length - 1; i >= 0; i--) {
-    const msgTokens = estimateTokens(serializeMessageForEstimation(messages[i]));
-    if (preservedTokens + msgTokens > preserveRecentTokens) break;
-    preservedTokens += msgTokens;
-    preserveStart = i;
+  if (preserveRecentTokens > 0) {
+    for (let i = messages.length - 1; i >= 0; i--) {
+      const msgTokens = estimateTokens(serializeMessageForEstimation(messages[i]));
+      if (preservedTokens + msgTokens > preserveRecentTokens) break;
+      preservedTokens += msgTokens;
+      preserveStart = i;
+    }
   }
+  preserveStart = Math.min(preserveStart, turnPreserveStart);
   preserveStart = adjustToToolBoundary(messages, preserveStart);
   // 추가 안전망 — backward walk 가 bounded (3 step) 이라 더 깊은 tool chain
   // 에서 preserveStart 가 여전히 orphan tool_result 를 가리킬 수 있음. forward
@@ -787,7 +824,28 @@ function splitForBoundary(
   return {
     toCompact: messages.slice(0, preserveStart),
     toPreserve: messages.slice(preserveStart),
+    protectedPreserveCount,
   };
+}
+
+function findRecentTurnPreserveStart(messages: GenericMessage[], preserveRecentTurns: number): number {
+  const keepCompletedTurns = Math.max(0, Math.floor(preserveRecentTurns));
+  if (keepCompletedTurns === 0) return messages.length;
+
+  const userIndices: number[] = [];
+  for (let i = 0; i < messages.length; i++) {
+    const msg = messages[i];
+    if (msg.role === "user" && msg.meta?.compactBoundary !== true) {
+      userIndices.push(i);
+    }
+  }
+  if (userIndices.length === 0) return messages.length;
+
+  const last = messages[messages.length - 1];
+  const trailingPendingUser = last.role === "user" && last.meta?.compactBoundary !== true;
+  const turnsToKeep = keepCompletedTurns + (trailingPendingUser ? 1 : 0);
+  const startIndex = Math.max(0, userIndices.length - turnsToKeep);
+  return userIndices[startIndex] ?? messages.length;
 }
 
 /**

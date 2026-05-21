@@ -381,6 +381,98 @@ describe("compactWithBoundary — LLM call integration", () => {
     expect(r.removedCount).toBe(0);
   });
 
+  it("keeps the last 5 user turns and their assistant turnSummary metadata verbatim", async () => {
+    const llm = makeMockLlm([makeFullSummaryText()]);
+    const messages: GenericMessage[] = [];
+    for (let i = 1; i <= 8; i++) {
+      messages.push({ role: "user", content: `질문 ${i}` });
+      messages.push({
+        role: "assistant",
+        content: `응답 ${i}`,
+        meta: {
+          turnSummary: {
+            turnDurationMs: i,
+            toolCount: 0,
+            cumulativeToolMs: 0,
+            tokensIn: 1_000 + i,
+            freshInputTokens: 900 + i,
+            tokensOut: i,
+          },
+        },
+      });
+    }
+
+    const r = await compactWithBoundary({
+      messages,
+      llm,
+      model: "claude-sonnet-4-6",
+      preserveRecentTokens: 0,
+      sessionId: "test-sess-recent-turns",
+      preflightTokens: 100_000,
+      compactNum: 1,
+    });
+
+    const preservedUsers = r.newHistory
+      .filter((m) => m.role === "user" && m.meta?.compactBoundary !== true)
+      .map((m) => m.content);
+    const preservedSummaries = r.newHistory
+      .filter((m) => m.role === "assistant")
+      .map((m) => m.meta?.turnSummary?.tokensOut);
+
+    expect(preservedUsers).toEqual(["질문 4", "질문 5", "질문 6", "질문 7", "질문 8"]);
+    expect(preservedSummaries).toEqual([4, 5, 6, 7, 8]);
+  });
+
+  it("keeps the pending user question plus the previous 5 completed user turns", async () => {
+    const llm = makeMockLlm([makeFullSummaryText()]);
+    const messages: GenericMessage[] = [];
+    for (let i = 1; i <= 8; i++) {
+      messages.push({ role: "user", content: `이전 질문 ${i}` });
+      messages.push({
+        role: "assistant",
+        content: `이전 응답 ${i}`,
+        meta: {
+          turnSummary: {
+            turnDurationMs: i,
+            toolCount: 0,
+            cumulativeToolMs: 0,
+            tokensIn: 1_000 + i,
+            freshInputTokens: 900 + i,
+            tokensOut: i,
+          },
+        },
+      });
+    }
+    messages.push({ role: "user", content: "현재 질문" });
+
+    const r = await compactWithBoundary({
+      messages,
+      llm,
+      model: "claude-sonnet-4-6",
+      preserveRecentTokens: 0,
+      sessionId: "test-sess-pending-turn",
+      preflightTokens: 100_000,
+      compactNum: 1,
+    });
+
+    const preservedUsers = r.newHistory
+      .filter((m) => m.role === "user" && m.meta?.compactBoundary !== true)
+      .map((m) => m.content);
+    const preservedSummaries = r.newHistory
+      .filter((m) => m.role === "assistant")
+      .map((m) => m.meta?.turnSummary?.tokensOut);
+
+    expect(preservedUsers).toEqual([
+      "이전 질문 4",
+      "이전 질문 5",
+      "이전 질문 6",
+      "이전 질문 7",
+      "이전 질문 8",
+      "현재 질문",
+    ]);
+    expect(preservedSummaries).toEqual([4, 5, 6, 7, 8]);
+  });
+
   it("retries parse failure once, then graceful raw fallback", async () => {
     // 두 번 모두 형식 위반 → raw fallback
     const llm = makeMockLlm(["bad response 1", "bad response 2"]);
@@ -582,21 +674,30 @@ describe("compactWithBoundary — LLM call integration", () => {
       messages.push({ role: "assistant", content: "y".repeat(2_000) });
     }
 
-    const r = await compactWithBoundary({
-      messages,
-      llm,
-      model: "claude-sonnet-4-6",
-      // history ≈ 30K tokens, preserve 10K → toCompact ≈ 20K → A.5 drops to ~4.5K
-      // → LLM summary → newHistory ≈ stub + 10K preserve = ~10K. 10K > 5K*0.8=4K → FORCED.
-      preserveRecentTokens: 10_000,
-      sessionId: "test-sess-forced",
-      preflightTokens: 5_000,
-      compactNum: 1,
-    });
+    const previousHome = process.env.LVIS_HOME;
+    const tmpHome = mkdtempSync(join(tmpdir(), "lvis-compact-forced-"));
+    process.env.LVIS_HOME = tmpHome;
+    try {
+      const r = await compactWithBoundary({
+        messages,
+        llm,
+        model: "claude-sonnet-4-6",
+        // history ≈ 30K tokens, preserve 10K → toCompact ≈ 20K → A.5 drops to ~4.5K
+        // → LLM summary → newHistory ≈ stub + 10K preserve = ~10K. 10K > 5K*0.8=4K → FORCED.
+        preserveRecentTokens: 10_000,
+        sessionId: "test-sess-forced",
+        preflightTokens: 5_000,
+        compactNum: 1,
+      });
 
-    expect(r.status).toBe("reduced_insufficient_forced");
-    expect(r.boundary).not.toBeNull();
-    expect(r.removedCount).toBeGreaterThan(0);
+      expect(r.status).toBe("reduced_insufficient_forced");
+      expect(r.boundary).not.toBeNull();
+      expect(r.removedCount).toBeGreaterThan(0);
+    } finally {
+      if (previousHome === undefined) delete process.env.LVIS_HOME;
+      else process.env.LVIS_HOME = previousHome;
+      rmSync(tmpHome, { recursive: true, force: true });
+    }
   });
 
   it("REDUCED_INSUFFICIENT_FORCED never drops the latest user message from preserve", async () => {

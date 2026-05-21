@@ -183,7 +183,7 @@ describe("ConversationLoop.resetAndResume", () => {
   });
 
   it("sets cumulativeUsage estimate on resume for the next token preflight", () => {
-    // 50 messages × 10K chars each → estimateMessagesTokens > 0. Token preflight 가
+    // Long synthetic history → estimateMessagesTokens > 0. Token preflight 가
     // next user turn 진입 시 이 값을 사용하여 임계 평가.
     const msgs: GenericMessage[] = [];
     for (let i = 0; i < 50; i++) {
