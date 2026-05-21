@@ -199,6 +199,15 @@ async function waitForFile(file, timeoutMs) {
   throw new Error(`timed out waiting for file: ${file}`);
 }
 
+async function waitForFileRemoved(file, timeoutMs) {
+  const startedAt = Date.now();
+  while (Date.now() - startedAt < timeoutMs) {
+    if (!existsSync(file)) return;
+    await new Promise((resolvePromise) => setTimeout(resolvePromise, 500));
+  }
+  throw new Error(`timed out waiting for file removal: ${file}`);
+}
+
 async function launchSmoke(executable, timeoutMs) {
   const userDataDir = mkdtempSync(join(tmpdir(), "lvis-nsis-smoke-user-data-"));
   const env = {
@@ -291,9 +300,7 @@ async function main() {
   } finally {
     const uninstaller = findUninstaller(installDir);
     await runProcess(uninstaller, ["/S", "/KEEP_APP_DATA"], { timeoutMs: options.uninstallTimeoutMs });
-    if (existsSync(installedExe)) {
-      throw new Error(`uninstall completed but installed executable remains: ${installedExe}`);
-    }
+    await waitForFileRemoved(installedExe, 30_000);
   }
 }
 
