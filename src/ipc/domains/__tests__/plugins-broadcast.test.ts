@@ -57,6 +57,10 @@ async function setup() {
   const appWindows = [makeWindow(), makeWindow()];
   const deps = {
     pluginMarketplace: {
+      list: vi.fn(async () => [
+        { id: "agent-hub", slug: "lvis-plugin-agent-hub" },
+        { id: "meeting", slug: "lvis-plugin-meeting" },
+      ]),
       install: vi.fn(async (...args: unknown[]) => {
         emitRegisteringProgress(args);
         return { pluginId: "agent-hub", installed: true };
@@ -174,6 +178,32 @@ describe("plugins IPC lifecycle broadcast", () => {
     }
   });
 
+  it("uses the canonical plugin id for pre-stop and rollback when an alias update is already loaded", async () => {
+    const { deps, appWindows } = await setup();
+    deps.pluginRuntime.listPluginIds.mockReturnValue(["meeting"]);
+    deps.pluginMarketplace.install.mockImplementationOnce(async (...args: unknown[]) => {
+      emitRegisteringProgress(args);
+      return { pluginId: "meeting", installed: true };
+    });
+    deps.pluginRuntime.addPlugin.mockRejectedValueOnce(new Error("restart failed"));
+
+    await expect(invoke("lvis:plugins:install", "lvis-plugin-meeting")).rejects.toThrow("restart failed");
+
+    expect(deps.pluginRuntime.removePlugin).toHaveBeenCalledWith("meeting");
+    expect(deps.pluginMarketplace.rollbackPlugin).toHaveBeenCalledWith("meeting");
+    expect(deps.pluginMarketplace.uninstall).not.toHaveBeenCalledWith("meeting");
+    for (const win of appWindows) {
+      expect(win.webContents.send).toHaveBeenCalledWith(
+        "lvis:plugins:install-progress",
+        { slug: "lvis-plugin-meeting", phase: "restarting" },
+      );
+      expect(win.webContents.send).toHaveBeenCalledWith(
+        "lvis:plugins:install-result",
+        { slug: "lvis-plugin-meeting", success: false, error: "restart failed" },
+      );
+    }
+  });
+
   it("broadcasts marketplace install failure with the requested slug when install throws before a canonical plugin id exists", async () => {
     const { deps, appWindows } = await setup();
     deps.pluginMarketplace.install.mockRejectedValueOnce(new Error("download failed"));
@@ -261,7 +291,7 @@ describe("plugins IPC lifecycle broadcast", () => {
     }
   });
 
-  it("rolls back a marketplace update without removing the loaded plugin when restart fails", async () => {
+  it("stops the loaded plugin before marketplace update and rolls back when restart fails", async () => {
     const { deps, appWindows } = await setup();
     deps.pluginRuntime.listPluginIds.mockReturnValue(["agent-hub"]);
     deps.pluginRuntime.addPlugin.mockRejectedValueOnce(new Error("prepare failed"));
@@ -269,7 +299,10 @@ describe("plugins IPC lifecycle broadcast", () => {
     await expect(invoke("lvis:plugins:install", "agent-hub")).rejects.toThrow("prepare failed");
 
     expect(deps.pluginMarketplace.rollbackPlugin).toHaveBeenCalledWith("agent-hub");
-    expect(deps.pluginRuntime.removePlugin).not.toHaveBeenCalledWith("agent-hub");
+    expect(deps.pluginRuntime.removePlugin).toHaveBeenCalledWith("agent-hub");
+    expect(deps.pluginRuntime.removePlugin.mock.invocationCallOrder[0]).toBeLessThan(
+      deps.pluginMarketplace.install.mock.invocationCallOrder[0],
+    );
     expect(deps.pluginMarketplace.uninstall).not.toHaveBeenCalledWith("agent-hub");
     for (const win of appWindows) {
       expect(win.webContents.send).toHaveBeenCalledWith(
@@ -459,6 +492,9 @@ describe("plugins IPC lifecycle broadcast", () => {
     const destroyedWindow = makeWindow({ destroyed: true });
     const deps = {
       pluginMarketplace: {
+        list: vi.fn(async () => [
+          { id: "agent-hub", slug: "lvis-plugin-agent-hub" },
+        ]),
         install: vi.fn(async (...args: unknown[]) => {
           emitRegisteringProgress(args);
           return { pluginId: "agent-hub", installed: true };

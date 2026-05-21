@@ -15,33 +15,32 @@ describe("main process plugin lifecycle regression guards", () => {
     expect(lifecycleSection, "deep-link install lifecycle section must be present").toBeTruthy();
     expect(source).not.toMatch(/mainWindow\?\.webContents\.send\("lvis:plugins:(install-progress|install-result|uninstall-result)"/);
 
-    const lockIndex = lifecycleSection!.indexOf("withPluginInstallLock(installLockId");
     const canonicalIdIndex = lifecycleSection!.indexOf("item.id === params.slug || item.slug === params.slug");
     const progressAliasIndex = lifecycleSection!.indexOf("let installProgressSlug = params.slug");
     const progressCanonicalIndex = lifecycleSection!.indexOf("installProgressSlug = installLockId");
-    const canonicalProgressIndex = lifecycleSection!.indexOf('slug: installLockId');
+    const lifecycleKeyIndex = lifecycleSection!.indexOf("lifecyclePluginId: installLockId");
+    const requestedIdIndex = lifecycleSection!.indexOf("requestedPluginId: params.slug");
     const catchResultIndex = source.indexOf('slug: installProgressSlug');
-    const lifecycleHelperIndex = lifecycleSection!.indexOf("await startInstalledPluginWithLifecycle({");
-    const failureIndex = lifecycleSection!.indexOf(
-      'broadcastPluginLifecycleEvent("lvis:plugins:install-result", { slug: pluginId, success: false, error: message })',
-    );
+    const lifecycleHelperIndex = lifecycleSection!.indexOf("await installMarketplacePluginWithLifecycle({");
+    const progressBridgeIndex = lifecycleSection!.indexOf('broadcastPluginLifecycleEvent("lvis:plugins:install-progress", payload)');
+    const failureIndex = lifecycleSection!.indexOf('slug: installProgressSlug');
     const successIndex = lifecycleSection!.indexOf("success: true", lifecycleHelperIndex);
 
-    expect(lockIndex).toBeGreaterThanOrEqual(0);
     expect(canonicalIdIndex).toBeGreaterThanOrEqual(0);
     expect(progressAliasIndex).toBeGreaterThanOrEqual(0);
     expect(progressCanonicalIndex).toBeGreaterThanOrEqual(0);
-    expect(canonicalProgressIndex).toBeGreaterThanOrEqual(0);
+    expect(lifecycleKeyIndex).toBeGreaterThanOrEqual(0);
+    expect(requestedIdIndex).toBeGreaterThanOrEqual(0);
     expect(catchResultIndex).toBeGreaterThanOrEqual(0);
     expect(lifecycleSection).not.toContain('broadcastPluginLifecycleEvent("lvis:plugins:install-progress", { slug: params.slug');
     expect(lifecycleSection).not.toContain('broadcastPluginLifecycleEvent("lvis:plugins:install-result", { slug: params.slug');
     expect(lifecycleSection).not.toContain("preparePythonRuntimeForInstalledPlugin");
     expect(lifecycleHelperIndex).toBeGreaterThanOrEqual(0);
-    expect(lifecycleSection).toContain('rollbackMode: "marketplace"');
     expect(lifecycleSection).toContain("pluginRuntime: activeServices.pluginRuntime");
     expect(lifecycleSection).toContain("pluginMarketplace: activeServices.pluginMarketplace");
     expect(lifecycleSection).not.toContain("activeServices.pluginRuntime.addPlugin(pluginId)");
     expect(lifecycleSection).not.toContain("activeServices.pluginMarketplace.uninstall(pluginId)");
+    expect(progressBridgeIndex).toBeGreaterThanOrEqual(0);
     expect(failureIndex).toBeGreaterThanOrEqual(0);
     expect(successIndex).toBeGreaterThanOrEqual(0);
     expect(lifecycleHelperIndex).toBeLessThan(successIndex);

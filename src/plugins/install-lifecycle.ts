@@ -2,7 +2,15 @@ const inflightInstallLocks = new Map<string, Promise<unknown>>();
 
 type InstalledPluginStartState = "started" | "preparing";
 
-type InstallProgressPhase = "restarting" | "preparing";
+type RuntimeInstallProgressPhase = "restarting" | "preparing";
+type MarketplaceInstallProgressPhase = "installing" | "restarting" | "verifying" | "registering" | "preparing";
+type MarketplaceInstallerProgressEvent =
+  | { phase: "downloading"; bytesDownloaded: number; bytesTotal: number | null }
+  | { phase: "verifying" | "registering" };
+type MarketplaceInstallProgressPayload =
+  | { slug: string; phase: MarketplaceInstallProgressPhase }
+  | { slug: string; phase: "downloading"; bytesDownloaded: number; bytesTotal: number | null };
+type MarketplaceLifecycleCatalogItem = { id: string; slug?: string; installed?: boolean };
 
 interface PluginInstallRuntime {
   listPluginIds(): string[];
@@ -11,11 +19,19 @@ interface PluginInstallRuntime {
   removePlugin(pluginId: string): Promise<void>;
 }
 
-interface PluginInstallMarketplace {
+interface PluginLifecycleMarketplace {
   uninstall(pluginId: string): Promise<unknown>;
   rollbackPlugin(pluginId: string): Promise<unknown>;
   rollbackLocalInstall?(pluginId: string): Promise<unknown>;
   clearLocalInstallRollback?(pluginId: string): Promise<unknown>;
+}
+
+interface PluginInstallMarketplace extends PluginLifecycleMarketplace {
+  list(): Promise<MarketplaceLifecycleCatalogItem[]>;
+  install(
+    pluginId: string,
+    onProgress?: (event: MarketplaceInstallerProgressEvent) => void,
+  ): Promise<{ pluginId: string; installed: true }>;
 }
 
 interface InstallLifecycleLogger {
@@ -49,13 +65,114 @@ export async function withPluginInstallLock<T>(
   }
 }
 
+export async function installMarketplacePluginWithLifecycle(options: {
+  requestedPluginId: string;
+  eventSlug?: string;
+  lifecyclePluginId?: string;
+  pluginRuntime: PluginInstallRuntime;
+  pluginMarketplace: PluginInstallMarketplace;
+  broadcastInstallProgress?: (payload: MarketplaceInstallProgressPayload) => void;
+  emitPluginInstalled?: (payload: { pluginId: string; source: "marketplace" }) => void;
+  refreshPluginNotifications?: () => void;
+  log?: InstallLifecycleLogger;
+}): Promise<{ pluginId: string; installed: true }> {
+  const {
+    requestedPluginId,
+    eventSlug,
+    lifecyclePluginId,
+    pluginRuntime,
+    pluginMarketplace,
+    broadcastInstallProgress,
+    emitPluginInstalled,
+    refreshPluginNotifications,
+    log,
+  } = options;
+  const catalogState = await resolveMarketplaceLifecycleState(pluginMarketplace, requestedPluginId);
+  const resolvedLifecyclePluginId = lifecyclePluginId ?? catalogState.pluginId;
+  const progressSlug = eventSlug ?? resolvedLifecyclePluginId;
+
+  return withPluginInstallLock(resolvedLifecyclePluginId, async () => {
+    const hadExistingInstall =
+      catalogState.installed === true ||
+      pluginRuntime.listPluginIds().includes(resolvedLifecyclePluginId);
+    let restorePluginId = resolvedLifecyclePluginId;
+    let startLifecycleAttempted = false;
+    try {
+      if (hadExistingInstall) {
+        broadcastInstallProgress?.({ slug: progressSlug, phase: "restarting" });
+        await pluginRuntime.removePlugin(resolvedLifecyclePluginId);
+      }
+
+      broadcastInstallProgress?.({ slug: progressSlug, phase: "installing" });
+      const result = await pluginMarketplace.install(requestedPluginId, (evt) => {
+        if (evt.phase === "downloading") {
+          broadcastInstallProgress?.({
+            slug: progressSlug,
+            phase: "downloading",
+            bytesDownloaded: evt.bytesDownloaded,
+            bytesTotal: evt.bytesTotal,
+          });
+        } else {
+          broadcastInstallProgress?.({ slug: progressSlug, phase: evt.phase });
+        }
+      });
+      const installedPluginId = result.pluginId === requestedPluginId ? resolvedLifecyclePluginId : result.pluginId;
+      restorePluginId = installedPluginId;
+      startLifecycleAttempted = true;
+      await startInstalledPluginWithLifecycle({
+        pluginId: installedPluginId,
+        source: "marketplace",
+        rollbackMode: "marketplace",
+        wasLoadedBeforeStart: hadExistingInstall,
+        pluginRuntime,
+        pluginMarketplace,
+        broadcastInstallProgress: (payload) =>
+          broadcastInstallProgress?.({ ...payload, slug: progressSlug }),
+        emitPluginInstalled: emitPluginInstalled
+          ? (payload) => emitPluginInstalled({ pluginId: payload.pluginId, source: "marketplace" })
+          : undefined,
+        refreshPluginNotifications,
+        log,
+      });
+      return { ...result, pluginId: installedPluginId };
+    } catch (err) {
+      if (
+        hadExistingInstall &&
+        !startLifecycleAttempted &&
+        !pluginRuntime.listPluginIds().includes(restorePluginId)
+      ) {
+        await restoreRuntimePlugin({
+          pluginRuntime,
+          pluginId: restorePluginId,
+          log,
+          context: "install update runtime restore",
+        });
+      }
+      throw err;
+    }
+  });
+}
+
+async function resolveMarketplaceLifecycleState(
+  pluginMarketplace: Pick<PluginInstallMarketplace, "list">,
+  requestedPluginId: string,
+): Promise<{ pluginId: string; installed: boolean | undefined }> {
+  const catalogItems = await pluginMarketplace.list();
+  const item = catalogItems.find((candidate) => candidate.id === requestedPluginId || candidate.slug === requestedPluginId);
+  return {
+    pluginId: item?.id ?? requestedPluginId,
+    installed: item?.installed,
+  };
+}
+
 export async function startInstalledPluginWithLifecycle(options: {
   pluginId: string;
   source: "marketplace" | "local-dev";
   rollbackMode: "marketplace" | "local-dev";
+  wasLoadedBeforeStart?: boolean;
   pluginRuntime: PluginInstallRuntime;
-  pluginMarketplace: PluginInstallMarketplace;
-  broadcastInstallProgress?: (payload: { slug: string; phase: InstallProgressPhase }) => void;
+  pluginMarketplace: PluginLifecycleMarketplace;
+  broadcastInstallProgress?: (payload: { slug: string; phase: RuntimeInstallProgressPhase }) => void;
   emitPluginInstalled?: (payload: { pluginId: string; source: "marketplace" | "local-dev" }) => void;
   refreshPluginNotifications?: () => void;
   log?: InstallLifecycleLogger;
@@ -64,6 +181,7 @@ export async function startInstalledPluginWithLifecycle(options: {
     pluginId,
     source,
     rollbackMode,
+    wasLoadedBeforeStart: wasLoadedBeforeStartOverride,
     pluginRuntime,
     pluginMarketplace,
     broadcastInstallProgress,
@@ -71,7 +189,8 @@ export async function startInstalledPluginWithLifecycle(options: {
     refreshPluginNotifications,
     log,
   } = options;
-  const wasLoadedBeforeStart = pluginRuntime.listPluginIds().includes(pluginId);
+  const wasLoadedBeforeStart =
+    wasLoadedBeforeStartOverride ?? pluginRuntime.listPluginIds().includes(pluginId);
   try {
     broadcastInstallProgress?.({ slug: pluginId, phase: "restarting" });
     const startState = await pluginRuntime.addPlugin(pluginId);
@@ -104,7 +223,7 @@ async function rollbackFailedPluginStart(options: {
   rollbackMode: "marketplace" | "local-dev";
   wasLoadedBeforeStart: boolean;
   pluginRuntime: PluginInstallRuntime;
-  pluginMarketplace: PluginInstallMarketplace;
+  pluginMarketplace: PluginLifecycleMarketplace;
   log?: InstallLifecycleLogger;
 }): Promise<void> {
   const {
@@ -126,8 +245,11 @@ async function rollbackFailedPluginStart(options: {
       log?.warn(`install update rollbackPlugin failed for ${pluginId}: ${errorMessage(rollbackErr)}`);
     });
     if (!pluginRuntime.listPluginIds().includes(pluginId)) {
-      await pluginRuntime.addPlugin(pluginId).catch((restoreErr) => {
-        log?.warn(`install update rollback runtime restore failed for ${pluginId}: ${errorMessage(restoreErr)}`);
+      await restoreRuntimePlugin({
+        pluginRuntime,
+        pluginId,
+        log,
+        context: "install update rollback runtime restore",
       });
     }
     return;
@@ -139,6 +261,23 @@ async function rollbackFailedPluginStart(options: {
   await pluginMarketplace.uninstall(pluginId).catch((uninstallErr) => {
     log?.warn(`install rollback uninstall failed for ${pluginId}: ${errorMessage(uninstallErr)}`);
   });
+}
+
+async function restoreRuntimePlugin(options: {
+  pluginRuntime: PluginInstallRuntime;
+  pluginId: string;
+  log?: InstallLifecycleLogger;
+  context: string;
+}): Promise<void> {
+  const { pluginRuntime, pluginId, log, context } = options;
+  try {
+    const startState = await pluginRuntime.addPlugin(pluginId);
+    if (startState === "preparing") {
+      await pluginRuntime.waitForPluginReady(pluginId);
+    }
+  } catch (restoreErr) {
+    log?.warn(`${context} failed for ${pluginId}: ${errorMessage(restoreErr)}`);
+  }
 }
 
 function errorMessage(err: unknown): string {
