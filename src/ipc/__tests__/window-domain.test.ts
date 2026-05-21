@@ -162,6 +162,7 @@ describe("window domain IPC", () => {
         title: "Preview",
         height: 320,
         allowScripts: true,
+        requiresScripts: true,
       },
     );
 
@@ -190,7 +191,9 @@ describe("window domain IPC", () => {
     expect(html).toContain("Content-Security-Policy");
     expect(html).toContain("frame-ancestors");
     expect(html).toMatch(/^<!doctype html><html><head><meta http-equiv="Content-Security-Policy"/);
-    expect(html).toContain("<main><h1>hello</h1></main>");
+    expect(html).toContain("data-render-html-frame");
+    expect(html).toContain("data-render-html-script-toggle");
+    expect(html).toContain("JavaScript");
     expect(win.show).toHaveBeenCalledOnce();
   });
 
@@ -206,7 +209,8 @@ describe("window domain IPC", () => {
     const dataUrl = win.loadURL.mock.calls[0]![0] as string;
     const html = decodeURIComponent(dataUrl.slice("data:text/html;charset=utf-8,".length));
     expect(html).toMatch(/^<!doctype html><html><head><meta http-equiv="Content-Security-Policy"/);
-    expect(html.indexOf("Content-Security-Policy")).toBeLessThan(html.indexOf("window.beforeCsp"));
+    expect(html.indexOf("Content-Security-Policy")).toBeLessThan(html.indexOf("data-render-html-frame"));
+    expect(html).not.toContain("<script>window.beforeCsp = true</script>");
   });
 
   it("rejects untrusted render_html window senders", async () => {
