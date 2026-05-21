@@ -35,11 +35,13 @@ const shellHtmlPath = resolve(repoRoot, "src/plugin-ui-shell.html");
 const shellJsPath = resolve(repoRoot, "src/plugin-ui-shell.js");
 const packageJsonPath = resolve(repoRoot, "package.json");
 const devScriptPath = resolve(repoRoot, "scripts/run-electron-dev.mjs");
+const buildAssetsPath = resolve(repoRoot, "scripts/lib/build-assets.mjs");
 
 const shellHtml = readFileSync(shellHtmlPath, "utf8");
 const shellJs = readFileSync(shellJsPath, "utf8");
 const packageJson = readFileSync(packageJsonPath, "utf8");
 const devScript = readFileSync(devScriptPath, "utf8");
+const buildAssets = readFileSync(buildAssetsPath, "utf8");
 
 function extractCsp(html: string): string {
   const m = html.match(/<meta\s+http-equiv="Content-Security-Policy"\s+content="([^"]+)"/i);
@@ -128,24 +130,23 @@ describe("plugin-ui-shell — CSP-safe external bootstrap", () => {
   });
 
   it("build script copies plugin-ui-shell.js into dist/src/", () => {
-    // The package.json `build` script invokes `copy-build-assets.mjs` with
-    // src/dest pairs. We don't want this to silently regress to "html only".
-    expect(packageJson).toMatch(
-      /src\/plugin-ui-shell\.js\s+dist\/src\/plugin-ui-shell\.js/,
-    );
-    // And the HTML pair must still be there.
-    expect(packageJson).toMatch(
-      /src\/plugin-ui-shell\.html\s+dist\/src\/plugin-ui-shell\.html/,
-    );
+    // The build script delegates to the shared asset registry; package.json
+    // should not become a second src/dest list again.
+    expect(packageJson).toContain("node scripts/copy-build-assets.mjs");
+    expect(packageJson).not.toContain("src/plugin-ui-shell.html dist/src/plugin-ui-shell.html");
+    expect(packageJson).not.toContain("src/plugin-ui-shell.js dist/src/plugin-ui-shell.js");
+    expect(buildAssets).toContain('src: "src/plugin-ui-shell.html"');
+    expect(buildAssets).toContain('out: "dist/src/plugin-ui-shell.html"');
+    expect(buildAssets).toContain('src: "src/plugin-ui-shell.js"');
+    expect(buildAssets).toContain('out: "dist/src/plugin-ui-shell.js"');
   });
 
   it("dev launcher copies and watches the plugin-ui-shell.js asset", () => {
     // The dev path bypasses `bun run build`, so it has its own copy/watch.
-    // Both the HTML and JS sibling must be wired up there.
-    expect(devScript).toMatch(/src\/plugin-ui-shell\.html/);
-    expect(devScript).toMatch(/src\/plugin-ui-shell\.js/);
-    expect(devScript).toMatch(/dist\/src\/plugin-ui-shell\.html/);
-    expect(devScript).toMatch(/dist\/src\/plugin-ui-shell\.js/);
+    // Both the HTML and JS sibling must come from the same registry as build.
+    expect(devScript).toContain('import { resolveBuildAssets } from "./lib/build-assets.mjs";');
+    expect(devScript).toContain('resolveBuildAssets(repoRoot, "plugin-shell")');
+    expect(buildAssets).toContain('category: "plugin-shell"');
   });
 
 });

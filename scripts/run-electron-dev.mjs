@@ -31,6 +31,7 @@ import {
   DEMO_ACTIVATION_DEV_RELAUNCH_EXIT_CODE,
 } from "./lib/dev-electron-exit.mjs";
 import { loadRepoDemoEnv } from "./lib/demo-env-loader.mjs";
+import { resolveBuildAssets } from "./lib/build-assets.mjs";
 import { homedir } from "node:os";
 import { basename, dirname, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -264,40 +265,18 @@ const repoRootHash = createHash("sha256").update(repoRoot).digest("hex").slice(0
 const DEV_PROFILE_NAME = process.env.LVIS_DEV_PROFILE_NAME || `Electron-LVIS-Dev-${basename(repoRoot)}-${repoRootHash}`;
 const binDir = resolve(repoRoot, "node_modules/.bin");
 const mainOutput = resolve(repoRoot, "dist/src/main/main.js");
-const htmlSrc = resolve(repoRoot, "src/index.html");
-const htmlOut = resolve(repoRoot, "dist/src/index.html");
+const [indexHtmlAsset] = resolveBuildAssets(repoRoot, "app-shell");
+const htmlSrc = indexHtmlAsset.src;
+const htmlOut = indexHtmlAsset.out;
 // Plugin UI shell — HTML + external bootstrap module. Both must reach
 // `dist/src/` for plugin webviews to render. The bootstrap is a separate
 // file because the shell's CSP (`script-src 'self'`, no `'unsafe-inline'`)
 // would silently refuse an inline `<script type="module">` block, leaving
 // embedded plugin areas blank and detached windows black.
-const pluginShellAssets = [
-  {
-    src: resolve(repoRoot, "src/plugin-ui-shell.html"),
-    out: resolve(repoRoot, "dist/src/plugin-ui-shell.html"),
-    label: "plugin-ui-shell.html",
-  },
-  {
-    src: resolve(repoRoot, "src/plugin-ui-shell.js"),
-    out: resolve(repoRoot, "dist/src/plugin-ui-shell.js"),
-    label: "plugin-ui-shell.js",
-  },
-];
-// Runtime script assets imported by compiled main-process modules. Production
-// `bun run build` copies these through package.json; the dev watcher must keep
-// the same contract or Electron can boot before the imported files exist.
-const runtimeScriptAssets = [
-  {
-    src: resolve(repoRoot, "scripts/electron-flags.mjs"),
-    out: resolve(repoRoot, "dist/scripts/electron-flags.mjs"),
-    label: "electron-flags.mjs",
-  },
-  {
-    src: resolve(repoRoot, "scripts/uv-targets.mjs"),
-    out: resolve(repoRoot, "dist/scripts/uv-targets.mjs"),
-    label: "uv-targets.mjs",
-  },
-];
+const pluginShellAssets = resolveBuildAssets(repoRoot, "plugin-shell");
+// Runtime script assets imported by compiled main-process modules. The dev
+// watcher and `bun run build` read the same registry in scripts/lib/build-assets.mjs.
+const runtimeScriptAssets = resolveBuildAssets(repoRoot, "runtime-script");
 
 const RESTART_DELAY_MS = parseMsEnv("LVIS_DEV_RESTART_DELAY_MS", 2500);
 const RESTART_FORCE_KILL_MS = parseMsEnv("LVIS_DEV_RESTART_FORCE_KILL_MS", 3000);
