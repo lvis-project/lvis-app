@@ -144,6 +144,33 @@ describe("ToolGroupCard", () => {
     expect(container.querySelector(".h-\\[6\\.9rem\\]")).not.toBeNull();
   });
 
+  it("pretty-prints JSON tool input and output through the shared payload block", () => {
+    const result = JSON.stringify({
+      ok: true,
+      rows: JSON.stringify([{ id: 1, title: "보고서" }]),
+    });
+    const { container } = render(<ToolGroupCard group={makeGroup({ tools: [
+      {
+        toolUseId: "tu-json",
+        name: "search_files",
+        input: { query: "월간 보고", options: JSON.stringify({ limit: 3, sort: "mtime" }) },
+        result,
+        status: "done",
+        displayOrder: 0,
+      },
+    ] })} />);
+    fireEvent.click(container.querySelector("button") as HTMLButtonElement);
+
+    const payloads = Array.from(container.querySelectorAll("[data-testid='tool-payload']"))
+      .map((node) => node.textContent ?? "");
+    expect(payloads).toHaveLength(2);
+    expect(payloads[0]).toContain('"options": {');
+    expect(payloads[0]).toContain('"limit": 3');
+    expect(payloads[1]).toContain('"rows": [');
+    expect(payloads[1]).toContain('"title": "보고서"');
+    expect(payloads.join("\n")).not.toContain('\\\"limit\\\"');
+  });
+
   it("bounds visually long one-line tool results after wrapping", () => {
     const result = JSON.stringify({
       url: "https://news.google.com/rss/search?q=IT",
