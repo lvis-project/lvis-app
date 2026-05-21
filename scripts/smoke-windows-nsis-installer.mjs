@@ -135,6 +135,14 @@ function appendOutput(current, chunk) {
   return next.length > MAX_OUTPUT_CHARS ? next.slice(next.length - MAX_OUTPUT_CHARS) : next;
 }
 
+function removeTempDirBestEffort(dir) {
+  try {
+    rmSync(dir, { recursive: true, force: true });
+  } catch (err) {
+    process.stderr.write(`[windows-installer-smoke] warning: could not remove temp dir ${dir}: ${err.message}\n`);
+  }
+}
+
 async function runProcess(command, args, { timeoutMs, env = process.env } = {}) {
   process.stdout.write(`[windows-installer-smoke] $ ${command} ${args.join(" ")}\n`);
 
@@ -240,7 +248,7 @@ async function launchSmoke(executable, timeoutMs) {
       });
     });
   } finally {
-    rmSync(userDataDir, { recursive: true, force: true });
+    removeTempDirBestEffort(userDataDir);
   }
 }
 

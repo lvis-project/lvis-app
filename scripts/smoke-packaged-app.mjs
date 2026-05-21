@@ -184,6 +184,14 @@ function appendOutput(current, chunk) {
   return next.length > MAX_OUTPUT_CHARS ? next.slice(next.length - MAX_OUTPUT_CHARS) : next;
 }
 
+function removeTempDirBestEffort(dir) {
+  try {
+    rmSync(dir, { recursive: true, force: true });
+  } catch (err) {
+    process.stderr.write(`[packaged-smoke] warning: could not remove temp dir ${dir}: ${err.message}\n`);
+  }
+}
+
 async function launchSmoke(executable, timeoutMs) {
   const userDataDir = mkdtempSync(join(tmpdir(), "lvis-packaged-smoke-"));
   const env = {
@@ -221,13 +229,13 @@ async function launchSmoke(executable, timeoutMs) {
     child.on("error", (err) => {
       clearTimeout(timer);
       if (killTimer) clearTimeout(killTimer);
-      rmSync(userDataDir, { recursive: true, force: true });
+      removeTempDirBestEffort(userDataDir);
       reject(err);
     });
     child.on("exit", (code, signal) => {
       clearTimeout(timer);
       if (killTimer) clearTimeout(killTimer);
-      rmSync(userDataDir, { recursive: true, force: true });
+      removeTempDirBestEffort(userDataDir);
 
       if (MODULE_LOAD_FAILURE.test(output)) {
         reject(new Error(`packaged app emitted module load failure:\n${output}`));
