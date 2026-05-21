@@ -97,7 +97,7 @@ export function useStatusBarHealth({ api, upsertPersistent, removePersistent }: 
 
     const unsubs: Array<() => void> = [];
     if (typeof api.onSettingsUpdated === "function") {
-      unsubs.push(api.onSettingsUpdated(() => void refreshLlm()));
+      unsubs.push(api.onSettingsUpdated(() => void refreshAll()));
     }
 
     return () => {
