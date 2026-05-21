@@ -1,8 +1,8 @@
 /**
  * Snapshot tests for VercelUnifiedProvider — azure-foundry slot.
  *
- * Azure AI Foundry exposes an OpenAI-compatible surface. We route through
- * createOpenAICompatible with the user-supplied deployment endpoint baseURL.
+ * Azure AI Foundry exposes OpenAI v1 Responses API. We route through
+ * @ai-sdk/azure so reasoning summaries can stream as reasoning-delta events.
  */
 import { describe, it, expect, vi } from "vitest";
 import type { StreamEvent } from "../../types.js";
@@ -16,10 +16,10 @@ async function collect(
 }
 
 describe("VercelUnifiedProvider azure-foundry", () => {
-  it("requires baseUrl and routes through createOpenAICompatible with azure-foundry name", async () => {
+  it("normalizes Azure endpoints and routes through @ai-sdk/azure Responses API", async () => {
     vi.resetModules();
-    const modelFactory = vi.fn(() => ({ __mock: "azure" }));
-    const createCompatSpy = vi.fn(() => modelFactory);
+    const responsesSpy = vi.fn(() => ({ __mock: "azure-responses" }));
+    const createAzureSpy = vi.fn(() => ({ responses: responsesSpy }));
 
     vi.doMock("ai", async () => {
       const actual = await vi.importActual<typeof import("ai")>("ai");
@@ -37,13 +37,13 @@ describe("VercelUnifiedProvider azure-foundry", () => {
         })),
       };
     });
-    vi.doMock("@ai-sdk/openai-compatible", () => ({
-      createOpenAICompatible: createCompatSpy,
+    vi.doMock("@ai-sdk/azure", () => ({
+      createAzure: createAzureSpy,
     }));
 
     const { VercelUnifiedProvider } = await import("../adapter.js");
     const endpoint =
-      "https://myresource.openai.azure.com/openai/deployments/gpt-4o/";
+      "https://myresource.openai.azure.com/openai/deployments/gpt-5.4-mini/chat/completions?api-version=2025-01-01-preview";
     const provider = new VercelUnifiedProvider(
       "azure-foundry",
       "azure-key",
@@ -52,24 +52,74 @@ describe("VercelUnifiedProvider azure-foundry", () => {
 
     const events = await collect(
       provider.streamTurn({
-        model: "gpt-4o",
+        model: "gpt-5.4-mini",
         systemPrompt: "sys",
         messages: [{ role: "user", content: "hi" }],
       }),
     );
 
-    expect(createCompatSpy).toHaveBeenCalledWith(
-      expect.objectContaining({
-        name: "azure-foundry",
-        baseURL: endpoint,
-        apiKey: "azure-key",
-      }),
-    );
-    expect(modelFactory).toHaveBeenCalledWith("gpt-4o");
+    expect(createAzureSpy).toHaveBeenCalledWith({
+      baseURL: "https://myresource.openai.azure.com/openai",
+      apiKey: "azure-key",
+    });
+    expect(responsesSpy).toHaveBeenCalledWith("gpt-5.4-mini");
     expect(events.at(-1)?.type).toBe("message_complete");
 
     vi.doUnmock("ai");
-    vi.doUnmock("@ai-sdk/openai-compatible");
+    vi.doUnmock("@ai-sdk/azure");
+  });
+
+  it("passes Azure reasoning options when thinking is enabled", async () => {
+    vi.resetModules();
+    const streamTextSpy = vi.fn(() => ({
+      fullStream: (async function* () {
+        yield { type: "reasoning-start", id: "r1" };
+        yield { type: "reasoning-delta", id: "r1", text: "checking" };
+        yield { type: "reasoning-end", id: "r1" };
+        yield { type: "text-delta", id: "t1", text: "ok" };
+        yield {
+          type: "finish",
+          finishReason: "stop",
+          totalUsage: { inputTokens: 1, outputTokens: 1 },
+        };
+      })(),
+    }));
+    const responsesSpy = vi.fn(() => ({ __mock: "azure-responses" }));
+    const createAzureSpy = vi.fn(() => ({ responses: responsesSpy }));
+
+    vi.doMock("ai", async () => {
+      const actual = await vi.importActual<typeof import("ai")>("ai");
+      return { ...actual, streamText: streamTextSpy };
+    });
+    vi.doMock("@ai-sdk/azure", () => ({
+      createAzure: createAzureSpy,
+    }));
+
+    const { VercelUnifiedProvider } = await import("../adapter.js");
+    const provider = new VercelUnifiedProvider(
+      "azure-foundry",
+      "azure-key",
+      "https://myresource.openai.azure.com/openai/v1/",
+    );
+
+    const events = await collect(
+      provider.streamTurn({
+        model: "gpt-5.4-mini",
+        systemPrompt: "sys",
+        messages: [{ role: "user", content: "hi" }],
+        enableThinking: true,
+        thinkingBudgetTokens: 10_000,
+      }),
+    );
+
+    const callArg = streamTextSpy.mock.calls[0]![0] as Record<string, unknown>;
+    expect(callArg.providerOptions).toEqual({
+      azure: { reasoningEffort: "high", reasoningSummary: "detailed" },
+    });
+    expect(events).toContainEqual({ type: "reasoning_delta", text: "checking" });
+
+    vi.doUnmock("ai");
+    vi.doUnmock("@ai-sdk/azure");
   });
 
   it("throws without baseUrl", async () => {
@@ -109,5 +159,22 @@ describe("VercelUnifiedProvider azure-foundry", () => {
     // synchronously so reviewer-wiring + IPC handlers stay unchanged.
     expect(p.constructor.name).toBe("LazyVercelProvider");
     expect(p.vendor).toBe("azure-foundry");
+  });
+
+  it("normalizes documented /openai/v1 base URLs for @ai-sdk/azure", async () => {
+    vi.resetModules();
+    const { normalizeAzureFoundryBaseURL } = await import("../adapter.js");
+
+    expect(
+      normalizeAzureFoundryBaseURL("https://example.openai.azure.com/openai/v1/"),
+    ).toBe("https://example.openai.azure.com/openai");
+    expect(
+      normalizeAzureFoundryBaseURL(
+        "https://example.openai.azure.com/openai/deployments/gpt/chat/completions?api-version=2025-01-01-preview",
+      ),
+    ).toBe("https://example.openai.azure.com/openai");
+    expect(
+      normalizeAzureFoundryBaseURL("https://example.openai.azure.com/"),
+    ).toBe("https://example.openai.azure.com/openai");
   });
 });
