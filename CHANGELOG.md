@@ -1,5 +1,24 @@
 # Changelog
 
+## v0.2.7 — 2026-05-22
+
+### 안정성 / 패키징
+
+- **Windows uninstall 실제 삭제 검증** (PR #1080) — NSIS uninstall 이 확인 다이얼로그 후 조용히 종료되는 대신 설치 폴더와 핵심 앱 파일 잔존 여부를 검증한다. 삭제 실패 시 실패 exit/error 로 보고하고, GUI uninstall 은 관리자 권한 재시도 1회만 제공한다.
+- **사용자 데이터 보존 경로 유지** (PR #1080) — `/KEEP_APP_DATA` 와 update uninstall (`--updated`) 경로는 기존처럼 사용자 데이터를 삭제하지 않으며, 관리자 권한 재시도도 앱 파일 제거 범위로 제한한다.
+- **Windows installer smoke 확장** (PR #1080) — Windows setup.exe smoke 가 silent install, installed app launch, `/S /KEEP_APP_DATA` uninstall, full `/S` uninstall, 설치 폴더 제거, user data cleanup 을 disposable Windows runner 에서 검증한다.
+
+### 배포
+
+- `latest` release 에 Windows/macOS/Linux versioned installer 와 stable `LVIS-latest-*` alias asset 을 함께 포함한다.
+
+### 검증
+
+- PR #1080: focused desktop packaging Vitest 6 pass, `bun run typecheck`, `bun run build`, remote CI success.
+- Build Installers run `26239492691`: Windows NSIS smoke verified `/S /KEEP_APP_DATA` and full `/S` uninstall both remove the install directory; full uninstall removes LVIS user data paths.
+
+---
+
 ## v0.2.6 — 2026-05-21
 
 ### 개선
