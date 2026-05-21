@@ -61,6 +61,38 @@ function webFetchCategoryForInput(input: unknown): "read" | "network" {
   return args.allowPrivateNetwork === true ? "network" : "read";
 }
 
+function formatWebFetchErrorDetails(error: unknown): string {
+  const parts: string[] = [];
+  const push = (value: unknown) => {
+    if (typeof value === "string" && value.trim()) {
+      parts.push(value.trim());
+    }
+  };
+  let cursor: unknown = error;
+  let depth = 0;
+  while (cursor && depth < 4) {
+    if (cursor instanceof Error) {
+      push(cursor.message);
+      const record = cursor as Error & { code?: unknown; cause?: unknown };
+      if (typeof record.code === "string") push(record.code);
+      cursor = record.cause;
+      depth += 1;
+      continue;
+    }
+    if (typeof cursor === "object") {
+      const record = cursor as { message?: unknown; code?: unknown; cause?: unknown };
+      push(record.message);
+      if (typeof record.code === "string") push(record.code);
+      cursor = record.cause;
+      depth += 1;
+      continue;
+    }
+    push(String(cursor));
+    break;
+  }
+  return [...new Set(parts)].join(" | ") || "unknown fetch error";
+}
+
 export function registerRequestPluginMetaTool(toolRegistry: ToolRegistry): void {
   // Phase 1.5 Option C — request_plugin 메타 툴 (항상 활성, scope filter 통과)
   // execute는 no-op — 실제 scope 확장은 ConversationLoop.queryLoop이 가로챈다.
@@ -225,6 +257,7 @@ export interface WorkflowToolDeps {
   getApprovalGate?: () => ApprovalGate | undefined;
   emitAgentSpawn?: (event: AgentSpawnEvent) => void;
   emitSkillLoad?: (event: SkillLoadEvent) => void;
+  webFetchImpl?: (input: string, init: RequestInit) => Promise<Response>;
 }
 
 export function registerBuiltinTools(
@@ -360,6 +393,7 @@ export function registerBuiltinTools(
           const response = await fetchPublicHttpResponse(url, {
             allowPrivateNetworks: allowPrivateNetwork,
             headers: { "User-Agent": "LVIS-Assistant/0.1.0" },
+            fetchImpl: workflowDeps?.webFetchImpl,
           });
           const html = await response.text();
           const text = html
@@ -381,7 +415,7 @@ export function registerBuiltinTools(
             output: JSON.stringify({
               url,
               error: "웹 페이지를 읽을 수 없습니다.",
-              details: (error as Error).message,
+              details: formatWebFetchErrorDetails(error),
             }),
             isError: true,
           };

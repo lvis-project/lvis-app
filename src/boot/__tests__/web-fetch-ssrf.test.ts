@@ -1,4 +1,4 @@
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 import { registerBuiltinTools } from "../tools.js";
 import { ToolRegistry } from "../../tools/registry.js";
 import { registerStandardCategories } from "../../permissions/category-registry.js";
@@ -12,13 +12,13 @@ import { PermissionManager } from "../../permissions/permission-manager.js";
  * reserved ranges — no live network required.
  */
 describe("web_fetch SSRF guard", () => {
-  function makeWebFetchTool() {
+  function makeWebFetchTool(deps?: Parameters<typeof registerBuiltinTools>[2]) {
     const registry = new ToolRegistry();
     const settingsStub = {
       get: () => ({ provider: "duckduckgo" }),
       getSecret: () => null,
     } as unknown as Parameters<typeof registerBuiltinTools>[1];
-    registerBuiltinTools(registry, settingsStub);
+    registerBuiltinTools(registry, settingsStub, deps);
     const tool = registry
       .getVisibleTools()
       .find((t) => t.name === "web_fetch");
@@ -100,5 +100,47 @@ describe("web_fetch SSRF guard", () => {
     );
     expect(result.isError).toBe(true);
     expect(result.output).toMatch(/non-public address/i);
+  });
+
+  it("uses the injected Electron/Chromium fetch path for approved private network URLs", async () => {
+    const webFetchImpl = vi.fn(async () =>
+      new Response("<html><body><h1>Internal Portal</h1></body></html>", { status: 200 }),
+    );
+    const tool = makeWebFetchTool({ webFetchImpl });
+
+    const result = await tool.execute(
+      { url: "https://10.185.177.209/", allowPrivateNetwork: true },
+      {} as never,
+    );
+
+    expect(result.isError).toBe(false);
+    expect(webFetchImpl).toHaveBeenCalledWith(
+      "https://10.185.177.209/",
+      expect.objectContaining({
+        redirect: "manual",
+        headers: { "User-Agent": "LVIS-Assistant/0.1.0" },
+      }),
+    );
+    expect(result.output).toContain("Internal Portal");
+  });
+
+  it("surfaces nested fetch cause details instead of only 'fetch failed'", async () => {
+    const cause = Object.assign(new Error("connect ETIMEDOUT 10.185.177.209:443"), {
+      code: "ETIMEDOUT",
+    });
+    const webFetchImpl = vi.fn(async () => {
+      throw new Error("fetch failed", { cause });
+    });
+    const tool = makeWebFetchTool({ webFetchImpl });
+
+    const result = await tool.execute(
+      { url: "https://10.185.177.209/", allowPrivateNetwork: true },
+      {} as never,
+    );
+
+    expect(result.isError).toBe(true);
+    expect(result.output).toContain("fetch failed");
+    expect(result.output).toContain("connect ETIMEDOUT 10.185.177.209:443");
+    expect(result.output).toContain("ETIMEDOUT");
   });
 });

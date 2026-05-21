@@ -276,6 +276,28 @@ describe("fetchPublicHttpResponse (mocked fetch)", () => {
     expect(fetchMock).toHaveBeenCalledOnce();
   });
 
+  it("uses an injected fetch implementation after DNS validation", async () => {
+    lookupMock.mockResolvedValue([{ address: "93.184.216.34", family: 4 }]);
+    const fetchImpl = vi.fn(async () =>
+      new Response("chromium", { status: 200 }),
+    );
+
+    const resp = await fetchPublicHttpResponse("https://example.com/", {
+      fetchImpl,
+      headers: { "User-Agent": "LVIS-Assistant/0.1.0" },
+    });
+
+    expect(resp.status).toBe(200);
+    expect(await resp.text()).toBe("chromium");
+    expect(fetchImpl).toHaveBeenCalledWith(
+      "https://example.com/",
+      expect.objectContaining({
+        redirect: "manual",
+        headers: { "User-Agent": "LVIS-Assistant/0.1.0" },
+      }),
+    );
+  });
+
   it("validates every hop of a redirect chain", async () => {
     lookupMock.mockResolvedValue([{ address: "93.184.216.34", family: 4 }]);
     const fetchMock = vi

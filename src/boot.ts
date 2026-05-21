@@ -37,7 +37,7 @@
  * No plugin-specific code lives here — all plugins register themselves via the
  * HostApi manufactured in `steps/plugin-runtime.ts`.
  */
-import { app, powerMonitor } from "electron";
+import { app, net, powerMonitor } from "electron";
 import type { BrowserWindow } from "electron";
 import { BrowserWindow as BrowserWindowValue } from "electron";
 import { randomUUID } from "node:crypto";
@@ -460,6 +460,13 @@ export async function bootstrap(
       } catch (err) {
         log.warn("skill_load emit failed: %s", (err as Error).message);
       }
+    },
+    webFetchImpl: async (url, init) => {
+      // Builtin web_fetch should use Chromium's network stack in packaged
+      // Electron so corporate proxy and OS trust-store configuration match
+      // what an LVIS user sees in auth/link windows. NetworkGuard still
+      // validates the initial URL and every redirect hop before this runs.
+      return await net.fetch(url, init) as unknown as Response;
     },
   };
 

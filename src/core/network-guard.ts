@@ -42,6 +42,7 @@ export interface NetworkGuardOptions {
 }
 
 type NetworkGuardFetchInit = RequestInit & NetworkGuardOptions & {
+  fetchImpl?: (input: string, init: RequestInit) => Promise<Response>;
   maxRedirects?: number;
   timeoutMs?: number;
 };
@@ -145,6 +146,7 @@ export async function fetchPublicHttpResponse(
     allowPrivateNetworks = false,
     maxRedirects = 5,
     timeoutMs = TOOL_TIMEOUT_POLICY.networkFetchDefaultMs,
+    fetchImpl = fetch,
     signal: externalSignal,
     ...restInit
   } = init;
@@ -167,7 +169,7 @@ export async function fetchPublicHttpResponse(
       }
     }
     try {
-      const response = await fetch(currentUrl, {
+      const response = await fetchImpl(currentUrl, {
         ...restInit,
         redirect: "manual",
         signal: controller.signal,
