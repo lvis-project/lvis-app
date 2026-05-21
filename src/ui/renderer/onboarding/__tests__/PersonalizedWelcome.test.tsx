@@ -144,6 +144,48 @@ describe("PersonalizedWelcome", () => {
     expect(cta.disabled).toBe(false);
   });
 
+  it("ping failure (private endpoint): points the user at VPN or demo host-map", async () => {
+    const { api } = makeApi(async () => ({
+      configured: true,
+      online: false,
+      vendor: "azure-foundry",
+      model: "gpt-5.4-mini",
+      error: "Public access is disabled. Please configure private endpoint.",
+    }));
+    render(<PersonalizedWelcome open api={api} onContinue={() => {}} />);
+    await waitFor(() => {
+      expect(
+        screen.getByTestId("personalized-welcome:ping-failure"),
+      ).toBeTruthy();
+    });
+    const failure = screen.getByTestId(
+      "personalized-welcome:ping-failure",
+    );
+    expect(failure.textContent).toContain("private endpoint");
+    expect(failure.textContent).toContain("host-map");
+  });
+
+  it("ping failure (timeout): points the user at VPN or demo host-map", async () => {
+    const { api } = makeApi(async () => ({
+      configured: true,
+      online: false,
+      vendor: "azure-foundry",
+      model: "gpt-5.4-mini",
+      error: "timeout",
+    }));
+    render(<PersonalizedWelcome open api={api} onContinue={() => {}} />);
+    await waitFor(() => {
+      expect(
+        screen.getByTestId("personalized-welcome:ping-failure"),
+      ).toBeTruthy();
+    });
+    const failure = screen.getByTestId(
+      "personalized-welcome:ping-failure",
+    );
+    expect(failure.textContent).toContain("private endpoint");
+    expect(failure.textContent).toContain("host-map");
+  });
+
   it("ping failure (unauthorized-frame ok=false): surfaces warning + keeps continue enabled", async () => {
     const { api } = makeApi(async () => ({
       ok: false,

@@ -77,6 +77,12 @@ function errorMessage(code: string): string {
       return "내부망 endpoint 에 연결할 수 없어요. VPN 또는 내부망 연결을 확인해주세요.";
     case "invalid-foundry-endpoint":
       return "데모 endpoint 형식이 올바르지 않아요. 발급자에게 새 활성 코드를 요청해 주세요.";
+    case "missing-foundry-host-map":
+      return "데모 private endpoint host-map 이 빠져 있어요. 발급자에게 새 활성 코드를 요청해 주세요.";
+    case "foundry-host-map-mismatch":
+      return "데모 endpoint 와 host-map 이 일치하지 않아요. 발급자에게 새 활성 코드를 요청해 주세요.";
+    case "invalid-foundry-host-map-target":
+      return "데모 host-map 대상이 허용된 private endpoint 대역이 아니에요. 발급자에게 새 활성 코드를 요청해 주세요.";
     default:
       return "로그인에 실패했습니다.";
   }
@@ -103,6 +109,12 @@ function activationErrorMessage(code: string): string {
       return "활성 코드에 Azure Foundry endpoint 정보가 빠져 있어요. 발급자에게 새 활성 코드를 요청해 주세요.";
     case "invalid-foundry-endpoint":
       return "데모 endpoint 형식이 올바르지 않아요. 발급자에게 새 활성 코드를 요청해 주세요.";
+    case "missing-foundry-host-map":
+      return "활성 코드에 private endpoint host-map 정보가 빠져 있어요. 발급자에게 새 활성 코드를 요청해 주세요.";
+    case "foundry-host-map-mismatch":
+      return "활성 코드의 endpoint 와 host-map 이 일치하지 않아요. 발급자에게 새 활성 코드를 요청해 주세요.";
+    case "invalid-foundry-host-map-target":
+      return "활성 코드의 host-map 대상이 허용된 private endpoint 대역이 아니에요. 발급자에게 새 활성 코드를 요청해 주세요.";
     case "persist-failed":
       return "활성 코드를 저장하지 못했어요. 디스크 공간 또는 권한을 확인한 뒤 다시 시도해 주세요.";
     case "unauthorized-frame":
@@ -318,7 +330,7 @@ export function LoginModalConversational({
           setError(activationErrorMessage(status.error));
           return;
         }
-        if (status.activated) {
+        if (status.activated && !forceActivation) {
           window.setTimeout(() => {
             void runAuthMockup();
           }, 220);
@@ -338,6 +350,7 @@ export function LoginModalConversational({
     activating,
     activationRelaunching,
     checkingDemoStatus,
+    forceActivation,
     api,
     runAuthMockup,
   ]);
@@ -388,10 +401,9 @@ export function LoginModalConversational({
   }, [api, activationCode, activating, submitting, activationRelaunching, runAuthMockup]);
 
   // 2026-05-20 — Settings 의 "데모 자격증명 재입력" entry. forceActivation 가
-  // true 인 동안 modal 이 열리면 chip selection 화면을 우회하고 activateDemoChip
-  // path 를 한 번만 자동 실행한다. `activateDemoChip` 내부에서 `demo.status` 를
-  // 다시 확인하므로, 이미 활성된 상태라면 곧장 auth transcript 로 진입하고
-  // 비활성 상태라면 activation 입력 page 가 mount 된다.
+  // true 인 동안 modal 이 열리면 chip selection 화면을 우회하고 activation
+  // 입력 page 를 mount 한다. 이미 활성된 상태여도 이 path 는 재입력을 위한
+  // 복구 entry 이므로 auth transcript 로 건너뛰지 않는다.
   const forceActivationFiredRef = useRef(false);
   useEffect(() => {
     if (!open) {
