@@ -19,7 +19,7 @@ import { markStaleToolResults, estimateMessagesTokens, getModelPreflightThreshol
  * pathological 상태이거나 *adversarial input* 신호.
  */
 const MAX_FORCE_RECOVER_PER_SESSION = 3;
-import { compactWithBoundary, renderBoundaryAsPreamble } from "./structured-compact.js";
+import { compactWithBoundary, DEFAULT_PRESERVE_RECENT_TURNS, renderBoundaryAsPreamble } from "./structured-compact.js";
 import { CompressionStatus } from "../shared/compact-status.js";
 import { stripSuggestedReplies } from "./suggested-replies.js";
 import { createProvider, secretKeyFor } from "./llm/provider-factory.js";
@@ -1085,6 +1085,7 @@ export class ConversationLoop {
         llm: this.provider,
         model,
         preserveRecentTokens,
+        preserveRecentTurns: DEFAULT_PRESERVE_RECENT_TURNS,
         compactNum: this.compactNum + 1,
         sessionId: this.sessionId,
         preflightTokens: preflight,
@@ -2348,9 +2349,9 @@ export class ConversationLoop {
       log.info(
         `preflight: TRIGGER — source=${triggerSource} estimated=${estimated} actualTokensIn=${actualTokensIn} preflight=${preflight} (model=${provider}/${model}) → LLM compact #${this.compactNum + 1}`,
       );
-      // Adaptive preserve budget — usagePct 가 높을수록 더 공격적으로 줄여서
-      // compact 가 항상 reduce 보장. red zone (usage >= 100%) 에서는 preserve=0
-      // 으로 전체 compact (boundary stub 만 남김).
+      // Adaptive token-budget preserve — usagePct 가 높을수록 줄인다. 별도 invariant 로
+      // compactWithBoundary 가 최근 5 user turn (+ 현재 pending user question)
+      // 을 verbatim 보존한다.
       //
       // forceRecover (context_error pending) 도 동일하게 preserve=0 — provider 가
       // 직접 거부한 상황이므로 보수적 preserve 가 의미 없음. 약속한 compact
@@ -2375,6 +2376,7 @@ export class ConversationLoop {
         llm: this.provider,
         model,
         preserveRecentTokens,
+        preserveRecentTurns: DEFAULT_PRESERVE_RECENT_TURNS,
         compactNum: this.compactNum + 1,
         sessionId: this.sessionId,
         preflightTokens: preflight,

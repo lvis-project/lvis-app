@@ -18,6 +18,8 @@ export class ConversationHistory {
   private readonly maxMessages: number;
 
   constructor(options?: ConversationHistoryOptions) {
+    // Default must be unbounded. Context reduction is owned by token-based
+    // auto-compact, not by a silent message-count eviction policy.
     this.maxMessages = normalizeMaxMessages(options?.maxMessages);
   }
 

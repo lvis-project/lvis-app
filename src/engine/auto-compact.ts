@@ -53,8 +53,7 @@ export function getModelUsableContext(vendor: LLMVendor, model: string): number 
 
 /**
  * Token preflight trigger (절대 token count). Same-session checkpoint
- * compaction conservative default —
- * 64K → 50% / 128K → 55% / 200K → 60% / 1M → 65% / other → 60%.
+ * compaction starts at 80% of the model-specific usable context budget.
  * 호출자: queryLoop 의 step 5/6 사이.
  *
  * **Dev override**: `LVIS_DEV_PREFLIGHT_OVERRIDE` 환경변수가 양의 정수면 그
@@ -66,7 +65,7 @@ export function getModelUsableContext(vendor: LLMVendor, model: string): number 
  * preflight 가 5K tokens 로 떨어져 짧은 대화만으로도 auto compact 트리거 가능.
  *
  * @example
- * // 200K Sonnet → usable 160K → 60% × 160K = 96K trigger
+ * // 200K Sonnet → usable 160K → 80% × 160K = 128K trigger
  * estimateMessagesTokens(history) >= getModelPreflightThreshold("claude", "claude-sonnet-4-6");
  */
 export function getModelPreflightThreshold(vendor: LLMVendor, model: string): number {

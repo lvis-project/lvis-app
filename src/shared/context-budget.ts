@@ -38,34 +38,19 @@ export function getUsableContext(contextWindow: number): number {
  *
  * `getUsableContext()` 와 *별도 함수* — 의미가 다름:
  *   - `getUsableContext`  = 분모 (전체 컨텍스트 윈도우의 사용 가능 portion)
- *   - `getPreflightThreshold` = 트리거 (usable 의 conservative %, LLM compact 진입점)
+ *   - `getPreflightThreshold` = 트리거 (usable 의 80%, LLM compact 진입점)
  *
  * 두 함수가 같은 구조라도 분리해야 향후 임계 비율을 모델 출시/관측치 기반으로
  * 독립 조정 가능.
  *
- * 2026-05 조정: estimateMessagesTokens 가 영어/코드 위주 대화에서 실제 토큰 수를
- * ~15-25% underestimate (chars/4 vs 실제 3-3.5 chars/token) 하는 것을 보완하여
- * threshold 를 낮춤. runPreflightGuard 가 실제 tokensIn 도 이중 감시하므로 더
- * 이른 compact 진입을 보장. 업데이트된 default:
- *
- *   - 64K  context  → 45 %  of usable  (≈ 16K)   small models / 단일 라운드 비중 큼
- *   - 128K context  → 50 %  of usable  (≈ 49K)
- *   - 200K context  → 55 %  of usable  (≈ 88K)   Anthropic default tier
- *   - 1M   context  → 60 %  of usable  (≈ 576K)
- *   - other         → 55 %  of usable
- *
- * 근거: conservative context-budgeting + estimator undercount 실측 보정.
+ * Contract: automatic compact starts at 80% of the model-specific usable
+ * context budget. Do not lower this by message count or model tier; the guard
+ * also watches provider-reported prompt tokens to catch estimator drift.
  *
  * @returns 절대 token count (Math.floor(usable × pct)). 0 if input invalid.
  */
 export function getPreflightThreshold(contextWindow: number): number {
   if (!Number.isFinite(contextWindow) || contextWindow <= 0) return 0;
   const usable = getUsableContext(contextWindow);
-  let pct: number;
-  if (contextWindow <= 64_000) pct = 0.45;
-  else if (contextWindow <= 128_000) pct = 0.50;
-  else if (contextWindow <= 200_000) pct = 0.55;
-  else if (contextWindow <= 1_000_000) pct = 0.60;
-  else pct = 0.55;
-  return Math.floor(usable * pct);
+  return Math.floor(usable * 0.8);
 }

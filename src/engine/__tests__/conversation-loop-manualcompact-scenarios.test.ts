@@ -18,6 +18,7 @@ import type { GenericMessage } from "../llm/types.js";
 import { fakeLlmSettings } from "../../shared/__tests__/fake-llm-settings.js";
 
 vi.mock("../structured-compact.js", () => ({
+  DEFAULT_PRESERVE_RECENT_TURNS: 5,
   compactWithBoundary: vi.fn(),
   renderBoundaryAsPreamble: vi.fn(() => "## Compact preamble"),
 }));
