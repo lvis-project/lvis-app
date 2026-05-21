@@ -109,6 +109,14 @@ export interface PluginCard {
   installPolicy?: "admin" | "user";
   /** Runtime load status derived from loaded/failed/disabled runtime state. */
   loadStatus: "loaded" | "preparing" | "failed" | "disabled";
+  /** Current dependency/runtime preparation step while loadStatus is "preparing". */
+  preparationStatus?: PluginPreparationStatus;
+  /** Optional Lucide icon name declared in the plugin manifest. */
+  icon?: string;
+  /** Optional short text rendered in place of a Lucide icon. */
+  iconText?: string;
+  /** Manifest-declared sidebar UI metadata, even before the plugin is loaded. */
+  uiExtensions?: PluginUiExtension[];
   version?: string;
   publisher?: string;
   configSchema?: PluginConfigSchema;
@@ -121,6 +129,19 @@ export interface PluginCard {
    * onto the canonical plugin card.
    */
   installAliases?: string[];
+}
+
+export interface PluginPreparationStatus {
+  phase: string;
+  message: string;
+  progressPct?: number;
+  updatedAt: string;
+}
+
+export interface PluginPreparationProgressInput {
+  phase: string;
+  message: string;
+  progressPct?: number;
 }
 
 /**
@@ -175,6 +196,7 @@ export interface PluginStartPreparationContext {
   manifest: PluginManifest;
   manifestPath: string;
   pluginRoot: string;
+  reportProgress?: (status: PluginPreparationProgressInput) => void;
 }
 
 export interface PluginRuntimeOptions {
@@ -261,6 +283,7 @@ export class PluginRuntime {
   private readonly failedPluginStubs = new Map<string, { name: string; description: string }>();
   private readonly disabledPluginIds = new Set<string>();
   private readonly preparingPluginIds = new Set<string>();
+  private readonly preparationStatuses = new Map<string, PluginPreparationStatus>();
   private readonly preparationFailures = new Map<string, string>();
   private readonly pendingPreparedStarts = new Map<string, PendingPreparedStart>();
   private readonly pendingRestarts = new Map<string, Promise<RestartPluginResult>>();
@@ -406,6 +429,8 @@ export class PluginRuntime {
     if (!this.preparePluginStart) return false;
     if (this.pendingPreparedStarts.has(manifest.id)) return true;
     const pluginRoot = dirname(plan.manifestPath);
+    const generation = ++this.nextPreparationGeneration;
+    this.preparationGenerations.set(manifest.id, generation);
     let result: Promise<void> | void | null | undefined;
     try {
       result = this.preparePluginStart({
@@ -413,19 +438,26 @@ export class PluginRuntime {
         manifest,
         manifestPath: plan.manifestPath,
         pluginRoot,
+        reportProgress: (status) => this.setPreparationStatus(manifest.id, status, generation),
       });
     } catch (err) {
       this.markPreparationFailed(manifest, err);
       return true;
     }
     if (!result || typeof (result as Promise<void>).then !== "function") {
+      this.preparationStatuses.delete(manifest.id);
       return false;
     }
 
     this.preparingPluginIds.add(manifest.id);
     this.preparationFailures.delete(manifest.id);
-    const generation = ++this.nextPreparationGeneration;
-    this.preparationGenerations.set(manifest.id, generation);
+    if (!this.preparationStatuses.has(manifest.id)) {
+      this.setPreparationStatus(manifest.id, {
+        phase: "pending",
+        message: "플러그인 런타임 준비를 시작합니다.",
+        progressPct: 5,
+      }, generation);
+    }
     let resolveReady!: () => void;
     let rejectReady!: (err: Error) => void;
     const ready = new Promise<void>((resolve, reject) => {
@@ -450,6 +482,7 @@ export class PluginRuntime {
           return;
         }
         this.preparingPluginIds.delete(manifest.id);
+        this.preparationStatuses.delete(manifest.id);
         this.preparationFailures.delete(manifest.id);
         resolveReady();
       })
@@ -468,9 +501,23 @@ export class PluginRuntime {
     return true;
   }
 
+  private setPreparationStatus(pluginId: string, status: PluginPreparationProgressInput, generation: number): void {
+    if (this.preparationGenerations.get(pluginId) !== generation) return;
+    const progressPct = typeof status.progressPct === "number"
+      ? Math.max(0, Math.min(100, Math.round(status.progressPct)))
+      : undefined;
+    this.preparationStatuses.set(pluginId, {
+      phase: status.phase,
+      message: status.message,
+      progressPct,
+      updatedAt: new Date().toISOString(),
+    });
+  }
+
   private markPreparationFailed(manifest: PluginManifest, err: unknown): void {
     const message = err instanceof Error ? err.message : String(err);
     this.preparingPluginIds.delete(manifest.id);
+    this.preparationStatuses.delete(manifest.id);
     this.preparationFailures.set(manifest.id, message);
     this.markFailed(manifest.id, {
       name: manifest.name,
@@ -485,6 +532,7 @@ export class PluginRuntime {
     pending?.rejectReady(new Error(`plugin '${pluginId}' runtime dependency preparation was cancelled`));
     this.preparationGenerations.set(pluginId, ++this.nextPreparationGeneration);
     this.preparingPluginIds.delete(pluginId);
+    this.preparationStatuses.delete(pluginId);
     this.preparationFailures.delete(pluginId);
     this.pendingPreparedStarts.delete(pluginId);
   }
@@ -1911,6 +1959,7 @@ export class PluginRuntime {
       this.preparationGenerations.set(pluginId, ++this.nextPreparationGeneration);
     }
     this.preparingPluginIds.clear();
+    this.preparationStatuses.clear();
     this.preparationFailures.clear();
     this.pendingPreparedStarts.clear();
     this.pendingRestarts.clear();
@@ -2043,6 +2092,7 @@ export class PluginRuntime {
         if (desc) toolDescriptions[toolName] = desc;
       }
     }
+    const uiExtensions = manifest.ui?.filter((extension) => extension.slot === "sidebar");
     return {
       id: pluginId,
       name: manifest.name,
@@ -2054,6 +2104,10 @@ export class PluginRuntime {
       isManaged: normalizeInstallPolicy(manifest) === "admin",
       installPolicy: manifest.installPolicy ?? "user",
       loadStatus,
+      preparationStatus: loadStatus === "preparing" ? this.preparationStatuses.get(pluginId) : undefined,
+      icon: manifest.icon,
+      iconText: manifest.iconText,
+      uiExtensions: uiExtensions && uiExtensions.length > 0 ? uiExtensions : undefined,
       version: manifest.version,
       publisher: manifest.publisher,
       configSchema: manifest.configSchema,

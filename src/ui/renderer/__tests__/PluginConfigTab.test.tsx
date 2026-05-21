@@ -275,6 +275,114 @@ describe("PluginConfigTab", () => {
 
     expect(screen.queryByLabelText("lvis-plugin-meeting 설치 진행 중")).toBeNull();
   });
+
+  it("renders preparation progress details for a selected preparing plugin", async () => {
+    const cards = vi.fn(async () => [
+      {
+        id: "agent-hub",
+        name: "Agent Hub",
+        description: "Agent orchestration",
+        publisher: "Test fixture",
+        sampleTools: [],
+        capabilities: [],
+        tools: [],
+        loadStatus: "preparing" as const,
+        preparationStatus: {
+          phase: "installing-deps",
+          message: "의존성 설치 중 (최초 1회)...",
+          progressPct: 40,
+          updatedAt: "2026-05-21T00:00:00.000Z",
+        },
+      },
+    ]);
+    Object.defineProperty(window, "lvis", {
+      value: {
+        plugins: { cards },
+        pluginConfig: { get: mockGet, set: mockSet },
+      },
+      writable: true,
+      configurable: true,
+    });
+
+    render(<PluginConfigTab />);
+
+    await waitFor(() => {
+      expect(screen.getByText("연관 라이브러리 다운로드/설치")).toBeInTheDocument();
+    });
+    expect(screen.getAllByText("의존성 설치 중 (최초 1회)...").length).toBeGreaterThan(0);
+    expect(screen.getByText("40%")).toBeInTheDocument();
+    expect(screen.getByText("준비가 끝나면 플러그인이 자동으로 로드됩니다.")).toBeInTheDocument();
+  });
+
+  it("refreshes and selects the preparing plugin when install progress enters preparing", async () => {
+    const meeting = {
+      id: "meeting",
+      name: "Meeting",
+      description: "Meeting plugin",
+      publisher: "Test fixture",
+      sampleTools: [],
+      capabilities: [],
+      tools: [],
+      loadStatus: "loaded" as const,
+    };
+    const agentHub = {
+      id: "agent-hub",
+      name: "Agent Hub",
+      description: "Agent orchestration",
+      publisher: "Test fixture",
+      sampleTools: [],
+      capabilities: [],
+      tools: [],
+      loadStatus: "preparing" as const,
+      preparationStatus: {
+        phase: "installing-python",
+        message: "Python 3.12 설치 중...",
+        progressPct: 10,
+        updatedAt: "2026-05-21T00:00:00.000Z",
+      },
+    };
+    const cards = vi.fn()
+      .mockResolvedValueOnce([meeting])
+      .mockResolvedValue([meeting, agentHub]);
+    let installProgressHandler: ((payload: { slug: string; phase: "preparing" }) => void) | null = null;
+    Object.defineProperty(window, "lvis", {
+      value: {
+        plugins: { cards },
+        pluginConfig: { get: mockGet, set: mockSet },
+      },
+      writable: true,
+      configurable: true,
+    });
+    Object.defineProperty(window, "lvisApi", {
+      value: {
+        onPluginInstallProgress: vi.fn((handler: (payload: { slug: string; phase: "preparing" }) => void) => {
+          installProgressHandler = handler;
+          return () => undefined;
+        }),
+        onPluginInstallResult: vi.fn(() => () => undefined),
+        onPluginUninstallResult: vi.fn(() => () => undefined),
+      },
+      writable: true,
+      configurable: true,
+    });
+
+    render(<PluginConfigTab />);
+
+    await waitFor(() => {
+      expect(cards).toHaveBeenCalledTimes(1);
+      expect(screen.getAllByText("Meeting").length).toBeGreaterThan(0);
+    });
+
+    await act(async () => {
+      installProgressHandler?.({ slug: "agent-hub", phase: "preparing" });
+    });
+
+    await waitFor(() => {
+      expect(cards.mock.calls.length).toBeGreaterThanOrEqual(2);
+      expect(screen.getByText("Python 런타임 설치")).toBeInTheDocument();
+    });
+    expect(screen.getAllByText("Python 3.12 설치 중...").length).toBeGreaterThan(0);
+  });
 });
 
 describe("PluginConfigTab — §9.2 Track B configSchema rendering", () => {

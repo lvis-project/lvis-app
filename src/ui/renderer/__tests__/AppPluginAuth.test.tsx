@@ -37,6 +37,52 @@ describe("App plugin auth routing", () => {
     ],
   };
 
+  it("renders a preparing plugin grid cell from plugin-card UI metadata before the view loads", async () => {
+    const { api } = await renderApp({
+      pluginCards: [
+        {
+          id: "local-indexer",
+          name: "LVIS Local Indexer",
+          description: "Indexes local documents",
+          sampleTools: [],
+          capabilities: [],
+          tools: [],
+          loadStatus: "preparing",
+          preparationStatus: {
+            phase: "installing-python",
+            message: "Python 3.12 설치 중...",
+            progressPct: 10,
+            updatedAt: "2026-05-21T00:00:00.000Z",
+          },
+          icon: "Plug",
+          uiExtensions: [
+            {
+              id: "local-indexer-control",
+              slot: "sidebar",
+              kind: "embedded-module",
+              title: "로컬 인덱서",
+              entry: "dist/ui/indexer-control.js",
+            },
+          ],
+        },
+      ],
+      pluginUiExtensions: [],
+    });
+
+    await waitFor(() => {
+      expect(api.listPluginCards).toHaveBeenCalled();
+    });
+
+    fireEvent.click(screen.getByTestId("plugin-grid-button"));
+
+    const cell = await screen.findByTestId("plugin-cell-plugin-local-indexer-local-indexer-control");
+    expect(cell).toHaveAttribute("aria-busy", "true");
+    expect(cell).toBeDisabled();
+    expect(screen.getByTestId("plugin-cell-plugin-local-indexer-local-indexer-control-phase")).toHaveTextContent("준비");
+    expect(screen.getByTestId("plugin-cell-plugin-local-indexer-local-indexer-control-preparation")).toHaveTextContent("Python 10%");
+    expect(cell).toHaveAttribute("title", expect.stringContaining("Python 10%"));
+  });
+
   it("opens an unauthenticated detached plugin view without invoking loginTool", async () => {
     const { api } = await renderApp(detachedPluginFixture);
     api.callPluginMethod.mockImplementation(async (tool: string) =>

@@ -7,7 +7,7 @@ import { Separator } from "../../../components/ui/separator.js";
 import { sanitizePluginConfig, sanitizePluginConfigKey } from "../../../shared/plugin-config.js";
 import { getApi } from "../api-client.js";
 import { getHostMarketplaceApi } from "../host-marketplace-api.js";
-import type { InstallInFlight, InstallPhase } from "../hooks/use-plugin-marketplace.js";
+import type { InstallInFlight, InstallPhase, InstallProgressPayload } from "../hooks/use-plugin-marketplace.js";
 import type { PluginCardSummary } from "../types.js";
 import { PluginAuthSection } from "../components/PluginAuthSection.js";
 import { usePluginAuthStatuses } from "../hooks/use-plugin-auth-status.js";
@@ -29,6 +29,68 @@ const INSTALL_PHASE_LABEL: Record<InstallPhase, string> = {
   restarting: "재시작 중…",
   preparing: "준비 중…",
 };
+
+const PREPARATION_PHASE_LABEL: Record<string, string> = {
+  pending: "부팅 준비",
+  "installing-python": "Python 런타임 설치",
+  "installing-deps": "연관 라이브러리 다운로드/설치",
+  verifying: "설치 검증",
+  ready: "부팅 준비 완료",
+  error: "준비 실패",
+};
+
+function formatInstallProgress(progress: InstallProgressPayload): string {
+  if (progress.phase !== "downloading") return INSTALL_PHASE_LABEL[progress.phase];
+  const received = formatBytes(progress.bytesDownloaded);
+  if (typeof progress.bytesTotal !== "number" || progress.bytesTotal <= 0) {
+    return `다운로드 중… ${received}`;
+  }
+  return `다운로드 중… ${received} / ${formatBytes(progress.bytesTotal)}`;
+}
+
+function formatBytes(bytes: number): string {
+  if (bytes >= 1024 * 1024) return `${(bytes / (1024 * 1024)).toFixed(1)} MB`;
+  if (bytes >= 1024) return `${Math.round(bytes / 1024)} KB`;
+  return `${bytes} B`;
+}
+
+function clampProgressPct(value: unknown): number | null {
+  if (typeof value !== "number" || !Number.isFinite(value)) return null;
+  return Math.max(0, Math.min(100, Math.round(value)));
+}
+
+function PluginPreparationStatusPanel({ plugin }: { plugin: PluginCardSummary }) {
+  if (plugin.loadStatus !== "preparing") return null;
+  const status = plugin.preparationStatus;
+  const progressPct = clampProgressPct(status?.progressPct);
+  const phaseLabel = status?.phase
+    ? PREPARATION_PHASE_LABEL[status.phase] ?? status.phase
+    : PREPARATION_PHASE_LABEL.pending;
+  const message = status?.message ?? "플러그인 런타임을 준비하는 중입니다.";
+  return (
+    <div className="space-y-2 rounded-sm bg-warning/10 px-3 py-2" aria-live="polite">
+      <div className="flex items-start justify-between gap-3">
+        <div className="min-w-0 space-y-0.5">
+          <div className="text-[10px] font-medium uppercase text-warning">준비 상태</div>
+          <div className="text-xs font-medium text-foreground">{phaseLabel}</div>
+          <div className="break-words text-[11px] text-muted-foreground">{message}</div>
+        </div>
+        {progressPct !== null && (
+          <div className="shrink-0 font-mono text-[11px] text-warning tabular-nums">{progressPct}%</div>
+        )}
+      </div>
+      <div className="h-1.5 w-full overflow-hidden rounded-full bg-warning/20">
+        <div
+          className={`h-full rounded-full bg-warning transition-all ${progressPct === null ? "w-1/3 animate-pulse" : ""}`}
+          style={progressPct === null ? undefined : { width: `${progressPct}%` }}
+        />
+      </div>
+      <div className="text-[10px] text-muted-foreground">
+        준비가 끝나면 플러그인이 자동으로 로드됩니다.
+      </div>
+    </div>
+  );
+}
 
 function configToEntries(config: Record<string, unknown>): KV[] {
   return Object.entries(config).map(([key, value]) => ({
@@ -107,11 +169,18 @@ export function PluginConfigTab() {
   // would still display the pre-install plugin set after a `lvis://install`
   // deep-link landed (other plugin surfaces refresh via the same event but
   // the settings tab's local `plugins` state was a one-shot mount-time snapshot).
-  const refreshPlugins = useCallback(async () => {
+  const refreshPlugins = useCallback(async (options?: { preferInstallKey?: string }) => {
     try {
       const cards = await window.lvis.plugins.cards();
       setPlugins(cards);
       setSelectedId((current) => {
+        const preferredInstallKey = options?.preferInstallKey;
+        if (preferredInstallKey) {
+          const preferred = cards.find((card) =>
+            isPluginInstallKey(card.id, preferredInstallKey, card.installAliases),
+          );
+          if (preferred) return preferred.id;
+        }
         if (current && cards.some((c) => c.id === current)) return current;
         return cards.length > 0 ? cards[0].id : null;
       });
@@ -145,7 +214,10 @@ export function PluginConfigTab() {
     if (typeof api.onPluginInstallProgress === "function") {
       unsubs.push(
         api.onPluginInstallProgress((payload) => {
-          setInstallInFlight((prev) => ({ ...prev, [payload.slug]: payload.phase }));
+          setInstallInFlight((prev) => ({ ...prev, [payload.slug]: payload }));
+          if (payload.phase === "preparing") {
+            void refreshPlugins({ preferInstallKey: payload.slug });
+          }
         }),
       );
     }
@@ -177,6 +249,14 @@ export function PluginConfigTab() {
       for (const u of unsubs) u();
     };
   }, [refreshPlugins]);
+
+  useEffect(() => {
+    if (!plugins.some((plugin) => plugin.loadStatus === "preparing")) return;
+    const interval = window.setInterval(() => {
+      void refreshPlugins();
+    }, 750);
+    return () => window.clearInterval(interval);
+  }, [plugins, refreshPlugins]);
 
   // Load config for selected plugin
   const [savedConfig, setSavedConfig] = useState<Record<string, unknown>>({});
@@ -447,6 +527,11 @@ export function PluginConfigTab() {
                         </span>
                       )}
                     </div>
+                    {p.loadStatus === "preparing" && p.preparationStatus?.message && (
+                      <div className="mt-1 truncate text-[10px] text-warning/80">
+                        {p.preparationStatus.message}
+                      </div>
+                    )}
                   </button>
                 ))}
                 {/* Skeleton rows for installs the main process is still
@@ -455,7 +540,7 @@ export function PluginConfigTab() {
                     promotes it into a real `plugins` entry. */}
                 {Object.entries(installInFlight)
                   .filter(([slug]) => !plugins.some((p) => isPluginInstallKey(p.id, slug, p.installAliases)))
-                  .map(([slug, phase]) => (
+                  .map(([slug, progress]) => (
                     <div
                       key={`in-flight:${slug}`}
                       className="flex w-full animate-pulse items-center gap-2 rounded border border-dashed border-muted px-2 py-1.5 text-xs text-muted-foreground"
@@ -469,7 +554,7 @@ export function PluginConfigTab() {
                       <span className="flex min-w-0 flex-col">
                         <span className="truncate">{slug}</span>
                         <span className="truncate text-[9px] opacity-70">
-                          {INSTALL_PHASE_LABEL[phase]}
+                          {formatInstallProgress(progress)}
                         </span>
                       </span>
                     </div>
@@ -546,6 +631,8 @@ export function PluginConfigTab() {
                     제거
                   </Button>
                 </div>
+
+                <PluginPreparationStatusPanel plugin={selectedPlugin} />
 
                 {/* Auth section — only when manifest declares `auth`, the
                     plugin is loaded (failed/disabled plugins have no live
