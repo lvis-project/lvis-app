@@ -30,49 +30,15 @@ import {
   classifyElectronExit,
   DEMO_ACTIVATION_DEV_RELAUNCH_EXIT_CODE,
 } from "./lib/dev-electron-exit.mjs";
-import { loadRepoDemoEnv } from "./lib/demo-env-loader.mjs";
 import { resolveBuildAssets } from "./lib/build-assets.mjs";
-import { homedir } from "node:os";
+import {
+  extractUserDataDir,
+  prepareElectronLaunchArgs,
+  prepareElectronLaunchEnv,
+} from "./lib/electron-launch-options.mjs";
 import { basename, dirname, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import electronPath from "electron";
-
-// Windows corp PC runtime flags — see scripts/run-electron.mjs for rationale.
-// Flag strings come from scripts/electron-flags.mjs so the dev launcher, the
-// production launcher, and main.ts's lvis:// protocol registration agree on
-// the literal switch list.
-import { WINDOWS_SAFE_GPU_FLAGS, SANDBOX_BYPASS_FLAG } from "./electron-flags.mjs";
-const WINDOWS_SAFE_ELECTRON_FLAGS = [...WINDOWS_SAFE_GPU_FLAGS, SANDBOX_BYPASS_FLAG];
-
-function applyWindowsSafeFlags(args) {
-  const next = [...args];
-  if (process.platform === "win32" && process.env.LVIS_KEEP_GPU !== "1") {
-    for (const flag of WINDOWS_SAFE_ELECTRON_FLAGS) {
-      if (!next.includes(flag)) next.push(flag);
-    }
-  }
-  if (process.env.LVIS_EXTRA_ELECTRON_FLAGS) {
-    const extra = process.env.LVIS_EXTRA_ELECTRON_FLAGS.split(/\s+/).filter(Boolean);
-    for (const flag of extra) {
-      if (!next.includes(flag)) next.push(flag);
-    }
-  }
-  return next;
-}
-
-function ensureWindowsUserDataDir(args, env, profileName) {
-  if (process.platform !== "win32") return args;
-  if (args.some((arg) => arg.startsWith("--user-data-dir="))) return args;
-  const appDataRoot = env.APPDATA || resolve(homedir(), "AppData", "Roaming");
-  const userDataDir = env.LVIS_USER_DATA_DIR || resolve(appDataRoot, profileName);
-  args.push(`--user-data-dir=${userDataDir}`);
-  return args;
-}
-
-function extractUserDataDir(args) {
-  const userDataArg = args.find((arg) => arg.startsWith("--user-data-dir="));
-  return userDataArg ? userDataArg.slice("--user-data-dir=".length) : "";
-}
 
 function escapePowerShellSingleQuoted(value) {
   return String(value).replace(/'/g, "''");
@@ -216,14 +182,6 @@ function pruneDuplicateMainElectronProcesses(userDataDir, keepPid) {
   } catch (err) {
     log("electron", `duplicate main prune skipped: ${err.message}`);
   }
-}
-
-function applyUtf8Env(env) {
-  if (!env.PYTHONIOENCODING) env.PYTHONIOENCODING = "utf-8";
-  if (!env.PYTHONUTF8) env.PYTHONUTF8 = "1";
-  if (!env.LANG) env.LANG = "en_US.UTF-8";
-  if (!env.LC_ALL) env.LC_ALL = "en_US.UTF-8";
-  return env;
 }
 
 function parseMsEnv(name, fallbackMs) {
@@ -549,24 +507,24 @@ async function stopChildProcess(proc, { forceTree = false } = {}) {
 function launchElectron() {
   if (electronProc) return;
   const launchEnv = (() => {
-    const e = applyUtf8Env({
+    const e = {
       ...process.env,
       LVIS_DEV: "1",
       LVIS_DEV_CONSOLE: process.env.LVIS_DEV_CONSOLE ?? "1",
       // Ensure pino logger selects pino-pretty in dev runs. NODE_ENV=production
       // gates JSON output; dev runs use "development" so colorized text is used.
       NODE_ENV: process.env.NODE_ENV ?? "development",
-      // The launcher already passes --no-sandbox via WINDOWS_SAFE_ELECTRON_FLAGS
+      // The launcher already passes --no-sandbox via shared Windows-safe flags
       // for the foreground dev process; mirror that into the lvis:// protocol
       // command we register so OS-launched second instances can also boot on
       // corp/VDI machines whose Chromium sandbox init fails without the flag.
-      LVIS_WIN_NO_SANDBOX: process.env.LVIS_WIN_NO_SANDBOX ?? "1",
-    });
-    loadRepoDemoEnv(e, repoRoot);
-    delete e.ELECTRON_RUN_AS_NODE;
-    return e;
+      LVIS_WIN_NO_SANDBOX: process.env.LVIS_WIN_NO_SANDBOX,
+    };
+    return prepareElectronLaunchEnv(e, { demoEnvRoot: repoRoot });
   })();
-  const electronArgs = ensureWindowsUserDataDir(applyWindowsSafeFlags([mainOutput]), launchEnv, DEV_PROFILE_NAME);
+  const electronArgs = prepareElectronLaunchArgs([mainOutput], launchEnv, {
+    profileName: DEV_PROFILE_NAME,
+  });
   const userDataDir = extractUserDataDir(electronArgs);
   cleanupStaleWindowsDevProcesses(userDataDir);
   log("electron", `launching ${mainOutput}`);

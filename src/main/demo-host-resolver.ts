@@ -54,6 +54,22 @@ function parseHostMap(raw: string | undefined): Array<[string, string]> {
   return pairs;
 }
 
+export function demoHostMapContainsHost(
+  rawHostMap: string | undefined,
+  rawUrlOrHost: string | undefined,
+): boolean {
+  if (typeof rawUrlOrHost !== "string" || rawUrlOrHost.length === 0) {
+    return false;
+  }
+  let hostname: string;
+  try {
+    hostname = new URL(rawUrlOrHost).hostname.toLowerCase();
+  } catch {
+    hostname = rawUrlOrHost.toLowerCase();
+  }
+  return parseHostMap(rawHostMap).some(([host]) => host.toLowerCase() === hostname);
+}
+
 export type DemoFoundryHostMapError =
   | "missing-foundry-host-map"
   | "foundry-host-map-mismatch"

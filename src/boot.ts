@@ -92,6 +92,7 @@ import { SessionTodoStore } from "./main/session-todo-store.js";
 import { AskUserQuestionGate, IPC_ASK_USER_QUESTION_REQUEST } from "./main/ask-user-question-gate.js";
 import { NotificationService } from "./main/notification-service.js";
 import { createSafeLlmFetch } from "./main/safe-llm-fetch.js";
+import { getDemoActiveVendor, getDemoHostMap } from "./main/demo-credentials.js";
 import { PreferenceRefreshService } from "./memory/preference-refresh-service.js";
 import { SkillStore } from "./main/skill-store.js";
 import { SkillOverlay } from "./main/skill-overlay.js";
@@ -174,7 +175,15 @@ export async function bootstrap(
   getMainWindow: () => BrowserWindow | null = () => mainWindow,
 ): Promise<AppServices> {
   log.info("boot: starting...");
-  const llmFetch = createSafeLlmFetch(net.fetch.bind(net));
+  const electronNetFetch = net.fetch.bind(net);
+  const networkFetch = (async (input: Parameters<typeof fetch>[0], init?: RequestInit) => {
+    const normalizedInput = input instanceof URL ? input.toString() : input;
+    return electronNetFetch(normalizedInput as string | Request, {
+      ...(init ?? {}),
+      bypassCustomProtocolHandlers: true,
+    });
+  }) as typeof fetch;
+  const llmFetch = createSafeLlmFetch(electronNetFetch);
 
   // Seed user-facing docs into `~/.lvis/` before any other component reads
   // home state. AGENTS.md is the LLM-facing system reference; on first boot
@@ -462,6 +471,9 @@ export async function bootstrap(
         log.warn("skill_load emit failed: %s", (err as Error).message);
       }
     },
+    networkFetch,
+    demoActiveVendor: getDemoActiveVendor(),
+    demoHostMap: getDemoHostMap(),
   };
 
   // §4.2 Step 4: builtin tools + request_plugin meta tool.

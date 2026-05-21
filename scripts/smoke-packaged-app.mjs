@@ -11,7 +11,10 @@ import { existsSync, mkdtempSync, readdirSync, rmSync, statSync } from "node:fs"
 import { tmpdir } from "node:os";
 import { basename, dirname, join, resolve, sep } from "node:path";
 import { fileURLToPath } from "node:url";
-import { WINDOWS_SAFE_GPU_FLAGS, SANDBOX_BYPASS_FLAG } from "./electron-flags.mjs";
+import {
+  prepareElectronLaunchArgs,
+  prepareElectronLaunchEnv,
+} from "./lib/electron-launch-options.mjs";
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const root = resolve(__dirname, "..");
@@ -165,8 +168,8 @@ function findPackagedExecutable(target, releaseDir) {
   return pickBest(matches, [`win-unpacked${sep}LVIS.exe`]);
 }
 
-function smokeArgs(platform, userDataDir) {
-  const args = [`--user-data-dir=${userDataDir}`];
+function smokeArgs(platform, env) {
+  const args = [`--user-data-dir=${env.LVIS_USER_DATA_DIR}`];
   if (platform === "linux") {
     // GitHub's Linux runner needs a virtual display and often lacks a usable
     // Chromium sandbox. The smoke is about packaged app startup and dependency
@@ -174,7 +177,10 @@ function smokeArgs(platform, userDataDir) {
     args.push("--disable-gpu", "--no-sandbox");
   }
   if (platform === "win32") {
-    args.push(...WINDOWS_SAFE_GPU_FLAGS, SANDBOX_BYPASS_FLAG);
+    return prepareElectronLaunchArgs(args, env, {
+      profileName: "LVIS",
+      platform,
+    });
   }
   return [...new Set(args)];
 }
@@ -194,15 +200,14 @@ function removeTempDirBestEffort(dir) {
 
 async function launchSmoke(executable, timeoutMs) {
   const userDataDir = mkdtempSync(join(tmpdir(), "lvis-packaged-smoke-"));
-  const env = {
+  const env = prepareElectronLaunchEnv({
     ...process.env,
     ELECTRON_ENABLE_LOGGING: "1",
     LVIS_DEV_CONSOLE: "0",
     LVIS_USER_DATA_DIR: userDataDir,
-  };
-  delete env.ELECTRON_RUN_AS_NODE;
+  });
 
-  const args = smokeArgs(process.platform, userDataDir);
+  const args = smokeArgs(process.platform, env);
   process.stdout.write(`[packaged-smoke] launching: ${executable} ${args.join(" ")}\n`);
 
   return await new Promise((resolvePromise, reject) => {

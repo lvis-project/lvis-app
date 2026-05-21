@@ -134,8 +134,12 @@ export function devPluginReloadEnabled(packaged: boolean = isPackagedCached): bo
  * mask (this flag is needed for `bun run start` on corp Windows even
  * outside a dev session).
  */
-export function devNoSandboxAllowed(packaged: boolean = isPackagedCached): boolean {
+export function devNoSandboxAllowed(
+  packaged: boolean = isPackagedCached,
+  platform: NodeJS.Platform = process.platform,
+): boolean {
   if (packaged) return false;
+  if (platform !== "win32") return false;
   return envEquals("LVIS_WIN_NO_SANDBOX", "1");
 }
 
@@ -215,4 +219,3 @@ export function assertMockMarketplaceAllowed(packaged: boolean = isPackagedCache
     );
   }
 }
-

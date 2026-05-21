@@ -7,6 +7,7 @@ import { UNAUTHORIZED_FRAME } from "../../gated.js";
 
 const handlers = new Map<string, (...args: unknown[]) => unknown>();
 const USER_INTENT = { inputOrigin: "user-keyboard", userActivation: true };
+const recordApprovalMock = vi.hoisted(() => vi.fn(async () => undefined));
 
 vi.mock("electron", () => ({
   ipcMain: {
@@ -15,6 +16,14 @@ vi.mock("electron", () => ({
     }),
   },
 }));
+
+vi.mock("../../../permissions/user-approval-store.js", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("../../../permissions/user-approval-store.js")>();
+  return {
+    ...actual,
+    recordApproval: recordApprovalMock,
+  };
+});
 
 function invoke(channel: string, ...args: unknown[]): unknown {
   const fn = handlers.get(channel);
@@ -138,6 +147,7 @@ async function setup(options: Parameters<typeof makeDeps>[0] = {}) {
 
 beforeEach(() => {
   handlers.clear();
+  recordApprovalMock.mockClear();
 });
 
 describe("permissions IPC handlers", () => {

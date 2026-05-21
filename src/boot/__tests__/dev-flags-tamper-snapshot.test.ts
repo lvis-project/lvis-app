@@ -20,6 +20,8 @@ import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import {
   _resetForTest,
   _setTamperedSnapshotForTest,
+  devNoSandboxAllowed,
+  setIsPackaged,
   shouldWarnPackagedFlagsIgnored,
   tamperedVarsAtBoot,
 } from "../dev-flags.js";
@@ -74,6 +76,22 @@ describe("dev-flags tamper snapshot", () => {
     expect(names).toContain("LVIS_DEV_RELOAD");
     expect(names).toContain("LVIS_WIN_NO_SANDBOX");
     expect(names).toHaveLength(3);
+  });
+
+  it("keeps LVIS_WIN_NO_SANDBOX Windows-only and packaged-gated", () => {
+    const saved = process.env.LVIS_WIN_NO_SANDBOX;
+    try {
+      process.env.LVIS_WIN_NO_SANDBOX = "1";
+      setIsPackaged(true);
+      expect(devNoSandboxAllowed(true, "win32")).toBe(false);
+      setIsPackaged(false);
+      expect(devNoSandboxAllowed(false, "win32")).toBe(true);
+      expect(devNoSandboxAllowed(false, "darwin")).toBe(false);
+      expect(devNoSandboxAllowed(false, "linux")).toBe(false);
+    } finally {
+      if (saved === undefined) delete process.env.LVIS_WIN_NO_SANDBOX;
+      else process.env.LVIS_WIN_NO_SANDBOX = saved;
+    }
   });
 
   it("clearing the override restores the real snapshot", () => {

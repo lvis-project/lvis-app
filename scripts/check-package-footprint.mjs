@@ -13,6 +13,7 @@ import { existsSync, readFileSync, readdirSync, statSync } from "node:fs";
 import { basename, dirname, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { gunzipSync } from "node:zlib";
+import { resolveBuildAssets } from "./lib/build-assets.mjs";
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const root = resolve(__dirname, "..");
@@ -150,13 +151,14 @@ if (appAsarMb > maxAppAsarMb) {
 
 const entries = asarList(appAsar);
 const entrySet = new Set(entries);
+const distRuntimeScriptEntries = resolveBuildAssets(root, "runtime-script")
+  .map((asset) => `/${asset.out.slice(root.length + 1).replace(/\\/g, "/")}`);
 
 const requiredEntries = [
   "/dist/src/main/main.js",
   "/dist/src/renderer.js",
   "/dist/src/preload.cjs",
-  "/dist/scripts/electron-flags.mjs",
-  "/dist/scripts/uv-targets.mjs",
+  ...distRuntimeScriptEntries,
   "/package.json",
 ];
 const missingRequired = requiredEntries.filter((entry) => !entrySet.has(entry));
@@ -179,8 +181,7 @@ if (redundantRendererSourceEntries.length > 0) {
 
 const allowedDistScriptEntries = new Set([
   "/dist/scripts",
-  "/dist/scripts/electron-flags.mjs",
-  "/dist/scripts/uv-targets.mjs",
+  ...distRuntimeScriptEntries,
 ]);
 const unexpectedDistScripts = entries.filter(
   (entry) => entry.startsWith("/dist/scripts/") && !allowedDistScriptEntries.has(entry),
