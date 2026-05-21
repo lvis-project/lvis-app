@@ -7,6 +7,7 @@ import { createAnthropic } from "@ai-sdk/anthropic";
 import { createGoogleGenerativeAI } from "@ai-sdk/google";
 import { createVertex } from "@ai-sdk/google-vertex";
 import { createOpenAI } from "@ai-sdk/openai";
+import { createAzure } from "@ai-sdk/azure";
 import { createOpenAICompatible } from "@ai-sdk/openai-compatible";
 import type {
   LLMProvider,
@@ -98,6 +99,23 @@ export function supportsAdaptiveThinking(modelId: string): boolean {
 const INTERLEAVED_THINKING_BETA = "interleaved-thinking-2025-05-14";
 const CONTEXT_1M_BETA = "context-1m-2025-08-07";
 
+export function normalizeAzureFoundryBaseURL(rawBaseUrl: string): string {
+  const parsedUrl = new URL(rawBaseUrl);
+  parsedUrl.search = "";
+  parsedUrl.hash = "";
+
+  let pathname = parsedUrl.pathname.replace(/\/+$/, "");
+  const openaiIndex = pathname.indexOf("/openai");
+  if (openaiIndex >= 0) {
+    pathname = `${pathname.slice(0, openaiIndex)}/openai`;
+  } else if (parsedUrl.hostname.endsWith(".openai.azure.com")) {
+    pathname = "/openai";
+  }
+
+  parsedUrl.pathname = pathname || "/";
+  return parsedUrl.toString().replace(/\/$/, "");
+}
+
 export interface VercelProviderExtras {
   /** Vertex AI — GCP project ID (required when vendor="vertex-ai"). */
   vertexProject?: string;
@@ -148,7 +166,7 @@ export class VercelUnifiedProvider implements LLMProvider {
       const budget = params.thinkingBudgetTokens ?? 10_000;
       const reasoningEffort = mapReasoningEffort(budget);
       const isOpenAIReasoning =
-        (slot === "openai" || slot === "copilot") &&
+        (slot === "openai" || slot === "copilot" || slot === "azure-foundry") &&
         isOpenAIReasoningModel(params.model);
 
       // Guard: Chat Completions returns 400 when reasoning_effort is set
@@ -187,7 +205,12 @@ export class VercelUnifiedProvider implements LLMProvider {
       // what enables the "think → tool → think" UX per the migration doc §4 row 6.
       let providerOptions: Record<string, Record<string, unknown>> | undefined =
         useReasoning
-          ? { openai: { reasoningEffort, reasoningSummary: "detailed" } }
+          ? {
+              [slot === "azure-foundry" ? "azure" : "openai"]: {
+                reasoningEffort,
+                reasoningSummary: "detailed",
+              },
+            }
           : undefined;
 
       // Anthropic-specific wiring: adaptive (4.x) vs budget-based (3.x) thinking
@@ -347,40 +370,22 @@ export class VercelUnifiedProvider implements LLMProvider {
     }
 
     if (slot === "azure-foundry") {
-      // Azure AI Foundry exposes an OpenAI-compatible surface on a per-deployment
-      // endpoint like https://{resource}.openai.azure.com/openai/deployments/{deployment}/.
-      // Route through createOpenAICompatible so we don't add Azure SDK to legacy paths.
+      // Azure AI Foundry uses the v1 Responses API for visible reasoning
+      // summaries. Accept older copied deployment/chat-completions URLs at the
+      // settings boundary, but normalize them to the resource /openai base URL
+      // expected by @ai-sdk/azure.
       if (!this.baseUrl) {
         throw new Error(
           "VercelUnifiedProvider(azure-foundry): baseUrl is required " +
-            "(e.g. https://{resource}.openai.azure.com/openai/deployments/{deployment}/)",
+            "(e.g. https://{resource}.openai.azure.com/openai/v1/)",
         );
       }
-      // Normalize user-supplied URL: strip any trailing /chat/completions path and
-      // extract api-version query param so the SDK can append the path cleanly.
-      // Users sometimes copy the full endpoint URL including path + query string.
-      const parsedUrl = new URL(this.baseUrl);
-      const apiVersion = parsedUrl.searchParams.get("api-version") ?? undefined;
-      parsedUrl.search = "";
-      const cleanBaseUrl = parsedUrl.toString().replace(/\/chat\/completions\/?$/, "/");
-      // CTRL simplification: dropped max_tokens→max_completion_tokens fetch
-      // shim; max output tokens is no longer threaded through from settings.
-      // Azure AI Foundry 는 OpenAI 호환 endpoint 지만 streaming response 의
-      // 마지막 chunk 에 usage 객체를 *기본적으로 포함하지 않음*. OpenAI 의
-      // 표준 `stream_options: { include_usage: true }` flag 가 필요한데
-      // createOpenAICompatible 가 default 로 안 보냄 → @ai-sdk/openai-compatible
-      // 의 `includeUsage: true` 옵션으로 강제. 이게 빠지면 turn_summary 의
-      // tokensIn/Out 이 항상 0 → ring + TokenCostBadge 둘 다 0% / hide.
-      // (audit log 에서 azure-foundry/* turn 만 inputTokens=0 로 catch).
-      const azure = createOpenAICompatible({
-        name: "azure-foundry",
-        baseURL: cleanBaseUrl,
+      const azure = createAzure({
+        baseURL: normalizeAzureFoundryBaseURL(this.baseUrl),
         apiKey: this.apiKey,
-        includeUsage: true,
-        ...(apiVersion ? { queryParams: { "api-version": apiVersion } } : {}),
         ...(this.customFetch ? { fetch: this.customFetch } : {}),
       });
-      return azure(modelId);
+      return azure.responses(modelId);
     }
 
     if (slot === "vertex-ai") {

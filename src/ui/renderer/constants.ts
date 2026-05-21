@@ -71,7 +71,7 @@ const VENDOR_UI: Record<LLMVendor, VendorUiMeta> = {
     label: "Azure AI Foundry",
     placeholder: "Azure API key...",
     needsBaseUrl: true,
-    baseUrlPlaceholder: "https://{resource}.openai.azure.com/openai/deployments/{deployment}/",
+    baseUrlPlaceholder: "https://{resource}.openai.azure.com/openai/v1/",
   },
   "vertex-ai": {
     label: "Google Vertex AI",
