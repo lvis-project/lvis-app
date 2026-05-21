@@ -30,6 +30,7 @@ import {
   classifyElectronExit,
   DEMO_ACTIVATION_DEV_RELAUNCH_EXIT_CODE,
 } from "./lib/dev-electron-exit.mjs";
+import { loadRepoDemoEnv } from "./lib/demo-env-loader.mjs";
 import { homedir } from "node:os";
 import { basename, dirname, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -582,6 +583,7 @@ function launchElectron() {
       // corp/VDI machines whose Chromium sandbox init fails without the flag.
       LVIS_WIN_NO_SANDBOX: process.env.LVIS_WIN_NO_SANDBOX ?? "1",
     });
+    loadRepoDemoEnv(e, repoRoot);
     delete e.ELECTRON_RUN_AS_NODE;
     return e;
   })();
