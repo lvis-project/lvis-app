@@ -91,4 +91,29 @@ describe("installer smoke and packaging discipline", () => {
     expect(packageFootprint).toContain("packaged uv binary SHA mismatch");
     expect(packageFootprint).toContain("uv license notice missing");
   });
+
+  it("keeps electron-builder host runtime resources aligned with the runtime asset inventory", async () => {
+    const packageJson = JSON.parse(readRepoFile("package.json")) as {
+      build?: { extraResources?: Array<{ from?: string; to?: string }> };
+    };
+    const runtimeAssets = await import("../../scripts/packaged-runtime-assets.mjs");
+    const extraResources = packageJson.build?.extraResources ?? [];
+    const hostResources = runtimeAssets.HOST_PACKAGED_RUNTIME_ASSETS.flatMap(
+      (asset: {
+        stagedBy?: string;
+        packageResource?: { from: string; to: string };
+        licenseResource?: { from: string; to: string };
+      }) =>
+        asset.stagedBy === "electron-builder native rebuild"
+          ? []
+          : [asset.packageResource, asset.licenseResource].filter(Boolean),
+    );
+
+    for (const resource of hostResources) {
+      expect(extraResources).toContainEqual({
+        from: resource.from,
+        to: resource.to,
+      });
+    }
+  });
 });
