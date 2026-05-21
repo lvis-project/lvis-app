@@ -73,4 +73,15 @@ describe("desktop packaging", () => {
       include: "build/installer.nsh",
     });
   });
+
+  it("verifies Windows app-file removal and exposes retry/failure paths", () => {
+    const script = readFileSync(join(root, "build", "installer.nsh"), "utf8");
+
+    expect(script).toContain("!macro customRemoveFiles");
+    expect(script).toContain('RMDir /r "$INSTDIR"');
+    expect(script).toContain('"$INSTDIR\\${APP_EXECUTABLE_FILENAME}"');
+    expect(script).toContain('ExecShell "runas" "$EXEPATH" "$R0 /KEEP_APP_DATA /LVIS_ELEVATED_RETRY"');
+    expect(script).toContain("SetErrorLevel 1");
+    expect(script).toContain("LVIS uninstall failed: app files remain");
+  });
 });

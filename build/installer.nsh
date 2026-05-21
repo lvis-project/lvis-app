@@ -56,3 +56,83 @@
   Pop $R1
   Pop $R0
 !macroend
+
+!macro customRemoveFiles
+  Push $R0
+  Push $R1
+  Push $R2
+
+  ; Keep electron-builder's update-time atomic replacement behavior. Updates
+  ; must remove old app files without treating user-data cleanup as uninstall.
+  ${if} ${isUpdated}
+    CreateDirectory "$PLUGINSDIR\old-install"
+
+    Push ""
+    Call un.atomicRMDir
+    Pop $R0
+
+    ${if} $R0 != 0
+      DetailPrint "File is busy, aborting: $R0"
+
+      Push ""
+      Call un.restoreFiles
+      Pop $R0
+
+      Abort `Can't rename "$INSTDIR" to "$PLUGINSDIR\old-install".`
+    ${endif}
+  ${endif}
+
+  ; Move out of $INSTDIR before deleting it; otherwise Windows can keep the
+  ; running uninstaller's current directory locked.
+  SetOutPath "$TEMP"
+  ClearErrors
+  RMDir /r "$INSTDIR"
+
+  StrCpy $R2 ""
+  IfFileExists "$INSTDIR\${APP_EXECUTABLE_FILENAME}" 0 +2
+    StrCpy $R2 "$INSTDIR\${APP_EXECUTABLE_FILENAME}"
+  IfFileExists "$INSTDIR\resources\app.asar" 0 +2
+    StrCpy $R2 "$INSTDIR\resources\app.asar"
+  ${if} $R2 == ""
+    IfFileExists "$INSTDIR\*.*" 0 lvis_remove_files_done
+    StrCpy $R2 "$INSTDIR"
+  ${endif}
+
+  ClearErrors
+  ${GetParameters} $R0
+  ${GetOptions} $R0 "/LVIS_ELEVATED_RETRY" $R1
+  ${ifNot} ${Errors}
+    Goto lvis_remove_files_failed
+  ${endif}
+
+  ${if} ${Silent}
+    Goto lvis_remove_files_failed
+  ${endif}
+
+  MessageBox MB_YESNO|MB_ICONEXCLAMATION \
+    "LVIS 설치 파일을 제거하지 못했습니다.$\n$\n남은 경로: $R2$\n$\n파일이 잠겨 있거나 삭제 권한이 부족할 수 있습니다. 관리자 권한으로 한 번 더 시도하시겠습니까?" \
+    IDYES lvis_retry_elevated IDNO lvis_remove_files_failed
+
+  lvis_retry_elevated:
+    ; Elevated retry is only for app files. Keep user-data cleanup bound to the
+    ; original user context so UAC does not switch $PROFILE/$APPDATA.
+    ExecShell "runas" "$EXEPATH" "$R0 /KEEP_APP_DATA /LVIS_ELEVATED_RETRY"
+    IfErrors lvis_remove_files_failed
+    Pop $R2
+    Pop $R1
+    Pop $R0
+    Quit
+
+  lvis_remove_files_failed:
+    SetErrorLevel 1
+    ${ifNot} ${Silent}
+      MessageBox MB_OK|MB_ICONEXCLAMATION \
+        "LVIS 설치 파일을 제거하지 못했습니다.$\n$\n남은 경로: $R2$\n$\nLVIS가 실행 중이면 종료한 뒤 다시 시도해 주세요."
+    ${endif}
+    Abort "LVIS uninstall failed: app files remain at $R2"
+
+  lvis_remove_files_done:
+  Pop $R2
+  Pop $R1
+  Pop $R0
+!macroend
