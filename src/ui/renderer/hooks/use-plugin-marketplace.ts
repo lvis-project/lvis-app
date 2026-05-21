@@ -9,7 +9,10 @@ import { getHostMarketplaceApi } from "../host-marketplace-api.js";
  * render an in-flight indicator while the main process drives the install.
  */
 export type InstallPhase = "installing" | "downloading" | "verifying" | "registering" | "restarting" | "preparing";
-export type InstallInFlight = Record<string, InstallPhase>;
+export type InstallProgressPayload =
+  | { slug: string; phase: Exclude<InstallPhase, "downloading"> }
+  | { slug: string; phase: "downloading"; bytesDownloaded: number; bytesTotal: number | null };
+export type InstallInFlight = Record<string, InstallProgressPayload>;
 
 /**
  * Plugin marketplace actions + state. Extracted from App.tsx to keep the
