@@ -447,6 +447,76 @@ describe("useStatusBar — combined health producer", () => {
     expect(health?.tooltip).toContain("Market: online");
   });
 
+  it("ignores stale marketplace ping results after settings updates start a new health generation", async () => {
+    const settingsHandlers: Array<(settings: unknown) => void> = [];
+    let resolveInitialMarketPing: (value: { configured: boolean; online: boolean }) => void =
+      () => undefined;
+    const pingMarketplace = vi
+      .fn()
+      .mockImplementationOnce(
+        () =>
+          new Promise<{ configured: boolean; online: boolean }>((resolve) => {
+            resolveInitialMarketPing = resolve;
+          }),
+      )
+      .mockResolvedValueOnce({
+        configured: false,
+        online: false,
+      });
+
+    const api = makeApi({
+      pingAiProvider: vi.fn(async () => ({
+        configured: true as const,
+        online: true as const,
+        vendor: "openai",
+        model: "gpt-5.4",
+        latencyMs: 12,
+      })),
+      pingMarketplace,
+      onSettingsUpdated: vi.fn((h) => {
+        settingsHandlers.push(h as (settings: unknown) => void);
+        return noop();
+      }),
+    });
+
+    const { result } = renderHook(() => useStatusBar({ api }));
+
+    await waitFor(() => {
+      expect(pingMarketplace).toHaveBeenCalledTimes(1);
+      expect(settingsHandlers.length).toBeGreaterThan(0);
+    });
+
+    act(() => {
+      const nextSettings = {
+        llm: fakeLlmSettings({ provider: "openai", model: "gpt-5.4" }),
+        marketplace: { backend: "disabled" },
+        chat: { systemPrompt: "", autoCompact: false },
+        webSearch: { provider: "none" },
+        roles: { presets: [] },
+      };
+      for (const handler of settingsHandlers) handler(nextSettings);
+    });
+
+    await waitFor(() => {
+      expect(pingMarketplace).toHaveBeenCalledTimes(2);
+      const health = result.current.persistent.find((p) => p.id === "health:services");
+      expect(health?.severity).toBe("warning");
+      expect(health?.tooltip).toContain("Market: not configured");
+    });
+
+    await act(async () => {
+      resolveInitialMarketPing({ configured: true, online: true });
+      await Promise.resolve();
+    });
+
+    await waitFor(() => {
+      const health = result.current.persistent.find((p) => p.id === "health:services");
+      expect(health?.severity).toBe("warning");
+      expect(health?.tooltip).toContain("Market: not configured");
+      expect(health?.tooltip).not.toContain("Market: online");
+    });
+  });
+
   it("keeps the combined health dot non-green when the model ping fails", async () => {
     const api = makeApi({
       pingAiProvider: vi.fn(async () => ({

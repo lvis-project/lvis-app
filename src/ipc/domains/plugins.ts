@@ -29,6 +29,10 @@ import { startInstalledPluginWithLifecycle, withPluginInstallLock } from "../../
 import { uninstallPluginWithLifecycle } from "../../plugins/uninstall-lifecycle.js";
 import { lvisHome } from "../../shared/lvis-home.js";
 const log = createLogger("lvis");
+const MARKETPLACE_PING_TIMEOUT_MS = 15_000;
+const MARKETPLACE_PING_CACHE_TTL_MS = 10_000;
+
+type MarketplacePingResult = { configured: boolean; online: boolean };
 
 function pluginConfigError(
   error: string,
@@ -284,6 +288,70 @@ export function registerPluginsHandlers(deps: IpcDeps): void {
       sendToWindow(win, channel, payload, log);
     }
   };
+  let marketplacePingCache:
+    | { key: string; result: MarketplacePingResult; timestampMs: number }
+    | null = null;
+  let marketplacePingInflight:
+    | { key: string; promise: Promise<MarketplacePingResult> }
+    | null = null;
+
+  const runMarketplacePing = async (): Promise<MarketplacePingResult> => {
+    const settings = settingsService.get("marketplace");
+    if (settings.backend !== "real-cloud" || !settings.realCloudBaseUrl) {
+      return { configured: false, online: false };
+    }
+
+    const base = settings.realCloudBaseUrl.replace(/\/?$/, "/");
+    const key = `${settings.backend}|${base}|${settings.realCloudAllowPrivateNetwork === true}`;
+    const now = Date.now();
+    if (
+      marketplacePingCache &&
+      marketplacePingCache.key === key &&
+      now - marketplacePingCache.timestampMs < MARKETPLACE_PING_CACHE_TTL_MS
+    ) {
+      return marketplacePingCache.result;
+    }
+    if (marketplacePingInflight?.key === key) {
+      return marketplacePingInflight.promise;
+    }
+
+    const promise = (async (): Promise<MarketplacePingResult> => {
+      try {
+        const url = new URL("api/v1/health", base).toString();
+        let res: Response;
+        if (settings.realCloudAllowPrivateNetwork === true) {
+          const ctrl = new AbortController();
+          const timer = setTimeout(() => ctrl.abort(), MARKETPLACE_PING_TIMEOUT_MS);
+          try {
+            res = await fetch(url, { signal: ctrl.signal });
+          } finally {
+            clearTimeout(timer);
+          }
+        } else {
+          const { fetchPublicHttpResponse } = await import("../../core/network-guard.js");
+          res = await fetchPublicHttpResponse(url, { timeoutMs: MARKETPLACE_PING_TIMEOUT_MS });
+        }
+        const result = { configured: true, online: res.ok } as const;
+        marketplacePingCache = { key, result, timestampMs: Date.now() };
+        return result;
+      } catch (err) {
+        // Periodic health probes are user-visible via the status dot. Logging
+        // every timeout at warn level turns transient network latency into log
+        // noise while update-check/catalog fetches still report actionable
+        // marketplace failures on their own paths.
+        log.debug("marketplace ping failed: %s", errMessage(err));
+        const result = { configured: true, online: false } as const;
+        marketplacePingCache = { key, result, timestampMs: Date.now() };
+        return result;
+      } finally {
+        if (marketplacePingInflight?.key === key) {
+          marketplacePingInflight = null;
+        }
+      }
+    })();
+    marketplacePingInflight = { key, promise };
+    return promise;
+  };
   // Phase 2d FU — bootstrap retry
   ipcMain.handle("lvis:bootstrap:retry", async (e) => {
     if (!validateSender(e)) {
@@ -507,31 +575,7 @@ export function registerPluginsHandlers(deps: IpcDeps): void {
 
   ipcMain.handle("lvis:marketplace:ping", async (e) => {
     if (!validateSender(e)) { auditUnauthorized(auditLogger, "lvis:marketplace:ping", e); return UNAUTHORIZED_FRAME; }
-    const settings = settingsService.get("marketplace");
-    if (settings.backend !== "real-cloud" || !settings.realCloudBaseUrl) {
-      return { configured: false, online: false } as const;
-    }
-    try {
-      const base = settings.realCloudBaseUrl.replace(/\/?$/, "/");
-      const url = new URL("api/v1/health", base).toString();
-      let res: Response;
-      if (settings.realCloudAllowPrivateNetwork === true) {
-        const ctrl = new AbortController();
-        const timer = setTimeout(() => ctrl.abort(), 3000);
-        try {
-          res = await fetch(url, { signal: ctrl.signal });
-        } finally {
-          clearTimeout(timer);
-        }
-      } else {
-        const { fetchPublicHttpResponse } = await import("../../core/network-guard.js");
-        res = await fetchPublicHttpResponse(url, { timeoutMs: 3000 });
-      }
-      return { configured: true, online: res.ok } as const;
-    } catch (err) {
-      log.warn("marketplace ping failed: %s", (err as Error).message);
-      return { configured: true, online: false } as const;
-    }
+    return runMarketplacePing();
   });
 
   // read-only, sender guard optional

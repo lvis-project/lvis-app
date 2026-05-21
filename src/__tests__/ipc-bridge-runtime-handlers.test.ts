@@ -341,6 +341,62 @@ describe("lvis:marketplace:ping", () => {
 
     fetchSpy.mockRestore();
   });
+
+  it("coalesces concurrent real-cloud pings into one network request", async () => {
+    let resolveFetch: (value: Response) => void = () => undefined;
+    const fetchSpy = vi.spyOn(global, "fetch").mockReturnValue(
+      new Promise<Response>((resolve) => {
+        resolveFetch = resolve;
+      }),
+    );
+
+    await setupHandlers(makeMockPM(), makeMockGate(), {
+      marketplaceSettings: {
+        backend: "real-cloud",
+        realCloudBaseUrl: "http://127.0.0.1:9999/",
+        realCloudAllowPrivateNetwork: true,
+      },
+    });
+
+    const first = invoke("lvis:marketplace:ping") as Promise<{ configured: boolean; online: boolean }>;
+    const second = invoke("lvis:marketplace:ping") as Promise<{ configured: boolean; online: boolean }>;
+
+    expect(fetchSpy).toHaveBeenCalledTimes(1);
+    resolveFetch({ ok: true } as Response);
+    await expect(first).resolves.toEqual({ configured: true, online: true });
+    await expect(second).resolves.toEqual({ configured: true, online: true });
+
+    fetchSpy.mockRestore();
+  });
+
+  it("serves near-repeat pings from the main-process cache", async () => {
+    const fetchSpy = vi.spyOn(global, "fetch").mockResolvedValue({
+      ok: true,
+    } as Response);
+
+    await setupHandlers(makeMockPM(), makeMockGate(), {
+      marketplaceSettings: {
+        backend: "real-cloud",
+        realCloudBaseUrl: "http://127.0.0.1:9999/",
+        realCloudAllowPrivateNetwork: true,
+      },
+    });
+
+    const first = await invoke("lvis:marketplace:ping") as {
+      configured: boolean;
+      online: boolean;
+    };
+    const second = await invoke("lvis:marketplace:ping") as {
+      configured: boolean;
+      online: boolean;
+    };
+
+    expect(first).toEqual({ configured: true, online: true });
+    expect(second).toEqual({ configured: true, online: true });
+    expect(fetchSpy).toHaveBeenCalledTimes(1);
+
+    fetchSpy.mockRestore();
+  });
 });
 
 // ─────────────────────────────────────────────────────────────────────────────
