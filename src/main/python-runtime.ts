@@ -56,6 +56,7 @@ interface ReadySentinel {
 // ─── 상수 ────────────────────────────────────────────
 
 const LVIS_RUNTIME_DIR = path.join(lvisHome(), "runtime");
+const UV_STDERR_TAIL_LIMIT_CHARS = 12_000;
 // Co-locate uv cache with the venv so hardlinks from cache → site-packages stay
 // on the same physical volume. NTFS hardlinks fail cross-volume with EXDEV
 // (issue #713) when ~/.lvis and %LOCALAPPDATA% live on different drives via
@@ -64,6 +65,15 @@ const LVIS_RUNTIME_DIR = path.join(lvisHome(), "runtime");
 // requirements.lock 위치: 설치된 플러그인 manifest 디렉토리 또는 명시 선언.
 const LOCK_FILE_RESOURCE_NAME = "python-requirements.lock";
 const runtimeSetupLocks = new Map<string, Promise<RuntimeResult>>();
+
+function appendTail(existing: string, next: string, limitChars: number): string {
+  const combined = existing + next;
+  return combined.length > limitChars ? combined.slice(-limitChars) : combined;
+}
+
+function summarizeUvCommand(args: string[]): string {
+  return ["uv", ...args.slice(0, 3)].join(" ");
+}
 
 export interface PythonRuntimeBootstrapperOptions {
   /**
@@ -481,17 +491,19 @@ export class PythonRuntimeBootstrapper {
 
       let stdout = "";
       let stderr = "";
+      let stderrBytes = 0;
+      let stderrChunks = 0;
 
       proc.stdout.on("data", (chunk: Buffer) => {
         const text = chunk.toString();
         stdout += text;
-        void this.log(`[uv stdout] ${text.trimEnd()}`);
       });
 
       proc.stderr.on("data", (chunk: Buffer) => {
         const text = chunk.toString();
-        stderr += text;
-        void this.log(`[uv stderr] ${text.trimEnd()}`);
+        stderr = appendTail(stderr, text, UV_STDERR_TAIL_LIMIT_CHARS);
+        stderrBytes += chunk.byteLength;
+        stderrChunks += 1;
       });
 
       proc.on("error", (err: NodeJS.ErrnoException) => {
@@ -503,6 +515,16 @@ export class PythonRuntimeBootstrapper {
       });
 
       proc.on("close", (code) => {
+        if (stderrBytes > 0) {
+          log.debug(
+            {
+              command: summarizeUvCommand(args),
+              stderrBytes,
+              stderrChunks,
+            },
+            "uv stderr suppressed; retained tail for failures",
+          );
+        }
         if (code === 0) {
           resolve(stdout);
         } else {

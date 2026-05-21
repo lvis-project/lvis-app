@@ -9,7 +9,7 @@ import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 import type { SpawnOptionsWithoutStdio } from "node:child_process";
 import type { EventEmitter } from "node:events";
 import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
-import { tmpdir } from "node:os";
+import { homedir, tmpdir } from "node:os";
 import path from "node:path";
 import { gzipSync } from "node:zlib";
 
@@ -56,6 +56,11 @@ function expectArgsNotToContainPath(args: string[], expectedPath: string): void 
   expect(args.map(normalizePathForAssert)).not.toContain(normalizePathForAssert(path.normalize(expectedPath)));
 }
 
+function expectedRuntimePath(...segments: string[]): string {
+  const lvisRoot = process.env.LVIS_HOME ?? path.join(homedir(), ".lvis");
+  return normalizePathForAssert(path.join(lvisRoot, "runtime", ...segments));
+}
+
 /**
  * 성공하는 spawn 프로세스 mock을 반환한다.
  * stdout으로 stdoutData를 방출한 뒤 exit 0.
@@ -74,6 +79,30 @@ function makeSpawnMock(stdoutData = "ok\n", exitCode = 0) {
     stderr,
     on: vi.fn((event: string, cb: (code: number | null) => void) => {
       if (event === "close") setTimeout(() => cb(exitCode), 0);
+    }),
+  };
+  return proc as unknown as ReturnType<typeof cpMock.spawn>;
+}
+
+function makeSpawnMockWithStderr(stderrChunks: string[], stdoutData = "", exitCode = 0) {
+  const stdout = {
+    on: vi.fn((event: string, cb: (chunk: Buffer) => void) => {
+      if (event === "data" && stdoutData.length > 0) setTimeout(() => cb(Buffer.from(stdoutData)), 0);
+    }),
+  };
+  const stderr = {
+    on: vi.fn((event: string, cb: (chunk: Buffer) => void) => {
+      if (event !== "data") return;
+      stderrChunks.forEach((chunk, index) => {
+        setTimeout(() => cb(Buffer.from(chunk)), index);
+      });
+    }),
+  };
+  const proc = {
+    stdout,
+    stderr,
+    on: vi.fn((event: string, cb: (code: number | null) => void) => {
+      if (event === "close") setTimeout(() => cb(exitCode), stderrChunks.length + 1);
     }),
   };
   return proc as unknown as ReturnType<typeof cpMock.spawn>;
@@ -216,6 +245,32 @@ describe("PythonRuntimeBootstrapper", () => {
     // result 유효
     expect(result.pythonPath).toBeTruthy();
     expect(result.venvPath).toBeTruthy();
+  });
+
+  it("uv stderr 다운로드 로그를 chunk 단위로 main log에 증폭하지 않는다", async () => {
+    const manifestPath = "/installed/local-indexer/plugin.json";
+    const stderrChunks = Array.from(
+      { length: 25 },
+      (_, index) => `Downloading package-${index} (${index + 1}.0MiB)\n`,
+    );
+    const logSpy = vi.spyOn(console, "log").mockImplementation(() => undefined);
+    mockedAccess
+      .mockRejectedValueOnce(Object.assign(new Error("ENOENT"), { code: "ENOENT" }))
+      .mockResolvedValueOnce(undefined)
+      .mockResolvedValueOnce(undefined);
+    mockedSpawn
+      .mockReturnValueOnce(makeSpawnMock("uv 0.7.3\n"))
+      .mockReturnValueOnce(makeSpawnMock(""))
+      .mockReturnValueOnce(makeSpawnMockWithStderr(stderrChunks))
+      .mockReturnValueOnce(makeSpawnMock("3.12.3\n"));
+
+    const bootstrapper = new PythonRuntimeBootstrapper({ pluginManifestPaths: [manifestPath] });
+    await bootstrapper.ensureReady(makeBrowserWindow());
+
+    const loggedLines = logSpy.mock.calls.map((call) => String(call[0]));
+    expect(loggedLines.some((line) => line.includes("[uv stdout]"))).toBe(false);
+    expect(loggedLines.some((line) => line.includes("[uv stderr]"))).toBe(false);
+    expect(loggedLines.filter((line) => line.includes("uv stderr suppressed; retained tail for failures"))).toHaveLength(1);
   });
 
   it("plugin.json이 선언한 상대 lockfile 경로를 manifest 디렉토리 기준으로 해석한다", async () => {
@@ -630,7 +685,7 @@ describe("PythonRuntimeBootstrapper", () => {
         .map(([, , opts]) => (opts as SpawnOptionsWithoutStdio).env ?? {});
     }
 
-    it("기본적으로 UV_CACHE_DIR을 ~/.lvis/runtime/uv-cache 로 설정한다", async () => {
+    it("기본적으로 UV_CACHE_DIR을 LVIS runtime uv-cache 로 설정한다", async () => {
       delete process.env.UV_CACHE_DIR;
       delete process.env.UV_LINK_MODE;
       setupSetupSpawns();
@@ -644,7 +699,7 @@ describe("PythonRuntimeBootstrapper", () => {
       expect(envs.length).toBeGreaterThan(0);
       for (const env of envs) {
         expect(env.UV_CACHE_DIR).toBeDefined();
-        expect(normalizePathForAssert(String(env.UV_CACHE_DIR))).toContain("/.lvis/runtime/uv-cache");
+        expect(normalizePathForAssert(String(env.UV_CACHE_DIR))).toBe(expectedRuntimePath("uv-cache"));
       }
     });
 
@@ -689,11 +744,12 @@ describe("PythonRuntimeBootstrapper", () => {
         });
         await bootstrapper.ensureReady(makeBrowserWindow());
 
-        const cacheCall = mkdirCalls.find((c) => normalizePathForAssert(c.path).endsWith("/.lvis/runtime/uv-cache"));
+        const cacheCall = mkdirCalls.find((c) => normalizePathForAssert(c.path) === expectedRuntimePath("uv-cache"));
         expect(cacheCall).toBeDefined();
         expect(cacheCall!.mode).toBe(0o700);
-        // ~/.lvis/<feature>/ 룰: 모든 runtime 하위 디렉토리는 0o700.
-        const lvisRuntimeMkdirs = mkdirCalls.filter((c) => normalizePathForAssert(c.path).includes("/.lvis/runtime/"));
+        // LVIS_HOME/<feature>/ 룰: 모든 runtime 하위 디렉토리는 0o700.
+        const runtimeRoot = `${expectedRuntimePath()}/`;
+        const lvisRuntimeMkdirs = mkdirCalls.filter((c) => normalizePathForAssert(c.path).startsWith(runtimeRoot));
         for (const call of lvisRuntimeMkdirs) {
           expect(call.mode).toBe(0o700);
         }
