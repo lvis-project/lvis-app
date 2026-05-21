@@ -14,6 +14,7 @@ export interface InputActionBarProps {
   // Leading
   plugins: PluginEntry[];
   onSelectPlugin: (viewKey: string) => void;
+  onRefreshPlugins?: () => void;
   installingPlugins?: ReadonlyMap<string, InstallPhase>;
   onOpenMarketplace: () => void;
   marketplaceUrlReady?: boolean;
@@ -69,6 +70,7 @@ function attachButtonLabel(
 export function InputActionBar({
   plugins,
   onSelectPlugin,
+  onRefreshPlugins,
   installingPlugins,
   onOpenMarketplace,
   marketplaceUrlReady,
@@ -175,6 +177,7 @@ export function InputActionBar({
         <PluginGridButton
           plugins={plugins}
           onSelect={onSelectPlugin}
+          onRefreshPlugins={onRefreshPlugins}
           installingPlugins={installingPlugins}
           onOpenMarketplace={onOpenMarketplace}
           marketplaceUrlReady={marketplaceUrlReady}

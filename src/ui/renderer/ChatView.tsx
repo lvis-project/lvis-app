@@ -157,6 +157,8 @@ export interface ChatViewProps {
   plugins: PluginEntry[];
   /** Navigate to a plugin view */
   onSelectPlugin: (viewKey: string) => void;
+  /** Refresh plugin cards/views before opening the plugin grid. */
+  onRefreshPlugins?: () => void;
   currentSessionKind?: "main" | "routine";
   currentSessionTitle?: string;
   sessions?: SessionSummary[];
@@ -219,7 +221,7 @@ function AskUserAnswerBubble({
   );
 }
 
-export function ChatView({ api, onAsk, onEditSave, onFork, onToggleStar, onRetryEffort, onContinueFromLastUser, isEntryStarred, onAbort, onGuide, onGuideError, onFeedback, subAgentSpawns, loadedSkills, hasAskQuestions, askQuestions, onResolveAskQuestion, plugins, onSelectPlugin, currentSessionKind = "main", currentSessionTitle, sessions, onLoadSession, onRefreshSessions, commandActions, commandPopoverOpen, onCommandPopoverOpenChange, installingPlugins, onOpenMarketplace, marketplaceUrlReady, onPluginPrimaryAction, onRoutineAcknowledge, onOpenPermissionQueue }: ChatViewProps) {
+export function ChatView({ api, onAsk, onEditSave, onFork, onToggleStar, onRetryEffort, onContinueFromLastUser, isEntryStarred, onAbort, onGuide, onGuideError, onFeedback, subAgentSpawns, loadedSkills, hasAskQuestions, askQuestions, onResolveAskQuestion, plugins, onSelectPlugin, onRefreshPlugins, currentSessionKind = "main", currentSessionTitle, sessions, onLoadSession, onRefreshSessions, commandActions, commandPopoverOpen, onCommandPopoverOpenChange, installingPlugins, onOpenMarketplace, marketplaceUrlReady, onPluginPrimaryAction, onRoutineAcknowledge, onOpenPermissionQueue }: ChatViewProps) {
   // We still need the api for SessionTodoPanel; obtain it via singleton.
   const workflowApi = getApi();
   const debugStreamEnabled = isDebugStreamEnabled();
@@ -1429,6 +1431,7 @@ export function ChatView({ api, onAsk, onEditSave, onFork, onToggleStar, onRetry
           <InputActionBar
             plugins={plugins}
             onSelectPlugin={onSelectPlugin}
+            onRefreshPlugins={onRefreshPlugins}
             installingPlugins={installingPlugins}
             onOpenMarketplace={onOpenMarketplace}
             marketplaceUrlReady={marketplaceUrlReady}
