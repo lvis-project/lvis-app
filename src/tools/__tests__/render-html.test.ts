@@ -130,6 +130,14 @@ describe("wrapWithCsp", () => {
 });
 
 describe("createRenderHtmlTool.execute", () => {
+  it("describes LVIS theme-token usage for generated pages", () => {
+    const tool = createRenderHtmlTool();
+
+    expect(tool.description).toContain("현재 LVIS 앱 테마 색상");
+    expect(tool.description).toContain("hsl(var(--primary))");
+    expect(JSON.stringify(tool.toJsonSchema())).toContain("--background");
+  });
+
   it("returns an isError result when html is empty/whitespace", async () => {
     const r = await runRenderHtml({ html: "   " });
     expect(r.isError).toBe(true);
