@@ -42,7 +42,7 @@ import {
 import { sanitizeZipEntryPath } from "./zip-entry-path.js";
 import type { MarketplaceFetcher } from "./marketplace-fetcher.js";
 import type { PublicKeyInput } from "./envelope-verifier.js";
-import type { PluginMarketplaceItem } from "./types.js";
+import type { PluginAccessSpec, PluginMarketplaceItem, PluginRegistryEntryInstallSource } from "./types.js";
 import {
   hashReceiptFiles,
   writeInstallReceipt,
@@ -55,6 +55,12 @@ export interface ArtifactStoreHistoryEntry {
   version: string;
   /** ISO timestamp. */
   installedAt: string;
+}
+
+export interface CachedRegistryEntrySnapshot {
+  installSource?: PluginRegistryEntryInstallSource;
+  bundleRefs?: string[];
+  approvedPluginAccess?: PluginAccessSpec;
 }
 
 export interface VerifiedArtifact {
@@ -171,12 +177,20 @@ export class PluginArtifactStore {
         `marketplace fetcher for "${plugin.id}" does not support signed artifact verification`,
       );
     }
+    const expectedArtifactSha256 =
+      !plugin.version || plugin.version === version || version === "latest"
+        ? plugin.artifactSha256
+        : undefined;
     const verified = await installFromMarketplace(slug, version, {
       http: this.fetcher,
       publicKeys: this.publicKeys,
       downloadRoot: resolve(this.cacheRoot, "verified-downloads"),
       cacheBase: this.tarballCacheBase,
-      expectedArtifactSha256: plugin.artifactSha256,
+      // Catalog rows expose the latest artifact hash. Explicit prior-version
+      // installs (rollback, pinned installPlugin) must rely on the versioned
+      // download header + signature envelope instead of comparing against the
+      // latest hash.
+      expectedArtifactSha256,
       onProgress,
     });
     return {
@@ -323,7 +337,11 @@ export class PluginArtifactStore {
    * Best-effort: a missing/unreadable manifest emits a warning but does
    * not throw — the install path should not be blocked by cache hygiene.
    */
-  async cacheVersionFromManifest(slug: string, manifestPath: string): Promise<void> {
+  async cacheVersionFromManifest(
+    slug: string,
+    manifestPath: string,
+    registryEntry?: CachedRegistryEntrySnapshot,
+  ): Promise<void> {
     try {
       const safeSlug = assertSafeArtifactSlug(slug);
       const raw = await readFile(manifestPath, "utf-8");
@@ -332,10 +350,39 @@ export class PluginArtifactStore {
       const dir = resolve(this.cacheRoot, safeSlug, version);
       await mkdir(dir, { recursive: true });
       await writeFile(resolve(dir, "plugin.json"), raw, "utf-8");
+      if (registryEntry) {
+        await writeFile(
+          resolve(dir, "registry-entry.json"),
+          `${JSON.stringify({
+            installSource: registryEntry.installSource,
+            bundleRefs: registryEntry.bundleRefs,
+            approvedPluginAccess: registryEntry.approvedPluginAccess,
+          }, null, 2)}\n`,
+          "utf-8",
+        );
+      }
     } catch (err) {
       log.warn(
         `cacheVersion failed for ${slug}: ${(err as Error).message}`,
       );
+    }
+  }
+
+  async readCachedRegistryEntrySnapshot(
+    slug: string,
+    version: string,
+  ): Promise<CachedRegistryEntrySnapshot | null> {
+    try {
+      const safeSlug = assertSafeArtifactSlug(slug);
+      const raw = await readFile(resolve(this.cacheRoot, safeSlug, version, "registry-entry.json"), "utf-8");
+      const parsed = JSON.parse(raw) as Partial<CachedRegistryEntrySnapshot>;
+      return {
+        installSource: parsed.installSource,
+        bundleRefs: Array.isArray(parsed.bundleRefs) ? parsed.bundleRefs : undefined,
+        approvedPluginAccess: parsed.approvedPluginAccess,
+      };
+    } catch {
+      return null;
     }
   }
 
