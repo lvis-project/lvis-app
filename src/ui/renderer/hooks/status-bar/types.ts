@@ -62,7 +62,9 @@ export interface ToastItem {
   id: string;
   severity: StatusBarSeverity;
   message: string;
-  /** Wall-clock ms when this toast should auto-evict. */
+  /** Duration this toast should stay visible after it reaches the queue head. */
+  ttlMs?: number;
+  /** Wall-clock ms when the current queue-head toast should auto-evict. */
   expiresAt: number;
   /**
    * Issue #260 — when present, identifies this toast as a notification
