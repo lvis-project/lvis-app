@@ -60,14 +60,19 @@ re-enter the activation code. They simply launch the app and click
 **chip 1**; the `loginMockup` chain runs immediately because the env
 vars are already in place.
 
-To **reset** the activation, delete the persisted file:
+To **reset only the activation payload**, delete the persisted demo env file:
 
 ```bash
 rm ~/.lvis/secrets/.env.demo
 ```
 
-After deletion the user is prompted for the activation string again on
-the next chip 1 click.
+After deletion the user is prompted for the activation string again on the next
+chip 1 click. This does **not** clear Electron userData, so LLM provider/auth
+settings can still remain in `lvis-settings.json` / `lvis-secrets.json` under
+the Electron profile directory (for example `~/Library/Application Support/LVIS`
+on macOS, or the directory selected through `LVIS_USER_DATA_DIR`). For a full
+demo state reset, clear both the persisted demo env file and the Electron
+profile settings/secrets.
 
 ## Generating an activation string (demo-owner workflow)
 
@@ -134,6 +139,9 @@ translates each to a Korean message inside the activation input bubble:
 | `invalid-vendor` | Decrypted payload has an unknown `LVIS_DEMO_VENDOR` | "활성 코드의 vendor 정보가 올바르지 않아요. 발급자에게 다시 요청해 주세요." |
 | `missing-foundry-endpoint` | Azure Foundry payload omits both `LVIS_DEMO_BASEURL_AZURE_FOUNDRY` and `LVIS_DEMO_ENDPOINT_AZURE_FOUNDRY` | "활성 코드에 Azure Foundry endpoint 정보가 빠져 있어요. 발급자에게 새 활성 코드를 요청해 주세요." |
 | `invalid-foundry-endpoint` | Azure Foundry endpoint fails the shared endpoint validator before persistence | "데모 endpoint 형식이 올바르지 않아요. 발급자에게 새 활성 코드를 요청해 주세요." |
+| `missing-foundry-host-map` | Azure Foundry payload omits `LVIS_DEMO_HOST_MAP` | "활성 코드에 Azure Foundry host-map 정보가 빠져 있어요. 발급자에게 새 활성 코드를 요청해 주세요." |
+| `foundry-host-map-mismatch` | `LVIS_DEMO_HOST_MAP` does not include the Azure Foundry endpoint host | "활성 코드의 host-map 이 Azure Foundry endpoint 와 맞지 않아요. 발급자에게 새 활성 코드를 요청해 주세요." |
+| `invalid-foundry-host-map-target` | `LVIS_DEMO_HOST_MAP` maps the endpoint host outside the approved demo private endpoint subnet | "활성 코드의 host-map 대상 IP 가 데모 사설 엔드포인트 대역이 아니에요. 발급자에게 새 활성 코드를 요청해 주세요." |
 | `persist-failed` | Filesystem write failure (permission/disk) | "활성 코드를 저장하지 못했어요. 디스크 공간 또는 권한을 확인한 뒤 다시 시도해 주세요." |
 | `unauthorized-frame` | IPC sender frame rejected (should never happen in production) | "잘못된 요청 경로입니다. 앱을 재시작한 뒤 다시 시도해 주세요." |
 
@@ -144,7 +152,8 @@ typo and retry without re-entering chip 1.
 
 | File | Responsibility |
 |---|---|
-| `src/main/demo-activation-codec.ts` | AES-256-GCM encrypt/decrypt + `.env.demo` parser. |
+| `src/main/demo-activation-codec.ts` | AES-256-GCM encrypt/decrypt + shared `.env.demo` parser export. |
+| `scripts/lib/env-demo-parser.mjs` | Single parser for local repo `.env.demo` and decrypted activation payloads. |
 | `src/main/demo-activation-loader.ts` | Sync packaged boot loader for persisted `.env.demo`. |
 | `src/ipc/domains/demo.ts` | `lvis:demo:activate` IPC handler — decrypt + persist + inject + recapture. |
 | `src/main/demo-credentials.ts` | Adds `recaptureDemoCredentialsAfterActivation()` for post-activation env re-scan. |

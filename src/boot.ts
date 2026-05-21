@@ -876,6 +876,7 @@ export async function bootstrap(
       auditLogger: bootAuditLogger,
       getAdditionalDirectories: () => readPermissionSettings().permissions.additionalDirectories,
       rewireReviewerAgent,
+      llmFetch,
     },
     toolRegistry,
   });

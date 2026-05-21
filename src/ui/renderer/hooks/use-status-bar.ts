@@ -122,12 +122,9 @@ export function useStatusBar(opts: UseStatusBarOptions) {
   }, []);
 
   // ── Producers (each in its own file under status-bar/)
-  // PR-X1 — status bar surface is intentionally pared down to the items that
-  // belong in a one-line context strip: active LLM vendor/model + toasts.
-  // Plugin / tool / MCP counts, OS marker, and marketplace ping moved to
-  // Settings → General (PR-X2 follow-up). Their producer hooks still exist in
-  // status-bar/ for now so the follow-up PR can re-mount them in the Settings
-  // pane without re-implementing the IPC plumbing.
+  // Status bar keeps one compact services health dot plus the active LLM
+  // vendor/model and transient toasts. Plugin/tool/MCP counts stay in
+  // Settings where their detail panes live.
   useStatusBarNotifications({ api, pushToast });
   useStatusBarInstall({ api, pushToast });
   // Producer registration order determines left-to-right render order in

@@ -80,11 +80,9 @@ import {
 import { validateFoundryEndpoint } from "../../permissions/reviewer/provider-adapters.js";
 import { isLLMVendor } from "../../shared/llm-vendor-defaults.js";
 import type { IpcDeps } from "../types.js";
+import { DEMO_ACTIVATION_DEV_RELAUNCH_EXIT_CODE } from "../../../scripts/lib/dev-electron-exit.mjs";
 
 const log = createLogger("demo-activation-ipc");
-// Keep in sync with scripts/lib/dev-electron-exit.mjs. In `bun run dev`,
-// the parent watcher owns relaunching so it can keep all watch processes alive.
-const DEMO_ACTIVATION_DEV_RELAUNCH_EXIT_CODE = 42;
 
 /**
  * 2026-05-20 — cross-window logout / reactivate broadcast channels.
