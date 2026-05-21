@@ -139,9 +139,6 @@ jobs:
           else
             node scripts/smoke-packaged-app.mjs --target "${{ matrix.target }}"
           fi
-      - name: Smoke install Windows NSIS setup
-        if: matrix.target == 'win'
-        run: node scripts/smoke-windows-nsis-installer.mjs
       - name: Upload installers
         uses: actions/upload-artifact@v7
         with:

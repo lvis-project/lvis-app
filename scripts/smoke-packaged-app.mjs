@@ -248,6 +248,32 @@ async function launchSmoke(executable, timeoutMs) {
   });
 }
 
+async function runWindowsInstallerSmoke(releaseDir, timeoutMs) {
+  const script = resolve(root, "scripts", "smoke-windows-nsis-installer.mjs");
+  process.stdout.write("[packaged-smoke] running Windows NSIS setup smoke\n");
+
+  return await new Promise((resolvePromise, reject) => {
+    const child = spawn(process.execPath, [
+      script,
+      "--release-dir",
+      releaseDir,
+      "--launch-timeout-ms",
+      String(timeoutMs),
+    ], {
+      stdio: "inherit",
+      windowsHide: true,
+    });
+    child.on("error", reject);
+    child.on("exit", (code, signal) => {
+      if (code === 0) {
+        resolvePromise();
+        return;
+      }
+      reject(new Error(`Windows NSIS setup smoke failed with code=${code} signal=${signal ?? "none"}`));
+    });
+  });
+}
+
 async function main() {
   const { target, releaseDir, timeoutMs } = parseArgs(process.argv.slice(2));
   const expectedPlatform = TARGET_PLATFORM[target];
@@ -261,6 +287,9 @@ async function main() {
   }
 
   await launchSmoke(executable, timeoutMs);
+  if (target === "win") {
+    await runWindowsInstallerSmoke(releaseDir, timeoutMs);
+  }
 }
 
 main().catch((err) => {
