@@ -43,8 +43,7 @@ export function useStatusBarHealth({ api, upsertPersistent, removePersistent }: 
     const refreshLlm = async () => {
       if (!canPingLlm) return;
       const my = ++llmToken;
-      llm = { status: "checking" };
-      emit();
+      if (llm.status === "checking") emit();
       try {
         const result = await api.pingAiProvider();
         if (cancelled || my !== llmToken) return;
@@ -59,8 +58,7 @@ export function useStatusBarHealth({ api, upsertPersistent, removePersistent }: 
     const refreshMarket = async () => {
       if (!canPingMarket) return;
       const my = ++marketToken;
-      market = { status: "checking" };
-      emit();
+      if (market.status === "checking") emit();
       try {
         const result = await api.pingMarketplace();
         if (cancelled || my !== marketToken) return;
