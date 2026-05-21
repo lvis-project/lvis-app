@@ -1949,7 +1949,8 @@ DLP 통계는 audit NDJSON에서 `type = "dlp"` 엔트리만 집계한다.
 
 - **파티션**: `webPreferences.partition = "lvis-render-html"` — 전용 세션 컨텍스트로 격리.
 - **webRequest 블록**: `installHtmlPreviewPartitionBlock()` (`src/main/html-preview-partition.ts`) 가 앱 `ready` 후 `session.fromPartition("lvis-render-html").webRequest.onBeforeRequest()` 로 **모든 http/https/file/ftp 요청을 차단** 한다. `data:`, `blob:`, `about:` 만 허용한다.
-- **CSP shell**: main IPC handler 는 renderer payload 를 그대로 로드하지 않고 `src/shared/render-html-preview.ts` 의 CSP-first document shell 로 재구성한 뒤 `data:` URL 로 로드한다.
+- **CSP + toolbar shell**: main IPC handler 는 renderer payload 를 그대로 로드하지 않고 `src/shared/render-html-preview.ts` 의 CSP-first host shell 로 재구성한 뒤 `data:` URL 로 로드한다. host shell 은 상단 toolbar 와 JavaScript 허용 토글만 소유하고, LLM HTML 은 sandboxed `iframe srcdoc` 안에 넣는다. 토글은 iframe sandbox 의 `allow-scripts` 와 CSP 문서를 재로딩할 뿐 parent/window 권한을 열지 않는다.
+- **테마 토큰 주입**: renderer 는 현재 `--background`, `--foreground`, `--primary`, `--muted`, `--border` 등 LVIS theme token 을 preview payload 에 싣고, shell 은 같은 token 을 host toolbar 와 iframe 문서 앞부분에 주입한다.
 - **효과**: 악성 플러그인 HTML 이 외부 서버로 데이터를 유출하거나 원격 스크립트를 로드하는 것을 OS 네트워크 계층에서 차단한다.
 
 ### 6.6.6 Playwright-Electron E2E 테스트 인프라 (E4 PR #135)

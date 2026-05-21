@@ -1,18 +1,35 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { ExternalLink, Loader2 } from "lucide-react";
 import { Button } from "../../../components/ui/button.js";
+import {
+  RENDER_HTML_THEME_TOKEN_NAMES,
+  type RenderHtmlThemeTokens,
+} from "../../../shared/render-html-preview.js";
 import type { RenderHtmlPayload } from "../types.js";
 
 type OpenState = "idle" | "opening" | "opened" | "error";
 
+function readRenderHtmlThemeTokens(): RenderHtmlThemeTokens | undefined {
+  if (typeof window.getComputedStyle !== "function") return undefined;
+  const styles = window.getComputedStyle(document.documentElement);
+  const tokens: RenderHtmlThemeTokens = {};
+  for (const name of RENDER_HTML_THEME_TOKEN_NAMES) {
+    const value = styles.getPropertyValue(`--${name}`).trim();
+    if (value) tokens[name] = value;
+  }
+  return Object.keys(tokens).length > 0 ? tokens : undefined;
+}
+
 export function HtmlPreview({
   payload,
   allowScripts = false,
+  requiresScripts = false,
   autoOpen = false,
   autoOpenKey,
 }: {
   payload: RenderHtmlPayload;
   allowScripts?: boolean;
+  requiresScripts?: boolean;
   autoOpen?: boolean;
   autoOpenKey?: string;
 }) {
@@ -35,7 +52,9 @@ export function HtmlPreview({
       title: payload.title ?? "HTML 렌더",
       height: Math.max(420, payload.height + 140),
       allowScripts,
+      requiresScripts,
       warnings: payload.warnings,
+      themeTokens: readRenderHtmlThemeTokens(),
     });
     if (result.ok) {
       setOpenState("opened");
@@ -43,7 +62,7 @@ export function HtmlPreview({
     }
     setOpenState("error");
     setErrorMessage(result.error);
-  }, [allowScripts, payload.height, payload.html, payload.title, payload.warnings]);
+  }, [allowScripts, payload.height, payload.html, payload.title, payload.warnings, requiresScripts]);
 
   useEffect(() => {
     if (!autoOpen) return;
@@ -57,11 +76,17 @@ export function HtmlPreview({
     <div className="mt-2 overflow-hidden rounded border bg-background">
       <div className="flex items-center justify-between gap-2 border-b bg-muted/30 px-2 py-1 text-[11px] text-muted-foreground">
         <span className="min-w-0 truncate">{payload.title ?? "HTML 미리보기"}</span>
-        <span className="shrink-0 text-[10px] opacity-60">별도 창 · JS {allowScripts ? "허용" : "차단"}</span>
+        <span className="shrink-0 text-[10px] opacity-60">
+          별도 창 · {requiresScripts ? "JS 창에서 설정" : "JS 없음"}
+        </span>
       </div>
       <div className="flex items-center justify-between gap-3 px-3 py-2">
         <div className="min-w-0 text-[11px] text-muted-foreground">
-          {openState === "opened" ? "창을 열었습니다." : "HTML 결과를 창에서 표시합니다."}
+          {openState === "opened"
+            ? "창을 열었습니다."
+            : requiresScripts
+              ? "스크립트 실행 설정은 열린 창 상단에서 바꿀 수 있습니다."
+              : "HTML 결과를 창에서 표시합니다."}
           {openState === "error" && errorMessage && (
             <span className="ml-2 text-destructive">{errorMessage}</span>
           )}
