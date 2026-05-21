@@ -1,5 +1,62 @@
 # Changelog
 
+## v0.2.4 — 2026-05-21
+
+### 신규 기능
+
+- **render_html 전용 preview window** (PR #1063) — 채팅 inline webview 대신 별도 sandboxed BrowserWindow 에서 HTML 결과를 열도록 전환. 저장 세션 replay 는 inert launcher 로 유지하고, 새로 완료된 `render_html` 결과만 1회 자동 open.
+- **preview window 내부 JavaScript 제어** (PR #1066) — JavaScript 허용/차단 토글을 채팅 카드가 아니라 실제 preview window toolbar 로 이동. preview shell 은 LVIS theme token 을 주입하고, tool description 도 `hsl(var(--background))` / `foreground` / `primary` / `muted` / `border` 기반 디자인을 권장하도록 정렬.
+
+### 개선
+
+- **plugin surface directory grant 정렬** (PR #1065) — plugin UI shell, preload, renderer resource 접근 경계를 최신 permission policy 에 맞춰 보강.
+- **설정 권한 목록 scroll 안정화** (PR #1064) — Settings → 권한 → 허용 디렉터리 삭제 후 스크롤 위치가 상단으로 튀지 않도록 삭제 전후 scrollTop 을 보존.
+- **toolbar help hint 정리** (PR #1063) — 상단 toolbar 의 `⌘ + ?` help hint pill 과 stale first-boot tour anchor 를 제거해 현재 onboarding flow 와 맞춤.
+
+### 보안 / 안정성
+
+- `render_html` preview 는 기존 `lvis-render-html` network-deny partition, CSP-first document, isolated renderer boundary 를 유지.
+- preview IPC / preload / renderer 회귀 테스트로 arbitrary HTML 이 Node, app preload API, unrestricted network 에 접근하지 못하도록 고정.
+- stale `fix/html-render-open-window*` 로컬 worktree/branch 는 최신 main 의 #1063/#1066 구현보다 오래된 축소판임을 확인하고 제거했다.
+
+### 검증
+
+- PR #1063: focused Vitest 6 files / 86 pass, `bun run typecheck`, `bun run build`, remote CI `build-and-test` / CodeQL success.
+- PR #1064: focused PermissionsTab Vitest 3 files / 27 pass / 1 skipped, `bun run typecheck`.
+- PR #1066: focused Vitest 4 files / 60 pass, `bun run typecheck`, `bun run build`.
+
+---
+
+## v0.2.3 — 2026-05-20
+
+### 신규 기능
+
+- **저장 세션 보존 및 채팅 목록 로드 wiring** — hamburger memory tab 의 채팅 목록 row 를 실제 session load 로 연결하고, detached memory view 에서도 main window 로 세션을 열 수 있게 했다.
+- **LLM 기본 모델 dropdown** — 텍스트 입력 기반 모델 설정을 provider별 default dropdown 으로 정렬.
+- **설정 logout + demo re-activation entrypoint** — 설정에서 logout / demo 재활성화 흐름을 직접 진입할 수 있게 했다.
+
+### 개선
+
+- **chat transcript replay SOT 정렬** — 재시작 후 history replay 가 proactive envelope, skill-routed user text, tool result display, system notice, turn summary 를 live streaming 과 같은 projection contract 로 복원.
+- **token preflight over-count 수정** — 자동 compact preflight 가 세션 누적 input token 이 아니라 최근 provider-reported raw prompt size 와 wire serialization 기준 estimate 를 사용하도록 정렬.
+- **TokenProgressRing denominator 수정** — Azure Foundry deployment id 가 OpenAI 모델명과 일치하면 OpenAI catalog context window 를 상속해 `gpt-5.4-mini` usable budget 이 `98,000` 대신 `360,000` 으로 계산.
+- **token ring tooltip 상단 상세화** — 비용 예측 tooltip 과 같은 상단 hover 패턴으로 context used / limit / remaining / usage / TPM 정보를 표시.
+- **plugin install progress alias 정리** — 요청 slug 와 canonical plugin id 사이 install progress ghost 를 제거하고 plugin cell alias 로 같은 셀에 진행 상태를 표시.
+
+### 안정성 / 패키징
+
+- **plugin dependency lifecycle runtime setup** — host boot 에서 plugin Python dependency sync 를 직접 수행하지 않고 plugin runtime prepare/start 경계로 이동.
+- **demo activation relaunch continuity** — dev runner 재시작, host demo status IPC, Foundry endpoint 검증을 통해 첫 활성화 후 relaunch 상태 보존.
+- **atomic release publish workflow** — tag build artifact 를 single publish job 으로 모아 GitHub Release asset partial upload race 를 제거.
+- **uv runtime packaging hardening** — packaged uv materialization, license notice, package footprint gate 를 보강.
+
+### 검증
+
+- 주요 focused suites: chat/session replay, auto-compact/context-budget/pricing, plugin runtime/install lifecycle, demo activation, status bar, token ring.
+- `bun run typecheck`, `bun run build`, macOS package footprint, remote CI / CodeQL / cluster-detector success.
+
+---
+
 ## v0.2.2 — 2026-05-20
 
 ### 신규 기능
