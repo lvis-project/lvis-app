@@ -93,17 +93,19 @@ cp .env.demo.example .env.demo
 # Open .env.demo and replace <paste-api-key-here> with the internal-issued demo key.
 ```
 
-`scripts/run-electron.mjs` automatically loads `.env.demo` when the file is
-present in the repo root, so **no manual `source` is required**:
+`bun run start` and `bun run dev` both load `.env.demo` before Electron boots
+when the file is present in the repo root, so **no manual `source` is required**:
 
 ```bash
 bun run start   # .env.demo is picked up automatically
+bun run dev     # same .env.demo loader, plus the dev watcher
 ```
 
 If you prefer to export variables manually (e.g. in a wrapper script):
 
 ```bash
 source .env.demo && bun run start
+source .env.demo && bun run dev
 ```
 
 Full variable reference for `.env.demo`:

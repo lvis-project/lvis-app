@@ -37,6 +37,7 @@ import {
   randomBytes,
   scryptSync,
 } from "node:crypto";
+export { parseEnvDemoText } from "../../scripts/lib/env-demo-parser.mjs";
 
 /**
  * Wire prefix — `LVIS-DEMO:v1:`. The `v1` version tag lets us evolve the
@@ -171,45 +172,4 @@ export function decryptActivationCode(code: string): string {
     throw new Error("decrypted activation payload is empty");
   }
   return text;
-}
-
-/**
- * Parse a `.env.demo` plaintext block into key/value pairs. Mirrors the
- * loader in `scripts/run-electron.mjs` so the *same* file shape is accepted
- * whether the user dropped the file in the repo root OR pasted an
- * activation string.
- *
- * Skips:
- *   - empty lines
- *   - lines starting with `#`
- * Strips:
- *   - leading `export ` prefix
- *   - surrounding double/single quotes around values
- *
- * The returned map is a plain object so callers can spread it into
- * `process.env` directly. Keys with empty values are *included* (the
- * `.env.demo` file may legitimately set `LVIS_DEMO_HOST_MAP=` to clear a
- * previously-applied mapping).
- */
-export function parseEnvDemoText(text: string): Record<string, string> {
-  const out: Record<string, string> = {};
-  for (const raw of text.split(/\r?\n/)) {
-    const line = raw.trim();
-    if (!line || line.startsWith("#")) continue;
-    const stripped = line.replace(/^export\s+/, "");
-    const eq = stripped.indexOf("=");
-    if (eq < 1) continue;
-    const key = stripped.slice(0, eq).trim();
-    let val = stripped.slice(eq + 1).trim();
-    if (
-      (val.startsWith('"') && val.endsWith('"')) ||
-      (val.startsWith("'") && val.endsWith("'"))
-    ) {
-      val = val.slice(1, -1);
-    }
-    if (key.length > 0) {
-      out[key] = val;
-    }
-  }
-  return out;
 }
