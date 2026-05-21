@@ -132,6 +132,10 @@ jobs:
         # above and is the SOT for whether code-sign was applied.
         if: matrix.target != 'mac' || steps.build.outputs.skip_sign != 'true'
         shell: bash
+        env:
+          # Windows runners are disposable, so the installer smoke can verify
+          # both /KEEP_APP_DATA preservation and the full uninstall cleanup.
+          LVIS_ALLOW_DESTRUCTIVE_UNINSTALL_SMOKE: ${{ matrix.target == 'win' && '1' || '' }}
         run: |
           set -euo pipefail
           if [ "${{ matrix.target }}" = "linux" ]; then
