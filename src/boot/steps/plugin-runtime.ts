@@ -1022,14 +1022,30 @@ export async function initPluginRuntime(
         });
       } catch {}
     },
-    preparePluginStart: ({ pluginId, manifest, manifestPath }) => {
+    preparePluginStart: ({ pluginId, manifest, manifestPath, reportProgress }) => {
       if (!pythonRuntime || !declaresHostManagedPythonRuntime(manifest)) return undefined;
       const win = getMainWindow?.() ?? mainWindow;
       return (async () => {
-        const runtime = await pythonRuntime.ensureReadyForPluginManifest(manifestPath, win);
+        reportProgress?.({
+          phase: "pending",
+          message: "플러그인 런타임 준비를 시작합니다.",
+          progressPct: 5,
+        });
+        const runtime = await pythonRuntime.ensureReadyForPluginManifest(manifestPath, win, (status) => {
+          reportProgress?.({
+            phase: status.phase,
+            message: status.msg,
+            progressPct: status.pct,
+          });
+        });
         if (!runtime) {
           throw new Error(`plugin '${pluginId}' declares host-managed Python but no accessible lockfile was found`);
         }
+        reportProgress?.({
+          phase: "ready",
+          message: "플러그인 부팅 준비 완료",
+          progressPct: 100,
+        });
         pluginRuntime.mergeConfigOverride(pluginId, { pythonExecutable: runtime.pythonPath });
         log.info("plugin dependency runtime ready: %s -> %s", pluginId, runtime.pythonPath);
       })();
