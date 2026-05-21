@@ -360,7 +360,7 @@ export interface MarketplaceSettings {
    */
   updateCheckEnabled?: boolean;
   /**
-   * S8 — update-check interval in milliseconds. Default 6 hours (21_600_000 ms).
+   * S8 — update-check interval in milliseconds. Default 10 minutes (600_000 ms).
    * Set to 0 to disable periodic checks (manual / on-open only).
    */
   updateCheckIntervalMs?: number;

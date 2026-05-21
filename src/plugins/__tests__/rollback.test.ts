@@ -221,6 +221,24 @@ describe("PluginMarketplaceService install → update → rollback", () => {
     expect(restored.plugins[0].installSource).toBe("user");
   });
 
+  it("rollback preserves installSource='admin' for managed marketplace installs", async () => {
+    const fetcher = new StubFetcher();
+    const svc = makeService(fetcher);
+
+    fetcher.item = { ...SAMPLE_ITEM, version: "1.0.0", installPolicy: "admin" };
+    await svc.install("example-sample");
+    fetcher.item = { ...SAMPLE_ITEM, version: "1.1.0", installPolicy: "admin" };
+    await svc.install("example-sample");
+
+    const registry = JSON.parse(await readFile(registryPath, "utf-8"));
+    expect(registry.plugins[0].installSource).toBe("admin");
+
+    await svc.rollbackPlugin("example-sample");
+
+    const restored = JSON.parse(await readFile(registryPath, "utf-8"));
+    expect(restored.plugins[0].installSource).toBe("admin");
+  });
+
   it("rollback normalises a legacy dev-link registry value to 'user' regardless of packaged/dev mode", async () => {
     // Pre-2026-05 a "dev-link" installSource on a packaged build was
     // explicitly cleared by a build guard. After the dev-link purge there
@@ -265,9 +283,8 @@ describe("PluginMarketplaceService install → update → rollback", () => {
     await svc.rollbackPlugin("example-sample");
 
     const restored = JSON.parse(await readFile(registryPath, "utf-8"));
-    // rollbackPlugin is always a user-actor marketplace re-install — admin
-    // rollback is blocked upstream by deploymentGuard, so the rolled-back
-    // entry always lands on installSource="user".
+    // User-owned marketplace rollback still normalizes stale non-admin
+    // registry source values to installSource="user".
     expect(restored.plugins[0].installSource).toBe("user");
     expect(restored.plugins[0].bundleRefs).toEqual(["work-assistant"]);
   });
