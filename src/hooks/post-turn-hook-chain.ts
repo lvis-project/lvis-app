@@ -80,7 +80,7 @@ export class PostTurnHookChain {
 
     // 1. markStaleToolResults (LLM-free, lazy, 항상).
     // Token preflight (`runPreflightGuard`) 가 *next turn 진입 전* 구조적
-    // 압축을 보수적 임계 (50/55/60/65%) 로 수행하므로 post-turn 추가 압축 불필요.
+    // 압축을 usable context 80% 임계로 수행하므로 post-turn 추가 압축 불필요.
     try {
       const autoCompactEnabled = this.deps.settingsService?.get("chat").autoCompact ?? true;
       if (!autoCompactEnabled) {

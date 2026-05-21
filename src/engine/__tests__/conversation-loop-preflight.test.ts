@@ -9,7 +9,7 @@
  *   trimming the persisted session transcript
  * - autoCompact OFF → preflight skipped even when tokens exceed threshold
  * - disableSessionPersistence → preflight skipped
- * - threshold values: 2026-05 lowered percentages
+ * - threshold values: 80% of usable model context
  */
 import { describe, it, expect, vi, beforeEach } from "vitest";
 import { ConversationLoop } from "../conversation-loop.js";
@@ -25,6 +25,7 @@ import { getModelPreflightThreshold, estimateMessagesTokens } from "../auto-comp
 // returns a controlled result without requiring a real LLM call.
 
 vi.mock("../structured-compact.js", () => ({
+  DEFAULT_PRESERVE_RECENT_TURNS: 5,
   compactWithBoundary: vi.fn(),
   renderBoundaryAsPreamble: vi.fn(() => "## Compact preamble"),
 }));
@@ -375,16 +376,14 @@ describe("runPreflightGuard — skip conditions", () => {
   });
 });
 
-describe("getPreflightThreshold — lowered thresholds (2026-05 adjustment)", () => {
-  it("200K context threshold is 55% of 160K usable = 88K", () => {
-    // claude-sonnet-4-5: 200K context → 160K usable → 55% × 160K = 88,000
+describe("getPreflightThreshold — 80% usable-context trigger", () => {
+  it("200K context threshold is 80% of 160K usable = 128K", () => {
     const threshold = getModelPreflightThreshold("claude", "claude-sonnet-4-5");
-    expect(threshold).toBe(88_000);
+    expect(threshold).toBe(128_000);
   });
 
-  it("128K context threshold is 50% of 98K usable = 49K", () => {
-    // gpt-4o: 128K context → 98K usable → 50% × 98K = 49,000
+  it("128K context threshold is 80% of 98K usable = 78.4K", () => {
     const threshold = getModelPreflightThreshold("openai", "gpt-4o");
-    expect(threshold).toBe(49_000);
+    expect(threshold).toBe(78_400);
   });
 });

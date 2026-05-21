@@ -44,10 +44,11 @@ describe("ConversationHistory.getCapacityRemaining", () => {
 
   it("does not impose a message-count cap by default", () => {
     const h = new ConversationHistory();
-    for (let i = 0; i < 55; i += 1) {
+    expect(h.getCapacityRemaining()).toBe(Number.POSITIVE_INFINITY);
+    for (let i = 0; i < 60; i++) {
       h.append({ role: "user", content: `message ${i}` });
     }
-    expect(h.length).toBe(55);
+    expect(h.length).toBe(60);
     expect(h.getCapacityRemaining()).toBe(Number.POSITIVE_INFINITY);
   });
 });
