@@ -37,7 +37,7 @@
  * No plugin-specific code lives here — all plugins register themselves via the
  * HostApi manufactured in `steps/plugin-runtime.ts`.
  */
-import { app, net, powerMonitor, shell } from "electron";
+import { app, net, shell } from "electron";
 import type { BrowserWindow } from "electron";
 import { BrowserWindow as BrowserWindowValue } from "electron";
 import { randomUUID } from "node:crypto";
