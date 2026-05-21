@@ -276,6 +276,21 @@ describe("fetchPublicHttpResponse (mocked fetch)", () => {
     expect(fetchMock).toHaveBeenCalledOnce();
   });
 
+  it("uses the injected fetch implementation when provided", async () => {
+    lookupMock.mockResolvedValue([{ address: "93.184.216.34", family: 4 }]);
+    const fetchMock = vi.fn(async () =>
+      new Response("electron", { status: 200 }),
+    );
+
+    const resp = await fetchPublicHttpResponse("https://example.com/", {
+      fetchImpl: fetchMock as typeof fetch,
+    });
+
+    expect(resp.status).toBe(200);
+    expect(await resp.text()).toBe("electron");
+    expect(fetchMock).toHaveBeenCalledOnce();
+  });
+
   it("validates every hop of a redirect chain", async () => {
     lookupMock.mockResolvedValue([{ address: "93.184.216.34", family: 4 }]);
     const fetchMock = vi

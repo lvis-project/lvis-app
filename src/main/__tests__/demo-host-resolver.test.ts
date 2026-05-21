@@ -11,6 +11,7 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 import {
   applyDemoHostResolverRules,
+  demoHostMapContainsHost,
   demoFoundryHostMapFingerprint,
   validateDemoFoundryHostMap,
   _testOnlyParseHostMap,
@@ -219,6 +220,15 @@ describe("buildHostResolverRules — Chromium format", () => {
 
   it("returns empty string for empty input", () => {
     expect(_testOnlyBuildHostResolverRules([])).toBe("");
+  });
+});
+
+describe("demoHostMapContainsHost", () => {
+  it("matches URL hostnames against the Chromium resolver host map", () => {
+    const raw = "example.test.openai.azure.com=10.182.192.10";
+
+    expect(demoHostMapContainsHost(raw, "https://example.test.openai.azure.com/openai/v1/")).toBe(true);
+    expect(demoHostMapContainsHost(raw, "https://other.test.openai.azure.com/openai/v1/")).toBe(false);
   });
 });
 

@@ -1,23 +1,15 @@
 import { spawnSync } from "node:child_process";
-import { homedir } from "node:os";
-import { resolve } from "node:path";
+import { fileURLToPath } from "node:url";
 import electronPath from "electron";
-import { WINDOWS_SAFE_GPU_FLAGS, SANDBOX_BYPASS_FLAG } from "./electron-flags.mjs";
-import { loadRepoDemoEnv } from "./lib/demo-env-loader.mjs";
+import {
+  prepareElectronLaunchArgs,
+  prepareElectronLaunchEnv,
+} from "./lib/electron-launch-options.mjs";
 
 const args = process.argv.slice(2);
 const env = { ...process.env };
+const repoRoot = fileURLToPath(new URL("..", import.meta.url));
 delete env.ELECTRON_RUN_AS_NODE;
-
-// Auto-load `.env.demo` if it exists in the repo root (gitignored — never
-// committed). This lets a developer run `bun run start` without having to
-// manually `source` the file first. Only applied when the file is present
-// so non-demo dev runs are unaffected.
-//
-// Format: simple `KEY=VALUE` lines (no `export`, no quoting required).
-// Comments (`# …`) and blank lines are ignored. Values with surrounding
-// double or single quotes have the quotes stripped.
-loadRepoDemoEnv(env, new URL("..", import.meta.url).pathname);
 
 // Ensure NODE_ENV is set so logger.ts can select pino-pretty at module load
 // time. This script handles unpackaged dev runs (`bun run start`); packaged
@@ -27,15 +19,6 @@ loadRepoDemoEnv(env, new URL("..", import.meta.url).pathname);
 // shell's NODE_ENV.
 if (!env.NODE_ENV) {
   env.NODE_ENV = "development";
-}
-
-function ensureWindowsUserDataDir(argsList, envVars, profileName) {
-  if (process.platform !== "win32") return argsList;
-  if (argsList.some((arg) => arg.startsWith("--user-data-dir="))) return argsList;
-  const appDataRoot = envVars.APPDATA || resolve(homedir(), "AppData", "Roaming");
-  const userDataDir = envVars.LVIS_USER_DATA_DIR || resolve(appDataRoot, profileName);
-  argsList.push(`--user-data-dir=${userDataDir}`);
-  return argsList;
 }
 
 if (!env.LVIS_DEV_CONSOLE) {
@@ -50,19 +33,14 @@ if (!env.LVIS_DEV_CONSOLE) {
 // flags.ts SoT in main.ts hard-gates this on `!app.isPackaged` regardless,
 // so a packaged binary that inherits LVIS_WIN_NO_SANDBOX=1 still keeps
 // Chromium sandboxing.
-if (process.platform === "win32" && env.LVIS_KEEP_GPU !== "1" && !env.LVIS_WIN_NO_SANDBOX) {
-  env.LVIS_WIN_NO_SANDBOX = "1";
-}
-
-// Force UTF-8 across every subprocess spoken to by Electron's embedded Node.
-// Without this, Windows' default ANSI code page (cp949 on Korean locale) turns
-// console logs and Python subprocess stdout into mojibake (깨진 한글). These
-// env vars are harmless on macOS/Linux (already UTF-8), so set them
-// unconditionally.
-if (!env.PYTHONIOENCODING) env.PYTHONIOENCODING = "utf-8";
-if (!env.PYTHONUTF8) env.PYTHONUTF8 = "1";
-if (!env.LANG) env.LANG = "en_US.UTF-8";
-if (!env.LC_ALL) env.LC_ALL = "en_US.UTF-8";
+//
+// The shared helper also auto-loads `.env.demo` from the repo root when present
+// and forces UTF-8 subprocess defaults. Dev and start launchers intentionally
+// use the same helper/order so `.env.demo` cannot affect Electron flags
+// differently across validation paths.
+prepareElectronLaunchEnv(env, {
+  demoEnvRoot: repoRoot,
+});
 
 // Windows corp PCs often run Electron under EDR/AV sandboxing + restricted
 // GPU drivers (Hyper-V isolation / VDI / locked-down ANGLE). Under those
@@ -76,19 +54,9 @@ if (!env.LC_ALL) env.LC_ALL = "en_US.UTF-8";
 // out with `LVIS_KEEP_GPU=1` on machines with a sane GPU (passthrough VMs,
 // CI). Override with `LVIS_EXTRA_ELECTRON_FLAGS="--foo --bar"` to append
 // extra flags without losing the defaults.
-if (process.platform === "win32" && env.LVIS_KEEP_GPU !== "1") {
-  const windowsSafeFlags = [...WINDOWS_SAFE_GPU_FLAGS, SANDBOX_BYPASS_FLAG];
-  for (const flag of windowsSafeFlags) {
-    if (!args.includes(flag)) args.push(flag);
-  }
-}
-if (env.LVIS_EXTRA_ELECTRON_FLAGS) {
-  const extra = env.LVIS_EXTRA_ELECTRON_FLAGS.split(/\s+/).filter(Boolean);
-  for (const flag of extra) {
-    if (!args.includes(flag)) args.push(flag);
-  }
-}
-ensureWindowsUserDataDir(args, env, "Electron-LVIS-Run");
+args.splice(0, args.length, ...prepareElectronLaunchArgs(args, env, {
+  profileName: "Electron-LVIS-Run",
+}));
 
 // Windows: launch Electron through a cmd.exe wrapper so `chcp 65001` and
 // Electron share the SAME console. A separate `execSync("chcp")` runs in a
