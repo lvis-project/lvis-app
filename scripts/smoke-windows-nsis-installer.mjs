@@ -8,10 +8,11 @@
  */
 
 import { spawn } from "node:child_process";
-import { existsSync, mkdtempSync, readdirSync, rmSync, statSync } from "node:fs";
+import { existsSync, mkdtempSync, readFileSync, readdirSync, rmSync, statSync } from "node:fs";
 import { basename, join, resolve } from "node:path";
 import { tmpdir } from "node:os";
 
+const packageJson = JSON.parse(readFileSync(new URL("../package.json", import.meta.url), "utf8"));
 const WINDOWS_SAFE_GPU_FLAGS = [
   "--disable-gpu",
   "--disable-software-rasterizer",
@@ -127,7 +128,10 @@ function findInstaller(options) {
 function defaultInstallDir() {
   const localAppData = process.env.LOCALAPPDATA;
   if (!localAppData) throw new Error("LOCALAPPDATA is not set");
-  return join(localAppData, "Programs", "LVIS");
+  if (typeof packageJson.name !== "string" || packageJson.name.length === 0) {
+    throw new Error("package.json name is required for NSIS one-click install path");
+  }
+  return join(localAppData, "Programs", packageJson.name);
 }
 
 function appendOutput(current, chunk) {
