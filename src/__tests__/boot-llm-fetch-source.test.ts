@@ -30,5 +30,6 @@ describe("boot LLM fetch wiring regression guards", () => {
 
     expect(bootSource).toMatch(/const routineLoopDeps = \{[\s\S]*?llmFetch,/);
     expect(bootSource).toMatch(/createConversationLoop\(\{[\s\S]*?llmFetch,/);
+    expect(bootSource).toMatch(/parentDeps: \{[\s\S]*?llmFetch,/);
   });
 });

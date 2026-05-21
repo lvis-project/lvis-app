@@ -68,7 +68,7 @@ interface DemoState {
   /**
    * #893 — vendor the demo/login backend should activate when the user
    * clicks the top-level Login button. Captured from `LVIS_DEMO_VENDOR`
-   * (kebab-case); when absent the default `"openai"` is used.
+   * (kebab-case); when absent the Azure Foundry demo default is used.
    */
   activeVendor: LLMVendor;
   keys: Map<string, string>;     // vendorSuffix → apiKey
