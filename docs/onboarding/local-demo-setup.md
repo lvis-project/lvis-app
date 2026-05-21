@@ -8,7 +8,7 @@ There are **two activation paths**:
 
 | Path | When to use |
 |---|---|
-| **A. Local `.env.demo` file** (this document) | You cloned the repo and run `bun run start` locally. Drop a `.env.demo` at the repo root; `scripts/run-electron.mjs` auto-loads it. |
+| **A. Local `.env.demo` file** (this document) | You cloned the repo and run `bun run start` or `bun run dev` locally. Drop a `.env.demo` at the repo root; both Electron launchers auto-load it before the app boots. |
 | **B. Activation code** (see [`demo-activation.md`](./demo-activation.md)) | You received the LVIS packaged app + a single-line `LVIS-DEMO:v1:<...>` activation string through an internal channel. The Login modal accepts the string and persists the decrypted `.env.demo` to `~/.lvis/secrets/.env.demo` for subsequent boots. |
 
 Both paths converge on the same runtime — once the env vars are in place
@@ -127,8 +127,8 @@ and closes the modal.
   main-process log for the underlying exception.
 - **`데모 모드 설정 확인이 필요해요. 환경 변수 LVIS_DEMO_VENDOR=azure-foundry …`** —
   `LVIS_DEMO_KEY_AZURE_FOUNDRY` is unset or `LVIS_DEMO_VENDOR` is not `azure-foundry`.
-  Create or source `.env.demo` before launch (`bun run start` does this automatically
-  when the file is present in the repo root).
+  Create or source `.env.demo` before launch (`bun run start` and `bun run dev`
+  do this automatically when the file is present in the repo root).
 - **`데모 자격증명이 올바르지 않습니다.`** — the renderer chip used the wrong
   username/password. Should never happen with the chip-driven flow; if it
   does, file an issue with the auth audit log.

@@ -61,12 +61,14 @@ export function useStatusBar(opts: UseStatusBarOptions) {
       notification?: ToastItem["notification"];
     }) => {
       const id = `toast:${++toastCounterRef.current}`;
-      const expiresAt = Date.now() + (input.ttlMs ?? defaultToastTtlMs);
+      const ttlMs = input.ttlMs ?? defaultToastTtlMs;
+      const expiresAt = Date.now() + ttlMs;
       setToasts((prev) => {
         const newItem: ToastItem = {
           id,
           severity: input.severity,
           message: input.message,
+          ttlMs,
           expiresAt,
           notification: input.notification,
         };
@@ -94,10 +96,16 @@ export function useStatusBar(opts: UseStatusBarOptions) {
     if (visibleToast === null) return;
     const delay = Math.max(0, visibleToast.expiresAt - Date.now());
     const id = setTimeout(() => {
-      setToasts((prev) => (prev[0]?.id === visibleToast.id ? prev.slice(1) : prev));
+      setToasts((prev) => {
+        if (prev[0]?.id !== visibleToast.id) return prev;
+        const [, nextHead, ...rest] = prev;
+        if (!nextHead) return [];
+        const ttlMs = nextHead.ttlMs ?? defaultToastTtlMs;
+        return [{ ...nextHead, expiresAt: Date.now() + ttlMs }, ...rest];
+      });
     }, delay);
     return () => clearTimeout(id);
-  }, [visibleToast]);
+  }, [defaultToastTtlMs, visibleToast]);
 
   const upsertPersistent = useCallback((item: PersistentItem) => {
     setPersistent((prev) => {
