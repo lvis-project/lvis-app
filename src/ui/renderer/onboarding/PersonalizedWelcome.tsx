@@ -10,8 +10,8 @@
  *   확인 라인* below the personalised greeting. Three render states:
  *     - loading:  spinner + "LLM 연결 확인 중…" (confirm disabled)
  *     - success:  "LVIS 가 <vendor> · <model> 와 <latency>ms 만에 연결됐어요."
- *     - failure:  warning + "LLM 연결을 확인하지 못했습니다 — Settings 에서
- *                  API 키를 확인하세요." (confirm still enabled — fallback path)
+ *     - failure:  warning + actionable copy for either missing credentials
+ *                  or private endpoint reachability (confirm still enabled).
  *
  *   The ping is a lightweight liveness probe (no full LLM round-trip); we
  *   just want to confirm the configured vendor/model responds before the
@@ -57,6 +57,16 @@ type PingState =
       latencyMs: number;
     }
   | { status: "failure"; reason: string };
+
+function pingFailureMessage(reason: string): string {
+  if (reason === "not-configured") {
+    return "LLM 연결을 확인하지 못했습니다 — Settings 에서 API 키를 확인하세요.";
+  }
+  if (/public access is disabled|private endpoint|enotfound|fetch failed|eai_again|etimedout|^timeout$/i.test(reason)) {
+    return "LLM private endpoint 연결을 확인하지 못했습니다 — VPN 또는 데모 host-map 을 확인하세요.";
+  }
+  return "LLM 연결을 확인하지 못했습니다 — Settings 에서 API 키를 확인하세요.";
+}
 
 function usePrefersReducedMotion(): boolean {
   const [reduce, setReduce] = useState<boolean>(() => {
@@ -227,8 +237,7 @@ export function PersonalizedWelcome({
               className="rounded-md bg-destructive/10 px-2.5 py-1.5 text-[11px] text-destructive"
               role="alert"
             >
-              LLM 연결을 확인하지 못했습니다 — Settings 에서 API 키를
-              확인하세요.
+              {pingFailureMessage(pingState.reason)}
             </div>
           )}
 

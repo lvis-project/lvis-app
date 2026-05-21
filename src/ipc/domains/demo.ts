@@ -42,6 +42,12 @@
  *     missing.
  *   - `invalid-foundry-endpoint` covers: Azure Foundry payload endpoint
  *     rejected by the shared settings endpoint validator.
+ *   - `missing-foundry-host-map` covers: Azure Foundry payload missing the
+ *     private endpoint host map required for Electron host-resolver-rules.
+ *   - `foundry-host-map-mismatch` covers: Azure Foundry endpoint host not
+ *     present in `LVIS_DEMO_HOST_MAP`.
+ *   - `invalid-foundry-host-map-target` covers: Azure Foundry endpoint host
+ *     mapped outside the approved demo private endpoint subnet.
  *
  * Storage namespace (project CLAUDE.md "Storage Namespace per Feature"):
  *   The persisted `.env.demo` lives under `~/.lvis/secrets/` (cross-cutting
@@ -61,10 +67,16 @@ import {
 import { persistedEnvDemoPath } from "../../main/demo-activation-loader.js";
 import {
   getDemoActiveVendor,
+  getDemoHostMap,
+  getDemoVendorConfig,
   isDemoEnabled,
   recaptureDemoCredentialsAfterActivation,
   resetDemoCredentials,
 } from "../../main/demo-credentials.js";
+import {
+  demoFoundryHostMapFingerprint,
+  validateDemoFoundryHostMap,
+} from "../../main/demo-host-resolver.js";
 import { validateFoundryEndpoint } from "../../permissions/reviewer/provider-adapters.js";
 import { isLLMVendor } from "../../shared/llm-vendor-defaults.js";
 import type { IpcDeps } from "../types.js";
@@ -168,6 +180,48 @@ function validateActivationPayloadEndpoint(
   }
 }
 
+function validateActivationPayloadHostMap(
+  vendor: string,
+  parsed: Record<string, string>,
+): "missing-foundry-host-map" | "foundry-host-map-mismatch" | "invalid-foundry-host-map-target" | null {
+  if (vendor !== "azure-foundry") return null;
+  const baseUrl =
+    parsed.LVIS_DEMO_BASEURL_AZURE_FOUNDRY ??
+    parsed.LVIS_DEMO_ENDPOINT_AZURE_FOUNDRY;
+  const error = validateDemoFoundryHostMap(baseUrl, parsed.LVIS_DEMO_HOST_MAP);
+  if (error !== null) {
+    log.warn(`activation payload has invalid azure-foundry host map: ${error}`);
+  }
+  return error;
+}
+
+function demoFoundryResolverFingerprintForCurrentBoot(): string | null {
+  if (!isDemoEnabled()) return null;
+  const vendor = getDemoActiveVendor();
+  if (vendor !== "azure-foundry") return "non-azure-demo";
+  const config = getDemoVendorConfig(vendor);
+  if (typeof config?.baseUrl !== "string" || config.baseUrl.length === 0) {
+    return null;
+  }
+  try {
+    validateFoundryEndpoint(config.baseUrl);
+  } catch {
+    return null;
+  }
+  return demoFoundryHostMapFingerprint(config.baseUrl, getDemoHostMap());
+}
+
+function demoFoundryResolverFingerprintForPayload(
+  vendor: string,
+  parsed: Record<string, string>,
+): string | null {
+  if (vendor !== "azure-foundry") return null;
+  const baseUrl =
+    parsed.LVIS_DEMO_BASEURL_AZURE_FOUNDRY ??
+    parsed.LVIS_DEMO_ENDPOINT_AZURE_FOUNDRY;
+  return demoFoundryHostMapFingerprint(baseUrl, parsed.LVIS_DEMO_HOST_MAP);
+}
+
 function validateActivationPayloadKey(
   vendor: string,
   parsed: Record<string, string>,
@@ -194,6 +248,10 @@ function broadcastAuthEvent(deps: IpcDeps, channel: string): void {
 export function registerDemoHandlers(deps: IpcDeps): void {
   const { auditLogger } = deps;
   let relaunchArmed = false;
+  const demoFoundryResolverFingerprintAtBoot =
+    demoFoundryResolverFingerprintForCurrentBoot();
+  let demoEffectiveForCurrentProcess =
+    demoFoundryResolverFingerprintAtBoot !== null;
 
   // v0.2.1 hotfix — snapshot whether demo capture was already populated
   // by boot-time `captureDemoCredentials()`. If yes, `.env.demo` was on
@@ -204,7 +262,7 @@ export function registerDemoHandlers(deps: IpcDeps): void {
   // relaunch on success. Captured at register time (called early during
   // boot, before any activation IPC) so a subsequent activation cannot
   // flip the snapshot.
-  const demoWasEffectiveAtBoot = isDemoEnabled();
+  const demoWasEffectiveAtBoot = demoFoundryResolverFingerprintAtBoot !== null;
 
   ipcMain.handle(
     "lvis:demo:status",
@@ -218,7 +276,7 @@ export function registerDemoHandlers(deps: IpcDeps): void {
         auditUnauthorized(auditLogger, "lvis:demo:status", e);
         return { ok: false, error: UNAUTHORIZED_FRAME.error };
       }
-      const activated = isDemoEnabled();
+      const activated = demoEffectiveForCurrentProcess && isDemoEnabled();
       return {
         ok: true,
         activated,
@@ -234,7 +292,7 @@ export function registerDemoHandlers(deps: IpcDeps): void {
       payload: { code?: unknown },
     ): Promise<
       | { ok: true; vendor: string; requiresRelaunch?: boolean }
-      | { ok: false; error: "invalid-code" | "persist-failed" | "no-vendor" | "invalid-vendor" | "no-demo-key" | "missing-foundry-endpoint" | "invalid-foundry-endpoint" | "unauthorized-frame" }
+      | { ok: false; error: "invalid-code" | "persist-failed" | "no-vendor" | "invalid-vendor" | "no-demo-key" | "missing-foundry-endpoint" | "invalid-foundry-endpoint" | "missing-foundry-host-map" | "foundry-host-map-mismatch" | "invalid-foundry-host-map-target" | "unauthorized-frame" }
     > => {
       if (!validateSender(e)) {
         auditUnauthorized(auditLogger, "lvis:demo:activate", e);
@@ -287,6 +345,10 @@ export function registerDemoHandlers(deps: IpcDeps): void {
       const endpointError = validateActivationPayloadEndpoint(vendor, parsed);
       if (endpointError !== null) {
         return { ok: false, error: endpointError };
+      }
+      const hostMapError = validateActivationPayloadHostMap(vendor, parsed);
+      if (hostMapError !== null) {
+        return { ok: false, error: hostMapError };
       }
 
       // Step 3 — persist to disk so the next boot auto-activates. The file
@@ -359,7 +421,12 @@ export function registerDemoHandlers(deps: IpcDeps): void {
       // to execute the already-armed relaunch. This keeps the message visible
       // before the process exits while preserving the main-process-only
       // relaunch authority.
-      const shouldRelaunch = !demoWasEffectiveAtBoot;
+      const activationFoundryResolverFingerprint =
+        demoFoundryResolverFingerprintForPayload(vendor, parsed);
+      const shouldRelaunch = vendor === "azure-foundry"
+        ? activationFoundryResolverFingerprint !== demoFoundryResolverFingerprintAtBoot
+        : !demoWasEffectiveAtBoot;
+      demoEffectiveForCurrentProcess = !shouldRelaunch;
       if (shouldRelaunch) {
         relaunchArmed = true;
       }
@@ -395,6 +462,7 @@ export function registerDemoHandlers(deps: IpcDeps): void {
       // 된다. 본 handler 는 *credential 삭제만* 담당하고 relaunch 는 후속
       // activate handler 가 책임진다.
       relaunchArmed = false;
+      demoEffectiveForCurrentProcess = false;
       try {
         const envDemoPath = persistedEnvDemoPath();
         await fs.rm(envDemoPath, { force: true });
