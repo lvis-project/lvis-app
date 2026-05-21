@@ -1,39 +1,5 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import { ChevronDown, ChevronRight, Loader2, Wrench } from "lucide-react";
-import { ScrollArea } from "../../../components/ui/scroll-area.js";
-
-/** Pretty, bounded code block for tool input/output. */
-function ToolPayloadBlock({ value, isError = false }: { value: string; isError?: boolean }) {
-  const formatted = useMemo(() => formatToolPayload(value), [value]);
-  const scrollable = shouldConstrainPayload(formatted);
-  const pre = (
-    <pre
-      className={`max-w-full whitespace-pre-wrap break-words px-2 py-1.5 font-mono text-[10px] leading-[1.35rem] [overflow-wrap:anywhere] ${
-        isError ? "text-destructive" : "text-muted-foreground"
-      }`}
-    >
-      {formatted}
-    </pre>
-  );
-  return (
-    <div className="min-w-0 max-w-full rounded bg-muted/70 ring-1 ring-border/50">
-      {scrollable ? <ScrollArea className="h-[6.9rem]">{pre}</ScrollArea> : pre}
-    </div>
-  );
-}
-
-function shouldConstrainPayload(value: string): boolean {
-  const lines = value.split("\n");
-  if (lines.length > 5) return true;
-  // Long JSON/XML/RSS strings often wrap visually into many rows without
-  // containing newline characters. Approximate wrapped rows so every tool
-  // input/output follows the same "about 5 visible lines" rule.
-  const estimatedVisualLines = lines.reduce(
-    (sum, line) => sum + Math.max(1, Math.ceil(line.length / 96)),
-    0,
-  );
-  return estimatedVisualLines > 5;
-}
 import { Badge } from "../../../components/ui/badge.js";
 import type { ChatEntry } from "../../../lib/chat-stream-state.js";
 import { parseRenderHtmlResult } from "../utils/html-preview.js";
@@ -46,6 +12,7 @@ import { HtmlPreview } from "./HtmlPreview.js";
 import { FileEditDiff, WriteFileSidecarDiff } from "./FileEditDiff.js";
 import { McpAppView } from "./McpAppView.js";
 import { CompactedToolResult } from "./CompactedToolResult.js";
+import { ToolPayloadBlock } from "./ToolPayloadBlock.js";
 
 /**
  * Per-tool execution duration badge — `⏱ 1.4s`. Rendered next to the
@@ -98,38 +65,6 @@ function RunningDurationBadge({ startedAt }: { startedAt?: number }) {
       ⏱ {label}
     </span>
   );
-}
-
-function formatToolPayload(value: string): string {
-  const trimmed = value.trim();
-  if (!trimmed) return value;
-  try {
-    return JSON.stringify(expandJsonStrings(JSON.parse(trimmed)), null, 2);
-  } catch {
-    return value;
-  }
-}
-
-function expandJsonStrings(value: unknown, depth = 0): unknown {
-  if (depth > 4) return value;
-  if (typeof value === "string") {
-    const trimmed = value.trim();
-    if (!trimmed.startsWith("{") && !trimmed.startsWith("[")) return value;
-    try {
-      return expandJsonStrings(JSON.parse(trimmed), depth + 1);
-    } catch {
-      return value;
-    }
-  }
-  if (Array.isArray(value)) {
-    return value.map((item) => expandJsonStrings(item, depth + 1));
-  }
-  if (value && typeof value === "object") {
-    return Object.fromEntries(
-      Object.entries(value).map(([key, item]) => [key, expandJsonStrings(item, depth + 1)]),
-    );
-  }
-  return value;
 }
 
 function isToolResultStub(value: unknown): value is string {
@@ -238,7 +173,7 @@ function SingleToolInline({
           {tool.input && (
             <div>
               <div className="mb-0.5 text-[9px] uppercase opacity-60">입력</div>
-              <ToolPayloadBlock value={JSON.stringify(tool.input, null, 2)} />
+              <ToolPayloadBlock value={tool.input} />
             </div>
           )}
           {tool.result !== undefined && (
@@ -399,7 +334,7 @@ export function ToolGroupCard({
                     {tool.input && (
                       <div>
                         <div className="mb-0.5 text-[9px] uppercase opacity-60">입력</div>
-                        <ToolPayloadBlock value={JSON.stringify(tool.input, null, 2)} />
+                        <ToolPayloadBlock value={tool.input} />
                       </div>
                     )}
                     {tool.result !== undefined && (
