@@ -58,9 +58,11 @@ import { getIsPackaged } from "../../boot/dev-flags.js";
 import {
   getDemoActiveVendor,
   getDemoCredentials,
+  getDemoHostMap,
   getDemoVendorConfig,
   isDemoEnabled,
 } from "../../main/demo-credentials.js";
+import { validateDemoFoundryHostMap } from "../../main/demo-host-resolver.js";
 import { validateFoundryEndpoint } from "../../permissions/reviewer/provider-adapters.js";
 import { LoginProgressEmitter } from "../../main/login-progress-emitter.js";
 import type { IpcDeps } from "../types.js";
@@ -178,6 +180,15 @@ export function registerAuthHandlers(deps: IpcDeps): void {
             `loginMockup invalid azure-foundry baseUrl: ${(err as Error).message}`,
           );
           return { ok: false, error: "invalid-foundry-endpoint" };
+        }
+        const hostMapError = validateDemoFoundryHostMap(
+          demoConfig.baseUrl,
+          getDemoHostMap(),
+        );
+        if (hostMapError !== null) {
+          progress.fail("llm-key-issuing", hostMapError, vendor);
+          log.warn(`loginMockup invalid azure-foundry host map: ${hostMapError}`);
+          return { ok: false, error: hostMapError };
         }
       }
 

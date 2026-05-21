@@ -15,7 +15,7 @@
  * frozen once the network service spins up.
  *
  * Format of `LVIS_DEMO_HOST_MAP` (comma-separated `host=ip` pairs):
- *   `host1.example.com=10.1.2.3,host2.example.com=10.1.2.4`
+ *   `host1.example.com=10.182.192.3,host2.example.com=10.182.192.4`
  *
  * No-op when:
  *   - `LVIS_DEMO_VENDOR !== "azure-foundry"` (other vendors don't need
@@ -28,6 +28,7 @@
  */
 import type { App } from "electron";
 import { createLogger } from "../lib/logger.js";
+import { validateFoundryEndpoint } from "../permissions/reviewer/provider-adapters.js";
 
 const log = createLogger("demo-host-resolver");
 
@@ -53,6 +54,102 @@ function parseHostMap(raw: string | undefined): Array<[string, string]> {
   return pairs;
 }
 
+export type DemoFoundryHostMapError =
+  | "missing-foundry-host-map"
+  | "foundry-host-map-mismatch"
+  | "invalid-foundry-host-map-target";
+
+const FOUNDRY_HOST_SUFFIXES = [
+  ".openai.azure.com",
+  ".services.ai.azure.com",
+  ".cognitiveservices.azure.com",
+] as const;
+
+function isAllowedDemoHostMapTarget(ip: string): boolean {
+  const octets = ip.split(".");
+  if (octets.length !== 4) return false;
+  const nums = octets.map((part) => Number.parseInt(part, 10));
+  if (
+    nums.some((n, idx) => !Number.isInteger(n) || n < 0 || n > 255 || String(n) !== octets[idx])
+  ) {
+    return false;
+  }
+  return (
+    nums[0] === 10 &&
+    nums[1] === 182 &&
+    nums[2] === 192 &&
+    nums[3] >= 1 &&
+    nums[3] <= 254
+  );
+}
+
+function findInvalidDemoHostMapTarget(
+  entries: ReadonlyArray<readonly [string, string]>,
+): readonly [string, string] | null {
+  return entries.find(([, ip]) => !isAllowedDemoHostMapTarget(ip)) ?? null;
+}
+
+function foundryResourcePrefix(host: string): string | null {
+  const normalized = host.toLowerCase();
+  const suffix = FOUNDRY_HOST_SUFFIXES.find((candidate) =>
+    normalized.endsWith(candidate),
+  );
+  if (suffix === undefined) return null;
+  const prefix = normalized.slice(0, normalized.length - suffix.length);
+  if (prefix.length === 0) return null;
+  return prefix;
+}
+
+function allowedFoundryHostMapHosts(endpointHost: string): Set<string> | null {
+  const prefix = foundryResourcePrefix(endpointHost);
+  if (prefix === null) return null;
+  return new Set(FOUNDRY_HOST_SUFFIXES.map((suffix) => `${prefix}${suffix}`));
+}
+
+function findDisallowedDemoHostMapHost(
+  endpointHost: string,
+  entries: ReadonlyArray<readonly [string, string]>,
+): readonly [string, string] | null {
+  const allowedHosts = allowedFoundryHostMapHosts(endpointHost);
+  if (allowedHosts === null) return entries[0] ?? null;
+  return entries.find(([host]) => !allowedHosts.has(host.toLowerCase())) ?? null;
+}
+
+function validatedFoundryEndpointHost(baseUrl: string | undefined): string | null {
+  if (typeof baseUrl !== "string" || baseUrl.length === 0) return null;
+  try {
+    validateFoundryEndpoint(baseUrl);
+    return new URL(baseUrl).hostname.toLowerCase();
+  } catch {
+    return null;
+  }
+}
+
+export function validateDemoFoundryHostMap(
+  baseUrl: string | undefined,
+  rawHostMap: string | undefined,
+): DemoFoundryHostMapError | null {
+  if (typeof baseUrl !== "string" || baseUrl.length === 0) return null;
+  let endpointHost: string;
+  try {
+    endpointHost = new URL(baseUrl).hostname.toLowerCase();
+  } catch {
+    return null;
+  }
+
+  const entries = parseHostMap(rawHostMap);
+  if (entries.length === 0) return "missing-foundry-host-map";
+  if (findInvalidDemoHostMapTarget(entries) !== null) {
+    return "invalid-foundry-host-map-target";
+  }
+  if (findDisallowedDemoHostMapHost(endpointHost, entries) !== null) {
+    return "foundry-host-map-mismatch";
+  }
+  const match = entries.find(([host]) => host.toLowerCase() === endpointHost);
+  if (!match) return "foundry-host-map-mismatch";
+  return null;
+}
+
 /**
  * Build the `host-resolver-rules` switch value from `[host, ip]` pairs.
  * Format: comma-separated `MAP <host> <ip>` clauses (Chromium net stack
@@ -62,6 +159,37 @@ function buildHostResolverRules(
   entries: ReadonlyArray<readonly [string, string]>,
 ): string {
   return entries.map(([host, ip]) => `MAP ${host} ${ip}`).join(",");
+}
+
+function normalizedHostMapEntries(
+  entries: ReadonlyArray<readonly [string, string]>,
+): Array<readonly [string, string]> {
+  return entries
+    .map(([host, ip]) => [host.toLowerCase(), ip] as const)
+    .sort(([leftHost, leftIp], [rightHost, rightIp]) => {
+      const hostOrder = leftHost.localeCompare(rightHost);
+      if (hostOrder !== 0) return hostOrder;
+      return leftIp.localeCompare(rightIp);
+    });
+}
+
+export function demoFoundryHostMapFingerprint(
+  baseUrl: string | undefined,
+  rawHostMap: string | undefined,
+): string | null {
+  const endpointHost = validatedFoundryEndpointHost(baseUrl);
+  if (endpointHost === null) return null;
+
+  const entries = parseHostMap(rawHostMap);
+  if (entries.length === 0) return null;
+  if (findInvalidDemoHostMapTarget(entries) !== null) return null;
+  if (findDisallowedDemoHostMapHost(endpointHost, entries) !== null) {
+    return null;
+  }
+  if (!entries.some(([host]) => host.toLowerCase() === endpointHost)) {
+    return null;
+  }
+  return `${endpointHost}|${buildHostResolverRules(normalizedHostMapEntries(entries))}`;
 }
 
 /**
@@ -79,10 +207,26 @@ export function applyDemoHostResolverRules(
   if (env.LVIS_DEMO_VENDOR !== "azure-foundry") {
     return false;
   }
+  const baseUrl =
+    env.LVIS_DEMO_BASEURL_AZURE_FOUNDRY ??
+    env.LVIS_DEMO_ENDPOINT_AZURE_FOUNDRY;
+  if (demoFoundryHostMapFingerprint(baseUrl, env.LVIS_DEMO_HOST_MAP) === null) {
+    log.info(
+      "[demo-host-resolver] mapping skipped (endpoint/host-map invalid or mismatched)",
+    );
+    return false;
+  }
   const entries = parseHostMap(env.LVIS_DEMO_HOST_MAP);
   if (entries.length === 0) {
     log.info(
       "[demo-host-resolver] mapping skipped (LVIS_DEMO_HOST_MAP empty or unset)",
+    );
+    return false;
+  }
+  const invalidTarget = findInvalidDemoHostMapTarget(entries);
+  if (invalidTarget !== null) {
+    log.warn(
+      `[demo-host-resolver] mapping skipped (host-map target outside approved demo subnet for ${invalidTarget[0]})`,
     );
     return false;
   }

@@ -27,6 +27,7 @@ import {
   onboardingChainReducer,
   type OnboardingChainStage,
 } from "./onboarding/onboarding-chain.js";
+import { shouldOpenDemoReactivationOnBoot } from "./onboarding/demo-reactivation-gate.js";
 import { LoginModal } from "./components/LoginModal.js";
 import { LLM_VENDORS } from "../../shared/llm-vendor-defaults.js";
 import { buildQuickActions } from "./components/command-actions.js";
@@ -688,6 +689,13 @@ export function App() {
         void checkApiKey();
         const settings = await api.getSettings();
         if (cancelled) return;
+        const demoStatus = await api.demo.status().catch(() => null);
+        if (cancelled) return;
+        if (shouldOpenDemoReactivationOnBoot(settings, demoStatus)) {
+          dispatchChain({ type: "probe-skip" });
+          setReactivationOpen(true);
+          return;
+        }
         if (settings.features?.onboardingCompleted === true) {
           dispatchChain({ type: "probe-skip" });
           return;
