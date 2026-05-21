@@ -24,7 +24,14 @@ import { CompressionStatus } from "../shared/compact-status.js";
 import { stripSuggestedReplies } from "./suggested-replies.js";
 import { createProvider, secretKeyFor } from "./llm/provider-factory.js";
 import { FallbackProvider, type FallbackStatus } from "./llm/vercel/fallback-chain.js";
-import type { GenericMessage, LLMProvider, MessageMeta, ToolSchema, TokenUsage } from "./llm/types.js";
+import type {
+  GenericMessage,
+  LLMProvider,
+  MessageMeta,
+  ProviderConfig,
+  ToolSchema,
+  TokenUsage,
+} from "./llm/types.js";
 import { collectRoundStream } from "./turn/stream-collector.js";
 import {
   handleRequestPlugin,
@@ -361,6 +368,8 @@ export interface ConversationLoopDeps {
   auditLogger?: AuditLogger;
   /** Rebuilds reviewer classifier/cache bindings after `/permission reviewer ...`. */
   rewireReviewerAgent?: () => void;
+  /** Main-process fetch implementation for SDK-backed LLM calls. */
+  llmFetch?: typeof fetch;
 }
 
 // 사용자가 *26 step* 작업에서 cap hit 으로 *조용히 끊긴* 사례 (2026-05-07) 후
@@ -580,7 +589,13 @@ export class ConversationLoop {
     }
 
     try {
-      const primary = createProvider({
+      const createLoopProvider = (config: ProviderConfig): LLMProvider =>
+        createProvider({
+          ...config,
+          ...(this.deps.llmFetch ? { fetch: this.deps.llmFetch } : {}),
+        });
+
+      const primary = createLoopProvider({
         vendor,
         apiKey: apiKey ?? "",
         model: block.model,
@@ -603,6 +618,8 @@ export class ConversationLoop {
         primary,
         chain,
         (v) => this.deps.settingsService.getSecret(secretKeyFor(v)) ?? "",
+        undefined,
+        createLoopProvider,
       );
     } catch {
       this.provider = null;

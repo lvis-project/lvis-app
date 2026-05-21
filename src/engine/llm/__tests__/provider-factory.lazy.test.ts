@@ -69,6 +69,42 @@ describe("createProvider lazy adapter (PR #705)", () => {
     expect(innerStreamTurn).toHaveBeenCalledTimes(2);
   });
 
+  it("passes the configured fetch implementation to the Vercel adapter", async () => {
+    const customFetch = vi.fn() as unknown as typeof fetch;
+    const innerStreamTurn = vi.fn(async function* () {
+      yield { type: "text_delta", text: "ok" };
+    });
+    const ctor = vi.fn(function () {
+      return {
+        vendor: "azure-foundry",
+        streamTurn: innerStreamTurn,
+      };
+    });
+    vi.doMock("../vercel/adapter.js", () => ({ VercelUnifiedProvider: ctor }));
+
+    const { createProvider } = await import("../provider-factory.js");
+    const provider = createProvider({
+      vendor: "azure-foundry",
+      apiKey: "k",
+      baseUrl: "https://aif.example.openai.azure.com/openai/v1/",
+      fetch: customFetch,
+    });
+
+    await drain(provider.streamTurn(TURN));
+
+    expect(ctor).toHaveBeenCalledTimes(1);
+    expect(ctor).toHaveBeenCalledWith(
+      "azure-foundry",
+      "k",
+      "https://aif.example.openai.azure.com/openai/v1/",
+      customFetch,
+      {
+        vertexProject: undefined,
+        vertexLocation: undefined,
+      },
+    );
+  });
+
   it("retries after a transient adapter construction failure", async () => {
     let attempt = 0;
     const ctor = vi.fn(function () {
