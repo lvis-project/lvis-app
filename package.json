@@ -76,7 +76,7 @@
     "zod": "^4.3.6"
   },
   "devDependencies": {
-    "@ai-sdk/devtools": "^0.0.17",
+    "@ai-sdk/devtools": "^0.0.18",
     "@electron/rebuild": "^4.0.3",
     "@playwright/test": "^1.48.0",
     "@storybook/react": "^10.3.6",
