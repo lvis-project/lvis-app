@@ -1,5 +1,29 @@
 # Changelog
 
+## v0.2.5 — 2026-05-21
+
+### 개선
+
+- **Local Indexer update lifecycle 정렬** (PR #1073) — Marketplace update button 과 `lvis://` install path 가 공통 lifecycle helper 를 사용한다. catalog/runtime 에서 기존 설치 상태를 확인한 뒤 artifact patch 전에 실행 중인 플러그인을 먼저 중지하고, install/start 실패 시 기존 runtime 또는 이전 artifact 로 복구한다.
+- **마켓플레이스 플러그인 업데이트 확인 주기 단축** (PR #1073) — 기본 update check interval 을 6시간에서 10분으로 낮춰 managed plugin 업데이트가 더 빨리 노출되도록 했다.
+- **플러그인 준비 상태 표시 보강** (PR #1071) — host-managed Python 플러그인의 `preparing` 단계가 설정 패널, 플러그인 목록, 메인 플러그인 그리드에 유지 표시된다. Local Indexer 처럼 로드 전 준비 중인 플러그인도 placeholder 상태로 드러난다.
+- **Azure Foundry reasoning 노출** (PR #1072) — Azure Foundry 응답의 reasoning/thinking 정보를 visible transcript 흐름에 맞춰 표시한다.
+
+### 안정성
+
+- **Python dependency sync 출력 억제** (PR #1071) — `uv pip sync` 의 대량 stderr 다운로드 로그는 tail 만 보존하고 UI thread 를 압박하지 않도록 조정했다. 프로세스는 기존대로 분리 실행되며 progress event 만 렌더러로 전달한다.
+- **Marketplace health probe 안정화** (PR #1070) — 정상 marketplace 에서 status ping abort WARN 이 반복되지 않도록 timeout, in-flight coalescing, cache, stale-generation discard 를 정렬했다.
+- **rollback metadata 보존** (PR #1073) — prior-version rollback 은 최신 catalog SHA 와 비교하지 않고 설치 당시 registry snapshot / bundle metadata 를 사용해 admin install source 와 artifact metadata 를 보존한다.
+
+### 검증
+
+- PR #1070: focused Vitest 2 files / 37 pass, `bun run typecheck`, `bun run build`, remote CI success.
+- PR #1071: focused PluginRuntime / PluginCard / PluginConfigTab / PluginGridButton suites 95 pass, `bun run typecheck`, `bun run build`.
+- PR #1072: remote CI success.
+- PR #1073: focused lifecycle/marketplace suites 117 pass, update interval source regression 1 pass, `bun run typecheck`, `bun run build`, remote CI success, Copilot inline comments 0.
+
+---
+
 ## v0.2.4 — 2026-05-21
 
 ### 신규 기능
