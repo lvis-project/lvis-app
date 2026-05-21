@@ -24,6 +24,9 @@
  *                                  normalized to baseUrl at the external
  *                                  activation boundary.
  *   LVIS_DEMO_MODEL_<VENDOR>     — default model id (optional override)
+ *   LVIS_DEMO_HOST_MAP           — host=ip map used by Electron
+ *                                  host-resolver-rules for Azure Foundry
+ *                                  private endpoints
  *   LVIS_DEMO_VERTEX_PROJECT     — Vertex AI GCP project (vertex-ai only)
  *   LVIS_DEMO_VERTEX_LOCATION    — Vertex AI GCP region (vertex-ai only)
  *
@@ -71,6 +74,7 @@ interface DemoState {
   keys: Map<string, string>;     // vendorSuffix → apiKey
   baseUrls: Map<string, string>; // vendorSuffix → baseUrl
   models: Map<string, string>;   // vendorSuffix → model
+  hostMap?: string;
   vertexProject?: string;
   vertexLocation?: string;
 }
@@ -135,6 +139,7 @@ export function captureDemoCredentials(): void {
 
   const vertexProject = process.env.LVIS_DEMO_VERTEX_PROJECT;
   const vertexLocation = process.env.LVIS_DEMO_VERTEX_LOCATION;
+  const hostMap = process.env.LVIS_DEMO_HOST_MAP;
   const rawActiveVendor = process.env.LVIS_DEMO_VENDOR;
   const activeVendor: LLMVendor = isLLMVendor(rawActiveVendor)
     ? rawActiveVendor
@@ -153,6 +158,7 @@ export function captureDemoCredentials(): void {
     keys,
     baseUrls,
     models,
+    ...(typeof hostMap === "string" ? { hostMap } : {}),
     ...(typeof vertexProject === "string" && vertexProject.length > 0 ? { vertexProject } : {}),
     ...(typeof vertexLocation === "string" && vertexLocation.length > 0 ? { vertexLocation } : {}),
   };
@@ -231,6 +237,10 @@ export function getDemoVendorConfig(vendor: string): DemoVendorConfig | null {
   }
 
   return config;
+}
+
+export function getDemoHostMap(): string | undefined {
+  return captured.hostMap;
 }
 
 /** Test-only reset. Production code must never call this. */
