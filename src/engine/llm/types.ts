@@ -351,9 +351,9 @@ export interface ProviderConfig {
   model?: string;
   baseUrl?: string;
   /**
-   * Optional fetch implementation for SDK-backed providers. Electron main
-   * passes `net.fetch` so private-endpoint/demo host mappings use Chromium's
-   * network stack instead of Node's resolver.
+   * Optional fetch implementation for SDK-backed providers that need the
+   * Electron main-process network stack. Production boot currently wires this
+   * only for Azure Foundry private-endpoint/demo host mappings.
    */
   fetch?: typeof fetch;
   /** Vertex AI — GCP project ID (required for vendor="vertex-ai"). */

@@ -57,4 +57,51 @@ describe("ConversationLoop LLM fetch wiring", () => {
       }),
     );
   });
+
+  it("does not pass the injected fetch to non-Azure providers", async () => {
+    const createProvider = vi.fn(() => ({
+      vendor: "openai" as const,
+      streamTurn: async function* () {},
+    }));
+    vi.doMock("../llm/provider-factory.js", () => ({
+      createProvider,
+      secretKeyFor: (vendor: string) => `llm.apiKey.${vendor}`,
+    }));
+    const { ConversationLoop } = await import("../conversation-loop.js");
+
+    const toolRegistry = new ToolRegistry();
+    const settings = fakeLlmSettings({
+      provider: "openai",
+      model: "gpt-5.4-mini",
+    });
+    settings.vendors.openai.baseUrl = "https://proxy.example.test/v1";
+    const llmFetch = vi.fn() as unknown as typeof fetch;
+
+    new ConversationLoop(({
+      settingsService: {
+        get: () => settings,
+        getSecret: () => "test-key",
+      },
+      systemPromptBuilder: { build: () => "system" },
+      keywordEngine: new KeywordEngine(),
+      routeEngine: new RouteEngine({ toolRegistry }),
+      toolRegistry,
+      memoryManager: { saveSession: () => {}, listSessions: () => [] },
+      llmFetch,
+    } as unknown) as ConstructorParameters<typeof ConversationLoop>[0]);
+
+    expect(createProvider).toHaveBeenCalledWith(
+      expect.not.objectContaining({
+        fetch: llmFetch,
+      }),
+    );
+    expect(createProvider).toHaveBeenCalledWith(
+      expect.objectContaining({
+        vendor: "openai",
+        apiKey: "test-key",
+        model: "gpt-5.4-mini",
+        baseUrl: "https://proxy.example.test/v1",
+      }),
+    );
+  });
 });

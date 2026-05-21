@@ -91,6 +91,7 @@ import { RoutinesScheduler } from "./main/routines-scheduler.js";
 import { SessionTodoStore } from "./main/session-todo-store.js";
 import { AskUserQuestionGate, IPC_ASK_USER_QUESTION_REQUEST } from "./main/ask-user-question-gate.js";
 import { NotificationService } from "./main/notification-service.js";
+import { createSafeLlmFetch } from "./main/safe-llm-fetch.js";
 import { PreferenceRefreshService } from "./memory/preference-refresh-service.js";
 import { SkillStore } from "./main/skill-store.js";
 import { SkillOverlay } from "./main/skill-overlay.js";
@@ -173,7 +174,7 @@ export async function bootstrap(
   getMainWindow: () => BrowserWindow | null = () => mainWindow,
 ): Promise<AppServices> {
   log.info("boot: starting...");
-  const llmFetch = net.fetch.bind(net) as typeof fetch;
+  const llmFetch = createSafeLlmFetch(net.fetch.bind(net));
 
   // Seed user-facing docs into `~/.lvis/` before any other component reads
   // home state. AGENTS.md is the LLM-facing system reference; on first boot
@@ -605,7 +606,7 @@ export async function bootstrap(
       vendor: llmVendor,
       apiKey: apiKey ?? "",
       model: block.model,
-      fetch: llmFetch,
+      ...(llmVendor === "azure-foundry" ? { fetch: llmFetch } : {}),
       ...(block.baseUrl ? { baseUrl: block.baseUrl } : {}),
       ...(block.vertexProject ? { vertexProject: block.vertexProject } : {}),
       ...(block.vertexLocation ? { vertexLocation: block.vertexLocation } : {}),
