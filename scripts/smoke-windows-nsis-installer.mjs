@@ -3,12 +3,22 @@
  * Smoke-test the Windows NSIS setup.exe, not just win-unpacked/LVIS.exe.
  *
  * The packaged-app smoke catches missing runtime files in win-unpacked. This
- * script covers the installer path: silent install, launch installed app, and
- * silent uninstall while preserving user data.
+ * script covers the installer path: silent install, launch installed app,
+ * silent uninstall while preserving user data, and an opt-in destructive
+ * uninstall pass for CI runners.
  */
 
 import { spawn } from "node:child_process";
-import { existsSync, mkdtempSync, readFileSync, readdirSync, rmSync, statSync } from "node:fs";
+import {
+  existsSync,
+  mkdirSync,
+  mkdtempSync,
+  readFileSync,
+  readdirSync,
+  rmSync,
+  statSync,
+  writeFileSync,
+} from "node:fs";
 import { basename, join, resolve } from "node:path";
 import { tmpdir } from "node:os";
 
@@ -20,6 +30,7 @@ const WINDOWS_SAFE_GPU_FLAGS = [
 ];
 const SANDBOX_BYPASS_FLAG = "--no-sandbox";
 const MAX_OUTPUT_CHARS = 16_000;
+const DESTRUCTIVE_SMOKE_ENV = "LVIS_ALLOW_DESTRUCTIVE_UNINSTALL_SMOKE";
 
 function usage() {
   process.stdout.write(
@@ -32,6 +43,7 @@ function usage() {
       "  --install-timeout-ms <n> Silent install timeout (default: 180000)",
       "  --launch-timeout-ms <n>  App launch health window (default: 12000)",
       "  --uninstall-timeout-ms <n> Silent uninstall timeout (default: 120000)",
+      `  --destructive-user-data-smoke  Also verify full uninstall deletes LVIS user-data paths (or set ${DESTRUCTIVE_SMOKE_ENV}=1)`,
       "  --help                   Show this help",
     ].join("\n") + "\n",
   );
@@ -44,6 +56,7 @@ function parseArgs(argv) {
     installTimeoutMs: 180_000,
     launchTimeoutMs: 12_000,
     uninstallTimeoutMs: 120_000,
+    destructiveUserDataSmoke: process.env[DESTRUCTIVE_SMOKE_ENV] === "1",
   };
 
   for (let i = 0; i < argv.length; i += 1) {
@@ -74,6 +87,10 @@ function parseArgs(argv) {
     }
     if (arg === "--uninstall-timeout-ms") {
       options.uninstallTimeoutMs = parsePositiveInt(argv[++i], "--uninstall-timeout-ms");
+      continue;
+    }
+    if (arg === "--destructive-user-data-smoke") {
+      options.destructiveUserDataSmoke = true;
       continue;
     }
     throw new Error(`Unknown argument: ${arg}`);
@@ -208,7 +225,77 @@ async function waitForFileRemoved(file, timeoutMs) {
   throw new Error(`timed out waiting for file removal: ${file}`);
 }
 
-async function launchSmoke(executable, timeoutMs) {
+async function waitForPathRemoved(file, timeoutMs) {
+  const startedAt = Date.now();
+  while (Date.now() - startedAt < timeoutMs) {
+    if (!existsSync(file)) return;
+    await new Promise((resolvePromise) => setTimeout(resolvePromise, 500));
+  }
+  throw new Error(`timed out waiting for path removal: ${file}`);
+}
+
+function userDataTargets() {
+  const { USERPROFILE, APPDATA, LOCALAPPDATA } = process.env;
+  if (!USERPROFILE) throw new Error("USERPROFILE is not set");
+  if (!APPDATA) throw new Error("APPDATA is not set");
+  if (!LOCALAPPDATA) throw new Error("LOCALAPPDATA is not set");
+  return [
+    join(USERPROFILE, ".lvis"),
+    join(APPDATA, "LVIS"),
+    join(LOCALAPPDATA, "LVIS"),
+  ];
+}
+
+function isDisposableGitHubActionsWindowsRunner() {
+  return process.env.GITHUB_ACTIONS === "true" && process.env.RUNNER_OS === "Windows";
+}
+
+function assertNoExistingUserDataTargets() {
+  const existing = userDataTargets().filter((target) => existsSync(target));
+  if (existing.length > 0 && isDisposableGitHubActionsWindowsRunner()) {
+    process.stdout.write(
+      [
+        `[windows-installer-smoke] ${DESTRUCTIVE_SMOKE_ENV}=1 on disposable GitHub Windows runner;`,
+        " existing LVIS user data paths will be included in full uninstall smoke:",
+        ...existing.map((target) => `[windows-installer-smoke] - ${target}`),
+        "",
+      ].join("\n"),
+    );
+    return;
+  }
+  if (existing.length > 0) {
+    throw new Error(
+      [
+        `${DESTRUCTIVE_SMOKE_ENV}=1 would delete existing LVIS user data paths:`,
+        ...existing.map((target) => `- ${target}`),
+        "Run this destructive smoke only in a disposable Windows runner.",
+      ].join("\n"),
+    );
+  }
+}
+
+function createUserDataSentinels() {
+  for (const target of userDataTargets()) {
+    mkdirSync(target, { recursive: true });
+    writeFileSync(join(target, "nsis-smoke-sentinel.txt"), "LVIS Windows uninstall smoke\n", "utf8");
+  }
+}
+
+function assertUserDataTargetsExist() {
+  const missing = userDataTargets().filter((target) => !existsSync(target));
+  if (missing.length > 0) {
+    throw new Error(`KEEP_APP_DATA uninstall removed user data unexpectedly: ${missing.join(", ")}`);
+  }
+}
+
+function assertUserDataTargetsRemoved() {
+  const remaining = userDataTargets().filter((target) => existsSync(target));
+  if (remaining.length > 0) {
+    throw new Error(`full uninstall left user data behind: ${remaining.join(", ")}`);
+  }
+}
+
+async function startInstalledApp(executable, timeoutMs) {
   const userDataDir = mkdtempSync(join(tmpdir(), "lvis-nsis-smoke-user-data-"));
   const env = {
     ...process.env,
@@ -227,7 +314,6 @@ async function launchSmoke(executable, timeoutMs) {
   try {
     return await new Promise((resolvePromise, reject) => {
       let output = "";
-      let timedOut = false;
       const child = spawn(executable, [...new Set(args)], {
         env,
         stdio: ["ignore", "pipe", "pipe"],
@@ -235,10 +321,27 @@ async function launchSmoke(executable, timeoutMs) {
       });
 
       const timer = setTimeout(() => {
-        timedOut = true;
-        child.kill("SIGTERM");
-        setTimeout(() => child.kill("SIGKILL"), 2_000).unref?.();
+        cleanupListeners();
+        process.stdout.write(`[windows-installer-smoke] app stayed up for ${timeoutMs}ms; launch smoke passed\n`);
+        resolvePromise({
+          child,
+          stop() {
+            if (child.exitCode === null && child.signalCode === null) {
+              child.kill("SIGTERM");
+              setTimeout(() => child.kill("SIGKILL"), 2_000).unref?.();
+            }
+            removeTempDirBestEffort(userDataDir);
+          },
+        });
       }, timeoutMs);
+
+      const cleanupListeners = () => {
+        clearTimeout(timer);
+        child.stdout?.removeAllListeners("data");
+        child.stderr?.removeAllListeners("data");
+        child.removeAllListeners("error");
+        child.removeAllListeners("exit");
+      };
 
       child.stdout?.on("data", (chunk) => {
         output = appendOutput(output, chunk);
@@ -247,21 +350,19 @@ async function launchSmoke(executable, timeoutMs) {
         output = appendOutput(output, chunk);
       });
       child.on("error", (error) => {
-        clearTimeout(timer);
+        cleanupListeners();
+        removeTempDirBestEffort(userDataDir);
         reject(error);
       });
       child.on("exit", (code, signal) => {
-        clearTimeout(timer);
-        if (timedOut) {
-          process.stdout.write(`[windows-installer-smoke] app stayed up for ${timeoutMs}ms; launch smoke passed\n`);
-          resolvePromise();
-          return;
-        }
+        cleanupListeners();
+        removeTempDirBestEffort(userDataDir);
         reject(new Error(`installed app exited early with code=${code} signal=${signal ?? "none"}\n${output}`));
       });
     });
-  } finally {
+  } catch (err) {
     removeTempDirBestEffort(userDataDir);
+    throw err;
   }
 }
 
@@ -272,6 +373,19 @@ function findUninstaller(installDir) {
   });
   if (matches.length === 0) throw new Error(`uninstaller not found in ${installDir}`);
   return matches[0];
+}
+
+async function installAndWait(installer, installedExe, timeoutMs) {
+  await runProcess(installer, ["/S", "/currentuser"], { timeoutMs });
+  await waitForFile(installedExe, 30_000);
+  process.stdout.write(`[windows-installer-smoke] installed executable found: ${installedExe}\n`);
+}
+
+async function uninstallAndVerify(uninstaller, args, { installDir, installedExe, timeoutMs }) {
+  await runProcess(uninstaller, args, { timeoutMs });
+  await waitForFileRemoved(installedExe, 30_000);
+  await waitForPathRemoved(installDir, 30_000);
+  process.stdout.write(`[windows-installer-smoke] uninstall removed install dir: ${installDir}\n`);
 }
 
 async function main() {
@@ -291,20 +405,54 @@ async function main() {
     );
   }
 
-  await runProcess(installer, ["/S", "/currentuser"], { timeoutMs: options.installTimeoutMs });
-  await waitForFile(installedExe, 30_000);
-  process.stdout.write(`[windows-installer-smoke] installed executable found: ${installedExe}\n`);
+  if (options.destructiveUserDataSmoke) {
+    assertNoExistingUserDataTargets();
+    createUserDataSentinels();
+  }
 
+  await installAndWait(installer, installedExe, options.installTimeoutMs);
+
+  let runningApp = null;
   try {
-    await launchSmoke(installedExe, options.launchTimeoutMs);
+    runningApp = await startInstalledApp(installedExe, options.launchTimeoutMs);
   } finally {
     const uninstaller = findUninstaller(installDir);
-    await runProcess(uninstaller, ["/S", "/KEEP_APP_DATA"], { timeoutMs: options.uninstallTimeoutMs });
-    await waitForFileRemoved(installedExe, 30_000);
+    try {
+      await uninstallAndVerify(uninstaller, ["/S", "/KEEP_APP_DATA"], {
+        installDir,
+        installedExe,
+        timeoutMs: options.uninstallTimeoutMs,
+      });
+    } finally {
+      runningApp?.stop();
+    }
   }
+
+  if (!options.destructiveUserDataSmoke) return;
+
+  assertUserDataTargetsExist();
+  await installAndWait(installer, installedExe, options.installTimeoutMs);
+  const uninstaller = findUninstaller(installDir);
+  await uninstallAndVerify(uninstaller, ["/S"], {
+    installDir,
+    installedExe,
+    timeoutMs: options.uninstallTimeoutMs,
+  });
+  assertUserDataTargetsRemoved();
+  process.stdout.write("[windows-installer-smoke] full uninstall removed LVIS user data paths\n");
 }
 
 main().catch((error) => {
+  if (process.env[DESTRUCTIVE_SMOKE_ENV] !== "1") {
+    try {
+      for (const target of userDataTargets()) {
+        const sentinel = join(target, "nsis-smoke-sentinel.txt");
+        if (existsSync(sentinel)) rmSync(target, { recursive: true, force: true });
+      }
+    } catch {
+      // Best-effort cleanup only. The original failure is the useful signal.
+    }
+  }
   process.stderr.write(`[windows-installer-smoke] FAILED: ${error.message}\n`);
   process.exit(1);
 });
