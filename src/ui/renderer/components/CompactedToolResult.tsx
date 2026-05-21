@@ -15,6 +15,7 @@
 
 import { useState } from "react";
 import { getApi } from "../api-client.js";
+import { formatToolPayloadString } from "../utils/tool-payload-format.js";
 
 /** Lazily split content into at most `limit` lines without scanning the full string. */
 function splitLines(content: string, limit: number): { lines: string[]; truncated: boolean } {
@@ -108,6 +109,8 @@ export function CompactedToolResult({
   const headerLabel = inputStr ? `${toolName}(${inputStr})` : toolName;
 
   if (state === "expanded" && verbatim) {
+    const formattedContent = formatToolPayloadString(verbatim.content);
+    const formattedLineCount = formattedContent.split("\n").length;
     return (
       <div className="tool-result-expanded min-w-0 w-full max-w-full rounded-md text-[11px]">
         <button
@@ -119,7 +122,7 @@ export function CompactedToolResult({
           <span>▼</span>
           <span>📦</span>
           <span className="min-w-0 truncate font-medium text-muted-foreground">{headerLabel}</span>
-          <span className="shrink-0 text-muted-foreground/70">· {verbatim.lineCount}줄</span>
+          <span className="shrink-0 text-muted-foreground/70">· {formattedLineCount}줄</span>
           <span className="ml-auto shrink-0 text-[10px] text-primary">접기</span>
         </button>
         <div className="tre-body min-w-0 rounded-b-md border-t max-h-[16rem] overflow-y-auto px-3 py-1 font-mono text-[10px] leading-[1.4]"
@@ -127,7 +130,7 @@ export function CompactedToolResult({
         >
           {(() => {
             const MAX_DISPLAY_LINES = 1000;
-            const { lines: displayLines, truncated } = splitLines(verbatim.content, MAX_DISPLAY_LINES);
+            const { lines: displayLines, truncated } = splitLines(formattedContent, MAX_DISPLAY_LINES);
             return (
               <div>
                 {displayLines.map((line, i) => (

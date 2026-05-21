@@ -79,6 +79,36 @@ describe("CompactedToolResult", () => {
     expect(container.textContent).toContain("line three");
   });
 
+  it("pretty-prints JSON verbatim content after expansion", async () => {
+    const content = JSON.stringify({
+      status: "ok",
+      payload: JSON.stringify({ items: [{ title: "보고서", count: 2 }] }),
+    });
+    vi.stubGlobal(
+      "lvisApi",
+      makeApi(() => Promise.resolve({ content, lineCount: 1 })),
+    );
+    const { container } = render(
+      <CompactedToolResult
+        toolUseId={TOOL_USE_ID}
+        toolName="Read"
+        stubContent={STUB}
+        sessionId={SESSION_ID}
+      />,
+    );
+
+    fireEvent.click(container.querySelector("button") as HTMLButtonElement);
+
+    await waitFor(() => {
+      const codeText = Array.from(container.querySelectorAll(".tre-code"))
+        .map((node) => node.textContent ?? "")
+        .join("\n");
+      expect(codeText).toContain('"payload": {');
+      expect(codeText).toContain('"title": "보고서"');
+      expect(codeText).not.toContain('\\\"items\\\"');
+    });
+  });
+
   it("shows line numbers in expanded body", async () => {
     const content = "alpha\nbeta\ngamma";
     vi.stubGlobal(
