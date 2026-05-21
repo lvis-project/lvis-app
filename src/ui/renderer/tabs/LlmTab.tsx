@@ -288,8 +288,8 @@ export function LlmTab(props: LlmTabProps) {
                   {vendor === "azure-foundry" && (
                     <p className="text-[11px] text-muted-foreground">
                       Azure AI Foundry 엔드포인트 형식:
-                      {" "}<code>https://{"{resource}"}.openai.azure.com/openai/deployments/{"{deployment}"}/</code>
-                      {" "}— 모델 드롭다운은 알려진 deployment/model 이름과 현재 저장된 사용자 지정 값을 표시합니다.
+                      {" "}<code>https://{"{resource}"}.openai.azure.com/openai/v1/</code>
+                      {" "}— 모델 값에는 Azure deployment 이름을 입력합니다.
                     </p>
                   )}
                   {(vendor === "openai" || vendor === "copilot") && (
