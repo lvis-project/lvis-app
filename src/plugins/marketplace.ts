@@ -37,6 +37,14 @@ function normalizeInstallPolicy(source: {
   return "user";
 }
 
+function resolveRollbackInstallSource(
+  currentSource: PluginRegistryEntryInstallSource | undefined,
+  snapshotSource: PluginRegistryEntryInstallSource | undefined,
+): PluginRegistryEntryInstallSource {
+  if (snapshotSource === "admin" || currentSource === "admin") return "admin";
+  return "user";
+}
+
 function normalizeDependencies(
   plugin: Pick<PluginMarketplaceItem, "dependencies">,
 ): Array<{ pluginId: string; versionRange?: string; required: boolean }> {
@@ -757,6 +765,7 @@ export class PluginMarketplaceService {
             `Delisted plugins are unsupported for rollback (yanked artifacts are not retained locally).`,
         );
       }
+      const registrySnapshot = await this.artifactStore.readCachedRegistryEntrySnapshot(pluginId, priorVersion);
       const manifestPathRel = await this.installArtifact(plugin, priorVersion);
 
       await this.artifactStore.appendHistory(pluginId, {
@@ -769,20 +778,17 @@ export class PluginMarketplaceService {
         if (existing) {
           existing.manifestPath = manifestPathRel;
           existing.enabled = true;
-          // Rollback re-installs from the marketplace catalog. Normalize any
-          // non-admin source (local-dev) back to "user" since this is now a
-          // marketplace-origin install.
-          // rollbackPlugin is always a user-actor marketplace re-install.
-          // Admin-managed plugin rollback is blocked upstream by deploymentGuard.
-          existing.installSource = "user";
-          existing.bundleRefs = existing.bundleRefs ?? [];
+          existing.installSource = resolveRollbackInstallSource(existing.installSource, registrySnapshot?.installSource);
+          existing.bundleRefs = existing.bundleRefs ?? registrySnapshot?.bundleRefs ?? [];
+          existing.approvedPluginAccess = registrySnapshot?.approvedPluginAccess ?? existing.approvedPluginAccess;
         } else {
           registry.plugins.push({
             id: pluginId,
             manifestPath: manifestPathRel,
             enabled: true,
-            installSource: "user",
-            bundleRefs: [],
+            installSource: resolveRollbackInstallSource(undefined, registrySnapshot?.installSource),
+            bundleRefs: registrySnapshot?.bundleRefs ?? [],
+            approvedPluginAccess: registrySnapshot?.approvedPluginAccess,
           });
         }
       });
@@ -837,7 +843,7 @@ export class PluginMarketplaceService {
     const manifestAbs = isAbsolute(entry.manifestPath)
       ? entry.manifestPath
       : resolve(dirname(this.registryPath), entry.manifestPath);
-    await this.artifactStore.cacheVersionFromManifest(pluginId, manifestAbs);
+    await this.artifactStore.cacheVersionFromManifest(pluginId, manifestAbs, entry);
     await this.appendHistoryFromManifestVersion(pluginId, manifestAbs);
   }
 
@@ -1088,7 +1094,7 @@ export class PluginMarketplaceService {
     plugin: PluginMarketplaceItem,
     version: string,
     onProgress?: (event: InstallerProgressEvent) => void,
-    opts: { cleanupFreshOnFailure?: boolean } = {},
+    opts: { cleanupFreshOnFailure?: boolean; validateCatalogMetadata?: boolean } = {},
   ): Promise<string> {
     const pluginDir = this.artifactStore.installDirFor(plugin.id);
     let extracted = false;
@@ -1114,7 +1120,18 @@ export class PluginMarketplaceService {
         await writeFile(manifestFile, `${JSON.stringify(manifest, null, 2)}\n`);
         extractedFiles.push("plugin.json");
       } else {
-        await this.assertInstalledManifestMatchesCatalog(plugin, version, manifestFile, pluginDir);
+        const validateCatalogMetadata =
+          opts.validateCatalogMetadata ??
+          (!plugin.version ||
+            plugin.version === version ||
+            version === "latest");
+        await this.assertInstalledManifestMatchesCatalog(
+          plugin,
+          version,
+          manifestFile,
+          pluginDir,
+          validateCatalogMetadata,
+        );
       }
       await this.finalizeInstall(plugin.id, {
         version,
@@ -1177,6 +1194,7 @@ export class PluginMarketplaceService {
     version: string,
     manifestFile: string,
     pluginDir: string,
+    validateCatalogMetadata = true,
   ): Promise<void> {
     try {
       const raw = await readFile(manifestFile, "utf-8");
@@ -1198,30 +1216,32 @@ export class PluginMarketplaceService {
         );
       }
 
-      const expectedInstallPolicy = plugin.installPolicy ?? "user";
-      const actualInstallPolicy = manifest.installPolicy ?? "user";
-      if (actualInstallPolicy !== expectedInstallPolicy) {
-        throw new Error(
-          `plugin "${plugin.id}" artifact manifest installPolicy mismatch: expected "${expectedInstallPolicy}", got "${String(actualInstallPolicy)}"`,
-        );
-      }
+      if (validateCatalogMetadata) {
+        const expectedInstallPolicy = plugin.installPolicy ?? "user";
+        const actualInstallPolicy = manifest.installPolicy ?? "user";
+        if (actualInstallPolicy !== expectedInstallPolicy) {
+          throw new Error(
+            `plugin "${plugin.id}" artifact manifest installPolicy mismatch: expected "${expectedInstallPolicy}", got "${String(actualInstallPolicy)}"`,
+          );
+        }
 
-      const expectedPluginAccess = plugin.pluginAccess ?? undefined;
-      const actualPluginAccess = manifest.pluginAccess ?? undefined;
-      if (JSON.stringify(actualPluginAccess) !== JSON.stringify(expectedPluginAccess)) {
-        throw new Error(
-          `plugin "${plugin.id}" artifact manifest pluginAccess does not match the catalog-approved grant`,
-        );
-      }
+        const expectedPluginAccess = plugin.pluginAccess ?? undefined;
+        const actualPluginAccess = manifest.pluginAccess ?? undefined;
+        if (JSON.stringify(actualPluginAccess) !== JSON.stringify(expectedPluginAccess)) {
+          throw new Error(
+            `plugin "${plugin.id}" artifact manifest pluginAccess does not match the catalog-approved grant`,
+          );
+        }
 
-      const expectedDependencies = normalizeDependencies(plugin);
-      const actualDependencies = normalizeDependencies(
-        manifest as Pick<PluginManifest, "dependencies">,
-      );
-      if (JSON.stringify(actualDependencies) !== JSON.stringify(expectedDependencies)) {
-        throw new Error(
-          `plugin "${plugin.id}" artifact manifest dependencies do not match the catalog-approved dependencies`,
+        const expectedDependencies = normalizeDependencies(plugin);
+        const actualDependencies = normalizeDependencies(
+          manifest as Pick<PluginManifest, "dependencies">,
         );
+        if (JSON.stringify(actualDependencies) !== JSON.stringify(expectedDependencies)) {
+          throw new Error(
+            `plugin "${plugin.id}" artifact manifest dependencies do not match the catalog-approved dependencies`,
+          );
+        }
       }
     } catch (err) {
       await rm(pluginDir, { recursive: true, force: true });

@@ -25,7 +25,11 @@ import { plog, PluginPhase } from "../../plugins/lifecycle-log.js";
 import { redactFsPath, redactAuditPayload } from "../../audit/dlp-filter.js";
 import { LVIS_TOKEN_NAMES } from "../../shared/plugin-ui-tokens.js";
 import { pluginAssetUrlFromRealPath } from "../../main/plugin-asset-protocol.js";
-import { startInstalledPluginWithLifecycle, withPluginInstallLock } from "../../plugins/install-lifecycle.js";
+import {
+  installMarketplacePluginWithLifecycle,
+  startInstalledPluginWithLifecycle,
+  withPluginInstallLock,
+} from "../../plugins/install-lifecycle.js";
 import { uninstallPluginWithLifecycle } from "../../plugins/uninstall-lifecycle.js";
 import { lvisHome } from "../../shared/lvis-home.js";
 const log = createLogger("lvis");
@@ -371,54 +375,35 @@ export function registerPluginsHandlers(deps: IpcDeps): void {
 
   ipcMain.handle("lvis:plugins:install", async (e, pluginId: string) => {
     if (!validateSender(e)) { auditUnauthorized(auditLogger, "lvis:plugins:install", e); return UNAUTHORIZED_FRAME; }
-    return withPluginInstallLock(pluginId, async () => {
-      const lifecycleSlug = pluginId;
-      let result: { pluginId: string; installed: true } | null = null;
-      // IPC is pure transport — actor decisions live inside
-      // PluginMarketplaceService.install (catalog → admin escalation).
-      // deployment-guard §7.3: "IPC 핸들러에서 actor를 직접 받지 말 것 —
-      // 'it-admin'은 ManagedPluginInstaller 같은 내부 플로우에서만 사용."
-      try {
-        broadcastPluginLifecycleEvent("lvis:plugins:install-progress", { slug: lifecycleSlug, phase: "installing" });
-        result = await pluginMarketplace.install(pluginId, (evt) => {
-          if (evt.phase === "downloading") {
-            broadcastPluginLifecycleEvent("lvis:plugins:install-progress", {
-              slug: lifecycleSlug,
-              phase: "downloading",
-              bytesDownloaded: evt.bytesDownloaded,
-              bytesTotal: evt.bytesTotal,
-            });
-          } else {
-            broadcastPluginLifecycleEvent("lvis:plugins:install-progress", { slug: lifecycleSlug, phase: evt.phase });
-          }
-        });
-        await startInstalledPluginWithLifecycle({
-          pluginId: result.pluginId,
-          source: "marketplace",
-          rollbackMode: "marketplace",
-          pluginRuntime,
-          pluginMarketplace,
-          broadcastInstallProgress: (payload) =>
-            broadcastPluginLifecycleEvent("lvis:plugins:install-progress", {
-              ...payload,
-              slug: lifecycleSlug,
-            }),
-          emitPluginInstalled: (payload) => emitHostEvent("plugin.installed", payload),
-          refreshPluginNotifications,
-          log,
-        });
-      } catch (err) {
-        const message = errMessage(err) || "addPlugin failed";
-        broadcastPluginLifecycleEvent("lvis:plugins:install-result", {
-          slug: lifecycleSlug,
-          success: false,
-          error: message,
-        });
-        throw err;
-      }
-      broadcastPluginLifecycleEvent("lvis:plugins:install-result", { slug: lifecycleSlug, success: true });
-      return result;
-    });
+    const lifecycleSlug = pluginId;
+    let result: { pluginId: string; installed: true } | null = null;
+    // IPC is pure transport — actor decisions live inside
+    // PluginMarketplaceService.install (catalog → admin escalation).
+    // deployment-guard §7.3: "IPC 핸들러에서 actor를 직접 받지 말 것 —
+    // 'it-admin'은 ManagedPluginInstaller 같은 내부 플로우에서만 사용."
+    try {
+      result = await installMarketplacePluginWithLifecycle({
+        requestedPluginId: pluginId,
+        eventSlug: lifecycleSlug,
+        pluginRuntime,
+        pluginMarketplace,
+        broadcastInstallProgress: (payload) =>
+          broadcastPluginLifecycleEvent("lvis:plugins:install-progress", payload),
+        emitPluginInstalled: (payload) => emitHostEvent("plugin.installed", payload),
+        refreshPluginNotifications,
+        log,
+      });
+    } catch (err) {
+      const message = errMessage(err) || "addPlugin failed";
+      broadcastPluginLifecycleEvent("lvis:plugins:install-result", {
+        slug: lifecycleSlug,
+        success: false,
+        error: message,
+      });
+      throw err;
+    }
+    broadcastPluginLifecycleEvent("lvis:plugins:install-result", { slug: lifecycleSlug, success: true });
+    return result;
   });
 
   ipcMain.handle("lvis:plugins:uninstall", async (e, pluginId: string) => {
