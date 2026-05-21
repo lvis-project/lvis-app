@@ -1,5 +1,26 @@
 # Changelog
 
+## v0.2.6 — 2026-05-21
+
+### 개선
+
+- **도구 입력/출력 pretty JSON 표시** (PR #1075) — 일반 도구 카드와 compacted/verbatim 원문 확장 UI 가 공통 payload formatter 를 사용해 JSON 입력/출력을 보기 쉬운 pretty JSON 으로 표시한다.
+- **Azure Foundry private endpoint LLM fetch 정렬** (PR #1077) — packaged build 의 Azure Foundry SDK 호출이 Electron `net.fetch` 기반 safe fetch 를 사용해 Chromium host resolver/private endpoint mapping 을 공유한다. 적용 범위는 검증된 Azure Foundry HTTPS host 로 제한하고, non-Azure provider 는 기존 fetch 경로를 유지한다.
+
+### 안정성 / 패키징
+
+- **Windows NSIS installer smoke 추가** (PR #1075/#1076) — Build Installers Windows job 이 `win-unpacked` 실행뿐 아니라 setup.exe silent install, installed `LVIS.exe` launch, silent uninstall 을 검증한다.
+- **Windows update uninstall 데이터 보존** (PR #1075) — update uninstall 경로의 `${isUpdated}` / `/KEEP_APP_DATA` / `--updated` 신호를 custom NSIS uninstall hook 이 존중해 사용자 데이터를 보존한다.
+- **Windows smoke cleanup race 안정화** (PR #1076) — Chromium temp cleanup EBUSY 와 NSIS uninstall 완료 직후 파일 제거 race 를 smoke 실패로 오인하지 않도록 외부 cleanup 경계를 기다리거나 best-effort 로 처리한다.
+
+### 검증
+
+- PR #1075: focused ToolGroupCard/CompactedToolResult Vitest 2 files / 41 pass, `bun run typecheck`, `bun run build:renderer`, remote CI success.
+- PR #1076: PR CI success, Build Installers PR-head run success across macOS/Linux/Windows including Windows NSIS install/launch/uninstall smoke.
+- PR #1077: safe LLM fetch / provider fetch injection focused Vitest, `bun run typecheck`, `bun run build`, remote CI success.
+
+---
+
 ## v0.2.5 — 2026-05-21
 
 ### 개선
