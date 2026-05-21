@@ -373,6 +373,80 @@ describe("PluginMarketplaceService install()", () => {
     expect(fetchSignatureEnvelope).toHaveBeenCalledTimes(2);
   });
 
+  it("does not compare explicit prior-version installs against the latest catalog artifact hash", async () => {
+    const signingKey = freshEd25519();
+    mockedPublisherKeys.getBundledPublicKeys.mockReturnValue({
+      "test-v1": signingKey.publicKey,
+    });
+    const pluginId = "versioned-plugin";
+    const priorZip = makePluginZip({
+      id: pluginId,
+      name: "Versioned Plugin",
+      version: "0.4.16",
+      entry: "./dist/hostPlugin.js",
+      tools: ["ping"],
+      installPolicy: "user",
+    });
+    const latestZip = makePluginZip({
+      id: pluginId,
+      name: "Versioned Plugin",
+      version: "0.4.18",
+      entry: "./dist/hostPlugin.js",
+      tools: ["ping"],
+      installPolicy: "admin",
+    });
+    const priorSha = createHash("sha256").update(priorZip).digest("hex");
+    const latestSha = createHash("sha256").update(latestZip).digest("hex");
+    const plugin: PluginMarketplaceItem = {
+      id: pluginId,
+      slug: pluginId,
+      name: "Versioned Plugin",
+      description: "A versioned test plugin",
+      version: "0.4.18",
+      packageSpec: "@lvis/versioned-plugin@0.4.18",
+      packageName: "@lvis/versioned-plugin",
+      tools: ["ping"],
+      installPolicy: "admin",
+      artifactSha256: latestSha,
+    };
+    const downloadArtifact = vi.fn(async (_slug: string, version: string) => {
+      const body = version === "0.4.16" ? priorZip : latestZip;
+      return {
+        body,
+        sha256Header: createHash("sha256").update(body).digest("hex"),
+        status: 200,
+      };
+    });
+    const fetchSignatureEnvelope = vi.fn(async (_slug: string, version: string) =>
+      makeEnvelope(version === "0.4.16" ? priorZip : latestZip, signingKey.privateKey),
+    );
+    const fetcher: MarketplaceFetcher & {
+      downloadArtifact: typeof downloadArtifact;
+      fetchSignatureEnvelope: typeof fetchSignatureEnvelope;
+    } = {
+      listPlugins: async () => [plugin],
+      getPluginDetail: async () => plugin,
+      downloadVersion: async () => {
+        throw new Error("downloadVersion should not be called for signed installs");
+      },
+      downloadArtifact,
+      fetchSignatureEnvelope,
+    };
+
+    const { service } = makeService(fetcher);
+    await service.installPlugin(pluginId, "0.4.16");
+
+    const manifest = JSON.parse(
+      await readFile(join(installedDir, pluginId, "plugin.json"), "utf-8"),
+    );
+    const receipt = JSON.parse(
+      await readFile(join(cacheRoot, pluginId, "install-receipt.json"), "utf-8"),
+    ) as { artifactSha256: string | null };
+    expect(manifest.version).toBe("0.4.16");
+    expect(receipt.artifactSha256).toBe(priorSha);
+    expect(receipt.artifactSha256).not.toBe(latestSha);
+  });
+
   it("rejects zip-slip entries from signed marketplace artifacts", async () => {
     const signingKey = freshEd25519();
     mockedPublisherKeys.getBundledPublicKeys.mockReturnValue({

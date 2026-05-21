@@ -262,6 +262,44 @@ describe("PluginArtifactStore — cacheVersionFromManifest", () => {
     }
   });
 
+  it("snapshots registry metadata next to the cached manifest", async () => {
+    const tmp = makeTmpDir();
+    try {
+      const store = makeStore(tmp);
+      const sourceManifest = resolve(tmp, "live", "plugin.json");
+      await mkdir(resolve(tmp, "live"), { recursive: true });
+      await writeFile(
+        sourceManifest,
+        JSON.stringify({ id: "acme", version: "1.2.3", name: "acme", entry: "x" }),
+      );
+
+      await store.cacheVersionFromManifest("acme", sourceManifest, {
+        installSource: "admin",
+        bundleRefs: ["work-assistant"],
+        approvedPluginAccess: { plugins: [{ pluginId: "work-assistant", tools: ["task_list"] }] },
+      });
+
+      const snapshot = await store.readCachedRegistryEntrySnapshot("acme", "1.2.3");
+      expect(snapshot).toEqual({
+        installSource: "admin",
+        bundleRefs: ["work-assistant"],
+        approvedPluginAccess: { plugins: [{ pluginId: "work-assistant", tools: ["task_list"] }] },
+      });
+    } finally {
+      rmSync(tmp, { recursive: true, force: true });
+    }
+  });
+
+  it("returns null when a cached registry metadata snapshot is absent", async () => {
+    const tmp = makeTmpDir();
+    try {
+      const store = makeStore(tmp);
+      expect(await store.readCachedRegistryEntrySnapshot("acme", "1.2.3")).toBeNull();
+    } finally {
+      rmSync(tmp, { recursive: true, force: true });
+    }
+  });
+
   it("is best-effort: missing source manifest does not throw", async () => {
     const tmp = makeTmpDir();
     try {

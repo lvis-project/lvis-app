@@ -156,7 +156,7 @@ export interface UpdateCheckInput {
 /**
  * S8 — plugin update detection. Fires an IPC event `marketplace:updates-available`
  * to the renderer when newer catalog versions are found. Runs once at boot
- * and on a configurable interval (default 6h). Feature-flagged.
+ * and on a configurable interval (default 10m). Feature-flagged.
  */
 export function wireUpdateCheck(input: UpdateCheckInput): void {
   const { mainWindow, settingsService, marketplaceFetcher, pluginPaths } = input;
@@ -169,7 +169,7 @@ export function wireUpdateCheck(input: UpdateCheckInput): void {
   const updateDetector = new PluginUpdateDetector(registryPath, marketplaceFetcher, {
     canaryOptIn: marketplaceSettings?.canaryOptIn ?? false,
   });
-  const DEFAULT_UPDATE_INTERVAL_MS = 6 * 60 * 60 * 1000; // 6 hours
+  const DEFAULT_UPDATE_INTERVAL_MS = 10 * 60 * 1000; // 10 minutes
 
   let lastBroadcastKey = "";
   const runUpdateCheck = async () => {
