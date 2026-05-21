@@ -92,6 +92,32 @@ describe("installer smoke and packaging discipline", () => {
     expect(packageFootprint).toContain("uv license notice missing");
   });
 
+  it("keeps packaged Windows smoke launch flags on the same launcher SOT", () => {
+    const smokePackagedApp = readRepoFile("scripts/smoke-packaged-app.mjs");
+    const smokeWindowsNsis = readRepoFile("scripts/smoke-windows-nsis-installer.mjs");
+    const electronLaunchOptions = readRepoFile("scripts/lib/electron-launch-options.mjs");
+
+    expect(smokePackagedApp).toContain("prepareElectronLaunchEnv");
+    expect(smokePackagedApp).toContain("prepareElectronLaunchArgs");
+    expect(smokePackagedApp).not.toContain('from "./electron-flags.mjs";');
+    expect(smokeWindowsNsis).toContain("prepareElectronLaunchEnv");
+    expect(smokeWindowsNsis).toContain("prepareElectronLaunchArgs");
+    expect(smokeWindowsNsis).not.toContain("const WINDOWS_SAFE_GPU_FLAGS = [");
+    expect(smokeWindowsNsis).not.toContain('const SANDBOX_BYPASS_FLAG = "--no-sandbox";');
+    expect(electronLaunchOptions).toContain("prepareElectronLaunchEnv");
+    expect(electronLaunchOptions).toContain("prepareElectronLaunchArgs");
+    expect(electronLaunchOptions).toContain("SANDBOX_BYPASS_FLAG");
+  });
+
+  it("derives packaged runtime script footprint from the build asset SOT", () => {
+    const packageFootprint = readRepoFile("scripts/check-package-footprint.mjs");
+
+    expect(packageFootprint).toContain('import { resolveBuildAssets } from "./lib/build-assets.mjs";');
+    expect(packageFootprint).toContain('resolveBuildAssets(root, "runtime-script")');
+    expect(packageFootprint).not.toContain('"/dist/scripts/electron-flags.mjs",');
+    expect(packageFootprint).not.toContain('"/dist/scripts/uv-targets.mjs",');
+  });
+
   it("keeps electron-builder host runtime resources aligned with the runtime asset inventory", async () => {
     const packageJson = JSON.parse(readRepoFile("package.json")) as {
       build?: { extraResources?: Array<{ from?: string; to?: string }> };

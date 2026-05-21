@@ -33,14 +33,47 @@ import { HybridRetriever } from "../main/hybrid-retriever.js";
 import { MockCloudIndexAdapter } from "../main/cloud-index-adapter.js";
 import { IdleSchedulerService, adaptPowerMonitor, type WorkerClientLite } from "../main/idle-scheduler.js";
 import { fetchPublicHttpResponse } from "../core/network-guard.js";
+import { demoHostMapContainsHost } from "../main/demo-host-resolver.js";
 import { createLogger } from "../lib/logger.js";
 const log = createLogger("lvis");
 
-function webFetchPrivateNetworkApprovalCacheKey(input: unknown): string | undefined {
+type DemoHostResolverDeps = {
+  demoActiveVendor?: string;
+  demoHostMap?: string;
+};
+
+function isDemoHostResolverMappedUrl(
+  input: unknown,
+  deps?: DemoHostResolverDeps,
+): boolean {
   const args = input && typeof input === "object"
     ? input as Record<string, unknown>
     : {};
-  if (args.allowPrivateNetwork !== true || typeof args.url !== "string") {
+  return (
+    deps?.demoActiveVendor === "azure-foundry" &&
+    typeof args.url === "string" &&
+    demoHostMapContainsHost(deps.demoHostMap, args.url)
+  );
+}
+
+function webFetchRequiresPrivateNetwork(
+  input: unknown,
+  deps?: DemoHostResolverDeps,
+): boolean {
+  const args = input && typeof input === "object"
+    ? input as Record<string, unknown>
+    : {};
+  return args.allowPrivateNetwork === true || isDemoHostResolverMappedUrl(input, deps);
+}
+
+function webFetchPrivateNetworkApprovalCacheKey(
+  input: unknown,
+  deps?: DemoHostResolverDeps,
+): string | undefined {
+  const args = input && typeof input === "object"
+    ? input as Record<string, unknown>
+    : {};
+  if (!webFetchRequiresPrivateNetwork(input, deps) || typeof args.url !== "string") {
     return undefined;
   }
   try {
@@ -54,11 +87,11 @@ function webFetchPrivateNetworkApprovalCacheKey(input: unknown): string | undefi
   }
 }
 
-function webFetchCategoryForInput(input: unknown): "read" | "network" {
-  const args = input && typeof input === "object"
-    ? input as Record<string, unknown>
-    : {};
-  return args.allowPrivateNetwork === true ? "network" : "read";
+function webFetchCategoryForInput(
+  input: unknown,
+  deps?: DemoHostResolverDeps,
+): "read" | "network" {
+  return webFetchRequiresPrivateNetwork(input, deps) ? "network" : "read";
 }
 
 export function registerRequestPluginMetaTool(toolRegistry: ToolRegistry): void {
@@ -223,6 +256,12 @@ export interface WorkflowToolDeps {
   skillApprovalsStore?: SkillApprovalsStore;
   /** C2(d): ApprovalGate for first-use skill approval modal. */
   getApprovalGate?: () => ApprovalGate | undefined;
+  /** Electron network-stack fetch used when host-resolver-rules are active. */
+  networkFetch?: typeof fetch;
+  /** Captured demo vendor before packaged env scrub. */
+  demoActiveVendor?: string;
+  /** Captured Chromium host-resolver-rules map before packaged env scrub. */
+  demoHostMap?: string;
   emitAgentSpawn?: (event: AgentSpawnEvent) => void;
   emitSkillLoad?: (event: SkillLoadEvent) => void;
 }
@@ -232,6 +271,7 @@ export function registerBuiltinTools(
   settingsService: SettingsService,
   workflowDeps?: WorkflowToolDeps,
 ): void {
+  const networkFetch = workflowDeps?.networkFetch ?? fetch;
   const builtins: Tool[] = [
     createDynamicTool({
       name: "web_search",
@@ -263,7 +303,7 @@ export function registerBuiltinTools(
         const apiKey = settingsService.getSecret(`web.apiKey.${ws.provider}`);
         try {
           if (ws.provider === "tavily" && apiKey) {
-            const res = await fetch("https://api.tavily.com/search", {
+            const res = await networkFetch("https://api.tavily.com/search", {
               method: "POST",
               headers: { "Content-Type": "application/json" },
               body: JSON.stringify({ api_key: apiKey, query, search_depth: "basic", max_results: count }),
@@ -279,7 +319,7 @@ export function registerBuiltinTools(
             };
           }
           if (ws.provider === "serper" && apiKey) {
-            const res = await fetch("https://google.serper.dev/search", {
+            const res = await networkFetch("https://google.serper.dev/search", {
               method: "POST",
               headers: { "X-API-KEY": apiKey, "Content-Type": "application/json" },
               body: JSON.stringify({ q: query, num: count }),
@@ -295,7 +335,7 @@ export function registerBuiltinTools(
             };
           }
           // DuckDuckGo HTML 검색
-          const ddgRes = await fetch(`https://html.duckduckgo.com/html/?q=${encodeURIComponent(query)}`, {
+          const ddgRes = await networkFetch(`https://html.duckduckgo.com/html/?q=${encodeURIComponent(query)}`, {
             method: "POST",
             headers: { "User-Agent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36", "Content-Type": "application/x-www-form-urlencoded" },
             body: `q=${encodeURIComponent(query)}`,
@@ -334,9 +374,9 @@ export function registerBuiltinTools(
       description: "특정 URL의 웹 페이지 내용을 읽어 텍스트로 변환합니다.",
       source: "builtin",
       category: "read",
-      categoryForInput: webFetchCategoryForInput,
+      categoryForInput: (input) => webFetchCategoryForInput(input, workflowDeps),
       isReadOnly: () => true,
-      approvalCacheKey: webFetchPrivateNetworkApprovalCacheKey,
+      approvalCacheKey: (input) => webFetchPrivateNetworkApprovalCacheKey(input, workflowDeps),
       jsonSchema: {
         type: "object",
         properties: {
@@ -352,13 +392,14 @@ export function registerBuiltinTools(
       execute: async (rawInput) => {
         const args = (rawInput ?? {}) as Record<string, unknown>;
         const url = args.url as string;
-        const allowPrivateNetwork = args.allowPrivateNetwork === true;
+        const allowPrivateNetwork = webFetchRequiresPrivateNetwork(rawInput, workflowDeps);
         try {
           // SSRF guard: route through NetworkGuard so private / loopback /
           // link-local / metadata endpoints are rejected per hop (incl. redirect
           // chain) and bad schemes / embedded credentials are refused up front.
           const response = await fetchPublicHttpResponse(url, {
             allowPrivateNetworks: allowPrivateNetwork,
+            fetchImpl: networkFetch,
             headers: { "User-Agent": "LVIS-Assistant/0.1.0" },
           });
           const html = await response.text();

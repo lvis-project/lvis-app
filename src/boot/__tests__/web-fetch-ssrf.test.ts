@@ -1,4 +1,4 @@
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 import { registerBuiltinTools } from "../tools.js";
 import { ToolRegistry } from "../../tools/registry.js";
 import { registerStandardCategories } from "../../permissions/category-registry.js";
@@ -12,13 +12,13 @@ import { PermissionManager } from "../../permissions/permission-manager.js";
  * reserved ranges — no live network required.
  */
 describe("web_fetch SSRF guard", () => {
-  function makeWebFetchTool() {
+  function makeWebFetchTool(workflowDeps?: Parameters<typeof registerBuiltinTools>[2]) {
     const registry = new ToolRegistry();
     const settingsStub = {
       get: () => ({ provider: "duckduckgo" }),
       getSecret: () => null,
     } as unknown as Parameters<typeof registerBuiltinTools>[1];
-    registerBuiltinTools(registry, settingsStub);
+    registerBuiltinTools(registry, settingsStub, workflowDeps);
     const tool = registry
       .getVisibleTools()
       .find((t) => t.name === "web_fetch");
@@ -100,5 +100,54 @@ describe("web_fetch SSRF guard", () => {
     );
     expect(result.isError).toBe(true);
     expect(result.output).toMatch(/non-public address/i);
+  });
+
+  it("uses the injected network fetch so host resolver rules apply to tool calls", async () => {
+    const networkFetch = vi.fn(async () =>
+      new Response("<html><body>resolved through electron</body></html>", { status: 200 }),
+    );
+    const tool = makeWebFetchTool({ networkFetch: networkFetch as typeof fetch });
+
+    const result = await tool.execute(
+      { url: "http://10.185.177.209/page", allowPrivateNetwork: true },
+      {} as never,
+    );
+
+    expect(result.isError).toBe(false);
+    expect(networkFetch).toHaveBeenCalledOnce();
+    expect(result.output).toContain("resolved through electron");
+  });
+
+  it("treats demo host-resolver mapped hosts as private-network approvals", async () => {
+    const tool = makeWebFetchTool({
+      demoActiveVendor: "azure-foundry",
+      demoHostMap: "example.test.openai.azure.com=10.182.192.10",
+    });
+    const input = { url: "https://example.test.openai.azure.com/openai/v1/" };
+
+    expect(tool.categoryForInput?.(input)).toBe("network");
+    expect(tool.approvalCacheKey?.(input)).toBe(
+      "private-network:https://example.test.openai.azure.com",
+    );
+  });
+
+  it("allows mapped private addresses only through the private-network path", async () => {
+    const networkFetch = vi.fn(async () =>
+      new Response("<html><body>mapped private address</body></html>", { status: 200 }),
+    );
+    const tool = makeWebFetchTool({
+      networkFetch: networkFetch as typeof fetch,
+      demoActiveVendor: "azure-foundry",
+      demoHostMap: "10.185.177.209=10.182.192.10",
+    });
+
+    const result = await tool.execute(
+      { url: "http://10.185.177.209/page" },
+      {} as never,
+    );
+
+    expect(result.isError).toBe(false);
+    expect(networkFetch).toHaveBeenCalledOnce();
+    expect(result.output).toContain("mapped private address");
   });
 });
