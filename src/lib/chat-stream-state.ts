@@ -50,7 +50,7 @@ export type StreamEvent = {
    * `compact_notice` (completion). Allows showing a "자동 압축 중..." indicator
    * during the blocking LLM compaction call.
    */
-  triggerSource?: "estimate" | "actual-tokensIn" | "message-count" | "manual" | "force-recover";
+  triggerSource?: "estimate" | "actual-tokensIn" | "manual" | "force-recover";
   estimatedBefore?: number;
   preflight?: number;
   /** Compact trigger on `compact_notice` — token preflight vs manual command. */
