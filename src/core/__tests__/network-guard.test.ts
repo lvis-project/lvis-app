@@ -355,6 +355,24 @@ describe("fetchPublicHttpResponse (mocked fetch)", () => {
     expect(fetchMock).toHaveBeenCalledTimes(2);
   });
 
+  it("scopes private-IP redirects through the allowPrivateNetworks predicate", async () => {
+    lookupMock.mockResolvedValue([{ address: "93.184.216.34", family: 4 }]);
+    const fetchMock = vi.fn().mockResolvedValueOnce(
+      new Response(null, {
+        status: 302,
+        headers: { location: "http://10.0.0.1/internal" },
+      }),
+    );
+    vi.stubGlobal("fetch", fetchMock);
+
+    await expect(
+      fetchPublicHttpResponse("https://start.example.com/", {
+        allowPrivateNetworks: (url) => url.hostname === "start.example.com",
+      }),
+    ).rejects.toThrowError(/non-public/);
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+  });
+
   it("aborts after too many redirects", async () => {
     lookupMock.mockResolvedValue([{ address: "93.184.216.34", family: 4 }]);
     const fetchMock = vi.fn(async (url: string) => {

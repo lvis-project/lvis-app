@@ -13,7 +13,9 @@ import {
   applyDemoHostResolverRules,
   demoHostMapContainsHost,
   demoFoundryHostMapFingerprint,
+  getAppliedDemoHostResolverFingerprint,
   validateDemoFoundryHostMap,
+  _testOnlyResetAppliedDemoHostResolverFingerprint,
   _testOnlyParseHostMap,
   _testOnlyBuildHostResolverRules,
 } from "../demo-host-resolver.js";
@@ -32,6 +34,7 @@ beforeEach(() => {
   process.env = { ...ORIGINAL_ENV };
   delete process.env.LVIS_DEMO_VENDOR;
   delete process.env.LVIS_DEMO_HOST_MAP;
+  _testOnlyResetAppliedDemoHostResolverFingerprint();
 });
 
 afterEach(() => {
@@ -53,6 +56,9 @@ describe("applyDemoHostResolverRules — env gating", () => {
       "host-resolver-rules",
       "MAP example.test.openai.azure.com 10.182.192.10,MAP example.test.services.ai.azure.com 10.182.192.11",
     );
+    expect(getAppliedDemoHostResolverFingerprint()).toBe(
+      "example.test.openai.azure.com|MAP example.test.openai.azure.com 10.182.192.10,MAP example.test.services.ai.azure.com 10.182.192.11",
+    );
   });
 
   it("skips the whole mapping when any target is outside the approved demo subnet", () => {
@@ -65,6 +71,7 @@ describe("applyDemoHostResolverRules — env gating", () => {
     });
     expect(result).toBe(false);
     expect(app.commandLine.appendSwitch).not.toHaveBeenCalled();
+    expect(getAppliedDemoHostResolverFingerprint()).toBeNull();
   });
 
   it("skips mapping when the Azure Foundry endpoint is missing", () => {
