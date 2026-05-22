@@ -14,19 +14,7 @@ import { describe, it, expect } from "vitest";
 
 import { SystemPromptBuilder } from "../system-prompt-builder.js";
 import { ToolRegistry } from "../../tools/registry.js";
-
-function makeBuilder(): SystemPromptBuilder {
-  return new SystemPromptBuilder({
-    memoryManager: {
-      getAgentsMd: () => "",
-      getLvisMd: () => "",
-      getMemoryIndex: () => "",
-      getUserPreferences: () => "",
-      getMemoryContext: () => "",
-    } as never,
-    toolRegistry: new ToolRegistry(),
-  });
-}
+import { makeSystemPromptBuilder } from "./test-helpers.js";
 
 function makeMemoryBuilder(memoryIndex: string): SystemPromptBuilder {
   return new SystemPromptBuilder({
@@ -52,7 +40,7 @@ describe("SystemPromptBuilder — Conversation Continuity Guard", () => {
   });
 
   it("injects the selected role preset as a per-turn system prompt section", () => {
-    const builder = makeBuilder();
+    const builder = makeSystemPromptBuilder();
     builder.setActiveRolePrompt({ name: "Reviewer", systemPromptAdd: "Review carefully." });
     const prompt = builder.build();
     expect(prompt).toContain('<lvis-active-role-prompt name="Reviewer">');
@@ -60,7 +48,7 @@ describe("SystemPromptBuilder — Conversation Continuity Guard", () => {
   });
 
   it("prioritizes direct plugin tool calls over agent_spawn", () => {
-    const builder = makeBuilder();
+    const builder = makeSystemPromptBuilder();
     const prompt = builder.build();
     expect(prompt).toContain("플러그인 UI/업무보드 직접 조회");
     expect(prompt).toContain("agent_spawn 을 쓰지 마세요");
@@ -69,7 +57,7 @@ describe("SystemPromptBuilder — Conversation Continuity Guard", () => {
   });
 
   it("emits the continuity guard instead of hidden marker output instructions", () => {
-    const builder = makeBuilder();
+    const builder = makeSystemPromptBuilder();
     const prompt = builder.build();
     expect(prompt).toContain("## 대화 연속성 출력 규칙");
     expect(prompt).toContain("최종 답변에는 사용자에게 보여줄 본문만 작성하세요");
@@ -79,7 +67,7 @@ describe("SystemPromptBuilder — Conversation Continuity Guard", () => {
   });
 
   it("describes checkpoint handling as host-owned next-turn preflight", () => {
-    const builder = makeBuilder();
+    const builder = makeSystemPromptBuilder();
     const prompt = builder.build();
     expect(prompt).toContain("체크포인트와 세션 요약은 host 가 다음 턴 시작 전 context preflight 에서 자동 처리합니다");
     expect(prompt).not.toContain("### Title 정책");
@@ -87,28 +75,28 @@ describe("SystemPromptBuilder — Conversation Continuity Guard", () => {
   });
 
   it("injects current session title when set", () => {
-    const builder = makeBuilder();
+    const builder = makeSystemPromptBuilder();
     builder.setSessionTitle("MS Graph 메일 조회");
     const prompt = builder.build();
     expect(prompt).toContain('현재 세션 제목: "MS Graph 메일 조회"');
   });
 
   it("omits session title line when title is null", () => {
-    const builder = makeBuilder();
+    const builder = makeSystemPromptBuilder();
     builder.setSessionTitle(null);
     const prompt = builder.build();
     expect(prompt).not.toContain("현재 세션 제목:");
   });
 
   it("omits session title line when title is empty string (normalised to null)", () => {
-    const builder = makeBuilder();
+    const builder = makeSystemPromptBuilder();
     builder.setSessionTitle("");
     const prompt = builder.build();
     expect(prompt).not.toContain("현재 세션 제목:");
   });
 
   it("updates session title between turns", () => {
-    const builder = makeBuilder();
+    const builder = makeSystemPromptBuilder();
     builder.setSessionTitle("첫 번째 제목");
     expect(builder.build()).toContain('현재 세션 제목: "첫 번째 제목"');
     builder.setSessionTitle("두 번째 제목 — 업데이트");
@@ -117,7 +105,7 @@ describe("SystemPromptBuilder — Conversation Continuity Guard", () => {
   });
 
   it("clears session title when set back to null", () => {
-    const builder = makeBuilder();
+    const builder = makeSystemPromptBuilder();
     builder.setSessionTitle("어떤 제목");
     expect(builder.build()).toContain("현재 세션 제목:");
     builder.setSessionTitle(null);
@@ -129,7 +117,7 @@ describe("SystemPromptBuilder — Conversation Continuity Guard", () => {
 
 describe("SystemPromptBuilder — sanitizeTitle via setSessionTitle", () => {
   it("strips newline characters (\\n, \\r) from title", () => {
-    const builder = makeBuilder();
+    const builder = makeSystemPromptBuilder();
     builder.setSessionTitle("제목\n주입\r시도");
     const prompt = builder.build();
     // newlines replaced by spaces and trimmed — result should not contain raw newlines inside quotes
@@ -139,7 +127,7 @@ describe("SystemPromptBuilder — sanitizeTitle via setSessionTitle", () => {
   });
 
   it("strips double-quote characters from title", () => {
-    const builder = makeBuilder();
+    const builder = makeSystemPromptBuilder();
     builder.setSessionTitle('MS Graph "이메일" 조회');
     const prompt = builder.build();
     // double quotes inside title are replaced with spaces
@@ -148,7 +136,7 @@ describe("SystemPromptBuilder — sanitizeTitle via setSessionTitle", () => {
   });
 
   it("strips backslash characters from title", () => {
-    const builder = makeBuilder();
+    const builder = makeSystemPromptBuilder();
     builder.setSessionTitle("C:\\Users\\test 파일");
     const prompt = builder.build();
     expect(prompt).not.toContain("C:\\Users");
@@ -156,7 +144,7 @@ describe("SystemPromptBuilder — sanitizeTitle via setSessionTitle", () => {
   });
 
   it("strips angle brackets (<>) to prevent prompt-template injection", () => {
-    const builder = makeBuilder();
+    const builder = makeSystemPromptBuilder();
     builder.setSessionTitle("<script>악의적 태그</script>");
     const prompt = builder.build();
     expect(prompt).not.toContain("<script>");
@@ -166,7 +154,7 @@ describe("SystemPromptBuilder — sanitizeTitle via setSessionTitle", () => {
   });
 
   it("caps title at 50 characters", () => {
-    const builder = makeBuilder();
+    const builder = makeSystemPromptBuilder();
     const longTitle = "가".repeat(60);
     builder.setSessionTitle(longTitle);
     const prompt = builder.build();
@@ -176,7 +164,7 @@ describe("SystemPromptBuilder — sanitizeTitle via setSessionTitle", () => {
   });
 
   it("whitespace-only title after sanitize is normalised to null (no injection)", () => {
-    const builder = makeBuilder();
+    const builder = makeSystemPromptBuilder();
     // A title that is all spaces should become empty after trim → treated as null
     builder.setSessionTitle("   ");
     const prompt = builder.build();
@@ -184,7 +172,7 @@ describe("SystemPromptBuilder — sanitizeTitle via setSessionTitle", () => {
   });
 
   it("title with only dangerous chars normalised to null after strip+trim", () => {
-    const builder = makeBuilder();
+    const builder = makeSystemPromptBuilder();
     // Only angle brackets and newlines — after strip all that remains is spaces → null
     builder.setSessionTitle("<>\r\n<>");
     const prompt = builder.build();
@@ -194,7 +182,7 @@ describe("SystemPromptBuilder — sanitizeTitle via setSessionTitle", () => {
 
 describe("SystemPromptBuilder — Section 8 Rolling Summary Preamble (always-on)", () => {
   it("Section 9.9 is always present (no gate)", () => {
-    const builder = makeBuilder();
+    const builder = makeSystemPromptBuilder();
     const prompt = builder.build();
     expect(prompt).toContain("## 대화 연속성 출력 규칙");
     expect(prompt).toContain("체크포인트 마커를 출력하지 마세요");
@@ -202,7 +190,7 @@ describe("SystemPromptBuilder — Section 8 Rolling Summary Preamble (always-on)
   });
 
   it("Section 8 (Rolling Summary Preamble) appears when preamble set", () => {
-    const builder = makeBuilder();
+    const builder = makeSystemPromptBuilder();
     builder.setSummaryPreamble("이전 세션 요약 내용입니다.");
     const prompt = builder.build();
     expect(prompt).toContain("<prior-context-summary>");
@@ -210,7 +198,7 @@ describe("SystemPromptBuilder — Section 8 Rolling Summary Preamble (always-on)
   });
 
   it("Section 8 is absent when preamble is null (first-turn / fresh session)", () => {
-    const builder = makeBuilder();
+    const builder = makeSystemPromptBuilder();
     const prompt = builder.build();
     expect(prompt).not.toContain("<prior-context-summary>");
   });

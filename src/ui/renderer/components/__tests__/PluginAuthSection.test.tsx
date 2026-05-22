@@ -4,6 +4,7 @@ import { render, screen, waitFor, fireEvent } from "@testing-library/react";
 import { PluginAuthSection } from "../PluginAuthSection.js";
 import type { LvisApi, PluginAuthSummary } from "../../types.js";
 import type { PluginAuthState } from "../../hooks/use-plugin-auth-status.js";
+import { makeMockLvisApi } from "../../../../../test/renderer/mock-lvis-api.js";
 
 const baseAuth: PluginAuthSummary = {
   label: "Microsoft 계정",
@@ -12,13 +13,15 @@ const baseAuth: PluginAuthSummary = {
   logoutTool: "ms_signout",
 };
 
-function makeApi(overrides?: Partial<LvisApi>): LvisApi {
+function pluginAuthSectionApi(overrides?: Partial<LvisApi>): LvisApi {
+  const { api } = makeMockLvisApi();
   const callPluginMethod = vi.fn(async () => ({ authenticated: true }));
-  return {
+  Object.assign(api, {
     callPluginMethod,
     onPluginEvent: vi.fn(() => () => undefined),
     ...overrides,
-  } as unknown as LvisApi;
+  });
+  return api as unknown as LvisApi;
 }
 
 beforeEach(() => {
@@ -27,7 +30,7 @@ beforeEach(() => {
 
 describe("PluginAuthSection", () => {
   it("renders 미인증 badge + 로그인 button when state is unauthed", () => {
-    const api = makeApi();
+    const api = pluginAuthSectionApi();
     render(
       <PluginAuthSection
         api={api}
@@ -46,7 +49,7 @@ describe("PluginAuthSection", () => {
   it("renders 인증됨 badge + account + 로그아웃 button when state is authed", () => {
     render(
       <PluginAuthSection
-        api={makeApi()}
+        api={pluginAuthSectionApi()}
         pluginId="ms-graph"
         pluginName="ms-graph"
         auth={baseAuth}
@@ -63,7 +66,7 @@ describe("PluginAuthSection", () => {
   it("hides 로그아웃 button + shows hint when manifest does not declare logoutTool", () => {
     render(
       <PluginAuthSection
-        api={makeApi()}
+        api={pluginAuthSectionApi()}
         pluginId="example-corp-portal"
         pluginName="example-corp-portal"
         auth={{ statusTool: "portal_status", loginTool: "portal_login" }}
@@ -77,7 +80,7 @@ describe("PluginAuthSection", () => {
   });
 
   it("invokes loginTool + onRefresh when 로그인 clicked", async () => {
-    const api = makeApi();
+    const api = pluginAuthSectionApi();
     const onRefresh = vi.fn();
     render(
       <PluginAuthSection
@@ -97,7 +100,7 @@ describe("PluginAuthSection", () => {
   });
 
   it("opens provided login UI instead of invoking loginTool", async () => {
-    const api = makeApi();
+    const api = pluginAuthSectionApi();
     const onOpenLoginUi = vi.fn(async () => ({ ok: true }));
     const onRefresh = vi.fn();
     render(
@@ -122,7 +125,7 @@ describe("PluginAuthSection", () => {
   });
 
   it("renders an error when the provided login UI opener returns ok=false", async () => {
-    const api = makeApi();
+    const api = pluginAuthSectionApi();
     const onOpenLoginUi = vi.fn(async () => ({ ok: false as const, error: "window denied" }));
     const consoleSpy = vi.spyOn(console, "error").mockImplementation(() => undefined);
     try {
@@ -150,7 +153,7 @@ describe("PluginAuthSection", () => {
   });
 
   it("invokes logoutTool + onRefresh when 로그아웃 clicked", async () => {
-    const api = makeApi();
+    const api = pluginAuthSectionApi();
     const onRefresh = vi.fn();
     render(
       <PluginAuthSection
@@ -172,7 +175,7 @@ describe("PluginAuthSection", () => {
   it("falls back to pluginName when auth.label is empty", () => {
     render(
       <PluginAuthSection
-        api={makeApi()}
+        api={pluginAuthSectionApi()}
         pluginId="x"
         pluginName="Cool Plugin"
         auth={{ statusTool: "x_status", loginTool: "x_login" }}
@@ -186,7 +189,7 @@ describe("PluginAuthSection", () => {
   it("renders error badge when state is error", () => {
     render(
       <PluginAuthSection
-        api={makeApi()}
+        api={pluginAuthSectionApi()}
         pluginId="x"
         pluginName="x"
         auth={baseAuth}

@@ -12,16 +12,9 @@ vi.mock("../../../../components/ui/scroll-area.js", () => ({
 }));
 
 import { PermissionsTab } from "../PermissionsTab.js";
+import { makeHookTrustRow as hook } from "./test-helpers.js";
 import type { HookTrustRow } from "../../types.js";
 
-function hook(name: string): HookTrustRow {
-  return {
-    fileName: name,
-    hookType: "pre",
-    sha256: "a".repeat(64),
-    state: "disabled",
-  };
-}
 
 function installApi(disabledBatches: HookTrustRow[][]) {
   const hookTrustList = vi.fn(async () => {

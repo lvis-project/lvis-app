@@ -11,11 +11,11 @@ import { describe, it, expect, vi } from "vitest";
 import { fireEvent, render } from "@testing-library/react";
 import { useState } from "react";
 import { LlmTab, type FallbackEntry } from "../LlmTab.js";
+import { makeMockLvisApi } from "../../../../../test/renderer/mock-lvis-api.js";
 
-function makeApi() {
-  return {
-    deleteApiKey: vi.fn(async () => ({ ok: true })),
-  } as unknown as Parameters<typeof LlmTab>[0]["api"];
+function llmTabApi() {
+  const { api } = makeMockLvisApi();
+  return api as unknown as Parameters<typeof LlmTab>[0]["api"];
 }
 
 function Harness({ initialAuthMode }: { initialAuthMode: "manual" | "login" }) {
@@ -33,7 +33,7 @@ function Harness({ initialAuthMode }: { initialAuthMode: "manual" | "login" }) {
   const [fallbackOpen, setFallbackOpen] = useState(false);
   return (
     <LlmTab
-      api={makeApi()}
+      api={llmTabApi()}
       vendor={vendor}
       setVendor={setVendor}
       baseUrl={baseUrl}

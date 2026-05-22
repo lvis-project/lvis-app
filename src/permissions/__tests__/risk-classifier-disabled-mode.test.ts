@@ -12,26 +12,9 @@
 import { describe, it, expect } from "vitest";
 import {
   DisabledRiskClassifier,
-  type ToolInvocationContext,
 } from "../reviewer/risk-classifier.js";
-import { detectSandboxCapability } from "../sandbox-capability.js";
+import { makeRiskClassifierContext as ctx } from "./test-helpers.js";
 
-const ALLOWED = ["/Users/ken/work", "/Users/ken/.lvis"];
-
-function ctx(overrides: Partial<ToolInvocationContext>): ToolInvocationContext {
-  return {
-    toolName: "test_tool",
-    source: "builtin",
-    category: "write",
-    pathFields: ["path"],
-    trustOrigin: "user-keyboard",
-    finalInput: {},
-    allowedDirectories: ALLOWED,
-    sensitivePathsAdjacent: [],
-    sandboxCapability: detectSandboxCapability(),
-    ...overrides,
-  };
-}
 
 describe("DisabledRiskClassifier — issue #664 pass-through", () => {
   const c = new DisabledRiskClassifier();

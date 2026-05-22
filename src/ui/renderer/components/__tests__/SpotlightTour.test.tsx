@@ -7,6 +7,7 @@ import {
   type SpotlightTourApi,
 } from "../SpotlightTour.js";
 import type { TourScenario } from "../../onboarding/default-tour-scenarios.js";
+import { makeMockLvisApi } from "../../../../../test/renderer/mock-lvis-api.js";
 
 /**
  * Tutorial-C — SpotlightTour component tests.
@@ -19,43 +20,22 @@ import type { TourScenario } from "../../onboarding/default-tour-scenarios.js";
  *   - Keyboard jump out of range is ignored (no crash, no desync).
  */
 
-function makeApi(): {
+function spotlightTourHarness(): {
   api: SpotlightTourApi;
   fireStart: (scenarioId: string) => void;
   markComplete: ReturnType<typeof vi.fn>;
   dismiss: ReturnType<typeof vi.fn>;
 } {
-  let onStartHandler: ((p: { scenarioId: string }) => void) | null = null;
-  const markComplete = vi.fn(async () => ({ ok: true as const }));
-  const dismiss = vi.fn(async () => ({ ok: true as const }));
-  const api: SpotlightTourApi = {
-    tour: {
-      getState: vi.fn(async () => ({
-        ok: true as const,
-        state: {
-          lastSeenScenario: null,
-          completedScenarios: [],
-          dismissedAt: null,
-        },
-      })),
-      markComplete,
-      dismiss,
-      onStart: (handler) => {
-        onStartHandler = handler;
-        return () => {
-          onStartHandler = null;
-        };
-      },
-    },
-  };
+  const { api, emitTourStart } = makeMockLvisApi();
+  const tour = api.tour as unknown as SpotlightTourApi["tour"];
   return {
-    api,
+    api: { tour },
     fireStart: (scenarioId: string) =>
       act(() => {
-        onStartHandler?.({ scenarioId });
+        emitTourStart(scenarioId);
       }),
-    markComplete,
-    dismiss,
+    markComplete: tour.markComplete as ReturnType<typeof vi.fn>,
+    dismiss: tour.dismiss as ReturnType<typeof vi.fn>,
   };
 }
 
@@ -75,7 +55,7 @@ const FIXTURE_REGISTRY: Readonly<Record<string, TourScenario>> = Object.freeze({
 
 describe("SpotlightTour", () => {
   it("renders nothing until tour.onStart fires", () => {
-    const { api } = makeApi();
+    const { api } = spotlightTourHarness();
     const { queryByTestId } = render(
       <SpotlightTour api={api} scenarios={FIXTURE_REGISTRY} />,
     );
@@ -83,7 +63,7 @@ describe("SpotlightTour", () => {
   });
 
   it("renders the active scenario when onStart fires", async () => {
-    const { api, fireStart } = makeApi();
+    const { api, fireStart } = spotlightTourHarness();
     const { findByTestId } = render(
       <SpotlightTour api={api} scenarios={FIXTURE_REGISTRY} />,
     );
@@ -93,7 +73,7 @@ describe("SpotlightTour", () => {
   });
 
   it("advances on '다음' click", async () => {
-    const { api, fireStart } = makeApi();
+    const { api, fireStart } = spotlightTourHarness();
     const { findByTestId } = render(
       <SpotlightTour api={api} scenarios={FIXTURE_REGISTRY} />,
     );
@@ -107,7 +87,7 @@ describe("SpotlightTour", () => {
   });
 
   it("ESC dismisses + calls tour.dismiss exactly once", async () => {
-    const { api, fireStart, dismiss } = makeApi();
+    const { api, fireStart, dismiss } = spotlightTourHarness();
     const { findByTestId, queryByTestId } = render(
       <SpotlightTour
         api={api}
@@ -128,7 +108,7 @@ describe("SpotlightTour", () => {
   });
 
   it("numeric keys jump to the matching step (1..N)", async () => {
-    const { api, fireStart } = makeApi();
+    const { api, fireStart } = spotlightTourHarness();
     const { findByTestId } = render(
       <SpotlightTour api={api} scenarios={FIXTURE_REGISTRY} />,
     );
@@ -142,7 +122,7 @@ describe("SpotlightTour", () => {
   });
 
   it("ignores out-of-range numeric keys without desyncing", async () => {
-    const { api, fireStart } = makeApi();
+    const { api, fireStart } = spotlightTourHarness();
     const { findByTestId } = render(
       <SpotlightTour api={api} scenarios={FIXTURE_REGISTRY} />,
     );
@@ -156,7 +136,7 @@ describe("SpotlightTour", () => {
   });
 
   it("ArrowLeft moves back one step", async () => {
-    const { api, fireStart } = makeApi();
+    const { api, fireStart } = spotlightTourHarness();
     const { findByTestId } = render(
       <SpotlightTour api={api} scenarios={FIXTURE_REGISTRY} />,
     );
@@ -173,7 +153,7 @@ describe("SpotlightTour", () => {
   });
 
   it("final step '완료' triggers tour.markComplete and closes", async () => {
-    const { api, fireStart, markComplete } = makeApi();
+    const { api, fireStart, markComplete } = spotlightTourHarness();
     const { findByTestId, queryByTestId } = render(
       <SpotlightTour api={api} scenarios={FIXTURE_REGISTRY} />,
     );
@@ -193,7 +173,7 @@ describe("SpotlightTour", () => {
   });
 
   it("backdrop click dismisses the tour", async () => {
-    const { api, fireStart, dismiss } = makeApi();
+    const { api, fireStart, dismiss } = spotlightTourHarness();
     const { findByTestId, queryByTestId } = render(
       <SpotlightTour api={api} scenarios={FIXTURE_REGISTRY} />,
     );
@@ -209,7 +189,7 @@ describe("SpotlightTour", () => {
   });
 
   it("opens immediately when initialScenarioId is provided", async () => {
-    const { api } = makeApi();
+    const { api } = spotlightTourHarness();
     const { findByTestId } = render(
       <SpotlightTour
         api={api}
@@ -230,7 +210,7 @@ describe("SpotlightTour", () => {
     modal.setAttribute("role", "dialog");
     modal.setAttribute("data-state", "open");
     document.body.appendChild(modal);
-    const { api, fireStart } = makeApi();
+    const { api, fireStart } = spotlightTourHarness();
     const { queryByTestId, findByTestId } = render(
       <SpotlightTour api={api} scenarios={FIXTURE_REGISTRY} />,
     );
@@ -277,7 +257,7 @@ describe("SpotlightTour", () => {
     const composer = document.createElement("input");
     composer.id = "composer-fake";
     document.body.appendChild(composer);
-    const { api, fireStart } = makeApi();
+    const { api, fireStart } = spotlightTourHarness();
     const { findByTestId } = render(
       <SpotlightTour api={api} scenarios={REGISTRY} />,
     );
@@ -312,7 +292,7 @@ describe("SpotlightTour", () => {
       media: query,
     });
     try {
-      const { api, fireStart } = makeApi();
+      const { api, fireStart } = spotlightTourHarness();
       const { findByTestId } = render(
         <SpotlightTour api={api} scenarios={FIXTURE_REGISTRY} />,
       );
@@ -342,7 +322,7 @@ describe("SpotlightTour", () => {
   // spec advances the tour to step 1 and then re-fires the same scenario
   // id; the tour must stay on step 1.
   it("ignores a duplicate tour.start for the already-active scenario", async () => {
-    const { api, fireStart } = makeApi();
+    const { api, fireStart } = spotlightTourHarness();
     const { findByTestId } = render(
       <SpotlightTour api={api} scenarios={FIXTURE_REGISTRY} />,
     );

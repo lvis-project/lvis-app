@@ -130,6 +130,18 @@ function makeSpawnFailMock(exitCode = 1, stderrMsg = "some error") {
   return proc as unknown as ReturnType<typeof cpMock.spawn>;
 }
 
+function setupPythonRuntimeSetupSpawns(): void {
+  mockedAccess
+    .mockRejectedValueOnce(Object.assign(new Error("ENOENT"), { code: "ENOENT" }))
+    .mockResolvedValueOnce(undefined)
+    .mockResolvedValueOnce(undefined);
+  mockedSpawn
+    .mockReturnValueOnce(makeSpawnMock("uv 0.7.3\n"))
+    .mockReturnValueOnce(makeSpawnMock(""))
+    .mockReturnValueOnce(makeSpawnMock(""))
+    .mockReturnValueOnce(makeSpawnMock("3.12.3\n"));
+}
+
 // ─── 테스트 대상 import (mock 설정 이후) ──────────────────────────────────────
 // dynamic import를 사용하지 않고 상단에서 import → vi.mock hoisting에 의존
 import { PythonRuntimeBootstrapper } from "../python-runtime.js";
@@ -664,18 +676,6 @@ describe("PythonRuntimeBootstrapper", () => {
   // ─── issue #713: uv cache co-located with venv (cross-volume hardlink fix) ─
 
   describe("issue #713 — uv cache cross-volume hardlink fix", () => {
-    function setupSetupSpawns(): void {
-      mockedAccess
-        .mockRejectedValueOnce(Object.assign(new Error("ENOENT"), { code: "ENOENT" })) // sentinel 없음
-        .mockResolvedValueOnce(undefined) // uv binary 존재
-        .mockResolvedValueOnce(undefined); // lock file 존재
-      mockedSpawn
-        .mockReturnValueOnce(makeSpawnMock("uv 0.7.3\n"))
-        .mockReturnValueOnce(makeSpawnMock(""))
-        .mockReturnValueOnce(makeSpawnMock(""))
-        .mockReturnValueOnce(makeSpawnMock("3.12.3\n"));
-    }
-
     function uvSpawnEnvs(): NodeJS.ProcessEnv[] {
       return mockedSpawn.mock.calls
         .filter(([bin]) => {
@@ -688,7 +688,7 @@ describe("PythonRuntimeBootstrapper", () => {
     it("기본적으로 UV_CACHE_DIR을 LVIS runtime uv-cache 로 설정한다", async () => {
       delete process.env.UV_CACHE_DIR;
       delete process.env.UV_LINK_MODE;
-      setupSetupSpawns();
+      setupPythonRuntimeSetupSpawns();
 
       const bootstrapper = new PythonRuntimeBootstrapper({
         pluginManifestPaths: ["/installed/local-indexer/plugin.json"],
@@ -708,7 +708,7 @@ describe("PythonRuntimeBootstrapper", () => {
       process.env.UV_CACHE_DIR = userCache;
       process.env.UV_LINK_MODE = "copy";
       try {
-        setupSetupSpawns();
+        setupPythonRuntimeSetupSpawns();
 
         const bootstrapper = new PythonRuntimeBootstrapper({
           pluginManifestPaths: ["/installed/local-indexer/plugin.json"],
@@ -729,7 +729,7 @@ describe("PythonRuntimeBootstrapper", () => {
 
     it("ensureDirs() 가 UV_CACHE_DIR 경로를 0o700 권한으로 mkdir 한다", async () => {
       delete process.env.UV_CACHE_DIR;
-      setupSetupSpawns();
+      setupPythonRuntimeSetupSpawns();
 
       const mkdirCalls: Array<{ path: string; mode: number | undefined }> = [];
       vi.mocked(fsMock.mkdir).mockImplementation(async (target, opts) => {
@@ -903,20 +903,8 @@ describe("PythonRuntimeBootstrapper", () => {
   // ─── issue #717: ~/.lvis/runtime/* file permissions hardening ────────────
 
   describe("issue #717 — runtime file permission hardening (0o600)", () => {
-    function setupSetupSpawns(): void {
-      mockedAccess
-        .mockRejectedValueOnce(Object.assign(new Error("ENOENT"), { code: "ENOENT" })) // sentinel 없음
-        .mockResolvedValueOnce(undefined) // uv binary 존재
-        .mockResolvedValueOnce(undefined); // lock file 존재
-      mockedSpawn
-        .mockReturnValueOnce(makeSpawnMock("uv 0.7.3\n"))
-        .mockReturnValueOnce(makeSpawnMock(""))
-        .mockReturnValueOnce(makeSpawnMock(""))
-        .mockReturnValueOnce(makeSpawnMock("3.12.3\n"));
-    }
-
     it("writeSentinel은 mode: 0o600으로 writeFile을 호출한다", async () => {
-      setupSetupSpawns();
+      setupPythonRuntimeSetupSpawns();
 
       const writeFileCalls: Array<{ path: string; opts: unknown }> = [];
       vi.mocked(fsMock.writeFile).mockImplementation(async (target, _data, opts) => {
@@ -939,7 +927,7 @@ describe("PythonRuntimeBootstrapper", () => {
     });
 
     it("log()는 mode: 0o600으로 appendFile을 호출한다", async () => {
-      setupSetupSpawns();
+      setupPythonRuntimeSetupSpawns();
 
       const appendFileCalls: Array<{ path: string; opts: unknown }> = [];
       vi.mocked(fsMock.appendFile).mockImplementation(async (target, _data, opts) => {

@@ -7,6 +7,7 @@
 
 import { describe, it, expect, vi, beforeEach } from "vitest";
 import { fakeLlmSettings } from "../../../shared/__tests__/fake-llm-settings.js";
+import { invokeRegisteredHandler } from "../../../__tests__/test-helpers.js";
 
 // ─── Mock electron ────────────────────────────────────────────────────────────
 const handlers = new Map<string, (...args: unknown[]) => unknown>();
@@ -166,9 +167,7 @@ async function setupHandlers(
 }
 
 function invoke(channel: string, ...args: unknown[]): unknown {
-  const fn = handlers.get(channel);
-  if (!fn) throw new Error(`No handler registered for: ${channel}`);
-  return fn(null, ...args);
+  return invokeRegisteredHandler(handlers, channel, ...args);
 }
 
 // ─── Tests ────────────────────────────────────────────────────────────────────

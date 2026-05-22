@@ -24,6 +24,7 @@
  */
 import "./setup.js";
 import { describe, it, expect } from "vitest";
+import { relativeLuminance } from "./helpers.js";
 import { render } from "@testing-library/react";
 import { readFileSync } from "node:fs";
 import { AssistantCard } from "../../src/ui/renderer/components/AssistantCard.js";
@@ -82,12 +83,6 @@ function hslTripleToRgb(triple: string): [number, number, number] {
   return [r + m, g + m, b + m];
 }
 
-/** WCAG 2.2 relative luminance from sRGB tuple. */
-function relativeLuminance([r, g, b]: [number, number, number]): number {
-  const channel = (c: number): number =>
-    c <= 0.03928 ? c / 12.92 : Math.pow((c + 0.055) / 1.055, 2.4);
-  return 0.2126 * channel(r) + 0.7152 * channel(g) + 0.0722 * channel(b);
-}
 
 /** WCAG contrast ratio in 1.0..21.0. */
 function contrastRatio(fgHsl: string, bgHsl: string): number {

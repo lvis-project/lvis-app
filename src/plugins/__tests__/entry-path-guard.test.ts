@@ -5,78 +5,61 @@
  * the rest of the registry loads normally.
  */
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
-import { mkdir, rm, writeFile } from "node:fs/promises";
+import { rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { PluginRuntime, resolvePluginEntryPath } from "../runtime.js";
-import { mkdtempSync } from "node:fs";
+import { resolvePluginEntryPath } from "../runtime.js";
+import {
+  makeTestPluginRuntime,
+  makeTestPluginRuntimeFixture,
+  writeTestPlugin,
+  writeTestPluginRegistry,
+  type TestPluginRuntimeFixture,
+} from "./test-helpers.js";
 
 describe("PluginRuntime — entry path allowlist", () => {
-  let testDir: string;
-  let installedDir: string;
-  let registryPath: string;
+  let fixture: TestPluginRuntimeFixture;
   let auditEntries: Array<{ level: string; message: string; data?: unknown }>;
 
   beforeEach(async () => {
-    testDir = mkdtempSync(join(tmpdir(), "lvis-entry-"));
-    installedDir = join(testDir, "plugins", "installed");
-    await mkdir(installedDir, { recursive: true });
-    registryPath = join(testDir, "plugins", "registry.json");
+    fixture = await makeTestPluginRuntimeFixture({ prefix: "lvis-entry-" });
     auditEntries = [];
   });
 
   afterEach(async () => {
-    await rm(testDir, { recursive: true, force: true });
+    await rm(fixture.rootDir, { recursive: true, force: true });
   });
 
-  async function writeManifest(
+  async function installManifestFixture(
     id: string,
     entry: string,
     opts: { writeEntryFile?: boolean } = {},
   ): Promise<void> {
-    const pluginDir = join(installedDir, id);
-    await mkdir(pluginDir, { recursive: true });
     const toolName = `${id.replace(/-/g, "_")}_ping`;
-    if (opts.writeEntryFile) {
-      await writeFile(
-        join(pluginDir, "entry.mjs"),
-        `export default async function createPlugin(ctx) {
-  return { handlers: { ${toolName}: async () => "pong" }, start: async () => {}, stop: async () => {} };
-}`,
-        "utf-8",
-      );
-    }
-    const manifest = {
+    await writeTestPlugin(fixture, {
       id,
-      name: id,
-      version: "1.0.0",
-      description: "Test fixture.",
-      publisher: "Test fixture",
       entry,
       tools: [toolName],
-    };
-    await writeFile(join(pluginDir, "plugin.json"), JSON.stringify(manifest), "utf-8");
+      entrySource: opts.writeEntryFile
+        ? `export default async function createPlugin(ctx) {
+  return { handlers: { ${toolName}: async () => "pong" }, start: async () => {}, stop: async () => {} };
+}`
+        : undefined,
+    });
   }
 
-  async function writeRegistry(ids: string[]): Promise<void> {
-    await writeFile(
-      registryPath,
-      JSON.stringify({
-        version: 1,
-        plugins: ids.map((id) => ({
-          id,
-          manifestPath: join(installedDir, id, "plugin.json"),
-        })),
-      }),
-      "utf-8",
+  async function registerPlugins(ids: string[]): Promise<void> {
+    await writeTestPluginRegistry(
+      fixture,
+      ids.map((id) => ({
+        id,
+        manifestPath: join(fixture.pluginsRoot, id, "plugin.json"),
+      })),
     );
   }
 
-  function makeRuntime(): PluginRuntime {
-    return new PluginRuntime({
-      hostRoot: testDir,
-      registryPath,
-      pluginsRoot: installedDir,
+  function runtimeWithAudit() {
+    return makeTestPluginRuntime(fixture, {
       auditLog: (level, message, data) => {
         auditEntries.push({ level, message, data });
       },
@@ -88,10 +71,10 @@ describe("PluginRuntime — entry path allowlist", () => {
     const origError = console.error;
     console.error = (msg: unknown) => { errors.push(String(msg)); };
     try {
-      await writeManifest("p-evil", "../../../etc/passwd.js");
-      await writeRegistry(["p-evil"]);
+      await installManifestFixture("p-evil", "../../../etc/passwd.js");
+      await registerPlugins(["p-evil"]);
 
-      const runtime = makeRuntime();
+      const runtime = runtimeWithAudit();
       await runtime.load();
 
       // Plugin dropped fail-soft.
@@ -111,10 +94,10 @@ describe("PluginRuntime — entry path allowlist", () => {
     const origError = console.error;
     console.error = () => {};
     try {
-      await writeManifest("p-abs", "/etc/passwd.js");
-      await writeRegistry(["p-abs"]);
+      await installManifestFixture("p-abs", "/etc/passwd.js");
+      await registerPlugins(["p-abs"]);
 
-      const runtime = makeRuntime();
+      const runtime = runtimeWithAudit();
       await runtime.load();
 
       expect(runtime.listPluginIds()).not.toContain("p-abs");
@@ -129,10 +112,10 @@ describe("PluginRuntime — entry path allowlist", () => {
   });
 
   it("accepts a normal relative entry inside the plugin dir", async () => {
-    await writeManifest("p-ok", "entry.mjs", { writeEntryFile: true });
-    await writeRegistry(["p-ok"]);
+    await installManifestFixture("p-ok", "entry.mjs", { writeEntryFile: true });
+    await registerPlugins(["p-ok"]);
 
-    const runtime = makeRuntime();
+    const runtime = runtimeWithAudit();
     await runtime.load();
 
     expect(runtime.listPluginIds()).toContain("p-ok");

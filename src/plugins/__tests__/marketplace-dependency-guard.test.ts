@@ -11,7 +11,7 @@ import { PluginMarketplaceService } from "../marketplace.js";
 import type { PluginMarketplaceItem } from "../types.js";
 import { MissingDependenciesError } from "../types.js";
 import { _resetForTest, setIsPackaged } from "../../boot/dev-flags.js";
-import { makeTestPluginPaths } from "./test-helpers.js";
+import { makeTestPluginMarketplaceService } from "./test-helpers.js";
 import { mkdtempSync } from "node:fs";
 
 // Minimal in-memory fetcher
@@ -117,21 +117,12 @@ describe("marketplace install dependency guard (S14)", () => {
     _resetForTest();
   });
 
-  function makeService(
-    fetcher: StubFetcher,
-  ): PluginMarketplaceService {
-    return new PluginMarketplaceService(
-      makeTestPluginPaths({ rootDir: tmpDir }),
-      fetcher as unknown as import("../marketplace-fetcher.js").MarketplaceFetcher,
-    );
-  }
-
   it("install succeeds when plugin has no requires", async () => {
     const item = makeItem("simple-plugin");
     const fetcher = new StubFetcher([item]);
     await setupTestDir(tmpDir, []);
 
-    const svc = makeService(fetcher);
+    const svc = makeTestPluginMarketplaceService(tmpDir, fetcher as never);
 
     // Should NOT throw MissingDependenciesError (it will fail later on npm install, which is fine)
     let threw: Error | null = null;
@@ -153,7 +144,7 @@ describe("marketplace install dependency guard (S14)", () => {
       JSON.stringify({ version: 1, plugins: [] }),
     );
 
-    const svc = makeService(fetcher);
+    const svc = makeTestPluginMarketplaceService(tmpDir, fetcher as never);
 
     await expect(svc.install("needs-meeting")).rejects.toBeInstanceOf(
       MissingDependenciesError,
@@ -195,7 +186,7 @@ describe("marketplace install dependency guard (S14)", () => {
       }),
     );
 
-    const svc = makeService(fetcher);
+    const svc = makeTestPluginMarketplaceService(tmpDir, fetcher as never);
 
     let err: MissingDependenciesError | null = null;
     try {
@@ -239,7 +230,7 @@ describe("marketplace install dependency guard (S14)", () => {
       }),
     );
 
-    const svc = makeService(fetcher);
+    const svc = makeTestPluginMarketplaceService(tmpDir, fetcher as never);
 
     let threw: Error | null = null;
     try {

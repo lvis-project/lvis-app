@@ -4,7 +4,7 @@
 import { describe, it, expect, vi, beforeEach } from "vitest";
 import { ApprovalGate } from "../approval-gate.js";
 import type { ApprovalRequest, ApprovalDecision } from "../approval-gate.js";
-import type { PolicyFile } from "../policy-store.js";
+import { makeTestPolicy } from "./test-helpers.js";
 
 // ─── Mock WebContents ─────────────────────────────────
 
@@ -45,16 +45,6 @@ function lastSentNonceHmac(wc: ReturnType<typeof makeMockWebContents>): {
   const calls = wc.send.mock.calls;
   const last = calls[calls.length - 1] as [string, ApprovalRequest];
   return { nonce: last[1].nonce as string, hmac: last[1].hmac as string };
-}
-
-function makePolicy(overrides?: Partial<PolicyFile>): PolicyFile {
-  return {
-    version: 1,
-    requireExplicitApproval: true,
-    managed: false,
-    updatedAt: new Date().toISOString(),
-    ...overrides,
-  };
 }
 
 // ─── Tests ───────────────────────────────────────────
@@ -282,7 +272,7 @@ describe("ApprovalGate", () => {
 
   it("requireExplicit=false가 페이로드에 포함됨 (policy.requireExplicitApproval=false)", async () => {
     const wc = makeMockWebContents();
-    const policy = makePolicy({ requireExplicitApproval: false });
+    const policy = makeTestPolicy({ requireExplicitApproval: false });
     const gate = new ApprovalGate(wc as never, policy);
     const req = makeRequest({ id: "req-nonstrict" });
 
@@ -297,7 +287,7 @@ describe("ApprovalGate", () => {
 
   it("setPolicy 호출 후 다음 request에 새 requireExplicit 반영", async () => {
     const wc = makeMockWebContents();
-    const strictPolicy = makePolicy({ requireExplicitApproval: true });
+    const strictPolicy = makeTestPolicy({ requireExplicitApproval: true });
     const gate = new ApprovalGate(wc as never, strictPolicy);
 
     // 첫 번째 request — strict
@@ -308,7 +298,7 @@ describe("ApprovalGate", () => {
     gate.resolve(req1.id, { requestId: req1.id, choice: "deny-once" });
 
     // policy 교체
-    gate.setPolicy(makePolicy({ requireExplicitApproval: false }));
+    gate.setPolicy(makeTestPolicy({ requireExplicitApproval: false }));
     expect(gate.policy.requireExplicitApproval).toBe(false);
 
     // 두 번째 request — lenient
@@ -393,7 +383,7 @@ describe("ApprovalGate", () => {
   it("sensitive path is hard-blocked even with mode=full_auto — dialog never shown", async () => {
     const wc = makeMockWebContents();
     // Even a permissive policy cannot unblock a sensitive path
-    const permissive = makePolicy({ requireExplicitApproval: false });
+    const permissive = makeTestPolicy({ requireExplicitApproval: false });
     const gate = new ApprovalGate(wc as never, permissive);
     const req = makeRequest({
       id: "req-sensitive",

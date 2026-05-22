@@ -8,6 +8,7 @@ import {
 } from "../../../../data/role-presets.js";
 import type { AppSettings, LvisApi } from "../../types.js";
 import { LEGACY_ROLE_PRESETS_STORAGE_KEY, useRolePresets } from "../use-role-presets.js";
+import { makeMockLvisApi } from "../../../../../test/renderer/mock-lvis-api.js";
 
 describe("useRolePresets", () => {
   afterEach(() => {
@@ -21,7 +22,7 @@ describe("useRolePresets", () => {
       { id: "legacy-reviewer", name: "Legacy Reviewer", systemPromptAdd: "Review legacy code." },
     ];
     localStorage.setItem(LEGACY_ROLE_PRESETS_STORAGE_KEY, JSON.stringify(legacyPresets));
-    const api = makeApi(cloneDefaultRolePresets());
+    const api = rolePresetsApi(cloneDefaultRolePresets());
 
     const { result } = renderHook(() => useRolePresets(api));
 
@@ -42,7 +43,7 @@ describe("useRolePresets", () => {
     const currentPresets = normalizeRolePresets([
       { id: "current", name: "Current", systemPromptAdd: "current" },
     ]);
-    const api = makeApi(currentPresets);
+    const api = rolePresetsApi(currentPresets);
 
     const { result } = renderHook(() => useRolePresets(api));
 
@@ -58,7 +59,7 @@ describe("useRolePresets", () => {
       LEGACY_ROLE_PRESETS_STORAGE_KEY,
       JSON.stringify([{ id: "legacy", name: "Legacy", systemPromptAdd: "legacy" }]),
     );
-    const api = makeApi(cloneDefaultRolePresets());
+    const api = rolePresetsApi(cloneDefaultRolePresets());
     vi.mocked(api.updateSettings).mockRejectedValueOnce(new Error("disk locked"));
 
     const { result } = renderHook(() => useRolePresets(api));
@@ -77,15 +78,15 @@ describe("useRolePresets", () => {
   });
 });
 
-function makeApi(initialRolePresets: RolePreset[]): LvisApi {
-  let settings = makeSettings(initialRolePresets);
+function rolePresetsApi(initialRolePresets: RolePreset[]): LvisApi {
+  let settings = rolePresetSettings(initialRolePresets);
   const handlers = new Set<(settings: AppSettings) => void>();
-
-  return {
+  const { api } = makeMockLvisApi({ settings });
+  Object.assign(api, {
     getSettings: vi.fn(async () => settings),
     updateSettings: vi.fn(async (patch: Partial<AppSettings>) => {
       if (patch.roles?.presets) {
-        settings = makeSettings(normalizeRolePresets(patch.roles.presets));
+        settings = rolePresetSettings(normalizeRolePresets(patch.roles.presets));
       }
       for (const handler of handlers) handler(settings);
       return settings;
@@ -94,10 +95,11 @@ function makeApi(initialRolePresets: RolePreset[]): LvisApi {
       handlers.add(handler);
       return () => handlers.delete(handler);
     }),
-  } as unknown as LvisApi;
+  });
+  return api as unknown as LvisApi;
 }
 
-function makeSettings(rolePresets: RolePreset[]): AppSettings {
+function rolePresetSettings(rolePresets: RolePreset[]): AppSettings {
   return {
     llm: {
       provider: "openai",

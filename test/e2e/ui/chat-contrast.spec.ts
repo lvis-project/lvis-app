@@ -1,6 +1,7 @@
 import { test, expect } from './fixtures';
 import { BUNDLE_IDS } from '../../../src/shared/theme-bundles.js';
 import type { BundleId } from '../../../src/shared/theme-bundles.js';
+import { relativeLuminance } from '../../contrast-helpers.js';
 
 /**
  * Chat-surface text contrast — WCAG AA regression guard for every shipped
@@ -44,11 +45,6 @@ function rgbToTuple(input: string): [number, number, number] {
   return [r, g, b];
 }
 
-function relativeLuminance([r, g, b]: [number, number, number]): number {
-  const channel = (c: number): number =>
-    c <= 0.03928 ? c / 12.92 : Math.pow((c + 0.055) / 1.055, 2.4);
-  return 0.2126 * channel(r) + 0.7152 * channel(g) + 0.0722 * channel(b);
-}
 
 function contrastRatio(fg: string, bg: string): number {
   const fl = relativeLuminance(rgbToTuple(fg));

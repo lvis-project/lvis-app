@@ -8,14 +8,16 @@ import {
   scenarioToPluginId,
   type PluginShowcaseApi,
 } from "../PluginShowcase.js";
+import { makeMockLvisApi } from "../../../../../test/renderer/mock-lvis-api.js";
 
-function makeApi(): {
+function pluginShowcaseApi(): {
   api: PluginShowcaseApi;
   tourStart: ReturnType<typeof vi.fn>;
 } {
-  const tourStart = vi.fn(async () => ({ ok: true }));
+  const { api } = makeMockLvisApi();
+  const tourStart = (api.tour as { start: ReturnType<typeof vi.fn> }).start;
   return {
-    api: { tour: { start: tourStart } },
+    api: api as unknown as PluginShowcaseApi,
     tourStart,
   };
 }
@@ -103,7 +105,7 @@ describe("scenarioToPluginId", () => {
 
 describe("PluginShowcase", () => {
   it("renders nothing when open=false", () => {
-    const { api } = makeApi();
+    const { api } = pluginShowcaseApi();
     render(
       <PluginShowcase
         open={false}
@@ -116,7 +118,7 @@ describe("PluginShowcase", () => {
   });
 
   it("shows empty state when installedPluginIds is empty", () => {
-    const { api } = makeApi();
+    const { api } = pluginShowcaseApi();
     render(
       <PluginShowcase
         open
@@ -130,7 +132,7 @@ describe("PluginShowcase", () => {
   });
 
   it("renders one card per installed plugin", () => {
-    const { api } = makeApi();
+    const { api } = pluginShowcaseApi();
     render(
       <PluginShowcase
         open
@@ -146,7 +148,7 @@ describe("PluginShowcase", () => {
   });
 
   it("'펼쳐보기 ↓' toggles inline scenario list without firing api.tour.start", () => {
-    const { api, tourStart } = makeApi();
+    const { api, tourStart } = pluginShowcaseApi();
     render(
       <PluginShowcase
         open
@@ -180,7 +182,7 @@ describe("PluginShowcase", () => {
   });
 
   it("toggling one card's scenarios does not affect siblings", () => {
-    const { api } = makeApi();
+    const { api } = pluginShowcaseApi();
     render(
       <PluginShowcase
         open
@@ -203,7 +205,7 @@ describe("PluginShowcase", () => {
   });
 
   it("'끝내기 →' fires onClose", () => {
-    const { api } = makeApi();
+    const { api } = pluginShowcaseApi();
     const onClose = vi.fn();
     render(
       <PluginShowcase
