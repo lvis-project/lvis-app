@@ -10,9 +10,15 @@
  * is never called.
  */
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
+import {
+  loadAuthHandlersForMockup as loadAuthModule,
+  makeAppIpcInvoker,
+  makeAuthLoginMockupDeps as makeDeps,
+} from "./test-helpers.js";
 
 const handlers = new Map<string, (...args: unknown[]) => unknown>();
 let _isPackaged = false;
+const invoke = makeAppIpcInvoker(handlers);
 
 vi.mock("electron", () => ({
   ipcMain: {
@@ -26,36 +32,6 @@ vi.mock("../../../boot/dev-flags.js", () => ({
   getIsPackaged: vi.fn(() => _isPackaged),
 }));
 
-function invoke(channel: string, ...args: unknown[]): Promise<unknown> {
-  const fn = handlers.get(channel);
-  if (!fn) throw new Error(`No handler registered for: ${channel}`);
-  return Promise.resolve(
-    fn(
-      { frameId: 0, processId: 0, frame: { url: "lvis://app" } } as never,
-      ...args,
-    ),
-  );
-}
-
-function makeDeps() {
-  return {
-    settingsService: {
-      get: vi.fn(() => ({
-        provider: "openai",
-        vendors: { openai: { model: "gpt-4o" } },
-      })),
-      getSecret: vi.fn(() => null),
-      setSecret: vi.fn(async () => undefined),
-      deleteSecret: vi.fn(async () => undefined),
-      patch: vi.fn(async () => undefined),
-      replaceLlm: vi.fn(async () => undefined),
-    },
-    auditLogger: { log: vi.fn() },
-    conversationLoop: { refreshProvider: vi.fn() },
-    rewireReviewerAgent: vi.fn(),
-    refreshActiveLlmWildcard: vi.fn(),
-  };
-}
 
 const ORIGINAL_ENV = { ...process.env };
 
@@ -71,12 +47,6 @@ afterEach(() => {
   process.env = { ...ORIGINAL_ENV };
 });
 
-async function loadAuthModule() {
-  const demoMod = await import("../../../main/demo-credentials.js");
-  demoMod.resetDemoCredentialsForTesting();
-  demoMod.captureDemoCredentials();
-  return await import("../auth.js");
-}
 
 describe("auth:login-mockup — full vendor config application (#893)", () => {
   it("applies only apiKey when no extra demo env vars are set (backward compat)", async () => {

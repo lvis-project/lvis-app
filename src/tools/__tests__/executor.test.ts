@@ -42,15 +42,9 @@ import {
   canonicalizePathForMatch,
   caseFoldForMatch,
 } from "../../permissions/sensitive-paths.js";
+import { makeMockWebContents } from "../../__tests__/test-helpers.js";
 
 // ─── Helpers ─────────────────────────────────────────
-
-function makeMockWebContents() {
-  return {
-    send: vi.fn(),
-    isDestroyed: vi.fn(() => false),
-  };
-}
 
 async function waitForApprovalPayload<T>(
   wc: ReturnType<typeof makeMockWebContents>,

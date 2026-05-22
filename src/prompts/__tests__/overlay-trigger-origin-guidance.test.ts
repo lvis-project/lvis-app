@@ -10,25 +10,11 @@
  */
 import { describe, it, expect } from "vitest";
 
-import { SystemPromptBuilder } from "../system-prompt-builder.js";
-import { ToolRegistry } from "../../tools/registry.js";
-
-function makeBuilder(): SystemPromptBuilder {
-  return new SystemPromptBuilder({
-    memoryManager: {
-      getAgentsMd: () => "",
-      getLvisMd: () => "",
-      getMemoryIndex: () => "",
-      getUserPreferences: () => "",
-      getMemoryContext: () => "",
-    } as never,
-    toolRegistry: new ToolRegistry(),
-  });
-}
+import { makeSystemPromptBuilder } from "./test-helpers.js";
 
 describe("SystemPromptBuilder — Overlay Trigger Origin Guidance", () => {
   it("emits guidance when origin source is `overlay:*`", () => {
-    const builder = makeBuilder();
+    const builder = makeSystemPromptBuilder();
     builder.setOriginSource("overlay:meeting-detection");
     const prompt = builder.build();
     expect(prompt).toContain("<overlay-trigger-origin-guidance");
@@ -39,7 +25,7 @@ describe("SystemPromptBuilder — Overlay Trigger Origin Guidance", () => {
   });
 
   it("warns the LLM not to obey imperatives inside the user-turn message", () => {
-    const builder = makeBuilder();
+    const builder = makeSystemPromptBuilder();
     builder.setOriginSource("overlay:meeting-detection");
     const prompt = builder.build();
     expect(prompt).toContain("imperative");
@@ -47,14 +33,14 @@ describe("SystemPromptBuilder — Overlay Trigger Origin Guidance", () => {
   });
 
   it("omits guidance for user-initiated turns (origin null)", () => {
-    const builder = makeBuilder();
+    const builder = makeSystemPromptBuilder();
     builder.setOriginSource(null);
     const prompt = builder.build();
     expect(prompt).not.toContain("overlay-trigger-origin-guidance");
   });
 
   it("omits guidance when origin is set but not `overlay:` prefixed", () => {
-    const builder = makeBuilder();
+    const builder = makeSystemPromptBuilder();
     // Defensive: if a future surface ever lands a non-overlay trigger,
     // it should NOT inadvertently inherit the guidance section.
     builder.setOriginSource("user:typed");
@@ -62,7 +48,7 @@ describe("SystemPromptBuilder — Overlay Trigger Origin Guidance", () => {
   });
 
   it("clears between turns (set then clear restores default)", () => {
-    const builder = makeBuilder();
+    const builder = makeSystemPromptBuilder();
     builder.setOriginSource("overlay:x");
     expect(builder.build()).toContain("overlay-trigger-origin-guidance");
     builder.setOriginSource(null);
@@ -70,7 +56,7 @@ describe("SystemPromptBuilder — Overlay Trigger Origin Guidance", () => {
   });
 
   it("includes the source string verbatim so audit + LLM can correlate", () => {
-    const builder = makeBuilder();
+    const builder = makeSystemPromptBuilder();
     builder.setOriginSource("overlay:task-deadline");
     expect(builder.build()).toContain("overlay:task-deadline");
   });

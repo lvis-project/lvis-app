@@ -7,20 +7,23 @@ import {
   type PersonalizedWelcomeApi,
 } from "../PersonalizedWelcome.js";
 import type { AiProviderPingIpcResult } from "../../../../shared/ai-provider-ping.js";
+import { makeMockLvisApi } from "../../../../../test/renderer/mock-lvis-api.js";
 
-function makeApi(
+function personalizedWelcomeApi(
   pingImpl: () => Promise<AiProviderPingIpcResult>,
 ): {
   api: PersonalizedWelcomeApi;
   pingAiProvider: ReturnType<typeof vi.fn>;
 } {
+  const { api } = makeMockLvisApi();
   const pingAiProvider = vi.fn(pingImpl);
-  return { api: { pingAiProvider }, pingAiProvider };
+  api.pingAiProvider = pingAiProvider;
+  return { api: api as unknown as PersonalizedWelcomeApi, pingAiProvider };
 }
 
 describe("PersonalizedWelcome", () => {
   it("renders nothing when open=false", () => {
-    const { api } = makeApi(async () => ({
+    const { api } = personalizedWelcomeApi(async () => ({
       configured: true,
       online: true,
       vendor: "azure-foundry",
@@ -34,7 +37,7 @@ describe("PersonalizedWelcome", () => {
   });
 
   it("uses neutral greeting when nickname is empty", () => {
-    const { api } = makeApi(
+    const { api } = personalizedWelcomeApi(
       async () =>
         new Promise(() => {
           // never resolves — stays in loading
@@ -47,7 +50,7 @@ describe("PersonalizedWelcome", () => {
   });
 
   it("greets the user by 호칭 when nickname is set", () => {
-    const { api } = makeApi(
+    const { api } = personalizedWelcomeApi(
       async () => new Promise(() => { /* pending */ }),
     );
     render(
@@ -64,7 +67,7 @@ describe("PersonalizedWelcome", () => {
   });
 
   it("reflects the user's intro line as a quoted welcome message", () => {
-    const { api } = makeApi(
+    const { api } = personalizedWelcomeApi(
       async () => new Promise(() => { /* pending */ }),
     );
     render(
@@ -82,7 +85,7 @@ describe("PersonalizedWelcome", () => {
   });
 
   it("ping loading: shows spinner row and disables continue button", () => {
-    const { api } = makeApi(
+    const { api } = personalizedWelcomeApi(
       async () => new Promise(() => { /* pending */ }),
     );
     render(<PersonalizedWelcome open api={api} onContinue={() => {}} />);
@@ -96,7 +99,7 @@ describe("PersonalizedWelcome", () => {
   });
 
   it("ping success: surfaces vendor/model/latency line and enables continue", async () => {
-    const { api } = makeApi(async () => ({
+    const { api } = personalizedWelcomeApi(async () => ({
       configured: true,
       online: true,
       vendor: "azure-foundry",
@@ -122,7 +125,7 @@ describe("PersonalizedWelcome", () => {
   });
 
   it("ping failure (not-configured): surfaces warning but keeps continue enabled (fallback path)", async () => {
-    const { api } = makeApi(async () => ({
+    const { api } = personalizedWelcomeApi(async () => ({
       configured: false,
       online: false,
       vendor: "azure-foundry",
@@ -145,7 +148,7 @@ describe("PersonalizedWelcome", () => {
   });
 
   it("ping failure (private endpoint): points the user at VPN or demo host-map", async () => {
-    const { api } = makeApi(async () => ({
+    const { api } = personalizedWelcomeApi(async () => ({
       configured: true,
       online: false,
       vendor: "azure-foundry",
@@ -166,7 +169,7 @@ describe("PersonalizedWelcome", () => {
   });
 
   it("ping failure (timeout): points the user at VPN or demo host-map", async () => {
-    const { api } = makeApi(async () => ({
+    const { api } = personalizedWelcomeApi(async () => ({
       configured: true,
       online: false,
       vendor: "azure-foundry",
@@ -187,7 +190,7 @@ describe("PersonalizedWelcome", () => {
   });
 
   it("ping failure (unauthorized-frame ok=false): surfaces warning + keeps continue enabled", async () => {
-    const { api } = makeApi(async () => ({
+    const { api } = personalizedWelcomeApi(async () => ({
       ok: false,
       error: "unauthorized-frame",
     }));
@@ -201,7 +204,7 @@ describe("PersonalizedWelcome", () => {
 
   it("'예, 시작할게요 →' fires onContinue once ping resolves", async () => {
     const onContinue = vi.fn();
-    const { api } = makeApi(async () => ({
+    const { api } = personalizedWelcomeApi(async () => ({
       configured: true,
       online: true,
       vendor: "azure-foundry",
@@ -220,7 +223,7 @@ describe("PersonalizedWelcome", () => {
   });
 
   it("does NOT expose a skip button (forced choice)", () => {
-    const { api } = makeApi(
+    const { api } = personalizedWelcomeApi(
       async () => new Promise(() => { /* pending */ }),
     );
     render(<PersonalizedWelcome open api={api} onContinue={() => {}} />);
@@ -231,7 +234,7 @@ describe("PersonalizedWelcome", () => {
     const originalConsoleError = console.error;
     console.error = vi.fn();
     try {
-      const { api } = makeApi(async () => {
+      const { api } = personalizedWelcomeApi(async () => {
         throw new Error("IPC disconnected");
       });
       render(<PersonalizedWelcome open api={api} onContinue={() => {}} />);

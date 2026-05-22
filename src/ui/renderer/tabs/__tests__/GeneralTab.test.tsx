@@ -12,53 +12,46 @@ import { describe, it, expect, vi } from "vitest";
 import { fireEvent, render, waitFor } from "@testing-library/react";
 import { GeneralTab } from "../GeneralTab.js";
 import type { LvisApi } from "../../types.js";
+import { makeMockLvisApi } from "../../../../../test/renderer/mock-lvis-api.js";
 
-function makeApi(overrides: Partial<LvisApi> = {}): LvisApi {
-  const base = {
-    listPluginUiExtensions: vi.fn().mockResolvedValue([{ pluginId: "a" }, { pluginId: "b" }]),
-    listPluginCards: vi.fn().mockResolvedValue([
+const GENERAL_SETTINGS = {
+  llm: { authMode: "manual", provider: "openai", vendors: {}, streamSmoothing: "none", fallbackChain: [] },
+  chat: { systemPrompt: "", autoCompact: true },
+  roles: { presets: [{ id: "default", name: "기본", systemPromptAdd: "", isDefault: true }] },
+  webSearch: { provider: "none" },
+  features: {},
+};
+
+const GENERAL_APP_INFO = {
+  version: "0.2.3",
+  electronVersion: "41.6.1",
+  nodeVersion: "22.4.0",
+  chromeVersion: "131.0.6778.0",
+  v8Version: "13.1.201.13",
+  platform: "darwin",
+  arch: "arm64",
+  userDataPath: "/Users/test/Library/Application Support/LVIS",
+};
+
+function generalTabApi(overrides: Partial<LvisApi> = {}): LvisApi {
+  const { api } = makeMockLvisApi({
+    pluginUiExtensions: [{ pluginId: "a" }, { pluginId: "b" }],
+    pluginCards: [
       { id: "a", name: "A", description: "", sampleTools: [], capabilities: [], tools: ["t1", "t2"] },
       { id: "b", name: "B", description: "", sampleTools: [], capabilities: [], tools: ["t3"] },
-    ]),
-    listAgentProfiles: vi.fn().mockResolvedValue({ agents: [{ name: "agent1" }, { name: "agent2" }] }),
-    listSkills: vi.fn().mockResolvedValue({ skills: [{ name: "skill1" }] }),
-    getSettings: vi.fn().mockResolvedValue({
-      llm: { authMode: "manual", provider: "openai", vendors: {}, streamSmoothing: "none", fallbackChain: [] },
-      chat: { systemPrompt: "", autoCompact: true },
-      roles: { presets: [{ id: "default", name: "기본", systemPromptAdd: "", isDefault: true }] },
-      webSearch: { provider: "none" },
-      features: {},
-    }),
-    pingMarketplace: vi.fn().mockResolvedValue({ configured: true, online: true }),
-    getAppInfo: vi.fn().mockResolvedValue({
-      version: "0.2.3",
-      electronVersion: "41.6.1",
-      nodeVersion: "22.4.0",
-      chromeVersion: "131.0.6778.0",
-      v8Version: "13.1.201.13",
-      platform: "darwin",
-      arch: "arm64",
-      userDataPath: "/Users/test/Library/Application Support/LVIS",
-    }),
-    hasApiKey: vi.fn().mockResolvedValue(true),
-    deleteApiKey: vi.fn().mockResolvedValue({ ok: true }),
-    updateSettings: vi.fn().mockResolvedValue({}),
-    memoryGetUserPrefs: vi.fn().mockResolvedValue("- 사용자 호칭: 미정\n자기소개 한 줄"),
-    onSettingsUpdated: vi.fn(() => () => {}),
-    demo: {
-      status: vi.fn(),
-      activate: vi.fn(),
-      relaunchAfterActivation: vi.fn(),
-      clearDemo: vi.fn().mockResolvedValue({ ok: true }),
-    },
-    ...overrides,
-  };
-  return base as unknown as LvisApi;
+    ],
+    agentProfiles: { agents: [{ name: "agent1" }, { name: "agent2" }] },
+    skills: { skills: [{ name: "skill1" }] },
+    settings: GENERAL_SETTINGS,
+    appInfo: GENERAL_APP_INFO,
+  });
+  Object.assign(api, overrides);
+  return api as unknown as LvisApi;
 }
 
 describe("GeneralTab", () => {
   it("renders all 5 workspace stat cards with their counts", async () => {
-    const api = makeApi();
+    const api = generalTabApi();
     const { findByTestId } = render(<GeneralTab api={api} onNavigate={() => {}} />);
     const plugin = await findByTestId("general-tab-card-plugin");
     const tool = await findByTestId("general-tab-card-tool");
@@ -76,14 +69,14 @@ describe("GeneralTab", () => {
   });
 
   it("renders marketplace status pill with the resolved online state", async () => {
-    const api = makeApi();
+    const api = generalTabApi();
     const { findByTestId } = render(<GeneralTab api={api} onNavigate={() => {}} />);
     const status = await findByTestId("general-tab-marketplace-status");
     await waitFor(() => expect(status.textContent).toContain("정상"));
   });
 
   it("calls onNavigate(plugin-config) when the 플러그인 card is clicked", async () => {
-    const api = makeApi();
+    const api = generalTabApi();
     const onNavigate = vi.fn();
     const { findByTestId } = render(<GeneralTab api={api} onNavigate={onNavigate} />);
     const plugin = await findByTestId("general-tab-card-plugin");
@@ -92,7 +85,7 @@ describe("GeneralTab", () => {
   });
 
   it("renders the resolved app version + data path", async () => {
-    const api = makeApi();
+    const api = generalTabApi();
     const { findByTestId, findByText } = render(<GeneralTab api={api} onNavigate={() => {}} />);
     const version = await findByTestId("general-tab-app-version");
     await waitFor(() => expect(version.textContent).toContain("v0.2.3"));
@@ -102,7 +95,7 @@ describe("GeneralTab", () => {
   });
 
   it("renders the resolved 기반 기술 stack (Electron / Node / Chromium / V8)", async () => {
-    const api = makeApi();
+    const api = generalTabApi();
     const { findByTestId } = render(<GeneralTab api={api} onNavigate={() => {}} />);
     const electron = await findByTestId("general-tab-stack-electron");
     const node = await findByTestId("general-tab-stack-node");
@@ -117,7 +110,7 @@ describe("GeneralTab", () => {
   });
 
   it("renders 미연결 when marketplace is not configured", async () => {
-    const api = makeApi({
+    const api = generalTabApi({
       pingMarketplace: vi.fn().mockResolvedValue({ configured: false, online: false }),
     });
     const { findByTestId } = render(<GeneralTab api={api} onNavigate={() => {}} />);
@@ -127,7 +120,7 @@ describe("GeneralTab", () => {
 
   // 2026-05-20 — 인증 관리 section: 로그아웃 / 데모 자격증명 재입력
   it("renders 인증 관리 buttons (reactivate + logout)", async () => {
-    const api = makeApi();
+    const api = generalTabApi();
     const { findByTestId } = render(
       <GeneralTab api={api} onNavigate={() => {}} onLogout={() => {}} onReactivateDemo={() => {}} />,
     );
@@ -138,7 +131,7 @@ describe("GeneralTab", () => {
   });
 
   it("invokes onReactivateDemo when the 데모 자격증명 재입력 button is clicked", async () => {
-    const api = makeApi();
+    const api = generalTabApi();
     const onReactivateDemo = vi.fn();
     const { findByTestId } = render(
       <GeneralTab api={api} onNavigate={() => {}} onReactivateDemo={onReactivateDemo} />,
@@ -148,7 +141,7 @@ describe("GeneralTab", () => {
   });
 
   it("로그아웃 클릭 → confirm dialog → 확인 시 active vendor 의 deleteApiKey + demo clear + onboardingCompleted=false + onLogout", async () => {
-    const api = makeApi();
+    const api = generalTabApi();
     const onLogout = vi.fn();
     const { findByTestId, queryByTestId } = render(
       <GeneralTab api={api} onNavigate={() => {}} onLogout={onLogout} onReactivateDemo={() => {}} />,
@@ -176,7 +169,7 @@ describe("GeneralTab", () => {
   });
 
   it("clearDemo 가 실패하면 onLogout 을 호출하지 않고 error 메시지를 노출", async () => {
-    const api = makeApi({
+    const api = generalTabApi({
       demo: {
         status: vi.fn(),
         activate: vi.fn(),
@@ -196,7 +189,7 @@ describe("GeneralTab", () => {
   });
 
   it("active vendor 키 삭제가 실패하면 demo clear/onLogout 없이 fail-closed", async () => {
-    const api = makeApi({
+    const api = generalTabApi({
       deleteApiKey: vi.fn().mockRejectedValue(new Error("keychain failed")),
     });
     const onLogout = vi.fn();

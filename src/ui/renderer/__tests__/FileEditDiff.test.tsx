@@ -15,6 +15,7 @@ import "../../../../test/renderer/setup.js";
 import { describe, it, expect, vi, afterEach, beforeEach } from "vitest";
 import { render, fireEvent, waitFor, act } from "@testing-library/react";
 import { WriteFileSidecarDiff as FileEditDiff } from "../components/FileEditDiff.js";
+import { makeMockLvisApi } from "../../../../test/renderer/mock-lvis-api.js";
 
 const SESSION_ID = "session-test-1";
 const TOOL_USE_ID = "tu-test-1";
@@ -31,9 +32,10 @@ const NORMAL_RESULT = JSON.stringify({
   bytes: 100,
 });
 
-/** Build a minimal window.lvisApi stub with a controllable chatGetWriteDiff. */
-function makeApi(impl: () => Promise<{ before: string; after: string } | null>) {
-  return { chatGetWriteDiff: vi.fn(impl) };
+function fileEditDiffApi(impl: () => Promise<{ before: string; after: string } | null>) {
+  const { api } = makeMockLvisApi();
+  api.chatGetWriteDiff = vi.fn(impl);
+  return api;
 }
 
 afterEach(() => {
@@ -42,7 +44,7 @@ afterEach(() => {
 
 describe("FileEditDiff", () => {
   it("renders plain summary for non-truncated result (no expand button)", () => {
-    vi.stubGlobal("lvisApi", makeApi(() => Promise.resolve(null)));
+    vi.stubGlobal("lvisApi", fileEditDiffApi(() => Promise.resolve(null)));
     const { container } = render(
       <FileEditDiff
         resultJson={NORMAL_RESULT}
@@ -56,7 +58,7 @@ describe("FileEditDiff", () => {
   });
 
   it("shows 전체 diff 보기 button for truncated+hasSidecar result", () => {
-    vi.stubGlobal("lvisApi", makeApi(() => Promise.resolve(null)));
+    vi.stubGlobal("lvisApi", fileEditDiffApi(() => Promise.resolve(null)));
     const { container } = render(
       <FileEditDiff
         resultJson={TRUNCATED_RESULT}
@@ -74,7 +76,7 @@ describe("FileEditDiff", () => {
   it("transitions idle → loading on click", () => {
     vi.stubGlobal(
       "lvisApi",
-      makeApi(() => new Promise(() => {})), // never resolves
+      fileEditDiffApi(() => new Promise(() => {})), // never resolves
     );
     const { container } = render(
       <FileEditDiff resultJson={TRUNCATED_RESULT} sessionId={SESSION_ID} toolUseId={TOOL_USE_ID} />,
@@ -91,7 +93,7 @@ describe("FileEditDiff", () => {
     const after = "line one\nline three";
     vi.stubGlobal(
       "lvisApi",
-      makeApi(() => Promise.resolve({ before, after })),
+      fileEditDiffApi(() => Promise.resolve({ before, after })),
     );
     const { container } = render(
       <FileEditDiff resultJson={TRUNCATED_RESULT} sessionId={SESSION_ID} toolUseId={TOOL_USE_ID} />,
@@ -111,7 +113,7 @@ describe("FileEditDiff", () => {
   it("transitions idle → loading → error on IPC returning null", async () => {
     vi.stubGlobal(
       "lvisApi",
-      makeApi(() => Promise.resolve(null)),
+      fileEditDiffApi(() => Promise.resolve(null)),
     );
     const { container } = render(
       <FileEditDiff resultJson={TRUNCATED_RESULT} sessionId={SESSION_ID} toolUseId={TOOL_USE_ID} />,
@@ -128,7 +130,7 @@ describe("FileEditDiff", () => {
   it("transitions idle → loading → error on IPC throw", async () => {
     vi.stubGlobal(
       "lvisApi",
-      makeApi(() => Promise.reject(new Error("IPC closed"))),
+      fileEditDiffApi(() => Promise.reject(new Error("IPC closed"))),
     );
     const { container } = render(
       <FileEditDiff resultJson={TRUNCATED_RESULT} sessionId={SESSION_ID} toolUseId={TOOL_USE_ID} />,
@@ -145,7 +147,7 @@ describe("FileEditDiff", () => {
   it("retry button resets error state back to idle", async () => {
     vi.stubGlobal(
       "lvisApi",
-      makeApi(() => Promise.resolve(null)),
+      fileEditDiffApi(() => Promise.resolve(null)),
     );
     const { container } = render(
       <FileEditDiff resultJson={TRUNCATED_RESULT} sessionId={SESSION_ID} toolUseId={TOOL_USE_ID} />,
@@ -170,7 +172,7 @@ describe("FileEditDiff", () => {
     const after = "alpha\ngamma";
     vi.stubGlobal(
       "lvisApi",
-      makeApi(() => Promise.resolve({ before, after })),
+      fileEditDiffApi(() => Promise.resolve({ before, after })),
     );
     const { container } = render(
       <FileEditDiff resultJson={TRUNCATED_RESULT} sessionId={SESSION_ID} toolUseId={TOOL_USE_ID} />,
@@ -195,7 +197,7 @@ describe("FileEditDiff", () => {
     const after = "unchanged\nadded line\nstays";
     vi.stubGlobal(
       "lvisApi",
-      makeApi(() => Promise.resolve({ before, after })),
+      fileEditDiffApi(() => Promise.resolve({ before, after })),
     );
     const { container } = render(
       <FileEditDiff resultJson={TRUNCATED_RESULT} sessionId={SESSION_ID} toolUseId={TOOL_USE_ID} />,
@@ -216,7 +218,7 @@ describe("FileEditDiff", () => {
     const pending = new Promise<{ before: string; after: string }>((res) => {
       resolve = res;
     });
-    vi.stubGlobal("lvisApi", makeApi(() => pending));
+    vi.stubGlobal("lvisApi", fileEditDiffApi(() => pending));
 
     const warnSpy = vi.spyOn(console, "error");
     const { container, unmount } = render(

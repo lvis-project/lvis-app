@@ -6,6 +6,12 @@ import { PluginRuntime } from "../runtime.js";
 import { PluginPhase } from "../lifecycle-log.js";
 import { PluginDeploymentGuard } from "../deployment-guard.js";
 import { mkdtempSync } from "node:fs";
+import {
+  makeTestPluginEntrySource,
+  makeTestPluginRuntime,
+  writeTestPlugin,
+  writeTestPluginRegistry,
+} from "./test-helpers.js";
 
 /**
  * Phase 1.5 F-round §F5: direct unit tests for `PluginRuntime.disable()`.
@@ -35,67 +41,55 @@ describe("PluginRuntime.disable", () => {
     id: string,
     installPolicy?: "admin" | "user",
   ): Promise<string> {
-    const pluginDir = join(installedDir, id);
-    await mkdir(pluginDir, { recursive: true });
-
     const methodName = `${id.replace(/[^a-zA-Z0-9_]/g, "_")}_hello`;
-
-    // Minimal ESM plugin entry — no external deps.
-    const entryPath = join(pluginDir, "entry.mjs");
-    await writeFile(
-      entryPath,
-      `export default async function createPlugin(ctx) {
-  return {
-    handlers: {
-      "${methodName}": async () => "hi-${id}",
-    },
-    start: async () => {},
-    stop: async () => {},
-  };
-}
-`,
-      "utf-8",
-    );
-
-    const manifest: Record<string, unknown> = {
-      id,
-      name: id,
-      version: "1.0.0",
-      entry: "entry.mjs",
-      tools: [methodName],
-      description: "Test fixture.",
-      publisher: "Test fixture",
-    };
+    const manifest: Record<string, unknown> = {};
     if (installPolicy) manifest.installPolicy = installPolicy;
-    const manifestPath = join(pluginDir, "plugin.json");
-    await writeFile(manifestPath, JSON.stringify(manifest), "utf-8");
-    return manifestPath;
-  }
-
-  async function writeRegistry(
-    entries: Array<{ id: string; manifestPath: string; enabled?: boolean; approvedPluginAccess?: unknown }>,
-  ): Promise<void> {
-    await mkdir(join(testDir, "plugins"), { recursive: true });
-    await writeFile(
+    const { manifestPath } = await writeTestPlugin({
+      rootDir: testDir,
+      pluginsRoot: installedDir,
       registryPath,
-      JSON.stringify({ version: 1, plugins: entries }),
-      "utf-8",
-    );
+    }, {
+      id,
+      tools: [methodName],
+      entrySource: makeTestPluginEntrySource({ [methodName]: JSON.stringify(`hi-${id}`) }),
+      manifest,
+    });
+    return manifestPath;
   }
 
   function makeRuntime(): PluginRuntime {
     const guard = new PluginDeploymentGuard({ registryPath, pluginsRoot: installedDir });
-    return new PluginRuntime({
-      hostRoot: testDir,
+    return makeTestPluginRuntime({
+      rootDir: testDir,
       registryPath,
       pluginsRoot: installedDir,
+    }, {
       deploymentGuard: guard,
     });
   }
 
+  async function writePluginWithEntry(
+    id: string,
+    methodName: string,
+    entrySource: string,
+    manifest: Record<string, unknown> = {},
+  ): Promise<string> {
+    const { manifestPath } = await writeTestPlugin({
+      rootDir: testDir,
+      pluginsRoot: installedDir,
+      registryPath,
+    }, {
+      id,
+      tools: [methodName],
+      entrySource,
+      manifest,
+    });
+    return manifestPath;
+  }
+
   it("disable removes methods + marks registry enabled=false for user plugin", async () => {
     const manifestPath = await writeFakePlugin("p-user");
-    await writeRegistry([{ id: "p-user", manifestPath, enabled: true }]);
+    await writeTestPluginRegistry({ registryPath }, [{ id: "p-user", manifestPath, enabled: true }]);
     const runtime = makeRuntime();
     await runtime.load();
 
@@ -114,7 +108,7 @@ describe("PluginRuntime.disable", () => {
 
   it("disable rejects managed plugin with guard error and leaves state unchanged", async () => {
     const manifestPath = await writeFakePlugin("p-managed", "admin");
-    await writeRegistry([{ id: "p-managed", manifestPath, enabled: true }]);
+    await writeTestPluginRegistry({ registryPath }, [{ id: "p-managed", manifestPath, enabled: true }]);
     const runtime = makeRuntime();
     await runtime.load();
 
@@ -131,7 +125,7 @@ describe("PluginRuntime.disable", () => {
 
   it("disable allows it-admin actor to disable a managed plugin", async () => {
     const manifestPath = await writeFakePlugin("p-managed", "admin");
-    await writeRegistry([{ id: "p-managed", manifestPath, enabled: true }]);
+    await writeTestPluginRegistry({ registryPath }, [{ id: "p-managed", manifestPath, enabled: true }]);
     const runtime = makeRuntime();
     await runtime.load();
 
@@ -145,7 +139,7 @@ describe("PluginRuntime.disable", () => {
 
   it("disable throws 'not found' for unknown pluginId without mutating state", async () => {
     const manifestPath = await writeFakePlugin("p-existing");
-    await writeRegistry([{ id: "p-existing", manifestPath, enabled: true }]);
+    await writeTestPluginRegistry({ registryPath }, [{ id: "p-existing", manifestPath, enabled: true }]);
     const runtime = makeRuntime();
     await runtime.load();
 
@@ -178,7 +172,7 @@ describe("PluginRuntime.disable", () => {
     const manifest = { id: pluginId, name: "Test", version: "1.0.0", entry: "entry.mjs", tools: ["com_example_test_hello"], description: "Test plugin fixture.", publisher: "Test fixture" };
     const manifestPath = join(pluginDir, "plugin.json");
     await writeFile(manifestPath, JSON.stringify(manifest), "utf-8");
-    await writeRegistry([{ id: pluginId, manifestPath, enabled: true }]);
+    await writeTestPluginRegistry({ registryPath }, [{ id: pluginId, manifestPath, enabled: true }]);
 
     const runtime = makeRuntime();
     await runtime.load();
@@ -204,7 +198,7 @@ describe("PluginRuntime.disable", () => {
     const manifest = { id: "bad-plugin", name: "Bad", version: "1.0.0", entry: "entry.mjs", tools: ["bad.method"], description: "Test fixture.", publisher: "Test fixture" };
     const manifestPath = join(pluginDir, "plugin.json");
     await writeFile(manifestPath, JSON.stringify(manifest), "utf-8");
-    await writeRegistry([{ id: "bad-plugin", manifestPath, enabled: true }]);
+    await writeTestPluginRegistry({ registryPath }, [{ id: "bad-plugin", manifestPath, enabled: true }]);
 
     const errSpy = vi.spyOn(console, "error").mockImplementation(() => {});
     const runtime = makeRuntime();
@@ -233,7 +227,7 @@ describe("PluginRuntime.disable", () => {
     const manifest = { id: "bad-leading-digit", name: "Bad", version: "1.0.0", entry: "entry.mjs", tools: ["1bad_name"], description: "Test fixture.", publisher: "Test fixture" };
     const manifestPath = join(pluginDir, "plugin.json");
     await writeFile(manifestPath, JSON.stringify(manifest), "utf-8");
-    await writeRegistry([{ id: "bad-leading-digit", manifestPath, enabled: true }]);
+    await writeTestPluginRegistry({ registryPath }, [{ id: "bad-leading-digit", manifestPath, enabled: true }]);
 
     const errSpy = vi.spyOn(console, "error").mockImplementation(() => {});
     const runtime = makeRuntime();
@@ -262,7 +256,7 @@ describe("PluginRuntime.disable", () => {
     const manifest = { id: "bad-hyphen", name: "Bad", version: "1.0.0", entry: "entry.mjs", tools: ["bad-name"], description: "Test fixture.", publisher: "Test fixture" };
     const manifestPath = join(pluginDir, "plugin.json");
     await writeFile(manifestPath, JSON.stringify(manifest), "utf-8");
-    await writeRegistry([{ id: "bad-hyphen", manifestPath, enabled: true }]);
+    await writeTestPluginRegistry({ registryPath }, [{ id: "bad-hyphen", manifestPath, enabled: true }]);
 
     const errSpy = vi.spyOn(console, "error").mockImplementation(() => {});
     const runtime = makeRuntime();
@@ -290,7 +284,7 @@ describe("PluginRuntime.disable", () => {
     const manifest = { id: "no-description", name: "No Desc", version: "1.0.0", entry: "entry.mjs", tools: ["no_desc_ping"] };
     const manifestPath = join(pluginDir, "plugin.json");
     await writeFile(manifestPath, JSON.stringify(manifest), "utf-8");
-    await writeRegistry([{ id: "no-description", manifestPath, enabled: true }]);
+    await writeTestPluginRegistry({ registryPath }, [{ id: "no-description", manifestPath, enabled: true }]);
 
     const errSpy = vi.spyOn(console, "error").mockImplementation(() => {});
     const runtime = makeRuntime();
@@ -318,7 +312,7 @@ describe("PluginRuntime.disable", () => {
     const manifest = { id: "empty-description", name: "Empty Desc", version: "1.0.0", entry: "entry.mjs", tools: ["empty_desc_ping"], description: "", publisher: "Test fixture" };
     const manifestPath = join(pluginDir, "plugin.json");
     await writeFile(manifestPath, JSON.stringify(manifest), "utf-8");
-    await writeRegistry([{ id: "empty-description", manifestPath, enabled: true }]);
+    await writeTestPluginRegistry({ registryPath }, [{ id: "empty-description", manifestPath, enabled: true }]);
 
     const errSpy = vi.spyOn(console, "error").mockImplementation(() => {});
     const runtime = makeRuntime();
@@ -368,7 +362,7 @@ describe("PluginRuntime.disable", () => {
       "utf-8",
     );
 
-    await writeRegistry([{ id: "ui-callable", manifestPath, enabled: true }]);
+    await writeTestPluginRegistry({ registryPath }, [{ id: "ui-callable", manifestPath, enabled: true }]);
     const runtime = makeRuntime();
     await runtime.startAll();
     runtime.setToolInvocationDelegate((method, payload) => runtime.call(method, payload));
@@ -383,7 +377,7 @@ describe("PluginRuntime.disable", () => {
 
   it("registerDisposer callbacks fire on disable() and not thereafter", async () => {
     const manifestPath = await writeFakePlugin("p-disposer");
-    await writeRegistry([{ id: "p-disposer", manifestPath, enabled: true }]);
+    await writeTestPluginRegistry({ registryPath }, [{ id: "p-disposer", manifestPath, enabled: true }]);
     const runtime = makeRuntime();
     await runtime.load();
 
@@ -428,7 +422,7 @@ describe("PluginRuntime.disable", () => {
       "utf-8",
     );
 
-    await writeRegistry([{ id: "meta-plugin", manifestPath, enabled: true }]);
+    await writeTestPluginRegistry({ registryPath }, [{ id: "meta-plugin", manifestPath, enabled: true }]);
 
     const runtime = makeRuntime();
     await runtime.load();
@@ -458,7 +452,7 @@ describe("PluginRuntime.disable", () => {
         JSON.stringify({ id: "calltool-plugin", name: "calltool-plugin", version: "1.0.0", entry: "entry.mjs", tools: ["calltool_ping"], description: "Test fixture.", publisher: "Test fixture" }),
         "utf-8",
       );
-      await writeRegistry([{ id: "calltool-plugin", manifestPath, enabled: true }]);
+      await writeTestPluginRegistry({ registryPath }, [{ id: "calltool-plugin", manifestPath, enabled: true }]);
 
       let injectedCallTool: ((toolName: string, payload?: unknown) => Promise<unknown>) | undefined;
 
@@ -509,7 +503,7 @@ describe("PluginRuntime.disable", () => {
         JSON.stringify({ id: "calltool-delegate", name: "calltool-delegate", version: "1.0.0", entry: "entry.mjs", tools: ["calltool_echo"], description: "Test fixture.", publisher: "Test fixture" }),
         "utf-8",
       );
-      await writeRegistry([{ id: "calltool-delegate", manifestPath, enabled: true }]);
+      await writeTestPluginRegistry({ registryPath }, [{ id: "calltool-delegate", manifestPath, enabled: true }]);
 
       const guard = new PluginDeploymentGuard({ registryPath, pluginsRoot: installedDir });
       const runtime = new PluginRuntime({
@@ -597,7 +591,7 @@ describe("PluginRuntime.disable", () => {
     const calendarManifestPath = await writePlugin("calendar", "calendar_today");
     const emailManifestPath = await writePlugin("email", "email_ping");
     const meetingManifestPath = await writePlugin("meeting", "meeting_ping");
-    await writeRegistry([
+    await writeTestPluginRegistry({ registryPath }, [
       {
         id: "work-assistant",
         manifestPath: workManifestPath,
@@ -681,7 +675,7 @@ describe("PluginRuntime.disable", () => {
       },
     });
     const calendarManifestPath = await writePlugin("calendar", "calendar_today");
-    await writeRegistry([
+    await writeTestPluginRegistry({ registryPath }, [
       {
         id: "work-assistant",
         manifestPath: workManifestPath,
@@ -717,34 +711,7 @@ describe("PluginRuntime.disable", () => {
   });
 
   it("allows load-time event subscriptions when manifest pluginAccess is declared", async () => {
-    const writePlugin = async (
-      id: string,
-      methodName: string,
-      entrySource: string,
-      extraManifest?: Record<string, unknown>,
-    ): Promise<string> => {
-      const pluginDir = join(installedDir, id);
-      await mkdir(pluginDir, { recursive: true });
-      await writeFile(join(pluginDir, "entry.mjs"), entrySource, "utf-8");
-      const manifestPath = join(pluginDir, "plugin.json");
-      await writeFile(
-        manifestPath,
-        JSON.stringify({
-          id,
-          name: id,
-          version: "1.0.0",
-          description: "Test fixture.",
-          publisher: "Test fixture",
-          entry: "entry.mjs",
-          tools: [methodName],
-          ...extraManifest,
-        }),
-        "utf-8",
-      );
-      return manifestPath;
-    };
-
-    const calendarManifestPath = await writePlugin(
+    const calendarManifestPath = await writePluginWithEntry(
       "calendar",
       "calendar_today",
       `export default async function createPlugin({ hostApi }) {
@@ -762,7 +729,7 @@ describe("PluginRuntime.disable", () => {
         },
       },
     );
-    const emailManifestPath = await writePlugin(
+    const emailManifestPath = await writePluginWithEntry(
       "email",
       "email_ping",
       `export default async function createPlugin() {
@@ -775,7 +742,7 @@ describe("PluginRuntime.disable", () => {
 `,
     );
 
-    await writeRegistry([
+    await writeTestPluginRegistry({ registryPath }, [
       {
         id: "calendar",
         manifestPath: calendarManifestPath,
@@ -805,34 +772,7 @@ describe("PluginRuntime.disable", () => {
   });
 
   it("blocks load-time event subscriptions to later-loaded plugins without pluginAccess", async () => {
-    const writePlugin = async (
-      id: string,
-      methodName: string,
-      entrySource: string,
-      extraManifest?: Record<string, unknown>,
-    ): Promise<string> => {
-      const pluginDir = join(installedDir, id);
-      await mkdir(pluginDir, { recursive: true });
-      await writeFile(join(pluginDir, "entry.mjs"), entrySource, "utf-8");
-      const manifestPath = join(pluginDir, "plugin.json");
-      await writeFile(
-        manifestPath,
-        JSON.stringify({
-          id,
-          name: id,
-          version: "1.0.0",
-          description: "Test fixture.",
-          publisher: "Test fixture",
-          entry: "entry.mjs",
-          tools: [methodName],
-          ...extraManifest,
-        }),
-        "utf-8",
-      );
-      return manifestPath;
-    };
-
-    const calendarManifestPath = await writePlugin(
+    const calendarManifestPath = await writePluginWithEntry(
       "calendar",
       "calendar_today",
       `export default async function createPlugin({ hostApi }) {
@@ -845,7 +785,7 @@ describe("PluginRuntime.disable", () => {
 }
 `,
     );
-    const emailManifestPath = await writePlugin(
+    const emailManifestPath = await writePluginWithEntry(
       "email",
       "email_ping",
       `export default async function createPlugin() {
@@ -858,7 +798,7 @@ describe("PluginRuntime.disable", () => {
 `,
     );
 
-    await writeRegistry([
+    await writeTestPluginRegistry({ registryPath }, [
       { id: "calendar", manifestPath: calendarManifestPath, enabled: true },
       { id: "email", manifestPath: emailManifestPath, enabled: true },
     ]);
@@ -883,7 +823,7 @@ describe("PluginRuntime.disable", () => {
     const calendarManifestPath = await writeFakePlugin("calendar");
     const emailManifestPath = await writeFakePlugin("email");
 
-    await writeRegistry([
+    await writeTestPluginRegistry({ registryPath }, [
       { id: "calendar", manifestPath: calendarManifestPath, enabled: true },
       { id: "email", manifestPath: emailManifestPath, enabled: true },
     ]);
@@ -956,7 +896,7 @@ describe("PluginRuntime.disable", () => {
       "utf-8",
     );
 
-    await writeRegistry([
+    await writeTestPluginRegistry({ registryPath }, [
       { id: "cap-provider", manifestPath: providerManifestPath, enabled: true },
       { id: "needs-calendar", manifestPath: consumerManifestPath, enabled: true },
     ]);
@@ -2323,36 +2263,22 @@ describe("PluginRuntime lifecycle plog emission", () => {
   });
 
   async function writeFakePlugin(id: string): Promise<string> {
-    const pluginDir = join(installedDir, id);
-    await mkdir(pluginDir, { recursive: true });
     const methodName = `${id.replace(/[^a-zA-Z0-9_]/g, "_")}_hello`;
-    await writeFile(
-      join(pluginDir, "entry.mjs"),
-      `export default async function createPlugin() {
-  return {
-    handlers: { "${methodName}": async () => "hi" },
-    start: async () => {},
-    stop: async () => {},
-  };
-}`,
-      "utf-8",
-    );
-    const manifestPath = join(pluginDir, "plugin.json");
-    await writeFile(
-      manifestPath,
-      JSON.stringify({ id, name: id, version: "1.0.0", entry: "entry.mjs", tools: [methodName], description: "test", publisher: "test" }),
-      "utf-8",
-    );
+    const { manifestPath } = await writeTestPlugin({
+      rootDir: testDir,
+      pluginsRoot: installedDir,
+      registryPath,
+    }, {
+      id,
+      tools: [methodName],
+      entrySource: makeTestPluginEntrySource({ [methodName]: JSON.stringify("hi") }),
+    });
     return manifestPath;
-  }
-
-  async function writeRegistry(entries: Array<{ id: string; manifestPath: string; enabled?: boolean }>): Promise<void> {
-    await writeFile(registryPath, JSON.stringify({ version: 1, plugins: entries }), "utf-8");
   }
 
   it("emits LOAD_START phase for each plugin entry during load()", async () => {
     const manifestPath = await writeFakePlugin("plog-test");
-    await writeRegistry([{ id: "plog-test", manifestPath, enabled: true }]);
+    await writeTestPluginRegistry({ registryPath }, [{ id: "plog-test", manifestPath, enabled: true }]);
     // In test mode, createLogger maps debug→console.log.
     // The ctx object is passed as 2nd arg; check the message string + ctx via JSON.
     const calls: unknown[][] = [];
@@ -2369,7 +2295,7 @@ describe("PluginRuntime lifecycle plog emission", () => {
 
   it("emits LOAD_OK phase after a plugin successfully loads", async () => {
     const manifestPath = await writeFakePlugin("plog-ok");
-    await writeRegistry([{ id: "plog-ok", manifestPath, enabled: true }]);
+    await writeTestPluginRegistry({ registryPath }, [{ id: "plog-ok", manifestPath, enabled: true }]);
     const calls: unknown[][] = [];
     const spy = vi.spyOn(console, "log").mockImplementation((...args) => { calls.push(args); });
     const runtime = new PluginRuntime({ hostRoot: testDir, registryPath, pluginsRoot: installedDir });
@@ -2384,7 +2310,7 @@ describe("PluginRuntime lifecycle plog emission", () => {
 
   it("emits RESTART_REQUEST phase when restartPlugin is called", async () => {
     const manifestPath = await writeFakePlugin("plog-restart");
-    await writeRegistry([{ id: "plog-restart", manifestPath, enabled: true }]);
+    await writeTestPluginRegistry({ registryPath }, [{ id: "plog-restart", manifestPath, enabled: true }]);
     const runtime = new PluginRuntime({ hostRoot: testDir, registryPath, pluginsRoot: installedDir });
     await runtime.load();
     const calls: unknown[][] = [];
@@ -2400,7 +2326,7 @@ describe("PluginRuntime lifecycle plog emission", () => {
 
   it("emits RESTART_STOP_OK phase after stop succeeds during restart", async () => {
     const manifestPath = await writeFakePlugin("plog-stop-ok");
-    await writeRegistry([{ id: "plog-stop-ok", manifestPath, enabled: true }]);
+    await writeTestPluginRegistry({ registryPath }, [{ id: "plog-stop-ok", manifestPath, enabled: true }]);
     const runtime = new PluginRuntime({ hostRoot: testDir, registryPath, pluginsRoot: installedDir });
     await runtime.load();
     const calls: unknown[][] = [];

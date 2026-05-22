@@ -1,4 +1,4 @@
-import { chmodSync, existsSync, mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { existsSync, mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
@@ -9,6 +9,7 @@ import {
   rejectHookTrust,
 } from "../hook-trust-commands.js";
 import { wireHookSystem } from "../../boot/steps/hook-system-wiring.js";
+import { writeExecutableHook } from "./test-helpers.js";
 
 let tmpDir: string;
 let hooksDir: string;
@@ -26,20 +27,13 @@ afterEach(() => {
   if (tmpDir) rmSync(tmpDir, { recursive: true, force: true });
 });
 
-function writeHook(name: string, body = "#!/bin/sh\necho '{}'\n"): void {
-  mkdirSync(hooksDir, { recursive: true });
-  const path = join(hooksDir, name);
-  writeFileSync(path, body);
-  chmodSync(path, 0o700);
-}
-
 function opts() {
   return { hooksDir, disabledDir, lockfilePath };
 }
 
 describe("hook trust slash command operations", () => {
   it("accepts a boot-quarantined hook and updates runtime trust", async () => {
-    writeHook("pre-demo.sh");
+    writeExecutableHook(hooksDir, "pre-demo.sh");
     const boot = await wireHookSystem(opts());
     expect(boot.manager.size()).toBe(0);
     expect(existsSync(join(disabledDir, "pre-demo.sh"))).toBe(true);
@@ -57,7 +51,7 @@ describe("hook trust slash command operations", () => {
   });
 
   it("disables an accepted hook and removes it from runtime trust", async () => {
-    writeHook("perm-demo.sh");
+    writeExecutableHook(hooksDir, "perm-demo.sh");
     const boot = await wireHookSystem({
       ...opts(),
       promptDispatcher: {
@@ -83,7 +77,7 @@ describe("hook trust slash command operations", () => {
   });
 
   it("reject permanently removes a quarantined hook from .disabled/", async () => {
-    writeHook("pre-quarantined.sh");
+    writeExecutableHook(hooksDir, "pre-quarantined.sh");
     const boot = await wireHookSystem(opts());
     expect(boot.manager.size()).toBe(0);
     expect(existsSync(join(disabledDir, "pre-quarantined.sh"))).toBe(true);
@@ -99,7 +93,7 @@ describe("hook trust slash command operations", () => {
   });
 
   it("reject refuses an active (trusted) hook — must disable first", async () => {
-    writeHook("perm-active.sh");
+    writeExecutableHook(hooksDir, "perm-active.sh");
     const boot = await wireHookSystem({
       ...opts(),
       promptDispatcher: {

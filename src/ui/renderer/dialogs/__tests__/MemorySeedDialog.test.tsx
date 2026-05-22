@@ -8,30 +8,22 @@ import {
   scenarioIntroPlaceholder,
 } from "../MemorySeedDialog.js";
 import type { LvisApi } from "../../types.js";
+import { makeMockLvisApi } from "../../../../../test/renderer/mock-lvis-api.js";
 
 type StubbedApi = Pick<LvisApi, "memoryUpdateIndexSections" | "tour" | "updateSettings">;
 
-function makeApi(overrides: Partial<StubbedApi> = {}): {
+function memorySeedDialogApi(overrides: Partial<StubbedApi> = {}): {
   api: StubbedApi;
   memoryUpdateIndexSections: ReturnType<typeof vi.fn>;
   tourStart: ReturnType<typeof vi.fn>;
   updateSettings: ReturnType<typeof vi.fn>;
 } {
-  const memoryUpdateIndexSections = vi.fn(async () => ({ ok: true }));
-  const tourStart = vi.fn(async () => ({ ok: true, scenarioId: "first-boot-essentials" }));
-  const updateSettings = vi.fn(async () => ({ ok: true }));
-  const api = {
-    memoryUpdateIndexSections,
-    tour: {
-      getState: vi.fn(),
-      markComplete: vi.fn(),
-      dismiss: vi.fn(),
-      start: tourStart,
-      onStart: vi.fn(() => () => {}),
-    } as unknown as LvisApi["tour"],
-    updateSettings,
-    ...overrides,
-  } as StubbedApi;
+  const { api: baseApi } = makeMockLvisApi();
+  Object.assign(baseApi, overrides);
+  const api = baseApi as unknown as StubbedApi;
+  const memoryUpdateIndexSections = baseApi.memoryUpdateIndexSections as ReturnType<typeof vi.fn>;
+  const tourStart = (baseApi.tour as unknown as LvisApi["tour"]).start as ReturnType<typeof vi.fn>;
+  const updateSettings = baseApi.updateSettings as ReturnType<typeof vi.fn>;
   return { api, memoryUpdateIndexSections, tourStart, updateSettings };
 }
 
@@ -55,7 +47,7 @@ describe("composeUrgentMemorySeed", () => {
 
 describe("MemorySeedDialog", () => {
   it("renders only when open=true", () => {
-    const { api } = makeApi();
+    const { api } = memorySeedDialogApi();
     const { rerender } = render(
       <MemorySeedDialog open={false} onOpenChange={() => {}} api={api} onDismissed={() => {}} />,
     );
@@ -68,7 +60,7 @@ describe("MemorySeedDialog", () => {
   });
 
   it("shows the fallback recommendation chip when intro is empty", () => {
-    const { api } = makeApi();
+    const { api } = memorySeedDialogApi();
     render(
       <MemorySeedDialog open onOpenChange={() => {}} api={api} onDismissed={() => {}} />,
     );
@@ -76,7 +68,7 @@ describe("MemorySeedDialog", () => {
   });
 
   it("updates the chip strip live as the intro changes", () => {
-    const { api } = makeApi();
+    const { api } = memorySeedDialogApi();
     render(
       <MemorySeedDialog open onOpenChange={() => {}} api={api} onDismissed={() => {}} />,
     );
@@ -91,7 +83,7 @@ describe("MemorySeedDialog", () => {
   });
 
   it("on submit, persists MEMORY.md urgent memory, marks onboarding complete, and starts the tour", async () => {
-    const { api, memoryUpdateIndexSections, tourStart } = makeApi();
+    const { api, memoryUpdateIndexSections, tourStart } = memorySeedDialogApi();
     const onDismissed = vi.fn();
     const onOpenChange = vi.fn();
 
@@ -118,7 +110,7 @@ describe("MemorySeedDialog", () => {
   });
 
   it("on skip, does NOT persist memory but still flips onboarding + launches the tour", async () => {
-    const { api, memoryUpdateIndexSections, tourStart } = makeApi();
+    const { api, memoryUpdateIndexSections, tourStart } = memorySeedDialogApi();
     const onDismissed = vi.fn();
     const onOpenChange = vi.fn();
 
@@ -134,7 +126,7 @@ describe("MemorySeedDialog", () => {
   });
 
   it("skips MEMORY.md write when both name and intro are blank but still advances", async () => {
-    const { api, memoryUpdateIndexSections, tourStart } = makeApi();
+    const { api, memoryUpdateIndexSections, tourStart } = memorySeedDialogApi();
     const onDismissed = vi.fn();
     const onOpenChange = vi.fn();
 
@@ -152,7 +144,7 @@ describe("MemorySeedDialog", () => {
   });
 
   it("still dismisses + starts tour when memoryUpdateIndexSections throws", async () => {
-    const { api, tourStart } = makeApi({
+    const { api, tourStart } = memorySeedDialogApi({
       memoryUpdateIndexSections: vi.fn(async () => {
         throw new Error("disk write failed");
       }),
@@ -193,7 +185,7 @@ describe("scenarioIntroPlaceholder", () => {
 
 describe("MemorySeedDialog placeholder integration", () => {
   it("applies the scenario-tinted placeholder when selectedScenarioId is set", () => {
-    const { api } = makeApi();
+    const { api } = memorySeedDialogApi();
     render(
       <MemorySeedDialog
         open
@@ -210,7 +202,7 @@ describe("MemorySeedDialog placeholder integration", () => {
   });
 
   it("uses the legacy placeholder when selectedScenarioId is omitted", () => {
-    const { api } = makeApi();
+    const { api } = memorySeedDialogApi();
     render(
       <MemorySeedDialog
         open

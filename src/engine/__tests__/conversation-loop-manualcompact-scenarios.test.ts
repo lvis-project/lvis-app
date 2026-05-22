@@ -13,9 +13,12 @@
  */
 import { describe, it, expect, vi, beforeEach } from "vitest";
 import { ConversationLoop } from "../conversation-loop.js";
-import type { ConversationLoopDeps } from "../conversation-loop.js";
 import type { GenericMessage } from "../llm/types.js";
-import { fakeLlmSettings } from "../../shared/__tests__/fake-llm-settings.js";
+import {
+  makeConversationLoopDeps as makeDeps,
+  makeConversationLoopMemoryManager as makeMemoryManager,
+  makeConversationTurnProvider as makeProviderStub,
+} from "./conversation-loop-test-helpers.js";
 
 vi.mock("../structured-compact.js", () => ({
   DEFAULT_PRESERVE_RECENT_TURNS: 5,
@@ -29,81 +32,6 @@ import { CompressionStatus } from "../../shared/compact-status.js";
 beforeEach(() => {
   vi.mocked(compactWithBoundary).mockClear();
 });
-
-function makeSettings() {
-  return {
-    get: (key: string) => {
-      if (key === "chat") return { systemPrompt: "", autoCompact: true };
-      if (key === "llm") return fakeLlmSettings({ provider: "claude", model: "claude-sonnet-4-5" });
-      return {};
-    },
-    getAll: () => ({}),
-    patch: vi.fn(),
-    getSecret: () => null,
-    setSecret: vi.fn(),
-    deleteSecret: vi.fn(),
-  } as unknown as ConversationLoopDeps["settingsService"];
-}
-
-function makeMemoryManager(messages: GenericMessage[] = []) {
-  const sessions: Record<string, GenericMessage[]> = { "sess-1": messages };
-  return {
-    listSessions: () => Object.keys(sessions).map((id) => ({ id, modifiedAt: new Date() })),
-    loadSession: (id: string) => sessions[id] ?? null,
-    loadSessionMetadata: vi.fn(() => null),
-    saveSession: vi.fn((id: string, msgs: GenericMessage[]) => {
-      sessions[id] = msgs;
-    }),
-    saveSessionMetadata: vi.fn(),
-    appendCheckpoint: vi.fn((_meta: unknown, cp: unknown) => ({ checkpoints: [cp] })),
-    saveCheckpointSnapshot: vi.fn(),
-    listMemoryEntries: () => [],
-    saveMemory: vi.fn(),
-    deleteMemory: vi.fn(),
-    searchMemoryEntries: vi.fn(),
-    getMemoryContext: vi.fn(),
-    getLvisMd: vi.fn(),
-    updateLvisMd: vi.fn(),
-    getUserPreferences: vi.fn(),
-    updateUserPreferences: vi.fn(),
-  } as unknown as ConversationLoopDeps["memoryManager"];
-}
-
-function makeDeps(overrides: Partial<ConversationLoopDeps> = {}): ConversationLoopDeps {
-  return {
-    settingsService: makeSettings(),
-    systemPromptBuilder: {
-      build: () => "system",
-      setToolScope: vi.fn(),
-      setOriginSource: vi.fn(),
-      setActiveSessionId: vi.fn(),
-      setActiveRolePrompt: vi.fn(),
-    } as unknown as ConversationLoopDeps["systemPromptBuilder"],
-    keywordEngine: {
-      classify: vi.fn().mockReturnValue({ type: "chat" }),
-      matchAllPluginIds: () => new Set(),
-    } as unknown as ConversationLoopDeps["keywordEngine"],
-    routeEngine: {
-      route: vi.fn().mockReturnValue({ route: "llm" }),
-    } as unknown as ConversationLoopDeps["routeEngine"],
-    toolRegistry: {
-      getToolSchemasForScope: () => [],
-      getVisibleTools: () => [],
-    } as unknown as ConversationLoopDeps["toolRegistry"],
-    memoryManager: makeMemoryManager(),
-    ...overrides,
-  };
-}
-
-function makeProviderStub() {
-  return {
-    vendor: "claude" as const,
-    streamTurn: async function* () {
-      yield { type: "text_delta" as const, text: "ok" };
-      yield { type: "message_complete" as const };
-    },
-  };
-}
 
 // ─── Tests ────────────────────────────────────────────────────────────────────
 

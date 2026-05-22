@@ -8,27 +8,12 @@ import "../../../../test/renderer/setup.js";
 import { describe, it, expect, vi, afterEach } from "vitest";
 import { act, fireEvent, waitFor } from "@testing-library/react";
 import { renderApp } from "../../../../test/renderer/render-app.js";
+import { deferred, submitChatMessage } from "../../../../test/renderer/helpers.js";
 import {
   __resetSuggestedRepliesStoreForTests,
   __teardownSuggestedRepliesIpcForTests,
 } from "../hooks/use-suggested-replies.js";
 
-function deferred<T>() {
-  let resolve!: (value: T) => void;
-  const promise = new Promise<T>((r) => {
-    resolve = r;
-  });
-  return { promise, resolve };
-}
-
-async function submitUser(container: HTMLElement, text: string) {
-  const textarea = container.querySelector("textarea") as HTMLTextAreaElement;
-  expect(textarea).toBeTruthy();
-  await act(async () => {
-    fireEvent.change(textarea, { target: { value: text } });
-    fireEvent.keyDown(textarea, { key: "Enter", code: "Enter" });
-  });
-}
 
 describe("ChatView", () => {
   it("mounts without crashing", async () => {
@@ -102,7 +87,7 @@ describe("ChatView", () => {
 
   it("shows permission reviewer progress and clears it when the tool starts", async () => {
     const { container, emitChatStream } = await renderApp({ hasApiKey: true });
-    await submitUser(container, "규정 찾아줘");
+    await submitChatMessage(container, "규정 찾아줘");
     await act(async () => {
       emitChatStream({
         type: "permission_review",
@@ -166,7 +151,7 @@ describe("ChatView", () => {
 
   it("clears permission reviewer status on stream done without a tool start", async () => {
     const { container, emitChatStream } = await renderApp({ hasApiKey: true });
-    await submitUser(container, "상태 정리 확인");
+    await submitChatMessage(container, "상태 정리 확인");
     await act(async () => {
       emitChatStream({
         type: "permission_review",
@@ -194,7 +179,7 @@ describe("ChatView", () => {
 
   it("clears permission reviewer status on stream error", async () => {
     const { container, emitChatStream } = await renderApp({ hasApiKey: true });
-    await submitUser(container, "오류 정리 확인");
+    await submitChatMessage(container, "오류 정리 확인");
     await act(async () => {
       emitChatStream({
         type: "permission_review",
@@ -269,7 +254,7 @@ describe("ChatView", () => {
 
   it("collapses pre-final assistant work and tools into one turn WorkGroup", async () => {
     const { container, emitChatStream } = await renderApp({ hasApiKey: true });
-    await submitUser(container, "일정 확인");
+    await submitChatMessage(container, "일정 확인");
     await act(async () => {
       // Round 1 — text + tool_use
       emitChatStream({ type: "text_delta", text: "첫번째 답변입니다" });
@@ -410,7 +395,7 @@ describe("ChatView", () => {
 
   it("treats overlay imports after an existing chat as a separate turn boundary", async () => {
     const { container, api, emitOverlayShow, emitChatStream } = await renderApp({ hasApiKey: true });
-    await submitUser(container, "첫 질문");
+    await submitChatMessage(container, "첫 질문");
     await act(async () => {
       emitChatStream({ type: "text_delta", text: "첫 최종 답변" });
       emitChatStream({
@@ -515,7 +500,7 @@ describe("ChatView", () => {
 
   it("keeps a one-step pre-final assistant round inside WorkGroup", async () => {
     const { container, emitChatStream } = await renderApp({ hasApiKey: true });
-    await submitUser(container, "추론 확인");
+    await submitChatMessage(container, "추론 확인");
     await act(async () => {
       // Round 1 — text, finalized as tool_use (no actual tool events follow)
       emitChatStream({ type: "text_delta", text: "첫번째 답변입니다" });
@@ -563,7 +548,7 @@ describe("ChatView", () => {
 
   it("keeps completed prior turns visible while a new turn is streaming", async () => {
     const { container, api, emitChatStream } = await renderApp({ hasApiKey: true });
-    await submitUser(container, "첫 질문");
+    await submitChatMessage(container, "첫 질문");
     await act(async () => {
       emitChatStream({ type: "reasoning_delta", text: "첫 턴 생각" });
       emitChatStream({ type: "text_delta", text: "첫 최종 답변" });
@@ -583,7 +568,7 @@ describe("ChatView", () => {
 
     const pendingSend = deferred<{ ok: true }>();
     api.chatSend.mockImplementationOnce(async () => pendingSend.promise);
-    await submitUser(container, "둘째 질문");
+    await submitChatMessage(container, "둘째 질문");
     await act(async () => {
       emitChatStream({ type: "text_delta", text: "둘째 답변 작성 중" });
     });
@@ -603,7 +588,7 @@ describe("ChatView", () => {
     const { container, api, emitChatStream } = await renderApp({ hasApiKey: true });
     const pendingSend = deferred<{ ok: true }>();
     api.chatSend.mockImplementationOnce(async () => pendingSend.promise);
-    await submitUser(container, "직접 도구 호출");
+    await submitChatMessage(container, "직접 도구 호출");
     await act(async () => {
       emitChatStream({ type: "text_delta", text: "도구를 바로 호출하겠습니다" });
       emitChatStream({
@@ -629,7 +614,7 @@ describe("ChatView", () => {
 
   it("strips meta markers and renders Markdown for assistant_round text", async () => {
     const { container, emitChatStream } = await renderApp({ hasApiKey: true });
-    await submitUser(container, "마크다운 확인");
+    await submitChatMessage(container, "마크다운 확인");
     await act(async () => {
       emitChatStream({ type: "text_delta", text: "결과는 **정상**입니다.<title>마크다운 렌더링 확인</title>" });
       emitChatStream({
@@ -739,7 +724,7 @@ describe("ChatView", () => {
 
   it("keeps completed prior turns visible while a new turn is streaming", async () => {
     const { container, api, emitChatStream } = await renderApp({ hasApiKey: true });
-    await submitUser(container, "첫 질문");
+    await submitChatMessage(container, "첫 질문");
     await act(async () => {
       emitChatStream({ type: "reasoning_delta", text: "첫 턴 생각" });
       emitChatStream({ type: "text_delta", text: "첫 최종 답변" });
@@ -759,7 +744,7 @@ describe("ChatView", () => {
 
     const pendingSend = deferred<{ ok: true }>();
     api.chatSend.mockImplementationOnce(async () => pendingSend.promise);
-    await submitUser(container, "둘째 질문");
+    await submitChatMessage(container, "둘째 질문");
     await act(async () => {
       emitChatStream({ type: "text_delta", text: "둘째 답변 작성 중" });
     });
@@ -777,7 +762,7 @@ describe("ChatView", () => {
 
   it("collapses standalone reasoning when thinking completes", async () => {
     const { container, emitChatStream } = await renderApp({ hasApiKey: true });
-    await submitUser(container, "생각만 확인");
+    await submitChatMessage(container, "생각만 확인");
     await act(async () => {
       emitChatStream({ type: "reasoning_delta", text: "완료되면 접혀야 하는 생각" });
     });
@@ -854,7 +839,7 @@ describe("ChatView", () => {
       },
     });
 
-    await submitUser(container, "새 질문");
+    await submitChatMessage(container, "새 질문");
 
     await waitFor(() => {
       expect(container.querySelectorAll('[data-testid="session-date-navigator"]')).toHaveLength(1);
@@ -1056,7 +1041,7 @@ describe("ChatView", () => {
     vi.stubGlobal("cancelAnimationFrame", vi.fn());
 
     const { container, emitChatStream } = await renderApp({ hasApiKey: true });
-    await submitUser(container, "긴 답변 줘");
+    await submitChatMessage(container, "긴 답변 줘");
     await act(async () => {
       emitChatStream({ type: "text_delta", text: "첫 문단" });
     });
@@ -1077,7 +1062,7 @@ describe("ChatView", () => {
     const { container, api, emitChatStream } = await renderApp({ hasApiKey: true });
     const pendingSend = deferred<{ ok: true }>();
     api.chatSend.mockImplementationOnce(async () => pendingSend.promise);
-    await submitUser(container, "직접 도구 호출");
+    await submitChatMessage(container, "직접 도구 호출");
     await act(async () => {
       emitChatStream({ type: "text_delta", text: "도구를 바로 호출하겠습니다" });
       emitChatStream({
@@ -1103,7 +1088,7 @@ describe("ChatView", () => {
 
   it("strips meta markers and renders Markdown for assistant_round text", async () => {
     const { container, emitChatStream } = await renderApp({ hasApiKey: true });
-    await submitUser(container, "마크다운 확인");
+    await submitChatMessage(container, "마크다운 확인");
     await act(async () => {
       emitChatStream({ type: "text_delta", text: "결과는 **정상**입니다.<title>마크다운 렌더링 확인</title>" });
       emitChatStream({
@@ -1128,7 +1113,7 @@ describe("ChatView", () => {
   // inside WorkGroup while the final assistant text stays visible standalone.
   it("keeps reasoning bucketed in WorkGroup while assistant text stays visible (reasoning+tool+end_turn)", async () => {
     const { container, emitChatStream } = await renderApp({ hasApiKey: true });
-    await submitUser(container, "오늘 일정");
+    await submitChatMessage(container, "오늘 일정");
     await act(async () => {
       // reasoning phase
       emitChatStream({ type: "reasoning_delta", text: "사용자 질문을 분석합니다" });

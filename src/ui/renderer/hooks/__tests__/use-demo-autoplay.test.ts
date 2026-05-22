@@ -19,19 +19,21 @@ import { describe, it, expect, vi } from "vitest";
 import { renderHook, act } from "@testing-library/react";
 import { useDemoAutoplay } from "../use-demo-autoplay.js";
 import type { LvisApi } from "../../types.js";
+import { makeMockLvisApi } from "../../../../../test/renderer/mock-lvis-api.js";
 
-function makeApi(options: {
+function demoAutoplayApi(options: {
   demoActivated?: boolean;
   onboardingCompleted?: boolean;
   demoAutoplayEnabled?: boolean;
 } = {}): { api: LvisApi; updateSettings: ReturnType<typeof vi.fn>; getSettings: ReturnType<typeof vi.fn>; demoStatus: ReturnType<typeof vi.fn> } {
-  const updateSettings = vi.fn().mockResolvedValue({ ok: true });
-  const getSettings = vi.fn().mockResolvedValue({
-    features: {
+  const { api } = makeMockLvisApi({
+    settings: {
       // Fresh-install shape — both flags undefined. The hook should still
       // refuse to touch `onboardingCompleted` even when activation succeeds.
-      demoAutoplayEnabled: options.demoAutoplayEnabled,
-      onboardingCompleted: options.onboardingCompleted,
+      features: {
+        demoAutoplayEnabled: options.demoAutoplayEnabled,
+        onboardingCompleted: options.onboardingCompleted,
+      },
     },
   });
   const demoStatus = vi.fn().mockResolvedValue({
@@ -39,19 +41,21 @@ function makeApi(options: {
     activated: options.demoActivated ?? false,
     vendor: options.demoActivated ? "azure-foundry" : null,
   });
-  const api = {
-    getSettings,
-    updateSettings,
-    demo: {
+  api.demo = {
+    ...((api.demo as object) ?? {}),
       status: demoStatus,
-    },
-  } as unknown as LvisApi;
-  return { api, updateSettings, getSettings, demoStatus };
+  };
+  return {
+    api: api as unknown as LvisApi,
+    updateSettings: api.updateSettings as ReturnType<typeof vi.fn>,
+    getSettings: api.getSettings as ReturnType<typeof vi.fn>,
+    demoStatus,
+  };
 }
 
 describe("useDemoAutoplay.onFinished — onboarding chain decoupling", () => {
   it("patches only demoAutoplayEnabled=false (never onboardingCompleted)", async () => {
-    const { api, updateSettings } = makeApi();
+    const { api, updateSettings } = demoAutoplayApi();
     const { result } = renderHook(() => useDemoAutoplay(api));
 
     await act(async () => {
@@ -72,7 +76,7 @@ describe("useDemoAutoplay.onFinished — onboarding chain decoupling", () => {
   });
 
   it("is idempotent — second onFinished does not emit another flag flip", async () => {
-    const { api, updateSettings } = makeApi();
+    const { api, updateSettings } = demoAutoplayApi();
     const { result } = renderHook(() => useDemoAutoplay(api));
 
     await act(async () => {
@@ -89,7 +93,7 @@ describe("useDemoAutoplay.onFinished — onboarding chain decoupling", () => {
   });
 
   it("activates from main demo.status even when renderer env is scrubbed", async () => {
-    const { api, updateSettings, demoStatus } = makeApi({
+    const { api, updateSettings, demoStatus } = demoAutoplayApi({
       demoActivated: true,
       onboardingCompleted: true,
     });
@@ -108,7 +112,7 @@ describe("useDemoAutoplay.onFinished — onboarding chain decoupling", () => {
   });
 
   it("does not activate when main demo.status reports inactive", async () => {
-    const { api, updateSettings, demoStatus } = makeApi({
+    const { api, updateSettings, demoStatus } = demoAutoplayApi({
       demoActivated: false,
       onboardingCompleted: true,
     });
