@@ -8,6 +8,7 @@
 import { vi, type Mock } from "vitest";
 import { cloneDefaultRolePresets } from "../../src/data/role-presets.js";
 import { fakeLlmSettings } from "../../src/shared/__tests__/fake-llm-settings.js";
+import type { StreamEvent } from "../../src/lib/chat-stream-state.js";
 
 export type MockLvisApi = Record<string, Mock>;
 
@@ -16,7 +17,6 @@ type HistoryMock = {
   sessionTitle?: string;
   sessionKind?: "main" | "routine";
   messages: unknown[];
-  estimatedInputTokens?: number;
 };
 
 type ApiOverrides = {
@@ -94,7 +94,7 @@ const DEFAULT_APP_INFO = {
 
 export function makeMockLvisApi(overrides: ApiOverrides = {}): {
   api: MockLvisApi;
-  emitChatStream: (ev: unknown) => void;
+  emitChatStream: (ev: StreamEvent) => void;
   emitOverlayShow: (item: unknown) => void;
   emitOverlayDismiss: (id: string) => void;
   emitRoutineFiredV2: (r: unknown) => void;
@@ -135,7 +135,7 @@ export function makeMockLvisApi(overrides: ApiOverrides = {}): {
     updatedAt: new Date().toISOString(),
   };
 
-  const chatStreamHandlers = new Set<(ev: unknown) => void>();
+  const chatStreamHandlers = new Set<(ev: StreamEvent) => void>();
   const overlayShowHandlers = new Set<(item: unknown) => void>();
   const overlayDismissHandlers = new Set<(id: string) => void>();
   const routineFiredV2Handlers = new Set<(r: unknown) => void>();
@@ -294,9 +294,6 @@ export function makeMockLvisApi(overrides: ApiOverrides = {}): {
           sessionKind: resolvedSessionHistory.sessionKind ?? "main",
           sessionTitle: resolvedSessionHistory.sessionTitle,
           messages: resolvedSessionHistory.messages,
-          ...(resolvedSessionHistory.estimatedInputTokens !== undefined
-            ? { estimatedInputTokens: resolvedSessionHistory.estimatedInputTokens }
-            : {}),
         };
       }
       const resolvedHistory = await history;
@@ -305,9 +302,6 @@ export function makeMockLvisApi(overrides: ApiOverrides = {}): {
         sessionKind: resolvedHistory.sessionKind ?? "main",
         sessionTitle: resolvedHistory.sessionTitle,
         messages: resolvedHistory.messages,
-        ...(resolvedHistory.estimatedInputTokens !== undefined
-          ? { estimatedInputTokens: resolvedHistory.estimatedInputTokens }
-          : {}),
       };
     }),
     chatEditResend: vi.fn(async () => ({ ok: true })),
@@ -325,7 +319,7 @@ export function makeMockLvisApi(overrides: ApiOverrides = {}): {
     chatContinueLastUser: vi.fn(async (_sessionId: string) => ({ ok: true })),
     chatRetryEffort: vi.fn(async () => ({ ok: true })),
     chatExport: vi.fn(async () => ({ ok: true, filePath: "/tmp/out.md" })),
-    onChatStream: vi.fn((h: (ev: unknown) => void) => {
+    onChatStream: vi.fn((h: (ev: StreamEvent) => void) => {
       chatStreamHandlers.add(h);
       return () => chatStreamHandlers.delete(h);
     }),

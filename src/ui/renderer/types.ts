@@ -224,7 +224,15 @@ export type PluginPerfStats = {
 };
 
 // ─── Usage types (Sprint 4.B) ───────────────────────
-export type UsageTotals = { inputTokens: number; outputTokens: number; totalTokens: number; cost: number };
+export type UsageTotals = {
+  inputTokens: number;
+  outputTokens: number;
+  cacheReadTokens: number;
+  cacheWriteTokens: number;
+  totalTokens: number;
+  cost: number;
+  unknownCostTurns?: number;
+};
 export type UsagePerX = UsageTotals & { vendor: string; model: string };
 export type UsageTrendPt = UsageTotals & { date: string };
 export type UsageConv = UsageTotals & { sessionId: string; turns: number; firstInput?: string };
@@ -514,7 +522,7 @@ export type LvisApi = {
   chatSessions: (opts?: { kind?: "main" | "routine" | "all"; routineId?: string; limit?: number; before?: string; beforeId?: string; after?: string }) => Promise<{ current: string; sessions: Array<{ id: string; modifiedAt: string; title: string; sessionKind: "main" | "routine"; routineId?: string; routineTitle?: string; routineFiredAt?: string; branchedFromCompactNum?: number }> }>;
   onChatStream: (h: (e: StreamEvent) => void) => () => void;
   onChatFallback: (h: (payload: { from: string; to: string }) => void) => () => void;
-  chatGetHistory: () => Promise<{ sessionId: string; sessionTitle?: string; sessionKind: "main" | "routine"; routineId?: string; routineTitle?: string; messages: SerializedHistoryMessage[]; estimatedInputTokens?: number }>;
+  chatGetHistory: () => Promise<{ sessionId: string; sessionTitle?: string; sessionKind: "main" | "routine"; routineId?: string; routineTitle?: string; messages: SerializedHistoryMessage[] }>;
   chatMainActiveState: () => Promise<{ mainActiveSessionId: string | null; mainActiveMode: "resume" | "fresh"; updatedAt: string } | null>;
   chatSessionHistory: (sessionId: string) => Promise<{
     ok: boolean;
@@ -524,7 +532,6 @@ export type LvisApi = {
     routineTitle?: string;
     routineFiredAt?: string;
     messages: SerializedHistoryMessage[];
-    estimatedInputTokens?: number;
     /** Chars in the rolling summary preamble applied to this session. 0 = no preamble. */
     preambleChars?: number;
   }>;

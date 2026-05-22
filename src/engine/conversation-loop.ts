@@ -10,7 +10,7 @@
 import { ConversationHistory, normalizeToolPairInvariant } from "./conversation-history.js";
 import { ToolExecutor, type ToolResult, type ToolUseBlock } from "../tools/executor.js";
 import { HookRunner } from "../hooks/hook-runner.js";
-import { markStaleToolResults, estimateMessagesTokens, getModelPreflightThreshold, getModelUsableContext, isContextLengthError } from "./auto-compact.js";
+import { markStaleToolResults, estimateMessagesTokens, estimateTokens, getModelPreflightThreshold, getModelUsableContext, isContextLengthError } from "./auto-compact.js";
 
 /**
  * 사용자가 반복적으로 context_error 유발 input 보낼 때 compact API 호출
@@ -24,13 +24,16 @@ import { CompressionStatus } from "../shared/compact-status.js";
 import { stripSuggestedReplies } from "./suggested-replies.js";
 import { createProvider, secretKeyFor } from "./llm/provider-factory.js";
 import { FallbackProvider, type FallbackStatus } from "./llm/vercel/fallback-chain.js";
+import { normalizeAiSdkUsageForCost } from "./llm/pricing.js";
 import type {
   GenericMessage,
+  LLMVendor,
   LLMProvider,
   MessageMeta,
   ProviderConfig,
   ToolSchema,
   TokenUsage,
+  TokenUsageByModel,
 } from "./llm/types.js";
 import { collectRoundStream } from "./turn/stream-collector.js";
 import {
@@ -72,6 +75,98 @@ const AI_PROVIDER_PING_TIMEOUT_MS = 8_000;
 
 function isSafeSessionId(sessionId: unknown): sessionId is string {
   return typeof sessionId === "string" && SESSION_ID_REGEX.test(sessionId);
+}
+
+function latestPersistedContextTokens(messages: GenericMessage[]): number {
+  let latestTurnSummaryTokens = 0;
+  let latestTurnSummaryCreatedAt = 0;
+  for (let i = messages.length - 1; i >= 0; i--) {
+    const contextTokensAfter = messages[i]?.meta?.checkpointMeta?.contextTokensAfter;
+    if (
+      typeof contextTokensAfter === "number" &&
+      Number.isFinite(contextTokensAfter) &&
+      contextTokensAfter > 0
+    ) {
+      const compactedAt = messages[i]?.meta?.createdAt;
+      if (
+        latestTurnSummaryTokens > 0 &&
+        typeof compactedAt === "number" &&
+        Number.isFinite(compactedAt) &&
+        latestTurnSummaryCreatedAt > compactedAt
+      ) {
+        return latestTurnSummaryTokens;
+      }
+      return Math.floor(contextTokensAfter);
+    }
+    const tokensIn = messages[i]?.meta?.turnSummary?.tokensIn;
+    if (typeof tokensIn === "number" && Number.isFinite(tokensIn) && tokensIn > 0) {
+      latestTurnSummaryTokens = Math.floor(tokensIn);
+      const createdAt = messages[i]?.meta?.createdAt;
+      latestTurnSummaryCreatedAt =
+        typeof createdAt === "number" && Number.isFinite(createdAt) ? createdAt : 0;
+    }
+  }
+  return latestTurnSummaryTokens;
+}
+
+function compactedHistoryWithContextCarrier(
+  messages: GenericMessage[],
+  contextTokensAfter: number,
+): GenericMessage[] {
+  let contextCarrierAttached = false;
+  return messages.map((message) => {
+    const meta = message.meta;
+    if (!meta) return message;
+    const nextMeta: MessageMeta = { ...meta };
+    delete nextMeta.turnSummary;
+    if (!contextCarrierAttached && nextMeta.checkpointMeta) {
+      nextMeta.checkpointMeta = {
+        ...nextMeta.checkpointMeta,
+        contextTokensAfter,
+      };
+      contextCarrierAttached = true;
+    }
+    return { ...message, meta: nextMeta };
+  });
+}
+
+function contentTruncatedHistoryWithContextCarrier(params: {
+  messages: GenericMessage[];
+  compactNum: number;
+  trigger: "auto-compact" | "manual";
+  removedCount: number;
+  freedTokens: number;
+  estimatedAfter: number;
+  truncatedDir?: string;
+}): { history: GenericMessage[]; contextTokensAfter: number; createdAt: string } {
+  const createdAt = new Date().toISOString();
+  const checkpointContent = `[compact #${params.compactNum}: content truncated]`;
+  const checkpoint: GenericMessage = {
+    role: "user",
+    content: checkpointContent,
+    meta: {
+      compactBoundary: true,
+      compactNum: params.compactNum,
+      removedCount: params.removedCount,
+      compactedAt: createdAt,
+      createdAt: new Date(createdAt).getTime(),
+      checkpointMeta: {
+        removedMessages: params.removedCount,
+        freedTokens: params.freedTokens,
+        compactNum: params.compactNum,
+        trigger: params.trigger,
+        compactStatus: CompressionStatus.CONTENT_TRUNCATED,
+        summary: `${params.removedCount}개 메시지 부분 절단됨`,
+        ...(params.truncatedDir !== undefined ? { truncatedDir: params.truncatedDir } : {}),
+      },
+    },
+  };
+  const contextTokensAfter = params.estimatedAfter + estimateMessagesTokens([checkpoint]);
+  return {
+    history: compactedHistoryWithContextCarrier([checkpoint, ...params.messages], contextTokensAfter),
+    contextTokensAfter,
+    createdAt,
+  };
 }
 const FILE_CONTENT_RESULT_TOOLS = new Set([
   "read_file",
@@ -186,7 +281,7 @@ export interface TurnCallbacks {
    * which fires on completion.
    */
   onCompactStarted?: (info: {
-    triggerSource: "estimate" | "actual-tokensIn" | "manual" | "force-recover";
+    triggerSource: "estimate" | "context-tokens" | "manual" | "force-recover";
     estimatedBefore: number;
     preflight: number;
   }) => void;
@@ -226,10 +321,10 @@ export interface TurnCallbacks {
     toolCount: number;
     cumulativeToolMs: number;
     /**
-     * `tokensIn` = the LAST round's raw input tokens (prompt size at turn
-     * end, includes cache reads). Used by TokenProgressRing to render the
-     * "context window fill" indicator — cache reads still occupy context
-     * window slots, so the ring needs the full size.
+     * `tokensIn` = the turn-end projected context input. This is the
+     * provider-calibrated input size the next request would carry after the
+     * final assistant output/tool results have been appended. TokenProgressRing
+     * and the turn footer both use this same context-fill SOT.
      */
     tokensIn: number;
     /**
@@ -237,10 +332,9 @@ export interface TurnCallbacks {
      * `inputTokens − cacheReadTokens − cacheWriteTokens`). This is the
      * billing-weight number the TokenCostBadge needs — fresh tokens are
      * billed at full input price, while cached reads are billed at 10%.
-     * Splitting `tokensIn` (last-round raw, for size) from `freshInputTokens`
-     * (turn-aggregate fresh, for billing) avoids the prior bug where the
-     * badge subtracted whole-turn cache from one round's input and ended up
-     * showing 0 fresh on multi-round (tool-using) turns.
+     * Splitting `tokensIn` (context-fill SOT) from `freshInputTokens`
+     * (turn-aggregate fresh, for billing) keeps the ring/footer context number
+     * separate from cost arithmetic.
      */
     freshInputTokens: number;
     tokensOut: number;
@@ -252,6 +346,14 @@ export interface TurnCallbacks {
      */
     cacheReadTokens?: number;
     cacheWriteTokens?: number;
+    /**
+     * Provider/model that actually served this turn after fallback resolution.
+     * Persisted with turn_summary so historical cost badges never re-price old
+     * turns with the user's current settings.
+     */
+    vendorProvider?: LLMVendor;
+    vendorModel?: string;
+    usageByModel?: TokenUsageByModel[];
     breakdown?: Record<string, { count: number; ms: number }>;
   }) => void;
 }
@@ -273,6 +375,7 @@ export interface TurnResult {
   toolCalls: Array<{ name: string; input: Record<string, unknown>; result: string }>;
   route: string;
   usage?: TokenUsage;
+  usageByModel?: TokenUsageByModel[];
   stopReason?: TurnStopReason;
 }
 
@@ -409,18 +512,26 @@ export class ConversationLoop {
   private tracer: ConversationTracer = createTracer(this.sessionId);
   private cumulativeUsage: TokenUsage = { inputTokens: 0, outputTokens: 0 };
   /**
-   * 마지막 round 의 raw inputTokens — turn_summary.tokensIn 으로 forward.
-   * "이번 turn 의 prompt 가 얼마나 컸나" (size 의도). queryLoop 에서 매 round
-   * overwrite, runTurn 의 turn_summary emit 시 read. billing 합산 (turnUsage)
-   * 와 다른 metric.
+   * 마지막 round 의 provider raw inputTokens. turn_summary.tokensIn 을 직접
+   * 채우는 값이 아니라, 턴 종료 context-fill SOT 를 provider 값으로 보정하기
+   * 위한 기준점이다.
    */
   private lastRoundInputTokens = 0;
   /**
-   * Latest provider-reported raw input size. Unlike `cumulativeUsage`, this
-   * is a context-window metric, not a session billing sum. Preflight uses it
-   * as the actual-token secondary signal when the local estimator undercounts.
+   * Local wire-shape estimate for the history submitted to the latest provider
+   * round. Combined with `lastRoundInputTokens` at turn end to project what the
+   * *next* request will carry after the final assistant output is appended.
    */
-  private lastProviderInputTokens = 0;
+  private lastRoundEstimatedInputTokens = 0;
+  /**
+   * Latest context-fill SOT. Successful turns store turn_summary.tokensIn here;
+   * compact paths store their post-compact estimate. During an in-flight
+   * multi-round turn it temporarily follows the latest provider raw input as a
+   * calibration anchor until turn end recomputes the projected value.
+   */
+  private lastContextInputTokens = 0;
+  /** Local message-shape estimate corresponding to `lastContextInputTokens`. */
+  private lastContextEstimatedInputTokens = 0;
   /** B4: current turn's AbortController — abortCurrentTurn() calls .abort() */
   currentAbortController: AbortController | null = null;
   /**
@@ -757,7 +868,8 @@ export class ConversationLoop {
     this.history.clear();
     this.cumulativeUsage = { inputTokens: 0, outputTokens: 0 };
     this.lastRoundInputTokens = 0;
-    this.lastProviderInputTokens = 0;
+    this.lastContextInputTokens = 0;
+    this.lastContextEstimatedInputTokens = 0;
     this.sessionPluginExpansions = 0;
     this.compactNum = 0;
     this.tracer = createTracer(this.sessionId);
@@ -985,7 +1097,8 @@ export class ConversationLoop {
     this.history.restore(normalized.messages);
     this.cumulativeUsage = { inputTokens: 0, outputTokens: 0 };
     this.lastRoundInputTokens = 0;
-    this.lastProviderInputTokens = 0;
+    this.lastContextInputTokens = latestPersistedContextTokens(normalized.messages);
+    this.lastContextEstimatedInputTokens = estimateMessagesTokens(normalized.messages);
     this.sessionPluginExpansions = 0;
     this.sessionAdditionalDirectories = [];
     this.turnAdditionalDirectories = [];
@@ -1040,7 +1153,6 @@ export class ConversationLoop {
       outputTokens: 0,
     };
     this.lastRoundInputTokens = 0;
-    this.lastProviderInputTokens = 0;
 
     return {
       ok: true,
@@ -1221,13 +1333,6 @@ export class ConversationLoop {
       throw new Error(err);
     }
 
-    // Snapshot vendor/model now so audit attribution survives mid-turn
-    // settings mutation (retry-effort patches thinking config and reverts
-    // in finally; user can switch vendor while a turn is streaming).
-    const llm = this.deps.settingsService.get("llm");
-    const turnVendorProvider = llm.provider;
-    const turnVendorModel = llm.vendors[llm.provider].model;
-
     // B4: set up abort controller for this turn
     const ac = new AbortController();
     this.currentAbortController = ac;
@@ -1267,10 +1372,11 @@ export class ConversationLoop {
     let turnTokensIn = 0;
     let turnTokensOut = 0;
     // queryLoop 가 별 method 라 마지막 round 의 raw inputTokens 를 instance
-    // field 로 share. queryLoop 가 매 round set, runTurn 이 turn_summary
-    // emit 시 read. 의도: "이번 turn 의 prompt size" 사용자 직관 (사용자
-    // 보고 2026-05-07: 합산은 10× over-count 처럼 보임).
+    // field 로 share. runTurn 은 이 provider 값에 post-turn history delta 를
+    // 더해 context-fill SOT 를 만든다.
     this.lastRoundInputTokens = 0;
+    this.lastRoundEstimatedInputTokens = 0;
+    this.lastContextEstimatedInputTokens = estimateMessagesTokens(this.history.getMessages());
     let turnToolCount = 0;
     let turnCumulativeToolMs = 0;
     const turnToolStarts = new Map<string, number>();
@@ -1454,9 +1560,10 @@ export class ConversationLoop {
         output: result.text,
         toolCalls: result.toolCalls.map((tc) => ({ name: tc.name, isError: false })),
         tokenUsage: result.usage,
+        usageByModel: result.usageByModel,
         route: routeResult.route,
-        vendorProvider: turnVendorProvider,
-        vendorModel: turnVendorModel,
+        vendorProvider: result.vendorProvider,
+        vendorModel: result.vendorModel,
       });
       // PostTurnHookChain owns the durable transcript projection: mark-stale
       // compaction plus marker-stripped assistant output. Keep in-memory history
@@ -1488,17 +1595,15 @@ export class ConversationLoop {
       // PostTurnHookChain에서 이미 처리하므로 fallback에서도 호출하지 않는다.
       // PostTurnHookChain을 주입한 경우와 fallback 모두 memory 추출은
       // hook chain의 memory-extract 단계에서만 일어난다.
-      if (this.isAutoCompactEnabled()) {
-        // Tool-result marking — 항상 실행, 저비용. child loop 에서도 작동.
-        // token preflight (next turn) 가 동등 압축 처리.
-        // child loop 은 fire-and-forget 이라 turn budget 짧음 → markStaleToolResults 만으로 충분.
-        const { messages: afterMark, result: mr } = markStaleToolResults(this.history.getMessages());
-        if (mr.marked) {
-          this.history.clear();
-          this.history.restore(afterMark);
-          if (process.env.NODE_ENV !== "production") {
-            log.info(`mark-stale (fallback): marked ${mr.markedCount} tool_results, ~${mr.freedCharsOnSerialize} chars saved on serialize`);
-          }
+      // Tool-result marking — 항상 실행, 저비용. child loop 에서도 작동.
+      // token preflight (next turn) 가 동등 압축 처리.
+      // child loop 은 fire-and-forget 이라 turn budget 짧음 → markStaleToolResults 만으로 충분.
+      const { messages: afterMark, result: mr } = markStaleToolResults(this.history.getMessages());
+      if (mr.marked) {
+        this.history.clear();
+        this.history.restore(afterMark);
+        if (process.env.NODE_ENV !== "production") {
+          log.info(`mark-stale (fallback): marked ${mr.markedCount} tool_results, ~${mr.freedCharsOnSerialize} chars saved on serialize`);
         }
       }
       if (!this.deps.disableSessionPersistence) {
@@ -1510,15 +1615,21 @@ export class ConversationLoop {
       // otherwise log every sub-agent LLM turn as the bare `"llm"` route
       // and lose vendor/model granularity in `~/.lvis/audit.jsonl`.
       const auditRoute =
-        routeResult.route === "llm"
-          ? `${turnVendorProvider}/${turnVendorModel}`
+        result.usage
+          ? `${result.vendorProvider}/${result.vendorModel}`
           : routeResult.route;
+      const auditTokenUsage = normalizeAiSdkUsageForCost(result.usage, result.vendorProvider);
+      const auditUsageByModel = result.usageByModel?.map((segment) => ({
+        ...segment,
+        tokenUsage: normalizeAiSdkUsageForCost(segment.tokenUsage, segment.vendorProvider),
+      }));
       this.auditLogger.logTurn({
         sessionId: this.sessionId,
         input,
         output: result.text,
         toolCalls: result.toolCalls.map((tc) => ({ name: tc.name, isError: false })),
-        tokenUsage: result.usage,
+        tokenUsage: auditTokenUsage,
+        usageByModel: auditUsageByModel,
         route: auditRoute,
       });
       this.deps.idleScheduler?.signalConversation();
@@ -1552,16 +1663,24 @@ export class ConversationLoop {
       `turn_summary: emit decision — stopReason="${result.stopReason}" textLen=${result.text?.trim().length ?? 0} usage=${result.usage ? `in=${result.usage.inputTokens} out=${result.usage.outputTokens}` : "MISSING"} → willEmit=${willEmitSummary}`,
     );
     if (willEmitSummary) {
-      // tokensIn = 마지막 round 의 prompt size (TokenProgressRing 의 "컨텍스트
-      //   윈도우 fill" 표시용 — cache 읽기도 컨텍스트 슬롯을 차지하므로 raw 가
-      //   맞음).
+      // tokensIn = turn-end projected context input. It is calibrated from
+      //   provider-truth last-round raw input plus the local wire-shape delta
+      //   produced after that provider request. This is the single context-fill
+      //   SOT used by both TokenProgressRing and the footer.
       // tokensOut / cacheRead / cacheWrite = turn 전체 합산 (billing 누적).
       // freshInputTokens = turn 전체 fresh 합산 (TokenCostBadge headline +
       //   cost 계산용 — 라운드별 (inputTokens − cacheRead − cacheWrite) 의 합).
       //   `result.usage` 는 turn-aggregate (queryLoop:1098 turnUsage), 그러므로
       //   여기서 단순 산수만 하면 정확. 이전 badge 버그는 last-round raw 와
       //   turn-aggregate cache 를 빼느라 음수 → 0 으로 잘리던 mismatch.
-      turnTokensIn = this.lastRoundInputTokens;
+      const postTurnEstimatedInputTokens = estimateMessagesTokens(this.history.getMessages());
+      const projectedDelta = postTurnEstimatedInputTokens - this.lastRoundEstimatedInputTokens;
+      turnTokensIn =
+        this.lastRoundInputTokens > 0
+          ? Math.max(0, this.lastRoundInputTokens + projectedDelta)
+          : postTurnEstimatedInputTokens;
+      this.lastContextInputTokens = turnTokensIn;
+      this.lastContextEstimatedInputTokens = postTurnEstimatedInputTokens;
       turnTokensOut = result.usage?.outputTokens ?? 0;
       const turnCacheRead = result.usage?.cacheReadTokens ?? 0;
       const turnCacheWrite = result.usage?.cacheWriteTokens ?? 0;
@@ -1573,6 +1692,13 @@ export class ConversationLoop {
         turnToolBreakdown.size > 0
           ? Object.fromEntries(turnToolBreakdown.entries())
           : undefined;
+      const uniqueUsageModelKeys = new Set(
+        result.usageByModel?.map((segment) => `${segment.vendorProvider}\u0000${segment.vendorModel}`) ?? [],
+      );
+      const singleUsageModel =
+        uniqueUsageModelKeys.size === 1 && result.usageByModel?.[0]
+          ? result.usageByModel[0]
+          : undefined;
       const turnSummaryPayload = {
         turnDurationMs: Math.max(0, Date.now() - turnStartedAt),
         toolCount: turnToolCount,
@@ -1582,6 +1708,13 @@ export class ConversationLoop {
         tokensOut: turnTokensOut,
         ...(turnCacheRead > 0 ? { cacheReadTokens: turnCacheRead } : {}),
         ...(turnCacheWrite > 0 ? { cacheWriteTokens: turnCacheWrite } : {}),
+        ...(singleUsageModel
+          ? {
+              vendorProvider: singleUsageModel.vendorProvider,
+              vendorModel: singleUsageModel.vendorModel,
+            }
+          : {}),
+        ...(result.usageByModel.length > 0 ? { usageByModel: result.usageByModel } : {}),
         ...(breakdown ? { breakdown } : {}),
       };
       // Persist turn-aggregate stats onto the turn-final assistant message so
@@ -1660,14 +1793,60 @@ export class ConversationLoop {
       toolTrustOrigin: ToolTrustOrigin;
       permissionUserIntent?: string;
     },
-  ): Promise<{ text: string; toolCalls: Array<{ name: string; input: Record<string, unknown>; result: string }>; usage?: TokenUsage; stopReason?: TurnStopReason }> {
+  ): Promise<{
+    text: string;
+    toolCalls: Array<{ name: string; input: Record<string, unknown>; result: string }>;
+    usage?: TokenUsage;
+    stopReason?: TurnStopReason;
+    usageByModel: TokenUsageByModel[];
+    vendorProvider: LLMVendor;
+    vendorModel: string;
+  }> {
     const llmSettings = this.deps.settingsService.get("llm");
     const activeBlock = llmSettings.vendors[llmSettings.provider];
     const model = activeBlock.model;
+    let servingVendorProvider: LLMVendor = llmSettings.provider;
+    let servingVendorModel = model;
+    const usageByModel: TokenUsageByModel[] = [];
+    const addUsageForServingModel = (usage: TokenUsage): void => {
+      usageByModel.push({
+        vendorProvider: servingVendorProvider,
+        vendorModel: servingVendorModel,
+        tokenUsage: {
+          inputTokens: usage.inputTokens,
+          outputTokens: usage.outputTokens,
+          ...(usage.cacheReadTokens !== undefined ? { cacheReadTokens: usage.cacheReadTokens } : {}),
+          ...(usage.cacheWriteTokens !== undefined ? { cacheWriteTokens: usage.cacheWriteTokens } : {}),
+        },
+      });
+    };
+    const withServingIdentity = (
+      result: {
+        text: string;
+        toolCalls: Array<{ name: string; input: Record<string, unknown>; result: string }>;
+        usage?: TokenUsage;
+        stopReason?: TurnStopReason;
+      },
+    ) => ({
+      ...result,
+      usageByModel: [...usageByModel],
+      vendorProvider: servingVendorProvider,
+      vendorModel: servingVendorModel,
+    });
     const turnProvider = this.provider instanceof FallbackProvider
       ? this.provider.withCallbacks({
         onFallback: callbacks?.onFallback,
-        onStatus: callbacks?.onLlmStatus,
+        onStatus: (status) => {
+          if (
+            (status.phase === "attempt" || status.phase === "retry") &&
+            status.provider &&
+            status.model
+          ) {
+            servingVendorProvider = status.provider;
+            servingVendorModel = status.model;
+          }
+          callbacks?.onLlmStatus?.(status);
+        },
       })
       : this.provider!;
     // Phase 1.5 Option C: scope is mutable within the turn. Mutating the
@@ -1707,13 +1886,13 @@ export class ConversationLoop {
         callbacks?.onError?.(
           `라운드 한도 (${effectiveMaxRounds}) 도달 — 작업이 중단됐습니다. 더 진행하려면 새 메시지를 보내세요.`,
         );
-        return {
+        return withServingIdentity({
           text: allToolCalls.length > 0
             ? `(round cap ${effectiveMaxRounds} reached — last assistant text: ${this.history.getMessages().filter((m) => m.role === "assistant").slice(-1)[0]?.content ?? ""})`
             : `(round cap ${effectiveMaxRounds} reached without assistant output)`,
           toolCalls: allToolCalls,
           usage: turnUsage,
-        };
+        });
       }
       // Round-boundary guidance inject — drain any "guide" utterances
       // queued via `ConversationLoop.queueGuidance` while the previous
@@ -1779,11 +1958,13 @@ export class ConversationLoop {
       }
 
       // ─── Stream attempt — token preflight 가 사전 압축 처리하므로 mid-loop retry 없음 ───
+      const messagesForRound = this.history.getMessages();
+      this.lastRoundEstimatedInputTokens = estimateMessagesTokens(messagesForRound);
       const stream = await collectRoundStream({
         provider: turnProvider,
         model,
         systemPrompt,
-        messages: this.history.getMessages(),
+        messages: messagesForRound,
         toolSchemas,
         llmSettings: { ...activeBlock, streamSmoothing: llmSettings.streamSmoothing },
         abortSignal,
@@ -1822,7 +2003,7 @@ export class ConversationLoop {
         // 보내면 자동 압축이 다시 시도됩니다". Set a pending flag so the next
         // runPreflightGuard force-triggers compact regardless of threshold.
         this.contextErrorPending = true;
-        return { text: userMsg, toolCalls: allToolCalls, usage: turnUsage, stopReason: "context-error" };
+        return withServingIdentity({ text: userMsg, toolCalls: allToolCalls, usage: turnUsage, stopReason: "context-error" });
       }
 
       if (stream.kind === "stream_error") {
@@ -1846,7 +2027,7 @@ export class ConversationLoop {
         if (isContextLengthError(stream.userMessage)) {
           this.contextErrorPending = true;
         }
-        return { text: stream.userMessage, toolCalls: allToolCalls, usage: turnUsage, stopReason: "stream-error" };
+        return withServingIdentity({ text: stream.userMessage, toolCalls: allToolCalls, usage: turnUsage, stopReason: "stream-error" });
       }
 
       if (stream.kind === "interrupted") {
@@ -1866,7 +2047,7 @@ export class ConversationLoop {
         const savedText = stripSuggestedReplies(stream.text ?? "") + "\n\n[중단됨]";
         this.history.append({ role: "assistant", content: savedText });
         callbacks?.onTextDelta?.("\n\n[중단됨]");
-        return { text: savedText, toolCalls: allToolCalls, usage: turnUsage, stopReason: "interrupted" };
+        return withServingIdentity({ text: savedText, toolCalls: allToolCalls, usage: turnUsage, stopReason: "interrupted" });
       }
 
       // stream.kind === "ok" — usage 반영 + assistant round commit
@@ -1875,24 +2056,27 @@ export class ConversationLoop {
       //   AI SDK v6 normalized inputTokens include cached tokens across
       //   providers, so subtract cacheRead/cacheWrite to get fresh input.
       //
-      // 1) turnUsage 는 모든 round 합산 (이전: `=` 으로 마지막 round 만 보존
+      // 1) turnUsage 는 모든 round 의 AI SDK normalized usage 합산
+      //    (이전: `=` 으로 마지막 round 만 보존
       //    → multi-round turn 의 turn_summary 가 under-report 되던 버그).
       // 2) cumulativeUsage.inputTokens 는 fresh input 만 누적 (cached 빼서)
       //    → long session 에서 cached prefix 가 매 turn 누적되어 ctxUsage 가
       //    조기에 100% 도달, auto-compact 가 premature 발화하던 root cause 해소.
       // 3) cache read/write 는 별도 누적 — 비용 계산은 다른 가중치 (read 0.1×,
-      //    write 1.25×) 적용 가능하도록 분리 보존.
+      //    write 1.25×) 적용 가능하도록 분리 보존. Audit/UsageDashboard
+      //    경계에서는 `normalizeAiSdkUsageForCost` 로 computeCost 계약에 맞춘다.
       if (stream.usage) {
         const u = stream.usage;
         const cacheRead = u.cacheReadTokens ?? 0;
         const cacheWrite = u.cacheWriteTokens ?? 0;
         const adjustedIn = Math.max(0, u.inputTokens - cacheRead - cacheWrite);
 
-        // Last-round overwrite (instance field — runTurn 의 turn_summary
-        // emit 이 read). turn_summary.tokensIn 의 size 의도. billing 합산은
-        // turnUsage.inputTokens / cumulativeUsage 가 별도 추적.
+        // Last-round overwrite. runTurn uses this as the provider-calibration
+        // anchor for turn_summary.tokensIn; billing 합산은 turnUsage.inputTokens /
+        // cumulativeUsage 가 별도 추적.
         this.lastRoundInputTokens = u.inputTokens;
-        this.lastProviderInputTokens = u.inputTokens;
+        this.lastContextInputTokens = u.inputTokens;
+        this.lastContextEstimatedInputTokens = this.lastRoundEstimatedInputTokens;
 
         turnUsage = {
           inputTokens: (turnUsage?.inputTokens ?? 0) + u.inputTokens,
@@ -1900,6 +2084,12 @@ export class ConversationLoop {
           cacheReadTokens: (turnUsage?.cacheReadTokens ?? 0) + cacheRead,
           cacheWriteTokens: (turnUsage?.cacheWriteTokens ?? 0) + cacheWrite,
         };
+        addUsageForServingModel({
+          inputTokens: u.inputTokens,
+          outputTokens: u.outputTokens,
+          cacheReadTokens: cacheRead,
+          cacheWriteTokens: cacheWrite,
+        });
 
         this.cumulativeUsage.inputTokens += adjustedIn;
         this.cumulativeUsage.outputTokens += u.outputTokens;
@@ -2001,7 +2191,7 @@ export class ConversationLoop {
             `응답이 ${stopReason ?? "알 수 없는 이유"} 로 조기 종료됐습니다 (round ${roundIndex}). 추가 응답 필요 시 후속 메시지로 요청하세요.`,
           );
         }
-        return { text: textContent, toolCalls: allToolCalls, usage: turnUsage, stopReason };
+        return withServingIdentity({ text: textContent, toolCalls: allToolCalls, usage: turnUsage, stopReason });
       }
 
       // §4.5.6 tool execution — request_plugin 가로채기 + knowledge depth cap + executor 호출
@@ -2136,7 +2326,7 @@ export class ConversationLoop {
       }
     }
 
-    return { text: "(도구 실행 라운드 한도 초과)", toolCalls: allToolCalls, usage: turnUsage };
+    return withServingIdentity({ text: "(도구 실행 라운드 한도 초과)", toolCalls: allToolCalls, usage: turnUsage });
   }
 
   /** Tool registry → LLM 이 받는 ToolSchema 배열로 변환. scope 필터 반영. */
@@ -2180,7 +2370,8 @@ export class ConversationLoop {
     /** §C1: verbatim pre-compact messages — persisted as checkpoint snapshot for branchFromCheckpoint. */
     messagesBefore: import("./llm/types.js").GenericMessage[],
   ): Promise<void> {
-    // CONTENT_TRUNCATED 경로 — boundary 없이 history 만 갱신. truncation 은
+    // CONTENT_TRUNCATED 경로 — LLM summary boundary 는 없지만 reload/branch
+    // parity 를 위해 lightweight checkpoint carrier 를 삽입한다. Truncation 은
     // 메시지를 stub 으로 대체하지 않고 in-place clip 이므로 boundary preamble
     // 변경 불필요. 그러나 chain consistency 위해 compactNum 은 bump (M-Critic-2).
     // cacheReadTokens/cacheWriteTokens 는 보존 — boundary 가 없으므로 provider
@@ -2188,20 +2379,57 @@ export class ConversationLoop {
     // 빌링이 부풀려진다.
     if (result.boundary === null) {
       this.compactNum += 1;
+      const freedTokens = Math.max(0, estimatedBefore - result.estimatedAfter);
+      const truncated = contentTruncatedHistoryWithContextCarrier({
+        messages: result.newHistory,
+        compactNum: this.compactNum,
+        trigger,
+        removedCount: result.removedCount,
+        freedTokens,
+        estimatedAfter: result.estimatedAfter,
+        ...(result.truncatedDir !== undefined ? { truncatedDir: result.truncatedDir } : {}),
+      });
+      try {
+        await this.deps.memoryManager.saveCheckpointSnapshot(
+          this.sessionId,
+          this.compactNum,
+          messagesBefore,
+        );
+        const llmSettings = this.deps.settingsService.get("llm");
+        const provider = llmSettings.provider;
+        const model = llmSettings.vendors[provider].model;
+        const usable = getModelUsableContext(provider, model);
+        const ctxUsageAtTrigger = usable > 0 ? Math.min(1.0, estimatedBefore / usable) : 0;
+        const checkpointEntry: import("../memory/memory-manager.js").Checkpoint = {
+          id: crypto.randomUUID(),
+          triggeredAt: truncated.createdAt,
+          trigger,
+          ctxUsageAtTrigger,
+          summary: `${result.removedCount}개 메시지 부분 절단됨`,
+          messageCountAtTrigger: prevMessageCount,
+          compactNum: this.compactNum,
+        };
+        const existingMeta = this.deps.memoryManager.loadSessionMetadata(this.sessionId) ?? {};
+        const updatedMeta = this.deps.memoryManager.appendCheckpoint(existingMeta, checkpointEntry);
+        await this.deps.memoryManager.saveSessionMetadata(this.sessionId, updatedMeta);
+      } catch (storageErr) {
+        log.warn(`applyBoundaryToSession: content-truncated checkpoint persist failed — ${(storageErr as Error).message}`);
+      }
       this.history.clear();
-      this.history.restore([...result.newHistory]);
+      this.history.restore(truncated.history);
       this.cumulativeUsage = {
         ...this.cumulativeUsage,
-        inputTokens: result.estimatedAfter,
+        inputTokens: truncated.contextTokensAfter,
       };
-      this.lastProviderInputTokens = result.estimatedAfter;
+      this.lastContextInputTokens = truncated.contextTokensAfter;
+      this.lastContextEstimatedInputTokens = truncated.contextTokensAfter;
       callbacks?.onCompactOccurred?.({
         removedMessages: result.removedCount,
-        freedTokens: Math.max(0, estimatedBefore - result.estimatedAfter),
+        freedTokens,
         trigger,
         compactNum: this.compactNum,
         summary: `${result.removedCount}개 메시지 부분 절단됨`,
-        estimatedAfter: result.estimatedAfter,
+        estimatedAfter: truncated.contextTokensAfter,
         compactStatus: result.status,
         ...(result.truncatedDir !== undefined ? { truncatedDir: result.truncatedDir } : {}),
       });
@@ -2224,17 +2452,20 @@ export class ConversationLoop {
       log.warn(`applyBoundaryToSession: saveCheckpointSnapshot failed — ${(snapshotErr as Error).message}`);
     }
 
-    this.history.clear();
-    this.history.restore([...result.newHistory]);
     const preamble = renderBoundaryAsPreamble(result.boundary);
+    const contextTokensAfter = result.estimatedAfter + estimateTokens(preamble);
+    const compactedHistory = compactedHistoryWithContextCarrier(result.newHistory, contextTokensAfter);
+    this.history.clear();
+    this.history.restore(compactedHistory);
     this.deps.systemPromptBuilder.setSummaryPreamble?.(preamble);
     this.cumulativeUsage = {
-      inputTokens: result.estimatedAfter,
+      inputTokens: contextTokensAfter,
       outputTokens: this.cumulativeUsage.outputTokens,
       ...(this.cumulativeUsage.cacheReadTokens !== undefined && { cacheReadTokens: 0 }),
       ...(this.cumulativeUsage.cacheWriteTokens !== undefined && { cacheWriteTokens: 0 }),
     };
-    this.lastProviderInputTokens = result.estimatedAfter;
+    this.lastContextInputTokens = contextTokensAfter;
+    this.lastContextEstimatedInputTokens = result.estimatedAfter;
 
     // Same-session checkpoint chain.
     // ctxUsageAtTrigger 분모는 *usable context window* (LVIS reservation 적용).
@@ -2265,8 +2496,8 @@ export class ConversationLoop {
 
     callbacks?.onCompactOccurred?.({
       removedMessages: result.removedCount,
-      freedTokens: Math.max(0, estimatedBefore - result.estimatedAfter),
-      estimatedAfter: result.estimatedAfter,
+      freedTokens: Math.max(0, estimatedBefore - contextTokensAfter),
+      estimatedAfter: contextTokensAfter,
       trigger,
       summary: preamble,
       compactNum: this.compactNum,
@@ -2340,16 +2571,18 @@ export class ConversationLoop {
     const estimated = estimateMessagesTokens(messagesBefore);
     // Two-signal preflight: estimateMessagesTokens (chars/4 heuristic) can
     // undercount real provider tokens on code-heavy content. Pair it with the
-    // last provider-reported prompt size. Do not use cumulativeUsage here:
-    // session billing sums grow every turn and are not a context-window fill
-    // metric.
-    const actualTokensIn = this.lastProviderInputTokens;
-    if (!forceRecover && estimated < preflight && actualTokensIn < preflight) return;
-    const triggerSource: "estimate" | "actual-tokensIn" | "force-recover" = forceRecover
+    // latest context-fill SOT. Do not use cumulativeUsage here: session billing
+    // sums grow every turn and are not a context-window fill metric.
+    const pendingInputDelta = Math.max(0, estimated - this.lastContextEstimatedInputTokens);
+    const contextTokensIn = this.lastContextInputTokens > 0
+      ? this.lastContextInputTokens + pendingInputDelta
+      : estimated;
+    if (!forceRecover && estimated < preflight && contextTokensIn < preflight) return;
+    const triggerSource: "estimate" | "context-tokens" | "force-recover" = forceRecover
       ? "force-recover"
       : estimated >= preflight
         ? "estimate"
-        : "actual-tokensIn";
+        : "context-tokens";
 
     this.isCompacting = true;
     // Notify renderer immediately so it can show a "자동 압축 중..." indicator
@@ -2362,7 +2595,7 @@ export class ConversationLoop {
     });
     try {
       log.info(
-        `preflight: TRIGGER — source=${triggerSource} estimated=${estimated} actualTokensIn=${actualTokensIn} preflight=${preflight} (model=${provider}/${model}) → LLM compact #${this.compactNum + 1}`,
+        `preflight: TRIGGER — source=${triggerSource} estimated=${estimated} contextTokensIn=${contextTokensIn} preflight=${preflight} (model=${provider}/${model}) → LLM compact #${this.compactNum + 1}`,
       );
       // Adaptive token-budget preserve — usagePct 가 높을수록 줄인다. 별도 invariant 로
       // compactWithBoundary 가 최근 5 user turn (+ 현재 pending user question)
@@ -2400,7 +2633,8 @@ export class ConversationLoop {
 
       if (compactResult.status === CompressionStatus.NOOP) {
         log.info("preflight: LLM compact returned NOOP (history within preserveRecentTokens) — no mutation");
-        this.lastProviderInputTokens = estimated;
+        this.lastContextInputTokens = estimated;
+        this.lastContextEstimatedInputTokens = estimated;
         return;
       }
 

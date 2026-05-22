@@ -383,6 +383,80 @@ describe("PostTurnHookChain", () => {
       expect(call.route).toBe("skill");
     });
 
+    it("emits serving provider/model for token-bearing skill routes", async () => {
+      const logTurn = vi.fn();
+      const chain = makeChain({ autoCompact: false, logTurn });
+
+      await chain.run({
+        sessionId: "session-skill-llm",
+        messages: createMessages(),
+        input: "메일 읽어줘",
+        output: "확인했습니다",
+        toolCalls: [],
+        route: "skill",
+        tokenUsage: { inputTokens: 100, outputTokens: 50 },
+        vendorProvider: "openai",
+        vendorModel: "gpt-5.4-mini",
+      });
+
+      const call = logTurn.mock.calls[0]![0] as { route: string };
+      expect(call.route).toBe("openai/gpt-5.4-mini");
+    });
+
+    it("persists per-model usage breakdown for mixed fallback rounds", async () => {
+      const logTurn = vi.fn();
+      const chain = makeChain({ autoCompact: false, logTurn });
+
+      await chain.run({
+        sessionId: "session-mixed-fallback",
+        messages: createMessages(),
+        input: "여러 라운드",
+        output: "완료",
+        toolCalls: [],
+        route: "llm",
+        tokenUsage: { inputTokens: 1_700_000, outputTokens: 100_000, cacheReadTokens: 500_000, cacheWriteTokens: 200_000 },
+        usageByModel: [
+          {
+            vendorProvider: "claude",
+            vendorModel: "claude-sonnet-4-6",
+            tokenUsage: { inputTokens: 1_700_000, outputTokens: 100_000, cacheReadTokens: 500_000, cacheWriteTokens: 200_000 },
+          },
+          {
+            vendorProvider: "openai",
+            vendorModel: "gpt-5.4-mini",
+            tokenUsage: { inputTokens: 10_000, outputTokens: 1_000 },
+          },
+        ],
+        vendorProvider: "openai",
+        vendorModel: "gpt-5.4-mini",
+      });
+
+      const call = logTurn.mock.calls[0]![0] as {
+        usageByModel: Array<{
+          vendorProvider: string;
+          vendorModel: string;
+          tokenUsage: { inputTokens: number; outputTokens: number; cacheReadTokens?: number; cacheWriteTokens?: number };
+        }>;
+      };
+      expect(call.usageByModel).toEqual([
+        {
+          vendorProvider: "claude",
+          vendorModel: "claude-sonnet-4-6",
+          tokenUsage: {
+            inputTokens: 1_000_000,
+            outputTokens: 100_000,
+            cacheReadTokens: 500_000,
+            cacheWriteTokens: 200_000,
+          },
+        },
+        {
+          vendorProvider: "openai",
+          vendorModel: "gpt-5.4-mini",
+          tokenUsage: { inputTokens: 10_000, outputTokens: 1_000 },
+        },
+      ]);
+    });
+
     it("prefers ctx.vendorProvider/vendorModel snapshot over current settings", async () => {
       // Regression: when the user mutates settings mid-flight (retry-effort
       // patches thinking config; user switches vendor while streaming),
@@ -406,6 +480,44 @@ describe("PostTurnHookChain", () => {
 
       const call = logTurn.mock.calls[0]![0] as { route: string };
       expect(call.route).toBe("claude/claude-3-5-sonnet-20241022");
+    });
+
+    it("normalizes Claude AI SDK total input to fresh input before audit logging", async () => {
+      const logTurn = vi.fn();
+      const chain = makeChain({ autoCompact: false, logTurn });
+
+      await chain.run({
+        sessionId: "session-claude-cache",
+        messages: createMessages(),
+        input: "캐시 사용량 확인",
+        output: "확인했습니다",
+        toolCalls: [],
+        tokenUsage: {
+          inputTokens: 1_700_000,
+          outputTokens: 100_000,
+          cacheReadTokens: 500_000,
+          cacheWriteTokens: 200_000,
+        },
+        route: "llm",
+        vendorProvider: "claude",
+        vendorModel: "claude-sonnet-4-6",
+      });
+
+      expect(logTurn).toHaveBeenCalledOnce();
+      const call = logTurn.mock.calls[0]![0] as {
+        tokenUsage: {
+          inputTokens: number;
+          outputTokens: number;
+          cacheReadTokens?: number;
+          cacheWriteTokens?: number;
+        };
+      };
+      expect(call.tokenUsage).toEqual({
+        inputTokens: 1_000_000,
+        outputTokens: 100_000,
+        cacheReadTokens: 500_000,
+        cacheWriteTokens: 200_000,
+      });
     });
 
     it("logs cleaned output when stream markers are present", async () => {

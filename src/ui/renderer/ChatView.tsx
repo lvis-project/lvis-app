@@ -63,6 +63,8 @@ import type { UserKeyboardIntentSnapshot } from "../../shared/chat-origin.js";
 import ReactMarkdown from "react-markdown";
 import { MARKDOWN_REMARK_PLUGINS } from "./utils/markdown-plugins.js";
 import { parseImportedTriggerEnvelope } from "../../shared/overlay-trigger-source.js";
+import { lookupBillablePricingOptional } from "../../shared/pricing-data.js";
+import type { LLMVendor } from "../../shared/llm-vendor-defaults.js";
 
 const CHAT_BOTTOM_THRESHOLD_PX = 96;
 
@@ -372,6 +374,9 @@ export function ChatView({ api, onAsk, onEditSave, onFork, onToggleStar, onRetry
       tokensOut: number;
       cacheReadTokens?: number;
       cacheWriteTokens?: number;
+      vendorProvider?: LLMVendor;
+      vendorModel?: string;
+      usageByModel?: Extract<ChatEntry, { kind: "turn_summary" }>["usageByModel"];
     };
     const map = new Map<number, TurnSummary>();
     let curTurnStart = -1;
@@ -389,6 +394,9 @@ export function ChatView({ api, onAsk, onEditSave, onFork, onToggleStar, onRetry
           tokensOut: e.tokensOut,
           ...(e.cacheReadTokens !== undefined ? { cacheReadTokens: e.cacheReadTokens } : {}),
           ...(e.cacheWriteTokens !== undefined ? { cacheWriteTokens: e.cacheWriteTokens } : {}),
+          ...(e.vendorProvider !== undefined ? { vendorProvider: e.vendorProvider } : {}),
+          ...(e.vendorModel !== undefined ? { vendorModel: e.vendorModel } : {}),
+          ...(e.usageByModel !== undefined ? { usageByModel: e.usageByModel } : {}),
         });
       }
     }
@@ -1320,6 +1328,10 @@ export function ChatView({ api, onAsk, onEditSave, onFork, onToggleStar, onRetry
             if (entryClassMap.get(i) === "final" && entry.kind === "assistant") {
               const turnStartIdx = finalTurnStartMap.get(i) ?? 0;
               const summary = turnSummaryByTurnStart.get(turnStartIdx);
+              const summaryVendor = summary?.vendorProvider;
+              const summaryPricing = summary?.vendorProvider && summary.vendorModel
+                ? lookupBillablePricingOptional(summary.vendorProvider, summary.vendorModel)
+                : undefined;
               rendered.push(
                   <div key={idx} data-chat-entry-index={idx} className={`${ringCls} min-w-0 w-full max-w-full overflow-x-hidden rounded-md`}>
                   <AssistantCard
@@ -1332,8 +1344,8 @@ export function ChatView({ api, onAsk, onEditSave, onFork, onToggleStar, onRetry
                   <TurnActionBar
                     timestamp={entry.kind === "assistant" ? entry.createdAt : undefined}
                     turnSummary={summary}
-                    pricing={activePricing}
-                    vendor={activeVendor}
+                    pricing={summaryPricing}
+                    vendor={summaryVendor ?? activeVendor}
                     isStarred={!!isEntryStarred(idx)}
                     actions={viewMode ? {} : {
                       onRetry: () => void onRetryEffort(),
@@ -1380,7 +1392,7 @@ export function ChatView({ api, onAsk, onEditSave, onFork, onToggleStar, onRetry
       {contextOverflowPct >= 0.95 && (
         <div className="flex w-full max-w-full items-center gap-2 border-t bg-destructive/10 px-3 py-1.5 text-xs text-destructive">
           <span className="font-semibold">컨텍스트 {Math.round(contextOverflowPct * 100)}% 사용</span>
-          <span>— 자동 압축이 필요합니다. 전송이 일시 차단됩니다.</span>
+          <span>— 다음 전송에서 자동 압축을 먼저 실행합니다.</span>
         </div>
       )}
       {contextOverflowPct >= 0.80 && contextOverflowPct < 0.95 && (
@@ -1441,18 +1453,12 @@ export function ChatView({ api, onAsk, onEditSave, onFork, onToggleStar, onRetry
             onCommandPopoverOpenChange={onCommandPopoverOpenChange}
             attachDisabled={
               attachments.length >= ATTACH_MAX_COUNT ||
-              hasApiKey === false ||
-              contextOverflowPct >= 0.95 ||
-              (typeof tpmPct === "number" && tpmPct >= 0.95)
+              hasApiKey === false
             }
             attachDisabledReason={
               hasApiKey === false
                 ? "no-api-key"
-                : contextOverflowPct >= 0.95
-                  ? "context-overflow"
-                  : (typeof tpmPct === "number" && tpmPct >= 0.95)
-                    ? "context-overflow"
-                    : "limit"
+                : "limit"
             }
             onAttach={async () => {
             const result = await window.lvis.attach.openFile();
@@ -1582,10 +1588,10 @@ export function ChatView({ api, onAsk, onEditSave, onFork, onToggleStar, onRetry
             onSend={handleComposerSend}
             suggestedReplies={suggestedReplies}
             disabled={
-              // Slash commands (e.g. /compact) bypass the context-overflow gate
-              // so the user can escape a fully-blocked input even while the
-              // "자동 압축이 필요합니다" banner is showing.
-              (hasApiKey === false || contextOverflowPct >= 0.95 || (typeof tpmPct === "number" && tpmPct >= 0.95) || viewMode !== null) &&
+              // Context/TPM red zones stay sendable: main preflight runs
+              // compact before the LLM call. Slash commands still bypass
+              // API/view UI gates where they are the recovery path.
+              (hasApiKey === false || viewMode !== null) &&
               !question.trimStart().startsWith("/")
             }
             onWarning={(msg) => console.warn(msg)}
@@ -1603,20 +1609,22 @@ export function ChatView({ api, onAsk, onEditSave, onFork, onToggleStar, onRetry
                 <Tooltip>
                   <TooltipTrigger asChild>
                     <span className={`text-[11px] font-mono ${costBadgeClass}`} title="예상 비용">
-                      {formatCostBadge(costEstimate.total)}
+                      {formatCostBadge(costEstimate.total, costEstimate.pricingKnown)}
                     </span>
                   </TooltipTrigger>
                   <TooltipContent className="text-xs">
-                    <div>입력: {costEstimate.inputTokens.toLocaleString()} tok · ${costEstimate.inputCost.toFixed(5)}</div>
-                    <div>출력(추정): {costEstimate.outputTokens.toLocaleString()} tok · ${costEstimate.outputCost.toFixed(5)}</div>
-                    <div className="font-semibold">합계: ${costEstimate.total.toFixed(5)}</div>
+                    <div>입력: {costEstimate.inputTokens.toLocaleString()} tok{costEstimate.pricingKnown === false ? "" : ` · $${costEstimate.inputCost.toFixed(5)}`}</div>
+                    <div>출력(추정): {costEstimate.outputTokens.toLocaleString()} tok{costEstimate.pricingKnown === false ? "" : ` · $${costEstimate.outputCost.toFixed(5)}`}</div>
+                    {costEstimate.pricingKnown === false
+                      ? <div className="font-semibold">가격 미등록 모델입니다.</div>
+                      : <div className="font-semibold">합계: ${costEstimate.total.toFixed(5)}</div>}
                   </TooltipContent>
                 </Tooltip>
               </div>
             }
             isBusy={streaming}
             isSendDisabled={
-              (hasApiKey === false || contextOverflowPct >= 0.95 || (typeof tpmPct === "number" && tpmPct >= 0.95) || viewMode !== null) &&
+              (hasApiKey === false || viewMode !== null) &&
               !question.trimStart().startsWith("/")
                 ? true
                 : question.trim().length === 0 && attachments.length === 0

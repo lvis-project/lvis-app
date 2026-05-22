@@ -27,19 +27,62 @@ function presetToDates(preset: Preset): { dateFrom: string; dateTo: string } {
   return { dateFrom: daysAgoKey(365 * 5), dateTo: to };
 }
 
-function computeMonthlyProjection(trend: UsageTrendPt[]): number {
-  if (trend.length === 0) return 0;
+function sumUnknownCostTurns(rows: Array<{ unknownCostTurns?: number }>): number {
+  return rows.reduce((sum, row) => sum + (row.unknownCostTurns ?? 0), 0);
+}
+
+function computeMonthlyProjection(trend: UsageTrendPt[]): { cost: number; hasUnknownCost: boolean } {
+  if (trend.length === 0) return { cost: 0, hasUnknownCost: false };
   const total = trend.reduce((s, p) => s + p.cost, 0);
-  return (total / trend.length) * 30;
+  return {
+    cost: (total / trend.length) * 30,
+    hasUnknownCost: sumUnknownCostTurns(trend) > 0,
+  };
+}
+
+function formatCostWithUnknown(v: { cost: number; unknownCostTurns?: number }): string {
+  const base = formatCost(v.cost);
+  return v.unknownCostTurns ? `${base} + 미정 ${v.unknownCostTurns}턴` : base;
+}
+
+function formatProjectedCost(v: { cost: number; hasUnknownCost: boolean }): string {
+  const base = formatCost(v.cost);
+  return v.hasUnknownCost ? `${base} + 미정 포함` : base;
+}
+
+function formatCacheBreakdown(v: { cacheReadTokens?: number; cacheWriteTokens?: number }): string {
+  return `cache r ${formatTokens(v.cacheReadTokens ?? 0)} / w ${formatTokens(v.cacheWriteTokens ?? 0)}`;
 }
 
 function buildCsvRows(summary: UsageSummaryShape): Array<Record<string, string | number>> {
   const rows: Array<Record<string, string | number>> = [];
   for (const pt of summary.trend) {
-    rows.push({ date: pt.date, vendor: "all", model: "all", inputTokens: pt.inputTokens, outputTokens: pt.outputTokens, totalTokens: pt.totalTokens, cost: pt.cost });
+    rows.push({
+      date: pt.date,
+      vendor: "all",
+      model: "all",
+      inputTokens: pt.inputTokens,
+      outputTokens: pt.outputTokens,
+      cacheReadTokens: pt.cacheReadTokens ?? 0,
+      cacheWriteTokens: pt.cacheWriteTokens ?? 0,
+      totalTokens: pt.totalTokens,
+      cost: pt.cost,
+      unknownCostTurns: pt.unknownCostTurns ?? 0,
+    });
   }
   for (const m of summary.perModel) {
-    rows.push({ date: "range-total", vendor: m.vendor, model: m.model, inputTokens: m.inputTokens, outputTokens: m.outputTokens, totalTokens: m.totalTokens, cost: m.cost });
+    rows.push({
+      date: "range-total",
+      vendor: m.vendor,
+      model: m.model,
+      inputTokens: m.inputTokens,
+      outputTokens: m.outputTokens,
+      cacheReadTokens: m.cacheReadTokens ?? 0,
+      cacheWriteTokens: m.cacheWriteTokens ?? 0,
+      totalTokens: m.totalTokens,
+      cost: m.cost,
+      unknownCostTurns: m.unknownCostTurns ?? 0,
+    });
   }
   return rows;
 }
@@ -105,6 +148,13 @@ export function UsageDashboard({ api }: { api: LvisApi }) {
 
   const sparkPoints = summary.trend.map((p) => p.totalTokens);
   const projection = computeMonthlyProjection(summary.trend);
+  const averageDailyKnownCost = summary.trend.length
+    ? summary.trend.reduce((s, p) => s + p.cost, 0) / summary.trend.length
+    : 0;
+  const averageDailyCost = {
+    cost: averageDailyKnownCost,
+    hasUnknownCost: sumUnknownCostTurns(summary.trend) > 0,
+  };
 
   return (
     <div className="space-y-5">
@@ -141,7 +191,8 @@ export function UsageDashboard({ api }: { api: LvisApi }) {
             <CardContent className="space-y-0.5 px-3 pb-3">
               <div className="text-lg font-semibold">{formatTokens(v.totalTokens)}</div>
               <div className="text-xs text-muted-foreground">in {formatTokens(v.inputTokens)} / out {formatTokens(v.outputTokens)}</div>
-              <div className="text-xs font-medium">{formatCost(v.cost)}</div>
+              <div className="text-xs text-muted-foreground">{formatCacheBreakdown(v)}</div>
+              <div className="text-xs font-medium">{formatCostWithUnknown(v)}</div>
             </CardContent>
           </Card>
         ))}
@@ -155,9 +206,9 @@ export function UsageDashboard({ api }: { api: LvisApi }) {
       <Card>
         <CardHeader className="pb-1 pt-3 px-3"><CardTitle className="text-xs text-muted-foreground">월간 예상 비용</CardTitle></CardHeader>
         <CardContent className="px-3 pb-3">
-          <div className="text-sm">이 속도로면 월 약 <span className="font-semibold">{formatCost(projection)}</span></div>
+          <div className="text-sm">이 속도로면 월 약 <span className="font-semibold">{formatProjectedCost(projection)}</span></div>
           <div className="text-xs text-muted-foreground mt-0.5">
-            일평균 {formatCost(summary.trend.length ? summary.trend.reduce((s, p) => s + p.cost, 0) / summary.trend.length : 0)} × 30일
+            일평균 {formatProjectedCost(averageDailyCost)} × 30일
           </div>
         </CardContent>
       </Card>
@@ -167,10 +218,15 @@ export function UsageDashboard({ api }: { api: LvisApi }) {
         <CardContent className="px-3 pb-3">
           {summary.perVendor.length === 0 ? <div className="text-xs text-muted-foreground">데이터 없음</div> : (
             <table className="w-full text-xs">
-              <thead><tr className="text-left text-muted-foreground"><th className="py-1">벤더</th><th>토큰</th><th>비용</th></tr></thead>
+              <thead><tr className="text-left text-muted-foreground"><th className="py-1">벤더</th><th>토큰</th><th>캐시</th><th>비용</th></tr></thead>
               <tbody>
                 {summary.perVendor.map((v) => (
-                  <tr key={v.vendor} className="border-t"><td className="py-1 font-mono">{v.vendor}</td><td>{formatTokens(v.totalTokens)}</td><td>{formatCost(v.cost)}</td></tr>
+                  <tr key={v.vendor} className="border-t">
+                    <td className="py-1 font-mono">{v.vendor}</td>
+                    <td>{formatTokens(v.totalTokens)}</td>
+                    <td className="text-muted-foreground">{formatCacheBreakdown(v)}</td>
+                    <td>{formatCostWithUnknown(v)}</td>
+                  </tr>
                 ))}
               </tbody>
             </table>
@@ -183,12 +239,15 @@ export function UsageDashboard({ api }: { api: LvisApi }) {
         <CardContent className="px-3 pb-3">
           {summary.topConversations.length === 0 ? <div className="text-xs text-muted-foreground">데이터 없음</div> : (
             <table className="w-full text-xs">
-              <thead><tr className="text-left text-muted-foreground"><th className="py-1">세션</th><th>턴</th><th>토큰</th><th>비용</th></tr></thead>
+              <thead><tr className="text-left text-muted-foreground"><th className="py-1">세션</th><th>턴</th><th>토큰</th><th>캐시</th><th>비용</th></tr></thead>
               <tbody>
                 {summary.topConversations.map((c) => (
                   <tr key={c.sessionId} className="border-t">
                     <td className="py-1 max-w-[120px] truncate font-mono" title={c.firstInput ?? c.sessionId}>{c.sessionId.slice(0, 12)}</td>
-                    <td>{c.turns}</td><td>{formatTokens(c.totalTokens)}</td><td>{formatCost(c.cost)}</td>
+                    <td>{c.turns}</td>
+                    <td>{formatTokens(c.totalTokens)}</td>
+                    <td className="text-muted-foreground">{formatCacheBreakdown(c)}</td>
+                    <td>{formatCostWithUnknown(c)}</td>
                   </tr>
                 ))}
               </tbody>

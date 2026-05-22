@@ -33,6 +33,7 @@ export function historyToEntries(
   let fallbackGroupId: string | null = null;
   const toolGroupByUseId = new Map<string, string>();
   const toolOrderByGroupId = new Map<string, number>();
+  let latestCheckpointCreatedAt: number | null = null;
 
   for (const m of messages) {
     if (m.role === "tool_result") {
@@ -65,6 +66,10 @@ export function historyToEntries(
       // normal user bubble so the visual matches what a live structured-compact
       // turn would have rendered.
       if (m.checkpointMeta) {
+        latestCheckpointCreatedAt =
+          typeof m.createdAt === "number" && Number.isFinite(m.createdAt)
+            ? m.createdAt
+            : Number.MAX_SAFE_INTEGER;
         out.push({
           kind: "checkpoint",
           removedMessages: m.checkpointMeta.removedMessages,
@@ -83,6 +88,17 @@ export function historyToEntries(
             ? { truncatedDir: m.checkpointMeta.truncatedDir }
             : {}),
         });
+        if (
+          typeof m.checkpointMeta.contextTokensAfter === "number" &&
+          Number.isFinite(m.checkpointMeta.contextTokensAfter) &&
+          m.checkpointMeta.contextTokensAfter > 0
+        ) {
+          out.push({
+            kind: "context_usage",
+            tokensIn: Math.floor(m.checkpointMeta.contextTokensAfter),
+            source: "compact-estimate",
+          });
+        }
         continue;
       }
       const importedTrigger = importedTriggerFromMessage(m);
@@ -141,7 +157,7 @@ export function historyToEntries(
       // shows real token / duration totals on reload. Only the turn-final
       // assistant carries `turnSummary` (attached by ConversationLoop right
       // after onTurnSummary fires).
-      if (m.turnSummary) {
+      if (m.turnSummary && !isPreservedPreCompactTurn(m, latestCheckpointCreatedAt)) {
         out.push({
           kind: "turn_summary",
           turnDurationMs: m.turnSummary.turnDurationMs,
@@ -156,12 +172,32 @@ export function historyToEntries(
           ...(m.turnSummary.cacheWriteTokens !== undefined
             ? { cacheWriteTokens: m.turnSummary.cacheWriteTokens }
             : {}),
+          ...(m.turnSummary.vendorProvider !== undefined
+            ? { vendorProvider: m.turnSummary.vendorProvider }
+            : {}),
+          ...(m.turnSummary.vendorModel !== undefined
+            ? { vendorModel: m.turnSummary.vendorModel }
+            : {}),
+          ...(m.turnSummary.usageByModel !== undefined
+            ? { usageByModel: m.turnSummary.usageByModel }
+            : {}),
           ...(m.turnSummary.breakdown ? { breakdown: m.turnSummary.breakdown } : {}),
         });
       }
     }
   }
   return out;
+}
+
+function isPreservedPreCompactTurn(
+  message: PersistedHistoryMessage,
+  latestCheckpointCreatedAt: number | null,
+): boolean {
+  if (latestCheckpointCreatedAt === null) return false;
+  if (typeof message.createdAt !== "number" || !Number.isFinite(message.createdAt)) {
+    return true;
+  }
+  return message.createdAt <= latestCheckpointCreatedAt;
 }
 
 function nextToolOrder(orderByGroupId: Map<string, number>, groupId: string): number {

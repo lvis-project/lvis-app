@@ -58,7 +58,7 @@ export interface ChatContextValue {
   contextBudget: number;
   /** Issue #912 — ring 이 사용하는 *실질 한도*. tpmLimit < contextBudget
    *  인 모델 (현재 nano) 에선 tpmLimit, else contextBudget. ring 의 100%
-   *  이 사용자의 "한도 초과" 인지와 일치하도록. */
+   *  이 provider request 한도 인지와 일치하도록. */
   effectiveBudget: number;
   // Issue #900 #1 — per-request TPM hint. tpmLimit undefined for models
   // without a registered tpmDefault (most models) → UI hides the indicator.
@@ -96,9 +96,9 @@ export interface ChatContextValue {
   costBadgeClass: string;
   /**
    * Active model 의 pricing — `TokenCostBadge` 가 cost 모드 토글에 사용.
-   * undefined (unknown vendor/model) 이면 토글 비활성. App 에서 lookupPricing
-   * 으로 한 번 계산해 전달, 같은 source 가 cost-estimator 와 context-budget 에
-   * 도 흘러들어가도록 일치.
+   * undefined (unknown vendor/model or zero-price placeholder) 이면 토글
+   * 비활성. Context-window lookup 과 달리 비용 표시는 billable pricing 이
+   * 확인된 모델에서만 켠다.
    */
   activePricing: ModelPricing | undefined;
   /**

@@ -318,6 +318,35 @@ describe("stream-mapper — Claude signature capture per-step", () => {
     }
   });
 
+  it("uses AI SDK 6 inputTokenDetails for canonical cache read/write tokens", async () => {
+    const canned = [
+      {
+        type: "finish",
+        finishReason: "stop",
+        totalUsage: {
+          inputTokens: 100,
+          outputTokens: 5,
+          cachedInputTokens: 10,
+          inputTokenDetails: {
+            noCacheTokens: 70,
+            cacheReadTokens: 20,
+            cacheWriteTokens: 10,
+          },
+        },
+      },
+    ];
+    const events = await collect(fullStreamToStreamEvent(fromArray(canned)));
+    const last = events.at(-1);
+    if (last?.type === "message_complete") {
+      expect(last.usage).toEqual({
+        inputTokens: 100,
+        outputTokens: 5,
+        cacheReadTokens: 20,
+        cacheWriteTokens: 10,
+      });
+    }
+  });
+
   it("providerMetadata.anthropic takes precedence over SDK cachedInputTokens for cacheReadTokens", async () => {
     const canned = [
       {

@@ -14,6 +14,7 @@ import { serializeMessageForEstimation, userContentText } from "./llm/types.js";
 import { lookupPricing, effectiveContextWindow } from "../shared/pricing-data.js";
 import { getUsableContext, getPreflightThreshold } from "../shared/context-budget.js";
 import { buildToolResultStrippedStub, buildToolResultTruncatedStub } from "../shared/tool-result-stub.js";
+import { estimateMultimodalTokenOverhead } from "../shared/multimodal-token-estimate.js";
 
 
 // ─── Context Window Registry ─────────────────────────
@@ -171,6 +172,9 @@ export function estimateMessagesTokens(messages: GenericMessage[]): number {
     // before provider send. Counting the raw content here makes preflight and
     // session-load rings fire far earlier than the actual payload.
     total += estimateTokens(serializeMessageForWireEstimate(msg));
+    if (msg.role === "user" && Array.isArray(msg.content)) {
+      total += estimateMultimodalTokenOverhead(msg.content);
+    }
   }
   return total;
 }

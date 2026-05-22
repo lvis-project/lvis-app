@@ -110,7 +110,7 @@ describe("useChatState — compact lifecycle scenarios", () => {
     expect(lastTwo[1]).toMatchObject({
       kind: "context_usage",
       tokensIn: 50_000,
-      source: "session-estimate",
+      source: "compact-estimate",
     });
   });
 
@@ -123,7 +123,7 @@ describe("useChatState — compact lifecycle scenarios", () => {
     act(() => {
       result.current.applyLoadedSession([
         { kind: "user", text: "hi" },
-        { kind: "turn_summary", tokensIn: 10_000, tokensOut: 500, turnDurationMs: 100, toolCount: 0, cumulativeToolMs: 0 } as ChatEntry,
+        { kind: "turn_summary", tokensIn: 10_000, freshInputTokens: 10_000, tokensOut: 500, turnDurationMs: 100, toolCount: 0, cumulativeToolMs: 0 } as ChatEntry,
       ]);
     });
 
@@ -156,7 +156,7 @@ describe("useChatState — compact lifecycle scenarios", () => {
     act(() => {
       result.current.applyLoadedSession([
         { kind: "user", text: "hi" },
-        { kind: "turn_summary", tokensIn: 9_999, tokensOut: 100, turnDurationMs: 50, toolCount: 0, cumulativeToolMs: 0 } as ChatEntry,
+        { kind: "turn_summary", tokensIn: 9_999, freshInputTokens: 9_999, tokensOut: 100, turnDurationMs: 50, toolCount: 0, cumulativeToolMs: 0 } as ChatEntry,
       ]);
     });
 
@@ -274,5 +274,81 @@ describe("useChatState — compact lifecycle scenarios", () => {
       text: "오류: Resource not found",
       systemNotice: "stream-error",
     });
+  });
+
+  it("S9b: turn_summary requires the token fields and preserves cache breakdown", () => {
+    const { api, streamHandler } = makeCapturedApi();
+    const { result } = renderHook(() => useChatState(api));
+
+    dispatchEvent(streamHandler, {
+      type: "turn_summary",
+      turnDurationMs: 100,
+      toolCount: 0,
+      cumulativeToolMs: 0,
+      tokensIn: 1000,
+      freshInputTokens: 700,
+      tokensOut: 50,
+      cacheReadTokens: 200,
+      cacheWriteTokens: 100,
+      vendorProvider: "claude",
+      vendorModel: "claude-opus-4-6",
+    } as StreamEvent);
+
+    expect(result.current.entries.at(-1)).toMatchObject({
+      kind: "turn_summary",
+      tokensIn: 1000,
+      freshInputTokens: 700,
+      tokensOut: 50,
+      cacheReadTokens: 200,
+      cacheWriteTokens: 100,
+      vendorProvider: "claude",
+      vendorModel: "claude-opus-4-6",
+    });
+
+    dispatchEvent(streamHandler, {
+      type: "turn_summary",
+      turnDurationMs: 100,
+      toolCount: 0,
+      cumulativeToolMs: 0,
+      tokensIn: 2000,
+      tokensOut: 50,
+    } as StreamEvent);
+
+    expect(result.current.entries.filter((entry) => entry.kind === "turn_summary")).toHaveLength(1);
+  });
+
+  it("S10: manual compact NOOP clears isCompacting and surfaces the engine summary", async () => {
+    const { api, streamHandler } = makeCapturedApi();
+    api.chatCompact = vi.fn(async () => ({
+      compacted: false,
+      compactedAt: null,
+      removedMessageCount: 0,
+      summary: "LLM provider 미구성 — 압축 실행 불가.",
+    }));
+    const { result } = renderHook(() => useChatState(api));
+
+    dispatchEvent(streamHandler, { type: "compact_started" } as StreamEvent);
+    await act(async () => {
+      const handled = await result.current.handleCompactCommand("/compact");
+      expect(handled).toBe(true);
+    });
+
+    expect(result.current.isCompacting).toBe(false);
+    expect(result.current.entries.at(-1)).toMatchObject({
+      kind: "system",
+      text: "LLM provider 미구성 — 압축 실행 불가.",
+    });
+  });
+
+  it("S11: only the exact /compact command is intercepted", async () => {
+    const { api } = makeCapturedApi();
+    const { result } = renderHook(() => useChatState(api));
+
+    await act(async () => {
+      const handled = await result.current.handleCompactCommand("/compactfoo");
+      expect(handled).toBe(false);
+    });
+
+    expect(api.chatCompact).not.toHaveBeenCalled();
   });
 });

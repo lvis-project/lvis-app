@@ -498,6 +498,48 @@ describe("ChatView", () => {
     });
   });
 
+  it("does not reprice legacy turn summaries that lack serving provider metadata", async () => {
+    const { container, emitChatStream } = await renderApp({ hasApiKey: true });
+    await submitChatMessage(container, "legacy summary");
+    await act(async () => {
+      emitChatStream({ type: "text_delta", text: "legacy answer" });
+      emitChatStream({
+        type: "assistant_round",
+        text: "legacy answer",
+        thought: "",
+        stopReason: "end_turn",
+        hasToolCalls: false,
+      });
+      emitChatStream({
+        type: "turn_summary",
+        turnDurationMs: 1000,
+        toolCount: 0,
+        cumulativeToolMs: 0,
+        tokensIn: 100,
+        freshInputTokens: 10,
+        tokensOut: 1,
+      });
+      emitChatStream({ type: "done" });
+    });
+
+    await waitFor(() => {
+      expect(container.textContent).toContain("legacy answer");
+      const tokenButton = Array.from(container.querySelectorAll("button")).find((button) =>
+        button.textContent?.includes("🪙") && button.textContent.includes("11"),
+      );
+      expect(tokenButton?.getAttribute("aria-disabled")).toBe("true");
+    });
+
+    const tokenButton = Array.from(container.querySelectorAll("button")).find((button) =>
+      button.textContent?.includes("🪙") && button.textContent.includes("11"),
+    );
+    expect(tokenButton).toBeTruthy();
+    await act(async () => {
+      fireEvent.click(tokenButton!);
+    });
+    expect(container.textContent).not.toMatch(/≈ \$/);
+  });
+
   it("keeps a one-step pre-final assistant round inside WorkGroup", async () => {
     const { container, emitChatStream } = await renderApp({ hasApiKey: true });
     await submitChatMessage(container, "추론 확인");
