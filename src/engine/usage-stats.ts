@@ -7,8 +7,7 @@
 import { readdirSync, readFileSync, existsSync } from "node:fs";
 import { join } from "node:path";
 import { isLLMVendor, type LLMVendor } from "./llm/types.js";
-import { DEFAULT_LLM_VENDOR } from "../shared/llm-vendor-defaults.js";
-import { getModelPricing, computeCost } from "./llm/pricing.js";
+import { getBillableModelPricing, computeCost, normalizeAiSdkUsageForCost } from "./llm/pricing.js";
 import { lvisHome } from "../shared/lvis-home.js";
 
 export interface AuditTurnEntry {
@@ -21,6 +20,16 @@ export interface AuditTurnEntry {
     cacheReadTokens?: number;
     cacheWriteTokens?: number;
   };
+  usageByModel?: Array<{
+    vendorProvider: string;
+    vendorModel: string;
+    tokenUsage: {
+      inputTokens: number;
+      outputTokens: number;
+      cacheReadTokens?: number;
+      cacheWriteTokens?: number;
+    };
+  }>;
   route?: string;
   input?: string;
 }
@@ -32,6 +41,7 @@ export interface UsageTotals {
   cacheWriteTokens: number;
   totalTokens: number;
   cost: number;
+  unknownCostTurns?: number;
 }
 
 export interface UsagePerVendor extends UsageTotals {
@@ -39,14 +49,8 @@ export interface UsagePerVendor extends UsageTotals {
   model: string;
 }
 
-export interface UsageTrendPoint {
+export interface UsageTrendPoint extends UsageTotals {
   date: string; // YYYY-MM-DD
-  inputTokens: number;
-  outputTokens: number;
-  cacheReadTokens: number;
-  cacheWriteTokens: number;
-  totalTokens: number;
-  cost: number;
 }
 
 export interface UsageConversation extends UsageTotals {
@@ -77,25 +81,47 @@ function emptyTotals(): UsageTotals {
   };
 }
 
-/**
- * Parse a route string `"vendor/model"` into `{ vendor, model }`.
- * Fallback: `{ vendor: DEFAULT_LLM_VENDOR, model: "unknown" }`.
- *
- * `engine/conversation-loop.ts` 의 audit emission site 는 LLM 턴에 한해
- * `${vendor}/${model}` 형태로 route 를 기록하므로 LLM 활동의 per-vendor /
- * per-model 비용 breakdown 이 정상 분류된다. 비-LLM RouteResult discriminator
- * (skill / command / agent-message) 는 의도적으로 default vendor 로 묶여
- * "non-LLM" 사용량을 한 줄로 집계 — 그쪽은 토큰/비용 attribution 의미가 없다.
- */
-function parseRoute(route: string | undefined): { vendor: LLMVendor; model: string } {
-  if (!route) return { vendor: DEFAULT_LLM_VENDOR, model: "unknown" };
+type UsageVendor = LLMVendor | "unknown";
+
+function parseRoute(route: string | undefined): { vendor: UsageVendor; model: string } {
+  if (!route) return { vendor: "unknown", model: "unknown" };
   const [v, ...rest] = route.split("/");
-  // Use the runtime type guard rather than a hand-rolled allow-list — the
-  // previous list was missing `azure-foundry` and `vertex-ai`, so usage
-  // logs from those vendors silently coerced to "claude" and got attributed
-  // to the wrong cost bucket. isLLMVendor stays in sync with LLM_VENDORS.
-  const vendor: LLMVendor = isLLMVendor(v) ? v : DEFAULT_LLM_VENDOR;
+  if (!isLLMVendor(v)) {
+    // Token-bearing legacy rows with bare routes (`llm`, `skill`, etc.) do
+    // not have a defensible provider/model. Keep them visible but explicitly
+    // unpriced instead of polluting the current default vendor bucket.
+    return { vendor: "unknown", model: route };
+  }
+  const vendor: LLMVendor = v;
   return { vendor, model: rest.join("/") || "unknown" };
+}
+
+type UsageSegment = {
+  vendor: UsageVendor;
+  model: string;
+  tokenUsage: NonNullable<AuditTurnEntry["tokenUsage"]>;
+};
+
+function parseUsageSegments(entry: AuditTurnEntry): UsageSegment[] {
+  if (entry.usageByModel?.length) {
+    return entry.usageByModel
+      .filter((segment) => isLLMVendor(segment.vendorProvider))
+      .map((segment) => ({
+        vendor: segment.vendorProvider as LLMVendor,
+        model: segment.vendorModel || "unknown",
+        tokenUsage: segment.tokenUsage,
+      }));
+  }
+  if (!entry.tokenUsage) return [];
+  const { vendor, model } = parseRoute(entry.route);
+  const tokenUsage =
+    vendor === "claude"
+      // Legacy audit rows without usageByModel were written before the audit
+      // boundary carried normalized cost semantics, so treat them as AI SDK raw
+      // usage and split Claude cache out before pricing/aggregation.
+      ? normalizeAiSdkUsageForCost(entry.tokenUsage, vendor)
+      : entry.tokenUsage;
+  return [{ vendor, model, tokenUsage }];
 }
 
 function addTo(
@@ -104,8 +130,9 @@ function addTo(
   output: number,
   cacheRead: number,
   cacheWrite: number,
-  vendor: LLMVendor,
+  vendor: UsageVendor,
   cost: number,
+  costKnown: boolean,
 ): void {
   target.inputTokens += input;
   target.outputTokens += output;
@@ -113,13 +140,14 @@ function addTo(
   target.cacheWriteTokens += cacheWrite;
   // totalTokens 의미는 vendor 별로 다르다 — Anthropic 은 input + cache 가산,
   // OpenAI/Gemini 는 cache 가 이미 input 안에 포함 (Vercel SDK normalized
-  // cachedInputTokens). 동일 공식을 쓰면 OpenAI 활동에서 cache 가
-  // double-count 되어 dashboard 합계가 부풀려진다.
+  // cachedInputTokens). Unknown legacy rows stay input+output only because
+  // cache semantics are not knowable and must not inflate visible totals.
   target.totalTokens +=
     vendor === "claude"
       ? input + output + cacheRead + cacheWrite
       : input + output;
   target.cost += cost;
+  if (!costKnown) target.unknownCostTurns = (target.unknownCostTurns ?? 0) + 1;
 }
 
 function dateKey(d: Date): string {
@@ -196,53 +224,11 @@ export function computeUsageSummary(
   const convMap = new Map<string, UsageConversation>();
 
   for (const e of entries) {
-    if (!e.tokenUsage) continue;
-    const {
-      inputTokens,
-      outputTokens,
-      cacheReadTokens = 0,
-      cacheWriteTokens = 0,
-    } = e.tokenUsage;
-    const { vendor, model } = parseRoute(e.route);
-    const pricing = getModelPricing(vendor, model);
-    const cost = computeCost(
-      { inputTokens, outputTokens, cacheReadTokens, cacheWriteTokens },
-      pricing,
-      vendor,
-    );
+    const segments = parseUsageSegments(e);
+    if (segments.length === 0) continue;
     const ts = new Date(e.timestamp);
     if (Number.isNaN(ts.getTime())) continue;
     const dKey = dateKey(ts);
-
-    if (dKey === todayKey) addTo(today, inputTokens, outputTokens, cacheReadTokens, cacheWriteTokens, vendor, cost);
-    if (dKey >= weekKey) addTo(thisWeek, inputTokens, outputTokens, cacheReadTokens, cacheWriteTokens, vendor, cost);
-    if (dKey >= monthKey) addTo(thisMonth, inputTokens, outputTokens, cacheReadTokens, cacheWriteTokens, vendor, cost);
-
-    // per vendor
-    const vKey = vendor;
-    let v = perVendorMap.get(vKey);
-    if (!v) {
-      v = { vendor, model: "*", ...emptyTotals() };
-      perVendorMap.set(vKey, v);
-    }
-    addTo(v, inputTokens, outputTokens, cacheReadTokens, cacheWriteTokens, vendor, cost);
-
-    // per model
-    const mKey = `${vendor}/${model}`;
-    let m = perModelMap.get(mKey);
-    if (!m) {
-      m = { vendor, model, ...emptyTotals() };
-      perModelMap.set(mKey, m);
-    }
-    addTo(m, inputTokens, outputTokens, cacheReadTokens, cacheWriteTokens, vendor, cost);
-
-    // trend
-    let t = trendMap.get(dKey);
-    if (!t) {
-      t = { date: dKey, ...emptyTotals() } as UsageTrendPoint;
-      trendMap.set(dKey, t);
-    }
-    addTo(t, inputTokens, outputTokens, cacheReadTokens, cacheWriteTokens, vendor, cost);
 
     // per conversation
     let c = convMap.get(e.sessionId);
@@ -251,7 +237,53 @@ export function computeUsageSummary(
       convMap.set(e.sessionId, c);
     }
     c.turns += 1;
-    addTo(c, inputTokens, outputTokens, cacheReadTokens, cacheWriteTokens, vendor, cost);
+
+    for (const segment of segments) {
+      const { vendor, model, tokenUsage } = segment;
+      const {
+        inputTokens,
+        outputTokens,
+        cacheReadTokens = 0,
+        cacheWriteTokens = 0,
+      } = tokenUsage;
+      const pricing = vendor !== "unknown" ? getBillableModelPricing(vendor, model) : undefined;
+      const costKnown = !!pricing;
+      const cost = pricing && vendor !== "unknown"
+        ? computeCost(
+            { inputTokens, outputTokens, cacheReadTokens, cacheWriteTokens },
+            pricing,
+            vendor,
+          )
+        : 0;
+
+      if (dKey === todayKey) addTo(today, inputTokens, outputTokens, cacheReadTokens, cacheWriteTokens, vendor, cost, costKnown);
+      if (dKey >= weekKey) addTo(thisWeek, inputTokens, outputTokens, cacheReadTokens, cacheWriteTokens, vendor, cost, costKnown);
+      if (dKey >= monthKey) addTo(thisMonth, inputTokens, outputTokens, cacheReadTokens, cacheWriteTokens, vendor, cost, costKnown);
+
+      const vKey = vendor;
+      let v = perVendorMap.get(vKey);
+      if (!v) {
+        v = { vendor, model: "*", ...emptyTotals() };
+        perVendorMap.set(vKey, v);
+      }
+      addTo(v, inputTokens, outputTokens, cacheReadTokens, cacheWriteTokens, vendor, cost, costKnown);
+
+      const mKey = `${vendor}/${model}`;
+      let m = perModelMap.get(mKey);
+      if (!m) {
+        m = { vendor, model, ...emptyTotals() };
+        perModelMap.set(mKey, m);
+      }
+      addTo(m, inputTokens, outputTokens, cacheReadTokens, cacheWriteTokens, vendor, cost, costKnown);
+
+      let t = trendMap.get(dKey);
+      if (!t) {
+        t = { date: dKey, ...emptyTotals() };
+        trendMap.set(dKey, t);
+      }
+      addTo(t, inputTokens, outputTokens, cacheReadTokens, cacheWriteTokens, vendor, cost, costKnown);
+      addTo(c, inputTokens, outputTokens, cacheReadTokens, cacheWriteTokens, vendor, cost, costKnown);
+    }
   }
 
   const trend = Array.from(trendMap.values()).sort((a, b) => a.date.localeCompare(b.date));

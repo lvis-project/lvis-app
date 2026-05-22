@@ -108,11 +108,26 @@ export interface AuditEntry {
     terminationReason?: "ok" | "ceiling" | "user-abort" | "error";
   }>;
   tokenUsage?: {
+    /**
+     * UsageDashboard / computeCost contract, not raw AI SDK total input:
+     * Claude stores fresh input here and cache in the cache fields; OpenAI /
+     * Gemini style providers keep provider prompt tokens, which include cache.
+     */
     inputTokens: number;
     outputTokens: number;
     cacheReadTokens?: number;
     cacheWriteTokens?: number;
   };
+  usageByModel?: Array<{
+    vendorProvider: string;
+    vendorModel: string;
+    tokenUsage: {
+      inputTokens: number;
+      outputTokens: number;
+      cacheReadTokens?: number;
+      cacheWriteTokens?: number;
+    };
+  }>;
   route?: string;
 }
 
@@ -510,6 +525,16 @@ export class AuditLogger {
       cacheReadTokens?: number;
       cacheWriteTokens?: number;
     };
+    usageByModel?: Array<{
+      vendorProvider: string;
+      vendorModel: string;
+      tokenUsage: {
+        inputTokens: number;
+        outputTokens: number;
+        cacheReadTokens?: number;
+        cacheWriteTokens?: number;
+      };
+    }>;
     route: string;
   }): void {
     this.log({
@@ -520,6 +545,7 @@ export class AuditLogger {
       output: params.output.slice(0, 500),
       toolCalls: params.toolCalls,
       tokenUsage: params.tokenUsage,
+      usageByModel: params.usageByModel,
       route: params.route,
     });
   }

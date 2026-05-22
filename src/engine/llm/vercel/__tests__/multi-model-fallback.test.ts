@@ -187,6 +187,7 @@ describe("(b) primary transient error → fallback succeeds", () => {
       expect.objectContaining({ phase: "retry", attempt: 2, maxAttempts: 5 }),
       expect.objectContaining({ phase: "retry", attempt: 5, maxAttempts: 5 }),
       expect.objectContaining({ phase: "fallback", from: "claude/primary-model", to: "openai/fallback-model" }),
+      expect.objectContaining({ phase: "attempt", provider: "openai", model: "fallback-model" }),
     ]));
   });
 
