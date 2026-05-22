@@ -9,7 +9,6 @@ import type { WebContents } from "electron";
 import type { ChatInputOrigin, ChatSendPayload } from "../../shared/chat-origin.js";
 import { isChatSendInputOrigin } from "../../shared/chat-origin.js";
 import { redactForLLM } from "../../audit/dlp-filter.js";
-import { estimateMessagesTokens } from "../../engine/auto-compact.js";
 import type { GenericMessage } from "../../engine/llm/types.js";
 import { userContentText } from "../../engine/llm/types.js";
 import { serializeHistoryMessage } from "../../shared/chat-history.js";
@@ -381,7 +380,7 @@ async function runStreamedTurn(
           ...(compactStatus !== undefined ? { compactStatus } : {}),
           ...(truncatedDir !== undefined ? { truncatedDir } : {}),
         }),
-      onTurnSummary: ({ turnDurationMs, toolCount, cumulativeToolMs, tokensIn, freshInputTokens, tokensOut, cacheReadTokens, cacheWriteTokens, breakdown }) =>
+      onTurnSummary: ({ turnDurationMs, toolCount, cumulativeToolMs, tokensIn, freshInputTokens, tokensOut, cacheReadTokens, cacheWriteTokens, vendorProvider, vendorModel, usageByModel, breakdown }) =>
         send({
           type: "turn_summary",
           turnDurationMs,
@@ -392,6 +391,9 @@ async function runStreamedTurn(
           tokensOut,
           ...(cacheReadTokens !== undefined ? { cacheReadTokens } : {}),
           ...(cacheWriteTokens !== undefined ? { cacheWriteTokens } : {}),
+          vendorProvider,
+          vendorModel,
+          ...(usageByModel !== undefined ? { usageByModel } : {}),
           ...(breakdown ? { breakdown } : {}),
         }),
       onLlmStatus: (status) => send({ type: "llm_status", ...status }),
@@ -751,7 +753,6 @@ export function registerChatHandlers(deps: IpcDeps): void {
       ...(conversationLoop.getSessionRoutineId() ? { routineId: conversationLoop.getSessionRoutineId() } : {}),
       ...(conversationLoop.getSessionRoutineTitle() ? { routineTitle: conversationLoop.getSessionRoutineTitle() } : {}),
       messages: messages.map(serializeHistoryMessage),
-      estimatedInputTokens: estimateMessagesTokens(messages),
     };
   });
 
@@ -828,7 +829,6 @@ export function registerChatHandlers(deps: IpcDeps): void {
       ...(routineTitle ? { routineTitle } : {}),
       ...(routineFiredAt ? { routineFiredAt } : {}),
       messages: raw.map(serializeHistoryMessage),
-      estimatedInputTokens: estimateMessagesTokens(raw),
       preambleChars,
     };
   });

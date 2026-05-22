@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 
 import { historyToEntries } from "../history.js";
+import { sessionHistoryToEntries } from "../../hooks/use-sessions.js";
 import { EMPTY_ASSISTANT_RESPONSE_TEXT } from "../../../../lib/chat-stream-state.js";
 
 describe("historyToEntries", () => {
@@ -328,10 +329,12 @@ describe("historyToEntries", () => {
             turnDurationMs: 3500,
             toolCount: 1,
             cumulativeToolMs: 800,
-            tokensIn: 1200,
+            tokensIn: 1450,
             freshInputTokens: 1000,
             tokensOut: 250,
             cacheReadTokens: 200,
+            vendorProvider: "claude",
+            vendorModel: "claude-opus-4-6",
           },
         },
       ]);
@@ -339,8 +342,11 @@ describe("historyToEntries", () => {
       expect(summary).toBeDefined();
       if (summary?.kind === "turn_summary") {
         expect(summary.turnDurationMs).toBe(3500);
+        expect(summary.tokensIn).toBe(1450);
         expect(summary.tokensOut).toBe(250);
         expect(summary.cacheReadTokens).toBe(200);
+        expect(summary.vendorProvider).toBe("claude");
+        expect(summary.vendorModel).toBe("claude-opus-4-6");
       }
     });
 
@@ -350,6 +356,134 @@ describe("historyToEntries", () => {
         { index: 1, role: "assistant", content: "a" },
       ]);
       expect(entries.find((e) => e.kind === "turn_summary")).toBeUndefined();
+    });
+
+    it("does not append a context_usage carrier when persisted turnSummary exists", () => {
+      const entries = sessionHistoryToEntries({
+        messages: [
+          { index: 0, role: "user", content: "q" },
+          {
+            index: 1,
+            role: "assistant",
+            content: "a",
+            turnSummary: {
+              turnDurationMs: 3500,
+              toolCount: 1,
+              cumulativeToolMs: 800,
+              tokensIn: 1450,
+              freshInputTokens: 1000,
+              tokensOut: 250,
+            },
+          },
+        ],
+      });
+
+      expect(entries.filter((e) => e.kind === "turn_summary")).toHaveLength(1);
+      expect(entries.find((e) => e.kind === "context_usage")).toBeUndefined();
+    });
+
+    it("reconstructs post-compact context_usage from checkpoint metadata before preserved turns", () => {
+      const entries = historyToEntries([
+        {
+          index: 0,
+          role: "user",
+          content: "[compact boundary]",
+          createdAt: 2_000,
+          checkpointMeta: {
+            removedMessages: 10,
+            freedTokens: 90_000,
+            compactNum: 1,
+            trigger: "auto-compact",
+            contextTokensAfter: 40_000,
+          },
+        },
+        {
+          index: 1,
+          role: "assistant",
+          content: "preserved answer",
+        },
+      ]);
+
+      expect(entries[0]).toMatchObject({ kind: "checkpoint", compactNum: 1 });
+      expect(entries[1]).toMatchObject({
+        kind: "context_usage",
+        tokensIn: 40_000,
+        source: "compact-estimate",
+      });
+    });
+
+    it("suppresses preserved pre-compact turn summaries after a checkpoint carrier", () => {
+      const entries = historyToEntries([
+        {
+          index: 0,
+          role: "user",
+          content: "[compact boundary]",
+          createdAt: 2_000,
+          checkpointMeta: {
+            removedMessages: 10,
+            freedTokens: 90_000,
+            compactNum: 1,
+            trigger: "auto-compact",
+            contextTokensAfter: 40_000,
+          },
+        },
+        {
+          index: 1,
+          role: "assistant",
+          content: "preserved answer",
+          createdAt: 1_000,
+          turnSummary: {
+            turnDurationMs: 1_000,
+            toolCount: 0,
+            cumulativeToolMs: 0,
+            tokensIn: 120_000,
+            freshInputTokens: 10_000,
+            tokensOut: 100,
+          },
+        },
+      ]);
+
+      expect(entries.filter((entry) => entry.kind === "context_usage")).toHaveLength(1);
+      expect(entries.find((entry) => entry.kind === "turn_summary")).toBeUndefined();
+    });
+
+    it("keeps post-compact turn summaries newer than the checkpoint carrier", () => {
+      const entries = historyToEntries([
+        {
+          index: 0,
+          role: "user",
+          content: "[compact boundary]",
+          createdAt: 2_000,
+          checkpointMeta: {
+            removedMessages: 10,
+            freedTokens: 90_000,
+            compactNum: 1,
+            trigger: "auto-compact",
+            contextTokensAfter: 40_000,
+          },
+        },
+        {
+          index: 1,
+          role: "assistant",
+          content: "new answer",
+          createdAt: 3_000,
+          turnSummary: {
+            turnDurationMs: 1_000,
+            toolCount: 0,
+            cumulativeToolMs: 0,
+            tokensIn: 45_000,
+            freshInputTokens: 12_000,
+            tokensOut: 100,
+          },
+        },
+      ]);
+
+      expect(entries.find((entry) => entry.kind === "context_usage")).toMatchObject({
+        tokensIn: 40_000,
+      });
+      expect(entries.find((entry) => entry.kind === "turn_summary")).toMatchObject({
+        tokensIn: 45_000,
+      });
     });
   });
 
@@ -377,6 +511,36 @@ describe("historyToEntries", () => {
         expect(checkpoint.trigger).toBe("auto-compact");
         expect(checkpoint.summary).toBe("summarized 5 messages");
       }
+    });
+
+    it("preserves content-truncated checkpoint status and archive path on replay", () => {
+      const entries = historyToEntries([
+        {
+          index: 0,
+          role: "user",
+          content: "[compact #2: content truncated]",
+          checkpointMeta: {
+            removedMessages: 4,
+            freedTokens: 800,
+            compactNum: 2,
+            trigger: "manual",
+            compactStatus: "content_truncated",
+            truncatedDir: "/tmp/lvis-truncated",
+            contextTokensAfter: 7_000,
+          },
+        },
+      ]);
+      expect(entries[0]).toMatchObject({
+        kind: "checkpoint",
+        compactNum: 2,
+        compactStatus: "content_truncated",
+        truncatedDir: "/tmp/lvis-truncated",
+      });
+      expect(entries[1]).toMatchObject({
+        kind: "context_usage",
+        tokensIn: 7_000,
+        source: "compact-estimate",
+      });
     });
 
     it("renders a normal user bubble when checkpointMeta is absent (legacy boundary)", () => {

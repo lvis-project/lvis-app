@@ -161,12 +161,20 @@ describe("serializeHistoryMessage createdAt + turnSummary projection", () => {
         checkpointMeta: {
           removedMessages: 37,
           freedTokens: 1200,
+          contextTokensAfter: 42_000,
           compactNum: 4,
           trigger: "auto-compact",
+          compactStatus: "content_truncated",
+          summary: "부분 절단됨",
+          truncatedDir: "/tmp/lvis-truncated",
         },
       },
     };
     const s: SerializedHistoryMessage = serializeHistoryMessage(m, 5);
     expect(s.checkpointMeta?.compactNum).toBe(4);
+    expect(s.checkpointMeta?.contextTokensAfter).toBe(42_000);
+    expect(s.checkpointMeta?.compactStatus).toBe("content_truncated");
+    expect(s.checkpointMeta?.summary).toBe("부분 절단됨");
+    expect(s.checkpointMeta?.truncatedDir).toBe("/tmp/lvis-truncated");
   });
 });

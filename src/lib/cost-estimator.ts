@@ -34,6 +34,7 @@ export interface EstimateBreakdown {
   inputCost: number;
   outputCost: number;
   total: number;
+  pricingKnown?: boolean;
 }
 
 /**
@@ -61,6 +62,7 @@ export function estimateTurnCost(input: EstimateInput): EstimateBreakdown {
     inputCost,
     outputCost,
     total: inputCost + outputCost,
+    pricingKnown: true,
   };
 }
 
@@ -73,7 +75,8 @@ export function costTier(total: number): CostTier {
   return "high";
 }
 
-export function formatCostBadge(total: number): string {
+export function formatCostBadge(total: number, pricingKnown = true): string {
+  if (!pricingKnown) return "비용 미정";
   if (total < 0.01) return `~$${total.toFixed(4)}`;
   if (total < 1) return `~$${total.toFixed(2)}`;
   return `~$${total.toFixed(2)}`;

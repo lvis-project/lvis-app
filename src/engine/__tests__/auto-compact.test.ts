@@ -280,6 +280,30 @@ describe("estimateMessagesTokens — provider-wire shape", () => {
     expect(wireEstimate).toBeLessThan(rawEquivalent / 10);
     expect(msg.content).toBe(verbatim);
   });
+
+  it("adds multimodal image token overhead beyond the text marker", () => {
+    const textOnly: GenericMessage = {
+      role: "user",
+      content: "[Image #1]",
+    };
+    const withImage: GenericMessage = {
+      role: "user",
+      content: [
+        { type: "text", text: "[Image #1]" },
+        {
+          type: "image",
+          image: "data:image/png;base64,abc",
+          mimeType: "image/png",
+          width: 1024,
+          height: 1024,
+          bytes: 4096,
+        },
+      ],
+    };
+
+    expect(estimateMessagesTokens([withImage]))
+      .toBeGreaterThan(estimateMessagesTokens([textOnly]) + 700);
+  });
 });
 
 describe("getModelPreflightThreshold — LVIS_DEV_PREFLIGHT_OVERRIDE", () => {

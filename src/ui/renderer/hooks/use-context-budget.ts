@@ -5,12 +5,13 @@ import { getUsableContext } from "../../../shared/context-budget.js";
 import { estimateTokens } from "../../../engine/auto-compact.js";
 
 /**
- * Context budget hook — provider-truth based (Phase 3, 2026-05-07).
+ * Context budget hook — turn-end context-fill SOT (Phase 3, 2026-05-07).
  *
  * `usedTokens` = the most recent usage carrier:
- *   - live turn: `turn_summary.tokensIn` from the provider's last raw input;
- *   - loaded session: `context_usage.tokensIn`, the main-process estimate
- *     rebuilt from persisted messages.
+ *   - `turn_summary.tokensIn`, the turn-end projected context input emitted
+ *     by the main loop and persisted on the final assistant;
+ *   - `context_usage.tokensIn`, emitted only after compact so the ring shrinks
+ *     immediately to the compacted context estimate.
  *
  * This is the right denominator for the context-fill ring because cache reads
  * still occupy context-window slots even though they're billed at 1/10 the
@@ -29,7 +30,7 @@ import { estimateTokens } from "../../../engine/auto-compact.js";
  *
  * draftText: optional composer draft — when present, its token estimate
  * (chars/4 + Korean 1.3x weighting via estimateTokens) is added on top of
- * the last provider-reported usedTokens so the ring and color thresholds
+ * the latest context-fill carrier so the ring and color thresholds
  * update as the user types, before the turn starts.
  *
  * Context window source: `src/shared/pricing-data.ts` →
@@ -41,8 +42,9 @@ export function useContextBudget(params: {
   llmVendor: string;
   llmModel: string;
   draftText?: string;
+  draftExtraTokens?: number;
 }) {
-  const { entries, llmVendor, llmModel, draftText } = params;
+  const { entries, llmVendor, llmModel, draftText, draftExtraTokens = 0 } = params;
 
   const contextBudget = useMemo(() => {
     // Effective window picks the 1M beta tier when the model defines one
@@ -70,8 +72,8 @@ export function useContextBudget(params: {
   // Add draft token estimate so the ring updates as the user types.
   // estimateTokens applies Korean 1.3x weighting (chars/4 heuristic).
   const draftTokens = useMemo(
-    () => (draftText ? estimateTokens(draftText) : 0),
-    [draftText],
+    () => (draftText ? estimateTokens(draftText) : 0) + Math.max(0, draftExtraTokens),
+    [draftText, draftExtraTokens],
   );
 
   const usedTokens = baseTokens + draftTokens;
@@ -101,12 +103,10 @@ export function useContextBudget(params: {
     [usedTokens, tpmLimit],
   );
 
-  // Issue #912 — TokenProgressRing 의 budget 으로 사용할 *효과적 한도*.
-  // tpmLimit 가 등록된 모델 (현재 gpt-5.4-nano 만) 에서는 *분당 처리 한도*
-  // 가 *contextWindow* 보다 훨씬 작은 *실질 한도* 이므로 ring 이 두 한도
-  // 중 더 작은 쪽을 100% 으로 시각화해야 사용자의 "한도 초과 인지" 와
-  // ring 표시가 일치. tpmLimit 미등록 모델은 기존 contextBudget 그대로
-  // — staleness 진단 (image #35 의 mini 케이스) 은 #912 별 분석.
+  // Issue #912 — effectiveBudget = min(contextBudget, tpmLimit). The ring
+  // uses this binding limit so a TPM-bound model turns red before the user
+  // hits a provider-side per-minute rejection, while the tooltip still shows
+  // the context-window denominator separately.
   const effectiveBudget = useMemo(
     () => (typeof tpmLimit === "number" && tpmLimit < contextBudget ? tpmLimit : contextBudget),
     [contextBudget, tpmLimit],
@@ -121,7 +121,7 @@ export function useContextBudget(params: {
     tpmLimit,
     tpmPct,
     isTpmOverflow: typeof tpmPct === "number" && tpmPct >= 1,
-    // #912 — ring 이 사용할 한도 (TPM-bound 모델에선 tpmLimit, else contextBudget).
+    // #912 — ring/binding request limit (TPM-bound 모델에선 tpmLimit, else contextBudget).
     effectiveBudget,
   };
 }
