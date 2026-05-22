@@ -1,5 +1,25 @@
 # Changelog
 
+## v0.2.9 — 2026-05-22
+
+### 안정성 / 컨텍스트
+
+- **50-message auto compact 제거** (PR #1097) — auto compact 는 고정 메시지 개수 대신 token pressure 또는 명시적 context-error recovery 로만 동작한다. 불필요한 중간 compact 로 thinking/tool-result 흐름이 끊기는 상황을 줄였다.
+
+### 테스트 / 품질 게이트
+
+- **테스트 helper SOT 정리** (PR #1095) — renderer, plugins, hooks, prompts, permissions, IPC, Vercel LLM adapter, conversation-loop 테스트의 반복 fixture/helper 를 공통 helper 로 이관했다.
+- **중복 helper detector 추가** (PR #1095) — AST 기반 `scripts/check-test-duplicates.mjs` 로 test/support 경로의 duplicate helper body, 같은 파일 내부 duplicate, generic `setup`/`fixture`/`mock` substantial body 를 CI에서 검출한다.
+- **Coverage area gate 추가** (PR #1095) — `@vitest/coverage-v8` 기반 `scripts/check-test-coverage.mjs` 와 `check:test-quality` 로 total/engine/permissions/plugins/ipc/renderer/main/boot/tools/mcp 영역별 회귀를 잡는다.
+- **Coverage wrapper 안정화** (PR #1095) — coverage report 는 임시 디렉터리에서 생성 후 cleanup 하며, Windows 에서 shell 기반 argv handling 없이 `bun.exe` 를 직접 실행한다.
+
+### 검증
+
+- PR #1097: focused Vitest 2 files / 16 pass, `bun run typecheck`, `git diff --check`, remote CI success.
+- PR #1095: `bun run check:test-quality` 445 files / 5865 pass / 13 skipped, duplicate scanned files 515 / duplicate helper implementations 0, coverage gates pass, `bun run typecheck`, `bun run build`, remote CI success, inline comments 0.
+
+---
+
 ## v0.2.8 — 2026-05-22
 
 ### 안정성 / 네트워크
