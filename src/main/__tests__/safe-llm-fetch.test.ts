@@ -43,7 +43,7 @@ describe("safe LLM fetch", () => {
     ).toBe(false);
   });
 
-  it("sets bypassCustomProtocolHandlers before delegating to Electron net.fetch", async () => {
+  it("sets fail-closed redirect and bypassCustomProtocolHandlers before delegating to Electron net.fetch", async () => {
     const response = new Response("ok");
     const netFetch = vi.fn(async () => response);
     const fetch = createSafeLlmFetch(
@@ -62,9 +62,72 @@ describe("safe LLM fetch", () => {
       expect.objectContaining({
         method: "POST",
         headers: { "x-test": "1" },
+        redirect: "error",
         bypassCustomProtocolHandlers: true,
       }),
     );
+  });
+
+  it("uses the direct private-endpoint fetch for mapped demo Foundry URLs", async () => {
+    const response = new Response("private");
+    const netFetch = vi.fn(async () => new Response("public"));
+    const privateFetch = vi.fn(async () => response);
+    const fetch = createSafeLlmFetch(
+      netFetch as unknown as Parameters<typeof createSafeLlmFetch>[0],
+      {
+        privateEndpoint: {
+          fetch: privateFetch as unknown as Parameters<typeof createSafeLlmFetch>[0],
+          isMappedUrl: (url) => url.hostname === "aif-example.openai.azure.com",
+        },
+      },
+    );
+
+    await expect(
+      fetch("https://aif-example.openai.azure.com/openai/v1/responses", {
+        method: "POST",
+        redirect: "follow",
+      }),
+    ).resolves.toBe(response);
+
+    expect(privateFetch).toHaveBeenCalledWith(
+      "https://aif-example.openai.azure.com/openai/v1/responses",
+      expect.objectContaining({
+        method: "POST",
+        redirect: "error",
+        bypassCustomProtocolHandlers: true,
+      }),
+    );
+    expect(netFetch).not.toHaveBeenCalled();
+  });
+
+  it("keeps unmapped Foundry URLs on the fail-closed default Electron net.fetch path", async () => {
+    const response = new Response("system");
+    const netFetch = vi.fn(async () => response);
+    const privateFetch = vi.fn(async () => new Response("private"));
+    const fetch = createSafeLlmFetch(
+      netFetch as unknown as Parameters<typeof createSafeLlmFetch>[0],
+      {
+        privateEndpoint: {
+          fetch: privateFetch as unknown as Parameters<typeof createSafeLlmFetch>[0],
+          isMappedUrl: () => false,
+        },
+      },
+    );
+
+    await expect(
+      fetch("https://other-resource.openai.azure.com/openai/v1/responses", {
+        redirect: "follow",
+      }),
+    ).resolves.toBe(response);
+
+    expect(netFetch).toHaveBeenCalledWith(
+      "https://other-resource.openai.azure.com/openai/v1/responses",
+      expect.objectContaining({
+        redirect: "error",
+        bypassCustomProtocolHandlers: true,
+      }),
+    );
+    expect(privateFetch).not.toHaveBeenCalled();
   });
 
   it("blocks custom protocols before they reach Electron net.fetch", async () => {
