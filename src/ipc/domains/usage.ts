@@ -31,7 +31,18 @@ export function registerUsageHandlers(deps: IpcDeps): void {
       : await dialog.showSaveDialog({ defaultPath: "lvis-usage.csv", filters: [{ name: "CSV", extensions: ["csv"] }] });
     if (result.canceled || !result.filePath) return { ok: false, canceled: true };
     const { writeFileSync } = await import("node:fs");
-    const headers = ["date", "vendor", "model", "inputTokens", "outputTokens", "totalTokens", "cost"];
+    const headers = [
+      "date",
+      "vendor",
+      "model",
+      "inputTokens",
+      "outputTokens",
+      "cacheReadTokens",
+      "cacheWriteTokens",
+      "totalTokens",
+      "cost",
+      "unknownCostTurns",
+    ];
     const lines = [
       headers.join(","),
       ...rows.map((r) => headers.map((h) => JSON.stringify(r[h] ?? "")).join(",")),

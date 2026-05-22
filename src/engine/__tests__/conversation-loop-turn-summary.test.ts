@@ -1,4 +1,4 @@
-import { describe, expect, it, vi } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 
 import { KeywordEngine } from "../../core/keyword-engine.js";
 import { RouteEngine } from "../../core/route-engine.js";
@@ -8,6 +8,11 @@ import { ToolRegistry } from "../../tools/registry.js";
 import { createDynamicTool } from "../../tools/base.js";
 import { fakeLlmSettings } from "../../shared/__tests__/fake-llm-settings.js";
 import { PostTurnHookChain } from "../../hooks/post-turn-hook-chain.js";
+import { FallbackProvider } from "../llm/vercel/fallback-chain.js";
+
+afterEach(() => {
+  vi.useRealTimers();
+});
 
 class FakeProvider implements LLMProvider {
   readonly vendor = "openai" as const;
@@ -21,7 +26,7 @@ class FakeProvider implements LLMProvider {
 }
 
 function createLoopWithRegistry(
-  provider: FakeProvider,
+  provider: LLMProvider,
   toolRegistry: ToolRegistry,
   overrides: Partial<ConstructorParameters<typeof ConversationLoop>[0]> = {},
 ): ConversationLoop {
@@ -111,15 +116,15 @@ describe("ConversationLoop onTurnSummary", () => {
 
     expect(summary).not.toBeNull();
     expect(summary!.toolCount).toBe(3);
-    // Contract (2026-05-07 v2): tokensIn = *마지막 round* 의 raw inputTokens
-    // (사용자 직관 = "이번 turn 의 context size"). tokensOut + cache 는 모든
-    // round 합산 (turn 의 누적 work). 사용자 보고 "10× over-count" 후 size
-    // 의도로 align.
+    // Contract (Issue #912): tokensIn = turn-end projected context input.
+    // It is the same SOT that TokenProgressRing consumes, not the last
+    // provider round alone. tokensOut + cache remain turn-aggregate work.
     //   round 1: in=100, out=20
     //   round 2: in= 80, out=15
     //   round 3: in= 60, out=10  (end_turn — last)
-    // → tokensIn=60 (last round), tokensOut=45 (sum).
-    expect(summary!.tokensIn).toBe(60);
+    // → tokensIn > 60 because final assistant output is now part of the next
+    // request context; tokensOut=45 (sum).
+    expect(summary!.tokensIn).toBeGreaterThan(60);
     expect(summary!.tokensOut).toBe(45);
     expect(summary!.turnDurationMs).toBeGreaterThanOrEqual(0);
     // cumulativeToolMs aggregates per-call wall-clock — non-negative; tool
@@ -176,10 +181,154 @@ describe("ConversationLoop onTurnSummary", () => {
     const savedMessages = lastCall?.[1] as GenericMessage[] | undefined;
     const finalAssistant = savedMessages?.slice().reverse().find((message) => message.role === "assistant");
     expect(finalAssistant?.meta?.turnSummary).toMatchObject({
-      tokensIn: 42,
+      tokensIn: expect.any(Number),
       tokensOut: 7,
       freshInputTokens: 42,
+      vendorProvider: "openai",
+      vendorModel: "gpt-5.4-mini",
     });
+    expect(finalAssistant?.meta?.turnSummary?.tokensIn ?? 0).toBeGreaterThan(42);
+  });
+
+  it("attributes fallback-served turns to the provider/model that actually streamed", async () => {
+    vi.useFakeTimers();
+    const toolRegistry = new ToolRegistry();
+    const primary: LLMProvider = {
+      vendor: "claude",
+      streamTurn: async function* () {
+        yield { type: "error", error: "500 internal server error", classification: "network" };
+      },
+    };
+    const fallback = new FakeProvider([
+      [
+        { type: "text_delta", text: "fallback answer" },
+        { type: "message_complete", stopReason: "end_turn", usage: { inputTokens: 10, outputTokens: 2 } },
+      ],
+    ]);
+    const provider = new FallbackProvider(
+      primary,
+      [{ provider: "openai", model: "gpt-5.4-mini" }],
+      () => "test-key",
+      undefined,
+      () => fallback,
+    );
+    const saveSession = vi.fn(async () => {});
+    const auditLogger = {
+      logTurn: vi.fn(),
+      logToolCall: vi.fn(),
+      isPermissionAuditChainReady: () => false,
+    };
+    const loop = createLoopWithRegistry(provider, toolRegistry, {
+      settingsService: {
+        get: () => fakeLlmSettings({ provider: "claude", model: "claude-sonnet-4-6" }),
+        getSecret: () => "test-key",
+      },
+      memoryManager: { saveSession, listSessions: () => [] } as never,
+      auditLogger: auditLogger as never,
+    });
+
+    let summary:
+      | { vendorProvider?: string; vendorModel?: string }
+      | null = null;
+    const pending = loop.runTurn("질문", {
+      onTurnSummary: (s) => {
+        summary = s;
+      },
+    }, undefined, { inputOrigin: "user-keyboard" });
+    await vi.advanceTimersByTimeAsync(5_000);
+    await pending;
+    vi.useRealTimers();
+
+    expect(summary).toMatchObject({
+      vendorProvider: "openai",
+      vendorModel: "gpt-5.4-mini",
+    });
+    const savedMessages = saveSession.mock.calls.at(-1)?.[1] as GenericMessage[] | undefined;
+    const finalAssistant = savedMessages?.slice().reverse().find((message) => message.role === "assistant");
+    expect(finalAssistant?.meta?.turnSummary).toMatchObject({
+      vendorProvider: "openai",
+      vendorModel: "gpt-5.4-mini",
+    });
+    expect(auditLogger.logTurn).toHaveBeenCalledWith(
+      expect.objectContaining({ route: "openai/gpt-5.4-mini" }),
+    );
+  });
+
+  it("keeps mixed-provider fallback rounds out of single-model turn badge pricing", async () => {
+    vi.useFakeTimers();
+    const toolRegistry = new ToolRegistry();
+    toolRegistry.register(createDynamicTool({
+      name: "read_file",
+      description: "Read file",
+      source: "builtin",
+      category: "read",
+      jsonSchema: { type: "object", properties: { path: { type: "string" } }, required: ["path"] },
+      isReadOnly: () => true,
+      execute: async () => ({ output: "contents", isError: false }),
+    }));
+    let primaryCalls = 0;
+    const primary: LLMProvider = {
+      vendor: "claude",
+      streamTurn: async function* () {
+        primaryCalls += 1;
+        if (primaryCalls === 1) {
+          yield { type: "tool_call", id: "t-1", name: "read_file", input: { path: "a" } };
+          yield { type: "message_complete", stopReason: "tool_use", usage: { inputTokens: 100, outputTokens: 10 } };
+          return;
+        }
+        yield { type: "error", error: "500 internal server error", classification: "network" };
+      },
+    };
+    const fallback = new FakeProvider([
+      [
+        { type: "text_delta", text: "fallback final" },
+        { type: "message_complete", stopReason: "end_turn", usage: { inputTokens: 20, outputTokens: 5 } },
+      ],
+    ]);
+    const provider = new FallbackProvider(
+      primary,
+      [{ provider: "openai", model: "gpt-5.4-mini" }],
+      () => "test-key",
+      undefined,
+      () => fallback,
+    );
+    const saveSession = vi.fn(async () => {});
+    const auditLogger = {
+      logTurn: vi.fn(),
+      logToolCall: vi.fn(),
+      isPermissionAuditChainReady: () => false,
+    };
+    const loop = createLoopWithRegistry(provider, toolRegistry, {
+      settingsService: {
+        get: () => fakeLlmSettings({ provider: "claude", model: "claude-sonnet-4-6" }),
+        getSecret: () => "test-key",
+      },
+      memoryManager: { saveSession, listSessions: () => [] } as never,
+      auditLogger: auditLogger as never,
+    });
+
+    let summary:
+      | { vendorProvider?: string; vendorModel?: string }
+      | null = null;
+    const pending = loop.runTurn("질문", {
+      onTurnSummary: (s) => {
+        summary = s;
+      },
+    }, undefined, { inputOrigin: "user-keyboard" });
+    await vi.advanceTimersByTimeAsync(5_000);
+    await pending;
+    vi.useRealTimers();
+
+    expect(summary?.vendorProvider).toBeUndefined();
+    expect(summary?.vendorModel).toBeUndefined();
+    expect(auditLogger.logTurn).toHaveBeenCalledWith(
+      expect.objectContaining({
+        usageByModel: [
+          expect.objectContaining({ vendorProvider: "claude", vendorModel: "claude-sonnet-4-6" }),
+          expect.objectContaining({ vendorProvider: "openai", vendorModel: "gpt-5.4-mini" }),
+        ],
+      }),
+    );
   });
 
   it("persists turnSummary on the marker-stripped post-turn transcript", async () => {
@@ -218,10 +367,13 @@ describe("ConversationLoop onTurnSummary", () => {
     expect(finalAssistant?.content).not.toContain("<title>");
     expect(finalAssistant?.content).not.toContain("[checkpoint]");
     expect(finalAssistant?.meta?.turnSummary).toMatchObject({
-      tokensIn: 30,
+      tokensIn: expect.any(Number),
       tokensOut: 6,
       freshInputTokens: 30,
+      vendorProvider: "openai",
+      vendorModel: "gpt-5.4-mini",
     });
+    expect(finalAssistant?.meta?.turnSummary?.tokensIn ?? 0).toBeGreaterThan(30);
   });
 
   it("does not emit a turnSummary footer when the durable final save fails", async () => {
@@ -347,7 +499,7 @@ describe("ConversationLoop onTurnSummary", () => {
     expect(result.text).toContain("한도를 초과");
   });
 
-  it("reports zero tokens when usage is unavailable", async () => {
+  it("reports estimated context tokens when provider usage is unavailable", async () => {
     const toolRegistry = new ToolRegistry();
     const provider = new FakeProvider([
       [
@@ -368,7 +520,7 @@ describe("ConversationLoop onTurnSummary", () => {
     }, undefined, { inputOrigin: "user-keyboard" });
 
     expect(summary).not.toBeNull();
-    expect(summary!.tokensIn).toBe(0);
+    expect(summary!.tokensIn).toBeGreaterThan(0);
     expect(summary!.tokensOut).toBe(0);
     expect(summary!.toolCount).toBe(0);
   });

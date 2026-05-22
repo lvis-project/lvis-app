@@ -13,22 +13,22 @@ afterEach(() => {
 });
 
 const MOCK_SUMMARY = {
-  today: { inputTokens: 1000, outputTokens: 500, totalTokens: 1500, cost: 0.01 },
-  thisWeek: { inputTokens: 7000, outputTokens: 3500, totalTokens: 10500, cost: 0.07 },
-  thisMonth: { inputTokens: 30000, outputTokens: 15000, totalTokens: 45000, cost: 0.30 },
+  today: { inputTokens: 1000, outputTokens: 500, cacheReadTokens: 100, cacheWriteTokens: 20, totalTokens: 1620, cost: 0.01 },
+  thisWeek: { inputTokens: 7000, outputTokens: 3500, cacheReadTokens: 700, cacheWriteTokens: 140, totalTokens: 11340, cost: 0.07 },
+  thisMonth: { inputTokens: 30000, outputTokens: 15000, cacheReadTokens: 3000, cacheWriteTokens: 600, totalTokens: 48600, cost: 0.30 },
   perVendor: [
-    { vendor: "claude", model: "*", inputTokens: 30000, outputTokens: 15000, totalTokens: 45000, cost: 0.30 },
+    { vendor: "claude", model: "*", inputTokens: 30000, outputTokens: 15000, cacheReadTokens: 3000, cacheWriteTokens: 600, totalTokens: 48600, cost: 0.30 },
   ],
   perModel: [
-    { vendor: "claude", model: "claude-sonnet-4-6", inputTokens: 30000, outputTokens: 15000, totalTokens: 45000, cost: 0.30 },
+    { vendor: "claude", model: "claude-sonnet-4-6", inputTokens: 30000, outputTokens: 15000, cacheReadTokens: 3000, cacheWriteTokens: 600, totalTokens: 48600, cost: 0.30 },
   ],
   trend: [
-    { date: "2026-04-17", inputTokens: 1000, outputTokens: 500, totalTokens: 1500, cost: 0.01 },
-    { date: "2026-04-18", inputTokens: 2000, outputTokens: 1000, totalTokens: 3000, cost: 0.02 },
+    { date: "2026-04-17", inputTokens: 1000, outputTokens: 500, cacheReadTokens: 100, cacheWriteTokens: 20, totalTokens: 1620, cost: 0.01 },
+    { date: "2026-04-18", inputTokens: 2000, outputTokens: 1000, cacheReadTokens: 200, cacheWriteTokens: 40, totalTokens: 3240, cost: 0.02 },
   ],
   topConversations: [
-    { sessionId: "sess-abc123", turns: 5, firstInput: "안녕", inputTokens: 10000, outputTokens: 5000, totalTokens: 15000, cost: 0.10 },
-    { sessionId: "sess-def456", turns: 2, firstInput: "질문", inputTokens: 5000, outputTokens: 2500, totalTokens: 7500, cost: 0.05 },
+    { sessionId: "sess-abc123", turns: 5, firstInput: "안녕", inputTokens: 10000, outputTokens: 5000, cacheReadTokens: 1000, cacheWriteTokens: 200, totalTokens: 16200, cost: 0.10 },
+    { sessionId: "sess-def456", turns: 2, firstInput: "질문", inputTokens: 5000, outputTokens: 2500, cacheReadTokens: 500, cacheWriteTokens: 100, totalTokens: 8100, cost: 0.05 },
   ],
   generatedAt: new Date().toISOString(),
 };
@@ -70,7 +70,10 @@ describe("UsageDashboard", () => {
 
   it("renders vendor breakdown with claude row", async () => {
     await renderDashboard();
-    await waitFor(() => expect(screen.getByText("claude")).toBeTruthy());
+    await waitFor(() => {
+      expect(screen.getByText("claude")).toBeTruthy();
+      expect(screen.getAllByText(/cache r/).length).toBeGreaterThan(0);
+    });
   });
 
   it("renders session Top 5 table", async () => {
@@ -81,6 +84,20 @@ describe("UsageDashboard", () => {
   it("renders monthly projection line", async () => {
     await renderDashboard();
     await waitFor(() => expect(screen.getByText(/이 속도로면 월 약/)).toBeTruthy());
+  });
+
+  it("marks monthly projection as unknown when trend contains unknown-cost turns", async () => {
+    const api = usageDashboardApi({
+      trend: [
+        { date: "2026-04-17", inputTokens: 1000, outputTokens: 500, cacheReadTokens: 0, cacheWriteTokens: 0, totalTokens: 1500, cost: 0, unknownCostTurns: 1 },
+        { date: "2026-04-18", inputTokens: 2000, outputTokens: 1000, cacheReadTokens: 0, cacheWriteTokens: 0, totalTokens: 3000, cost: 0, unknownCostTurns: 2 },
+      ],
+    });
+    const { container } = await renderDashboard(api);
+    await waitFor(() => {
+      expect(container.textContent).toContain("월 약 $0 + 미정 포함");
+      expect(container.textContent).toContain("일평균 $0 + 미정 포함 × 30일");
+    });
   });
 
   it("renders preset buttons", async () => {
@@ -128,6 +145,31 @@ describe("UsageDashboard", () => {
       expect(rows.length).toBeGreaterThan(0);
       expect(rows[0]).toHaveProperty("date");
       expect(rows[0]).toHaveProperty("cost");
+      expect(rows[0]).toHaveProperty("cacheReadTokens", 100);
+      expect(rows[0]).toHaveProperty("cacheWriteTokens", 20);
+      expect(rows[0]).toHaveProperty("unknownCostTurns", 0);
+    });
+  });
+
+  it("exports unknown-cost turn counts in CSV rows", async () => {
+    const api = usageDashboardApi({
+      trend: [
+        { date: "2026-04-17", inputTokens: 1000, outputTokens: 500, cacheReadTokens: 100, cacheWriteTokens: 10, totalTokens: 1610, cost: 0, unknownCostTurns: 2 },
+      ],
+      perModel: [
+        { vendor: "openai", model: "gpt-4o", inputTokens: 1000, outputTokens: 500, cacheReadTokens: 100, cacheWriteTokens: 0, totalTokens: 1500, cost: 0, unknownCostTurns: 3 },
+      ],
+    });
+    await renderDashboard(api);
+    await waitFor(() => expect(screen.getByRole("button", { name: /CSV 내보내기/ })).toBeTruthy());
+    fireEvent.click(screen.getByRole("button", { name: /CSV 내보내기/ }));
+    await waitFor(() => {
+      expect(api.exportUsageCsv).toHaveBeenCalledTimes(1);
+      const rows = api.exportUsageCsv.mock.calls[0][0] as Array<Record<string, unknown>>;
+      expect(rows[0]).toHaveProperty("unknownCostTurns", 2);
+      expect(rows[0]).toHaveProperty("cacheReadTokens", 100);
+      expect(rows[0]).toHaveProperty("cacheWriteTokens", 10);
+      expect(rows.find((row) => row.date === "range-total")).toHaveProperty("unknownCostTurns", 3);
     });
   });
 

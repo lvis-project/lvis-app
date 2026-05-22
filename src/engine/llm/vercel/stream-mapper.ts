@@ -29,6 +29,19 @@ const log = createLogger("stream-mapper");
 
 type AnyPart = Record<string, unknown> & { type: string };
 
+type UsageRaw = {
+  inputTokens?: number;
+  outputTokens?: number;
+  promptTokens?: number;
+  completionTokens?: number;
+  cachedInputTokens?: number;
+  inputTokenDetails?: {
+    noCacheTokens?: number;
+    cacheReadTokens?: number;
+    cacheWriteTokens?: number;
+  };
+};
+
 export async function* fullStreamToStreamEvent(
   stream: AsyncIterable<AnyPart>,
 ): AsyncIterable<StreamEvent> {
@@ -109,20 +122,8 @@ export async function* fullStreamToStreamEvent(
       case "finish": {
         const p = part as {
           finishReason?: string;
-          totalUsage?: {
-            inputTokens?: number;
-            outputTokens?: number;
-            promptTokens?: number;
-            completionTokens?: number;
-            cachedInputTokens?: number;
-          };
-          usage?: {
-            inputTokens?: number;
-            outputTokens?: number;
-            promptTokens?: number;
-            completionTokens?: number;
-            cachedInputTokens?: number;
-          };
+          totalUsage?: UsageRaw;
+          usage?: UsageRaw;
           providerMetadata?: {
             anthropic?: {
               cacheCreationInputTokens?: number;
@@ -145,9 +146,11 @@ export async function* fullStreamToStreamEvent(
         const usageRaw = p.totalUsage ?? p.usage;
         const cacheReadTokens =
           p.providerMetadata?.anthropic?.cacheReadInputTokens ??
+          usageRaw?.inputTokenDetails?.cacheReadTokens ??
           usageRaw?.cachedInputTokens;
         const cacheWriteTokens =
-          p.providerMetadata?.anthropic?.cacheCreationInputTokens;
+          p.providerMetadata?.anthropic?.cacheCreationInputTokens ??
+          usageRaw?.inputTokenDetails?.cacheWriteTokens;
         const usage = usageRaw
           ? {
               inputTokens:

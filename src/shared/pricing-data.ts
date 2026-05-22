@@ -16,9 +16,12 @@
  *                              should treat the beta value as the *effective*
  *                              window when present.
  *
- * Cache prices (Anthropic only — `cacheReadPer1M` / `cacheWritePer1M`):
- *   Read  ~ 0.1× input,  Write 5m TTL ~ 1.25× input. When omitted, callers
- *   derive ratios at compute time (see `engine/llm/pricing.ts:computeCost`).
+ * Cache prices:
+ *   - OpenAI/Azure-compatible prompt cache reads use `cacheReadPer1M` when
+ *     the provider publishes a cached-input price.
+ *   - Anthropic prompt cache reads/writes use `cacheReadPer1M` /
+ *     `cacheWritePer1M`; omitted values derive from public ratios at compute
+ *     time (read ~0.1× input, write 5m TTL ~1.25× input).
  *
  * IMPORTANT: this module must stay pure — no `process.env`, no Node-only
  * imports. All env-override logic lives in `engine/llm/pricing.ts`.
@@ -42,10 +45,10 @@ export interface ModelPricing {
   /** Default API tier context window in tokens. */
   contextWindow: number;
   /**
-   * Cache read price ($/1M tokens). Anthropic only — billed at ~0.1× input
-   * for prompt-cached reads. OpenAI / Gemini do not bill cache reads as a
-   * separate line item (their `cached_tokens` is already inside `prompt_tokens`).
-   * Undefined → caller treats cache reads as ordinary input.
+   * Cache read price ($/1M tokens). Anthropic bills prompt-cache hits as a
+   * separate additive line; OpenAI/Azure-compatible providers report cached
+   * tokens as a subset of prompt tokens and price that subset at this rate
+   * when published. Undefined → caller treats cache reads as ordinary input.
    */
   cacheReadPer1M?: number;
   /**
@@ -93,14 +96,14 @@ export interface ModelPricing {
 /** Default pricing + context catalog. */
 export const DEFAULT_PRICING: Record<PricingVendor, Record<string, ModelPricing>> = {
   // ── Anthropic Claude ──────────────────────────────────────────────────────
-  // Pricing: https://www.anthropic.com/pricing — list prices verified 2026-04.
+  // Pricing: https://platform.claude.com/docs/en/about-claude/pricing — verified 2026-05-22.
   // Context: 4.6 family supports 1M via `context-1m-2025-08-07` beta.
   claude: {
     "claude-sonnet-4-6":           { inputPer1M: 3,    outputPer1M: 15, contextWindow: 200_000, contextWindow1MBeta: 1_000_000 },
     "claude-sonnet-4-5":           { inputPer1M: 3,    outputPer1M: 15, contextWindow: 200_000 },
     "claude-sonnet-4-20250514":    { inputPer1M: 3,    outputPer1M: 15, contextWindow: 200_000 },
-    "claude-opus-4-6":             { inputPer1M: 15,   outputPer1M: 75, contextWindow: 200_000, contextWindow1MBeta: 1_000_000 },
-    "claude-opus-4-5":             { inputPer1M: 15,   outputPer1M: 75, contextWindow: 200_000 },
+    "claude-opus-4-6":             { inputPer1M: 5,    outputPer1M: 25, contextWindow: 200_000, contextWindow1MBeta: 1_000_000 },
+    "claude-opus-4-5":             { inputPer1M: 5,    outputPer1M: 25, contextWindow: 200_000 },
     "claude-opus-4-20250514":      { inputPer1M: 15,   outputPer1M: 75, contextWindow: 200_000 },
     "claude-haiku-4-5":            { inputPer1M: 1,    outputPer1M: 5,  contextWindow: 200_000 },
     "claude-haiku-4-5-20251001":   { inputPer1M: 1,    outputPer1M: 5,  contextWindow: 200_000 },
@@ -134,8 +137,8 @@ export const DEFAULT_PRICING: Record<PricingVendor, Record<string, ModelPricing>
     //   사양 없음 → 등록 안 함. window-only preflight 유지 (안전).
     // 동적 `x-ratelimit-remaining-tokens` header parser 가 도입되면 본
     // 정적 등록 자체가 deprecated 후보 — 별 cycle.
-    "gpt-5.4":                     { inputPer1M: 2.5,  outputPer1M: 15,  contextWindow: 1_050_000, surchargeInputThreshold: 272_000, surchargeInputMultiplier: 2,   surchargeOutputMultiplier: 1.5 },
-    "gpt-5.4-mini":                { inputPer1M: 0.75, outputPer1M: 4.5, contextWindow:   400_000 },
+    "gpt-5.4":                     { inputPer1M: 2.5,  outputPer1M: 15,  cacheReadPer1M: 0.25,  contextWindow: 1_050_000, surchargeInputThreshold: 272_000, surchargeInputMultiplier: 2,   surchargeOutputMultiplier: 1.5 },
+    "gpt-5.4-mini":                { inputPer1M: 0.75, outputPer1M: 4.5, cacheReadPer1M: 0.075, contextWindow:   400_000 },
     "gpt-5.4-nano":                { inputPer1M: 0.2,  outputPer1M: 1.25, contextWindow:  400_000, tpmDefault:    200_000 },
     "gpt-5.4-pro":                 { inputPer1M: 30,   outputPer1M: 180, contextWindow: 1_100_000, surchargeInputThreshold: 272_000, surchargeInputMultiplier: 2,   surchargeOutputMultiplier: 1.5 },
     "gpt-5.3":                     { inputPer1M: 0,    outputPer1M: 0,  contextWindow:   400_000 },
@@ -278,6 +281,40 @@ export function lookupPricingOptional(
   return undefined;
 }
 
+export function hasKnownTokenPricing(
+  pricing: Pick<ModelPricing, "inputPer1M" | "outputPer1M"> | undefined,
+): pricing is ModelPricing {
+  return !!pricing && (pricing.inputPer1M > 0 || pricing.outputPer1M > 0);
+}
+
+/**
+ * Strict cost-display variant. Zero-price catalog rows may be valid for
+ * context-window lookup (unknown direct provider pricing, subscription-billed
+ * routes, or free-tier placeholders), but they are not safe to present as
+ * "$0" token cost unless a caller has a separate billing contract.
+ */
+export function lookupBillablePricingOptional(
+  vendor: string,
+  model: string,
+  table: Record<string, Record<string, ModelPricing>> = DEFAULT_PRICING,
+): ModelPricing | undefined {
+  if (vendor === "azure-foundry") {
+    const vendorTable = table[vendor] ?? {};
+    const exact = vendorTable[model];
+    if (hasKnownTokenPricing(exact)) return exact;
+    let bestKey: string | undefined;
+    for (const key of Object.keys(vendorTable)) {
+      if (model.startsWith(key) && (bestKey === undefined || key.length > bestKey.length)) {
+        bestKey = key;
+      }
+    }
+    const direct = bestKey !== undefined ? vendorTable[bestKey] : undefined;
+    return hasKnownTokenPricing(direct) ? direct : undefined;
+  }
+  const pricing = lookupPricingOptional(vendor, model, table);
+  return hasKnownTokenPricing(pricing) ? pricing : undefined;
+}
+
 /**
  * Anthropic prompt cache per-1M rates resolved against an explicit pricing
  * entry. When the entry omits `cacheReadPer1M` / `cacheWritePer1M`, the
@@ -320,9 +357,9 @@ export function effectiveContextWindow(pricing: ModelPricing): number {
  * IMPORTANT: `inputTokens` carries PROVIDER-RAW semantics, which differ:
  *   - Anthropic: `input_tokens` 는 fresh-only — cache 토큰은 별도 필드.
  *     총 effective input = input + cache_read + cache_write.
- *   - OpenAI / Gemini: `prompt_tokens` / `promptTokenCount` 는 cached 를
- *     이미 포함. cacheReadTokens 가 들어와도 prompt 안의 *부분집합* 으로
- *     읽어야 하며, 별도로 합산하면 double-count.
+ *   - OpenAI / Azure / Gemini: `prompt_tokens` / `promptTokenCount` 는
+ *     cached 를 이미 포함. cacheReadTokens 가 들어와도 prompt 안의
+ *     *부분집합* 으로 읽어야 하며, 별도로 합산하면 double-count.
  *
  * Adapters MUST normalize their provider's shape into this convention
  * BEFORE calling computeCost.
@@ -332,6 +369,29 @@ export interface UsageForCost {
   outputTokens: number;
   cacheReadTokens?: number;
   cacheWriteTokens?: number;
+}
+
+/**
+ * Normalize AI SDK v6 usage into the provider-cost contract above.
+ *
+ * AI SDK reports `inputTokens` as total prompt tokens and puts cache details
+ * under `inputTokenDetails`. Anthropic cost math needs fresh input plus
+ * additive cache lines, while OpenAI/Gemini style providers already include
+ * cache inside prompt tokens. Their cached subset is split inside
+ * `computeCost`, not at this normalization boundary.
+ */
+export function normalizeAiSdkUsageForCost<T extends UsageForCost | undefined>(
+  usage: T,
+  vendor: PricingVendor,
+): T {
+  if (!usage || vendor !== "claude") return usage;
+  const input = Number.isFinite(usage.inputTokens) ? usage.inputTokens : 0;
+  const cacheRead = Number.isFinite(usage.cacheReadTokens) ? (usage.cacheReadTokens ?? 0) : 0;
+  const cacheWrite = Number.isFinite(usage.cacheWriteTokens) ? (usage.cacheWriteTokens ?? 0) : 0;
+  return {
+    ...usage,
+    inputTokens: Math.max(0, input - Math.max(0, cacheRead) - Math.max(0, cacheWrite)),
+  };
 }
 
 /**
@@ -380,8 +440,9 @@ export function computeCost(
     case "copilot":
     case "azure-foundry": {
       // `prompt_tokens` 가 cached 를 이미 포함 — cacheRead 를 또 더하면
-      // double-count. cached portion 의 자동 할인 (~50%) 은 provider 빌링
-      // 파이프라인에서 처리되며 LVIS 는 list-price 로 근사한다.
+      // double-count. Instead split the provider-reported prompt tokens into
+      // fresh + cached portions so OpenAI/Azure published cached-input rates
+      // are visible in LVIS cost surfaces.
       //
       // Long-context surcharge (gpt-5.4 / gpt-5.4-pro): input>threshold 시
       // 세션 전체가 input × M_in + output × M_out 로 우상향. issue #900.
@@ -390,7 +451,14 @@ export function computeCost(
         && input > pricing.surchargeInputThreshold;
       const inMul = inSurcharge ? (pricing.surchargeInputMultiplier ?? 1) : 1;
       const outMul = inSurcharge ? (pricing.surchargeOutputMultiplier ?? 1) : 1;
-      return per1M(input, pricing.inputPer1M * inMul) + per1M(output, pricing.outputPer1M * outMul);
+      const cachedInput = Math.min(input, cacheRead);
+      const freshInput = Math.max(0, input - cachedInput);
+      const cachedInputRate = pricing.cacheReadPer1M ?? pricing.inputPer1M;
+      return (
+        per1M(freshInput, pricing.inputPer1M * inMul) +
+        per1M(cachedInput, cachedInputRate * inMul) +
+        per1M(output, pricing.outputPer1M * outMul)
+      );
     }
     case "gemini":
     case "vertex-ai": {

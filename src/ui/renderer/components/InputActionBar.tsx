@@ -29,11 +29,10 @@ export interface InputActionBarProps {
   /**
    * Why the attach button is disabled, used to surface a context-specific
    * tooltip. Defaults to "limit" — useful when the caller only wires the
-   * 5-cap path. Pass "no-api-key" or "context-overflow" for the other
-   * gating cases so users see the actual blocker, not a misleading
-   * "한도 도달" message.
+   * 5-cap path. Pass "no-api-key" for auth gating so users see the actual
+   * blocker, not a misleading "한도 도달" message.
    */
-  attachDisabledReason?: "limit" | "no-api-key" | "context-overflow";
+  attachDisabledReason?: "limit" | "no-api-key";
   // Trailing — role preset
   rolePresets: RolePreset[];
   activePreset: RolePreset | null | undefined;
@@ -58,12 +57,10 @@ export interface InputActionBarProps {
 
 function attachButtonLabel(
   disabled: boolean,
-  reason: "limit" | "no-api-key" | "context-overflow",
+  reason: "limit" | "no-api-key",
 ): string {
   if (!disabled) return "파일/이미지 첨부 (최대 5개)";
   if (reason === "no-api-key") return "첨부 비활성 — API 키 설정 후 사용 가능";
-  if (reason === "context-overflow")
-    return "첨부 비활성 — 컨텍스트 한도, 자동 압축 후 사용 가능";
   return "첨부 비활성 — 5/5 한도 도달";
 }
 

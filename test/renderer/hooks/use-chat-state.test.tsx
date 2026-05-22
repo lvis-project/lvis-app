@@ -276,6 +276,7 @@ describe("useContextBudget (deterministic math)", () => {
         toolCount: 0,
         cumulativeToolMs: 0,
         tokensIn: 10_000,
+        freshInputTokens: 10_000,
         tokensOut: 200,
       },
     ];
@@ -289,6 +290,7 @@ describe("useContextBudget (deterministic math)", () => {
         toolCount: 0,
         cumulativeToolMs: 0,
         tokensIn: 5_000,
+        freshInputTokens: 5_000,
         tokensOut: 100,
       },
     ];
@@ -302,11 +304,11 @@ describe("useContextBudget (deterministic math)", () => {
     expect(b).toBe(5_000); // compact 후 감소가 정상 — Phase 3 의 핵심 동작.
   });
 
-  it("usedTokens reflects a loaded session context estimate until a live turn summary arrives", () => {
+  it("usedTokens reflects compact context carriers until a live turn summary arrives", () => {
     const loaded: ChatEntry[] = [
       { kind: "user", text: "이전 질문" },
       { kind: "assistant", text: "이전 답변", streaming: false },
-      { kind: "context_usage", tokensIn: 12_345, source: "session-estimate" },
+      { kind: "context_usage", tokensIn: 12_345, source: "compact-estimate" },
     ];
     const liveAfterLoaded: ChatEntry[] = [
       ...loaded,
@@ -512,14 +514,13 @@ describe("useSessions (streaming guard)", () => {
     expect(result.current.currentSessionId).toBe("other-sess");
   });
 
-  it("handleLoadSession carries the persisted session context token estimate", async () => {
+  it("handleLoadSession does not synthesize a session-level context estimate", async () => {
     const { api } = makeMockLvisApi();
     const { result } = renderHook(() => useSessions(api as unknown as LvisApi));
     const setEntries = vi.fn();
     api.chatSessionHistory.mockClear();
     api.chatSessionHistory.mockResolvedValueOnce({
       ok: true,
-      estimatedInputTokens: 4321,
       messages: [
         { index: 0, role: "user", content: "이전 질문" },
         { index: 1, role: "assistant", content: "이전 답변" },
@@ -533,7 +534,6 @@ describe("useSessions (streaming guard)", () => {
     expect(setEntries).toHaveBeenCalledWith([
       { kind: "user", text: "이전 질문" },
       { kind: "assistant", text: "이전 답변", streaming: false, route: undefined },
-      { kind: "context_usage", tokensIn: 4321, source: "session-estimate" },
     ]);
   });
 
@@ -645,7 +645,6 @@ describe("useSessions (streaming guard)", () => {
       currentSession: "active-sess",
       history: {
         sessionId: "active-sess",
-        estimatedInputTokens: 2468,
         messages: [
           { index: 0, role: "user", content: "진행 중 질문" },
           { index: 1, role: "assistant", content: "진행 중 답변" },
@@ -665,7 +664,6 @@ describe("useSessions (streaming guard)", () => {
       expect(applyInitial).toHaveBeenCalledWith([
         { kind: "user", text: "진행 중 질문" },
         { kind: "assistant", text: "진행 중 답변", streaming: false, route: undefined },
-        { kind: "context_usage", tokensIn: 2468, source: "session-estimate" },
       ]);
     });
   });

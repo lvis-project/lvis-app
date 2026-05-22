@@ -40,7 +40,8 @@ import { MainContent } from "./MainContent.js";
 import { StatusBar } from "./components/StatusBar.js";
 import { useStatusBar, type NotificationToastMeta } from "./hooks/use-status-bar.js";
 import { useSettings } from "./hooks/use-settings.js";
-import { lookupPricingOptional } from "../../shared/pricing-data.js";
+import { lookupBillablePricingOptional } from "../../shared/pricing-data.js";
+import { estimateMultimodalTokenOverhead } from "../../shared/multimodal-token-estimate.js";
 import { useChatState } from "./hooks/use-chat-state.js";
 import { useApproval } from "./hooks/use-approval.js";
 import { useSearch } from "./hooks/use-search.js";
@@ -434,9 +435,21 @@ export function App() {
 
   // LLM settings + context budget (single source of truth: src/shared/pricing-data.ts)
   const { llmVendor, llmModel, enableThinkingChat, refresh: refreshLlmSettings, toggleThinking } = useSettings(api);
+  const draftAttachmentTokens = useMemo(
+    () => estimateMultimodalTokenOverhead(attachments
+      .filter((attachment) => attachment.kind === "image")
+      .map((attachment) => ({
+        type: "image",
+        mimeType: attachment.mimeType,
+        width: attachment.width,
+        height: attachment.height,
+        bytes: attachment.bytes,
+      }))),
+    [attachments],
+  );
 
   const { usedTokens, contextBudget, effectiveBudget, contextOverflowPct, tpmLimit, tpmPct, isTpmOverflow } =
-    useContextBudget({ entries, llmVendor, llmModel, draftText: question });
+    useContextBudget({ entries, llmVendor, llmModel, draftText: question, draftExtraTokens: draftAttachmentTokens });
 
   const activePluginView = useMemo(() => pluginViews.find((i) => toViewKey(i) === activeView), [pluginViews, activeView]);
 
@@ -950,6 +963,7 @@ export function App() {
       if (mode === "default" && opts?.inputOrigin !== "queue-auto") {
         if (await handleCompactCommand(t)) {
           if (debugStreamEnabled) debugLog("handleAsk", "skip:compact-command-handled");
+          setQuestion("");
           return;
         }
         if (t === "/load" || t.startsWith("/load ")) {
@@ -1111,7 +1125,7 @@ export function App() {
   // toggle in TokenCostBadge stays disabled rather than showing $0 from
   // FALLBACK_PRICING.
   const activePricing = useMemo(
-    () => lookupPricingOptional(llmVendor, llmModel),
+    () => lookupBillablePricingOptional(llmVendor, llmModel),
     [llmVendor, llmModel],
   );
 

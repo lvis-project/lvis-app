@@ -15,6 +15,7 @@ import {
 } from "../../../lib/chat-stream-state.js";
 import { detectFromStream } from "../../../lib/stream-markers.js";
 import { debugLog, isDebugStreamEnabled } from "../../../lib/debug-stream.js";
+import { isLLMVendor } from "../../../shared/llm-vendor-defaults.js";
 import type { LvisApi } from "../types.js";
 import { DEFAULT_TOAST_TTL_MS } from "../constants.js";
 
@@ -276,24 +277,20 @@ export function useChatState(api: LvisApi) {
         // provider's usage report (Vercel AI SDK forwards prompt_tokens +
         // completion_tokens through stream-mapper.ts; see the engine-side
         // `onTurnSummary` wiring in conversation-loop.ts runTurn).
-        const turnDurationMs = ev.turnDurationMs ?? 0;
-        const toolCount = ev.toolCount ?? 0;
-        const cumulativeToolMs = ev.cumulativeToolMs ?? 0;
-        const tokensIn = ev.tokensIn ?? 0;
-        const freshInputTokens = ev.freshInputTokens ?? 0;
-        const tokensOut = ev.tokensOut ?? 0;
+        const summary = parseTurnSummaryEvent(ev);
+        if (!summary) {
+          console.warn("Malformed turn_summary stream event ignored", ev);
+          return;
+        }
         setEntries((p) => [
           ...p,
           {
             kind: "turn_summary",
-            turnDurationMs,
-            toolCount,
-            cumulativeToolMs,
-            tokensIn,
-            freshInputTokens,
-            tokensOut,
+            ...summary,
             ...(ev.cacheReadTokens !== undefined ? { cacheReadTokens: ev.cacheReadTokens } : {}),
             ...(ev.cacheWriteTokens !== undefined ? { cacheWriteTokens: ev.cacheWriteTokens } : {}),
+            ...(summary.vendorProvider !== undefined ? { vendorProvider: summary.vendorProvider } : {}),
+            ...(summary.vendorModel !== undefined ? { vendorModel: summary.vendorModel } : {}),
             ...(ev.breakdown ? { breakdown: ev.breakdown } : {}),
           },
         ]);
@@ -330,7 +327,7 @@ export function useChatState(api: LvisApi) {
             {
               kind: "context_usage" as const,
               tokensIn: estimatedAfter,
-              source: "session-estimate" as const,
+              source: "compact-estimate" as const,
             },
           ];
         });
@@ -677,15 +674,17 @@ export function useChatState(api: LvisApi) {
    */
   const handleCompactCommand = useCallback(
     async (input: string): Promise<boolean> => {
-      if (!input.trimStart().startsWith("/compact")) return false;
+      if (!/^\/compact(?:\s|$)/.test(input.trimStart())) return false;
       try {
         const res = await api.chatCompact();
         const banner = res.compacted
           ? `대화 압축: ${res.removedMessageCount}개 메시지 요약됨`
-          : "컴팩트 불필요: 메시지 수가 충분히 적습니다.";
+          : res.summary;
         setEntries((p) => [...p, { kind: "system", text: banner }]);
       } catch (err) {
         setEntries((p) => [...p, { kind: "system", text: `압축 오류: ${(err as Error).message}` }]);
+      } finally {
+        setIsCompacting(false);
       }
       return true;
     },
@@ -731,6 +730,95 @@ function visibleAssistantText(text: string): string {
   // decides whether to preserve or splice the entry based on surrounding
   // context (tool_group / checkpoint siblings), not on placeholder text.
   return text.trim().length > 0 ? text : "";
+}
+
+function parseTurnSummaryEvent(ev: Parameters<Parameters<LvisApi["onChatStream"]>[0]>[0]): Pick<
+  Extract<ChatEntry, { kind: "turn_summary" }>,
+  | "turnDurationMs"
+  | "toolCount"
+  | "cumulativeToolMs"
+  | "tokensIn"
+  | "freshInputTokens"
+  | "tokensOut"
+  | "vendorProvider"
+  | "vendorModel"
+  | "usageByModel"
+> | null {
+  if (ev.type !== "turn_summary") return null;
+  const {
+    turnDurationMs,
+    toolCount,
+    cumulativeToolMs,
+    tokensIn,
+    freshInputTokens,
+    tokensOut,
+    vendorProvider,
+    vendorModel,
+  } = ev;
+  if (
+    !isFiniteNonNegative(turnDurationMs) ||
+    !isFiniteNonNegative(toolCount) ||
+    !isFiniteNonNegative(cumulativeToolMs) ||
+    !isFiniteNonNegative(tokensIn) ||
+    !isFiniteNonNegative(freshInputTokens) ||
+    !isFiniteNonNegative(tokensOut)
+  ) {
+    return null;
+  }
+  return {
+    turnDurationMs,
+    toolCount,
+    cumulativeToolMs,
+    tokensIn,
+    freshInputTokens,
+    tokensOut,
+    ...(isLLMVendor(vendorProvider) ? { vendorProvider } : {}),
+    ...(typeof vendorModel === "string" && vendorModel.length > 0 ? { vendorModel } : {}),
+    ...(parseUsageByModel(ev.usageByModel) !== undefined
+      ? { usageByModel: parseUsageByModel(ev.usageByModel) }
+      : {}),
+  };
+}
+
+function isFiniteNonNegative(value: unknown): value is number {
+  return typeof value === "number" && Number.isFinite(value) && value >= 0;
+}
+
+function parseUsageByModel(value: unknown): Extract<ChatEntry, { kind: "turn_summary" }>["usageByModel"] | undefined {
+  if (!Array.isArray(value)) return undefined;
+  const parsed = value.flatMap((segment) => {
+    if (!segment || typeof segment !== "object") return [];
+    const s = segment as {
+      vendorProvider?: unknown;
+      vendorModel?: unknown;
+      tokenUsage?: {
+        inputTokens?: unknown;
+        outputTokens?: unknown;
+        cacheReadTokens?: unknown;
+        cacheWriteTokens?: unknown;
+      };
+    };
+    if (!isLLMVendor(s.vendorProvider) || typeof s.vendorModel !== "string" || s.vendorModel.length === 0) return [];
+    const usage = s.tokenUsage;
+    if (
+      !usage ||
+      !isFiniteNonNegative(usage.inputTokens) ||
+      !isFiniteNonNegative(usage.outputTokens)
+    ) {
+      return [];
+    }
+    return [{
+      vendorProvider: s.vendorProvider,
+      vendorModel: s.vendorModel,
+      tokenUsage: {
+        inputTokens: usage.inputTokens,
+        outputTokens: usage.outputTokens,
+        ...(isFiniteNonNegative(usage.cacheReadTokens) ? { cacheReadTokens: usage.cacheReadTokens } : {}),
+        ...(isFiniteNonNegative(usage.cacheWriteTokens) ? { cacheWriteTokens: usage.cacheWriteTokens } : {}),
+      },
+    }];
+  });
+  return parsed.length > 0 ? parsed : undefined;
 }
 
 function formatLlmStatusMessage(ev: {

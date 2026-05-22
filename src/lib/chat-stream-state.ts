@@ -3,6 +3,18 @@ import type {
   PermissionReviewRiskLevel,
   PermissionReviewStatus,
 } from "../shared/permission-review-status.js";
+import type { LLMVendor } from "../shared/llm-vendor-defaults.js";
+
+export type TokenUsageSegment = {
+  vendorProvider: LLMVendor;
+  vendorModel: string;
+  tokenUsage: {
+    inputTokens: number;
+    outputTokens: number;
+    cacheReadTokens?: number;
+    cacheWriteTokens?: number;
+  };
+};
 
 /**
  * Checkpoint trigger reason on `compact_notice` events.
@@ -50,7 +62,7 @@ export type StreamEvent = {
    * `compact_notice` (completion). Allows showing a "자동 압축 중..." indicator
    * during the blocking LLM compaction call.
    */
-  triggerSource?: "estimate" | "actual-tokensIn" | "manual" | "force-recover";
+  triggerSource?: "estimate" | "context-tokens" | "manual" | "force-recover";
   estimatedBefore?: number;
   preflight?: number;
   /** Compact trigger on `compact_notice` — token preflight vs manual command. */
@@ -109,8 +121,8 @@ export type StreamEvent = {
   /**
    * Turn-aggregate fresh input tokens (sum of per-round
    * `inputTokens − cacheRead − cacheWrite`). Used by TokenCostBadge for the
-   * billing-weight headline + cost calc. Distinct from `tokensIn` (last
-   * round raw, used by TokenProgressRing for context-fill).
+   * billing-weight headline + cost calc. Distinct from `tokensIn`, which is
+   * the turn-end context-fill SOT.
    */
   freshInputTokens?: number;
   /**
@@ -120,6 +132,11 @@ export type StreamEvent = {
    */
   cacheReadTokens?: number;
   cacheWriteTokens?: number;
+  /** Provider/model that actually served the turn, after fallback resolution. */
+  vendorProvider?: LLMVendor;
+  vendorModel?: string;
+  /** Per provider request usage segments for request-granular cost math. */
+  usageByModel?: TokenUsageSegment[];
   breakdown?: Record<string, { count: number; ms: number }>;
 };
 
@@ -208,13 +225,13 @@ export type ChatEntry =
       kind: "session_resume";
       preambleChars: number;
     }
-  // Hidden carrier for session replay context usage. Unlike turn_summary,
-  // this is an estimate rebuilt from persisted messages, not provider-reported
-  // per-turn billing data.
+  // Hidden carrier for post-compact context usage. Unlike turn_summary,
+  // this is a compact-result estimate, not provider-reported per-turn billing
+  // data. Session replay does not synthesize this carrier.
   | {
       kind: "context_usage";
       tokensIn: number;
-      source: "session-estimate";
+      source: "compact-estimate";
     }
   // Overlay trigger that the user accepted ("확인하기"). The
   // trigger session ran in an isolated ConversationLoop; once imported,
@@ -259,8 +276,8 @@ export type ChatEntry =
        */
       cumulativeToolMs: number;
       /**
-       * Last round's raw input tokens. TokenProgressRing uses this for the
-       * context-window fill indicator (cache reads still occupy slots).
+       * Turn-end projected context input. TokenProgressRing and the footer use
+       * this same value so the user sees one context-fill SOT.
        */
       tokensIn: number;
       /**
@@ -278,6 +295,11 @@ export type ChatEntry =
        */
       cacheReadTokens?: number;
       cacheWriteTokens?: number;
+      /** Provider/model that actually served the turn, after fallback resolution. */
+      vendorProvider?: LLMVendor;
+      vendorModel?: string;
+      /** Per provider request usage segments for request-granular cost math. */
+      usageByModel?: TokenUsageSegment[];
       /** Per-tool aggregate (`{ count, ms }` per tool name). Omitted when no tools ran. */
       breakdown?: Record<string, { count: number; ms: number }>;
     };

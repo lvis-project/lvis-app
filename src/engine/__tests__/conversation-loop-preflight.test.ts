@@ -3,7 +3,7 @@
  *
  * Covers:
  * - estimate-based trigger: estimateMessagesTokens ≥ threshold → compact called
- * - actual-tokensIn-based trigger: last provider input ≥ threshold even when
+ * - context-token secondary trigger: last context-fill SOT ≥ threshold even when
  *   estimate is below (undercount scenario for code-heavy English content)
  * - message count is not a compact trigger; token preflight owns context pressure
  * - autoCompact OFF → preflight skipped even when tokens exceed threshold
@@ -13,7 +13,7 @@
 import { describe, it, expect, vi, beforeEach } from "vitest";
 import { ConversationLoop } from "../conversation-loop.js";
 import type { GenericMessage } from "../llm/types.js";
-import { getModelPreflightThreshold, estimateMessagesTokens } from "../auto-compact.js";
+import { getModelPreflightThreshold, estimateMessagesTokens, estimateTokens } from "../auto-compact.js";
 import {
   makeConversationLoopDeps as makeDeps,
   makeConversationLoopMemoryManager as makeMemoryManager,
@@ -50,7 +50,16 @@ function makeSyntheticCompactResult(originalMessages: GenericMessage[]): import(
   const boundaryStub: GenericMessage = {
     role: "user",
     content: "[compact boundary stub]",
-    meta: { isBoundaryStub: true } as unknown as GenericMessage["meta"],
+    meta: {
+      compactBoundary: true,
+      compactNum: 1,
+      checkpointMeta: {
+        removedMessages: Math.max(0, originalMessages.length - 2),
+        freedTokens: 1_000,
+        compactNum: 1,
+        trigger: "auto-compact",
+      },
+    },
   };
   const recent = originalMessages.slice(-2);
   return {
@@ -78,6 +87,18 @@ function makeSyntheticNoopResult(messages: GenericMessage[]): import("../structu
     removedCount: 0,
     estimatedAfter: 0,
     truncatedCount: 0,
+  };
+}
+
+function makeSyntheticContentTruncatedResult(messages: GenericMessage[]): import("../structured-compact.js").CompactWithBoundaryResult {
+  return {
+    status: CompressionStatus.CONTENT_TRUNCATED,
+    boundary: null,
+    newHistory: messages.slice(-2),
+    removedCount: 2,
+    estimatedAfter: 100,
+    truncatedDir: "/tmp/lvis-truncated",
+    truncatedCount: 2,
   };
 }
 
@@ -128,12 +149,87 @@ describe("runPreflightGuard — estimate-based trigger", () => {
     // onCompactOccurred emitted from applyBoundaryToSession.
     expect(compactOccurredCb).toHaveBeenCalled();
   });
+
+  it("persists post-compact context SOT on the boundary and clears preserved stale turn summaries", async () => {
+    const settings = makeSettings(true, "claude-sonnet-4-5", "claude");
+    const threshold = getModelPreflightThreshold("claude", "claude-sonnet-4-5");
+
+    const history: GenericMessage[] = [
+      ...makeHistoryExceedingEstimateThreshold(threshold),
+      { role: "user", content: "latest q" },
+      {
+        role: "assistant",
+        content: "latest a",
+        meta: {
+          turnSummary: {
+            turnDurationMs: 1_000,
+            toolCount: 0,
+            cumulativeToolMs: 0,
+            tokensIn: threshold + 5_000,
+            freshInputTokens: 100,
+            tokensOut: 10,
+          },
+        },
+      },
+    ];
+    const mem = makeMemoryManager(history);
+    const loop = new ConversationLoop(makeDeps({ settingsService: settings, memoryManager: mem }));
+    loop.resetAndResume("sess-1");
+
+    const fakeProvider = makeTurnProvider();
+    (loop as unknown as { provider: typeof fakeProvider }).provider = fakeProvider;
+    vi.mocked(compactWithBoundary).mockResolvedValueOnce(makeSyntheticCompactResult(history));
+
+    await loop.runTurn(
+      "trigger compact",
+      {},
+      undefined,
+      { inputOrigin: "user-keyboard" },
+    );
+
+    const messages = loop.getHistory().getMessages();
+    expect(messages[0]?.meta?.checkpointMeta?.contextTokensAfter).toBe(
+      100 + estimateTokens("## Compact preamble"),
+    );
+    const preservedOldAnswer = messages.find((message) => message.content === "latest a");
+    expect(preservedOldAnswer?.meta?.turnSummary).toBeUndefined();
+  });
+
+  it("persists content-truncated compacts as checkpoint context carriers", async () => {
+    const settings = makeSettings(true, "claude-sonnet-4-5", "claude");
+    const threshold = getModelPreflightThreshold("claude", "claude-sonnet-4-5");
+    const history = makeHistoryExceedingEstimateThreshold(threshold);
+    const mem = makeMemoryManager(history);
+    const loop = new ConversationLoop(makeDeps({ settingsService: settings, memoryManager: mem }));
+    loop.resetAndResume("sess-1");
+
+    const fakeProvider = makeTurnProvider();
+    (loop as unknown as { provider: typeof fakeProvider }).provider = fakeProvider;
+    vi.mocked(compactWithBoundary).mockResolvedValueOnce(makeSyntheticContentTruncatedResult(history));
+
+    await loop.runTurn(
+      "trigger content truncation",
+      {},
+      undefined,
+      { inputOrigin: "user-keyboard" },
+    );
+
+    const messages = loop.getHistory().getMessages();
+    expect(messages[0]?.meta?.checkpointMeta).toMatchObject({
+      compactStatus: CompressionStatus.CONTENT_TRUNCATED,
+      contextTokensAfter: expect.any(Number),
+      truncatedDir: "/tmp/lvis-truncated",
+    });
+    expect(messages[0]?.meta?.checkpointMeta?.contextTokensAfter).toBeGreaterThan(100);
+    expect((mem as { saveCheckpointSnapshot: ReturnType<typeof vi.fn> }).saveCheckpointSnapshot)
+      .toHaveBeenCalledWith("sess-1", 1, expect.any(Array));
+  });
 });
 
-describe("runPreflightGuard — actual-tokensIn secondary trigger", () => {
-  it("calls compactWithBoundary when last provider input >= threshold even if estimate is below", async () => {
+describe("runPreflightGuard — context-token secondary trigger", () => {
+  it("calls compactWithBoundary when last context-fill SOT >= threshold even if estimate is below", async () => {
     // Scenario: estimator undercount — history text is code-heavy and the
-    // actual provider-reported tokensIn exceeds threshold while
+    // context-fill SOT exceeds threshold while
     // estimateMessagesTokens is still below (chars/4 undercount).
 
     const settings = makeSettings(true, "claude-sonnet-4-5", "claude");
@@ -154,9 +250,9 @@ describe("runPreflightGuard — actual-tokensIn secondary trigger", () => {
     const fakeProvider = makeTurnProvider();
     (loop as unknown as { provider: typeof fakeProvider }).provider = fakeProvider;
 
-    // Simulate prior turn having reported an actual prompt size above threshold.
-    (loop as unknown as { lastProviderInputTokens: number })
-      .lastProviderInputTokens = threshold + 1_000;
+    // Simulate prior turn having reported a context-fill size above threshold.
+    (loop as unknown as { lastContextInputTokens: number })
+      .lastContextInputTokens = threshold + 1_000;
 
     // Configure mock: return a compact result (with removedCount > 0) so
     // applyBoundaryToSession fires and onCompactOccurred is emitted.
@@ -193,8 +289,8 @@ describe("runPreflightGuard — actual-tokensIn secondary trigger", () => {
     (loop as unknown as { provider: typeof fakeProvider }).provider = fakeProvider;
     (loop as unknown as { cumulativeUsage: { inputTokens: number; outputTokens: number } })
       .cumulativeUsage = { inputTokens: threshold + 1_000, outputTokens: 500 };
-    (loop as unknown as { lastProviderInputTokens: number })
-      .lastProviderInputTokens = threshold - 1_000;
+    (loop as unknown as { lastContextInputTokens: number })
+      .lastContextInputTokens = threshold - 1_000;
 
     const compactOccurredCb = vi.fn();
     await loop.runTurn(
@@ -206,6 +302,42 @@ describe("runPreflightGuard — actual-tokensIn secondary trigger", () => {
 
     expect(compactWithBoundary).not.toHaveBeenCalled();
     expect(compactOccurredCb).not.toHaveBeenCalled();
+  });
+
+  it("adds the pending user input delta to the calibrated context-token preflight signal", async () => {
+    const settings = makeSettings(true, "claude-sonnet-4-5", "claude");
+    const threshold = getModelPreflightThreshold("claude", "claude-sonnet-4-5");
+
+    const shortHistory: GenericMessage[] = [
+      { role: "user", content: "short message" },
+      { role: "assistant", content: "ok" },
+    ];
+    const baselineEstimate = estimateMessagesTokens(shortHistory);
+    expect(baselineEstimate).toBeLessThan(threshold);
+
+    const mem = makeMemoryManager(shortHistory);
+    const loop = new ConversationLoop(makeDeps({ settingsService: settings, memoryManager: mem }));
+    loop.resetAndResume("sess-1");
+
+    const fakeProvider = makeTurnProvider();
+    (loop as unknown as { provider: typeof fakeProvider }).provider = fakeProvider;
+    (loop as unknown as { lastContextInputTokens: number }).lastContextInputTokens = threshold - 100;
+    (loop as unknown as { lastContextEstimatedInputTokens: number }).lastContextEstimatedInputTokens = baselineEstimate;
+
+    vi.mocked(compactWithBoundary).mockResolvedValueOnce(makeSyntheticCompactResult(shortHistory));
+
+    const compactStartedCb = vi.fn();
+    await loop.runTurn(
+      "p".repeat(800),
+      { onCompactStarted: compactStartedCb },
+      undefined,
+      { inputOrigin: "user-keyboard" },
+    );
+
+    expect(compactWithBoundary).toHaveBeenCalled();
+    expect(compactStartedCb).toHaveBeenCalledWith(
+      expect.objectContaining({ triggerSource: "context-tokens" }),
+    );
   });
 });
 
@@ -225,8 +357,8 @@ describe("runPreflightGuard — message count is not a trigger", () => {
 
     const fakeProvider = makeTurnProvider();
     (loop as unknown as { provider: typeof fakeProvider }).provider = fakeProvider;
-    (loop as unknown as { lastProviderInputTokens: number })
-      .lastProviderInputTokens = threshold - 1_000;
+    (loop as unknown as { lastContextInputTokens: number })
+      .lastContextInputTokens = threshold - 1_000;
 
     vi.mocked(compactWithBoundary).mockResolvedValueOnce(makeSyntheticCompactResult(history));
 

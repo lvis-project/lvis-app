@@ -13,7 +13,7 @@ import { formatHhMmKst } from "../utils/format-time.js";
  */
 export type TurnSummaryForBadge = Pick<
   TokenCostBadgeProps,
-  "tokensIn" | "freshInputTokens" | "tokensOut" | "cacheReadTokens" | "cacheWriteTokens"
+  "tokensIn" | "freshInputTokens" | "tokensOut" | "cacheReadTokens" | "cacheWriteTokens" | "usageByModel"
 >;
 
 export function TurnActionBar({

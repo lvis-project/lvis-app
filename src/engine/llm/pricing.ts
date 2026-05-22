@@ -12,12 +12,15 @@ import type { LLMVendor } from "./types.js";
 import {
   DEFAULT_PRICING,
   computeCost as sharedComputeCost,
+  hasKnownTokenPricing,
   lookupPricing,
+  normalizeAiSdkUsageForCost,
   type ModelPricing,
   type UsageForCost,
 } from "../../shared/pricing-data.js";
 
 export type { ModelPricing, UsageForCost };
+export { normalizeAiSdkUsageForCost };
 
 let cachedOverride: Record<LLMVendor, Record<string, ModelPricing>> | null = null;
 let cachedOverrideEnv: string | undefined = undefined;
@@ -41,6 +44,14 @@ export function getModelPricing(vendor: LLMVendor, model: string): ModelPricing 
   // Shared lookup (exact → prefix → FALLBACK_PRICING). lookupPricing already
   // handles the miss path, so no extra wrapping needed here.
   return lookupPricing(vendor, model);
+}
+
+export function getBillableModelPricing(vendor: LLMVendor, model: string): ModelPricing | undefined {
+  const overridden = getOverride()?.[vendor]?.[model];
+  if (overridden) return hasKnownTokenPricing(overridden) ? overridden : undefined;
+  if (vendor === "azure-foundry") return undefined;
+  const pricing = getModelPricing(vendor, model);
+  return hasKnownTokenPricing(pricing) ? pricing : undefined;
 }
 
 /**
