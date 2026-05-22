@@ -2,6 +2,7 @@
  * Common test helpers for renderer test files.
  */
 import { act, fireEvent } from "@testing-library/react";
+export { relativeLuminance } from "../contrast-helpers.js";
 
 /**
  * Submits a chat message by typing into the main composer textarea and
@@ -20,4 +21,12 @@ export async function submitChatMessage(
   await act(async () => {
     fireEvent.keyDown(textarea, { key: "Enter", code: "Enter" });
   });
+}
+
+export function deferred<T>() {
+  let resolve!: (value: T) => void;
+  const promise = new Promise<T>((r) => {
+    resolve = r;
+  });
+  return { promise, resolve };
 }

@@ -17,6 +17,7 @@ import {
   syncPluginToolRegistry,
   syncPluginToolRegistryForPlugin,
 } from "../../../boot/plugins.js";
+import { makeTestPluginRuntime } from "../../__tests__/test-helpers.js";
 
 describe("PluginRuntime lifecycle — restartPlugin", () => {
   let testDir: string;
@@ -35,8 +36,8 @@ describe("PluginRuntime lifecycle — restartPlugin", () => {
   });
 
   function makeRuntime() {
-    return new PluginRuntime({
-      hostRoot: testDir,
+    return makeTestPluginRuntime({
+      rootDir: testDir,
       registryPath,
       pluginsRoot: installedDir,
     });

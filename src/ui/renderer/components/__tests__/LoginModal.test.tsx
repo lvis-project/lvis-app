@@ -3,6 +3,7 @@ import "../../../../../test/renderer/setup.ts";
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 import { act, render, fireEvent, waitFor } from "@testing-library/react";
 import { LoginModal } from "../LoginModal.js";
+import { makeMockLvisApi } from "../../../../../test/renderer/mock-lvis-api.js";
 
 /**
  * LoginModal — IPC failure / error mapping tests.
@@ -17,7 +18,7 @@ import { LoginModal } from "../LoginModal.js";
  * user keystroke required. These tests exercise both branches.
  */
 
-function makeApi(
+function loginModalApi(
   loginImpl: () => Promise<
     | { ok: true; vendor: string; fieldsApplied: string[] }
     | { ok: false; error: string }
@@ -35,7 +36,8 @@ function makeApi(
     | { ok: false; error: string }
   >,
 ) {
-  return {
+  const { api } = makeMockLvisApi();
+  Object.assign(api, {
     loginMockup: vi.fn(loginImpl),
     openSettingsWindow: vi.fn(),
     demo: {
@@ -49,7 +51,8 @@ function makeApi(
         relaunchImpl ?? (async () => ({ ok: true })),
       ),
     },
-  } as unknown as Parameters<typeof LoginModal>[0]["api"];
+  });
+  return api as unknown as Parameters<typeof LoginModal>[0]["api"];
 }
 
 // The activation string is opaque to the renderer — the IPC mock controls
@@ -100,7 +103,7 @@ describe("LoginModal — chip-driven demo flow (activation → auth)", () => {
   }
 
   it("fires loginMockup with hard-coded demo credentials after activation", async () => {
-    const api = makeApi(async () => ({
+    const api = loginModalApi(async () => ({
       ok: true,
       vendor: "azure-foundry",
       fieldsApplied: ["apiKey"],
@@ -127,7 +130,7 @@ describe("LoginModal — chip-driven demo flow (activation → auth)", () => {
   });
 
   it("skips activation input and runs loginMockup when demo env was loaded at boot", async () => {
-    const api = makeApi(
+    const api = loginModalApi(
       async () => ({
         ok: true,
         vendor: "azure-foundry",
@@ -163,7 +166,7 @@ describe("LoginModal — chip-driven demo flow (activation → auth)", () => {
   });
 
   it("forceActivation opens the activation input even when demo status is already active", async () => {
-    const api = makeApi(
+    const api = loginModalApi(
       async () => ({
         ok: true,
         vendor: "azure-foundry",
@@ -203,7 +206,7 @@ describe("LoginModal — chip-driven demo flow (activation → auth)", () => {
   });
 
   it("displays a Korean error message when the auth IPC call rejects", async () => {
-    const api = makeApi(async () => {
+    const api = loginModalApi(async () => {
       throw new Error("IPC channel disconnected");
     });
     render(<LoginModal api={api} open onOpenChange={() => {}} />);
@@ -221,7 +224,7 @@ describe("LoginModal — chip-driven demo flow (activation → auth)", () => {
   });
 
   it("shows the mapped Korean error for invalid-credentials", async () => {
-    const api = makeApi(async () => ({ ok: false, error: "invalid-credentials" }));
+    const api = loginModalApi(async () => ({ ok: false, error: "invalid-credentials" }));
     render(<LoginModal api={api} open onOpenChange={() => {}} />);
 
     await waitFor(() => {
@@ -237,7 +240,7 @@ describe("LoginModal — chip-driven demo flow (activation → auth)", () => {
   });
 
   it("shows the mapped Korean error for no-demo-key", async () => {
-    const api = makeApi(async () => ({ ok: false, error: "no-demo-key" }));
+    const api = loginModalApi(async () => ({ ok: false, error: "no-demo-key" }));
     render(<LoginModal api={api} open onOpenChange={() => {}} />);
 
     await waitFor(() => {
@@ -255,7 +258,7 @@ describe("LoginModal — chip-driven demo flow (activation → auth)", () => {
   });
 
   it("does not render the legacy username/password form in the conversational variant", async () => {
-    const api = makeApi(async () => ({ ok: true, vendor: "azure-foundry", fieldsApplied: ["apiKey"] }));
+    const api = loginModalApi(async () => ({ ok: true, vendor: "azure-foundry", fieldsApplied: ["apiKey"] }));
     render(<LoginModal api={api} open onOpenChange={() => {}} />);
 
     await waitFor(() => {
@@ -269,7 +272,7 @@ describe("LoginModal — chip-driven demo flow (activation → auth)", () => {
   });
 
   it("keeps demo activation inside the chat transcript instead of a dedicated page", async () => {
-    const api = makeApi(async () => ({
+    const api = loginModalApi(async () => ({
       ok: true,
       vendor: "azure-foundry",
       fieldsApplied: ["apiKey"],
@@ -297,7 +300,7 @@ describe("LoginModal — chip-driven demo flow (activation → auth)", () => {
       toFake: ["setTimeout", "clearTimeout", "Date"],
     });
     try {
-      const api = makeApi(async () => ({
+      const api = loginModalApi(async () => ({
         ok: true,
         vendor: "azure-foundry",
         fieldsApplied: ["apiKey"],
@@ -324,7 +327,7 @@ describe("LoginModal — chip-driven demo flow (activation → auth)", () => {
   });
 
   it("shows a Korean activation error when demo.activate rejects with invalid-code", async () => {
-    const api = makeApi(
+    const api = loginModalApi(
       async () => ({ ok: true, vendor: "azure-foundry", fieldsApplied: ["apiKey"] }),
       async () => ({ ok: false, error: "invalid-code" }),
     );
@@ -368,7 +371,7 @@ describe("LoginModal — chip-driven demo flow (activation → auth)", () => {
       toFake: ["setTimeout", "clearTimeout", "Date"],
     });
     try {
-      const api = makeApi(
+      const api = loginModalApi(
         async () => ({ ok: true, vendor: "azure-foundry", fieldsApplied: ["apiKey"] }),
         async () => ({ ok: true, vendor: "azure-foundry", requiresRelaunch: true }),
         async () => ({ ok: true }),

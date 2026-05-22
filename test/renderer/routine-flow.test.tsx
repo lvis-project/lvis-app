@@ -9,6 +9,7 @@ import "./setup.js";
 import { describe, it, expect, vi, afterEach } from "vitest";
 import { act, fireEvent, waitFor } from "@testing-library/react";
 import { renderApp } from "./render-app.js";
+import { deferred, submitChatMessage } from "./helpers.js";
 
 function makeRoutineResult() {
   return {
@@ -20,22 +21,6 @@ function makeRoutineResult() {
   };
 }
 
-function deferred<T>() {
-  let resolve!: (value: T) => void;
-  const promise = new Promise<T>((r) => {
-    resolve = r;
-  });
-  return { promise, resolve };
-}
-
-async function submitUser(container: HTMLElement, text: string) {
-  const textarea = container.querySelector("textarea") as HTMLTextAreaElement;
-  expect(textarea).toBeTruthy();
-  await act(async () => {
-    fireEvent.change(textarea, { target: { value: text } });
-    fireEvent.keyDown(textarea, { key: "Enter", code: "Enter" });
-  });
-}
 
 describe("Routine flow (Phase 3.3 regression net)", () => {
   it("onRoutineFiredV2 renders the OverlayCard", async () => {
@@ -199,7 +184,7 @@ describe("Routine flow (Phase 3.3 regression net)", () => {
     const pendingSend = deferred<{ ok: true }>();
     api.chatSend.mockImplementationOnce(async () => pendingSend.promise);
 
-    await submitUser(container, "진행 중인 질문");
+    await submitChatMessage(container, "진행 중인 질문");
     await waitFor(() => expect(api.chatSend).toHaveBeenCalled());
 
     await act(async () => {

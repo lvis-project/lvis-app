@@ -22,7 +22,7 @@ import { PluginMarketplaceService } from "../marketplace.js";
 import type { PluginMarketplaceItem } from "../types.js";
 import { MissingPluginDependenciesError } from "../types.js";
 import { _resetForTest, setIsPackaged } from "../../boot/dev-flags.js";
-import { makeTestPluginPaths } from "./test-helpers.js";
+import { makeTestPluginMarketplaceService } from "./test-helpers.js";
 
 class StubFetcher {
   constructor(private items: PluginMarketplaceItem[]) {}
@@ -125,13 +125,6 @@ describe("marketplace install — plugin-id dependencies (issue #92)", () => {
     _resetForTest();
   });
 
-  function makeService(fetcher: StubFetcher): PluginMarketplaceService {
-    return new PluginMarketplaceService(
-      makeTestPluginPaths({ rootDir: tmpDir }),
-      fetcher as unknown as import("../marketplace-fetcher.js").MarketplaceFetcher,
-    );
-  }
-
   it("installs successfully when all soft dependencies are absent", async () => {
     // Mirrors the issue #92 work-assistant manifest: every dep `required: false`.
     const consumer = makeItem("work-assistant-like", {
@@ -141,7 +134,7 @@ describe("marketplace install — plugin-id dependencies (issue #92)", () => {
       ],
     });
     await writeRegistry(tmpDir, []);
-    const svc = makeService(new StubFetcher([consumer]));
+    const svc = makeTestPluginMarketplaceService(tmpDir, new StubFetcher([consumer]) as never);
 
     const result = await svc.install("work-assistant-like");
     expect(result).toEqual({ pluginId: "work-assistant-like", installed: true });
@@ -161,7 +154,7 @@ describe("marketplace install — plugin-id dependencies (issue #92)", () => {
     const provider = makeItem("string-dep");
     await seedInstalledPlugin(tmpDir, "string-dep");
     await writeRegistry(tmpDir, [{ id: "string-dep" }]);
-    const svc = makeService(new StubFetcher([consumer, provider]));
+    const svc = makeTestPluginMarketplaceService(tmpDir, new StubFetcher([consumer, provider]) as never);
 
     await expect(svc.install("string-form-consumer")).resolves.toMatchObject({
       installed: true,
@@ -176,7 +169,7 @@ describe("marketplace install — plugin-id dependencies (issue #92)", () => {
       ],
     });
     await writeRegistry(tmpDir, []);
-    const svc = makeService(new StubFetcher([consumer]));
+    const svc = makeTestPluginMarketplaceService(tmpDir, new StubFetcher([consumer]) as never);
 
     let err: unknown = null;
     try {
@@ -203,7 +196,7 @@ describe("marketplace install — plugin-id dependencies (issue #92)", () => {
       ],
     });
     await writeRegistry(tmpDir, []);
-    const svc = makeService(new StubFetcher([consumer]));
+    const svc = makeTestPluginMarketplaceService(tmpDir, new StubFetcher([consumer]) as never);
 
     let err: unknown = null;
     try {
@@ -223,7 +216,7 @@ describe("marketplace install — plugin-id dependencies (issue #92)", () => {
     const provider = makeItem("hard-dep");
     await seedInstalledPlugin(tmpDir, "hard-dep");
     await writeRegistry(tmpDir, [{ id: "hard-dep" }]);
-    const svc = makeService(new StubFetcher([consumer, provider]));
+    const svc = makeTestPluginMarketplaceService(tmpDir, new StubFetcher([consumer, provider]) as never);
 
     await expect(svc.install("consumer-happy")).resolves.toMatchObject({
       installed: true,
@@ -242,7 +235,7 @@ describe("marketplace install — plugin-id dependencies (issue #92)", () => {
     });
     const adminDep = makeItem("ms-graph-like", { installPolicy: "admin" });
     await writeRegistry(tmpDir, []);
-    const svc = makeService(new StubFetcher([consumer, adminDep]));
+    const svc = makeTestPluginMarketplaceService(tmpDir, new StubFetcher([consumer, adminDep]) as never);
 
     await expect(svc.install("work-assistant-like")).resolves.toMatchObject({
       installed: true,
@@ -262,7 +255,7 @@ describe("marketplace install — plugin-id dependencies (issue #92)", () => {
   it("installs successfully when manifest has no `dependencies` field at all", async () => {
     const consumer = makeItem("no-deps-field");
     await writeRegistry(tmpDir, []);
-    const svc = makeService(new StubFetcher([consumer]));
+    const svc = makeTestPluginMarketplaceService(tmpDir, new StubFetcher([consumer]) as never);
 
     await expect(svc.install("no-deps-field")).resolves.toMatchObject({
       installed: true,
@@ -273,7 +266,7 @@ describe("marketplace install — plugin-id dependencies (issue #92)", () => {
   it("installs successfully when `dependencies` is the empty array", async () => {
     const consumer = makeItem("empty-deps", { dependencies: [] });
     await writeRegistry(tmpDir, []);
-    const svc = makeService(new StubFetcher([consumer]));
+    const svc = makeTestPluginMarketplaceService(tmpDir, new StubFetcher([consumer]) as never);
 
     await expect(svc.install("empty-deps")).resolves.toMatchObject({
       installed: true,
@@ -289,7 +282,7 @@ describe("marketplace install — plugin-id dependencies (issue #92)", () => {
       dependencies: ["missing-provider"],
     });
     await writeRegistry(tmpDir, []);
-    const svc = makeService(new StubFetcher([consumer]));
+    const svc = makeTestPluginMarketplaceService(tmpDir, new StubFetcher([consumer]) as never);
 
     let err: unknown = null;
     try {
@@ -320,7 +313,7 @@ describe("marketplace install — plugin-id dependencies (issue #92)", () => {
       ],
     });
     await writeRegistry(tmpDir, []);
-    const svc = makeService(new StubFetcher([consumer]));
+    const svc = makeTestPluginMarketplaceService(tmpDir, new StubFetcher([consumer]) as never);
 
     await expect(svc.install("malformed-dep-consumer")).resolves.toMatchObject({
       installed: true,

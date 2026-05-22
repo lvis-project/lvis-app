@@ -251,23 +251,12 @@ vi.mock("../../permissions/policy-store.js", () => ({
   savePolicy: vi.fn(),
 }));
 
-function makeMockPM() {
-  return {
-    getMode: vi.fn(() => "default"),
-    setModePersist: vi.fn(),
-    listPersistedRules: vi.fn(async () => []),
-    addAlwaysAllowedPersist: vi.fn(),
-    addAlwaysDeniedPersist: vi.fn(),
-    removeRule: vi.fn(),
-    getVisibilityDenyRules: vi.fn(() => []),
-  };
-}
-
-function makeMockGate() {
-  return { resolve: vi.fn(), setPolicy: vi.fn() };
-}
-
 import { fakeLlmSettings } from "../../shared/__tests__/fake-llm-settings.js";
+import {
+  makeMockApprovalGate,
+  makeMockConversationLoop,
+  makeMockPermissionManager,
+} from "../../__tests__/test-helpers.js";
 
 function makeServicesForListSecretKeys(secretsMap: Record<string, string | null>) {
   return {
@@ -321,17 +310,8 @@ function makeServicesForListSecretKeys(secretsMap: Record<string, string | null>
       getUserPreferences: vi.fn(),
       updateUserPreferences: vi.fn(),
     } as any,
-    conversationLoop: {
-      permissionManager: makeMockPM(),
-      hasProvider: vi.fn(),
-      runTurn: vi.fn(),
-      newConversation: vi.fn(),
-      getSessionId: vi.fn(() => "s1"),
-      listSessions: vi.fn(() => []),
-      loadSession: vi.fn(),
-      refreshProvider: vi.fn(),
-    } as any,
-    approvalGate: makeMockGate() as any,
+    conversationLoop: makeMockConversationLoop(makeMockPermissionManager()) as any,
+    approvalGate: makeMockApprovalGate() as any,
     mcpManager: { listServers: vi.fn(() => []), killSwitch: vi.fn() } as any,
     toolRegistry: { setDenyRules: vi.fn(), size: 0 } as any,
     auditLogger: { log: vi.fn() } as any,

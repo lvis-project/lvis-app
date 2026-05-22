@@ -13,6 +13,7 @@ import "../setup.js";
 import { describe, it, expect, vi } from "vitest";
 import { renderHook, act, waitFor } from "@testing-library/react";
 import { makeMockLvisApi } from "../mock-lvis-api.js";
+import { deferred } from "../helpers.js";
 import { useChatState } from "../../../src/ui/renderer/hooks/use-chat-state.js";
 import { useContextBudget } from "../../../src/ui/renderer/hooks/use-context-budget.js";
 import { useCostEstimate } from "../../../src/ui/renderer/hooks/use-cost-estimate.js";
@@ -21,13 +22,6 @@ import { useStarred } from "../../../src/ui/renderer/hooks/use-starred.js";
 import type { LvisApi } from "../../../src/ui/renderer/types.js";
 import type { ChatEntry } from "../../../src/lib/chat-stream-state.js";
 
-function deferred<T>() {
-  let resolve!: (value: T) => void;
-  const promise = new Promise<T>((r) => {
-    resolve = r;
-  });
-  return { promise, resolve };
-}
 
 describe("useChatState", () => {
   it("subscribes to onChatStream on mount", () => {

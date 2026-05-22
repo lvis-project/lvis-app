@@ -37,6 +37,10 @@ type ApiOverrides = {
   hasApiKey?: boolean;
   hasProvider?: boolean;
   usage?: unknown;
+  appInfo?: unknown;
+  marketplacePing?: unknown;
+  agentProfiles?: unknown;
+  skills?: unknown;
   pluginCards?: unknown[];
   marketplace?: unknown[];
   pluginUiExtensions?: unknown[];
@@ -77,6 +81,17 @@ const DEFAULT_USAGE = {
   generatedAt: new Date().toISOString(),
 };
 
+const DEFAULT_APP_INFO = {
+  version: "0.0.0-test",
+  electronVersion: "0.0.0",
+  nodeVersion: "0.0.0",
+  chromeVersion: "0.0.0",
+  v8Version: "0.0.0",
+  platform: "test",
+  arch: "x64",
+  userDataPath: "/tmp/lvis-test-user-data",
+};
+
 export function makeMockLvisApi(overrides: ApiOverrides = {}): {
   api: MockLvisApi;
   emitChatStream: (ev: unknown) => void;
@@ -85,6 +100,10 @@ export function makeMockLvisApi(overrides: ApiOverrides = {}): {
   emitRoutineFiredV2: (r: unknown) => void;
   emitViewActivate: (v: string) => void;
   emitAskUserQuestion: (r: unknown) => void;
+  emitTourStart: (scenarioId: string) => void;
+  emitBootstrapStatus: (status: unknown) => void;
+  emitPluginInstallProgress: (payload: unknown) => void;
+  emitPluginInstallResult: (payload: unknown) => void;
 } {
   let settings = overrides.settings ?? DEFAULT_SETTINGS;
   const sessions = (overrides.sessions ?? []).map((session) => ({
@@ -99,6 +118,10 @@ export function makeMockLvisApi(overrides: ApiOverrides = {}): {
   const hasApiKey = overrides.hasApiKey ?? true;
   const hasProvider = overrides.hasProvider ?? true;
   const usage = overrides.usage ?? DEFAULT_USAGE;
+  const appInfo = overrides.appInfo ?? DEFAULT_APP_INFO;
+  const marketplacePing = overrides.marketplacePing ?? { configured: true, online: true };
+  const agentProfiles = overrides.agentProfiles ?? { agents: [] };
+  const skills = overrides.skills ?? { skills: [] };
   const pluginCards = overrides.pluginCards ?? [];
   const marketplace = overrides.marketplace ?? [];
   const pluginUiExtensions = overrides.pluginUiExtensions ?? [];
@@ -121,9 +144,30 @@ export function makeMockLvisApi(overrides: ApiOverrides = {}): {
   const settingsWindowSavedHandlers = new Set<() => void>();
   const settingsWindowTabHandlers = new Set<(tab: string) => void>();
   const askUserQuestionHandlers = new Set<(r: unknown) => void>();
+  const tourStartHandlers = new Set<(payload: { scenarioId: string }) => void>();
+  const bootstrapStatusHandlers = new Set<(status: unknown) => void>();
+  const pluginInstallProgressHandlers = new Set<(payload: unknown) => void>();
+  const pluginInstallResultHandlers = new Set<(payload: unknown) => void>();
 
   const api: MockLvisApi = {
     notifyPluginTheme: vi.fn(async () => ({ ok: true })),
+    tour: {
+      getState: vi.fn(async () => ({
+        ok: true,
+        state: {
+          lastSeenScenario: null,
+          completedScenarios: [],
+          dismissedAt: null,
+        },
+      })),
+      markComplete: vi.fn(async () => ({ ok: true })),
+      dismiss: vi.fn(async () => ({ ok: true })),
+      start: vi.fn(async (scenarioId: string) => ({ ok: true, scenarioId })),
+      onStart: vi.fn((handler: (payload: { scenarioId: string }) => void) => {
+        tourStartHandlers.add(handler);
+        return () => tourStartHandlers.delete(handler);
+      }),
+    },
     getSettings: vi.fn(async () => settings),
     updateSettings: vi.fn(async (p: unknown) => {
       settings = { ...(settings as object), ...(p as object) };
@@ -143,6 +187,12 @@ export function makeMockLvisApi(overrides: ApiOverrides = {}): {
     setMarketplaceApiKey: vi.fn(async () => ({ ok: true })),
     hasMarketplaceApiKey: vi.fn(async () => false),
     deleteMarketplaceApiKey: vi.fn(async () => ({ ok: true })),
+    demo: {
+      status: vi.fn(async () => ({ active: false })),
+      activate: vi.fn(async () => ({ ok: true })),
+      relaunchAfterActivation: vi.fn(async () => ({ ok: true })),
+      clearDemo: vi.fn(async () => ({ ok: true })),
+    },
     openSettingsWindow: vi.fn(async (initialTab?: string) => {
       if (initialTab) settingsWindowTabHandlers.forEach((handler) => handler(initialTab));
       return { ok: true, windowId: 2 };
@@ -308,14 +358,15 @@ export function makeMockLvisApi(overrides: ApiOverrides = {}): {
     memoryRefreshUserPrefs: vi.fn(async () => ({ ok: true, content: "# Refreshed Preferences" })),
 
     listMarketplacePlugins: vi.fn(async () => marketplace),
+    pingMarketplace: vi.fn(async () => marketplacePing),
     installMarketplacePlugin: vi.fn(async () => ({ ok: true })),
     uninstallMarketplacePlugin: vi.fn(async () => ({ ok: true })),
     // Marketplace agent/skill surface — added with PR #753. Default mocks
     // return empty lists and no-op subscribers so renderer tests that mount
     // <ChatView> via `useAssistantContextOptions` resolve cleanly rather than
     // throwing `api.listAgentProfiles is not a function`.
-    listAgentProfiles: vi.fn(async () => ({ agents: [] })),
-    listSkills: vi.fn(async () => ({ skills: [] })),
+    listAgentProfiles: vi.fn(async () => agentProfiles),
+    listSkills: vi.fn(async () => skills),
     installAgentFromMarketplace: vi.fn(async (slug: string) => ({
       ok: true as const,
       slug,
@@ -345,6 +396,7 @@ export function makeMockLvisApi(overrides: ApiOverrides = {}): {
     listPluginUiExtensions: vi.fn(async () => pluginUiExtensions),
     listPluginCards: vi.fn(async () => pluginCards),
     callPluginMethod: vi.fn(async () => ({ ok: true })),
+    openExternalUrl: vi.fn(async () => ({ ok: true })),
     window: {
       openDetached: vi.fn(async () => ({ ok: true, windowId: 1 })),
       closeDetached: vi.fn(async () => ({ ok: true })),
@@ -359,6 +411,7 @@ export function makeMockLvisApi(overrides: ApiOverrides = {}): {
     getRecentNotes: vi.fn(async () => []),
 
     getUsageSummary: vi.fn(async () => usage),
+    getAppInfo: vi.fn(async () => appInfo),
     // Routine v2 API
     listRoutinesV2: vi.fn(async () => []),
     dismissRoutineV2: vi.fn(async () => ({ ok: true })),
@@ -416,7 +469,19 @@ export function makeMockLvisApi(overrides: ApiOverrides = {}): {
     }),
 
     onMarketplaceUpdatesAvailable: vi.fn(() => () => {}),
-    onBootstrapStatus: vi.fn(() => () => {}),
+    onPluginInstallProgress: vi.fn((handler: (payload: unknown) => void) => {
+      pluginInstallProgressHandlers.add(handler);
+      return () => pluginInstallProgressHandlers.delete(handler);
+    }),
+    onPluginInstallResult: vi.fn((handler: (payload: unknown) => void) => {
+      pluginInstallResultHandlers.add(handler);
+      return () => pluginInstallResultHandlers.delete(handler);
+    }),
+    onBootstrapStatus: vi.fn((handler: (status: unknown) => void) => {
+      bootstrapStatusHandlers.add(handler);
+      return () => bootstrapStatusHandlers.delete(handler);
+    }),
+    retryBootstrap: vi.fn(async () => ({ ok: true })),
     // App auto-update bridge — renderer's useAppUpdate hook subscribes
     // immediately at App mount, so the smoke test mock must define these
     // even when the suite doesn't exercise update flow.
@@ -444,6 +509,10 @@ export function makeMockLvisApi(overrides: ApiOverrides = {}): {
     emitRoutineFiredV2: (r) => routineFiredV2Handlers.forEach((h) => h(r)),
     emitViewActivate: (v) => viewHandlers.forEach((h) => h(v)),
     emitAskUserQuestion: (r) => askUserQuestionHandlers.forEach((h) => h(r)),
+    emitTourStart: (scenarioId) => tourStartHandlers.forEach((h) => h({ scenarioId })),
+    emitBootstrapStatus: (status) => bootstrapStatusHandlers.forEach((h) => h(status)),
+    emitPluginInstallProgress: (payload) => pluginInstallProgressHandlers.forEach((h) => h(payload)),
+    emitPluginInstallResult: (payload) => pluginInstallResultHandlers.forEach((h) => h(payload)),
   };
 }
 

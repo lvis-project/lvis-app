@@ -21,6 +21,7 @@ import { mkdtempSync, rmSync, readFileSync, existsSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { DEMO_ACTIVATION_DEV_RELAUNCH_EXIT_CODE } from "../../../../scripts/lib/dev-electron-exit.mjs";
+import { makeAppIpcInvoker } from "./test-helpers.js";
 
 const handlers = new Map<string, (...args: unknown[]) => unknown>();
 const relaunchMock = vi.fn();
@@ -45,16 +46,7 @@ vi.mock("electron", () => ({
   },
 }));
 
-function invoke(channel: string, ...args: unknown[]): Promise<unknown> {
-  const fn = handlers.get(channel);
-  if (!fn) throw new Error(`No handler registered for: ${channel}`);
-  return Promise.resolve(
-    fn(
-      { frameId: 0, processId: 0, frame: { url: "lvis://app" } } as never,
-      ...args,
-    ),
-  );
-}
+const invoke = makeAppIpcInvoker(handlers);
 
 function invokeWithEvent(channel: string, event: unknown, ...args: unknown[]): Promise<unknown> {
   const fn = handlers.get(channel);

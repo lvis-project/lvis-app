@@ -6,15 +6,8 @@
  * We route through `@ai-sdk/google-vertex` via `createVertex()`.
  */
 import { describe, it, expect, vi } from "vitest";
-import type { StreamEvent } from "../../types.js";
+import { collectStreamEvents as collect } from "./test-helpers.js";
 
-async function collect(
-  iter: AsyncIterable<StreamEvent>,
-): Promise<StreamEvent[]> {
-  const out: StreamEvent[] = [];
-  for await (const ev of iter) out.push(ev);
-  return out;
-}
 
 describe("VercelUnifiedProvider vertex-ai", () => {
   it("creates the Vertex client with project + default location", async () => {

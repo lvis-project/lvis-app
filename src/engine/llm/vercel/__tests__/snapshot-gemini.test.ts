@@ -8,21 +8,12 @@
  *   L4 — Signature:  skipped for Gemini (no extended thinking signatures)
  */
 import { describe, it, expect, vi } from "vitest";
+import { collectStreamEvents as collect, streamFromArray as fromArray } from "./test-helpers.js";
 import type { StreamEvent } from "../../types.js";
 import { fullStreamToStreamEvent } from "../stream-mapper.js";
 import { genericToModelMessages } from "../message-mapper.js";
 
-async function collect(
-  iter: AsyncIterable<StreamEvent>,
-): Promise<StreamEvent[]> {
-  const out: StreamEvent[] = [];
-  for await (const ev of iter) out.push(ev);
-  return out;
-}
 
-async function* fromArray<T>(arr: T[]): AsyncIterable<T> {
-  for (const item of arr) yield item;
-}
 
 describe("VercelUnifiedProvider gemini — L1 structural parity", () => {
   it("maps a canned fullStream to the expected StreamEvent sequence", async () => {
