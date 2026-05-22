@@ -4,9 +4,11 @@ import { fireEvent, render, screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { MemorySearchPanel } from "../MemorySearchPanel.js";
 import type { LvisApi } from "../../types.js";
+import { makeMockLvisApi } from "../../../../../test/renderer/mock-lvis-api.js";
 
-function makeApi(): LvisApi {
-  return {
+function memorySearchPanelApi(): LvisApi {
+  const { api } = makeMockLvisApi();
+  Object.assign(api, {
     memoryGetIndex: vi.fn(async () => ""),
     memoryListEntries: vi.fn(async () => []),
     memoryListSessions: vi.fn(async () => [
@@ -19,12 +21,13 @@ function makeApi(): LvisApi {
     ]),
     memorySearchEntries: vi.fn(async () => []),
     memorySearchSessions: vi.fn(async () => []),
-  } as unknown as LvisApi;
+  });
+  return api as unknown as LvisApi;
 }
 
 describe("MemorySearchPanel", () => {
   it("opens a selected chat session from the memory session list", async () => {
-    const api = makeApi();
+    const api = memorySearchPanelApi();
     const onOpenSession = vi.fn(async () => true);
     const user = userEvent.setup();
 
@@ -40,7 +43,7 @@ describe("MemorySearchPanel", () => {
   });
 
   it("keeps the row inspectable when session loading fails", async () => {
-    const api = makeApi();
+    const api = memorySearchPanelApi();
     const onOpenSession = vi.fn(async () => false);
     const user = userEvent.setup();
 

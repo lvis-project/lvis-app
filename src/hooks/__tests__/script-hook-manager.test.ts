@@ -10,25 +10,17 @@ import {
   dlpRedactInput,
   type HookDispatchPayload,
 } from "../script-hook-manager.js";
-import type { DiscoveredHook } from "../hook-discovery.js";
+import { fixtureHook as buildFixtureHook } from "./test-helpers.js";
 
 const FIXTURE_ROOT = resolve(__dirname, "..", "..", "..", "test", "fixtures", "hooks");
 const WINDOWS_SHELL_TIMEOUT_MS = 20_000;
 const shellIntegrationOptions =
   process.platform === "win32" ? { timeoutMs: WINDOWS_SHELL_TIMEOUT_MS } : undefined;
 
-function fixtureHook(
+const hookFixture = (
   fileName: string,
   type: "pre" | "post" | "perm" = "pre",
-): DiscoveredHook {
-  return {
-    path: resolve(FIXTURE_ROOT, fileName),
-    fileName,
-    hookType: type,
-    sha256: "test",
-    size: 0,
-  };
-}
+): ReturnType<typeof buildFixtureHook> => buildFixtureHook(FIXTURE_ROOT, fileName, type);
 
 const basePayload: HookDispatchPayload = {
   toolName: "fs_write",
@@ -51,9 +43,9 @@ describe("Permission policy P4 ScriptHookManager", () => {
   it("filters hooks by type — only pre runs in runPreToolUse", async () => {
     const m = new ScriptHookManager();
     m.setTrustedHooks([
-      fixtureHook("pre-allow.sh", "pre"),
-      fixtureHook("post-observe.sh", "post"),
-      fixtureHook("perm-strict.sh", "perm"),
+      hookFixture("pre-allow.sh", "pre"),
+      hookFixture("post-observe.sh", "post"),
+      hookFixture("perm-strict.sh", "perm"),
     ]);
     const pre = await m.runPreToolUse(basePayload, shellIntegrationOptions);
     expect(pre.decision).toBe("allow");
@@ -63,14 +55,14 @@ describe("Permission policy P4 ScriptHookManager", () => {
 
   it("hook deny wins over upstream allow signal (deny precedence)", async () => {
     const m = new ScriptHookManager();
-    m.setTrustedHooks([fixtureHook("pre-deny.sh", "pre")]);
+    m.setTrustedHooks([hookFixture("pre-deny.sh", "pre")]);
     const out = await m.runPreToolUse(basePayload, shellIntegrationOptions);
     expect(out.decision).toBe("deny");
   });
 
   it("post hooks observe — chain still returns allow when all allow", async () => {
     const m = new ScriptHookManager();
-    m.setTrustedHooks([fixtureHook("post-observe.sh", "post")]);
+    m.setTrustedHooks([hookFixture("post-observe.sh", "post")]);
     const out = await m.runPostToolUse({
       ...basePayload,
       toolOutput: "tool ran",
@@ -83,7 +75,7 @@ describe("Permission policy P4 ScriptHookManager", () => {
 
   it("perm hooks gate ApprovalRequest rounds", async () => {
     const m = new ScriptHookManager();
-    m.setTrustedHooks([fixtureHook("perm-strict.sh", "perm")]);
+    m.setTrustedHooks([hookFixture("perm-strict.sh", "perm")]);
     const out = await m.runPermissionRequest(basePayload, shellIntegrationOptions);
     expect(out.decision).toBe("deny");
     expect(out.reason).toContain("strict perm policy");

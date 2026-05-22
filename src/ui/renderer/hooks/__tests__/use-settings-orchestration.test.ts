@@ -2,6 +2,7 @@ import { act, renderHook, waitFor } from "@testing-library/react";
 import { describe, expect, it, vi } from "vitest";
 import { useSettingsOrchestration } from "../use-settings-orchestration.js";
 import type { AppSettings, LvisApi } from "../../types.js";
+import { makeMockLvisApi } from "../../../../../test/renderer/mock-lvis-api.js";
 
 function makeSettings(): AppSettings {
   return {
@@ -29,24 +30,23 @@ function makeSettings(): AppSettings {
   };
 }
 
-function makeApi(updateResult: Awaited<ReturnType<LvisApi["updateSettings"]>>): LvisApi {
+function settingsOrchestrationApi(updateResult: Awaited<ReturnType<LvisApi["updateSettings"]>>): LvisApi {
   const settings = makeSettings();
-  return {
-    getSettings: vi.fn(async () => settings),
+  const { api } = makeMockLvisApi({
+    settings,
+    hasApiKey: false,
+  });
+  Object.assign(api, {
     updateSettings: vi.fn(async () => updateResult),
-    onSettingsUpdated: vi.fn(() => () => undefined),
-    hasApiKey: vi.fn(async () => false),
     hasWebApiKey: vi.fn(async () => false),
     hasMarketplaceApiKey: vi.fn(async () => false),
-    setApiKey: vi.fn(async () => ({ ok: true as const })),
-    setWebApiKey: vi.fn(async () => ({ ok: true as const })),
-    setMarketplaceApiKey: vi.fn(async () => ({ ok: true as const })),
-  } as unknown as LvisApi;
+  });
+  return api as unknown as LvisApi;
 }
 
 describe("useSettingsOrchestration", () => {
   it("aborts LLM key persistence when settings:update returns reviewer-rewire-failed", async () => {
-    const api = makeApi({ ok: false, error: "reviewer-rewire-failed" });
+    const api = settingsOrchestrationApi({ ok: false, error: "reviewer-rewire-failed" });
     const onSaved = vi.fn();
     const { result } = renderHook(() => useSettingsOrchestration(api, onSaved));
 

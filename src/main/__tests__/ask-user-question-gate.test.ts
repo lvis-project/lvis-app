@@ -13,13 +13,7 @@ import {
   AskUserQuestionGate,
   IPC_ASK_USER_QUESTION_TIMEOUT,
 } from "../ask-user-question-gate.js";
-
-function makeMockWebContents() {
-  return {
-    send: vi.fn(),
-    isDestroyed: vi.fn(() => false),
-  };
-}
+import { makeMockWebContents } from "../../__tests__/test-helpers.js";
 
 /** Convenience — most tests only care about the wait/abort/timeout shape. */
 function single(question: string) {

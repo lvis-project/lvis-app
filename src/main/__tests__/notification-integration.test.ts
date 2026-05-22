@@ -10,18 +10,12 @@ import { describe, it, expect, vi } from "vitest";
 import { AskUserQuestionGate } from "../ask-user-question-gate.js";
 import { ApprovalGate } from "../../permissions/approval-gate.js";
 import type { NotificationService, FireOptions } from "../notification-service.js";
+import { makeMockWebContents } from "../../__tests__/test-helpers.js";
 
 function makeFakeNotificationService(): NotificationService {
   return {
     fire: vi.fn((_opts: FireOptions) => {}),
   } as unknown as NotificationService;
-}
-
-function makeMockWebContents() {
-  return {
-    send: vi.fn(),
-    isDestroyed: vi.fn(() => false),
-  };
 }
 
 describe("Trigger 3: AskUserQuestionGate fires `ask-user` on requestAndWait entry", () => {

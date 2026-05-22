@@ -16,73 +16,31 @@ import { ConversationLoop } from "../conversation-loop.js";
 import type { ConversationLoopDeps } from "../conversation-loop.js";
 import type { GenericMessage } from "../llm/types.js";
 import { estimateMessagesTokens } from "../auto-compact.js";
-import { fakeLlmSettings } from "../../shared/__tests__/fake-llm-settings.js";
 import { wireHookSystem } from "../../boot/steps/hook-system-wiring.js";
+import {
+  makeConversationLoopDeps,
+  makeConversationLoopLongHistory,
+  makeConversationLoopMemoryManager,
+  makeConversationLoopSettings,
+} from "./conversation-loop-test-helpers.js";
 
 // ─── Minimal stubs ────────────────────────────────────────────────────────────
 
-function makeSettings(autoCompact = true, model = "gpt-4o", provider: "openai" | "claude" | "gemini" | "copilot" | "azure-foundry" | "vertex-ai" = "openai") {
-  return {
-    get: (key: string) => {
-      if (key === "chat") return { systemPrompt: "", autoCompact };
-      if (key === "llm") return fakeLlmSettings({ provider, model });
-      return {};
-    },
-    getAll: () => ({}),
-    patch: vi.fn(),
-    getSecret: () => null,
-    setSecret: vi.fn(),
-    deleteSecret: vi.fn(),
-  } as unknown as ConversationLoopDeps["settingsService"];
-}
-
-function makeMemoryManager(storedMessages: GenericMessage[] | null = null) {
-  const sessions: Record<string, GenericMessage[]> = {};
-  if (storedMessages) sessions["test-session-id"] = storedMessages;
-
-  return {
-    listSessions: () => Object.keys(sessions).map((id) => ({ id, modifiedAt: new Date() })),
-    loadSession: (id: string) => sessions[id] ?? null,
-    loadSessionMetadata: vi.fn(() => null),
-    saveSession: vi.fn((id: string, msgs: GenericMessage[]) => { sessions[id] = msgs; }),
-    listMemoryEntries: () => [],
-    saveMemory: vi.fn(),
-    deleteMemory: vi.fn(),
-    searchMemoryEntries: vi.fn(),
-    getMemoryContext: vi.fn(),
-    getLvisMd: vi.fn(),
-    updateLvisMd: vi.fn(),
-    getUserPreferences: vi.fn(),
-    updateUserPreferences: vi.fn(),
-  } as unknown as ConversationLoopDeps["memoryManager"];
-}
-
-function makeDeps(overrides: Partial<ConversationLoopDeps> = {}): ConversationLoopDeps {
-  return {
-    settingsService: makeSettings(),
-    systemPromptBuilder: { build: () => "system", setToolScope: vi.fn() } as unknown as ConversationLoopDeps["systemPromptBuilder"],
-    keywordEngine: { classify: vi.fn(), matchAllPluginIds: () => new Set() } as unknown as ConversationLoopDeps["keywordEngine"],
-    routeEngine: { route: vi.fn() } as unknown as ConversationLoopDeps["routeEngine"],
-    toolRegistry: { getToolSchemasForScope: () => [], getVisibleTools: () => [] } as unknown as ConversationLoopDeps["toolRegistry"],
-    memoryManager: makeMemoryManager(),
+const RESUME_SESSION_ID = "test-session-id";
+const resumeMemory = (storedMessages: GenericMessage[] | null = null) =>
+  makeConversationLoopMemoryManager(storedMessages, RESUME_SESSION_ID);
+const resumeDeps = (overrides: Partial<ConversationLoopDeps> = {}) =>
+  makeConversationLoopDeps({
+    settingsService: makeConversationLoopSettings(true, "gpt-4o", "openai"),
+    memoryManager: resumeMemory(),
     ...overrides,
-  };
-}
-
-/** Build a long conversation that exceeds the compaction threshold (>= 6 messages). */
-function makeLongHistory(count = 20): GenericMessage[] {
-  const msgs: GenericMessage[] = [];
-  for (let i = 0; i < count; i++) {
-    msgs.push({ role: i % 2 === 0 ? "user" : "assistant", content: `msg-${i} ${"x".repeat(200)}` });
-  }
-  return msgs;
-}
+  });
 
 // ─── Tests ────────────────────────────────────────────────────────────────────
 
 describe("ConversationLoop.resetAndResume", () => {
   it("returns ok:false for unknown session", () => {
-    const loop = new ConversationLoop(makeDeps({ memoryManager: makeMemoryManager(null) }));
+    const loop = new ConversationLoop(resumeDeps({ memoryManager: resumeMemory(null) }));
     const result = loop.resetAndResume("nonexistent-id");
     expect(result.ok).toBe(false);
     expect(result.compacted).toBe(false);
@@ -95,8 +53,8 @@ describe("ConversationLoop.resetAndResume", () => {
       { role: "user", content: "hello" },
       { role: "assistant", content: "world" },
     ];
-    const mem = makeMemoryManager(history);
-    const loop = new ConversationLoop(makeDeps({ memoryManager: mem }));
+    const mem = resumeMemory(history);
+    const loop = new ConversationLoop(resumeDeps({ memoryManager: mem }));
 
     // Simulate prior usage so we can confirm reset
     const result = loop.resetAndResume("test-session-id");
@@ -113,8 +71,8 @@ describe("ConversationLoop.resetAndResume", () => {
       { role: "user", content: "hi" },
       { role: "assistant", content: "hello" },
     ];
-    const mem = makeMemoryManager(history);
-    const loop = new ConversationLoop(makeDeps({ memoryManager: mem }));
+    const mem = resumeMemory(history);
+    const loop = new ConversationLoop(resumeDeps({ memoryManager: mem }));
 
     const result = loop.resetAndResume("test-session-id");
 
@@ -125,10 +83,10 @@ describe("ConversationLoop.resetAndResume", () => {
   });
 
   it("does NOT compact when autoCompact is disabled", () => {
-    const history = makeLongHistory(20);
-    const mem = makeMemoryManager(history);
-    const settings = makeSettings(false);
-    const loop = new ConversationLoop(makeDeps({ memoryManager: mem, settingsService: settings }));
+    const history = makeConversationLoopLongHistory(20);
+    const mem = resumeMemory(history);
+    const settings = makeConversationLoopSettings(false, "gpt-4o", "openai");
+    const loop = new ConversationLoop(resumeDeps({ memoryManager: mem, settingsService: settings }));
 
     const result = loop.resetAndResume("test-session-id");
 
@@ -138,8 +96,8 @@ describe("ConversationLoop.resetAndResume", () => {
 
   it("session-id is updated to the resumed session", () => {
     const history: GenericMessage[] = [{ role: "user", content: "resume me" }];
-    const mem = makeMemoryManager(history);
-    const loop = new ConversationLoop(makeDeps({ memoryManager: mem }));
+    const mem = resumeMemory(history);
+    const loop = new ConversationLoop(resumeDeps({ memoryManager: mem }));
 
     loop.resetAndResume("test-session-id");
     expect(loop.getSessionId()).toBe("test-session-id");
@@ -149,7 +107,7 @@ describe("ConversationLoop.resetAndResume", () => {
     const childHistory: GenericMessage[] = [{ role: "user", content: "child only" }];
     const parentHistory: GenericMessage[] = [{ role: "user", content: "parent should not load" }];
     const mem = {
-      ...makeMemoryManager(null),
+      ...resumeMemory(null),
       loadSession: vi.fn((id: string) => {
         if (id === "child-session") return childHistory;
         if (id === "parent-session") return parentHistory;
@@ -170,7 +128,7 @@ describe("ConversationLoop.resetAndResume", () => {
       setToolScope: vi.fn(),
       setSummaryPreamble: vi.fn(),
     } as unknown as ConversationLoopDeps["systemPromptBuilder"];
-    const loop = new ConversationLoop(makeDeps({ memoryManager: mem, systemPromptBuilder }));
+    const loop = new ConversationLoop(resumeDeps({ memoryManager: mem, systemPromptBuilder }));
 
     const result = loop.resetAndResume("child-session");
 
@@ -189,8 +147,8 @@ describe("ConversationLoop.resetAndResume", () => {
     for (let i = 0; i < 50; i++) {
       msgs.push({ role: i % 2 === 0 ? "user" : "assistant", content: "y".repeat(10_000) });
     }
-    const mem = makeMemoryManager(msgs);
-    const loop = new ConversationLoop(makeDeps({ memoryManager: mem }));
+    const mem = resumeMemory(msgs);
+    const loop = new ConversationLoop(resumeDeps({ memoryManager: mem }));
 
     const result = loop.resetAndResume("test-session-id");
     expect(result.ok).toBe(true);
@@ -205,7 +163,7 @@ describe("ConversationLoop.resetAndResume", () => {
       { role: "user", content: "old question" },
       { role: "assistant", content: "old answer" },
     ];
-    const mem = makeMemoryManager(history);
+    const mem = resumeMemory(history);
     const routeEngine = {
       route: vi.fn().mockReturnValue({ route: "llm" }),
     } as unknown as ConversationLoopDeps["routeEngine"];
@@ -213,11 +171,11 @@ describe("ConversationLoop.resetAndResume", () => {
       classify: vi.fn().mockReturnValue({ type: "chat" }),
       matchAllPluginIds: () => new Set(),
     } as unknown as ConversationLoopDeps["keywordEngine"];
-    const loop = new ConversationLoop(makeDeps({
+    const loop = new ConversationLoop(resumeDeps({
       memoryManager: mem,
       routeEngine,
       keywordEngine,
-      settingsService: makeSettings(false),
+      settingsService: makeConversationLoopSettings(false, "gpt-4o", "openai"),
     }));
     let providerMessages: GenericMessage[] = [];
     const fakeProvider = {
@@ -252,7 +210,7 @@ describe("ConversationLoop.resetAndResume", () => {
       classify: vi.fn().mockReturnValue({ type: "command" }),
       matchAllPluginIds: () => new Set(),
     } as unknown as ConversationLoopDeps["keywordEngine"];
-    const loop = new ConversationLoop(makeDeps({ routeEngine, keywordEngine }));
+    const loop = new ConversationLoop(resumeDeps({ routeEngine, keywordEngine }));
     const fakeProvider = {
       vendor: "openai" as const,
       streamTurn: async function* () { /* unused */ },
@@ -269,32 +227,9 @@ describe("ConversationLoop.resetAndResume", () => {
 
 
 describe("ConversationLoop.manualCompact — Major Fix callbacks", () => {
-  /** makeMemoryManager stub with appendCheckpoint + saveSessionMetadata support */
-  function makeMemoryManagerWithCheckpoint() {
-    const sessions: Record<string, GenericMessage[]> = {};
-    const metadata: Record<string, unknown> = {};
-    return {
-      listSessions: () => [],
-      loadSession: (id: string) => sessions[id] ?? null,
-      loadSessionMetadata: vi.fn(() => null),
-      saveSession: vi.fn((id: string, msgs: GenericMessage[]) => { sessions[id] = msgs; }),
-      saveSessionMetadata: vi.fn(async (id: string, meta: unknown) => { metadata[id] = meta; }),
-      appendCheckpoint: vi.fn((_meta: unknown, cp: unknown) => ({ checkpoints: [cp] })),
-      listMemoryEntries: () => [],
-      saveMemory: vi.fn(),
-      deleteMemory: vi.fn(),
-      searchMemoryEntries: vi.fn(),
-      getMemoryContext: vi.fn(),
-      getLvisMd: vi.fn(),
-      updateLvisMd: vi.fn(),
-      getUserPreferences: vi.fn(),
-      updateUserPreferences: vi.fn(),
-    } as unknown as ConversationLoopDeps["memoryManager"];
-  }
-
   it("no-op (short history): compacted:false", async () => {
-    const mem = makeMemoryManagerWithCheckpoint();
-    const loop = new ConversationLoop(makeDeps({ memoryManager: mem }));
+    const mem = resumeMemory();
+    const loop = new ConversationLoop(resumeDeps({ memoryManager: mem }));
 
     // Provider 없으면 early-return — 짧은 history 로 충분히 no-op 검증
     const result = await loop.manualCompact();
@@ -304,17 +239,10 @@ describe("ConversationLoop.manualCompact — Major Fix callbacks", () => {
 
   it("manualCompact appends a checkpoint and persists summary", async () => {
     // Long enough history to trigger compact
-    const longHistory = makeLongHistory(40);
-    const mem = makeMemoryManagerWithCheckpoint();
-    // Pre-load session
-    const sessions: Record<string, GenericMessage[]> = { "test-session-id": longHistory };
-    const memWithHistory = {
-      ...mem,
-      loadSession: (id: string) => sessions[id] ?? null,
-      loadSessionMetadata: vi.fn(() => null),
-    } as unknown as ConversationLoopDeps["memoryManager"];
+    const longHistory = makeConversationLoopLongHistory(40);
+    const mem = resumeMemory(longHistory);
 
-    const loop = new ConversationLoop(makeDeps({ memoryManager: memWithHistory }));
+    const loop = new ConversationLoop(resumeDeps({ memoryManager: mem }));
     loop.resetAndResume("test-session-id");
 
     // Inject a fake provider that returns a valid 12-section summary
@@ -350,8 +278,8 @@ describe("ConversationLoop.manualCompact — Major Fix callbacks", () => {
       expect(result.compacted).toBe(true);
       expect(result.removedMessageCount).toBeGreaterThan(0);
       // appendCheckpoint and saveSessionMetadata must have been called.
-      expect((memWithHistory as { appendCheckpoint: ReturnType<typeof vi.fn> }).appendCheckpoint).toHaveBeenCalled();
-      expect((memWithHistory as { saveSessionMetadata: ReturnType<typeof vi.fn> }).saveSessionMetadata).toHaveBeenCalled();
+      expect((mem as { appendCheckpoint: ReturnType<typeof vi.fn> }).appendCheckpoint).toHaveBeenCalled();
+      expect((mem as { saveSessionMetadata: ReturnType<typeof vi.fn> }).saveSessionMetadata).toHaveBeenCalled();
     }
   });
 });
@@ -360,7 +288,7 @@ describe("ConversationLoop command routing", () => {
   it("/memory lists memory entries only", async () => {
     const listMemoryEntries = vi.fn(() => [{ title: "사용자 기억", filename: "memory-note.md", content: "# 사용자 기억" }]);
     const mem = {
-      ...makeMemoryManager(),
+      ...resumeMemory(),
       listMemoryEntries,
     } as unknown as ConversationLoopDeps["memoryManager"];
     const routeEngine = {
@@ -374,7 +302,7 @@ describe("ConversationLoop command routing", () => {
       vendor: "openai" as const,
       streamTurn: async function* () { /* unused */ },
     };
-    const loop = new ConversationLoop(makeDeps({ memoryManager: mem, routeEngine, keywordEngine }));
+    const loop = new ConversationLoop(resumeDeps({ memoryManager: mem, routeEngine, keywordEngine }));
     (loop as unknown as { provider: typeof fakeProvider }).provider = fakeProvider;
 
     const result = await loop.runTurn("/memory", undefined, undefined, { inputOrigin: "user-keyboard" });
@@ -408,7 +336,7 @@ describe("ConversationLoop command routing", () => {
         classify: vi.fn().mockReturnValue({ type: "command" }),
         matchAllPluginIds: () => new Set(),
       } as unknown as ConversationLoopDeps["keywordEngine"];
-      const loop = new ConversationLoop(makeDeps({
+      const loop = new ConversationLoop(resumeDeps({
         routeEngine,
         keywordEngine,
         scriptHookManager: boot.manager,

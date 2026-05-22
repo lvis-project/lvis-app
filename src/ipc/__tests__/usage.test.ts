@@ -6,6 +6,7 @@
  */
 import { describe, it, expect, vi, beforeEach } from "vitest";
 import type { IpcMainInvokeEvent } from "electron";
+import { invokeRegisteredHandlerWithEvent } from "../../__tests__/test-helpers.js";
 
 // ─── Mock electron ────────────────────────────────────────────────────────────
 
@@ -35,9 +36,7 @@ vi.mock("../../engine/usage-stats.js", () => ({
 // ─── Helpers ──────────────────────────────────────────────────────────────────
 
 function invoke(channel: string, event: unknown, ...args: unknown[]): unknown {
-  const fn = handlers.get(channel);
-  if (!fn) throw new Error(`No handler registered for: ${channel}`);
-  return fn(event, ...args);
+  return invokeRegisteredHandlerWithEvent(handlers, channel, event, ...args);
 }
 
 function trustedEvent(): IpcMainInvokeEvent {

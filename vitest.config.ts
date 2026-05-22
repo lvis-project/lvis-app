@@ -67,6 +67,21 @@ export default defineConfig({
       const major = parseInt(process.versions.node.split(".")[0], 10);
       return major >= 25 ? ["--no-experimental-webstorage"] : [];
     })(),
+    coverage: {
+      provider: "v8",
+      reportsDirectory: "coverage/vitest",
+      reporter: ["text-summary", "json-summary", "html"],
+      reportOnFailure: true,
+      skipFull: true,
+      include: ["src/**/*.{ts,tsx}"],
+      exclude: [
+        "**/__tests__/**",
+        "**/__probes__/**",
+        "**/*.{test,spec}.{ts,tsx}",
+        "**/*.d.ts",
+      ],
+      excludeAfterRemap: true,
+    },
     projects: [
       {
         extends: true,

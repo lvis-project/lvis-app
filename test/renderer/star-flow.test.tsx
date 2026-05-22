@@ -8,20 +8,14 @@ import "./setup.js";
 import { describe, it, expect, vi, afterEach } from "vitest";
 import { act, fireEvent, waitFor } from "@testing-library/react";
 import { renderApp } from "./render-app.js";
+import { submitChatMessage } from "./helpers.js";
 
-async function submit(container: HTMLElement, text: string): Promise<void> {
-  const textarea = container.querySelector("textarea") as HTMLTextAreaElement;
-  await act(async () => {
-    fireEvent.change(textarea, { target: { value: text } });
-    fireEvent.keyDown(textarea, { key: "Enter", code: "Enter" });
-  });
-}
 
 describe("Star flow (Phase 3 regression net)", () => {
   it("clicking star on a user message calls starredAdd with sessionId + messageIndex", async () => {
     const { container, api } = await renderApp({ currentSession: "sess-star" });
     await waitFor(() => expect(api.getSettings).toHaveBeenCalled());
-    await submit(container, "star me");
+    await submitChatMessage(container, "star me");
     await waitFor(() => expect(api.chatSend).toHaveBeenCalled());
 
     const starBtn = await waitFor(() => {
@@ -48,7 +42,7 @@ describe("Star flow (Phase 3 regression net)", () => {
   it("starring then unstarring calls starredRemove", async () => {
     const { container, api } = await renderApp({ currentSession: "sess-star" });
     await waitFor(() => expect(api.getSettings).toHaveBeenCalled());
-    await submit(container, "toggle me");
+    await submitChatMessage(container, "toggle me");
     await waitFor(() => expect(api.chatSend).toHaveBeenCalled());
 
     const starBtn = await waitFor(() => {

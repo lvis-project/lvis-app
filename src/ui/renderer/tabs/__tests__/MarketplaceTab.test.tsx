@@ -17,17 +17,12 @@ import { describe, it, expect, vi } from "vitest";
 import { fireEvent, render, waitFor } from "@testing-library/react";
 import { MarketplaceTab } from "../MarketplaceTab.js";
 import type { LvisApi } from "../../types.js";
+import { makeMockLvisApi } from "../../../../../test/renderer/mock-lvis-api.js";
 
-function makeApi(overrides: Partial<LvisApi> = {}): LvisApi {
-  const base = {
-    listMarketplacePlugins: vi.fn().mockResolvedValue([]),
-    pingMarketplace: vi.fn().mockResolvedValue({ configured: true, online: true }),
-    openExternalUrl: vi.fn().mockResolvedValue({ ok: true }),
-    deleteMarketplaceApiKey: vi.fn().mockResolvedValue({ ok: true }),
-    installMcpFromMarketplace: vi.fn().mockResolvedValue({ ok: true }),
-    ...overrides,
-  };
-  return base as unknown as LvisApi;
+function marketplaceTabApi(overrides: Partial<LvisApi> = {}): LvisApi {
+  const { api } = makeMockLvisApi();
+  Object.assign(api, overrides);
+  return api as unknown as LvisApi;
 }
 
 function defaultProps(api: LvisApi) {
@@ -48,7 +43,7 @@ function defaultProps(api: LvisApi) {
 
 describe("MarketplaceTab", () => {
   it("renders the primary CTA (open button + caption)", async () => {
-    const api = makeApi();
+    const api = marketplaceTabApi();
     const { findByTestId, getByText } = render(<MarketplaceTab {...defaultProps(api)} />);
     const cta = await findByTestId("marketplace:cta:open");
     expect(cta.textContent).toContain("마켓플레이스 열기");
@@ -56,14 +51,14 @@ describe("MarketplaceTab", () => {
   });
 
   it("reflects the pingMarketplace status in the CTA status pill", async () => {
-    const api = makeApi();
+    const api = marketplaceTabApi();
     const { findByTestId } = render(<MarketplaceTab {...defaultProps(api)} />);
     const status = await findByTestId("marketplace:cta:status");
     await waitFor(() => expect(status.textContent).toContain("정상"));
   });
 
   it("shows 응답 없음 when configured but offline", async () => {
-    const api = makeApi({
+    const api = marketplaceTabApi({
       pingMarketplace: vi.fn().mockResolvedValue({ configured: true, online: false }),
     });
     const { findByTestId } = render(<MarketplaceTab {...defaultProps(api)} />);
@@ -72,7 +67,7 @@ describe("MarketplaceTab", () => {
   });
 
   it("calls openExternalUrl(baseUrl) when the CTA is clicked", async () => {
-    const api = makeApi();
+    const api = marketplaceTabApi();
     const { findByTestId } = render(<MarketplaceTab {...defaultProps(api)} />);
     const cta = await findByTestId("marketplace:cta:open");
     fireEvent.click(cta);
@@ -80,7 +75,7 @@ describe("MarketplaceTab", () => {
   });
 
   it("hides the 서버 연결 controls behind 고급 옵션 by default", async () => {
-    const api = makeApi();
+    const api = marketplaceTabApi();
     const { findByTestId, queryByTestId } = render(<MarketplaceTab {...defaultProps(api)} />);
     // toggle button is always present; body (and url save button) only when expanded
     await findByTestId("marketplace:advanced:toggle");
@@ -89,7 +84,7 @@ describe("MarketplaceTab", () => {
   });
 
   it("expands 고급 옵션 body when the toggle is clicked", async () => {
-    const api = makeApi();
+    const api = marketplaceTabApi();
     const { findByTestId } = render(<MarketplaceTab {...defaultProps(api)} />);
     const toggle = await findByTestId("marketplace:advanced:toggle");
     fireEvent.click(toggle);

@@ -12,6 +12,7 @@
  */
 
 import { describe, it, expect, vi, beforeEach } from "vitest";
+import { invokeRegisteredHandler, invokeRegisteredHandlerWithEvent } from "../../../__tests__/test-helpers.js";
 
 // ─── Mock electron ─────────────────────────────────────────────────────────────
 const handlers = new Map<string, (...args: unknown[]) => unknown>();
@@ -139,15 +140,11 @@ async function setupHandlers(loop: ReturnType<typeof makeConversationLoop>) {
 }
 
 function invoke(channel: string, ...args: unknown[]): unknown {
-  const fn = handlers.get(channel);
-  if (!fn) throw new Error(`No handler registered for: ${channel}`);
-  return fn(null, ...args);
+  return invokeRegisteredHandler(handlers, channel, ...args);
 }
 
 function invokeWithEvent(channel: string, event: unknown, ...args: unknown[]): unknown {
-  const fn = handlers.get(channel);
-  if (!fn) throw new Error(`No handler registered for: ${channel}`);
-  return fn(event, ...args);
+  return invokeRegisteredHandlerWithEvent(handlers, channel, event, ...args);
 }
 
 // ─── Tests ────────────────────────────────────────────────────────────────────

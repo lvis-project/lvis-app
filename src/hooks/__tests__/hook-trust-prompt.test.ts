@@ -5,14 +5,11 @@
  */
 import { describe, expect, it, beforeEach, afterEach } from "vitest";
 import {
-  chmodSync,
   existsSync,
-  mkdirSync,
   mkdtempSync,
   readdirSync,
   readFileSync,
   rmSync,
-  writeFileSync,
 } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -22,6 +19,7 @@ import {
   type TrustPromptDispatcher,
 } from "../hook-trust-prompt.js";
 import type { LockfileShape } from "../hook-discovery.js";
+import { writeExecutableHook } from "./test-helpers.js";
 
 let tmpDir: string;
 let hooksDir: string;
@@ -39,13 +37,6 @@ afterEach(() => {
   if (tmpDir) rmSync(tmpDir, { recursive: true, force: true });
 });
 
-function writeHook(name: string, body: string): void {
-  mkdirSync(hooksDir, { recursive: true });
-  const path = join(hooksDir, name);
-  writeFileSync(path, body);
-  chmodSync(path, 0o700);
-}
-
 function makeDispatcher(decisions: TrustPromptDecision[]): TrustPromptDispatcher {
   return { prompt: async () => decisions };
 }
@@ -60,8 +51,8 @@ describe("Permission policy P4 runHookTrustWorkflow", () => {
   });
 
   it("fresh install with hooks present + dispatcher trusts all → lockfile written", async () => {
-    writeHook("pre-allow.sh", "#!/bin/sh\necho '{}'");
-    writeHook("post-x.sh", "#!/bin/sh\necho '{}'");
+    writeExecutableHook(hooksDir, "pre-allow.sh", "#!/bin/sh\necho '{}'");
+    writeExecutableHook(hooksDir, "post-x.sh", "#!/bin/sh\necho '{}'");
     const result = await runHookTrustWorkflow({
       hooksDir,
       lockfilePath,
@@ -83,8 +74,8 @@ describe("Permission policy P4 runHookTrustWorkflow", () => {
   });
 
   it("rejected hooks → moved to .disabled/ + not in lockfile", async () => {
-    writeHook("pre-bad.sh", "#!/bin/sh\nexit 1");
-    writeHook("pre-good.sh", "#!/bin/sh\nexit 0");
+    writeExecutableHook(hooksDir, "pre-bad.sh", "#!/bin/sh\nexit 1");
+    writeExecutableHook(hooksDir, "pre-good.sh", "#!/bin/sh\nexit 0");
     const result = await runHookTrustWorkflow({
       hooksDir,
       lockfilePath,
@@ -105,7 +96,7 @@ describe("Permission policy P4 runHookTrustWorkflow", () => {
   });
 
   it("changed-hash detection on subsequent boot", async () => {
-    writeHook("pre-x.sh", "#!/bin/sh\necho 'v1'");
+    writeExecutableHook(hooksDir, "pre-x.sh", "#!/bin/sh\necho 'v1'");
     // First run: trust the hook
     await runHookTrustWorkflow({
       hooksDir,
@@ -114,7 +105,7 @@ describe("Permission policy P4 runHookTrustWorkflow", () => {
       promptDispatcher: makeDispatcher([{ fileName: "pre-x.sh", trust: true }]),
     });
     // Mutate the hook
-    writeHook("pre-x.sh", "#!/bin/sh\necho 'v2-malicious'");
+    writeExecutableHook(hooksDir, "pre-x.sh", "#!/bin/sh\necho 'v2-malicious'");
     // Second run: dispatcher should be invoked because hash changed
     const seen: string[] = [];
     const result = await runHookTrustWorkflow({
@@ -133,7 +124,7 @@ describe("Permission policy P4 runHookTrustWorkflow", () => {
   });
 
   it("trusted-then-still-trusted preserves acceptedAt across runs", async () => {
-    writeHook("pre-keep.sh", "#!/bin/sh\necho 'stable'");
+    writeExecutableHook(hooksDir, "pre-keep.sh", "#!/bin/sh\necho 'stable'");
     const first = await runHookTrustWorkflow({
       hooksDir,
       lockfilePath,
@@ -159,14 +150,14 @@ describe("Permission policy P4 runHookTrustWorkflow", () => {
   });
 
   it("strict-deny when no dispatcher — auto-disables every untrusted hook", async () => {
-    writeHook("pre-untrusted.sh", "#!/bin/sh\necho hi");
+    writeExecutableHook(hooksDir, "pre-untrusted.sh", "#!/bin/sh\necho hi");
     const result = await runHookTrustWorkflow({ hooksDir, lockfilePath, disabledDir });
     expect(result.trustedHooks).toEqual([]);
     expect(result.disabledHooks.map((h) => h.fileName)).toEqual(["pre-untrusted.sh"]);
   });
 
   it("dispatcher throws → strict-deny applied (defense-in-depth)", async () => {
-    writeHook("pre-x.sh", "#!/bin/sh\nexit 0");
+    writeExecutableHook(hooksDir, "pre-x.sh", "#!/bin/sh\nexit 0");
     const result = await runHookTrustWorkflow({
       hooksDir,
       lockfilePath,

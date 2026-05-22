@@ -5,6 +5,7 @@ import "./setup.js";
 import { describe, it, expect, vi, afterEach } from "vitest";
 import { render, screen, waitFor, fireEvent } from "@testing-library/react";
 import React from "react";
+import { makeMockLvisApi } from "./mock-lvis-api.js";
 
 afterEach(() => {
   vi.unstubAllGlobals();
@@ -43,19 +44,19 @@ const MOCK_ENTRIES = [
   },
 ];
 
-function makeApi(overrides: {
+function auditTabApi(overrides: {
   searchResult?: { entries: unknown[]; total: number };
   stats?: unknown;
 } = {}) {
-  return {
-    audit: {
-      search: vi.fn(async () => overrides.searchResult ?? { entries: MOCK_ENTRIES, total: MOCK_ENTRIES.length }),
-      getStats: vi.fn(async () => overrides.stats ?? MOCK_STATS),
-    },
+  const { api } = makeMockLvisApi();
+  api.audit = {
+    search: vi.fn(async () => overrides.searchResult ?? { entries: MOCK_ENTRIES, total: MOCK_ENTRIES.length }),
+    getStats: vi.fn(async () => overrides.stats ?? MOCK_STATS),
   };
+  return api;
 }
 
-async function renderAuditTab(api = makeApi()) {
+async function renderAuditTab(api = auditTabApi()) {
   vi.stubGlobal("lvisApi", api);
   (window as unknown as { lvisApi: typeof api }).lvisApi = api;
 
@@ -71,7 +72,7 @@ describe("AuditTab", () => {
   });
 
   it("calls audit.search and audit.getStats on mount", async () => {
-    const api = makeApi();
+    const api = auditTabApi();
     await renderAuditTab(api);
     await waitFor(() => {
       expect(api.audit.search).toHaveBeenCalledTimes(1);
@@ -114,7 +115,7 @@ describe("AuditTab", () => {
   });
 
   it("shows empty state when no entries", async () => {
-    const api = makeApi({ searchResult: { entries: [], total: 0 }, stats: { totalByType: {}, totalByDay: {}, sensitiveOps: 0 } });
+    const api = auditTabApi({ searchResult: { entries: [], total: 0 }, stats: { totalByType: {}, totalByDay: {}, sensitiveOps: 0 } });
     await renderAuditTab(api);
     await waitFor(() => {
       expect(screen.getByText(/항목이 없습니다/)).toBeTruthy();
@@ -130,7 +131,7 @@ describe("AuditTab", () => {
       output: "ok",
       route: "claude",
     }));
-    const api = makeApi({ searchResult: { entries, total: 120 } });
+    const api = auditTabApi({ searchResult: { entries, total: 120 } });
     await renderAuditTab(api);
     await waitFor(() => {
       // "1 / 3" pagination — total 120 / 50 = 3 pages
@@ -139,7 +140,7 @@ describe("AuditTab", () => {
   });
 
   it("calls search again when 검색 button is clicked", async () => {
-    const api = makeApi();
+    const api = auditTabApi();
     await renderAuditTab(api);
     await waitFor(() => screen.getByText("검색"));
     const btn = screen.getByText("검색");

@@ -27,69 +27,50 @@
  *      ever generated.
  */
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
-import { mkdir, rm, writeFile } from "node:fs/promises";
-import { tmpdir } from "node:os";
-
+import { rm } from "node:fs/promises";
 import { join } from "node:path";
-import { PluginRuntime } from "../runtime.js";
+import {
+  makeTestPluginRuntime,
+  makeTestPluginRuntimeFixture,
+  writeTestPlugin,
+  writeTestPluginRegistry,
+  type TestPluginRuntimeFixture,
+} from "./test-helpers.js";
 
 describe("PluginRuntime — uiCallable suffix-blocking removed", () => {
-  let testDir: string;
-  let installedDir: string;
-  let registryPath: string;
+  let fixture: TestPluginRuntimeFixture;
   let auditEntries: Array<{ level: string; message: string; data?: unknown }>;
 
   beforeEach(async () => {
-    testDir = join(
-      tmpdir(),
-      `lvis-ui-unsigned-${Date.now()}-${Math.random().toString(36).slice(2)}`,
-    );
-    installedDir = join(testDir, "plugins", "installed");
-    await mkdir(installedDir, { recursive: true });
-    registryPath = join(testDir, "plugins", "registry.json");
+    fixture = await makeTestPluginRuntimeFixture({ prefix: "lvis-ui-unsigned-" });
     auditEntries = [];
   });
 
   afterEach(async () => {
-    await rm(testDir, { recursive: true, force: true });
+    await rm(fixture.rootDir, { recursive: true, force: true });
   });
 
   async function writePlugin(id: string, manifestOverrides: Record<string, unknown> = {}): Promise<void> {
-    const pluginDir = join(installedDir, id);
-    await mkdir(pluginDir, { recursive: true });
-    await writeFile(
-      join(pluginDir, "entry.mjs"),
-      `export default async function createPlugin(ctx) {
-  return { handlers: { "${id}_get": async () => "ok", "${id}_delete": async () => "ok" }, start: async () => {}, stop: async () => {} };
-}`,
-      "utf-8",
-    );
-    const manifest = {
+    const { manifestPath } = await writeTestPlugin(fixture, {
       id,
-      name: id,
-      version: "1.0.0",
-      description: "Test fixture.",
-      publisher: "Test fixture",
-      entry: "entry.mjs",
+      entrySource: `export default async function createPlugin(ctx) {
+  return {
+    handlers: {
+      "${id}_get": async () => "ok",
+      "${id}_delete": async () => "ok",
+    },
+    start: async () => {},
+    stop: async () => {},
+  };
+}`,
       tools: [`${id}_get`, `${id}_delete`],
-      ...manifestOverrides,
-    };
-    await writeFile(join(pluginDir, "plugin.json"), JSON.stringify(manifest), "utf-8");
-    await writeFile(
-      registryPath,
-      JSON.stringify({
-        version: 1,
-        plugins: [{ id, manifestPath: join(pluginDir, "plugin.json") }],
-      }),
-      "utf-8",
-    );
+      manifest: manifestOverrides,
+    });
+    await writeTestPluginRegistry(fixture, [{ id, manifestPath }]);
   }
 
-  function makeRuntime(opts: { allowManagedUnsigned?: boolean } = {}): PluginRuntime {
-    return new PluginRuntime({
-      hostRoot: testDir,
-      registryPath,
-      pluginsRoot: installedDir,
+  function runtimeWithAudit(opts: { allowManagedUnsigned?: boolean } = {}) {
+    return makeTestPluginRuntime(fixture, {
       allowManagedUnsigned: opts.allowManagedUnsigned,
       auditLog: (level, message, data) => {
         auditEntries.push({ level, message, data });
@@ -104,7 +85,7 @@ describe("PluginRuntime — uiCallable suffix-blocking removed", () => {
       uiCallable: ["pmd_delete"],
     });
 
-    const runtime = makeRuntime();
+    const runtime = runtimeWithAudit();
     await runtime.load();
 
     expect(runtime.listPluginIds()).toContain("p-managed-default");
@@ -117,7 +98,7 @@ describe("PluginRuntime — uiCallable suffix-blocking removed", () => {
       uiCallable: ["pud_delete"],
     });
 
-    const runtime = makeRuntime();
+    const runtime = runtimeWithAudit();
     await runtime.load();
 
     expect(runtime.listPluginIds()).toContain("p-user-delete");
@@ -136,19 +117,18 @@ describe("PluginRuntime — uiCallable suffix-blocking removed", () => {
     });
 
     // Rewrite the registry to include both plugins (writePlugin overwrites it).
-    await writeFile(
-      registryPath,
-      JSON.stringify({
-        version: 1,
-        plugins: [
-          { id: "p-managed-allow", manifestPath: join(installedDir, "p-managed-allow", "plugin.json") },
-          { id: "p-user-allow", manifestPath: join(installedDir, "p-user-allow", "plugin.json") },
-        ],
-      }),
-      "utf-8",
-    );
+    await writeTestPluginRegistry(fixture, [
+      {
+        id: "p-managed-allow",
+        manifestPath: join(fixture.pluginsRoot, "p-managed-allow", "plugin.json"),
+      },
+      {
+        id: "p-user-allow",
+        manifestPath: join(fixture.pluginsRoot, "p-user-allow", "plugin.json"),
+      },
+    ]);
 
-    const runtime = makeRuntime({ allowManagedUnsigned: true });
+    const runtime = runtimeWithAudit({ allowManagedUnsigned: true });
     await runtime.load();
 
     expect(runtime.listPluginIds()).toContain("p-managed-allow");
@@ -162,7 +142,7 @@ describe("PluginRuntime — uiCallable suffix-blocking removed", () => {
       uiCallable: ["pac_delete"],
     });
 
-    const runtime = makeRuntime();
+    const runtime = runtimeWithAudit();
     await runtime.load();
 
     expect(runtime.listPluginIds()).toContain("p-audit-check");

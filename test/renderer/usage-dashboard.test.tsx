@@ -5,6 +5,7 @@ import "./setup.js";
 import { describe, it, expect, vi, afterEach } from "vitest";
 import { render, screen, waitFor, fireEvent } from "@testing-library/react";
 import React from "react";
+import { makeMockLvisApi } from "./mock-lvis-api.js";
 
 afterEach(() => {
   vi.unstubAllGlobals();
@@ -32,16 +33,15 @@ const MOCK_SUMMARY = {
   generatedAt: new Date().toISOString(),
 };
 
-function makeApi(overrides: Partial<typeof MOCK_SUMMARY> = {}) {
+function usageDashboardApi(overrides: Partial<typeof MOCK_SUMMARY> = {}) {
   const summary = { ...MOCK_SUMMARY, ...overrides };
-  return {
-    getUsageSummary: vi.fn(async () => summary),
-    getUsageRange: vi.fn(async () => summary),
-    exportUsageCsv: vi.fn(async () => ({ ok: true, filePath: "/tmp/lvis-usage.csv" })),
-  };
+  const { api } = makeMockLvisApi({ usage: summary });
+  api.getUsageRange = vi.fn(async () => summary);
+  api.exportUsageCsv = vi.fn(async () => ({ ok: true, filePath: "/tmp/lvis-usage.csv" }));
+  return api;
 }
 
-async function renderDashboard(api = makeApi()) {
+async function renderDashboard(api = usageDashboardApi()) {
   const { UsageDashboard } = await import("../../src/ui/renderer/components/UsageDashboard.js");
   const result = render(<UsageDashboard api={api as any} />);
   return { ...result, api };
@@ -54,7 +54,7 @@ describe("UsageDashboard", () => {
   });
 
   it("calls getUsageRange on mount", async () => {
-    const api = makeApi();
+    const api = usageDashboardApi();
     await renderDashboard(api);
     await waitFor(() => expect(api.getUsageRange).toHaveBeenCalledTimes(1));
   });
@@ -95,7 +95,7 @@ describe("UsageDashboard", () => {
   });
 
   it("calls getUsageRange again when preset changes", async () => {
-    const api = makeApi();
+    const api = usageDashboardApi();
     await renderDashboard(api);
     await waitFor(() => expect(api.getUsageRange).toHaveBeenCalledTimes(1));
     fireEvent.click(screen.getByRole("button", { name: "7d" }));
@@ -118,7 +118,7 @@ describe("UsageDashboard", () => {
   });
 
   it("calls exportUsageCsv when CSV button clicked", async () => {
-    const api = makeApi();
+    const api = usageDashboardApi();
     await renderDashboard(api);
     await waitFor(() => expect(screen.getByRole("button", { name: /CSV 내보내기/ })).toBeTruthy());
     fireEvent.click(screen.getByRole("button", { name: /CSV 내보내기/ }));
@@ -132,7 +132,7 @@ describe("UsageDashboard", () => {
   });
 
   it("disables CSV button when no trend data", async () => {
-    const api = makeApi({ trend: [], topConversations: [] });
+    const api = usageDashboardApi({ trend: [], topConversations: [] });
     await renderDashboard(api);
     await waitFor(() => {
       expect(screen.getByRole("button", { name: /CSV 내보내기/ })).toBeDisabled();
@@ -140,7 +140,7 @@ describe("UsageDashboard", () => {
   });
 
   it("shows 데이터 없음 for empty vendor table", async () => {
-    const api = makeApi({ perVendor: [] });
+    const api = usageDashboardApi({ perVendor: [] });
     await renderDashboard(api);
     await waitFor(() => {
       expect(screen.getAllByText("데이터 없음").length).toBeGreaterThan(0);

@@ -4,6 +4,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { PluginDeploymentGuard } from "../deployment-guard.js";
 import { mkdtempSync } from "node:fs";
+import { writeTestPluginRegistry } from "./test-helpers.js";
 
 /**
  * Phase 1.5 test gate — PluginDeploymentGuard §7.2-§7.3
@@ -28,16 +29,12 @@ describe("PluginDeploymentGuard", () => {
     await rm(testDir, { recursive: true, force: true });
   });
 
-  async function writeRegistry(entries: Array<{ id: string; manifestPath: string; enabled?: boolean }>) {
-    await writeFile(registryPath, JSON.stringify({ version: 1, plugins: entries }), "utf-8");
-  }
-
   it("rejects user uninstalling a managed plugin (outside installedDir)", async () => {
     const managedRoot = join(testDir, "bundle-root");
     await mkdir(join(managedRoot, "p-managed"), { recursive: true });
     const pluginManifest = join(managedRoot, "p-managed", "plugin.json");
     await writeFile(pluginManifest, "{}", "utf-8");
-    await writeRegistry([{ id: "p-managed", manifestPath: pluginManifest }]);
+    await writeTestPluginRegistry({ registryPath }, [{ id: "p-managed", manifestPath: pluginManifest }]);
 
     const guard = new PluginDeploymentGuard({ registryPath, pluginsRoot: installedDir });
     const result = await guard.canUninstall("p-managed", "user");
@@ -51,7 +48,7 @@ describe("PluginDeploymentGuard", () => {
     await mkdir(userDir, { recursive: true });
     const manifestPath = join(userDir, "plugin.json");
     await writeFile(manifestPath, "{}", "utf-8");
-    await writeRegistry([{ id: "p-user", manifestPath }]);
+    await writeTestPluginRegistry({ registryPath }, [{ id: "p-user", manifestPath }]);
 
     const guard = new PluginDeploymentGuard({ registryPath, pluginsRoot: installedDir });
     const result = await guard.canUninstall("p-user", "user");
@@ -64,7 +61,7 @@ describe("PluginDeploymentGuard", () => {
     await mkdir(join(managedRoot, "p-managed"), { recursive: true });
     const pluginManifest = join(managedRoot, "p-managed", "plugin.json");
     await writeFile(pluginManifest, "{}", "utf-8");
-    await writeRegistry([{ id: "p-managed", manifestPath: pluginManifest }]);
+    await writeTestPluginRegistry({ registryPath }, [{ id: "p-managed", manifestPath: pluginManifest }]);
 
     const guard = new PluginDeploymentGuard({ registryPath, pluginsRoot: installedDir });
     const result = await guard.canUninstall("p-managed", "it-admin");
@@ -73,7 +70,7 @@ describe("PluginDeploymentGuard", () => {
   });
 
   it("rejects unknown pluginId with 'not found' reason", async () => {
-    await writeRegistry([]);
+    await writeTestPluginRegistry({ registryPath }, []);
 
     const guard = new PluginDeploymentGuard({ registryPath, pluginsRoot: installedDir });
     const result = await guard.canUninstall("missing", "user");
@@ -87,7 +84,7 @@ describe("PluginDeploymentGuard", () => {
     await mkdir(spoofDir, { recursive: true });
     const manifestPath = join(spoofDir, "plugin.json");
     await writeFile(manifestPath, "{}", "utf-8");
-    await writeRegistry([{ id: "spoof", manifestPath }]);
+    await writeTestPluginRegistry({ registryPath }, [{ id: "spoof", manifestPath }]);
 
     const guard = new PluginDeploymentGuard({ registryPath, pluginsRoot: installedDir });
     const result = await guard.canUninstall("spoof", "user");
@@ -104,7 +101,7 @@ describe("PluginDeploymentGuard", () => {
     const escapeManifest = join(escapeDir, "plugin.json");
     await writeFile(escapeManifest, "{}", "utf-8");
     // relative manifestPath가 registry dirname 기준으로 resolve되어 installedDir 밖으로 탈출.
-    await writeRegistry([{ id: "escape", manifestPath: "elsewhere/plugin.json" }]);
+    await writeTestPluginRegistry({ registryPath }, [{ id: "escape", manifestPath: "elsewhere/plugin.json" }]);
 
     const guard = new PluginDeploymentGuard({ registryPath, pluginsRoot: installedDir });
     const result = await guard.canUninstall("escape", "user");
@@ -122,7 +119,7 @@ describe("PluginDeploymentGuard", () => {
       JSON.stringify({ id: "p-managed-inside", installPolicy: "admin" }),
       "utf-8",
     );
-    await writeRegistry([{ id: "p-managed-inside", manifestPath }]);
+    await writeTestPluginRegistry({ registryPath }, [{ id: "p-managed-inside", manifestPath }]);
 
     const guard = new PluginDeploymentGuard({ registryPath, pluginsRoot: installedDir });
     const result = await guard.canUninstall("p-managed-inside", "user");
@@ -140,7 +137,7 @@ describe("PluginDeploymentGuard", () => {
       JSON.stringify({ id: "p-user-explicit", installPolicy: "user" }),
       "utf-8",
     );
-    await writeRegistry([{ id: "p-user-explicit", manifestPath }]);
+    await writeTestPluginRegistry({ registryPath }, [{ id: "p-user-explicit", manifestPath }]);
 
     const guard = new PluginDeploymentGuard({ registryPath, pluginsRoot: installedDir });
     const result = await guard.canUninstall("p-user-explicit", "user");
@@ -158,7 +155,7 @@ describe("PluginDeploymentGuard", () => {
       JSON.stringify({ id: "p-legacy", name: "Legacy", version: "0.9.0" }),
       "utf-8",
     );
-    await writeRegistry([{ id: "p-legacy", manifestPath }]);
+    await writeTestPluginRegistry({ registryPath }, [{ id: "p-legacy", manifestPath }]);
 
     const guard = new PluginDeploymentGuard({ registryPath, pluginsRoot: installedDir });
     const result = await guard.canUninstall("p-legacy", "user");
@@ -196,7 +193,7 @@ describe("PluginDeploymentGuard", () => {
     await mkdir(join(managedRoot, "p-managed"), { recursive: true });
     const pluginManifest = join(managedRoot, "p-managed", "plugin.json");
     await writeFile(pluginManifest, "{}", "utf-8");
-    await writeRegistry([{ id: "p-managed", manifestPath: pluginManifest }]);
+    await writeTestPluginRegistry({ registryPath }, [{ id: "p-managed", manifestPath: pluginManifest }]);
 
     const guard = new PluginDeploymentGuard({ registryPath, pluginsRoot: installedDir });
     const uninstall = await guard.canUninstall("p-managed", "user");

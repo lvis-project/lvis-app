@@ -59,7 +59,8 @@ jobs:
       - name: Remove root-level Bun binary shims before Vitest
         working-directory: lvis-app
         run: rm -f ajv pino
-      - run: bun run test
+      - name: Run quality-gated tests
+        run: bun run check:test-quality
         working-directory: lvis-app
 
   windows-permission-tests:

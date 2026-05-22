@@ -11,20 +11,14 @@ import "./setup.js";
 import { describe, it, expect, vi, afterEach } from "vitest";
 import { act, waitFor, fireEvent } from "@testing-library/react";
 import { renderApp } from "./render-app.js";
+import { submitChatMessage } from "./helpers.js";
 
-async function submit(container: HTMLElement, text: string): Promise<void> {
-  const textarea = container.querySelector("textarea") as HTMLTextAreaElement;
-  await act(async () => {
-    fireEvent.change(textarea, { target: { value: text } });
-    fireEvent.keyDown(textarea, { key: "Enter", code: "Enter" });
-  });
-}
 
 describe("Chat stream sequencing (Phase 3.2 regression net)", () => {
   it("text_delta events accumulate into the streaming assistant entry", async () => {
     const { container, api, emitChatStream } = await renderApp();
     await waitFor(() => expect(api.getSettings).toHaveBeenCalled());
-    await submit(container, "ask");
+    await submitChatMessage(container, "ask");
     await waitFor(() => expect(api.chatSend).toHaveBeenCalled());
 
     await act(async () => {
@@ -39,7 +33,7 @@ describe("Chat stream sequencing (Phase 3.2 regression net)", () => {
   it("reasoning_delta events render reasoning content", async () => {
     const { container, api, emitChatStream } = await renderApp();
     await waitFor(() => expect(api.getSettings).toHaveBeenCalled());
-    await submit(container, "think");
+    await submitChatMessage(container, "think");
     await waitFor(() => expect(api.chatSend).toHaveBeenCalled());
 
     await act(async () => {
@@ -53,7 +47,7 @@ describe("Chat stream sequencing (Phase 3.2 regression net)", () => {
   it("tool_start renders a tool group card for the tool call", async () => {
     const { container, api, emitChatStream } = await renderApp();
     await waitFor(() => expect(api.getSettings).toHaveBeenCalled());
-    await submit(container, "use tool");
+    await submitChatMessage(container, "use tool");
     await waitFor(() => expect(api.chatSend).toHaveBeenCalled());
 
     await act(async () => {
@@ -76,7 +70,7 @@ describe("Chat stream sequencing (Phase 3.2 regression net)", () => {
   it("assistant_round + done finalize the streaming entry", async () => {
     const { container, api, emitChatStream } = await renderApp();
     await waitFor(() => expect(api.getSettings).toHaveBeenCalled());
-    await submit(container, "complete");
+    await submitChatMessage(container, "complete");
     await waitFor(() => expect(api.chatSend).toHaveBeenCalled());
 
     await act(async () => {

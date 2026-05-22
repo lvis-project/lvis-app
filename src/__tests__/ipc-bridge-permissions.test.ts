@@ -6,6 +6,7 @@
  */
 import { describe, it, expect, vi, beforeEach } from "vitest";
 import { fakeLlmSettings } from "../shared/__tests__/fake-llm-settings.js";
+import { invokeRegisteredHandler, invokeRegisteredHandlerWithEvent } from "./test-helpers.js";
 
 // ─── Mock electron ────────────────────────────────────
 
@@ -155,16 +156,11 @@ async function setupHandlers(pm = makeMockPM(), gate = makeMockGate()) {
 }
 
 function invoke(channel: string, ...args: unknown[]): unknown {
-  const fn = handlers.get(channel);
-  if (!fn) throw new Error(`No handler registered for: ${channel}`);
-  // ipcMain handlers receive (_event, ...args) — pass null as event
-  return fn(null, ...args);
+  return invokeRegisteredHandler(handlers, channel, ...args);
 }
 
 function invokeWithEvent(channel: string, event: unknown, ...args: unknown[]): unknown {
-  const fn = handlers.get(channel);
-  if (!fn) throw new Error(`No handler registered for: ${channel}`);
-  return fn(event, ...args);
+  return invokeRegisteredHandlerWithEvent(handlers, channel, event, ...args);
 }
 
 const USER_INTENT = { inputOrigin: "user-keyboard", userActivation: true };

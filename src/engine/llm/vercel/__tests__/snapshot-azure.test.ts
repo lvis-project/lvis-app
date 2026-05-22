@@ -5,15 +5,8 @@
  * @ai-sdk/azure so reasoning summaries can stream as reasoning-delta events.
  */
 import { describe, it, expect, vi } from "vitest";
-import type { StreamEvent } from "../../types.js";
+import { collectStreamEvents as collect } from "./test-helpers.js";
 
-async function collect(
-  iter: AsyncIterable<StreamEvent>,
-): Promise<StreamEvent[]> {
-  const out: StreamEvent[] = [];
-  for await (const ev of iter) out.push(ev);
-  return out;
-}
 
 describe("VercelUnifiedProvider azure-foundry", () => {
   it("normalizes Azure endpoints and routes through @ai-sdk/azure Responses API", async () => {
