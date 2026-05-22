@@ -35,10 +35,11 @@ export class NetworkGuardError extends Error {
 export interface NetworkGuardOptions {
   /**
    * Allows RFC1918 IPv4 and IPv6 ULA addresses after an upstream approval
-   * gate has authorized the request. Loopback, link-local, metadata, CGNAT,
-   * and 0.0.0.0/8 remain blocked.
+   * gate has authorized the request. A predicate scopes that approval to
+   * the current redirect hop URL. Loopback, link-local, metadata, CGNAT, and
+   * 0.0.0.0/8 remain blocked.
    */
-  allowPrivateNetworks?: boolean;
+  allowPrivateNetworks?: boolean | ((url: URL) => boolean);
 }
 
 type NetworkGuardFetchInit = RequestInit & NetworkGuardOptions & {
@@ -115,7 +116,11 @@ export async function ensurePublicHttpUrl(
   if (addresses.length === 0) {
     throw new NetworkGuardError(`target host did not resolve: ${parsed.hostname}`);
   }
-  const blocked = addresses.filter((addr) => !isAllowedAddress(addr, options));
+  const allowPrivateNetworks =
+    options.allowPrivateNetworks === true ||
+    (typeof options.allowPrivateNetworks === "function" &&
+      options.allowPrivateNetworks(parsed));
+  const blocked = addresses.filter((addr) => !isAllowedAddress(addr, allowPrivateNetworks));
   if (blocked.length > 0) {
     const rendered =
       blocked.slice(0, 3).join(", ") + (blocked.length > 3 ? ", ..." : "");
@@ -260,9 +265,9 @@ function isPublicAddress(address: string): boolean {
   return false;
 }
 
-function isAllowedAddress(address: string, options: NetworkGuardOptions): boolean {
+function isAllowedAddress(address: string, allowPrivateNetworks: boolean): boolean {
   if (isPublicAddress(address)) return true;
-  if (options.allowPrivateNetworks !== true) return false;
+  if (!allowPrivateNetworks) return false;
   return isPrivateNetworkAddress(address);
 }
 

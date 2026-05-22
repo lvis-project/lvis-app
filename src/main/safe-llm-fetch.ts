@@ -3,10 +3,19 @@ const AZURE_FOUNDRY_HOST_SUFFIXES = [
   ".services.ai.azure.com",
 ] as const;
 
-type ElectronNetFetch = (
+export type ElectronNetFetch = (
   input: string | Request,
   init?: RequestInit & { bypassCustomProtocolHandlers?: boolean },
 ) => Promise<Response>;
+
+type PrivateEndpointFetch = {
+  fetch: ElectronNetFetch;
+  isMappedUrl: (url: URL) => boolean;
+};
+
+export type SafeLlmFetchOptions = {
+  privateEndpoint?: PrivateEndpointFetch;
+};
 
 function requestUrl(input: Parameters<typeof fetch>[0]): URL {
   if (typeof input === "string" || input instanceof URL) {
@@ -39,7 +48,10 @@ export function isAllowedLlmFetchUrl(url: URL): boolean {
  * calls because Chromium owns the host-resolver rules. Keep that power scoped
  * to the only current LLM path that needs it.
  */
-export function createSafeLlmFetch(netFetch: ElectronNetFetch): typeof fetch {
+export function createSafeLlmFetch(
+  netFetch: ElectronNetFetch,
+  options: SafeLlmFetchOptions = {},
+): typeof fetch {
   return (async (input: Parameters<typeof fetch>[0], init?: RequestInit) => {
     const url = requestUrl(input);
     if (!isAllowedLlmFetchUrl(url)) {
@@ -49,8 +61,12 @@ export function createSafeLlmFetch(netFetch: ElectronNetFetch): typeof fetch {
     }
 
     const normalizedInput = input instanceof URL ? input.toString() : input;
-    return netFetch(normalizedInput as string | Request, {
+    const privateEndpoint = options.privateEndpoint;
+    const usePrivateEndpoint = privateEndpoint?.isMappedUrl(url) === true;
+    const fetchImpl = usePrivateEndpoint ? privateEndpoint.fetch : netFetch;
+    return fetchImpl(normalizedInput as string | Request, {
       ...(init ?? {}),
+      redirect: "error",
       bypassCustomProtocolHandlers: true,
     });
   }) as typeof fetch;

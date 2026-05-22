@@ -121,6 +121,7 @@ describe("web_fetch SSRF guard", () => {
   it("treats demo host-resolver mapped hosts as private-network approvals", async () => {
     const tool = makeWebFetchTool({
       demoActiveVendor: "azure-foundry",
+      demoHostMapApplied: true,
       demoHostMap: "example.test.openai.azure.com=10.182.192.10",
     });
     const input = { url: "https://example.test.openai.azure.com/openai/v1/" };
@@ -131,13 +132,18 @@ describe("web_fetch SSRF guard", () => {
     );
   });
 
-  it("allows mapped private addresses only through the private-network path", async () => {
+  it("allows mapped private addresses only through the direct private-network fetch path", async () => {
     const networkFetch = vi.fn(async () =>
+      new Response("<html><body>system proxy path</body></html>", { status: 200 }),
+    );
+    const privateNetworkFetch = vi.fn(async () =>
       new Response("<html><body>mapped private address</body></html>", { status: 200 }),
     );
     const tool = makeWebFetchTool({
       networkFetch: networkFetch as typeof fetch,
+      privateNetworkFetch: privateNetworkFetch as typeof fetch,
       demoActiveVendor: "azure-foundry",
+      demoHostMapApplied: true,
       demoHostMap: "10.185.177.209=10.182.192.10",
     });
 
@@ -147,7 +153,117 @@ describe("web_fetch SSRF guard", () => {
     );
 
     expect(result.isError).toBe(false);
-    expect(networkFetch).toHaveBeenCalledOnce();
+    expect(privateNetworkFetch).toHaveBeenCalledOnce();
+    expect(networkFetch).not.toHaveBeenCalled();
     expect(result.output).toContain("mapped private address");
+  });
+
+  it("re-evaluates demo host mapping on every redirect hop before using direct fetch", async () => {
+    const networkFetch = vi.fn(async () =>
+      new Response("<html><body>public redirect target</body></html>", { status: 200 }),
+    );
+    const privateNetworkFetch = vi.fn(async () =>
+      new Response("", {
+        status: 302,
+        headers: { location: "http://93.184.216.34/final" },
+      }),
+    );
+    const tool = makeWebFetchTool({
+      networkFetch: networkFetch as typeof fetch,
+      privateNetworkFetch: privateNetworkFetch as typeof fetch,
+      demoActiveVendor: "azure-foundry",
+      demoHostMapApplied: true,
+      demoHostMap: "10.185.177.209=10.182.192.10",
+    });
+
+    const result = await tool.execute(
+      { url: "http://10.185.177.209/page" },
+      {} as never,
+    );
+
+    expect(result.isError).toBe(false);
+    expect(privateNetworkFetch).toHaveBeenCalledOnce();
+    expect(networkFetch).toHaveBeenCalledOnce();
+    expect(networkFetch).toHaveBeenCalledWith(
+      "http://93.184.216.34/final",
+      expect.objectContaining({ redirect: "manual" }),
+    );
+    expect(result.output).toContain("public redirect target");
+  });
+
+  it("blocks mapped demo redirects to unmapped private hosts without broadening approval", async () => {
+    const networkFetch = vi.fn(async () =>
+      new Response("<html><body>unmapped private target</body></html>", { status: 200 }),
+    );
+    const privateNetworkFetch = vi.fn(async () =>
+      new Response("", {
+        status: 302,
+        headers: { location: "http://10.0.0.2/final" },
+      }),
+    );
+    const tool = makeWebFetchTool({
+      networkFetch: networkFetch as typeof fetch,
+      privateNetworkFetch: privateNetworkFetch as typeof fetch,
+      demoActiveVendor: "azure-foundry",
+      demoHostMapApplied: true,
+      demoHostMap: "10.185.177.209=10.182.192.10",
+    });
+
+    const result = await tool.execute(
+      { url: "http://10.185.177.209/page" },
+      {} as never,
+    );
+
+    expect(result.isError).toBe(true);
+    expect(privateNetworkFetch).toHaveBeenCalledOnce();
+    expect(networkFetch).not.toHaveBeenCalled();
+    expect(result.output).toContain("non-public address");
+  });
+
+  it("fails mapped demo fetches when the direct private-network fetch is not wired", async () => {
+    const networkFetch = vi.fn(async () =>
+      new Response("<html><body>system proxy path</body></html>", { status: 200 }),
+    );
+    const tool = makeWebFetchTool({
+      networkFetch: networkFetch as typeof fetch,
+      demoActiveVendor: "azure-foundry",
+      demoHostMapApplied: true,
+      demoHostMap: "10.185.177.209=10.182.192.10",
+    });
+
+    const result = await tool.execute(
+      { url: "http://10.185.177.209/page" },
+      {} as never,
+    );
+
+    expect(result.isError).toBe(true);
+    expect(networkFetch).not.toHaveBeenCalled();
+    expect(result.output).toContain("private endpoint fetch is not configured");
+  });
+
+  it("does not treat raw demo host-map entries as private when resolver rules were not applied", async () => {
+    const networkFetch = vi.fn(async () =>
+      new Response("<html><body>normal network path</body></html>", { status: 200 }),
+    );
+    const privateNetworkFetch = vi.fn(async () =>
+      new Response("<html><body>direct private path</body></html>", { status: 200 }),
+    );
+    const tool = makeWebFetchTool({
+      networkFetch: networkFetch as typeof fetch,
+      privateNetworkFetch: privateNetworkFetch as typeof fetch,
+      demoActiveVendor: "azure-foundry",
+      demoHostMapApplied: false,
+      demoHostMap: "93.184.216.34=10.182.192.10",
+    });
+    const input = { url: "http://93.184.216.34/page" };
+
+    expect(tool.categoryForInput?.(input)).toBe("read");
+    expect(tool.approvalCacheKey?.(input)).toBeUndefined();
+    const result = await tool.execute(input, {} as never);
+
+    expect(result.isError).toBe(false);
+    expect(networkFetch).toHaveBeenCalledOnce();
+    expect(privateNetworkFetch).not.toHaveBeenCalled();
+    expect(result.output).toContain("normal network path");
   });
 });
