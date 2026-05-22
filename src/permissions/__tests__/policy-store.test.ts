@@ -3,6 +3,7 @@
  */
 import { describe, it, expect, vi, beforeEach } from "vitest";
 import { loadPolicy, savePolicy, getAdminPolicyPath } from "../policy-store.js";
+import { makeTestPolicy } from "./test-helpers.js";
 
 // ─── Mock fs/promises ─────────────────────────────────
 // Intercept readFile / mkdir / open so tests stay in-memory.
@@ -42,21 +43,6 @@ function writeFile(path: string, obj: object): void {
   files[path] = JSON.stringify(obj, null, 2) + "\n";
 }
 
-function makePolicyObj(overrides: Partial<{
-  version: number;
-  requireExplicitApproval: boolean;
-  managed: boolean;
-  updatedAt: string;
-}> = {}): object {
-  return {
-    version: 1,
-    requireExplicitApproval: true,
-    managed: false,
-    updatedAt: new Date().toISOString(),
-    ...overrides,
-  };
-}
-
 // ─── Tests ───────────────────────────────────────────
 
 describe("policy-store", () => {
@@ -91,7 +77,7 @@ describe("policy-store", () => {
   });
 
   it("managed: true 박혀있을 때 savePolicy가 throw", async () => {
-    writeFile(USER_PATH, makePolicyObj({ managed: true }));
+    writeFile(USER_PATH, makeTestPolicy({ managed: true }));
 
     await expect(
       savePolicy({ requireExplicitApproval: false }, USER_PATH, ADMIN_PATH),
@@ -125,7 +111,7 @@ describe("policy-store", () => {
   // ══════════════════════════════════════════════════
 
   it("admin-dir 없음 → user만 사용, source: 'user'", async () => {
-    writeFile(USER_PATH, makePolicyObj({ requireExplicitApproval: false }));
+    writeFile(USER_PATH, makeTestPolicy({ requireExplicitApproval: false }));
 
     const result = await loadPolicy(USER_PATH, ADMIN_PATH);
     expect(result.source).toBe("user");
@@ -134,8 +120,8 @@ describe("policy-store", () => {
   });
 
   it("admin-dir 존재 + user 존재 → merged, admin 값 우선", async () => {
-    writeFile(USER_PATH,  makePolicyObj({ requireExplicitApproval: false, managed: false }));
-    writeFile(ADMIN_PATH, makePolicyObj({ requireExplicitApproval: true,  managed: true  }));
+    writeFile(USER_PATH,  makeTestPolicy({ requireExplicitApproval: false, managed: false }));
+    writeFile(ADMIN_PATH, makeTestPolicy({ requireExplicitApproval: true,  managed: true  }));
 
     const result = await loadPolicy(USER_PATH, ADMIN_PATH);
     expect(result.source).toBe("merged");
@@ -147,8 +133,8 @@ describe("policy-store", () => {
   });
 
   it("admin managed:true + user managed:false → 최종 managed:true", async () => {
-    writeFile(USER_PATH,  makePolicyObj({ managed: false }));
-    writeFile(ADMIN_PATH, makePolicyObj({ managed: true  }));
+    writeFile(USER_PATH,  makeTestPolicy({ managed: false }));
+    writeFile(ADMIN_PATH, makeTestPolicy({ managed: true  }));
 
     const result = await loadPolicy(USER_PATH, ADMIN_PATH);
     expect(result.managed).toBe(true);
@@ -156,7 +142,7 @@ describe("policy-store", () => {
   });
 
   it("admin-dir만 존재(user 없음) → source: 'admin'", async () => {
-    writeFile(ADMIN_PATH, makePolicyObj({ requireExplicitApproval: false, managed: true }));
+    writeFile(ADMIN_PATH, makeTestPolicy({ requireExplicitApproval: false, managed: true }));
 
     const result = await loadPolicy(USER_PATH, ADMIN_PATH);
     expect(result.source).toBe("admin");
@@ -166,7 +152,7 @@ describe("policy-store", () => {
   });
 
   it("admin-dir 존재 시 savePolicy throw (admin-dir file exists)", async () => {
-    writeFile(ADMIN_PATH, makePolicyObj({ managed: true }));
+    writeFile(ADMIN_PATH, makeTestPolicy({ managed: true }));
 
     await expect(
       savePolicy({ requireExplicitApproval: false }, USER_PATH, ADMIN_PATH),
@@ -174,7 +160,7 @@ describe("policy-store", () => {
   });
 
   it("admin-dir path가 invalid JSON일 때 user로 fallback", async () => {
-    writeFile(USER_PATH,  makePolicyObj({ requireExplicitApproval: false }));
+    writeFile(USER_PATH,  makeTestPolicy({ requireExplicitApproval: false }));
     // 잘못된 JSON
     files[ADMIN_PATH] = "not-valid-json";
 
@@ -185,7 +171,7 @@ describe("policy-store", () => {
   });
 
   it("admin-dir version 불일치 시 admin 무시, user로 fallback", async () => {
-    writeFile(USER_PATH,  makePolicyObj({ requireExplicitApproval: false }));
+    writeFile(USER_PATH,  makeTestPolicy({ requireExplicitApproval: false }));
     writeFile(ADMIN_PATH, JSON.stringify({ version: 2, requireExplicitApproval: true, managed: true, updatedAt: new Date().toISOString() }, null, 2) + "\n");
 
     const result = await loadPolicy(USER_PATH, ADMIN_PATH);

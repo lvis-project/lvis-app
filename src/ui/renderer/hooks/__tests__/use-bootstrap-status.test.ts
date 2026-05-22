@@ -10,36 +10,28 @@ import { describe, it, expect, vi } from "vitest";
 import { act, renderHook } from "@testing-library/react";
 import { useBootstrapStatus } from "../use-bootstrap-status.js";
 import type { LvisApi } from "../../types.js";
+import { makeMockLvisApi } from "../../../../../test/renderer/mock-lvis-api.js";
 
-function makeApi() {
-  let cb: ((status: Parameters<LvisApi["onBootstrapStatus"]>[0] extends (s: infer S) => void ? S : never) => void) | null = null;
-  const retryBootstrap = vi.fn().mockResolvedValue({ ok: true });
-  const api = {
-    onBootstrapStatus: vi.fn((handler: typeof cb) => {
-      cb = handler;
-      return () => {
-        cb = null;
-      };
-    }),
-    retryBootstrap,
-  } as unknown as LvisApi;
+function bootstrapStatusApi() {
+  const { api, emitBootstrapStatus } = makeMockLvisApi();
   return {
-    api,
-    retryBootstrap,
-    emit: (s: Parameters<NonNullable<typeof cb>>[0]) => cb?.(s),
+    api: api as unknown as LvisApi,
+    retryBootstrap: api.retryBootstrap as ReturnType<typeof vi.fn>,
+    emit: (s: Parameters<LvisApi["onBootstrapStatus"]>[0] extends (status: infer S) => void ? S : never) =>
+      emitBootstrapStatus(s),
   };
 }
 
 describe("useBootstrapStatus", () => {
   it("starts with no status and installing=false", () => {
-    const { api } = makeApi();
+    const { api } = bootstrapStatusApi();
     const { result } = renderHook(() => useBootstrapStatus(api));
     expect(result.current.status).toBeNull();
     expect(result.current.installing).toBe(false);
   });
 
   it("`start` event flips installing true and exposes the event", () => {
-    const { api, emit } = makeApi();
+    const { api, emit } = bootstrapStatusApi();
     const { result } = renderHook(() => useBootstrapStatus(api));
     act(() => emit({ phase: "start" }));
     expect(result.current.status).toEqual({ phase: "start" });
@@ -47,7 +39,7 @@ describe("useBootstrapStatus", () => {
   });
 
   it("`complete` event resets installing and surfaces failed list", () => {
-    const { api, emit } = makeApi();
+    const { api, emit } = bootstrapStatusApi();
     const { result } = renderHook(() => useBootstrapStatus(api));
     act(() => emit({ phase: "start" }));
     act(() =>
@@ -66,7 +58,7 @@ describe("useBootstrapStatus", () => {
   });
 
   it("`error` event resets installing and exposes the host message", () => {
-    const { api, emit } = makeApi();
+    const { api, emit } = bootstrapStatusApi();
     const { result } = renderHook(() => useBootstrapStatus(api));
     act(() => emit({ phase: "error", message: "catalog fetch failed" }));
     expect(result.current.installing).toBe(false);
@@ -74,7 +66,7 @@ describe("useBootstrapStatus", () => {
   });
 
   it("dismiss clears status without re-subscribing", () => {
-    const { api, emit } = makeApi();
+    const { api, emit } = bootstrapStatusApi();
     const { result } = renderHook(() => useBootstrapStatus(api));
     act(() => emit({ phase: "error", message: "x" }));
     expect(result.current.status).not.toBeNull();
@@ -83,7 +75,7 @@ describe("useBootstrapStatus", () => {
   });
 
   it("retry calls api.retryBootstrap and lets host status events drive updates", async () => {
-    const { api, retryBootstrap, emit } = makeApi();
+    const { api, retryBootstrap, emit } = bootstrapStatusApi();
     const { result } = renderHook(() => useBootstrapStatus(api));
     act(() => emit({ phase: "error", message: "catalog down" }));
     expect(result.current.status).toMatchObject({ phase: "error" });
@@ -102,7 +94,7 @@ describe("useBootstrapStatus", () => {
   });
 
   it("retry swallows api errors so the banner never throws", async () => {
-    const { api, retryBootstrap } = makeApi();
+    const { api, retryBootstrap } = bootstrapStatusApi();
     retryBootstrap.mockRejectedValueOnce(new Error("ipc closed"));
     const { result } = renderHook(() => useBootstrapStatus(api));
     await act(async () => {

@@ -12,16 +12,10 @@
  *   - OpenAI gpt-5.x → /v1/responses routing (Responses API).
  */
 import { describe, it, expect, vi } from "vitest";
+import { collectStreamEvents as collect } from "./test-helpers.js";
 import type { StreamEvent } from "../../types.js";
 import { mapReasoningEffort, isOpenAIReasoningModel } from "../adapter.js";
 
-async function collect(
-  iter: AsyncIterable<StreamEvent>,
-): Promise<StreamEvent[]> {
-  const out: StreamEvent[] = [];
-  for await (const ev of iter) out.push(ev);
-  return out;
-}
 
 describe("VercelUnifiedProvider openai — reasoning_effort mapping", () => {
   it("maps 4 budget bands: none / low / medium / high", () => {

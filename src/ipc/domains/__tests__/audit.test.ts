@@ -23,6 +23,7 @@
  * before registering handlers.
  */
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
+import { invokeFileIpcHandler } from "./test-helpers.js";
 
 const handlers = new Map<string, (...args: unknown[]) => unknown>();
 
@@ -35,18 +36,7 @@ vi.mock("electron", () => ({
 }));
 
 function invoke(channel: string, ...args: unknown[]): Promise<unknown> {
-  const fn = handlers.get(channel);
-  if (!fn) throw new Error(`No handler registered for: ${channel}`);
-  return Promise.resolve(
-    fn(
-      {
-        frameId: 0,
-        processId: 0,
-        senderFrame: { url: "file:///app/index.html" },
-      } as never,
-      ...args,
-    ),
-  );
+  return invokeFileIpcHandler(handlers, channel, ...args);
 }
 
 interface AuditLoggerSpy {

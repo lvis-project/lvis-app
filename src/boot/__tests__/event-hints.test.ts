@@ -9,12 +9,17 @@
  *  5. Multiple plugins → hints from all are merged
  */
 import { describe, expect, it, beforeEach, afterEach } from "vitest";
-import { mkdir, rm, writeFile } from "node:fs/promises";
+import { mkdir, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
-import { join } from "node:path";
-import { PluginRuntime } from "../../plugins/runtime.js";
+import { dirname, join } from "node:path";
 import { buildManifestEventHints } from "../plugins.js";
 import { mkdtempSync } from "node:fs";
+import {
+  makeTestPluginEntrySource,
+  makeTestPluginRuntime,
+  writeTestPlugin,
+  writeTestPluginRegistry,
+} from "../../plugins/__tests__/test-helpers.js";
 
 async function writePlugin(
   installedDir: string,
@@ -22,36 +27,18 @@ async function writePlugin(
   id: string,
   eventSubscriptions: unknown[],
 ): Promise<void> {
-  const pluginDir = join(installedDir, id);
-  await mkdir(pluginDir, { recursive: true });
   const toolName = `${id.replace(/-/g, "_")}_ping`;
-  await writeFile(
-    join(pluginDir, "entry.mjs"),
-    `export default async function createPlugin(ctx) {
-  return { handlers: { ${toolName}: async () => "pong" }, start: async () => {}, stop: async () => {} };
-}`,
-    "utf-8",
-  );
-  const manifest = {
-    id,
-    name: id,
-    version: "1.0.0",
-    description: "Test fixture.",
-    publisher: "Test fixture",
-    entry: "entry.mjs",
-    tools: [toolName],
-    eventSubscriptions,
-  };
-  await writeFile(join(pluginDir, "plugin.json"), JSON.stringify(manifest), "utf-8");
-  // Append plugin to registry (overwrite with single entry for simplicity; tests use one plugin at a time)
-  await writeFile(
+  const { manifestPath } = await writeTestPlugin({
+    rootDir: dirname(dirname(installedDir)),
+    pluginsRoot: installedDir,
     registryPath,
-    JSON.stringify({
-      version: 1,
-      plugins: [{ id, manifestPath: join(pluginDir, "plugin.json") }],
-    }),
-    "utf-8",
-  );
+  }, {
+    id,
+    tools: [toolName],
+    entrySource: makeTestPluginEntrySource({ [toolName]: JSON.stringify("pong") }),
+    manifest: { eventSubscriptions },
+  });
+  await writeTestPluginRegistry({ registryPath }, [{ id, manifestPath }]);
 }
 
 describe("buildManifestEventHints", () => {
@@ -72,7 +59,7 @@ describe("buildManifestEventHints", () => {
 
   it("string form → neutral fallback hint", async () => {
     await writePlugin(installedDir, registryPath, "p-str", ["meeting.ended"]);
-    const runtime = new PluginRuntime({ hostRoot: testDir, registryPath, pluginsRoot: installedDir });
+    const runtime = makeTestPluginRuntime({ rootDir: testDir, registryPath, pluginsRoot: installedDir });
     await runtime.load();
 
     const hints = buildManifestEventHints(runtime);
@@ -87,7 +74,7 @@ describe("buildManifestEventHints", () => {
     await writePlugin(installedDir, registryPath, "p-obj", [
       { type: "meeting.summary.created", hint: { category: "meeting", priority: "medium", title: "회의 요약" } },
     ]);
-    const runtime = new PluginRuntime({ hostRoot: testDir, registryPath, pluginsRoot: installedDir });
+    const runtime = makeTestPluginRuntime({ rootDir: testDir, registryPath, pluginsRoot: installedDir });
     await runtime.load();
 
     const hints = buildManifestEventHints(runtime);
@@ -102,7 +89,7 @@ describe("buildManifestEventHints", () => {
     await writePlugin(installedDir, registryPath, "p-nohint", [
       { type: "email.analyzed" },
     ]);
-    const runtime = new PluginRuntime({ hostRoot: testDir, registryPath, pluginsRoot: installedDir });
+    const runtime = makeTestPluginRuntime({ rootDir: testDir, registryPath, pluginsRoot: installedDir });
     await runtime.load();
 
     const hints = buildManifestEventHints(runtime);
@@ -118,7 +105,7 @@ describe("buildManifestEventHints", () => {
       "email.analyzed",
       { type: "meeting.ended", hint: { category: "meeting", priority: "high", title: "회의 종료" } },
     ]);
-    const runtime = new PluginRuntime({ hostRoot: testDir, registryPath, pluginsRoot: installedDir });
+    const runtime = makeTestPluginRuntime({ rootDir: testDir, registryPath, pluginsRoot: installedDir });
     await runtime.load();
 
     const hints = buildManifestEventHints(runtime);

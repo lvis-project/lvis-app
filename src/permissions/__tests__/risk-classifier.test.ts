@@ -18,28 +18,11 @@ import {
   dlpRedactInputForPrompt,
   maxVerdict,
   type LlmReviewerProvider,
-  type ToolInvocationContext,
   type RiskVerdict,
 } from "../reviewer/risk-classifier.js";
 import { PERMISSION_REVIEWER_FRAMEWORK } from "../../shared/permission-reviewer-framework.js";
-import { detectSandboxCapability } from "../sandbox-capability.js";
+import { makeRiskClassifierContext as ctx } from "./test-helpers.js";
 
-const ALLOWED = ["/Users/ken/work", "/Users/ken/.lvis"];
-
-function ctx(overrides: Partial<ToolInvocationContext>): ToolInvocationContext {
-  return {
-    toolName: "test_tool",
-    source: "builtin",
-    category: "write",
-    pathFields: ["path"],
-    trustOrigin: "user-keyboard",
-    finalInput: {},
-    allowedDirectories: ALLOWED,
-    sensitivePathsAdjacent: [],
-    sandboxCapability: detectSandboxCapability(),
-    ...overrides,
-  };
-}
 
 describe("DisabledRiskClassifier", () => {
   // Issue #664: post-fix `disabled` is pass-through-LOW (not defer-all-HIGH).

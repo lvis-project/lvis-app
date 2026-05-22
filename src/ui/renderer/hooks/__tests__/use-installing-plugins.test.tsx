@@ -12,12 +12,7 @@ import { describe, it, expect, vi } from "vitest";
 import { act, renderHook } from "@testing-library/react";
 import { useInstallingPlugins } from "../use-installing-plugins.js";
 import type { LvisApi } from "../../types.js";
-
-// ── Helpers ───────────────────────────────────────────────────────────────────
-
-function noop() {
-  return () => {};
-}
+import { makeMockLvisApi } from "../../../../../test/renderer/mock-lvis-api.js";
 
 type ProgressPayload =
   | { slug: string; phase: "installing" | "restarting" | "verifying" | "registering" | "preparing" }
@@ -30,35 +25,22 @@ interface FakeHandlers {
   result: (payload: ResultPayload) => void;
 }
 
-function makeApi(handlers: Partial<FakeHandlers> = {}): { api: LvisApi; emit: FakeHandlers } {
-  let capturedProgress: ((p: ProgressPayload) => void) | null = null;
-  let capturedResult: ((p: ResultPayload) => void) | null = null;
-
-  const api = {
-    onPluginInstallProgress: vi.fn((h: (p: ProgressPayload) => void) => {
-      capturedProgress = h;
-      return noop();
-    }),
-    onPluginInstallResult: vi.fn((h: (p: ResultPayload) => void) => {
-      capturedResult = h;
-      return noop();
-    }),
-    ...handlers,
-  } as unknown as LvisApi;
-
-  const emit: FakeHandlers = {
-    progress: (p) => capturedProgress?.(p),
-    result: (p) => capturedResult?.(p),
+function installingPluginsApi(): { api: LvisApi; emit: FakeHandlers } {
+  const { api, emitPluginInstallProgress, emitPluginInstallResult } = makeMockLvisApi();
+  return {
+    api: api as unknown as LvisApi,
+    emit: {
+      progress: (payload) => emitPluginInstallProgress(payload),
+      result: (payload) => emitPluginInstallResult(payload),
+    },
   };
-
-  return { api, emit };
 }
 
 // ── Tests ─────────────────────────────────────────────────────────────────────
 
 describe("useInstallingPlugins — initial state", () => {
   it("returns an empty Map on mount", () => {
-    const { api } = makeApi();
+    const { api } = installingPluginsApi();
     const { result } = renderHook(() => useInstallingPlugins(api));
     expect(result.current.size).toBe(0);
     expect(result.current.get("anything")).toBeUndefined();
@@ -67,7 +49,7 @@ describe("useInstallingPlugins — initial state", () => {
 
 describe("useInstallingPlugins — phase tracking", () => {
   it("stores the latest phase per slug", () => {
-    const { api, emit } = makeApi();
+    const { api, emit } = installingPluginsApi();
     const { result } = renderHook(() => useInstallingPlugins(api));
 
     act(() => emit.progress({ slug: "agent-hub", phase: "downloading", bytesDownloaded: 0, bytesTotal: null }));
@@ -89,7 +71,7 @@ describe("useInstallingPlugins — phase tracking", () => {
   });
 
   it("preserves identity when the same phase is re-emitted", () => {
-    const { api, emit } = makeApi();
+    const { api, emit } = installingPluginsApi();
     const { result } = renderHook(() => useInstallingPlugins(api));
 
     act(() => emit.progress({ slug: "agent-hub", phase: "installing" }));
@@ -102,7 +84,7 @@ describe("useInstallingPlugins — phase tracking", () => {
 
 describe("useInstallingPlugins — install-progress adds pluginId", () => {
   it("adds the slug when an install-progress event fires", () => {
-    const { api, emit } = makeApi();
+    const { api, emit } = installingPluginsApi();
     const { result } = renderHook(() => useInstallingPlugins(api));
 
     act(() => {
@@ -116,7 +98,7 @@ describe("useInstallingPlugins — install-progress adds pluginId", () => {
 
 describe("useInstallingPlugins — install-result removes pluginId", () => {
   it("removes the slug when an install-result event fires (success)", () => {
-    const { api, emit } = makeApi();
+    const { api, emit } = installingPluginsApi();
     const { result } = renderHook(() => useInstallingPlugins(api));
 
     act(() => {
@@ -132,7 +114,7 @@ describe("useInstallingPlugins — install-result removes pluginId", () => {
   });
 
   it("removes the slug when an install-result event fires (failure)", () => {
-    const { api, emit } = makeApi();
+    const { api, emit } = installingPluginsApi();
     const { result } = renderHook(() => useInstallingPlugins(api));
 
     act(() => {
@@ -148,7 +130,7 @@ describe("useInstallingPlugins — install-result removes pluginId", () => {
 
 describe("useInstallingPlugins — duplicate add", () => {
   it("holds only one entry when the same pluginId is added twice", () => {
-    const { api, emit } = makeApi();
+    const { api, emit } = installingPluginsApi();
     const { result } = renderHook(() => useInstallingPlugins(api));
 
     act(() => {
@@ -165,7 +147,7 @@ describe("useInstallingPlugins — duplicate add", () => {
 
 describe("useInstallingPlugins — simultaneous installs", () => {
   it("holds all slugs when multiple plugins are installing concurrently", () => {
-    const { api, emit } = makeApi();
+    const { api, emit } = installingPluginsApi();
     const { result } = renderHook(() => useInstallingPlugins(api));
 
     act(() => {
@@ -181,7 +163,7 @@ describe("useInstallingPlugins — simultaneous installs", () => {
   });
 
   it("removes only the completed slug when one of multiple concurrent installs finishes", () => {
-    const { api, emit } = makeApi();
+    const { api, emit } = installingPluginsApi();
     const { result } = renderHook(() => useInstallingPlugins(api));
 
     act(() => {

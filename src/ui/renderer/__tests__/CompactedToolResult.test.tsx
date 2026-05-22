@@ -10,16 +10,16 @@ import "../../../../test/renderer/setup.js";
 import { describe, it, expect, vi, afterEach } from "vitest";
 import { render, fireEvent, act, waitFor } from "@testing-library/react";
 import { CompactedToolResult } from "../components/CompactedToolResult.js";
+import { makeMockLvisApi } from "../../../../test/renderer/mock-lvis-api.js";
 
 const STUB = "[tool_result stripped: tool=Read, origLen=1234]";
 const SESSION_ID = "session-test-1";
 const TOOL_USE_ID = "tu-test-1";
 
-/** Build a minimal window.lvisApi stub with a controllable chatGetVerbatimToolResult. */
-function makeApi(impl: () => Promise<{ content: string; lineCount: number } | null>) {
-  return {
-    chatGetVerbatimToolResult: vi.fn(impl),
-  };
+function compactedToolResultApi(impl: () => Promise<{ content: string; lineCount: number } | null>) {
+  const { api } = makeMockLvisApi();
+  api.chatGetVerbatimToolResult = vi.fn(impl);
+  return api;
 }
 
 describe("CompactedToolResult", () => {
@@ -28,7 +28,7 @@ describe("CompactedToolResult", () => {
   });
 
   it("renders in collapsed state by default with char count hint from stub", () => {
-    vi.stubGlobal("lvisApi", makeApi(() => Promise.resolve(null)));
+  vi.stubGlobal("lvisApi", compactedToolResultApi(() => Promise.resolve(null)));
     const { container } = render(
       <CompactedToolResult
         toolUseId={TOOL_USE_ID}
@@ -49,7 +49,7 @@ describe("CompactedToolResult", () => {
     const content = "line one\nline two\nline three";
     vi.stubGlobal(
       "lvisApi",
-      makeApi(() => Promise.resolve({ content, lineCount: 3 })),
+      compactedToolResultApi(() => Promise.resolve({ content, lineCount: 3 })),
     );
     const { container } = render(
       <CompactedToolResult
@@ -86,7 +86,7 @@ describe("CompactedToolResult", () => {
     });
     vi.stubGlobal(
       "lvisApi",
-      makeApi(() => Promise.resolve({ content, lineCount: 1 })),
+      compactedToolResultApi(() => Promise.resolve({ content, lineCount: 1 })),
     );
     const { container } = render(
       <CompactedToolResult
@@ -113,7 +113,7 @@ describe("CompactedToolResult", () => {
     const content = "alpha\nbeta\ngamma";
     vi.stubGlobal(
       "lvisApi",
-      makeApi(() => Promise.resolve({ content, lineCount: 3 })),
+      compactedToolResultApi(() => Promise.resolve({ content, lineCount: 3 })),
     );
     const { container } = render(
       <CompactedToolResult
@@ -136,7 +136,7 @@ describe("CompactedToolResult", () => {
   it("transitions collapsed → loading → missing on IPC returning null", async () => {
     vi.stubGlobal(
       "lvisApi",
-      makeApi(() => Promise.resolve(null)),
+      compactedToolResultApi(() => Promise.resolve(null)),
     );
     const { container } = render(
       <CompactedToolResult
@@ -158,7 +158,7 @@ describe("CompactedToolResult", () => {
   it("transitions collapsed → loading → missing on IPC throw (Major #1 fix)", async () => {
     vi.stubGlobal(
       "lvisApi",
-      makeApi(() => Promise.reject(new Error("IPC channel closed"))),
+      compactedToolResultApi(() => Promise.reject(new Error("IPC channel closed"))),
     );
     const { container } = render(
       <CompactedToolResult
@@ -182,7 +182,7 @@ describe("CompactedToolResult", () => {
     const content = "single line";
     vi.stubGlobal(
       "lvisApi",
-      makeApi(() => Promise.resolve({ content, lineCount: 1 })),
+      compactedToolResultApi(() => Promise.resolve({ content, lineCount: 1 })),
     );
     const { container } = render(
       <CompactedToolResult
@@ -211,7 +211,7 @@ describe("CompactedToolResult", () => {
     const content = "a\nb";
     vi.stubGlobal(
       "lvisApi",
-      makeApi(() => Promise.resolve({ content, lineCount: 2 })),
+      compactedToolResultApi(() => Promise.resolve({ content, lineCount: 2 })),
     );
     const { container } = render(
       <CompactedToolResult

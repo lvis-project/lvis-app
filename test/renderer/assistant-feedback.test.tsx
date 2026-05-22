@@ -6,14 +6,8 @@ import "./setup.js";
 import { describe, it, expect, vi, afterEach } from "vitest";
 import { act, fireEvent, waitFor } from "@testing-library/react";
 import { renderApp } from "./render-app.js";
+import { submitChatMessage } from "./helpers.js";
 
-async function sendMessage(container: HTMLElement, text: string): Promise<void> {
-  const textarea = container.querySelector("textarea") as HTMLTextAreaElement;
-  await act(async () => {
-    fireEvent.change(textarea, { target: { value: text } });
-    fireEvent.keyDown(textarea, { key: "Enter", code: "Enter" });
-  });
-}
 
 describe("D6 AssistantCard feedback buttons", () => {
   afterEach(() => {
@@ -24,7 +18,7 @@ describe("D6 AssistantCard feedback buttons", () => {
     const { container, api, emitChatStream } = await renderApp({ currentSession: "sess-fb" });
     await waitFor(() => expect(api.getSettings).toHaveBeenCalled());
 
-    await sendMessage(container, "hello");
+    await submitChatMessage(container, "hello");
     await waitFor(() => expect(api.chatSend).toHaveBeenCalled());
 
     // Emit an assistant response so AssistantCard renders
@@ -58,7 +52,7 @@ describe("D6 AssistantCard feedback buttons", () => {
     const { container, api, emitChatStream } = await renderApp({ currentSession: "sess-fb2" });
     await waitFor(() => expect(api.getSettings).toHaveBeenCalled());
 
-    await sendMessage(container, "world");
+    await submitChatMessage(container, "world");
     await waitFor(() => expect(api.chatSend).toHaveBeenCalled());
 
     await act(async () => {

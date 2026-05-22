@@ -8,6 +8,13 @@
  */
 import { describe, it, expect, vi, beforeEach } from "vitest";
 import { fakeLlmSettings } from "../shared/__tests__/fake-llm-settings.js";
+import {
+  makeMockApprovalGate,
+  makeMockConversationLoop,
+  makeMockPermissionManager,
+  invokeRegisteredHandler,
+  invokeRegisteredHandlerWithEvent,
+} from "./test-helpers.js";
 
 // ─── Mock electron ────────────────────────────────────────────────────────────
 
@@ -33,40 +40,11 @@ vi.mock("../permissions/policy-store.js", () => ({
 
 // ─── Mock PermissionManager ───────────────────────────────────────────────────
 
-function makeMockPM() {
-  return {
-    getMode: vi.fn(() => "default"),
-    setModePersist: vi.fn(),
-    listPersistedRules: vi.fn(async () => []),
-    addAlwaysAllowedPersist: vi.fn(),
-    addAlwaysDeniedPersist: vi.fn(),
-    removeRule: vi.fn(),
-    getVisibilityDenyRules: vi.fn(() => []),
-  };
-}
-
-function makeMockLoop(pm: ReturnType<typeof makeMockPM>) {
-  return {
-    permissionManager: pm,
-    hasProvider: vi.fn(),
-    runTurn: vi.fn(),
-    newConversation: vi.fn(),
-    getSessionId: vi.fn(() => "s1"),
-    listSessions: vi.fn(() => []),
-    loadSession: vi.fn(),
-    refreshProvider: vi.fn(),
-  };
-}
-
-function makeMockGate() {
-  return { resolve: vi.fn(), setPolicy: vi.fn() };
-}
-
 // ─── Build AppServices stub ───────────────────────────────────────────────────
 
 function makeServices(
-  pm = makeMockPM(),
-  gate = makeMockGate(),
+  pm = makeMockPermissionManager(),
+  gate = makeMockApprovalGate(),
   overrides: {
     toolRegistrySize?: number;
     pluginIds?: string[];
@@ -122,7 +100,7 @@ function makeServices(
       getUserPreferences: vi.fn(),
       updateUserPreferences: vi.fn(),
     } as any,
-    conversationLoop: makeMockLoop(pm) as any,
+    conversationLoop: makeMockConversationLoop(pm) as any,
     approvalGate: gate as any,
     mcpManager: { listServers: vi.fn(() => mcpServers), killSwitch: vi.fn() } as any,
     toolRegistry: { setDenyRules: vi.fn(), size: toolRegistrySize } as any,
@@ -138,8 +116,8 @@ function makeServices(
 // ─── Handler registration helper ─────────────────────────────────────────────
 
 async function setupHandlers(
-  pm = makeMockPM(),
-  gate = makeMockGate(),
+  pm = makeMockPermissionManager(),
+  gate = makeMockApprovalGate(),
   serviceOverrides: Parameters<typeof makeServices>[2] = {},
 ) {
   handlers.clear();
@@ -152,9 +130,7 @@ async function setupHandlers(
 // ─── Invocation helpers ───────────────────────────────────────────────────────
 
 function invoke(channel: string, ...args: unknown[]): unknown {
-  const fn = handlers.get(channel);
-  if (!fn) throw new Error(`No handler registered for: ${channel}`);
-  return fn(null, ...args);
+  return invokeRegisteredHandler(handlers, channel, ...args);
 }
 
 function invokeWithEvent(
@@ -162,9 +138,7 @@ function invokeWithEvent(
   event: unknown,
   ...args: unknown[]
 ): unknown {
-  const fn = handlers.get(channel);
-  if (!fn) throw new Error(`No handler registered for: ${channel}`);
-  return fn(event, ...args);
+  return invokeRegisteredHandlerWithEvent(handlers, channel, event, ...args);
 }
 
 // Convenience: build a fake IpcMainInvokeEvent with an untrusted sender.
@@ -177,7 +151,7 @@ function untrustedEvent() {
 // ─────────────────────────────────────────────────────────────────────────────
 describe("lvis:runtime:counts", () => {
   it("returns { tools, plugins, mcps } with correct numeric values", async () => {
-    await setupHandlers(makeMockPM(), makeMockGate(), {
+    await setupHandlers(makeMockPermissionManager(), makeMockApprovalGate(), {
       toolRegistrySize: 7,
       pluginIds: ["meeting", "email", "calendar"],
       mcpServers: [
@@ -251,7 +225,7 @@ describe("lvis:runtime:env", () => {
 // ─────────────────────────────────────────────────────────────────────────────
 describe("lvis:marketplace:ping", () => {
   it("returns { configured: false, online: false } when backend is not real-cloud", async () => {
-    await setupHandlers(makeMockPM(), makeMockGate(), {
+    await setupHandlers(makeMockPermissionManager(), makeMockApprovalGate(), {
       marketplaceSettings: { backend: "mock" },
     });
 
@@ -265,7 +239,7 @@ describe("lvis:marketplace:ping", () => {
   });
 
   it("returns { configured: false } when backend is real-cloud but no base URL", async () => {
-    await setupHandlers(makeMockPM(), makeMockGate(), {
+    await setupHandlers(makeMockPermissionManager(), makeMockApprovalGate(), {
       marketplaceSettings: {
         backend: "real-cloud",
         realCloudBaseUrl: "",
@@ -299,7 +273,7 @@ describe("lvis:marketplace:ping", () => {
       new Error("ECONNREFUSED"),
     );
 
-    await setupHandlers(makeMockPM(), makeMockGate(), {
+    await setupHandlers(makeMockPermissionManager(), makeMockApprovalGate(), {
       marketplaceSettings: {
         backend: "real-cloud",
         realCloudBaseUrl: "http://127.0.0.1:9999/",
@@ -323,7 +297,7 @@ describe("lvis:marketplace:ping", () => {
       ok: true,
     } as Response);
 
-    await setupHandlers(makeMockPM(), makeMockGate(), {
+    await setupHandlers(makeMockPermissionManager(), makeMockApprovalGate(), {
       marketplaceSettings: {
         backend: "real-cloud",
         realCloudBaseUrl: "http://127.0.0.1:9999/",
@@ -350,7 +324,7 @@ describe("lvis:marketplace:ping", () => {
       }),
     );
 
-    await setupHandlers(makeMockPM(), makeMockGate(), {
+    await setupHandlers(makeMockPermissionManager(), makeMockApprovalGate(), {
       marketplaceSettings: {
         backend: "real-cloud",
         realCloudBaseUrl: "http://127.0.0.1:9999/",
@@ -374,7 +348,7 @@ describe("lvis:marketplace:ping", () => {
       ok: true,
     } as Response);
 
-    await setupHandlers(makeMockPM(), makeMockGate(), {
+    await setupHandlers(makeMockPermissionManager(), makeMockApprovalGate(), {
       marketplaceSettings: {
         backend: "real-cloud",
         realCloudBaseUrl: "http://127.0.0.1:9999/",
