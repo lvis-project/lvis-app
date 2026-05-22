@@ -80,6 +80,9 @@ export function composeOutgoing(params: {
       type: "image",
       image: img.dataUrl,
       mimeType: img.mimeType,
+      width: img.width,
+      height: img.height,
+      bytes: img.bytes,
     }));
 
   return {

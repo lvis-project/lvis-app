@@ -14,6 +14,7 @@ import type {
   UserApprovalVerdict,
 } from "./shared/permissions-events.js";
 import type { SerializedHistoryMessage } from "./shared/chat-history.js";
+import type { StreamEvent } from "./lib/chat-stream-state.js";
 import { OVERLAY_V1, PERMISSIONS, ROUTINES_V2, SETTINGS, UI } from "./shared/ipc-channels.js";
 import { PLUGIN_PRIVATE_NAMESPACES } from "./plugins/capabilities.js";
 import type {
@@ -583,7 +584,6 @@ const api = {
       routineId?: string;
       routineTitle?: string;
       messages: SerializedHistoryMessage[];
-      estimatedInputTokens?: number;
     }>,
   chatMainActiveState: async () =>
     ipcRenderer.invoke("lvis:chat:main-active-state") as Promise<{
@@ -600,7 +600,6 @@ const api = {
       routineTitle?: string;
       routineFiredAt?: string;
       messages: SerializedHistoryMessage[];
-      estimatedInputTokens?: number;
       /** Chars in the rolling summary preamble applied to this session. 0 = no preamble. */
       preambleChars?: number;
     }>,
@@ -645,8 +644,8 @@ const api = {
     ipcRenderer.invoke("lvis:starred:add", entry),
   starredRemove: async (opts: { id?: string; sessionId?: string; messageIndex?: number }) =>
     ipcRenderer.invoke("lvis:starred:remove", opts),
-  onChatStream: (handler: (event: { type: string; text?: string; thought?: string; name?: string; error?: string; systemNotice?: "context-error" | "stream-error"; result?: string; isError?: boolean; input?: Record<string, unknown>; groupId?: string; toolUseId?: string; displayOrder?: number; roundIndex?: number; stopReason?: "end_turn" | "tool_use"; hasToolCalls?: boolean; removedMessages?: number; freedTokens?: number; trigger?: "auto-compact" | "manual"; summary?: string; compactNum?: number; mode?: "default" | "strict" | "auto" | "allow"; phase?: "attempt" | "retry" | "fallback"; label?: string; attempt?: number; maxAttempts?: number; from?: string; to?: string; reason?: string; turnDurationMs?: number; toolCount?: number; cumulativeToolMs?: number; tokensIn?: number; tokensOut?: number; breakdown?: Record<string, { count: number; ms: number }>; triggerSource?: "estimate" | "actual-tokensIn" | "manual"; estimatedBefore?: number; preflight?: number; estimatedAfter?: number; compactStatus?: "summarized" | "content_truncated" | "noop" | "reduced_insufficient_forced"; truncatedDir?: string }) => void) => {
-    const listener = (_event: unknown, payload: Parameters<typeof handler>[0]) => handler(payload);
+  onChatStream: (handler: (event: StreamEvent) => void) => {
+    const listener = (_event: unknown, payload: StreamEvent) => handler(payload);
     ipcRenderer.on("lvis:chat:stream", listener);
     return () => ipcRenderer.removeListener("lvis:chat:stream", listener);
   },

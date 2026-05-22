@@ -7,6 +7,9 @@
 import { describe, it, expect, vi, beforeEach } from "vitest";
 import type { IpcMainInvokeEvent } from "electron";
 import { invokeRegisteredHandlerWithEvent } from "../../__tests__/test-helpers.js";
+import { mkdtempSync, readFileSync } from "node:fs";
+import { join } from "node:path";
+import { tmpdir } from "node:os";
 
 // ─── Mock electron ────────────────────────────────────────────────────────────
 
@@ -119,5 +122,33 @@ describe("lvis:usage:export-csv", () => {
     const result = await invoke("lvis:usage:export-csv", trustedEvent(), []) as { ok: boolean; canceled?: boolean };
     expect(result.ok).toBe(false);
     expect(result.canceled).toBe(true);
+  });
+
+  it("writes unknownCostTurns to successful CSV exports", async () => {
+    const { dialog } = await import("electron");
+    const filePath = join(mkdtempSync(join(tmpdir(), "lvis-usage-csv-")), "usage.csv");
+    vi.mocked(dialog.showSaveDialog).mockResolvedValueOnce({ canceled: false, filePath });
+
+    const result = await invoke("lvis:usage:export-csv", trustedEvent(), [
+      {
+        date: "2026-05-22",
+        vendor: "openai",
+        model: "gpt-4o",
+        inputTokens: 100,
+        outputTokens: 10,
+        cacheReadTokens: 20,
+        cacheWriteTokens: 5,
+        totalTokens: 110,
+        cost: 0,
+        unknownCostTurns: 1,
+      },
+    ]) as { ok: boolean; filePath?: string };
+
+    expect(result).toEqual({ ok: true, filePath });
+    const csv = readFileSync(filePath, "utf-8");
+    expect(csv.split("\n")[0]).toBe("date,vendor,model,inputTokens,outputTokens,cacheReadTokens,cacheWriteTokens,totalTokens,cost,unknownCostTurns");
+    expect(csv).toContain('"gpt-4o"');
+    expect(csv).toContain(",20,5,");
+    expect(csv).toContain(",1");
   });
 });

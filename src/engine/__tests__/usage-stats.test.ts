@@ -121,19 +121,34 @@ describe("usage-stats", () => {
     });
 
     it.each(["openai", "copilot", "azure-foundry"] as const)(
-      "%s — cache fields are NOT added (already in prompt_tokens, list price)",
+      "%s — cache fields split prompt_tokens into fresh + discounted cached input",
       (vendor) => {
-        // Pretend a hypothetical OpenAI-family turn carries cacheReadTokens
-        // (shouldn't happen via the engine, but the function MUST be safe
-        // against double-counting). 1M input + 1M cacheRead + 1M output
-        // → only $2 input + $8 output = $10. Cache field is ignored.
+        // 1M prompt input contains 0.25M cached input. Cost is:
+        // 0.75M*$2 fresh + 0.25M*$0.20 cached + 1M*$8 output = $9.55.
         expect(
           computeCost(
             {
               inputTokens: 1_000_000,
               outputTokens: 1_000_000,
-              cacheReadTokens: 1_000_000,
+              cacheReadTokens: 250_000,
               cacheWriteTokens: 0,
+            },
+            { ...gpt, cacheReadPer1M: 0.2 },
+            vendor,
+          ),
+        ).toBeCloseTo(9.55, 5);
+      },
+    );
+
+    it.each(["openai", "copilot", "azure-foundry"] as const)(
+      "%s — missing cached-input rate treats cached prompt tokens as ordinary input",
+      (vendor) => {
+        expect(
+          computeCost(
+            {
+              inputTokens: 1_000_000,
+              outputTokens: 1_000_000,
+              cacheReadTokens: 250_000,
             },
             gpt,
             vendor,
@@ -201,7 +216,148 @@ describe("usage-stats", () => {
     expect(summary.perVendor[0].totalTokens).toBe(1_100_000);
   });
 
-  it("totalTokens vendor-aware — Anthropic adds cache to total (cache outside input)", () => {
+  it("marks zero-price placeholder model costs as unknown instead of fake $0", () => {
+    const entries: AuditTurnEntry[] = [
+      {
+        timestamp: new Date().toISOString(),
+        sessionId: "legacy-openai",
+        type: "turn",
+        route: "openai/gpt-4o",
+        tokenUsage: {
+          inputTokens: 10_000,
+          outputTokens: 1_000,
+        },
+      },
+    ];
+    const summary = computeUsageSummary(entries, new Date());
+    expect(summary.perVendor[0].cost).toBe(0);
+    expect(summary.perVendor[0].unknownCostTurns).toBe(1);
+    expect(summary.today.unknownCostTurns).toBe(1);
+  });
+
+  it("marks Azure Foundry model-name inherited pricing as unknown without an explicit override", () => {
+    const entries: AuditTurnEntry[] = [
+      {
+        timestamp: new Date().toISOString(),
+        sessionId: "azure-model-alias",
+        type: "turn",
+        route: "azure-foundry/gpt-5.4-mini",
+        tokenUsage: {
+          inputTokens: 10_000,
+          outputTokens: 1_000,
+          cacheReadTokens: 5_000,
+        },
+      },
+    ];
+    const summary = computeUsageSummary(entries, new Date());
+    expect(summary.perVendor[0].vendor).toBe("azure-foundry");
+    expect(summary.perVendor[0].cost).toBe(0);
+    expect(summary.perVendor[0].unknownCostTurns).toBe(1);
+  });
+
+  it("keeps token-bearing bare legacy routes in an explicit unknown bucket", () => {
+    const entries: AuditTurnEntry[] = [
+      {
+        timestamp: new Date().toISOString(),
+        sessionId: "legacy-bare-route",
+        type: "turn",
+        route: "skill",
+        tokenUsage: {
+          inputTokens: 10_000,
+          outputTokens: 1_000,
+          cacheReadTokens: 500,
+        },
+      },
+    ];
+    const summary = computeUsageSummary(entries, new Date());
+    expect(summary.perVendor[0].vendor).toBe("unknown");
+    expect(summary.perVendor[0].model).toBe("*");
+    expect(summary.perModel[0].vendor).toBe("unknown");
+    expect(summary.perModel[0].model).toBe("skill");
+    expect(summary.perVendor[0].unknownCostTurns).toBe(1);
+    expect(summary.perVendor[0].totalTokens).toBe(11_000);
+  });
+
+  it("uses per-model audit breakdown for mixed-provider fallback turns", () => {
+    const entries: AuditTurnEntry[] = [
+      {
+        timestamp: new Date().toISOString(),
+        sessionId: "mixed-fallback",
+        type: "turn",
+        route: "openai/gpt-5.4-mini",
+        tokenUsage: {
+          inputTokens: 2_010_000,
+          outputTokens: 101_000,
+          cacheReadTokens: 500_000,
+          cacheWriteTokens: 200_000,
+        },
+        usageByModel: [
+          {
+            vendorProvider: "claude",
+            vendorModel: "claude-sonnet-4-6",
+            tokenUsage: {
+              inputTokens: 1_000_000,
+              outputTokens: 100_000,
+              cacheReadTokens: 500_000,
+              cacheWriteTokens: 200_000,
+            },
+          },
+          {
+            vendorProvider: "openai",
+            vendorModel: "gpt-5.4-mini",
+            tokenUsage: {
+              inputTokens: 10_000,
+              outputTokens: 1_000,
+            },
+          },
+        ],
+      },
+    ];
+
+    const summary = computeUsageSummary(entries, new Date());
+    expect(summary.topConversations[0].turns).toBe(1);
+    expect(summary.perVendor.map((row) => row.vendor).sort()).toEqual(["claude", "openai"]);
+    expect(summary.perModel.map((row) => `${row.vendor}/${row.model}`).sort()).toEqual([
+      "claude/claude-sonnet-4-6",
+      "openai/gpt-5.4-mini",
+    ]);
+    expect(summary.perVendor.find((row) => row.vendor === "claude")?.totalTokens).toBe(1_800_000);
+    expect(summary.perVendor.find((row) => row.vendor === "openai")?.totalTokens).toBe(11_000);
+  });
+
+  it("prices OpenAI long-context surcharge per provider request segment, not per LVIS turn aggregate", () => {
+    const entries: AuditTurnEntry[] = [
+      {
+        timestamp: new Date().toISOString(),
+        sessionId: "multi-round-openai",
+        type: "turn",
+        route: "openai/gpt-5.4",
+        tokenUsage: {
+          inputTokens: 400_000,
+          outputTokens: 0,
+        },
+        usageByModel: [
+          {
+            vendorProvider: "openai",
+            vendorModel: "gpt-5.4",
+            tokenUsage: { inputTokens: 200_000, outputTokens: 0 },
+          },
+          {
+            vendorProvider: "openai",
+            vendorModel: "gpt-5.4",
+            tokenUsage: { inputTokens: 200_000, outputTokens: 0 },
+          },
+        ],
+      },
+    ];
+    const summary = computeUsageSummary(entries, new Date());
+    // Each provider request is below the >272K surcharge threshold:
+    // 2 * (200K * $2.50/M) = $1. Aggregating first would incorrectly
+    // surcharge 400K at $5/M = $2.
+    expect(summary.perModel[0].cost).toBeCloseTo(1, 5);
+  });
+
+  it("totalTokens vendor-aware — current Anthropic usageByModel adds cache to total", () => {
     const entries: AuditTurnEntry[] = [
       {
         timestamp: new Date().toISOString(),
@@ -209,16 +365,51 @@ describe("usage-stats", () => {
         type: "turn",
         route: "claude/claude-sonnet-4-6",
         tokenUsage: {
-          inputTokens: 1_000_000,
+          inputTokens: 1_700_000,
           outputTokens: 100_000,
-          cacheReadTokens: 500_000, // outside inputTokens for Anthropic
+          cacheReadTokens: 500_000,
           cacheWriteTokens: 200_000,
         },
+        usageByModel: [
+          {
+            vendorProvider: "claude",
+            vendorModel: "claude-sonnet-4-6",
+            tokenUsage: {
+              inputTokens: 1_000_000,
+              outputTokens: 100_000,
+              cacheReadTokens: 500_000,
+              cacheWriteTokens: 200_000,
+            },
+          },
+        ],
       },
     ];
     const summary = computeUsageSummary(entries, new Date());
     // Claude: total = input + output + cacheRead + cacheWrite = 1_800_000
     expect(summary.perVendor[0].totalTokens).toBe(1_800_000);
+    // Cost = fresh $3 + cache read $0.15 + cache write $0.75 + output $1.50.
+    expect(summary.perVendor[0].cost).toBeCloseTo(5.4, 5);
+  });
+
+  it("normalizes legacy Claude audit rows without usageByModel before aggregation", () => {
+    const entries: AuditTurnEntry[] = [
+      {
+        timestamp: new Date().toISOString(),
+        sessionId: "legacy-claude-cache-hot",
+        type: "turn",
+        route: "claude/claude-sonnet-4-6",
+        tokenUsage: {
+          inputTokens: 1_700_000,
+          outputTokens: 100_000,
+          cacheReadTokens: 500_000,
+          cacheWriteTokens: 200_000,
+        },
+      },
+    ];
+    const summary = computeUsageSummary(entries, new Date());
+    expect(summary.perVendor[0].inputTokens).toBe(1_000_000);
+    expect(summary.perVendor[0].totalTokens).toBe(1_800_000);
+    expect(summary.perVendor[0].cost).toBeCloseTo(5.4, 5);
   });
 
   it("Anthropic billing-contract: cache reduces total cost vs uncached input", () => {
@@ -240,6 +431,20 @@ describe("usage-stats", () => {
     expect(cached).toBeCloseTo(0.30, 5);
     expect(fresh).toBeCloseTo(3.0, 5);
     expect(cached / fresh).toBeCloseTo(0.1, 5);
+  });
+
+  it("OpenAI billing-contract: cached input is discounted without changing total token volume", () => {
+    const gpt54mini = getModelPricing("openai", "gpt-5.4-mini");
+    const cached = computeCost(
+      { inputTokens: 1_000_000, outputTokens: 0, cacheReadTokens: 900_000 },
+      gpt54mini,
+      "openai",
+    );
+    const fresh = computeCost({ inputTokens: 1_000_000, outputTokens: 0 }, gpt54mini, "openai");
+    // 100K fresh at $0.75/M + 900K cached at $0.075/M.
+    expect(cached).toBeCloseTo(0.1425, 5);
+    expect(fresh).toBeCloseTo(0.75, 5);
+    expect(cached).toBeLessThan(fresh);
   });
 
   it("builds a chronological trend array", () => {

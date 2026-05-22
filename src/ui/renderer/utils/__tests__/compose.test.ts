@@ -59,7 +59,14 @@ describe("composeOutgoing", () => {
     });
     expect(r.text).toContain("[Image #1]");
     expect(r.attachments).toEqual([
-      { type: "image", image: img1.dataUrl, mimeType: "image/png" },
+      {
+        type: "image",
+        image: img1.dataUrl,
+        mimeType: "image/png",
+        width: img1.width,
+        height: img1.height,
+        bytes: img1.bytes,
+      },
     ]);
   });
 

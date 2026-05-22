@@ -13,7 +13,7 @@ import { afterEach, describe, expect, it } from "vitest";
 import { render, screen, cleanup, fireEvent } from "@testing-library/react";
 import { TooltipProvider } from "../../../../components/ui/tooltip.js";
 import { TokenCostBadge } from "../TokenCostBadge.js";
-import { computeCost, type ModelPricing } from "../../../../shared/pricing-data.js";
+import { computeCost, lookupPricing, type ModelPricing } from "../../../../shared/pricing-data.js";
 import type { LLMVendor } from "../../../../shared/llm-vendor-defaults.js";
 
 const sonnet: ModelPricing = { inputPer1M: 3, outputPer1M: 15, contextWindow: 200_000 };
@@ -39,19 +39,22 @@ describe("TokenCostBadge — cost parity with shared computeCost", () => {
 
   it.each<{ vendor: LLMVendor; pricing: ModelPricing; label: string }>([
     { vendor: "claude", pricing: sonnet, label: "claude — cache additive at Anthropic ratios" },
-    { vendor: "openai", pricing: gpt, label: "openai — cache fields ignored (already in prompt_tokens)" },
-    { vendor: "copilot", pricing: gpt, label: "copilot — cache fields ignored" },
-    { vendor: "azure-foundry", pricing: gpt, label: "azure-foundry — cache fields ignored" },
-    { vendor: "gemini", pricing: flash, label: "gemini — cache fields ignored, zero list price" },
-    { vendor: "vertex-ai", pricing: flash, label: "vertex-ai — cache fields ignored, zero list price" },
+    { vendor: "openai", pricing: gpt, label: "openai — provider-raw input includes cached tokens" },
+    { vendor: "copilot", pricing: gpt, label: "copilot — provider-raw input includes cached tokens" },
+    { vendor: "azure-foundry", pricing: gpt, label: "azure-foundry — provider-raw input includes cached tokens" },
+    { vendor: "gemini", pricing: flash, label: "gemini — provider-raw input includes cached tokens, zero list price" },
+    { vendor: "vertex-ai", pricing: flash, label: "vertex-ai — provider-raw input includes cached tokens, zero list price" },
   ])("$label", ({ vendor, pricing }) => {
     const freshInputTokens = 1_000_000;
     const tokensOut = 1_000_000;
     const cacheReadTokens = 500_000;
     const cacheWriteTokens = 200_000;
+    const costInputTokens = vendor === "claude"
+      ? freshInputTokens
+      : freshInputTokens + cacheReadTokens + cacheWriteTokens;
 
     const expected = computeCost(
-      { inputTokens: freshInputTokens, outputTokens: tokensOut, cacheReadTokens, cacheWriteTokens },
+      { inputTokens: costInputTokens, outputTokens: tokensOut, cacheReadTokens, cacheWriteTokens },
       pricing,
       vendor,
     );
@@ -73,7 +76,7 @@ describe("TokenCostBadge — cost parity with shared computeCost", () => {
     expect(numeric).toBeCloseTo(expected, 2);
   });
 
-  it("toggle stays disabled and cost label is absent when pricing is undefined", () => {
+  it("toggle stays disabled and unknown-cost state is visible when pricing is undefined", () => {
     render(
       <TooltipProvider>
         <TokenCostBadge
@@ -88,6 +91,33 @@ describe("TokenCostBadge — cost parity with shared computeCost", () => {
     expect(btn.getAttribute("aria-disabled")).toBe("true");
     fireEvent.click(btn);
     expect(screen.queryByText(/^≈ \$/)).toBeNull();
+    expect(screen.getByText("미정")).toBeTruthy();
+  });
+
+  it("sums OpenAI long-context pricing per request segment", () => {
+    const pricing = lookupPricing("openai", "gpt-5.4");
+    renderInCostMode({
+      tokensIn: 410_000,
+      freshInputTokens: 400_000,
+      tokensOut: 0,
+      pricing,
+      vendor: "openai",
+      usageByModel: [
+        {
+          vendorProvider: "openai",
+          vendorModel: "gpt-5.4",
+          tokenUsage: { inputTokens: 200_000, outputTokens: 0 },
+        },
+        {
+          vendorProvider: "openai",
+          vendorModel: "gpt-5.4",
+          tokenUsage: { inputTokens: 200_000, outputTokens: 0 },
+        },
+      ],
+    });
+    const costSpan = screen.getByText(/^≈ \$/);
+    const numeric = Number((costSpan.textContent ?? "").replace(/[^0-9.]/g, ""));
+    expect(numeric).toBeCloseTo(1, 2);
   });
 
   it("renders nothing when both tokensIn and headline tokens are zero", () => {

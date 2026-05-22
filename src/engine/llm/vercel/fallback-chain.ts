@@ -45,6 +45,8 @@ export interface FallbackCallbacks {
 export interface FallbackStatus {
   phase: "attempt" | "retry" | "fallback";
   label?: string;
+  provider?: LLMVendor;
+  model?: string;
   attempt?: number;
   maxAttempts?: number;
   from?: string;
@@ -99,6 +101,7 @@ async function* attemptStreamWithRetries(
   provider: LLMProvider,
   params: StreamTurnParams,
   label: string,
+  identity: { provider: LLMVendor; model: string },
   callbacks?: FallbackCallbacks,
 ): AsyncIterable<StreamEvent> {
   let lastErr: unknown;
@@ -107,6 +110,8 @@ async function* attemptStreamWithRetries(
     callbacks?.onStatus?.({
       phase: "attempt",
       label,
+      provider: identity.provider,
+      model: identity.model,
       attempt,
       maxAttempts: MAX_ATTEMPTS_PER_PROVIDER,
     });
@@ -121,6 +126,8 @@ async function* attemptStreamWithRetries(
       callbacks?.onStatus?.({
         phase: "retry",
         label,
+        provider: identity.provider,
+        model: identity.model,
         attempt: attempt + 1,
         maxAttempts: MAX_ATTEMPTS_PER_PROVIDER,
         reason: err instanceof Error ? err.message : String(err),
@@ -221,9 +228,19 @@ export async function* streamWithFallback(
   // Attempts 1..N: lazily-constructed fallback providers (built only when needed).
   const totalAttempts = 1 + chain.length;
 
-  const getAttempt = (i: number): { provider: LLMProvider; label: string; attemptParams: StreamTurnParams } => {
+  const getAttempt = (i: number): {
+    provider: LLMProvider;
+    label: string;
+    identity: { provider: LLMVendor; model: string };
+    attemptParams: StreamTurnParams;
+  } => {
     if (i === 0) {
-      return { provider: primary, label: `${primary.vendor}/${params.model}`, attemptParams: params };
+      return {
+        provider: primary,
+        label: `${primary.vendor}/${params.model}`,
+        identity: { provider: primary.vendor, model: params.model },
+        attemptParams: params,
+      };
     }
     const entry = chain[i - 1]!;
     const apiKey = getApiKey(entry.provider);
@@ -237,15 +254,16 @@ export async function* streamWithFallback(
         ...(entry.vertexLocation ? { vertexLocation: entry.vertexLocation } : {}),
       }),
       label: `${entry.provider}/${entry.model}`,
+      identity: { provider: entry.provider, model: entry.model },
       attemptParams: { ...params, model: entry.model },
     };
   };
 
   let lastErr: unknown;
   for (let i = 0; i < totalAttempts; i++) {
-    const { provider, label, attemptParams } = getAttempt(i);
+    const { provider, label, identity, attemptParams } = getAttempt(i);
     try {
-      yield* attemptStreamWithRetries(provider, attemptParams, label, callbacks);
+      yield* attemptStreamWithRetries(provider, attemptParams, label, identity, callbacks);
       return;
     } catch (err) {
       if (isNonRetryable(err)) throw err;

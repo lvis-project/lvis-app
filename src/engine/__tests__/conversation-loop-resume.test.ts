@@ -158,6 +158,114 @@ describe("ConversationLoop.resetAndResume", () => {
     expect(result.compacted).toBe(false);
   });
 
+  it("hydrates the context-fill SOT from the latest persisted turnSummary on resume", () => {
+    const msgs: GenericMessage[] = [
+      { role: "user", content: "old question" },
+      {
+        role: "assistant",
+        content: "old answer",
+        meta: {
+          turnSummary: {
+            turnDurationMs: 1_000,
+            toolCount: 0,
+            cumulativeToolMs: 0,
+            tokensIn: 123_456,
+            freshInputTokens: 10_000,
+            tokensOut: 900,
+          },
+        },
+      },
+    ];
+    const mem = resumeMemory(msgs);
+    const loop = new ConversationLoop(resumeDeps({ memoryManager: mem }));
+
+    const result = loop.resetAndResume("test-session-id");
+
+    expect(result.ok).toBe(true);
+    expect((loop as unknown as { lastContextInputTokens: number }).lastContextInputTokens).toBe(123_456);
+    expect((loop as unknown as { lastRoundInputTokens: number }).lastRoundInputTokens).toBe(0);
+  });
+
+  it("hydrates post-compact context SOT ahead of preserved pre-compact turnSummary", () => {
+    const msgs: GenericMessage[] = [
+      {
+        role: "user",
+        content: "[compact boundary stub]",
+        meta: {
+          checkpointMeta: {
+            removedMessages: 10,
+            freedTokens: 90_000,
+            compactNum: 1,
+            trigger: "auto-compact",
+            contextTokensAfter: 40_000,
+          },
+        },
+      },
+      {
+        role: "assistant",
+        content: "preserved old answer",
+        meta: {
+          turnSummary: {
+            turnDurationMs: 1_000,
+            toolCount: 0,
+            cumulativeToolMs: 0,
+            tokensIn: 123_456,
+            freshInputTokens: 10_000,
+            tokensOut: 900,
+          },
+        },
+      },
+    ];
+    const mem = resumeMemory(msgs);
+    const loop = new ConversationLoop(resumeDeps({ memoryManager: mem }));
+
+    const result = loop.resetAndResume("test-session-id");
+
+    expect(result.ok).toBe(true);
+    expect((loop as unknown as { lastContextInputTokens: number }).lastContextInputTokens).toBe(40_000);
+  });
+
+  it("hydrates newer post-compact turnSummary ahead of an older checkpoint carrier", () => {
+    const msgs: GenericMessage[] = [
+      {
+        role: "user",
+        content: "[compact boundary stub]",
+        meta: {
+          createdAt: 2_000,
+          checkpointMeta: {
+            removedMessages: 10,
+            freedTokens: 90_000,
+            compactNum: 1,
+            trigger: "auto-compact",
+            contextTokensAfter: 40_000,
+          },
+        },
+      },
+      {
+        role: "assistant",
+        content: "post-compact answer",
+        meta: {
+          createdAt: 3_000,
+          turnSummary: {
+            turnDurationMs: 1_000,
+            toolCount: 0,
+            cumulativeToolMs: 0,
+            tokensIn: 60_000,
+            freshInputTokens: 12_000,
+            tokensOut: 900,
+          },
+        },
+      },
+    ];
+    const mem = resumeMemory(msgs);
+    const loop = new ConversationLoop(resumeDeps({ memoryManager: mem }));
+
+    const result = loop.resetAndResume("test-session-id");
+
+    expect(result.ok).toBe(true);
+    expect((loop as unknown as { lastContextInputTokens: number }).lastContextInputTokens).toBe(60_000);
+  });
+
   it("passes resumed history plus the new user turn to the LLM provider", async () => {
     const history: GenericMessage[] = [
       { role: "user", content: "old question" },
