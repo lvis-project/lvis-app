@@ -1,5 +1,28 @@
 # Changelog
 
+## v0.2.8 — 2026-05-22
+
+### 안정성 / 네트워크
+
+- **Sub-agent Azure Foundry private endpoint 정렬** (PR #1083) — `agent_spawn` 으로 생성된 child conversation loop 도 parent 와 같은 guarded Electron `net.fetch` 기반 LLM fetch 를 상속해 public Azure endpoint 로 우회하지 않도록 했다.
+- **Builtin internet tools resolver 정렬** (PR #1089) — `web_search` / `web_fetch` 같은 builtin network tools 도 Electron `net.fetch` 를 주입받아 demo host resolver/private endpoint mapping 을 공유한다.
+- **Demo host-map mapped `web_fetch` 승인 경계 보강** (PR #1089) — demo host map 에 의해 private endpoint 로 해석되는 URL 은 public DNS 상 public IP 로 보이더라도 private-network approval category/cache key 를 사용한다.
+- **LLM/Marketplace combined health 안정화** (PR #1083) — background refresh 중 상태가 `online → checking → online` 으로 깜빡이지 않도록 마지막 concrete 상태를 유지한다.
+
+### 개발 / 패키징
+
+- **Dev/start launch SOT 통합** (PR #1081/#1089) — `bun run dev`, `bun run start`, packaged smoke, Windows NSIS smoke 가 같은 Electron launch env/arg helper 를 사용한다. `.env.demo`, Windows-safe GPU flags, `--no-sandbox`, `--user-data-dir`, UTF-8 env, `LVIS_WIN_NO_SANDBOX` 정책이 한 경로에서 적용된다.
+- **Package footprint guard 정렬** (PR #1089) — runtime script packaging checks 를 `BUILD_ASSETS` SOT 에서 파생해 dev/build/watch 자산 목록과 drift 나지 않도록 했다.
+- **Sequential status toast 안정화** (PR #1081) — install/update toast burst 에서 뒤쪽 toast 가 앞쪽 toast 만료 시간 때문에 즉시 사라지는 queue expiry 문제를 수정했다.
+
+### 검증
+
+- PR #1081: focused `useStatusBar` Vitest 23 pass, repeated focused run 5/5 pass, targeted Vitest 5 files / 73 pass, `bun run typecheck`, `bun run build`.
+- PR #1083: focused Vitest 4 files / 42 pass, `bun run typecheck`, `bun run build`, `git diff --check`.
+- PR #1089: launcher/package `node --check`, electron launch helper node tests 7 pass, focused host-resolver/web-fetch/launch Vitest 4 files / 47 pass, full Vitest 443 files / 5841 pass / 13 skipped, `bun run typecheck`, `bun run build`, remote CI success, cluster review Critical=0/Major=0.
+
+---
+
 ## v0.2.7 — 2026-05-22
 
 ### 안정성 / 패키징
