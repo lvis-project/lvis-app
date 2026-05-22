@@ -8,15 +8,9 @@ import "./setup.js";
 import { describe, it, expect, vi, afterEach } from "vitest";
 import { act, fireEvent, waitFor } from "@testing-library/react";
 import { renderApp } from "./render-app.js";
+import { submitChatMessage } from "./helpers.js";
 import { fakeLlmSettings } from "../../src/shared/__tests__/fake-llm-settings.js";
 
-async function submit(container: HTMLElement, text: string): Promise<void> {
-  const textarea = container.querySelector("textarea") as HTMLTextAreaElement;
-  await act(async () => {
-    fireEvent.change(textarea, { target: { value: text } });
-    fireEvent.keyDown(textarea, { key: "Enter", code: "Enter" });
-  });
-}
 
 describe("Redact notice (Phase 3 regression net)", () => {
   it("redact_notice with count renders a PII system badge", async () => {
@@ -30,7 +24,7 @@ describe("Redact notice (Phase 3 regression net)", () => {
       },
     });
     await waitFor(() => expect(api.getSettings).toHaveBeenCalled());
-    await submit(container, "contains pii");
+    await submitChatMessage(container, "contains pii");
     await waitFor(() => expect(api.chatSend).toHaveBeenCalled());
 
     await act(async () => {
@@ -45,7 +39,7 @@ describe("Redact notice (Phase 3 regression net)", () => {
   it("no redact_notice event => no PII badge in chat", async () => {
     const { container, api, emitChatStream } = await renderApp();
     await waitFor(() => expect(api.getSettings).toHaveBeenCalled());
-    await submit(container, "plain message");
+    await submitChatMessage(container, "plain message");
     await waitFor(() => expect(api.chatSend).toHaveBeenCalled());
 
     await act(async () => {

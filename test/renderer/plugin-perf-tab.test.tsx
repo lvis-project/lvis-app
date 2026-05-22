@@ -5,6 +5,7 @@ import "./setup.js";
 import { describe, it, expect, vi, afterEach } from "vitest";
 import { render, screen, waitFor, fireEvent } from "@testing-library/react";
 import React from "react";
+import { makeMockLvisApi } from "./mock-lvis-api.js";
 
 afterEach(() => {
   vi.unstubAllGlobals();
@@ -34,15 +35,15 @@ const MOCK_STATS = {
   },
 };
 
-function makeApi(stats: Record<string, unknown> = MOCK_STATS) {
-  return {
-    plugins: {
-      getPerfStats: vi.fn(async () => stats),
-    },
+function pluginPerfTabApi(stats: Record<string, unknown> = MOCK_STATS) {
+  const { api } = makeMockLvisApi();
+  api.plugins = {
+    getPerfStats: vi.fn(async () => stats),
   };
+  return api;
 }
 
-async function renderTab(api = makeApi()) {
+async function renderTab(api = pluginPerfTabApi()) {
   const { PluginPerfTab } = await import("../../src/ui/renderer/tabs/PluginPerfTab.js");
   const result = render(<PluginPerfTab api={api as any} />);
   return { ...result, api };
@@ -55,7 +56,7 @@ describe("PluginPerfTab", () => {
   });
 
   it("calls getPerfStats on mount", async () => {
-    const api = makeApi();
+    const api = pluginPerfTabApi();
     await renderTab(api);
     await waitFor(() => {
       expect(api.plugins.getPerfStats).toHaveBeenCalledTimes(1);
@@ -72,14 +73,14 @@ describe("PluginPerfTab", () => {
   });
 
   it("shows empty message when no plugins", async () => {
-    await renderTab(makeApi({}));
+    await renderTab(pluginPerfTabApi({}));
     await waitFor(() => {
       expect(screen.getByText(/로드된 플러그인이 없습니다/)).toBeTruthy();
     });
   });
 
   it("calls getPerfStats again on refresh button click", async () => {
-    const api = makeApi();
+    const api = pluginPerfTabApi();
     await renderTab(api);
     await waitFor(() => expect(api.plugins.getPerfStats).toHaveBeenCalledTimes(1));
 

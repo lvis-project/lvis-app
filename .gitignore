@@ -26,6 +26,7 @@ resources/uv-archives/
 # Playwright UI E2E artifacts
 test-results/
 playwright-report/
+coverage/
 
 # Storybook build output
 storybook-static/

@@ -14,6 +14,7 @@ import { act, renderHook, waitFor } from "@testing-library/react";
 import { useStatusBar } from "../use-status-bar.js";
 import type { LvisApi } from "../../types.js";
 import { fakeLlmSettings } from "../../../../shared/__tests__/fake-llm-settings.js";
+import { makeMockLvisApi } from "../../../../../test/renderer/mock-lvis-api.js";
 
 // ── Minimal API factory ───────────────────────────────────────────────────────
 // Only wire up the methods exercised by each test so that accidental calls to
@@ -23,16 +24,15 @@ function noop() {
   return () => {};
 }
 
-function makeApi(overrides: Partial<LvisApi> = {}): LvisApi {
-  return {
-    // Defaults that let the hook mount without triggering visible side-effects.
-    getSettings: vi.fn(async () => ({
-      llm: fakeLlmSettings({ provider: "openai", model: "gpt-4o-mini" }),
-      chat: { systemPrompt: "", autoCompact: false },
-      webSearch: { provider: "none" },
-    })),
-    ...overrides,
-  } as unknown as LvisApi;
+function statusBarApi(overrides: Partial<LvisApi> = {}): LvisApi {
+  const { api } = makeMockLvisApi();
+  // Keep the default status-bar fixture quiet. Individual producer tests opt
+  // into the API methods they exercise through overrides below.
+  delete api.getSettings;
+  delete api.onSettingsUpdated;
+  delete api.pingMarketplace;
+  Object.assign(api, overrides);
+  return api as unknown as LvisApi;
 }
 
 // ── Fake-timer harness ────────────────────────────────────────────────────────
@@ -55,7 +55,7 @@ afterEach(() => {
 // ─────────────────────────────────────────────────────────────────────────────
 describe("useStatusBar — toast TTL eviction", () => {
   it("removes a toast after its TTL elapses (default 5 s, checked after 6 s)", async () => {
-    const api = makeApi();
+    const api = statusBarApi();
     const { result } = renderHook(() =>
       useStatusBar({ api, defaultToastTtlMs: 5000 }),
     );
@@ -82,7 +82,7 @@ describe("useStatusBar — toast TTL eviction", () => {
 // ─────────────────────────────────────────────────────────────────────────────
 describe("useStatusBar — toast queue cap", () => {
   it("caps at 50 toasts and keeps the LATEST 50 when 100 are pushed", () => {
-    const api = makeApi();
+    const api = statusBarApi();
     const { result } = renderHook(() =>
       useStatusBar({ api, defaultToastTtlMs: 60_000 }),
     );
@@ -107,7 +107,7 @@ describe("useStatusBar — toast queue cap", () => {
 // ─────────────────────────────────────────────────────────────────────────────
 describe("useStatusBar — upsertPersistent", () => {
   it("updates an existing persistent item in place (no duplicate entries)", () => {
-    const api = makeApi();
+    const api = statusBarApi();
     const { result } = renderHook(() => useStatusBar({ api }));
 
     act(() => {
@@ -137,7 +137,7 @@ describe("useStatusBar — upsertPersistent", () => {
 // ─────────────────────────────────────────────────────────────────────────────
 describe("useStatusBar — removePersistent", () => {
   it("removes a previously upserted persistent item by id", () => {
-    const api = makeApi();
+    const api = statusBarApi();
     const { result } = renderHook(() => useStatusBar({ api }));
 
     act(() => {
@@ -170,7 +170,7 @@ describe("useStatusBar — install lifecycle producer", () => {
       | ((payload: InstallProgressPayload) => void)
       | null = null;
 
-    const api = makeApi({
+    const api = statusBarApi({
       onPluginInstallProgress: vi.fn((h) => {
         capturedHandler = h;
         return noop();
@@ -197,7 +197,7 @@ describe("useStatusBar — install lifecycle producer", () => {
       | ((payload: InstallProgressPayload) => void)
       | null = null;
 
-    const api = makeApi({
+    const api = statusBarApi({
       onPluginInstallProgress: vi.fn((h) => {
         capturedHandler = h;
         return noop();
@@ -223,7 +223,7 @@ describe("useStatusBar — install lifecycle producer", () => {
   it("renders downloading label with byte counts when bytesTotal is known", () => {
     let capturedHandler: ((payload: InstallProgressPayload) => void) | null = null;
 
-    const api = makeApi({
+    const api = statusBarApi({
       onPluginInstallProgress: vi.fn((h) => {
         capturedHandler = h;
         return noop();
@@ -249,7 +249,7 @@ describe("useStatusBar — install lifecycle producer", () => {
   it("renders downloading label without denominator when bytesTotal is null", () => {
     let capturedHandler: ((payload: InstallProgressPayload) => void) | null = null;
 
-    const api = makeApi({
+    const api = statusBarApi({
       onPluginInstallProgress: vi.fn((h) => {
         capturedHandler = h;
         return noop();
@@ -273,7 +273,7 @@ describe("useStatusBar — install lifecycle producer", () => {
   it("renders verifying label for phase=verifying", () => {
     let capturedHandler: ((payload: InstallProgressPayload) => void) | null = null;
 
-    const api = makeApi({
+    const api = statusBarApi({
       onPluginInstallProgress: vi.fn((h) => {
         capturedHandler = h;
         return noop();
@@ -292,7 +292,7 @@ describe("useStatusBar — install lifecycle producer", () => {
   it("renders registering label for phase=registering", () => {
     let capturedHandler: ((payload: InstallProgressPayload) => void) | null = null;
 
-    const api = makeApi({
+    const api = statusBarApi({
       onPluginInstallProgress: vi.fn((h) => {
         capturedHandler = h;
         return noop();
@@ -318,7 +318,7 @@ describe("useStatusBar — install lifecycle producer", () => {
 // ─────────────────────────────────────────────────────────────────────────────
 describe("useStatusBar — vendor producer", () => {
   it("upserts vendor:llm with the active provider + model from getSettings", async () => {
-    const api = makeApi({
+    const api = statusBarApi({
       getSettings: vi.fn(async () => ({
         llm: fakeLlmSettings({ provider: "openai", model: "gpt-5.4" }),
         chat: { systemPrompt: "", autoCompact: false },
@@ -341,7 +341,7 @@ describe("useStatusBar — vendor producer", () => {
   it("reactively updates vendor:llm when onSettingsUpdated fires with a new provider", async () => {
     let capturedHandler: ((settings: unknown) => void) | null = null;
 
-    const api = makeApi({
+    const api = statusBarApi({
       getSettings: vi.fn(async () => ({
         llm: fakeLlmSettings({ provider: "openai", model: "gpt-5.4" }),
         chat: { systemPrompt: "", autoCompact: false },
@@ -380,7 +380,7 @@ describe("useStatusBar — vendor producer", () => {
 
   it("wires onClick to openSettingsWindow(\"llm\") when the API is available", async () => {
     const openSettingsWindow = vi.fn(async () => ({ ok: true as const, windowId: 1 }));
-    const api = makeApi({
+    const api = statusBarApi({
       getSettings: vi.fn(async () => ({
         llm: fakeLlmSettings({ provider: "claude", model: "claude-sonnet-4-6" }),
         chat: { systemPrompt: "", autoCompact: false },
@@ -408,7 +408,7 @@ describe("useStatusBar — vendor producer", () => {
 // ─────────────────────────────────────────────────────────────────────────────
 describe("useStatusBar — combined health producer", () => {
   it("renders one success dot immediately before vendor:llm when LLM and marketplace are online", async () => {
-    const api = makeApi({
+    const api = statusBarApi({
       getSettings: vi.fn(async () => ({
         llm: fakeLlmSettings({ provider: "openai", model: "gpt-5.4" }),
         chat: { systemPrompt: "", autoCompact: false },
@@ -489,7 +489,7 @@ describe("useStatusBar — combined health producer", () => {
           }),
       );
 
-    const api = makeApi({
+    const api = statusBarApi({
       pingAiProvider,
       pingMarketplace,
     });
@@ -546,7 +546,7 @@ describe("useStatusBar — combined health producer", () => {
         online: false,
       });
 
-    const api = makeApi({
+    const api = statusBarApi({
       pingAiProvider: vi.fn(async () => ({
         configured: true as const,
         online: true as const,
@@ -600,7 +600,7 @@ describe("useStatusBar — combined health producer", () => {
   });
 
   it("keeps the combined health dot non-green when the model ping fails", async () => {
-    const api = makeApi({
+    const api = statusBarApi({
       pingAiProvider: vi.fn(async () => ({
         configured: true as const,
         online: false as const,
@@ -626,7 +626,7 @@ describe("useStatusBar — combined health producer", () => {
   });
 
   it("renders an error dot when the provider ping IPC rejects the sender", async () => {
-    const api = makeApi({
+    const api = statusBarApi({
       pingAiProvider: vi.fn(async () => ({
         ok: false as const,
         error: "unauthorized-frame" as const,
@@ -647,7 +647,7 @@ describe("useStatusBar — combined health producer", () => {
   });
 
   it("uses warning when marketplace is not configured even if the LLM is online", async () => {
-    const api = makeApi({
+    const api = statusBarApi({
       pingAiProvider: vi.fn(async () => ({
         configured: true as const,
         online: true as const,
@@ -677,7 +677,7 @@ describe("useStatusBar — combined health producer", () => {
 // ─────────────────────────────────────────────────────────────────────────────
 describe("useStatusBar — sequential toast display", () => {
   it("visibleToast exposes the queue head, pendingCount reflects the rest", () => {
-    const api = makeApi();
+    const api = statusBarApi();
     const { result } = renderHook(() =>
       useStatusBar({ api, defaultToastTtlMs: 5000 }),
     );
@@ -693,7 +693,7 @@ describe("useStatusBar — sequential toast display", () => {
   });
 
   it("auto-advances to next toast after the visible one's TTL elapses", async () => {
-    const api = makeApi();
+    const api = statusBarApi();
     const { result } = renderHook(() =>
       useStatusBar({ api, defaultToastTtlMs: 3000 }),
     );
@@ -716,7 +716,7 @@ describe("useStatusBar — sequential toast display", () => {
   });
 
   it("queue drains to null visibleToast after all toasts expire", async () => {
-    const api = makeApi();
+    const api = statusBarApi();
     const { result } = renderHook(() =>
       useStatusBar({ api, defaultToastTtlMs: 3000 }),
     );
@@ -736,7 +736,7 @@ describe("useStatusBar — sequential toast display", () => {
   });
 
   it("removeToast on visibleToast immediately advances to next", () => {
-    const api = makeApi();
+    const api = statusBarApi();
     const { result } = renderHook(() =>
       useStatusBar({ api, defaultToastTtlMs: 30_000 }),
     );
@@ -760,7 +760,7 @@ describe("useStatusBar — sequential toast display", () => {
   it("burst of 3 install-result events shows only 1 toast at a time, advancing sequentially", async () => {
     let capturedHandler: ((payload: { slug: string; success: boolean; error?: string }) => void) | null = null;
 
-    const api = makeApi({
+    const api = statusBarApi({
       onPluginInstallResult: vi.fn((h) => {
         capturedHandler = h;
         return () => {};

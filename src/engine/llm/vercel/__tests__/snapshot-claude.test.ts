@@ -16,6 +16,7 @@
  *   - Short-reasoning-then-tool (#12433 empty-buffer edge) → log-and-skip.
  */
 import { describe, it, expect, vi } from "vitest";
+import { collectStreamEvents as collect, streamFromArray as fromArray } from "./test-helpers.js";
 import type { StreamEvent } from "../../types.js";
 import {
   mapBudgetToEffort,
@@ -25,17 +26,7 @@ import { extractSignatureSafely } from "../signature-shim.js";
 import { genericToModelMessages } from "../message-mapper.js";
 import { fullStreamToStreamEvent } from "../stream-mapper.js";
 
-async function collect(
-  iter: AsyncIterable<StreamEvent>,
-): Promise<StreamEvent[]> {
-  const out: StreamEvent[] = [];
-  for await (const ev of iter) out.push(ev);
-  return out;
-}
 
-async function* fromArray<T>(arr: T[]): AsyncIterable<T> {
-  for (const item of arr) yield item;
-}
 
 // ────────────────────────────────────────────────────────────────
 // Unit: helpers

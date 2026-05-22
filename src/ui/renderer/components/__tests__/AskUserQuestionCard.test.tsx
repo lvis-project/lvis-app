@@ -4,18 +4,18 @@ import { describe, it, expect, vi } from "vitest";
 import { render, fireEvent, act, waitFor } from "@testing-library/react";
 import { AskUserQuestionCard } from "../AskUserQuestionCard.js";
 import type { AskUserQuestionRequest } from "../AskUserQuestionCard.js";
+import { makeMockLvisApi } from "../../../../../test/renderer/mock-lvis-api.js";
 
-/**
- * Minimal mock LvisApi — only the surface AskUserQuestionCard uses.
- */
-function makeApi(opts: { respondDelay?: number } = {}) {
+function askUserQuestionApi(opts: { respondDelay?: number } = {}) {
+  const { api } = makeMockLvisApi();
   const respondAskUserQuestion = vi.fn(async () => {
     if (opts.respondDelay) {
       await new Promise((r) => setTimeout(r, opts.respondDelay));
     }
     return { ok: true };
   });
-  return { respondAskUserQuestion };
+  api.respondAskUserQuestion = respondAskUserQuestion;
+  return api;
 }
 
 function makeRequest(overrides: Partial<AskUserQuestionRequest> = {}): AskUserQuestionRequest {
@@ -48,7 +48,7 @@ describe("AskUserQuestionCard — single question keyboard Enter", () => {
      * so the keyboard handler skips onAdvance(). respondAskUserQuestion must
      * be called exactly once.
      */
-    const api = makeApi();
+    const api = askUserQuestionApi();
     const onResolved = vi.fn();
     const request = makeRequest();
 
@@ -71,7 +71,7 @@ describe("AskUserQuestionCard — single question keyboard Enter", () => {
   });
 
   it("calls respondAndClose exactly once on Space key", async () => {
-    const api = makeApi();
+    const api = askUserQuestionApi();
     const request = makeRequest();
 
     const { getByText } = render(
@@ -91,7 +91,7 @@ describe("AskUserQuestionCard — single question keyboard Enter", () => {
   });
 
   it("dismisses the current question on Escape", async () => {
-    const api = makeApi();
+    const api = askUserQuestionApi();
     const onResolved = vi.fn();
     const request = makeRequest();
 
@@ -121,7 +121,7 @@ describe("AskUserQuestionCard — multi-step keyboard Enter (intermediate step)"
      * selecting a choice should advance to the next step (goNext) but must NOT
      * call respondAndClose yet.
      */
-    const api = makeApi();
+    const api = askUserQuestionApi();
     const onResolved = vi.fn();
     const request = makeRequest({
       questions: [
@@ -155,7 +155,7 @@ describe("AskUserQuestionCard — multi-step keyboard Enter (intermediate step)"
      * "보내기" button submit path should call respondAndClose exactly once.
      * This test ensures no extra submit is triggered by the keyboard handler.
      */
-    const api = makeApi();
+    const api = askUserQuestionApi();
     const onResolved = vi.fn();
     const request = makeRequest({
       questions: [
@@ -201,7 +201,7 @@ describe("AskUserQuestionCard — multi-step keyboard Enter (intermediate step)"
   });
 
   it("focuses the send button on the confirm step and submits with Enter", async () => {
-    const api = makeApi();
+    const api = askUserQuestionApi();
     const onResolved = vi.fn();
     const request = makeRequest({
       questions: [
@@ -239,7 +239,7 @@ describe("AskUserQuestionCard — multi-step keyboard Enter (intermediate step)"
 
 describe("AskUserQuestionCard — multi-step free-text keyboard navigation", () => {
   it("does not advance while Korean IME composition is being committed", async () => {
-    const api = makeApi();
+    const api = askUserQuestionApi();
     const request = makeRequest({
       questions: [
         { question: "참석자", allowFreeText: true },
@@ -270,7 +270,7 @@ describe("AskUserQuestionCard — multi-step free-text keyboard navigation", () 
   });
 
   it("keeps arrow keys inside free-text editing and moves questions from the card surface", async () => {
-    const api = makeApi();
+    const api = askUserQuestionApi();
     const request = makeRequest({
       questions: [
         { question: "참석자", allowFreeText: true },
@@ -325,7 +325,7 @@ describe("AskUserQuestionCard — multi-step free-text keyboard navigation", () 
   });
 
   it("moves choice answers with ArrowUp and ArrowDown before ArrowRight changes question", async () => {
-    const api = makeApi();
+    const api = askUserQuestionApi();
     const request = makeRequest({
       questions: [
         { question: "첫 번째 질문", choices: ["A", "B"], allowFreeText: false },
@@ -366,7 +366,7 @@ describe("AskUserQuestionCard — multi-step free-text keyboard navigation", () 
   });
 
   it("includes free-text input in the answer arrow loop and commits it with Enter", async () => {
-    const api = makeApi();
+    const api = askUserQuestionApi();
     const request = makeRequest({
       questions: [
         {
@@ -418,7 +418,7 @@ describe("AskUserQuestionCard — multi-step free-text keyboard navigation", () 
 
 describe("AskUserQuestionCard — mouse click path (single question)", () => {
   it("calls respondAndClose exactly once on click — no keyboard involved", async () => {
-    const api = makeApi();
+    const api = askUserQuestionApi();
     const request = makeRequest();
 
     const { getByText } = render(
@@ -448,7 +448,7 @@ describe("AskUserQuestionCard — 4-direction card-level arrow navigation", () =
    * intact while we fix Up/Down.
    */
   it("ArrowLeft and ArrowRight navigate between questions from card surface", async () => {
-    const api = makeApi();
+    const api = askUserQuestionApi();
     const request = makeRequest({
       questions: [
         { question: "Q1", choices: ["A", "B"], allowFreeText: false },
@@ -481,7 +481,7 @@ describe("AskUserQuestionCard — 4-direction card-level arrow navigation", () =
    * Regression: before this fix, ArrowUp/Down on the card surface had no effect.
    */
   it("ArrowDown from card surface moves focus to next choice answer", async () => {
-    const api = makeApi();
+    const api = askUserQuestionApi();
     const request = makeRequest({
       questions: [
         { question: "색상 선택", choices: ["빨강", "파랑", "초록"], allowFreeText: false },
@@ -509,7 +509,7 @@ describe("AskUserQuestionCard — 4-direction card-level arrow navigation", () =
    * (wraps around to last when at index 0).
    */
   it("ArrowUp from card surface moves focus to a choice answer (wraps to last)", async () => {
-    const api = makeApi();
+    const api = askUserQuestionApi();
     const request = makeRequest({
       questions: [
         { question: "색상 선택", choices: ["빨강", "파랑", "초록"], allowFreeText: false },
@@ -537,7 +537,7 @@ describe("AskUserQuestionCard — 4-direction card-level arrow navigation", () =
    * questions — both work together without interfering.
    */
   it("ArrowDown navigates choices then ArrowRight advances question (4-dir together)", async () => {
-    const api = makeApi();
+    const api = askUserQuestionApi();
     const request = makeRequest({
       questions: [
         { question: "Q1", choices: ["A", "B"], allowFreeText: false },
@@ -582,7 +582,7 @@ describe("AskUserQuestionCard — ArrowUp/Down suppressed when free-text input i
    * must remain the input after the keydown.
    */
   it("ArrowDown inside free-text input keeps focus on the input", async () => {
-    const api = makeApi();
+    const api = askUserQuestionApi();
     const request = makeRequest({
       questions: [
         { question: "의제", allowFreeText: true },
@@ -604,7 +604,7 @@ describe("AskUserQuestionCard — ArrowUp/Down suppressed when free-text input i
   });
 
   it("ArrowUp inside free-text input keeps focus on the input", async () => {
-    const api = makeApi();
+    const api = askUserQuestionApi();
     const request = makeRequest({
       questions: [
         { question: "의제", allowFreeText: true },
@@ -637,7 +637,7 @@ describe("AskUserQuestionCard — ArrowDown suppressed on confirm step", () => {
    * move focus into prior question choices.
    */
   it("ArrowDown on card at confirm step does not move focus to a choice button", async () => {
-    const api = makeApi();
+    const api = askUserQuestionApi();
     const request = makeRequest({
       questions: [
         { question: "Q1", choices: ["A", "B"], allowFreeText: false },
@@ -682,7 +682,7 @@ describe("AskUserQuestionCard — ArrowDown suppressed on confirm step", () => {
 
 describe("AskUserQuestionCard — auto-focus on mount enables arrow nav", () => {
   it("focuses the card container immediately when the request mounts", async () => {
-    const api = makeApi();
+    const api = askUserQuestionApi();
     const request = makeRequest();
     const { getByTestId } = render(
       <AskUserQuestionCard api={api as never} request={request} onResolved={vi.fn()} />,
@@ -693,7 +693,7 @@ describe("AskUserQuestionCard — auto-focus on mount enables arrow nav", () => 
   });
 
   it("ArrowDown works right after mount with no prior interaction", async () => {
-    const api = makeApi();
+    const api = askUserQuestionApi();
     const request = makeRequest({
       questions: [
         { question: "색상", choices: ["빨강", "파랑"], allowFreeText: false },
@@ -718,7 +718,7 @@ describe("AskUserQuestionCard — auto-focus on mount enables arrow nav", () => 
 
 describe("AskUserQuestionCard — multi-select", () => {
   it("clicking a choice toggles its membership and does NOT auto-submit", async () => {
-    const api = makeApi();
+    const api = askUserQuestionApi();
     const onResolved = vi.fn();
     const request = makeRequest({
       questions: [
@@ -749,7 +749,7 @@ describe("AskUserQuestionCard — multi-select", () => {
   });
 
   it("explicit 보내기 sends choices: string[] for multi-select", async () => {
-    const api = makeApi();
+    const api = askUserQuestionApi();
     const onResolved = vi.fn();
     const request = makeRequest({
       questions: [
@@ -782,7 +782,7 @@ describe("AskUserQuestionCard — multi-select", () => {
   });
 
   it("re-clicking a selected chip removes it from the selection set", async () => {
-    const api = makeApi();
+    const api = askUserQuestionApi();
     const request = makeRequest({
       questions: [
         {
@@ -817,7 +817,7 @@ describe("AskUserQuestionCard — multi-select", () => {
   });
 
   it("Enter on a multi-select chip toggles it but does not advance the step", async () => {
-    const api = makeApi();
+    const api = askUserQuestionApi();
     const request = makeRequest({
       questions: [
         {
@@ -844,7 +844,7 @@ describe("AskUserQuestionCard — multi-select", () => {
   });
 
   it("multi-select preserves picks when typing into the free-text input", async () => {
-    const api = makeApi();
+    const api = askUserQuestionApi();
     const request = makeRequest({
       questions: [
         {
@@ -885,7 +885,7 @@ describe("AskUserQuestionCard — multi-select", () => {
 
 describe("AskUserQuestionCard — 4-question pagination", () => {
   it("paginates through 4 questions and submits all answers", async () => {
-    const api = makeApi();
+    const api = askUserQuestionApi();
     const request = makeRequest({
       questions: [
         { question: "Q1", choices: ["A"], allowFreeText: false },

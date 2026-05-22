@@ -9,17 +9,13 @@
  *   (e) All chain entries exhausted → throws last error.
  */
 import { afterEach, describe, it, expect, vi } from "vitest";
+import { collectStreamEvents as collect } from "./test-helpers.js";
 import type { LLMProvider, StreamEvent } from "../../types.js";
 import { FallbackProvider, streamWithFallback } from "../fallback-chain.js";
 import type { FallbackEntry, ProviderFactory } from "../fallback-chain.js";
 
 // ─── helpers ────────────────────────────────────────────────────
 
-async function collect(iter: AsyncIterable<StreamEvent>): Promise<StreamEvent[]> {
-  const out: StreamEvent[] = [];
-  for await (const ev of iter) out.push(ev);
-  return out;
-}
 
 function makeProvider(vendor: string, events: StreamEvent[]): LLMProvider {
   return {
