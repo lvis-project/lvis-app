@@ -5,6 +5,7 @@
 ### 안정성 / 네트워크
 
 - **Sub-agent Azure Foundry private endpoint 정렬** (PR #1083) — `agent_spawn` 으로 생성된 child conversation loop 도 parent 와 같은 guarded Electron `net.fetch` 기반 LLM fetch 를 상속해 public Azure endpoint 로 우회하지 않도록 했다.
+- **macOS 프록시/PAC 환경 private endpoint 고정** — demo host-map 에 포함된 Azure Foundry LLM/web_fetch URL 은 전용 Electron session 을 `direct` proxy mode 로 사용해 시스템 프록시/PAC 가 Chromium host resolver mapping 을 우회하지 못하게 했다.
 - **Builtin internet tools resolver 정렬** (PR #1089) — `web_search` / `web_fetch` 같은 builtin network tools 도 Electron `net.fetch` 를 주입받아 demo host resolver/private endpoint mapping 을 공유한다.
 - **Demo host-map mapped `web_fetch` 승인 경계 보강** (PR #1089) — demo host map 에 의해 private endpoint 로 해석되는 URL 은 public DNS 상 public IP 로 보이더라도 private-network approval category/cache key 를 사용한다.
 - **LLM/Marketplace combined health 안정화** (PR #1083) — background refresh 중 상태가 `online → checking → online` 으로 깜빡이지 않도록 마지막 concrete 상태를 유지한다.
@@ -20,6 +21,7 @@
 - PR #1081: focused `useStatusBar` Vitest 23 pass, repeated focused run 5/5 pass, targeted Vitest 5 files / 73 pass, `bun run typecheck`, `bun run build`.
 - PR #1083: focused Vitest 4 files / 42 pass, `bun run typecheck`, `bun run build`, `git diff --check`.
 - PR #1089: launcher/package `node --check`, electron launch helper node tests 7 pass, focused host-resolver/web-fetch/launch Vitest 4 files / 47 pass, full Vitest 443 files / 5841 pass / 13 skipped, `bun run typecheck`, `bun run build`, remote CI success, cluster review Critical=0/Major=0.
+- macOS 프록시/PAC private endpoint fix: focused Vitest 5 files / 93 pass, `bun run typecheck`, `bun run build`, full Vitest 443 files / 5849 pass / 13 skipped, Electron direct-session probe `200` vs system proxy path `403 ThrowExceptionDueToTrafficDenied`.
 
 ---
 

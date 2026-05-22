@@ -37,7 +37,7 @@
  * No plugin-specific code lives here — all plugins register themselves via the
  * HostApi manufactured in `steps/plugin-runtime.ts`.
  */
-import { app, net, shell } from "electron";
+import { app, net, session, shell } from "electron";
 import type { BrowserWindow } from "electron";
 import { BrowserWindow as BrowserWindowValue } from "electron";
 import { randomUUID } from "node:crypto";
@@ -92,7 +92,12 @@ import { SessionTodoStore } from "./main/session-todo-store.js";
 import { AskUserQuestionGate, IPC_ASK_USER_QUESTION_REQUEST } from "./main/ask-user-question-gate.js";
 import { NotificationService } from "./main/notification-service.js";
 import { createSafeLlmFetch } from "./main/safe-llm-fetch.js";
-import { getDemoActiveVendor, getDemoHostMap } from "./main/demo-credentials.js";
+import { getDemoActiveVendor, getDemoHostMap, getDemoVendorConfig } from "./main/demo-credentials.js";
+import {
+  demoFoundryHostMapFingerprint,
+  demoHostMapContainsHost,
+  getAppliedDemoHostResolverFingerprint,
+} from "./main/demo-host-resolver.js";
 import { PreferenceRefreshService } from "./memory/preference-refresh-service.js";
 import { SkillStore } from "./main/skill-store.js";
 import { SkillOverlay } from "./main/skill-overlay.js";
@@ -176,14 +181,40 @@ export async function bootstrap(
 ): Promise<AppServices> {
   log.info("boot: starting...");
   const electronNetFetch = net.fetch.bind(net);
-  const networkFetch = (async (input: Parameters<typeof fetch>[0], init?: RequestInit) => {
-    const normalizedInput = input instanceof URL ? input.toString() : input;
-    return electronNetFetch(normalizedInput as string | Request, {
-      ...(init ?? {}),
-      bypassCustomProtocolHandlers: true,
-    });
-  }) as typeof fetch;
-  const llmFetch = createSafeLlmFetch(electronNetFetch);
+  const privateEndpointSession = session.fromPartition("lvis-private-endpoint-fetch");
+  await privateEndpointSession.setProxy({ mode: "direct" });
+  const electronDirectFetch = privateEndpointSession.fetch.bind(privateEndpointSession);
+  const demoActiveVendor = getDemoActiveVendor();
+  const demoHostMap = getDemoHostMap();
+  const demoFoundryConfig = demoActiveVendor === "azure-foundry"
+    ? getDemoVendorConfig("azure-foundry")
+    : null;
+  const appliedDemoHostMapFingerprint = demoFoundryHostMapFingerprint(
+    demoFoundryConfig?.baseUrl,
+    demoHostMap,
+  );
+  const isAppliedDemoHostMap =
+    appliedDemoHostMapFingerprint !== null &&
+    appliedDemoHostMapFingerprint === getAppliedDemoHostResolverFingerprint();
+  const isDemoPrivateEndpointUrl = (url: URL) =>
+    isAppliedDemoHostMap &&
+    demoHostMapContainsHost(demoHostMap, url.toString());
+  const createElectronFetch = (fetchImpl: typeof electronNetFetch): typeof fetch =>
+    (async (input: Parameters<typeof fetch>[0], init?: RequestInit) => {
+      const normalizedInput = input instanceof URL ? input.toString() : input;
+      return fetchImpl(normalizedInput as string | Request, {
+        ...(init ?? {}),
+        bypassCustomProtocolHandlers: true,
+      });
+    }) as typeof fetch;
+  const networkFetch = createElectronFetch(electronNetFetch);
+  const privateNetworkFetch = createElectronFetch(electronDirectFetch);
+  const llmFetch = createSafeLlmFetch(electronNetFetch, {
+    privateEndpoint: {
+      fetch: electronDirectFetch,
+      isMappedUrl: isDemoPrivateEndpointUrl,
+    },
+  });
 
   // Seed user-facing docs into `~/.lvis/` before any other component reads
   // home state. AGENTS.md is the LLM-facing system reference; on first boot
@@ -472,8 +503,10 @@ export async function bootstrap(
       }
     },
     networkFetch,
-    demoActiveVendor: getDemoActiveVendor(),
-    demoHostMap: getDemoHostMap(),
+    privateNetworkFetch,
+    demoActiveVendor,
+    demoHostMap,
+    demoHostMapApplied: isAppliedDemoHostMap,
   };
 
   // §4.2 Step 4: builtin tools + request_plugin meta tool.
