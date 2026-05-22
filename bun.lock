@@ -25,7 +25,7 @@
         "zod": "^4.3.6",
       },
       "devDependencies": {
-        "@ai-sdk/devtools": "^0.0.17",
+        "@ai-sdk/devtools": "^0.0.18",
         "@electron/rebuild": "^4.0.3",
         "@playwright/test": "^1.48.0",
         "@storybook/react": "^10.3.6",
@@ -92,7 +92,7 @@
 
     "@ai-sdk/azure": ["@ai-sdk/azure@3.0.65", "", { "dependencies": { "@ai-sdk/openai": "3.0.64", "@ai-sdk/provider": "3.0.10", "@ai-sdk/provider-utils": "4.0.27" }, "peerDependencies": { "zod": "^3.25.76 || ^4.1.8" } }, "sha512-i8KdHakLrlBuX4D6pk+AIMSUaj2ZgxcsyKmgrRhZmR+wdunNZf0sh0rjd7LLCItHSPfMk4BWIAeW656R0wJlvg=="],
 
-    "@ai-sdk/devtools": ["@ai-sdk/devtools@0.0.17", "", { "dependencies": { "@ai-sdk/provider": "3.0.10", "@hono/node-server": "^1.13.7", "hono": "^4.6.14" }, "bin": { "devtools": "bin/cli.js" } }, "sha512-CJgo+3DMHOJbxxq1qTgnW4vpFXgBW1pHePMimBW4Go5FPU7iLqppoGX/UC798IXqlD3hncQRPfyBLZjbsJC91w=="],
+    "@ai-sdk/devtools": ["@ai-sdk/devtools@0.0.18", "", { "dependencies": { "@ai-sdk/provider": "3.0.10", "@hono/node-server": "^1.13.7", "hono": "^4.6.14" }, "bin": { "devtools": "bin/cli.js" } }, "sha512-0J25Q7occrkMJM1MrP0KeR8XNdGGKNgzxhOLfxBe/qZBQP6yXgV4H5Gf2DnDC3UgXDBJBskH9nh23doCo2Pebw=="],
 
     "@ai-sdk/gateway": ["@ai-sdk/gateway@3.0.115", "", { "dependencies": { "@ai-sdk/provider": "3.0.10", "@ai-sdk/provider-utils": "4.0.27", "@vercel/oidc": "3.2.0" }, "peerDependencies": { "zod": "^3.25.76 || ^4.1.8" } }, "sha512-xonmGfN9pt54WdKqMzWe68BRYS3rsYvraBzioyA0gfNcecHs8Ir5qk/X8grJSyZ95hghjWiOphrK6bAc11E6SA=="],
 
@@ -314,7 +314,7 @@
 
     "@jridgewell/trace-mapping": ["@jridgewell/trace-mapping@0.3.31", "", { "dependencies": { "@jridgewell/resolve-uri": "^3.1.0", "@jridgewell/sourcemap-codec": "^1.4.14" } }, "sha512-zzNR+SdQSDJzc8joaeP8QQoCQr8NuYx2dIIytl1QeBEZHJ9uW6hebsrYgbz8hJwUQao3TWCMtmfV8Nu1twOLAw=="],
 
-    "@lvis/plugin-sdk": ["@lvis/plugin-sdk@github:lvis-project/lvis-plugin-sdk#840092f", { "dependencies": { "ajv": "^8.20.0", "focus-trap": "^8.2.0", "lucide-react": "^1.14.0" }, "peerDependencies": { "react": ">=18.0.0", "react-dom": ">=18.0.0", "tsup": ">=8.0.0" }, "optionalPeers": ["react", "react-dom", "tsup"] }, "lvis-project-lvis-plugin-sdk-840092f", "sha512-ooN4akW66TQoEP0nc9AqYc4n9ejc8Pysc2QDkVixVQCGYt32E1EaXe5njB5NKAJKfcxIKE3/vbpQQzaMKmkLLQ=="],
+    "@lvis/plugin-sdk": ["@lvis/plugin-sdk@github:lvis-project/lvis-plugin-sdk#840092f", { "dependencies": { "ajv": "^8.20.0", "focus-trap": "^8.2.0", "lucide-react": "^1.14.0" }, "peerDependencies": { "react": ">=18.0.0", "react-dom": ">=18.0.0", "tsup": ">=8.0.0" }, "optionalPeers": ["react", "react-dom", "tsup"] }, "lvis-project-lvis-plugin-sdk-840092f"],
 
     "@malept/cross-spawn-promise": ["@malept/cross-spawn-promise@2.0.0", "", { "dependencies": { "cross-spawn": "^7.0.1" } }, "sha512-1DpKU0Z5ThltBwjNySMC14g0CkbyhCaz9FkhxqNsZI6uAPJXFS8cMXlBKo26FJ8ZuW6S9GCMcR9IO5k2X5/9Fg=="],
 
