@@ -32,6 +32,8 @@ import { validateFoundryEndpoint } from "../permissions/reviewer/provider-adapte
 
 const log = createLogger("demo-host-resolver");
 
+let appliedDemoHostResolverFingerprint: string | null = null;
+
 /**
  * Parse a `LVIS_DEMO_HOST_MAP` value into `[host, ip]` pairs. Malformed
  * entries (missing `=`, empty host, empty ip) are silently dropped — the
@@ -208,6 +210,10 @@ export function demoFoundryHostMapFingerprint(
   return `${endpointHost}|${buildHostResolverRules(normalizedHostMapEntries(entries))}`;
 }
 
+export function getAppliedDemoHostResolverFingerprint(): string | null {
+  return appliedDemoHostResolverFingerprint;
+}
+
 /**
  * Apply the demo host-resolver mapping when `LVIS_DEMO_VENDOR=azure-foundry`
  * and `LVIS_DEMO_HOST_MAP` is non-empty. MUST be called before
@@ -220,13 +226,15 @@ export function applyDemoHostResolverRules(
   app: Pick<App, "commandLine">,
   env: NodeJS.ProcessEnv = process.env,
 ): boolean {
+  appliedDemoHostResolverFingerprint = null;
   if (env.LVIS_DEMO_VENDOR !== "azure-foundry") {
     return false;
   }
   const baseUrl =
     env.LVIS_DEMO_BASEURL_AZURE_FOUNDRY ??
     env.LVIS_DEMO_ENDPOINT_AZURE_FOUNDRY;
-  if (demoFoundryHostMapFingerprint(baseUrl, env.LVIS_DEMO_HOST_MAP) === null) {
+  const fingerprint = demoFoundryHostMapFingerprint(baseUrl, env.LVIS_DEMO_HOST_MAP);
+  if (fingerprint === null) {
     log.info(
       "[demo-host-resolver] mapping skipped (endpoint/host-map invalid or mismatched)",
     );
@@ -248,10 +256,15 @@ export function applyDemoHostResolverRules(
   }
   const rules = buildHostResolverRules(entries);
   app.commandLine.appendSwitch("host-resolver-rules", rules);
+  appliedDemoHostResolverFingerprint = fingerprint;
   log.info(
     `[demo-host-resolver] mapping applied: ${entries.length} host(s) → intranet`,
   );
   return true;
+}
+
+export function _testOnlyResetAppliedDemoHostResolverFingerprint(): void {
+  appliedDemoHostResolverFingerprint = null;
 }
 
 /** Test-only — expose the parser so unit tests can assert format handling. */
