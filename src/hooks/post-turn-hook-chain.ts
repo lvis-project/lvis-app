@@ -11,7 +11,8 @@
 
 import { markStaleToolResults } from "../engine/auto-compact.js";
 import { detectFromStream, type DetectorResult } from "../engine/checkpoint-detector.js";
-import type { GenericMessage, TokenUsage } from "../engine/llm/types.js";
+import { isLLMVendor, type GenericMessage, type TokenUsage, type TokenUsageByModel } from "../engine/llm/types.js";
+import { normalizeAiSdkUsageForCost } from "../engine/llm/pricing.js";
 import type { MemoryManager } from "../memory/memory-manager.js";
 import type { AuditLogger } from "../audit/audit-logger.js";
 import type { IdleSchedulerService } from "../main/idle-scheduler.js";
@@ -27,16 +28,22 @@ export interface PostTurnHookContext {
   input: string;
   output: string;
   toolCalls: Array<{ name: string; isError: boolean }>;
+  /**
+   * AI SDK-normalized turn usage from the provider stream. `inputTokens`
+   * includes cache for modern AI SDK providers; the audit step normalizes this
+   * to the `computeCost` provider contract before persisting.
+   */
   tokenUsage?: TokenUsage;
+  usageByModel?: TokenUsageByModel[];
   route: string;
   /**
    * Snapshot of the LLM vendor/model that actually served this turn —
    * captured at runTurn entry so that post-turn audit attribution is
    * stable even if the user mutates settings mid-flight (e.g. retry-effort
    * temporarily patches thinking config and reverts in finally). The audit
-   * step uses these to emit `${provider}/${model}` for "llm" routes; usage
-   * stats then attribute cost to the model that actually consumed tokens.
-   * Optional so non-LLM-route callers (skill / command) can omit them.
+   * step uses these to emit `${provider}/${model}` for any token-bearing LLM
+   * turn, including `skill` routes that still execute through the LLM.
+   * Optional so non-token callers (command) can omit them.
    */
   vendorProvider?: string;
   vendorModel?: string;
@@ -82,20 +89,15 @@ export class PostTurnHookChain {
     // Token preflight (`runPreflightGuard`) 가 *next turn 진입 전* 구조적
     // 압축을 usable context 80% 임계로 수행하므로 post-turn 추가 압축 불필요.
     try {
-      const autoCompactEnabled = this.deps.settingsService?.get("chat").autoCompact ?? true;
-      if (!autoCompactEnabled) {
-        log.info("post-turn compact: SKIPPED (autoCompact 설정 OFF)");
+      const beforeMarkCount = ctx.messages.length;
+      const { messages: afterMark, result: mr } = markStaleToolResults(ctx.messages);
+      if (mr.marked) {
+        compactedMessages = afterMark;
+        log.info(
+          `mark-stale: marked ${mr.markedCount} tool_results, ~${mr.freedCharsOnSerialize} chars saved on serialize (msgCount=${beforeMarkCount}, memory verbatim)`,
+        );
       } else {
-        const beforeMarkCount = ctx.messages.length;
-        const { messages: afterMark, result: mr } = markStaleToolResults(ctx.messages);
-        if (mr.marked) {
-          compactedMessages = afterMark;
-          log.info(
-            `mark-stale: marked ${mr.markedCount} tool_results, ~${mr.freedCharsOnSerialize} chars saved on serialize (msgCount=${beforeMarkCount}, memory verbatim)`,
-          );
-        } else {
-          log.info(`mark-stale: SKIPPED — no stale tool_result content found (msgCount=${beforeMarkCount})`);
-        }
+        log.info(`mark-stale: SKIPPED — no stale tool_result content found (msgCount=${beforeMarkCount})`);
       }
     } catch (err) {
       log.warn({ err }, "mark-stale failed");
@@ -189,8 +191,15 @@ export class PostTurnHookChain {
       const model =
         ctx.vendorModel ??
         (llmSettings ? llmSettings.vendors[llmSettings.provider].model : undefined);
+      const auditTokenUsage = provider && isLLMVendor(provider)
+        ? normalizeAiSdkUsageForCost(ctx.tokenUsage, provider)
+        : ctx.tokenUsage;
+      const auditUsageByModel = ctx.usageByModel?.map((segment) => ({
+        ...segment,
+        tokenUsage: normalizeAiSdkUsageForCost(segment.tokenUsage, segment.vendorProvider),
+      }));
       const auditRoute =
-        ctx.route === "llm" && provider && model
+        ctx.tokenUsage && provider && model
           ? `${provider}/${model}`
           : ctx.route;
       this.deps.auditLogger?.logTurn({
@@ -198,7 +207,8 @@ export class PostTurnHookChain {
         input: ctx.input,
         output: outputForHooks,
         toolCalls: ctx.toolCalls,
-        tokenUsage: ctx.tokenUsage,
+        tokenUsage: auditTokenUsage,
+        usageByModel: auditUsageByModel,
         route: auditRoute,
       });
     } catch (err) {

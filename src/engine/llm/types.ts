@@ -165,6 +165,10 @@ export interface MessageMeta {
     turnDurationMs: number;
     toolCount: number;
     cumulativeToolMs: number;
+    /**
+     * Turn-end projected context input. This is the single context-fill SOT
+     * used by TokenProgressRing and the turn footer.
+     */
     tokensIn: number;
     /** Sum of per-round (input − cacheRead − cacheWrite). Always set by the
      * live conversation-loop emit, so required for any persisted turnSummary. */
@@ -172,6 +176,15 @@ export interface MessageMeta {
     tokensOut: number;
     cacheReadTokens?: number;
     cacheWriteTokens?: number;
+    /** Provider/model that actually served this turn, after fallback resolution. */
+    vendorProvider?: LLMVendor;
+    vendorModel?: string;
+    /**
+     * Per provider request usage segments. Kept unmerged so surcharge-sensitive
+     * pricing (for example OpenAI long-context request tiers) is computed at
+     * the same granularity the provider bills.
+     */
+    usageByModel?: TokenUsageByModel[];
     breakdown?: Record<string, { count: number; ms: number }>;
   };
   /**
@@ -183,6 +196,8 @@ export interface MessageMeta {
   checkpointMeta?: {
     removedMessages: number;
     freedTokens: number;
+    /** Post-compact context-fill SOT attached to the compact boundary. */
+    contextTokensAfter?: number;
     compactNum?: number;
     trigger?: "auto-compact" | "manual";
     compactStatus?: "summarized" | "content_truncated" | "noop" | "reduced_insufficient_forced";
@@ -210,7 +225,7 @@ export interface ThinkingBlock {
  */
 export type UserContentPart =
   | { type: "text"; text: string }
-  | { type: "image"; image: string; mimeType?: string }
+  | { type: "image"; image: string; mimeType?: string; width?: number; height?: number; bytes?: number }
   | { type: "file"; data: string; mimeType: string };
 
 export type GenericMessage =
@@ -306,10 +321,21 @@ export type StreamEvent =
   | { type: "error"; error: string; classification?: string };
 
 export interface TokenUsage {
+  /**
+   * AI SDK-normalized provider usage. In AI SDK v6 this is total prompt input,
+   * including cached tokens; callers that persist cost records must normalize
+   * through `normalizeAiSdkUsageForCost` before using `computeCost`.
+   */
   inputTokens: number;
   outputTokens: number;
   cacheReadTokens?: number;
   cacheWriteTokens?: number;
+}
+
+export interface TokenUsageByModel {
+  vendorProvider: LLMVendor;
+  vendorModel: string;
+  tokenUsage: TokenUsage;
 }
 
 // ─── Provider 인터페이스 ────────────────────────────

@@ -3,11 +3,6 @@ import type { ChatEntry } from "../../../lib/chat-stream-state.js";
 import type { LvisApi } from "../types.js";
 import { historyToEntries } from "../utils/history.js";
 
-type UsageEstimatedHistory = {
-  messages: Parameters<typeof historyToEntries>[0];
-  estimatedInputTokens?: number;
-};
-
 export interface SessionSummary {
   id: string;
   modifiedAt: string;
@@ -92,7 +87,7 @@ export function useSessions(
         // persisted session replay both enter ChatView as ChatEntry[]. Hydrate
         // only the exact active main session so routine re-entry never replaces
         // the persisted main active state.
-        applyInitialSession?.(historyWithUsageToEntries(h));
+        applyInitialSession?.(historyToEntries(h.messages));
         return;
       }
       const resumed = await api.chatSessionResume(activeState.mainActiveSessionId);
@@ -191,7 +186,7 @@ export function useSessions(
 }
 
 export function sessionHistoryToEntries(history: Awaited<ReturnType<LvisApi["chatSessionHistory"]>>): ChatEntry[] {
-  const entries = historyWithUsageToEntries(history);
+  const entries = historyToEntries(history.messages);
   if ((history.preambleChars ?? 0) <= 0) return entries;
   return [
     {
@@ -200,19 +195,4 @@ export function sessionHistoryToEntries(history: Awaited<ReturnType<LvisApi["cha
     },
     ...entries,
   ];
-}
-
-function historyWithUsageToEntries(history: UsageEstimatedHistory): ChatEntry[] {
-  const entries = historyToEntries(history.messages);
-  const tokensIn = normalizeEstimatedInputTokens(history.estimatedInputTokens);
-  if (tokensIn <= 0) return entries;
-  return [
-    ...entries,
-    { kind: "context_usage", tokensIn, source: "session-estimate" },
-  ];
-}
-
-function normalizeEstimatedInputTokens(value: unknown): number {
-  if (typeof value !== "number" || !Number.isFinite(value)) return 0;
-  return Math.max(0, Math.floor(value));
 }

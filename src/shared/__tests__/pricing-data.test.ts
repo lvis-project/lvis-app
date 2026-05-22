@@ -8,8 +8,10 @@ import {
   computeCost,
   DEFAULT_PRICING,
   FALLBACK_PRICING,
+  lookupBillablePricingOptional,
   lookupPricing,
   lookupPricingOptional,
+  normalizeAiSdkUsageForCost,
 } from "../pricing-data.js";
 import { getModelPricing, PRICING_TABLE } from "../../engine/llm/pricing.js";
 
@@ -27,6 +29,7 @@ describe("shared pricing-data", () => {
       const samples: Array<[string, string]> = [
         ["claude", "claude-sonnet-4-6"],
         ["claude", "claude-opus-4-6"],
+        ["claude", "claude-opus-4-5"],
         ["claude", "claude-haiku-4-5"],
         ["openai", "gpt-5.4"],
         ["openai", "gpt-5.4-mini"],
@@ -53,11 +56,51 @@ describe("shared pricing-data", () => {
     expect(p.outputPer1M).toBe(15);
   });
 
+  it.each(["claude-opus-4-6", "claude-opus-4-5"] as const)(
+    "pins %s current standard pricing",
+    (model) => {
+      // Anthropic official pricing, checked 2026-05-22:
+      // Opus 4.5/4.6 = $5 input, $6.25 5m cache write, $0.50 cache hit, $25 output.
+      const p = lookupPricing("claude", model);
+      expect(p.inputPer1M).toBe(5);
+      expect(p.outputPer1M).toBe(25);
+      expect(p.cacheReadPer1M).toBeUndefined();
+      expect(p.cacheWritePer1M).toBeUndefined();
+      expect(
+        computeCost(
+          {
+            inputTokens: 1_000_000,
+            outputTokens: 1_000_000,
+            cacheReadTokens: 1_000_000,
+            cacheWriteTokens: 1_000_000,
+          },
+          p,
+          "claude",
+        ),
+      ).toBeCloseTo(36.75, 5);
+    },
+  );
+
   it("unknown vendor/model falls back to zero-cost FALLBACK_PRICING", () => {
     const p = lookupPricing("nope", "mystery-model");
     expect(p).toBe(FALLBACK_PRICING);
     expect(p.inputPer1M).toBe(0);
     expect(p.outputPer1M).toBe(0);
+  });
+
+  it("does not expose zero-price placeholder rows as billable pricing", () => {
+    expect(lookupPricingOptional("openai", "gpt-4o")).toMatchObject({
+      inputPer1M: 0,
+      outputPer1M: 0,
+      contextWindow: 128_000,
+    });
+    expect(lookupBillablePricingOptional("openai", "gpt-4o")).toBeUndefined();
+    expect(lookupBillablePricingOptional("openai", "gpt-5.4-mini")).toMatchObject({
+      inputPer1M: 0.75,
+      cacheReadPer1M: 0.075,
+      outputPer1M: 4.5,
+    });
+    expect(lookupBillablePricingOptional("azure-foundry", "gpt-5.4-mini")).toBeUndefined();
   });
 });
 
@@ -119,12 +162,14 @@ describe("engine pricing env-override (Node-only layer)", () => {
     it("gpt-5.4 (1M-class base)", () => {
       const p = lookupPricing("openai", "gpt-5.4");
       expect(p.inputPer1M).toBe(2.5);
+      expect(p.cacheReadPer1M).toBe(0.25);
       expect(p.outputPer1M).toBe(15);
       expect(p.contextWindow).toBe(1_050_000);
     });
     it("gpt-5.4-mini (400K tier)", () => {
       const p = lookupPricing("openai", "gpt-5.4-mini");
       expect(p.inputPer1M).toBe(0.75);
+      expect(p.cacheReadPer1M).toBe(0.075);
       expect(p.outputPer1M).toBe(4.5);
       expect(p.contextWindow).toBe(400_000);
     });
@@ -149,8 +194,10 @@ describe("engine pricing env-override (Node-only layer)", () => {
     it("Azure OpenAI deployment id gpt-5.4-mini inherits the OpenAI model spec", () => {
       const p = lookupPricing("azure-foundry", "gpt-5.4-mini");
       expect(p.inputPer1M).toBe(0.75);
+      expect(p.cacheReadPer1M).toBe(0.075);
       expect(p.outputPer1M).toBe(4.5);
       expect(p.contextWindow).toBe(400_000);
+      expect(lookupBillablePricingOptional("azure-foundry", "gpt-5.4-mini")).toBeUndefined();
     });
   });
 });
@@ -197,4 +244,38 @@ describe("computeCost — long-context surcharge (issue #900)", () => {
     // mini standard: 350_000/1M × $0.75 + 10_000/1M × $4.5 = $0.2625 + $0.045 = $0.3075
     expect(cost).toBeCloseTo(0.3075, 5);
   });
+});
+
+describe("normalizeAiSdkUsageForCost", () => {
+  it("converts AI SDK total input to Claude fresh input before cost math", () => {
+    const normalized = normalizeAiSdkUsageForCost(
+      {
+        inputTokens: 1_700_000,
+        outputTokens: 100_000,
+        cacheReadTokens: 500_000,
+        cacheWriteTokens: 200_000,
+      },
+      "claude",
+    );
+
+    expect(normalized).toEqual({
+      inputTokens: 1_000_000,
+      outputTokens: 100_000,
+      cacheReadTokens: 500_000,
+      cacheWriteTokens: 200_000,
+    });
+  });
+
+  it.each(["openai", "azure-foundry", "gemini", "vertex-ai", "copilot"] as const)(
+    "keeps %s provider prompt tokens cache-inclusive",
+    (vendor) => {
+      const usage = {
+        inputTokens: 1_700_000,
+        outputTokens: 100_000,
+        cacheReadTokens: 500_000,
+        cacheWriteTokens: 200_000,
+      };
+      expect(normalizeAiSdkUsageForCost(usage, vendor)).toBe(usage);
+    },
+  );
 });
