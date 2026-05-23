@@ -1,5 +1,5 @@
 /**
- * RoutinesStore v2 — persistent backing for the `schedule_routine` LLM tool.
+ * RoutinesStore v2 — persistent backing for the `routine_schedule` LLM tool.
  *
  * Persists routines to `~/.lvis/routine/routines.json` with an in-process async mutex
  * (mirroring RemindersStore `withFileLock`) so concurrent add/dismiss operations
@@ -45,7 +45,7 @@ import { lvisHome } from "../shared/lvis-home.js";
 /** Maximum allowed distance into the future for schedule.at (parity with RemindersStore). */
 const MAX_FUTURE_OFFSET_MS = 5 * 365.25 * 24 * 60 * 60 * 1000;
 
-/** Maximum cron expression length (prevents regex DoS). Must match schedule-routine.ts. */
+/** Maximum cron expression length (prevents regex DoS). Must match routine-schedule.ts. */
 const MAX_CRON_EXPR_LENGTH = 256;
 
 /** Minimum interval in ms (1 minute — prevents sub-minute polling spam). */
