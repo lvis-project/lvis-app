@@ -27,6 +27,7 @@ import {
   buildModePreamble,
 } from "../subagent-runner.js";
 import { MODEL_COMPLEXITY_MAP } from "../../shared/model-complexity-map.js";
+import { LLM_VENDOR_MODEL_OPTIONS } from "../../shared/llm-vendor-defaults.js";
 import { AGENT_MODE_MAP } from "../../shared/agent-mode-map.js";
 import type { LLMProvider, StreamEvent, StreamTurnParams } from "../llm/types.js";
 import { createAgentSpawnTool } from "../../tools/agent-spawn.js";
@@ -356,13 +357,26 @@ describe("resolveSubAgentModel — #1112 complexity resolution", () => {
     );
   });
 
-  it("passes an explicit vendor-specific model ID through unchanged", () => {
-    expect(resolveSubAgentModel("claude-opus-4-6", "claude")).toBe(
-      "claude-opus-4-6",
-    );
-    // Even when the active vendor differs, an explicit ID is the profile
-    // writer's deliberate choice — pass through, do not second-guess.
-    expect(resolveSubAgentModel("gpt-5.4", "claude")).toBe("gpt-5.4");
+  it("passes an explicit model ID through only when the active vendor offers it", () => {
+    const claudeOpt = LLM_VENDOR_MODEL_OPTIONS.claude[0];
+    expect(resolveSubAgentModel(claudeOpt, "claude")).toBe(claudeOpt);
+    const openaiOpt = LLM_VENDOR_MODEL_OPTIONS.openai[0];
+    expect(resolveSubAgentModel(openaiOpt, "openai")).toBe(openaiOpt);
+  });
+
+  it("falls back to the parent model (null) + warns when an explicit ID is not selectable for the active vendor", () => {
+    const warnSpy = vi
+      .spyOn(console, "warn")
+      .mockImplementation(() => undefined);
+    try {
+      // An openai model ID under the claude vendor: claude cannot serve it,
+      // so it must NOT reach the provider as a non-retryable model-not-found.
+      expect(resolveSubAgentModel("gpt-5.4", "claude")).toBeNull();
+      const logged = warnSpy.mock.calls.map((c) => c.join(" ")).join("\n");
+      expect(logged).toMatch(/parent-model fallback used/i);
+    } finally {
+      warnSpy.mockRestore();
+    }
   });
 
   it("returns null for undefined / empty — caller keeps the parent model", () => {
@@ -406,5 +420,54 @@ describe("buildModePreamble — #1113 mode posture + skill recommendation", () =
 
   it("returns an empty string for the inert default mode", () => {
     expect(buildModePreamble(AGENT_MODE_MAP.default)).toBe("");
+  });
+});
+
+// ─── Unknown-mode audit warn (#1113) ──────────────────
+
+describe("SubAgentRunner — unknown mode audit warn", () => {
+  it("logs a warning when the profile mode does not match a known mode", async () => {
+    const toolRegistry = new ToolRegistry();
+    const provider = new ScriptedProvider([
+      [
+        { type: "text_delta", text: "done" },
+        { type: "message_complete", stopReason: "end_turn" },
+      ],
+    ]);
+    const runner = new SubAgentRunner({
+      parentDeps: buildLoopDeps(toolRegistry),
+      toolRegistry,
+    });
+    const hasProviderSpy = vi
+      .spyOn(
+        ConversationLoop.prototype as unknown as { hasProvider: () => boolean },
+        "hasProvider",
+      )
+      .mockReturnValue(true);
+    const refreshProviderSpy = vi
+      .spyOn(
+        ConversationLoop.prototype as unknown as { refreshProvider: () => void },
+        "refreshProvider",
+      )
+      .mockImplementation(function (this: ConversationLoop) {
+        (this as { provider: LLMProvider | null }).provider = provider;
+      });
+    const warnSpy = vi
+      .spyOn(console, "warn")
+      .mockImplementation(() => undefined);
+    try {
+      await runner.spawn({
+        title: "t",
+        instructions: "do",
+        profileMode: "supervise", // not a member of AGENT_MODES
+        maxTurns: 1,
+      });
+      const logged = warnSpy.mock.calls.map((c) => c.join(" ")).join("\n");
+      expect(logged).toMatch(/unknown mode/i);
+    } finally {
+      hasProviderSpy.mockRestore();
+      refreshProviderSpy.mockRestore();
+      warnSpy.mockRestore();
+    }
   });
 });
