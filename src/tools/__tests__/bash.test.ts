@@ -300,9 +300,9 @@ describe("BashTool — schema default", () => {
   });
 });
 
-// ── H2: env whitelist — secrets must NOT leak to child process ────
+// ── env allowlist — secrets must NOT leak to child process ────
 
-describe("BashTool — H2 env whitelist", () => {
+describe("BashTool — env allowlist: secrets must not reach child", () => {
   it("does not leak LVIS_TEST_SECRET to the spawned child", async () => {
     // Arrange: set a secret in the parent env
     const SECRET_KEY = "LVIS_TEST_SECRET";

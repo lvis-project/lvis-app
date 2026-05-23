@@ -1688,7 +1688,8 @@ export class PluginRuntime {
   }
 
   /**
-   * H2: Renderer-originated plugin invocation.
+   * Invoke a plugin method from the renderer, enforcing the uiCallable allowlist
+   * so only explicitly declared methods are reachable via the IPC bridge.
    */
   async callFromUi(method: string, payload?: unknown): Promise<unknown> {
     const entry = this.methodMap.get(method);
