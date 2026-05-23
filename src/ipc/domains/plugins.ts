@@ -356,7 +356,7 @@ export function registerPluginsHandlers(deps: IpcDeps): void {
     marketplacePingInflight = { key, promise };
     return promise;
   };
-  // Phase 2d FU — bootstrap retry
+  // Bootstrap retry
   ipcMain.handle("lvis:bootstrap:retry", async (e) => {
     if (!validateSender(e)) {
       auditUnauthorized(auditLogger, "lvis:bootstrap:retry", e);

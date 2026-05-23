@@ -183,9 +183,9 @@ export interface ReviewerDispatchResult {
 
 export type ReviewerDeferPolicy = "none" | "high" | "medium-high";
 
-// R-3 RejectResponse interface and MAX_REVIEWER_RETRIES deferred to follow-up.
-// The R-3 LLM caller retry wiring lives in conversation-loop.ts scope.
-// Tracked in follow-up issue for "R-3 LLM caller retry wiring" with
+// RejectResponse interface and MAX_REVIEWER_RETRIES deferred to follow-up.
+// LLM caller retry wiring lives in conversation-loop.ts scope.
+// Tracked in follow-up issue for "LLM caller retry wiring" with
 // max 2 retry / counter scope / args-change-reset contract.
 
 export class PermissionManager {
@@ -286,7 +286,7 @@ export class PermissionManager {
 
   /**
    * CRITICAL 4.1 — wire renderer broadcast for memory-hit auto-approve disclosure.
-   * Called once at boot. When set, every R-2 memory hit emits
+   * Called once at boot. When set, every user-approval memory hit emits
    * `lvis:permissions:user-approval-hit` to the renderer and a console.info log.
    */
   setBroadcastConfigChanged(fn: () => void): void {
@@ -696,11 +696,11 @@ export class PermissionManager {
       },
     };
 
-    // ── R-2 user-approval memory hit ─────────────────────────────────────
+    // ── User-approval memory hit ──────────────────────────────────────────
     // Check the user-approval store before consulting the LLM classifier.
     // A memory hit for a non-revoked approval bypasses the LLM call and
-    // returns the rule-based verdict directly (the R-1 composition rule
-    // still applies — sandbox/context quality can only raise, not lower).
+    // returns the rule-based verdict directly (composition rule still
+    // applies — sandbox/context quality can only raise, not lower).
     // HIGH-verdict approvals are intentionally included: if the user already
     // justified a HIGH action this session, re-running the LLM is wasteful.
     const userApproval = await lookupApproval(
@@ -719,7 +719,7 @@ export class PermissionManager {
       verdictAtApproval: UserApprovalVerdict | null;
     } | null = null;
 
-    // Cross-cutting root-cause fix: a legacy R-2 entry may carry
+    // Cross-cutting root-cause fix: a legacy user-approval entry may carry
     // `null verdictAtApproval` (the field was added in the user-approval-store
     // wiring; entries written before that change pre-date it). A legacy null
     // means "the original verdict is unrecoverable" — NOT "medium".
@@ -903,10 +903,10 @@ export class PermissionManager {
    *   - "allow"    → permitted (with audit)
    *   - "ask"      → ApprovalGate round-trip
    *   - "deny"     → refused (used by future restricted categories)
-   *   - "reviewer" → defer to Phase 3 reviewer agent (headless lane)
+   *   - "reviewer" → defer to reviewer agent (headless lane)
    *   - "override" → meta category — caller reads tool.decisionOverride
    *
-   * The Phase 3 reviewer is not yet wired; until it lands, "reviewer"
+   * The reviewer agent is not yet wired; until it lands, "reviewer"
    * is mapped to "ask" so the user is prompted instead of silently
    * permitting a headless write — fail-safe per design §1 principles.
    *
