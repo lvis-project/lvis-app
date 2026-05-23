@@ -1,4 +1,4 @@
-// Phase 2: stateless helpers over window.lvisApi.
+// Stateless helpers over window.lvisApi.
 
 import type { LvisApi, PluginUiExtension } from "./types.js";
 

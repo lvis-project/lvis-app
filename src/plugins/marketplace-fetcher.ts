@@ -1,7 +1,7 @@
 /**
  * Marketplace Fetcher — §9.5 M4
  *
- * Abstracts the source of marketplace catalog data. Phase 2-final has a
+ * Abstracts the source of marketplace catalog data. The current implementation has a
  * single production source: the lvis-marketplace REST service.
  *
  * Implementations:

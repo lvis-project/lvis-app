@@ -319,7 +319,7 @@ export interface TelemetrySettings {
 }
 
 /**
- * Sprint E §3 — Privacy tab. Default OFF.
+ * §3 — Privacy tab. Default OFF.
  * piiRedactEnabled: 활성화 시 user draft 를 LLM 으로 보내기 전 DLPFilter 로
  *   이메일/전화/신용카드 등을 `[REDACTED:*]` 로 치환한다. 감사 로그에 건수 기록.
  */
@@ -344,7 +344,7 @@ export interface WebSearchSettings {
 /**
  * §9.5 — plugin marketplace backend.
  *
- * Phase 2-final: server-only. The lvis-marketplace REST API is the single
+ * Server-only. The lvis-marketplace REST API is the single
  * source of truth for catalog + signed artifacts. The historical "mock"
  * backend that read `plugins/marketplace.json` from disk is removed; tests
  * that need a deterministic catalog inject a stub fetcher directly.
@@ -395,7 +395,7 @@ const DEFAULT_SETTINGS: AppSettings = {
     provider: "duckduckgo",
   },
   marketplace: {
-    // Phase 2-final defaults — single source: marketplace server. Default
+    // Defaults — single source: marketplace server. Default
     // points at the production tunnel so a fresh install lands on the live
     // catalog without any post-install configuration. Operators running a
     // local marketplace (http://localhost:8000) can override via Settings →
@@ -467,8 +467,8 @@ export class SettingsService {
   }
 
   /**
-   * Phase 1.5 §7.x: Retroactive 0o600 enforcement.
-   * Phase 1 C5 fix (A4)는 신규 write에만 mode를 적용했으므로, 기존 설치에
+   * §7.x: Retroactive 0o600 enforcement.
+   * 신규 write에만 mode를 적용했으므로, 기존 설치에
    * 남아있는 lvis-secrets.json (0o644 추정)을 owner-only로 내려준다.
    *
    * fd-based fstat+fchmod로 TOCTOU 방지. path 기반 chmod는

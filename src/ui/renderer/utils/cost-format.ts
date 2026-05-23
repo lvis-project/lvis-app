@@ -1,4 +1,4 @@
-// Phase 2: token + cost number formatting used by UsageDashboard.
+// Token + cost number formatting used by UsageDashboard.
 
 export function formatTokens(n: number): string {
   if (n >= 1_000_000) return `${(n / 1_000_000).toFixed(2)}M`;

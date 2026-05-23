@@ -1,4 +1,4 @@
-// Phase 2: React-free constants extracted from src/renderer.tsx.
+// React-free constants extracted from src/renderer.tsx.
 
 // ── Toast / Banner TTL ────────────────────────────────────────────────────────
 /**

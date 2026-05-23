@@ -17,7 +17,7 @@ export type { StatusBarSeverity, NotificationToastMeta, PersistentItem, ToastIte
  * this hook; producers subscribe to host events that already exist
  * (install-progress, install-result, uninstall-result) plus the routine
  * schedule from settings, so this hook needs no new IPC channel for the
- * Phase 1 surface.
+ * initial surface.
  *
  * Future phases (plugin-emitted events, online/offline, marketplace
  * reachability) will plug into the same hook by appending toasts /

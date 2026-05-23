@@ -10,7 +10,7 @@ import { TooltipProvider } from "../../components/ui/tooltip.js";
 import { ErrorBoundary } from "./components/ErrorBoundary.js";
 import { ThemeProvider } from "./theme/index.js";
 
-// ─── Phase 2 split: types / constants / helpers / components / tabs ──
+// ─── Imports: types / constants / helpers / components / tabs ────────
 import { getApi, getPluginViewLabel, toViewKey } from "./api-client.js";
 import type { PluginEntry } from "./components/PluginGridButton.js";
 import { getPluginInstallAliases } from "./utils/plugin-install-aliases.js";
@@ -350,7 +350,7 @@ export function App() {
   // listeners, no stale-state divergence between the two views.
   const { statuses: pluginAuthStatuses } = usePluginAuthStatuses(api, pluginCards);
 
-  // Sprint B — role preset, cost preview, multimodal attachments
+  // Role preset, cost preview, multimodal attachments
   const { rolePresets, activePreset, activePresetId, setActivePresetId } = useRolePresets(api);
   const { agents: agentOptions, skills: skillOptions } = useAssistantContextOptions(api);
   const [activeAgentName, setActiveAgentName] = useState("");

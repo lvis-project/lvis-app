@@ -1,7 +1,7 @@
 /**
- * R-2 User-Approval Memory Layer — persistent + session-scoped approval store.
+ * User-Approval Memory Layer — persistent + session-scoped approval store.
  *
- * Spec ref: docs/research/sandbox-isolation.md §R-2
+ * Spec ref: docs/research/sandbox-isolation.md
  * Issue: #691
  *
  * Stores per-tool approval decisions made by the user in the ToolApprovalDialog
@@ -56,7 +56,7 @@ export interface UserApprovalEntry {
   /**
    * Display metadata — stored alongside the entry so listApprovals() can
    * return human-readable tool identity without re-parsing the hash key.
-   * R-2 Round-3: required for PermissionsTab table to show toolName.
+   * Required for PermissionsTab table to show toolName.
    */
   toolName?: string;
   source?: string;
@@ -215,7 +215,7 @@ export async function recordApproval(
     nlJustification: entry.nlJustification,
     revokedAt: null,
     // Store display metadata so listApprovals() can surface toolName/source
-    // without re-parsing the hash key. R-2 Round-3 MEDIUM fix.
+    // without re-parsing the hash key.
     toolName,
     source,
     // Store key components for boot-time migration (issue #837): if

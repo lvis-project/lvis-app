@@ -137,7 +137,7 @@ export async function parsePluginJson(
   path: string,
   validator: ValidateFunction,
 ): Promise<PluginManifest> {
-  // Sprint 1-A A4 — detailed, per-field error messages shaped as
+  // Detailed, per-field error messages shaped as
   //   "Invalid plugin manifest '<pluginId>' at '<fieldPath>': <reason>. Example: <correction>"
   const raw = await readFile(path, "utf-8");
   let parsed: PluginManifest;
@@ -280,7 +280,7 @@ export async function parsePluginJson(
   }
   if (typeof parsed.publisher !== "string" || parsed.publisher.length === 0) {
     log.warn(
-      `plugin '${pid}' at '${path}' is missing publisher field (SHOULD per Phase 1). ` +
+      `plugin '${pid}' at '${path}' is missing publisher field (SHOULD). ` +
       `Add: "publisher": "Your Org"`,
     );
   }
@@ -301,7 +301,7 @@ export async function parsePluginJson(
     }
   }
 
-  // Sprint 4-A — surface any remaining testMode flag in a protected plugin manifest.
+  // Surface any remaining testMode flag in a protected plugin manifest.
   if (
     normalizeInstallPolicy(parsed) === "admin" &&
     parsed.config &&
@@ -332,7 +332,7 @@ export async function parsePluginJson(
     }
   }
 
-  // Sprint 4-B §B-3 — uiCallable ⊂ tools validation.
+  // §B-3 — uiCallable ⊂ tools validation.
   const uiCallable = Array.isArray(parsed.uiCallable) ? parsed.uiCallable : [];
   for (let i = 0; i < uiCallable.length; i += 1) {
     const method = uiCallable[i];

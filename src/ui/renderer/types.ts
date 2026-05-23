@@ -1,4 +1,4 @@
-// Phase 2: types extracted from src/renderer.tsx.
+// Types extracted from src/renderer.tsx.
 // Pure type declarations — no React runtime, no hook state, no side effects.
 
 import type { PluginUiExtensionView } from "../../plugin-ui-host.js";
@@ -223,7 +223,7 @@ export type PluginPerfStats = {
   lastCallAt: number | null;
 };
 
-// ─── Usage types (Sprint 4.B) ───────────────────────
+// ─── Usage types ────────────────────────────────────
 export type UsageTotals = {
   inputTokens: number;
   outputTokens: number;
@@ -909,9 +909,9 @@ export type ApprovalRequest = {
   target?: { filePath?: string };
   isReadOnly?: boolean;
   mode?: "default" | "ask_all" | "plan" | "full_auto";
-  /** §D2: nonce issued by the main process; renderer echoes verbatim. */
+  /** Confused-deputy nonce issued by the main process; renderer echoes verbatim. */
   nonce?: string;
-  /** §D2: HMAC over (id, nonce, toolName, args) — echoed verbatim. */
+  /** HMAC over (id, nonce, toolName, args) — echoed verbatim for confused-deputy defense. */
   hmac?: string;
   /**
    * Permission policy — present when `kind === "out-of-allowed-dir"`. Carries
@@ -927,7 +927,7 @@ export type ApprovalRequest = {
   /** Permission policy trust-origin classification, e.g. "user" / "agent". */
   trustOrigin?: string;
   /**
-   * R-2 Round-3: semantic cache key for the approval (e.g. a stable hash of
+   * Semantic cache key for the approval (e.g. a stable hash of
    * the tool invocation, distinct from the raw args string). Propagated from
    * the main process so the renderer can include it in the record IPC call,
    * ensuring record/lookup key symmetry in user-approval-store.
@@ -954,9 +954,9 @@ export type ApprovalDecision = {
   requestId: string;
   choice: ApprovalChoice;
   rememberPattern?: string;
-  /** §D2: echoed nonce from the matching ApprovalRequest. */
+  /** Echoed nonce from the matching ApprovalRequest (confused-deputy defense). */
   nonce?: string;
-  /** §D2: echoed HMAC from the matching ApprovalRequest. */
+  /** Echoed HMAC from the matching ApprovalRequest (confused-deputy defense). */
   hmac?: string;
 };
 
@@ -965,7 +965,7 @@ export type ApprovalDecision = {
   respond: (decision: ApprovalDecision) => Promise<unknown>;
 };
 
-/** R-2 User-Approval Store API */
+/** User-Approval Store API */
 /**
  * Approval scope + verdict — re-uses the union literal types from the
  * shared SOT (`UserApprovalScope` / `UserApprovalVerdict`) so renderer
@@ -991,9 +991,9 @@ export type LvisUserApprovalApi = {
     scope: UserApprovalScope;
     verdictAtApproval: UserApprovalVerdict;
     nlJustification: string | null;
-    /** R-2 Round-3: propagate trust origin for record/lookup key symmetry. */
+    /** Propagate trust origin for record/lookup key symmetry. */
     trustOrigin?: string;
-    /** R-2 Round-3: propagate cache key for record/lookup key symmetry. */
+    /** Propagate cache key for record/lookup key symmetry. */
     approvalCacheKey?: string;
   }) => Promise<{ ok: boolean; error?: string; message?: string }>;
   revokeByKey: (key: string) => Promise<{ ok: boolean; error?: string; message?: string }>;
@@ -1004,7 +1004,7 @@ export type LvisUserApprovalApi = {
     verdictAtApproval: UserApprovalVerdict;
     nlJustification: string | null;
     revokedAt: string | null;
-    /** R-2 Round-3: display metadata stored alongside the entry. */
+    /** Display metadata stored alongside the entry. */
     toolName?: string;
     source?: string;
   }>>;
@@ -1134,7 +1134,7 @@ export type LvisPermissionApi = {
   ) => () => void;
   /**
    * Permission policy CRITICAL 4.1 — subscribe to user-approval memory-hit
-   * disclosure events. Fires when an R-2 approval cache entry auto-resolves
+   * disclosure events. Fires when a user-approval cache entry auto-resolves
    * a tool invocation that would otherwise have prompted. Renderer is
    * expected to surface a transient toast/banner so the user sees that a
    * stored approval was applied. Returns an unsubscribe function.

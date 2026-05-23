@@ -183,7 +183,7 @@ export interface PluginManifest {
    * 런타임이 이 값을 그대로 tool name으로 사용한다.
    */
   tools: string[];
-  /** 플러그인 한 줄 설명 — LLM 카탈로그 및 UI에 표시. Phase 1 MUST 필드. */
+  /** 플러그인 한 줄 설명 — LLM 카탈로그 및 UI에 표시. MUST 필드. */
   description: string;
   config?: Record<string, unknown>;
   ui?: PluginUiExtension[];
@@ -251,7 +251,7 @@ export interface PluginManifest {
   requires?: RequiresSpec;
   publisher?: string;
   /**
-   * Sprint 1-A A1 — optional hard startup timeout (ms, positive integer).
+   * Optional hard startup timeout (ms, positive integer).
    * When declared, PluginRuntime enforces a `Promise.race`-based timeout on
    * the plugin's `start()` call — the running task is NOT cancelled
    * (no AbortController is wired through); the host simply drops the slow
@@ -864,13 +864,13 @@ export interface PluginHostApi {
   callLlm(prompt: string, options?: { maxTokens?: number; systemPrompt?: string }): Promise<string>;
 
   /**
-   * Sprint 1-A A3 — structured log event routed through AuditLogger.
+   * Structured log event routed through AuditLogger.
    * Automatically tagged with `plugin:${pluginId}` context (sessionId = "plugin").
    */
   logEvent(level: "info" | "warn" | "error", message: string, data?: unknown): void;
 
   /**
-   * Sprint 1-A A3 — register a handler fired before app shutdown (Electron
+   * Register a handler fired before app shutdown (Electron
    * `before-quit`). Host enforces a 5s timeout on each handler; slow handlers
    * are logged but do not block quit.
    */
@@ -1064,7 +1064,7 @@ export interface PluginHostApi {
      * ApprovalIssuerRegistry BEFORE calling the gate, so the respond path
      * can verify cross-plugin hijack and scope violations.
      *
-     * The gate generates nonce + HMAC internally (§D2 confused-deputy defense).
+     * The gate generates nonce + HMAC internally (confused-deputy defense).
      * Plugin MUST NOT compute nonce/HMAC.
      *
      * `scope` must be present in the host-approved install grant
@@ -1080,7 +1080,7 @@ export interface PluginHostApi {
      * Resolve a pending ApprovalGate entry from the main process.
      *
      * Equivalent to `approvalGate.resolve(requestId, { requestId, choice, nonce, hmac })`.
-     * §D2: nonce + hmac MUST be echoed back verbatim as issued by the host with
+     * Nonce + hmac MUST be echoed back verbatim as issued by the host with
      * the original ApprovalRequest — the gate re-verifies them before honoring
      * the decision. A mismatch forces deny-once (confused-deputy defense).
      *
@@ -1088,8 +1088,8 @@ export interface PluginHostApi {
      * (b) scope is still in the host-approved install grant. Violations throw.
      *
      * NOTE: a `list()` method was deliberately NOT exposed. Listing pending
-     * approvals from a plugin would surface gate-issued nonces/HMACs (§D2
-     * confused-deputy material) to plugin code with no current use case.
+     * approvals from a plugin would surface gate-issued nonces/HMACs (confused-deputy
+     * material) to plugin code with no current use case.
      * If a future flow legitimately needs the snapshot, add it then with a
      * scoped capability — do not pre-expose dead surface.
      */
@@ -1191,7 +1191,7 @@ export interface ConversationTriggerResult {
 }
 
 /**
- * Sprint 1-A A2 — canonical alias for the tool-handler function type exposed
+ * Canonical alias for the tool-handler function type exposed
  * through `@lvis/plugin-sdk`. Kept identical to `PluginToolHandler` so the SDK
  * surface can evolve without breaking the existing runtime name.
  */

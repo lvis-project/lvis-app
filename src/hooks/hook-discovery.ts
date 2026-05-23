@@ -1,5 +1,5 @@
 /**
- * Permission policy Phase 4 — Layer 6 hook discovery + trust lockfile.
+ * Permission policy — Layer 6 hook discovery + trust lockfile.
  *
  * Spec ref: docs/architecture/permission-policy-design.md §3 Layer 6
  * "Boot-time hash check + explicit trust registration".

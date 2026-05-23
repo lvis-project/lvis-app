@@ -1,5 +1,5 @@
 /**
- * Feedback Store — D6 thumbs-up/down message feedback persistence.
+ * Feedback Store — thumbs-up/down message feedback persistence.
  *
  * Stores user feedback separately from the audit log to keep PII/free-text
  * out of security-audit infrastructure (GDPR §17 / privacy hardening).

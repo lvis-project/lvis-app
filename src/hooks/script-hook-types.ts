@@ -1,5 +1,5 @@
 /**
- * Permission policy Phase 4 — Layer 6 hook system: shell-script hook contract.
+ * Permission policy — Layer 6 hook system: shell-script hook contract.
  *
  * Spec ref: docs/architecture/permission-policy-design.md §3 Layer 6.
  *

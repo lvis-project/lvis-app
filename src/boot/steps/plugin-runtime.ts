@@ -836,7 +836,7 @@ export interface InitPluginRuntimeOutput {
   deploymentGuard: PluginDeploymentGuard;
   lateBinding: LateBindingRefs;
   pluginShutdownHandlers: Array<{ pluginId: string; handler: () => void | Promise<void> }>;
-  /** Phase 0 SoT — shared with MarketplaceService + post-boot update detector. */
+  /** SoT — shared with MarketplaceService + post-boot update detector. */
   pluginPaths: ReturnType<typeof resolvePluginPaths>;
 }
 
@@ -873,7 +873,7 @@ export async function initPluginRuntime(
   // the next plugin call without reload.
   const readAppPreference = buildAppPreferenceReader(settingsService, log);
 
-  // Plugin shutdown handler registry — fires on before-quit (see Sprint 1-A A3).
+  // Plugin shutdown handler registry — fires on before-quit (see shared AuditLogger + hooks wiring).
   const pluginShutdownHandlers: Array<{ pluginId: string; handler: () => void | Promise<void> }> = [];
   let pluginShutdownRan = false;
   app.prependOnceListener("before-quit", (event) => {
@@ -979,7 +979,7 @@ export async function initPluginRuntime(
     triggerExecutorRef: { fn: null },
   };
 
-  // Phase 1 §Step 4 — wire `app.isPackaged` into the dev-flag gate before any
+  // §Step 4 — wire `app.isPackaged` into the dev-flag gate before any
   // helper or downstream module reads it. Packaged builds with LVIS_DEV* set
   // get a single audit warning, never a per-flag enumeration.
   setIsPackaged(app.isPackaged);
@@ -1002,7 +1002,7 @@ export async function initPluginRuntime(
     });
   };
 
-  // Phase 1 §Step 1 + §Step 2 — thread the user-installed dir as a second
+  // §Step 1 + §Step 2 — thread the user-installed dir as a second
   // trust root and the unsigned-user-plugin opt-in flag.
   pluginRuntime = new PluginRuntime({
     hostRoot: projectRoot,

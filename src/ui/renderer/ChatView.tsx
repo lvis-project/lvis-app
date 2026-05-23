@@ -144,7 +144,7 @@ export interface ChatViewProps {
   onGuide: (text: string) => Promise<{ ok: true } | { ok: false; error: string }>;
   /** Surface visible error in chat transcript when guide is rejected (queue-full / too-long / no-active-turn). */
   onGuideError: (message: string) => void;
-  /** D6: submit thumbs up/down feedback for an assistant message */
+  /** Submit thumbs up/down feedback for an assistant message. */
   onFeedback?: (messageIdx: number, rating: "up" | "down", reason?: string) => void | Promise<void>;
   /** Workflow tool state — lifted to App level so panel survives view navigation */
   subAgentSpawns: SubAgentSpawn[];
@@ -271,10 +271,10 @@ export function ChatView({ api, onAsk, onEditSave, onFork, onToggleStar, onRetry
   const [forkToast, setForkToast] = useState<string | null>(null);
   const forkToastTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
-  // R-2 user-approval memory-hit disclosure toast (#793). Subscribes to the
+  // User-approval memory-hit disclosure toast (#793). Subscribes to the
   // `lvis:permissions:user-approval-hit` IPC broadcast wired by PR #786 and
   // surfaces a transient banner so the user sees that a stored approval
-  // (R-2 cache) auto-resolved the tool call. Auto-dismisses after 4 s.
+  // cache entry auto-resolved the tool call. Auto-dismisses after 4 s.
   const [userApprovalHitToast, setUserApprovalHitToast] = useState<
     UserApprovalHitPayload | null
   >(null);
@@ -858,7 +858,7 @@ export function ChatView({ api, onAsk, onEditSave, onFork, onToggleStar, onRetry
           {forkToast}
         </div>
       )}
-      {/* R-2 user-approval memory-hit disclosure toast (#793) — auto-dismisses after 4 s.
+      {/* User-approval memory-hit disclosure toast (#793) — auto-dismisses after 4 s.
           Verdict-tier tint surfaces the trust gradient (CRITICAL 4.1 disclosure):
           - low    → --success (informational, safe re-approval)
           - medium → --warning (moderate risk)

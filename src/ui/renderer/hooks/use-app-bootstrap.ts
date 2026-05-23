@@ -17,7 +17,7 @@ export interface AppBootstrapDeps {
  *  - register Cmd/Ctrl+K keybinding for the command popover
  *
  * Uses a mounted ref to avoid late async resolutions writing to an unmounted
- * component (PR#44 HIGH).
+ * component.
  *
  * Three effects are used:
  *  1. [] — sets isMountedRef lifetime; never re-runs so the ref is never
