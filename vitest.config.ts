@@ -28,7 +28,7 @@ const rendererTestGlobs = [
 ];
 
 /**
- * Phase 1 renderer split — test infrastructure.
+ * Renderer split — test infrastructure.
  *
  * Renderer tests (jsdom + RTL) live under test/renderer/**.
  * All other tests (main/boot/ipc-bridge) continue to run under the default
