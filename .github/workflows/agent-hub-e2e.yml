@@ -1,4 +1,4 @@
-name: Agent Hub v3 E2E
+name: Agent Hub E2E
 
 on:
   pull_request:
@@ -15,8 +15,8 @@ on:
   workflow_dispatch: {}
 
 jobs:
-  agent-hub-v3-e2e:
-    name: Agent Hub v3 E2E (Playwright + Electron)
+  agent-hub-e2e:
+    name: Agent Hub E2E (Playwright + Electron)
     # E2E requires building private sibling plugin fixtures
     # (lvis-plugin-agent-hub etc.). Fork PRs cannot access
     # LVIS_REPO_READ_TOKEN, so this job is meaningful only for same-repo
@@ -103,7 +103,7 @@ jobs:
         working-directory: lvis-app
         run: bun run build
 
-      - name: Run Agent Hub v3 E2E tests
+      - name: Run Agent Hub E2E tests
         working-directory: lvis-app
         run: xvfb-run --auto-servernum --server-args="-screen 0 1280x1024x24" bunx playwright test test/e2e/agent-hub/
         env:
@@ -113,7 +113,7 @@ jobs:
         if: always()
         uses: actions/upload-artifact@v7
         with:
-          name: agent-hub-v3-playwright-report-${{ github.run_id }}
+          name: agent-hub-playwright-report-${{ github.run_id }}
           path: |
             lvis-app/playwright-report/
             lvis-app/test-results/
