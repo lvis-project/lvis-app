@@ -2806,7 +2806,7 @@ describe("ToolExecutor — Layer 1 allowed-directories", () => {
     // Regression: executor must spread approvalCacheKey into the ApprovalRequest
     // so the renderer receives a non-undefined value and can record entries with
     // the same key that dispatchReviewer uses for lookup. Without this fix the
-    // R-2 hit rate for bash/schedule_routine/fs_write is 0%.
+    // R-2 hit rate for bash/routine_schedule/fs_write is 0%.
     const registry = new ToolRegistry();
     const bash = new BashTool();
     registry.register(bash);

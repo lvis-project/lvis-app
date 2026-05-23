@@ -17,7 +17,7 @@ const LONG_INPUT_SUMMARY = JSON.stringify({
     endpoint: "https://example.invalid/really/long/path/that/must/not/stretch/the-modal",
   },
   payload:
-    "schedule_routine_write_payload_with_a_very_long_unbroken_identifier_".repeat(7),
+    "routine_schedule_write_payload_with_a_very_long_unbroken_identifier_".repeat(7),
 });
 
 test.describe("deferred queue modal", () => {
@@ -38,7 +38,7 @@ test.describe("deferred queue modal", () => {
       JSON.stringify({
         id: "dq-e2e-long-input",
         ts: "2026-05-11T09:00:00.000Z",
-        toolName: "schedule_routine",
+        toolName: "routine_schedule",
         source: "builtin",
         category: "write",
         inputSummary: LONG_INPUT_SUMMARY,
@@ -84,7 +84,7 @@ test.describe("deferred queue modal", () => {
     const dialog = page.getByTestId("deferred-queue-dialog");
     await expect(dialog).toBeVisible();
     const entry = dialog.getByTestId("deferred-entry-dq-e2e-long-input");
-    await expect(entry.locator("code", { hasText: "schedule_routine" }).first()).toBeVisible();
+    await expect(entry.locator("code", { hasText: "routine_schedule" }).first()).toBeVisible();
     await expect(dialog.getByRole("button", { name: "허용" })).toBeVisible();
     await expect(dialog.getByRole("button", { name: "거부" })).toBeVisible();
 
