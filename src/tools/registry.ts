@@ -277,7 +277,7 @@ export class ToolRegistry {
   }
 
   /**
-   * Phase 1 Lazy Tool Scoping — return schemas restricted to the given scope.
+   * Lazy Tool Scoping — return schemas restricted to the given scope.
    *
    * - Builtins (tool.source === "builtin") are included when includeBuiltins.
    * - Plugin tools are included only when their pluginId is in activePluginIds.

@@ -170,7 +170,7 @@ export const ENFORCED_CAPABILITIES: ReadonlyMap<string, CapabilityPolicy> = new 
  * (log.warn + no fan-out).
  *
  * `task` namespace is absent — host-side TaskDeadlinePoller and TaskService
- * were removed in 2026-05 (Phase 4). Task ownership now lives in plugins.
+ * were removed in 2026-05. Task ownership now lives in plugins.
  * Plugin-owned namespaces (single publisher pinned by HostApi pluginId
  * identity) are intentionally NOT capability-gated here — host stays
  * agnostic to plugin ids (open-source-readiness). Plugin-bus event
@@ -210,7 +210,7 @@ export const HOST_ONLY_EMIT_NAMESPACES: ReadonlySet<string> = new Set([
  * (namespace drift tracking) unless it falls under PLUGIN_PRIVATE_NAMESPACES.
  *
  * `task.*` was retired here on 2026-05-11 — host-side owner was
- * removed in Phase 4 (2026-05-05, architecture.md §"task-deadline"
+ * removed in 2026-05-05 (architecture.md §"task-deadline"
  * row). No plugin emits the namespace today; task-domain signals flow
  * through a plugin-owned channel instead. That plugin-owned channel
  * is intentionally NOT promoted into this allowlist: the host stays

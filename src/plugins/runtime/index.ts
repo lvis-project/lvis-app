@@ -90,7 +90,7 @@ export { resolveManifestLoadPlan, readEnabledManifestSnapshots };
 export type { ManifestLoadPlan, ManifestSnapshot };
 
 /**
- * Phase 1.5 Option C — non-active plugin catalog card.
+ * Option C — non-active plugin catalog card.
  */
 export interface PluginCard {
   id: string;

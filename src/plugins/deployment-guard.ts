@@ -81,7 +81,7 @@ export class PluginDeploymentGuard {
       };
     }
 
-    // Phase 1 §Step 3 — Trust precedence:
+    // §Step 3 — Trust precedence:
     //   registry-recorded `installSource` (set at install time, verified
     //   actor) ≫ manifest `installPolicy` (advisory, user-writable).
     // Without this anchoring a user with write access to plugin.json could
@@ -114,7 +114,7 @@ export class PluginDeploymentGuard {
   }
 
   /**
-   * Phase 1.5 §13 test requirement: install-side guard.
+   * §13 test requirement: install-side guard.
    *
    * Catalog item에 `installPolicy: "admin"`이 붙어있으면 user actor의 설치 요청을
    * 거부한다. UI는 이미 disabled 상태지만, 백엔드에서도 enforcement를 걸어

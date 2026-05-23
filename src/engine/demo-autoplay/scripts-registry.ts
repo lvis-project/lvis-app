@@ -1,7 +1,7 @@
 /**
  * Live Auto-play — scripted-turn registry (Tutorial-X3).
  *
- * Phase 1 of demo-autoplay shipped a single `meeting-summary-demo.json`
+ * The initial demo-autoplay shipped a single `meeting-summary-demo.json`
  * script. The Tutorial-X extension adds three more — one per LVIS plugin
  * category — and rotates between them so the user sees a different first
  * scenario each boot.
