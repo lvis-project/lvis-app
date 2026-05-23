@@ -11,8 +11,9 @@ import { describe, it, expect } from "vitest";
 import { mkdirSync, mkdtempSync, rmSync, writeFileSync, symlinkSync } from "node:fs";
 import { join } from "node:path";
 import { tmpdir, platform } from "node:os";
+import { resolve as resolvePath } from "node:path";
+import { fileURLToPath } from "node:url";
 import { SkillStore, SKILL_MAX_BODY_BYTES } from "../skill-store.js";
-import { BUILTIN_SKILLS } from "../builtin-skills.js";
 
 describe("SkillStore — C2 traversal & allowlist", () => {
   it("rejects symlinks pointing outside the skills directory", async () => {
@@ -103,27 +104,33 @@ describe("SkillStore — C2 traversal & allowlist", () => {
     }
   });
 
-  it("ships built-in staff-perspective skills (report, meeting, email, decision, data)", async () => {
-    // Built-in skills must always be present, even when the user has no
-    // ~/.lvis/skills/ directory. Each must have a valid frontmatter shape
-    // and a body small enough to inject into the system prompt.
-    const expected = [
-      "report-writing",
-      "meeting-minutes",
-      "email-polish",
-      "decision-record",
-      "data-summary",
-    ];
-    for (const name of expected) {
-      const skill = BUILTIN_SKILLS.find((s) => s.name === name);
-      expect(skill, `built-in skill '${name}' missing`).toBeDefined();
-      expect(skill?.source).toBe("builtin");
-      expect(skill?.description.length).toBeGreaterThan(0);
-      expect(skill?.triggers.length).toBeGreaterThan(0);
-      expect(skill?.body.length).toBeGreaterThan(0);
+  it("packages built-in staff-perspective skills as files under resources/skills/", async () => {
+    // Built-in skills are seeded as files into `~/.lvis/skills/` on first
+    // boot so users can edit or remove each prompt. Loading `resources/
+    // skills/` through the real SkillStore parser exercises the same path
+    // a user disk would, and catches frontmatter or body-size regressions
+    // before any file is shipped.
+    const here = fileURLToPath(new URL(".", import.meta.url));
+    const repoRoot = resolvePath(here, "../../..");
+    const resourcesSkillsDir = resolvePath(repoRoot, "resources", "skills");
+    const store = new SkillStore({ userDir: resourcesSkillsDir });
+    const all = await store.list();
+    const names = all.map((s) => s.name).sort();
+    expect(names).toEqual(
+      [
+        "data-summary",
+        "decision-record",
+        "email-polish",
+        "meeting-minutes",
+        "report-writing",
+      ].sort(),
+    );
+    for (const skill of all) {
+      expect(skill.description.length).toBeGreaterThan(0);
+      expect(skill.triggers.length).toBeGreaterThan(0);
       expect(
-        Buffer.byteLength(skill?.body ?? "", "utf-8"),
-        `built-in skill '${name}' body exceeds SKILL_MAX_BODY_BYTES`,
+        Buffer.byteLength(skill.body, "utf-8"),
+        `built-in skill '${skill.name}' body exceeds SKILL_MAX_BODY_BYTES`,
       ).toBeLessThanOrEqual(SKILL_MAX_BODY_BYTES);
     }
   });

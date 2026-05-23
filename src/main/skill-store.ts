@@ -15,7 +15,6 @@
  */
 import { readFile, readdir, realpath } from "node:fs/promises";
 import { resolve, join, relative, isAbsolute } from "node:path";
-import { BUILTIN_SKILLS } from "./builtin-skills.js";
 import { createLogger } from "../lib/logger.js";
 import { lvisHome } from "../shared/lvis-home.js";
 const log = createLogger("lvis");
@@ -106,8 +105,10 @@ export class SkillStore {
   /** List skills available across builtin + user directories. */
   async list(): Promise<LoadedSkill[]> {
     const out: LoadedSkill[] = [];
-    // Built-ins shipped inline first; user-authored next so they win on collision.
-    out.push(...BUILTIN_SKILLS);
+    // Packaged builtin dist scan first; user-authored next so they win on
+    // collision. Built-in skills now ship as files under
+    // `~/.lvis/skills/` (seeded on first boot) so users can edit or
+    // remove them per team — there is no longer an inline-TS source.
     if (this.builtinDir) {
       out.push(...(await this.scanDir(this.builtinDir, "builtin")));
     }
