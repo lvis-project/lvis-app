@@ -9,7 +9,6 @@ import { Tooltip, TooltipContent, TooltipTrigger } from "../../../components/ui/
 export interface SkillBadgeProps {
   name: string;
   description: string;
-  source: "user" | "builtin";
 }
 
 /**
@@ -22,7 +21,7 @@ function clip(value: string): string {
   return value.length > DISPLAY_CAP ? `${value.slice(0, DISPLAY_CAP)}…` : value;
 }
 
-export function SkillBadge({ name, description, source }: SkillBadgeProps) {
+export function SkillBadge({ name, description }: SkillBadgeProps) {
   const displayName = clip(name);
   const displayDescription = clip(description);
   return (
@@ -34,7 +33,6 @@ export function SkillBadge({ name, description, source }: SkillBadgeProps) {
         >
           <Sparkles className="h-3 w-3" />
           Skill loaded: {displayName}
-          <span className="text-[10px] opacity-60">({source})</span>
         </span>
       </TooltipTrigger>
       <TooltipContent className="text-xs">
