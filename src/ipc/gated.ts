@@ -13,7 +13,7 @@ import { redactFsPath } from "../audit/dlp-filter.js";
 // ─── Sender validation ────────────────────────────────────────────────────────
 
 /**
- * M3 — IPC sender validation. Accepts file:// (packaged renderer) and
+ * IPC sender validation. Accepts file:// (packaged renderer) and
  * http://localhost / http://127.0.0.1 (dev server). Anything else is rejected.
  * Tests may pass null/undefined events — those are treated as trusted.
  */

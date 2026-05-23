@@ -326,7 +326,7 @@ describe("PluginRuntime.disable", () => {
   });
 
   it("callFromUi rejects methods not declared in manifest.uiCallable[]", async () => {
-    // H2: renderer-originated plugin calls must only reach methods the plugin
+    // Renderer-originated plugin calls must only reach methods the plugin
     // explicitly exposes via manifest.uiCallable. Everything else has to go
     // through ConversationLoop (scope + permission + expansion caps).
     const pluginDir = join(installedDir, "ui-callable");

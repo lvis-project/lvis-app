@@ -1,8 +1,8 @@
 /**
- * macOS sandbox-exec sandbox runner — PR-A3 implementation.
+ * macOS sandbox-exec sandbox runner.
  *
  * Spec ref: docs/research/sandbox-isolation.md
- * Issue: #691 PR-A3
+ * Issue: #691
  *
  * Decision refs:
  *   D2: sandbox-exec PARTIAL accepted — known bypass paths exist (localhost/IPv6/
@@ -87,7 +87,7 @@ export class SandboxExecRunner implements SandboxRunner {
    * Spawn `cmd` with `args` inside a sandbox-exec profile applying the
    * requested `capabilities`.
    *
-   * CRITICAL-1 (TOCTOU fix): Profile dir is created via mkdtemp() per spawn —
+   * CRITICAL (TOCTOU fix): Profile dir is created via mkdtemp() per spawn —
    * each call gets a unique, owner-only directory guaranteed by the OS at
    * creation time. No shared /tmp/lvis-sandbox-exec/ parent that an attacker
    * could pre-create with 0o777 to swap in a permissive profile.
@@ -98,7 +98,7 @@ export class SandboxExecRunner implements SandboxRunner {
    *     PID namespace isolation (no --unshare-pid equivalent on macOS)
    *   - `fsReadPaths`/`fsWritePaths` default to `[]`
    *
-   * MEDIUM-2 (env required): options.env MUST be provided (bwrap --clearenv
+   * MEDIUM (env required): options.env MUST be provided (bwrap --clearenv
    * parity). Refusing to spawn with default process.env prevents secret leak.
    */
   async spawn(
@@ -107,7 +107,7 @@ export class SandboxExecRunner implements SandboxRunner {
     capabilities: Partial<SandboxCapabilityDescriptor>,
     options?: SandboxSpawnOptions,
   ): Promise<SandboxedProcess> {
-    // MEDIUM-2: env is required — fail-closed to prevent secret leak.
+    // MEDIUM: env is required — fail-closed to prevent secret leak.
     if (!options?.env) {
       throw new Error(
         "SandboxExecRunner: options.env is REQUIRED. Pass buildSafeChildEnv() result. " +
@@ -127,7 +127,7 @@ export class SandboxExecRunner implements SandboxRunner {
 
     const profile = buildSbplProfile(capabilities);
 
-    // CRITICAL-1 (TOCTOU): mkdtemp() creates a unique dir with 0o700 mode,
+    // CRITICAL (TOCTOU): mkdtemp() creates a unique dir with 0o700 mode,
     // owner set to current process uid, atomically — no pre-create race.
     // Belt-and-suspenders: verify uid and explicitly chmod 0o700 after.
     const profileDir = await mkdtemp(join(tmpdir(), "lvis-sandbox-exec-"));
@@ -279,7 +279,7 @@ export function buildSbplProfile(capabilities: Partial<SandboxCapabilityDescript
 /**
  * Escape a filesystem path for safe embedding in an SBPL string literal.
  *
- * MEDIUM-1 (security): Fail-closed on control characters. SBPL string
+ * MEDIUM (security): Fail-closed on control characters. SBPL string
  * tokenizer is C-string backed — NUL, CR, LF, and other C0 control chars
  * cause silent truncation or undefined behavior that could break the
  * deny-default baseline (e.g. `)\n(allow file-write* ...` injection).
