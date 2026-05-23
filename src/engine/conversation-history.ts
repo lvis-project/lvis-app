@@ -99,7 +99,7 @@ export class ConversationHistory {
   }
 
   /**
-   * Sprint 4.C — edit/fork support. Keep only the first `count` messages.
+   * Edit/fork support. Keep only the first `count` messages.
    * No-op if `count` is >= current length or negative.
    */
   truncate(count: number): void {

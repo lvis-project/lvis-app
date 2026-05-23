@@ -271,7 +271,7 @@ function initialMainWindowBounds(): { x: number; y: number; width: number; heigh
 }
 
 /**
- * W1.0 — `--plugin-smoke=<id1>,<id2>,...` CLI flag.
+ * `--plugin-smoke=<id1>,<id2>,...` CLI flag.
  *
  * Verifies that the named plugins mount + init correctly during boot, then
  * exits 0 (success) or 1 (any plugin missing / failed to initialize). Used
@@ -1593,7 +1593,7 @@ async function main() {
 
   updateSplashStatus("작업 화면을 여는 중...");
 
-  // W1.0 — `--plugin-smoke=<id,...>` exits early after verifying that the
+  // `--plugin-smoke=<id,...>` exits early after verifying that the
   // named plugins mounted + initialized. Boot already awaited
   // pluginRuntime.startAll(); here we just confirm the named ids are loaded.
   if (pluginSmokeIds !== null) {

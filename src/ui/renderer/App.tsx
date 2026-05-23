@@ -350,7 +350,7 @@ export function App() {
   // listeners, no stale-state divergence between the two views.
   const { statuses: pluginAuthStatuses } = usePluginAuthStatuses(api, pluginCards);
 
-  // Sprint B — role preset, cost preview, multimodal attachments
+  // Role preset, cost preview, multimodal attachments
   const { rolePresets, activePreset, activePresetId, setActivePresetId } = useRolePresets(api);
   const { agents: agentOptions, skills: skillOptions } = useAssistantContextOptions(api);
   const [activeAgentName, setActiveAgentName] = useState("");

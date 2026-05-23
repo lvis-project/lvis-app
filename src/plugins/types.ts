@@ -251,7 +251,7 @@ export interface PluginManifest {
   requires?: RequiresSpec;
   publisher?: string;
   /**
-   * Sprint 1-A A1 — optional hard startup timeout (ms, positive integer).
+   * Optional hard startup timeout (ms, positive integer).
    * When declared, PluginRuntime enforces a `Promise.race`-based timeout on
    * the plugin's `start()` call — the running task is NOT cancelled
    * (no AbortController is wired through); the host simply drops the slow
@@ -864,13 +864,13 @@ export interface PluginHostApi {
   callLlm(prompt: string, options?: { maxTokens?: number; systemPrompt?: string }): Promise<string>;
 
   /**
-   * Sprint 1-A A3 — structured log event routed through AuditLogger.
+   * Structured log event routed through AuditLogger.
    * Automatically tagged with `plugin:${pluginId}` context (sessionId = "plugin").
    */
   logEvent(level: "info" | "warn" | "error", message: string, data?: unknown): void;
 
   /**
-   * Sprint 1-A A3 — register a handler fired before app shutdown (Electron
+   * Register a handler fired before app shutdown (Electron
    * `before-quit`). Host enforces a 5s timeout on each handler; slow handlers
    * are logged but do not block quit.
    */
@@ -1191,7 +1191,7 @@ export interface ConversationTriggerResult {
 }
 
 /**
- * Sprint 1-A A2 — canonical alias for the tool-handler function type exposed
+ * Canonical alias for the tool-handler function type exposed
  * through `@lvis/plugin-sdk`. Kept identical to `PluginToolHandler` so the SDK
  * surface can evolve without breaking the existing runtime name.
  */
