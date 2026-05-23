@@ -65,6 +65,21 @@ function seedOne(
     return;
   }
 
+  // Read the packaged template ONCE at the top so subsequent comparisons
+  // and writes work against an in-memory snapshot. This eliminates the
+  // existsSync→readFileSync sequence CodeQL flags as `js/file-system-race`
+  // (the rule fires on any read-then-read pattern in a try block, even
+  // when the second read targets a stable packaged resource). The
+  // packaged file ships with the installer and does not mutate between
+  // launches, so one read is also the most efficient shape.
+  let packagedBuf: Buffer;
+  try {
+    packagedBuf = readFileSync(packagedSource);
+  } catch (err) {
+    console.warn(`[seed-lvis-home-docs] failed to read packaged ${filename}:`, err);
+    return;
+  }
+
   const target = join(home, filename);
   const upgradeTarget = join(home, `${filename}.new`);
 
@@ -84,24 +99,19 @@ function seedOne(
     return;
   }
 
-  // User has an existing copy. Compare to the packaged version; write a
+  // User has an existing copy. Compare to the packaged snapshot; write a
   // .new sibling only when the packaged content differs.
   try {
-    const a = statSync(target);
-    const b = statSync(packagedSource);
-    if (a.size === b.size) {
-      const aBuf = readFileSync(target);
-      const bBuf = readFileSync(packagedSource);
-      if (aBuf.equals(bBuf)) return;
+    if (statSync(target).size === packagedBuf.length) {
+      if (readFileSync(target).equals(packagedBuf)) return;
     }
 
     // If a previous `.new` is sitting unmerged, do not clobber it. Compare:
     //   - identical to the latest packaged content → no-op (already offered)
     //   - different → land a timestamped sibling so neither the user's
     //     review work nor the newer upgrade signal is lost.
-    // Use try-read-catch-ENOENT instead of existsSync+readFileSync so the
-    // check and read are a single attempt — closes the CodeQL
-    // `js/file-system-race` finding the earlier pattern triggered.
+    // try-read-catch-ENOENT instead of existsSync+readFileSync keeps the
+    // check and read atomic.
     let existingUpgradeBuf: Buffer | null = null;
     try {
       existingUpgradeBuf = readFileSync(upgradeTarget);
@@ -109,7 +119,6 @@ function seedOne(
       if ((err as NodeJS.ErrnoException).code !== "ENOENT") throw err;
     }
     if (existingUpgradeBuf !== null) {
-      const packagedBuf = readFileSync(packagedSource);
       if (existingUpgradeBuf.equals(packagedBuf)) return;
       const ts = new Date().toISOString().replace(/[:.]/g, "-");
       const datedTarget = join(home, `${filename}.new.${ts}`);
