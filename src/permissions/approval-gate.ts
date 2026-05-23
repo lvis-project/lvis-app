@@ -403,7 +403,7 @@ export class ApprovalGate {
     // not even full_auto / user-approval paths can bypass it. Cannot be
     // overridden by user approval, admin policy, or permission mode.
     //
-    // H3: canonicalize the path BEFORE matching via the shared
+    // Canonicalize the path BEFORE matching via the shared
     // canonicalizePathForMatch() helper. This closes four bypass vectors:
     // `..` segments, NFD unicode forms, trailing spaces, mixed-case on
     // case-insensitive filesystems, and duplicate slashes.

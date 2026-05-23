@@ -304,8 +304,8 @@ async function spawnWithTimeout(
     const child: PipedChild = spawn(shell.cmd, shell.shellArgs(command), {
       cwd,
       stdio: ["ignore", "pipe", "pipe"],
-      // H2: strip secrets (LVIS_*, *_API_KEY, GITHUB_TOKEN, AWS_*, etc.)
-      // from the child's environment. Only generic shell/locale vars.
+      // Strip secrets (LVIS_*, *_API_KEY, GITHUB_TOKEN, AWS_*, etc.) from
+      // the child's environment. Only generic shell/locale vars pass through.
       env: shellEnvForChild(shell, buildSafeChildEnv()),
     });
     trackManagedChildProcess(child, { label: "tool:bash" });

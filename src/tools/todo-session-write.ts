@@ -31,7 +31,7 @@ export function createTodoSessionWriteTool(store: SessionTodoStore): Tool {
       "도구가 노출되어 있으면 그쪽을 우선 호출하세요. 본 도구는 어시스턴트가 " +
       "다단계 응답을 풀어가는 *내부 단계 추적* 용도로만 사용합니다.",
     source: "builtin",
-    // H1: category="read" — the assistant's own per-session checklist lives
+    // category="read" — the assistant's own per-session checklist lives
     // entirely in an in-memory store this conversation owns; there is no
     // external mutation, no on-disk persistence, no cross-session impact.
     // Treating each tick as a write would pop an approval modal for every
