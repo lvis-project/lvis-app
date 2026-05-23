@@ -45,8 +45,8 @@ export function createAgentSpawnTool(deps: AgentSpawnToolDeps): Tool {
     name: "agent_spawn",
     description:
       "sub-agent 를 띄워 별도의 작은 작업을 실행합니다. 부모 대화 히스토리와 분리된 fresh 컨텍스트, " +
-      "지정한 sourceTools 만 사용 가능. maxTurns (기본 30, 최대 60) — task 복잡도를 직접 판단해서 명시하세요: " +
-      "단일 lookup/요약은 5-10, 표준 multi-step 작업은 20-30, 깊은 코드 탐색·다중 파일 분석·복합 디버깅은 40-60. " +
+      "지정한 sourceTools 만 사용 가능. maxTurns (기본 30, 상한 30) — task 복잡도를 직접 판단해서 명시하세요: " +
+      "단일 lookup/요약은 5-10, 표준 multi-step 작업은 15-20, 깊은 코드 탐색·다중 파일 분석·복합 디버깅은 25-30. " +
       "agentName 을 지정하면 ~/.lvis/agents/<name>.md 또는 ~/.lvis/agents/<name>/AGENTS.md 프로필을 profile prompt 로 결합합니다. " +
       "결과로 요약 텍스트 + tool call 수 반환. " +
       "특정 tool/plugin 을 직접 호출하라는 요청의 대체 경로로 사용하지 마세요. 요청 대상 도구가 현재 보이면 직접 호출하고, 보이지 않으면 request_plugin 으로 활성화하세요.",
