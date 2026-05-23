@@ -1,5 +1,5 @@
 /**
- * Permission policy Phase 2.5 — `~/.lvis/settings.json` permissions block.
+ * Permission policy — `~/.lvis/settings.json` permissions block.
  *
  * Spec ref: docs/architecture/permission-policy-design.md §3 Layer 1.
  *

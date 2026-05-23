@@ -1,11 +1,11 @@
 /**
  * HybridRetriever — Local Indexer (BM25 + Vector) + Cloud 결합
  *
- * 청사진 §1 C4: RRF k=60, weights {bm25:0.5, vec:0.5, cloud:0.0} (Phase 1)
+ * 청사진 §1 C4: RRF k=60, weights {bm25:0.5, vec:0.5, cloud:0.0}
  * 청사진 §6.1: `lvis-app/src/main/hybrid-retriever.ts`
  * 청사진 §8 컴포넌트 다이어그램: HybridRetriever → workerClient.searchBm25/Vector + CloudAdapter
  *
- * Phase 1.5에서 LightRAG 추가 시 weights 재정규화:
+ * LightRAG 추가 시 weights 재정규화:
  *   {bm25:0.35, vec:0.35, lightrag:0.3} 또는
  *   {bm25:0.35, vec:0.35, cloud:0.3}
  *
@@ -249,7 +249,7 @@ export class HybridRetriever {
   }
 
   private async safeCloud(query: string, topK: number): Promise<SearchHit[]> {
-    // weight 0이면 호출 자체를 생략 — Phase 1 기본 경로.
+    // weight 0이면 호출 자체를 생략.
     if (this.weights.cloud <= 0) return [];
 
     try {

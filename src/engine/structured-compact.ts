@@ -336,7 +336,7 @@ export interface CompactWithBoundaryResult {
   estimatedAfter: number;
   /** CONTENT_TRUNCATED 경로의 원본 보존 디렉토리. 사용자 banner 에 표시. */
   truncatedDir?: string;
-  /** Phase 2 truncation 으로 격리된 메시지 수. */
+  /** Truncation 으로 격리된 메시지 수. */
   truncatedCount: number;
 }
 

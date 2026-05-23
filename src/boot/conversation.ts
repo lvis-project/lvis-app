@@ -75,7 +75,7 @@ export function createSystemPromptBuilder(opts: {
         "</active-plugins>",
       ].join("\n");
     },
-    // Phase 1.5 Option C — 비활성 plugin 카탈로그 공급.
+    // Option C — 비활성 plugin 카탈로그 공급.
     getPluginCards: () => pluginRuntime.listPluginCards(toolRegistry),
     getActiveSkillsSection,
     // Tutorial-X4 — User Onboarding Context source. Renderer writes the
@@ -300,7 +300,7 @@ export function createConversationLoop(deps: ConversationDeps): ConversationLoop
     scriptHookManager: deps.scriptHookManager,
     additionalDirectories: deps.additionalDirectories,
     getAdditionalDirectories: deps.getAdditionalDirectories,
-    // Phase 1.5 Option C — request_plugin 메타 툴 pluginId 검증용.
+    // Option C — request_plugin 메타 툴 pluginId 검증용.
     pluginRuntime: deps.pluginRuntime,
     skillOverlay: deps.skillOverlay,
     sessionTodoStore: deps.sessionTodoStore,

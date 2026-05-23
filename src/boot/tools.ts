@@ -137,7 +137,7 @@ function webFetchFetchImpl(
 }
 
 export function registerRequestPluginMetaTool(toolRegistry: ToolRegistry): void {
-  // Phase 1.5 Option C — request_plugin 메타 툴 (항상 활성, scope filter 통과)
+  // Option C — request_plugin 메타 툴 (항상 활성, scope filter 통과)
   // execute는 no-op — 실제 scope 확장은 ConversationLoop.queryLoop이 가로챈다.
   toolRegistry.register(createDynamicTool({
     name: "request_plugin",

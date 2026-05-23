@@ -1,5 +1,5 @@
 /**
- * Permission policy Phase 4 — Layer 6 hook runtime manager.
+ * Permission policy — Layer 6 hook runtime manager.
  *
  * Spec ref: docs/architecture/permission-policy-design.md §3 Layer 6.
  *
