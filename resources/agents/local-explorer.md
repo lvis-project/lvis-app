@@ -20,7 +20,6 @@ mode: default
 - **캘린더** — MS Graph plugin Calendar
 - **회의 녹취 · 요약** — Meeting plugin 의 transcript · summary 저장소
 - **로컬 의미 검색** — local-indexer plugin 가용 시 본문 의미 검색
-- **사용자 노트** — `~/.lvis/notes/` 또는 사용자 지정 노트 도구
 
 ## 작업 원칙
 
