@@ -2,7 +2,7 @@
  * R-2 User-Approval Memory Layer — persistent + session-scoped approval store.
  *
  * Spec ref: docs/research/sandbox-isolation.md §R-2
- * Issue: #691 PR-A4
+ * Issue: #691
  *
  * Stores per-tool approval decisions made by the user in the ToolApprovalDialog
  * so that subsequent calls with the same (toolName, args, source) triple can
@@ -110,11 +110,11 @@ function migrationMarkerPath(): string {
  * invocations of the same tool from different trust origins (e.g. "user-keyboard"
  * vs "plugin-abc") or with different semantic keys cannot collapse onto the same
  * cached approval. This prevents a low-trust caller from inheriting a high-trust
- * approval made by a different origin (CRITICAL-4 cache identity collapse fix).
+ * approval made by a different origin (CRITICAL cache-identity collapse fix).
  *
  * args is canonicalized via `canonicalStringify` (from shared/canonical-json.ts)
  * before hashing so that object key ordering differences ({a,b} vs {b,a}) do
- * not produce distinct keys for semantically identical inputs (HIGH-2 JSON
+ * not produce distinct keys for semantically identical inputs (HIGH JSON
  * canonical fix). Re-exported for backward-compat with existing importers.
  */
 export { canonicalStringify } from "../shared/canonical-json.js";
@@ -165,7 +165,7 @@ async function atomicWrite(data: ApprovalsFile): Promise<void> {
   try {
     const content = `${JSON.stringify(data, null, 2)}\n`;
     await fd.writeFile(content);
-    // MEDIUM-1: fsync the file data before rename to survive power loss.
+    // MEDIUM: fsync the file data before rename to survive power loss.
     await fd.sync();
   } finally {
     await fd.close();
@@ -173,7 +173,7 @@ async function atomicWrite(data: ApprovalsFile): Promise<void> {
 
   await rename(tmp, path);
 
-  // MEDIUM-1: fsync the directory so the rename is durable.
+  // MEDIUM: fsync the directory so the rename is durable.
   const dirFd = await open(dir, constants.O_RDONLY);
   try {
     await dirFd.sync();
@@ -503,7 +503,7 @@ export async function migrateCanonicalization(): Promise<void> {
     }
     await rename(markerTmp, markerPath);
 
-    // MEDIUM-1: fsync marker directory so rename is durable.
+    // MEDIUM: fsync marker directory so rename is durable.
     const markerDirFd = await open(markerDir, constants.O_RDONLY);
     try {
       await markerDirFd.sync();
@@ -511,7 +511,7 @@ export async function migrateCanonicalization(): Promise<void> {
       await markerDirFd.close();
     }
 
-    // MEDIUM-4: route through structured logger (bootAuditLogger not yet
+    // MEDIUM: route through structured logger (bootAuditLogger not yet
     // available at this call site; createLogger routes to the same sink).
     log.info({
       event: "r2-canonicalization-migration",

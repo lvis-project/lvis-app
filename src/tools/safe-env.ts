@@ -1,5 +1,5 @@
 /**
- * Safe child-process environment builder (Tier H2).
+ * Safe child-process environment builder.
  *
  * Whitelist-based forwarding of environment variables to spawned children.
  * Every caller that shells out (bash tool, external command hooks) MUST go

@@ -38,7 +38,7 @@ export function registerSettingsHandlers(deps: IpcDeps): void {
 
   ipcMain.handle("lvis:settings:update", async (e, partial) => {
     if (!validateSender(e)) { auditUnauthorized(auditLogger, "lvis:settings:update", e); return UNAUTHORIZED_FRAME; }
-    // LOW-2: validate vendors["azure-foundry"].baseUrl at write time so an invalid
+    // LOW: validate vendors["azure-foundry"].baseUrl at write time so an invalid
     // Foundry endpoint is rejected before it reaches the settings store.
     const foundryPatch = (partial as Record<string, unknown> | null | undefined)
       ?.llm as Record<string, unknown> | undefined;
