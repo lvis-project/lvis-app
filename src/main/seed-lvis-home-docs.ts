@@ -1,5 +1,12 @@
 import { app } from "electron";
-import { existsSync, mkdirSync, copyFileSync, statSync, readFileSync } from "node:fs";
+import {
+  existsSync,
+  mkdirSync,
+  copyFileSync,
+  statSync,
+  readFileSync,
+  readdirSync,
+} from "node:fs";
 import { join } from "node:path";
 import { lvisHome } from "../shared/lvis-home.js";
 
@@ -8,17 +15,19 @@ import { lvisHome } from "../shared/lvis-home.js";
  *
  * Currently seeds:
  *   - AGENTS.md — LVIS system reference for LLMs running inside the host
+ *   - agents/*.md — built-in sub-agent profiles (executor, researcher,
+ *     planner, local-explorer) for the `agent_spawn` tool
  *
- * Behavior:
- *   - If `~/.lvis/AGENTS.md` does not exist → copy from packaged resources.
+ * Behavior (per file):
+ *   - If `~/.lvis/<path>` does not exist → copy from packaged resources.
  *   - If it exists and is byte-identical to the packaged copy → no-op.
  *   - If it exists and diverges from the packaged copy → write the packaged
- *     version alongside as `~/.lvis/AGENTS.md.new` so the user can diff and
+ *     version alongside as `~/.lvis/<path>.new` so the user can diff and
  *     decide whether to merge upgrade content into their copy.
  *
- * The user's `AGENTS.md` is never overwritten — they may freely edit it to
- * inject site-specific rules. The `.new` upgrade marker is the only path
- * by which an upgrade can communicate "there is new content to consider".
+ * The user's edits are never overwritten — they may freely customize each
+ * file to inject site-specific rules. The `.new` upgrade marker is the only
+ * path by which an upgrade can communicate "there is new content to consider".
  *
  * Non-fatal — failures log and continue. Boot must not block on doc seeding.
  */
@@ -34,6 +43,7 @@ export function seedLvisHomeDocs(): { seeded: string[]; upgraded: string[] } {
   }
 
   seedOne(home, "AGENTS.md", result);
+  seedDir(home, "agents", result);
   return result;
 }
 
@@ -75,6 +85,45 @@ function seedOne(
     result.upgraded.push(filename);
   } catch (err) {
     console.warn(`[seed-lvis-home-docs] failed to compare ${filename}:`, err);
+  }
+}
+
+/**
+ * Seed every `*.md` file from a packaged resource subdirectory into the
+ * matching `~/.lvis/<subdir>/` location. Each file uses the same per-file
+ * seed/upgrade semantics as {@link seedOne} — first-boot copy, byte-identical
+ * no-op, divergent write to `.new` marker.
+ */
+function seedDir(
+  home: string,
+  subdir: string,
+  result: { seeded: string[]; upgraded: string[] },
+): void {
+  const packagedDir = resolvePackagedResource(subdir);
+  if (packagedDir === null) {
+    // No packaged templates for this subdir — fine for early dev tree, just skip.
+    return;
+  }
+
+  const targetDir = join(home, subdir);
+  try {
+    mkdirSync(targetDir, { recursive: true, mode: 0o700 });
+  } catch (err) {
+    console.warn(`[seed-lvis-home-docs] failed to ensure dir ${subdir}:`, err);
+    return;
+  }
+
+  let entries: string[];
+  try {
+    entries = readdirSync(packagedDir);
+  } catch (err) {
+    console.warn(`[seed-lvis-home-docs] failed to scan ${subdir}:`, err);
+    return;
+  }
+
+  for (const entry of entries) {
+    if (!entry.toLowerCase().endsWith(".md")) continue;
+    seedOne(home, join(subdir, entry), result);
   }
 }
 
