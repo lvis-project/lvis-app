@@ -121,10 +121,27 @@ LVIS host + plugin 의 모든 user-data storage 는 **`~/.lvis/<feature>/`** 디
     └── ...
 ```
 
+### Canonical entry point — `openFeatureNamespace`
+
+새 `~/.lvis/<feature>/` namespace 는 **반드시** `src/main/storage/feature-namespace.ts` 의 `openFeatureNamespace(featureId)` 핸들 API 를 통해 access 한다. `mkdirSync(..., { mode: 0o700 })` / `writeFile(..., { mode: 0o600 })` / tmpfile+rename / JSON parse-with-fallback 를 call site 에서 직접 재구현하지 **말 것** — 한 곳에서 mode 비트를 빠뜨리면 namespace 가 조용히 world-readable 가 된다.
+
+```ts
+import { openFeatureNamespace } from "./storage/feature-namespace.js";
+
+const ns = openFeatureNamespace("onboarding"); // ~/.lvis/onboarding/
+await ns.writeJson("tour-state.json", state);   // 0o700 dir + 0o600 file + atomic
+const loaded = await ns.readJson("tour-state.json", DEFAULT);  // parse-with-fallback
+const sessionsDir = await ns.childDir("sessions");             // 0o700 subdir
+```
+
+- `dir` 는 매 access 마다 `lvisHome()` 로 lazily 재해석 → module-level 핸들이라도 `LVIS_HOME` 테스트 override 를 존중.
+- 비-JSON raw 파일 (예: markdown) 은 `writeFileAtomicAtPath(absPath, body)` 사용 — 같은 0o700/0o600/atomic 보장.
+- Path 가 dependency-injected 되는 store (테스트가 temp path 주입) 는 `writeFileAtomicAtPath` 로 contract 만 위임하고 `filePath` 는 그대로 유지 (예: `routines-store.ts`).
+
 ### 룰
 
 - **단일 도메인 = 단일 디렉토리**. 같은 도메인의 설정 + session + cache + state 모두 그 디렉토리 하위에 모은다.
-- **디렉토리 권한**: 0o700 (디렉토리), 0o600 (파일). secrets 는 추가 암호화 의무.
+- **디렉토리 권한**: 0o700 (디렉토리), 0o600 (파일). secrets 는 추가 암호화 의무. **이 mode 보장은 `openFeatureNamespace` 가 단일 출처로 강제** — 새 store 가 직접 mkdir 하면 안 됨.
 - **Cross-cutting 자원** (`settings.json`, `audit.log`, `secrets/`) 만 `~/.lvis/` 직속. 도메인 specific 자원이 root 에 흩어지면 안 됨.
 - **Plugin 자체 data** 는 `~/.lvis/plugins/<pluginId>/` 만 사용. host 의 다른 디렉토리 (`~/.lvis/routine/` 등) 직접 read/write 금지 — host API (예: `hostApi.addTask`, `hostApi.saveNote`) 통한 access 만.
 - **Backup / clear**: 도메인 단위 (`rm -rf ~/.lvis/<feature>/`) 가능해야 함.
