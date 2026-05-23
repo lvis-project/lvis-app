@@ -3,7 +3,7 @@
  *
  * Single source of truth for env-var and HTTP-header name constraints.
  * Both mcp-governance.ts and mcp-runtime-spec.ts import from here so
- * the two validation paths can never silently diverge (MEDIUM-6).
+ * the two validation paths can never silently diverge (MEDIUM).
  */
 
 /** POSIX env-var name syntax: starts with letter or underscore, followed by word chars. */
@@ -29,7 +29,7 @@ export const MAX_MCP_MANIFEST_BYTES = 1 * 1024 * 1024; // 1 MB
  * interpreter startup-file hijacking (BASH_ENV, PYTHONSTARTUP),
  * or node-flag injection (NODE_OPTIONS) in spawned MCP child processes.
  *
- * Checked case-insensitively (CRITICAL-1).
+ * Checked case-insensitively (CRITICAL).
  */
 export const RESERVED_ENV_NAMES = new Set([
   "PATH",
@@ -60,7 +60,7 @@ export const RESERVED_ENV_NAMES = new Set([
  * Transfer-Encoding, etc.) and forwarding headers are spec-reserved and
  * can cause request smuggling or SSRF amplification if overridden.
  *
- * Checked case-insensitively (HIGH-1).
+ * Checked case-insensitively (HIGH).
  */
 export const RESERVED_HEADERS = new Set([
   "authorization",

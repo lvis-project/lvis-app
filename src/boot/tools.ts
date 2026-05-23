@@ -14,7 +14,7 @@ import { createDynamicTool, type Tool } from "../tools/base.js";
 import { createKnowledgeSearchTools } from "../tools/knowledge-search.js";
 import { createRenderHtmlTool } from "../tools/render-html.js";
 import { createAskUserQuestionTool } from "../tools/ask-user-question.js";
-import { createScheduleRoutineTool } from "../tools/schedule-routine.js";
+import { createRoutineScheduleTool } from "../tools/routine-schedule.js";
 import { createTodoSessionWriteTool } from "../tools/todo-session-write.js";
 import { createAgentSpawnTool, type AgentSpawnEvent } from "../tools/agent-spawn.js";
 import { createSkillLoadTool, type SkillLoadEvent } from "../tools/skill-load.js";
@@ -489,7 +489,7 @@ export function registerBuiltinTools(
     );
   }
   if (workflowDeps?.routinesStore) {
-    builtins.push(createScheduleRoutineTool(workflowDeps.routinesStore));
+    builtins.push(createRoutineScheduleTool(workflowDeps.routinesStore));
   }
   if (workflowDeps?.sessionTodoStore) {
     builtins.push(createTodoSessionWriteTool(workflowDeps.sessionTodoStore));

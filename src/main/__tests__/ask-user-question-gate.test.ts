@@ -1,5 +1,5 @@
 /**
- * AskUserQuestionGate — H5 / M2 timeout coverage + multi-question contract.
+ * AskUserQuestionGate — timeout coverage + multi-question contract.
  *
  * The gate must:
  *   1. Resolve `{ dismissed: true }` after the configured timeout.
@@ -54,7 +54,7 @@ describe("AskUserQuestionGate — timeout path", () => {
     expect(timeoutCall![1]).toMatchObject({ requestId: response.requestId });
   });
 
-  it("caps concurrent pending requests to 5 (H3)", async () => {
+  it("caps concurrent pending requests to 5", async () => {
     const wc = makeMockWebContents();
     const gate = new AskUserQuestionGate(wc as never, 60_000);
     const slots: Array<Promise<unknown>> = [];

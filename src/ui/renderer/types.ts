@@ -631,7 +631,7 @@ export type LvisApi = {
    */
   onPluginEvent?: (eventType: string, handler: (data: unknown) => void) => (() => void);
   listPluginCards: () => Promise<PluginCardSummary[]>;
-  // schedule_routine v2 — persistent routine list + lifecycle
+  // routine_schedule v2 — persistent routine list + lifecycle
   listRoutinesV2: () => Promise<import("../../shared/routines-types.js").RoutineRecord[]>;
   dismissRoutineV2: (id: string) => Promise<{ ok: boolean; error?: string }>;
   removeRoutineV2: (id: string) => Promise<{ ok: boolean; error?: string }>;
@@ -965,7 +965,7 @@ export type ApprovalDecision = {
   respond: (decision: ApprovalDecision) => Promise<unknown>;
 };
 
-/** R-2 User-Approval Store API (PR-A4) */
+/** R-2 User-Approval Store API */
 /**
  * Approval scope + verdict — re-uses the union literal types from the
  * shared SOT (`UserApprovalScope` / `UserApprovalVerdict`) so renderer

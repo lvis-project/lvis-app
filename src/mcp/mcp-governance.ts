@@ -247,7 +247,7 @@ export class McpGovernance {
         "knowledge_search",
         "render_html",
         "request_plugin",
-        "schedule_routine",
+        "routine_schedule",
         "skill_list",
         "skill_load",
         "todo_session_write",
@@ -308,7 +308,7 @@ export class McpGovernance {
       return { valid: false, reason: "stdio transport에는 command가 필요합니다.", layer: 1 };
     }
     const allowed = approval.allowedCommands ?? [];
-    // H3 fix: 빈 allowedCommands는 deny (deny-by-default 원칙)
+    // Empty allowedCommands → deny (deny-by-default)
     if (allowed.length === 0 || !allowed.includes(config.command)) {
       return {
         valid: false,

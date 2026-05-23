@@ -471,7 +471,7 @@ export class PythonRuntimeBootstrapper {
         env.UV_CACHE_DIR = this.uvCacheDir();
       }
 
-      // §691 PR-A4: SandboxRunner adoption gate for uv spawn.
+      // §691: SandboxRunner adoption gate for uv spawn.
       // When LVIS_SANDBOX_ENABLED=1 and a runner is registered, log the
       // intent. Full adoption is deferred until SandboxedProcess exposes a
       // Node.js-compatible stream API (SandboxedProcess uses WHATWG
