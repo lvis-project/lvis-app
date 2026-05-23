@@ -1,5 +1,5 @@
 /**
- * Phase 1 — mockable LvisApi surface for renderer tests.
+ * Mockable LvisApi surface for renderer tests.
  *
  * Every method is a `vi.fn()` so tests can spy on calls, and the default
  * return values are sensible empty/pass values so <App /> can mount without

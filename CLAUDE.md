@@ -102,7 +102,7 @@ src/
 
 ## Storage Namespace per Feature (REQUIRED)
 
-LVIS host + plugin 의 모든 user-data storage 는 **`~/.lvis/<feature>/`** 디렉토리 namespace 로 격리한다. *feature* 는 host 도메인 (chat sessions, routine, audit log 등) 또는 plugin id (`work-proactive`, `meeting`, `local-indexer` 등).
+LVIS host + plugin 의 모든 user-data storage 는 **`~/.lvis/<feature>/`** 디렉토리 namespace 로 격리한다. *feature* 는 host 도메인 (chat sessions, routine, audit log 등) 또는 plugin id (`work-assistant`, `meeting`, `local-indexer` 등).
 
 ### 정합 패턴
 

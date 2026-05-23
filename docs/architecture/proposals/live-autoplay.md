@@ -262,7 +262,7 @@ grep -F '"[demo-autoplay]"' ~/.lvis/audit/*.jsonl
 | PR | Scope | Status |
 |----|-------|--------|
 | **PR-E (본 PR)** | proposal + minimal viable: ScriptedTurnEngine + FakeSandbox + DemoAutoplayBanner + meeting-summary-demo script + feature flag wiring + audit prefix | this PR |
-| PR-E1 | additional scripts (calendar, work-proactive scenarios) + script SOT discipline + lint rule | follow-up |
+| PR-E1 | additional scripts (calendar, work-assistant scenarios) + script SOT discipline + lint rule | follow-up |
 | PR-E2 | telemetry — autoplay completion rate / abort point histogram | follow-up |
 | PR-E3 | optional main-process IPC for cross-window demo state (multi-window edge case) | follow-up |
 

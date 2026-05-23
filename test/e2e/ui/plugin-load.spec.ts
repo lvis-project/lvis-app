@@ -7,9 +7,9 @@ import { test, expect } from './fixtures';
 const PLUGIN_VIEWS = [
   { id: 'local-indexer', label: '로컬 인덱서', testId: 'plugin-cell-plugin-local-indexer-local-indexer-control' },
   { id: 'meeting', label: '미팅', testId: 'plugin-cell-plugin-meeting-meeting-control' },
-  // Plugin repo is `lvis-plugin-work-proactive` but manifest id is `work-assistant`.
+  // Plugin repo + manifest id are both `work-assistant`.
   // PluginGridButton derives testid from viewKey (`plugin:<manifest.id>:<view.id>`),
-  // so we follow the manifest id here, not the repo slug.
+  // so we follow the manifest id here.
   { id: 'work-assistant', label: 'Proactive', testId: 'plugin-cell-plugin-work-assistant-detector-control' },
   { id: 'agent-hub', label: '업무 보드', testId: 'plugin-cell-plugin-agent-hub-agent-hub-panel' },
 ] as const;

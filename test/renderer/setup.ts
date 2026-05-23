@@ -1,5 +1,5 @@
 /**
- * Phase 1 — jsdom setup for renderer tests.
+ * jsdom setup for renderer tests.
  *
  * Imported from each test file (import "./setup"). Sets up:
  *   - @testing-library/jest-dom matchers

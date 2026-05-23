@@ -1,5 +1,5 @@
 /**
- * Phase 1 — renderApp helper.
+ * renderApp helper.
  *
  * Stubs window.lvisApi / window.lvis with the provided overrides, renders
  * <App /> via @testing-library/react, returns the mock fns so tests can
