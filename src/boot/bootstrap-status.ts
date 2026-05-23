@@ -1,5 +1,5 @@
 /**
- * Phase 2d — first-boot bootstrap status surface.
+ * First-boot bootstrap status surface.
  *
  * The managed plugin bootstrap (`ensureManagedInstalled`) runs once at boot
  * and is graceful by design: marketplace unreachable, per-plugin install

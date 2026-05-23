@@ -8,7 +8,7 @@
  * 1. 명시적 명령어 (/command)
  * 2. 스킬 키워드 (플러그인 등록)
  * 3. 에이전트 멘션 (@사람)
- * 4. 의도 + 엔티티 — Phase 4
+ * 4. 의도 + 엔티티
  * 5. 일반 대화 (fallback)
  */
 
@@ -29,7 +29,7 @@ export interface SkillKeyword {
   skillId: string;
   /**
    * Plugin 식별자. null/undefined = builtin 스킬.
-   * Lazy tool scoping (Phase 1) — classify 결과에서 active plugin 집합을
+   * Lazy tool scoping — classify 결과에서 active plugin 집합을
    * 도출할 때 사용된다. boot.ts createHostApi.registerKeywords가
    * 플러그인 호출 시 자동 주입한다.
    */
@@ -57,7 +57,7 @@ export class KeywordEngine {
   }
 
   /**
-   * Phase 1 Lazy Tool Scoping — 입력에 포함된 모든 키워드의 pluginId 집합을 반환.
+   * Lazy Tool Scoping — 입력에 포함된 모든 키워드의 pluginId 집합을 반환.
    * classify()는 첫 매치만 반환하지만, scope 결정은 "이 턴에서 필요한 모든
    * 플러그인"을 수집해야 한다. builtin 스킬(pluginId undefined)은 제외된다.
    */

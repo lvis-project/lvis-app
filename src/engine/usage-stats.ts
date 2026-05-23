@@ -1,5 +1,5 @@
 /**
- * Usage Stats Aggregator — Sprint 4.B
+ * Usage Stats Aggregator
  *
  * Parses audit-logger JSONL files (~/.lvis/audit/YYYY-MM-DD.jsonl) and
  * produces token + cost summaries for the Usage Dashboard.

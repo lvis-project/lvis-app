@@ -36,7 +36,7 @@ export interface CategoryDecisionInput {
 
 export interface ToolCategoryDescriptor {
   name: ToolCategory;
-  /** 0..1 — Phase 3 rule classifier baseline weight. */
+  /** 0..1 — rule classifier baseline weight. */
   riskWeight: number;
   /**
    * Pure function — given mode/source/headless, returns the lane the

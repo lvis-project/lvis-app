@@ -26,7 +26,7 @@ import { canonicalStringify } from "../shared/canonical-json.js";
 import { TOOL_TIMEOUT_POLICY } from "../shared/tool-timeout-policy.js";
 import type { ApprovalPurposeSuggestion } from "../shared/permission-review-status.js";
 
-// ─── §D1 args DLP masking ────────────────────────────
+// ─── Args DLP masking ────────────────────────────────
 // Approval 모달에 전달되는 tool args 내 민감정보(API key, 이메일, 전화번호,
 // 주민등록번호, 신용카드 등)를 UI 표시용으로만 마스킹한다. 원본 args 는
 // executor 가 별도로 보유한 toolUse.input 을 그대로 사용하므로 실행 경로에는
@@ -182,13 +182,13 @@ export interface ApprovalRequest {
    */
   approvalCacheKey?: string;
   /**
-   * §D2: Confused-deputy defense — random nonce bound to this request.
+   * Confused-deputy defense — random nonce bound to this request.
    * The renderer MUST echo this value back unchanged in the
    * {@link ApprovalDecision}. Paired with {@link hmac} for integrity.
    */
   nonce?: string;
   /**
-   * §D2: HMAC-SHA256(sessionKey, `${id}|${nonce}|${toolName}|${canonicalArgs}`)
+   * HMAC-SHA256(sessionKey, `${id}|${nonce}|${toolName}|${canonicalArgs}`)
    * — hex encoded. The main process re-derives this from the stored pending
    * entry on receipt of the decision and rejects on mismatch.
    */
@@ -208,13 +208,13 @@ export interface ApprovalDecision {
   /** allow-always / deny-always 일 때 영구화 패턴 (기본: 도구 이름 exact) */
   rememberPattern?: string;
   /**
-   * §D2: Nonce originally issued with the {@link ApprovalRequest}. The
+   * Nonce originally issued with the {@link ApprovalRequest}. The
    * renderer echoes it back verbatim. Missing or mismatched values cause
    * the decision to be rejected and treated as deny-once.
    */
   nonce?: string;
   /**
-   * §D2: HMAC originally issued with the {@link ApprovalRequest}. Echoed
+   * HMAC originally issued with the {@link ApprovalRequest}. Echoed
    * back by the renderer. The main process re-computes the expected HMAC
    * from the pending entry and compares using timingSafeEqual.
    */
@@ -249,9 +249,9 @@ interface PendingEntry {
    * agent-action) do not propagate a cache key.
    */
   approvalCacheKey?: string;
-  /** §D2: nonce issued for this request (echoed back verbatim) */
+  /** Confused-deputy nonce issued for this request (echoed back verbatim) */
   nonce: string;
-  /** §D2: expected HMAC for this request */
+  /** Expected HMAC for this request (confused-deputy defense) */
   expectedHmac: string;
 }
 
@@ -278,10 +278,10 @@ function formatApprovalAuditFields(fields: {
 }
 
 /**
- * §D2: constant-time comparison of the echoed (nonce, hmac) pair against
- * the pending entry's expected values. Returns false if either field is
- * missing or malformed; returns true only when both the nonce and HMAC
- * match byte-for-byte.
+ * Constant-time comparison of the echoed (nonce, hmac) pair against
+ * the pending entry's expected values (confused-deputy defense). Returns
+ * false if either field is missing or malformed; returns true only when
+ * both the nonce and HMAC match byte-for-byte.
  */
 function verifyApprovalIntegrity(
   entry: PendingEntry,
@@ -319,10 +319,10 @@ export class ApprovalGate {
    */
   private readonly notificationService?: NotificationService;
   /**
-   * §D2: Per-instance HMAC secret. 32 random bytes generated at construction
-   * time. Never leaves the main process — used only to sign/verify the nonce
-   * that rides along with approval requests. A fresh key each boot naturally
-   * scopes replay protection to the current ApprovalGate lifetime.
+   * Per-instance HMAC secret for confused-deputy defense. 32 random bytes
+   * generated at construction time. Never leaves the main process — used only
+   * to sign/verify the nonce that rides along with approval requests. A fresh
+   * key each boot naturally scopes replay protection to the current ApprovalGate lifetime.
    */
   private readonly sessionKey: Buffer = randomBytes(32);
 
@@ -489,7 +489,7 @@ export class ApprovalGate {
       // notification failure must never block approval flow
     }
 
-    // §D2: mint nonce + HMAC, attach to outgoing request
+    // Mint nonce + HMAC, attach to outgoing request (confused-deputy defense)
     const nonce = randomBytes(16).toString("hex");
     const canonicalArgs = canonicalStringify(fullReq.args);
     const signingInput = `${fullReq.id}|${nonce}|${fullReq.toolName}|${canonicalArgs}`;
@@ -537,9 +537,9 @@ export class ApprovalGate {
       });
 
       // 렌더러로 요청 발송 (main→renderer 단방향)
-      // §D1: UI 표시용으로 args 의 민감정보를 마스킹. 원본 args 는 executor
+      // UI 표시용으로 args 의 민감정보를 마스킹. 원본 args 는 executor
       // 내부에 남아 tool 실행에는 그대로 사용됨.
-      // §D2: 마스킹된 payload 에 nonce+hmac 을 덧붙여 confused-deputy 방어.
+      // 마스킹된 payload 에 nonce+hmac 을 덧붙여 confused-deputy 방어.
       const dlpHits = new Set<string>();
       const maskedApprovalPurpose = signedReq.approvalPurpose
         ? maskApprovalPurposeForDisplay(signedReq.approvalPurpose, dlpHits)
@@ -583,7 +583,7 @@ export class ApprovalGate {
     const entry = this.pending.get(requestId);
     if (!entry) return;
 
-    // §D2: Confused-deputy defense — verify nonce + HMAC BEFORE honoring the
+    // Confused-deputy defense — verify nonce + HMAC BEFORE honoring the
     // decision. A mismatch indicates either a malicious/compromised renderer,
     // a replay of a stale decision, or a cross-request mix-up. Force
     // deny-once and audit the failure.

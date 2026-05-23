@@ -14,7 +14,7 @@ export type { DlpResult } from "../shared/dlp.js";
 export { maskSensitiveData } from "../shared/dlp.js";
 
 /**
- * Sprint E §3 — 사용자 draft 를 LLM 으로 보내기 전 PII 를 `[REDACTED:*]` 로
+ * §3 — 사용자 draft 를 LLM 으로 보내기 전 PII 를 `[REDACTED:*]` 로
  * 전체 치환한다. maskSensitiveData 와 달리 부분 마스킹이 아닌 완전 제거
  * (카드 뒷 4자리 미보존) — 전송 방지 목적이 우선.
  *

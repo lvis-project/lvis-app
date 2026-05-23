@@ -1,7 +1,7 @@
 /**
  * CheckpointDivider — auto compact / manual checkpoint 표시 horizontal divider.
  *
- * Phase 3 (compact pipeline rewrite) — status 별 visual variant:
+ * Status 별 visual variant:
  *   - SUMMARIZED          → 📦 정상 요약 (blue/slate)
  *   - CONTENT_TRUNCATED   → ✂️ 부분 절단됨 (yellow) — LLM 호출 skip
  *   - NOOP                → ✓ 불필요 (gray) — small history

@@ -283,7 +283,7 @@ export class IdleSchedulerService {
   }
 
   /**
-   * Sprint 2-D: register a late-bound state transition listener. Only one
+   * Register a late-bound state transition listener. Only one
    * listener is supported (boot.ts owns it); repeated calls overwrite.
    * Pass `null` to detach.
    */
@@ -418,7 +418,7 @@ export class IdleSchedulerService {
         await new Promise<void>((r) => setTimeout(r, cooldown));
       }
     } catch (err) {
-      // 실패 시 로그만, 재시도/DLQ는 Phase 1.5 이후
+      // 실패 시 로그만, 재시도/DLQ는 추후 구현
       this.logger(
         `[idle-scheduler] enqueue/process failed for ${job.filePath}: ${(err as Error).message ?? String(err)}`,
       );

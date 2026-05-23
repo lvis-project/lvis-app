@@ -16,7 +16,7 @@
  *
  * async-mutex 패턴: permissions-store.ts §M1 복사.
  *
- * TODO Phase 3: Windows (certutil), Linux (/etc/lvis) admin-dir 검증 강화.
+ * TODO: Windows (certutil), Linux (/etc/lvis) admin-dir 검증 강화.
  */
 import { mkdir, open, readFile } from "node:fs/promises";
 import { dirname, join, resolve } from "node:path";
