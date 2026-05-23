@@ -19,7 +19,7 @@ export interface PermissionsFile {
   updatedAt: string;
 }
 
-// ─── in-process async mutex (§M1 패턴) ──────────────
+// ─── in-process async mutex ──────────────
 
 const permissionsLocks = new Map<string, Promise<void>>();
 
