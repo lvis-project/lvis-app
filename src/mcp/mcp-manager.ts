@@ -329,7 +329,7 @@ export class McpManager {
       throw new Error("[mcp-manager] 서버 id가 비어있거나 공백만 포함할 수 없습니다.");
     }
 
-    // HIGH-4: apiKey 값 자체 CR/LF + control char 검증 (raw 값 기준 — trim 전에 검사)
+    // HIGH: apiKey 값 자체 CR/LF + control char 검증 (raw 값 기준 — trim 전에 검사)
     if (/[\r\n\x00-\x08\x0B-\x1F\x7F]/.test(apiKey)) {
       throw new Error("[mcp-manager] API 키에 제어 문자(CR/LF 등)가 포함되어 있습니다.");
     }
@@ -343,7 +343,7 @@ export class McpManager {
 
     let updatedConfig: McpServerConfig | undefined;
 
-    // HIGH-3: validate BEFORE saveConfigs (inside the file-lock, mirrors addConfig pattern)
+    // HIGH: validate BEFORE saveConfigs (inside the file-lock, mirrors addConfig pattern)
     await this.withConfigLock(async () => {
       await this.withConfigFileLock(async () => {
         const existing = await this.loadFromConfigUnlocked();
@@ -374,7 +374,7 @@ export class McpManager {
       throw new Error(`[mcp-manager] 서버 id '${id}'를 찾을 수 없습니다.`);
     }
 
-    // MEDIUM-1: disconnect existing client before reconnect so the new apiKey takes effect
+    // MEDIUM: disconnect existing client before reconnect so the new apiKey takes effect
     const existingClient = this.clients.get(id);
     if (existingClient) {
       await existingClient.disconnect().catch((err) => {
@@ -385,7 +385,7 @@ export class McpManager {
 
     try {
       await this.connectServer(updatedConfig, { force: true });
-      // MEDIUM-5: audit log on success
+      // MEDIUM: audit log on success
       this.auditLogger?.log({
         timestamp: new Date().toISOString(),
         sessionId: "mcp-manager",
@@ -395,11 +395,11 @@ export class McpManager {
       });
       return { connected: true };
     } catch (err) {
-      // MEDIUM-3: scrub secrets from warning before surfacing to caller
+      // MEDIUM: scrub secrets from warning before surfacing to caller
       const rawMsg = err instanceof Error ? err.message : String(err);
       const warning = scrubSecrets(rawMsg);
       log.warn(`API 키 설정 후 연결 실패 (${id}): %s`, warning);
-      // MEDIUM-5: audit log on failure
+      // MEDIUM: audit log on failure
       this.auditLogger?.log({
         timestamp: new Date().toISOString(),
         sessionId: "mcp-manager",

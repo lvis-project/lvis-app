@@ -653,7 +653,7 @@ class StdioTransport implements McpTransport {
     }
     const spawnCommand = resolveStdioSpawnCommand(this.config.command, this.config.args ?? []);
 
-    // §691 PR-A4 D9: MCP stdio spawn path. The "mcp" registry slot is
+    // §691 D9: MCP stdio spawn path. The "mcp" registry slot is
     // pre-populated in boot.ts with the active OS runner so capability
     // reporting (getSandboxRunner("mcp")) reflects the OS isolation level.
     // Full sandbox adoption for MCP (wrapping this spawn via SandboxRunner.spawn())
@@ -751,7 +751,7 @@ class StdioTransport implements McpTransport {
     this.process.stderr?.on("data", (chunk: Buffer) => {
       const text = chunk.toString("utf-8").trim();
       if (text) {
-        // MEDIUM-4: scrub secrets before logging stderr output from MCP child processes
+        // MEDIUM: scrub secrets before logging stderr output from MCP child processes
         log.warn(`${this.config.id} stderr: %s`, scrubSecrets(text));
       }
     });
@@ -906,7 +906,7 @@ class HttpTransport implements McpTransport {
     // Build and validate request headers. `config.headers` comes from admin
     // governance but we still strip CRLF-injection attempts — no trusted
     // source should be immune from hardening.
-    // HIGH-1: normalize all header names to lowercase to prevent case-collision
+    // HIGH: normalize all header names to lowercase to prevent case-collision
     // between admin-supplied headers and apiKey injection (e.g. both
     // `Authorization` and `authorization` co-existing in the same object).
     const headers: Record<string, string> = {

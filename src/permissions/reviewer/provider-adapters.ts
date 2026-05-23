@@ -179,14 +179,14 @@ export class FoundryReviewerProvider implements LlmReviewerProvider {
 
 /**
  * Validate that the Foundry endpoint is HTTPS, ends with one of the approved
- * Azure suffixes, and has a well-formed subdomain (LOW-1: tightened check).
+ * Azure suffixes, and has a well-formed subdomain (LOW: tightened check).
  * Throws on invalid input so the caller fails closed (atomic cutover).
  *
  * Subdomain takeover analysis: both accepted suffixes are managed by the
  * Azure control plane. A dangling CNAME attack requires an attacker to claim
  * the exact Azure resource, which requires the user's subscription credentials.
  *
- * LOW-1: subdomain regex rejects double-dot, percent-encoded dots, and other
+ * LOW: subdomain regex rejects double-dot, percent-encoded dots, and other
  * malformed label sequences that pass the suffix-only check.
  */
 export function validateFoundryEndpoint(endpoint: string): void {
@@ -212,7 +212,7 @@ export function validateFoundryEndpoint(endpoint: string): void {
       `e.g. https://<project>.services.ai.azure.com`,
     );
   }
-  // LOW-1: validate the subdomain portion (everything before the matched suffix).
+  // LOW: validate the subdomain portion (everything before the matched suffix).
   // Rejects: bare suffix (no subdomain), double-dot sequences, invalid label chars.
   const subdomain = url.hostname.slice(0, url.hostname.length - matchedSuffix.length);
   if (
@@ -241,14 +241,14 @@ export function validateFoundryEndpoint(endpoint: string): void {
  *     Example: `https://proj.services.ai.azure.com`
  *              → `https://proj.services.ai.azure.com/models/gpt-4o/chat/completions?api-version=…`
  *
- * HIGH-1: Detection uses URL.pathname path-segment check + hostname-suffix check
+ * HIGH: Detection uses URL.pathname path-segment check + hostname-suffix check
  * rather than a plain substring `.includes("/openai/deployments/")`, which could
  * be fooled by a Foundry-native endpoint whose base path contains that string.
  */
 export function buildFoundryUrl(endpoint: string, model: string): string {
   // Normalize trailing slash
   const base = endpoint.replace(/\/+$/, "");
-  // HIGH-1: detect Azure OpenAI deployment shape via path segment + hostname suffix.
+  // HIGH: detect Azure OpenAI deployment shape via path segment + hostname suffix.
   // Both conditions must be true: the hostname belongs to openai.azure.com AND
   // the path starts with /openai/deployments/.
   let isAzureOAIDeployment = false;
@@ -465,7 +465,7 @@ export function reviewerProviderKeyPresent(
     return getSecret(GCP_PLAYGROUND_API_KEY_SECRET) !== null;
   }
   // openai / anthropic / google — resolve UI name → canonical vendor, then check secret.
-  // MEDIUM-3: use hasOwnProperty-safe lookup to avoid prototype-chain traversal on the
+  // MEDIUM: use hasOwnProperty-safe lookup to avoid prototype-chain traversal on the
   // null-prototype REVIEWER_VENDOR_MAP (Object.create(null) has no .hasOwnProperty method).
   // MAJOR-3: unknown provider name → fail-closed (return false) rather than
   // falling through to `?? provider` which would silently check an arbitrary secret key.
