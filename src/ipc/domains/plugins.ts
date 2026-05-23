@@ -592,7 +592,6 @@ export function registerPluginsHandlers(deps: IpcDeps): void {
       name: skill.name,
       description: skill.description,
       triggers: skill.triggers,
-      source: skill.source,
     }));
     return { skills };
   });

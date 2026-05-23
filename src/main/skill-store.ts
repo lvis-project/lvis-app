@@ -1,9 +1,10 @@
 /**
  * SkillStore — markdown-with-frontmatter skill loader for the `skill_load`
- * LLM tool. User-authored skills live under `~/.lvis/skills/` as either
- * `skills/<name>/SKILL.md` (preferred agent-platform layout) or legacy
- * `skills/<name>.md` files. Built-ins ship inline and optional packaged
- * skills can be loaded from `dist/skills/`.
+ * LLM tool. Skills live under `~/.lvis/skills/` as either
+ * `skills/<name>/SKILL.md` (preferred agent-platform layout) or
+ * `skills/<name>.md` flat files. Built-in skills ship as files under
+ * `resources/skills/` and are seeded into `~/.lvis/skills/` on first boot
+ * by `seed-lvis-home-docs.ts`, so the user can freely edit each prompt.
  *
  * Frontmatter contract:
  *   ---
@@ -42,7 +43,6 @@ export interface LoadedSkill {
   description: string;
   triggers: string[];
   body: string;
-  source: "user" | "builtin";
   filePath: string;
 }
 
@@ -89,30 +89,18 @@ export function parseFrontmatter(raw: string): {
 export interface SkillStoreOptions {
   /** Override user-skills directory. */
   userDir?: string;
-  /** Built-in skills directory (`dist/skills/` in production). */
-  builtinDir?: string;
 }
 
 export class SkillStore {
   private readonly userDir: string;
-  private readonly builtinDir: string | null;
 
   constructor(opts: SkillStoreOptions = {}) {
     this.userDir = opts.userDir ?? USER_SKILLS_DIR;
-    this.builtinDir = opts.builtinDir ?? null;
   }
 
-  /** List skills available across builtin + user directories. */
+  /** List skills available under the user skills directory. */
   async list(): Promise<LoadedSkill[]> {
-    const out: LoadedSkill[] = [];
-    // Packaged builtin dist scan first; user-authored next so they win on
-    // collision. Built-in skills now ship as files under
-    // `~/.lvis/skills/` (seeded on first boot) so users can edit or
-    // remove them per team — there is no longer an inline-TS source.
-    if (this.builtinDir) {
-      out.push(...(await this.scanDir(this.builtinDir, "builtin")));
-    }
-    out.push(...(await this.scanDir(this.userDir, "user")));
+    const out = await this.scanDir(this.userDir);
     const byName = new Map<string, LoadedSkill>();
     for (const s of out) byName.set(s.name, s);
     return [...byName.values()];
@@ -123,10 +111,7 @@ export class SkillStore {
     return all.find((s) => s.name === name) ?? null;
   }
 
-  private async scanDir(
-    dir: string,
-    source: "user" | "builtin",
-  ): Promise<LoadedSkill[]> {
+  private async scanDir(dir: string): Promise<LoadedSkill[]> {
     let entries: Array<import("node:fs").Dirent>;
     try {
       entries = await readdir(dir, { withFileTypes: true });
@@ -206,7 +191,6 @@ export class SkillStore {
           description: fm.description ?? "",
           triggers: fm.triggers ?? [],
           body: trimmedBody,
-          source,
           filePath: realFile,
         });
       } catch (err) {

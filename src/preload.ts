@@ -1371,7 +1371,6 @@ const api = {
     handler: (event: {
       name: string;
       description: string;
-      source: "user" | "builtin";
     }) => void,
   ) => {
     const listener = (_e: unknown, ev: Parameters<typeof handler>[0]) => handler(ev);
