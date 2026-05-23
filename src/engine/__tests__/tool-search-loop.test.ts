@@ -15,7 +15,7 @@ import { describe, it, expect } from "vitest";
 import { KeywordEngine } from "../../core/keyword-engine.js";
 import { RouteEngine } from "../../core/route-engine.js";
 import { ConversationLoop } from "../conversation-loop.js";
-import type { LLMProvider, StreamEvent, StreamTurnInput } from "../llm/types.js";
+import type { LLMProvider, StreamEvent, StreamTurnParams } from "../llm/types.js";
 import { ToolRegistry } from "../../tools/registry.js";
 import { createDynamicTool } from "../../tools/base.js";
 import { TOOL_SEARCH_TOOL_NAME } from "../../tools/registry.js";
@@ -28,7 +28,7 @@ class RecordingProvider implements LLMProvider {
 
   constructor(private readonly turns: StreamEvent[][]) {}
 
-  async *streamTurn(input: StreamTurnInput): AsyncIterable<StreamEvent> {
+  async *streamTurn(input: StreamTurnParams): AsyncIterable<StreamEvent> {
     this.observedToolNames.push((input.tools ?? []).map((t) => t.name));
     yield* this.turns[this.index++] ?? [];
   }
@@ -55,6 +55,7 @@ function makeLoop(opts: {
     name: "meeting_start",
     description: "회의 시작",
     source: "plugin",
+    category: "read",
     pluginId: "com.example.meeting",
     jsonSchema: { type: "object", properties: {} },
     execute: async () => ({ output: "started", isError: false }),
@@ -63,6 +64,7 @@ function makeLoop(opts: {
     name: "meeting_stop",
     description: "회의 종료",
     source: "plugin",
+    category: "write",
     pluginId: "com.example.meeting",
     jsonSchema: { type: "object", properties: {} },
     execute: async () => ({ output: "stopped", isError: false }),
@@ -97,7 +99,7 @@ function makeLoop(opts: {
       listPluginIds: () => ["com.example.meeting"],
     },
   } as unknown) as ConstructorParameters<typeof ConversationLoop>[0]);
-  (loop as { provider: LLMProvider | null }).provider = opts.provider;
+  (loop as unknown as { provider: LLMProvider | null }).provider = opts.provider;
   return loop;
 }
 
