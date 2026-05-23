@@ -1064,7 +1064,7 @@ export interface PluginHostApi {
      * ApprovalIssuerRegistry BEFORE calling the gate, so the respond path
      * can verify cross-plugin hijack and scope violations.
      *
-     * The gate generates nonce + HMAC internally (§D2 confused-deputy defense).
+     * The gate generates nonce + HMAC internally (confused-deputy defense).
      * Plugin MUST NOT compute nonce/HMAC.
      *
      * `scope` must be present in the host-approved install grant
@@ -1080,7 +1080,7 @@ export interface PluginHostApi {
      * Resolve a pending ApprovalGate entry from the main process.
      *
      * Equivalent to `approvalGate.resolve(requestId, { requestId, choice, nonce, hmac })`.
-     * §D2: nonce + hmac MUST be echoed back verbatim as issued by the host with
+     * Nonce + hmac MUST be echoed back verbatim as issued by the host with
      * the original ApprovalRequest — the gate re-verifies them before honoring
      * the decision. A mismatch forces deny-once (confused-deputy defense).
      *
@@ -1088,8 +1088,8 @@ export interface PluginHostApi {
      * (b) scope is still in the host-approved install grant. Violations throw.
      *
      * NOTE: a `list()` method was deliberately NOT exposed. Listing pending
-     * approvals from a plugin would surface gate-issued nonces/HMACs (§D2
-     * confused-deputy material) to plugin code with no current use case.
+     * approvals from a plugin would surface gate-issued nonces/HMACs (confused-deputy
+     * material) to plugin code with no current use case.
      * If a future flow legitimately needs the snapshot, add it then with a
      * scoped capability — do not pre-expose dead surface.
      */

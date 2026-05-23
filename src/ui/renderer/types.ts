@@ -909,9 +909,9 @@ export type ApprovalRequest = {
   target?: { filePath?: string };
   isReadOnly?: boolean;
   mode?: "default" | "ask_all" | "plan" | "full_auto";
-  /** §D2: nonce issued by the main process; renderer echoes verbatim. */
+  /** Confused-deputy nonce issued by the main process; renderer echoes verbatim. */
   nonce?: string;
-  /** §D2: HMAC over (id, nonce, toolName, args) — echoed verbatim. */
+  /** HMAC over (id, nonce, toolName, args) — echoed verbatim for confused-deputy defense. */
   hmac?: string;
   /**
    * Permission policy — present when `kind === "out-of-allowed-dir"`. Carries
@@ -954,9 +954,9 @@ export type ApprovalDecision = {
   requestId: string;
   choice: ApprovalChoice;
   rememberPattern?: string;
-  /** §D2: echoed nonce from the matching ApprovalRequest. */
+  /** Echoed nonce from the matching ApprovalRequest (confused-deputy defense). */
   nonce?: string;
-  /** §D2: echoed HMAC from the matching ApprovalRequest. */
+  /** Echoed HMAC from the matching ApprovalRequest (confused-deputy defense). */
   hmac?: string;
 };
 
