@@ -2279,7 +2279,7 @@ flowchart TB
 - **Scheduler**: 30s polling (RoutinesScheduler), cron minute-key dedup via `lastFiredMinuteUTC`
 - **Execution modes**: `llm-session` (RoutineEngine 호출, prePrompt 로 conversation 시작) / `notification-only` (OS notification, conversation 영향 0)
 - **Repeat kinds**: `none / daily / weekly / monthly / interval / cron` — monthly day-of-month clamping
-- **LLM tool**: `schedule_routine` (자연어 입력 → struct payload, 4 vendor 호환)
+- **LLM tool**: `routine_schedule` (자연어 입력 → struct payload, 4 vendor 호환)
 - **UI**: 단일 RoutinePanel 의 통합 list (Reminder 흡수), execution mode badge, 3-tab 입력 모달 (form / cron / 자연어)
 - **Reminder 폐지**: PR #626 atomic cutover 로 `RemindersStore`, `RemindersScheduler`, `remind_at` tool, `RemindersList` 컴포넌트 모두 제거
 

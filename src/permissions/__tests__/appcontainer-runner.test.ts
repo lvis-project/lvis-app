@@ -52,7 +52,10 @@ describe("AppContainerRunner.detect() — win32 (PR-A3 detect-only)", () => {
     expect(result.available).toBe(false);
     expect(result.kind).toBe("none");
     expect(result.confidence).toBe("verified");
-    expect(result.reason).toMatch(/PR-A3\.5/);
+    // The detect() reason explains the native-binding deferral. (A prior
+    // process-label match — /PR-A3\.5/ — was removed when the production
+    // message dropped the PR tag per the naming-convention sweep; the
+    // /N-API|native/ match below is the durable assertion.)
     expect(result.reason).toMatch(/N-API|native/i);
   });
 
@@ -71,10 +74,12 @@ describe("AppContainerRunner.detect() — win32 (PR-A3 detect-only)", () => {
 // ─── spawn() — always throws in PR-A3 ────────────────────────────────────────
 
 describe("AppContainerRunner.spawn() — always throws in PR-A3", () => {
-  it("throws on linux with clear message about PR-A3.5", async () => {
+  it("throws on linux with a clear native-binding message", async () => {
     vi.spyOn(process, "platform", "get").mockReturnValue("linux");
     const runner = makeRunner();
-    await expect(runner.spawn("/bin/echo", [], {})).rejects.toThrow(/PR-A3\.5/);
+    await expect(runner.spawn("/bin/echo", [], {})).rejects.toThrow(
+      /native binding/i,
+    );
   });
 
   it("throws on win32 with message about N-API binding", async () => {

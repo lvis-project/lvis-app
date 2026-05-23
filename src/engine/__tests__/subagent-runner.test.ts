@@ -1,6 +1,6 @@
 /**
- * SubAgentRunner — H5 behavioral coverage for the Round 1 review's
- * three concrete failure modes:
+ * SubAgentRunner — behavioral coverage for three concrete failure modes
+ * (turn-cap enforcement, sourceTools allowlist, recursive spawn refusal):
  *
  *   1. C3(a) maxRounds bound — the runner must stop emitting LLM rounds
  *      once `maxTurns` is reached, even if the fake provider would happily
