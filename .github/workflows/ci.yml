@@ -37,7 +37,7 @@ jobs:
             echo "::warning::No LVIS_REPO_READ_TOKEN or gh auth token available; attempting unauthenticated sibling clones."
           fi
           sibling_ref="${LVIS_SIBLING_REPO_REF:-${GITHUB_HEAD_REF:-${GITHUB_REF_NAME:-}}}"
-          for slug in lvis-plugin-meeting lvis-plugin-local-indexer lvis-plugin-work-proactive lvis-plugin-agent-hub lvis-plugin-ms-graph; do
+          for slug in lvis-plugin-meeting lvis-plugin-local-indexer lvis-plugin-work-assistant lvis-plugin-agent-hub lvis-plugin-ms-graph; do
             if [ -d "$slug" ]; then rm -rf "$slug"; fi
             clone_url="https://github.com/lvis-project/${slug}.git"
             if [ -n "$repo_token" ]; then

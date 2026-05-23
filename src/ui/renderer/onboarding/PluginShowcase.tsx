@@ -61,7 +61,7 @@ export interface PluginShowcaseProps {
    * Scenario id → plugin id map:
    *   meeting       → meeting
    *   docs          → local-indexer
-   *   work          → work-proactive
+   *   work          → work-assistant
    *   multi-agent   → agent-hub
    */
   prioritizedScenarioId?: string | null;
@@ -80,7 +80,7 @@ export function scenarioToPluginId(
     case "docs":
       return "local-indexer";
     case "work":
-      return "work-proactive";
+      return "work-assistant";
     case "multi-agent":
       return "agent-hub";
     default:
@@ -142,7 +142,7 @@ const PLUGIN_DESCRIPTIONS: readonly PluginDescription[] = [
     ],
   },
   {
-    id: "work-proactive",
+    id: "work-assistant",
     emoji: "💼",
     label: "업무 도우미",
     body: "이메일·일정에서 액션 아이템 후보를 추출해 적절한 시점에 카드로 알려줍니다.",
