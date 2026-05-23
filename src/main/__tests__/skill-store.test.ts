@@ -12,6 +12,7 @@ import { mkdirSync, mkdtempSync, rmSync, writeFileSync, symlinkSync } from "node
 import { join } from "node:path";
 import { tmpdir, platform } from "node:os";
 import { SkillStore, SKILL_MAX_BODY_BYTES } from "../skill-store.js";
+import { BUILTIN_SKILLS } from "../builtin-skills.js";
 
 describe("SkillStore — C2 traversal & allowlist", () => {
   it("rejects symlinks pointing outside the skills directory", async () => {
@@ -99,6 +100,31 @@ describe("SkillStore — C2 traversal & allowlist", () => {
       expect(all.find((s) => s.name === "huge")).toBeUndefined();
     } finally {
       rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
+  it("ships built-in staff-perspective skills (report, meeting, email, decision, data)", async () => {
+    // Built-in skills must always be present, even when the user has no
+    // ~/.lvis/skills/ directory. Each must have a valid frontmatter shape
+    // and a body small enough to inject into the system prompt.
+    const expected = [
+      "report-writing",
+      "meeting-minutes",
+      "email-polish",
+      "decision-record",
+      "data-summary",
+    ];
+    for (const name of expected) {
+      const skill = BUILTIN_SKILLS.find((s) => s.name === name);
+      expect(skill, `built-in skill '${name}' missing`).toBeDefined();
+      expect(skill?.source).toBe("builtin");
+      expect(skill?.description.length).toBeGreaterThan(0);
+      expect(skill?.triggers.length).toBeGreaterThan(0);
+      expect(skill?.body.length).toBeGreaterThan(0);
+      expect(
+        Buffer.byteLength(skill?.body ?? "", "utf-8"),
+        `built-in skill '${name}' body exceeds SKILL_MAX_BODY_BYTES`,
+      ).toBeLessThanOrEqual(SKILL_MAX_BODY_BYTES);
     }
   });
 
