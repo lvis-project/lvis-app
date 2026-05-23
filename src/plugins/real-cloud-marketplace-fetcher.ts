@@ -332,7 +332,7 @@ export class RealCloudMarketplaceFetcher implements MarketplaceFetcher, Marketpl
 
     // packageName: use explicit field if present, otherwise fall back to slug
     // (the lvis-marketplace server identifies artifacts by slug, not npm package name)
-    // H1/H2: validate against strict allowlist to prevent npm argument injection
+    // Validate against a strict allowlist to prevent npm argument injection
     // and path traversal via slug-derived node_modules resolution.
     const packageNameCandidate =
       row.package_name ?? row.packageName ?? row.slug ?? id;
