@@ -50,14 +50,14 @@ describe("resolveShowcaseCards", () => {
 
   it("hoists the prioritized plugin to the top when set", () => {
     const cards = resolveShowcaseCards(
-      ["meeting", "local-indexer", "work-proactive", "agent-hub"],
+      ["meeting", "local-indexer", "work-assistant", "agent-hub"],
       "agent-hub",
     );
     expect(cards.map((c) => c.id)).toEqual([
       "agent-hub",
       "meeting",
       "local-indexer",
-      "work-proactive",
+      "work-assistant",
     ]);
   });
 
@@ -92,7 +92,7 @@ describe("scenarioToPluginId", () => {
   it("maps each ScenarioShowcase id to the matching plugin id", () => {
     expect(scenarioToPluginId("meeting")).toBe("meeting");
     expect(scenarioToPluginId("docs")).toBe("local-indexer");
-    expect(scenarioToPluginId("work")).toBe("work-proactive");
+    expect(scenarioToPluginId("work")).toBe("work-assistant");
     expect(scenarioToPluginId("multi-agent")).toBe("agent-hub");
   });
 
