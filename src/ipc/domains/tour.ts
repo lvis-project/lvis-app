@@ -18,11 +18,14 @@
  * directory + 0o600 file modes.
  */
 import { ipcMain } from "electron";
-import { mkdirSync, writeFileSync } from "node:fs";
-import { dirname, join } from "node:path";
+import { join } from "node:path";
+import {
+  openFeatureNamespace,
+  writeFileAtomicAtPath,
+} from "../../main/storage/feature-namespace.js";
+import { fanOutToAllWindows } from "../broadcast-helpers.js";
 import { validateSender, UNAUTHORIZED_FRAME, auditUnauthorized } from "../gated.js";
 import { createLogger } from "../../lib/logger.js";
-import { lvisHome } from "../../shared/lvis-home.js";
 import {
   DEFAULT_TOUR_STATE,
   readTourState,
@@ -42,6 +45,9 @@ import type { IpcDeps } from "../types.js";
 const ONBOARDING_CONTEXT_MAX_BYTES = 4 * 1024;
 
 const log = createLogger("tour-ipc");
+
+/** `~/.lvis/onboarding/` namespace — owns onboarding-context.md. */
+const onboardingNs = openFeatureNamespace("onboarding");
 
 export const TOUR_START_CHANNEL = "lvis:tour:start";
 
@@ -192,19 +198,11 @@ export function registerTourHandlers(deps: IpcDeps): void {
       }
       // Fan out to every open app window so e.g. a Settings → Help button
       // pressed in the main window can also launch the tour inside a
-      // detached pane. One window's send failure must not block the others.
+      // detached pane. `fanOutToAllWindows` composes on safe-send's
+      // per-window destroyed-check + send-race swallow; `log` receives the
+      // per-window warn so one window's failure never blocks the others.
       const targets = deps.getAppWindows?.() ?? [deps.getMainWindow()];
-      for (const win of targets) {
-        if (!win || win.isDestroyed?.()) continue;
-        try {
-          win.webContents.send(TOUR_START_CHANNEL, { scenarioId });
-        } catch (err) {
-          log.warn(
-            { err: err instanceof Error ? err.message : String(err) },
-            "tour-start broadcast failed for one window",
-          );
-        }
-      }
+      fanOutToAllWindows(targets, TOUR_START_CHANNEL, { scenarioId }, { logger: log });
       return { ok: true, scenarioId };
     },
   );
@@ -250,9 +248,15 @@ export function registerTourHandlers(deps: IpcDeps): void {
         };
       }
       try {
-        const path = join(lvisHome(), "onboarding", "onboarding-context.md");
-        mkdirSync(dirname(path), { recursive: true, mode: 0o700 });
-        writeFileSync(path, content, { encoding: "utf-8", mode: 0o600 });
+        // Raw markdown (not JSON) lives in the `~/.lvis/onboarding/`
+        // namespace alongside tour-state.json. writeFileAtomicAtPath
+        // materializes the 0o700 directory and atomically writes the file
+        // 0o600 via the shared SOT helper, so the mode contract is never
+        // re-derived inline.
+        await writeFileAtomicAtPath(
+          join(onboardingNs.dir, "onboarding-context.md"),
+          content,
+        );
         return { ok: true };
       } catch (err) {
         log.error(

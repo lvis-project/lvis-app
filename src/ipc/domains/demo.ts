@@ -58,6 +58,7 @@
 import { app, ipcMain } from "electron";
 import { promises as fs } from "node:fs";
 import { dirname } from "node:path";
+import { fanOutToAllWindows } from "../broadcast-helpers.js";
 import { validateSender, UNAUTHORIZED_FRAME, auditUnauthorized } from "../gated.js";
 import { createLogger } from "../../lib/logger.js";
 import {
@@ -232,15 +233,11 @@ function validateActivationPayloadKey(
 }
 
 function broadcastAuthEvent(deps: IpcDeps, channel: string): void {
+  // Payload-less one-way main → renderer cue. fanOutToAllWindows composes on
+  // safe-send's per-window destroyed-check + send-race swallow, preserving
+  // the prior "one window's send failure must not block the others" contract.
   const targets = deps.getAppWindows?.() ?? [deps.getMainWindow()];
-  for (const win of targets) {
-    if (!win || win.isDestroyed?.()) continue;
-    try {
-      win.webContents.send(channel);
-    } catch {
-      /* one window's send failure must not block the others */
-    }
-  }
+  fanOutToAllWindows(targets, channel, undefined);
 }
 
 export function registerDemoHandlers(deps: IpcDeps): void {
