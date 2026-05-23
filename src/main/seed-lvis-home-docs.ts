@@ -99,10 +99,18 @@ function seedOne(
     //   - identical to the latest packaged content → no-op (already offered)
     //   - different → land a timestamped sibling so neither the user's
     //     review work nor the newer upgrade signal is lost.
-    if (existsSync(upgradeTarget)) {
-      const cBuf = readFileSync(upgradeTarget);
-      const bBuf = readFileSync(packagedSource);
-      if (cBuf.equals(bBuf)) return;
+    // Use try-read-catch-ENOENT instead of existsSync+readFileSync so the
+    // check and read are a single attempt — closes the CodeQL
+    // `js/file-system-race` finding the earlier pattern triggered.
+    let existingUpgradeBuf: Buffer | null = null;
+    try {
+      existingUpgradeBuf = readFileSync(upgradeTarget);
+    } catch (err) {
+      if ((err as NodeJS.ErrnoException).code !== "ENOENT") throw err;
+    }
+    if (existingUpgradeBuf !== null) {
+      const packagedBuf = readFileSync(packagedSource);
+      if (existingUpgradeBuf.equals(packagedBuf)) return;
       const ts = new Date().toISOString().replace(/[:.]/g, "-");
       const datedTarget = join(home, `${filename}.new.${ts}`);
       copyFileSync(packagedSource, datedTarget);
