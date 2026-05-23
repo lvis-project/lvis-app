@@ -63,6 +63,13 @@ export type StreamEvent = {
    * during the blocking LLM compaction call.
    */
   triggerSource?: "estimate" | "context-tokens" | "manual" | "force-recover";
+  /**
+   * `recovery_exhausted` event — emitted when force-recover budget is fully
+   * consumed (#917). Renderer surfaces a persistent banner informing the user
+   * that auto-compact can no longer recover the session (compact cannot reduce
+   * context) and manual intervention is required (model change / new chat).
+   */
+  recoveryExhausted?: true;
   estimatedBefore?: number;
   preflight?: number;
   /** Compact trigger on `compact_notice` — token preflight vs manual command. */
