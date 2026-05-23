@@ -431,6 +431,92 @@ describe("runPreflightGuard — skip conditions", () => {
   });
 });
 
+describe("runPreflightGuard — force-recover hard-cap (#917)", () => {
+  it("blocks compactWithBoundary after MAX_FORCE_RECOVER_PER_SESSION exhaustion and fires onRecoveryExhausted", async () => {
+    // autoCompact ON so normal threshold gate would fire; force-recover budget exhausts first.
+    const settings = makeSettings(true, "claude-sonnet-4-5", "claude");
+    const threshold = getModelPreflightThreshold("claude", "claude-sonnet-4-5");
+    const history = makeHistoryExceedingEstimateThreshold(threshold);
+    const mem = makeMemoryManager(history);
+    const loop = new ConversationLoop(makeDeps({ settingsService: settings, memoryManager: mem }));
+    loop.resetAndResume("sess-budget");
+
+    const fakeProvider = makeTurnProvider();
+    (loop as unknown as { provider: typeof fakeProvider }).provider = fakeProvider;
+
+    // Simulate budget already exhausted: set count to MAX (3) directly.
+    (loop as unknown as { contextErrorPending: boolean }).contextErrorPending = true;
+    (loop as unknown as { contextErrorRecoveryCount: number }).contextErrorRecoveryCount = 3;
+
+    // Mock compact to return success — should NOT be called.
+    vi.mocked(compactWithBoundary).mockResolvedValue(makeSyntheticCompactResult(history));
+
+    const recoveryExhaustedCb = vi.fn();
+    const compactStartedCb = vi.fn();
+    await loop.runTurn(
+      "trigger turn",
+      { onRecoveryExhausted: recoveryExhaustedCb, onCompactStarted: compactStartedCb },
+      undefined,
+      { inputOrigin: "user-keyboard" },
+    );
+
+    // Hard-cap: compactWithBoundary must NOT be called even though history exceeds threshold.
+    expect(compactWithBoundary).not.toHaveBeenCalled();
+    // Renderer must be notified of exhaustion.
+    expect(recoveryExhaustedCb).toHaveBeenCalledTimes(1);
+    // compact_started must NOT fire (no API call).
+    expect(compactStartedCb).not.toHaveBeenCalled();
+  });
+
+  it("recoveryExhausted blocks subsequent turns until a clean turn re-arms it", async () => {
+    const settings = makeSettings(true, "claude-sonnet-4-5", "claude");
+    const threshold = getModelPreflightThreshold("claude", "claude-sonnet-4-5");
+    const history = makeHistoryExceedingEstimateThreshold(threshold);
+    const mem = makeMemoryManager(history);
+    const loop = new ConversationLoop(makeDeps({ settingsService: settings, memoryManager: mem }));
+    loop.resetAndResume("sess-rearm");
+
+    const fakeProvider = makeTurnProvider();
+    (loop as unknown as { provider: typeof fakeProvider }).provider = fakeProvider;
+
+    // Pre-set recoveryExhausted=true (as if prior turn triggered it).
+    (loop as unknown as { recoveryExhausted: boolean }).recoveryExhausted = true;
+
+    vi.mocked(compactWithBoundary).mockResolvedValue(makeSyntheticCompactResult(history));
+
+    // First turn — recoveryExhausted blocks compact.
+    const compactStartedCb1 = vi.fn();
+    await loop.runTurn(
+      "turn while exhausted",
+      { onCompactStarted: compactStartedCb1 },
+      undefined,
+      { inputOrigin: "user-keyboard" },
+    );
+    expect(compactWithBoundary).not.toHaveBeenCalled();
+    expect(compactStartedCb1).not.toHaveBeenCalled();
+
+    // After a clean turn recoveryExhausted should be reset to false.
+    expect((loop as unknown as { recoveryExhausted: boolean }).recoveryExhausted).toBe(false);
+    expect((loop as unknown as { contextErrorRecoveryCount: number }).contextErrorRecoveryCount).toBe(0);
+
+    // Next turn with context_error pending can force-recover again.
+    vi.mocked(compactWithBoundary).mockClear();
+    vi.mocked(compactWithBoundary).mockResolvedValueOnce(makeSyntheticCompactResult(history));
+    (loop as unknown as { contextErrorPending: boolean }).contextErrorPending = true;
+
+    const compactStartedCb2 = vi.fn();
+    await loop.runTurn(
+      "turn after re-arm",
+      { onCompactStarted: compactStartedCb2 },
+      undefined,
+      { inputOrigin: "user-keyboard" },
+    );
+    // After re-arm force-recover can fire again.
+    expect(compactWithBoundary).toHaveBeenCalled();
+    expect(compactStartedCb2).toHaveBeenCalled();
+  });
+});
+
 describe("getPreflightThreshold — 80% usable-context trigger", () => {
   it("200K context threshold is 80% of 160K usable = 128K", () => {
     const threshold = getModelPreflightThreshold("claude", "claude-sonnet-4-5");
