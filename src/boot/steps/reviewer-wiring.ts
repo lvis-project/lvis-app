@@ -194,7 +194,7 @@ type EffectiveReviewerSettings = Omit<ReviewerSettingsBlock, "provider"> & {
  * Wire the reviewer agent. Idempotent — calling twice replaces the
  * previously-installed classifier on `permissionManager`.
  *
- * MEDIUM-1: VerdictCache and DeferredQueue are lightweight file-backed stores
+ * MEDIUM: VerdictCache and DeferredQueue are lightweight file-backed stores
  * with no persistent open file handles — each operation opens, appends, and
  * closes atomically via withFileLock. Creating new instances on re-wire is
  * therefore safe: the new instances share the same backing files as the old

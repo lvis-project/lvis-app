@@ -8,7 +8,7 @@
  * Produces a deterministic JSON string where object keys are sorted so that
  * {a, b} and {b, a} produce identical output. This prevents key-ordering
  * differences from producing distinct entryKey hashes for semantically
- * identical inputs (HIGH-2 JSON canonical fix, R-2 memory layer symmetry).
+ * identical inputs (HIGH JSON canonical fix, R-2 memory layer symmetry).
  *
  * H-1 undefined asymmetry fix (R-5): keys whose value is `undefined` are
  * dropped, matching JSON.stringify behaviour. A top-level `undefined` is
@@ -69,7 +69,7 @@
  * the symmetry properties of the resulting cache key.
  *
  * Spec ref: docs/research/sandbox-isolation.md §R-2
- * Issue: #691 PR-A4 Round 5, #800 value-type docs
+ * Issue: #691, #800 value-type docs
  */
 /**
  * Defense-in-depth limits (issue #797).

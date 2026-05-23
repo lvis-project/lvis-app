@@ -126,16 +126,17 @@ export class BashTool extends ZodTool<typeof BashToolInputSchema> {
       return { output: commandPathViolation, isError: true };
     }
 
-    // §691 PR-A2: SandboxRunner spawn path (first consumer of SandboxedProcess).
-    // If a runner is registered for the current platform (Linux bwrap via PR-A2,
-    // macOS/Win via PR-A3), delegate spawn to it. The sandboxed process exposes
-    // stdout/stderr as WHATWG ReadableStream<Uint8Array>; we pipe through
-    // TextDecoderStream for UTF-8 string capture (CJK multi-byte boundary safe).
+    // §691: SandboxRunner spawn path (first consumer of SandboxedProcess).
+    // If a runner is registered for the current platform (Linux bwrap,
+    // macOS sandbox-exec, or Windows AppContainer), delegate spawn to it.
+    // The sandboxed process exposes stdout/stderr as WHATWG
+    // ReadableStream<Uint8Array>; we pipe through TextDecoderStream for
+    // UTF-8 string capture (CJK multi-byte boundary safe).
     //
-    // MEDIUM-2: Gated on LVIS_SANDBOX_ENABLED=1. Default off until PR-A4 R-2
-    // wires the policy hook and enables always-on. This prevents bwrap from
+    // MEDIUM: Gated on LVIS_SANDBOX_ENABLED=1. Default off pending the
+    // policy-hook wiring that enables always-on. This prevents bwrap from
     // breaking all Linux users before the full policy rollout.
-    // TODO(PR-A4 R-2): remove the env-gate and make sandbox always-on.
+    // TODO: remove the env-gate and make sandbox always-on once policy hook lands.
     //
     // If no runner is registered or sandbox is not enabled (isolation=none per D8),
     // fall through to the existing spawnWithTimeout path unchanged — R-1 composition
@@ -175,7 +176,7 @@ interface SpawnResult {
 
 /**
  * Execute a shell command via the registered {@link SandboxRunner} for the
- * current platform (PR-A2: Linux bwrap; PR-A3: macOS/Windows).
+ * current platform (Linux bwrap, macOS sandbox-exec, or Windows AppContainer).
  *
  * The command is run as `bash -c <command>` inside the sandbox. stdout and
  * stderr are merged into a single string output (matching the behaviour of
@@ -191,10 +192,10 @@ interface SpawnResult {
  *   - `processIsolated: true` — separate PID namespace
  *
  * Policy notes:
- *   - Network policy will be refined by R-2 hook in PR-A4.
- *   - fsReadPaths will be extended based on tool analysis in PR-A3.
+ *   - Network policy will be refined when the always-on policy hook lands.
+ *   - fsReadPaths will be extended based on per-platform tool analysis.
  *   - The cwd bind is the only write path — tools that need broader write
- *     access must request it via the capability system (future R-3).
+ *     access must request it via the capability system.
  *
  * @internal — only exported for testing.
  */
@@ -206,7 +207,7 @@ export async function spawnWithSandbox(
 ): Promise<SpawnResult> {
   const shell = resolveShell();
   // Pass only string-valued env entries (SandboxRunner env type is Record<string,string>).
-  // CRITICAL-1: runner uses --clearenv + --setenv so only these entries enter the sandbox.
+  // CRITICAL: runner uses --clearenv + --setenv so only these entries enter the sandbox.
   const safeEnv = Object.fromEntries(
     Object.entries(shellEnvForChild(shell, buildSafeChildEnv())).filter(
       (entry): entry is [string, string] => typeof entry[1] === "string",
@@ -218,7 +219,7 @@ export async function spawnWithSandbox(
     shell.shellArgs(command),
     {
       networkBlocked: true,
-      // MEDIUM-3: /lib /lib64 /bin /sbin are now provided by the runner's base
+      // MEDIUM: /lib /lib64 /bin /sbin are now provided by the runner's base
       // whitelist. Caller still specifies /etc /usr + HOME for shell/locale/git.
       fsReadPaths: [
         "/etc",
@@ -228,13 +229,13 @@ export async function spawnWithSandbox(
       fsWritePaths: [resolvedCwd],
       processIsolated: true,
     },
-    // CRITICAL-2: pass cwd so the runner applies --chdir inside the namespace.
+    // CRITICAL: pass cwd so the runner applies --chdir inside the namespace.
     { env: safeEnv, cwd: resolvedCwd },
   );
 
   const chunks: string[] = [];
 
-  // HIGH-2: per-stream TextDecoder instance — a single shared decoder would
+  // HIGH: per-stream TextDecoder instance — a single shared decoder would
   // corrupt multi-byte CJK sequences when stdout and stderr are drained
   // concurrently because TextDecoder is stateful (stream: true mode buffers
   // incomplete byte sequences across calls).
@@ -268,7 +269,7 @@ export async function spawnWithSandbox(
     await Promise.all([drainStream(proc.stdout), drainStream(proc.stderr)]);
     code = await proc.exitCode;
   } catch (err) {
-    // HIGH-1: signal kill or spawn error — preserve the error message for
+    // HIGH: signal kill or spawn error — preserve the error message for
     // diagnostic parity with spawnWithTimeout's "spawn failed: …" path.
     code = undefined;
     chunks.push(`\nspawn failed: ${(err as Error).message}`);

@@ -2,10 +2,10 @@
  * S2 Sandbox Audit Sink — append pipeline for sandbox execution audit entries.
  *
  * Spec ref: docs/research/sandbox-isolation.md §3.6 (S2 audit fields)
- * Issue: #691 PR-A4
+ * Issue: #691
  *
  * This module provides the *sink* for `SandboxAuditEntry` records — the
- * emit pipeline deferred from PR-A1. Entries are appended in JSONL format
+ * emit pipeline for sandbox execution audit entries. Entries are appended in JSONL format
  * to `~/.lvis/audit/<YYYY-MM-DD>.sandbox.jsonl` (daily-rotated, same
  * directory as the permission-gate audit channel so the AuditPanel reader
  * can glob both channels from one directory).
