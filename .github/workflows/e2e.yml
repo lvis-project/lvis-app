@@ -9,7 +9,7 @@ on:
 jobs:
   e2e:
     name: Playwright E2E (Electron)
-    runs-on: ubuntu-24.04-arm
+    runs-on: [self-hosted, Linux, ARM64, oracle]
     steps:
       - uses: actions/checkout@v6
         with:

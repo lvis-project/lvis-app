@@ -16,7 +16,7 @@ jobs:
       (github.event_name == 'pull_request' &&
        github.event.label.name == 'm4-e2e' &&
        github.event.pull_request.head.repo.full_name == github.repository)
-    runs-on: ubuntu-24.04-arm
+    runs-on: [self-hosted, Linux, ARM64, oracle]
     timeout-minutes: 20
     env:
       # Both keys MUST be provided as repo/org secrets. The prior committed
