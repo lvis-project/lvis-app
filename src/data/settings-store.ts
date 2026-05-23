@@ -133,6 +133,26 @@ export interface FeatureFlags {
   demoAutoplayRotationIndex?: number;
 }
 
+/**
+ * Experimental, staged-rollout feature flags. Kept separate from
+ * {@link FeatureFlags} (UX/onboarding/demo toggles) so a runtime
+ * mechanism gated behind a deliberate experiment reads from one
+ * obvious place. All flags default `false` — the host behaves
+ * exactly as today until the operator opts in.
+ */
+export interface ExperimentalSettings {
+  /**
+   * Tool-level deferral (docs/development/tool-level-deferral-design.md).
+   * When `true`, plugin/MCP tool schemas are deferred: only keyword-
+   * preloaded tools + builtins/meta-tools are sent to the LLM each turn,
+   * and the rest appear as a compact `<tool-catalog>` that the model
+   * promotes via `tool_search({ query })`. When `false` (default), the
+   * legacy plugin-level scoping path runs unchanged (an active plugin
+   * loads ALL its tools; no catalog; no `tool_search`).
+   */
+  toolDeferral?: boolean;
+}
+
 export interface AppSettings {
   llm: LLMSettings;
   chat: ChatSettings;
@@ -156,6 +176,8 @@ export interface AppSettings {
   pluginConfigs: Record<string, PluginConfigRecord>;
   /** Experimental feature flags. All default false. */
   features?: FeatureFlags;
+  /** Staged-rollout experiment flags (e.g. tool-level deferral). All default false. */
+  experimental?: ExperimentalSettings;
 }
 
 export interface PluginSettings {}
@@ -443,6 +465,10 @@ const DEFAULT_SETTINGS: AppSettings = {
     // this to `true` deliberately — no "missing key === skipped" trap.
     onboardingCompleted: false,
   },
+  experimental: {
+    // Tool-level deferral default OFF — staged rollout (Phase 3 flips this).
+    toolDeferral: false,
+  },
 };
 
 export class SettingsService {
@@ -615,6 +641,12 @@ export class SettingsService {
         ...normalizeFeatureFlags(partial.features),
       };
     }
+    if (partial.experimental) {
+      this.settings.experimental = {
+        ...this.settings.experimental,
+        ...normalizeExperimental(partial.experimental),
+      };
+    }
     await this.saveSettings();
     return this.getAll();
   }
@@ -760,6 +792,7 @@ export class SettingsService {
         plugins: {},
         pluginConfigs: { ...DEFAULT_SETTINGS.pluginConfigs, ...pluginConfigs },
         features: { ...DEFAULT_SETTINGS.features, ...normalizeFeatureFlags(parsed.features) },
+        experimental: { ...DEFAULT_SETTINGS.experimental, ...normalizeExperimental(parsed.experimental) },
       };
       if (needsV2WriteBack) result.__needsV2WriteBack = true;
       return result;
@@ -1109,6 +1142,22 @@ function normalizeFeatureFlags(input: unknown): FeatureFlags {
     Number.isFinite(obj.demoAutoplayRotationIndex)
   ) {
     result.demoAutoplayRotationIndex = obj.demoAutoplayRotationIndex;
+  }
+  return result;
+}
+
+/**
+ * Coerce on-disk `experimental` block to ExperimentalSettings shape.
+ * Missing or invalid fields are silently dropped — all flags default to false.
+ */
+function normalizeExperimental(input: unknown): ExperimentalSettings {
+  if (!input || typeof input !== "object" || Array.isArray(input)) {
+    return {};
+  }
+  const obj = input as Record<string, unknown>;
+  const result: ExperimentalSettings = {};
+  if (typeof obj.toolDeferral === "boolean") {
+    result.toolDeferral = obj.toolDeferral;
   }
   return result;
 }

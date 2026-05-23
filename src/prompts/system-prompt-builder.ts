@@ -74,8 +74,12 @@ export class SystemPromptBuilder {
   private readonly sources: PromptSource[] = [];
   private toolScope: {
     activePluginIds: Set<string>;
+    /** Tool-Level Deferral — individually loaded plugin/mcp tool names. */
+    activeToolNames?: Set<string>;
     includeBuiltins: boolean;
     includeMcp: boolean;
+    /** Tool-Level Deferral — `experimental.toolDeferral` flag snapshot. */
+    deferral?: boolean;
   } | null = null;
   private indexedDocsContext: string = "";
   /**
@@ -169,8 +173,10 @@ export class SystemPromptBuilder {
    */
   setToolScope(scope: {
     activePluginIds: Set<string>;
+    activeToolNames?: Set<string>;
     includeBuiltins: boolean;
     includeMcp: boolean;
+    deferral?: boolean;
   } | null): void {
     this.toolScope = scope;
   }
@@ -407,6 +413,38 @@ export class SystemPromptBuilder {
             `- **${s.name}**: ${s.description}`,
           ),
           "</available-tools>",
+        ].join("\n");
+      },
+    });
+
+    // ⑤-b Tool Catalog (per-turn, Tool-Level Deferral, flag-gated)
+    //
+    // Rendered ONLY when `experimental.toolDeferral` is on for the turn.
+    // Lists in-scope plugin/MCP tools that are NOT loaded (deferred) as a
+    // compact name + 1-line catalog. The model promotes a tool into the live
+    // tool set by calling `tool_search({ query })`. Loaded tools (Source 5)
+    // are excluded by getToolCatalogForScope, so no duplication.
+    this.sources.push({
+      id: 5.5,
+      name: "Tool Catalog",
+      refresh: "per-turn",
+      build: () => {
+        const scope = this.toolScope;
+        if (!scope || scope.deferral !== true) return "";
+        const catalog = toolRegistry.getToolCatalogForScope({
+          activePluginIds: scope.activePluginIds,
+          activeToolNames: scope.activeToolNames ?? new Set<string>(),
+          includeMcp: scope.includeMcp,
+        });
+        if (catalog.length === 0) return "";
+        return [
+          "<tool-catalog>",
+          "아래 도구는 아직 로드되지 않았습니다 (이름 + 한 줄 설명만 표시). " +
+            "사용하려면 먼저 `tool_search({query})` 를 호출해 로드하세요. query 에는 " +
+            "도구 이름 또는 기능 키워드를 넣습니다. 로드 후 다음 라운드부터 직접 호출할 수 있습니다.",
+          "",
+          ...catalog.map((t) => `- **${t.name}**: ${t.description}`),
+          "</tool-catalog>",
         ].join("\n");
       },
     });
