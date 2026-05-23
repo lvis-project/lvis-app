@@ -7,8 +7,15 @@
  */
 import { describe, expect, it, vi } from "vitest";
 import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
-import { join } from "node:path";
+import { join, resolve as resolvePath } from "node:path";
 import { tmpdir } from "node:os";
+import { fileURLToPath } from "node:url";
+
+const REPO_ROOT = resolvePath(
+  fileURLToPath(new URL(".", import.meta.url)),
+  "../../..",
+);
+const BUILTIN_SKILLS_DIR = resolvePath(REPO_ROOT, "resources/skills");
 import type { ToolExecutionContext } from "../base.js";
 import { createAskUserQuestionTool } from "../ask-user-question.js";
 import { createScheduleRoutineTool } from "../schedule-routine.js";
@@ -486,8 +493,10 @@ describe("skill_load tool", () => {
     approve: async () => undefined,
   } as never;
 
-  it("loads built-in report-writing skill and emits badge", async () => {
-    const store = new SkillStore({});
+  it("loads packaged report-writing skill from seed source and emits badge", async () => {
+    // Post-first-boot, the seed copies report-writing into ~/.lvis/skills/.
+    // Pointing userDir at resources/skills/ simulates that on-disk state.
+    const store = new SkillStore({ userDir: BUILTIN_SKILLS_DIR });
     const overlay = new SkillOverlay();
     const events: string[] = [];
     const tool = createSkillLoadTool({
