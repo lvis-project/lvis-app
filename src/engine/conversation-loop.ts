@@ -431,11 +431,13 @@ export interface ConversationLoopDeps {
   /**
    * Sub-agent model override. When set, `refreshProvider()` uses this model
    * ID for the primary provider instead of the active vendor block's model.
-   * The user-configured fallback chain is left untouched so a sub-agent that
-   * picks an unavailable model still degrades through the same resilience
-   * path the parent uses. Resolved by `SubAgentRunner` from the agent
-   * profile's `model:` frontmatter (complexity tier → model ID, or an
-   * explicit model ID, or undefined → no override = parent model).
+   * `SubAgentRunner.resolveSubAgentModel` only ever sets this to a model the
+   * active vendor can actually serve — a complexity-tier-resolved ID, or an
+   * explicit ID validated against LLM_VENDOR_MODEL_OPTIONS. An unresolvable
+   * or unavailable value resolves to undefined so the child simply runs on
+   * the parent vendor block's model. The override therefore never feeds the
+   * provider a model-not-found that the (non-retryable) fallback chain would
+   * refuse to recover from.
    */
   modelOverride?: string;
   /**
@@ -1874,7 +1876,7 @@ export class ConversationLoop {
     let toolTrustOrigin = bounds.toolTrustOrigin;
     // C3(a): assistant-round counter — used by the maxRounds break below.
     let assistantRoundsRun = 0;
-    // C3(a): effective round budget. Default = MAX_TOOL_ROUNDS (10); when a
+    // C3(a): effective round budget. Default = MAX_TOOL_ROUNDS (30); when a
     // caller supplies maxRounds (sub-agent runner) clamp to it. Negative or
     // zero falls back to default so callers keep working unchanged.
     const requestedMaxRounds = bounds?.maxRounds;
