@@ -292,7 +292,7 @@ export class PluginRuntime {
   private nextPreparationGeneration = 0;
   private toolInvocationDelegate: PluginToolInvocationDelegate | null = null;
   private loaded = false;
-  /** Sprint 4-B §B-1 — lazily-compiled AJV validator for plugin.schema.json. */
+  /** §B-1 — lazily-compiled AJV validator for plugin.schema.json. */
   private manifestValidator: ValidateFunction | null = null;
 
   constructor(options: PluginRuntimeOptions) {

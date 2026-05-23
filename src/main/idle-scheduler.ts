@@ -283,7 +283,7 @@ export class IdleSchedulerService {
   }
 
   /**
-   * Sprint 2-D: register a late-bound state transition listener. Only one
+   * Register a late-bound state transition listener. Only one
    * listener is supported (boot.ts owns it); repeated calls overwrite.
    * Pass `null` to detach.
    */

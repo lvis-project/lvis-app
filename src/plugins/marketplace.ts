@@ -174,7 +174,7 @@ export class MockMarketplaceFetcher implements MarketplaceFetcher {
   }
 }
 
-/** Sprint 3-B §9.6 / PR#44 HIGH — per-plugin install/rollback history. */
+/** §9.6 — per-plugin install/rollback history. */
 interface PluginHistoryEntry {
   version: string;
   installedAt: string; // ISO timestamp
@@ -191,7 +191,7 @@ export class PluginMarketplaceService {
    * owns the catalog fetch. IPC handler stays a pure transport.
    */
   private readonly auditLogger?: AuditLogger;
-  /** Sprint 3-B §9.6: per-plugin version cache for rollback. */
+  /** §9.6: per-plugin version cache for rollback. */
   private readonly cacheRoot: string;
   /**
    * Phase 2 §FU#267 — artifact-management subsystem. Owns signed-zip
@@ -668,7 +668,7 @@ export class PluginMarketplaceService {
   }
 
   /**
-   * Sprint 3-B §9.6 — versioned install path. Thin wrapper around `install()`
+   * §9.6 — versioned install path. Thin wrapper around `install()`
    * that pins `packageSpec` to a specific version (npm semver) and leaves a
    * rollback breadcrumb. Callers can pass any marketplace pluginId; version
    * is used as the npm install target (e.g. `@lvis/foo@1.2.3`).
@@ -732,7 +732,7 @@ export class PluginMarketplaceService {
   }
 
   /**
-   * Sprint 3-B §9.6 — rollback to the prior cached version for `pluginId`.
+   * §9.6 — rollback to the prior cached version for `pluginId`.
    * Throws when no prior version is available.
    * PR#44 HIGH: guarded by per-plugin mutex to avoid racing with installPlugin.
    */

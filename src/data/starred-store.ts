@@ -1,5 +1,5 @@
 /**
- * Starred Message Store — Sprint 4.C
+ * Starred Message Store
  *
  * 사용자가 "즐겨찾기"한 메시지를 ~/.lvis/starred.json 에 영속화.
  * 세션 간 공유되어 사이드바의 "즐겨찾기" 탭에 전체 목록을 노출한다.

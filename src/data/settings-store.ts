@@ -319,7 +319,7 @@ export interface TelemetrySettings {
 }
 
 /**
- * Sprint E §3 — Privacy tab. Default OFF.
+ * §3 — Privacy tab. Default OFF.
  * piiRedactEnabled: 활성화 시 user draft 를 LLM 으로 보내기 전 DLPFilter 로
  *   이메일/전화/신용카드 등을 `[REDACTED:*]` 로 치환한다. 감사 로그에 건수 기록.
  */

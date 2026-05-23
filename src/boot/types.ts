@@ -118,7 +118,7 @@ export interface AppServices {
   refreshActiveLlmWildcard?: () => void;
   /** Whether knowledge search tools were successfully registered. */
   knowledgeAvailable: boolean;
-  /** Sprint 4.C — starred messages persistence (~/.lvis/starred.json) */
+  /** Starred messages persistence (~/.lvis/starred.json) */
   starredStore?: StarredStore;
   /** Privacy hardening — feedback persistence separate from audit log (~/.lvis/feedback.jsonl) */
   feedbackStore?: FeedbackStore;

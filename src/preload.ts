@@ -575,7 +575,7 @@ const api = {
         branchedAt?: string;
       }>;
     }>,
-  // Sprint 4.C — conversation UX
+  // Conversation UX
   chatGetHistory: async () =>
     ipcRenderer.invoke("lvis:chat:get-history") as Promise<{
       sessionId: string;
@@ -703,7 +703,7 @@ const api = {
     getPerfStats: async () => ipcRenderer.invoke("lvis:plugins:perf-stats"),
   },
 
-  // ─── Usage Observability (Sprint 4.B) ────────────
+  // ─── Usage Observability ─────────────────────────
   getUsageSummary: async (days?: number) => ipcRenderer.invoke("lvis:usage:summary", days),
   getUsageRange: async (opts: { dateFrom: string; dateTo: string }) => ipcRenderer.invoke("lvis:usage:range", opts),
   exportUsageCsv: async (rows: Array<Record<string, string | number>>) => ipcRenderer.invoke("lvis:usage:export-csv", rows),

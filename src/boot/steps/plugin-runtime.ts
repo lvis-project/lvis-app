@@ -873,7 +873,7 @@ export async function initPluginRuntime(
   // the next plugin call without reload.
   const readAppPreference = buildAppPreferenceReader(settingsService, log);
 
-  // Plugin shutdown handler registry — fires on before-quit (see Sprint 1-A A3).
+  // Plugin shutdown handler registry — fires on before-quit (see shared AuditLogger + hooks wiring).
   const pluginShutdownHandlers: Array<{ pluginId: string; handler: () => void | Promise<void> }> = [];
   let pluginShutdownRan = false;
   app.prependOnceListener("before-quit", (event) => {

@@ -1,5 +1,5 @@
 /**
- * Cost Estimator — Sprint B
+ * Cost Estimator
  *
  * Pre-send cost preview for the chat input bar (the small badge next to
  * the input). Uses a chars/4 heuristic, ±20% accuracy. *Pre-send only* —
