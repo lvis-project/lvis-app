@@ -1,5 +1,5 @@
 /**
- * Phase 1.5 Option C — `request_plugin` 메타 툴 처리.
+ * Option C — `request_plugin` 메타 툴 처리.
  *
  * LLM 이 tool_use 로 `request_plugin({pluginId})` 를 요청하면 실제 tool executor
  * 에 넘기지 않고 이 모듈이 scope 를 확장하거나 에러 결과를 합성한다.

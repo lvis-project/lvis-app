@@ -75,7 +75,7 @@ export function createSystemPromptBuilder(opts: {
         "</active-plugins>",
       ].join("\n");
     },
-    // Phase 1.5 Option C — 비활성 plugin 카탈로그 공급.
+    // Option C — 비활성 plugin 카탈로그 공급.
     getPluginCards: () => pluginRuntime.listPluginCards(toolRegistry),
     getActiveSkillsSection,
     // Tutorial-X4 — User Onboarding Context source. Renderer writes the
@@ -110,7 +110,7 @@ export function createPostTurnHookChain(opts: {
   idleScheduler?: IdleSchedulerService;
   settingsService: SettingsService;
   /**
-   * Sprint 1-A A3 — shared AuditLogger. When provided, PostTurnHookChain
+   * Shared AuditLogger. When provided, PostTurnHookChain
    * reuses the same instance as HostApi.logEvent so plugin + host audit
    * trails stay unified. When omitted, a new logger is created.
    */
@@ -300,7 +300,7 @@ export function createConversationLoop(deps: ConversationDeps): ConversationLoop
     scriptHookManager: deps.scriptHookManager,
     additionalDirectories: deps.additionalDirectories,
     getAdditionalDirectories: deps.getAdditionalDirectories,
-    // Phase 1.5 Option C — request_plugin 메타 툴 pluginId 검증용.
+    // Option C — request_plugin 메타 툴 pluginId 검증용.
     pluginRuntime: deps.pluginRuntime,
     skillOverlay: deps.skillOverlay,
     sessionTodoStore: deps.sessionTodoStore,
@@ -331,7 +331,7 @@ function clampMaxTokens(raw: number | undefined): number | undefined {
  * 않도록 호스트에서 sanitize: 유효한 양의 정수만 수용하고 상한(CALL_LLM_MAX_TOKENS_CEILING)
  * 으로 clamp. 유효하지 않으면 undefined로 넘겨 generateText의 기본값(400)을 사용.
  *
- * Sprint 4-B §B-7 — per-pluginId token bucket (default 20 calls / 10 min) +
+ * §B-7 — per-pluginId token bucket (default 20 calls / 10 min) +
  * audit event on every call. The bucket is a sliding-window counter keyed by
  * pluginId. Exceeding plugins receive a thrown Error; the audit logger still
  * records the attempt so operators can spot runaway plugins.

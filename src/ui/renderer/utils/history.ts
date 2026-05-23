@@ -1,4 +1,4 @@
-// Phase 2: persisted-history → renderer-entries rebuild.
+// Persisted-history → renderer-entries rebuild.
 
 import {
   applyToolEnd,

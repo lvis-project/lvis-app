@@ -20,7 +20,7 @@
  *   - Concurrency: flush() is serialized by an in-flight guard so overlapping
  *     timer ticks + explicit flush() calls can't duplicate-submit a batch.
  *
- * D6: Authorization header reuses the GitHub App token already stored as a
+ * Authorization header reuses the GitHub App token already stored as a
  *     secret under "marketplace.apiKey". No new auth mechanism introduced.
  */
 import { randomUUID } from "node:crypto";

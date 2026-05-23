@@ -38,7 +38,7 @@ export interface PluginDevWatcherHandle {
 export function startPluginDevWatcher(
   opts: PluginDevWatcherOptions,
 ): PluginDevWatcherHandle {
-  // Phase 1 §Step 4 — gate hard-anchored to !app.isPackaged via dev-flags.
+  // §Step 4 — gate hard-anchored to !app.isPackaged via dev-flags.
   if (!devPluginReloadEnabled()) {
     return { stop: () => {} };
   }

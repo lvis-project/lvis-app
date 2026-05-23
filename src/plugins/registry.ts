@@ -198,13 +198,13 @@ export function resolveManifestPathsFromRegistry(
     .map((entry) => (isAbsolute(entry.manifestPath) ? entry.manifestPath : resolve(baseDir, entry.manifestPath)));
 }
 
-// ─── Phase 1.5 F-round §M1: in-process async mutex ──────────────────
+// ─── In-process async mutex ──────────────────────────────────────────
 //
 // Serialize read-modify-write cycles on registry.json to prevent TOCTOU
 // races between concurrent install / uninstall / disable paths. Keyed by
 // registryPath so tests with tmp paths do not interfere with production.
-// Scope is intentionally in-process only — cross-process locking is Phase 2+
-// (requires file locks or IPC serialization).
+// Scope is intentionally in-process only — cross-process locking
+// (file locks or IPC serialization) is not yet implemented.
 
 const registryLocks = new Map<string, Promise<void>>();
 

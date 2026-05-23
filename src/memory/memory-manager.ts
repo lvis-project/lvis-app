@@ -507,7 +507,7 @@ export class MemoryManager {
     return this.searchEntries(this.listMemoryEntries(), query);
   }
 
-  /** sessions/ 키워드 검색 — D5 메모리 검색 패널용. Cap 50. */
+  /** sessions/ 키워드 검색 — 메모리 검색 패널용. Cap 50. */
   searchSessions(query: string, options: Pick<ListSessionsOptions, "kind" | "routineId"> = {}): SessionSearchEntry[] {
     // Require at least 2 chars to prevent accidental full-dump via empty/trivial query.
     if (query.trim().length < 2) return [];

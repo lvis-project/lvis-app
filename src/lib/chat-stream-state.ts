@@ -72,7 +72,7 @@ export type StreamEvent = {
   /** Compact sequence number on `compact_notice` — enables view/branch actions. */
   compactNum?: number;
   /**
-   * Phase 3 — compact 결과 분류. Renderer 가 status 별로 다른 banner
+   * Compact 결과 분류. Renderer 가 status 별로 다른 banner
    * variant 를 표시 ("summarized" / "content_truncated" / "noop" /
    * "reduced_insufficient_forced"). `compact-status.ts` SOT.
    */
@@ -209,7 +209,7 @@ export type ChatEntry =
       /** Compact sequence number — enables view/branch actions on CheckpointDivider. */
       compactNum?: number;
       /**
-       * Phase 3 — compact 결과 분류. CheckpointDivider 가 status 별로
+       * Compact 결과 분류. CheckpointDivider 가 status 별로
        * 다른 visual variant (색상/아이콘/메시지) 를 표시한다.
        */
       compactStatus?: "summarized" | "content_truncated" | "noop" | "reduced_insufficient_forced";
