@@ -14,7 +14,7 @@
  * ACL 강제는 하지 않는다 — OS 수준 쓰기 방지는 IT/MDM 담당.
  * admin-dir 파일의 부재가 기본 상황 (개발자 머신 / 해외망).
  *
- * async-mutex 패턴: permissions-store.ts §M1 복사.
+ * async-mutex 패턴: permissions-store.ts 와 동일.
  *
  * TODO: Windows (certutil), Linux (/etc/lvis) admin-dir 검증 강화.
  */
@@ -80,7 +80,7 @@ function defaultPolicy(): PolicyFile {
   };
 }
 
-// ─── in-process async mutex (§M1 패턴 복사) ─────────
+// ─── in-process async mutex (permissions-store.ts 와 동일 패턴) ─────────
 
 const policyLocks = new Map<string, Promise<void>>();
 
