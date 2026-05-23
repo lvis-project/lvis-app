@@ -17,7 +17,7 @@ jobs:
       (github.event_name == 'pull_request' &&
        github.event.label.name == 'ui-e2e' &&
        github.event.pull_request.head.repo.full_name == github.repository)
-    runs-on: [self-hosted, Linux, ARM64, oracle]
+    runs-on: ubuntu-24.04-arm
     timeout-minutes: 25
     env:
       E2E: "1"
