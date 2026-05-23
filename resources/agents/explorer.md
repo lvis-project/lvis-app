@@ -1,7 +1,7 @@
 ---
 name: explorer
 description: 내 컴퓨터 안 파일·문서·메일·캘린더 탐색 — 사내 자료의 1차 SOT
-model: sonnet
+model: low
 mode: default
 ---
 
