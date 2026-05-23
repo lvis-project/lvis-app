@@ -32,7 +32,10 @@ import {
   isModelComplexityLevel,
   resolveModelForComplexity,
 } from "../shared/model-complexity-map.js";
-import { isLLMVendor } from "../shared/llm-vendor-defaults.js";
+import {
+  isLLMVendor,
+  isModelAvailableForVendor,
+} from "../shared/llm-vendor-defaults.js";
 import {
   resolveAgentMode,
   type AgentModeConfig,
@@ -89,12 +92,16 @@ export interface SubAgentRunnerDeps {
   toolRegistry: ToolRegistry;
 }
 
-// Sub-agent turn budget: default 30 covers most multi-step research/edit
-// flows; cap 60 leaves headroom for genuinely complex investigations. The
-// LLM is instructed (see `agent_spawn` description) to set `maxTurns`
-// based on its own complexity judgment of the task it is delegating.
+// Sub-agent turn budget. The child runs on the same ConversationLoop whose
+// per-run hard limit is MAX_TOOL_ROUNDS (30) — a child can never exceed it —
+// so the advertised cap is pinned to 30 to avoid promising the LLM (via the
+// `agent_spawn` maxTurns schema) rounds that the loop would silently drop.
+// Default 30 covers most multi-step research/edit flows; the LLM picks a
+// lower maxTurns for simpler tasks per the `agent_spawn` description.
+// Exported so `agent-spawn.ts` clamps the LLM-supplied maxTurns to the same
+// SOT ceiling instead of a drifting literal.
 const MAX_TURNS_DEFAULT = 30;
-const MAX_TURNS_CAP = 60;
+export const MAX_TURNS_CAP = 30;
 /**
  * C3(b): tools that must NEVER appear in a sub-agent's registry, regardless
  * of `sourceTools`. Adding `agent_spawn` here is the primary fork-bomb
@@ -110,10 +117,17 @@ const SUB_AGENT_TOOL_BLOCKLIST = new Set<string>(["agent_spawn"]);
  *   2. complexity tier      → MODEL_COMPLEXITY_MAP[vendor][tier]; null when
  *                             the vendor lacks that tier (design-intent
  *                             parent-model fallback, logged for audit)
- *   3. explicit model ID    → passed through unchanged
+ *   3. explicit model ID    → used only when it is a selectable option for
+ *                             the active vendor (LLM_VENDOR_MODEL_OPTIONS);
+ *                             otherwise null (parent-model fallback, logged)
+ *                             so an ID the vendor cannot serve never reaches
+ *                             the provider as a non-retryable model-not-found
+ *                             that the fallback chain refuses to recover from.
  *
  * Returning null means "no override" — the caller leaves `modelOverride`
  * unset so `refreshProvider()` uses the vendor block's configured model.
+ * Every non-null result is therefore a model the active vendor can serve
+ * (tier-resolved or option-validated).
  */
 export function resolveSubAgentModel(
   profileModel: string | undefined,
@@ -135,8 +149,19 @@ export function resolveSubAgentModel(
     return resolved;
   }
 
-  // Explicit vendor-specific model ID — pass through.
-  return trimmed;
+  // Explicit vendor-specific model ID. Use it only when the active vendor
+  // can actually serve it; an unavailable ID resolves to null (parent-model
+  // fallback, logged) rather than reaching the provider and hard-failing the
+  // child with a non-retryable model-not-found.
+  if (isModelAvailableForVendor(activeVendor, trimmed)) {
+    return trimmed;
+  }
+  log.warn(
+    "sub-agent: parent-model fallback used — model '%s' is not a selectable option for vendor '%s'",
+    trimmed,
+    activeVendor,
+  );
+  return null;
 }
 
 /**
