@@ -18,7 +18,6 @@ export function createAgentListTool(store: AgentProfileStore): Tool {
         triggers: agent.triggers,
         model: agent.model,
         mode: agent.mode,
-        source: agent.source,
       }));
       return { output: JSON.stringify({ agents }), isError: false };
     },

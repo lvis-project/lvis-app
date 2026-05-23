@@ -2,7 +2,11 @@ name: Cluster Detector
 
 on:
   pull_request:
-    types: [opened, synchronize]
+    # `labeled` is required so applying the `cluster-review-passed`
+    # exemption label re-runs the workflow without forcing a no-op
+    # commit. `unlabeled` so removing the attestation re-enables the
+    # block.
+    types: [opened, synchronize, labeled, unlabeled]
 
 permissions:
   pull-requests: write
@@ -16,6 +20,33 @@ jobs:
       - uses: actions/checkout@v6
         with:
           fetch-depth: 0
+
+      # ── 0. Exemption label — manual cluster review already attested ──────
+      # CLAUDE.md §Cross-Cutting Review Gate documents the resolution path:
+      # run a 3-agent cluster review (architect + critic + security-reviewer)
+      # against the merged-state set and confirm MAJOR=0. When that happens,
+      # the human attester applies the `cluster-review-passed` label to this
+      # PR and the gate clears. Without an exemption mechanism the workflow
+      # would have no way to know the manual review was performed and would
+      # block every merge in a 14-day sensitive-area window indefinitely.
+      - name: Check exemption label
+        id: exempt-check
+        env:
+          GH_TOKEN: ${{ github.token }}
+          PR_NUMBER: ${{ github.event.pull_request.number }}
+          REPO: ${{ github.repository }}
+        run: |
+          set -euo pipefail
+          EXEMPT_LABEL=$(gh pr view "$PR_NUMBER" \
+            --repo "$REPO" \
+            --json labels \
+            --jq '.labels[]? | select(.name == "cluster-review-passed") | .name' 2>/dev/null || echo "")
+          if [ -n "$EXEMPT_LABEL" ]; then
+            echo "exempt=true" >> "$GITHUB_OUTPUT"
+            echo "Cluster review exemption label detected — gate cleared."
+          else
+            echo "exempt=false" >> "$GITHUB_OUTPUT"
+          fi
 
       - name: Check sensitive area changes and cluster window
         id: cluster-check
@@ -144,7 +175,7 @@ jobs:
           echo "violation_reason=${VIOLATION_REASON}" >> "$GITHUB_OUTPUT"
 
       - name: Post violation comment
-        if: steps.cluster-check.outputs.violation == 'true'
+        if: steps.cluster-check.outputs.violation == 'true' && steps.exempt-check.outputs.exempt != 'true'
         env:
           GH_TOKEN: ${{ github.token }}
           PR_NUMBER: ${{ github.event.pull_request.number }}
@@ -184,7 +215,7 @@ jobs:
             --body "$COMMENT_BODY"
 
       - name: Set commit status — violation
-        if: steps.cluster-check.outputs.violation == 'true'
+        if: steps.cluster-check.outputs.violation == 'true' && steps.exempt-check.outputs.exempt != 'true'
         env:
           GH_TOKEN: ${{ github.token }}
           HEAD_SHA: ${{ github.event.pull_request.head.sha }}
@@ -211,3 +242,17 @@ jobs:
             -f state=success \
             -f context="cluster-detector" \
             -f description="No sensitive area cluster detected"
+
+      - name: Set commit status — pass (cluster review exempted)
+        if: steps.cluster-check.outputs.violation == 'true' && steps.exempt-check.outputs.exempt == 'true'
+        env:
+          GH_TOKEN: ${{ github.token }}
+          HEAD_SHA: ${{ github.event.pull_request.head.sha }}
+          REPO: ${{ github.repository }}
+        run: |
+          gh api \
+            --method POST \
+            "repos/${REPO}/statuses/${HEAD_SHA}" \
+            -f state=success \
+            -f context="cluster-detector" \
+            -f description="Cluster review attested via cluster-review-passed label"

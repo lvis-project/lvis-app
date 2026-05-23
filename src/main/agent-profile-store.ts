@@ -37,7 +37,6 @@ export interface LoadedAgentProfile {
   model?: string;
   mode?: string;
   body: string;
-  source: "user";
   filePath: string;
 }
 
@@ -163,7 +162,6 @@ export class AgentProfileStore {
           model: fm.model,
           mode: fm.mode,
           body: trimmedBody,
-          source: "user",
           filePath: realFile,
         });
       } catch (err) {

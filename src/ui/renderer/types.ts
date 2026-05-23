@@ -809,7 +809,6 @@ export type LvisApi = {
     h: (event: {
       name: string;
       description: string;
-      source: "user" | "builtin";
     }) => void,
   ) => () => void;
   // ─── Notifications (#260) ────────────────────────

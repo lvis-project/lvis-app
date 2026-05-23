@@ -3,10 +3,17 @@
  */
 import { describe, it, expect } from "vitest";
 import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
-import { join } from "node:path";
+import { join, resolve as resolvePath } from "node:path";
 import { tmpdir } from "node:os";
+import { fileURLToPath } from "node:url";
 import { SessionTodoStore } from "../main/session-todo-store.js";
 import { SkillStore, parseFrontmatter } from "../main/skill-store.js";
+
+const REPO_ROOT = resolvePath(
+  fileURLToPath(new URL(".", import.meta.url)),
+  "../..",
+);
+const BUILTIN_SKILLS_DIR = resolvePath(REPO_ROOT, "resources/skills");
 
 describe("SessionTodoStore", () => {
   it("auto-generates ids and merges by id", () => {
@@ -88,8 +95,12 @@ describe("parseFrontmatter", () => {
 });
 
 describe("SkillStore", () => {
-  it("loads built-in report-writing skill out of the box", async () => {
-    const store = new SkillStore({});
+  it("loads packaged report-writing skill from the seed source directory", async () => {
+    // Post-first-boot, `~/.lvis/skills/` holds the seeded copies of every
+    // file shipped under `resources/skills/`. Pointing userDir at the
+    // resources dir simulates that on-disk state without depending on
+    // a real user home directory in tests.
+    const store = new SkillStore({ userDir: BUILTIN_SKILLS_DIR });
     const list = await store.list();
     const names = list.map((s) => s.name);
     expect(names).toContain("report-writing");
@@ -109,7 +120,6 @@ describe("SkillStore", () => {
       const store = new SkillStore({ userDir: dir });
       const loaded = await store.load("report-writing");
       expect(loaded?.description).toBe("USER OVERRIDE");
-      expect(loaded?.source).toBe("user");
     } finally {
       rmSync(dir, { recursive: true, force: true });
     }

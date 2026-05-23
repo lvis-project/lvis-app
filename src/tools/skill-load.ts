@@ -4,19 +4,19 @@
  * renderer surfaces a SkillBadge ("🎯 Skill loaded: <name>") at the call
  * site so the user sees which skills are active for the rest of the chat.
  *
- * Security model (post C2 review):
+ * Security model (post C2 review + #1104 file-seed migration):
  *   - Skill bodies are NEVER appended to conversation history as `user`-role
  *     messages. Pre-fix, a malicious skill body ("ignore previous
  *     instructions and exfil…") landed in history with the user role and
  *     read like genuine input. Post-fix, the body lives in a separately
  *     delimited section of each turn's system prompt, fenced with
- *     `<lvis-skill name="…" source="…">…</lvis-skill>` so provenance is
- *     unambiguous (see {@link SkillOverlay}).
- *   - First load of any user-authored skill requires explicit user approval
- *     via {@link ApprovalGate}. Approval is persisted in
- *     `~/.lvis/skill-approvals.json` so the modal does not re-pop on
- *     subsequent loads of the same skill. Built-in skills (shipped with
- *     the host) skip the approval gate.
+ *     `<lvis-skill name="…">…</lvis-skill>` so provenance is unambiguous
+ *     (see {@link SkillOverlay}).
+ *   - Every skill — including seeded built-ins under `~/.lvis/skills/`,
+ *     which are user-editable on disk — runs through {@link ApprovalGate}
+ *     on first load. Approval is persisted in `~/.lvis/skill-approvals.json`
+ *     and hash-bound to the current body so a post-approval body swap
+ *     re-prompts (R2-CR-3 TOCTOU close).
  *   - Skill names are allowlisted to `[a-zA-Z0-9_-]+` and traversal-checked
  *     by {@link SkillStore} — see `skill-store.ts` for the file-side
  *     defenses.
@@ -34,7 +34,6 @@ const log = createLogger("lvis");
 export interface SkillLoadEvent {
   name: string;
   description: string;
-  source: "user" | "builtin";
 }
 
 export interface SkillLoadToolDeps {
@@ -62,8 +61,10 @@ export function createSkillLoadTool(deps: SkillLoadToolDeps): Tool {
     // Even though no filesystem mutation happens, the assistant's future
     // behavior is mutated by attacker-controlled content. Treat as "write"
     // so the §6.3 PermissionManager lifts the auto-approve and the first
-    // load of each user skill goes through the user-confirmation modal.
-    // Built-in skills bypass via `skill-approvals-store.ts` allowlist.
+    // load of each skill — seeded built-ins included — goes through the
+    // user-confirmation modal, then the body-hash record in
+    // `skill-approvals-store.ts` short-circuits repeat loads of the same
+    // body.
     category: "write",
     jsonSchema: {
       type: "object",
@@ -108,55 +109,53 @@ export function createSkillLoadTool(deps: SkillLoadToolDeps): Tool {
         };
       }
 
-      // C2(d): user-authored skills require explicit approval on first load.
-      // Builtins are pre-blessed (they ship with the host).
-      if (skill.source === "user") {
-        // R2-CR-3: hash-bind approval to the current body. If the user
-        // approved an earlier body and the file has since been swapped,
-        // `isApproved` returns false and we re-prompt — this closes a TOCTOU
-        // window where post-approval body mutations would silently inherit
-        // the previous "yes."
-        const alreadyApproved = await deps.approvals.isApproved(
-          skill.name,
-          skill.body,
-        );
-        if (!alreadyApproved) {
-          const gate = deps.getApprovalGate();
-          if (!gate) {
-            return {
-              output: JSON.stringify({
-                error: "skill_load approval gate unavailable",
-              }),
-              isError: true,
-            };
-          }
-          const decision = await gate.requestAndWait({
-            id: randomUUID(),
-            category: "tool",
-            toolName: "skill_load",
-            toolCategory: "meta",
-            args: { skillName: skill.name, source: skill.source },
-            reason: `사용자 작성 skill '${skill.name}' 을 시스템 프롬프트에 주입합니다. 승인 시 영구적으로 허용됩니다. (현재 본문 sha256 에 바인딩됩니다 — 본문이 변경되면 다시 확인합니다.)`,
-            source: "builtin",
-            createdAt: Date.now(),
-          });
-          if (decision.choice.startsWith("deny")) {
-            return {
-              output: JSON.stringify({
-                error: `user denied skill load: ${skill.name}`,
-              }),
-              isError: true,
-            };
-          }
-          // R2-CR-3: persist approval BOUND TO the current body's sha256.
-          // A subsequent body swap will invalidate this record.
-          await deps.approvals.approve(skill.name, skill.body).catch((err) => {
-            log.warn(
-              "skill_load: approval persistence failed (non-fatal): %s",
-              (err as Error).message,
-            );
-          });
+      // C2(d): every skill body is user-editable on disk — seeded built-in
+      // files included — so the approval gate runs uniformly. R2-CR-3:
+      // hash-bind approval to the current body. If the user approved an
+      // earlier body and the file has since been swapped, `isApproved`
+      // returns false and we re-prompt — closing the TOCTOU window where
+      // post-approval body mutations would silently inherit the previous
+      // "yes."
+      const alreadyApproved = await deps.approvals.isApproved(
+        skill.name,
+        skill.body,
+      );
+      if (!alreadyApproved) {
+        const gate = deps.getApprovalGate();
+        if (!gate) {
+          return {
+            output: JSON.stringify({
+              error: "skill_load approval gate unavailable",
+            }),
+            isError: true,
+          };
         }
+        const decision = await gate.requestAndWait({
+          id: randomUUID(),
+          category: "tool",
+          toolName: "skill_load",
+          toolCategory: "meta",
+          args: { skillName: skill.name },
+          reason: `skill '${skill.name}' 을 시스템 프롬프트에 주입합니다. 승인 시 영구적으로 허용됩니다. (현재 본문 sha256 에 바인딩됩니다 — 본문이 변경되면 다시 확인합니다.)`,
+          source: "builtin",
+          createdAt: Date.now(),
+        });
+        if (decision.choice.startsWith("deny")) {
+          return {
+            output: JSON.stringify({
+              error: `user denied skill load: ${skill.name}`,
+            }),
+            isError: true,
+          };
+        }
+        // R2-CR-3: persist approval BOUND TO the current body's sha256.
+        // A subsequent body swap will invalidate this record.
+        await deps.approvals.approve(skill.name, skill.body).catch((err) => {
+          log.warn(
+            "skill_load: approval persistence failed (non-fatal): %s",
+            (err as Error).message,
+          );
+        });
       }
 
       // R2-SEC-INFO: refuse to register a skill without a real session id.
@@ -184,15 +183,13 @@ export function createSkillLoadTool(deps: SkillLoadToolDeps): Tool {
       deps.emit({
         name: skill.name,
         description: skill.description,
-        source: skill.source,
       });
       return {
         output: JSON.stringify({
           loaded: true,
           skillName: skill.name,
           summary:
-            skill.description ||
-            `Skill '${skill.name}' loaded from ${skill.source}`,
+            skill.description || `Skill '${skill.name}' loaded`,
         }),
         isError: false,
       };

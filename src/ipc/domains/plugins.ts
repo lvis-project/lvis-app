@@ -578,7 +578,6 @@ export function registerPluginsHandlers(deps: IpcDeps): void {
       triggers: agent.triggers,
       ...(agent.model ? { model: agent.model } : {}),
       ...(agent.mode ? { mode: agent.mode } : {}),
-      source: agent.source,
     }));
     return { agents };
   });
@@ -592,7 +591,6 @@ export function registerPluginsHandlers(deps: IpcDeps): void {
       name: skill.name,
       description: skill.description,
       triggers: skill.triggers,
-      source: skill.source,
     }));
     return { skills };
   });
