@@ -124,6 +124,7 @@ export const LLM_VENDOR_MODEL_OPTIONS: Readonly<Record<LLMVendor, readonly strin
     ],
     copilot: [
       "gpt-4o",
+      "gpt-5.4-nano",
       "gpt-5.4-mini",
       "gpt-5.4",
       "gpt-4.1",
@@ -132,6 +133,7 @@ export const LLM_VENDOR_MODEL_OPTIONS: Readonly<Record<LLMVendor, readonly strin
     ],
     "azure-foundry": [
       "gpt-4o",
+      "gpt-5.4-nano",
       "gpt-5.4-mini",
       "gpt-5.4",
       "gpt-4.1",
