@@ -230,7 +230,7 @@ Plugin 제거:
 | knowledge_search / document_* | read | ask (default; plugin dependency gated) |
 | render_html | write | ask (default) |
 | request_plugin | read | ask (default) |
-| schedule_routine | write | ask (default) |
+| routine_schedule | write | ask (default) |
 | skill_list | read | allow |
 | skill_load | read | ask (default; first-use approval gated) |
 | todo_session_write | write | ask (default) |
