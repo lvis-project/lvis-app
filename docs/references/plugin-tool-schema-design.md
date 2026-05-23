@@ -733,7 +733,7 @@ import { Stack, Toggle } from "@lvis/plugin-sdk/ui";
 | `emitEvent(name, payload)` | 다른 플러그인·호스트 이벤트 버스에 이벤트 발행 (capability gate) | 직접 플러그인 간 함수 호출 대체 |
 | `onEvent(name, handler)` | 다른 플러그인 이벤트 구독 (private namespace 차단) | 폴링 대체 (push 모델로 충분) |
 | `addTask(task)` | 액션 아이템 → LVIS 태스크 자동 생성 (host `taskService` → `~/.lvis/tasks/lvis-tasks.db` SQLite). | UI 직접 조작 대체 |
-| `saveNote(title, content)` | `~/.lvis/notes/`에 회의록·요약 저장 | 대용량 바이너리 저장 |
+| `saveNote(title, content)` | `~/.lvis/plugins/<id>/notes/`에 회의록·요약 저장 (플러그인 namespace 내부) | 대용량 바이너리 저장 |
 | `getSecret(key)` | 암호화된 API 키 조회 | 키를 메모리에 캐시 후 재사용 (매번 호출) |
 | `callTool(toolName, payload?)` | manifest `pluginAccess.tools[]` 로 허용한 다른 플러그인 tool 을 호출. Host 가 PluginRuntime access check 후 ToolExecutor 권한 경로로 위임 | peer plugin module import, handler 직접 호출, 권한 우회 |
 <!-- PR 3c: getMsGraphToken / startMsGraphAuth / isMsGraphAuthenticated / getMsGraphAccount / onMsGraphAuthChange / withMsGraphRetry — host HostApi 에서 제거됨. ms-graph 플러그인이 자체 MSAL 소유. architecture.md §9.4a "Plugin-Owned OAuth Authentication" 참조. -->
