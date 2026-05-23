@@ -12,9 +12,9 @@
  *   - A turn cap (default 5) — runTurn(`maxRounds: cappedTurns`) terminates
  *     queryLoop cleanly between rounds, and the executor's per-round
  *     fan-out cap (10 calls/round) bounds total tool execution count.
- *   - An H2 wrapper over the parent ApprovalGate that prepends
- *     "[Sub-Agent: <title>]" to the user-facing approval reason so users
- *     know an approval modal originated from a sub-agent.
+ *   - An ApprovalGate wrapper that prepends "[Sub-Agent: <title>]" to the
+ *     user-facing approval reason so users know an approval modal originated
+ *     from a sub-agent.
  *
  * Per-turn updates are streamed back as events so the renderer can show a
  * live SubAgentCard. Final summary is delivered as `summary` in the result.
@@ -129,7 +129,7 @@ export function resolveSubAgentModel(
 }
 
 /**
- * H2: ApprovalGate wrapper that prepends `[Sub-Agent: <title>] ` to the
+ * ApprovalGate wrapper that prepends `[Sub-Agent: <title>] ` to the
  * `reason` text shown in the user-facing approval modal so users can
  * distinguish parent-loop approvals from sub-agent approvals at a glance.
  * No other behavior changes — the underlying gate handles HMAC/nonce, S1
@@ -184,8 +184,8 @@ export class SubAgentRunner {
         .map((tool) => tool.pluginId as string),
     );
 
-    // H2: wrap the parent ApprovalGate so approval modals from this sub-
-    // agent's tool calls show "[Sub-Agent: <title>]" in their reason text.
+    // Wrap the parent ApprovalGate so approval modals from this sub-agent's
+    // tool calls show "[Sub-Agent: <title>]" in their reason text.
     const wrappedApprovalGate = this.deps.parentDeps.approvalGate
       ? makeSubAgentApprovalAdapter(this.deps.parentDeps.approvalGate, input.title)
       : undefined;

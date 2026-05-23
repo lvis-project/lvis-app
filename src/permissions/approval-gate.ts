@@ -173,12 +173,12 @@ export interface ApprovalRequest {
    */
   sensitivePathPattern?: string | null;
   /**
-   * R-2 R4: Cache key for approval record/lookup symmetry.
+   * Cache key for approval record/lookup symmetry.
    * Propagated from executor's approvalCacheKeyFor() result so the
    * renderer can record and look up entries using the same key that
    * dispatchReviewer uses. Without this field the renderer receives
-   * undefined and the record key mismatches the lookup key → R-2 hit
-   * rate 0% for tools like schedule_routine / bash / fs_write.
+   * undefined and the record key mismatches the lookup key → approval
+   * cache hit rate 0% for tools like routine_schedule / bash / fs_write.
    */
   approvalCacheKey?: string;
   /**
@@ -403,7 +403,7 @@ export class ApprovalGate {
     // not even full_auto / user-approval paths can bypass it. Cannot be
     // overridden by user approval, admin policy, or permission mode.
     //
-    // H3: canonicalize the path BEFORE matching via the shared
+    // Canonicalize the path BEFORE matching via the shared
     // canonicalizePathForMatch() helper. This closes four bypass vectors:
     // `..` segments, NFD unicode forms, trailing spaces, mixed-case on
     // case-insensitive filesystems, and duplicate slashes.

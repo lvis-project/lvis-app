@@ -486,9 +486,9 @@ describe("ApprovalGate", () => {
     expect(result.choice).toBe("deny-once");
   });
 
-  // ── H3: Path canonicalization before sensitive-path check ────
+  // ── Path canonicalization before sensitive-path check ────
 
-  it("H3: path with '..' segments is canonicalized and still blocked", async () => {
+  it("path with '..' segments is canonicalized and still blocked", async () => {
     const wc = makeMockWebContents();
     const gate = new ApprovalGate(wc as never);
     const req = makeRequest({
@@ -506,7 +506,7 @@ describe("ApprovalGate", () => {
     expect(wc.send).not.toHaveBeenCalled();
   });
 
-  it("H3: NFD-decomposed path is NFC-normalized and still blocked", async () => {
+  it("NFD-decomposed path is NFC-normalized and still blocked", async () => {
     const wc = makeMockWebContents();
     const gate = new ApprovalGate(wc as never);
     // ".\u0073\u0073h" is already composed (".ssh") — use a real NFD
@@ -530,7 +530,7 @@ describe("ApprovalGate", () => {
     expect(wc.send).not.toHaveBeenCalled();
   });
 
-  it("H3: mixed-case path on macOS is case-folded and still blocked", async () => {
+  it("mixed-case path on macOS is case-folded and still blocked", async () => {
     // Case-fold only kicks in on darwin/win32; on linux runners this
     // test still exercises the canonicalization path but the underlying
     // assertion only makes sense when the folder matches after toLowerCase.
@@ -746,7 +746,7 @@ describe("ApprovalGate", () => {
     expect(n1).not.toBe(n2);
   });
 
-  it("H3: duplicate slashes are collapsed and still blocked", async () => {
+  it("duplicate slashes are collapsed and still blocked", async () => {
     const wc = makeMockWebContents();
     const gate = new ApprovalGate(wc as never);
     const req = makeRequest({

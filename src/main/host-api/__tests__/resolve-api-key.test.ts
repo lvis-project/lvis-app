@@ -553,7 +553,7 @@ describe("resolveApiKey — registry.installSource precedence (#958 round-1)", (
     }
     // Audit trail records the bypass with the registry source.
     const bypassLine = auditLogger.mock.mock.calls.find((c) =>
-      String(c[0]?.input ?? "").includes("policy=admin tier3-bypassed"),
+      String(c[0]?.input ?? "").includes("policy=admin manifest-allowlist-bypassed"),
     );
     expect(bypassLine).toBeDefined();
     expect(String(bypassLine?.[0]?.input ?? "")).toContain(
@@ -662,7 +662,7 @@ describe("resolveApiKey — registry.installSource precedence (#958 round-1)", (
     );
     expect(result.ok).toBe(true);
     const bypassLine = auditLogger.mock.mock.calls.find((c) =>
-      String(c[0]?.input ?? "").includes("policy=admin tier3-bypassed"),
+      String(c[0]?.input ?? "").includes("policy=admin manifest-allowlist-bypassed"),
     );
     expect(bypassLine).toBeDefined();
     expect(String(bypassLine?.[0]?.input ?? "")).toContain(

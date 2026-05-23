@@ -288,21 +288,21 @@ describe("PermissionManager (B1 persistence)", () => {
   });
 
   it("uses approvalCacheKey for authority-sensitive allow-always cache hits", async () => {
-    await pm.addAlwaysAllowedPersist("schedule_routine:scope:allow:meeting");
+    await pm.addAlwaysAllowedPersist("routine_schedule:scope:allow:meeting");
 
     const sameScope = pm.checkDetailed(
-      "schedule_routine",
+      "routine_schedule",
       "builtin",
       "write",
       null,
-      { approvalCacheKey: "schedule_routine:scope:allow:meeting" },
+      { approvalCacheKey: "routine_schedule:scope:allow:meeting" },
     );
     const widerScope = pm.checkDetailed(
-      "schedule_routine",
+      "routine_schedule",
       "builtin",
       "write",
       null,
-      { approvalCacheKey: "schedule_routine:scope:allow:alpha-plugin,beta-plugin" },
+      { approvalCacheKey: "routine_schedule:scope:allow:alpha-plugin,beta-plugin" },
     );
 
     expect(sameScope.decision).toBe("allow");
@@ -312,14 +312,14 @@ describe("PermissionManager (B1 persistence)", () => {
   });
 
   it("does not reuse bare tool-name allow rules when approvalCacheKey is present", async () => {
-    await pm.addAlwaysAllowedPersist("schedule_routine");
+    await pm.addAlwaysAllowedPersist("routine_schedule");
 
     const result = pm.checkDetailed(
-      "schedule_routine",
+      "routine_schedule",
       "builtin",
       "write",
       null,
-      { approvalCacheKey: "schedule_routine:scope:allow:meeting" },
+      { approvalCacheKey: "routine_schedule:scope:allow:meeting" },
     );
 
     expect(result.decision).toBe("ask");
