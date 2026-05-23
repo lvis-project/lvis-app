@@ -30,10 +30,10 @@ export type UserApprovalScope = "session" | "persistent";
 export type UserApprovalVerdict = "low" | "medium" | "high";
 
 /**
- * Emitted on the `PERMISSIONS.userApprovalHit` channel when an R-2
+ * Emitted on the `PERMISSIONS.userApprovalHit` channel when a
  * memory hit auto-approves a tool call. The renderer surfaces this to
  * the user as a non-blocking disclosure so the audit-trail intent of
- * R-4 NL justification (#691) is preserved for subsequent auto-approves.
+ * NL justification (#691) is preserved for subsequent auto-approves.
  *
  * Wire-shape boundary: this is a TYPE-level contract only. Payloads
  * crossing the IPC boundary are NOT structurally validated by importing
