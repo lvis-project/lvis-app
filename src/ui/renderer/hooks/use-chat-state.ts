@@ -35,6 +35,12 @@ export function useChatState(api: LvisApi) {
   const [streaming, setStreaming] = useState(false);
   /** True while a pre-turn auto-compact is running. */
   const [isCompacting, setIsCompacting] = useState(false);
+  /** triggerSource of the most recent compact_started event — used to render
+   *  the force-recover OFF-override banner (#916). Reset to null on compact_notice / done. */
+  const [compactTriggerSource, setCompactTriggerSource] = useState<"estimate" | "context-tokens" | "manual" | "force-recover" | null>(null);
+  /** True once recovery_exhausted fires — compact cannot reduce context (#917).
+   *  Cleared on clearForNewChat. */
+  const [isRecoveryExhausted, setIsRecoveryExhausted] = useState(false);
   const streamRef = useRef("");
   const thoughtRef = useRef("");
   const activeStreamIdRef = useRef<number | null>(null);
@@ -298,9 +304,16 @@ export function useChatState(api: LvisApi) {
         // Pre-turn auto-compact started — show a transient "자동 압축 중..." hint.
         // Cleared when `compact_notice` (completion) arrives.
         setIsCompacting(true);
+        // Capture triggerSource so ChatView/App can show distinct banner for
+        // force-recover (autoCompact OFF-override) vs normal compact (#916).
+        setCompactTriggerSource(ev.triggerSource ?? null);
+      } else if (ev.type === "recovery_exhausted") {
+        // Issue #917 — force-recover budget consumed; compact cannot reduce context.
+        setIsRecoveryExhausted(true);
       } else if (ev.type === "compact_notice") {
         // Compact completed — clear the in-progress indicator.
         setIsCompacting(false);
+        setCompactTriggerSource(null);
         // Emit a structured `kind: "checkpoint"` entry so ChatView can render
         // a consistent checkpoint divider instead of string-matching prose.
         const removed = ev.removedMessages ?? 0;
@@ -336,6 +349,7 @@ export function useChatState(api: LvisApi) {
         // arrived (engine error path swallowed the throw), this prevents
         // the indicator from sticking forever.
         setIsCompacting(false);
+        setCompactTriggerSource(null);
         if (debugStreamEnabled) {
           debugLog("stream", "done:enter", {
             accStream: streamRef.current.length,
@@ -613,6 +627,8 @@ export function useChatState(api: LvisApi) {
     activeStreamIdRef.current = null;
     // New chat: any prior session's in-flight compact indicator is stale.
     setIsCompacting(false);
+    setCompactTriggerSource(null);
+    setIsRecoveryExhausted(false);
   }, []);
 
   const appendUserMessage = useCallback((content: string, injectHint?: "queue" | "interrupt"): void => {
@@ -696,6 +712,8 @@ export function useChatState(api: LvisApi) {
     streaming,
     setStreaming,
     isCompacting,
+    compactTriggerSource,
+    isRecoveryExhausted,
     beginStreamingRequest,
     finishStreamingRequest,
     editingEntryIdx,
