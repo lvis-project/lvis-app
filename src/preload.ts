@@ -1158,7 +1158,7 @@ const api = {
       ipcRenderer.invoke(PERMISSIONS.approvalRespond, decision),
   },
 
-  // ─── R-2 User-Approval Store (PR-A4) ─────────────
+  // ─── User-Approval Store ─────────────
   userApproval: {
     /** Record a user approval decision (scope: session | persistent). */
     record: async (entry: {
@@ -1170,9 +1170,9 @@ const api = {
       scope: UserApprovalScope;
       verdictAtApproval: UserApprovalVerdict;
       nlJustification: string | null;
-      /** R-2 Round-3: propagated for record/lookup key symmetry. */
+      /** Propagated for record/lookup key symmetry. */
       trustOrigin?: string;
-      /** R-2 Round-3: propagated for record/lookup key symmetry. */
+      /** Propagated for record/lookup key symmetry. */
       approvalCacheKey?: string;
     }) => ipcRenderer.invoke(PERMISSIONS.userApprovalRecord, { ...entry, intent: ipcUserKeyboardIntent() }),
     /** Revoke an approval by raw composite key. */

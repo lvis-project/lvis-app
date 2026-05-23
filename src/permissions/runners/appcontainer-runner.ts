@@ -11,7 +11,7 @@
  *       deferred to PR-A3.5.
  *   D8: detect-only in PR-A3. detect() returns available=false with a clear
  *       reason so boot skips registration. Windows tools fall through to
- *       isolation=none with the R-1 composition rule + reviewer no-downgrade
+ *       isolation=none with the composition rule + reviewer no-downgrade
  *       safety net.
  *
  * PR-A3.5 deliverable (out of scope here):

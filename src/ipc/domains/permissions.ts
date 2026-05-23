@@ -501,7 +501,7 @@ export function registerPermissionsHandlers(deps: IpcDeps): void {
     }
   });
 
-  // ── R-2 User-Approval Store handlers (PR-A4) ──────────────────────────
+  // ── User-Approval Store handlers ──────────────────────────
 
   ipcMain.handle(PERMISSIONS.userApprovalRecord, async (e, payload: unknown) => {
     if (!validateSender(e)) { auditUnauthorized(auditLogger, PERMISSIONS.userApprovalRecord, e); return UNAUTHORIZED_FRAME; }
@@ -523,8 +523,7 @@ export function registerPermissionsHandlers(deps: IpcDeps): void {
     // `body.approvalCacheKey`. A renderer XSS could swap any of these and
     // make the recorded entry a memory hit for a different
     // (toolName, source, trustOrigin, approvalCacheKey) tuple than the
-    // one the main process emitted — defeating R-2 CRITICAL-4 cache
-    // identity isolation.
+    // one the main process emitted — defeating cache identity isolation.
     //
     // Fix: the renderer now sends `requestId` (the original
     // ApprovalRequest.id). The handler reads the canonical
@@ -544,12 +543,12 @@ export function registerPermissionsHandlers(deps: IpcDeps): void {
     ) {
       return { ok: false, error: "invalid-payload", message: "user-approval record: invalid payload" };
     }
-    // R-4 HIGH verdict enforcement: HIGH approvals must use session scope and
+    // HIGH verdict enforcement: HIGH approvals must use session scope and
     // include a non-empty NL justification. Enforced here in the IPC handler
     // (renderer-side XSS bypass protection) in addition to dialog-level guards.
     if (verdictAtApproval === "high") {
       if (scope !== "session") {
-        return { ok: false, error: "high-requires-session-scope", message: "HIGH verdict approvals must use session scope (per R-4 design)" };
+        return { ok: false, error: "high-requires-session-scope", message: "HIGH verdict approvals must use session scope" };
       }
       if (typeof nlJustification !== "string" || nlJustification.trim().length === 0) {
         return { ok: false, error: "high-requires-justification", message: "HIGH verdict approvals require non-empty NL justification" };
@@ -563,7 +562,7 @@ export function registerPermissionsHandlers(deps: IpcDeps): void {
       return { ok: false, error: "no-such-request", message: "user-approval record: no in-flight ApprovalRequest for requestId" };
     }
     try {
-      // MEDIUM security-M2: canonicalize at IPC handler to catch any non-renderer
+      // Canonicalize at IPC handler to catch any non-renderer
       // callers that bypass the renderer-side canonicalization. Non-JSON or
       // non-object args are explicitly rejected (CLAUDE.md No Fallback Code).
       let canonicalArgs: string;
@@ -586,7 +585,7 @@ export function registerPermissionsHandlers(deps: IpcDeps): void {
         trustOrigin: snapshot.trustOrigin,
         approvalCacheKey: snapshot.approvalCacheKey,
       });
-      // R-2 user-approval store mutation — outside PermissionManager, so
+      // User-approval store mutation — outside PermissionManager, so
       // emit the broadcast explicitly to keep the Active Approvals view
       // in multi-window PermissionsTab fresh.
       broadcastPermissionConfigChanged(deps);
