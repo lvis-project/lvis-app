@@ -138,7 +138,7 @@ export class BashTool extends ZodTool<typeof BashToolInputSchema> {
     // breaking all Linux users before the full policy rollout.
     // TODO: remove the env-gate and make sandbox always-on once policy hook lands.
     //
-    // If no runner is registered or sandbox is not enabled (isolation=none per D8),
+    // If no runner is registered or sandbox is not enabled (isolation=none, detect-and-skip),
     // fall through to the existing spawnWithTimeout path unchanged — R-1 composition
     // rule + reviewer judgment remain the safety net.
     const sandboxRunner = getSandboxRunner(process.platform as NodeJS.Platform);
@@ -186,7 +186,7 @@ interface SpawnResult {
  * (SIGTERM to bwrap wrapper, which propagates into the namespace).
  *
  * The sandboxed process is given a conservative capability set:
- *   - `networkBlocked: true` — no outbound egress (D1 verified-kernel)
+ *   - `networkBlocked: true` — no outbound egress (verified-kernel CLONE_NEWNET)
  *   - `fsReadPaths: ["/etc", "/usr"]` — minimal read mounts
  *   - `fsWritePaths: [resolvedCwd]` — write access only to the working dir
  *   - `processIsolated: true` — separate PID namespace

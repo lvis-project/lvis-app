@@ -4,14 +4,14 @@
  * Spec ref: docs/research/sandbox-isolation.md
  * Issue: #691
  *
- * Decision refs:
- *   D1: bwrap OS-only — no bundled binary, requires OS package (dnf install bubblewrap).
- *   D8: detect-and-skip — if /usr/bin/bwrap absent, runner stays unregistered;
+ * Design decisions:
+ *   bwrap OS-only — no bundled binary, requires OS package (dnf install bubblewrap).
+ *   detect-and-skip — if /usr/bin/bwrap absent, runner stays unregistered;
  *       Linux tools run with isolation=none. Composition rule + reviewer
  *       judgment provide the safety net.
  *
  * bwrap flags used:
- *   --unshare-net       CLONE_NEWNET — verified-kernel egress block (D1)
+ *   --unshare-net       CLONE_NEWNET — verified-kernel egress block
  *   --unshare-pid       separate PID namespace so child cannot ptrace host
  *   --new-session       new session (setsid) isolates from terminal signals
  *   --ro-bind-try       bind-mount a path read-only (silently skips if absent)
@@ -34,7 +34,7 @@ import type {
 } from "../sandbox-runner.js";
 import { trackManagedChildProcess } from "../../main/managed-child-processes.js";
 
-/** Absolute path to the OS-installed bwrap binary (D1: no bundled fallback). */
+/** Absolute path to the OS-installed bwrap binary (no bundled fallback). */
 export const BWRAP_BIN = "/usr/bin/bwrap";
 
 export class BwrapRunner implements SandboxRunner {
@@ -121,7 +121,7 @@ export class BwrapRunner implements SandboxRunner {
       bwrapArgs.push("--setenv", k, v);
     }
 
-    // Network isolation — CLONE_NEWNET (D1 verified-kernel egress block).
+    // Network isolation — CLONE_NEWNET (verified-kernel egress block).
     // Default: block (conservative). Caller passes `networkBlocked: false`
     // only when the tool explicitly needs outbound access.
     if (capabilities.networkBlocked !== false) {

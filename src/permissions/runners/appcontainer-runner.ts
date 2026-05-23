@@ -4,12 +4,12 @@
  * Spec ref: docs/research/sandbox-isolation.md
  * Issue: #691
  *
- * Decision refs:
- *   D3: Windows AppContainer only (no WSL2 fallback). Verified-kernel via
+ * Design decisions:
+ *   Windows AppContainer only (no WSL2 fallback). Verified-kernel via
  *       capability SID model. Full native Win32 spawn (CreateProcess +
  *       CreateAppContainerProfile) requires node-ffi or N-API binding —
  *       deferred to a future native-binding deliverable.
- *   D8: detect-only. detect() returns available=false with a clear reason so
+ *   detect-only. detect() returns available=false with a clear reason so
  *       boot skips registration. Windows tools fall through to isolation=none
  *       with the composition rule + reviewer no-downgrade safety net.
  *
@@ -56,7 +56,7 @@ export class AppContainerRunner implements SandboxRunner {
         confidence: "verified",
       };
     }
-    // D3: native Win32 binding not yet implemented.
+    // Native Win32 binding not yet implemented.
     // Return available=false so boot skips registration and Windows tools
     // fall through to isolation=none — no false sense of isolation.
     return {
