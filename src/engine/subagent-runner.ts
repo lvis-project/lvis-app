@@ -33,6 +33,10 @@ import {
   resolveModelForComplexity,
 } from "../shared/model-complexity-map.js";
 import { isLLMVendor } from "../shared/llm-vendor-defaults.js";
+import {
+  resolveAgentMode,
+  type AgentModeConfig,
+} from "../shared/agent-mode-map.js";
 import { createLogger } from "../lib/logger.js";
 
 const log = createLogger("lvis");
@@ -52,6 +56,13 @@ export interface SubAgentSpawnInput {
    * intent fallback, logged for audit).
    */
   profileModel?: string;
+  /**
+   * Agent profile's `mode:` frontmatter (execute / plan / research /
+   * explore, or undefined). Resolved in `spawn()` to a working-posture
+   * preamble + auto-skill recommendation prepended to the instructions.
+   * Unknown / absent → the `default` mode (inert), logged for audit.
+   */
+  profileMode?: string;
 }
 
 export interface SubAgentTurnUpdate {
@@ -129,6 +140,34 @@ export function resolveSubAgentModel(
 }
 
 /**
+ * Build the mode preamble prepended to a sub-agent's instructions:
+ *   - working-posture line (mode.reasoningHint)
+ *   - auto-skill RECOMMENDATION (not a force-load — LVIS gates every skill
+ *     behind a body-hash approval; the LLM must call `skill_load` so the
+ *     normal approval modal runs. See agent-mode-map.ts SECURITY MODEL).
+ * Returns "" for the default/inert mode so the profile body is unchanged.
+ */
+export function buildModePreamble(config: AgentModeConfig): string {
+  const parts: string[] = [];
+  if (config.reasoningHint) {
+    parts.push(
+      `<lvis-agent-mode-posture>\n${config.reasoningHint}\n</lvis-agent-mode-posture>`,
+    );
+  }
+  if (config.autoSkills.length > 0) {
+    parts.push(
+      [
+        "<lvis-agent-mode-skills>",
+        `이 작업에는 다음 skill 이 유용합니다: ${config.autoSkills.join(", ")}.`,
+        "필요하면 skill_load 로 로드하세요 (첫 로드 시 사용자 승인 모달이 뜹니다).",
+        "</lvis-agent-mode-skills>",
+      ].join("\n"),
+    );
+  }
+  return parts.join("\n\n");
+}
+
+/**
  * H2: ApprovalGate wrapper that prepends `[Sub-Agent: <title>] ` to the
  * `reason` text shown in the user-facing approval modal so users can
  * distinguish parent-loop approvals from sub-agent approvals at a glance.
@@ -164,7 +203,22 @@ export class SubAgentRunner {
     callbacks?: SubAgentSpawnCallbacks,
   ): Promise<SubAgentSpawnResult> {
     const childSessionId = `${input.originSessionId ?? "spawn"}::${randomUUID()}`;
-    const requestedTurns = input.maxTurns ?? MAX_TURNS_DEFAULT;
+
+    // Resolve the profile's mode → working-posture preamble + maxTurns hint.
+    // Unknown / absent mode resolves to the inert `default` mode; a non-empty
+    // unmatched mode is logged so the audit trail captures the typo.
+    const modeResult = resolveAgentMode(input.profileMode);
+    if (!modeResult.matched) {
+      log.warn(
+        "sub-agent: unknown mode '%s' — using default (inert) mode",
+        modeResult.requested,
+      );
+    }
+
+    // Mode's maxToolRoundsHint seeds maxTurns only when the agent_spawn call
+    // did not specify one; explicit input.maxTurns always wins.
+    const requestedTurns =
+      input.maxTurns ?? modeResult.config.maxToolRoundsHint ?? MAX_TURNS_DEFAULT;
     const cappedTurns = Math.max(1, Math.min(MAX_TURNS_CAP, requestedTurns));
 
     // C3(b): build the sub-agent's tool surface. Always strip the blocklist
@@ -235,7 +289,13 @@ export class SubAgentRunner {
     let lastText = "";
     let turn = 0;
 
-    const initialPrompt = input.instructions;
+    // Prepend the mode preamble (posture + auto-skill recommendation) to the
+    // instructions. The preamble is empty for the default mode, leaving the
+    // profile body to drive the sub-agent unchanged.
+    const modePreamble = buildModePreamble(modeResult.config);
+    const initialPrompt = modePreamble
+      ? `${modePreamble}\n\n${input.instructions}`
+      : input.instructions;
     let assistantRounds = 0;
 
     try {
