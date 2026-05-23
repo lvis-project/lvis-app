@@ -145,7 +145,7 @@ function applyRuntimeAppIcon() {
   }
 }
 
-// Phase 1 trust-hardening — strip LVIS_DEV* from process.env in packaged
+// Trust-hardening — strip LVIS_DEV* from process.env in packaged
 // builds before any preload, renderer, or worker inherits it. Without this
 // scrub, a packaged binary launched with LVIS_DEV=1 in the user environment
 // would expose `env.isDev=true` to the renderer (via preload's
@@ -202,7 +202,7 @@ if (app.isPackaged) {
 }
 
 // §17 C1: Corporate CA 런타임 주입 — corp-ca-loader 사용 (정식 대응 완료).
-// Phase 1.5의 dev-only TLS bypass 완전 제거. Chromium은 OS keystore 자동 신뢰.
+// Dev-only TLS bypass 완전 제거. Chromium은 OS keystore 자동 신뢰.
 async function injectCorporateCa() {
   try {
     const result = await ensureCorporateCa();

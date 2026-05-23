@@ -833,7 +833,7 @@ const api = {
   confirmInstallAppUpdate: () =>
     ipcRenderer.invoke("lvis:update:confirm-install") as Promise<{ confirmed: boolean }>,
 
-  // ─── Phase 2d — managed bootstrap status ─────────
+  // ─── Managed bootstrap status ────────────────────
   // The host emits these around `ensureManagedInstalled()` so the renderer
   // can show a banner / toast during startup install. Three lifecycle states:
   //   - { phase: "start" }
@@ -852,7 +852,7 @@ const api = {
     ipcRenderer.on("lvis:bootstrap:status", listener);
     return () => ipcRenderer.removeListener("lvis:bootstrap:status", listener);
   },
-  // Phase 2d FU — banner-driven retry. Re-emits the start/complete/error
+  // Banner-driven retry. Re-emits the start/complete/error
   // status sequence so the banner subscriber updates without needing a
   // separate result channel.
   retryBootstrap: () => ipcRenderer.invoke("lvis:bootstrap:retry"),

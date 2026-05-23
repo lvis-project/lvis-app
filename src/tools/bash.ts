@@ -139,7 +139,7 @@ export class BashTool extends ZodTool<typeof BashToolInputSchema> {
     // TODO: remove the env-gate and make sandbox always-on once policy hook lands.
     //
     // If no runner is registered or sandbox is not enabled (isolation=none, detect-and-skip),
-    // fall through to the existing spawnWithTimeout path unchanged — R-1 composition
+    // fall through to the existing spawnWithTimeout path unchanged — composition
     // rule + reviewer judgment remain the safety net.
     const sandboxRunner = getSandboxRunner(process.platform as NodeJS.Platform);
     const sandboxEnabled = process.env["LVIS_SANDBOX_ENABLED"] === "1";

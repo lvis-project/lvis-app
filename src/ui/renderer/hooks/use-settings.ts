@@ -19,7 +19,7 @@ function narrowVendor(raw: unknown): LLMVendor {
 }
 
 /**
- * Phase 3.1: LLM settings cache hook.
+ * LLM settings cache hook.
  *
  * Centralises the chat-input-bar's read-through cache of LLM provider/model/
  * thinking toggle, plus the context-overflow provider/model snapshot loaded
