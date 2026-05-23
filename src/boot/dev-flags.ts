@@ -202,8 +202,8 @@ export function getIsPackaged(): boolean {
  * `MockMarketplaceFetcher`, which serves catalog from a user-writable
  * `plugins/marketplace.json`. In production the only sanctioned source is
  * `CloudMarketplaceFetcher` talking to the marketplace server (envelope
- * signatures are the trust anchor). Pre-Phase-2 review (security-reviewer
- * H-1) showed that allowing the mock in packaged builds would let any user
+ * signatures are the trust anchor). Security review showed that allowing
+ * the mock in packaged builds would let any user
  * advertise their own plugin as `installPolicy:"admin"` and get it
  * auto-installed by the managed bootstrap.
  *
