@@ -170,7 +170,7 @@ describe("registerPluginNotifications — routed via NotificationService", () =>
     const win = makeMockWindow({ destroyed: true });
     const audit = makeAuditLogger();
     const ns = makeNotificationServiceStub();
-    const runtime = makeRuntime([{ event: "test.fired" }], "work-proactive");
+    const runtime = makeRuntime([{ event: "test.fired" }], "work-assistant");
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
     const dispose = registerPluginNotifications(runtime as any, win, ns, audit);
 
@@ -181,7 +181,7 @@ describe("registerPluginNotifications — routed via NotificationService", () =>
     const input = JSON.parse(audit.calls[0].input as string) as Record<string, unknown>;
     expect(input.event).toBe("notification.suppressed");
     expect(input.reason).toBe("window-destroyed");
-    expect(input.pluginId).toBe("work-proactive");
+    expect(input.pluginId).toBe("work-assistant");
     expect(input.pluginEvent).toBe("test.fired");
     dispose();
   });
