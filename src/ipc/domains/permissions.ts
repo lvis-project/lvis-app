@@ -270,15 +270,15 @@ export function registerPermissionsHandlers(deps: IpcDeps): void {
   // bare `false` on validateSender failure. Bare `false` is indistinguishable
   // from "key not present", masking the security rejection from the caller.
   //
-  // MEDIUM-3: input allowlist — only the five known reviewer provider strings
+  // MEDIUM: input allowlist — only the five known reviewer provider strings
   // are accepted; anything else short-circuits before touching the secret store.
-  // Minor-3: REVIEWER_PROVIDERS_SET imported from permission-settings-store (single SOT).
+  // Minor: REVIEWER_PROVIDERS_SET imported from permission-settings-store (single SOT).
   ipcMain.handle(PERMISSIONS.reviewerProviderHasKey, async (e, provider: unknown) => {
     if (!validateSender(e)) {
       auditUnauthorized(auditLogger, PERMISSIONS.reviewerProviderHasKey, e);
       return UNAUTHORIZED_FRAME;
     }
-    // MEDIUM-3: reject unknown provider names before touching the secret store.
+    // MEDIUM: reject unknown provider names before touching the secret store.
     if (typeof provider !== "string" || !REVIEWER_PROVIDERS_SET.has(provider as ReviewerProvider)) {
       return false;
     }
