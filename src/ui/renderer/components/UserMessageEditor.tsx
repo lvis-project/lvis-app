@@ -3,7 +3,7 @@ import { Button } from "../../../components/ui/button.js";
 import { Textarea } from "../../../components/ui/textarea.js";
 
 /**
- * Sprint 4.C: Inline editor for resending a user message. Renders as a
+ * Inline editor for resending a user message. Renders as a
  * compact Textarea over the original bubble with Save/Cancel controls.
  */
 export function UserMessageEditor({

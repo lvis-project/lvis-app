@@ -1,5 +1,5 @@
 /**
- * LLM Pricing + Context Window Registry — Sprint 4.B (Observability)
+ * LLM Pricing + Context Window Registry
  *
  * Thin Node-side layer over `src/shared/pricing-data.ts`. The shared module
  * holds the vendor/model/$-rate table (browser-safe, no Node-only imports) so

@@ -223,7 +223,7 @@ export type PluginPerfStats = {
   lastCallAt: number | null;
 };
 
-// ─── Usage types (Sprint 4.B) ───────────────────────
+// ─── Usage types ────────────────────────────────────
 export type UsageTotals = {
   inputTokens: number;
   outputTokens: number;

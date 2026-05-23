@@ -253,7 +253,7 @@ export async function bootstrap(
   // caught internally and logged without aborting boot. Noop if marker present.
   await migrateCanonicalization();
 
-  // Sprint 1-A A3 — shared AuditLogger instance (plugin runtime + hooks + gate).
+  // Shared AuditLogger instance (plugin runtime + hooks + gate).
   const { AuditLogger } = await import("./audit/audit-logger.js");
   const { safeStorage } = await import("electron");
   const {
@@ -1228,7 +1228,7 @@ export async function bootstrap(
     });
   });
 
-  // Sprint 4.C — starred store + feedback store.
+  // Starred store + feedback store.
   const starredStore = new StarredStore();
   const feedbackStore = new FeedbackStore();
 
