@@ -136,7 +136,7 @@ export class DisabledMarketplaceFetcher implements MarketplaceFetcher {
  * cannot serve as a trust anchor; any packaged binary that fell back to this
  * fetcher would let local users advertise their own plugins as
  * `installPolicy:"admin"` and get them auto-installed by the managed
- * bootstrap (security-reviewer H-1, pre-Phase-2 audit).
+ * bootstrap (security review: mock fetcher must not run in packaged builds).
  *
  * Note: downloadVersion() is not supported regardless of build mode.
  */
@@ -219,7 +219,7 @@ export class PluginMarketplaceService {
   /**
    * Constructor — `paths` is the single source of truth for
    * the registry / installed-dir / cache layout, and `fetcher` is required.
-   * The pre-Phase-2b `appRoot` argument used by the npm-install branch is
+   * The `appRoot` argument used by the former npm-install branch is
    * gone; the only install path is the signed-zip download under
    * `paths.pluginsRoot`.
    */
@@ -984,7 +984,7 @@ export class PluginMarketplaceService {
   ): Promise<void> {
     // Every install is a zip-extract under pluginsRoot,
     // so uninstall is a recursive rm of the plugin's directory. The
-    // pre-Phase-2 npm-uninstall branch (`isZipInstalled === false`) is
+    // former npm-uninstall branch (`isZipInstalled === false`) is
     // gone with the install-side npm path.
     const manifestPath = isAbsolute(entry.manifestPath)
       ? entry.manifestPath

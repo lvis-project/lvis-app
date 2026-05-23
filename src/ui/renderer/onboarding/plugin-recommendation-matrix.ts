@@ -60,15 +60,14 @@ const MATRIX: MatrixRow[] = [
     marketplaceSlug: "lvis-plugin-local-indexer",
   },
   {
-    // Manifest id is `work-assistant` (per plugin manifest); the repo slug
-    // `lvis-plugin-work-proactive` is the legacy marketplace package name
-    // kept for backward-compat installs. Display label is the user-facing
-    // 업무 도우미 brand — "work-proactive" is no longer a user-visible term.
+    // Manifest id is `work-assistant` (per plugin manifest); the canonical
+    // marketplace slug is `lvis-plugin-work-assistant`. Display label is
+    // the user-facing 업무 도우미 brand.
     pluginId: "work-assistant",
     label: "업무 도우미",
     emoji: "💼",
     keywords: ["업무", "할일", "todo", "task", "proactive", "assistant", "일정"],
-    marketplaceSlug: "lvis-plugin-work-proactive",
+    marketplaceSlug: "lvis-plugin-work-assistant",
   },
   {
     pluginId: "ms-graph",

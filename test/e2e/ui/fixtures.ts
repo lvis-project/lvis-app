@@ -17,7 +17,7 @@ const HERE = path.dirname(fileURLToPath(import.meta.url));
 const E2E_PLUGIN_REPOS = [
   'lvis-plugin-local-indexer',
   'lvis-plugin-meeting',
-  'lvis-plugin-work-proactive',
+  'lvis-plugin-work-assistant',
   'lvis-plugin-agent-hub',
 ] as const;
 
