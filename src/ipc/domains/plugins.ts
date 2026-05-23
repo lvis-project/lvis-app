@@ -864,7 +864,7 @@ export function registerPluginsHandlers(deps: IpcDeps): void {
 
   // ─── MCP ──────────────────────────────────────
 
-  // MEDIUM-2: in-process token-bucket rate limiter for set-api-key (5 calls/min/serverId)
+  // MEDIUM: in-process token-bucket rate limiter for set-api-key (5 calls/min/serverId)
   const setApiKeyRateBucket = new Map<string, { count: number; windowStart: number }>();
   const SET_API_KEY_MAX_CALLS = 5;
   const SET_API_KEY_WINDOW_MS = 60_000;

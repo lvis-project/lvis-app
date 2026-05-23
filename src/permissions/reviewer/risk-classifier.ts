@@ -91,15 +91,14 @@ export interface ToolInvocationContext {
    */
   sandboxCapability: SandboxCapability;
   /**
-   * R-1 (PR-A1): Conversation context for context-quality no-downgrade rule.
-   * PR-A4 will wire actual conversation state here. In v1 only
-   * `recentUserMessage` is consulted — the heuristic in
+   * R-1: Conversation context for context-quality no-downgrade rule.
+   * Only `recentUserMessage` is consulted — the heuristic in
    * {@link isContextMissingIntent} treats an absent or short (<5 chars)
    * message as "weak context", preventing the LLM from downgrading a
    * rule-based MEDIUM/HIGH verdict to LOW.
    *
-   * Optional so that existing callers that pre-date PR-A1 do not require
-   * immediate updates. Absence is treated as weak context (conservative).
+   * Optional so that existing callers do not require immediate updates.
+   * Absence is treated as weak context (conservative).
    */
   conversationContext?: {
     recentUserMessage?: string;
@@ -172,9 +171,9 @@ export class StrictRiskClassifier implements RiskClassifier {
 // ─── Context-quality helpers (R-1) ───────────────────────────────────
 
 /**
- * PR-A4 R-1 intent classifier — grapheme cluster count + word entropy.
+ * R-1 intent classifier — grapheme cluster count + word entropy.
  *
- * Replaces the v1 five-character heuristic (PR-A1) with a CJK-safe
+ * Replaces the v1 five-character heuristic with a CJK-safe
  * multi-signal detector. All three signals must pass for intent to be
  * considered present; failure of any returns true (missing intent),
  * preventing LLM downgrade of rule-based MEDIUM/HIGH verdicts.
@@ -193,7 +192,8 @@ export class StrictRiskClassifier implements RiskClassifier {
  * Conservative bias: any signal failure returns true (missing intent).
  * O(n) in message length; no LLM call.
  *
- * Resolves PR-A1 security F1 finding: Korean CJK false positives.
+ * Resolves Korean CJK false-positive finding: short Korean messages were
+ * previously misclassified as absent intent by the v1 character-count heuristic.
  */
 export function isContextMissingIntent(input: ToolInvocationContext): boolean {
   const msg = input.conversationContext?.recentUserMessage?.trim() ?? "";
@@ -862,7 +862,7 @@ export class LlmRiskClassifier implements RiskClassifier {
     throw lastErr;
   }
 
-  // MEDIUM-2: accepts optional abortSignal so callers (dispatchReviewer,
+  // MEDIUM: accepts optional abortSignal so callers (dispatchReviewer,
   // interactive approval flow) can cancel an in-flight LLM call when the
   // user cancels the operation. The second parameter is not part of the
   // RiskClassifier interface (which is intentionally signal-agnostic) but
