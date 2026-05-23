@@ -3,7 +3,7 @@
  * Production release builder.
  *
  * Steps:
- *   1. Pre-flight security checks (H2 dev-key block, H3 signing-env validation)
+ *   1. Pre-flight security checks (dev-key block, signing-env validation)
  *   2. Read + patch-bump version in package.json
  *   3. node scripts/build-installers.mjs --current --publish=never
  *
@@ -46,7 +46,7 @@ function bumpPatch(version) {
 }
 
 /**
- * H2 — refuse to ship if the embedded publisher keys still include the
+ * Refuse to ship if the embedded publisher keys still include the
  * development key. Under CI without --allow-dev-key this is a hard failure.
  * Locally it prints a loud warning so the developer notices before upload.
  */
@@ -79,7 +79,7 @@ async function checkDevPublisherKey() {
 }
 
 /**
- * H3 — validate signing environment. For packaged macOS/Windows builds we
+ * Validate signing environment. For packaged macOS/Windows builds we
  * need codesign material. --skip-code-sign is an explicit internal-build
  * opt-out. Also verifies package.json build.publish.provider is declared.
  */

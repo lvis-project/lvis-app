@@ -179,14 +179,14 @@ export class PowerShellTool extends ZodTool<typeof PowerShellToolInputSchema> {
       return { output: preflightError, isError: true, metadata: { preflightDenied: true } };
     }
 
-    // §691 PR-A3: SandboxRunner adoption for PowerShell spawn path.
-    // On Windows, AppContainerRunner.detect() returns available=false in PR-A3
-    // (native binding deferred to PR-A3.5), so getSandboxRunner("win32") returns
-    // undefined and this block is skipped — Windows falls through to spawnPowerShell.
+    // §691: SandboxRunner adoption for PowerShell spawn path.
+    // On Windows, AppContainerRunner.detect() returns available=false (native
+    // binding pending), so getSandboxRunner("win32") returns undefined and this
+    // block is skipped — Windows falls through to spawnPowerShell.
     // On macOS, SandboxExecRunner is registered when LVIS_SANDBOX_ENABLED=1, so
     // pwsh on macOS will run inside the sandbox-exec PARTIAL profile.
-    // MEDIUM-2: Gated on LVIS_SANDBOX_ENABLED=1 (default off) — parity with bash.ts.
-    // TODO(PR-A4 R-2): remove the env-gate and make sandbox always-on.
+    // MEDIUM: Gated on LVIS_SANDBOX_ENABLED=1 (default off) — parity with bash.ts.
+    // TODO: remove the env-gate and make sandbox always-on once policy hook lands.
     const sandboxRunner = getSandboxRunner(process.platform as NodeJS.Platform);
     const sandboxEnabled = process.env["LVIS_SANDBOX_ENABLED"] === "1";
     if (sandboxRunner && sandboxEnabled) {
