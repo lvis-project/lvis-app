@@ -9,10 +9,11 @@
  * {@link RoutinesScheduler} (separate module) drives the polling loop and
  * fires execution events when a scheduled routine's next-fire time arrives.
  */
-import { mkdir, readFile, writeFile, rename } from "node:fs/promises";
-import { dirname, resolve } from "node:path";
+import { readFile, rename } from "node:fs/promises";
+import { resolve, join } from "node:path";
 import { randomUUID } from "node:crypto";
 import { isValidCronExpression } from "../routines/cron-evaluator.js";
+import { writeFileAtomicAtPath } from "./storage/feature-namespace.js";
 import { createLogger } from "../lib/logger.js";
 const log = createLogger("lvis");
 
@@ -40,7 +41,7 @@ import type {
   AddRoutineInput,
 } from "../shared/routines-types.js";
 import { MAX_PERSISTED_ROUTINES, MAX_LLM_SESSION_ROUTINES } from "../shared/routines-types.js";
-import { lvisHome } from "../shared/lvis-home.js";
+import { openFeatureNamespace } from "./storage/feature-namespace.js";
 
 /** Maximum allowed distance into the future for schedule.at (parity with RemindersStore). */
 const MAX_FUTURE_OFFSET_MS = 5 * 365.25 * 24 * 60 * 60 * 1000;
@@ -121,8 +122,10 @@ export interface RoutinesFile {
   routines: RoutineRecord[];
 }
 
-// Consolidated under ~/.lvis/routine/ namespace (single directory for all routine data).
-const DEFAULT_PATH = resolve(lvisHome(), "routine", "routines.json");
+// Consolidated under ~/.lvis/routine/ namespace (single directory for all
+// routine data). Resolved through the feature-namespace helper so the
+// `~/.lvis/<feature>/` location stays the single source of truth.
+const DEFAULT_PATH = join(openFeatureNamespace("routine").dir, "routines.json");
 
 const fileLocks = new Map<string, Promise<void>>();
 
@@ -163,13 +166,11 @@ async function readFileOrEmpty(filePath: string): Promise<RoutinesFile> {
 }
 
 async function writeFileAtomic(filePath: string, data: RoutinesFile): Promise<void> {
-  await mkdir(dirname(filePath), { recursive: true, mode: 0o700 });
-  const tmp = `${filePath}.tmp`;
-  await writeFile(tmp, `${JSON.stringify(data, null, 2)}\n`, {
-    encoding: "utf-8",
-    mode: 0o600,
-  });
-  await rename(tmp, filePath);
+  // Delegates the 0o700-dir / 0o600-file / tmpfile+rename contract to the
+  // feature-namespace SOT helper. The injectable `filePath` (tests pass a
+  // temp path) is preserved — the helper enforces the permission boundary on
+  // whatever parent directory the path resolves to.
+  await writeFileAtomicAtPath(filePath, `${JSON.stringify(data, null, 2)}\n`);
 }
 
 /** Deep clone a RoutineRecord to prevent callers from mutating shared cache refs. */
