@@ -21,7 +21,8 @@ import { ToolRegistry } from "../../tools/registry.js";
 import { createDynamicTool } from "../../tools/base.js";
 import { KeywordEngine } from "../../core/keyword-engine.js";
 import { RouteEngine } from "../../core/route-engine.js";
-import { SubAgentRunner } from "../subagent-runner.js";
+import { SubAgentRunner, resolveSubAgentModel } from "../subagent-runner.js";
+import { MODEL_COMPLEXITY_MAP } from "../../shared/model-complexity-map.js";
 import type { LLMProvider, StreamEvent, StreamTurnParams } from "../llm/types.js";
 import { createAgentSpawnTool } from "../../tools/agent-spawn.js";
 import { fakeLlmSettings } from "../../shared/__tests__/fake-llm-settings.js";
@@ -334,5 +335,47 @@ describe("SubAgentRunner — agent_spawn always stripped", () => {
     );
     expect(scopedFromAllowlist.findByName("agent_spawn")).toBeUndefined();
     expect(scopedFromAllowlist.findByName("noop")).toBeDefined();
+  });
+});
+
+describe("resolveSubAgentModel — #1112 complexity resolution", () => {
+  it("resolves a complexity tier to the active vendor's model", () => {
+    expect(resolveSubAgentModel("mid", "claude")).toBe(
+      MODEL_COMPLEXITY_MAP.claude.mid,
+    );
+    expect(resolveSubAgentModel("high", "openai")).toBe(
+      MODEL_COMPLEXITY_MAP.openai.high,
+    );
+    expect(resolveSubAgentModel("low", "gemini")).toBe(
+      MODEL_COMPLEXITY_MAP.gemini.low,
+    );
+  });
+
+  it("passes an explicit vendor-specific model ID through unchanged", () => {
+    expect(resolveSubAgentModel("claude-opus-4-6", "claude")).toBe(
+      "claude-opus-4-6",
+    );
+    // Even when the active vendor differs, an explicit ID is the profile
+    // writer's deliberate choice — pass through, do not second-guess.
+    expect(resolveSubAgentModel("gpt-5.4", "claude")).toBe("gpt-5.4");
+  });
+
+  it("returns null for undefined / empty — caller keeps the parent model", () => {
+    expect(resolveSubAgentModel(undefined, "claude")).toBeNull();
+    expect(resolveSubAgentModel("", "claude")).toBeNull();
+    expect(resolveSubAgentModel("   ", "claude")).toBeNull();
+  });
+
+  it("returns null when the active vendor is outside the union (boundary)", () => {
+    // A complexity tier needs a known vendor to map against. An unknown
+    // vendor string (corrupt settings, etc.) yields the parent-model
+    // fallback rather than a wrong model.
+    expect(resolveSubAgentModel("mid", "totally-fake-vendor")).toBeNull();
+  });
+
+  it("trims surrounding whitespace before classifying", () => {
+    expect(resolveSubAgentModel("  mid  ", "claude")).toBe(
+      MODEL_COMPLEXITY_MAP.claude.mid,
+    );
   });
 });
