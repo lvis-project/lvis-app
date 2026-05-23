@@ -1107,10 +1107,10 @@ export async function bootstrap(
   // Runs after MCP connects so the full service graph is ready before
   // adding OS-level spawn isolation.
   //
-  // Linux:   bubblewrap (bwrap) — verified-kernel CLONE_NEWNET (D1)
-  // macOS:   sandbox-exec SBPL profile — PARTIAL (D2, known bypasses)
+  // Linux:   bubblewrap (bwrap) — verified-kernel CLONE_NEWNET
+  // macOS:   sandbox-exec SBPL profile — PARTIAL (known bypasses)
   // Windows: AppContainer — detect-only; native Win32 N-API binding pending.
-  //          detect() returns available=false so registration is skipped (D3).
+  //          detect() returns available=false so registration is skipped.
   //
   // All platforms: LVIS_SANDBOX_ENABLED=1 required (default off)
   // until the always-on policy hook is wired.
@@ -1136,7 +1136,7 @@ export async function bootstrap(
       }
     }
 
-    // §691: macOS sandbox-exec runner (D2 PARTIAL).
+    // §691: macOS sandbox-exec runner (PARTIAL — known bypass paths).
     if (process.platform === "darwin" && process.env["LVIS_SANDBOX_ENABLED"] === "1") {
       const { SandboxExecRunner } = await import("./permissions/runners/sandbox-exec-runner.js");
       const sandboxExecRunner = new SandboxExecRunner();
@@ -1156,7 +1156,7 @@ export async function bootstrap(
       );
     }
 
-    // §691: Windows AppContainer runner (D3 detect-only; native Win32 binding pending).
+    // §691: Windows AppContainer runner (detect-only; native Win32 binding pending).
     // detect() always returns available=false so registration is skipped.
     if (process.platform === "win32" && process.env["LVIS_SANDBOX_ENABLED"] === "1") {
       const { AppContainerRunner } = await import("./permissions/runners/appcontainer-runner.js");
@@ -1173,7 +1173,7 @@ export async function bootstrap(
       }
     }
 
-    // §691 D9: Wire the "mcp" slot with the active platform runner.
+    // §691: Wire the "mcp" slot with the active platform runner.
     // MCP child processes (StdioTransport) need bidirectional stdin — the
     // SandboxRunner interface does not yet support stdin pipes, so MCP spawn
     // is not replaced here. The "mcp" registry slot is pre-populated so
@@ -1190,7 +1190,7 @@ export async function bootstrap(
       const platformDetection = getActiveDetection(platformKey);
       if (platformRunner && platformDetection) {
         _registerRunner("mcp", platformRunner, platformDetection);
-        log.info("boot: mcp sandbox slot wired to %s runner (D9)", platformKey);
+        log.info("boot: mcp sandbox slot wired to %s runner", platformKey);
       }
     }
 
@@ -1228,7 +1228,7 @@ export async function bootstrap(
     });
   });
 
-  // Sprint 4.C — starred store + D6 feedback store.
+  // Sprint 4.C — starred store + feedback store.
   const starredStore = new StarredStore();
   const feedbackStore = new FeedbackStore();
 

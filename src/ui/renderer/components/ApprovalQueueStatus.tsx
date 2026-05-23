@@ -1,5 +1,5 @@
 /**
- * ApprovalQueueStatus — D3 renderer UI for approval queue depth.
+ * ApprovalQueueStatus — renderer UI for approval queue depth.
  *
  * Renders a small floating badge showing the number of pending approval
  * requests plus a compact list of waiting requests (tool name + source).

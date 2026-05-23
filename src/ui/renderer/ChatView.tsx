@@ -144,7 +144,7 @@ export interface ChatViewProps {
   onGuide: (text: string) => Promise<{ ok: true } | { ok: false; error: string }>;
   /** Surface visible error in chat transcript when guide is rejected (queue-full / too-long / no-active-turn). */
   onGuideError: (message: string) => void;
-  /** D6: submit thumbs up/down feedback for an assistant message */
+  /** Submit thumbs up/down feedback for an assistant message. */
   onFeedback?: (messageIdx: number, rating: "up" | "down", reason?: string) => void | Promise<void>;
   /** Workflow tool state — lifted to App level so panel survives view navigation */
   subAgentSpawns: SubAgentSpawn[];

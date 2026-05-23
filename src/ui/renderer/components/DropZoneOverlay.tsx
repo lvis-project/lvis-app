@@ -1,5 +1,5 @@
 /**
- * D7 — DropZoneOverlay
+ * DropZoneOverlay
  *
  * Full-window translucent overlay that appears when the user drags files over
  * the Electron window. On drop, extracts absolute paths via

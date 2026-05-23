@@ -653,7 +653,7 @@ class StdioTransport implements McpTransport {
     }
     const spawnCommand = resolveStdioSpawnCommand(this.config.command, this.config.args ?? []);
 
-    // §691 D9: MCP stdio spawn path. The "mcp" registry slot is
+    // MCP stdio spawn path. The "mcp" registry slot is
     // pre-populated in boot.ts with the active OS runner so capability
     // reporting (getSandboxRunner("mcp")) reflects the OS isolation level.
     // Full sandbox adoption for MCP (wrapping this spawn via SandboxRunner.spawn())

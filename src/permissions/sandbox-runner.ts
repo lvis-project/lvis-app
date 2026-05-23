@@ -4,10 +4,9 @@
  * Spec ref: docs/research/sandbox-isolation.md
  * Issue: #691 sandbox foundation
  *
- * D4: SandboxCapabilityDescriptor uses a narrow allowlist
+ * SandboxCapabilityDescriptor uses a narrow allowlist
  *   ({ networkBlocked, fsReadPaths, fsWritePaths, processIsolated }).
- * D9: MCP child-process slot reserved in the registry (platform key
- *   "mcp" is a conventional key reserved for per-OS runner registration).
+ * The "mcp" registry key is a conventional slot reserved for per-OS runner registration.
  *
  * Per-OS implementations cover Linux (bwrap) and macOS/Windows
  * (sandbox-exec + AppContainer). Boot detection wiring lives in the
@@ -20,7 +19,7 @@ import { setActiveSandboxCapability, __resetActiveSandboxCapabilityForTest } fro
 // ─── Capability Descriptor ────────────────────────────────────────────────────
 
 /**
- * Sandbox capability descriptor — D4 narrow allowlist.
+ * Sandbox capability descriptor — narrow allowlist.
  *
  * v1: 4 fields. v2 will add OCI extension via optional field.
  *
@@ -112,7 +111,7 @@ export interface SandboxRunner {
    *
    * @param cmd          Absolute path to the executable (no shell expansion).
    * @param args         Argument list. Immutable to prevent TOCTOU mutations.
-   * @param capabilities Requested sandbox constraints (D4 narrow allowlist).
+   * @param capabilities Requested sandbox constraints (narrow allowlist).
    * @param options      Optional env overrides and working directory.
    * @returns            A live {@link SandboxedProcess} handle.
    */
@@ -136,19 +135,18 @@ export interface SandboxRunner {
 /**
  * Registry key: either a `NodeJS.Platform` value (per-OS runners registered
  * by the platform runner modules) or the literal `"mcp"` for the cross-platform
- * MCP spawn path (D9 commitment). Using `"mcp"` here makes the D9 slot
- * type-system enforced rather than a docstring-only convention.
+ * MCP spawn path. Using `"mcp"` here makes the slot type-system enforced
+ * rather than a docstring-only convention.
  */
 export type SandboxRunnerKey = NodeJS.Platform | "mcp";
 
 /**
  * Boot-time platform-keyed registry. Native platforms ('linux', 'darwin',
  * 'win32') are registered by per-OS runner modules; the conventional 'mcp'
- * key reserves a slot for D9 child-process integration.
+ * key reserves a slot for MCP child-process integration.
  *
  * Consumers MAY explicitly retry with key 'mcp' when getSandboxRunner(process.platform)
- * returns undefined. (Automatic MCP-runner wrapper deferred pending the D9
- * native binding.)
+ * returns undefined. (Automatic MCP-runner wrapper deferred pending the native binding.)
  *
  * Registry is module-level so the same Map is shared across all callers
  * in the same process. Tests MUST call {@link __resetSandboxRunnersForTest}
