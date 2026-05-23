@@ -471,7 +471,7 @@ export class SettingsService {
    * Phase 1 C5 fix (A4)는 신규 write에만 mode를 적용했으므로, 기존 설치에
    * 남아있는 lvis-secrets.json (0o644 추정)을 owner-only로 내려준다.
    *
-   * F-round §M2: fd-based fstat+fchmod로 TOCTOU 방지. path 기반 chmod는
+   * fd-based fstat+fchmod로 TOCTOU 방지. path 기반 chmod는
    * 공격자가 stat→chmod window 사이에 파일을 symlink로 바꿔치기해 다른 파일의
    * 퍼미션을 내릴 수 있다 (chmod follows symlinks on Linux). fd를 열면 파일
    * 핸들이 해당 inode에 고정되므로 이 race를 차단.
