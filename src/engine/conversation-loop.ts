@@ -262,7 +262,7 @@ export interface TurnCallbacks {
      */
     compactNum?: number;
     /**
-     * Phase 3 — Gemini-style status. Renderer 가 status 별로 다른 banner
+     * Gemini-style status. Renderer 가 status 별로 다른 banner
      * variant (색상/아이콘/메시지) 를 표시한다. SUMMARIZED 가 정상 경로,
      * CONTENT_TRUNCATED / REDUCED_INSUFFICIENT_FORCED 는 fail-loud UX.
      */
@@ -411,7 +411,7 @@ export interface ConversationLoopDeps {
    */
   hookRunner?: HookRunner;
   /**
-   * Phase 1.5 Option C — plugin runtime reference used for:
+   * Option C — plugin runtime reference used for:
    *   - request_plugin 메타 툴 pluginId 유효성 검증
    *   - inactive plugin 카탈로그 공급 (SystemPromptBuilder가 읽음)
    * Omitted in lightweight unit tests; scope expansion becomes a no-op.
@@ -499,7 +499,7 @@ const MAX_TOOL_ROUNDS = 30;
  */
 const MAX_TOOL_CALLS_PER_ROUND = 10;
 
-/** Phase 1 Lazy Tool Scoping — 매 턴 LLM에 노출할 도구 집합 정의. */
+/** Lazy Tool Scoping — 매 턴 LLM에 노출할 도구 집합 정의. */
 interface ToolScope {
   activePluginIds: Set<string>;
   includeBuiltins: boolean;
@@ -545,7 +545,7 @@ export class ConversationLoop {
   /** B4: current turn's AbortController — abortCurrentTurn() calls .abort() */
   currentAbortController: AbortController | null = null;
   /**
-   * Phase 1 Lazy Tool Scoping — 직전 턴의 active plugin 집합.
+   * Lazy Tool Scoping — 직전 턴의 active plugin 집합.
    * Keyword miss (type==="general") 시 fallback으로 재사용한다.
    * null = 이전 턴 없음 → builtin-only scope.
    */
@@ -1479,7 +1479,7 @@ export class ConversationLoop {
       await this.runPreflightGuard(turnSignal, callbacks);
     }
 
-    // Phase 1 Lazy Tool Scoping — 이 턴에서 노출할 plugin 집합 결정.
+    // Lazy Tool Scoping — 이 턴에서 노출할 plugin 집합 결정.
     // SystemPromptBuilder Tool Schemas 섹션도 동일 scope로 필터링되도록
     // build() 호출 전에 setToolScope 수행.
     const scope = this.resolveToolScope(input);
@@ -1862,7 +1862,7 @@ export class ConversationLoop {
         },
       })
       : this.provider!;
-    // Phase 1.5 Option C: scope is mutable within the turn. Mutating the
+    // Option C: scope is mutable within the turn. Mutating the
     // caller's Set directly means the next turn's fallback sees every plugin
     // that was activated here.
     let toolSchemas: ToolSchema[] = this.rebuildToolSchemas(scope);
@@ -2682,7 +2682,7 @@ export class ConversationLoop {
   // PostTurnHookChain의 memory-extract hook이 단일 진실 소스이며,
   // fallback 경로에서도 중복 추출을 수행하지 않는다.
 
-  // ─── Private: Tool Scope Resolution (Phase 1 Lazy Tool Scoping) ───
+  // ─── Private: Tool Scope Resolution (Lazy Tool Scoping) ───────────
 
   /**
    * 입력에서 활성 plugin 집합을 유도하여 ToolScope를 반환한다.

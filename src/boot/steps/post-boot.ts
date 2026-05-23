@@ -149,7 +149,7 @@ export interface UpdateCheckInput {
   mainWindow: BrowserWindow;
   settingsService: SettingsService;
   marketplaceFetcher: MarketplaceFetcher;
-  /** Phase 2a SoT — registry path resolved once at boot from userDataDir. */
+  /** SoT — registry path resolved once at boot from userDataDir. */
   pluginPaths: PluginPaths;
 }
 

@@ -2,7 +2,7 @@ import { useEffect, useState } from "react";
 import type { LvisApi } from "../types.js";
 
 /**
- * Phase 2d — managed bootstrap status subscription.
+ * Managed bootstrap status subscription.
  *
  * The host emits one of three lifecycle states around
  * `ensureManagedInstalled()`:

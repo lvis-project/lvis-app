@@ -183,7 +183,7 @@ export interface PluginManifest {
    * 런타임이 이 값을 그대로 tool name으로 사용한다.
    */
   tools: string[];
-  /** 플러그인 한 줄 설명 — LLM 카탈로그 및 UI에 표시. Phase 1 MUST 필드. */
+  /** 플러그인 한 줄 설명 — LLM 카탈로그 및 UI에 표시. MUST 필드. */
   description: string;
   config?: Record<string, unknown>;
   ui?: PluginUiExtension[];

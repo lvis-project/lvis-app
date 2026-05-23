@@ -280,7 +280,7 @@ export async function parsePluginJson(
   }
   if (typeof parsed.publisher !== "string" || parsed.publisher.length === 0) {
     log.warn(
-      `plugin '${pid}' at '${path}' is missing publisher field (SHOULD per Phase 1). ` +
+      `plugin '${pid}' at '${path}' is missing publisher field (SHOULD). ` +
       `Add: "publisher": "Your Org"`,
     );
   }
