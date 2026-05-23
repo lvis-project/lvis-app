@@ -27,7 +27,7 @@ describe("AgentProfileStore", () => {
     }
   });
 
-  it("packages built-in staff-perspective profiles (executor, researcher, planner, local-explorer)", async () => {
+  it("packages built-in staff-perspective profiles (executor, researcher, planner, explorer)", async () => {
     // resources/agents/*.md is the seed source copied into ~/.lvis/agents/
     // on first boot. Loading via AgentProfileStore against the resources
     // directory exercises the same parser the runtime uses, catching
@@ -39,7 +39,7 @@ describe("AgentProfileStore", () => {
     const all = await store.list();
     const names = all.map((a) => a.name).sort();
     expect(names).toEqual(
-      ["executor", "local-explorer", "planner", "researcher"].sort(),
+      ["executor", "explorer", "planner", "researcher"].sort(),
     );
     for (const profile of all) {
       expect(profile.description.length).toBeGreaterThan(0);
