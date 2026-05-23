@@ -33,6 +33,13 @@ vi.mock("electron", () => ({
   },
 }));
 
+// Node/bun runtimes differ on whether `globalThis.navigator` exists: some
+// (e.g. older bun, plain node before the Navigator global) leave it undefined,
+// which makes `defineProperty` throw "called on non-object". Define a stub
+// first so the test does not assume the host runtime already provides one.
+if (typeof globalThis.navigator !== "object" || globalThis.navigator === null) {
+  Object.defineProperty(globalThis, "navigator", { configurable: true, value: {} });
+}
 Object.defineProperty(globalThis.navigator, "userActivation", {
   configurable: true,
   value: mockUserActivation,

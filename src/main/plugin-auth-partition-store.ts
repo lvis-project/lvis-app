@@ -16,8 +16,8 @@
  *   is taken (deep-cloned) synchronously before the async chain is entered, so
  *   subsequent map mutations cannot corrupt an in-flight write.
  */
-import { glob, mkdir, readFile, rename, unlink, writeFile } from "node:fs/promises";
-import { dirname, resolve } from "node:path";
+import { mkdir, readdir, readFile, rename, unlink, writeFile } from "node:fs/promises";
+import { basename, dirname, resolve } from "node:path";
 import { randomBytes } from "node:crypto";
 import { lvisHome } from "../shared/lvis-home.js";
 
@@ -243,14 +243,20 @@ export async function deletePersistedPluginAuthPartitions(pluginId: string): Pro
  */
 export async function cleanupStaleTmpFiles(): Promise<void> {
   const path = filePath();
-  const pattern = `${path}.*.tmp`;
+  const dir = dirname(path);
+  const prefix = `${basename(path)}.`;
   try {
-    for await (const tmpFile of glob(pattern)) {
-      await unlink(tmpFile).catch(() => {
-        /* best-effort */
-      });
-    }
+    const entries = await readdir(dir);
+    await Promise.all(
+      entries
+        .filter((entry) => entry.startsWith(prefix) && entry.endsWith(".tmp"))
+        .map((entry) =>
+          unlink(resolve(dir, entry)).catch(() => {
+            /* best-effort */
+          }),
+        ),
+    );
   } catch {
-    /* glob throws if dir absent — safe to ignore on first boot */
+    /* readdir throws if dir absent — safe to ignore on first boot */
   }
 }
