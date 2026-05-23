@@ -1,5 +1,5 @@
 /**
- * Role Presets — Sprint B
+ * Role Presets
  *
  * Each preset bundles a systemPromptAdd. The selected preset is sent as a
  * per-turn system prompt section; the default preset means "no override".

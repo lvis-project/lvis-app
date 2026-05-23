@@ -21,7 +21,7 @@
  * trailing single-star segments. This mirrors OpenHarness's
  * `_policy_match_paths` subtle-glob-bug prevention.
  *
- * Permission policy Phase 2.5 — frozen-canonical algorithm + sensitive-path expansion
+ * Permission policy — frozen-canonical algorithm + sensitive-path expansion
  * (security review hardening):
  *   - bounded walk-up via realpathSync.native() → first existing ancestor
  *   - MAX_WALK_UP=64 caps adversarial symlink-cycle / deep-path attacks

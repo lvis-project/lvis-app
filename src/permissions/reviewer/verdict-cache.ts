@@ -1,5 +1,5 @@
 /**
- * Permission policy Phase 3 — Layer 5 Reviewer Agent: verdict cache.
+ * Permission policy — Layer 5 Reviewer Agent: verdict cache.
  *
  * Spec ref: docs/architecture/permission-policy-design.md §3 Layer 5
  * verdict cache, §11 v2.1 binding decision (selective by invalidationKey).

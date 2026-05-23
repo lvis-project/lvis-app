@@ -4,11 +4,11 @@
  * Spec ref: docs/research/sandbox-isolation.md
  * Issue: #691
  *
- * Decision refs:
- *   D2: sandbox-exec PARTIAL accepted — known bypass paths exist (localhost/IPv6/
+ * Design decisions:
+ *   sandbox-exec PARTIAL accepted — known bypass paths exist (localhost/IPv6/
  *       DNS/Bonjour/UDS). kind="partial" and confidence="policy-best-effort" reflect
  *       this honestly. No Lima fallback.
- *   D8: detect-and-skip — if /usr/bin/sandbox-exec is absent (abnormal macOS),
+ *   detect-and-skip — if /usr/bin/sandbox-exec is absent (abnormal macOS),
  *       runner stays unregistered. macOS tools run with isolation=none.
  *
  * SBPL profile strategy:
@@ -19,7 +19,7 @@
  *   (prefix: lvis-sandbox-exec-). The .sb profile is written there (0o600)
  *   and the entire directory is rm -rf'd after the child exits.
  *
- * Known limitations (D2 PARTIAL):
+ * Known limitations (PARTIAL — sandbox-exec):
  *   - sandbox-exec does not block loopback (localhost/127.0.0.1/::1) network.
  *   - Bonjour/mDNS, Unix domain sockets, and some IPC paths are not reliably blocked.
  *   - Apple deprecated the sandbox-exec CLI in macOS 12+ (binary still ships).
@@ -40,7 +40,7 @@ import type {
 } from "../sandbox-runner.js";
 import { trackManagedChildProcess } from "../../main/managed-child-processes.js";
 
-/** Absolute path to the macOS system sandbox-exec binary (D8: no bundled fallback). */
+/** Absolute path to the macOS system sandbox-exec binary (no bundled fallback). */
 export const SANDBOX_EXEC_BIN = "/usr/bin/sandbox-exec";
 
 export class SandboxExecRunner implements SandboxRunner {
@@ -48,7 +48,7 @@ export class SandboxExecRunner implements SandboxRunner {
    * Probe whether sandbox-exec is available on the current host.
    *
    * Returns `available: false` immediately on non-darwin platforms.
-   * Returns `kind: "partial"` and `confidence: "policy-best-effort"` (D2) —
+   * Returns `kind: "partial"` and `confidence: "policy-best-effort"` —
    * sandbox-exec has known bypass paths so we honestly advertise PARTIAL.
    */
   async detect(): Promise<SandboxRunnerDetect> {
@@ -64,7 +64,7 @@ export class SandboxExecRunner implements SandboxRunner {
       await access(SANDBOX_EXEC_BIN, constants.X_OK);
       return {
         available: true,
-        // D2: PARTIAL — known bypass paths: localhost/IPv6/DNS/Bonjour/UDS
+        // PARTIAL — known bypass paths: localhost/IPv6/DNS/Bonjour/UDS
         reason:
           "macOS sandbox-exec available (PARTIAL — known bypass paths: " +
           "localhost/IPv6/DNS/Bonjour/UDS; Apple deprecated CLI in macOS 12+)",
@@ -93,7 +93,7 @@ export class SandboxExecRunner implements SandboxRunner {
    * could pre-create with 0o777 to swap in a permissive profile.
    *
    * Missing capability fields use conservative defaults:
-   *   - `networkBlocked` defaults to `true` (deny network — D2 PARTIAL)
+   *   - `networkBlocked` defaults to `true` (deny network — PARTIAL enforcement)
    *   - `processIsolated` is informational; sandbox-exec does not provide
    *     PID namespace isolation (no --unshare-pid equivalent on macOS)
    *   - `fsReadPaths`/`fsWritePaths` default to `[]`
@@ -116,7 +116,7 @@ export class SandboxExecRunner implements SandboxRunner {
     }
 
     if (capabilities.processIsolated === true) {
-      // D2 known limitation: macOS sandbox-exec does not provide PID namespace
+      // Known limitation: macOS sandbox-exec does not provide PID namespace
       // isolation. Log a warning so callers are not misled.
       // eslint-disable-next-line no-console
       console.warn(
@@ -244,7 +244,7 @@ export function buildSbplProfile(capabilities: Partial<SandboxCapabilityDescript
   );
 
   // ─── Network ──────────────────────────────────────────────────────────
-  // Default: deny network (D2 PARTIAL: loopback/UDS not reliably blocked).
+  // Default: deny network (PARTIAL: loopback/UDS not reliably blocked by sandbox-exec).
   // Allow only when caller explicitly requests networkBlocked: false.
   if (capabilities.networkBlocked === false) {
     lines.push("(allow network*)");
