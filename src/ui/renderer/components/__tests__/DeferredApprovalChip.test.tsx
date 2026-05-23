@@ -205,7 +205,7 @@ describe("DeferredApprovalChip", () => {
   });
 
   it("surfaces the entry source label so plugin-deferred entries are distinguishable (round-1 architect MAJOR-2)", async () => {
-    installApi([makeEntry({ source: "plugin", toolName: "work_proactive_email_scan" })]);
+    installApi([makeEntry({ source: "plugin", toolName: "work_assistant_email_scan" })]);
     await act(async () => {
       render(<DeferredApprovalChip draftText="허용해 주세요" />);
     });
@@ -215,11 +215,11 @@ describe("DeferredApprovalChip", () => {
     // semantics.
     expect(chip.textContent).toContain("플러그인");
     expect(chip.querySelector('[aria-label="플러그인 도구"]')).toBeTruthy();
-    expect(chip.textContent).toContain("work_proactive_email_scan");
+    expect(chip.textContent).toContain("work_assistant_email_scan");
     expect(chip.getAttribute("data-target-source")).toBe("plugin");
     expect(
       screen.getByRole("button", {
-        name: /플러그인 도구 'work_proactive_email_scan' 실행을 허용/,
+        name: /플러그인 도구 'work_assistant_email_scan' 실행을 허용/,
       }),
     ).toBeTruthy();
   });
