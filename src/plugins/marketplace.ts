@@ -206,7 +206,7 @@ export class PluginMarketplaceService {
    */
   private readonly catalogCacheBase: string | null;
   /**
-   * PR#44 HIGH: per-plugin in-process mutex. Concurrent install/rollback
+   * Per-plugin in-process mutex. Concurrent install/rollback
    * calls for the same pluginId are serialized to protect the cache
    * breadcrumb + history.json from corruption.
    */
@@ -701,7 +701,7 @@ export class PluginMarketplaceService {
         pluginId,
         resolve(dirname(this.registryPath), manifestPath),
       );
-      // PR#44 HIGH: record install in per-plugin history.json (replaces the
+      // Record install in per-plugin history.json (replaces the
       // mtime-based rollback target selection, which is unreliable across
       // filesystems that round mtimes and cache writes).
       await this.artifactStore.appendHistory(pluginId, {
@@ -734,7 +734,7 @@ export class PluginMarketplaceService {
   /**
    * §9.6 — rollback to the prior cached version for `pluginId`.
    * Throws when no prior version is available.
-   * PR#44 HIGH: guarded by per-plugin mutex to avoid racing with installPlugin.
+   * Guarded by per-plugin mutex to avoid racing with installPlugin.
    */
   async rollbackPlugin(pluginId: string): Promise<{ pluginId: string; rolledBackTo: string }> {
     return this.withPluginLock(pluginId, async () => {
@@ -797,7 +797,7 @@ export class PluginMarketplaceService {
   }
 
   /**
-   * PR#44 HIGH: per-plugin serialization. Concurrent callers for the same
+   * Per-plugin serialization. Concurrent callers for the same
    * pluginId queue behind each other; callers for different plugins run
    * concurrently. We keep the map entry only while the promise is pending.
    */

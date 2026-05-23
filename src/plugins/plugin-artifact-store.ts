@@ -425,7 +425,7 @@ export class PluginArtifactStore {
    * still on disk that parses as valid JSON with a matching `version`
    * field. Returns `null` when no rollback target is available.
    *
-   * Bad-input guards (PR#44 Copilot): empty/whitespace/non-string
+   * Bad-input guards: empty/whitespace/non-string
    * version dirs are skipped rather than surfaced as missing — they
    * were never legal history entries to begin with.
    */
