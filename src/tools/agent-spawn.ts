@@ -9,6 +9,7 @@
 import { randomUUID } from "node:crypto";
 import { createDynamicTool, type Tool } from "./base.js";
 import type { SubAgentRunner } from "../engine/subagent-runner.js";
+import { MAX_TURNS_CAP } from "../engine/subagent-runner.js";
 import {
   AGENT_NAME_ALLOWLIST,
   type LoadedAgentProfile,
@@ -79,9 +80,9 @@ export function createAgentSpawnTool(deps: AgentSpawnToolDeps): Tool {
         maxTurns: {
           type: "integer",
           minimum: 1,
-          maximum: 60,
+          maximum: MAX_TURNS_CAP,
           description:
-            "최대 어시스턴트 라운드 수. 기본 30. 간단 lookup 5-10 · 표준 20-30 · 복잡 multi-step 40-60. LLM 이 task 복잡도로 직접 판단.",
+            "최대 어시스턴트 라운드 수 (상한 30). 기본 30. 간단 lookup 5-10 · 표준 15-20 · 복잡 multi-step 25-30. LLM 이 task 복잡도로 직접 판단.",
         },
       },
     },
@@ -152,7 +153,7 @@ export function createAgentSpawnTool(deps: AgentSpawnToolDeps): Tool {
           : undefined;
       const maxTurns =
         typeof a.maxTurns === "number" && Number.isFinite(a.maxTurns)
-          ? Math.max(1, Math.min(60, Math.floor(a.maxTurns)))
+          ? Math.max(1, Math.min(MAX_TURNS_CAP, Math.floor(a.maxTurns)))
           : undefined;
       const originSessionId =
         typeof ctx.metadata?.sessionId === "string"

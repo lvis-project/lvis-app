@@ -28,15 +28,16 @@
  *   - LVIS gates EVERY skill behind a body-hash approval (see
  *     skill-load.ts + skill-approvals-store.ts). A mode that force-loaded
  *     skills into the system prompt would BYPASS that gate — a security
- *     regression. So `autoSkills` is an *allowlist of candidates*, not a
- *     force-load list. SubAgentRunner registers an auto-skill into the
- *     child SkillOverlay ONLY when `SkillApprovalsStore.isApproved(name,
- *     body)` already returns true (the user previously approved that exact
- *     body). Un-approved candidates are NOT injected; they surface to the
- *     LLM as a recommendation so it can call `skill_load` and trigger the
- *     normal approval modal. This preserves the body-hash TOFU gate while
- *     still giving "agent selection → relevant skills" ergonomics once a
- *     skill has been approved once.
+ *     regression. So `autoSkills` is a *recommendation list*, never a
+ *     force-load. SubAgentRunner does NOT register anything into the child
+ *     SkillOverlay from a mode: `buildModePreamble` only emits a
+ *     `<lvis-agent-mode-skills>` text block naming the candidates and
+ *     telling the LLM to call `skill_load` itself — which runs the normal
+ *     body-hash approval modal. The gate is therefore fully preserved; a
+ *     skill body is only ever injected after the user approves it through
+ *     `skill_load`, exactly as for a manually requested skill. The
+ *     ergonomic win is that the agent's mode surfaces the right skills so
+ *     the user/LLM does not have to hunt for them.
  *
  * Cross-importer boundary:
  *   - Imported by `SubAgentRunner` (engine). Pure / browser-safe — no
@@ -58,9 +59,9 @@ export interface AgentModeConfig {
   reasoningHint: string;
   /**
    * Candidate skill names (must match seeded builtin skills under
-   * `~/.lvis/skills/`). Registered into the child SkillOverlay ONLY when
-   * already body-hash approved; otherwise surfaced as a recommendation.
-   * See the SECURITY MODEL note above.
+   * `~/.lvis/skills/`). Surfaced to the sub-agent as a recommendation only
+   * (never auto-registered); the LLM calls `skill_load` to load one, which
+   * runs the normal body-hash approval modal. See the SECURITY MODEL note.
    */
   autoSkills: readonly string[];
   /**
