@@ -16,7 +16,7 @@ import type { ComposedOutgoing } from "../utils/compose.js";
  *
  * Returns the pre-send cost estimate + badge color for the draft input.
  * The expensive history serialization only depends on `entries`, so we
- * memo it separately keyed on length + last-entry identity (Phase 1 fix
+ * memo it separately keyed on length + last-entry identity (performance fix
  * pattern) — typing a draft in long sessions doesn't re-serialize the
  * whole conversation.
  */

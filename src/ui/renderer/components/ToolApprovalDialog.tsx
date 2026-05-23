@@ -52,9 +52,9 @@ export function ToolApprovalDialog({
   onDecide: (choice: ApprovalChoice, pattern?: string) => void;
 }) {
   const [expanded, setExpanded] = useState(false);
-  // R-4: NL justification (required for HIGH verdict approvals)
+  // NL justification (required for HIGH verdict approvals)
   const [nlJustification, setNlJustification] = useState("");
-  // R-4: Scope selector ("session" | "persistent"). HIGH forces "session".
+  // Scope selector ("session" | "persistent"). HIGH forces "session".
   const [scopeChoice, setScopeChoice] = useState<UserApprovalScope>("session");
   const nlInputRef = useRef<HTMLInputElement>(null);
   const suggestedPurpose =
@@ -63,7 +63,7 @@ export function ToolApprovalDialog({
       ? request.approvalPurpose.text.trim()
       : "";
 
-  // Reset R-4 state when a new request arrives.
+  // Reset NL/scope state when a new request arrives.
   useEffect(() => {
     setNlJustification(suggestedPurpose);
     setScopeChoice("session");
@@ -71,7 +71,7 @@ export function ToolApprovalDialog({
 
   const finalVerdict = request?.reviewerVerdict?.level ?? riskLevelForCategory(request?.toolCategory ?? "meta");
 
-  // R-4: HIGH verdict → focus NL field when dialog opens.
+  // HIGH verdict → focus NL field when dialog opens.
   useEffect(() => {
     if (open && finalVerdict === "high" && suggestedPurpose.length === 0) {
       // Small delay so the dialog animation completes first.
@@ -80,13 +80,13 @@ export function ToolApprovalDialog({
     }
   }, [open, finalVerdict, suggestedPurpose.length]);
 
-  // R-4: Approve is disabled for HIGH when NL field is empty.
+  // Approve is disabled for HIGH when NL field is empty.
   const approveDisabled = finalVerdict === "high" && nlJustification.trim().length === 0;
 
-  // R-4: Wrap onDecide("allow-*") to record approval before deciding.
-  // R-2 Round-3 CRITICAL: use canonicalStringify for args + propagate trustOrigin
+  // Wrap onDecide("allow-*") to record approval before deciding.
+  // CRITICAL: use canonicalStringify for args + propagate trustOrigin
   // + approvalCacheKey so that the record key matches the lookup key in
-  // dispatchReviewer. Without this, R-2 memory hit rate is 0%.
+  // dispatchReviewer. Without this, user-approval memory hit rate is 0%.
   // Fire-and-await pattern: onDecide is called synchronously so the UI
   // responds immediately; the record IPC is awaited in the background so
   // test assertions on onDecide do not need to drain microtask queues.
@@ -107,7 +107,7 @@ export function ToolApprovalDialog({
         trustOrigin: request.trustOrigin,
         approvalCacheKey: request.approvalCacheKey,
       }).catch((err: unknown) => {
-        console.warn("[R-2] user-approval record failed (non-fatal):", err);
+        console.warn("[user-approval] record failed (non-fatal):", err);
       });
     }
     // Call onDecide synchronously so the UI responds immediately.
@@ -256,7 +256,7 @@ export function ToolApprovalDialog({
 
             {/* MAJOR 1.6: NL justification moved above collapsible details so it's
                 visible without scrolling when the HIGH verdict disables Approve. */}
-            {/* R-4: NL justification — required for HIGH verdict */}
+            {/* NL justification — required for HIGH verdict */}
             {finalVerdict === "high" && (
               <div className="mt-3 rounded-md border border-destructive/30 bg-destructive/5 p-3">
                 <Label
@@ -308,7 +308,7 @@ export function ToolApprovalDialog({
             </details>
           </div>
 
-          {/* R-4: Scope selector — LOW/MEDIUM only (HIGH is always session) */}
+          {/* Scope selector — LOW/MEDIUM only (HIGH is always session) */}
           {finalVerdict !== "high" && (
             <div className="mt-3">
               <p className="mb-1.5 text-xs font-semibold">승인 범위</p>

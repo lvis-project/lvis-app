@@ -77,7 +77,7 @@ export interface AppServices {
   routineEngine?: RoutineEngine;
   mcpManager: McpManager;
   /**
-   * Phase 2 §FU#259 — artifact store rooted at `userData/mcp-servers/`.
+   * §FU#259 — artifact store rooted at `userData/mcp-servers/`.
    * Constructed at boot when the marketplace fetcher supports verified
    * downloads; absent when the build uses the disabled fetcher (no
    * marketplace configured) so the MCP install IPC degrades gracefully.
@@ -118,9 +118,9 @@ export interface AppServices {
   refreshActiveLlmWildcard?: () => void;
   /** Whether knowledge search tools were successfully registered. */
   knowledgeAvailable: boolean;
-  /** Sprint 4.C — starred messages persistence (~/.lvis/starred.json) */
+  /** Starred messages persistence (~/.lvis/starred.json) */
   starredStore?: StarredStore;
-  /** D6 privacy hardening — feedback persistence separate from audit log (~/.lvis/feedback.jsonl) */
+  /** Privacy hardening — feedback persistence separate from audit log (~/.lvis/feedback.jsonl) */
   feedbackStore?: FeedbackStore;
   /** Workflow tools — exposed for IPC handlers + shutdown wiring. */
   routinesStore?: import("../main/routines-store.js").RoutinesStore;
@@ -131,7 +131,7 @@ export interface AppServices {
   agentProfileStore?: import("../main/agent-profile-store.js").AgentProfileStore;
   /** 플러그인 설치/제거 후 OS 알림 핸들러를 재구성한다. */
   refreshPluginNotifications?: () => void;
-  /** Phase 0 SoT — canonical plugin install/cache paths. */
+  /** SoT — canonical plugin install/cache paths. */
   pluginPaths?: ReturnType<typeof import("../plugins/plugin-paths.js").resolvePluginPaths>;
   /** Host-owned wipe for persistent plugin auth sessions. */
   clearAuthPartitionService?: (partition: string) => Promise<void>;

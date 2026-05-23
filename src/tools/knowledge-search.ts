@@ -1,7 +1,7 @@
 /**
  * Knowledge Search Tool — LLM agentic 검색 루프
  *
- * 청사진 §1 C1: Phase 1에서 검색 주체는 LVIS agentic 루프.
+ * 청사진 §1 C1: 검색 주체는 LVIS agentic 루프.
  *   Local indexer는 데이터 소스일 뿐 `search()`가 없음.
  *   → LVIS가 OpenAI function calling 4개 도구를 노출하여 LLM이 직접 트리를 탐색.
  *

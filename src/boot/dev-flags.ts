@@ -1,5 +1,5 @@
 /**
- * Dev-mode flag gate (Phase 1 §Step 4).
+ * Dev-mode flag gate (§Step 4).
  *
  * Single source of truth for every `LVIS_DEV*` env var read in main-process
  * code. Each helper hard-gates on `!app.isPackaged` so a packaged production

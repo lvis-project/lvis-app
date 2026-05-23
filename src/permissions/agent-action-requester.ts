@@ -10,7 +10,7 @@
  *     records issuer plugin id + scope in the ApprovalIssuerRegistry, carries
  *     that issuer metadata into ApprovalGate audit provenance, and delegates to
  *     ApprovalGate which mints nonce + HMAC.
- *   - Plugin MUST NOT compute nonce/HMAC — those are gate-internal §D2 fields.
+ *   - Plugin MUST NOT compute nonce/HMAC — those are gate-internal confused-deputy fields.
  *
  * Returns only the ApprovalChoice so callers don't need to unwrap
  * ApprovalDecision (nonce/hmac fields are verification artefacts, not outputs).
@@ -154,7 +154,7 @@ export function verifyApprovalRequestScope(
  * provided registry BEFORE calling the gate, so the respond path can
  * verify origin + scope without a race.
  *
- * The gate generates nonce + HMAC internally (§D2 confused-deputy defense).
+ * The gate generates nonce + HMAC internally (confused-deputy defense).
  * On timeout the gate returns deny-once; this function propagates that
  * choice without masking the error path. If `gate.requestAndWait` throws,
  * the registry entry recorded above is removed in the `finally` block so

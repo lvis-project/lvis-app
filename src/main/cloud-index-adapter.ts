@@ -1,10 +1,10 @@
 /**
- * Cloud Index Adapter — Phase 1 Mock
+ * Cloud Index Adapter — Mock
  *
  * 향후 Server Index Engine (Elasticsearch + Milvus/Qdrant) 클라이언트로
- * 교체될 인터페이스. Phase 1에서는 빈 결과 + 구조화 로그만 반환한다.
+ * 교체될 인터페이스. 현재는 빈 결과 + 구조화 로그만 반환한다.
  *
- * 청사진 §1 C4: Phase 1 cloud weight = 0.0 (bm25:0.5 + vec:0.5 로 재정규화)
+ * 청사진 §1 C4: cloud weight = 0.0 (bm25:0.5 + vec:0.5 로 재정규화)
  * 청사진 §6.1: `lvis-app/src/main/cloud-index-adapter.ts`
  *
  * INTEGRATION NOTE for Agent 4 (Plugin Integrator):
@@ -30,7 +30,7 @@ export interface CloudIndexHit {
 
 /**
  * Cloud Index Adapter 인터페이스.
- * Phase 2에서 Server Index Engine 실연결 클라이언트가 이 인터페이스를 구현한다.
+ * Server Index Engine 실연결 클라이언트가 이 인터페이스를 구현한다.
  */
 export interface CloudIndexAdapter {
   /**
@@ -47,15 +47,15 @@ export interface CloudIndexAdapter {
   isAvailable(): Promise<boolean>;
 }
 
-// ─── Phase 1 Mock 구현 ──────────────────────────────
+// ─── Mock 구현 ──────────────────────────────────────
 
 /**
- * Mock Cloud Index Adapter — Phase 1.
+ * Mock Cloud Index Adapter.
  *
  * 모든 검색 요청에 빈 배열을 반환한다. 이로써 HybridRetriever는
  * bm25 + vec 두 개 소스만으로 작동하고, cloud weight=0 정규화가 성립한다.
  *
- * Phase 2에서 실클라이언트로 교체되면 HybridRetriever 생성자의
+ * 실클라이언트로 교체되면 HybridRetriever 생성자의
  * weights 기본값을 {bm25:0.35, vec:0.35, cloud:0.3}로 바꾸면 된다.
  */
 export class MockCloudIndexAdapter implements CloudIndexAdapter {

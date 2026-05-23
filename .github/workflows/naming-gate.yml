@@ -45,13 +45,24 @@ jobs:
 
           # NOTE: review-round R is matched only with a hyphen (`R-2`) to avoid
           # flagging domain risk-register ids (`R1`..`R8` in threat tables).
+          # NOTE: review-round R matched hyphen-only (`R-2`) so domain
+          # risk-register ids (`R1`..`R8`) are spared. D-decision matched
+          # with a colon (`D5:`) so bare `D1` identifiers/hex are spared.
+          # Permanent anchors (`#NNN` issue refs, `§9.6` arch section refs)
+          # are intentionally NOT flagged.
           patterns=(
             '\bH[1-9][0-9]?\b'
             '\bR-[1-9][0-9]?\b'
+            '\bD[0-9]+:'
             '\bF-round\b'
             '\bPR-[A-Z][0-9]+\b'
+            '\bPR#[0-9]+'
+            '§M[1-9][0-9]?\b'
             '\b(MEDIUM|HIGH|CRITICAL|LOW)-[1-9][0-9]?\b'
-            '\b[pP]hase[0-9]+[a-z]?\b'
+            '\b[pP]hase[ -]?[0-9]+[a-z]?\b'
+            '\bSprint [0-9A-Z]'
+            '\bWave [0-9A-Z]'
+            '\bW[0-9]\.[0-9]\b'
             '\b[rR]ound[0-9]+\b'
             '\b[tT]ier[0-9]+-(bypass|skip|excluded|ignored)'
             '\bpr[0-9]{3,}\b'

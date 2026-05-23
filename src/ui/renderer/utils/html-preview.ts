@@ -1,4 +1,4 @@
-// Phase 2: pure parsing + highlight helpers.
+// Pure parsing + highlight helpers.
 
 import React from "react";
 import type { RenderHtmlPayload } from "../types.js";

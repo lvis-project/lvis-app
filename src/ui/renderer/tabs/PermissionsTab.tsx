@@ -237,7 +237,7 @@ export function PermissionsTab() {
   // (allow-session grants from out-of-allowed-dir dialog, addRule/removeRule
   // through PermissionManager SOT, userApprovalRecord/Revoke in another
   // window). Refresh BOTH `fetchAll` (rules + directories + mode) AND
-  // `fetchApprovals` (R-2 active approvals) so every PermissionsTab section
+  // `fetchApprovals` (active approvals) so every PermissionsTab section
   // stays in sync — the broadcast is a single hint event covering all
   // permission-state mutations.
   useEffect(() => {
@@ -1040,7 +1040,7 @@ export function PermissionsTab() {
           )}
         </SettingsSection>
 
-        {/* ── R-5: 사용자 승인 기록 ── */}
+        {/* ── 사용자 승인 기록 ── */}
         <SettingsSection
           title={`사용자 승인 기록 (${userApprovals.length})`}
           description="세션 또는 지속적으로 기록된 도구 승인 목록입니다."

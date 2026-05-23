@@ -5,7 +5,7 @@ import { getUsableContext } from "../../../shared/context-budget.js";
 import { estimateTokens } from "../../../engine/auto-compact.js";
 
 /**
- * Context budget hook — turn-end context-fill SOT (Phase 3, 2026-05-07).
+ * Context budget hook — turn-end context-fill SOT (2026-05-07).
  *
  * `usedTokens` = the most recent usage carrier:
  *   - `turn_summary.tokensIn`, the turn-end projected context input emitted

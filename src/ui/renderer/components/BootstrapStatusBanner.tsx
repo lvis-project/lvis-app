@@ -1,4 +1,4 @@
-// Phase 2d — managed bootstrap status banner.
+// Managed bootstrap status banner.
 //
 // Renders one of three states based on the IPC event from the host:
 //   - start    → "플러그인 설치 중…" (no dismiss; host will emit terminal soon)

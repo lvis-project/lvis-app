@@ -8,7 +8,7 @@ interface Options {
 }
 
 /**
- * Vendor + model indicator for the status bar (PR-X1).
+ * Vendor + model indicator for the status bar.
  *
  * Surfaces the currently active LLM provider and model name from
  * `settings.llm`. Reads once at mount via `getSettings()` and stays

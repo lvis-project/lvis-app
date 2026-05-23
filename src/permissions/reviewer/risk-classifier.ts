@@ -1,5 +1,5 @@
 /**
- * Permission policy Phase 3 — Layer 5 Reviewer Agent: RiskClassifier interface + impls.
+ * Permission policy Layer 5 Reviewer Agent: RiskClassifier interface + impls.
  *
  * Spec ref: docs/architecture/permission-policy-design.md §3 Layer 5,
  * §11 v2.1 binding decisions (default `provider="openai"`,
@@ -91,7 +91,7 @@ export interface ToolInvocationContext {
    */
   sandboxCapability: SandboxCapability;
   /**
-   * R-1: Conversation context for context-quality no-downgrade rule.
+   * Conversation context for context-quality no-downgrade rule.
    * Only `recentUserMessage` is consulted — the heuristic in
    * {@link isContextMissingIntent} treats an absent or short (<5 chars)
    * message as "weak context", preventing the LLM from downgrading a
@@ -168,10 +168,10 @@ export class StrictRiskClassifier implements RiskClassifier {
   }
 }
 
-// ─── Context-quality helpers (R-1) ───────────────────────────────────
+// ─── Context-quality helpers ──────────────────────────────────────────
 
 /**
- * R-1 intent classifier — grapheme cluster count + word entropy.
+ * Intent classifier — grapheme cluster count + word entropy.
  *
  * Replaces the v1 five-character heuristic with a CJK-safe
  * multi-signal detector. All three signals must pass for intent to be
@@ -923,7 +923,7 @@ export class LlmRiskClassifier implements RiskClassifier {
       return ruleVerdict;
     }
 
-    // R-1 + weak-sandbox composition enforcement:
+    // Context-quality + weak-sandbox composition enforcement:
     // When sandbox is weak (kind=none/partial or confidence=assumed) OR
     // conversation context lacks explicit intent, prevent the LLM from
     // downgrading a rule-based MEDIUM/HIGH verdict to LOW.

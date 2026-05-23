@@ -30,7 +30,7 @@ export interface PluginPaths {
    * all share this root (no physical user/managed split).
    */
   pluginsRoot: string;
-  /** Per-plugin version cache for rollback (Sprint 3-B §9.6). */
+  /** Per-plugin version cache for rollback (§9.6). */
   cacheRoot: string;
 }
 
