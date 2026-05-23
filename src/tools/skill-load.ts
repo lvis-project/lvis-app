@@ -4,19 +4,19 @@
  * renderer surfaces a SkillBadge ("🎯 Skill loaded: <name>") at the call
  * site so the user sees which skills are active for the rest of the chat.
  *
- * Security model (post C2 review):
+ * Security model (post C2 review + #1104 file-seed migration):
  *   - Skill bodies are NEVER appended to conversation history as `user`-role
  *     messages. Pre-fix, a malicious skill body ("ignore previous
  *     instructions and exfil…") landed in history with the user role and
  *     read like genuine input. Post-fix, the body lives in a separately
  *     delimited section of each turn's system prompt, fenced with
- *     `<lvis-skill name="…" source="…">…</lvis-skill>` so provenance is
- *     unambiguous (see {@link SkillOverlay}).
- *   - First load of any user-authored skill requires explicit user approval
- *     via {@link ApprovalGate}. Approval is persisted in
- *     `~/.lvis/skill-approvals.json` so the modal does not re-pop on
- *     subsequent loads of the same skill. Built-in skills (shipped with
- *     the host) skip the approval gate.
+ *     `<lvis-skill name="…">…</lvis-skill>` so provenance is unambiguous
+ *     (see {@link SkillOverlay}).
+ *   - Every skill — including seeded built-ins under `~/.lvis/skills/`,
+ *     which are user-editable on disk — runs through {@link ApprovalGate}
+ *     on first load. Approval is persisted in `~/.lvis/skill-approvals.json`
+ *     and hash-bound to the current body so a post-approval body swap
+ *     re-prompts (R2-CR-3 TOCTOU close).
  *   - Skill names are allowlisted to `[a-zA-Z0-9_-]+` and traversal-checked
  *     by {@link SkillStore} — see `skill-store.ts` for the file-side
  *     defenses.
