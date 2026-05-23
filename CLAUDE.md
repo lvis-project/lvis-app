@@ -372,6 +372,31 @@ Relevant sections: 1 (Boot), 2 (ConversationLoop), 6 (Core Engines), 9 (Plugin S
 - Symptom fix 가 아닌 **root-cause design fix** 우선 — symptom-only PR 은 closed-superseded 처리
 - Cluster review 가 발견한 deferred work (test infra, lint rule 등 cluster 외부 작업) 는 follow-up issue 로 명시
 
+### 해소 신호 — `cluster-review-passed` label
+
+`.github/workflows/cluster-detector.yml` 는 트리거 조건만 자동 감지하고, **해소 (manual cluster review 완료)** 신호는 PR 의 `cluster-review-passed` label 로 받는다. 이 label 이 없는 PR 은 cluster-detector 가 `state=failure` 로 머지를 차단한다.
+
+- 적용 절차:
+  1. 트리거 PR 머지 *직전* 에 3-agent cluster review 실행 (architect / critic / security-reviewer)
+  2. 모든 reviewer 가 MAJOR=0 으로 GO 평결
+  3. `gh pr edit <PR#> --add-label cluster-review-passed` (label 미존재 시 `gh label create cluster-review-passed --color FBCA04 --description "Cluster review attested (CLAUDE.md §Cross-Cutting Review Gate)"` 로 생성)
+  4. cluster-detector 재실행 — exempt 분기로 `state=success` 작성 후 머지 가능
+- Label 적용은 **사람이 직접** (orchestrator agent 의 명시 결정). 자동 적용 금지 — 의도된 audit trail.
+- 같은 label 이 *bundle* (3+ sensitive commits in single PR) 트리거에도 동일 적용. trigger 종류 무관.
+
+### 운영 가이드 (PR description 권장)
+
+cluster review GO 받은 PR 의 description 끝에 다음 형식의 attestation 블록 추가 (audit / 후일 검증 용):
+
+```
+## Cluster Review (CLAUDE.md §Cross-Cutting Review Gate)
+- architect: GO — <one-line finding summary>
+- critic: GO — <one-line finding summary>
+- security-reviewer: GO — <one-line finding summary>
+- Label applied: cluster-review-passed
+- Round: N (final)
+```
+
 ### 위반 사례
 
 2026-05-17 PRs #822-#827 (6 PR, permissions/audit area) cluster: single-PR review 6건 모두 통과 → cross-cutting 에서 3 MAJOR 발견 (silent-success banner / SOT residual / fail-permissive `?? "medium"` coerce). 한 사이클 손실 → PR #829 (symptom) closed → PR #832 (root-cause) re-cluster fix.
