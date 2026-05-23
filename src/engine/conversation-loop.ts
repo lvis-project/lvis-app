@@ -429,6 +429,16 @@ export interface ConversationLoopDeps {
    */
   forcedActivePluginIds?: ReadonlySet<string>;
   /**
+   * Sub-agent model override. When set, `refreshProvider()` uses this model
+   * ID for the primary provider instead of the active vendor block's model.
+   * The user-configured fallback chain is left untouched so a sub-agent that
+   * picks an unavailable model still degrades through the same resilience
+   * path the parent uses. Resolved by `SubAgentRunner` from the agent
+   * profile's `model:` frontmatter (complexity tier → model ID, or an
+   * explicit model ID, or undefined → no override = parent model).
+   */
+  modelOverride?: string;
+  /**
    * Hard plugin allowlist for scoped callers such as routines. When set,
    * keyword matches, forced plugins, and request_plugin expansions are all
    * intersected with this set.
@@ -710,7 +720,10 @@ export class ConversationLoop {
       const primary = createLoopProvider({
         vendor,
         apiKey: apiKey ?? "",
-        model: block.model,
+        // Sub-agent model override takes precedence over the vendor block's
+        // configured model; falls back to block.model when no override is set
+        // (parent loops and sub-agents without a resolved profile model).
+        model: this.deps.modelOverride ?? block.model,
         ...(block.baseUrl ? { baseUrl: block.baseUrl } : {}),
         ...(block.vertexProject ? { vertexProject: block.vertexProject } : {}),
         ...(block.vertexLocation ? { vertexLocation: block.vertexLocation } : {}),
