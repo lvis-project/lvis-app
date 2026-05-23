@@ -4,7 +4,6 @@ import {
   mkdirSync,
   copyFileSync,
   chmodSync,
-  statSync,
   readFileSync,
   readdirSync,
   constants as fsConstants,
@@ -100,11 +99,13 @@ function seedOne(
   }
 
   // User has an existing copy. Compare to the packaged snapshot; write a
-  // .new sibling only when the packaged content differs.
+  // .new sibling only when the packaged content differs. We read the
+  // target directly instead of statSync→readFileSync so CodeQL doesn't
+  // flag the stat-then-read pair as `js/file-system-race`. Buffer.equals
+  // performs the length check internally, so the stat shortcut had no
+  // semantic value anyway.
   try {
-    if (statSync(target).size === packagedBuf.length) {
-      if (readFileSync(target).equals(packagedBuf)) return;
-    }
+    if (readFileSync(target).equals(packagedBuf)) return;
 
     // If a previous `.new` is sitting unmerged, do not clobber it. Compare:
     //   - identical to the latest packaged content → no-op (already offered)
