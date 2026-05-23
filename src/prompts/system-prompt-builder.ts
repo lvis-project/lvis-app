@@ -113,7 +113,7 @@ export class SystemPromptBuilder {
    * When true, the Routine Summary Tag Instruction section (id=9.8) is
    * included in the built prompt, instructing the LLM to append a
    * <summary>…</summary> tag at the end of its response. This tag is then
-   * parsed by RoutineEngineV2 to produce the OverlayCard summary — avoiding
+   * parsed by RoutineEngine to produce the OverlayCard summary — avoiding
    * raw truncation of full content.
    *
    * Must NOT be enabled on the main chat ConversationLoop — only set via
