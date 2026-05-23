@@ -766,7 +766,7 @@ const TOOL_USE_STRATEGY = `## 도구 사용 전략
   - **summaryHint**: 다중 질문 카드의 confirm 단계 row label (≤ 10자). 생략 시 question 자체를 짧게 잘라 사용.
   - 정적 폴백("네"/"아니오"/"잘 모르겠어요") 절대 사용 금지.
   - 'suggestedAnswers' 는 deprecated — 신규 호출에서는 choices + recommendedIndex/altIndices 를 사용하세요.
-- **schedule_routine**: 반복 또는 일회성 루틴 등록. execution="llm-session"(LLM 대화 시작) 또는 "notification-only"(OS 알림). 날짜·시각·반복(daily/weekly/monthly/interval/cron) 지정. 예: "매일 오전 9시에 데일리 리포트 작성" → execution:"llm-session", schedule:{at:"...",repeat:{kind:"daily"}}, prePrompt:"...".
+- **routine_schedule**: 지정한 예약 시각에 발화되는 루틴(self-trigger)을 등록. 캘린더 일정 조회 도구가 아니므로 "캘린더 점검/오늘 일정/회의 확인" 같은 조회 요청에는 사용 금지(캘린더는 ms-graph 플러그인). execution="llm-session"(LLM 대화 시작) 또는 "notification-only"(OS 알림). 날짜·시각·반복(daily/weekly/monthly/interval/cron) 지정. 예: "매일 오전 9시에 데일리 리포트 작성" → execution:"llm-session", schedule:{at:"...",repeat:{kind:"daily"}}, prePrompt:"...".
 - **todo_session_write**: 한 턴 안에서 여러 단계를 거쳐야 하는 작업이면 다음 순서를 반드시 따르세요.
   1. **계획 즉시 등록**: 단계 목록을 todo_session_write 로 전달해 전체 항목을 pending 으로 생성합니다.
   2. **첫 번째 단계 시작 선언**: 계획 등록 직후, 다른 도구를 호출하기 **전에** todo_session_write 를 다시 호출해 첫 번째 항목을 in_progress 로 표시합니다.
