@@ -44,8 +44,6 @@ import {
 } from "./turn/plugin-expansion.js";
 import {
   handleToolSearch,
-  MAX_TOOL_SEARCH_PER_TURN,
-  MAX_TOOL_SEARCH_PER_SESSION,
   TOOL_SEARCH_TOOL,
 } from "./turn/tool-search.js";
 import { applyKnowledgeDepthCap } from "./turn/knowledge-cap.js";

@@ -18,6 +18,7 @@ function makeBuiltin(name: string) {
     name,
     description: `builtin ${name}`,
     source: "builtin",
+    category: "read",
     jsonSchema: { type: "object", properties: {} },
     execute: async () => ({ output: "", isError: false }),
   });
@@ -28,6 +29,7 @@ function makePluginTool(name: string, pluginId: string) {
     name,
     description: `plugin ${name}`,
     source: "plugin",
+    category: "read",
     pluginId,
     jsonSchema: { type: "object", properties: {} },
     execute: async () => ({ output: "", isError: false }),
@@ -39,6 +41,7 @@ function makeMcpTool(name: string, mcpServerId: string) {
     name,
     description: `mcp ${name}`,
     source: "mcp",
+    category: "network",
     mcpServerId,
     jsonSchema: { type: "object", properties: {} },
     execute: async () => ({ output: "", isError: false }),
