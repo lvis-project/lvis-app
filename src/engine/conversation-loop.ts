@@ -285,6 +285,13 @@ export interface TurnCallbacks {
     estimatedBefore: number;
     preflight: number;
   }) => void;
+  /**
+   * Fired when force-recover budget is exhausted (#917). Renderer must surface
+   * a persistent banner informing the user that auto-compact can no longer
+   * recover the session and manual intervention (model change / chat reset) is
+   * required.
+   */
+  onRecoveryExhausted?: () => void;
   onFallback?: (from: string, to: string) => void;
   onLlmStatus?: (status: FallbackStatus) => void;
   /**
@@ -591,6 +598,14 @@ export class ConversationLoop {
    * 회 연속 force-recover = 3 turn 연속 모델 한도 초과).
    */
   private contextErrorRecoveryCount: number = 0;
+  /**
+   * Issue #917 — budget 소진 후 compact API 호출을 완전 차단하는 persistent
+   * flag. `MAX_FORCE_RECOVER_PER_SESSION` 횟수를 모두 소진하면 true 로 설정되며,
+   * 이후 turn 에서 force-recover 뿐 아니라 *normal threshold compact 도*
+   * 차단한다 (compact 가 context 를 줄이지 못하는 구조적 실패가 입증됐으므로).
+   * 정상 turn (context_error 없이 완료) 이후 re-arm 가능하도록 reset.
+   */
+  private recoveryExhausted: boolean = false;
   /**
    * "Guide" utterance buffer — mid-stream direction adjustments that the
    * user typed while a turn is in flight. Drained at each round boundary in
@@ -1765,6 +1780,20 @@ export class ConversationLoop {
 
     callbacks?.onTurnComplete?.(result.text);
 
+    // Issue #917 — re-arm recovery budget after a clean turn. If the turn
+    // completed without a context_error / stream_error the structural failure
+    // that exhausted the budget is resolved; allow force-recover to trigger
+    // again on the next error series.
+    if (
+      result.stopReason !== "context-error" &&
+      result.stopReason !== "stream-error" &&
+      this.recoveryExhausted
+    ) {
+      this.recoveryExhausted = false;
+      this.contextErrorRecoveryCount = 0;
+      log.info("runTurn: recoveryExhausted reset — clean turn, recovery re-armed");
+    }
+
     // Issue #260 — fire system notification on turn-end. Skip if the turn
     // was interrupted (user aborted), hit context_error / stream_error, or
     // produced no assistant text (rare tool-only termination). Body is the
@@ -2560,11 +2589,21 @@ export class ConversationLoop {
     const forceRecover = this.contextErrorPending && !overRecoveryBudget;
     if (this.contextErrorPending && overRecoveryBudget) {
       log.warn(
-        `preflight: force-recover BUDGET EXHAUSTED (count=${this.contextErrorRecoveryCount}/${MAX_FORCE_RECOVER_PER_SESSION}) — falling back to threshold gate`,
+        `preflight: force-recover BUDGET EXHAUSTED (count=${this.contextErrorRecoveryCount}/${MAX_FORCE_RECOVER_PER_SESSION}) — blocking all compact API calls`,
       );
-      // Stay armed for a normal threshold-based trigger but stop the
-      // override behaviour. Clear the flag so the normal gates apply.
+      // Issue #917: budget 소진은 compact 가 context 를 줄이지 못하는 구조적
+      // 실패이므로 이후 API 호출을 완전 차단한다 (force + normal 모두). 이전
+      // 코드는 normal threshold gate 로 fallthrough 해서 여전히 compactWithBoundary
+      // 를 호출했는데 이는 DoS hard-cap 을 무력화하는 갭.
       this.contextErrorPending = false;
+      this.recoveryExhausted = true;
+      callbacks?.onRecoveryExhausted?.();
+      return;
+    }
+    // Budget 소진 상태면 compact 완전 차단 (re-arm 은 정상 turn 완료 후 reset).
+    if (this.recoveryExhausted) {
+      log.warn("preflight: recoveryExhausted — all compact API calls blocked until normal turn completes");
+      return;
     }
     if (!forceRecover && !this.isAutoCompactEnabled()) {
       log.debug("runPreflightGuard: skipped (autoCompact 설정 OFF)");

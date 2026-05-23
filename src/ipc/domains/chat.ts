@@ -368,6 +368,8 @@ async function runStreamedTurn(
           estimatedBefore,
           preflight,
         }),
+      onRecoveryExhausted: () =>
+        send({ type: "recovery_exhausted" }),
       onCompactOccurred: ({ removedMessages, freedTokens, estimatedAfter, trigger, summary, compactNum, compactStatus, truncatedDir }) =>
         send({
           type: "compact_notice",
