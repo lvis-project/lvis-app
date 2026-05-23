@@ -221,7 +221,7 @@ function renderAgentProfilePrompt(
   taskInstructions: string,
 ): string {
   return [
-    `<lvis-agent-profile name="${escapeAttr(profile.name)}" source="${profile.source}">`,
+    `<lvis-agent-profile name="${escapeAttr(profile.name)}">`,
     neutralizeAgentProfileFence(profile.body),
     "</lvis-agent-profile>",
     "",

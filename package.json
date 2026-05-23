@@ -232,6 +232,16 @@
       {
         "from": "resources/AGENTS.md",
         "to": "AGENTS.md"
+      },
+      {
+        "from": "resources/agents",
+        "to": "agents",
+        "filter": ["*.md"]
+      },
+      {
+        "from": "resources/skills",
+        "to": "skills",
+        "filter": ["*.md"]
       }
     ],
     "mac": {
