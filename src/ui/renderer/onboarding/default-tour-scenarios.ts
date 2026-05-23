@@ -221,7 +221,7 @@ const DOC_SEARCH_TOUR: TourScenario = {
 
 const WORK_ASSISTANT_TOUR: TourScenario = {
   // Renamed from `proactive-work-tour` to align with the canonical
-  // 업무 도우미 brand. Plugin tour-anchors live in lvis-plugin-work-proactive
+  // 업무 도우미 brand. Plugin tour-anchors live in lvis-plugin-work-assistant
   // (package repo) and use the manifest id (work-assistant) on their DOM
   // attributes — the test/e2e fixture pins `manifest.id="work-assistant"`.
   id: "work-assistant-tour",
