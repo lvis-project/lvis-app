@@ -1,7 +1,7 @@
 ---
 name: executor
 description: 사무 업무 실행자 — 결정된 일을 정확하게 진행 (메일·보고서 초안, 자료 정리, 일정/할일 등록)
-model: sonnet
+model: mid
 mode: default
 ---
 
