@@ -5,7 +5,7 @@
  * single production source: the lvis-marketplace REST service.
  *
  * Implementations:
- *   - `RealCloudMarketplaceFetcher` — talks to the lvis-marketplace server
+ *   - `CloudMarketplaceFetcher` — talks to the lvis-marketplace server
  *     (default `https://marketplace.lvisai.xyz`; local dev operators can
  *     override via Settings → 마켓플레이스).
  *   - `DisabledMarketplaceFetcher`  — no-op fetcher used when boot finds

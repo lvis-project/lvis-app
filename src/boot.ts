@@ -45,7 +45,7 @@ import { resolve } from "node:path";
 import { adaptPowerMonitor } from "./main/idle-scheduler.js";
 import { DisabledMarketplaceFetcher, PluginMarketplaceService } from "./plugins/marketplace.js";
 import type { MarketplaceFetcher } from "./plugins/marketplace.js";
-import { RealCloudMarketplaceFetcher } from "./plugins/real-cloud-marketplace-fetcher.js";
+import { CloudMarketplaceFetcher } from "./plugins/cloud-marketplace-fetcher.js";
 import { PluginArtifactStore } from "./plugins/plugin-artifact-store.js";
 import { getBundledPublicKeys } from "./plugins/publisher-keys.js";
 import { sweepOrphanUninstallDirs } from "./plugins/orphan-uninstall-sweeper.js";
@@ -523,7 +523,7 @@ export async function bootstrap(
   // §9.5 marketplace backend selection.
   const marketplaceSettings = settingsService.get("marketplace");
   // Phase 2-final marketplace fetcher selection — single production path:
-  //   - real-cloud + URL → RealCloudMarketplaceFetcher
+  //   - real-cloud + URL → CloudMarketplaceFetcher
   //   - otherwise (no URL configured) → DisabledMarketplaceFetcher
   // No `MockMarketplaceFetcher` fallback at boot. Default points at the
   // production tunnel (`https://marketplace.lvisai.xyz`); dev operators
@@ -531,7 +531,7 @@ export async function bootstrap(
   // Tests inject their own fetcher.
   let marketplaceFetcher: MarketplaceFetcher;
   if (marketplaceSettings.realCloudBaseUrl) {
-    marketplaceFetcher = new RealCloudMarketplaceFetcher({
+    marketplaceFetcher = new CloudMarketplaceFetcher({
       baseUrl: marketplaceSettings.realCloudBaseUrl,
       apiKey: settingsService.getSecret("marketplace.apiKey") ?? undefined,
       allowPrivateNetwork: marketplaceSettings.realCloudAllowPrivateNetwork,
@@ -550,12 +550,12 @@ export async function bootstrap(
 
   // Closure invoked by the settings IPC handler when MarketplaceTab fields
   // change. Re-reads the persisted `marketplace.realCloudAllowPrivateNetwork`
-  // value and pushes it into the live RealCloudMarketplaceFetcher so the
+  // value and pushes it into the live CloudMarketplaceFetcher so the
   // SSRF-guard bypass toggle takes effect on the next request (honoring the
   // "즉시 적용" UX badge). No-op when the fetcher is the disabled variant —
   // a disabled marketplace has no live config to refresh.
   const refreshMarketplaceFetcherConfig = (): void => {
-    if (!(marketplaceFetcher instanceof RealCloudMarketplaceFetcher)) return;
+    if (!(marketplaceFetcher instanceof CloudMarketplaceFetcher)) return;
     const next = settingsService.get("marketplace").realCloudAllowPrivateNetwork ?? false;
     marketplaceFetcher.updateAllowPrivateNetwork(next);
   };

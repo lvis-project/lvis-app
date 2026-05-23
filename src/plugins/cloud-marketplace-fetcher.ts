@@ -1,5 +1,5 @@
 /**
- * Real cloud marketplace fetcher — §9.5 M4
+ * Cloud marketplace fetcher — §9.5 M4
  *
  * Talks to the lvis-marketplace REST server. Read-only client: never
  * publishes, never mutates server state.
@@ -97,7 +97,7 @@ interface ServerCatalogRow {
   mcpAuth?: unknown;
 }
 
-export class RealCloudMarketplaceFetcher implements MarketplaceFetcher, MarketplaceHttp {
+export class CloudMarketplaceFetcher implements MarketplaceFetcher, MarketplaceHttp {
   constructor(private config: RealCloudMarketplaceConfig) {}
 
   /**
