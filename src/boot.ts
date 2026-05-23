@@ -1113,9 +1113,9 @@ export async function bootstrap(
   //                  PR-A3.5 (native Win32 N-API binding). detect() returns
   //                  available=false so registration is skipped (D3).
   //
-  // All platforms: MEDIUM-2 gate — LVIS_SANDBOX_ENABLED=1 required (default off)
-  // until PR-A4 R-2 wires the always-on policy hook.
-  // TODO(PR-A4 R-2): remove the env-gate and make sandbox always-on.
+  // All platforms: LVIS_SANDBOX_ENABLED=1 required (default off)
+  // until the always-on policy hook is wired.
+  // TODO: remove the env-gate and make sandbox always-on.
   {
     const { registerSandboxRunner: _registerRunner, sealSandboxRunnerRegistry } = await import(
       "./permissions/sandbox-runner.js"

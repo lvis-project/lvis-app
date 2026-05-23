@@ -7,7 +7,7 @@
  * Decision refs:
  *   D1: bwrap OS-only — no bundled binary, requires OS package (dnf install bubblewrap).
  *   D8: detect-and-skip — if /usr/bin/bwrap absent, runner stays unregistered;
- *       Linux tools run with isolation=none. R-1 composition rule + reviewer
+ *       Linux tools run with isolation=none. Composition rule + reviewer
  *       judgment provide the safety net.
  *
  * bwrap flags used:
