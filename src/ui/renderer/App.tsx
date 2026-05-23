@@ -93,7 +93,7 @@ export function App() {
 
   // Chat state + stream lifecycle (useChatState is the sole owner of entries).
   const {
-    entries, streaming, isCompacting, beginStreamingRequest, finishStreamingRequest, editingEntryIdx, setEditingEntryIdx, editBusy,
+    entries, streaming, isCompacting, compactTriggerSource, isRecoveryExhausted, beginStreamingRequest, finishStreamingRequest, editingEntryIdx, setEditingEntryIdx, editBusy,
     entryIndexToHistoryIndex, handleEditSave, handleRetryEffort, handleContinueFromLastUser,
     resetStreamAccumulators, setErrorWithThought, handleCompactCommand,
     clearForNewChat, appendUserEntry, appendAssistantStatus, appendSystemEntry, applyInitialSession, applyLoadedSession, truncateToEntry,
@@ -1286,14 +1286,39 @@ export function App() {
   // Show a persistent StatusBar indicator while a pre-turn auto-compact runs.
   // `compact_started` sets isCompacting → this effect upserts the item.
   // `compact_notice` clears isCompacting → this effect removes the item.
+  // Issue #916: force-recover (autoCompact OFF-override) shows a distinct label.
   useEffect(() => {
     const COMPACT_ITEM_ID = "auto-compact-in-progress";
     if (isCompacting) {
-      statusUpsertPersistent({ id: COMPACT_ITEM_ID, severity: "info", label: "컨텍스트", value: "자동 압축 중..." });
+      const isForceRecover = compactTriggerSource === "force-recover";
+      statusUpsertPersistent({
+        id: COMPACT_ITEM_ID,
+        severity: isForceRecover ? "warning" : "info",
+        label: "컨텍스트",
+        value: isForceRecover
+          ? "자동 압축을 끄셨지만, context 한도 복구를 위해 1회 압축했습니다"
+          : "자동 압축 중...",
+      });
     } else {
       statusRemovePersistent(COMPACT_ITEM_ID);
     }
-  }, [isCompacting, statusUpsertPersistent, statusRemovePersistent]);
+  }, [isCompacting, compactTriggerSource, statusUpsertPersistent, statusRemovePersistent]);
+
+  // Issue #917: show a persistent warning banner when force-recover budget is exhausted.
+  // Cleared when the user starts a new chat (clearForNewChat resets isRecoveryExhausted).
+  useEffect(() => {
+    const EXHAUSTED_ITEM_ID = "recovery-exhausted";
+    if (isRecoveryExhausted) {
+      statusUpsertPersistent({
+        id: EXHAUSTED_ITEM_ID,
+        severity: "error",
+        label: "압축 실패",
+        value: "압축으로 복구 불가 — 모델 변경 또는 새 대화를 시작하세요",
+      });
+    } else {
+      statusRemovePersistent(EXHAUSTED_ITEM_ID);
+    }
+  }, [isRecoveryExhausted, statusUpsertPersistent, statusRemovePersistent]);
 
   const handleStatusToastClick = useCallback(
     (toast: { id: string; notification?: NotificationToastMeta }) => {

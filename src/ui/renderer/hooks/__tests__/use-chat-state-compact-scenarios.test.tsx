@@ -351,4 +351,107 @@ describe("useChatState — compact lifecycle scenarios", () => {
 
     expect(api.chatCompact).not.toHaveBeenCalled();
   });
+
+  // ─── #916: force-recover OFF-override banner ──────────────────────────────
+
+  it("S12 (#916): compact_started with triggerSource=force-recover exposes compactTriggerSource", () => {
+    const { api, streamHandler } = makeCapturedApi();
+    const { result } = renderHook(() => useChatState(api));
+
+    expect(result.current.compactTriggerSource).toBeNull();
+
+    dispatchEvent(streamHandler, {
+      type: "compact_started",
+      triggerSource: "force-recover",
+      estimatedBefore: 90_000,
+      preflight: 88_000,
+    } as StreamEvent);
+
+    expect(result.current.isCompacting).toBe(true);
+    expect(result.current.compactTriggerSource).toBe("force-recover");
+  });
+
+  it("S13 (#916): compact_notice clears compactTriggerSource", () => {
+    const { api, streamHandler } = makeCapturedApi();
+    const { result } = renderHook(() => useChatState(api));
+
+    dispatchEvent(streamHandler, {
+      type: "compact_started",
+      triggerSource: "force-recover",
+      estimatedBefore: 90_000,
+      preflight: 88_000,
+    } as StreamEvent);
+
+    expect(result.current.compactTriggerSource).toBe("force-recover");
+
+    dispatchEvent(streamHandler, {
+      type: "compact_notice",
+      removedMessages: 10,
+      freedTokens: 5_000,
+    } as StreamEvent);
+
+    expect(result.current.isCompacting).toBe(false);
+    expect(result.current.compactTriggerSource).toBeNull();
+  });
+
+  it("S14 (#916): done event clears compactTriggerSource defensively", () => {
+    const { api, streamHandler } = makeCapturedApi();
+    const { result } = renderHook(() => useChatState(api));
+
+    dispatchEvent(streamHandler, {
+      type: "compact_started",
+      triggerSource: "force-recover",
+    } as StreamEvent);
+
+    expect(result.current.compactTriggerSource).toBe("force-recover");
+
+    dispatchEvent(streamHandler, { type: "done" } as StreamEvent);
+
+    expect(result.current.compactTriggerSource).toBeNull();
+  });
+
+  // ─── #917: recovery_exhausted banner ─────────────────────────────────────
+
+  it("S15 (#917): recovery_exhausted event sets isRecoveryExhausted", () => {
+    const { api, streamHandler } = makeCapturedApi();
+    const { result } = renderHook(() => useChatState(api));
+
+    expect(result.current.isRecoveryExhausted).toBe(false);
+
+    dispatchEvent(streamHandler, { type: "recovery_exhausted" } as StreamEvent);
+
+    expect(result.current.isRecoveryExhausted).toBe(true);
+  });
+
+  it("S16 (#917): clearForNewChat resets isRecoveryExhausted", () => {
+    const { api, streamHandler } = makeCapturedApi();
+    const { result } = renderHook(() => useChatState(api));
+
+    dispatchEvent(streamHandler, { type: "recovery_exhausted" } as StreamEvent);
+    expect(result.current.isRecoveryExhausted).toBe(true);
+
+    act(() => {
+      result.current.clearForNewChat();
+    });
+
+    expect(result.current.isRecoveryExhausted).toBe(false);
+  });
+
+  it("S17 (#917): clearForNewChat also resets compactTriggerSource", () => {
+    const { api, streamHandler } = makeCapturedApi();
+    const { result } = renderHook(() => useChatState(api));
+
+    dispatchEvent(streamHandler, {
+      type: "compact_started",
+      triggerSource: "force-recover",
+    } as StreamEvent);
+    expect(result.current.compactTriggerSource).toBe("force-recover");
+
+    act(() => {
+      result.current.clearForNewChat();
+    });
+
+    expect(result.current.compactTriggerSource).toBeNull();
+    expect(result.current.isCompacting).toBe(false);
+  });
 });
