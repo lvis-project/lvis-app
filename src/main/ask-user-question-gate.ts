@@ -97,7 +97,7 @@ interface PendingEntry {
 
 const DEFAULT_TIMEOUT_MS = 5 * 60 * 1000;
 /**
- * H3: per-session cap on concurrent pending questions. Without this, a
+ * Per-session cap on concurrent pending questions. Without this, a
  * misbehaving assistant could chain many `ask_user_question` calls in one
  * turn and bury the renderer in cards. 5 is generous for legitimate
  * workflows (decision tree branches) and tight enough that abuse is
@@ -178,7 +178,7 @@ export class AskUserQuestionGate {
       })),
       createdAt: Date.now(),
     };
-    // H3: enforce concurrent-pending cap before scheduling anything.
+    // Enforce concurrent-pending cap before scheduling anything.
     if (this.pending.size >= MAX_CONCURRENT_PENDING) {
       return Promise.resolve({
         requestId: req.id,

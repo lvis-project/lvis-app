@@ -46,7 +46,7 @@ describe("createRoutineEngine", () => {
       "schedule-daily",
       expect.any(String),
     );
-    // routine-engine-v2 calls loop.runTurn(prePrompt, undefined, signal, options).
+    // routine-engine calls loop.runTurn(prePrompt, undefined, signal, options).
     expect(mockLoop.runTurn).toHaveBeenCalledWith(
       "오늘 업무 맥락 정리",
       undefined,

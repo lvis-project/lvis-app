@@ -642,7 +642,7 @@ export class ConversationLoop {
   }
 
   /**
-   * HIGH-1: plugin disable 시 lastTurnScope에서 해당 pluginId 제거.
+   * HIGH: plugin disable 시 lastTurnScope에서 해당 pluginId 제거.
    * boot.ts의 onDisable 콜백에서 호출된다.
    */
   onPluginDisabled(pluginId: string): void {

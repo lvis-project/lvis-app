@@ -2,15 +2,14 @@
  * S2 sandbox audit entry schema + builder.
  *
  * Spec ref: docs/research/sandbox-isolation.md §3.6 (S2 audit fields)
- * Issue: #691 PR-A1 Foundation
+ * Issue: #691
  *
  * This module defines the JSON shape of a sandbox execution audit entry
  * and a builder function that callers use to construct one.
  *
  * The *sink* (audit.log append, HMAC chain linkage) is intentionally
- * omitted here — it lands in PR-A4 where the full user-approval-store
- * and emit pipeline are wired. This keeps PR-A1 focused on types and
- * skeletons only.
+ * omitted here — it is wired alongside the full user-approval-store and
+ * emit pipeline. This file is focused on types and skeletons only.
  *
  * Relationship to existing audit:
  *   `src/audit/audit-schema.ts` defines the permission-gate audit entries
@@ -28,7 +27,7 @@ import type { UserApprovalVerdict } from "../shared/permissions-events.js";
 
 /**
  * An observable event captured during a single sandboxed tool execution.
- * PR-A2/A3 runner implementations emit these as they intercept syscalls
+ * Runner implementations emit these as they intercept syscalls
  * (via bwrap seccomp / sandbox-exec / AppContainer filter logs).
  */
 export type SandboxEvent =
@@ -68,7 +67,7 @@ export interface SandboxAuditEntry {
   tool: {
     /** Tool name (underscore format, per CLAUDE.md Tool Naming Convention). */
     name: string;
-    /** Raw args as a JSON string (pre-DLP-redaction — PR-A4 will apply DLP). */
+    /** Raw args as a JSON string (pre-DLP-redaction — DLP is applied by the emit caller). */
     args: string;
     /** Trust origin of the tool call (mirrors ToolInvocationContext.trustOrigin). */
     source: string;
@@ -98,8 +97,8 @@ export interface SandboxAuditEntry {
     finalVerdict: "low" | "medium" | "high";
     /**
      * Composition rules that fired and influenced the final verdict.
-     * Populated by the reviewer engine (PR-A4). Empty when no rule
-     * overrode the base verdict.
+     * Populated by the reviewer engine. Empty when no rule overrode
+     * the base verdict.
      */
     compositionRulesTriggered: Array<{
       rule: string;
@@ -129,9 +128,9 @@ export interface SandboxAuditEntry {
  * The `timestamp` field is always set by this builder — callers MUST NOT
  * set it manually to ensure consistent UTC wall-clock recording.
  *
- * PR-A4 will wire the actual sink (audit.log append + HMAC chain linkage).
- * Until then, callers can use this builder for in-memory event capture
- * and test assertions.
+ * The actual sink (audit.log append + HMAC chain linkage) is wired by the
+ * sandbox-audit-sink module. Callers can use this builder for in-memory
+ * event capture and test assertions.
  *
  * @example
  * ```ts
