@@ -1,5 +1,5 @@
 /**
- * RoutinesStore v2 — coverage mirrors RemindersStore H4 tests.
+ * RoutinesStore v2 — coverage mirrors the RemindersStore atomic-write / cap / mode / clamp tests.
  *
  * - Invalid `at` rejection.
  * - 50-record cap enforcement.
