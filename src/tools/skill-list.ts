@@ -15,7 +15,6 @@ export function createSkillListTool(store: SkillStore): Tool {
         name: skill.name,
         description: skill.description,
         triggers: skill.triggers,
-        source: skill.source,
       }));
       return { output: JSON.stringify({ skills }), isError: false };
     },

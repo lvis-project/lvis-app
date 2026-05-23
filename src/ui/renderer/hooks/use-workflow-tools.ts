@@ -112,7 +112,6 @@ export function useWorkflowTools(api: LvisApi) {
           {
             name: event.name,
             description: event.description,
-            source: event.source,
           },
         ];
         if (next.length > SKILL_BADGE_CAP) {

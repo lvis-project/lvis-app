@@ -1,0 +1,62 @@
+name: CodeQL
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+  schedule:
+    # Weekly scheduled run so security-events surface even when no PR is open.
+    # Mon 09:00 UTC = 18:00 KST.
+    - cron: "0 9 * * 1"
+
+# GitHub's default CodeQL setup pulls the repo over an unauthenticated git
+# URL on self-hosted / fork-pull paths, which has been failing with
+# "could not read Username for 'https://github.com': terminal prompts
+# disabled" (HTTP 401) on this repo. Switching to advanced setup pins the
+# checkout token explicitly and lets the workflow declare the exact
+# `security-events: write` permission CodeQL needs to upload results.
+# The default setup MUST be disabled in repo Settings → Code security →
+# Code scanning so the two flows don't double-analyze each commit.
+
+permissions:
+  actions: read
+  contents: read
+  security-events: write
+
+jobs:
+  analyze:
+    name: Analyze (${{ matrix.language }})
+    # Default setup ran on ubuntu-latest; keep parity so any tooling
+    # assumptions about the runner image stay valid.
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        language: [javascript-typescript]
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v6
+        with:
+          # CodeQL needs full history for query packs that examine git
+          # blame / timeline metadata. Default setup uses fetch-depth: 0
+          # already; mirror it here.
+          fetch-depth: 0
+          # Explicit token closes the 401 we hit under default setup —
+          # GITHUB_TOKEN has read access to this repo on every event.
+          token: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Initialize CodeQL
+        uses: github/codeql-action/init@v3
+        with:
+          languages: ${{ matrix.language }}
+          # Use GitHub's recommended security-and-quality query set so the
+          # surface is at least as wide as default setup. If you need to
+          # narrow it later, switch to `queries: security-extended`.
+          queries: security-and-quality
+
+      - name: Perform CodeQL Analysis
+        uses: github/codeql-action/analyze@v3
+        with:
+          category: "/language:${{ matrix.language }}"

@@ -7,14 +7,12 @@ export interface AssistantAgentSummary {
   triggers: string[];
   model?: string;
   mode?: string;
-  source: "user";
 }
 
 export interface AssistantSkillSummary {
   name: string;
   description: string;
   triggers: string[];
-  source: "user" | "builtin";
 }
 
 export interface SelectedAssistantContext {
