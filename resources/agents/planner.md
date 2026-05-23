@@ -2,7 +2,7 @@
 name: planner
 description: 점수 추적 인터뷰형 기획 — 차원별 명확도 점수를 올려가며 완성된 plan 문서로 수렴
 model: high
-mode: default
+mode: plan
 ---
 
 # Planner

@@ -21,8 +21,13 @@ import { ToolRegistry } from "../../tools/registry.js";
 import { createDynamicTool } from "../../tools/base.js";
 import { KeywordEngine } from "../../core/keyword-engine.js";
 import { RouteEngine } from "../../core/route-engine.js";
-import { SubAgentRunner, resolveSubAgentModel } from "../subagent-runner.js";
+import {
+  SubAgentRunner,
+  resolveSubAgentModel,
+  buildModePreamble,
+} from "../subagent-runner.js";
 import { MODEL_COMPLEXITY_MAP } from "../../shared/model-complexity-map.js";
+import { AGENT_MODE_MAP } from "../../shared/agent-mode-map.js";
 import type { LLMProvider, StreamEvent, StreamTurnParams } from "../llm/types.js";
 import { createAgentSpawnTool } from "../../tools/agent-spawn.js";
 import { fakeLlmSettings } from "../../shared/__tests__/fake-llm-settings.js";
@@ -377,5 +382,29 @@ describe("resolveSubAgentModel — #1112 complexity resolution", () => {
     expect(resolveSubAgentModel("  mid  ", "claude")).toBe(
       MODEL_COMPLEXITY_MAP.claude.mid,
     );
+  });
+});
+
+describe("buildModePreamble — #1113 mode posture + skill recommendation", () => {
+  it("includes the posture line and skill recommendation for a skill-bearing mode", () => {
+    const preamble = buildModePreamble(AGENT_MODE_MAP.execute);
+    expect(preamble).toContain("<lvis-agent-mode-posture>");
+    expect(preamble).toContain(AGENT_MODE_MAP.execute.reasoningHint);
+    expect(preamble).toContain("<lvis-agent-mode-skills>");
+    for (const skill of AGENT_MODE_MAP.execute.autoSkills) {
+      expect(preamble).toContain(skill);
+    }
+    // RECOMMENDATION, not force-load — body-hash approval gate still runs.
+    expect(preamble).toContain("skill_load");
+  });
+
+  it("omits the skills block for a mode with no auto skills (explore)", () => {
+    const preamble = buildModePreamble(AGENT_MODE_MAP.explore);
+    expect(preamble).toContain("<lvis-agent-mode-posture>");
+    expect(preamble).not.toContain("<lvis-agent-mode-skills>");
+  });
+
+  it("returns an empty string for the inert default mode", () => {
+    expect(buildModePreamble(AGENT_MODE_MAP.default)).toBe("");
   });
 });

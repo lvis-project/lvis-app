@@ -178,6 +178,10 @@ export function createAgentSpawnTool(deps: AgentSpawnToolDeps): Tool {
             // explicit model ID). SubAgentRunner resolves it against the
             // active vendor; undefined leaves the child on the parent model.
             profileModel: profile?.model,
+            // #1113: profile's `mode:` frontmatter (execute/plan/research/
+            // explore). SubAgentRunner prepends a working-posture preamble +
+            // auto-skill recommendation; undefined → inert default mode.
+            profileMode: profile?.mode,
           },
           {
             onTurn: (u) =>
