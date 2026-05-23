@@ -271,10 +271,10 @@ export function ChatView({ api, onAsk, onEditSave, onFork, onToggleStar, onRetry
   const [forkToast, setForkToast] = useState<string | null>(null);
   const forkToastTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
-  // R-2 user-approval memory-hit disclosure toast (#793). Subscribes to the
+  // User-approval memory-hit disclosure toast (#793). Subscribes to the
   // `lvis:permissions:user-approval-hit` IPC broadcast wired by PR #786 and
   // surfaces a transient banner so the user sees that a stored approval
-  // (R-2 cache) auto-resolved the tool call. Auto-dismisses after 4 s.
+  // cache entry auto-resolved the tool call. Auto-dismisses after 4 s.
   const [userApprovalHitToast, setUserApprovalHitToast] = useState<
     UserApprovalHitPayload | null
   >(null);
@@ -858,7 +858,7 @@ export function ChatView({ api, onAsk, onEditSave, onFork, onToggleStar, onRetry
           {forkToast}
         </div>
       )}
-      {/* R-2 user-approval memory-hit disclosure toast (#793) — auto-dismisses after 4 s.
+      {/* User-approval memory-hit disclosure toast (#793) — auto-dismisses after 4 s.
           Verdict-tier tint surfaces the trust gradient (CRITICAL 4.1 disclosure):
           - low    → --success (informational, safe re-approval)
           - medium → --warning (moderate risk)

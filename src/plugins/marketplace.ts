@@ -98,7 +98,7 @@ type InstallReceiptValidation = {
 export interface MarketplaceListItem extends PluginMarketplaceItem {
   installed: boolean;
   enabled: boolean;
-  /** Phase 1.5 §9.6: true if protected (managed) — used by UI to show lock icon */
+  /** §9.6: true if protected (managed) — used by UI to show lock icon */
   isManaged: boolean;
 }
 
@@ -194,7 +194,7 @@ export class PluginMarketplaceService {
   /** §9.6: per-plugin version cache for rollback. */
   private readonly cacheRoot: string;
   /**
-   * Phase 2 §FU#267 — artifact-management subsystem. Owns signed-zip
+   * §FU#267 — artifact-management subsystem. Owns signed-zip
    * download, atomic extract, history journal, version snapshot cache.
    * The orchestrator (this class) coordinates registry writes around it.
    */
@@ -217,7 +217,7 @@ export class PluginMarketplaceService {
   readonly log?: (message: string, ...args: unknown[]) => void;
 
   /**
-   * Phase 2-final constructor — `paths` is the single source of truth for
+   * Constructor — `paths` is the single source of truth for
    * the registry / installed-dir / cache layout, and `fetcher` is required.
    * The pre-Phase-2b `appRoot` argument used by the npm-install branch is
    * gone; the only install path is the signed-zip download under
@@ -533,7 +533,7 @@ export class PluginMarketplaceService {
     await this.artifactStore.cacheVersionFromManifest(pluginId, manifestAbsPath);
     await this.appendHistoryFromManifestVersion(pluginId, manifestAbsPath);
 
-    // §M1 F-round: atomic read-modify-write under registry lock.
+    // Atomic read-modify-write under registry lock.
     // Issue #92 — `bundleRootId` is always `null` here: the host no longer
     // auto-installs dependencies, so no plugin is installed as a "bundle
     // child" of another. `bundleRefs` itself is retained on entries for
@@ -636,7 +636,7 @@ export class PluginMarketplaceService {
       }
     }
 
-    // §M1 F-round: serialize read-remove-write through the registry lock.
+    // Serialize read-remove-write through the registry lock.
     return withRegistryLock(this.registryPath, async () => {
       const registry = await readPluginRegistry(this.registryPath);
       const target = registry.plugins.find((x) => x.id === pluginId);
@@ -746,7 +746,7 @@ export class PluginMarketplaceService {
       if (!priorVersion) {
         throw new Error(`No prior version cached for plugin: ${pluginId}`);
       }
-      // Phase 2-final rollback: re-run the verified-zip install path with
+      // Rollback: re-run the verified-zip install path with
       // the prior version. The marketplace server retains every published
       // version; the client's `cacheRoot` only tracks history (which versions
       // we've used), the binary itself is fetched fresh each time. No npm.
@@ -982,7 +982,7 @@ export class PluginMarketplaceService {
     entry: PluginRegistryEntry,
     _remainingEntries: PluginRegistryEntry[],
   ): Promise<void> {
-    // Phase 2-final: every install is a zip-extract under pluginsRoot,
+    // Every install is a zip-extract under pluginsRoot,
     // so uninstall is a recursive rm of the plugin's directory. The
     // pre-Phase-2 npm-uninstall branch (`isZipInstalled === false`) is
     // gone with the install-side npm path.
@@ -1076,7 +1076,7 @@ export class PluginMarketplaceService {
   }
 
   /**
-   * Phase 2-final install path — single source: download + verify + extract.
+   * Install path — single source: download + verify + extract.
    *
    * The historical file:-spec / npm-install branch is gone. Production and
    * dev both fetch a signed zip from the marketplace API; the dev workflow
@@ -1140,7 +1140,7 @@ export class PluginMarketplaceService {
         signerKeyId: verified.signerKeyId,
         files: extractedFiles,
       });
-      // Phase 2a invariant: registry entries hold registry-relative POSIX
+      // Invariant: registry entries hold registry-relative POSIX
       // paths regardless of which install branch produced the manifest.
       return toRegistryRelativeManifestPath(this.registryPath, manifestFile);
     } catch (err) {

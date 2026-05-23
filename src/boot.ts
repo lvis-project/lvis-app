@@ -247,7 +247,7 @@ export async function bootstrap(
     routeEngine,
   } = core;
 
-  // Issue #837 — one-shot idempotent migration: re-canonicalize R-2
+  // Issue #837 — one-shot idempotent migration: re-canonicalize user-approval
   // user-approval keys after PR #828 upgraded canonicalStringify to RFC 8785
   // JCS deep recursion. Runs after bootstrapCoreServices so any failure is
   // caught internally and logged without aborting boot. Noop if marker present.
@@ -522,7 +522,7 @@ export async function bootstrap(
 
   // §9.5 marketplace backend selection.
   const marketplaceSettings = settingsService.get("marketplace");
-  // Phase 2-final marketplace fetcher selection — single production path:
+  // Marketplace fetcher selection — single production path:
   //   - real-cloud + URL → CloudMarketplaceFetcher
   //   - otherwise (no URL configured) → DisabledMarketplaceFetcher
   // No `MockMarketplaceFetcher` fallback at boot. Default points at the
@@ -593,7 +593,7 @@ export async function bootstrap(
   // §9.5 — Managed plugin bootstrap. Mandatory enterprise plugins are fetched
   // from the marketplace on boot (VS Code-style), not packaged in app source.
   // Graceful: marketplace unreachable or per-plugin failure never bricks boot.
-  // Phase 2d surfaces lifecycle status (start/complete/error) to the renderer
+  // Surfaces lifecycle status (start/complete/error) to the renderer
   // so the user sees something when the marketplace is unreachable or
   // partial-fails. The same helper backs the `lvis:bootstrap:retry` IPC.
   await runManagedBootstrap({
@@ -622,7 +622,7 @@ export async function bootstrap(
   // rules across.
   toolRegistry.setDenyRules(permissionManager.getVisibilityDenyRules());
 
-  // Permission policy P4 — Layer 5 reviewer agent wiring (Phase 3 deferral resolution).
+  // Permission policy P4 — Layer 5 reviewer agent wiring.
   // Reads `permissions.reviewer` from `~/.lvis/settings.json` and binds the
   // classifier + cache + deferred queue onto the live PermissionManager so
   // `dispatchReviewer()` routes HIGH verdicts into the deferred queue.
