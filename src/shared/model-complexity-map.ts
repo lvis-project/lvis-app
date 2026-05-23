@@ -94,12 +94,12 @@ export const MODEL_COMPLEXITY_MAP: Readonly<
     high: "gemini-2.5-pro",
   }),
   copilot: Object.freeze({
-    low: "gpt-4.1-mini",
+    low: "gpt-5.4-nano",
     mid: "gpt-5.4-mini",
     high: "gpt-5.4",
   }),
   "azure-foundry": Object.freeze({
-    low: "gpt-4.1-mini",
+    low: "gpt-5.4-nano",
     mid: "gpt-5.4-mini",
     high: "gpt-5.4",
   }),
