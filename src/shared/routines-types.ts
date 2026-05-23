@@ -93,7 +93,7 @@ export interface RoutineRecord {
    * extra directories permitted during this routine's headless session.
    *
  * Missing scope → deny-all (fail-safe per Permission policy design §1). The
-   * runtime normalizer in `RoutineEngineV2.normalizeScope` coerces a
+   * runtime normalizer in `RoutineEngine.normalizeScope` coerces a
    * missing/undefined scope into `{ pluginIds: { mode: "deny-all" } }`
    * rather than `inherit`, so a routine that never declared scope cannot
    * accidentally see the user's currently-active plugin set. Records with

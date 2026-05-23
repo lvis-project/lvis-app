@@ -171,8 +171,8 @@ function shellPathPolicyViolation(
 }
 
 /**
- * H3: Redact every `freeText` field from an `ask_user_question` tool
- * result before it is written to the audit log. Result shape (one card,
+ * Redact every `freeText` field from an `ask_user_question` tool result
+ * before it is written to the audit log. Result shape (one card,
  * 1–4 questions):
  *   {"answers":[{"choice":"…"},{"freeText":"…"}],"dismissed":false}
  * We keep choice/dismissed but replace each non-empty freeText with a
@@ -1983,7 +1983,7 @@ export class ToolExecutor {
     // ── Step 8: Audit + Result (항상 실행) ──────────
     const durationMs = Date.now() - startTime;
     callbacks?.onToolEnd?.(toolUse.name, displayContent, isError, meta, uiPayload, durationMs);
-    // H3: redact the user's freeText answer before it lands in the audit
+    // Redact the user's freeText answer before it lands in the audit
     // log. The DLP filter at Step 7b only catches structured patterns
     // (emails, IDs); a free-form answer ("내 비밀번호는 …") wouldn't match
     // any pattern but is still PII the user typed in. For ask_user_question

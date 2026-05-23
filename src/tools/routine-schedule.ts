@@ -1,7 +1,12 @@
 /**
- * `schedule_routine` LLM tool — creates a persistent routine that fires at a
+ * `routine_schedule` LLM tool — creates a persistent routine that fires at a
  * scheduled time (one-off or repeating). The routine survives app restart
  * (persisted to `~/.lvis/routine/routines.json`) and fires via the RoutinesScheduler.
+ *
+ * NOTE: This tool registers a *routine* (a future-firing self-trigger).
+ * It is NOT a calendar / 일정 조회 tool — calendar event queries are served by
+ * the ms-graph plugin. Naming intentionally puts "routine" first to avoid the
+ * "schedule" verb colliding with "캘린더 일정" requests in LLM tool selection.
  *
  * Execution modes:
  *   - "llm-session"       → starts a ConversationLoop with prePrompt
@@ -118,7 +123,7 @@ function parseAllowedPlugins(raw: unknown): string[] | null {
   return [...new Set(ids)];
 }
 
-export function scheduleRoutineApprovalCacheKey(rawInput: unknown): string {
+export function routineScheduleApprovalCacheKey(rawInput: unknown): string {
   const input = (rawInput ?? {}) as Record<string, unknown>;
   const allowedPlugins = parseAllowedPlugins(input.allowedPlugins);
   if (!allowedPlugins) return "scope:invalid";
@@ -126,11 +131,13 @@ export function scheduleRoutineApprovalCacheKey(rawInput: unknown): string {
   return `scope:allow:${[...allowedPlugins].sort().join(",")}`;
 }
 
-export function createScheduleRoutineTool(store: RoutinesStore): Tool {
+export function createRoutineScheduleTool(store: RoutinesStore): Tool {
   return createDynamicTool({
-    name: "schedule_routine",
+    name: "routine_schedule",
     description:
-      "특정 시각 또는 반복 일정에 실행될 루틴을 등록합니다. " +
+      "지정한 예약 시각에 발화되는 루틴(자동 self-trigger)을 등록합니다. " +
+      "캘린더 일정/이벤트 조회 도구가 아니므로, '캘린더 점검', '오늘 일정', '회의 확인' 같은 " +
+      "캘린더/일정 조회 요청에는 사용하지 마십시오 (캘린더 조회는 ms-graph 플러그인). " +
       "execution='llm-session'이면 지정 시각에 LLM 대화를 시작하고, " +
       "'notification-only'이면 OS 알림만 발송합니다. " +
       "반복 방식: none/daily/weekly/monthly/interval/cron. " +
@@ -140,7 +147,7 @@ export function createScheduleRoutineTool(store: RoutinesStore): Tool {
       "prePrompt:'오늘의 데일리 리포트 작성'",
     source: "builtin",
     category: "write",
-    approvalCacheKey: scheduleRoutineApprovalCacheKey,
+    approvalCacheKey: routineScheduleApprovalCacheKey,
     jsonSchema: {
       type: "object",
       required: ["execution", "schedule"],
@@ -283,7 +290,7 @@ export function createScheduleRoutineTool(store: RoutinesStore): Tool {
       } catch (err) {
         return {
           output: JSON.stringify({
-            error: (err as Error).message ?? "schedule_routine failed",
+            error: (err as Error).message ?? "routine_schedule failed",
           }),
           isError: true,
         };

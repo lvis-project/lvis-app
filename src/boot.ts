@@ -45,7 +45,7 @@ import { resolve } from "node:path";
 import { adaptPowerMonitor } from "./main/idle-scheduler.js";
 import { DisabledMarketplaceFetcher, PluginMarketplaceService } from "./plugins/marketplace.js";
 import type { MarketplaceFetcher } from "./plugins/marketplace.js";
-import { RealCloudMarketplaceFetcher } from "./plugins/real-cloud-marketplace-fetcher.js";
+import { CloudMarketplaceFetcher } from "./plugins/cloud-marketplace-fetcher.js";
 import { PluginArtifactStore } from "./plugins/plugin-artifact-store.js";
 import { getBundledPublicKeys } from "./plugins/publisher-keys.js";
 import { sweepOrphanUninstallDirs } from "./plugins/orphan-uninstall-sweeper.js";
@@ -523,7 +523,7 @@ export async function bootstrap(
   // §9.5 marketplace backend selection.
   const marketplaceSettings = settingsService.get("marketplace");
   // Phase 2-final marketplace fetcher selection — single production path:
-  //   - real-cloud + URL → RealCloudMarketplaceFetcher
+  //   - real-cloud + URL → CloudMarketplaceFetcher
   //   - otherwise (no URL configured) → DisabledMarketplaceFetcher
   // No `MockMarketplaceFetcher` fallback at boot. Default points at the
   // production tunnel (`https://marketplace.lvisai.xyz`); dev operators
@@ -531,7 +531,7 @@ export async function bootstrap(
   // Tests inject their own fetcher.
   let marketplaceFetcher: MarketplaceFetcher;
   if (marketplaceSettings.realCloudBaseUrl) {
-    marketplaceFetcher = new RealCloudMarketplaceFetcher({
+    marketplaceFetcher = new CloudMarketplaceFetcher({
       baseUrl: marketplaceSettings.realCloudBaseUrl,
       apiKey: settingsService.getSecret("marketplace.apiKey") ?? undefined,
       allowPrivateNetwork: marketplaceSettings.realCloudAllowPrivateNetwork,
@@ -550,12 +550,12 @@ export async function bootstrap(
 
   // Closure invoked by the settings IPC handler when MarketplaceTab fields
   // change. Re-reads the persisted `marketplace.realCloudAllowPrivateNetwork`
-  // value and pushes it into the live RealCloudMarketplaceFetcher so the
+  // value and pushes it into the live CloudMarketplaceFetcher so the
   // SSRF-guard bypass toggle takes effect on the next request (honoring the
   // "즉시 적용" UX badge). No-op when the fetcher is the disabled variant —
   // a disabled marketplace has no live config to refresh.
   const refreshMarketplaceFetcherConfig = (): void => {
-    if (!(marketplaceFetcher instanceof RealCloudMarketplaceFetcher)) return;
+    if (!(marketplaceFetcher instanceof CloudMarketplaceFetcher)) return;
     const next = settingsService.get("marketplace").realCloudAllowPrivateNetwork ?? false;
     marketplaceFetcher.updateAllowPrivateNetwork(next);
   };
@@ -1103,19 +1103,18 @@ export async function bootstrap(
     });
   })();
 
-  // §691 PR-A2/A3: Per-OS sandbox runner detection + boot-phase registry seal.
+  // §691: Per-OS sandbox runner detection + boot-phase registry seal.
   // Runs after MCP connects so the full service graph is ready before
   // adding OS-level spawn isolation.
   //
-  // Linux   (PR-A2): bubblewrap (bwrap) — verified-kernel CLONE_NEWNET (D1)
-  // macOS   (PR-A3): sandbox-exec SBPL profile — PARTIAL (D2, known bypasses)
-  // Windows (PR-A3): AppContainer — detect-only in PR-A3; spawn deferred to
-  //                  PR-A3.5 (native Win32 N-API binding). detect() returns
-  //                  available=false so registration is skipped (D3).
+  // Linux:   bubblewrap (bwrap) — verified-kernel CLONE_NEWNET (D1)
+  // macOS:   sandbox-exec SBPL profile — PARTIAL (D2, known bypasses)
+  // Windows: AppContainer — detect-only; native Win32 N-API binding pending.
+  //          detect() returns available=false so registration is skipped (D3).
   //
-  // All platforms: MEDIUM-2 gate — LVIS_SANDBOX_ENABLED=1 required (default off)
-  // until PR-A4 R-2 wires the always-on policy hook.
-  // TODO(PR-A4 R-2): remove the env-gate and make sandbox always-on.
+  // All platforms: LVIS_SANDBOX_ENABLED=1 required (default off)
+  // until the always-on policy hook is wired.
+  // TODO: remove the env-gate and make sandbox always-on.
   {
     const { registerSandboxRunner: _registerRunner, sealSandboxRunnerRegistry } = await import(
       "./permissions/sandbox-runner.js"
@@ -1137,7 +1136,7 @@ export async function bootstrap(
       }
     }
 
-    // §691 PR-A3: macOS sandbox-exec runner (D2 PARTIAL).
+    // §691: macOS sandbox-exec runner (D2 PARTIAL).
     if (process.platform === "darwin" && process.env["LVIS_SANDBOX_ENABLED"] === "1") {
       const { SandboxExecRunner } = await import("./permissions/runners/sandbox-exec-runner.js");
       const sandboxExecRunner = new SandboxExecRunner();
@@ -1157,8 +1156,8 @@ export async function bootstrap(
       );
     }
 
-    // §691 PR-A3: Windows AppContainer runner (D3 detect-only; spawn deferred to PR-A3.5).
-    // detect() always returns available=false in PR-A3 so registration is skipped.
+    // §691: Windows AppContainer runner (D3 detect-only; native Win32 binding pending).
+    // detect() always returns available=false so registration is skipped.
     if (process.platform === "win32" && process.env["LVIS_SANDBOX_ENABLED"] === "1") {
       const { AppContainerRunner } = await import("./permissions/runners/appcontainer-runner.js");
       const appContainerRunner = new AppContainerRunner();
@@ -1174,14 +1173,14 @@ export async function bootstrap(
       }
     }
 
-    // §691 PR-A3 D9: Wire the "mcp" slot with the active platform runner.
+    // §691 D9: Wire the "mcp" slot with the active platform runner.
     // MCP child processes (StdioTransport) need bidirectional stdin — the
     // SandboxRunner interface does not yet support stdin pipes, so MCP spawn
-    // is not replaced in PR-A3. The "mcp" registry slot is pre-populated so
+    // is not replaced here. The "mcp" registry slot is pre-populated so
     // that capability reporting (getSandboxRunner("mcp")) reflects the OS
-    // isolation level that *would* apply when PR-A4 wires full MCP sandboxing.
-    // PR-A4 will replace StdioTransport.open() with a SandboxedProcess variant
-    // that adds stdin support.
+    // isolation level that would apply once full MCP sandboxing is wired.
+    // Full wiring will replace StdioTransport.open() with a SandboxedProcess
+    // variant that adds stdin support.
     {
       const { getSandboxRunner: _getRunner, getActiveDetection } = await import(
         "./permissions/sandbox-runner.js"
@@ -1197,7 +1196,7 @@ export async function bootstrap(
 
     // Seal the registry after all boot-time runners are registered.
     // Post-seal registration throws in production (NODE_ENV !== "test")
-    // to prevent runtime injection of untrusted runners (PR-A1 follow-up #1).
+    // to prevent runtime injection of untrusted runners (issue #691 follow-up).
     sealSandboxRunnerRegistry();
   }
 

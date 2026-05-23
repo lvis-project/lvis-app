@@ -7,8 +7,7 @@
  * (`permission-manager.ts`), the preload bridge (`preload.ts`), and
  * any future renderer typings (`ui/renderer/types.ts`).
  *
- * Issue: #802 (PR-A4 R3 code-reviewer LOW finding — inline duplicates
- * across 3+ sites).
+ * Issue: #802 (code-reviewer LOW finding — inline duplicates across 3+ sites).
  */
 
 /**
