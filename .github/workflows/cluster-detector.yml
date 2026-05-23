@@ -2,7 +2,11 @@ name: Cluster Detector
 
 on:
   pull_request:
-    types: [opened, synchronize]
+    # `labeled` is required so applying the `cluster-review-passed`
+    # exemption label re-runs the workflow without forcing a no-op
+    # commit. `unlabeled` so removing the attestation re-enables the
+    # block.
+    types: [opened, synchronize, labeled, unlabeled]
 
 permissions:
   pull-requests: write
