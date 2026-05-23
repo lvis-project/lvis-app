@@ -3,9 +3,11 @@ import {
   existsSync,
   mkdirSync,
   copyFileSync,
+  chmodSync,
   statSync,
   readFileSync,
   readdirSync,
+  constants as fsConstants,
 } from "node:fs";
 import { join } from "node:path";
 import { lvisHome } from "../shared/lvis-home.js";
@@ -68,9 +70,15 @@ function seedOne(
 
   if (!existsSync(target)) {
     try {
-      copyFileSync(packagedSource, target);
+      // COPYFILE_EXCL closes the TOCTOU window between existsSync and the
+      // write: if another process (concurrent boot from a second app
+      // instance, background sync agent) lands a file in the gap, this
+      // throws EEXIST and we honor their write rather than clobbering it.
+      copyFileSync(packagedSource, target, fsConstants.COPYFILE_EXCL);
+      enforceUserFileMode(target);
       result.seeded.push(filename);
     } catch (err) {
+      if ((err as NodeJS.ErrnoException).code === "EEXIST") return;
       console.warn(`[seed-lvis-home-docs] failed to seed ${filename}:`, err);
     }
     return;
@@ -86,10 +94,41 @@ function seedOne(
       const bBuf = readFileSync(packagedSource);
       if (aBuf.equals(bBuf)) return;
     }
+
+    // If a previous `.new` is sitting unmerged, do not clobber it. Compare:
+    //   - identical to the latest packaged content → no-op (already offered)
+    //   - different → land a timestamped sibling so neither the user's
+    //     review work nor the newer upgrade signal is lost.
+    if (existsSync(upgradeTarget)) {
+      const cBuf = readFileSync(upgradeTarget);
+      const bBuf = readFileSync(packagedSource);
+      if (cBuf.equals(bBuf)) return;
+      const ts = new Date().toISOString().replace(/[:.]/g, "-");
+      const datedTarget = join(home, `${filename}.new.${ts}`);
+      copyFileSync(packagedSource, datedTarget);
+      enforceUserFileMode(datedTarget);
+      result.upgraded.push(filename);
+      return;
+    }
+
     copyFileSync(packagedSource, upgradeTarget);
+    enforceUserFileMode(upgradeTarget);
     result.upgraded.push(filename);
   } catch (err) {
     console.warn(`[seed-lvis-home-docs] failed to compare ${filename}:`, err);
+  }
+}
+
+/**
+ * Storage-namespace rule: files under `~/.lvis/` are 0o600 (user-only).
+ * On Windows chmod is effectively a no-op — wrap so the seed continues to
+ * succeed there instead of treating the platform mismatch as a fatal error.
+ */
+function enforceUserFileMode(target: string): void {
+  try {
+    chmodSync(target, 0o600);
+  } catch {
+    // Windows / non-POSIX filesystem — best effort only.
   }
 }
 
