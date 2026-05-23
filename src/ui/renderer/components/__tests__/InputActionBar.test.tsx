@@ -160,7 +160,7 @@ describe("InputActionBar (post indexer-removal)", () => {
       const { getByTestId } = renderBar({
         rolePresets: [mockPreset, codingPreset],
         agentOptions: [{ name: "Planner", description: "", sourceTools: [], triggers: [], source: "user" }],
-        skillOptions: [{ name: "Debugger", description: "", triggers: [], source: "user" }],
+        skillOptions: [{ name: "Debugger", description: "", triggers: [] }],
         activeAgentName: "Planner",
         activeSkillNames: ["Debugger"],
         activePreset: codingPreset,

@@ -120,7 +120,6 @@ describe("SkillStore", () => {
       const store = new SkillStore({ userDir: dir });
       const loaded = await store.load("report-writing");
       expect(loaded?.description).toBe("USER OVERRIDE");
-      expect(loaded?.source).toBe("user");
     } finally {
       rmSync(dir, { recursive: true, force: true });
     }

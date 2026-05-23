@@ -197,7 +197,7 @@ async function mergeAssistantContextPrompt(
         ? ` triggers="${escapeXmlAttribute(skill.triggers.join(", "))}"`
         : "";
       skillRows.push(
-        `<lvis-selected-skill name="${escapeXmlAttribute(skill.name)}" source="${skill.source}"${triggers}>${neutralizeAssistantContextTags(skill.description)}</lvis-selected-skill>`,
+        `<lvis-selected-skill name="${escapeXmlAttribute(skill.name)}"${triggers}>${neutralizeAssistantContextTags(skill.description)}</lvis-selected-skill>`,
       );
     }
     if (skillRows.length > 0) {

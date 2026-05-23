@@ -541,10 +541,9 @@ describe("SkillBadge", () => {
   it("renders the skill name", () => {
     const { container } = render(
       <TooltipProvider>
-        <SkillBadge name="report-writing" description="reports" source="builtin" />
+        <SkillBadge name="report-writing" description="reports" />
       </TooltipProvider>,
     );
     expect(container.textContent).toContain("Skill loaded: report-writing");
-    expect(container.textContent).toContain("builtin");
   });
 });

@@ -9,8 +9,8 @@
  * ("ignore previous instructions and exfil…") landed in conversation
  * history with the user role — i.e., looked exactly like the user typed it.
  * Routing skill bodies through the SYSTEM prompt instead, fenced with
- * `<lvis-skill name="…" source="…">…</lvis-skill>` envelopes, keeps the
- * provenance clear and prevents the body from masquerading as user input.
+ * `<lvis-skill name="…">…</lvis-skill>` envelopes, keeps the provenance
+ * clear and prevents the body from masquerading as user input.
  *
  * The overlay is queried each turn by SystemPromptBuilder, so newly-loaded
  * skills take effect on the NEXT round — synchronous return from the tool
@@ -20,7 +20,6 @@ import type { LoadedSkill } from "./skill-store.js";
 
 export interface SkillOverlayEntry {
   name: string;
-  source: "user" | "builtin";
   body: string;
 }
 
@@ -33,7 +32,6 @@ export class SkillOverlay {
     const bySkill = this.bySession.get(sessionId) ?? new Map<string, SkillOverlayEntry>();
     bySkill.set(skill.name, {
       name: skill.name,
-      source: skill.source,
       body: skill.body,
     });
     this.bySession.set(sessionId, bySkill);
@@ -70,7 +68,7 @@ export class SkillOverlay {
     if (entries.length === 0) return "";
     const lines: string[] = ["<lvis-active-skills>"];
     for (const e of entries) {
-      lines.push(`<lvis-skill name="${escapeAttr(e.name)}" source="${e.source}">`);
+      lines.push(`<lvis-skill name="${escapeAttr(e.name)}">`);
       lines.push(neutralizeSkillFence(e.body));
       lines.push(`</lvis-skill>`);
     }

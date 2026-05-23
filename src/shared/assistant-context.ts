@@ -14,7 +14,6 @@ export interface AssistantSkillSummary {
   name: string;
   description: string;
   triggers: string[];
-  source: "user" | "builtin";
 }
 
 export interface SelectedAssistantContext {
