@@ -1,7 +1,7 @@
 ---
 name: researcher
 description: 외부 정보 탐색 specialist — 시장·통계·규정·뉴스·공식 문서를 출처 명시로 수집
-model: sonnet
+model: mid
 mode: default
 ---
 

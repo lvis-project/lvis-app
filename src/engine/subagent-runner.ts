@@ -28,6 +28,14 @@ import { randomUUID } from "node:crypto";
 import { ConversationLoop, type ConversationLoopDeps } from "./conversation-loop.js";
 import type { ToolRegistry } from "../tools/registry.js";
 import type { ApprovalGate, ApprovalRequest, ApprovalDecision } from "../permissions/approval-gate.js";
+import {
+  isModelComplexityLevel,
+  resolveModelForComplexity,
+} from "../shared/model-complexity-map.js";
+import { isLLMVendor } from "../shared/llm-vendor-defaults.js";
+import { createLogger } from "../lib/logger.js";
+
+const log = createLogger("lvis");
 
 export interface SubAgentSpawnInput {
   title: string;
@@ -36,6 +44,14 @@ export interface SubAgentSpawnInput {
   maxTurns?: number;
   /** Origin session id — propagated for audit attribution only. */
   originSessionId?: string;
+  /**
+   * Agent profile's `model:` frontmatter. May be a complexity tier
+   * ("low" / "mid" / "high"), an explicit vendor-specific model ID, or
+   * undefined. Resolved against the active vendor in `spawn()`; an
+   * unresolvable value leaves the child on the parent's model (design-
+   * intent fallback, logged for audit).
+   */
+  profileModel?: string;
 }
 
 export interface SubAgentTurnUpdate {
@@ -75,6 +91,42 @@ const MAX_TURNS_CAP = 60;
  * defense-in-depth backstop.
  */
 const SUB_AGENT_TOOL_BLOCKLIST = new Set<string>(["agent_spawn"]);
+
+/**
+ * Resolve an agent profile's `model:` frontmatter to a concrete model ID
+ * for the child loop, against the parent's active vendor:
+ *   1. undefined / empty   → null (child stays on the parent model)
+ *   2. complexity tier      → MODEL_COMPLEXITY_MAP[vendor][tier]; null when
+ *                             the vendor lacks that tier (design-intent
+ *                             parent-model fallback, logged for audit)
+ *   3. explicit model ID    → passed through unchanged
+ *
+ * Returning null means "no override" — the caller leaves `modelOverride`
+ * unset so `refreshProvider()` uses the vendor block's configured model.
+ */
+export function resolveSubAgentModel(
+  profileModel: string | undefined,
+  activeVendor: string,
+): string | null {
+  const trimmed = profileModel?.trim();
+  if (!trimmed) return null;
+
+  if (isModelComplexityLevel(trimmed)) {
+    if (!isLLMVendor(activeVendor)) return null;
+    const resolved = resolveModelForComplexity(activeVendor, trimmed);
+    if (resolved === null) {
+      log.warn(
+        "sub-agent: parent-model fallback used — vendor '%s' has no '%s' tier in MODEL_COMPLEXITY_MAP",
+        activeVendor,
+        trimmed,
+      );
+    }
+    return resolved;
+  }
+
+  // Explicit vendor-specific model ID — pass through.
+  return trimmed;
+}
 
 /**
  * H2: ApprovalGate wrapper that prepends `[Sub-Agent: <title>] ` to the
@@ -142,6 +194,12 @@ export class SubAgentRunner {
     // hookRunner so the child plays by the same security rules.
     // History is fresh because ConversationLoop.constructor instantiates a new
     // ConversationHistory.
+    // Resolve the child's model from the profile's `model:` frontmatter
+    // against the parent's active vendor. null → leave modelOverride unset
+    // so the child runs on the parent's configured model.
+    const activeVendor = this.deps.parentDeps.settingsService.get("llm").provider;
+    const resolvedModel = resolveSubAgentModel(input.profileModel, activeVendor);
+
     const childDeps: ConversationLoopDeps = {
       ...this.deps.parentDeps,
       toolRegistry: scopedRegistry,
@@ -156,6 +214,9 @@ export class SubAgentRunner {
       // load skills if the user grants — but its own session id will be
       // tracked separately via setActiveSessionId.
       skillOverlay: this.deps.parentDeps.skillOverlay,
+      // #1112: per-profile model override. undefined when unresolved so the
+      // child inherits the parent vendor block's model.
+      modelOverride: resolvedModel ?? undefined,
     };
 
     const child = new ConversationLoop(childDeps);
