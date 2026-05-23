@@ -212,7 +212,7 @@ export interface PluginManifest {
    */
   eventSubscriptions?: string[] | EventSubscription[];
   /**
-   * H2: UI가 ipcRenderer 를 통해 직접 호출할 수 있는 plugin method 의 allowlist.
+   * UI가 ipcRenderer 를 통해 직접 호출할 수 있는 plugin method 의 allowlist.
    * 이 배열에 없는 method 는 `lvis:plugins:call` IPC 를 통해 호출할 수 없다.
    * (ConversationLoop 의 permission/scope/expansion cap 을 우회하는 경로 차단.)
    */
