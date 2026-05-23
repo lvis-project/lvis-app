@@ -6,14 +6,15 @@ on:
     branches: [main]
 jobs:
   build-and-test:
-    # Fork PRs run on ephemeral GitHub-hosted ubuntu-latest — they
-    # cannot exfiltrate secrets or persist state on the self-hosted
-    # Oracle ARM64 runner. Same-repo PRs and main push keep using
-    # self-hosted for speed and ARM64 native parity. This closes the
-    # "pwn-request" supply-chain RCE vector: a fork PR controls
-    # package.json + postinstall scripts, and `bun install` would
-    # execute attacker code on whatever runner is assigned.
-    runs-on: ${{ (github.event_name == 'pull_request' && github.event.pull_request.head.repo.full_name != github.repository) && 'ubuntu-latest' || fromJSON('["self-hosted","Linux","ARM64","oracle"]') }}
+    # All runs use ephemeral GitHub-hosted ARM64 runners. Ephemeral VMs
+    # cannot persist state or exfiltrate secrets across runs, which closes
+    # the "pwn-request" supply-chain RCE vector that made the prior
+    # self-hosted Oracle runner risky for fork PRs (a fork controls
+    # package.json + postinstall scripts, and `bun install` would execute
+    # attacker code). ARM64 keeps native-module (better-sqlite3 etc.) parity
+    # with the dev fleet. Fork-PR secret access is still gated at the sibling
+    # clone step below (skipped when no LVIS_REPO_READ_TOKEN is available).
+    runs-on: ubuntu-24.04-arm
     steps:
       - uses: actions/checkout@v6
         with:
