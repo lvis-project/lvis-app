@@ -184,9 +184,9 @@ export interface ReviewerDispatchResult {
 export type ReviewerDeferPolicy = "none" | "high" | "medium-high";
 
 // R-3 RejectResponse interface and MAX_REVIEWER_RETRIES deferred to follow-up.
-// The R-3 LLM caller retry wiring lives in conversation-loop.ts scope — outside
-// the 17-file boundary of PR-A4. Tracked in follow-up issue for "R-3 LLM caller
-// retry wiring" with max 2 retry / counter scope / args-change-reset contract.
+// The R-3 LLM caller retry wiring lives in conversation-loop.ts scope.
+// Tracked in follow-up issue for "R-3 LLM caller retry wiring" with
+// max 2 retry / counter scope / args-change-reset contract.
 
 export class PermissionManager {
   private rules: PermissionRule[] = [];
@@ -720,9 +720,9 @@ export class PermissionManager {
     } | null = null;
 
     // Cross-cutting root-cause fix: a legacy R-2 entry may carry
-    // `null verdictAtApproval` (PR-A4 R3 added the field; entries
-    // written before that PR pre-date it). A legacy null means
-    // "the original verdict is unrecoverable" — NOT "medium".
+    // `null verdictAtApproval` (the field was added in the user-approval-store
+    // wiring; entries written before that change pre-date it). A legacy null
+    // means "the original verdict is unrecoverable" — NOT "medium".
     // Treat the memory hit as missing → fresh approval flow takes
     // over. This protects two invariants:
     //   (a) maxVerdict() below would otherwise receive null and

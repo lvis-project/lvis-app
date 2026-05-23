@@ -1,6 +1,6 @@
 /**
  * Unit tests for the 5 workflow system tools (S1+S2):
- * ask_user_question, schedule_routine, todo_session_write, agent_spawn, skill_load.
+ * ask_user_question, routine_schedule, todo_session_write, agent_spawn, skill_load.
  *
  * Each test stubs the service dependency and exercises the tool's
  * `execute(rawInput, ctx)` contract directly — no Electron / IPC.
@@ -18,7 +18,7 @@ const REPO_ROOT = resolvePath(
 const BUILTIN_SKILLS_DIR = resolvePath(REPO_ROOT, "resources/skills");
 import type { ToolExecutionContext } from "../base.js";
 import { createAskUserQuestionTool } from "../ask-user-question.js";
-import { createScheduleRoutineTool } from "../schedule-routine.js";
+import { createRoutineScheduleTool } from "../routine-schedule.js";
 import { createTodoSessionWriteTool } from "../todo-session-write.js";
 import { createAgentSpawnTool } from "../agent-spawn.js";
 import { createSkillLoadTool } from "../skill-load.js";
@@ -145,12 +145,12 @@ describe("ask_user_question tool", () => {
   });
 });
 
-describe("schedule_routine tool", () => {
+describe("routine_schedule tool", () => {
   it("declares a literal-aware approval cache key for plugin scope", () => {
     const tmp = mkdtempSync(join(tmpdir(), "lvis-rt-"));
     try {
       const store = new RoutinesStore(join(tmp, "routines.json"));
-      const tool = createScheduleRoutineTool(store);
+      const tool = createRoutineScheduleTool(store);
 
       expect(tool.approvalCacheKey?.({ allowedPlugins: ["meeting", "local-indexer"] })).toBe(
         "scope:allow:local-indexer,meeting",
@@ -168,7 +168,7 @@ describe("schedule_routine tool", () => {
     const tmp = mkdtempSync(join(tmpdir(), "lvis-rt-"));
     try {
       const store = new RoutinesStore(join(tmp, "routines.json"));
-      const tool = createScheduleRoutineTool(store);
+      const tool = createRoutineScheduleTool(store);
       const r = await tool.execute(
         { execution: "notification-only", schedule: { at: "not-a-date" }, notificationTitle: "x" },
         ctx(),
@@ -183,7 +183,7 @@ describe("schedule_routine tool", () => {
     const tmp = mkdtempSync(join(tmpdir(), "lvis-rt-"));
     try {
       const store = new RoutinesStore(join(tmp, "routines.json"));
-      const tool = createScheduleRoutineTool(store);
+      const tool = createRoutineScheduleTool(store);
       const r = await tool.execute(
         {
           execution: "notification-only",
@@ -209,7 +209,7 @@ describe("schedule_routine tool", () => {
     const tmp = mkdtempSync(join(tmpdir(), "lvis-rt-"));
     try {
       const store = new RoutinesStore(join(tmp, "routines.json"));
-      const tool = createScheduleRoutineTool(store);
+      const tool = createRoutineScheduleTool(store);
       const r = await tool.execute(
         { execution: "notification-only", schedule: { at: "2030-01-01" }, notificationTitle: "newyear" },
         ctx(),
@@ -227,7 +227,7 @@ describe("schedule_routine tool", () => {
     const tmp = mkdtempSync(join(tmpdir(), "lvis-rt-"));
     try {
       const store = new RoutinesStore(join(tmp, "routines.json"));
-      const tool = createScheduleRoutineTool(store);
+      const tool = createRoutineScheduleTool(store);
       const r = await tool.execute(
         { execution: "llm-session", schedule: { at: "2030-01-01T09:00:00Z" } },
         ctx(),

@@ -130,7 +130,7 @@ export class DisabledMarketplaceFetcher implements MarketplaceFetcher {
 /**
  * @internal Dev/test-only fetcher. Reads a local JSON catalog file.
  *
- * Production / packaged builds MUST use {@link RealCloudMarketplaceFetcher}
+ * Production / packaged builds MUST use {@link CloudMarketplaceFetcher}
  * — the constructor throws when invoked in a packaged build via the shared
  * dev-flags gate. The local `plugins/marketplace.json` is user-writable and
  * cannot serve as a trust anchor; any packaged binary that fell back to this
@@ -160,7 +160,7 @@ export class MockMarketplaceFetcher implements MarketplaceFetcher {
     _version: string,
   ): Promise<{ zipBuffer: Buffer; sha256: string }> {
     throw new Error(
-      "MockMarketplaceFetcher does not support downloadVersion(); use RealCloudMarketplaceFetcher",
+      "MockMarketplaceFetcher does not support downloadVersion(); use CloudMarketplaceFetcher",
     );
   }
 

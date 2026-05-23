@@ -8,7 +8,7 @@ const TOOL_DISPLAY_NAMES: Record<string, string> = {
   task_today: "오늘 할 일",
   task_overdue: "기한 지난 할 일",
   todo_session_write: "세션 TO-DO 저장",
-  schedule_routine: "루틴 등록",
+  routine_schedule: "루틴 스케줄",
 
   agent_spawn: "서브에이전트 실행",
 

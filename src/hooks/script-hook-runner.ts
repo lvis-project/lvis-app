@@ -95,7 +95,7 @@ export async function runOneHookScript(
     const hookCommand = `${shellEnvAssignments(hookEnv)} ${shellCommandForHookPath(shell, hook.path)}`;
     const child = spawn(shell.cmd, shell.shellArgs(hookCommand), {
       cwd,
-      // H2: whitelist env — do not leak ANTHROPIC_API_KEY, AWS_*, GITHUB_TOKEN
+      // Allowlist env — do not leak ANTHROPIC_API_KEY, AWS_*, GITHUB_TOKEN
       // etc. to hook scripts. The hook receives only the LVIS_HOOK_* vars.
       env: shellEnvForChild(shell, buildSafeChildEnv(hookEnv)),
       stdio: ["pipe", "pipe", "pipe"],

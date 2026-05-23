@@ -1371,7 +1371,7 @@ export async function initPluginRuntime(
           }
           // #958 round-1 security MEDIUM — admin-bypass audit + counter.
           // Emit BEFORE the host-secret read line so operators can pivot
-          // on `policy=admin tier3-bypassed` in the audit log. The
+          // on `policy=admin manifest-allowlist-bypassed` in the audit log. The
           // dedicated `hostSecret_admin_bypass` counter is on top of the
           // regular `hostSecret_read` increment below so totals stay
           // comparable across bypass and non-bypass reads.
@@ -1381,7 +1381,7 @@ export async function initPluginRuntime(
                 timestamp: new Date().toISOString(),
                 sessionId: "plugin",
                 type: "info",
-                input: `[plugin:${pluginId}] policy=admin tier3-bypassed key=${auditKey} source=${registryInstallSource !== undefined ? "registry.installSource" : "manifest.installPolicy"}`,
+                input: `[plugin:${pluginId}] policy=admin manifest-allowlist-bypassed key=${auditKey} source=${registryInstallSource !== undefined ? "registry.installSource" : "manifest.installPolicy"}`,
               });
             } catch { /* audit must not break host */ }
             incrementHostSecretCounter(
