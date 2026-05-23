@@ -2,11 +2,13 @@
  * Boot §4.2 Step 4 — Builtin tool registration + §4.4 knowledge DI.
  *
  * - registerRequestPluginMetaTool: request_plugin meta tool
+ * - registerToolSearchMetaTool: tool_search meta tool (tool-level deferral)
  * - registerBuiltinTools: web_search, web_fetch, workflow tools
  * - wireKnowledgeAndIdleScheduler: worker-client capability 탐지 → HybridRetriever,
  *   knowledge tools 등록, IdleScheduler 배선
  */
 import type { ToolRegistry } from "../tools/registry.js";
+import { TOOL_SEARCH_TOOL_NAME } from "../tools/registry.js";
 import type { SettingsService } from "../data/settings-store.js";
 import type { PluginRuntime } from "../plugins/runtime.js";
 import type { AuditService } from "../main/audit-service.js";
@@ -161,6 +163,39 @@ export function registerRequestPluginMetaTool(toolRegistry: ToolRegistry): void 
     // Handled inline by ConversationLoop; fallback if executor reaches it.
     execute: async () => ({
       output: "request_plugin은 대화 루프에서 직접 처리됩니다.",
+      isError: false,
+    }),
+  }));
+}
+
+export function registerToolSearchMetaTool(toolRegistry: ToolRegistry): void {
+  // Tool-Level Deferral — tool_search 메타 툴. Statically registered, but the
+  // registry HIDES it from the loaded tool set unless `scope.deferral` is true
+  // (experimental.toolDeferral flag), so it never reaches the LLM while the
+  // flag is off. execute는 no-op — 실제 promotion 은 ConversationLoop.queryLoop
+  // 이 가로챈다 (request_plugin 과 동일 패턴).
+  toolRegistry.register(createDynamicTool({
+    name: TOOL_SEARCH_TOOL_NAME,
+    description:
+      "system prompt 의 '<tool-catalog>' 에 나열된, 아직 로드되지 않은 도구를 검색해 " +
+      "이번 턴에 사용할 수 있도록 로드합니다. query 에 작업과 관련된 키워드(도구 이름 " +
+      "또는 기능 설명의 단어)를 주면 매칭되는 도구를 다음 라운드부터 호출할 수 있습니다.",
+    source: "builtin",
+    category: "read",
+    isReadOnly: () => true,
+    jsonSchema: {
+      type: "object",
+      required: ["query"],
+      properties: {
+        query: {
+          type: "string",
+          description: "찾으려는 도구의 이름 또는 기능 키워드",
+        },
+      },
+    },
+    // Handled inline by ConversationLoop; fallback if executor reaches it.
+    execute: async () => ({
+      output: "tool_search는 대화 루프에서 직접 처리됩니다.",
       isError: false,
     }),
   }));
