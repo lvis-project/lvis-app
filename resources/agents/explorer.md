@@ -15,7 +15,7 @@ mode: default
 
 다음 위치에서 정보를 찾고 정리해 보고합니다.
 
-- **문서 폴더** — `~/Documents/`, `~/Downloads/`, `~/Desktop/`, 사용자 지정 경로
+- **문서 폴더** — `~/Documents/`, `~/Downloads/`, `~/Desktop/`, 사용자 지정 경로 (Windows 의 경우 `%USERPROFILE%\Documents\` · `\Downloads\` · `\Desktop\`)
 - **메일** — Outlook / MS Graph plugin 으로 검색
 - **캘린더** — MS Graph plugin Calendar
 - **회의 녹취 · 요약** — Meeting plugin 의 transcript · summary 저장소
