@@ -147,6 +147,24 @@ export const LLM_VENDOR_MODEL_OPTIONS: Readonly<Record<LLMVendor, readonly strin
     ],
   });
 
+/**
+ * True when `model` is a selectable model ID for `vendor` per
+ * {@link LLM_VENDOR_MODEL_OPTIONS} (the authoritative option list the
+ * settings UI offers — there is no other way to provision a model for a
+ * vendor). Used by `SubAgentRunner.resolveSubAgentModel` to validate an
+ * agent profile's explicit `model:` frontmatter before applying it as a
+ * child `modelOverride`, so an unavailable ID falls back to the parent
+ * model instead of hard-failing the sub-agent on a non-retryable
+ * provider model-not-found.
+ */
+export function isModelAvailableForVendor(
+  vendor: string,
+  model: string,
+): boolean {
+  if (!isLLMVendor(vendor)) return false;
+  return LLM_VENDOR_MODEL_OPTIONS[vendor].includes(model);
+}
+
 function defaultBlock(vendor: LLMVendor): LLMVendorSettings {
   const model = DEFAULT_MODEL[vendor];
   return {
