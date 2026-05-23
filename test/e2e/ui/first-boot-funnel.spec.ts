@@ -1,0 +1,174 @@
+/**
+ * Cross-PR first-boot funnel e2e (#988 / #986).
+ *
+ * Each tutorial-track PR ships its own single-flow spec — LoginModal,
+ * Live Auto-play, SpotlightTour — but none sequences the *combined*
+ * first-boot funnel a real user walks. A regression where (e.g.) marking
+ * onboarding complete silently dismisses the tour without firing
+ * `markComplete` slips through all three per-PR specs. This spec closes
+ * that gap end-to-end:
+ *
+ *   fresh LVIS_HOME →
+ *     ScenarioShowcase / LoginModal appears →
+ *     "제가 발급받은 API 키가 있어요" (API 키 직접 입력) →
+ *     native settings window opens, fill key + save →
+ *     MemorySeed wizard → PersonalizedWelcome →
+ *     SpotlightTour broadcasts "first-boot-essentials" and walks every step →
+ *     `~/.lvis/onboarding/tour-state.json` lists "first-boot-essentials"
+ *       in completedScenarios →
+ *     reload → the tour does NOT auto-reopen.
+ *
+ * The fixture default boots a fresh LVIS_HOME (no API key, no
+ * `features.onboardingCompleted`), so the boot probe dispatches
+ * `probe-start` and the Z onboarding chain mounts the ScenarioShowcase.
+ */
+import { test, expect } from './fixtures';
+import path from 'node:path';
+import fs from 'node:fs';
+
+const FRESH_KEY = 'sk-e2e-first-boot-funnel-openai';
+
+/** Read the persisted tour-state.json under the per-test LVIS_HOME. */
+function readTourState(userDataDir: string): { completedScenarios?: string[] } | null {
+  // The fixture sets LVIS_HOME to `${userDataDir}/lvis-state`; the
+  // onboarding domain owns `~/.lvis/onboarding/tour-state.json`.
+  const file = path.join(userDataDir, 'lvis-state', 'onboarding', 'tour-state.json');
+  if (!fs.existsSync(file)) return null;
+  try {
+    return JSON.parse(fs.readFileSync(file, 'utf-8'));
+  } catch {
+    return null;
+  }
+}
+
+test.describe('first-boot funnel: onboarding → API key → tour completion', () => {
+  test('walks the full chain, persists tour completion, and does not re-open the tour on reload', async ({
+    app,
+    mainWindow,
+    userDataDir,
+  }) => {
+    // (1) Fresh boot → the Z chain mounts the ScenarioShowcase.
+    const showcase = mainWindow.getByTestId('scenario-showcase');
+    await expect(showcase).toBeVisible({ timeout: 30_000 });
+
+    // (2) Continue to login. The forced-choice CTA advances the chain
+    // to stage="login" so the LoginModal mounts.
+    await mainWindow.getByTestId('scenario-showcase:start').click();
+    const loginModal = mainWindow.getByTestId('login-modal');
+    await expect(loginModal).toBeVisible({ timeout: 10_000 });
+
+    // (3) Pick "API 키 직접 입력" (chip 2 / BYOK). This opens the native
+    // settings window on the LLM tab and closes the LoginModal (which
+    // the chain treats as a login-skip, advancing to the MemorySeed
+    // stage).
+    const settingsWindowPromise = app.waitForEvent('window', { timeout: 10_000 });
+    await mainWindow.getByTestId('login-modal:chip-byok').click();
+    const settingsWindow = await settingsWindowPromise;
+    await settingsWindow.waitForLoadState('domcontentloaded');
+    await expect(settingsWindow.getByRole('heading', { name: '설정' })).toBeVisible({
+      timeout: 10_000,
+    });
+
+    // The LLM tab defaults to manual ("API 키 직접 입력") auth mode; fill a
+    // key and persist it. The chain does not block on key persistence — the
+    // BYOK chip already advanced the chain when it closed the LoginModal — so
+    // we assert the persisted LLM settings (provider/authMode) flipped rather
+    // than polling the OS-keychain-backed `hasApiKey`, which is not reliably
+    // writable in a headless run.
+    await expect(settingsWindow.getByLabel('API 키 직접 입력', { exact: true })).toBeChecked();
+    await settingsWindow.getByTestId('llm-api-key-input').fill(FRESH_KEY);
+    await settingsWindow.getByTestId('llm-tab:save-providers').click();
+    // The default fresh-boot provider is host-defined (e.g. azure-foundry),
+    // so we don't pin a vendor — asserting authMode round-tripped to "manual"
+    // is enough to prove the save persisted. The funnel does not depend on
+    // which vendor the key was stored under.
+    await expect
+      .poll(
+        async () =>
+          settingsWindow.evaluate(async () => {
+            const api = (window as unknown as {
+              lvisApi: { getSettings: () => Promise<{ llm: { authMode?: string } }> };
+            }).lvisApi;
+            const settings = await api.getSettings();
+            return settings.llm.authMode;
+          }),
+        { timeout: 15_000 },
+      )
+      .toBe('manual');
+
+    // Close the settings window via the main process (no in-DOM close
+    // button on the native window chrome).
+    const settingsClosed = settingsWindow.waitForEvent('close');
+    await app.evaluate(({ BrowserWindow }) => {
+      const target = BrowserWindow.getAllWindows().find(
+        (w) => !w.isDestroyed() && w.getTitle() === 'LVIS 설정',
+      );
+      target?.close();
+    });
+    await settingsClosed;
+
+    // (4) MemorySeed wizard — the chain advanced to stage="memory" when the
+    // LoginModal closed. Fill 호칭 + 자기소개 and submit.
+    const memoryDialog = mainWindow.getByTestId('memory-seed-dialog');
+    await expect(memoryDialog).toBeVisible({ timeout: 15_000 });
+    await memoryDialog.getByTestId('memory-seed-dialog:name').fill('Ken');
+    await memoryDialog
+      .getByTestId('memory-seed-dialog:intro')
+      .fill('회의가 많은 PM. 회의록 정리와 일정 관리 자동화에 관심.');
+    await memoryDialog.getByTestId('memory-seed-dialog:submit').click();
+    await expect(memoryDialog).toBeHidden({ timeout: 10_000 });
+
+    // (5) PersonalizedWelcome — forced choice. Pressing the only CTA
+    // advances the chain to stage="tour", whose chain-effect broadcasts
+    // `tour.start("first-boot-essentials")`.
+    const welcome = mainWindow.getByTestId('personalized-welcome');
+    await expect(welcome).toBeVisible({ timeout: 10_000 });
+    await welcome.getByTestId('personalized-welcome:continue').click();
+    await expect(welcome).toBeHidden({ timeout: 10_000 });
+
+    // (6) SpotlightTour mounts on the broadcast and runs the first-boot
+    // scenario against the live composer/action-bar anchors. The root
+    // `spotlight-tour` div is a zero-size wrapper (its children — backdrop
+    // + card — are position:fixed), so assert visibility on the card and
+    // pin the scenario id on the attached root.
+    const tour = mainWindow.getByTestId('spotlight-tour');
+    const card = mainWindow.getByTestId('spotlight-tour:card');
+    await expect(card).toBeVisible({ timeout: 10_000 });
+    await expect(tour).toHaveAttribute('data-scenario-id', 'first-boot-essentials');
+
+    // Walk every step: click "다음 →" until the final step's "완료" closes
+    // the tour. The button label flips to "완료" on the last step; we drive
+    // the next button until the tour card unmounts.
+    const nextButton = mainWindow.getByTestId('spotlight-tour:next');
+    // The first-boot scenario has a fixed step count; bound the loop well
+    // above it so a regression that strands the tour fails loudly rather
+    // than spinning forever.
+    for (let step = 0; step < 12; step += 1) {
+      if (!(await card.isVisible().catch(() => false))) break;
+      await nextButton.click();
+      // Allow the step transition (or close-out) to settle.
+      await mainWindow.waitForTimeout(150);
+    }
+    await expect(card).toBeHidden({ timeout: 10_000 });
+
+    // (7) Completion is persisted: tour-state.json must list the scenario
+    // in completedScenarios (markComplete fired on the final step).
+    await expect
+      .poll(() => readTourState(userDataDir)?.completedScenarios ?? [], { timeout: 10_000 })
+      .toContain('first-boot-essentials');
+
+    // (8) Reload the app. The boot probe now sees onboardingCompleted=true
+    // (the chain persisted it on stage="done"), so the chain skips and the
+    // tour broadcast never fires — the tour must NOT auto-reopen.
+    await mainWindow.reload();
+    await mainWindow
+      .locator('[data-testid="main-toolbar"]')
+      .first()
+      .waitFor({ state: 'visible', timeout: 60_000 });
+    // Give the boot probe + any chain effect time to run; the tour would
+    // have re-broadcast within ~1s if the regression were present.
+    await mainWindow.waitForTimeout(2_000);
+    await expect(mainWindow.getByTestId('spotlight-tour')).toHaveCount(0);
+    await expect(mainWindow.getByTestId('scenario-showcase')).toHaveCount(0);
+  });
+});
