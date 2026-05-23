@@ -145,3 +145,101 @@ describe("ToolRegistry.getToolSchemasForScope — Phase 1 Lazy Tool Scoping", ()
     expect(schemas.map((s) => s.name)).not.toContain("bash");
   });
 });
+
+describe("ToolRegistry — Tool-Level Deferral (flag on)", () => {
+  function seedWithToolSearch(): ToolRegistry {
+    const r = seed();
+    r.register(makeBuiltin("tool_search"));
+    return r;
+  }
+
+  it("flag off: tool_search hidden even though registered as a builtin", () => {
+    const r = seedWithToolSearch();
+    const schemas = r.getToolSchemasForScope({
+      activePluginIds: new Set<string>(),
+      includeBuiltins: true,
+      includeMcp: false,
+      deferral: false,
+    });
+    expect(schemas.map((s) => s.name)).not.toContain("tool_search");
+  });
+
+  it("flag on: tool_search visible; plugin tools load individually by activeToolNames", () => {
+    const r = seedWithToolSearch();
+    const schemas = r.getToolSchemasForScope({
+      activePluginIds: new Set(["com.example.meeting"]),
+      activeToolNames: new Set(["meeting_start"]),
+      includeBuiltins: true,
+      includeMcp: true,
+      deferral: true,
+    });
+    const names = schemas.map((s) => s.name).sort();
+    // builtins + tool_search load; only the preloaded meeting_start loads,
+    // NOT meeting_stop (deferred), and not mcp_fetch (not in activeToolNames).
+    expect(names).toEqual(["bash", "meeting_start", "tool_search", "web_search"]);
+  });
+
+  it("flag on: plugin tool not in activeToolNames stays deferred", () => {
+    const r = seedWithToolSearch();
+    const schemas = r.getToolSchemasForScope({
+      activePluginIds: new Set(["com.example.meeting"]),
+      activeToolNames: new Set<string>(),
+      includeBuiltins: true,
+      includeMcp: true,
+      deferral: true,
+    });
+    expect(schemas.map((s) => s.name)).not.toContain("meeting_start");
+    expect(schemas.map((s) => s.name)).not.toContain("meeting_stop");
+  });
+});
+
+describe("ToolRegistry.getToolCatalogForScope", () => {
+  it("lists in-scope plugin/mcp tools that are NOT loaded", () => {
+    const r = seed();
+    const catalog = r.getToolCatalogForScope({
+      activePluginIds: new Set(["com.example.meeting"]),
+      activeToolNames: new Set(["meeting_start"]),
+      includeMcp: true,
+    });
+    const names = catalog.map((c) => c.name).sort();
+    // meeting_start is loaded → excluded; meeting_stop deferred → present;
+    // mcp_fetch in scope (includeMcp) and not loaded → present;
+    // email_list plugin not active → excluded.
+    expect(names).toEqual(["mcp_fetch", "meeting_stop"]);
+  });
+
+  it("excludes loaded tools (no duplication with the loaded path)", () => {
+    const r = seed();
+    const catalog = r.getToolCatalogForScope({
+      activePluginIds: new Set(["com.example.meeting"]),
+      activeToolNames: new Set(["meeting_start", "meeting_stop"]),
+      includeMcp: false,
+    });
+    expect(catalog.map((c) => c.name)).not.toContain("meeting_start");
+    expect(catalog.map((c) => c.name)).not.toContain("meeting_stop");
+    expect(catalog.map((c) => c.name)).toEqual([]);
+  });
+
+  it("never includes builtins in the catalog", () => {
+    const r = seed();
+    const catalog = r.getToolCatalogForScope({
+      activePluginIds: new Set<string>(),
+      activeToolNames: new Set<string>(),
+      includeMcp: true,
+    });
+    expect(catalog.map((c) => c.name)).not.toContain("bash");
+    expect(catalog.map((c) => c.name)).not.toContain("web_search");
+  });
+
+  it("deny rules apply to the catalog too", () => {
+    const r = seed();
+    r.setDenyRules([{ pattern: "meeting_stop" }]);
+    const catalog = r.getToolCatalogForScope({
+      activePluginIds: new Set(["com.example.meeting"]),
+      activeToolNames: new Set<string>(),
+      includeMcp: false,
+    });
+    expect(catalog.map((c) => c.name)).not.toContain("meeting_stop");
+    expect(catalog.map((c) => c.name)).toContain("meeting_start");
+  });
+});

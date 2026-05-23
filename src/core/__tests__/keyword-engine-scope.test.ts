@@ -64,6 +64,45 @@ describe("KeywordEngine — pluginId propagation (Phase 1 scoping)", () => {
   });
 });
 
+describe("KeywordEngine — matchToolNames (Tool-Level Deferral)", () => {
+  it("returns skillIds that resolve to a registered tool", () => {
+    const eng = new KeywordEngine();
+    eng.registerKeywords([
+      { keyword: "회의록", skillId: "meeting_start", pluginId: "com.example.meeting" },
+      { keyword: "이메일", skillId: "email_list", pluginId: "com.example.email" },
+    ]);
+    const registered = new Set(["meeting_start", "email_list"]);
+    const names = eng.matchToolNames(
+      "오늘 회의록 정리해서 이메일로 보내줘",
+      (n) => registered.has(n),
+    );
+    expect(names).toEqual(new Set(["meeting_start", "email_list"]));
+  });
+
+  it("ignores keywords whose skillId does not resolve to a tool", () => {
+    const eng = new KeywordEngine();
+    eng.registerKeywords([
+      { keyword: "회의록", skillId: "meeting_start", pluginId: "com.example.meeting" },
+      // skillId not present in the registry resolver → dropped
+      { keyword: "번역", skillId: "translate_ghost", pluginId: "com.example.translate" },
+    ]);
+    const registered = new Set(["meeting_start"]);
+    const names = eng.matchToolNames(
+      "회의록 작성하고 번역도",
+      (n) => registered.has(n),
+    );
+    expect(names).toEqual(new Set(["meeting_start"]));
+  });
+
+  it("returns empty Set when no keyword matches", () => {
+    const eng = new KeywordEngine();
+    eng.registerKeywords([
+      { keyword: "회의록", skillId: "meeting_start", pluginId: "com.example.meeting" },
+    ]);
+    expect(eng.matchToolNames("날씨 어때", () => true)).toEqual(new Set());
+  });
+});
+
 describe("KeywordEngine — imported overlay trigger envelope bypass", () => {
   it("envelope with valid overlay: source is classified as `general`, NOT `skill`", () => {
     // Ensures the trigger-import path doesn't get tagged with

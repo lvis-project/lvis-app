@@ -72,6 +72,27 @@ export class KeywordEngine {
     return result;
   }
 
+  /**
+   * Tool-Level Deferral (B: keyword→tool preload) — 입력에 매치된 키워드의
+   * `skillId` 중 *실제 등록된 plugin/mcp tool 로 resolve 되는 것만* 반환한다.
+   *
+   * `matchAllPluginIds` 가 plugin 단위 scope 를 도출하는 것과 짝을 이루며,
+   * 이쪽은 tool 단위 preload 집합을 도출한다. registry 에 대한 직접 의존을
+   * 피하기 위해 `isToolName(name)` resolver 를 호출 측 (ConversationLoop) 에서
+   * 주입받는다 — circular import 없음. resolver 가 false 를 주는 skillId
+   * (builtin 스킬, 미등록 tool) 는 제외된다.
+   */
+  matchToolNames(input: string, isToolName: (name: string) => boolean): Set<string> {
+    const lowerInput = input.trim().toLowerCase();
+    const result = new Set<string>();
+    for (const sk of this.skillKeywords) {
+      if (lowerInput.includes(sk.keyword.toLowerCase()) && isToolName(sk.skillId)) {
+        result.add(sk.skillId);
+      }
+    }
+    return result;
+  }
+
   /** 사용자 입력 분류 — §6.1 우선순위 기반 */
   classify(input: string): InputClassification {
     const trimmed = input.trim();
