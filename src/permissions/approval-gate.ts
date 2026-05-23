@@ -178,7 +178,7 @@ export interface ApprovalRequest {
    * renderer can record and look up entries using the same key that
    * dispatchReviewer uses. Without this field the renderer receives
    * undefined and the record key mismatches the lookup key → R-2 hit
-   * rate 0% for tools like schedule_routine / bash / fs_write.
+   * rate 0% for tools like routine_schedule / bash / fs_write.
    */
   approvalCacheKey?: string;
   /**

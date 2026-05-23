@@ -1265,7 +1265,7 @@ const api = {
     return () => ipcRenderer.removeListener("lvis:ask-user-question:timeout", listener);
   },
 
-  // schedule_routine v2 — persistent routine list + lifecycle
+  // routine_schedule v2 — persistent routine list + lifecycle
   listRoutinesV2: async () => ipcRenderer.invoke(ROUTINES_V2.list),
   dismissRoutineV2: async (id: string) => ipcRenderer.invoke(ROUTINES_V2.dismiss, id),
   removeRoutineV2: async (id: string) => ipcRenderer.invoke(ROUTINES_V2.remove, id),

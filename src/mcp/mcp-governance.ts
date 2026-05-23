@@ -247,7 +247,7 @@ export class McpGovernance {
         "knowledge_search",
         "render_html",
         "request_plugin",
-        "schedule_routine",
+        "routine_schedule",
         "skill_list",
         "skill_load",
         "todo_session_write",

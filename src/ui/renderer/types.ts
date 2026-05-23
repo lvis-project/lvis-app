@@ -631,7 +631,7 @@ export type LvisApi = {
    */
   onPluginEvent?: (eventType: string, handler: (data: unknown) => void) => (() => void);
   listPluginCards: () => Promise<PluginCardSummary[]>;
-  // schedule_routine v2 — persistent routine list + lifecycle
+  // routine_schedule v2 — persistent routine list + lifecycle
   listRoutinesV2: () => Promise<import("../../shared/routines-types.js").RoutineRecord[]>;
   dismissRoutineV2: (id: string) => Promise<{ ok: boolean; error?: string }>;
   removeRoutineV2: (id: string) => Promise<{ ok: boolean; error?: string }>;
