@@ -410,7 +410,7 @@ cluster review GO 받은 PR 의 description 끝에 다음 형식의 attestation 
 3. **Cross-importer 정합**: type 을 import 하는 모든 module 에 `import type { X } from "../shared/..."` 명시 (`import type` 이어야 runtime cycle 없음)
 4. **Lint enforcement (권장)**: ESLint `no-restricted-syntax` 로 inline literal 직접 사용 금지 — 새 callsite 가 추가될 때 자동 차단
 
-### 위반 사례 — R-2 verdict 시리즈 (2026-05-16~17)
+### 위반 사례 — verdictAtApproval union sweep (2026-05-16~17)
 
 - PR #786 — `verdictAtApproval: "low"|"medium"|"high"` 도입 (SOT 없이 inline union)
 - PR #802 — 8 사이트 swept (sweep 미완 — grep 누락)
