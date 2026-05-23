@@ -8,9 +8,9 @@
  * Produces a deterministic JSON string where object keys are sorted so that
  * {a, b} and {b, a} produce identical output. This prevents key-ordering
  * differences from producing distinct entryKey hashes for semantically
- * identical inputs (HIGH JSON canonical fix, R-2 memory layer symmetry).
+ * identical inputs (HIGH JSON canonical fix — memory layer symmetry).
  *
- * H-1 undefined asymmetry fix (R-5): keys whose value is `undefined` are
+ * H-1 undefined asymmetry fix: keys whose value is `undefined` are
  * dropped, matching JSON.stringify behaviour. A top-level `undefined` is
  * serialised as "null" per RFC 8259 (JSON has no undefined token).
  *
@@ -60,7 +60,7 @@
  *                        top level → `"null"` here).
  *   - `NaN` / `±Infinity` → `JSON.stringify` returns `"null"` per spec.
  *                        Two `NaN`s and `±Infinity` collapse to the same
- *                        string — acceptable for our R-2 use case
+ *                        string — acceptable use case
  *                        (permission cache key) but worth noting.
  *
  * In summary: callers should pass JSON-clean tool args (plain objects,
@@ -68,7 +68,7 @@
  * type behaviour above is documented so a future reader can understand
  * the symmetry properties of the resulting cache key.
  *
- * Spec ref: docs/research/sandbox-isolation.md §R-2
+ * Spec ref: docs/research/sandbox-isolation.md
  * Issue: #691, #800 value-type docs
  */
 /**
@@ -102,7 +102,7 @@ function canonicalStringifyInner(
     // RFC 8785 JCS — element order preserved; nested objects within an
     // array are RECURSIVELY canonicalized (keys sorted). Without this,
     // `[{a:1,b:2}]` and `[{b:2,a:1}]` produce distinct strings, breaking
-    // R-2 cache symmetry and HMAC stability for approval-gate
+    // cache symmetry and HMAC stability for approval-gate
     // (issue #828 — private duplicate consolidation).
     const parts = value.map(
       (e) => canonicalStringifyInner(e, seen, depth + 1),

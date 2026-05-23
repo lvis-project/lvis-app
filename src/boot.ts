@@ -247,13 +247,13 @@ export async function bootstrap(
     routeEngine,
   } = core;
 
-  // Issue #837 — one-shot idempotent migration: re-canonicalize R-2
+  // Issue #837 — one-shot idempotent migration: re-canonicalize user-approval
   // user-approval keys after PR #828 upgraded canonicalStringify to RFC 8785
   // JCS deep recursion. Runs after bootstrapCoreServices so any failure is
   // caught internally and logged without aborting boot. Noop if marker present.
   await migrateCanonicalization();
 
-  // Sprint 1-A A3 — shared AuditLogger instance (plugin runtime + hooks + gate).
+  // Shared AuditLogger instance (plugin runtime + hooks + gate).
   const { AuditLogger } = await import("./audit/audit-logger.js");
   const { safeStorage } = await import("electron");
   const {
@@ -522,7 +522,7 @@ export async function bootstrap(
 
   // §9.5 marketplace backend selection.
   const marketplaceSettings = settingsService.get("marketplace");
-  // Phase 2-final marketplace fetcher selection — single production path:
+  // Marketplace fetcher selection — single production path:
   //   - real-cloud + URL → CloudMarketplaceFetcher
   //   - otherwise (no URL configured) → DisabledMarketplaceFetcher
   // No `MockMarketplaceFetcher` fallback at boot. Default points at the
@@ -593,7 +593,7 @@ export async function bootstrap(
   // §9.5 — Managed plugin bootstrap. Mandatory enterprise plugins are fetched
   // from the marketplace on boot (VS Code-style), not packaged in app source.
   // Graceful: marketplace unreachable or per-plugin failure never bricks boot.
-  // Phase 2d surfaces lifecycle status (start/complete/error) to the renderer
+  // Surfaces lifecycle status (start/complete/error) to the renderer
   // so the user sees something when the marketplace is unreachable or
   // partial-fails. The same helper backs the `lvis:bootstrap:retry` IPC.
   await runManagedBootstrap({
@@ -622,7 +622,7 @@ export async function bootstrap(
   // rules across.
   toolRegistry.setDenyRules(permissionManager.getVisibilityDenyRules());
 
-  // Permission policy P4 — Layer 5 reviewer agent wiring (Phase 3 deferral resolution).
+  // Permission policy P4 — Layer 5 reviewer agent wiring.
   // Reads `permissions.reviewer` from `~/.lvis/settings.json` and binds the
   // classifier + cache + deferred queue onto the live PermissionManager so
   // `dispatchReviewer()` routes HIGH verdicts into the deferred queue.
@@ -1107,10 +1107,10 @@ export async function bootstrap(
   // Runs after MCP connects so the full service graph is ready before
   // adding OS-level spawn isolation.
   //
-  // Linux:   bubblewrap (bwrap) — verified-kernel CLONE_NEWNET (D1)
-  // macOS:   sandbox-exec SBPL profile — PARTIAL (D2, known bypasses)
+  // Linux:   bubblewrap (bwrap) — verified-kernel CLONE_NEWNET
+  // macOS:   sandbox-exec SBPL profile — PARTIAL (known bypasses)
   // Windows: AppContainer — detect-only; native Win32 N-API binding pending.
-  //          detect() returns available=false so registration is skipped (D3).
+  //          detect() returns available=false so registration is skipped.
   //
   // All platforms: LVIS_SANDBOX_ENABLED=1 required (default off)
   // until the always-on policy hook is wired.
@@ -1136,7 +1136,7 @@ export async function bootstrap(
       }
     }
 
-    // §691: macOS sandbox-exec runner (D2 PARTIAL).
+    // §691: macOS sandbox-exec runner (PARTIAL — known bypass paths).
     if (process.platform === "darwin" && process.env["LVIS_SANDBOX_ENABLED"] === "1") {
       const { SandboxExecRunner } = await import("./permissions/runners/sandbox-exec-runner.js");
       const sandboxExecRunner = new SandboxExecRunner();
@@ -1156,7 +1156,7 @@ export async function bootstrap(
       );
     }
 
-    // §691: Windows AppContainer runner (D3 detect-only; native Win32 binding pending).
+    // §691: Windows AppContainer runner (detect-only; native Win32 binding pending).
     // detect() always returns available=false so registration is skipped.
     if (process.platform === "win32" && process.env["LVIS_SANDBOX_ENABLED"] === "1") {
       const { AppContainerRunner } = await import("./permissions/runners/appcontainer-runner.js");
@@ -1173,7 +1173,7 @@ export async function bootstrap(
       }
     }
 
-    // §691 D9: Wire the "mcp" slot with the active platform runner.
+    // §691: Wire the "mcp" slot with the active platform runner.
     // MCP child processes (StdioTransport) need bidirectional stdin — the
     // SandboxRunner interface does not yet support stdin pipes, so MCP spawn
     // is not replaced here. The "mcp" registry slot is pre-populated so
@@ -1190,7 +1190,7 @@ export async function bootstrap(
       const platformDetection = getActiveDetection(platformKey);
       if (platformRunner && platformDetection) {
         _registerRunner("mcp", platformRunner, platformDetection);
-        log.info("boot: mcp sandbox slot wired to %s runner (D9)", platformKey);
+        log.info("boot: mcp sandbox slot wired to %s runner", platformKey);
       }
     }
 
@@ -1228,7 +1228,7 @@ export async function bootstrap(
     });
   });
 
-  // Sprint 4.C — starred store + D6 feedback store.
+  // Starred store + feedback store.
   const starredStore = new StarredStore();
   const feedbackStore = new FeedbackStore();
 

@@ -8,7 +8,7 @@
  *
  * 재사용 cache: ~/.lvis/certs/corp-ca.pem (다음 부팅 skip, 7일마다 refresh)
  *
- * TODO Phase 3: Windows (win-ca / certutil) + Linux (/etc/ssl/certs) 구현.
+ * TODO: Windows (win-ca / certutil) + Linux (/etc/ssl/certs) 구현.
  *   - Windows: `certutil -exportPFX -p "" Root "<CN>" tmp.pfx` or win-ca npm pkg
  *   - Linux:   /etc/ssl/certs/*RootCA*.pem or `update-ca-certificates` hook
  */
@@ -93,21 +93,21 @@ async function extractMacos(): Promise<string | null> {
 }
 
 async function extractWindows(): Promise<string | null> {
-  // Windows runtime extraction is Phase 3 (win-ca pkg or certutil pfx export).
+  // Windows runtime extraction is pending (win-ca pkg or certutil pfx export).
   // Until then, the OS still presents installed CAs to Chromium via the system
   // trust store, so TLS usually works without injection; skip silently unless
   // the user wants diagnostics (LVIS_CORP_CA_DEBUG=1).
   if (process.env.LVIS_CORP_CA_DEBUG === "1") {
-    log.info("Windows runtime extraction skipped (Phase 3 pending)");
+    log.info("Windows runtime extraction skipped (pending)");
   }
   return null;
 }
 
 async function extractLinux(): Promise<string | null> {
-  // Linux runtime extraction is Phase 3 (scan /etc/ssl/certs or
+  // Linux runtime extraction is pending (scan /etc/ssl/certs or
   // update-ca-trust). Silent by default — OS trust store still applies.
   if (process.env.LVIS_CORP_CA_DEBUG === "1") {
-    log.info("Linux runtime extraction skipped (Phase 3 pending)");
+    log.info("Linux runtime extraction skipped (pending)");
   }
   return null;
 }

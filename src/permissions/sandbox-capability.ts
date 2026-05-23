@@ -33,9 +33,9 @@ export type SandboxKind =
   | "bubblewrap"
   | "sandbox-exec"
   | "appcontainer"
-  /** D5+D6: OS-level isolation present but evidence quality is PARTIAL (e.g. sandbox-exec partial profile). */
+  /** OS-level isolation present but evidence quality is PARTIAL (e.g. sandbox-exec partial profile). */
   | "partial"
-  /** D6: filesystem-only isolation (landlock-only — future-proofing for Linux landlock runner). */
+  /** Filesystem-only isolation (landlock-only — future-proofing for Linux landlock runner). */
   | "fs-only";
 
 /**
@@ -48,7 +48,7 @@ export type SandboxKind =
  *   - "policy-best-effort" — binary confirmed present + executable, but the
  *     sandbox profile is a best-effort policy (e.g. macOS sandbox-exec SBPL).
  *     Known bypass paths exist; enforcement is weaker than "verified".
- *     D2: used for macOS sandbox-exec (PARTIAL) to distinguish from assumed.
+ *     Used for macOS sandbox-exec (PARTIAL) to distinguish from assumed.
  */
 export type SandboxConfidence = "verified" | "assumed" | "policy-best-effort";
 
@@ -94,7 +94,7 @@ export function __resetActiveSandboxCapabilityForTest(): void {
  *
  * MAJOR-1 fix: returns the capability stored by {@link setActiveSandboxCapability}
  * when a runner has been registered at boot with its detection result. Falls back
- * to kind="none" only when no runner is registered (isolation=none per D8).
+ * to kind="none" only when no runner is registered (isolation=none, detect-and-skip).
  *
  * This is the single SOT the reviewer and UI consult — all callers automatically
  * see the correct kind after BwrapRunner registration without re-probing the OS.
@@ -119,7 +119,7 @@ export function detectSandboxCapability(): SandboxCapability {
  *
  *   "executionSandbox=none (verified, darwin) — no OS sandbox configured for the host process"
  *
- * Labels for new kinds (D5+D6):
+ * Labels for extended kinds:
  *   partial  → "⚠ OS 격리 부분적 (sandbox-exec)"
  *   fs-only  → "ℹ 파일시스템만 격리 (landlock)"
  */
@@ -152,7 +152,7 @@ export function formatSandboxCapabilityForPrompt(capability: SandboxCapability):
  * invocation. Centralised here so the reviewer + audit + UI agree.
  *
  *   - `kind === "none"`          → weak (no isolation)
- *   - `kind === "partial"`       → weak (D5: partial isolation = evidence gap)
+ *   - `kind === "partial"`       → weak (partial isolation = evidence gap)
  *   - `confidence === "assumed"` → weak (unverified isolation = no isolation)
  *
  * `fs-only` is NOT weak — it is strong-for-fs. The composition rule

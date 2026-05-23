@@ -31,7 +31,7 @@ function memoryIndexResult(content: string | undefined, query = ""): NoteResult[
 }
 
 /**
- * D5 — memory search hook.
+ * Memory search hook.
  *
  * Debounces query (200 ms), fires IPC calls, guards post-unmount setState
  * with aliveRef pattern.
