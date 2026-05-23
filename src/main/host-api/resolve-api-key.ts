@@ -321,7 +321,7 @@ export async function resolveApiKey(
   }
   // #958 round-1 security MEDIUM — admin-bypass audit + counter. Emit an
   // explicit audit line BEFORE the host-secret read so operators can
-  // pivot on `policy=admin tier3-bypassed` in the audit log even if the
+  // pivot on `policy=admin manifest-allowlist-bypassed` in the audit log even if the
   // subsequent settings lookup fails for an unrelated reason. The
   // dedicated `hostSecret_admin_bypass` counter is on top of the regular
   // `hostSecret_read` increment downstream so totals stay comparable.
@@ -329,7 +329,7 @@ export async function resolveApiKey(
     audit(
       deps,
       "info",
-      `resolveApiKey policy=admin tier3-bypassed vendor=${vendor} purpose=${request.purpose} source=${deps.registryInstallSource !== undefined ? "registry.installSource" : "manifest.installPolicy"}`,
+      `resolveApiKey policy=admin manifest-allowlist-bypassed vendor=${vendor} purpose=${request.purpose} source=${deps.registryInstallSource !== undefined ? "registry.installSource" : "manifest.installPolicy"}`,
     );
     incrementHostSecretCounter(
       "hostSecret_admin_bypass",
