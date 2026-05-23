@@ -6,23 +6,23 @@ LVIS 데스크톱 호스트 앱입니다. Electron main/renderer/preload, 플러
 - Plugin Runtime + Manifest 기반 동적 로딩
 - `~/.lvis/plugins/registry.json` 기반 manifestPath 동적 로딩
 - `@lvis/plugin-local-indexer`, `@lvis/plugin-meeting`, `@lvis/plugin-ms-graph`,
-  `@lvis/plugin-work-proactive`, `@lvis/plugin-agent-hub`
+  `@lvis/plugin-work-assistant`, `@lvis/plugin-agent-hub`
   마켓플레이스 install 또는 `lvis-cli install file://<path-to-dist.zip>` 으로 사이드로드
-- 앱 시작 시 Local Indexer 워커 + 자동 인덱서 구동
+- 부팅 시 managed marketplace plugin 자동 install/refresh (`src/boot/managed-marketplace.ts` → `ensureManagedInstalled()` → `pluginRuntime.restartAll()`) 및 first-boot 진행 상태를 `lvis:bootstrap:status` IPC 로 renderer 에 emit
+- Host-side **HybridRetriever** (`src/main/hybrid-retriever.ts`) — Local Indexer plugin worker 의 BM25 + Vector 검색 결과와 Cloud adapter 를 RRF (k=60) 로 융합. 문서 인덱싱/워커 수명주기는 `@lvis/plugin-local-indexer` 가 담당
 - 실제 채팅 UI(렌더러) + preload IPC 브리지
 - webpack 기반 renderer/preload/plugin-preload 번들링
 - macOS Apple Silicon / Linux / Windows installer 빌드 스크립트와 GitHub Actions matrix
 - 주요 IPC 핸들러 (전체 목록은 `src/ipc/domains/*.ts` 참조)
   - 채팅 / 세션: `lvis:chat:send`, `lvis:chat:abort`, `lvis:chat:sessions`, `lvis:chat:session-resume`, `lvis:chat:fork`, `lvis:chat:branch-from-checkpoint`, `lvis:chat:edit-resend`, `lvis:chat:export`, `lvis:chat:compact`
   - 워크플로우: `lvis:ask-user-question:respond` (인라인 질문 카드 응답)
-  - 인덱스: `lvis:index:scan`, `lvis:index:documents`
   - 미팅: `lvis:meeting:start`, `lvis:meeting:push-chunk`, `lvis:meeting:stop`, `lvis:meeting:transcript`
   - 거버넌스: `lvis:audit:search`, `lvis:dlp:stats`, `lvis:agents:list`, `lvis:agents:install`
 - E2E 플로우 스모크 테스트 스크립트
 
 ## 현재 빌드/배포 상태
 
-- 개발 실행: `bun run start`
+- 개발 실행: `bun run start` (build → Electron launch). 인크리멘털 dev 루프는 `bun run dev`
 - 타입 검사: `bun run typecheck`
 - 앱 빌드: `bun run build`
 - 현재 OS installer: `bun run dist`
@@ -96,14 +96,14 @@ UI 렌더링 책임은 호스트(`lvis-app` renderer)에 있으며, 플러그인
 
 ### 이벤트 버스
 
-선제성 기능은 `emitEvent` / `onEvent` 기반 비동기 이벤트 버스로 통신합니다. 현재 활성 플러그인 셋(`meeting`, `work-proactive`, `local-indexer`, `ms-graph`, `agent-hub`) 기준:
+선제성 기능은 `emitEvent` / `onEvent` 기반 비동기 이벤트 버스로 통신합니다. 현재 활성 플러그인 셋(`meeting`, `work-assistant`, `local-indexer`, `ms-graph`, `agent-hub`) 기준:
 
 | 이벤트 | 발행자 | 구독자 |
 |--------|--------|--------|
-| `meeting.summary.created` | meeting hostPlugin | work-proactive, boot.ts (OS 알림) |
+| `meeting.summary.created` | meeting hostPlugin | work-assistant, boot.ts (OS 알림) |
 | `meeting.transcript.updated` | meeting hostPlugin | boot.ts (OS 알림) |
 | `meeting.summary.degraded` | meeting hostPlugin | boot.ts (OS 알림) |
-| `meeting.ended` | meeting hostPlugin | work-proactive |
+| `meeting.ended` | meeting hostPlugin | work-assistant |
 
 플러그인은 manifest 의 `emittedEvents` / `subscriptions` 로 이벤트 계약을 선언하고, manifest validator 가 `auth` capability 와 `${id}.auth.changed` 같은 cross-field 일관성을 boot 시 검사합니다.
 
@@ -143,18 +143,19 @@ Electron 런타임 자체는 여전히 Node로 구동됩니다 (`scripts/run-ele
 않습니다).
 
 > **⚠️ Node.js 필수:** bun이 기본 러너이지만, `postinstall` 스크립트
-> (`node scripts/fetch-uv.mjs`)와 Electron 실행 스크립트
-> (`scripts/run-electron.mjs`)는 시스템 `node` CLI를 직접 호출합니다.
-> Electron 내장 Node는 PATH의 `node` 바이너리를 대체하지 않으므로,
-> **개발자 머신에 Node.js v18 이상**이 별도로 설치되어 있어야 합니다.
+> (`node scripts/fetch-uv.mjs`, `node scripts/register-lvis-protocol.mjs`) 와
+> Electron 실행 스크립트 (`scripts/run-electron.mjs`)는 시스템 `node` CLI를
+> 직접 호출합니다. Electron 내장 Node는 PATH의 `node` 바이너리를 대체하지
+> 않으므로, **개발자 머신에 Node.js v22.4 이상** (`package.json` `engines.node`
+> 기준) 이 별도로 설치되어 있어야 합니다.
 
 ## 빌드
 
 ```bash
-# 타입 검사
+# 타입 검사 (별도 단계 — build 에는 포함되지 않음)
 bun run typecheck
 
-# main TypeScript + webpack renderer/preload bundles + Tailwind CSS + asset copy
+# main esbuild bundle + webpack renderer/preload + Tailwind CSS + asset copy + TLS guard
 bun run build
 
 # Electron version smoke test
@@ -163,11 +164,15 @@ bun run test:electron-smoke
 
 `bun run build`는 다음 단계를 수행합니다.
 
-1. `tsc -p tsconfig.json`으로 main/shared TypeScript를 빌드합니다.
-2. `webpack.config.cjs`의 `renderer`, `preload`, `pluginPreload` compiler를 실행합니다.
-3. Tailwind CSS를 `dist/src/styles.css`로 minify 출력합니다.
-4. HTML/plugin shell/electron flag 자산을 `dist/`로 복사합니다.
-5. TLS bypass guard를 실행합니다.
+1. `scripts/clean-dist.mjs` 로 `dist/` 를 비웁니다.
+2. `scripts/generate-lvis-icons.cjs` 로 앱 아이콘 자산을 생성합니다.
+3. `scripts/build-main-esbuild.mjs` (esbuild) 로 main/shared TypeScript를 번들합니다.
+4. `webpack.config.cjs`의 `renderer`, `preload`, `pluginPreload` compiler를 실행합니다.
+5. Tailwind CSS를 `dist/src/styles.css`로 minify 출력합니다.
+6. HTML/plugin shell/electron flag 자산을 `dist/`로 복사합니다.
+7. TLS bypass guard (`check-no-tls-bypass.mjs`) 를 실행합니다.
+
+> 타입 검사는 `bun run build` 에 포함되지 않습니다. 별도 `bun run typecheck` (`tsc --noEmit`) 로 검사합니다.
 
 ## 설치 파일 생성
 
@@ -211,7 +216,7 @@ Windows에서의 first-run 경험을 단순화하기 위해 `scripts/run-electro
 - **플러그인 경로 허용** — dev runner는 `LVIS_DEV=1` 을 세팅해 로컬 개발 entry 경로를 허용합니다. 마켓플레이스 artifact 검증과 install receipt 무결성 검사는 dev env flag로 우회하지 않습니다.
 - **콘솔 UTF-8 정렬** — Windows 콘솔을 `chcp 65001` 로 UTF-8 로 전환하고 `PYTHONIOENCODING=utf-8`, `PYTHONUTF8=1`, `LANG/LC_ALL=en_US.UTF-8` 환경변수를 기본 주입합니다. cp949 로 인한 한글/이모지 깨짐이 사라집니다.
 
-> **Node.js 필수:** `scripts/run-electron.mjs` 는 시스템 `node` CLI를 직접 호출합니다. Node.js v18 이상이 설치되어 있어야 합니다.
+> **Node.js 필수:** `scripts/run-electron.mjs` 는 시스템 `node` CLI를 직접 호출합니다. Node.js v22.4 이상이 설치되어 있어야 합니다.
 
 ### 권장 설치 절차
 
@@ -249,6 +254,7 @@ bun run start
 | `LVIS_DEV` | `1` (unpackaged) | 플러그인 루트 경계 검사 완화 (`../../../node_modules/@lvis/*` 허용) |
 | `LVIS_KEEP_GPU` | 미설정 | `1` 이면 Windows GPU safe-flag 주입 skip |
 | `LVIS_EXTRA_ELECTRON_FLAGS` | 미설정 | 기본 flag 유지한 채 추가 Electron flag append (`"--foo --bar"`) |
+| `LVIS_DEV_CONSOLE` | `0` | `1` 이면 Electron DevTools 콘솔 창 자동 오픈 |
 | `LVIS_DEBUG` | 미설정 | `1` 이면 `run-electron.mjs` 가 적용한 args/env 출력 |
 | `LVIS_SKIP_CORP_CA` | 미설정 | `1` 이면 CA 자동 주입 skip |
 | `LVIS_CORP_CA_DEBUG` | 미설정 | `1` 이면 CA 추출 디버그 로그 표시 |
