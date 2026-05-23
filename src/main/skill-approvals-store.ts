@@ -26,9 +26,10 @@
  * is acceptable in dev-stage and gives the user a chance to re-confirm any
  * previously-blessed skill bodies.
  *
- * Built-in skills are NOT recorded here — they ship with the host so the
- * load tool short-circuits the approval gate for them entirely (see
- * `skill-load.ts`).
+ * Every skill — including seeded built-ins under `~/.lvis/skills/` — is
+ * recorded here once approved. The load tool gates uniformly because the
+ * on-disk body is user-editable post-seed; hash-binding closes the
+ * post-approval mutation TOCTOU window (see `skill-load.ts`).
  */
 import { mkdir, readFile, writeFile, rename } from "node:fs/promises";
 import { dirname, resolve } from "node:path";

@@ -7,7 +7,6 @@ export interface AssistantAgentSummary {
   triggers: string[];
   model?: string;
   mode?: string;
-  source: "user";
 }
 
 export interface AssistantSkillSummary {
