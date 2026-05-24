@@ -508,16 +508,43 @@ function remapSystemPromptForOpenAIResponses(systemPrompt: string): string {
 function remapPromptTextForOpenAIResponses(text: string): string {
   let remapped = text;
   for (const [from, to] of Object.entries(OPENAI_RESPONSES_TOOL_NAME_ALIASES)) {
-    remapped = remapped.replace(new RegExp(`\\b${from}\\b`, "g"), to);
+    remapped = remapped.replace(
+      new RegExp(`\\b${escapeRegExp(from)}\\b`, "g"),
+      to,
+    );
   }
   return remapped;
 }
 
+function restorePromptTextFromOpenAIResponses(text: string): string {
+  let restored = text;
+  for (const [from, to] of Object.entries(
+    OPENAI_RESPONSES_TOOL_NAME_ALIAS_REVERSE,
+  )) {
+    restored = restored.replace(
+      new RegExp(`\\b${escapeRegExp(from)}\\b`, "g"),
+      to,
+    );
+  }
+  return restored;
+}
+
 function restoreStreamEventFromOpenAIResponses(event: StreamEvent): StreamEvent {
-  if (event.type !== "tool_call") return event;
-  const restoredName = fromOpenAIResponsesToolName(event.name);
-  if (restoredName === event.name) return event;
-  return { ...event, name: restoredName };
+  if (event.type === "tool_call") {
+    const restoredName = fromOpenAIResponsesToolName(event.name);
+    if (restoredName === event.name) return event;
+    return { ...event, name: restoredName };
+  }
+  if (event.type === "text_delta" || event.type === "reasoning_delta") {
+    const restoredText = restorePromptTextFromOpenAIResponses(event.text);
+    if (restoredText === event.text) return event;
+    return { ...event, text: restoredText };
+  }
+  return event;
+}
+
+function escapeRegExp(value: string): string {
+  return value.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
 }
 
 function buildTools(
