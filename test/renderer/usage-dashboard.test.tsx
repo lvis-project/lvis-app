@@ -76,6 +76,14 @@ describe("UsageDashboard", () => {
     });
   });
 
+  it("renders model breakdown with concrete model rows", async () => {
+    await renderDashboard();
+    await waitFor(() => {
+      expect(screen.getByText("모델별 사용량")).toBeTruthy();
+      expect(screen.getByText("claude-sonnet-4-6")).toBeTruthy();
+    });
+  });
+
   it("renders session Top 5 table", async () => {
     await renderDashboard();
     await waitFor(() => expect(screen.getByText("sess-abc123".slice(0, 12))).toBeTruthy());

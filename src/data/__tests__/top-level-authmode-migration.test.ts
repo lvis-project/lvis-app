@@ -190,7 +190,7 @@ describe("SettingsService — #893 top-level authMode migration", () => {
         provider: "gemini",
         vendors: {
           gemini: {
-            model: "gemini-2.0-flash",
+            model: "gemini-2.5-flash",
             enableThinking: false,
             thinkingBudgetTokens: 10_000,
           },

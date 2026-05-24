@@ -11,6 +11,10 @@ import {
   listFilesRecursive,
   writeInstallReceipt,
 } from '../../../src/plugins/plugin-install-receipt.js';
+import {
+  buildE2eBaseSettings,
+  buildIsolatedElectronEnv,
+} from './seeded-electron';
 
 const HERE = path.dirname(fileURLToPath(import.meta.url));
 
@@ -304,10 +308,12 @@ export type ElectronFixtures = {
 };
 export type ElectronOptions = {
   launchEnv: LaunchEnv;
+  onboardingCompleted: boolean;
 };
 
 export const test = base.extend<ElectronFixtures & ElectronOptions>({
   launchEnv: [{}, { option: true }],
+  onboardingCompleted: [true, { option: true }],
 
   userDataDir: async ({}, use) => {
     const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'lvis-e2e-'));
@@ -319,7 +325,7 @@ export const test = base.extend<ElectronFixtures & ElectronOptions>({
     }
   },
 
-  app: async ({ userDataDir, launchEnv }, use) => {
+  app: async ({ userDataDir, launchEnv, onboardingCompleted }, use) => {
     const repoRoot = path.resolve(HERE, '../../..');
     const mainEntry = path.join(repoRoot, 'dist/src/main/main.js');
     if (!fs.existsSync(mainEntry)) {
@@ -335,6 +341,11 @@ export const test = base.extend<ElectronFixtures & ElectronOptions>({
        bootstrap dies). Resolved via the shared `lvisHome()` helper. */
     const lvisHomeForTest = path.join(userDataDir, 'lvis-state');
     fs.mkdirSync(lvisHomeForTest, { recursive: true, mode: 0o700 });
+    fs.writeFileSync(
+      path.join(userDataDir, 'lvis-settings.json'),
+      JSON.stringify(buildE2eBaseSettings(onboardingCompleted), null, 2) + '\n',
+      'utf-8',
+    );
     const e2eWhitelistEnv = await seedE2ePlugins(
       repoRoot,
       lvisHomeForTest,
@@ -342,10 +353,11 @@ export const test = base.extend<ElectronFixtures & ElectronOptions>({
     );
     const app = await electron.launch({
       args: [mainEntry, `--user-data-dir=${userDataDir}`, '--no-sandbox'],
-      env: {
-        ...process.env,
+      env: buildIsolatedElectronEnv({
         ...launchEnv,
         ...e2eWhitelistEnv,
+        HOME: userDataDir,
+        USERPROFILE: userDataDir,
         LVIS_DEV: '1',
         LVIS_E2E: '1',
         LVIS_HOME: lvisHomeForTest,
@@ -355,7 +367,7 @@ export const test = base.extend<ElectronFixtures & ElectronOptions>({
         LVIS_MAIN_ENTRY: mainEntry,
         NODE_ENV: 'test',
         ELECTRON_DISABLE_SECURITY_WARNINGS: '1',
-      },
+      }),
       timeout: 30_000,
     });
     // Capture main-process console output to help diagnose CI crashes.

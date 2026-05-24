@@ -18,8 +18,8 @@
  *       in completedScenarios →
  *     reload → the tour does NOT auto-reopen.
  *
- * The fixture default boots a fresh LVIS_HOME (no API key, no
- * `features.onboardingCompleted`), so the boot probe dispatches
+ * This spec opts out of the shared fixture returning-user seed with
+ * `test.use({ onboardingCompleted: false })`, so the boot probe dispatches
  * `probe-start` and the Z onboarding chain mounts the ScenarioShowcase.
  */
 import { test, expect } from './fixtures';
@@ -27,6 +27,8 @@ import path from 'node:path';
 import fs from 'node:fs';
 
 const FRESH_KEY = 'sk-e2e-first-boot-funnel-openai';
+
+test.use({ onboardingCompleted: false });
 
 /** Read the persisted tour-state.json under the per-test LVIS_HOME. */
 function readTourState(userDataDir: string): { completedScenarios?: string[] } | null {
@@ -150,6 +152,24 @@ test.describe('first-boot funnel: onboarding → API key → tour completion', (
       await mainWindow.waitForTimeout(150);
     }
     await expect(card).toBeHidden({ timeout: 10_000 });
+
+    const pluginShowcase = mainWindow.getByTestId('plugin-showcase');
+    await expect(pluginShowcase).toBeVisible({ timeout: 10_000 });
+    await mainWindow.getByTestId('plugin-showcase:close').click();
+    await expect(pluginShowcase).toBeHidden({ timeout: 10_000 });
+    await expect
+      .poll(
+        async () =>
+          mainWindow.evaluate(async () => {
+            const api = (window as unknown as {
+              lvisApi: { getSettings: () => Promise<{ features?: { onboardingCompleted?: boolean } }> };
+            }).lvisApi;
+            const settings = await api.getSettings();
+            return settings.features?.onboardingCompleted;
+          }),
+        { timeout: 10_000 },
+      )
+      .toBe(true);
 
     // (7) Completion is persisted: tour-state.json must list the scenario
     // in completedScenarios (markComplete fired on the final step).
