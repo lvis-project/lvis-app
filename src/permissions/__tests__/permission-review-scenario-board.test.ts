@@ -66,6 +66,7 @@ function makeTool(args: {
   source?: ToolSource;
   pathFields?: readonly string[];
   pluginId?: string;
+  mcpServerId?: string;
 }): { tool: Tool; execute: ReturnType<typeof vi.fn> } {
   const execute = vi.fn(async () => ({ output: `${args.name} ok`, isError: false }));
   const tool = createDynamicTool({
@@ -74,6 +75,7 @@ function makeTool(args: {
     source: args.source ?? "builtin",
     category: args.category,
     pluginId: args.pluginId,
+    mcpServerId: args.mcpServerId,
     pathFields: args.pathFields,
     jsonSchema: {
       type: "object",
@@ -219,7 +221,12 @@ describe("permission-review-scenario-board-v2.html contract", () => {
   it("S5 auto-review MED foreground mutation opens approval", async () => {
     const { pm, cleanup } = makeManager("auto", fixedClassifier({ level: "medium", reason: "external summary send" }));
     try {
-      const { tool, execute } = makeTool({ name: "teams_send", category: "network", source: "plugin" });
+      const { tool, execute } = makeTool({
+        name: "teams_send",
+        category: "network",
+        source: "plugin",
+        pluginId: "ms-graph",
+      });
       const gate = makeGate("allow-once");
       const result = await runProbe({
         tool,
@@ -312,7 +319,12 @@ describe("permission-review-scenario-board-v2.html contract", () => {
     };
     const { pm, cleanup } = makeManager("auto", classifier);
     try {
-      const { tool, execute } = makeTool({ name: "teams_send", category: "network", source: "plugin" });
+      const { tool, execute } = makeTool({
+        name: "teams_send",
+        category: "network",
+        source: "plugin",
+        pluginId: "ms-graph",
+      });
       const gate = makeGate("deny-once");
       const result = await runProbe({
         tool,
@@ -359,7 +371,12 @@ describe("permission-review-scenario-board-v2.html contract", () => {
     const classify = vi.fn((): RiskVerdict => ({ level: "low", reason: "reviewer would allow" }));
     const { pm, cleanup } = makeManager("auto", { classify });
     try {
-      const { tool, execute } = makeTool({ name: "mcp.repo_create_issue", category: "network", source: "mcp" });
+      const { tool, execute } = makeTool({
+        name: "mcp.repo_create_issue",
+        category: "network",
+        source: "mcp",
+        mcpServerId: "github",
+      });
       const gate = makeGate("deny-once");
       const result = await runProbe({
         tool,
@@ -385,7 +402,12 @@ describe("permission-review-scenario-board-v2.html contract", () => {
   it("S13 trusted metadata network lookup can pass LOW in auto-review", async () => {
     const { pm, cleanup } = makeManager("auto");
     try {
-      const { tool, execute } = makeTool({ name: "graph_profile_get", category: "network", source: "plugin" });
+      const { tool, execute } = makeTool({
+        name: "graph_profile_get",
+        category: "network",
+        source: "plugin",
+        pluginId: "ms-graph",
+      });
       const gate = makeGate("deny-once");
       const result = await runProbe({
         tool,
@@ -404,7 +426,12 @@ describe("permission-review-scenario-board-v2.html contract", () => {
   it("S14 network data egress asks with reviewer impact", async () => {
     const { pm, cleanup } = makeManager("auto");
     try {
-      const { tool } = makeTool({ name: "teams_send", category: "network", source: "plugin" });
+      const { tool } = makeTool({
+        name: "teams_send",
+        category: "network",
+        source: "plugin",
+        pluginId: "ms-graph",
+      });
       const gate = makeGate("deny-once");
       const result = await runProbe({
         tool,
@@ -428,7 +455,12 @@ describe("permission-review-scenario-board-v2.html contract", () => {
   it("S15 unknown or sensitive network target is HIGH and requires approval", async () => {
     const { pm, cleanup } = makeManager("auto");
     try {
-      const { tool, execute } = makeTool({ name: "upload_archive", category: "network", source: "plugin" });
+      const { tool, execute } = makeTool({
+        name: "upload_archive",
+        category: "network",
+        source: "plugin",
+        pluginId: "archive-plugin",
+      });
       const gate = makeGate("deny-once");
       const result = await runProbe({
         tool,
@@ -449,7 +481,12 @@ describe("permission-review-scenario-board-v2.html contract", () => {
   it("S16 headless network MED/HIGH goes to the manual queue without execution", async () => {
     const { pm, queue, cleanup } = makeManager("auto", fixedClassifier({ level: "medium", reason: "headless data egress" }));
     try {
-      const { tool, execute } = makeTool({ name: "teams_send", category: "network", source: "plugin" });
+      const { tool, execute } = makeTool({
+        name: "teams_send",
+        category: "network",
+        source: "plugin",
+        pluginId: "ms-graph",
+      });
       const gate = makeGate("allow-once");
       const result = await runProbe({
         tool,
