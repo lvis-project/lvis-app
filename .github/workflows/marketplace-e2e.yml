@@ -1,20 +1,20 @@
-name: M4 E2E (marketplace ↔ installer)
+name: Marketplace E2E (publish ↔ install)
 
 # Opt-in only. Run manually via workflow_dispatch or when PR branches
-# explicitly include an `m4-e2e` label. Keeps normal CI fast.
+# explicitly include a `marketplace-e2e` label. Keeps normal CI fast.
 on:
   workflow_dispatch: {}
   pull_request:
     types: [labeled]
 
 jobs:
-  m4-e2e:
-    # workflow_dispatch (manual) OR same-repo PR labeled `m4-e2e`.
+  marketplace-e2e:
+    # workflow_dispatch (manual) OR same-repo PR labeled `marketplace-e2e`.
     # Sibling marketplace + signing-key secrets are not exposed to forks.
     if: >-
       github.event_name == 'workflow_dispatch' ||
       (github.event_name == 'pull_request' &&
-       github.event.label.name == 'm4-e2e' &&
+       github.event.label.name == 'marketplace-e2e' &&
        github.event.pull_request.head.repo.full_name == github.repository)
     runs-on: ubuntu-24.04-arm
     timeout-minutes: 20
@@ -62,18 +62,18 @@ jobs:
           (cd server && uv run python ../scripts/build_schemas.py)
           ls -la schemas/
 
-      - name: Clean stale M4 DB only (DO NOT kill processes — production marketplace shares the host)
+      - name: Clean stale marketplace E2E DB
         run: |
-          # Self-hosted runner co-hosts the production marketplace server.
-          # Killing uvicorn here would take down production. Use a dedicated
-          # port (8765, set below) and only clean OUR pid file + sqlite DB.
-          # Stale M4 uvicorn (port 8765) is owned by the workflow only.
+          # github-hosted runners are ephemeral — there is no shared production
+          # marketplace to protect (this was a self-hosted-only concern). Use a
+          # dedicated port (8765, set below) and clean OUR pid file + sqlite DB
+          # for idempotent reruns within the ephemeral VM.
           if [ -f /tmp/m4-marketplace.pid ]; then
             kill "$(cat /tmp/m4-marketplace.pid)" 2>/dev/null || true
             sleep 1
           fi
           rm -f /tmp/m4-marketplace.pid /tmp/m4-marketplace.db /tmp/m4-marketplace.db-wal /tmp/m4-marketplace.db-shm
-          echo "stale M4 DB + tracked pid cleaned (production processes untouched)"
+          echo "stale E2E DB + tracked pid cleaned"
 
       - name: Seed publisher API key (before server start — avoids sqlite lock)
         env:
