@@ -230,6 +230,9 @@ describe("historyToEntries", () => {
         content: "chunk",
         toolDisplay: {
           durationMs: 456,
+          source: "plugin",
+          category: "read",
+          pluginId: "com.example.meeting",
           uiPayload: {
             serverId: "srv",
             resourceUri: "ui://result",
@@ -249,7 +252,11 @@ describe("historyToEntries", () => {
         },
       ],
     });
-    expect(group?.kind === "tool_group" ? group.tools[0] : undefined).not.toHaveProperty("uiPayload");
+    const tool = group?.kind === "tool_group" ? group.tools[0] : undefined;
+    expect(tool).not.toHaveProperty("source");
+    expect(tool).not.toHaveProperty("category");
+    expect(tool).not.toHaveProperty("pluginId");
+    expect(tool).not.toHaveProperty("uiPayload");
   });
 
   it("replays ask_user_question answers as a visible answer recap bubble", () => {

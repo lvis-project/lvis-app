@@ -156,12 +156,14 @@ function serializeToolDisplay(
   // Persisted JSONL is user-writable. Replaying uiPayload would mount MCP UI
   // resources and cross back into host IPC without proof that this row came from
   // an actual tool execution, so persisted replay keeps only inert timing data.
-  if (
+  const durationMs =
     typeof toolDisplay.durationMs === "number" &&
     Number.isFinite(toolDisplay.durationMs) &&
     toolDisplay.durationMs >= 0
-  ) {
-    return { durationMs: toolDisplay.durationMs };
+      ? toolDisplay.durationMs
+      : undefined;
+  if (durationMs !== undefined) {
+    return { durationMs };
   }
   return undefined;
 }

@@ -217,7 +217,18 @@ async function runStreamedTurn(
           hasToolCalls,
         }),
       onToolStart: (name, toolInput, meta) =>
-        send({ type: "tool_start", name, input: toolInput, ...meta }),
+        send({
+          type: "tool_start",
+          name,
+          input: toolInput,
+          groupId: meta.groupId,
+          toolUseId: meta.toolUseId,
+          displayOrder: meta.displayOrder,
+          source: meta.source,
+          toolCategory: meta.category,
+          pluginId: meta.pluginId,
+          mcpServerId: meta.mcpServerId,
+        }),
       onPermissionReview: (event) =>
         send({
           type: "permission_review",
@@ -233,7 +244,21 @@ async function runStreamedTurn(
           approvalPurpose: event.approvalPurpose,
         }),
       onToolEnd: (name, toolResult, isError, meta, uiPayload, durationMs) =>
-        send({ type: "tool_end", name, result: toolResult, isError, ...meta, ...(uiPayload && { uiPayload }), durationMs }),
+        send({
+          type: "tool_end",
+          name,
+          result: toolResult,
+          isError,
+          groupId: meta.groupId,
+          toolUseId: meta.toolUseId,
+          displayOrder: meta.displayOrder,
+          source: meta.source,
+          toolCategory: meta.category,
+          pluginId: meta.pluginId,
+          mcpServerId: meta.mcpServerId,
+          ...(uiPayload && { uiPayload }),
+          durationMs,
+        }),
       onError: (error, systemNotice) =>
         send({ type: "error", error, ...(systemNotice ? { systemNotice } : {}) }),
       onPermissionModeChanged: (mode) => send({ type: "permission_mode_changed", mode }),
