@@ -122,7 +122,7 @@ describe("ConversationLoop queryLoop", () => {
     });
   });
 
-  it("clears a fully completed session TO-DO plan at the next turn start", async () => {
+  it("clears the previous session TO-DO plan at the next turn start", async () => {
     const toolRegistry = new ToolRegistry();
     const provider = new FakeProvider([
       [
@@ -132,7 +132,7 @@ describe("ConversationLoop queryLoop", () => {
     ]);
     const sessionTodoStore = new SessionTodoStore();
     sessionTodoStore.write("s-main", [
-      { content: "done", status: "completed" },
+      { content: "stale from previous turn", status: "in_progress" },
     ]);
     const loop = new ConversationLoop(({
       settingsService: {
