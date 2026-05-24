@@ -183,7 +183,7 @@ describe("ConversationLoop.resetAndResume", () => {
 
     expect(result.ok).toBe(true);
     expect((loop as unknown as { lastContextInputTokens: number }).lastContextInputTokens).toBe(123_456);
-    expect((loop as unknown as { lastRoundInputTokens: number }).lastRoundInputTokens).toBe(0);
+    expect((loop as unknown as { lastRoundProviderInputTokens: number }).lastRoundProviderInputTokens).toBe(0);
   });
 
   it("hydrates post-compact context SOT ahead of preserved pre-compact turnSummary", () => {

@@ -5,10 +5,10 @@ import { getUsableContext } from "../../../shared/context-budget.js";
 import { estimateTokens } from "../../../engine/auto-compact.js";
 
 /**
- * Context budget hook — turn-end context-fill SOT (2026-05-07).
+ * Context budget hook — engine-projected next request input SOT.
  *
  * `usedTokens` = the most recent usage carrier:
- *   - `turn_summary.tokensIn`, the turn-end projected context input emitted
+ *   - `turn_summary.tokensIn`, the engine-projected next request input emitted
  *     by the main loop and persisted on the final assistant;
  *   - `context_usage.tokensIn`, emitted only after compact so the ring shrinks
  *     immediately to the compacted context estimate.
@@ -25,7 +25,7 @@ import { estimateTokens } from "../../../engine/auto-compact.js";
  *   - over-counted under-Korean content because chars/4 ≠ tokens/4 (1.7-2);
  *   - did not shrink after compact since entries persisted in UI.
  *
- * Pre-first-turn: returns 0 (no usage yet). Streaming: still uses the
+ * Pre-first-turn: returns 0 (no projection yet). Streaming: still uses the
  * *previous* usage carrier until the new live turn_summary lands at turn end.
  *
  * draftText: optional composer draft — when present, its token estimate

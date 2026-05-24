@@ -13,7 +13,8 @@
 import { describe, it, expect, vi, beforeEach } from "vitest";
 import { ConversationLoop } from "../conversation-loop.js";
 import type { GenericMessage } from "../llm/types.js";
-import { getModelPreflightThreshold, estimateMessagesTokens, estimateTokens } from "../auto-compact.js";
+import { getModelPreflightThreshold, estimateMessagesTokens } from "../auto-compact.js";
+import { estimateRequestInputProjection } from "../request-input-projection.js";
 import {
   makeConversationLoopDeps as makeDeps,
   makeConversationLoopMemoryManager as makeMemoryManager,
@@ -173,7 +174,21 @@ describe("runPreflightGuard — estimate-based trigger", () => {
       },
     ];
     const mem = makeMemoryManager(history);
-    const loop = new ConversationLoop(makeDeps({ settingsService: settings, memoryManager: mem }));
+    let summaryPreamble: string | null = null;
+    const loop = new ConversationLoop(makeDeps({
+      settingsService: settings,
+      memoryManager: mem,
+      systemPromptBuilder: {
+        build: () => ["system", summaryPreamble].filter(Boolean).join("\n"),
+        setSummaryPreamble: vi.fn((preamble: string | null) => {
+          summaryPreamble = preamble;
+        }),
+        setToolScope: vi.fn(),
+        setOriginSource: vi.fn(),
+        setActiveSessionId: vi.fn(),
+        setActiveRolePrompt: vi.fn(),
+      } as never,
+    }));
     loop.resetAndResume("sess-1");
 
     const fakeProvider = makeTurnProvider();
@@ -188,8 +203,21 @@ describe("runPreflightGuard — estimate-based trigger", () => {
     );
 
     const messages = loop.getHistory().getMessages();
-    expect(messages[0]?.meta?.checkpointMeta?.contextTokensAfter).toBe(
-      100 + estimateTokens("## Compact preamble"),
+    const checkpointProjectionMessages = messages.slice(0, -1);
+    const contextTokensAfter = messages[0]?.meta?.checkpointMeta?.contextTokensAfter;
+    expect(contextTokensAfter).toBe(
+      estimateRequestInputProjection({
+        systemPrompt: "system\n## Compact preamble",
+        messages: checkpointProjectionMessages,
+        toolSchemas: [],
+      }).totalTokens,
+    );
+    expect(contextTokensAfter).toBeGreaterThan(
+      estimateRequestInputProjection({
+        systemPrompt: "system",
+        messages: checkpointProjectionMessages,
+        toolSchemas: [],
+      }).totalTokens,
     );
     const preservedOldAnswer = messages.find((message) => message.content === "latest a");
     expect(preservedOldAnswer?.meta?.turnSummary).toBeUndefined();
@@ -313,6 +341,11 @@ describe("runPreflightGuard — context-token secondary trigger", () => {
       { role: "assistant", content: "ok" },
     ];
     const baselineEstimate = estimateMessagesTokens(shortHistory);
+    const baselineProjection = estimateRequestInputProjection({
+      systemPrompt: "system",
+      messages: shortHistory,
+      toolSchemas: [],
+    }).totalTokens;
     expect(baselineEstimate).toBeLessThan(threshold);
 
     const mem = makeMemoryManager(shortHistory);
@@ -322,7 +355,7 @@ describe("runPreflightGuard — context-token secondary trigger", () => {
     const fakeProvider = makeTurnProvider();
     (loop as unknown as { provider: typeof fakeProvider }).provider = fakeProvider;
     (loop as unknown as { lastContextInputTokens: number }).lastContextInputTokens = threshold - 100;
-    (loop as unknown as { lastContextEstimatedInputTokens: number }).lastContextEstimatedInputTokens = baselineEstimate;
+    (loop as unknown as { lastContextInputProjectionTokens: number }).lastContextInputProjectionTokens = baselineProjection;
 
     vi.mocked(compactWithBoundary).mockResolvedValueOnce(makeSyntheticCompactResult(shortHistory));
 
@@ -337,6 +370,49 @@ describe("runPreflightGuard — context-token secondary trigger", () => {
     expect(compactWithBoundary).toHaveBeenCalled();
     expect(compactStartedCb).toHaveBeenCalledWith(
       expect.objectContaining({ triggerSource: "context-tokens" }),
+    );
+  });
+});
+
+describe("runPreflightGuard — request projection source", () => {
+  it("compacts when system prompt overhead crosses threshold even if message estimate is below", async () => {
+    const settings = makeSettings(true, "claude-sonnet-4-5", "claude");
+    const threshold = getModelPreflightThreshold("claude", "claude-sonnet-4-5");
+    const shortHistory: GenericMessage[] = [
+      { role: "user", content: "short message" },
+      { role: "assistant", content: "ok" },
+    ];
+    expect(estimateMessagesTokens(shortHistory)).toBeLessThan(threshold);
+
+    const mem = makeMemoryManager(shortHistory);
+    const loop = new ConversationLoop(makeDeps({
+      settingsService: settings,
+      memoryManager: mem,
+      systemPromptBuilder: {
+        build: () => "system-overhead ".repeat(threshold),
+        setToolScope: vi.fn(),
+        setOriginSource: vi.fn(),
+        setActiveSessionId: vi.fn(),
+        setActiveRolePrompt: vi.fn(),
+      } as never,
+    }));
+    loop.resetAndResume("sess-1");
+
+    const fakeProvider = makeTurnProvider();
+    (loop as unknown as { provider: typeof fakeProvider }).provider = fakeProvider;
+    vi.mocked(compactWithBoundary).mockResolvedValueOnce(makeSyntheticCompactResult(shortHistory));
+
+    const compactStartedCb = vi.fn();
+    await loop.runTurn(
+      "next turn",
+      { onCompactStarted: compactStartedCb },
+      undefined,
+      { inputOrigin: "user-keyboard" },
+    );
+
+    expect(compactWithBoundary).toHaveBeenCalled();
+    expect(compactStartedCb).toHaveBeenCalledWith(
+      expect.objectContaining({ triggerSource: "estimate" }),
     );
   });
 });

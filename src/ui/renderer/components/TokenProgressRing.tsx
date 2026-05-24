@@ -10,7 +10,7 @@ interface TokenProgressRingProps {
 /**
  * TokenProgressRing — SVG circular progress indicator for token usage.
  *
- * Visual-only ring (no percent text inside). Raw counts revealed via hover
+ * Visual-only ring (no percent text inside). Projected request counts revealed via hover
  * tooltip. Color tiers match the former chip: emerald < 50%, amber 50-80%,
  * rose > 80%. Sized at 26px to align with Warp-style toolbar buttons.
  */
@@ -48,8 +48,8 @@ export function TokenProgressRing({ used, budget, contextBudget, tpmLimit }: Tok
           className="flex items-center justify-center rounded-md p-1 hover:bg-muted/60 transition-colors cursor-default focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-foreground focus-visible:ring-offset-1"
           style={{ width: 28, height: 28 }}
           data-testid="token-progress-ring"
-          title="컨텍스트 사용량"
-          aria-label={`Token usage ${pct} percent`}
+          title="다음 요청 입력 예측"
+          aria-label={`Projected input ${pct} percent`}
           role="img"
           tabIndex={0}
         >
@@ -87,10 +87,10 @@ export function TokenProgressRing({ used, budget, contextBudget, tpmLimit }: Tok
         </div>
       </TooltipTrigger>
       <TooltipContent side="top" className="min-w-[220px] text-xs tabular-nums">
-        <div className="mb-1 text-[10px] uppercase tracking-wider opacity-60">context breakdown</div>
+        <div className="mb-1 text-[10px] uppercase tracking-wider opacity-60">projected input</div>
         <div className="space-y-0.5">
           <div className="flex justify-between gap-3">
-            <span>used:</span>
+            <span>next request:</span>
             <span>{used.toLocaleString()}</span>
           </div>
           <div className="flex justify-between gap-3">
