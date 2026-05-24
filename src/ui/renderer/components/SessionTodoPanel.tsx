@@ -157,6 +157,11 @@ export function SessionTodoPanel({
   const visible = items.filter((i) => i.status !== "deleted");
   const completedCount = items.filter((i) => i.status === "completed").length;
   const inProgress = items.find((i) => i.status === "in_progress");
+  // Collapsed-header focus: prefer the in-progress item; if none yet (e.g. a
+  // freshly-set plan still all-pending before step 1 is marked in_progress),
+  // fall back to the first non-completed item so the closed header never goes
+  // blank while there is still work to do.
+  const collapsedFocus = inProgress ?? visible.find((i) => i.status !== "completed");
   const reduceMotion = prefersReducedMotion();
   // Pulse only when motion is allowed; otherwise rely on color/dot to
   // signal "active" (still readable, no jitter for sensitive users).
@@ -207,16 +212,19 @@ export function SessionTodoPanel({
             새 시작
           </span>
         )}
-        {/* Collapsed-state focal point: the active item streams next to
-            the count and pulses so the user can see progress at a glance
-            without expanding the panel. */}
-        {!open && inProgress && (
+        {/* Collapsed-state focal point: the focus item (in-progress, else the
+            first non-completed) streams next to the count so the user can see
+            what's happening at a glance without expanding. Pulse only when the
+            focus item is actually in-progress. */}
+        {!open && collapsedFocus && (
           <span
-            className={`ml-2 min-w-0 flex-1 truncate text-left text-warning ${activePulse}`}
+            className={`ml-2 min-w-0 flex-1 truncate text-left text-warning ${
+              collapsedFocus.status === "in_progress" ? activePulse : ""
+            }`}
             data-testid="session-todo-collapsed-active"
-            title={inProgress.content}
+            title={collapsedFocus.content}
           >
-            {inProgress.content}
+            {collapsedFocus.content}
           </span>
         )}
       </Button>
