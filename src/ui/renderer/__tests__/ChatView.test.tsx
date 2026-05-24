@@ -14,6 +14,47 @@ import {
   __teardownSuggestedRepliesIpcForTests,
 } from "../hooks/use-suggested-replies.js";
 
+function installDeterministicScrollMetrics(scrollHeight = 2400, clientHeight = 600) {
+  const descriptors = {
+    scrollHeight: Object.getOwnPropertyDescriptor(HTMLElement.prototype, "scrollHeight"),
+    clientHeight: Object.getOwnPropertyDescriptor(HTMLElement.prototype, "clientHeight"),
+    scrollTop: Object.getOwnPropertyDescriptor(HTMLElement.prototype, "scrollTop"),
+  };
+  let assignedScrollTop = 0;
+  Object.defineProperty(HTMLElement.prototype, "scrollHeight", {
+    configurable: true,
+    get: () => scrollHeight,
+  });
+  Object.defineProperty(HTMLElement.prototype, "clientHeight", {
+    configurable: true,
+    get: () => clientHeight,
+  });
+  Object.defineProperty(HTMLElement.prototype, "scrollTop", {
+    configurable: true,
+    get: () => assignedScrollTop,
+    set: (value: number) => {
+      assignedScrollTop = value;
+    },
+  });
+  return {
+    get assignedScrollTop() {
+      return assignedScrollTop;
+    },
+    setAssignedScrollTop(value: number) {
+      assignedScrollTop = value;
+    },
+    restore() {
+      for (const [key, descriptor] of Object.entries(descriptors)) {
+        if (descriptor) {
+          Object.defineProperty(HTMLElement.prototype, key, descriptor);
+        } else {
+          delete (HTMLElement.prototype as unknown as Record<string, unknown>)[key];
+        }
+      }
+    },
+  };
+}
+
 
 describe("ChatView", () => {
   it("mounts without crashing", async () => {
@@ -1029,6 +1070,7 @@ describe("ChatView", () => {
   });
 
   it("places bulk-loaded history at the bottom without smooth replay scrolling", async () => {
+    const scrollMetrics = installDeterministicScrollMetrics();
     const scrollToSpy = vi.fn();
     Object.defineProperty(HTMLElement.prototype, "scrollTo", {
       configurable: true,
@@ -1040,57 +1082,77 @@ describe("ChatView", () => {
     });
     vi.stubGlobal("cancelAnimationFrame", vi.fn());
 
-    const { container } = await renderApp({
-      mainActiveState: {
-        mainActiveSessionId: "sess-default",
-        mainActiveMode: "resume",
-        updatedAt: new Date().toISOString(),
-      },
-      history: {
-        sessionId: "sess-default",
-        messages: [
-          { index: 0, role: "user", content: "오래된 질문" },
-          { index: 1, role: "assistant", content: "마지막 답변" },
-        ],
-      },
-    });
+    try {
+      const { container } = await renderApp({
+        mainActiveState: {
+          mainActiveSessionId: "sess-default",
+          mainActiveMode: "resume",
+          updatedAt: new Date().toISOString(),
+        },
+        history: {
+          sessionId: "sess-default",
+          messages: [
+            { index: 0, role: "user", content: "오래된 질문" },
+            { index: 1, role: "assistant", content: "마지막 답변" },
+          ],
+        },
+      });
 
-    await waitFor(() => {
-      expect(container.textContent).toContain("마지막 답변");
-      expect(scrollToSpy).toHaveBeenCalledWith(expect.objectContaining({ behavior: "auto" }));
-    });
-    const lastScrollArg = scrollToSpy.mock.calls.at(-1)?.[0] as ScrollToOptions | undefined;
-    expect(lastScrollArg?.behavior).toBe("auto");
+      await waitFor(() => {
+        expect(container.textContent).toContain("마지막 답변");
+        expect(scrollMetrics.assignedScrollTop).toBe(2400);
+      });
+      expect(scrollToSpy).not.toHaveBeenCalled();
+    } finally {
+      scrollMetrics.restore();
+    }
   });
 
-  it("keeps a pinned transcript at the bottom when streaming text grows in place", async () => {
+  it("coalesces streaming bottom-follow into one immediate pin without smooth scroll", async () => {
+    const scrollMetrics = installDeterministicScrollMetrics();
     const scrollToSpy = vi.fn();
     Object.defineProperty(HTMLElement.prototype, "scrollTo", {
       configurable: true,
       value: scrollToSpy,
     });
+    const rafCallbacks: FrameRequestCallback[] = [];
     vi.stubGlobal("requestAnimationFrame", (cb: FrameRequestCallback) => {
-      cb(0);
-      return 1;
+      rafCallbacks.push(cb);
+      return rafCallbacks.length;
     });
-    vi.stubGlobal("cancelAnimationFrame", vi.fn());
+    vi.stubGlobal("cancelAnimationFrame", vi.fn((id: number) => {
+      rafCallbacks[id - 1] = () => undefined;
+    }));
 
-    const { container, emitChatStream } = await renderApp({ hasApiKey: true });
-    await submitChatMessage(container, "긴 답변 줘");
-    await act(async () => {
-      emitChatStream({ type: "text_delta", text: "첫 문단" });
-    });
-    await waitFor(() => expect(container.textContent).toContain("첫 문단"));
-    scrollToSpy.mockClear();
+    try {
+      const { container, emitChatStream } = await renderApp({ hasApiKey: true });
+      await submitChatMessage(container, "긴 답변 줘");
+      await act(async () => {
+        while (rafCallbacks.length > 0) {
+          rafCallbacks.shift()?.(0);
+        }
+      });
+      rafCallbacks.length = 0;
+      scrollToSpy.mockClear();
+      scrollMetrics.setAssignedScrollTop(1800);
 
-    await act(async () => {
-      emitChatStream({ type: "text_delta", text: "\n\n두 번째 문단이 같은 assistant entry에 추가됩니다." });
-    });
+      await act(async () => {
+        emitChatStream({ type: "text_delta", text: "첫 문단" });
+        emitChatStream({ type: "text_delta", text: "\n\n두 번째 문단이 같은 assistant entry에 추가됩니다." });
+      });
 
-    await waitFor(() => {
-      expect(container.textContent).toContain("두 번째 문단");
-      expect(scrollToSpy).toHaveBeenCalledWith(expect.objectContaining({ behavior: "smooth" }));
-    });
+      await waitFor(() => expect(container.textContent).toContain("두 번째 문단"));
+      expect(rafCallbacks).toHaveLength(1);
+
+      await act(async () => {
+        rafCallbacks.shift()?.(0);
+      });
+
+      expect(scrollMetrics.assignedScrollTop).toBe(2400);
+      expect(scrollToSpy).not.toHaveBeenCalled();
+    } finally {
+      scrollMetrics.restore();
+    }
   });
 
   it("moves a tool_use assistant round into the active WorkGroup before tool events arrive", async () => {
