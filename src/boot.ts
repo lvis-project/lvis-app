@@ -83,6 +83,7 @@ import { createRefreshActiveLlmWildcard } from "./boot/steps/refresh-active-llm-
 import {
   registerBuiltinTools,
   registerRequestPluginMetaTool,
+  registerToolSearchMetaTool,
   wireKnowledgeAndIdleScheduler,
   type WorkflowToolDeps,
 } from "./boot/tools.js";
@@ -509,9 +510,12 @@ export async function bootstrap(
     demoHostMapApplied: isAppliedDemoHostMap,
   };
 
-  // §4.2 Step 4: builtin tools + request_plugin meta tool.
+  // §4.2 Step 4: builtin tools + request_plugin / tool_search meta tools.
   registerBuiltinTools(toolRegistry, settingsService, workflowDeps);
   registerRequestPluginMetaTool(toolRegistry);
+  // Statically registered; gated to LLM visibility on the experimental.toolDeferral
+  // flag inside getToolSchemasForScope (hidden when the flag is off).
+  registerToolSearchMetaTool(toolRegistry);
 
   // §4.4 HybridRetriever + Knowledge Tools DI, §6.1 IdleSchedulerService.
   const { idleScheduler, knowledgeAvailable } = await wireKnowledgeAndIdleScheduler({
