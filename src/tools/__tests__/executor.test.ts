@@ -712,6 +712,7 @@ describe("ToolExecutor — C1 sensitive-path hard-block wiring", () => {
       name: "reviewed_write_probe_p3",
       description: "P3 interactive auto-approve probe",
       source: "plugin",
+      pluginId: "test-plugin",
       category: "write",
       jsonSchema: {
         type: "object",
@@ -813,6 +814,7 @@ describe("ToolExecutor — C1 sensitive-path hard-block wiring", () => {
       name: "reviewed_write_probe_p3_off",
       description: "P3 off-state probe",
       source: "plugin",
+      pluginId: "test-plugin",
       category: "write",
       jsonSchema: {
         type: "object",
@@ -872,6 +874,7 @@ describe("ToolExecutor — C1 sensitive-path hard-block wiring", () => {
       name: "reviewed_network_probe_medium",
       description: "MEDIUM reviewer approval probe",
       source: "plugin",
+      pluginId: "test-plugin",
       category: "network",
       jsonSchema: {
         type: "object",
@@ -934,10 +937,11 @@ describe("ToolExecutor — C1 sensitive-path hard-block wiring", () => {
       ]);
       expect(permissionReviewEvents[1]).toMatchObject({
         verdictLevel: "medium",
-        reason: expect.stringContaining("***@example.com"),
       });
-      expect(permissionReviewEvents[1]?.reason).not.toContain("alice@example.com");
-      expect(permissionReviewEvents[1]?.reason).not.toContain("sk-abcdefghijklmnopqrstuvwxyz");
+      const reviewReason = String(permissionReviewEvents[1]?.reason ?? "");
+      expect(reviewReason).toContain("***@example.com");
+      expect(reviewReason).not.toContain("alice@example.com");
+      expect(reviewReason).not.toContain("sk-abcdefghijklmnopqrstuvwxyz");
       expect(requestAndWait).toHaveBeenCalledWith(expect.objectContaining({
         toolName: "reviewed_network_probe_medium",
         approvalPurpose: expect.objectContaining({
@@ -961,6 +965,7 @@ describe("ToolExecutor — C1 sensitive-path hard-block wiring", () => {
       name: "reviewed_write_probe",
       description: "reviewed write probe",
       source: "plugin",
+      pluginId: "test-plugin",
       category: "write",
       jsonSchema: {
         type: "object",
@@ -1520,6 +1525,7 @@ describe("ToolExecutor — R2-CR-4 ask_user_question audit redaction is gated by
       name: "ask_user_question",
       description: "plugin tool with the same name",
       source: "plugin",
+      pluginId: "test-plugin",
       category: "read",
       isReadOnly: () => true,
       jsonSchema: { type: "object", properties: {} },
@@ -2276,6 +2282,7 @@ describe("ToolExecutor — Layer 1 allowed-directories", () => {
         name: "teams_send",
         description: "Sends a Teams message.",
         source: "plugin",
+        pluginId: "ms-graph",
         category: "network",
         jsonSchema: {
           type: "object",
@@ -2371,6 +2378,7 @@ describe("ToolExecutor — Layer 1 allowed-directories", () => {
         name: "overlay_write",
         description: "Overlay write probe.",
         source: "plugin",
+        pluginId: "overlay-plugin",
         category: "write",
         jsonSchema: {
           type: "object",
@@ -2382,6 +2390,7 @@ describe("ToolExecutor — Layer 1 allowed-directories", () => {
         name: "mcp_network",
         description: "MCP network probe.",
         source: "mcp",
+        mcpServerId: "generic-mcp",
         category: "network",
         jsonSchema: {
           type: "object",
@@ -2897,6 +2906,7 @@ describe("ToolExecutor — Layer 1 allowed-directories", () => {
       name: "plugin_send_message",
       description: "Sends a message.",
       source: "plugin",
+      pluginId: "test-plugin",
       category: "network",
       jsonSchema: {
         type: "object",
