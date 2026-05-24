@@ -249,13 +249,14 @@ describe("historyToEntries", () => {
           toolUseId: "t1",
           name: "read_tool_result_chunk",
           durationMs: 456,
-          source: "plugin",
-          category: "read",
-          pluginId: "com.example.meeting",
         },
       ],
     });
-    expect(group?.kind === "tool_group" ? group.tools[0] : undefined).not.toHaveProperty("uiPayload");
+    const tool = group?.kind === "tool_group" ? group.tools[0] : undefined;
+    expect(tool).not.toHaveProperty("source");
+    expect(tool).not.toHaveProperty("category");
+    expect(tool).not.toHaveProperty("pluginId");
+    expect(tool).not.toHaveProperty("uiPayload");
   });
 
   it("replays ask_user_question answers as a visible answer recap bubble", () => {
