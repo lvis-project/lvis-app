@@ -121,6 +121,16 @@ describe("VercelUnifiedProvider azure-foundry", () => {
     const streamTextSpy = vi.fn(() => ({
       fullStream: (async function* () {
         yield {
+          type: "reasoning-delta",
+          id: "rsn-1",
+          text: "lvis_tool_search 노출 여부를 확인합니다.",
+        };
+        yield {
+          type: "text-delta",
+          id: "txt-1",
+          text: "현재 빌트인 도구에는 lvis_tool_search 가 있습니다.",
+        };
+        yield {
           type: "tool-call",
           toolCallId: "tu-2",
           toolName: "lvis_tool_search",
@@ -262,6 +272,14 @@ describe("VercelUnifiedProvider azure-foundry", () => {
           },
         },
       ],
+    });
+    expect(events).toContainEqual({
+      type: "reasoning_delta",
+      text: "tool_search 노출 여부를 확인합니다.",
+    });
+    expect(events).toContainEqual({
+      type: "text_delta",
+      text: "현재 빌트인 도구에는 tool_search 가 있습니다.",
     });
     expect(events.find((event) => event.type === "tool_call")).toMatchObject({
       type: "tool_call",
