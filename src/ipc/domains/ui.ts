@@ -5,7 +5,6 @@
 import { BrowserWindow, Menu, ipcMain, type IpcMainInvokeEvent, type MenuItemConstructorOptions } from "electron";
 import type {
   AssistantContextMenuAction,
-  AssistantContextMenuOption,
   AssistantContextMenuPayload,
   AssistantContextMenuPersona,
 } from "../../shared/assistant-context-menu.js";
@@ -36,16 +35,6 @@ function cleanCoordinate(value: unknown): number | null {
   return Math.max(0, Math.min(100_000, Math.round(value)));
 }
 
-function cleanOptions(value: unknown): AssistantContextMenuOption[] | null {
-  if (!Array.isArray(value)) return null;
-  const out: AssistantContextMenuOption[] = [];
-  for (const item of value.slice(0, MAX_OPTIONS)) {
-    const name = cleanMenuText((item as { name?: unknown } | null)?.name);
-    if (name) out.push({ name });
-  }
-  return out;
-}
-
 function cleanPersonas(value: unknown): AssistantContextMenuPersona[] | null {
   if (!Array.isArray(value)) return null;
   const out: AssistantContextMenuPersona[] = [];
@@ -64,21 +53,13 @@ function normalizePayload(value: unknown): AssistantContextMenuPayload | null {
   const requestId = cleanRequestId(raw.requestId);
   const x = cleanCoordinate(raw.x);
   const y = cleanCoordinate(raw.y);
-  const agents = cleanOptions(raw.agents);
-  const skills = cleanOptions(raw.skills);
   const personas = cleanPersonas(raw.personas);
-  if (!requestId || x === null || y === null || !agents || !skills || !personas) return null;
+  if (!requestId || x === null || y === null || !personas) return null;
   return {
     requestId,
     x,
     y,
-    agents,
-    skills,
     personas,
-    activeAgentName: cleanMenuText(raw.activeAgentName) ?? "",
-    activeSkillNames: Array.isArray(raw.activeSkillNames)
-      ? raw.activeSkillNames.slice(0, MAX_OPTIONS).map(cleanMenuText).filter((v): v is string => v !== null)
-      : [],
     activePersonaId: cleanMenuText(raw.activePersonaId) ?? "",
   };
 }
@@ -112,49 +93,7 @@ function buildAssistantContextMenu(
   event: IpcMainInvokeEvent,
   payload: AssistantContextMenuPayload,
 ): Menu {
-  const activeSkills = new Set(payload.activeSkillNames);
   const template: MenuItemConstructorOptions[] = [
-    {
-      label: "Agent",
-      submenu: [
-        {
-          label: "기본 에이전트",
-          type: "radio",
-          checked: payload.activeAgentName === "",
-          click: () => sendAction(event, { requestId: payload.requestId, kind: "agent", name: "" }),
-        },
-        ...payload.agents.map((agent): MenuItemConstructorOptions => ({
-          label: agent.name,
-          type: "radio",
-          checked: payload.activeAgentName === agent.name,
-          click: () => sendAction(event, { requestId: payload.requestId, kind: "agent", name: agent.name }),
-        })),
-        ...(payload.agents.length === 0
-          ? [{ label: "설치된 agent 없음", enabled: false } satisfies MenuItemConstructorOptions]
-          : []),
-      ],
-    },
-    {
-      label: "Skills",
-      submenu: [
-        {
-          label: "스킬 해제",
-          enabled: payload.activeSkillNames.length > 0,
-          click: () => sendAction(event, { requestId: payload.requestId, kind: "skills-clear" }),
-        },
-        { type: "separator" },
-        ...payload.skills.map((skill): MenuItemConstructorOptions => ({
-          label: skill.name,
-          type: "checkbox",
-          checked: activeSkills.has(skill.name),
-          click: () => sendAction(event, { requestId: payload.requestId, kind: "skill-toggle", name: skill.name }),
-        })),
-        ...(payload.skills.length === 0
-          ? [{ label: "사용 가능한 skill 없음", enabled: false } satisfies MenuItemConstructorOptions]
-          : []),
-      ],
-    },
-    { type: "separator" },
     {
       label: "Persona",
       submenu: payload.personas.length > 0

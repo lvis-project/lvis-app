@@ -7,7 +7,6 @@ import { PluginGridButton, type PluginEntry } from "./PluginGridButton.js";
 import type { InstallPhase } from "../hooks/use-plugin-marketplace.js";
 import { CommandPopover, type QuickAction } from "./CommandPopover.js";
 import type { RolePreset } from "../../../data/role-presets.js";
-import type { AssistantAgentSummary, AssistantSkillSummary } from "../../../shared/assistant-context.js";
 import type { AssistantContextMenuAction } from "../../../shared/assistant-context-menu.js";
 
 export interface InputActionBarProps {
@@ -38,12 +37,6 @@ export interface InputActionBarProps {
   activePreset: RolePreset | null | undefined;
   activePresetId: string;
   onSelectPreset: (id: string) => void;
-  agentOptions: AssistantAgentSummary[];
-  skillOptions: AssistantSkillSummary[];
-  activeAgentName: string;
-  onSelectAgent: (name: string) => void;
-  activeSkillNames: string[];
-  onChangeSkillNames: (updater: (current: string[]) => string[]) => void;
   // Trailing — thinking
   vendorSupportsThinking: boolean;
   enableThinkingChat: boolean;
@@ -82,12 +75,6 @@ export function InputActionBar({
   activePreset,
   activePresetId,
   onSelectPreset,
-  agentOptions,
-  skillOptions,
-  activeAgentName,
-  onSelectAgent,
-  activeSkillNames,
-  onChangeSkillNames,
   vendorSupportsThinking,
   enableThinkingChat,
   onToggleThinking,
@@ -95,43 +82,16 @@ export function InputActionBar({
   approvalSlot,
 }: InputActionBarProps) {
   const assistantMenuRequestIdRef = useRef<string | null>(null);
-  const hasAssistantContext =
-    !!activeAgentName ||
-    activeSkillNames.length > 0 ||
-    (!!activePreset && !activePreset.isDefault);
+  const hasAssistantContext = !!activePreset && !activePreset.isDefault;
   const assistantTitle = [
-    activeAgentName ? `Agent: ${activeAgentName}` : "",
-    activeSkillNames.length > 0 ? `Skills: ${activeSkillNames.join(", ")}` : "",
     activePreset && !activePreset.isDefault ? `Persona: ${activePreset.name}` : "",
-  ].filter(Boolean).join(" / ") || "Agent, skill, persona 선택";
-  const toggleSkill = useCallback((name: string) => {
-    onChangeSkillNames((current) => (
-      current.includes(name)
-        ? current.filter((item) => item !== name)
-        : [...current, name]
-    ));
-  }, [onChangeSkillNames]);
+  ].filter(Boolean).join(" / ") || "Persona 선택";
 
   const handleAssistantContextAction = useCallback((action: AssistantContextMenuAction) => {
     if (action.requestId !== assistantMenuRequestIdRef.current) return;
     assistantMenuRequestIdRef.current = null;
-    switch (action.kind) {
-      case "agent":
-        if (typeof action.name === "string") onSelectAgent(action.name);
-        return;
-      case "skill-toggle":
-        if (typeof action.name === "string") toggleSkill(action.name);
-        return;
-      case "skills-clear":
-        onChangeSkillNames(() => []);
-        return;
-      case "persona":
-        if (typeof action.id === "string") onSelectPreset(action.id);
-        return;
-      default:
-        return;
-    }
-  }, [onChangeSkillNames, onSelectAgent, onSelectPreset, toggleSkill]);
+    if (action.kind === "persona" && typeof action.id === "string") onSelectPreset(action.id);
+  }, [onSelectPreset]);
 
   useEffect(() => {
     return window.lvis?.ui?.onAssistantContextAction?.(handleAssistantContextAction);
@@ -151,14 +111,10 @@ export function InputActionBar({
       requestId,
       x: Math.round(event.clientX || rect.left),
       y: Math.round(event.clientY || rect.top),
-      agents: agentOptions.map((agent) => ({ name: agent.name })),
-      skills: skillOptions.map((skill) => ({ name: skill.name })),
       personas: rolePresets.map((preset) => ({ id: preset.id, name: preset.name })),
-      activeAgentName,
-      activeSkillNames,
       activePersonaId: activePresetId,
     });
-  }, [activeAgentName, activePresetId, activeSkillNames, agentOptions, rolePresets, skillOptions]);
+  }, [activePresetId, rolePresets]);
 
   return (
     <div
@@ -214,7 +170,7 @@ export function InputActionBar({
           </div>
         )}
 
-        {/* Native assistant context menu. Electron draws this outside the
+        {/* Native persona context menu. Electron draws this outside the
             renderer DOM, so submenus are not clipped by the chat pane. */}
         <Button
           variant="outline"

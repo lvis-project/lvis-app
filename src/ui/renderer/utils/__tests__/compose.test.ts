@@ -147,17 +147,14 @@ describe("composeOutgoing", () => {
     expect(r.text).not.toContain("[Pasted text #7 +99 lines]");
   });
 
-  it("returns active role preset as system prompt metadata", () => {
+  it("returns only the active persona prompt id for main-side resolution", () => {
     const r = composeOutgoing({
       raw: "hi",
       activePreset: { id: "x", name: "reviewer", systemPromptAdd: "Review carefully." },
       attachments: [],
     });
     expect(r.text).toBe("hi");
-    expect(r.rolePrompt).toEqual({
-      name: "reviewer",
-      systemPromptAdd: "Review carefully.",
-    });
+    expect(r.personaPromptId).toBe("x");
   });
 
   it("keeps imported trigger envelopes as exact plugin-authored text", () => {

@@ -15,6 +15,7 @@
  *                lvis:memory:*, lvis:starred:*, lvis:feedback:*, lvis:ask-user-question:*
  *   plugins      lvis:plugins:*, lvis:bootstrap:*, lvis:runtime:*, lvis:marketplace:*,
  *                lvis:mcp:*, lvis:plugin:*, lvis:file:*, lvis:notification:clicked
+ *   prompts      lvis:prompts:*
  *   usage        lvis:usage:*
  *   audit        lvis:audit:*, lvis:dlp:*
  *   permissions  lvis:permission:*, lvis:approval:*, lvis:policy:*
@@ -31,6 +32,7 @@ import { registerDemoHandlers } from "./domains/demo.js";
 import { registerTourHandlers } from "./domains/tour.js";
 import { registerChatHandlers } from "./domains/chat.js";
 import { registerPluginsHandlers } from "./domains/plugins.js";
+import { registerPromptHandlers } from "./domains/prompts.js";
 import { registerUsageHandlers } from "./domains/usage.js";
 import { registerAuditHandlers } from "./domains/audit.js";
 import { registerPermissionsHandlers } from "./domains/permissions.js";
@@ -69,6 +71,7 @@ export function registerIpcHandlers(
   registerTourHandlers(deps);
   registerChatHandlers(deps);
   registerPluginsHandlers(deps);
+  registerPromptHandlers(deps);
   registerUsageHandlers(deps);
   registerAuditHandlers(deps);
   registerPermissionsHandlers(deps);
