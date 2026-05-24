@@ -45,6 +45,8 @@ export type StreamEvent = {
   reviewStatus?: PermissionReviewStatus;
   toolCategory?: "read" | "write" | "shell" | "network" | "meta";
   source?: "builtin" | "plugin" | "mcp";
+  pluginId?: string;
+  mcpServerId?: string;
   verdictLevel?: PermissionReviewRiskLevel;
   approvalPurpose?: ApprovalPurposeSuggestion;
   roundIndex?: number;
@@ -154,6 +156,10 @@ export type ToolEntryItem = {
   status: "running" | "done" | "error";
   input?: Record<string, unknown>;
   result?: string;
+  source?: "builtin" | "plugin" | "mcp";
+  category?: "read" | "write" | "shell" | "network" | "meta";
+  pluginId?: string;
+  mcpServerId?: string;
   /** Optional MCP Apps UI payload from MCP tool response. */
   uiPayload?: {
     serverId: string;
@@ -685,6 +691,10 @@ export function applyToolStart(
     name: string;
     displayOrder?: number;
     input?: Record<string, unknown>;
+    source?: "builtin" | "plugin" | "mcp";
+    category?: "read" | "write" | "shell" | "network" | "meta";
+    pluginId?: string;
+    mcpServerId?: string;
   },
 ): ChatEntry[] {
   const next = [...entries];
@@ -701,6 +711,10 @@ export function applyToolStart(
     displayOrder: payload.displayOrder ?? 0,
     status: "running",
     input: payload.input,
+    ...(payload.source ? { source: payload.source } : {}),
+    ...(payload.category ? { category: payload.category } : {}),
+    ...(payload.pluginId ? { pluginId: payload.pluginId } : {}),
+    ...(payload.mcpServerId ? { mcpServerId: payload.mcpServerId } : {}),
     startedAt: Date.now(),
   };
 
@@ -751,6 +765,10 @@ export function applyToolEnd(
     isError?: boolean;
     uiPayload?: ToolEntryItem["uiPayload"];
     durationMs?: number;
+    source?: "builtin" | "plugin" | "mcp";
+    category?: "read" | "write" | "shell" | "network" | "meta";
+    pluginId?: string;
+    mcpServerId?: string;
   },
 ): ChatEntry[] {
   const next = [...entries];
@@ -771,6 +789,10 @@ export function applyToolEnd(
       ...rest,
       status: (payload.isError ? "error" : "done") as "done" | "error",
       result: payload.result,
+      ...(payload.source ? { source: payload.source } : {}),
+      ...(payload.category ? { category: payload.category } : {}),
+      ...(payload.pluginId ? { pluginId: payload.pluginId } : {}),
+      ...(payload.mcpServerId ? { mcpServerId: payload.mcpServerId } : {}),
       ...(payload.uiPayload && { uiPayload: payload.uiPayload }),
       ...(typeof payload.durationMs === "number" && { durationMs: payload.durationMs }),
     };

@@ -22,6 +22,10 @@ export type SerializedCheckpointMeta = NonNullable<MessageMeta["checkpointMeta"]
 export type SerializedImportedTriggerMeta = NonNullable<MessageMeta["importedTrigger"]>;
 export type SerializedToolDisplayMeta = {
   durationMs?: number;
+  source?: "builtin" | "plugin" | "mcp";
+  category?: "read" | "write" | "shell" | "network" | "meta";
+  pluginId?: string;
+  mcpServerId?: string;
 };
 
 // Exact IPC payload emitted by serializeHistoryMessage() for renderer history
@@ -156,12 +160,43 @@ function serializeToolDisplay(
   // Persisted JSONL is user-writable. Replaying uiPayload would mount MCP UI
   // resources and cross back into host IPC without proof that this row came from
   // an actual tool execution, so persisted replay keeps only inert timing data.
-  if (
+  const durationMs =
     typeof toolDisplay.durationMs === "number" &&
     Number.isFinite(toolDisplay.durationMs) &&
     toolDisplay.durationMs >= 0
-  ) {
-    return { durationMs: toolDisplay.durationMs };
+      ? toolDisplay.durationMs
+      : undefined;
+  const source =
+    toolDisplay.source === "builtin" ||
+    toolDisplay.source === "plugin" ||
+    toolDisplay.source === "mcp"
+      ? toolDisplay.source
+      : undefined;
+  const category =
+    toolDisplay.category === "read" ||
+    toolDisplay.category === "write" ||
+    toolDisplay.category === "shell" ||
+    toolDisplay.category === "network" ||
+    toolDisplay.category === "meta"
+      ? toolDisplay.category
+      : undefined;
+  const pluginId =
+    typeof toolDisplay.pluginId === "string" && toolDisplay.pluginId.length > 0
+      ? toolDisplay.pluginId
+      : undefined;
+  const mcpServerId =
+    typeof toolDisplay.mcpServerId === "string" && toolDisplay.mcpServerId.length > 0
+      ? toolDisplay.mcpServerId
+      : undefined;
+
+  if (durationMs !== undefined || source !== undefined || category !== undefined || pluginId !== undefined || mcpServerId !== undefined) {
+    return {
+      ...(durationMs !== undefined ? { durationMs } : {}),
+      ...(source !== undefined ? { source } : {}),
+      ...(category !== undefined ? { category } : {}),
+      ...(pluginId !== undefined ? { pluginId } : {}),
+      ...(mcpServerId !== undefined ? { mcpServerId } : {}),
+    };
   }
   return undefined;
 }
