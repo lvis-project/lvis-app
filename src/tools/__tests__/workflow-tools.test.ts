@@ -256,6 +256,18 @@ describe("todo_session_write tool", () => {
     expect(r.isError).toBe(true);
   });
 
+  it("rejects execution when session metadata is missing", async () => {
+    const store = new SessionTodoStore();
+    const tool = createTodoSessionWriteTool(store);
+    const r = await tool.execute(
+      { items: [{ content: "step", status: "pending" }] },
+      { cwd: process.cwd(), extraAllowedDirectories: [], metadata: {} },
+    );
+    expect(r.isError).toBe(true);
+    expect(r.output).toContain("missing sessionId metadata");
+    expect(store.list("unknown")).toEqual([]);
+  });
+
   it("merges items by id and preserves order", async () => {
     const store = new SessionTodoStore();
     const tool = createTodoSessionWriteTool(store);
