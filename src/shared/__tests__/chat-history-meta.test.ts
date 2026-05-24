@@ -56,6 +56,30 @@ describe("serializeHistoryMessage createdAt + turnSummary projection", () => {
     expect(s.createdAt).toBe(1_700_000_000_000);
   });
 
+  it("normalizes provider wire tool_search aliases at the history IPC boundary", () => {
+    const assistant: GenericMessage = {
+      role: "assistant",
+      content: "현재 빌트인 도구에는 `lvis_tool_search` 가 있습니다.",
+      thought: "lvis\\_tool_search 노출 여부를 확인합니다.",
+      toolCalls: [{ id: "t1", name: "lvis_tool_search" }],
+    };
+    const toolResult: GenericMessage = {
+      role: "tool_result",
+      toolUseId: "t1",
+      toolName: "lvis_tool_search",
+      content: "필요한 도구는 lvis_tool\\_search 로 로드하세요.",
+    };
+
+    const serializedAssistant = serializeHistoryMessage(assistant, 20);
+    const serializedToolResult = serializeHistoryMessage(toolResult, 21);
+
+    expect(serializedAssistant.content).toBe("현재 빌트인 도구에는 `tool_search` 가 있습니다.");
+    expect(serializedAssistant.thought).toBe("tool_search 노출 여부를 확인합니다.");
+    expect(serializedAssistant.toolCalls?.[0]?.name).toBe("tool_search");
+    expect(serializedToolResult.toolName).toBe("tool_search");
+    expect(serializedToolResult.content).toBe("필요한 도구는 tool_search 로 로드하세요.");
+  });
+
   it("preserves systemNotice marker through serialization (Issue #911)", () => {
     const m: GenericMessage = {
       role: "assistant",
