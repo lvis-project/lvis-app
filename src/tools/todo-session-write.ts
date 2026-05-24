@@ -1,8 +1,8 @@
 /**
- * `todo_session_write` LLM tool — assistant's per-session checklist.
- * Distinct from user `task_*` (persistent): in-memory only, scoped to the
- * active ChatSession via `ctx.metadata.sessionId`. The renderer's
- * SessionTodoPanel surfaces the live list inside the chat view.
+ * `todo_session_write` LLM tool — assistant's current-turn checklist.
+ * Distinct from user `task_*` (persistent): in-memory only, cleared at the
+ * next user turn boundary, and routed by active ChatSession id so the
+ * renderer's SessionTodoPanel receives the right live list.
  */
 import { createDynamicTool, type Tool } from "./base.js";
 import type {
@@ -23,7 +23,7 @@ export function createTodoSessionWriteTool(store: SessionTodoStore): Tool {
     name: "todo_session_write",
     description:
       "현재 턴 동안 어시스턴트가 따라갈 체크리스트를 작성/갱신합니다. " +
-      "사용자 task_* 와 다름 (세션 단위 휘발성). id 를 같이 보내면 merge, " +
+      "사용자 task_* 와 다름 (다음 사용자 턴 시작 시 자동으로 비워지는 휘발성 plan). id 를 같이 보내면 merge, " +
       "생략하면 새 항목 생성. beforeId/afterId 로 중간 삽입 또는 이동 가능. " +
       "status: pending | in_progress | completed | deleted. " +
       "사용자가 본인의 업무·할 일·태스크를 등록·기록·추가해달라는 요청에는 " +
@@ -31,7 +31,7 @@ export function createTodoSessionWriteTool(store: SessionTodoStore): Tool {
       "도구가 노출되어 있으면 그쪽을 우선 호출하세요. 본 도구는 어시스턴트가 " +
       "다단계 응답을 풀어가는 *내부 단계 추적* 용도로만 사용합니다.",
     source: "builtin",
-    // category="read" — the assistant's own per-session checklist lives
+    // category="read" — the assistant's own current-turn checklist lives
     // entirely in an in-memory store this conversation owns; there is no
     // external mutation, no on-disk persistence, no cross-session impact.
     // Treating each tick as a write would pop an approval modal for every
@@ -63,10 +63,13 @@ export function createTodoSessionWriteTool(store: SessionTodoStore): Tool {
       },
     },
     execute: async (rawInput, ctx) => {
-      const sessionId =
-        typeof ctx.metadata?.sessionId === "string"
-          ? (ctx.metadata.sessionId as string)
-          : "unknown";
+      if (typeof ctx.metadata?.sessionId !== "string" || ctx.metadata.sessionId.length === 0) {
+        return {
+          output: JSON.stringify({ error: "missing sessionId metadata" }),
+          isError: true,
+        };
+      }
+      const sessionId = ctx.metadata.sessionId;
       const a = (rawInput ?? {}) as Record<string, unknown>;
       const itemsRaw = Array.isArray(a.items) ? (a.items as unknown[]) : [];
       const updates: SessionTodoUpdate[] = [];
