@@ -166,7 +166,7 @@ export interface MessageMeta {
     toolCount: number;
     cumulativeToolMs: number;
     /**
-     * Turn-end projected context input. This is the single context-fill SOT
+     * Engine-projected next request input. This is the single context-fill SOT
      * used by TokenProgressRing and the turn footer.
      */
     tokensIn: number;

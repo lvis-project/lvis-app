@@ -129,7 +129,7 @@ export type StreamEvent = {
    * Turn-aggregate fresh input tokens (sum of per-round
    * `inputTokens − cacheRead − cacheWrite`). Used by TokenCostBadge for the
    * billing-weight headline + cost calc. Distinct from `tokensIn`, which is
-   * the turn-end context-fill SOT.
+   * the engine-projected next request input SOT.
    */
   freshInputTokens?: number;
   /**
