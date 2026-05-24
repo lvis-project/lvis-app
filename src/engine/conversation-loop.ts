@@ -443,14 +443,17 @@ export interface ConversationLoopDeps {
     listPluginIds(): string[];
   };
   /**
-   * Sub-agent fixed tool-surface support. When a child loop receives a
-   * pre-scoped registry containing plugin tools, lazy keyword matching may
-   * not see the plugin keywords in the child instruction text. These plugin
-   * ids are therefore always included in the child turn scope so the LLM gets
-   * the actual structured tool schemas instead of only natural-language
-   * instructions about available tools.
+   * Fixed-scope support for callers that already made a plugin-scope decision.
+   * These plugin ids are always eligible for catalog/preload checks even when
+   * the child/routine instruction text does not repeat a plugin keyword.
    */
   forcedActivePluginIds?: ReadonlySet<string>;
+  /**
+   * Explicit tool-schema allowlist for fixed-surface callers such as
+   * sub-agents. These names enter `tools[]` directly even when no keyword
+   * preloads them.
+   */
+  forcedActiveToolNames?: ReadonlySet<string>;
   /**
    * Sub-agent model override. When set, `refreshProvider()` uses this model
    * ID for the primary provider instead of the active vendor block's model.
@@ -529,13 +532,21 @@ interface ToolScope {
   activePluginIds: Set<string>;
   /**
    * Tool-Level Deferral — 개별적으로 preload/promote 된 plugin+mcp tool 이름.
-   * `deferral` 이 true 일 때만 의미가 있다 (flag off 경로는 미사용).
+   * Builtins/meta-tools are loaded separately by `includeBuiltins`.
    */
   activeToolNames: Set<string>;
   includeBuiltins: boolean;
   includeMcp: boolean;
-  /** Tool-Level Deferral — 이번 턴 `experimental.toolDeferral` flag snapshot. */
+  /** Tool-Level Deferral is the only plugin/MCP exposure path. */
   deferral: boolean;
+}
+
+interface ToolExposureMetrics {
+  loadedToolCount: number;
+  deferredCatalogCount: number;
+  promotedToolNames: string[];
+  toolSchemaTokens: number;
+  projectedRequestInputTokens: number | null;
 }
 
 // ─── Loop ───────────────────────────────────────────
@@ -585,7 +596,7 @@ export class ConversationLoop {
   /**
    * Tool-Level Deferral — 직전 턴에 로드된 plugin/mcp tool 이름 집합.
    * keyword-miss 후속 턴이 이미 promote/preload 된 도구를 계속 노출하도록
-   * carry-forward 한다. null = 이전 턴 없음. flag off 경로에서는 미사용.
+   * carry-forward 한다. null = 이전 턴 없음.
    */
   private lastTurnToolNames: Set<string> | null = null;
   /** Session-wide total of request_plugin activations (cap MAX_SESSION_PLUGIN_EXPANSION). */
@@ -1671,11 +1682,22 @@ export class ConversationLoop {
     // follow-up turn keeps tool_search-promoted / keyword-preloaded tools
     // loaded even if the keyword does not re-match.
     this.lastTurnToolNames = new Set(scope.activeToolNames);
+    const postTurnToolExposure = this.buildToolExposureMetrics(
+      scope,
+      result.finalToolSchemas,
+      estimateRequestInputProjection({
+        systemPrompt,
+        messages: this.history.getMessages(),
+        toolSchemas: result.finalToolSchemas,
+      }),
+      result.promotedToolNames,
+    );
 
     // §4.5.2 step 11 — POST_TURN
     this.tracer.step("POST_TURN", {
       toolCallCount: result.toolCalls.length,
       stopReason: result.stopReason,
+      ...postTurnToolExposure,
     });
     // §4.5.5 Post-Turn Hook Chain (Agent 6: compact → saveSession → extractMemory → detect-checkpoint → update-title → audit → idle-poke)
     if (this.deps.postTurnHookChain) {
@@ -1687,6 +1709,7 @@ export class ConversationLoop {
         toolCalls: result.toolCalls.map((tc) => ({ name: tc.name, isError: false })),
         tokenUsage: result.usage,
         usageByModel: result.usageByModel,
+        toolExposure: postTurnToolExposure,
         route: routeResult.route,
         vendorProvider: result.vendorProvider,
         vendorModel: result.vendorModel,
@@ -1756,6 +1779,7 @@ export class ConversationLoop {
         toolCalls: result.toolCalls.map((tc) => ({ name: tc.name, isError: false })),
         tokenUsage: auditTokenUsage,
         usageByModel: auditUsageByModel,
+        toolExposure: postTurnToolExposure,
         route: auditRoute,
       });
       this.deps.idleScheduler?.signalConversation();
@@ -1948,6 +1972,7 @@ export class ConversationLoop {
     vendorProvider: LLMVendor;
     vendorModel: string;
     finalToolSchemas: ToolSchema[];
+    promotedToolNames: string[];
   }> {
     const llmSettings = this.deps.settingsService.get("llm");
     const activeBlock = llmSettings.vendors[llmSettings.provider];
@@ -1985,6 +2010,7 @@ export class ConversationLoop {
       vendorProvider: servingVendorProvider,
       vendorModel: servingVendorModel,
       finalToolSchemas: [...toolSchemas],
+      promotedToolNames: [...new Set(promotedToolNamesForTurn)],
     });
     const turnProvider = this.provider instanceof FallbackProvider
       ? this.provider.withCallbacks({
@@ -2007,6 +2033,7 @@ export class ConversationLoop {
     let pluginExpansions = 0;
     // Tool-Level Deferral — per-turn tool_search counter (mirror pluginExpansions).
     let toolSearches = 0;
+    const promotedToolNamesForTurn: string[] = [];
     let knowledgeCallCount = 0;
     let roundIndex = 0;
     let toolTrustOrigin = bounds.toolTrustOrigin;
@@ -2120,9 +2147,6 @@ export class ConversationLoop {
         this.tracer.step("GUIDANCE_INJECTED", { round, len: joined.length });
       }
 
-      // §4.5.2 step 7 — LLM_STREAM
-      this.tracer.step("LLM_STREAM", { round, model, toolCount: toolSchemas.length });
-
       const repaired = this.history.repairToolPairInvariant();
       if (repaired.removedMessages > 0 || repaired.removedToolCalls > 0) {
         log.warn(
@@ -2136,6 +2160,18 @@ export class ConversationLoop {
         systemPrompt,
         messages: messagesForRound,
         toolSchemas,
+      });
+      // §4.5.2 step 7 — LLM_STREAM
+      this.tracer.step("LLM_STREAM", {
+        round,
+        model,
+        toolCount: toolSchemas.length,
+        ...this.buildToolExposureMetrics(
+          scope,
+          toolSchemas,
+          this.lastRoundInputProjection,
+          promotedToolNamesForTurn,
+        ),
       });
       const stream = await collectRoundStream({
         provider: turnProvider,
@@ -2378,7 +2414,6 @@ export class ConversationLoop {
         id: tc.id, name: tc.name, input: tc.input,
       }));
 
-      const prevToolCount = toolSchemas.length;
       const pluginOutcome = handleRequestPlugin(toolUses, {
         turnExpansions: pluginExpansions,
         sessionExpansions: this.sessionPluginExpansions,
@@ -2393,10 +2428,10 @@ export class ConversationLoop {
       if (rebuiltAfterPlugin) {
         toolSchemas = this.rebuildToolSchemas(scope);
       }
-      const addedToolCount = Math.max(0, toolSchemas.length - prevToolCount);
+      const catalogCountAfterPlugin = this.deps.toolRegistry.getToolCatalogForScope(scope).length;
       for (const rr of pluginOutcome.results) {
         const finalContent = !rr.is_error && rebuiltAfterPlugin
-          ? `${rr.content} ${addedToolCount}개 도구 추가됨 (현재 ${toolSchemas.length}개 사용 가능).`
+          ? `${rr.content} 플러그인 도구는 카탈로그에서 검색 가능 (${catalogCountAfterPlugin}개 후보, 현재 ${toolSchemas.length}개 로드됨). 필요한 도구는 tool_search 로 로드하세요.`
           : rr.content;
         this.history.append({
           role: "tool_result",
@@ -2414,49 +2449,47 @@ export class ConversationLoop {
         });
       }
 
-      // Tool-Level Deferral — tool_search 가로채기 (flag on 일 때만 tool 이
-      // 노출되므로 off 면 catalog/intercept 자체가 no-op). request_plugin 과
-      // 동일 패턴: catalog 매치 → activeToolNames promote → schema rebuild →
+      // Tool-Level Deferral — tool_search 가로채기. request_plugin 과 동일
+      // 패턴: catalog 매치 → activeToolNames promote → schema rebuild →
       // tool_result 합성 (tool-pair invariant) + round 예산 환불.
       let toolUsesForExecutor: ToolUseBlock[] = pluginOutcome.remaining;
       let searchPromotedThisRound = false;
-      if (scope.deferral) {
-        const prevToolCountForSearch = toolSchemas.length;
-        const searchOutcome = handleToolSearch(pluginOutcome.remaining, {
-          turnSearches: toolSearches,
-          sessionSearches: this.sessionToolSearches,
-          activeToolNames: scope.activeToolNames,
-          catalog: this.deps.toolRegistry.getToolCatalogForScope(scope),
-        });
-        toolSearches = searchOutcome.nextTurnSearches;
-        this.sessionToolSearches = searchOutcome.nextSessionSearches;
-        toolUsesForExecutor = searchOutcome.remaining;
-        searchPromotedThisRound = searchOutcome.promotedToolNames.length > 0;
+      const prevToolCountForSearch = toolSchemas.length;
+      const searchOutcome = handleToolSearch(pluginOutcome.remaining, {
+        turnSearches: toolSearches,
+        sessionSearches: this.sessionToolSearches,
+        activeToolNames: scope.activeToolNames,
+        catalog: this.deps.toolRegistry.getToolCatalogForScope(scope),
+      });
+      toolSearches = searchOutcome.nextTurnSearches;
+      this.sessionToolSearches = searchOutcome.nextSessionSearches;
+      toolUsesForExecutor = searchOutcome.remaining;
+      searchPromotedThisRound = searchOutcome.promotedToolNames.length > 0;
+      promotedToolNamesForTurn.push(...searchOutcome.promotedToolNames);
 
-        const rebuiltAfterSearch = searchOutcome.promotedToolNames.length > 0;
-        if (rebuiltAfterSearch) {
-          toolSchemas = this.rebuildToolSchemas(scope);
-        }
-        const addedBySearch = Math.max(0, toolSchemas.length - prevToolCountForSearch);
-        for (const rr of searchOutcome.results) {
-          const finalContent = !rr.is_error && rebuiltAfterSearch
-            ? `${rr.content} (현재 ${toolSchemas.length}개 사용 가능, +${addedBySearch}).`
-            : rr.content;
-          this.history.append({
-            role: "tool_result",
-            toolUseId: rr.tool_use_id,
-            toolName: TOOL_SEARCH_TOOL,
-            content: finalContent,
-            ...(rr.is_error && { isError: true }),
-          });
-        }
-        for (const promoted of searchOutcome.promotedToolNames) {
-          allToolCalls.push({
-            name: TOOL_SEARCH_TOOL,
-            input: { promoted },
-            result: `loaded:${promoted}`,
-          });
-        }
+      const rebuiltAfterSearch = searchOutcome.promotedToolNames.length > 0;
+      if (rebuiltAfterSearch) {
+        toolSchemas = this.rebuildToolSchemas(scope);
+      }
+      const addedBySearch = Math.max(0, toolSchemas.length - prevToolCountForSearch);
+      for (const rr of searchOutcome.results) {
+        const finalContent = !rr.is_error && rebuiltAfterSearch
+          ? `${rr.content} (현재 ${toolSchemas.length}개 사용 가능, +${addedBySearch}).`
+          : rr.content;
+        this.history.append({
+          role: "tool_result",
+          toolUseId: rr.tool_use_id,
+          toolName: TOOL_SEARCH_TOOL,
+          content: finalContent,
+          ...(rr.is_error && { isError: true }),
+        });
+      }
+      for (const promoted of searchOutcome.promotedToolNames) {
+        allToolCalls.push({
+          name: TOOL_SEARCH_TOOL,
+          input: { promoted },
+          result: `loaded:${promoted}`,
+        });
       }
 
       // meta-tool (request_plugin / tool_search) 만 있으면 다음 round 로 —
@@ -2570,6 +2603,22 @@ export class ConversationLoop {
       }
     }
     return result;
+  }
+
+  private buildToolExposureMetrics(
+    scope: ToolScope,
+    toolSchemas: ToolSchema[],
+    projection: RequestInputProjection | null,
+    promotedToolNames: readonly string[] = [],
+  ): ToolExposureMetrics {
+    return {
+      loadedToolCount: toolSchemas.length,
+      deferredCatalogCount: this.deps.toolRegistry.getToolCatalogForScope(scope).length,
+      promotedToolNames: [...new Set(promotedToolNames)],
+      toolSchemaTokens: projection?.toolSchemaTokens
+        ?? estimateTokens(JSON.stringify({ tools: toolSchemas })),
+      projectedRequestInputTokens: projection?.totalTokens ?? null,
+    };
   }
 
   /**
@@ -2948,6 +2997,7 @@ export class ConversationLoop {
    * - KeywordEngine.matchAllPluginIds() → 이번 턴 active plugin Set
    * - 매치 없음(일반 대화) → lastTurnScope fallback, 그마저 없으면 빈 Set (builtin-only)
    * - Builtins + MCP는 항상 포함 (host-side tool은 항시 사용 가능)
+   * - Plugin/MCP schemas are still loaded only by activeToolNames.
    */
   private resolveToolScope(input: string): ToolScope {
     const matched = this.deps.keywordEngine.matchAllPluginIds(input);
@@ -2968,24 +3018,28 @@ export class ConversationLoop {
       }
     }
 
-    // Tool-Level Deferral — read the per-turn flag snapshot.
-    const deferral = this.deps.settingsService.get("experimental")?.toolDeferral === true;
+    // Tool-Level Deferral default-on: persisted experimental.toolDeferral is
+    // no longer a runtime branch because the legacy whole-plugin schema path
+    // has been removed.
+    const deferral = true;
 
-    // (B) keyword→tool preload ∪ carried-forward loaded tools. Only computed
-    // when the flag is on (flag-off path leaves activeToolNames unused). The
-    // preload set is restricted to tools whose owning plugin is in scope, so
-    // a keyword can never load a tool the plugin-scope path would have hidden.
+    // (B) keyword→tool preload ∪ carried-forward loaded tools ∪ explicit
+    // fixed-surface allowlist. Keyword/carry-forward entries are restricted to
+    // tools whose owning plugin is in scope, so a keyword can never load a tool
+    // the plugin-scope path would have hidden.
     const activeToolNames = new Set<string>();
-    if (deferral) {
-      const inScopeToolNames = this.scopedToolNameSet(activePluginIds);
-      const preloaded = this.deps.keywordEngine.matchToolNames(
-        input,
-        (name) => inScopeToolNames.has(name),
-      );
-      for (const name of preloaded) activeToolNames.add(name);
-      for (const name of this.lastTurnToolNames ?? []) {
-        if (inScopeToolNames.has(name)) activeToolNames.add(name);
-      }
+    const inScopeToolNames = this.scopedToolNameSet(activePluginIds);
+    const preloaded = this.deps.keywordEngine.matchToolNames(
+      input,
+      (name) => inScopeToolNames.has(name),
+    );
+    for (const name of preloaded) activeToolNames.add(name);
+    for (const name of this.lastTurnToolNames ?? []) {
+      if (inScopeToolNames.has(name)) activeToolNames.add(name);
+    }
+    const registeredToolNames = new Set(this.deps.toolRegistry.listAll().map((tool) => tool.name));
+    for (const name of this.deps.forcedActiveToolNames ?? []) {
+      if (registeredToolNames.has(name)) activeToolNames.add(name);
     }
 
     return {

@@ -3,9 +3,8 @@
  *
  * Verifies scope filter semantics:
  *   - Empty activePluginIds → builtin-only (plugin tools excluded)
- *   - Single plugin in scope → builtins + that plugin's tools
- *   - Multi-plugin scope → union of plugin tools
- *   - MCP toggle → MCP tools included only when includeMcp=true
+ *   - Active plugin scope alone → catalog eligibility, not loaded schemas
+ *   - Plugin/MCP schemas load only by activeToolNames
  *   - Builtins toggle → builtins excluded when includeBuiltins=false
  */
 import { describe, it, expect } from "vitest";
@@ -71,7 +70,7 @@ describe("ToolRegistry.getToolSchemasForScope — Phase 1 Lazy Tool Scoping", ()
     expect(names).toEqual(["bash", "web_search"]);
   });
 
-  it("single plugin in scope → builtins + that plugin's tools", () => {
+  it("active plugin scope alone does not load plugin schemas", () => {
     const r = seed();
     const schemas = r.getToolSchemasForScope({
       activePluginIds: new Set(["com.example.meeting"]),
@@ -79,13 +78,14 @@ describe("ToolRegistry.getToolSchemasForScope — Phase 1 Lazy Tool Scoping", ()
       includeMcp: false,
     });
     const names = schemas.map((s) => s.name).sort();
-    expect(names).toEqual(["bash", "meeting_start", "meeting_stop", "web_search"]);
+    expect(names).toEqual(["bash", "web_search"]);
   });
 
-  it("multi-plugin scope → union of plugin tools", () => {
+  it("plugin schemas load individually by activeToolNames", () => {
     const r = seed();
     const schemas = r.getToolSchemasForScope({
       activePluginIds: new Set(["com.example.meeting", "com.example.email"]),
+      activeToolNames: new Set(["meeting_stop", "email_list"]),
       includeBuiltins: true,
       includeMcp: false,
     });
@@ -93,16 +93,16 @@ describe("ToolRegistry.getToolSchemasForScope — Phase 1 Lazy Tool Scoping", ()
     expect(names).toEqual([
       "bash",
       "email_list",
-      "meeting_start",
       "meeting_stop",
       "web_search",
     ]);
   });
 
-  it("includeMcp=true adds MCP tools; includeMcp=false excludes them", () => {
+  it("includeMcp=true still requires activeToolNames for MCP schemas", () => {
     const r = seed();
     const withMcp = r.getToolSchemasForScope({
       activePluginIds: new Set<string>(),
+      activeToolNames: new Set(["mcp_fetch"]),
       includeBuiltins: true,
       includeMcp: true,
     });
@@ -120,17 +120,19 @@ describe("ToolRegistry.getToolSchemasForScope — Phase 1 Lazy Tool Scoping", ()
     const r = seed();
     const schemas = r.getToolSchemasForScope({
       activePluginIds: new Set(["com.example.meeting"]),
+      activeToolNames: new Set(["meeting_start"]),
       includeBuiltins: false,
       includeMcp: false,
     });
     const names = schemas.map((s) => s.name).sort();
-    expect(names).toEqual(["meeting_start", "meeting_stop"]);
+    expect(names).toEqual(["meeting_start"]);
   });
 
   it("accepts string[] in addition to Set for activePluginIds", () => {
     const r = seed();
     const schemas = r.getToolSchemasForScope({
       activePluginIds: ["com.example.email"],
+      activeToolNames: ["email_list"],
       includeBuiltins: false,
       includeMcp: false,
     });
@@ -149,14 +151,14 @@ describe("ToolRegistry.getToolSchemasForScope — Phase 1 Lazy Tool Scoping", ()
   });
 });
 
-describe("ToolRegistry — Tool-Level Deferral (flag on)", () => {
+describe("ToolRegistry — Tool-Level Deferral", () => {
   function seedWithToolSearch(): ToolRegistry {
     const r = seed();
     r.register(makeBuiltin("tool_search"));
     return r;
   }
 
-  it("flag off: tool_search hidden even though registered as a builtin", () => {
+  it("tool_search is visible whenever builtins are included", () => {
     const r = seedWithToolSearch();
     const schemas = r.getToolSchemasForScope({
       activePluginIds: new Set<string>(),
@@ -164,10 +166,10 @@ describe("ToolRegistry — Tool-Level Deferral (flag on)", () => {
       includeMcp: false,
       deferral: false,
     });
-    expect(schemas.map((s) => s.name)).not.toContain("tool_search");
+    expect(schemas.map((s) => s.name)).toContain("tool_search");
   });
 
-  it("flag on: tool_search visible; plugin tools load individually by activeToolNames", () => {
+  it("plugin tools load individually by activeToolNames", () => {
     const r = seedWithToolSearch();
     const schemas = r.getToolSchemasForScope({
       activePluginIds: new Set(["com.example.meeting"]),
@@ -182,7 +184,7 @@ describe("ToolRegistry — Tool-Level Deferral (flag on)", () => {
     expect(names).toEqual(["bash", "meeting_start", "tool_search", "web_search"]);
   });
 
-  it("flag on: plugin tool not in activeToolNames stays deferred", () => {
+  it("plugin tool not in activeToolNames stays deferred", () => {
     const r = seedWithToolSearch();
     const schemas = r.getToolSchemasForScope({
       activePluginIds: new Set(["com.example.meeting"]),
@@ -193,6 +195,18 @@ describe("ToolRegistry — Tool-Level Deferral (flag on)", () => {
     });
     expect(schemas.map((s) => s.name)).not.toContain("meeting_start");
     expect(schemas.map((s) => s.name)).not.toContain("meeting_stop");
+  });
+
+  it("activeToolNames cannot expose a plugin outside activePluginIds", () => {
+    const r = seedWithToolSearch();
+    const schemas = r.getToolSchemasForScope({
+      activePluginIds: new Set<string>(),
+      activeToolNames: new Set(["meeting_start"]),
+      includeBuiltins: true,
+      includeMcp: false,
+      deferral: true,
+    });
+    expect(schemas.map((s) => s.name)).not.toContain("meeting_start");
   });
 });
 

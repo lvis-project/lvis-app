@@ -469,6 +469,7 @@ describe("ConversationLoop onTurnSummary", () => {
       keywordEngine: {
         classify: () => ({ type: "skill", text: "지금 메일 읽어줘" }),
         matchAllPluginIds: () => new Set<string>(),
+        matchToolNames: () => new Set<string>(),
       } as never,
       routeEngine: { route: () => ({ route: "skill", skillId: "msgraph_email_list" }) } as never,
       memoryManager: { saveSession, listSessions: () => [] } as never,

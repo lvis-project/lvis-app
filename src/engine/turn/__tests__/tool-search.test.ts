@@ -15,6 +15,7 @@ import {
   TOOL_SEARCH_TOOL,
   MAX_TOOL_SEARCH_PER_TURN,
   MAX_TOOL_SEARCH_PER_SESSION,
+  MAX_TOOL_SEARCH_PROMOTIONS_PER_SEARCH,
   type ToolSearchState,
 } from "../tool-search.js";
 import type { ToolUseBlock } from "../../../tools/executor.js";
@@ -72,6 +73,15 @@ describe("handleToolSearch", () => {
     expect(out.nextTurnSearches).toBe(0);
   });
 
+  it("returns an error for query text without a searchable token", () => {
+    const state = freshState();
+    const out = handleToolSearch([search("tu-1", "m")], state);
+    expect(out.results[0].is_error).toBe(true);
+    expect(out.results[0].content).toContain("2글자");
+    expect(out.promotedToolNames).toEqual([]);
+    expect(state.activeToolNames.size).toBe(0);
+  });
+
   it("returns an error tool_result when no catalog tool matches", () => {
     const state = freshState();
     const out = handleToolSearch([search("tu-1", "존재하지않는도구xyz")], state);
@@ -84,6 +94,22 @@ describe("handleToolSearch", () => {
     const out = handleToolSearch([search("tu-1", "meeting_start")], state);
     expect(out.results[0].is_error).toBe(true);
     expect(out.promotedToolNames).toEqual([]);
+  });
+
+  it("caps a broad query to a small top-N promotion set", () => {
+    const state = freshState({
+      catalog: [
+        { name: "meeting_agenda", description: "meeting helper" },
+        { name: "meeting_notes", description: "meeting helper" },
+        { name: "meeting_start", description: "meeting helper" },
+        { name: "meeting_stop", description: "meeting helper" },
+        { name: "meeting_summary", description: "meeting helper" },
+      ],
+    });
+    const out = handleToolSearch([search("tu-1", "meeting")], state);
+    expect(out.results[0].is_error).toBe(false);
+    expect(out.promotedToolNames).toHaveLength(MAX_TOOL_SEARCH_PROMOTIONS_PER_SEARCH);
+    expect(state.activeToolNames.size).toBe(MAX_TOOL_SEARCH_PROMOTIONS_PER_SEARCH);
   });
 
   it("enforces the per-turn cap", () => {
