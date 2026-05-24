@@ -181,6 +181,11 @@ describe("VercelUnifiedProvider openai — L1/L2/L3 (mocked streamText)", () => 
     const streamTextSpy = vi.fn(() => ({
       fullStream: (async function* () {
         yield {
+          type: "text-delta",
+          id: "txt-1",
+          text: "현재 빌트인 도구에는 lvis_tool_search 가 있습니다.",
+        };
+        yield {
           type: "tool-call",
           toolCallId: "tu-2",
           toolName: "lvis_tool_search",
@@ -321,6 +326,10 @@ describe("VercelUnifiedProvider openai — L1/L2/L3 (mocked streamText)", () => 
       ],
     });
 
+    expect(events).toContainEqual({
+      type: "text_delta",
+      text: "현재 빌트인 도구에는 tool_search 가 있습니다.",
+    });
     const toolEv = events.find((event) => event.type === "tool_call");
     expect(toolEv).toMatchObject({
       type: "tool_call",
