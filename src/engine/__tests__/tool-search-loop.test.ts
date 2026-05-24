@@ -77,12 +77,22 @@ function makeLoop(opts: {
     jsonSchema: { type: "object", properties: {} },
     execute: async () => ({ output: "emails", isError: false }),
   }));
+  toolRegistry.register(createDynamicTool({
+    name: "msgraph_email_list",
+    description: "Microsoft Graph 메일 목록",
+    source: "plugin",
+    category: "read",
+    pluginId: "com.example.msgraph",
+    jsonSchema: { type: "object", properties: {} },
+    execute: async () => ({ output: "msgraph emails", isError: false }),
+  }));
 
   const keywordEngine = new KeywordEngine();
   // "회의" keyword → plugin scope (meeting) AND tool preload (meeting_start).
   keywordEngine.registerKeywords([
     { keyword: "회의", skillId: "meeting_start", pluginId: "com.example.meeting" },
     { keyword: "메일", skillId: "email_list", pluginId: "com.example.email" },
+    { keyword: "msgraph", skillId: "msgraph_email_list", pluginId: "com.example.msgraph" },
   ]);
   const routeEngine = new RouteEngine({ toolRegistry });
 
@@ -105,7 +115,7 @@ function makeLoop(opts: {
       listSessions: () => [],
     },
     pluginRuntime: {
-      listPluginIds: () => ["com.example.meeting"],
+      listPluginIds: () => ["com.example.meeting", "com.example.email", "com.example.msgraph"],
     },
   } as unknown) as ConstructorParameters<typeof ConversationLoop>[0]);
   (loop as unknown as { provider: LLMProvider | null }).provider = opts.provider;
@@ -181,6 +191,76 @@ describe("ConversationLoop — Tool-Level Deferral", () => {
     expect(provider.observedToolNames[1]).toContain("meeting_stop");
     expect(provider.observedToolNames[2]).toContain("email_list");
     expect(provider.observedToolNames[2]).not.toContain("meeting_start");
+    expect(provider.observedToolNames[2]).not.toContain("meeting_stop");
+  });
+
+  it("drops carried plugin tools when the next turn asks for builtin tool inventory", async () => {
+    const provider = new RecordingProvider([
+      [
+        { type: "text_delta", text: "meeting scoped" },
+        { type: "message_complete", stopReason: "end_turn" },
+      ],
+      [
+        { type: "text_delta", text: "builtin list" },
+        { type: "message_complete", stopReason: "end_turn" },
+      ],
+    ]);
+    const loop = makeLoop({ provider });
+
+    await loop.runTurn("회의 정리해줘", undefined, undefined, { inputOrigin: "user-keyboard" });
+    await loop.runTurn("빌트인 툴 리스트 보여줘", undefined, undefined, { inputOrigin: "user-keyboard" });
+
+    expect(provider.observedToolNames[0]).toContain("meeting_start");
+    expect(provider.observedToolNames[1]).toContain(TOOL_SEARCH_TOOL_NAME);
+    expect(provider.observedToolNames[1]).not.toContain("meeting_start");
+    expect(provider.observedToolNames[1]).not.toContain("meeting_stop");
+    expect(provider.observedToolNames[1]).not.toContain("msgraph_email_list");
+  });
+
+  it("drops carried msgraph plugin tools when the next turn asks for builtin tool inventory", async () => {
+    const provider = new RecordingProvider([
+      [
+        { type: "text_delta", text: "msgraph scoped" },
+        { type: "message_complete", stopReason: "end_turn" },
+      ],
+      [
+        { type: "text_delta", text: "builtin list" },
+        { type: "message_complete", stopReason: "end_turn" },
+      ],
+    ]);
+    const loop = makeLoop({ provider });
+
+    await loop.runTurn("msgraph 이메일 확인해줘", undefined, undefined, { inputOrigin: "user-keyboard" });
+    await loop.runTurn("기본 내장 도구만 보여줘", undefined, undefined, { inputOrigin: "user-keyboard" });
+
+    expect(provider.observedToolNames[0]).toContain("msgraph_email_list");
+    expect(provider.observedToolNames[1]).toContain(TOOL_SEARCH_TOOL_NAME);
+    expect(provider.observedToolNames[1]).not.toContain("msgraph_email_list");
+    expect(provider.observedToolNames[1]).not.toContain("meeting_start");
+  });
+
+  it("does not carry unused tool_search promotions into the following turn", async () => {
+    const provider = new RecordingProvider([
+      [
+        { type: "tool_call", id: "tu-1", name: TOOL_SEARCH_TOOL_NAME, input: { query: "meeting_stop" } },
+        { type: "message_complete", stopReason: "tool_use" },
+      ],
+      [
+        { type: "text_delta", text: "loaded but unused" },
+        { type: "message_complete", stopReason: "end_turn" },
+      ],
+      [
+        { type: "text_delta", text: "follow-up" },
+        { type: "message_complete", stopReason: "end_turn" },
+      ],
+    ]);
+    const loop = makeLoop({ provider });
+
+    await loop.runTurn("회의 정리해줘", undefined, undefined, { inputOrigin: "user-keyboard" });
+    await loop.runTurn("계속 진행해줘", undefined, undefined, { inputOrigin: "user-keyboard" });
+
+    expect(provider.observedToolNames[1]).toContain("meeting_stop");
+    expect(provider.observedToolNames[2]).toContain("meeting_start");
     expect(provider.observedToolNames[2]).not.toContain("meeting_stop");
   });
 });

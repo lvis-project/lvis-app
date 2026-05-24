@@ -45,6 +45,24 @@ export interface DeprecationEvent {
   replacedBy?: string;
 }
 
+export interface ToolSchemaEntry {
+  name: string;
+  description: string;
+  input_schema: unknown;
+  source: Tool["source"];
+  category: Tool["category"];
+  pluginId?: string;
+  mcpServerId?: string;
+}
+
+export interface ToolCatalogEntry {
+  name: string;
+  description: string;
+  source: Extract<Tool["source"], "plugin" | "mcp">;
+  pluginId?: string;
+  mcpServerId?: string;
+}
+
 /**
  * Compare two semver-ish version strings. Returns `a < b ? -1 : a > b ? 1 : 0`.
  * Non-numeric segments fall back to lexical compare so pre-release tags
@@ -83,6 +101,46 @@ function trimCatalogDescription(description: string): string {
   return candidate.length > 100 ? `${candidate.slice(0, 97)}...` : candidate;
 }
 
+function schemaEntryForTool(tool: Tool, inputSchema: unknown): ToolSchemaEntry {
+  return {
+    name: tool.name,
+    description: tool.description,
+    input_schema: inputSchema,
+    source: tool.source,
+    category: tool.category,
+    ...(tool.pluginId ? { pluginId: tool.pluginId } : {}),
+    ...(tool.mcpServerId ? { mcpServerId: tool.mcpServerId } : {}),
+  };
+}
+
+function catalogEntryForTool(tool: Tool): ToolCatalogEntry | null {
+  if (tool.source !== "plugin" && tool.source !== "mcp") return null;
+  return {
+    name: tool.name,
+    description: trimCatalogDescription(tool.description),
+    source: tool.source,
+    ...(tool.pluginId ? { pluginId: tool.pluginId } : {}),
+    ...(tool.mcpServerId ? { mcpServerId: tool.mcpServerId } : {}),
+  };
+}
+
+function toolOwnerKey(tool: Tool): string {
+  if (tool.source === "builtin") return "builtin";
+  if (tool.source === "plugin") {
+    if (!tool.pluginId) {
+      throw new Error(`Plugin tool '${tool.name}' is missing pluginId`);
+    }
+    return `plugin:${tool.pluginId}`;
+  }
+  if (tool.source === "mcp") {
+    if (!tool.mcpServerId) {
+      throw new Error(`MCP tool '${tool.name}' is missing mcpServerId`);
+    }
+    return `mcp:${tool.mcpServerId}`;
+  }
+  throw new Error(`Unsupported tool source for '${tool.name}': ${String(tool.source)}`);
+}
+
 export class ToolRegistry {
   /**
    * `name → latest active tool` — fast path for the common lookup.
@@ -103,19 +161,13 @@ export class ToolRegistry {
    * Register a tool.
    *
    * - Same name + same version → throws (duplicate registration bug).
-   * - Same name + different version → stored in the version index; the
-   *   name→tool map points at whichever version is newest (semver compare)
-   *   and is not deprecated.
+   * - Same name + different version → allowed only within the same source
+   *   owner; versioning is not a cross-plugin/MCP/builtin override channel.
+   *   The name→tool map points at whichever owner-local version is newest
+   *   (semver compare) and is not deprecated.
    */
   register(tool: Tool): void {
-    const versionMap = this.versioned.get(tool.name) ?? new Map<string, Tool>();
-    if (versionMap.has(tool.version)) {
-      throw new Error(
-        `Tool already registered: ${tool.name}@${tool.version}`,
-      );
-    }
-    versionMap.set(tool.version, tool);
-    this.versioned.set(tool.name, versionMap);
+    const versionMap = this.addToVersioned(this.versioned, tool);
     this.tools.set(tool.name, this.pickLatest(versionMap));
   }
 
@@ -286,16 +338,10 @@ export class ToolRegistry {
   }
 
   /** LLM-facing schema array — consumed by SystemPromptBuilder. */
-  getToolSchemas(): Array<{
-    name: string;
-    description: string;
-    input_schema: unknown;
-  }> {
-    return this.getVisibleTools().map((tool) => ({
-      name: tool.name,
-      description: tool.description,
-      input_schema: tool.toJsonSchema(),
-    }));
+  getToolSchemas(): ToolSchemaEntry[] {
+    return this.getVisibleTools().map((tool) =>
+      schemaEntryForTool(tool, tool.toJsonSchema()),
+    );
   }
 
   /**
@@ -317,7 +363,7 @@ export class ToolRegistry {
     includeBuiltins: boolean;
     includeMcp: boolean;
     deferral?: boolean;
-  }): Array<{ name: string; description: string; input_schema: unknown }> {
+  }): ToolSchemaEntry[] {
     const active = scope.activePluginIds instanceof Set
       ? scope.activePluginIds
       : new Set(scope.activePluginIds);
@@ -351,17 +397,13 @@ export class ToolRegistry {
         // scope computation. Drop the offending tool with a warn instead so
         // the rest of the turn keeps working.
         try {
-          return {
-            name: tool.name,
-            description: tool.description,
-            input_schema: tool.toJsonSchema(),
-          };
+          return schemaEntryForTool(tool, tool.toJsonSchema());
         } catch (err) {
           log.warn(`toJsonSchema failed for '${tool.name}': %s`, (err as Error).message);
           return null;
         }
       })
-      .filter((entry): entry is { name: string; description: string; input_schema: unknown } => entry !== null);
+      .filter((entry): entry is ToolSchemaEntry => entry !== null);
   }
 
   /**
@@ -379,7 +421,7 @@ export class ToolRegistry {
     activePluginIds: Set<string> | string[];
     activeToolNames?: Set<string> | string[];
     includeMcp: boolean;
-  }): Array<{ name: string; description: string }> {
+  }): ToolCatalogEntry[] {
     const active = scope.activePluginIds instanceof Set
       ? scope.activePluginIds
       : new Set(scope.activePluginIds);
@@ -397,10 +439,8 @@ export class ToolRegistry {
         }
         return false; // builtins/meta-tools are never deferred
       })
-      .map((tool) => ({
-        name: tool.name,
-        description: trimCatalogDescription(tool.description),
-      }));
+      .map((tool) => catalogEntryForTool(tool))
+      .filter((entry): entry is ToolCatalogEntry => entry !== null);
   }
 
   /** Replace the deny-rule list (admin policy load). */
@@ -452,13 +492,15 @@ export class ToolRegistry {
     return clone;
   }
 
-  private addToVersioned(index: Map<string, Map<string, Tool>>, tool: Tool): void {
+  private addToVersioned(index: Map<string, Map<string, Tool>>, tool: Tool): Map<string, Tool> {
     const versionMap = index.get(tool.name) ?? new Map<string, Tool>();
+    this.assertNameOwnerCompatible(versionMap, tool);
     if (versionMap.has(tool.version)) {
       throw new Error(`Tool already registered: ${tool.name}@${tool.version}`);
     }
     versionMap.set(tool.version, tool);
     index.set(tool.name, versionMap);
+    return versionMap;
   }
 
   private buildLatestMap(index: Map<string, Map<string, Tool>>): Map<string, Tool> {
@@ -491,6 +533,18 @@ export class ToolRegistry {
         log.warn(
           `deprecation handler threw: %s`,
           (err as Error).message,
+        );
+      }
+    }
+  }
+
+  private assertNameOwnerCompatible(versionMap: Map<string, Tool>, tool: Tool): void {
+    const nextOwner = toolOwnerKey(tool);
+    for (const existing of versionMap.values()) {
+      const existingOwner = toolOwnerKey(existing);
+      if (existingOwner !== nextOwner) {
+        throw new Error(
+          `Tool name collision: '${tool.name}' already owned by ${existingOwner}; cannot register ${nextOwner}`,
         );
       }
     }

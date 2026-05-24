@@ -37,8 +37,14 @@ export interface PostTurnHookContext {
   usageByModel?: TokenUsageByModel[];
   toolExposure?: {
     loadedToolCount: number;
+    loadedToolSourceCounts: { builtin: number; plugin: number; mcp: number };
     deferredCatalogCount: number;
+    deferredCatalogSourceCounts: { plugin: number; mcp: number };
     promotedToolNames: string[];
+    loadedPluginIds: string[];
+    loadedMcpServerIds: string[];
+    deferredPluginIds: string[];
+    deferredMcpServerIds: string[];
     toolSchemaTokens: number;
     projectedRequestInputTokens: number | null;
   };

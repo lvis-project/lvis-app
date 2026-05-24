@@ -56,7 +56,7 @@ export function historyToEntries(
         toolUseId,
         result: textContent(m.content),
         isError: m.isError,
-        durationMs: m.toolDisplay?.durationMs,
+        ...(m.toolDisplay?.durationMs !== undefined ? { durationMs: m.toolDisplay.durationMs } : {}),
       });
       continue;
     }

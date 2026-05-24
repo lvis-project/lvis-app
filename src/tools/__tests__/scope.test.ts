@@ -98,6 +98,31 @@ describe("ToolRegistry.getToolSchemasForScope — Phase 1 Lazy Tool Scoping", ()
     ]);
   });
 
+  it("schema entries preserve tool provenance metadata", () => {
+    const r = seed();
+    const schemas = r.getToolSchemasForScope({
+      activePluginIds: new Set(["com.example.meeting"]),
+      activeToolNames: new Set(["meeting_stop", "mcp_fetch"]),
+      includeBuiltins: true,
+      includeMcp: true,
+    });
+
+    expect(schemas.find((s) => s.name === "bash")).toMatchObject({
+      source: "builtin",
+      category: "read",
+    });
+    expect(schemas.find((s) => s.name === "meeting_stop")).toMatchObject({
+      source: "plugin",
+      category: "read",
+      pluginId: "com.example.meeting",
+    });
+    expect(schemas.find((s) => s.name === "mcp_fetch")).toMatchObject({
+      source: "mcp",
+      category: "network",
+      mcpServerId: "server-1",
+    });
+  });
+
   it("includeMcp=true still requires activeToolNames for MCP schemas", () => {
     const r = seed();
     const withMcp = r.getToolSchemasForScope({
@@ -223,6 +248,24 @@ describe("ToolRegistry.getToolCatalogForScope", () => {
     // mcp_fetch in scope (includeMcp) and not loaded → present;
     // email_list plugin not active → excluded.
     expect(names).toEqual(["mcp_fetch", "meeting_stop"]);
+  });
+
+  it("catalog entries preserve plugin/MCP provenance metadata", () => {
+    const r = seed();
+    const catalog = r.getToolCatalogForScope({
+      activePluginIds: new Set(["com.example.meeting"]),
+      activeToolNames: new Set<string>(),
+      includeMcp: true,
+    });
+
+    expect(catalog.find((c) => c.name === "meeting_start")).toMatchObject({
+      source: "plugin",
+      pluginId: "com.example.meeting",
+    });
+    expect(catalog.find((c) => c.name === "mcp_fetch")).toMatchObject({
+      source: "mcp",
+      mcpServerId: "server-1",
+    });
   });
 
   it("excludes loaded tools (no duplication with the loaded path)", () => {
