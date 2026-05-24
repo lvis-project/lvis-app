@@ -423,6 +423,7 @@ export function ChatView({ api, onAsk, onEditSave, onFork, onToggleStar, onRetry
   const previousEntryCountRef = useRef(entries.length);
   const previousSessionIdRef = useRef(currentSessionId);
   const pinnedToBottomRef = useRef(true);
+  const autoBottomPinFrameRef = useRef<number | null>(null);
   const scrollFollowSignature = useMemo(() => bottomFollowSignature(entries), [entries]);
   const [showJumpToBottom, setShowJumpToBottom] = useState(false);
 
@@ -432,7 +433,33 @@ export function ChatView({ api, onAsk, onEditSave, onFork, onToggleStar, onRetry
     return viewport.scrollHeight - viewport.scrollTop - viewport.clientHeight <= CHAT_BOTTOM_THRESHOLD_PX;
   }, [scrollViewportRef]);
 
+  const cancelAutoBottomPin = useCallback(() => {
+    if (autoBottomPinFrameRef.current === null) return;
+    window.cancelAnimationFrame(autoBottomPinFrameRef.current);
+    autoBottomPinFrameRef.current = null;
+  }, []);
+
+  const pinChatToBottom = useCallback(() => {
+    const viewport = scrollViewportRef.current;
+    if (viewport) {
+      viewport.scrollTop = viewport.scrollHeight;
+    } else {
+      chatEndRef.current?.scrollIntoView({ behavior: "auto" });
+    }
+    pinnedToBottomRef.current = true;
+    setShowJumpToBottom(false);
+  }, [chatEndRef, scrollViewportRef]);
+
+  const scheduleAutoBottomPin = useCallback(() => {
+    if (autoBottomPinFrameRef.current !== null) return;
+    autoBottomPinFrameRef.current = window.requestAnimationFrame(() => {
+      autoBottomPinFrameRef.current = null;
+      pinChatToBottom();
+    });
+  }, [pinChatToBottom]);
+
   const scrollChatToBottom = useCallback((behavior: ScrollBehavior = "smooth") => {
+    cancelAutoBottomPin();
     const viewport = scrollViewportRef.current;
     if (viewport) {
       if (typeof viewport.scrollTo === "function") {
@@ -445,7 +472,9 @@ export function ChatView({ api, onAsk, onEditSave, onFork, onToggleStar, onRetry
     }
     pinnedToBottomRef.current = true;
     setShowJumpToBottom(false);
-  }, [chatEndRef, scrollViewportRef]);
+  }, [cancelAutoBottomPin, chatEndRef, scrollViewportRef]);
+
+  useEffect(() => () => cancelAutoBottomPin(), [cancelAutoBottomPin]);
 
   const handleCalendarSessionSelect = useCallback(async (sessionId: string) => {
     await onLoadSession?.(sessionId);
@@ -771,12 +800,13 @@ export function ChatView({ api, onAsk, onEditSave, onFork, onToggleStar, onRetry
     const onScroll = () => {
       const nearBottom = isNearBottom();
       pinnedToBottomRef.current = nearBottom;
+      if (!nearBottom) cancelAutoBottomPin();
       setShowJumpToBottom(!nearBottom);
     };
     onScroll();
     viewport.addEventListener("scroll", onScroll, { passive: true });
     return () => viewport.removeEventListener("scroll", onScroll);
-  }, [isNearBottom, scrollViewportRef]);
+  }, [cancelAutoBottomPin, isNearBottom, scrollViewportRef]);
 
   useEffect(() => {
     const previousEntryCount = previousEntryCountRef.current;
@@ -790,13 +820,13 @@ export function ChatView({ api, onAsk, onEditSave, onFork, onToggleStar, onRetry
       entries.length > 1 &&
       (previousEntryCount === 0 || previousSessionId !== currentSessionId)
     ) {
-      requestAnimationFrame(() => scrollChatToBottom("auto"));
+      scheduleAutoBottomPin();
       return;
     }
     if (pinnedToBottomRef.current || isNearBottom()) {
-      requestAnimationFrame(() => scrollChatToBottom("smooth"));
+      scheduleAutoBottomPin();
     }
-  }, [currentSessionId, entries.length, isNearBottom, scrollChatToBottom, scrollFollowSignature, viewMode]);
+  }, [currentSessionId, entries.length, isNearBottom, scheduleAutoBottomPin, scrollFollowSignature, viewMode]);
 
   const activeDayKey = getKoreaDateKey(new Date());
 
