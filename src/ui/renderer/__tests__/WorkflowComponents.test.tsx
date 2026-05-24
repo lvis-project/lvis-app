@@ -388,6 +388,25 @@ describe("SessionTodoPanel", () => {
     expect(collapsed!.className).toContain("animate-pulse");
   });
 
+  it("falls back to the first pending item in the collapsed header when nothing is in progress", async () => {
+    const api = fakeApi({
+      listSessionTodos: () =>
+        Promise.resolve([
+          { id: "t1", content: "first pending", status: "pending" },
+          { id: "t2", content: "second pending", status: "pending" },
+        ]),
+    });
+    const { findByText, container } = render(<SessionTodoPanel api={api} />);
+    // Starts collapsed; with no in_progress item the header surfaces the first
+    // non-completed item instead of going blank.
+    await findByText("first pending");
+    const collapsed = container.querySelector('[data-testid="session-todo-collapsed-active"]');
+    expect(collapsed).not.toBeNull();
+    expect(collapsed!.textContent).toBe("first pending");
+    // A pending (not in-progress) focus item must not pulse.
+    expect(collapsed!.className).not.toContain("animate-pulse");
+  });
+
   it("shows '이어서' chip when items already exist on mount (resumed session)", async () => {
     const api = fakeApi({
       listSessionTodos: () =>
