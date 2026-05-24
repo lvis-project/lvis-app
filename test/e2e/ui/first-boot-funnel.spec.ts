@@ -26,12 +26,6 @@ import { test, expect } from './fixtures';
 import path from 'node:path';
 import fs from 'node:fs';
 
-// Opt out of the fixture's `onboardingCompleted` seed: this spec drives the
-// full first-boot funnel and needs the ScenarioShowcase onboarding chain to
-// mount. (The fixture seeds onboardingCompleted=true by default so that
-// non-onboarding specs are not blocked by the modal overlay.)
-test.use({ launchEnv: { LVIS_E2E_ONBOARDING_FUNNEL: '1' } });
-
 const FRESH_KEY = 'sk-e2e-first-boot-funnel-openai';
 
 /** Read the persisted tour-state.json under the per-test LVIS_HOME. */
