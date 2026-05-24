@@ -57,10 +57,6 @@ export function historyToEntries(
         result: textContent(m.content),
         isError: m.isError,
         ...(m.toolDisplay?.durationMs !== undefined ? { durationMs: m.toolDisplay.durationMs } : {}),
-        ...(m.toolDisplay?.source ? { source: m.toolDisplay.source } : {}),
-        ...(m.toolDisplay?.category ? { category: m.toolDisplay.category } : {}),
-        ...(m.toolDisplay?.pluginId ? { pluginId: m.toolDisplay.pluginId } : {}),
-        ...(m.toolDisplay?.mcpServerId ? { mcpServerId: m.toolDisplay.mcpServerId } : {}),
       });
       continue;
     }
