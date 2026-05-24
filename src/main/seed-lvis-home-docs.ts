@@ -22,6 +22,9 @@ import { lvisHome } from "../shared/lvis-home.js";
  *     email-polish, decision-record, data-summary) for the `skill_load`
  *     tool. Shipping skills as files (not inline TS) lets users edit
  *     each prompt to match their team's tone/format.
+ *   - prompts/*.md — built-in main-agent persona prompts. The composer
+ *     selects one persona per turn; agents and skills stay on their own
+ *     dynamic tool paths.
  *
  * Behavior (per file):
  *   - If `~/.lvis/<path>` does not exist → copy from packaged resources.
@@ -50,6 +53,7 @@ export function seedLvisHomeDocs(): { seeded: string[]; upgraded: string[] } {
   seedOne(home, "AGENTS.md", result);
   seedDir(home, "agents", result);
   seedDir(home, "skills", result);
+  seedDir(home, "prompts", result);
   return result;
 }
 

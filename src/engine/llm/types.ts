@@ -134,11 +134,11 @@ export interface MessageMeta {
     maxBytes: number;
   };
   /**
-   * Per-turn role prompt metadata selected by the user for this user message.
-   * Stored so retry/edit-resend can replay the same system-prompt role without
-   * embedding role instructions into visible user text.
+   * Per-turn Persona prompt selection selected by the user for this user
+   * message. Stores only prompt-store identity metadata; retry/edit-resend
+   * re-resolves the current prompt body from `PersonaPromptStore`.
    */
-  activeRolePrompt?: { name: string; systemPromptAdd: string };
+  activePersonaPrompt?: { id: string; name: string };
   /**
    * Compact boundary 의 opaque-state slot. type-only import 로 cycle 회피.
    * 단일 source of truth: src/engine/structured-compact.ts:CompactBoundary.

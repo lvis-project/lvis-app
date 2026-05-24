@@ -67,7 +67,7 @@ describe("ConversationLoop queryLoop", () => {
     await expect(loop.runTurn("질문", undefined, undefined, {
       inputOrigin: "user-keyboard",
       originSource: "overlay:test",
-      rolePrompt: { name: "Reviewer", systemPromptAdd: "Review carefully." },
+      rolePrompt: { id: "reviewer", name: "Reviewer", systemPromptAdd: "Review carefully." },
     })).rejects.toThrow("prompt assembly failed");
 
     expect(setOriginSource).toHaveBeenNthCalledWith(1, "overlay:test");
@@ -75,13 +75,14 @@ describe("ConversationLoop queryLoop", () => {
     expect(setActiveSessionId).toHaveBeenNthCalledWith(1, expect.any(String));
     expect(setActiveSessionId).toHaveBeenLastCalledWith(null);
     expect(setActiveRolePrompt).toHaveBeenNthCalledWith(1, {
+      id: "reviewer",
       name: "Reviewer",
       systemPromptAdd: "Review carefully.",
     });
     expect(setActiveRolePrompt).toHaveBeenLastCalledWith(null);
   });
 
-  it("persists role prompt metadata on the user message for retry replay", async () => {
+  it("persists persona prompt identity on the user message for retry replay", async () => {
     const toolRegistry = new ToolRegistry();
     const provider = new FakeProvider([
       [
@@ -105,7 +106,7 @@ describe("ConversationLoop queryLoop", () => {
 
     await loop.runTurn("review this", undefined, undefined, {
       inputOrigin: "user-keyboard",
-      rolePrompt: { name: "Reviewer", systemPromptAdd: "Review carefully." },
+      rolePrompt: { id: "reviewer", name: "Reviewer", systemPromptAdd: "Review carefully." },
     });
 
     const [firstMessage] = withoutRuntimeMeta(loop.getHistory().getMessages());
@@ -113,9 +114,9 @@ describe("ConversationLoop queryLoop", () => {
       role: "user",
       content: "review this",
       meta: {
-        activeRolePrompt: {
+        activePersonaPrompt: {
+          id: "reviewer",
           name: "Reviewer",
-          systemPromptAdd: "Review carefully.",
         },
       },
     });
