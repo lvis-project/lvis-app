@@ -12,7 +12,7 @@
 // settings store uses to validate `provider` at IPC boundaries. We
 // re-export here so existing engine-side callers keep their import
 // path while the type definition cannot drift between modules.
-import type { LLMVendor } from "../../shared/llm-vendor-defaults.js";
+import { LLM_VENDOR_DEFAULTS, type LLMVendor } from "../../shared/llm-vendor-defaults.js";
 export type { LLMVendor };
 export { LLM_VENDORS, isLLMVendor } from "../../shared/llm-vendor-defaults.js";
 
@@ -25,14 +25,14 @@ export const LLM_VENDOR_LABELS: Record<LLMVendor, string> = {
   "vertex-ai": "Google Vertex AI",
 };
 
-export const LLM_DEFAULT_MODELS: Record<LLMVendor, string> = {
-  claude: "claude-sonnet-4-6",   // Claude Sonnet 4.6 — 1M context (2026-02)
-  openai: "gpt-5.4-mini",        // GPT-5.4 mini — default OpenAI settings model
-  gemini: "gemini-2.5-flash",    // Gemini 2.5 Flash — 1M context (2025)
-  copilot: "gpt-4.1",            // GitHub Copilot 기본 모델 (2025-05)
-  "azure-foundry": "gpt-4o",     // Azure deployment name — user must override with their own deployment
-  "vertex-ai": "gemini-2.5-flash", // Vertex AI uses Gemini models by default
-};
+export const LLM_DEFAULT_MODELS: Record<LLMVendor, string> = Object.freeze(
+  Object.fromEntries(
+    Object.entries(LLM_VENDOR_DEFAULTS).map(([vendor, settings]) => [
+      vendor,
+      settings.model,
+    ]),
+  ) as Record<LLMVendor, string>,
+);
 
 // ─── 범용 메시지 ────────────────────────────────────
 

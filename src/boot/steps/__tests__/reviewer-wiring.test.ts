@@ -244,7 +244,7 @@ describe("Permission policy P4 reviewer-wiring", () => {
           reviewer: {
             mode: "rule",
             provider: "google",
-            model: "gemini-2.0-flash",
+            model: "gemini-2.5-flash",
             fallbackOnError: "deny",
             interactive: { autoApprove: "off" },
           },
@@ -257,7 +257,7 @@ describe("Permission policy P4 reviewer-wiring", () => {
       readSettings: () => ({
         mode: "rule",
         provider: "google",
-        model: "gemini-2.0-flash",
+        model: "gemini-2.5-flash",
         fallbackOnError: "deny",
         interactive: { autoApprove: "off" },
       }),
