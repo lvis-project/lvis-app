@@ -1008,7 +1008,7 @@ flowchart LR
 
     subgraph "Dynamic Sources (매 턴 갱신)"
         S5["⑤ Tool Schemas<br/>L1 Filter 통과한 도구 스키마"]
-        S6["⑥ Active Plugin Schemas<br/>활성 플러그인 도구·스킬"]
+        S6["⑥ Plugin/Tool Catalog<br/>비활성·지연 도구 발견 (request_plugin·tool_search)"]
         S7["⑦ Memory / MEMORY.md<br/>사용자 축적 기억 인덱스"]
         S8["⑧ Rolling Summary Preamble<br/>id=2.5 (체크포인트 prior context 요약, 있을 경우)"]
     end
@@ -1043,7 +1043,7 @@ flowchart LR
 | ③ | Employee Profile | 부팅 시 | 0.5~1K | 사용자 이름·직급·부서·역할 |
 | ④ | Org Context | 부팅 시 | 1~2K | 조직 구조 요약, 팀원 목록, 보고 라인 |
 | ⑤ | Tool Schemas | 매 턴 | 3~8K | L1 Filter 통과 후 the LLM backend에 노출할 도구 JSON 스키마 |
-| ⑥ | Plugin Schemas | 플러그인 변경 시 | 1~5K | 활성 플러그인의 도구·스킬 스키마 |
+| ⑥ | Plugin/Tool Catalog | 매 턴 (조건부) | 0.5~2K | 비활성 플러그인 카탈로그 + 지연 도구 카탈로그 (`tool_search`, `experimental.toolDeferral`). 활성 플러그인 도구 스키마는 ⑤에 포함 |
 | ⑦ | MEMORY.md | 파일 변경 시 | 1~3K | 사용자 축적 기억 인덱스 — 선호, 루틴, 프로젝트 정보 |
 | ⑧ | Rolling Summary Preamble (id=2.5) | on-change | 2~5K | 체크포인트에서 이어받은 prior context summary. `summaryPreamble` 가 set 된 모든 턴에서 주입. |
 | ⑨ | OS / Environment | 부팅 시 | 0.3~0.5K | OS 종류, 홈 디렉터리, 시간대, 현재 시각 |
