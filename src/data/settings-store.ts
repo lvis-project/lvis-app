@@ -18,7 +18,7 @@ import {
 } from "../shared/llm-vendor-defaults.js";
 import { BUNDLE_IDS, DEFAULT_BUNDLE_ID } from "../shared/theme-bundles.js";
 import { createLogger } from "../lib/logger.js";
-import { cloneDefaultRolePresets, normalizeRolePresets, type RolePreset } from "./role-presets.js";
+import type { RolePreset } from "./role-presets.js";
 const log = createLogger("settings");
 
 export type { LLMVendor, LLMVendorSettings };
@@ -410,7 +410,7 @@ const DEFAULT_SETTINGS: AppSettings = {
     autoCompact: true,
   },
   roles: {
-    presets: cloneDefaultRolePresets(),
+    presets: [],
   },
   webSearch: {
     provider: "duckduckgo",
@@ -926,13 +926,9 @@ function migrateLegacyLlmAuthMode(input: unknown): LLMSettingsPatch {
 }
 
 function normalizeRoleSettings(input: unknown, base: RoleSettings = DEFAULT_SETTINGS.roles): RoleSettings {
-  if (!input || typeof input !== "object" || Array.isArray(input)) {
-    return { presets: normalizeRolePresets(base.presets) };
-  }
-  const obj = input as { presets?: unknown };
-  return {
-    presets: normalizeRolePresets(obj.presets ?? base.presets),
-  };
+  void input;
+  void base;
+  return { presets: [] };
 }
 
 /**

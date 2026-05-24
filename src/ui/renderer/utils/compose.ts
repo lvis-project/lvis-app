@@ -1,5 +1,5 @@
 import type { RolePreset } from "../../../data/role-presets.js";
-import { buildActiveRolePrompt, type ActiveRolePrompt } from "../../../data/role-presets.js";
+import { buildActivePersonaPromptId } from "../../../data/role-presets.js";
 import type { UserContentPart } from "../../../engine/llm/types.js";
 import type { Attachment } from "../types/attachments.js";
 import { buildMarkerText } from "./attachment-markers.js";
@@ -14,8 +14,8 @@ export interface ComposedOutgoing {
    * — the IPC layer forwards it to `runTurn(input, { attachments })`.
    */
   attachments: UserContentPart[];
-  /** Per-turn role prompt metadata; main injects this into the system prompt. */
-  rolePrompt?: ActiveRolePrompt;
+  /** Per-turn Persona id; main resolves it from the file-backed prompt store. */
+  personaPromptId?: string;
 }
 
 /**
@@ -88,7 +88,7 @@ export function composeOutgoing(params: {
   return {
     text: body,
     attachments: imageParts,
-    rolePrompt: buildActiveRolePrompt(activePreset) ?? undefined,
+    personaPromptId: buildActivePersonaPromptId(activePreset) ?? undefined,
   };
 }
 
