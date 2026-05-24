@@ -66,6 +66,10 @@ describe("LLM vendor defaults", () => {
     expect(LLM_VENDOR_DEFAULTS.openai.model).toBe("gpt-5.4-mini");
   });
 
+  it("uses gemini-2.5-flash as the Gemini default model", () => {
+    expect(LLM_VENDOR_DEFAULTS.gemini.model).toBe("gemini-2.5-flash");
+  });
+
   it("enables thinking by default for every provider", () => {
     for (const v of LLM_VENDORS) {
       expect(LLM_VENDOR_DEFAULTS[v].enableThinking).toBe(true);
@@ -75,6 +79,7 @@ describe("LLM vendor defaults", () => {
   it("freshVendorBlocks() preserves the default thinking-enabled blocks", () => {
     const blocks = freshVendorBlocks();
     expect(blocks.openai.model).toBe("gpt-5.4-mini");
+    expect(blocks.gemini.model).toBe("gemini-2.5-flash");
     for (const v of LLM_VENDORS) {
       expect(blocks[v].enableThinking).toBe(true);
     }

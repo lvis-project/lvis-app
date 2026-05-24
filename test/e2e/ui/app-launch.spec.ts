@@ -11,6 +11,8 @@ test('app launches and main window is visible', async ({ app, mainWindow }) => {
   const hasRoot = await mainWindow.locator('#root').count();
   expect(hasRoot).toBe(1);
 
+  await expect(mainWindow.getByTestId('scenario-showcase')).toHaveCount(0);
+
   const windows = app.windows();
   expect(windows.length).toBeGreaterThanOrEqual(1);
 });

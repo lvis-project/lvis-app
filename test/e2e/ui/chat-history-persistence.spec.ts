@@ -1,4 +1,5 @@
 import { test, expect } from './fixtures';
+import { buildIsolatedElectronEnv } from './seeded-electron';
 
 /**
  * Chat history persistence — send a message, restart the app (reusing the
@@ -37,7 +38,16 @@ test('chat history persists across app restart, or skips cleanly', async ({
 
   const app2 = await electron.launch({
     args: [mainEntry, `--user-data-dir=${userDataDir}`],
-    env: { ...process.env, LVIS_E2E: '1', NODE_ENV: 'test' },
+    env: buildIsolatedElectronEnv({
+      HOME: userDataDir,
+      USERPROFILE: userDataDir,
+      LVIS_HOME: path.join(userDataDir, 'lvis-state'),
+      LVIS_DEV: '1',
+      LVIS_E2E: '1',
+      LVIS_MAIN_ENTRY: mainEntry,
+      NODE_ENV: 'test',
+      ELECTRON_DISABLE_SECURITY_WARNINGS: '1',
+    }),
     timeout: 30_000,
   });
 

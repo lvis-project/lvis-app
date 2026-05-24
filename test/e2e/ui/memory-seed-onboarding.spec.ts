@@ -1,3 +1,4 @@
+import { buildE2eBaseSettings, buildIsolatedElectronEnv } from "./seeded-electron";
 /**
  * Tutorial-B (O-X2) — Memory Seed Onboarding Wizard e2e.
  *
@@ -20,7 +21,7 @@
  */
 import { test, expect } from "@playwright/test";
 import { _electron as electron, type ElectronApplication, type Page } from "playwright";
-import { existsSync, mkdtempSync, readFileSync, rmSync } from "node:fs";
+import { existsSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { dirname, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -40,18 +41,25 @@ test.describe("memory seed onboarding wizard", () => {
   test.beforeEach(async () => {
     userDataDir = mkdtempSync(resolve(tmpdir(), "lvis-memory-seed-user-data-"));
     tempHome = mkdtempSync(resolve(tmpdir(), "lvis-memory-seed-home-"));
+    writeFileSync(
+      resolve(userDataDir, "lvis-settings.json"),
+      JSON.stringify(buildE2eBaseSettings(false), null, 2) + "\n",
+      "utf-8",
+    );
+    const lvisHome = resolve(tempHome, ".lvis");
 
     app = await electron.launch({
       args: [MAIN_ENTRY, `--user-data-dir=${userDataDir}`, "--no-sandbox"],
-      env: {
-        ...process.env,
+      env: buildIsolatedElectronEnv({
         HOME: tempHome,
         USERPROFILE: tempHome,
+        LVIS_HOME: lvisHome,
         LVIS_DEV: "1",
         LVIS_E2E: "1",
+        LVIS_MAIN_ENTRY: MAIN_ENTRY,
         NODE_ENV: "test",
         ELECTRON_DISABLE_SECURITY_WARNINGS: "1",
-      },
+      }),
       timeout: 30_000,
     });
     page = await app.firstWindow();
@@ -116,15 +124,16 @@ test.describe("memory seed onboarding wizard", () => {
     await app.close().catch(() => {});
     app = await electron.launch({
       args: [MAIN_ENTRY, `--user-data-dir=${userDataDir}`, "--no-sandbox"],
-      env: {
-        ...process.env,
+      env: buildIsolatedElectronEnv({
         HOME: tempHome,
         USERPROFILE: tempHome,
+        LVIS_HOME: lvisHome,
         LVIS_DEV: "1",
         LVIS_E2E: "1",
+        LVIS_MAIN_ENTRY: MAIN_ENTRY,
         NODE_ENV: "test",
         ELECTRON_DISABLE_SECURITY_WARNINGS: "1",
-      },
+      }),
       timeout: 30_000,
     });
     page = await app.firstWindow();
