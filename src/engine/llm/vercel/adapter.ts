@@ -10,6 +10,7 @@ import { createOpenAI } from "@ai-sdk/openai";
 import { createAzure } from "@ai-sdk/azure";
 import { createOpenAICompatible } from "@ai-sdk/openai-compatible";
 import type {
+  GenericMessage,
   LLMProvider,
   LLMVendor,
   StreamEvent,
@@ -21,6 +22,7 @@ import { fullStreamToStreamEvent } from "./stream-mapper.js";
 import { mapAiSdkErrorToLvis } from "./error-mapper.js";
 import { createLogger } from "../../../lib/logger.js";
 import { lookupPricing } from "../../../shared/pricing-data.js";
+import { TOOL_SEARCH_TOOL_NAME } from "../../../tools/registry.js";
 const log = createLogger("adapter");
 
 /**
@@ -32,6 +34,16 @@ const log = createLogger("adapter");
 export type VercelVendor = LLMVendor | "openai-compatible";
 
 const COPILOT_BASE_URL = "https://models.github.ai/inference";
+const OPENAI_RESPONSES_TOOL_NAME_ALIASES: Readonly<Record<string, string>> = {
+  [TOOL_SEARCH_TOOL_NAME]: "lvis_tool_search",
+};
+const OPENAI_RESPONSES_TOOL_NAME_ALIAS_REVERSE: Readonly<Record<string, string>> =
+  Object.fromEntries(
+    Object.entries(OPENAI_RESPONSES_TOOL_NAME_ALIASES).map(([from, to]) => [
+      to,
+      from,
+    ]),
+  );
 
 /** Detect OpenAI reasoning-model families (Responses API + reasoning_effort support). */
 export function isOpenAIReasoningModel(model: string): boolean {
@@ -154,8 +166,18 @@ export class VercelUnifiedProvider implements LLMProvider {
     const slot = this.vendorSlot;
 
     try {
-      const messages: ModelMessage[] = genericToModelMessages(params.messages, this.vendor);
-      const tools = buildTools(params.tools);
+      const useOpenAIResponsesAliases = usesOpenAIResponsesWire(slot, params.model);
+      const messages: ModelMessage[] = genericToModelMessages(
+        useOpenAIResponsesAliases
+          ? remapGenericMessagesForOpenAIResponses(params.messages)
+          : params.messages,
+        this.vendor,
+      );
+      const tools = buildTools(
+        useOpenAIResponsesAliases
+          ? remapToolSchemasForOpenAIResponses(params.tools)
+          : params.tools,
+      );
       const hasTools = Boolean(tools && Object.keys(tools).length > 0);
 
       // Per-vendor model resolution.
@@ -271,7 +293,9 @@ export class VercelUnifiedProvider implements LLMProvider {
       try {
         const result = streamText({
           model,
-          system: params.systemPrompt,
+          system: useOpenAIResponsesAliases
+            ? remapSystemPromptForOpenAIResponses(params.systemPrompt)
+            : params.systemPrompt,
           messages,
           ...(tools ? { tools } : {}),
           ...(transform ? { experimental_transform: transform } : {}),
@@ -298,7 +322,11 @@ export class VercelUnifiedProvider implements LLMProvider {
         return;
       }
 
-      yield* fullStreamToStreamEvent(fullStream);
+      for await (const event of fullStreamToStreamEvent(fullStream)) {
+        yield useOpenAIResponsesAliases
+          ? restoreStreamEventFromOpenAIResponses(event)
+          : event;
+      }
     } catch (err) {
       const mapped = mapAiSdkErrorToLvis(err);
       yield {
@@ -413,6 +441,83 @@ export class VercelUnifiedProvider implements LLMProvider {
 
     throw new Error(`VercelUnifiedProvider: unknown vendor slot "${slot}"`);
   }
+}
+
+function usesOpenAIResponsesWire(slot: VercelVendor, modelId: string): boolean {
+  return slot === "azure-foundry" || (slot === "openai" && isOpenAIReasoningModel(modelId));
+}
+
+function toOpenAIResponsesToolName(toolName: string): string {
+  return OPENAI_RESPONSES_TOOL_NAME_ALIASES[toolName] ?? toolName;
+}
+
+function fromOpenAIResponsesToolName(toolName: string): string {
+  return OPENAI_RESPONSES_TOOL_NAME_ALIAS_REVERSE[toolName] ?? toolName;
+}
+
+function remapGenericMessagesForOpenAIResponses(
+  messages: GenericMessage[],
+): GenericMessage[] {
+  return messages.map((message) => {
+    if (message.role === "assistant" && message.toolCalls) {
+      return {
+        ...message,
+        content: remapPromptTextForOpenAIResponses(message.content),
+        toolCalls: message.toolCalls.map((toolCall) => ({
+          ...toolCall,
+          name: toOpenAIResponsesToolName(toolCall.name),
+        })),
+      };
+    }
+    if (message.role === "assistant") {
+      return {
+        ...message,
+        content: remapPromptTextForOpenAIResponses(message.content),
+      };
+    }
+    if (message.role === "tool_result" && message.toolName) {
+      return {
+        ...message,
+        toolName: toOpenAIResponsesToolName(message.toolName),
+        content: remapPromptTextForOpenAIResponses(message.content),
+      };
+    }
+    if (message.role === "tool_result") {
+      return {
+        ...message,
+        content: remapPromptTextForOpenAIResponses(message.content),
+      };
+    }
+    return message;
+  });
+}
+
+function remapToolSchemasForOpenAIResponses(
+  schemas: ToolSchema[] | undefined,
+): ToolSchema[] | undefined {
+  return schemas?.map((schema) => ({
+    ...schema,
+    name: toOpenAIResponsesToolName(schema.name),
+  }));
+}
+
+function remapSystemPromptForOpenAIResponses(systemPrompt: string): string {
+  return remapPromptTextForOpenAIResponses(systemPrompt);
+}
+
+function remapPromptTextForOpenAIResponses(text: string): string {
+  let remapped = text;
+  for (const [from, to] of Object.entries(OPENAI_RESPONSES_TOOL_NAME_ALIASES)) {
+    remapped = remapped.replace(new RegExp(`\\b${from}\\b`, "g"), to);
+  }
+  return remapped;
+}
+
+function restoreStreamEventFromOpenAIResponses(event: StreamEvent): StreamEvent {
+  if (event.type !== "tool_call") return event;
+  const restoredName = fromOpenAIResponsesToolName(event.name);
+  if (restoredName === event.name) return event;
+  return { ...event, name: restoredName };
 }
 
 function buildTools(
