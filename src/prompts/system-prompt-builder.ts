@@ -76,7 +76,7 @@ export class SystemPromptBuilder {
     activeToolNames?: Set<string>;
     includeBuiltins: boolean;
     includeMcp: boolean;
-    /** Tool-Level Deferral — `experimental.toolDeferral` flag snapshot. */
+    /** Tool-Level Deferral — retained for persisted/test scope compatibility. */
     deferral?: boolean;
   } | null = null;
   private indexedDocsContext: string = "";
@@ -415,9 +415,8 @@ export class SystemPromptBuilder {
       },
     });
 
-    // ⑤-b Tool Catalog (per-turn, Tool-Level Deferral, flag-gated)
+    // ⑤-b Tool Catalog (per-turn, Tool-Level Deferral)
     //
-    // Rendered ONLY when `experimental.toolDeferral` is on for the turn.
     // Lists in-scope plugin/MCP tools that are NOT loaded (deferred) as a
     // compact name + 1-line catalog. The model promotes a tool into the live
     // tool set by calling `tool_search({ query })`. Loaded tools (Source 5)
@@ -428,7 +427,7 @@ export class SystemPromptBuilder {
       refresh: "per-turn",
       build: () => {
         const scope = this.toolScope;
-        if (!scope || scope.deferral !== true) return "";
+        if (!scope) return "";
         const catalog = toolRegistry.getToolCatalogForScope({
           activePluginIds: scope.activePluginIds,
           activeToolNames: scope.activeToolNames ?? new Set<string>(),

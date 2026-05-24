@@ -137,18 +137,17 @@ export interface FeatureFlags {
  * Experimental, staged-rollout feature flags. Kept separate from
  * {@link FeatureFlags} (UX/onboarding/demo toggles) so a runtime
  * mechanism gated behind a deliberate experiment reads from one
- * obvious place. All flags default `false` — the host behaves
- * exactly as today until the operator opts in.
+ * obvious place.
  */
 export interface ExperimentalSettings {
   /**
    * Tool-level deferral (docs/development/tool-level-deferral-design.md).
-   * When `true`, plugin/MCP tool schemas are deferred: only keyword-
-   * preloaded tools + builtins/meta-tools are sent to the LLM each turn,
-   * and the rest appear as a compact `<tool-catalog>` that the model
-   * promotes via `tool_search({ query })`. When `false` (default), the
-   * legacy plugin-level scoping path runs unchanged (an active plugin
-   * loads ALL its tools; no catalog; no `tool_search`).
+   * Default-on. Plugin/MCP tool schemas are deferred: only keyword-
+   * preloaded/promoted/explicitly allowlisted tools plus builtins/meta-tools
+   * are sent to the LLM each turn, and the rest appear as a compact
+   * `<tool-catalog>` that the model promotes via `tool_search({ query })`.
+   * The legacy whole-plugin schema path has been removed; persisted `false`
+   * values are ignored by the runtime and retained only for settings migration.
    */
   toolDeferral?: boolean;
 }
@@ -176,7 +175,7 @@ export interface AppSettings {
   pluginConfigs: Record<string, PluginConfigRecord>;
   /** Experimental feature flags. All default false. */
   features?: FeatureFlags;
-  /** Staged-rollout experiment flags (e.g. tool-level deferral). All default false. */
+  /** Staged-rollout experiment flags (e.g. tool-level deferral). */
   experimental?: ExperimentalSettings;
 }
 
@@ -466,8 +465,8 @@ const DEFAULT_SETTINGS: AppSettings = {
     onboardingCompleted: false,
   },
   experimental: {
-    // Tool-level deferral default OFF — staged rollout (default-on cutover flips this).
-    toolDeferral: false,
+    // Tool-level deferral default ON — legacy whole-plugin schema loading removed.
+    toolDeferral: true,
   },
 };
 
@@ -1148,7 +1147,8 @@ function normalizeFeatureFlags(input: unknown): FeatureFlags {
 
 /**
  * Coerce on-disk `experimental` block to ExperimentalSettings shape.
- * Missing or invalid fields are silently dropped — all flags default to false.
+ * Missing or invalid fields are silently dropped and filled from
+ * DEFAULT_SETTINGS by the settings merge path.
  */
 function normalizeExperimental(input: unknown): ExperimentalSettings {
   if (!input || typeof input !== "object" || Array.isArray(input)) {

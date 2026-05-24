@@ -246,6 +246,12 @@ export function createRoutineConversationLoop(
     allowedPluginIds = new Set(scope.pluginIds.ids);
   }
   const forcedActivePluginIds = new Set(scope?.forcedPluginIds ?? []);
+  const forcedActiveToolNames = new Set(
+    deps.toolRegistry
+      .listAll()
+      .filter((tool) => tool.source === "plugin" && tool.pluginId && forcedActivePluginIds.has(tool.pluginId))
+      .map((tool) => tool.name),
+  );
   return new ConversationLoop({
     settingsService: deps.settingsService,
     systemPromptBuilder: routineSystemPromptBuilder,
@@ -263,6 +269,7 @@ export function createRoutineConversationLoop(
     llmFetch: deps.llmFetch,
     allowedPluginIds,
     forcedActivePluginIds,
+    ...(forcedActiveToolNames.size > 0 ? { forcedActiveToolNames } : {}),
     additionalDirectories: scope?.directories ?? [],
     headless: true,
     // postTurnHookChain / idleScheduler intentionally omitted — routine loops

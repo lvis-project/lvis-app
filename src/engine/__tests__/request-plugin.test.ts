@@ -14,6 +14,7 @@ import { RouteEngine } from "../../core/route-engine.js";
 import { ConversationLoop } from "../conversation-loop.js";
 import type { LLMProvider, StreamEvent, StreamTurnInput } from "../llm/types.js";
 import { ToolRegistry } from "../../tools/registry.js";
+import { TOOL_SEARCH_TOOL_NAME } from "../../tools/registry.js";
 import { createDynamicTool } from "../../tools/base.js";
 import { fakeLlmSettings } from "../../shared/__tests__/fake-llm-settings.js";
 
@@ -35,6 +36,7 @@ function makeLoop(opts: {
   availablePluginIds: string[];
   allowedPluginIds?: string[];
   forcedActivePluginIds?: string[];
+  forcedActiveToolNames?: string[];
 }): ConversationLoop {
   const toolRegistry = new ToolRegistry();
   // request_plugin builtin (source=builtin so scope filter includes it)
@@ -48,6 +50,19 @@ function makeLoop(opts: {
       type: "object",
       required: ["pluginId"],
       properties: { pluginId: { type: "string" } },
+    },
+    execute: async () => ({ output: "unreachable", isError: false }),
+  }));
+  toolRegistry.register(createDynamicTool({
+    name: TOOL_SEARCH_TOOL_NAME,
+    description: "도구 검색",
+    source: "builtin",
+    category: "read",
+    isReadOnly: () => true,
+    jsonSchema: {
+      type: "object",
+      required: ["query"],
+      properties: { query: { type: "string" } },
     },
     execute: async () => ({ output: "unreachable", isError: false }),
   }));
@@ -85,25 +100,50 @@ function makeLoop(opts: {
     },
     ...(opts.allowedPluginIds ? { allowedPluginIds: new Set(opts.allowedPluginIds) } : {}),
     ...(opts.forcedActivePluginIds ? { forcedActivePluginIds: new Set(opts.forcedActivePluginIds) } : {}),
+    ...(opts.forcedActiveToolNames ? { forcedActiveToolNames: new Set(opts.forcedActiveToolNames) } : {}),
   } as unknown) as ConstructorParameters<typeof ConversationLoop>[0]);
   (loop as { provider: LLMProvider | null }).provider = opts.provider;
   return loop;
 }
 
 describe("ConversationLoop — request_plugin meta tool (Option C)", () => {
-  it("activates plugin and exposes its tool in the next round", async () => {
+  it("activates plugin catalog without exposing all plugin schemas", async () => {
     const provider = new RecordingProvider([
       // Round 0: LLM asks to activate meeting plugin.
       [
         { type: "tool_call", id: "tu-1", name: "request_plugin", input: { pluginId: "com.example.meeting" } },
         { type: "message_complete", stopReason: "tool_use" },
       ],
-      // Round 1: LLM now calls meeting_start (should be available).
       [
-        { type: "tool_call", id: "tu-2", name: "meeting_start", input: {} },
+        { type: "text_delta", text: "카탈로그 활성화" },
+        { type: "message_complete", stopReason: "end_turn" },
+      ],
+    ]);
+    const loop = makeLoop({ provider, availablePluginIds: ["com.example.meeting"] });
+    const result = await loop.runTurn("일반 질문", undefined, undefined, { inputOrigin: "user-keyboard" });
+    expect(result.text).toBe("카탈로그 활성화");
+    // Round 0 should NOT have meeting_start available.
+    expect(provider.observedToolNames[0]).not.toContain("meeting_start");
+    // Round 1 keeps plugin tools deferred; tool_search remains the discovery path.
+    expect(provider.observedToolNames[1]).toContain(TOOL_SEARCH_TOOL_NAME);
+    expect(provider.observedToolNames[1]).not.toContain("meeting_start");
+    const messages = loop.getHistory().getMessages();
+    const toolResult = messages.find((m) => m.role === "tool_result") as { content: string } | undefined;
+    expect(toolResult?.content).toContain("카탈로그");
+    expect(toolResult?.content).not.toContain("0개 도구 추가됨");
+  });
+
+  it("supports request_plugin -> tool_search in the same assistant round", async () => {
+    const provider = new RecordingProvider([
+      [
+        { type: "tool_call", id: "tu-1", name: "request_plugin", input: { pluginId: "com.example.meeting" } },
+        { type: "tool_call", id: "tu-2", name: TOOL_SEARCH_TOOL_NAME, input: { query: "meeting_start" } },
         { type: "message_complete", stopReason: "tool_use" },
       ],
-      // Round 2: LLM wraps up.
+      [
+        { type: "tool_call", id: "tu-3", name: "meeting_start", input: {} },
+        { type: "message_complete", stopReason: "tool_use" },
+      ],
       [
         { type: "text_delta", text: "회의를 시작했습니다." },
         { type: "message_complete", stopReason: "end_turn" },
@@ -112,9 +152,7 @@ describe("ConversationLoop — request_plugin meta tool (Option C)", () => {
     const loop = makeLoop({ provider, availablePluginIds: ["com.example.meeting"] });
     const result = await loop.runTurn("일반 질문", undefined, undefined, { inputOrigin: "user-keyboard" });
     expect(result.text).toBe("회의를 시작했습니다.");
-    // Round 0 should NOT have meeting_start available.
     expect(provider.observedToolNames[0]).not.toContain("meeting_start");
-    // Round 1 SHOULD have meeting_start available (scope expanded).
     expect(provider.observedToolNames[1]).toContain("meeting_start");
   });
 
@@ -195,7 +233,7 @@ describe("ConversationLoop — request_plugin meta tool (Option C)", () => {
     expect(toolResult?.content).toContain("알 수 없는 플러그인 ID");
   });
 
-  it("keeps forced plugins active even when allowedPluginIds is deny-all", async () => {
+  it("keeps explicitly allowlisted tools visible even when allowedPluginIds is deny-all", async () => {
     const provider = new RecordingProvider([
       [
         { type: "text_delta", text: "done" },
@@ -207,6 +245,7 @@ describe("ConversationLoop — request_plugin meta tool (Option C)", () => {
       availablePluginIds: ["com.example.meeting"],
       allowedPluginIds: [],
       forcedActivePluginIds: ["com.example.meeting"],
+      forcedActiveToolNames: ["meeting_start"],
     });
 
     await loop.runTurn("일반 질문", undefined, undefined, { inputOrigin: "user-keyboard" });

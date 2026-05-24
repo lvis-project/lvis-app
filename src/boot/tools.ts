@@ -169,11 +169,9 @@ export function registerRequestPluginMetaTool(toolRegistry: ToolRegistry): void 
 }
 
 export function registerToolSearchMetaTool(toolRegistry: ToolRegistry): void {
-  // Tool-Level Deferral — tool_search 메타 툴. Statically registered, but the
-  // registry HIDES it from the loaded tool set unless `scope.deferral` is true
-  // (experimental.toolDeferral flag), so it never reaches the LLM while the
-  // flag is off. execute는 no-op — 실제 promotion 은 ConversationLoop.queryLoop
-  // 이 가로챈다 (request_plugin 과 동일 패턴).
+  // Tool-Level Deferral — tool_search 메타 툴. Statically registered and
+  // visible whenever builtins are in scope. execute는 no-op — 실제 promotion 은
+  // ConversationLoop.queryLoop 이 가로챈다 (request_plugin 과 동일 패턴).
   toolRegistry.register(createDynamicTool({
     name: TOOL_SEARCH_TOOL_NAME,
     description:
