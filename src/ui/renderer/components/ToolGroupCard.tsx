@@ -67,6 +67,30 @@ function RunningDurationBadge({ startedAt }: { startedAt?: number }) {
   );
 }
 
+type ToolItem = Extract<ChatEntry, { kind: "tool_group" }>["tools"][number];
+
+function toolSourceLabel(tool: ToolItem): string | null {
+  if (tool.source === "plugin") return `plugin:${tool.pluginId ?? "unknown"}`;
+  if (tool.source === "mcp") return `mcp:${tool.mcpServerId ?? "unknown"}`;
+  if (tool.source === "builtin") return "builtin";
+  return null;
+}
+
+function ToolSourceBadge({ tool }: { tool: ToolItem }) {
+  const label = toolSourceLabel(tool);
+  if (!label) return null;
+  return (
+    <Badge
+      variant="outline"
+      className="max-w-[160px] shrink-0 truncate px-1 py-0 font-mono text-[9px]"
+      title={`tool source: ${label}${tool.category ? `, category: ${tool.category}` : ""}`}
+      data-testid="tool-source"
+    >
+      {label}
+    </Badge>
+  );
+}
+
 function isToolResultStub(value: unknown): value is string {
   return (
     typeof value === "string" &&
@@ -156,6 +180,7 @@ function SingleToolInline({
       >
         <Wrench className="h-3 w-3 flex-shrink-0" />
         <span className="min-w-0 truncate font-medium">{getToolDisplayName(tool.name)}</span>
+        <ToolSourceBadge tool={tool} />
         {isRunning
           ? <RunningDurationBadge startedAt={tool.startedAt} />
           : <ToolDurationBadge durationMs={tool.durationMs} />}
@@ -258,6 +283,7 @@ export function ToolGroupCard({
   }
 
   const uniqueToolNames = [...new Set(tools.map((t) => getToolDisplayName(t.name)))].join(" · ");
+  const uniqueSourceLabels = [...new Set(tools.map((t) => toolSourceLabel(t)).filter((label): label is string => label !== null))].join(" · ");
   const htmlPreviews = tools
     .filter((t) => t.name === "render_html" && t.status === "done")
     .map((t) => ({ toolUseId: t.toolUseId, payload: parseRenderHtmlResult(t.result) }))
@@ -288,6 +314,14 @@ export function ToolGroupCard({
         <Wrench className="h-3 w-3 flex-shrink-0" />
         <span className="shrink-0 font-medium">{groupTitle}</span>
         <span className="min-w-0 truncate text-[10px] opacity-60">{uniqueToolNames}</span>
+        {uniqueSourceLabels && (
+          <span
+            className="max-w-[180px] shrink-0 truncate font-mono text-[9px] opacity-70"
+            title={`tool sources: ${uniqueSourceLabels}`}
+          >
+            {uniqueSourceLabels}
+          </span>
+        )}
         <Badge variant="outline" className="px-1 py-0 text-[10px] flex-shrink-0">
           {groupStatus === "running" ? `${doneCount}/${group.tools.length}` : `${group.tools.length}개`}
         </Badge>
@@ -315,6 +349,7 @@ export function ToolGroupCard({
                 >
                   {isExpanded ? <ChevronDown className="h-2.5 w-2.5 flex-shrink-0" /> : <ChevronRight className="h-2.5 w-2.5 flex-shrink-0" />}
                   <span className="min-w-0 truncate">{getToolDisplayName(tool.name)}</span>
+                  <ToolSourceBadge tool={tool} />
                   {tool.status === "running"
                     ? <RunningDurationBadge startedAt={tool.startedAt} />
                     : <ToolDurationBadge durationMs={tool.durationMs} />}

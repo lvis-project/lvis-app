@@ -120,6 +120,11 @@ describe("ConversationTracer — §4.5 11-step", () => {
       expect(names.has(step), `missing step: ${step}`).toBe(true);
     }
     expect(expected.length).toBe(11);
+    const postTurn = rec.steps.find((s) => s.name === "POST_TURN");
+    expect(postTurn?.meta).toMatchObject({
+      loadedToolSourceCounts: { builtin: 1, plugin: 0, mcp: 0 },
+      deferredCatalogSourceCounts: { plugin: 0, mcp: 0 },
+    });
   });
 
   it("writes valid JSONL entries to the trace file when enabled", async () => {

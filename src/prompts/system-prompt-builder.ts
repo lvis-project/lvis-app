@@ -7,7 +7,7 @@
 import { hostname, platform, userInfo } from "node:os";
 import type { ActiveRolePrompt } from "../data/role-presets.js";
 import type { MemoryManager } from "../memory/memory-manager.js";
-import type { ToolRegistry } from "../tools/registry.js";
+import type { ToolCatalogEntry, ToolRegistry, ToolSchemaEntry } from "../tools/registry.js";
 import { redactFsPath } from "../audit/dlp-filter.js";
 import { createLogger } from "../lib/logger.js";
 import { isOverlayTriggerOrigin } from "../shared/overlay-trigger-source.js";
@@ -16,6 +16,35 @@ import { lvisHome } from "../shared/lvis-home.js";
 const log = createLogger("system-prompt");
 
 // ─── Types ──────────────────────────────────────────
+
+type ToolProvenanceEntry = Pick<ToolSchemaEntry | ToolCatalogEntry, "source" | "pluginId" | "mcpServerId">;
+
+function toolProvenanceLabel(tool: ToolProvenanceEntry): string {
+  if (tool.source === "plugin") return `plugin:${tool.pluginId ?? "unknown"}`;
+  if (tool.source === "mcp") return `mcp:${tool.mcpServerId ?? "unknown"}`;
+  return "builtin";
+}
+
+function renderToolGroups<T extends ToolProvenanceEntry>(
+  entries: readonly T[],
+  renderEntry: (entry: T) => string,
+): string[] {
+  const groups = new Map<string, T[]>();
+  for (const entry of entries) {
+    const label = toolProvenanceLabel(entry);
+    const group = groups.get(label) ?? [];
+    group.push(entry);
+    groups.set(label, group);
+  }
+
+  const lines: string[] = [];
+  for (const [label, group] of groups) {
+    if (lines.length > 0) lines.push("");
+    lines.push(`### ${label}`);
+    for (const entry of group) lines.push(renderEntry(entry));
+  }
+  return lines;
+}
 
 export interface PromptSource {
   /** 소스 번호 (①~⑫) */
@@ -406,8 +435,9 @@ export class SystemPromptBuilder {
         return [
           "<available-tools>",
           "다음 도구를 사용할 수 있습니다. 필요 시 tool_use 블록으로 호출하세요.",
+          "출처 표기: builtin=호스트 내장, plugin:<id>=설치 플러그인, mcp:<id>=MCP 서버. 현재 로드되어 있어도 builtin 이라는 뜻은 아닙니다.",
           "",
-          ...schemas.map((s) =>
+          ...renderToolGroups(schemas, (s) =>
             `- **${s.name}**: ${s.description}`,
           ),
           "</available-tools>",
@@ -439,8 +469,9 @@ export class SystemPromptBuilder {
           "아래 도구는 아직 로드되지 않았습니다 (이름 + 한 줄 설명만 표시). " +
             "사용하려면 먼저 `tool_search({query})` 를 호출해 로드하세요. query 에는 " +
             "도구 이름 또는 기능 키워드를 넣습니다. 로드 후 다음 라운드부터 직접 호출할 수 있습니다.",
+          "카탈로그도 출처별로 그룹화됩니다. plugin:<id>/mcp:<id> 도구를 builtin 으로 설명하지 마세요.",
           "",
-          ...catalog.map((t) => `- **${t.name}**: ${t.description}`),
+          ...renderToolGroups(catalog, (t) => `- **${t.name}**: ${t.description}`),
           "</tool-catalog>",
         ].join("\n");
       },

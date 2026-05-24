@@ -61,6 +61,10 @@ export interface MessageMeta {
   /** Renderer display metadata for tool_result replay parity. */
   toolDisplay?: {
     durationMs?: number;
+    source?: "builtin" | "plugin" | "mcp";
+    category?: "read" | "write" | "shell" | "network" | "meta";
+    pluginId?: string;
+    mcpServerId?: string;
     uiPayload?: import("../../mcp/types.js").McpUiPayload;
   };
   /**

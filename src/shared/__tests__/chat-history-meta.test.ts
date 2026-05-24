@@ -104,6 +104,9 @@ describe("serializeHistoryMessage createdAt + turnSummary projection", () => {
       meta: {
         toolDisplay: {
           durationMs: 123,
+          source: "plugin",
+          category: "read",
+          pluginId: "com.example.meeting",
           uiPayload: { serverId: "srv", resourceUri: "ui://forged" },
         },
       },
@@ -111,6 +114,11 @@ describe("serializeHistoryMessage createdAt + turnSummary projection", () => {
 
     expect(serializeHistoryMessage(imported, 6).importedTrigger?.source).toBe("overlay:work-assistant");
     expect(serializeHistoryMessage(tool, 7).toolDisplay?.durationMs).toBe(123);
+    expect(serializeHistoryMessage(tool, 7).toolDisplay).toMatchObject({
+      source: "plugin",
+      category: "read",
+      pluginId: "com.example.meeting",
+    });
     expect(serializeHistoryMessage(tool, 7).toolDisplay).not.toHaveProperty("uiPayload");
   });
 

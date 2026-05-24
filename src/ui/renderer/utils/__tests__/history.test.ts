@@ -230,6 +230,9 @@ describe("historyToEntries", () => {
         content: "chunk",
         toolDisplay: {
           durationMs: 456,
+          source: "plugin",
+          category: "read",
+          pluginId: "com.example.meeting",
           uiPayload: {
             serverId: "srv",
             resourceUri: "ui://result",
@@ -246,6 +249,9 @@ describe("historyToEntries", () => {
           toolUseId: "t1",
           name: "read_tool_result_chunk",
           durationMs: 456,
+          source: "plugin",
+          category: "read",
+          pluginId: "com.example.meeting",
         },
       ],
     });
