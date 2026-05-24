@@ -66,15 +66,6 @@ export function createSystemPromptBuilder(opts: {
   return new SystemPromptBuilder({
     memoryManager,
     toolRegistry,
-    getPluginSchemas: () => {
-      const tools = pluginRuntime.listToolNames();
-      if (tools.length === 0) return "";
-      return [
-        "<active-plugins>",
-        `활성 플러그인 도구: ${tools.join(", ")}`,
-        "</active-plugins>",
-      ].join("\n");
-    },
     // Option C — 비활성 plugin 카탈로그 공급.
     getPluginCards: () => pluginRuntime.listPluginCards(toolRegistry),
     getActiveSkillsSection,
