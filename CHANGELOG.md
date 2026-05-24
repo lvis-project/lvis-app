@@ -1,5 +1,31 @@
 # Changelog
 
+## v0.2.10 — 2026-05-25
+
+### 안정성 / 모델 도구 노출
+
+- **Tool-level deferral 기본 경로 정착** (PR #1147) — plugin activation 을 catalog scope 로 유지하고, provider-visible tool schema 는 keyword preload / `tool_search` promotion / carry-forward / 고정 allowlist 로만 노출한다. broad promotion 은 scoring/top-N 으로 제한해 TPM burst 와 불필요한 tool schema 노출을 줄였다.
+- **Tool provenance source-aware 정렬** (PR #1153) — `builtin`, `plugin:<id>`, `mcp:<id>` 출처를 ToolRegistry, prompt catalog, execution metadata, IPC, trace/audit, ToolGroupCard UI까지 유지한다. cross-owner tool-name collision 은 fail-closed 처리하고, builtin tool inventory 질문에서는 직전 plugin/MCP carry-forward 를 reset 해 plugin tool 이 builtin 처럼 답변되는 경로를 차단했다.
+- **OpenAI/Azure Responses `tool_search` wire alias 정렬** (PR #1149/#1150) — LVIS 내부 `tool_search` 와 provider built-in `tool_search_call` 충돌을 `lvis_tool_search` wire alias 로 분리하고, persisted history / tool result / display text 는 사용자에게 다시 `tool_search` 로 복원한다.
+
+### UX / 컨텍스트
+
+- **Persona prompt store 전환** (PR #1148) — main composer assistant-context 버튼을 Persona 전용으로 정리하고, role/persona prompts 를 file-backed `~/.lvis/prompts/*.md` + seeded resources SOT 로 이동했다.
+- **Session TO-DO turn boundary 정렬** (PR #1152) — 세션 TO-DO 를 current-turn transient plan 으로 고정해 새 사용자 턴 시작 시 이전 plan 이 남지 않도록 하고, live push race 와 badge 상태를 정리했다.
+- **Chat streaming scroll jitter 수정** (PR #1151) — streaming 중 bottom-follow 를 rAF coalesced immediate pin 으로 통합해 긴 응답에서 smooth scroll 반복으로 viewport 가 흔들리는 문제를 제거했다.
+
+### 컨텍스트 예산 / E2E 안정화
+
+- **Projected next-turn input SOT** (PR #1142/#1143) — context budget ring 과 compact 판단을 next-turn projected input 기준으로 재정렬하고, tool-result carryover / input-output split / TPM banner e2e coverage 를 보강했다.
+- **Linux-headless onboarding/e2e 격리 보강** (PR #1143/#1146) — Electron e2e fixture 의 onboarding state, marketplace/update bootstrap, memory seed flow 를 실제 first-boot chain 과 맞췄다.
+
+### 검증
+
+- PR #1153: focused provenance suites, `ToolGroupCard`, `permission-review-scenario-board`, `bun run check:test-quality` 458 files / 6041 pass / 13 skipped with coverage gates, `bun run typecheck`, `bun run build`, remote build-and-test / Windows permission path / CodeQL / naming / cluster success, Copilot inline comments 0.
+- PR #1147/#1148/#1149/#1150/#1151/#1152: targeted Vitest/Playwright lanes, typecheck/build, remote CI success.
+
+---
+
 ## v0.2.9 — 2026-05-22
 
 ### 안정성 / 컨텍스트
