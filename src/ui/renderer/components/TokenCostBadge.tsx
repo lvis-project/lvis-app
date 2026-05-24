@@ -210,7 +210,7 @@ export function TokenCostBadge({
             <span>{headlineTokens.toLocaleString()}</span>
           </div>
           <div className="flex justify-between gap-3 opacity-70">
-            <span>context (turn-end):</span>
+            <span>projected next input:</span>
             <span>{tokensIn.toLocaleString()}</span>
           </div>
           {cost !== null && (

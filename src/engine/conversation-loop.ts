@@ -11,6 +11,11 @@ import { ConversationHistory, normalizeToolPairInvariant } from "./conversation-
 import { ToolExecutor, type ToolResult, type ToolUseBlock } from "../tools/executor.js";
 import { HookRunner } from "../hooks/hook-runner.js";
 import { markStaleToolResults, estimateMessagesTokens, estimateTokens, getModelPreflightThreshold, getModelUsableContext, isContextLengthError } from "./auto-compact.js";
+import {
+  estimateRequestInputProjection,
+  projectNextTurnInputTokens,
+  type RequestInputProjection,
+} from "./request-input-projection.js";
 
 /**
  * 사용자가 반복적으로 context_error 유발 input 보낼 때 compact API 호출
@@ -72,6 +77,12 @@ import { isToolResultStubContent } from "../shared/tool-result-stub.js";
 import { createTracer, type ConversationTracer } from "../observability/conversation-trace.js";
 import { createLogger } from "../lib/logger.js";
 const log = createLogger("lvis");
+
+interface RequestProjectionContext {
+  systemPrompt: string;
+  toolSchemas: ToolSchema[];
+  estimateCurrent: () => RequestInputProjection;
+}
 
 const INLINE_PASTED_TEXT_RE = /(^|\n)-{5} Pasted text #\d+ \(\d+ lines\) -{5}\n/;
 const SESSION_ID_REGEX = /^[a-zA-Z0-9_\-]+$/;
@@ -332,10 +343,11 @@ export interface TurnCallbacks {
     toolCount: number;
     cumulativeToolMs: number;
     /**
-     * `tokensIn` = the turn-end projected context input. This is the
+     * `tokensIn` = engine-projected next request input. This is the
      * provider-calibrated input size the next request would carry after the
-     * final assistant output/tool results have been appended. TokenProgressRing
-     * and the turn footer both use this same context-fill SOT.
+     * final assistant output/tool results have been appended, including the
+     * system prompt and exposed tool schemas. TokenProgressRing and the turn
+     * footer both use this same context-fill SOT.
      */
     tokensIn: number;
     /**
@@ -546,13 +558,13 @@ export class ConversationLoop {
    * 채우는 값이 아니라, 턴 종료 context-fill SOT 를 provider 값으로 보정하기
    * 위한 기준점이다.
    */
-  private lastRoundInputTokens = 0;
+  private lastRoundProviderInputTokens = 0;
   /**
-   * Local wire-shape estimate for the history submitted to the latest provider
-   * round. Combined with `lastRoundInputTokens` at turn end to project what the
-   * *next* request will carry after the final assistant output is appended.
+   * Engine request-input projection for the exact request submitted to the
+   * latest provider round. Includes system prompt, provider-wire messages, and
+   * exposed tool schemas.
    */
-  private lastRoundEstimatedInputTokens = 0;
+  private lastRoundInputProjection: RequestInputProjection | null = null;
   /**
    * Latest context-fill SOT. Successful turns store turn_summary.tokensIn here;
    * compact paths store their post-compact estimate. During an in-flight
@@ -560,8 +572,8 @@ export class ConversationLoop {
    * calibration anchor until turn end recomputes the projected value.
    */
   private lastContextInputTokens = 0;
-  /** Local message-shape estimate corresponding to `lastContextInputTokens`. */
-  private lastContextEstimatedInputTokens = 0;
+  /** Local full-request projection corresponding to `lastContextInputTokens`. */
+  private lastContextInputProjectionTokens = 0;
   /** B4: current turn's AbortController — abortCurrentTurn() calls .abort() */
   currentAbortController: AbortController | null = null;
   /**
@@ -898,6 +910,52 @@ export class ConversationLoop {
     return this.provider?.vendor ?? "none";
   }
 
+  private buildSystemPromptForScope(
+    scope: ToolScope,
+    originSource: string | null,
+    rolePrompt?: ActiveRolePrompt,
+  ): string {
+    this.deps.systemPromptBuilder.setToolScope?.(scope);
+    this.deps.systemPromptBuilder.setOriginSource?.(originSource);
+    this.deps.systemPromptBuilder.setActiveSessionId?.(this.sessionId);
+    this.deps.systemPromptBuilder.setActiveRolePrompt?.(rolePrompt ?? null);
+    try {
+      return this.deps.systemPromptBuilder.build();
+    } finally {
+      this.deps.systemPromptBuilder.setOriginSource?.(null);
+      this.deps.systemPromptBuilder.setActiveSessionId?.(null);
+      this.deps.systemPromptBuilder.setActiveRolePrompt?.(null);
+    }
+  }
+
+  private estimateCurrentRequestProjection(params: {
+    systemPrompt: string;
+    toolSchemas: ToolSchema[];
+  }): RequestInputProjection {
+    return estimateRequestInputProjection({
+      systemPrompt: params.systemPrompt,
+      messages: this.history.getMessages(),
+      toolSchemas: params.toolSchemas,
+    });
+  }
+
+  private createRequestProjectionContext(
+    scope: ToolScope,
+    originSource: string | null,
+    rolePrompt: ActiveRolePrompt | undefined,
+    toolSchemas: ToolSchema[],
+  ): RequestProjectionContext {
+    const buildSystemPrompt = () => this.buildSystemPromptForScope(scope, originSource, rolePrompt);
+    return {
+      systemPrompt: buildSystemPrompt(),
+      toolSchemas,
+      estimateCurrent: () => this.estimateCurrentRequestProjection({
+        systemPrompt: buildSystemPrompt(),
+        toolSchemas,
+      }),
+    };
+  }
+
   /** 대화 이력 초기화 (새 대화) — §4.5.7 */
   newConversation(kind: SessionKind = "main"): void {
     if (this.history.length > 0) {
@@ -916,9 +974,10 @@ export class ConversationLoop {
     this.turnAdditionalDirectories = [];
     this.history.clear();
     this.cumulativeUsage = { inputTokens: 0, outputTokens: 0 };
-    this.lastRoundInputTokens = 0;
+    this.lastRoundProviderInputTokens = 0;
+    this.lastRoundInputProjection = null;
     this.lastContextInputTokens = 0;
-    this.lastContextEstimatedInputTokens = 0;
+    this.lastContextInputProjectionTokens = 0;
     this.sessionPluginExpansions = 0;
     this.sessionToolSearches = 0;
     this.lastTurnToolNames = null;
@@ -1147,9 +1206,10 @@ export class ConversationLoop {
     this.history.clear();
     this.history.restore(normalized.messages);
     this.cumulativeUsage = { inputTokens: 0, outputTokens: 0 };
-    this.lastRoundInputTokens = 0;
+    this.lastRoundProviderInputTokens = 0;
+    this.lastRoundInputProjection = null;
     this.lastContextInputTokens = latestPersistedContextTokens(normalized.messages);
-    this.lastContextEstimatedInputTokens = estimateMessagesTokens(normalized.messages);
+    this.lastContextInputProjectionTokens = 0;
     this.sessionPluginExpansions = 0;
     this.sessionToolSearches = 0;
     this.lastTurnToolNames = null;
@@ -1198,14 +1258,15 @@ export class ConversationLoop {
       return { ok: false, compacted: false, compactedAt: null, removedMessageCount: 0 };
     }
 
-    // Session resume does not compact immediately. The next user turn runs
-    // token preflight and triggers LLM compact if needed. Keep only an
-    // estimated input-token baseline so that ratio evaluation is accurate.
+    // Session resume does not compact immediately. The next user turn computes
+    // a full request-input projection from the live prompt/tool scope before
+    // deciding whether compact is needed.
     this.cumulativeUsage = {
       inputTokens: estimateMessagesTokens(this.history.getMessages()),
       outputTokens: 0,
     };
-    this.lastRoundInputTokens = 0;
+    this.lastRoundProviderInputTokens = 0;
+    this.lastRoundInputProjection = null;
 
     return {
       ok: true,
@@ -1255,12 +1316,20 @@ export class ConversationLoop {
     this.isCompacting = true;
     try {
       const messagesBefore = this.history.getMessages();
+      const scope = this.resolveToolScope("");
+      const toolSchemas = this.rebuildToolSchemas(scope);
+      const projectionContext = this.createRequestProjectionContext(scope, null, undefined, toolSchemas);
+      const requestProjection = estimateRequestInputProjection({
+        systemPrompt: projectionContext.systemPrompt,
+        messages: messagesBefore,
+        toolSchemas,
+      });
       // Mirror runPreflightGuard's pre-compact UX hint so slash-`/compact`
       // also lights up the "자동 압축 중..." StatusBar indicator during the
       // potentially long-running LLM summarization.
       callbacks?.onCompactStarted?.({
         triggerSource: "manual",
-        estimatedBefore: estimateMessagesTokens(messagesBefore),
+        estimatedBefore: requestProjection.totalTokens,
         preflight,
       });
       const result = await compactWithBoundary({
@@ -1283,8 +1352,15 @@ export class ConversationLoop {
         };
       }
 
-      const estimated = estimateMessagesTokens(messagesBefore);
-      await this.applyBoundaryToSession(result, "manual", estimated, callbacks, messagesBefore.length, messagesBefore);
+      await this.applyBoundaryToSession(
+        result,
+        "manual",
+        requestProjection.totalTokens,
+        callbacks,
+        messagesBefore.length,
+        messagesBefore,
+        projectionContext,
+      );
 
       // 영속화 — manualCompact 완료 시점에 즉시 disk 반영.
       void Promise.resolve(
@@ -1424,12 +1500,11 @@ export class ConversationLoop {
     const turnStartedAt = Date.now();
     let turnTokensIn = 0;
     let turnTokensOut = 0;
-    // queryLoop 가 별 method 라 마지막 round 의 raw inputTokens 를 instance
-    // field 로 share. runTurn 은 이 provider 값에 post-turn history delta 를
-    // 더해 context-fill SOT 를 만든다.
-    this.lastRoundInputTokens = 0;
-    this.lastRoundEstimatedInputTokens = 0;
-    this.lastContextEstimatedInputTokens = estimateMessagesTokens(this.history.getMessages());
+    // queryLoop 가 별 method 라 마지막 round 의 provider inputTokens 와
+    // request-input projection 을 instance field 로 share. runTurn 은 이
+    // provider 값에 post-turn projection delta 를 더해 context-fill SOT 를 만든다.
+    this.lastRoundProviderInputTokens = 0;
+    this.lastRoundInputProjection = null;
     let turnToolCount = 0;
     let turnCumulativeToolMs = 0;
     const turnToolStarts = new Map<string, number>();
@@ -1510,42 +1585,35 @@ export class ConversationLoop {
     // §4.5.2 step 5 — HISTORY_APPEND
     this.tracer.step("HISTORY_APPEND", { role: "user", historySize: this.history.length });
 
-    // ─── Token Preflight (same-session checkpoint compaction) ───
-    // step 5 (HISTORY_APPEND) 직후 / step 6 (PROMPT_ASSEMBLE) 직전. estimateMessagesTokens
-    // 가 model 의 preflight threshold 도달 시 차단형으로 LLM compact 실행.
-    // 결과: summary preamble 갱신 + history 교체 + context-size tracker reset → 후속 step 6 build() 가
-    // 새 compact 결과를 반영. mid-loop reactive compact 영구 예방.
-    if (this.provider && !this.deps.disableSessionPersistence) {
-      await this.runPreflightGuard(turnSignal, callbacks);
-    }
-
     // Lazy Tool Scoping — 이 턴에서 노출할 plugin 집합 결정.
     // SystemPromptBuilder Tool Schemas 섹션도 동일 scope로 필터링되도록
     // build() 호출 전에 setToolScope 수행.
     const scope = this.resolveToolScope(input);
-    // Guard: test mocks may stub SystemPromptBuilder without this method.
-    this.deps.systemPromptBuilder.setToolScope?.(scope);
-    // Overlay trigger origin: set + clear synchronously around build() so concurrent
-    // turns do not see each other's flag. SystemPromptBuilder has a single
-    // `originSource` slot; if we straddled an await we'd race.
-    this.deps.systemPromptBuilder.setOriginSource?.(options?.originSource ?? null);
-    // C2(c): scope the SkillOverlay section to this session id. The setter
-    // is optional on the prompt builder so focused unit-test stubs without
-    // skill overlay support keep working unchanged.
-    this.deps.systemPromptBuilder.setActiveSessionId?.(this.sessionId);
-    this.deps.systemPromptBuilder.setActiveRolePrompt?.(options?.rolePrompt ?? null);
+    const initialToolSchemas = this.rebuildToolSchemas(scope);
 
-    let systemPrompt: string;
-    try {
-      systemPrompt = this.deps.systemPromptBuilder.build();
-    } finally {
-      // Clear immediately so any nested or follow-up build() inside the same
-      // tick (or a concurrent runTurn that starts during the upcoming await)
-      // sees a clean slate, even when prompt assembly throws.
-      this.deps.systemPromptBuilder.setOriginSource?.(null);
-      this.deps.systemPromptBuilder.setActiveSessionId?.(null);
-      this.deps.systemPromptBuilder.setActiveRolePrompt?.(null);
+    // ─── Token Preflight (same-session checkpoint compaction) ───
+    // step 5 (HISTORY_APPEND) 직후 / step 6 (PROMPT_ASSEMBLE) 직전. The
+    // projection is built from the same system prompt, provider-wire history,
+    // and tool schemas that the provider request will carry. If compaction
+    // mutates the summary preamble/history, prompt assembly runs again below.
+    if (this.provider && !this.deps.disableSessionPersistence) {
+      await this.runPreflightGuard(
+        this.createRequestProjectionContext(
+          scope,
+          options?.originSource ?? null,
+          options?.rolePrompt,
+          initialToolSchemas,
+        ),
+        turnSignal,
+        callbacks,
+      );
     }
+
+    const systemPrompt = this.buildSystemPromptForScope(
+      scope,
+      options?.originSource ?? null,
+      options?.rolePrompt,
+    );
     // §4.5.2 step 6 — PROMPT_ASSEMBLE
     this.tracer.step("PROMPT_ASSEMBLE", { promptLen: systemPrompt.length, activePlugins: scope.activePluginIds.size });
     let result: Awaited<ReturnType<ConversationLoop["queryLoop"]>>;
@@ -1563,6 +1631,7 @@ export class ConversationLoop {
           inputOrigin,
           toolTrustOrigin,
           permissionUserIntent,
+          rolePrompt: options?.rolePrompt,
         },
       );
     } finally {
@@ -1730,14 +1799,19 @@ export class ConversationLoop {
       //   `result.usage` 는 turn-aggregate (queryLoop:1098 turnUsage), 그러므로
       //   여기서 단순 산수만 하면 정확. 이전 badge 버그는 last-round raw 와
       //   turn-aggregate cache 를 빼느라 음수 → 0 으로 잘리던 mismatch.
-      const postTurnEstimatedInputTokens = estimateMessagesTokens(this.history.getMessages());
-      const projectedDelta = postTurnEstimatedInputTokens - this.lastRoundEstimatedInputTokens;
-      turnTokensIn =
-        this.lastRoundInputTokens > 0
-          ? Math.max(0, this.lastRoundInputTokens + projectedDelta)
-          : postTurnEstimatedInputTokens;
+      const postTurnProjection = estimateRequestInputProjection({
+        systemPrompt,
+        messages: this.history.getMessages(),
+        toolSchemas: result.finalToolSchemas,
+      });
+      const lastRoundProjection = this.lastRoundInputProjection ?? postTurnProjection;
+      turnTokensIn = projectNextTurnInputTokens({
+        providerInputTokens: this.lastRoundProviderInputTokens,
+        lastRoundProjection,
+        postTurnProjection,
+      });
       this.lastContextInputTokens = turnTokensIn;
-      this.lastContextEstimatedInputTokens = postTurnEstimatedInputTokens;
+      this.lastContextInputProjectionTokens = postTurnProjection.totalTokens;
       turnTokensOut = result.usage?.outputTokens ?? 0;
       const turnCacheRead = result.usage?.cacheReadTokens ?? 0;
       const turnCacheWrite = result.usage?.cacheWriteTokens ?? 0;
@@ -1851,7 +1925,7 @@ export class ConversationLoop {
   // ─── Private: Query Loop (벤더 추상화) ────────────
 
   private async queryLoop(
-    systemPrompt: string,
+    initialSystemPrompt: string,
     scope: ToolScope,
     callbacks: TurnCallbacks | undefined,
     abortSignal: AbortSignal | undefined,
@@ -1863,6 +1937,7 @@ export class ConversationLoop {
       inputOrigin: ChatInputOrigin;
       toolTrustOrigin: ToolTrustOrigin;
       permissionUserIntent?: string;
+      rolePrompt?: ActiveRolePrompt;
     },
   ): Promise<{
     text: string;
@@ -1872,10 +1947,12 @@ export class ConversationLoop {
     usageByModel: TokenUsageByModel[];
     vendorProvider: LLMVendor;
     vendorModel: string;
+    finalToolSchemas: ToolSchema[];
   }> {
     const llmSettings = this.deps.settingsService.get("llm");
     const activeBlock = llmSettings.vendors[llmSettings.provider];
     const model = activeBlock.model;
+    let systemPrompt = initialSystemPrompt;
     let servingVendorProvider: LLMVendor = llmSettings.provider;
     let servingVendorModel = model;
     const usageByModel: TokenUsageByModel[] = [];
@@ -1891,6 +1968,10 @@ export class ConversationLoop {
         },
       });
     };
+    // Option C: scope is mutable within the turn. Mutating the
+    // caller's Set directly means the next turn's fallback sees every plugin
+    // that was activated here.
+    let toolSchemas: ToolSchema[] = this.rebuildToolSchemas(scope);
     const withServingIdentity = (
       result: {
         text: string;
@@ -1903,6 +1984,7 @@ export class ConversationLoop {
       usageByModel: [...usageByModel],
       vendorProvider: servingVendorProvider,
       vendorModel: servingVendorModel,
+      finalToolSchemas: [...toolSchemas],
     });
     const turnProvider = this.provider instanceof FallbackProvider
       ? this.provider.withCallbacks({
@@ -1920,10 +2002,6 @@ export class ConversationLoop {
         },
       })
       : this.provider!;
-    // Option C: scope is mutable within the turn. Mutating the
-    // caller's Set directly means the next turn's fallback sees every plugin
-    // that was activated here.
-    let toolSchemas: ToolSchema[] = this.rebuildToolSchemas(scope);
     const allToolCalls: Array<{ name: string; input: Record<string, unknown>; result: string }> = [];
     let turnUsage: TokenUsage | undefined;
     let pluginExpansions = 0;
@@ -2010,7 +2088,29 @@ export class ConversationLoop {
         // well below the post-compact preserveRecent budget, so the
         // next round's prompt-assembly will fit.
         if (this.provider && !this.deps.disableSessionPersistence) {
-          await this.runPreflightGuard(abortSignal, callbacks);
+          const compacted = await this.runPreflightGuard(
+            {
+              systemPrompt,
+              toolSchemas,
+              estimateCurrent: () => this.estimateCurrentRequestProjection({
+                systemPrompt: this.buildSystemPromptForScope(
+                  scope,
+                  overlayTriggerOrigin,
+                  bounds.rolePrompt,
+                ),
+                toolSchemas,
+              }),
+            },
+            abortSignal,
+            callbacks,
+          );
+          if (compacted) {
+            systemPrompt = this.buildSystemPromptForScope(
+              scope,
+              overlayTriggerOrigin,
+              bounds.rolePrompt,
+            );
+          }
         }
         this.history.append({
           role: "user",
@@ -2032,7 +2132,11 @@ export class ConversationLoop {
 
       // ─── Stream attempt — token preflight 가 사전 압축 처리하므로 mid-loop retry 없음 ───
       const messagesForRound = this.history.getMessages();
-      this.lastRoundEstimatedInputTokens = estimateMessagesTokens(messagesForRound);
+      this.lastRoundInputProjection = estimateRequestInputProjection({
+        systemPrompt,
+        messages: messagesForRound,
+        toolSchemas,
+      });
       const stream = await collectRoundStream({
         provider: turnProvider,
         model,
@@ -2147,9 +2251,9 @@ export class ConversationLoop {
         // Last-round overwrite. runTurn uses this as the provider-calibration
         // anchor for turn_summary.tokensIn; billing 합산은 turnUsage.inputTokens /
         // cumulativeUsage 가 별도 추적.
-        this.lastRoundInputTokens = u.inputTokens;
+        this.lastRoundProviderInputTokens = u.inputTokens;
         this.lastContextInputTokens = u.inputTokens;
-        this.lastContextEstimatedInputTokens = this.lastRoundEstimatedInputTokens;
+        this.lastContextInputProjectionTokens = this.lastRoundInputProjection?.totalTokens ?? 0;
 
         turnUsage = {
           inputTokens: (turnUsage?.inputTokens ?? 0) + u.inputTokens,
@@ -2490,6 +2594,7 @@ export class ConversationLoop {
     prevMessageCount: number,
     /** §C1: verbatim pre-compact messages — persisted as checkpoint snapshot for branchFromCheckpoint. */
     messagesBefore: import("./llm/types.js").GenericMessage[],
+    projectionContext: RequestProjectionContext,
   ): Promise<void> {
     // CONTENT_TRUNCATED 경로 — LLM summary boundary 는 없지만 reload/branch
     // parity 를 위해 lightweight checkpoint carrier 를 삽입한다. Truncation 은
@@ -2500,14 +2605,26 @@ export class ConversationLoop {
     // 빌링이 부풀려진다.
     if (result.boundary === null) {
       this.compactNum += 1;
-      const freedTokens = Math.max(0, estimatedBefore - result.estimatedAfter);
-      const truncated = contentTruncatedHistoryWithContextCarrier({
+      let truncated = contentTruncatedHistoryWithContextCarrier({
+        messages: result.newHistory,
+        compactNum: this.compactNum,
+        trigger,
+        removedCount: result.removedCount,
+        estimatedAfter: result.estimatedAfter,
+        freedTokens: Math.max(0, estimatedBefore - result.estimatedAfter),
+        ...(result.truncatedDir !== undefined ? { truncatedDir: result.truncatedDir } : {}),
+      });
+      this.history.clear();
+      this.history.restore(truncated.history);
+      const contextTokensAfter = projectionContext.estimateCurrent().totalTokens;
+      const freedTokens = Math.max(0, estimatedBefore - contextTokensAfter);
+      truncated = contentTruncatedHistoryWithContextCarrier({
         messages: result.newHistory,
         compactNum: this.compactNum,
         trigger,
         removedCount: result.removedCount,
         freedTokens,
-        estimatedAfter: result.estimatedAfter,
+        estimatedAfter: contextTokensAfter,
         ...(result.truncatedDir !== undefined ? { truncatedDir: result.truncatedDir } : {}),
       });
       try {
@@ -2543,7 +2660,7 @@ export class ConversationLoop {
         inputTokens: truncated.contextTokensAfter,
       };
       this.lastContextInputTokens = truncated.contextTokensAfter;
-      this.lastContextEstimatedInputTokens = truncated.contextTokensAfter;
+      this.lastContextInputProjectionTokens = truncated.contextTokensAfter;
       callbacks?.onCompactOccurred?.({
         removedMessages: result.removedCount,
         freedTokens,
@@ -2574,11 +2691,14 @@ export class ConversationLoop {
     }
 
     const preamble = renderBoundaryAsPreamble(result.boundary);
-    const contextTokensAfter = result.estimatedAfter + estimateTokens(preamble);
-    const compactedHistory = compactedHistoryWithContextCarrier(result.newHistory, contextTokensAfter);
+    let compactedHistory = compactedHistoryWithContextCarrier(result.newHistory, result.estimatedAfter);
     this.history.clear();
     this.history.restore(compactedHistory);
     this.deps.systemPromptBuilder.setSummaryPreamble?.(preamble);
+    const contextTokensAfter = projectionContext.estimateCurrent().totalTokens;
+    compactedHistory = compactedHistoryWithContextCarrier(result.newHistory, contextTokensAfter);
+    this.history.clear();
+    this.history.restore(compactedHistory);
     this.cumulativeUsage = {
       inputTokens: contextTokensAfter,
       outputTokens: this.cumulativeUsage.outputTokens,
@@ -2586,7 +2706,7 @@ export class ConversationLoop {
       ...(this.cumulativeUsage.cacheWriteTokens !== undefined && { cacheWriteTokens: 0 }),
     };
     this.lastContextInputTokens = contextTokensAfter;
-    this.lastContextEstimatedInputTokens = result.estimatedAfter;
+    this.lastContextInputProjectionTokens = contextTokensAfter;
 
     // Same-session checkpoint chain.
     // ctxUsageAtTrigger 분모는 *usable context window* (LVIS reservation 적용).
@@ -2630,8 +2750,9 @@ export class ConversationLoop {
   /**
    * Token preflight guard for same-session checkpoint compaction.
    *
-   * step 5 (HISTORY_APPEND) 직후 호출 — `estimateMessagesTokens(history) >= getModelPreflightThreshold()`
-   * 시 차단형 await 로 `compactWithBoundary` 실행. 결과:
+   * step 5 (HISTORY_APPEND) 직후 호출 — request-input projection
+   * (system prompt + wire history + tool schemas) 이 getModelPreflightThreshold()
+   * 에 도달하면 차단형 await 로 `compactWithBoundary` 실행. 결과:
    *   1. `compactNum` 증가
    *   2. `history` 교체 (boundary stub + recentVerbatim)
    *   3. `setSummaryPreamble` 로 prior-context summary 갱신
@@ -2645,9 +2766,10 @@ export class ConversationLoop {
    * early-exit signal 만 전달하고 stream-collector 가 사용자 안내 처리.
    */
   private async runPreflightGuard(
+    projectionContext: RequestProjectionContext,
     abortSignal?: AbortSignal,
     callbacks?: TurnCallbacks,
-  ): Promise<void> {
+  ): Promise<boolean> {
     // Issue #910 follow-up — prior turn ended with context_error / stream_error
     // and the user-facing message promised auto-compact on the next send.
     // Force-trigger compact regardless of threshold + autoCompact setting:
@@ -2675,40 +2797,47 @@ export class ConversationLoop {
       this.contextErrorPending = false;
       this.recoveryExhausted = true;
       callbacks?.onRecoveryExhausted?.();
-      return;
+      return false;
     }
     // Budget 소진 상태면 compact 완전 차단 (re-arm 은 정상 turn 완료 후 reset).
     if (this.recoveryExhausted) {
       log.warn("preflight: recoveryExhausted — all compact API calls blocked until normal turn completes");
-      return;
+      return false;
     }
     if (!forceRecover && !this.isAutoCompactEnabled()) {
       log.debug("runPreflightGuard: skipped (autoCompact 설정 OFF)");
-      return;
+      return false;
     }
     if (this.isCompacting) {
       log.info("preflight: SKIPPED — isCompacting lock held (concurrent turn race avoided)");
-      return;
+      return false;
     }
-    if (!this.provider) return;
+    if (!this.provider) return false;
 
     const llmSettings = this.deps.settingsService.get("llm");
     const provider = llmSettings.provider;
     const model = llmSettings.vendors[provider].model;
     const preflight = getModelPreflightThreshold(provider, model);
-    if (!forceRecover && preflight <= 0) return;
+    if (!forceRecover && preflight <= 0) return false;
 
     const messagesBefore = this.history.getMessages();
-    const estimated = estimateMessagesTokens(messagesBefore);
-    // Two-signal preflight: estimateMessagesTokens (chars/4 heuristic) can
-    // undercount real provider tokens on code-heavy content. Pair it with the
-    // latest context-fill SOT. Do not use cumulativeUsage here: session billing
-    // sums grow every turn and are not a context-window fill metric.
-    const pendingInputDelta = Math.max(0, estimated - this.lastContextEstimatedInputTokens);
+    const requestProjection = estimateRequestInputProjection({
+      systemPrompt: projectionContext.systemPrompt,
+      messages: messagesBefore,
+      toolSchemas: projectionContext.toolSchemas,
+    });
+    const estimated = requestProjection.totalTokens;
+    // Two-signal preflight: local request projection can drift from provider
+    // tokenization. Pair it with the latest provider-calibrated context-fill
+    // SOT. Do not use cumulativeUsage here: session billing sums grow every
+    // turn and are not a context-window fill metric.
+    const pendingInputDelta = this.lastContextInputProjectionTokens > 0
+      ? Math.max(0, estimated - this.lastContextInputProjectionTokens)
+      : 0;
     const contextTokensIn = this.lastContextInputTokens > 0
       ? this.lastContextInputTokens + pendingInputDelta
       : estimated;
-    if (!forceRecover && estimated < preflight && contextTokensIn < preflight) return;
+    if (!forceRecover && estimated < preflight && contextTokensIn < preflight) return false;
     const triggerSource: "estimate" | "context-tokens" | "force-recover" = forceRecover
       ? "force-recover"
       : estimated >= preflight
@@ -2735,7 +2864,8 @@ export class ConversationLoop {
       // forceRecover (context_error pending) 도 동일하게 preserve=0 — provider 가
       // 직접 거부한 상황이므로 보수적 preserve 가 의미 없음. 약속한 compact
       // 를 가장 공격적으로 수행하는 게 사용자 약속 정합.
-      const usagePct = preflight > 0 ? estimated / preflight : 0;
+      const preflightPressure = Math.max(estimated, contextTokensIn);
+      const usagePct = preflight > 0 ? preflightPressure / preflight : 0;
       const basePreserveRecentTokens = forceRecover || usagePct >= 1.0
         ? 0
         : usagePct >= 0.8
@@ -2764,23 +2894,33 @@ export class ConversationLoop {
 
       if (compactResult.status === CompressionStatus.NOOP) {
         log.info("preflight: LLM compact returned NOOP (history within preserveRecentTokens) — no mutation");
-        this.lastContextInputTokens = estimated;
-        this.lastContextEstimatedInputTokens = estimated;
-        return;
+        this.lastContextInputTokens = contextTokensIn;
+        this.lastContextInputProjectionTokens = estimated;
+        return false;
       }
 
       // 다음 prompt assembly 가 새 boundary 를 read 해야 함.
       // onCompactOccurred (compactNum 포함) 은 applyBoundaryToSession 안에서 단일 emit.
       // 여기서 두 번째 emit 을 제거해 CheckpointDivider 중복 방지.
-      await this.applyBoundaryToSession(compactResult, "auto-compact", estimated, callbacks, messagesBefore.length, messagesBefore);
+      await this.applyBoundaryToSession(
+        compactResult,
+        "auto-compact",
+        estimated,
+        callbacks,
+        messagesBefore.length,
+        messagesBefore,
+        projectionContext,
+      );
 
       log.info(
         `preflight: APPLIED — removed=${compactResult.removedCount} estimatedAfter=${compactResult.estimatedAfter} compactNum=${this.compactNum}`,
       );
+      return true;
     } catch (err) {
       // LLM compact 실패 시 turn 자체는 계속 진행 — compact 미적용 history 로 stream attempt.
       // context_error 도달 시 stream-collector 의 safety net 이 사용자 안내 처리.
       log.warn(`preflight: LLM compact failed — ${(err as Error).message}. context_error safety net 으로 위임.`);
+      return false;
     } finally {
       this.isCompacting = false;
       // Single-cycle invariant — every force-recover attempt (success /
