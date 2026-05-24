@@ -22,6 +22,11 @@ import { fullStreamToStreamEvent } from "./stream-mapper.js";
 import { mapAiSdkErrorToLvis } from "./error-mapper.js";
 import { createLogger } from "../../../lib/logger.js";
 import { lookupPricing } from "../../../shared/pricing-data.js";
+import {
+  normalizeProviderToolAliasText,
+  OPENAI_RESPONSES_TOOL_SEARCH_ALIAS,
+  PROVIDER_TOOL_SEARCH_TEXT_ALIASES,
+} from "../../../shared/tool-name-aliases.js";
 import { TOOL_SEARCH_TOOL_NAME } from "../../../tools/registry.js";
 const log = createLogger("adapter");
 
@@ -35,7 +40,7 @@ export type VercelVendor = LLMVendor | "openai-compatible";
 
 const COPILOT_BASE_URL = "https://models.github.ai/inference";
 const OPENAI_RESPONSES_TOOL_NAME_ALIASES: Readonly<Record<string, string>> = {
-  [TOOL_SEARCH_TOOL_NAME]: "lvis_tool_search",
+  [TOOL_SEARCH_TOOL_NAME]: OPENAI_RESPONSES_TOOL_SEARCH_ALIAS,
 };
 const OPENAI_RESPONSES_TOOL_NAME_ALIAS_REVERSE: Readonly<Record<string, string>> =
   Object.fromEntries(
@@ -44,7 +49,6 @@ const OPENAI_RESPONSES_TOOL_NAME_ALIAS_REVERSE: Readonly<Record<string, string>>
       from,
     ]),
   );
-
 /** Detect OpenAI reasoning-model families (Responses API + reasoning_effort support). */
 export function isOpenAIReasoningModel(model: string): boolean {
   const m = model.toLowerCase();
@@ -322,10 +326,12 @@ export class VercelUnifiedProvider implements LLMProvider {
         return;
       }
 
-      for await (const event of fullStreamToStreamEvent(fullStream)) {
-        yield useOpenAIResponsesAliases
-          ? restoreStreamEventFromOpenAIResponses(event)
-          : event;
+      const streamEvents = fullStreamToStreamEvent(fullStream);
+      const restoredEvents = useOpenAIResponsesAliases
+        ? restoreStreamEventsFromOpenAIResponses(streamEvents)
+        : streamEvents;
+      for await (const event of restoredEvents) {
+        yield event;
       }
     } catch (err) {
       const mapped = mapAiSdkErrorToLvis(err);
@@ -462,7 +468,7 @@ function remapGenericMessagesForOpenAIResponses(
     if (message.role === "assistant" && message.toolCalls) {
       return {
         ...message,
-        content: remapPromptTextForOpenAIResponses(message.content),
+        content: restorePromptTextFromOpenAIResponses(message.content),
         toolCalls: message.toolCalls.map((toolCall) => ({
           ...toolCall,
           name: toOpenAIResponsesToolName(toolCall.name),
@@ -472,20 +478,20 @@ function remapGenericMessagesForOpenAIResponses(
     if (message.role === "assistant") {
       return {
         ...message,
-        content: remapPromptTextForOpenAIResponses(message.content),
+        content: restorePromptTextFromOpenAIResponses(message.content),
       };
     }
     if (message.role === "tool_result" && message.toolName) {
       return {
         ...message,
         toolName: toOpenAIResponsesToolName(message.toolName),
-        content: remapPromptTextForOpenAIResponses(message.content),
+        content: restorePromptTextFromOpenAIResponses(message.content),
       };
     }
     if (message.role === "tool_result") {
       return {
         ...message,
-        content: remapPromptTextForOpenAIResponses(message.content),
+        content: restorePromptTextFromOpenAIResponses(message.content),
       };
     }
     return message;
@@ -502,49 +508,111 @@ function remapToolSchemasForOpenAIResponses(
 }
 
 function remapSystemPromptForOpenAIResponses(systemPrompt: string): string {
-  return remapPromptTextForOpenAIResponses(systemPrompt);
-}
-
-function remapPromptTextForOpenAIResponses(text: string): string {
-  let remapped = text;
-  for (const [from, to] of Object.entries(OPENAI_RESPONSES_TOOL_NAME_ALIASES)) {
-    remapped = remapped.replace(
-      new RegExp(`\\b${escapeRegExp(from)}\\b`, "g"),
-      to,
-    );
-  }
-  return remapped;
+  return restorePromptTextFromOpenAIResponses(systemPrompt);
 }
 
 function restorePromptTextFromOpenAIResponses(text: string): string {
-  let restored = text;
-  for (const [from, to] of Object.entries(
-    OPENAI_RESPONSES_TOOL_NAME_ALIAS_REVERSE,
-  )) {
-    restored = restored.replace(
-      new RegExp(`\\b${escapeRegExp(from)}\\b`, "g"),
-      to,
-    );
-  }
-  return restored;
+  return normalizeProviderToolAliasText(text);
 }
 
-function restoreStreamEventFromOpenAIResponses(event: StreamEvent): StreamEvent {
+async function* restoreStreamEventsFromOpenAIResponses(
+  events: AsyncIterable<StreamEvent>,
+): AsyncIterable<StreamEvent> {
+  let bufferedKind: "text_delta" | "reasoning_delta" | null = null;
+  const buffers: Record<"text_delta" | "reasoning_delta", string> = {
+    text_delta: "",
+    reasoning_delta: "",
+  };
+
+  const flushBufferedText = (
+    kind: "text_delta" | "reasoning_delta",
+    final: boolean,
+  ): StreamEvent | null => {
+    const text = buffers[kind];
+    if (text.length === 0) return null;
+    let safeLength = final
+      ? text.length
+      : text.length - longestOpenAIResponseAliasPrefixSuffix(text);
+    if (safeLength <= 0) return null;
+    if (!final) {
+      safeLength = avoidCuttingOpenAIResponseAlias(text, safeLength);
+      if (safeLength <= 0) return null;
+    }
+    const emitText = text.slice(0, safeLength);
+    buffers[kind] = text.slice(safeLength);
+    const restoredText = restorePromptTextFromOpenAIResponses(emitText);
+    return restoredText.length > 0 ? { type: kind, text: restoredText } : null;
+  };
+
+  const flushActive = (final: boolean): StreamEvent | null => {
+    if (!bufferedKind) return null;
+    const event = flushBufferedText(bufferedKind, final);
+    if (final) bufferedKind = null;
+    return event;
+  };
+
+  for await (const event of events) {
+    if (event.type === "text_delta" || event.type === "reasoning_delta") {
+      if (bufferedKind && bufferedKind !== event.type) {
+        const flushed = flushActive(true);
+        if (flushed) yield flushed;
+      }
+      bufferedKind = event.type;
+      buffers[event.type] += event.text;
+      const flushed = flushBufferedText(event.type, false);
+      if (flushed) yield flushed;
+      continue;
+    }
+
+    const flushed = flushActive(true);
+    if (flushed) yield flushed;
+    yield restoreNonTextStreamEventFromOpenAIResponses(event);
+  }
+
+  const flushed = flushActive(true);
+  if (flushed) yield flushed;
+}
+
+function avoidCuttingOpenAIResponseAlias(text: string, safeLength: number): number {
+  let adjusted = safeLength;
+  const lower = text.toLowerCase();
+  for (const alias of PROVIDER_TOOL_SEARCH_TEXT_ALIASES) {
+    const needle = alias.toLowerCase();
+    let index = lower.indexOf(needle);
+    while (index >= 0) {
+      const end = index + needle.length;
+      if (index < adjusted && end > adjusted) {
+        adjusted = index;
+      }
+      index = lower.indexOf(needle, index + 1);
+    }
+  }
+  return adjusted;
+}
+
+function longestOpenAIResponseAliasPrefixSuffix(text: string): number {
+  const lower = text.toLowerCase();
+  let longest = 0;
+  for (const aliasText of PROVIDER_TOOL_SEARCH_TEXT_ALIASES) {
+    const alias = aliasText.toLowerCase();
+    const maxLength = Math.min(alias.length - 1, lower.length);
+    for (let length = maxLength; length > longest; length--) {
+      if (alias.startsWith(lower.slice(lower.length - length))) {
+        longest = length;
+        break;
+      }
+    }
+  }
+  return longest;
+}
+
+function restoreNonTextStreamEventFromOpenAIResponses(event: StreamEvent): StreamEvent {
   if (event.type === "tool_call") {
     const restoredName = fromOpenAIResponsesToolName(event.name);
     if (restoredName === event.name) return event;
     return { ...event, name: restoredName };
   }
-  if (event.type === "text_delta" || event.type === "reasoning_delta") {
-    const restoredText = restorePromptTextFromOpenAIResponses(event.text);
-    if (restoredText === event.text) return event;
-    return { ...event, text: restoredText };
-  }
   return event;
-}
-
-function escapeRegExp(value: string): string {
-  return value.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
 }
 
 function buildTools(

@@ -183,7 +183,17 @@ describe("VercelUnifiedProvider openai — L1/L2/L3 (mocked streamText)", () => 
         yield {
           type: "text-delta",
           id: "txt-1",
-          text: "현재 빌트인 도구에는 lvis_tool_search 가 있습니다.",
+          text: "현재 빌트인 도구에는 `lvis",
+        };
+        yield {
+          type: "text-delta",
+          id: "txt-1",
+          text: "\\_tool",
+        };
+        yield {
+          type: "text-delta",
+          id: "txt-1",
+          text: "_search` 가 있습니다.",
         };
         yield {
           type: "tool-call",
@@ -251,7 +261,7 @@ describe("VercelUnifiedProvider openai — L1/L2/L3 (mocked streamText)", () => 
             role: "tool_result",
             toolUseId: "tu-1",
             toolName: TOOL_SEARCH_TOOL_NAME,
-            content: "필요한 도구는 tool_search 로 로드하세요.",
+            content: "필요한 도구는 lvis_tool_search 로 로드하세요.",
           },
         ],
         tools: [
@@ -273,7 +283,7 @@ describe("VercelUnifiedProvider openai — L1/L2/L3 (mocked streamText)", () => 
       tools?: Record<string, unknown>;
       messages?: Array<{ role: string; content: unknown[] }>;
     };
-    expect(callArg.system).toBe("call lvis_tool_search({ query }) when needed");
+    expect(callArg.system).toBe("call tool_search({ query }) when needed");
     expect(Object.keys(callArg.tools ?? {})).toEqual(["lvis_tool_search"]);
     expect(callArg.messages?.[1]).toMatchObject({
       role: "assistant",
@@ -320,16 +330,17 @@ describe("VercelUnifiedProvider openai — L1/L2/L3 (mocked streamText)", () => 
           toolName: "lvis_tool_search",
           output: {
             type: "text",
-            value: "필요한 도구는 lvis_tool_search 로 로드하세요.",
+            value: "필요한 도구는 tool_search 로 로드하세요.",
           },
         },
       ],
     });
 
-    expect(events).toContainEqual({
-      type: "text_delta",
-      text: "현재 빌트인 도구에는 tool_search 가 있습니다.",
-    });
+    expect(events
+      .filter((event): event is Extract<StreamEvent, { type: "text_delta" }> =>
+        event.type === "text_delta")
+      .map((event) => event.text)
+      .join("")).toBe("현재 빌트인 도구에는 `tool_search` 가 있습니다.");
     const toolEv = events.find((event) => event.type === "tool_call");
     expect(toolEv).toMatchObject({
       type: "tool_call",
