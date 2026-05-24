@@ -66,7 +66,7 @@ function makeLoop(opts: {
     },
     execute: async () => ({ output: "unreachable", isError: false }),
   }));
-  // a plugin tool gated by com.example.meeting scope
+  // Plugin tools gated by their plugin catalog scope.
   toolRegistry.register(createDynamicTool({
     name: "meeting_start",
     description: "회의 시작",
@@ -74,6 +74,14 @@ function makeLoop(opts: {
     pluginId: "com.example.meeting",
     jsonSchema: { type: "object", properties: {} },
     execute: async () => ({ output: "started", isError: false }),
+  }));
+  toolRegistry.register(createDynamicTool({
+    name: "index_scan_status",
+    description: "로컬 인덱서 상태 확인",
+    source: "plugin",
+    pluginId: "local-indexer",
+    jsonSchema: { type: "object", properties: {} },
+    execute: async () => ({ output: "indexed", isError: false }),
   }));
 
   const keywordEngine = new KeywordEngine();
@@ -133,27 +141,27 @@ describe("ConversationLoop — request_plugin meta tool (Option C)", () => {
     expect(toolResult?.content).not.toContain("0개 도구 추가됨");
   });
 
-  it("supports request_plugin -> tool_search in the same assistant round", async () => {
+  it("supports request_plugin(local-indexer) -> tool_search(index_scan_status) in the same assistant round", async () => {
     const provider = new RecordingProvider([
       [
-        { type: "tool_call", id: "tu-1", name: "request_plugin", input: { pluginId: "com.example.meeting" } },
-        { type: "tool_call", id: "tu-2", name: TOOL_SEARCH_TOOL_NAME, input: { query: "meeting_start" } },
+        { type: "tool_call", id: "tu-1", name: "request_plugin", input: { pluginId: "local-indexer" } },
+        { type: "tool_call", id: "tu-2", name: TOOL_SEARCH_TOOL_NAME, input: { query: "index_scan_status" } },
         { type: "message_complete", stopReason: "tool_use" },
       ],
       [
-        { type: "tool_call", id: "tu-3", name: "meeting_start", input: {} },
+        { type: "tool_call", id: "tu-3", name: "index_scan_status", input: {} },
         { type: "message_complete", stopReason: "tool_use" },
       ],
       [
-        { type: "text_delta", text: "회의를 시작했습니다." },
+        { type: "text_delta", text: "인덱서 상태를 확인했습니다." },
         { type: "message_complete", stopReason: "end_turn" },
       ],
     ]);
-    const loop = makeLoop({ provider, availablePluginIds: ["com.example.meeting"] });
+    const loop = makeLoop({ provider, availablePluginIds: ["local-indexer"] });
     const result = await loop.runTurn("일반 질문", undefined, undefined, { inputOrigin: "user-keyboard" });
-    expect(result.text).toBe("회의를 시작했습니다.");
-    expect(provider.observedToolNames[0]).not.toContain("meeting_start");
-    expect(provider.observedToolNames[1]).toContain("meeting_start");
+    expect(result.text).toBe("인덱서 상태를 확인했습니다.");
+    expect(provider.observedToolNames[0]).not.toContain("index_scan_status");
+    expect(provider.observedToolNames[1]).toContain("index_scan_status");
   });
 
   it("returns error tool_result for unknown pluginId", async () => {
