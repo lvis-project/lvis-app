@@ -473,7 +473,7 @@ describe("ConversationLoop onTurnSummary", () => {
   it("does not emit a summary or notification when stopReason is context-error", async () => {
     // Regression guard for Copilot round 10: context_error path must set
     // stopReason="context-error" so willEmitSummary skips, preventing stale
-    // lastRoundInputTokens from being reported to the user.
+    // lastRoundProviderInputTokens from being reported to the user.
     const toolRegistry = new ToolRegistry();
     const provider = new FakeProvider([
       [
@@ -493,7 +493,7 @@ describe("ConversationLoop onTurnSummary", () => {
 
     // stopReason must be "context-error" (not undefined / "end_turn")
     expect(result.stopReason).toBe("context-error");
-    // No turn summary emitted — stale lastRoundInputTokens must not reach UI
+    // No turn summary emitted — stale lastRoundProviderInputTokens must not reach UI
     expect(summaryCallCount).toBe(0);
     // Error message was surfaced as turn text
     expect(result.text).toContain("한도를 초과");
@@ -523,5 +523,52 @@ describe("ConversationLoop onTurnSummary", () => {
     expect(summary!.tokensIn).toBeGreaterThan(0);
     expect(summary!.tokensOut).toBe(0);
     expect(summary!.toolCount).toBe(0);
+  });
+
+  it("uses engine request projection when provider usage is unavailable", async () => {
+    const toolRegistry = new ToolRegistry();
+    toolRegistry.register(createDynamicTool({
+      name: "large_schema_tool",
+      description: "Tool with intentionally large schema description ".repeat(200),
+      source: "builtin",
+      category: "read",
+      jsonSchema: {
+        type: "object",
+        properties: {
+          query: { type: "string", description: "query text ".repeat(200) },
+        },
+        required: ["query"],
+      },
+      isReadOnly: () => true,
+      execute: async () => ({ output: "ok", isError: false }),
+    }));
+    const provider = new FakeProvider([
+      [
+        { type: "text_delta", text: "ok" },
+        { type: "message_complete", stopReason: "end_turn" },
+      ],
+    ]);
+    const loop = createLoopWithRegistry(provider, toolRegistry, {
+      systemPromptBuilder: {
+        build: () => "system prompt overhead ".repeat(300),
+        setToolScope: vi.fn(),
+        setOriginSource: vi.fn(),
+        setActiveSessionId: vi.fn(),
+        setActiveRolePrompt: vi.fn(),
+      } as never,
+    });
+
+    let summary:
+      | { tokensIn: number; tokensOut: number; toolCount: number }
+      | null = null;
+    await loop.runTurn("질문", {
+      onTurnSummary: (s) => {
+        summary = s;
+      },
+    }, undefined, { inputOrigin: "user-keyboard" });
+
+    expect(summary).not.toBeNull();
+    expect(summary!.tokensIn).toBeGreaterThan(3_000);
+    expect(summary!.tokensOut).toBe(0);
   });
 });

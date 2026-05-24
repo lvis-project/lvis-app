@@ -16,10 +16,10 @@ describe("TokenProgressRing", () => {
     expect(ring).toHaveAttribute("tabindex", "0");
   });
 
-  it("has aria-label describing token usage", () => {
+  it("has aria-label describing projected input", () => {
     const { getByTestId } = renderWithProvider(<TokenProgressRing used={500} budget={1000} />);
     const ring = getByTestId("token-progress-ring");
-    expect(ring).toHaveAttribute("aria-label", "Token usage 50 percent");
+    expect(ring).toHaveAttribute("aria-label", "Projected input 50 percent");
   });
 
   it("has role=img", () => {
@@ -31,6 +31,6 @@ describe("TokenProgressRing", () => {
   it("exposes a compact native hint label like the cost badge", () => {
     const { getByTestId } = renderWithProvider(<TokenProgressRing used={250} budget={1000} />);
     const ring = getByTestId("token-progress-ring");
-    expect(ring).toHaveAttribute("title", "컨텍스트 사용량");
+    expect(ring).toHaveAttribute("title", "다음 요청 입력 예측");
   });
 });
