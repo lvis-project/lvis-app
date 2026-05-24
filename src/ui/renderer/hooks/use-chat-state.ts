@@ -237,16 +237,37 @@ export function useChatState(api: LvisApi) {
         streamRef.current = "";
         thoughtRef.current = "";
       } else if (ev.type === "tool_start" && ev.name && ev.groupId && ev.toolUseId !== undefined) {
-        const { groupId, toolUseId, displayOrder = 0, name, input } = ev;
+        const { groupId, toolUseId, displayOrder = 0, name, input, source, toolCategory, pluginId, mcpServerId } = ev;
         setEntries((p) =>
           applyToolStart(
             dropPermissionReviewEntries(dropPendingLlmStatusAssistant(p), { groupId, toolUseId }),
-            { groupId, toolUseId, displayOrder, name, input },
+            {
+              groupId,
+              toolUseId,
+              displayOrder,
+              name,
+              input,
+              ...(source ? { source } : {}),
+              ...(toolCategory ? { category: toolCategory } : {}),
+              ...(pluginId ? { pluginId } : {}),
+              ...(mcpServerId ? { mcpServerId } : {}),
+            },
           ),
         );
       } else if (ev.type === "tool_end" && ev.name && ev.groupId && ev.toolUseId !== undefined) {
-        const { groupId, toolUseId, result, isError, uiPayload, durationMs } = ev;
-        setEntries((p) => applyToolEnd(p, { groupId, toolUseId, result, isError, uiPayload, durationMs }));
+        const { groupId, toolUseId, result, isError, uiPayload, durationMs, source, toolCategory, pluginId, mcpServerId } = ev;
+        setEntries((p) => applyToolEnd(p, {
+          groupId,
+          toolUseId,
+          result,
+          isError,
+          uiPayload,
+          durationMs,
+          ...(source ? { source } : {}),
+          ...(toolCategory ? { category: toolCategory } : {}),
+          ...(pluginId ? { pluginId } : {}),
+          ...(mcpServerId ? { mcpServerId } : {}),
+        }));
       } else if (ev.type === "error") {
         // LLM compact may have started but thrown — clear the indicator
         // so the StatusBar item doesn't stick when compact_notice never arrives.
