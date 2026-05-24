@@ -3,20 +3,13 @@ import { buildE2eBaseSettings, buildIsolatedElectronEnv } from "./seeded-electro
  * Tutorial-B (O-X2) — Memory Seed Onboarding Wizard e2e.
  *
  * Verifies the first-boot funnel:
- *   1. Fresh HOME (no `features.onboardingCompleted` set, no API keys)
- *      causes the wizard to auto-mount.
- *   2. Filling in 호칭 + 자기소개 → "기억하고 시작하기" dismisses the
+ *   1. Fresh HOME (`features.onboardingCompleted=false`, no API keys)
+ *      starts at ScenarioShowcase and advances through LoginModal.
+ *   2. The BYOK login path closes LoginModal and mounts MemorySeed.
+ *   3. Filling in 호칭 + 자기소개 → "기억하고 시작하기" dismisses the
  *      wizard and seeds `~/.lvis/memories/MEMORY.md` Urgent Memory.
- *   3. After dismissal the SpotlightTour spotlight visibly mounts. The
- *      production trigger is the Z chain-effect (App.tsx:699-711) firing
- *      `api.tour.start("first-boot-essentials")` on stage="tour" — the
- *      MemorySeed wizard's own `startTour()` is intentionally swallowed
- *      by an App.tsx-side `tour.start` wrapper to prevent a double-fire
- *      that would visibly reset the SpotlightTour to step 0 (regression
- *      from PR #1019; fix in #1029). This spec validates the *chain-effect
- *      driven* trigger path — the wizard's own startTour() lives only as
- *      a defensive secondary call for the dev-mode swallow-failure case.
- *   4. Subsequent boots do NOT re-show the wizard
+ *   4. PersonalizedWelcome advances to SpotlightTour via the Z chain-effect.
+ *   5. Subsequent boots do NOT re-show the wizard
  *      (`features.onboardingCompleted` flipped).
  */
 import { test, expect } from "@playwright/test";
@@ -37,6 +30,7 @@ test.describe("memory seed onboarding wizard", () => {
   let page: Page;
   let userDataDir: string;
   let tempHome: string;
+  let lvisHome: string;
 
   test.beforeEach(async () => {
     userDataDir = mkdtempSync(resolve(tmpdir(), "lvis-memory-seed-user-data-"));
@@ -46,7 +40,7 @@ test.describe("memory seed onboarding wizard", () => {
       JSON.stringify(buildE2eBaseSettings(false), null, 2) + "\n",
       "utf-8",
     );
-    const lvisHome = resolve(tempHome, ".lvis");
+    lvisHome = resolve(tempHome, ".lvis");
 
     app = await electron.launch({
       args: [MAIN_ENTRY, `--user-data-dir=${userDataDir}`, "--no-sandbox"],
@@ -75,11 +69,91 @@ test.describe("memory seed onboarding wizard", () => {
     if (tempHome) rmSync(tempHome, { recursive: true, force: true });
   });
 
+  async function advanceToMemorySeed() {
+    const showcase = page.getByTestId("scenario-showcase");
+    await expect(showcase).toBeVisible({ timeout: 30_000 });
+
+    await page.getByTestId("scenario-showcase:start").click();
+    const loginModal = page.getByTestId("login-modal");
+    await expect(loginModal).toBeVisible({ timeout: 10_000 });
+
+    const settingsWindowPromise = app.waitForEvent("window", { timeout: 10_000 });
+    await page.getByTestId("login-modal:chip-byok").click();
+    const settingsWindow = await settingsWindowPromise;
+    await settingsWindow.waitForLoadState("domcontentloaded");
+    await expect(settingsWindow.getByRole("heading", { name: "설정" })).toBeVisible({
+      timeout: 10_000,
+    });
+
+    const settingsClosed = settingsWindow.waitForEvent("close");
+    await app.evaluate(({ BrowserWindow }) => {
+      const target = BrowserWindow.getAllWindows().find(
+        (w) => !w.isDestroyed() && w.getTitle() === "LVIS 설정",
+      );
+      target?.close();
+    });
+    await settingsClosed;
+
+    const dialog = page.getByTestId("memory-seed-dialog");
+    await expect(dialog).toBeVisible({ timeout: 15_000 });
+    return dialog;
+  }
+
+  async function completeOnboardingAfterMemory(options?: {
+    expectedGreeting?: string;
+    expectedIntro?: string;
+  }) {
+    const welcome = page.getByTestId("personalized-welcome");
+    await expect(welcome).toBeVisible({ timeout: 10_000 });
+    if (options?.expectedGreeting) {
+      await expect(welcome.getByTestId("personalized-welcome:greeting")).toContainText(
+        options.expectedGreeting,
+      );
+    }
+    if (options?.expectedIntro) {
+      await expect(welcome.getByTestId("personalized-welcome:intro")).toContainText(
+        options.expectedIntro,
+      );
+    }
+    await welcome.getByTestId("personalized-welcome:continue").click();
+    await expect(welcome).toBeHidden({ timeout: 10_000 });
+
+    const tour = page.getByTestId("spotlight-tour");
+    const tourCard = page.getByTestId("spotlight-tour:card");
+    await expect(tourCard).toBeVisible({ timeout: 10_000 });
+    await expect(tour).toHaveAttribute("data-scenario-id", "first-boot-essentials");
+
+    const nextButton = page.getByTestId("spotlight-tour:next");
+    for (let step = 0; step < 12; step += 1) {
+      if (!(await tourCard.isVisible().catch(() => false))) break;
+      await nextButton.click();
+      await page.waitForTimeout(150);
+    }
+    await expect(tourCard).toBeHidden({ timeout: 10_000 });
+
+    const pluginShowcase = page.getByTestId("plugin-showcase");
+    await expect(pluginShowcase).toBeVisible({ timeout: 10_000 });
+    await page.getByTestId("plugin-showcase:close").click();
+    await expect(pluginShowcase).toBeHidden({ timeout: 10_000 });
+    await expect
+      .poll(
+        async () =>
+          page.evaluate(async () => {
+            const api = (window as unknown as {
+              lvisApi: { getSettings: () => Promise<{ features?: { onboardingCompleted?: boolean } }> };
+            }).lvisApi;
+            const settings = await api.getSettings();
+            return settings.features?.onboardingCompleted;
+          }),
+        { timeout: 10_000 },
+      )
+      .toBe(true);
+  }
+
   test("auto-opens on first boot, seeds MEMORY.md, and the chain-effect tour broadcast mounts the SpotlightTour", async () => {
     await page.setViewportSize({ width: 460, height: 840 });
 
-    const dialog = page.getByTestId("memory-seed-dialog");
-    await expect(dialog).toBeVisible({ timeout: 30_000 });
+    const dialog = await advanceToMemorySeed();
 
     await dialog.getByTestId("memory-seed-dialog:name").fill("Ken");
     await dialog
@@ -93,17 +167,12 @@ test.describe("memory seed onboarding wizard", () => {
     await dialog.getByTestId("memory-seed-dialog:submit").click();
     await expect(dialog).toBeHidden({ timeout: 10_000 });
 
-    // SpotlightTour root mounts only after a `lvis:tour:start` broadcast.
-    // Trigger origin is the chain-effect at App.tsx (stage="tour" branch),
-    // NOT the wizard's internal startTour() — that path is intentionally
-    // swallowed by the App.tsx-side `tour.start` wrapper to prevent the
-    // double-mount regression (PR #1029). The chain-effect is the canonical
-    // production trigger: this assertion proves the wizard's onDismissed →
-    // dispatchChain("memory-finish") → stage="tour" → broadcast pipeline.
-    await page
-      .getByTestId("spotlight-tour")
-      .first()
-      .waitFor({ state: "visible", timeout: 10_000 });
+    // The chain must carry MemorySeed values into PersonalizedWelcome before
+    // the tour broadcast can mark onboarding complete.
+    await completeOnboardingAfterMemory({
+      expectedGreeting: "Ken",
+      expectedIntro: "매주 회의가 많은 PM",
+    });
 
     // MEMORY.md should now carry both 호칭 + 자기소개 lines in Urgent Memory.
     const memoryPath = resolve(tempHome, ".lvis", "memories", "MEMORY.md");
@@ -114,13 +183,13 @@ test.describe("memory seed onboarding wizard", () => {
   });
 
   test("does not re-open on the second boot once onboarding is completed", async () => {
-    // First boot: dismiss via skip.
-    const dialog = page.getByTestId("memory-seed-dialog");
-    await expect(dialog).toBeVisible({ timeout: 30_000 });
+    // First boot: advance through ScenarioShowcase/LoginModal, then dismiss via skip.
+    const dialog = await advanceToMemorySeed();
     await dialog.getByTestId("memory-seed-dialog:skip").click();
     await expect(dialog).toBeHidden({ timeout: 10_000 });
+    await completeOnboardingAfterMemory();
 
-    // Close and re-launch with the same HOME — the wizard must NOT reopen.
+    // Close and re-launch with the same HOME — completed onboarding must not reopen.
     await app.close().catch(() => {});
     app = await electron.launch({
       args: [MAIN_ENTRY, `--user-data-dir=${userDataDir}`, "--no-sandbox"],
@@ -144,6 +213,8 @@ test.describe("memory seed onboarding wizard", () => {
 
     // Wait long enough that the first-boot probe would have fired.
     await page.waitForTimeout(2_000);
-    await expect(page.getByTestId("memory-seed-dialog")).toBeHidden();
+    await expect(page.getByTestId("scenario-showcase")).toHaveCount(0);
+    await expect(page.getByTestId("login-modal")).toHaveCount(0);
+    await expect(page.getByTestId("memory-seed-dialog")).toHaveCount(0);
   });
 });
