@@ -78,6 +78,10 @@ export interface ToolCallMeta {
   groupId: string;
   toolUseId: string;
   displayOrder: number;
+  source?: ToolSource;
+  category?: ToolCategory;
+  pluginId?: string;
+  mcpServerId?: string;
 }
 
 /**
@@ -993,6 +997,10 @@ export class ToolExecutor {
     source = tool.source;
     trust = trustFromSource(source);
     let invocationCategory = resolveInvocationCategory(tool, toolUse.input);
+    meta.source = source;
+    meta.category = invocationCategory;
+    if (tool.pluginId) meta.pluginId = tool.pluginId;
+    if (tool.mcpServerId) meta.mcpServerId = tool.mcpServerId;
 
     const foldedExecutionCwd = caseFoldForMatch(canonicalizePathForMatch(executionCwd));
     if (isFilesystemRootPath(foldedExecutionCwd)) {
@@ -1043,6 +1051,7 @@ export class ToolExecutor {
       : toolUse.input;
     if (finalInput !== toolUse.input) {
       invocationCategory = resolveInvocationCategory(tool, finalInput);
+      meta.category = invocationCategory;
     }
     const approvalCacheKey = approvalCacheKeyFor(tool, finalInput, executionCwd);
     const invocationPermissionContext: ToolPermissionContext = {

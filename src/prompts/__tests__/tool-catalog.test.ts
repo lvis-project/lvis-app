@@ -14,6 +14,14 @@ import { createDynamicTool } from "../../tools/base.js";
 function seedRegistry(): ToolRegistry {
   const r = new ToolRegistry();
   r.register(createDynamicTool({
+    name: "bash",
+    description: "명령을 실행합니다.",
+    source: "builtin",
+    category: "shell",
+    jsonSchema: { type: "object", properties: {} },
+    execute: async () => ({ output: "", isError: false }),
+  }));
+  r.register(createDynamicTool({
     name: "meeting_start",
     description: "회의 녹음을 시작합니다.",
     source: "plugin",
@@ -60,6 +68,8 @@ describe("SystemPromptBuilder — tool catalog (Tool-Level Deferral)", () => {
     const prompt = builder.build();
     expect(prompt).toContain("<tool-catalog>");
     expect(prompt).toContain("tool_search");
+    expect(prompt).toContain("### plugin:com.example.meeting");
+    expect(prompt).toContain("plugin:<id>/mcp:<id> 도구를 builtin 으로 설명하지 마세요.");
     // meeting_stop is deferred → present in catalog.
     expect(prompt).toContain("**meeting_stop**");
     // meeting_start is loaded → NOT duplicated in catalog.
@@ -76,6 +86,10 @@ describe("SystemPromptBuilder — tool catalog (Tool-Level Deferral)", () => {
       deferral: false,
     });
     const prompt = builder.build();
+    expect(prompt).toContain("<available-tools>");
+    expect(prompt).toContain("현재 로드되어 있어도 builtin 이라는 뜻은 아닙니다.");
+    expect(prompt).toContain("### builtin");
+    expect(prompt).toContain("### plugin:com.example.meeting");
     expect(prompt).toContain("<tool-catalog>");
     expect(prompt).toContain("**meeting_start**");
     expect(prompt).toContain("**meeting_stop**");

@@ -82,6 +82,48 @@ describe("ToolGroupCard", () => {
     expect(container.textContent).not.toContain("file content");
   });
 
+  it("shows tool provenance labels for builtin, plugin, and MCP tools", () => {
+    const { container } = render(<ToolGroupCard group={makeMultiGroup({
+      tools: [
+        {
+          toolUseId: "tu-1",
+          name: "read_file",
+          input: {},
+          result: "r1",
+          status: "done",
+          displayOrder: 0,
+          source: "builtin",
+        },
+        {
+          toolUseId: "tu-2",
+          name: "meeting_start",
+          input: {},
+          result: "r2",
+          status: "done",
+          displayOrder: 1,
+          source: "plugin",
+          pluginId: "com.example.meeting",
+        },
+        {
+          toolUseId: "tu-3",
+          name: "mcp_fetch",
+          input: {},
+          result: "r3",
+          status: "done",
+          displayOrder: 2,
+          source: "mcp",
+          mcpServerId: "server-1",
+        },
+      ],
+    })} />);
+
+    fireEvent.click(container.querySelector("button") as HTMLButtonElement);
+
+    expect(container.textContent).toContain("builtin");
+    expect(container.textContent).toContain("plugin:com.example.meeting");
+    expect(container.textContent).toContain("mcp:server-1");
+  });
+
   it("single tool running: shows spinner inline", () => {
     const { container } = render(
       <ToolGroupCard group={makeGroup({ status: "running", tools: [{ toolUseId: "tu-1", name: "read_file", input: {}, status: "running", displayOrder: 0 }] })} />,
