@@ -15,6 +15,7 @@ import { describe, it, expect, vi } from "vitest";
 import { collectStreamEvents as collect } from "./test-helpers.js";
 import type { StreamEvent } from "../../types.js";
 import { mapReasoningEffort, isOpenAIReasoningModel } from "../adapter.js";
+import { TOOL_SEARCH_TOOL_NAME } from "../../../../tools/registry.js";
 
 
 describe("VercelUnifiedProvider openai — reasoning_effort mapping", () => {
@@ -170,6 +171,163 @@ describe("VercelUnifiedProvider openai — L1/L2/L3 (mocked streamText)", () => 
     if (finish?.type === "message_complete") {
       expect(finish.stopReason).toBe("tool_use");
     }
+
+    vi.doUnmock("ai");
+    vi.doUnmock("@ai-sdk/openai");
+  });
+
+  it("aliases LVIS tool_search on OpenAI Responses wire and restores stream events", async () => {
+    vi.resetModules();
+    const streamTextSpy = vi.fn(() => ({
+      fullStream: (async function* () {
+        yield {
+          type: "tool-call",
+          toolCallId: "tu-2",
+          toolName: "lvis_tool_search",
+          input: { query: "index_scan_status" },
+        };
+        yield {
+          type: "finish",
+          finishReason: "tool-calls",
+          totalUsage: { inputTokens: 1, outputTokens: 1 },
+        };
+      })(),
+    }));
+
+    vi.doMock("ai", async () => {
+      const actual = await vi.importActual<typeof import("ai")>("ai");
+      return { ...actual, streamText: streamTextSpy };
+    });
+    vi.doMock("@ai-sdk/openai", () => ({
+      createOpenAI: () => ({
+        responses: vi.fn(() => ({ __mock: "responses" })),
+        chat: vi.fn(() => ({ __mock: "chat" })),
+      }),
+    }));
+
+    const { VercelUnifiedProvider } = await import("../adapter.js");
+    const provider = new VercelUnifiedProvider("openai", "test-key");
+
+    const events = await collect(
+      provider.streamTurn({
+        model: "gpt-5.4-mini",
+        systemPrompt: "call tool_search({ query }) when needed",
+        messages: [
+          { role: "user", content: "로컬 인덱서 확인해보자" },
+          {
+            role: "assistant",
+            content: "",
+            toolCalls: [
+              {
+                id: "tu-0",
+                name: "request_plugin",
+                input: { pluginId: "local-indexer" },
+              },
+            ],
+          },
+          {
+            role: "tool_result",
+            toolUseId: "tu-0",
+            toolName: "request_plugin",
+            content: "local-indexer 카탈로그가 활성화되었습니다.",
+          },
+          {
+            role: "assistant",
+            content: "",
+            toolCalls: [
+              {
+                id: "tu-1",
+                name: TOOL_SEARCH_TOOL_NAME,
+                input: { query: "index_scan_status" },
+              },
+            ],
+          },
+          {
+            role: "tool_result",
+            toolUseId: "tu-1",
+            toolName: TOOL_SEARCH_TOOL_NAME,
+            content: "필요한 도구는 tool_search 로 로드하세요.",
+          },
+        ],
+        tools: [
+          {
+            name: TOOL_SEARCH_TOOL_NAME,
+            description: "도구 검색",
+            inputSchema: {
+              type: "object",
+              required: ["query"],
+              properties: { query: { type: "string" } },
+            },
+          },
+        ],
+      }),
+    );
+
+    const callArg = streamTextSpy.mock.calls[0]![0] as {
+      system?: string;
+      tools?: Record<string, unknown>;
+      messages?: Array<{ role: string; content: unknown[] }>;
+    };
+    expect(callArg.system).toBe("call lvis_tool_search({ query }) when needed");
+    expect(Object.keys(callArg.tools ?? {})).toEqual(["lvis_tool_search"]);
+    expect(callArg.messages?.[1]).toMatchObject({
+      role: "assistant",
+      content: [
+        {
+          type: "tool-call",
+          toolCallId: "tu-0",
+          toolName: "request_plugin",
+          input: { pluginId: "local-indexer" },
+        },
+      ],
+    });
+    expect(callArg.messages?.[2]).toMatchObject({
+      role: "tool",
+      content: [
+        {
+          type: "tool-result",
+          toolCallId: "tu-0",
+          toolName: "request_plugin",
+          output: {
+            type: "text",
+            value: "local-indexer 카탈로그가 활성화되었습니다.",
+          },
+        },
+      ],
+    });
+    expect(callArg.messages?.[3]).toMatchObject({
+      role: "assistant",
+      content: [
+        {
+          type: "tool-call",
+          toolCallId: "tu-1",
+          toolName: "lvis_tool_search",
+          input: { query: "index_scan_status" },
+        },
+      ],
+    });
+    expect(callArg.messages?.[4]).toMatchObject({
+      role: "tool",
+      content: [
+        {
+          type: "tool-result",
+          toolCallId: "tu-1",
+          toolName: "lvis_tool_search",
+          output: {
+            type: "text",
+            value: "필요한 도구는 lvis_tool_search 로 로드하세요.",
+          },
+        },
+      ],
+    });
+
+    const toolEv = events.find((event) => event.type === "tool_call");
+    expect(toolEv).toMatchObject({
+      type: "tool_call",
+      id: "tu-2",
+      name: TOOL_SEARCH_TOOL_NAME,
+      input: { query: "index_scan_status" },
+    });
 
     vi.doUnmock("ai");
     vi.doUnmock("@ai-sdk/openai");
