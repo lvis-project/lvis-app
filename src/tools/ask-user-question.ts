@@ -62,6 +62,7 @@ export function createAskUserQuestionTool(deps: AskUserQuestionToolDeps): Tool {
                 description:
                   "버튼으로 보여줄 선택지. 최대 3개, 항목당 한국어 ≤ 20자. " +
                   "그 외 답은 자유 입력으로 사용자가 보완하므로 4개 이상 후보가 있어도 가장 가능성 높은 3개만 두세요. " +
+                  "정적 폴백('네'/'아니오'/'잘 모르겠어요')은 금지 — 그 분기점의 맥락에 맞는 구체적 선택지를 제시하세요. " +
                   "비어 있거나 생략 시 자유 입력만 표시.",
               },
               recommendedIndex: {
