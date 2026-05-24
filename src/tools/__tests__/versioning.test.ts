@@ -23,6 +23,7 @@ function makeTool(
     deprecatedSince?: string;
     replacedBy?: string;
     pluginId?: string;
+    mcpServerId?: string;
     source?: "builtin" | "plugin" | "mcp";
   } = {},
 ) {
@@ -31,6 +32,7 @@ function makeTool(
     description: `tool ${name}@${opts.version ?? "1.0.0"}`,
     source: opts.source ?? "builtin",
     pluginId: opts.pluginId,
+    mcpServerId: opts.mcpServerId,
     version: opts.version,
     deprecatedSince: opts.deprecatedSince,
     replacedBy: opts.replacedBy,
@@ -65,6 +67,33 @@ describe("§6.4 Tool Versioning — ToolRegistry", () => {
       "2.0.3",
       "2.1.0",
     ]);
+  });
+
+  it("rejects cross-owner name collisions so plugin tools cannot replace builtins by version", () => {
+    const r = new ToolRegistry();
+    r.register(makeTool("meeting_start", { version: "1.0.0" }));
+
+    expect(() =>
+      r.register(makeTool("meeting_start", {
+        version: "9.0.0",
+        source: "plugin",
+        pluginId: "lvis-plugin-meeting",
+      })),
+    ).toThrow(/Tool name collision.*builtin.*plugin:lvis-plugin-meeting/);
+
+    expect(r.findByName("meeting_start")?.source).toBe("builtin");
+    expect(r.findByName("meeting_start")?.version).toBe("1.0.0");
+  });
+
+  it("rejects plugin and MCP tools that are missing owner ids", () => {
+    const r = new ToolRegistry();
+
+    expect(() =>
+      r.register(makeTool("plugin_missing_owner", { source: "plugin" })),
+    ).toThrow(/missing pluginId/);
+    expect(() =>
+      r.register(makeTool("mcp_missing_owner", { source: "mcp" })),
+    ).toThrow(/missing mcpServerId/);
   });
 
   it("findByNameVersion returns the pinned legacy version without deprecation warn", () => {

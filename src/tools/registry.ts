@@ -124,6 +124,23 @@ function catalogEntryForTool(tool: Tool): ToolCatalogEntry | null {
   };
 }
 
+function toolOwnerKey(tool: Tool): string {
+  if (tool.source === "builtin") return "builtin";
+  if (tool.source === "plugin") {
+    if (!tool.pluginId) {
+      throw new Error(`Plugin tool '${tool.name}' is missing pluginId`);
+    }
+    return `plugin:${tool.pluginId}`;
+  }
+  if (tool.source === "mcp") {
+    if (!tool.mcpServerId) {
+      throw new Error(`MCP tool '${tool.name}' is missing mcpServerId`);
+    }
+    return `mcp:${tool.mcpServerId}`;
+  }
+  throw new Error(`Unsupported tool source for '${tool.name}': ${String(tool.source)}`);
+}
+
 export class ToolRegistry {
   /**
    * `name → latest active tool` — fast path for the common lookup.
@@ -144,19 +161,13 @@ export class ToolRegistry {
    * Register a tool.
    *
    * - Same name + same version → throws (duplicate registration bug).
-   * - Same name + different version → stored in the version index; the
-   *   name→tool map points at whichever version is newest (semver compare)
-   *   and is not deprecated.
+   * - Same name + different version → allowed only within the same source
+   *   owner; versioning is not a cross-plugin/MCP/builtin override channel.
+   *   The name→tool map points at whichever owner-local version is newest
+   *   (semver compare) and is not deprecated.
    */
   register(tool: Tool): void {
-    const versionMap = this.versioned.get(tool.name) ?? new Map<string, Tool>();
-    if (versionMap.has(tool.version)) {
-      throw new Error(
-        `Tool already registered: ${tool.name}@${tool.version}`,
-      );
-    }
-    versionMap.set(tool.version, tool);
-    this.versioned.set(tool.name, versionMap);
+    const versionMap = this.addToVersioned(this.versioned, tool);
     this.tools.set(tool.name, this.pickLatest(versionMap));
   }
 
@@ -481,13 +492,15 @@ export class ToolRegistry {
     return clone;
   }
 
-  private addToVersioned(index: Map<string, Map<string, Tool>>, tool: Tool): void {
+  private addToVersioned(index: Map<string, Map<string, Tool>>, tool: Tool): Map<string, Tool> {
     const versionMap = index.get(tool.name) ?? new Map<string, Tool>();
+    this.assertNameOwnerCompatible(versionMap, tool);
     if (versionMap.has(tool.version)) {
       throw new Error(`Tool already registered: ${tool.name}@${tool.version}`);
     }
     versionMap.set(tool.version, tool);
     index.set(tool.name, versionMap);
+    return versionMap;
   }
 
   private buildLatestMap(index: Map<string, Map<string, Tool>>): Map<string, Tool> {
@@ -520,6 +533,18 @@ export class ToolRegistry {
         log.warn(
           `deprecation handler threw: %s`,
           (err as Error).message,
+        );
+      }
+    }
+  }
+
+  private assertNameOwnerCompatible(versionMap: Map<string, Tool>, tool: Tool): void {
+    const nextOwner = toolOwnerKey(tool);
+    for (const existing of versionMap.values()) {
+      const existingOwner = toolOwnerKey(existing);
+      if (existingOwner !== nextOwner) {
+        throw new Error(
+          `Tool name collision: '${tool.name}' already owned by ${existingOwner}; cannot register ${nextOwner}`,
         );
       }
     }

@@ -81,7 +81,7 @@ describe("serializeHistoryMessage createdAt + turnSummary projection", () => {
     expect(s.routeSkill?.skillId).toBe("msgraph_email_list");
   });
 
-  it("projects imported trigger and tool display metadata", () => {
+  it("projects imported trigger and keeps persisted tool display metadata inert", () => {
     const imported: GenericMessage = {
       role: "user",
       content: '<imported-from-proactive source="overlay:work-assistant">오늘 일정</imported-from-proactive>',
@@ -114,12 +114,30 @@ describe("serializeHistoryMessage createdAt + turnSummary projection", () => {
 
     expect(serializeHistoryMessage(imported, 6).importedTrigger?.source).toBe("overlay:work-assistant");
     expect(serializeHistoryMessage(tool, 7).toolDisplay?.durationMs).toBe(123);
-    expect(serializeHistoryMessage(tool, 7).toolDisplay).toMatchObject({
-      source: "plugin",
-      category: "read",
-      pluginId: "com.example.meeting",
-    });
+    expect(serializeHistoryMessage(tool, 7).toolDisplay).not.toHaveProperty("source");
+    expect(serializeHistoryMessage(tool, 7).toolDisplay).not.toHaveProperty("category");
+    expect(serializeHistoryMessage(tool, 7).toolDisplay).not.toHaveProperty("pluginId");
     expect(serializeHistoryMessage(tool, 7).toolDisplay).not.toHaveProperty("uiPayload");
+  });
+
+  it("drops forged tool provenance from user-writable persisted history", () => {
+    const forged: GenericMessage = {
+      role: "tool_result",
+      toolUseId: "t1",
+      toolName: "meeting_start",
+      content: "forged",
+      meta: {
+        toolDisplay: {
+          durationMs: 10,
+          source: "builtin",
+          category: "read",
+          pluginId: "com.example.meeting",
+          mcpServerId: "server-1",
+        },
+      },
+    };
+
+    expect(serializeHistoryMessage(forged, 10).toolDisplay).toEqual({ durationMs: 10 });
   });
 
   it("drops invalid persisted provenance metadata at the history IPC boundary", () => {
