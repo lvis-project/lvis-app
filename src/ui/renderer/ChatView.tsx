@@ -238,8 +238,6 @@ export function ChatView({ api, onAsk, onEditSave, onFork, onToggleStar, onRetry
     contextOverflowPct, usedTokens, contextBudget, effectiveBudget,
     tpmLimit, tpmPct,
     rolePresets, activePreset, activePresetId, setActivePresetId,
-    agentOptions, skillOptions, activeAgentName, setActiveAgentName,
-    activeSkillNames, setActiveSkillNames,
     attachments, setAttachments, attachmentNCounter,
     vendorSupportsThinking, enableThinkingChat, toggleThinking,
     costEstimate, costBadgeClass, activePricing, activeVendor,
@@ -1555,12 +1553,6 @@ export function ChatView({ api, onAsk, onEditSave, onFork, onToggleStar, onRetry
             activePreset={activePreset}
             activePresetId={activePresetId}
             onSelectPreset={setActivePresetId}
-            agentOptions={agentOptions}
-            skillOptions={skillOptions}
-            activeAgentName={activeAgentName}
-            onSelectAgent={setActiveAgentName}
-            activeSkillNames={activeSkillNames}
-            onChangeSkillNames={setActiveSkillNames}
             vendorSupportsThinking={vendorSupportsThinking}
             enableThinkingChat={enableThinkingChat}
             onToggleThinking={toggleThinking}

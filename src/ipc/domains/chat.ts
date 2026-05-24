@@ -8,6 +8,8 @@ import { ipcMain } from "electron";
 import type { WebContents } from "electron";
 import type { ChatInputOrigin, ChatSendPayload } from "../../shared/chat-origin.js";
 import { isChatSendInputOrigin } from "../../shared/chat-origin.js";
+import type { ActiveRolePrompt } from "../../data/role-presets.js";
+import { PERSONA_PROMPT_ID_ALLOWLIST } from "../../main/persona-prompt-store.js";
 import { redactForLLM } from "../../audit/dlp-filter.js";
 import type { GenericMessage } from "../../engine/llm/types.js";
 import { userContentText } from "../../engine/llm/types.js";
@@ -15,9 +17,6 @@ import { serializeHistoryMessage } from "../../shared/chat-history.js";
 import type { ConversationLoop, TurnResult } from "../../engine/conversation-loop.js";
 import { parseImportedTriggerEnvelope } from "../../shared/overlay-trigger-source.js";
 import type { ChatUtteranceMode } from "../../shared/chat-utterance.js";
-import type { SelectedAssistantContext } from "../../shared/assistant-context.js";
-import { AGENT_NAME_ALLOWLIST } from "../../main/agent-profile-store.js";
-import { SKILL_NAME_ALLOWLIST } from "../../main/skill-store.js";
 import { validateSender, UNAUTHORIZED_FRAME, auditUnauthorized } from "../gated.js";
 import type { IpcDeps } from "../types.js";
 import { sendToWebContents } from "../safe-send.js";
@@ -30,8 +29,6 @@ import {
 } from "../../engine/suggested-replies.js";
 import type { SessionKind } from "../../memory/memory-manager.js";
 const log = createLogger("chat");
-const MAX_ROLE_PROMPT_CHARS = 12_000;
-const MAX_SELECTED_SKILLS = 5;
 const SESSION_KIND_VALUES = new Set<SessionKind | "all">(["main", "routine", "all"]);
 const SESSION_ID_REGEX = /^[a-zA-Z0-9_\-]+$/;
 
@@ -66,175 +63,54 @@ function removeOrphanToolUse(messages: GenericMessage[]): GenericMessage[] {
   return result;
 }
 
-function normalizeRolePrompt(
+function normalizePersonaPromptId(
   inputOrigin: ChatInputOrigin,
   value: unknown,
-): { ok: true; rolePrompt?: NonNullable<ChatSendPayload["rolePrompt"]> } | { ok: false; error: string } {
+): { ok: true; personaPromptId?: string } | { ok: false; error: string } {
   if (value === undefined || value === null) return { ok: true };
-  // queue-auto 도 user-keyboard 와 동등 trust (사용자 입력 누적) → rolePrompt
-  // 허용. 검증 명: role-prompt-origin-restricted (origin allow-list).
-  if (inputOrigin !== "user-keyboard" && inputOrigin !== "queue-auto") {
-    return { ok: false, error: "role-prompt-origin-restricted" };
+  if (inputOrigin !== "user-keyboard") {
+    return { ok: false, error: "persona-prompt-origin-restricted" };
   }
-  if (!value || typeof value !== "object" || Array.isArray(value)) {
-    return { ok: false, error: "invalid-role-prompt" };
+  if (typeof value !== "string") return { ok: false, error: "invalid-persona-prompt-id" };
+  const id = value.trim();
+  if (!PERSONA_PROMPT_ID_ALLOWLIST.test(id) || id === "default") {
+    return { ok: false, error: "invalid-persona-prompt-id" };
   }
-  const candidate = value as { name?: unknown; systemPromptAdd?: unknown };
-  if (typeof candidate.name !== "string" || typeof candidate.systemPromptAdd !== "string") {
-    return { ok: false, error: "invalid-role-prompt" };
-  }
-  const systemPromptAdd = candidate.systemPromptAdd.trim().slice(0, MAX_ROLE_PROMPT_CHARS);
-  if (!systemPromptAdd) return { ok: true };
-  return {
-    ok: true,
-    rolePrompt: {
-      name: candidate.name.trim().slice(0, 80) || "role",
-      systemPromptAdd,
-    },
-  };
+  return { ok: true, personaPromptId: id };
 }
 
-function normalizeAssistantContext(
-  inputOrigin: ChatInputOrigin,
-  value: unknown,
-): { ok: true; assistantContext?: SelectedAssistantContext } | { ok: false; error: string } {
-  if (value === undefined || value === null) return { ok: true };
-  if (inputOrigin !== "user-keyboard" && inputOrigin !== "queue-auto") {
-    return { ok: false, error: "assistant-context-origin-restricted" };
-  }
-  if (!value || typeof value !== "object" || Array.isArray(value)) {
-    return { ok: false, error: "invalid-assistant-context" };
-  }
-  const candidate = value as { agentName?: unknown; skillNames?: unknown };
-  let agentName: string | undefined;
-  if (candidate.agentName !== undefined && candidate.agentName !== null) {
-    if (typeof candidate.agentName !== "string") {
-      return { ok: false, error: "invalid-assistant-agent" };
-    }
-    const trimmed = candidate.agentName.trim();
-    if (trimmed) {
-      if (!AGENT_NAME_ALLOWLIST.test(trimmed)) {
-        return { ok: false, error: "invalid-assistant-agent" };
-      }
-      agentName = trimmed;
-    }
-  }
-
-  const skillNames: string[] = [];
-  if (candidate.skillNames !== undefined && candidate.skillNames !== null) {
-    if (!Array.isArray(candidate.skillNames)) {
-      return { ok: false, error: "invalid-assistant-skills" };
-    }
-    const seen = new Set<string>();
-    for (const raw of candidate.skillNames) {
-      if (typeof raw !== "string") return { ok: false, error: "invalid-assistant-skills" };
-      const name = raw.trim();
-      if (!name) continue;
-      if (!SKILL_NAME_ALLOWLIST.test(name)) {
-        return { ok: false, error: "invalid-assistant-skill" };
-      }
-      if (!seen.has(name)) {
-        seen.add(name);
-        skillNames.push(name);
-      }
-      if (skillNames.length >= MAX_SELECTED_SKILLS) break;
-    }
-  }
-
-  if (!agentName && skillNames.length === 0) return { ok: true };
-  return {
-    ok: true,
-    assistantContext: {
-      ...(agentName ? { agentName } : {}),
-      ...(skillNames.length > 0 ? { skillNames } : {}),
-    },
-  };
-}
-
-function escapeXmlAttribute(value: string): string {
-  return value
-    .replace(/&/g, "&amp;")
-    .replace(/"/g, "&quot;")
-    .replace(/</g, "&lt;")
-    .replace(/>/g, "&gt;");
-}
-
-function neutralizeAssistantContextTags(value: string): string {
-  return value.replace(
-    /<\/?\s*lvis-(?:selected-assistant-context|agent-profile|selected-skill)[^>]*>/gi,
-    (match) => match.replace("<", "< "),
-  );
-}
-
-async function mergeAssistantContextPrompt(
-  baseRolePrompt: ChatSendPayload["rolePrompt"],
-  assistantContext: SelectedAssistantContext | undefined,
-  deps: Pick<IpcDeps, "agentProfileStore" | "skillStore">,
-): Promise<ChatSendPayload["rolePrompt"]> {
-  if (!assistantContext) return baseRolePrompt;
-  const sections: string[] = [];
-  const labels: string[] = [];
-
-  if (assistantContext.agentName && deps.agentProfileStore) {
-    const agent = await deps.agentProfileStore.load(assistantContext.agentName);
-    if (agent) {
-      labels.push(`Agent: ${agent.name}`);
-      sections.push([
-        `<lvis-agent-profile name="${escapeXmlAttribute(agent.name)}">`,
-        neutralizeAssistantContextTags(agent.body),
-        "</lvis-agent-profile>",
-      ].join("\n"));
-    }
-  }
-
-  if (assistantContext.skillNames?.length && deps.skillStore) {
-    const skillRows: string[] = [];
-    for (const skillName of assistantContext.skillNames) {
-      const skill = await deps.skillStore.load(skillName);
-      if (!skill) continue;
-      labels.push(`Skill: ${skill.name}`);
-      const triggers = skill.triggers.length > 0
-        ? ` triggers="${escapeXmlAttribute(skill.triggers.join(", "))}"`
-        : "";
-      skillRows.push(
-        `<lvis-selected-skill name="${escapeXmlAttribute(skill.name)}"${triggers}>${neutralizeAssistantContextTags(skill.description)}</lvis-selected-skill>`,
-      );
-    }
-    if (skillRows.length > 0) {
-      sections.push([
-        "<lvis-selected-skills>",
-        "The user selected these skills for this turn. Do not apply a selected skill body from metadata alone; call the skill_load tool before relying on the full skill instructions so existing approval and body-hash checks run.",
-        ...skillRows,
-        "</lvis-selected-skills>",
-      ].join("\n"));
-    }
-  }
-
-  if (sections.length === 0) return baseRolePrompt;
-  const assistantSection = [
-    "<lvis-selected-assistant-context>",
-    ...sections,
-    "</lvis-selected-assistant-context>",
-  ].join("\n");
-  const systemPromptAdd = [
-    baseRolePrompt?.systemPromptAdd?.trim(),
-    assistantSection,
-  ].filter((part): part is string => !!part).join("\n\n").slice(0, MAX_ROLE_PROMPT_CHARS);
-  if (!systemPromptAdd.trim()) return undefined;
-  const baseName = baseRolePrompt?.name?.trim();
-  const promptLabels = [baseName, ...labels].filter((label): label is string => !!label);
-  return {
-    name: promptLabels.length > 0 ? promptLabels.slice(0, 4).join(" + ") : "assistant context",
-    systemPromptAdd,
-  };
-}
-
-function rolePromptFromUserMessage(
+function personaPromptIdFromUserMessage(
   message: GenericMessage | undefined,
-): NonNullable<ChatSendPayload["rolePrompt"]> | undefined {
-  if (!message || message.role !== "user") return undefined;
-  const normalized = normalizeRolePrompt("user-keyboard", message.meta?.activeRolePrompt);
-  return normalized.ok ? normalized.rolePrompt : undefined;
+): { ok: true; personaPromptId?: string } | { ok: false; error: string } {
+  if (!message || message.role !== "user") return { ok: true };
+  const value = message.meta?.activePersonaPrompt;
+  if (value === undefined || value === null) return { ok: true };
+  if (!value || typeof value !== "object" || Array.isArray(value)) {
+    return { ok: false, error: "invalid-persona-prompt-id" };
+  }
+  return normalizePersonaPromptId("user-keyboard", (value as { id?: unknown }).id);
+}
+
+async function resolvePersonaRolePrompt(
+  personaPromptStore: IpcDeps["personaPromptStore"],
+  personaPromptId: string | undefined,
+): Promise<{ ok: true; rolePrompt?: ActiveRolePrompt } | { ok: false; error: string }> {
+  if (!personaPromptId) return { ok: true };
+  if (!personaPromptStore) return { ok: false, error: "persona-prompt-not-found" };
+  try {
+    const prompt = await personaPromptStore.get(personaPromptId);
+    if (!prompt) return { ok: false, error: "persona-prompt-not-found" };
+    return {
+      ok: true,
+      rolePrompt: {
+        id: prompt.id,
+        name: prompt.name,
+        systemPromptAdd: prompt.systemPromptAdd,
+      },
+    };
+  } catch {
+    return { ok: false, error: "invalid-persona-prompt-id" };
+  }
 }
 
 function entryOrdinalToHistoryIndex(history: GenericMessage[], ordinal: number): number {
@@ -311,7 +187,7 @@ async function runStreamedTurn(
     options: {
     attachments?: import("../../engine/llm/types.js").UserContentPart[];
     inputOrigin: ChatInputOrigin;
-    rolePrompt?: ChatSendPayload["rolePrompt"];
+    rolePrompt?: ActiveRolePrompt;
   },
 ): Promise<TurnResult> {
   const send = (payload: unknown) => sendToWebContents(webContents, channel, { streamId, ...((payload as Record<string, unknown>) ?? {}) }, log);
@@ -430,6 +306,7 @@ export function registerChatHandlers(deps: IpcDeps): void {
     auditLogger,
     askUserQuestionGate,
     preferenceRefreshService,
+    personaPromptStore,
     getMainWindow,
   } = deps;
 
@@ -486,7 +363,7 @@ export function registerChatHandlers(deps: IpcDeps): void {
   const streamTurn = async (
     input: string,
     attachments?: import("../../engine/llm/types.js").UserContentPart[],
-    rolePrompt?: ChatSendPayload["rolePrompt"],
+    rolePrompt?: ActiveRolePrompt,
   ) => {
     const win = getMainWindow();
     const streamId = allocateStreamId();
@@ -519,8 +396,7 @@ export function registerChatHandlers(deps: IpcDeps): void {
       attachments?: unknown;
       inputOrigin?: unknown;
       userActivation?: unknown;
-      rolePrompt?: unknown;
-      assistantContext?: unknown;
+      personaPromptId?: unknown;
     };
     if (typeof candidate.input !== "string") {
       return { ok: false, error: "invalid-input" };
@@ -535,10 +411,8 @@ export function registerChatHandlers(deps: IpcDeps): void {
     if (candidate.inputOrigin === "plugin-emitted" && !originSource) {
       return { ok: false, error: "missing-plugin-envelope" };
     }
-    const rolePrompt = normalizeRolePrompt(candidate.inputOrigin, candidate.rolePrompt);
-    if (!rolePrompt.ok) return { ok: false, error: rolePrompt.error };
-    const assistantContext = normalizeAssistantContext(candidate.inputOrigin, candidate.assistantContext);
-    if (!assistantContext.ok) return { ok: false, error: assistantContext.error };
+    const personaPrompt = normalizePersonaPromptId(candidate.inputOrigin, candidate.personaPromptId);
+    if (!personaPrompt.ok) return { ok: false, error: personaPrompt.error };
     return {
       ok: true,
       payload: {
@@ -546,8 +420,7 @@ export function registerChatHandlers(deps: IpcDeps): void {
         attachments: candidate.attachments,
         inputOrigin: candidate.inputOrigin,
         ...(candidate.userActivation === true ? { userActivation: true } : {}),
-        ...(rolePrompt.rolePrompt ? { rolePrompt: rolePrompt.rolePrompt } : {}),
-        ...(assistantContext.assistantContext ? { assistantContext: assistantContext.assistantContext } : {}),
+        ...(personaPrompt.personaPromptId ? { personaPromptId: personaPrompt.personaPromptId } : {}),
       },
     };
   };
@@ -559,7 +432,9 @@ export function registerChatHandlers(deps: IpcDeps): void {
     if (!validateSender(e)) { auditUnauthorized(auditLogger, "lvis:chat:send", e); return UNAUTHORIZED_FRAME; }
     const parsed = parseChatSendPayload(payload);
     if (!parsed.ok) return { ok: false, error: parsed.error };
-    const { input, attachments, inputOrigin, rolePrompt, assistantContext } = parsed.payload;
+    const { input, attachments, inputOrigin, personaPromptId } = parsed.payload;
+    const personaPrompt = await resolvePersonaRolePrompt(personaPromptStore, personaPromptId);
+    if (!personaPrompt.ok) return { ok: false, error: personaPrompt.error };
     // queue-auto inputOrigin path 는 사용자 명시 입력 누적 의 자동 인입.
     // user gesture context 밖 (IPC stream done event 트리거) 라 audit 추가
     // 필요 — security forensics 에서 user-keyboard turn 과 구분 가능해야 함
@@ -579,7 +454,6 @@ export function registerChatHandlers(deps: IpcDeps): void {
     const validated = validateUserContentParts(attachments);
     const win = getMainWindow();
     const effective = sanitizeOutgoingInput(input, win?.webContents);
-    const effectiveRolePrompt = await mergeAssistantContextPrompt(rolePrompt, assistantContext, deps);
     const streamId = allocateStreamId();
     return trackStreamTurn(async () => {
       const result = await runStreamedTurn(
@@ -588,7 +462,12 @@ export function registerChatHandlers(deps: IpcDeps): void {
         win?.webContents,
         "lvis:chat:stream",
         streamId,
-        { ...streamTurnOptions, attachments: validated, inputOrigin, rolePrompt: effectiveRolePrompt },
+        {
+          ...streamTurnOptions,
+          attachments: validated,
+          inputOrigin,
+          ...(personaPrompt.rolePrompt ? { rolePrompt: personaPrompt.rolePrompt } : {}),
+        },
       );
       await markMainActiveAfterTurn(effective);
       return result;
@@ -840,11 +719,14 @@ export function registerChatHandlers(deps: IpcDeps): void {
     if (typeof messageIndex !== "number" || messageIndex < 0) return { ok: false, error: "invalid-index" };
     if (typeof newText !== "string" || newText.trim().length === 0) return { ok: false, error: "empty-text" };
     const history = conversationLoop.getHistory().getMessages() as GenericMessage[];
-    const realIdx = entryOrdinalToHistoryIndex(history, messageIndex);
-    if (realIdx < 0) return { ok: false, error: "index-out-of-range" };
-    const rolePrompt = rolePromptFromUserMessage(history[realIdx]);
-    conversationLoop.getHistory().truncate(realIdx);
-    const result = await streamTurn(newText, undefined, rolePrompt);
+    const historyIndex = entryOrdinalToHistoryIndex(history, messageIndex);
+    if (historyIndex < 0) return { ok: false, error: "index-out-of-range" };
+    const personaPromptId = personaPromptIdFromUserMessage(history[historyIndex]);
+    if (!personaPromptId.ok) return { ok: false, error: personaPromptId.error };
+    const personaPrompt = await resolvePersonaRolePrompt(personaPromptStore, personaPromptId.personaPromptId);
+    if (!personaPrompt.ok) return { ok: false, error: personaPrompt.error };
+    conversationLoop.getHistory().truncate(historyIndex);
+    const result = await streamTurn(newText, undefined, personaPrompt.rolePrompt);
     return { ok: true, result };
   });
 
@@ -853,8 +735,8 @@ export function registerChatHandlers(deps: IpcDeps): void {
     const current = conversationLoop.getHistory().getMessages() as GenericMessage[];
     let upto = current.length;
     if (typeof messageIndex === "number" && messageIndex >= 0) {
-      const realIdx = entryOrdinalToHistoryIndex(current, messageIndex);
-      if (realIdx >= 0) upto = Math.min(realIdx + 1, current.length);
+      const historyIndex = entryOrdinalToHistoryIndex(current, messageIndex);
+      if (historyIndex >= 0) upto = Math.min(historyIndex + 1, current.length);
     }
     let slice = current.slice(0, upto);
     slice = removeOrphanToolUse(slice);
@@ -913,10 +795,13 @@ export function registerChatHandlers(deps: IpcDeps): void {
     const lastUserAttachments = Array.isArray(lastUser.content)
       ? lastUser.content.filter((p) => p.type !== "text")
       : undefined;
-    const rolePrompt = rolePromptFromUserMessage(lastUser);
+    const personaPromptId = personaPromptIdFromUserMessage(lastUser);
+    if (!personaPromptId.ok) return { ok: false, error: personaPromptId.error };
+    const personaPrompt = await resolvePersonaRolePrompt(personaPromptStore, personaPromptId.personaPromptId);
+    if (!personaPrompt.ok) return { ok: false, error: personaPrompt.error };
     conversationLoop.getHistory().truncate(lastUserIdx);
     try {
-      const result = await streamTurn(lastUserText, lastUserAttachments, rolePrompt);
+      const result = await streamTurn(lastUserText, lastUserAttachments, personaPrompt.rolePrompt);
       return { ok: true, result };
     } catch (err) {
       if (opts.restoreOnFailure) {
