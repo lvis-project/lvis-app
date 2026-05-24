@@ -370,7 +370,7 @@ graph TB
 
 > **Phase 1 갱신 (2026-04-13)**: Python Runtime Bootstrap 추가.
 > **Runtime ownership 갱신 (2026-05-20)**: 앱 installer 는 OS별 host-owned runtime asset(`uv`, native binding)을 포함하고 검증하지만, 앱 부트는 `uv` materialize 나 Python dependency sync 를 수행하지 않는다. host-managed Python dependency install/venv sync 는 플러그인 start 전 `PluginRuntime.preparePluginStart` 가 비동기로 수행하되, venv 는 플러그인 id 별이 아니라 lockfile content + OS/arch 별 공유 env 로 관리한다. 준비 중 신규 플러그인은 `loadStatus=preparing` 으로 호출을 방어한다.
-> **Wave B/C 정렬 (2026-05-11)**: 세부 로직은 `src/boot/*.ts` 모듈로 분리되어 있으며 (`services.ts`, `plugins.ts`, `conversation.ts`, `tools.ts`, `types.ts`), overlay trigger 는 별도 background engine 이 아니다. `host:overlay` capability 를 가진 플러그인이 `hostApi.triggerConversation()` 으로 overlay item staging 을 요청하고, 사용자가 CTA 를 수락한 뒤에만 main chat 으로 import 된다. PostTurnHookChain 은 세션 저장, memory extraction, title/checkpoint, audit, idle-poke 를 처리하며 overlay prompt 를 자동 생성하지 않는다.
+> **모듈 분리 정렬 (2026-05-11)**: 세부 로직은 `src/boot/*.ts` 모듈로 분리되어 있으며 (`services.ts`, `plugins.ts`, `conversation.ts`, `tools.ts`, `types.ts`), overlay trigger 는 별도 background engine 이 아니다. `host:overlay` capability 를 가진 플러그인이 `hostApi.triggerConversation()` 으로 overlay item staging 을 요청하고, 사용자가 CTA 를 수락한 뒤에만 main chat 으로 import 된다. PostTurnHookChain 은 세션 저장, memory extraction, title/checkpoint, audit, idle-poke 를 처리하며 overlay prompt 를 자동 생성하지 않는다.
 
 **런타임 준비 경계:**
 
@@ -1876,7 +1876,7 @@ flowchart LR
 
 ## 6.6 Observability & Audit — 운영 가시성
 
-Observability Sprint X-D (PR #113–#116) 에서 추가된 4개의 운영 가시성 컴포넌트를 정의한다. 모두 `src/ui/renderer/` Settings 탭 체계로 노출되며, 데이터는 로컬 파일(`~/.lvis/audit/audit.ndjson`, 인메모리 stats)에서 읽는다.
+Observability 컴포넌트 (PR #113–#116) 에서 추가된 4개의 운영 가시성 컴포넌트를 정의한다. 모두 `src/ui/renderer/` Settings 탭 체계로 노출되며, 데이터는 로컬 파일(`~/.lvis/audit/audit.ndjson`, 인메모리 stats)에서 읽는다.
 
 ### 6.6.1 Audit Log Search UI (PR #113)
 
@@ -2681,7 +2681,7 @@ graph TB
 
 boot 시 `PluginRuntime.startAll()`은 로드된 플러그인을 순차 `await`하며 개별 실패를 try/catch로 격리한다. 실패한 플러그인은 `toolMap`에서 제거되고 나머지는 정상 동작한다. 타임아웃/병렬화는 아직 없다.
 
-**현행 (Sprint 1-A 이후):** `PluginRuntime.startAll`은 `Promise.allSettled` 병렬 실행, 5초 초과 시 slow-plugin warn 로깅, `manifest.startupTimeoutMs` 선언 시 `Promise.race` 기반 하드 타임아웃 적용(실제 플러그인 작업은 cancellation되지 않으며, 호스트가 해당 플러그인을 drop하고 계속 진행한다). 실패한 플러그인은 fail-soft로 drop되며 나머지는 계속 로드된다.
+**현행:** `PluginRuntime.startAll`은 `Promise.allSettled` 병렬 실행, 5초 초과 시 slow-plugin warn 로깅, `manifest.startupTimeoutMs` 선언 시 `Promise.race` 기반 하드 타임아웃 적용(실제 플러그인 작업은 cancellation되지 않으며, 호스트가 해당 플러그인을 drop하고 계속 진행한다). 실패한 플러그인은 fail-soft로 drop되며 나머지는 계속 로드된다.
 
 **Lifecycle callback 쌍 — `onDisable` / `onEnable`:** `PluginRuntime`은 `PluginRuntimeOptions`로 두 개의 host-provided 콜백을 받는다.
 

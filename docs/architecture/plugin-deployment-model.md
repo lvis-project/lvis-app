@@ -460,7 +460,7 @@ export class PluginDeploymentGuard {
   /**
    * managed 플러그인은 사용자가 제거할 수 없다.
    *
-   * ⚠️ Security B-HIGH-2 + Architect CRITICAL-2 정정 (2026-04-13):
+   * ⚠️ Security B-HIGH + Architect CRITICAL 정정 (2026-04-13):
    * 이전 초안은 `registry().plugins.find(...).deployment`에서 deployment를 읽었으나
    * `PluginRegistryEntry`에는 `deployment` 필드가 없고(있어도 registry JSON을
    * 사용자가 편집하여 managed→user 재분류 가능), **manifestPath 경로가 managed
@@ -566,14 +566,14 @@ export interface GuardResult {
 
 ### 7.4 통합 지점 — `PluginMarketplaceService` + `PluginRuntime`
 
-**⚠️ Architect Phase 4 cycle 2 CRITICAL-1 정정 (2026-04-13)**:
+**⚠️ Architect CRITICAL 정정 (2026-04-13)**:
 이전 초안은 `PluginRuntime.uninstall/disable/install`에 guard를 삽입한다고 기술했으나, 실제 `lvis-app/src/plugin-runtime/runtime.ts`에는 이 메서드들이 존재하지 않는다. **실제 uninstall 경로는 `PluginMarketplaceService.uninstall()` (`marketplace.ts:63-90`)** 이며, `disable` 기능은 현재 **런타임 hot-disable이 미구현**이다. Phase 1.5 scope에는 다음이 포함되어야 한다:
 
 1. **`PluginMarketplaceService.uninstall()`에 guard 삽입** (기존 메서드)
 2. **`disable()` 메서드 신규 구현** — `registry.json`의 `enabled` 토글 + 런타임 `PluginRuntime.stopAll()` 재호출
 3. **`install()` 경로 guard** — 현재 `PluginMarketplaceService.install()` 기반
 
-**actor 신뢰 경계 (Security B-HIGH-1 대응)**:
+**actor 신뢰 경계 (Security B-HIGH 대응)**:
 `actor` 파라미터는 **main process 코드 내부에서만** 결정된다. IPC/HTTP로 외부 입력을 받을 수 없으며, renderer devtools로 IPC 호출 시 actor는 항상 `"user"` 고정. `"it-admin"` 경로는 `ManagedPluginInstaller` 내부에서만 사용되며 IPC에 노출되지 않는다.
 
 ```typescript
@@ -793,11 +793,11 @@ ipcMain.handle("lvis:plugins:disable", async (_e, pluginId: string) => {
 - ✅ `PluginMarketplaceService.install/uninstall` + `PluginRuntime.disable` guard 주입
 - ✅ UI 잠금 표시 (🔒 + bg-muted/40 + 버튼 disabled + tooltip)
 - ✅ `plugin.json` + 설치 manifest + marketplace.json catalog 3곳 모두 `deployment: "managed"` 전파
-- ✅ Bonus F-round: registry TOCTOU lock, fd-based chmod, 하드코딩 SHA256, 15 신규 테스트
+- ✅ Bonus (추가 hardening): registry TOCTOU lock, fd-based chmod, 하드코딩 SHA256, 15 신규 테스트
 
 **제외** (Phase 2 정식 이월): 정책 파일, 서명 검증, managed installer, IT admin API 연동
 
-**검증**: vitest 110/110 PASS, TSC 0 errors, E2E subset 5/5, 3-reviewer APPROVE_WITH_MINOR → F-round all resolved.
+**검증**: vitest 110/110 PASS, TSC 0 errors, E2E subset 5/5, 3-reviewer APPROVE_WITH_MINOR → 추가 hardening 항목 all resolved.
 
 **산출물 예상**:
 - `lvis-app/src/plugin-runtime/types.ts` (DeploymentMode 추가)
