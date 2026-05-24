@@ -1,6 +1,6 @@
 # Plugin Schema Design — LVIS
 
-**Status:** v4 (Sprint 3-B + 4-A/B + Phase 5 반영)
+**Status:** v4
 **Updated:** 2026-04-18
 **Architect 승인:** manifest signature + uiCallable + capability taxonomy + AJV 검증 플로우
 
@@ -745,7 +745,7 @@ import { Stack, Toggle } from "@lvis/plugin-sdk/ui";
 | `logEvent(level, message, data?)` | 호스트 감사 로그에 플러그인 이벤트 기록 | 디버그 전용 고빈도 로깅 (성능) |
 | `onShutdown(handler)` | 앱 종료 전 정리 작업 (DB flush, 파일 저장 등) | 긴 비동기 작업 (5s 제한) |
 
-### callLlm 상세 (Sprint 4-B §B-7)
+### callLlm 상세 (§B-7)
 
 ```typescript
 // 플러그인이 선제성 제안 본문을 생성하는 예
