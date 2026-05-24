@@ -1,6 +1,6 @@
 # Tool-Level Deferral (hybrid keyword-preload + `tool_search`)
 
-> Status: Phase 1 design (host-only). Rooted in `docs/architecture/architecture.md` §6.4 (Tool Registry),
+> Status: host-only design. Rooted in `docs/architecture/architecture.md` §6.4 (Tool Registry),
 > §6.1 (KeywordEngine), §4.5 (Conversation Query Loop). Companion to the existing plugin-level lazy
 > scoping (`request_plugin`).
 
@@ -16,7 +16,7 @@ all-or-nothing plugin activation. LVIS already has the *plugin-level* mechanism;
 
 ## Design (hybrid B + A)
 
-Two cooperating mechanisms, both **host-only** (no plugin-repo manifest change required for Phase 1):
+Two cooperating mechanisms, both **host-only** (no plugin-repo manifest change required at this stage):
 
 - **(B) Keyword→tool preload** — reuse the existing `SkillKeyword.skillId`. When `matchAllPluginIds` matches a
   plugin, the *same* matched keywords already carry a `skillId` that resolves (via `toolRegistry.findByName`) to a
@@ -67,7 +67,7 @@ New `ToolRegistry.getToolCatalogForScope(scope)` → `{ name, description }[]` o
 **in scope** (plugin active OR mcp included) but **not** in `activeToolNames`. Description trimmed to first
 sentence / ~100 chars for the catalog. Deny rules (`getVisibleTools`) apply first, same as the loaded path.
 
-## File-by-file (Phase 1, host-only)
+## File-by-file (host-only stage)
 
 1. **`src/engine/conversation-loop.ts`**
    - Extend `ToolScope` (line 512).
@@ -105,9 +105,9 @@ sentence / ~100 chars for the catalog. Deny rules (`getVisibleTools`) apply firs
   every intercepted `tool_use`, exactly like `request_plugin`.
 - **Flag off** ⇒ no behavioral change at all (legacy path untouched).
 - **No Fallback Code**: the legacy (flag-off) branch is the staged-rollout default with a removal plan
-  (Phase 3: flip default on, then delete the legacy branch), not an indefinite compat shim.
+  (default-on cutover: flip default on, then delete the legacy branch), not an indefinite compat shim.
 
-## Tests (Phase 1)
+## Tests (host-only stage)
 
 - `keyword-engine.test`: `matchToolNames` returns skillIds resolving to tools; ignores unmatched/unresolvable.
 - `registry.test`: `getToolSchemasForScope` tool-level filtering (flag on) vs plugin-level (flag off);
@@ -121,9 +121,9 @@ sentence / ~100 chars for the catalog. Deny rules (`getVisibleTools`) apply firs
 
 ## Phasing
 
-- **Phase 1 (this PR, host-only)**: everything above, flag default **off**. Lands the full mechanism + tests with
+- **Host-only stage (this PR)**: everything above, flag default **off**. Lands the full mechanism + tests with
   zero production behavior change.
-- **Phase 2 (cross-repo, optional)**: richer manifest `keywords[].tools?: string[]` (multiple preload tools per
+- **Cross-repo follow-up (optional)**: richer manifest `keywords[].tools?: string[]` (multiple preload tools per
   keyword, not just `skillId`) in SDK schema + all plugin repos + template + marketplace validation. Field-Addition
   Sweep + companion PRs.
-- **Phase 3**: enable flag by default after e2e/dogfood, then remove the legacy branch.
+- **Default-on cutover**: enable flag by default after e2e/dogfood, then remove the legacy branch.

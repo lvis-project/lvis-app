@@ -466,7 +466,7 @@ const DEFAULT_SETTINGS: AppSettings = {
     onboardingCompleted: false,
   },
   experimental: {
-    // Tool-level deferral default OFF — staged rollout (Phase 3 flips this).
+    // Tool-level deferral default OFF — staged rollout (default-on cutover flips this).
     toolDeferral: false,
   },
 };
