@@ -3,12 +3,13 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 import { KeywordEngine } from "../../core/keyword-engine.js";
 import { RouteEngine } from "../../core/route-engine.js";
 import { ConversationLoop } from "../conversation-loop.js";
-import type { GenericMessage, LLMProvider, StreamEvent } from "../llm/types.js";
+import type { GenericMessage, LLMProvider, StreamEvent, ToolSchema } from "../llm/types.js";
 import { ToolRegistry } from "../../tools/registry.js";
 import { createDynamicTool } from "../../tools/base.js";
 import { fakeLlmSettings } from "../../shared/__tests__/fake-llm-settings.js";
 import { PostTurnHookChain } from "../../hooks/post-turn-hook-chain.js";
 import { FallbackProvider } from "../llm/vercel/fallback-chain.js";
+import { estimateRequestInputProjection } from "../request-input-projection.js";
 
 afterEach(() => {
   vi.useRealTimers();
@@ -49,6 +50,18 @@ function createLoopWithRegistry(
   } as unknown) as ConstructorParameters<typeof ConversationLoop>[0]);
   (loop as { provider: LLMProvider | null }).provider = provider;
   return loop;
+}
+
+function visibleToolSchemas(toolRegistry: ToolRegistry): ToolSchema[] {
+  return toolRegistry.getToolSchemasForScope({
+    activePluginIds: new Set<string>(),
+    includeBuiltins: true,
+    includeMcp: false,
+  }).map((schema) => ({
+    name: schema.name,
+    description: schema.description,
+    inputSchema: schema.input_schema as ToolSchema["inputSchema"],
+  }));
 }
 
 describe("ConversationLoop onTurnSummary", () => {
@@ -570,5 +583,62 @@ describe("ConversationLoop onTurnSummary", () => {
     expect(summary).not.toBeNull();
     expect(summary!.tokensIn).toBeGreaterThan(3_000);
     expect(summary!.tokensOut).toBe(0);
+  });
+
+  it("derives post-tool turnSummary.tokensIn from engine projection when tool results carry over", async () => {
+    const largeToolResult = "large search result payload ".repeat(250);
+    const toolRegistry = new ToolRegistry();
+    toolRegistry.register(createDynamicTool({
+      name: "large_search",
+      description: "Return a large search result",
+      source: "builtin",
+      category: "read",
+      jsonSchema: { type: "object", properties: { query: { type: "string" } }, required: ["query"] },
+      isReadOnly: () => true,
+      execute: async () => ({ output: largeToolResult, isError: false }),
+    }));
+    const provider = new FakeProvider([
+      [
+        { type: "text_delta", text: "searching" },
+        { type: "tool_call", id: "large-1", name: "large_search", input: { query: "budget" } },
+        { type: "message_complete", stopReason: "tool_use" },
+      ],
+      [
+        { type: "text_delta", text: "large result summarized" },
+        { type: "message_complete", stopReason: "end_turn" },
+      ],
+    ]);
+    const saveSession = vi.fn(async () => {});
+    const loop = createLoopWithRegistry(provider, toolRegistry, {
+      memoryManager: { saveSession, listSessions: () => [] } as never,
+    });
+
+    let summary:
+      | { tokensIn: number; tokensOut: number; freshInputTokens: number }
+      | null = null;
+    await loop.runTurn("큰 검색 결과를 요약해줘", {
+      onTurnSummary: (s) => {
+        summary = s;
+      },
+    }, undefined, { inputOrigin: "user-keyboard" });
+
+    const savedMessages = saveSession.mock.calls.at(-1)?.[1] as GenericMessage[] | undefined;
+    expect(savedMessages).toBeDefined();
+    const toolResult = savedMessages?.find((message) => message.role === "tool_result");
+    expect(toolResult?.content).toBe(largeToolResult);
+    expect(toolResult?.meta?.truncated).toBeUndefined();
+    const expectedProjection = estimateRequestInputProjection({
+      systemPrompt: "system",
+      messages: savedMessages ?? [],
+      toolSchemas: visibleToolSchemas(toolRegistry),
+    });
+    const savedAssistant = savedMessages?.slice().reverse().find((message) => message.role === "assistant");
+
+    expect(summary).not.toBeNull();
+    expect(summary!.tokensIn).toBe(expectedProjection.totalTokens);
+    expect(summary!.tokensIn).toBeGreaterThan(1_000);
+    expect(summary!.tokensOut).toBe(0);
+    expect(summary!.freshInputTokens).toBe(0);
+    expect(savedAssistant?.meta?.turnSummary?.tokensIn).toBe(expectedProjection.totalTokens);
   });
 });

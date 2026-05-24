@@ -155,6 +155,7 @@ export function TokenCostBadge({
       <TooltipTrigger asChild>
         <button
           type="button"
+          data-testid="token-cost-badge"
           onClick={(e) => {
             e.stopPropagation();
             if (cost !== null) setMode((m) => (m === "tokens" ? "cost" : "tokens"));
