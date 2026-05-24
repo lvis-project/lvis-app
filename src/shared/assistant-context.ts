@@ -14,8 +14,3 @@ export interface AssistantSkillSummary {
   description: string;
   triggers: string[];
 }
-
-export interface SelectedAssistantContext {
-  agentName?: string;
-  skillNames?: string[];
-}

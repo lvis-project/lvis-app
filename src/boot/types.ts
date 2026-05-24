@@ -129,6 +129,7 @@ export interface AppServices {
   askUserQuestionGate?: import("../main/ask-user-question-gate.js").AskUserQuestionGate;
   skillStore?: import("../main/skill-store.js").SkillStore;
   agentProfileStore?: import("../main/agent-profile-store.js").AgentProfileStore;
+  personaPromptStore?: import("../main/persona-prompt-store.js").PersonaPromptStore;
   /** 플러그인 설치/제거 후 OS 알림 핸들러를 재구성한다. */
   refreshPluginNotifications?: () => void;
   /** SoT — canonical plugin install/cache paths. */

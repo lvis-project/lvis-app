@@ -3,7 +3,7 @@
  *
  * Covers the unit-testable acceptance criteria of issue #1108 (follow-up to
  * PR #1104's built-in agents/skills seed):
- *   - first-boot copy of packaged resources into ~/.lvis/{AGENTS.md,agents,skills}
+ *   - first-boot copy of packaged resources into ~/.lvis/{AGENTS.md,agents,skills,prompts}
  *   - byte-identical re-run is a no-op (idempotent)
  *   - a user-edited copy survives upgrade; the new packaged version lands as
  *     `<file>.new` rather than clobbering the user's edit
@@ -59,6 +59,7 @@ beforeEach(() => {
   writeRes("AGENTS.md", "AGENTS v1\n");
   writeRes(join("agents", "executor.md"), "executor v1\n");
   writeRes(join("skills", "report-writing.md"), "report v1\n");
+  writeRes(join("prompts", "summarizer.md"), "summarizer v1\n");
 });
 
 afterEach(() => {
@@ -70,12 +71,13 @@ afterEach(() => {
 });
 
 describe("seedLvisHomeDocs — first boot", () => {
-  it("copies AGENTS.md + agents/*.md + skills/*.md into ~/.lvis", () => {
+  it("copies AGENTS.md + agents/*.md + skills/*.md + prompts/*.md into ~/.lvis", () => {
     const r = seedLvisHomeDocs();
 
     expect(r.seeded).toContain("AGENTS.md");
     expect(r.seeded).toContain(join("agents", "executor.md"));
     expect(r.seeded).toContain(join("skills", "report-writing.md"));
+    expect(r.seeded).toContain(join("prompts", "summarizer.md"));
     expect(r.upgraded).toEqual([]);
 
     expect(readFileSync(join(home, "AGENTS.md"), "utf8")).toBe("AGENTS v1\n");
@@ -84,6 +86,9 @@ describe("seedLvisHomeDocs — first boot", () => {
     );
     expect(readFileSync(join(home, "skills", "report-writing.md"), "utf8")).toBe(
       "report v1\n",
+    );
+    expect(readFileSync(join(home, "prompts", "summarizer.md"), "utf8")).toBe(
+      "summarizer v1\n",
     );
   });
 

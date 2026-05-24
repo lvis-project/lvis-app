@@ -16,7 +16,6 @@ vi.mock("electron", () => ({
 }));
 
 import { SettingsService } from "../settings-store.js";
-import { DEFAULT_ROLE_PRESETS } from "../role-presets.js";
 import { DEFAULT_BUNDLE_ID } from "../../shared/theme-bundles.js";
 
 describe("SettingsService marketplace defaults", () => {
@@ -170,12 +169,12 @@ describe("SettingsService role presets", () => {
     rmSync(userDataPath, { recursive: true, force: true });
   });
 
-  it("defaults roles.presets on a fresh install", () => {
+  it("keeps roles.presets empty on a fresh install", () => {
     const service = new SettingsService({ userDataPath });
-    expect(service.get("roles").presets).toEqual(DEFAULT_ROLE_PRESETS);
+    expect(service.get("roles").presets).toEqual([]);
   });
 
-  it("round-trips custom role presets across restart", async () => {
+  it("strips custom role preset writes so prompt files remain the only persona body store", async () => {
     const service = new SettingsService({ userDataPath });
     await service.patch({
       roles: {
@@ -187,7 +186,7 @@ describe("SettingsService role presets", () => {
     });
 
     const reloaded = new SettingsService({ userDataPath });
-    expect(reloaded.get("roles").presets.map((preset) => preset.id)).toEqual(["default", "support"]);
+    expect(reloaded.get("roles").presets).toEqual([]);
   });
 
   it("normalizes invalid role settings without resetting unrelated sections", () => {
@@ -201,7 +200,7 @@ describe("SettingsService role presets", () => {
     );
 
     const service = new SettingsService({ userDataPath });
-    expect(service.get("roles").presets).toEqual(DEFAULT_ROLE_PRESETS);
+    expect(service.get("roles").presets).toEqual([]);
     expect(service.get("chat").systemPrompt).toBe("preserved-prompt");
     expect(service.get("chat").autoCompact).toBe(false);
   });

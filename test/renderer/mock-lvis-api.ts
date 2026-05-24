@@ -6,7 +6,6 @@
  * crashing.
  */
 import { vi, type Mock } from "vitest";
-import { cloneDefaultRolePresets } from "../../src/data/role-presets.js";
 import { fakeLlmSettings } from "../../src/shared/__tests__/fake-llm-settings.js";
 import type { StreamEvent } from "../../src/lib/chat-stream-state.js";
 
@@ -21,6 +20,7 @@ type HistoryMock = {
 
 type ApiOverrides = {
   settings?: unknown;
+  personaPrompts?: unknown[];
   sessions?: Array<{
     id: string;
     modifiedAt: string;
@@ -58,7 +58,7 @@ type ApiOverrides = {
 const DEFAULT_SETTINGS = {
   llm: fakeLlmSettings({ provider: "openai", model: "gpt-4o-mini" }),
   chat: { systemPrompt: "", autoCompact: true },
-  roles: { presets: cloneDefaultRolePresets() },
+  roles: { presets: [] },
   webSearch: { provider: "none" },
   routine: {},
   privacy: { piiRedactEnabled: false },
@@ -106,6 +106,7 @@ export function makeMockLvisApi(overrides: ApiOverrides = {}): {
   emitPluginInstallResult: (payload: unknown) => void;
 } {
   let settings = overrides.settings ?? DEFAULT_SETTINGS;
+  let personaPrompts = overrides.personaPrompts ?? [];
   const sessions = (overrides.sessions ?? []).map((session) => ({
     ...session,
     title: session.title ?? `세션 ${session.id.slice(0, 8)}`,
@@ -142,6 +143,7 @@ export function makeMockLvisApi(overrides: ApiOverrides = {}): {
   const viewHandlers = new Set<(v: string) => void>();
   const settingsUpdatedHandlers = new Set<(settings: unknown) => void>();
   const settingsWindowSavedHandlers = new Set<() => void>();
+  const personaPromptsUpdatedHandlers = new Set<() => void>();
   const settingsWindowTabHandlers = new Set<(tab: string) => void>();
   const askUserQuestionHandlers = new Set<(r: unknown) => void>();
   const tourStartHandlers = new Set<(payload: { scenarioId: string }) => void>();
@@ -177,6 +179,31 @@ export function makeMockLvisApi(overrides: ApiOverrides = {}): {
     onSettingsUpdated: vi.fn((handler: (settings: unknown) => void) => {
       settingsUpdatedHandlers.add(handler);
       return () => settingsUpdatedHandlers.delete(handler);
+    }),
+    listPersonaPromptSummaries: vi.fn(async () => ({
+      prompts: personaPrompts.map((item) => ({
+        id: (item as { id?: string }).id ?? "",
+        name: (item as { name?: string }).name ?? "",
+      })),
+    })),
+    listPersonaPrompts: vi.fn(async () => ({ prompts: personaPrompts })),
+    savePersonaPrompt: vi.fn(async (prompt: { id: string; name: string; systemPromptAdd: string }) => {
+      personaPrompts = [
+        ...personaPrompts.filter((item) => (item as { id?: unknown }).id !== prompt.id),
+        prompt,
+      ];
+      personaPromptsUpdatedHandlers.forEach((handler) => handler());
+      return { ok: true, prompt };
+    }),
+    deletePersonaPrompt: vi.fn(async (id: string) => {
+      const before = personaPrompts.length;
+      personaPrompts = personaPrompts.filter((item) => (item as { id?: unknown }).id !== id);
+      personaPromptsUpdatedHandlers.forEach((handler) => handler());
+      return { ok: true, deleted: personaPrompts.length !== before };
+    }),
+    onPersonaPromptsUpdated: vi.fn((handler: () => void) => {
+      personaPromptsUpdatedHandlers.add(handler);
+      return () => personaPromptsUpdatedHandlers.delete(handler);
     }),
     setApiKey: vi.fn(async () => ({ ok: true })),
     hasApiKey: vi.fn(async () => hasApiKey),
@@ -355,10 +382,8 @@ export function makeMockLvisApi(overrides: ApiOverrides = {}): {
     pingMarketplace: vi.fn(async () => marketplacePing),
     installMarketplacePlugin: vi.fn(async () => ({ ok: true })),
     uninstallMarketplacePlugin: vi.fn(async () => ({ ok: true })),
-    // Marketplace agent/skill surface — added with PR #753. Default mocks
-    // return empty lists and no-op subscribers so renderer tests that mount
-    // <ChatView> via `useAssistantContextOptions` resolve cleanly rather than
-    // throwing `api.listAgentProfiles is not a function`.
+    // Marketplace agent/skill surface. Settings/dashboard tests still read
+    // these counts even though the composer no longer injects them per turn.
     listAgentProfiles: vi.fn(async () => agentProfiles),
     listSkills: vi.fn(async () => skills),
     installAgentFromMarketplace: vi.fn(async (slug: string) => ({

@@ -30,7 +30,6 @@ import "./setup.js";
 import { describe, it, expect, vi, afterEach } from "vitest";
 import { act, fireEvent, waitFor } from "@testing-library/react";
 import { fakeLlmSettings } from "../../src/shared/__tests__/fake-llm-settings.js";
-import { cloneDefaultRolePresets } from "../../src/data/role-presets.js";
 import {
   makeMockLvisApi,
   makeMockLvisNamespace,
@@ -49,7 +48,7 @@ function returningUserSettings() {
   return {
     llm: fakeLlmSettings({ provider: "openai", model: "gpt-4o-mini" }),
     chat: { systemPrompt: "", autoCompact: true },
-    roles: { presets: cloneDefaultRolePresets() },
+    roles: { presets: [] },
     webSearch: { provider: "none" },
     routine: {},
     privacy: { piiRedactEnabled: false },

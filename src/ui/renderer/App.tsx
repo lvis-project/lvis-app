@@ -60,7 +60,6 @@ import { usePluginMarketplace } from "./hooks/use-plugin-marketplace.js";
 import { usePluginAuthStatuses } from "./hooks/use-plugin-auth-status.js";
 import type { Attachment } from "./types/attachments.js";
 import { useRolePresets } from "./hooks/use-role-presets.js";
-import { useAssistantContextOptions } from "./hooks/use-assistant-context-options.js";
 import { useAppBootstrap } from "./hooks/use-app-bootstrap.js";
 import { useChatActions } from "./hooks/use-chat-actions.js";
 import { useChatContextValue } from "./hooks/use-chat-context-value.js";
@@ -352,9 +351,6 @@ export function App() {
 
   // Role preset, cost preview, multimodal attachments
   const { rolePresets, activePreset, activePresetId, setActivePresetId } = useRolePresets(api);
-  const { agents: agentOptions, skills: skillOptions } = useAssistantContextOptions(api);
-  const [activeAgentName, setActiveAgentName] = useState("");
-  const [activeSkillNames, setActiveSkillNames] = useState<string[]>([]);
   const [attachments, setAttachments] = useState<Attachment[]>([]);
   // Strictly increasing N — never reassigned even after attachment removal so
   // textarea markers ([Image #N]) keep referring to the same payload.
@@ -915,16 +911,6 @@ export function App() {
     [activePreset, attachments],
   );
 
-  useEffect(() => {
-    if (activeAgentName && !agentOptions.some((agent) => agent.name === activeAgentName)) {
-      setActiveAgentName("");
-    }
-    if (activeSkillNames.length > 0) {
-      const available = new Set(skillOptions.map((skill) => skill.name));
-      setActiveSkillNames((current) => current.filter((name) => available.has(name)));
-    }
-  }, [activeAgentName, activeSkillNames.length, agentOptions, skillOptions]);
-
   const handleAsk = useCallback(
     async (
       q: string,
@@ -1048,15 +1034,9 @@ export function App() {
           opts?.inputOrigin === "queue-auto"
             ? undefined
             : mode === "default" ? userIntent : undefined,
-          // chat.ts:59 가 queue-auto 도 rolePrompt 허용 — Round 3 critic
-          // M-NEW-1 fix. role preset 효과가 queue-auto inject 에도 적용됨.
-          mode === "default" ? composed.rolePrompt : undefined,
-          mode === "default"
-            ? {
-                ...(activeAgentName ? { agentName: activeAgentName } : {}),
-                ...(activeSkillNames.length > 0 ? { skillNames: activeSkillNames } : {}),
-              }
-            : undefined,
+          opts?.inputOrigin === "queue-auto"
+            ? undefined
+            : mode === "default" ? composed.personaPromptId : undefined,
         );
         if (debugStreamEnabled) debugLog("handleAsk", "chatSend:resolved", { requestId });
         // After successful send, clear attachments — the textarea was
@@ -1108,8 +1088,6 @@ export function App() {
       // composeOutgoing's deps drift. llmVendor/llmModel are read by
       // the supportsVision gate.
       attachments,
-      activeAgentName,
-      activeSkillNames,
       llmVendor,
       llmModel,
       onOpenSettings,
@@ -1264,8 +1242,6 @@ export function App() {
     contextOverflowPct, usedTokens, contextBudget, effectiveBudget,
     tpmLimit, tpmPct, isTpmOverflow,
     rolePresets, activePreset, activePresetId, setActivePresetId,
-    agentOptions, skillOptions, activeAgentName, setActiveAgentName,
-    activeSkillNames, setActiveSkillNames,
     attachments, setAttachments, attachmentNCounter,
     vendorSupportsThinking, enableThinkingChat, toggleThinking, costEstimate, costBadgeClass,
     activePricing,

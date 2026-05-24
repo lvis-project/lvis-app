@@ -29,6 +29,7 @@ export const COMMON_IPC_ERROR_MESSAGES: Readonly<Record<string, string>> = {
   "missing-plugin-envelope": "플러그인 envelope 정보가 누락되었습니다.",
   "assistant-context-origin-restricted": "이 어시스턴트 컨텍스트는 현재 출처에서 사용할 수 없습니다.",
   "role-prompt-origin-restricted": "역할 프롬프트는 사용자 입력 출처에서만 변경할 수 있습니다.",
+  "persona-prompt-origin-restricted": "Persona 프롬프트는 사용자 입력 출처에서만 변경할 수 있습니다.",
 
   // ── Permission manager / audit state ──
   "no-permission-manager": "권한 매니저가 아직 초기화되지 않았습니다. 잠시 후 다시 시도해주세요.",
@@ -90,6 +91,9 @@ export const COMMON_IPC_ERROR_MESSAGES: Readonly<Record<string, string>> = {
   "invalid-assistant-skill": "잘못된 어시스턴트 스킬입니다.",
   "invalid-assistant-skills": "잘못된 어시스턴트 스킬 목록입니다.",
   "invalid-role-prompt": "잘못된 역할 프롬프트입니다.",
+  "invalid-persona-prompt": "잘못된 Persona 프롬프트입니다.",
+  "invalid-persona-prompt-id": "잘못된 Persona 프롬프트 ID입니다.",
+  "persona-prompt-not-found": "선택한 Persona 프롬프트를 찾을 수 없습니다.",
   "invalid-memory-sections": "잘못된 메모리 섹션 정보입니다.",
   "routine-not-found": "루틴을 찾을 수 없습니다.",
   "no-user-message": "사용자 메시지를 찾을 수 없습니다.",

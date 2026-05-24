@@ -17,7 +17,7 @@ import { makeMockLvisApi } from "../../../../../test/renderer/mock-lvis-api.js";
 const GENERAL_SETTINGS = {
   llm: { authMode: "manual", provider: "openai", vendors: {}, streamSmoothing: "none", fallbackChain: [] },
   chat: { systemPrompt: "", autoCompact: true },
-  roles: { presets: [{ id: "default", name: "기본", systemPromptAdd: "", isDefault: true }] },
+  roles: { presets: [] },
   webSearch: { provider: "none" },
   features: {},
 };
@@ -42,6 +42,7 @@ function generalTabApi(overrides: Partial<LvisApi> = {}): LvisApi {
     ],
     agentProfiles: { agents: [{ name: "agent1" }, { name: "agent2" }] },
     skills: { skills: [{ name: "skill1" }] },
+    personaPrompts: [{ id: "persona1", name: "Persona", systemPromptAdd: "Act as persona." }],
     settings: GENERAL_SETTINGS,
     appInfo: GENERAL_APP_INFO,
   });

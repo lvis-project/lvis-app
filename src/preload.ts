@@ -22,7 +22,6 @@ import type {
   UserKeyboardIntent,
   UserKeyboardIntentSnapshot,
 } from "./shared/chat-origin.js";
-import type { SelectedAssistantContext } from "./shared/assistant-context.js";
 import type {
   AssistantContextMenuAction,
   AssistantContextMenuPayload,
@@ -545,15 +544,13 @@ const api = {
     attachments: unknown[] | undefined,
     inputOrigin: ChatSendInputOrigin,
     userIntent?: UserKeyboardIntentSnapshot,
-    rolePrompt?: { name: string; systemPromptAdd: string },
-    assistantContext?: SelectedAssistantContext,
+    personaPromptId?: string,
   ) =>
     ipcRenderer.invoke("lvis:chat:send", {
       input,
       attachments,
       inputOrigin,
-      ...(rolePrompt ? { rolePrompt } : {}),
-      ...(assistantContext ? { assistantContext } : {}),
+      ...(personaPromptId ? { personaPromptId } : {}),
       ...(inputOrigin === "user-keyboard"
         ? { userActivation: consumeUserKeyboardIntent(userIntent) }
         : {}),
@@ -677,6 +674,11 @@ const api = {
 
   // ─── Plugins ─────────────────────────────────────
   listMarketplacePlugins: async () => ipcRenderer.invoke("lvis:plugins:marketplace:list"),
+  listPersonaPromptSummaries: async () => ipcRenderer.invoke("lvis:prompts:list-summaries"),
+  listPersonaPrompts: async () => ipcRenderer.invoke("lvis:prompts:list"),
+  savePersonaPrompt: async (prompt: { id: string; name: string; systemPromptAdd: string }) =>
+    ipcRenderer.invoke("lvis:prompts:save", prompt),
+  deletePersonaPrompt: async (id: string) => ipcRenderer.invoke("lvis:prompts:delete", id),
   listAgentProfiles: async () => ipcRenderer.invoke("lvis:agents:list"),
   listSkills: async () => ipcRenderer.invoke("lvis:skills:list"),
   installAgentFromMarketplace: async (slug: string) =>
@@ -899,6 +901,11 @@ const api = {
     const listener = (_event: unknown, payload: Parameters<typeof handler>[0]) => handler(payload);
     ipcRenderer.on("lvis:plugins:uninstall-result", listener);
     return () => ipcRenderer.removeListener("lvis:plugins:uninstall-result", listener);
+  },
+  onPersonaPromptsUpdated: (handler: () => void) => {
+    const listener = () => handler();
+    ipcRenderer.on("lvis:prompts:updated", listener);
+    return () => ipcRenderer.removeListener("lvis:prompts:updated", listener);
   },
 
   onAgentInstallResult: (handler: (payload: { slug: string; success: boolean; agentId?: string; error?: string }) => void) => {
