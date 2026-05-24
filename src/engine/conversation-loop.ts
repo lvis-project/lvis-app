@@ -1559,17 +1559,17 @@ export class ConversationLoop {
       attachmentParts.length > 0
         ? [{ type: "text" as const, text: baseText }, ...attachmentParts]
         : baseText;
-    const rolePromptMeta = options?.rolePrompt?.systemPromptAdd.trim()
+    const personaPromptMeta = options?.rolePrompt?.id
       ? {
+          id: options.rolePrompt.id,
           name: options.rolePrompt.name,
-          systemPromptAdd: options.rolePrompt.systemPromptAdd,
         }
       : undefined;
     const importedTrigger = inputOrigin === "plugin-emitted"
       ? parseImportedTriggerEnvelopePayload(turnInput)
       : null;
     const userMeta: MessageMeta = {
-      ...(rolePromptMeta ? { activeRolePrompt: rolePromptMeta } : {}),
+      ...(personaPromptMeta ? { activePersonaPrompt: personaPromptMeta } : {}),
       ...(routeResult.route === "skill"
         ? { displayText: turnInput, routeSkill: { skillId: routeResult.skillId } }
         : {}),

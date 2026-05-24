@@ -104,6 +104,7 @@ import { SkillStore } from "./main/skill-store.js";
 import { SkillOverlay } from "./main/skill-overlay.js";
 import { SkillApprovalsStore } from "./main/skill-approvals-store.js";
 import { AgentProfileStore } from "./main/agent-profile-store.js";
+import { PersonaPromptStore } from "./main/persona-prompt-store.js";
 import { SubAgentRunner } from "./engine/subagent-runner.js";
 import type { AgentSpawnEvent } from "./tools/agent-spawn.js";
 import type { SkillLoadEvent } from "./tools/skill-load.js";
@@ -457,6 +458,7 @@ export async function bootstrap(
   const sessionTodoStore = new SessionTodoStore();
   const skillStore = new SkillStore();
   const agentProfileStore = new AgentProfileStore();
+  const personaPromptStore = new PersonaPromptStore();
   const skillOverlay = new SkillOverlay();
   const skillApprovalsStore = new SkillApprovalsStore();
   await skillApprovalsStore.load().catch((err) => {
@@ -1262,7 +1264,7 @@ export async function bootstrap(
     systemPromptBuilder, conversationLoop, routineEngine, mcpManager, mcpArtifactStore, agentArtifactStore, skillArtifactStore,
     idleScheduler, preferenceRefreshService, bashAstValidator, auditService, auditLogger: bootAuditLogger, postTurnHookChain,
     approvalGate, rewireReviewerAgent, refreshMarketplaceFetcherConfig, refreshActiveLlmWildcard,
-    routinesStore, routinesScheduler, sessionTodoStore, askUserQuestionGate, skillStore, agentProfileStore,
+    routinesStore, routinesScheduler, sessionTodoStore, askUserQuestionGate, skillStore, agentProfileStore, personaPromptStore,
     knowledgeAvailable, starredStore, feedbackStore,
     notificationService,
     scriptHookManager,

@@ -7,14 +7,13 @@ import type { McpServerConfig, McpServerConfigDto, McpServerState } from "../../
 import type { SerializedHistoryMessage } from "../../shared/chat-history.js";
 import type { PluginConfigRecord } from "../../shared/plugin-config.js";
 import type { ChatSendInputOrigin } from "../../shared/chat-origin.js";
-import type { ActiveRolePrompt, RolePreset } from "../../data/role-presets.js";
+import type { RolePreset } from "../../data/role-presets.js";
 import type { PermissionEvaluationContext as PermissionEvaluationContextShape } from "../../permissions/evaluation-context.js";
 import type { ApprovalPurposeSuggestion } from "../../shared/permission-review-status.js";
 import type {
   AssistantAgentSummary,
   AssistantSkillSummary,
   MarketplacePackageType,
-  SelectedAssistantContext,
 } from "../../shared/assistant-context.js";
 import type {
   AssistantContextMenuAction,
@@ -279,6 +278,17 @@ export type LvisApi = {
   getSettings: () => Promise<AppSettings>;
   updateSettings: (patch: DeepPartial<AppSettings>) => Promise<SettingsUpdateResult>;
   onSettingsUpdated: (handler: (settings: AppSettings) => void) => () => void;
+  listPersonaPromptSummaries: () => Promise<{ prompts: Array<Pick<RolePreset, "id" | "name">> }>;
+  listPersonaPrompts: () => Promise<{ prompts: RolePreset[] }>;
+  savePersonaPrompt: (prompt: { id: string; name: string; systemPromptAdd: string }) => Promise<
+    | { ok: true; prompt: RolePreset }
+    | { ok: false; error: string }
+  >;
+  deletePersonaPrompt: (id: string) => Promise<
+    | { ok: true; deleted: boolean }
+    | { ok: false; error: string }
+  >;
+  onPersonaPromptsUpdated?: (handler: () => void) => () => void;
   setApiKey: (vendor: string, k: string) => Promise<{ ok: true }>;
   hasApiKey: (vendor?: string) => Promise<boolean>;
   deleteApiKey: (vendor: string) => Promise<{ ok: true }>;
@@ -514,8 +524,7 @@ export type LvisApi = {
     attachments: import("../../engine/llm/types.js").UserContentPart[] | undefined,
     inputOrigin: ChatSendInputOrigin,
     userIntent?: import("../../shared/chat-origin.js").UserKeyboardIntentSnapshot,
-    rolePrompt?: ActiveRolePrompt,
-    assistantContext?: SelectedAssistantContext,
+    personaPromptId?: string,
   ) => Promise<unknown>;
   chatGuide: (input: string) => Promise<unknown>;
   chatNew: () => Promise<{ ok: true }>;

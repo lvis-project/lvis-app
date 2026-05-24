@@ -99,11 +99,7 @@ describe("ui IPC handlers", () => {
       requestId: "req-1",
       x: 10.4,
       y: 20.6,
-      agents: [{ name: "Planner" }],
-      skills: [{ name: "Debugger" }],
       personas: [{ id: "default", name: "기본" }],
-      activeAgentName: "Planner",
-      activeSkillNames: ["Debugger"],
       activePersonaId: "default",
     });
 
@@ -114,23 +110,8 @@ describe("ui IPC handlers", () => {
       y: 21,
     });
     const template = firstTemplate();
-    expect(template[0]?.label).toBe("Agent");
-    expect(template[0]?.submenu?.[0]?.label).toBe("기본 에이전트");
-    expect(template[0]?.submenu?.[1]).toMatchObject({
-      label: "Planner",
-      type: "radio",
-      checked: true,
-    });
-    expect(template[1]?.submenu?.[0]).toMatchObject({
-      label: "스킬 해제",
-      enabled: true,
-    });
-    expect(template[1]?.submenu?.[2]).toMatchObject({
-      label: "Debugger",
-      type: "checkbox",
-      checked: true,
-    });
-    expect(template[3]?.submenu?.[0]).toMatchObject({
+    expect(template[0]?.label).toBe("Persona");
+    expect(template[0]?.submenu?.[0]).toMatchObject({
       label: "기본",
       type: "radio",
       checked: true,
@@ -144,34 +125,13 @@ describe("ui IPC handlers", () => {
       requestId: "req-2",
       x: 1,
       y: 2,
-      agents: [{ name: "Planner" }],
-      skills: [{ name: "Debugger" }],
       personas: [{ id: "coding", name: "코딩" }],
-      activeAgentName: "",
-      activeSkillNames: [],
       activePersonaId: "",
     });
 
     const template = firstTemplate();
-    template[0]?.submenu?.[1]?.click?.();
-    template[1]?.submenu?.[0]?.click?.();
-    template[1]?.submenu?.[2]?.click?.();
-    template[3]?.submenu?.[0]?.click?.();
+    template[0]?.submenu?.[0]?.click?.();
 
-    expect(sendMock).toHaveBeenCalledWith(UI.assistantContextAction, {
-      requestId: "req-2",
-      kind: "agent",
-      name: "Planner",
-    });
-    expect(sendMock).toHaveBeenCalledWith(UI.assistantContextAction, {
-      requestId: "req-2",
-      kind: "skills-clear",
-    });
-    expect(sendMock).toHaveBeenCalledWith(UI.assistantContextAction, {
-      requestId: "req-2",
-      kind: "skill-toggle",
-      name: "Debugger",
-    });
     expect(sendMock).toHaveBeenCalledWith(UI.assistantContextAction, {
       requestId: "req-2",
       kind: "persona",
@@ -184,9 +144,7 @@ describe("ui IPC handlers", () => {
       requestId: "req-3",
       x: 1,
       y: 2,
-      agents: "bad",
-      skills: [],
-      personas: [],
+      personas: "bad",
     });
 
     expect(result).toEqual({ ok: false, error: "invalid-assistant-context-menu" });
@@ -197,7 +155,7 @@ describe("ui IPC handlers", () => {
     const pluginResult = invoke(
       UI.assistantContextMenu,
       makeEvent("file:///app/plugin-ui-shell.html"),
-      { requestId: "req-4", x: 1, y: 2, agents: [], skills: [], personas: [] },
+      { requestId: "req-4", x: 1, y: 2, personas: [] },
     );
     expect(pluginResult).toEqual({ ok: false, error: "unauthorized-frame" });
 
@@ -206,7 +164,7 @@ describe("ui IPC handlers", () => {
     const iframeResult = invoke(
       UI.assistantContextMenu,
       iframeEvent,
-      { requestId: "req-5", x: 1, y: 2, agents: [], skills: [], personas: [] },
+      { requestId: "req-5", x: 1, y: 2, personas: [] },
     );
 
     expect(iframeResult).toEqual({ ok: false, error: "unauthorized-frame" });

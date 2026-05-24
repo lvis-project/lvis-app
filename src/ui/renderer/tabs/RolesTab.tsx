@@ -3,8 +3,8 @@ import { Badge } from "../../../components/ui/badge.js";
 import { Button } from "../../../components/ui/button.js";
 import { Input } from "../../../components/ui/input.js";
 import { Textarea } from "../../../components/ui/textarea.js";
-import { cloneDefaultRolePresets, type RolePreset } from "../../../data/role-presets.js";
-import { isIpcErrorResult, type LvisApi } from "../types.js";
+import type { RolePreset } from "../../../data/role-presets.js";
+import type { LvisApi } from "../types.js";
 import { useNotifySaved } from "../contexts/saved-toast.js";
 import { SettingsPageHeader } from "../components/SettingsPageHeader.js";
 import { SettingsSection } from "../components/SettingsSection.js";
@@ -48,8 +48,8 @@ export function RolesTab({ api }: { api: LvisApi }) {
     const failures: string[] = [];
 
     try {
-      const settings = await api.getSettings();
-      setRolePresets(settings.roles.presets);
+      const { prompts } = await api.listPersonaPrompts();
+      setRolePresets(prompts);
       setRolesLoaded(true);
     } catch (err) {
       failures.push(`roles: ${(err as Error).message}`);
@@ -79,35 +79,26 @@ export function RolesTab({ api }: { api: LvisApi }) {
 
   useEffect(() => {
     void loadSources();
-    const unsubscribe = api.onSettingsUpdated((settings) => {
-      setRolePresets(settings.roles.presets);
-      setRolesLoaded(true);
+    const unsubscribe = api.onPersonaPromptsUpdated?.(() => {
+      void api.listPersonaPrompts()
+        .then(({ prompts }) => {
+          setRolePresets(prompts);
+          setRolesLoaded(true);
+        })
+        .catch(() => {
+          setRolesLoaded(false);
+        });
     });
-    return unsubscribe;
+    return () => {
+      unsubscribe?.();
+    };
   }, [api, loadSources]);
 
-  const persistRoles = useCallback(async (next: RolePreset[]) => {
-    if (!rolesLoaded) {
-      setError("역할 설정을 아직 읽지 못했습니다.");
-      return;
-    }
-    setSaving("roles");
-    setError(null);
-    setRolePresets(next);
-    try {
-      const settings = await api.updateSettings({ roles: { presets: next } });
-      if (isIpcErrorResult(settings)) {
-        throw new Error(settings.message ?? settings.error);
-      }
-      setRolePresets(settings.roles.presets);
-      setStatus("역할 프롬프트를 저장했습니다.");
-      notifySaved();
-    } catch (err) {
-      setError((err as Error).message);
-    } finally {
-      setSaving(null);
-    }
-  }, [api, rolesLoaded, notifySaved]);
+  const reloadPersonaPrompts = useCallback(async () => {
+    const { prompts } = await api.listPersonaPrompts();
+    setRolePresets(prompts);
+    setRolesLoaded(true);
+  }, [api]);
 
   const startEdit = (preset: RolePreset) => {
     if (preset.isDefault) return;
@@ -123,25 +114,40 @@ export function RolesTab({ api }: { api: LvisApi }) {
   const saveDraft = async () => {
     const name = draft.name.trim();
     if (!name) return;
-    const id = editingId ?? makeRoleId(name);
-    const nextPreset: RolePreset = { id, name, systemPromptAdd: draft.systemPromptAdd };
-    const next = editingId
-      ? rolePresets.map((preset) => preset.id === editingId ? nextPreset : preset)
-      : [...rolePresets, nextPreset];
-    await persistRoles(next);
-    cancelEdit();
+    setSaving("roles");
+    setError(null);
+    try {
+      const id = editingId ?? makePersonaPromptId(name);
+      const result = await api.savePersonaPrompt({ id, name, systemPromptAdd: draft.systemPromptAdd });
+      if (!result.ok) throw new Error(result.error);
+      await reloadPersonaPrompts();
+      setStatus("역할 프롬프트를 저장했습니다.");
+      notifySaved();
+      cancelEdit();
+    } catch (err) {
+      setError((err as Error).message);
+    } finally {
+      setSaving(null);
+    }
   };
 
   const removePreset = async (id: string) => {
     const target = rolePresets.find((preset) => preset.id === id);
     if (!target || target.isDefault) return;
-    await persistRoles(rolePresets.filter((preset) => preset.id !== id));
-    if (editingId === id) cancelEdit();
-  };
-
-  const resetRoles = async () => {
-    await persistRoles(cloneDefaultRolePresets());
-    cancelEdit();
+    setSaving("roles");
+    setError(null);
+    try {
+      const result = await api.deletePersonaPrompt(id);
+      if (!result.ok) throw new Error(result.error);
+      await reloadPersonaPrompts();
+      setStatus("역할 프롬프트를 삭제했습니다.");
+      notifySaved();
+      if (editingId === id) cancelEdit();
+    } catch (err) {
+      setError((err as Error).message);
+    } finally {
+      setSaving(null);
+    }
   };
 
   const saveAgents = async () => {
@@ -279,7 +285,7 @@ export function RolesTab({ api }: { api: LvisApi }) {
     <div className="space-y-6">
       <SettingsPageHeader
         title="역할"
-        description="역할 프롬프트와 활성 역할을 관리합니다"
+        description="~/.lvis/prompts의 Persona 프롬프트를 관리합니다"
       />
 
       <SettingsSection title="역할 소스">
@@ -344,9 +350,6 @@ export function RolesTab({ api }: { api: LvisApi }) {
 
           {section === "roles" ? (
             <div className="space-y-3">
-              <div className="flex justify-end">
-                <Button size="sm" variant="ghost" onClick={resetRoles} disabled={!rolesLoaded || saving === "roles"}>기본값으로 리셋</Button>
-              </div>
               <div className="space-y-2">
                 {rolePresets.map((preset) => (
                   <div key={preset.id} className="rounded-md border border-border/70 p-2">
@@ -386,14 +389,14 @@ export function RolesTab({ api }: { api: LvisApi }) {
 memories/MEMORY.md          -> urgent memory, references, and saved-memory index
 memories/*.md               -> detailed long-term memories with references
 user-preferences.md         -> compact durable user preferences only
-roles.presets               -> per-turn role prompt list in SettingsService
+prompts/*.md                -> user-editable per-turn persona prompts
 
 Idle:
   IDLE_SCAN -> optionally refresh user-preferences.md from sources, preferences only
 
 Turn:
   system prompt reads AGENTS.md + user-preferences.md + MEMORY.md + memories/*.md
-  selected role prompt is injected as a per-turn system prompt section`}
+  selected persona prompt is injected as a per-turn system prompt section`}
             </pre>
           ) : null}
         </div>
@@ -405,12 +408,13 @@ Turn:
   );
 }
 
-function makeRoleId(name: string): string {
+function makePersonaPromptId(name: string): string {
   const slug = name
     .toLowerCase()
-    .replace(/[^a-z0-9가-힣\s-]/g, "")
+    .replace(/[^a-z0-9\s-]/g, "")
     .replace(/\s+/g, "-")
     .replace(/-+/g, "-")
-    .slice(0, 40) || "role";
+    .replace(/^-|-$/g, "")
+    .slice(0, 40) || "persona";
   return `${slug}-${Math.random().toString(36).slice(2, 6)}`;
 }

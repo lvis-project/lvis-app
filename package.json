@@ -242,6 +242,11 @@
         "from": "resources/skills",
         "to": "skills",
         "filter": ["*.md"]
+      },
+      {
+        "from": "resources/prompts",
+        "to": "prompts",
+        "filter": ["*.md"]
       }
     ],
     "mac": {

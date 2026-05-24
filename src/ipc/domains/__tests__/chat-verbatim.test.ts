@@ -108,7 +108,7 @@ function makeConversationLoop(
 
 function makeMinimalDeps(
   loop: ReturnType<typeof makeConversationLoop>,
-  opts: { getMainWindow?: () => unknown } = {},
+  opts: { getMainWindow?: () => unknown; personaPromptStore?: unknown } = {},
 ) {
   return {
     conversationLoop: loop as any,
@@ -148,6 +148,7 @@ function makeMinimalDeps(
     starredStore: undefined,
     feedbackStore: undefined,
     auditLogger: { log: vi.fn() } as any,
+    personaPromptStore: opts.personaPromptStore,
     askUserQuestionGate: undefined,
     notificationService: undefined,
     getMainWindow: opts.getMainWindow ?? vi.fn(() => null),
@@ -156,7 +157,7 @@ function makeMinimalDeps(
 
 async function setupHandlers(
   loop: ReturnType<typeof makeConversationLoop>,
-  opts: { getMainWindow?: () => unknown } = {},
+  opts: { getMainWindow?: () => unknown; personaPromptStore?: unknown } = {},
 ) {
   handlers.clear();
   vi.clearAllMocks();
@@ -678,6 +679,73 @@ describe("lvis:chat:send provenance", () => {
     );
   });
 
+  it("resolves personaPromptId through PersonaPromptStore at the chat boundary", async () => {
+    const loop = makeConversationLoop("session-provenance", []);
+    loop.runTurn.mockResolvedValue({ text: "ok", toolCalls: [], stopReason: "end_turn" });
+    const personaPromptStore = {
+      get: vi.fn(async () => ({
+        id: "reviewer",
+        name: "Reviewer",
+        systemPromptAdd: "Current file prompt.",
+      })),
+    };
+    await setupHandlers(loop, { personaPromptStore });
+
+    await invoke("lvis:chat:send", {
+      input: "hello",
+      inputOrigin: "user-keyboard",
+      userActivation: true,
+      personaPromptId: "reviewer",
+    });
+
+    expect(personaPromptStore.get).toHaveBeenCalledWith("reviewer");
+    expect(loop.runTurn).toHaveBeenCalledWith(
+      "hello",
+      expect.any(Object),
+      undefined,
+      expect.objectContaining({
+        inputOrigin: "user-keyboard",
+        rolePrompt: {
+          id: "reviewer",
+          name: "Reviewer",
+          systemPromptAdd: "Current file prompt.",
+        },
+      }),
+    );
+  });
+
+  it("fails closed when selected personaPromptId is missing from the prompt store", async () => {
+    const loop = makeConversationLoop("session-provenance", []);
+    const personaPromptStore = { get: vi.fn(async () => null) };
+    await setupHandlers(loop, { personaPromptStore });
+
+    const result = await invoke("lvis:chat:send", {
+      input: "hello",
+      inputOrigin: "user-keyboard",
+      userActivation: true,
+      personaPromptId: "deleted",
+    });
+
+    expect(result).toEqual({ ok: false, error: "persona-prompt-not-found" });
+    expect(loop.runTurn).not.toHaveBeenCalled();
+  });
+
+  it("rejects personaPromptId on queue-auto chat sends", async () => {
+    const loop = makeConversationLoop("session-provenance", []);
+    const personaPromptStore = { get: vi.fn() };
+    await setupHandlers(loop, { personaPromptStore });
+
+    const result = await invoke("lvis:chat:send", {
+      input: "queued follow-up",
+      inputOrigin: "queue-auto",
+      personaPromptId: "reviewer",
+    });
+
+    expect(result).toEqual({ ok: false, error: "persona-prompt-origin-restricted" });
+    expect(personaPromptStore.get).not.toHaveBeenCalled();
+    expect(loop.runTurn).not.toHaveBeenCalled();
+  });
+
   it("forwards permission mode change callbacks to the chat stream", async () => {
     const sent: Array<{ channel: string; payload: unknown }> = [];
     const loop = makeConversationLoop("session-provenance", []);
@@ -754,22 +822,29 @@ describe("lvis:chat:send provenance", () => {
     ]);
   });
 
-  it("preserves stored role prompt metadata when edit-resending a user message", async () => {
+  it("resolves stored persona prompt id when edit-resending a user message", async () => {
     const loop = makeConversationLoop("session-provenance", [
       {
         role: "user",
         content: "old text",
         meta: {
-          activeRolePrompt: {
+          activePersonaPrompt: {
+            id: "reviewer",
             name: "Reviewer",
-            systemPromptAdd: "Review carefully.",
           },
         },
       },
       { role: "assistant", content: "old answer" },
     ]);
     loop.runTurn.mockResolvedValue({ text: "ok", toolCalls: [], stopReason: "end_turn" });
-    await setupHandlers(loop);
+    const personaPromptStore = {
+      get: vi.fn(async () => ({
+        id: "reviewer",
+        name: "Reviewer",
+        systemPromptAdd: "Current file prompt.",
+      })),
+    };
+    await setupHandlers(loop, { personaPromptStore });
 
     await invoke("lvis:chat:edit-resend", 0, "new text");
 
@@ -780,14 +855,15 @@ describe("lvis:chat:send provenance", () => {
       expect.objectContaining({
         inputOrigin: "user-keyboard",
         rolePrompt: {
+          id: "reviewer",
           name: "Reviewer",
-          systemPromptAdd: "Review carefully.",
+          systemPromptAdd: "Current file prompt.",
         },
       }),
     );
   });
 
-  it("preserves stored role prompt metadata when retrying with effort settings", async () => {
+  it("resolves stored persona prompt id when retrying with effort settings", async () => {
     const loop = makeConversationLoop("session-provenance", [
       {
         role: "user",
@@ -796,16 +872,23 @@ describe("lvis:chat:send provenance", () => {
           { type: "image", image: "data:image/png;base64,abc", mimeType: "image/png" },
         ],
         meta: {
-          activeRolePrompt: {
+          activePersonaPrompt: {
+            id: "reviewer",
             name: "Reviewer",
-            systemPromptAdd: "Review carefully.",
           },
         },
       },
       { role: "assistant", content: "old answer" },
     ]);
     loop.runTurn.mockResolvedValue({ text: "ok", toolCalls: [], stopReason: "end_turn" });
-    await setupHandlers(loop);
+    const personaPromptStore = {
+      get: vi.fn(async () => ({
+        id: "reviewer",
+        name: "Reviewer",
+        systemPromptAdd: "Current file prompt.",
+      })),
+    };
+    await setupHandlers(loop, { personaPromptStore });
 
     await invoke("lvis:chat:retry-effort", { enableThinking: true, thinkingBudgetTokens: 12345 });
 
@@ -816,8 +899,9 @@ describe("lvis:chat:send provenance", () => {
       expect.objectContaining({
         inputOrigin: "user-keyboard",
         rolePrompt: {
+          id: "reviewer",
           name: "Reviewer",
-          systemPromptAdd: "Review carefully.",
+          systemPromptAdd: "Current file prompt.",
         },
         attachments: [
           { type: "image", image: "data:image/png;base64,abc", mimeType: "image/png" },

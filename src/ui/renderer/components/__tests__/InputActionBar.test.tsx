@@ -50,12 +50,6 @@ function renderBar(overrides: Partial<Parameters<typeof InputActionBar>[0]> = {}
     activePreset: mockPreset,
     activePresetId: "default",
     onSelectPreset: vi.fn(),
-    agentOptions: [],
-    skillOptions: [],
-    activeAgentName: "",
-    onSelectAgent: vi.fn(),
-    activeSkillNames: [],
-    onChangeSkillNames: vi.fn(),
     vendorSupportsThinking: false,
     enableThinkingChat: false,
     onToggleThinking: vi.fn(),
@@ -159,10 +153,6 @@ describe("InputActionBar (post indexer-removal)", () => {
     try {
       const { getByTestId } = renderBar({
         rolePresets: [mockPreset, codingPreset],
-        agentOptions: [{ name: "Planner", description: "", sourceTools: [], triggers: [] }],
-        skillOptions: [{ name: "Debugger", description: "", triggers: [] }],
-        activeAgentName: "Planner",
-        activeSkillNames: ["Debugger"],
         activePreset: codingPreset,
         activePresetId: "coding",
       });
@@ -173,14 +163,10 @@ describe("InputActionBar (post indexer-removal)", () => {
       expect(typeof payload.y).toBe("number");
       expect(nativeMenu.showAssistantContextMenu).toHaveBeenCalledWith(
         expect.objectContaining({
-          agents: [{ name: "Planner" }],
-          skills: [{ name: "Debugger" }],
           personas: [
             { id: "default", name: "기본" },
             { id: "coding", name: "코딩" },
           ],
-          activeAgentName: "Planner",
-          activeSkillNames: ["Debugger"],
           activePersonaId: "coding",
         }),
       );
@@ -210,47 +196,23 @@ describe("InputActionBar (post indexer-removal)", () => {
     }
   });
 
-  it("routes native assistant context actions back to the existing selectors", () => {
+  it("routes native persona actions back to the existing selector", () => {
     const nativeMenu = installNativeMenuMock();
-    const onSelectAgent = vi.fn();
     const onSelectPreset = vi.fn();
-    const onChangeSkillNames = vi.fn();
     try {
       const { getByTestId } = renderBar({
         rolePresets: [mockPreset, codingPreset],
-        onSelectAgent,
         onSelectPreset,
-        onChangeSkillNames,
       });
       fireEvent.click(getByTestId("iab-assistant-context-button"));
       const firstRequestId = nativeMenu.showAssistantContextMenu.mock.calls[0]?.[0]?.requestId;
       expect(typeof firstRequestId).toBe("string");
 
-      nativeMenu.emit({ requestId: "other", kind: "agent", name: "Ignored" });
+      nativeMenu.emit({ requestId: "other", kind: "persona", id: "ignored" });
       expect(onSelectPreset).not.toHaveBeenCalled();
-      expect(onSelectAgent).not.toHaveBeenCalled();
 
-      nativeMenu.emit({ requestId: firstRequestId, kind: "agent", name: "Planner" });
-      nativeMenu.emit({ requestId: firstRequestId, kind: "agent", name: "Duplicate" });
-      fireEvent.click(getByTestId("iab-assistant-context-button"));
-      const secondRequestId = nativeMenu.showAssistantContextMenu.mock.calls[1]?.[0]?.requestId;
-      nativeMenu.emit({ requestId: secondRequestId, kind: "persona", id: "coding" });
-      fireEvent.click(getByTestId("iab-assistant-context-button"));
-      const thirdRequestId = nativeMenu.showAssistantContextMenu.mock.calls[2]?.[0]?.requestId;
-      nativeMenu.emit({ requestId: thirdRequestId, kind: "skills-clear" });
-      fireEvent.click(getByTestId("iab-assistant-context-button"));
-      const fourthRequestId = nativeMenu.showAssistantContextMenu.mock.calls[3]?.[0]?.requestId;
-      nativeMenu.emit({ requestId: fourthRequestId, kind: "skill-toggle", name: "Debugger" });
-
-      expect(onSelectAgent).toHaveBeenCalledWith("Planner");
-      expect(onSelectAgent).not.toHaveBeenCalledWith("Duplicate");
+      nativeMenu.emit({ requestId: firstRequestId, kind: "persona", id: "coding" });
       expect(onSelectPreset).toHaveBeenCalledWith("coding");
-      expect(onChangeSkillNames).toHaveBeenCalledTimes(2);
-      const clearUpdater = onChangeSkillNames.mock.calls[0]?.[0] as (current: string[]) => string[];
-      const toggleUpdater = onChangeSkillNames.mock.calls[1]?.[0] as (current: string[]) => string[];
-      expect(clearUpdater(["Debugger"])).toEqual([]);
-      expect(toggleUpdater(["Other"])).toEqual(["Other", "Debugger"]);
-      expect(toggleUpdater(["Debugger"])).toEqual([]);
     } finally {
       nativeMenu.restore();
     }

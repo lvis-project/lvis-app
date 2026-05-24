@@ -11,7 +11,7 @@
  *     (host-side per-plugin tool list)
  *   - 에이전트  → `listAgentProfiles().agents.length`
  *   - 스킬      → `listSkills().skills.length`
- *   - 역할      → `getSettings().roles.presets.length`
+ *   - 역할      → `listPersonaPromptSummaries().prompts.length`
  *   - 마켓플레이스 → `pingMarketplace()` (configured + online flags)
  *
  * Refresh runs once on mount and on demand via the returned `refresh()`.
@@ -65,14 +65,14 @@ export function useWorkspaceStats(api: LvisApi): {
       cardsRes,
       agentsRes,
       skillsRes,
-      settingsRes,
+      promptsRes,
       pingRes,
     ] = await Promise.allSettled([
       api.listPluginUiExtensions(),
       api.listPluginCards(),
       api.listAgentProfiles(),
       api.listSkills(),
-      api.getSettings(),
+      api.listPersonaPromptSummaries(),
       api.pingMarketplace(),
     ]);
     if (!aliveRef.current) return;
@@ -96,8 +96,8 @@ export function useWorkspaceStats(api: LvisApi): {
     if (skillsRes.status === "fulfilled") {
       next.skillCount = skillsRes.value.skills.length;
     }
-    if (settingsRes.status === "fulfilled") {
-      next.roleCount = settingsRes.value.roles?.presets?.length ?? 0;
+    if (promptsRes.status === "fulfilled") {
+      next.roleCount = promptsRes.value.prompts.length;
     }
     if (pingRes.status === "fulfilled") {
       next.marketplace = {
