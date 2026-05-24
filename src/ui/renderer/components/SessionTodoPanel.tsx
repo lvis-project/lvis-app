@@ -23,7 +23,7 @@
  * "TO-DO 가 작성은 되는데 업데이트는 안됨").
  */
 import { useCallback, useEffect, useRef, useState } from "react";
-import { ChevronDown, ChevronRight, ListChecks, RotateCcw, Sparkles } from "lucide-react";
+import { ChevronDown, ChevronRight, ListChecks, Pencil, Plus, RotateCcw, Sparkles } from "lucide-react";
 import { Badge } from "../../../components/ui/badge.js";
 import { Button } from "../../../components/ui/button.js";
 import type { LvisApi } from "../types.js";
@@ -33,6 +33,9 @@ interface SessionTodoItem {
   content: string;
   status: string;
 }
+
+type PlanBadge = "fresh" | "resumed";
+type ChangeBadge = "added" | "updated";
 
 const STATUS_BADGE: Record<string, { label: string; cls: string; dot: string }> = {
   pending: {
@@ -62,6 +65,23 @@ const STATUS_BADGE: Record<string, { label: string; cls: string; dot: string }> 
   },
 };
 
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === "object" && value !== null;
+}
+
+function isSessionTodoItemArray(value: unknown): value is SessionTodoItem[] {
+  if (!Array.isArray(value)) return false;
+  return value.every((item) => {
+    if (!isRecord(item)) return false;
+    return (
+      typeof item.id === "string" &&
+      typeof item.content === "string" &&
+      typeof item.status === "string" &&
+      Object.prototype.hasOwnProperty.call(STATUS_BADGE, item.status)
+    );
+  });
+}
+
 /**
  * Detects whether the prefers-reduced-motion media query is honored at
  * mount time. The result is captured once — a runtime change to the OS
@@ -77,6 +97,25 @@ function prefersReducedMotion(): boolean {
   } catch {
     return false;
   }
+}
+
+function classifyTodoChange(
+  prev: readonly SessionTodoItem[],
+  next: readonly SessionTodoItem[],
+): ChangeBadge | null {
+  const prevById = new Map(prev.map((item) => [item.id, item]));
+  const nextById = new Map(next.map((item) => [item.id, item]));
+  const added = next.some((item) => !prevById.has(item.id));
+  if (added) return "added";
+  const updated = next.some((item) => {
+    const before = prevById.get(item.id);
+    return Boolean(before && (before.content !== item.content || before.status !== item.status));
+  });
+  if (updated) return "updated";
+  const reordered = next.some((item, index) => prev[index]?.id !== item.id);
+  if (reordered) return "updated";
+  const removed = prev.some((item) => !nextById.has(item.id));
+  return removed ? "updated" : null;
 }
 
 export function SessionTodoPanel({
@@ -98,46 +137,90 @@ export function SessionTodoPanel({
   // in-progress item title, so the user sees the active step at a glance and
   // expands only when they want the full list.
   const [open, setOpen] = useState(false);
-  // Continuation marker: true when the panel surfaced items via the
-  // initial `listSessionTodos` fetch (i.e. items already existed for
-  // this session before mount). Distinguishes "이어서 진행" from "새 시작".
-  const [resumed, setResumed] = useState<boolean | null>(null);
-  // Track which session's items are currently rendered so a `:changed`
-  // event for a different session id is dropped instead of overwriting.
-  const visibleSessionRef = useRef<string | undefined>(sessionId);
+  // Plan marker: "resumed" only when the initial fetch finds existing items;
+  // "fresh" when a live push creates a plan after an empty/cleared state.
+  // Kept separate from item state so late initial fetches cannot overwrite a
+  // live "fresh" push that arrived first.
+  const [planBadge, setPlanBadge] = useState<PlanBadge | null>(null);
+  // Last non-initial mutation marker. This is intentionally lightweight UI
+  // state derived from item diffs; the store remains the item-list SOT.
+  const [changeBadge, setChangeBadge] = useState<ChangeBadge | null>(null);
+  const itemsRef = useRef<SessionTodoItem[]>([]);
+  const latestSessionIdRef = useRef<string | undefined>(sessionId);
+  const hasLivePushRef = useRef(false);
+  latestSessionIdRef.current = sessionId;
+
+  const applyItems = useCallback((next: SessionTodoItem[], source: "initial-fetch" | "push") => {
+    const prev = itemsRef.current;
+    if (source === "initial-fetch" && hasLivePushRef.current) {
+      return;
+    }
+    itemsRef.current = next;
+    setItems(next);
+
+    if (next.length === 0) {
+      setPlanBadge(null);
+      setChangeBadge(null);
+      return;
+    }
+
+    if (source === "initial-fetch") {
+      setPlanBadge((current) => current ?? "resumed");
+      return;
+    }
+
+    if (prev.length === 0) {
+      setPlanBadge((current) => current ?? "fresh");
+      setChangeBadge(null);
+      return;
+    }
+
+    const change = classifyTodoChange(prev, next);
+    setChangeBadge(change);
+  }, []);
 
   const refresh = useCallback(async () => {
     if (typeof api.listSessionTodos !== "function") return;
-    const list = await api.listSessionTodos(sessionId);
-    visibleSessionRef.current = sessionId;
-    setItems(list);
-    // First fetch on a session id determines the continuation state:
-    //   - existing items => "이어서" (resumed)
-    //   - empty list     => "새 시작" (fresh)
-    setResumed(list.length > 0);
-  }, [api, sessionId]);
+    const requestedSessionId = sessionId;
+    const list = await api.listSessionTodos(requestedSessionId);
+    if (requestedSessionId !== latestSessionIdRef.current) {
+      return;
+    }
+    if (!isSessionTodoItemArray(list)) {
+      return;
+    }
+    applyItems(list, "initial-fetch");
+  }, [api, applyItems, sessionId]);
 
   useEffect(() => {
     void refresh();
     if (typeof api.onSessionTodoChanged !== "function") {
       return undefined;
     }
-    const unsub = api.onSessionTodoChanged(({ sessionId: emittedSid, items: next }) => {
-      // Drop pushes from a different session — without this, switching
-      // chats keeps the old session emitting into the active panel.
-      // The bridge is permitted to omit `sessionId` (legacy clients);
-      // in that case we accept the push as the bridge already filtered.
-      if (emittedSid && sessionId && emittedSid !== sessionId) {
+    const unsub = api.onSessionTodoChanged((payload: unknown) => {
+      if (!isRecord(payload)) {
         return;
       }
-      visibleSessionRef.current = emittedSid ?? sessionId;
-      setItems(next);
-      // Latch the continuation marker on the very first arrival so it
-      // stays stable for the lifetime of this mount:
-      //   - null → false  (panel mounted empty, items just landed = 새 시작)
-      //   - null → true   (panel mounted with items already = 이어서)
-      // Subsequent pushes do not flip the marker.
-      setResumed((prev) => (prev === null ? next.length > 0 : prev));
+      const emittedSid = payload.sessionId;
+      const next = payload.items;
+      // Drop malformed or foreign pushes. Main/preload require `sessionId`;
+      // accepting omitted IDs would let stale session events overwrite the
+      // active view and reintroduce a hidden legacy path.
+      if (typeof emittedSid !== "string" || emittedSid.length === 0) {
+        return;
+      }
+      const activeSessionId = latestSessionIdRef.current;
+      if (typeof activeSessionId !== "string" || activeSessionId.length === 0) {
+        return;
+      }
+      if (emittedSid !== activeSessionId) {
+        return;
+      }
+      if (!isSessionTodoItemArray(next)) {
+        return;
+      }
+      hasLivePushRef.current = true;
+      applyItems(next, "push");
     });
     return unsub;
   }, [api, refresh, sessionId]);
@@ -148,7 +231,10 @@ export function SessionTodoPanel({
   // refresh covers both "swap to a session that has todos" (fetch repopulates)
   // and "swap to a session that has none" (fetch returns []).
   useEffect(() => {
-    setResumed(null);
+    setPlanBadge(null);
+    setChangeBadge(null);
+    hasLivePushRef.current = false;
+    itemsRef.current = [];
     setItems([]);
   }, [sessionId]);
 
@@ -188,28 +274,46 @@ export function SessionTodoPanel({
         <Badge variant="outline" className="px-1 py-0 text-[10px]">
           {completedCount}/{visible.length}
         </Badge>
-        {/* Continuation chip — explicit affordance for the user feedback:
-            "신규 TO-DO 를 작성하거나, 다음 턴을 시작할 때, 계속 이어서 하는 것인지
-            초기화 하고 가는 것인지도 판단이 잘 안되고 있음". `resumed === null`
-            means the first fetch hasn't resolved yet, so show nothing. */}
-        {resumed === true && (
+        {/* Plan chip — makes the current-turn plan boundary explicit.
+            `planBadge === null` means the first fetch hasn't resolved yet, so show nothing. */}
+        {planBadge === "resumed" && (
           <span
             className="ml-1 inline-flex items-center gap-1 rounded-full bg-warning/15 px-1.5 py-0 text-[10px] text-warning"
             data-testid="session-todo-continuation"
-            title="이전 턴의 TO-DO 를 이어서 진행 중"
+            title="현재 턴에서 작성된 TO-DO 를 이어서 진행 중"
           >
             <RotateCcw className="h-2.5 w-2.5" />
             이어서
           </span>
         )}
-        {resumed === false && (
+        {planBadge === "fresh" && (
           <span
             className="ml-1 inline-flex items-center gap-1 rounded-full bg-success/15 px-1.5 py-0 text-[10px] text-success"
             data-testid="session-todo-fresh"
-            title="새 세션에서 TO-DO 를 새로 작성"
+            title="현재 턴의 TO-DO 를 새로 작성"
           >
             <Sparkles className="h-2.5 w-2.5" />
             새 시작
+          </span>
+        )}
+        {changeBadge === "added" && (
+          <span
+            className="ml-1 inline-flex items-center gap-1 rounded-full bg-primary/10 px-1.5 py-0 text-[10px] text-primary"
+            data-testid="session-todo-added"
+            title="이번 업데이트에서 TO-DO 항목이 추가됨"
+          >
+            <Plus className="h-2.5 w-2.5" />
+            추가
+          </span>
+        )}
+        {changeBadge === "updated" && (
+          <span
+            className="ml-1 inline-flex items-center gap-1 rounded-full bg-muted px-1.5 py-0 text-[10px] text-muted-foreground"
+            data-testid="session-todo-updated"
+            title="이번 업데이트에서 TO-DO 항목이 수정됨"
+          >
+            <Pencil className="h-2.5 w-2.5" />
+            수정
           </span>
         )}
         {/* Collapsed-state focal point: the focus item (in-progress, else the
