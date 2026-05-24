@@ -31,8 +31,6 @@ export interface PromptSource {
 export interface SystemPromptBuilderDeps {
   memoryManager: MemoryManager;
   toolRegistry: ToolRegistry;
-  /** 플러그인 스킬 스키마 (PluginRuntime에서 주입) */
-  getPluginSchemas?: () => string;
   /**
    * 비활성 plugin 카탈로그 공급자. 빈 배열이거나 undefined면 섹션이
    * 생략된다.
@@ -280,7 +278,7 @@ export class SystemPromptBuilder {
   // ─── Private ──────────────────────────────────────
 
   private initSources(deps: SystemPromptBuilderDeps): void {
-    const { memoryManager, toolRegistry, getPluginSchemas } = deps;
+    const { memoryManager, toolRegistry } = deps;
 
     // ① Role Definition (정적)
     this.sources.push({
@@ -447,14 +445,6 @@ export class SystemPromptBuilder {
           "</tool-catalog>",
         ].join("\n");
       },
-    });
-
-    // ⑥ Active Plugin Schemas (플러그인 변경 시)
-    this.sources.push({
-      id: 6,
-      name: "Plugin Schemas",
-      refresh: "on-change",
-      build: () => getPluginSchemas?.() ?? "",
     });
 
     // 비활성 plugin 카탈로그.
