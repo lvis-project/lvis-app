@@ -128,6 +128,13 @@ export interface AuditEntry {
       cacheWriteTokens?: number;
     };
   }>;
+  toolExposure?: {
+    loadedToolCount: number;
+    deferredCatalogCount: number;
+    promotedToolNames: string[];
+    toolSchemaTokens: number;
+    projectedRequestInputTokens: number | null;
+  };
   route?: string;
 }
 
@@ -535,6 +542,13 @@ export class AuditLogger {
         cacheWriteTokens?: number;
       };
     }>;
+    toolExposure?: {
+      loadedToolCount: number;
+      deferredCatalogCount: number;
+      promotedToolNames: string[];
+      toolSchemaTokens: number;
+      projectedRequestInputTokens: number | null;
+    };
     route: string;
   }): void {
     this.log({
@@ -546,6 +560,7 @@ export class AuditLogger {
       toolCalls: params.toolCalls,
       tokenUsage: params.tokenUsage,
       usageByModel: params.usageByModel,
+      toolExposure: params.toolExposure,
       route: params.route,
     });
   }

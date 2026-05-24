@@ -513,8 +513,8 @@ export async function bootstrap(
   // §4.2 Step 4: builtin tools + request_plugin / tool_search meta tools.
   registerBuiltinTools(toolRegistry, settingsService, workflowDeps);
   registerRequestPluginMetaTool(toolRegistry);
-  // Statically registered; gated to LLM visibility on the experimental.toolDeferral
-  // flag inside getToolSchemasForScope (hidden when the flag is off).
+  // Statically registered; visible whenever builtins are in scope because
+  // tool-level deferral is the only plugin/MCP schema exposure path.
   registerToolSearchMetaTool(toolRegistry);
 
   // §4.4 HybridRetriever + Knowledge Tools DI, §6.1 IdleSchedulerService.

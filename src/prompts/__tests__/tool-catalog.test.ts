@@ -2,9 +2,8 @@
  * Tool-Level Deferral — SystemPromptBuilder <tool-catalog> source.
  *
  * Verifies:
- *   - flag ON  → <tool-catalog> lists in-scope, NOT-loaded plugin/mcp tools
+ *   - <tool-catalog> lists in-scope, NOT-loaded plugin/mcp tools
  *     with the tool_search instruction; loaded tools are not duplicated.
- *   - flag OFF → no <tool-catalog> section at all (legacy behavior).
  */
 import { describe, it, expect } from "vitest";
 
@@ -49,7 +48,7 @@ function makeBuilder(toolRegistry: ToolRegistry): SystemPromptBuilder {
 }
 
 describe("SystemPromptBuilder — tool catalog (Tool-Level Deferral)", () => {
-  it("flag ON: renders deferred tools + tool_search instruction", () => {
+  it("renders deferred tools + tool_search instruction", () => {
     const builder = makeBuilder(seedRegistry());
     builder.setToolScope({
       activePluginIds: new Set(["com.example.meeting"]),
@@ -68,7 +67,7 @@ describe("SystemPromptBuilder — tool catalog (Tool-Level Deferral)", () => {
     expect(catalogBlock).not.toContain("**meeting_start**");
   });
 
-  it("flag OFF: no tool-catalog section", () => {
+  it("renders catalog even if a stale scope still carries deferral=false", () => {
     const builder = makeBuilder(seedRegistry());
     builder.setToolScope({
       activePluginIds: new Set(["com.example.meeting"]),
@@ -77,10 +76,12 @@ describe("SystemPromptBuilder — tool catalog (Tool-Level Deferral)", () => {
       deferral: false,
     });
     const prompt = builder.build();
-    expect(prompt).not.toContain("<tool-catalog>");
+    expect(prompt).toContain("<tool-catalog>");
+    expect(prompt).toContain("**meeting_start**");
+    expect(prompt).toContain("**meeting_stop**");
   });
 
-  it("flag ON but nothing deferred → section omitted", () => {
+  it("nothing deferred → section omitted", () => {
     const builder = makeBuilder(seedRegistry());
     builder.setToolScope({
       activePluginIds: new Set(["com.example.meeting"]),
