@@ -459,6 +459,253 @@ describe("SessionTodoPanel", () => {
     expect(queryByTestId("session-todo-continuation")).toBeNull();
   });
 
+  it("keeps the '새 시작' chip when a live push beats the initial list fetch", async () => {
+    let pushPayload: ((p: {
+      sessionId: string;
+      items: Array<{ id: string; content: string; status: string }>;
+    }) => void) | null = null;
+    let resolveList!: (value: Array<{ id: string; content: string; status: string }>) => void;
+    const listPromise = new Promise<Array<{ id: string; content: string; status: string }>>((resolve) => {
+      resolveList = resolve;
+    });
+    const api = fakeApi({
+      listSessionTodos: () => listPromise,
+      onSessionTodoChanged: ((handler: (p: {
+        sessionId: string;
+        items: Array<{ id: string; content: string; status: string }>;
+      }) => void) => {
+        pushPayload = handler;
+        return () => undefined;
+      }) as never,
+    });
+    const { findByTestId, queryByTestId, queryByText } = render(
+      <SessionTodoPanel api={api} sessionId="session-race" />,
+    );
+
+    const firstItems = [{ id: "n1", content: "live plan", status: "pending" }];
+    await act(async () => {
+      pushPayload!({ sessionId: "session-race", items: firstItems });
+    });
+    expect((await findByTestId("session-todo-fresh")).textContent).toContain("새 시작");
+
+    await act(async () => {
+      resolveList([{ id: "old", content: "stale list snapshot", status: "pending" }]);
+      await listPromise;
+    });
+    expect(queryByTestId("session-todo-fresh")).toBeInTheDocument();
+    expect(queryByTestId("session-todo-continuation")).toBeNull();
+    expect(queryByText("stale list snapshot")).toBeNull();
+  });
+
+  it("ignores malformed push events without a session id", async () => {
+    let pushPayload: ((p: {
+      sessionId?: string;
+      items: Array<{ id: string; content: string; status: string }>;
+    }) => void) | null = null;
+    const api = fakeApi({
+      listSessionTodos: () => Promise.resolve([]),
+      onSessionTodoChanged: ((handler: (p: {
+        sessionId?: string;
+        items: Array<{ id: string; content: string; status: string }>;
+      }) => void) => {
+        pushPayload = handler;
+        return () => undefined;
+      }) as never,
+    });
+    const { queryByTestId } = render(
+      <SessionTodoPanel api={api} sessionId="session-strict" />,
+    );
+    await act(async () => {
+      await Promise.resolve();
+      pushPayload!({
+        items: [{ id: "bad", content: "missing session", status: "pending" }],
+      });
+    });
+    expect(queryByTestId("session-todo-panel")).toBeNull();
+  });
+
+  it("ignores malformed push payloads with a valid session id", async () => {
+    let pushPayload: ((p: unknown) => void) | null = null;
+    const api = fakeApi({
+      listSessionTodos: () => Promise.resolve([]),
+      onSessionTodoChanged: ((handler: (p: unknown) => void) => {
+        pushPayload = handler;
+        return () => undefined;
+      }) as never,
+    });
+    const { queryByTestId } = render(
+      <SessionTodoPanel api={api} sessionId="session-strict" />,
+    );
+    await act(async () => {
+      await Promise.resolve();
+      pushPayload!({ sessionId: "session-strict", items: null });
+      pushPayload!({
+        sessionId: "session-strict",
+        items: [{ id: "bad", content: "bad status", status: "not-a-status" }],
+      });
+    });
+    expect(queryByTestId("session-todo-panel")).toBeNull();
+  });
+
+  it("ignores push events until the active chat session id is known", async () => {
+    let pushPayload: ((p: {
+      sessionId: string;
+      items: Array<{ id: string; content: string; status: string }>;
+    }) => void) | null = null;
+    const api = fakeApi({
+      listSessionTodos: () => Promise.resolve([]),
+      onSessionTodoChanged: ((handler: (p: {
+        sessionId: string;
+        items: Array<{ id: string; content: string; status: string }>;
+      }) => void) => {
+        pushPayload = handler;
+        return () => undefined;
+      }) as never,
+    });
+    const { queryByTestId } = render(
+      <SessionTodoPanel api={api} sessionId="" />,
+    );
+    await act(async () => {
+      await Promise.resolve();
+      pushPayload!({
+        sessionId: "session-other",
+        items: [{ id: "ghost", content: "wrong session", status: "pending" }],
+      });
+    });
+    expect(queryByTestId("session-todo-panel")).toBeNull();
+  });
+
+  it("ignores malformed initial session-todo snapshots", async () => {
+    const api = fakeApi({
+      listSessionTodos: () => Promise.resolve(null) as never,
+    });
+    const { queryByTestId } = render(
+      <SessionTodoPanel api={api} sessionId="session-strict" />,
+    );
+    await act(async () => {
+      await Promise.resolve();
+    });
+    expect(queryByTestId("session-todo-panel")).toBeNull();
+  });
+
+  it("resets plan badge on clear, then labels the next live plan as fresh", async () => {
+    let pushPayload: ((p: {
+      sessionId: string;
+      items: Array<{ id: string; content: string; status: string }>;
+    }) => void) | null = null;
+    const api = fakeApi({
+      listSessionTodos: () =>
+        Promise.resolve([{ id: "old", content: "old plan", status: "completed" }]),
+      onSessionTodoChanged: ((handler: (p: {
+        sessionId: string;
+        items: Array<{ id: string; content: string; status: string }>;
+      }) => void) => {
+        pushPayload = handler;
+        return () => undefined;
+      }) as never,
+    });
+    const { findByTestId, queryByTestId } = render(
+      <SessionTodoPanel api={api} sessionId="session-clear" />,
+    );
+    expect((await findByTestId("session-todo-continuation")).textContent).toContain("이어서");
+
+    await act(async () => {
+      pushPayload!({ sessionId: "session-clear", items: [] });
+    });
+    expect(queryByTestId("session-todo-panel")).toBeNull();
+
+    await act(async () => {
+      pushPayload!({
+        sessionId: "session-clear",
+        items: [{ id: "new", content: "new topic", status: "pending" }],
+      });
+    });
+    expect((await findByTestId("session-todo-fresh")).textContent).toContain("새 시작");
+    expect(queryByTestId("session-todo-continuation")).toBeNull();
+  });
+
+  it("shows add and update chips for non-initial mutations", async () => {
+    let pushPayload: ((p: {
+      sessionId: string;
+      items: Array<{ id: string; content: string; status: string }>;
+    }) => void) | null = null;
+    const api = fakeApi({
+      listSessionTodos: () =>
+        Promise.resolve([{ id: "t1", content: "first", status: "pending" }]),
+      onSessionTodoChanged: ((handler: (p: {
+        sessionId: string;
+        items: Array<{ id: string; content: string; status: string }>;
+      }) => void) => {
+        pushPayload = handler;
+        return () => undefined;
+      }) as never,
+    });
+    const { findByTestId, queryByTestId } = render(
+      <SessionTodoPanel api={api} sessionId="session-mutate" />,
+    );
+    await findByTestId("session-todo-continuation");
+
+    await act(async () => {
+      pushPayload!({
+        sessionId: "session-mutate",
+        items: [
+          { id: "t1", content: "first", status: "pending" },
+          { id: "t2", content: "second", status: "pending" },
+        ],
+      });
+    });
+    expect((await findByTestId("session-todo-added")).textContent).toContain("추가");
+
+    await act(async () => {
+      pushPayload!({
+        sessionId: "session-mutate",
+        items: [
+          { id: "t1", content: "first", status: "completed" },
+          { id: "t2", content: "second", status: "pending" },
+        ],
+      });
+    });
+    expect((await findByTestId("session-todo-updated")).textContent).toContain("수정");
+    expect(queryByTestId("session-todo-added")).toBeNull();
+  });
+
+  it("shows the update chip for same-turn reorder-only mutations", async () => {
+    let pushPayload: ((p: {
+      sessionId: string;
+      items: Array<{ id: string; content: string; status: string }>;
+    }) => void) | null = null;
+    const api = fakeApi({
+      listSessionTodos: () =>
+        Promise.resolve([
+          { id: "t1", content: "first", status: "pending" },
+          { id: "t2", content: "second", status: "pending" },
+        ]),
+      onSessionTodoChanged: ((handler: (p: {
+        sessionId: string;
+        items: Array<{ id: string; content: string; status: string }>;
+      }) => void) => {
+        pushPayload = handler;
+        return () => undefined;
+      }) as never,
+    });
+    const { findByTestId, queryByTestId } = render(
+      <SessionTodoPanel api={api} sessionId="session-reorder" />,
+    );
+    await findByTestId("session-todo-continuation");
+
+    await act(async () => {
+      pushPayload!({
+        sessionId: "session-reorder",
+        items: [
+          { id: "t2", content: "second", status: "pending" },
+          { id: "t1", content: "first", status: "pending" },
+        ],
+      });
+    });
+    expect((await findByTestId("session-todo-updated")).textContent).toContain("수정");
+    expect(queryByTestId("session-todo-added")).toBeNull();
+  });
+
   it("ignores push events emitted for a different session id", async () => {
     let pushPayload: ((p: {
       sessionId: string;

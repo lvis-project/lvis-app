@@ -1,7 +1,8 @@
 /**
- * SessionTodoStore — in-memory backing for the assistant's per-session
- * checklist (`todo_session_write` LLM tool). Distinct from user `task_*`
- * persistence: scope is the active ChatSession only, never written to disk.
+ * SessionTodoStore — in-memory backing for the assistant's current-turn
+ * checklist (`todo_session_write` LLM tool), keyed by active ChatSession so
+ * renderer pushes route to the right view. Distinct from user `task_*`
+ * persistence: never written to disk.
  *
  * State shape: sessionId → ordered array of {id, content, status}. "deleted"
  * is a command state, not a durable row state: deleted items are removed from
@@ -96,10 +97,9 @@ export class SessionTodoStore {
     return merged.map((i) => ({ ...i }));
   }
 
-  clearIfAllCompleted(sessionId: string): boolean {
+  clearForTurnStart(sessionId: string): boolean {
     const items = this.sessions.get(sessionId) ?? [];
     if (items.length === 0) return false;
-    if (!items.every((i) => i.status === "completed")) return false;
     this.clear(sessionId);
     return true;
   }

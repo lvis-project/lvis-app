@@ -57,12 +57,12 @@ describe("SessionTodoStore", () => {
     ]);
     expect(deleted.map((i) => i.content)).toEqual(["a", "b"]);
 
-    expect(store.clearIfAllCompleted("s")).toBe(false);
+    expect(store.clearForTurnStart("missing-session")).toBe(false);
     store.write("s", [
-      { id: a.id, status: "completed" },
+      { id: a.id, status: "in_progress" },
       { id: b.id, status: "completed" },
     ]);
-    expect(store.clearIfAllCompleted("s")).toBe(true);
+    expect(store.clearForTurnStart("s")).toBe(true);
     expect(store.list("s")).toEqual([]);
   });
 

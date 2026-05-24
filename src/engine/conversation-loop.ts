@@ -495,9 +495,10 @@ export interface ConversationLoopDeps {
   skillOverlay?: { clear(sessionId: string): void };
   /**
    * Session-scoped assistant TO-DO lifecycle. At the start of a new turn,
-   * a fully completed prior plan is cleared so the next plan starts fresh.
+   * the prior turn's transient plan is cleared so a new topic cannot append
+   * onto stale assistant steps.
    */
-  sessionTodoStore?: { clearIfAllCompleted(sessionId: string): boolean };
+  sessionTodoStore?: { clearForTurnStart(sessionId: string): boolean };
   /**
    * Issue #260: optional system notification service. When supplied, the
    * loop fires a `turn-end` notification when runTurn resolves successfully
@@ -1463,7 +1464,7 @@ export class ConversationLoop {
     const turnInput = isUserKeyboardOrigin(inputOrigin) ? input : stripLeadingSlash(input);
     const toolTrustOrigin = initialToolTrustOrigin(inputOrigin, turnInput);
     const permissionUserIntent = summarizePermissionUserIntent(inputOrigin, turnInput);
-    this.deps.sessionTodoStore?.clearIfAllCompleted(effectiveSessionId);
+    this.deps.sessionTodoStore?.clearForTurnStart(effectiveSessionId);
 
     // §4.5.2 step 1 — REQUEST_ENTRY (main process 도달 시점)
     this.tracer.step("REQUEST_ENTRY", { inputLen: turnInput.length, inputOrigin });
