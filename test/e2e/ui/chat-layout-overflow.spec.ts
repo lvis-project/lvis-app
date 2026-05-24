@@ -4,6 +4,7 @@ import { existsSync, mkdirSync, mkdtempSync, rmSync, utimesSync, writeFileSync }
 import { tmpdir } from "node:os";
 import { dirname, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
+import { buildE2eBaseSettings, buildIsolatedElectronEnv } from "./seeded-electron";
 
 const HERE = dirname(fileURLToPath(import.meta.url));
 const REPO_ROOT = resolve(HERE, "../../..");
@@ -35,6 +36,11 @@ test.describe("chat layout overflow", () => {
   test.beforeEach(async () => {
     userDataDir = mkdtempSync(resolve(tmpdir(), "lvis-chat-layout-user-data-"));
     tempHome = mkdtempSync(resolve(tmpdir(), "lvis-chat-layout-home-"));
+    writeFileSync(
+      resolve(userDataDir, "lvis-settings.json"),
+      JSON.stringify(buildE2eBaseSettings(true), null, 2) + "\n",
+      "utf-8",
+    );
     const fillerSessionId = "00000000-1111-4222-8333-444444444444";
     const historicalSessionId = "11111111-2222-4333-8444-555555555555";
     const activeSessionId = "99999999-aaaa-4bbb-8ccc-dddddddddddd";
@@ -175,15 +181,15 @@ test.describe("chat layout overflow", () => {
 
     app = await electron.launch({
       args: [MAIN_ENTRY, `--user-data-dir=${userDataDir}`, "--no-sandbox"],
-      env: {
-        ...process.env,
+      env: buildIsolatedElectronEnv({
         HOME: tempHome,
         USERPROFILE: tempHome,
         LVIS_DEV: "1",
         LVIS_E2E: "1",
+        LVIS_MAIN_ENTRY: MAIN_ENTRY,
         NODE_ENV: "test",
         ELECTRON_DISABLE_SECURITY_WARNINGS: "1",
-      },
+      }),
       timeout: 30_000,
     });
     page = await app.firstWindow();

@@ -35,67 +35,38 @@
  */
 
 import { test, expect } from "@playwright/test";
-import { _electron as electron, type ElectronApplication, type Page } from "playwright";
-import { existsSync, mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
-import { tmpdir } from "node:os";
-import { dirname, resolve } from "node:path";
-import { fileURLToPath } from "node:url";
-
-const HERE = dirname(fileURLToPath(import.meta.url));
-const REPO_ROOT = resolve(HERE, "../../..");
-const MAIN_ENTRY = resolve(REPO_ROOT, "dist/src/main/main.js");
+import type { LLMVendor } from "../../../src/shared/llm-vendor-defaults.js";
+import {
+  buildLlmSettings,
+  builtMainExists,
+  launchSeededElectron,
+  teardownSeededElectron,
+  type SeededElectronContext,
+} from "./seeded-electron";
 
 // ---------------------------------------------------------------------------
 // Helpers
 // ---------------------------------------------------------------------------
 
-/** Minimal lvis-settings.json that selects openai + gpt-5.4-nano. */
-function makeSettings(vendor: string, model: string): string {
-  return JSON.stringify(
+function makeHistoryRows(tokensIn: number): Array<Record<string, unknown>> {
+  const now = Date.now();
+  return [
+    { index: 0, role: "user", content: "테스트 메시지", createdAt: now - 6000 },
     {
-      llm: {
-        authMode: "manual",
-        provider: vendor,
-        vendors: {
-          claude: { model: "claude-sonnet-4-6", enableThinking: true, thinkingBudgetTokens: 10000 },
-          openai: { model, enableThinking: true, thinkingBudgetTokens: 10000 },
-          gemini: { model: "gemini-2.0-flash", enableThinking: true, thinkingBudgetTokens: 10000 },
-          copilot: { model: "gpt-4o", enableThinking: true, thinkingBudgetTokens: 10000 },
-          "azure-foundry": { model: "gpt-4o", enableThinking: true, thinkingBudgetTokens: 10000 },
-          "vertex-ai": { model: "gemini-2.5-flash", enableThinking: true, thinkingBudgetTokens: 10000 },
-        },
-        streamSmoothing: "none",
-        fallbackChain: [],
+      index: 1,
+      role: "assistant",
+      content: "테스트 응답",
+      createdAt: now - 5000,
+      turnSummary: {
+        tokensIn,
+        tokensOut: 500,
+        turnDurationMs: 3000,
+        toolCount: 0,
+        cumulativeToolMs: 0,
+        freshInputTokens: tokensIn,
       },
     },
-    null,
-    2,
-  );
-}
-
-/**
- * One-line JSONL for the session: a user message followed by a turn-final
- * assistant message that carries `turnSummary.tokensIn`.
- * `historyToEntries()` converts this into a `kind:"turn_summary"` ChatEntry,
- * which the `use-context-budget` hook reads to derive `usedTokens`.
- */
-function makeSessionJsonl(tokensIn: number): string {
-  const user = JSON.stringify({ index: 0, role: "user", content: "테스트 메시지" });
-  const assistant = JSON.stringify({
-    index: 1,
-    role: "assistant",
-    content: "테스트 응답",
-    createdAt: Date.now() - 5000,
-    turnSummary: {
-      tokensIn,
-      tokensOut: 500,
-      turnDurationMs: 3000,
-      toolCount: 0,
-      cumulativeToolMs: 0,
-      freshInputTokens: tokensIn,
-    },
-  });
-  return user + "\n" + assistant + "\n";
+  ];
 }
 
 /**
@@ -104,81 +75,18 @@ function makeSessionJsonl(tokensIn: number): string {
  */
 async function launchWithTokens(opts: {
   tokensIn: number;
-  vendor: string;
+  vendor: LLMVendor;
   model: string;
-}): Promise<{ app: ElectronApplication; page: Page; userDataDir: string; tempHome: string }> {
+}): Promise<SeededElectronContext> {
   const { tokensIn, vendor, model } = opts;
-  const userDataDir = mkdtempSync(resolve(tmpdir(), "lvis-tpm-e2e-user-data-"));
-  const tempHome = mkdtempSync(resolve(tmpdir(), "lvis-tpm-e2e-home-"));
-
-  // --- 1. Settings ---
-  writeFileSync(
-    resolve(userDataDir, "lvis-settings.json"),
-    makeSettings(vendor, model),
-    "utf-8",
-  );
-
-  // --- 2. Sessions ---
-  const sessionsDir = resolve(tempHome, ".lvis", "sessions");
-  mkdirSync(sessionsDir, { recursive: true });
-  const sessionId = "aa000000-bb11-4cc2-8dd3-eeeeeeeeeeee";
-  writeFileSync(
-    resolve(sessionsDir, `${sessionId}.jsonl`),
-    makeSessionJsonl(tokensIn),
-    "utf-8",
-  );
-  writeFileSync(
-    resolve(sessionsDir, `${sessionId}.meta.json`),
-    JSON.stringify({ title: "TPM e2e probe" }, null, 2),
-    "utf-8",
-  );
-
-  // --- 3. Active-session pointer ---
-  writeFileSync(
-    resolve(sessionsDir, ".active-session.json"),
-    JSON.stringify(
-      {
-        mainActiveMode: "resume",
-        mainActiveSessionId: sessionId,
-        updatedAt: new Date().toISOString(),
-      },
-      null,
-      2,
-    ),
-    "utf-8",
-  );
-
-  const app = await electron.launch({
-    args: [MAIN_ENTRY, `--user-data-dir=${userDataDir}`, "--no-sandbox"],
-    env: {
-      ...process.env,
-      HOME: tempHome,
-      USERPROFILE: tempHome,
-      LVIS_HOME: resolve(tempHome, ".lvis"),
-      LVIS_DEV: "1",
-      LVIS_E2E: "1",
-      NODE_ENV: "test",
-      ELECTRON_DISABLE_SECURITY_WARNINGS: "1",
-    },
-    timeout: 30_000,
+  return launchSeededElectron({
+    sessionId: "aa000000-bb11-4cc2-8dd3-eeeeeeeeeeee",
+    sessionTitle: "TPM e2e probe",
+    settings: buildLlmSettings(vendor, model),
+    historyRows: makeHistoryRows(tokensIn),
+    userDataPrefix: "lvis-tpm-e2e-user-data-",
+    homePrefix: "lvis-tpm-e2e-home-",
   });
-
-  app.process().stdout?.on("data", (d: Buffer) => process.stdout.write(`[electron:stdout] ${d}`));
-  app.process().stderr?.on("data", (d: Buffer) => process.stdout.write(`[electron:stderr] ${d}`));
-
-  const page = await app.firstWindow();
-  await page.locator('[data-testid="main-toolbar"]').first().waitFor({
-    state: "visible",
-    timeout: 60_000,
-  });
-
-  return { app, page, userDataDir, tempHome };
-}
-
-async function teardown(ctx: { app: ElectronApplication; userDataDir: string; tempHome: string }): Promise<void> {
-  await ctx.app.close().catch(() => {});
-  rmSync(ctx.userDataDir, { recursive: true, force: true });
-  rmSync(ctx.tempHome, { recursive: true, force: true });
 }
 
 // ---------------------------------------------------------------------------
@@ -186,7 +94,7 @@ async function teardown(ctx: { app: ElectronApplication; userDataDir: string; te
 // ---------------------------------------------------------------------------
 
 test.describe("TPM warning / destructive banner", () => {
-  test.skip(!existsSync(MAIN_ENTRY), "dist/src/main/main.js not built; run bun run build first");
+  test.skip(!builtMainExists(), "dist/src/main/main.js not built; run bun run build first");
 
   // -------------------------------------------------------------------------
   // Case 1 — nano model + 160K tokens → warning banner (80% ≤ tpmPct < 95%)
@@ -219,7 +127,7 @@ test.describe("TPM warning / destructive banner", () => {
       const destructiveDiv = page.locator("div.bg-destructive\\/10").filter({ hasText: /분당 한도\(TPM\)/ });
       await expect(destructiveDiv).toHaveCount(0);
     } finally {
-      await teardown(ctx);
+      await teardownSeededElectron(ctx);
     }
   });
 
@@ -262,7 +170,7 @@ test.describe("TPM warning / destructive banner", () => {
       // In this no-key test environment it must be in a non-enabled state.
       expect(typeof isDisabled).toBe("boolean");
     } finally {
-      await teardown(ctx);
+      await teardownSeededElectron(ctx);
     }
   });
 
@@ -287,7 +195,7 @@ test.describe("TPM warning / destructive banner", () => {
       const tpmBanners = page.locator("span.font-semibold").filter({ hasText: /분당 한도\(TPM\)/ });
       await expect(tpmBanners).toHaveCount(0);
     } finally {
-      await teardown(ctx);
+      await teardownSeededElectron(ctx);
     }
   });
 
@@ -328,7 +236,7 @@ test.describe("TPM warning / destructive banner", () => {
       // Banner still visible after theme swap.
       await expect(tpmText).toBeVisible();
     } finally {
-      await teardown(ctx);
+      await teardownSeededElectron(ctx);
     }
   });
 
@@ -378,7 +286,7 @@ test.describe("TPM warning / destructive banner", () => {
       // Screenshot for stacked layout visual record
       await page.screenshot({ path: "test-results/tpm-banner-stacked.png", fullPage: false });
     } finally {
-      await teardown(ctx);
+      await teardownSeededElectron(ctx);
     }
   });
 });

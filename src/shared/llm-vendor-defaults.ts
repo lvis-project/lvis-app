@@ -89,7 +89,7 @@ export interface LLMVendorSettings {
 const DEFAULT_MODEL: Record<LLMVendor, string> = {
   claude: "claude-sonnet-4-6",
   openai: "gpt-5.4-mini",
-  gemini: "gemini-2.0-flash",
+  gemini: "gemini-2.5-flash",
   copilot: "gpt-4o",
   "azure-foundry": "gpt-4o",
   "vertex-ai": "gemini-2.5-flash",
@@ -116,10 +116,10 @@ export const LLM_VENDOR_MODEL_OPTIONS: Readonly<Record<LLMVendor, readonly strin
       "gpt-4o",
     ],
     gemini: [
-      "gemini-2.0-flash",
       "gemini-2.5-flash",
       "gemini-2.5-pro",
       "gemini-2.5-flash-lite",
+      "gemini-2.0-flash",
       "gemini-2.0-flash-lite",
     ],
     copilot: [

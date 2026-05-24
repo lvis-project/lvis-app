@@ -157,7 +157,7 @@ export function UsageDashboard({ api }: { api: LvisApi }) {
   };
 
   return (
-    <div className="space-y-5">
+    <div className="space-y-5" data-testid="usage-dashboard">
       {header}
       <Card>
         <CardHeader className="pb-1 pt-3 px-3 flex-row items-center justify-between">
@@ -226,6 +226,29 @@ export function UsageDashboard({ api }: { api: LvisApi }) {
                     <td>{formatTokens(v.totalTokens)}</td>
                     <td className="text-muted-foreground">{formatCacheBreakdown(v)}</td>
                     <td>{formatCostWithUnknown(v)}</td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          )}
+        </CardContent>
+      </Card>
+
+      <Card>
+        <CardHeader className="pb-1 pt-3 px-3"><CardTitle className="text-xs text-muted-foreground">모델별 사용량</CardTitle></CardHeader>
+        <CardContent className="px-3 pb-3">
+          {summary.perModel.length === 0 ? <div className="text-xs text-muted-foreground">데이터 없음</div> : (
+            <table className="w-full text-xs">
+              <thead><tr className="text-left text-muted-foreground"><th className="py-1">모델</th><th>토큰</th><th>캐시</th><th>비용</th></tr></thead>
+              <tbody>
+                {summary.perModel.map((m) => (
+                  <tr key={`${m.vendor}:${m.model}`} className="border-t">
+                    <td className="py-1 font-mono break-all">
+                      <span className="text-muted-foreground">{m.vendor}/</span>{m.model}
+                    </td>
+                    <td>{formatTokens(m.totalTokens)}</td>
+                    <td className="text-muted-foreground">{formatCacheBreakdown(m)}</td>
+                    <td>{formatCostWithUnknown(m)}</td>
                   </tr>
                 ))}
               </tbody>

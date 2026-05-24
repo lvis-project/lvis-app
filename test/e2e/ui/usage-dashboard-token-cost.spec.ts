@@ -1,0 +1,117 @@
+import fs from "node:fs";
+import path from "node:path";
+import { test, expect } from "@playwright/test";
+import { builtMainExists, launchSeededElectron, teardownSeededElectron } from "./seeded-electron";
+import { closeSettingsWindow, openSettingsWindow } from "./settings-window";
+
+function todayKey(): string {
+  return new Date().toISOString().slice(0, 10);
+}
+
+function writeUsageAudit(lvisHome: string): void {
+  const day = todayKey();
+  const auditDir = path.join(lvisHome, "audit");
+  fs.mkdirSync(auditDir, { recursive: true });
+  const rows = [
+    {
+      timestamp: `${day}T12:00:00.000Z`,
+      sessionId: "mixed-provider-session",
+      type: "turn",
+      route: "openai/gpt-5.4-mini",
+      input: "mixed provider historical turn",
+      tokenUsage: {
+        inputTokens: 53_000,
+        outputTokens: 6300,
+        cacheReadTokens: 5000,
+        cacheWriteTokens: 1000,
+      },
+      usageByModel: [
+        {
+          vendorProvider: "claude",
+          vendorModel: "claude-sonnet-4-6",
+          tokenUsage: {
+            inputTokens: 30_000,
+            outputTokens: 5000,
+            cacheReadTokens: 4000,
+            cacheWriteTokens: 1000,
+          },
+        },
+        {
+          vendorProvider: "openai",
+          vendorModel: "gpt-5.4-mini",
+          tokenUsage: {
+            inputTokens: 23_000,
+            outputTokens: 1300,
+            cacheReadTokens: 1000,
+          },
+        },
+      ],
+    },
+    {
+      timestamp: `${day}T12:05:00.000Z`,
+      sessionId: "unknown-cost-session",
+      type: "turn",
+      route: "skill",
+      input: "unknown cost historical turn",
+      tokenUsage: {
+        inputTokens: 10_000,
+        outputTokens: 1000,
+        cacheReadTokens: 500,
+      },
+    },
+  ];
+  fs.writeFileSync(
+    path.join(auditDir, `${day}.jsonl`),
+    `${rows.map((row) => JSON.stringify(row)).join("\n")}\n`,
+    "utf-8",
+  );
+}
+
+test.describe("usage dashboard token cost e2e", () => {
+  test.skip(!builtMainExists(), "dist/src/main/main.js not built; run bun run build first");
+
+  test("historical mixed-provider rows keep their provider pricing and unknown-cost rows stay unknown", async () => {
+    const ctx = await launchSeededElectron({
+      sessionTitle: "usage dashboard token cost",
+      historyRows: [
+        { index: 0, role: "user", content: "사용량 대시보드 e2e", createdAt: Date.now() - 1000 },
+      ],
+    });
+
+    try {
+      writeUsageAudit(ctx.lvisHome);
+      const settingsWindow = await openSettingsWindow(ctx.app, ctx.page, "usage");
+      try {
+        await expect(settingsWindow.getByTestId("usage-dashboard")).toBeVisible({
+          timeout: 10_000,
+        });
+        await expect(settingsWindow.getByText("벤더별 사용량")).toBeVisible();
+
+        const vendorTableRows = settingsWindow
+          .locator("table")
+          .filter({ hasText: "벤더" })
+          .first()
+          .locator("tbody tr");
+        const claudeRow = vendorTableRows.filter({ hasText: "claude" });
+        const openaiRow = vendorTableRows.filter({ hasText: "openai" });
+        const unknownRow = vendorTableRows.filter({ hasText: "unknown" });
+
+        await expect(claudeRow).toContainText("claude");
+        await expect(claudeRow).not.toContainText("미정");
+        await expect(openaiRow).toContainText("openai");
+        await expect(openaiRow).not.toContainText("미정");
+
+        await expect(unknownRow).toContainText("unknown");
+        await expect(unknownRow).toContainText("$0 + 미정 1턴");
+        await expect(settingsWindow.getByText("미정 포함").first()).toBeVisible();
+
+        await expect(settingsWindow.getByText("claude-sonnet-4-6")).toBeVisible();
+        await expect(settingsWindow.getByText("gpt-5.4-mini")).toBeVisible();
+      } finally {
+        await closeSettingsWindow(ctx.app, settingsWindow);
+      }
+    } finally {
+      await teardownSeededElectron(ctx);
+    }
+  });
+});
