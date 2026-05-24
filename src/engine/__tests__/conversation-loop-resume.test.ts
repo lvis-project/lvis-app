@@ -277,7 +277,8 @@ describe("ConversationLoop.resetAndResume", () => {
     } as unknown as ConversationLoopDeps["routeEngine"];
     const keywordEngine = {
       classify: vi.fn().mockReturnValue({ type: "chat" }),
-      matchAllPluginIds: () => new Set(),
+      matchAllPluginIds: () => new Set<string>(),
+      matchToolNames: () => new Set<string>(),
     } as unknown as ConversationLoopDeps["keywordEngine"];
     const loop = new ConversationLoop(resumeDeps({
       memoryManager: mem,

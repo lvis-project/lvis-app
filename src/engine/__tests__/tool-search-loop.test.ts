@@ -1,14 +1,13 @@
 /**
- * Tool-Level Deferral — ConversationLoop integration (flag on/off).
+ * Tool-Level Deferral — ConversationLoop integration.
  *
  * Mirrors request-plugin.test's RecordingProvider harness.
  *
  * Verifies:
- *   1. flag ON  → turn-1 tools[] = builtins + keyword-preloaded only (deferred
- *      plugin tools absent); after tool_search, the next round includes the
- *      promoted tool.
- *   2. flag OFF → legacy plugin-level path: an active plugin loads ALL its
- *      tools and tool_search is never exposed (byte-identical to today).
+ *   1. turn-1 tools[] = builtins + keyword-preloaded only (deferred plugin
+ *      tools absent); after tool_search, the next round includes the promoted
+ *      tool.
+ *   2. persisted flag false does not revive the removed whole-plugin path.
  */
 import { describe, it, expect } from "vitest";
 
@@ -36,10 +35,10 @@ class RecordingProvider implements LLMProvider {
 
 function makeLoop(opts: {
   provider: LLMProvider;
-  toolDeferral: boolean;
+  toolDeferral?: boolean;
 }): ConversationLoop {
   const toolRegistry = new ToolRegistry();
-  // tool_search builtin (statically registered; gated on deferral in the registry).
+  // tool_search builtin (statically registered; visible with builtins).
   toolRegistry.register(createDynamicTool({
     name: TOOL_SEARCH_TOOL_NAME,
     description: "도구 검색",
@@ -69,11 +68,21 @@ function makeLoop(opts: {
     jsonSchema: { type: "object", properties: {} },
     execute: async () => ({ output: "stopped", isError: false }),
   }));
+  toolRegistry.register(createDynamicTool({
+    name: "email_list",
+    description: "메일 목록",
+    source: "plugin",
+    category: "read",
+    pluginId: "com.example.email",
+    jsonSchema: { type: "object", properties: {} },
+    execute: async () => ({ output: "emails", isError: false }),
+  }));
 
   const keywordEngine = new KeywordEngine();
   // "회의" keyword → plugin scope (meeting) AND tool preload (meeting_start).
   keywordEngine.registerKeywords([
     { keyword: "회의", skillId: "meeting_start", pluginId: "com.example.meeting" },
+    { keyword: "메일", skillId: "email_list", pluginId: "com.example.email" },
   ]);
   const routeEngine = new RouteEngine({ toolRegistry });
 
@@ -104,7 +113,7 @@ function makeLoop(opts: {
 }
 
 describe("ConversationLoop — Tool-Level Deferral", () => {
-  it("flag ON: preloads keyword tool, defers the rest, promotes via tool_search", async () => {
+  it("preloads keyword tool, defers the rest, promotes via tool_search", async () => {
     const provider = new RecordingProvider([
       // Round 0: model loads the deferred meeting_stop via tool_search.
       [
@@ -122,7 +131,7 @@ describe("ConversationLoop — Tool-Level Deferral", () => {
         { type: "message_complete", stopReason: "end_turn" },
       ],
     ]);
-    const loop = makeLoop({ provider, toolDeferral: true });
+    const loop = makeLoop({ provider });
     const result = await loop.runTurn("회의 정리해줘", undefined, undefined, { inputOrigin: "user-keyboard" });
     expect(result.text).toBe("완료");
 
@@ -134,7 +143,7 @@ describe("ConversationLoop — Tool-Level Deferral", () => {
     expect(provider.observedToolNames[1]).toContain("meeting_stop");
   });
 
-  it("flag OFF: legacy path loads ALL plugin tools; tool_search hidden", async () => {
+  it("persisted flag false still defers plugin tools and exposes tool_search", async () => {
     const provider = new RecordingProvider([
       [
         { type: "text_delta", text: "ok" },
@@ -144,9 +153,34 @@ describe("ConversationLoop — Tool-Level Deferral", () => {
     const loop = makeLoop({ provider, toolDeferral: false });
     await loop.runTurn("회의 정리해줘", undefined, undefined, { inputOrigin: "user-keyboard" });
 
-    // Active plugin → BOTH its tools load; tool_search never exposed.
+    // Active plugin scope alone no longer loads every plugin tool.
     expect(provider.observedToolNames[0]).toContain("meeting_start");
-    expect(provider.observedToolNames[0]).toContain("meeting_stop");
-    expect(provider.observedToolNames[0]).not.toContain(TOOL_SEARCH_TOOL_NAME);
+    expect(provider.observedToolNames[0]).not.toContain("meeting_stop");
+    expect(provider.observedToolNames[0]).toContain(TOOL_SEARCH_TOOL_NAME);
+  });
+
+  it("clamps carried-forward tools when plugin scope changes", async () => {
+    const provider = new RecordingProvider([
+      [
+        { type: "tool_call", id: "tu-1", name: TOOL_SEARCH_TOOL_NAME, input: { query: "meeting_stop" } },
+        { type: "message_complete", stopReason: "tool_use" },
+      ],
+      [
+        { type: "text_delta", text: "meeting done" },
+        { type: "message_complete", stopReason: "end_turn" },
+      ],
+      [
+        { type: "text_delta", text: "email done" },
+        { type: "message_complete", stopReason: "end_turn" },
+      ],
+    ]);
+    const loop = makeLoop({ provider });
+    await loop.runTurn("회의 정리해줘", undefined, undefined, { inputOrigin: "user-keyboard" });
+    await loop.runTurn("메일 확인해줘", undefined, undefined, { inputOrigin: "user-keyboard" });
+
+    expect(provider.observedToolNames[1]).toContain("meeting_stop");
+    expect(provider.observedToolNames[2]).toContain("email_list");
+    expect(provider.observedToolNames[2]).not.toContain("meeting_start");
+    expect(provider.observedToolNames[2]).not.toContain("meeting_stop");
   });
 });

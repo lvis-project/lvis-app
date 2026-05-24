@@ -74,12 +74,15 @@ export function makeConversationLoopDeps(
     } as unknown as ConversationLoopDeps["systemPromptBuilder"],
     keywordEngine: {
       classify: vi.fn().mockReturnValue({ type: "chat" }),
-      matchAllPluginIds: () => new Set(),
+      matchAllPluginIds: () => new Set<string>(),
+      matchToolNames: () => new Set<string>(),
     } as unknown as ConversationLoopDeps["keywordEngine"],
     routeEngine: {
       route: vi.fn().mockReturnValue({ route: "llm" }),
     } as unknown as ConversationLoopDeps["routeEngine"],
     toolRegistry: {
+      listAll: () => [],
+      getToolCatalogForScope: () => [],
       getToolSchemasForScope: () => [],
       getVisibleTools: () => [],
     } as unknown as ConversationLoopDeps["toolRegistry"],

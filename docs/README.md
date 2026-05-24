@@ -20,6 +20,7 @@ AI 프론티어 생산성 향상 엔터프라이즈 매니지먼트 시스템
 | [실행 가이드](./guides/getting-started.md) | 프로그램 설치 및 실행 방법 |
 | [플러그인 개발 가이드](./guides/plugin-development.md) | plugin.json, HostApi, UI 슬롯, 배포 흐름 |
 | [테마 및 UI primitive 기준](./development/theme-system.md) | semantic token theme system + shadcn registry primitive source of truth |
+| [도구 로딩 정책](./development/tool-loading-policy.md) | plugin/MCP/builtin tool registry, catalog, full-schema exposure, TPM-safe loading policy |
 | [프로덕션 릴리스 체크리스트](./references/production-release-checklist.md) | 앱 installer 생성, signing/notarization, smoke test, publish 절차 |
 | [청사진 & 이행 문서](./blueprints/) | 구현 계획, 연구 메모, 단계별 closure report |
 

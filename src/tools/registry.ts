@@ -23,10 +23,10 @@ const log = createLogger("tool-registry");
 
 /**
  * Tool-Level Deferral — name of the `tool_search` meta-tool. SOT lives here
- * (the lowest layer that must gate its visibility); `engine/turn/tool-search.ts`
- * re-exports it as `TOOL_SEARCH_TOOL`. The registry hides it from the loaded
- * tool set whenever `scope.deferral` is false, so the builtin can stay
- * statically registered yet never reach the LLM while the flag is off.
+ * (the lowest layer that owns visibility); `engine/turn/tool-search.ts`
+ * re-exports it as `TOOL_SEARCH_TOOL`. Tool-level deferral is now the only
+ * plugin/MCP exposure path, so this builtin is visible whenever builtins are
+ * in scope.
  */
 export const TOOL_SEARCH_TOOL_NAME = "tool_search";
 
@@ -301,21 +301,11 @@ export class ToolRegistry {
   /**
    * Lazy Tool Scoping — return schemas restricted to the given scope.
    *
-   * Two paths, selected by `scope.deferral` (the `experimental.toolDeferral`
-   * flag snapshot for the turn):
-   *
-   * - **deferral off (legacy, default)** — the behaviour preserved byte-for-byte:
-   *   - Builtins (tool.source === "builtin") are included when includeBuiltins.
-   *   - Plugin tools are included only when their pluginId is in activePluginIds.
-   *   - MCP tools (tool.source === "mcp") are included when includeMcp.
-   * - **deferral on (tool-level)** — builtins/meta-tools still load (so the model
-   *   can call `tool_search`), but plugin/MCP tools load *individually* only when
-   *   their name is in `scope.activeToolNames` (keyword-preloaded or promoted).
-   *   Everything else is deferred to {@link getToolCatalogForScope}.
-   *
-   * In BOTH paths the `tool_search` meta-tool is gated on `scope.deferral`: it
-   * only ever reaches the LLM when the flag is on, so registration can stay
-   * static.
+   * Builtins/meta-tools load when `includeBuiltins` is set. Plugin/MCP tools
+   * load individually only when their name is in `scope.activeToolNames`
+   * (keyword-preloaded, `tool_search`-promoted, carried forward in current
+   * scope, or explicitly allowlisted by a sub-agent/routine/headless caller).
+   * Everything else is deferred to {@link getToolCatalogForScope}.
    *
    * Deny rules still apply first (§6.3 Layer 1, via {@link getVisibleTools}).
    * Matches {@link getToolSchemas} shape for drop-in replacement in the
@@ -331,7 +321,6 @@ export class ToolRegistry {
     const active = scope.activePluginIds instanceof Set
       ? scope.activePluginIds
       : new Set(scope.activePluginIds);
-    const deferral = scope.deferral === true;
     const activeNames = scope.activeToolNames instanceof Set
       ? scope.activeToolNames
       : new Set(scope.activeToolNames ?? []);
@@ -340,12 +329,10 @@ export class ToolRegistry {
       .filter((tool) => {
         if (tool.source === "builtin") {
           if (!scope.includeBuiltins) return false;
-          // `tool_search` only exists for the LLM when deferral is on.
-          if (tool.name === TOOL_SEARCH_TOOL_NAME) return deferral;
           return true;
         }
         if (tool.source === "mcp") {
-          return deferral ? activeNames.has(tool.name) : scope.includeMcp;
+          return scope.includeMcp && activeNames.has(tool.name);
         }
         if (tool.source === "plugin") {
           // A plugin tool without a pluginId is a registration bug; drop it
@@ -354,7 +341,7 @@ export class ToolRegistry {
             log.warn(`plugin tool '${tool.name}' missing pluginId — skipped in scope filter`);
             return false;
           }
-          return deferral ? activeNames.has(tool.name) : active.has(tool.pluginId);
+          return active.has(tool.pluginId) && activeNames.has(tool.name);
         }
         // Fallback for any new source kind added later — exclude from scope.
         return false;

@@ -54,10 +54,6 @@ export function SessionDateNavigator({
     setPickedDate(dateFromKey(key));
   }, [key]);
 
-  useEffect(() => {
-    void preloadCalendar();
-  }, []);
-
   const label = formatDayLabel(key);
 
   const handlePopoverOpenChange = (open: boolean) => {
