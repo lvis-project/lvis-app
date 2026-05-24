@@ -744,16 +744,7 @@ const TOOL_USE_STRATEGY = `## 도구 사용 전략
 - 사용자가 특정 플러그인 도구나 플러그인 UI/업무보드 직접 조회를 요청하면 **agent_spawn 을 쓰지 마세요**. 해당 도구가 현재 보이면 직접 호출하고, 보이지 않으면 먼저 request_plugin 으로 플러그인을 활성화한 뒤 같은 턴에서 직접 도구를 호출하세요.
 
 ### 워크플로우 시스템 툴 (S1+S2)
-- **ask_user_question**: 분기점에서 가정에 의존하지 말고 사용자에게 직접 질문하세요. 관련된 질문 1~4개를 한 번에 묶어 questions[] 배열로 전달하면 사용자가 한 카드에서 차례로 답하고 마지막 컨펌 페이지에서 일괄 제출합니다 — 같은 카드에 묶을 수 있는 질문을 여러 번 호출로 쪼개지 마세요. 각 질문 형식 규칙:
-  - **choices**: 0~3개, 항목당 한국어 ≤ 20자. 4개 이상 후보가 있어도 가장 가능성 높은 3개만 두고 나머지는 자유 입력으로 보완하게 둡니다.
-  - **recommendedIndex**: 컨텍스트로 명확히 한 답에 weight 가 있을 때만 그 인덱스를 지정 (전체 0 또는 1개). 사용자의 사적/외부 사실(거주지·취향 등)이 답이라면 비워둡니다.
-  - **altIndices**: recommendedIndex 외 추가로 권장하고 싶은 답의 인덱스 0~N 개. UI 가 칩 앞쪽에 회색 '대안' 배지를 자동 부착합니다.
-  - **allowFreeText**: 항상 true (single-line input). chip 만으로 안 풀리는 경우의 escape hatch.
-  - **allowMultiple**: 기본 false (단일 선택). 여러 후보가 동시에 답이 될 수 있는 질문(관심 분야 여러 개, 적용 범위 복수 선택 등)에서만 true 로 두세요. true 일 때 응답은 answers[].choices: string[] (다중 선택 라벨 배열) — 단일 선택은 answers[].choice: string. 모든 chip 이 상호 배타적이면 false 가 정답입니다.
-  - **placeholder**: 자유입력 input 의 단서 (한국어 ≤ 20자, 예: "다른 방향을 한 줄로"). 'Recommend'/'(대안)' 같은 메타 표기는 UI 가 부착하므로 텍스트에 직접 박지 마세요.
-  - **summaryHint**: 다중 질문 카드의 confirm 단계 row label (≤ 10자). 생략 시 question 자체를 짧게 잘라 사용.
-  - 정적 폴백("네"/"아니오"/"잘 모르겠어요") 절대 사용 금지.
-  - 'suggestedAnswers' 는 deprecated — 신규 호출에서는 choices + recommendedIndex/altIndices 를 사용하세요.
+- **ask_user_question** (적극 사용): 분기점·모호한 지점에서 가정으로 진행하지 말고 사용자에게 직접 물으세요. 한 번 묻는 게 잘못 짚고 길게 진행하는 것보다 거의 항상 낫습니다. 관련된 질문 1~4개는 한 카드로 묶어 questions[] 로 한 번에 보내고(같은 카드에 묶을 질문을 여러 호출로 쪼개지 마세요), 정적 '네/아니오/잘 모르겠어요' 폴백 대신 그 맥락에 맞는 구체적 choices 를 제시하세요. 각 파라미터(choices·recommendedIndex·altIndices·allowMultiple·placeholder·summaryHint)의 상세 작성 규칙은 도구 스키마의 description 을 따르세요.
 - **routine_schedule**: 지정한 예약 시각에 발화되는 루틴(self-trigger)을 등록. 캘린더 일정 조회 도구가 아니므로 "캘린더 점검/오늘 일정/회의 확인" 같은 조회 요청에는 사용 금지(캘린더는 ms-graph 플러그인). execution="llm-session"(LLM 대화 시작) 또는 "notification-only"(OS 알림). 날짜·시각·반복(daily/weekly/monthly/interval/cron) 지정. 예: "매일 오전 9시에 데일리 리포트 작성" → execution:"llm-session", schedule:{at:"...",repeat:{kind:"daily"}}, prePrompt:"...".
 - **todo_session_write**: 한 턴 안에서 여러 단계를 거쳐야 하는 작업이면 다음 순서를 반드시 따르세요.
   1. **계획 즉시 등록**: 단계 목록을 todo_session_write 로 전달해 전체 항목을 pending 으로 생성합니다.

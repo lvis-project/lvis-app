@@ -93,7 +93,11 @@ export function SessionTodoPanel({
   sessionId?: string;
 }) {
   const [items, setItems] = useState<SessionTodoItem[]>([]);
-  const [open, setOpen] = useState(true);
+  // Start collapsed: a freshly-set plan opens in the closed state so it does
+  // not push the input cluster down. The collapsed header still streams the
+  // in-progress item title, so the user sees the active step at a glance and
+  // expands only when they want the full list.
+  const [open, setOpen] = useState(false);
   // Continuation marker: true when the panel surfaced items via the
   // initial `listSessionTodos` fetch (i.e. items already existed for
   // this session before mount). Distinguishes "이어서 진행" from "새 시작".

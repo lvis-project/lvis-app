@@ -314,6 +314,17 @@ describe("RoutinePanel", () => {
 });
 
 describe("SessionTodoPanel", () => {
+  // The panel now starts collapsed (default closed). Open it via the header
+  // toggle to assert the expanded list. Requires the panel to be rendered
+  // already (items loaded), so callers await the header text first.
+  async function openPanel(container: HTMLElement) {
+    const header = container.querySelector('[data-testid="session-todo-panel"] button');
+    if (!header) throw new Error("session-todo panel header not rendered");
+    await act(async () => {
+      header.dispatchEvent(new MouseEvent("click", { bubbles: true }));
+    });
+  }
+
   it("hides when no items", async () => {
     const api = fakeApi();
     const { container } = render(<SessionTodoPanel api={api} />);
@@ -332,7 +343,9 @@ describe("SessionTodoPanel", () => {
           { id: "t2", content: "step 2", status: "completed" },
         ]),
     });
-    const { findByText } = render(<SessionTodoPanel api={api} />);
+    const { findByText, container } = render(<SessionTodoPanel api={api} />);
+    await findByText("세션 TO-DO");
+    await openPanel(container);
     expect(await findByText("step 1")).toBeInTheDocument();
     expect(await findByText("step 2")).toBeInTheDocument();
   });
@@ -346,7 +359,9 @@ describe("SessionTodoPanel", () => {
           { id: "t3", content: "next thing", status: "pending" },
         ]),
     });
-    const { findByTestId, queryAllByTestId } = render(<SessionTodoPanel api={api} />);
+    const { findByTestId, queryAllByTestId, findByText, container } = render(<SessionTodoPanel api={api} />);
+    await findByText("세션 TO-DO");
+    await openPanel(container);
     const active = await findByTestId("session-todo-active-row");
     expect(active.className).toContain("animate-pulse");
     // Only the in-progress row gets the active testid — pending/completed
@@ -364,14 +379,9 @@ describe("SessionTodoPanel", () => {
         ]),
     });
     const { findByText, container } = render(<SessionTodoPanel api={api} />);
-    // Wait for items to load + panel to render.
+    // Panel starts collapsed by default — the active item should already show
+    // next to the count without any toggle.
     await findByText("current thing");
-    // Collapse the panel.
-    const header = container.querySelector('[data-testid="session-todo-panel"] button');
-    if (!header) throw new Error("panel header not found");
-    await act(async () => {
-      header.dispatchEvent(new MouseEvent("click", { bubbles: true }));
-    });
     const collapsed = container.querySelector('[data-testid="session-todo-collapsed-active"]');
     expect(collapsed).not.toBeNull();
     expect(collapsed!.textContent).toBe("current thing");
@@ -446,9 +456,11 @@ describe("SessionTodoPanel", () => {
         return () => undefined;
       }) as never,
     });
-    const { findByText, queryByText } = render(
+    const { findByText, queryByText, container } = render(
       <SessionTodoPanel api={api} sessionId="session-A" />,
     );
+    await findByText("세션 TO-DO");
+    await openPanel(container);
     await findByText("session-A item");
     // A foreign session emits — must NOT clobber the visible list.
     await act(async () => {
@@ -468,10 +480,12 @@ describe("SessionTodoPanel", () => {
     });
     const fetchSpy = vi.fn(() => fetchPromise);
     const api = fakeApi({ listSessionTodos: fetchSpy as never });
-    const { rerender, findByText, queryByText } = render(
+    const { rerender, findByText, queryByText, container } = render(
       <SessionTodoPanel api={api} sessionId="session-A" />,
     );
     resolveList([{ id: "t1", content: "first", status: "pending" }]);
+    await findByText("세션 TO-DO");
+    await openPanel(container);
     await findByText("first");
     // Swap session id — synchronously the panel should clear its visible
     // items so a stale row never lingers between sessions. The pending
@@ -492,6 +506,8 @@ describe("SessionTodoPanel", () => {
     const { findByText, container } = render(
       <SessionTodoPanel api={api} sessionId="s" />,
     );
+    await findByText("세션 TO-DO");
+    await openPanel(container);
     await findByText("smooth pill");
     const pill = container.querySelector('li[data-status="pending"] span:nth-child(2)');
     expect(pill).not.toBeNull();
