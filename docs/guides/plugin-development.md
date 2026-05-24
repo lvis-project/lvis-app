@@ -1,6 +1,6 @@
 # LVIS 플러그인 개발 가이드
 
-> **상태**: Sprint 4-A + 4-B 반영판 (2026-04-18)
+> **상태**: 최신 반영판 (2026-04-18)
 > **대상**: LVIS 플러그인 개발자
 > **선행 읽음**: [아키텍처 문서 §9](../architecture/architecture.md#9-plugin-system--ui-extension) · [CLAUDE.md](../../CLAUDE.md)
 >
@@ -307,7 +307,7 @@ interface PluginHostApi {
   isMsGraphAuthenticated(): boolean;
   getMsGraphAccount(): string | null;                 // ← 문자열 또는 null
 
-  // Sprint 1-A / 4-B 확장
+  // 확장 API
   callLlm(prompt: string, options?: { maxTokens?: number; systemPrompt?: string }): Promise<string>;
   logEvent(level: "info" | "warn" | "error", message: string, data?: unknown): void;
   onShutdown(handler: () => void | Promise<void>): void;

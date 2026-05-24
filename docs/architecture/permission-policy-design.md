@@ -924,8 +924,8 @@ PR #664 + PR #860 ratified.
 
 **Out-of-scope (deferred to follow-up issues, see PR #860 description for links):**
 
-- R-3 LLM caller retry wiring (deferred from PR #790)
+- LLM caller retry wiring (deferred from PR #790)
 - Sandbox spawn-path full adoption — Node Readable compat (PR #791)
-- PR-A2 R2 missing tests (PR #779)
+- missing tests (PR #779)
 - Sandbox A1/A2/A3 UX polish leftover (PR #806)
 - Preload bridge wiring for ApprovalRequest binding (PR #799 completion)
