@@ -253,18 +253,18 @@ grep -F '"[demo-autoplay]"' ~/.lvis/audit/*.jsonl
 | `lvis:demo-autoplay:abort` | renderer → main | abort + cleanup | `not-running` |
 | `lvis:demo-autoplay:status` | renderer → main | get current state | — |
 
-> **Note**: 본 PR 의 minimal viable 구현에서는 *renderer 내부* ScriptedTurnEngine 만 구현하고 IPC 는 wire 하지 않는다 — main process 에 demo state 가 필요하지 않기 때문 (fake sandbox 도 renderer 에서 closed loop). 위 IPC 는 PR-E3 의 enforcement 단계에서 main 보조 audit 용으로 도입. 본 PR 의 audit 은 renderer 가 기존 `auditLogger` IPC 채널 (`lvis:audit:*`) 로 entry 를 push 하는 방식.
+> **Note**: 본 PR 의 minimal viable 구현에서는 *renderer 내부* ScriptedTurnEngine 만 구현하고 IPC 는 wire 하지 않는다 — main process 에 demo state 가 필요하지 않기 때문 (fake sandbox 도 renderer 에서 closed loop). 위 IPC 는 후속 enforcement 단계에서 main 보조 audit 용으로 도입. 본 PR 의 audit 은 renderer 가 기존 `auditLogger` IPC 채널 (`lvis:audit:*`) 로 entry 를 push 하는 방식.
 
 ---
 
 ## 10. Follow-up PR 분리 계획
 
-| PR | Scope | Status |
+| 항목 | Scope | Status |
 |----|-------|--------|
-| **PR-E (본 PR)** | proposal + minimal viable: ScriptedTurnEngine + FakeSandbox + DemoAutoplayBanner + meeting-summary-demo script + feature flag wiring + audit prefix | this PR |
-| PR-E1 | additional scripts (calendar, work-assistant scenarios) + script SOT discipline + lint rule | follow-up |
-| PR-E2 | telemetry — autoplay completion rate / abort point histogram | follow-up |
-| PR-E3 | optional main-process IPC for cross-window demo state (multi-window edge case) | follow-up |
+| **본 PR** | proposal + minimal viable: ScriptedTurnEngine + FakeSandbox + DemoAutoplayBanner + meeting-summary-demo script + feature flag wiring + audit prefix | this PR |
+| Scripts | additional scripts (calendar, work-assistant scenarios) + script SOT discipline + lint rule | follow-up |
+| Telemetry | telemetry — autoplay completion rate / abort point histogram | follow-up |
+| Cross-window IPC | optional main-process IPC for cross-window demo state (multi-window edge case) | follow-up |
 
 ---
 
@@ -279,7 +279,7 @@ grep -F '"[demo-autoplay]"' ~/.lvis/audit/*.jsonl
 ## 12. Open questions (follow-up)
 
 - **Multi-language**: 본 PR 은 한국어 script only. i18n 도입 시 script SOT 를 `meeting-summary-demo.<locale>.json` 으로 분리.
-- **Pause / resume**: 본 PR 은 abort 만 지원. mockup 의 "⏸ 일시정지" 는 PR-E2 에서 추가 검토 (필요 시).
+- **Pause / resume**: 본 PR 은 abort 만 지원. mockup 의 "⏸ 일시정지" 는 후속에서 추가 검토 (필요 시).
 - **Multi-window**: 본 PR 은 ChatView mount 1개 가정. 추가 window 가 같은 시각에 autoplay 시도하면 두 번째 mount 는 `already-running` 으로 skip.
 
 ---
