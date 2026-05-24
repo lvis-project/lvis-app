@@ -256,12 +256,17 @@ export class SubAgentRunner {
     const scopedRegistry = filteredSourceTools
       ? this.deps.toolRegistry.createScopedView(filteredSourceTools)
       : this.parentRegistryWithoutBlocklist();
+    const scopedTools = scopedRegistry.listAll();
     const forcedActivePluginIds = new Set(
-      scopedRegistry
-        .listAll()
-        .filter((tool) => tool.source === "plugin" && tool.pluginId)
-        .map((tool) => tool.pluginId as string),
+      filteredSourceTools
+        ? scopedTools
+            .filter((tool) => tool.source === "plugin" && tool.pluginId)
+            .map((tool) => tool.pluginId as string)
+        : [],
     );
+    const forcedActiveToolNames = filteredSourceTools
+      ? new Set(scopedTools.map((tool) => tool.name))
+      : undefined;
 
     // Wrap the parent ApprovalGate so approval modals from this sub-agent's
     // tool calls show "[Sub-Agent: <title>]" in their reason text.
@@ -289,6 +294,7 @@ export class SubAgentRunner {
       // Sub-agent does not request_plugin (its tool surface is fixed at spawn).
       pluginRuntime: undefined,
       forcedActivePluginIds,
+      ...(forcedActiveToolNames ? { forcedActiveToolNames } : {}),
       // C2(c): the sub-agent uses the parent's SkillOverlay reference to
       // load skills if the user grants — but its own session id will be
       // tracked separately via setActiveSessionId.

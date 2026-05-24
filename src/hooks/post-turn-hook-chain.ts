@@ -35,6 +35,13 @@ export interface PostTurnHookContext {
    */
   tokenUsage?: TokenUsage;
   usageByModel?: TokenUsageByModel[];
+  toolExposure?: {
+    loadedToolCount: number;
+    deferredCatalogCount: number;
+    promotedToolNames: string[];
+    toolSchemaTokens: number;
+    projectedRequestInputTokens: number | null;
+  };
   route: string;
   /**
    * Snapshot of the LLM vendor/model that actually served this turn —
@@ -209,6 +216,7 @@ export class PostTurnHookChain {
         toolCalls: ctx.toolCalls,
         tokenUsage: auditTokenUsage,
         usageByModel: auditUsageByModel,
+        toolExposure: ctx.toolExposure,
         route: auditRoute,
       });
     } catch (err) {
