@@ -610,6 +610,31 @@ interface ToolExposureMetrics {
   deferredLoadedRatio: number | null;
 }
 
+interface ProviderRequestDiagnostics {
+  sessionId: string;
+  round: number;
+  assistantRoundIndex: number;
+  inputOrigin: ChatInputOrigin;
+  configuredProvider: LLMVendor;
+  model: string;
+  preflightThresholdTokens: number;
+  promptChars: number;
+  messageCount: number;
+  messageRoleCounts: Record<GenericMessage["role"], number>;
+  projection: RequestInputProjection;
+  toolResultCount: number;
+  toolResultChars: number;
+  toolResultTokens: number;
+  compactedToolResultCount: number;
+  truncatedToolResultCount: number;
+  serializedStubToolResultCount: number;
+  assistantToolCallCount: number;
+  loadedToolNames: string[];
+  loadedToolNamesTruncated: number;
+  activePluginIds: string[];
+  toolExposure: ToolExposureMetrics;
+}
+
 // ─── Loop ───────────────────────────────────────────
 
 export class ConversationLoop {
@@ -2238,17 +2263,33 @@ export class ConversationLoop {
         messages: messagesForRound,
         toolSchemas,
       });
+      const toolExposure = this.buildToolExposureMetrics(
+        scope,
+        toolSchemas,
+        this.lastRoundInputProjection,
+        promotedToolNamesForTurn,
+      );
+      const requestDiagnostics = this.buildProviderRequestDiagnostics({
+        round,
+        assistantRoundIndex: roundIndex,
+        inputOrigin: bounds.inputOrigin,
+        configuredProvider: llmSettings.provider,
+        model,
+        systemPrompt,
+        messages: messagesForRound,
+        toolSchemas,
+        activePluginIds: [...scope.activePluginIds],
+        projection: this.lastRoundInputProjection,
+        toolExposure,
+      });
       // §4.5.2 step 7 — LLM_STREAM
       this.tracer.step("LLM_STREAM", {
         round,
+        assistantRoundIndex: roundIndex,
         model,
         toolCount: toolSchemas.length,
-        ...this.buildToolExposureMetrics(
-          scope,
-          toolSchemas,
-          this.lastRoundInputProjection,
-          promotedToolNamesForTurn,
-        ),
+        ...toolExposure,
+        request: requestDiagnostics,
       });
       const stream = await collectRoundStream({
         provider: turnProvider,
@@ -2299,9 +2340,21 @@ export class ConversationLoop {
       if (stream.kind === "stream_error") {
         // EARLY-EXIT #2: provider stream error. 이미 onError 콜백 + history 에
         // 메시지 push. 추가 진단 로그로 빈도 추적.
+        const streamErrorMeta = {
+          round,
+          assistantRoundIndex: roundIndex,
+          classification: stream.classification,
+          providerError: stream.providerError,
+          request: requestDiagnostics,
+        };
         log.warn(
+          {
+            sessionId: this.sessionId,
+            ...streamErrorMeta,
+          },
           `queryLoop: EARLY-EXIT(stream-error) — round=${roundIndex} userMessage="${stream.userMessage.slice(0, 100)}"`,
         );
+        this.tracer.step("LLM_STREAM_ERROR", streamErrorMeta);
         callbacks?.onError?.(stream.userMessage, "stream-error");
         this.history.append({
           role: "assistant",
@@ -2738,6 +2791,76 @@ export class ConversationLoop {
       projectedRequestInputTokens: projection?.totalTokens ?? null,
       deferralEligibleLoadedCount,
       deferredLoadedRatio,
+    };
+  }
+
+  private buildProviderRequestDiagnostics(params: {
+    round: number;
+    assistantRoundIndex: number;
+    inputOrigin: ChatInputOrigin;
+    configuredProvider: LLMVendor;
+    model: string;
+    systemPrompt: string;
+    messages: GenericMessage[];
+    toolSchemas: ToolSchema[];
+    activePluginIds: string[];
+    projection: RequestInputProjection;
+    toolExposure: ToolExposureMetrics;
+  }): ProviderRequestDiagnostics {
+    const messageRoleCounts: Record<GenericMessage["role"], number> = {
+      user: 0,
+      assistant: 0,
+      tool_result: 0,
+    };
+    let toolResultChars = 0;
+    let compactedToolResultCount = 0;
+    let truncatedToolResultCount = 0;
+    let serializedStubToolResultCount = 0;
+    let assistantToolCallCount = 0;
+    const toolResultMessages: GenericMessage[] = [];
+
+    for (const message of params.messages) {
+      messageRoleCounts[message.role] += 1;
+      if (message.role === "assistant") {
+        assistantToolCallCount += message.toolCalls?.length ?? 0;
+      }
+      if (message.role === "tool_result") {
+        toolResultMessages.push(message);
+        toolResultChars += message.content.length;
+        if (message.meta?.compactedAt !== undefined) compactedToolResultCount += 1;
+        if (message.meta?.truncated !== undefined) truncatedToolResultCount += 1;
+        if (message.meta?.serializedStub === true) serializedStubToolResultCount += 1;
+      }
+    }
+
+    const loadedToolNames = params.toolSchemas.map((schema) => schema.name);
+    const visibleLoadedToolNames = loadedToolNames.slice(0, 40);
+    return {
+      sessionId: this.sessionId,
+      round: params.round,
+      assistantRoundIndex: params.assistantRoundIndex,
+      inputOrigin: params.inputOrigin,
+      configuredProvider: params.configuredProvider,
+      model: params.model,
+      preflightThresholdTokens: getModelPreflightThreshold(
+        params.configuredProvider,
+        params.model,
+      ),
+      promptChars: params.systemPrompt.length,
+      messageCount: params.messages.length,
+      messageRoleCounts,
+      projection: params.projection,
+      toolResultCount: toolResultMessages.length,
+      toolResultChars,
+      toolResultTokens: estimateMessagesTokens(toolResultMessages),
+      compactedToolResultCount,
+      truncatedToolResultCount,
+      serializedStubToolResultCount,
+      assistantToolCallCount,
+      loadedToolNames: visibleLoadedToolNames,
+      loadedToolNamesTruncated: Math.max(0, loadedToolNames.length - visibleLoadedToolNames.length),
+      activePluginIds: params.activePluginIds,
+      toolExposure: params.toolExposure,
     };
   }
 

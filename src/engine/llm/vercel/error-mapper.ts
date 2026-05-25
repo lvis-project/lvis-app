@@ -13,13 +13,22 @@ import {
   classifyProviderError,
   type ClassifiedError,
 } from "../error-classifier.js";
+import {
+  extractProviderErrorDiagnostics,
+  providerErrorMessage,
+  withProviderErrorClassification,
+  type ProviderErrorDiagnostics,
+} from "../provider-error-diagnostics.js";
 
 export interface MappedError {
   classification: ClassifiedError["category"];
   userMessage: string;
+  rawError: string;
+  providerError: ProviderErrorDiagnostics;
 }
 
 export function mapAiSdkErrorToLvis(err: unknown): MappedError {
+  const diagnostics = extractProviderErrorDiagnostics(err);
   let raw: string;
 
   if (APICallError.isInstance(err)) {
@@ -27,11 +36,11 @@ export function mapAiSdkErrorToLvis(err: unknown): MappedError {
     // HTTP code (401/403/413/429/404/...) without us having to duplicate the
     // category table here.
     const status = err.statusCode ?? "";
-    raw = `${status} ${err.message}`;
+    raw = `${status} ${providerErrorMessage(err)}`;
   } else if (AISDKError.isInstance(err)) {
-    raw = err.message;
+    raw = providerErrorMessage(err);
   } else if (err instanceof Error) {
-    raw = err.message;
+    raw = providerErrorMessage(err);
   } else if (typeof err === "string") {
     raw = err;
   } else {
@@ -47,5 +56,7 @@ export function mapAiSdkErrorToLvis(err: unknown): MappedError {
   return {
     classification: classified.category,
     userMessage: classified.userMessage,
+    rawError: raw,
+    providerError: withProviderErrorClassification(diagnostics, classified.category),
   };
 }
