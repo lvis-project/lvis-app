@@ -8,6 +8,7 @@ import type { BrowserWindow } from "electron";
 import { lvisHome } from "../shared/lvis-home.js";
 import type { SettingsService } from "../data/settings-store.js";
 import type { MemoryManager } from "../memory/memory-manager.js";
+import type { SkillCatalogEntry } from "../main/skill-store.js";
 import type { KeywordEngine } from "../core/keyword-engine.js";
 import type { RouteEngine } from "../core/route-engine.js";
 import type { ToolRegistry } from "../tools/registry.js";
@@ -55,19 +56,21 @@ export function createSystemPromptBuilder(opts: {
   toolRegistry: ToolRegistry;
   pluginRuntime: PluginRuntime;
   /**
-   * C2(c): per-session SkillOverlay reader. The builder calls this each
-   * turn with the active session id and folds the returned section into
+   * C2(c): current-turn SkillOverlay reader. The builder calls this each
+   * round with the active session id and folds the returned section into
    * the system prompt. Optional so unit tests can stub the builder
    * without touching the overlay.
    */
   getActiveSkillsSection?: (sessionId: string) => string;
+  getAvailableSkills?: () => SkillCatalogEntry[];
 }): SystemPromptBuilder {
-  const { memoryManager, toolRegistry, pluginRuntime, getActiveSkillsSection } = opts;
+  const { memoryManager, toolRegistry, pluginRuntime, getActiveSkillsSection, getAvailableSkills } = opts;
   return new SystemPromptBuilder({
     memoryManager,
     toolRegistry,
     // Option C — 비활성 plugin 카탈로그 공급.
     getPluginCards: () => pluginRuntime.listPluginCards(toolRegistry),
+    getAvailableSkills,
     getActiveSkillsSection,
     // Tutorial-X4 — User Onboarding Context source. Renderer writes the
     // synthesized markdown after MemorySeedDialog dismissal; reader is
@@ -170,7 +173,7 @@ export interface ConversationDeps {
    * not only slash-dispatch grants.
    */
   broadcastPermissionConfigChanged?: () => void;
-  /** C2(c): per-session SkillOverlay handle, cleared on newConversation(). */
+  /** C2(c): current-turn SkillOverlay handle, cleared on newConversation(). */
   skillOverlay?: { clear(sessionId: string): void };
   /** Session-scoped assistant TO-DO lifecycle. */
   sessionTodoStore?: SessionTodoStore;

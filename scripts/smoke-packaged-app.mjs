@@ -7,7 +7,7 @@
  * such as ERR_MODULE_NOT_FOUND before installers are uploaded.
  */
 import { spawn } from "node:child_process";
-import { existsSync, mkdtempSync, readdirSync, rmSync, statSync } from "node:fs";
+import { existsSync, mkdtempSync, readdirSync, readFileSync, rmSync, statSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { basename, dirname, join, resolve, sep } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -198,17 +198,77 @@ function removeTempDirBestEffort(dir) {
   }
 }
 
-async function launchSmoke(executable, timeoutMs) {
-  const userDataDir = mkdtempSync(join(tmpdir(), "lvis-packaged-smoke-"));
-  const env = prepareElectronLaunchEnv({
-    ...process.env,
-    ELECTRON_ENABLE_LOGGING: "1",
-    LVIS_DEV_CONSOLE: "0",
-    LVIS_USER_DATA_DIR: userDataDir,
-  });
+function assertSeededMarkdownDir(homeDir, subdir) {
+  const target = join(homeDir, subdir);
+  if (!existsSync(target)) {
+    throw new Error(`LVIS_HOME seed missing directory: ${target}`);
+  }
+  const markdownFiles = readdirSync(target).filter((entry) => entry.toLowerCase().endsWith(".md"));
+  if (markdownFiles.length === 0) {
+    throw new Error(`LVIS_HOME seed directory has no markdown files: ${target}`);
+  }
+}
 
+function expectedSeededMarkdownFiles() {
+  const files = ["AGENTS.md"];
+  for (const subdir of ["agents", "skills", "prompts"]) {
+    for (const entry of readdirSync(join(root, "resources", subdir))) {
+      if (entry.toLowerCase().endsWith(".md")) {
+        files.push(join(subdir, entry));
+      }
+    }
+  }
+  return files.sort((a, b) => a.localeCompare(b));
+}
+
+function assertPackagedFirstLaunchSeed(homeDir) {
+  const agents = join(homeDir, "AGENTS.md");
+  if (!existsSync(agents)) {
+    throw new Error(`LVIS_HOME seed missing AGENTS.md: ${agents}`);
+  }
+  const agentsContent = readFileSync(agents, "utf8");
+  if (!agentsContent.includes("LVIS")) {
+    throw new Error(`LVIS_HOME seed AGENTS.md does not look like LVIS guidance: ${agents}`);
+  }
+  assertSeededMarkdownDir(homeDir, "agents");
+  assertSeededMarkdownDir(homeDir, "skills");
+  assertSeededMarkdownDir(homeDir, "prompts");
+  for (const rel of expectedSeededMarkdownFiles()) {
+    const target = join(homeDir, rel);
+    if (!existsSync(target)) {
+      throw new Error(`LVIS_HOME seed missing bundled file: ${target}`);
+    }
+  }
+}
+
+function prepareUpgradeProbe(homeDir) {
+  const rel = join("skills", "report-writing.md");
+  const target = join(homeDir, rel);
+  const upgradeTarget = `${target}.new`;
+  const packagedContent = readFileSync(target, "utf8");
+  const userContent = `${packagedContent}\n\nUSER CUSTOMIZATION FROM PACKAGED SMOKE\n`;
+  writeFileSync(target, userContent, "utf8");
+  rmSync(upgradeTarget, { force: true });
+  return { rel, target, upgradeTarget, packagedContent, userContent };
+}
+
+function assertUpgradeProbe(probe) {
+  const current = readFileSync(probe.target, "utf8");
+  if (current !== probe.userContent) {
+    throw new Error(`LVIS_HOME upgrade overwrote user-edited file: ${probe.target}`);
+  }
+  if (!existsSync(probe.upgradeTarget)) {
+    throw new Error(`LVIS_HOME upgrade did not create .new marker for ${probe.rel}`);
+  }
+  const offered = readFileSync(probe.upgradeTarget, "utf8");
+  if (offered !== probe.packagedContent) {
+    throw new Error(`LVIS_HOME upgrade .new marker does not match packaged content: ${probe.upgradeTarget}`);
+  }
+}
+
+async function runPackagedAppOnce(executable, timeoutMs, env, label) {
   const args = smokeArgs(process.platform, env);
-  process.stdout.write(`[packaged-smoke] launching: ${executable} ${args.join(" ")}\n`);
+  process.stdout.write(`[packaged-smoke] launching ${label}: ${executable} ${args.join(" ")}\n`);
 
   return await new Promise((resolvePromise, reject) => {
     let output = "";
@@ -234,31 +294,53 @@ async function launchSmoke(executable, timeoutMs) {
     child.on("error", (err) => {
       clearTimeout(timer);
       if (killTimer) clearTimeout(killTimer);
-      removeTempDirBestEffort(userDataDir);
       reject(err);
     });
     child.on("exit", (code, signal) => {
       clearTimeout(timer);
       if (killTimer) clearTimeout(killTimer);
-      removeTempDirBestEffort(userDataDir);
 
       if (MODULE_LOAD_FAILURE.test(output)) {
         reject(new Error(`packaged app emitted module load failure:\n${output}`));
         return;
       }
       if (timedOut) {
-        process.stdout.write(`[packaged-smoke] app stayed up for ${timeoutMs}ms; smoke passed\n`);
+        process.stdout.write(`[packaged-smoke] app stayed up for ${timeoutMs}ms (${label})\n`);
         resolvePromise();
         return;
       }
       if (code === 0) {
-        process.stdout.write("[packaged-smoke] app exited cleanly; smoke passed\n");
+        process.stdout.write(`[packaged-smoke] app exited cleanly (${label})\n`);
         resolvePromise();
         return;
       }
       reject(new Error(`packaged app exited early with code=${code} signal=${signal ?? "none"}:\n${output}`));
     });
   });
+}
+
+async function launchSmoke(executable, timeoutMs) {
+  const userDataDir = mkdtempSync(join(tmpdir(), "lvis-packaged-smoke-"));
+  const lvisHomeDir = mkdtempSync(join(tmpdir(), "lvis-packaged-home-"));
+  const env = prepareElectronLaunchEnv({
+    ...process.env,
+    ELECTRON_ENABLE_LOGGING: "1",
+    LVIS_DEV_CONSOLE: "0",
+    LVIS_USER_DATA_DIR: userDataDir,
+    LVIS_HOME: lvisHomeDir,
+  });
+
+  try {
+    await runPackagedAppOnce(executable, timeoutMs, env, "first launch");
+    assertPackagedFirstLaunchSeed(lvisHomeDir);
+    const probe = prepareUpgradeProbe(lvisHomeDir);
+    await runPackagedAppOnce(executable, timeoutMs, env, "upgrade probe");
+    assertUpgradeProbe(probe);
+    process.stdout.write("[packaged-smoke] first-launch seed and upgrade .new smoke passed\n");
+  } finally {
+    removeTempDirBestEffort(userDataDir);
+    removeTempDirBestEffort(lvisHomeDir);
+  }
 }
 
 async function runWindowsInstallerSmoke(releaseDir, timeoutMs) {

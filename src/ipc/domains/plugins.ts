@@ -587,11 +587,7 @@ export function registerPluginsHandlers(deps: IpcDeps): void {
       auditUnauthorized(auditLogger, "lvis:skills:list", e);
       return UNAUTHORIZED_FRAME;
     }
-    const skills = (await deps.skillStore?.list() ?? []).map((skill) => ({
-      name: skill.name,
-      description: skill.description,
-      triggers: skill.triggers,
-    }));
+    const skills = deps.skillStore?.listCatalogSync() ?? [];
     return { skills };
   });
 

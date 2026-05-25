@@ -28,6 +28,14 @@ describe("installer smoke and packaging discipline", () => {
     expect(smokeScript).toContain("linux-unpacked");
     expect(smokeScript).toContain("win-unpacked");
     expect(smokeScript).toContain(".app");
+    expect(smokeScript).toContain("LVIS_HOME");
+    expect(smokeScript).toContain("assertPackagedFirstLaunchSeed");
+    expect(smokeScript).toContain("assertUpgradeProbe");
+    expect(smokeScript).toContain("expectedSeededMarkdownFiles");
+    expect(smokeScript).toContain('join(root, "resources", subdir)');
+    expect(smokeScript).toContain('["agents", "skills", "prompts"]');
+    expect(smokeScript).toContain("skills");
+    expect(smokeScript).toContain("prompts");
   });
 
   it("documents runtime package imports as dependencies, not devDependencies", () => {

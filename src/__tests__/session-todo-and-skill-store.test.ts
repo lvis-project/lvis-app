@@ -79,11 +79,10 @@ describe("SessionTodoStore", () => {
 describe("parseFrontmatter", () => {
   it("returns name + body when frontmatter is present", () => {
     const { fm, body } = parseFrontmatter(
-      "---\nname: foo\ndescription: bar\ntriggers: [a, b]\n---\nbody text",
+      "---\nname: foo\ndescription: bar\n---\nbody text",
     );
     expect(fm.name).toBe("foo");
     expect(fm.description).toBe("bar");
-    expect(fm.triggers).toEqual(["a", "b"]);
     expect(body).toBe("body text");
   });
 

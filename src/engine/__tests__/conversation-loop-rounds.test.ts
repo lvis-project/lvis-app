@@ -1,4 +1,4 @@
-import { mkdtempSync, rmSync } from "node:fs";
+import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { describe, expect, it, vi } from "vitest";
@@ -6,13 +6,16 @@ import { describe, expect, it, vi } from "vitest";
 import { KeywordEngine } from "../../core/keyword-engine.js";
 import { RouteEngine } from "../../core/route-engine.js";
 import { ConversationLoop } from "../conversation-loop.js";
-import type { GenericMessage, LLMProvider, StreamEvent } from "../llm/types.js";
+import type { GenericMessage, LLMProvider, StreamEvent, StreamTurnParams } from "../llm/types.js";
 import { ToolRegistry } from "../../tools/registry.js";
 import { createDynamicTool } from "../../tools/base.js";
 import { createReadToolResultChunkTool } from "../../tools/tool-result-chunk.js";
 import { fakeLlmSettings } from "../../shared/__tests__/fake-llm-settings.js";
 import { SessionTodoStore } from "../../main/session-todo-store.js";
 import { MemoryManager } from "../../memory/memory-manager.js";
+import { SkillOverlay } from "../../main/skill-overlay.js";
+import { SkillStore } from "../../main/skill-store.js";
+import { createSkillLoadTool } from "../../tools/skill-load.js";
 
 class FakeProvider implements LLMProvider {
   readonly vendor = "openai" as const;
@@ -21,6 +24,21 @@ class FakeProvider implements LLMProvider {
   constructor(private readonly turns: StreamEvent[][]) {}
 
   async *streamTurn(): AsyncIterable<StreamEvent> {
+    yield* this.turns[this.index++] ?? [];
+  }
+}
+
+class RecordingPromptProvider implements LLMProvider {
+  readonly vendor = "openai" as const;
+  private index = 0;
+  readonly systemPrompts: string[] = [];
+  readonly messages: GenericMessage[][] = [];
+
+  constructor(private readonly turns: StreamEvent[][]) {}
+
+  async *streamTurn(input: StreamTurnParams): AsyncIterable<StreamEvent> {
+    this.systemPrompts.push(input.systemPrompt);
+    this.messages.push(input.messages);
     yield* this.turns[this.index++] ?? [];
   }
 }
@@ -157,6 +175,165 @@ describe("ConversationLoop queryLoop", () => {
     await loop.runTurn("다음 질문", undefined, undefined, { inputOrigin: "user-keyboard" });
 
     expect(sessionTodoStore.list("s-main")).toEqual([]);
+  });
+
+  it("clears skill overlay at user-turn boundaries", async () => {
+    const toolRegistry = new ToolRegistry();
+    const provider = new FakeProvider([
+      [
+        { type: "text_delta", text: "ok" },
+        { type: "message_complete", stopReason: "end_turn" },
+      ],
+    ]);
+    const clear = vi.fn();
+    const loop = new ConversationLoop(({
+      settingsService: { get: () => fakeLlmSettings(), getSecret: () => "test-key" },
+      systemPromptBuilder: {
+        build: () => "system",
+        setToolScope: vi.fn(),
+        setActiveSessionId: vi.fn(),
+      },
+      keywordEngine: new KeywordEngine(),
+      routeEngine: new RouteEngine({ toolRegistry }),
+      toolRegistry,
+      memoryManager: { saveSession: () => {}, listSessions: () => [] },
+      skillOverlay: { clear },
+      disableSessionPersistence: true,
+    } as unknown) as ConstructorParameters<typeof ConversationLoop>[0]);
+    (loop as { provider: LLMProvider | null }).provider = provider;
+
+    await loop.runTurn("질문", undefined, undefined, { inputOrigin: "user-keyboard" });
+
+    expect(clear).toHaveBeenCalledTimes(2);
+    expect(clear.mock.calls[0][0]).toBe(clear.mock.calls[1][0]);
+  });
+
+  it("injects a loaded skill body only for the active user turn", async () => {
+    const dir = mkdtempSync(join(tmpdir(), "lvis-skill-turn-"));
+    try {
+      mkdirSync(dir, { recursive: true });
+      writeFileSync(
+        join(dir, "brief.md"),
+        "---\nname: brief\ndescription: Brief writer\n---\nBODY ONLY THIS TURN",
+        "utf8",
+      );
+      const toolRegistry = new ToolRegistry();
+      const overlay = new SkillOverlay();
+      toolRegistry.register(createSkillLoadTool({
+        store: new SkillStore({ userDir: dir }),
+        overlay,
+        approvals: {
+          isApproved: async () => true,
+          approve: async () => undefined,
+        } as never,
+        getApprovalGate: () => undefined,
+        emit: () => undefined,
+      }));
+      let activeSessionId: string | null = null;
+      const provider = new RecordingPromptProvider([
+        [
+          { type: "tool_call", id: "tu-1", name: "skill_load", input: { skillName: "brief" } },
+          { type: "message_complete", stopReason: "tool_use" },
+        ],
+        [
+          { type: "text_delta", text: "done" },
+          { type: "message_complete", stopReason: "end_turn" },
+        ],
+        [
+          { type: "text_delta", text: "next" },
+          { type: "message_complete", stopReason: "end_turn" },
+        ],
+      ]);
+      const loop = new ConversationLoop(({
+        settingsService: { get: () => fakeLlmSettings(), getSecret: () => "test-key" },
+        systemPromptBuilder: {
+          build: () => activeSessionId ? overlay.buildSection(activeSessionId) : "",
+          setToolScope: vi.fn(),
+          setActiveSessionId: (sessionId: string | null) => {
+            activeSessionId = sessionId;
+          },
+        },
+        keywordEngine: new KeywordEngine(),
+        routeEngine: new RouteEngine({ toolRegistry }),
+        toolRegistry,
+        memoryManager: { saveSession: () => {}, listSessions: () => [] },
+        skillOverlay: overlay,
+        disableSessionPersistence: true,
+      } as unknown) as ConstructorParameters<typeof ConversationLoop>[0]);
+      (loop as { provider: LLMProvider | null }).provider = provider;
+
+      await loop.runTurn("brief me", undefined, undefined, { inputOrigin: "user-keyboard" });
+      await loop.runTurn("new topic", undefined, undefined, { inputOrigin: "user-keyboard" });
+
+      expect(provider.systemPrompts[0]).not.toContain("BODY ONLY THIS TURN");
+      expect(provider.systemPrompts[1]).toContain("BODY ONLY THIS TURN");
+      expect(provider.systemPrompts[2]).not.toContain("BODY ONLY THIS TURN");
+      expect(JSON.stringify(provider.messages[1])).not.toContain("BODY ONLY THIS TURN");
+      expect(JSON.stringify(loop.getHistory().getMessages())).not.toContain("BODY ONLY THIS TURN");
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
+  it("uses the sessionIdOverride when rebuilding the skill overlay prompt", async () => {
+    const dir = mkdtempSync(join(tmpdir(), "lvis-skill-child-turn-"));
+    try {
+      writeFileSync(
+        join(dir, "brief.md"),
+        "---\nname: brief\ndescription: Brief current turn\n---\nCHILD BODY ONLY",
+        "utf-8",
+      );
+      const overlay = new SkillOverlay();
+      const toolRegistry = new ToolRegistry();
+      toolRegistry.register(createSkillLoadTool({
+        store: new SkillStore({ userDir: dir }),
+        overlay,
+        approvals: {
+          isApproved: async () => true,
+          approve: async () => undefined,
+        } as never,
+        getApprovalGate: () => undefined,
+        emit: () => undefined,
+      }));
+      let activeSessionId: string | null = null;
+      const provider = new RecordingPromptProvider([
+        [
+          { type: "tool_call", id: "tu-1", name: "skill_load", input: { skillName: "brief" } },
+          { type: "message_complete", stopReason: "tool_use" },
+        ],
+        [
+          { type: "text_delta", text: "child done" },
+          { type: "message_complete", stopReason: "end_turn" },
+        ],
+      ]);
+      const loop = new ConversationLoop(({
+        settingsService: { get: () => fakeLlmSettings(), getSecret: () => "test-key" },
+        systemPromptBuilder: {
+          build: () => activeSessionId ? overlay.buildSection(activeSessionId) : "",
+          setToolScope: vi.fn(),
+          setActiveSessionId: (sessionId: string | null) => {
+            activeSessionId = sessionId;
+          },
+        },
+        keywordEngine: new KeywordEngine(),
+        routeEngine: new RouteEngine({ toolRegistry }),
+        toolRegistry,
+        memoryManager: { saveSession: () => {}, listSessions: () => [] },
+        skillOverlay: overlay,
+        disableSessionPersistence: true,
+      } as unknown) as ConstructorParameters<typeof ConversationLoop>[0]);
+      (loop as { provider: LLMProvider | null }).provider = provider;
+
+      await loop.runTurn("brief child", undefined, undefined, {
+        inputOrigin: "llm-tool-arg",
+        sessionIdOverride: "child-1",
+      });
+
+      expect(provider.systemPrompts[0]).not.toContain("CHILD BODY ONLY");
+      expect(provider.systemPrompts[1]).toContain("CHILD BODY ONLY");
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
   });
 
   it("classifies model-generated tool args from a typed prompt as llm-tool-arg", async () => {
