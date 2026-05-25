@@ -53,6 +53,11 @@ import { captureDemoCredentials } from "./main/demo-credentials.js";
 import { loadPersistedDemoActivationSync } from "./main/demo-activation-loader.js";
 import { applyDemoHostResolverRules } from "./main/demo-host-resolver.js";
 import { forceKillManagedChildProcesses } from "./main/managed-child-processes.js";
+import {
+  computeInitialMainWindowBounds,
+  MAIN_WINDOW_MIN_HEIGHT,
+  MAIN_WINDOW_MIN_WIDTH,
+} from "./main/main-window-bounds.js";
 import { createLvisTrayIcon } from "./main/tray-icon.js";
 import {
   resolveShutdownCleanupTimeoutMs,
@@ -245,12 +250,6 @@ let pendingRendererReload = false;
 let appShutdownStarted = false;
 let appShutdownCompleted = false;
 
-const MAIN_WINDOW_WIDTH = 460;
-const MAIN_WINDOW_HEIGHT = 840;
-const MAIN_WINDOW_MIN_WIDTH = 460;
-const MAIN_WINDOW_MIN_HEIGHT = 640;
-const MAIN_WINDOW_TOP_GAP = 24;
-const MAIN_WINDOW_RIGHT_GAP = 10;
 const SETTINGS_WINDOW_WIDTH = 1040;
 const SETTINGS_WINDOW_HEIGHT = 760;
 const SETTINGS_WINDOW_MIN_WIDTH = 820;
@@ -259,15 +258,7 @@ const rendererIndexUrl = () => pathToFileURL(resolve(__dirname, "..", "index.htm
 
 function initialMainWindowBounds(): { x: number; y: number; width: number; height: number } {
   const { workArea } = screen.getPrimaryDisplay();
-  const width = Math.max(MAIN_WINDOW_MIN_WIDTH, Math.min(MAIN_WINDOW_WIDTH, workArea.width));
-  const height = Math.max(MAIN_WINDOW_MIN_HEIGHT, Math.min(MAIN_WINDOW_HEIGHT, workArea.height));
-  const rightGap = width < workArea.width ? MAIN_WINDOW_RIGHT_GAP : 0;
-  return {
-    x: workArea.x + workArea.width - width - rightGap,
-    y: workArea.y + Math.min(MAIN_WINDOW_TOP_GAP, Math.max(0, workArea.height - height)),
-    width,
-    height,
-  };
+  return computeInitialMainWindowBounds(workArea);
 }
 
 /**
