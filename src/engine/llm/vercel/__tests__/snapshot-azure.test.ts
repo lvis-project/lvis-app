@@ -6,6 +6,7 @@
  */
 import { describe, it, expect, vi } from "vitest";
 import { collectStreamEvents as collect } from "./test-helpers.js";
+import type { StreamEvent } from "../../types.js";
 import { TOOL_SEARCH_TOOL_NAME } from "../../../../tools/registry.js";
 
 
@@ -123,12 +124,27 @@ describe("VercelUnifiedProvider azure-foundry", () => {
         yield {
           type: "reasoning-delta",
           id: "rsn-1",
-          text: "lvis_tool_search 노출 여부를 확인합니다.",
+          text: "lvis_tool",
+        };
+        yield {
+          type: "reasoning-delta",
+          id: "rsn-1",
+          text: "\\_search 노출 여부를 확인합니다.",
         };
         yield {
           type: "text-delta",
           id: "txt-1",
-          text: "현재 빌트인 도구에는 lvis_tool_search 가 있습니다.",
+          text: "현재 빌트인 도구에는 lvis",
+        };
+        yield {
+          type: "text-delta",
+          id: "txt-1",
+          text: "_tool",
+        };
+        yield {
+          type: "text-delta",
+          id: "txt-1",
+          text: "_search 가 있습니다.",
         };
         yield {
           type: "tool-call",
@@ -199,7 +215,7 @@ describe("VercelUnifiedProvider azure-foundry", () => {
             role: "tool_result",
             toolUseId: "tu-1",
             toolName: TOOL_SEARCH_TOOL_NAME,
-            content: "필요한 도구는 tool_search 로 로드하세요.",
+            content: "필요한 도구는 lvis_tool_search 로 로드하세요.",
           },
         ],
         tools: [
@@ -221,7 +237,7 @@ describe("VercelUnifiedProvider azure-foundry", () => {
       tools?: Record<string, unknown>;
       messages?: Array<{ role: string; content: unknown[] }>;
     };
-    expect(callArg.system).toBe("call lvis_tool_search({ query }) when needed");
+    expect(callArg.system).toBe("call tool_search({ query }) when needed");
     expect(Object.keys(callArg.tools ?? {})).toEqual(["lvis_tool_search"]);
     expect(callArg.messages?.[1]).toMatchObject({
       role: "assistant",
@@ -268,19 +284,21 @@ describe("VercelUnifiedProvider azure-foundry", () => {
           toolName: "lvis_tool_search",
           output: {
             type: "text",
-            value: "필요한 도구는 lvis_tool_search 로 로드하세요.",
+            value: "필요한 도구는 tool_search 로 로드하세요.",
           },
         },
       ],
     });
-    expect(events).toContainEqual({
-      type: "reasoning_delta",
-      text: "tool_search 노출 여부를 확인합니다.",
-    });
-    expect(events).toContainEqual({
-      type: "text_delta",
-      text: "현재 빌트인 도구에는 tool_search 가 있습니다.",
-    });
+    expect(events
+      .filter((event): event is Extract<StreamEvent, { type: "reasoning_delta" }> =>
+        event.type === "reasoning_delta")
+      .map((event) => event.text)
+      .join("")).toBe("tool_search 노출 여부를 확인합니다.");
+    expect(events
+      .filter((event): event is Extract<StreamEvent, { type: "text_delta" }> =>
+        event.type === "text_delta")
+      .map((event) => event.text)
+      .join("")).toBe("현재 빌트인 도구에는 tool_search 가 있습니다.");
     expect(events.find((event) => event.type === "tool_call")).toMatchObject({
       type: "tool_call",
       id: "tu-2",
