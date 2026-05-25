@@ -126,6 +126,7 @@ export const COMMON_IPC_ERROR_MESSAGES: Readonly<Record<string, string>> = {
   "denied_extension": "허용되지 않은 파일 확장자입니다.",
   "no-store": "저장소를 사용할 수 없습니다.",
   "no-starred-store": "즐겨찾기 저장소를 사용할 수 없습니다.",
+  "no-session-todo-store": "세션 TO-DO 저장소를 사용할 수 없습니다.",
   // ── #893 Auth mockup login ──
   "invalid-credentials": "아이디 또는 비밀번호가 올바르지 않습니다.",
   "invalid-vendor": "지원하지 않는 벤더입니다.",
