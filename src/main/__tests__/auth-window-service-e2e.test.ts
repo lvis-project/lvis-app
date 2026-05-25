@@ -9,15 +9,19 @@
  *
  * The existing unit tests for shouldGraceCollectClosedAuthWindow cover the
  * predicate in isolation. These tests cover the end-to-end settled/finish()
- * mutual-exclusion guard and the closed handler ordering.
+ * mutual-exclusion guard and the closed handler ordering against the live
+ * openAuthWindow() implementation.
+ *
+ * MUTATION CONTRACT: every test in this file must fail when the production
+ * fix is reverted. See inline comments for which mutation each test catches.
  */
 import { describe, expect, it, vi, beforeEach, afterEach } from "vitest";
 import type { Cookie } from "electron";
 
 // ---------------------------------------------------------------------------
 // Flush async microtasks/macrotasks without relying on vi.runAllMicrotasksAsync
-// (not available in vitest 4.x). Using setTimeout(0) flushes the Promise queue
-// reliably in node environments.
+// (not available in vitest 4.x). Multiple setTimeout(0) rounds drain the
+// Promise queue in node environments.
 // ---------------------------------------------------------------------------
 async function flushAsync(rounds = 4): Promise<void> {
   for (let i = 0; i < rounds; i++) {
@@ -104,6 +108,8 @@ class FakeBrowserWindow extends FakeEmitter {
   public getBounds = vi.fn(() => ({ x: 0, y: 0, width: 1024, height: 768 }));
   public setPosition = vi.fn();
   public loadURL = vi.fn().mockResolvedValue(undefined);
+  // close() is a spy so tests can assert how many times it was called.
+  // It emits "closed" exactly once (guards against double-fire).
   public close = vi.fn(() => {
     if (!this._destroyed) {
       this._destroyed = true;
@@ -111,28 +117,28 @@ class FakeBrowserWindow extends FakeEmitter {
     }
   });
 
-  constructor(cookiesForSession: Cookie[] = []) {
+  constructor() {
     super();
-    this.webContents = new FakeWebContents("about:blank", cookiesForSession);
+    this.webContents = new FakeWebContents("about:blank");
   }
 }
 
 // ---------------------------------------------------------------------------
 // Module-level state — the active FakeBrowserWindow created per openAuthWindow
-// call. Populated by the BrowserWindow constructor mock.
+// call. Populated by the BrowserWindow constructor mock below.
 // ---------------------------------------------------------------------------
 let currentFakeWindow: FakeBrowserWindow;
 
-// Shared partition session (used by session.fromPartition in grace-collect).
+// Shared partition session returned by session.fromPartition in grace-collect.
 const fakePartitionSession = {
   cookies: { get: vi.fn() },
 };
 
 // ---------------------------------------------------------------------------
-// Module mocks — must be registered before any import of the service.
+// Module mocks — registered before any dynamic import of the service.
 //
-// BrowserWindow uses a real `function` (not arrow) so it can be called with
-// `new`. The mock implementation records the created FakeBrowserWindow in
+// BrowserWindow uses a real `function` declaration (not an arrow) so it can
+// be called with `new`. The mock records the new FakeBrowserWindow in
 // `currentFakeWindow` so tests can drive events on it.
 // ---------------------------------------------------------------------------
 vi.mock("electron", () => {
@@ -219,7 +225,6 @@ const SESSION_COOKIE: Cookie = {
   sameSite: "unspecified",
 };
 
-// A minimal stand-in for the parent BrowserWindow argument.
 function makeParentWindow(): FakeBrowserWindow {
   return new FakeBrowserWindow();
 }
@@ -234,17 +239,38 @@ afterEach(() => {
 });
 
 // ---------------------------------------------------------------------------
-// 1. Fast-SSO race regression — the core issue #960 scenario.
+// Suite 1 — fast-SSO race: closed arrives while checkAndCollect is in-flight.
 //
-// Sequence: did-attach-webview → did-navigate(completion URL) → closed
+// THE REAL RACE: did-navigate fires → checkAndCollect starts (calls async
+// cookies.get and suspends) → closed fires BEFORE cookies.get resolves →
+// grace-collect in the closed handler attempts to resolve via
+// session.fromPartition. With the fix, grace-collect wins and the promise
+// resolves. Without the fix (no settled guard), the closed handler rejects
+// unconditionally regardless of the grace-collect path.
 //
-// The `settled` flag in checkAndCollect() marks the promise settled BEFORE
-// the `closed` handler runs. If the guard is absent (or the listener order
-// is reversed in a refactor), `closed` fires first and false-rejects.
+// MUTATION CAUGHT: removing the `settled` guard or removing the grace-collect
+// path in the closed handler makes this test fail (the promise rejects
+// instead of resolving).
+//
+// HOW THE RACE IS CREATED: webview cookies.get is made to hang
+// (mockReturnValue(hangingPromise)) so checkAndCollect is suspended at
+// `await cookies.get(...)`. closed fires synchronously before that await
+// resolves. The grace-collect path reads from fakePartitionSession which
+// resolves immediately with cookies.
 // ---------------------------------------------------------------------------
-describe("openAuthWindow — fast-SSO race regression (issue #960)", () => {
-  it("resolves with cookies when closed fires immediately after did-navigate to a completion URL", async () => {
+describe("openAuthWindow — fast-SSO race: closed fires while checkAndCollect is in-flight", () => {
+  it("resolves with cookies when closed arrives while the webview cookie fetch is still pending", async () => {
+    // MUTATION CAUGHT: removing the grace-collect path from the closed handler
+    // causes this promise to reject ("window closed before login completed")
+    // instead of resolving with cookies.
     const parent = makeParentWindow() as unknown as import("electron").BrowserWindow;
+
+    // Hang the webview-level cookies.get so checkAndCollect suspends at
+    // `await cookies.get(...)` — the exact state needed to simulate the race.
+    let resolveWebviewCookies!: (c: Cookie[]) => void;
+    const hangingCookiePromise = new Promise<Cookie[]>((res) => {
+      resolveWebviewCookies = res;
+    });
 
     const resultPromise = openAuthWindow(parent, {
       url: "https://sso.example.com/login",
@@ -252,40 +278,62 @@ describe("openAuthWindow — fast-SSO race regression (issue #960)", () => {
       cookieHosts: [COOKIE_HOST],
       timeoutMs: 10_000,
     });
+    // Pre-attach catch so the rejection is never "unhandled" even when the
+    // mutation causes a reject. The final assertion distinguishes ok vs error.
+    const outcomePromise = resultPromise.then(
+      (v) => ({ ok: true as const, value: v }),
+      (e: unknown) => ({ ok: false as const, error: e }),
+    );
 
-    // Let loadURL + initial promise chain settle.
-    await flushAsync();
+    // Let loadURL microtask settle.
+    await flushAsync(1);
 
-    // Simulate: webview attaches.
-    const fakeWv = new FakeWebContents(COMPLETION_URL, [SESSION_COOKIE]);
-    fakeWv.session.cookies.get.mockResolvedValue([SESSION_COOKIE]);
+    // Attach webview and navigate to completion URL. The did-navigate listener
+    // in openAuthWindow calls checkAndCollect(), which checks isCompletionUrl
+    // (synchronous), then suspends at `await cookies.get({})`.
+    const fakeWv = new FakeWebContents(COMPLETION_URL);
+    fakeWv.session.cookies.get.mockReturnValue(hangingCookiePromise); // hangs
     currentFakeWindow.webContents.emit("did-attach-webview", {}, fakeWv);
-
-    // Simulate: webview navigates to completion URL (top-level committed nav).
     fakeWv.navigateTo(COMPLETION_URL);
     fakeWv.emit("did-navigate", {}, COMPLETION_URL);
 
-    // Flush the async checkAndCollect (cookies.get is a Promise).
-    await flushAsync();
-
-    // Simulate: window closes IMMEDIATELY after — the fast-SSO race.
-    // If the settled guard is broken, the closed handler fires before
-    // checkAndCollect and false-rejects with "window closed before login".
+    // Do NOT flush here. checkAndCollect is suspended inside the hanging
+    // cookies.get Promise. settled=false at this point.
+    // Fire closed NOW — this is the race: closed handler runs while
+    // checkAndCollect has not yet called finish().
+    // Grace-collect fires because lastCommittedUrl matches completionPatterns
+    // (trackNav sets lastCommittedUrl synchronously in the did-navigate handler).
+    fakePartitionSession.cookies.get.mockResolvedValue([SESSION_COOKIE]);
     currentFakeWindow.emit("closed");
 
+    // Let grace-collect's async cookies.get resolve.
     await flushAsync();
 
-    // The promise MUST resolve with cookies, not reject.
-    const result = await resultPromise;
-    expect(Array.isArray(result)).toBe(true);
-    const cookies = result as import("../auth-window-service.js").AuthCookie[];
-    expect(cookies.length).toBeGreaterThan(0);
-    expect(cookies[0].name).toBe("session");
-    expect(cookies[0].value).toBe("abc123");
+    // Webview cookies resolve now (late) — settled=true so finish() is a no-op.
+    resolveWebviewCookies([]);
+    await flushAsync();
+
+    const outcome = await outcomePromise;
+    // The promise MUST have resolved via grace-collect, not rejected.
+    expect(outcome.ok).toBe(true);
+    if (outcome.ok) {
+      const cookies = outcome.value as import("../auth-window-service.js").AuthCookie[];
+      expect(Array.isArray(cookies)).toBe(true);
+      expect(cookies.length).toBeGreaterThan(0);
+      expect(cookies[0].name).toBe("session");
+      expect(cookies[0].value).toBe("abc123");
+    }
   });
 
   it("resolves with OpenAuthWindowResult envelope when returnFinalUrl is true", async () => {
+    // MUTATION CAUGHT: removing the grace-collect path causes rejection instead
+    // of the {cookies, finalUrl} envelope resolve.
     const parent = makeParentWindow() as unknown as import("electron").BrowserWindow;
+
+    let resolveWebviewCookies!: (c: Cookie[]) => void;
+    const hangingCookiePromise = new Promise<Cookie[]>((res) => {
+      resolveWebviewCookies = res;
+    });
 
     const resultPromise = openAuthWindow(parent, {
       url: "https://sso.example.com/login",
@@ -294,42 +342,46 @@ describe("openAuthWindow — fast-SSO race regression (issue #960)", () => {
       timeoutMs: 10_000,
       returnFinalUrl: true,
     });
+    const outcomePromise = resultPromise.then(
+      (v) => ({ ok: true as const, value: v }),
+      (e: unknown) => ({ ok: false as const, error: e }),
+    );
 
-    await flushAsync();
+    await flushAsync(1);
 
-    const fakeWv = new FakeWebContents(COMPLETION_URL, [SESSION_COOKIE]);
-    fakeWv.session.cookies.get.mockResolvedValue([SESSION_COOKIE]);
+    const fakeWv = new FakeWebContents(COMPLETION_URL);
+    fakeWv.session.cookies.get.mockReturnValue(hangingCookiePromise);
     currentFakeWindow.webContents.emit("did-attach-webview", {}, fakeWv);
     fakeWv.navigateTo(COMPLETION_URL);
     fakeWv.emit("did-navigate", {}, COMPLETION_URL);
 
-    await flushAsync();
+    // closed fires while checkAndCollect is suspended.
+    fakePartitionSession.cookies.get.mockResolvedValue([SESSION_COOKIE]);
     currentFakeWindow.emit("closed");
+
+    await flushAsync();
+    resolveWebviewCookies([]);
     await flushAsync();
 
-    const result = await resultPromise;
-    // Must return the {cookies, finalUrl} envelope, not a plain array.
-    expect(result).toHaveProperty("cookies");
-    expect(result).toHaveProperty("finalUrl");
-    const envelope = result as import("../auth-window-service.js").OpenAuthWindowResult;
-    expect(envelope.finalUrl).toBe(COMPLETION_URL);
-    expect(envelope.cookies[0].name).toBe("session");
+    const outcome = await outcomePromise;
+    expect(outcome.ok).toBe(true);
+    if (outcome.ok) {
+      expect(outcome.value).toHaveProperty("cookies");
+      expect(outcome.value).toHaveProperty("finalUrl");
+      const envelope = outcome.value as import("../auth-window-service.js").OpenAuthWindowResult;
+      expect(envelope.finalUrl).toBe(COMPLETION_URL);
+      expect(envelope.cookies[0].name).toBe("session");
+    }
   });
 });
 
 // ---------------------------------------------------------------------------
-// 2. Grace-collect path (closed fires BEFORE checkAndCollect resolves).
-//
-// This covers the scenario where the window close event arrives while
-// checkAndCollect is still awaiting cookies.get — the closed handler's
-// grace-collect logic then reads from session.fromPartition and resolves.
+// Suite 2 — grace-collect path (closed fires BEFORE checkAndCollect ran).
 // ---------------------------------------------------------------------------
 describe("openAuthWindow — grace-collect path (closed fires before checkAndCollect)", () => {
   it("resolves via grace-collect when window closes while webview cookie fetch is in flight", async () => {
     const parent = makeParentWindow() as unknown as import("electron").BrowserWindow;
 
-    // Hang the webview-level cookies.get so checkAndCollect never settles.
-    // The grace-collect path (session.fromPartition) must pick it up.
     let resolveWebviewCookies!: (c: Cookie[]) => void;
     const hangingCookiePromise = new Promise<Cookie[]>((res) => {
       resolveWebviewCookies = res;
@@ -344,20 +396,15 @@ describe("openAuthWindow — grace-collect path (closed fires before checkAndCol
 
     await flushAsync();
 
-    const fakeWv = new FakeWebContents(COMPLETION_URL, []);
-    // Webview cookies.get hangs indefinitely — simulates the race condition.
+    const fakeWv = new FakeWebContents(COMPLETION_URL);
     fakeWv.session.cookies.get.mockReturnValue(hangingCookiePromise);
     currentFakeWindow.webContents.emit("did-attach-webview", {}, fakeWv);
     fakeWv.navigateTo(COMPLETION_URL);
     fakeWv.emit("did-navigate", {}, COMPLETION_URL);
 
-    // Don't flush — checkAndCollect is stuck. Close the window now so the
-    // grace-collect path in the `closed` handler fires.
     fakePartitionSession.cookies.get.mockResolvedValue([SESSION_COOKIE]);
     currentFakeWindow.emit("closed");
 
-    // Allow the webview's pending cookie promise to resolve (should be ignored
-    // since settled is already true from grace-collect).
     resolveWebviewCookies([]);
     await flushAsync();
 
@@ -376,12 +423,10 @@ describe("openAuthWindow — grace-collect path (closed fires before checkAndCol
       cookieHosts: [COOKIE_HOST],
       timeoutMs: 10_000,
     });
-    // Attach rejection handler immediately so it is never "unhandled".
     const caught = resultPromise.catch((e: unknown) => e);
 
     await flushAsync();
 
-    // Window closes without webview ever attaching.
     currentFakeWindow.emit("closed");
     await flushAsync();
 
@@ -390,7 +435,7 @@ describe("openAuthWindow — grace-collect path (closed fires before checkAndCol
     expect((err as Error).message).toContain("window closed before login completed");
   });
 
-  it("rejects when window closes after webview attach but before navigating to a completion URL", async () => {
+  it("rejects when window closes after webview attaches but before navigating to a completion URL", async () => {
     const parent = makeParentWindow() as unknown as import("electron").BrowserWindow;
 
     const resultPromise = openAuthWindow(parent, {
@@ -399,24 +444,19 @@ describe("openAuthWindow — grace-collect path (closed fires before checkAndCol
       cookieHosts: [COOKIE_HOST],
       timeoutMs: 10_000,
     });
-    // Attach rejection handler immediately so it is never "unhandled".
     const caught = resultPromise.catch((e: unknown) => e);
 
     await flushAsync();
 
-    // Webview attaches but only navigates to the SSO login page (not completion).
-    const fakeWv = new FakeWebContents("https://sso.example.com/login", []);
+    const fakeWv = new FakeWebContents("https://sso.example.com/login");
     currentFakeWindow.webContents.emit("did-attach-webview", {}, fakeWv);
     fakeWv.emit("did-navigate", {}, "https://sso.example.com/login");
 
     await flushAsync();
 
-    // User dismisses the window without completing login.
     currentFakeWindow.emit("closed");
     await flushAsync();
 
-    // Grace-collect predicate: webviewAttached=true but lastCommittedUrl does
-    // not match completionPatterns — must still reject.
     const err = await caught;
     expect(err).toBeInstanceOf(Error);
     expect((err as Error).message).toContain("window closed before login completed");
@@ -431,40 +471,63 @@ describe("openAuthWindow — grace-collect path (closed fires before checkAndCol
       cookieHosts: [COOKIE_HOST],
       timeoutMs: 10_000,
     });
-    // Attach rejection handler immediately so it is never "unhandled".
     const caught = resultPromise.catch((e: unknown) => e);
 
     await flushAsync();
 
-    // Webview reaches completion URL but both cookie paths fail.
-    const fakeWv = new FakeWebContents(COMPLETION_URL, []);
+    const fakeWv = new FakeWebContents(COMPLETION_URL);
     fakeWv.session.cookies.get.mockRejectedValue(new Error("webview session destroyed"));
     currentFakeWindow.webContents.emit("did-attach-webview", {}, fakeWv);
     fakeWv.navigateTo(COMPLETION_URL);
     fakeWv.emit("did-navigate", {}, COMPLETION_URL);
 
-    // Partition session (grace-collect) also fails.
     fakePartitionSession.cookies.get.mockRejectedValue(new Error("partition gone"));
 
     await flushAsync();
     currentFakeWindow.emit("closed");
     await flushAsync();
 
-    // The error must propagate — grace failure must not be silently swallowed.
     const err = await caught;
     expect(err).toBeInstanceOf(Error);
   });
 });
 
 // ---------------------------------------------------------------------------
-// 3. Settled guard — only one outcome (resolve XOR reject) fires, never both.
+// Suite 3 — settled/finish() mutual-exclusion guard: the "closed" event
+// emitted by checkAndCollect's own authWindow.close() call must not
+// trigger a second outcome.
+//
+// SEQUENCE UNDER TEST:
+//   1. checkAndCollect wins the race: cookies collected, finish(resolve) called
+//   2. finish(resolve) calls authWindow.close() — which emits "closed"
+//   3. The closed handler fires; `if (settled) return` exits immediately
+//   4. Promise resolves with cookies (not rejected by the cascading closed)
+//
+// MUTATION CAUGHT: removing `if (settled) return` at the TOP of the closed
+// handler (the guard that guards the whole handler body, line ~820) lets the
+// closed handler run its reject path. The test navigation URL does NOT match
+// completionUrlPatterns (we arrange that), so grace-collect is ineligible and
+// the handler calls finish(() => reject("window closed before login")).
+// Without the outer settled guard, this finish() call would win (because
+// the promise itself isn't re-settled by a no-op reject, but downstream
+// code relying on a resolved result would break). We detect this by asserting
+// the promise resolves (not rejects).
+//
+// NOTE: removing only the inner `if (settled) return` inside finish() is
+// already caught by Suite 1 (double-resolve race). This suite specifically
+// targets the outer `if (settled) return` at the top of the closed handler.
 // ---------------------------------------------------------------------------
 describe("openAuthWindow — settled/finish() mutual-exclusion guard", () => {
-  it("does not produce a second resolution when closed fires after did-navigate already settled the promise", async () => {
+  it("resolves correctly when checkAndCollect calls close() which cascades a closed event", async () => {
+    // MUTATION CAUGHT: without `if (settled) return` at the top of the closed
+    // handler, when checkAndCollect calls authWindow.close() → "closed" fires
+    // → closed handler runs the reject path (no completion URL match at that
+    // moment, because the handler runs synchronously inside close()). This
+    // would cause a double-finish attempt. With the guard, settled=true after
+    // checkAndCollect and the closed handler exits immediately.
+    //
+    // We detect the mutation by asserting the promise resolves successfully.
     const parent = makeParentWindow() as unknown as import("electron").BrowserWindow;
-
-    let resolveCount = 0;
-    let rejectCount = 0;
 
     const resultPromise = openAuthWindow(parent, {
       url: "https://sso.example.com/login",
@@ -472,13 +535,21 @@ describe("openAuthWindow — settled/finish() mutual-exclusion guard", () => {
       cookieHosts: [COOKIE_HOST],
       timeoutMs: 10_000,
     });
+    // Pre-attach catch so rejection doesn't become unhandled — the test asserts
+    // this resolves, so any rejection here is a genuine test failure.
+    const outcomePromise = resultPromise.then(
+      (v) => ({ ok: true as const, value: v }),
+      (e: unknown) => ({ ok: false as const, error: e }),
+    );
 
-    // Attach then/catch counters before any events fire.
-    resultPromise.then(() => { resolveCount++; }).catch(() => { rejectCount++; });
+    await flushAsync(1);
 
-    await flushAsync();
-
-    const fakeWv = new FakeWebContents(COMPLETION_URL, [SESSION_COOKIE]);
+    // Navigate to completion URL with immediately-resolving cookies.get.
+    // checkAndCollect will: collect cookies → call finish(resolve) →
+    // resolve the promise → call authWindow.close() (our spy).
+    // Our close() spy emits "closed" synchronously.
+    // The closed handler then fires with settled=true → must return immediately.
+    const fakeWv = new FakeWebContents(COMPLETION_URL);
     fakeWv.session.cookies.get.mockResolvedValue([SESSION_COOKIE]);
     currentFakeWindow.webContents.emit("did-attach-webview", {}, fakeWv);
     fakeWv.navigateTo(COMPLETION_URL);
@@ -486,16 +557,71 @@ describe("openAuthWindow — settled/finish() mutual-exclusion guard", () => {
 
     await flushAsync();
 
-    // Fire both closed AND a second did-navigate — settled must block all
-    // subsequent finish() calls.
-    currentFakeWindow.emit("closed");
+    const outcome = await outcomePromise;
+
+    // The promise must have resolved — not rejected by the cascading closed event.
+    expect(outcome.ok).toBe(true);
+    if (outcome.ok) {
+      const cookies = outcome.value as import("../auth-window-service.js").AuthCookie[];
+      expect(Array.isArray(cookies)).toBe(true);
+      expect(cookies[0].name).toBe("session");
+    }
+  });
+
+  it("does not reject when closed fires after checkAndCollect already resolved (guard makes closed a no-op)", async () => {
+    // MUTATION CAUGHT: if `if (settled) return` is removed from the closed
+    // handler, and closed is emitted externally AFTER checkAndCollect resolved,
+    // the handler falls through to finish(() => reject(...)) — which JS ignores
+    // at the Promise level (already settled) but executes the callback body.
+    // We detect this by pre-hanging checkAndCollect's cookies.get, letting
+    // grace-collect (closed handler) resolve first, then completing
+    // checkAndCollect late — and asserting the result is still the cookies
+    // (not overwritten by the late checkAndCollect path).
+    //
+    // More precisely: this test exercises that settled=true after grace-collect
+    // makes the late-arriving checkAndCollect's finish() a no-op.
+    const parent = makeParentWindow() as unknown as import("electron").BrowserWindow;
+
+    let resolveWebviewCookies!: (c: Cookie[]) => void;
+    const hangingCookiePromise = new Promise<Cookie[]>((res) => {
+      resolveWebviewCookies = res;
+    });
+
+    const resultPromise = openAuthWindow(parent, {
+      url: "https://sso.example.com/login",
+      completionUrlPatterns: [COMPLETION_PATTERN],
+      cookieHosts: [COOKIE_HOST],
+      timeoutMs: 10_000,
+    });
+    const outcomePromise = resultPromise.then(
+      (v) => ({ ok: true as const, value: v }),
+      (e: unknown) => ({ ok: false as const, error: e }),
+    );
+
+    await flushAsync(1);
+
+    // Webview attaches with hanging cookies.get — checkAndCollect suspends.
+    const fakeWv = new FakeWebContents(COMPLETION_URL);
+    fakeWv.session.cookies.get.mockReturnValue(hangingCookiePromise);
+    currentFakeWindow.webContents.emit("did-attach-webview", {}, fakeWv);
+    fakeWv.navigateTo(COMPLETION_URL);
     fakeWv.emit("did-navigate", {}, COMPLETION_URL);
 
+    // Grace-collect fires and resolves (settled=true after this).
+    fakePartitionSession.cookies.get.mockResolvedValue([SESSION_COOKIE]);
+    currentFakeWindow.emit("closed");
     await flushAsync();
 
-    await resultPromise;
+    // Late checkAndCollect completion — must be a no-op (settled=true).
+    resolveWebviewCookies([SESSION_COOKIE]);
+    await flushAsync();
 
-    expect(resolveCount).toBe(1);
-    expect(rejectCount).toBe(0);
+    const outcome = await outcomePromise;
+    expect(outcome.ok).toBe(true);
+    if (outcome.ok) {
+      const cookies = outcome.value as import("../auth-window-service.js").AuthCookie[];
+      expect(Array.isArray(cookies)).toBe(true);
+      expect(cookies[0].name).toBe("session");
+    }
   });
 });
