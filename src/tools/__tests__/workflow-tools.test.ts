@@ -362,6 +362,21 @@ describe("todo_session_write tool", () => {
     writeSpy.mockRestore();
   });
 
+  it("treats deleting a non-existent item as a no-op", async () => {
+    const store = new SessionTodoStore();
+    const tool = createTodoSessionWriteTool(store);
+    const writeSpy = vi.spyOn(store, "write");
+    const r = await tool.execute(
+      { items: [{ id: "ghost", status: "deleted" }] },
+      ctx("s-del"),
+    );
+    const body = JSON.parse(r.output);
+    expect(r.isError).toBe(false);
+    expect(body.changed).toBe(false);
+    expect(writeSpy).not.toHaveBeenCalled();
+    writeSpy.mockRestore();
+  });
+
   it("supports ordered insertion and deletion", async () => {
     const store = new SessionTodoStore();
     const tool = createTodoSessionWriteTool(store);
