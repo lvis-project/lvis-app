@@ -15,7 +15,7 @@
  */
 import { describe, it, expect, beforeEach, afterEach, vi } from "vitest";
 import { mkdir, readFile, writeFile, rm } from "node:fs/promises";
-import { resolve, join } from "node:path";
+import { dirname, resolve, join } from "node:path";
 import { tmpdir } from "node:os";
 import { mkdtempSync } from "node:fs";
 import { PluginMarketplaceService } from "../marketplace.js";
@@ -113,10 +113,27 @@ describe("marketplace install — plugin-id dependencies (issue #92)", () => {
     // call count to verify which plugins reached the install branch.
     installArtifactSpy = vi.spyOn(
       PluginMarketplaceService.prototype as unknown as {
-        installArtifact: (...args: unknown[]) => Promise<string>;
+        installArtifact: (plugin: PluginMarketplaceItem) => Promise<string>;
       },
       "installArtifact",
-    ).mockResolvedValue("installed/stub/plugin.json");
+    ).mockImplementation(async (plugin) => {
+      const manifestRelPath = `installed/${plugin.id}/plugin.json`;
+      const manifestAbsPath = resolve(tmpDir, "plugins", manifestRelPath);
+      await mkdir(dirname(manifestAbsPath), { recursive: true });
+      await writeFile(
+        manifestAbsPath,
+        JSON.stringify({
+          id: plugin.id,
+          name: plugin.name,
+          version: plugin.version ?? "1.0.0",
+          entry: "dist/index.js",
+          tools: plugin.tools ?? [],
+          description: plugin.description,
+          publisher: plugin.publisher,
+        }),
+      );
+      return manifestRelPath;
+    });
   });
 
   afterEach(async () => {
