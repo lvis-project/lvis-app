@@ -274,11 +274,10 @@ export interface ToolPermissionContext {
   /**
    * Optional fresh accessor for the additional-directories view. When
    * provided, `executeOne` invokes this at its start so that an earlier
-   * tool in the same `Promise.all(executeAll)` batch granting
-   * `allow-once`/`allow-session` widens the scope visible to siblings
-   * scheduled after it on the event loop. Falls back to
-   * `additionalDirectories` (snapshot) when omitted — keeps legacy
-   * callers working.
+   * tool in the same ordered `executeAll()` run granting
+   * `allow-once`/`allow-session` widens the scope visible to later tools.
+   * Falls back to `additionalDirectories` (snapshot) when omitted — keeps
+   * legacy callers working.
    */
   getAdditionalDirectories?: () => readonly string[];
   /**
@@ -933,7 +932,7 @@ export class ToolExecutor {
     };
   }
 
-  /** 복수 tool_use 병렬 실행 — 최대 5개씩 배치 처리.
+  /** 복수 tool_use 순서 실행.
    *
    * `overlayTriggerOrigin` (예: `"overlay:meeting-detection"`) 가 set 이면
    * 모든 write/shell/network 호출이 사용자 영구 승인을 우회해 ask 로 강제됨
@@ -949,16 +948,9 @@ export class ToolExecutor {
     opts: ExecuteOptions = {},
   ): Promise<ToolResult[]> {
     const groupId = randomUUID();
-    const BATCH_SIZE = 5;
-    if (toolUses.length <= BATCH_SIZE) {
-      return Promise.all(toolUses.map((tu, idx) => this.executeOne(tu, groupId, idx, opts)));
-    }
-
     const results: ToolResult[] = [];
-    for (let i = 0; i < toolUses.length; i += BATCH_SIZE) {
-      const batch = toolUses.slice(i, i + BATCH_SIZE);
-      const batchResults = await Promise.all(batch.map((tu, batchIdx) => this.executeOne(tu, groupId, i + batchIdx, opts)));
-      results.push(...batchResults);
+    for (let idx = 0; idx < toolUses.length; idx++) {
+      results.push(await this.executeOne(toolUses[idx], groupId, idx, opts));
     }
     return results;
   }
@@ -1064,8 +1056,8 @@ export class ToolExecutor {
     // the *current* additional-directories view at the top of this
     // executeOne (rather than the snapshot taken when executeAll() was
     // dispatched). This makes an `allow-once`/`allow-session` grant
-    // applied by an earlier sibling in the same Promise.all batch
-    // visible to tools scheduled after it on the event loop.
+    // applied by an earlier tool visible to later tools in the same
+    // ordered run.
     const baseAdditionalDirectories: readonly string[] =
       invocationPermissionContext.getAdditionalDirectories?.()
       ?? invocationPermissionContext.additionalDirectories
@@ -1296,12 +1288,12 @@ export class ToolExecutor {
     };
 
     const applyApprovedDirectory = (approvedDirectory: string): void => {
-      // Re-read fresh: a parallel sibling in the same Promise.all(executeAll)
-      // batch may have just resolved its own out-of-allowed-dir dialog and
-      // mutated the conversation loop's session/turn lists. Spreading from
+      // Re-read fresh: an earlier tool in the same ordered executeAll run may
+      // have just resolved its own out-of-allowed-dir dialog and mutated the
+      // conversation loop's session/turn lists. Spreading from
       // `baseAdditionalDirectories` (executeOne-entry snapshot) would silently
-      // drop the sibling's grant — read-side is fresh via getAdditionalDirectories
-      // but write-side must also be fresh for symmetry. (architect 2-round Q1)
+      // drop that grant — read-side is fresh via getAdditionalDirectories but
+      // write-side must also be fresh for symmetry. (architect 2-round Q1)
       const fresh: readonly string[] =
         invocationPermissionContext.getAdditionalDirectories?.()
         ?? baseAdditionalDirectories;
