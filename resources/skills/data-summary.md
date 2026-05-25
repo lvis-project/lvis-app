@@ -1,7 +1,6 @@
 ---
 name: data-summary
 description: 표·csv 데이터 요약 skill — 핵심 지표·이상치·트렌드를 액션 가능한 형태로
-triggers: [summary, 요약, data, 데이터, 통계, 표, csv]
 ---
 
 # Data Summary Skill

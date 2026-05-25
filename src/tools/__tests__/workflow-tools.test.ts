@@ -29,6 +29,8 @@ import { SessionTodoStore } from "../../main/session-todo-store.js";
 import { SkillStore } from "../../main/skill-store.js";
 import { SkillOverlay } from "../../main/skill-overlay.js";
 import { AgentProfileStore } from "../../main/agent-profile-store.js";
+import { ToolRegistry, TOOL_SEARCH_TOOL_NAME } from "../registry.js";
+import { registerToolSearchMetaTool } from "../../boot/tools.js";
 
 function ctx(sessionId = "session-x"): ToolExecutionContext {
   return { cwd: process.cwd(), extraAllowedDirectories: [], metadata: { sessionId } };
@@ -456,7 +458,7 @@ describe("skill_list and agent_list tools", () => {
       mkdirSync(join(skillDir, "deploy"), { recursive: true });
       writeFileSync(
         join(skillDir, "deploy", "SKILL.md"),
-        "---\nname: deploy\ndescription: Deploy workflow\ntriggers: [deploy]\n---\nsecret body",
+        "---\nname: deploy\ndescription: Deploy workflow\n---\nsecret body",
         "utf-8",
       );
       const tool = createSkillListTool(new SkillStore({ userDir: skillDir }));
@@ -467,6 +469,7 @@ describe("skill_list and agent_list tools", () => {
           expect.objectContaining({ name: "deploy", description: "Deploy workflow" }),
         ]),
       );
+      expect(parsed.skills[0]).not.toHaveProperty("triggers");
       expect(r.output).not.toContain("secret body");
     } finally {
       rmSync(skillDir, { recursive: true, force: true });
@@ -493,6 +496,20 @@ describe("skill_list and agent_list tools", () => {
     } finally {
       rmSync(agentDir, { recursive: true, force: true });
     }
+  });
+});
+
+describe("tool_search meta tool", () => {
+  it("fails closed if executor reaches the loop-intercepted fallback", async () => {
+    const registry = new ToolRegistry();
+    registerToolSearchMetaTool(registry);
+    const tool = registry.findByName(TOOL_SEARCH_TOOL_NAME);
+    expect(tool).toBeDefined();
+
+    const result = await tool!.execute({ query: "meeting" }, ctx());
+
+    expect(result.isError).toBe(true);
+    expect(result.output).toContain("interception");
   });
 });
 
@@ -524,8 +541,8 @@ describe("skill_load tool", () => {
     expect(parsed.loaded).toBe(true);
     expect(parsed.skillName).toBe("report-writing");
     expect(events).toEqual(["report-writing"]);
-    // C2(c): the overlay carries the skill body for the next turn's
-    // system prompt; previously this was a chat-history append.
+    // The overlay carries the skill body for the current user turn's follow-up
+    // rounds; ConversationLoop clears it at the turn boundary.
     const overlaySection = overlay.buildSection("sess-1");
     expect(overlaySection).toContain("<lvis-skill name=\"report-writing\"");
     expect(overlaySection).toContain("</lvis-active-skills>");
