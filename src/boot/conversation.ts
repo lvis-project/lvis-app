@@ -109,6 +109,12 @@ export function createPostTurnHookChain(opts: {
    * trails stay unified. When omitted, a new logger is created.
    */
   auditLogger?: AuditLogger;
+  /**
+   * Same SessionTodoStore instance the conversation loop holds — the hook
+   * marks a completed plan here and the loop's `clearIfPending` executes it at
+   * the next turn boundary.
+   */
+  sessionTodoStore?: SessionTodoStore;
 }): { postTurnHookChain: PostTurnHookChain; auditLogger: AuditLogger } {
   // §4.5 + Agent 6: PostTurnHookChain 조립
   const auditLogger = opts.auditLogger ?? new AuditLogger();
@@ -117,6 +123,7 @@ export function createPostTurnHookChain(opts: {
     auditLogger,
     idleScheduler: opts.idleScheduler,
     settingsService: opts.settingsService,
+    sessionTodoStore: opts.sessionTodoStore,
   });
   return { postTurnHookChain, auditLogger };
 }
@@ -175,8 +182,14 @@ export interface ConversationDeps {
   broadcastPermissionConfigChanged?: () => void;
   /** C2(c): current-turn SkillOverlay handle, cleared on newConversation(). */
   skillOverlay?: { clear(sessionId: string): void };
-  /** Session-scoped assistant TO-DO lifecycle. */
-  sessionTodoStore?: SessionTodoStore;
+  /**
+   * Session-scoped assistant TO-DO lifecycle. Required: the interactive loop
+   * must run the next-turn `clearIfPending`. A missing wire silently disables
+   * completed-plan clearing — the post-turn hook would keep marking sessions
+   * that nothing consumes. Routine loops use a separate factory and never
+   * carry this store.
+   */
+  sessionTodoStore: SessionTodoStore;
   /** Issue #260: optional notification service for turn-end auto-fire. */
   notificationService?: NotificationService;
   auditLogger?: AuditLogger;

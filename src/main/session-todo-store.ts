@@ -5,11 +5,27 @@
  * persistence: never written to disk.
  *
  * State shape: sessionId → ordered array of {id, content, status}. Durable
- * item statuses are pending/in_progress/completed. Completed plans are cleared
- * at the next explicit user/user-queued turn boundary. Unfinished plans stay
- * visible because they still represent active assistant work. The update-only
- * "deleted" command may remove items, but it must not create the empty-list
- * clear event.
+ * item statuses are pending/in_progress/completed.
+ *
+ * Completed-plan clear is a deterministic two-step lifecycle so a finished
+ * plan stays visible through the turn that completed it and clears exactly at
+ * the next turn boundary, regardless of input origin:
+ *
+ *   1. mark (`markForClearIfCompleted`) — the post-turn hook chain runs after
+ *      every turn. If the plan is fully completed it records the sessionId in
+ *      `pendingClear` WITHOUT emitting, so the panel stays on screen for the
+ *      turn that finished it.
+ *   2. execute (`clearIfPending`) — at the next turn start the conversation
+ *      loop drops any pending session unconditionally (delete + empty-list
+ *      emit). No input-origin gate, so routine/headless turns clear too.
+ *
+ * Any `write(...)` that re-sets items drops the pending mark, so a plan that
+ * changed after being marked is re-evaluated by the next post-turn hook rather
+ * than firing a stale clear. Manual dismiss (`clear`) also drops the mark.
+ *
+ * Unfinished plans stay visible because they still represent active assistant
+ * work. The update-only "deleted" command may remove items, but it must not
+ * create the empty-list clear event.
  */
 import { randomUUID } from "node:crypto";
 import { createLogger } from "../lib/logger.js";
@@ -31,6 +47,11 @@ export class SessionTodoEmptyPlanError extends Error {
 export class SessionTodoStore {
   private readonly sessions = new Map<string, SessionTodoItem[]>();
   private readonly listeners = new Set<SessionTodoListener>();
+  /**
+   * Sessions whose fully-completed plan was marked by the post-turn hook and
+   * is awaiting clear at the next turn boundary. Never observable to listeners.
+   */
+  private readonly pendingClear = new Set<string>();
 
   list(sessionId: string): SessionTodoItem[] {
     const items = this.sessions.get(sessionId) ?? [];
@@ -80,6 +101,9 @@ export class SessionTodoStore {
     }
     if (merged.length === 0) return [];
     this.sessions.set(sessionId, merged);
+    // A write that re-sets items invalidates any prior completion mark: the
+    // plan changed, so the next post-turn hook re-evaluates it from scratch.
+    this.pendingClear.delete(sessionId);
     for (const l of this.listeners) {
       try {
         l(sessionId, merged.map((i) => ({ ...i })));
@@ -90,22 +114,49 @@ export class SessionTodoStore {
     return merged.map((i) => ({ ...i }));
   }
 
-  clearForTurnStart(sessionId: string): boolean {
+  /**
+   * Mark step of the deterministic clear lifecycle (post-turn hook). Marks the
+   * session for clear at the next turn boundary IFF it currently holds a
+   * fully-completed plan. MUST NOT emit — the panel stays visible through the
+   * turn that completed it. A no-longer-completed plan is defensively unmarked.
+   *
+   * @returns true when the session was marked, false otherwise.
+   */
+  markForClearIfCompleted(sessionId: string): boolean {
     const items = this.sessions.get(sessionId) ?? [];
-    if (items.length === 0) return false;
-    if (!items.every((item) => item.status === "completed")) return false;
+    if (items.length > 0 && items.every((item) => item.status === "completed")) {
+      this.pendingClear.add(sessionId);
+      return true;
+    }
+    this.pendingClear.delete(sessionId);
+    return false;
+  }
+
+  /**
+   * Execute step of the deterministic clear lifecycle (next turn start). If the
+   * session was marked by a prior post-turn hook, drop it now (delete + empty
+   * emit) and consume the mark. Unconditional — no input-origin gate — so
+   * routine/headless turns clear completed plans too.
+   *
+   * @returns true when a pending session was cleared, false otherwise.
+   */
+  clearIfPending(sessionId: string): boolean {
+    if (!this.pendingClear.has(sessionId)) return false;
     this.clear(sessionId);
     return true;
   }
 
   /**
    * Explicit-clear path: drop the session and emit an empty list to listeners.
-   * Used by both the turn-start auto-clear and the manual dismiss affordance.
-   * Distinct from the update-only `deleted` command, which removes items but
-   * must never produce the empty-list clear event.
+   * Used by both `clearIfPending` (deterministic next-turn execute) and the
+   * manual dismiss affordance. Also drops any pending completion mark so a
+   * dismissed plan cannot fire a stale clear. Distinct from the update-only
+   * `deleted` command, which removes items but must never produce the
+   * empty-list clear event.
    */
   clear(sessionId: string): void {
     this.sessions.delete(sessionId);
+    this.pendingClear.delete(sessionId);
     for (const l of this.listeners) {
       try {
         l(sessionId, []);
