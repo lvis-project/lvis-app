@@ -912,6 +912,7 @@ export async function bootstrap(
     },
     pluginRuntime,
     skillOverlay,
+    sessionTodoStore,
     notificationService,
     auditLogger: bootAuditLogger,
     rewireReviewerAgent,
