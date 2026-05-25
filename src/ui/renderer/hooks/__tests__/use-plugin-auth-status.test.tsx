@@ -4,7 +4,7 @@ import { renderHook, waitFor, act } from "@testing-library/react";
 import { usePluginAuthStatuses } from "../use-plugin-auth-status.js";
 import type { LvisApi, PluginCardSummary } from "../../types.js";
 
-function makePlugin(id: string, withAuth: boolean): PluginCardSummary {
+function makePlugin(id: string, withAuth: boolean, overrides: Partial<PluginCardSummary> = {}): PluginCardSummary {
   return {
     id,
     name: id,
@@ -21,6 +21,7 @@ function makePlugin(id: string, withAuth: boolean): PluginCardSummary {
           logoutTool: "foo_signout",
         }
       : undefined,
+    ...overrides,
   };
 }
 
@@ -68,6 +69,63 @@ describe("usePluginAuthStatuses", () => {
     await waitFor(() => {
       expect(result.current.statuses.get("ms-graph")?.kind).toBe("unauthed");
     });
+  });
+
+  it("keeps auth checks for inactive plugins that still have a loaded runtime", async () => {
+    const api = {
+      callPluginMethod: vi.fn(async () => ({ authenticated: false })),
+      onPluginEvent: vi.fn(() => () => undefined),
+    } as unknown as LvisApi;
+
+    const { result } = renderHook(() =>
+      usePluginAuthStatuses(api, [
+        makePlugin("inactive-auth", true, {
+          loadStatus: "disabled",
+          active: false,
+          runtimeLoaded: true,
+        }),
+      ]),
+    );
+
+    await waitFor(() => {
+      expect(result.current.statuses.get("inactive-auth")?.kind).toBe("unauthed");
+    });
+    expect(api.callPluginMethod).toHaveBeenCalledWith("foo_status");
+  });
+
+  it("skips auth checks for non-callable failed/preparing runtimes", async () => {
+    const api = {
+      callPluginMethod: vi.fn(),
+      onPluginEvent: vi.fn(() => () => undefined),
+    } as unknown as LvisApi;
+
+    const { result } = renderHook(() =>
+      usePluginAuthStatuses(api, [
+        makePlugin("failed-auth", true, { loadStatus: "failed", active: false, runtimeLoaded: false }),
+        makePlugin("preparing-auth", true, { loadStatus: "preparing", active: false, runtimeLoaded: false }),
+      ]),
+    );
+
+    expect(result.current.statuses.size).toBe(0);
+    expect(api.callPluginMethod).not.toHaveBeenCalled();
+  });
+
+  it("manual refresh does not invoke statusTool for a non-callable runtime", async () => {
+    const api = {
+      callPluginMethod: vi.fn(),
+      onPluginEvent: vi.fn(() => () => undefined),
+    } as unknown as LvisApi;
+
+    const { result } = renderHook(() =>
+      usePluginAuthStatuses(api, [
+        makePlugin("failed-auth", true, { loadStatus: "failed", active: false, runtimeLoaded: false }),
+      ]),
+    );
+
+    act(() => result.current.refresh("failed-auth"));
+
+    expect(result.current.statuses.size).toBe(0);
+    expect(api.callPluginMethod).not.toHaveBeenCalled();
   });
 
   it("surfaces error when statusTool rejects", async () => {

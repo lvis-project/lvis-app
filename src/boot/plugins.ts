@@ -88,6 +88,9 @@ export function syncPluginToolRegistry(
     ...toolRegistry.listPluginIds(),
     ...entries.map(({ pluginId }) => pluginId),
   ]);
+  // ToolRegistry is the execution registry, not the model-exposure SOT.
+  // Inactive runtime-loaded plugins keep tools registered so auth/config/UI
+  // calls remain callable; ConversationLoop scope gates model visibility.
   const tools = pluginToolsForRuntimeEntries(pluginRuntime, entries);
   toolRegistry.replacePluginTools(pluginIds, tools);
 }

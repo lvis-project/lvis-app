@@ -52,6 +52,10 @@ export interface ToolSearchState {
   sessionSearches: number;
   /** 이번 턴 scope 에 로드된 tool name (mutation 가능). */
   activeToolNames: Set<string>;
+  /** 현재 provider `tools[]`에 이미 노출된 full-schema tool names. */
+  loadedToolNames?: Set<string>;
+  /** 현재 provider `tools[]`에 이미 노출된 full-schema tools. */
+  loadedTools?: ToolSearchCatalogEntry[];
   /** 현재 catalog (아직 로드되지 않은 in-scope plugin/mcp tool). */
   catalog: ToolSearchCatalogEntry[];
 }
@@ -63,6 +67,8 @@ export interface ToolSearchOutcome {
   remaining: ToolUseBlock[];
   /** promote 에 성공한 tool name 목록 — 호출자가 toolSchemas rebuild 신호로 사용. */
   promotedToolNames: string[];
+  /** tool_search asked for a tool that is already present in provider tools[]. */
+  alreadyLoadedToolNames: string[];
   /** 갱신된 턴 카운터. */
   nextTurnSearches: number;
   /** 갱신된 세션 카운터. */
@@ -165,6 +171,7 @@ export function handleToolSearch(
   const results: ToolSearchOutcome["results"] = [];
   const remaining: ToolUseBlock[] = [];
   const promotedToolNames: string[] = [];
+  const alreadyLoadedToolNames: string[] = [];
   let turnSearches = state.turnSearches;
   let sessionSearches = state.sessionSearches;
 
@@ -204,34 +211,53 @@ export function handleToolSearch(
       });
     } else {
       const normalizedQuery = query.trim().toLowerCase();
-      const exactLoaded = [...state.activeToolNames].some(
-        (name) => name.toLowerCase() === normalizedQuery,
+      const loadedCatalog = state.loadedTools ?? [...(state.loadedToolNames ?? state.activeToolNames)]
+        .map((name) => ({ name, description: "" }));
+      const exactLoaded = loadedCatalog.find(
+        (tool) => tool.name.toLowerCase() === normalizedQuery,
       );
-      const matches = exactLoaded
-        ? []
-        : matchCatalog(query, state.catalog).filter(
-            (m) => !state.activeToolNames.has(m.name),
-          );
-      if (matches.length === 0) {
+      if (exactLoaded) {
+        alreadyLoadedToolNames.push(exactLoaded.name);
         results.push({
           tool_use_id: tu.id,
-          content:
-            `'${query}' 에 매치되는 미로드 도구 없음. ` +
-            `현재 카탈로그: ${state.catalog.map((c) => c.name).join(", ") || "(없음)"}`,
-          is_error: true,
-        });
-      } else {
-        for (const m of matches) {
-          state.activeToolNames.add(m.name);
-          promotedToolNames.push(m.name);
-        }
-        turnSearches += 1;
-        sessionSearches += 1;
-        results.push({
-          tool_use_id: tu.id,
-          content: `${matches.length}개 도구 로드됨: ${matches.map((m) => m.name).join(", ")}.`,
+          content: `${exactLoaded.name} 는 이미 로드되어 있습니다. 바로 호출하세요.`,
           is_error: false,
         });
+      } else {
+        const matches = matchCatalog(query, state.catalog).filter(
+          (m) => !state.activeToolNames.has(m.name),
+        );
+        if (matches.length === 0) {
+          const loadedMatches = matchCatalog(query, loadedCatalog);
+          if (loadedMatches.length > 0) {
+            for (const match of loadedMatches) alreadyLoadedToolNames.push(match.name);
+            results.push({
+              tool_use_id: tu.id,
+              content: `${loadedMatches.map((m) => m.name).join(", ")} 는 이미 로드되어 있습니다. 바로 호출하세요.`,
+              is_error: false,
+            });
+          } else {
+            results.push({
+              tool_use_id: tu.id,
+              content:
+                `'${query}' 에 매치되는 미로드 도구 없음. ` +
+                `현재 카탈로그: ${state.catalog.map((c) => c.name).join(", ") || "(없음)"}`,
+              is_error: true,
+            });
+          }
+        } else {
+          for (const m of matches) {
+            state.activeToolNames.add(m.name);
+            promotedToolNames.push(m.name);
+          }
+          turnSearches += 1;
+          sessionSearches += 1;
+          results.push({
+            tool_use_id: tu.id,
+            content: `${matches.length}개 도구 로드됨: ${matches.map((m) => m.name).join(", ")}.`,
+            is_error: false,
+          });
+        }
       }
     }
   }
@@ -240,6 +266,7 @@ export function handleToolSearch(
     results,
     remaining,
     promotedToolNames,
+    alreadyLoadedToolNames,
     nextTurnSearches: turnSearches,
     nextSessionSearches: sessionSearches,
   };
