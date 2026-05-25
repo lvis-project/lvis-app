@@ -348,6 +348,9 @@ describe("SessionTodoPanel", () => {
     await openPanel(container);
     expect(await findByText("step 1")).toBeInTheDocument();
     expect(await findByText("step 2")).toBeInTheDocument();
+    const panel = container.querySelector('[data-testid="session-todo-panel"]');
+    expect(panel?.querySelectorAll("button")).toHaveLength(1);
+    expect(panel?.textContent).not.toContain("수정");
   });
 
   it("pulses the in-progress row in the expanded view so it's the focal point", async () => {
@@ -457,6 +460,102 @@ describe("SessionTodoPanel", () => {
     const chip = await findByTestId("session-todo-fresh");
     expect(chip.textContent).toContain("새 시작");
     expect(queryByTestId("session-todo-continuation")).toBeNull();
+  });
+
+  it("expires transient session todo badges without clearing the plan", async () => {
+    vi.useFakeTimers();
+    try {
+      let pushPayload: ((p: {
+        sessionId: string;
+        items: Array<{ id: string; content: string; status: string }>;
+      }) => void) | null = null;
+      const api = fakeApi({
+        listSessionTodos: () => Promise.resolve([]),
+        onSessionTodoChanged: ((handler: (p: {
+          sessionId: string;
+          items: Array<{ id: string; content: string; status: string }>;
+        }) => void) => {
+          pushPayload = handler;
+          return () => undefined;
+        }) as never,
+      });
+      const { container, getByTestId, getByText, queryByTestId } = render(
+        <SessionTodoPanel api={api} sessionId="session-expire" />,
+      );
+
+      await act(async () => {
+        await Promise.resolve();
+        pushPayload!({
+          sessionId: "session-expire",
+          items: [{ id: "n1", content: "freshly authored", status: "pending" }],
+        });
+      });
+      expect(getByTestId("session-todo-fresh").textContent).toContain("새 시작");
+
+      await act(async () => {
+        vi.advanceTimersByTime(5_000);
+      });
+      expect(queryByTestId("session-todo-fresh")).toBeNull();
+      expect(getByTestId("session-todo-panel")).toBeInTheDocument();
+      await openPanel(container);
+      expect(getByText("freshly authored")).toBeInTheDocument();
+
+      await act(async () => {
+        pushPayload!({
+          sessionId: "session-expire",
+          items: [
+            { id: "n1", content: "freshly authored", status: "pending" },
+            { id: "n2", content: "added", status: "pending" },
+          ],
+        });
+      });
+      expect(getByTestId("session-todo-added").textContent).toContain("추가");
+
+      await act(async () => {
+        vi.advanceTimersByTime(5_000);
+      });
+      expect(queryByTestId("session-todo-added")).toBeNull();
+      expect(getByTestId("session-todo-panel")).toBeInTheDocument();
+      expect(getByText("added")).toBeInTheDocument();
+
+      await act(async () => {
+        pushPayload!({
+          sessionId: "session-expire",
+          items: [
+            { id: "n1", content: "freshly authored", status: "in_progress" },
+            { id: "n2", content: "added", status: "pending" },
+          ],
+        });
+      });
+      expect(getByTestId("session-todo-updated").textContent).toContain("수정");
+
+      await act(async () => {
+        vi.advanceTimersByTime(5_000);
+      });
+      expect(queryByTestId("session-todo-updated")).toBeNull();
+      expect(getByTestId("session-todo-panel")).toBeInTheDocument();
+      expect(getByText("freshly authored")).toBeInTheDocument();
+
+      await act(async () => {
+        pushPayload!({
+          sessionId: "session-expire",
+          items: [
+            { id: "n1", content: "freshly authored", status: "completed" },
+            { id: "n2", content: "added", status: "completed" },
+          ],
+        });
+      });
+      expect(getByTestId("session-todo-completed").textContent).toContain("완료");
+
+      await act(async () => {
+        vi.advanceTimersByTime(5_000);
+      });
+      expect(queryByTestId("session-todo-completed")).toBeNull();
+      expect(getByTestId("session-todo-panel")).toBeInTheDocument();
+      expect(getByText("freshly authored")).toBeInTheDocument();
+    } finally {
+      vi.useRealTimers();
+    }
   });
 
   it("keeps the '새 시작' chip when a live push beats the initial list fetch", async () => {
@@ -624,7 +723,7 @@ describe("SessionTodoPanel", () => {
     expect(queryByTestId("session-todo-continuation")).toBeNull();
   });
 
-  it("shows add and update chips for non-initial mutations", async () => {
+  it("shows add, update, and completed chips for non-initial mutations", async () => {
     let pushPayload: ((p: {
       sessionId: string;
       items: Array<{ id: string; content: string; status: string }>;
@@ -667,6 +766,18 @@ describe("SessionTodoPanel", () => {
     });
     expect((await findByTestId("session-todo-updated")).textContent).toContain("수정");
     expect(queryByTestId("session-todo-added")).toBeNull();
+
+    await act(async () => {
+      pushPayload!({
+        sessionId: "session-mutate",
+        items: [
+          { id: "t1", content: "first", status: "completed" },
+          { id: "t2", content: "second", status: "completed" },
+        ],
+      });
+    });
+    expect((await findByTestId("session-todo-completed")).textContent).toContain("완료");
+    expect(queryByTestId("session-todo-updated")).toBeNull();
   });
 
   it("shows the update chip for same-turn reorder-only mutations", async () => {

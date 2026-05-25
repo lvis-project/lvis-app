@@ -344,6 +344,29 @@ describe("todo_session_write tool", () => {
     const after3 = JSON.parse(r3.output).items as Array<{ content: string }>;
     expect(after3.map((i) => i.content)).toEqual(["step 2", "step 3"]);
   });
+
+  it("rejects deleting every session todo item", async () => {
+    const store = new SessionTodoStore();
+    const tool = createTodoSessionWriteTool(store);
+    const r1 = await tool.execute(
+      {
+        items: [{ content: "step 1", status: "pending" }],
+      },
+      ctx("s-delete-all"),
+    );
+    const [step1] = JSON.parse(r1.output).items as Array<{ id: string; content: string }>;
+
+    const r2 = await tool.execute(
+      {
+        items: [{ id: step1.id, status: "deleted" }],
+      },
+      ctx("s-delete-all"),
+    );
+
+    expect(r2.isError).toBe(true);
+    expect(r2.output).toContain("cannot delete every item");
+    expect(store.list("s-delete-all").map((item) => item.content)).toEqual(["step 1"]);
+  });
 });
 
 describe("agent_spawn tool", () => {
