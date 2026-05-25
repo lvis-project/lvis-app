@@ -174,6 +174,34 @@ describe("NotificationService — routing decision", () => {
     expect(log.input).not.toContain("hello world");
   });
 
+  it("system notifications route through the same in-app toast path", () => {
+    const win = makeMockWindow({ focused: true, minimized: false });
+    const svc = new NotificationService({
+      getMainWindow: () => win as unknown as Electron.BrowserWindow,
+      auditLogger,
+      notificationFactory: factoryStub.factory,
+      isReady: () => true,
+      isTestEnv: () => false,
+      isAnyWindowFocused: () => true,
+    });
+
+    svc.fire({
+      kind: "system",
+      title: "LVIS reference 업데이트 사용 가능",
+      body: "~/.lvis/AGENTS.md.new 를 검토해 병합하거나 삭제하세요.",
+    });
+
+    expect(win.webContents.send).toHaveBeenCalledWith(
+      IPC_NOTIFICATION_TOAST,
+      expect.objectContaining({
+        kind: "system",
+        title: "LVIS reference 업데이트 사용 가능",
+      }),
+    );
+    const log = (auditLogger.log as unknown as ReturnType<typeof vi.fn>).mock.calls[0][0];
+    expect(JSON.parse(log.input).kind).toBe("system");
+  });
+
   it("minimized window → OS notification path", () => {
     const win = makeMockWindow({ focused: false, minimized: true });
     const svc = new NotificationService({
