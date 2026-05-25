@@ -12,8 +12,33 @@ import {
 import {
   isSessionTodoUpdateStatus,
   SESSION_TODO_UPDATE_STATUSES,
+  type SessionTodoItem,
   type SessionTodoUpdate,
 } from "../shared/session-todo.js";
+
+/**
+ * An update changes the plan when it adds/moves an item, deletes one, or
+ * shifts an existing item's status or content. A call whose every update
+ * leaves the current state untouched (e.g. re-marking an already-in_progress
+ * item in_progress) is a no-op: it burns a full-context round without moving
+ * the checklist. We detect that to nudge the model out of redundant re-mark
+ * loops rather than silently re-writing identical state.
+ */
+function updateChangesPlan(
+  u: SessionTodoUpdate,
+  current: Map<string, SessionTodoItem>,
+): boolean {
+  // Reorder intent — we do not compute the resulting order here, so never
+  // suppress it.
+  if (u.beforeId || u.afterId) return true;
+  // New item, or an id we have not seen yet → it adds to the plan.
+  if (!u.id) return true;
+  const cur = current.get(u.id);
+  if (!cur) return true;
+  if (u.status !== cur.status) return true;
+  if (u.content !== undefined && u.content !== cur.content) return true;
+  return false;
+}
 
 export function createTodoSessionWriteTool(store: SessionTodoStore): Tool {
   return createDynamicTool({
@@ -87,6 +112,20 @@ export function createTodoSessionWriteTool(store: SessionTodoStore): Tool {
         return {
           output: JSON.stringify({ error: "no valid items provided" }),
           isError: true,
+        };
+      }
+      // No-op guard — if no update would change the current plan (the
+      // already-in_progress re-mark loop), skip the write and tell the model
+      // to stop re-sending unchanged state and continue with work tools.
+      const current = new Map(store.list(sessionId).map((i) => [i.id, i]));
+      if (!updates.some((u) => updateChangesPlan(u, current))) {
+        return {
+          output: JSON.stringify({
+            items: store.list(sessionId),
+            changed: false,
+            note: "No item changed state — do not call todo_session_write again for the same status. Continue with work tools and only update the TO-DO when an item actually advances.",
+          }),
+          isError: false,
         };
       }
       let merged;
