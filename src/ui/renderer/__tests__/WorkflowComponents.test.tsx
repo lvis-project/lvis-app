@@ -486,7 +486,7 @@ describe("SessionTodoPanel", () => {
         return () => undefined;
       }) as never,
     });
-    const { findByText, queryByTestId, queryByText, container } = render(
+    const { findByText, queryByText, container } = render(
       <SessionTodoPanel api={api} sessionId="session-race" />,
     );
 
