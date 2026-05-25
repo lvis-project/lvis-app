@@ -1,8 +1,13 @@
 /**
  * Post-Turn Hook Chain — turn 완료 후 실행
  *
- * mark-stale → detect-checkpoint → saveSession → extractMemory → update-title → auditLog → idle-poke 순차 실행.
+ * mark-stale → detect-checkpoint → saveSession → extractMemory → update-title → auditLog → mark-session-todo-for-clear → idle-poke 순차 실행.
  * 각 단계는 독립적이며 한 단계 실패가 다음을 차단하지 않음.
+ *
+ * mark-session-todo-for-clear: 이 턴이 완료한 session TO-DO 플랜이 전부
+ * completed 이면 SessionTodoStore 에 *마킹만* 한다 (emit 없음 → 패널은 이 턴
+ * 동안 그대로 보임). 실제 clear 는 다음 턴 시작에서 conversation-loop 의
+ * `clearIfPending` 가 input-origin 무관하게 결정적으로 수행한다.
  *
  * Post-turn full compact is intentionally absent. Token preflight (`runPreflightGuard`,
  * conversation-loop.ts) handles LLM-based compaction before the next turn.
@@ -74,6 +79,13 @@ export interface PostTurnHookChainDeps {
    * Caller (typically conversation-loop or IPC bridge) can trigger summary handling.
    */
   onCheckpointSuggested?: (sessionId: string, cleanedOutput: string) => void;
+  /**
+   * Session-scoped assistant TO-DO lifecycle — mark side. When the turn just
+   * completed a fully-completed plan, the chain marks it for clear at the next
+   * turn boundary (the conversation loop executes via `clearIfPending`). Marking
+   * never emits, so the panel persists through the completing turn.
+   */
+  sessionTodoStore?: { markForClearIfCompleted(sessionId: string): boolean };
 }
 
 export interface PostTurnHookResult {
@@ -229,6 +241,18 @@ export class PostTurnHookChain {
       });
     } catch (err) {
       log.warn("audit failed: %s", err);
+    }
+
+    // Mark completed session TO-DO for clear at the next turn boundary.
+    //    Deterministic, runs after every turn. Marking does not emit, so the
+    //    panel stays visible through the turn that completed it; the
+    //    conversation loop clears it unconditionally at the next turn start.
+    try {
+      if (this.deps.sessionTodoStore?.markForClearIfCompleted(ctx.sessionId)) {
+        log.info(`mark-session-todo-for-clear: marked session ${ctx.sessionId} for next-turn clear`);
+      }
+    } catch (err) {
+      log.warn("mark-session-todo-for-clear failed: %s", err);
     }
 
     // 7. Idle poke.

@@ -879,6 +879,7 @@ export async function bootstrap(
     idleScheduler,
     settingsService,
     auditLogger: bootAuditLogger,
+    sessionTodoStore,
   });
 
   // ApprovalGate already constructed above (before initPluginRuntime) so the
