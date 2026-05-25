@@ -4,6 +4,7 @@ import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "../../
 
 const EMOJI_FONT_STACK =
   "'Apple Color Emoji', 'Segoe UI Emoji', 'Noto Color Emoji', 'Twemoji Mozilla', sans-serif";
+const EMOJI_STYLE = { fontFamily: EMOJI_FONT_STACK };
 
 /**
  * Bottom status bar (#231). Two slots:
@@ -91,7 +92,8 @@ export function StatusBar(props: StatusBarProps) {
                 )}
                 {item.label !== undefined && item.label.length > 0 && (
                   <span
-                    style={{ fontFamily: EMOJI_FONT_STACK }}
+                    data-status-bar-emoji="true"
+                    style={EMOJI_STYLE}
                     className="shrink-0 leading-none"
                     aria-hidden="true"
                   >

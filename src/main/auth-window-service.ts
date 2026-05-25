@@ -325,9 +325,21 @@ export function filterCookiesByHost(cookies: Cookie[], allowedHosts: string[]): 
  * 같은 파라미터에 목적지 URL 을 담아 보내 IdP 도메인에 있는 상태에서
  * 거짓 양성으로 "완료" 판정되는 것을 막는다.
  */
-export function isCompletionUrl(url: string, patterns: string[]): boolean {
+export function isCompletionUrl(url: string, patterns: readonly string[]): boolean {
   const target = extractCompletionTarget(url);
   return patterns.some((p) => target.includes(p));
+}
+
+export function shouldGraceCollectClosedAuthWindow(input: {
+  webviewAttached: boolean;
+  lastCommittedUrl: string | null;
+  completionPatterns: readonly string[];
+}): boolean {
+  return (
+    input.webviewAttached &&
+    input.lastCommittedUrl !== null &&
+    isCompletionUrl(input.lastCommittedUrl, input.completionPatterns)
+  );
 }
 
 /** URL for host-visible diagnostics only; strips query/hash to avoid token leaks. */
@@ -818,10 +830,11 @@ export async function openAuthWindow(
       const lastCommittedSanitized = lastCommittedUrl
         ? sanitizeUrlForLog(lastCommittedUrl)
         : null;
-      const isGraceEligible =
-        webviewAttached &&
-        lastCommittedUrl !== null &&
-        isCompletionUrl(lastCommittedUrl, normalizedCompletionPatterns);
+      const isGraceEligible = shouldGraceCollectClosedAuthWindow({
+        webviewAttached,
+        lastCommittedUrl,
+        completionPatterns: normalizedCompletionPatterns,
+      });
       if (isGraceEligible && lastCommittedUrl) {
         const capturedUrl = lastCommittedUrl;
         const partitionSession = session.fromPartition(effectivePartition);
