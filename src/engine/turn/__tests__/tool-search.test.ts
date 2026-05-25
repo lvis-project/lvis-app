@@ -17,6 +17,7 @@ import {
   MAX_TOOL_SEARCH_PER_SESSION,
   MAX_TOOL_SEARCH_PROMOTIONS_PER_SEARCH,
   MIN_CATALOG_MATCH_TOKEN_LENGTH,
+  _scoreCatalogEntryForTest,
   type ToolSearchState,
 } from "../tool-search.js";
 import type { ToolUseBlock } from "../../../tools/executor.js";
@@ -164,5 +165,48 @@ describe("handleToolSearch", () => {
     const out = handleToolSearch([search("tu-1", "meeting_start")], state);
     expect(out.results[0].is_error).toBe(true);
     expect(out.results[0].content).toContain("세션 한도 초과");
+  });
+});
+
+/**
+ * Direct scoring-guard tests — exercising `scoreCatalogEntry` via its
+ * test-only export so the MIN_CATALOG_MATCH_TOKEN_LENGTH guards inside the
+ * function are covered independently of the tokenizeQuery pre-filter.
+ * (The handleToolSearch tests above exercise the tokenizer path; these pin
+ * the scoring boundary itself, so deleting either guard fails a test.)
+ */
+describe("_scoreCatalogEntryForTest — scoring-boundary MIN_CATALOG_MATCH_TOKEN_LENGTH guard", () => {
+  const entry = { name: "meeting_start", description: "begin a recorded meeting" };
+
+  it("gives zero score to a token below the minimum length", () => {
+    // Passing a raw sub-min token directly to the scorer, bypassing tokenizeQuery.
+    // The guard on line 105 of tool-search.ts must catch it; without the guard
+    // "a" would score 30 via description.includes("a") on 'begin a recorded meeting'.
+    const score = _scoreCatalogEntryForTest("a", ["a"], entry);
+    expect(score).toBe(0);
+  });
+
+  it("scores a token of exactly the minimum length normally", () => {
+    // A 2-char token exactly at the threshold must still contribute score.
+    // "me" is a prefix of "meeting_start" → name.startsWith → +350.
+    const score = _scoreCatalogEntryForTest("me", ["me"], entry);
+    expect(score).toBeGreaterThan(0);
+  });
+
+  it("ignores sub-min tokens in a mixed array but scores valid tokens", () => {
+    // ["a", "meeting"] — "a" must contribute nothing; "meeting" (nameToken match)
+    // must contribute +300.  This directly pins both guards (lines 100 and 105).
+    const score = _scoreCatalogEntryForTest("a meeting", ["a", "meeting"], entry);
+    // Only "meeting" contributes: name.startsWith("meeting") → 350
+    // plus description.includes("meeting") → 30.
+    expect(score).toBe(380);
+  });
+
+  it("gives zero score when the whole query is below the minimum length", () => {
+    // The exact-match guard (query.length >= MIN_CATALOG_MATCH_TOKEN_LENGTH) on
+    // line 100 must prevent a 1-char query from scoring 1000 on a 1-char name.
+    const tiny = { name: "m", description: "shorthand tool" };
+    const score = _scoreCatalogEntryForTest("m", ["m"], tiny);
+    expect(score).toBe(0);
   });
 });
