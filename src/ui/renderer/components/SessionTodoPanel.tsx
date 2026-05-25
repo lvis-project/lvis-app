@@ -11,10 +11,12 @@
  * keeps streaming next to the badge — user always knows what the
  * assistant is working on without expanding.
  *
- * Continuation indicator: when items survive a panel re-mount on the same
- * `sessionId` we surface a small "이어서" badge so the user can tell the
- * panel is continuing prior work rather than starting fresh. Without this
- * the user reported confusion about whether a new turn resets state.
+ * Manual dismiss: when every item is completed (6/6) the header surfaces an
+ * X button so the user can close a finished plan immediately. The actual
+ * clear is driven by the store emitting an empty list (which makes the panel
+ * return null), not a local-only hide — this keeps the renderer in sync with
+ * the store SOT. This is an interim manual affordance while the turn-start
+ * auto-clear (gated to completed + input-origin) is unreliable.
  *
  * Session filtering: pushes from `onSessionTodoChanged` are filtered by
  * the current `sessionId` prop so a stale session's emissions cannot
@@ -24,14 +26,10 @@
  */
 import { useCallback, useEffect, useRef, useState } from "react";
 import {
-  CheckCircle2,
   ChevronDown,
   ChevronRight,
   ListChecks,
-  Pencil,
-  Plus,
-  RotateCcw,
-  Sparkles,
+  X,
 } from "lucide-react";
 import { Badge } from "../../../components/ui/badge.js";
 import { Button } from "../../../components/ui/button.js";
@@ -41,12 +39,6 @@ import {
   type SessionTodoStatus,
 } from "../../../shared/session-todo.js";
 import type { LvisApi } from "../types.js";
-
-type PlanBadge = "fresh" | "resumed";
-type ChangeBadge = "added" | "updated" | "completed";
-type TransientBadge<T extends string> = { kind: T; revision: number };
-
-const TRANSIENT_BADGE_TTL_MS = 5_000;
 
 const STATUS_BADGE: Record<SessionTodoStatus, { label: string; cls: string; dot: string }> = {
   pending: {
@@ -99,44 +91,15 @@ function prefersReducedMotion(): boolean {
   }
 }
 
-function classifyTodoChange(
-  prev: readonly SessionTodoItem[],
-  next: readonly SessionTodoItem[],
-): ChangeBadge | null {
-  const prevById = new Map(prev.map((item) => [item.id, item]));
-  const nextById = new Map(next.map((item) => [item.id, item]));
-  const completed = next.length > 0 && next.every((item) => item.status === "completed");
-  if (completed) return "completed";
-  const added = next.some((item) => !prevById.has(item.id));
-  if (added) return "added";
-  const updated = next.some((item) => {
-    const before = prevById.get(item.id);
-    return Boolean(before && (before.content !== item.content || before.status !== item.status));
-  });
-  if (updated) return "updated";
-  const reordered = next.some((item, index) => prev[index]?.id !== item.id);
-  if (reordered) return "updated";
-  const removed = prev.some((item) => !nextById.has(item.id));
-  return removed ? "updated" : null;
-}
-
-function nextTransientBadge<T extends string>(
-  kind: T,
-  current: { revision: number } | null,
-): TransientBadge<T> {
-  return { kind, revision: (current?.revision ?? 0) + 1 };
-}
-
 export function SessionTodoPanel({
   api,
   sessionId,
 }: {
   api: LvisApi;
   /**
-   * Current chat session id. Used to (a) filter incoming `:changed`
-   * pushes so a stale session can't clobber the visible list, and (b)
-   * decide whether to render the "이어서" continuation chip when the
-   * panel re-mounts on the same id with prior items.
+   * Current chat session id. Used to filter incoming `:changed` pushes so a
+   * stale session can't clobber the visible list, and to scope the manual
+   * dismiss clear to the active session.
    */
   sessionId?: string;
 }) {
@@ -146,59 +109,21 @@ export function SessionTodoPanel({
   // in-progress item title, so the user sees the active step at a glance and
   // expands only when they want the full list.
   const [open, setOpen] = useState(false);
-  // Plan marker: "resumed" only when the initial fetch finds existing items;
-  // "fresh" when a live push creates a plan after an empty/cleared state.
-  // Kept separate from item state so late initial fetches cannot overwrite a
-  // live "fresh" push that arrived first.
-  const [planBadge, setPlanBadge] = useState<TransientBadge<PlanBadge> | null>(null);
-  // Last non-initial mutation marker. This is intentionally lightweight UI
-  // state derived from item diffs; the store remains the item-list SOT.
-  const [changeBadge, setChangeBadge] = useState<TransientBadge<ChangeBadge> | null>(null);
   const itemsRef = useRef<SessionTodoItem[]>([]);
   const latestSessionIdRef = useRef<string | undefined>(sessionId);
   const hasLivePushRef = useRef(false);
   latestSessionIdRef.current = sessionId;
 
+  // The store remains the item-list SOT. A late initial fetch must not
+  // overwrite items that a live push already applied, so we guard
+  // initial-fetch updates behind the `hasLivePushRef` flag.
   const applyItems = useCallback((next: SessionTodoItem[], source: "initial-fetch" | "push") => {
-    const prev = itemsRef.current;
     if (source === "initial-fetch" && hasLivePushRef.current) {
       return;
     }
     itemsRef.current = next;
     setItems(next);
-
-    if (next.length === 0) {
-      setPlanBadge(null);
-      setChangeBadge(null);
-      return;
-    }
-
-    if (source === "initial-fetch") {
-      setPlanBadge((current) => current ?? nextTransientBadge("resumed", current));
-      return;
-    }
-
-    if (prev.length === 0) {
-      setPlanBadge((current) => current ?? nextTransientBadge("fresh", current));
-      setChangeBadge(null);
-      return;
-    }
-
-    const change = classifyTodoChange(prev, next);
-    setChangeBadge((current) => (change ? nextTransientBadge(change, current) : null));
   }, []);
-
-  useEffect(() => {
-    if (planBadge === null) return undefined;
-    const timer = window.setTimeout(() => setPlanBadge(null), TRANSIENT_BADGE_TTL_MS);
-    return () => window.clearTimeout(timer);
-  }, [planBadge?.revision]);
-
-  useEffect(() => {
-    if (changeBadge === null) return undefined;
-    const timer = window.setTimeout(() => setChangeBadge(null), TRANSIENT_BADGE_TTL_MS);
-    return () => window.clearTimeout(timer);
-  }, [changeBadge?.revision]);
 
   const refresh = useCallback(async () => {
     const requestedSessionId = sessionId;
@@ -248,8 +173,6 @@ export function SessionTodoPanel({
   // refresh covers both "swap to a session that has todos" (fetch repopulates)
   // and "swap to a session that has none" (fetch returns []).
   useEffect(() => {
-    setPlanBadge(null);
-    setChangeBadge(null);
     hasLivePushRef.current = false;
     itemsRef.current = [];
     setItems([]);
@@ -260,6 +183,8 @@ export function SessionTodoPanel({
   const visible = items;
   const completedCount = items.filter((i) => i.status === "completed").length;
   const inProgress = items.find((i) => i.status === "in_progress");
+  // A completed plan is the trigger for the manual dismiss affordance.
+  const allComplete = visible.length > 0 && completedCount === visible.length;
   // Collapsed-header focus: prefer the in-progress item; if none yet (e.g. a
   // freshly-set plan still all-pending before step 1 is marked in_progress),
   // fall back to the first non-completed item so the closed header never goes
@@ -270,6 +195,16 @@ export function SessionTodoPanel({
   // signal "active" (still readable, no jitter for sensitive users).
   const activePulse = reduceMotion ? "" : "animate-pulse";
 
+  const handleDismiss = async () => {
+    try {
+      await api.clearSessionTodos(sessionId);
+    } catch (err) {
+      // Silent failure: the panel stays visible if the clear didn't land.
+      // No user-facing text — the store emit is what actually clears the view.
+      console.warn("session-todo dismiss failed:", err);
+    }
+  };
+
   return (
     <div
       // The input cluster below us already draws its own `border-t bg-card`
@@ -279,85 +214,53 @@ export function SessionTodoPanel({
       data-testid="session-todo-panel"
       data-session-id={sessionId ?? ""}
     >
-      <Button
-        type="button"
-        variant="ghost"
-        className="h-auto w-full justify-start gap-2 rounded-none px-3 py-1.5 text-xs font-normal hover:bg-warning/10"
-        onClick={() => setOpen((o) => !o)}
-      >
-        {open ? <ChevronDown className="h-3 w-3" /> : <ChevronRight className="h-3 w-3" />}
-        <ListChecks className="h-3 w-3" />
-        <span className="font-medium">세션 TO-DO</span>
-        <Badge variant="outline" className="px-1 py-0 text-[10px]">
-          {completedCount}/{visible.length}
-        </Badge>
-        {/* Plan chip — transient signal for the current session plan boundary. */}
-        {planBadge?.kind === "resumed" && (
-          <span
-            className="ml-1 inline-flex items-center gap-1 rounded-full bg-warning/15 px-1.5 py-0 text-[10px] text-warning"
-            data-testid="session-todo-continuation"
-            title="현재 턴에서 작성된 TO-DO 를 이어서 진행 중"
+      <div className="flex items-center hover:bg-warning/10">
+        <Button
+          type="button"
+          variant="ghost"
+          className="h-auto flex-1 min-w-0 justify-start gap-2 rounded-none px-3 py-1.5 text-xs font-normal hover:bg-transparent"
+          onClick={() => setOpen((o) => !o)}
+        >
+          {open ? <ChevronDown className="h-3 w-3" /> : <ChevronRight className="h-3 w-3" />}
+          <ListChecks className="h-3 w-3" />
+          <span className="font-medium">세션 TO-DO</span>
+          <Badge variant="outline" className="px-1 py-0 text-[10px]">
+            {completedCount}/{visible.length}
+          </Badge>
+          {/* Collapsed-state focal point: the focus item (in-progress, else the
+              first non-completed) streams next to the count so the user can see
+              what's happening at a glance without expanding. Pulse only when the
+              focus item is actually in-progress. */}
+          {!open && collapsedFocus && (
+            <span
+              className={`ml-2 min-w-0 flex-1 truncate text-left text-warning ${
+                collapsedFocus.status === "in_progress" ? activePulse : ""
+              }`}
+              data-testid="session-todo-collapsed-active"
+              title={collapsedFocus.content}
+            >
+              {collapsedFocus.content}
+            </span>
+          )}
+        </Button>
+        {allComplete && (
+          <Button
+            type="button"
+            variant="ghost"
+            size="icon"
+            className="mr-1 h-6 w-6 shrink-0 rounded-none hover:bg-transparent"
+            data-testid="session-todo-dismiss"
+            title="완료된 TO-DO 닫기"
+            onClick={(e) => {
+              // Don't toggle the panel open/closed when dismissing.
+              e.stopPropagation();
+              void handleDismiss();
+            }}
           >
-            <RotateCcw className="h-2.5 w-2.5" />
-            이어서
-          </span>
+            <X className="h-3 w-3" />
+          </Button>
         )}
-        {planBadge?.kind === "fresh" && (
-          <span
-            className="ml-1 inline-flex items-center gap-1 rounded-full bg-success/15 px-1.5 py-0 text-[10px] text-success"
-            data-testid="session-todo-fresh"
-            title="현재 턴의 TO-DO 를 새로 작성"
-          >
-            <Sparkles className="h-2.5 w-2.5" />
-            새 시작
-          </span>
-        )}
-        {changeBadge?.kind === "added" && (
-          <span
-            className="ml-1 inline-flex items-center gap-1 rounded-full bg-primary/10 px-1.5 py-0 text-[10px] text-primary"
-            data-testid="session-todo-added"
-            title="이번 업데이트에서 TO-DO 항목이 추가됨"
-          >
-            <Plus className="h-2.5 w-2.5" />
-            추가
-          </span>
-        )}
-        {changeBadge?.kind === "updated" && (
-          <span
-            className="ml-1 inline-flex items-center gap-1 rounded-full bg-muted px-1.5 py-0 text-[10px] text-muted-foreground"
-            data-testid="session-todo-updated"
-            title="이번 업데이트에서 TO-DO 항목이 수정됨"
-          >
-            <Pencil className="h-2.5 w-2.5" />
-            수정
-          </span>
-        )}
-        {changeBadge?.kind === "completed" && (
-          <span
-            className="ml-1 inline-flex items-center gap-1 rounded-full bg-success/15 px-1.5 py-0 text-[10px] text-success"
-            data-testid="session-todo-completed"
-            title="이번 업데이트에서 세션 TO-DO 가 완료됨"
-          >
-            <CheckCircle2 className="h-2.5 w-2.5" />
-            완료
-          </span>
-        )}
-        {/* Collapsed-state focal point: the focus item (in-progress, else the
-            first non-completed) streams next to the count so the user can see
-            what's happening at a glance without expanding. Pulse only when the
-            focus item is actually in-progress. */}
-        {!open && collapsedFocus && (
-          <span
-            className={`ml-2 min-w-0 flex-1 truncate text-left text-warning ${
-              collapsedFocus.status === "in_progress" ? activePulse : ""
-            }`}
-            data-testid="session-todo-collapsed-active"
-            title={collapsedFocus.content}
-          >
-            {collapsedFocus.content}
-          </span>
-        )}
-      </Button>
+      </div>
       {open && (
         // Cap the expanded list so a long plan doesn't push the input
         // cluster off-screen — internal scroll preserves the chat layout.
