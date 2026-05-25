@@ -36,7 +36,7 @@ describe("SessionTodoStore", () => {
     expect(r2[2].content).toBe("c");
   });
 
-  it("inserts, moves, deletes, and clears a fully completed plan", () => {
+  it("inserts, moves, deletes, then marks and clears a fully completed plan", () => {
     const store = new SessionTodoStore();
     const events: Array<{ sid: string; len: number }> = [];
     store.onChange((sid, items) => events.push({ sid, len: items.length }));
@@ -62,17 +62,30 @@ describe("SessionTodoStore", () => {
     ]);
     expect(deleted.map((i) => i.content)).toEqual(["a", "b"]);
 
-    expect(store.clearForTurnStart("missing-session")).toBe(false);
+    // Nothing pending yet → execute is a no-op for any session.
+    expect(store.clearIfPending("missing-session")).toBe(false);
+    expect(store.clearIfPending("s")).toBe(false);
+
     store.write("s", [
       { id: a.id, status: "completed" },
       { id: b.id, status: "completed" },
     ]);
-    expect(store.clearForTurnStart("s")).toBe(true);
+    const eventCountBeforeMark = events.length;
+
+    // Phase 1: mark must NOT emit — the panel stays visible this turn.
+    expect(store.markForClearIfCompleted("s")).toBe(true);
+    expect(events.length).toBe(eventCountBeforeMark);
+    expect(store.list("s").map((i) => i.content)).toEqual(["a", "b"]);
+
+    // Phase 2: execute drops the session + emits empty exactly once.
+    expect(store.clearIfPending("s")).toBe(true);
     expect(store.list("s")).toEqual([]);
     expect(events.at(-1)).toEqual({ sid: "s", len: 0 });
+    // Mark is consumed: a second execute is a no-op.
+    expect(store.clearIfPending("s")).toBe(false);
   });
 
-  it("does not clear unfinished plans at a turn boundary", () => {
+  it("does not mark unfinished plans for clear", () => {
     const store = new SessionTodoStore();
     const events: Array<{ sid: string; len: number }> = [];
     store.onChange((sid, items) => events.push({ sid, len: items.length }));
@@ -82,12 +95,60 @@ describe("SessionTodoStore", () => {
       { content: "not started", status: "pending" },
     ]);
 
-    expect(store.clearForTurnStart("s")).toBe(false);
+    expect(store.markForClearIfCompleted("s")).toBe(false);
+    expect(store.clearIfPending("s")).toBe(false);
     expect(store.list("s").map((item) => item.content)).toEqual([
       "still running",
       "not started",
     ]);
     expect(events).toEqual([{ sid: "s", len: 2 }]);
+  });
+
+  it("markForClearIfCompleted defensively unmarks when re-run on a no-longer-completed plan", () => {
+    const store = new SessionTodoStore();
+    const [a] = store.write("s", [{ content: "a", status: "completed" }]);
+    expect(store.markForClearIfCompleted("s")).toBe(true);
+
+    // The plan regresses to in_progress. write() already resets the mark, but
+    // re-running the mark step on a non-completed plan must also clear it via
+    // the defensive `else` branch (it returns false and leaves nothing pending).
+    store.write("s", [{ id: a.id, status: "in_progress" }]);
+    expect(store.markForClearIfCompleted("s")).toBe(false);
+    expect(store.clearIfPending("s")).toBe(false);
+
+    // markForClearIfCompleted on a session with no plan also returns false.
+    expect(store.markForClearIfCompleted("never-seen")).toBe(false);
+  });
+
+  it("write() resets a stale pending-clear mark so a changed plan is re-evaluated", () => {
+    const store = new SessionTodoStore();
+    const events: Array<{ sid: string; len: number }> = [];
+    store.onChange((sid, items) => events.push({ sid, len: items.length }));
+    const [a] = store.write("s", [{ content: "a", status: "completed" }]);
+    expect(store.markForClearIfCompleted("s")).toBe(true);
+
+    // The plan changes after being marked → the mark is invalidated.
+    store.write("s", [
+      { id: a.id, status: "completed" },
+      { content: "b", status: "in_progress" },
+    ]);
+    expect(store.clearIfPending("s")).toBe(false);
+    expect(store.list("s").map((i) => i.content)).toEqual(["a", "b"]);
+    // No spurious empty-list emit happened.
+    expect(events.every((e) => e.len > 0)).toBe(true);
+  });
+
+  it("manual clear() drops a pending-clear mark", () => {
+    const store = new SessionTodoStore();
+    store.write("s", [{ content: "a", status: "completed" }]);
+    expect(store.markForClearIfCompleted("s")).toBe(true);
+
+    // Manual dismiss clears immediately and consumes the mark, so a later
+    // execute cannot re-fire against a repopulated session.
+    store.clear("s");
+    store.write("s", [{ content: "new topic", status: "pending" }]);
+    expect(store.clearIfPending("s")).toBe(false);
+    expect(store.list("s").map((i) => i.content)).toEqual(["new topic"]);
   });
 
   it("rejects a delete-only update that would empty the plan", () => {
@@ -128,7 +189,7 @@ describe("SessionTodoStore", () => {
       { content: "b", status: "pending" },
     ]);
 
-    // Manual dismiss path: unlike clearForTurnStart, clear() does not gate on
+    // Manual dismiss path: unlike the mark step, clear() does not gate on
     // every item being completed.
     store.clear("s3");
     expect(store.list("s3")).toEqual([]);

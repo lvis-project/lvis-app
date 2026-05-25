@@ -233,10 +233,6 @@ function initialToolTrustOrigin(inputOrigin: ChatInputOrigin, turnInput: string)
   return "llm-tool-arg";
 }
 
-function shouldClearSessionTodoAtTurnStart(inputOrigin: ChatInputOrigin): boolean {
-  return isUserKeyboardOrigin(inputOrigin) || inputOrigin === "queue-auto";
-}
-
 function summarizePermissionUserIntent(
   inputOrigin: ChatInputOrigin,
   turnInput: string,
@@ -532,11 +528,12 @@ export interface ConversationLoopDeps {
    */
   skillOverlay?: { clear(sessionId: string): void };
   /**
-   * Session-scoped assistant TO-DO lifecycle. At the start of a new turn,
-   * the prior turn's transient plan is cleared so a new topic cannot append
-   * onto stale assistant steps.
+   * Session-scoped assistant TO-DO lifecycle — execute side. At the start of a
+   * new turn the loop unconditionally drops any plan the post-turn hook marked
+   * as completed (`markForClearIfCompleted`), so a finished plan clears at the
+   * turn boundary regardless of input origin. Unfinished plans stay visible.
    */
-  sessionTodoStore?: { clearForTurnStart(sessionId: string): boolean };
+  sessionTodoStore?: { clearIfPending(sessionId: string): boolean };
   /**
    * Issue #260: optional system notification service. When supplied, the
    * loop fires a `turn-end` notification when runTurn resolves successfully
@@ -1531,9 +1528,10 @@ export class ConversationLoop {
     const turnInput = isUserKeyboardOrigin(inputOrigin) ? input : stripLeadingSlash(input);
     const toolTrustOrigin = initialToolTrustOrigin(inputOrigin, turnInput);
     const permissionUserIntent = summarizePermissionUserIntent(inputOrigin, turnInput);
-    if (shouldClearSessionTodoAtTurnStart(inputOrigin)) {
-      this.deps.sessionTodoStore?.clearForTurnStart(effectiveSessionId);
-    }
+    // Deterministic completed-plan clear: execute any clear the post-turn hook
+    // marked for this session. Unconditional (no input-origin gate) so
+    // routine/headless turns clear too; unfinished plans were never marked.
+    this.deps.sessionTodoStore?.clearIfPending?.(effectiveSessionId);
     this.deps.skillOverlay?.clear(effectiveSessionId);
 
     // §4.5.2 step 1 — REQUEST_ENTRY (main process 도달 시점)

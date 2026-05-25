@@ -140,7 +140,7 @@ describe("ConversationLoop queryLoop", () => {
     });
   });
 
-  it("clears a completed session TO-DO plan at the next turn start", async () => {
+  it("executes a pending completed-plan clear at the next turn start", async () => {
     const toolRegistry = new ToolRegistry();
     const provider = new FakeProvider([
       [
@@ -152,6 +152,8 @@ describe("ConversationLoop queryLoop", () => {
     sessionTodoStore.write("s-main", [
       { content: "stale from previous turn", status: "completed" },
     ]);
+    // The prior turn's post-turn hook marked this completed plan for clear.
+    sessionTodoStore.markForClearIfCompleted("s-main");
     const loop = new ConversationLoop(({
       settingsService: {
         get: () => fakeLlmSettings(),
@@ -177,7 +179,7 @@ describe("ConversationLoop queryLoop", () => {
     expect(sessionTodoStore.list("s-main")).toEqual([]);
   });
 
-  it("keeps completed session TO-DO plans for non-user-origin turns", async () => {
+  it("executes a pending clear UNCONDITIONALLY for non-user-origin turns (no origin gate)", async () => {
     const toolRegistry = new ToolRegistry();
     const provider = new FakeProvider([
       [
@@ -189,6 +191,9 @@ describe("ConversationLoop queryLoop", () => {
     sessionTodoStore.write("s-main", [
       { content: "completed user plan", status: "completed" },
     ]);
+    // A prior turn marked the plan; the origin gate is gone, so even a
+    // plugin-emitted (non-user-keyboard, non-queue-auto) turn must clear it.
+    sessionTodoStore.markForClearIfCompleted("s-main");
     const loop = new ConversationLoop(({
       settingsService: {
         get: () => fakeLlmSettings(),
@@ -211,8 +216,48 @@ describe("ConversationLoop queryLoop", () => {
 
     await loop.runTurn("plugin prompt", undefined, undefined, { inputOrigin: "plugin-emitted" });
 
+    expect(sessionTodoStore.list("s-main")).toEqual([]);
+  });
+
+  it("does not clear a completed plan mid-turn when no prior mark exists", async () => {
+    const toolRegistry = new ToolRegistry();
+    const provider = new FakeProvider([
+      [
+        { type: "text_delta", text: "ok" },
+        { type: "message_complete", stopReason: "end_turn" },
+      ],
+    ]);
+    const sessionTodoStore = new SessionTodoStore();
+    sessionTodoStore.write("s-main", [
+      { content: "completed this very turn", status: "completed" },
+    ]);
+    // No markForClearIfCompleted yet — the plan was completed during a turn
+    // whose post-turn hook hasn't run. It must stay visible until the NEXT
+    // turn boundary, never cleared mid-turn.
+    const loop = new ConversationLoop(({
+      settingsService: {
+        get: () => fakeLlmSettings(),
+        getSecret: () => "test-key",
+      },
+      systemPromptBuilder: {
+        build: () => "system",
+      },
+      keywordEngine: new KeywordEngine(),
+      routeEngine: new RouteEngine({ toolRegistry }),
+      toolRegistry,
+      memoryManager: {
+        saveSession: () => {},
+        listSessions: () => [],
+      },
+      sessionTodoStore,
+    } as unknown) as ConstructorParameters<typeof ConversationLoop>[0]);
+    (loop as { provider: LLMProvider | null }).provider = provider;
+    (loop as { sessionId: string }).sessionId = "s-main";
+
+    await loop.runTurn("다음 질문", undefined, undefined, { inputOrigin: "user-keyboard" });
+
     expect(sessionTodoStore.list("s-main").map((item) => item.content)).toEqual([
-      "completed user plan",
+      "completed this very turn",
     ]);
   });
 
