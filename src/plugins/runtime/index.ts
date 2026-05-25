@@ -734,13 +734,13 @@ export class PluginRuntime {
       this.failedPluginIds.delete(manifest.id);
       this.disabledPluginIds.delete(manifest.id);
       plog("debug", { pluginId: manifest.id, phase: PluginPhase.LOAD_OK }, "plugin loaded");
-      // #1176 M1 fix: fire onDisable immediately after loading an inactive
-      // plugin so the boot-wired handler (boot/steps/plugin-runtime.ts)
-      // calls toolRegistry.unregisterByPlugin + keywordEngine.unregisterByPlugin.
-      // This is the same path taken by runtime setPluginEnabled(false).
-      if (this.inactivePluginIds.has(manifest.id)) {
-        this.onDisable?.(manifest.id);
-      }
+      // NOTE: inactive-plugin tool/keyword suppression is handled by the BOOT
+      // SYNC path (syncPluginToolRegistry skips inactive plugins) and by the
+      // hostApi.registerKeywords gate (keywords are only registered if the
+      // plugin is active at start() time). Firing onDisable here would be a
+      // no-op because tools are not yet in the registry (syncPluginToolRegistry
+      // runs after startAll) and keywords have not been registered yet (they
+      // come in start() → hostApi.registerKeywords, also after load()). (#1176 M3)
     }
     this.loaded = true;
   }

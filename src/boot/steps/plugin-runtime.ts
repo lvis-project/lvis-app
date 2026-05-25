@@ -1070,6 +1070,16 @@ export async function initPluginRuntime(
           (err as Error).message,
         );
       }
+      // #1176 M3: re-register keywords from the manifest when a previously
+      // inactive plugin is re-enabled. Keywords are registered during start()
+      // via hostApi.registerKeywords, which is gated on isPluginEnabled at
+      // that time. Since start() only runs once, we must re-register from the
+      // manifest here so keyword-based routing works after re-enable.
+      const manifest = pluginRuntime.getPluginManifest(pluginId);
+      if (manifest?.keywords && manifest.keywords.length > 0) {
+        keywordEngine.registerKeywords(manifest.keywords.map((k) => ({ ...k, pluginId })));
+        log.debug(`plugin:${pluginId} re-registered ${manifest.keywords.length} keywords on enable`);
+      }
     },
     createHostApi: (pluginId: string, manifest: PluginManifest, pluginDataDir: string): PluginHostApi => {
       // #893 Stage 2 — manifest sha256 pin (Tier-3 whitelist check). The
@@ -1174,6 +1184,12 @@ export async function initPluginRuntime(
         },
       },
       registerKeywords: (keywords) => {
+        // #1176 M3: inactive plugins must not register keywords at start() time.
+        // The onEnable path re-registers them if the plugin is later activated.
+        if (!pluginRuntime.isPluginEnabled(pluginId)) {
+          log.debug(`plugin:${pluginId} skipping keyword registration — plugin inactive`);
+          return;
+        }
         keywordEngine.registerKeywords(
           keywords.map((k) => ({ ...k, pluginId })),
         );

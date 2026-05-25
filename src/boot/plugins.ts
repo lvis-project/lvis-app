@@ -88,7 +88,14 @@ export function syncPluginToolRegistry(
     ...toolRegistry.listPluginIds(),
     ...entries.map(({ pluginId }) => pluginId),
   ]);
-  const tools = pluginToolsForRuntimeEntries(pluginRuntime, entries);
+  // #1176 M3: inactive plugins (isPluginEnabled===false) must not have their
+  // tools registered in the registry. Their tools are absent from the per-turn
+  // scope via resolveToolScope, but non-scoped reads (getVisibleTools, boot
+  // log, system-prompt Source 5 scope===undefined fallback) would leak them
+  // without this filter. The onEnable path (syncPluginToolRegistryForPlugin)
+  // registers tools when the plugin is re-activated.
+  const activeEntries = entries.filter(({ pluginId }) => pluginRuntime.isPluginEnabled(pluginId));
+  const tools = pluginToolsForRuntimeEntries(pluginRuntime, activeEntries);
   toolRegistry.replacePluginTools(pluginIds, tools);
 }
 
