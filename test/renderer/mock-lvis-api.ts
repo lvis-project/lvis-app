@@ -348,6 +348,7 @@ export function makeMockLvisApi(overrides: ApiOverrides = {}): {
     chatRetryEffort: vi.fn(async () => ({ ok: true })),
     chatExport: vi.fn(async () => ({ ok: true, filePath: "/tmp/out.md" })),
     listSessionTodos: vi.fn(async () => []),
+    clearSessionTodos: vi.fn(async () => ({ ok: true })),
     onSessionTodoChanged: vi.fn((handler: (payload: unknown) => void) => {
       sessionTodoHandlers.add(handler);
       return () => sessionTodoHandlers.delete(handler);
