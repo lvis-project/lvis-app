@@ -7,7 +7,7 @@
  * State shape: sessionId → ordered array of {id, content, status}. Durable
  * item statuses are pending/in_progress/completed.
  *
- * Completed-plan clear is a deterministic two-phase lifecycle so a finished
+ * Completed-plan clear is a deterministic two-step lifecycle so a finished
  * plan stays visible through the turn that completed it and clears exactly at
  * the next turn boundary, regardless of input origin:
  *
@@ -115,7 +115,7 @@ export class SessionTodoStore {
   }
 
   /**
-   * Phase 1 of the deterministic clear lifecycle (post-turn hook). Marks the
+   * Mark step of the deterministic clear lifecycle (post-turn hook). Marks the
    * session for clear at the next turn boundary IFF it currently holds a
    * fully-completed plan. MUST NOT emit — the panel stays visible through the
    * turn that completed it. A no-longer-completed plan is defensively unmarked.
@@ -133,7 +133,7 @@ export class SessionTodoStore {
   }
 
   /**
-   * Phase 2 of the deterministic clear lifecycle (next turn start). If the
+   * Execute step of the deterministic clear lifecycle (next turn start). If the
    * session was marked by a prior post-turn hook, drop it now (delete + empty
    * emit) and consume the mark. Unconditional — no input-origin gate — so
    * routine/headless turns clear completed plans too.
