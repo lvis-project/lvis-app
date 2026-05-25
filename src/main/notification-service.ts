@@ -1,15 +1,16 @@
 /**
  * NotificationService — Issue #260 system-level notify_user integration.
  *
- * Auto-fires desktop notifications at 4 lifecycle points:
+ * Auto-fires desktop notifications at core lifecycle points:
  *   1. Turn end (ConversationLoop.runTurn resolves)
  *   2. Routine fired (RoutineEngine result delivered)
  *   3. Agent asks question (AskUserQuestionGate.requestAndWait entry)
  *   4. Confirmation needed (ApprovalGate.requestAndWait entry)
+ * Plus rare system/configuration cues such as seeded reference-doc upgrades.
  *
  * notify_user is NOT an LLM tool. The LLM never invokes it directly. It's a
  * passive system service constructed in boot.ts AFTER the main window exists
- * and injected into AppServices so all 4 trigger sites can call
+ * and injected into AppServices so trigger sites can call
  * `services.notificationService.fire(...)`.
  *
  * Routing:
@@ -28,7 +29,13 @@ import { createLogger } from "../lib/logger.js";
 import { stripMarkdown } from "../shared/strip-markdown.js";
 const log = createLogger("lvis");
 
-export type NotificationKind = "turn-end" | "routine" | "ask-user" | "approval" | "plugin";
+export type NotificationKind =
+  | "turn-end"
+  | "routine"
+  | "ask-user"
+  | "approval"
+  | "plugin"
+  | "system";
 
 /**
  * Closed enumeration of valid `NotificationKind` values. Exported so IPC
@@ -43,6 +50,7 @@ export const NOTIFICATION_KINDS: ReadonlySet<NotificationKind> = new Set([
   "ask-user",
   "approval",
   "plugin",
+  "system",
 ]);
 
 export interface NotificationContextRef {
@@ -100,6 +108,7 @@ const ELLIPSIS = "…";
  *   - routine  : 0    (rare — always fire)
  *   - ask-user : 0    (rare — user expects every one)
  *   - plugin   : 5 s  (#841 — protects against runaway plugin emit loops)
+ *   - system   : 0    (rare boot/config upgrade cues)
  *
  * In-memory only — cooldown resets on app restart by design
  * (cross-restart persistence is overkill for an anti-spam gate).
@@ -115,6 +124,7 @@ const COOLDOWN_MS_BY_KIND: Record<NotificationKind, number> = {
   // coalesce legitimate independent alerts. Still tight enough to defang a
   // buggy plugin emitting 30 events/sec from blasting toasts.
   plugin: 5_000,
+  system: 0,
 };
 
 /**

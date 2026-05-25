@@ -823,7 +823,7 @@ export type LvisApi = {
   // ─── Notifications (#260) ────────────────────────
   onNotificationToast?: (
     h: (payload: {
-      kind: "turn-end" | "routine" | "ask-user" | "approval";
+      kind: "turn-end" | "routine" | "ask-user" | "approval" | "plugin" | "system";
       title: string;
       body: string;
       contextRef?: {
@@ -836,7 +836,7 @@ export type LvisApi = {
   ) => () => void;
   onNotificationClicked?: (
     h: (payload: {
-      kind: "turn-end" | "routine" | "ask-user" | "approval";
+      kind: "turn-end" | "routine" | "ask-user" | "approval" | "plugin" | "system";
       contextRef?: {
         sessionId?: string;
         routineId?: string;
@@ -846,7 +846,7 @@ export type LvisApi = {
     }) => void,
   ) => () => void;
   notifyClick?: (payload: {
-    kind: "turn-end" | "routine" | "ask-user" | "approval";
+    kind: "turn-end" | "routine" | "ask-user" | "approval" | "plugin" | "system";
     contextRef?: {
       sessionId?: string;
       routineId?: string;
