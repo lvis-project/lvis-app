@@ -1,4 +1,5 @@
 import { useEffect } from "react";
+import { STATUS_BAR_VENDOR_EMOJIS } from "../../../../shared/status-bar-emojis.js";
 import type { LvisApi, AppSettings } from "../../types.js";
 import type { PersistentItem } from "./types.js";
 
@@ -105,18 +106,18 @@ function shortVendorLabel(provider: string): string {
 function vendorEmoji(provider: string): string {
   switch (provider) {
     case "claude":
-      return "🟧";
+      return STATUS_BAR_VENDOR_EMOJIS.claude;
     case "openai":
-      return "🟦";
+      return STATUS_BAR_VENDOR_EMOJIS.openai;
     case "gemini":
-      return "🟢";
+      return STATUS_BAR_VENDOR_EMOJIS.gemini;
     case "copilot":
-      return "🐙";
+      return STATUS_BAR_VENDOR_EMOJIS.copilot;
     case "azure-foundry":
-      return "🔷";
+      return STATUS_BAR_VENDOR_EMOJIS.azureFoundry;
     case "vertex-ai":
-      return "🟣";
+      return STATUS_BAR_VENDOR_EMOJIS.vertexAi;
     default:
-      return "🤖";
+      return STATUS_BAR_VENDOR_EMOJIS.fallback;
   }
 }

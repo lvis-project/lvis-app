@@ -149,7 +149,11 @@ import {
 import { runManagedBootstrap } from "./boot/managed-marketplace.js";
 import { createLogger } from "./lib/logger.js";
 import { lvisHome } from "./shared/lvis-home.js";
-import { seedLvisHomeDocs } from "./main/seed-lvis-home-docs.js";
+import {
+  listLvisHomeDocUpgradeMarkers,
+  seedLvisHomeDocs,
+  type LvisHomeDocUpgradeMarker,
+} from "./main/seed-lvis-home-docs.js";
 const log = createLogger("lvis");
 
 export type { AppServices } from "./boot/types.js";
@@ -223,6 +227,7 @@ export async function bootstrap(
   // it is copied from packaged resources, and on subsequent upgrades a
   // `.new` sibling is dropped next to the user's edited copy for diff/merge.
   // Non-fatal — failures log and continue.
+  let lvisHomeDocUpgradeMarkers: LvisHomeDocUpgradeMarker[] = [];
   try {
     const seeded = seedLvisHomeDocs();
     if (seeded.seeded.length > 0) {
@@ -230,6 +235,12 @@ export async function bootstrap(
     }
     if (seeded.upgraded.length > 0) {
       log.info(`boot: lvis-home docs upgrade available: ${seeded.upgraded.join(", ")}`);
+    }
+    lvisHomeDocUpgradeMarkers = listLvisHomeDocUpgradeMarkers();
+    if (lvisHomeDocUpgradeMarkers.length > 0) {
+      log.info(
+        `boot: pending lvis-home docs upgrade markers: ${lvisHomeDocUpgradeMarkers.map((m) => m.markerPath).join(", ")}`,
+      );
     }
   } catch (err) {
     log.warn(`boot: seedLvisHomeDocs failed (non-fatal): ${String(err)}`);
@@ -272,8 +283,8 @@ export async function bootstrap(
     permissionAuditSecretStore,
   );
 
-  // Issue #260 — system notification service. Constructed up-front so all
-  // 4 trigger sites (turn-end, routine, ask-user, approval) can call .fire().
+  // Issue #260 — system notification service. Constructed up-front so
+  // turn-end, routine, ask-user, approval, plugin, and system cues can call .fire().
   // Live mainWindow getter avoids a stale handle after Electron close+reopen.
   const notificationService = new NotificationService({
     getMainWindow,
@@ -286,6 +297,17 @@ export async function bootstrap(
   // rather than silently no-oping on every notification fire.
   if (!notificationService) {
     throw new Error("NotificationService failed to initialize — boot order regression");
+  }
+  if (lvisHomeDocUpgradeMarkers.length > 0) {
+    const markerSummary =
+      lvisHomeDocUpgradeMarkers.length === 1
+        ? `~/.lvis/${lvisHomeDocUpgradeMarkers[0].markerPath}`
+        : `~/.lvis reference ${lvisHomeDocUpgradeMarkers.length}개 파일`;
+    notificationService.fire({
+      kind: "system",
+      title: "LVIS reference 업데이트 사용 가능",
+      body: `검토 대상: ${markerSummary}. 병합하거나 삭제하세요.`,
+    });
   }
   // Routine delivery sites pass `notificationService` explicitly per-call so
   // there's no module-level singleton to reset between tests/processes.

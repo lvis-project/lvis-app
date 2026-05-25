@@ -1,4 +1,5 @@
 import { useEffect } from "react";
+import { STATUS_BAR_OS_EMOJIS } from "../../../../shared/status-bar-emojis.js";
 import type { LvisApi } from "../../types.js";
 import type { PersistentItem } from "./types.js";
 
@@ -48,12 +49,12 @@ export function useStatusBarOs({ api, upsertPersistent }: Options): void {
 function osEmoji(platform: string): string {
   switch (platform) {
     case "darwin":
-      return "🍎";
+      return STATUS_BAR_OS_EMOJIS.darwin;
     case "win32":
-      return "🪟";
+      return STATUS_BAR_OS_EMOJIS.win32;
     case "linux":
-      return "🐧";
+      return STATUS_BAR_OS_EMOJIS.linux;
     default:
-      return "💻";
+      return STATUS_BAR_OS_EMOJIS.fallback;
   }
 }
