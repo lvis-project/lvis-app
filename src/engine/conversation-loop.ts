@@ -597,8 +597,10 @@ interface ToolExposureMetrics {
    * deferral-eligible (plugin + MCP) tools — builtins are never deferred so
    * they would otherwise dilute the ratio. `deferralEligibleLoadedCount` is the
    * plugin/MCP slice of the loaded schemas; `deferredLoadedRatio` is
-   * deferred / (deferred + loaded-eligible), clamped to [0, 1]. Null when no
-   * deferral-eligible tool exists this turn (ratio is undefined).
+   * deferred / (deferred + loaded-eligible), structurally bounded to [0, 1]
+   * (the numerator `catalogEntries.length` is a strict subset of the
+   * denominator, so no clamp is needed). Null when no deferral-eligible tool
+   * exists this turn (denominator is zero, ratio is undefined).
    */
   deferralEligibleLoadedCount: number;
   deferredLoadedRatio: number | null;
