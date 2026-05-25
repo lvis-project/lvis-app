@@ -87,9 +87,14 @@ export async function resolveManifestLoadPlan(opts: {
 }
 
 /**
- * For each enabled plan entry, read and validate the manifest. Returns a map
- * keyed by pluginIdHint (or manifest.id when no hint). Failed reads are
- * skipped with a warning.
+ * For every plan entry (enabled or inactive), read and validate the manifest.
+ * Returns a map keyed by pluginIdHint (or manifest.id when no hint). Failed
+ * reads are skipped with a warning.
+ *
+ * Previously named "readEnabledManifestSnapshots" and gated on plan.enabled —
+ * dropped in #1176 so inactive plugins (enabled=false) are still loaded into
+ * memory; their tools are hidden via the inactivePluginIds gate in
+ * PluginRuntime, not by skipping the load.
  */
 export async function readEnabledManifestSnapshots(
   loadPlan: ManifestLoadPlan[],
@@ -97,7 +102,6 @@ export async function readEnabledManifestSnapshots(
 ): Promise<Map<string, ManifestSnapshot>> {
   const snapshots = new Map<string, ManifestSnapshot>();
   for (const plan of loadPlan) {
-    if (!plan.enabled) continue;
     try {
       const manifest = await parsePluginJson(plan.manifestPath, validator);
       // Key by pluginIdHint (registry id) when available so addPlugin() lookups

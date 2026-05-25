@@ -31,9 +31,12 @@ interface Entry {
   manifest: PluginManifest;
 }
 
-function stubRuntime(entries: Entry[]): PluginRuntime {
+function stubRuntime(entries: Entry[], inactiveIds: Set<string> = new Set()): PluginRuntime {
   return {
     listPluginManifests: () => entries,
+    // #1176: syncPluginToolRegistry is the execution registry path and does
+    // not gate on this predicate; ConversationLoop owns model exposure.
+    isPluginEnabled: (pluginId: string) => !inactiveIds.has(pluginId),
   } as unknown as PluginRuntime;
 }
 
@@ -289,6 +292,97 @@ describe("syncPluginToolRegistry — plugin lifecycle sync", () => {
     syncPluginToolRegistryForPlugin(nextRuntime, registry, "beta");
     expect(registry.findByName("alpha_run")).toBe(alphaAfter);
     expect(registry.findByName("beta_run")?.version).toBe("2.0.0");
+  });
+
+  /**
+   * M3 regression — #1176: inactive-plugin tools must not appear in the
+   * non-scoped registry after syncPluginToolRegistry.
+   *
+   * Active/inactive state gates model exposure in ConversationLoop, not the
+   * execution registry. Inactive runtime-loaded plugins keep tools registered
+   * so auth/config/UI calls can still execute against the loaded runtime.
+   */
+  describe("M3 — inactive-plugin tools stay registered for runtime execution", () => {
+    it("inactive plugin tools remain registered after boot sync", () => {
+      const registry = new ToolRegistry();
+      const inactiveIds = new Set(["inactive-plugin"]);
+      const runtime = stubRuntime(
+        [
+          { pluginId: "active-plugin", manifest: manifest("active-plugin", ["active_run"]) },
+          { pluginId: "inactive-plugin", manifest: manifest("inactive-plugin", ["inactive_run"]) },
+        ],
+        inactiveIds,
+      );
+
+      syncPluginToolRegistry(runtime, registry);
+
+      // Active plugin tool is registered and visible.
+      expect(registry.findByName("active_run")?.pluginId).toBe("active-plugin");
+      // Inactive plugin tool remains executable; ConversationLoop scope hides
+      // it from the model while UI/auth/config can still call it.
+      expect(registry.findByName("inactive_run")?.pluginId).toBe("inactive-plugin");
+      const visibleNames = registry.getVisibleTools().map((t) => t.name);
+      expect(visibleNames).toContain("active_run");
+      expect(visibleNames).toContain("inactive_run");
+    });
+
+    it("re-enable does not need tool re-registration because runtime tools stayed registered", () => {
+      const registry = new ToolRegistry();
+      const inactiveIds = new Set(["my-plugin"]);
+      const entries = [
+        { pluginId: "my-plugin", manifest: manifest("my-plugin", ["my_tool"]) },
+      ];
+
+      // Boot sync with plugin inactive — tools remain registered for UI/auth.
+      syncPluginToolRegistry(stubRuntime(entries, inactiveIds), registry);
+      expect(registry.findByName("my_tool")?.pluginId).toBe("my-plugin");
+
+      // Simulate active-state change true: targeted sync is idempotent and
+      // preserves the executable tool registration.
+      syncPluginToolRegistryForPlugin(stubRuntime(entries, new Set()), registry, "my-plugin");
+      expect(registry.findByName("my_tool")?.pluginId).toBe("my-plugin");
+      const visibleNames = registry.getVisibleTools().map((t) => t.name);
+      expect(visibleNames).toContain("my_tool");
+    });
+
+    it("targeted active-state sync keeps tools while the plugin is inactive", () => {
+      const registry = new ToolRegistry();
+      const entries = [
+        { pluginId: "my-plugin", manifest: manifest("my-plugin", ["my_tool"]) },
+      ];
+
+      syncPluginToolRegistry(stubRuntime(entries, new Set()), registry);
+      expect(registry.findByName("my_tool")?.pluginId).toBe("my-plugin");
+
+      syncPluginToolRegistryForPlugin(
+        stubRuntime(entries, new Set(["my-plugin"])),
+        registry,
+        "my-plugin",
+      );
+
+      expect(registry.findByName("my_tool")?.pluginId).toBe("my-plugin");
+      expect(registry.getVisibleTools().map((t) => t.name)).toContain("my_tool");
+    });
+
+    it("active plugin tools always present even when other plugins are inactive", () => {
+      const registry = new ToolRegistry();
+      const inactiveIds = new Set(["b"]);
+      syncPluginToolRegistry(
+        stubRuntime(
+          [
+            { pluginId: "a", manifest: manifest("a", ["a_run"]) },
+            { pluginId: "b", manifest: manifest("b", ["b_run"]) },
+            { pluginId: "c", manifest: manifest("c", ["c_run"]) },
+          ],
+          inactiveIds,
+        ),
+        registry,
+      );
+
+      expect(registry.findByName("a_run")?.pluginId).toBe("a");
+      expect(registry.findByName("b_run")?.pluginId).toBe("b");
+      expect(registry.findByName("c_run")?.pluginId).toBe("c");
+    });
   });
 
   it("requires SDK-backed plugin authority metadata before registering tools", () => {

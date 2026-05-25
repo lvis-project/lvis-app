@@ -699,6 +699,10 @@ const api = {
   readPluginUiModule: async (pluginId: string, viewId: string) =>
     ipcRenderer.invoke("lvis:plugins:ui:read-module", { pluginId, viewId }) as Promise<string>,
   listPluginCards: async () => ipcRenderer.invoke("lvis:plugins:cards"),
+  // #1176 — toggle a plugin active/inactive. Returns the IPC result frame
+  // ({ ok, pluginId, enabled } | { ok:false, error, message }).
+  setPluginEnabled: async (pluginId: string, enabled: boolean) =>
+    ipcRenderer.invoke("lvis:plugins:set-enabled", pluginId, enabled),
   callPluginMethod: async (method: string, payload?: unknown) => ipcRenderer.invoke("lvis:plugins:call", method, payload),
 
   // ─── Plugin Performance (Observability) ──────────
@@ -902,6 +906,14 @@ const api = {
     const listener = (_event: unknown, payload: Parameters<typeof handler>[0]) => handler(payload);
     ipcRenderer.on("lvis:plugins:uninstall-result", listener);
     return () => ipcRenderer.removeListener("lvis:plugins:uninstall-result", listener);
+  },
+  // #1176 — fires after a plugin's active/inactive state is toggled (via this
+  // surface or any other). Renderer surfaces use this to refresh plugin cards
+  // so a disabled plugin's tools/UI disappear (and reappear on re-enable).
+  onPluginEnabledChanged: (handler: (payload: { pluginId: string; enabled: boolean }) => void) => {
+    const listener = (_event: unknown, payload: Parameters<typeof handler>[0]) => handler(payload);
+    ipcRenderer.on("lvis:plugins:enabled-changed", listener);
+    return () => ipcRenderer.removeListener("lvis:plugins:enabled-changed", listener);
   },
   onPersonaPromptsUpdated: (handler: () => void) => {
     const listener = () => handler();

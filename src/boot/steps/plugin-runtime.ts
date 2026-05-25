@@ -1051,6 +1051,18 @@ export async function initPluginRuntime(
       toolRegistry.unregisterByPlugin(pluginId);
       lateBinding.conversationLoopRef.fn?.onPluginDisabled(pluginId);
     },
+    onActiveStateChange: (pluginId, enabled) => {
+      if (!enabled) {
+        keywordEngine.unregisterByPlugin(pluginId);
+        lateBinding.conversationLoopRef.fn?.onPluginDisabled(pluginId);
+        return;
+      }
+      const manifest = pluginRuntime.getPluginManifest(pluginId);
+      if (!keywordEngine.hasPluginKeywords(pluginId) && manifest?.keywords && manifest.keywords.length > 0) {
+        keywordEngine.registerKeywords(manifest.keywords.map((k) => ({ ...k, pluginId })));
+        log.debug(`plugin:${pluginId} re-registered ${manifest.keywords.length} keywords on activation`);
+      }
+    },
     // Symmetric to `onDisable` — re-registers tools after a successful
     // restart/add/reload. Without this every chat-surface tool call hits
     // `도구를 찾을 수 없습니다` post-restart (see PR #760). Non-fatal:
@@ -1069,6 +1081,20 @@ export async function initPluginRuntime(
           `tool registry sync failed after plugin onEnable (${pluginId}): %s`,
           (err as Error).message,
         );
+      }
+      // Runtime restart/reload can reach loaded+started after a prior teardown.
+      // registerKeywords usually runs through hostApi during start(); keep this
+      // guarded manifest replay as the lifecycle safety net without duplicating
+      // entries or reviving user-inactive plugins.
+      const manifest = pluginRuntime.getPluginManifest(pluginId);
+      if (
+        pluginRuntime.isPluginEnabled(pluginId) &&
+        !keywordEngine.hasPluginKeywords(pluginId) &&
+        manifest?.keywords &&
+        manifest.keywords.length > 0
+      ) {
+        keywordEngine.registerKeywords(manifest.keywords.map((k) => ({ ...k, pluginId })));
+        log.debug(`plugin:${pluginId} re-registered ${manifest.keywords.length} keywords on enable`);
       }
     },
     createHostApi: (pluginId: string, manifest: PluginManifest, pluginDataDir: string): PluginHostApi => {
@@ -1174,6 +1200,13 @@ export async function initPluginRuntime(
         },
       },
       registerKeywords: (keywords) => {
+        // #1176 M3: inactive plugins must not register keywords at start() time.
+        // onActiveStateChange(true) re-registers them if the plugin is later
+        // activated without a runtime restart.
+        if (!pluginRuntime.isPluginEnabled(pluginId)) {
+          log.debug(`plugin:${pluginId} skipping keyword registration — plugin inactive`);
+          return;
+        }
         keywordEngine.registerKeywords(
           keywords.map((k) => ({ ...k, pluginId })),
         );

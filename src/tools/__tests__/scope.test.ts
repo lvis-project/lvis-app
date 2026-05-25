@@ -303,3 +303,65 @@ describe("ToolRegistry.getToolCatalogForScope", () => {
     expect(catalog.map((c) => c.name)).toContain("meeting_start");
   });
 });
+
+describe("ToolRegistry — eager exposure (deferral=false, #1176)", () => {
+  it("loads the whole active plugin suite without per-tool activeToolNames", () => {
+    const r = seed();
+    const schemas = r.getToolSchemasForScope({
+      activePluginIds: new Set(["com.example.meeting"]),
+      // No activeToolNames at all — eager mode must still load every meeting tool.
+      includeBuiltins: true,
+      includeMcp: false,
+      deferral: false,
+    });
+    const names = schemas.map((s) => s.name).sort();
+    expect(names).toEqual(["bash", "meeting_start", "meeting_stop", "web_search"]);
+  });
+
+  it("loads in-scope MCP tools eagerly when includeMcp is set", () => {
+    const r = seed();
+    const schemas = r.getToolSchemasForScope({
+      activePluginIds: new Set<string>(),
+      includeBuiltins: false,
+      includeMcp: true,
+      deferral: false,
+    });
+    expect(schemas.map((s) => s.name)).toContain("mcp_fetch");
+  });
+
+  it("still excludes plugins outside activePluginIds in eager mode", () => {
+    const r = seed();
+    const schemas = r.getToolSchemasForScope({
+      activePluginIds: new Set(["com.example.meeting"]),
+      includeBuiltins: false,
+      includeMcp: false,
+      deferral: false,
+    });
+    const names = schemas.map((s) => s.name).sort();
+    expect(names).toEqual(["meeting_start", "meeting_stop"]);
+    expect(names).not.toContain("email_list");
+  });
+
+  it("returns an empty catalog in eager mode (nothing left to discover)", () => {
+    const r = seed();
+    const catalog = r.getToolCatalogForScope({
+      activePluginIds: new Set(["com.example.meeting"]),
+      includeMcp: true,
+      deferral: false,
+    });
+    expect(catalog).toEqual([]);
+  });
+
+  it("deny rules still apply in eager mode", () => {
+    const r = seed();
+    r.setDenyRules([{ pattern: "meeting_stop" }]);
+    const schemas = r.getToolSchemasForScope({
+      activePluginIds: new Set(["com.example.meeting"]),
+      includeBuiltins: false,
+      includeMcp: false,
+      deferral: false,
+    });
+    expect(schemas.map((s) => s.name)).not.toContain("meeting_stop");
+    expect(schemas.map((s) => s.name)).toContain("meeting_start");
+  });
+});

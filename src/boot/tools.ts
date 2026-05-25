@@ -140,13 +140,13 @@ function webFetchFetchImpl(
 
 export function registerRequestPluginMetaTool(toolRegistry: ToolRegistry): void {
   // Option C — request_plugin 메타 툴 (항상 활성, scope filter 통과)
-  // execute는 no-op — 실제 scope 확장은 ConversationLoop.queryLoop이 가로챈다.
+  // 실제 scope 확장은 ConversationLoop.queryLoop이 가로챈다.
   toolRegistry.register(createDynamicTool({
     name: "request_plugin",
     description:
-      "현재 비활성화된 플러그인 중 이번 턴 작업에 필요한 것을 활성화 요청합니다. " +
-      "비활성 플러그인 목록은 system prompt '사용 가능한 플러그인' 섹션 참조. " +
-      "활성화 후 같은 턴 내에서 해당 플러그인의 tool을 호출할 수 있습니다.",
+      "현재 턴에 아직 선택되지 않은 enabled 플러그인 중 이번 작업에 필요한 것을 선택 요청합니다. " +
+      "요청 가능한 플러그인 목록은 system prompt '사용 가능한 플러그인' 섹션 참조. " +
+      "선택 후 같은 턴 내에서 해당 플러그인의 tool을 호출할 수 있습니다.",
     source: "builtin",
     category: "read",
     isReadOnly: () => true,
@@ -160,10 +160,11 @@ export function registerRequestPluginMetaTool(toolRegistry: ToolRegistry): void 
         },
       },
     },
-    // Handled inline by ConversationLoop; fallback if executor reaches it.
+    // Handled inline by ConversationLoop. If execution reaches this fallback,
+    // the loop interception regressed; fail closed so traces expose it.
     execute: async () => ({
-      output: "request_plugin은 대화 루프에서 직접 처리됩니다.",
-      isError: false,
+      output: "request_plugin 오류: 대화 루프 interception 이 누락되었습니다.",
+      isError: true,
     }),
   }));
 }

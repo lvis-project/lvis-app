@@ -109,6 +109,10 @@ export interface PluginCard {
   installPolicy?: "admin" | "user";
   /** Runtime load status derived from loaded/failed/disabled runtime state. */
   loadStatus: "loaded" | "preparing" | "failed" | "disabled";
+  /** Whether this plugin's tools are currently exposed to the model. */
+  active: boolean;
+  /** Whether a plugin instance is loaded and callable even when inactive. */
+  runtimeLoaded: boolean;
   /** Current dependency/runtime preparation step while loadStatus is "preparing". */
   preparationStatus?: PluginPreparationStatus;
   /** Optional Lucide icon name declared in the plugin manifest. */
@@ -239,6 +243,13 @@ export interface PluginRuntimeOptions {
    */
   onEnable?: (pluginId: string) => void;
   /**
+   * Fires when the user toggles active/inactive without unloading the runtime.
+   * Unlike {@link onDisable}, this MUST NOT unregister plugin tools from the
+   * execution registry: auth/config/UI calls remain runtime-callable while
+   * model exposure is gated by ConversationLoop scope.
+   */
+  onActiveStateChange?: (pluginId: string, enabled: boolean) => void;
+  /**
    * Optional dependency preparation gate. When this returns a Promise, plugin
    * loading/start is deferred without blocking app boot; calls into the
    * plugin fail with a clear "preparing" message until the Promise resolves.
@@ -269,6 +280,7 @@ export class PluginRuntime {
   private readonly auditLog?: (level: "info" | "warn" | "error", message: string, data?: unknown) => void;
   private readonly onDisable?: (pluginId: string) => void;
   private readonly onEnable?: (pluginId: string) => void;
+  private readonly onActiveStateChange?: (pluginId: string, enabled: boolean) => void;
   private readonly preparePluginStart?: (context: PluginStartPreparationContext) => Promise<void> | void | null | undefined;
   private readonly plugins = new Map<string, LoadedPlugin>();
   private readonly methodMap = new Map<string, { pluginId: string; handler: PluginToolHandler }>();
@@ -282,6 +294,14 @@ export class PluginRuntime {
   private readonly failedPluginIds = new Set<string>();
   private readonly failedPluginStubs = new Map<string, { name: string; description: string }>();
   private readonly disabledPluginIds = new Set<string>();
+  /**
+   * #1176 active/inactive — plugins toggled inactive at runtime via
+   * {@link setPluginEnabled}. Orthogonal to {@link disabledPluginIds} (the
+   * load/unload state): an inactive plugin stays *loaded* but its tools are
+   * hidden from the model's per-turn scope. `enabled !== false` is the active
+   * predicate, so absence from this set means active (migration-safe default).
+   */
+  private readonly inactivePluginIds = new Set<string>();
   private readonly preparingPluginIds = new Set<string>();
   private readonly preparationStatuses = new Map<string, PluginPreparationStatus>();
   private readonly preparationFailures = new Map<string, string>();
@@ -309,6 +329,7 @@ export class PluginRuntime {
     this.auditLog = options.auditLog;
     this.onDisable = options.onDisable;
     this.onEnable = options.onEnable;
+    this.onActiveStateChange = options.onActiveStateChange;
     this.preparePluginStart = options.preparePluginStart;
   }
 
@@ -591,7 +612,7 @@ export class PluginRuntime {
           : (err as NodeJS.ErrnoException).code === "ENOENT" ? "manifest_missing"
           : "manifest_read";
         plog("error", { pluginId, phase: PluginPhase.VALIDATION_FAIL, err, reason }, `manifest read failed: ${(err as Error).message}`);
-        if (plan.enabled && plan.pluginIdHint) {
+        if (plan.pluginIdHint) {
           this.markFailed(plan.pluginIdHint, {
             name: plan.pluginIdHint,
             description: "Plugin manifest could not be loaded.",
@@ -606,10 +627,16 @@ export class PluginRuntime {
         enabledManifestSnapshots.get(manifest.id)?.approvedPluginAccess ?? plan.approvedPluginAccess;
       this.knownPluginManifests.set(manifest.id, manifest);
       this.failedPluginStubs.delete(manifest.id);
+      // #1176 M1 fix: inactive plugins (enabled=false) are LOADED just like
+      // active ones — only model exposure is gated. Seed inactivePluginIds here
+      // so isPluginEnabled() is correct immediately after boot; the boot
+      // ToolRegistry sync and hostApi.registerKeywords gate suppress inactive
+      // tools/keywords without stop/reload churn.
       if (!plan.enabled) {
-        this.disabledPluginIds.add(manifest.id);
-        this.failedPluginIds.delete(manifest.id);
-        continue;
+        this.inactivePluginIds.add(manifest.id);
+      } else {
+        // Ensure a previously-inactive plugin becomes active on re-enable.
+        this.inactivePluginIds.delete(manifest.id);
       }
       this.disabledPluginIds.delete(manifest.id);
       this.failedPluginIds.delete(manifest.id);
@@ -719,6 +746,10 @@ export class PluginRuntime {
       this.failedPluginIds.delete(manifest.id);
       this.disabledPluginIds.delete(manifest.id);
       plog("debug", { pluginId: manifest.id, phase: PluginPhase.LOAD_OK }, "plugin loaded");
+      // NOTE: inactive-plugin model visibility is not a runtime load concern.
+      // Boot sync still registers loaded tools for host/UI/auth execution;
+      // ConversationLoop scope and the hostApi.registerKeywords gate suppress
+      // model-visible tools/keywords for inactive plugins.
     }
     this.loaded = true;
   }
@@ -1789,6 +1820,61 @@ export class PluginRuntime {
     return [...this.plugins.keys()];
   }
 
+  /**
+   * #1176 active/inactive — whether a plugin's tools may be exposed this turn.
+   * Mirrors the registry `enabled` field: `enabled !== false` is active, so an
+   * unknown / never-toggled plugin defaults to active (migration-safe). This is
+   * orthogonal to load state — an inactive plugin stays loaded. Its tools are
+   * hidden from the model by resolveToolScope and refused on the model/agent
+   * execution path by the plugin-tool-adapter, while host-internal call() stays
+   * callable for auth/config/UI. The synchronous in-memory mirror lets the
+   * per-turn `resolveToolScope` gate read it without touching disk.
+   */
+  isPluginEnabled(pluginId: string): boolean {
+    return !this.inactivePluginIds.has(pluginId);
+  }
+
+  /**
+   * #1176 — toggle a plugin's active/inactive state. Persists `enabled` to the
+   * registry atomically and updates the in-memory mirror. Deliberately does NOT
+   * unload/reload the plugin: tool exposure is recomputed per turn from
+   * {@link isPluginEnabled}, so a disabled plugin's tools simply vanish from the
+   * next turn's scope (and reappear on re-enable) with no runtime churn.
+   * Active-state changes use `onActiveStateChange`; runtime lifecycle
+   * `onDisable`/`onEnable` remains reserved for actual unload/reload paths.
+   *
+   * @throws if `pluginId` is not a known/loaded plugin.
+   */
+  async setPluginEnabled(pluginId: string, enabled: boolean): Promise<void> {
+    if (!this.knownPluginManifests.has(pluginId) && !this.plugins.has(pluginId)) {
+      throw new Error(`Plugin not found: ${pluginId}`);
+    }
+    if (this.registryPath) {
+      await updatePluginRegistry(this.registryPath, (registry) => {
+        const entry = registry.plugins.find((p) => p.id === pluginId);
+        if (!entry) {
+          throw new Error(`Plugin not found in registry: ${pluginId}`);
+        }
+        entry.enabled = enabled;
+      });
+    }
+    if (enabled) {
+      this.inactivePluginIds.delete(pluginId);
+      try {
+        this.onActiveStateChange?.(pluginId, true);
+      } catch (err) {
+        log.error(`onActiveStateChange failed during setPluginEnabled(${pluginId}, true): %s`, (err as Error).message);
+      }
+    } else {
+      this.inactivePluginIds.add(pluginId);
+      try {
+        this.onActiveStateChange?.(pluginId, false);
+      } catch (err) {
+        log.error(`onActiveStateChange failed during setPluginEnabled(${pluginId}, false): %s`, (err as Error).message);
+      }
+    }
+  }
+
   getPluginManifest(pluginId: string): PluginManifest | undefined {
     return this.plugins.get(pluginId)?.manifest ?? this.knownPluginManifests.get(pluginId);
   }
@@ -1807,9 +1893,17 @@ export class PluginRuntime {
       : null;
     const cards = new Map<string, PluginCard>();
     for (const [pluginId, manifest] of this.knownPluginManifests) {
+      const runtimeLoaded = this.plugins.has(pluginId);
+      const enabled = !this.inactivePluginIds.has(pluginId);
+      const active = enabled && runtimeLoaded;
       const loadStatus = this.preparingPluginIds.has(pluginId)
         ? "preparing"
-        : this.plugins.has(pluginId)
+        // #1176 active/inactive — a runtime-toggled inactive plugin stays in
+        // `this.plugins` (loaded) but reports "disabled" so the UI reflects the
+        // active/inactive state, not the load state.
+        : !enabled
+          ? "disabled"
+          : runtimeLoaded
           ? "loaded"
           : this.failedPluginIds.has(pluginId)
           ? "failed"
@@ -1817,7 +1911,10 @@ export class PluginRuntime {
             ? "disabled"
             : null;
       if (!loadStatus) continue;
-      cards.set(pluginId, this.buildPluginCard(pluginId, manifest, loadStatus, visibleNames));
+      cards.set(pluginId, this.buildPluginCard(pluginId, manifest, loadStatus, visibleNames, {
+        active,
+        runtimeLoaded,
+      }));
     }
     for (const [pluginId, stub] of this.failedPluginStubs) {
       if (cards.has(pluginId)) continue;
@@ -1829,6 +1926,8 @@ export class PluginRuntime {
         tools: [],
         capabilities: [],
         loadStatus: "failed",
+        active: false,
+        runtimeLoaded: false,
       });
     }
     return [...cards.values()];
@@ -2064,9 +2163,12 @@ export class PluginRuntime {
     manifest: PluginManifest,
     loadStatus: PluginCard["loadStatus"],
     visibleNames: Set<string> | null,
+    state: { active: boolean; runtimeLoaded: boolean },
   ): PluginCard {
     const allTools = manifest.tools ?? [];
-    const filteredTools = visibleNames
+    const filteredTools = !state.active
+      ? []
+      : visibleNames
       ? allTools.filter((t) => visibleNames.has(t))
       : allTools;
     const sampleTools = filteredTools.slice(0, 3);
@@ -2105,6 +2207,8 @@ export class PluginRuntime {
       isManaged: normalizeInstallPolicy(manifest) === "admin",
       installPolicy: manifest.installPolicy ?? "user",
       loadStatus,
+      active: state.active,
+      runtimeLoaded: state.runtimeLoaded,
       preparationStatus: loadStatus === "preparing" ? this.preparationStatuses.get(pluginId) : undefined,
       icon: manifest.icon,
       iconText: manifest.iconText,

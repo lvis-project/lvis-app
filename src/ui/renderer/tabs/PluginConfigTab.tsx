@@ -4,6 +4,7 @@ import { Button } from "../../../components/ui/button.js";
 import { Input } from "../../../components/ui/input.js";
 import { ScrollArea } from "../../../components/ui/scroll-area.js";
 import { Separator } from "../../../components/ui/separator.js";
+import { Switch } from "../../../components/ui/switch.js";
 import { sanitizePluginConfig, sanitizePluginConfigKey } from "../../../shared/plugin-config.js";
 import { getApi } from "../api-client.js";
 import { getHostMarketplaceApi } from "../host-marketplace-api.js";
@@ -52,6 +53,10 @@ function formatBytes(bytes: number): string {
   if (bytes >= 1024 * 1024) return `${(bytes / (1024 * 1024)).toFixed(1)} MB`;
   if (bytes >= 1024) return `${Math.round(bytes / 1024)} KB`;
   return `${bytes} B`;
+}
+
+function isRuntimeCallablePlugin(plugin: PluginCardSummary): boolean {
+  return plugin.runtimeLoaded ?? (plugin.loadStatus === "loaded");
 }
 
 function clampProgressPct(value: unknown): number | null {
@@ -191,6 +196,29 @@ export function PluginConfigTab() {
     }
   }, [showBanner]);
 
+  // #1176 — toggle a plugin active/inactive. Inactive plugins stay loaded but
+  // their tools are hidden from the model. Optimistically reflects the new
+  // loadStatus, then refreshes from the runtime (which is the source of truth).
+  const [togglingId, setTogglingId] = useState<string | null>(null);
+  const handleToggleEnabled = useCallback(
+    async (pluginId: string, nextEnabled: boolean) => {
+      setTogglingId(pluginId);
+      try {
+        const res = await getApi().setPluginEnabled(pluginId, nextEnabled);
+        if (!res.ok) {
+          showBanner("error", res.message ?? "플러그인 활성 상태 변경 실패");
+          return;
+        }
+        await refreshPlugins();
+      } catch (e) {
+        showBanner("error", (e as Error).message ?? "플러그인 활성 상태 변경 실패");
+      } finally {
+        setTogglingId(null);
+      }
+    },
+    [refreshPlugins, showBanner],
+  );
+
   useEffect(() => {
     void refreshPlugins();
   }, [refreshPlugins]);
@@ -242,6 +270,15 @@ export function PluginConfigTab() {
           if (success) {
             void refreshPlugins();
           }
+        }),
+      );
+    }
+    // #1176 — refresh when a plugin's active/inactive state changes from any
+    // surface so the list badges + tools panel reflect the toggle.
+    if (typeof api.onPluginEnabledChanged === "function") {
+      unsubs.push(
+        api.onPluginEnabledChanged(() => {
+          void refreshPlugins();
         }),
       );
     }
@@ -332,6 +369,10 @@ export function PluginConfigTab() {
   }, [selectedId, entries, showBanner, notifySaved]);
 
   const selectedPlugin = plugins.find((p) => p.id === selectedId);
+  const selectedPluginActive = selectedPlugin
+    ? (selectedPlugin.active ?? selectedPlugin.loadStatus !== "disabled")
+    : false;
+  const selectedPluginRuntimeLoaded = selectedPlugin ? isRuntimeCallablePlugin(selectedPlugin) : false;
   // §9.2 Track B — merge schema-declared defaults with the saved config
   // so the typed form always shows the value the plugin will actually
   // receive (defaults first, saved overrides win).
@@ -491,6 +532,7 @@ export function PluginConfigTab() {
                   <button
                     key={p.id}
                     type="button"
+                    data-testid={`plugin-config:row:${p.id}`}
                     onClick={() => setSelectedId(p.id)}
                     className={`w-full text-left rounded px-2 py-1.5 text-xs hover:bg-accent ${
                       selectedId === p.id ? "bg-accent font-semibold" : ""
@@ -502,23 +544,43 @@ export function PluginConfigTab() {
                     </div>
                     <div className="flex items-center gap-1 mt-0.5">
                       {p.loadStatus === "loaded" && (
-                        <span className="inline-block rounded-full bg-success/15 px-1.5 py-px text-[9px] font-medium text-success">로드됨</span>
+                        <span
+                          data-testid={`plugin-config:row-status:${p.id}`}
+                          className="inline-block rounded-full bg-success/15 px-1.5 py-px text-[9px] font-medium text-success"
+                        >
+                          로드됨
+                        </span>
                       )}
                       {p.loadStatus === "preparing" && (
-                        <span className="inline-block rounded-full bg-warning/15 px-1.5 py-px text-[9px] font-medium text-warning">준비 중</span>
+                        <span
+                          data-testid={`plugin-config:row-status:${p.id}`}
+                          className="inline-block rounded-full bg-warning/15 px-1.5 py-px text-[9px] font-medium text-warning"
+                        >
+                          준비 중
+                        </span>
                       )}
                       {p.loadStatus === "failed" && (
-                        <span className="inline-block rounded-full bg-destructive/15 px-1.5 py-px text-[9px] font-medium text-destructive">실패</span>
+                        <span
+                          data-testid={`plugin-config:row-status:${p.id}`}
+                          className="inline-block rounded-full bg-destructive/15 px-1.5 py-px text-[9px] font-medium text-destructive"
+                        >
+                          실패
+                        </span>
                       )}
                       {p.loadStatus === "disabled" && (
-                        <span className="inline-block rounded-full bg-muted px-1.5 py-px text-[9px] font-medium text-muted-foreground">비활성</span>
+                        <span
+                          data-testid={`plugin-config:row-status:${p.id}`}
+                          className="inline-block rounded-full bg-muted px-1.5 py-px text-[9px] font-medium text-muted-foreground"
+                        >
+                          비활성
+                        </span>
                       )}
-                      {/* Auth status — only when manifest declares `auth` AND the plugin is
-                          actually loaded (skip failed/disabled rows whose runtime can't be
-                          invoked). The list-level badge is a "you need to do something here"
+                      {/* Auth status — only when manifest declares `auth` AND the runtime is
+                          callable (inactive plugins remain callable for auth/config).
+                          The list-level badge is a "you need to do something here"
                           surface; we render only `unauthed` (red) so the row stays visually
                           quiet for the happy-path. Click → detail panel handles login flow. */}
-                      {p.auth && p.loadStatus === "loaded" && authStatuses.get(p.id)?.kind === "unauthed" && (
+                      {p.auth && isRuntimeCallablePlugin(p) && authStatuses.get(p.id)?.kind === "unauthed" && (
                         <span
                           className="inline-block rounded-full bg-destructive/15 px-1.5 py-px text-[9px] font-medium text-destructive"
                           title="이 플러그인은 로그인이 필요합니다"
@@ -597,13 +659,33 @@ export function PluginConfigTab() {
                       )}
                       {selectedPlugin.loadStatus && (
                         selectedPlugin.loadStatus === "loaded" ? (
-                          <span className="inline-block rounded-full bg-success/15 px-1.5 py-px text-[9px] font-medium text-success">로드됨</span>
+                          <span
+                            data-testid={`plugin-config:detail-status:${selectedPlugin.id}`}
+                            className="inline-block rounded-full bg-success/15 px-1.5 py-px text-[9px] font-medium text-success"
+                          >
+                            로드됨
+                          </span>
                         ) : selectedPlugin.loadStatus === "preparing" ? (
-                          <span className="inline-block rounded-full bg-warning/15 px-1.5 py-px text-[9px] font-medium text-warning">준비 중</span>
+                          <span
+                            data-testid={`plugin-config:detail-status:${selectedPlugin.id}`}
+                            className="inline-block rounded-full bg-warning/15 px-1.5 py-px text-[9px] font-medium text-warning"
+                          >
+                            준비 중
+                          </span>
                         ) : selectedPlugin.loadStatus === "failed" ? (
-                          <span className="inline-block rounded-full bg-destructive/15 px-1.5 py-px text-[9px] font-medium text-destructive">실패</span>
+                          <span
+                            data-testid={`plugin-config:detail-status:${selectedPlugin.id}`}
+                            className="inline-block rounded-full bg-destructive/15 px-1.5 py-px text-[9px] font-medium text-destructive"
+                          >
+                            실패
+                          </span>
                         ) : (
-                          <span className="inline-block rounded-full bg-muted px-1.5 py-px text-[9px] font-medium text-muted-foreground">비활성</span>
+                          <span
+                            data-testid={`plugin-config:detail-status:${selectedPlugin.id}`}
+                            className="inline-block rounded-full bg-muted px-1.5 py-px text-[9px] font-medium text-muted-foreground"
+                          >
+                            비활성
+                          </span>
                         )
                       )}
                     </div>
@@ -620,26 +702,44 @@ export function PluginConfigTab() {
                       <p className="mt-1 text-xs text-muted-foreground">{selectedPlugin.description}</p>
                     )}
                   </div>
-                  <Button
-                    size="sm"
-                    variant="destructive"
-                    className="h-7 text-xs px-2 shrink-0"
-                    onClick={() => setUninstallTarget(selectedPlugin)}
-                    disabled={saving || selectedPlugin.isManaged}
-                    title={selectedPlugin.isManaged ? "관리자가 설치한 플러그인은 제거할 수 없습니다" : undefined}
-                  >
-                    제거
-                  </Button>
+                  <div className="flex items-center gap-2 shrink-0">
+                    {selectedPluginRuntimeLoaded ? (
+                      <label className="flex items-center gap-1.5 text-[10px] text-muted-foreground">
+                        <span>{selectedPluginActive ? "활성" : "비활성"}</span>
+                        <Switch
+                          size="sm"
+                          data-testid={`plugin-config:enabled-toggle:${selectedPlugin.id}`}
+                          checked={selectedPluginActive}
+                          disabled={togglingId === selectedPlugin.id}
+                          onCheckedChange={(next) => void handleToggleEnabled(selectedPlugin.id, next)}
+                          aria-label={`${selectedPlugin.name} 활성/비활성 전환`}
+                        />
+                      </label>
+                    ) : (
+                      <span className="text-[10px] text-muted-foreground">
+                        {selectedPlugin.loadStatus === "preparing" ? "준비 중" : "실행 불가"}
+                      </span>
+                    )}
+                    <Button
+                      size="sm"
+                      variant="destructive"
+                      className="h-7 text-xs px-2"
+                      onClick={() => setUninstallTarget(selectedPlugin)}
+                      disabled={saving || selectedPlugin.isManaged}
+                      title={selectedPlugin.isManaged ? "관리자가 설치한 플러그인은 제거할 수 없습니다" : undefined}
+                    >
+                      제거
+                    </Button>
+                  </div>
                 </div>
 
                 <PluginPreparationStatusPanel plugin={selectedPlugin} />
 
                 {/* Auth section — only when manifest declares `auth`, the
-                    plugin is loaded (failed/disabled plugins have no live
-                    runtime to invoke), and the api bridge is available.
+                    runtime is callable, and the api bridge is available.
                     See architecture.md §9.4a. */}
                 {selectedPlugin.auth &&
-                  selectedPlugin.loadStatus === "loaded" &&
+                  selectedPluginRuntimeLoaded &&
                   apiForAuthHook && (
                   <>
                     <Separator />
@@ -670,7 +770,7 @@ export function PluginConfigTab() {
                     Collapsed by default with a tool-count badge so the detail
                     panel stays scannable for plugins with many tools. Click
                     the row to expand. */}
-                {selectedPlugin.tools.length > 0 && (
+                {(selectedPlugin.tools.length > 0 || !selectedPluginActive) && (
                   <>
                     <Separator />
                     <div className="space-y-1">
@@ -686,12 +786,25 @@ export function PluginConfigTab() {
                           <span className="inline-flex items-center justify-center min-w-[1.25rem] rounded-full bg-muted px-1.5 py-px text-[10px] font-medium text-muted-foreground tabular-nums">
                             {selectedPlugin.tools.length}
                           </span>
+                          {!selectedPluginActive && (
+                            <span className="rounded-full bg-muted px-1.5 py-px text-[9px] font-medium text-muted-foreground">
+                              모델 미노출
+                            </span>
+                          )}
                         </span>
                         <span aria-hidden="true" className="text-[10px] text-muted-foreground">
                           {toolsExpanded ? "▾" : "▸"}
                         </span>
                       </button>
-                      {toolsExpanded && (
+                      {!selectedPluginActive && selectedPlugin.tools.length === 0 && (
+                        <p
+                          data-testid={`plugin-config:tools-hidden-note:${selectedPlugin.id}`}
+                          className="px-1 text-[11px] text-muted-foreground"
+                        >
+                          비활성 상태에서는 이 플러그인의 도구가 모델에 노출되지 않습니다.
+                        </p>
+                      )}
+                      {toolsExpanded && selectedPlugin.tools.length > 0 && (
                         <div
                           id={`plugin-tools-list-${selectedPlugin.id}`}
                           className="space-y-2 max-h-48 overflow-y-auto pr-1"

@@ -56,6 +56,11 @@ export class KeywordEngine {
     this.skillKeywords = this.skillKeywords.filter((sk) => sk.pluginId !== pluginId);
   }
 
+  /** Whether this plugin currently contributes any keyword routing entries. */
+  hasPluginKeywords(pluginId: string): boolean {
+    return this.skillKeywords.some((sk) => sk.pluginId === pluginId);
+  }
+
   /**
    * Lazy Tool Scoping — 입력에 포함된 모든 키워드의 pluginId 집합을 반환.
    * classify()는 첫 매치만 반환하지만, scope 결정은 "이 턴에서 필요한 모든

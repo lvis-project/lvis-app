@@ -30,7 +30,7 @@ import { SkillStore } from "../../main/skill-store.js";
 import { SkillOverlay } from "../../main/skill-overlay.js";
 import { AgentProfileStore } from "../../main/agent-profile-store.js";
 import { ToolRegistry, TOOL_SEARCH_TOOL_NAME } from "../registry.js";
-import { registerToolSearchMetaTool } from "../../boot/tools.js";
+import { registerRequestPluginMetaTool, registerToolSearchMetaTool } from "../../boot/tools.js";
 
 function ctx(sessionId = "session-x"): ToolExecutionContext {
   return { cwd: process.cwd(), extraAllowedDirectories: [], metadata: { sessionId } };
@@ -306,6 +306,77 @@ describe("todo_session_write tool", () => {
     expect(after2[1].status).toBe("pending");
   });
 
+  it("rejects a no-op re-mark without mutating the store", async () => {
+    const store = new SessionTodoStore();
+    const tool = createTodoSessionWriteTool(store);
+    const r1 = await tool.execute(
+      { items: [{ content: "step 1", status: "in_progress" }] },
+      ctx("s-noop"),
+    );
+    const id = (JSON.parse(r1.output).items as Array<{ id: string }>)[0].id;
+    const writeSpy = vi.spyOn(store, "write");
+
+    // Re-mark the already-in_progress item in_progress → nothing changes.
+    const r2 = await tool.execute(
+      { items: [{ id, status: "in_progress" }] },
+      ctx("s-noop"),
+    );
+    const body = JSON.parse(r2.output);
+    expect(r2.isError).toBe(true);
+    expect(body.changed).toBe(false);
+    expect(body.error).toContain("Do not retry todo_session_write");
+    // Fail-safe: a no-op call never reaches the store.
+    expect(writeSpy).not.toHaveBeenCalled();
+    writeSpy.mockRestore();
+  });
+
+  it("still writes when at least one item actually advances", async () => {
+    const store = new SessionTodoStore();
+    const tool = createTodoSessionWriteTool(store);
+    const r1 = await tool.execute(
+      {
+        items: [
+          { content: "step 1", status: "in_progress" },
+          { content: "step 2", status: "pending" },
+        ],
+      },
+      ctx("s-adv"),
+    );
+    const items = JSON.parse(r1.output).items as Array<{ id: string }>;
+    const writeSpy = vi.spyOn(store, "write");
+
+    // step 1 -> completed (real change) alongside a no-op re-mark of step 2.
+    const r2 = await tool.execute(
+      {
+        items: [
+          { id: items[0].id, status: "completed" },
+          { id: items[1].id, status: "pending" },
+        ],
+      },
+      ctx("s-adv"),
+    );
+    const body = JSON.parse(r2.output);
+    expect(body.changed).toBeUndefined();
+    expect(writeSpy).toHaveBeenCalledTimes(1);
+    expect(body.items[0].status).toBe("completed");
+    writeSpy.mockRestore();
+  });
+
+  it("treats deleting a non-existent item as a no-op", async () => {
+    const store = new SessionTodoStore();
+    const tool = createTodoSessionWriteTool(store);
+    const writeSpy = vi.spyOn(store, "write");
+    const r = await tool.execute(
+      { items: [{ id: "ghost", status: "deleted" }] },
+      ctx("s-del"),
+    );
+    const body = JSON.parse(r.output);
+    expect(r.isError).toBe(false);
+    expect(body.changed).toBe(false);
+    expect(writeSpy).not.toHaveBeenCalled();
+    writeSpy.mockRestore();
+  });
+
   it("supports ordered insertion and deletion", async () => {
     const store = new SessionTodoStore();
     const tool = createTodoSessionWriteTool(store);
@@ -530,6 +601,20 @@ describe("tool_search meta tool", () => {
     expect(tool).toBeDefined();
 
     const result = await tool!.execute({ query: "meeting" }, ctx());
+
+    expect(result.isError).toBe(true);
+    expect(result.output).toContain("interception");
+  });
+});
+
+describe("request_plugin meta tool", () => {
+  it("fails closed if executor reaches the loop-intercepted fallback", async () => {
+    const registry = new ToolRegistry();
+    registerRequestPluginMetaTool(registry);
+    const tool = registry.findByName("request_plugin");
+    expect(tool).toBeDefined();
+
+    const result = await tool!.execute({ pluginId: "local-indexer" }, ctx());
 
     expect(result.isError).toBe(true);
     expect(result.output).toContain("interception");

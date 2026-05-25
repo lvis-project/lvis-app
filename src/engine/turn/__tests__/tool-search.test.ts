@@ -129,11 +129,54 @@ describe("handleToolSearch", () => {
     expect(out.promotedToolNames).toEqual([]);
   });
 
-  it("does not re-promote an already-loaded tool", () => {
+  it("returns a non-error already-loaded result for an exact loaded tool query", () => {
     const state = freshState({ activeToolNames: new Set(["meeting_start"]) });
     const out = handleToolSearch([search("tu-1", "meeting_start")], state);
-    expect(out.results[0].is_error).toBe(true);
+    expect(out.results[0].is_error).toBe(false);
+    expect(out.results[0].content).toContain("이미 로드");
     expect(out.promotedToolNames).toEqual([]);
+    expect(out.alreadyLoadedToolNames).toEqual(["meeting_start"]);
+    expect(out.nextTurnSearches).toBe(0);
+    expect(out.nextSessionSearches).toBe(0);
+  });
+
+  it("recognizes eager-loaded tools even when they were not individually promoted", () => {
+    const state = freshState({
+      activeToolNames: new Set<string>(),
+      loadedToolNames: new Set(["meeting_start"]),
+      catalog: [],
+    });
+    const out = handleToolSearch([search("tu-1", "meeting_start")], state);
+    expect(out.results[0].is_error).toBe(false);
+    expect(out.results[0].content).toContain("이미 로드");
+    expect(out.promotedToolNames).toEqual([]);
+    expect(out.alreadyLoadedToolNames).toEqual(["meeting_start"]);
+    expect(state.activeToolNames.size).toBe(0);
+  });
+
+  it("recognizes eager-loaded tools by name tokens when no unloaded catalog tool matches", () => {
+    const state = freshState({
+      activeToolNames: new Set<string>(),
+      loadedTools: [{ name: "index_scan_status", description: "로컬 인덱서 상태 확인" }],
+      catalog: [],
+    });
+    const out = handleToolSearch([search("tu-1", "scan status")], state);
+    expect(out.results[0].is_error).toBe(false);
+    expect(out.results[0].content).toContain("이미 로드");
+    expect(out.alreadyLoadedToolNames).toEqual(["index_scan_status"]);
+    expect(out.promotedToolNames).toEqual([]);
+  });
+
+  it("still promotes unloaded catalog matches before falling back to already-loaded keyword matches", () => {
+    const state = freshState({
+      activeToolNames: new Set<string>(),
+      loadedTools: [{ name: "meeting_start", description: "meeting helper" }],
+      catalog: [{ name: "meeting_stop", description: "meeting helper" }],
+    });
+    const out = handleToolSearch([search("tu-1", "meeting")], state);
+    expect(out.results[0].is_error).toBe(false);
+    expect(out.promotedToolNames).toEqual(["meeting_stop"]);
+    expect(out.alreadyLoadedToolNames).toEqual([]);
   });
 
   it("caps a broad query to a small top-N promotion set", () => {
