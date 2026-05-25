@@ -20,6 +20,7 @@ import type { MarketplaceFetcher } from "../marketplace-fetcher.js";
 import type { PluginMarketplaceItem } from "../types.js";
 import { _resetForTest, setIsPackaged } from "../../boot/dev-flags.js";
 import { makeTestPluginPaths } from "./test-helpers.js";
+import { canonicalJSON } from "../whitelist/canonical-json.js";
 
 function makePluginZip(manifest: Record<string, unknown>): Buffer {
   const zip = new AdmZip();
@@ -29,6 +30,10 @@ function makePluginZip(manifest: Record<string, unknown>): Buffer {
     Buffer.from("export default async function createPlugin() { return { handlers: {} }; }\n", "utf-8"),
   );
   return zip.toBuffer();
+}
+
+function manifestSha(manifest: unknown): string {
+  return createHash("sha256").update(canonicalJSON(manifest)).digest("hex");
 }
 
 function freshEd25519() {
@@ -125,13 +130,14 @@ describe("PluginMarketplaceService install()", () => {
       packageName: "@lvis/test-plugin",
       tools: ["ping"],
     };
-    const zipBuffer = makePluginZip({
+    const pluginManifest = {
       id: plugin.id,
       name: plugin.name,
       version: plugin.version,
       entry: "./dist/hostPlugin.js",
       tools: plugin.tools,
-    });
+    };
+    const zipBuffer = makePluginZip(pluginManifest);
     const downloadVersion = vi.fn(async () => {
       throw new Error("downloadVersion should not be called for signed installs");
     });
@@ -164,7 +170,7 @@ describe("PluginMarketplaceService install()", () => {
     expect(npmInstallMock).not.toHaveBeenCalled();
 
     const registry = JSON.parse(await readFile(registryPath, "utf-8")) as {
-      plugins: Array<{ manifestPath: string }>;
+      plugins: Array<{ manifestPath: string; manifestSha256?: string }>;
     };
     // Phase 2a invariant: the zip-install branch must emit a registry-
     // relative POSIX path (NOT an absolute path). Locks the regression
@@ -174,6 +180,7 @@ describe("PluginMarketplaceService install()", () => {
     expect(entryPath).toBe("test-plugin/plugin.json");
     expect(entryPath).not.toMatch(/^[/\\]|^[A-Za-z]:/);
     expect(entryPath).not.toContain("\\");
+    expect(registry.plugins[0].manifestSha256).toBe(manifestSha(pluginManifest));
 
     const manifest = JSON.parse(
       await readFile(manifestPathToAbs(entryPath), "utf-8"),
@@ -305,21 +312,23 @@ describe("PluginMarketplaceService install()", () => {
     mockedPublisherKeys.getBundledPublicKeys.mockReturnValue({
       "test-v1": signingKey.publicKey,
     });
-    const v1Zip = makePluginZip({
+    const v1Manifest = {
       id: "hash-repair-plugin",
       name: "Hash Repair Plugin",
       version: "1.2.3",
       entry: "./dist/hostPlugin.js",
       tools: ["ping"],
-    });
-    const v2Zip = makePluginZip({
+    };
+    const v2Manifest = {
       id: "hash-repair-plugin",
       name: "Hash Repair Plugin",
       version: "1.2.3",
       entry: "./dist/hostPlugin.js",
       tools: ["ping"],
       description: "Rebuilt artifact",
-    });
+    };
+    const v1Zip = makePluginZip(v1Manifest);
+    const v2Zip = makePluginZip(v2Manifest);
     const plugin: PluginMarketplaceItem = {
       id: "hash-repair-plugin",
       slug: "hash-repair-plugin",
@@ -368,7 +377,11 @@ describe("PluginMarketplaceService install()", () => {
     const receipt = JSON.parse(
       await readFile(join(cacheRoot, "hash-repair-plugin", "install-receipt.json"), "utf-8"),
     ) as { artifactSha256: string | null };
+    const registry = JSON.parse(await readFile(registryPath, "utf-8")) as {
+      plugins: Array<{ manifestSha256?: string }>;
+    };
     expect(receipt.artifactSha256).toBe(plugin.artifactSha256);
+    expect(registry.plugins[0].manifestSha256).toBe(manifestSha(v2Manifest));
     expect(downloadArtifact).toHaveBeenCalledTimes(2);
     expect(fetchSignatureEnvelope).toHaveBeenCalledTimes(2);
   });
