@@ -2,6 +2,10 @@ import type { GenericMessage, MessageMeta } from "../engine/llm/types.js";
 import { userContentText } from "../engine/llm/types.js";
 import { maskSensitiveData } from "./dlp.js";
 import { isOverlayTriggerOrigin } from "./overlay-trigger-source.js";
+import {
+  normalizeProviderToolAliasName,
+  normalizeProviderToolAliasText,
+} from "./tool-name-aliases.js";
 
 export type SerializedHistoryToolCall = {
   id: string;
@@ -63,8 +67,8 @@ export function serializeHistoryMessage(
     m.role === "user"
       ? userContentText(m.content)
       : m.role === "tool_result"
-        ? maskSensitiveData(m.content).masked
-        : m.content;
+        ? normalizeProviderToolAliasText(maskSensitiveData(m.content).masked)
+        : normalizeProviderToolAliasText(m.content);
   const meta = m.meta as MessageMeta | undefined;
   const toolDisplay = serializeToolDisplay(meta?.toolDisplay);
   const importedTrigger = serializeImportedTrigger(meta?.importedTrigger);
@@ -98,8 +102,17 @@ export function serializeHistoryMessage(
   if (m.role === "assistant") {
     return {
       ...base,
-      ...(m.thought !== undefined ? { thought: m.thought } : {}),
-      ...(m.toolCalls !== undefined ? { toolCalls: m.toolCalls } : {}),
+      ...(m.thought !== undefined
+        ? { thought: normalizeProviderToolAliasText(m.thought) }
+        : {}),
+      ...(m.toolCalls !== undefined
+        ? {
+            toolCalls: m.toolCalls.map((toolCall) => ({
+              ...toolCall,
+              name: normalizeProviderToolAliasName(toolCall.name),
+            })),
+          }
+        : {}),
     };
   }
 
@@ -107,7 +120,9 @@ export function serializeHistoryMessage(
     return {
       ...base,
       toolUseId: m.toolUseId,
-      ...(m.toolName !== undefined ? { toolName: m.toolName } : {}),
+      ...(m.toolName !== undefined
+        ? { toolName: normalizeProviderToolAliasName(m.toolName) }
+        : {}),
       ...(m.isError !== undefined ? { isError: m.isError } : {}),
     };
   }
