@@ -25,6 +25,10 @@
 import type { StreamEvent, ThinkingBlock } from "../types.js";
 import { extractSignatureSafely } from "./signature-shim.js";
 import { createLogger } from "../../../lib/logger.js";
+import {
+  extractProviderErrorDiagnostics,
+  providerErrorMessage,
+} from "../provider-error-diagnostics.js";
 const log = createLogger("stream-mapper");
 
 type AnyPart = Record<string, unknown> & { type: string };
@@ -171,20 +175,12 @@ export async function* fullStreamToStreamEvent(
       }
       case "error": {
         const err = (part as { error?: unknown }).error;
-        let msg: string;
-        if (err instanceof Error) {
-          msg = err.message;
-        } else if (typeof err === "string") {
-          msg = err;
-        } else {
-          // JSON.stringify can throw on circular refs / BigInt; fall back to String().
-          try {
-            msg = JSON.stringify(err);
-          } catch {
-            msg = String(err);
-          }
-        }
-        yield { type: "error", error: msg };
+        const providerError = extractProviderErrorDiagnostics(err);
+        yield {
+          type: "error",
+          error: providerErrorMessage(err),
+          providerError,
+        };
         break;
       }
       default:

@@ -322,6 +322,7 @@ export class VercelUnifiedProvider implements LLMProvider {
           type: "error",
           error: mapped.userMessage,
           classification: mapped.classification,
+          providerError: mapped.providerError,
         };
         return;
       }
@@ -339,6 +340,7 @@ export class VercelUnifiedProvider implements LLMProvider {
         type: "error",
         error: mapped.userMessage,
         classification: mapped.classification,
+        providerError: mapped.providerError,
       };
     }
   }
