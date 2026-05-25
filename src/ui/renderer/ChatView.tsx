@@ -1079,6 +1079,9 @@ export function ChatView({ api, onAsk, onEditSave, onFork, onToggleStar, onRetry
     if (e.kind === "assistant") {
       if (e.phase === "work") {
         entryClassMap.set(i, "intermediate");
+      } else if (e.phase === "final" && !isActiveTurnEntry) {
+        entryClassMap.set(i, "final");
+        finalTurnStartMap.set(i, myTurnStart);
       } else if (!hasSubsequent && !isActiveTurnEntry) {
         entryClassMap.set(i, "final");
         finalTurnStartMap.set(i, myTurnStart);
