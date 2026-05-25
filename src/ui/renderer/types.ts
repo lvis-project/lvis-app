@@ -794,6 +794,7 @@ export type LvisApi = {
     h: (payload: { requestId: string }) => void,
   ) => () => void;
   listSessionTodos: (sessionId?: string) => Promise<SessionTodoItem[]>;
+  clearSessionTodos: (sessionId?: string) => Promise<{ ok: boolean; error?: string }>;
   onSessionTodoChanged: (
     h: (payload: {
       sessionId: string;

@@ -202,6 +202,16 @@ export function registerMiscHandlers(deps: IpcDeps): void {
     const sid = sessionId ?? conversationLoop.getSessionId();
     return sessionTodoStore.list(sid);
   });
+  ipcMain.handle("lvis:session-todo:clear", (e, sessionId?: string) => {
+    if (!validateSender(e)) {
+      auditUnauthorized(auditLogger, "lvis:session-todo:clear", e);
+      return UNAUTHORIZED_FRAME;
+    }
+    if (!sessionTodoStore) return { ok: false, error: "no-session-todo-store" };
+    const sid = sessionId ?? conversationLoop.getSessionId();
+    sessionTodoStore.clear(sid);
+    return { ok: true };
+  });
   if (sessionTodoStore) {
     sessionTodoStore.onChange((sessionId, items) => {
       try {
