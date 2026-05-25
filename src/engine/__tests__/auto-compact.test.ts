@@ -14,6 +14,8 @@ import {
   setRuntimePreflightOverride,
   getRuntimePreflightOverride,
 } from "../auto-compact.js";
+import { stubMarkedToolResults } from "../wire-serialize.js";
+import { isToolResultStubContent } from "../../shared/tool-result-stub.js";
 import type { GenericMessage } from "../llm/types.js";
 
 function makeToolUseId(i: number): string {
@@ -168,6 +170,131 @@ describe("markStaleToolResults", () => {
     });
     expect(result.marked).toBe(true);
     expect(result.markedCount).toBe(6);
+  });
+});
+
+/** N개의 tool_use/tool_result 쌍 (각 result > minStubThreshold). */
+function synthN(count: number): GenericMessage[] {
+  const msgs: GenericMessage[] = [{ role: "user", content: "시작하자" }];
+  for (let i = 0; i < count; i++) {
+    const id = makeToolUseId(i);
+    msgs.push({
+      role: "assistant",
+      content: `step ${i}`,
+      toolCalls: [{ id, name: "search", input: { q: `query-${i}` } }],
+    });
+    msgs.push({
+      role: "tool_result",
+      toolUseId: id,
+      toolName: "search",
+      content: "x".repeat(5000) + `#${i}`,
+    });
+  }
+  return msgs;
+}
+
+describe("intra-turn tool-result stubbing (issue #1171)", () => {
+  it("preserve=16 marks the oldest 14 of 30 and keeps the newest 16 verbatim, then wire-stubs only the 14", () => {
+    const messages = synthN(30);
+    const { messages: afterMark, result } = markStaleToolResults(messages, {
+      preserveRecentToolResults: 16,
+    });
+
+    expect(result.marked).toBe(true);
+    expect(result.markedCount).toBe(14); // 30 - 16
+
+    const markedResults = afterMark.filter((m) => m.role === "tool_result");
+    expect(markedResults).toHaveLength(30);
+
+    // In-memory: oldest 14 carry compactedAt, content still verbatim; newest 16 unmarked.
+    for (let i = 0; i < 30; i++) {
+      const m = markedResults[i];
+      if (m.role !== "tool_result") continue;
+      expect(m.content.length).toBeGreaterThan(1000); // verbatim in memory either way
+      if (i < 14) {
+        expect(m.meta?.compactedAt).toMatch(/^\d{4}-/);
+      } else {
+        expect(m.meta?.compactedAt).toBeUndefined();
+      }
+    }
+
+    // Wire form: the 14 marked become stubs; the 16 preserved stay verbatim.
+    const wire = stubMarkedToolResults(afterMark);
+    const wireResults = wire.filter((m) => m.role === "tool_result");
+    expect(wireResults).toHaveLength(30);
+    for (let i = 0; i < 30; i++) {
+      const m = wireResults[i];
+      if (m.role !== "tool_result") continue;
+      if (i < 14) {
+        expect(isToolResultStubContent(m.content)).toBe(true);
+        expect(m.content.length).toBeLessThan(200);
+      } else {
+        expect(isToolResultStubContent(m.content)).toBe(false);
+        expect(m.content.length).toBeGreaterThan(1000);
+      }
+    }
+  });
+
+  it("is idempotent and only marks the newly-aged-out subset after more results arrive", () => {
+    const first = markStaleToolResults(synthN(30), { preserveRecentToolResults: 16 });
+    expect(first.result.markedCount).toBe(14);
+
+    // Second call over the already-marked array marks nothing.
+    const second = markStaleToolResults(first.messages, { preserveRecentToolResults: 16 });
+    expect(second.result.marked).toBe(false);
+    expect(second.result.markedCount).toBe(0);
+
+    // Append 10 fresh tool_results (now 40 total) and call again — only the
+    // 10 that just aged out of the protect window are newly marked.
+    const grown: GenericMessage[] = [...first.messages];
+    for (let i = 30; i < 40; i++) {
+      const id = makeToolUseId(i);
+      grown.push({
+        role: "assistant",
+        content: `step ${i}`,
+        toolCalls: [{ id, name: "search", input: {} }],
+      });
+      grown.push({
+        role: "tool_result",
+        toolUseId: id,
+        toolName: "search",
+        content: "x".repeat(5000) + `#${i}`,
+      });
+    }
+    const third = markStaleToolResults(grown, { preserveRecentToolResults: 16 });
+    // 40 total - 16 preserved = 24 should-be-marked; 14 were already marked,
+    // so only the 10 newly-aged-out are marked this pass.
+    expect(third.result.markedCount).toBe(10);
+    const stillMarked = third.messages.filter(
+      (m) => m.role === "tool_result" && m.meta?.compactedAt !== undefined,
+    );
+    expect(stillMarked).toHaveLength(24);
+  });
+
+  it("intra-turn preserve16 then post-turn preserve8 converges to the same state as post-turn alone", () => {
+    // Baseline: post-turn-only mark with preserve=8.
+    const baseline = markStaleToolResults(synthN(30), { preserveRecentToolResults: 8 });
+    expect(baseline.result.markedCount).toBe(22); // 30 - 8
+
+    // Layered: intra-turn (16) first, then post-turn (8).
+    const intra = markStaleToolResults(synthN(30), { preserveRecentToolResults: 16 });
+    const layered = markStaleToolResults(intra.messages, { preserveRecentToolResults: 8 });
+    // Intra marked the oldest 14; post-turn marks the next 8 (indices 14..21)
+    // that were still inside the 16-window but outside the 8-window.
+    expect(layered.result.markedCount).toBe(8);
+
+    const layeredMarked = layered.messages.filter(
+      (m) => m.role === "tool_result" && m.meta?.compactedAt !== undefined,
+    );
+    const baselineMarked = baseline.messages.filter(
+      (m) => m.role === "tool_result" && m.meta?.compactedAt !== undefined,
+    );
+    expect(layeredMarked).toHaveLength(baselineMarked.length); // both = 22 ("all but last 8")
+
+    // The projected wire token count is identical to the post-turn-only path.
+    expect(estimateMessagesTokens(stubMarkedToolResults(layered.messages))).toBe(
+      estimateMessagesTokens(stubMarkedToolResults(baseline.messages)),
+    );
   });
 });
 
