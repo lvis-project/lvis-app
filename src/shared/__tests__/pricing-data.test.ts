@@ -172,6 +172,8 @@ describe("engine pricing env-override (Node-only layer)", () => {
       expect(p.cacheReadPer1M).toBe(0.075);
       expect(p.outputPer1M).toBe(4.5);
       expect(p.contextWindow).toBe(400_000);
+      // org Tier-1 TPM (실측 429 "Limit 200000") — preflight TPM-aware 트리거용.
+      expect(p.tpmDefault).toBe(200_000);
     });
     it("gpt-5.4-nano (400K tier, cheapest)", () => {
       const p = lookupPricing("openai", "gpt-5.4-nano");
