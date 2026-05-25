@@ -18,6 +18,11 @@ import type { LLMProvider, StreamEvent, ToolCallBlock, ToolSchema, GenericMessag
 import { isContextLengthError } from "../auto-compact.js";
 import { stubMarkedToolResults } from "../wire-serialize.js";
 import { classifyProviderError } from "../llm/error-classifier.js";
+import {
+  extractProviderErrorDiagnostics,
+  withProviderErrorClassification,
+  type ProviderErrorDiagnostics,
+} from "../llm/provider-error-diagnostics.js";
 
 export interface StreamCollectParams {
   provider: LLMProvider;
@@ -65,7 +70,12 @@ export type StreamCollectResult =
    * 그 외 스트림 에러 — classifyProviderError 결과 문자열 포함.
    * 호출자가 history + onError 처리.
    */
-  | { kind: "stream_error"; userMessage: string };
+  | {
+      kind: "stream_error";
+      userMessage: string;
+      classification: string;
+      providerError: ProviderErrorDiagnostics;
+    };
 
 /**
  * 한 round 의 stream 을 소비한다.
@@ -138,13 +148,24 @@ export async function collectRoundStream(
           break;
         case "error": {
           if (abortSignal?.aborted) return { kind: "interrupted", text };
-          if (isContextLengthError(event.error)) {
+          const rawForClassification = event.providerError?.messagePreview ?? event.error;
+          if (isContextLengthError(rawForClassification)) {
             // Token preflight 가 사전 차단하지만 estimator drift 시 도달.
             // 호출자 (queryLoop) 는 사용자 안내 후 turn 종료 — retry 없음.
-            return { kind: "context_error", errorMessage: event.error };
+            return { kind: "context_error", errorMessage: rawForClassification };
           }
-          const classified = classifyProviderError(event.error);
-          return { kind: "stream_error", userMessage: `오류: ${classified.userMessage}` };
+          const classified = classifyProviderError(rawForClassification);
+          const classification = event.providerError?.classification ?? classified.category;
+          const providerError = withProviderErrorClassification(
+            event.providerError ?? extractProviderErrorDiagnostics(event.error),
+            classification,
+          );
+          return {
+            kind: "stream_error",
+            userMessage: `오류: ${classified.userMessage}`,
+            classification,
+            providerError,
+          };
         }
       }
     }
@@ -157,7 +178,15 @@ export async function collectRoundStream(
     }
     const raw = err instanceof Error ? err.message : String(err);
     const classified = classifyProviderError(raw);
-    return { kind: "stream_error", userMessage: `오류: ${classified.userMessage}` };
+    return {
+      kind: "stream_error",
+      userMessage: `오류: ${classified.userMessage}`,
+      classification: classified.category,
+      providerError: withProviderErrorClassification(
+        extractProviderErrorDiagnostics(err),
+        classified.category,
+      ),
+    };
   }
 
   if (abortSignal?.aborted) return { kind: "interrupted", text };
@@ -165,6 +194,12 @@ export async function collectRoundStream(
     return {
       kind: "stream_error",
       userMessage: "오류: 모델 스트림이 도구 호출 완료 신호 없이 종료되었습니다. 다시 시도해 주세요.",
+      classification: "unknown",
+      providerError: {
+        origin: "unknown",
+        classification: "unknown",
+        messagePreview: "model stream ended without message_complete after tool_call",
+      },
     };
   }
 

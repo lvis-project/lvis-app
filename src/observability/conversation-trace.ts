@@ -24,6 +24,7 @@ export type TraceStepName =
   | "HISTORY_APPEND"        // 5. user 메시지 append
   | "PROMPT_ASSEMBLE"       // 6. system prompt 조립
   | "LLM_STREAM"            // 7. provider.streamTurn 시작
+  | "LLM_STREAM_ERROR"      // 7b. provider.streamTurn 오류 구조화
   | "REASONING_ACCUMULATE"  // 8. reasoning_delta 누적 완료 (round 단위)
   | "TOOL_EXECUTE"          // 9. ToolExecutor.executeAll
   | "ROUND_COMMIT"          // 10. assistant_round 확정
