@@ -32,6 +32,9 @@ import { AGENT_MODE_MAP } from "../../shared/agent-mode-map.js";
 import type { LLMProvider, StreamEvent, StreamTurnParams } from "../llm/types.js";
 import { createAgentSpawnTool } from "../../tools/agent-spawn.js";
 import { fakeLlmSettings } from "../../shared/__tests__/fake-llm-settings.js";
+import { pluginToolsForRegistration } from "../../plugins/plugin-tool-adapter.js";
+import type { PluginRuntime } from "../../plugins/runtime.js";
+import type { PluginManifest } from "../../plugins/types.js";
 
 // ─── Test scaffolding ─────────────────────────────────
 
@@ -251,6 +254,74 @@ describe("SubAgentRunner — sourceTools allowlist", () => {
       expect(provider.observedToolNames[0]).toEqual([scheduleToolName]);
       expect(provider.observedToolNames[0]).not.toContain("other_plugin_tool");
       expect(execSpy).toHaveBeenCalledOnce();
+    } finally {
+      hasProviderSpy.mockRestore();
+      refreshProviderSpy.mockRestore();
+    }
+  });
+
+  it("does not execute an inactive plugin's tool even when allowlisted via sourceTools", async () => {
+    // The scoped view a sub-agent receives does not rebuild tools — it hands
+    // out the same gated adapter objects. sourceTools is not filtered by
+    // isPluginEnabled (an inactive tool name CAN be allowlisted and exposed),
+    // so the boundary must hold at execution: the adapter fail-closes before
+    // reaching the runtime.
+    const toolRegistry = new ToolRegistry();
+    const runtimeCall = vi.fn(async () => ({ items: ["secret"] }));
+    const fakeRuntime = {
+      isPluginEnabled: () => false,
+      call: runtimeCall,
+    } as unknown as PluginRuntime;
+    const toolName = "index_scan";
+    for (const tool of pluginToolsForRegistration(fakeRuntime, "local-indexer", {
+      id: "local-indexer",
+      name: "indexer",
+      version: "1.0.0",
+      main: "x.js",
+      tools: [toolName],
+      toolSchemas: {
+        [toolName]: {
+          description: "scan the index",
+          category: "read",
+          inputSchema: { type: "object", properties: { q: { type: "string" } } },
+        },
+      },
+    } as PluginManifest)) {
+      toolRegistry.register(tool);
+    }
+
+    const provider = new ScriptedProvider([
+      [
+        { type: "tool_call", id: "tu-1", name: toolName, input: { q: "x" } },
+        { type: "message_complete", stopReason: "tool_use" },
+      ],
+      [
+        { type: "text_delta", text: "done" },
+        { type: "message_complete", stopReason: "end_turn" },
+      ],
+    ]);
+    const runner = new SubAgentRunner({ parentDeps: buildLoopDeps(toolRegistry), toolRegistry });
+    const hasProviderSpy = vi
+      .spyOn(ConversationLoop.prototype as unknown as { hasProvider: () => boolean }, "hasProvider")
+      .mockReturnValue(true);
+    const refreshProviderSpy = vi
+      .spyOn(ConversationLoop.prototype as unknown as { refreshProvider: () => void }, "refreshProvider")
+      .mockImplementation(function (this: ConversationLoop) {
+        (this as { provider: LLMProvider | null }).provider = provider;
+      });
+
+    try {
+      await runner.spawn({
+        title: "indexer",
+        instructions: "scan",
+        sourceTools: [toolName],
+        maxTurns: 2,
+      });
+
+      // Exposed to the child (sourceTools is not isPluginEnabled-filtered)…
+      expect(provider.observedToolNames[0]).toContain(toolName);
+      // …but execution fails closed at the adapter — the runtime is never hit.
+      expect(runtimeCall).not.toHaveBeenCalled();
     } finally {
       hasProviderSpy.mockRestore();
       refreshProviderSpy.mockRestore();

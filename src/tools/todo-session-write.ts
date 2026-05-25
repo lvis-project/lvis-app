@@ -31,10 +31,12 @@ function updateChangesPlan(
   // Reorder intent — we do not compute the resulting order here, so never
   // suppress it.
   if (u.beforeId || u.afterId) return true;
-  // New item, or an id we have not seen yet → it adds to the plan.
-  if (!u.id) return true;
-  const cur = current.get(u.id);
-  if (!cur) return true;
+  const cur = u.id ? current.get(u.id) : undefined;
+  if (!cur) {
+    // No existing item under this id: a delete targets nothing (no-op),
+    // anything else creates/adds an item (a real change).
+    return u.status !== "deleted";
+  }
   if (u.status !== cur.status) return true;
   if (u.content !== undefined && u.content !== cur.content) return true;
   return false;

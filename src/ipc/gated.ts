@@ -16,6 +16,11 @@ import { redactFsPath } from "../audit/dlp-filter.js";
  * IPC sender validation. Accepts file:// (packaged renderer) and
  * http://localhost / http://127.0.0.1 (dev server). Anything else is rejected.
  * Tests may pass null/undefined events — those are treated as trusted.
+ *
+ * Read-only channels may use this. State-mutating / sensitive host channels
+ * must use {@link validateHostRendererSender} instead — it additionally fails
+ * closed on a null/empty frame URL and rejects plugin-ui-shell frames, neither
+ * of which this base validator does.
  */
 export function validateSender(event: IpcMainInvokeEvent | null | undefined): boolean {
   const frame = event?.senderFrame;
