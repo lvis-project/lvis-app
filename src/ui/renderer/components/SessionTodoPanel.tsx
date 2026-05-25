@@ -23,21 +23,32 @@
  * "TO-DO 가 작성은 되는데 업데이트는 안됨").
  */
 import { useCallback, useEffect, useRef, useState } from "react";
-import { ChevronDown, ChevronRight, ListChecks, Pencil, Plus, RotateCcw, Sparkles } from "lucide-react";
+import {
+  CheckCircle2,
+  ChevronDown,
+  ChevronRight,
+  ListChecks,
+  Pencil,
+  Plus,
+  RotateCcw,
+  Sparkles,
+} from "lucide-react";
 import { Badge } from "../../../components/ui/badge.js";
 import { Button } from "../../../components/ui/button.js";
+import {
+  isSessionTodoStatus,
+  type SessionTodoItem,
+  type SessionTodoStatus,
+} from "../../../shared/session-todo.js";
 import type { LvisApi } from "../types.js";
 
-interface SessionTodoItem {
-  id: string;
-  content: string;
-  status: string;
-}
-
 type PlanBadge = "fresh" | "resumed";
-type ChangeBadge = "added" | "updated";
+type ChangeBadge = "added" | "updated" | "completed";
+type TransientBadge<T extends string> = { kind: T; revision: number };
 
-const STATUS_BADGE: Record<string, { label: string; cls: string; dot: string }> = {
+const TRANSIENT_BADGE_TTL_MS = 5_000;
+
+const STATUS_BADGE: Record<SessionTodoStatus, { label: string; cls: string; dot: string }> = {
   pending: {
     label: "대기",
     cls: "bg-muted text-muted-foreground",
@@ -53,16 +64,6 @@ const STATUS_BADGE: Record<string, { label: string; cls: string; dot: string }> 
     cls: "bg-success/15 text-success",
     dot: "bg-success",
   },
-  failed: {
-    label: "실패",
-    cls: "bg-destructive/15 text-destructive",
-    dot: "bg-destructive",
-  },
-  deleted: {
-    label: "취소",
-    cls: "bg-muted text-muted-foreground line-through",
-    dot: "bg-muted-foreground/40",
-  },
 };
 
 function isRecord(value: unknown): value is Record<string, unknown> {
@@ -76,8 +77,7 @@ function isSessionTodoItemArray(value: unknown): value is SessionTodoItem[] {
     return (
       typeof item.id === "string" &&
       typeof item.content === "string" &&
-      typeof item.status === "string" &&
-      Object.prototype.hasOwnProperty.call(STATUS_BADGE, item.status)
+      isSessionTodoStatus(item.status)
     );
   });
 }
@@ -105,6 +105,8 @@ function classifyTodoChange(
 ): ChangeBadge | null {
   const prevById = new Map(prev.map((item) => [item.id, item]));
   const nextById = new Map(next.map((item) => [item.id, item]));
+  const completed = next.length > 0 && next.every((item) => item.status === "completed");
+  if (completed) return "completed";
   const added = next.some((item) => !prevById.has(item.id));
   if (added) return "added";
   const updated = next.some((item) => {
@@ -116,6 +118,13 @@ function classifyTodoChange(
   if (reordered) return "updated";
   const removed = prev.some((item) => !nextById.has(item.id));
   return removed ? "updated" : null;
+}
+
+function nextTransientBadge<T extends string>(
+  kind: T,
+  current: { revision: number } | null,
+): TransientBadge<T> {
+  return { kind, revision: (current?.revision ?? 0) + 1 };
 }
 
 export function SessionTodoPanel({
@@ -141,10 +150,10 @@ export function SessionTodoPanel({
   // "fresh" when a live push creates a plan after an empty/cleared state.
   // Kept separate from item state so late initial fetches cannot overwrite a
   // live "fresh" push that arrived first.
-  const [planBadge, setPlanBadge] = useState<PlanBadge | null>(null);
+  const [planBadge, setPlanBadge] = useState<TransientBadge<PlanBadge> | null>(null);
   // Last non-initial mutation marker. This is intentionally lightweight UI
   // state derived from item diffs; the store remains the item-list SOT.
-  const [changeBadge, setChangeBadge] = useState<ChangeBadge | null>(null);
+  const [changeBadge, setChangeBadge] = useState<TransientBadge<ChangeBadge> | null>(null);
   const itemsRef = useRef<SessionTodoItem[]>([]);
   const latestSessionIdRef = useRef<string | undefined>(sessionId);
   const hasLivePushRef = useRef(false);
@@ -165,22 +174,33 @@ export function SessionTodoPanel({
     }
 
     if (source === "initial-fetch") {
-      setPlanBadge((current) => current ?? "resumed");
+      setPlanBadge((current) => current ?? nextTransientBadge("resumed", current));
       return;
     }
 
     if (prev.length === 0) {
-      setPlanBadge((current) => current ?? "fresh");
+      setPlanBadge((current) => current ?? nextTransientBadge("fresh", current));
       setChangeBadge(null);
       return;
     }
 
     const change = classifyTodoChange(prev, next);
-    setChangeBadge(change);
+    setChangeBadge((current) => (change ? nextTransientBadge(change, current) : null));
   }, []);
 
+  useEffect(() => {
+    if (planBadge === null) return undefined;
+    const timer = window.setTimeout(() => setPlanBadge(null), TRANSIENT_BADGE_TTL_MS);
+    return () => window.clearTimeout(timer);
+  }, [planBadge?.revision]);
+
+  useEffect(() => {
+    if (changeBadge === null) return undefined;
+    const timer = window.setTimeout(() => setChangeBadge(null), TRANSIENT_BADGE_TTL_MS);
+    return () => window.clearTimeout(timer);
+  }, [changeBadge?.revision]);
+
   const refresh = useCallback(async () => {
-    if (typeof api.listSessionTodos !== "function") return;
     const requestedSessionId = sessionId;
     const list = await api.listSessionTodos(requestedSessionId);
     if (requestedSessionId !== latestSessionIdRef.current) {
@@ -194,9 +214,6 @@ export function SessionTodoPanel({
 
   useEffect(() => {
     void refresh();
-    if (typeof api.onSessionTodoChanged !== "function") {
-      return undefined;
-    }
     const unsub = api.onSessionTodoChanged((payload: unknown) => {
       if (!isRecord(payload)) {
         return;
@@ -240,7 +257,7 @@ export function SessionTodoPanel({
 
   if (items.length === 0) return null;
 
-  const visible = items.filter((i) => i.status !== "deleted");
+  const visible = items;
   const completedCount = items.filter((i) => i.status === "completed").length;
   const inProgress = items.find((i) => i.status === "in_progress");
   // Collapsed-header focus: prefer the in-progress item; if none yet (e.g. a
@@ -274,9 +291,8 @@ export function SessionTodoPanel({
         <Badge variant="outline" className="px-1 py-0 text-[10px]">
           {completedCount}/{visible.length}
         </Badge>
-        {/* Plan chip — makes the current-turn plan boundary explicit.
-            `planBadge === null` means the first fetch hasn't resolved yet, so show nothing. */}
-        {planBadge === "resumed" && (
+        {/* Plan chip — transient signal for the current session plan boundary. */}
+        {planBadge?.kind === "resumed" && (
           <span
             className="ml-1 inline-flex items-center gap-1 rounded-full bg-warning/15 px-1.5 py-0 text-[10px] text-warning"
             data-testid="session-todo-continuation"
@@ -286,7 +302,7 @@ export function SessionTodoPanel({
             이어서
           </span>
         )}
-        {planBadge === "fresh" && (
+        {planBadge?.kind === "fresh" && (
           <span
             className="ml-1 inline-flex items-center gap-1 rounded-full bg-success/15 px-1.5 py-0 text-[10px] text-success"
             data-testid="session-todo-fresh"
@@ -296,7 +312,7 @@ export function SessionTodoPanel({
             새 시작
           </span>
         )}
-        {changeBadge === "added" && (
+        {changeBadge?.kind === "added" && (
           <span
             className="ml-1 inline-flex items-center gap-1 rounded-full bg-primary/10 px-1.5 py-0 text-[10px] text-primary"
             data-testid="session-todo-added"
@@ -306,7 +322,7 @@ export function SessionTodoPanel({
             추가
           </span>
         )}
-        {changeBadge === "updated" && (
+        {changeBadge?.kind === "updated" && (
           <span
             className="ml-1 inline-flex items-center gap-1 rounded-full bg-muted px-1.5 py-0 text-[10px] text-muted-foreground"
             data-testid="session-todo-updated"
@@ -314,6 +330,16 @@ export function SessionTodoPanel({
           >
             <Pencil className="h-2.5 w-2.5" />
             수정
+          </span>
+        )}
+        {changeBadge?.kind === "completed" && (
+          <span
+            className="ml-1 inline-flex items-center gap-1 rounded-full bg-success/15 px-1.5 py-0 text-[10px] text-success"
+            data-testid="session-todo-completed"
+            title="이번 업데이트에서 세션 TO-DO 가 완료됨"
+          >
+            <CheckCircle2 className="h-2.5 w-2.5" />
+            완료
           </span>
         )}
         {/* Collapsed-state focal point: the focus item (in-progress, else the
@@ -337,14 +363,14 @@ export function SessionTodoPanel({
         // cluster off-screen — internal scroll preserves the chat layout.
         <ul className="max-h-[35vh] space-y-1 overflow-y-auto border-t px-3 py-1.5">
           {items.map((it) => {
-            const meta = STATUS_BADGE[it.status] ?? STATUS_BADGE.pending;
+            const meta = STATUS_BADGE[it.status];
             const active = it.status === "in_progress";
             return (
               <li
                 key={it.id}
                 className={`flex items-start gap-2 transition-opacity duration-200 ${
                   active ? activePulse : ""
-                } ${it.status === "deleted" ? "opacity-50" : "opacity-100"}`}
+                }`}
                 data-testid={active ? "session-todo-active-row" : undefined}
                 data-status={it.status}
               >
@@ -365,7 +391,7 @@ export function SessionTodoPanel({
                 <span
                   className={`min-w-0 flex-1 transition-opacity duration-200 ${
                     it.status === "completed" ? "line-through opacity-70" : ""
-                  } ${it.status === "deleted" ? "line-through opacity-50" : ""}`}
+                  }`}
                 >
                   {it.content}
                 </span>

@@ -852,12 +852,12 @@ const TOOL_USE_STRATEGY = `## 도구 사용 전략
 - **ask_user_question** (적극 사용): 분기점·모호한 지점에서 가정으로 진행하지 말고 사용자에게 직접 물으세요. 한 번 묻는 게 잘못 짚고 길게 진행하는 것보다 거의 항상 낫습니다. 관련된 질문 1~4개는 한 카드로 묶어 questions[] 로 한 번에 보내고(같은 카드에 묶을 질문을 여러 호출로 쪼개지 마세요), 정적 '네/아니오/잘 모르겠어요' 폴백 대신 그 맥락에 맞는 구체적 choices 를 제시하세요. 각 파라미터(choices·recommendedIndex·altIndices·allowMultiple·placeholder·summaryHint)의 상세 작성 규칙은 도구 스키마의 description 을 따르세요.
 - **routine_schedule**: 지정한 예약 시각에 발화되는 루틴(self-trigger)을 등록. 캘린더 일정 조회 도구가 아니므로 "캘린더 점검/오늘 일정/회의 확인" 같은 조회 요청에는 사용 금지(캘린더는 ms-graph 플러그인). execution="llm-session"(LLM 대화 시작) 또는 "notification-only"(OS 알림). 날짜·시각·반복(daily/weekly/monthly/interval/cron) 지정. 예: "매일 오전 9시에 데일리 리포트 작성" → execution:"llm-session", schedule:{at:"...",repeat:{kind:"daily"}}, prePrompt:"...".
 - **todo_session_write**: 한 턴 안에서 여러 단계를 거쳐야 하는 작업이면 다음 순서를 반드시 따르세요.
-  새 사용자 턴이 시작되면 이전 턴의 세션 TO-DO 는 자동으로 비워집니다. 같은 턴 안에서 기존 계획에 단계가 추가될 때만 새 항목을 삽입하고, 이미 있는 단계는 반드시 기존 id 로 수정하세요.
+  완료된 세션 TO-DO 는 다음 명시 사용자 입력 또는 사용자 큐 자동 인입 턴 시작 시 자동으로 비워집니다. 완료되지 않은 계획은 이어서 보이므로, 같은 턴 안에서 기존 계획에 단계가 추가될 때만 새 항목을 삽입하고, 이미 있는 단계는 반드시 기존 id 로 수정하세요.
   1. **계획 즉시 등록**: 단계 목록을 todo_session_write 로 전달해 전체 항목을 pending 으로 생성합니다.
   2. **첫 번째 단계 시작 선언**: 계획 등록 직후, 다른 도구를 호출하기 **전에** todo_session_write 를 다시 호출해 첫 번째 항목을 in_progress 로 표시합니다.
   3. **단계 완료 후 즉시 전환**: 각 도구 호출(또는 분석 단계)이 끝나면 해당 항목을 completed 로, 다음 항목을 in_progress 로 **같은 호출에** 업데이트합니다.
   4. **마지막 단계 완료**: 모든 작업이 끝나면 마지막 항목도 completed 로 표시합니다.
-  5. **계획 변경 반영**: 새 단계가 생기면 beforeId/afterId 로 정확한 위치에 삽입하고, 필요 없어진 단계는 status=deleted 로 제거합니다. 순서를 바꿔야 하면 기존 id 와 beforeId/afterId 를 같이 보내 이동합니다.
+  5. **계획 변경 반영**: 새 단계가 생기면 beforeId/afterId 로 정확한 위치에 삽입하고, 필요 없어진 일부 단계는 status=deleted 로 제거합니다. 모든 항목을 삭제해 빈 계획을 만들지 말고, 작업이 끝난 항목은 completed 로 닫으세요. 순서를 바꿔야 하면 기존 id 와 beforeId/afterId 를 같이 보내 이동합니다.
 
   **절대 금지**: pending 상태 항목이 남아 있는 채로 실제 작업 도구를 호출하지 마세요. 사용자는 SessionTodoPanel 에서 실시간으로 진행 상황을 확인하므로, 도구를 호출하기 전에 반드시 해당 단계를 in_progress 로 먼저 업데이트해야 합니다.
 

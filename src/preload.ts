@@ -31,6 +31,7 @@ import type {
   OpenHtmlPreviewWindowPayload,
   OpenHtmlPreviewWindowResult,
 } from "./shared/render-html-preview.js";
+import type { SessionTodoItem } from "./shared/session-todo.js";
 
 // ─── Deterministic plugin webview asset URLs ────────────────────────────────
 // `__dirname` here resolves to the host preload's bundled location
@@ -1346,7 +1347,7 @@ const api = {
   onSessionTodoChanged: (
     handler: (payload: {
       sessionId: string;
-      items: Array<{ id: string; content: string; status: string }>;
+      items: SessionTodoItem[];
     }) => void,
   ) => {
     const listener = (_e: unknown, p: Parameters<typeof handler>[0]) => handler(p);

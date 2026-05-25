@@ -150,6 +150,7 @@ export function makeMockLvisApi(overrides: ApiOverrides = {}): {
   const bootstrapStatusHandlers = new Set<(status: unknown) => void>();
   const pluginInstallProgressHandlers = new Set<(payload: unknown) => void>();
   const pluginInstallResultHandlers = new Set<(payload: unknown) => void>();
+  const sessionTodoHandlers = new Set<(payload: unknown) => void>();
 
   const api: MockLvisApi = {
     notifyPluginTheme: vi.fn(async () => ({ ok: true })),
@@ -346,6 +347,11 @@ export function makeMockLvisApi(overrides: ApiOverrides = {}): {
     chatContinueLastUser: vi.fn(async (_sessionId: string) => ({ ok: true })),
     chatRetryEffort: vi.fn(async () => ({ ok: true })),
     chatExport: vi.fn(async () => ({ ok: true, filePath: "/tmp/out.md" })),
+    listSessionTodos: vi.fn(async () => []),
+    onSessionTodoChanged: vi.fn((handler: (payload: unknown) => void) => {
+      sessionTodoHandlers.add(handler);
+      return () => sessionTodoHandlers.delete(handler);
+    }),
     onChatStream: vi.fn((h: (ev: StreamEvent) => void) => {
       chatStreamHandlers.add(h);
       return () => chatStreamHandlers.delete(h);

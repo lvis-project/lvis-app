@@ -233,6 +233,10 @@ function initialToolTrustOrigin(inputOrigin: ChatInputOrigin, turnInput: string)
   return "llm-tool-arg";
 }
 
+function shouldClearSessionTodoAtTurnStart(inputOrigin: ChatInputOrigin): boolean {
+  return isUserKeyboardOrigin(inputOrigin) || inputOrigin === "queue-auto";
+}
+
 function summarizePermissionUserIntent(
   inputOrigin: ChatInputOrigin,
   turnInput: string,
@@ -1515,7 +1519,9 @@ export class ConversationLoop {
     const turnInput = isUserKeyboardOrigin(inputOrigin) ? input : stripLeadingSlash(input);
     const toolTrustOrigin = initialToolTrustOrigin(inputOrigin, turnInput);
     const permissionUserIntent = summarizePermissionUserIntent(inputOrigin, turnInput);
-    this.deps.sessionTodoStore?.clearForTurnStart(effectiveSessionId);
+    if (shouldClearSessionTodoAtTurnStart(inputOrigin)) {
+      this.deps.sessionTodoStore?.clearForTurnStart(effectiveSessionId);
+    }
     this.deps.skillOverlay?.clear(effectiveSessionId);
 
     // §4.5.2 step 1 — REQUEST_ENTRY (main process 도달 시점)
