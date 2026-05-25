@@ -165,10 +165,16 @@ describe("PluginRuntime — active/inactive toggle (#1176)", () => {
       expect(runtime.isPluginEnabled("se-plugin")).toBe(false);
     });
 
-    it("(c) tools are absent from schema and catalog, and onDisable fired at boot", () => {
-      // onDisable must have fired during load so the boot handler can
-      // unregister tools from the registry.
-      expect(disabledCalls).toContain("se-plugin");
+    it("(c) inactivePluginIds seeded at boot — tool suppression via syncPluginToolRegistry filter, not onDisable", () => {
+      // M3 fix: tool suppression at boot is handled by syncPluginToolRegistry
+      // filtering on isPluginEnabled (in plugins.ts), NOT by onDisable firing
+      // during load(). The onDisable-during-load() was dead code (tools/keywords
+      // not yet registered at load() time) and has been removed.
+      // isPluginEnabled must return false so the filter works correctly.
+      expect(runtime.isPluginEnabled("se-plugin")).toBe(false);
+      // onDisable must NOT have fired during boot load (it was dead; removed).
+      // It fires only on explicit setPluginEnabled(false) calls.
+      expect(disabledCalls).not.toContain("se-plugin");
     });
 
     it("(d) setPluginEnabled(true) succeeds and fires onEnable (re-enable after restart)", async () => {
