@@ -16,7 +16,6 @@ function makeSkill(name: string, body: string): LoadedSkill {
   return {
     name,
     description: "",
-    triggers: [],
     body,
     filePath: `/tmp/${name}.md`,
   };

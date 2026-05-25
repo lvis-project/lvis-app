@@ -11,11 +11,7 @@ export function createSkillListTool(store: SkillStore): Tool {
     isReadOnly: () => true,
     jsonSchema: { type: "object", properties: {} },
     execute: async () => {
-      const skills = (await store.list()).map((skill) => ({
-        name: skill.name,
-        description: skill.description,
-        triggers: skill.triggers,
-      }));
+      const skills = store.listCatalogSync();
       return { output: JSON.stringify({ skills }), isError: false };
     },
   });

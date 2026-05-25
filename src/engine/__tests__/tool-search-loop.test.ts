@@ -36,6 +36,7 @@ class RecordingProvider implements LLMProvider {
 function makeLoop(opts: {
   provider: LLMProvider;
   toolDeferral?: boolean;
+  headless?: boolean;
 }): ConversationLoop {
   const toolRegistry = new ToolRegistry();
   // tool_search builtin (statically registered; visible with builtins).
@@ -86,6 +87,15 @@ function makeLoop(opts: {
     jsonSchema: { type: "object", properties: {} },
     execute: async () => ({ output: "msgraph emails", isError: false }),
   }));
+  toolRegistry.register(createDynamicTool({
+    name: "mcp_fetch",
+    description: "MCP fetch",
+    source: "mcp",
+    category: "read",
+    mcpServerId: "browser",
+    jsonSchema: { type: "object", properties: {} },
+    execute: async () => ({ output: "mcp", isError: false }),
+  }));
 
   const keywordEngine = new KeywordEngine();
   // "회의" keyword → plugin scope (meeting) AND tool preload (meeting_start).
@@ -117,6 +127,7 @@ function makeLoop(opts: {
     pluginRuntime: {
       listPluginIds: () => ["com.example.meeting", "com.example.email", "com.example.msgraph"],
     },
+    headless: opts.headless,
   } as unknown) as ConstructorParameters<typeof ConversationLoop>[0]);
   (loop as unknown as { provider: LLMProvider | null }).provider = opts.provider;
   return loop;
@@ -262,5 +273,28 @@ describe("ConversationLoop — Tool-Level Deferral", () => {
     expect(provider.observedToolNames[1]).toContain("meeting_stop");
     expect(provider.observedToolNames[2]).toContain("meeting_start");
     expect(provider.observedToolNames[2]).not.toContain("meeting_stop");
+  });
+
+  it("keeps MCP tools out of headless deferral catalog and loaded schemas", async () => {
+    const provider = new RecordingProvider([
+      [
+        { type: "tool_call", id: "tu-1", name: TOOL_SEARCH_TOOL_NAME, input: { query: "mcp_fetch" } },
+        { type: "message_complete", stopReason: "tool_use" },
+      ],
+      [
+        { type: "text_delta", text: "no mcp" },
+        { type: "message_complete", stopReason: "end_turn" },
+      ],
+    ]);
+    const loop = makeLoop({ provider, headless: true });
+
+    const result = await loop.runTurn("회의 정리해줘", undefined, undefined, { inputOrigin: "user-keyboard" });
+
+    expect(result.text).toBe("no mcp");
+    expect(provider.observedToolNames[0]).not.toContain("mcp_fetch");
+    expect(provider.observedToolNames[1]).not.toContain("mcp_fetch");
+    const toolResult = loop.getHistory().getMessages().find((m) => m.role === "tool_result");
+    expect(toolResult?.content).toContain("'mcp_fetch' 에 매치되는 미로드 도구 없음");
+    expect(toolResult?.isError).toBe(true);
   });
 });

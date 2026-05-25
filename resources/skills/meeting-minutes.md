@@ -1,7 +1,6 @@
 ---
 name: meeting-minutes
 description: 회의록 정리 skill — 일시·참석자·논의·결정·할일 5섹션 표준 형식
-triggers: [meeting, 회의록, 회의, minutes, 안건, 결정사항]
 ---
 
 # Meeting Minutes Skill

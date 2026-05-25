@@ -191,10 +191,11 @@ export function registerToolSearchMetaTool(toolRegistry: ToolRegistry): void {
         },
       },
     },
-    // Handled inline by ConversationLoop; fallback if executor reaches it.
+    // Handled inline by ConversationLoop. If execution reaches this fallback,
+    // the loop interception regressed; fail closed so traces expose it.
     execute: async () => ({
-      output: "tool_search는 대화 루프에서 직접 처리됩니다.",
-      isError: false,
+      output: "tool_search 오류: 대화 루프 interception 이 누락되었습니다.",
+      isError: true,
     }),
   }));
 }

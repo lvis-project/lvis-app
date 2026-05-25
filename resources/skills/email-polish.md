@@ -1,7 +1,6 @@
 ---
 name: email-polish
 description: 메일·공문 톤 정리 skill — 받는 사람·목적·요청·서명 4부 구조로 다듬기
-triggers: [email, 메일, 공문, polish, 다듬, 톤, 초안]
 ---
 
 # Email Polish Skill
