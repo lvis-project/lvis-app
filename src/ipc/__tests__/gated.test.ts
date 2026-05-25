@@ -10,6 +10,7 @@ import os from "node:os";
 import type { IpcMainInvokeEvent } from "electron";
 import {
   validateSender,
+  validateHostRendererSender,
   UNAUTHORIZED_FRAME,
   auditUnauthorized,
   validatePluginFrame,
@@ -48,6 +49,31 @@ describe("validateSender", () => {
     expect(validateSender(null)).toBe(true);
     expect(validateSender(undefined)).toBe(true);
     expect(validateSender({} as IpcMainInvokeEvent)).toBe(true);
+  });
+});
+
+describe("validateHostRendererSender", () => {
+  it("accepts the host file renderer", () => {
+    expect(validateHostRendererSender(ev("file:///Applications/Lvis.app/dist/index.html"))).toBe(true);
+  });
+
+  it("accepts dev server host renderer URLs", () => {
+    expect(validateHostRendererSender(ev("http://localhost:5173/"))).toBe(true);
+    expect(validateHostRendererSender(ev("http://127.0.0.1:5173/"))).toBe(true);
+  });
+
+  it("rejects plugin UI shell file frames", () => {
+    expect(validateHostRendererSender(ev("file:///dist/src/plugin-ui-shell.html"))).toBe(false);
+  });
+
+  it("rejects arbitrary remote origins", () => {
+    expect(validateHostRendererSender(ev("https://evil.example.com/"))).toBe(false);
+  });
+
+  it("rejects missing senderFrame for state-mutating host channels", () => {
+    expect(validateHostRendererSender(null)).toBe(false);
+    expect(validateHostRendererSender(undefined)).toBe(false);
+    expect(validateHostRendererSender({} as IpcMainInvokeEvent)).toBe(false);
   });
 });
 

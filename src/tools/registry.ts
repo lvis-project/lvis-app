@@ -22,11 +22,9 @@ import { createLogger } from "../lib/logger.js";
 const log = createLogger("tool-registry");
 
 /**
- * Tool-Level Deferral — name of the `tool_search` meta-tool. SOT lives here
- * (the lowest layer that owns visibility); `engine/turn/tool-search.ts`
- * re-exports it as `TOOL_SEARCH_TOOL`. Tool-level deferral is now the only
- * plugin/MCP exposure path, so this builtin is visible whenever builtins are
- * in scope.
+ * Tool-Level Deferral — name of the `tool_search` meta-tool. This low-level
+ * registry module owns the stable tool name; ConversationLoop owns whether
+ * plugin/MCP tools are eagerly exposed or deferred for the current turn.
  */
 export const TOOL_SEARCH_TOOL_NAME = "tool_search";
 
@@ -371,14 +369,25 @@ export class ToolRegistry {
       ? scope.activeToolNames
       : new Set(scope.activeToolNames ?? []);
 
+    // Eager mode (#1176): below the EAGER_TOOL_EXPOSURE_CEILING the turn
+    // exposes every in-scope plugin/MCP tool's full schema directly, so the
+    // model never has to spend `tool_search` rounds discovering them. Deferred
+    // mode keeps the per-tool gating where only `activeToolNames` entries load
+    // and the rest live in the compact catalog.
+    const deferral = scope.deferral !== false;
+
     return this.getVisibleTools()
       .filter((tool) => {
         if (tool.source === "builtin") {
+          // Builtins/meta-tools are always eager — never deferred, never
+          // counted toward the exposure ceiling.
           if (!scope.includeBuiltins) return false;
           return true;
         }
         if (tool.source === "mcp") {
-          return scope.includeMcp && activeNames.has(tool.name);
+          if (!scope.includeMcp) return false;
+          // Eager: every in-scope MCP tool loads. Deferred: only promoted ones.
+          return deferral ? activeNames.has(tool.name) : true;
         }
         if (tool.source === "plugin") {
           // A plugin tool without a pluginId is a registration bug; drop it
@@ -387,7 +396,10 @@ export class ToolRegistry {
             log.warn(`plugin tool '${tool.name}' missing pluginId — skipped in scope filter`);
             return false;
           }
-          return active.has(tool.pluginId) && activeNames.has(tool.name);
+          if (!active.has(tool.pluginId)) return false;
+          // Eager: the whole active plugin's suite loads. Deferred: only the
+          // tools individually promoted via keyword/carry-forward/tool_search.
+          return deferral ? activeNames.has(tool.name) : true;
         }
         // Fallback for any new source kind added later — exclude from scope.
         return false;
@@ -421,7 +433,13 @@ export class ToolRegistry {
     activePluginIds: Set<string> | string[];
     activeToolNames?: Set<string> | string[];
     includeMcp: boolean;
+    deferral?: boolean;
   }): ToolCatalogEntry[] {
+    // Eager mode (#1176): every in-scope tool is already exposed in full by
+    // {@link getToolSchemasForScope}, so there is nothing left to discover —
+    // the catalog is empty and the `<tool-catalog>` block naturally vanishes.
+    if (scope.deferral === false) return [];
+
     const active = scope.activePluginIds instanceof Set
       ? scope.activePluginIds
       : new Set(scope.activePluginIds);

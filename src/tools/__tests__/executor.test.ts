@@ -1257,18 +1257,19 @@ describe("ToolExecutor — C1 sensitive-path hard-block wiring", () => {
   });
 });
 
-// ─── D4 §4.5.3 — parallel tool approval ─────────────
+// ─── D4 §4.5.3 — ordered tool approval/execution ─────────────
 
 /**
- * D4: When the LLM emits two tool_calls in one round, executeAll runs them
- * in parallel (Promise.all). Each call reaches the approval gate independently.
+ * D4: When the LLM emits multiple tool_calls in one round, executeAll runs
+ * them in the exact emitted order. Each call still reaches the approval gate,
+ * but later calls must not start until earlier calls have resolved.
  * This test verifies:
- *   1. Both ApprovalGate.requestAndWait() calls are in-flight concurrently.
- *   2. Approving each request unblocks execution of both.
- *   3. Both tools execute and return results without error.
- *   4. Denying each request blocks both tools.
+ *   1. Only the first approval request is pending before it is resolved.
+ *   2. Resolving one request advances to the next request in order.
+ *   3. Tool execution order matches the LLM-emitted tool call order.
+ *   4. Denials continue to the later tool calls without reordering.
  */
-describe("ToolExecutor — D4 parallel approval (§4.5.3)", () => {
+describe("ToolExecutor — D4 ordered approval/execution (§4.5.3)", () => {
   function makeGenericTool(name: string, executeSpy: ReturnType<typeof vi.fn>): import("../base.js").Tool {
     return createDynamicTool({
       name,
@@ -1314,16 +1315,23 @@ describe("ToolExecutor — D4 parallel approval (§4.5.3)", () => {
     return sent;
   }
 
-  it("두 도구 동시 승인 → 두 도구 모두 실행됨", async () => {
-    const spy1 = vi.fn(async () => "result-A");
-    const spy2 = vi.fn(async () => "result-B");
+  it("LLM이 낸 tool_call 순서대로 승인 요청과 실행이 진행됨", async () => {
+    const executionOrder: string[] = [];
+    const spy1 = vi.fn(async () => {
+      executionOrder.push("tool_a");
+      return "result-A";
+    });
+    const spy2 = vi.fn(async () => {
+      executionOrder.push("tool_b");
+      return "result-B";
+    });
 
     const registry = new ToolRegistry();
     registry.register(makeGenericTool("tool_a", spy1));
     registry.register(makeGenericTool("tool_b", spy2));
 
     const permMgr = new PermissionManager("/tmp/nonexistent-permissions.json");
-    permMgr.checkDetailed = () => ({ decision: "ask", reason: "parallel test", layer: 5 });
+    permMgr.checkDetailed = () => ({ decision: "ask", reason: "ordered test", layer: 5 });
 
     const wc = makeMockWebContents();
     const sent = captureRequests(wc);
@@ -1338,13 +1346,21 @@ describe("ToolExecutor — D4 parallel approval (§4.5.3)", () => {
       { sessionId: "sess-d4-approve", permissionContext: userPermissionContext() },
     );
 
-    await waitForPending(gate, 2);
-    expect(gate.pendingCount).toBe(2);
+    await waitForPending(gate, 1);
+    expect(gate.pendingCount).toBe(1);
+    expect(sent).toHaveLength(1);
+    expect(sent[0].toolName).toBe("tool_a");
+    expect(spy1).not.toHaveBeenCalled();
+    expect(spy2).not.toHaveBeenCalled();
 
-    // Echo nonce+hmac back so D2 HMAC validation passes
-    for (const req of sent) {
-      gate.resolve(req.id, { requestId: req.id, choice: "allow-once", nonce: req.nonce, hmac: req.hmac });
-    }
+    gate.resolve(sent[0].id, { requestId: sent[0].id, choice: "allow-once", nonce: sent[0].nonce, hmac: sent[0].hmac });
+    await waitForPending(gate, 1);
+    expect(sent).toHaveLength(2);
+    expect(sent[1].toolName).toBe("tool_b");
+    expect(spy1).toHaveBeenCalledTimes(1);
+    expect(spy2).not.toHaveBeenCalled();
+
+    gate.resolve(sent[1].id, { requestId: sent[1].id, choice: "allow-once", nonce: sent[1].nonce, hmac: sent[1].hmac });
 
     const results = await execPromise;
 
@@ -1352,9 +1368,10 @@ describe("ToolExecutor — D4 parallel approval (§4.5.3)", () => {
     expect(results.every((r) => !r.is_error)).toBe(true);
     expect(spy1).toHaveBeenCalledTimes(1);
     expect(spy2).toHaveBeenCalledTimes(1);
+    expect(executionOrder).toEqual(["tool_a", "tool_b"]);
   }, 10000);
 
-  it("두 도구 동시 거부 → 두 결과 모두 오류", async () => {
+  it("두 도구 순서 거부 → 두 결과 모두 오류", async () => {
     const spy1 = vi.fn(async () => "should-not-run");
     const spy2 = vi.fn(async () => "should-not-run");
 
@@ -1363,7 +1380,7 @@ describe("ToolExecutor — D4 parallel approval (§4.5.3)", () => {
     registry.register(makeGenericTool("tool_d", spy2));
 
     const permMgr = new PermissionManager("/tmp/nonexistent-permissions.json");
-    permMgr.checkDetailed = () => ({ decision: "ask", reason: "parallel deny test", layer: 5 });
+    permMgr.checkDetailed = () => ({ decision: "ask", reason: "ordered deny test", layer: 5 });
 
     const wc = makeMockWebContents();
     const sent = captureRequests(wc);
@@ -1378,12 +1395,17 @@ describe("ToolExecutor — D4 parallel approval (§4.5.3)", () => {
       { sessionId: "sess-d4-deny", permissionContext: userPermissionContext() },
     );
 
-    await waitForPending(gate, 2);
-    expect(gate.pendingCount).toBe(2);
+    await waitForPending(gate, 1);
+    expect(gate.pendingCount).toBe(1);
+    expect(sent).toHaveLength(1);
+    expect(sent[0].toolName).toBe("tool_c");
 
-    for (const req of sent) {
-      gate.resolve(req.id, { requestId: req.id, choice: "deny-once", nonce: req.nonce, hmac: req.hmac });
-    }
+    gate.resolve(sent[0].id, { requestId: sent[0].id, choice: "deny-once", nonce: sent[0].nonce, hmac: sent[0].hmac });
+    await waitForPending(gate, 1);
+    expect(sent).toHaveLength(2);
+    expect(sent[1].toolName).toBe("tool_d");
+
+    gate.resolve(sent[1].id, { requestId: sent[1].id, choice: "deny-once", nonce: sent[1].nonce, hmac: sent[1].hmac });
 
     const results = await execPromise;
 
@@ -1417,12 +1439,18 @@ describe("ToolExecutor — D4 parallel approval (§4.5.3)", () => {
       { sessionId: "sess-d4-selective", permissionContext: userPermissionContext() },
     );
 
-    await waitForPending(gate, 2);
+    await waitForPending(gate, 1);
+    expect(sent).toHaveLength(1);
+    expect(sent[0].toolName).toBe("tool_e");
 
-    const reqE = sent.find((r) => r.toolName === "tool_e")!;
-    const reqF = sent.find((r) => r.toolName === "tool_f")!;
-
+    const reqE = sent[0];
     gate.resolve(reqE.id, { requestId: reqE.id, choice: "allow-once", nonce: reqE.nonce, hmac: reqE.hmac });
+
+    await waitForPending(gate, 1);
+    expect(sent).toHaveLength(2);
+    expect(sent[1].toolName).toBe("tool_f");
+
+    const reqF = sent[1];
     gate.resolve(reqF.id, { requestId: reqF.id, choice: "deny-once", nonce: reqF.nonce, hmac: reqF.hmac });
 
     const results = await execPromise;

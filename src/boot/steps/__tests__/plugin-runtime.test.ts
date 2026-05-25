@@ -23,6 +23,7 @@ const runtimeTestState = vi.hoisted(() => ({
     listPluginManifests: vi.fn(() => [] as Array<{ pluginId: string; manifest: unknown }>),
     getPluginRoot: vi.fn((pluginId: string) => `/tmp/lvis-test/plugins/${pluginId}`),
     getPluginManifest: vi.fn(() => null),
+    isPluginEnabled: vi.fn(() => true),
     getApprovedPluginAccess: vi.fn(() => undefined),
     registerDisposer: vi.fn(),
     assertPluginToolAccess: vi.fn(),
@@ -249,6 +250,7 @@ describe("initPluginRuntime partition policy", () => {
       keywordEngine: {
         registerKeywords: vi.fn(),
         unregisterByPlugin: vi.fn(),
+        hasPluginKeywords: vi.fn(() => false),
       } as never,
       toolRegistry: {
         unregisterByPlugin: vi.fn(),

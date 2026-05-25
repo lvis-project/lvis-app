@@ -21,6 +21,26 @@ const log = createLogger("system-prompt");
 
 type ToolProvenanceEntry = Pick<ToolSchemaEntry | ToolCatalogEntry, "source" | "pluginId" | "mcpServerId">;
 
+type RequestablePluginCatalogCard = {
+  id: string;
+  name: string;
+  description: string;
+  sampleTools: string[];
+  /** Enabled and loaded enough to be selectable via request_plugin. */
+  active?: boolean;
+  /** Runtime instance exists, so request_plugin can put it into turn scope. */
+  runtimeLoaded?: boolean;
+  loadStatus?: "loaded" | "preparing" | "failed" | "disabled";
+};
+
+function isRequestablePluginCatalogCard(card: RequestablePluginCatalogCard): boolean {
+  if (card.active === false) return false;
+  if (card.runtimeLoaded === false) return false;
+  if (card.loadStatus && card.loadStatus !== "loaded") return false;
+  if (card.sampleTools.length === 0) return false;
+  return true;
+}
+
 function toolProvenanceLabel(tool: ToolProvenanceEntry): string {
   if (tool.source === "plugin") return `plugin:${tool.pluginId ?? "unknown"}`;
   if (tool.source === "mcp") return `mcp:${tool.mcpServerId ?? "unknown"}`;
@@ -63,15 +83,9 @@ export interface SystemPromptBuilderDeps {
   memoryManager: MemoryManager;
   toolRegistry: ToolRegistry;
   /**
-   * 비활성 plugin 카탈로그 공급자. 빈 배열이거나 undefined면 섹션이
-   * 생략된다.
+   * request_plugin candidate catalog provider. Empty/undefined omits the section.
    */
-  getPluginCards?: () => Array<{
-    id: string;
-    name: string;
-    description: string;
-    sampleTools: string[];
-  }>;
+  getPluginCards?: () => RequestablePluginCatalogCard[];
   /**
    * Lightweight skill catalog provider. Only name/description are surfaced
    * here; full bodies stay behind `skill_load`.
@@ -443,8 +457,9 @@ export class SystemPromptBuilder {
     // ④-b Tool Use Strategy (정적) — 모델이 도구를 어떻게 쓸지에 대한
     // Think→Act→Observe→Reflect 가이드. 특히 소형 reasoning 모델에서 도구
     // 호출 사이에 추론 흐름이 드러나도록 유도하는 목적 (migration doc lever 2).
-    // 병렬/순차 전략은 하드코딩 플래그로 강제하지 않고 LLM이 문맥에 맞게
-    // 스스로 선택하도록 한다 (lever 1 — LLM 결정 사항).
+    // 한 메시지 안의 다중 호출/단일 호출 전략은 LLM이 문맥에 맞게
+    // 스스로 선택하도록 한다. 실제 실행은 LLM이 나열한 tool_call 순서를
+    // 보존한다 (lever 1 — LLM 결정 사항).
     //
     // id=4.5: Org Context (id=4) 와 충돌하지 않도록 분수형 id 사용.
     // 정렬은 1 < 2 < 3 < 4 < 4.5 < 5 < 6 ... 로 자연스럽게 삽입된다.
@@ -596,6 +611,7 @@ export class SystemPromptBuilder {
           activePluginIds: scope.activePluginIds,
           activeToolNames: scope.activeToolNames ?? new Set<string>(),
           includeMcp: scope.includeMcp,
+          deferral: scope.deferral,
         });
         if (catalog.length === 0) return "";
         return [
@@ -611,22 +627,23 @@ export class SystemPromptBuilder {
       },
     });
 
-    // 비활성 plugin 카탈로그.
+    // request_plugin 카탈로그.
     // LLM이 "이 턴에 필요한 플러그인"을 판단해 request_plugin 호출 가능하도록
-    // system prompt에 힌트를 노출. 활성 plugin은 제외.
+    // system prompt에 힌트를 노출. 현재 턴 scope에 이미 들어온 plugin과
+    // 사용자/registry가 비활성화한 plugin은 제외한다.
     const { getPluginCards } = deps;
     this.sources.push({
       id: 65,
-      name: "Inactive Plugin Catalog",
+      name: "Requestable Plugin Catalog",
       refresh: "per-turn",
       build: () => {
         const cards = getPluginCards?.() ?? [];
         if (cards.length === 0) return "";
         const active = this.toolScope?.activePluginIds ?? new Set<string>();
-        const inactive = cards.filter((c) => !active.has(c.id));
+        const inactive = cards.filter((c) => !active.has(c.id) && isRequestablePluginCatalogCard(c));
         if (inactive.length === 0) return "";
         const lines: string[] = [
-          "## 사용 가능한 플러그인 (현재 비활성 — request_plugin 으로 활성화)",
+          "## 사용 가능한 플러그인 (현재 턴 미선택 — request_plugin 으로 선택)",
         ];
         for (const c of inactive) {
           const sample = c.sampleTools.length > 0 ? `: ${c.sampleTools.join(", ")}` : "";
@@ -917,15 +934,15 @@ const TOOL_USE_STRATEGY = `## 도구 사용 전략
 2. 도구 결과를 받으면 **무엇을 알게 되었고 다음에 무엇이 필요한지** 한 문장으로 정리하세요.
 3. 충분한 정보가 모였다고 판단되면 도구를 더 호출하지 말고 최종 답변으로 넘어가세요.
 
-### 순차 vs 병렬 — 상황에 맞게 스스로 판단
+### 순차 vs 다중 호출 — 상황에 맞게 스스로 판단
 - **순차 (기본 선호)**: 한 결과가 다음 선택에 영향을 주는 경우.
   - 예: 뉴스 검색 → 흥미로운 기사 방문 → 추가 검색
   - 예: 폴더 스캔 → 관심 문서의 구조 확인 → 특정 페이지 조회
   - 도구 사이에 판단 과정을 분명히 드러내세요.
-- **병렬 (조건부 허용)**: 호출 결과가 서로 독립적이고 미리 결정 가능한 경우에만.
+- **같은 메시지의 다중 호출 (조건부 허용)**: 호출 결과가 서로 독립적이고 미리 결정 가능한 경우에만.
   - 예: 서로 다른 도시의 날씨를 한 번에 조회
   - 예: 여러 독립 파일의 메타데이터 동시 확인
-  - 결과가 서로 연쇄된다면 순차로 전환하세요. 확실하지 않으면 순차가 기본입니다.
+  - host 는 같은 메시지 안의 tool_call 도 **나열된 순서대로** 실행합니다. 결과가 서로 연쇄된다면 이전 결과를 본 뒤 다음 메시지에서 호출하세요. 확실하지 않으면 순차가 기본입니다.
 
 ### 추가 원칙
 - 이미 대화 내용, <lvis-agents-context>, <lvis-memory-index>, <user-memory> 에 답이 있으면 도구를 호출하지 마세요.
@@ -937,24 +954,23 @@ const TOOL_USE_STRATEGY = `## 도구 사용 전략
 ### 워크플로우 시스템 툴 (S1+S2)
 - **ask_user_question** (적극 사용): 분기점·모호한 지점에서 가정으로 진행하지 말고 사용자에게 직접 물으세요. 한 번 묻는 게 잘못 짚고 길게 진행하는 것보다 거의 항상 낫습니다. 관련된 질문 1~4개는 한 카드로 묶어 questions[] 로 한 번에 보내고(같은 카드에 묶을 질문을 여러 호출로 쪼개지 마세요), 정적 '네/아니오/잘 모르겠어요' 폴백 대신 그 맥락에 맞는 구체적 choices 를 제시하세요. 각 파라미터(choices·recommendedIndex·altIndices·allowMultiple·placeholder·summaryHint)의 상세 작성 규칙은 도구 스키마의 description 을 따르세요.
 - **routine_schedule**: 지정한 예약 시각에 발화되는 루틴(self-trigger)을 등록. 캘린더 일정 조회 도구가 아니므로 "캘린더 점검/오늘 일정/회의 확인" 같은 조회 요청에는 사용 금지(캘린더는 ms-graph 플러그인). execution="llm-session"(LLM 대화 시작) 또는 "notification-only"(OS 알림). 날짜·시각·반복(daily/weekly/monthly/interval/cron) 지정. 예: "매일 오전 9시에 데일리 리포트 작성" → execution:"llm-session", schedule:{at:"...",repeat:{kind:"daily"}}, prePrompt:"...".
-- **todo_session_write**: 한 턴 안에서 여러 단계를 거쳐야 하는 작업이면 다음 순서를 반드시 따르세요.
+- **todo_session_write**: 한 턴 안에서 여러 단계를 거쳐야 하는 작업이면 다음 원칙을 따르세요. **상태 갱신만을 위한 별도 라운드를 만들지 말고**, 상태 전환은 다음 작업 도구 호출과 **같은 메시지에 앞 순서로 함께 실어** 보내세요. host 는 같은 메시지의 tool_call 을 나열된 순서대로 실행하므로 SessionTodoPanel 은 다음 작업 도구 시작 전에 갱신됩니다.
   완료된 세션 TO-DO 는 다음 명시 사용자 입력 또는 사용자 큐 자동 인입 턴 시작 시 자동으로 비워집니다. 완료되지 않은 계획은 이어서 보이므로, 같은 턴 안에서 기존 계획에 단계가 추가될 때만 새 항목을 삽입하고, 이미 있는 단계는 반드시 기존 id 로 수정하세요.
-  1. **계획 즉시 등록**: 단계 목록을 todo_session_write 로 전달해 전체 항목을 pending 으로 생성합니다.
-  2. **첫 번째 단계 시작 선언**: 계획 등록 직후, 다른 도구를 호출하기 **전에** todo_session_write 를 다시 호출해 첫 번째 항목을 in_progress 로 표시합니다.
-  3. **단계 완료 후 즉시 전환**: 각 도구 호출(또는 분석 단계)이 끝나면 해당 항목을 completed 로, 다음 항목을 in_progress 로 **같은 호출에** 업데이트합니다.
-  4. **마지막 단계 완료**: 모든 작업이 끝나면 마지막 항목도 completed 로 표시합니다.
-  5. **계획 변경 반영**: 새 단계가 생기면 beforeId/afterId 로 정확한 위치에 삽입하고, 필요 없어진 일부 단계는 status=deleted 로 제거합니다. 모든 항목을 삭제해 빈 계획을 만들지 말고, 작업이 끝난 항목은 completed 로 닫으세요. 순서를 바꿔야 하면 기존 id 와 beforeId/afterId 를 같이 보내 이동합니다.
+  1. **계획 등록 + 첫 단계 시작을 한 호출에**: 단계 목록을 todo_session_write 로 한 번에 전달하되 첫 항목은 in_progress, 나머지는 pending 으로 생성합니다. 등록과 첫 in_progress 를 두 라운드로 쪼개지 마세요.
+  2. **상태 전환은 다음 작업 호출에 동승**: 어떤 단계의 작업 도구 결과를 확인했으면, 그 항목을 completed 로 닫고 다음 항목을 in_progress 로 바꾸는 todo_session_write 를 **다음 작업 도구 호출과 같은 메시지에, 그 작업 도구보다 앞 순서로** 함께 넣습니다. 이미 결과를 본 뒤의 갱신이므로 completed 판정이 안전합니다.
+  3. **마지막 단계 완료**: 마지막 작업 결과를 확인한 뒤 그 항목을 completed 로 닫습니다.
+  4. **계획 변경 반영**: 새 단계가 생기면 beforeId/afterId 로 정확한 위치에 삽입하고, 필요 없어진 일부 단계는 status=deleted 로 제거합니다. 모든 항목을 삭제해 빈 계획을 만들지 말고, 작업이 끝난 항목은 completed 로 닫으세요. 순서를 바꿔야 하면 기존 id 와 beforeId/afterId 를 같이 보내 이동합니다.
 
-  **절대 금지**: pending 상태 항목이 남아 있는 채로 실제 작업 도구를 호출하지 마세요. 사용자는 SessionTodoPanel 에서 실시간으로 진행 상황을 확인하므로, 도구를 호출하기 전에 반드시 해당 단계를 in_progress 로 먼저 업데이트해야 합니다.
+  **하지 말 것**: 상태 갱신만을 목적으로 한 todo_session_write 단독 라운드를 작업 도구 호출 사이마다 끼워넣지 마세요 — 라운드 수가 배로 늘어 비용·지연이 커집니다. 상태 전환은 그다음 작업 호출에 동승시키세요. 다만 **아직 결과를 확인하지 않은 단계를 미리 completed 로 표시하지는 마세요.**
+
+  **no-op 재호출 금지**: 이미 그 상태인 항목을 **같은 상태로 다시 보내지 마세요**. todo_session_write 는 어떤 항목의 status 가 실제로 바뀔 때만 호출합니다. 한 단계(in_progress)가 여러 도구 호출에 걸쳐 진행되는 동안에는 그 사이에 todo 를 반복하지 말고 **작업 도구만 이어서** 호출하고, 그 단계가 끝나 다음 단계로 넘어갈 때 한 번만 갱신하세요. 이미 in_progress 인 항목을 in_progress 로 다시 보내는 호출은 아무 변화도 만들지 못하고 라운드만 소모하므로 **오류로 처리됩니다.**
 
   **올바른 호출 순서 예시** (3단계 작업):
-  - [1] todo_session_write → 3개 항목 전체 pending 으로 등록
-  - [2] todo_session_write → 항목 1 을 in_progress 로 업데이트 (도구 호출 전)
-  - [3] 필요한 도구 호출 → 실제 작업 수행
-  - [4] todo_session_write → 항목 1 completed + 항목 2 in_progress 로 업데이트
-  - [5] 필요한 도구 호출 → 다음 작업 수행
-  - [6] todo_session_write → 항목 2 completed + 항목 3 in_progress 로 업데이트
-  - [7] ... 최종 단계 완료 후 항목 3 completed
+  - [1] todo_session_write → 3개 항목 등록 (항목 1 = in_progress, 항목 2·3 = pending)
+  - [2] 항목 1 작업 도구 호출 → 실제 작업 수행
+  - [3] todo_session_write(항목 1 completed, 항목 2 in_progress) **+** 항목 2 작업 도구 호출 — 한 메시지에 이 순서로 함께
+  - [4] todo_session_write(항목 2 completed, 항목 3 in_progress) **+** 항목 3 작업 도구 호출 — 한 메시지에 이 순서로 함께
+  - [5] todo_session_write → 항목 3 completed (마지막 결과 확인 후)
 
   사용자 task_* 와 다른 임시(세션) 체크리스트입니다.
 - **agent_list**: ~/.lvis/agents/ 에 등록된 agent profile 목록을 확인합니다.

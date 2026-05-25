@@ -26,6 +26,7 @@ import {
 const MAX_FORCE_RECOVER_PER_SESSION = 3;
 import { compactWithBoundary, DEFAULT_PRESERVE_RECENT_TURNS, renderBoundaryAsPreamble } from "./structured-compact.js";
 import { CompressionStatus } from "../shared/compact-status.js";
+import { EAGER_TOOL_EXPOSURE_CEILING } from "../shared/tool-exposure-policy.js";
 import { stripSuggestedReplies } from "./suggested-replies.js";
 import { createProvider, secretKeyFor } from "./llm/provider-factory.js";
 import { FallbackProvider, type FallbackStatus } from "./llm/vercel/fallback-chain.js";
@@ -476,6 +477,12 @@ export interface ConversationLoopDeps {
    */
   pluginRuntime?: {
     listPluginIds(): string[];
+    /**
+     * #1176 — whether a loaded plugin is active (its tools may be exposed).
+     * `enabled !== false` in the registry; absent → active (migration-safe).
+     * Used by {@link resolveToolScope} to drop inactive plugins from scope.
+     */
+    isPluginEnabled?(pluginId: string): boolean;
   };
   /**
    * Fixed-scope support for callers that already made a plugin-scope decision.
@@ -591,7 +598,13 @@ interface ToolScope {
   forcedToolNames: Set<string>;
   includeBuiltins: boolean;
   includeMcp: boolean;
-  /** Tool-Level Deferral is the only plugin/MCP exposure path. */
+  /**
+   * #1176 deferral gate. `false` → eager full-schema exposure of every
+   * in-scope plugin/MCP tool (no `tool_search` discovery). `true` → per-tool
+   * deferral where only `activeToolNames` load and the rest live in the compact
+   * catalog. Set by {@link resolveToolScope} from the eligible tool count vs
+   * {@link EAGER_TOOL_EXPOSURE_CEILING}.
+   */
   deferral: boolean;
 }
 
@@ -2560,7 +2573,10 @@ export class ConversationLoop {
         turnExpansions: pluginExpansions,
         sessionExpansions: this.sessionPluginExpansions,
         activePluginIds: scope.activePluginIds,
-        availablePluginIds: this.filterAllowedPluginIds(this.deps.pluginRuntime?.listPluginIds() ?? []),
+        availablePluginIds: this.filterAllowedPluginIds(
+          (this.deps.pluginRuntime?.listPluginIds() ?? [])
+            .filter((pluginId) => this.deps.pluginRuntime?.isPluginEnabled?.(pluginId) !== false),
+        ),
       });
       pluginExpansions = pluginOutcome.nextTurnExpansions;
       this.sessionPluginExpansions = pluginOutcome.nextSessionExpansions;
@@ -2568,12 +2584,19 @@ export class ConversationLoop {
       // 활성화 성공했으면 tool schema 재빌드 + 추가된 tool 수 보고
       const rebuiltAfterPlugin = pluginOutcome.activatedPluginIds.length > 0;
       if (rebuiltAfterPlugin) {
+        scope.deferral = this.shouldDeferToolSchemas(scope.activePluginIds);
         toolSchemas = this.rebuildToolSchemas(scope);
       }
       const catalogCountAfterPlugin = this.deps.toolRegistry.getToolCatalogForScope(scope).length;
       for (const rr of pluginOutcome.results) {
+        // #1176 — in eager mode the activated plugin's full tool suite is
+        // already loaded, so there is nothing to discover; tell the model it is
+        // ready instead of pointing it at tool_search. Deferred mode keeps the
+        // catalog-search guidance.
         const finalContent = !rr.is_error && rebuiltAfterPlugin
-          ? `${rr.content} 플러그인 도구는 카탈로그에서 검색 가능 (${catalogCountAfterPlugin}개 후보, 현재 ${toolSchemas.length}개 로드됨). 필요한 도구는 tool_search 로 로드하세요.`
+          ? scope.deferral
+            ? `${rr.content} 플러그인 도구는 카탈로그에서 검색 가능 (${catalogCountAfterPlugin}개 후보, 현재 ${toolSchemas.length}개 로드됨). 필요한 도구는 tool_search 로 로드하세요.`
+            : `${rr.content} 플러그인 도구가 모두 로드됨 (현재 ${toolSchemas.length}개 사용 가능). 바로 호출하세요.`
           : rr.content;
         this.history.append({
           role: "tool_result",
@@ -2601,6 +2624,11 @@ export class ConversationLoop {
         turnSearches: toolSearches,
         sessionSearches: this.sessionToolSearches,
         activeToolNames: scope.activeToolNames,
+        loadedToolNames: new Set(toolSchemas.map((tool) => tool.name)),
+        loadedTools: toolSchemas.map((tool) => ({
+          name: tool.name,
+          description: tool.description,
+        })),
         catalog: this.deps.toolRegistry.getToolCatalogForScope(scope),
       });
       toolSearches = searchOutcome.nextTurnSearches;
@@ -3321,10 +3349,23 @@ export class ConversationLoop {
       }
     }
 
-    // Tool-Level Deferral default-on: persisted experimental.toolDeferral is
-    // no longer a runtime branch because the legacy whole-plugin schema path
-    // has been removed.
-    const deferral = true;
+    // #1176 active/inactive — a plugin toggled inactive stays loaded but its
+    // tools are hidden from the model. Drop inactive plugins from scope here so
+    // their tools vanish next turn with no runtime reload. `enabled !== false`
+    // is the active predicate (undefined → active, migration-safe).
+    const pluginRuntime = this.deps.pluginRuntime;
+    if (pluginRuntime?.isPluginEnabled) {
+      for (const pluginId of [...activePluginIds]) {
+        if (!pluginRuntime.isPluginEnabled(pluginId)) activePluginIds.delete(pluginId);
+      }
+    }
+
+    // #1176 deferral gate — eligible tools are active-plugin + in-scope MCP
+    // tools only (builtins/meta-tools are always eager and never counted).
+    // Below the ceiling the turn exposes every eligible tool's full schema so
+    // the model needs zero `tool_search` discovery rounds; at/above it the turn
+    // falls back to deferral so a very large surface does not flood context.
+    const deferral = this.shouldDeferToolSchemas(activePluginIds);
 
     // (B) keyword→tool preload ∪ carried-forward loaded tools ∪ explicit
     // fixed-surface allowlist. Keyword/carry-forward entries are restricted to
@@ -3345,7 +3386,7 @@ export class ConversationLoop {
     for (const name of resetCarryForward ? [] : (this.lastTurnToolNames ?? [])) {
       if (inScopeToolNames.has(name)) activeToolNames.add(name);
     }
-    const registeredToolNames = new Set(this.deps.toolRegistry.listAll().map((tool) => tool.name));
+    const registeredToolNames = new Set(this.deps.toolRegistry.getVisibleTools().map((tool) => tool.name));
     for (const name of this.deps.forcedActiveToolNames ?? []) {
       if (registeredToolNames.has(name)) {
         activeToolNames.add(name);
@@ -3373,7 +3414,7 @@ export class ConversationLoop {
   private scopedToolNameSet(activePluginIds: Set<string>): Set<string> {
     const includeMcp = this.deps.headless !== true;
     const names = new Set<string>();
-    for (const tool of this.deps.toolRegistry.listAll()) {
+    for (const tool of this.deps.toolRegistry.getVisibleTools()) {
       if (tool.source === "plugin") {
         if (tool.pluginId && activePluginIds.has(tool.pluginId)) names.add(tool.name);
       } else if (tool.source === "mcp" && includeMcp) {
@@ -3381,6 +3422,10 @@ export class ConversationLoop {
       }
     }
     return names;
+  }
+
+  private shouldDeferToolSchemas(activePluginIds: Set<string>): boolean {
+    return this.scopedToolNameSet(activePluginIds).size >= EAGER_TOOL_EXPOSURE_CEILING;
   }
 
   private filterAllowedPluginIds(pluginIds: string[]): string[] {
