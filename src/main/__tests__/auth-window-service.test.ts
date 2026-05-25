@@ -16,6 +16,7 @@ vi.mock("electron", () => ({
 const {
   filterCookiesByHost,
   isCompletionUrl,
+  shouldGraceCollectClosedAuthWindow,
   sanitizeUrlForLog,
   buildAuthResult,
   buildAuthWindowShellHtml,
@@ -134,6 +135,49 @@ describe("isCompletionUrl", () => {
     expect(isCompletionUrl("https://anywhere.example.com", [""])).toBe(true);
     // normalize 후 빈 배열이 되면 false.
     expect(isCompletionUrl("https://anywhere.example.com", [])).toBe(false);
+  });
+});
+
+describe("shouldGraceCollectClosedAuthWindow", () => {
+  it("allows closed-event grace collect only after a trusted committed completion URL", () => {
+    expect(
+      shouldGraceCollectClosedAuthWindow({
+        webviewAttached: true,
+        lastCommittedUrl: "https://portal.example.com/portal",
+        completionPatterns: ["portal.example.com/portal"],
+      }),
+    ).toBe(true);
+  });
+
+  it("rejects pre-attach closes even if a completion URL is known", () => {
+    expect(
+      shouldGraceCollectClosedAuthWindow({
+        webviewAttached: false,
+        lastCommittedUrl: "https://portal.example.com/portal",
+        completionPatterns: ["portal.example.com/portal"],
+      }),
+    ).toBe(false);
+  });
+
+  it("does not use uncommitted last-seen URLs for the closed-event grace path", () => {
+    expect(
+      shouldGraceCollectClosedAuthWindow({
+        webviewAttached: true,
+        lastCommittedUrl: null,
+        completionPatterns: ["portal.example.com/portal"],
+      }),
+    ).toBe(false);
+  });
+
+  it("keeps RelayState/query spoofing out of the trusted closed-event grace path", () => {
+    expect(
+      shouldGraceCollectClosedAuthWindow({
+        webviewAttached: true,
+        lastCommittedUrl:
+          "https://sso.example.com/saml/callback?RelayState=https%3A%2F%2Fportal.example.com%2Fportal",
+        completionPatterns: ["portal.example.com/portal"],
+      }),
+    ).toBe(false);
   });
 });
 

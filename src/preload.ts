@@ -1392,7 +1392,7 @@ const api = {
   // the window and the renderer can scroll/navigate to the source surface.
   onNotificationToast: (
     handler: (payload: {
-      kind: "turn-end" | "routine" | "ask-user" | "approval";
+      kind: "turn-end" | "routine" | "ask-user" | "approval" | "plugin" | "system";
       title: string;
       body: string;
       contextRef?: {
@@ -1409,7 +1409,7 @@ const api = {
   },
   onNotificationClicked: (
     handler: (payload: {
-      kind: "turn-end" | "routine" | "ask-user" | "approval";
+      kind: "turn-end" | "routine" | "ask-user" | "approval" | "plugin" | "system";
       contextRef?: {
         sessionId?: string;
         routineId?: string;
@@ -1423,7 +1423,7 @@ const api = {
     return () => ipcRenderer.removeListener("lvis:notification:clicked", listener);
   },
   notifyClick: async (payload: {
-    kind: "turn-end" | "routine" | "ask-user" | "approval";
+    kind: "turn-end" | "routine" | "ask-user" | "approval" | "plugin" | "system";
     contextRef?: {
       sessionId?: string;
       routineId?: string;
