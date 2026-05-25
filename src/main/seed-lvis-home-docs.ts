@@ -16,15 +16,19 @@ export interface LvisHomeDocUpgradeMarker {
   markerPath: string;
 }
 
-const SEEDED_DOC_DIRS = ["", "agents", "skills", "prompts"] as const;
+const UPGRADE_MARKER_DOC_DIRS = ["", "skills", "prompts"] as const;
+
+interface SeedOneOptions {
+  upgradePolicy: "marker" | "seed-only";
+}
 
 /**
  * Seed user-facing reference docs into `~/.lvis/` on first launch.
  *
  * Currently seeds:
  *   - AGENTS.md — LVIS system reference for LLMs running inside the host
- *   - agents/*.md — built-in sub-agent profiles (executor, researcher,
- *     planner, explorer) for the `agent_spawn` tool
+ *   - agents/*.md — initial sub-agent profile examples (executor,
+ *     researcher, planner, explorer) for the `agent_spawn` tool
  *   - skills/*.md — built-in skills (report-writing, meeting-minutes,
  *     email-polish, decision-record, data-summary) for the `skill_load`
  *     tool. Shipping skills as files (not inline TS) lets users edit
@@ -33,16 +37,16 @@ const SEEDED_DOC_DIRS = ["", "agents", "skills", "prompts"] as const;
  *     selects one persona per turn; agents and skills stay on their own
  *     dynamic tool paths.
  *
- * Behavior (per file):
+ * Behavior:
  *   - If `~/.lvis/<path>` does not exist → copy from packaged resources.
- *   - If it exists and is byte-identical to the packaged copy → no-op.
- *   - If it exists and diverges from the packaged copy → write the packaged
- *     version alongside as `~/.lvis/<path>.new` so the user can diff and
- *     decide whether to merge upgrade content into their copy.
+ *   - AGENTS.md, skills/*.md, and prompts/*.md still offer divergent
+ *     packaged updates as `~/.lvis/<path>.new` for user review.
+ *   - agents/*.md are seed-only. Shared agent operating guidance belongs in
+ *     AGENTS.md; updating packaged agent profiles must not create a new
+ *     apparent user agent such as `agents/executor.md.new`.
  *
  * The user's edits are never overwritten — they may freely customize each
- * file to inject site-specific rules. The `.new` upgrade marker is the only
- * path by which an upgrade can communicate "there is new content to consider".
+ * file to inject site-specific rules.
  *
  * Non-fatal — failures log and continue. Boot must not block on doc seeding.
  */
@@ -57,16 +61,16 @@ export function seedLvisHomeDocs(): { seeded: string[]; upgraded: string[] } {
     return result;
   }
 
-  seedOne(home, "AGENTS.md", result);
-  seedDir(home, "agents", result);
-  seedDir(home, "skills", result);
-  seedDir(home, "prompts", result);
+  seedOne(home, "AGENTS.md", result, { upgradePolicy: "marker" });
+  seedDir(home, "agents", result, { upgradePolicy: "seed-only" });
+  seedDir(home, "skills", result, { upgradePolicy: "marker" });
+  seedDir(home, "prompts", result, { upgradePolicy: "marker" });
   return result;
 }
 
 export function listLvisHomeDocUpgradeMarkers(home = lvisHome()): LvisHomeDocUpgradeMarker[] {
   const markers: LvisHomeDocUpgradeMarker[] = [];
-  for (const subdir of SEEDED_DOC_DIRS) {
+  for (const subdir of UPGRADE_MARKER_DOC_DIRS) {
     const dir = subdir.length > 0 ? join(home, subdir) : home;
     let entries: string[];
     try {
@@ -103,6 +107,7 @@ function seedOne(
   home: string,
   filename: string,
   result: { seeded: string[]; upgraded: string[] },
+  options: SeedOneOptions,
 ): void {
   const packagedSource = resolvePackagedResource(filename);
   if (packagedSource === null) {
@@ -143,6 +148,8 @@ function seedOne(
     }
     return;
   }
+
+  if (options.upgradePolicy === "seed-only") return;
 
   // User has an existing copy. Compare to the packaged snapshot; write a
   // .new sibling only when the packaged content differs. We read the
@@ -198,14 +205,14 @@ function enforceUserFileMode(target: string): void {
 
 /**
  * Seed every `*.md` file from a packaged resource subdirectory into the
- * matching `~/.lvis/<subdir>/` location. Each file uses the same per-file
- * seed/upgrade semantics as {@link seedOne} — first-boot copy, byte-identical
- * no-op, divergent write to `.new` marker.
+ * matching `~/.lvis/<subdir>/` location. The caller chooses whether existing
+ * divergent user files get a non-clobbering `.new` marker or stay seed-only.
  */
 function seedDir(
   home: string,
   subdir: string,
   result: { seeded: string[]; upgraded: string[] },
+  options: SeedOneOptions,
 ): void {
   const packagedDir = resolvePackagedResource(subdir);
   if (packagedDir === null) {
@@ -231,7 +238,7 @@ function seedDir(
 
   for (const entry of entries) {
     if (!entry.toLowerCase().endsWith(".md")) continue;
-    seedOne(home, join(subdir, entry), result);
+    seedOne(home, join(subdir, entry), result, options);
   }
 }
 
