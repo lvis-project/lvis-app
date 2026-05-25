@@ -1,6 +1,6 @@
 import { Loader2, Star, RefreshCw, GitBranch, ThumbsUp, ThumbsDown, AlertTriangle } from "lucide-react";
 import ReactMarkdown from "react-markdown";
-import { useState } from "react";
+import { memo, useMemo, useState } from "react";
 import { Button } from "../../../components/ui/button.js";
 import { Input } from "../../../components/ui/input.js";
 import { Tooltip, TooltipContent, TooltipTrigger } from "../../../components/ui/tooltip.js";
@@ -10,7 +10,7 @@ import { MARKDOWN_REMARK_PLUGINS } from "../utils/markdown-plugins.js";
 import { replaceToolNamesInText } from "../utils/tool-display.js";
 import { detectFromStream } from "../../../lib/stream-markers.js";
 
-export function AssistantCard({
+function AssistantCardImpl({
   entry,
   actions,
   isStarred,
@@ -43,8 +43,8 @@ export function AssistantCard({
     : entry.streaming
       ? "LVIS 응답 작성 중"
       : "LVIS 응답";
-  const displayText = detectFromStream(entry.text || "").cleanedText;
-  const renderedText = replaceToolNamesInText(displayText);
+  const displayText = useMemo(() => detectFromStream(entry.text || "").cleanedText, [entry.text]);
+  const renderedText = useMemo(() => replaceToolNamesInText(displayText), [displayText]);
   const markdownText = entry.route === "command" ? preserveCommandLineBreaks(renderedText) : renderedText;
   // chars/4 token estimate 제거 (2026-05-07): TurnActionBar 의 TokenCostBadge
   // 가 provider-reported 값을 단일 source 로 표시. 카드 헤더의 ~tok 배지는
@@ -209,3 +209,5 @@ export function AssistantCard({
 function preserveCommandLineBreaks(text: string): string {
   return text.replace(/([^\n])\n(?=[^\n])/g, "$1  \n");
 }
+
+export const AssistantCard = memo(AssistantCardImpl);

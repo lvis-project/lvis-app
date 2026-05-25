@@ -53,6 +53,7 @@ import { captureDemoCredentials } from "./main/demo-credentials.js";
 import { loadPersistedDemoActivationSync } from "./main/demo-activation-loader.js";
 import { applyDemoHostResolverRules } from "./main/demo-host-resolver.js";
 import { forceKillManagedChildProcesses } from "./main/managed-child-processes.js";
+import { scrubPackagedProcessEnv } from "./main/packaged-env-scrub.js";
 import {
   computeInitialMainWindowBounds,
   MAIN_WINDOW_MIN_HEIGHT,
@@ -150,7 +151,7 @@ function applyRuntimeAppIcon() {
   }
 }
 
-// Trust-hardening — strip LVIS_DEV* from process.env in packaged
+// Trust-hardening — strip dev/test-only LVIS flags from process.env in packaged
 // builds before any preload, renderer, or worker inherits it. Without this
 // scrub, a packaged binary launched with LVIS_DEV=1 in the user environment
 // would expose `env.isDev=true` to the renderer (via preload's
@@ -189,15 +190,7 @@ captureDemoCredentials();
 applyDemoHostResolverRules(app);
 
 if (app.isPackaged) {
-  for (const key of Object.keys(process.env)) {
-    if (
-      key.startsWith("LVIS_DEV") ||
-      key.startsWith("LVIS_DEMO") ||
-      key === "LVIS_WIN_NO_SANDBOX"
-    ) {
-      delete process.env[key];
-    }
-  }
+  scrubPackagedProcessEnv(process.env);
   // Force NODE_ENV=production in packaged builds so downstream gates
   // (preload `__lvisDevMode`, dev IPC, auto-compact runtime override) read
   // a reliable signal. Electron itself does not set NODE_ENV, so without

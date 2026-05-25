@@ -13,7 +13,14 @@ import {
   type MockLvisApi,
 } from "./mock-lvis-api.js";
 
-type RenderAppOpts = Parameters<typeof makeMockLvisApi>[0];
+type RenderAppOpts = Parameters<typeof makeMockLvisApi>[0] & {
+  lvisEnv?: Partial<{
+    isDev: boolean;
+    isE2E: boolean;
+    enableDevConsole: boolean;
+    debugStream: boolean;
+  }>;
+};
 
 export type RenderAppReturn = {
   container: RenderResult["container"];
@@ -30,6 +37,7 @@ export type RenderAppReturn = {
 };
 
 export async function renderApp(opts: RenderAppOpts = {}): Promise<RenderAppReturn> {
+  const { lvisEnv, ...apiOpts } = opts;
   const {
     api,
     emitChatStream,
@@ -38,8 +46,8 @@ export async function renderApp(opts: RenderAppOpts = {}): Promise<RenderAppRetu
     emitRoutineFiredV2,
     emitViewActivate,
     emitAskUserQuestion,
-  } = makeMockLvisApi(opts);
-  const { ns, emitApproval } = makeMockLvisNamespace();
+  } = makeMockLvisApi(apiOpts);
+  const { ns, emitApproval } = makeMockLvisNamespace({ env: lvisEnv });
 
   vi.stubGlobal("lvisApi", api);
   vi.stubGlobal("lvis", ns);
