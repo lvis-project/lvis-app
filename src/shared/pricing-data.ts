@@ -130,15 +130,18 @@ export const DEFAULT_PRICING: Record<PricingVendor, Record<string, ModelPricing>
     //
     // gpt-5.4-mini / nano 는 OpenAI spec 상 surcharge 없음 (400K 단일 tier).
     // tpmDefault — issue #900 #3. *empirically grounded* values 만 등록.
-    // - nano 200K: 사용자 영상 사고의 실제 provider error 에 명시된 한도
-    //   ("Limit 200000, Requested 271630") → org Tier-1 보수적 default 정합
-    // - mini / gpt-5.4 / gpt-5.4-pro: OpenAI 공식 Tier-1 TPM 미공개 (2026-05).
-    //   gpt-5 Tier-1 은 500K (Sep 2025 increase 후) 이지만 5.4 family 별도
-    //   사양 없음 → 등록 안 함. window-only preflight 유지 (안전).
+    // - nano 200K & mini 200K: 실제 provider 429 에 명시된 org Tier-1 한도.
+    //   nano "Limit 200000, Requested 271630" (사용자 영상 사고);
+    //   mini "Limit 200000, Requested 34223/34493" (2026-05 인덱서 turn 사고 —
+    //   400K window 안의 단발 input 이 분당 누적으로 200K TPM 초과). 둘 다
+    //   org Tier-1 보수적 default 로 정합 (window-only 면 preflight 가 288K 라
+    //   200K TPM 벽 전에 트리거되지 않음).
+    // - gpt-5.4 / gpt-5.4-pro: OpenAI 공식 Tier-1 TPM 미공개 (2026-05) + 1M-class
+    //   window 라 200K 가정 부적절 → 등록 안 함. window-only preflight 유지 (안전).
     // 동적 `x-ratelimit-remaining-tokens` header parser 가 도입되면 본
     // 정적 등록 자체가 deprecated 후보 — 별 cycle.
     "gpt-5.4":                     { inputPer1M: 2.5,  outputPer1M: 15,  cacheReadPer1M: 0.25,  contextWindow: 1_050_000, surchargeInputThreshold: 272_000, surchargeInputMultiplier: 2,   surchargeOutputMultiplier: 1.5 },
-    "gpt-5.4-mini":                { inputPer1M: 0.75, outputPer1M: 4.5, cacheReadPer1M: 0.075, contextWindow:   400_000 },
+    "gpt-5.4-mini":                { inputPer1M: 0.75, outputPer1M: 4.5, cacheReadPer1M: 0.075, contextWindow:   400_000, tpmDefault:    200_000 },
     "gpt-5.4-nano":                { inputPer1M: 0.2,  outputPer1M: 1.25, contextWindow:  400_000, tpmDefault:    200_000 },
     "gpt-5.4-pro":                 { inputPer1M: 30,   outputPer1M: 180, contextWindow: 1_100_000, surchargeInputThreshold: 272_000, surchargeInputMultiplier: 2,   surchargeOutputMultiplier: 1.5 },
     "gpt-5.3":                     { inputPer1M: 0,    outputPer1M: 0,  contextWindow:   400_000 },
