@@ -4,6 +4,7 @@ import { Button } from "../../../components/ui/button.js";
 import { Input } from "../../../components/ui/input.js";
 import { ScrollArea } from "../../../components/ui/scroll-area.js";
 import { Separator } from "../../../components/ui/separator.js";
+import { Switch } from "../../../components/ui/switch.js";
 import { sanitizePluginConfig, sanitizePluginConfigKey } from "../../../shared/plugin-config.js";
 import { getApi } from "../api-client.js";
 import { getHostMarketplaceApi } from "../host-marketplace-api.js";
@@ -191,6 +192,29 @@ export function PluginConfigTab() {
     }
   }, [showBanner]);
 
+  // #1176 — toggle a plugin active/inactive. Inactive plugins stay loaded but
+  // their tools are hidden from the model. Optimistically reflects the new
+  // loadStatus, then refreshes from the runtime (which is the source of truth).
+  const [togglingId, setTogglingId] = useState<string | null>(null);
+  const handleToggleEnabled = useCallback(
+    async (pluginId: string, nextEnabled: boolean) => {
+      setTogglingId(pluginId);
+      try {
+        const res = await getApi().setPluginEnabled(pluginId, nextEnabled);
+        if (!res.ok) {
+          showBanner("error", res.message ?? "플러그인 활성 상태 변경 실패");
+          return;
+        }
+        await refreshPlugins();
+      } catch (e) {
+        showBanner("error", (e as Error).message ?? "플러그인 활성 상태 변경 실패");
+      } finally {
+        setTogglingId(null);
+      }
+    },
+    [refreshPlugins, showBanner],
+  );
+
   useEffect(() => {
     void refreshPlugins();
   }, [refreshPlugins]);
@@ -242,6 +266,15 @@ export function PluginConfigTab() {
           if (success) {
             void refreshPlugins();
           }
+        }),
+      );
+    }
+    // #1176 — refresh when a plugin's active/inactive state changes from any
+    // surface so the list badges + tools panel reflect the toggle.
+    if (typeof api.onPluginEnabledChanged === "function") {
+      unsubs.push(
+        api.onPluginEnabledChanged(() => {
+          void refreshPlugins();
         }),
       );
     }
@@ -620,16 +653,37 @@ export function PluginConfigTab() {
                       <p className="mt-1 text-xs text-muted-foreground">{selectedPlugin.description}</p>
                     )}
                   </div>
-                  <Button
-                    size="sm"
-                    variant="destructive"
-                    className="h-7 text-xs px-2 shrink-0"
-                    onClick={() => setUninstallTarget(selectedPlugin)}
-                    disabled={saving || selectedPlugin.isManaged}
-                    title={selectedPlugin.isManaged ? "관리자가 설치한 플러그인은 제거할 수 없습니다" : undefined}
-                  >
-                    제거
-                  </Button>
+                  <div className="flex items-center gap-2 shrink-0">
+                    {/* #1176 active/inactive toggle. Inactive plugins stay
+                        loaded but their tools are hidden from the model.
+                        Disabled for preparing/failed runtimes (no live state
+                        to gate) — failed/preparing plugins expose no tools. */}
+                    <label className="flex items-center gap-1.5 text-[10px] text-muted-foreground">
+                      <span>{selectedPlugin.loadStatus === "disabled" ? "비활성" : "활성"}</span>
+                      <Switch
+                        size="sm"
+                        data-testid={`plugin-config:enabled-toggle:${selectedPlugin.id}`}
+                        checked={selectedPlugin.loadStatus !== "disabled"}
+                        disabled={
+                          togglingId === selectedPlugin.id ||
+                          selectedPlugin.loadStatus === "preparing" ||
+                          selectedPlugin.loadStatus === "failed"
+                        }
+                        onCheckedChange={(next) => void handleToggleEnabled(selectedPlugin.id, next)}
+                        aria-label={`${selectedPlugin.name} 활성/비활성 전환`}
+                      />
+                    </label>
+                    <Button
+                      size="sm"
+                      variant="destructive"
+                      className="h-7 text-xs px-2"
+                      onClick={() => setUninstallTarget(selectedPlugin)}
+                      disabled={saving || selectedPlugin.isManaged}
+                      title={selectedPlugin.isManaged ? "관리자가 설치한 플러그인은 제거할 수 없습니다" : undefined}
+                    >
+                      제거
+                    </Button>
+                  </div>
                 </div>
 
                 <PluginPreparationStatusPanel plugin={selectedPlugin} />
