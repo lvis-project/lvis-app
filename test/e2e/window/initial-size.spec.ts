@@ -6,6 +6,7 @@
  *   width  = 460 px  (single-column chat shell)
  *   height = 840 px  (tall enough for composer + recent history)
  *   right edge keeps a small visual gap from the primary work area edge.
+ *   macOS/Linux open near the top edge; Windows opens near the bottom edge.
  *
  * Uses `app.evaluate` to read bounds directly via Electron BrowserWindow APIs.
  * Skipped automatically when the built app binary is absent so CI that doesn't
@@ -25,6 +26,7 @@ const EXPECTED_HEIGHT = 840;
 const EXPECTED_MIN_HEIGHT = 640;
 const EXPECTED_RIGHT_GAP = 10;
 const EXPECTED_TOP_GAP = 24;
+const EXPECTED_BOTTOM_GAP = 24;
 
 test.describe("initial window size", () => {
   test.skip(!existsSync(DIST_MAIN), "dist/src/main/main.js not built — skipping");
@@ -58,12 +60,13 @@ test.describe("initial window size", () => {
   });
 
   test("main window opens narrow, taller, and right-aligned", async () => {
-    const { bounds, workArea } = await app.evaluate(({ BrowserWindow, screen }) => {
+    const { bounds, workArea, platform } = await app.evaluate(({ BrowserWindow, screen }) => {
       const [win] = BrowserWindow.getAllWindows();
       if (!win) throw new Error("main BrowserWindow was not created");
       return {
         bounds: win.getBounds(),
         workArea: screen.getPrimaryDisplay().workArea,
+        platform: process.platform,
       };
     });
 
@@ -76,7 +79,10 @@ test.describe("initial window size", () => {
     const rightGap = (workArea.x + workArea.width) - (bounds.x + bounds.width);
     const expectedRightGap = bounds.width < workArea.width ? EXPECTED_RIGHT_GAP : 0;
     expect(Math.abs(rightGap - expectedRightGap)).toBeLessThanOrEqual(8);
-    const expectedY = workArea.y + Math.min(EXPECTED_TOP_GAP, Math.max(0, workArea.height - bounds.height));
+    const availableVerticalSpace = Math.max(0, workArea.height - bounds.height);
+    const expectedY = platform === "win32"
+      ? workArea.y + Math.max(0, availableVerticalSpace - EXPECTED_BOTTOM_GAP)
+      : workArea.y + Math.min(EXPECTED_TOP_GAP, availableVerticalSpace);
     expect(Math.abs(bounds.y - expectedY)).toBeLessThanOrEqual(8);
     // Ensure height is not accidentally compact (the PR #368 regression was 380px)
     expect(bounds.height).toBeGreaterThanOrEqual(600);
