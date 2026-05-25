@@ -233,7 +233,7 @@ Plugin 제거:
 | routine_schedule | write | ask (default) |
 | skill_list | read | allow |
 | skill_load | read | ask (default; first-use approval gated) |
-| todo_session_write | write | ask (default) |
+| todo_session_write | read | allow |
 | web_search | read | allow |
 | web_fetch | read / network | allow (public URL), ask (private network opt-in) |
 

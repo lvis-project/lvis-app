@@ -4,40 +4,29 @@
  * renderer pushes route to the right view. Distinct from user `task_*`
  * persistence: never written to disk.
  *
- * State shape: sessionId → ordered array of {id, content, status}. "deleted"
- * is a command state, not a durable row state: deleted items are removed from
- * the active list so the panel represents the runnable plan, not an audit log.
+ * State shape: sessionId → ordered array of {id, content, status}. Durable
+ * item statuses are pending/in_progress/completed. Completed plans are cleared
+ * at the next explicit user/user-queued turn boundary. Unfinished plans stay
+ * visible because they still represent active assistant work. The update-only
+ * "deleted" command may remove items, but it must not create the empty-list
+ * clear event.
  */
 import { randomUUID } from "node:crypto";
 import { createLogger } from "../lib/logger.js";
+import type { SessionTodoItem, SessionTodoUpdate } from "../shared/session-todo.js";
 const log = createLogger("lvis");
-
-export type SessionTodoStatus =
-  | "pending"
-  | "in_progress"
-  | "completed"
-  | "deleted";
-
-export interface SessionTodoItem {
-  id: string;
-  content: string;
-  status: SessionTodoStatus;
-}
-
-export interface SessionTodoUpdate {
-  id?: string;
-  content?: string;  // omit to keep existing content when updating by id
-  status: SessionTodoStatus;
-  /** Insert or move this item before another item id. Wins over afterId. */
-  beforeId?: string;
-  /** Insert or move this item after another item id. Appends if target missing. */
-  afterId?: string;
-}
 
 export type SessionTodoListener = (
   sessionId: string,
   items: SessionTodoItem[],
 ) => void;
+
+export class SessionTodoEmptyPlanError extends Error {
+  constructor() {
+    super("SessionTodoStore.write cannot remove every session TO-DO item");
+    this.name = "SessionTodoEmptyPlanError";
+  }
+}
 
 export class SessionTodoStore {
   private readonly sessions = new Map<string, SessionTodoItem[]>();
@@ -86,6 +75,10 @@ export class SessionTodoStore {
     const merged: SessionTodoItem[] = order
       .map((id) => byId.get(id))
       .filter((x): x is SessionTodoItem => Boolean(x));
+    if (merged.length === 0 && existing.length > 0) {
+      throw new SessionTodoEmptyPlanError();
+    }
+    if (merged.length === 0) return [];
     this.sessions.set(sessionId, merged);
     for (const l of this.listeners) {
       try {
@@ -100,11 +93,12 @@ export class SessionTodoStore {
   clearForTurnStart(sessionId: string): boolean {
     const items = this.sessions.get(sessionId) ?? [];
     if (items.length === 0) return false;
-    this.clear(sessionId);
+    if (!items.every((item) => item.status === "completed")) return false;
+    this.clearCompletedPlan(sessionId);
     return true;
   }
 
-  clear(sessionId: string): void {
+  private clearCompletedPlan(sessionId: string): void {
     this.sessions.delete(sessionId);
     for (const l of this.listeners) {
       try {
