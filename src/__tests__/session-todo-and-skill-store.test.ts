@@ -6,7 +6,10 @@ import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { join, resolve as resolvePath } from "node:path";
 import { tmpdir } from "node:os";
 import { fileURLToPath } from "node:url";
-import { SessionTodoStore } from "../main/session-todo-store.js";
+import {
+  SessionTodoEmptyPlanError,
+  SessionTodoStore,
+} from "../main/session-todo-store.js";
 import { SkillStore, parseFrontmatter } from "../main/skill-store.js";
 
 const REPO_ROOT = resolvePath(
@@ -35,6 +38,8 @@ describe("SessionTodoStore", () => {
 
   it("inserts, moves, deletes, and clears a fully completed plan", () => {
     const store = new SessionTodoStore();
+    const events: Array<{ sid: string; len: number }> = [];
+    store.onChange((sid, items) => events.push({ sid, len: items.length }));
     const initial = store.write("s", [
       { content: "a", status: "pending" },
       { content: "c", status: "pending" },
@@ -59,11 +64,50 @@ describe("SessionTodoStore", () => {
 
     expect(store.clearForTurnStart("missing-session")).toBe(false);
     store.write("s", [
-      { id: a.id, status: "in_progress" },
+      { id: a.id, status: "completed" },
       { id: b.id, status: "completed" },
     ]);
     expect(store.clearForTurnStart("s")).toBe(true);
     expect(store.list("s")).toEqual([]);
+    expect(events.at(-1)).toEqual({ sid: "s", len: 0 });
+  });
+
+  it("does not clear unfinished plans at a turn boundary", () => {
+    const store = new SessionTodoStore();
+    const events: Array<{ sid: string; len: number }> = [];
+    store.onChange((sid, items) => events.push({ sid, len: items.length }));
+
+    store.write("s", [
+      { content: "still running", status: "in_progress" },
+      { content: "not started", status: "pending" },
+    ]);
+
+    expect(store.clearForTurnStart("s")).toBe(false);
+    expect(store.list("s").map((item) => item.content)).toEqual([
+      "still running",
+      "not started",
+    ]);
+    expect(events).toEqual([{ sid: "s", len: 2 }]);
+  });
+
+  it("rejects a delete-only update that would empty the plan", () => {
+    const store = new SessionTodoStore();
+    const events: Array<{ sid: string; len: number }> = [];
+    store.onChange((sid, items) => events.push({ sid, len: items.length }));
+    const [a, b] = store.write("s", [
+      { content: "a", status: "pending" },
+      { content: "b", status: "pending" },
+    ]);
+
+    expect(() =>
+      store.write("s", [
+        { id: a.id, status: "deleted" },
+        { id: b.id, status: "deleted" },
+      ]),
+    ).toThrow(SessionTodoEmptyPlanError);
+
+    expect(store.list("s").map((item) => item.content)).toEqual(["a", "b"]);
+    expect(events).toEqual([{ sid: "s", len: 2 }]);
   });
 
   it("emits change events with the merged list", () => {

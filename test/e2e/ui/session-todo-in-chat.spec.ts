@@ -100,7 +100,7 @@ test('session-todo-panel appears inside ChatView after session-todo:changed even
   expect(Math.abs(geometry!.panelRight - geometry!.mainRight)).toBeLessThanOrEqual(1);
 });
 
-test('session-todo-panel clears and labels fresh/add/update mutations', async ({ app, mainWindow }) => {
+test('session-todo-panel clears and labels fresh/add/update/complete mutations', async ({ app, mainWindow }) => {
   const sessionId = await currentSessionId(mainWindow);
   const emitTodos = async (items: Array<{ id: string; content: string; status: string }>) => {
     await app.evaluate(({ BrowserWindow }, payload) => {
@@ -128,6 +128,13 @@ test('session-todo-panel clears and labels fresh/add/update mutations', async ({
   ]);
   await expect(mainWindow.locator('[data-testid="session-todo-updated"]')).toBeVisible();
   await expect(mainWindow.locator('[data-testid="session-todo-added"]')).toHaveCount(0);
+
+  await emitTodos([
+    { id: 'fresh-1', content: 'fresh step', status: 'completed' },
+    { id: 'fresh-2', content: 'added step', status: 'completed' },
+  ]);
+  await expect(mainWindow.locator('[data-testid="session-todo-completed"]')).toBeVisible();
+  await expect(mainWindow.locator('[data-testid="session-todo-updated"]')).toHaveCount(0);
 
   await emitTodos([]);
   await expect(panel).toHaveCount(0);
