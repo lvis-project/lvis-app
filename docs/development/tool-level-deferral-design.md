@@ -24,9 +24,9 @@ blew the 200K TPM ceiling (429). Eager exposure of an active plugin's whole suit
   catalog, zero `tool_search`. At/above it → the per-tool deferral mechanism described below.
 - **Plugin active/inactive state** is managed via two cooperating layers (NOT a single mechanism):
   1. **`PluginRuntime.inactivePluginIds`** (in-memory Set, SOT): populated at boot from `PluginRegistryEntry.enabled === false` and toggled at runtime by `setPluginEnabled()`. `isPluginEnabled(id)` reads this Set — never the persisted registry field — so the per-turn scope gate is always correct after a restart.
-  2. **`onDisable` tool-unregistration** (`boot/steps/plugin-runtime.ts`): when a plugin becomes inactive (at boot for `enabled=false` entries, or at runtime via `setPluginEnabled(false)`) the `onDisable` hook fires `toolRegistry.unregisterByPlugin(id)` + `keywordEngine.unregisterByPlugin(id)`. This removes the plugin's tools from the registry's visible set so they are absent from schema AND catalog.
-  
-  Together: inactive plugin stays fully loaded in memory (no stop/reload churn), its tools are absent from the registry visible set and from the per-turn scope. `setPluginEnabled(true)` fires `onEnable`, which re-registers tools and keywords. This is the deliberate TPM lever — disable a heavy plugin to shrink the turn's tool surface.
+  2. **Execution registry vs model exposure** (`boot/plugins.ts`, `boot/steps/plugin-runtime.ts`): ToolRegistry keeps runtime-loaded plugin tools registered for execution, auth/config/UI, permission, and audit. ConversationLoop scope filters inactive plugins out of provider `tools[]`, `<tool-catalog>`, and `request_plugin`. Runtime `setPluginEnabled(false)` fires `onActiveStateChange(false)` to remove keywords and transient turn scope only; it does **not** unload the plugin or unregister ToolRegistry entries. `setPluginEnabled(true)` fires `onActiveStateChange(true)` to re-register manifest keywords when needed.
+
+  Together: inactive plugin stays fully loaded in memory (no stop/reload churn), its tools remain executable through host/UI paths, and its keywords/tools are absent from model-visible prompt scope. This is the deliberate TPM lever — disable a heavy plugin to shrink the turn's tool surface while preserving config/auth UX.
 - The **"do not reintroduce full-schema loading" directive is retired.** Full-schema loading *is* the default
   again below the ceiling. The dead `settings.experimental.toolDeferral` flag (never read at runtime after the
   unconditional cutover) was removed — there is no settings branch; the count-based gate is the only switch.
@@ -69,12 +69,15 @@ exposed eagerly. (The former `settings.experimental.toolDeferral` flag was dead 
 |---|---|---|
 | **Loaded** | yes | full name+desc (`<available-tools>`) |
 | **Catalog** | no | name + 1-line (`<tool-catalog>`, "call tool_search to load") |
-| **Hidden** | no | no (denied, or plugin fully inactive → still reachable via `request_plugin`) |
+| **Hidden** | no | no (denied, user-disabled plugin, or out-of-policy surface) |
 
-- **Loaded** = builtins + meta-tools (always) + keyword-preloaded tools (B) + `tool_search`-promoted tools.
-- **Catalog** = all visible plugin/MCP tools that are in scope but not loaded.
-- `request_plugin` promotes a plugin into catalog scope. In deferral mode it must not promote every tool schema
-  owned by that plugin.
+- **Loaded** = builtins + meta-tools (always); below the eager ceiling, every active plugin/MCP tool in scope;
+  at/above the ceiling, only keyword-preloaded tools (B), `tool_search`-promoted tools, and explicit
+  allowlist/carry-forward tools.
+- **Catalog** = in-scope plugin/MCP tools that are not loaded, emitted only when `deferral === true`.
+- `request_plugin` promotes an enabled runtime-loaded plugin into current-turn scope. User-disabled plugins are
+  absent from `tools[]`, `<tool-catalog>`, and the requestable plugin catalog until the user re-enables them in UI.
+  In deferral mode `request_plugin` must not promote every tool schema owned by that plugin.
 
 ## Data model changes
 
@@ -86,15 +89,16 @@ interface ToolScope {
   activeToolNames: Set<string>;   // NEW — individually-promoted/preloaded plugin+mcp tools
   includeBuiltins: boolean;
   includeMcp: boolean;
-  deferral: boolean;              // retained compatibility marker; runtime path is default-on
+  deferral: boolean;              // true only when eligibleCount >= EAGER_TOOL_EXPOSURE_CEILING
 }
 ```
 
-`ToolRegistry.getToolSchemasForScope` (registry.ts:290) — plugin/MCP branch becomes:
+`ToolRegistry.getToolSchemasForScope` (registry.ts:290) — plugin/MCP branch:
 
 ```
 plugin/mcp tool included as LOADED iff:
-  scope.activeToolNames.has(tool.name)
+  !scope.deferral && owner is in active scope
+  OR scope.deferral && scope.activeToolNames.has(tool.name)
 ```
 
 New `ToolRegistry.getToolCatalogForScope(scope)` → `{ name, description }[]` of visible plugin/MCP tools that are
@@ -107,7 +111,8 @@ sentence / ~100 chars for the catalog. Deny rules (`getVisibleTools`) apply firs
    - Extend `ToolScope` (line 512).
    - `resolveToolScope` (line 2735): compute `activeToolNames` =
      `keywordEngine.matchToolNames(input)` (B) ∪ carried `lastTurnScope.activeToolNames` ∪ explicit fixed-surface
-     allowlists. Keep `activePluginIds` as catalog membership, not whole-plugin schema loading.
+     allowlists. Keep `activePluginIds` as active owner scope; below the eager ceiling it exposes full active-plugin
+     schemas, and at/above the ceiling it becomes catalog scope for individually loaded tools.
    - `lastTurnScope` (line 1577): persist `activeToolNames` too (so a follow-up keeps loaded tools).
    - Wire `handleToolSearch` next to `handleRequestPlugin` (lines 2248-2288): same intercept→promote→
      `rebuildToolSchemas(scope)` pattern, sharing the round-refund (`round--`) and counter logic.
@@ -140,7 +145,7 @@ sentence / ~100 chars for the catalog. Deny rules (`getVisibleTools`) apply firs
   is the single gate, and the dead `experimental.toolDeferral` flag was removed (#1176). Eager full-schema
   exposure below the ceiling is intended behavior, not a fallback.
 - **Budget contract**: request-input projection must include the same `tools[]` schemas that the provider request
-  receives, and traces must expose loaded/deferred tool counts before default-on.
+  receives, and traces must expose loaded/deferred tool counts for both eager and deferred modes.
 
 ## Tests (host-only stage)
 
@@ -149,8 +154,8 @@ sentence / ~100 chars for the catalog. Deny rules (`getVisibleTools`) apply firs
   `getToolCatalogForScope` excludes loaded + denied tools.
 - `tool-search.test` (mirror `request_plugin.test`): intercept, promote, caps, unknown-query error, tool-pair
   result synthesis, round refund, and broad-query top-N clamping.
-- `conversation-loop` integration: turn-1 `tools[]` = builtins + preloaded only; after `tool_search`,
-  next round includes promoted tool; persisted flag false does not restore the legacy path.
+- `conversation-loop` integration: below the eager ceiling, active plugin suites are exposed directly; at/above the
+  ceiling, turn-1 `tools[]` = builtins + preloaded only and after `tool_search` the next round includes promoted tools.
 - `system-prompt-builder.test`: catalog section present when deferred tools exist; loaded tools not duplicated
   in catalog.
 - Sub-agent/routine/headless integration: deferral on never leaves an explicitly allowed tool unavailable to the

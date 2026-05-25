@@ -22,11 +22,9 @@ import { createLogger } from "../lib/logger.js";
 const log = createLogger("tool-registry");
 
 /**
- * Tool-Level Deferral — name of the `tool_search` meta-tool. SOT lives here
- * (the lowest layer that owns visibility); `engine/turn/tool-search.ts`
- * re-exports it as `TOOL_SEARCH_TOOL`. Tool-level deferral is now the only
- * plugin/MCP exposure path, so this builtin is visible whenever builtins are
- * in scope.
+ * Tool-Level Deferral — name of the `tool_search` meta-tool. This low-level
+ * registry module owns the stable tool name; ConversationLoop owns whether
+ * plugin/MCP tools are eagerly exposed or deferred for the current turn.
  */
 export const TOOL_SEARCH_TOOL_NAME = "tool_search";
 

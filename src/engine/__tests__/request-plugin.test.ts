@@ -17,6 +17,7 @@ import { ToolRegistry } from "../../tools/registry.js";
 import { TOOL_SEARCH_TOOL_NAME } from "../../tools/registry.js";
 import { createDynamicTool } from "../../tools/base.js";
 import { fakeLlmSettings } from "../../shared/__tests__/fake-llm-settings.js";
+import { EAGER_TOOL_EXPOSURE_CEILING } from "../../shared/tool-exposure-policy.js";
 
 class RecordingProvider implements LLMProvider {
   readonly vendor = "openai" as const;
@@ -34,9 +35,12 @@ class RecordingProvider implements LLMProvider {
 function makeLoop(opts: {
   provider: LLMProvider;
   availablePluginIds: string[];
+  inactivePluginIds?: string[];
   allowedPluginIds?: string[];
   forcedActivePluginIds?: string[];
   forcedActiveToolNames?: string[];
+  extraPluginTools?: Array<{ pluginId: string; name: string }>;
+  deniedToolPatterns?: string[];
 }): ConversationLoop {
   const toolRegistry = new ToolRegistry();
   // request_plugin builtin (source=builtin so scope filter includes it)
@@ -83,6 +87,21 @@ function makeLoop(opts: {
     jsonSchema: { type: "object", properties: {} },
     execute: async () => ({ output: "indexed", isError: false }),
   }));
+  for (const tool of opts.extraPluginTools ?? []) {
+    toolRegistry.register(createDynamicTool({
+      name: tool.name,
+      description: `${tool.pluginId} ${tool.name}`,
+      source: "plugin",
+      pluginId: tool.pluginId,
+      category: "read",
+      isReadOnly: () => true,
+      jsonSchema: { type: "object", properties: {} },
+      execute: async () => ({ output: "ok", isError: false }),
+    }));
+  }
+  if (opts.deniedToolPatterns) {
+    toolRegistry.setDenyRules(opts.deniedToolPatterns.map((pattern) => ({ pattern })));
+  }
 
   const keywordEngine = new KeywordEngine();
   const routeEngine = new RouteEngine({ toolRegistry });
@@ -105,6 +124,7 @@ function makeLoop(opts: {
     },
     pluginRuntime: {
       listPluginIds: () => opts.availablePluginIds,
+      isPluginEnabled: (pluginId: string) => !(opts.inactivePluginIds ?? []).includes(pluginId),
     },
     ...(opts.allowedPluginIds ? { allowedPluginIds: new Set(opts.allowedPluginIds) } : {}),
     ...(opts.forcedActivePluginIds ? { forcedActivePluginIds: new Set(opts.forcedActivePluginIds) } : {}),
@@ -143,7 +163,7 @@ describe("ConversationLoop — request_plugin meta tool (Option C)", () => {
     expect(toolResult?.content).not.toContain("tool_search");
   });
 
-  it("supports request_plugin(local-indexer) -> tool_search(index_scan_status) in the same assistant round", async () => {
+  it("treats same-round request_plugin -> tool_search for an eagerly loaded tool as already loaded", async () => {
     const provider = new RecordingProvider([
       [
         { type: "tool_call", id: "tu-1", name: "request_plugin", input: { pluginId: "local-indexer" } },
@@ -164,6 +184,11 @@ describe("ConversationLoop — request_plugin meta tool (Option C)", () => {
     expect(result.text).toBe("인덱서 상태를 확인했습니다.");
     expect(provider.observedToolNames[0]).not.toContain("index_scan_status");
     expect(provider.observedToolNames[1]).toContain("index_scan_status");
+    const toolResults = loop.getHistory().getMessages()
+      .filter((m) => m.role === "tool_result") as Array<{ content: string; isError?: boolean; toolName?: string }>;
+    const searchResult = toolResults.find((m) => m.toolName === TOOL_SEARCH_TOOL_NAME);
+    expect(searchResult?.isError).not.toBe(true);
+    expect(searchResult?.content).toContain("이미 로드");
   });
 
   it("returns error tool_result for unknown pluginId", async () => {
@@ -184,6 +209,99 @@ describe("ConversationLoop — request_plugin meta tool (Option C)", () => {
     const toolResult = messages.find((m) => m.role === "tool_result") as { content: string; isError?: boolean } | undefined;
     expect(toolResult?.isError).toBe(true);
     expect(toolResult?.content).toContain("알 수 없는 플러그인 ID");
+  });
+
+  it("rejects request_plugin for a loaded but inactive plugin", async () => {
+    const provider = new RecordingProvider([
+      [
+        { type: "tool_call", id: "tu-1", name: "request_plugin", input: { pluginId: "com.example.meeting" } },
+        { type: "message_complete", stopReason: "tool_use" },
+      ],
+      [
+        { type: "text_delta", text: "inactive rejected" },
+        { type: "message_complete", stopReason: "end_turn" },
+      ],
+    ]);
+    const loop = makeLoop({
+      provider,
+      availablePluginIds: ["com.example.meeting"],
+      inactivePluginIds: ["com.example.meeting"],
+    });
+
+    await loop.runTurn("일반 질문", undefined, undefined, { inputOrigin: "user-keyboard" });
+
+    expect(provider.observedToolNames[0]).not.toContain("meeting_start");
+    const messages = loop.getHistory().getMessages();
+    const toolResult = messages.find((m) => m.role === "tool_result") as { content: string; isError?: boolean } | undefined;
+    expect(toolResult?.isError).toBe(true);
+    expect(toolResult?.content).toContain("알 수 없는 플러그인 ID");
+    expect(toolResult?.content).toContain("(없음)");
+  });
+
+  it("recomputes deferral after request_plugin crosses the eager exposure ceiling", async () => {
+    const provider = new RecordingProvider([
+      [
+        { type: "tool_call", id: "tu-1", name: "request_plugin", input: { pluginId: "heavy-plugin" } },
+        { type: "message_complete", stopReason: "tool_use" },
+      ],
+      [
+        { type: "text_delta", text: "deferred" },
+        { type: "message_complete", stopReason: "end_turn" },
+      ],
+    ]);
+    const extraPluginTools = Array.from({ length: EAGER_TOOL_EXPOSURE_CEILING }, (_, index) => ({
+      pluginId: "heavy-plugin",
+      name: `heavy_tool_${index}`,
+    }));
+    const loop = makeLoop({
+      provider,
+      availablePluginIds: ["heavy-plugin"],
+      extraPluginTools,
+    });
+
+    await loop.runTurn("heavy", undefined, undefined, { inputOrigin: "user-keyboard" });
+
+    expect(provider.observedToolNames[0]).not.toContain("heavy_tool_0");
+    expect(provider.observedToolNames[1]).toContain(TOOL_SEARCH_TOOL_NAME);
+    expect(provider.observedToolNames[1]).not.toContain("heavy_tool_199");
+    const messages = loop.getHistory().getMessages();
+    const toolResult = messages.find((m) => m.role === "tool_result") as { content: string; isError?: boolean } | undefined;
+    expect(toolResult?.isError).not.toBe(true);
+    expect(toolResult?.content).toContain("tool_search");
+    expect(toolResult?.content).not.toContain("모두 로드됨");
+  });
+
+  it("counts only policy-visible tools when deciding the eager exposure ceiling", async () => {
+    const provider = new RecordingProvider([
+      [
+        { type: "tool_call", id: "tu-1", name: "request_plugin", input: { pluginId: "heavy-plugin" } },
+        { type: "message_complete", stopReason: "tool_use" },
+      ],
+      [
+        { type: "text_delta", text: "visible eager" },
+        { type: "message_complete", stopReason: "end_turn" },
+      ],
+    ]);
+    const extraPluginTools = Array.from({ length: EAGER_TOOL_EXPOSURE_CEILING }, (_, index) => ({
+      pluginId: "heavy-plugin",
+      name: `heavy_tool_${index}`,
+    }));
+    const loop = makeLoop({
+      provider,
+      availablePluginIds: ["heavy-plugin"],
+      extraPluginTools,
+      deniedToolPatterns: ["heavy_tool_199"],
+    });
+
+    await loop.runTurn("heavy", undefined, undefined, { inputOrigin: "user-keyboard" });
+
+    expect(provider.observedToolNames[1]).toContain("heavy_tool_198");
+    expect(provider.observedToolNames[1]).not.toContain("heavy_tool_199");
+    const messages = loop.getHistory().getMessages();
+    const toolResult = messages.find((m) => m.role === "tool_result") as { content: string; isError?: boolean } | undefined;
+    expect(toolResult?.isError).not.toBe(true);
+    expect(toolResult?.content).toContain("모두 로드됨");
+    expect(toolResult?.content).not.toContain("tool_search");
   });
 
   it("enforces MAX_PLUGIN_EXPANSION (=2) per turn", async () => {

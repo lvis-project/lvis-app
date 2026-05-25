@@ -21,6 +21,26 @@ const log = createLogger("system-prompt");
 
 type ToolProvenanceEntry = Pick<ToolSchemaEntry | ToolCatalogEntry, "source" | "pluginId" | "mcpServerId">;
 
+type RequestablePluginCatalogCard = {
+  id: string;
+  name: string;
+  description: string;
+  sampleTools: string[];
+  /** Enabled and loaded enough to be selectable via request_plugin. */
+  active?: boolean;
+  /** Runtime instance exists, so request_plugin can put it into turn scope. */
+  runtimeLoaded?: boolean;
+  loadStatus?: "loaded" | "preparing" | "failed" | "disabled";
+};
+
+function isRequestablePluginCatalogCard(card: RequestablePluginCatalogCard): boolean {
+  if (card.active === false) return false;
+  if (card.runtimeLoaded === false) return false;
+  if (card.loadStatus && card.loadStatus !== "loaded") return false;
+  if (card.sampleTools.length === 0) return false;
+  return true;
+}
+
 function toolProvenanceLabel(tool: ToolProvenanceEntry): string {
   if (tool.source === "plugin") return `plugin:${tool.pluginId ?? "unknown"}`;
   if (tool.source === "mcp") return `mcp:${tool.mcpServerId ?? "unknown"}`;
@@ -63,15 +83,9 @@ export interface SystemPromptBuilderDeps {
   memoryManager: MemoryManager;
   toolRegistry: ToolRegistry;
   /**
-   * 비활성 plugin 카탈로그 공급자. 빈 배열이거나 undefined면 섹션이
-   * 생략된다.
+   * request_plugin candidate catalog provider. Empty/undefined omits the section.
    */
-  getPluginCards?: () => Array<{
-    id: string;
-    name: string;
-    description: string;
-    sampleTools: string[];
-  }>;
+  getPluginCards?: () => RequestablePluginCatalogCard[];
   /**
    * Lightweight skill catalog provider. Only name/description are surfaced
    * here; full bodies stay behind `skill_load`.
@@ -596,6 +610,7 @@ export class SystemPromptBuilder {
           activePluginIds: scope.activePluginIds,
           activeToolNames: scope.activeToolNames ?? new Set<string>(),
           includeMcp: scope.includeMcp,
+          deferral: scope.deferral,
         });
         if (catalog.length === 0) return "";
         return [
@@ -611,22 +626,23 @@ export class SystemPromptBuilder {
       },
     });
 
-    // 비활성 plugin 카탈로그.
+    // request_plugin 카탈로그.
     // LLM이 "이 턴에 필요한 플러그인"을 판단해 request_plugin 호출 가능하도록
-    // system prompt에 힌트를 노출. 활성 plugin은 제외.
+    // system prompt에 힌트를 노출. 현재 턴 scope에 이미 들어온 plugin과
+    // 사용자/registry가 비활성화한 plugin은 제외한다.
     const { getPluginCards } = deps;
     this.sources.push({
       id: 65,
-      name: "Inactive Plugin Catalog",
+      name: "Requestable Plugin Catalog",
       refresh: "per-turn",
       build: () => {
         const cards = getPluginCards?.() ?? [];
         if (cards.length === 0) return "";
         const active = this.toolScope?.activePluginIds ?? new Set<string>();
-        const inactive = cards.filter((c) => !active.has(c.id));
+        const inactive = cards.filter((c) => !active.has(c.id) && isRequestablePluginCatalogCard(c));
         if (inactive.length === 0) return "";
         const lines: string[] = [
-          "## 사용 가능한 플러그인 (현재 비활성 — request_plugin 으로 활성화)",
+          "## 사용 가능한 플러그인 (현재 턴 미선택 — request_plugin 으로 선택)",
         ];
         for (const c of inactive) {
           const sample = c.sampleTools.length > 0 ? `: ${c.sampleTools.join(", ")}` : "";

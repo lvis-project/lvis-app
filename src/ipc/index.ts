@@ -48,7 +48,7 @@ import type { BrowserWindow } from "electron";
 export type { IpcDeps } from "./types.js";
 export { registerWindowEventListeners } from "./domains/window.js";
 export { unregisterPluginWebview } from "./domains/plugins.js";
-export { validateSender, UNAUTHORIZED_FRAME, auditUnauthorized, validatePluginFrame } from "./gated.js";
+export { validateSender, validateHostRendererSender, UNAUTHORIZED_FRAME, auditUnauthorized, validatePluginFrame } from "./gated.js";
 
 /**
  * Register all IPC handlers. Called once during app boot (from main.ts /

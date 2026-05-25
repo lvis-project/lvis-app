@@ -3,12 +3,13 @@
  *
  * Verifies the active/inactive toggle is orthogonal to load state:
  *   - setPluginEnabled(false) marks the plugin inactive, persists enabled=false
- *     to the registry, fires onDisable, and reports loadStatus="disabled" — but
- *     keeps the plugin LOADED (listPluginIds still contains it; no stop/reload).
- *   - setPluginEnabled(true) re-activates, persists enabled=true, fires onEnable.
+ *     to the registry, fires onActiveStateChange(false), and reports
+ *     loadStatus="disabled" — but keeps the plugin LOADED.
+ *   - setPluginEnabled(true) re-activates, persists enabled=true, fires
+ *     onActiveStateChange(true).
  *   - an unknown plugin id throws.
  */
-import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { mkdir, readFile, rm, writeFile } from "node:fs/promises";
 import { mkdtempSync } from "node:fs";
 import { tmpdir } from "node:os";
@@ -59,7 +60,11 @@ describe("PluginRuntime — active/inactive toggle (#1176)", () => {
     await rm(testDir, { recursive: true, force: true });
   });
 
-  function makeRuntime(opts: { onDisable?: (id: string) => void; onEnable?: (id: string) => void } = {}) {
+  function makeRuntime(opts: {
+    onDisable?: (id: string) => void;
+    onEnable?: (id: string) => void;
+    onActiveStateChange?: (id: string, enabled: boolean) => void;
+  } = {}) {
     return makeTestPluginRuntime({ rootDir: testDir, registryPath, pluginsRoot: installedDir }, opts);
   }
 
@@ -69,9 +74,9 @@ describe("PluginRuntime — active/inactive toggle (#1176)", () => {
     expect(runtime.isPluginEnabled("se-plugin")).toBe(true);
   });
 
-  it("disable marks inactive + persists enabled=false + fires onDisable, plugin stays loaded", async () => {
-    const disabled: string[] = [];
-    const runtime = makeRuntime({ onDisable: (id) => disabled.push(id) });
+  it("disable marks inactive + persists enabled=false + fires active-state callback, plugin stays loaded", async () => {
+    const changes: Array<{ id: string; enabled: boolean }> = [];
+    const runtime = makeRuntime({ onActiveStateChange: (id, enabled) => changes.push({ id, enabled }) });
     await runtime.startAll();
     expect(runtime.listPluginIds()).toContain("se-plugin");
 
@@ -80,7 +85,7 @@ describe("PluginRuntime — active/inactive toggle (#1176)", () => {
     // Active predicate flips, but the plugin is still loaded (no unload).
     expect(runtime.isPluginEnabled("se-plugin")).toBe(false);
     expect(runtime.listPluginIds()).toContain("se-plugin");
-    expect(disabled).toEqual(["se-plugin"]);
+    expect(changes).toEqual([{ id: "se-plugin", enabled: false }]);
 
     // Registry persisted enabled=false atomically.
     const registry = JSON.parse(await readFile(registryPath, "utf-8"));
@@ -89,23 +94,27 @@ describe("PluginRuntime — active/inactive toggle (#1176)", () => {
     // Card reports "disabled" even though the plugin is loaded.
     const card = runtime.listPluginCards().find((c) => c.id === "se-plugin");
     expect(card?.loadStatus).toBe("disabled");
+    expect(card?.runtimeLoaded).toBe(true);
+    expect(card?.active).toBe(false);
   });
 
-  it("re-enable marks active + persists enabled=true + fires onEnable", async () => {
-    const enabled: string[] = [];
-    const runtime = makeRuntime({ onEnable: (id) => enabled.push(id) });
+  it("re-enable marks active + persists enabled=true + fires active-state callback", async () => {
+    const changes: Array<{ id: string; enabled: boolean }> = [];
+    const runtime = makeRuntime({ onActiveStateChange: (id, enabled) => changes.push({ id, enabled }) });
     await runtime.startAll();
     await runtime.setPluginEnabled("se-plugin", false);
-    enabled.length = 0; // ignore any onEnable from boot
+    changes.length = 0;
 
     await runtime.setPluginEnabled("se-plugin", true);
 
     expect(runtime.isPluginEnabled("se-plugin")).toBe(true);
-    expect(enabled).toContain("se-plugin");
+    expect(changes).toEqual([{ id: "se-plugin", enabled: true }]);
     const registry = JSON.parse(await readFile(registryPath, "utf-8"));
     expect(registry.plugins.find((p: { id: string }) => p.id === "se-plugin").enabled).toBe(true);
     const card = runtime.listPluginCards().find((c) => c.id === "se-plugin");
     expect(card?.loadStatus).toBe("loaded");
+    expect(card?.runtimeLoaded).toBe(true);
+    expect(card?.active).toBe(true);
   });
 
   it("does not stop/reload the plugin instance on disable (call still resolves)", async () => {
@@ -120,6 +129,22 @@ describe("PluginRuntime — active/inactive toggle (#1176)", () => {
     const runtime = makeRuntime();
     await runtime.startAll();
     await expect(runtime.setPluginEnabled("nope", false)).rejects.toThrow("Plugin not found: nope");
+  });
+
+  it("fails closed when the loaded plugin is missing from registry.json", async () => {
+    const runtime = makeRuntime();
+    await runtime.startAll();
+    await writeFile(registryPath, JSON.stringify({ version: 1, plugins: [] }), "utf-8");
+
+    await expect(runtime.setPluginEnabled("se-plugin", false)).rejects.toThrow(
+      "Plugin not found in registry: se-plugin",
+    );
+
+    expect(runtime.isPluginEnabled("se-plugin")).toBe(true);
+    const card = runtime.listPluginCards().find((c) => c.id === "se-plugin");
+    expect(card?.loadStatus).toBe("loaded");
+    expect(card?.runtimeLoaded).toBe(true);
+    expect(card?.active).toBe(true);
   });
 
   /**
@@ -163,27 +188,28 @@ describe("PluginRuntime — active/inactive toggle (#1176)", () => {
 
     it("(b) isPluginEnabled returns false immediately after boot", () => {
       expect(runtime.isPluginEnabled("se-plugin")).toBe(false);
+      const card = runtime.listPluginCards().find((c) => c.id === "se-plugin");
+      expect(card?.loadStatus).toBe("disabled");
+      expect(card?.runtimeLoaded).toBe(true);
+      expect(card?.active).toBe(false);
     });
 
-    it("(c) inactivePluginIds seeded at boot — tool suppression via syncPluginToolRegistry filter, not onDisable", () => {
-      // M3 fix: tool suppression at boot is handled by syncPluginToolRegistry
-      // filtering on isPluginEnabled (in plugins.ts), NOT by onDisable firing
-      // during load(). The onDisable-during-load() was dead code (tools/keywords
-      // not yet registered at load() time) and has been removed.
-      // isPluginEnabled must return false so the filter works correctly.
+    it("(c) inactivePluginIds seeded at boot without lifecycle teardown callbacks", () => {
+      // Model exposure is gated by ConversationLoop scope, not by removing
+      // runtime tools from ToolRegistry. Boot only needs the active predicate.
       expect(runtime.isPluginEnabled("se-plugin")).toBe(false);
-      // onDisable must NOT have fired during boot load (it was dead; removed).
-      // It fires only on explicit setPluginEnabled(false) calls.
       expect(disabledCalls).not.toContain("se-plugin");
     });
 
-    it("(d) setPluginEnabled(true) succeeds and fires onEnable (re-enable after restart)", async () => {
+    it("(d) setPluginEnabled(true) succeeds after restart", async () => {
       // Before the M1 fix this threw "Plugin not found: se-plugin".
       await expect(runtime.setPluginEnabled("se-plugin", true)).resolves.toBeUndefined();
       expect(runtime.isPluginEnabled("se-plugin")).toBe(true);
-      expect(enabledCalls).toContain("se-plugin");
+      expect(enabledCalls).not.toContain("se-plugin");
       const card = runtime.listPluginCards().find((c) => c.id === "se-plugin");
       expect(card?.loadStatus).toBe("loaded");
+      expect(card?.runtimeLoaded).toBe(true);
+      expect(card?.active).toBe(true);
     });
   });
 });

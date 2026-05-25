@@ -494,6 +494,120 @@ describe("PluginConfigTab — §9.2 Track B configSchema rendering", () => {
 });
 
 describe("PluginConfigTab — auth UI", () => {
+  it("keeps auth UI available for inactive loaded plugins while hiding model tools", async () => {
+    const cards = vi.fn(async () => [
+      {
+        id: "inactive-auth-plugin",
+        name: "Inactive Auth Plugin",
+        description: "Inactive but runtime-loaded",
+        sampleTools: [],
+        capabilities: [],
+        tools: [],
+        loadStatus: "disabled" as const,
+        active: false,
+        runtimeLoaded: true,
+        auth: {
+          label: "Token auth",
+          statusTool: "inactive_status",
+          loginTool: "inactive_login",
+        },
+      },
+    ]);
+    const callPluginMethod = vi.fn(async (tool: string) =>
+      tool === "inactive_status" ? { authenticated: false } : { ok: true },
+    );
+
+    Object.defineProperty(window, "lvis", {
+      value: {
+        plugins: { cards },
+        pluginConfig: {
+          get: vi.fn(async () => ({ ok: true as const, config: {} })),
+          set: vi.fn(async () => ({ ok: true as const, config: {} })),
+          listSecretKeys: vi.fn(async () => ({ ok: true as const, keys: [] })),
+        },
+      },
+      writable: true,
+      configurable: true,
+    });
+    Object.defineProperty(window, "lvisApi", {
+      value: {
+        callPluginMethod,
+        onPluginEvent: vi.fn(() => () => undefined),
+        onPluginEnabledChanged: vi.fn(() => () => undefined),
+        setPluginEnabled: vi.fn(async () => ({ ok: true as const })),
+        listPluginUiExtensions: vi.fn(async () => []),
+        window: { openDetached: vi.fn(async () => ({ ok: true as const, windowId: 7 })) },
+      },
+      writable: true,
+      configurable: true,
+    });
+    Object.defineProperty(window, "lvisHost", {
+      value: { takePluginMarketplaceApi: () => null },
+      writable: true,
+      configurable: true,
+    });
+
+    render(<PluginConfigTab />);
+
+    const loginButton = await screen.findByTestId("plugin-auth-login-inactive-auth-plugin");
+    expect(loginButton).toHaveTextContent("로그인");
+    expect(screen.getByTestId("plugin-config:enabled-toggle:inactive-auth-plugin")).toHaveAttribute("data-state", "unchecked");
+    expect(screen.getByTestId("plugin-config:tools-hidden-note:inactive-auth-plugin")).toBeInTheDocument();
+    await waitFor(() => {
+      expect(callPluginMethod).toHaveBeenCalledWith("inactive_status");
+    });
+  });
+
+  it("does not render an active-state switch for failed plugins", async () => {
+    const cards = vi.fn(async () => [
+      {
+        id: "failed-plugin",
+        name: "Failed Plugin",
+        description: "Failed runtime",
+        sampleTools: [],
+        capabilities: [],
+        tools: [],
+        loadStatus: "failed" as const,
+        active: false,
+        runtimeLoaded: false,
+      },
+    ]);
+
+    Object.defineProperty(window, "lvis", {
+      value: {
+        plugins: { cards },
+        pluginConfig: {
+          get: vi.fn(async () => ({ ok: true as const, config: {} })),
+          set: vi.fn(async () => ({ ok: true as const, config: {} })),
+          listSecretKeys: vi.fn(async () => ({ ok: true as const, keys: [] })),
+        },
+      },
+      writable: true,
+      configurable: true,
+    });
+    Object.defineProperty(window, "lvisApi", {
+      value: {
+        onPluginEvent: vi.fn(() => () => undefined),
+        onPluginEnabledChanged: vi.fn(() => () => undefined),
+        listPluginUiExtensions: vi.fn(async () => []),
+        window: { openDetached: vi.fn(async () => ({ ok: true as const, windowId: 7 })) },
+      },
+      writable: true,
+      configurable: true,
+    });
+    Object.defineProperty(window, "lvisHost", {
+      value: { takePluginMarketplaceApi: () => null },
+      writable: true,
+      configurable: true,
+    });
+
+    render(<PluginConfigTab />);
+
+    expect(await screen.findByTestId("plugin-config:detail-status:failed-plugin")).toHaveTextContent("실패");
+    expect(screen.queryByTestId("plugin-config:enabled-toggle:failed-plugin")).toBeNull();
+    expect(screen.getByText("실행 불가")).toBeInTheDocument();
+  });
+
   it("uses loginTool even when a plugin also declares detached UI views", async () => {
     const cards = vi.fn(async () => [
       {

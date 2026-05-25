@@ -15,6 +15,7 @@ import {
   buildE2eBaseSettings,
   buildIsolatedElectronEnv,
 } from './seeded-electron';
+import { canonicalJSON } from '../../../src/plugins/whitelist/canonical-json.js';
 
 const HERE = path.dirname(fileURLToPath(import.meta.url));
 
@@ -26,6 +27,8 @@ const E2E_PLUGIN_REPOS = [
 ] as const;
 
 const E2E_RESOLVE_DEMO_KEY_TOOL = 'meeting_resolve_demo_key';
+const E2E_PLUGIN_UI_STUB_SOURCE =
+  'export function mount({ root }) { root.textContent = "E2E Plugin UI"; }\nexport default { mount };\n';
 
 type LaunchEnv = Record<string, string | undefined>;
 
@@ -40,32 +43,26 @@ type E2eManifest = {
   ui?: unknown;
 };
 
-function canonicalJson(value: unknown): string {
-  if (value === undefined) return 'null';
-  if (value === null || typeof value !== 'object') {
-    return JSON.stringify(value) ?? 'null';
-  }
-  if (Array.isArray(value)) {
-    return `[${value.map((item) => canonicalJson(item)).join(',')}]`;
-  }
-  const obj = value as Record<string, unknown>;
-  return `{${Object.keys(obj)
-    .filter((key) => obj[key] !== undefined)
-    .sort()
-    .map((key) => `${JSON.stringify(key)}:${canonicalJson(obj[key])}`)
-    .join(',')}}`;
-}
-
 function addUniqueString(list: unknown, value: string): string[] {
   const next = Array.isArray(list) ? list.filter((item): item is string => typeof item === 'string') : [];
   if (!next.includes(value)) next.push(value);
   return next;
 }
 
+function manifestIdentitySha256FromPluginJson(pluginJsonPath: string): string {
+  const manifest = JSON.parse(fs.readFileSync(pluginJsonPath, 'utf-8')) as unknown;
+  return createHash('sha256').update(canonicalJSON(manifest)).digest('hex');
+}
+
 function prepareE2eManifest(manifest: E2eManifest, enableDemoKeyProbe: boolean): E2eManifest {
   if (!enableDemoKeyProbe || manifest.id !== 'meeting') return manifest;
 
-  const hostSecretReads = addUniqueString(manifest.hostSecrets?.read, 'llm.apiKey.openai');
+  const declaredHostKeyNames = Array.isArray(manifest.hostSecrets?.read)
+    ? manifest.hostSecrets.read.filter((item): item is string => typeof item === 'string')
+    : [];
+  const hostSecretReads = declaredHostKeyNames.includes('llm.apiKey.openai')
+    ? declaredHostKeyNames
+    : [...declaredHostKeyNames, 'llm.apiKey.openai'];
   return {
     ...manifest,
     hostSecrets: { read: hostSecretReads },
@@ -173,17 +170,39 @@ function killLocalIndexerWorkers(): void {
 }
 
 function resolveE2ePluginSourceRoot(repoRoot: string): string {
-  return process.env.LVIS_E2E_PLUGIN_SOURCE_ROOT
-    ? path.resolve(process.env.LVIS_E2E_PLUGIN_SOURCE_ROOT)
-    : path.resolve(repoRoot, '..');
+  if (process.env.LVIS_E2E_PLUGIN_SOURCE_ROOT) {
+    return path.resolve(process.env.LVIS_E2E_PLUGIN_SOURCE_ROOT);
+  }
+
+  const candidates = [path.resolve(repoRoot, '..')];
+  try {
+    const output = execSync('git worktree list --porcelain', {
+      cwd: repoRoot,
+      stdio: ['ignore', 'pipe', 'ignore'],
+    }).toString();
+    for (const line of output.split('\n')) {
+      if (!line.startsWith('worktree ')) continue;
+      candidates.push(path.dirname(line.slice('worktree '.length).trim()));
+    }
+  } catch {
+    /* Non-git CI checkouts fall back to repoRoot/.. below. */
+  }
+
+  const uniqueCandidates = [...new Set(candidates)];
+  return uniqueCandidates.find((candidate) =>
+    E2E_PLUGIN_REPOS.some((repoSlug) =>
+      fs.existsSync(path.join(candidate, repoSlug, 'plugin.json')),
+    ),
+  ) ?? uniqueCandidates[0];
 }
 
 async function seedE2ePlugins(
   repoRoot: string,
   lvisHomeForTest: string,
   enableDemoKeyProbe: boolean,
+  seedTogglePlugin: boolean,
+  seedRepositoryPlugins: boolean,
 ): Promise<LaunchEnv> {
-  const sourceRoot = resolveE2ePluginSourceRoot(repoRoot);
   const pluginsRoot = path.join(lvisHomeForTest, 'plugins');
   const cacheRoot = path.join(pluginsRoot, '.cache');
   fs.mkdirSync(pluginsRoot, { recursive: true, mode: 0o700 });
@@ -197,77 +216,16 @@ async function seedE2ePlugins(
     approvedPluginAccess?: unknown;
   }> = [];
 
-  for (const repoSlug of E2E_PLUGIN_REPOS) {
-    const sourceDir = path.join(sourceRoot, repoSlug);
-    const sourceManifest = path.join(sourceDir, 'plugin.json');
-    if (!fs.existsSync(sourceManifest)) {
-      console.warn(`[e2e] plugin source missing, not seeded: ${sourceManifest}`);
-      continue;
-    }
-
-    const sourceManifestText = fs.readFileSync(sourceManifest, 'utf-8');
-    const manifest = prepareE2eManifest(
-      JSON.parse(sourceManifestText) as E2eManifest,
-      enableDemoKeyProbe,
-    );
-    if (typeof manifest.id !== 'string' || typeof manifest.version !== 'string') {
-      throw new Error(`[e2e] invalid plugin manifest: ${sourceManifest}`);
-    }
+  async function writeSeededPlugin(
+    manifest: E2eManifest & { id: string; version: string; entry: string; tools: string[] },
+    hostPluginSource: string,
+  ): Promise<void> {
     const manifestText = `${JSON.stringify(manifest, null, 2)}\n`;
-    const hostSecretReads = Array.isArray(manifest.hostSecrets?.read)
-      ? manifest.hostSecrets.read.filter((item): item is string => typeof item === 'string')
-      : [];
-    if (hostSecretReads.length > 0) {
-      whitelistGrants[manifest.id] = {
-        read: hostSecretReads,
-        manifestSha256: createHash('sha256').update(canonicalJson(manifest)).digest('hex'),
-      };
-    }
-
     const pluginDir = path.join(pluginsRoot, manifest.id);
     fs.rmSync(pluginDir, { recursive: true, force: true });
-    fs.mkdirSync(pluginDir, { recursive: true, mode: 0o700 });
+    fs.mkdirSync(path.join(pluginDir, 'dist'), { recursive: true, mode: 0o700 });
     fs.writeFileSync(path.join(pluginDir, 'plugin.json'), manifestText, 'utf-8');
-
-    const targetDist = path.join(pluginDir, 'dist');
-    if (manifest.id === 'agent-hub') {
-      const sourceDist = path.join(sourceDir, 'dist');
-      if (!fs.existsSync(sourceDist)) {
-        throw new Error(`[e2e] agent-hub dist missing: ${sourceDist}`);
-      }
-      fs.cpSync(sourceDist, targetDist, {
-        recursive: true,
-        force: true,
-        filter: (src) => !src.includes(`${path.sep}.git${path.sep}`) && !src.includes(`${path.sep}node_modules${path.sep}`),
-      });
-    } else {
-      const uiEntries = Array.isArray((manifest as { ui?: unknown }).ui)
-        ? ((manifest as { ui: Array<{ entry?: unknown; displayName?: unknown }> }).ui)
-        : [];
-      fs.mkdirSync(targetDist, { recursive: true, mode: 0o700 });
-      fs.writeFileSync(
-        path.join(targetDist, 'hostPlugin.js'),
-        buildHostPluginStub(manifest.id, enableDemoKeyProbe),
-        'utf-8',
-      );
-      for (const ui of uiEntries) {
-        if (typeof ui.entry !== 'string' || !ui.entry.startsWith('dist/')) continue;
-        const uiPath = path.join(pluginDir, ui.entry);
-        fs.mkdirSync(path.dirname(uiPath), { recursive: true, mode: 0o700 });
-        fs.writeFileSync(
-          uiPath,
-          `export function mount({ root }) { root.textContent = ${JSON.stringify(String(ui.displayName ?? manifest.id))}; }\nexport default { mount };\n`,
-          'utf-8',
-        );
-      }
-    }
-
-    const receiptFiles = ['plugin.json'];
-    if (fs.existsSync(targetDist)) {
-      for (const file of await listFilesRecursive(targetDist)) {
-        receiptFiles.push(`dist/${file}`);
-      }
-    }
+    fs.writeFileSync(path.join(pluginDir, manifest.entry), hostPluginSource, 'utf-8');
     await writeInstallReceipt(cacheRoot, {
       schemaVersion: 2,
       pluginId: manifest.id,
@@ -276,9 +234,8 @@ async function seedE2ePlugins(
       artifactSha256: null,
       signerKeyId: null,
       installedAt: new Date().toISOString(),
-      files: await hashReceiptFiles(pluginDir, receiptFiles),
+      files: await hashReceiptFiles(pluginDir, ['plugin.json', manifest.entry]),
     });
-
     entries.push({
       id: manifest.id,
       manifestPath: `${manifest.id}/plugin.json`,
@@ -286,6 +243,131 @@ async function seedE2ePlugins(
       installSource: 'local-dev',
       approvedPluginAccess: manifest.pluginAccess,
     });
+  }
+
+  if (seedTogglePlugin) {
+    await writeSeededPlugin(
+      {
+        id: 'e2e-toggle-plugin',
+        name: 'E2E Toggle Plugin',
+        version: '0.0.0',
+        description: 'Minimal plugin used by plugin active/inactive E2E coverage.',
+        publisher: 'LVIS E2E',
+        entry: 'dist/hostPlugin.js',
+        tools: ['e2e_toggle_ping'],
+        toolSchemas: {
+          e2e_toggle_ping: {
+            description: 'E2E toggle smoke tool',
+            category: 'read',
+            inputSchema: { type: 'object', properties: {}, additionalProperties: false },
+          },
+        },
+      },
+      `export default function createPlugin() {
+  return {
+    handlers: { e2e_toggle_ping: async () => "pong" },
+    start() {},
+    stop() {}
+  };
+}\n`,
+    );
+  }
+
+  if (seedRepositoryPlugins) {
+    const sourceRoot = resolveE2ePluginSourceRoot(repoRoot);
+    for (const repoSlug of E2E_PLUGIN_REPOS) {
+      const sourceDir = path.join(sourceRoot, repoSlug);
+      const sourceManifest = path.join(sourceDir, 'plugin.json');
+      if (!fs.existsSync(sourceManifest)) {
+        console.warn(`[e2e] plugin source missing, not seeded: ${sourceManifest}`);
+        continue;
+      }
+
+      const sourceManifestText = fs.readFileSync(sourceManifest, 'utf-8');
+      const manifest = prepareE2eManifest(
+        JSON.parse(sourceManifestText) as E2eManifest,
+        enableDemoKeyProbe,
+      );
+      if (typeof manifest.id !== 'string' || typeof manifest.version !== 'string') {
+        throw new Error(`[e2e] invalid plugin manifest: ${sourceManifest}`);
+      }
+      const manifestText = `${JSON.stringify(manifest, null, 2)}\n`;
+      const pluginDir = path.join(pluginsRoot, manifest.id);
+      fs.rmSync(pluginDir, { recursive: true, force: true });
+      fs.mkdirSync(pluginDir, { recursive: true, mode: 0o700 });
+      const pluginJsonPath = path.join(pluginDir, 'plugin.json');
+      fs.writeFileSync(pluginJsonPath, manifestText, 'utf-8');
+
+      const hostSecretReads = Array.isArray(manifest.hostSecrets?.read)
+        ? manifest.hostSecrets.read.filter((item): item is string => typeof item === 'string')
+        : [];
+      if (hostSecretReads.length > 0) {
+        whitelistGrants[manifest.id] = {
+          read: hostSecretReads,
+          manifestSha256: manifestIdentitySha256FromPluginJson(pluginJsonPath),
+        };
+      }
+
+      const targetDist = path.join(pluginDir, 'dist');
+      if (manifest.id === 'agent-hub') {
+        const sourceDist = path.join(sourceDir, 'dist');
+        if (!fs.existsSync(sourceDist)) {
+          throw new Error(`[e2e] agent-hub dist missing: ${sourceDist}`);
+        }
+        fs.cpSync(sourceDist, targetDist, {
+          recursive: true,
+          force: true,
+          filter: (src) =>
+            !src.includes(`${path.sep}.git${path.sep}`) &&
+            !src.includes(`${path.sep}node_modules${path.sep}`),
+        });
+      } else {
+        const uiEntries = Array.isArray((manifest as { ui?: unknown }).ui)
+          ? ((manifest as { ui: Array<{ entry?: unknown; displayName?: unknown }> }).ui)
+          : [];
+        fs.mkdirSync(targetDist, { recursive: true, mode: 0o700 });
+        fs.writeFileSync(
+          path.join(targetDist, 'hostPlugin.js'),
+          buildHostPluginStub(manifest.id, enableDemoKeyProbe),
+          'utf-8',
+        );
+        for (const ui of uiEntries) {
+          if (typeof ui.entry !== 'string' || !ui.entry.startsWith('dist/')) continue;
+          const uiPath = path.join(pluginDir, ui.entry);
+          fs.mkdirSync(path.dirname(uiPath), { recursive: true, mode: 0o700 });
+          fs.writeFileSync(
+            uiPath,
+            E2E_PLUGIN_UI_STUB_SOURCE,
+            'utf-8',
+          );
+        }
+      }
+
+      const receiptFiles = ['plugin.json'];
+      if (fs.existsSync(targetDist)) {
+        for (const file of await listFilesRecursive(targetDist)) {
+          receiptFiles.push(`dist/${file}`);
+        }
+      }
+      await writeInstallReceipt(cacheRoot, {
+        schemaVersion: 2,
+        pluginId: manifest.id,
+        version: manifest.version,
+        installSource: 'local-dev',
+        artifactSha256: null,
+        signerKeyId: null,
+        installedAt: new Date().toISOString(),
+        files: await hashReceiptFiles(pluginDir, receiptFiles),
+      });
+
+      entries.push({
+        id: manifest.id,
+        manifestPath: `${manifest.id}/plugin.json`,
+        enabled: true,
+        installSource: 'local-dev',
+        approvedPluginAccess: manifest.pluginAccess,
+      });
+    }
   }
 
   fs.writeFileSync(
@@ -309,11 +391,15 @@ export type ElectronFixtures = {
 export type ElectronOptions = {
   launchEnv: LaunchEnv;
   onboardingCompleted: boolean;
+  seedTogglePlugin: boolean;
+  seedRepositoryPlugins: boolean;
 };
 
 export const test = base.extend<ElectronFixtures & ElectronOptions>({
   launchEnv: [{}, { option: true }],
   onboardingCompleted: [true, { option: true }],
+  seedTogglePlugin: [false, { option: true }],
+  seedRepositoryPlugins: [true, { option: true }],
 
   userDataDir: async ({}, use) => {
     const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'lvis-e2e-'));
@@ -325,7 +411,7 @@ export const test = base.extend<ElectronFixtures & ElectronOptions>({
     }
   },
 
-  app: async ({ userDataDir, launchEnv, onboardingCompleted }, use) => {
+  app: async ({ userDataDir, launchEnv, onboardingCompleted, seedTogglePlugin, seedRepositoryPlugins }, use) => {
     const repoRoot = path.resolve(HERE, '../../..');
     const mainEntry = path.join(repoRoot, 'dist/src/main/main.js');
     if (!fs.existsSync(mainEntry)) {
@@ -350,6 +436,8 @@ export const test = base.extend<ElectronFixtures & ElectronOptions>({
       repoRoot,
       lvisHomeForTest,
       launchEnv.LVIS_E2E_RESOLVE_DEMO_KEY_PROBE === '1',
+      seedTogglePlugin,
+      seedRepositoryPlugins,
     );
     const app = await electron.launch({
       args: [mainEntry, `--user-data-dir=${userDataDir}`, '--no-sandbox'],

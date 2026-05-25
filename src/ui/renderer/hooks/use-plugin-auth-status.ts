@@ -27,6 +27,10 @@ function parseStatusResult(raw: unknown): PluginAuthState {
   return { kind: "unauthed" };
 }
 
+function isRuntimeCallablePlugin(plugin: PluginCardSummary): boolean {
+  return plugin.runtimeLoaded ?? (plugin.loadStatus === "loaded");
+}
+
 /**
  * Event-driven auth-status tracker for every loaded plugin that declares
  * `manifest.auth` (architecture.md §9.4a). Fetches statusTool once on
@@ -34,9 +38,9 @@ function parseStatusResult(raw: unknown): PluginAuthState {
  * emits — **no polling timer**. A manual `refresh` callback is also
  * returned for callers that just triggered login/logout.
  *
- * Plugins are filtered to `loadStatus === "loaded"` — failed/disabled
- * plugins have no live runtime to invoke, so the hook never dispatches
- * statusTool against them.
+ * Plugins are filtered by `runtimeLoaded` — inactive plugins still have a live
+ * runtime, so auth/config checks remain available while their tools are hidden
+ * from the model. Failed/preparing plugins have no callable runtime.
  *
  * Implementation note: the effect dep is a JSON cache-key derived from the
  * auth-bearing entries — not the `plugins` array reference — because the
@@ -58,13 +62,13 @@ export function usePluginAuthStatuses(
   const pluginsRef = useRef(plugins);
   pluginsRef.current = plugins;
 
-  // Stable cache key — only changes when the set of auth-bearing+loaded
+  // Stable cache key — only changes when the set of auth-bearing+runtime-loaded
   // plugins or their auth tool names actually change. Skipping
-  // failed/disabled plugins here means the effect doesn't re-bind every
-  // time a plugin transitions in/out of `loaded` for unrelated reasons.
+  // failed/preparing plugins here means the effect doesn't re-bind every
+  // time a plugin transitions in/out of a callable runtime for unrelated reasons.
   const authCacheKey = useMemo(() => {
     return plugins
-      .filter((p) => p.auth && p.loadStatus === "loaded")
+      .filter((p) => p.auth && isRuntimeCallablePlugin(p))
       .map((p) =>
         [
           p.id,
@@ -82,7 +86,15 @@ export function usePluginAuthStatuses(
       if (!api) return;
       const target = pluginsRef.current.find((p) => p.id === pluginId);
       const auth = target?.auth;
-      if (!auth) return;
+      if (!auth || !target || !isRuntimeCallablePlugin(target)) {
+        setStatuses((prev) => {
+          if (!prev.has(pluginId)) return prev;
+          const next = new Map(prev);
+          next.delete(pluginId);
+          return next;
+        });
+        return;
+      }
       // Fire and forget — error path lands in setStatuses.
       void (async () => {
         try {
@@ -114,7 +126,7 @@ export function usePluginAuthStatuses(
   useEffect(() => {
     if (!api) return;
     const authPlugins = pluginsRef.current.filter(
-      (p) => p.auth && p.loadStatus === "loaded",
+      (p) => p.auth && isRuntimeCallablePlugin(p),
     );
     if (authPlugins.length === 0) {
       setStatuses(new Map());

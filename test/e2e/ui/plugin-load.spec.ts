@@ -36,8 +36,7 @@ test('plugins with UI extensions appear in the composer plugin grid', async ({ m
   await localIndexerCell.click();
 
   // Plugin UIs render inside an Electron <webview> via plugin-ui-host. In
-  // the seeded E2E fixture the renderer side is a minimal stub
-  // (`export function mount({ root }) { root.textContent = …; }`) and the
+  // the seeded E2E fixture the renderer side is a minimal static stub and the
   // host partition setup, plugin auth state, and webview attach handshake
   // can racey-fail (typically blocked behind "API 키 설정 필요" gating in a
   // fresh LVIS_HOME). The primary regression guard for this spec is that
