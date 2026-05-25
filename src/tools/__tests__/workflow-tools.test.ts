@@ -306,6 +306,62 @@ describe("todo_session_write tool", () => {
     expect(after2[1].status).toBe("pending");
   });
 
+  it("returns changed:false without mutating on a no-op re-mark", async () => {
+    const store = new SessionTodoStore();
+    const tool = createTodoSessionWriteTool(store);
+    const r1 = await tool.execute(
+      { items: [{ content: "step 1", status: "in_progress" }] },
+      ctx("s-noop"),
+    );
+    const id = (JSON.parse(r1.output).items as Array<{ id: string }>)[0].id;
+    const writeSpy = vi.spyOn(store, "write");
+
+    // Re-mark the already-in_progress item in_progress → nothing changes.
+    const r2 = await tool.execute(
+      { items: [{ id, status: "in_progress" }] },
+      ctx("s-noop"),
+    );
+    const body = JSON.parse(r2.output);
+    expect(r2.isError).toBe(false);
+    expect(body.changed).toBe(false);
+    expect(body.note).toContain("do not call todo_session_write again");
+    // Fail-safe: a no-op call never reaches the store.
+    expect(writeSpy).not.toHaveBeenCalled();
+    writeSpy.mockRestore();
+  });
+
+  it("still writes when at least one item actually advances", async () => {
+    const store = new SessionTodoStore();
+    const tool = createTodoSessionWriteTool(store);
+    const r1 = await tool.execute(
+      {
+        items: [
+          { content: "step 1", status: "in_progress" },
+          { content: "step 2", status: "pending" },
+        ],
+      },
+      ctx("s-adv"),
+    );
+    const items = JSON.parse(r1.output).items as Array<{ id: string }>;
+    const writeSpy = vi.spyOn(store, "write");
+
+    // step 1 -> completed (real change) alongside a no-op re-mark of step 2.
+    const r2 = await tool.execute(
+      {
+        items: [
+          { id: items[0].id, status: "completed" },
+          { id: items[1].id, status: "pending" },
+        ],
+      },
+      ctx("s-adv"),
+    );
+    const body = JSON.parse(r2.output);
+    expect(body.changed).toBeUndefined();
+    expect(writeSpy).toHaveBeenCalledTimes(1);
+    expect(body.items[0].status).toBe("completed");
+    writeSpy.mockRestore();
+  });
+
   it("supports ordered insertion and deletion", async () => {
     const store = new SessionTodoStore();
     const tool = createTodoSessionWriteTool(store);
