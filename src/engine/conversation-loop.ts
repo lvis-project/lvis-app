@@ -563,6 +563,20 @@ const MAX_TOOL_ROUNDS = 30;
  */
 const MAX_TOOL_CALLS_PER_ROUND = 10;
 
+// Intra-turn tool-result stubbing — deep tool loops (e.g. indexer turns of
+// 11~19 rounds) otherwise resend the full accumulated tool_result history on
+// every round, blowing past the model's per-minute token budget. Between
+// rounds we mark older tool_results stale (memory stays verbatim; the wire
+// serializer stubs them on the next send), keeping the current + previous
+// round's results intact so chained tool calls can still reference recent
+// output. The window is count-based to match the markStaleToolResults
+// contract: 2 rounds worth of results (current + previous).
+const INTRA_TURN_PRESERVE_RECENT_RESULTS = 2 * MAX_TOOL_CALLS_PER_ROUND;
+// Only micro-compact between rounds once the projected per-round input is
+// already large enough to matter — half the model's preflight threshold —
+// so short turns don't pay the mark overhead.
+const MICRO_COMPACT_FLOOR_FACTOR = 0.5;
+
 /** Lazy Tool Scoping — 매 턴 LLM에 노출할 도구 집합 정의. */
 interface ToolScope {
   activePluginIds: Set<string>;
@@ -2720,6 +2734,33 @@ export class ConversationLoop {
           ...(tr.is_error && { isError: true }),
           ...(toolDisplay ? { meta: { toolDisplay } } : {}),
         });
+      }
+      // Intra-turn micro-compact — mark older tool_results stale before the
+      // next round assembles its request (`messagesForRound`), so the next
+      // provider send stubs them on the wire. Mirrors the sub-agent fallback
+      // mark (clear()/restore() atomic swap). Gated on the already-computed
+      // per-round projection to skip short turns; the threshold SOT is
+      // getModelPreflightThreshold so no literal is introduced.
+      const microCompactFloor = Math.floor(
+        getModelPreflightThreshold(llmSettings.provider, model) * MICRO_COMPACT_FLOOR_FACTOR,
+      );
+      if (
+        microCompactFloor > 0 &&
+        (this.lastRoundInputProjection?.totalTokens ?? 0) >= microCompactFloor
+      ) {
+        const { messages: afterMark, result: mr } = markStaleToolResults(
+          this.history.getMessages(),
+          { preserveRecentToolResults: INTRA_TURN_PRESERVE_RECENT_RESULTS },
+        );
+        if (mr.marked) {
+          this.history.clear();
+          this.history.restore(afterMark);
+          if (process.env.NODE_ENV !== "production") {
+            log.info(
+              `mark-stale (intra-turn): marked ${mr.markedCount} tool_results, ~${mr.freedCharsOnSerialize} chars saved on serialize`,
+            );
+          }
+        }
       }
       if (capResult.allowed.some((tu) => tu.name === "skill_load")) {
         systemPrompt = this.buildSystemPromptForScope(
