@@ -641,6 +641,17 @@ export type LvisApi = {
    */
   onPluginEvent?: (eventType: string, handler: (data: unknown) => void) => (() => void);
   listPluginCards: () => Promise<PluginCardSummary[]>;
+  /**
+   * #1176 — toggle a plugin active/inactive. Inactive plugins stay loaded but
+   * their tools are hidden from the model's per-turn scope.
+   */
+  setPluginEnabled: (
+    pluginId: string,
+    enabled: boolean,
+  ) => Promise<
+    | { ok: true; pluginId: string; enabled: boolean }
+    | { ok: false; error: string; message: string }
+  >;
   // routine_schedule v2 — persistent routine list + lifecycle
   listRoutinesV2: () => Promise<import("../../shared/routines-types.js").RoutineRecord[]>;
   dismissRoutineV2: (id: string) => Promise<{ ok: boolean; error?: string }>;
@@ -706,6 +717,8 @@ export type LvisApi = {
   retryBootstrap: () => Promise<{ ok: true } | { ok: false; error: string }>;
   onPluginInstallResult: (h: (payload: { slug: string; success: boolean; preparing?: boolean; error?: string }) => void) => () => void;
   onPluginUninstallResult: (h: (payload: { slug: string; success: boolean; error?: string }) => void) => () => void;
+  /** #1176 — plugin active/inactive toggled (this surface or another). */
+  onPluginEnabledChanged?: (h: (payload: { pluginId: string; enabled: boolean }) => void) => () => void;
   onAgentInstallResult: (h: (payload: { slug: string; success: boolean; agentId?: string; error?: string }) => void) => () => void;
   onAgentUninstallResult: (h: (payload: { slug: string; success: boolean; agentId?: string; error?: string }) => void) => () => void;
   onSkillInstallResult: (h: (payload: { slug: string; success: boolean; skillId?: string; error?: string }) => void) => () => void;
