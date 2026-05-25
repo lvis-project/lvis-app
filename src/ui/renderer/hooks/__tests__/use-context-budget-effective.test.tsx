@@ -83,9 +83,12 @@ describe("useContextBudget — effectiveBudget (Issue #912)", () => {
     const { result } = renderHook(() =>
       useContextBudget({ entries: [], llmVendor: "azure-foundry", llmModel: "gpt-5.4-mini" }),
     );
-    expect(result.current.tpmLimit).toBeUndefined();
+    // gpt-5.4-mini now carries tpmDefault=200K (org Tier-1, empirically grounded
+    // by the indexer-turn 429); azure-foundry deployment ids inherit the full
+    // OpenAI spec incl. tpm → effectiveBudget = min(contextBudget, tpmLimit).
+    expect(result.current.tpmLimit).toBe(200_000);
     expect(result.current.contextBudget).toBe(360_000);
-    expect(result.current.effectiveBudget).toBe(360_000);
+    expect(result.current.effectiveBudget).toBe(200_000);
   });
 
   it("keeps contextBudget when tpmLimit happens to exceed it (defensive)", () => {
