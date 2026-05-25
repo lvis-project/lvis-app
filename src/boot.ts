@@ -614,12 +614,13 @@ export async function bootstrap(
   const updateCheckFetcher: MarketplaceFetcher | undefined = marketplaceFetcher;
 
   // §4.5.9: SystemPromptBuilder.
-  // C2(c): wire the skill overlay reader so each turn's system prompt
-  // includes the <lvis-active-skills> section for the current session.
+  // Skills use progressive disclosure: lightweight catalog every turn, full
+  // bodies only after skill_load and only for the current user-turn window.
   const systemPromptBuilder = createSystemPromptBuilder({
     memoryManager,
     toolRegistry,
     pluginRuntime,
+    getAvailableSkills: () => skillStore.listCatalogSync(),
     getActiveSkillsSection: (sessionId) => skillOverlay.buildSection(sessionId),
   });
   // §6.3: PermissionManager — instance was constructed before
@@ -931,8 +932,8 @@ export async function bootstrap(
     },
     toolRegistry,
   });
-  // C2(c): skill_load no longer mutates conversation history. The body is
-  // registered into SkillOverlay (per-session) and read each turn by
+  // skill_load no longer mutates conversation history. The body is registered
+  // into SkillOverlay for the current user-turn window and read by
   // SystemPromptBuilder via getActiveSkillsSection. See main/skill-overlay.ts
   // for the registry; src/tools/skill-load.ts for the tool entry point.
 

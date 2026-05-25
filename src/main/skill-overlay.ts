@@ -1,5 +1,5 @@
 /**
- * SkillOverlay — per-session registry of loaded skills, consumed by
+ * SkillOverlay — current-turn registry of loaded skills, consumed by
  * {@link SystemPromptBuilder} as a separately delimited section in each
  * turn's system prompt.
  *
@@ -12,9 +12,10 @@
  * `<lvis-skill name="…">…</lvis-skill>` envelopes, keeps the provenance
  * clear and prevents the body from masquerading as user input.
  *
- * The overlay is queried each turn by SystemPromptBuilder, so newly-loaded
- * skills take effect on the NEXT round — synchronous return from the tool
- * just records the registration.
+ * The overlay is queried by SystemPromptBuilder during the current user turn,
+ * so newly-loaded skills take effect on the next assistant round. The
+ * ConversationLoop clears the overlay at the user-turn boundary; loaded skill
+ * bodies are not ambient session context.
  */
 import type { LoadedSkill } from "./skill-store.js";
 
@@ -44,7 +45,7 @@ export class SkillOverlay {
     return [...m.values()];
   }
 
-  /** Drop all skills for a session — fired on `chat:new`. */
+  /** Drop all skills for a session — fired on user-turn boundaries and chat:new. */
   clear(sessionId: string): void {
     this.bySession.delete(sessionId);
   }
@@ -53,7 +54,7 @@ export class SkillOverlay {
    * Build the system-prompt section for the given session. Each skill is
    * fenced with `<lvis-skill>` so the LLM can attribute the guidance and
    * the body cannot accidentally look like user-supplied content.
-   * Empty when no skills are loaded.
+   * Empty when no skills are loaded for the current user turn.
    *
    * LOW (skill body sanitization): skill BODIES are also sanitized — pre-fix,
    * only the `name` attribute went through `escapeAttr`. A malicious body

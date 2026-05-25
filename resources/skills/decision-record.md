@@ -1,7 +1,6 @@
 ---
 name: decision-record
 description: 의사결정 기록 skill — 배경·대안·선택·근거·책임 5섹션 영구 보관용
-triggers: [decision, 의사결정, 결정, ADR, 선택, 검토]
 ---
 
 # Decision Record Skill

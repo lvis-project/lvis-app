@@ -1,7 +1,6 @@
 ---
 name: report-writing
 description: Structured business-report writing skill — situation, action, result, recommendation
-triggers: [report, 리포트, 보고서, summary, 결산]
 ---
 
 # Report Writing Skill
