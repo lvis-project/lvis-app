@@ -19,10 +19,11 @@ import {
 /**
  * An update changes the plan when it adds/moves an item, deletes one, or
  * shifts an existing item's status or content. A call whose every update
- * leaves the current state untouched (e.g. re-marking an already-in_progress
- * item in_progress) is a no-op: it burns a full-context round without moving
- * the checklist. We detect that to nudge the model out of redundant re-mark
- * loops rather than silently re-writing identical state.
+ * leaves the current state untouched by re-marking an existing item (e.g.
+ * already-in_progress -> in_progress) is invalid: it burns a full-context
+ * round without moving the checklist. We reject that case so the model treats
+ * the call as a failed update instead of a successful tool result worth
+ * repeating. A delete of an already-absent item remains an idempotent no-op.
  */
 function updateChangesPlan(
   u: SessionTodoUpdate,
@@ -40,6 +41,13 @@ function updateChangesPlan(
   if (u.status !== cur.status) return true;
   if (u.content !== undefined && u.content !== cur.content) return true;
   return false;
+}
+
+function isMissingDeleteNoOp(
+  u: SessionTodoUpdate,
+  current: Map<string, SessionTodoItem>,
+): boolean {
+  return !!u.id && u.status === "deleted" && !current.has(u.id) && !u.beforeId && !u.afterId;
 }
 
 export function createTodoSessionWriteTool(store: SessionTodoStore): Tool {
@@ -117,17 +125,29 @@ export function createTodoSessionWriteTool(store: SessionTodoStore): Tool {
         };
       }
       // No-op guard — if no update would change the current plan (the
-      // already-in_progress re-mark loop), skip the write and tell the model
-      // to stop re-sending unchanged state and continue with work tools.
+      // already-in_progress re-mark loop), reject it as an invalid update.
+      // Returning success with changed:false was not enough in live sessions:
+      // the model kept repeating the same no-op and hit TPM. A failed result
+      // makes the contract violation explicit and engages the generic
+      // "do not retry the same failed tool input" prompt rule.
       const current = new Map(store.list(sessionId).map((i) => [i.id, i]));
       if (!updates.some((u) => updateChangesPlan(u, current))) {
+        if (updates.every((u) => isMissingDeleteNoOp(u, current))) {
+          return {
+            output: JSON.stringify({
+              items: store.list(sessionId),
+              changed: false,
+            }),
+            isError: false,
+          };
+        }
         return {
           output: JSON.stringify({
             items: store.list(sessionId),
             changed: false,
-            note: "No item changed state — do not call todo_session_write again for the same status. Continue with work tools and only update the TO-DO when an item actually advances.",
+            error: "No item changed state. Do not retry todo_session_write with the same status; continue with work tools and only update the TO-DO when an item actually advances.",
           }),
-          isError: false,
+          isError: true,
         };
       }
       let merged;

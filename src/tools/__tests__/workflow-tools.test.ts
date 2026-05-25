@@ -306,7 +306,7 @@ describe("todo_session_write tool", () => {
     expect(after2[1].status).toBe("pending");
   });
 
-  it("returns changed:false without mutating on a no-op re-mark", async () => {
+  it("rejects a no-op re-mark without mutating the store", async () => {
     const store = new SessionTodoStore();
     const tool = createTodoSessionWriteTool(store);
     const r1 = await tool.execute(
@@ -322,9 +322,9 @@ describe("todo_session_write tool", () => {
       ctx("s-noop"),
     );
     const body = JSON.parse(r2.output);
-    expect(r2.isError).toBe(false);
+    expect(r2.isError).toBe(true);
     expect(body.changed).toBe(false);
-    expect(body.note).toContain("do not call todo_session_write again");
+    expect(body.error).toContain("Do not retry todo_session_write");
     // Fail-safe: a no-op call never reaches the store.
     expect(writeSpy).not.toHaveBeenCalled();
     writeSpy.mockRestore();

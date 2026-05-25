@@ -291,9 +291,12 @@ describe("SystemPromptBuilder — todo_session_write batching guidance (TPM roun
     // so each step does not incur a separate full-context round.
     expect(prompt).toContain("상태 갱신만을 위한 별도 라운드를 만들지");
     expect(prompt).toContain("같은 메시지에");
+    expect(prompt).toContain("나열된 순서대로 실행");
+    expect(prompt).toContain("그 작업 도구보다 앞 순서로");
     // No-op prohibition: do not re-send an item in its current status (the
     // observed in_progress re-mark loop that spent 32/35 todo calls on no change).
     expect(prompt).toContain("같은 상태로 다시 보내지 마세요");
+    expect(prompt).toContain("오류로 처리됩니다");
   });
 
   it("does not re-introduce the per-step mandate that forced a dedicated in_progress round before every tool call", () => {
