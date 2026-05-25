@@ -542,7 +542,16 @@ export function makeMockLvisApi(overrides: ApiOverrides = {}): {
   };
 }
 
-export function makeMockLvisNamespace() {
+type LvisNamespaceOverrides = {
+  env?: Partial<{
+    isDev: boolean;
+    isE2E: boolean;
+    enableDevConsole: boolean;
+    debugStream: boolean;
+  }>;
+};
+
+export function makeMockLvisNamespace(overrides: LvisNamespaceOverrides = {}) {
   const approvalHandlers = new Set<(r: unknown) => void>();
   return {
     ns: {
@@ -573,8 +582,10 @@ export function makeMockLvisNamespace() {
       },
       env: {
         isDev: false,
+        isE2E: false,
         enableDevConsole: false,
         debugStream: false,
+        ...overrides.env,
       },
     },
     emitApproval: (r: unknown) => approvalHandlers.forEach((h) => h(r)),

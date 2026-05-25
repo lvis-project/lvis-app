@@ -14,7 +14,9 @@ const mockOn = vi.fn();
 const mockRemoveListener = vi.fn();
 const mockUserActivation = { isActive: false };
 const originalDebugStreamEnv = process.env.VITE_DEBUG_STREAM;
+const originalLvisDebugStreamEnv = process.env.LVIS_DEBUG_STREAM;
 const originalLvisDevEnv = process.env.LVIS_DEV;
+const originalLvisE2eEnv = process.env.LVIS_E2E;
 const originalLvisDevConsoleEnv = process.env.LVIS_DEV_CONSOLE;
 
 // Named exports only — mirrors the named-import shape in preload.ts.
@@ -72,7 +74,9 @@ describe("preload — plugin webview asset URLs", () => {
     mockUserActivation.isActive = false;
     vi.resetModules();
     delete process.env.VITE_DEBUG_STREAM;
+    delete process.env.LVIS_DEBUG_STREAM;
     delete process.env.LVIS_DEV;
+    delete process.env.LVIS_E2E;
     delete process.env.LVIS_DEV_CONSOLE;
   });
 
@@ -82,10 +86,20 @@ describe("preload — plugin webview asset URLs", () => {
     } else {
       process.env.VITE_DEBUG_STREAM = originalDebugStreamEnv;
     }
+    if (originalLvisDebugStreamEnv === undefined) {
+      delete process.env.LVIS_DEBUG_STREAM;
+    } else {
+      process.env.LVIS_DEBUG_STREAM = originalLvisDebugStreamEnv;
+    }
     if (originalLvisDevEnv === undefined) {
       delete process.env.LVIS_DEV;
     } else {
       process.env.LVIS_DEV = originalLvisDevEnv;
+    }
+    if (originalLvisE2eEnv === undefined) {
+      delete process.env.LVIS_E2E;
+    } else {
+      process.env.LVIS_E2E = originalLvisE2eEnv;
     }
     if (originalLvisDevConsoleEnv === undefined) {
       delete process.env.LVIS_DEV_CONSOLE;
@@ -214,9 +228,28 @@ describe("preload — plugin webview asset URLs", () => {
 
     expect(env).toMatchObject({
       isDev: false,
+      isE2E: false,
       enableDevConsole: false,
       debugStream: false,
     });
+  });
+
+  it("reflects LVIS_E2E in the preload bridge", async () => {
+    process.env.LVIS_E2E = "1";
+    const lvis = await loadLvisNamespace();
+    const env = lvis["env"] as Record<string, unknown>;
+
+    expect(env["isE2E"]).toBe(true);
+    expect(env["debugStream"]).toBe(false);
+  });
+
+  it("does not treat LVIS_E2E as dev mode by itself", async () => {
+    process.env.LVIS_E2E = "1";
+    const lvis = await loadLvisNamespace();
+    const env = lvis["env"] as Record<string, unknown>;
+
+    expect(env["isDev"]).toBe(false);
+    expect(env["isE2E"]).toBe(true);
   });
 
   it("reflects VITE_DEBUG_STREAM in the preload bridge", async () => {
@@ -227,9 +260,20 @@ describe("preload — plugin webview asset URLs", () => {
     expect(env["debugStream"]).toBe(true);
   });
 
-  it("enables debugStream when the dev console is enabled in dev mode", async () => {
+  it("keeps debugStream separate from the dev console flag", async () => {
     process.env.LVIS_DEV = "1";
     process.env.LVIS_DEV_CONSOLE = "1";
+    const lvis = await loadLvisNamespace();
+    const env = lvis["env"] as Record<string, unknown>;
+
+    expect(env["enableDevConsole"]).toBe(true);
+    expect(env["debugStream"]).toBe(false);
+  });
+
+  it("reflects LVIS_DEBUG_STREAM in the preload bridge", async () => {
+    process.env.LVIS_DEV = "1";
+    process.env.LVIS_DEV_CONSOLE = "1";
+    process.env.LVIS_DEBUG_STREAM = "1";
     const lvis = await loadLvisNamespace();
     const env = lvis["env"] as Record<string, unknown>;
 

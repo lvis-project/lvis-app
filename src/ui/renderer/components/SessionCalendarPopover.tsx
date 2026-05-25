@@ -5,6 +5,13 @@ import type { SessionSummary } from "../hooks/use-sessions.js";
 import { formatHhMmKst } from "../utils/format-time.js";
 import { CalendarFallback, LazyCalendar, preloadCalendar } from "./LazyCalendar.js";
 
+const KOREA_DATE_KEY_FORMATTER = new Intl.DateTimeFormat("en-US", {
+  timeZone: "Asia/Seoul",
+  year: "numeric",
+  month: "2-digit",
+  day: "2-digit",
+});
+
 /**
  * Returns a YYYY-MM-DD date key normalized to Korea Standard Time (UTC+9).
  * Used so that sessions created after midnight UTC but before midnight KST
@@ -12,12 +19,7 @@ import { CalendarFallback, LazyCalendar, preloadCalendar } from "./LazyCalendar.
  * Edge case 6: KST/UTC normalization.
  */
 function getKoreaDateKey(date: Date): string {
-  const parts = new Intl.DateTimeFormat("en-US", {
-    timeZone: "Asia/Seoul",
-    year: "numeric",
-    month: "2-digit",
-    day: "2-digit",
-  }).formatToParts(date);
+  const parts = KOREA_DATE_KEY_FORMATTER.formatToParts(date);
   const get = (type: string) => parts.find((part) => part.type === type)?.value ?? "";
   return `${get("year")}-${get("month")}-${get("day")}`;
 }

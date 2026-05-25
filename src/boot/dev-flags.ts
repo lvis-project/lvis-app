@@ -41,10 +41,10 @@ let configured = false;
 /**
  * Round-4 tamper-detect snapshot.
  *
- * `main.ts` scrubs `LVIS_DEV*` and `LVIS_WIN_NO_SANDBOX` from `process.env`
- * before the renderer / preload / plugin runtime boots in packaged mode. That
- * scrub runs at `main.ts:67-73`, AFTER this module's import (line 20) but
- * BEFORE {@link shouldWarnPackagedFlagsIgnored} is invoked from
+ * `main.ts` scrubs dev/test-only env vars from `process.env` before the
+ * renderer / preload / plugin runtime boots in packaged mode. That scrub runs
+ * AFTER this module's import but BEFORE {@link shouldWarnPackagedFlagsIgnored}
+ * is invoked from
  * `plugin-runtime.ts`. Reading `process.env` inside the helper would observe
  * the scrubbed (empty) state and silently disable the audit log.
  *
@@ -56,16 +56,26 @@ let configured = false;
  * The snapshot is intentionally a frozen `Set<string>` so neither the helper
  * nor a malicious caller can mutate it after capture.
  */
-const PACKAGED_FORBIDDEN_VARS = [
-  "LVIS_DEV",
-  "LVIS_DEV_RELOAD",
-  "LVIS_DEV_CONSOLE",
+const PACKAGED_FORBIDDEN_EXACT_VARS = [
+  "LVIS_E2E",
+  "LVIS_DEBUG_STREAM",
+  "VITE_DEBUG_STREAM",
   "LVIS_WIN_NO_SANDBOX",
   "LVIS_PLUGINS_DIR",
+  "LVIS_WHITELIST_OFFLINE",
 ] as const;
 
+const PACKAGED_FORBIDDEN_PREFIXES = ["LVIS_DEV"] as const;
+
+export function isPackagedForbiddenEnvVar(name: string): boolean {
+  return (
+    PACKAGED_FORBIDDEN_EXACT_VARS.some((exact) => name === exact) ||
+    PACKAGED_FORBIDDEN_PREFIXES.some((prefix) => name.startsWith(prefix))
+  );
+}
+
 const tamperedAtBoot: ReadonlySet<string> = Object.freeze(
-  new Set(PACKAGED_FORBIDDEN_VARS.filter((name) => process.env[name] !== undefined)),
+  new Set(Object.keys(process.env).filter(isPackagedForbiddenEnvVar)),
 );
 
 /**
@@ -144,9 +154,9 @@ export function devNoSandboxAllowed(
 }
 
 /**
- * Returns true if any LVIS_DEV* / LVIS_WIN_NO_SANDBOX / LVIS_PLUGINS_DIR env
- * var was present at module-load time in a packaged build — caller should
- * log a single audit warning so operators can detect tampered launches.
+ * Returns true if any forbidden dev/test env var was present at module-load
+ * time in a packaged build — caller should log a single audit warning so
+ * operators can detect tampered launches.
  *
  * Reads from the {@link tamperedAtBoot} snapshot, NOT live `process.env`.
  * `main.ts:67-73` scrubs these vars from `process.env` before this helper
