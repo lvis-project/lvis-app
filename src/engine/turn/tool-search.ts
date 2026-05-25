@@ -122,6 +122,16 @@ function scoreCatalogEntry(
 }
 
 /**
+ * Test-only export — allows unit tests to drive `scoreCatalogEntry` directly
+ * so the scoring-side MIN_CATALOG_MATCH_TOKEN_LENGTH guards (lines above) are
+ * covered independently of the tokenizeQuery pre-filter. The function is pure
+ * and has no side effects; exporting it does not affect production behaviour.
+ *
+ * @internal Do not import outside of `__tests__/`.
+ */
+export { scoreCatalogEntry as _scoreCatalogEntryForTest };
+
+/**
  * query 에 매치되는 catalog tool 을 점수화해 상위 N개만 반환한다.
  * Broad substring query 가 activeToolNames 를 대량 확장하지 못하도록
  * exact/name-token match 를 description hit 보다 강하게 두고 promotion
