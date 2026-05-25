@@ -32,6 +32,29 @@ export function validateSender(event: IpcMainInvokeEvent | null | undefined): bo
   }
 }
 
+/**
+ * Host renderer validation for state-mutating host IPC. Plugin UI shells are
+ * also file:// frames but intentionally receive only `window.lvisPlugin`, not
+ * host-wide `window.lvisApi`; reject them explicitly at sensitive channels.
+ */
+export function validateHostRendererSender(event: IpcMainInvokeEvent | null | undefined): boolean {
+  if (!validateSender(event)) return false;
+  const rawUrl = event?.senderFrame?.url ?? "";
+  if (!rawUrl) return false;
+  try {
+    const url = new URL(rawUrl);
+    if (url.protocol === "file:" && url.pathname.toLowerCase().endsWith("/plugin-ui-shell.html")) {
+      return false;
+    }
+    if (url.protocol === "file:") return true;
+    if (url.protocol === "http:" && url.hostname === "localhost") return true;
+    if (url.protocol === "http:" && url.hostname === "127.0.0.1") return true;
+    return false;
+  } catch {
+    return false;
+  }
+}
+
 export const UNAUTHORIZED_FRAME = { ok: false, error: "unauthorized-frame" as const };
 
 /**

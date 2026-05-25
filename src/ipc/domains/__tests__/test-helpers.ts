@@ -29,7 +29,12 @@ export function invokeAppIpcHandler(
   if (!fn) throw new Error(`No handler registered for: ${channel}`);
   return Promise.resolve(
     fn(
-      { frameId: 0, processId: 0, frame: { url: "lvis://app" } } as never,
+      {
+        frameId: 0,
+        processId: 0,
+        frame: { url: "file:///app/index.html" },
+        senderFrame: { url: "file:///app/index.html" },
+      } as never,
       ...args,
     ),
   );

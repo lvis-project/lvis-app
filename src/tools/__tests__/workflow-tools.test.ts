@@ -30,7 +30,7 @@ import { SkillStore } from "../../main/skill-store.js";
 import { SkillOverlay } from "../../main/skill-overlay.js";
 import { AgentProfileStore } from "../../main/agent-profile-store.js";
 import { ToolRegistry, TOOL_SEARCH_TOOL_NAME } from "../registry.js";
-import { registerToolSearchMetaTool } from "../../boot/tools.js";
+import { registerRequestPluginMetaTool, registerToolSearchMetaTool } from "../../boot/tools.js";
 
 function ctx(sessionId = "session-x"): ToolExecutionContext {
   return { cwd: process.cwd(), extraAllowedDirectories: [], metadata: { sessionId } };
@@ -530,6 +530,20 @@ describe("tool_search meta tool", () => {
     expect(tool).toBeDefined();
 
     const result = await tool!.execute({ query: "meeting" }, ctx());
+
+    expect(result.isError).toBe(true);
+    expect(result.output).toContain("interception");
+  });
+});
+
+describe("request_plugin meta tool", () => {
+  it("fails closed if executor reaches the loop-intercepted fallback", async () => {
+    const registry = new ToolRegistry();
+    registerRequestPluginMetaTool(registry);
+    const tool = registry.findByName("request_plugin");
+    expect(tool).toBeDefined();
+
+    const result = await tool!.execute({ pluginId: "local-indexer" }, ctx());
 
     expect(result.isError).toBe(true);
     expect(result.output).toContain("interception");

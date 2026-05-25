@@ -16,7 +16,7 @@ import { emitPluginConfigChange, SECRET_REDACTED_SENTINEL } from "../../plugins/
 import { runManagedBootstrap } from "../../boot/managed-marketplace.js";
 import { isDevModeUnlocked } from "../../boot/dev-flags.js";
 import { NOTIFICATION_KINDS } from "../../main/notification-service.js";
-import { validateSender, UNAUTHORIZED_FRAME, auditUnauthorized, validatePluginFrame } from "../gated.js";
+import { validateSender, validateHostRendererSender, UNAUTHORIZED_FRAME, auditUnauthorized, validatePluginFrame } from "../gated.js";
 import type { IpcDeps } from "../types.js";
 import { sendToWindow } from "../safe-send.js";
 import { BUNDLE_IDS } from "../../shared/theme-bundles.js";
@@ -444,7 +444,7 @@ export function registerPluginsHandlers(deps: IpcDeps): void {
   ipcMain.handle(
     "lvis:plugins:set-enabled",
     async (e, pluginId: unknown, enabled: unknown) => {
-      if (!validateSender(e)) {
+      if (!validateHostRendererSender(e)) {
         auditUnauthorized(auditLogger, "lvis:plugins:set-enabled", e);
         return UNAUTHORIZED_FRAME;
       }
@@ -457,7 +457,12 @@ export function registerPluginsHandlers(deps: IpcDeps): void {
       try {
         await pluginRuntime.setPluginEnabled(pluginId, enabled);
       } catch (err) {
-        return pluginConfigError("no-such-plugin", errMessage(err) || `unknown plugin: ${pluginId}`);
+        const message = errMessage(err);
+        if (message.startsWith("Plugin not found")) {
+          return pluginConfigError("no-such-plugin", `unknown plugin: ${pluginId}`);
+        }
+        log.error(`plugin enabled-state change failed (${pluginId}): %s`, message);
+        return pluginConfigError("toggle-failed", "plugin enabled state could not be changed");
       }
       emitHostEvent("plugin.enabled-changed", { pluginId, enabled });
       broadcastPluginLifecycleEvent("lvis:plugins:enabled-changed", { pluginId, enabled });
@@ -565,7 +570,7 @@ export function registerPluginsHandlers(deps: IpcDeps): void {
   });
 
   // read-only, sender guard optional
-  ipcMain.handle("lvis:plugins:cards", () => pluginRuntime.listPluginCards());
+  ipcMain.handle("lvis:plugins:cards", () => pluginRuntime.listPluginCards(deps.toolRegistry));
 
   ipcMain.handle("lvis:runtime:counts", (e) => {
     if (!validateSender(e)) { auditUnauthorized(auditLogger, "lvis:runtime:counts", e); return UNAUTHORIZED_FRAME; }

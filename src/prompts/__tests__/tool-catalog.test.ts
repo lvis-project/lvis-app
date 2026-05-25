@@ -77,7 +77,7 @@ describe("SystemPromptBuilder — tool catalog (Tool-Level Deferral)", () => {
     expect(catalogBlock).not.toContain("**meeting_start**");
   });
 
-  it("renders catalog even if a stale scope still carries deferral=false", () => {
+  it("omits catalog when deferral=false because eager mode exposes the full suite", () => {
     const builder = makeBuilder(seedRegistry());
     builder.setToolScope({
       activePluginIds: new Set(["com.example.meeting"]),
@@ -90,9 +90,10 @@ describe("SystemPromptBuilder — tool catalog (Tool-Level Deferral)", () => {
     expect(prompt).toContain("현재 로드되어 있어도 builtin 이라는 뜻은 아닙니다.");
     expect(prompt).toContain("### builtin");
     expect(prompt).toContain("### plugin:com.example.meeting");
-    expect(prompt).toContain("<tool-catalog>");
     expect(prompt).toContain("**meeting_start**");
     expect(prompt).toContain("**meeting_stop**");
+    expect(prompt).not.toContain("<tool-catalog>");
+    expect(prompt).not.toContain("사용하려면 먼저 `tool_search({query})`");
   });
 
   it("nothing deferred → section omitted", () => {
