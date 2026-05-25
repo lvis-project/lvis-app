@@ -46,8 +46,11 @@ export async function openSettingsWindow(
 
   const settingsWindow = await settingsWindowPromise;
   await settingsWindow.waitForLoadState('domcontentloaded');
-  await expect(settingsWindow.getByRole('heading', { name: '설정' })).toBeVisible({
-    timeout: 10_000,
-  });
+  // `exact: true` — some tab bodies render their own heading containing "설정"
+  // (e.g. the plugin-config tab's "플러그인 설정"), which would otherwise make
+  // the non-exact match resolve to multiple elements under strict mode.
+  await expect(
+    settingsWindow.getByRole('heading', { name: '설정', exact: true }),
+  ).toBeVisible({ timeout: 10_000 });
   return settingsWindow;
 }

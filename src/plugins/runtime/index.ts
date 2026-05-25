@@ -282,6 +282,14 @@ export class PluginRuntime {
   private readonly failedPluginIds = new Set<string>();
   private readonly failedPluginStubs = new Map<string, { name: string; description: string }>();
   private readonly disabledPluginIds = new Set<string>();
+  /**
+   * #1176 active/inactive — plugins toggled inactive at runtime via
+   * {@link setPluginEnabled}. Orthogonal to {@link disabledPluginIds} (the
+   * load/unload state): an inactive plugin stays *loaded* but its tools are
+   * hidden from the model's per-turn scope. `enabled !== false` is the active
+   * predicate, so absence from this set means active (migration-safe default).
+   */
+  private readonly inactivePluginIds = new Set<string>();
   private readonly preparingPluginIds = new Set<string>();
   private readonly preparationStatuses = new Map<string, PluginPreparationStatus>();
   private readonly preparationFailures = new Map<string, string>();
@@ -1789,6 +1797,48 @@ export class PluginRuntime {
     return [...this.plugins.keys()];
   }
 
+  /**
+   * #1176 active/inactive — whether a plugin's tools may be exposed this turn.
+   * Mirrors the registry `enabled` field: `enabled !== false` is active, so an
+   * unknown / never-toggled plugin defaults to active (migration-safe). This is
+   * orthogonal to load state — an inactive plugin stays loaded; only its tool
+   * exposure is gated. The synchronous in-memory mirror lets the per-turn
+   * `resolveToolScope` gate read it without touching disk.
+   */
+  isPluginEnabled(pluginId: string): boolean {
+    return !this.inactivePluginIds.has(pluginId);
+  }
+
+  /**
+   * #1176 — toggle a plugin's active/inactive state. Persists `enabled` to the
+   * registry atomically and updates the in-memory mirror. Deliberately does NOT
+   * unload/reload the plugin: tool exposure is recomputed per turn from
+   * {@link isPluginEnabled}, so a disabled plugin's tools simply vanish from the
+   * next turn's scope (and reappear on re-enable) with no runtime churn. On
+   * disable the `onDisable` hook fires to prune transient scope state (e.g.
+   * ConversationLoop.lastTurnScope); on enable `onEnable` re-syncs.
+   *
+   * @throws if `pluginId` is not a known/loaded plugin.
+   */
+  async setPluginEnabled(pluginId: string, enabled: boolean): Promise<void> {
+    if (!this.knownPluginManifests.has(pluginId) && !this.plugins.has(pluginId)) {
+      throw new Error(`Plugin not found: ${pluginId}`);
+    }
+    if (this.registryPath) {
+      await updatePluginRegistry(this.registryPath, (registry) => {
+        const entry = registry.plugins.find((p) => p.id === pluginId);
+        if (entry) entry.enabled = enabled;
+      });
+    }
+    if (enabled) {
+      this.inactivePluginIds.delete(pluginId);
+      this.onEnable?.(pluginId);
+    } else {
+      this.inactivePluginIds.add(pluginId);
+      this.onDisable?.(pluginId);
+    }
+  }
+
   getPluginManifest(pluginId: string): PluginManifest | undefined {
     return this.plugins.get(pluginId)?.manifest ?? this.knownPluginManifests.get(pluginId);
   }
@@ -1809,7 +1859,12 @@ export class PluginRuntime {
     for (const [pluginId, manifest] of this.knownPluginManifests) {
       const loadStatus = this.preparingPluginIds.has(pluginId)
         ? "preparing"
-        : this.plugins.has(pluginId)
+        // #1176 active/inactive — a runtime-toggled inactive plugin stays in
+        // `this.plugins` (loaded) but reports "disabled" so the UI reflects the
+        // active/inactive state, not the load state.
+        : this.inactivePluginIds.has(pluginId)
+          ? "disabled"
+          : this.plugins.has(pluginId)
           ? "loaded"
           : this.failedPluginIds.has(pluginId)
           ? "failed"

@@ -2,8 +2,8 @@
  * Phase 1.5 Option C — request_plugin meta-tool integration.
  *
  * Verifies:
- *   1. Calling request_plugin activates the plugin and exposes its tool
- *      schemas in the next streaming round.
+ *   1. Calling request_plugin activates the plugin and (below the eager
+ *      ceiling, #1176) exposes its FULL tool suite eagerly in the next round.
  *   2. Unknown pluginId returns an error tool_result without mutating scope.
  *   3. MAX_PLUGIN_EXPANSION (=2) is enforced per turn.
  */
@@ -115,7 +115,7 @@ function makeLoop(opts: {
 }
 
 describe("ConversationLoop — request_plugin meta tool (Option C)", () => {
-  it("activates plugin catalog without exposing all plugin schemas", async () => {
+  it("activates a plugin and exposes its full tool suite eagerly (#1176)", async () => {
     const provider = new RecordingProvider([
       // Round 0: LLM asks to activate meeting plugin.
       [
@@ -123,22 +123,24 @@ describe("ConversationLoop — request_plugin meta tool (Option C)", () => {
         { type: "message_complete", stopReason: "tool_use" },
       ],
       [
-        { type: "text_delta", text: "카탈로그 활성화" },
+        { type: "text_delta", text: "활성화 완료" },
         { type: "message_complete", stopReason: "end_turn" },
       ],
     ]);
     const loop = makeLoop({ provider, availablePluginIds: ["com.example.meeting"] });
     const result = await loop.runTurn("일반 질문", undefined, undefined, { inputOrigin: "user-keyboard" });
-    expect(result.text).toBe("카탈로그 활성화");
-    // Round 0 should NOT have meeting_start available.
+    expect(result.text).toBe("활성화 완료");
+    // Round 0 (before activation) should NOT have meeting_start available.
     expect(provider.observedToolNames[0]).not.toContain("meeting_start");
-    // Round 1 keeps plugin tools deferred; tool_search remains the discovery path.
-    expect(provider.observedToolNames[1]).toContain(TOOL_SEARCH_TOOL_NAME);
-    expect(provider.observedToolNames[1]).not.toContain("meeting_start");
+    // #1176: below the eager ceiling, activation loads the plugin's whole suite
+    // directly — no tool_search needed.
+    expect(provider.observedToolNames[1]).toContain("meeting_start");
     const messages = loop.getHistory().getMessages();
     const toolResult = messages.find((m) => m.role === "tool_result") as { content: string } | undefined;
-    expect(toolResult?.content).toContain("카탈로그");
-    expect(toolResult?.content).not.toContain("0개 도구 추가됨");
+    // The activation message tells the model the tools are loaded, not that it
+    // must call tool_search.
+    expect(toolResult?.content).toContain("모두 로드됨");
+    expect(toolResult?.content).not.toContain("tool_search");
   });
 
   it("supports request_plugin(local-indexer) -> tool_search(index_scan_status) in the same assistant round", async () => {
