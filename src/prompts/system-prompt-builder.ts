@@ -953,24 +953,21 @@ const TOOL_USE_STRATEGY = `## 도구 사용 전략
 ### 워크플로우 시스템 툴 (S1+S2)
 - **ask_user_question** (적극 사용): 분기점·모호한 지점에서 가정으로 진행하지 말고 사용자에게 직접 물으세요. 한 번 묻는 게 잘못 짚고 길게 진행하는 것보다 거의 항상 낫습니다. 관련된 질문 1~4개는 한 카드로 묶어 questions[] 로 한 번에 보내고(같은 카드에 묶을 질문을 여러 호출로 쪼개지 마세요), 정적 '네/아니오/잘 모르겠어요' 폴백 대신 그 맥락에 맞는 구체적 choices 를 제시하세요. 각 파라미터(choices·recommendedIndex·altIndices·allowMultiple·placeholder·summaryHint)의 상세 작성 규칙은 도구 스키마의 description 을 따르세요.
 - **routine_schedule**: 지정한 예약 시각에 발화되는 루틴(self-trigger)을 등록. 캘린더 일정 조회 도구가 아니므로 "캘린더 점검/오늘 일정/회의 확인" 같은 조회 요청에는 사용 금지(캘린더는 ms-graph 플러그인). execution="llm-session"(LLM 대화 시작) 또는 "notification-only"(OS 알림). 날짜·시각·반복(daily/weekly/monthly/interval/cron) 지정. 예: "매일 오전 9시에 데일리 리포트 작성" → execution:"llm-session", schedule:{at:"...",repeat:{kind:"daily"}}, prePrompt:"...".
-- **todo_session_write**: 한 턴 안에서 여러 단계를 거쳐야 하는 작업이면 다음 순서를 반드시 따르세요.
+- **todo_session_write**: 한 턴 안에서 여러 단계를 거쳐야 하는 작업이면 다음 원칙을 따르세요. **상태 갱신만을 위한 별도 라운드를 만들지 말고**, 상태 전환은 다음 작업 도구 호출과 **같은 메시지에 함께 실어**(병렬 tool call) 보내세요. 같은 라운드 안에서 실행되므로 SessionTodoPanel 은 그대로 실시간 갱신됩니다.
   완료된 세션 TO-DO 는 다음 명시 사용자 입력 또는 사용자 큐 자동 인입 턴 시작 시 자동으로 비워집니다. 완료되지 않은 계획은 이어서 보이므로, 같은 턴 안에서 기존 계획에 단계가 추가될 때만 새 항목을 삽입하고, 이미 있는 단계는 반드시 기존 id 로 수정하세요.
-  1. **계획 즉시 등록**: 단계 목록을 todo_session_write 로 전달해 전체 항목을 pending 으로 생성합니다.
-  2. **첫 번째 단계 시작 선언**: 계획 등록 직후, 다른 도구를 호출하기 **전에** todo_session_write 를 다시 호출해 첫 번째 항목을 in_progress 로 표시합니다.
-  3. **단계 완료 후 즉시 전환**: 각 도구 호출(또는 분석 단계)이 끝나면 해당 항목을 completed 로, 다음 항목을 in_progress 로 **같은 호출에** 업데이트합니다.
-  4. **마지막 단계 완료**: 모든 작업이 끝나면 마지막 항목도 completed 로 표시합니다.
-  5. **계획 변경 반영**: 새 단계가 생기면 beforeId/afterId 로 정확한 위치에 삽입하고, 필요 없어진 일부 단계는 status=deleted 로 제거합니다. 모든 항목을 삭제해 빈 계획을 만들지 말고, 작업이 끝난 항목은 completed 로 닫으세요. 순서를 바꿔야 하면 기존 id 와 beforeId/afterId 를 같이 보내 이동합니다.
+  1. **계획 등록 + 첫 단계 시작을 한 호출에**: 단계 목록을 todo_session_write 로 한 번에 전달하되 첫 항목은 in_progress, 나머지는 pending 으로 생성합니다. 등록과 첫 in_progress 를 두 라운드로 쪼개지 마세요.
+  2. **상태 전환은 다음 작업 호출에 동승**: 어떤 단계의 작업 도구 결과를 확인했으면, 그 항목을 completed 로 닫고 다음 항목을 in_progress 로 바꾸는 todo_session_write 를 **다음 작업 도구 호출과 같은 메시지에** 함께 넣습니다. 이미 결과를 본 뒤의 갱신이므로 completed 판정이 안전합니다.
+  3. **마지막 단계 완료**: 마지막 작업 결과를 확인한 뒤 그 항목을 completed 로 닫습니다.
+  4. **계획 변경 반영**: 새 단계가 생기면 beforeId/afterId 로 정확한 위치에 삽입하고, 필요 없어진 일부 단계는 status=deleted 로 제거합니다. 모든 항목을 삭제해 빈 계획을 만들지 말고, 작업이 끝난 항목은 completed 로 닫으세요. 순서를 바꿔야 하면 기존 id 와 beforeId/afterId 를 같이 보내 이동합니다.
 
-  **절대 금지**: pending 상태 항목이 남아 있는 채로 실제 작업 도구를 호출하지 마세요. 사용자는 SessionTodoPanel 에서 실시간으로 진행 상황을 확인하므로, 도구를 호출하기 전에 반드시 해당 단계를 in_progress 로 먼저 업데이트해야 합니다.
+  **하지 말 것**: 상태 갱신만을 목적으로 한 todo_session_write 단독 라운드를 작업 도구 호출 사이마다 끼워넣지 마세요 — 라운드 수가 배로 늘어 비용·지연이 커집니다. 상태 전환은 그다음 작업 호출에 동승시키세요. 다만 **아직 결과를 확인하지 않은 단계를 미리 completed 로 표시하지는 마세요.**
 
   **올바른 호출 순서 예시** (3단계 작업):
-  - [1] todo_session_write → 3개 항목 전체 pending 으로 등록
-  - [2] todo_session_write → 항목 1 을 in_progress 로 업데이트 (도구 호출 전)
-  - [3] 필요한 도구 호출 → 실제 작업 수행
-  - [4] todo_session_write → 항목 1 completed + 항목 2 in_progress 로 업데이트
-  - [5] 필요한 도구 호출 → 다음 작업 수행
-  - [6] todo_session_write → 항목 2 completed + 항목 3 in_progress 로 업데이트
-  - [7] ... 최종 단계 완료 후 항목 3 completed
+  - [1] todo_session_write → 3개 항목 등록 (항목 1 = in_progress, 항목 2·3 = pending)
+  - [2] 항목 1 작업 도구 호출 → 실제 작업 수행
+  - [3] 항목 2 작업 도구 호출 **+** todo_session_write(항목 1 completed, 항목 2 in_progress) — 한 메시지에 함께
+  - [4] 항목 3 작업 도구 호출 **+** todo_session_write(항목 2 completed, 항목 3 in_progress) — 한 메시지에 함께
+  - [5] todo_session_write → 항목 3 completed (마지막 결과 확인 후)
 
   사용자 task_* 와 다른 임시(세션) 체크리스트입니다.
 - **agent_list**: ~/.lvis/agents/ 에 등록된 agent profile 목록을 확인합니다.
