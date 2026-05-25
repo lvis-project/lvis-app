@@ -87,6 +87,24 @@ describe("SkillStore — C2 traversal & allowlist", () => {
     }
   });
 
+  it("rejects frontmatter `name:` that does not match the skill file id", async () => {
+    const dir = mkdtempSync(join(tmpdir(), "lvis-skills-"));
+    try {
+      writeFileSync(
+        join(dir, "actual-id.md"),
+        "---\nname: other-id\n---\nbody",
+        "utf-8",
+      );
+      const store = new SkillStore({ userDir: dir });
+      const all = await store.list();
+      expect(all.find((s) => s.name === "other-id")).toBeUndefined();
+      expect(store.listCatalogSync()).toEqual([]);
+      expect(await store.load("actual-id")).toBeNull();
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
   it("rejects bodies larger than the SKILL_MAX_BODY_BYTES cap", async () => {
     const dir = mkdtempSync(join(tmpdir(), "lvis-skills-"));
     try {
@@ -127,11 +145,47 @@ describe("SkillStore — C2 traversal & allowlist", () => {
     );
     for (const skill of all) {
       expect(skill.description.length).toBeGreaterThan(0);
-      expect(skill.triggers.length).toBeGreaterThan(0);
       expect(
         Buffer.byteLength(skill.body, "utf-8"),
         `built-in skill '${skill.name}' body exceeds SKILL_MAX_BODY_BYTES`,
       ).toBeLessThanOrEqual(SKILL_MAX_BODY_BYTES);
+    }
+  });
+
+  it("returns a lightweight catalog without exposing skill bodies", () => {
+    const dir = mkdtempSync(join(tmpdir(), "lvis-skills-"));
+    try {
+      writeFileSync(
+        join(dir, "brief.md"),
+        "---\nname: brief\ndescription: Short brief\n---\nSECRET BODY",
+        "utf-8",
+      );
+      const store = new SkillStore({ userDir: dir });
+      const catalog = store.listCatalogSync();
+      expect(catalog).toEqual([{
+        name: "brief",
+        description: "Short brief",
+      }]);
+      expect(JSON.stringify(catalog)).not.toContain("SECRET BODY");
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
+  it("catalog reads only frontmatter and keeps metadata for oversized bodies", () => {
+    const dir = mkdtempSync(join(tmpdir(), "lvis-skills-"));
+    try {
+      writeFileSync(
+        join(dir, "huge.md"),
+        `---\nname: huge\ndescription: Huge but discoverable\n---\n${"x".repeat(SKILL_MAX_BODY_BYTES + 1)}`,
+        "utf-8",
+      );
+      const store = new SkillStore({ userDir: dir });
+      const catalog = store.listCatalogSync();
+      expect(catalog).toEqual([{ name: "huge", description: "Huge but discoverable" }]);
+      expect(JSON.stringify(catalog)).not.toContain("x".repeat(100));
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
     }
   });
 
@@ -141,14 +195,35 @@ describe("SkillStore — C2 traversal & allowlist", () => {
       mkdirSync(join(dir, "git-release"), { recursive: true });
       writeFileSync(
         join(dir, "git-release", "SKILL.md"),
-        "---\nname: git-release\ndescription: Create releases\ntriggers: [release, tag]\n---\n## Release\nShip it.",
+        "---\nname: git-release\ndescription: Create releases\n---\n## Release\nShip it.",
         "utf-8",
       );
       const store = new SkillStore({ userDir: dir });
       const skill = await store.load("git-release");
       expect(skill?.description).toBe("Create releases");
-      expect(skill?.triggers).toEqual(["release", "tag"]);
       expect(skill?.body).toContain("Ship it.");
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
+  it("refuses ambiguous skill_load when both directory and flat-file ids exist", async () => {
+    const dir = mkdtempSync(join(tmpdir(), "lvis-skills-"));
+    try {
+      mkdirSync(join(dir, "duplicate"), { recursive: true });
+      writeFileSync(
+        join(dir, "duplicate", "SKILL.md"),
+        "---\nname: duplicate\ndescription: directory\n---\ndirectory body",
+        "utf-8",
+      );
+      writeFileSync(
+        join(dir, "duplicate.md"),
+        "---\nname: duplicate\ndescription: flat\n---\nflat body",
+        "utf-8",
+      );
+      const store = new SkillStore({ userDir: dir });
+
+      expect(await store.load("duplicate")).toBeNull();
     } finally {
       rmSync(dir, { recursive: true, force: true });
     }

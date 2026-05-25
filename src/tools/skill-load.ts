@@ -1,8 +1,8 @@
 /**
  * `skill_load` LLM tool — loads a skill (markdown w/ frontmatter) and
- * registers it as a system-prompt overlay for the current session. The
+ * registers it as a system-prompt overlay for the current user turn. The
  * renderer surfaces a SkillBadge ("🎯 Skill loaded: <name>") at the call
- * site so the user sees which skills are active for the rest of the chat.
+ * site so the user sees which skills were loaded for the active turn.
  *
  * Security model (post C2 review + #1104 file-seed migration):
  *   - Skill bodies are NEVER appended to conversation history as `user`-role
@@ -38,7 +38,7 @@ export interface SkillLoadEvent {
 
 export interface SkillLoadToolDeps {
   store: SkillStore;
-  /** Per-session overlay registry — read by SystemPromptBuilder each turn. */
+  /** Current-turn overlay registry — read by SystemPromptBuilder each round. */
   overlay: SkillOverlay;
   /** Persistent allowlist for user-authored skills. */
   approvals: SkillApprovalsStore;
@@ -52,8 +52,8 @@ export function createSkillLoadTool(deps: SkillLoadToolDeps): Tool {
   return createDynamicTool({
     name: "skill_load",
     description:
-      "이름으로 skill 을 로드해 다음 턴부터 시스템 프롬프트에 주입합니다. " +
-      "Skill 은 ~/.lvis/skills/<name>/SKILL.md (또는 legacy <name>.md, YAML frontmatter + markdown). " +
+      "이름으로 skill body 를 승인 후 현재 사용자 턴의 후속 라운드에만 주입합니다. " +
+      "Skill 은 ~/.lvis/skills/<name>/SKILL.md 또는 ~/.lvis/skills/<name>.md (YAML frontmatter + markdown). " +
       "처음 로드되는 user skill 은 사용자 승인을 요구하며, 승인은 영구 저장됩니다. " +
       "성공 시 { loaded: true, skillName, summary } 반환.",
     source: "builtin",
@@ -72,7 +72,7 @@ export function createSkillLoadTool(deps: SkillLoadToolDeps): Tool {
       properties: {
         skillName: {
           type: "string",
-          description: "로드할 skill 이름 (frontmatter 의 name 또는 파일명).",
+          description: "로드할 skill 이름 (파일/디렉터리명과 frontmatter name 이 일치해야 함).",
         },
         args: {
           type: "object",
@@ -136,7 +136,7 @@ export function createSkillLoadTool(deps: SkillLoadToolDeps): Tool {
           toolName: "skill_load",
           toolCategory: "meta",
           args: { skillName: skill.name },
-          reason: `skill '${skill.name}' 을 시스템 프롬프트에 주입합니다. 승인 시 영구적으로 허용됩니다. (현재 본문 sha256 에 바인딩됩니다 — 본문이 변경되면 다시 확인합니다.)`,
+          reason: `skill '${skill.name}' body 를 현재 사용자 턴의 후속 라운드에만 주입합니다. 승인 기록은 영구 저장되며 현재 본문 sha256 에 바인딩됩니다 — 본문이 변경되면 다시 확인합니다.`,
           source: "builtin",
           createdAt: Date.now(),
         });
@@ -175,9 +175,9 @@ export function createSkillLoadTool(deps: SkillLoadToolDeps): Tool {
           isError: true,
         };
       }
-      // Register in the per-session overlay. SystemPromptBuilder reads from
-      // this on every subsequent turn — the next assistant round will see
-      // the skill body inside <lvis-active-skills>…</lvis-active-skills>.
+      // Register in the current-turn overlay. SystemPromptBuilder reads this
+      // on subsequent assistant rounds, and ConversationLoop clears it at the
+      // user-turn boundary so the body does not become ambient session context.
       deps.overlay.register(sessionId, skill);
 
       deps.emit({
