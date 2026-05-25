@@ -121,4 +121,63 @@ describe("PluginRuntime — active/inactive toggle (#1176)", () => {
     await runtime.startAll();
     await expect(runtime.setPluginEnabled("nope", false)).rejects.toThrow("Plugin not found: nope");
   });
+
+  /**
+   * M1 cross-restart regression — #1176.
+   *
+   * Scenario: user disables a plugin, app restarts. Before the fix, the boot
+   * LOAD gate (registry filter + snapshots.ts) would skip loading the plugin
+   * entirely, leaving inactivePluginIds empty. As a result:
+   *   - isPluginEnabled("se-plugin") returned true (false negative)
+   *   - setPluginEnabled("se-plugin", true) threw "Plugin not found"
+   *
+   * After the fix, ALL installed plugins are loaded regardless of enabled=false;
+   * inactivePluginIds is seeded at boot from the persisted enabled=false value.
+   */
+  describe("cross-restart: boot from persisted enabled=false", () => {
+    let disabledCalls: string[];
+    let enabledCalls: string[];
+    let runtime: ReturnType<typeof makeRuntime>;
+
+    beforeEach(async () => {
+      // Persist enabled=false in the registry BEFORE boot (simulates a restart
+      // after the user previously disabled the plugin).
+      await writeFile(
+        registryPath,
+        JSON.stringify({ version: 1, plugins: [{ id: "se-plugin", manifestPath, enabled: false }] }),
+        "utf-8",
+      );
+      disabledCalls = [];
+      enabledCalls = [];
+      runtime = makeRuntime({
+        onDisable: (id) => disabledCalls.push(id),
+        onEnable: (id) => enabledCalls.push(id),
+      });
+      await runtime.startAll();
+    });
+
+    it("(a) plugin IS loaded despite enabled=false", () => {
+      // The plugin should appear in listPluginIds (loaded into memory).
+      expect(runtime.listPluginIds()).toContain("se-plugin");
+    });
+
+    it("(b) isPluginEnabled returns false immediately after boot", () => {
+      expect(runtime.isPluginEnabled("se-plugin")).toBe(false);
+    });
+
+    it("(c) tools are absent from schema and catalog, and onDisable fired at boot", () => {
+      // onDisable must have fired during load so the boot handler can
+      // unregister tools from the registry.
+      expect(disabledCalls).toContain("se-plugin");
+    });
+
+    it("(d) setPluginEnabled(true) succeeds and fires onEnable (re-enable after restart)", async () => {
+      // Before the M1 fix this threw "Plugin not found: se-plugin".
+      await expect(runtime.setPluginEnabled("se-plugin", true)).resolves.toBeUndefined();
+      expect(runtime.isPluginEnabled("se-plugin")).toBe(true);
+      expect(enabledCalls).toContain("se-plugin");
+      const card = runtime.listPluginCards().find((c) => c.id === "se-plugin");
+      expect(card?.loadStatus).toBe("loaded");
+    });
+  });
 });

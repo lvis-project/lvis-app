@@ -22,9 +22,11 @@ blew the 200K TPM ceiling (429). Eager exposure of an active plugin's whole suit
   in `src/shared/tool-exposure-policy.ts`). *Eligible* counts only active-plugin + in-scope MCP tools; **builtins
   and meta-tools are always eager and never counted**. Below the ceiling → eager full-schema exposure, empty
   catalog, zero `tool_search`. At/above it → the per-tool deferral mechanism described below.
-- **Plugin active/inactive state** (`PluginRegistryEntry.enabled`; `enabled !== false` = active) gates exposure:
-  an inactive plugin stays loaded but its tools are dropped from the per-turn scope. This is the deliberate TPM
-  lever — disable a heavy plugin to shrink the turn's tool surface.
+- **Plugin active/inactive state** is managed via two cooperating layers (NOT a single mechanism):
+  1. **`PluginRuntime.inactivePluginIds`** (in-memory Set, SOT): populated at boot from `PluginRegistryEntry.enabled === false` and toggled at runtime by `setPluginEnabled()`. `isPluginEnabled(id)` reads this Set — never the persisted registry field — so the per-turn scope gate is always correct after a restart.
+  2. **`onDisable` tool-unregistration** (`boot/steps/plugin-runtime.ts`): when a plugin becomes inactive (at boot for `enabled=false` entries, or at runtime via `setPluginEnabled(false)`) the `onDisable` hook fires `toolRegistry.unregisterByPlugin(id)` + `keywordEngine.unregisterByPlugin(id)`. This removes the plugin's tools from the registry's visible set so they are absent from schema AND catalog.
+  
+  Together: inactive plugin stays fully loaded in memory (no stop/reload churn), its tools are absent from the registry visible set and from the per-turn scope. `setPluginEnabled(true)` fires `onEnable`, which re-registers tools and keywords. This is the deliberate TPM lever — disable a heavy plugin to shrink the turn's tool surface.
 - The **"do not reintroduce full-schema loading" directive is retired.** Full-schema loading *is* the default
   again below the ceiling. The dead `settings.experimental.toolDeferral` flag (never read at runtime after the
   unconditional cutover) was removed — there is no settings branch; the count-based gate is the only switch.

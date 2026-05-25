@@ -599,7 +599,7 @@ export class PluginRuntime {
           : (err as NodeJS.ErrnoException).code === "ENOENT" ? "manifest_missing"
           : "manifest_read";
         plog("error", { pluginId, phase: PluginPhase.VALIDATION_FAIL, err, reason }, `manifest read failed: ${(err as Error).message}`);
-        if (plan.enabled && plan.pluginIdHint) {
+        if (plan.pluginIdHint) {
           this.markFailed(plan.pluginIdHint, {
             name: plan.pluginIdHint,
             description: "Plugin manifest could not be loaded.",
@@ -614,10 +614,17 @@ export class PluginRuntime {
         enabledManifestSnapshots.get(manifest.id)?.approvedPluginAccess ?? plan.approvedPluginAccess;
       this.knownPluginManifests.set(manifest.id, manifest);
       this.failedPluginStubs.delete(manifest.id);
+      // #1176 M1 fix: inactive plugins (enabled=false) are LOADED just like
+      // active ones — only tool exposure is gated.  We seed inactivePluginIds
+      // here so isPluginEnabled() is correct immediately after boot, even
+      // before any setPluginEnabled() call.  After the plugin finishes loading
+      // (see the onDisable call below) its tools are unregistered via the
+      // existing onDisable hook wired in boot/steps/plugin-runtime.ts.
       if (!plan.enabled) {
-        this.disabledPluginIds.add(manifest.id);
-        this.failedPluginIds.delete(manifest.id);
-        continue;
+        this.inactivePluginIds.add(manifest.id);
+      } else {
+        // Ensure a previously-inactive plugin becomes active on re-enable.
+        this.inactivePluginIds.delete(manifest.id);
       }
       this.disabledPluginIds.delete(manifest.id);
       this.failedPluginIds.delete(manifest.id);
@@ -727,6 +734,13 @@ export class PluginRuntime {
       this.failedPluginIds.delete(manifest.id);
       this.disabledPluginIds.delete(manifest.id);
       plog("debug", { pluginId: manifest.id, phase: PluginPhase.LOAD_OK }, "plugin loaded");
+      // #1176 M1 fix: fire onDisable immediately after loading an inactive
+      // plugin so the boot-wired handler (boot/steps/plugin-runtime.ts)
+      // calls toolRegistry.unregisterByPlugin + keywordEngine.unregisterByPlugin.
+      // This is the same path taken by runtime setPluginEnabled(false).
+      if (this.inactivePluginIds.has(manifest.id)) {
+        this.onDisable?.(manifest.id);
+      }
     }
     this.loaded = true;
   }
