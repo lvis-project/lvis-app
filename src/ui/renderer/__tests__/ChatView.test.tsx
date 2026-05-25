@@ -988,6 +988,57 @@ describe("ChatView", () => {
     });
   });
 
+  it("keeps the accepted final assistant visible when a late delta arrives after end_turn", async () => {
+    const { container, emitChatStream } = await renderApp({ hasApiKey: true });
+    await submitChatMessage(container, "서브에이전트 병렬 검증");
+    const finalText = "병렬 검증 완료했습니다.\n\n결론만 먼저 말하면 인덱서, 미팅, 아웃룩 모두 확인되었습니다.";
+
+    await act(async () => {
+      emitChatStream({ type: "text_delta", text: "먼저 도구를 확인하겠습니다" });
+      emitChatStream({
+        type: "assistant_round",
+        text: "먼저 도구를 확인하겠습니다",
+        thought: "",
+        stopReason: "tool_use",
+        hasToolCalls: true,
+      });
+      emitChatStream({ type: "tool_start", name: "agent_spawn", groupId: "g1", toolUseId: "t1" });
+      emitChatStream({
+        type: "tool_end",
+        name: "agent_spawn",
+        groupId: "g1",
+        toolUseId: "t1",
+        result: "ok",
+        isError: false,
+      });
+      emitChatStream({ type: "text_delta", text: finalText });
+      emitChatStream({
+        type: "assistant_round",
+        text: finalText,
+        thought: "",
+        stopReason: "end_turn",
+        hasToolCalls: false,
+      });
+      emitChatStream({
+        type: "assistant_round",
+        text: ".",
+        thought: "",
+        stopReason: "end_turn",
+        hasToolCalls: false,
+      });
+      emitChatStream({ type: "text_delta", text: "." });
+      emitChatStream({ type: "done" });
+    });
+
+    await waitFor(() => {
+      expect(container.textContent).toContain("병렬 검증 완료했습니다.");
+      const assistantBodies = Array.from(container.querySelectorAll('[data-testid="assistant-message-body"]'))
+        .map((body) => body.textContent ?? "");
+      expect(assistantBodies.some((text) => text.includes("병렬 검증 완료했습니다."))).toBe(true);
+      expect(assistantBodies.some((text) => text.trim() === ".")).toBe(false);
+    });
+  });
+
   it("hydrates current-session backlog history on mount", async () => {
     const { container } = await renderApp({
       hasApiKey: true,

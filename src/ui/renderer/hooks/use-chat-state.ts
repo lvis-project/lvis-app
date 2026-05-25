@@ -45,6 +45,9 @@ export function useChatState(api: LvisApi) {
   const thoughtRef = useRef("");
   const activeStreamIdRef = useRef<number | null>(null);
   const streamingRequestRef = useRef(0);
+  // Final assistant text is canonical at assistant_round(end_turn). Later
+  // deltas in the same stream are protocol tail noise, not a new response.
+  const finalAssistantRoundClosedRef = useRef(false);
 
   const [editingEntryIdx, setEditingEntryIdx] = useState<number | null>(null);
   const [editBusy, setEditBusy] = useState(false);
@@ -147,12 +150,28 @@ export function useChatState(api: LvisApi) {
           return upsertStreamingAssistant(base, message);
         });
       } else if (ev.type === "text_delta" && ev.text) {
+        if (finalAssistantRoundClosedRef.current) {
+          if (debugStreamEnabled) {
+            debugLog("stream", "text_delta:ignored-after-final-round", {
+              textLen: ev.text.length,
+            });
+          }
+          return;
+        }
         setEntries((p) => {
           streamRef.current += ev.text!;
           const base = p;
           return upsertStreamingAssistant(base, streamRef.current);
         });
       } else if (ev.type === "reasoning_delta" && ev.text) {
+        if (finalAssistantRoundClosedRef.current) {
+          if (debugStreamEnabled) {
+            debugLog("stream", "reasoning_delta:ignored-after-final-round", {
+              textLen: ev.text.length,
+            });
+          }
+          return;
+        }
         thoughtRef.current += ev.text;
         setEntries((p) => {
           const base = p;
@@ -203,21 +222,31 @@ export function useChatState(api: LvisApi) {
             stopReason: ev.stopReason,
           });
         }
+        const phase = ev.stopReason === "tool_use" || ev.hasToolCalls ? "work" : "final";
+        if (finalAssistantRoundClosedRef.current) {
+          if (debugStreamEnabled) {
+            debugLog("stream", "assistant_round:ignored-after-final-round", {
+              evTextLen: ev.text?.length ?? 0,
+              evThoughtLen: ev.thought?.length ?? 0,
+              phase,
+            });
+          }
+          return;
+        }
         setEntries((p) => {
           const base = p;
           const beforeCount = base.length;
           let next = finalizeStreamingReasoning(base, ev.thought ?? thoughtRef.current);
           const afterReasoningCount = next.length;
-           // Bugfix #561 follow-up: empty-string `ev.text` from the engine
-           // would be picked by the previous `ev.text ?? streamRef.current`
-           // form (since `""` is not nullish), erasing the renderer's
-           // accumulated body and leaving the assistant entry blank. Use
-           // `||` so an empty string falls through to the delta-accumulated
-           // `streamRef.current` instead of overwriting body content.
+          // Bugfix #561 follow-up: empty-string `ev.text` from the engine
+          // would be picked by the previous `ev.text ?? streamRef.current`
+          // form (since `""` is not nullish), erasing the renderer's
+          // accumulated body and leaving the assistant entry blank. Use
+          // `||` so an empty string falls through to the delta-accumulated
+          // `streamRef.current` instead of overwriting body content.
           const rawText = ev.text || streamRef.current;
           const detected = detectFromStream(rawText);
           const finalText = visibleAssistantText(detected.cleanedText);
-          const phase = ev.stopReason === "tool_use" || ev.hasToolCalls ? "work" : "final";
           next = finalizeStreamingAssistant(next, finalText, { phase, overrideText: finalText });
           const afterAssistantCount = next.length;
           if (debugStreamEnabled) {
@@ -234,6 +263,7 @@ export function useChatState(api: LvisApi) {
           }
           return next;
         });
+        finalAssistantRoundClosedRef.current = phase === "final";
         streamRef.current = "";
         thoughtRef.current = "";
       } else if (ev.type === "tool_start" && ev.name && ev.groupId && ev.toolUseId !== undefined) {
@@ -283,6 +313,7 @@ export function useChatState(api: LvisApi) {
         streamRef.current = "";
         thoughtRef.current = "";
         activeStreamIdRef.current = null;
+        finalAssistantRoundClosedRef.current = false;
       } else if (ev.type === "redact_notice") {
         // user draft 에서 PII 가 리댁트되었음을 알리는 시스템 배지.
         const count = (ev as unknown as { count?: number }).count ?? 0;
@@ -378,7 +409,16 @@ export function useChatState(api: LvisApi) {
             route: ev.route,
           });
         }
-        if (streamRef.current || thoughtRef.current) {
+        if (finalAssistantRoundClosedRef.current) {
+          setEntries((p) => dropPermissionReviewEntries(dropPendingLlmStatusAssistant(p)));
+          if (debugStreamEnabled) {
+            debugLog("stream", "done:skip-finalize", {
+              reason: "final assistant_round already closed",
+            });
+          }
+          streamRef.current = "";
+          thoughtRef.current = "";
+        } else if (streamRef.current || thoughtRef.current) {
           const doneRoute = ev.route;
           // Strip <title>...</title> and [checkpoint] markers.
           // that may have been streamed as raw deltas before post-turn cleanup.
@@ -420,6 +460,7 @@ export function useChatState(api: LvisApi) {
           }
         }
         activeStreamIdRef.current = null;
+        finalAssistantRoundClosedRef.current = false;
       }
     };
     const unsub = api.onChatStream(handleStreamEvent);
@@ -517,6 +558,7 @@ export function useChatState(api: LvisApi) {
 
   const beginStreamingRequest = useCallback(() => {
     const requestId = ++streamingRequestRef.current;
+    finalAssistantRoundClosedRef.current = false;
     if (isDebugStreamEnabled()) {
       debugLog("stream", "BEGIN", {
         requestId,
@@ -555,6 +597,7 @@ export function useChatState(api: LvisApi) {
         streamRef.current = "";
         thoughtRef.current = "";
         activeStreamIdRef.current = null;
+        finalAssistantRoundClosedRef.current = false;
         const res = await api.chatEditResend(histIdx, newText);
         if (!res?.ok) {
           failed = true;
@@ -598,6 +641,7 @@ export function useChatState(api: LvisApi) {
     streamRef.current = "";
     thoughtRef.current = "";
     activeStreamIdRef.current = null;
+    finalAssistantRoundClosedRef.current = false;
     try {
       const res = await api.chatRetryEffort({
         enableThinking: true,
@@ -626,6 +670,7 @@ export function useChatState(api: LvisApi) {
     streamRef.current = "";
     thoughtRef.current = "";
     activeStreamIdRef.current = null;
+    finalAssistantRoundClosedRef.current = false;
   }, []);
 
   // Used by handleAsk error path to show an error bubble with the current thought.
@@ -634,10 +679,12 @@ export function useChatState(api: LvisApi) {
     streamRef.current = "";
     thoughtRef.current = "";
     activeStreamIdRef.current = null;
+    finalAssistantRoundClosedRef.current = false;
   }, []);
 
   // ── Intent methods (replace raw setEntries) ──
   const seedRoutineEntries = useCallback((seeded: ChatEntry[]) => {
+    finalAssistantRoundClosedRef.current = false;
     setEntries(seeded);
   }, []);
 
@@ -646,6 +693,7 @@ export function useChatState(api: LvisApi) {
     streamRef.current = "";
     thoughtRef.current = "";
     activeStreamIdRef.current = null;
+    finalAssistantRoundClosedRef.current = false;
     // New chat: any prior session's in-flight compact indicator is stale.
     setIsCompacting(false);
     setCompactTriggerSource(null);
@@ -665,6 +713,7 @@ export function useChatState(api: LvisApi) {
     streamRef.current = "";
     thoughtRef.current = "";
     activeStreamIdRef.current = null;
+    finalAssistantRoundClosedRef.current = false;
     appendAssistantStatus("이 지점부터 다시 시작했습니다. 마지막 질문에 대한 답변을 이어서 생성합니다.");
     try {
       const res = await api.chatContinueLastUser(sessionId);
@@ -687,11 +736,16 @@ export function useChatState(api: LvisApi) {
     // Session switch: clear any in-flight compact indicator. If a compact
     // was running in the previous session, its compact_notice may never
     // arrive for this hook instance — the StatusBar hint would stick.
+    streamRef.current = "";
+    thoughtRef.current = "";
+    activeStreamIdRef.current = null;
+    finalAssistantRoundClosedRef.current = false;
     setIsCompacting(false);
     setEntries(loaded);
   }, []);
 
   const applyInitialSession = useCallback((loaded: ChatEntry[]) => {
+    finalAssistantRoundClosedRef.current = false;
     setEntries((current) => (current.length === 0 ? loaded : current));
   }, []);
 
@@ -700,6 +754,10 @@ export function useChatState(api: LvisApi) {
     // compact was mid-flight, its `compact_notice` will land in a different
     // streaming context (or never arrive for this hook instance), so clear
     // the indicator here too — same class as applyLoadedSession / clearForNewChat.
+    streamRef.current = "";
+    thoughtRef.current = "";
+    activeStreamIdRef.current = null;
+    finalAssistantRoundClosedRef.current = false;
     setIsCompacting(false);
     setEntries((p) => p.slice(0, entryIndex + 1));
   }, []);
