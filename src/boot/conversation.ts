@@ -109,6 +109,12 @@ export function createPostTurnHookChain(opts: {
    * trails stay unified. When omitted, a new logger is created.
    */
   auditLogger?: AuditLogger;
+  /**
+   * Same SessionTodoStore instance the conversation loop holds — the hook
+   * marks a completed plan here and the loop's `clearIfPending` executes it at
+   * the next turn boundary.
+   */
+  sessionTodoStore?: SessionTodoStore;
 }): { postTurnHookChain: PostTurnHookChain; auditLogger: AuditLogger } {
   // §4.5 + Agent 6: PostTurnHookChain 조립
   const auditLogger = opts.auditLogger ?? new AuditLogger();
@@ -117,6 +123,7 @@ export function createPostTurnHookChain(opts: {
     auditLogger,
     idleScheduler: opts.idleScheduler,
     settingsService: opts.settingsService,
+    sessionTodoStore: opts.sessionTodoStore,
   });
   return { postTurnHookChain, auditLogger };
 }
