@@ -88,14 +88,10 @@ export function syncPluginToolRegistry(
     ...toolRegistry.listPluginIds(),
     ...entries.map(({ pluginId }) => pluginId),
   ]);
-  // #1176 M3: inactive plugins (isPluginEnabled===false) must not have their
-  // tools registered in the registry. Their tools are absent from the per-turn
-  // scope via resolveToolScope, but non-scoped reads (getVisibleTools, boot
-  // log, system-prompt Source 5 scope===undefined fallback) would leak them
-  // without this filter. The onEnable path (syncPluginToolRegistryForPlugin)
-  // registers tools when the plugin is re-activated.
-  const activeEntries = entries.filter(({ pluginId }) => pluginRuntime.isPluginEnabled(pluginId));
-  const tools = pluginToolsForRuntimeEntries(pluginRuntime, activeEntries);
+  // ToolRegistry is the execution registry, not the model-exposure SOT.
+  // Inactive runtime-loaded plugins keep tools registered so auth/config/UI
+  // calls remain callable; ConversationLoop scope gates model visibility.
+  const tools = pluginToolsForRuntimeEntries(pluginRuntime, entries);
   toolRegistry.replacePluginTools(pluginIds, tools);
 }
 

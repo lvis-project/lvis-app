@@ -85,6 +85,10 @@ export type PluginCardSummary = {
   /** Install policy from the plugin manifest: "admin" (IT-managed only) or "user" (anyone). */
   installPolicy?: "admin" | "user";
   loadStatus?: "loaded" | "preparing" | "failed" | "disabled";
+  /** Whether the plugin's tools are currently exposed to the model. */
+  active?: boolean;
+  /** Whether the plugin instance is loaded and callable even when inactive. */
+  runtimeLoaded?: boolean;
   preparationStatus?: {
     phase: string;
     message: string;

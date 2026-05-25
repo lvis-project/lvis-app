@@ -2573,7 +2573,10 @@ export class ConversationLoop {
         turnExpansions: pluginExpansions,
         sessionExpansions: this.sessionPluginExpansions,
         activePluginIds: scope.activePluginIds,
-        availablePluginIds: this.filterAllowedPluginIds(this.deps.pluginRuntime?.listPluginIds() ?? []),
+        availablePluginIds: this.filterAllowedPluginIds(
+          (this.deps.pluginRuntime?.listPluginIds() ?? [])
+            .filter((pluginId) => this.deps.pluginRuntime?.isPluginEnabled?.(pluginId) !== false),
+        ),
       });
       pluginExpansions = pluginOutcome.nextTurnExpansions;
       this.sessionPluginExpansions = pluginOutcome.nextSessionExpansions;
@@ -2581,6 +2584,7 @@ export class ConversationLoop {
       // 활성화 성공했으면 tool schema 재빌드 + 추가된 tool 수 보고
       const rebuiltAfterPlugin = pluginOutcome.activatedPluginIds.length > 0;
       if (rebuiltAfterPlugin) {
+        scope.deferral = this.shouldDeferToolSchemas(scope.activePluginIds);
         toolSchemas = this.rebuildToolSchemas(scope);
       }
       const catalogCountAfterPlugin = this.deps.toolRegistry.getToolCatalogForScope(scope).length;
@@ -2620,6 +2624,11 @@ export class ConversationLoop {
         turnSearches: toolSearches,
         sessionSearches: this.sessionToolSearches,
         activeToolNames: scope.activeToolNames,
+        loadedToolNames: new Set(toolSchemas.map((tool) => tool.name)),
+        loadedTools: toolSchemas.map((tool) => ({
+          name: tool.name,
+          description: tool.description,
+        })),
         catalog: this.deps.toolRegistry.getToolCatalogForScope(scope),
       });
       toolSearches = searchOutcome.nextTurnSearches;
@@ -3356,8 +3365,7 @@ export class ConversationLoop {
     // Below the ceiling the turn exposes every eligible tool's full schema so
     // the model needs zero `tool_search` discovery rounds; at/above it the turn
     // falls back to deferral so a very large surface does not flood context.
-    const eligibleCount = this.scopedToolNameSet(activePluginIds).size;
-    const deferral = eligibleCount >= EAGER_TOOL_EXPOSURE_CEILING;
+    const deferral = this.shouldDeferToolSchemas(activePluginIds);
 
     // (B) keyword→tool preload ∪ carried-forward loaded tools ∪ explicit
     // fixed-surface allowlist. Keyword/carry-forward entries are restricted to
@@ -3378,7 +3386,7 @@ export class ConversationLoop {
     for (const name of resetCarryForward ? [] : (this.lastTurnToolNames ?? [])) {
       if (inScopeToolNames.has(name)) activeToolNames.add(name);
     }
-    const registeredToolNames = new Set(this.deps.toolRegistry.listAll().map((tool) => tool.name));
+    const registeredToolNames = new Set(this.deps.toolRegistry.getVisibleTools().map((tool) => tool.name));
     for (const name of this.deps.forcedActiveToolNames ?? []) {
       if (registeredToolNames.has(name)) {
         activeToolNames.add(name);
@@ -3406,7 +3414,7 @@ export class ConversationLoop {
   private scopedToolNameSet(activePluginIds: Set<string>): Set<string> {
     const includeMcp = this.deps.headless !== true;
     const names = new Set<string>();
-    for (const tool of this.deps.toolRegistry.listAll()) {
+    for (const tool of this.deps.toolRegistry.getVisibleTools()) {
       if (tool.source === "plugin") {
         if (tool.pluginId && activePluginIds.has(tool.pluginId)) names.add(tool.name);
       } else if (tool.source === "mcp" && includeMcp) {
@@ -3414,6 +3422,10 @@ export class ConversationLoop {
       }
     }
     return names;
+  }
+
+  private shouldDeferToolSchemas(activePluginIds: Set<string>): boolean {
+    return this.scopedToolNameSet(activePluginIds).size >= EAGER_TOOL_EXPOSURE_CEILING;
   }
 
   private filterAllowedPluginIds(pluginIds: string[]): string[] {

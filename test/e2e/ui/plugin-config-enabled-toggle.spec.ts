@@ -1,15 +1,16 @@
 import { test, expect } from './fixtures';
 import { openSettingsWindow, closeSettingsWindow } from './settings-window';
 
+test.use({ seedTogglePlugin: true, seedRepositoryPlugins: false });
+
 /**
  * #1176 — PluginConfigTab active/inactive Switch.
  *
  * Opens the native settings window at the plugin-config tab, selects a LOADED
  * plugin (its toggle is enabled), and toggles its active/inactive Switch.
- * Verifies the card's loadStatus badge flips to "비활성" (disabled) and back to
- * "로드됨" (loaded) — the renderer-visible signal that the plugin's tools are
- * hidden / re-exposed. Skips cleanly when no loaded plugin is seeded (e.g. all
- * seeded plugins are in a preparing/failed runtime state) or none are seeded.
+ * Verifies the selected plugin's own loadStatus badge flips to "비활성"
+ * (disabled) and back to "로드됨" (loaded), and that the model-tool visibility
+ * note is scoped to that same plugin.
  */
 test('plugin-config Switch toggles a loaded plugin active/inactive and back', async ({ app, mainWindow }) => {
   const settings = await openSettingsWindow(app, mainWindow, 'plugin-config');
@@ -19,51 +20,30 @@ test('plugin-config Switch toggles a loaded plugin active/inactive and back', as
       .waitFor({ state: 'visible', timeout: 15_000 })
       .then(() => true)
       .catch(() => false);
-    test.skip(!hasToggle, 'No installed plugin with an enable toggle — skipping.');
+    expect(hasToggle, 'Expected at least one runtime-loaded plugin with an active-state toggle').toBe(true);
 
-    // Walk the plugin list and select the first plugin whose detail toggle is
-    // ENABLED (loaded). Preparing/failed plugins render a disabled toggle and
-    // cannot be toggled — skip past them. The plugin list is a column of
-    // <button> rows showing name + status badge.
-    const rows = settings.locator('button:has(span)').filter({ hasText: /.+/ });
-    const rowCount = await rows.count();
-
-    let pluginId = '';
-    for (let i = 0; i < rowCount && !pluginId; i += 1) {
-      await rows.nth(i).click().catch(() => {});
-      const toggle = settings.locator('[data-testid^="plugin-config:enabled-toggle:"]').first();
-      const visible = await toggle
-        .waitFor({ state: 'visible', timeout: 3_000 })
-        .then(() => true)
-        .catch(() => false);
-      if (!visible) continue;
-      const isDisabled = await toggle.isDisabled().catch(() => true);
-      if (!isDisabled) {
-        pluginId = (await toggle.getAttribute('data-testid'))?.replace(
-          'plugin-config:enabled-toggle:',
-          '',
-        ) ?? '';
-      }
-    }
-
-    test.skip(pluginId.length === 0, 'No loaded plugin available to toggle in this environment — skipping.');
+    const pluginId = 'e2e-toggle-plugin';
+    await settings.locator(`[data-testid="plugin-config:row:${pluginId}"]`).click();
 
     const toggle = settings.locator(`[data-testid="plugin-config:enabled-toggle:${pluginId}"]`);
-    const disabledBadge = settings.getByText('비활성', { exact: true }).first();
-    const loadedBadge = settings.getByText('로드됨', { exact: true }).first();
+    const detailStatus = settings.locator(`[data-testid="plugin-config:detail-status:${pluginId}"]`);
+    const hiddenNote = settings.locator(`[data-testid="plugin-config:tools-hidden-note:${pluginId}"]`);
 
     // Initial state: active (loaded), switch checked.
     await expect(toggle).toHaveAttribute('data-state', 'checked');
+    await expect(detailStatus).toHaveText(/로드됨/);
 
     // Disable → loadStatus flips to "비활성", tools hidden.
     await toggle.click();
     await expect(toggle).toHaveAttribute('data-state', 'unchecked', { timeout: 15_000 });
-    await expect(disabledBadge).toBeVisible({ timeout: 15_000 });
+    await expect(detailStatus).toHaveText(/비활성/, { timeout: 15_000 });
+    await expect(hiddenNote).toBeVisible({ timeout: 15_000 });
 
     // Re-enable → loadStatus returns to "로드됨", tools re-exposed.
     await toggle.click();
     await expect(toggle).toHaveAttribute('data-state', 'checked', { timeout: 15_000 });
-    await expect(loadedBadge).toBeVisible({ timeout: 15_000 });
+    await expect(detailStatus).toHaveText(/로드됨/, { timeout: 15_000 });
+    await expect(hiddenNote).toHaveCount(0);
   } finally {
     await closeSettingsWindow(app, settings).catch(() => {});
   }
