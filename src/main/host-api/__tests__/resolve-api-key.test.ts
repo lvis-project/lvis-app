@@ -213,6 +213,7 @@ describe("resolveApiKey — Tier-3 whitelist registry deny passthrough", () => {
   it("returns reason=not-whitelisted when registry denies (plugin absent from grants)", async () => {
     // Seed registry with a grant for OTHER plugin so this plugin is absent.
     const manifest = manifestFor("p", ["llm.apiKey.openai"]);
+    const manifestSha256 = shaOfManifest(manifest);
     await seedRegistryWithGrant({
       pluginId: "other",
       allowedKeys: ["llm.apiKey.openai"],
@@ -223,7 +224,7 @@ describe("resolveApiKey — Tier-3 whitelist registry deny passthrough", () => {
       {
         pluginId: "p",
         manifest,
-        manifestSha256: shaOfManifest(manifest),
+        manifestSha256,
         settingsService: makeSettingsService({
           provider: "openai",
           secrets: { "llm.apiKey.openai": "sk-host" },
@@ -242,6 +243,7 @@ describe("resolveApiKey — Tier-3 BEFORE Tier-4 ordering (cycle 1 MEDIUM)", () 
     // Tier-3 must surface first (not-whitelisted), not the vendor-mismatch
     // leak that would tell the plugin which vendor is active.
     const manifest = manifestFor("p", ["llm.apiKey.openai"]);
+    const manifestSha256 = shaOfManifest(manifest);
     await seedRegistryWithGrant({
       pluginId: "other",
       allowedKeys: ["llm.apiKey.openai"],
@@ -254,7 +256,7 @@ describe("resolveApiKey — Tier-3 BEFORE Tier-4 ordering (cycle 1 MEDIUM)", () 
       {
         pluginId: "p",
         manifest,
-        manifestSha256: shaOfManifest(manifest),
+        manifestSha256,
         settingsService: makeSettingsService({
           provider: "claude",
           secrets: { "llm.apiKey.openai": "sk-host" },
@@ -270,17 +272,18 @@ describe("resolveApiKey — Tier-3 BEFORE Tier-4 ordering (cycle 1 MEDIUM)", () 
 describe("resolveApiKey — Tier-4 vendor mismatch", () => {
   it("returns vendor-mismatch when plugin allowlisted but vendor != active", async () => {
     const manifest = manifestFor("p", ["llm.apiKey.openai"]);
+    const manifestSha256 = shaOfManifest(manifest);
     await seedRegistryWithGrant({
       pluginId: "p",
       allowedKeys: ["llm.apiKey.openai"],
-      manifestSha256: shaOfManifest(manifest),
+      manifestSha256,
     });
     const result = await resolveApiKey(
       { purpose: "llm", vendor: "openai" },
       {
         pluginId: "p",
         manifest,
-        manifestSha256: shaOfManifest(manifest),
+        manifestSha256,
         // Active vendor is claude → vendor-mismatch on requested openai.
         settingsService: makeSettingsService({ provider: "claude" }) as never,
         auditLogger: makeAuditLogger(),
@@ -531,13 +534,14 @@ describe("resolveApiKey — registry.installSource precedence (#958 round-1)", (
     const manifest = manifestFor("p", ["llm.apiKey.openai"]);
     // Note: NO `seedRegistryWithGrant` call — the whitelist registry has
     // no grant for this plugin. Without admin-bypass Tier-3 would deny.
+    const manifestSha256 = shaOfManifest(manifest);
     const auditLogger = makeAuditLogger();
     const result = await resolveApiKey(
       { purpose: "llm", vendor: "openai" },
       {
         pluginId: "p",
         manifest, // manifest.installPolicy === undefined (~"user")
-        manifestSha256: shaOfManifest(manifest),
+        manifestSha256,
         settingsService: makeSettingsService({
           provider: "openai",
           secrets: { "llm.apiKey.openai": "sk-admin-host" },
@@ -545,6 +549,7 @@ describe("resolveApiKey — registry.installSource precedence (#958 round-1)", (
         auditLogger,
         // Host-verified install record: admin install.
         registryInstallSource: "admin",
+        registryManifestSha256: manifestSha256,
       },
     );
     expect(result.ok).toBe(true);
@@ -559,6 +564,27 @@ describe("resolveApiKey — registry.installSource precedence (#958 round-1)", (
     expect(String(bypassLine?.[0]?.input ?? "")).toContain(
       "source=registry.installSource",
     );
+  });
+
+  it("registry.installSource='admin' denies when registry manifest sha differs (#959)", async () => {
+    const manifest = manifestFor("p", ["llm.apiKey.openai"]);
+    const result = await resolveApiKey(
+      { purpose: "llm", vendor: "openai" },
+      {
+        pluginId: "p",
+        manifest,
+        manifestSha256: shaOfManifest(manifest),
+        registryManifestSha256: "f".repeat(64),
+        settingsService: makeSettingsService({
+          provider: "openai",
+          secrets: { "llm.apiKey.openai": "sk-admin-host" },
+        }) as never,
+        auditLogger: makeAuditLogger(),
+        registryInstallSource: "admin",
+      },
+    );
+    expect(result.ok).toBe(false);
+    if (!result.ok) expect(result.reason).toBe("not-whitelisted");
   });
 
   it("registry.installSource='user' overrides a malicious manifest.installPolicy='admin'", async () => {
@@ -588,10 +614,9 @@ describe("resolveApiKey — registry.installSource precedence (#958 round-1)", (
     if (!result.ok) expect(result.reason).toBe("not-whitelisted");
   });
 
-  it("falls back to manifest.installPolicy when registry.installSource is absent (legacy entries)", async () => {
-    // Legacy registries that pre-date the `installSource` field still
-    // need the bypass to work via the manifest path so the #955 fix
-    // remains effective for pre-migration data.
+  it("denies manifest-only admin bypass when registry manifest sha is absent (#959)", async () => {
+    // Admin secret-access bypass now requires the host-owned install-time
+    // manifest SHA. A manifest-only admin signal is not enough to skip Tier-3.
     const manifest = {
       ...manifestFor("p", ["llm.apiKey.openai"]),
       installPolicy: "admin" as const,
@@ -607,11 +632,11 @@ describe("resolveApiKey — registry.installSource precedence (#958 round-1)", (
           secrets: { "llm.apiKey.openai": "sk-host" },
         }) as never,
         auditLogger: makeAuditLogger(),
-        // `registryInstallSource` deliberately omitted → manifest path.
+        // registry fields deliberately omitted.
       },
     );
-    expect(result.ok).toBe(true);
-    if (result.ok) expect(result.bearer()).toBe("sk-host");
+    expect(result.ok).toBe(false);
+    if (!result.ok) expect(result.reason).toBe("not-whitelisted");
   });
 
   it("emits hostSecret_admin_bypass counter on admin-bypass success", async () => {
@@ -619,18 +644,20 @@ describe("resolveApiKey — registry.installSource precedence (#958 round-1)", (
       "../../../telemetry/host-secret-counters.js"
     );
     const manifest = manifestFor("p", ["llm.apiKey.openai"]);
+    const manifestSha256 = shaOfManifest(manifest);
     const result = await resolveApiKey(
       { purpose: "llm", vendor: "openai" },
       {
         pluginId: "p",
         manifest,
-        manifestSha256: shaOfManifest(manifest),
+        manifestSha256,
         settingsService: makeSettingsService({
           provider: "openai",
           secrets: { "llm.apiKey.openai": "sk-admin" },
         }) as never,
         auditLogger: makeAuditLogger(),
         registryInstallSource: "admin",
+        registryManifestSha256: manifestSha256,
       },
     );
     expect(result.ok).toBe(true);
@@ -640,7 +667,7 @@ describe("resolveApiKey — registry.installSource precedence (#958 round-1)", (
     expect(getHostSecretCounter("hostSecret_read", "p", "llm")).toBe(1);
   });
 
-  it("audit `source=manifest.installPolicy` when registry value absent (#958)", async () => {
+  it("does not emit admin-bypass audit when registry manifest sha is absent (#959)", async () => {
     const manifest = {
       ...manifestFor("p", ["llm.apiKey.openai"]),
       installPolicy: "admin" as const,
@@ -657,16 +684,13 @@ describe("resolveApiKey — registry.installSource precedence (#958 round-1)", (
           secrets: { "llm.apiKey.openai": "sk-x" },
         }) as never,
         auditLogger,
-        // registryInstallSource omitted → manifest fallback.
+        // registry fields omitted → manifest-only admin signal denied.
       },
     );
-    expect(result.ok).toBe(true);
+    expect(result.ok).toBe(false);
     const bypassLine = auditLogger.mock.mock.calls.find((c) =>
       String(c[0]?.input ?? "").includes("policy=admin manifest-allowlist-bypassed"),
     );
-    expect(bypassLine).toBeDefined();
-    expect(String(bypassLine?.[0]?.input ?? "")).toContain(
-      "source=manifest.installPolicy",
-    );
+    expect(bypassLine).toBeUndefined();
   });
 });

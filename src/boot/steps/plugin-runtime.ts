@@ -31,7 +31,7 @@ import { PluginDeploymentGuard } from "../../plugins/deployment-guard.js";
 // the Tier-3 admin-bypass gate is anchored to a host-verified field, not
 // the user-writable `plugin.json` manifest.
 import { readPluginRegistry } from "../../plugins/registry.js";
-import type { PluginRegistryEntryInstallSource } from "../../plugins/types.js";
+import type { PluginRegistryEntry, PluginRegistryEntryInstallSource } from "../../plugins/types.js";
 import { createPluginStorage } from "../../plugins/storage.js";
 import {
   setIsPackaged,
@@ -928,47 +928,43 @@ export async function initPluginRuntime(
     pluginsRoot: pluginPaths.pluginsRoot,
   });
 
-  // #958 round-1 security MEDIUM — installSource cache. The registry file
+  // #958/#959 security — registry-entry cache. The registry file
   // (`~/.lvis/plugins/registry.json`) is the host-verified source of
-  // truth for whether a plugin was installed by an admin or by a user;
-  // `manifest.installPolicy` lives inside the plugin's writable
-  // `plugin.json` and cannot be trusted alone. We populate this map at
-  // boot and refresh on every install/uninstall event so the
-  // host-api closures (getSecret + resolveApiKey) can answer
-  // installSource lookups synchronously without touching disk on the
-  // hot path.
+  // truth for both admin/user installSource and the install-time manifest
+  // SHA pin. `plugin.json` lives inside the plugin's writable surface and
+  // cannot be trusted alone. We populate this map at boot and refresh on
+  // every install/uninstall event so HostApi closures answer lookups
+  // synchronously without touching disk on the hot path.
   //
-  // Trust precedence: caller code (getSecret / resolveApiKey) reads
-  // this map first; only when the entry is absent (legacy registry
-  // pre-dating the field — `readPluginRegistry` migrates these on
-  // read, but a defensive miss can still occur for plugins discovered
-  // before the cache is rehydrated) does it consult
-  // `manifest.installPolicy`. Mirrors the precedence rule in
-  // `deployment-guard.ts:84-92`.
-  const installSourceCache = new Map<string, PluginRegistryEntryInstallSource>();
-  const refreshInstallSourceCache = async (): Promise<void> => {
+  // Trust source: caller code (getSecret / resolveApiKey) reads this map;
+  // manifest-only admin metadata cannot activate secret-access bypass.
+  const registryEntryCache = new Map<string, Pick<PluginRegistryEntry, "installSource" | "manifestSha256">>();
+  const refreshRegistryEntryCache = async (): Promise<void> => {
     try {
       const registry = await readPluginRegistry(pluginPaths.registryPath);
-      installSourceCache.clear();
+      registryEntryCache.clear();
       for (const entry of registry.plugins) {
-        if (entry.installSource !== undefined) {
-          installSourceCache.set(entry.id, entry.installSource);
+        if (entry.installSource !== undefined || entry.manifestSha256 !== undefined) {
+          registryEntryCache.set(entry.id, {
+            installSource: entry.installSource,
+            manifestSha256: entry.manifestSha256,
+          });
         }
       }
     } catch (err) {
-      // Cache stays empty / stale — callers will fall back to
-      // `manifest.installPolicy` which is correct for first-boot
-      // (no registry file yet) and legacy registry entries.
+      registryEntryCache.clear();
+      // Cache stays empty. Secret-access bypass stays fail-closed
+      // because callers treat a missing registry installSource as "user".
       log.warn(
-        "installSource cache refresh failed: %s",
+        "registry-entry cache refresh failed: %s",
         (err as Error).message,
       );
     }
   };
-  await refreshInstallSourceCache();
-  const getRegistryInstallSource = (
+  await refreshRegistryEntryCache();
+  const getRegistryEntry = (
     pluginId: string,
-  ): PluginRegistryEntryInstallSource | undefined => installSourceCache.get(pluginId);
+  ): Pick<PluginRegistryEntry, "installSource" | "manifestSha256"> | undefined => registryEntryCache.get(pluginId);
 
   // Late-binding refs for ConversationLoop-dependent callers.
   const lateBinding: LateBindingRefs = {
@@ -1254,14 +1250,18 @@ export async function initPluginRuntime(
             manifestSha256,
             settingsService,
             auditLogger: bootAuditLogger,
-            // #958 round-1 — feed the registry-anchored installSource so
-            // the Tier-3 admin-bypass gate trusts the host-verified
-            // install record over the user-writable manifest field.
-            // Falls through to `undefined` on legacy entries (handled by
-            // the helper's manifest fallback).
-            ...((): { registryInstallSource?: "admin" | "user" | "local-dev" } => {
-              const src = getRegistryInstallSource(pluginId);
-              return src !== undefined ? { registryInstallSource: src } : {};
+            // #958/#959 — feed the registry-anchored installSource and
+            // install-time manifest SHA so admin bypasses skip only the
+            // host-secret ACL, never the manifest tamper check.
+            ...((): {
+              registryInstallSource?: "admin" | "user" | "local-dev";
+              registryManifestSha256?: string;
+            } => {
+              const entry = getRegistryEntry(pluginId);
+              return {
+                ...(entry?.installSource !== undefined ? { registryInstallSource: entry.installSource } : {}),
+                ...(entry?.manifestSha256 !== undefined ? { registryManifestSha256: entry.manifestSha256 } : {}),
+              };
             })(),
             // Cluster review M1 — bind the permission-manager revoke signal
             // accessor so an in-flight bearer aborts when permissions
@@ -1328,31 +1328,26 @@ export async function initPluginRuntime(
           const activeProvider = isLlmKey
             ? (settingsService.get("llm").provider as string)
             : vendor;
-          // #958 round-1 security MEDIUM — trust precedence: registry-
-          // recorded `installSource` wins over `manifest.installPolicy`.
+          // #958/#959 security — registry-recorded `installSource` is the
+          // only source that can activate admin secret-access bypass.
           // The registry file is host-managed; `plugin.json` is inside
           // the plugin's writable surface so a malicious post-install
           // patch could flip `installPolicy:"admin"` and inherit Tier-3
-          // bypass. Mirrors `deployment-guard.ts:84-92`.
-          const registryInstallSource = getRegistryInstallSource(pluginId);
-          const effectiveInstallPolicy: "admin" | "user" | undefined =
-            registryInstallSource !== undefined
-              ? registryInstallSource === "admin"
-                ? "admin"
-                : "user"
-              : manifest.installPolicy;
+          // bypass if manifest-only metadata were trusted here.
+          const registryEntry = getRegistryEntry(pluginId);
+          const registryInstallSource = registryEntry?.installSource;
+          const effectiveInstallPolicy: "admin" | "user" =
+            registryInstallSource === "admin" ? "admin" : "user";
           const outcome = runTier3Then4({
             pluginId,
             key,
             manifestSha256,
+            installedManifestSha256: registryEntry?.manifestSha256,
             vendor,
             activeProvider,
-            // #955 follow-up — admin-installed plugins bypass the Tier-3
-            // signed whitelist registry ACL. Tier-4 vendor cross-check
-            // still applies via the same helper.
-            // #958 round-1 — value comes from the registry-anchored
-            // decision above so a user can't flip the bypass by editing
-            // plugin.json.
+            // #955/#959 — admin-installed plugins bypass only the Tier-3
+            // signed whitelist registry ACL. The registry manifest SHA and
+            // Tier-4 vendor cross-check still apply via the same helper.
             installPolicy: effectiveInstallPolicy,
           });
           if (outcome.kind === "deny") {
@@ -1381,7 +1376,7 @@ export async function initPluginRuntime(
                 timestamp: new Date().toISOString(),
                 sessionId: "plugin",
                 type: "info",
-                input: `[plugin:${pluginId}] policy=admin manifest-allowlist-bypassed key=${auditKey} source=${registryInstallSource !== undefined ? "registry.installSource" : "manifest.installPolicy"}`,
+                input: `[plugin:${pluginId}] policy=admin manifest-allowlist-bypassed key=${auditKey} source=registry.installSource`,
               });
             } catch { /* audit must not break host */ }
             incrementHostSecretCounter(
@@ -1881,10 +1876,9 @@ export async function initPluginRuntime(
     const pluginId = (data as { pluginId?: string } | undefined)?.pluginId;
     if (typeof pluginId !== "string") return;
     installLoadedPluginPartitionPolicy(pluginId);
-    // #958 round-1 — keep the installSource cache in sync so a freshly
-    // installed admin plugin gets its Tier-3 bypass on first call,
-    // without waiting for the next boot.
-    void refreshInstallSourceCache();
+    // #958/#959 — keep installSource + manifest SHA pin in sync so a freshly
+    // installed admin plugin gets both decisions on first call.
+    void refreshRegistryEntryCache();
   });
 
   // Uninstall: `onDisable` only unregisters the removed plugin's tools, but a
@@ -1902,10 +1896,9 @@ export async function initPluginRuntime(
         (err as Error).message,
       );
     }
-    // #958 round-1 — drop the stale cache entry so a re-install (or a
-    // re-introduction with a different installSource) does not inherit
-    // the previous Tier-3 bypass decision.
-    void refreshInstallSourceCache();
+    // #958/#959 — drop the stale cache entry so a re-install does not inherit
+    // the previous Tier-3 bypass or manifest SHA decision.
+    void refreshRegistryEntryCache();
   });
 
   // 플러그인 메서드를 ToolRegistry에 등록. Async dependency preparation may

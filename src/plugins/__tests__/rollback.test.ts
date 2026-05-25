@@ -1,4 +1,5 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { createHash } from "node:crypto";
 import { mkdir, readFile, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -8,6 +9,7 @@ import type { PluginMarketplaceItem } from "../types.js";
 import { _resetForTest, setIsPackaged } from "../../boot/dev-flags.js";
 import { makeTestPluginPaths } from "./test-helpers.js";
 import { mkdtempSync } from "node:fs";
+import { canonicalJSON } from "../whitelist/canonical-json.js";
 
 /**
  * Sprint 3-B §9.6 + Phase 2-final — install → update → rollback lifecycle.
@@ -29,6 +31,14 @@ const SAMPLE_ITEM: PluginMarketplaceItem = {
   packageName: "@lvis/sample",
   tools: ["sample_ping"],
 };
+
+function sampleManifest(version: string) {
+  return { id: "example-sample", version, entry: "./dist/index.js", tools: [] };
+}
+
+function manifestSha(manifest: unknown): string {
+  return createHash("sha256").update(canonicalJSON(manifest)).digest("hex");
+}
 
 class StubFetcher implements MarketplaceFetcher {
   item: PluginMarketplaceItem = { ...SAMPLE_ITEM };
@@ -82,11 +92,7 @@ describe("PluginMarketplaceService install → update → rollback", () => {
     }, "installArtifact").mockImplementation(async (_plugin, version) => {
       await mkdir(pluginDir, { recursive: true });
       const manifestFile = join(pluginDir, "plugin.json");
-      await writeFile(
-        manifestFile,
-        JSON.stringify({ id: "example-sample", version, entry: "./dist/index.js", tools: [] }),
-        "utf-8",
-      );
+      await writeFile(manifestFile, JSON.stringify(sampleManifest(version)), "utf-8");
       return "example-sample/plugin.json";
     });
     return svc;
@@ -237,6 +243,7 @@ describe("PluginMarketplaceService install → update → rollback", () => {
 
     const restored = JSON.parse(await readFile(registryPath, "utf-8"));
     expect(restored.plugins[0].installSource).toBe("admin");
+    expect(restored.plugins[0].manifestSha256).toBe(manifestSha(sampleManifest("1.0.0")));
   });
 
   it("rollback normalises a legacy dev-link registry value to 'user' regardless of packaged/dev mode", async () => {

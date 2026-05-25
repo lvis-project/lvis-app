@@ -1,4 +1,5 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { createHash } from "node:crypto";
 import { existsSync, mkdtempSync } from "node:fs";
 import { mkdir, readFile, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
@@ -6,6 +7,11 @@ import { join } from "node:path";
 import { MockMarketplaceFetcher, PluginMarketplaceService } from "../marketplace.js";
 import { _resetForTest, setIsPackaged } from "../../boot/dev-flags.js";
 import { makeTestPluginPaths } from "./test-helpers.js";
+import { canonicalJSON } from "../whitelist/canonical-json.js";
+
+function manifestSha(manifest: unknown): string {
+  return createHash("sha256").update(canonicalJSON(manifest)).digest("hex");
+}
 
 describe("PluginMarketplaceService.installLocal", () => {
   let testDir: string;
@@ -170,6 +176,12 @@ describe("PluginMarketplaceService.installLocal", () => {
     const service = makeService();
     await service.installLocal(sourceDir);
 
+    const installedManifest = JSON.parse(
+      await readFile(join(pluginsDir, "test-plugin", "plugin.json"), "utf-8"),
+    );
+    const registry = JSON.parse(await readFile(registryPath, "utf-8"));
+    expect(registry.plugins[0].manifestSha256).toBe(manifestSha(installedManifest));
+
     const receiptPath = join(cacheRoot, "test-plugin", "install-receipt.json");
     expect(existsSync(receiptPath)).toBe(true);
 
@@ -249,6 +261,8 @@ describe("PluginMarketplaceService.installLocal", () => {
     const installDir = join(pluginsDir, "test-plugin");
     const manifest = JSON.parse(await readFile(join(installDir, "plugin.json"), "utf-8"));
     expect(manifest.version).toBe("1.2.3");
+    const registry = JSON.parse(await readFile(registryPath, "utf-8"));
+    expect(registry.plugins[0].manifestSha256).toBe(manifestSha(manifest));
 
     const receipt = JSON.parse(
       await readFile(join(cacheRoot, "test-plugin", "install-receipt.json"), "utf-8"),

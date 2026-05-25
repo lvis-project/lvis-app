@@ -1,10 +1,10 @@
 /**
  * #955 follow-up — `runTier3Then4` admin-install bypass.
  *
- * `installPolicy: "admin"` MUST skip the Tier-3 signed whitelist registry
- * ACL (admin install already represents an explicit elevated grant) while
- * still enforcing Tier-4 active-vendor cross-check. Plain `"user"` installs
- * keep the original behaviour — both Tier-3 and Tier-4 apply in order.
+ * `installPolicy: "admin"` MUST skip only the Tier-3 signed whitelist
+ * registry ACL while still enforcing the install-time manifest SHA pin and
+ * Tier-4 active-vendor cross-check. Plain `"user"` installs keep the original
+ * behaviour — both Tier-3 and Tier-4 apply in order.
  */
 import { describe, it, expect, beforeEach } from "vitest";
 import { runTier3Then4 } from "../tier-order.js";
@@ -48,11 +48,13 @@ describe("runTier3Then4 — admin-install bypass (#955)", () => {
     }
   });
 
-  it("allows an admin-install plugin even when registry would deny", () => {
+  it("allows an admin-install plugin when the install-time manifest sha matches", () => {
+    const manifestSha256 = "a".repeat(64);
     const outcome = runTier3Then4({
       pluginId: "meeting",
       key: "llm.apiKey.openai",
-      manifestSha256: "a".repeat(64),
+      manifestSha256,
+      installedManifestSha256: manifestSha256,
       vendor: "openai",
       activeProvider: "openai",
       installPolicy: "admin",
@@ -64,11 +66,46 @@ describe("runTier3Then4 — admin-install bypass (#955)", () => {
     expect(outcome).toEqual({ kind: "allow", via: "admin-bypass" });
   });
 
-  it("emits via='admin-bypass' on the allow outcome (#958)", () => {
+  it("denies an admin-install plugin when the running manifest sha differs from install time (#959)", () => {
+    const outcome = runTier3Then4({
+      pluginId: "meeting",
+      key: "llm.apiKey.openai",
+      manifestSha256: "b".repeat(64),
+      installedManifestSha256: "a".repeat(64),
+      vendor: "openai",
+      activeProvider: "openai",
+      installPolicy: "admin",
+    });
+    expect(outcome).toEqual({
+      kind: "deny",
+      tier: "tier-3",
+      reason: "manifest-sha-mismatch",
+    });
+  });
+
+  it("denies an admin-install plugin when the install-time manifest sha is absent (#959)", () => {
     const outcome = runTier3Then4({
       pluginId: "meeting",
       key: "llm.apiKey.openai",
       manifestSha256: "a".repeat(64),
+      vendor: "openai",
+      activeProvider: "openai",
+      installPolicy: "admin",
+    });
+    expect(outcome).toEqual({
+      kind: "deny",
+      tier: "tier-3",
+      reason: "manifest-sha-mismatch",
+    });
+  });
+
+  it("emits via='admin-bypass' on the allow outcome (#958)", () => {
+    const manifestSha256 = "a".repeat(64);
+    const outcome = runTier3Then4({
+      pluginId: "meeting",
+      key: "llm.apiKey.openai",
+      manifestSha256,
+      installedManifestSha256: manifestSha256,
       vendor: "openai",
       activeProvider: "openai",
       installPolicy: "admin",
@@ -154,10 +191,12 @@ describe("runTier3Then4 — admin-install bypass (#955)", () => {
   });
 
   it("denies an admin-install plugin on vendor mismatch (Tier-4 preserved)", () => {
+    const manifestSha256 = "a".repeat(64);
     const outcome = runTier3Then4({
       pluginId: "meeting",
       key: "llm.apiKey.openai",
-      manifestSha256: "a".repeat(64),
+      manifestSha256,
+      installedManifestSha256: manifestSha256,
       vendor: "openai",
       activeProvider: "claude",
       installPolicy: "admin",

@@ -35,16 +35,12 @@ const EMPTY_SNAPSHOT: SuggestedRepliesSnapshot = {
 };
 
 // Suggestions matching this pattern are filtered out before they reach the
-// store. Spec §10 intent = drop LLM-generated *executable* command payloads
-// (`/admin run prod`, `!shell -c rm`, `$env=foo bar`) — i.e. command-prefix
-// *followed by* an argument. Single-token commands (`/clear`, `/help`,
-// `!ls`) intentionally pass through: chip click only fills the textarea
-// (no auto-send), so the host's command parser at send-time is the real
-// trust boundary. A blanket prefix taboo would block legitimate suggestion
-// of the user's own slash commands — false-positive surface > injection
-// surface here. Pattern: prefix char + non-whitespace + whitespace +
-// non-whitespace (i.e. argument present).
-const SLASH_COMMAND_PATTERN = /^[/!$]\S+\s+\S/;
+// store. Spec §10 / #980 intent = drop LLM-generated executable command
+// payloads even when they are single-token host commands (`/clear`, `/help`,
+// `!ls`) because chip accept fills the composer and the next Enter can execute
+// it unintentionally. `$` is limited to env-assignment shape so natural
+// currency/prose suggestions are not silently removed.
+const COMMAND_PREFIX_PATTERN = /^(?:\/\S*|!\S*|\$[A-Za-z_][A-Za-z0-9_]*=)/;
 
 // Module-level store — single source of truth for all subscribers. Reset to
 // `EMPTY_SNAPSHOT` on every new replies push so React's `Object.is` snapshot
@@ -85,9 +81,11 @@ function getSnapshot(): SuggestedRepliesSnapshot {
 export function pushSuggestedReplies(replies: string[]): void {
   // Slash-command filter runs *before* the empty-check so a list whose only
   // entries are command-prefixed correctly collapses to "no suggestions".
-  const filtered = replies.filter(
-    (r) => typeof r === "string" && r.length > 0 && !SLASH_COMMAND_PATTERN.test(r.trim()),
-  );
+  const filtered = replies.filter((r) => {
+    if (typeof r !== "string") return false;
+    const trimmed = r.trim();
+    return trimmed.length > 0 && !COMMAND_PREFIX_PATTERN.test(trimmed);
+  });
 
   // Telemetry: if the previous snapshot was still active + unaccepted when a
   // new push arrives, the user effectively ignored it. Record before we

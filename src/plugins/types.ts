@@ -448,6 +448,12 @@ export interface PluginUiExtension {
 export interface PluginRegistryEntry {
   id: string;
   manifestPath: string;
+  /**
+   * Canonical JSON SHA-256 of plugin.json recorded at install time. Runtime
+   * HostApi gates compare the running manifest against this host-owned value
+   * before honoring admin secret-access bypasses.
+   */
+  manifestSha256?: string;
   enabled?: boolean;
   bundleRefs?: string[];
   approvedPluginAccess?: PluginAccessSpec;

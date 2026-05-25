@@ -96,9 +96,8 @@ export interface ResolveApiKeyDeps {
   getPluginRevokeSignal?: (pluginId: string) => AbortSignal;
   /**
    * #958 round-1 security MEDIUM — install-source from the on-disk plugin
-   * registry (`PluginRegistryEntry.installSource`). When present this
-   * value takes PRECEDENCE over `manifest.installPolicy` for the Tier-3
-   * admin-bypass gate. Rationale (mirrors `deployment-guard.ts:84-92`):
+   * registry (`PluginRegistryEntry.installSource`). This is the only value
+   * that can activate the Tier-3 admin-bypass gate:
    *   - `registry.installSource` is written by the host at install time
    *     under a verified actor; the file lives at
    *     `~/.lvis/plugins/registry.json` and is not part of the plugin's
@@ -106,11 +105,16 @@ export interface ResolveApiKeyDeps {
    *   - `manifest.installPolicy` is a field inside `plugin.json` — a
    *     user-installed plugin (or a malicious post-install patch) can
    *     flip it to `"admin"` and inherit the Tier-3 bypass.
-   * Trust precedence: registry ≫ manifest. We fall back to the manifest
-   * only when registry has no recorded `installSource` (legacy entry
-   * pre-dating the field — `readPluginRegistry` migrates these on read).
+   * Trust source: registry only. A manifest-only `"admin"` value is advisory
+   * metadata and cannot activate the secret-access bypass.
    */
   registryInstallSource?: "admin" | "user" | "local-dev";
+  /**
+   * Install-time canonical plugin.json SHA from the host-owned plugin
+   * registry. Required for admin secret-access bypasses so the bypass cannot
+   * survive a post-install manifest swap.
+   */
+  registryManifestSha256?: string;
 }
 
 /**
@@ -271,22 +275,15 @@ export async function resolveApiKey(
     return { ok: false, reason: "not-whitelisted" };
   }
 
-  // #958 round-1 security MEDIUM — trust precedence for the Tier-3
+  // #958/#959 security — trust source for the Tier-3
   // admin-bypass gate: registry-recorded `installSource` (verified at
-  // install time, lives outside the plugin's writable surface) wins over
-  // `manifest.installPolicy` (inside `plugin.json`, user-writable).
+  // install time, lives outside the plugin's writable surface) is the only
+  // admin bypass source. `manifest.installPolicy` is user-writable advisory
+  // metadata and never activates the secret-access bypass.
   // Without this anchoring a malicious post-install plugin.json patch
   // could flip `installPolicy:"admin"` and inherit the Tier-3 bypass.
-  // Only `installSource === "admin"` triggers the bypass; `"local-dev"`
-  // and `"user"` keep the full Tier-3 ACL. Manifest is consulted only
-  // when registry has no `installSource` (legacy migration window —
-  // see `readPluginRegistry`).
-  const effectiveInstallPolicy: "admin" | "user" | undefined =
-    deps.registryInstallSource !== undefined
-      ? deps.registryInstallSource === "admin"
-        ? "admin"
-        : "user"
-      : deps.manifest.installPolicy;
+  const effectiveInstallPolicy: "admin" | "user" =
+    deps.registryInstallSource === "admin" ? "admin" : "user";
   // Tier-3 + Tier-4 via the shared helper (`runTier3Then4`). Ralph cycle 1
   // MEDIUM fix unifies the order between this path and `getSecret`:
   // whitelist registry (coarse signed ACL) → active-vendor cross-check
@@ -295,12 +292,12 @@ export async function resolveApiKey(
     pluginId: deps.pluginId,
     key: llmKey,
     manifestSha256: deps.manifestSha256,
+    installedManifestSha256: deps.registryManifestSha256,
     vendor,
     activeProvider,
-    // #955 follow-up — admin-installed plugins bypass the Tier-3 signed
-    // whitelist registry ACL. Tier-4 vendor cross-check still applies.
-    // #958 round-1 — value comes from the registry-anchored decision
-    // above so a user can't flip the bypass by editing plugin.json.
+    // #955/#959 — admin-installed plugins bypass only the Tier-3 signed
+    // whitelist registry ACL. The registry manifest SHA and Tier-4 vendor
+    // cross-check still apply.
     installPolicy: effectiveInstallPolicy,
   });
   if (tierOutcome.kind === "deny") {
@@ -329,7 +326,7 @@ export async function resolveApiKey(
     audit(
       deps,
       "info",
-      `resolveApiKey policy=admin manifest-allowlist-bypassed vendor=${vendor} purpose=${request.purpose} source=${deps.registryInstallSource !== undefined ? "registry.installSource" : "manifest.installPolicy"}`,
+      `resolveApiKey policy=admin manifest-allowlist-bypassed vendor=${vendor} purpose=${request.purpose} source=registry.installSource`,
     );
     incrementHostSecretCounter(
       "hostSecret_admin_bypass",
