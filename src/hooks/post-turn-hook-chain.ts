@@ -47,6 +47,8 @@ export interface PostTurnHookContext {
     deferredMcpServerIds: string[];
     toolSchemaTokens: number;
     projectedRequestInputTokens: number | null;
+    deferralEligibleLoadedCount: number;
+    deferredLoadedRatio: number | null;
   };
   route: string;
   /**
