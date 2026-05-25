@@ -140,6 +140,8 @@ export interface AuditEntry {
     deferredMcpServerIds: string[];
     toolSchemaTokens: number;
     projectedRequestInputTokens: number | null;
+    deferralEligibleLoadedCount: number;
+    deferredLoadedRatio: number | null;
   };
   route?: string;
 }
@@ -560,6 +562,8 @@ export class AuditLogger {
       deferredMcpServerIds: string[];
       toolSchemaTokens: number;
       projectedRequestInputTokens: number | null;
+      deferralEligibleLoadedCount: number;
+      deferredLoadedRatio: number | null;
     };
     route: string;
   }): void {
