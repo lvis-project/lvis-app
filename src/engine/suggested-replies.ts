@@ -2,7 +2,7 @@
  * Suggested replies — parser + streaming filter.
  *
  * LLM emits a `<suggested_replies>` block at the end of the final assistant
- * message containing 2~5 follow-up reply candidates. The streaming filter
+ * message containing follow-up reply candidates (default 3, max 5). The streaming filter
  * withholds those bytes from the renderer-bound stream so the user never
  * sees the raw tag, then surfaces the parsed list once the stream ends.
  *
@@ -10,7 +10,7 @@
  * `src/prompts/system-prompt-builder.ts`. Instruction recommends 40~60자
  * length with rare 30자 short answers; cap 80 leaves safety margin for
  * brief LLM over-spill. Count cap matches the upper-bound emit guidance
- * (2~5). Drift between layers silently drops emitted candidates.
+ * (max 5). Drift between layers silently drops emitted candidates.
  */
 
 export const SUGGESTED_REPLIES_OPEN = "<suggested_replies>";

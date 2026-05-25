@@ -100,7 +100,7 @@ partial asset 삭제 후 workflow re-run 방식도 가능하지만, **electron-b
 
 - **Mac x64 (Intel) 미산출 — intentional**. CI runner = macOS arm64. Apple Silicon Mac 만 공식 지원.
 - **`[DEFAULT_BRANCH_DIRECT_PUSH]` guard 가 main 직접 push 차단** — release bump 도 예외 없이 PR 강제. dev-tools PR #14 가 도입한 정책.
-- **electron-builder publish race** — 3 platform job 이 같은 draft 에 동시 publish, GitHub API atomic 미보장 → partial 가능. 위 "Partial release 복구" 절차로 보강.
+- **electron-builder publish race (resolved v0.2.3+)** — 과거 matrix publish 경로의 historic incident. 현재는 single publish job 이므로 운영 한계가 아니라 legacy 복구 참고만 유지.
 - **Tag dereference 주의** — annotated tag 의 `git ls-remote` 결과는 *tag object SHA*. commit SHA 보려면 `refs/tags/vX.Y.Z^{}`.
 
 ## 자주 발생하는 함정
