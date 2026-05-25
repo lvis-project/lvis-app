@@ -44,4 +44,18 @@ describe("system prompt — suggested replies contract", () => {
     // suggestions. The prompt must preserve the explicit "생략한다" guidance.
     expect(prompt).toMatch(/생략한다/);
   });
+
+  it("keeps the #980 count and command-prefix policy explicit", () => {
+    const prompt = buildMinimalPrompt();
+    expect(prompt).toContain("기본 3개");
+    expect(prompt).toContain("최대 5개");
+    expect(prompt).toContain("완결 답변");
+    expect(prompt).toContain("/clear 포함");
+    expect(prompt).toContain("단일 토큰 command 도 금지");
+    const example = prompt.slice(
+      prompt.indexOf(SUGGESTED_REPLIES_OPEN),
+      prompt.indexOf(SUGGESTED_REPLIES_CLOSE),
+    );
+    expect(example.match(/^- \{text\}$/gm)).toHaveLength(3);
+  });
 });

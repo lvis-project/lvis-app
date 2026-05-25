@@ -119,32 +119,35 @@ describe("useSuggestedReplies", () => {
 
   // --- PR-D additions: slash filter + telemetry ---
 
-  it("slash-command WITH arguments is filtered out (executable payload)", () => {
+  it("slash-command with arguments is filtered out (executable payload)", () => {
     const { result } = renderHook(() => useSuggestedReplies());
     act(() => { pushSuggestedReplies(["/admin run prod", "확인"]); });
     expect(result.current.best).toBe("확인");
     expect(result.current.alternates).toEqual([]);
   });
 
-  it("single-token slash command passes filter (legitimate suggestion)", () => {
-    // Critic review #971: `/clear`, `/help` 같은 *no-arg* host command 추천은
-    // 사용자가 정당하게 원할 수 있음 — chip click 은 textarea fill 만 하고
-    // host parser 가 send 시점에 권한 체크하므로 trust boundary 유효.
+  it("single-token slash command is filtered out (#980)", () => {
     const { result } = renderHook(() => useSuggestedReplies());
-    act(() => { pushSuggestedReplies(["/clear", "/help"]); });
-    expect(result.current.best).toBe("/clear");
-    expect(result.current.alternates).toEqual(["/help"]);
+    act(() => { pushSuggestedReplies(["/clear", "/help", "상태를 다시 확인해줘"]); });
+    expect(result.current.best).toBe("상태를 다시 확인해줘");
+    expect(result.current.alternates).toEqual([]);
   });
 
-  it("bang and dollar commands WITH arguments are filtered out", () => {
+  it("bang commands and dollar env assignments are filtered out", () => {
     const { result } = renderHook(() => useSuggestedReplies());
-    act(() => { pushSuggestedReplies(["!shell -c rm", "$env=foo bar", "다음"]); });
+    act(() => { pushSuggestedReplies(["!ls", "$ENV=value", "!shell -c rm", "$env=foo bar", "다음"]); });
     expect(result.current.best).toBe("다음");
   });
 
-  it("list with only command-with-args suggestions collapses to empty", () => {
+  it("natural dollar-prefixed prose is not treated as an env assignment", () => {
     const { result } = renderHook(() => useSuggestedReplies());
-    act(() => { pushSuggestedReplies(["/help me with X", "!ls -la /", "$path=evil ok"]); });
+    act(() => { pushSuggestedReplies(["$100 예산으로 다시 계산해줘"]); });
+    expect(result.current.best).toBe("$100 예산으로 다시 계산해줘");
+  });
+
+  it("list with only command-prefixed suggestions collapses to empty", () => {
+    const { result } = renderHook(() => useSuggestedReplies());
+    act(() => { pushSuggestedReplies(["/clear", "/help me with X", "!ls -la /", "$path=evil ok"]); });
     expect(result.current.best).toBeNull();
     expect(result.current.alternates).toEqual([]);
   });

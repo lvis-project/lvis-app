@@ -59,6 +59,7 @@ export interface ArtifactStoreHistoryEntry {
 
 export interface CachedRegistryEntrySnapshot {
   installSource?: PluginRegistryEntryInstallSource;
+  manifestSha256?: string;
   bundleRefs?: string[];
   approvedPluginAccess?: PluginAccessSpec;
 }
@@ -355,6 +356,7 @@ export class PluginArtifactStore {
           resolve(dir, "registry-entry.json"),
           `${JSON.stringify({
             installSource: registryEntry.installSource,
+            manifestSha256: registryEntry.manifestSha256,
             bundleRefs: registryEntry.bundleRefs,
             approvedPluginAccess: registryEntry.approvedPluginAccess,
           }, null, 2)}\n`,
@@ -378,6 +380,7 @@ export class PluginArtifactStore {
       const parsed = JSON.parse(raw) as Partial<CachedRegistryEntrySnapshot>;
       return {
         installSource: parsed.installSource,
+        manifestSha256: typeof parsed.manifestSha256 === "string" ? parsed.manifestSha256 : undefined,
         bundleRefs: Array.isArray(parsed.bundleRefs) ? parsed.bundleRefs : undefined,
         approvedPluginAccess: parsed.approvedPluginAccess,
       };
