@@ -13,6 +13,7 @@ import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 import { act, renderHook, waitFor } from "@testing-library/react";
 import { useStatusBar } from "../use-status-bar.js";
 import type { LvisApi } from "../../types.js";
+import { STATUS_BAR_VENDOR_EMOJIS } from "../../../../shared/status-bar-emojis.js";
 import { fakeLlmSettings } from "../../../../shared/__tests__/fake-llm-settings.js";
 import { makeMockLvisApi } from "../../../../../test/renderer/mock-lvis-api.js";
 
@@ -333,6 +334,7 @@ describe("useStatusBar — vendor producer", () => {
     await waitFor(() => {
       const item = result.current.persistent.find((p) => p.id === "vendor:llm");
       expect(item).toBeDefined();
+      expect(item?.label).toBe(STATUS_BAR_VENDOR_EMOJIS.openai);
       expect(item?.value).toContain("OpenAI");
       expect(item?.value).toContain("gpt-5.4");
     });
@@ -373,6 +375,7 @@ describe("useStatusBar — vendor producer", () => {
 
     await waitFor(() => {
       const item = result.current.persistent.find((p) => p.id === "vendor:llm");
+      expect(item?.label).toBe(STATUS_BAR_VENDOR_EMOJIS.claude);
       expect(item?.value).toContain("Claude");
       expect(item?.value).toContain("claude-sonnet-4-6");
     });

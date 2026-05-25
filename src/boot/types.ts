@@ -173,8 +173,8 @@ export interface AppServices {
   startRoutinesScheduler?: () => void;
   /**
    * Issue #260 — system-level notification service. Auto-fires desktop
-   * notifications at 4 lifecycle points (turn-end / routine / ask-user /
-   * approval). Constructed AFTER main window exists in boot.ts. The LLM never
+   * notifications at lifecycle points (turn-end / routine / ask-user /
+   * approval / plugin / system). Constructed AFTER main window exists in boot.ts. The LLM never
    * sees this — it's a passive surface called by the host at trigger sites.
    */
   notificationService?: NotificationService;
