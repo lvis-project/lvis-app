@@ -554,6 +554,14 @@ describe("getModelPreflightThreshold — TPM-aware preflight (issue #900 #3)", (
     expect(t).toBe(160_000);
   });
 
+  it("gpt-5.4-mini — TPM 200K × 0.8 = 160K < window threshold 288K → tpm 채택 (인덱서 turn 사고 prevention)", () => {
+    // mini: contextWindow 400K → window threshold = floor(360K × 0.8) = 288K
+    // mini: tpmDefault 200K (실측 429 "Limit 200000") → tpm threshold = floor(200K × 0.8) = 160K
+    // min(288K, 160K) = 160K. window-only 였다면 288K 라 실제 200K TPM 벽 전에 미트리거.
+    const t = getModelPreflightThreshold("openai", "gpt-5.4-mini");
+    expect(t).toBe(160_000);
+  });
+
   it("gpt-5.4 — tpmDefault 30M >> window-based threshold → window 채택", () => {
     // gpt-5.4: contextWindow 1.05M → 80% × 1.01M = 808K window threshold
     // gpt-5.4: tpmDefault 30M → tpm threshold = 24M
