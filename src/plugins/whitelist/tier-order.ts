@@ -49,6 +49,7 @@ export interface TierCheckInput {
   pluginId: string;
   key: string;
   manifestSha256?: string;
+  installedManifestSha256?: string;
   vendor: string;
   activeProvider: string;
   /**
@@ -59,9 +60,10 @@ export interface TierCheckInput {
    * registry ACL is redundant — it is meant to keep `user`-installed
    * plugins from reading host secrets they were never approved for.
    *
-   * Tier-4 (active-vendor cross-check) is preserved unconditionally so
-   * an admin plugin still cannot read a non-active vendor's key — the
-   * dynamic per-session vendor identity gate continues to apply.
+   * Tier-4 (active-vendor cross-check) is preserved unconditionally.
+   * Admin mode also preserves the install-time manifest SHA pin: the
+   * bypass applies only to the signed `hostSecrets.read` ACL, not to
+   * post-install plugin.json tamper detection.
    */
   installPolicy?: "user" | "admin";
 }
@@ -71,10 +73,9 @@ export interface TierCheckInput {
  * in that fixed order. Returns the first deny outcome encountered or
  * `{ kind: "allow" }` when both gates pass.
  *
- * `installPolicy === "admin"` bypasses Tier-3 entirely (admin-install
- * already represents an explicit elevated grant — see field JSDoc on
- * `TierCheckInput`). Tier-4 still runs so vendor cross-check is enforced
- * regardless of install policy.
+ * `installPolicy === "admin"` bypasses the Tier-3 host-secret ACL only.
+ * The install-time manifest SHA pin still runs before Tier-4 so an
+ * elevated marketplace grant cannot silently survive a plugin.json swap.
  *
  * NB: callers MUST still emit their own audit log lines + counter
  * increments — this helper deliberately stays free of those concerns
@@ -84,13 +85,20 @@ export interface TierCheckInput {
  */
 export function runTier3Then4(input: TierCheckInput): TierOutcome {
   if (input.installPolicy === "admin") {
+    if (
+      !input.manifestSha256 ||
+      !input.installedManifestSha256 ||
+      input.manifestSha256.toLowerCase() !== input.installedManifestSha256.toLowerCase()
+    ) {
+      return { kind: "deny", tier: "tier-3", reason: "manifest-sha-mismatch" };
+    }
     if (input.vendor !== input.activeProvider) {
       return { kind: "deny", tier: "tier-4", reason: "vendor-mismatch" };
     }
     // #958 round-1 security MEDIUM — mark this allow as having taken the
     // admin-bypass branch so callers can emit an explicit audit line +
     // counter for anomaly detection. The signed Tier-3 ACL was NOT
-    // consulted; only Tier-4 (vendor cross-check) ran above.
+    // consulted; the install-time manifest SHA pin and Tier-4 did run.
     return { kind: "allow", via: "admin-bypass" };
   }
   const decision = whitelistRegistry.isAllowed(

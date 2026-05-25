@@ -81,6 +81,7 @@ function migrateLegacyEntry(
     id: entry.id,
     manifestPath: entry.manifestPath,
   };
+  if (entry.manifestSha256 !== undefined) migrated.manifestSha256 = entry.manifestSha256;
   if (entry.enabled !== undefined) migrated.enabled = entry.enabled;
   if (entry.bundleRefs !== undefined) migrated.bundleRefs = entry.bundleRefs;
   if (entry.approvedPluginAccess !== undefined) migrated.approvedPluginAccess = entry.approvedPluginAccess;

@@ -1,4 +1,5 @@
 import { cp, mkdir, readFile, rename, rm, stat as statAsync, writeFile } from "node:fs/promises";
+import { createHash } from "node:crypto";
 import { tombstoneAndDeferredRemove } from "./installed-entry-fs.js";
 import { realpathSync } from "node:fs";
 import { dirname, isAbsolute, posix, relative, resolve } from "node:path";
@@ -16,6 +17,7 @@ import type { InstallerProgressEvent } from "./marketplace-installer.js";
 import { getBundledPublicKeys } from "./publisher-keys.js";
 import { PluginArtifactStore } from "./plugin-artifact-store.js";
 import { installReceiptPath, listFilesRecursive, verifyInstallReceipt } from "./plugin-install-receipt.js";
+import { canonicalJSON } from "./whitelist/canonical-json.js";
 import type { PluginInstallReceipt } from "./plugin-install-receipt.js";
 import { STABLE_SEMVER_RE } from "./runtime/manifest-validation.js";
 import type { InstallPolicy, PluginRegistryEntry } from "./types.js";
@@ -35,6 +37,10 @@ function normalizeInstallPolicy(source: {
     return "admin";
   }
   return "user";
+}
+
+function shaOfManifest(manifest: unknown): string {
+  return createHash("sha256").update(canonicalJSON(manifest)).digest("hex");
 }
 
 function resolveRollbackInstallSource(
@@ -78,6 +84,7 @@ type InstallOperationState = {
       bundleRefs: string[] | undefined;
       approvedPluginAccess: PluginRegistryEntry["approvedPluginAccess"];
       installSource: PluginRegistryEntryInstallSource | undefined;
+      manifestSha256: string | undefined;
     }
   >;
 };
@@ -490,10 +497,11 @@ export class PluginMarketplaceService {
       const receiptValidation = await this.getInstallReceiptValidation(plugin.id, manifestPath);
       const isSameArtifact = this.installedArtifactMatchesCatalog(plugin, receiptValidation);
       if (isSameVersion && receiptValidation.ok && isSameArtifact) {
+        const manifestSha256 = await this.readManifestSha256(manifestPath);
         // Pass `null` as `bundleRootId` — auto-install of `dependencies[]`
         // is gone (issue #92), so no plugin is ever installed as a bundle
         // child of another. `mergeBundleRefs` treats `null` as no-op.
-        await this.touchInstalledRegistryEntry(plugin.id, null, actor, plugin.pluginAccess, state);
+        await this.touchInstalledRegistryEntry(plugin.id, null, actor, plugin.pluginAccess, manifestSha256, state);
         return { pluginId: plugin.id, installed: true };
       }
       if (isSameVersion && !receiptValidation.ok) {
@@ -529,6 +537,7 @@ export class PluginMarketplaceService {
     const manifestAbsPath = isAbsolute(manifestPath)
       ? manifestPath
       : resolve(dirname(this.registryPath), manifestPath);
+    const manifestSha256 = await this.readManifestSha256(manifestAbsPath);
     this.clearInstallReceiptValidation(pluginId, manifestAbsPath);
     await this.artifactStore.cacheVersionFromManifest(pluginId, manifestAbsPath);
     await this.appendHistoryFromManifestVersion(pluginId, manifestAbsPath);
@@ -542,6 +551,7 @@ export class PluginMarketplaceService {
       const existing = registry.plugins.find((x) => x.id === plugin.id);
       if (existing) {
         existing.manifestPath = manifestPath;
+        existing.manifestSha256 = manifestSha256;
         existing.enabled = true;
         // A marketplace install always supersedes any prior install
         // source (local-dev, ...).
@@ -552,6 +562,7 @@ export class PluginMarketplaceService {
         registry.plugins.push({
           id: plugin.id,
           manifestPath,
+          manifestSha256,
           enabled: true,
           installSource: actor === "it-admin" ? "admin" : "user",
           bundleRefs: this.mergeBundleRefs([], null, plugin.id),
@@ -697,9 +708,13 @@ export class PluginMarketplaceService {
       await this.snapshotCurrentInstall(pluginId);
 
       const manifestPath = await this.installArtifact(plugin, version);
+      const manifestAbsPath = isAbsolute(manifestPath)
+        ? manifestPath
+        : resolve(dirname(this.registryPath), manifestPath);
+      const manifestSha256 = await this.readManifestSha256(manifestAbsPath);
       await this.artifactStore.cacheVersionFromManifest(
         pluginId,
-        resolve(dirname(this.registryPath), manifestPath),
+        manifestAbsPath,
       );
       // Record install in per-plugin history.json (replaces the
       // mtime-based rollback target selection, which is unreliable across
@@ -713,6 +728,7 @@ export class PluginMarketplaceService {
         const existing = registry.plugins.find((x) => x.id === plugin.id);
         if (existing) {
           existing.manifestPath = manifestPath;
+          existing.manifestSha256 = manifestSha256;
           existing.enabled = true;
           existing.installSource = "user";
           existing.approvedPluginAccess = plugin.pluginAccess;
@@ -720,6 +736,7 @@ export class PluginMarketplaceService {
           registry.plugins.push({
             id: plugin.id,
             manifestPath,
+            manifestSha256,
             enabled: true,
             installSource: "user",
             bundleRefs: [],
@@ -767,6 +784,10 @@ export class PluginMarketplaceService {
       }
       const registrySnapshot = await this.artifactStore.readCachedRegistryEntrySnapshot(pluginId, priorVersion);
       const manifestPathRel = await this.installArtifact(plugin, priorVersion);
+      const manifestAbsPath = isAbsolute(manifestPathRel)
+        ? manifestPathRel
+        : resolve(dirname(this.registryPath), manifestPathRel);
+      const manifestSha256 = await this.readManifestSha256(manifestAbsPath);
 
       await this.artifactStore.appendHistory(pluginId, {
         version: priorVersion,
@@ -777,6 +798,7 @@ export class PluginMarketplaceService {
         const existing = registry.plugins.find((x) => x.id === pluginId);
         if (existing) {
           existing.manifestPath = manifestPathRel;
+          existing.manifestSha256 = manifestSha256;
           existing.enabled = true;
           existing.installSource = resolveRollbackInstallSource(existing.installSource, registrySnapshot?.installSource);
           existing.bundleRefs = existing.bundleRefs ?? registrySnapshot?.bundleRefs ?? [];
@@ -785,6 +807,7 @@ export class PluginMarketplaceService {
           registry.plugins.push({
             id: pluginId,
             manifestPath: manifestPathRel,
+            manifestSha256,
             enabled: true,
             installSource: resolveRollbackInstallSource(undefined, registrySnapshot?.installSource),
             bundleRefs: registrySnapshot?.bundleRefs ?? [],
@@ -861,6 +884,11 @@ export class PluginMarketplaceService {
     }
   }
 
+  private async readManifestSha256(manifestPath: string): Promise<string> {
+    const raw = await readFile(manifestPath, "utf-8");
+    return shaOfManifest(JSON.parse(raw));
+  }
+
   private async getInstalledRegistryEntry(pluginId: string): Promise<PluginRegistryEntry | null> {
     // Round-3 §6: registry read errors must surface (only ENOENT is silently
     // handled inside `readPluginRegistry`, which returns the empty default).
@@ -919,6 +947,7 @@ export class PluginMarketplaceService {
     bundleRootId: string | null,
     actor: "user" | "it-admin",
     approvedPluginAccess: PluginRegistryEntry["approvedPluginAccess"],
+    manifestSha256: string,
     state?: InstallOperationState,
   ): Promise<void> {
     await updatePluginRegistry(this.registryPath, (registry) => {
@@ -930,9 +959,11 @@ export class PluginMarketplaceService {
           bundleRefs: entry.bundleRefs ? [...entry.bundleRefs] : undefined,
           approvedPluginAccess: entry.approvedPluginAccess,
           installSource: entry.installSource,
+          manifestSha256: entry.manifestSha256,
         });
       }
       entry.enabled = true;
+      entry.manifestSha256 = manifestSha256;
       entry.installSource = actor === "it-admin" ? "admin" : entry.installSource ?? "user";
       entry.bundleRefs = this.mergeBundleRefs(entry.bundleRefs, bundleRootId, pluginId);
       entry.approvedPluginAccess = approvedPluginAccess;
@@ -962,6 +993,11 @@ export class PluginMarketplaceService {
         entry.enabled = snapshot.enabled;
         entry.bundleRefs = snapshot.bundleRefs;
         entry.approvedPluginAccess = snapshot.approvedPluginAccess;
+        if (snapshot.manifestSha256) {
+          entry.manifestSha256 = snapshot.manifestSha256;
+        } else {
+          delete entry.manifestSha256;
+        }
         if (snapshot.installSource) {
           // Restore "user", "admin", or "local-dev" as-is. For "local-dev",
           // the install receipt written by installLocal remains on disk so
@@ -1429,6 +1465,7 @@ export class PluginMarketplaceService {
         const localInstallSource: PluginRegistryEntryInstallSource =
           manifest.installPolicy === "admin" ? "admin" : "local-dev";
         const registryManifestPath = posix.join(pluginId, "plugin.json");
+        const manifestSha256 = shaOfManifest(manifest);
         // Mirror the marketplace install path's grant of `manifest.pluginAccess`
         // into `approvedPluginAccess`. Without this,
         // `assertPluginEventAccess` / `assertPluginToolAccess` find no grant for
@@ -1442,6 +1479,7 @@ export class PluginMarketplaceService {
           const existing = registry.plugins.find((x) => x.id === pluginId);
           if (existing) {
             existing.manifestPath = registryManifestPath;
+            existing.manifestSha256 = manifestSha256;
             existing.enabled = true;
             existing.installSource = localInstallSource;
             existing.approvedPluginAccess = approvedPluginAccess;
@@ -1449,6 +1487,7 @@ export class PluginMarketplaceService {
             registry.plugins.push({
               id: pluginId,
               manifestPath: registryManifestPath,
+              manifestSha256,
               enabled: true,
               installSource: localInstallSource,
               approvedPluginAccess,

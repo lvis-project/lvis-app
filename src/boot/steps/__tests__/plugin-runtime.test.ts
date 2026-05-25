@@ -9,12 +9,13 @@
  *   and the original ApprovalOriginError is still re-thrown to the caller.
  */
 
-import { describe, it, expect, vi } from "vitest";
+import { beforeEach, describe, it, expect, vi } from "vitest";
 import { mkdtempSync } from "node:fs";
 
 const runtimeTestState = vi.hoisted(() => ({
   appPrependOnceListener: vi.fn(),
   capturedRuntimeOptions: null as Record<string, unknown> | null,
+  readPluginRegistry: vi.fn(async () => ({ version: 1, plugins: [] })),
   runtime: {
     startAll: vi.fn(async () => {}),
     listToolNames: vi.fn(() => [] as string[]),
@@ -64,6 +65,10 @@ vi.mock("../../../plugins/plugin-paths.js", () => ({
   })),
 }));
 
+vi.mock("../../../plugins/registry.js", () => ({
+  readPluginRegistry: runtimeTestState.readPluginRegistry,
+}));
+
 import {
   auditApprovalViolation,
   declaresHostManagedPythonRuntime,
@@ -75,6 +80,12 @@ import {
 import { ApprovalOriginError } from "../../../permissions/agent-action-requester.js";
 import { installPluginPartitionPolicy } from "../../../main/html-preview-partition.js";
 import { pluginPartitionName } from "../../../shared/plugin-partition.js";
+import { emitEvent } from "../../types.js";
+
+beforeEach(() => {
+  runtimeTestState.readPluginRegistry.mockReset();
+  runtimeTestState.readPluginRegistry.mockResolvedValue({ version: 1, plugins: [] });
+});
 
 describe("auditApprovalViolation (Group C — audit logger try-catch swallow)", () => {
   it("re-throws the original ApprovalOriginError even when auditLogger.log throws", () => {
@@ -842,5 +853,91 @@ describe("initPluginRuntime HostApi factory", () => {
 
     expect(getHostSecretCounter("hostSecret_denied", "plugin-b7", "other")).toBe(3);
     expect(getHostSecretCounter("hostSecret_denied", "plugin-b7", "attacker")).toBe(0);
+  });
+
+  it("clears registry-entry cache on refresh failure so admin secret bypass fails closed (#959)", async () => {
+    runtimeTestState.capturedRuntimeOptions = null;
+    const { canonicalJSON } = await import("../../../plugins/whitelist/canonical-json.js");
+    const { createHash } = await import("node:crypto");
+    const manifest = {
+      id: "plugin-cache-fail",
+      installPolicy: "admin",
+      config: {},
+      hostSecrets: { read: ["llm.apiKey.openai"] },
+    };
+    const manifestSha256 = createHash("sha256")
+      .update(canonicalJSON(manifest))
+      .digest("hex");
+    runtimeTestState.readPluginRegistry.mockResolvedValueOnce({
+      version: 1,
+      plugins: [
+        {
+          id: "plugin-cache-fail",
+          manifestPath: "plugin-cache-fail/plugin.json",
+          enabled: true,
+          installSource: "admin",
+          manifestSha256,
+        },
+      ],
+    });
+
+    await initPluginRuntime({
+      projectRoot: "/tmp/lvis-test/project",
+      settingsService: {
+        get: vi.fn((key: string) => {
+          if (key === "llm") return { provider: "openai" };
+          if (key === "pluginConfigs") return {};
+          return undefined;
+        }),
+        getSecret: vi.fn((key: string) => key === "llm.apiKey.openai" ? "sk-openai" : null),
+        getPluginConfig: vi.fn(() => ({})),
+        setPluginConfig: vi.fn(),
+      } as never,
+      memoryManager: {} as never,
+      keywordEngine: {
+        registerKeywords: vi.fn(),
+        unregisterByPlugin: vi.fn(),
+      } as never,
+      toolRegistry: {
+        unregisterByPlugin: vi.fn(),
+        register: vi.fn(),
+        listAll: vi.fn(() => []),
+        listPluginIds: vi.fn(() => []),
+        replacePluginTools: vi.fn(),
+      } as never,
+      pythonPath: undefined,
+      bootAuditLogger: { log: vi.fn() } as never,
+      mainWindow: {} as never,
+      openAuthWindowService: vi.fn(),
+      openLinkWindowService: vi.fn(),
+      openAuthPartitionViewerService: vi.fn(),
+      shellOpenExternal: vi.fn(),
+      approvalGate: { requestAndWait: vi.fn() } as never,
+    });
+
+    const createHostApi = runtimeTestState.capturedRuntimeOptions?.createHostApi as
+      | ((pluginId: string, manifest: {
+          id: string;
+          installPolicy?: "admin" | "user";
+          config?: Record<string, unknown>;
+          hostSecrets?: { read?: string[] };
+        }, pluginDataDir: string) => {
+          getSecret: (key: string) => string | null;
+        })
+      | undefined;
+    expect(createHostApi).toBeDefined();
+
+    const api = createHostApi!(
+      "plugin-cache-fail",
+      manifest,
+      mkdtempSync("/tmp/lvis-hostapi-data-"),
+    );
+    expect(api.getSecret("llm.apiKey.openai")).toBe("sk-openai");
+
+    runtimeTestState.readPluginRegistry.mockRejectedValue(new Error("registry unavailable"));
+    emitEvent("plugin.installed", { pluginId: "plugin-cache-fail" });
+    await new Promise((resolve) => setTimeout(resolve, 0));
+
+    expect(api.getSecret("llm.apiKey.openai")).toBeNull();
   });
 });
