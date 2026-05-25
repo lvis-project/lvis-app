@@ -100,7 +100,7 @@ test('session-todo-panel appears inside ChatView after session-todo:changed even
   expect(Math.abs(geometry!.panelRight - geometry!.mainRight)).toBeLessThanOrEqual(1);
 });
 
-test('session-todo-panel clears and labels fresh/add/update/complete mutations', async ({ app, mainWindow }) => {
+test('session-todo-panel drops transient header badges and dismisses at completion', async ({ app, mainWindow }) => {
   const sessionId = await currentSessionId(mainWindow);
   const emitTodos = async (items: Array<{ id: string; content: string; status: string }>) => {
     await app.evaluate(({ BrowserWindow }, payload) => {
@@ -114,33 +114,36 @@ test('session-todo-panel clears and labels fresh/add/update/complete mutations',
   await emitTodos([{ id: 'fresh-1', content: 'fresh step', status: 'pending' }]);
   const panel = mainWindow.locator('[data-testid="session-todo-panel"]');
   await expect(panel).toBeVisible();
-  await expect(mainWindow.locator('[data-testid="session-todo-fresh"]')).toBeVisible();
+  // The transient header badge systems were removed — none of them render.
+  await expect(mainWindow.locator('[data-testid="session-todo-fresh"]')).toHaveCount(0);
+  await expect(mainWindow.locator('[data-testid="session-todo-continuation"]')).toHaveCount(0);
+  // A not-yet-complete plan must not surface the dismiss affordance.
+  await expect(mainWindow.locator('[data-testid="session-todo-dismiss"]')).toHaveCount(0);
 
   await emitTodos([
     { id: 'fresh-1', content: 'fresh step', status: 'pending' },
     { id: 'fresh-2', content: 'added step', status: 'pending' },
   ]);
-  await expect(mainWindow.locator('[data-testid="session-todo-added"]')).toBeVisible();
-
-  await emitTodos([
-    { id: 'fresh-1', content: 'fresh step', status: 'completed' },
-    { id: 'fresh-2', content: 'added step', status: 'pending' },
-  ]);
-  await expect(mainWindow.locator('[data-testid="session-todo-updated"]')).toBeVisible();
   await expect(mainWindow.locator('[data-testid="session-todo-added"]')).toHaveCount(0);
+  await expect(mainWindow.locator('[data-testid="session-todo-dismiss"]')).toHaveCount(0);
 
+  // Every item completed → 2/2 → the dismiss X appears.
   await emitTodos([
     { id: 'fresh-1', content: 'fresh step', status: 'completed' },
     { id: 'fresh-2', content: 'added step', status: 'completed' },
   ]);
-  await expect(mainWindow.locator('[data-testid="session-todo-completed"]')).toBeVisible();
-  await expect(mainWindow.locator('[data-testid="session-todo-updated"]')).toHaveCount(0);
+  await expect(mainWindow.locator('[data-testid="session-todo-completed"]')).toHaveCount(0);
+  const dismiss = mainWindow.locator('[data-testid="session-todo-dismiss"]');
+  await expect(dismiss).toBeVisible();
 
-  await emitTodos([]);
+  // Clicking it routes through clearSessionTodos, whose empty-list emit
+  // removes the panel (no local hide hack).
+  await dismiss.click();
   await expect(panel).toHaveCount(0);
 
+  // A fresh plan repopulates with no header badges.
   await emitTodos([{ id: 'next-1', content: 'next topic step', status: 'pending' }]);
   await expect(panel).toBeVisible();
-  await expect(mainWindow.locator('[data-testid="session-todo-fresh"]')).toBeVisible();
+  await expect(mainWindow.locator('[data-testid="session-todo-fresh"]')).toHaveCount(0);
   await expect(mainWindow.locator('[data-testid="session-todo-continuation"]')).toHaveCount(0);
 });

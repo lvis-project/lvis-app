@@ -335,7 +335,7 @@ describe("SessionTodoPanel", () => {
     expect(container.querySelector('[data-testid="session-todo-panel"]')).toBeNull();
   });
 
-  it("renders items when present", async () => {
+  it("renders items with per-row status pills when present", async () => {
     const api = fakeApi({
       listSessionTodos: () =>
         Promise.resolve([
@@ -349,8 +349,16 @@ describe("SessionTodoPanel", () => {
     expect(await findByText("step 1")).toBeInTheDocument();
     expect(await findByText("step 2")).toBeInTheDocument();
     const panel = container.querySelector('[data-testid="session-todo-panel"]');
-    expect(panel?.querySelectorAll("button")).toHaveLength(1);
+    // Per-row status pills survive the header-badge removal: each row keeps a
+    // 대기/진행/완료 chip.
+    expect(panel?.textContent).toContain("대기");
+    expect(panel?.textContent).toContain("완료");
+    // The removed transient header badges must no longer render.
     expect(panel?.textContent).not.toContain("수정");
+    expect(container.querySelector('[data-testid="session-todo-continuation"]')).toBeNull();
+    expect(container.querySelector('[data-testid="session-todo-fresh"]')).toBeNull();
+    expect(container.querySelector('[data-testid="session-todo-added"]')).toBeNull();
+    expect(container.querySelector('[data-testid="session-todo-updated"]')).toBeNull();
   });
 
   it("pulses the in-progress row in the expanded view so it's the focal point", async () => {
@@ -410,28 +418,21 @@ describe("SessionTodoPanel", () => {
     expect(collapsed!.className).not.toContain("animate-pulse");
   });
 
-  it("shows '이어서' chip when items already exist on mount (resumed session)", async () => {
-    const api = fakeApi({
-      listSessionTodos: () =>
-        Promise.resolve([{ id: "t1", content: "carryover", status: "pending" }]),
-    });
-    const { findByTestId } = render(
-      <SessionTodoPanel api={api} sessionId="session-A" />,
-    );
-    const chip = await findByTestId("session-todo-continuation");
-    expect(chip.textContent).toContain("이어서");
-  });
-
-  it("shows '새 시작' chip when items first arrive in a previously-empty session", async () => {
+  it("shows the dismiss X only when every item is completed and clears via the store emit", async () => {
     let pushPayload: ((p: {
       sessionId: string;
       items: Array<{ id: string; content: string; status: string }>;
     }) => void) | null = null;
+    const clearSpy = vi.fn(async (_sessionId?: string) => {
+      // The real clear path drives the panel away by emitting an empty list,
+      // not a local hide — simulate that here.
+      pushPayload?.({ sessionId: "session-dismiss", items: [] });
+      return { ok: true };
+    });
     const api = fakeApi({
-      // Mount with empty session — the panel itself stays hidden until
-      // the first push arrives, which is when the user actually needs
-      // the "fresh vs resumed" affordance.
-      listSessionTodos: () => Promise.resolve([]),
+      listSessionTodos: () =>
+        Promise.resolve([{ id: "t1", content: "only step", status: "in_progress" }]),
+      clearSessionTodos: clearSpy as never,
       onSessionTodoChanged: ((handler: (p: {
         sessionId: string;
         items: Array<{ id: string; content: string; status: string }>;
@@ -440,125 +441,33 @@ describe("SessionTodoPanel", () => {
         return () => undefined;
       }) as never,
     });
-    const { queryByTestId, findByTestId } = render(
-      <SessionTodoPanel api={api} sessionId="session-B" />,
+    const { findByText, queryByTestId, findByTestId } = render(
+      <SessionTodoPanel api={api} sessionId="session-dismiss" />,
     );
-    // Allow the initial empty fetch to resolve. Panel is hidden because
-    // items.length === 0; no chip is queryable yet.
-    await act(async () => {
-      await Promise.resolve();
-    });
-    expect(queryByTestId("session-todo-panel")).toBeNull();
-    // First push lands → panel materializes WITH the "fresh start" chip
-    // because the empty initial fetch flagged the session as not resumed.
+    await findByText("세션 TO-DO");
+    // Not yet all-complete: the dismiss X must be absent.
+    expect(queryByTestId("session-todo-dismiss")).toBeNull();
+
+    // Mark the single item completed → 1/1 → dismiss X appears.
     await act(async () => {
       pushPayload!({
-        sessionId: "session-B",
-        items: [{ id: "n1", content: "freshly authored", status: "pending" }],
+        sessionId: "session-dismiss",
+        items: [{ id: "t1", content: "only step", status: "completed" }],
       });
     });
-    const chip = await findByTestId("session-todo-fresh");
-    expect(chip.textContent).toContain("새 시작");
-    expect(queryByTestId("session-todo-continuation")).toBeNull();
+    const dismiss = await findByTestId("session-todo-dismiss");
+
+    // Clicking it calls clearSessionTodos; the resulting empty-list emit
+    // removes the panel entirely (returns null at items.length === 0).
+    await act(async () => {
+      dismiss.dispatchEvent(new MouseEvent("click", { bubbles: true }));
+      await Promise.resolve();
+    });
+    expect(clearSpy).toHaveBeenCalledWith("session-dismiss");
+    expect(queryByTestId("session-todo-panel")).toBeNull();
   });
 
-  it("expires transient session todo badges without clearing the plan", async () => {
-    vi.useFakeTimers();
-    try {
-      let pushPayload: ((p: {
-        sessionId: string;
-        items: Array<{ id: string; content: string; status: string }>;
-      }) => void) | null = null;
-      const api = fakeApi({
-        listSessionTodos: () => Promise.resolve([]),
-        onSessionTodoChanged: ((handler: (p: {
-          sessionId: string;
-          items: Array<{ id: string; content: string; status: string }>;
-        }) => void) => {
-          pushPayload = handler;
-          return () => undefined;
-        }) as never,
-      });
-      const { container, getByTestId, getByText, queryByTestId } = render(
-        <SessionTodoPanel api={api} sessionId="session-expire" />,
-      );
-
-      await act(async () => {
-        await Promise.resolve();
-        pushPayload!({
-          sessionId: "session-expire",
-          items: [{ id: "n1", content: "freshly authored", status: "pending" }],
-        });
-      });
-      expect(getByTestId("session-todo-fresh").textContent).toContain("새 시작");
-
-      await act(async () => {
-        vi.advanceTimersByTime(5_000);
-      });
-      expect(queryByTestId("session-todo-fresh")).toBeNull();
-      expect(getByTestId("session-todo-panel")).toBeInTheDocument();
-      await openPanel(container);
-      expect(getByText("freshly authored")).toBeInTheDocument();
-
-      await act(async () => {
-        pushPayload!({
-          sessionId: "session-expire",
-          items: [
-            { id: "n1", content: "freshly authored", status: "pending" },
-            { id: "n2", content: "added", status: "pending" },
-          ],
-        });
-      });
-      expect(getByTestId("session-todo-added").textContent).toContain("추가");
-
-      await act(async () => {
-        vi.advanceTimersByTime(5_000);
-      });
-      expect(queryByTestId("session-todo-added")).toBeNull();
-      expect(getByTestId("session-todo-panel")).toBeInTheDocument();
-      expect(getByText("added")).toBeInTheDocument();
-
-      await act(async () => {
-        pushPayload!({
-          sessionId: "session-expire",
-          items: [
-            { id: "n1", content: "freshly authored", status: "in_progress" },
-            { id: "n2", content: "added", status: "pending" },
-          ],
-        });
-      });
-      expect(getByTestId("session-todo-updated").textContent).toContain("수정");
-
-      await act(async () => {
-        vi.advanceTimersByTime(5_000);
-      });
-      expect(queryByTestId("session-todo-updated")).toBeNull();
-      expect(getByTestId("session-todo-panel")).toBeInTheDocument();
-      expect(getByText("freshly authored")).toBeInTheDocument();
-
-      await act(async () => {
-        pushPayload!({
-          sessionId: "session-expire",
-          items: [
-            { id: "n1", content: "freshly authored", status: "completed" },
-            { id: "n2", content: "added", status: "completed" },
-          ],
-        });
-      });
-      expect(getByTestId("session-todo-completed").textContent).toContain("완료");
-
-      await act(async () => {
-        vi.advanceTimersByTime(5_000);
-      });
-      expect(queryByTestId("session-todo-completed")).toBeNull();
-      expect(getByTestId("session-todo-panel")).toBeInTheDocument();
-      expect(getByText("freshly authored")).toBeInTheDocument();
-    } finally {
-      vi.useRealTimers();
-    }
-  });
-
-  it("keeps the '새 시작' chip when a live push beats the initial list fetch", async () => {
+  it("keeps a stale list snapshot from clobbering a live push (no header badges)", async () => {
     let pushPayload: ((p: {
       sessionId: string;
       items: Array<{ id: string; content: string; status: string }>;
@@ -577,7 +486,7 @@ describe("SessionTodoPanel", () => {
         return () => undefined;
       }) as never,
     });
-    const { findByTestId, queryByTestId, queryByText } = render(
+    const { findByText, queryByTestId, queryByText, container } = render(
       <SessionTodoPanel api={api} sessionId="session-race" />,
     );
 
@@ -585,15 +494,17 @@ describe("SessionTodoPanel", () => {
     await act(async () => {
       pushPayload!({ sessionId: "session-race", items: firstItems });
     });
-    expect((await findByTestId("session-todo-fresh")).textContent).toContain("새 시작");
+    await findByText("세션 TO-DO");
 
     await act(async () => {
       resolveList([{ id: "old", content: "stale list snapshot", status: "pending" }]);
       await listPromise;
     });
-    expect(queryByTestId("session-todo-fresh")).toBeInTheDocument();
-    expect(queryByTestId("session-todo-continuation")).toBeNull();
+    // Live push wins over the late initial fetch; removed transient header
+    // badges never render.
     expect(queryByText("stale list snapshot")).toBeNull();
+    expect(container.querySelector('[data-testid="session-todo-fresh"]')).toBeNull();
+    expect(container.querySelector('[data-testid="session-todo-continuation"]')).toBeNull();
   });
 
   it("ignores malformed push events without a session id", async () => {
@@ -687,7 +598,7 @@ describe("SessionTodoPanel", () => {
     expect(queryByTestId("session-todo-panel")).toBeNull();
   });
 
-  it("resets plan badge on clear, then labels the next live plan as fresh", async () => {
+  it("clears the panel when the store emits an empty list, then repopulates on the next plan", async () => {
     let pushPayload: ((p: {
       sessionId: string;
       items: Array<{ id: string; content: string; status: string }>;
@@ -703,10 +614,10 @@ describe("SessionTodoPanel", () => {
         return () => undefined;
       }) as never,
     });
-    const { findByTestId, queryByTestId } = render(
+    const { findByText, queryByTestId } = render(
       <SessionTodoPanel api={api} sessionId="session-clear" />,
     );
-    expect((await findByTestId("session-todo-continuation")).textContent).toContain("이어서");
+    await findByText("세션 TO-DO");
 
     await act(async () => {
       pushPayload!({ sessionId: "session-clear", items: [] });
@@ -719,102 +630,8 @@ describe("SessionTodoPanel", () => {
         items: [{ id: "new", content: "new topic", status: "pending" }],
       });
     });
-    expect((await findByTestId("session-todo-fresh")).textContent).toContain("새 시작");
-    expect(queryByTestId("session-todo-continuation")).toBeNull();
-  });
-
-  it("shows add, update, and completed chips for non-initial mutations", async () => {
-    let pushPayload: ((p: {
-      sessionId: string;
-      items: Array<{ id: string; content: string; status: string }>;
-    }) => void) | null = null;
-    const api = fakeApi({
-      listSessionTodos: () =>
-        Promise.resolve([{ id: "t1", content: "first", status: "pending" }]),
-      onSessionTodoChanged: ((handler: (p: {
-        sessionId: string;
-        items: Array<{ id: string; content: string; status: string }>;
-      }) => void) => {
-        pushPayload = handler;
-        return () => undefined;
-      }) as never,
-    });
-    const { findByTestId, queryByTestId } = render(
-      <SessionTodoPanel api={api} sessionId="session-mutate" />,
-    );
-    await findByTestId("session-todo-continuation");
-
-    await act(async () => {
-      pushPayload!({
-        sessionId: "session-mutate",
-        items: [
-          { id: "t1", content: "first", status: "pending" },
-          { id: "t2", content: "second", status: "pending" },
-        ],
-      });
-    });
-    expect((await findByTestId("session-todo-added")).textContent).toContain("추가");
-
-    await act(async () => {
-      pushPayload!({
-        sessionId: "session-mutate",
-        items: [
-          { id: "t1", content: "first", status: "completed" },
-          { id: "t2", content: "second", status: "pending" },
-        ],
-      });
-    });
-    expect((await findByTestId("session-todo-updated")).textContent).toContain("수정");
-    expect(queryByTestId("session-todo-added")).toBeNull();
-
-    await act(async () => {
-      pushPayload!({
-        sessionId: "session-mutate",
-        items: [
-          { id: "t1", content: "first", status: "completed" },
-          { id: "t2", content: "second", status: "completed" },
-        ],
-      });
-    });
-    expect((await findByTestId("session-todo-completed")).textContent).toContain("완료");
-    expect(queryByTestId("session-todo-updated")).toBeNull();
-  });
-
-  it("shows the update chip for same-turn reorder-only mutations", async () => {
-    let pushPayload: ((p: {
-      sessionId: string;
-      items: Array<{ id: string; content: string; status: string }>;
-    }) => void) | null = null;
-    const api = fakeApi({
-      listSessionTodos: () =>
-        Promise.resolve([
-          { id: "t1", content: "first", status: "pending" },
-          { id: "t2", content: "second", status: "pending" },
-        ]),
-      onSessionTodoChanged: ((handler: (p: {
-        sessionId: string;
-        items: Array<{ id: string; content: string; status: string }>;
-      }) => void) => {
-        pushPayload = handler;
-        return () => undefined;
-      }) as never,
-    });
-    const { findByTestId, queryByTestId } = render(
-      <SessionTodoPanel api={api} sessionId="session-reorder" />,
-    );
-    await findByTestId("session-todo-continuation");
-
-    await act(async () => {
-      pushPayload!({
-        sessionId: "session-reorder",
-        items: [
-          { id: "t2", content: "second", status: "pending" },
-          { id: "t1", content: "first", status: "pending" },
-        ],
-      });
-    });
-    expect((await findByTestId("session-todo-updated")).textContent).toContain("수정");
-    expect(queryByTestId("session-todo-added")).toBeNull();
+    await findByText("new topic");
+    expect(queryByTestId("session-todo-panel")).toBeInTheDocument();
   });
 
   it("ignores push events emitted for a different session id", async () => {

@@ -118,6 +118,22 @@ describe("SessionTodoStore", () => {
     store.write("s2", [{ content: "y", status: "pending" }]);
     expect(events).toEqual([1, 2]);
   });
+
+  it("clear() emits an empty list and drops the session regardless of status", () => {
+    const store = new SessionTodoStore();
+    const events: Array<{ sid: string; len: number }> = [];
+    store.onChange((sid, items) => events.push({ sid, len: items.length }));
+    store.write("s3", [
+      { content: "a", status: "in_progress" },
+      { content: "b", status: "pending" },
+    ]);
+
+    // Manual dismiss path: unlike clearForTurnStart, clear() does not gate on
+    // every item being completed.
+    store.clear("s3");
+    expect(store.list("s3")).toEqual([]);
+    expect(events.at(-1)).toEqual({ sid: "s3", len: 0 });
+  });
 });
 
 describe("parseFrontmatter", () => {

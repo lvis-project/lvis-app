@@ -94,11 +94,17 @@ export class SessionTodoStore {
     const items = this.sessions.get(sessionId) ?? [];
     if (items.length === 0) return false;
     if (!items.every((item) => item.status === "completed")) return false;
-    this.clearCompletedPlan(sessionId);
+    this.clear(sessionId);
     return true;
   }
 
-  private clearCompletedPlan(sessionId: string): void {
+  /**
+   * Explicit-clear path: drop the session and emit an empty list to listeners.
+   * Used by both the turn-start auto-clear and the manual dismiss affordance.
+   * Distinct from the update-only `deleted` command, which removes items but
+   * must never produce the empty-list clear event.
+   */
+  clear(sessionId: string): void {
     this.sessions.delete(sessionId);
     for (const l of this.listeners) {
       try {
