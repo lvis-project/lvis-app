@@ -140,7 +140,7 @@ describe("ConversationLoop queryLoop", () => {
     });
   });
 
-  it("clears the previous session TO-DO plan at the next turn start", async () => {
+  it("clears a completed session TO-DO plan at the next turn start", async () => {
     const toolRegistry = new ToolRegistry();
     const provider = new FakeProvider([
       [
@@ -150,7 +150,7 @@ describe("ConversationLoop queryLoop", () => {
     ]);
     const sessionTodoStore = new SessionTodoStore();
     sessionTodoStore.write("s-main", [
-      { content: "stale from previous turn", status: "in_progress" },
+      { content: "stale from previous turn", status: "completed" },
     ]);
     const loop = new ConversationLoop(({
       settingsService: {
@@ -175,6 +175,84 @@ describe("ConversationLoop queryLoop", () => {
     await loop.runTurn("다음 질문", undefined, undefined, { inputOrigin: "user-keyboard" });
 
     expect(sessionTodoStore.list("s-main")).toEqual([]);
+  });
+
+  it("keeps completed session TO-DO plans for non-user-origin turns", async () => {
+    const toolRegistry = new ToolRegistry();
+    const provider = new FakeProvider([
+      [
+        { type: "text_delta", text: "ok" },
+        { type: "message_complete", stopReason: "end_turn" },
+      ],
+    ]);
+    const sessionTodoStore = new SessionTodoStore();
+    sessionTodoStore.write("s-main", [
+      { content: "completed user plan", status: "completed" },
+    ]);
+    const loop = new ConversationLoop(({
+      settingsService: {
+        get: () => fakeLlmSettings(),
+        getSecret: () => "test-key",
+      },
+      systemPromptBuilder: {
+        build: () => "system",
+      },
+      keywordEngine: new KeywordEngine(),
+      routeEngine: new RouteEngine({ toolRegistry }),
+      toolRegistry,
+      memoryManager: {
+        saveSession: () => {},
+        listSessions: () => [],
+      },
+      sessionTodoStore,
+    } as unknown) as ConstructorParameters<typeof ConversationLoop>[0]);
+    (loop as { provider: LLMProvider | null }).provider = provider;
+    (loop as { sessionId: string }).sessionId = "s-main";
+
+    await loop.runTurn("plugin prompt", undefined, undefined, { inputOrigin: "plugin-emitted" });
+
+    expect(sessionTodoStore.list("s-main").map((item) => item.content)).toEqual([
+      "completed user plan",
+    ]);
+  });
+
+  it("keeps unfinished session TO-DO plans across turn boundaries", async () => {
+    const toolRegistry = new ToolRegistry();
+    const provider = new FakeProvider([
+      [
+        { type: "text_delta", text: "ok" },
+        { type: "message_complete", stopReason: "end_turn" },
+      ],
+    ]);
+    const sessionTodoStore = new SessionTodoStore();
+    sessionTodoStore.write("s-main", [
+      { content: "still running from previous turn", status: "in_progress" },
+    ]);
+    const loop = new ConversationLoop(({
+      settingsService: {
+        get: () => fakeLlmSettings(),
+        getSecret: () => "test-key",
+      },
+      systemPromptBuilder: {
+        build: () => "system",
+      },
+      keywordEngine: new KeywordEngine(),
+      routeEngine: new RouteEngine({ toolRegistry }),
+      toolRegistry,
+      memoryManager: {
+        saveSession: () => {},
+        listSessions: () => [],
+      },
+      sessionTodoStore,
+    } as unknown) as ConstructorParameters<typeof ConversationLoop>[0]);
+    (loop as { provider: LLMProvider | null }).provider = provider;
+    (loop as { sessionId: string }).sessionId = "s-main";
+
+    await loop.runTurn("다음 질문", undefined, undefined, { inputOrigin: "user-keyboard" });
+
+    expect(sessionTodoStore.list("s-main").map((item) => item.content)).toEqual([
+      "still running from previous turn",
+    ]);
   });
 
   it("clears skill overlay at user-turn boundaries", async () => {

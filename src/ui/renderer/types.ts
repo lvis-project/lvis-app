@@ -24,6 +24,7 @@ import type {
   OpenHtmlPreviewWindowPayload,
   OpenHtmlPreviewWindowResult,
 } from "../../shared/render-html-preview.js";
+import type { SessionTodoItem } from "../../shared/session-todo.js";
 
 // Re-export MCP types for renderer-side consumers (type-only, no main-process runtime)
 export type { McpServerConfig, McpServerConfigDto, McpServerState };
@@ -792,13 +793,11 @@ export type LvisApi = {
   onAskUserQuestionTimeout?: (
     h: (payload: { requestId: string }) => void,
   ) => () => void;
-  listSessionTodos: (sessionId?: string) => Promise<
-    Array<{ id: string; content: string; status: string }>
-  >;
+  listSessionTodos: (sessionId?: string) => Promise<SessionTodoItem[]>;
   onSessionTodoChanged: (
     h: (payload: {
       sessionId: string;
-      items: Array<{ id: string; content: string; status: string }>;
+      items: SessionTodoItem[];
     }) => void,
   ) => () => void;
   onAgentSpawnEvent: (

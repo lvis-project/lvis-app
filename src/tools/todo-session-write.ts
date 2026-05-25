@@ -1,29 +1,26 @@
 /**
  * `todo_session_write` LLM tool — assistant's current-turn checklist.
- * Distinct from user `task_*` (persistent): in-memory only, cleared at the
- * next user turn boundary, and routed by active ChatSession id so the
- * renderer's SessionTodoPanel receives the right live list.
+ * Distinct from user `task_*` (persistent): in-memory only, scoped to the
+ * active ChatSession id, and cleared at the next explicit user/user-queued
+ * turn boundary only after every item is completed.
  */
 import { createDynamicTool, type Tool } from "./base.js";
-import type {
-  SessionTodoStore,
-  SessionTodoStatus,
-  SessionTodoUpdate,
+import {
+  SessionTodoEmptyPlanError,
+  type SessionTodoStore,
 } from "../main/session-todo-store.js";
-
-const STATUS_VALUES: SessionTodoStatus[] = [
-  "pending",
-  "in_progress",
-  "completed",
-  "deleted",
-];
+import {
+  isSessionTodoUpdateStatus,
+  SESSION_TODO_UPDATE_STATUSES,
+  type SessionTodoUpdate,
+} from "../shared/session-todo.js";
 
 export function createTodoSessionWriteTool(store: SessionTodoStore): Tool {
   return createDynamicTool({
     name: "todo_session_write",
     description:
       "현재 턴 동안 어시스턴트가 따라갈 체크리스트를 작성/갱신합니다. " +
-      "사용자 task_* 와 다름 (다음 사용자 턴 시작 시 자동으로 비워지는 휘발성 plan). id 를 같이 보내면 merge, " +
+      "사용자 task_* 와 다름 (모든 항목이 완료된 뒤 다음 명시 사용자 입력 또는 사용자 큐 자동 인입 턴 시작 시 비워지는 휘발성 plan). id 를 같이 보내면 merge, " +
       "생략하면 새 항목 생성. beforeId/afterId 로 중간 삽입 또는 이동 가능. " +
       "status: pending | in_progress | completed | deleted. " +
       "사용자가 본인의 업무·할 일·태스크를 등록·기록·추가해달라는 요청에는 " +
@@ -54,7 +51,7 @@ export function createTodoSessionWriteTool(store: SessionTodoStore): Tool {
             properties: {
               id: { type: "string", description: "기존 항목 id — 생략 시 신규 생성. id 전달 시 content 생략 가능(기존 내용 유지)." },
               content: { type: "string", description: "항목 내용. 신규 생성 시 필수." },
-              status: { type: "string", enum: STATUS_VALUES },
+              status: { type: "string", enum: SESSION_TODO_UPDATE_STATUSES },
               beforeId: { type: "string", description: "이 항목 앞에 삽입/이동할 기준 id. afterId 보다 우선." },
               afterId: { type: "string", description: "이 항목 뒤에 삽입/이동할 기준 id. 기준이 없으면 뒤에 추가." },
             },
@@ -80,10 +77,10 @@ export function createTodoSessionWriteTool(store: SessionTodoStore): Tool {
         const id = typeof obj.id === "string" ? obj.id : undefined;
         const beforeId = typeof obj.beforeId === "string" ? obj.beforeId : undefined;
         const afterId = typeof obj.afterId === "string" ? obj.afterId : undefined;
-        const status = obj.status as SessionTodoStatus;
+        const status = obj.status;
         // new items require content; updates by id allow content omission
         if (!id && !content?.trim()) continue;
-        if (!STATUS_VALUES.includes(status)) continue;
+        if (!isSessionTodoUpdateStatus(status)) continue;
         updates.push({ id, content, status, beforeId, afterId });
       }
       if (updates.length === 0) {
@@ -92,7 +89,20 @@ export function createTodoSessionWriteTool(store: SessionTodoStore): Tool {
           isError: true,
         };
       }
-      const merged = store.write(sessionId, updates);
+      let merged;
+      try {
+        merged = store.write(sessionId, updates);
+      } catch (err) {
+        if (!(err instanceof SessionTodoEmptyPlanError)) {
+          throw err;
+        }
+        return {
+          output: JSON.stringify({
+            error: "todo_session_write cannot delete every item; mark remaining items completed instead",
+          }),
+          isError: true,
+        };
+      }
       return {
         output: JSON.stringify({ items: merged }),
         isError: false,
