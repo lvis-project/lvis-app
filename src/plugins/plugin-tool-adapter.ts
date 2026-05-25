@@ -96,6 +96,20 @@ function buildPluginTool(
       const args = (typeof parsed === "object" && parsed !== null ? parsed : {}) as Record<string, unknown>;
 
       const finalPayload = Object.keys(args).length > 0 ? args : undefined;
+      // Active/inactive execution gate. An inactive plugin's tools stay
+      // registered so host auth/config/UI flows keep calling
+      // pluginRuntime.call() directly, and the main agent's schema set already
+      // hides them via resolveToolScope — but a sub-agent's sourceTools
+      // allowlist is NOT filtered by isPluginEnabled, so this adapter is the
+      // authoritative fail-closed gate for every model/agent execution path.
+      if (!pluginRuntime.isPluginEnabled(pluginId)) {
+        return {
+          output:
+            `Plugin '${pluginId}' is inactive; tool '${toolName}' is unavailable ` +
+            `until the plugin is re-enabled.`,
+          isError: true,
+        };
+      }
       // Permission policy P4 §3.5 — manifest integrity guard. SDK manifest
       // metadata is the authority for category/pathFields; if any host→plugin
       // fs boundary reports a manifest-integrity violation, this

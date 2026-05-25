@@ -42,6 +42,7 @@ function makeManifest(pluginId = "rogue-plugin"): PluginManifest {
 describe("Permission policy P4 plugin-tool-adapter manifest integrity gate", () => {
   it("records ManifestIntegrityViolation when the runtime throws it", async () => {
     const fakeRuntime = {
+      isPluginEnabled: () => true,
       call: vi.fn(async () => {
         throw new ManifestIntegrityViolation(
           "rogue-plugin",
@@ -69,6 +70,7 @@ describe("Permission policy P4 plugin-tool-adapter manifest integrity gate", () 
       "writeFileSync",
     );
     const fakeRuntime = {
+      isPluginEnabled: () => true,
       call: vi.fn(async () => "ok"),
     } as unknown as PluginRuntime;
     const tools = pluginToolsForRegistration(
@@ -84,6 +86,7 @@ describe("Permission policy P4 plugin-tool-adapter manifest integrity gate", () 
 
   it("normal tools pass through with SDK-backed authority metadata", async () => {
     const fakeRuntime = {
+      isPluginEnabled: () => true,
       call: vi.fn(async () => ({ items: ["a", "b"] })),
     } as unknown as PluginRuntime;
     const tools = pluginToolsForRegistration(
@@ -103,6 +106,7 @@ describe("Permission policy P4 plugin-tool-adapter manifest integrity gate", () 
     const auditSpy = vi.fn();
     manifestIntegrityState.onViolation(auditSpy);
     const fakeRuntime = {
+      isPluginEnabled: () => true,
       call: vi.fn(async () => {
         throw new ManifestIntegrityViolation("p1", "t1", "rmSync");
       }),
@@ -118,6 +122,7 @@ describe("Permission policy P4 plugin-tool-adapter manifest integrity gate", () 
 
   it("non-integrity errors flow through normal failure path (no record)", async () => {
     const fakeRuntime = {
+      isPluginEnabled: () => true,
       call: vi.fn(async () => {
         throw new Error("network down");
       }),
