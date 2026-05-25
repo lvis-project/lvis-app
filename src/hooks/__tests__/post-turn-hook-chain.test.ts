@@ -545,4 +545,57 @@ describe("PostTurnHookChain", () => {
     });
   });
 
+  describe("mark-session-todo-for-clear step", () => {
+    function makeChain(markForClearIfCompleted: ReturnType<typeof vi.fn>) {
+      const settingsService = {
+        get: vi.fn((key: string) => {
+          if (key === "llm") return fakeLlmSettings();
+          return { systemPrompt: "", autoCompact: false };
+        }),
+      } as unknown as SettingsService;
+      return new PostTurnHookChain({
+        settingsService,
+        sessionTodoStore: { markForClearIfCompleted },
+      });
+    }
+
+    it("calls markForClearIfCompleted with ctx.sessionId after the turn", async () => {
+      const markForClearIfCompleted = vi.fn().mockReturnValue(true);
+      const chain = makeChain(markForClearIfCompleted);
+
+      await chain.run({
+        sessionId: "session-todo-mark",
+        messages: createMessages(),
+        input: "끝났어",
+        output: "완료했습니다",
+        toolCalls: [],
+        route: "chat",
+      });
+
+      expect(markForClearIfCompleted).toHaveBeenCalledOnce();
+      expect(markForClearIfCompleted).toHaveBeenCalledWith("session-todo-mark");
+    });
+
+    it("is failure-isolated: a throwing mark step does not break the chain", async () => {
+      vi.spyOn(console, "warn").mockImplementation(() => {});
+      const markForClearIfCompleted = vi.fn(() => {
+        throw new Error("boom");
+      });
+      const chain = makeChain(markForClearIfCompleted);
+
+      const result = await chain.run({
+        sessionId: "session-todo-mark-throws",
+        messages: createMessages(),
+        input: "끝났어",
+        output: "완료했습니다",
+        toolCalls: [],
+        route: "chat",
+      });
+
+      // The chain still resolves with a well-formed result.
+      expect(result.detector.checkpointSuggested).toBe(false);
+      expect(markForClearIfCompleted).toHaveBeenCalledOnce();
+    });
+  });
+
 });
