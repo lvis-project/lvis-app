@@ -127,6 +127,75 @@ describe("ConversationTracer — §4.5 11-step", () => {
     });
   });
 
+  it("records provider request and stream-error diagnostics without prompt text", async () => {
+    const provider = new FakeProvider([
+      [
+        {
+          type: "error",
+          error:
+            "Rate limit reached for gpt-5.4-mini on tokens per min (TPM): Limit 200000, Used 165785, Requested 47118. Please try again in 3.87s.",
+          classification: "rate-limit",
+          providerError: {
+            origin: "provider",
+            providerType: "tokens",
+            providerCode: "rate_limit_exceeded",
+            classification: "rate-limit",
+            messagePreview:
+              "Rate limit reached for gpt-5.4-mini on tokens per min (TPM): Limit 200000, Used 165785, Requested 47118. Please try again in 3.87s.",
+            rateLimit: {
+              kind: "tokens-per-minute",
+              limit: 200000,
+              used: 165785,
+              requested: 47118,
+              retryAfterSeconds: 3.87,
+            },
+          },
+        },
+      ],
+    ]);
+    const loop = makeLoop(provider);
+    const rec = new RecordingTracer();
+    loop.setTracer(rec);
+
+    await loop.runTurn("인덱서 호출", undefined, undefined, { inputOrigin: "user-keyboard" });
+
+    const streamStep = rec.steps.find((step) => step.name === "LLM_STREAM");
+    expect(streamStep?.meta).toMatchObject({
+      request: {
+        inputOrigin: "user-keyboard",
+        messageRoleCounts: { user: 1, assistant: 0, tool_result: 0 },
+        toolResultCount: 0,
+        projection: {
+          systemPromptTokens: expect.any(Number),
+          messageTokens: expect.any(Number),
+          toolSchemaTokens: expect.any(Number),
+          totalTokens: expect.any(Number),
+        },
+      },
+    });
+    expect(JSON.stringify(streamStep?.meta)).not.toContain("인덱서 호출");
+
+    const errorStep = rec.steps.find((step) => step.name === "LLM_STREAM_ERROR");
+    expect(errorStep?.meta).toMatchObject({
+      classification: "rate-limit",
+      providerError: {
+        providerType: "tokens",
+        providerCode: "rate_limit_exceeded",
+        rateLimit: {
+          limit: 200000,
+          used: 165785,
+          requested: 47118,
+          retryAfterSeconds: 3.87,
+        },
+      },
+      request: {
+        toolExposure: {
+          loadedToolCount: 1,
+        },
+      },
+    });
+  });
+
   it("writes valid JSONL entries to the trace file when enabled", async () => {
     const dir = mkdtempSync(join(tmpdir(), "lvis-trace-"));
     const sessionId = "test-session-abc";

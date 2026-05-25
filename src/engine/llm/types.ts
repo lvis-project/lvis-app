@@ -13,6 +13,7 @@
 // re-export here so existing engine-side callers keep their import
 // path while the type definition cannot drift between modules.
 import { LLM_VENDOR_DEFAULTS, type LLMVendor } from "../../shared/llm-vendor-defaults.js";
+import type { ProviderErrorDiagnostics } from "./provider-error-diagnostics.js";
 export type { LLMVendor };
 export { LLM_VENDORS, isLLMVendor } from "../../shared/llm-vendor-defaults.js";
 
@@ -322,7 +323,12 @@ export type StreamEvent =
   | { type: "reasoning_delta"; text: string }
   | { type: "tool_call"; id: string; name: string; input: Record<string, unknown> }
   | { type: "message_complete"; stopReason: "end_turn" | "tool_use"; usage?: TokenUsage; thinkingBlocks?: ThinkingBlock[] }
-  | { type: "error"; error: string; classification?: string };
+  | {
+      type: "error";
+      error: string;
+      classification?: string;
+      providerError?: ProviderErrorDiagnostics;
+    };
 
 export interface TokenUsage {
   /**

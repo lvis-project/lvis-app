@@ -55,7 +55,49 @@ describe("VercelUnifiedProvider gemini — L1 structural parity", () => {
       { type: "finish", finishReason: "error", totalUsage: {} },
     ];
     const events = await collect(fullStreamToStreamEvent(fromArray(canned)));
-    expect(events[0]).toEqual({ type: "error", error: "boom" });
+    expect(events[0]).toMatchObject({
+      type: "error",
+      error: "boom",
+      providerError: {
+        origin: "unknown",
+        messagePreview: "boom",
+      },
+    });
+  });
+
+  it("preserves OpenAI-style TPM error diagnostics from error parts", async () => {
+    const events = await collect(fullStreamToStreamEvent(fromArray([
+      {
+        type: "error",
+        error: {
+          type: "error",
+          sequence_number: 2,
+          error: {
+            type: "tokens",
+            code: "rate_limit_exceeded",
+            message:
+              "Rate limit reached for gpt-5.4-mini in organization org-IiSU6QTnhaSXVSkRxDCFuf3u on tokens per min (TPM): Limit 200000, Used 165785, Requested 47118. Please try again in 3.87s.",
+          },
+        },
+      },
+    ])));
+
+    expect(events[0]).toMatchObject({
+      type: "error",
+      error: expect.stringContaining("Rate limit reached"),
+      providerError: {
+        origin: "provider",
+        providerType: "tokens",
+        providerCode: "rate_limit_exceeded",
+        rateLimit: {
+          kind: "tokens-per-minute",
+          limit: 200000,
+          used: 165785,
+          requested: 47118,
+          retryAfterSeconds: 3.87,
+        },
+      },
+    });
   });
 });
 
