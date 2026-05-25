@@ -10,6 +10,7 @@ import type { MemoryManager } from "../memory/memory-manager.js";
 import type { SkillCatalogEntry } from "../main/skill-store.js";
 import type { ToolCatalogEntry, ToolRegistry, ToolSchemaEntry } from "../tools/registry.js";
 import { redactFsPath } from "../audit/dlp-filter.js";
+import { estimateTokens } from "../engine/auto-compact.js";
 import { createLogger } from "../lib/logger.js";
 import { isOverlayTriggerOrigin } from "../shared/overlay-trigger-source.js";
 import { lvisHome } from "../shared/lvis-home.js";
@@ -181,7 +182,92 @@ export class SystemPromptBuilder {
     if (preambleLen > 0) {
       log.info(`build: preamble injected (len=${preambleLen}, ${sections.length} sections total)`);
     }
+
+    // Dev-only per-source size dump. Gated EXACTLY like LVIS_DEV_PREFLIGHT_OVERRIDE
+    // in auto-compact.ts: ignored under production NODE_ENV, otherwise enabled when
+    // LVIS_DEV_PROMPT_SOURCE_DUMP is set. Logs sizes/labels ONLY — never prompt
+    // content — so memory/user content is not leaked into logs. Measurement
+    // enabler for the TPM base-size work; no behavior change to the prompt itself.
+    if (this.isPromptSourceDumpEnabled()) {
+      const breakdown = this.getSourceSizeBreakdown();
+      for (const entry of breakdown.sources) {
+        log.info(
+          `prompt-source-size: id=${entry.id} label=${JSON.stringify(entry.label)} chars=${entry.chars} estTokens=${entry.estTokens}`,
+        );
+      }
+      log.info(
+        `prompt-source-size: TOTAL chars=${breakdown.totalChars} estTokens=${breakdown.totalEstTokens} sources=${breakdown.sources.length}`,
+      );
+    }
+
     return sections.join("\n\n");
+  }
+
+  /**
+   * Dev-only gate for the per-source size dump. Mirrors
+   * `readDevPreflightOverride()` in auto-compact.ts: production NODE_ENV always
+   * disables it; otherwise it is enabled when `LVIS_DEV_PROMPT_SOURCE_DUMP` is
+   * set to a non-empty value.
+   */
+  private isPromptSourceDumpEnabled(): boolean {
+    if (process.env.NODE_ENV === "production") return false;
+    return Boolean(process.env.LVIS_DEV_PROMPT_SOURCE_DUMP);
+  }
+
+  /**
+   * Pure per-source size breakdown of the assembled system prompt.
+   *
+   * Iterates the SAME source list `build()` concatenates — generically, with no
+   * per-plugin/per-source branching — and reports the byte (char) and estimated
+   * token cost of each non-empty source. Used to size which sources dominate the
+   * per-round system-prompt base (loaded tool descriptions, input_schema,
+   * memory, AGENTS.md, skills catalog, …) for the TPM base-size work.
+   *
+   * `totalChars` equals `build().length` for the same builder state so callers
+   * can assert the per-source `chars` sum reconciles with the assembled prompt
+   * (entries sum + "\n\n" join separators = totalChars).
+   *
+   * Pure: when `scope` is provided it is applied to the tool-scope only for the
+   * duration of the measurement and restored before returning (no net state
+   * change). When omitted, the current builder state is measured as-is.
+   */
+  getSourceSizeBreakdown(scope?: {
+    activePluginIds: Set<string>;
+    activeToolNames?: Set<string>;
+    includeBuiltins: boolean;
+    includeMcp: boolean;
+    deferral?: boolean;
+  } | null): {
+    sources: Array<{ id: number; label: string; chars: number; estTokens: number }>;
+    totalChars: number;
+    totalEstTokens: number;
+  } {
+    const previousScope = this.toolScope;
+    const scopeOverridden = scope !== undefined;
+    if (scopeOverridden) this.toolScope = scope;
+    try {
+      const sources: Array<{ id: number; label: string; chars: number; estTokens: number }> = [];
+      for (const source of this.sources) {
+        const content = source.build();
+        if (!content.trim()) continue;
+        const chars = content.length;
+        sources.push({
+          id: source.id,
+          label: source.name,
+          chars,
+          estTokens: estimateTokens(content),
+        });
+      }
+      sources.sort((a, b) => b.chars - a.chars);
+      // totalChars matches build().length: per-source chars + "\n\n" (2 chars)
+      // join separators between the kept (non-empty) sections.
+      const joinChars = sources.length > 1 ? (sources.length - 1) * 2 : 0;
+      const totalChars = sources.reduce((sum, s) => sum + s.chars, 0) + joinChars;
+      const totalEstTokens = sources.reduce((sum, s) => sum + s.estTokens, 0);
+      return { sources, totalChars, totalEstTokens };
+    } finally {
+      if (scopeOverridden) this.toolScope = previousScope;
+    }
   }
 
   /** 외부에서 소스 추가 */
