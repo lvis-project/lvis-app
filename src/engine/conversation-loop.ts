@@ -592,6 +592,16 @@ interface ToolExposureMetrics {
   deferredMcpServerIds: string[];
   toolSchemaTokens: number;
   projectedRequestInputTokens: number | null;
+  /**
+   * Deferral effectiveness signal for the default-on dogfood gate. Counts only
+   * deferral-eligible (plugin + MCP) tools — builtins are never deferred so
+   * they would otherwise dilute the ratio. `deferralEligibleLoadedCount` is the
+   * plugin/MCP slice of the loaded schemas; `deferredLoadedRatio` is
+   * deferred / (deferred + loaded-eligible), clamped to [0, 1]. Null when no
+   * deferral-eligible tool exists this turn (ratio is undefined).
+   */
+  deferralEligibleLoadedCount: number;
+  deferredLoadedRatio: number | null;
 }
 
 // ─── Loop ───────────────────────────────────────────
@@ -2698,6 +2708,13 @@ export class ConversationLoop {
       if (entry.source === "plugin") deferredCatalogSourceCounts.plugin += 1;
       if (entry.source === "mcp") deferredCatalogSourceCounts.mcp += 1;
     }
+    // Deferral effectiveness — only plugin/MCP tools are deferral-eligible;
+    // builtins always load so they must not enter the ratio. The denominator
+    // is the full deferral-eligible universe (loaded + still-deferred).
+    const deferralEligibleLoadedCount = loadedToolSourceCounts.plugin + loadedToolSourceCounts.mcp;
+    const deferralEligibleTotal = deferralEligibleLoadedCount + catalogEntries.length;
+    const deferredLoadedRatio =
+      deferralEligibleTotal > 0 ? catalogEntries.length / deferralEligibleTotal : null;
     return {
       loadedToolCount: toolSchemas.length,
       loadedToolSourceCounts,
@@ -2711,6 +2728,8 @@ export class ConversationLoop {
       toolSchemaTokens: projection?.toolSchemaTokens
         ?? estimateTokens(JSON.stringify({ tools: toolSchemas })),
       projectedRequestInputTokens: projection?.totalTokens ?? null,
+      deferralEligibleLoadedCount,
+      deferredLoadedRatio,
     };
   }
 

@@ -16,6 +16,7 @@ import {
   MAX_TOOL_SEARCH_PER_TURN,
   MAX_TOOL_SEARCH_PER_SESSION,
   MAX_TOOL_SEARCH_PROMOTIONS_PER_SEARCH,
+  MIN_CATALOG_MATCH_TOKEN_LENGTH,
   type ToolSearchState,
 } from "../tool-search.js";
 import type { ToolUseBlock } from "../../../tools/executor.js";
@@ -77,9 +78,47 @@ describe("handleToolSearch", () => {
     const state = freshState();
     const out = handleToolSearch([search("tu-1", "m")], state);
     expect(out.results[0].is_error).toBe(true);
-    expect(out.results[0].content).toContain("2글자");
+    expect(out.results[0].content).toContain(`${MIN_CATALOG_MATCH_TOKEN_LENGTH}글자`);
     expect(out.promotedToolNames).toEqual([]);
     expect(state.activeToolNames.size).toBe(0);
+  });
+
+  it("does not promote on a sub-minimum-length token but does on a valid one", () => {
+    // Every catalog description contains the single char "e", so a 1-char query
+    // would broadly over-promote without the min-token guard. A name token of
+    // valid length ("email") must still promote its tool.
+    const state = freshState({
+      catalog: [
+        { name: "meeting_start", description: "begin a recorded meeting" },
+        { name: "email_list", description: "enumerate received messages" },
+      ],
+    });
+    const subMin = handleToolSearch([search("tu-1", "e")], state);
+    expect(subMin.results[0].is_error).toBe(true);
+    expect(subMin.promotedToolNames).toEqual([]);
+    expect(state.activeToolNames.size).toBe(0);
+
+    const valid = handleToolSearch([search("tu-2", "email")], state);
+    expect(valid.results[0].is_error).toBe(false);
+    expect(valid.promotedToolNames).toContain("email_list");
+    expect(state.activeToolNames.has("email_list")).toBe(true);
+  });
+
+  it("does not let a sub-minimum-length token contribute to scoring", () => {
+    // Mixed query: a sub-min token ("a") plus a valid token ("meeting"). Only
+    // the valid token may drive promotion — the short token must contribute no
+    // score even though it is a substring of every catalog entry.
+    const state = freshState({
+      catalog: [
+        { name: "meeting_start", description: "a meeting helper" },
+        { name: "calendar_add", description: "add a calendar event" },
+      ],
+    });
+    const out = handleToolSearch([search("tu-1", "a meeting")], state);
+    expect(out.results[0].is_error).toBe(false);
+    // calendar_add only matches via the sub-min "a" token → must NOT promote.
+    expect(out.promotedToolNames).toEqual(["meeting_start"]);
+    expect(state.activeToolNames.has("calendar_add")).toBe(false);
   });
 
   it("returns an error tool_result when no catalog tool matches", () => {

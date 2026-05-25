@@ -31,6 +31,13 @@ export const MAX_TOOL_SEARCH_PER_TURN = 4;
 export const MAX_TOOL_SEARCH_PER_SESSION = 20;
 /** 검색 1회가 promote 할 수 있는 최대 도구 수. Broad query TPM 폭증 방지. */
 export const MAX_TOOL_SEARCH_PROMOTIONS_PER_SEARCH = 3;
+/**
+ * Catalog 매칭에 기여할 수 있는 최소 토큰 길이. 이보다 짧은 토큰 (예: 1글자
+ * `m`, `a`) 은 `name.includes` / `description.includes` 로 거의 모든 카탈로그
+ * 항목과 매치되어 over-promotion 을 유발하므로 점수화 단계에서 제외한다.
+ * query tokenization 과 catalog scoring 양쪽에서 동일 SOT 로 강제한다.
+ */
+export const MIN_CATALOG_MATCH_TOKEN_LENGTH = 2;
 
 /** Catalog entry the loop supplies (from `getToolCatalogForScope`). */
 export interface ToolSearchCatalogEntry {
@@ -73,7 +80,7 @@ function tokenizeQuery(query: string): string[] {
     normalized,
     ...normalized.split(/[\s,.;:()[\]{}"'`/\\|]+/),
     ...normalized.split(/[\s,.;:()[\]{}"'`/\\|_-]+/),
-  ].map((t) => t.trim()).filter((t) => t.length >= 2));
+  ].map((t) => t.trim()).filter((t) => t.length >= MIN_CATALOG_MATCH_TOKEN_LENGTH));
 }
 
 function tokenizeName(name: string): string[] {
@@ -88,9 +95,14 @@ function scoreCatalogEntry(
   const name = entry.name.toLowerCase();
   const description = entry.description.toLowerCase();
   const nameTokens = tokenizeName(entry.name);
-  let score = name === query ? 1_000 : 0;
+  // Exact whole-query name match still requires the query to clear the minimum
+  // token length so a 1-char query cannot promote a 1-char tool name.
+  let score = name === query && query.length >= MIN_CATALOG_MATCH_TOKEN_LENGTH ? 1_000 : 0;
 
   for (const token of tokens) {
+    // Defense at the scoring boundary: sub-minimum tokens never contribute,
+    // even if a future caller bypasses tokenizeQuery's length filter.
+    if (token.length < MIN_CATALOG_MATCH_TOKEN_LENGTH) continue;
     if (name === token) {
       score += 700;
     } else if (name.startsWith(token)) {
@@ -161,7 +173,7 @@ export function handleToolSearch(
     } else if (tokenizeQuery(query).length === 0) {
       results.push({
         tool_use_id: tu.id,
-        content: "tool_search 오류: query 에 2글자 이상의 검색 토큰이 필요합니다.",
+        content: `tool_search 오류: query 에 ${MIN_CATALOG_MATCH_TOKEN_LENGTH}글자 이상의 검색 토큰이 필요합니다.`,
         is_error: true,
       });
     } else if (turnSearches >= MAX_TOOL_SEARCH_PER_TURN) {

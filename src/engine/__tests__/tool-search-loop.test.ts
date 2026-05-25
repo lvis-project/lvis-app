@@ -9,7 +9,7 @@
  *      tool.
  *   2. persisted flag false does not revive the removed whole-plugin path.
  */
-import { describe, it, expect } from "vitest";
+import { describe, it, expect, vi } from "vitest";
 
 import { KeywordEngine } from "../../core/keyword-engine.js";
 import { RouteEngine } from "../../core/route-engine.js";
@@ -18,7 +18,15 @@ import type { LLMProvider, StreamEvent, StreamTurnParams } from "../llm/types.js
 import { ToolRegistry } from "../../tools/registry.js";
 import { createDynamicTool } from "../../tools/base.js";
 import { TOOL_SEARCH_TOOL_NAME } from "../../tools/registry.js";
+import { AuditLogger } from "../../audit/audit-logger.js";
 import { fakeLlmSettings } from "../../shared/__tests__/fake-llm-settings.js";
+
+type CapturedToolExposure = {
+  loadedToolCount: number;
+  deferredCatalogCount: number;
+  deferralEligibleLoadedCount: number;
+  deferredLoadedRatio: number | null;
+};
 
 class RecordingProvider implements LLMProvider {
   readonly vendor = "openai" as const;
@@ -37,6 +45,7 @@ function makeLoop(opts: {
   provider: LLMProvider;
   toolDeferral?: boolean;
   headless?: boolean;
+  auditLogger?: AuditLogger;
 }): ConversationLoop {
   const toolRegistry = new ToolRegistry();
   // tool_search builtin (statically registered; visible with builtins).
@@ -128,6 +137,7 @@ function makeLoop(opts: {
       listPluginIds: () => ["com.example.meeting", "com.example.email", "com.example.msgraph"],
     },
     headless: opts.headless,
+    ...(opts.auditLogger ? { auditLogger: opts.auditLogger } : {}),
   } as unknown) as ConstructorParameters<typeof ConversationLoop>[0]);
   (loop as unknown as { provider: LLMProvider | null }).provider = opts.provider;
   return loop;
@@ -296,5 +306,67 @@ describe("ConversationLoop — Tool-Level Deferral", () => {
     const toolResult = loop.getHistory().getMessages().find((m) => m.role === "tool_result");
     expect(toolResult?.content).toContain("'mcp_fetch' 에 매치되는 미로드 도구 없음");
     expect(toolResult?.isError).toBe(true);
+  });
+
+  it("emits the deferred/loaded ratio metric with correct counts", async () => {
+    const provider = new RecordingProvider([
+      [
+        { type: "text_delta", text: "ok" },
+        { type: "message_complete", stopReason: "end_turn" },
+      ],
+    ]);
+    const auditLogger = new AuditLogger();
+    const captured: CapturedToolExposure[] = [];
+    vi.spyOn(auditLogger, "logTurn").mockImplementation(
+      (params: { toolExposure?: CapturedToolExposure }) => {
+        if (params.toolExposure) captured.push(params.toolExposure);
+      },
+    );
+    const loop = makeLoop({ provider, auditLogger });
+
+    // "회의" keyword loads meeting_start (plugin) + tool_search (builtin). The
+    // deferral-eligible universe for a main turn is meeting_stop (plugin, in
+    // the meeting scope) plus mcp_fetch (MCP is in scope for main sessions) —
+    // both stay deferred. email/msgraph plugins are not active this turn.
+    await loop.runTurn("회의 정리해줘", undefined, undefined, { inputOrigin: "user-keyboard" });
+
+    expect(captured).toHaveLength(1);
+    const exposure = captured[0];
+    // Loaded: tool_search (builtin) + meeting_start (plugin).
+    expect(exposure.loadedToolCount).toBe(2);
+    // Only the plugin slice is deferral-eligible — builtins never count.
+    expect(exposure.deferralEligibleLoadedCount).toBe(1);
+    // Deferred: meeting_stop (plugin) + mcp_fetch (MCP) stay in the catalog.
+    expect(exposure.deferredCatalogCount).toBe(2);
+    // ratio = deferred / (deferred + deferral-eligible loaded) = 2 / (2 + 1).
+    expect(exposure.deferredLoadedRatio).toBeCloseTo(2 / 3, 10);
+  });
+
+  it("reports a null deferred/loaded ratio when no deferral-eligible tool exists", async () => {
+    const provider = new RecordingProvider([
+      [
+        { type: "text_delta", text: "builtin only" },
+        { type: "message_complete", stopReason: "end_turn" },
+      ],
+    ]);
+    const auditLogger = new AuditLogger();
+    const captured: CapturedToolExposure[] = [];
+    vi.spyOn(auditLogger, "logTurn").mockImplementation(
+      (params: { toolExposure?: CapturedToolExposure }) => {
+        if (params.toolExposure) captured.push(params.toolExposure);
+      },
+    );
+    // Headless excludes MCP, and a keyword-miss builtin-inventory prompt
+    // activates no plugin scope — so the deferral-eligible universe is empty
+    // and the ratio is undefined (null), not 0.
+    const loop = makeLoop({ provider, auditLogger, headless: true });
+
+    await loop.runTurn("빌트인 툴 리스트 보여줘", undefined, undefined, { inputOrigin: "user-keyboard" });
+
+    expect(captured).toHaveLength(1);
+    const exposure = captured[0];
+    expect(exposure.deferralEligibleLoadedCount).toBe(0);
+    expect(exposure.deferredCatalogCount).toBe(0);
+    expect(exposure.deferredLoadedRatio).toBeNull();
   });
 });
