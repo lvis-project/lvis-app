@@ -23,7 +23,7 @@
  * state 로 남긴다. 토큰-only 배지와 가격 미상 배지를 사용자가 구분해야
  * 비용 화면의 신뢰성이 유지된다.
  */
-import { useState } from "react";
+import { memo, useState } from "react";
 import { Tooltip, TooltipContent, TooltipTrigger } from "../../../components/ui/tooltip.js";
 import {
   computeCost,
@@ -94,7 +94,7 @@ function formatCost(c: number): string {
   return `$${c.toFixed(2)}`;
 }
 
-export function TokenCostBadge({
+function TokenCostBadgeImpl({
   tokensIn,
   freshInputTokens,
   tokensOut,
@@ -231,3 +231,5 @@ export function TokenCostBadge({
     </Tooltip>
   );
 }
+
+export const TokenCostBadge = memo(TokenCostBadgeImpl);

@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from "react";
+import { memo, useEffect, useRef, useState } from "react";
 import { ChevronDown, ChevronRight, Loader2 } from "lucide-react";
 import { debugLog, isDebugStreamEnabled } from "../../../lib/debug-stream.js";
 import { formatDuration } from "../../../lib/turn-summary-format.js";
@@ -15,13 +15,19 @@ interface WorkGroupProps {
    * duration labels.
    */
   turnDurationMs?: number;
+  /**
+   * Stable content signature for memoization. ChatView can rebuild element
+   * children while an active turn streams; unchanged historical groups should
+   * not rerender just because the active group changed.
+   */
+  revision: string;
 }
 
 // Monotonic per-instance id so multiple WorkGroups in one turn can be
 // distinguished in the debug logs without relying on React internals.
 let __wgInstanceCounter = 0;
 
-export function WorkGroup({ stepCount, streaming, children, turnDurationMs }: WorkGroupProps) {
+function WorkGroupImpl({ stepCount, streaming, children, turnDurationMs }: WorkGroupProps) {
   // Past-turn WorkGroups always receive streaming=false from first render,
   // so they must start closed. Active-turn WorkGroups start open and
   // auto-close when the true→false transition fires in the effect below.
@@ -68,9 +74,9 @@ export function WorkGroup({ stepCount, streaming, children, turnDurationMs }: Wo
     prevStreaming.current = streaming;
   }, [streaming]);
 
-  // Diagnostic: log every render with the relevant state — surfaces
-  // re-renders that come from parent prop changes vs internal state.
-  if (debugStreamEnabled) {
+  // Diagnostic: only active streaming groups log render churn. Historical
+  // groups used to spam the console on every active-turn delta in dev mode.
+  if (debugStreamEnabled && streaming) {
     debugLog("WG", "render", { wgId, streaming, open, stepCount });
   }
 
@@ -118,3 +124,10 @@ export function WorkGroup({ stepCount, streaming, children, turnDurationMs }: Wo
     </div>
   );
 }
+
+export const WorkGroup = memo(WorkGroupImpl, (prev, next) => (
+  prev.stepCount === next.stepCount &&
+  prev.streaming === next.streaming &&
+  prev.turnDurationMs === next.turnDurationMs &&
+  prev.revision === next.revision
+));
