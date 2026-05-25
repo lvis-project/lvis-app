@@ -5,8 +5,9 @@
  * PR #1104's built-in agents/skills seed):
  *   - first-boot copy of packaged resources into ~/.lvis/{AGENTS.md,agents,skills,prompts}
  *   - byte-identical re-run is a no-op (idempotent)
- *   - a user-edited copy survives upgrade; the new packaged version lands as
- *     `<file>.new` rather than clobbering the user's edit
+ *   - a user-edited AGENTS.md / skill / prompt copy survives upgrade; the new
+ *     packaged version lands as `<file>.new` rather than clobbering the user's edit
+ *   - user-edited agent profiles are seed-only and do not create `agents/*.md.new`
  *   - a second divergent upgrade lands a timestamped `<file>.new.<ts>` and
  *     leaves the prior `.new` untouched
  *   - an already-offered `.new` identical to the packaged copy is a no-op
@@ -175,20 +176,37 @@ describe("seedLvisHomeDocs — upgrade markers", () => {
     expect(readFileSync(join(home, dated[0]), "utf8")).toBe("AGENTS v3\n");
   });
 
-  it("lists pending .new upgrade markers across seeded doc directories", () => {
+  it("keeps user-edited agent profiles seed-only without creating .new markers", () => {
+    seedLvisHomeDocs();
+    writeFileSync(join(home, "agents", "executor.md"), "user executor\n");
+    writeRes(join("agents", "executor.md"), "executor v2\n");
+
+    const r = seedLvisHomeDocs();
+
+    expect(r.upgraded).not.toContain(join("agents", "executor.md"));
+    expect(readFileSync(join(home, "agents", "executor.md"), "utf8")).toBe(
+      "user executor\n",
+    );
+    expect(existsSync(join(home, "agents", "executor.md.new"))).toBe(false);
+  });
+
+  it("lists pending .new upgrade markers without surfacing agent profile markers", () => {
     seedLvisHomeDocs();
     writeFileSync(join(home, "AGENTS.md"), "user edited\n");
+    writeFileSync(join(home, "skills", "report-writing.md"), "user report\n");
     writeFileSync(join(home, "agents", "executor.md"), "user executor\n");
     writeRes("AGENTS.md", "AGENTS v2\n");
+    writeRes(join("skills", "report-writing.md"), "report v2\n");
     writeRes(join("agents", "executor.md"), "executor v2\n");
 
     seedLvisHomeDocs();
+    writeFileSync(join(home, "agents", "legacy.md.new"), "legacy agent marker\n");
 
     expect(listLvisHomeDocUpgradeMarkers(home)).toEqual([
       { markerPath: "AGENTS.md.new", sourcePath: "AGENTS.md" },
       {
-        markerPath: join("agents", "executor.md.new"),
-        sourcePath: join("agents", "executor.md"),
+        markerPath: join("skills", "report-writing.md.new"),
+        sourcePath: join("skills", "report-writing.md"),
       },
     ]);
   });
