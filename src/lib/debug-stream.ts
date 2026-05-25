@@ -1,8 +1,8 @@
 /**
  * Streaming-flow diagnostic logger.
  *
- * Gated by `VITE_DEBUG_STREAM=1` or the dev-console preload bridge
- * (`LVIS_DEV=1` + `LVIS_DEV_CONSOLE=1`; cheap disabled fast-path).
+ * Gated by `VITE_DEBUG_STREAM=1` or `LVIS_DEBUG_STREAM=1` through the
+ * preload bridge. DevTools can be open without enabling this stream.
  * Used to trace the chat-streaming path top-to-bottom: IPC events,
  * stream-state mutations, classifier output, WorkGroup mount/effect, and
  * handleAsk lifecycle.
@@ -36,7 +36,10 @@ export function isDebugStreamEnabled(): boolean {
   }
 
   // Node/preload fallback keeps the helper usable outside the renderer.
-  return typeof process !== "undefined" && isFlagEnabled(process.env?.VITE_DEBUG_STREAM);
+  return (
+    typeof process !== "undefined" &&
+    (isFlagEnabled(process.env?.VITE_DEBUG_STREAM) || isFlagEnabled(process.env?.LVIS_DEBUG_STREAM))
+  );
 }
 
 export function debugLog(scope: string, ...args: unknown[]): void {

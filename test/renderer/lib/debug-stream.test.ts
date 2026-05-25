@@ -2,6 +2,7 @@ import "../setup.js";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 const originalDebugStreamEnv = process.env.VITE_DEBUG_STREAM;
+const originalLvisDebugStreamEnv = process.env.LVIS_DEBUG_STREAM;
 
 function setRendererDebugFlag(value: boolean, overrides?: { isDev?: boolean; enableDevConsole?: boolean }) {
   const current = window.lvis;
@@ -19,6 +20,7 @@ describe("debug-stream", () => {
   beforeEach(() => {
     setRendererDebugFlag(false);
     delete process.env.VITE_DEBUG_STREAM;
+    delete process.env.LVIS_DEBUG_STREAM;
   });
 
   afterEach(() => {
@@ -26,6 +28,11 @@ describe("debug-stream", () => {
       delete process.env.VITE_DEBUG_STREAM;
     } else {
       process.env.VITE_DEBUG_STREAM = originalDebugStreamEnv;
+    }
+    if (originalLvisDebugStreamEnv === undefined) {
+      delete process.env.LVIS_DEBUG_STREAM;
+    } else {
+      process.env.LVIS_DEBUG_STREAM = originalLvisDebugStreamEnv;
     }
   });
 
@@ -51,5 +58,18 @@ describe("debug-stream", () => {
     expect(spy).not.toHaveBeenCalled();
 
     spy.mockRestore();
+  });
+
+  it("honors LVIS_DEBUG_STREAM in non-renderer fallback paths", async () => {
+    const current = window.lvis;
+    delete (window as unknown as { lvis?: unknown }).lvis;
+    process.env.LVIS_DEBUG_STREAM = "1";
+    const { isDebugStreamEnabled } = await import("../../../src/lib/debug-stream.js");
+
+    try {
+      expect(isDebugStreamEnabled()).toBe(true);
+    } finally {
+      window.lvis = current;
+    }
   });
 });

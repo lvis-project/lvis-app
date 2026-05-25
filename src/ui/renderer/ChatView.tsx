@@ -21,7 +21,7 @@ import { ViewModeBanner, type ViewModeState } from "./components/ViewModeBanner.
 import { SessionResumeDivider } from "./components/SessionResumeDivider.js";
 import { SessionTodoPanel } from "./components/SessionTodoPanel.js";
 import { MessageQueuePanel } from "./components/MessageQueuePanel.js";
-import { MessageQueueStore, formatQueueInject } from "./state/message-queue-store.js";
+import { MessageQueueStore, formatQueueInject, type MessageQueueItem } from "./state/message-queue-store.js";
 import { SubAgentCard } from "./components/SubAgentCard.js";
 import { TokenCostBadge } from "./components/TokenCostBadge.js";
 import { TokenProgressRing } from "./components/TokenProgressRing.js";
@@ -67,11 +67,119 @@ import { lookupBillablePricingOptional } from "../../shared/pricing-data.js";
 import type { LLMVendor } from "../../shared/llm-vendor-defaults.js";
 
 const CHAT_BOTTOM_THRESHOLD_PX = 96;
+const KOREA_DATE_KEY_FORMATTER = new Intl.DateTimeFormat("en-US", {
+  timeZone: "Asia/Seoul",
+  year: "numeric",
+  month: "2-digit",
+  day: "2-digit",
+});
 
 type ImportedTriggerEntry = Extract<ChatEntry, { kind: "imported_trigger" }>;
+type ToolGroupEntry = Extract<ChatEntry, { kind: "tool_group" }>;
 
 function isTurnStartEntry(entry: ChatEntry | undefined): boolean {
   return entry?.kind === "user" || entry?.kind === "imported_trigger";
+}
+
+function textRevision(text: string | undefined): string {
+  if (!text) return "0:0";
+  let hash = 0x811c9dc5;
+  for (let i = 0; i < text.length; i++) {
+    hash ^= text.charCodeAt(i);
+    hash = Math.imul(hash, 0x01000193);
+  }
+  return `${text.length}:${hash >>> 0}`;
+}
+
+function valueRevision(value: unknown): string {
+  if (value === undefined) return "undefined";
+  if (value === null) return "null";
+  if (typeof value !== "object") return textRevision(String(value));
+  if (Array.isArray(value)) {
+    return textRevision(`[${value.map(valueRevision).join(",")}]`);
+  }
+  const objectValue = value as Record<string, unknown>;
+  return textRevision(`{${Object.keys(objectValue)
+    .sort()
+    .map((key) => `${key}:${valueRevision(objectValue[key])}`)
+    .join(",")}}`);
+}
+
+function subAgentRevision(spawn: SubAgentSpawn): string {
+  return [
+    spawn.spawnId,
+    textRevision(spawn.title),
+    spawn.status,
+    spawn.toolCallCount,
+    textRevision(spawn.summary),
+    textRevision(spawn.errorMessage),
+    spawn.turns
+      .map((turn) => `${turn.turn}:${turn.toolCallCount}:${textRevision(turn.text)}`)
+      .join("|"),
+  ].join(":");
+}
+
+function toolGroupRevision(group: ToolGroupEntry, spawnRevisions: string[]): string {
+  return [
+    group.groupId,
+    group.groupIds.join(","),
+    group.status,
+    group.tools
+      .map((tool) => [
+        tool.toolUseId,
+        tool.name,
+        tool.displayOrder,
+        tool.status,
+        valueRevision(tool.input),
+        textRevision(tool.result),
+        tool.source ?? "",
+        tool.category ?? "",
+        tool.pluginId ?? "",
+        tool.mcpServerId ?? "",
+        tool.durationMs ?? "",
+        tool.startedAt ?? "",
+        valueRevision(tool.uiPayload),
+      ].join(":"))
+      .join("|"),
+    spawnRevisions.join(","),
+  ].join("#");
+}
+
+function entryRenderRevision(params: {
+  entry: ChatEntry;
+  idx: number;
+  searchHighlight: string;
+  starred: boolean;
+  spawnRevisions?: string[];
+}): string {
+  const { entry, idx, searchHighlight, starred, spawnRevisions = [] } = params;
+  switch (entry.kind) {
+    case "reasoning":
+      return `${idx}:reasoning:${textRevision(entry.text)}:${entry.streaming ? "1" : "0"}`;
+    case "assistant":
+      return `${idx}:assistant:${textRevision(entry.text)}:${entry.streaming ? "1" : "0"}:${entry.phase ?? ""}:${entry.systemNotice ?? ""}:${textRevision(searchHighlight)}:${starred ? "1" : "0"}`;
+    case "permission_review":
+      return [
+        idx,
+        "permission_review",
+        entry.toolUseId,
+        entry.groupId,
+        entry.displayOrder,
+        entry.status,
+        entry.verdictLevel ?? "",
+        entry.toolName,
+        entry.source ?? "",
+        entry.toolCategory ?? "",
+        textRevision(entry.reason),
+        valueRevision(entry.approvalPurpose),
+      ].join(":");
+    case "tool_group":
+      return `${idx}:tool_group:${toolGroupRevision(entry, spawnRevisions)}`;
+    case "ask_user_answer":
+      return `${idx}:ask_user_answer:${entry.dismissed ? "1" : "0"}:${entry.rows.map((row) => `${row.label}:${textRevision(row.value)}`).join("|")}`;
+    default:
+      return `${idx}:${entry.kind}`;
+  }
 }
 
 function bottomFollowSignature(entries: ChatEntry[]): string {
@@ -550,12 +658,21 @@ export function ChatView({ api, onAsk, onEditSave, onFork, onToggleStar, onRetry
   // queue-auto inject in-flight 플래그 — done event re-entrancy 방지.
   const queueAutoInflightRef = useRef(false);
 
-  // dev-mode test hook — Playwright e2e 가 store 직접 manipulation 으로
-  // 큐 시나리오 검증 가능. production 빌드에선 노출 X.
+  // dev/e2e runtime test hook — Playwright launches production-built renderer
+  // assets, so this must use preload runtime env instead of build-time NODE_ENV.
   useEffect(() => {
-    if (process.env.NODE_ENV !== "production") {
-      (window as unknown as { __lvis_message_queue_store__?: MessageQueueStore }).__lvis_message_queue_store__ = messageQueueStore;
+    const w = window as unknown as {
+      __lvis_message_queue_store__?: MessageQueueStore;
+      lvis?: { env?: { isDev?: boolean; isE2E?: boolean } };
+    };
+    if (w.lvis?.env?.isDev === true && w.lvis?.env?.isE2E === true) {
+      w.__lvis_message_queue_store__ = messageQueueStore;
     }
+    return () => {
+      if (w.__lvis_message_queue_store__ === messageQueueStore) {
+        delete w.__lvis_message_queue_store__;
+      }
+    };
   }, [messageQueueStore]);
   useEffect(() => {
     messageQueueStore.clear();
@@ -697,6 +814,47 @@ export function ChatView({ api, onAsk, onEditSave, onFork, onToggleStar, onRetry
     void onAsk(combined, { inputOrigin: "user-keyboard", token: "" }, { injectHint: "interrupt" });
   }, [question, messageQueueStore, onAsk, setQuestion]);
 
+  const handleMessageQueueSendNow = useCallback((item: MessageQueueItem) => {
+    messageQueueStore.remove(item.id);
+    const text = formatQueueInject([item]);
+    void onAsk(text, { inputOrigin: "user-keyboard", token: "" }, { injectHint: "interrupt" });
+  }, [messageQueueStore, onAsk]);
+
+  const handleInsertSlashCommand = useCallback((cmd: string) => {
+    setQuestion((prev) => (prev ? `${prev}${cmd} ` : `${cmd} `));
+  }, [setQuestion]);
+
+  const noopPluginPrimaryAction = useCallback(() => {}, []);
+
+  const handleBottomSend = useCallback(() => {
+    handleComposerSend({ inputOrigin: "user-keyboard", token: "" });
+  }, [handleComposerSend]);
+
+  const tokenSlot = useMemo(() => (
+    <div className="flex min-w-0 items-center gap-2">
+      <TokenProgressRing
+        used={usedTokens}
+        budget={effectiveBudget}
+        contextBudget={contextBudget}
+        tpmLimit={tpmLimit}
+      />
+      <Tooltip>
+        <TooltipTrigger asChild>
+          <span className={`text-[11px] font-mono ${costBadgeClass}`} title="예상 비용">
+            {formatCostBadge(costEstimate.total, costEstimate.pricingKnown)}
+          </span>
+        </TooltipTrigger>
+        <TooltipContent className="text-xs">
+          <div>입력: {costEstimate.inputTokens.toLocaleString()} tok{costEstimate.pricingKnown === false ? "" : ` · $${costEstimate.inputCost.toFixed(5)}`}</div>
+          <div>출력(추정): {costEstimate.outputTokens.toLocaleString()} tok{costEstimate.pricingKnown === false ? "" : ` · $${costEstimate.outputCost.toFixed(5)}`}</div>
+          {costEstimate.pricingKnown === false
+            ? <div className="font-semibold">가격 미등록 모델입니다.</div>
+            : <div className="font-semibold">합계: ${costEstimate.total.toFixed(5)}</div>}
+        </TooltipContent>
+      </Tooltip>
+    </div>
+  ), [contextBudget, costBadgeClass, costEstimate, effectiveBudget, tpmLimit, usedTokens]);
+
   // ESC 우선순위
   //   1. 모달 (Radix Dialog [data-state="open"]) → 모달이 가로챔 (defensive)
   //   2. 큐 선택 항목 있음 → 선택 해제만 (LLM 안 건드림)
@@ -829,6 +987,12 @@ export function ChatView({ api, onAsk, onEditSave, onFork, onToggleStar, onRetry
   }, [currentSessionId, entries.length, isNearBottom, scheduleAutoBottomPin, scrollFollowSignature, viewMode]);
 
   const activeDayKey = getKoreaDateKey(new Date());
+  const handleJumpToEntry = useCallback((entryIndex: number) => {
+    const el = scrollViewportRef.current?.querySelector<HTMLElement>(
+      `[data-chat-entry-index="${entryIndex}"]`,
+    );
+    el?.scrollIntoView({ behavior: "smooth", block: "start" });
+  }, [scrollViewportRef]);
 
 
   // No auto-scroll needed for floating panel — it is positioned outside
@@ -857,6 +1021,473 @@ export function ChatView({ api, onAsk, onEditSave, onFork, onToggleStar, onRetry
     return () => window.removeEventListener("keydown", handler);
   }, [streaming, onAbort]);
 
+  const transcriptEntries = useMemo(() => {
+  // Three-way entry classification eliminates retroactive-reclassification flicker.
+  //
+  // "intermediate" — non-final work inside a user turn. This includes
+  //                  reasoning, tools, and mid-turn assistant text.
+  //                  Once the final assistant answer lands, all prior
+  //                  work collapses into one WorkGroup.
+  // "live"         — standalone non-final edge entry.
+  // "final"        — last assistant entry outside the active streaming turn
+  //                  → shown with TurnActionBar (turn truly complete)
+  //
+  // TurnActionBar therefore appears ONLY when the whole turn is done, never during it.
+
+  // Use visibleEntries (sliced in view-mode, full list otherwise).
+  const activeEntries = visibleEntries;
+
+  // Last turn-start index: user messages and imported overlay prompts both
+  // own the assistant/tool/summary output that follows them.
+  let lastTurnStartIdx = -1;
+  for (let k = activeEntries.length - 1; k >= 0; k--) {
+    if (isTurnStartEntry(activeEntries[k])) { lastTurnStartIdx = k; break; }
+  }
+
+  type EntryClass = "intermediate" | "live" | "final";
+  const entryClassMap = new Map<number, EntryClass>();
+  const finalTurnStartMap = new Map<number, number>(); // final idx → turn-start idx
+  const entryTurnStartMap = new Map<number, number>(); // classified idx → turn-start idx
+
+  let turnStart = -1;
+  for (let i = 0; i < activeEntries.length; i++) {
+    const e = activeEntries[i];
+    if (!e) continue;
+    if (isTurnStartEntry(e)) { turnStart = i; continue; }
+    if (e.kind !== "assistant" && e.kind !== "reasoning" && e.kind !== "tool_group" && e.kind !== "permission_review") continue;
+
+    let nextTurnStartIdx = activeEntries.length;
+    for (let j = i + 1; j < activeEntries.length; j++) {
+      if (isTurnStartEntry(activeEntries[j])) { nextTurnStartIdx = j; break; }
+    }
+
+    const subsequentTurnEntries = activeEntries.slice(i + 1, nextTurnStartIdx);
+    const hasSubsequent = subsequentTurnEntries.some(
+      (ne) => ne.kind === "assistant" || ne.kind === "tool_group" || ne.kind === "reasoning" || ne.kind === "permission_review",
+    );
+    const hasSubsequentWork = subsequentTurnEntries.some(
+      (ne) => ne.kind === "tool_group" || ne.kind === "reasoning" || ne.kind === "permission_review",
+    );
+
+    const myTurnStart = turnStart >= 0 ? turnStart : 0;
+    entryTurnStartMap.set(i, myTurnStart);
+    const isActiveTurnEntry = myTurnStart === lastTurnStartIdx && streaming;
+    const hasPriorWork = activeEntries.slice(myTurnStart + 1, i).some(
+      (pe) => pe.kind === "tool_group" || pe.kind === "reasoning" || pe.kind === "permission_review",
+    );
+
+    if (e.kind === "assistant") {
+      if (e.phase === "work") {
+        entryClassMap.set(i, "intermediate");
+      } else if (!hasSubsequent && !isActiveTurnEntry) {
+        entryClassMap.set(i, "final");
+        finalTurnStartMap.set(i, myTurnStart);
+      } else if (isActiveTurnEntry || hasSubsequentWork || hasPriorWork) {
+        entryClassMap.set(i, "intermediate");
+      } else {
+        entryClassMap.set(i, "live");
+      }
+    } else if (hasSubsequent || isActiveTurnEntry) {
+      entryClassMap.set(i, "intermediate");
+    } else {
+      entryClassMap.set(i, "live");
+    }
+  }
+
+  const rendered: React.ReactNode[] = [];
+  let i = 0;
+  while (i < activeEntries.length) {
+    const entry = activeEntries[i];
+    if (!entry) { i++; continue; }
+    // Capture idx by value — closures in this loop must not close over mutable `i`
+    const idx = i;
+
+    const ringClassFor = (entryIdx: number) => {
+      const isMatch = searchMatchSet.has(entryIdx);
+      const isCurrentMatch = searchOpen && searchMatches[searchIdx] === entryIdx;
+      return isCurrentMatch ? "ring-2 ring-primary" : isMatch ? "ring-1 ring-primary/40" : "";
+    };
+    const ringCls = ringClassFor(idx);
+
+    if (entry.kind === "user") {
+      // Add extra breathing room only after a *completed* assistant
+      // turn (whose action bar sits at the bottom of the card).
+      // Skip the gap for day/session markers, session-opening user
+      // turns, and mid-stream guidance messages where the previous
+      // assistant entry is still streaming and has no action bar
+      // yet. `!mt-4` uses Tailwind's important prefix to outweigh
+      // the parent's `space-y-3` specificity (the descendant
+      // selector `> :not([hidden]) ~ :not([hidden])` otherwise
+      // wins).
+      const prevEntry = i > 0 ? activeEntries[i - 1] : undefined;
+      const prevAssistantComplete =
+        prevEntry?.kind === "assistant" && prevEntry.streaming !== true;
+      const userGapCls = prevAssistantComplete ? "!mt-4" : "";
+      if (editingEntryIdx === i) {
+        rendered.push(
+          <div key={idx} className={userGapCls}>
+            <UserMessageEditor
+              initialText={entry.text}
+              busy={editBusy}
+              onCancel={() => setEditingEntryIdx(null)}
+              onSave={(next) => void onEditSave(idx, next)}
+            />
+          </div>
+        );
+      } else {
+        const starId = isEntryStarred(idx);
+        const starActive = !!starId;
+        rendered.push(
+          <div key={idx} data-chat-entry-index={idx} className={`group relative ml-auto w-fit min-w-0 max-w-[75%] overflow-hidden rounded-md bg-message-user px-3.5 py-2 text-sm text-message-user-foreground ${userGapCls} ${ringCls}`}>
+            {/* "나" label removed — sender is implicit. Star + hover
+                actions float top-right via absolute positioning so
+                the bubble has no header chrome. */}
+            {entry.injectHint === "queue" ? (
+              <div className="mb-1 inline-flex items-center gap-1 rounded bg-message-user-foreground/10 px-1.5 py-0.5 text-[10px] text-message-user-foreground/70" title="메시지 큐에서 자동 인입">
+                ↪ 큐에서
+              </div>
+            ) : entry.injectHint === "interrupt" ? (
+              <div className="mb-1 inline-flex items-center gap-1 rounded bg-message-user-foreground/10 px-1.5 py-0.5 text-[10px] text-message-user-foreground/70" title="현재 LLM 응답 중단 후 즉시 새 메시지로 주입">
+                ⚡ 중단후 새메세지
+              </div>
+            ) : null}
+            {starActive ? (
+              <Star key="active" className="absolute right-2 top-2 h-3 w-3 fill-emphasis text-emphasis lvis-anim-star" />
+            ) : null}
+            {/* Hide mutating actions in view-mode (read-only slice). */}
+            {!viewMode && (
+              <div className="absolute right-2 top-2 hidden gap-1 group-hover:flex bg-message-user/95 rounded">
+                <Button type="button" variant="ghost" size="icon-xs" title="편집" onClick={() => setEditingEntryIdx(idx)}>
+                  <Pencil className="h-3 w-3" />
+                </Button>
+                <Button type="button" variant="ghost" size="icon-xs" title="분기" onClick={() => void onFork(idx)}>
+                  <GitBranch className="h-3 w-3" />
+                </Button>
+                <Button type="button" variant="ghost" size="icon-xs" title="즐겨찾기" onClick={() => void onToggleStar(idx)}>
+                  <Star key={starActive ? "on" : "off"} className={`h-3 w-3 ${starActive ? "fill-emphasis text-emphasis lvis-anim-star" : ""}`} />
+                </Button>
+              </div>
+            )}
+            <div className="whitespace-pre-wrap break-words [overflow-wrap:anywhere]">{searchHighlight ? highlightText(entry.text, searchHighlight) : entry.text}</div>
+          </div>
+        );
+      }
+      i++;
+      continue;
+    }
+
+    if (entry.kind === "ask_user_answer") {
+      rendered.push(<AskUserAnswerBubble key={idx} entry={entry} />);
+      i++;
+      continue;
+    }
+
+    if (entry.kind === "system") {
+      rendered.push(
+        <div
+          key={idx}
+          data-testid="system-entry"
+          className="mx-auto text-center text-xs text-muted-foreground py-1 px-3 rounded-full bg-muted/50"
+        >
+          {entry.text}
+        </div>,
+      );
+      i++;
+      continue;
+    }
+
+    // turn_summary entry — 데이터 carrier 로 history 에 남기되 standalone
+    // 렌더링 안 함. 같은 turn 의 final AssistantCard / WorkGroup 이
+    // turnSummaryByTurnStart 에서 lookup 해 inline 으로 표시한다.
+    if (entry.kind === "turn_summary" || entry.kind === "context_usage") {
+      i++;
+      continue;
+    }
+
+    // Structured compact checkpoint marker — auto-compact 및 manual compact 모두 CheckpointDivider 로 렌더.
+    // CheckpointDivider 의 trigger prop 이 auto/manual variant 를 구분.
+    // sessionId 불변이라 revert 액션 없음.
+    // SummaryToast 가 rendered preamble (12-section structured summary) 노출.
+    if (entry.kind === "checkpoint") {
+      rendered.push(
+        <CheckpointDivider
+          key={`cp-${idx}`}
+          trigger={entry.trigger}
+          messageCount={entry.removedMessages}
+          compactNum={entry.compactNum}
+          compactStatus={entry.compactStatus}
+          truncatedDir={entry.truncatedDir}
+          onEnterView={handleEnterView}
+          onBranchFrom={handleBranchFrom}
+        />,
+      );
+      if (entry.summary) {
+        rendered.push(
+          <SummaryToast key={`cp-${idx}-summary`} summary={entry.summary} />,
+        );
+      }
+      i++;
+      continue;
+    }
+
+    if (entry.kind === "session_resume") {
+      rendered.push(
+        <SessionResumeDivider
+          key={`sr-${idx}`}
+          preambleChars={entry.preambleChars}
+        />,
+      );
+      i++;
+      continue;
+    }
+
+    if (entry.kind === "imported_trigger") {
+      rendered.push(
+        <ImportedTriggerCard
+          key={`trigger:${entry.sessionId}`}
+          entry={entry}
+        />,
+      );
+      i++;
+      continue;
+    }
+
+    // ── Intermediate: collect contiguous turn work into one WorkGroup ──
+    if (entryClassMap.get(i) === "intermediate") {
+      const groupStart = i;
+      const groupTurnStart = entryTurnStartMap.get(i) ?? 0;
+      // Spinner is shown only while this WorkGroup belongs to the currently active turn
+      const groupIsActiveTurn = groupTurnStart === lastTurnStartIdx && streaming;
+      if (debugStreamEnabled && groupIsActiveTurn) {
+        debugLog("ChatView", "WorkGroup:render-decision", {
+          groupStart,
+          groupTurnStart,
+          lastTurnStartIdx,
+          globalStreaming: streaming,
+          groupIsActiveTurn,
+        });
+      }
+      const groupEntries: { idx: number; node: React.ReactNode }[] = [];
+      const groupRevisions: string[] = [];
+
+      while (i < activeEntries.length) {
+        const e = activeEntries[i];
+        if (!e) { i++; continue; }
+        if ((entryTurnStartMap.get(i) ?? groupTurnStart) !== groupTurnStart) break;
+        const cls = entryClassMap.get(i);
+        if (cls === "final") break;
+        if (e.kind === "reasoning") {
+          if (cls === "intermediate") {
+            groupRevisions.push(entryRenderRevision({ entry: e, idx: i, searchHighlight, starred: false }));
+            groupEntries.push({ idx: i, node: <ReasoningCard key={i} entry={e} embedded /> });
+          } else {
+            break;
+          }
+        } else if (e.kind === "permission_review") {
+          if (cls === "intermediate") {
+            groupRevisions.push(entryRenderRevision({ entry: e, idx: i, searchHighlight, starred: false }));
+            groupEntries.push({
+              idx: i,
+              node: <PermissionReviewStatusCard key={`permission-review-${e.toolUseId}`} entry={e} />,
+            });
+          } else {
+            break;
+          }
+        } else if (e.kind === "tool_group") {
+          if (cls === "intermediate") {
+            const spawnRevisions = e.tools.flatMap((tool) =>
+              (spawnsByToolUseId.get(tool.toolUseId) ?? []).map(subAgentRevision),
+            );
+            const spawnNodes = renderSpawnsForGroup(e);
+            groupRevisions.push(entryRenderRevision({ entry: e, idx: i, searchHighlight, starred: false, spawnRevisions }));
+            groupEntries.push({
+              idx: i,
+              node: spawnNodes.length === 0 ? (
+                <ToolGroupCard key={e.groupId} group={e} embedded sessionId={currentSessionId} />
+              ) : (
+                <Fragment key={e.groupId}>
+                  <ToolGroupCard group={e} embedded sessionId={currentSessionId} />
+                  {spawnNodes}
+                </Fragment>
+              ),
+            });
+          } else {
+            break;
+          }
+        } else if (e.kind === "assistant") {
+          if (cls === "intermediate") {
+            const starred = !!isEntryStarred(i);
+            groupRevisions.push(entryRenderRevision({ entry: e, idx: i, searchHighlight, starred }));
+            groupEntries.push({
+              idx: i,
+              node: (
+                <AssistantCard
+                  key={i}
+                  entry={e}
+                  highlightQuery={searchHighlight}
+                  isStarred={starred}
+                  isFinal={false}
+                  embedded
+                />
+              ),
+            });
+          } else {
+            break;
+          }
+        } else if (e.kind === "ask_user_answer") {
+          // ask_user_question 의 사용자 응답 카드도 같은 turn 의
+          // WorkGroup 안에 inline 으로 흡수. 이전: 이 branch 가 없어
+          // default break 로 떨어지면서 WorkGroup 가 분리 → 사용자가
+          // "작업 3단계 + 작업 9단계" 로 보이던 UX 분리 (2026-05-07).
+          // entryTurnStartMap 에는 ask_user_answer 가 없어 line 901
+          // 의 fallback 으로 같은 turn 처리되었으나, 여기서 명시 push
+          // 가 없으면 default `break` 로 떨어짐. 안전을 위해 walkback
+          // 으로 turnStart 일치 검증.
+          let aaTurnStart = -1;
+          for (let k = i; k >= 0; k--) {
+            if (isTurnStartEntry(activeEntries[k])) { aaTurnStart = k; break; }
+          }
+          if (aaTurnStart === groupTurnStart) {
+            groupRevisions.push(entryRenderRevision({ entry: e, idx: i, searchHighlight, starred: false }));
+            groupEntries.push({
+              idx: i,
+              node: <AskUserAnswerBubble key={`ask-${i}`} entry={e} />,
+            });
+          } else {
+            break;
+          }
+        } else {
+          break;
+        }
+        i++;
+      }
+
+      if (groupEntries.length > 0) {
+        // Prefer the turn_summary's authoritative `toolCount` over
+        // groupEntries.length — the latter includes reasoning /
+        // assistant bubbles / ask_user_answer / inline sub-agent
+        // cards and would diverge from the actual tool-call count.
+        const groupSummary = turnSummaryByTurnStart.get(groupTurnStart);
+        rendered.push(
+          <WorkGroup
+            key={`wg-${currentSessionId}:${groupStart}`}
+            stepCount={groupSummary?.toolCount ?? groupEntries.length}
+            streaming={groupIsActiveTurn}
+            turnDurationMs={groupSummary?.turnDurationMs}
+            revision={[currentSessionId, ...groupRevisions].join("||")}
+          >
+            {groupEntries.map((ge) => (
+              <div key={ge.idx} data-chat-entry-index={ge.idx}>
+                {ge.node}
+              </div>
+            ))}
+          </WorkGroup>
+        );
+      }
+      continue;
+    }
+
+    // ── Live: last entry in turn while streaming — no TurnActionBar ──
+    if (entryClassMap.get(i) === "live") {
+      if (entry.kind === "reasoning") {
+        rendered.push(<ReasoningCard key={idx} entry={entry} />);
+      } else if (entry.kind === "permission_review") {
+        rendered.push(<PermissionReviewStatusCard key={`permission-review-${entry.toolUseId}`} entry={entry} />);
+      } else if (entry.kind === "tool_group") {
+        rendered.push(<ToolGroupCard key={entry.groupId} group={entry} sessionId={currentSessionId} />);
+        for (const node of renderSpawnsForGroup(entry)) rendered.push(node);
+      } else if (entry.kind === "assistant") {
+        rendered.push(
+          <div key={idx} data-chat-entry-index={idx} className={ringCls || undefined}>
+            <AssistantCard
+              entry={entry}
+              highlightQuery={searchHighlight}
+              isStarred={!!isEntryStarred(idx)}
+              isFinal={true}
+            />
+          </div>
+        );
+      }
+      i++;
+      continue;
+    }
+
+    // ── Final: turn complete, last assistant — show TurnActionBar ──
+    if (entryClassMap.get(i) === "final" && entry.kind === "assistant") {
+      const turnStartIdx = finalTurnStartMap.get(i) ?? 0;
+      const summary = turnSummaryByTurnStart.get(turnStartIdx);
+      const summaryVendor = summary?.vendorProvider;
+      const summaryPricing = summary?.vendorProvider && summary.vendorModel
+        ? lookupBillablePricingOptional(summary.vendorProvider, summary.vendorModel)
+        : undefined;
+      rendered.push(
+          <div key={idx} data-chat-entry-index={idx} className={`${ringCls} min-w-0 w-full max-w-full overflow-x-hidden rounded-md`}>
+          <AssistantCard
+            entry={entry}
+            highlightQuery={searchHighlight}
+            isStarred={!!isEntryStarred(idx)}
+            isFinal={true}
+          />
+          {/* Suppress mutating TurnActionBar actions in view-mode. */}
+          <TurnActionBar
+            timestamp={entry.kind === "assistant" ? entry.createdAt : undefined}
+            turnSummary={summary}
+            pricing={summaryPricing}
+            vendor={summaryVendor ?? activeVendor}
+            isStarred={!!isEntryStarred(idx)}
+            actions={viewMode ? {} : {
+              onRetry: () => void onRetryEffort(),
+              onFork: () => void onFork(idx),
+              onToggleStar: () => void onToggleStar(idx),
+            }}
+            onFeedback={!viewMode && onFeedback ? (rating, reason) => void onFeedback(idx, rating, reason) : undefined}
+          />
+        </div>
+      );
+      i++;
+      continue;
+    }
+
+    // ── Fallback: unclassified edge-case entries ──
+    if (entry.kind === "reasoning") {
+      rendered.push(<ReasoningCard key={idx} entry={entry} />);
+    } else if (entry.kind === "permission_review") {
+      rendered.push(<PermissionReviewStatusCard key={`permission-review-${entry.toolUseId}`} entry={entry} />);
+    } else if (entry.kind === "tool_group") {
+      rendered.push(<ToolGroupCard key={entry.groupId} group={entry} sessionId={currentSessionId} />);
+      for (const node of renderSpawnsForGroup(entry)) rendered.push(node);
+    }
+    i++;
+  }
+  return rendered;
+  }, [
+    activeVendor,
+    currentSessionId,
+    debugStreamEnabled,
+    editBusy,
+    editingEntryIdx,
+    handleBranchFrom,
+    handleEnterView,
+    isEntryStarred,
+    onEditSave,
+    onFeedback,
+    onFork,
+    onRetryEffort,
+    onToggleStar,
+    renderSpawnsForGroup,
+    spawnsByToolUseId,
+    searchHighlight,
+    searchIdx,
+    searchMatchSet,
+    searchMatches,
+    searchOpen,
+    setEditingEntryIdx,
+    streaming,
+    turnSummaryByTurnStart,
+    viewMode,
+    visibleEntries,
+  ]);
+
   return (
     <div
       className="relative flex min-h-0 min-w-0 w-full flex-1 flex-col overflow-hidden"
@@ -871,7 +1502,7 @@ export function ChatView({ api, onAsk, onEditSave, onFork, onToggleStar, onRetry
       )}
       {/* Routine fire + plugin overlay. Routine items stay isolated from chat history; plugin items insert via imported_trigger on confirm. */}
       <OverlayCardRegion
-        onPluginPrimaryAction={onPluginPrimaryAction ?? (() => {})}
+        onPluginPrimaryAction={onPluginPrimaryAction ?? noopPluginPrimaryAction}
         onRoutineAcknowledge={onRoutineAcknowledge}
       />
       <div className="relative min-h-0 min-w-0 max-w-full flex-1 overflow-hidden">
@@ -902,7 +1533,7 @@ export function ChatView({ api, onAsk, onEditSave, onFork, onToggleStar, onRetry
           : verdict === "medium" ? "warning"
           : "success";
         const tone = `border-[hsl(var(--${token})/0.4)] bg-[hsl(var(--${token})/0.1)] text-[hsl(var(--${token}))]`;
-        return (
+  return (
           <div
             data-testid="user-approval-hit-toast"
             data-verdict={verdict}
@@ -940,12 +1571,7 @@ export function ChatView({ api, onAsk, onEditSave, onFork, onToggleStar, onRetry
           currentSessionId={currentSessionId}
           streaming={streaming}
           currentSessionEntries={navigatorCurrentSessionEntries}
-          onJumpToEntry={(entryIndex) => {
-            const el = scrollViewportRef.current?.querySelector<HTMLElement>(
-              `[data-chat-entry-index="${entryIndex}"]`,
-            );
-            el?.scrollIntoView({ behavior: "smooth", block: "start" });
-          }}
+          onJumpToEntry={handleJumpToEntry}
           onLoadSession={handleCalendarSessionSelect}
           onRefreshSessions={onRefreshSessions}
         />
@@ -972,435 +1598,7 @@ export function ChatView({ api, onAsk, onEditSave, onFork, onToggleStar, onRetry
             where the empty state paints before the boot probe resolves
             (#1014 tracer: Stage B). */}
         {visibleEntries.length === 0 && hasApiKey === true && !hasAskQuestions && !suggestedRepliesActive && <div className="py-12 text-center text-sm text-muted-foreground">LVIS 에이전트가 준비되었습니다. 질문을 입력하거나 /command를 사용하세요.</div>}
-        {(() => {
-          // Three-way entry classification eliminates retroactive-reclassification flicker.
-          //
-          // "intermediate" — non-final work inside a user turn. This includes
-          //                  reasoning, tools, and mid-turn assistant text.
-          //                  Once the final assistant answer lands, all prior
-          //                  work collapses into one WorkGroup.
-          // "live"         — standalone non-final edge entry.
-          // "final"        — last assistant entry outside the active streaming turn
-          //                  → shown with TurnActionBar (turn truly complete)
-          //
-          // TurnActionBar therefore appears ONLY when the whole turn is done, never during it.
-
-          // Use visibleEntries (sliced in view-mode, full list otherwise).
-          const activeEntries = visibleEntries;
-
-          // Last turn-start index: user messages and imported overlay prompts both
-          // own the assistant/tool/summary output that follows them.
-          let lastTurnStartIdx = -1;
-          for (let k = activeEntries.length - 1; k >= 0; k--) {
-            if (isTurnStartEntry(activeEntries[k])) { lastTurnStartIdx = k; break; }
-          }
-
-          type EntryClass = "intermediate" | "live" | "final";
-          const entryClassMap = new Map<number, EntryClass>();
-          const finalTurnStartMap = new Map<number, number>(); // final idx → turn-start idx
-          const entryTurnStartMap = new Map<number, number>(); // classified idx → turn-start idx
-
-          let turnStart = -1;
-          for (let i = 0; i < activeEntries.length; i++) {
-            const e = activeEntries[i];
-            if (!e) continue;
-            if (isTurnStartEntry(e)) { turnStart = i; continue; }
-            if (e.kind !== "assistant" && e.kind !== "reasoning" && e.kind !== "tool_group" && e.kind !== "permission_review") continue;
-
-            let nextTurnStartIdx = activeEntries.length;
-            for (let j = i + 1; j < activeEntries.length; j++) {
-              if (isTurnStartEntry(activeEntries[j])) { nextTurnStartIdx = j; break; }
-            }
-
-            const subsequentTurnEntries = activeEntries.slice(i + 1, nextTurnStartIdx);
-            const hasSubsequent = subsequentTurnEntries.some(
-              (ne) => ne.kind === "assistant" || ne.kind === "tool_group" || ne.kind === "reasoning" || ne.kind === "permission_review",
-            );
-            const hasSubsequentWork = subsequentTurnEntries.some(
-              (ne) => ne.kind === "tool_group" || ne.kind === "reasoning" || ne.kind === "permission_review",
-            );
-
-            const myTurnStart = turnStart >= 0 ? turnStart : 0;
-            entryTurnStartMap.set(i, myTurnStart);
-            const isActiveTurnEntry = myTurnStart === lastTurnStartIdx && streaming;
-            const hasPriorWork = activeEntries.slice(myTurnStart + 1, i).some(
-              (pe) => pe.kind === "tool_group" || pe.kind === "reasoning" || pe.kind === "permission_review",
-            );
-
-            if (e.kind === "assistant") {
-              if (e.phase === "work") {
-                entryClassMap.set(i, "intermediate");
-              } else if (!hasSubsequent && !isActiveTurnEntry) {
-                entryClassMap.set(i, "final");
-                finalTurnStartMap.set(i, myTurnStart);
-              } else if (isActiveTurnEntry || hasSubsequentWork || hasPriorWork) {
-                entryClassMap.set(i, "intermediate");
-              } else {
-                entryClassMap.set(i, "live");
-              }
-            } else if (hasSubsequent || isActiveTurnEntry) {
-              entryClassMap.set(i, "intermediate");
-            } else {
-              entryClassMap.set(i, "live");
-            }
-          }
-
-          const rendered: React.ReactNode[] = [];
-          let i = 0;
-          while (i < activeEntries.length) {
-            const entry = activeEntries[i];
-            if (!entry) { i++; continue; }
-            // Capture idx by value — closures in this loop must not close over mutable `i`
-            const idx = i;
-
-            const ringClassFor = (entryIdx: number) => {
-              const isMatch = searchMatchSet.has(entryIdx);
-              const isCurrentMatch = searchOpen && searchMatches[searchIdx] === entryIdx;
-              return isCurrentMatch ? "ring-2 ring-primary" : isMatch ? "ring-1 ring-primary/40" : "";
-            };
-            const ringCls = ringClassFor(idx);
-
-            if (entry.kind === "user") {
-              // Add extra breathing room only after a *completed* assistant
-              // turn (whose action bar sits at the bottom of the card).
-              // Skip the gap for day/session markers, session-opening user
-              // turns, and mid-stream guidance messages where the previous
-              // assistant entry is still streaming and has no action bar
-              // yet. `!mt-4` uses Tailwind's important prefix to outweigh
-              // the parent's `space-y-3` specificity (the descendant
-              // selector `> :not([hidden]) ~ :not([hidden])` otherwise
-              // wins).
-              const prevEntry = i > 0 ? activeEntries[i - 1] : undefined;
-              const prevAssistantComplete =
-                prevEntry?.kind === "assistant" && prevEntry.streaming !== true;
-              const userGapCls = prevAssistantComplete ? "!mt-4" : "";
-              if (editingEntryIdx === i) {
-                rendered.push(
-                  <div key={idx} className={userGapCls}>
-                    <UserMessageEditor
-                      initialText={entry.text}
-                      busy={editBusy}
-                      onCancel={() => setEditingEntryIdx(null)}
-                      onSave={(next) => void onEditSave(idx, next)}
-                    />
-                  </div>
-                );
-              } else {
-                const starId = isEntryStarred(idx);
-                const starActive = !!starId;
-                rendered.push(
-                  <div key={idx} data-chat-entry-index={idx} className={`group relative ml-auto w-fit min-w-0 max-w-[75%] overflow-hidden rounded-md bg-message-user px-3.5 py-2 text-sm text-message-user-foreground ${userGapCls} ${ringCls}`}>
-                    {/* "나" label removed — sender is implicit. Star + hover
-                        actions float top-right via absolute positioning so
-                        the bubble has no header chrome. */}
-                    {entry.injectHint === "queue" ? (
-                      <div className="mb-1 inline-flex items-center gap-1 rounded bg-message-user-foreground/10 px-1.5 py-0.5 text-[10px] text-message-user-foreground/70" title="메시지 큐에서 자동 인입">
-                        ↪ 큐에서
-                      </div>
-                    ) : entry.injectHint === "interrupt" ? (
-                      <div className="mb-1 inline-flex items-center gap-1 rounded bg-message-user-foreground/10 px-1.5 py-0.5 text-[10px] text-message-user-foreground/70" title="현재 LLM 응답 중단 후 즉시 새 메시지로 주입">
-                        ⚡ 중단후 새메세지
-                      </div>
-                    ) : null}
-                    {starActive ? (
-                      <Star key="active" className="absolute right-2 top-2 h-3 w-3 fill-emphasis text-emphasis lvis-anim-star" />
-                    ) : null}
-                    {/* Hide mutating actions in view-mode (read-only slice). */}
-                    {!viewMode && (
-                      <div className="absolute right-2 top-2 hidden gap-1 group-hover:flex bg-message-user/95 rounded">
-                        <Button type="button" variant="ghost" size="icon-xs" title="편집" onClick={() => setEditingEntryIdx(idx)}>
-                          <Pencil className="h-3 w-3" />
-                        </Button>
-                        <Button type="button" variant="ghost" size="icon-xs" title="분기" onClick={() => void onFork(idx)}>
-                          <GitBranch className="h-3 w-3" />
-                        </Button>
-                        <Button type="button" variant="ghost" size="icon-xs" title="즐겨찾기" onClick={() => void onToggleStar(idx)}>
-                          <Star key={starActive ? "on" : "off"} className={`h-3 w-3 ${starActive ? "fill-emphasis text-emphasis lvis-anim-star" : ""}`} />
-                        </Button>
-                      </div>
-                    )}
-                    <div className="whitespace-pre-wrap break-words [overflow-wrap:anywhere]">{searchHighlight ? highlightText(entry.text, searchHighlight) : entry.text}</div>
-                  </div>
-                );
-              }
-              i++;
-              continue;
-            }
-
-            if (entry.kind === "ask_user_answer") {
-              rendered.push(<AskUserAnswerBubble key={idx} entry={entry} />);
-              i++;
-              continue;
-            }
-
-            if (entry.kind === "system") {
-              rendered.push(
-                <div
-                  key={idx}
-                  data-testid="system-entry"
-                  className="mx-auto text-center text-xs text-muted-foreground py-1 px-3 rounded-full bg-muted/50"
-                >
-                  {entry.text}
-                </div>,
-              );
-              i++;
-              continue;
-            }
-
-            // turn_summary entry — 데이터 carrier 로 history 에 남기되 standalone
-            // 렌더링 안 함. 같은 turn 의 final AssistantCard / WorkGroup 이
-            // turnSummaryByTurnStart 에서 lookup 해 inline 으로 표시한다.
-            if (entry.kind === "turn_summary" || entry.kind === "context_usage") {
-              i++;
-              continue;
-            }
-
-            // Structured compact checkpoint marker — auto-compact 및 manual compact 모두 CheckpointDivider 로 렌더.
-            // CheckpointDivider 의 trigger prop 이 auto/manual variant 를 구분.
-            // sessionId 불변이라 revert 액션 없음.
-            // SummaryToast 가 rendered preamble (12-section structured summary) 노출.
-            if (entry.kind === "checkpoint") {
-              rendered.push(
-                <CheckpointDivider
-                  key={`cp-${idx}`}
-                  trigger={entry.trigger}
-                  messageCount={entry.removedMessages}
-                  compactNum={entry.compactNum}
-                  compactStatus={entry.compactStatus}
-                  truncatedDir={entry.truncatedDir}
-                  onEnterView={handleEnterView}
-                  onBranchFrom={handleBranchFrom}
-                />,
-              );
-              if (entry.summary) {
-                rendered.push(
-                  <SummaryToast key={`cp-${idx}-summary`} summary={entry.summary} />,
-                );
-              }
-              i++;
-              continue;
-            }
-
-            if (entry.kind === "session_resume") {
-              rendered.push(
-                <SessionResumeDivider
-                  key={`sr-${idx}`}
-                  preambleChars={entry.preambleChars}
-                />,
-              );
-              i++;
-              continue;
-            }
-
-            if (entry.kind === "imported_trigger") {
-              rendered.push(
-                <ImportedTriggerCard
-                  key={`trigger:${entry.sessionId}`}
-                  entry={entry}
-                />,
-              );
-              i++;
-              continue;
-            }
-
-            // ── Intermediate: collect contiguous turn work into one WorkGroup ──
-            if (entryClassMap.get(i) === "intermediate") {
-              const groupStart = i;
-              const groupTurnStart = entryTurnStartMap.get(i) ?? 0;
-              // Spinner is shown only while this WorkGroup belongs to the currently active turn
-              const groupIsActiveTurn = groupTurnStart === lastTurnStartIdx && streaming;
-              if (debugStreamEnabled) {
-                debugLog("ChatView", "WorkGroup:render-decision", {
-                  groupStart,
-                  groupTurnStart,
-                  lastTurnStartIdx,
-                  globalStreaming: streaming,
-                  groupIsActiveTurn,
-                });
-              }
-              const groupEntries: { idx: number; node: React.ReactNode }[] = [];
-
-              while (i < activeEntries.length) {
-                const e = activeEntries[i];
-                if (!e) { i++; continue; }
-                if ((entryTurnStartMap.get(i) ?? groupTurnStart) !== groupTurnStart) break;
-                const cls = entryClassMap.get(i);
-                if (cls === "final") break;
-                if (e.kind === "reasoning") {
-                  if (cls === "intermediate") {
-                    groupEntries.push({ idx: i, node: <ReasoningCard key={i} entry={e} embedded /> });
-                  } else {
-                    break;
-                  }
-                } else if (e.kind === "permission_review") {
-                  if (cls === "intermediate") {
-                    groupEntries.push({
-                      idx: i,
-                      node: <PermissionReviewStatusCard key={`permission-review-${e.toolUseId}`} entry={e} />,
-                    });
-                  } else {
-                    break;
-                  }
-                } else if (e.kind === "tool_group") {
-                  if (cls === "intermediate") {
-                    const spawnNodes = renderSpawnsForGroup(e);
-                    groupEntries.push({
-                      idx: i,
-                      node: spawnNodes.length === 0 ? (
-                        <ToolGroupCard key={e.groupId} group={e} embedded sessionId={currentSessionId} />
-                      ) : (
-                        <Fragment key={e.groupId}>
-                          <ToolGroupCard group={e} embedded sessionId={currentSessionId} />
-                          {spawnNodes}
-                        </Fragment>
-                      ),
-                    });
-                  } else {
-                    break;
-                  }
-                } else if (e.kind === "assistant") {
-                  if (cls === "intermediate") {
-                    groupEntries.push({
-                      idx: i,
-                      node: (
-                        <AssistantCard
-                          key={i}
-                          entry={e}
-                          highlightQuery={searchHighlight}
-                          isStarred={!!isEntryStarred(i)}
-                          isFinal={false}
-                          embedded
-                        />
-                      ),
-                    });
-                  } else {
-                    break;
-                  }
-                } else if (e.kind === "ask_user_answer") {
-                  // ask_user_question 의 사용자 응답 카드도 같은 turn 의
-                  // WorkGroup 안에 inline 으로 흡수. 이전: 이 branch 가 없어
-                  // default break 로 떨어지면서 WorkGroup 가 분리 → 사용자가
-                  // "작업 3단계 + 작업 9단계" 로 보이던 UX 분리 (2026-05-07).
-                  // entryTurnStartMap 에는 ask_user_answer 가 없어 line 901
-                  // 의 fallback 으로 같은 turn 처리되었으나, 여기서 명시 push
-                  // 가 없으면 default `break` 로 떨어짐. 안전을 위해 walkback
-                  // 으로 turnStart 일치 검증.
-                  let aaTurnStart = -1;
-                  for (let k = i; k >= 0; k--) {
-                    if (isTurnStartEntry(activeEntries[k])) { aaTurnStart = k; break; }
-                  }
-                  if (aaTurnStart === groupTurnStart) {
-                    groupEntries.push({
-                      idx: i,
-                      node: <AskUserAnswerBubble key={`ask-${i}`} entry={e} />,
-                    });
-                  } else {
-                    break;
-                  }
-                } else {
-                  break;
-                }
-                i++;
-              }
-
-              if (groupEntries.length > 0) {
-                // Prefer the turn_summary's authoritative `toolCount` over
-                // groupEntries.length — the latter includes reasoning /
-                // assistant bubbles / ask_user_answer / inline sub-agent
-                // cards and would diverge from the actual tool-call count.
-                const groupSummary = turnSummaryByTurnStart.get(groupTurnStart);
-                rendered.push(
-                  <WorkGroup
-                    key={`wg-${groupStart}`}
-                    stepCount={groupSummary?.toolCount ?? groupEntries.length}
-                    streaming={groupIsActiveTurn}
-                    turnDurationMs={groupSummary?.turnDurationMs}
-                  >
-                    {groupEntries.map((ge) => (
-                      <div key={ge.idx} data-chat-entry-index={ge.idx}>
-                        {ge.node}
-                      </div>
-                    ))}
-                  </WorkGroup>
-                );
-              }
-              continue;
-            }
-
-            // ── Live: last entry in turn while streaming — no TurnActionBar ──
-            if (entryClassMap.get(i) === "live") {
-              if (entry.kind === "reasoning") {
-                rendered.push(<ReasoningCard key={idx} entry={entry} />);
-              } else if (entry.kind === "permission_review") {
-                rendered.push(<PermissionReviewStatusCard key={`permission-review-${entry.toolUseId}`} entry={entry} />);
-              } else if (entry.kind === "tool_group") {
-                rendered.push(<ToolGroupCard key={entry.groupId} group={entry} sessionId={currentSessionId} />);
-                for (const node of renderSpawnsForGroup(entry)) rendered.push(node);
-              } else if (entry.kind === "assistant") {
-                rendered.push(
-                  <div key={idx} data-chat-entry-index={idx} className={ringCls || undefined}>
-                    <AssistantCard
-                      entry={entry}
-                      highlightQuery={searchHighlight}
-                      isStarred={!!isEntryStarred(idx)}
-                      isFinal={true}
-                    />
-                  </div>
-                );
-              }
-              i++;
-              continue;
-            }
-
-            // ── Final: turn complete, last assistant — show TurnActionBar ──
-            if (entryClassMap.get(i) === "final" && entry.kind === "assistant") {
-              const turnStartIdx = finalTurnStartMap.get(i) ?? 0;
-              const summary = turnSummaryByTurnStart.get(turnStartIdx);
-              const summaryVendor = summary?.vendorProvider;
-              const summaryPricing = summary?.vendorProvider && summary.vendorModel
-                ? lookupBillablePricingOptional(summary.vendorProvider, summary.vendorModel)
-                : undefined;
-              rendered.push(
-                  <div key={idx} data-chat-entry-index={idx} className={`${ringCls} min-w-0 w-full max-w-full overflow-x-hidden rounded-md`}>
-                  <AssistantCard
-                    entry={entry}
-                    highlightQuery={searchHighlight}
-                    isStarred={!!isEntryStarred(idx)}
-                    isFinal={true}
-                  />
-                  {/* Suppress mutating TurnActionBar actions in view-mode. */}
-                  <TurnActionBar
-                    timestamp={entry.kind === "assistant" ? entry.createdAt : undefined}
-                    turnSummary={summary}
-                    pricing={summaryPricing}
-                    vendor={summaryVendor ?? activeVendor}
-                    isStarred={!!isEntryStarred(idx)}
-                    actions={viewMode ? {} : {
-                      onRetry: () => void onRetryEffort(),
-                      onFork: () => void onFork(idx),
-                      onToggleStar: () => void onToggleStar(idx),
-                    }}
-                    onFeedback={!viewMode && onFeedback ? (rating, reason) => void onFeedback(idx, rating, reason) : undefined}
-                  />
-                </div>
-              );
-              i++;
-              continue;
-            }
-
-            // ── Fallback: unclassified edge-case entries ──
-            if (entry.kind === "reasoning") {
-              rendered.push(<ReasoningCard key={idx} entry={entry} />);
-            } else if (entry.kind === "permission_review") {
-              rendered.push(<PermissionReviewStatusCard key={`permission-review-${entry.toolUseId}`} entry={entry} />);
-            } else if (entry.kind === "tool_group") {
-              rendered.push(<ToolGroupCard key={entry.groupId} group={entry} sessionId={currentSessionId} />);
-              for (const node of renderSpawnsForGroup(entry)) rendered.push(node);
-            }
-            i++;
-          }
-          return rendered;
-        })()}
+        {transcriptEntries}
         <div ref={chatEndRef} />
       </div></ScrollArea>
       {showJumpToBottom && (
@@ -1458,13 +1656,7 @@ export function ChatView({ api, onAsk, onEditSave, onFork, onToggleStar, onRetry
           <SessionTodoPanel api={workflowApi} sessionId={currentSessionId} />
           <MessageQueuePanel
             store={messageQueueStore}
-            onSendNow={(item) => {
-              // 행별 [↑ 즉시] — 그 1 항목만 즉시 주입 = 사용자 명시 인터럽트.
-              // "⚡ 중단후 새메세지" hint. handleAsk 자체 abort.
-              messageQueueStore.remove(item.id);
-              const text = formatQueueInject([item]);
-              void onAsk(text, { inputOrigin: "user-keyboard", token: "" }, { injectHint: "interrupt" });
-            }}
+            onSendNow={handleMessageQueueSendNow}
           />
         </div>
         <div className="w-full max-w-full min-w-0 overflow-x-hidden pb-1 space-y-2">
@@ -1475,7 +1667,7 @@ export function ChatView({ api, onAsk, onEditSave, onFork, onToggleStar, onRetry
             installingPlugins={installingPlugins}
             onOpenMarketplace={onOpenMarketplace}
             marketplaceUrlReady={marketplaceUrlReady}
-            onInsertSlashCommand={(cmd) => setQuestion(question ? question + cmd + " " : cmd + " ")}
+            onInsertSlashCommand={handleInsertSlashCommand}
             commandActions={commandActions}
             commandPopoverOpen={commandPopoverOpen}
             onCommandPopoverOpenChange={onCommandPopoverOpenChange}
@@ -1620,30 +1812,7 @@ export function ChatView({ api, onAsk, onEditSave, onFork, onToggleStar, onRetry
             placeholder={computeComposerPlaceholder({ hasApiKey, streaming, suggestedReplies })}
           />
           <BottomActionRow
-            tokenSlot={
-              <div className="flex min-w-0 items-center gap-2">
-                <TokenProgressRing
-                  used={usedTokens}
-                  budget={effectiveBudget}
-                  contextBudget={contextBudget}
-                  tpmLimit={tpmLimit}
-                />
-                <Tooltip>
-                  <TooltipTrigger asChild>
-                    <span className={`text-[11px] font-mono ${costBadgeClass}`} title="예상 비용">
-                      {formatCostBadge(costEstimate.total, costEstimate.pricingKnown)}
-                    </span>
-                  </TooltipTrigger>
-                  <TooltipContent className="text-xs">
-                    <div>입력: {costEstimate.inputTokens.toLocaleString()} tok{costEstimate.pricingKnown === false ? "" : ` · $${costEstimate.inputCost.toFixed(5)}`}</div>
-                    <div>출력(추정): {costEstimate.outputTokens.toLocaleString()} tok{costEstimate.pricingKnown === false ? "" : ` · $${costEstimate.outputCost.toFixed(5)}`}</div>
-                    {costEstimate.pricingKnown === false
-                      ? <div className="font-semibold">가격 미등록 모델입니다.</div>
-                      : <div className="font-semibold">합계: ${costEstimate.total.toFixed(5)}</div>}
-                  </TooltipContent>
-                </Tooltip>
-              </div>
-            }
+            tokenSlot={tokenSlot}
             isBusy={streaming}
             isSendDisabled={
               (hasApiKey === false || viewMode !== null) &&
@@ -1651,7 +1820,7 @@ export function ChatView({ api, onAsk, onEditSave, onFork, onToggleStar, onRetry
                 ? true
                 : question.trim().length === 0 && attachments.length === 0
             }
-            onSend={() => handleComposerSend({ inputOrigin: "user-keyboard", token: "" })}
+            onSend={handleBottomSend}
             onCancel={() => {
               // ESC handler 와 동일: 큐를 inject + abort (멈춤 X, 입력으로 inject).
               flushQueueAsUserMessage();
@@ -1672,12 +1841,7 @@ export function ChatView({ api, onAsk, onEditSave, onFork, onToggleStar, onRetry
 }
 
 function getKoreaDateKey(date: Date): string {
-  const parts = new Intl.DateTimeFormat("en-US", {
-    timeZone: "Asia/Seoul",
-    year: "numeric",
-    month: "2-digit",
-    day: "2-digit",
-  }).formatToParts(date);
+  const parts = KOREA_DATE_KEY_FORMATTER.formatToParts(date);
   const get = (type: string) => parts.find((part) => part.type === type)?.value ?? "";
   return `${get("year")}-${get("month")}-${get("day")}`;
 }

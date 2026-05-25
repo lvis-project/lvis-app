@@ -1631,10 +1631,11 @@ contextBridge.exposeInMainWorld("lvis", {
   },
   env: {
     isDev: process.env.LVIS_DEV === "1",
+    isE2E: process.env.LVIS_E2E === "1",
     enableDevConsole: process.env.LVIS_DEV_CONSOLE === "1",
     debugStream:
       process.env.VITE_DEBUG_STREAM === "1" ||
-      (process.env.LVIS_DEV === "1" && process.env.LVIS_DEV_CONSOLE === "1"),
+      process.env.LVIS_DEBUG_STREAM === "1",
     /**
      * Legacy dev/debug surface only. Demo activation decisions now use
      * `api.demo.status()` because packaged builds scrub `LVIS_DEMO_*`
