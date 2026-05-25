@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { memo, useEffect, useState } from "react";
 import { CalendarDays } from "lucide-react";
 import { Popover, PopoverTrigger } from "../../../components/ui/popover.js";
 import type { SessionSummary } from "../hooks/use-sessions.js";
@@ -21,7 +21,7 @@ import {
  * Edge case 7: fork/backtrack — entry positions are index-based, not date-sorted.
  * Edge case 5: streaming && !isCurrent guard lives in SessionCalendarPopover session buttons.
  */
-export function SessionDateNavigator({
+function SessionDateNavigatorImpl({
   dateKey,
   sessionMarkerId,
   sessions = [],
@@ -99,6 +99,8 @@ export function SessionDateNavigator({
     </div>
   );
 }
+
+export const SessionDateNavigator = memo(SessionDateNavigatorImpl);
 
 /** Formats a YYYY-MM-DD key as a human-readable label with 오늘/어제 annotation. */
 function formatDayLabel(dateKey: string): string {

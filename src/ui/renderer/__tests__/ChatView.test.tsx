@@ -76,6 +76,22 @@ describe("ChatView", () => {
     });
   });
 
+  it("keeps the message queue test hook closed when LVIS_E2E is set without dev mode", async () => {
+    delete (window as unknown as { __lvis_message_queue_store__?: unknown }).__lvis_message_queue_store__;
+    await renderApp({ hasApiKey: true, lvisEnv: { isDev: false, isE2E: true } });
+
+    expect((window as unknown as { __lvis_message_queue_store__?: unknown }).__lvis_message_queue_store__).toBeUndefined();
+  });
+
+  it("exposes the message queue test hook only for dev e2e runtime", async () => {
+    delete (window as unknown as { __lvis_message_queue_store__?: unknown }).__lvis_message_queue_store__;
+    await renderApp({ hasApiKey: true, lvisEnv: { isDev: true, isE2E: true } });
+
+    await waitFor(() => {
+      expect((window as unknown as { __lvis_message_queue_store__?: unknown }).__lvis_message_queue_store__).toBeDefined();
+    });
+  });
+
   it("uses the stable scoped chat scroll surface", async () => {
     const { container } = await renderApp({ hasApiKey: true });
     await waitFor(() => {
@@ -247,6 +263,81 @@ describe("ChatView", () => {
     });
   });
 
+  it("updates expanded WorkGroup permission-review fields when status stays unchanged", async () => {
+    const { container, emitChatStream } = await renderApp({ hasApiKey: true });
+    await submitChatMessage(container, "권한 검토 revision 확인");
+
+    await act(async () => {
+      emitChatStream({
+        type: "permission_review",
+        reviewStatus: "needs_approval",
+        name: "first_permission_tool",
+        toolCategory: "network",
+        source: "plugin",
+        groupId: "g-review-revision",
+        toolUseId: "t-review-revision",
+        displayOrder: 0,
+        verdictLevel: "medium",
+        approvalPurpose: {
+          text: "첫 번째 승인 목적",
+          source: "conversation",
+          confidence: "sufficient",
+        },
+      });
+      emitChatStream({ type: "text_delta", text: "권한 확인 후 답변합니다" });
+      emitChatStream({
+        type: "assistant_round",
+        text: "권한 확인 후 답변합니다",
+        thought: "",
+        stopReason: "end_turn",
+        hasToolCalls: false,
+      });
+    });
+
+    await waitFor(() => {
+      expect(container.textContent).toMatch(/작업\s*1단계/);
+      expect(container.textContent).toContain("권한 확인 후 답변합니다");
+      expect(container.textContent).not.toContain("첫 번째 승인 목적");
+    });
+
+    await act(async () => {
+      fireEvent.click(container.querySelector("[data-testid=\"work-group\"] button")!);
+    });
+
+    await waitFor(() => {
+      expect(container.textContent).toContain("first_permission_tool");
+      expect(container.textContent).toContain("플러그인");
+      expect(container.textContent).toContain("첫 번째 승인 목적");
+    });
+
+    await act(async () => {
+      emitChatStream({
+        type: "permission_review",
+        reviewStatus: "needs_approval",
+        name: "second_permission_tool",
+        toolCategory: "network",
+        source: "builtin",
+        groupId: "g-review-revision",
+        toolUseId: "t-review-revision",
+        displayOrder: 0,
+        verdictLevel: "medium",
+        approvalPurpose: {
+          text: "두 번째 승인 목적",
+          source: "conversation",
+          confidence: "sufficient",
+        },
+      });
+    });
+
+    await waitFor(() => {
+      expect(container.textContent).toContain("second_permission_tool");
+      expect(container.textContent).toContain("내장");
+      expect(container.textContent).toContain("두 번째 승인 목적");
+      expect(container.textContent).not.toContain("first_permission_tool");
+      expect(container.textContent).not.toContain("첫 번째 승인 목적");
+    });
+  });
+
   it("Ctrl+C on input element does NOT call preventDefault (Issue 2 fix)", async () => {
     const { container, emitChatStream } = await renderApp({ hasApiKey: true });
     // Start streaming so the Ctrl+C handler is active
@@ -362,6 +453,166 @@ describe("ChatView", () => {
     });
     await waitFor(() => {
       expect(container.textContent).toContain("__calendar_result__");
+    });
+  });
+
+  it("updates expanded WorkGroup content when a same-length tool result changes", async () => {
+    const { container, emitChatStream } = await renderApp({ hasApiKey: true });
+    await submitChatMessage(container, "도구 결과 갱신 확인");
+
+    await act(async () => {
+      emitChatStream({ type: "text_delta", text: "도구를 확인합니다" });
+      emitChatStream({
+        type: "assistant_round",
+        text: "도구를 확인합니다",
+        thought: "",
+        stopReason: "tool_use",
+        hasToolCalls: true,
+      });
+      emitChatStream({
+        type: "tool_start",
+        name: "calendar_list",
+        groupId: "g-same-length",
+        toolUseId: "t-same-length",
+        input: { query: "today" },
+        source: "plugin",
+        toolCategory: "read",
+        pluginId: "meeting",
+      });
+      emitChatStream({
+        type: "tool_end",
+        name: "calendar_list",
+        groupId: "g-same-length",
+        toolUseId: "t-same-length",
+        result: "alpha",
+        isError: false,
+        source: "plugin",
+        toolCategory: "read",
+        pluginId: "meeting",
+        durationMs: 100,
+      });
+    });
+
+    await waitFor(() => {
+      expect(container.textContent).toMatch(/작업\s*1단계/);
+    });
+
+    const toolButton = Array.from(container.querySelectorAll("button")).find((button) =>
+      button.textContent?.includes("calendar list"),
+    ) as HTMLButtonElement | undefined;
+    expect(toolButton).toBeTruthy();
+    await act(async () => {
+      fireEvent.click(toolButton!);
+    });
+    await waitFor(() => {
+      expect(container.textContent).toContain("alpha");
+    });
+
+    await act(async () => {
+      emitChatStream({
+        type: "tool_end",
+        name: "calendar_list",
+        groupId: "g-same-length",
+        toolUseId: "t-same-length",
+        result: "bravo",
+        isError: false,
+        source: "plugin",
+        toolCategory: "read",
+        pluginId: "meeting",
+        durationMs: 110,
+      });
+    });
+
+    await waitFor(() => {
+      expect(container.textContent).toContain("bravo");
+      expect(container.textContent).not.toContain("alpha");
+    });
+  });
+
+  it("does not carry expanded WorkGroup state across loaded sessions", async () => {
+    const now = new Date().toISOString();
+    const messagesFor = (toolName: string, resultText: string, finalText: string) => [
+      { index: 0, role: "user", content: "작업 흐름 확인" },
+      {
+        index: 1,
+        role: "assistant",
+        content: "",
+        thought: "세션 전환 작업 계획",
+        toolCalls: [{ id: "tool-1", name: toolName, input: { q: "today" } }],
+      },
+      { index: 2, role: "tool_result", toolUseId: "tool-1", toolName, content: resultText },
+      { index: 3, role: "assistant", content: finalText },
+    ];
+
+    const { container, api } = await renderApp({
+      currentSession: "current-session",
+      sessions: [
+        { id: "current-session", modifiedAt: now, title: "현재 대화" },
+        { id: "other-session", modifiedAt: now, title: "다른 대화" },
+      ],
+      mainActiveState: {
+        mainActiveSessionId: "current-session",
+        mainActiveMode: "resume",
+        updatedAt: now,
+      },
+      history: {
+        sessionId: "current-session",
+        messages: messagesFor("current_session_probe", "current-session-result", "현재 최종"),
+      },
+      historyBySession: {
+        "other-session": {
+          messages: messagesFor("other_session_probe", "other-session-result", "다른 최종"),
+        },
+      },
+    });
+
+    await waitFor(() => {
+      expect(container.textContent).toContain("현재 최종");
+      expect(container.textContent).toMatch(/작업\s*2단계/);
+      expect(container.textContent).not.toContain("current session probe");
+    });
+
+    await act(async () => {
+      fireEvent.click(container.querySelector("[data-testid=\"work-group\"] button")!);
+    });
+
+    await waitFor(() => {
+      expect(container.textContent).toContain("current session probe");
+    });
+
+    const dayButton = container.querySelector('[data-testid="session-date-navigator"] button') as HTMLButtonElement | null;
+    expect(dayButton).toBeTruthy();
+    await act(async () => {
+      fireEvent.click(dayButton!);
+    });
+
+    await waitFor(() => {
+      expect(document.body.textContent).toContain("다른 대화");
+    });
+
+    const sessionButton = Array.from(document.querySelectorAll("button")).find((button) =>
+      button.textContent?.includes("다른 대화"),
+    ) as HTMLButtonElement | undefined;
+    expect(sessionButton).toBeTruthy();
+
+    await act(async () => {
+      fireEvent.click(sessionButton!);
+    });
+
+    await waitFor(() => {
+      expect(api.chatSessionHistory).toHaveBeenCalledWith("other-session");
+      expect(container.textContent).toContain("다른 최종");
+      expect(container.textContent).not.toContain("current session probe");
+      expect(container.textContent).not.toContain("other session probe");
+    });
+
+    await act(async () => {
+      fireEvent.click(container.querySelector("[data-testid=\"work-group\"] button")!);
+    });
+
+    await waitFor(() => {
+      expect(container.textContent).toContain("other session probe");
+      expect(container.textContent).not.toContain("current session probe");
     });
   });
 

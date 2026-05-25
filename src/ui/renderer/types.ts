@@ -1359,6 +1359,7 @@ declare global {
       attach: LvisAttachApi;
       env: {
         isDev: boolean;
+        isE2E: boolean;
         enableDevConsole: boolean;
         debugStream: boolean;
       };

@@ -21,6 +21,7 @@ import {
   _resetForTest,
   _setTamperedSnapshotForTest,
   devNoSandboxAllowed,
+  isPackagedForbiddenEnvVar,
   setIsPackaged,
   shouldWarnPackagedFlagsIgnored,
   tamperedVarsAtBoot,
@@ -69,13 +70,39 @@ describe("dev-flags tamper snapshot", () => {
     _setTamperedSnapshotForTest([
       "LVIS_DEV",
       "LVIS_DEV_RELOAD",
+      "LVIS_DEV_CONSOLE",
+      "LVIS_E2E",
+      "LVIS_DEBUG_STREAM",
+      "VITE_DEBUG_STREAM",
       "LVIS_WIN_NO_SANDBOX",
+      "LVIS_PLUGINS_DIR",
     ]);
     const names = tamperedVarsAtBoot();
     expect(names).toContain("LVIS_DEV");
     expect(names).toContain("LVIS_DEV_RELOAD");
+    expect(names).toContain("LVIS_DEV_CONSOLE");
+    expect(names).toContain("LVIS_E2E");
+    expect(names).toContain("LVIS_DEBUG_STREAM");
+    expect(names).toContain("VITE_DEBUG_STREAM");
     expect(names).toContain("LVIS_WIN_NO_SANDBOX");
-    expect(names).toHaveLength(3);
+    expect(names).toContain("LVIS_PLUGINS_DIR");
+    expect(names).toHaveLength(8);
+  });
+
+  it("defines the packaged dev/test env scrub predicate", () => {
+    expect(isPackagedForbiddenEnvVar("LVIS_DEV")).toBe(true);
+    expect(isPackagedForbiddenEnvVar("LVIS_DEV_CONSOLE")).toBe(true);
+    expect(isPackagedForbiddenEnvVar("LVIS_DEV_SOMETHING_NEW")).toBe(true);
+    expect(isPackagedForbiddenEnvVar("LVIS_E2E")).toBe(true);
+    expect(isPackagedForbiddenEnvVar("LVIS_DEBUG_STREAM")).toBe(true);
+    expect(isPackagedForbiddenEnvVar("VITE_DEBUG_STREAM")).toBe(true);
+    expect(isPackagedForbiddenEnvVar("LVIS_WIN_NO_SANDBOX")).toBe(true);
+    expect(isPackagedForbiddenEnvVar("LVIS_PLUGINS_DIR")).toBe(true);
+    expect(isPackagedForbiddenEnvVar("LVIS_WHITELIST_OFFLINE")).toBe(true);
+
+    expect(isPackagedForbiddenEnvVar("LVIS_DEMO_VENDOR")).toBe(false);
+    expect(isPackagedForbiddenEnvVar("LVIS_HOME")).toBe(false);
+    expect(isPackagedForbiddenEnvVar("NODE_ENV")).toBe(false);
   });
 
   it("keeps LVIS_WIN_NO_SANDBOX Windows-only and packaged-gated", () => {
