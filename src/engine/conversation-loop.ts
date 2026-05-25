@@ -523,9 +523,8 @@ export interface ConversationLoopDeps {
   /** Disable normal ~/.lvis/sessions persistence for isolated child loops. */
   disableSessionPersistence?: boolean;
   /**
-   * C2(c): per-session SkillOverlay handle. Cleared on `newConversation()`
-   * so a brand-new session does not inherit a previous session's loaded
-   * skills. Optional so focused unit-test setups can skip the overlay.
+   * Current-turn SkillOverlay handle. Cleared at user-turn start/end so skill
+   * bodies never persist as ambient session context.
    */
   skillOverlay?: { clear(sessionId: string): void };
   /**
@@ -971,10 +970,11 @@ export class ConversationLoop {
     scope: ToolScope,
     originSource: string | null,
     rolePrompt?: ActiveRolePrompt,
+    overlaySessionId = this.sessionId,
   ): string {
     this.deps.systemPromptBuilder.setToolScope?.(scope);
     this.deps.systemPromptBuilder.setOriginSource?.(originSource);
-    this.deps.systemPromptBuilder.setActiveSessionId?.(this.sessionId);
+    this.deps.systemPromptBuilder.setActiveSessionId?.(overlaySessionId);
     this.deps.systemPromptBuilder.setActiveRolePrompt?.(rolePrompt ?? null);
     try {
       return this.deps.systemPromptBuilder.build();
@@ -1001,8 +1001,14 @@ export class ConversationLoop {
     originSource: string | null,
     rolePrompt: ActiveRolePrompt | undefined,
     toolSchemas: ToolSchema[],
+    overlaySessionId = this.sessionId,
   ): RequestProjectionContext {
-    const buildSystemPrompt = () => this.buildSystemPromptForScope(scope, originSource, rolePrompt);
+    const buildSystemPrompt = () => this.buildSystemPromptForScope(
+      scope,
+      originSource,
+      rolePrompt,
+      overlaySessionId,
+    );
     return {
       systemPrompt: buildSystemPrompt(),
       toolSchemas,
@@ -1510,6 +1516,7 @@ export class ConversationLoop {
     const toolTrustOrigin = initialToolTrustOrigin(inputOrigin, turnInput);
     const permissionUserIntent = summarizePermissionUserIntent(inputOrigin, turnInput);
     this.deps.sessionTodoStore?.clearForTurnStart(effectiveSessionId);
+    this.deps.skillOverlay?.clear(effectiveSessionId);
 
     // §4.5.2 step 1 — REQUEST_ENTRY (main process 도달 시점)
     this.tracer.step("REQUEST_ENTRY", { inputLen: turnInput.length, inputOrigin });
@@ -1660,6 +1667,7 @@ export class ConversationLoop {
           options?.originSource ?? null,
           options?.rolePrompt,
           initialToolSchemas,
+          effectiveSessionId,
         ),
         turnSignal,
         callbacks,
@@ -1670,6 +1678,7 @@ export class ConversationLoop {
       scope,
       options?.originSource ?? null,
       options?.rolePrompt,
+      effectiveSessionId,
     );
     // §4.5.2 step 6 — PROMPT_ASSEMBLE
     this.tracer.step("PROMPT_ASSEMBLE", { promptLen: systemPrompt.length, activePlugins: scope.activePluginIds.size });
@@ -1703,6 +1712,7 @@ export class ConversationLoop {
       // of success/error/abort) ensures the next turn re-prompts for the
       // same path — the user's "1회" intent.
       this.turnAdditionalDirectories = [];
+      this.deps.skillOverlay?.clear(effectiveSessionId);
       // Drain any guidance that never reached a round boundary (single-
       // round turn, or guidance queued after the last round closed). It
       // cannot be applied to a future turn safely — the next turn's user
@@ -2171,6 +2181,7 @@ export class ConversationLoop {
                   scope,
                   overlayTriggerOrigin,
                   bounds.rolePrompt,
+                  bounds.sessionIdOverride ?? this.sessionId,
                 ),
                 toolSchemas,
               }),
@@ -2183,6 +2194,7 @@ export class ConversationLoop {
               scope,
               overlayTriggerOrigin,
               bounds.rolePrompt,
+              bounds.sessionIdOverride ?? this.sessionId,
             );
           }
         }
@@ -2639,6 +2651,14 @@ export class ConversationLoop {
           ...(tr.is_error && { isError: true }),
           ...(toolDisplay ? { meta: { toolDisplay } } : {}),
         });
+      }
+      if (capResult.allowed.some((tu) => tu.name === "skill_load")) {
+        systemPrompt = this.buildSystemPromptForScope(
+          scope,
+          overlayTriggerOrigin,
+          bounds.rolePrompt,
+          bounds.sessionIdOverride ?? this.sessionId,
+        );
       }
     }
 

@@ -10,11 +10,11 @@
  *   ---
  *   name: <skill name>           # required, unique
  *   description: <one line>      # surfaced as the badge subtitle
- *   triggers: ["..."]            # optional keyword hints (LLM consumes)
  *   ---
- *   <markdown body>              # appended to chat history as a system message
+ *   <markdown body>              # loaded into the current-turn prompt overlay
  */
 import { readFile, readdir, realpath } from "node:fs/promises";
+import { closeSync, openSync, readdirSync, readSync, realpathSync } from "node:fs";
 import { resolve, join, relative, isAbsolute } from "node:path";
 import { createLogger } from "../lib/logger.js";
 import { lvisHome } from "../shared/lvis-home.js";
@@ -35,22 +35,33 @@ export const SKILL_MAX_BODY_BYTES = 8 * 1024;
 export interface SkillFrontmatter {
   name: string;
   description?: string;
-  triggers?: string[];
 }
 
 export interface LoadedSkill {
   name: string;
   description: string;
-  triggers: string[];
   body: string;
   filePath: string;
 }
 
+export interface SkillCatalogEntry {
+  name: string;
+  description: string;
+}
+
+interface SkillCatalogRecord extends SkillCatalogEntry {
+  baseName: string;
+  filePath: string;
+}
+
 const USER_SKILLS_DIR = resolve(lvisHome(), "skills");
+const SKILL_CATALOG_SCAN_LIMIT = 256;
+const SKILL_FRONTMATTER_READ_BYTES = 16 * 1024;
+const SKILL_CATALOG_DESCRIPTION_MAX_CHARS = 1024;
 
 /**
- * Parse a YAML-ish frontmatter block. Supports `key: value` lines and
- * `key: [a, b, c]` arrays. Quoted strings (single/double) are unwrapped.
+ * Parse a YAML-ish frontmatter block. Supports `key: value` lines.
+ * Quoted strings (single/double) are unwrapped.
  * Deliberately tiny — full YAML would pull in a dep we don't need.
  */
 export function parseFrontmatter(raw: string): {
@@ -70,15 +81,6 @@ export function parseFrontmatter(raw: string): {
     if (!m) continue;
     const key = m[1];
     let val = m[2].trim();
-    if (val.startsWith("[") && val.endsWith("]")) {
-      const arr = val
-        .slice(1, -1)
-        .split(",")
-        .map((s) => s.trim().replace(/^["']|["']$/g, ""))
-        .filter((s) => s.length > 0);
-      if (key === "triggers") fm.triggers = arr;
-      continue;
-    }
     val = val.replace(/^["']|["']$/g, "");
     if (key === "name") fm.name = val;
     else if (key === "description") fm.description = val;
@@ -106,9 +108,61 @@ export class SkillStore {
     return [...byName.values()];
   }
 
+  /**
+   * Synchronous lightweight catalog for prompt assembly. It returns only
+   * metadata; skill bodies stay behind `skill_load` and the approval gate.
+   */
+  listCatalogSync(): SkillCatalogEntry[] {
+    const out = this.scanCatalogDirSync(this.userDir);
+    const byName = new Map<string, SkillCatalogEntry>();
+    for (const s of out) {
+      byName.set(s.name, {
+        name: s.name,
+        description: s.description,
+      });
+    }
+    return [...byName.values()];
+  }
+
   async load(name: string): Promise<LoadedSkill | null> {
-    const all = await this.list();
-    return all.find((s) => s.name === name) ?? null;
+    if (!SKILL_NAME_ALLOWLIST.test(name)) return null;
+    let canonicalDir: string;
+    try {
+      canonicalDir = await realpath(this.userDir);
+    } catch {
+      canonicalDir = resolve(this.userDir);
+    }
+    const candidates = [
+      join(this.userDir, name, "SKILL.md"),
+      join(this.userDir, `${name}.md`),
+    ];
+    const loaded: LoadedSkill[] = [];
+    for (const filePath of candidates) {
+      let canonicalFile: string;
+      try {
+        canonicalFile = await realpath(filePath);
+      } catch (err) {
+        if ((err as NodeJS.ErrnoException).code !== "ENOENT") {
+          log.warn(`skill load: realpath failed for ${filePath}: %s`, (err as Error).message);
+        }
+        continue;
+      }
+      const rel = relative(canonicalDir, canonicalFile);
+      if (rel.startsWith("..") || isAbsolute(rel)) {
+        log.warn(`skill load: rejected traversal — ${filePath} -> ${canonicalFile} escapes ${canonicalDir}`);
+        continue;
+      }
+      try {
+        loaded.push(await this.loadFile(canonicalFile, name));
+      } catch (err) {
+        log.warn(`skill load failed for ${filePath}: %s`, (err as Error).message);
+      }
+    }
+    if (loaded.length > 1) {
+      log.warn(`skill load: duplicate skill id "${name}" exists as both directory and flat file; refusing ambiguous load`);
+      return null;
+    }
+    return loaded[0] ?? null;
   }
 
   private async scanDir(dir: string): Promise<LoadedSkill[]> {
@@ -125,11 +179,11 @@ export class SkillStore {
     // a real path (just-created via mkdir, race conditions), fall back to
     // the supplied `dir` value — confinement still works because we resolve
     // every entry the same way.
-    let realDir: string;
+    let canonicalDir: string;
     try {
-      realDir = await realpath(dir);
+      canonicalDir = await realpath(dir);
     } catch {
-      realDir = resolve(dir);
+      canonicalDir = resolve(dir);
     }
 
     const skills: LoadedSkill[] = [];
@@ -146,9 +200,9 @@ export class SkillStore {
       // C2(a): resolve the entry's real path and verify it stays inside
       // the (real) skills directory. Symlinks pointing outside (e.g.
       // `evil.md → /etc/passwd`) are rejected here.
-      let realFile: string;
+      let canonicalFile: string;
       try {
-        realFile = await realpath(filePath);
+        canonicalFile = await realpath(filePath);
       } catch (err) {
         log.warn(
           `skill scan: realpath failed for ${filePath}: %s`,
@@ -156,46 +210,112 @@ export class SkillStore {
         );
         continue;
       }
-      const rel = relative(realDir, realFile);
+      const rel = relative(canonicalDir, canonicalFile);
       if (rel.startsWith("..") || isAbsolute(rel)) {
         log.warn(
-          `skill scan: rejected traversal — ${filePath} -> ${realFile} escapes ${realDir}`,
+          `skill scan: rejected traversal — ${filePath} -> ${canonicalFile} escapes ${canonicalDir}`,
         );
         continue;
       }
       try {
-        const raw = await readFile(realFile, "utf-8");
-        const { fm, body } = parseFrontmatter(raw);
-        const name = fm.name || baseName;
-        // C2(b): the resolved-from-frontmatter name is also subject to the
-        // allowlist; if a malicious frontmatter sets `name: ../../etc`, we
-        // reject the skill rather than carry that ID into the load() lookup.
-        if (!SKILL_NAME_ALLOWLIST.test(name)) {
-          log.warn(
-            `skill scan: rejected non-allowlist frontmatter name "${name}" in ${realFile}`,
-          );
-          continue;
-        }
-        const trimmedBody = body.trim();
-        // C2(e): cap body length so a malicious skill cannot blow up the
-        // system prompt or chew up tokens. 8 KB is generous for a markdown
-        // skill and tight enough that abuse is bounded.
-        if (Buffer.byteLength(trimmedBody, "utf-8") > SKILL_MAX_BODY_BYTES) {
-          log.warn(
-            `skill scan: rejected oversized body for ${realFile} (>${SKILL_MAX_BODY_BYTES} bytes)`,
-          );
-          continue;
-        }
-        skills.push({
-          name,
-          description: fm.description ?? "",
-          triggers: fm.triggers ?? [],
-          body: trimmedBody,
-          filePath: realFile,
-        });
+        skills.push(await this.loadFile(canonicalFile, baseName));
       } catch (err) {
         log.warn(
           `skill load failed for ${filePath}: %s`,
+          (err as Error).message,
+        );
+      }
+    }
+    return skills;
+  }
+
+  private async loadFile(canonicalFile: string, baseName: string): Promise<LoadedSkill> {
+    const raw = await readFile(canonicalFile, "utf-8");
+    const { fm, body } = parseFrontmatter(raw);
+    const name = resolveSkillName(baseName, fm);
+    const trimmedBody = body.trim();
+    // C2(e): cap body length so a malicious skill cannot blow up the
+    // system prompt or chew up tokens. 8 KB is generous for a markdown
+    // skill and tight enough that abuse is bounded.
+    if (Buffer.byteLength(trimmedBody, "utf-8") > SKILL_MAX_BODY_BYTES) {
+      throw new Error(`rejected oversized body (>${SKILL_MAX_BODY_BYTES} bytes)`);
+    }
+    return {
+      name,
+      description: fm.description ?? "",
+      body: trimmedBody,
+      filePath: canonicalFile,
+    };
+  }
+
+  private scanCatalogDirSync(dir: string, limit = SKILL_CATALOG_SCAN_LIMIT): SkillCatalogRecord[] {
+    let entries: Array<import("node:fs").Dirent>;
+    try {
+      entries = readdirSync(dir, { withFileTypes: true });
+    } catch (err) {
+      if ((err as NodeJS.ErrnoException).code === "ENOENT") return [];
+      throw err;
+    }
+
+    let canonicalDir: string;
+    try {
+      canonicalDir = realpathSync(dir);
+    } catch {
+      canonicalDir = resolve(dir);
+    }
+
+    const skills: SkillCatalogRecord[] = [];
+    const sortedEntries = entries
+      .slice()
+      .sort((a, b) => a.name.localeCompare(b.name));
+    const limitedEntries = Number.isFinite(limit)
+      ? sortedEntries.slice(0, limit)
+      : sortedEntries;
+    if (Number.isFinite(limit) && entries.length > limit) {
+      log.warn(
+        `skill catalog: scanned first ${limit} entries out of ${entries.length}`,
+      );
+    }
+
+    for (const entry of limitedEntries) {
+      const candidate = this.skillCandidate(dir, entry);
+      if (!candidate) continue;
+      const { baseName, filePath } = candidate;
+      if (!SKILL_NAME_ALLOWLIST.test(baseName)) {
+        log.warn(`skill catalog: rejected non-allowlist entry: ${entry.name}`);
+        continue;
+      }
+
+      let canonicalFile: string;
+      try {
+        canonicalFile = realpathSync(filePath);
+      } catch (err) {
+        log.warn(
+          `skill catalog: realpath failed for ${filePath}: %s`,
+          (err as Error).message,
+        );
+        continue;
+      }
+      const rel = relative(canonicalDir, canonicalFile);
+      if (rel.startsWith("..") || isAbsolute(rel)) {
+        log.warn(
+          `skill catalog: rejected traversal — ${filePath} -> ${canonicalFile} escapes ${canonicalDir}`,
+        );
+        continue;
+      }
+
+      try {
+        const fm = readFrontmatterSync(canonicalFile);
+        const name = resolveSkillName(baseName, fm);
+        skills.push({
+          name,
+          description: normalizeCatalogDescription(fm.description ?? ""),
+          baseName,
+          filePath: canonicalFile,
+        });
+      } catch (err) {
+        log.warn(
+          `skill catalog failed for ${filePath}: %s`,
           (err as Error).message,
         );
       }
@@ -221,4 +341,38 @@ export class SkillStore {
     }
     return null;
   }
+}
+
+function readFrontmatterSync(filePath: string): SkillFrontmatter {
+  const buf = Buffer.alloc(SKILL_FRONTMATTER_READ_BYTES);
+  const fd = openSync(filePath, "r");
+  try {
+    const bytes = readSync(fd, buf, 0, buf.length, 0);
+    const raw = buf.toString("utf-8", 0, bytes);
+    const match = raw.match(/^---\s*\r?\n([\s\S]*?)\r?\n---\s*\r?\n?/);
+    if (!match) return { name: "" };
+    return parseFrontmatter(`---\n${match[1]}\n---\n`).fm;
+  } finally {
+    closeSync(fd);
+  }
+}
+
+function resolveSkillName(baseName: string, fm: SkillFrontmatter): string {
+  const name = fm.name || baseName;
+  // C2(b): frontmatter may not redefine the canonical skill id. This keeps
+  // catalog metadata and `skill_load({skillName})` pointed at the same file
+  // and avoids duplicate-alias ambiguity.
+  if (name !== baseName) {
+    throw new Error(`frontmatter name "${name}" must match skill id "${baseName}"`);
+  }
+  if (!SKILL_NAME_ALLOWLIST.test(name)) {
+    throw new Error(`rejected non-allowlist frontmatter name "${name}"`);
+  }
+  return name;
+}
+
+function normalizeCatalogDescription(value: string): string {
+  const oneLine = value.replace(/[\r\n]+/g, " ").replace(/[<>]/g, "").trim();
+  if (oneLine.length <= SKILL_CATALOG_DESCRIPTION_MAX_CHARS) return oneLine;
+  return `${oneLine.slice(0, SKILL_CATALOG_DESCRIPTION_MAX_CHARS - 1).trimEnd()}…`;
 }

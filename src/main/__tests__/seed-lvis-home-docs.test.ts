@@ -17,8 +17,8 @@
  * at a temp fixtures root and `LVIS_HOME` at a temp home — no real ~/.lvis or
  * repo resources are touched.
  *
- * The platform-installer smoke (resources actually ship in the DMG/NSIS/AppImage
- * and seed on real first launch) remains a manual/CI step — see issue #1108.
+ * The packaged launch smoke verifies that resources ship and seed on real
+ * first launch; this file keeps the deterministic seed/upgrade semantics.
  */
 import { describe, it, expect, beforeEach, afterEach, vi } from "vitest";
 import {
@@ -33,6 +33,7 @@ import {
 } from "node:fs";
 import { tmpdir } from "node:os";
 import { join, dirname } from "node:path";
+import { app } from "electron";
 
 vi.mock("electron", () => ({ app: { isPackaged: false } }));
 
@@ -42,6 +43,7 @@ let fixtures: string;
 let home: string;
 let cwdSpy: ReturnType<typeof vi.spyOn>;
 const prevLvisHome = process.env.LVIS_HOME;
+const originalResourcesPath = (process as NodeJS.Process & { resourcesPath?: string }).resourcesPath;
 
 /** Write a packaged resource fixture under <fixtures>/resources/<rel>. */
 function writeRes(rel: string, content: string): void {
@@ -68,6 +70,8 @@ afterEach(() => {
   rmSync(home, { recursive: true, force: true });
   if (prevLvisHome === undefined) delete process.env.LVIS_HOME;
   else process.env.LVIS_HOME = prevLvisHome;
+  (app as { isPackaged: boolean }).isPackaged = false;
+  (process as NodeJS.Process & { resourcesPath?: string }).resourcesPath = originalResourcesPath;
 });
 
 describe("seedLvisHomeDocs — first boot", () => {
@@ -107,6 +111,29 @@ describe("seedLvisHomeDocs — first boot", () => {
     expect(r2.seeded).toEqual([]);
     expect(r2.upgraded).toEqual([]);
     expect(existsSync(join(home, "AGENTS.md.new"))).toBe(false);
+  });
+
+  it("uses process.resourcesPath when Electron is packaged", () => {
+    const resourcesPath = mkdtempSync(join(tmpdir(), "lvis-packaged-resources-"));
+    try {
+      (app as { isPackaged: boolean }).isPackaged = true;
+      (process as NodeJS.Process & { resourcesPath?: string }).resourcesPath = resourcesPath;
+      writeFileSync(join(resourcesPath, "AGENTS.md"), "PACKAGED AGENTS\n");
+      mkdirSync(join(resourcesPath, "agents"), { recursive: true });
+      mkdirSync(join(resourcesPath, "skills"), { recursive: true });
+      mkdirSync(join(resourcesPath, "prompts"), { recursive: true });
+      writeFileSync(join(resourcesPath, "agents", "executor.md"), "packaged executor\n");
+      writeFileSync(join(resourcesPath, "skills", "report-writing.md"), "packaged report\n");
+      writeFileSync(join(resourcesPath, "prompts", "summarizer.md"), "packaged prompt\n");
+
+      const r = seedLvisHomeDocs();
+
+      expect(r.seeded).toContain("AGENTS.md");
+      expect(readFileSync(join(home, "AGENTS.md"), "utf8")).toBe("PACKAGED AGENTS\n");
+      expect(readFileSync(join(home, "skills", "report-writing.md"), "utf8")).toBe("packaged report\n");
+    } finally {
+      rmSync(resourcesPath, { recursive: true, force: true });
+    }
   });
 });
 
