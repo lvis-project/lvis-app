@@ -994,6 +994,40 @@ export class ToolExecutor {
     if (tool.pluginId) meta.pluginId = tool.pluginId;
     if (tool.mcpServerId) meta.mcpServerId = tool.mcpServerId;
 
+    const returnUserAbort = async (input: Record<string, unknown>): Promise<ToolResult> => {
+      const msg = "도구 실행이 취소되었습니다.";
+      const durationMs = Date.now() - startTime;
+      const abortedPermission: PermissionCheckResult = {
+        decision: "deny",
+        reason: "user aborted turn",
+        layer: 0,
+      };
+      emitToolStart(callbacks, toolUse.name, input, meta);
+      callbacks?.onToolEnd?.(toolUse.name, msg, true, meta, undefined, durationMs);
+      await this.auditToolCall(
+        sessionId,
+        toolUse.name,
+        source,
+        trust,
+        input,
+        msg,
+        true,
+        startTime,
+        abortedPermission,
+        Infinity,
+        permissionContext,
+        invocationCategory,
+        executionCwd,
+        undefined,
+        "user-abort",
+      );
+      return { tool_use_id: toolUse.id, content: msg, is_error: true, durationMs };
+    };
+
+    if (abortSignal?.aborted) {
+      return returnUserAbort(toolUse.input);
+    }
+
     const foldedExecutionCwd = caseFoldForMatch(canonicalizePathForMatch(executionCwd));
     if (isFilesystemRootPath(foldedExecutionCwd)) {
       const msg = `[권한 차단] 도구 '${toolUse.name}' (${source}) — execution cwd is filesystem root.`;
@@ -1052,6 +1086,9 @@ export class ToolExecutor {
     };
     const approvalPurpose = buildApprovalPurposeSuggestion(finalInput, invocationPermissionContext);
     const reviewerInput = maskToolInputForDisplay(finalInput);
+    if (abortSignal?.aborted) {
+      return returnUserAbort(finalInput);
+    }
     // Within-round freshness: when the caller provided a getter we read
     // the *current* additional-directories view at the top of this
     // executeOne (rather than the snapshot taken when executeAll() was
@@ -1918,9 +1955,32 @@ export class ToolExecutor {
         outcome.reason === "ceiling"
           ? `tool execution exceeded global ceiling (${effectiveCeilingMs}ms): ${toolUse.name}`
           : outcome.reason === "user-abort"
-            ? outcome.error.message || "도구 실행이 취소되었습니다"
+            ? "도구 실행이 취소되었습니다."
             : outcome.error.message || "알 수 없는 도구 실행 오류";
       isError = true;
+    }
+
+    if (terminationReason === "user-abort") {
+      const durationMs = Date.now() - startTime;
+      callbacks?.onToolEnd?.(toolUse.name, content, true, meta, undefined, durationMs);
+      await this.auditToolCall(
+        sessionId,
+        toolUse.name,
+        source,
+        trust,
+        finalInput,
+        content,
+        true,
+        startTime,
+        permissionResult,
+        rateResult.remaining,
+        invocationPermissionContext,
+        invocationCategory,
+        executionCwd,
+        targetFilePath,
+        terminationReason,
+      );
+      return { tool_use_id: toolUse.id, content, is_error: true, durationMs };
     }
 
     // ── Step 7: PostHook + Feedback Merge ───────────

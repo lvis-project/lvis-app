@@ -832,7 +832,7 @@ export class ConversationLoop {
 
   /** B4: Abort the current streaming turn. No-op if no turn in flight. */
   abortCurrentTurn(): void {
-    this.currentAbortController?.abort();
+    this.currentAbortController?.abort(new Error("user cancelled turn"));
   }
 
   /**
@@ -841,8 +841,8 @@ export class ConversationLoop {
    * The text is held in `guidanceQueue` and consumed at the next round
    * boundary in `queryLoop` (between tool execution and the next LLM
    * stream), where it is appended to history as a user message. The
-   * currently-streaming round is NOT aborted; in-flight tool calls run
-   * to completion.
+   * currently-streaming round is NOT aborted; in-flight tool calls receive
+   * the turn's abort signal only when the user explicitly stops the turn.
    *
    * Atomically checks `hasActiveTurn()` inline so the IPC handler cannot
    * race the turn's `finally` block and silently leak a queued guide
@@ -1595,8 +1595,7 @@ export class ConversationLoop {
        * queryLoop terminates cleanly between rounds once the cap is hit
        * regardless of tool_use chains the LLM still wants to run. Used by
        * SubAgentRunner to enforce the agent_spawn `maxTurns` parameter at
-       * the loop boundary instead of leaning on `abortCurrentTurn()` which
-       * only halts the next streaming response.
+       * the loop boundary instead of using user-cancel semantics.
        */
       maxRounds?: number;
       /**
@@ -1642,9 +1641,13 @@ export class ConversationLoop {
     const ac = new AbortController();
     this.currentAbortController = ac;
     if (abortSignal?.aborted) {
-      ac.abort();
+      ac.abort(abortSignal.reason ?? new Error("parent aborted turn"));
     } else {
-      abortSignal?.addEventListener("abort", () => ac.abort(), { once: true });
+      abortSignal?.addEventListener(
+        "abort",
+        () => ac.abort(abortSignal.reason ?? new Error("parent aborted turn")),
+        { once: true },
+      );
     }
     const turnSignal = ac.signal;
 
@@ -2225,9 +2228,8 @@ export class ConversationLoop {
     for (let round = 0; round < MAX_TOOL_ROUNDS; round++) {
       // C3(a): hard guard between rounds — if we have already executed
       // `effectiveMaxRounds` assistant turns, stop cleanly and return the
-      // last text. This is the loop-boundary defense the agent_spawn
-      // turn-cap leans on (callbacks calling abortCurrentTurn only halts
-      // the next streaming response, not pending tool execution).
+      // last text. This is the loop-boundary defense for agent_spawn
+      // turn caps; abortCurrentTurn remains the user-cancel path.
       if (assistantRoundsRun >= effectiveMaxRounds) {
         // EARLY-EXIT #1: round cap hit. 이 자리에서 *조용히* synthetic 텍스트
         // 를 반환하면 사용자는 "왜 갑자기 끊겼지?" 의문. WARN 로그 + UI 콜백으로
@@ -2845,6 +2847,20 @@ export class ConversationLoop {
           content: tr.content,
           ...(tr.is_error && { isError: true }),
           ...(toolDisplay ? { meta: { toolDisplay } } : {}),
+        });
+      }
+      if (abortSignal?.aborted) {
+        log.info(
+          `queryLoop: EARLY-EXIT(tool-abort) — round=${roundIndex} toolResults=${allResults.length}`,
+        );
+        const savedText = "[중단됨]";
+        this.history.append({ role: "assistant", content: savedText });
+        callbacks?.onTextDelta?.("\n\n[중단됨]");
+        return withServingIdentity({
+          text: savedText,
+          toolCalls: allToolCalls,
+          usage: turnUsage,
+          stopReason: "interrupted",
         });
       }
       // Intra-turn micro-compact — mark older tool_results stale before the

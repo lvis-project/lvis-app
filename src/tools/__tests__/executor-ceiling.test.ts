@@ -56,6 +56,40 @@ describe("runWithCeiling — executor global ceiling helper", () => {
     }
   });
 
+  it("returns user-abort promptly even when the task ignores the signal", async () => {
+    const parentController = new AbortController();
+    const task = vi.fn(() => new Promise<never>(() => {}));
+    const promise = runWithCeiling(task, 10_000, parentController.signal, "stuck-tool");
+
+    setTimeout(() => parentController.abort(new Error("user cancelled")), 100);
+    await vi.advanceTimersByTimeAsync(150);
+
+    const outcome = await promise;
+    expect(task).toHaveBeenCalledTimes(1);
+    expect(outcome.ok).toBe(false);
+    if (!outcome.ok) {
+      expect(outcome.reason).toBe("user-abort");
+      expect(outcome.error.message).toBe("user cancelled");
+    }
+    expect(vi.getTimerCount()).toBe(0);
+  });
+
+  it("returns ceiling promptly even when the task ignores the signal", async () => {
+    const task = vi.fn(() => new Promise<never>(() => {}));
+    const promise = runWithCeiling(task, 500, undefined, "stuck-tool");
+
+    await vi.advanceTimersByTimeAsync(600);
+
+    const outcome = await promise;
+    expect(task).toHaveBeenCalledTimes(1);
+    expect(outcome.ok).toBe(false);
+    if (!outcome.ok) {
+      expect(outcome.reason).toBe("ceiling");
+      expect(outcome.error.message).toMatch(/exceeded global ceiling \(500ms\): stuck-tool/);
+    }
+    expect(vi.getTimerCount()).toBe(0);
+  });
+
   it("returns ok=false reason='error' for ordinary task failures (not timeout, not user abort)", async () => {
     const task = () => Promise.reject(new Error("internal tool error"));
     const outcome = await runWithCeiling(task, 5_000, undefined, "broken-tool");

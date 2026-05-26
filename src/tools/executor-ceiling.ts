@@ -2,10 +2,9 @@
  * Tool execution ceiling — last-resort cap with linked AbortController.
  *
  * The wrapper bridges the executor's parent `abortSignal` and a ceiling
- * timer into a single `AbortSignal` passed to the underlying tool. When the
- * ceiling fires, the tool's signal is aborted so any tool that participates
- * in abortSignal cancellation (built-in shell, MCP adapter, plugin handlers)
- * stops its underlying work instead of being orphaned.
+ * timer into a single `AbortSignal` passed to the underlying tool. The wrapper
+ * also returns as soon as either abort boundary fires, even when the underlying
+ * tool ignores the signal and leaves its Promise pending.
  *
  * Extracted from `executor.ts` Step 6 (Execute) so the ceiling semantics can
  * be unit-tested without instantiating the full 8-step pipeline.
@@ -36,12 +35,25 @@ export async function runWithCeiling<T>(
   taskName: string,
 ): Promise<ToolCeilingOutcome<T>> {
   const ceilingController = new AbortController();
+  let resolveInterruption: (outcome: ToolCeilingOutcome<T>) => void = () => {};
+  let interruptionSettled = false;
+  const interruptionOutcome = new Promise<ToolCeilingOutcome<T>>((resolve) => {
+    resolveInterruption = (outcome) => {
+      if (interruptionSettled) return;
+      interruptionSettled = true;
+      resolve(outcome);
+    };
+  });
+  const parentAbortError = (): Error =>
+    parentAbortSignal?.reason instanceof Error
+      ? parentAbortSignal.reason
+      : new Error(String(parentAbortSignal?.reason ?? "parent aborted"));
   let ceilingFired = false;
   const timer = setTimeout(() => {
     ceilingFired = true;
-    ceilingController.abort(
-      new Error(`tool execution exceeded global ceiling (${ceilingMs}ms): ${taskName}`),
-    );
+    const err = new Error(`tool execution exceeded global ceiling (${ceilingMs}ms): ${taskName}`);
+    resolveInterruption({ ok: false, reason: "ceiling", error: err });
+    ceilingController.abort(err);
   }, ceilingMs);
 
   // Fast path: parent already aborted at entry. Skip calling `task` entirely
@@ -49,46 +61,50 @@ export async function runWithCeiling<T>(
   // which is a no-op on an already-aborted signal, so the tool would hang.
   if (parentAbortSignal?.aborted) {
     clearTimeout(timer);
-    const reason =
-      parentAbortSignal.reason instanceof Error
-        ? parentAbortSignal.reason
-        : new Error(String(parentAbortSignal.reason ?? "parent aborted"));
-    return { ok: false, reason: "user-abort", error: reason };
+    return { ok: false, reason: "user-abort", error: parentAbortError() };
   }
 
   let parentAbortListener: (() => void) | undefined;
   if (parentAbortSignal) {
-    parentAbortListener = () =>
-      ceilingController.abort(parentAbortSignal.reason ?? new Error("parent aborted"));
+    parentAbortListener = () => {
+      const err = parentAbortError();
+      resolveInterruption({ ok: false, reason: "user-abort", error: err });
+      ceilingController.abort(err);
+    };
     parentAbortSignal.addEventListener("abort", parentAbortListener, { once: true });
   }
 
-  try {
-    const value = await task(ceilingController.signal);
-    return { ok: true, value };
-  } catch (err) {
-    if (ceilingFired) {
+  const taskOutcome = Promise.resolve()
+    .then(() => task(ceilingController.signal))
+    .then((value): ToolCeilingOutcome<T> => ({ ok: true, value }))
+    .catch((err): ToolCeilingOutcome<T> => {
+      if (ceilingFired) {
+        return {
+          ok: false,
+          reason: "ceiling",
+          error: new Error(
+            `tool execution exceeded global ceiling (${ceilingMs}ms): ${taskName}`,
+          ),
+        };
+      }
+      if (parentAbortSignal?.aborted) {
+        return {
+          ok: false,
+          reason: "user-abort",
+          error: err instanceof Error ? err : new Error(String(err)),
+        };
+      }
       return {
         ok: false,
-        reason: "ceiling",
-        error: new Error(
-          `tool execution exceeded global ceiling (${ceilingMs}ms): ${taskName}`,
-        ),
-      };
-    }
-    if (parentAbortSignal?.aborted) {
-      return {
-        ok: false,
-        reason: "user-abort",
+        reason: "error",
         error: err instanceof Error ? err : new Error(String(err)),
       };
-    }
-    return {
-      ok: false,
-      reason: "error",
-      error: err instanceof Error ? err : new Error(String(err)),
-    };
+    });
+
+  try {
+    return await Promise.race([taskOutcome, interruptionOutcome]);
   } finally {
+    interruptionSettled = true;
     clearTimeout(timer);
     if (parentAbortListener && parentAbortSignal) {
       parentAbortSignal.removeEventListener("abort", parentAbortListener);
