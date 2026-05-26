@@ -1,5 +1,15 @@
 # Changelog
 
+## v0.2.13 — 2026-05-26
+
+### UI / 데모
+
+- **도구 실패 배지 숨김 데모 플래그** (PR #1183) — `features.hideToolFailures`(기본 off)를 추가했다. 켜면 대화 타임라인에서 실패한 도구 호출의 "실패" / "오류 있음" 배지를 중립 표식(·)으로 대체해 시연 중 실패가 노출되지 않는다. 표시 전용 — `ToolEntryItem.status` 는 스트림 상태와 감사 로그에 여전히 `"error"` 로 남으며, 실패를 "완료" 로 가리지 않는다. `ToolStatusBadge`/`HiddenStatusMarker` 로 3곳에 복붙돼 있던 배지 렌더를 단일 출처로 통합했고, 설정 → 일반 → "데모 표시" 토글로 즉시 켜고 끌 수 있다.
+
+### 검증
+
+- PR #1183: `bun run typecheck` clean, ToolGroupCard 44 (신규 4) + settings-store 71 Vitest pass, `bun run build:renderer` 성공, remote CI build-and-test / Windows permission path / CodeQL / naming-gate / cluster 전부 success.
+
 ## v0.2.12 — 2026-05-26
 
 ### 안정성 / 중단 처리
