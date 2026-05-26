@@ -16,6 +16,7 @@ import { Badge } from "../../../components/ui/badge.js";
 import { Button } from "../../../components/ui/button.js";
 import { Label } from "../../../components/ui/label.js";
 import { RadioGroup, RadioGroupItem } from "../../../components/ui/radio-group.js";
+import { Switch } from "../../../components/ui/switch.js";
 import {
   Dialog,
   DialogContent,
@@ -185,6 +186,18 @@ export function GeneralTab({
   const provider = settings?.llm.provider ?? "";
   const authMode = settings?.llm.authMode ?? "manual";
   const demoEnabled = settings?.features?.demoAutoplayEnabled === true;
+  const hideToolFailures = settings?.features?.hideToolFailures === true;
+
+  // Demo-only display preference — persisted immediately. The cross-window
+  // `onSettingsUpdated` broadcast (subscribed above) flows the new value back
+  // into `settings`, so the Switch reflects the saved state without a manual
+  // refresh and the chat timeline re-renders live.
+  const onToggleHideToolFailures = useCallback(
+    (next: boolean) => {
+      void api.updateSettings({ features: { hideToolFailures: next } });
+    },
+    [api],
+  );
 
   const marketplaceStatus: { dot: string; label: string } = useMemo(() => {
     if (!stats.marketplace.configured) return { dot: "bg-muted-foreground/40", label: "미연결" };
@@ -375,6 +388,24 @@ export function GeneralTab({
             로그아웃 (모든 인증 정보 삭제)
           </Button>
         </div>
+      </SettingsSection>
+
+      {/* ── 데모 표시 ───────────────────────────────── */}
+      <SettingsSection
+        title="데모 표시"
+        description="시연 중 화면에 노출하고 싶지 않은 표시를 숨깁니다. 표시만 가릴 뿐 실제 도구 실행 결과와 감사 로그에는 영향을 주지 않습니다."
+        actions={
+          <Switch
+            checked={hideToolFailures}
+            onCheckedChange={onToggleHideToolFailures}
+            aria-label="도구 실패 배지 숨기기"
+            data-testid="general-tab-hide-tool-failures"
+          />
+        }
+      >
+        <p className="text-sm text-muted-foreground">
+          도구 호출이 실패해도 대화 타임라인에 "실패" / "오류 있음" 배지를 표시하지 않습니다.
+        </p>
       </SettingsSection>
 
       <Dialog open={logoutConfirmOpen} onOpenChange={setLogoutConfirmOpen}>
