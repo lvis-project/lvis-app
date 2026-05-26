@@ -1267,13 +1267,16 @@ export function App() {
     const COMPACT_ITEM_ID = "auto-compact-in-progress";
     if (isCompacting) {
       const isForceRecover = compactTriggerSource === "force-recover";
+      const isRateLimitRecover = compactTriggerSource === "rate-limit";
       statusUpsertPersistent({
         id: COMPACT_ITEM_ID,
-        severity: isForceRecover ? "warning" : "info",
+        severity: isForceRecover || isRateLimitRecover ? "warning" : "info",
         label: "컨텍스트",
         value: isForceRecover
           ? "자동 압축을 끄셨지만, context 한도 복구를 위해 1회 압축했습니다"
-          : "자동 압축 중...",
+          : isRateLimitRecover
+            ? "TPM 한도 복구를 위해 자동 압축 중..."
+            : "자동 압축 중...",
       });
     } else {
       statusRemovePersistent(COMPACT_ITEM_ID);
