@@ -12,7 +12,7 @@
  */
 import { describe, it, expect, vi, beforeEach } from "vitest";
 import { ConversationLoop } from "../conversation-loop.js";
-import type { GenericMessage } from "../llm/types.js";
+import type { GenericMessage, LLMProvider, StreamEvent } from "../llm/types.js";
 import { getModelPreflightThreshold, estimateMessagesTokens } from "../auto-compact.js";
 import { estimateRequestInputProjection } from "../request-input-projection.js";
 import {
@@ -101,6 +101,17 @@ function makeSyntheticContentTruncatedResult(messages: GenericMessage[]): import
     truncatedDir: "/tmp/lvis-truncated",
     truncatedCount: 2,
   };
+}
+
+class ScriptedProvider implements LLMProvider {
+  readonly vendor = "openai" as const;
+  private index = 0;
+
+  constructor(private readonly turns: StreamEvent[][]) {}
+
+  async *streamTurn(): AsyncIterable<StreamEvent> {
+    yield* this.turns[this.index++] ?? [];
+  }
 }
 
 /**
@@ -371,6 +382,162 @@ describe("runPreflightGuard — context-token secondary trigger", () => {
     expect(compactStartedCb).toHaveBeenCalledWith(
       expect.objectContaining({ triggerSource: "context-tokens" }),
     );
+  });
+});
+
+describe("queryLoop — rate-limit reactive compact", () => {
+  it("runs auto-compact when provider reports rate_limit_exceeded for TPM", async () => {
+    const settings = makeSettings(true, "gpt-5.4-mini", "openai");
+    const history: GenericMessage[] = [
+      { role: "user", content: "prior" },
+      { role: "assistant", content: "ok" },
+    ];
+    const mem = makeMemoryManager(history);
+    const loop = new ConversationLoop(makeDeps({ settingsService: settings, memoryManager: mem }));
+    loop.resetAndResume("sess-rate-limit");
+
+    const message =
+      "Rate limit reached for gpt-5.4-mini on tokens per min (TPM): Limit 200000, Used 161755, Requested 45096. Please try again in 2.055s.";
+    const provider = new ScriptedProvider([
+      [
+        {
+          type: "error",
+          error: message,
+          providerError: {
+            origin: "provider",
+            providerType: "tokens",
+            providerCode: "rate_limit_exceeded",
+            classification: "rate-limit",
+            messagePreview: message,
+            rateLimit: {
+              kind: "tokens-per-minute",
+              limit: 200_000,
+              used: 161_755,
+              requested: 45_096,
+              retryAfterSeconds: 2.055,
+            },
+          },
+        },
+      ],
+    ]);
+    (loop as unknown as { provider: LLMProvider }).provider = provider;
+    vi.mocked(compactWithBoundary).mockImplementationOnce(async ({ messages }) =>
+      makeSyntheticCompactResult(messages as GenericMessage[]),
+    );
+
+    const compactStartedCb = vi.fn();
+    const compactOccurredCb = vi.fn();
+    const errorCb = vi.fn();
+    const textDeltaCb = vi.fn();
+    const result = await loop.runTurn(
+      "trigger rate limit",
+      {
+        onCompactStarted: compactStartedCb,
+        onCompactOccurred: compactOccurredCb,
+        onError: errorCb,
+        onTextDelta: textDeltaCb,
+      },
+      undefined,
+      { inputOrigin: "user-keyboard" },
+    );
+
+    expect(compactWithBoundary).toHaveBeenCalledTimes(1);
+    expect(compactStartedCb).toHaveBeenCalledWith(
+      expect.objectContaining({ triggerSource: "rate-limit" }),
+    );
+    expect(compactOccurredCb).toHaveBeenCalledTimes(1);
+    expect(errorCb).not.toHaveBeenCalled();
+    expect(textDeltaCb).toHaveBeenCalledWith(expect.stringContaining("자동 압축"));
+    expect(result.text).toContain("압축된 컨텍스트");
+  });
+
+  it("does not compact for request-per-minute rate limits", async () => {
+    const settings = makeSettings(true, "gpt-5.4-mini", "openai");
+    const loop = new ConversationLoop(makeDeps({ settingsService: settings }));
+    loop.resetAndResume("sess-rpm");
+
+    const message = "Rate limit reached on requests per minute (RPM): Limit 100, Used 100, Requested 1.";
+    const provider = new ScriptedProvider([
+      [
+        {
+          type: "error",
+          error: message,
+          providerError: {
+            origin: "provider",
+            providerType: "requests",
+            providerCode: "rate_limit_exceeded",
+            classification: "rate-limit",
+            messagePreview: message,
+            rateLimit: { kind: "requests-per-minute", limit: 100, used: 100, requested: 1 },
+          },
+        },
+      ],
+    ]);
+    (loop as unknown as { provider: LLMProvider }).provider = provider;
+    vi.mocked(compactWithBoundary).mockResolvedValue(makeSyntheticCompactResult([]));
+
+    const errorCb = vi.fn();
+    await loop.runTurn(
+      "trigger rpm",
+      { onError: errorCb },
+      undefined,
+      { inputOrigin: "user-keyboard" },
+    );
+
+    expect(compactWithBoundary).not.toHaveBeenCalled();
+    expect(errorCb).toHaveBeenCalled();
+  });
+
+  it("does not repeat TPM reactive compact before a clean turn re-arms recovery", async () => {
+    const settings = makeSettings(true, "gpt-5.4-mini", "openai");
+    const loop = new ConversationLoop(makeDeps({ settingsService: settings }));
+    loop.resetAndResume("sess-repeat-tpm");
+
+    const message =
+      "Rate limit reached for gpt-5.4-mini on tokens per min (TPM): Limit 200000, Used 161755, Requested 45096. Please try again in 2.055s.";
+    const tpmError: StreamEvent = {
+      type: "error",
+      error: message,
+      providerError: {
+        origin: "provider",
+        providerType: "tokens",
+        providerCode: "rate_limit_exceeded",
+        classification: "rate-limit",
+        messagePreview: message,
+        rateLimit: {
+          kind: "tokens-per-minute",
+          limit: 200_000,
+          used: 161_755,
+          requested: 45_096,
+          retryAfterSeconds: 2.055,
+        },
+      },
+    };
+    const provider = new ScriptedProvider([[tpmError], [tpmError]]);
+    (loop as unknown as { provider: LLMProvider }).provider = provider;
+    vi.mocked(compactWithBoundary).mockImplementationOnce(async ({ messages }) =>
+      makeSyntheticCompactResult(messages as GenericMessage[]),
+    );
+
+    const firstErrorCb = vi.fn();
+    await loop.runTurn(
+      "first tpm",
+      { onError: firstErrorCb },
+      undefined,
+      { inputOrigin: "user-keyboard" },
+    );
+
+    const secondErrorCb = vi.fn();
+    await loop.runTurn(
+      "second tpm",
+      { onError: secondErrorCb },
+      undefined,
+      { inputOrigin: "user-keyboard" },
+    );
+
+    expect(compactWithBoundary).toHaveBeenCalledTimes(1);
+    expect(firstErrorCb).not.toHaveBeenCalled();
+    expect(secondErrorCb).toHaveBeenCalled();
   });
 });
 
