@@ -100,6 +100,15 @@ export interface ChatContextValue {
    * UI 에 일치시키기 위해 propagate.
    */
   activeVendor: LLMVendor;
+
+  /**
+   * Demo-only display flag (`features.hideToolFailures`). When true, ToolGroupCard
+   * rows suppress the "실패"/"오류 있음" badge so a failed tool reads as an ordinary
+   * row. Presentation only — tool.status stays "error" in state/audit. Sourced
+   * from `useHideToolFailures(api)` in App.tsx; consumed by ChatView, which passes
+   * it down to each ToolGroupCard as the `hideFailureStatus` prop.
+   */
+  hideToolFailures: boolean;
 }
 
 const ChatContext = createContext<ChatContextValue | null>(null);
