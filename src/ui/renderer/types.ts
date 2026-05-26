@@ -201,6 +201,11 @@ export type AppSettings = {
      * `nextRotationIndex` helpers.
      */
     demoAutoplayRotationIndex?: number;
+    /**
+     * Demo-only display flag — hides tool failure badges in the chat timeline.
+     * Main-process SOT: `src/data/settings-store.ts` `FeatureFlags.hideToolFailures`.
+     */
+    hideToolFailures?: boolean;
   };
 };
 
