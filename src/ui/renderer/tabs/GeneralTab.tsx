@@ -186,15 +186,32 @@ export function GeneralTab({
   const provider = settings?.llm.provider ?? "";
   const authMode = settings?.llm.authMode ?? "manual";
   const demoEnabled = settings?.features?.demoAutoplayEnabled === true;
-  const hideToolFailures = settings?.features?.hideToolFailures === true;
+  // Demo-only display preference. Mirrored into local state so the Switch
+  // flips on the click itself (optimistic), instead of waiting for the
+  // updateSettings round-trip + cross-window `onSettingsUpdated` broadcast to
+  // flow back into `settings`. Without this, a stale/slow settings snapshot
+  // leaves the controlled Switch visually stuck while the value still persists
+  // — which reads to the user as "the toggle doesn't click". The effect below
+  // reconciles the optimistic value with the authoritative one (initial load
+  // + cross-window edits). Matches the optimistic pattern in
+  // `useSettings.toggleThinking`.
+  const [hideToolFailures, setHideToolFailures] = useState(false);
+  useEffect(() => {
+    setHideToolFailures(settings?.features?.hideToolFailures === true);
+  }, [settings?.features?.hideToolFailures]);
 
-  // Demo-only display preference — persisted immediately. The cross-window
-  // `onSettingsUpdated` broadcast (subscribed above) flows the new value back
-  // into `settings`, so the Switch reflects the saved state without a manual
-  // refresh and the chat timeline re-renders live.
   const onToggleHideToolFailures = useCallback(
     (next: boolean) => {
-      void api.updateSettings({ features: { hideToolFailures: next } });
+      setHideToolFailures(next); // optimistic — reconciled by the effect above
+      void api.updateSettings({ features: { hideToolFailures: next } }).then((res) => {
+        // Revert the optimistic flip if the IPC explicitly rejected the patch.
+        // On success the broadcast re-affirms the same value via the effect, so
+        // there is nothing to do; this only guards the (currently unreachable
+        // for a features-only patch) error branch from leaving a stuck Switch.
+        if (res && typeof res === "object" && "ok" in res && res.ok === false) {
+          setHideToolFailures(!next);
+        }
+      });
     },
     [api],
   );
