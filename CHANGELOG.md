@@ -1,5 +1,29 @@
 # Changelog
 
+## v0.2.11 — 2026-05-26
+
+### TPM / 컨텍스트 안정화 (핵심)
+
+- **Eager 도구 노출 회귀 수정 + 플러그인 활성/비활성** (PR #1177) — tool-level deferral 기본-on 회귀(턴마다 ~12회 `tool_search` 디스커버리 라운드로 TPM 폭증)를 되돌려 활성 플러그인 도구 스키마를 다시 eager 로 노출한다. 빌트인은 항상 eager 이며 임계 카운트에서 제외하고, deferral 은 활성 plugin+MCP 도구 수 ≥ 200(`EAGER_TOOL_EXPOSURE_CEILING`) 일 때만 동작한다. 설치/삭제만 있던 플러그인에 활성/비활성 상태를 도입했고(비활성 플러그인은 로드 유지·모델 노출만 차단·실행은 어댑터에서 fail-closed, sub-agent 경로 포함), 세션 TO-DO 의 no-op 재마킹 루프(이미 in_progress 인 항목 반복 갱신)를 차단하고 같은-메시지 도구 호출 순서를 결정적으로 보장한다.
+- **TPM 429 bounded auto-compact 복구** (PR #1178) — provider diagnostics 가 `rate_limit_exceeded` 를 tokens-per-minute(TPM) 실패로 식별하면 대화를 1회 자동 압축해 라운드당 요청 크기를 줄여 복구한다. RPM(요청/분) 한도는 정상 에러 경로를 유지하고, 에러 시리즈당 1회 + clean turn 후에만 re-arm 하는 가드로 반복 429 가 compact 를 증폭하지 못하게 막는다.
+- **gpt-5.4-mini TPM-aware preflight** (PR #1174) — `gpt-5.4-mini` 의 `tpmDefault=200K` 를 등록해 preflight 압축 판단이 TPM 한도를 인지하도록 했다.
+- **Intra-turn tool-result stubbing** (PR #1172) — tool-call 라운드 사이에 직전 tool result 를 stub 으로 치환해 결과-heavy 턴의 누적 입력 토큰을 줄인다.
+
+### 스트리밍 / 렌더링
+
+- **스트림 종료 후 최종 답변 안정화** (PR #1173) — 스트림 closure 이후 final answer 가 흔들리지 않도록 고정하고, provider stream 실패를 request diagnostics 로 노출한다. 대용량 히스토리에서 streaming 중 render boundary / latency 회귀 가드를 추가했다.
+
+### 개발 도구
+
+- **dev 전용 system-prompt per-source 크기 계측** (PR #1175) — `LVIS_DEV_PROMPT_SOURCE_DUMP` 로 12-source 프롬프트의 소스별 토큰 크기를 측정한다.
+
+### 검증
+
+- PR #1177: 3-agent cluster review GO (architect/critic/security, MAJOR 0), `bun run typecheck`/`build`, plugins/boot 843 + 전체 스위트 6194 pass.
+- PR #1178: engine/renderer/coverage multi-agent review, focused Vitest + 470 files / 6200 pass, `bun run typecheck`/`build`, CI CLEAN.
+
+---
+
 ## v0.2.10 — 2026-05-25
 
 ### 안정성 / 모델 도구 노출
