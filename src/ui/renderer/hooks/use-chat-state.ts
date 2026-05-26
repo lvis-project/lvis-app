@@ -37,7 +37,7 @@ export function useChatState(api: LvisApi) {
   const [isCompacting, setIsCompacting] = useState(false);
   /** triggerSource of the most recent compact_started event — used to render
    *  the force-recover OFF-override banner (#916). Reset to null on compact_notice / done. */
-  const [compactTriggerSource, setCompactTriggerSource] = useState<"estimate" | "context-tokens" | "manual" | "force-recover" | null>(null);
+  const [compactTriggerSource, setCompactTriggerSource] = useState<"estimate" | "context-tokens" | "manual" | "force-recover" | "rate-limit" | null>(null);
   /** True once recovery_exhausted fires — compact cannot reduce context (#917).
    *  Cleared on clearForNewChat. */
   const [isRecoveryExhausted, setIsRecoveryExhausted] = useState(false);
@@ -302,6 +302,7 @@ export function useChatState(api: LvisApi) {
         // LLM compact may have started but thrown — clear the indicator
         // so the StatusBar item doesn't stick when compact_notice never arrives.
         setIsCompacting(false);
+        setCompactTriggerSource(null);
         setEntries((p) =>
           setAssistantError(
             dropPermissionReviewEntries(p),
