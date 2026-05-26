@@ -730,6 +730,48 @@ describe("ToolGroupCard", () => {
   });
 });
 
+describe("ToolGroupCard — hideFailureStatus (demo flag)", () => {
+  function makeErrorGroup(): ToolGroupEntry {
+    return makeGroup({
+      status: "error",
+      tools: [
+        { toolUseId: "tu-err", name: "read_file", input: {}, result: "boom", status: "error", displayOrder: 0 },
+      ],
+    });
+  }
+
+  it("default (flag off): a failed single tool shows the 실패 badge", () => {
+    const { container } = render(<ToolGroupCard group={makeErrorGroup()} />);
+    expect(container.textContent).toContain("실패");
+    expect(container.querySelector('[data-testid="tool-status-hidden"]')).toBeNull();
+  });
+
+  it("flag on: a failed single tool hides 실패 and shows the neutral marker", () => {
+    const { container } = render(<ToolGroupCard group={makeErrorGroup()} hideFailureStatus />);
+    expect(container.textContent).not.toContain("실패");
+    expect(container.querySelector('[data-testid="tool-status-hidden"]')).not.toBeNull();
+  });
+
+  it("flag on: a successful tool is unaffected (still shows 완료)", () => {
+    const { container } = render(<ToolGroupCard group={makeGroup({ status: "done" })} hideFailureStatus />);
+    expect(container.textContent).toContain("완료");
+    expect(container.querySelector('[data-testid="tool-status-hidden"]')).toBeNull();
+  });
+
+  it("flag on: a group with an error hides the 오류 있음 header badge", () => {
+    const group = makeMultiGroup({
+      status: "error",
+      tools: [
+        { toolUseId: "tu-1", name: "knowledge_search", input: {}, result: "r1", status: "done", displayOrder: 0 },
+        { toolUseId: "tu-2", name: "read_file", input: {}, result: "boom", status: "error", displayOrder: 1 },
+      ],
+    });
+    const { container } = render(<ToolGroupCard group={group} hideFailureStatus />);
+    expect(container.textContent).not.toContain("오류 있음");
+    expect(container.querySelector('[data-testid="tool-status-hidden"]')).not.toBeNull();
+  });
+});
+
 afterEach(() => {
   vi.unstubAllGlobals();
 });

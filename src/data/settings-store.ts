@@ -131,6 +131,14 @@ export interface FeatureFlags {
    * dedicated namespace for one counter.
    */
   demoAutoplayRotationIndex?: number;
+  /**
+   * Demo-only display preference. When `true`, the chat timeline suppresses
+   * the per-tool failure pill ("실패") and the group-level "오류 있음" pill so
+   * a failed tool call reads as an ordinary row (name + duration only). This
+   * is a *presentation* flag: `ToolEntryItem.status` stays `"error"` in stream
+   * state and the audit log — only the badge is hidden. Default false.
+   */
+  hideToolFailures?: boolean;
 }
 
 export interface AppSettings {
@@ -442,6 +450,7 @@ const DEFAULT_SETTINGS: AppSettings = {
     // chain. Any other path that wants to suppress the chain must set
     // this to `true` deliberately — no "missing key === skipped" trap.
     onboardingCompleted: false,
+    hideToolFailures: false,
   },
 };
 
@@ -1097,6 +1106,9 @@ function normalizeFeatureFlags(input: unknown): FeatureFlags {
   }
   if (typeof obj.demoAutoplayEnabled === "boolean") {
     result.demoAutoplayEnabled = obj.demoAutoplayEnabled;
+  }
+  if (typeof obj.hideToolFailures === "boolean") {
+    result.hideToolFailures = obj.hideToolFailures;
   }
   // Tutorial-X3 — accept the int rotation index; drop NaN / non-finite
   // values so a corrupted on-disk state never crashes the autoplay path.
