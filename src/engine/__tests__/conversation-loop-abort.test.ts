@@ -7,9 +7,10 @@ import type { LLMProvider, StreamEvent } from "../llm/types.js";
 import { KeywordEngine } from "../../core/keyword-engine.js";
 import { RouteEngine } from "../../core/route-engine.js";
 import { ToolRegistry } from "../../tools/registry.js";
+import { createDynamicTool } from "../../tools/base.js";
 import { fakeLlmSettings } from "../../shared/__tests__/fake-llm-settings.js";
 
-function makeLoop(): ConversationLoop {
+function makeHarness(): { loop: ConversationLoop; toolRegistry: ToolRegistry } {
   const toolRegistry = new ToolRegistry();
   const keywordEngine = new KeywordEngine();
   const routeEngine = new RouteEngine({ toolRegistry });
@@ -26,7 +27,11 @@ function makeLoop(): ConversationLoop {
     memoryManager: { saveSession: () => {}, listSessions: () => [] },
   } as unknown) as ConstructorParameters<typeof ConversationLoop>[0]);
 
-  return loop;
+  return { loop, toolRegistry };
+}
+
+function makeLoop(): ConversationLoop {
+  return makeHarness().loop;
 }
 
 describe("ConversationLoop currentAbortController lifecycle", () => {
@@ -130,6 +135,52 @@ describe("ConversationLoop abort (B4)", () => {
     const result = await loop.runTurn("go", undefined, ac.signal, { inputOrigin: "user-keyboard" });
     expect(result.stopReason).toBe("interrupted");
     expect(toolExecuted).toBe(false);
+  });
+
+  it("abort during tool execution records cancelled tool_result and stops before another LLM round", async () => {
+    const { loop, toolRegistry } = makeHarness();
+    let streamCalls = 0;
+    let toolEntered = false;
+
+    toolRegistry.register(createDynamicTool({
+      name: "stuck_tool",
+      description: "A tool that ignores abort for regression coverage.",
+      source: "builtin",
+      category: "read",
+      isReadOnly: () => true,
+      jsonSchema: { type: "object", properties: {} },
+      execute: async () => {
+        toolEntered = true;
+        loop.abortCurrentTurn();
+        return new Promise<never>(() => {});
+      },
+    }));
+
+    (loop as { provider: LLMProvider }).provider = {
+      vendor: "openai" as const,
+      async *streamTurn(): AsyncIterable<StreamEvent> {
+        streamCalls += 1;
+        yield { type: "tool_call", id: "t1", name: "stuck_tool", input: {} } as StreamEvent;
+        yield { type: "message_complete", stopReason: "tool_use" } as StreamEvent;
+      },
+    };
+
+    const textDeltas: string[] = [];
+    const result = await loop.runTurn("go", {
+      onTextDelta: (delta) => textDeltas.push(delta),
+    }, undefined, { inputOrigin: "user-keyboard" });
+
+    expect(toolEntered).toBe(true);
+    expect(streamCalls).toBe(1);
+    expect(result.stopReason).toBe("interrupted");
+    expect(result.text).toBe("[중단됨]");
+    expect(textDeltas.join("")).toContain("[중단됨]");
+
+    const history = loop.getHistory().getMessages();
+    const toolResult = history.find((message) => message.role === "tool_result");
+    expect(toolResult?.content).toContain("취소");
+    const lastAssistant = history.filter((message) => message.role === "assistant").at(-1);
+    expect(lastAssistant?.content).toBe("[중단됨]");
   });
 
   it("abort after stream complete → no-op, normal result", async () => {
