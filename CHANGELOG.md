@@ -1,5 +1,16 @@
 # Changelog
 
+## v0.2.12 — 2026-05-26
+
+### 안정성 / 중단 처리
+
+- **툴 실행 중 사용자 중단 지원** (PR #1180) — `abortCurrentTurn()` 이 provider stream 에만 머물지 않고 tool executor 까지 전파되도록 정렬했다. 비협조 툴이 `abortSignal` 을 무시해도 `runWithCeiling()` 이 사용자 중단/ceiling 에서 즉시 반환하고, 이미 취소된 후속 tool call 은 훅/권한 단계 전에 취소 `tool_result` 로 닫는다.
+- **Tool-result pair 보존 후 턴 종료** (PR #1180) — tool 실행 중 중단되면 취소 `tool_result` 를 history 에 남긴 뒤 다음 LLM round 로 재진입하지 않고 `[중단됨]` 으로 턴을 종료한다. OpenAI/Anthropic strict tool_use/tool_result pair invariant 를 유지하면서 사용자는 즉시 중단 완료를 확인할 수 있다.
+
+### 검증
+
+- PR #1180: focused Vitest 3 files, `bun run typecheck`, `bun run build`, pre-push full Vitest 470 files / 6204 pass / 13 skipped, remote CI / Windows permission path / CodeQL / naming / cluster success, Copilot inline comments 0.
+
 ## v0.2.11 — 2026-05-26
 
 ### TPM / 컨텍스트 안정화 (핵심)
