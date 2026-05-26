@@ -1415,6 +1415,47 @@ describe("ToolExecutor — D4 ordered approval/execution (§4.5.3)", () => {
     expect(spy2).not.toHaveBeenCalled();
   }, 10000);
 
+  it("이미 취소된 turn signal이면 후속 도구를 훅/권한 전에 취소 결과로 닫음", async () => {
+    const spy1 = vi.fn(async () => "should-not-run");
+    const spy2 = vi.fn(async () => "should-not-run");
+
+    const registry = new ToolRegistry();
+    registry.register(makeGenericTool("tool_cancel_a", spy1));
+    registry.register(makeGenericTool("tool_cancel_b", spy2));
+
+    const executor = new ToolExecutor(registry);
+    const ac = new AbortController();
+    ac.abort(new Error("user cancelled"));
+
+    const events: string[] = [];
+    const results = await executor.executeAll(
+      [
+        { id: "cancel-1", name: "tool_cancel_a", input: { value: "a" } },
+        { id: "cancel-2", name: "tool_cancel_b", input: { value: "b" } },
+      ],
+      {
+        abortSignal: ac.signal,
+        permissionContext: userPermissionContext(),
+        callbacks: {
+          onToolStart: (name) => events.push(`start:${name}`),
+          onToolEnd: (name, result, isError) => events.push(`end:${name}:${isError}:${result}`),
+        },
+      },
+    );
+
+    expect(spy1).not.toHaveBeenCalled();
+    expect(spy2).not.toHaveBeenCalled();
+    expect(results).toHaveLength(2);
+    expect(results.every((result) => result.is_error === true)).toBe(true);
+    expect(results.every((result) => result.content.includes("취소"))).toBe(true);
+    expect(events).toEqual([
+      "start:tool_cancel_a",
+      "end:tool_cancel_a:true:도구 실행이 취소되었습니다.",
+      "start:tool_cancel_b",
+      "end:tool_cancel_b:true:도구 실행이 취소되었습니다.",
+    ]);
+  });
+
   it("선택적 승인 — 하나 허용, 하나 거부", async () => {
     const spyAllow = vi.fn(async () => "allowed-result");
     const spyDeny = vi.fn(async () => "denied-result");
