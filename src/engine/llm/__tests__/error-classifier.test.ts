@@ -46,16 +46,15 @@ describe("classifyProviderError", () => {
   });
 
   // Regression lock — issue #900. OpenAI 의 "Request too large for ...
-  // Limit 200,000, Requested 271,630" (TPM 초과) 메시지가 *대화 길이*
-  // 가 아닌 *분당 처리량* 한도라 자동 압축으로 해결 안 됨. 기존 분류
-  // 가 context-length 의 "too many tokens" 패턴에 잘못 매치되던 회귀.
+  // Limit 200,000, Requested 271,630" (TPM 초과) 메시지가 context-length
+  // 의 "too many tokens" 패턴에 잘못 매치되던 회귀.
   describe("issue #900 — TPM rate-limit vs context-length distinction", () => {
     it("OpenAI 'Request too large' (TPM 형식) classifies as rate-limit, NOT context-length", () => {
       const raw = "Request too large for gpt-5.4-nano in organization org-xxx on tokens per minute (TPM): Limit 200000, Requested 271630.";
       const result = classifyProviderError(raw);
       expect(result.category).toBe("rate-limit");
-      expect(result.userMessage).toContain("TPM");
-      expect(result.userMessage).toContain("자동 압축으로 해결되지 않습니다");
+      expect(result.userMessage).toContain("분당 처리 한도");
+      expect(result.userMessage).not.toContain("context");
     });
 
     it("'tokens per minute' phrase alone classifies as rate-limit", () => {

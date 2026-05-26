@@ -29,13 +29,13 @@ export function classifyProviderError(raw: string): ClassifiedError {
 
   // Order matters: rate-limit FIRST. OpenAI 의 "Request too large for ...
   // Limit 200,000, Requested 271,630" (TPM 초과) 메시지가 context-length
-  // 패턴의 "too many tokens" 에 잘못 매치되어 *자동 압축* 으로 처리되던
-  // 문제. TPM 초과는 대화 길이가 아닌 분당 처리량 한도라 압축이 해결
-  // 못함 (issue #900).
+  // 패턴의 "too many tokens" 에 잘못 매치되면 원인 분리가 흐려진다.
+  // reactive auto-compact 여부는 provider error diagnostics 의
+  // rate_limit_exceeded + tokens-per-minute code path 에서 결정한다.
   if (/rate_limit|429|too many requests|requests per minute|tokens per minute|tpm|rpm|request too large|too large for/.test(lower)) {
     return {
       category: "rate-limit",
-      userMessage: "분당 처리 한도(TPM) 초과 — 잠시 후 재시도하거나, 더 작은 메시지/첨부로 시도하세요. (이 한도는 *대화 길이* 가 아닌 *분당 토큰 처리량* 이므로 자동 압축으로 해결되지 않습니다.)",
+      userMessage: "분당 처리 한도 초과 — 잠시 후 재시도하세요. 세부 한도와 재시도 시점은 provider diagnostics 를 확인하세요.",
       rawError: raw,
     };
   }

@@ -371,6 +371,21 @@ describe("useChatState — compact lifecycle scenarios", () => {
     expect(result.current.compactTriggerSource).toBe("force-recover");
   });
 
+  it("S12b: compact_started with triggerSource=rate-limit exposes compactTriggerSource", () => {
+    const { api, streamHandler } = makeCapturedApi();
+    const { result } = renderHook(() => useChatState(api));
+
+    dispatchEvent(streamHandler, {
+      type: "compact_started",
+      triggerSource: "rate-limit",
+      estimatedBefore: 45_096,
+      preflight: 0,
+    } as StreamEvent);
+
+    expect(result.current.isCompacting).toBe(true);
+    expect(result.current.compactTriggerSource).toBe("rate-limit");
+  });
+
   it("S13 (#916): compact_notice clears compactTriggerSource", () => {
     const { api, streamHandler } = makeCapturedApi();
     const { result } = renderHook(() => useChatState(api));
@@ -407,6 +422,25 @@ describe("useChatState — compact lifecycle scenarios", () => {
 
     dispatchEvent(streamHandler, { type: "done" } as StreamEvent);
 
+    expect(result.current.compactTriggerSource).toBeNull();
+  });
+
+  it("S14b: error event clears compactTriggerSource defensively", () => {
+    const { api, streamHandler } = makeCapturedApi();
+    const { result } = renderHook(() => useChatState(api));
+
+    dispatchEvent(streamHandler, {
+      type: "compact_started",
+      triggerSource: "rate-limit",
+      estimatedBefore: 45_096,
+      preflight: 0,
+    } as StreamEvent);
+
+    expect(result.current.compactTriggerSource).toBe("rate-limit");
+
+    dispatchEvent(streamHandler, { type: "error", error: "compact failed" } as StreamEvent);
+
+    expect(result.current.isCompacting).toBe(false);
     expect(result.current.compactTriggerSource).toBeNull();
   });
 
