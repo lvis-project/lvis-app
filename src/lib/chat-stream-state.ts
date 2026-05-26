@@ -64,7 +64,7 @@ export type StreamEvent = {
    * `compact_notice` (completion). Allows showing a "자동 압축 중..." indicator
    * during the blocking LLM compaction call.
    */
-  triggerSource?: "estimate" | "context-tokens" | "manual" | "force-recover";
+  triggerSource?: "estimate" | "context-tokens" | "manual" | "force-recover" | "rate-limit";
   /**
    * `recovery_exhausted` event — emitted when force-recover budget is fully
    * consumed (#917). Renderer surfaces a persistent banner informing the user

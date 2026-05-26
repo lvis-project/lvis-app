@@ -332,7 +332,7 @@ export interface TurnCallbacks {
    * which fires on completion.
    */
   onCompactStarted?: (info: {
-    triggerSource: "estimate" | "context-tokens" | "manual" | "force-recover";
+    triggerSource: CompactTriggerSource;
     estimatedBefore: number;
     preflight: number;
   }) => void;
@@ -584,6 +584,12 @@ const INTRA_TURN_PRESERVE_RECENT_RESULTS = 2 * MAX_TOOL_CALLS_PER_ROUND;
 // so short turns don't pay the mark overhead.
 const MICRO_COMPACT_FLOOR_FACTOR = 0.5;
 
+type CompactTriggerSource = "estimate" | "context-tokens" | "manual" | "force-recover" | "rate-limit";
+
+interface PreflightGuardOptions {
+  forceReason?: "rate-limit";
+}
+
 /** Lazy Tool Scoping — 매 턴 LLM에 노출할 도구 집합 정의. */
 interface ToolScope {
   activePluginIds: Set<string>;
@@ -758,6 +764,12 @@ export class ConversationLoop {
    * 정상 turn (context_error 없이 완료) 이후 re-arm 가능하도록 reset.
    */
   private recoveryExhausted: boolean = false;
+  /**
+   * TPM reactive compact is an error-boundary recovery, not a normal threshold
+   * trigger. Try it once per error series and re-arm only after a clean turn so
+   * repeated 429 responses cannot amplify compact API calls.
+   */
+  private rateLimitRecoveryAttempted: boolean = false;
   /**
    * "Guide" utterance buffer — mid-stream direction adjustments that the
    * user typed while a turn is in flight. Drained at each round boundary in
@@ -1084,6 +1096,36 @@ export class ConversationLoop {
     };
   }
 
+  private shouldAutoCompactForRateLimit(stream: {
+    classification: string;
+    providerError: {
+      providerType?: string;
+      providerCode?: string;
+      rateLimit?: { kind: "tokens-per-minute" | "requests-per-minute" | "unknown" };
+    };
+  }): boolean {
+    const providerCode = stream.providerError.providerCode;
+    const providerType = stream.providerError.providerType;
+    const rateLimitKind = stream.providerError.rateLimit?.kind;
+    return (
+      stream.classification === "rate-limit" &&
+      providerCode === "rate_limit_exceeded" &&
+      (providerType === "tokens" || rateLimitKind === "tokens-per-minute")
+    );
+  }
+
+  private rateLimitCompactMessage(stream: {
+    providerError: {
+      rateLimit?: { retryAfterSeconds?: number };
+    };
+  }): string {
+    const retryAfter = stream.providerError.rateLimit?.retryAfterSeconds;
+    const waitText = retryAfter !== undefined && Number.isFinite(retryAfter)
+      ? ` 약 ${Math.ceil(retryAfter)}초 후 같은 요청을 다시 보내면`
+      : " 잠시 후 같은 요청을 다시 보내면";
+    return `분당 토큰 처리 한도(TPM)에 도달해 대화를 자동 압축했습니다.${waitText} 압축된 컨텍스트로 이어서 처리됩니다.`;
+  }
+
   /** 대화 이력 초기화 (새 대화) — §4.5.7 */
   newConversation(kind: SessionKind = "main"): void {
     if (this.history.length > 0) {
@@ -1110,6 +1152,7 @@ export class ConversationLoop {
     this.sessionToolSearches = 0;
     this.lastTurnToolNames = null;
     this.compactNum = 0;
+    this.rateLimitRecoveryAttempted = false;
     this.tracer = createTracer(this.sessionId);
     // Clear rolling summary preamble for fresh session.
     this.deps.systemPromptBuilder.setSummaryPreamble?.(null);
@@ -1395,6 +1438,7 @@ export class ConversationLoop {
     };
     this.lastRoundProviderInputTokens = 0;
     this.lastRoundInputProjection = null;
+    this.rateLimitRecoveryAttempted = false;
 
     return {
       ok: true,
@@ -2029,18 +2073,23 @@ export class ConversationLoop {
 
     callbacks?.onTurnComplete?.(result.text);
 
-    // Issue #917 — re-arm recovery budget after a clean turn. If the turn
-    // completed without a context_error / stream_error the structural failure
-    // that exhausted the budget is resolved; allow force-recover to trigger
-    // again on the next error series.
+    // Re-arm recovery budgets after a clean turn. If the turn completed
+    // without a context_error / stream_error, the structural failure that
+    // exhausted force-recover or TPM recovery is resolved.
     if (
       result.stopReason !== "context-error" &&
       result.stopReason !== "stream-error" &&
-      this.recoveryExhausted
+      (this.recoveryExhausted || this.rateLimitRecoveryAttempted)
     ) {
+      const wasRecoveryExhausted = this.recoveryExhausted;
       this.recoveryExhausted = false;
       this.contextErrorRecoveryCount = 0;
-      log.info("runTurn: recoveryExhausted reset — clean turn, recovery re-armed");
+      this.rateLimitRecoveryAttempted = false;
+      log.info(
+        wasRecoveryExhausted
+          ? "runTurn: recoveryExhausted reset — clean turn, recovery re-armed"
+          : "runTurn: rate-limit recovery reset — clean turn, recovery re-armed",
+      );
     }
 
     // Issue #260 — fire system notification on turn-end. Skip if the turn
@@ -2380,6 +2429,41 @@ export class ConversationLoop {
           `queryLoop: EARLY-EXIT(stream-error) — round=${roundIndex} userMessage="${stream.userMessage.slice(0, 100)}"`,
         );
         this.tracer.step("LLM_STREAM_ERROR", streamErrorMeta);
+        if (
+          this.shouldAutoCompactForRateLimit(stream) &&
+          !this.rateLimitRecoveryAttempted &&
+          this.provider &&
+          !this.deps.disableSessionPersistence
+        ) {
+          this.rateLimitRecoveryAttempted = true;
+          const compacted = await this.runPreflightGuard(
+            {
+              systemPrompt,
+              toolSchemas,
+              estimateCurrent: () => this.estimateCurrentRequestProjection({
+                systemPrompt,
+                toolSchemas,
+              }),
+            },
+            abortSignal,
+            callbacks,
+            { forceReason: "rate-limit" },
+          );
+          if (compacted) {
+            const recoveredMessage = this.rateLimitCompactMessage(stream);
+            callbacks?.onTextDelta?.(recoveredMessage);
+            this.history.append({
+              role: "assistant",
+              content: recoveredMessage,
+            });
+            return withServingIdentity({
+              text: recoveredMessage,
+              toolCalls: allToolCalls,
+              usage: turnUsage,
+              stopReason: "stream-error",
+            });
+          }
+        }
         callbacks?.onError?.(stream.userMessage, "stream-error");
         this.history.append({
           role: "assistant",
@@ -3148,6 +3232,7 @@ export class ConversationLoop {
     projectionContext: RequestProjectionContext,
     abortSignal?: AbortSignal,
     callbacks?: TurnCallbacks,
+    options?: PreflightGuardOptions,
   ): Promise<boolean> {
     // Issue #910 follow-up — prior turn ended with context_error / stream_error
     // and the user-facing message promised auto-compact on the next send.
@@ -3165,6 +3250,7 @@ export class ConversationLoop {
     // hitting the limit) and further attempts just multiply API cost.
     const overRecoveryBudget = this.contextErrorRecoveryCount >= MAX_FORCE_RECOVER_PER_SESSION;
     const forceRecover = this.contextErrorPending && !overRecoveryBudget;
+    const forceRateLimit = options?.forceReason === "rate-limit";
     if (this.contextErrorPending && overRecoveryBudget) {
       log.warn(
         `preflight: force-recover BUDGET EXHAUSTED (count=${this.contextErrorRecoveryCount}/${MAX_FORCE_RECOVER_PER_SESSION}) — blocking all compact API calls`,
@@ -3183,7 +3269,7 @@ export class ConversationLoop {
       log.warn("preflight: recoveryExhausted — all compact API calls blocked until normal turn completes");
       return false;
     }
-    if (!forceRecover && !this.isAutoCompactEnabled()) {
+    if (!forceRecover && !forceRateLimit && !this.isAutoCompactEnabled()) {
       log.debug("runPreflightGuard: skipped (autoCompact 설정 OFF)");
       return false;
     }
@@ -3197,7 +3283,7 @@ export class ConversationLoop {
     const provider = llmSettings.provider;
     const model = llmSettings.vendors[provider].model;
     const preflight = getModelPreflightThreshold(provider, model);
-    if (!forceRecover && preflight <= 0) return false;
+    if (!forceRecover && !forceRateLimit && preflight <= 0) return false;
 
     const messagesBefore = this.history.getMessages();
     const requestProjection = estimateRequestInputProjection({
@@ -3216,12 +3302,14 @@ export class ConversationLoop {
     const contextTokensIn = this.lastContextInputTokens > 0
       ? this.lastContextInputTokens + pendingInputDelta
       : estimated;
-    if (!forceRecover && estimated < preflight && contextTokensIn < preflight) return false;
-    const triggerSource: "estimate" | "context-tokens" | "force-recover" = forceRecover
+    if (!forceRecover && !forceRateLimit && estimated < preflight && contextTokensIn < preflight) return false;
+    const triggerSource: Exclude<CompactTriggerSource, "manual"> = forceRecover
       ? "force-recover"
-      : estimated >= preflight
-        ? "estimate"
-        : "context-tokens";
+      : forceRateLimit
+        ? "rate-limit"
+        : estimated >= preflight
+          ? "estimate"
+          : "context-tokens";
 
     this.isCompacting = true;
     // Notify renderer immediately so it can show a "자동 압축 중..." indicator
@@ -3240,12 +3328,13 @@ export class ConversationLoop {
       // compactWithBoundary 가 최근 5 user turn (+ 현재 pending user question)
       // 을 verbatim 보존한다.
       //
-      // forceRecover (context_error pending) 도 동일하게 preserve=0 — provider 가
+      // forceRecover (context_error pending) 및 rate-limit 복구도 동일하게
+      // preserve=0 — provider 가
       // 직접 거부한 상황이므로 보수적 preserve 가 의미 없음. 약속한 compact
       // 를 가장 공격적으로 수행하는 게 사용자 약속 정합.
       const preflightPressure = Math.max(estimated, contextTokensIn);
       const usagePct = preflight > 0 ? preflightPressure / preflight : 0;
-      const basePreserveRecentTokens = forceRecover || usagePct >= 1.0
+      const basePreserveRecentTokens = forceRecover || forceRateLimit || usagePct >= 1.0
         ? 0
         : usagePct >= 0.8
           ? Math.max(1_000, Math.floor(preflight * 0.2))
