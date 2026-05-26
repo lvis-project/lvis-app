@@ -1,5 +1,15 @@
 # Changelog
 
+## v0.2.14 — 2026-05-27
+
+### UI / 설정
+
+- **데모 표시 토글 optimistic 전환** (PR #1185) — `features.hideToolFailures` 스위치가 순수 controlled 라 `updateSettings → onSettingsUpdated` broadcast 왕복이 끝나야 움직였고, stale/느린 설정 snapshot 에선 값은 저장되는데 스위치가 시각적으로 멈춰 "클릭이 안 되는" 것처럼 보였다. 클릭 즉시 로컬 state 로 전환(optimistic)하고 authoritative `settings` 값과 effect 로 reconcile, IPC 에러 시 revert 한다. `useSettings.toggleThinking` 와 동일 패턴.
+
+### 검증
+
+- PR #1185: 3-agent 검증 루프(correctness / architecture / test) GO MAJOR=0, `bun run typecheck` + `build:renderer`, 신규 e2e (flip + persist + reopen reflection) pass, remote CI build-and-test / Windows permission path / CodeQL / naming-gate / cluster 전부 success.
+
 ## v0.2.13 — 2026-05-26
 
 ### UI / 데모
