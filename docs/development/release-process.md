@@ -56,10 +56,11 @@ Build Installers workflow 완료 후:
 gh release view vX.Y.Z -R lvis-project/lvis-app --json assets -q '[.assets[].name]'
 ```
 
-**기대 asset (11종, v0.2.1 기준)**:
+**기대 asset (23종 = version/update metadata 13 + stable alias 10)**:
 - Linux: `LVIS-X.Y.Z-linux-amd64.deb`, `LVIS-X.Y.Z-linux-x86_64.AppImage`, `LVIS-X.Y.Z-linux-x86_64.rpm`, `latest-linux.yml`
-- Mac arm64: `LVIS-X.Y.Z-mac-arm64.dmg` + `.blockmap`, `LVIS-X.Y.Z-mac-arm64.zip`, `latest-mac.yml`
-- Windows: `LVIS-X.Y.Z-windows-x64-setup.exe`, `LVIS-X.Y.Z-win-x64.zip`, `latest.yml`
+- Mac arm64: `LVIS-X.Y.Z-mac-arm64.dmg` + `.blockmap`, `LVIS-X.Y.Z-mac-arm64.zip` + `.blockmap`, `latest-mac.yml`
+- Windows: `LVIS-X.Y.Z-windows-x64-setup.exe` + `.blockmap`, `LVIS-X.Y.Z-win-x64.zip`, `latest.yml`
+- Stable website aliases: matching `LVIS-latest-*` copies for each installer/archive and `.blockmap`.
 
 ### 6. Release body + publish
 

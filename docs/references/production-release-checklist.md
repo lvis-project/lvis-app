@@ -79,7 +79,9 @@ changing artifact compression or size.
 For all three platforms, use the **Build Installers** GitHub Actions workflow.
 It runs the same `scripts/build-installers.mjs` entrypoint on macOS, Linux,
 and Windows runners so native dependencies and installer tooling are resolved
-on the target OS instead of relying on cross-platform packaging.
+on the target OS instead of relying on cross-platform packaging. The publish
+job also attaches `LVIS-latest-*` stable alias assets for the website download
+links; do not publish a release that only has versioned `LVIS-X.Y.Z-*` assets.
 
 ## Smoke-Test Checklist
 
