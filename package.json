@@ -105,7 +105,7 @@
     "clsx": "^2.1.1",
     "cmdk": "^1.1.1",
     "date-fns": "^4.1.0",
-    "electron": "^41.2.0",
+    "electron": "^42.3.0",
     "electron-builder": "26.11.1",
     "eruda": "^3.4.3",
     "esbuild": "^0.28.0",
