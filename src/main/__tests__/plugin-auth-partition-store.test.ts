@@ -10,7 +10,7 @@
  */
 import { describe, expect, it, vi, beforeEach, afterEach } from "vitest";
 import { mkdtempSync } from "node:fs";
-import { rm, writeFile, mkdir } from "node:fs/promises";
+import { rm, writeFile, mkdir, unlink } from "node:fs/promises";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
 import {
@@ -187,12 +187,11 @@ describe("write queue — concurrency safety", () => {
   });
 
   it("write queue recovers after transient I/O error — subsequent write succeeds", async () => {
-    const { chmod } = await import("node:fs/promises");
-
-    // Create the plugins dir and make it non-writable to force a real EACCES.
+    // Block the plugins directory path with a regular file. This forces a real
+    // mkdir/write failure on Windows and POSIX; chmod-based permission tests
+    // are not portable across Windows developer shells.
     const dir = join(tmpHome, "plugins");
-    await mkdir(dir, { recursive: true });
-    await chmod(dir, 0o500); // r-x: mkdir+writeFile inside will fail
+    await writeFile(dir, "not a directory", "utf8");
 
     const mapA = new Map([["pluginA", new Set(["persist:plugin-auth:pluginA"])]]);
     const mapB = new Map([["pluginB", new Set(["persist:plugin-auth:pluginB"])]]);
@@ -200,8 +199,8 @@ describe("write queue — concurrency safety", () => {
     // Write A should reject because the dir is read-only.
     await expect(writePersistedPluginAuthPartitions(mapA)).rejects.toThrow();
 
-    // Restore dir permissions so subsequent writes can succeed.
-    await chmod(dir, 0o700);
+    // Remove the blocker so subsequent writes can create the directory.
+    await unlink(dir);
 
     // The write queue must NOT be permanently bricked after the error.
     // __resetWriteQueueForTest() is NOT called here — we rely on the
