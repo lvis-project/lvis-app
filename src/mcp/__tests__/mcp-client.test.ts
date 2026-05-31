@@ -911,7 +911,7 @@ describe("StdioTransport — regression", () => {
 
     await client.connect();
     expect(spawnMock).toHaveBeenCalledWith(
-      expect.stringMatching(/resources\/uv\/[^/]+\/uv(?:\.exe)?$/),
+      expect.stringMatching(/resources[\\/]uv[\\/][^\\/]+[\\/]uv(?:\.exe)?$/),
       ["tool", "run", "--from", "browser-use[cli]==0.12.6", "browser-use", "--mcp"],
       expect.objectContaining({
         env: expect.objectContaining({

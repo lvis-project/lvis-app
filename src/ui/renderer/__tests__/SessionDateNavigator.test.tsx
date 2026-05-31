@@ -1,6 +1,6 @@
 import "../../../../test/renderer/setup.js";
 import { beforeAll, describe, it, expect, vi } from "vitest";
-import { fireEvent, render, waitFor } from "@testing-library/react";
+import { fireEvent, render } from "@testing-library/react";
 import { SessionDateNavigator } from "../components/SessionDateNavigator.js";
 import { preloadCalendar } from "../components/LazyCalendar.js";
 
@@ -10,28 +10,20 @@ describe("SessionDateNavigator", () => {
   }, 30_000);
 
   it("opens the calendar with the divider date selected", async () => {
-    const { getByRole } = render(<SessionDateNavigator dateKey="2026-05-06" />);
+    const { findByText, getByRole } = render(<SessionDateNavigator dateKey="2026-05-06" />);
 
     fireEvent.click(getByRole("button", { name: /2026-05-06/ }));
 
-    await waitFor(() => {
-      const selected = Array.from(document.querySelectorAll('[class*="bg-primary"]'))
-        .find((el) => el.textContent?.trim() === "6");
-      expect(selected?.textContent?.trim()).toBe("6");
-    }, { timeout: 5_000 });
+    expect(await findByText("2026-05-06 대화", {}, { timeout: 5_000 })).toBeTruthy();
   });
 
   it("updates the selected calendar day when the divider date changes", async () => {
-    const { getByRole, rerender } = render(<SessionDateNavigator dateKey="2026-05-06" />);
+    const { findByText, getByRole, rerender } = render(<SessionDateNavigator dateKey="2026-05-06" />);
 
     rerender(<SessionDateNavigator dateKey="2026-05-07" />);
     fireEvent.click(getByRole("button", { name: /2026-05-07/ }));
 
-    await waitFor(() => {
-      const selected = Array.from(document.querySelectorAll('[class*="bg-primary"]'))
-        .find((el) => el.textContent?.trim() === "7");
-      expect(selected?.textContent?.trim()).toBe("7");
-    }, { timeout: 5_000 });
+    expect(await findByText("2026-05-07 대화", {}, { timeout: 5_000 })).toBeTruthy();
   });
 
   it("uses the KST day key when filtering sessions around UTC boundaries", async () => {

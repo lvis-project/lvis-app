@@ -294,7 +294,7 @@ describe("SandboxExecRunner.spawn() — CRITICAL-1 mkdtemp per-spawn", () => {
     vi.mocked(mkdtemp).mockResolvedValue("/tmp/lvis-sandbox-exec-xyz123");
     await new SandboxExecRunner().spawn("/bin/echo", [], {}, { env: {} });
     const writtenPath = vi.mocked(writeFile).mock.calls[0]![0] as string;
-    expect(writtenPath).toBe("/tmp/lvis-sandbox-exec-xyz123/profile.sb");
+    expect(writtenPath.replace(/\\/g, "/")).toBe("/tmp/lvis-sandbox-exec-xyz123/profile.sb");
   });
 
   it("calls chmod(profileDir, 0o700) after mkdtemp", async () => {
@@ -320,16 +320,33 @@ describe("SandboxExecRunner.spawn() — CRITICAL-1 mkdtemp per-spawn", () => {
 
   it("cleans up profileDir and rethrows when ownership check fails", async () => {
     const { stat, rm } = await import("node:fs/promises");
+    const proc = process as typeof process & { getuid?: () => number };
+    const originalGetuid = proc.getuid;
+    Object.defineProperty(process, "getuid", {
+      configurable: true,
+      value: () => 1000,
+    });
     // Return a different uid than process.getuid()
-    const wrongUid = (process.getuid?.() ?? 0) + 1;
+    const wrongUid = 1001;
     vi.mocked(stat).mockResolvedValue({ uid: wrongUid } as import("node:fs").Stats);
-    await expect(
-      new SandboxExecRunner().spawn("/bin/echo", [], {}, { env: {} }),
-    ).rejects.toThrow("profile dir ownership mismatch");
-    expect(rm).toHaveBeenCalledWith(
-      expect.stringContaining("lvis-sandbox-exec-"),
-      expect.objectContaining({ recursive: true, force: true }),
-    );
+    try {
+      await expect(
+        new SandboxExecRunner().spawn("/bin/echo", [], {}, { env: {} }),
+      ).rejects.toThrow("profile dir ownership mismatch");
+      expect(rm).toHaveBeenCalledWith(
+        expect.stringContaining("lvis-sandbox-exec-"),
+        expect.objectContaining({ recursive: true, force: true }),
+      );
+    } finally {
+      if (originalGetuid) {
+        Object.defineProperty(process, "getuid", {
+          configurable: true,
+          value: originalGetuid,
+        });
+      } else {
+        delete proc.getuid;
+      }
+    }
   });
 });
 

@@ -2,7 +2,7 @@ import AdmZip from "adm-zip";
 import { mkdtempSync, rmSync } from "node:fs";
 import { readFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
-import { join } from "node:path";
+import { join, resolve } from "node:path";
 import { describe, expect, it, vi } from "vitest";
 
 import { installAgentPackageFromMarketplace } from "../agent-installer.js";
@@ -43,6 +43,7 @@ function makeFetcher(pluginType: "agent" | "skill"): MarketplaceFetcher {
 function makeStore(buffer: Buffer): PluginArtifactStore & {
   extractZip: ReturnType<typeof vi.fn>;
 } {
+  const installRoot = resolve("/tmp/lvis-package");
   return {
     downloadVerifiedArtifact: vi.fn(async () => ({
       zipBuffer: buffer,
@@ -50,7 +51,7 @@ function makeStore(buffer: Buffer): PluginArtifactStore & {
       signerKeyId: "test-key",
     })),
     extractZip: vi.fn(async () => ["plugin.json"]),
-    installDirFor: vi.fn(() => "/tmp/lvis-package"),
+    installDirFor: vi.fn(() => installRoot),
     writeInstallReceipt: vi.fn(),
     appendHistory: vi.fn(),
   } as unknown as PluginArtifactStore & { extractZip: ReturnType<typeof vi.fn> };
@@ -96,8 +97,8 @@ describe("assistant package installers", () => {
         id: "reviewer",
         source: "marketplace",
         enabled: true,
-        profilePath: "/tmp/lvis-package/AGENTS.md",
-        manifestPath: "/tmp/lvis-package/plugin.json",
+        profilePath: join(resolve("/tmp/lvis-package"), "AGENTS.md"),
+        manifestPath: join(resolve("/tmp/lvis-package"), "plugin.json"),
       });
     } finally {
       rmSync(tmp, { recursive: true, force: true });
@@ -143,8 +144,8 @@ describe("assistant package installers", () => {
         id: "audit",
         source: "marketplace",
         enabled: true,
-        skillPath: "/tmp/lvis-package/SKILL.md",
-        manifestPath: "/tmp/lvis-package/plugin.json",
+        skillPath: join(resolve("/tmp/lvis-package"), "SKILL.md"),
+        manifestPath: join(resolve("/tmp/lvis-package"), "plugin.json"),
       });
     } finally {
       rmSync(tmp, { recursive: true, force: true });

@@ -1131,7 +1131,7 @@ export function App() {
   }, [activeView]);
 
   useAppBootstrap({
-    api, refreshViews, refreshCards, checkApiKey,
+    api, refreshViews, refreshCards: async () => { await refreshCards(); }, checkApiKey,
     setActiveView,
     toggleCommandPopover,
   });

@@ -1282,7 +1282,7 @@ export type LvisPluginsApi = {
 };
 
 export type LvisHostMarketplaceApi = {
-  installMarketplacePlugin: (id: string) => Promise<PluginMarketplaceActionResult>;
+  installMarketplacePlugin: (id: string, expectedVersion?: string) => Promise<PluginMarketplaceActionResult>;
   uninstallMarketplacePlugin: (id: string) => Promise<PluginMarketplaceActionResult>;
   installMarketplaceAgent?: (slug: string) => Promise<PluginMarketplaceActionResult>;
   uninstallMarketplaceAgent?: (slug: string) => Promise<PluginMarketplaceActionResult>;

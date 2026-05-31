@@ -122,7 +122,7 @@ describe("check-test-duplicates", () => {
 
       const result = analyzeDuplicateHelpers(root);
 
-      expect(result.files.map((file) => file.replace(`${root}/`, "")).sort()).toEqual([
+      expect(result.files.map((file) => normalizeRepoPath(file, root)).sort()).toEqual([
         "one.test.ts",
         "two.test.ts",
       ]);
