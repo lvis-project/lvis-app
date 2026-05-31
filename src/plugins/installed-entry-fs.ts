@@ -7,8 +7,9 @@
  *
  * ## Edge cases the rename can still fail (rare, host-side surfacing)
  *
- * - **Antivirus / endpoint protection** holding the directory itself with
- *   FILE_SHARE_DELETE denied → `rename` throws EPERM/EACCES (errno -4048).
+ * - **Antivirus / endpoint protection, or an open Windows handle created
+ *   without delete sharing**, holding the directory or a child file →
+ *   `rename` throws EPERM/EACCES (errno -4048).
  * - **Process holds the install dir as cwd** → rename fails. LVIS host code
  *   does not chdir into plugin dirs (verified — no `process.chdir()` calls
  *   reference plugin paths) so this is only possible if a plugin worker
@@ -40,10 +41,11 @@ export const TOMBSTONE_SUBDIR = "+tombstones+";
  * Atomic Windows-safe directory removal.
  *
  * 1. Rename `installedManifestDir` → `<pluginsRoot>/+tombstones+/<id>-<ts>-<rand>`.
- *    NTFS allows directory rename with open file handles inside (handles
- *    use file references, not paths), so this succeeds even when a plugin
- *    worker still holds SQLite WAL/SHM files. The `<rand>` suffix prevents
- *    collisions when multiple uninstalls fire within the same millisecond.
+ *    On POSIX this succeeds even when a plugin worker still holds files
+ *    inside. On Windows it succeeds only when those handles allow delete
+ *    sharing; otherwise the rename throws and the caller surfaces the
+ *    uninstall failure. The `<rand>` suffix prevents collisions when
+ *    multiple uninstalls fire within the same millisecond.
  * 2. Fire-and-forget rm of the tombstone. On Windows the rm may fail with
  *    EBUSY if handles are still open — that's fine, the orphan sweeper at
  *    next boot picks up the leftover.
