@@ -34,10 +34,17 @@ export const STABLE_SEMVER_RE =
 export const HOST_SECRETS_KEY_PATTERN = /^llm\.apiKey\.[a-z-]+$/;
 const log = createLogger("plugin-runtime");
 
+type JsonObject = Record<string, unknown>;
+
+function asObject(value: unknown): JsonObject | undefined {
+  return value && typeof value === "object" && !Array.isArray(value)
+    ? value as JsonObject
+    : undefined;
+}
+
 function patchHostSecretsIntoLegacySdkSchema(schema: unknown): unknown {
-  if (!schema || typeof schema !== "object" || Array.isArray(schema)) return schema;
-  const root = schema as { properties?: Record<string, unknown> };
-  if (!root.properties || root.properties.hostSecrets !== undefined) return schema;
+  const root = asObject(schema) as (JsonObject & { properties?: Record<string, unknown> }) | undefined;
+  if (!root?.properties || root.properties.hostSecrets !== undefined) return schema;
   root.properties.hostSecrets = {
     type: "object",
     additionalProperties: false,
@@ -52,6 +59,66 @@ function patchHostSecretsIntoLegacySdkSchema(schema: unknown): unknown {
     },
   };
   return schema;
+}
+
+function schemaHasHostSecrets(schema: unknown): boolean {
+  const root = asObject(schema);
+  const properties = asObject(root?.properties);
+  return properties?.hostSecrets !== undefined;
+}
+
+function patchHostCompatibilityIntoLegacySdkSchema(schema: unknown): unknown {
+  patchHostSecretsIntoLegacySdkSchema(schema);
+  return schema;
+}
+
+async function loadSdkManifestSchema(): Promise<unknown> {
+  const schemaPath = createRequire(import.meta.url).resolve(
+    "@lvis/plugin-sdk/schemas/plugin-manifest.schema.json",
+  );
+  const schemaBytes = await readFile(schemaPath, "utf-8");
+  return JSON.parse(schemaBytes);
+}
+
+function compileAjvValidator(schema: unknown): ValidateFunction {
+  // Ajv default export compat for ESM/CJS interop.
+  const AjvAny = AjvModule as unknown as { default?: unknown };
+  const AjvCtor = (AjvAny.default ?? AjvModule) as new (opts?: unknown) => {
+    compile: (schema: unknown) => ValidateFunction;
+  };
+  // strictRequired=false — if/then branches reference properties declared
+  // on the outer `properties` block; AJV's strict mode otherwise flags
+  // these as "property not defined inside the same schema object".
+  const ajv = new AjvCtor({
+    strict: true,
+    strictRequired: false,
+    allErrors: true,
+    allowUnionTypes: true,
+  });
+  const AddAny = AddFormatsModule as unknown as { default?: unknown };
+  const addFormatsFn = (AddAny.default ?? AddFormatsModule) as (a: unknown) => void;
+  addFormatsFn(ajv);
+  return ajv.compile(schema);
+}
+
+function wrapSdkValidatorWithHostCompatibility(
+  sdkValidator: ValidateFunction,
+  hostValidator: ValidateFunction,
+): ValidateFunction {
+  const wrapped = ((data: unknown) => {
+    if (sdkValidator(data)) {
+      wrapped.errors = null;
+      return true;
+    }
+    const sdkErrors = sdkValidator.errors ?? null;
+    if (hostValidator(data)) {
+      wrapped.errors = null;
+      return true;
+    }
+    wrapped.errors = hostValidator.errors ?? sdkErrors;
+    return false;
+  }) as ValidateFunction;
+  return wrapped;
 }
 
 export function normalizeInstallPolicy(
@@ -82,12 +149,23 @@ export function getDeclaredEmittedEvents(manifest: PluginManifest): string[] {
  * operators see the drift signal in logs.
  */
 export async function buildManifestValidator(): Promise<ValidateFunction> {
+  const sdkSchema = await loadSdkManifestSchema();
+  const hostCompatibilityNeeded = !schemaHasHostSecrets(sdkSchema);
+
   try {
     // Prefer SDK helper when available so AJV options stay in lockstep.
     type SdkModule = { compileManifestValidator?: () => ValidateFunction };
     const sdk = (await import("@lvis/plugin-sdk")) as unknown as SdkModule;
     if (typeof sdk.compileManifestValidator === "function") {
-      return sdk.compileManifestValidator();
+      const sdkValidator = sdk.compileManifestValidator();
+      if (!hostCompatibilityNeeded) return sdkValidator;
+      log.warn(
+        "SDK manifest schema lacks host compatibility extensions — wrapping compileManifestValidator() with host-local AJV compatibility. Update @lvis/plugin-sdk to keep manifest validation in lockstep.",
+      );
+      return wrapSdkValidatorWithHostCompatibility(
+        sdkValidator,
+        compileAjvValidator(patchHostCompatibilityIntoLegacySdkSchema(sdkSchema)),
+      );
     }
     log.warn(
       "SDK does not export compileManifestValidator() — falling back to host-local AJV compile. Update @lvis/plugin-sdk to keep manifest validation in lockstep.",
@@ -99,29 +177,7 @@ export async function buildManifestValidator(): Promise<ValidateFunction> {
     log.warn(`SDK validator import failed, using host-local AJV: ${(err as Error).message}`);
   }
   try {
-    const schemaPath = createRequire(import.meta.url).resolve(
-      "@lvis/plugin-sdk/schemas/plugin-manifest.schema.json",
-    );
-    const schemaBytes = await readFile(schemaPath, "utf-8");
-    const schema = patchHostSecretsIntoLegacySdkSchema(JSON.parse(schemaBytes));
-    // Ajv default export compat for ESM/CJS interop.
-    const AjvAny = AjvModule as unknown as { default?: unknown };
-    const AjvCtor = (AjvAny.default ?? AjvModule) as new (opts?: unknown) => {
-      compile: (schema: unknown) => ValidateFunction;
-    };
-    // strictRequired=false — if/then branches reference properties declared
-    // on the outer `properties` block; AJV's strict mode otherwise flags
-    // these as "property not defined inside the same schema object".
-    const ajv = new AjvCtor({
-      strict: true,
-      strictRequired: false,
-      allErrors: true,
-      allowUnionTypes: true,
-    });
-    const AddAny = AddFormatsModule as unknown as { default?: unknown };
-    const addFormatsFn = (AddAny.default ?? AddFormatsModule) as (a: unknown) => void;
-    addFormatsFn(ajv);
-    return ajv.compile(schema);
+    return compileAjvValidator(patchHostCompatibilityIntoLegacySdkSchema(sdkSchema));
   } catch (err) {
     throw new Error(`SDK plugin manifest schema unavailable: ${(err as Error).message}`);
   }
@@ -332,7 +388,9 @@ export async function parsePluginJson(
     }
   }
 
-  // §B-3 — uiCallable ⊂ tools validation.
+  // §B-3 — uiCallable structural validation. UI-callable methods may be
+  // runtime-only and therefore do not need to appear in tools[]; tools[] is
+  // the LLM-facing registration surface.
   const uiCallable = Array.isArray(parsed.uiCallable) ? parsed.uiCallable : [];
   for (let i = 0; i < uiCallable.length; i += 1) {
     const method = uiCallable[i];
@@ -343,11 +401,11 @@ export async function parsePluginJson(
         `"uiCallable": ["summary_get"]`,
       );
     }
-    if (!parsed.tools.includes(method)) {
-      fail(
-        `uiCallable[${i}]`,
-        `entry '${method}' is not declared in tools[]`,
-        `add "${method}" to tools[] or remove it from uiCallable[]`,
+    if (!TOOL_NAME_PATTERN.test(method)) {
+      throw new Error(
+        `Invalid UI-callable method name '${method}' in plugin '${pid}' at 'uiCallable[${i}]' (${path}): ` +
+        `method names must match ^[a-zA-Z_][a-zA-Z0-9_]*$ (start with letter/underscore, then letters/digits/underscores). ` +
+        `Example: "uiCallable": ["sample_upload_chunk"] (not "sample.upload.chunk")`,
       );
     }
   }
@@ -376,7 +434,7 @@ export async function parsePluginJson(
         fail(
           `auth.${key}`,
           `tool '${value}' is not declared in uiCallable[]`,
-          `add "${value}" to uiCallable[] (and tools[]) so the host UI surface can invoke it`,
+        `add "${value}" to uiCallable[] so the host UI surface can invoke it`,
         );
       }
     }

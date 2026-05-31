@@ -1,11 +1,12 @@
 /**
- * Sprint 4-B unit tests — AJV wiring (B-1), uiCallable subset-of-tools[]
+ * Sprint 4-B unit tests — AJV wiring (B-1), uiCallable structural
  * validation (B-3), capability gate (B-5 — tested via manifest field), and
  * rate-limit (B-7 — tested in sprint4b-rate-limit.test.ts).
  *
  * NOTE: The legacy suffix-based "destructive verb" gate has been removed.
- * uiCallable validation is now purely structural: every entry must be a
- * string declared in tools[]. Security relies on code review + marketplace
+ * uiCallable validation is now structural: every entry must be a valid
+ * runtime method name. UI-only methods may stay out of tools[] so they are
+ * not registered as LLM tools. Security relies on code review + marketplace
  * approval + signature verification — not on naming patterns.
  */
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
@@ -93,7 +94,7 @@ describe("Sprint 4-B — AJV + uiCallable + destructive guards", () => {
     expect(runtime.listPluginIds()).toHaveLength(0);
   });
 
-  it("B-3: uiCallable not in tools[] is rejected", async () => {
+  it("B-3: uiCallable not in tools[] is accepted as UI-only runtime method", async () => {
     await writePlugin("p-ui-missing", { tools: ["pum_hello", "pum_delete"], uiCallable: ["p_ui_missing_ghost"] });
     const runtime = new PluginRuntime({ hostRoot: testDir, registryPath, pluginsRoot: installedDir });
     const origErr = console.error;
@@ -104,8 +105,8 @@ describe("Sprint 4-B — AJV + uiCallable + destructive guards", () => {
     } finally {
       console.error = origErr;
     }
-    expect(runtime.listPluginIds()).toHaveLength(0);
-    expect(ctxArgs.some((c) => (c as Record<string, unknown>)?.phase === PluginPhase.VALIDATION_FAIL)).toBe(true);
+    expect(runtime.listPluginIds()).toContain("p-ui-missing");
+    expect(ctxArgs.some((c) => (c as Record<string, unknown>)?.phase === PluginPhase.VALIDATION_FAIL)).toBe(false);
   });
 
   it("B-3: any suffix in uiCallable accepted when tool is in tools[]", async () => {

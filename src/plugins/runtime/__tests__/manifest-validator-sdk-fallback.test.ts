@@ -73,9 +73,10 @@ describe("buildManifestValidator — SDK fallback (PR #894 B5)", () => {
       publisher: "Test",
     };
     expect(validator(validManifest)).toBe(true);
+
   });
 
-  it("prefers the SDK helper when it IS exported (no fallback warn)", async () => {
+  it("uses the SDK helper when it IS exported and only wraps for host compatibility", async () => {
     // Build a minimal AJV-shaped helper so the host's `typeof === 'function'`
     // gate accepts it. The returned function is the production code path
     // — we assert the helper was invoked, not the warn.
@@ -100,11 +101,12 @@ describe("buildManifestValidator — SDK fallback (PR #894 B5)", () => {
     const validator = await buildManifestValidator();
 
     expect(compileManifestValidator).toHaveBeenCalledTimes(1);
-    expect(validator).toBe(sdkValidator);
-    // No fallback warn — SDK helper is in lockstep.
-    const warnedWithDriftSignal = warnSpy.mock.calls.some((call) =>
-      typeof call[0] === "string" && call[0].includes("compileManifestValidator"),
+    expect(validator({})).toBe(true);
+    expect(sdkValidator).toHaveBeenCalledTimes(1);
+    // No missing-helper fallback warn — SDK helper is present.
+    const warnedWithMissingHelperSignal = warnSpy.mock.calls.some((call) =>
+      typeof call[0] === "string" && call[0].includes("does not export compileManifestValidator"),
     );
-    expect(warnedWithDriftSignal).toBe(false);
+    expect(warnedWithMissingHelperSignal).toBe(false);
   });
 });

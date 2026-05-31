@@ -3,9 +3,8 @@
  *
  * Verifies the contract documented in architecture.md §9.4a "Plugin-Owned
  * OAuth — Host UI Surface": when a manifest declares `auth`, the three
- * referenced tool names must all live in `uiCallable[]`. Mirrors the
- * existing `uiCallable ⊂ tools` cross-check pattern in §B-3 of
- * `manifest-validation.ts` so the same gate runs at load time.
+ * referenced tool names must all live in `uiCallable[]` so the same gate
+ * runs at load time.
  */
 import { afterEach, beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
 import { mkdir, rm, writeFile } from "node:fs/promises";

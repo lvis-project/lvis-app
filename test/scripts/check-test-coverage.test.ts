@@ -1,16 +1,13 @@
 import { describe, expect, it } from "vitest";
-import { spawnSync } from "node:child_process";
 import fs from "node:fs";
 import { tmpdir } from "node:os";
 import path from "node:path";
-import { fileURLToPath } from "node:url";
 import {
   COVERAGE_GATES,
   evaluateCoverageSummary,
+  runCoverageCli,
   topUncoveredFiles,
 } from "../../scripts/check-test-coverage.mjs";
-
-const scriptPath = fileURLToPath(new URL("../../scripts/check-test-coverage.mjs", import.meta.url));
 
 type CoverageMetric = {
   total: number;
@@ -101,14 +98,17 @@ describe("check-test-coverage", () => {
   it("fails the CLI when the coverage summary is missing", () => {
     const root = fs.mkdtempSync(path.join(tmpdir(), "lvis-coverage-missing-"));
     try {
-      const result = spawnSync(process.execPath, [scriptPath], {
+      const stdout: string[] = [];
+      const stderr: string[] = [];
+      const status = runCoverageCli([], {
         cwd: root,
-        encoding: "utf8",
+        stdout: (line: string) => stdout.push(line),
+        stderr: (line: string) => stderr.push(line),
       });
 
-      expect(result.status).toBe(1);
-      expect(result.stderr).toContain("coverage summary not found");
-      expect(result.stderr).toContain("run `bun run test:coverage`");
+      expect(status).toBe(1);
+      expect(stderr.join("\n")).toContain("coverage summary not found");
+      expect(stderr.join("\n")).toContain("run `bun run test:coverage`");
     } finally {
       fs.rmSync(root, { recursive: true, force: true });
     }
@@ -134,15 +134,18 @@ describe("check-test-coverage", () => {
         }),
       );
 
-      const result = spawnSync(process.execPath, [scriptPath, summaryPath], {
+      const stdout: string[] = [];
+      const stderr: string[] = [];
+      const status = runCoverageCli([summaryPath], {
         cwd: root,
-        encoding: "utf8",
+        stdout: (line: string) => stdout.push(line),
+        stderr: (line: string) => stderr.push(line),
       });
 
-      expect(result.status).toBe(1);
-      expect(result.stdout).toContain("coverage gates:");
-      expect(result.stderr).toContain("coverage gate failed");
-      expect(result.stderr).toContain("engine.lines: 75.00 < 81.00");
+      expect(status).toBe(1);
+      expect(stdout.join("\n")).toContain("coverage gates:");
+      expect(stderr.join("\n")).toContain("coverage gate failed");
+      expect(stderr.join("\n")).toContain("engine.lines: 75.00 < 81.00");
     } finally {
       fs.rmSync(root, { recursive: true, force: true });
     }
