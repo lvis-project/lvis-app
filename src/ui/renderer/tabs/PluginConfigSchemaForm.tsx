@@ -86,6 +86,13 @@ function fieldError(prop: PluginConfigSchemaPropertySummary, value: unknown): st
   return null;
 }
 
+function isSameConfigValue(a: unknown, b: unknown): boolean {
+  if (Array.isArray(a) && Array.isArray(b)) {
+    return JSON.stringify(a) === JSON.stringify(b);
+  }
+  return a === b;
+}
+
 /**
  * Render a typed form for the plugin's declared `configSchema`. The form
  * keeps secret fields and cleartext fields strictly separate: cleartext
@@ -104,6 +111,7 @@ export function PluginConfigSchemaForm({
   const properties = schema.properties ?? {};
   const propertyKeys = useMemo(() => Object.keys(properties), [properties]);
   const [draft, setDraft] = useState<PluginConfigFormValues>(() => ({ ...values }));
+  const dirtyKeysRef = useRef<Set<string>>(new Set());
   // Resync rule:
   //  - On plugin SWITCH (pluginId changed): hard reset draft to the new
   //    plugin's saved values + clear secret drafts. Drafts from a previous
@@ -117,6 +125,7 @@ export function PluginConfigSchemaForm({
   const prevPluginIdRef = useRef(pluginId);
   useEffect(() => {
     if (prevPluginIdRef.current !== pluginId) {
+      dirtyKeysRef.current = new Set();
       setDraft({ ...values });
       setSecretDrafts({});
       prevPluginIdRef.current = pluginId;
@@ -124,20 +133,23 @@ export function PluginConfigSchemaForm({
     }
     setDraft((prev) => {
       const next = { ...values };
-      for (const key of propertyKeys) {
+      const nextDirtyKeys = new Set<string>();
+      for (const key of dirtyKeysRef.current) {
         const prop = properties[key];
+        if (!prop) continue;
         if (prop.type === "string" && prop.format === "secret") continue;
         if (prev[key] === undefined) continue;
         const draftV = prev[key];
         const savedV = values[key];
-        const dirty = Array.isArray(draftV) && Array.isArray(savedV)
-          ? JSON.stringify(draftV) !== JSON.stringify(savedV)
-          : draftV !== savedV;
-        if (dirty) next[key] = draftV;
+        if (!isSameConfigValue(draftV, savedV)) {
+          next[key] = draftV;
+          nextDirtyKeys.add(key);
+        }
       }
+      dirtyKeysRef.current = nextDirtyKeys;
       return next;
     });
-  }, [pluginId, values, propertyKeys, properties]);
+  }, [pluginId, values, properties]);
   const [secretDrafts, setSecretDrafts] = useState<Record<string, string>>({});
   /** Per-key saving indicator — drives the inline Save button's loading state
    *  on text / number / array / secret fields. Toggle / enum auto-save uses
@@ -173,6 +185,7 @@ export function PluginConfigSchemaForm({
   // 200ms debounce is unnecessary; remove it to keep semantics clean.
   const updateImmediate = useCallback(
     (key: string, value: unknown) => {
+      dirtyKeysRef.current.add(key);
       setDraft((prev) => ({ ...prev, [key]: value }));
       void onSave(buildSingleKeyPayload(key, value));
     },
@@ -181,6 +194,7 @@ export function PluginConfigSchemaForm({
 
   /** Text/number/array — set draft only; explicit per-field Save button persists. */
   const updateDraft = useCallback((key: string, value: unknown) => {
+    dirtyKeysRef.current.add(key);
     setDraft((prev) => ({ ...prev, [key]: value }));
   }, []);
 
@@ -224,10 +238,7 @@ export function PluginConfigSchemaForm({
     (key: string): boolean => {
       const draftVal = draft[key];
       const savedVal = values[key];
-      if (Array.isArray(draftVal) && Array.isArray(savedVal)) {
-        return JSON.stringify(draftVal) !== JSON.stringify(savedVal);
-      }
-      return draftVal !== savedVal;
+      return !isSameConfigValue(draftVal, savedVal);
     },
     [draft, values],
   );
