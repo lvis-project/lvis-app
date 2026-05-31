@@ -1,5 +1,21 @@
 # Changelog
 
+## v0.2.15 — 2026-06-01
+
+### 플러그인 / 마켓플레이스
+
+- **플러그인 secret URL 오입력 차단** (PR #1194) — API-key 형태의 플러그인 secret 필드에 `http://` / `https://` endpoint 값이 저장되거나 provider 호출까지 흘러가는 경로를 차단했다. 저장 경계와 HostApi read 경계에서 URL-shaped 값을 거부/격리해 provider 401 에러에 잘못된 endpoint 문자열이 노출되는 문제를 막는다.
+- **마켓플레이스 업데이트 버전 검증 강화** (PR #1194) — renderer 가 전달한 기대 버전을 신뢰하지 않고, main-process install lifecycle 에서 trusted catalog version 과 먼저 대조한다. 실제 version-changing install 이 일어난 경우에만 rollback/quarantine 을 수행하고, no-op install 뒤 mismatch 는 기존 정상 런타임을 복구한다.
+
+### 안정성 / Windows 검증
+
+- **permission path SOT Windows 정렬** (PR #1194) — reviewer path-field 값과 allowedDirectories 비교를 canonical + case-fold 형태로 통일해 Windows drive/separator 차이로 허용 경로가 HIGH 로 오판되는 문제를 수정했다.
+- **persistent approval store Windows 내구성 보강** (PR #1194) — Windows 에서 directory fsync 가 EPERM 을 반환하는 환경을 best-effort 로 처리하고, persistent approval 파일의 read/modify/write 를 직렬화해 동시 rename 충돌을 제거했다.
+
+### 검증
+
+- PR #1194: 3-agent cluster review GO (architect/critic/security, MAJOR 0), `bun run typecheck`, 전체 `bunx vitest run --reporter=verbose` 473 files / 6226 pass / 24 skipped, `bun run build`, pre-push hook(`tsc --noEmit`, `vitest run`, `build`) pass, remote CI build-and-test / Windows permission path / CodeQL / naming-gate / cluster-detector success.
+
 ## v0.2.14 — 2026-05-27
 
 ### UI / 설정
