@@ -857,6 +857,69 @@ describe("initPluginRuntime HostApi factory", () => {
     expect(getHostSecretCounter("hostSecret_denied", "plugin-b7", "attacker")).toBe(0);
   });
 
+
+  it("quarantines endpoint URLs stored in api-key-like own plugin secrets", async () => {
+    runtimeTestState.capturedRuntimeOptions = null;
+    const bootAuditLogger = { log: vi.fn() };
+
+    await initPluginRuntime({
+      projectRoot: "/tmp/lvis-test/project",
+      settingsService: {
+        get: vi.fn((key: string) => {
+          if (key === "llm") return { provider: "openai" };
+          if (key === "pluginConfigs") return {};
+          return undefined;
+        }),
+        getSecret: vi.fn((key: string) => {
+          if (key === "plugin.plugin-q.sttApiKey") return "https://example.openai.azure.com/openai/deployments/stt/audio/transcriptions";
+          if (key === "plugin.plugin-q.webhookUrl") return "https://example.com/hook";
+          if (key === "plugin.plugin-q.apiKey") return "sk-valid";
+          return null;
+        }),
+        getPluginConfig: vi.fn(() => ({})),
+        setPluginConfig: vi.fn(),
+      } as never,
+      memoryManager: {} as never,
+      keywordEngine: {
+        registerKeywords: vi.fn(),
+        unregisterByPlugin: vi.fn(),
+      } as never,
+      toolRegistry: {
+        unregisterByPlugin: vi.fn(),
+        register: vi.fn(),
+        listAll: vi.fn(() => []),
+        listPluginIds: vi.fn(() => []),
+        replacePluginTools: vi.fn(),
+      } as never,
+      pythonPath: undefined,
+      bootAuditLogger: bootAuditLogger as never,
+      mainWindow: {} as never,
+      openAuthWindowService: vi.fn(),
+      openLinkWindowService: vi.fn(),
+      openAuthPartitionViewerService: vi.fn(),
+      shellOpenExternal: vi.fn(),
+      approvalGate: { requestAndWait: vi.fn() } as never,
+    });
+
+    const createHostApi = runtimeTestState.capturedRuntimeOptions?.createHostApi as
+      | ((pluginId: string, manifest: { id: string; config?: Record<string, unknown> }, pluginDataDir: string) => {
+          getSecret: (key: string) => string | null;
+        })
+      | undefined;
+    expect(createHostApi).toBeDefined();
+
+    const pluginDataDir = mkdtempSync("/tmp/lvis-hostapi-data-");
+    const api = createHostApi!("plugin-q", { id: "plugin-q", config: {} }, pluginDataDir);
+
+    expect(api.getSecret("plugin.plugin-q.sttApiKey")).toBeNull();
+    expect(api.getSecret("plugin.plugin-q.webhookUrl")).toBe("https://example.com/hook");
+    expect(api.getSecret("plugin.plugin-q.apiKey")).toBe("sk-valid");
+    expect(bootAuditLogger.log).toHaveBeenCalledWith(expect.objectContaining({
+      type: "warn",
+      input: expect.stringContaining("pluginSecret_denied reason=endpoint-url-in-api-key-like-secret"),
+    }));
+  });
+
   it("clears registry-entry cache on refresh failure so admin secret bypass fails closed (#959)", async () => {
     runtimeTestState.capturedRuntimeOptions = null;
     const { canonicalJSON } = await import("../../../plugins/whitelist/canonical-json.js");

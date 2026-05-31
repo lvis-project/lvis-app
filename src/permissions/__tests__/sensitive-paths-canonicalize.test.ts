@@ -19,7 +19,7 @@
 import { describe, it, expect } from "vitest";
 import { mkdtempSync, mkdirSync } from "node:fs";
 import { tmpdir } from "node:os";
-import { join } from "node:path";
+import { isAbsolute, join } from "node:path";
 import { canonicalizePathForMatch } from "../sensitive-paths.js";
 
 describe("canonicalizePathForMatch — security MAJOR-3 bypass vectors", () => {
@@ -69,8 +69,10 @@ describe("canonicalizePathForMatch — security MAJOR-3 bypass vectors", () => {
 
   it("path produces an absolute resolved string", () => {
     const canonical = canonicalizePathForMatch("relative/path/file.txt");
-    // Must be absolute (path.resolve at minimum prepends cwd)
-    expect(canonical.startsWith("/")).toBe(true);
+    // Must be absolute (path.resolve at minimum prepends cwd). On Windows
+    // canonicalizePathForMatch normalizes separators to `/`, but the drive
+    // prefix remains absolute.
+    expect(isAbsolute(canonical)).toBe(true);
     // No `.` or `..` segments leak through
     expect(canonical.includes("/../")).toBe(false);
     expect(canonical.includes("/./")).toBe(false);

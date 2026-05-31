@@ -1569,8 +1569,8 @@ contextBridge.exposeInMainWorld("lvisHost", {
     if (hostMarketplaceApiClaimed) return null;
     hostMarketplaceApiClaimed = true;
     return {
-      installMarketplacePlugin: async (pluginId: string) =>
-        normalizePluginActionResult(await ipcRenderer.invoke("lvis:plugins:install", pluginId)),
+      installMarketplacePlugin: async (pluginId: string, expectedVersion?: string) =>
+        normalizePluginActionResult(await ipcRenderer.invoke("lvis:plugins:install", pluginId, expectedVersion ? { expectedVersion } : undefined)),
       uninstallMarketplacePlugin: async (pluginId: string) =>
         normalizePluginActionResult(await ipcRenderer.invoke("lvis:plugins:uninstall", pluginId)),
       installMarketplaceAgent: async (slug: string) =>

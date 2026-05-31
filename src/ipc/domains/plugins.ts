@@ -12,6 +12,7 @@ import { fileURLToPath } from "node:url";
 import { emitEvent as emitHostEvent } from "../../boot/types.js";
 import { HOST_ONLY_EMIT_NAMESPACES, requiredCapabilityForEmit } from "../../plugins/capabilities.js";
 import { stripSecretFields } from "../../plugins/config-schema.js";
+import { shouldBlockPluginSecretRead, validateApiKeyLikeSecretValue } from "../../plugins/secret-shape.js";
 import { emitPluginConfigChange, SECRET_REDACTED_SENTINEL } from "../../plugins/config-change-bus.js";
 import { runManagedBootstrap } from "../../boot/managed-marketplace.js";
 import { isDevModeUnlocked } from "../../boot/dev-flags.js";
@@ -69,6 +70,19 @@ function errMessage(e: unknown): string {
   }
 }
 
+function validateSecretConfigValue(
+  pluginId: string,
+  key: string,
+  value: string,
+): { ok: false; error: string; message: string } | null {
+  if (validateApiKeyLikeSecretValue({ key, value })) {
+    return pluginConfigError(
+      "plugin-config-secret-invalid-value",
+      `Plugin '${pluginId}' secret field '${key}' looks like an endpoint URL. Save endpoint URLs in the matching URL/baseUrl field, not in the API key field.`,
+    );
+  }
+  return null;
+}
 interface PluginWebviewBinding {
   pluginId: string;
   entryUrl: string;
@@ -373,9 +387,15 @@ export function registerPluginsHandlers(deps: IpcDeps): void {
     return { ok: true } as const;
   });
 
-  ipcMain.handle("lvis:plugins:install", async (e, pluginId: string) => {
+  ipcMain.handle("lvis:plugins:install", async (e, pluginId: string, options?: unknown) => {
     if (!validateSender(e)) { auditUnauthorized(auditLogger, "lvis:plugins:install", e); return UNAUTHORIZED_FRAME; }
     const lifecycleSlug = pluginId;
+    const installOptions = asPlainRecord(options);
+    const expectedVersionValue = installOptions.expectedVersion;
+    if (expectedVersionValue !== undefined && typeof expectedVersionValue !== "string") {
+      throw new Error("expectedVersion must be a string when provided");
+    }
+    const expectedVersion = typeof expectedVersionValue === "string" ? expectedVersionValue.trim() || undefined : undefined;
     let result: { pluginId: string; installed: true } | null = null;
     // IPC is pure transport — actor decisions live inside
     // PluginMarketplaceService.install (catalog → admin escalation).
@@ -385,6 +405,7 @@ export function registerPluginsHandlers(deps: IpcDeps): void {
       result = await installMarketplacePluginWithLifecycle({
         requestedPluginId: pluginId,
         eventSlug: lifecycleSlug,
+        expectedVersion,
         pluginRuntime,
         pluginMarketplace,
         broadcastInstallProgress: (payload) =>
@@ -845,7 +866,10 @@ export function registerPluginsHandlers(deps: IpcDeps): void {
       if (!/^[A-Za-z][A-Za-z0-9._-]{0,127}$/.test(safePluginId)) {
         return pluginConfigError("plugin-config-secret-invalid-plugin-id", `Invalid pluginId: ${pluginId}`);
       }
-      await settingsService.setSecret(`plugin.${safePluginId}.${key}`, String(value ?? ""));
+      const secretValue = String(value ?? "");
+      const validationError = validateSecretConfigValue(safePluginId, key, secretValue);
+      if (validationError) return validationError;
+      await settingsService.setSecret(`plugin.${safePluginId}.${key}`, secretValue);
       const current = settingsService.getPluginConfig(safePluginId) ?? {};
       if (key in current) {
         const next = { ...current };
@@ -873,8 +897,11 @@ export function registerPluginsHandlers(deps: IpcDeps): void {
       for (const key of Object.keys(schema.properties)) {
         const prop = schema.properties[key];
         if (prop?.type === "string" && prop.format === "secret") {
-          const stored = settingsService.getSecret(`plugin.${pluginId}.${key}`);
-          if (stored !== null) presentKeys.push(key);
+          const storageKey = `plugin.${pluginId}.${key}`;
+          const stored = settingsService.getSecret(storageKey);
+          if (stored !== null && !shouldBlockPluginSecretRead({ pluginId, storageKey, value: stored })) {
+            presentKeys.push(key);
+          }
         }
       }
       return { ok: true as const, keys: presentKeys };

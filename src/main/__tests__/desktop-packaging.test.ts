@@ -50,7 +50,12 @@ describe("desktop packaging", () => {
         expect.objectContaining({ path: "build/dmg-extras/uninstall.command" }),
       ]),
     );
-    expect(statSync(join(root, "build", "dmg-extras", "uninstall.command")).mode & 0o111).not.toBe(0);
+    const scriptStat = statSync(join(root, "build", "dmg-extras", "uninstall.command"));
+    if (process.platform === "win32") {
+      expect(scriptStat.size).toBeGreaterThan(0);
+    } else {
+      expect(scriptStat.mode & 0o111).not.toBe(0);
+    }
   });
 
   it("keeps the macOS uninstaller on fixed LVIS data paths", () => {

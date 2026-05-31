@@ -33,6 +33,7 @@ import { PluginDeploymentGuard } from "../../plugins/deployment-guard.js";
 import { readPluginRegistry } from "../../plugins/registry.js";
 import type { PluginRegistryEntry, PluginRegistryEntryInstallSource } from "../../plugins/types.js";
 import { createPluginStorage } from "../../plugins/storage.js";
+import { shouldBlockPluginSecretRead } from "../../plugins/secret-shape.js";
 import {
   setIsPackaged,
   shouldWarnPackagedFlagsIgnored,
@@ -1340,7 +1341,19 @@ export async function initPluginRuntime(
         const auditKey = key.slice(0, 64);
         // Tier 1 — own namespace.
         if (key.startsWith(`plugin.${pluginId}.`)) {
-          return settingsService.getSecret(key);
+          const value = settingsService.getSecret(key);
+          if (shouldBlockPluginSecretRead({ pluginId, storageKey: key, value })) {
+            try {
+              bootAuditLogger.log({
+                timestamp: new Date().toISOString(),
+                sessionId: "plugin",
+                type: "warn",
+                input: `[plugin:${pluginId}] pluginSecret_denied reason=endpoint-url-in-api-key-like-secret key=${auditKey}`,
+              });
+            } catch { /* audit must not break host */ }
+            return null;
+          }
+          return value;
         }
         const allowlist = manifest.hostSecrets?.read ?? [];
         const keyPrefix = sanitizeKeyPrefix(key);
