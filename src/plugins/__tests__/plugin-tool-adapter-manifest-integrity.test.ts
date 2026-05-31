@@ -102,6 +102,31 @@ describe("Permission policy P4 plugin-tool-adapter manifest integrity gate", () 
     expect(result.output).toContain("items");
   });
 
+  it("does not register UI-only runtime methods for LLM tool calls", () => {
+    const fakeRuntime = {
+      isPluginEnabled: () => true,
+      call: vi.fn(async () => ({ ok: true })),
+    } as unknown as PluginRuntime;
+    const manifest: PluginManifest = {
+      ...makeManifest("ui-plugin"),
+      tools: ["public_search"],
+      uiCallable: ["ui_upload_chunk"],
+      toolSchemas: {
+        public_search: {
+          description: "Searches public data for a test query",
+          category: "read",
+          inputSchema: {
+            type: "object",
+            properties: { q: { type: "string" } },
+          },
+        },
+      },
+    } as PluginManifest;
+
+    const tools = pluginToolsForRegistration(fakeRuntime, "ui-plugin", manifest);
+    expect(tools.map((tool) => tool.name)).toEqual(["public_search"]);
+  });
+
   it("violation IPC + audit listeners fire on first violation", async () => {
     const auditSpy = vi.fn();
     manifestIntegrityState.onViolation(auditSpy);

@@ -68,4 +68,27 @@ describe("parsePluginJson — SDK schema validator required", () => {
     const validator = await buildManifestValidator();
     await expect(parsePluginJson(manifestPath, validator)).rejects.toThrow(/schema validation failed/);
   });
+
+  it("allows UI-only runtime methods to stay out of tools[]", async () => {
+    await writeFile(
+      manifestPath,
+      JSON.stringify({
+        id: "test-validator",
+        name: "Validator Test",
+        version: "1.0.0",
+        entry: "dist/index.js",
+        tools: [],
+        uiCallable: ["ui_upload_chunk"],
+        description: "Validator UI-only runtime method test plugin",
+        publisher: "Test",
+      }),
+      "utf-8",
+    );
+
+    const validator = await buildManifestValidator();
+    await expect(parsePluginJson(manifestPath, validator)).resolves.toMatchObject({
+      uiCallable: ["ui_upload_chunk"],
+      tools: [],
+    });
+  });
 });

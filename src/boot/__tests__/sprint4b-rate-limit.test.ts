@@ -75,4 +75,22 @@ describe("createCallLlmForPlugin (Sprint 4-B §B-7)", () => {
       .join("|");
     expect(msgs).toMatch(/promptLen=11/);
   });
+
+  it("passes abort signal through to ConversationLoop.generateText", async () => {
+    const loop = makeFakeLoop();
+    const audit = makeFakeAudit();
+    const callLlm = createCallLlmForPlugin(loop as never, audit as never, {
+      maxCalls: 5,
+      windowMs: 10_000,
+    });
+    const controller = new AbortController();
+
+    await callLlm("p1", "hello", { signal: controller.signal });
+    expect(loop.generateText).toHaveBeenCalledWith(
+      "hello",
+      undefined,
+      undefined,
+      controller.signal,
+    );
+  });
 });
