@@ -41,6 +41,7 @@
 import type { SettingsService } from "../../data/settings-store.js";
 import type { PluginManifest } from "../../plugins/types.js";
 import type { AuditLogger } from "../../audit/audit-logger.js";
+import { shouldBlockPluginSecretRead } from "../../plugins/secret-shape.js";
 import { runTier3Then4 } from "../../plugins/whitelist/tier-order.js";
 import {
   incrementHostSecretCounter,
@@ -253,6 +254,15 @@ export async function resolveApiKey(
   // unify the lifetime contract on the plugin side.
   const ownNamespaceKey = `plugin.${deps.pluginId}.llm.apiKey.${vendor}`;
   const ownValue = deps.settingsService.getSecret(ownNamespaceKey);
+  if (shouldBlockPluginSecretRead({ pluginId: deps.pluginId, storageKey: ownNamespaceKey, value: ownValue })) {
+    audit(
+      deps,
+      "warn",
+      `resolveApiKey deny source=plugin-namespace reason=endpoint-url-in-api-key-like-secret vendor=${vendor} purpose=${request.purpose}`,
+    );
+    incrementHostSecretCounter("hostSecret_denied", deps.pluginId, keyPrefix);
+    return { ok: false, reason: "no-host-vendor" };
+  }
   if (typeof ownValue === "string" && ownValue.length > 0) {
     audit(
       deps,

@@ -635,6 +635,29 @@ export class PluginMarketplaceService {
     return result;
   }
 
+  async quarantinePlugin(
+    pluginId: string,
+    reason: string,
+  ): Promise<{ pluginId: string; quarantined: true }> {
+    return withRegistryLock(this.registryPath, async () => {
+      const registry = await readPluginRegistry(this.registryPath);
+      const target = registry.plugins.find((x) => x.id === pluginId);
+      if (!target) {
+        return { pluginId, quarantined: true as const };
+      }
+      const remainingEntries = registry.plugins.filter((x) => x.id !== pluginId);
+      try {
+        await this.removeInstalledEntry(target, remainingEntries);
+      } catch (err) {
+        log.warn(`quarantinePlugin: failed to tombstone ${pluginId}: ${(err as Error).message}`);
+      }
+      registry.plugins = remainingEntries;
+      await writePluginRegistry(this.registryPath, registry);
+      log.warn(`quarantined plugin '${pluginId}' after failed install verification: ${reason}`);
+      return { pluginId, quarantined: true as const };
+    });
+  }
+
   async uninstall(
     pluginId: string,
     options?: { removeBundleMembers?: boolean },
@@ -911,7 +934,7 @@ export class PluginMarketplaceService {
   }
 
   /** Returns the version string from the currently-installed manifest, or null. */
-  private async getInstalledVersion(pluginId: string): Promise<string | null> {
+  async getInstalledVersion(pluginId: string): Promise<string | null> {
     // Round-3 §6: registry read errors propagate; only the manifest-missing
     // path returns null (stale registry entry).
     const registry = await readPluginRegistry(this.registryPath);

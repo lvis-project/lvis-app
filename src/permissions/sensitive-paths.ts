@@ -170,6 +170,7 @@ export function canonicalizePathForMatch(rawPath: string): string {
   }
 
   return canonical
+    .replace(/\\/g, "/")
     .replace(/\/+/g, "/")
     .normalize("NFC")
     .replace(/^([a-zA-Z]:)/, (m) =>

@@ -54,6 +54,7 @@ describe("ensureWorkspaceCwd", () => {
       const workspaceDir = ensureWorkspaceCwd();
       expect(workspaceDir).toBe(join(customHome, "workspace"));
     } finally {
+      process.chdir(prevCwd);
       rmSync(customHome, { recursive: true, force: true });
     }
   });
