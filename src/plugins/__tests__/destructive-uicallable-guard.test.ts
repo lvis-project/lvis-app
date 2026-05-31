@@ -1,10 +1,10 @@
 /**
- * uiCallable security model — subset + runtime scope enforcement.
+ * uiCallable security model — runtime scope enforcement.
  *
  * The runtime no longer blocks verbs by suffix. Instead:
- *   1. uiCallable ⊆ tools[] is enforced at manifest load time. Any entry not
- *      declared in tools[] fails the load.
- *   2. callFromUi() re-checks the method is declared in that plugin's
+ *   1. tools[] is the LLM registration surface.
+ *   2. uiCallable[] may name UI-only runtime methods that are not in tools[].
+ *   3. callFromUi() re-checks the method is declared in that plugin's
  *      uiCallable at invocation time (defense in depth against stale maps).
  *
  * Security properties come from:
@@ -69,8 +69,8 @@ const PREVIOUSLY_BLOCKED_VERBS = [
   "thing_truncate",
 ];
 
-describe("uiCallable subset validation", () => {
-  it("rejects manifest whose uiCallable entry is not in tools[]", async () => {
+describe("uiCallable runtime-method validation", () => {
+  it("accepts UI-only methods that are not in tools[]", async () => {
     const manifestPath = await writeTempPlugin({
       installPolicy: "user",
       tools: ["foo_get"],
@@ -81,7 +81,7 @@ describe("uiCallable subset validation", () => {
       manifestPaths: [manifestPath],
     });
     const parse = (rt as unknown as { readManifest(p: string): Promise<unknown> }).readManifest.bind(rt);
-    await expect(parse(manifestPath)).rejects.toThrow(/uiCallable\[1\].*not declared in tools/);
+    await expect(parse(manifestPath)).resolves.toBeDefined();
   });
 
   it("rejects non-string uiCallable entries", async () => {
@@ -98,7 +98,7 @@ describe("uiCallable subset validation", () => {
     await expect(parse(manifestPath)).rejects.toThrow(/uiCallable/);
   });
 
-  it("accepts when every uiCallable entry is declared in tools[]", async () => {
+  it("accepts when every uiCallable entry is also declared in tools[]", async () => {
     const manifestPath = await writeTempPlugin({
       installPolicy: "user",
       tools: ["foo_get", "foo_list"],

@@ -947,8 +947,10 @@ export class ConversationLoop {
     prompt: string,
     _maxTokensIgnored?: number,
     systemPrompt = "당신은 LVIS, 사용자의 AI 비서입니다.",
+    abortSignal?: AbortSignal,
   ): Promise<string> {
     if (!this.provider) throw new Error("LLM provider not configured");
+    if (abortSignal?.aborted) throw new Error("LLM generation aborted");
     let text = "";
     const llm = this.deps.settingsService.get("llm");
     for await (const ev of this.provider.streamTurn({
@@ -956,7 +958,9 @@ export class ConversationLoop {
       messages: [{ role: "user", content: prompt }],
       tools: [],
       model: llm.vendors[llm.provider].model,
+      abortSignal,
     })) {
+      if (abortSignal?.aborted) throw new Error("LLM generation aborted");
       if (ev.type === "text_delta" && ev.text) text += ev.text;
       if (ev.type === "message_complete") break;
       if (ev.type === "error") throw new Error(`LLM stream error: ${ev.error}`);
