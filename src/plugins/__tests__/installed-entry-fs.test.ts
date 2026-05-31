@@ -79,10 +79,9 @@ describe("tombstoneAndDeferredRemove", () => {
     ).resolves.toMatch(/local-indexer-42-z$/);
   });
 
-  it("simulates EBUSY tolerance: rename succeeds even with an open file handle inside", async () => {
-    // macOS/Linux allow rename of dir with open files (no exception). On
-    // NTFS this is the documented MoveFileExW behaviour. Simulate by
-    // holding an open handle to a file inside; rename must still succeed.
+  const openHandleRenameIt = process.platform === "win32" ? it.skip : it;
+  openHandleRenameIt("renames even with an open file handle inside on POSIX", async () => {
+    // macOS/Linux allow rename of a directory with open child files.
     const fh = await open(join(installedDir, "data", "fts5.sqlite"), "r");
     try {
       const tombstone = await tombstoneAndDeferredRemove(installedDir, pluginsRoot, {
@@ -92,6 +91,22 @@ describe("tombstoneAndDeferredRemove", () => {
       expect(tombstone).toMatch(/local-indexer-7-w$/);
       // Original install dir is renamed away
       await expect(stat(installedDir)).rejects.toMatchObject({ code: "ENOENT" });
+    } finally {
+      await fh.close();
+    }
+  });
+
+  const windowsOpenHandleIt = process.platform === "win32" ? it : it.skip;
+  windowsOpenHandleIt("surfaces EPERM when an open Windows handle blocks rename", async () => {
+    const fh = await open(join(installedDir, "data", "fts5.sqlite"), "r");
+    try {
+      await expect(
+        tombstoneAndDeferredRemove(installedDir, pluginsRoot, {
+          now: () => 7,
+          randomSuffix: () => "w",
+        }),
+      ).rejects.toMatchObject({ code: "EPERM" });
+      await expect(stat(installedDir)).resolves.toBeTruthy();
     } finally {
       await fh.close();
     }
