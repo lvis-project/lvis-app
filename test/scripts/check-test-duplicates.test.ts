@@ -1,18 +1,15 @@
 import { describe, expect, it } from "vitest";
-import { spawnSync } from "node:child_process";
 import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { fileURLToPath } from "node:url";
 import {
   analyzeDuplicateHelpers,
   collectDuplicateBodies,
   collectHelpers,
   isScannedTestSource,
   normalizeRepoPath,
+  runDuplicateCli,
 } from "../../scripts/check-test-duplicates.mjs";
-
-const scriptPath = fileURLToPath(new URL("../../scripts/check-test-duplicates.mjs", import.meta.url));
 
 describe("check-test-duplicates", () => {
   it("scans test specs and shared helper modules", () => {
@@ -176,16 +173,19 @@ describe("check-test-duplicates", () => {
         ].join("\n"),
       );
 
-      const result = spawnSync(process.execPath, [scriptPath, "--fail-on-duplicates"], {
-        cwd: root,
-        encoding: "utf8",
+      const stdout: string[] = [];
+      const stderr: string[] = [];
+      const status = runDuplicateCli(["--fail-on-duplicates"], {
+        root,
+        stdout: (line: string) => stdout.push(line),
+        stderr: (line: string) => stderr.push(line),
       });
 
-      expect(result.status).toBe(1);
-      expect(result.stdout).toContain("duplicate helper implementations: 1");
-      expect(result.stdout).toContain("runtime.test.ts:1");
-      expect(result.stdout).toContain("runtime.test.ts:2");
-      expect(result.stderr).toContain("Duplicate test helper implementations remain");
+      expect(status).toBe(1);
+      expect(stdout.join("\n")).toContain("duplicate helper implementations: 1");
+      expect(stdout.join("\n")).toContain("runtime.test.ts:1");
+      expect(stdout.join("\n")).toContain("runtime.test.ts:2");
+      expect(stderr.join("\n")).toContain("Duplicate test helper implementations remain");
     } finally {
       rmSync(root, { recursive: true, force: true });
     }

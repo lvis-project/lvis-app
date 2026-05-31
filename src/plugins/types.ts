@@ -180,7 +180,7 @@ export interface PluginManifest {
   entry: string;
   /**
    * LLM에 노출되는 도구 이름 배열. `^[a-zA-Z_][a-zA-Z0-9_]*$` 필수 — 도트/하이픈 금지.
-   * 런타임이 이 값을 그대로 tool name으로 사용한다.
+   * UI 전용 runtime method는 여기에 넣지 말고 `uiCallable[]`에만 선언한다.
    */
   tools: string[];
   /** 플러그인 한 줄 설명 — LLM 카탈로그 및 UI에 표시. MUST 필드. */
@@ -263,6 +263,7 @@ export interface PluginManifest {
   /**
    * LLM이 도구를 호출할 때 사용하는 JSON Schema (draft-07)와
    * 권한 정책 메타데이터. 키: tool 이름 (tools 배열 내 값과 동일).
+   * UI 전용 runtime method는 `toolSchemas`에 넣지 않는다.
    */
   toolSchemas?: Record<
     string,
@@ -867,7 +868,7 @@ export interface PluginHostApi {
    * 플러그인이 직접 LLM 키를 관리하지 않고도 인텔리전트 기능 구현 가능.
    * LLM이 준비되지 않은 경우 에러를 던진다.
    */
-  callLlm(prompt: string, options?: { maxTokens?: number; systemPrompt?: string }): Promise<string>;
+  callLlm(prompt: string, options?: { maxTokens?: number; systemPrompt?: string; signal?: AbortSignal }): Promise<string>;
 
   /**
    * Structured log event routed through AuditLogger.

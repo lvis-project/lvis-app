@@ -179,36 +179,44 @@ function formatGateSummary(gateSummary) {
   return `${gateSummary.name.padEnd(11)} files=${String(gateSummary.fileCount).padStart(3)} ${metrics}`;
 }
 
-function main() {
-  const summaryPath = path.resolve(process.cwd(), process.argv[2] ?? COVERAGE_SUMMARY_PATH);
+export function runCoverageCli(args = process.argv.slice(2), options = {}) {
+  const cwd = options.cwd ?? process.cwd();
+  const stdout = options.stdout ?? console.log;
+  const stderr = options.stderr ?? console.error;
+  const summaryPath = path.resolve(cwd, args[0] ?? COVERAGE_SUMMARY_PATH);
   if (!fs.existsSync(summaryPath)) {
-    console.error(`coverage summary not found: ${path.relative(process.cwd(), summaryPath)}`);
-    console.error("run `bun run test:coverage` before `node scripts/check-test-coverage.mjs`");
-    process.exit(1);
+    stderr(`coverage summary not found: ${path.relative(cwd, summaryPath)}`);
+    stderr("run `bun run test:coverage` before `node scripts/check-test-coverage.mjs`");
+    return 1;
   }
 
   const summary = JSON.parse(fs.readFileSync(summaryPath, "utf8"));
-  const result = evaluateCoverageSummary(summary);
-  console.log("coverage gates:");
+  const result = evaluateCoverageSummary(summary, { cwd });
+  stdout("coverage gates:");
   for (const gateSummary of result.gateSummaries) {
-    console.log(`  ${formatGateSummary(gateSummary)}`);
+    stdout(`  ${formatGateSummary(gateSummary)}`);
   }
 
   if (!result.passed) {
-    console.error("\ncoverage gate failed:");
+    stderr("\ncoverage gate failed:");
     for (const failure of result.failures) {
-      console.error(`  - ${failure}`);
+      stderr(`  - ${failure}`);
     }
-    console.error("\ntop uncovered files:");
-    for (const file of topUncoveredFiles(summary)) {
-      console.error(
+    stderr("\ntop uncovered files:");
+    for (const file of topUncoveredFiles(summary, { cwd })) {
+      stderr(
         `  - ${file.file}: ${file.uncoveredLines} uncovered lines (${file.linePct.toFixed(2)}%)`,
       );
     }
-    process.exit(1);
+    return 1;
   }
 
-  console.log("coverage gates passed");
+  stdout("coverage gates passed");
+  return 0;
+}
+
+function main() {
+  process.exitCode = runCoverageCli(process.argv.slice(2));
 }
 
 if (import.meta.url === pathToFileURL(process.argv[1] ?? "").href) {

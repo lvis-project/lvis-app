@@ -6,12 +6,6 @@ import process from "node:process";
 import ts from "typescript";
 
 const ROOT = process.cwd();
-const FAIL_ON_DUPLICATES = process.argv.includes("--fail-on-duplicates");
-const SHOW_NAME_HOTSPOTS = process.argv.includes("--name-hotspots");
-const LIMIT = Number.parseInt(
-  process.argv.find((arg) => arg.startsWith("--limit="))?.slice("--limit=".length) ?? "40",
-  10,
-);
 
 const SKIP_DIRS = new Set([
   ".git",
@@ -178,36 +172,54 @@ export function analyzeDuplicateHelpers(root = ROOT) {
   };
 }
 
-function main() {
-  const { files, duplicateBodies, duplicateNames } = analyzeDuplicateHelpers(ROOT);
+function parseLimit(args) {
+  return Number.parseInt(
+    args.find((arg) => arg.startsWith("--limit="))?.slice("--limit=".length) ?? "40",
+    10,
+  );
+}
 
-  console.log(`test files: ${files.length}`);
-  console.log(`duplicate helper implementations: ${duplicateBodies.length}`);
-  for (const group of duplicateBodies.slice(0, LIMIT)) {
-    console.log(`\n${group.uniqueLocations.size}x ${[...group.uniqueNames].join(" / ")}`);
+export function runDuplicateCli(args = process.argv.slice(2), options = {}) {
+  const root = options.root ?? ROOT;
+  const stdout = options.stdout ?? console.log;
+  const stderr = options.stderr ?? console.error;
+  const failOnDuplicates = args.includes("--fail-on-duplicates");
+  const showNameHotspots = args.includes("--name-hotspots");
+  const limit = parseLimit(args);
+  const { files, duplicateBodies, duplicateNames } = analyzeDuplicateHelpers(root);
+
+  stdout(`test files: ${files.length}`);
+  stdout(`duplicate helper implementations: ${duplicateBodies.length}`);
+  for (const group of duplicateBodies.slice(0, limit)) {
+    stdout(`\n${group.uniqueLocations.size}x ${[...group.uniqueNames].join(" / ")}`);
     for (const entry of group.entries.slice(0, 8)) {
-      console.log(`  - ${entry.rel}:${entry.line} (${entry.name})`);
+      stdout(`  - ${entry.rel}:${entry.line} (${entry.name})`);
     }
-    if (group.entries.length > 8) console.log(`  - ... ${group.entries.length - 8} more`);
+    if (group.entries.length > 8) stdout(`  - ... ${group.entries.length - 8} more`);
   }
 
-  if (SHOW_NAME_HOTSPOTS) {
-    console.log(`helper-name hotspots (advisory): ${duplicateNames.length}`);
-    for (const [name, locations] of duplicateNames.slice(0, LIMIT)) {
-      console.log(`\n${locations.size}x ${name}`);
+  if (showNameHotspots) {
+    stdout(`helper-name hotspots (advisory): ${duplicateNames.length}`);
+    for (const [name, locations] of duplicateNames.slice(0, limit)) {
+      stdout(`\n${locations.size}x ${name}`);
       for (const location of [...locations].slice(0, 8)) {
-        console.log(`  - ${location}`);
+        stdout(`  - ${location}`);
       }
-      if (locations.size > 8) console.log(`  - ... ${locations.size - 8} more`);
+      if (locations.size > 8) stdout(`  - ... ${locations.size - 8} more`);
     }
   }
 
-  if (FAIL_ON_DUPLICATES && duplicateBodies.length > 0) {
-    console.error(
+  if (failOnDuplicates && duplicateBodies.length > 0) {
+    stderr(
       `\nDuplicate test helper implementations remain. Refactor shared fixtures or add a targeted exception only with rationale.`,
     );
-    process.exit(1);
+    return 1;
   }
+  return 0;
+}
+
+function main() {
+  process.exitCode = runDuplicateCli(process.argv.slice(2), { root: ROOT });
 }
 
 if (import.meta.url === pathToFileURL(process.argv[1] ?? "").href) {

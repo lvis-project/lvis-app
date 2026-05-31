@@ -361,7 +361,7 @@ export function createCallLlmForPlugin(
   conversationLoop: ConversationLoop,
   auditLogger: AuditLogger,
   options: CallLlmRateLimitOptions = {},
-): (pluginId: string, prompt: string, opts?: { maxTokens?: number; systemPrompt?: string }) => Promise<string> {
+): (pluginId: string, prompt: string, opts?: { maxTokens?: number; systemPrompt?: string; signal?: AbortSignal }) => Promise<string> {
   const maxCalls = options.maxCalls ?? 20;
   const windowMs = options.windowMs ?? 10 * 60 * 1000;
   const buckets = new Map<string, number[]>();
@@ -398,7 +398,7 @@ export function createCallLlmForPlugin(
       });
     } catch {}
 
-    return conversationLoop.generateText(prompt, maxTokens, opts?.systemPrompt);
+    return conversationLoop.generateText(prompt, maxTokens, opts?.systemPrompt, opts?.signal);
   };
 }
 
@@ -408,9 +408,9 @@ export function createCallLlmForPlugin(
  */
 export function createCallLlm(
   conversationLoop: ConversationLoop,
-): (prompt: string, opts?: { maxTokens?: number; systemPrompt?: string }) => Promise<string> {
+): (prompt: string, opts?: { maxTokens?: number; systemPrompt?: string; signal?: AbortSignal }) => Promise<string> {
   return (prompt, opts) => {
     const maxTokens = clampMaxTokens(opts?.maxTokens);
-    return conversationLoop.generateText(prompt, maxTokens, opts?.systemPrompt);
+    return conversationLoop.generateText(prompt, maxTokens, opts?.systemPrompt, opts?.signal);
   };
 }

@@ -725,7 +725,7 @@ const triggerConversationDedupe = new TriggerConversationDedupe();
 export interface LateBindingRefs {
   llmCallerRef: {
     fn:
-      | ((prompt: string, opts?: { maxTokens?: number; systemPrompt?: string }) => Promise<string>)
+      | ((prompt: string, opts?: { maxTokens?: number; systemPrompt?: string; signal?: AbortSignal }) => Promise<string>)
       | null;
   };
   pluginCallLlmRef: {
@@ -733,7 +733,7 @@ export interface LateBindingRefs {
       | ((
           pluginId: string,
           prompt: string,
-          opts?: { maxTokens?: number; systemPrompt?: string },
+          opts?: { maxTokens?: number; systemPrompt?: string; signal?: AbortSignal },
         ) => Promise<string>)
       | null;
   };

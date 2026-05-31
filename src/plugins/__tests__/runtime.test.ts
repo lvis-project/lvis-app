@@ -375,6 +375,47 @@ describe("PluginRuntime.disable", () => {
     await expect(runtime.call("uic_private")).resolves.toBe("private-ok");
   });
 
+  it("callFromUi can invoke UI-only methods that are not LLM tools", async () => {
+    const pluginDir = join(installedDir, "ui-only-method");
+    await mkdir(pluginDir, { recursive: true });
+
+    await writeFile(
+      join(pluginDir, "entry.mjs"),
+      `export default async function createPlugin(ctx) {
+  return {
+    handlers: {
+      "uio_upload_chunk": async () => "ui-only-ok",
+    },
+  };
+}
+`,
+      "utf-8",
+    );
+
+    const manifestPath = join(pluginDir, "plugin.json");
+    await writeFile(
+      manifestPath,
+      JSON.stringify({
+        id: "ui-only-method",
+        name: "ui-only-method",
+        version: "1.0.0",
+        description: "Test fixture.",
+        publisher: "Test fixture",
+        entry: "entry.mjs",
+        tools: [],
+        uiCallable: ["uio_upload_chunk"],
+      }),
+      "utf-8",
+    );
+
+    await writeTestPluginRegistry({ registryPath }, [{ id: "ui-only-method", manifestPath, enabled: true }]);
+    const runtime = makeRuntime();
+    await runtime.startAll();
+    runtime.setToolInvocationDelegate((method, payload) => runtime.call(method, payload));
+
+    await expect(runtime.callFromUi("uio_upload_chunk")).resolves.toBe("ui-only-ok");
+  });
+
   it("registerDisposer callbacks fire on disable() and not thereafter", async () => {
     const manifestPath = await writeFakePlugin("p-disposer");
     await writeTestPluginRegistry({ registryPath }, [{ id: "p-disposer", manifestPath, enabled: true }]);

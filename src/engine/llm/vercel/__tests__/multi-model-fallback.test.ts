@@ -311,6 +311,32 @@ describe("(d) AbortError → no fallback, re-throws (user cancel sacred)", () =>
 
     expect(factory).not.toHaveBeenCalled();
   });
+
+  it("does not retry or fallback when the request is aborted before a delayed retryable error arrives", async () => {
+    vi.useFakeTimers();
+    const controller = new AbortController();
+    const primary: LLMProvider = {
+      vendor: "claude" as any,
+      streamTurn: vi.fn(async function* () {
+        await new Promise((resolve) => setTimeout(resolve, 1_500));
+        yield { type: "error" as const, error: "The operation was aborted", classification: "network" };
+      }),
+    };
+    const factory: ProviderFactory = vi.fn(() => makeProvider("openai", GOOD_EVENTS));
+    const params = { ...BASE_PARAMS, abortSignal: controller.signal };
+
+    const pending = expect(
+      collect(streamWithFallback(primary, params, CHAIN, getApiKey, undefined, factory)),
+    ).rejects.toMatchObject({ name: "AbortError" });
+
+    await vi.advanceTimersByTimeAsync(1_200);
+    controller.abort();
+    await vi.advanceTimersByTimeAsync(300);
+    await pending;
+
+    expect(primary.streamTurn).toHaveBeenCalledTimes(1);
+    expect(factory).not.toHaveBeenCalled();
+  });
 });
 
 // ─── (e) All chain exhausted → throws last error ─────────────────
