@@ -92,6 +92,31 @@ describe("ConversationLoop.generateText", () => {
     const result = await loop.generateText("prompt");
     expect(result).toBe("first");
   });
+
+  it("generateText abortSignal을 provider streamTurn에 전달한다", async () => {
+    const provider = new FakeProvider([
+      { type: "message_complete", stopReason: "end_turn" },
+    ]);
+    const loop = buildLoop(provider);
+    const controller = new AbortController();
+
+    await loop.generateText("prompt", undefined, "system", controller.signal);
+    expect(provider.lastParams?.abortSignal).toBe(controller.signal);
+  });
+
+  it("pre-aborted generateText는 provider 호출 전에 중단한다", async () => {
+    const provider = new FakeProvider([
+      { type: "message_complete", stopReason: "end_turn" },
+    ]);
+    const loop = buildLoop(provider);
+    const controller = new AbortController();
+    controller.abort();
+
+    await expect(
+      loop.generateText("prompt", undefined, "system", controller.signal),
+    ).rejects.toThrow("LLM generation aborted");
+    expect(provider.lastParams).toBeNull();
+  });
 });
 
 describe("ConversationLoop.pingProvider", () => {

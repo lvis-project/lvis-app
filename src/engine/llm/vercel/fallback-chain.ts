@@ -106,6 +106,7 @@ async function* attemptStreamWithRetries(
 ): AsyncIterable<StreamEvent> {
   let lastErr: unknown;
   for (let attempt = 1; attempt <= MAX_ATTEMPTS_PER_PROVIDER; attempt += 1) {
+    throwIfAborted(params.abortSignal);
     const attemptStartedAt = Date.now();
     callbacks?.onStatus?.({
       phase: "attempt",
@@ -119,6 +120,7 @@ async function* attemptStreamWithRetries(
       yield* attemptStream(provider, params);
       return;
     } catch (err) {
+      throwIfAborted(params.abortSignal);
       if (isNonRetryable(err)) throw err;
       lastErr = err;
       await waitForAttemptWindow(attemptStartedAt, err, params.abortSignal);
@@ -143,14 +145,18 @@ function makeAbortError(): Error {
   return err;
 }
 
+function throwIfAborted(abortSignal?: AbortSignal): void {
+  if (abortSignal?.aborted) throw makeAbortError();
+}
+
 function waitForAttemptWindow(
   startedAt: number,
   err: unknown,
   abortSignal?: AbortSignal,
 ): Promise<void> {
   const remainingMs = Math.max(0, MIN_RETRY_WINDOW_MS - (Date.now() - startedAt));
-  if (remainingMs <= 0) return Promise.resolve();
   if (abortSignal?.aborted) return Promise.reject(makeAbortError());
+  if (remainingMs <= 0) return Promise.resolve();
   return new Promise((resolve, reject) => {
     let timeout: ReturnType<typeof setTimeout> | undefined;
     const onAbort = () => {
@@ -263,9 +269,11 @@ export async function* streamWithFallback(
   for (let i = 0; i < totalAttempts; i++) {
     const { provider, label, identity, attemptParams } = getAttempt(i);
     try {
+      throwIfAborted(params.abortSignal);
       yield* attemptStreamWithRetries(provider, attemptParams, label, identity, callbacks);
       return;
     } catch (err) {
+      throwIfAborted(params.abortSignal);
       if (isNonRetryable(err)) throw err;
       lastErr = err;
       if (i + 1 >= totalAttempts) break;
