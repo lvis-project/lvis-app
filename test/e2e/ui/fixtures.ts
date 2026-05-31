@@ -41,6 +41,7 @@ type E2eManifest = {
   hostSecrets?: { read?: unknown };
   toolSchemas?: Record<string, unknown>;
   ui?: unknown;
+  python?: unknown;
 };
 
 function addUniqueString(list: unknown, value: string): string[] {
@@ -55,21 +56,25 @@ function manifestIdentitySha256FromPluginJson(pluginJsonPath: string): string {
 }
 
 function prepareE2eManifest(manifest: E2eManifest, enableDemoKeyProbe: boolean): E2eManifest {
-  if (!enableDemoKeyProbe || manifest.id !== 'meeting') return manifest;
+  const base = { ...manifest };
+  if (base.id !== 'agent-hub') {
+    delete base.python;
+  }
+  if (!enableDemoKeyProbe || base.id !== 'meeting') return base;
 
-  const declaredHostKeyNames = Array.isArray(manifest.hostSecrets?.read)
-    ? manifest.hostSecrets.read.filter((item): item is string => typeof item === 'string')
+  const declaredHostKeyNames = Array.isArray(base.hostSecrets?.read)
+    ? base.hostSecrets.read.filter((item): item is string => typeof item === 'string')
     : [];
   const hostSecretReads = declaredHostKeyNames.includes('llm.apiKey.openai')
     ? declaredHostKeyNames
     : [...declaredHostKeyNames, 'llm.apiKey.openai'];
   return {
-    ...manifest,
+    ...base,
     hostSecrets: { read: hostSecretReads },
-    tools: addUniqueString(manifest.tools, E2E_RESOLVE_DEMO_KEY_TOOL),
-    uiCallable: addUniqueString(manifest.uiCallable, E2E_RESOLVE_DEMO_KEY_TOOL),
+    tools: addUniqueString(base.tools, E2E_RESOLVE_DEMO_KEY_TOOL),
+    uiCallable: addUniqueString(base.uiCallable, E2E_RESOLVE_DEMO_KEY_TOOL),
     toolSchemas: {
-      ...(manifest.toolSchemas ?? {}),
+      ...(base.toolSchemas ?? {}),
       [E2E_RESOLVE_DEMO_KEY_TOOL]: {
         description: 'E2E-only probe that resolves the host-managed OpenAI key through hostApi.resolveApiKey.',
         category: 'read',
