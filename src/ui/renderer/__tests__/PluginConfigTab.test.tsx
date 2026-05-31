@@ -719,4 +719,100 @@ describe("PluginConfigSchemaForm — values prop sync", () => {
       expect(input.value).toBe("outlook.com");
     });
   });
+
+  it("does not preserve schema defaults as dirty values when saved values arrive asynchronously", async () => {
+    const schema = {
+      properties: {
+        apiKeySource: {
+          type: "string" as const,
+          title: "STT key source",
+          enum: ["host", "plugin"],
+          default: "host",
+        },
+      },
+    };
+
+    const { rerender } = render(
+      <PluginConfigSchemaForm
+        pluginId="meeting"
+        schema={schema}
+        values={{ apiKeySource: "host" }}
+        secretsPresent={{}}
+        onSave={async () => {}}
+        onSetSecret={async () => {}}
+      />,
+    );
+    const select = document.querySelector(
+      '[id="pcfg:meeting:apiKeySource"]',
+    ) as HTMLSelectElement;
+    expect(select).not.toBeNull();
+    expect(select.value).toBe("host");
+
+    rerender(
+      <PluginConfigSchemaForm
+        pluginId="meeting"
+        schema={schema}
+        values={{ apiKeySource: "plugin" }}
+        secretsPresent={{}}
+        onSave={async () => {}}
+        onSetSecret={async () => {}}
+      />,
+    );
+
+    await waitFor(() => {
+      expect(select.value).toBe("plugin");
+    });
+  });
+
+  it("still preserves explicit unsaved edits while applying saved updates to untouched fields", async () => {
+    const schema = {
+      properties: {
+        endpoint: {
+          type: "string" as const,
+          title: "Endpoint",
+        },
+        region: {
+          type: "string" as const,
+          title: "Region",
+        },
+      },
+    };
+
+    const { rerender } = render(
+      <PluginConfigSchemaForm
+        pluginId="sync-plugin"
+        schema={schema}
+        values={{ endpoint: "https://old.example", region: "eastus" }}
+        secretsPresent={{}}
+        onSave={async () => {}}
+        onSetSecret={async () => {}}
+      />,
+    );
+    const endpoint = document.querySelector(
+      '[id="pcfg:sync-plugin:endpoint"]',
+    ) as HTMLInputElement;
+    const region = document.querySelector(
+      '[id="pcfg:sync-plugin:region"]',
+    ) as HTMLInputElement;
+    expect(endpoint).not.toBeNull();
+    expect(region).not.toBeNull();
+
+    fireEvent.change(endpoint, { target: { value: "https://draft.example" } });
+
+    rerender(
+      <PluginConfigSchemaForm
+        pluginId="sync-plugin"
+        schema={schema}
+        values={{ endpoint: "https://old.example", region: "westus" }}
+        secretsPresent={{}}
+        onSave={async () => {}}
+        onSetSecret={async () => {}}
+      />,
+    );
+
+    await waitFor(() => {
+      expect(endpoint.value).toBe("https://draft.example");
+      expect(region.value).toBe("westus");
+    });
+  });
 });
