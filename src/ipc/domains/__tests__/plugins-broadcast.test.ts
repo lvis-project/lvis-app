@@ -61,6 +61,7 @@ async function setup() {
         { id: "agent-hub", slug: "lvis-plugin-agent-hub" },
         { id: "meeting", slug: "lvis-plugin-meeting" },
       ]),
+      getInstalledVersion: vi.fn(async () => "1.0.0"),
       install: vi.fn(async (...args: unknown[]) => {
         emitRegisteringProgress(args);
         return { pluginId: "agent-hub", installed: true };
@@ -77,10 +78,12 @@ async function setup() {
       removePlugin: vi.fn(async () => undefined),
       listPluginIds: vi.fn((): string[] => []),
       mergeConfigOverride: vi.fn(),
+      setConfigOverride: vi.fn(),
       getPluginManifest: vi.fn(() => ({
         configSchema: {
           properties: {
             apiKey: { type: "string", format: "secret" },
+            sttApiKey: { type: "string", format: "secret" },
           },
         },
       })),
@@ -89,6 +92,10 @@ async function setup() {
       get: vi.fn(() => ({ backend: "real-cloud", realCloudBaseUrl: "https://marketplace.example" })),
       deletePluginConfig: vi.fn(async () => undefined),
       deletePluginSecrets: vi.fn(async () => 0),
+      setSecret: vi.fn(async () => undefined),
+      getSecret: vi.fn(() => null),
+      getPluginConfig: vi.fn(() => ({})),
+      setPluginConfig: vi.fn(async () => undefined),
     },
     auditLogger: {
       log: vi.fn(),
@@ -312,6 +319,35 @@ describe("plugins IPC lifecycle broadcast", () => {
     }
   });
 
+  it("rejects endpoint URLs saved into API-key secret fields", async () => {
+    const { deps } = await setup();
+
+    const result = await invoke(
+      "lvis:plugins:config:secret:set",
+      "meeting",
+      "sttApiKey",
+      "https://example.openai.azure.com/openai/deployments/gpt-4o-transcribe/audio/transcriptions",
+    );
+
+    expect(result).toMatchObject({
+      ok: false,
+      error: "plugin-config-secret-invalid-value",
+    });
+    expect(deps.settingsService.setSecret).not.toHaveBeenCalled();
+  });
+
+  it("does not report endpoint URLs saved in API-key-like secret fields as present", async () => {
+    const { deps } = await setup();
+    deps.settingsService.getSecret.mockImplementation((key: string) => {
+      if (key.endsWith(".apiKey")) return "sk-valid";
+      if (key.endsWith(".sttApiKey")) return "https://example.openai.azure.com/openai/deployments/stt/audio/transcriptions";
+      return null;
+    });
+
+    const result = await invoke("lvis:plugins:config:secret:list-keys", "meeting");
+
+    expect(result).toEqual({ ok: true, keys: ["apiKey"] });
+  });
   it("broadcasts uninstall result to every app window", async () => {
     const { deps, appWindows } = await setup();
 
@@ -320,7 +356,7 @@ describe("plugins IPC lifecycle broadcast", () => {
     expect(deps.pluginMarketplace.uninstall).toHaveBeenCalledWith("agent-hub");
     expect(deps.pluginRuntime.removePlugin).toHaveBeenCalledWith("agent-hub");
     expect(deps.settingsService.deletePluginConfig).toHaveBeenCalledWith("agent-hub");
-    expect(deps.settingsService.deletePluginSecrets).toHaveBeenCalledWith("agent-hub", new Set(["apiKey"]));
+    expect(deps.settingsService.deletePluginSecrets).toHaveBeenCalledWith("agent-hub", new Set(["apiKey", "sttApiKey"]));
     expect(deps.clearAuthPartitionService).toHaveBeenCalledWith("persist:plugin-auth:agent-hub");
     expect(deps.clearAuthPartitionService).toHaveBeenCalledWith("persist:plugin-auth:agent-hub:tenant");
     expect(deps.forgetPluginAuthPartitionsService).toHaveBeenCalledWith("agent-hub");
@@ -495,7 +531,8 @@ describe("plugins IPC lifecycle broadcast", () => {
         list: vi.fn(async () => [
           { id: "agent-hub", slug: "lvis-plugin-agent-hub" },
         ]),
-        install: vi.fn(async (...args: unknown[]) => {
+        getInstalledVersion: vi.fn(async () => "1.0.0"),
+      install: vi.fn(async (...args: unknown[]) => {
           emitRegisteringProgress(args);
           return { pluginId: "agent-hub", installed: true };
         }),
@@ -511,6 +548,7 @@ describe("plugins IPC lifecycle broadcast", () => {
         removePlugin: vi.fn(async () => undefined),
         listPluginIds: vi.fn((): string[] => []),
         mergeConfigOverride: vi.fn(),
+      setConfigOverride: vi.fn(),
       },
       settingsService: {
         get: vi.fn(() => ({ backend: "real-cloud", realCloudBaseUrl: "https://marketplace.example" })),
