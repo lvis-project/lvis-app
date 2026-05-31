@@ -38,9 +38,11 @@ export function usePluginMarketplace(api: LvisApi) {
     try {
       const cards = await api.listPluginCards();
       setPluginCards(cards);
+      return cards;
     } catch {
       // Card load is best-effort — surfaces that depend on it (auth badge)
       // simply skip rendering until next refresh tick.
+      return [];
     }
   }, [api]);
 
@@ -55,19 +57,25 @@ export function usePluginMarketplace(api: LvisApi) {
     }
   }, [api]);
 
-  const installPlugin = useCallback(async (id: string) => {
+  const installPlugin = useCallback(async (id: string, expectedVersion?: string) => {
     setWorking(true);
     try {
-      const result = await getHostMarketplaceApi().installMarketplacePlugin(id);
+      const result = await getHostMarketplaceApi().installMarketplacePlugin(id, expectedVersion);
       if (!result.ok) {
         throw new Error(result.message ?? result.error);
       }
       await refreshMarketplace();
       await refreshViews();
-      await refreshCards();
+      const cards = await refreshCards();
+      assertInstalledPluginVersion(cards, {
+        requestedPluginId: id,
+        installedPluginId: result.pluginId,
+        expectedVersion,
+      });
       setMarketStatus(`설치 완료: ${id}`);
     } catch (e) {
       setMarketStatus(`설치 실패: ${(e as Error).message}`);
+      throw e;
     } finally {
       setWorking(false);
     }
@@ -109,4 +117,32 @@ export function usePluginMarketplace(api: LvisApi) {
     installPlugin,
     uninstallPlugin,
   };
+}
+
+export function assertInstalledPluginVersion(
+  cards: PluginCardSummary[],
+  input: {
+    requestedPluginId: string;
+    installedPluginId: string;
+    expectedVersion?: string;
+  },
+): void {
+  const expectedVersion = input.expectedVersion?.trim();
+  if (!expectedVersion) return;
+
+  const card = cards.find((candidate) =>
+    candidate.id === input.installedPluginId ||
+    candidate.id === input.requestedPluginId ||
+    candidate.installAliases?.includes(input.requestedPluginId),
+  );
+  if (!card) {
+    throw new Error(
+      `설치 검증 실패: ${input.requestedPluginId} manifest를 다시 읽지 못했습니다.`,
+    );
+  }
+  if (card.version !== expectedVersion) {
+    throw new Error(
+      `설치 검증 실패: ${input.requestedPluginId} expected ${expectedVersion}, got ${card.version ?? "unknown"}`,
+    );
+  }
 }

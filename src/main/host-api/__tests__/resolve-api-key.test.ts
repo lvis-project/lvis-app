@@ -190,8 +190,33 @@ describe("resolveApiKey — Tier-1 own-namespace short-circuit", () => {
       expect(result.vendor).toBe("openai");
     }
   });
-});
 
+  it("rejects URL-shaped values in plugin-owned llm api keys before returning a bearer", async () => {
+    const manifest = manifestFor("plugin-x", []);
+    const audit = makeAuditLogger();
+    const settings = makeSettingsService({
+      provider: "openai",
+      secrets: { "plugin.plugin-x.llm.apiKey.openai": "https://example.openai.azure.com/openai/deployments/stt/audio/transcriptions" },
+    });
+
+    const result = await resolveApiKey(
+      { purpose: "llm", vendor: "openai" },
+      {
+        pluginId: "plugin-x",
+        manifest,
+        settingsService: settings as never,
+        auditLogger: audit,
+      },
+    );
+
+    expect(result.ok).toBe(false);
+    if (!result.ok) expect(result.reason).toBe("no-host-vendor");
+    expect(audit.mock).toHaveBeenCalledWith(expect.objectContaining({
+      type: "warn",
+      input: expect.stringContaining("endpoint-url-in-api-key-like-secret"),
+    }));
+  });
+});
 describe("resolveApiKey — Tier-2 manifest allowlist miss", () => {
   it("returns reason=not-whitelisted when llm.apiKey.<vendor> not in hostSecrets.read", async () => {
     const manifest = manifestFor("p", []); // no allowlist entries

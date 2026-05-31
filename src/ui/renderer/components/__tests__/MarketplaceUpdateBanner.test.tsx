@@ -28,6 +28,19 @@ describe("MarketplaceUpdateBanner", () => {
     expect(banner.textContent).toContain("LVIS Email (email) → 3.1.0");
   });
 
+  it("passes the expected latest version to the update action", async () => {
+    const onUpdate = vi.fn(async () => undefined);
+    render(
+      <MarketplaceUpdateBanner
+        updates={[update("meeting", "LVIS Meeting", "0.5.24")]}
+        onDismiss={vi.fn()}
+        onUpdate={onUpdate}
+      />,
+    );
+
+    screen.getByTestId("marketplace-update-action").click();
+    await vi.waitFor(() => expect(onUpdate).toHaveBeenCalledWith("meeting", "0.5.24"));
+  });
   it("falls back to plugin id when a display name is missing", () => {
     render(
       <MarketplaceUpdateBanner
