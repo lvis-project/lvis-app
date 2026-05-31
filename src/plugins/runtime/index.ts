@@ -81,6 +81,10 @@ import { plog, PluginPhase } from "../lifecycle-log.js";
 const log = createLogger("plugin-runtime");
 const START_FAILURE_STOP_TIMEOUT_MS = 2_000;
 
+function declaredRuntimeMethods(manifest: PluginManifest): string[] {
+  return [...new Set([...(manifest.tools ?? []), ...(manifest.uiCallable ?? [])])];
+}
+
 export type { InstallPolicy };
 export { normalizeInstallPolicy, getDeclaredEmittedEvents };
 export { resolveManifestLoadPlan, readEnabledManifestSnapshots };
@@ -716,7 +720,7 @@ export class PluginRuntime {
       );
 
       const methods = new Map<string, PluginToolHandler>();
-      for (const toolName of manifest.tools) {
+      for (const toolName of declaredRuntimeMethods(manifest)) {
         const handler = instance.handlers[toolName];
         if (!handler) {
           plog("warn", { pluginId: manifest.id, phase: PluginPhase.REGISTER_TOOL_SKIP, toolName, reason: "missing_handler" }, "tool disabled — missing handler");
@@ -994,7 +998,7 @@ export class PluginRuntime {
     }
 
     const methods = new Map<string, PluginToolHandler>();
-    for (const toolName of manifest.tools) {
+    for (const toolName of declaredRuntimeMethods(manifest)) {
       const handler = instance.handlers[toolName];
       if (!handler) {
         plog("warn", { pluginId, phase: PluginPhase.REGISTER_TOOL_SKIP, toolName, reason: "missing_handler" }, "tool disabled — missing handler after restart");
@@ -1415,7 +1419,7 @@ export class PluginRuntime {
     }
 
     const methods = new Map<string, PluginToolHandler>();
-    for (const toolName of manifest.tools) {
+    for (const toolName of declaredRuntimeMethods(manifest)) {
       const handler = instance.handlers[toolName];
       if (!handler) {
         log.warn(`missing handler '${toolName}' — tool disabled`);
@@ -1548,7 +1552,7 @@ export class PluginRuntime {
     );
 
     const methods = new Map<string, PluginToolHandler>();
-    for (const toolName of manifest.tools) {
+    for (const toolName of declaredRuntimeMethods(manifest)) {
       const handler = instance.handlers[toolName];
       if (!handler) {
         log.warn(`missing handler '${toolName}' after reload — tool disabled`);
