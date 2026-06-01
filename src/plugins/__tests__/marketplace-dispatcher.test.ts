@@ -18,6 +18,7 @@ vi.mock("../publisher-keys.js", () => ({
 import { PluginMarketplaceService } from "../marketplace.js";
 import type { MarketplaceFetcher } from "../marketplace-fetcher.js";
 import type { PluginMarketplaceItem } from "../types.js";
+import { setCachedCatalog } from "../offline-cache.js";
 import { _resetForTest, setIsPackaged } from "../../boot/dev-flags.js";
 import { makeTestPluginPaths } from "./test-helpers.js";
 import { canonicalJSON } from "../whitelist/canonical-json.js";
@@ -725,5 +726,39 @@ describe("PluginMarketplaceService install()", () => {
     const { service, npmInstallMock } = makeService(fetcher);
     await expect(service.install("broken-plugin")).rejects.toThrow(/zip format/i);
     expect(npmInstallMock).not.toHaveBeenCalled();
+  });
+
+  it("reads update guard versions from the live fetcher instead of the offline catalog cache", async () => {
+    const cachedPlugin: PluginMarketplaceItem = {
+      id: "meeting",
+      slug: "meeting",
+      name: "LVIS Meeting",
+      description: "cached",
+      version: "0.5.8",
+      packageSpec: "meeting@0.5.8",
+      packageName: "meeting",
+      tools: [],
+    };
+    const livePlugin: PluginMarketplaceItem = {
+      ...cachedPlugin,
+      description: "live",
+      version: "0.5.25",
+      packageSpec: "meeting@0.5.25",
+    };
+    await setCachedCatalog([cachedPlugin], resolve(cacheRoot, "marketplace-catalog"));
+    const fetcher: MarketplaceFetcher = {
+      listPlugins: vi.fn(async () => [livePlugin]),
+      getPluginDetail: vi.fn(async (slug: string) => (slug === "meeting" ? livePlugin : null)),
+      downloadVersion: vi.fn(async () => ({
+        zipBuffer: Buffer.from(""),
+        sha256: "",
+      })),
+    };
+    const { service } = makeService(fetcher);
+
+    const listed = await service.list();
+    expect(listed.find((item) => item.id === "meeting")?.version).toBe("0.5.8");
+    await expect(service.getLiveCatalogVersion("meeting")).resolves.toBe("0.5.25");
+    expect(fetcher.getPluginDetail).toHaveBeenCalledWith("meeting");
   });
 });

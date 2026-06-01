@@ -61,6 +61,7 @@ async function setup() {
         { id: "agent-hub", slug: "lvis-plugin-agent-hub" },
         { id: "meeting", slug: "lvis-plugin-meeting" },
       ]),
+      getLiveCatalogVersion: vi.fn(async () => "1.0.0"),
       getInstalledVersion: vi.fn(async () => "1.0.0"),
       install: vi.fn(async (...args: unknown[]) => {
         emitRegisteringProgress(args);
@@ -531,8 +532,9 @@ describe("plugins IPC lifecycle broadcast", () => {
         list: vi.fn(async () => [
           { id: "agent-hub", slug: "lvis-plugin-agent-hub" },
         ]),
+        getLiveCatalogVersion: vi.fn(async () => "1.0.0"),
         getInstalledVersion: vi.fn(async () => "1.0.0"),
-      install: vi.fn(async (...args: unknown[]) => {
+        install: vi.fn(async (...args: unknown[]) => {
           emitRegisteringProgress(args);
           return { pluginId: "agent-hub", installed: true };
         }),
