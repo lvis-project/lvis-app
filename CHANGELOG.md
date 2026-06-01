@@ -1,5 +1,15 @@
 # Changelog
 
+## v0.2.17 — 2026-06-01
+
+### 릴리스 검증
+
+- **라이브 앱 업데이트 설치 경로 검증 릴리스** — v0.2.16 의 updater shutdown handoff 수정이 실제 GitHub 릴리스 피드에서 다음 버전 업데이트를 다운로드하고, 확인 후 종료/설치까지 완료하는지 검증하기 위한 version-only 릴리스다. 업데이트 설치 코드 경로는 v0.2.16 과 동일하며, package version bump 만으로 v0.2.16 → v0.2.17 라이브 업데이트 경로를 만든다.
+
+### 검증
+
+- v0.2.16 과 동일 코드 경로. v0.2.16 검증: Targeted Vitest 4 files / 53 pass, `bun run check:test-quality`, `bun run typecheck`, `bun run build`, `git diff --check` pass.
+
 ## v0.2.16 — 2026-06-01
 
 ### 앱 업데이트
