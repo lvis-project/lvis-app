@@ -18,6 +18,7 @@ import type { BrowserWindow } from "electron";
 import { mkdirSync } from "node:fs";
 import { randomUUID, createHash } from "node:crypto";
 import { installPluginPartitionPolicy } from "../../main/html-preview-partition.js";
+import { isAppUpdateInstallRequested } from "../../main/app-update-install-intent.js";
 import { pluginPartitionName } from "../../shared/plugin-partition.js";
 import { onEvent as onHostEvent } from "../types.js";
 import { normalizeAllowedHosts } from "../../main/host-allow-list.js";
@@ -837,6 +838,7 @@ export interface InitPluginRuntimeOutput {
   deploymentGuard: PluginDeploymentGuard;
   lateBinding: LateBindingRefs;
   pluginShutdownHandlers: Array<{ pluginId: string; handler: () => void | Promise<void> }>;
+  runPluginShutdownHandlers: () => Promise<void>;
   /** SoT — shared with MarketplaceService + post-boot update detector. */
   pluginPaths: ReturnType<typeof resolvePluginPaths>;
 }
@@ -877,12 +879,13 @@ export async function initPluginRuntime(
   // Plugin shutdown handler registry — fires on before-quit (see shared AuditLogger + hooks wiring).
   const pluginShutdownHandlers: Array<{ pluginId: string; handler: () => void | Promise<void> }> = [];
   let pluginShutdownRan = false;
-  app.prependOnceListener("before-quit", (event) => {
-    if (pluginShutdownHandlers.length === 0 || pluginShutdownRan) return;
+  let pluginShutdownPromise: Promise<void> | null = null;
+  const runPluginShutdownHandlers = (): Promise<void> => {
+    if (pluginShutdownRan) return pluginShutdownPromise ?? Promise.resolve();
+    if (pluginShutdownHandlers.length === 0) return Promise.resolve();
     pluginShutdownRan = true;
     const SHUTDOWN_TIMEOUT_MS = 5000;
-    event.preventDefault();
-    void (async () => {
+    pluginShutdownPromise = (async () => {
       await Promise.allSettled(
         pluginShutdownHandlers.map(async ({ pluginId, handler }) => {
           let timer: NodeJS.Timeout | undefined;
@@ -900,6 +903,15 @@ export async function initPluginRuntime(
           }
         }),
       );
+    })();
+    return pluginShutdownPromise;
+  };
+  app.prependOnceListener("before-quit", (event) => {
+    if (isAppUpdateInstallRequested()) return;
+    if (pluginShutdownHandlers.length === 0 || pluginShutdownRan) return;
+    event.preventDefault();
+    void (async () => {
+      await runPluginShutdownHandlers();
       app.quit();
     })();
   });
@@ -1971,6 +1983,7 @@ export async function initPluginRuntime(
     deploymentGuard,
     lateBinding,
     pluginShutdownHandlers,
+    runPluginShutdownHandlers,
     pluginPaths,
   };
 }

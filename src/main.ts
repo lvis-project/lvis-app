@@ -64,6 +64,11 @@ import {
   resolveShutdownCleanupTimeoutMs,
   runCleanupWithHardTimeout,
 } from "./main/shutdown-timeout.js";
+import {
+  isAppUpdateInstallPrepared,
+  isAppUpdateInstallRequested,
+  markAppUpdateInstallPrepared,
+} from "./main/app-update-install-intent.js";
 import { logger as rootPinoLogger } from "./lib/logger.js";
 const log = createLogger("lvis");
 
@@ -242,6 +247,8 @@ let rendererReloadReady = false;
 let pendingRendererReload = false;
 let appShutdownStarted = false;
 let appShutdownCompleted = false;
+type AppShutdownCleanupOutcome = "completed" | "skipped" | "timed-out" | "failed";
+let appShutdownCleanupPromise: Promise<AppShutdownCleanupOutcome> | null = null;
 
 const SETTINGS_WINDOW_WIDTH = 1040;
 const SETTINGS_WINDOW_HEIGHT = 760;
@@ -252,6 +259,69 @@ const rendererIndexUrl = () => pathToFileURL(resolve(__dirname, "..", "index.htm
 function initialMainWindowBounds(): { x: number; y: number; width: number; height: number } {
   const { workArea } = screen.getPrimaryDisplay();
   return computeInitialMainWindowBounds(workArea);
+}
+
+async function runAppShutdownCleanup(options: {
+  reason: "before-quit" | "app-update-install";
+  exitOnTimeout: boolean;
+}): Promise<AppShutdownCleanupOutcome> {
+  if (!services || appShutdownCompleted) return "skipped";
+  if (appShutdownCleanupPromise) return appShutdownCleanupPromise;
+
+  appShutdownStarted = true;
+  const svc = services;
+  const cleanupTimeoutMs = resolveShutdownCleanupTimeoutMs();
+  appShutdownCleanupPromise = (async () => {
+    const result = await runCleanupWithHardTimeout(async (signal) => {
+      // Persist window state FIRST — it's a fast synchronous-ish operation
+      // and if any later async step (shutdown routines / plugin stopAll)
+      // hangs past the cleanup deadline we still don't lose the user's
+      // last window layout. The remaining steps honor the AbortSignal so
+      // they can break out of their inner loops when the deadline fires.
+      windowManager?.persistAll();
+      if (signal.aborted) return;
+      await svc.runPluginShutdownHandlers?.();
+      if (signal.aborted) return;
+      // v2 shutdown routines — fire all active shutdown-trigger routines with a
+      // 5s timeout so a hung LLM call cannot block app.quit() indefinitely.
+      await runShutdownRoutines(svc);
+      if (signal.aborted) return;
+      await svc.shutdown?.();
+      if (signal.aborted) return;
+      await svc.pluginRuntime.stopAll();
+    }, cleanupTimeoutMs);
+
+    if (result.status === "timed-out") {
+      // Force-kill BEFORE the log line so killedChildCount reflects what
+      // actually happened, not an optimistic pre-kill count.
+      const killedChildCount = forceKillManagedChildProcesses(`${options.reason} cleanup timeout`);
+      log.error({
+        timeoutMs: cleanupTimeoutMs,
+        killedChildCount,
+        reason: options.reason,
+      }, "shutdown cleanup timed out");
+      // Flush the logger so the diagnostic above (and any preceding warn
+      // about which subsystem hung) makes it to disk before the process leaves.
+      await flushLogger(log);
+      appShutdownCompleted = true;
+      if (options.exitOnTimeout) {
+        app.exit(0);
+      }
+      return "timed-out";
+    }
+
+    if (result.status === "failed") {
+      log.error("%s: shutdown cleanup failed: %s", options.reason, errorMessage(result.error));
+      await flushLogger(log);
+      appShutdownCompleted = true;
+      return "failed";
+    }
+
+    appShutdownCompleted = true;
+    return "completed";
+  })();
+
+  return appShutdownCleanupPromise;
 }
 
 /**
@@ -1450,6 +1520,7 @@ function createWindow(options: { showBootstrapSplash?: boolean } = {}) {
     showMainWindow(win);
   });
   win.on("close", (event) => {
+    if (isAppUpdateInstallRequested()) return;
     if (appShutdownStarted || appShutdownCompleted || !tray || win.isDestroyed()) return;
     // Honour user's close-button preference. The default is `hide-to-tray`
     // (keeps routine scheduler + plugin background work alive); a user who
@@ -1809,61 +1880,25 @@ app.on("activate", () => {
 });
 
 app.on("before-quit", (event) => {
+  const appUpdateInstallRequested = isAppUpdateInstallRequested();
+  if (isAppUpdateInstallPrepared()) return;
   if (!services || appShutdownCompleted) return;
   if (appShutdownStarted) {
     event.preventDefault();
     return;
   }
-  appShutdownStarted = true;
   event.preventDefault();
-  // Capture services in a local so TypeScript narrowing survives the async
-  // closure boundary, and so a future window-closed handler that nulls
-  // `services` mid-shutdown cannot NPE us on the next member access.
-  const svc = services;
-  const cleanupTimeoutMs = resolveShutdownCleanupTimeoutMs();
   void (async () => {
-    const result = await runCleanupWithHardTimeout(async (signal) => {
-      // Persist window state FIRST — it's a fast synchronous-ish operation
-      // and if any later async step (shutdown routines / plugin stopAll)
-      // hangs past the cleanup deadline we still don't lose the user's
-      // last window layout. The remaining steps honor the AbortSignal so
-      // they can break out of their inner loops when the deadline fires.
-      windowManager?.persistAll();
-      if (signal.aborted) return;
-      // v2 shutdown routines — fire all active shutdown-trigger routines with a
-      // 5s timeout so a hung LLM call cannot block app.quit() indefinitely.
-      await runShutdownRoutines(svc);
-      if (signal.aborted) return;
-      await svc.shutdown?.();
-      if (signal.aborted) return;
-      await svc.pluginRuntime.stopAll();
-    }, cleanupTimeoutMs);
-
-    if (result.status === "timed-out") {
-      // Force-kill BEFORE the log line so killedChildCount reflects what
-      // actually happened, not an optimistic pre-kill count.
-      const killedChildCount = forceKillManagedChildProcesses("app shutdown cleanup timeout");
-      log.error({
-        timeoutMs: cleanupTimeoutMs,
-        killedChildCount,
-      }, "before-quit: shutdown cleanup timed out; forcing app exit");
-      // Flush the logger so the diagnostic above (and any preceding warn
-      // about which subsystem hung) makes it to disk before app.exit()
-      // hard-terminates the process. pino transports buffer writes by
-      // default, so without this the "why we force-killed" trail is lost
-      // — precisely the line audit needs after a force exit.
-      await flushLogger(log);
-      appShutdownCompleted = true;
-      app.exit(0);
+    const outcome = await runAppShutdownCleanup({
+      reason: appUpdateInstallRequested ? "app-update-install" : "before-quit",
+      exitOnTimeout: !appUpdateInstallRequested,
+    });
+    if (appUpdateInstallRequested) {
+      markAppUpdateInstallPrepared();
+      app.quit();
       return;
     }
-
-    if (result.status === "failed") {
-      log.error("before-quit: shutdown cleanup failed: %s", errorMessage(result.error));
-      await flushLogger(log);
-    }
-
-    appShutdownCompleted = true;
+    if (outcome === "timed-out") return;
     app.quit();
   })();
 });
