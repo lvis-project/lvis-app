@@ -829,16 +829,12 @@ const api = {
    *  "available"; rejected (ok:false) otherwise. */
   downloadAppUpdate: () =>
     ipcRenderer.invoke("lvis:update:download-now") as Promise<{ ok: boolean; reason?: string }>,
-  /** Quit and apply the downloaded update. Only valid when the current
-   *  state is "downloaded"; rejected (ok:false) otherwise. */
+  /** Quit and apply the downloaded update. Main validates the sender and
+   *  owns the native confirmation dialog before it calls quitAndInstall().
+   *  Only valid when the current state is "downloaded"; rejected
+   *  (ok:false) otherwise. */
   installAppUpdate: () =>
     ipcRenderer.invoke("lvis:update:install-now") as Promise<{ ok: boolean; reason?: string }>,
-  /** Show the native confirmation dialog before installAppUpdate. Returns
-   *  { confirmed: true } only when the user clicked 재시작. Replaces the
-   *  renderer-side window.confirm() (which blocks the JS thread and
-   *  doesn't respect window focus on macOS). */
-  confirmInstallAppUpdate: () =>
-    ipcRenderer.invoke("lvis:update:confirm-install") as Promise<{ confirmed: boolean }>,
 
   // ─── Managed bootstrap status ────────────────────
   // The host emits these around `ensureManagedInstalled()` so the renderer

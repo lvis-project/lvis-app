@@ -1,5 +1,18 @@
 # Changelog
 
+## v0.2.16 — 2026-06-01
+
+### 앱 업데이트
+
+- **앱 업데이트 적용 재시작 경로 복구** — `quitAndInstall()` 가 먼저 BrowserWindow 를 닫고 앱 종료로 이어지는 Electron updater 계약을 LVIS 의 close-to-tray / async before-quit / plugin before-quit 핸들러가 `preventDefault()` 로 가로막아 다운로드 완료 후 재시작 설치가 진행되지 않던 문제를 수정했다. 업데이트 설치 의도를 main process 에 표시하고, 해당 경우에는 창 닫기와 종료 이벤트를 updater 가 소유하도록 둔다.
+- **업데이트 설치 IPC 경계 보강** — `lvis:update:install-now` 가 실제 재시작/설치 경로가 되었으므로 host renderer sender 를 main process 에서 검증하고, native 확인 dialog 도 같은 IPC handler 안에서 소유해 renderer 나 plugin shell 이 확인 단계를 건너뛰어 설치를 강제하지 못하게 했다.
+- **업데이트 배지 IPC race 방어** — renderer 의 초기 `getAppUpdateState()` snapshot 이 더 늦게 도착해 live update push 를 덮어쓰지 못하게 하고, install IPC 가 실패하거나 앱이 종료되지 않는 경우에는 local click gate 를 해제해 재시도 가능하게 했다.
+
+### 검증
+
+- Targeted Vitest: `release-prep`, `app-update-install-intent-source`, `use-app-update`, `plugin-runtime` — 4 files / 53 pass.
+- `bun run typecheck`, `bun run build`, `git diff --check` pass.
+
 ## v0.2.15 — 2026-06-01
 
 ### 플러그인 / 마켓플레이스
