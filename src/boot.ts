@@ -445,6 +445,7 @@ export async function bootstrap(
     pluginRuntime,
     deploymentGuard,
     lateBinding,
+    runPluginShutdownHandlers,
     pluginPaths,
   } = await initPluginRuntime({
     projectRoot,
@@ -1298,7 +1299,7 @@ export async function bootstrap(
     knowledgeAvailable, starredStore, feedbackStore,
     notificationService,
     scriptHookManager,
-    telemetry, pluginTelemetry, autoUpdaterStop,
+    telemetry, pluginTelemetry, autoUpdaterStop, runPluginShutdownHandlers,
     pluginPaths,
     clearAuthPartitionService,
     forgetPluginAuthPartitionsService,
