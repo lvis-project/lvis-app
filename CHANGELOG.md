@@ -1,5 +1,16 @@
 # Changelog
 
+## v0.2.18 — 2026-06-01
+
+### 플러그인 / 마켓플레이스
+
+- **플러그인 업데이트 stale catalog 차단 복구** (PR #1198) — 업데이트 배지는 live Marketplace catalog 로 `meeting@0.5.25` 를 감지했지만, 설치 직전 `expectedVersion` 검증은 7일 TTL offline catalog cache 의 stale `meeting@0.5.8` 값을 읽어 정상 업데이트를 차단했다. 업데이트 설치 경로의 버전 검증을 live catalog 조회로 정렬해 banner 와 install guard 가 같은 Marketplace 최신 버전을 기준으로 판단하도록 했다.
+- **일반 설치 경로 live fetch 범위 제한** (PR #1198) — `expectedVersion` 이 없는 일반 설치는 기존 catalog/list 경로를 유지하고, 업데이트처럼 기대 버전이 명시된 경우에만 live version guard 를 수행한다.
+
+### 검증
+
+- PR #1198: focused Vitest 4 files / 51 pass, `bun run typecheck`, `bun run build`, `git diff --check`, remote build-and-test / Windows permission path / CodeQL / naming-gate success, Copilot current-head inline comments 0, Cross-Cutting 3-lane review Critical=0/Major=0.
+
 ## v0.2.17 — 2026-06-01
 
 ### 릴리스 검증
