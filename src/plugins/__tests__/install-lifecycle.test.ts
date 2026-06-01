@@ -29,6 +29,7 @@ function makeMarketplace() {
       { id: "meeting", slug: "lvis-plugin-meeting", version: "2.0.0" },
     ]),
     install: vi.fn(async (pluginId: string) => ({ pluginId, installed: true as const })),
+    getLiveCatalogVersion: vi.fn(async () => "2.0.0"),
     getInstalledVersion: vi.fn(async () => "1.0.0"),
     quarantinePlugin: vi.fn(async (pluginId: string, reason: string) => ({ pluginId, reason, quarantined: true as const })),
     uninstall: vi.fn(async (pluginId: string) => ({ pluginId, uninstalled: true as const })),
@@ -122,14 +123,13 @@ describe("installMarketplacePluginWithLifecycle", () => {
 
     expect(runtime.removePlugin).toHaveBeenCalledWith("p");
     expect(runtime.addPlugin).toHaveBeenCalledWith("p");
+    expect(marketplace.getLiveCatalogVersion).not.toHaveBeenCalled();
   });
 
   it("rejects stale renderer expectedVersion before touching runtime or marketplace install", async () => {
     const runtime = makeRuntime(["p"]);
     const marketplace = makeMarketplace();
-    marketplace.list.mockResolvedValue([
-      { id: "p", slug: "lvis-plugin-p", installed: true, version: "1.0.0" },
-    ]);
+    marketplace.getLiveCatalogVersion.mockResolvedValue("1.0.0");
 
     await expect(
       installMarketplacePluginWithLifecycle({
@@ -145,6 +145,29 @@ describe("installMarketplacePluginWithLifecycle", () => {
     expect(marketplace.rollbackPlugin).not.toHaveBeenCalled();
     expect(marketplace.uninstall).not.toHaveBeenCalled();
     expect(marketplace.quarantinePlugin).not.toHaveBeenCalled();
+  });
+
+  it("checks expectedVersion against the live catalog instead of a stale cached lifecycle list", async () => {
+    const runtime = makeRuntime(["p"]);
+    const marketplace = makeMarketplace();
+    marketplace.list.mockResolvedValue([
+      { id: "p", slug: "lvis-plugin-p", installed: true, version: "1.0.0" },
+    ]);
+    marketplace.getLiveCatalogVersion.mockResolvedValue("2.0.0");
+    marketplace.getInstalledVersion
+      .mockResolvedValueOnce("1.0.0")
+      .mockResolvedValueOnce("2.0.0");
+
+    const result = await installMarketplacePluginWithLifecycle({
+      requestedPluginId: "p",
+      expectedVersion: "2.0.0",
+      pluginRuntime: runtime,
+      pluginMarketplace: marketplace,
+    });
+
+    expect(result).toEqual({ pluginId: "p", installed: true });
+    expect(marketplace.getLiveCatalogVersion).toHaveBeenCalledWith("p");
+    expect(marketplace.install).toHaveBeenCalledWith("p", expect.any(Function));
   });
 
 
