@@ -40,6 +40,7 @@ interface PluginLifecycleMarketplace {
 
 interface PluginInstallMarketplace extends PluginLifecycleMarketplace {
   list(): Promise<MarketplaceLifecycleCatalogItem[]>;
+  getLiveCatalogVersion(pluginId: string): Promise<string | null>;
   getInstalledVersion(pluginId: string): Promise<string | null>;
   quarantinePlugin(pluginId: string, reason: string): Promise<unknown>;
   install(
@@ -109,11 +110,14 @@ export async function installMarketplacePluginWithLifecycle(options: {
 
   return withPluginInstallLock(resolvedLifecyclePluginId, async () => {
     const currentCatalogState = await resolveMarketplaceLifecycleState(pluginMarketplace, requestedPluginId);
-    assertExpectedVersionMatchesTrustedCatalog({
-      pluginId: currentCatalogState.pluginId,
-      expectedVersion,
-      catalogVersion: currentCatalogState.version,
-    });
+    const expectedVersionForGuard = expectedVersion?.trim();
+    if (expectedVersionForGuard) {
+      assertExpectedVersionMatchesTrustedCatalog({
+        pluginId: currentCatalogState.pluginId,
+        expectedVersion: expectedVersionForGuard,
+        catalogVersion: await pluginMarketplace.getLiveCatalogVersion(requestedPluginId),
+      });
+    }
     const hadExistingInstall =
       currentCatalogState.installed === true ||
       pluginRuntime.listPluginIds().includes(currentCatalogState.pluginId);
@@ -302,7 +306,7 @@ async function assertInstalledMarketplacePluginVersion(options: {
 function assertExpectedVersionMatchesTrustedCatalog(options: {
   pluginId: string;
   expectedVersion?: string;
-  catalogVersion?: string;
+  catalogVersion: string | null;
 }): void {
   const expectedVersion = options.expectedVersion?.trim();
   if (!expectedVersion) return;

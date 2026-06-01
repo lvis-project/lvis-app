@@ -954,6 +954,22 @@ export class PluginMarketplaceService {
     return typeof parsed.version === "string" ? parsed.version : null;
   }
 
+  /**
+   * Returns the live catalog version for an install/update request.
+   *
+   * This intentionally bypasses {@link list()} and its offline catalog cache:
+   * update notifications are produced from the live fetcher, so the matching
+   * install guard must compare the requested version against the same live
+   * source instead of a still-valid-but-older cached catalog.
+   */
+  async getLiveCatalogVersion(pluginId: string): Promise<string | null> {
+    const detail = await this.fetcher.getPluginDetail(pluginId);
+    if (detail?.version) return detail.version;
+    const plugins = await this.fetcher.listPlugins();
+    const plugin = plugins.find((candidate) => candidate.id === pluginId || candidate.slug === pluginId);
+    return plugin?.version ?? null;
+  }
+
   private mergeBundleRefs(
     bundleRefs: string[] | undefined,
     bundleRootId: string | null,
