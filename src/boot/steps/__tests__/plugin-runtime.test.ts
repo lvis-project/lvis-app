@@ -224,6 +224,57 @@ describe("deriveOverlaySummaryForDisplay", () => {
 });
 
 describe("initPluginRuntime partition policy", () => {
+  it("exposes an idempotent shutdown-handler runner for updater install cleanup", async () => {
+    runtimeTestState.capturedRuntimeOptions = null;
+    runtimeTestState.runtime.listPluginIds.mockReturnValue([]);
+    runtimeTestState.runtime.listPluginManifests.mockReturnValue([]);
+
+    const output = await initPluginRuntime({
+      projectRoot: "/tmp/lvis-test/project",
+      settingsService: {
+        get: vi.fn((key: string) => {
+          if (key === "llm") return { provider: "openai" };
+          if (key === "pluginConfigs") return {};
+          return undefined;
+        }),
+        getSecret: vi.fn(() => undefined),
+        getPluginConfig: vi.fn(() => ({})),
+        setPluginConfig: vi.fn(),
+      } as never,
+      memoryManager: {} as never,
+      keywordEngine: {
+        registerKeywords: vi.fn(),
+        unregisterByPlugin: vi.fn(),
+        hasPluginKeywords: vi.fn(() => false),
+      } as never,
+      toolRegistry: {
+        unregisterByPlugin: vi.fn(),
+        register: vi.fn(),
+        listAll: vi.fn(() => []),
+        listPluginIds: vi.fn(() => []),
+        replacePluginTools: vi.fn(),
+      } as never,
+      pythonPath: undefined,
+      bootAuditLogger: { log: vi.fn() } as never,
+      mainWindow: {} as never,
+      openAuthWindowService: vi.fn(),
+      openLinkWindowService: vi.fn(),
+      openAuthPartitionViewerService: vi.fn(),
+      shellOpenExternal: vi.fn(),
+      approvalGate: {} as never,
+    });
+
+    const handler = vi.fn(async () => {});
+    output.pluginShutdownHandlers.push({ pluginId: "meeting", handler });
+
+    await Promise.all([
+      output.runPluginShutdownHandlers(),
+      output.runPluginShutdownHandlers(),
+    ]);
+
+    expect(handler).toHaveBeenCalledOnce();
+  });
+
   it("registers plugin webview preload policy from onEnable after managed bootstrap restartAll", async () => {
     runtimeTestState.capturedRuntimeOptions = null;
     runtimeTestState.runtime.listPluginIds.mockReturnValue([]);

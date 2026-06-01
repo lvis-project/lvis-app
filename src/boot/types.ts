@@ -163,6 +163,8 @@ export interface AppServices {
    * clear the 4h interval deterministically instead of relying on unref().
    */
   autoUpdaterStop?: () => void;
+  /** Runs HostApi onShutdown handlers exactly once; shared by normal quit and updater install prep. */
+  runPluginShutdownHandlers?: () => Promise<void>;
   /** Central app shutdown hook for timers, background services, and transports. */
   shutdown?: () => Promise<void>;
   /**

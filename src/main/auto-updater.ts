@@ -13,17 +13,24 @@
  *   - Renderer → main: `lvis:update:download-now` triggers downloadUpdate().
  *     `download-progress` / `update-downloaded` events feed the same
  *     state stream the badge consumes.
- *   - Renderer → main: `lvis:update:install-now` triggers quitAndInstall()
- *     after the user clicks the "재시작해서 적용" badge action.
+ *   - Renderer → main: `lvis:update:install-now` validates the host
+ *     renderer sender, shows the native confirmation dialog in the main
+ *     process, then triggers quitAndInstall().
  *   - Network errors silently logged (no user-facing noise).
  *
  * All credentials/publish config are declared in package.json `build.publish`
  * — NEVER in code. Users supply signing certs + GH_TOKEN at release time.
  */
 import { createRequire } from "node:module";
-import type { BrowserWindow, IpcMain } from "electron";
+import type { BrowserWindow, IpcMain, IpcMainInvokeEvent } from "electron";
+import type { AuditLogger } from "../audit/audit-logger.js";
+import { auditUnauthorized, validateHostRendererSender } from "../ipc/gated.js";
 import { createLogger } from "../lib/logger.js";
 import type { UpdateState } from "../shared/update-state.js";
+import {
+  beginAppUpdateInstallRequest,
+  clearAppUpdateInstallRequested,
+} from "./app-update-install-intent.js";
 export type { UpdateState };
 const log = createLogger("auto-updater");
 
@@ -31,6 +38,7 @@ const _require = createRequire(import.meta.url);
 
 export interface AutoUpdaterDeps {
   mainWindow: BrowserWindow;
+  auditLogger: AuditLogger;
   /** Settings accessor — re-read on every tick so user can toggle at runtime. */
   isEnabled: () => boolean;
   /**
@@ -38,6 +46,8 @@ export interface AutoUpdaterDeps {
    * `electron-updater` so unit tests don't need the native dep.
    */
   updaterFactory?: () => UpdaterLike;
+  /** Test seam for the native destructive-action confirmation dialog. */
+  confirmInstallForTest?: () => Promise<boolean>;
 }
 
 /** Minimal surface of electron-updater.autoUpdater we rely on. */
@@ -72,14 +82,16 @@ export function createAutoUpdater(deps: AutoUpdaterDeps): {
   start: () => void;
   stop: () => void;
   triggerCheck: () => Promise<void>;
-  /** Test seam — exposes the same closure-private handlers that are
-   *  registered against ipcMain at start(). Used by release-prep tests
-   *  to assert negative paths (download-when-not-available, etc.)
-   *  without spinning up a real Electron ipcMain. NOT used by production
-   *  callers; the registered ipcMain handlers are the SoT for runtime. */
+  /** Test seam — exposes closure-private updater operations plus the
+   *  production IPC wrappers so release-prep tests can cover both
+   *  state-machine negative paths and IPC sender/confirmation gates without
+   *  spinning up a real Electron ipcMain. NOT used by production callers; the
+   *  registered ipcMain handlers are the SoT for runtime. */
   _testOnly: {
     downloadNow: () => Promise<{ ok: boolean; reason?: string }>;
     installNow: () => Promise<{ ok: boolean; reason?: string }>;
+    ipcDownloadNow: (event: IpcMainInvokeEvent) => Promise<{ ok: boolean; reason?: string }>;
+    ipcInstallNow: (event: IpcMainInvokeEvent) => Promise<{ ok: boolean; reason?: string }>;
     confirmInstall: () => Promise<{ confirmed: boolean }>;
     getState: () => UpdateState;
   };
@@ -88,6 +100,7 @@ export function createAutoUpdater(deps: AutoUpdaterDeps): {
   let updater: UpdaterLike | null = null;
   let wired = false;
   let lastState: UpdateState = { kind: "idle" };
+  let installInProgress = false;
 
   const loadUpdater = (): UpdaterLike | null => {
     if (updater) return updater;
@@ -154,6 +167,8 @@ export function createAutoUpdater(deps: AutoUpdaterDeps): {
     });
     u.on("error", (err) => {
       log.warn("error (non-fatal): %s", err.message);
+      installInProgress = false;
+      clearAppUpdateInstallRequested();
     });
   };
 
@@ -174,7 +189,21 @@ export function createAutoUpdater(deps: AutoUpdaterDeps): {
   // register. Both commands are no-ops when the updater module is
   // unavailable (dev mode, packaging gap) so the renderer can safely
   // fire-and-forget.
-  const onDownloadNow = async (): Promise<{ ok: boolean; reason?: string }> => {
+  const rejectUnauthorizedIpc = (
+    channel: "lvis:update:download-now" | "lvis:update:install-now",
+    event: IpcMainInvokeEvent,
+  ): { ok: false; reason: "unauthorized-frame" } => {
+    auditUnauthorized(deps.auditLogger, channel, event);
+    return { ok: false, reason: "unauthorized-frame" };
+  };
+
+  const isAuthorizedHostRenderer = (
+    event: IpcMainInvokeEvent,
+  ): boolean => {
+    return validateHostRendererSender(event);
+  };
+
+  const downloadAvailableUpdate = async (): Promise<{ ok: boolean; reason?: string }> => {
     const u = loadUpdater();
     if (!u) return { ok: false, reason: "updater-unavailable" };
     if (lastState.kind !== "available") {
@@ -197,28 +226,41 @@ export function createAutoUpdater(deps: AutoUpdaterDeps): {
     }
   };
 
-  const onInstallNow = async (): Promise<{ ok: boolean; reason?: string }> => {
+  const installDownloadedUpdate = async (): Promise<{ ok: boolean; reason?: string }> => {
     const u = loadUpdater();
     if (!u) return { ok: false, reason: "updater-unavailable" };
+    if (installInProgress) {
+      return { ok: false, reason: "install-in-progress" };
+    }
     if (lastState.kind !== "downloaded") {
       return { ok: false, reason: `not-downloaded (state=${lastState.kind})` };
     }
     log.info("user-initiated install for v%s", lastState.version);
     try {
-      // Fires quit-and-install on the next tick. Confirmation runs via
-      // the separate `lvis:update:confirm-install` IPC (native dialog
-      // shown from the main process) BEFORE the renderer invokes us, so
-      // by the time we get here the user has already accepted.
-      setImmediate(() => {
-        try { u.quitAndInstall(); } catch (err) {
-          log.warn("quitAndInstall failed: %s", (err as Error).message);
-        }
-      });
+      // Main-owned confirmation runs before this function is called from IPC,
+      // so by the time we get here the user has already accepted. The first
+      // quitAndInstall call is allowed to close BrowserWindows; LVIS
+      // intercepts the resulting before-quit event,
+      // runs its bounded cleanup, then lets the prepared app quit continue.
+      installInProgress = true;
+      beginAppUpdateInstallRequest();
+      u.quitAndInstall();
       return { ok: true };
     } catch (err) {
-      log.warn("install scheduling failed: %s", (err as Error).message);
+      installInProgress = false;
+      clearAppUpdateInstallRequested();
+      log.warn("quitAndInstall failed: %s", (err as Error).message);
       return { ok: false, reason: (err as Error).message };
     }
+  };
+
+  const onDownloadNow = async (
+    event: IpcMainInvokeEvent,
+  ): Promise<{ ok: boolean; reason?: string }> => {
+    if (!isAuthorizedHostRenderer(event)) {
+      return rejectUnauthorizedIpc("lvis:update:download-now", event);
+    }
+    return downloadAvailableUpdate();
   };
 
   /**
@@ -234,6 +276,9 @@ export function createAutoUpdater(deps: AutoUpdaterDeps): {
   const onConfirmInstall = async (): Promise<{ confirmed: boolean }> => {
     if (lastState.kind !== "downloaded") {
       return { confirmed: false };
+    }
+    if (deps.confirmInstallForTest) {
+      return { confirmed: await deps.confirmInstallForTest() };
     }
     try {
       const electron = _require("electron") as {
@@ -258,6 +303,22 @@ export function createAutoUpdater(deps: AutoUpdaterDeps): {
     }
   };
 
+  const onInstallNow = async (
+    event: IpcMainInvokeEvent,
+  ): Promise<{ ok: boolean; reason?: string }> => {
+    if (!isAuthorizedHostRenderer(event)) {
+      return rejectUnauthorizedIpc("lvis:update:install-now", event);
+    }
+    if (lastState.kind !== "downloaded") {
+      return { ok: false, reason: `not-downloaded (state=${lastState.kind})` };
+    }
+    const confirmation = await onConfirmInstall();
+    if (!confirmation.confirmed) {
+      return { ok: false, reason: "not-confirmed" };
+    }
+    return installDownloadedUpdate();
+  };
+
   const onGetState = (): UpdateState => lastState;
 
   // Defensive lazy-load of ipcMain — unit tests run outside Electron and
@@ -280,7 +341,6 @@ export function createAutoUpdater(deps: AutoUpdaterDeps): {
     ipcRegistered = true;
     ipc.handle("lvis:update:download-now", onDownloadNow);
     ipc.handle("lvis:update:install-now", onInstallNow);
-    ipc.handle("lvis:update:confirm-install", onConfirmInstall);
     ipc.handle("lvis:update:get-state", onGetState);
   };
   const unregisterIpc = () => {
@@ -293,7 +353,6 @@ export function createAutoUpdater(deps: AutoUpdaterDeps): {
     if (!ipc) return;
     ipc.removeHandler("lvis:update:download-now");
     ipc.removeHandler("lvis:update:install-now");
-    ipc.removeHandler("lvis:update:confirm-install");
     ipc.removeHandler("lvis:update:get-state");
   };
 
@@ -312,8 +371,10 @@ export function createAutoUpdater(deps: AutoUpdaterDeps): {
     },
     triggerCheck,
     _testOnly: {
-      downloadNow: onDownloadNow,
-      installNow: onInstallNow,
+      downloadNow: downloadAvailableUpdate,
+      installNow: installDownloadedUpdate,
+      ipcDownloadNow: onDownloadNow,
+      ipcInstallNow: onInstallNow,
       confirmInstall: onConfirmInstall,
       getState: onGetState,
     },
