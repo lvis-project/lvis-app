@@ -329,6 +329,35 @@ describe("allowed-subnet sourcing (LVIS_DEMO_HOST_SUBNET)", () => {
     expect(parseAllowedSubnets("")).toEqual([]);
   });
 
+  it("drops public / non-RFC1918 / over-broad subnets (only strict RFC1918 subsets allowed)", () => {
+    // 0.0.0.0/0, public CIDRs, and ranges broader than (or straddling) an
+    // RFC1918 boundary are NOT legitimate intranet targets → dropped.
+    expect(parseAllowedSubnets("0.0.0.0/0")).toEqual([]);
+    expect(parseAllowedSubnets("8.8.8.0/24")).toEqual([]);
+    expect(parseAllowedSubnets("10.0.0.0/7")).toEqual([]); // covers 10.x AND 11.x (public)
+    expect(parseAllowedSubnets("172.0.0.0/8")).toEqual([]); // wider than 172.16/12
+    // A public CIDR mixed with a valid private one keeps only the private one.
+    expect(parseAllowedSubnets("0.0.0.0/0,10.182.192.0/24")).toEqual(["10.182.192.0/24"]);
+    // The RFC1918 ranges themselves and strict subsets are accepted.
+    expect(parseAllowedSubnets("10.0.0.0/8,172.16.0.0/12,192.168.0.0/16")).toEqual([
+      "10.0.0.0/8",
+      "172.16.0.0/12",
+      "192.168.0.0/16",
+    ]);
+  });
+
+  it("fails closed when the only provided subnet is public (e.g. 0.0.0.0/0)", () => {
+    const base = "https://endpoint.openai.azure.com/openai/v1/";
+    // A public subnet is dropped → present-but-all-dropped → fail closed,
+    // even for a target that the RFC1918 default would have accepted.
+    expect(
+      validateDemoFoundryHostMap(base, "endpoint.openai.azure.com=10.182.192.7", "0.0.0.0/0"),
+    ).toBe("invalid-foundry-host-map-target");
+    expect(
+      demoFoundryHostMapFingerprint(base, "endpoint.openai.azure.com=10.182.192.7", "0.0.0.0/0"),
+    ).toBeNull();
+  });
+
   it("treats an absent/empty/whitespace-only subnet as 'not provided' (RFC1918 fallback, not fail-closed)", () => {
     const base = "https://endpoint.openai.azure.com/openai/v1/";
     // undefined and whitespace-only are the benign "absent" case → RFC1918

@@ -122,9 +122,32 @@ function parseCidr(cidr: string): { base: number; mask: number } | null {
 }
 
 /**
+ * `true` only when `cidr` is a strict subset of one of the private (RFC1918)
+ * ranges — i.e. EVERY address it covers is private. Rejects `0.0.0.0/0`, public
+ * CIDRs, and any CIDR broader than (or straddling) an RFC1918 boundary. This is
+ * the guard against a misissued/typo'd activation key widening the host-resolver
+ * allow-list to a public target, which would let it redirect the Foundry
+ * hostname off-network and leak the request (and bearer credentials) to an
+ * arbitrary public IP.
+ */
+function isCidrWithinRfc1918(cidr: string): boolean {
+  const c = parseCidr(cidr);
+  if (c === null) return false;
+  return DEFAULT_ALLOWED_SUBNETS.some((rangeCidr) => {
+    const r = parseCidr(rangeCidr);
+    if (r === null) return false;
+    // c ⊆ r iff c is at least as specific as r (r's mask bits ⊆ c's mask bits)
+    // AND c's network base falls inside r.
+    return ((c.mask & r.mask) >>> 0) === (r.mask >>> 0) && ((c.base & r.mask) >>> 0) === r.base;
+  });
+}
+
+/**
  * Parse the activation-provided allowed-subnet list (comma-separated CIDRs,
- * e.g. `10.0.0.0/24`). Malformed entries are dropped; empty/absent yields `[]`.
- * The caller ({@link resolveAllowedSubnets}) distinguishes "absent" (→ RFC1918
+ * e.g. `10.0.0.0/24`). Entries that are malformed OR not a strict subset of an
+ * RFC1918 private range are dropped (a public target is never legitimate — the
+ * whole point is intranet-only redirection). Empty/absent yields `[]`; the
+ * caller ({@link resolveAllowedSubnets}) distinguishes "absent" (→ RFC1918
  * fallback) from "present-but-all-dropped" (→ fail closed).
  */
 export function parseAllowedSubnets(raw: string | undefined): string[] {
@@ -132,7 +155,7 @@ export function parseAllowedSubnets(raw: string | undefined): string[] {
   return raw
     .split(",")
     .map((s) => s.trim())
-    .filter((s) => s.length > 0 && parseCidr(s) !== null);
+    .filter((s) => s.length > 0 && isCidrWithinRfc1918(s));
 }
 
 /**
