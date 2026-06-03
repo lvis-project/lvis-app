@@ -192,18 +192,10 @@ export type AppSettings = {
     /** #893 — `true` after the user has dismissed the first-boot onboarding. */
     onboardingCompleted?: boolean;
     /**
-     * O-X1 Live Auto-play — demo-only flag. See main-process SOT in
-     * `src/data/settings-store.ts` `FeatureFlags.demoAutoplayEnabled` and
-     * the proposal `docs/architecture/proposals/live-autoplay.md` §7.
+     * Demo-only presentation flag. Mirrors the main-process SOT in
+     * `src/data/settings-store.ts` `FeatureFlags.demoAutoplayEnabled`.
      */
     demoAutoplayEnabled?: boolean;
-    /**
-     * Tutorial-X3 — rotation index into the `DEMO_SCRIPTS` catalog. Each
-     * activation picks `DEMO_SCRIPTS[index % len]` then bumps the index.
-     * See `scripts-registry.ts` for the catalog and `pickScript`/
-     * `nextRotationIndex` helpers.
-     */
-    demoAutoplayRotationIndex?: number;
     /**
      * Demo-only display flag — hides tool failure badges in the chat timeline.
      * Main-process SOT: `src/data/settings-store.ts` `FeatureFlags.hideToolFailures`.

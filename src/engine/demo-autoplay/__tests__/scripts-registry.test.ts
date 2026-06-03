@@ -7,8 +7,6 @@ import { describe, it, expect } from "vitest";
 import {
   DEMO_SCRIPTS,
   getScriptByScenarioId,
-  nextRotationIndex,
-  pickScript,
 } from "../scripts-registry.js";
 
 describe("DEMO_SCRIPTS catalog", () => {
@@ -62,23 +60,6 @@ describe("DEMO_SCRIPTS catalog", () => {
     const labels = multi?.toolCalls.map((c) => c.labelKo).join(" ") ?? "";
     expect(labels).toMatch(/market-analyst/);
     expect(labels).toMatch(/competitor-tracker/);
-  });
-});
-
-describe("pickScript / nextRotationIndex", () => {
-  it("undefined index → first script", () => {
-    expect(pickScript(undefined).id).toBe("meeting-summary-demo");
-  });
-
-  it("wraps around catalog length via modulo", () => {
-    expect(pickScript(0).id).toBe("meeting-summary-demo");
-    expect(pickScript(1).id).toBe("doc-search-demo");
-    expect(pickScript(DEMO_SCRIPTS.length).id).toBe("meeting-summary-demo");
-  });
-
-  it("nextRotationIndex steps and wraps", () => {
-    expect(nextRotationIndex(undefined)).toBe(1);
-    expect(nextRotationIndex(DEMO_SCRIPTS.length - 1)).toBe(0);
   });
 });
 
