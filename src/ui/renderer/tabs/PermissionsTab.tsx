@@ -14,7 +14,6 @@ import {
   SelectTrigger,
   SelectValue,
 } from "../../../components/ui/select.js";
-import { Separator } from "../../../components/ui/separator.js";
 import { PERMISSION_REVIEWER_FRAMEWORK } from "../../../shared/permission-reviewer-framework.js";
 import type { UserApprovalScope, UserApprovalVerdict } from "../../../shared/permissions-events.js";
 import { EXEC_MODE_OPTIONS, LONG_TOAST_TTL_MS } from "../constants.js";
