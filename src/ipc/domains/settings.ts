@@ -7,12 +7,19 @@ import { validateExternalUrl } from "../../shared/external-url.js";
 import { SETTINGS } from "../../shared/ipc-channels.js";
 import { validateSender, UNAUTHORIZED_FRAME, auditUnauthorized } from "../gated.js";
 import { sendToWindow } from "../safe-send.js";
+import { setLocale } from "../../i18n/index.js";
 import type { IpcDeps } from "../types.js";
 import type { LLMSettings } from "../../data/settings-store.js";
 
 /** Minor-1: extracted helper — 6 handlers share identical 5-line broadcast. */
 function broadcastSettingsSnapshot(deps: IpcDeps): void {
   const snapshot = deps.settingsService.getAll();
+  // Keep the main-process UI locale in sync with the persisted language so
+  // dialogs/menus/notifications shown after a language switch use it too.
+  // Optional-chain `appearance` — a partial snapshot (e.g. a test double or a
+  // pre-migration settings file) must not crash the broadcast. setLocale
+  // coerces undefined to the English default.
+  setLocale(snapshot.appearance?.language);
   for (const win of deps.getAppWindows?.() ?? []) {
     sendToWindow(win, SETTINGS.updated, snapshot);
   }

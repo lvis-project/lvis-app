@@ -1,5 +1,6 @@
 import type { Routine, RoutineResult } from "../core/routine-engine.js";
 import { createLogger } from "../lib/logger.js";
+import { t } from "../i18n/index.js";
 import type { FireOptions } from "./notification-service.js";
 import type { RoutineRecord } from "../shared/routines-types.js";
 
@@ -50,7 +51,7 @@ export async function runShutdownRoutines(
         } else {
           svc.notificationService?.fire({
             kind: "routine",
-            title: routine.notificationTitle ?? routine.title ?? "종료 루틴 알림",
+            title: routine.notificationTitle ?? routine.title ?? t("be_shutdownRoutines.shutdownRoutineNotificationTitle"),
             body: routine.notificationBody ?? "",
             contextRef: { routineId: routine.id },
           });

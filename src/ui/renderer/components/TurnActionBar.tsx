@@ -6,6 +6,7 @@ import { Tooltip, TooltipContent, TooltipTrigger } from "../../../components/ui/
 import { TokenCostBadge, type TokenCostBadgePricing, type TokenCostBadgeProps } from "./TokenCostBadge.js";
 import type { LLMVendor } from "../../../shared/llm-vendor-defaults.js";
 import { formatHhMmKst } from "../utils/format-time.js";
+import { useTranslation } from "../../../i18n/react.js";
 
 /**
  * Turn-aggregate provider-reported token usage forwarded to the inline
@@ -42,6 +43,7 @@ export function TurnActionBar({
   actions?: { onRetry?: () => void; onFork?: () => void; onToggleStar?: () => void };
   onFeedback?: (rating: "up" | "down", reason?: string) => void | Promise<void>;
 }) {
+  const { t } = useTranslation();
   const [feedbackRating, setFeedbackRating] = useState<"up" | "down" | null>(null);
   const [showReasonBox, setShowReasonBox] = useState(false);
   const [reasonDraft, setReasonDraft] = useState("");
@@ -63,13 +65,13 @@ export function TurnActionBar({
               variant="ghost"
               size="icon"
               className="h-5 w-5 text-muted-foreground hover:text-foreground"
-              title="다시 시도 (깊이: high)"
+              title={t("turnActionBar.retryButton")}
               onClick={actions.onRetry}
             >
               <RefreshCw className="h-3 w-3" />
             </Button>
           </TooltipTrigger>
-          <TooltipContent>다시 시도 (깊이: high)</TooltipContent>
+          <TooltipContent>{t("turnActionBar.retryButton")}</TooltipContent>
         </Tooltip>
       )}
       {actions?.onFork && (
@@ -85,7 +87,7 @@ export function TurnActionBar({
               <GitBranch className="h-3 w-3" />
             </Button>
           </TooltipTrigger>
-          <TooltipContent>분기</TooltipContent>
+          <TooltipContent>{t("turnActionBar.forkButton")}</TooltipContent>
         </Tooltip>
       )}
       {actions?.onToggleStar && (
@@ -101,7 +103,7 @@ export function TurnActionBar({
               <Star key={isStarred ? "on" : "off"} className={`h-3 w-3 ${isStarred ? "fill-emphasis text-emphasis lvis-anim-star" : ""}`} />
             </Button>
           </TooltipTrigger>
-          <TooltipContent>즐겨찾기</TooltipContent>
+          <TooltipContent>{t("turnActionBar.starButton")}</TooltipContent>
         </Tooltip>
       )}
       {onFeedback ? (
@@ -120,12 +122,12 @@ export function TurnActionBar({
                   setShowReasonBox(false);
                   void onFeedback("up");
                 }}
-                aria-label="도움이 됐어요"
+                aria-label={t("turnActionBar.feedbackUp")}
               >
                 <ThumbsUp key={feedbackRating === "up" ? "on" : "off"} className={`h-3 w-3 ${feedbackRating === "up" ? "fill-success lvis-anim-pop" : ""}`} />
               </Button>
             </TooltipTrigger>
-            <TooltipContent>도움이 됐어요</TooltipContent>
+            <TooltipContent>{t("turnActionBar.feedbackUp")}</TooltipContent>
           </Tooltip>
           <Tooltip>
             <TooltipTrigger asChild>
@@ -138,19 +140,19 @@ export function TurnActionBar({
                   if (feedbackRating === "down") return;
                   setShowReasonBox(true);
                 }}
-                aria-label="개선이 필요해요"
+                aria-label={t("turnActionBar.feedbackDown")}
               >
                 <ThumbsDown key={feedbackRating === "down" ? "on" : "off"} className={`h-3 w-3 ${feedbackRating === "down" ? "fill-destructive lvis-anim-pop" : ""}`} />
               </Button>
             </TooltipTrigger>
-            <TooltipContent>개선이 필요해요</TooltipContent>
+            <TooltipContent>{t("turnActionBar.feedbackDown")}</TooltipContent>
           </Tooltip>
           {showReasonBox && feedbackRating !== "down" ? (
             <div className="flex items-center gap-1">
               <Input
                 type="text"
                 maxLength={200}
-                placeholder="이유 (선택)"
+                placeholder={t("turnActionBar.reasonPlaceholder")}
                 value={reasonDraft}
                 onChange={(e) => setReasonDraft(e.target.value)}
                 className="h-6 w-36 px-2 text-xs"
@@ -176,7 +178,7 @@ export function TurnActionBar({
                   void onFeedback("down", reasonDraft.trim() || undefined);
                 }}
               >
-                전송
+                {t("turnActionBar.sendButton")}
               </Button>
             </div>
           ) : null}

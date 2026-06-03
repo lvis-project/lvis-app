@@ -2,6 +2,7 @@ import { memo, useEffect, useRef, useState } from "react";
 import { ChevronDown, ChevronRight, Loader2 } from "lucide-react";
 import { debugLog, isDebugStreamEnabled } from "../../../lib/debug-stream.js";
 import { formatDuration } from "../../../lib/turn-summary-format.js";
+import { useTranslation } from "../../../i18n/react.js";
 
 interface WorkGroupProps {
   stepCount: number;
@@ -31,6 +32,7 @@ function WorkGroupImpl({ stepCount, streaming, children, turnDurationMs }: WorkG
   // Past-turn WorkGroups always receive streaming=false from first render,
   // so they must start closed. Active-turn WorkGroups start open and
   // auto-close when the true→false transition fires in the effect below.
+  const { t } = useTranslation();
   const debugStreamEnabled = isDebugStreamEnabled();
   const [open, setOpen] = useState(streaming);
   const prevStreaming = useRef(streaming);
@@ -96,7 +98,7 @@ function WorkGroupImpl({ stepCount, streaming, children, turnDurationMs }: WorkG
           ? <Loader2 className="h-3 w-3 animate-spin flex-shrink-0" />
           : null}
         <span className="min-w-0 font-medium text-foreground/90">
-          {streaming ? "작업 중..." : "작업"}
+          {streaming ? t("workGroup.working") : t("workGroup.work")}
         </span>
         {/*
           Single-step intermediate entries still render the WorkGroup header
@@ -106,7 +108,7 @@ function WorkGroupImpl({ stepCount, streaming, children, turnDurationMs }: WorkG
           remove the expand/collapse UI for half the chat history. Reviewed
           in #565; intentional, not a candidate for inline rendering.
         */}
-        {!streaming && <span className="shrink-0 opacity-50">{stepCount}단계</span>}
+        {!streaming && <span className="shrink-0 opacity-50">{t("workGroup.stepCount", { count: stepCount })}</span>}
         {!streaming && turnDurationMs !== undefined && turnDurationMs > 0 && (
           <span className="shrink-0 opacity-50 tabular-nums">⏱ {formatDuration(turnDurationMs)}</span>
         )}

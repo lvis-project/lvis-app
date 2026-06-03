@@ -15,6 +15,8 @@
  *     자체의 의미가 사라짐).
  */
 
+import { t } from "../../../i18n/runtime.js";
+
 export interface PluginRecommendation {
   /** Stable identifier — matches plugin id where applicable, or `chat-basics` for the fallback. */
   pluginId: string;
@@ -33,7 +35,10 @@ export interface PluginRecommendation {
 
 interface MatrixRow {
   pluginId: string;
+  /** Plain label string for entries with an English label, or omit in favour of labelKey. */
   label: string;
+  /** i18n key to resolve at call time (used when the label requires translation). */
+  labelKey?: string;
   emoji: string;
   keywords: string[];
   marketplaceSlug: string | null;
@@ -64,7 +69,8 @@ const MATRIX: MatrixRow[] = [
     // marketplace slug is `lvis-plugin-work-assistant`. Display label is
     // the user-facing 업무 도우미 brand.
     pluginId: "work-assistant",
-    label: "업무 도우미",
+    label: "work assistant",
+    labelKey: "pluginRecommendationMatrix.workAssistantLabel",
     emoji: "💼",
     keywords: ["업무", "할일", "todo", "task", "proactive", "assistant", "일정"],
     marketplaceSlug: "lvis-plugin-work-assistant",
@@ -85,12 +91,15 @@ const MATRIX: MatrixRow[] = [
   },
 ];
 
-const FALLBACK: PluginRecommendation = {
-  pluginId: "chat-basics",
-  label: "chat 기본 사용",
-  emoji: "💬",
-  marketplaceSlug: null,
-};
+/** Returns the fallback chip at call time so the label resolves through the active locale. */
+function getFallback(): PluginRecommendation {
+  return {
+    pluginId: "chat-basics",
+    label: t("pluginRecommendationMatrix.chatBasicsLabel"),
+    emoji: "💬",
+    marketplaceSlug: null,
+  };
+}
 
 /**
  * Infer recommended plugins from a free-form Korean (or mixed) self-intro.
@@ -99,7 +108,7 @@ const FALLBACK: PluginRecommendation = {
  */
 export function inferRecommendedPlugins(intro: string): PluginRecommendation[] {
   const normalized = intro.toLowerCase();
-  if (normalized.trim().length === 0) return [FALLBACK];
+  if (normalized.trim().length === 0) return [getFallback()];
 
   const hits: PluginRecommendation[] = [];
   const seen = new Set<string>();
@@ -109,12 +118,12 @@ export function inferRecommendedPlugins(intro: string): PluginRecommendation[] {
       seen.add(row.pluginId);
       hits.push({
         pluginId: row.pluginId,
-        label: row.label,
+        label: row.labelKey ? t(row.labelKey) : row.label,
         emoji: row.emoji,
         marketplaceSlug: row.marketplaceSlug,
       });
     }
   }
 
-  return hits.length > 0 ? hits : [FALLBACK];
+  return hits.length > 0 ? hits : [getFallback()];
 }

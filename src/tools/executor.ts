@@ -72,6 +72,7 @@ import {
   TOOL_RESULT_CHUNK_READER_METADATA_KEY,
   type ToolResultChunkReader,
 } from "./tool-result-chunk.js";
+import { t } from "../i18n/index.js";
 const log = createLogger("executor");
 
 export interface ToolCallMeta {
@@ -400,7 +401,7 @@ function cleanApprovalPurposeText(value: unknown, maxLength = 180): string | und
 
 function purposeSentenceFromIntent(intent: string): string {
   const text = intent.replace(/[.!?。！？]+$/u, "").trim();
-  return maskSensitiveData(`사용자 요청에 따라 ${text} 작업을 수행합니다.`).masked;
+  return maskSensitiveData(t("be_executor.purposeSentence", { text })).masked;
 }
 
 function pickPurposeFromToolInput(input: Record<string, unknown>): string | undefined {
@@ -713,8 +714,7 @@ export class ToolExecutor {
       return {
         allowed: false,
         message:
-          `[권한 보류 — strict headless] 도구 '${toolName}' (${source}) — ` +
-          "strict 모드는 headless 자동 리뷰를 허용하지 않습니다." +
+          t("be_executor.permHoldStrictHeadless", { toolName, source }) +
           (deferredId ? ` (deferredId=${deferredId})` : ""),
         permissionResult: {
           decision: "deny",
@@ -729,7 +729,7 @@ export class ToolExecutor {
     if (!this.permissionManager?.hasReviewer()) {
       return {
         allowed: false,
-        message: `[권한 차단 — headless] 도구 '${toolName}' (${source}) — reviewer 미배치, fail-closed.`,
+        message: t("be_executor.permBlockHeadlessNoReviewer", { toolName, source }),
         permissionResult: {
           decision: "deny",
           reason: "headless reviewer not wired",
@@ -788,8 +788,7 @@ export class ToolExecutor {
       return {
         allowed: false,
         message:
-          `[권한 보류 — reviewer] 도구 '${toolName}' (${source}) — ` +
-          `${reviewer.verdict.reason}` +
+          t("be_executor.permHoldReviewer", { toolName, source, reason: reviewer.verdict.reason }) +
           (reviewer.deferredId ? ` (deferredId=${reviewer.deferredId})` : ""),
         permissionResult: {
           decision: "deny",
@@ -982,9 +981,9 @@ export class ToolExecutor {
     const tool = this.toolRegistry.findByName(toolUse.name);
     if (!tool) {
       const durationMs = Date.now() - startTime;
-      await this.auditToolCall(sessionId, toolUse.name, "builtin", "high", toolUse.input, "도구 없음", true, startTime, { decision: "deny", reason: "도구 없음", layer: 0 }, Infinity, permissionContext);
-      callbacks?.onToolEnd?.(toolUse.name, `도구를 찾을 수 없습니다: ${toolUse.name}`, true, meta, undefined, durationMs);
-      return { tool_use_id: toolUse.id, content: `도구를 찾을 수 없습니다: ${toolUse.name}`, is_error: true, durationMs };
+      await this.auditToolCall(sessionId, toolUse.name, "builtin", "high", toolUse.input, t("be_executor.toolNotFoundAudit"), true, startTime, { decision: "deny", reason: t("be_executor.toolNotFoundAudit"), layer: 0 }, Infinity, permissionContext);
+      callbacks?.onToolEnd?.(toolUse.name, t("be_executor.toolNotFound", { name: toolUse.name }), true, meta, undefined, durationMs);
+      return { tool_use_id: toolUse.id, content: t("be_executor.toolNotFound", { name: toolUse.name }), is_error: true, durationMs };
     }
     source = tool.source;
     trust = trustFromSource(source);
@@ -995,7 +994,7 @@ export class ToolExecutor {
     if (tool.mcpServerId) meta.mcpServerId = tool.mcpServerId;
 
     const returnUserAbort = async (input: Record<string, unknown>): Promise<ToolResult> => {
-      const msg = "도구 실행이 취소되었습니다.";
+      const msg = t("be_executor.toolExecutionCancelled");
       const durationMs = Date.now() - startTime;
       const abortedPermission: PermissionCheckResult = {
         decision: "deny",
@@ -1030,7 +1029,7 @@ export class ToolExecutor {
 
     const foldedExecutionCwd = caseFoldForMatch(canonicalizePathForMatch(executionCwd));
     if (isFilesystemRootPath(foldedExecutionCwd)) {
-      const msg = `[권한 차단] 도구 '${toolUse.name}' (${source}) — execution cwd is filesystem root.`;
+      const msg = t("be_executor.permBlockCwdRoot", { name: toolUse.name, source });
       const durationMs = Date.now() - startTime;
       const blockedPermission: PermissionCheckResult = {
         decision: "deny",
@@ -1044,7 +1043,7 @@ export class ToolExecutor {
     }
 
     if (!permissionContext?.trustOrigin) {
-      const msg = `[권한 차단] 도구 '${toolUse.name}' (${source}) — trust origin is missing.`;
+      const msg = t("be_executor.permBlockTrustOriginMissing", { name: toolUse.name, source });
       const durationMs = Date.now() - startTime;
       const blockedPermission: PermissionCheckResult = {
         decision: "deny",
@@ -1064,7 +1063,7 @@ export class ToolExecutor {
     });
 
     if (preResult.action === "deny") {
-      const msg = `[훅 차단] ${preResult.reason ?? "PreToolUse 훅에 의해 차단됨"}`;
+      const msg = t("be_executor.hookBlockPre", { reason: preResult.reason ?? t("be_executor.hookBlockPreDefaultReason") });
       const durationMs = Date.now() - startTime;
       emitToolStart(callbacks, toolUse.name, toolUse.input, meta);
       callbacks?.onToolEnd?.(toolUse.name, msg, true, meta, undefined, durationMs);
@@ -1131,7 +1130,7 @@ export class ToolExecutor {
       const trustOrigin = invocationPermissionContext.trustOrigin;
       const validation = validateDirectoryAddition(outOfAllowedTarget.canonicalPath);
       if (!validation.ok) {
-        const msg = `[디렉토리 정책 차단] 도구 '${toolUse.name}' — ${validation.reason} (${outOfAllowedTarget.filePath}).`;
+        const msg = t("be_executor.dirPolicyBlock", { name: toolUse.name, reason: validation.reason, filePath: outOfAllowedTarget.filePath });
         const durationMs = Date.now() - startTime;
         emitToolStart(callbacks, toolUse.name, finalInput, meta);
         callbacks?.onToolEnd?.(toolUse.name, msg, true, meta, undefined, durationMs);
@@ -1207,7 +1206,7 @@ export class ToolExecutor {
           );
           decision = await this.approvalGate.requestAndWait(approvalRequest);
         } catch (approvalErr) {
-          const msg = `[디렉토리 정책 오류] 도구 '${toolUse.name}' — ${approvalErr instanceof Error ? approvalErr.message : String(approvalErr)}`;
+          const msg = t("be_executor.dirPolicyError", { name: toolUse.name, error: approvalErr instanceof Error ? approvalErr.message : String(approvalErr) });
           const durationMs = Date.now() - startTime;
           emitToolStart(callbacks, toolUse.name, finalInput, meta);
           callbacks?.onToolEnd?.(toolUse.name, msg, true, meta, undefined, durationMs);
@@ -1216,7 +1215,7 @@ export class ToolExecutor {
         }
 
         if (decision.choice.startsWith("deny")) {
-          const msg = `[디렉토리 정책 차단] 도구 '${toolUse.name}' — 사용자가 허용 디렉토리 외부 경로 접근을 거부했습니다 (${outOfAllowedTarget.filePath}).`;
+          const msg = t("be_executor.dirPolicyUserDenied", { name: toolUse.name, filePath: outOfAllowedTarget.filePath });
           const durationMs = Date.now() - startTime;
           emitToolStart(callbacks, toolUse.name, finalInput, meta);
           callbacks?.onToolEnd?.(toolUse.name, msg, true, meta, undefined, durationMs);
@@ -1236,7 +1235,7 @@ export class ToolExecutor {
             acknowledgeWarnings: true,
           });
           if (!dirResult.ok || dirResult.verb !== "allow") {
-            const msg = `[디렉토리 정책 저장 실패] 도구 '${toolUse.name}' — ${dirResult.ok ? "unexpected result" : dirResult.error}`;
+            const msg = t("be_executor.dirPolicySaveFailed", { name: toolUse.name, error: dirResult.ok ? "unexpected result" : dirResult.error });
             const durationMs = Date.now() - startTime;
             emitToolStart(callbacks, toolUse.name, finalInput, meta);
             callbacks?.onToolEnd?.(toolUse.name, msg, true, meta, undefined, durationMs);
@@ -1263,7 +1262,7 @@ export class ToolExecutor {
             acknowledgeWarnings: true,
           });
           if (!dirResult.ok || dirResult.verb !== "allow") {
-            const msg = `[디렉토리 정책 세션 등록 실패] 도구 '${toolUse.name}' — ${dirResult.ok ? "unexpected result" : dirResult.error}`;
+            const msg = t("be_executor.dirPolicySessionRegFailed", { name: toolUse.name, error: dirResult.ok ? "unexpected result" : dirResult.error });
             const durationMs = Date.now() - startTime;
             emitToolStart(callbacks, toolUse.name, finalInput, meta);
             callbacks?.onToolEnd?.(toolUse.name, msg, true, meta, undefined, durationMs);
@@ -1304,8 +1303,7 @@ export class ToolExecutor {
           ...(deferredId ? { deferred: { queueId: deferredId, reviewerVerdict: verdict } } : {}),
         };
         const msg =
-          `[권한 보류 — directory] 도구 '${toolUse.name}' (${source}) — ` +
-          "headless 실행 중 허용 디렉토리 외부 경로 접근은 수동 디렉토리 승인 전 실행하지 않습니다." +
+          t("be_executor.permHoldHeadlessDirectory", { name: toolUse.name, source }) +
           (deferredId ? ` (deferredId=${deferredId})` : "");
         const durationMs = Date.now() - startTime;
         log.warn(msg);
@@ -1315,7 +1313,7 @@ export class ToolExecutor {
         return { allowed: false, result: { tool_use_id: toolUse.id, content: msg, is_error: true, durationMs } };
       }
 
-      const msg = `[승인 게이트 미연결 — Layer 1] 도구 '${toolUse.name}' (${source}) — 허용 디렉토리 외부 경로이지만 승인 게이트가 없어 차단.`;
+      const msg = t("be_executor.approvalGateMissingLayer1", { name: toolUse.name, source });
       const durationMs = Date.now() - startTime;
       log.error(msg);
       emitToolStart(callbacks, toolUse.name, finalInput, meta);
@@ -1427,7 +1425,7 @@ export class ToolExecutor {
           continue;
         }
 
-        const msg = `[Shell 경로 정책 차단] 도구 '${toolUse.name}' — ${shellPathViolation.reason}`;
+        const msg = t("be_executor.shellPathPolicyBlock", { name: toolUse.name, reason: shellPathViolation.reason });
         const durationMs = Date.now() - startTime;
         const blockedPermission: PermissionCheckResult = {
           decision: "deny",
@@ -1452,7 +1450,7 @@ export class ToolExecutor {
     if (this.bashAstValidator) {
       const bashResult = this.bashAstValidator.validate(toolUse.name, finalInput);
       if (bashResult.decision === "deny") {
-        const msg = `[Bash AST 차단] ${bashResult.reason} (pattern: ${bashResult.patternId})`;
+        const msg = t("be_executor.bashAstBlock", { reason: bashResult.reason ?? "", patternId: bashResult.patternId ?? "" });
         const durationMs = Date.now() - startTime;
         emitToolStart(callbacks, toolUse.name, finalInput, meta);
         callbacks?.onToolEnd?.(toolUse.name, msg, true, meta, undefined, durationMs);
@@ -1481,7 +1479,7 @@ export class ToolExecutor {
     if (source === "plugin" && invocationPermissionContext.allowedPluginIds) {
       const pluginAllowed = !!tool.pluginId && invocationPermissionContext.allowedPluginIds.has(tool.pluginId);
       if (!pluginAllowed) {
-        const msg = `[권한 차단] 플러그인 도구 '${toolUse.name}' — 현재 실행 scope 밖의 pluginId=${tool.pluginId ?? "(unknown)"}`;
+        const msg = t("be_executor.permBlockPluginOutOfScope", { name: toolUse.name, pluginId: tool.pluginId ?? "(unknown)" });
         const durationMs = Date.now() - startTime;
         const blockedPermission: PermissionCheckResult = {
           decision: "deny",
@@ -1496,7 +1494,7 @@ export class ToolExecutor {
     }
 
     if (sensitivePathPattern) {
-      const msg = `[민감 경로 차단] 도구 '${toolUse.name}' (${source}) — ${sensitiveTarget?.filePath} matches ${sensitivePathPattern}`;
+      const msg = t("be_executor.sensitivePathBlock", { name: toolUse.name, source, filePath: sensitiveTarget?.filePath ?? "", pattern: sensitivePathPattern ?? "" });
       const durationMs = Date.now() - startTime;
       const blockedPermission: PermissionCheckResult = {
         decision: "deny",
@@ -1607,7 +1605,7 @@ export class ToolExecutor {
       if (metaOverride === "ask" && permissionResult.decision === "allow") {
         permissionResult = {
           decision: "ask",
-          reason: `meta tool decisionOverride='ask' — 사용자 컨펌 필요`,
+          reason: t("be_executor.metaToolAskOverrideReason"),
           layer: 6,
         };
       }
@@ -1643,7 +1641,7 @@ export class ToolExecutor {
         }
       }
       if (permissionResult.decision === "deny") {
-        const msg = `[권한 차단] 도구 '${toolUse.name}' (${source}, trust:${trust}) — ${permissionResult.reason}`;
+        const msg = t("be_executor.permBlockDeny", { name: toolUse.name, source, trust, reason: permissionResult.reason });
         const durationMs = Date.now() - startTime;
         // Use finalInput (post-PreToolUse hook) so audit/UI never show stale
         // pre-hook args for a hook-modified invocation.
@@ -1663,7 +1661,7 @@ export class ToolExecutor {
               reason: `headless explicit approval unavailable: ${permissionResult.reason}`,
               layer: permissionResult.layer,
             };
-            const msg = `[권한 차단 — headless] 도구 '${toolUse.name}' (${source}) — ${headlessDeny.reason}`;
+            const msg = t("be_executor.permBlockHeadlessDeny", { name: toolUse.name, source, reason: headlessDeny.reason });
             const durationMs = Date.now() - startTime;
             emitToolStart(callbacks, toolUse.name, finalInput, meta);
             callbacks?.onToolEnd?.(toolUse.name, msg, true, meta, undefined, durationMs);
@@ -1745,7 +1743,7 @@ export class ToolExecutor {
             invocationPermissionContext,
           );
           if (permHook.decision === "deny") {
-            const msg = `[Hook Permission 차단] ${permHook.reason}`;
+            const msg = t("be_executor.hookPermissionBlock", { reason: permHook.reason });
             const durationMs = Date.now() - startTime;
             emitToolStart(callbacks, toolUse.name, finalInput, meta);
             callbacks?.onToolEnd?.(toolUse.name, msg, true, meta, undefined, durationMs);
@@ -1768,7 +1766,7 @@ export class ToolExecutor {
             );
             decision = await this.approvalGate.requestAndWait(approvalRequest);
           } catch (approvalErr) {
-            const msg = `[승인 오류] 도구 '${toolUse.name}' — 승인 게이트 내부 오류: ${approvalErr instanceof Error ? approvalErr.message : String(approvalErr)}`;
+            const msg = t("be_executor.approvalGateError", { name: toolUse.name, error: approvalErr instanceof Error ? approvalErr.message : String(approvalErr) });
             const durationMs = Date.now() - startTime;
             // finalInput keeps audit/UI consistent with the args shown to the
             // approval gate (which already uses finalInput in approvalRequest).
@@ -1788,7 +1786,7 @@ export class ToolExecutor {
               const pattern = approvalCacheKey ?? decision.rememberPattern ?? toolUse.name;
               await this.permissionManager.addAlwaysDeniedPersist(pattern);
             }
-            const msg = `[승인 거부] 도구 '${toolUse.name}' — 사용자가 실행을 거부했습니다.`;
+            const msg = t("be_executor.approvalDeniedByUser", { name: toolUse.name });
             const durationMs = Date.now() - startTime;
             // finalInput matches the args the user actually saw + denied via
             // approvalRequest — never log stale pre-hook input here.
@@ -1815,7 +1813,7 @@ export class ToolExecutor {
           // allow-once / allow-always: 실행 계속
         } else {
           // §F4: approvalGate 미연결 시 fail-closed — 모든 ask 결정을 차단
-          const msg = `[승인 게이트 미연결] 도구 '${toolUse.name}' (${source}) — ask 결정이지만 승인 게이트가 없어 차단. ${permissionResult.reason}`;
+          const msg = t("be_executor.approvalGateMissing", { name: toolUse.name, source, reason: permissionResult.reason });
           const durationMs = Date.now() - startTime;
           log.error(msg);
           // finalInput so audit reflects post-hook args even when the gate is
@@ -1842,7 +1840,7 @@ export class ToolExecutor {
       invocationPermissionContext,
     );
     if (scriptPre.decision === "deny") {
-      const msg = `[Hook 차단] ${scriptPre.reason}`;
+      const msg = t("be_executor.hookBlockScript", { reason: scriptPre.reason });
       const durationMs = Date.now() - startTime;
       emitToolStart(callbacks, toolUse.name, finalInput, meta);
       callbacks?.onToolEnd?.(toolUse.name, msg, true, meta, undefined, durationMs);
@@ -1853,7 +1851,7 @@ export class ToolExecutor {
     // ── Step 5: Rate Limit (trust별) ────────────────
     const rateResult = this.rateLimiter.check(toolUse.name, trust);
     if (!rateResult.allowed) {
-      const msg = `[속도 제한] 도구 '${toolUse.name}' (trust:${trust}) 호출 빈도 초과. 잠시 후 다시 시도해주세요.`;
+      const msg = t("be_executor.rateLimitExceeded", { name: toolUse.name, trust });
       const durationMs = Date.now() - startTime;
       emitToolStart(callbacks, toolUse.name, finalInput, meta);
       callbacks?.onToolEnd?.(toolUse.name, msg, true, meta, undefined, durationMs);
@@ -1865,7 +1863,7 @@ export class ToolExecutor {
       try {
         this.auditLogger.assertPermissionAuditWritable();
       } catch (err) {
-        const msg = `[감사 체인 차단] 도구 '${toolUse.name}' — permission audit chain is not writable: ${err instanceof Error ? err.message : String(err)}`;
+        const msg = t("be_executor.auditChainBlock", { name: toolUse.name, error: err instanceof Error ? err.message : String(err) });
         const durationMs = Date.now() - startTime;
         emitToolStart(callbacks, toolUse.name, finalInput, meta);
         callbacks?.onToolEnd?.(toolUse.name, msg, true, meta, undefined, durationMs);
@@ -1955,8 +1953,8 @@ export class ToolExecutor {
         outcome.reason === "ceiling"
           ? `tool execution exceeded global ceiling (${effectiveCeilingMs}ms): ${toolUse.name}`
           : outcome.reason === "user-abort"
-            ? "도구 실행이 취소되었습니다."
-            : outcome.error.message || "알 수 없는 도구 실행 오류";
+            ? t("be_executor.toolExecutionCancelled")
+            : outcome.error.message || t("be_executor.toolExecutionUnknownError");
       isError = true;
     }
 

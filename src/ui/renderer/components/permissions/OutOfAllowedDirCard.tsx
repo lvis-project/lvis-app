@@ -36,6 +36,7 @@ import { Input } from "../../../../components/ui/input.js";
 import type { ApprovalChoice, ApprovalRequest } from "../../types.js";
 import { isNonUserTrustOrigin, trustOriginLabel } from "../../utils/trust-origin-label.js";
 import { PermissionEvaluationContextPanel } from "./PermissionEvaluationContextPanel.js";
+import { useTranslation } from "../../../../i18n/react.js";
 
 interface OutOfAllowedDirCardProps {
   open: boolean;
@@ -58,6 +59,7 @@ export function OutOfAllowedDirCard({
   request,
   onDecide,
 }: OutOfAllowedDirCardProps) {
+  const { t } = useTranslation();
   const [retypeValue, setRetypeValue] = useState("");
   const [acknowledgedAdjacency, setAcknowledgedAdjacency] = useState(false);
 
@@ -96,29 +98,28 @@ export function OutOfAllowedDirCard({
       >
         <DialogHeader>
           <DialogTitle className="flex items-center gap-2">
-            허용 디렉토리 외부 접근
+            {t("outOfAllowedDirCard.title")}
             <Badge variant="outline" className="ml-2 text-[11px]">
               {originLabel}
             </Badge>
           </DialogTitle>
           <DialogDescription>
-            도구 <code className="rounded bg-muted px-1 py-0.5 font-mono">{request.toolName}</code>{" "}
-            가 현재 허용 디렉토리 목록 외부의 경로에 접근하려 합니다. 허용 범위를
-            선택하세요 — 이번 1회 (현재 메시지 처리 동안), 이번 세션 (현재
-            대화 종료까지), 영구 (설정에 저장), 또는 거부.
+            {t("outOfAllowedDirCard.descriptionPrefix")}{" "}
+            <code className="rounded bg-muted px-1 py-0.5 font-mono">{request.toolName}</code>{" "}
+            {t("outOfAllowedDirCard.descriptionSuffix")}
           </DialogDescription>
         </DialogHeader>
 
         <div className="space-y-3 py-2">
           {warnOrigin && (
             <section className="rounded border border-warning/40 bg-warning/15 px-3 py-2 text-xs text-warning">
-              이 디렉토리 접근은 {originLabel}에서 시작되었습니다. 영구 허용은 이후 같은 범위의 파일 접근을 계속 허용합니다.
+              {t("outOfAllowedDirCard.originWarning", { originLabel })}
             </section>
           )}
 
           <section>
             <p className="mb-1 text-xs font-medium text-muted-foreground">
-              요청 경로
+              {t("outOfAllowedDirCard.candidatePathLabel")}
             </p>
             <p className="rounded bg-muted px-2 py-1 text-sm font-mono break-all">
               {candidatePath}
@@ -127,11 +128,11 @@ export function OutOfAllowedDirCard({
 
           <section>
             <p className="mb-1 text-xs font-medium text-muted-foreground">
-              현재 허용 디렉토리 ({currentAllowed.length}개)
+              {t("outOfAllowedDirCard.currentAllowedLabel", { count: currentAllowed.length })}
             </p>
             <ul className="max-h-24 overflow-y-auto rounded border bg-muted/50 p-2 text-xs font-mono break-all">
               {currentAllowed.length === 0 ? (
-                <li className="text-muted-foreground">— 없음 —</li>
+                <li className="text-muted-foreground">{t("outOfAllowedDirCard.emptyAllowed")}</li>
               ) : (
                 currentAllowed.map((d) => <li key={d}>{d}</li>)
               )}
@@ -141,7 +142,7 @@ export function OutOfAllowedDirCard({
           {suggestedParent && (
             <section>
               <p className="mb-1 text-xs font-medium text-muted-foreground">
-                추천 추가 디렉토리
+                {t("outOfAllowedDirCard.suggestedParentLabel")}
               </p>
               <p className="rounded bg-info/10 px-2 py-1 text-sm font-mono text-info break-all">
                 {suggestedParent}
@@ -152,7 +153,7 @@ export function OutOfAllowedDirCard({
           {adjacencyWarnings.length > 0 && (
             <section className="rounded border border-destructive/40 bg-destructive/10 p-2 text-sm">
               <p className="mb-1 font-medium text-destructive">
-                주의 — 인접 경고
+                {t("outOfAllowedDirCard.adjacencyWarningTitle")}
               </p>
               <ul className="ml-4 list-disc text-xs text-destructive">
                 {adjacencyWarnings.map((w, i) => <li key={i}>{w}</li>)}
@@ -163,7 +164,7 @@ export function OutOfAllowedDirCard({
                   onCheckedChange={(checked) => setAcknowledgedAdjacency(checked === true)}
                   data-testid="adjacency-warning-ack"
                 />
-                위 경고를 이해했고 진행을 원합니다.
+                {t("outOfAllowedDirCard.adjacencyAckLabel")}
               </Label>
             </section>
           )}
@@ -172,7 +173,7 @@ export function OutOfAllowedDirCard({
 
           <section className="rounded border bg-muted/30 p-2">
             <p className="mb-1 text-xs font-medium text-muted-foreground">
-              영구 추가 확인 (피싱 방지) — &ldquo;{confirmName}&rdquo; 를 정확히 입력하세요
+              {t("outOfAllowedDirCard.retypeLabel", { confirmName })}
             </p>
             <Input
               value={retypeValue}
@@ -185,15 +186,15 @@ export function OutOfAllowedDirCard({
 
         <DialogFooter className="gap-2 sm:gap-2">
           <Button className="w-full sm:w-auto" variant="ghost" onClick={() => onDecide("deny-once")}>
-            거부
+            {t("outOfAllowedDirCard.denyButton")}
           </Button>
           <Button
             className="w-full sm:w-auto"
             variant="outline"
             onClick={() => onDecide("allow-once")}
-            title="현재 메시지 처리 동안만 허용. 다음 메시지에서는 다시 묻습니다."
+            title={t("outOfAllowedDirCard.allowOnceTitle")}
           >
-            이번 1회만
+            {t("outOfAllowedDirCard.allowOnceButton")}
           </Button>
           <Button
             className="w-full sm:w-auto"
@@ -205,13 +206,13 @@ export function OutOfAllowedDirCard({
             }}
             title={
               adjacencyBlocking
-                ? "민감 경로 인접 경고를 먼저 확인하세요"
+                ? t("outOfAllowedDirCard.allowSessionBlockedTitle")
                 : suggestedParent
-                  ? `현재 대화 종료까지 ${suggestedParent} 하위 전체 접근을 허용 (영구 저장하지 않음)`
-                  : "추천 추가 디렉토리가 없습니다"
+                  ? t("outOfAllowedDirCard.allowSessionTitle", { suggestedParent })
+                  : t("outOfAllowedDirCard.allowSessionNoSuggestionTitle")
             }
           >
-            이번 세션 동안 허용
+            {t("outOfAllowedDirCard.allowSessionButton")}
           </Button>
           <Button
             className="w-full sm:w-auto"
@@ -221,7 +222,7 @@ export function OutOfAllowedDirCard({
               onDecide("allow-always", suggestedParent);
             }}
           >
-            디렉토리 영구 추가
+            {t("outOfAllowedDirCard.allowAlwaysButton")}
           </Button>
         </DialogFooter>
       </DialogContent>

@@ -8,6 +8,7 @@ import React, { useCallback, useEffect, useState } from "react";
 import { Checkbox } from "../../../components/ui/checkbox.js";
 import { NativeSelect, NativeSelectOption } from "../../../components/ui/native-select.js";
 import { Separator } from "../../../components/ui/separator.js";
+import { useTranslation } from "../../../i18n/react.js";
 
 interface DlpStats {
   totalHits: number;
@@ -36,9 +37,10 @@ function Bar({ value, max }: { value: number; max: number }) {
 
 /** Inline SVG sparkline for daily hit trend */
 function Sparkline({ byDay }: { byDay: Record<string, number> }) {
+  const { t } = useTranslation();
   const days = Object.keys(byDay).sort();
   if (days.length < 2) {
-    return <p className="text-[11px] text-muted-foreground italic">데이터 부족 (2일 이상 필요)</p>;
+    return <p className="text-[11px] text-muted-foreground italic">{t("privacyTab.sparklineInsufficientData")}</p>;
   }
   const values = days.map((d) => byDay[d] ?? 0);
   const maxVal = Math.max(...values, 1);
@@ -77,6 +79,7 @@ interface PrivacyTabProps {
 }
 
 export function PrivacyTab({ piiRedactEnabled, onToggle }: PrivacyTabProps) {
+  const { t } = useTranslation();
   const [stats, setStats] = useState<DlpStats | null>(null);
   const [statsError, setStatsError] = useState<string | null>(null);
   const [days, setDays] = useState(7);
@@ -87,9 +90,9 @@ export function PrivacyTab({ piiRedactEnabled, onToggle }: PrivacyTabProps) {
       setStats(s);
       setStatsError(null);
     } catch (e) {
-      setStatsError((e as Error).message ?? "통계 로드 실패");
+      setStatsError((e as Error).message ?? t("privacyTab.statsLoadFailed"));
     }
-  }, []);
+  }, [t]);
 
   useEffect(() => {
     if (piiRedactEnabled) {
@@ -104,9 +107,9 @@ export function PrivacyTab({ piiRedactEnabled, onToggle }: PrivacyTabProps) {
       {/* ── Toggle ── */}
       <div className="space-y-2">
         <div>
-          <p className="text-sm font-medium">PII 리댁트</p>
+          <p className="text-sm font-medium">{t("privacyTab.piiRedactTitle")}</p>
           <p className="text-[11px] text-muted-foreground">
-            활성화 시 LLM으로 전송 전에 이메일·전화·신용카드 등 개인정보를 [REDACTED:*]로 치환합니다. 기본값은 꺼짐.
+            {t("privacyTab.piiRedactDescription")}
           </p>
         </div>
         <div className="flex items-center gap-3 rounded-md border px-3 py-3">
@@ -118,10 +121,10 @@ export function PrivacyTab({ piiRedactEnabled, onToggle }: PrivacyTabProps) {
           />
           <div className="space-y-0.5">
             <p id="pii-redact-toggle-label" className="text-sm font-medium">
-              PII 리댁트 활성화 (기본 OFF)
+              {t("privacyTab.piiRedactToggleLabel")}
             </p>
             <p className="text-[11px] text-muted-foreground">
-              전송 직전 이메일/전화번호/주민번호/카드번호를 `[REDACTED:*]`로 치환하고, 리댁트 발생 시 응답 영역에 🔒 알림을 잠시 표시합니다. 감사 로그에도 건수가 기록됩니다.
+              {t("privacyTab.piiRedactToggleDescription")}
             </p>
           </div>
         </div>
@@ -133,16 +136,16 @@ export function PrivacyTab({ piiRedactEnabled, onToggle }: PrivacyTabProps) {
           <Separator />
           <div className="space-y-3">
             <div className="flex items-center justify-between">
-              <p className="text-sm font-medium">DLP 탐지 통계</p>
+              <p className="text-sm font-medium">{t("privacyTab.dlpStatsTitle")}</p>
               <NativeSelect
                 size="sm"
                 className="w-28"
                 value={days}
                 onChange={(e) => setDays(Number(e.target.value))}
               >
-                <NativeSelectOption value={7}>최근 7일</NativeSelectOption>
-                <NativeSelectOption value={14}>최근 14일</NativeSelectOption>
-                <NativeSelectOption value={30}>최근 30일</NativeSelectOption>
+                <NativeSelectOption value={7}>{t("privacyTab.last7Days")}</NativeSelectOption>
+                <NativeSelectOption value={14}>{t("privacyTab.last14Days")}</NativeSelectOption>
+                <NativeSelectOption value={30}>{t("privacyTab.last30Days")}</NativeSelectOption>
               </NativeSelect>
             </div>
 
@@ -156,14 +159,14 @@ export function PrivacyTab({ piiRedactEnabled, onToggle }: PrivacyTabProps) {
               <div className="space-y-4">
                 {/* Total */}
                 <div className="rounded-md border px-4 py-3 text-center">
-                  <p className="text-[11px] text-muted-foreground">총 리댁션 ({days}일)</p>
+                  <p className="text-[11px] text-muted-foreground">{t("privacyTab.totalRedactions", { days })}</p>
                   <p className="text-2xl font-semibold tabular-nums">{stats.totalHits.toLocaleString()}</p>
                 </div>
 
                 {/* By Kind bar chart */}
                 {Object.keys(stats.byKind).length > 0 ? (
                   <div className="space-y-1.5">
-                    <p className="text-[11px] text-muted-foreground font-medium">유형별 분포</p>
+                    <p className="text-[11px] text-muted-foreground font-medium">{t("privacyTab.byKindTitle")}</p>
                     {Object.entries(stats.byKind)
                       .sort((a, b) => b[1] - a[1])
                       .map(([kind, count]) => (
@@ -175,12 +178,12 @@ export function PrivacyTab({ piiRedactEnabled, onToggle }: PrivacyTabProps) {
                       ))}
                   </div>
                 ) : (
-                  <p className="text-[11px] text-muted-foreground italic">탐지 기록 없음</p>
+                  <p className="text-[11px] text-muted-foreground italic">{t("privacyTab.noDetectionRecords")}</p>
                 )}
 
                 {/* Daily trend sparkline */}
                 <div className="space-y-1.5">
-                  <p className="text-[11px] text-muted-foreground font-medium">일별 트렌드</p>
+                  <p className="text-[11px] text-muted-foreground font-medium">{t("privacyTab.dailyTrendTitle")}</p>
                   <div className="overflow-x-auto">
                     <Sparkline byDay={stats.byDay} />
                   </div>
@@ -195,13 +198,13 @@ export function PrivacyTab({ piiRedactEnabled, onToggle }: PrivacyTabProps) {
                 {/* Top 5 patterns */}
                 {stats.topPatterns.length > 0 && (
                   <div className="space-y-1.5">
-                    <p className="text-[11px] text-muted-foreground font-medium">상위 패턴 (Top 5)</p>
+                    <p className="text-[11px] text-muted-foreground font-medium">{t("privacyTab.topPatternsTitle")}</p>
                     <div className="rounded-md border text-xs">
                       <table className="w-full">
                         <thead>
                           <tr className="border-b bg-muted/40">
-                            <th className="px-3 py-1.5 text-left font-medium">패턴</th>
-                            <th className="px-3 py-1.5 text-right font-medium">건수</th>
+                            <th className="px-3 py-1.5 text-left font-medium">{t("privacyTab.tableHeaderPattern")}</th>
+                            <th className="px-3 py-1.5 text-right font-medium">{t("privacyTab.tableHeaderCount")}</th>
                           </tr>
                         </thead>
                         <tbody>
@@ -223,7 +226,7 @@ export function PrivacyTab({ piiRedactEnabled, onToggle }: PrivacyTabProps) {
             )}
 
             {!stats && !statsError && (
-              <p className="text-[11px] text-muted-foreground italic">통계 로딩 중...</p>
+              <p className="text-[11px] text-muted-foreground italic">{t("privacyTab.statsLoading")}</p>
             )}
           </div>
         </>

@@ -1,11 +1,11 @@
 import { createDynamicTool, type Tool } from "./base.js";
 import type { SkillStore } from "../main/skill-store.js";
+import { t } from "../i18n/index.js";
 
 export function createSkillListTool(store: SkillStore): Tool {
   return createDynamicTool({
     name: "skill_list",
-    description:
-      "현재 사용할 수 있는 LVIS skills 목록을 반환합니다. skill_load 전에 어떤 skill 이 있는지 확인할 때 사용하세요.",
+    description: t("be_skillList.toolDescription"),
     source: "builtin",
     category: "read",
     isReadOnly: () => true,

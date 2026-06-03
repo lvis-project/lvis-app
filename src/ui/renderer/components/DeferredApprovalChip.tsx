@@ -32,6 +32,7 @@ import {
   type ApprovalIntent,
 } from "../../../permissions/approval-intent.js";
 import type { DeferredQueueEntry } from "../types.js";
+import { useTranslation } from "../../../i18n/react.js";
 
 export interface DeferredApprovalChipProps {
   /** The user's current composer draft text. Re-evaluated on every change. */
@@ -44,6 +45,7 @@ export function DeferredApprovalChip({
   draftText,
   onResolved,
 }: DeferredApprovalChipProps) {
+  const { t } = useTranslation();
   const [pending, setPending] = useState<DeferredQueueEntry[]>([]);
   const [busy, setBusy] = useState(false);
   // Round-2 code-reviewer MAJOR — synchronous re-entry guard. `useState`
@@ -101,7 +103,7 @@ export function DeferredApprovalChip({
     const listApi = window.lvis?.permission?.deferredList;
     if (!api) {
       inFlight.current = false;
-      setError("deferred-resolve API 사용 불가");
+      setError(t("deferredApprovalChip.apiUnavailable"));
       return;
     }
     setBusy(true);
@@ -117,14 +119,14 @@ export function DeferredApprovalChip({
         if (!current.ok) {
           // Round-6 UX MINOR — plain Korean; raw `current.error` value
           // never reaches UI.
-          setError("대기 중인 요청을 확인하지 못했습니다. 잠시 후 다시 시도하세요.");
+          setError(t("deferredApprovalChip.checkQueueFailed"));
           return;
         }
         if (current.pending.length !== 1 || current.pending[0]?.id !== target.id) {
           // Round-6 UX MINOR — "pending 큐" English-Korean mix replaced
           // with plain Korean. Tells the user what happened + the
           // next step.
-          setError("다른 요청이 추가됐습니다. 승인 패널에서 직접 처리하세요.");
+          setError(t("deferredApprovalChip.queueChanged"));
           await refresh();
           return;
         }
@@ -136,7 +138,7 @@ export function DeferredApprovalChip({
       if (liveIntent.kind !== intent.kind) {
         // Round-5 UX NIT — "의도가 변경되었습니다" is internal-state
         // language. Plain Korean for what actually happened.
-        setError("입력이 바뀌었습니다. 다시 확인하고 버튼을 눌러 주세요.");
+        setError(t("deferredApprovalChip.intentChanged"));
         return;
       }
       // Round-3 critic MAJOR — the audit `reason` field is HMAC-chained
@@ -155,7 +157,7 @@ export function DeferredApprovalChip({
       if (!r.ok) {
         // Round-6 UX MINOR — sanitize raw IPC error string before
         // surfacing. The error code may be a developer-facing token.
-        setError("요청 처리 중 오류가 발생했습니다.");
+        setError(t("deferredApprovalChip.resolveError"));
         return;
       }
       onResolved?.(decision, target.id);
@@ -180,23 +182,23 @@ export function DeferredApprovalChip({
   // English tokens like "mcp" or "builtin".
   const sourceBadgeText =
     target.source === "plugin"
-      ? "플러그인"
+      ? t("deferredApprovalChip.sourcePlugin")
       : target.source === "mcp"
-        ? "MCP"
-        : "기본";
+        ? t("deferredApprovalChip.sourceMcp")
+        : t("deferredApprovalChip.sourceBuiltin");
   const sourceBadgeAriaLabel =
     target.source === "plugin"
-      ? "플러그인 도구"
+      ? t("deferredApprovalChip.sourcePluginTool")
       : target.source === "mcp"
-        ? "MCP 도구"
-        : "기본 도구";
+        ? t("deferredApprovalChip.sourceMcpTool")
+        : t("deferredApprovalChip.sourceBuiltinTool");
   // Round-5 UX MAJOR — "호출" is dev jargon; "실행" reads as
   // conversational confirmation rather than legal-permission form.
   const labelTail =
     intent.kind === "approve"
-      ? `'${target.toolName}' 실행을 허용할까요?`
-      : `'${target.toolName}' 실행을 취소할까요?`;
-  const action = intent.kind === "approve" ? "허용" : "거절";
+      ? t("deferredApprovalChip.labelApprove", { toolName: target.toolName })
+      : t("deferredApprovalChip.labelReject", { toolName: target.toolName });
+  const action = intent.kind === "approve" ? t("deferredApprovalChip.actionApprove") : t("deferredApprovalChip.actionReject");
 
   return (
     // Round-3 UX MAJOR — switched to `flex-col` so the error row drops
@@ -235,7 +237,7 @@ export function DeferredApprovalChip({
           disabled={busy}
           onClick={() => void handle()}
           data-testid="deferred-approval-chip-action"
-          aria-label={`${sourceBadgeAriaLabel} '${target.toolName}' 실행을 ${action}`}
+          aria-label={t("deferredApprovalChip.actionAriaLabel", { sourceBadgeAriaLabel, toolName: target.toolName, action })}
         >
           {action}
         </Button>
@@ -244,8 +246,8 @@ export function DeferredApprovalChip({
           size="icon"
           variant="ghost"
           className="h-7 w-7 shrink-0 text-muted-foreground"
-          aria-label="이 승인 제안 닫기"
-          title="닫기"
+          aria-label={t("deferredApprovalChip.dismissAriaLabel")}
+          title={t("deferredApprovalChip.dismissTitle")}
           data-testid="deferred-approval-chip-dismiss"
           onClick={() => {
             setError(null);

@@ -43,6 +43,8 @@ import { Textarea } from "../../../components/ui/textarea.js";
 import { cn } from "../../../lib/utils.js";
 import type { LvisApi } from "../types.js";
 import { inferRecommendedPlugins } from "../onboarding/plugin-recommendation-matrix.js";
+import { t } from "../../../i18n/runtime.js";
+import { useTranslation } from "../../../i18n/react.js";
 
 export interface MemorySeedDialogProps {
   open: boolean;
@@ -85,15 +87,15 @@ export function scenarioIntroPlaceholder(
 ): string {
   switch (scenarioId) {
     case "meeting":
-      return "예) 매주 회의가 많은 PM. 회의록 정리와 액션 아이템 추출에 관심.";
+      return t("memorySeedDialog.placeholderMeeting");
     case "docs":
-      return "예) 사내 문서가 많은 시니어 엔지니어. 빠른 검색과 요약이 필요.";
+      return t("memorySeedDialog.placeholderDocs");
     case "work":
-      return "예) 메일·일정이 폭주하는 매니저. 우선순위 정리와 알림 자동화에 관심.";
+      return t("memorySeedDialog.placeholderWork");
     case "multi-agent":
-      return "예) 리서치/분석을 여러 갈래로 동시 진행하는 PM·전략가.";
+      return t("memorySeedDialog.placeholderMultiAgent");
     default:
-      return "예) 매주 회의가 많은 PM. 회의록 정리와 일정 관리 자동화에 관심.";
+      return t("memorySeedDialog.placeholderDefault");
   }
 }
 
@@ -108,10 +110,10 @@ export function composeUrgentMemorySeed(name: string, intro: string): string {
   const trimmedIntro = intro.trim();
   const lines: string[] = [];
   if (trimmedName.length > 0) {
-    lines.push(`- 호칭: ${trimmedName}`);
+    lines.push(t("memorySeedDialog.seedName", { name: trimmedName }));
   }
   if (trimmedIntro.length > 0) {
-    lines.push(`- 자기소개: ${trimmedIntro}`);
+    lines.push(t("memorySeedDialog.seedIntro", { intro: trimmedIntro }));
   }
   return lines.join("\n");
 }
@@ -144,22 +146,16 @@ export function composeOnboardingContext(
   }
   const lines: string[] = [];
   if (trimmedName.length > 0) {
-    lines.push(`- 사용자 호칭: ${trimmedName}`);
-    lines.push(
-      `- 호칭 사용 규칙: 첫 turn 의 인사에서 "${trimmedName}" 호칭을 자연스럽게 한 번 사용하고, 이후 turn 에서는 과도하게 반복하지 않습니다.`,
-    );
+    lines.push(t("memorySeedDialog.ctxUserName", { name: trimmedName }));
+    lines.push(t("memorySeedDialog.ctxNameRule", { name: trimmedName }));
   }
   if (trimmedIntro.length > 0) {
-    lines.push(`- 사용자 자기소개: ${trimmedIntro}`);
+    lines.push(t("memorySeedDialog.ctxUserIntro", { intro: trimmedIntro }));
   }
   if (slugs.length > 0) {
-    lines.push(
-      `- 방금 설치 요청한 플러그인: ${slugs.join(", ")}. 첫 turn 에서 이 플러그인 중 하나로 시작할 수 있는 *진짜 첫 작업* 을 자연스럽게 제안하세요.`,
-    );
+    lines.push(t("memorySeedDialog.ctxPlugins", { slugs: slugs.join(", ") }));
   }
-  lines.push(
-    `- 첫 turn 가이드라인: 사용자가 방금 LVIS 의 온보딩을 마쳤습니다. 일반적인 환영 인사가 아닌, 위 정보 기반의 *구체적 다음 행동* 을 1~2 문장으로 제시하세요.`,
-  );
+  lines.push(t("memorySeedDialog.ctxFirstTurnGuideline"));
   return lines.join("\n");
 }
 
@@ -170,6 +166,7 @@ export function MemorySeedDialog({
   onDismissed,
   selectedScenarioId = null,
 }: MemorySeedDialogProps) {
+  const { t } = useTranslation();
   const [name, setName] = useState("");
   const [intro, setIntro] = useState("");
   const [submitting, setSubmitting] = useState(false);
@@ -293,10 +290,10 @@ export function MemorySeedDialog({
             </span>
             <div>
               <DialogTitle className="text-sm font-medium">
-                LVIS — 기억을 시작합니다
+                {t("memorySeedDialog.brandTitle")}
               </DialogTitle>
               <DialogDescription className="text-[10px]">
-                저를 어떻게 부르고 싶으세요?
+                {t("memorySeedDialog.brandSubtitle")}
               </DialogDescription>
             </div>
           </div>
@@ -305,28 +302,26 @@ export function MemorySeedDialog({
         <div className="px-6 pb-6 space-y-3">
           {/* LVIS welcome message card — MEMORY.md 첫 항목 안내 */}
           <div className="rounded-lg bg-[hsl(var(--muted))] px-3 py-3 text-[12.5px] leading-relaxed">
-            <b>저를 어떻게 부르고 싶으세요?</b>
+            <b>{t("memorySeedDialog.cardHeading")}</b>
             <br />
-            그리고 LVIS 가 무엇을 가장 자주 도와드리면 좋을지 한 줄로
-            적어주세요.
+            {t("memorySeedDialog.cardBody")}
             <br />
             <span className="text-[10.5px] text-muted-foreground">
-              이 한 줄은 영구 메모리(MEMORY.md)로 저장되어 모든 대화에
-              반영됩니다.
+              {t("memorySeedDialog.cardNote")}
             </span>
           </div>
 
           {/* Name */}
           <div className="space-y-1.5">
             <Label htmlFor="memory-seed-name" className="text-[11px]">
-              호칭
+              {t("memorySeedDialog.labelName")}
             </Label>
             <Input
               id="memory-seed-name"
               data-testid="memory-seed-dialog:name"
               value={name}
               onChange={(e) => setName(e.target.value)}
-              placeholder="이름 또는 호칭"
+              placeholder={t("memorySeedDialog.placeholderName")}
               autoFocus
             />
           </div>
@@ -334,7 +329,7 @@ export function MemorySeedDialog({
           {/* One-liner intro */}
           <div className="space-y-1.5">
             <Label htmlFor="memory-seed-intro" className="text-[11px]">
-              한 줄 자기소개
+              {t("memorySeedDialog.labelIntro")}
             </Label>
             <Textarea
               id="memory-seed-intro"
@@ -346,7 +341,7 @@ export function MemorySeedDialog({
               placeholder={scenarioIntroPlaceholder(selectedScenarioId)}
             />
             <p className="text-[10px] text-muted-foreground">
-              ✦ 이 내용이 MEMORY.md 의 첫 항목이 됩니다.
+              {t("memorySeedDialog.introHint")}
             </p>
           </div>
 
@@ -364,10 +359,10 @@ export function MemorySeedDialog({
               className="text-[10.5px] uppercase tracking-wider"
               style={{ color: "hsl(var(--p-purple-500))" }}
             >
-              ✨ 분석 결과
+              {t("memorySeedDialog.analysisHeading")}
             </div>
             <div className="text-[12px] mt-1.5">
-              자기소개 기반으로 다음 도구를 추천합니다:
+              {t("memorySeedDialog.analysisBody")}
             </div>
             <div className="mt-2 flex flex-wrap gap-1.5">
               {recommendations.map((rec) => {
@@ -384,9 +379,9 @@ export function MemorySeedDialog({
                     title={
                       installable
                         ? requested
-                          ? "설치 요청을 보냈습니다"
-                          : "클릭하면 설치합니다"
-                        : "이 추천은 설치 가능한 플러그인이 없습니다"
+                          ? t("memorySeedDialog.chipTitleInstalled")
+                          : t("memorySeedDialog.chipTitleInstall")
+                        : t("memorySeedDialog.chipTitleNoPlugin")
                     }
                     className={
                       "text-[11px] px-2 py-0.5 rounded-full transition disabled:cursor-default"
@@ -407,7 +402,7 @@ export function MemorySeedDialog({
             {/* Microcopy explains the chip becomes a real install. The
                 fallback chat-basics chip stays a non-button (disabled). */}
             <p className="mt-2 text-[10.5px] text-muted-foreground">
-              ✦ 클릭하면 해당 플러그인이 즉시 설치됩니다.
+              {t("memorySeedDialog.chipInstallHint")}
             </p>
           </div>
 
@@ -423,7 +418,7 @@ export function MemorySeedDialog({
                 "linear-gradient(135deg, hsl(var(--p-purple-500)), hsl(var(--p-blue-500)))",
             }}
           >
-            기억하고 시작하기 →
+            {t("memorySeedDialog.submitButton")}
           </Button>
           <Button
             type="button"
@@ -433,7 +428,7 @@ export function MemorySeedDialog({
             onClick={handleSkip}
             disabled={submitting}
           >
-            건너뛰기 (나중에 ⌘? 로 재진입)
+            {t("memorySeedDialog.skipButton")}
           </Button>
         </div>
       </DialogContent>

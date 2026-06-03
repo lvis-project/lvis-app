@@ -3,6 +3,7 @@ import { isIpcErrorResult, type AppSettings, type DeepPartial, type LvisApi } fr
 import { VENDORS } from "../constants.js";
 import { formatIpcError } from "../format-ipc-error.js";
 import type { FallbackEntry } from "../tabs/LlmTab.js";
+import { t } from "../../../i18n/runtime.js";
 
 export interface SettingsOrchestrationState {
   // LLM
@@ -377,7 +378,7 @@ export function useSettingsOrchestration(
       // the rejection in an unhandled-promise warning, leaving the user
       // thinking a toggle persisted when it did not.
       const message =
-        err instanceof Error && err.message ? err.message : "설정 저장 실패";
+        err instanceof Error && err.message ? err.message : t("useSettingsOrchestration.saveFailed");
       setLastSaveError({ tab, message });
     } finally {
       savingRef.current = false;

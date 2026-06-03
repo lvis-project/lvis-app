@@ -27,6 +27,8 @@
  *   - `.controls`, `.titlebar-btn`, `.titlebar-btn-close`
  */
 
+import { t } from "../i18n/index.js";
+
 export interface TitlebarShellOptions {
   /** Process platform — drives macOS hidden-inset vs Win/Linux full titlebar. */
   platform: NodeJS.Platform;
@@ -45,13 +47,13 @@ export function buildTitlebarHtml({ platform }: TitlebarShellOptions): string {
   return `<div class="titlebar" id="titlebar">
     <div class="title" id="title"></div>
     <div class="controls">
-      <button class="titlebar-btn" id="minimize" title="최소화" aria-label="최소화">
+      <button class="titlebar-btn" id="minimize" title="${t("be_windowTitlebarShell.minimize")}" aria-label="${t("be_windowTitlebarShell.minimize")}">
         <svg viewBox="0 0 24 24"><path d="M5 12h14"/></svg>
       </button>
-      <button class="titlebar-btn" id="maximize" title="최대화" aria-label="최대화">
+      <button class="titlebar-btn" id="maximize" title="${t("be_windowTitlebarShell.maximize")}" aria-label="${t("be_windowTitlebarShell.maximize")}">
         <svg id="max-icon" viewBox="0 0 24 24"><path d="M8 3H5a2 2 0 0 0-2 2v3"/><path d="M21 8V5a2 2 0 0 0-2-2h-3"/><path d="M3 16v3a2 2 0 0 0 2 2h3"/><path d="M16 21h3a2 2 0 0 0 2-2v-3"/></svg>
       </button>
-      <button class="titlebar-btn titlebar-btn-close" id="close" title="닫기" aria-label="닫기">
+      <button class="titlebar-btn titlebar-btn-close" id="close" title="${t("be_windowTitlebarShell.close")}" aria-label="${t("be_windowTitlebarShell.close")}">
         <svg viewBox="0 0 24 24"><path d="M18 6 6 18"/><path d="m6 6 12 12"/></svg>
     </button>
     </div>
@@ -172,7 +174,7 @@ export function buildTitlebarButtonScript({ platform }: TitlebarShellOptions): s
     document.getElementById("close").addEventListener("click", () => window.lvisWindow?.close());
     window.lvisWindow?.onMaximizedChanged?.((maximized) => {
       const btn = document.getElementById("maximize");
-      btn.title = maximized ? "이전 크기로" : "최대화";
+      btn.title = maximized ? "${t("be_windowTitlebarShell.restore")}" : "${t("be_windowTitlebarShell.maximize")}";
       btn.setAttribute("aria-label", btn.title);
     });
     document.getElementById("titlebar").addEventListener("dblclick", (event) => {

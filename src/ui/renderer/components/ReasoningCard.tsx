@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState } from "react";
 import { Brain, ChevronDown, ChevronRight, Loader2 } from "lucide-react";
 import type { ChatEntry } from "../../../lib/chat-stream-state.js";
+import { useTranslation } from "../../../i18n/react.js";
 
 /**
  * Thinking card. Two modes:
@@ -23,6 +24,7 @@ export function ReasoningCard({
   entry: Extract<ChatEntry, { kind: "reasoning" }>;
   embedded?: boolean;
 }) {
+  const { t } = useTranslation();
   const streaming = entry.streaming === true;
   // Initial open state mirrors streaming: live turns start expanded so deltas
   // are visible, already-complete entries (session history reload, non-
@@ -42,7 +44,7 @@ export function ReasoningCard({
     wasStreamingRef.current = streaming;
   }, [streaming]);
 
-  const title = streaming ? "생각 중..." : "생각 완료";
+  const title = streaming ? t("reasoningCard.thinkingTitle") : t("reasoningCard.thoughtCompleteTitle");
   const bodyVisible = streaming || open;
   // chars/4 token estimate 제거 (2026-05-07): 한국어 2-3× under-estimate
   // 의 거짓 정보였음. 토큰 정보는 turn 단위로 ActionBar 의 TokenCostBadge
@@ -74,7 +76,7 @@ export function ReasoningCard({
       </button>
       {bodyVisible && (
         <div className="ml-3 min-w-0 whitespace-pre-wrap break-words border-l-2 border-muted py-1 pl-3 text-[11px] italic leading-5 text-muted-foreground/80 [overflow-wrap:anywhere] lvis-anim-fade-in">
-          {entry.text || (streaming ? "생각하는 중..." : "")}
+          {entry.text || (streaming ? t("reasoningCard.thinkingBody") : "")}
         </div>
       )}
     </div>

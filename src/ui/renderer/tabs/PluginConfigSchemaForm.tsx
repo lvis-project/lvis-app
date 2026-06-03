@@ -33,6 +33,8 @@ import { Input } from "../../../components/ui/input.js";
 import { Label } from "../../../components/ui/label.js";
 import { NativeSelect, NativeSelectOption } from "../../../components/ui/native-select.js";
 import type { PluginConfigSchemaPropertySummary, PluginConfigSchemaSummary } from "../types.js";
+import { useTranslation } from "../../../i18n/react.js";
+import { t } from "../../../i18n/runtime.js";
 export type PluginConfigFormValues = Record<string, unknown>;
 
 export interface PluginConfigSchemaFormProps {
@@ -60,27 +62,27 @@ function fieldError(prop: PluginConfigSchemaPropertySummary, value: unknown): st
   if (value === undefined || value === "") return null;
   if (prop.type === "string" && typeof value === "string") {
     if (prop.minLength !== undefined && value.length < prop.minLength) {
-      return `최소 ${prop.minLength}자 이상이어야 합니다.`;
+      return t("pluginConfigSchemaForm.errorMinLength", { minLength: prop.minLength });
     }
     if (prop.maxLength !== undefined && value.length > prop.maxLength) {
-      return `최대 ${prop.maxLength}자까지 입력할 수 있습니다.`;
+      return t("pluginConfigSchemaForm.errorMaxLength", { maxLength: prop.maxLength });
     }
     if (prop.pattern) {
       try {
         const re = new RegExp(prop.pattern);
-        if (!re.test(value)) return `패턴 (${prop.pattern}) 에 맞지 않습니다.`;
+        if (!re.test(value)) return t("pluginConfigSchemaForm.errorPatternMismatch", { pattern: prop.pattern });
       } catch {
         // bad pattern — schema author error; surface gracefully
-        return `패턴 표현식이 잘못되었습니다: ${prop.pattern}`;
+        return t("pluginConfigSchemaForm.errorPatternInvalid", { pattern: prop.pattern });
       }
     }
   }
   if ((prop.type === "number" || prop.type === "integer") && typeof value === "number") {
     if (prop.minimum !== undefined && value < prop.minimum) {
-      return `최소값 ${prop.minimum} 이상이어야 합니다.`;
+      return t("pluginConfigSchemaForm.errorMinValue", { minimum: prop.minimum });
     }
     if (prop.maximum !== undefined && value > prop.maximum) {
-      return `최대값 ${prop.maximum} 이하이어야 합니다.`;
+      return t("pluginConfigSchemaForm.errorMaxValue", { maximum: prop.maximum });
     }
   }
   return null;
@@ -101,6 +103,7 @@ export function PluginConfigSchemaForm({
   onSave,
   onSetSecret,
 }: PluginConfigSchemaFormProps) {
+  const { t } = useTranslation();
   const properties = schema.properties ?? {};
   const propertyKeys = useMemo(() => Object.keys(properties), [properties]);
   const [draft, setDraft] = useState<PluginConfigFormValues>(() => ({ ...values }));
@@ -235,7 +238,7 @@ export function PluginConfigSchemaForm({
   return (
     <div data-testid={`plugin-config-form:${pluginId}`} className="flex flex-col gap-3">
       {propertyKeys.length === 0 && (
-        <p className="text-xs text-muted-foreground">선언된 설정 필드가 없습니다.</p>
+        <p className="text-xs text-muted-foreground">{t("pluginConfigSchemaForm.noFields")}</p>
       )}
       {propertyKeys.map((key) => {
         const prop = properties[key];
@@ -261,7 +264,7 @@ export function PluginConfigSchemaForm({
                     id={fieldId}
                     type="password"
                     className="h-7 text-xs flex-1"
-                    placeholder={secretsPresent[key] ? "**** (저장됨)" : "값을 입력하세요"}
+                    placeholder={secretsPresent[key] ? t("pluginConfigSchemaForm.secretSavedPlaceholder") : t("pluginConfigSchemaForm.secretInputPlaceholder")}
                     value={secretDrafts[key] ?? ""}
                     onChange={(e) =>
                       setSecretDrafts((prev) => ({ ...prev, [key]: e.target.value }))
@@ -275,11 +278,11 @@ export function PluginConfigSchemaForm({
                     disabled={!(secretDrafts[key]?.length ?? 0) || Boolean(fieldSaving[key])}
                     data-testid={`${fieldId}:save`}
                   >
-                    {fieldSaving[key] ? "저장 중…" : "저장"}
+                    {fieldSaving[key] ? t("pluginConfigSchemaForm.saving") : t("pluginConfigSchemaForm.save")}
                   </Button>
                 </div>
                 <p className="text-[10px] text-muted-foreground">
-                  🔒 OS 키체인에 암호화 저장됩니다. settings.json 에는 저장되지 않으므로 안전합니다.
+                  {t("pluginConfigSchemaForm.secretKeychainNote")}
                 </p>
               </>
             ) : prop.enum ? (
@@ -300,7 +303,7 @@ export function PluginConfigSchemaForm({
                 }}
               >
                 <NativeSelectOption value="" disabled>
-                  선택…
+                  {t("pluginConfigSchemaForm.selectPlaceholder")}
                 </NativeSelectOption>
                 {prop.enum.map((option) => (
                   <NativeSelectOption key={String(option)} value={String(option)}>
@@ -315,14 +318,14 @@ export function PluginConfigSchemaForm({
                   checked={Boolean(value ?? prop.default ?? false)}
                   onCheckedChange={(checked) => updateImmediate(key, checked === true)}
                 />
-                <span className="text-muted-foreground">{label} 활성화</span>
+                <span className="text-muted-foreground">{t("pluginConfigSchemaForm.enableLabel", { label })}</span>
               </Label>
             ) : prop.type === "array" && prop.items?.type === "string" ? (
               <div className="flex items-center gap-2">
                 <Input
                   id={fieldId}
                   className="h-7 text-xs flex-1"
-                  placeholder="쉼표로 구분"
+                  placeholder={t("pluginConfigSchemaForm.arrayPlaceholder")}
                   value={
                     Array.isArray(value)
                       ? value.join(", ")
@@ -346,7 +349,7 @@ export function PluginConfigSchemaForm({
                   disabled={!isCleartextDirty(key) || Boolean(fieldSaving[key])}
                   data-testid={`${fieldId}:save`}
                 >
-                  {fieldSaving[key] ? "저장 중…" : "저장"}
+                  {fieldSaving[key] ? t("pluginConfigSchemaForm.saving") : t("pluginConfigSchemaForm.save")}
                 </Button>
               </div>
             ) : prop.type === "number" || prop.type === "integer" ? (
@@ -378,7 +381,7 @@ export function PluginConfigSchemaForm({
                   disabled={!isCleartextDirty(key) || Boolean(fieldSaving[key])}
                   data-testid={`${fieldId}:save`}
                 >
-                  {fieldSaving[key] ? "저장 중…" : "저장"}
+                  {fieldSaving[key] ? t("pluginConfigSchemaForm.saving") : t("pluginConfigSchemaForm.save")}
                 </Button>
               </div>
             ) : (
@@ -398,7 +401,7 @@ export function PluginConfigSchemaForm({
                   disabled={!isCleartextDirty(key) || Boolean(fieldSaving[key])}
                   data-testid={`${fieldId}:save`}
                 >
-                  {fieldSaving[key] ? "저장 중…" : "저장"}
+                  {fieldSaving[key] ? t("pluginConfigSchemaForm.saving") : t("pluginConfigSchemaForm.save")}
                 </Button>
               </div>
             )}
@@ -411,8 +414,7 @@ export function PluginConfigSchemaForm({
           className="rounded-md border border-dashed p-2 text-[11px] text-muted-foreground"
           data-testid={`${pluginId}:custom-panel-placeholder`}
         >
-          이 플러그인은 추가 설정 패널 ({schema.customPanel.exportName}) 을 제공합니다.
-          향후 UI Slot System(§9.3) 을 통해 자동 마운트될 예정입니다.
+          {t("pluginConfigSchemaForm.customPanelNote", { exportName: schema.customPanel.exportName })}
         </div>
       )}
       {/* No bottom batch button — text/number/array/secret fields each have

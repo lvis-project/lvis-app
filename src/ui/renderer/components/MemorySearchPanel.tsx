@@ -6,16 +6,18 @@ import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "../..
 import { Button } from "../../../components/ui/button.js";
 import { useMemorySearch, type NoteResult, type SessionResult } from "../hooks/use-memory-search.js";
 import type { LvisApi } from "../types.js";
+import { t } from "../../../i18n/runtime.js";
+import { useTranslation } from "../../../i18n/react.js";
 
 function relativeTime(iso: string): string {
   const diff = Date.now() - new Date(iso).getTime();
   const minutes = Math.floor(diff / 60000);
-  if (minutes < 1) return "방금 전";
-  if (minutes < 60) return `${minutes}분 전`;
+  if (minutes < 1) return t("memorySearchPanel.justNow");
+  if (minutes < 60) return t("memorySearchPanel.minutesAgo", { minutes });
   const hours = Math.floor(minutes / 60);
-  if (hours < 24) return `${hours}시간 전`;
+  if (hours < 24) return t("memorySearchPanel.hoursAgo", { hours });
   const days = Math.floor(hours / 24);
-  return `${days}일 전`;
+  return t("memorySearchPanel.daysAgo", { days });
 }
 
 function NoteRow({ note }: { note: NoteResult }) {
@@ -47,6 +49,7 @@ function SessionRow({
   session: SessionResult;
   onOpenSession?: (sessionId: string) => void | boolean | Promise<void | boolean>;
 }) {
+  const { t } = useTranslation();
   const [expanded, setExpanded] = useState(false);
   const [loading, setLoading] = useState(false);
   const [failed, setFailed] = useState(false);
@@ -78,11 +81,11 @@ function SessionRow({
       variant="ghost"
       className="h-auto w-full flex-col items-stretch justify-start rounded-none border-b border-border/50 px-3 py-2 text-left last:border-0 hover:bg-muted/50"
       onClick={() => void handleClick()}
-      aria-label={`채팅 열기: ${session.title ?? session.sessionId.slice(0, 8)}`}
+      aria-label={t("memorySearchPanel.openChatAriaLabel", { title: session.title ?? session.sessionId.slice(0, 8) })}
     >
       <div className="flex min-w-0 items-baseline justify-between gap-2">
         <span className="min-w-0 flex-1 truncate text-sm font-medium">
-          {session.title || `세션 ${session.sessionId.slice(0, 8)}`}
+          {session.title || t("memorySearchPanel.sessionFallbackTitle", { id: session.sessionId.slice(0, 8) })}
         </span>
         <span className="text-[10px] text-muted-foreground shrink-0">{relativeTime(session.timestamp)}</span>
       </div>
@@ -91,7 +94,7 @@ function SessionRow({
           {session.sessionId.slice(0, 8)}
         </span>
         <span className="shrink-0 text-[10px] text-muted-foreground">
-          {loading ? "불러오는 중..." : failed ? "로드 실패" : onOpenSession ? "클릭하여 열기" : "클릭하여 펼치기"}
+          {loading ? t("memorySearchPanel.loading") : failed ? t("memorySearchPanel.loadFailed") : onOpenSession ? t("memorySearchPanel.clickToOpen") : t("memorySearchPanel.clickToExpand")}
         </span>
       </div>
       <p className={`text-xs text-muted-foreground mt-0.5 ${expanded ? "whitespace-pre-wrap break-words" : "truncate"}`}>
@@ -107,38 +110,39 @@ export interface MemorySearchPanelProps {
 }
 
 export function MemorySearchPanel({ api, onOpenSession }: MemorySearchPanelProps) {
+  const { t } = useTranslation();
   const { query, setQuery, noteResults, sessionResults, loading } = useMemorySearch(api);
 
   return (
     <Card className="mx-auto flex min-h-0 min-w-0 flex-1 w-full max-w-6xl flex-col overflow-hidden">
       <CardHeader className="pb-4">
-        <CardTitle>메모리</CardTitle>
-        <CardDescription>메모리 인덱스, 저장된 기억, 세션을 검색하거나 전체 목록으로 확인합니다.</CardDescription>
+        <CardTitle>{t("memorySearchPanel.panelTitle")}</CardTitle>
+        <CardDescription>{t("memorySearchPanel.panelDescription")}</CardDescription>
       </CardHeader>
       <CardContent className="flex min-h-0 min-w-0 flex-1 flex-col gap-3">
         <Input
-          placeholder="메모리 검색… (비워두면 전체 목록)"
+          placeholder={t("memorySearchPanel.searchPlaceholder")}
           value={query}
           onChange={(e) => setQuery(e.target.value)}
           className="text-sm"
-          aria-label="메모리 검색"
+          aria-label={t("memorySearchPanel.searchAriaLabel")}
         />
         <Tabs defaultValue="notes" className="flex min-h-0 min-w-0 flex-1 flex-col">
           <TabsList className="w-full">
             <TabsTrigger value="notes" className="flex-1">
-              기억{noteResults.length > 0 ? ` (${noteResults.length})` : ""}
+              {t("memorySearchPanel.notesTab")}{noteResults.length > 0 ? ` (${noteResults.length})` : ""}
             </TabsTrigger>
             <TabsTrigger value="sessions" className="flex-1">
-              채팅 목록{sessionResults.length > 0 ? ` (${sessionResults.length})` : ""}
+              {t("memorySearchPanel.sessionsTab")}{sessionResults.length > 0 ? ` (${sessionResults.length})` : ""}
             </TabsTrigger>
           </TabsList>
           <TabsContent value="notes" className="mt-2 flex-1 min-h-0 overflow-hidden">
             <ScrollArea className="h-full pr-2">
               {loading ? (
-                <p className="px-3 py-4 text-xs text-muted-foreground">검색 중…</p>
+                <p className="px-3 py-4 text-xs text-muted-foreground">{t("memorySearchPanel.searching")}</p>
               ) : noteResults.length === 0 ? (
                 <p className="px-3 py-4 text-xs text-muted-foreground">
-                  {query === "" ? "저장된 기억이 없습니다" : "결과 없음"}
+                  {query === "" ? t("memorySearchPanel.noNotesEmpty") : t("memorySearchPanel.noResults")}
                 </p>
               ) : (
                 noteResults.map((n) => <NoteRow key={n.title + n.updatedAt} note={n} />)
@@ -148,10 +152,10 @@ export function MemorySearchPanel({ api, onOpenSession }: MemorySearchPanelProps
           <TabsContent value="sessions" className="mt-2 flex-1 min-h-0 overflow-hidden">
             <ScrollArea className="h-full pr-2">
               {loading ? (
-                <p className="px-3 py-4 text-xs text-muted-foreground">검색 중…</p>
+                <p className="px-3 py-4 text-xs text-muted-foreground">{t("memorySearchPanel.searching")}</p>
               ) : sessionResults.length === 0 ? (
                 <p className="px-3 py-4 text-xs text-muted-foreground">
-                  {query === "" ? "저장된 세션이 없습니다" : "결과 없음"}
+                  {query === "" ? t("memorySearchPanel.noSessionsEmpty") : t("memorySearchPanel.noResults")}
                 </p>
               ) : (
                 sessionResults.map((s) => (

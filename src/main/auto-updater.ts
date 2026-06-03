@@ -23,6 +23,7 @@
 import { createRequire } from "node:module";
 import type { BrowserWindow, IpcMain } from "electron";
 import { createLogger } from "../lib/logger.js";
+import { t } from "../i18n/index.js";
 import type { UpdateState } from "../shared/update-state.js";
 export type { UpdateState };
 const log = createLogger("auto-updater");
@@ -244,12 +245,12 @@ export function createAutoUpdater(deps: AutoUpdaterDeps): {
       }
       const result = await electron.dialog.showMessageBox(deps.mainWindow, {
         type: "question",
-        buttons: ["취소", "재시작"],
+        buttons: [t("common.cancel"), t("mainDialog.restart")],
         defaultId: 1,
         cancelId: 0,
-        title: "업데이트 적용",
-        message: `LVIS v${lastState.version} 으로 재시작합니다.`,
-        detail: "진행 중인 작업이 종료됩니다. 계속하시겠습니까?",
+        title: t("mainDialog.updateApplyTitle"),
+        message: t("mainDialog.updateRestartMessage", { version: lastState.version }),
+        detail: t("mainDialog.updateRestartDetail"),
       });
       return { confirmed: result.response === 1 };
     } catch (err) {

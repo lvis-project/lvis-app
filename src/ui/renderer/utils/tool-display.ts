@@ -1,44 +1,46 @@
-/** Human-readable display names for LLM tool identifiers. */
-const TOOL_DISPLAY_NAMES: Record<string, string> = {
-  // Tasks
-  task_add: "할 일 추가",
-  task_list: "할 일 목록",
-  task_update: "할 일 수정",
-  task_delete: "할 일 삭제",
-  task_today: "오늘 할 일",
-  task_overdue: "기한 지난 할 일",
-  todo_session_write: "세션 TO-DO 저장",
-  routine_schedule: "루틴 스케줄",
+import { t } from "../../../i18n/runtime.js";
 
-  agent_spawn: "서브에이전트 실행",
+/** Human-readable display name keys for LLM tool identifiers. */
+const TOOL_DISPLAY_KEYS: Record<string, string> = {
+  // Tasks
+  task_add: "toolDisplay.taskAdd",
+  task_list: "toolDisplay.taskList",
+  task_update: "toolDisplay.taskUpdate",
+  task_delete: "toolDisplay.taskDelete",
+  task_today: "toolDisplay.taskToday",
+  task_overdue: "toolDisplay.taskOverdue",
+  todo_session_write: "toolDisplay.todoSessionWrite",
+  routine_schedule: "toolDisplay.routineSchedule",
+
+  agent_spawn: "toolDisplay.agentSpawn",
 
   // Web / Search
-  web_search: "웹 검색",
-  web_fetch: "웹 페이지 가져오기",
+  web_search: "toolDisplay.webSearch",
+  web_fetch: "toolDisplay.webFetch",
 
   // System
-  bash: "터미널 명령",
-  powershell: "PowerShell 명령",
-  read_file: "파일 읽기",
-  list_files: "파일 목록",
-  glob_files: "파일 찾기",
-  grep_files: "파일 내용 검색",
-  write_file: "파일 쓰기",
-  edit_file: "파일 편집",
-  apply_patch: "파일 패치",
-  move_file: "파일 이동",
-  delete_file: "파일 삭제",
-  request_plugin: "플러그인 실행",
-  read_tool_result_chunk: "도구 결과 청크 읽기",
+  bash: "toolDisplay.bash",
+  powershell: "toolDisplay.powershell",
+  read_file: "toolDisplay.readFile",
+  list_files: "toolDisplay.listFiles",
+  glob_files: "toolDisplay.globFiles",
+  grep_files: "toolDisplay.grepFiles",
+  write_file: "toolDisplay.writeFile",
+  edit_file: "toolDisplay.editFile",
+  apply_patch: "toolDisplay.applyPatch",
+  move_file: "toolDisplay.moveFile",
+  delete_file: "toolDisplay.deleteFile",
+  request_plugin: "toolDisplay.requestPlugin",
+  read_tool_result_chunk: "toolDisplay.readToolResultChunk",
 
   // Misc
-  skill_load: "스킬 로드",
-  ask_user_question: "사용자에게 질문",
-  noop: "대기",
+  skill_load: "toolDisplay.skillLoad",
+  ask_user_question: "toolDisplay.askUserQuestion",
+  noop: "toolDisplay.noop",
 };
 
 export function getToolDisplayName(toolName: string): string {
-  if (TOOL_DISPLAY_NAMES[toolName]) return TOOL_DISPLAY_NAMES[toolName];
+  if (TOOL_DISPLAY_KEYS[toolName]) return t(TOOL_DISPLAY_KEYS[toolName]);
   // Unknown tool names render as readable text (underscores -> spaces).
   return toolName.replace(/_/g, " ");
 }
@@ -58,9 +60,9 @@ export function replaceToolNamesInText(text: string): string {
     .map((seg, idx) => {
       if (idx % 2 === 1) return seg; // code segment — leave as-is
       let out = seg;
-      for (const [code, display] of Object.entries(TOOL_DISPLAY_NAMES)) {
+      for (const [code, key] of Object.entries(TOOL_DISPLAY_KEYS)) {
         if (!code.includes("_")) continue; // single-word names → skip (unsafe to replace in prose)
-        out = out.replace(new RegExp(`\\b${code}\\b`, "g"), display);
+        out = out.replace(new RegExp(`\\b${code}\\b`, "g"), t(key));
       }
       return out;
     })

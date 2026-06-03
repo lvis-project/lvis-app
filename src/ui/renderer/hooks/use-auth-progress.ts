@@ -19,6 +19,7 @@
  */
 import { useCallback, useEffect, useState } from "react";
 import type { LvisApi } from "../types.js";
+import { t } from "../../../i18n/runtime.js";
 
 export type AuthProgressStep =
   | "credentials-validating"
@@ -105,13 +106,15 @@ export function useAuthProgress(
   return { steps: stepsState, vendor, lastError, active, reset };
 }
 
-/** Korean label for each step. Kept renderer-side per CLAUDE.md. */
-export const AUTH_STEP_LABEL_KO: Record<AuthProgressStep, string> = {
-  "credentials-validating": "자격증명 검증",
-  "llm-key-issuing": "LLM 키 발급",
-  "sandbox-preparing": "Sandbox 준비",
-  complete: "인증 완료",
-};
+/** Localised label for each step. Kept renderer-side per CLAUDE.md. */
+export function getAuthStepLabels(): Record<AuthProgressStep, string> {
+  return {
+    "credentials-validating": t("useAuthProgress.credentialsValidating"),
+    "llm-key-issuing": t("useAuthProgress.llmKeyIssuing"),
+    "sandbox-preparing": t("useAuthProgress.sandboxPreparing"),
+    complete: t("useAuthProgress.complete"),
+  };
+}
 
 /** Ordered step list for renderer iteration. */
 export const AUTH_STEP_ORDER: readonly AuthProgressStep[] = [

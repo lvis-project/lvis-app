@@ -49,6 +49,7 @@ import type {
   ScriptedTurn,
 } from "../../../engine/demo-autoplay/types.js";
 import { getScriptByScenarioId } from "../../../engine/demo-autoplay/scripts-registry.js";
+import { useTranslation } from "../../../i18n/react.js";
 
 export interface ScenarioShowcaseProps {
   open: boolean;
@@ -65,34 +66,36 @@ export interface ScenarioShowcaseProps {
 interface ScenarioCard {
   id: string;
   icon: string;
-  title: string;
-  body: string;
+  /** i18n key resolved via t() at render time */
+  titleKey: string;
+  /** i18n key resolved via t() at render time */
+  bodyKey: string;
 }
 
 const SCENARIO_CARDS: readonly ScenarioCard[] = [
   {
     id: "meeting",
     icon: "🎙️",
-    title: "회의록 정리",
-    body: "회의 녹음 → 자동 STT → 요약과 액션 아이템 추출.",
+    titleKey: "scenarioShowcase.meetingTitle",
+    bodyKey: "scenarioShowcase.meetingBody",
   },
   {
     id: "docs",
     icon: "📚",
-    title: "문서 검색",
-    body: "로컬 PDF·Word·마크다운을 인덱싱하고 자연어로 답합니다.",
+    titleKey: "scenarioShowcase.docsTitle",
+    bodyKey: "scenarioShowcase.docsBody",
   },
   {
     id: "work",
     icon: "💼",
-    title: "업무 도우미",
-    body: "이메일 / 일정에서 할 일을 추출해 적시 알림으로 제안합니다.",
+    titleKey: "scenarioShowcase.workTitle",
+    bodyKey: "scenarioShowcase.workBody",
   },
   {
     id: "multi-agent",
     icon: "🤖",
-    title: "Multi-agent",
-    body: "여러 에이전트가 작업을 분산해 처리하고 결과를 합성합니다.",
+    titleKey: "scenarioShowcase.multiAgentTitle",
+    bodyKey: "scenarioShowcase.multiAgentBody",
   },
 ];
 
@@ -168,7 +171,7 @@ export function ScenarioShowcase({ open, onStart }: ScenarioShowcaseProps) {
         {activeScript && activeCard ? (
           <ScenarioShowcaseInlineDemo
             script={activeScript}
-            cardTitle={activeCard.title}
+            cardTitleKey={activeCard.titleKey}
             onBack={handleResetToGrid}
             onStart={handleStart}
           />
@@ -202,6 +205,7 @@ function ScenarioShowcaseGrid({
   onCardClick: (scenarioId: string) => void;
   onStart: () => void;
 }) {
+  const { t } = useTranslation();
   return (
     <>
       <DialogHeader className="px-6 pt-6 pb-3 space-y-0">
@@ -221,7 +225,7 @@ function ScenarioShowcaseGrid({
               LVIS Studio
             </DialogTitle>
             <DialogDescription className="text-[11px]">
-              어떤 작업이 가장 자주이세요? 카드를 누르면 시나리오를 구경할 수 있습니다.
+              {t("scenarioShowcase.gridDescription")}
             </DialogDescription>
           </div>
         </div>
@@ -239,20 +243,20 @@ function ScenarioShowcaseGrid({
               data-testid={`scenario-showcase:card:${card.id}`}
               onClick={() => onCardClick(card.id)}
               className="rounded-lg border border-border/70 bg-[hsl(var(--muted))] px-3 py-3 text-left transition hover:border-[hsl(var(--p-purple-500)/0.6)] hover:bg-[hsl(var(--muted))]/80 focus:outline-none focus:ring-2 focus:ring-[hsl(var(--p-purple-500))]"
-              aria-label={`${card.title} — ${card.body}. 클릭하면 시나리오를 구경합니다.`}
+              aria-label={`${t(card.titleKey)} — ${t(card.bodyKey)}. ${t("scenarioShowcase.cardAriaClickHint")}`}
             >
               <div className="text-lg leading-none" aria-hidden="true">
                 {card.icon}
               </div>
-              <div className="mt-2 text-[12px] font-medium">{card.title}</div>
+              <div className="mt-2 text-[12px] font-medium">{t(card.titleKey)}</div>
               <div className="mt-1 text-[10.5px] leading-snug text-muted-foreground">
-                {card.body}
+                {t(card.bodyKey)}
               </div>
               <div
                 className="mt-2 text-[10px] font-medium"
                 style={{ color: "hsl(var(--p-purple-500))" }}
               >
-                ▶ 시나리오 구경하기
+                {t("scenarioShowcase.cardPreviewAffordance")}
               </div>
             </button>
           ))}
@@ -268,7 +272,7 @@ function ScenarioShowcaseGrid({
               "linear-gradient(135deg, hsl(var(--p-purple-500)), hsl(var(--p-blue-500)))",
           }}
         >
-          로그인하여 LVIS 시작하기
+          {t("scenarioShowcase.startButton")}
         </Button>
       </div>
     </>
@@ -282,15 +286,16 @@ function ScenarioShowcaseGrid({
  */
 function ScenarioShowcaseInlineDemo({
   script,
-  cardTitle,
+  cardTitleKey,
   onBack,
   onStart,
 }: {
   script: ScriptedTurn;
-  cardTitle: string;
+  cardTitleKey: string;
   onBack: () => void;
   onStart: () => void;
 }) {
+  const { t } = useTranslation();
   return (
     <div data-testid="scenario-showcase:inline-demo" className="flex flex-col">
       <div
@@ -303,13 +308,13 @@ function ScenarioShowcaseInlineDemo({
           onClick={onBack}
           className="text-[10.5px] text-muted-foreground transition hover:text-foreground"
         >
-          ← 뒤로가기
+          {t("scenarioShowcase.backButton")}
         </button>
         <span
           className="ml-2 text-[11px] font-medium text-foreground"
           data-testid="scenario-showcase:inline-demo:title"
         >
-          {cardTitle}
+          {t(cardTitleKey)}
         </span>
         <span
           data-testid="scenario-showcase:inline-demo:rec"
@@ -357,7 +362,7 @@ function ScenarioShowcaseInlineDemo({
                   "linear-gradient(135deg, hsl(var(--p-purple-500)), hsl(var(--p-blue-500)))",
               }}
             >
-              로그인하여 LVIS 시작하기
+              {t("scenarioShowcase.startButton")}
             </Button>
             <Button
               type="button"
@@ -366,7 +371,7 @@ function ScenarioShowcaseInlineDemo({
               data-testid="scenario-showcase:inline-demo:back-cta"
               onClick={onBack}
             >
-              뒤로가기
+              {t("scenarioShowcase.backButtonShort")}
             </Button>
           </div>
         </div>
@@ -475,6 +480,7 @@ function ScenarioShowcaseDemoTranscript({ script }: { script: ScriptedTurn }) {
 }
 
 function ScenarioShowcaseDemoEntry({ entry }: { entry: DemoEntry }) {
+  const { t } = useTranslation();
   if (entry.kind === "user") {
     return (
       <div
@@ -511,7 +517,7 @@ function ScenarioShowcaseDemoEntry({ entry }: { entry: DemoEntry }) {
             </span>
             <span className="text-[10.5px] text-muted-foreground">
               {entry.labelKo}
-              {entry.status === "running" ? " · 실행 중" : ""}
+              {entry.status === "running" ? ` · ${t("scenarioShowcase.toolRunning")}` : ""}
             </span>
           </div>
         </div>
@@ -529,7 +535,7 @@ function ScenarioShowcaseDemoEntry({ entry }: { entry: DemoEntry }) {
           className="flex-1 rounded-lg rounded-tl-sm px-3 py-2 font-mono text-[10.5px] text-muted-foreground"
           style={{ background: "hsl(var(--card))" }}
         >
-          📄 데모: {entry.text}
+          {t("scenarioShowcase.toolResultPrefix")}{entry.text}
         </div>
       </div>
     );

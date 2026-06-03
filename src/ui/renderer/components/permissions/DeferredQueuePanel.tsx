@@ -21,6 +21,8 @@ import { Badge } from "../../../../components/ui/badge.js";
 import { Button } from "../../../../components/ui/button.js";
 import { SOURCE_BADGE } from "../../constants.js";
 import type { DeferredQueueEntry } from "../../types.js";
+import { useTranslation } from "../../../../i18n/react.js";
+import { t } from "../../../../i18n/runtime.js";
 import {
   SummaryTile,
   ReviewRow,
@@ -49,6 +51,7 @@ export interface DeferredQueuePanelProps {
 }
 
 export function DeferredQueuePanel({ showEmpty = false, onClose }: DeferredQueuePanelProps): ReactElement | null {
+  const { t } = useTranslation();
   const [pending, setPending] = useState<DeferredQueueEntry[]>([]);
   const [activeIndex, setActiveIndex] = useState(0);
   const [busy, setBusy] = useState(false);
@@ -114,7 +117,7 @@ export function DeferredQueuePanel({ showEmpty = false, onClose }: DeferredQueue
   const activeLevel = activeEntry?.verdict.level ?? "low";
   // Round-7 architect MAJOR — Korean risk label (was raw English
   // `activeLevel.toUpperCase()` → `LOW`/`MEDIUM`/`HIGH` leaking into UI).
-  const queueBadge = hasPending ? riskLevelKoLabel(activeLevel) : "대기 없음";
+  const queueBadge = hasPending ? riskLevelKoLabel(activeLevel) : t("deferredQueuePanel.noQueue");
   const badgeClassName = levelBadgeClass(activeLevel);
 
   return (
@@ -125,7 +128,7 @@ export function DeferredQueuePanel({ showEmpty = false, onClose }: DeferredQueue
             {queueBadge}
           </Badge>
           <h3 className="min-w-0 flex-1 text-base font-semibold">
-            보류된 승인 요청 없음
+            {t("deferredQueuePanel.noPendingTitle")}
           </h3>
         </header>
       )}
@@ -139,7 +142,7 @@ export function DeferredQueuePanel({ showEmpty = false, onClose }: DeferredQueue
           className="rounded border bg-background p-3 text-sm text-muted-foreground"
           data-testid="deferred-queue-empty"
         >
-          보류된 승인 요청이 없습니다.
+          {t("deferredQueuePanel.emptyState")}
         </div>
       ) : (
         <ul className="min-w-0">
@@ -156,22 +159,22 @@ export function DeferredQueuePanel({ showEmpty = false, onClose }: DeferredQueue
                       {queueBadge}
                     </Badge>
                     <h4 className="min-w-0 flex-1 text-base font-semibold">
-                      백그라운드 변경 승인
+                      {t("deferredQueuePanel.approvalTitle")}
                     </h4>
                     <Badge variant="outline" className="shrink-0 text-[11px] text-muted-foreground">
-                      {pending.length} 대기 · {activeIndex + 1} / {pending.length}
+                      {t("deferredQueuePanel.pendingBadge", { count: pending.length, current: activeIndex + 1 })}
                     </Badge>
                   </div>
                 </div>
               </div>
               <div className="space-y-3">
                 <div className="grid min-w-0 gap-2 sm:grid-cols-2">
-                  <SummaryTile label="도구 / 출처">
+                  <SummaryTile label={t("deferredQueuePanel.toolSourceLabel")}>
                     <code>{activeEntry.toolName}</code>
                     <br />
-                    출처: {sourceLabel(activeEntry.source)}
+                    {t("deferredQueuePanel.sourceWithValue", { source: sourceLabel(activeEntry.source) })}
                   </SummaryTile>
-                  <SummaryTile label="권한 분류">
+                  <SummaryTile label={t("deferredQueuePanel.categoryLabel")}>
                     {categoryLabel(activeEntry.category)}
                   </SummaryTile>
                 </div>
@@ -197,7 +200,7 @@ export function DeferredQueuePanel({ showEmpty = false, onClose }: DeferredQueue
                 <PermissionEvaluationContextPanel context={activeEntry.evaluationContext} />
                 <details className="min-w-0 rounded-md border bg-muted/20">
                   <summary className="cursor-pointer px-3 py-2 text-xs font-semibold">
-                    전체 입력 보기
+                    {t("deferredQueuePanel.showFullInput")}
                   </summary>
                   <pre className="max-h-56 max-w-full overflow-auto border-t px-3 py-2 whitespace-pre-wrap break-all font-mono text-[11px] leading-relaxed">
                     {activeEntry.inputSummary}
@@ -213,7 +216,7 @@ export function DeferredQueuePanel({ showEmpty = false, onClose }: DeferredQueue
                     disabled={busy}
                     onClick={onClose}
                   >
-                    닫기
+                    {t("deferredQueuePanel.closeButton")}
                   </Button>
                 )}
                 <Button
@@ -223,14 +226,14 @@ export function DeferredQueuePanel({ showEmpty = false, onClose }: DeferredQueue
                   disabled={busy}
                   onClick={() => handle(activeEntry.id, "rejected")}
                 >
-                  거부
+                  {t("deferredQueuePanel.rejectButton")}
                 </Button>
                 <Button
                   size="sm"
                   disabled={busy}
                   onClick={() => handle(activeEntry.id, "approved")}
                 >
-                  허용
+                  {t("deferredQueuePanel.approveButton")}
                 </Button>
               </div>
             </li>
@@ -245,51 +248,51 @@ function reviewRows(entry: DeferredQueueEntry): ReviewBasisRow[] {
   const parsed = parseInputSummary(entry.inputSummary);
   // Round-7 architect MAJOR — Korean risk label in the review row.
   const verdict = `${riskLevelKoLabel(entry.verdict.level)} · ${entry.verdict.reason}`;
-  const common = { label: "판단", value: verdict };
+  const common = { label: t("deferredQueuePanel.rowLabelVerdict"), value: verdict };
   if (entry.category === "read") {
     return [
-      { label: "대상", value: pickSummary(parsed, ["path", "paths", "target", "targets", "file", "directory", "resource", "query", "url", "uri"], entry.inputSummary), monospace: true, testId: "deferred-entry-input" },
-      { label: "범위", value: `${sourceLabel(entry.source)} · ${categoryLabel(entry.category)} · ${scopeLabel(parsed)}` },
-      { label: "민감도", value: sensitivityLabel(parsed) },
-      { label: "양", value: inputVolumeLabel(entry.inputSummary) },
+      { label: t("deferredQueuePanel.rowLabelTarget"), value: pickSummary(parsed, ["path", "paths", "target", "targets", "file", "directory", "resource", "query", "url", "uri"], entry.inputSummary), monospace: true, testId: "deferred-entry-input" },
+      { label: t("deferredQueuePanel.rowLabelScope"), value: `${sourceLabel(entry.source)} · ${categoryLabel(entry.category)} · ${scopeLabel(parsed)}` },
+      { label: t("deferredQueuePanel.rowLabelSensitivity"), value: sensitivityLabel(parsed) },
+      { label: t("deferredQueuePanel.rowLabelVolume"), value: inputVolumeLabel(entry.inputSummary) },
       common,
-      { label: "선택", value: "큐에서는 이번 항목 허용 또는 거부만 처리합니다." },
+      { label: t("deferredQueuePanel.rowLabelChoice"), value: t("deferredQueuePanel.choiceQueueOnly") },
     ];
   }
   if (entry.category === "write") {
     return [
-      { label: "대상", value: pickSummary(parsed, ["path", "paths", "target", "targets", "file", "configKey", "taskId", "id"], entry.inputSummary), monospace: true, testId: "deferred-entry-input" },
-      { label: "변경", value: pickSummary(parsed, ["operation", "action", "mode", "patch", "content", "body", "text"], "변경 내용은 입력 요약 기준으로 확인합니다."), monospace: true },
-      { label: "영향", value: `${sourceLabel(entry.source)} · ${categoryLabel(entry.category)} · 파일/설정/사용자 데이터 변경 가능성` },
-      { label: "복구", value: pickSummary(parsed, ["diff", "backup", "rollback", "undo"], "복구 정보는 입력 요약에 명시되지 않음") },
+      { label: t("deferredQueuePanel.rowLabelTarget"), value: pickSummary(parsed, ["path", "paths", "target", "targets", "file", "configKey", "taskId", "id"], entry.inputSummary), monospace: true, testId: "deferred-entry-input" },
+      { label: t("deferredQueuePanel.rowLabelChange"), value: pickSummary(parsed, ["operation", "action", "mode", "patch", "content", "body", "text"], t("deferredQueuePanel.writeChangeFallback")), monospace: true },
+      { label: t("deferredQueuePanel.rowLabelImpact"), value: `${sourceLabel(entry.source)} · ${categoryLabel(entry.category)} · ${t("deferredQueuePanel.writeImpactSuffix")}` },
+      { label: t("deferredQueuePanel.rowLabelRecovery"), value: pickSummary(parsed, ["diff", "backup", "rollback", "undo"], t("deferredQueuePanel.recoveryFallback")) },
       common,
-      { label: "선택", value: "큐에서는 이번 항목 허용 또는 거부만 처리합니다." },
+      { label: t("deferredQueuePanel.rowLabelChoice"), value: t("deferredQueuePanel.choiceQueueOnly") },
     ];
   }
   if (entry.category === "network") {
     return [
-      { label: "엔드포인트", value: pickSummary(parsed, ["endpoint", "url", "uri", "host", "baseUrl"], "엔드포인트 정보는 입력 요약에 명시되지 않음"), monospace: true, testId: "deferred-entry-input" },
-      { label: "메서드", value: pickSummary(parsed, ["method", "httpMethod"], "메서드 정보는 입력 요약에 명시되지 않음") },
-      { label: "전송 내용", value: pickSummary(parsed, ["payload", "body", "message", "text", "input", "params", "args"], payloadLabel(entry.inputSummary)), monospace: true },
-      { label: "인증 범위", value: pickSummary(parsed, ["auth", "scope", "scopes", "tenant", "account"], "인증 범위 정보는 입력 요약에 명시되지 않음") },
+      { label: t("deferredQueuePanel.rowLabelEndpoint"), value: pickSummary(parsed, ["endpoint", "url", "uri", "host", "baseUrl"], t("deferredQueuePanel.endpointFallback")), monospace: true, testId: "deferred-entry-input" },
+      { label: t("deferredQueuePanel.rowLabelMethod"), value: pickSummary(parsed, ["method", "httpMethod"], t("deferredQueuePanel.methodFallback")) },
+      { label: t("deferredQueuePanel.rowLabelPayload"), value: pickSummary(parsed, ["payload", "body", "message", "text", "input", "params", "args"], payloadLabel(entry.inputSummary)), monospace: true },
+      { label: t("deferredQueuePanel.rowLabelAuthScope"), value: pickSummary(parsed, ["auth", "scope", "scopes", "tenant", "account"], t("deferredQueuePanel.authScopeFallback")) },
       common,
-      { label: "선택", value: "큐에서는 이번 항목 허용 또는 거부만 처리합니다." },
+      { label: t("deferredQueuePanel.rowLabelChoice"), value: t("deferredQueuePanel.choiceQueueOnly") },
     ];
   }
   if (entry.category === "shell") {
     return [
-      { label: "명령", value: pickSummary(parsed, ["command", "cmd", "args", "script", "argv"], entry.inputSummary), monospace: true, testId: "deferred-entry-input" },
-      { label: "작업 디렉토리/환경", value: pickSummary(parsed, ["cwd", "workingDirectory", "env", "environment"], "작업 디렉토리/환경 정보는 입력 요약에 명시되지 않음"), monospace: true },
-      { label: "부작용", value: "파일 변경, 네트워크 호출, dependency install, background process 가능성을 명령 기준으로 확인합니다." },
-      { label: "제한", value: formatEvaluationLimits(entry.evaluationContext) },
+      { label: t("deferredQueuePanel.rowLabelCommand"), value: pickSummary(parsed, ["command", "cmd", "args", "script", "argv"], entry.inputSummary), monospace: true, testId: "deferred-entry-input" },
+      { label: t("deferredQueuePanel.rowLabelWorkDir"), value: pickSummary(parsed, ["cwd", "workingDirectory", "env", "environment"], t("deferredQueuePanel.workDirFallback")), monospace: true },
+      { label: t("deferredQueuePanel.rowLabelSideEffects"), value: t("deferredQueuePanel.shellSideEffects") },
+      { label: t("deferredQueuePanel.rowLabelLimits"), value: formatEvaluationLimits(entry.evaluationContext) },
       common,
-      { label: "선택", value: "큐에서는 이번 항목 허용 또는 거부만 처리합니다." },
+      { label: t("deferredQueuePanel.rowLabelChoice"), value: t("deferredQueuePanel.choiceQueueOnly") },
     ];
   }
   return [
-    { label: "입력", value: entry.inputSummary, monospace: true, testId: "deferred-entry-input" },
+    { label: t("deferredQueuePanel.rowLabelInput"), value: entry.inputSummary, monospace: true, testId: "deferred-entry-input" },
     common,
-    { label: "선택", value: "큐에서는 이번 항목 허용 또는 거부만 처리합니다." },
+    { label: t("deferredQueuePanel.rowLabelChoice"), value: t("deferredQueuePanel.choiceQueueOnly") },
   ];
 }
 

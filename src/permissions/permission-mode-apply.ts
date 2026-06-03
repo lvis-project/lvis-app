@@ -1,5 +1,6 @@
 import { randomUUID } from "node:crypto";
 import type { AuditLogger } from "../audit/audit-logger.js";
+import { t } from "../i18n/index.js";
 import type { ApprovalGate } from "./approval-gate.js";
 import type { PermissionManager } from "./permission-manager.js";
 import type { PermissionModeCommand } from "./permission-slash.js";
@@ -32,7 +33,7 @@ export async function applyPermissionModeCommand(
       return {
         ok: false,
         error: "approval-gate-unavailable",
-        message: "영구 권한 모드 변경은 사용자 확인 모달이 필요합니다.",
+        message: t("be_permissionModeApply.approvalGateUnavailable"),
       };
     }
     const decision = await deps.approvalGate.requestAndWait({
@@ -41,7 +42,7 @@ export async function applyPermissionModeCommand(
       toolName: "/permission mode",
       toolCategory: "meta",
       args: { fromMode: previous, toMode: cmd.mode, durable: true },
-      reason: `권한 모드를 '${cmd.mode}'로 영구 저장합니다.`,
+      reason: t("be_permissionModeApply.approvalReason", { mode: cmd.mode }),
       source: "builtin",
       createdAt: Date.now(),
       trustOrigin: "user-keyboard",
@@ -52,7 +53,7 @@ export async function applyPermissionModeCommand(
       return {
         ok: false,
         error: "durable-mode-denied",
-        message: "영구 권한 모드 변경이 취소되었습니다.",
+        message: t("be_permissionModeApply.durableModeDenied"),
       };
     }
   }
@@ -62,7 +63,7 @@ export async function applyPermissionModeCommand(
       return {
         ok: false,
         error: "permission-audit-not-ready",
-        message: "권한 감사 체인이 초기화되지 않았습니다.",
+        message: t("be_permissionModeApply.auditChainNotReady"),
       };
     }
     try {
@@ -79,7 +80,7 @@ export async function applyPermissionModeCommand(
       return {
         ok: false,
         error: "permission-audit-write-failed",
-        message: `권한 감사 기록에 실패했습니다: ${(err as Error).message}`,
+        message: t("be_permissionModeApply.auditWriteFailed", { message: (err as Error).message }),
       };
     }
   }

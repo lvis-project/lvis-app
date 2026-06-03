@@ -26,6 +26,7 @@ import type { AuditLogger } from "../audit/audit-logger.js";
 import { withFileLock } from "../lib/with-file-lock.js";
 import { createLogger } from "../lib/logger.js";
 import { lvisHome } from "../shared/lvis-home.js";
+import { t } from "../i18n/index.js";
 const log = createLogger("mcp-manager");
 
 const DEFAULT_CONFIG_PATH = join(lvisHome(), "mcp", "servers.json");
@@ -252,7 +253,7 @@ export class McpManager {
   async readUiResource(serverId: string, uri: string): Promise<string> {
     const client = this.clients.get(serverId);
     if (!client) {
-      throw new Error(`[mcp-manager] 서버 '${serverId}'를 찾을 수 없습니다.`);
+      throw new Error(`[mcp-manager] ${t("be_mcpManager.serverNotFound", { serverId })}`);
     }
     return client.readResource(uri);
   }
@@ -276,23 +277,23 @@ export class McpManager {
   async addConfig(config: McpServerConfig): Promise<{ connected: boolean; warning?: string }> {
     // Runtime payload validation (IPC cast is type-only, disappears at runtime)
     if (!config?.id || typeof config.id !== "string") {
-      throw new Error("[mcp-manager] 유효하지 않은 서버 id");
+      throw new Error(`[mcp-manager] ${t("be_mcpManager.invalidServerId")}`);
     }
     const validTransports = ["stdio", "http"] as const;
     if (!validTransports.includes(config.transport as (typeof validTransports)[number])) {
-      throw new Error(`[mcp-manager] 유효하지 않은 transport: ${String(config.transport)}`);
+      throw new Error(`[mcp-manager] ${t("be_mcpManager.invalidTransport", { transport: String(config.transport) })}`);
     }
     if (config.transport === "stdio" && !(config as { command?: string }).command?.trim()) {
-      throw new Error("[mcp-manager] stdio 서버는 command 필드가 필요합니다.");
+      throw new Error(`[mcp-manager] ${t("be_mcpManager.stdioCommandRequired")}`);
     }
     if (config.transport === "http" && !(config as { url?: string }).url?.trim()) {
-      throw new Error("[mcp-manager] http 서버는 url 필드가 필요합니다.");
+      throw new Error(`[mcp-manager] ${t("be_mcpManager.httpUrlRequired")}`);
     }
 
     // Normalize id: trim whitespace, reject empty
     const normalizedId = config.id.trim();
     if (!normalizedId) {
-      throw new Error("[mcp-manager] 서버 id가 비어있거나 공백만 포함할 수 없습니다.");
+      throw new Error(`[mcp-manager] ${t("be_mcpManager.serverIdBlank")}`);
     }
     const normalizedConfig = { ...config, id: normalizedId } as McpServerConfig;
 
@@ -301,12 +302,12 @@ export class McpManager {
         const validation = this.governance.validateServer(normalizedConfig);
         if (!validation.valid) {
           throw new Error(
-            `[mcp-manager] 거버넌스 검증 실패 (Layer ${validation.layer}): ${validation.reason}`,
+            `[mcp-manager] ${t("be_mcpManager.governanceValidationFailed", { layer: String(validation.layer), reason: validation.reason })}`,
           );
         }
         const existing = await this.loadFromConfigUnlocked();
         if (existing.some((s) => s.id === normalizedId)) {
-          throw new Error(`[mcp-manager] 서버 id '${normalizedId}'가 이미 존재합니다.`);
+          throw new Error(`[mcp-manager] ${t("be_mcpManager.serverIdAlreadyExists", { id: normalizedId })}`);
         }
         const updated = [...existing, normalizedConfig];
         await this.saveConfigs(updated);
@@ -326,19 +327,19 @@ export class McpManager {
   async setApiKey(serverId: string, apiKey: string): Promise<{ connected: boolean; warning?: string }> {
     const id = serverId.trim();
     if (!id) {
-      throw new Error("[mcp-manager] 서버 id가 비어있거나 공백만 포함할 수 없습니다.");
+      throw new Error(`[mcp-manager] ${t("be_mcpManager.serverIdBlank")}`);
     }
 
     // HIGH: apiKey 값 자체 CR/LF + control char 검증 (raw 값 기준 — trim 전에 검사)
     if (/[\r\n\x00-\x08\x0B-\x1F\x7F]/.test(apiKey)) {
-      throw new Error("[mcp-manager] API 키에 제어 문자(CR/LF 등)가 포함되어 있습니다.");
+      throw new Error(`[mcp-manager] ${t("be_mcpManager.apiKeyControlChars")}`);
     }
     const trimmedKey = apiKey.trim();
     if (trimmedKey.length === 0) {
-      throw new Error("[mcp-manager] API 키가 비어있습니다.");
+      throw new Error(`[mcp-manager] ${t("be_mcpManager.apiKeyEmpty")}`);
     }
     if (trimmedKey.length > 4096) {
-      throw new Error("[mcp-manager] API 키가 너무 깁니다 (최대 4096자).");
+      throw new Error(`[mcp-manager] ${t("be_mcpManager.apiKeyTooLong")}`);
     }
 
     let updatedConfig: McpServerConfig | undefined;
@@ -349,18 +350,18 @@ export class McpManager {
         const existing = await this.loadFromConfigUnlocked();
         const idx = existing.findIndex((server) => server.id === id);
         if (idx === -1) {
-          throw new Error(`[mcp-manager] 서버 id '${id}'를 찾을 수 없습니다.`);
+          throw new Error(`[mcp-manager] ${t("be_mcpManager.serverIdNotFound", { id })}`);
         }
         const current = existing[idx];
         if (current.auth !== "api-key") {
-          throw new Error(`[mcp-manager] 서버 '${id}'는 API key 인증 서버가 아닙니다.`);
+          throw new Error(`[mcp-manager] ${t("be_mcpManager.serverNotApiKey", { id })}`);
         }
         const candidate = { ...current, apiKey: trimmedKey } as McpServerConfig;
         // Governance validation BEFORE persisting to disk
         const validation = this.governance.validateServer(candidate);
         if (!validation.valid) {
           throw new Error(
-            `[mcp-manager] 거버넌스 검증 실패 (Layer ${validation.layer}): ${validation.reason}`,
+            `[mcp-manager] ${t("be_mcpManager.governanceValidationFailed", { layer: String(validation.layer), reason: validation.reason })}`,
           );
         }
         updatedConfig = candidate;
@@ -371,7 +372,7 @@ export class McpManager {
     });
 
     if (!updatedConfig) {
-      throw new Error(`[mcp-manager] 서버 id '${id}'를 찾을 수 없습니다.`);
+      throw new Error(`[mcp-manager] ${t("be_mcpManager.serverIdNotFound", { id })}`);
     }
 
     // MEDIUM: disconnect existing client before reconnect so the new apiKey takes effect
@@ -510,7 +511,7 @@ export class McpManager {
   async callTool(serverId: string, toolName: string, args: Record<string, unknown>): Promise<{ text: string; uiPayload?: McpUiPayload }> {
     const client = this.clients.get(serverId);
     if (!client) {
-      throw new Error(`[mcp-manager] 서버 '${serverId}'가 존재하지 않습니다.`);
+      throw new Error(`[mcp-manager] ${t("be_mcpManager.serverDoesNotExist", { serverId })}`);
     }
     return client.callTool(toolName, args);
   }

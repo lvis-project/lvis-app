@@ -1,5 +1,8 @@
+import { useTranslation } from "../../../i18n/react.js";
+
 export function Sparkline({ points, width = 260, height = 48 }: { points: number[]; width?: number; height?: number }) {
-  if (points.length === 0) return <div className="text-xs text-muted-foreground">데이터 없음</div>;
+  const { t } = useTranslation();
+  if (points.length === 0) return <div className="text-xs text-muted-foreground">{t("sparkline.noData")}</div>;
   const max = Math.max(...points, 1);
   const step = points.length > 1 ? width / (points.length - 1) : 0;
   const path = points

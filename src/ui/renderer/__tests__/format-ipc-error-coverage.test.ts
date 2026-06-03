@@ -22,7 +22,7 @@ import { describe, it, expect } from "vitest";
 import { readdirSync, readFileSync } from "node:fs";
 import { join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
-import { COMMON_IPC_ERROR_MESSAGES } from "../format-ipc-error.js";
+import { COMMON_IPC_ERROR_MESSAGES, formatIpcError } from "../format-ipc-error.js";
 
 const __dirname = resolve(fileURLToPath(import.meta.url), "..");
 const IPC_DOMAIN_DIR = resolve(__dirname, "../../../ipc/domains");
@@ -85,15 +85,21 @@ describe("formatIpcError — full IPC error code coverage", () => {
     ).toBeGreaterThan(50);
   });
 
-  it("COMMON_IPC_ERROR_MESSAGES values are non-empty Korean strings", () => {
-    for (const [code, message] of Object.entries(COMMON_IPC_ERROR_MESSAGES)) {
+  it("every common IPC error code resolves to a non-empty localized message", () => {
+    // After the i18n migration, COMMON_IPC_ERROR_MESSAGES maps each code to a
+    // translation KEY; formatIpcError resolves it through t(). This suite runs
+    // under the Korean test locale (see vitest-locale-ko setup), so every code
+    // must resolve to a non-empty Korean message — the same invariant the old
+    // "values are Korean" assertion enforced, now through the translation layer.
+    for (const code of Object.keys(COMMON_IPC_ERROR_MESSAGES)) {
+      const message = formatIpcError(code, undefined);
       expect(message.length, `code "${code}" has empty message`).toBeGreaterThan(0);
-      // Korean range: U+AC00–U+D7A3 (Hangul syllables). Each message
-      // must contain at least one Hangul codepoint — otherwise it is
-      // still an English passthrough.
+      // Korean range: U+AC00–U+D7A3 (Hangul syllables). A resolved message
+      // lacking Hangul means the key is missing from the Korean catalog and
+      // fell through to the raw key/English.
       expect(
         /[가-힣]/.test(message),
-        `code "${code}" message lacks Korean characters: "${message}"`,
+        `code "${code}" did not resolve to a Korean message: "${message}"`,
       ).toBe(true);
     }
   });

@@ -3,11 +3,13 @@ import {
   formatIpcError,
   COMMON_IPC_ERROR_MESSAGES,
 } from "../format-ipc-error.js";
+import { t } from "../../../i18n/runtime.js";
 
 describe("formatIpcError (SOT — #830)", () => {
   it("resolves a known common code from the default map", () => {
+    // The map now holds translation keys; formatIpcError resolves them via t().
     expect(formatIpcError("invalid-key", undefined)).toBe(
-      COMMON_IPC_ERROR_MESSAGES["invalid-key"],
+      t(COMMON_IPC_ERROR_MESSAGES["invalid-key"]),
     );
   });
 

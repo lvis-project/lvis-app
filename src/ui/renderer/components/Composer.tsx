@@ -10,6 +10,7 @@ import {
   type SetStateAction,
 } from "react";
 import { flushSync } from "react-dom";
+import { useTranslation } from "../../../i18n/react.js";
 import { Textarea } from "../../../components/ui/textarea.js";
 import {
   AttachmentChip,
@@ -31,7 +32,6 @@ import {
   type SuggestedRepliesSnapshot,
 } from "../hooks/use-suggested-replies.js";
 
-const DEFAULT_PLACEHOLDER = "질문을 입력하세요... (Cmd/Ctrl+V 로 클립보드 붙여넣기)";
 
 export interface ComposerHandle {
   focus(): void;
@@ -115,6 +115,7 @@ export const Composer = forwardRef<ComposerHandle, ComposerProps>(function Compo
   },
   ref,
 ) {
+  const { t } = useTranslation();
   const taRef = useRef<HTMLTextAreaElement | null>(null);
   // IME composition state (e.g. 한글 조합 중). Spec §8: ImePreedit 중 → ghost
   // hide, composition 끝나면 reappear. Tracked via React composition events
@@ -223,7 +224,7 @@ export const Composer = forwardRef<ComposerHandle, ComposerProps>(function Compo
         });
         if (!inserted) {
           onWarning?.(
-            `첨부 ${ATTACH_MAX_COUNT}개 한도 — 클립보드 paste 가 중간에 차단됨`,
+            t("composer.attachLimitPasteBlocked", { max: ATTACH_MAX_COUNT }),
           );
         }
       } else if (outcome.insertText) {
@@ -406,7 +407,7 @@ export const Composer = forwardRef<ComposerHandle, ComposerProps>(function Compo
       ? suggestedReplies.alternates
       : [];
   const suggestionSurfaceVisible = ghostVisible || chipAlternates.length > 0;
-  const fallbackPlaceholder = suggestionSurfaceVisible ? "" : DEFAULT_PLACEHOLDER;
+  const fallbackPlaceholder = suggestionSurfaceVisible ? "" : t("composer.defaultPlaceholder");
 
   const acceptChip = useCallback(
     (chipText: string) => {
@@ -508,7 +509,7 @@ export const Composer = forwardRef<ComposerHandle, ComposerProps>(function Compo
           data-testid="composer-limit-warning"
           className="mt-1 text-[11px] text-destructive"
         >
-          ⚠ 첨부 {ATTACH_MAX_COUNT}개 한도 — 더 추가하려면 textarea 의 [...#N] 마커를 지워주세요
+          {t("composer.attachLimitWarning", { max: ATTACH_MAX_COUNT })}
         </div>
       ) : null}
     </div>

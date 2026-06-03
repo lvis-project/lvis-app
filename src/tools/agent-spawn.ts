@@ -14,6 +14,7 @@ import {
   AGENT_NAME_ALLOWLIST,
   type LoadedAgentProfile,
 } from "../main/agent-profile-store.js";
+import { t } from "../i18n/index.js";
 
 export interface AgentSpawnEvent {
   spawnId: string;
@@ -43,13 +44,7 @@ export interface AgentSpawnToolDeps {
 export function createAgentSpawnTool(deps: AgentSpawnToolDeps): Tool {
   return createDynamicTool({
     name: "agent_spawn",
-    description:
-      "sub-agent 를 띄워 별도의 작은 작업을 실행합니다. 부모 대화 히스토리와 분리된 fresh 컨텍스트, " +
-      "지정한 sourceTools 만 사용 가능. maxTurns (기본 30, 상한 30) — task 복잡도를 직접 판단해서 명시하세요: " +
-      "단일 lookup/요약은 5-10, 표준 multi-step 작업은 15-20, 깊은 코드 탐색·다중 파일 분석·복합 디버깅은 25-30. " +
-      "agentName 을 지정하면 ~/.lvis/agents/<name>.md 또는 ~/.lvis/agents/<name>/AGENTS.md 프로필을 profile prompt 로 결합합니다. " +
-      "결과로 요약 텍스트 + tool call 수 반환. " +
-      "특정 tool/plugin 을 직접 호출하라는 요청의 대체 경로로 사용하지 마세요. 요청 대상 도구가 현재 보이면 직접 호출하고, 보이지 않으면 request_plugin 으로 활성화하세요.",
+    description: t("be_agentSpawn.toolDescription"),
     source: "builtin",
     category: "meta",
     decisionOverride: "ask",
@@ -59,30 +54,26 @@ export function createAgentSpawnTool(deps: AgentSpawnToolDeps): Tool {
       properties: {
         title: {
           type: "string",
-          description:
-            "sub-agent 의 짧은 제목 (UI 카드 헤더에 표시). agentName 이 없으면 필수입니다.",
+          description: t("be_agentSpawn.propTitleDescription"),
         },
         agentName: {
           type: "string",
-          description:
-            "선택: ~/.lvis/agents/ 에 정의된 agent profile 이름. 지정 시 해당 프로필 본문과 기본 sourceTools 를 사용합니다.",
+          description: t("be_agentSpawn.propAgentNameDescription"),
         },
         instructions: {
           type: "string",
-          description: "sub-agent 가 수행할 작업 — system+user prompt 결합본.",
+          description: t("be_agentSpawn.propInstructionsDescription"),
         },
         sourceTools: {
           type: "array",
           items: { type: "string" },
-          description:
-            "sub-agent 에 노출할 tool 이름 목록. 생략 시 부모와 동일한 tool 셋.",
+          description: t("be_agentSpawn.propSourceToolsDescription"),
         },
         maxTurns: {
           type: "integer",
           minimum: 1,
           maximum: MAX_TURNS_CAP,
-          description:
-            "최대 어시스턴트 라운드 수 (상한 30). 기본 30. 간단 lookup 5-10 · 표준 15-20 · 복잡 multi-step 25-30. LLM 이 task 복잡도로 직접 판단.",
+          description: t("be_agentSpawn.propMaxTurnsDescription"),
         },
       },
     },

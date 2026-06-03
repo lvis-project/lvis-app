@@ -1,9 +1,10 @@
 import type { ThemeBundle } from "./types.js";
+import { t } from "../../../../i18n/runtime.js";
 
 export const tokyoNightBundle: ThemeBundle = {
   id: "tokyo-night",
   name: "Tokyo Night",
-  description: "다크 셸 + 블루 액센트 + 다크 코드",
+  description: t("tokyoNight.description"),
   shell: "dark",
   highContrast: false,
   tokens: {

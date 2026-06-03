@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useState } from "react";
 import { Button } from "../../../components/ui/button.js";
+import { useTranslation } from "../../../i18n/react.js";
 import type { PluginAuthState } from "../hooks/use-plugin-auth-status.js";
 import type { LvisApi, PluginAuthSummary } from "../types.js";
 
@@ -39,6 +40,7 @@ export function PluginAuthSection({
   onOpenLoginUi,
   onRefresh,
 }: PluginAuthSectionProps) {
+  const { t } = useTranslation();
   const [working, setWorking] = useState(false);
   const [localError, setLocalError] = useState<string | null>(null);
 
@@ -69,11 +71,11 @@ export function PluginAuthSection({
       // triage. Avoids leaking IPC reject internals (e.g.
       // "Method 'x' is not UI-callable for plugin 'y'") into the badge UI.
       console.error(`[plugin-auth] ${pluginId} loginTool ${auth.loginTool} failed`, err);
-      setLocalError("로그인에 실패했습니다. 잠시 후 다시 시도해 주세요.");
+      setLocalError(t("pluginAuthSection.loginError"));
     } finally {
       setWorking(false);
     }
-  }, [api, auth.loginTool, onOpenLoginUi, onRefresh, pluginId]);
+  }, [api, auth.loginTool, onOpenLoginUi, onRefresh, pluginId, t]);
 
   const handleLogout = useCallback(async () => {
     if (!auth.logoutTool) return;
@@ -84,20 +86,20 @@ export function PluginAuthSection({
       onRefresh();
     } catch (err) {
       console.error(`[plugin-auth] ${pluginId} logoutTool ${auth.logoutTool} failed`, err);
-      setLocalError("로그아웃에 실패했습니다. 잠시 후 다시 시도해 주세요.");
+      setLocalError(t("pluginAuthSection.logoutError"));
     } finally {
       setWorking(false);
     }
-  }, [api, auth.logoutTool, onRefresh, pluginId]);
+  }, [api, auth.logoutTool, onRefresh, pluginId, t]);
 
   const label = auth.label?.trim() || pluginName;
 
   return (
     <div className="space-y-1" data-testid={`plugin-auth-section-${pluginId}`}>
-      <p className="text-[10px] font-medium text-muted-foreground uppercase tracking-wide">인증</p>
+      <p className="text-[10px] font-medium text-muted-foreground uppercase tracking-wide">{t("pluginAuthSection.sectionHeading")}</p>
       <div className="flex items-center justify-between gap-2 rounded-md border bg-muted/30 px-2.5 py-1.5">
         <div className="flex min-w-0 items-center gap-2">
-          {renderBadge(state)}
+          {renderBadge(state, t)}
           <div className="min-w-0">
             <p className="truncate text-xs font-medium">{label}</p>
             {state.kind === "authed" && state.account && (
@@ -122,18 +124,18 @@ export function PluginAuthSection({
                 disabled={working}
                 data-testid={`plugin-auth-logout-${pluginId}`}
               >
-                {working ? "처리 중…" : "로그아웃"}
+                {working ? t("pluginAuthSection.working") : t("pluginAuthSection.logoutButton")}
               </Button>
             ) : (
               <span
                 className="text-[10px] text-muted-foreground"
                 data-testid={`plugin-auth-logout-hint-${pluginId}`}
               >
-                로그아웃은 플러그인 화면에서
+                {t("pluginAuthSection.logoutHint")}
               </span>
             )
           ) : state.kind === "loading" ? (
-            <span className="text-[10px] text-muted-foreground">확인 중…</span>
+            <span className="text-[10px] text-muted-foreground">{t("pluginAuthSection.checking")}</span>
           ) : (
             <Button
               size="sm"
@@ -143,7 +145,7 @@ export function PluginAuthSection({
               disabled={working}
               data-testid={`plugin-auth-login-${pluginId}`}
             >
-              {working ? "로그인 중…" : onOpenLoginUi ? "로그인 창 열기" : "로그인"}
+              {working ? t("pluginAuthSection.loggingIn") : onOpenLoginUi ? t("pluginAuthSection.openLoginWindow") : t("pluginAuthSection.loginButton")}
             </Button>
           )}
         </div>
@@ -152,25 +154,25 @@ export function PluginAuthSection({
   );
 }
 
-function renderBadge(state: PluginAuthState) {
+function renderBadge(state: PluginAuthState, t: (key: string) => string) {
   if (state.kind === "authed") {
     return (
       <span className="inline-flex shrink-0 items-center gap-1 rounded-full bg-success/15 px-1.5 py-px text-[10px] font-medium text-success">
-        ✓ 인증됨
+        {t("pluginAuthSection.badgeAuthed")}
       </span>
     );
   }
   if (state.kind === "unauthed") {
     return (
       <span className="inline-flex shrink-0 items-center gap-1 rounded-full bg-destructive/15 px-1.5 py-px text-[10px] font-medium text-destructive">
-        🔒 미인증
+        {t("pluginAuthSection.badgeUnauthed")}
       </span>
     );
   }
   if (state.kind === "error") {
     return (
       <span className="inline-flex shrink-0 items-center gap-1 rounded-full bg-warning/15 px-1.5 py-px text-[10px] font-medium text-warning">
-        ⚠ 오류
+        {t("pluginAuthSection.badgeError")}
       </span>
     );
   }

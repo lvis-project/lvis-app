@@ -21,6 +21,7 @@ import { useSyncExternalStore, useState, useMemo, useCallback, useRef } from "re
 import { ChevronDown, ChevronRight, MessageSquarePlus, ArrowUp, X, Pencil } from "lucide-react";
 import { Badge } from "../../../components/ui/badge.js";
 import type { MessageQueueStore, MessageQueueItem } from "../state/message-queue-store.js";
+import { useTranslation } from "../../../i18n/react.js";
 
 interface MessageQueuePanelProps {
   store: MessageQueueStore;
@@ -29,6 +30,7 @@ interface MessageQueuePanelProps {
 }
 
 export function MessageQueuePanel({ store, onSendNow }: MessageQueuePanelProps) {
+  const { t } = useTranslation();
   const items = useSyncExternalStore<readonly MessageQueueItem[]>(
     store.subscribe,
     () => store.getItems(),
@@ -61,17 +63,17 @@ export function MessageQueuePanel({ store, onSendNow }: MessageQueuePanelProps) 
           <ChevronRight className="h-3.5 w-3.5 text-muted-foreground" />
         )}
         <MessageSquarePlus className="h-3.5 w-3.5 text-info" />
-        <span className="text-sm font-medium">메시지 큐</span>
+        <span className="text-sm font-medium">{t("messageQueuePanel.panelTitle")}</span>
         <Badge className="bg-info text-[10px] font-semibold text-background">{items.length}</Badge>
         {selectedCount > 0 && (
           <span className="text-xs text-muted-foreground">
-            · <span className="text-accent">{selectedCount} 선택</span>
-            <span className="ml-1 text-[10px]">(⌘⏎ 대상)</span>
+            · <span className="text-accent">{t("messageQueuePanel.selectedCount", { count: selectedCount })}</span>
+            <span className="ml-1 text-[10px]">{t("messageQueuePanel.cmdEnterHint")}</span>
           </span>
         )}
         {!expanded && (
           <span className="ml-2 truncate text-xs text-muted-foreground">
-            · 다음 brake-point 에 자동 주입
+            · {t("messageQueuePanel.collapsedHint")}
           </span>
         )}
       </button>
@@ -107,6 +109,7 @@ interface MessageQueueRowProps {
 }
 
 function MessageQueueRow({ item, onToggle, onSendNow, onRemove, onEdit }: MessageQueueRowProps) {
+  const { t } = useTranslation();
   const [editing, setEditing] = useState(false);
   const [draft, setDraft] = useState(item.text);
   const inputRef = useRef<HTMLInputElement | null>(null);
@@ -163,7 +166,7 @@ function MessageQueueRow({ item, onToggle, onSendNow, onRemove, onEdit }: Messag
             ? "border-accent bg-accent text-[9px] text-background"
             : "border-muted-foreground")
         }
-        aria-label={item.selected ? "선택 해제" : "선택"}
+        aria-label={item.selected ? t("messageQueuePanel.deselectAriaLabel") : t("messageQueuePanel.selectAriaLabel")}
         aria-pressed={item.selected}
       >
         {item.selected ? "✓" : null}
@@ -187,13 +190,13 @@ function MessageQueueRow({ item, onToggle, onSendNow, onRemove, onEdit }: Messag
           data-testid="message-queue-row-edit"
           className="flex-1 rounded border border-accent/50 bg-background px-1.5 py-0.5 text-xs text-foreground focus:outline-none focus:ring-1 focus:ring-accent"
           maxLength={8000}
-          aria-label="큐 항목 텍스트 수정"
+          aria-label={t("messageQueuePanel.editInputAriaLabel")}
         />
       ) : (
         <span
           className="flex-1 cursor-text truncate text-xs text-foreground"
           onDoubleClick={enterEdit}
-          title="더블클릭으로 수정"
+          title={t("messageQueuePanel.doubleClickToEditTitle")}
           data-testid="message-queue-row-text"
         >
           {item.text}
@@ -205,8 +208,8 @@ function MessageQueueRow({ item, onToggle, onSendNow, onRemove, onEdit }: Messag
             type="button"
             onClick={enterEdit}
             className="inline-flex h-5 w-5 items-center justify-center rounded border border-transparent text-muted-foreground hover:border-border hover:bg-muted hover:text-foreground"
-            aria-label="수정"
-            title="수정 (또는 텍스트 더블클릭)"
+            aria-label={t("messageQueuePanel.editButtonAriaLabel")}
+            title={t("messageQueuePanel.editButtonTitle")}
             data-testid="message-queue-row-edit-button"
           >
             <Pencil className="h-2.5 w-2.5" />
@@ -215,17 +218,17 @@ function MessageQueueRow({ item, onToggle, onSendNow, onRemove, onEdit }: Messag
             type="button"
             onClick={onSendNow}
             className="inline-flex h-5 items-center gap-1 rounded border border-transparent px-1.5 text-[10px] text-accent hover:border-accent hover:bg-accent/10"
-            aria-label="이 항목만 즉시 주입"
-            title="이 항목만 즉시 주입 (인터럽트)"
+            aria-label={t("messageQueuePanel.sendNowAriaLabel")}
+            title={t("messageQueuePanel.sendNowTitle")}
           >
-            <ArrowUp className="h-2.5 w-2.5" /> 즉시
+            <ArrowUp className="h-2.5 w-2.5" /> {t("messageQueuePanel.sendNowLabel")}
           </button>
           <button
             type="button"
             onClick={onRemove}
             className="inline-flex h-5 w-5 items-center justify-center rounded border border-transparent text-muted-foreground hover:border-destructive/40 hover:bg-destructive/10 hover:text-destructive"
-            aria-label="제거"
-            title="제거"
+            aria-label={t("messageQueuePanel.removeAriaLabel")}
+            title={t("messageQueuePanel.removeTitle")}
           >
             <X className="h-3 w-3" />
           </button>

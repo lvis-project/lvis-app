@@ -1,5 +1,6 @@
 import { lazy, type ComponentType } from "react";
 import type { CalendarProps } from "../../../components/ui/calendar.js";
+import { useTranslation } from "../../../i18n/react.js";
 
 let calendarModulePromise:
   | Promise<{ default: ComponentType<CalendarProps> }>
@@ -15,5 +16,6 @@ export function preloadCalendar(): Promise<{ default: ComponentType<CalendarProp
 export const LazyCalendar = lazy(preloadCalendar);
 
 export function CalendarFallback() {
-  return <div className="h-[248px] w-[252px]" aria-label="달력 로딩 중" />;
+  const { t } = useTranslation();
+  return <div className="h-[248px] w-[252px]" aria-label={t("lazyCalendar.calendarLoading")} />;
 }

@@ -21,6 +21,7 @@ import type { ReactNode } from "react";
 import { Square } from "lucide-react";
 import { Button } from "../../../components/ui/button.js";
 import type { UserKeyboardIntentSnapshot } from "../../../shared/chat-origin.js";
+import { useTranslation } from "../../../i18n/react.js";
 
 export interface BottomActionRowProps {
   /** TokenProgressRing + cost badge 슬롯. ChatView 가 합성해서 주입. */
@@ -42,6 +43,7 @@ export function BottomActionRow({
   onSend,
   onCancel,
 }: BottomActionRowProps) {
+  const { t } = useTranslation();
   return (
     <div
       data-testid="composer-bottom-action-row"
@@ -51,7 +53,7 @@ export function BottomActionRow({
         {tokenSlot}
         <span className="inline-flex items-center gap-1 text-[11px] text-muted-foreground">
           <Kbd>⇧⏎</Kbd>
-          <span>줄바꿈</span>
+          <span>{t("bottomActionRow.newline")}</span>
         </span>
         {isBusy && (
           <span
@@ -59,7 +61,7 @@ export function BottomActionRow({
             data-testid="composer-hint-immediate"
           >
             <Kbd>⌘⏎</Kbd>
-            <span>즉시 주입</span>
+            <span>{t("bottomActionRow.immediateInject")}</span>
           </span>
         )}
       </div>
@@ -70,8 +72,8 @@ export function BottomActionRow({
             onClick={onCancel}
             data-testid="composer-cancel-button"
             className="inline-flex h-6 w-6 items-center justify-center rounded-full bg-foreground text-background transition-opacity hover:opacity-80"
-            title="LLM 취소 (ESC)"
-            aria-label="LLM 취소 (ESC)"
+            title={t("bottomActionRow.cancelButton")}
+            aria-label={t("bottomActionRow.cancelButton")}
           >
             <Square className="h-2.5 w-2.5 fill-current" strokeWidth={0} />
           </button>
@@ -83,7 +85,7 @@ export function BottomActionRow({
           data-testid="composer-send-button"
           className="inline-flex h-7 items-center gap-1.5 px-3 text-xs font-semibold"
         >
-          <span>전송</span>
+          <span>{t("bottomActionRow.sendButton")}</span>
           <KbdInverse>⏎</KbdInverse>
         </Button>
       </div>

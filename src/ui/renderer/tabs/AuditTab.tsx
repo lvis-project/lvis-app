@@ -8,6 +8,7 @@ import { Separator } from "../../../components/ui/separator.js";
 import type { AuditEntry } from "../../../audit/audit-logger.js";
 import { SettingsPageHeader } from "../components/SettingsPageHeader.js";
 import { SettingsSection } from "../components/SettingsSection.js";
+import { useTranslation } from "../../../i18n/react.js";
 
 interface AuditStats {
   totalByType: Record<string, number>;
@@ -51,6 +52,7 @@ const TYPE_BADGE: Record<string, string> = {
 };
 
 export function AuditTab() {
+  const { t } = useTranslation();
   const [dateFrom, setDateFrom] = useState(isoDateOffset(7));
   const [dateTo, setDateTo] = useState(new Date().toISOString().slice(0, 10));
   const [typeFilter, setTypeFilter] = useState("");
@@ -86,7 +88,7 @@ export function AuditTab() {
       });
       setResult(res);
     } catch (e) {
-      setError((e as Error).message ?? "검색 실패");
+      setError((e as Error).message ?? t("auditTab.searchFailed"));
     } finally {
       setLoading(false);
     }
@@ -130,22 +132,22 @@ export function AuditTab() {
     <div className="pr-1">
       <div className="space-y-6">
         <SettingsPageHeader
-          title="감사"
-          description="감사 로그를 조회하고 export 합니다"
+          title={t("auditTab.pageTitle")}
+          description={t("auditTab.pageDescription")}
         />
 
         {/* ── Stats Bar ── */}
         {stats && (
-          <SettingsSection title="최근 7일 통계">
+          <SettingsSection title={t("auditTab.statsTitle")}>
             <div className="flex flex-wrap gap-3">
               <div className="rounded-md border px-3 py-2 text-center">
-                <p className="text-xs text-muted-foreground">총 항목</p>
+                <p className="text-xs text-muted-foreground">{t("auditTab.statsTotalItems")}</p>
                 <p className="text-lg font-semibold tabular-nums">
                   {Object.values(stats.totalByType).reduce((a, b) => a + b, 0).toLocaleString()}
                 </p>
               </div>
               <div className="rounded-md border px-3 py-2 text-center">
-                <p className="text-xs text-muted-foreground">민감 작업</p>
+                <p className="text-xs text-muted-foreground">{t("auditTab.statsSensitiveOps")}</p>
                 <p className={`text-lg font-semibold tabular-nums ${stats.sensitiveOps > 0 ? "text-destructive" : ""}`}>
                   {stats.sensitiveOps}
                 </p>
@@ -153,10 +155,10 @@ export function AuditTab() {
             </div>
             {top3.length > 0 && (
               <div className="space-y-1">
-                <p className="text-[11px] text-muted-foreground">상위 유형</p>
-                {top3.map(([t, count]) => (
-                  <div key={t} className="flex items-center gap-2">
-                    <span className="w-20 truncate text-[11px] font-mono">{t}</span>
+                <p className="text-[11px] text-muted-foreground">{t("auditTab.statsTopTypes")}</p>
+                {top3.map(([typeName, count]) => (
+                  <div key={typeName} className="flex items-center gap-2">
+                    <span className="w-20 truncate text-[11px] font-mono">{typeName}</span>
                     <div className="flex-1 rounded-full bg-muted h-2 overflow-hidden">
                       <div
                         className="h-2 rounded-full bg-primary"
@@ -172,10 +174,10 @@ export function AuditTab() {
         )}
 
         {/* ── Filters ── */}
-        <SettingsSection title="검색 필터">
+        <SettingsSection title={t("auditTab.filterTitle")}>
           <div className="grid grid-cols-2 gap-2">
             <div className="space-y-1">
-              <Label className="text-[11px] text-muted-foreground">시작 날짜</Label>
+              <Label className="text-[11px] text-muted-foreground">{t("auditTab.filterDateFrom")}</Label>
               <Input
                 type="date"
                 className="h-8 text-xs"
@@ -184,7 +186,7 @@ export function AuditTab() {
               />
             </div>
             <div className="space-y-1">
-              <Label className="text-[11px] text-muted-foreground">종료 날짜</Label>
+              <Label className="text-[11px] text-muted-foreground">{t("auditTab.filterDateTo")}</Label>
               <Input
                 type="date"
                 className="h-8 text-xs"
@@ -200,7 +202,7 @@ export function AuditTab() {
               value={typeFilter}
               onChange={(e) => setTypeFilter(e.target.value)}
             >
-              <NativeSelectOption value="">모든 유형</NativeSelectOption>
+              <NativeSelectOption value="">{t("auditTab.filterAllTypes")}</NativeSelectOption>
               <NativeSelectOption value="turn">turn</NativeSelectOption>
               <NativeSelectOption value="tool_call">tool_call</NativeSelectOption>
               <NativeSelectOption value="approval">approval</NativeSelectOption>
@@ -211,20 +213,20 @@ export function AuditTab() {
             </NativeSelect>
             <Input
               className="h-8 flex-1 text-xs"
-              placeholder="텍스트 검색..."
+              placeholder={t("auditTab.filterTextPlaceholder")}
               value={textSearch}
               onChange={(e) => setTextSearch(e.target.value)}
               onKeyDown={(e) => { if (e.key === "Enter") handleSearch(); }}
             />
             <Button size="sm" className="h-8" onClick={handleSearch} disabled={loading}>
-              {loading ? "..." : "검색"}
+              {loading ? "..." : t("auditTab.searchButton")}
             </Button>
           </div>
         </SettingsSection>
 
         {/* ── Results ── */}
         <SettingsSection
-          title={`결과 ${result.total > 0 ? `(${result.total.toLocaleString()}건)` : ""}`}
+          title={result.total > 0 ? t("auditTab.resultsWithCount", { count: result.total.toLocaleString() }) : t("auditTab.resultsTitle")}
           actions={
             totalPages > 1 ? (
               <div className="flex items-center gap-1 text-[11px]">
@@ -254,7 +256,7 @@ export function AuditTab() {
           )}
 
           {!loading && result.entries.length === 0 && !error && (
-            <p className="py-4 text-center text-xs text-muted-foreground italic">항목이 없습니다.</p>
+            <p className="py-4 text-center text-xs text-muted-foreground italic">{t("auditTab.emptyState")}</p>
           )}
 
           {result.entries.length > 0 && (
@@ -262,10 +264,10 @@ export function AuditTab() {
               <table className="w-full">
                 <thead>
                   <tr className="border-b bg-muted/40">
-                    <th className="px-3 py-2 text-left font-medium">시각</th>
-                    <th className="px-3 py-2 text-left font-medium">유형</th>
-                    <th className="px-3 py-2 text-left font-medium">소스 / 라우트</th>
-                    <th className="px-3 py-2 text-left font-medium">메시지</th>
+                    <th className="px-3 py-2 text-left font-medium">{t("auditTab.colTimestamp")}</th>
+                    <th className="px-3 py-2 text-left font-medium">{t("auditTab.colType")}</th>
+                    <th className="px-3 py-2 text-left font-medium">{t("auditTab.colSourceRoute")}</th>
+                    <th className="px-3 py-2 text-left font-medium">{t("auditTab.colMessage")}</th>
                   </tr>
                 </thead>
                 <tbody>

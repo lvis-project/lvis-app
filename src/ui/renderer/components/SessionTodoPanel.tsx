@@ -33,6 +33,7 @@ import {
 } from "lucide-react";
 import { Badge } from "../../../components/ui/badge.js";
 import { Button } from "../../../components/ui/button.js";
+import { useTranslation } from "../../../i18n/react.js";
 import {
   isSessionTodoStatus,
   type SessionTodoItem,
@@ -40,19 +41,19 @@ import {
 } from "../../../shared/session-todo.js";
 import type { LvisApi } from "../types.js";
 
-const STATUS_BADGE: Record<SessionTodoStatus, { label: string; cls: string; dot: string }> = {
+const STATUS_BADGE: Record<SessionTodoStatus, { labelKey: string; cls: string; dot: string }> = {
   pending: {
-    label: "대기",
+    labelKey: "sessionTodoPanel.statusPending",
     cls: "bg-muted text-muted-foreground",
     dot: "bg-muted-foreground/40",
   },
   in_progress: {
-    label: "진행",
+    labelKey: "sessionTodoPanel.statusInProgress",
     cls: "bg-warning/15 text-warning",
     dot: "bg-warning",
   },
   completed: {
-    label: "완료",
+    labelKey: "sessionTodoPanel.statusCompleted",
     cls: "bg-success/15 text-success",
     dot: "bg-success",
   },
@@ -103,6 +104,7 @@ export function SessionTodoPanel({
    */
   sessionId?: string;
 }) {
+  const { t } = useTranslation();
   const [items, setItems] = useState<SessionTodoItem[]>([]);
   // Start collapsed: a freshly-set plan opens in the closed state so it does
   // not push the input cluster down. The collapsed header still streams the
@@ -223,7 +225,7 @@ export function SessionTodoPanel({
         >
           {open ? <ChevronDown className="h-3 w-3" /> : <ChevronRight className="h-3 w-3" />}
           <ListChecks className="h-3 w-3" />
-          <span className="font-medium">세션 TO-DO</span>
+          <span className="font-medium">{t("sessionTodoPanel.panelTitle")}</span>
           <Badge variant="outline" className="px-1 py-0 text-[10px]">
             {completedCount}/{visible.length}
           </Badge>
@@ -250,7 +252,7 @@ export function SessionTodoPanel({
             size="icon"
             className="mr-1 h-6 w-6 shrink-0 rounded-none hover:bg-transparent"
             data-testid="session-todo-dismiss"
-            title="완료된 TO-DO 닫기"
+            title={t("sessionTodoPanel.dismissTitle")}
             onClick={(e) => {
               // Don't toggle the panel open/closed when dismissing.
               e.stopPropagation();
@@ -289,7 +291,7 @@ export function SessionTodoPanel({
                 <span
                   className={`shrink-0 rounded px-1.5 py-0.5 text-[10px] font-medium transition-colors ${meta.cls}`}
                 >
-                  {meta.label}
+                  {t(meta.labelKey)}
                 </span>
                 <span
                   className={`min-w-0 flex-1 transition-opacity duration-200 ${

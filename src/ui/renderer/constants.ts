@@ -29,13 +29,14 @@ import {
   LLM_VENDORS,
   type LLMVendor,
 } from "../../shared/llm-vendor-defaults.js";
+import { t } from "../../i18n/runtime.js";
 
 export const SOURCE_LABEL: Record<string, string> = {
-  email: "메일",
-  meeting: "미팅",
-  calendar: "일정",
+  get email() { return t("constants.sourceLabelEmail"); },
   teams: "Teams",
-  manual: "직접",
+  get meeting() { return t("constants.sourceLabelMeeting"); },
+  get calendar() { return t("constants.sourceLabelCalendar"); },
+  get manual() { return t("constants.sourceLabelManual"); },
 };
 
 export const PRIORITY_EMOJI: Record<string, string> = {
@@ -45,8 +46,8 @@ export const PRIORITY_EMOJI: Record<string, string> = {
 };
 
 export const SOURCE_BADGE: Record<string, string> = {
-  builtin: "내장",
-  plugin: "플러그인",
+  get builtin() { return t("constants.sourceBadgeBuiltin"); },
+  get plugin() { return t("constants.sourceBadgePlugin"); },
   mcp: "MCP",
 };
 
@@ -87,12 +88,12 @@ export const VENDORS = LLM_VENDORS.map((id) => ({
   modelOptions: LLM_VENDOR_MODEL_OPTIONS[id],
 }));
 
-export const WEB_PROVIDERS = [
-  { id: "duckduckgo", label: "DuckDuckGo", placeholder: "키 불필요", needsKey: false },
+export const WEB_PROVIDERS: { id: string; label: string; readonly placeholder: string; needsKey: boolean }[] = [
+  { id: "duckduckgo", label: "DuckDuckGo", get placeholder() { return t("constants.webProviderDuckDuckGoPlaceholder"); }, needsKey: false },
   { id: "tavily", label: "Tavily AI", placeholder: "tvly-...", needsKey: true },
-  { id: "serper", label: "Serper.dev", placeholder: "키 입력...", needsKey: true },
+  { id: "serper", label: "Serper.dev", get placeholder() { return t("constants.webProviderSerperPlaceholder"); }, needsKey: true },
   { id: "google", label: "Google Search", placeholder: "API Key...", needsKey: true },
-] as const;
+];
 
 // Reasoning effort slider steps. Budget values are chosen to land cleanly in
 // both `mapReasoningEffort()` (OpenAI: ≤3000=low, ≤8000=medium, >8000=high)
@@ -119,11 +120,27 @@ export function budgetToEffortIndex(budget: number): number {
   return closest;
 }
 
-export const EXEC_MODE_OPTIONS: { value: ExecMode; label: string; description: string }[] = [
-  { value: "default", label: "기본", description: "읽기 도구는 허용하고 변경·셸·네트워크는 승인 요청" },
-  { value: "strict", label: "전체 물어보기", description: "읽기까지 포함해 모든 도구 실행 전 승인 요청" },
-  { value: "auto", label: "자동 검증", description: "저위험 작업은 감사 기록으로 처리하고 자동(헤드리스) 실행과 대화형 채팅 모두를 권한 리뷰어가 검증" },
-  { value: "allow", label: "전체 허용", description: "하드 차단 밖 도구는 자동 허용하고 허용 디렉터리 밖 접근은 별도 승인" },
+export const EXEC_MODE_OPTIONS: { value: ExecMode; readonly label: string; readonly description: string }[] = [
+  {
+    value: "default",
+    get label() { return t("constants.execModeDefaultLabel"); },
+    get description() { return t("constants.execModeDefaultDesc"); },
+  },
+  {
+    value: "strict",
+    get label() { return t("constants.execModeStrictLabel"); },
+    get description() { return t("constants.execModeStrictDesc"); },
+  },
+  {
+    value: "auto",
+    get label() { return t("constants.execModeAutoLabel"); },
+    get description() { return t("constants.execModeAutoDesc"); },
+  },
+  {
+    value: "allow",
+    get label() { return t("constants.execModeAllowLabel"); },
+    get description() { return t("constants.execModeAllowDesc"); },
+  },
 ];
 
 // Keep in sync with src/tools/render-html.ts — the server already clamps,

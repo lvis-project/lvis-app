@@ -7,37 +7,47 @@ import { Tooltip, TooltipContent, TooltipTrigger } from "../../../components/ui/
 import { pluginIconFor } from "../utils/plugin-icon.js";
 import type { InstallPhase } from "../hooks/use-plugin-marketplace.js";
 import type { PluginCardSummary } from "../types.js";
+import { useTranslation } from "../../../i18n/react.js";
+import type { TranslationVars } from "../../../i18n/translate.js";
 
-const PHASE_LABEL: Record<InstallPhase, string> = {
-  downloading: "다운로드",
-  verifying: "검증",
-  installing: "설치",
-  registering: "등록",
-  restarting: "재시작",
-  preparing: "준비",
-};
+type TFn = (key: string, vars?: TranslationVars) => string;
 
-const PREPARATION_SHORT_LABEL: Record<string, string> = {
-  pending: "준비",
-  "installing-python": "Python",
-  "installing-deps": "라이브러리",
-  verifying: "검증",
-  ready: "완료",
-  error: "실패",
-};
+function getPhaseLabel(phase: InstallPhase, t: TFn): string {
+  const map: Record<InstallPhase, string> = {
+    downloading: t("pluginGridButton.phaseDownloading"),
+    verifying: t("pluginGridButton.phaseVerifying"),
+    installing: t("pluginGridButton.phaseInstalling"),
+    registering: t("pluginGridButton.phaseRegistering"),
+    restarting: t("pluginGridButton.phaseRestarting"),
+    preparing: t("pluginGridButton.phasePreparing"),
+  };
+  return map[phase];
+}
 
-function formatPreparationText(status: PluginCardSummary["preparationStatus"]): string | null {
+function getPreparationShortLabel(phase: string, t: TFn): string {
+  const map: Record<string, string> = {
+    pending: t("pluginGridButton.prepPending"),
+    "installing-python": "Python",
+    "installing-deps": t("pluginGridButton.prepInstallingDeps"),
+    verifying: t("pluginGridButton.prepVerifying"),
+    ready: t("pluginGridButton.prepReady"),
+    error: t("pluginGridButton.prepError"),
+  };
+  return map[phase] ?? phase;
+}
+
+function formatPreparationText(status: PluginCardSummary["preparationStatus"], t: TFn): string | null {
   if (!status) return null;
-  const label = PREPARATION_SHORT_LABEL[status.phase] ?? status.phase;
+  const label = getPreparationShortLabel(status.phase, t);
   const pct = typeof status.progressPct === "number" && Number.isFinite(status.progressPct)
     ? ` ${Math.max(0, Math.min(100, Math.round(status.progressPct)))}%`
     : "";
   return `${label}${pct}`;
 }
 
-function formatPreparationTitle(status: PluginCardSummary["preparationStatus"]): string | null {
+function formatPreparationTitle(status: PluginCardSummary["preparationStatus"], t: TFn): string | null {
   if (!status) return null;
-  const text = formatPreparationText(status);
+  const text = formatPreparationText(status, t);
   return [text, status.message].filter(Boolean).join(" · ");
 }
 
@@ -95,6 +105,7 @@ export function PluginGridButton({
   onOpenMarketplace,
   marketplaceUrlReady = false,
 }: PluginGridButtonProps) {
+  const { t } = useTranslation();
   const [open, setOpen] = useState(false);
   // Match popover width to the chat composer's INNER input-bar and shift
   // it left via `alignOffset` so the popover's left edge aligns with the
@@ -138,7 +149,7 @@ export function PluginGridButton({
     return () => ro.disconnect();
   }, [open]);
   const anyUnauthed = plugins.some((p) => p.unauthed);
-  const tooltipLabel = anyUnauthed ? "플러그인 — 인증 필요" : "플러그인";
+  const tooltipLabel = anyUnauthed ? t("pluginGridButton.tooltipUnauthed") : t("pluginGridButton.tooltip");
 
   const handleSelect = (viewKey: string) => {
     setOpen(false);
@@ -172,7 +183,7 @@ export function PluginGridButton({
       <LayoutGrid className="h-3.5 w-3.5" />
       {anyUnauthed && (
         <span
-          aria-label="미인증 플러그인 있음"
+          aria-label={t("pluginGridButton.dotAriaLabel")}
           data-testid="plugin-grid-unauthed-dot"
           className="absolute -right-1 -top-1 h-2 w-2 rounded-full bg-destructive ring-1 ring-background"
         />
@@ -190,7 +201,7 @@ export function PluginGridButton({
               variant="ghost"
               size="sm"
               className="h-7 w-7 p-0"
-              aria-label="플러그인 열기"
+              aria-label={t("pluginGridButton.openAriaLabel")}
               data-testid="plugin-grid-button"
               // SpotlightTour anchor — step 8 ("플러그인 — 회의·문서·업무 도우미")
               // in `first-boot-essentials` pins to this trigger. See
@@ -230,8 +241,8 @@ export function PluginGridButton({
                 <Plug className="h-5 w-5" />
               </span>
             </div>
-            <p className="text-sm mb-1">플러그인이 없습니다</p>
-            <p className="text-xs text-muted-foreground">마켓플레이스에서 설치해보세요</p>
+            <p className="text-sm mb-1">{t("pluginGridButton.emptyTitle")}</p>
+            <p className="text-xs text-muted-foreground">{t("pluginGridButton.emptyDescription")}</p>
             <Button
               size="sm"
               variant="outline"
@@ -243,9 +254,9 @@ export function PluginGridButton({
               }}
             >
               {marketplaceUrlReady ? (
-                <>마켓플레이스 열기 <ExternalLink className="h-3 w-3" /></>
+                <>{t("pluginGridButton.openMarketplace")} <ExternalLink className="h-3 w-3" /></>
               ) : (
-                "로딩 중..."
+                t("pluginGridButton.loadingEllipsis")
               )}
             </Button>
           </div>
@@ -263,9 +274,9 @@ export function PluginGridButton({
                 .find((value): value is InstallPhase => value !== undefined)
                 ?? (p.loadStatus === "preparing" ? "preparing" : undefined);
               const isInstalling = phase !== undefined;
-              const phaseLabel = phase ? PHASE_LABEL[phase] : undefined;
-              const preparationText = formatPreparationText(p.preparationStatus);
-              const preparationTitle = formatPreparationTitle(p.preparationStatus);
+              const phaseLabel = phase ? getPhaseLabel(phase, t) : undefined;
+              const preparationText = formatPreparationText(p.preparationStatus, t);
+              const preparationTitle = formatPreparationTitle(p.preparationStatus, t);
               const Icon = pluginIconFor({ icon: p.icon, iconText: p.iconText });
 
               return (
@@ -282,10 +293,10 @@ export function PluginGridButton({
                   title={
                     isInstalling && phaseLabel
                       ? preparationTitle
-                        ? `${p.label} ${phaseLabel} 중 — ${preparationTitle}`
-                        : `${p.label} ${phaseLabel} 중...`
+                        ? t("pluginGridButton.installingTitleWithPrep", { label: p.label, phaseLabel, preparationTitle })
+                        : t("pluginGridButton.installingTitle", { label: p.label, phaseLabel })
                       : p.unauthed
-                        ? `${p.label} — 클릭하여 로그인`
+                        ? t("pluginGridButton.unauthedTitle", { label: p.label })
                         : undefined
                   }
                 >
@@ -314,7 +325,7 @@ export function PluginGridButton({
                     {p.unauthed && (
                       <span
                         id={`${p.viewKey}-unauthed`}
-                        aria-label="미인증"
+                        aria-label={t("pluginGridButton.unauthedBadge")}
                         className="absolute -right-0.5 -top-0.5 inline-flex items-center justify-center rounded-full bg-destructive px-1 py-px text-[8px] font-medium text-destructive-foreground shadow"
                       >
                         🔒
@@ -345,8 +356,8 @@ export function PluginGridButton({
                 className="plugin-cell cell-installing flex flex-col items-center gap-1 rounded-lg px-2 py-1 cursor-default"
                 data-testid={`plugin-cell-installing-${slug}`}
                 aria-busy="true"
-                aria-label={`${slug} ${PHASE_LABEL[phase]} 중`}
-                title={`${slug} ${PHASE_LABEL[phase]} 중...`}
+                aria-label={t("pluginGridButton.placeholderAriaLabel", { slug, phaseLabel: getPhaseLabel(phase, t) })}
+                title={t("pluginGridButton.placeholderTitle", { slug, phaseLabel: getPhaseLabel(phase, t) })}
               >
                 <span className="plugin-icon relative flex h-11 w-11 items-center justify-center rounded-full bg-muted">
                   <Plug className="h-7 w-7 opacity-40" strokeWidth={1.6} />
@@ -362,7 +373,7 @@ export function PluginGridButton({
                     className="absolute inset-0 flex items-center justify-center text-[8px] font-semibold text-foreground leading-none z-10 pointer-events-none"
                     data-testid={`plugin-cell-installing-${slug}-phase`}
                   >
-                    {PHASE_LABEL[phase]}
+                    {getPhaseLabel(phase, t)}
                   </span>
                 </span>
                 <span className="text-[11px] font-bold truncate max-w-[64px] text-muted-foreground">
@@ -384,8 +395,8 @@ export function PluginGridButton({
                 onOpenMarketplace();
               }}
               data-testid="plugin-cell-add"
-              title="마켓플레이스 열기"
-              aria-label="마켓플레이스 열기"
+              title={t("pluginGridButton.openMarketplace")}
+              aria-label={t("pluginGridButton.openMarketplace")}
             >
               <span className="plugin-icon flex h-11 w-11 items-center justify-center rounded-full border border-dashed border-muted-foreground/40 text-muted-foreground">
                 {marketplaceUrlReady ? (
@@ -395,7 +406,7 @@ export function PluginGridButton({
                 )}
               </span>
               <span className="text-[11px] text-muted-foreground truncate max-w-[64px]">
-                {marketplaceUrlReady ? "마켓" : "로딩 중"}
+                {marketplaceUrlReady ? t("pluginGridButton.marketShort") : t("pluginGridButton.loading")}
               </span>
             </button>
           </div>

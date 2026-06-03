@@ -13,6 +13,7 @@
  */
 
 import { createLogger } from "../lib/logger.js";
+import { t } from "../i18n/index.js";
 const log = createLogger("hook");
 
 // ─── Types ──────────────────────────────────────────
@@ -86,7 +87,7 @@ export class HookRunner {
         const result = await hook.handler({ toolName: ctx.toolName, toolInput: currentInput });
 
         if (result.action === "deny") {
-          return { action: "deny", reason: result.reason ?? `${hook.name} 훅에 의해 차단됨` };
+          return { action: "deny", reason: result.reason ?? t("be_hookRunner.blockedByHook", { name: hook.name }) };
         }
 
         if (result.action === "modify" && result.updatedInput) {

@@ -1,9 +1,10 @@
 import type { ThemeBundle } from "./types.js";
+import { t } from "../../../../i18n/runtime.js";
 
 export const forestBundle: ThemeBundle = {
   id: "forest",
   name: "Forest",
-  description: "라이트 셸 + 틸 액센트 + 라이트 코드",
+  description: t("forest.description"),
   shell: "light",
   highContrast: false,
   tokens: {

@@ -1,4 +1,5 @@
 import { useEffect } from "react";
+import { t } from "../../../../i18n/runtime.js";
 import { STATUS_BAR_VENDOR_EMOJIS } from "../../../../shared/status-bar-emojis.js";
 import type { LvisApi, AppSettings } from "../../types.js";
 import type { PersistentItem } from "./types.js";
@@ -46,7 +47,7 @@ export function useStatusBarVendor({ api, upsertPersistent }: Options): void {
         severity: "info",
         label: vendorEmoji(provider),
         value,
-        a11yLabel: "활성 LLM 벤더 및 모델",
+        a11yLabel: t("useStatusBarVendor.activeVendorA11y"),
         tooltip: model.length > 0 ? `${vendorLabel} · ${model}` : vendorLabel,
         onClick,
       });
@@ -94,7 +95,7 @@ function shortVendorLabel(provider: string): string {
     case "vertex-ai":
       return "Vertex";
     default:
-      return provider || "(미설정)";
+      return provider || t("useStatusBarVendor.notConfigured");
   }
 }
 

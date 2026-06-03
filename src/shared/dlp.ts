@@ -1,22 +1,24 @@
+import { t } from "../i18n/index.js";
+
 export interface DlpResult {
   masked: string;
   detections: string[];
 }
 
 interface DlpPattern {
-  name: string;
+  nameKey: string;
   pattern: RegExp;
   replace: (...args: string[]) => string;
 }
 
 const DLP_PATTERNS: DlpPattern[] = [
   {
-    name: "주민등록번호",
+    nameKey: "be_dlp.patternResidentId",
     pattern: /\d{6}-[1-4]\d{6}/g,
     replace: () => "******-*******",
   },
   {
-    name: "신용카드",
+    nameKey: "be_dlp.patternCreditCard",
     pattern: /\d{4}[-\s]?\d{4}[-\s]?\d{4}[-\s]?\d{4}/g,
     replace: (match) => {
       const digits = match.replace(/[-\s]/g, "");
@@ -25,17 +27,17 @@ const DLP_PATTERNS: DlpPattern[] = [
     },
   },
   {
-    name: "API 키",
+    nameKey: "be_dlp.patternApiKey",
     pattern: /sk-[a-zA-Z0-9]{20,}/g,
     replace: () => "sk-****",
   },
   {
-    name: "전화번호",
+    nameKey: "be_dlp.patternPhoneNumber",
     pattern: /010-\d{4}-\d{4}/g,
     replace: () => "010-****-****",
   },
   {
-    name: "이메일",
+    nameKey: "be_dlp.patternEmail",
     pattern: /[a-zA-Z0-9._%+-]+@([a-zA-Z0-9.-]+\.[a-zA-Z]{2,})/g,
     replace: (_match: string, domain: string) => `***@${domain}`,
   },
@@ -51,12 +53,12 @@ export function maskSensitiveData(text: string): DlpResult {
   const detections: string[] = [];
   let masked = text;
 
-  for (const { name, pattern, replace } of DLP_PATTERNS) {
+  for (const { nameKey, pattern, replace } of DLP_PATTERNS) {
     pattern.lastIndex = 0;
     const before = masked;
     masked = masked.replace(pattern, replace);
     if (masked !== before) {
-      detections.push(name);
+      detections.push(t(nameKey));
     }
   }
 

@@ -1,5 +1,6 @@
 import { Button } from "../../../components/ui/button.js";
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from "../../../components/ui/dialog.js";
+import { useTranslation } from "../../../i18n/react.js";
 import type { MarketplaceItem } from "../types.js";
 
 export interface PluginInstallDialogProps {
@@ -10,15 +11,16 @@ export interface PluginInstallDialogProps {
 }
 
 export function PluginInstallDialog({ target, onClose, onConfirm, working }: PluginInstallDialogProps) {
+  const { t } = useTranslation();
   return (
     <Dialog open={!!target} onOpenChange={(o) => !o && onClose()}>
       <DialogContent>
         <DialogHeader>
-          <DialogTitle>플러그인 설치</DialogTitle>
-          <DialogDescription>{target ? `'${target.name}' 설치?` : ""}</DialogDescription>
+          <DialogTitle>{t("pluginInstallDialog.title")}</DialogTitle>
+          <DialogDescription>{target ? t("pluginInstallDialog.confirmInstall", { name: target.name }) : ""}</DialogDescription>
         </DialogHeader>
         <DialogFooter>
-          <Button variant="secondary" onClick={onClose}>취소</Button>
+          <Button variant="secondary" onClick={onClose}>{t("pluginInstallDialog.cancel")}</Button>
           <Button
             onClick={async () => {
               if (!target) return;
@@ -27,7 +29,7 @@ export function PluginInstallDialog({ target, onClose, onConfirm, working }: Plu
               await onConfirm(id);
             }}
             disabled={working}
-          >설치</Button>
+          >{t("pluginInstallDialog.install")}</Button>
         </DialogFooter>
       </DialogContent>
     </Dialog>

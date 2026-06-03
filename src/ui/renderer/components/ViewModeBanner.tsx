@@ -9,6 +9,8 @@
  * backdrop-blur(10px) so the chat content is partially visible underneath.
  */
 
+import { useTranslation } from "../../../i18n/react.js";
+
 export interface ViewModeState {
   compactNum: number;
   /**
@@ -25,6 +27,8 @@ export function ViewModeBanner({
   viewMode: ViewModeState | null;
   onExit: () => void;
 }) {
+  const { t } = useTranslation();
+
   if (!viewMode) return null;
 
   return (
@@ -37,10 +41,10 @@ export function ViewModeBanner({
           data-testid="view-mode-banner-title"
           className="text-[12px] font-semibold text-[hsl(var(--action-view))]"
         >
-          📖 #{viewMode.compactNum} 시점 보기 모드
+          {t("viewModeBanner.title", { compactNum: viewMode.compactNum })}
         </span>
         <span className="text-[10px] text-muted-foreground">
-          첫 {viewMode.slicedRangeEnd}개 메시지 · 이 시점 이후 메시지는 숨겨짐
+          {t("viewModeBanner.messageRange", { slicedRangeEnd: viewMode.slicedRangeEnd })}
         </span>
       </div>
       <button
@@ -48,9 +52,9 @@ export function ViewModeBanner({
         data-testid="view-mode-exit-btn"
         onClick={onExit}
         className="shrink-0 rounded-md border border-[hsl(var(--action-view)/0.4)] bg-[hsl(var(--action-view)/0.12)] px-3 py-1.5 text-[11px] font-medium text-[hsl(var(--action-view))] transition-colors hover:bg-[hsl(var(--action-view)/0.2)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[hsl(var(--action-view)/0.5)]"
-        aria-label="라이브 시점으로 복귀"
+        aria-label={t("viewModeBanner.exitAriaLabel")}
       >
-        ▶ 라이브 시점으로 복귀
+        {t("viewModeBanner.exitButton")}
       </button>
     </div>
   );

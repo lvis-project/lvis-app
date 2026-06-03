@@ -2,6 +2,7 @@
 // Pure type declarations — no React runtime, no hook state, no side effects.
 
 import type { PluginUiExtensionView } from "../../plugin-ui-host.js";
+import type { Locale } from "../../i18n/locale.js";
 import type { StreamEvent } from "../../lib/chat-stream-state.js";
 import type { McpServerConfig, McpServerConfigDto, McpServerState } from "../../mcp/types.js";
 import type { SerializedHistoryMessage } from "../../shared/chat-history.js";
@@ -167,6 +168,8 @@ export type AppSettings = {
     schemaVersion?: 2;
     bundleId?: string;
     followSystem?: boolean;
+    /** UI language (i18n). SOT: `AppearanceSettings` in settings-store. */
+    language?: Locale;
     /** User-configurable font family + size. */
     font?: {
       /** `"system"` = HOST_FONT_STACK default; otherwise a validated raw stack. */

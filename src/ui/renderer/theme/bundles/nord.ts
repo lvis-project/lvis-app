@@ -1,4 +1,5 @@
 import type { ThemeBundle } from "./types.js";
+import { t } from "../../../../i18n/runtime.js";
 
 /**
  * Nord — arctic, north-bluish color palette.
@@ -10,7 +11,7 @@ import type { ThemeBundle } from "./types.js";
 export const nordBundle: ThemeBundle = {
   id: "nord",
   name: "Nord",
-  description: "다크 셸 + 북극 프로스트 액센트 + 오로라 상태색",
+  description: t("nord.description"),
   shell: "dark",
   highContrast: false,
   tokens: {

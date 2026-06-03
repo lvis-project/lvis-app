@@ -17,6 +17,7 @@
 import { createElement, useEffect, useMemo, useRef, useState } from "react";
 import type { McpUiPayload } from "../../../mcp/types.js";
 import { Loader2, AlertCircle } from "lucide-react";
+import { useTranslation } from "../../../i18n/react.js";
 
 type BridgeMessage = { jsonrpc?: string; id?: number; method?: string; params?: unknown };
 type BridgeEventSource = MessageEventSource | null | undefined;
@@ -163,6 +164,7 @@ export function createMcpAppBridge(payload: McpUiPayload, el: BridgeWebview) {
 // ─── Component ───────────────────────────────────────
 
 export function McpAppView({ payload }: { payload: McpUiPayload }) {
+  const { t } = useTranslation();
   const [htmlContent, setHtmlContent] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
   const webviewRef = useRef<HTMLElement | null>(null);
@@ -220,7 +222,7 @@ export function McpAppView({ payload }: { payload: McpUiPayload }) {
       <div className="flex items-center justify-between gap-2 border-b bg-muted/30 px-2 py-1 text-[11px] text-muted-foreground">
         <span className="truncate">{payload.title ?? "MCP App"}</span>
         <span className="text-[10px] opacity-60">
-          MCP · 격리된 프로세스 · 제한된 네트워크
+          {t("mcpAppView.sandboxBadge")}
         </span>
       </div>
       {error ? (
@@ -231,7 +233,7 @@ export function McpAppView({ payload }: { payload: McpUiPayload }) {
       ) : !dataUrl ? (
         <div className="flex items-center justify-center gap-2 px-3 py-4 text-[11px] text-muted-foreground" style={{ height }}>
           <Loader2 className="h-3.5 w-3.5 animate-spin" />
-          <span>MCP App 로드 중...</span>
+          <span>{t("mcpAppView.loading")}</span>
         </div>
       ) : (
         createElement("webview", {

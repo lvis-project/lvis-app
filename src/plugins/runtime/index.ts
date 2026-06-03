@@ -78,6 +78,7 @@ import {
 import type { LoadedPlugin, ManifestLoadPlan, ManifestSnapshot } from "./types.js";
 import { createLogger } from "../../lib/logger.js";
 import { plog, PluginPhase } from "../lifecycle-log.js";
+import { t } from "../../i18n/index.js";
 const log = createLogger("plugin-runtime");
 const START_FAILURE_STOP_TIMEOUT_MS = 2_000;
 
@@ -479,7 +480,7 @@ export class PluginRuntime {
     if (!this.preparationStatuses.has(manifest.id)) {
       this.setPreparationStatus(manifest.id, {
         phase: "pending",
-        message: "플러그인 런타임 준비를 시작합니다.",
+        message: t("be_runtimeIndex.preparingRuntimeMessage"),
         progressPct: 5,
       }, generation);
     }

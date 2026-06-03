@@ -14,6 +14,7 @@
  */
 
 import { useState } from "react";
+import { useTranslation } from "../../../i18n/react.js";
 import { getApi } from "../api-client.js";
 import { formatToolPayloadString } from "../utils/tool-payload-format.js";
 
@@ -81,6 +82,7 @@ export function CompactedToolResult({
     "collapsed",
   );
   const [verbatim, setVerbatim] = useState<{ content: string; lineCount: number } | null>(null);
+  const { t } = useTranslation();
 
   const inputStr = truncateInput(input);
   const origChars = parseStubChars(stubContent);
@@ -122,8 +124,8 @@ export function CompactedToolResult({
           <span>▼</span>
           <span>📦</span>
           <span className="min-w-0 truncate font-medium text-muted-foreground">{headerLabel}</span>
-          <span className="shrink-0 text-muted-foreground/70">· {formattedLineCount}줄</span>
-          <span className="ml-auto shrink-0 text-[10px] text-primary">접기</span>
+          <span className="shrink-0 text-muted-foreground/70">· {t("compactedToolResult.lineCount", { count: formattedLineCount })}</span>
+          <span className="ml-auto shrink-0 text-[10px] text-primary">{t("compactedToolResult.collapseButton")}</span>
         </button>
         <div className="tre-body min-w-0 rounded-b-md border-t max-h-[16rem] overflow-y-auto px-3 py-1 font-mono text-[10px] leading-[1.4]"
           style={{ backgroundColor: "hsl(var(--code-bg))", color: "hsl(var(--code-fg))" }}
@@ -141,7 +143,7 @@ export function CompactedToolResult({
                 ))}
                 {truncated && (
                   <div className="tre-truncated px-2 py-1 text-muted-foreground/60 italic">
-                    ⓘ 화면 표시 제한 ({MAX_DISPLAY_LINES} 줄)
+                    {t("compactedToolResult.displayLimit", { limit: MAX_DISPLAY_LINES })}
                   </div>
                 )}
               </div>
@@ -157,7 +159,7 @@ export function CompactedToolResult({
       <div
         className="flex min-w-0 w-full max-w-full items-center gap-1.5 rounded-md px-3 py-1.5 text-[11px] text-muted-foreground/50 cursor-default select-none"
         style={{ backgroundColor: "hsl(var(--muted) / 0.4)" }}
-        title="원본은 in-session 동안만 사용 가능합니다. 재시작 후 verbatim이 소실되었습니다."
+        title={t("compactedToolResult.missingTooltip")}
       >
         <span>▸</span>
         <span>📦</span>
@@ -165,8 +167,8 @@ export function CompactedToolResult({
         {origChars !== null && (
           <span className="shrink-0 opacity-70">· {formatChars(origChars)}</span>
         )}
-        <span className="shrink-0 ml-1">· 원본 소실</span>
-        <span className="shrink-0 text-[10px]" title="앱 재시작 후에는 원본을 복원할 수 없습니다.">ⓘ</span>
+        <span className="shrink-0 ml-1">· {t("compactedToolResult.originalLost")}</span>
+        <span className="shrink-0 text-[10px]" title={t("compactedToolResult.originalLostIconTooltip")}>ⓘ</span>
       </div>
     );
   }
@@ -192,7 +194,7 @@ export function CompactedToolResult({
         className="ml-auto shrink-0 text-[10px]"
         style={{ color: "hsl(var(--primary))" }}
       >
-        {state === "loading" ? "불러오는 중…" : "[펼치기]"}
+        {state === "loading" ? t("compactedToolResult.loading") : t("compactedToolResult.expandButton")}
       </span>
     </button>
   );

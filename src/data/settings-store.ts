@@ -17,6 +17,7 @@ import {
   type LLMVendorSettings,
 } from "../shared/llm-vendor-defaults.js";
 import { BUNDLE_IDS, DEFAULT_BUNDLE_ID } from "../shared/theme-bundles.js";
+import { DEFAULT_LOCALE, normalizeLocale, type Locale } from "../i18n/index.js";
 import { createLogger } from "../lib/logger.js";
 import type { RolePreset } from "./role-presets.js";
 const log = createLogger("settings");
@@ -230,6 +231,12 @@ export interface AppearanceSettings {
   bundleId: string;
   followSystem?: boolean;
   font?: AppearanceFontSettings;
+  /**
+   * UI language. Drives the i18n layer (see {@link ../i18n}). Defaults to
+   * {@link DEFAULT_LOCALE} (English) for the global build; persisted here so
+   * the choice survives restarts and is read by both main and renderer.
+   */
+  language?: Locale;
 }
 
 /**
@@ -393,7 +400,7 @@ const DEFAULT_SETTINGS: AppSettings = {
   },
   chat: {
     systemPrompt:
-      "당신은 LVIS 로컬 지식 어시스턴트입니다. 사용자의 문서와 컨텍스트를 기반으로 정확하고 유용한 답변을 제공합니다. 한국어로 답변합니다.",
+      "You are LVIS, a local knowledge assistant. You provide accurate, helpful answers grounded in the user's documents and context. Respond in the user's language.",
     autoCompact: true,
   },
   roles: {
@@ -432,6 +439,7 @@ const DEFAULT_SETTINGS: AppSettings = {
   appearance: {
     schemaVersion: 2,
     bundleId: DEFAULT_BUNDLE_ID,
+    language: DEFAULT_LOCALE,
   },
   webView: {
     preferredFlow: "in-app",
@@ -568,6 +576,13 @@ export class SettingsService {
         ...this.settings.appearance,
         ...(appearanceRest as Partial<AppearanceSettings>),
       };
+      // Validate the language patch — coerce to a supported locale so a
+      // malformed renderer/IPC payload can never persist an unknown language
+      // (mirrors the font validation below; No-Fallback-Code: validate at the
+      // trust boundary instead of dropping on next load).
+      if ("language" in appearanceRest) {
+        nextAppearance.language = normalizeLocale((appearanceRest as { language?: unknown }).language);
+      }
       // Accept `font: undefined`, missing field, or `font: null` — all three
       // mean "no font subfield patch in this call". Guard against `null` so
       // a defensive caller (or a malformed test fixture) cannot crash
@@ -996,7 +1011,13 @@ function normalizeAppearance(input: unknown): AppearanceSettings {
         ? rawBundleId
         : DEFAULT_BUNDLE_ID;
     const followSystem = typeof obj.followSystem === "boolean" ? obj.followSystem : undefined;
-    const result: AppearanceSettings = { schemaVersion: 2, bundleId };
+    const result: AppearanceSettings = {
+      schemaVersion: 2,
+      bundleId,
+      // Coerce any stored/legacy value to a supported locale; missing →
+      // English default for the global build.
+      language: normalizeLocale(obj.language),
+    };
     if (followSystem !== undefined) result.followSystem = followSystem;
     const font = normalizeAppearanceFont(obj.font);
     if (font) result.font = font;
@@ -1012,7 +1033,8 @@ function normalizeAppearance(input: unknown): AppearanceSettings {
         ? obj.chatTheme : "default") as ChatThemePreference,
       codeTheme: (typeof obj.codeTheme === "string" ? obj.codeTheme : "auto") as CodeThemePreference,
     };
-    return migrateAppearanceV1ToV2(legacy);
+    // Preserve any stored language across the v1→v2 migration; default English.
+    return { ...migrateAppearanceV1ToV2(legacy), language: normalizeLocale(obj.language) };
   }
 
   return { ...DEFAULT_SETTINGS.appearance };

@@ -18,6 +18,7 @@ import { join, resolve, basename } from "node:path";
 import { withFileLock } from "../lib/with-file-lock.js";
 import { createLogger } from "../lib/logger.js";
 import { lvisHome } from "../shared/lvis-home.js";
+import { t } from "../i18n/index.js";
 import {
   buildToolResultStrippedStub,
   buildToolResultTruncatedStub,
@@ -186,51 +187,17 @@ export interface SessionMetadata {
 
 const MEMORY_MARKER = "<!-- lvis:kind=memory -->";
 
-const DEFAULT_AGENTS_MD = `# LVIS 에이전트 컨텍스트
+function getDefaultAgentsMd(): string {
+  return t("be_memoryManager.defaultAgentsMd");
+}
 
-> 이 파일은 LVIS 에이전트에게 프로젝트·조직·팀 컨텍스트를 전달합니다.
-> 관리자가 배포하거나, 사용자가 직접 편집할 수 있습니다.
+function getDefaultMemoryIndex(): string {
+  return t("be_memoryManager.defaultMemoryIndex");
+}
 
-## 조직 정보
-
-(여기에 팀·부서·프로젝트 정보를 기입하세요)
-
-## 업무 규칙
-
-(반복적으로 지켜야 하는 규칙이나 가이드라인)
-`;
-
-const DEFAULT_MEMORY_INDEX = `# LVIS Memory Index
-
-> LVIS가 세션 시작 시 적극적으로 읽는 장기 메모리 인덱스입니다.
-> 긴급 기억은 이 파일의 Urgent Memory 섹션에 500자 내외로 유지하고,
-> 상세 기억은 같은 폴더의 개별 Markdown 파일로 분리한 뒤 Saved Memories에 링크하세요.
-
-## Urgent Memory
-
-(지금 즉시 참고해야 할 내용을 500자 내외로 유지)
-
-## References
-
-(긴급 기억의 근거 링크 또는 출처)
-
-## Saved Memories
-
-`;
-
-const DEFAULT_USER_PREFS = `# 사용자 선호
-
-> LVIS가 참고하는 개인 선호 설정입니다. 자유롭게 편집하세요.
-
-## 커뮤니케이션 스타일
-
-- 한국어로 답변
-- 간결한 설명 선호
-
-## 자주 쓰는 도구
-
-(자주 사용하는 플러그인, 도구, 명령어 등)
-`;
+function getDefaultUserPrefs(): string {
+  return t("be_memoryManager.defaultUserPrefs");
+}
 
 const MAX_SESSION_FILE_BYTES = 5_000_000;
 /** Max length of summaryPreamble stored in session metadata (~2000 tokens). */
@@ -624,7 +591,7 @@ export class MemoryManager {
     await withFileLock(targetPath, async () => {
       const current = existsSync(targetPath)
         ? readFileSync(targetPath, "utf-8")
-        : DEFAULT_MEMORY_INDEX;
+        : getDefaultMemoryIndex();
       writeFileSync(targetPath, this.patchMemoryIndexSections(current, sections), "utf-8");
     });
     this.memoryIndex = this.readMemoryIndex();
@@ -982,16 +949,16 @@ export class MemoryManager {
         const summary = session.size > MAX_SESSION_FILE_BYTES
           ? {
               title: metadata?.routineTitle
-                ? `${metadata.routineTitle} 대화`
-                : `세션 ${session.id.slice(0, 8)}`,
-              preview: "(대화가 커서 미리보기를 생략했습니다)",
+                ? t("be_memoryManager.sessionTitleWithRoutine", { routineTitle: metadata.routineTitle })
+                : t("be_memoryManager.sessionTitleShort", { id: session.id.slice(0, 8) }),
+              preview: t("be_memoryManager.sessionPreviewTooLarge"),
             }
           : this.readSessionSummary(session.id);
         return {
           id: session.id,
           modifiedAt: session.modifiedAt,
           sessionKind,
-          title: metadata?.title || summary.title || metadata?.routineTitle || `세션 ${session.id.slice(0, 8)}`,
+          title: metadata?.title || summary.title || metadata?.routineTitle || t("be_memoryManager.sessionTitleShort", { id: session.id.slice(0, 8) }),
           preview: summary.preview,
           routineId: metadata?.routineId,
           routineTitle: metadata?.routineTitle,
@@ -1042,16 +1009,16 @@ export class MemoryManager {
         const summary = session.size > MAX_SESSION_FILE_BYTES
           ? {
               title: metadata?.routineTitle
-                ? `${metadata.routineTitle} 대화`
-                : `세션 ${session.id.slice(0, 8)}`,
-              preview: "(대화가 커서 미리보기를 생략했습니다)",
+                ? t("be_memoryManager.sessionTitleWithRoutine", { routineTitle: metadata.routineTitle })
+                : t("be_memoryManager.sessionTitleShort", { id: session.id.slice(0, 8) }),
+              preview: t("be_memoryManager.sessionPreviewTooLarge"),
             }
           : this.readSessionSummary(session.id);
         return {
           id: session.id,
           modifiedAt: session.modifiedAt,
           sessionKind,
-          title: metadata?.title || summary.title || metadata?.routineTitle || `세션 ${session.id.slice(0, 8)}`,
+          title: metadata?.title || summary.title || metadata?.routineTitle || t("be_memoryManager.sessionTitleShort", { id: session.id.slice(0, 8) }),
           preview: summary.preview,
           routineId: metadata?.routineId,
           routineTitle: metadata?.routineTitle,
@@ -1355,17 +1322,17 @@ export class MemoryManager {
 
     const agentsMdPath = join(this.lvisDir, "AGENTS.md");
     if (!existsSync(agentsMdPath)) {
-      writeFileSync(agentsMdPath, DEFAULT_AGENTS_MD, "utf-8");
+      writeFileSync(agentsMdPath, getDefaultAgentsMd(), "utf-8");
     }
 
     const userPrefsPath = join(this.lvisDir, "user-preferences.md");
     if (!existsSync(userPrefsPath)) {
-      writeFileSync(userPrefsPath, DEFAULT_USER_PREFS, "utf-8");
+      writeFileSync(userPrefsPath, getDefaultUserPrefs(), "utf-8");
     }
 
     const memoryIndexPath = join(this.memoryDir, "MEMORY.md");
     if (!existsSync(memoryIndexPath)) {
-      writeFileSync(memoryIndexPath, DEFAULT_MEMORY_INDEX, "utf-8");
+      writeFileSync(memoryIndexPath, getDefaultMemoryIndex(), "utf-8");
     }
   }
 
@@ -1538,7 +1505,7 @@ export class MemoryManager {
     const line = `- [${safeTitle}](./${filename}) — ${excerpt}`;
     const existing = existsSync(targetPath)
       ? readFileSync(targetPath, "utf-8")
-      : DEFAULT_MEMORY_INDEX;
+      : getDefaultMemoryIndex();
     const lines = existing.split(/\r?\n/);
     const linkNeedle = `](./${filename})`;
     const idx = lines.findIndex((l) => l.includes(linkNeedle));
@@ -1567,8 +1534,8 @@ export class MemoryManager {
   private ensureMemoryIndexSections(markdown: string): string {
     const base = markdown.trim() ? markdown.trim() : "# LVIS Memory Index";
     let next = base.startsWith("# ") ? base : `# LVIS Memory Index\n\n${base}`;
-    next = this.ensureMemoryIndexSection(next, "Urgent Memory", "(지금 즉시 참고해야 할 내용을 500자 내외로 유지)");
-    next = this.ensureMemoryIndexSection(next, "References", "(긴급 기억의 근거 링크 또는 출처)");
+    next = this.ensureMemoryIndexSection(next, "Urgent Memory", t("be_memoryManager.urgentMemoryPlaceholder"));
+    next = this.ensureMemoryIndexSection(next, "References", t("be_memoryManager.referencesPlaceholder"));
     next = this.ensureMemoryIndexSection(next, "Saved Memories", "");
     return next;
   }
@@ -1653,8 +1620,8 @@ export class MemoryManager {
     const messages = this.loadSession(sessionId);
     if (!Array.isArray(messages)) {
       return {
-        title: `세션 ${sessionId.slice(0, 8)}`,
-        preview: "(내용 없음)",
+        title: t("be_memoryManager.sessionTitleShort", { id: sessionId.slice(0, 8) }),
+        preview: t("be_memoryManager.sessionPreviewEmpty"),
       };
     }
 
@@ -1670,8 +1637,8 @@ export class MemoryManager {
     }
 
     return {
-      title: (lastUser || lastContent || `세션 ${sessionId.slice(0, 8)}`).slice(0, 80),
-      preview: (lastContent || lastUser || "(내용 없음)").slice(0, 200),
+      title: (lastUser || lastContent || t("be_memoryManager.sessionTitleShort", { id: sessionId.slice(0, 8) })).slice(0, 80),
+      preview: (lastContent || lastUser || t("be_memoryManager.sessionPreviewEmpty")).slice(0, 200),
     };
   }
 
