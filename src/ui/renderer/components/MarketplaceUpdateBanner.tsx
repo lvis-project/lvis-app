@@ -3,6 +3,7 @@
 import { useState } from "react";
 import { Button } from "../../../components/ui/button.js";
 import type { PluginUpdateInfo } from "../hooks/use-marketplace-updates.js";
+import { useTranslation } from "../../../i18n/react.js";
 
 /**
  * Renders a compact banner listing plugins with available updates.
@@ -23,6 +24,7 @@ export function MarketplaceUpdateBanner({
   onDismiss: () => void;
   onUpdate: (pluginId: string, expectedVersion?: string) => Promise<void>;
 }) {
+  const { t } = useTranslation();
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
@@ -31,8 +33,8 @@ export function MarketplaceUpdateBanner({
   const updateLabels = updates.map((update) => formatUpdateLabel(update));
   const summary =
     updates.length === 1
-      ? "플러그인 업데이트 가능:"
-      : `${updates.length}개 플러그인 업데이트 가능:`;
+      ? t("marketplaceUpdateBanner.summaryOne")
+      : t("marketplaceUpdateBanner.summaryMany", { count: updates.length });
   const details = updateLabels.join(", ");
   const label = `${summary} ${details}`;
 
@@ -63,7 +65,7 @@ export function MarketplaceUpdateBanner({
       <span className="min-w-0 flex-1" title={label}>
         <span className="block truncate leading-4">{summary}</span>
         <span className="block truncate text-[11px] leading-3 text-info/75">{details}</span>
-        {error ? <span className="ml-2 text-destructive">— 일부 실패: {error}</span> : null}
+        {error ? <span className="ml-2 text-destructive">{t("marketplaceUpdateBanner.partialFailure", { error })}</span> : null}
       </span>
       <div className="flex shrink-0 items-center gap-1">
         <Button
@@ -74,13 +76,13 @@ export function MarketplaceUpdateBanner({
           data-testid="marketplace-update-action"
           className="h-7 text-[12px]"
         >
-          {busy ? "업데이트 중…" : "업데이트"}
+          {busy ? t("marketplaceUpdateBanner.updating") : t("marketplaceUpdateBanner.updateButton")}
         </Button>
         <Button
           variant="ghost"
           size="sm"
           onClick={onDismiss}
-          aria-label="업데이트 알림 닫기"
+          aria-label={t("marketplaceUpdateBanner.dismissAriaLabel")}
           className="text-info hover:text-info/80 h-auto p-1"
         >
           ✕

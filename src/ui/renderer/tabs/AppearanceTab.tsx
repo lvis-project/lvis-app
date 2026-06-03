@@ -25,6 +25,8 @@ import { getApi } from "../api-client.js";
 import { useNotifySaved } from "../contexts/saved-toast.js";
 import { SettingsPageHeader } from "../components/SettingsPageHeader.js";
 import { SettingsSection } from "../components/SettingsSection.js";
+import { SUPPORTED_LOCALES, LOCALE_INFO } from "../../../i18n/index.js";
+import { useTranslation } from "../../../i18n/react.js";
 
 type WebViewPreferredFlow = "in-app" | "system-browser";
 
@@ -93,12 +95,13 @@ interface BundleCardProps {
 }
 
 function BundleCard({ bundle, selected, onSelect }: BundleCardProps) {
+  const { t } = useTranslation();
   return (
     <button
       type="button"
       role="radio"
       aria-checked={selected}
-      aria-label={`테마: ${bundle.name}`}
+      aria-label={t("appearanceTab.bundleCardAriaLabel", { name: bundle.name })}
       data-selected={selected ? "true" : "false"}
       data-bundle-id={bundle.id}
       className="lvis-theme-card"
@@ -125,15 +128,15 @@ function BundleCard({ bundle, selected, onSelect }: BundleCardProps) {
 
 type FontSizeOption = { value: 0.875 | 1 | 1.125 | 1.25; label: string };
 const FONT_SIZE_OPTIONS: ReadonlyArray<FontSizeOption> = [
-  { value: 0.875, label: "작게" },
-  { value: 1, label: "보통" },
-  { value: 1.125, label: "크게" },
-  { value: 1.25, label: "매우 크게" },
+  { value: 0.875, label: "appearanceTab.fontSizeSmall" },
+  { value: 1, label: "appearanceTab.fontSizeNormal" },
+  { value: 1.125, label: "appearanceTab.fontSizeLarge" },
+  { value: 1.25, label: "appearanceTab.fontSizeXLarge" },
 ];
 
 type FontFamilyPreset = { value: string; label: string; stack: string };
 const FONT_FAMILY_PRESETS: ReadonlyArray<FontFamilyPreset> = [
-  { value: "system", label: "시스템 기본", stack: "" /* unset → HOST_FONT_STACK */ },
+  { value: "system", label: "appearanceTab.fontFamilySystem", stack: "" /* unset → HOST_FONT_STACK */ },
   {
     value: "pretendard",
     label: "Pretendard",
@@ -247,8 +250,8 @@ function useFontPreferences() {
 
 /* ─── webView preferredFlow options ──────────────────────────────────────── */
 const WEBVIEW_OPTIONS: ReadonlyArray<{ value: WebViewPreferredFlow; label: string; hint: string }> = [
-  { value: "in-app", label: "인앱 표시", hint: "외부 URL 을 LVIS 창 안에 표시합니다." },
-  { value: "system-browser", label: "시스템 브라우저", hint: "외부 URL 을 OS 기본 브라우저에서 엽니다." },
+  { value: "in-app", label: "appearanceTab.webViewInApp", hint: "appearanceTab.webViewInAppHint" },
+  { value: "system-browser", label: "appearanceTab.webViewSystemBrowser", hint: "appearanceTab.webViewSystemBrowserHint" },
 ];
 
 function useWebViewPreferredFlow(): {
@@ -315,6 +318,7 @@ function FontFamilyCustomInput({
   initial: string;
   onCommit: (value: string) => void;
 }) {
+  const { t } = useTranslation();
   const [raw, setRaw] = useState(initial);
   const inputRef = useRef<HTMLInputElement | null>(null);
   // `escapingRef` blocks the `onBlur=commit()` call that fires synchronously
@@ -343,12 +347,12 @@ function FontFamilyCustomInput({
 
   return (
     <details className="text-[11px] text-muted-foreground">
-      <summary className="cursor-pointer select-none">직접 입력 (CSS font-family stack)</summary>
+      <summary className="cursor-pointer select-none">{t("appearanceTab.fontFamilyCustomSummary")}</summary>
       <input
         ref={inputRef}
         type="text"
         value={raw}
-        placeholder='예: "Spoqa Han Sans Neo", system-ui, sans-serif'
+        placeholder={t("appearanceTab.fontFamilyCustomPlaceholder")}
         maxLength={200}
         onChange={(e) => setRaw(e.target.value)}
         onBlur={() => {
@@ -369,17 +373,64 @@ function FontFamilyCustomInput({
           }
         }}
         className="mt-2 w-full rounded border border-input bg-background px-2 py-1 font-mono text-xs text-foreground focus:outline-none focus:ring-1 focus:ring-ring"
-        aria-label="사용자 정의 폰트 stack"
+        aria-label={t("appearanceTab.fontFamilyCustomAriaLabel")}
       />
       <p className="mt-1 text-[10px]">
-        한글/영문/숫자 폰트 이름, 콤마, 따옴표, 하이픈만 허용 (최대 200자). 입력 후 Enter 또는 포커스를 벗어나면 저장됩니다.
-        Escape 로 취소합니다. 잘못된 입력은 자동으로 시스템 기본으로 되돌아갑니다.
+        {t("appearanceTab.fontFamilyCustomHint")}
       </p>
     </details>
   );
 }
 
+/* ─── Language picker ────────────────────────────────────────────────────── */
+
+/**
+ * Language selector. Reads/writes the active UI locale through the i18n
+ * context (which persists to `settings.appearance.language` and broadcasts the
+ * change to every window). Option labels use each locale's native name so they
+ * are recognizable regardless of the current language.
+ */
+function LanguageSection() {
+  const { locale, setLocale, t } = useTranslation();
+  const notifySaved = useNotifySaved();
+  return (
+    <SettingsSection
+      title={t("settings.appearance.language.title")}
+      description={t("settings.appearance.language.description")}
+    >
+      <div role="radiogroup" aria-label={t("settings.appearance.language.title")} className="flex flex-wrap gap-2">
+        {SUPPORTED_LOCALES.map((code) => {
+          const selected = locale === code;
+          return (
+            <button
+              key={code}
+              type="button"
+              role="radio"
+              aria-checked={selected}
+              data-testid={`language-option-${code}`}
+              onClick={() => {
+                if (!selected) {
+                  setLocale(code);
+                  notifySaved();
+                }
+              }}
+              className={`rounded-md border px-3 py-2 text-sm transition-colors ${
+                selected
+                  ? "border-primary bg-primary/10 text-foreground"
+                  : "border-border text-muted-foreground hover:bg-muted"
+              }`}
+            >
+              {LOCALE_INFO[code].nativeName}
+            </button>
+          );
+        })}
+      </div>
+    </SettingsSection>
+  );
+}
+
 export function AppearanceTab() {
+  const { t } = useTranslation();
   const { bundleId, setBundle, followSystem, setFollowSystem } = useTheme();
   const { flow: webViewFlow, setFlow: setWebViewFlow } = useWebViewPreferredFlow();
   const { family, sizeScale, setFamily, setSizeScale } = useFontPreferences();
@@ -399,18 +450,21 @@ export function AppearanceTab() {
   return (
     <div className="space-y-6">
       <SettingsPageHeader
-        title="테마"
-        description="화면 색상, 글꼴, 외부 URL 표시 방식을 설정합니다"
+        title={t("appearanceTab.pageTitle")}
+        description={t("appearanceTab.pageDescription")}
       />
+
+      {/* ── Language ──────────────────────────────────── */}
+      <LanguageSection />
 
       {/* ── 테마 선택 ─────────────────────────────────── */}
       <SettingsSection
-        title="색상 테마"
-        description="테마를 선택하면 채팅 배경, 강조 색상, 코드 블록이 함께 변경됩니다. 변경은 즉시 적용되며 재시작이 필요 없습니다."
+        title={t("appearanceTab.themeSectionTitle")}
+        description={t("appearanceTab.themeSectionDescription")}
       >
         <div
           role="radiogroup"
-          aria-label="테마 선택"
+          aria-label={t("appearanceTab.themeRadioGroupLabel")}
           className="grid grid-cols-2 gap-3 sm:grid-cols-3"
         >
           {BUNDLES.map((bundle) => (
@@ -427,16 +481,16 @@ export function AppearanceTab() {
         {isVioletPair && (
           <div className="flex items-center justify-between pt-2 border-t border-border">
             <div>
-              <p className="text-sm font-medium">시스템 테마 따르기</p>
+              <p className="text-sm font-medium">{t("appearanceTab.followSystemLabel")}</p>
               <p className="text-[11px] text-muted-foreground">
-                OS 라이트/다크 모드에 맞춰 Violet Light / Violet Dark 를 자동 전환합니다.
+                {t("appearanceTab.followSystemDescription")}
               </p>
             </div>
             <button
               type="button"
               role="switch"
               aria-checked={followSystem}
-              aria-label="OS 시스템 색상 따라가기"
+              aria-label={t("appearanceTab.followSystemAriaLabel")}
               data-testid="follow-system-toggle"
               onClick={() => selectFollowSystem(!followSystem)}
               className={`relative inline-flex h-5 w-9 items-center rounded-full transition-colors ${
@@ -455,21 +509,21 @@ export function AppearanceTab() {
 
       {/* ── 폰트 ────────────────────────────────────── */}
       <SettingsSection
-        title="폰트"
-        description="호스트 본체 / 채팅 / 설정 창 전체에 적용됩니다. 시스템 기본은 OS 의 sans-serif 와 한글 폰트 fallback 체인을 사용합니다. 플러그인 자체 창은 호스트 설정과 별도로 자체 폰트를 사용합니다."
+        title={t("appearanceTab.fontSectionTitle")}
+        description={t("appearanceTab.fontSectionDescription")}
         actions={
           <span className="text-[11px] text-muted-foreground">
-            크기 미리보기:{" "}
+            {t("appearanceTab.fontSizePreview")}{" "}
             <span className="font-mono text-foreground">{Math.round(sizeScale * 16)}px</span>
           </span>
         }
       >
         {/* 폰트 패밀리 */}
         <div className="space-y-2">
-          <label className="text-[11px] text-muted-foreground">패밀리</label>
+          <label className="text-[11px] text-muted-foreground">{t("appearanceTab.fontFamilyLabel")}</label>
           <div
             role="radiogroup"
-            aria-label="폰트 패밀리 선택"
+            aria-label={t("appearanceTab.fontFamilyRadioGroupLabel")}
             data-testid="font-family-presets"
             className="flex flex-wrap gap-2"
           >
@@ -489,7 +543,7 @@ export function AppearanceTab() {
                       : "border-border text-muted-foreground hover:bg-muted/50 hover:text-foreground"
                   }`}
                 >
-                  {opt.label}
+                  {t(opt.label)}
                 </button>
               );
             })}
@@ -504,10 +558,10 @@ export function AppearanceTab() {
 
         {/* 폰트 크기 */}
         <div className="space-y-2">
-          <label className="text-[11px] text-muted-foreground">크기</label>
+          <label className="text-[11px] text-muted-foreground">{t("appearanceTab.fontSizeLabel")}</label>
           <div
             role="radiogroup"
-            aria-label="폰트 크기 선택"
+            aria-label={t("appearanceTab.fontSizeRadioGroupLabel")}
             data-testid="font-size-scale"
             className="flex flex-wrap gap-2"
           >
@@ -528,7 +582,7 @@ export function AppearanceTab() {
                   }`}
                   style={{ fontSize: `${opt.value * 0.75}rem` }}
                 >
-                  {opt.label}
+                  {t(opt.label)}
                 </button>
               );
             })}
@@ -538,17 +592,17 @@ export function AppearanceTab() {
 
       {/* ── 외부 URL 표시 정책 (B1) ─────────────────────────────────── */}
       <SettingsSection
-        title="외부 URL 표시"
-        description="이 설정은 플러그인이 호스트에 위임한 외부 URL 표시에 적용됩니다."
+        title={t("appearanceTab.webViewSectionTitle")}
+        description={t("appearanceTab.webViewSectionDescription")}
         actions={
           <span className="text-[11px] text-muted-foreground">
-            현재: <span className="font-mono text-foreground">{webViewFlow}</span>
+            {t("appearanceTab.webViewCurrentLabel")} <span className="font-mono text-foreground">{webViewFlow}</span>
           </span>
         }
       >
         <div
           role="radiogroup"
-          aria-label="외부 URL 표시 정책 선택"
+          aria-label={t("appearanceTab.webViewRadioGroupLabel")}
           data-testid="webview-preferred-flow"
           className="flex flex-wrap gap-2"
         >
@@ -561,7 +615,7 @@ export function AppearanceTab() {
                 role="radio"
                 aria-checked={checked}
                 data-value={opt.value}
-                title={opt.hint}
+                title={t(opt.hint)}
                 onClick={() => setWebViewFlow(opt.value)}
                 className={`rounded-full border px-3 py-1 text-xs transition-colors ${
                   checked
@@ -569,7 +623,7 @@ export function AppearanceTab() {
                     : "border-border text-muted-foreground hover:bg-muted/50 hover:text-foreground"
                 }`}
               >
-                {opt.label}
+                {t(opt.label)}
               </button>
             );
           })}

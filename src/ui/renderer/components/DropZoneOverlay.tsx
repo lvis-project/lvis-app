@@ -16,6 +16,7 @@
  */
 import { useCallback, useEffect, useRef, useState } from "react";
 import { SHORT_TOAST_TTL_MS } from "../constants.js";
+import { useTranslation } from "../../../i18n/react.js";
 
 interface DropZoneOverlayProps {
   /** Called with result for parent-level toast/notification; optional. */
@@ -23,6 +24,7 @@ interface DropZoneOverlayProps {
 }
 
 export function DropZoneOverlay({ onResult }: DropZoneOverlayProps) {
+  const { t } = useTranslation();
   const [visible, setVisible] = useState(false);
   const [toast, setToast] = useState<string | null>(null);
   const toastTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
@@ -84,14 +86,14 @@ export function DropZoneOverlay({ onResult }: DropZoneOverlayProps) {
       }
 
       if (paths.length === 0) {
-        showToast("파일 경로를 읽을 수 없습니다.");
+        showToast(t("dropZoneOverlay.cannotReadPaths"));
         return;
       }
 
       try {
         const result = await (window as Window & { lvisApi?: { fileScanPaths?: (p: string[]) => Promise<{ ok: boolean; indexed?: number; failed?: number; error?: string }> } }).lvisApi?.fileScanPaths?.(paths);
         if (!result) {
-          showToast("인덱서 응답 없음");
+          showToast(t("dropZoneOverlay.noIndexerResponse"));
           return;
         }
         onResult?.(result);
@@ -100,14 +102,14 @@ export function DropZoneOverlay({ onResult }: DropZoneOverlayProps) {
           const failed = result.failed ?? 0;
           showToast(
             failed > 0
-              ? `${indexed}개 인덱싱 완료, ${failed}개 실패`
-              : `${indexed}개 파일 인덱싱 완료`,
+              ? t("dropZoneOverlay.indexedWithFailures", { indexed, failed })
+              : t("dropZoneOverlay.indexedSuccess", { indexed }),
           );
         } else {
-          showToast(result.error === "no-indexer" ? "인덱서 플러그인을 찾을 수 없습니다" : `오류: ${result.error ?? "unknown"}`);
+          showToast(result.error === "no-indexer" ? t("dropZoneOverlay.noIndexerPlugin") : t("dropZoneOverlay.indexingError", { error: result.error ?? "unknown" }));
         }
       } catch (err) {
-        showToast(`인덱싱 오류: ${(err as Error).message}`);
+        showToast(t("dropZoneOverlay.indexingException", { message: (err as Error).message }));
       }
     };
 
@@ -154,7 +156,7 @@ export function DropZoneOverlay({ onResult }: DropZoneOverlayProps) {
               letterSpacing: "0.01em",
             }}
           >
-            파일을 드롭하여 인덱싱
+            {t("dropZoneOverlay.dropToIndex")}
           </div>
         </div>
       )}

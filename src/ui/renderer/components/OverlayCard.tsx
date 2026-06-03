@@ -31,6 +31,7 @@ import {
   TooltipContent,
   TooltipTrigger,
 } from "../../../components/ui/tooltip.js";
+import { useTranslation } from "../../../i18n/react.js";
 
 export interface OverlayCardProps {
   /** Card title — routine name or plugin-supplied title */
@@ -58,19 +59,19 @@ export interface OverlayCardProps {
   kind?: "routine" | "plugin";
 }
 
-function relativeTime(isoString: string): string {
+function relativeTime(isoString: string, t: (key: string, vars?: Record<string, string | number>) => string): string {
   try {
-    const t = new Date(isoString).getTime();
-    if (!Number.isFinite(t)) return "";
-    const diffMs = Date.now() - t;
-    if (diffMs < 0) return "방금"; // future timestamp (clock skew) — clamp
+    const ts = new Date(isoString).getTime();
+    if (!Number.isFinite(ts)) return "";
+    const diffMs = Date.now() - ts;
+    if (diffMs < 0) return t("overlayCard.justNow"); // future timestamp (clock skew) — clamp
     const diffSec = Math.floor(diffMs / 1000);
-    if (diffSec < 60) return `${diffSec}초 전`;
+    if (diffSec < 60) return t("overlayCard.secondsAgo", { count: diffSec });
     const diffMin = Math.floor(diffSec / 60);
-    if (diffMin < 60) return `${diffMin}분 전`;
+    if (diffMin < 60) return t("overlayCard.minutesAgo", { count: diffMin });
     const diffHr = Math.floor(diffMin / 60);
-    if (diffHr < 24) return `${diffHr}시간 전`;
-    return `${Math.floor(diffHr / 24)}일 전`;
+    if (diffHr < 24) return t("overlayCard.hoursAgo", { count: diffHr });
+    return t("overlayCard.daysAgo", { count: Math.floor(diffHr / 24) });
   } catch {
     return "";
   }
@@ -90,10 +91,11 @@ export function OverlayCard({
   primaryActionLabel,
   kind = "routine",
 }: OverlayCardProps) {
+  const { t } = useTranslation();
   const [expanded, setExpanded] = useState(false);
   const [isOverflowing, setIsOverflowing] = useState(false);
   const summaryRef = useRef<HTMLParagraphElement | null>(null);
-  const relTime = useMemo(() => relativeTime(firedAt), [firedAt]);
+  const relTime = useMemo(() => relativeTime(firedAt, t), [firedAt, t]);
 
   // Layout 측정으로 정확한 truncation 감지 — `scrollHeight > clientHeight`
   // 비교. CSS `line-clamp-2` 의 실제 overflow 여부를 폰트/너비 기반으로
@@ -136,7 +138,7 @@ export function OverlayCard({
               <span className="truncate">{title}</span>
             </CardTitle>
             <CardDescription className="mt-0.5 flex items-center gap-1 text-[11px]">
-              <span>{running ? "진행 중…" : kind === "plugin" ? "플러그인 알림" : "루틴 완료"}</span>
+              <span>{running ? t("overlayCard.running") : kind === "plugin" ? t("overlayCard.pluginNotice") : t("overlayCard.routineDone")}</span>
               {!running && (
                 <>
                   <span>·</span>
@@ -169,7 +171,7 @@ export function OverlayCard({
                   variant="ghost"
                   className="h-7 w-7 p-0"
                   data-testid="overlay-card-prev"
-                  aria-label="이전"
+                  aria-label={t("overlayCard.prevAriaLabel")}
                   disabled={queueIndex <= 1}
                   onClick={onPrev}
                 >
@@ -180,7 +182,7 @@ export function OverlayCard({
                   variant="ghost"
                   className="h-7 w-7 p-0"
                   data-testid="overlay-card-next"
-                  aria-label="다음"
+                  aria-label={t("overlayCard.nextAriaLabel")}
                   disabled={queueIndex >= queueTotal}
                   onClick={onNext}
                 >
@@ -193,18 +195,18 @@ export function OverlayCard({
               variant="ghost"
               className="h-7 gap-1 px-2 text-xs"
               data-testid="routine-card-dismiss"
-              aria-label="닫기"
+              aria-label={t("overlayCard.closeAriaLabel")}
               onClick={onDismiss}
             >
               <X className="h-3.5 w-3.5" />
-              닫기
+              {t("overlayCard.closeButton")}
             </Button>
           </div>
         </div>
       </CardHeader>
       <CardContent className="min-h-0 overflow-hidden pt-0">
         {running ? (
-          <p className="text-xs text-muted-foreground/70">루틴 실행 중입니다. 잠시 기다려 주세요.</p>
+          <p className="text-xs text-muted-foreground/70">{t("overlayCard.runningDescription")}</p>
         ) : summary ? (
           <>
             <p
@@ -231,19 +233,19 @@ export function OverlayCard({
                 {expanded ? (
                   <>
                     <ChevronUp className="h-3 w-3" />
-                    접기
+                    {t("overlayCard.collapseButton")}
                   </>
                 ) : (
                   <>
                     <ChevronDown className="h-3 w-3" />
-                    더 보기
+                    {t("overlayCard.expandButton")}
                   </>
                 )}
               </Button>
             )}
           </>
         ) : (
-          <p className="text-xs text-muted-foreground/50">요약 없음</p>
+          <p className="text-xs text-muted-foreground/50">{t("overlayCard.noSummary")}</p>
         )}
         {!running && onPrimaryAction && (
           <div className="mt-2 flex justify-end">
@@ -254,7 +256,7 @@ export function OverlayCard({
               data-testid="overlay-card-primary-action"
               onClick={onPrimaryAction}
             >
-              {primaryActionLabel ?? (kind === "plugin" ? "확인하기" : "결과 보기")}
+              {primaryActionLabel ?? (kind === "plugin" ? t("overlayCard.pluginPrimaryAction") : t("overlayCard.routinePrimaryAction"))}
             </Button>
           </div>
         )}

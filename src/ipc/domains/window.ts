@@ -5,6 +5,7 @@
  * Also exports registerWindowEventListeners (re-used by main.ts).
  */
 import { BrowserWindow, ipcMain, type BrowserWindow as ElectronBrowserWindow, type IpcMainInvokeEvent } from "electron";
+import { t } from "../../i18n/index.js";
 import { resolveAppIconPath } from "../../main/app-icon.js";
 import {
   buildRenderHtmlPreviewShell,
@@ -93,7 +94,7 @@ export function registerWindowHandlers(deps: IpcDeps): void {
     const previewPayload = normalized as Exclude<typeof normalized, { ok: false; error: string }>;
 
     const parent = getSenderWindow(e) ?? getMainWindow() ?? undefined;
-    const title = previewPayload.title ?? "HTML 렌더";
+    const title = previewPayload.title ?? t("be_windowDomain.htmlPreviewDefaultTitle");
     const documentHtml = buildRenderHtmlPreviewShell({
       html: previewPayload.html,
       title,

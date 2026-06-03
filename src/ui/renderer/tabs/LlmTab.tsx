@@ -16,6 +16,7 @@ import { REASONING_EFFORT_STEPS, VENDORS, budgetToEffortIndex } from "../constan
 import type { LvisApi } from "../types.js";
 import { SettingsPageHeader } from "../components/SettingsPageHeader.js";
 import { SettingsSection } from "../components/SettingsSection.js";
+import { useTranslation } from "../../../i18n/react.js";
 
 export interface FallbackEntry {
   provider: string;
@@ -93,6 +94,7 @@ function SectionSaveBar({
   settingsLoaded: boolean;
   testId: string;
 }) {
+  const { t } = useTranslation();
   return (
     <div className="flex justify-end border-t border-border/40 pt-2">
       <Button
@@ -101,7 +103,7 @@ function SectionSaveBar({
         disabled={saving || !settingsLoaded}
         data-testid={testId}
       >
-        {saving ? "저장 중…" : "저장"}
+        {saving ? t("llmTab.saving") : t("llmTab.save")}
       </Button>
     </div>
   );
@@ -109,9 +111,10 @@ function SectionSaveBar({
 
 /** Inline badge for "즉시 적용" label. */
 function ImmediateBadge() {
+  const { t } = useTranslation();
   return (
     <span className="rounded-full bg-muted px-1.5 py-0.5 text-[9px] font-medium uppercase tracking-wide text-muted-foreground">
-      즉시 적용
+      {t("llmTab.immediateApply")}
     </span>
   );
 }
@@ -170,6 +173,7 @@ export function LlmTab(props: LlmTabProps) {
     saving = false,
     settingsLoaded = true,
   } = props;
+  const { t } = useTranslation();
   const vendorInfo = getVendorInfo(vendor);
   const hasOnSave = typeof onSave === "function";
   const activeModelValue = model.trim() || vendorInfo.defaultModel;
@@ -178,8 +182,8 @@ export function LlmTab(props: LlmTabProps) {
   return (
     <div className="space-y-6">
       <SettingsPageHeader
-        title="모델"
-        description="AI 공급자와 모델, API 키, 폴백 체인을 설정합니다"
+        title={t("llmTab.pageTitle")}
+        description={t("llmTab.pageDescription")}
       />
 
       {/* Section A — 공급자 구성.
@@ -189,7 +193,7 @@ export function LlmTab(props: LlmTabProps) {
           (baseUrl / vertex / API key / model) deferred to the section's
           저장 button. */}
       <SettingsSection
-        title="공급자 구성"
+        title={t("llmTab.providerConfig")}
         id="llm-providers"
       >
         <div
@@ -197,7 +201,7 @@ export function LlmTab(props: LlmTabProps) {
           data-testid="llm-tab:section-providers"
         >
           <div className="space-y-2">
-            <Label className="text-sm font-medium">인증 방식</Label>
+            <Label className="text-sm font-medium">{t("llmTab.authMethod")}</Label>
             <RadioGroup
               value={authMode}
               onValueChange={(v) => {
@@ -214,7 +218,7 @@ export function LlmTab(props: LlmTabProps) {
             >
               <div className="flex items-center gap-2">
                 <RadioGroupItem value="manual" id="auth-mode-manual" />
-                <Label htmlFor="auth-mode-manual" className="text-xs">API 키 직접 입력</Label>
+                <Label htmlFor="auth-mode-manual" className="text-xs">{t("llmTab.authManual")}</Label>
               </div>
               <div className="flex items-center gap-2">
                 <RadioGroupItem value="login" id="auth-mode-login" />
@@ -226,13 +230,13 @@ export function LlmTab(props: LlmTabProps) {
           {authMode === "login" ? (
             <div className="space-y-2" data-testid="llm-tab:login-section">
               <p className="text-[11px] text-muted-foreground">
-                현재 활성 벤더: <code>{vendorInfo.label}</code> ({model || vendorInfo.defaultModel})
+                {t("llmTab.activeVendor")}: <code>{vendorInfo.label}</code> ({model || vendorInfo.defaultModel})
               </p>
               <div className="flex items-center gap-2">
                 {hasKey ? (
-                  <Badge variant="default" className="text-xs">로그인됨</Badge>
+                  <Badge variant="default" className="text-xs">{t("llmTab.loggedIn")}</Badge>
                 ) : (
-                  <Badge variant="secondary" className="text-xs">로그인 필요</Badge>
+                  <Badge variant="secondary" className="text-xs">{t("llmTab.loginRequired")}</Badge>
                 )}
               </div>
               <Button
@@ -245,14 +249,14 @@ export function LlmTab(props: LlmTabProps) {
                 Login
               </Button>
               <p className="text-[11px] text-muted-foreground">
-                로그인 시 벤더 선택 · API 키 · 엔드포인트 · 모델이 자동으로 설정됩니다.
+                {t("llmTab.loginAutoConfig")}
               </p>
             </div>
           ) : (
             <div className="space-y-3" data-testid="llm-tab:manual-section">
               <div className="space-y-2">
                 <Label htmlFor="vendor-select" className="flex items-center gap-2">
-                  벤더
+                  {t("llmTab.vendor")}
                   <ImmediateBadge />
                 </Label>
                 <Select
@@ -263,7 +267,7 @@ export function LlmTab(props: LlmTabProps) {
                   }}
                 >
                   <SelectTrigger id="vendor-select" className="w-full">
-                    <SelectValue placeholder="벤더 선택" />
+                    <SelectValue placeholder={t("llmTab.vendorPlaceholder")} />
                   </SelectTrigger>
                   <SelectContent>
                     {VENDORS.map((v) => (
@@ -275,7 +279,7 @@ export function LlmTab(props: LlmTabProps) {
               {vendor !== "vertex-ai" && (vendorInfo.needsBaseUrl || vendor === "openai" || vendor === "copilot") && (
                 <div className="space-y-2">
                   <Label className="text-sm font-medium">
-                    Endpoint (baseUrl){vendorInfo.needsBaseUrl ? " *" : " (선택)"}
+                    Endpoint (baseUrl){vendorInfo.needsBaseUrl ? " *" : ` (${t("llmTab.optional")})`}
                   </Label>
                   <Input
                     value={baseUrl}
@@ -283,18 +287,18 @@ export function LlmTab(props: LlmTabProps) {
                     placeholder={(vendorInfo as any).baseUrlPlaceholder ?? "https://..."}
                   />
                   <p className="text-[11px] text-muted-foreground">
-                    ⓘ 저장 전 벤더 변경 시 현재 입력이 폐기됩니다.
+                    {t("llmTab.baseUrlDiscardWarning")}
                   </p>
                   {vendor === "azure-foundry" && (
                     <p className="text-[11px] text-muted-foreground">
-                      Azure AI Foundry 엔드포인트 형식:
+                      {t("llmTab.azureEndpointFormat")}
                       {" "}<code>https://{"{resource}"}.openai.azure.com/openai/v1/</code>
-                      {" "}— 모델 값에는 Azure deployment 이름을 입력합니다.
+                      {" "}— {t("llmTab.azureDeploymentNote")}
                     </p>
                   )}
                   {(vendor === "openai" || vendor === "copilot") && (
                     <p className="text-[11px] text-muted-foreground">
-                      프록시 또는 커스텀 엔드포인트를 사용하는 경우에만 입력합니다.
+                      {t("llmTab.proxyEndpointNote")}
                     </p>
                   )}
                 </div>
@@ -303,8 +307,8 @@ export function LlmTab(props: LlmTabProps) {
                 <div className="space-y-2 rounded-md border p-3">
                   <p className="text-sm font-medium">Google Vertex AI</p>
                   <p className="text-[11px] text-muted-foreground">
-                    서비스 계정 또는 ADC(<code>gcloud auth application-default login</code>)로 인증합니다.
-                    API 키는 사용하지 않으며, <code>GOOGLE_APPLICATION_CREDENTIALS</code> 환경 변수로 서비스 계정 JSON 경로를 지정할 수 있습니다.
+                    {t("llmTab.vertexAuthDesc1")}<code>gcloud auth application-default login</code>{t("llmTab.vertexAuthDesc2")}
+                    {t("llmTab.vertexAuthDesc3")}<code>GOOGLE_APPLICATION_CREDENTIALS</code>{t("llmTab.vertexAuthDesc4")}
                   </p>
                   <div className="space-y-1">
                     <Label className="text-xs text-muted-foreground">GCP Project ID *</Label>
@@ -315,27 +319,27 @@ export function LlmTab(props: LlmTabProps) {
                     />
                   </div>
                   <div className="space-y-1">
-                    <Label className="text-xs text-muted-foreground">Location (region) — 선택</Label>
+                    <Label className="text-xs text-muted-foreground">Location (region) — {t("llmTab.optional")}</Label>
                     <Input
                       value={vertexLocation}
                       onChange={(e) => setVertexLocation(e.target.value)}
-                      placeholder="us-central1 (기본값)"
+                      placeholder={t("llmTab.vertexLocationPlaceholder")}
                     />
                   </div>
                 </div>
               )}
               {vendor !== "vertex-ai" && (
                 <div className="space-y-2">
-                  <Label className="text-sm font-medium">{vendorInfo.label} API 키</Label>
+                  <Label className="text-sm font-medium">{vendorInfo.label} {t("llmTab.apiKey")}</Label>
                   <div className="flex items-center gap-2">
-                    {hasKey ? <Badge variant="default" className="text-xs">설정됨</Badge> : <Badge variant="secondary" className="text-xs">미설정</Badge>}
-                    {hasKey && <Button size="sm" variant="ghost" className="h-7 text-xs text-destructive" onClick={() => void api.deleteApiKey(vendor).then(() => { setHasKey(false); onSaved(); })}>삭제</Button>}
+                    {hasKey ? <Badge variant="default" className="text-xs">{t("llmTab.apiKeySet")}</Badge> : <Badge variant="secondary" className="text-xs">{t("llmTab.apiKeyNotSet")}</Badge>}
+                    {hasKey && <Button size="sm" variant="ghost" className="h-7 text-xs text-destructive" onClick={() => void api.deleteApiKey(vendor).then(() => { setHasKey(false); onSaved(); })}>{t("llmTab.delete")}</Button>}
                   </div>
-                  <Input data-testid="llm-api-key-input" type="password" placeholder={hasKey ? "새 키로 교체" : vendorInfo.placeholder} value={keyInput} onChange={(e) => setKeyInput(e.target.value)} />
+                  <Input data-testid="llm-api-key-input" type="password" placeholder={hasKey ? t("llmTab.replaceKey") : vendorInfo.placeholder} value={keyInput} onChange={(e) => setKeyInput(e.target.value)} />
                 </div>
               )}
               <div className="space-y-2">
-                <Label htmlFor="model-select" className="text-sm font-medium">모델</Label>
+                <Label htmlFor="model-select" className="text-sm font-medium">{t("llmTab.model")}</Label>
                 <Select value={activeModelValue} onValueChange={setModel}>
                   <SelectTrigger
                     id="model-select"
@@ -384,7 +388,7 @@ export function LlmTab(props: LlmTabProps) {
           className="space-y-2"
           data-testid="llm-tab:section-thinking"
         >
-          <p className="text-[11px] text-muted-foreground">모델 내부 추론 과정을 스트리밍으로 표시합니다. Claude는 명시 활성화(Sonnet 4.5+/Opus 4+), OpenAI o-계열·gpt-5는 Responses API 자동, Gemini 2.0+는 모델 지원 시 자동.</p>
+          <p className="text-[11px] text-muted-foreground">{t("llmTab.thinkingDesc")}</p>
           {enableThinking && (
             <div className="space-y-2">
               <div className="flex items-center justify-between">
@@ -411,7 +415,7 @@ export function LlmTab(props: LlmTabProps) {
                 ))}
               </div>
               <p className="text-[11px] text-muted-foreground">
-                높을수록 더 많은 사고 토큰을 사용해 꼼꼼히 추론하지만 지연 시간과 비용이 증가합니다. 현재 이 설정은 Claude·OpenAI에 적용되며, Gemini는 모델이 지원하는 경우 추론 표시만 자동으로 동작하고 이 예산 값은 적용되지 않습니다.
+                {t("llmTab.reasoningEffortDesc")}
               </p>
             </div>
           )}
@@ -420,7 +424,7 @@ export function LlmTab(props: LlmTabProps) {
 
       {/* Section C — Fallback Chain */}
       <SettingsSection
-        title="장애 복구 (Fallback Chain)"
+        title={t("llmTab.fallbackTitle")}
         id="llm-fallback"
       >
         <div
@@ -433,12 +437,12 @@ export function LlmTab(props: LlmTabProps) {
             className="h-auto w-full justify-between rounded-none px-0 py-1 text-sm font-medium"
             onClick={() => setFallbackOpen((o) => !o)}
           >
-            <span className="text-muted-foreground text-xs">첫 응답이 1초 안에 오지 않거나 5xx/429/네트워크 오류 시 순서대로 전환할 벤더·모델 목록</span>
+            <span className="text-muted-foreground text-xs">{t("llmTab.fallbackSummary")}</span>
             <span className="text-muted-foreground">{fallbackOpen ? "▲" : "▼"}</span>
           </Button>
           {fallbackOpen && (
             <div className="space-y-3">
-              <p className="text-[11px] text-muted-foreground">첫 응답이 1초 안에 오지 않거나 5xx/429/네트워크 오류가 나면 같은 모델을 5회 시도한 뒤 순서대로 전환할 벤더·모델 목록입니다.</p>
+              <p className="text-[11px] text-muted-foreground">{t("llmTab.fallbackDesc")}</p>
               {fallbackChain.map((entry, idx) => {
                 const fallbackVendorInfo = getVendorInfo(entry.provider);
                 const fallbackModelValue = entry.model.trim() || fallbackVendorInfo.defaultModel;
@@ -488,7 +492,7 @@ export function LlmTab(props: LlmTabProps) {
                       className="h-8 text-xs text-destructive"
                       onClick={() => setFallbackChain((c) => c.filter((_, i) => i !== idx))}
                     >
-                      삭제
+                      {t("llmTab.delete")}
                     </Button>
                   </div>
                 );
@@ -502,7 +506,7 @@ export function LlmTab(props: LlmTabProps) {
                   { provider: "openai", model: getVendorInfo("openai").defaultModel },
                 ])}
               >
-                + 추가
+                {t("llmTab.addEntry")}
               </Button>
               {hasOnSave && (
                 <SectionSaveBar

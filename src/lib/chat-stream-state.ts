@@ -4,6 +4,7 @@ import type {
   PermissionReviewStatus,
 } from "../shared/permission-review-status.js";
 import type { LLMVendor } from "../shared/llm-vendor-defaults.js";
+import { t } from "../i18n/index.js";
 
 export type TokenUsageSegment = {
   vendorProvider: LLMVendor;
@@ -25,8 +26,7 @@ export type TokenUsageSegment = {
  */
 export type CheckpointTrigger = "auto-compact" | "manual";
 
-export const EMPTY_ASSISTANT_RESPONSE_TEXT =
-  "응답이 비어있습니다. (도구 호출만 있었거나 LLM이 텍스트를 생성하지 않음)";
+export const EMPTY_ASSISTANT_RESPONSE_TEXT = t("be_chatStreamState.emptyAssistantResponse");
 
 export type StreamEvent = {
   type: string;
@@ -870,7 +870,7 @@ function answerLabel(question: { question?: string; summaryHint?: string } | und
   const hint = question?.summaryHint?.trim();
   if (hint) return hint;
   const text = question?.question?.trim();
-  if (!text) return `답변 ${index + 1}`;
+  if (!text) return t("be_chatStreamState.answerLabel", { index: String(index + 1) });
   return text.length <= 14 ? text : `${text.slice(0, 13)}…`;
 }
 

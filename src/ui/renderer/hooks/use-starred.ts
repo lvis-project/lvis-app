@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
 import type { ChatEntry } from "../../../lib/chat-stream-state.js";
 import type { LvisApi } from "../types.js";
+import { t } from "../../../i18n/runtime.js";
 
 export interface StarredItem {
   id: string;
@@ -99,7 +100,7 @@ export function useStarred(api: LvisApi) {
             sessionId,
             messageIndex: -1,
             role: "session",
-            text: title?.trim() || `세션 즐겨찾기 · #${sessionId.slice(0, 8)}`,
+            text: title?.trim() || t("useStarred.sessionFallbackText", { sessionId: sessionId.slice(0, 8) }),
           });
         }
         await refreshStarred();

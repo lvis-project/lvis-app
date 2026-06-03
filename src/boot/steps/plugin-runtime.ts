@@ -69,6 +69,7 @@ import {
   syncPluginToolRegistry,
   syncPluginToolRegistryForPlugin,
 } from "../plugins.js";
+import { t } from "../../i18n/index.js";
 import { createLogger } from "../../lib/logger.js";
 import { stripUntrustedTags } from "../../lib/strip-untrusted-tags.js";
 import { plog, PluginPhase } from "../../plugins/lifecycle-log.js";
@@ -393,7 +394,7 @@ export function formatPluginPendingPrompt(prompt: string, source: string): strin
 }
 
 export const OVERLAY_SUMMARY_DISPLAY_CAP = 2_000;
-export const OVERLAY_SUMMARY_TRUNCATION_MARKER = "\n…[잘림 — 확인하기 후 채팅에서 전체 보기]";
+export const OVERLAY_SUMMARY_TRUNCATION_MARKER = "\n…[truncated — view full in chat]";
 
 /**
  * Build the user-visible overlay preview. The full prompt still flows through
@@ -406,8 +407,9 @@ export function deriveOverlaySummaryForDisplay(
   const rawSummary = spec.summary != null ? spec.summary : spec.prompt;
   const stripped = stripUntrustedTags(rawSummary);
   if (stripped.length > OVERLAY_SUMMARY_DISPLAY_CAP) {
-    const cap = OVERLAY_SUMMARY_DISPLAY_CAP - OVERLAY_SUMMARY_TRUNCATION_MARKER.length;
-    return stripped.slice(0, cap) + OVERLAY_SUMMARY_TRUNCATION_MARKER;
+    const marker = t("be_pluginRuntime.overlaySummaryTruncationMarker");
+    const cap = OVERLAY_SUMMARY_DISPLAY_CAP - marker.length;
+    return stripped.slice(0, cap) + marker;
   }
   return stripped;
 }
@@ -1037,7 +1039,7 @@ export async function initPluginRuntime(
       return (async () => {
         reportProgress?.({
           phase: "pending",
-          message: "플러그인 런타임 준비를 시작합니다.",
+          message: t("be_pluginRuntime.pluginRuntimePreparationStarting"),
           progressPct: 5,
         });
         const runtime = await pythonRuntime.ensureReadyForPluginManifest(manifestPath, win, (status) => {
@@ -1052,7 +1054,7 @@ export async function initPluginRuntime(
         }
         reportProgress?.({
           phase: "ready",
-          message: "플러그인 부팅 준비 완료",
+          message: t("be_pluginRuntime.pluginRuntimeReady"),
           progressPct: 100,
         });
         pluginRuntime.mergeConfigOverride(pluginId, { pythonExecutable: runtime.pythonPath });
@@ -1860,7 +1862,7 @@ export async function initPluginRuntime(
           title: spec.title ?? spec.source.replace(/^overlay:/, ""),
           summary: derivedSummary,
           running: false,
-          primaryActionLabel: spec.primaryActionLabel ?? "확인하기",
+          primaryActionLabel: spec.primaryActionLabel ?? t("be_pluginRuntime.overlayPrimaryActionLabel"),
           pendingPrompt: formatPluginPendingPrompt(spec.prompt, decision.source),
           createdAt: new Date().toISOString(),
         };

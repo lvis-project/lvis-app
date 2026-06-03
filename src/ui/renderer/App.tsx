@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useMemo, useReducer, useRef, useState } from "react";
+import { useTranslation } from "../../i18n/react.js";
 import { debugLog, isDebugStreamEnabled } from "../../lib/debug-stream.js";
 import {
   composeImportedTriggerOutgoing,
@@ -75,6 +76,7 @@ import type { UserKeyboardIntentSnapshot } from "../../shared/chat-origin.js";
 // ─── App ────────────────────────────────────────────
 
 export function App() {
+  const { t } = useTranslation();
   const api = useMemo(() => getApi(), []);
   // App auto-update badge state — surfaces the main-process electron-updater
   // events as a permanent badge next to the Home button. User-gated:
@@ -244,8 +246,8 @@ export function App() {
       addFireRef.current?.({
         id: `${evt.routineId}-running`,
         source: { kind: "routine", routineId: evt.routineId, firedAt: new Date().toISOString() },
-        title: `[실패] 루틴`,
-        summary: `루틴 실행 실패: ${evt.error}`,
+        title: t("app.routineFailedTitle"),
+        summary: t("app.routineFailedSummary", { error: evt.error }),
         running: false,
       });
     });
@@ -526,13 +528,13 @@ export function App() {
     async (viewKey: string): Promise<boolean> => {
       const openDetached = api.window?.openDetached;
       if (!openDetached) {
-        setErrorWithThought("오류: 플러그인 창을 열 수 없습니다.");
+        setErrorWithThought(t("app.errorCannotOpenPluginWindow"));
         return false;
       }
       const result = await openDetached(viewKey);
       if (!result.ok) {
         console.warn(`[plugin-ui] detached plugin view ${viewKey} did not open`, result.error);
-        setErrorWithThought(`오류: 플러그인 창을 열 수 없습니다. ${result.error}`);
+        setErrorWithThought(t("app.errorCannotOpenPluginWindowDetail", { error: result.error }));
         return false;
       }
       return true;
@@ -544,13 +546,13 @@ export function App() {
     async (viewKey: "routines" | "memory" | "starred"): Promise<boolean> => {
       const openDetached = api.window?.openDetached;
       if (!openDetached) {
-        setErrorWithThought("오류: 새 창을 열 수 없습니다.");
+        setErrorWithThought(t("app.errorCannotOpenNewWindow"));
         return false;
       }
       const result = await openDetached(viewKey);
       if (!result.ok) {
         console.warn(`[window] detached built-in view ${viewKey} did not open`, result.error);
-        setErrorWithThought(`오류: 새 창을 열 수 없습니다. ${result.error}`);
+        setErrorWithThought(t("app.errorCannotOpenNewWindowDetail", { error: result.error }));
         return false;
       }
       return true;
@@ -606,7 +608,7 @@ export function App() {
                 `[plugin-action] ${view.pluginId} tool '${actionTool}' failed`,
                 err,
               );
-              setErrorWithThought("오류: 플러그인 액션을 실행할 수 없습니다.");
+              setErrorWithThought(t("app.errorCannotRunPluginAction"));
             } finally {
               pluginActionInflightRef.current.delete(inflightKey);
             }
@@ -927,8 +929,8 @@ export function App() {
       // payload object allocation when diagnostics are off (#566 item 1).
       const debugStreamEnabled = isDebugStreamEnabled();
       if (debugStreamEnabled) debugLog("handleAsk", "enter", { mode, qLen: q.length, streaming });
-      const t = q.trim();
-      if (!t) {
+      const trimmed = q.trim();
+      if (!trimmed) {
         if (debugStreamEnabled) debugLog("handleAsk", "skip:empty");
         return;
       }
@@ -950,21 +952,21 @@ export function App() {
       // 큐는 단순 user message inject 로만 동작 — slash command literal 은
       // LLM 에 plain text 로 전달.
       if (mode === "default" && opts?.inputOrigin !== "queue-auto") {
-        if (await handleCompactCommand(t)) {
+        if (await handleCompactCommand(trimmed)) {
           if (debugStreamEnabled) debugLog("handleAsk", "skip:compact-command-handled");
           setQuestion("");
           return;
         }
-        if (t === "/load" || t.startsWith("/load ")) {
-          const requested = t.slice("/load".length).trim();
+        if (trimmed === "/load" || trimmed.startsWith("/load ")) {
+          const requested = trimmed.slice("/load".length).trim();
           if (requested.length === 0) {
-            setErrorWithThought("사용법: /load <세션ID>");
+            setErrorWithThought(t("app.loadCommandUsage"));
             return;
           }
           const listed = await api.chatSessions();
           const match = listed.sessions.find((session) => session.id.startsWith(requested));
           if (!match) {
-            setErrorWithThought(`세션을 찾을 수 없습니다: ${requested}`);
+            setErrorWithThought(t("app.sessionNotFound", { requested }));
             return;
           }
           await sessionLoad(match.id, false, applyLoadedSession);
@@ -983,8 +985,8 @@ export function App() {
       if (debugStreamEnabled) debugLog("handleAsk", "begin", { requestId, streamingRequestId });
       setQuestion("");
       const composed = mode === "trigger-import"
-        ? composeImportedTriggerOutgoing(t)
-        : composeOutgoing(t);
+        ? composeImportedTriggerOutgoing(trimmed)
+        : composeOutgoing(trimmed);
       const outgoing = composed.text;
       // queue-auto path 는 큐 schema (텍스트 only) 라 사용자가 별도로 추가한
       // 첨부 파일이 따라가면 mental model 위배 + silent corruption (Round 3
@@ -996,11 +998,7 @@ export function App() {
       // image parts on a text-only model.
       const hasImageParts = outgoingAttachments.some((p) => p.type === "image");
       if (hasImageParts && !supportsVision(llmVendor, llmModel)) {
-        const proceed = window.confirm(
-          `현재 모델(${llmModel})은 이미지를 지원하지 않습니다.\n` +
-            "이미지는 전달되지 않고 파일 경로 / 텍스트만 전송됩니다.\n\n" +
-            "그래도 전송하시겠습니까? 취소하면 모델을 바꾼 뒤 다시 시도할 수 있습니다.",
-        );
+        const proceed = window.confirm(t("app.visionNotSupportedConfirm", { llmModel }));
         if (!proceed) {
           // Restore the original (untrimmed) draft text so the user can
           // switch models and resend without retyping. We use `q` rather
@@ -1018,10 +1016,10 @@ export function App() {
       // visibly, and rendering the wrapped envelope as a user bubble
       // would misattribute authorship.
       if (mode !== "trigger-import") {
-        appendUserEntry(t, opts?.injectHint);
+        appendUserEntry(trimmed, opts?.injectHint);
       }
       resetStreamAccumulators();
-      appendAssistantStatus("생각 중...");
+      appendAssistantStatus(t("app.thinkingStatus"));
       try {
         await api.chatSend(
           outgoing,
@@ -1055,7 +1053,7 @@ export function App() {
             err: (err as Error)?.message,
           });
         }
-        setErrorWithThought(`오류: ${(err as Error).message}`);
+        setErrorWithThought(t("app.errorGeneric", { message: (err as Error).message }));
       } finally {
         const turnMatch = turnRequestRef.current === requestId;
         if (debugStreamEnabled) {
@@ -1275,12 +1273,12 @@ export function App() {
       statusUpsertPersistent({
         id: COMPACT_ITEM_ID,
         severity: isForceRecover || isRateLimitRecover ? "warning" : "info",
-        label: "컨텍스트",
+        label: t("app.compactStatusLabel"),
         value: isForceRecover
-          ? "자동 압축을 끄셨지만, context 한도 복구를 위해 1회 압축했습니다"
+          ? t("app.compactForceRecoverValue")
           : isRateLimitRecover
-            ? "TPM 한도 복구를 위해 자동 압축 중..."
-            : "자동 압축 중...",
+            ? t("app.compactRateLimitValue")
+            : t("app.compactInProgressValue"),
       });
     } else {
       statusRemovePersistent(COMPACT_ITEM_ID);
@@ -1295,8 +1293,8 @@ export function App() {
       statusUpsertPersistent({
         id: EXHAUSTED_ITEM_ID,
         severity: "error",
-        label: "압축 실패",
-        value: "압축으로 복구 불가 — 모델 변경 또는 새 대화를 시작하세요",
+        label: t("app.compactExhaustedLabel"),
+        value: t("app.compactExhaustedValue"),
       });
     } else {
       statusRemovePersistent(EXHAUSTED_ITEM_ID);
@@ -1321,7 +1319,7 @@ export function App() {
 
   // ─── Render ───────────────────────────────────
   return (
-    <ErrorBoundary fallback="앱 오류가 발생했습니다">
+    <ErrorBoundary fallback={t("app.appErrorFallback")}>
     <ThemeProvider api={api}>
     <TooltipProvider>
     <OverlayContextProvider
@@ -1450,7 +1448,7 @@ export function App() {
               loop where the bad data is reloaded with the page. */}
           <ErrorBoundary
             boundaryName="main-content"
-            fallback="메인 영역에 오류가 발생했습니다 — 상단 메뉴에서 설정 → 마켓플레이스로 이동하여 해당 플러그인을 업데이트하거나 제거해 주세요."
+            fallback={t("app.mainContentErrorFallback")}
             onReset={() => {
               // Refresh plugin views/cards in case the failure was caused by
               // a transient state mismatch. activeView reset to "home" gives
@@ -1484,7 +1482,7 @@ export function App() {
             isEntryStarred={isEntryStarred}
             onAbort={handleAbort}
             onGuide={handleGuide}
-            onGuideError={(msg) => appendSystemEntry(`⚠️ 방향 지시 전송 실패: ${msg}`)}
+            onGuideError={(msg) => appendSystemEntry(t("app.guideErrorMessage", { msg }))}
             onFeedback={handleFeedback}
             subAgentSpawns={subAgentSpawns}
             loadedSkills={loadedSkills}

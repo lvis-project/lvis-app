@@ -16,6 +16,7 @@ import { createHash } from "node:crypto";
 import * as fs from "node:fs/promises";
 import * as path from "node:path";
 import type { BrowserWindow } from "electron";
+import { t } from "../i18n/index.js";
 import { createLogger } from "../lib/logger.js";
 import { resolvePluginPaths } from "../plugins/plugin-paths.js";
 import { readPluginRegistry, resolveManifestPathsFromRegistry } from "../plugins/registry.js";
@@ -242,7 +243,7 @@ export class PythonRuntimeBootstrapper {
 
   private async setupIfStillNeeded(result: RuntimeResult): Promise<RuntimeResult> {
     if (!this.options.forceSetup && await this.checkSentinel()) {
-      this.sendStatus({ phase: "ready", msg: "Python 런타임 준비 완료 (캐시)", pct: 100 });
+      this.sendStatus({ phase: "ready", msg: t("be_pythonRuntime.statusReadyCached"), pct: 100 });
       await this.log("[python-runtime] .ready sentinel 확인 — skip setup");
       return result;
     }
@@ -261,14 +262,11 @@ export class PythonRuntimeBootstrapper {
     try {
       await fs.access(uvBin);
     } catch {
-      throw new Error(
-        `uv binary를 찾을 수 없습니다: ${uvBin}\n` +
-        `"npm run postinstall" 또는 "node scripts/fetch-uv.mjs"를 먼저 실행하세요.`
-      );
+      throw new Error(t("be_pythonRuntime.errUvBinaryNotFound", { uvBin }));
     }
 
     // Step 2: Python 3.12 설치
-    this.sendStatus({ phase: "installing-python", msg: "Python 3.12 설치 중...", pct: 10 });
+    this.sendStatus({ phase: "installing-python", msg: t("be_pythonRuntime.statusInstallingPython"), pct: 10 });
     await this.log("[python-runtime] Step 1: uv python install 3.12");
     const uvVersion = await this.runUv(uvBin, [
       "python", "install", "3.12",
@@ -277,7 +275,7 @@ export class PythonRuntimeBootstrapper {
     });
 
     // Step 3: venv 생성
-    this.sendStatus({ phase: "installing-python", msg: "Python venv 생성 중...", pct: 30 });
+    this.sendStatus({ phase: "installing-python", msg: t("be_pythonRuntime.statusCreatingVenv"), pct: 30 });
     await this.log("[python-runtime] Step 2: uv venv");
     await this.runUv(uvBin, [
       "venv", this.venvDir(), "--python", "3.12",
@@ -289,7 +287,7 @@ export class PythonRuntimeBootstrapper {
     // uv 0.7.3 이후 `pip sync`는 lock 파일을 받아 그대로 동기화하므로 `--frozen`은
     // 받지 않음 (uv 0.7.x: error: unexpected argument '--frozen'). lock 파일 자체가
     // pinning 역할이라 의미적으로도 redundant.
-    this.sendStatus({ phase: "installing-deps", msg: "의존성 설치 중 (최초 1회)...", pct: 40 });
+    this.sendStatus({ phase: "installing-deps", msg: t("be_pythonRuntime.statusInstallingDeps"), pct: 40 });
     await this.log("[python-runtime] Step 3: uv pip sync");
     const lockFile = await this.findLockFile();
     await this.runUv(uvBin, [
@@ -300,7 +298,7 @@ export class PythonRuntimeBootstrapper {
     });
 
     // Step 5: import 검증
-    this.sendStatus({ phase: "verifying", msg: "설치 검증 중...", pct: 85 });
+    this.sendStatus({ phase: "verifying", msg: t("be_pythonRuntime.statusVerifying"), pct: 85 });
     await this.log("[python-runtime] Step 4: import verification");
     const pythonVersion = await this.verifyImports();
 
@@ -309,7 +307,7 @@ export class PythonRuntimeBootstrapper {
     await this.writeSentinel(uvVersionStr, pythonVersion);
     await this.log(`[python-runtime] .ready sentinel 기록 완료 — python: ${pythonVersion}`);
 
-    this.sendStatus({ phase: "ready", msg: "Python 런타임 준비 완료", pct: 100 });
+    this.sendStatus({ phase: "ready", msg: t("be_pythonRuntime.statusReady"), pct: 100 });
   }
 
   // ─── private: Python path ─────────────────────────
@@ -416,8 +414,9 @@ export class PythonRuntimeBootstrapper {
       }
     }
     throw new Error(
-      `python-requirements.lock 파일을 찾을 수 없습니다.\n` +
-      `검색 경로:\n${candidates.length > 0 ? candidates.map((candidate) => `- ${candidate}`).join("\n") : "- (없음)"}`
+      t("be_pythonRuntime.errLockFileNotFound", {
+        paths: candidates.length > 0 ? candidates.map((candidate) => `- ${candidate}`).join("\n") : t("be_pythonRuntime.errLockFileNone"),
+      })
     );
   }
 
@@ -508,9 +507,9 @@ export class PythonRuntimeBootstrapper {
 
       proc.on("error", (err: NodeJS.ErrnoException) => {
         if (err.code === "ENOENT") {
-          reject(new Error(`uv binary 실행 실패 (ENOENT): ${uvBin}`));
+          reject(new Error(t("be_pythonRuntime.errUvExecEnoent", { uvBin })));
         } else {
-          reject(new Error(`uv 실행 오류: ${err.message}`));
+          reject(new Error(t("be_pythonRuntime.errUvExecError", { message: err.message })));
         }
       });
 
@@ -530,8 +529,7 @@ export class PythonRuntimeBootstrapper {
         } else {
           reject(
             new Error(
-              `uv 명령 실패 (exit ${code}): uv ${args.join(" ")}\n` +
-              `stderr: ${stderr.slice(-1000)}`
+              t("be_pythonRuntime.errUvCommandFailed", { code: String(code), args: args.join(" "), stderr: stderr.slice(-1000) })
             )
           );
         }
@@ -572,9 +570,9 @@ export class PythonRuntimeBootstrapper {
 
       proc.on("error", (err: NodeJS.ErrnoException) => {
         if (err.code === "ENOENT") {
-          reject(new Error(`Python binary 실행 실패 (ENOENT): ${pythonBin}`));
+          reject(new Error(t("be_pythonRuntime.errPythonExecEnoent", { pythonBin })));
         } else {
-          reject(new Error(`Python 실행 오류: ${err.message}`));
+          reject(new Error(t("be_pythonRuntime.errPythonExecError", { message: err.message })));
         }
       });
 
@@ -584,7 +582,7 @@ export class PythonRuntimeBootstrapper {
         } else {
           reject(
             new Error(
-              `Python 검증 실패 (exit ${code})\nstdout: ${stdout}\nstderr: ${stderr.slice(-500)}`
+              t("be_pythonRuntime.errPythonVerifyFailed", { code: String(code), stdout, stderr: stderr.slice(-500) })
             )
           );
         }
@@ -602,10 +600,7 @@ export class PythonRuntimeBootstrapper {
     ].join("; ");
 
     const version = await this.runPython(pythonBin, ["-c", verifyScript]).catch((err: Error) => {
-      throw new Error(
-        `Python 런타임 검증 실패.\n` +
-        `원인: ${err.message}`
-      );
+      throw new Error(t("be_pythonRuntime.errRuntimeVerifyFailed", { message: err.message }));
     });
 
     return version;

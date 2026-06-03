@@ -5,6 +5,7 @@ import {
   DialogHeader,
   DialogTitle,
 } from "../../../components/ui/dialog.js";
+import { useTranslation } from "../../../i18n/react.js";
 import { DeferredQueuePanel } from "../components/permissions/DeferredQueuePanel.js";
 
 export interface DeferredQueueDialogProps {
@@ -13,6 +14,7 @@ export interface DeferredQueueDialogProps {
 }
 
 export function DeferredQueueDialog({ open, onOpenChange }: DeferredQueueDialogProps) {
+  const { t } = useTranslation();
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
       <DialogContent
@@ -21,8 +23,8 @@ export function DeferredQueueDialog({ open, onOpenChange }: DeferredQueueDialogP
         data-testid="deferred-queue-dialog"
       >
         <DialogHeader className="sr-only">
-          <DialogTitle>보류된 권한 요청 검토</DialogTitle>
-          <DialogDescription>사용자가 권한 큐 버튼에서 직접 연 보류 승인 목록입니다.</DialogDescription>
+          <DialogTitle>{t("deferredQueueDialog.title")}</DialogTitle>
+          <DialogDescription>{t("deferredQueueDialog.description")}</DialogDescription>
         </DialogHeader>
         <div className="min-h-0 flex-1 overflow-y-auto px-5 py-4">
           <DeferredQueuePanel showEmpty onClose={() => onOpenChange(false)} />

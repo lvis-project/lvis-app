@@ -9,26 +9,27 @@ import {
   CommandList,
 } from "../../../components/ui/command.js";
 import { PopoverContent } from "../../../components/ui/popover.js";
+import { useTranslation } from "../../../i18n/react.js";
 import type { QuickAction } from "./command-actions.js";
 
-const SLASH_COMMANDS: { cmd: string; label: string }[] = [
-  { cmd: "/new",      label: "새 대화" },
-  { cmd: "/sessions", label: "세션 목록" },
-  { cmd: "/load",     label: "세션 불러오기" },
-  { cmd: "/compact",  label: "대화 압축" },
-  { cmd: "/remember", label: "메모리 저장" },
-  { cmd: "/memory",   label: "메모리 조회" },
-  { cmd: "/vendor",   label: "벤더 변경" },
-  { cmd: "/tools",    label: "도구 목록" },
-  { cmd: "/permission", label: "권한 상태" },
-  { cmd: "/permission dir list", label: "허용 디렉터리 목록" },
-  { cmd: "/permission mode strict", label: "권한 모드: strict" },
-  { cmd: "/permission mode default", label: "권한 모드: default" },
-  { cmd: "/permission mode auto", label: "권한 모드: auto" },
-  { cmd: "/permission mode allow", label: "권한 모드: allow" },
-  { cmd: "/permission hooks list", label: "Hook 신뢰 상태" },
-  { cmd: "/permission audit verify", label: "권한 감사 검증" },
-  { cmd: "/help",     label: "도움말" },
+const SLASH_COMMANDS: { cmd: string; labelKey: string }[] = [
+  { cmd: "/new",      labelKey: "commandPopoverPanel.cmdNew" },
+  { cmd: "/sessions", labelKey: "commandPopoverPanel.cmdSessions" },
+  { cmd: "/load",     labelKey: "commandPopoverPanel.cmdLoad" },
+  { cmd: "/compact",  labelKey: "commandPopoverPanel.cmdCompact" },
+  { cmd: "/remember", labelKey: "commandPopoverPanel.cmdRemember" },
+  { cmd: "/memory",   labelKey: "commandPopoverPanel.cmdMemory" },
+  { cmd: "/vendor",   labelKey: "commandPopoverPanel.cmdVendor" },
+  { cmd: "/tools",    labelKey: "commandPopoverPanel.cmdTools" },
+  { cmd: "/permission", labelKey: "commandPopoverPanel.cmdPermission" },
+  { cmd: "/permission dir list", labelKey: "commandPopoverPanel.cmdPermissionDirList" },
+  { cmd: "/permission mode strict", labelKey: "commandPopoverPanel.cmdPermissionModeStrict" },
+  { cmd: "/permission mode default", labelKey: "commandPopoverPanel.cmdPermissionModeDefault" },
+  { cmd: "/permission mode auto", labelKey: "commandPopoverPanel.cmdPermissionModeAuto" },
+  { cmd: "/permission mode allow", labelKey: "commandPopoverPanel.cmdPermissionModeAllow" },
+  { cmd: "/permission hooks list", labelKey: "commandPopoverPanel.cmdPermissionHooksList" },
+  { cmd: "/permission audit verify", labelKey: "commandPopoverPanel.cmdPermissionAuditVerify" },
+  { cmd: "/help",     labelKey: "commandPopoverPanel.cmdHelp" },
 ];
 
 interface CommandPopoverPanelProps {
@@ -38,6 +39,7 @@ interface CommandPopoverPanelProps {
 }
 
 export function CommandPopoverPanel({ actions, onInsert, onClose }: CommandPopoverPanelProps) {
+  const { t } = useTranslation();
   const [query, setQuery] = useState("");
   const inputRef = useRef<HTMLInputElement>(null);
   const composingRef = useRef(false);
@@ -82,8 +84,8 @@ export function CommandPopoverPanel({ actions, onInsert, onClose }: CommandPopov
     : actions;
   const filteredSlash = lowerQuery
     ? SLASH_COMMANDS.filter(
-        ({ cmd, label }) =>
-          cmd.includes(lowerQuery) || label.toLowerCase().includes(lowerQuery),
+        ({ cmd, labelKey }) =>
+          cmd.includes(lowerQuery) || t(labelKey).toLowerCase().includes(lowerQuery),
       )
     : SLASH_COMMANDS;
 
@@ -98,7 +100,7 @@ export function CommandPopoverPanel({ actions, onInsert, onClose }: CommandPopov
       <Command shouldFilter={false}>
         <CommandInput
           ref={inputRef}
-          placeholder="검색..."
+          placeholder={t("commandPopoverPanel.searchPlaceholder")}
           value={query}
           onValueChange={setQuery}
           data-testid="command-input"
@@ -106,10 +108,10 @@ export function CommandPopoverPanel({ actions, onInsert, onClose }: CommandPopov
           onCompositionEnd={() => { composingRef.current = false; }}
         />
         <CommandList className="max-h-[320px] overflow-y-auto scrollbar-thin">
-          <CommandEmpty>결과 없음</CommandEmpty>
+          <CommandEmpty>{t("commandPopoverPanel.noResults")}</CommandEmpty>
 
           {filteredActions.length > 0 && (
-            <CommandGroup heading="빠른 실행" data-testid="command-group-actions">
+            <CommandGroup heading={t("commandPopoverPanel.quickActions")} data-testid="command-group-actions">
               {filteredActions.map((action) => (
                 <CommandItem
                   key={action.id}
@@ -123,17 +125,17 @@ export function CommandPopoverPanel({ actions, onInsert, onClose }: CommandPopov
           )}
 
           {filteredSlash.length > 0 && (
-            <CommandGroup heading="슬래시 명령" data-testid="command-group-slash">
-              {filteredSlash.map(({ cmd, label }) => (
+            <CommandGroup heading={t("commandPopoverPanel.slashCommands")} data-testid="command-group-slash">
+              {filteredSlash.map(({ cmd, labelKey }) => (
                 <CommandItem
                   key={cmd}
-                  value={`${cmd} ${label}`}
+                  value={`${cmd} ${t(labelKey)}`}
                   onSelect={() => handleSelectSlash(cmd)}
                 >
                   <span className="font-mono text-xs text-muted-foreground w-24 shrink-0">
                     {cmd}
                   </span>
-                  <span className="text-xs">{label}</span>
+                  <span className="text-xs">{t(labelKey)}</span>
                 </CommandItem>
               ))}
             </CommandGroup>

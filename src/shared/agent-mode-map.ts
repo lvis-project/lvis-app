@@ -44,6 +44,8 @@
  *     Electron / Node imports.
  */
 
+import { t } from "../i18n/index.js";
+
 /**
  * Behavior knobs a mode can tune. Intentionally small: LVIS removed
  * per-vendor `temperature` / `maxOutputTokens` sampling params (see
@@ -92,25 +94,25 @@ export const AGENT_MODE_MAP: Readonly<Record<AgentMode, AgentModeConfig>> =
   Object.freeze({
     execute: {
       reasoningHint:
-        "결정된 작업을 정확히 실행해 산출물을 만든다. 범위를 넓히지 말고, 모호한 곳은 짧게 1회 질문 후 가정을 명시한다.",
+        t("be_agentModeMap.executeReasoningHint"),
       autoSkills: ["email-polish", "meeting-minutes"],
       maxToolRoundsHint: 20,
     },
     plan: {
       reasoningHint:
-        "차원별 명확도를 점수로 추적하며 한 번에 하나의 질문으로 모호함을 줄인다. 임계치 도달 시 실행 가능한 plan 문서를 출력한다.",
+        t("be_agentModeMap.planReasoningHint"),
       autoSkills: ["decision-record", "report-writing"],
       maxToolRoundsHint: 30,
     },
     research: {
       reasoningHint:
-        "외부 신뢰 출처에서 사실을 수집하고 모든 사실에 출처를 명시한다. 중요한 숫자는 2곳 이상 교차 검증한다.",
+        t("be_agentModeMap.researchReasoningHint"),
       autoSkills: ["data-summary", "report-writing"],
       maxToolRoundsHint: 25,
     },
     explore: {
       reasoningHint:
-        "내 컴퓨터·사내 자료에서 관련 항목을 찾아 위치와 핵심만 보고한다. 민감 정보는 본문 노출 없이 위치만 알린다.",
+        t("be_agentModeMap.exploreReasoningHint"),
       autoSkills: [],
       maxToolRoundsHint: 15,
     },

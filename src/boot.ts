@@ -150,6 +150,7 @@ import {
 import { runManagedBootstrap } from "./boot/managed-marketplace.js";
 import { createLogger } from "./lib/logger.js";
 import { lvisHome } from "./shared/lvis-home.js";
+import { t } from "./i18n/index.js";
 import {
   listLvisHomeDocUpgradeMarkers,
   seedLvisHomeDocs,
@@ -303,11 +304,11 @@ export async function bootstrap(
     const markerSummary =
       lvisHomeDocUpgradeMarkers.length === 1
         ? `~/.lvis/${lvisHomeDocUpgradeMarkers[0].markerPath}`
-        : `~/.lvis reference ${lvisHomeDocUpgradeMarkers.length}개 파일`;
+        : t("be_boot.upgradeMarkersPlural", { count: String(lvisHomeDocUpgradeMarkers.length) });
     notificationService.fire({
       kind: "system",
-      title: "LVIS reference 업데이트 사용 가능",
-      body: `검토 대상: ${markerSummary}. 병합하거나 삭제하세요.`,
+      title: t("be_boot.upgradeNotificationTitle"),
+      body: t("be_boot.upgradeNotificationBody", { markerSummary }),
     });
   }
   // Routine delivery sites pass `notificationService` explicitly per-call so
@@ -1051,7 +1052,7 @@ export async function bootstrap(
     try {
       notificationService?.fire({
         kind: "routine",
-        title: routine.notificationTitle ?? routine.title ?? "루틴 알림",
+        title: routine.notificationTitle ?? routine.title ?? t("be_boot.routineNotificationFallbackTitle"),
         body: routine.notificationBody ?? "",
         contextRef: { routineId: routine.id },
       });

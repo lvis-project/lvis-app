@@ -21,6 +21,7 @@ import { ChevronDown, ChevronRight, FilePlus2, FilePenLine } from "lucide-react"
 import type { FileEditDiffData, FileEditHunk } from "../utils/file-diff.js";
 import { countDiffLines } from "../utils/file-diff.js";
 import { getApi } from "../api-client.js";
+import { useTranslation } from "../../../i18n/react.js";
 
 // ─── Main inline diff component (edit_file / apply_patch / write_file inline) ─
 
@@ -31,6 +32,7 @@ const VERB_BY_TOOL: Record<FileEditDiffData["tool"], string> = {
 };
 
 export function FileEditDiff({ data }: { data: FileEditDiffData }) {
+  const { t } = useTranslation();
   const [open, setOpen] = useState(true);
   const totals = computeLineTotals(data.hunks);
   const verb = data.isNewFile ? "Create" : VERB_BY_TOOL[data.tool];
@@ -74,7 +76,7 @@ export function FileEditDiff({ data }: { data: FileEditDiffData }) {
             </span>
           )}
           {data.truncated && (
-            <span className="text-warning" title="긴 파일은 미리보기가 잘렸습니다">
+            <span className="text-warning" title={t("fileEditDiff.truncatedTitle")}>
               truncated
             </span>
           )}
@@ -92,7 +94,7 @@ export function FileEditDiff({ data }: { data: FileEditDiffData }) {
           ))}
           {totals.added === 0 && totals.removed === 0 && (
             <div className="px-3 py-2 text-[10px] text-muted-foreground">
-              변경된 내용 없음.
+              {t("fileEditDiff.noChanges")}
             </div>
           )}
         </div>
@@ -300,6 +302,7 @@ export function WriteFileSidecarDiff({
   toolUseId,
   filePath,
 }: WriteFileSidecarDiffProps) {
+  const { t } = useTranslation();
   const parsed = parseWriteResult(resultJson);
   const [diffState, setDiffState] = useState<SidecarDiffState>("idle");
   const [diffData, setDiffData] = useState<{ before: string; after: string } | null>(null);
@@ -335,7 +338,7 @@ export function WriteFileSidecarDiff({
       const result = await getApi().chatGetWriteDiff(sessionId, toolUseId);
       if (!isMountedRef.current) return;
       if (result === null) {
-        setErrorMsg("diff 파일이 소실되었습니다 (세션 재시작 후 불가).");
+        setErrorMsg(t("fileEditDiff.diffFileLost"));
         setDiffState("error");
       } else {
         setDiffData(result);
@@ -343,7 +346,7 @@ export function WriteFileSidecarDiff({
       }
     } catch (err) {
       if (!isMountedRef.current) return;
-      setErrorMsg((err as Error).message ?? "IPC 오류");
+      setErrorMsg((err as Error).message ?? t("fileEditDiff.ipcError"));
       setDiffState("error");
     }
   }
@@ -372,7 +375,7 @@ export function WriteFileSidecarDiff({
             className="ml-auto shrink-0 text-[10px] text-primary hover:underline"
             onClick={() => setDiffState("idle")}
           >
-            접기
+            {t("fileEditDiff.collapse")}
           </button>
         </div>
         <div
@@ -380,7 +383,7 @@ export function WriteFileSidecarDiff({
           style={{ backgroundColor: "hsl(var(--code-bg))", color: "hsl(var(--code-fg))" }}
         >
           {hunks.length === 0 ? (
-            <div className="px-3 py-1 text-muted-foreground/60 italic">변경 없음</div>
+            <div className="px-3 py-1 text-muted-foreground/60 italic">{t("fileEditDiff.noChangesShort")}</div>
           ) : (
             hunks.map((h, i) => (
               <div
@@ -429,7 +432,7 @@ export function WriteFileSidecarDiff({
           className="shrink-0 text-[10px] text-primary hover:underline"
           onClick={handleRetry}
         >
-          재시도
+          {t("fileEditDiff.retry")}
         </button>
       </div>
     );
@@ -445,7 +448,7 @@ export function WriteFileSidecarDiff({
       <div className="flex items-center gap-2 px-3 py-1.5">
         <span className="font-medium text-primary/80 truncate min-w-0">{path}</span>
         {bytes && <span className="shrink-0 text-muted-foreground/60 text-[10px]">{bytes}</span>}
-        <span className="shrink-0 text-[10px] text-warning/80 ml-1">· 미리보기 제한</span>
+        <span className="shrink-0 text-[10px] text-warning/80 ml-1">· {t("fileEditDiff.previewLimit")}</span>
         <button
           type="button"
           disabled={isLoading}
@@ -454,7 +457,7 @@ export function WriteFileSidecarDiff({
             void handleExpand();
           }}
         >
-          {isLoading ? "불러오는 중…" : "전체 diff 보기"}
+          {isLoading ? t("fileEditDiff.loading") : t("fileEditDiff.viewFullDiff")}
         </button>
       </div>
     </div>

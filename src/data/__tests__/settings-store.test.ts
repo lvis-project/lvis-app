@@ -485,31 +485,31 @@ describe("SettingsService appearance v2 — fresh install defaults", () => {
 
   it("fresh install returns schemaVersion:2 with DEFAULT_BUNDLE_ID", () => {
     const service = new SettingsService({ userDataPath });
-    expect(service.get("appearance")).toEqual({ schemaVersion: 2, bundleId: DEFAULT_BUNDLE_ID });
+    expect(service.get("appearance")).toEqual({ schemaVersion: 2, language: "en", bundleId: DEFAULT_BUNDLE_ID });
   });
 
   it("v2 appearance round-trips across restart", async () => {
     const service = new SettingsService({ userDataPath });
-    await service.patch({ appearance: { schemaVersion: 2, bundleId: "midnight" } });
+    await service.patch({ appearance: { schemaVersion: 2, language: "en", bundleId: "midnight" } });
     const reloaded = new SettingsService({ userDataPath });
-    expect(reloaded.get("appearance")).toEqual({ schemaVersion: 2, bundleId: "midnight" });
+    expect(reloaded.get("appearance")).toEqual({ schemaVersion: 2, language: "en", bundleId: "midnight" });
   });
 
   it("v2 with followSystem=true round-trips", async () => {
     const service = new SettingsService({ userDataPath });
-    await service.patch({ appearance: { schemaVersion: 2, bundleId: "violet-light", followSystem: true } });
+    await service.patch({ appearance: { schemaVersion: 2, language: "en", bundleId: "violet-light", followSystem: true } });
     const reloaded = new SettingsService({ userDataPath });
-    expect(reloaded.get("appearance")).toEqual({ schemaVersion: 2, bundleId: "violet-light", followSystem: true });
+    expect(reloaded.get("appearance")).toEqual({ schemaVersion: 2, language: "en", bundleId: "violet-light", followSystem: true });
   });
 
   it("unknown bundleId coerces to DEFAULT_BUNDLE_ID", () => {
     writeFileSync(
       join(userDataPath, "lvis-settings.json"),
-      JSON.stringify({ appearance: { schemaVersion: 2, bundleId: "nonexistent-bundle" } }),
+      JSON.stringify({ appearance: { schemaVersion: 2, language: "en", bundleId: "nonexistent-bundle" } }),
       "utf-8",
     );
     const service = new SettingsService({ userDataPath });
-    expect(service.get("appearance")).toEqual({ schemaVersion: 2, bundleId: DEFAULT_BUNDLE_ID });
+    expect(service.get("appearance")).toEqual({ schemaVersion: 2, language: "en", bundleId: DEFAULT_BUNDLE_ID });
   });
 
   it("appearance block absent (pre-theme system install) → DEFAULT_BUNDLE_ID", () => {
@@ -519,7 +519,7 @@ describe("SettingsService appearance v2 — fresh install defaults", () => {
       "utf-8",
     );
     const service = new SettingsService({ userDataPath });
-    expect(service.get("appearance")).toEqual({ schemaVersion: 2, bundleId: DEFAULT_BUNDLE_ID });
+    expect(service.get("appearance")).toEqual({ schemaVersion: 2, language: "en", bundleId: DEFAULT_BUNDLE_ID });
     // Unrelated section preserved
     expect(service.get("chat").systemPrompt).toBe("preserved");
   });
@@ -551,67 +551,67 @@ describe("SettingsService appearance v1 → v2 migration", () => {
   it("dark + default → tokyo-night", () => {
     writeV1({ theme: "dark", chatTheme: "default", codeTheme: "auto" });
     const s = new SettingsService({ userDataPath });
-    expect(s.get("appearance")).toEqual({ schemaVersion: 2, bundleId: "tokyo-night" });
+    expect(s.get("appearance")).toEqual({ schemaVersion: 2, language: "en", bundleId: "tokyo-night" });
   });
 
   it("dark + lg → violet-dark", () => {
     writeV1({ theme: "dark", chatTheme: "lg", codeTheme: "auto" });
     const s = new SettingsService({ userDataPath });
-    expect(s.get("appearance")).toEqual({ schemaVersion: 2, bundleId: "violet-dark" });
+    expect(s.get("appearance")).toEqual({ schemaVersion: 2, language: "en", bundleId: "violet-dark" });
   });
 
   it("light + default → forest", () => {
     writeV1({ theme: "light", chatTheme: "default", codeTheme: "auto" });
     const s = new SettingsService({ userDataPath });
-    expect(s.get("appearance")).toEqual({ schemaVersion: 2, bundleId: "forest" });
+    expect(s.get("appearance")).toEqual({ schemaVersion: 2, language: "en", bundleId: "forest" });
   });
 
   it("light + lg → violet-light", () => {
     writeV1({ theme: "light", chatTheme: "lg", codeTheme: "auto" });
     const s = new SettingsService({ userDataPath });
-    expect(s.get("appearance")).toEqual({ schemaVersion: 2, bundleId: "violet-light" });
+    expect(s.get("appearance")).toEqual({ schemaVersion: 2, language: "en", bundleId: "violet-light" });
   });
 
   it("dark + lg + dark (code override) → violet-dark (code override ignored)", () => {
     writeV1({ theme: "dark", chatTheme: "lg", codeTheme: "dark" });
     const s = new SettingsService({ userDataPath });
-    expect(s.get("appearance")).toEqual({ schemaVersion: 2, bundleId: "violet-dark" });
+    expect(s.get("appearance")).toEqual({ schemaVersion: 2, language: "en", bundleId: "violet-dark" });
   });
 
   it("light + default + dark (code override) → forest (code override ignored)", () => {
     writeV1({ theme: "light", chatTheme: "default", codeTheme: "dark" });
     const s = new SettingsService({ userDataPath });
-    expect(s.get("appearance")).toEqual({ schemaVersion: 2, bundleId: "forest" });
+    expect(s.get("appearance")).toEqual({ schemaVersion: 2, language: "en", bundleId: "forest" });
   });
 
   it("* + purple → midnight (closest accent coercion)", () => {
     writeV1({ theme: "dark", chatTheme: "purple", codeTheme: "auto" });
     const s = new SettingsService({ userDataPath });
-    expect(s.get("appearance")).toEqual({ schemaVersion: 2, bundleId: "midnight" });
+    expect(s.get("appearance")).toEqual({ schemaVersion: 2, language: "en", bundleId: "midnight" });
   });
 
   it("* + orange → midnight", () => {
     writeV1({ theme: "light", chatTheme: "orange", codeTheme: "auto" });
     const s = new SettingsService({ userDataPath });
-    expect(s.get("appearance")).toEqual({ schemaVersion: 2, bundleId: "midnight" });
+    expect(s.get("appearance")).toEqual({ schemaVersion: 2, language: "en", bundleId: "midnight" });
   });
 
   it("* + blue → midnight", () => {
     writeV1({ theme: "dark", chatTheme: "blue", codeTheme: "dark" });
     const s = new SettingsService({ userDataPath });
-    expect(s.get("appearance")).toEqual({ schemaVersion: 2, bundleId: "midnight" });
+    expect(s.get("appearance")).toEqual({ schemaVersion: 2, language: "en", bundleId: "midnight" });
   });
 
   it("high-contrast + * → high-contrast (HC always wins)", () => {
     writeV1({ theme: "high-contrast", chatTheme: "purple", codeTheme: "dark" });
     const s = new SettingsService({ userDataPath });
-    expect(s.get("appearance")).toEqual({ schemaVersion: 2, bundleId: "high-contrast" });
+    expect(s.get("appearance")).toEqual({ schemaVersion: 2, language: "en", bundleId: "high-contrast" });
   });
 
   it("invalid theme string → DEFAULT_BUNDLE_ID", () => {
     writeV1({ theme: "sepia", chatTheme: "default", codeTheme: "auto" });
     const s = new SettingsService({ userDataPath });
-    expect(s.get("appearance")).toEqual({ schemaVersion: 2, bundleId: DEFAULT_BUNDLE_ID });
+    expect(s.get("appearance")).toEqual({ schemaVersion: 2, language: "en", bundleId: DEFAULT_BUNDLE_ID });
   });
 
   it("v1 write-back: migrated appearance is written to disk as v2", async () => {
@@ -624,21 +624,21 @@ describe("SettingsService appearance v1 → v2 migration", () => {
       onDisk = JSON.parse(readFileSync(join(userDataPath, "lvis-settings.json"), "utf-8")) as Record<string, unknown>;
       if ((onDisk.appearance as Record<string, unknown>).schemaVersion === 2) break;
     }
-    expect(onDisk.appearance).toEqual({ schemaVersion: 2, bundleId: "violet-dark" });
+    expect(onDisk.appearance).toEqual({ schemaVersion: 2, language: "en", bundleId: "violet-dark" });
     // No legacy keys remain after write-back
     expect(onDisk.appearance.theme).toBeUndefined();
     expect(onDisk.appearance.chatTheme).toBeUndefined();
-    expect(service.get("appearance")).toEqual({ schemaVersion: 2, bundleId: "violet-dark" });
+    expect(service.get("appearance")).toEqual({ schemaVersion: 2, language: "en", bundleId: "violet-dark" });
   });
 
   it("v2 file loads without re-migration", () => {
     writeFileSync(
       join(userDataPath, "lvis-settings.json"),
-      JSON.stringify({ appearance: { schemaVersion: 2, bundleId: "forest" } }),
+      JSON.stringify({ appearance: { schemaVersion: 2, language: "en", bundleId: "forest" } }),
       "utf-8",
     );
     const s = new SettingsService({ userDataPath });
-    expect(s.get("appearance")).toEqual({ schemaVersion: 2, bundleId: "forest" });
+    expect(s.get("appearance")).toEqual({ schemaVersion: 2, language: "en", bundleId: "forest" });
   });
 
   // Main process has no window.matchMedia — system theme must not crash and must
@@ -646,13 +646,13 @@ describe("SettingsService appearance v1 → v2 migration", () => {
   it("system + default → DEFAULT_BUNDLE_ID (main process: no matchMedia needed)", () => {
     writeV1({ theme: "system", chatTheme: "default", codeTheme: "auto" });
     const s = new SettingsService({ userDataPath });
-    expect(s.get("appearance")).toEqual({ schemaVersion: 2, bundleId: DEFAULT_BUNDLE_ID });
+    expect(s.get("appearance")).toEqual({ schemaVersion: 2, language: "en", bundleId: DEFAULT_BUNDLE_ID });
   });
 
   it("system + lg → violet-dark + followSystem:true (main process: renderer will track OS)", () => {
     writeV1({ theme: "system", chatTheme: "lg", codeTheme: "auto" });
     const s = new SettingsService({ userDataPath });
-    expect(s.get("appearance")).toEqual({ schemaVersion: 2, bundleId: "violet-dark", followSystem: true });
+    expect(s.get("appearance")).toEqual({ schemaVersion: 2, language: "en", bundleId: "violet-dark", followSystem: true });
   });
 
   it("codeTheme-only v1 triggers write-back (needsV2WriteBack includes codeTheme)", async () => {
@@ -682,7 +682,7 @@ describe("SettingsService appearance.font — Track A user-configurable font", (
   function writeAppearance(font: unknown): void {
     writeFileSync(
       join(userDataPath, "lvis-settings.json"),
-      JSON.stringify({ appearance: { schemaVersion: 2, bundleId: "tokyo-night", font } }),
+      JSON.stringify({ appearance: { schemaVersion: 2, language: "en", bundleId: "tokyo-night", font } }),
     );
   }
 
@@ -716,7 +716,7 @@ describe("SettingsService appearance.font — Track A user-configurable font", (
       const dir = mkdtempSync(join(tmpdir(), `settings-store-size-${value}-`));
       writeFileSync(
         join(dir, "lvis-settings.json"),
-        JSON.stringify({ appearance: { schemaVersion: 2, bundleId: "tokyo-night", font: { sizeScale: value } } }),
+        JSON.stringify({ appearance: { schemaVersion: 2, language: "en", bundleId: "tokyo-night", font: { sizeScale: value } } }),
       );
       const s = new SettingsService({ userDataPath: dir });
       expect(s.get("appearance")).toMatchObject({ font: { sizeScale: value } });
@@ -738,8 +738,8 @@ describe("SettingsService appearance.font — Track A user-configurable font", (
 
   it("patch family-only preserves a previously patched sizeScale (PR #672 review HIGH#1)", async () => {
     const s = new SettingsService({ userDataPath });
-    await s.patch({ appearance: { schemaVersion: 2, bundleId: "tokyo-night", font: { sizeScale: 1.125 } } });
-    await s.patch({ appearance: { schemaVersion: 2, bundleId: "tokyo-night", font: { family: "Pretendard, system-ui, sans-serif" } } });
+    await s.patch({ appearance: { schemaVersion: 2, language: "en", bundleId: "tokyo-night", font: { sizeScale: 1.125 } } });
+    await s.patch({ appearance: { schemaVersion: 2, language: "en", bundleId: "tokyo-night", font: { family: "Pretendard, system-ui, sans-serif" } } });
     expect(s.get("appearance").font).toEqual({
       sizeScale: 1.125,
       family: "Pretendard, system-ui, sans-serif",
@@ -748,8 +748,8 @@ describe("SettingsService appearance.font — Track A user-configurable font", (
 
   it("patch sizeScale-only preserves a previously patched family (PR #672 review HIGH#1, reverse order)", async () => {
     const s = new SettingsService({ userDataPath });
-    await s.patch({ appearance: { schemaVersion: 2, bundleId: "tokyo-night", font: { family: "Pretendard, sans-serif" } } });
-    await s.patch({ appearance: { schemaVersion: 2, bundleId: "tokyo-night", font: { sizeScale: 1.25 } } });
+    await s.patch({ appearance: { schemaVersion: 2, language: "en", bundleId: "tokyo-night", font: { family: "Pretendard, sans-serif" } } });
+    await s.patch({ appearance: { schemaVersion: 2, language: "en", bundleId: "tokyo-night", font: { sizeScale: 1.25 } } });
     expect(s.get("appearance").font).toEqual({
       family: "Pretendard, sans-serif",
       sizeScale: 1.25,
@@ -794,11 +794,11 @@ describe("SettingsService appearance.font — Track A user-configurable font", (
 
   it("patch with `font: null` is a no-op — does not crash on null deref (PR #672 2차 critic N3)", async () => {
     const s = new SettingsService({ userDataPath });
-    await s.patch({ appearance: { schemaVersion: 2, bundleId: "tokyo-night", font: { sizeScale: 1.125 } } });
+    await s.patch({ appearance: { schemaVersion: 2, language: "en", bundleId: "tokyo-night", font: { sizeScale: 1.125 } } });
     // Caller deliberately sends `font: null` (some defensive call sites do this
     // to "clear" without specifying subfields). Must not throw, must preserve
     // the previously-patched font block.
-    await s.patch({ appearance: { schemaVersion: 2, bundleId: "tokyo-night", font: null as unknown as { sizeScale: 1 | 1.125 } } });
+    await s.patch({ appearance: { schemaVersion: 2, language: "en", bundleId: "tokyo-night", font: null as unknown as { sizeScale: 1 | 1.125 } } });
     expect(s.get("appearance").font?.sizeScale).toBe(1.125);
   });
 });

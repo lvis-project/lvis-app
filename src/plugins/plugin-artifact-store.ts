@@ -350,9 +350,9 @@ export class PluginArtifactStore {
       const version = parsed.version ?? "unknown";
       const dir = resolve(this.cacheRoot, safeSlug, version);
       await mkdir(dir, { recursive: true });
-      await writeFile(resolve(dir, "plugin.json"), raw, "utf-8");
+      await this.writeCacheFileAtomic(resolve(dir, "plugin.json"), raw);
       if (registryEntry) {
-        await writeFile(
+        await this.writeCacheFileAtomic(
           resolve(dir, "registry-entry.json"),
           `${JSON.stringify({
             installSource: registryEntry.installSource,
@@ -360,7 +360,6 @@ export class PluginArtifactStore {
             bundleRefs: registryEntry.bundleRefs,
             approvedPluginAccess: registryEntry.approvedPluginAccess,
           }, null, 2)}\n`,
-          "utf-8",
         );
       }
     } catch (err) {
@@ -368,6 +367,19 @@ export class PluginArtifactStore {
         `cacheVersion failed for ${slug}: ${(err as Error).message}`,
       );
     }
+  }
+
+  /**
+   * Atomically create a cache-metadata file: write the body to a sibling
+   * `.tmp` with an owner-only mode (0o600) then rename over the target. Mirrors
+   * the `~/.lvis/` atomic-write contract (project CLAUDE.md) — a crash never
+   * leaves a half-written snapshot, and the restrictive mode keeps the cache
+   * file out of other local users' reach (no shared-temp exposure).
+   */
+  private async writeCacheFileAtomic(filePath: string, body: string): Promise<void> {
+    const tmp = `${filePath}.tmp`;
+    await writeFile(tmp, body, { encoding: "utf-8", mode: 0o600 });
+    await rename(tmp, filePath);
   }
 
   async readCachedRegistryEntrySnapshot(
@@ -403,7 +415,7 @@ export class PluginArtifactStore {
       await mkdir(dir, { recursive: true });
       const entries = await this.readHistory(safeSlug);
       entries.push(entry);
-      await writeFile(this.historyPath(safeSlug), `${JSON.stringify({ entries }, null, 2)}\n`, "utf-8");
+      await this.writeCacheFileAtomic(this.historyPath(safeSlug), `${JSON.stringify({ entries }, null, 2)}\n`);
     } catch (err) {
       log.warn(
         `appendHistory failed for ${slug}: ${(err as Error).message}`,

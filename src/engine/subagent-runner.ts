@@ -41,6 +41,7 @@ import {
   type AgentModeConfig,
 } from "../shared/agent-mode-map.js";
 import { createLogger } from "../lib/logger.js";
+import { t } from "../i18n/index.js";
 
 const log = createLogger("lvis");
 
@@ -183,8 +184,8 @@ export function buildModePreamble(config: AgentModeConfig): string {
     parts.push(
       [
         "<lvis-agent-mode-skills>",
-        `이 작업에는 다음 skill 이 유용합니다: ${config.autoSkills.join(", ")}.`,
-        "필요하면 skill_load 로 로드하세요 (첫 로드 시 사용자 승인 모달이 뜹니다).",
+        t("be_subagentRunner.modeSkillsRecommendation", { skills: config.autoSkills.join(", ") }),
+        t("be_subagentRunner.modeSkillsLoadHint"),
         "</lvis-agent-mode-skills>",
       ].join("\n"),
     );

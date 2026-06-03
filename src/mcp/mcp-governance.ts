@@ -28,6 +28,7 @@ import {
   RESERVED_ENV_NAMES,
   RESERVED_HEADERS,
 } from "./safe-names.js";
+import { t } from "../i18n/index.js";
 const log = createLogger("mcp-governance");
 
 const DEFAULT_POLICY: McpGovernancePolicy = {
@@ -120,30 +121,30 @@ export class McpGovernance {
   validateServer(config: McpServerConfig): ValidationResult {
     // L0: 정책 존재 확인
     if (!this.policy) {
-      return { valid: false, reason: "거버넌스 정책이 로드되지 않았습니다.", layer: 0 };
+      return { valid: false, reason: t("be_mcpGovernance.policyNotLoaded"), layer: 0 };
     }
 
     // L1-a: 서버 승인 상태 확인 (deny-by-default)
     const approval = this.findApproval(config.id);
     if (!approval) {
-      return { valid: false, reason: `미승인 서버: '${config.id}'는 거버넌스 정책에 등록되지 않았습니다.`, layer: 1 };
+      return { valid: false, reason: t("be_mcpGovernance.unapprovedServer", { id: config.id }), layer: 1 };
     }
     if (approval.status === "revoked") {
-      return { valid: false, reason: `취소된 서버: '${config.id}'의 승인이 철회되었습니다. (${approval.revokedAt})`, layer: 1 };
+      return { valid: false, reason: t("be_mcpGovernance.revokedServer", { id: config.id, revokedAt: approval.revokedAt ?? "" }), layer: 1 };
     }
     if (approval.status === "pending") {
-      return { valid: false, reason: `대기 중: '${config.id}'는 아직 승인되지 않았습니다.`, layer: 1 };
+      return { valid: false, reason: t("be_mcpGovernance.pendingServer", { id: config.id }), layer: 1 };
     }
 
     // L1-b: 전역 서버 수 제한
     const activeCount = this.policy.servers.filter((s) => s.status === "approved").length;
     if (activeCount > this.policy.globalRules.maxServersTotal) {
-      return { valid: false, reason: `최대 서버 수 초과 (${activeCount}/${this.policy.globalRules.maxServersTotal})`, layer: 1 };
+      return { valid: false, reason: t("be_mcpGovernance.maxServersExceeded", { activeCount, maxServersTotal: this.policy.globalRules.maxServersTotal }), layer: 1 };
     }
 
     // L1-c: Transport 검증
     if (config.transport !== approval.transport) {
-      return { valid: false, reason: `Transport 불일치: 설정=${config.transport}, 승인=${approval.transport}`, layer: 1 };
+      return { valid: false, reason: t("be_mcpGovernance.transportMismatch", { configTransport: config.transport, approvedTransport: approval.transport }), layer: 1 };
     }
 
     // L1-d: stdio — 명령어 검증
@@ -210,17 +211,17 @@ export class McpGovernance {
   ): ValidationResult {
     const approval = this.findApproval(serverId);
     if (!approval || approval.status !== "approved") {
-      return { valid: false, reason: `미승인 서버의 도구 등록 시도: ${serverId}`, layer: 3 };
+      return { valid: false, reason: t("be_mcpGovernance.unapprovedServerToolRegistration", { serverId }), layer: 3 };
     }
 
     // 능력 제한: tools 허용 여부
     if (!approval.allowedCapabilities.includes("tools")) {
-      return { valid: false, reason: `서버 '${serverId}'는 도구 등록 권한이 없습니다.`, layer: 3 };
+      return { valid: false, reason: t("be_mcpGovernance.noToolRegistrationPermission", { serverId }), layer: 3 };
     }
 
     // 최대 도구 수
     if (tools.length > approval.maxTools) {
-      return { valid: false, reason: `도구 수 초과: ${tools.length}/${approval.maxTools} (서버: ${serverId})`, layer: 3 };
+      return { valid: false, reason: t("be_mcpGovernance.toolCountExceeded", { toolCount: tools.length, maxTools: approval.maxTools, serverId }), layer: 3 };
     }
 
     // 네임스페이스 + shadowing 검증
@@ -233,7 +234,7 @@ export class McpGovernance {
 
       // 기존 도구 shadowing 방지
       if (existingToolNames.has(namespacedName)) {
-        return { valid: false, reason: `도구 이름 충돌: '${namespacedName}'은 이미 등록되어 있습니다.`, layer: 3 };
+        return { valid: false, reason: t("be_mcpGovernance.toolNameConflict", { namespacedName }), layer: 3 };
       }
 
       // builtin/plugin 도구 shadowing 차단
@@ -255,7 +256,7 @@ export class McpGovernance {
         "web_search",
       ];
       if (baseNames.includes(tool.name)) {
-        return { valid: false, reason: `빌트인 도구 덮어쓰기 시도 차단: '${tool.name}'`, layer: 3 };
+        return { valid: false, reason: t("be_mcpGovernance.builtinToolOverwriteBlocked", { toolName: tool.name }), layer: 3 };
       }
     }
 
@@ -305,14 +306,14 @@ export class McpGovernance {
 
   private validateStdioCommand(config: McpServerConfig, approval: McpServerApproval): ValidationResult {
     if (!config.command) {
-      return { valid: false, reason: "stdio transport에는 command가 필요합니다.", layer: 1 };
+      return { valid: false, reason: t("be_mcpGovernance.stdioCommandRequired"), layer: 1 };
     }
     const allowed = approval.allowedCommands ?? [];
     // Empty allowedCommands → deny (deny-by-default)
     if (allowed.length === 0 || !allowed.includes(config.command)) {
       return {
         valid: false,
-        reason: `허용되지 않은 명령어: '${config.command}'. 허용 목록: [${allowed.join(", ")}]`,
+        reason: t("be_mcpGovernance.disallowedCommand", { command: config.command, allowedList: allowed.join(", ") }),
         layer: 1,
       };
     }
@@ -321,7 +322,7 @@ export class McpGovernance {
     const dangerousArgs = ["--no-sandbox", "--disable-security", "eval(", "$(", "`"];
     for (const arg of config.args ?? []) {
       if (dangerousArgs.some((d) => arg.includes(d))) {
-        return { valid: false, reason: `위험한 인수 감지: '${arg}'`, layer: 1 };
+        return { valid: false, reason: t("be_mcpGovernance.dangerousArgDetected", { arg }), layer: 1 };
       }
     }
 
@@ -330,13 +331,13 @@ export class McpGovernance {
 
   private validateUrl(config: McpServerConfig, approval: McpServerApproval): ValidationResult {
     if (!config.url) {
-      return { valid: false, reason: `${config.transport} transport에는 url이 필요합니다.`, layer: 1 };
+      return { valid: false, reason: t("be_mcpGovernance.transportRequiresUrl", { transport: config.transport }), layer: 1 };
     }
 
     // 전역 차단 URL 패턴 체크
     for (const pattern of this.policy.globalRules.blockedUrlPatterns) {
       if (matchUrlPattern(pattern, config.url)) {
-        return { valid: false, reason: `차단된 URL 패턴: '${config.url}' matches '${pattern}'`, layer: 1 };
+        return { valid: false, reason: t("be_mcpGovernance.blockedUrlPattern", { url: config.url, pattern }), layer: 1 };
       }
     }
 
@@ -347,7 +348,7 @@ export class McpGovernance {
       if (!matches) {
         return {
           valid: false,
-          reason: `허용되지 않은 URL: '${config.url}'. 허용 목록: [${allowed.join(", ")}]`,
+          reason: t("be_mcpGovernance.disallowedUrl", { url: config.url, allowedList: allowed.join(", ") }),
           layer: 1,
         };
       }
@@ -360,7 +361,7 @@ export class McpGovernance {
       if (!matches) {
         return {
           valid: false,
-          reason: `전역 URL 허용 목록에 없음: '${config.url}'`,
+          reason: t("be_mcpGovernance.urlNotInGlobalAllowList", { url: config.url }),
           layer: 1,
         };
       }
@@ -379,7 +380,7 @@ export class McpGovernance {
     try {
       parsed = new URL(rawUrl);
     } catch {
-      return { valid: false, reason: `잘못된 URL 형식: '${rawUrl}'`, layer: 1 };
+      return { valid: false, reason: t("be_mcpGovernance.invalidUrlFormat", { rawUrl }), layer: 1 };
     }
     if (parsed.protocol === "https:") return { valid: true };
     if (parsed.protocol === "http:") {
@@ -389,13 +390,13 @@ export class McpGovernance {
       }
       return {
         valid: false,
-        reason: `HTTP transport에는 https:// 가 필요합니다 (localhost 제외): '${rawUrl}'`,
+        reason: t("be_mcpGovernance.httpsRequired", { rawUrl }),
         layer: 1,
       };
     }
     return {
       valid: false,
-      reason: `HTTP transport는 http:// 또는 https:// 만 허용됩니다: '${rawUrl}'`,
+      reason: t("be_mcpGovernance.httpSchemeOnly", { rawUrl }),
       layer: 1,
     };
   }
@@ -412,16 +413,23 @@ export class McpGovernance {
       if (/[\r\n]/.test(name) || /[\r\n]/.test(value)) {
         return {
           valid: false,
-          reason: `헤더에 CR/LF 포함 금지: '${name}'`,
+          reason: t("be_mcpGovernance.headerCrlfForbidden", { name }),
           layer: 1,
         };
       }
       // Defense-in-depth: reject any other control character (U+0000..U+001F
       // except horizontal tab U+0009) in header values.
-      if (/[\u0000-\u0008\u000B-\u001F]/.test(value)) {
+      if (
+        Array.from(value).some((ch) => {
+          const cp = ch.charCodeAt(0);
+          // Reject U+0000..U+001F except horizontal tab (U+0009) and line
+          // feed (U+000A); CR/LF pairs are already rejected above.
+          return cp <= 0x1f && cp !== 0x09 && cp !== 0x0a;
+        })
+      ) {
         return {
           valid: false,
-          reason: `헤더 값에 제어 문자 포함: '${name}'`,
+          reason: t("be_mcpGovernance.headerControlCharForbidden", { name }),
           layer: 1,
         };
       }
@@ -439,35 +447,35 @@ export class McpGovernance {
       if (!isApiKeyServer) return { valid: true };
       return {
         valid: false,
-        reason: `stdio API-key 서버는 승인된 apiKeyEnv가 필요합니다 (서버: ${config.id})`,
+        reason: t("be_mcpGovernance.apiKeyEnvRequired", { serverId: config.id }),
         layer: 1,
       };
     }
     if (!ENV_NAME_RE.test(name)) {
       return {
         valid: false,
-        reason: `apiKeyEnv는 안전한 환경변수 이름이어야 합니다: '${name}'`,
+        reason: t("be_mcpGovernance.apiKeyEnvInvalidName", { name }),
         layer: 1,
       };
     }
     if (name.length > MAX_NAME_LEN) {
       return {
         valid: false,
-        reason: `apiKeyEnv 이름이 너무 깁니다 (최대 ${MAX_NAME_LEN}자): '${name}'`,
+        reason: t("be_mcpGovernance.apiKeyEnvNameTooLong", { maxLen: MAX_NAME_LEN, name }),
         layer: 1,
       };
     }
     if (RESERVED_ENV_NAMES.has(name.toUpperCase())) {
       return {
         valid: false,
-        reason: `apiKeyEnv '${name}'은 호스트 보안 기준에 예약된 환경변수입니다`,
+        reason: t("be_mcpGovernance.apiKeyEnvReserved", { name }),
         layer: 1,
       };
     }
     if (approval.apiKeyEnv !== name) {
       return {
         valid: false,
-        reason: `승인되지 않은 apiKeyEnv: '${name}'. 승인값: ${approval.apiKeyEnv ?? "(none)"}`,
+        reason: t("be_mcpGovernance.unapprovedApiKeyEnv", { name, approvedValue: approval.apiKeyEnv ?? "(none)" }),
         layer: 1,
       };
     }
@@ -483,35 +491,35 @@ export class McpGovernance {
       if (!approval.apiKeyHeader) return { valid: true };
       return {
         valid: false,
-        reason: `HTTP API-key 서버는 승인된 apiKeyHeader '${approval.apiKeyHeader}'를 사용해야 합니다`,
+        reason: t("be_mcpGovernance.apiKeyHeaderRequired", { approvedHeader: approval.apiKeyHeader }),
         layer: 1,
       };
     }
     if (!HTTP_HEADER_NAME_RE.test(name)) {
       return {
         valid: false,
-        reason: `apiKeyHeader는 안전한 HTTP 헤더 이름이어야 합니다: '${name}'`,
+        reason: t("be_mcpGovernance.apiKeyHeaderInvalidName", { name }),
         layer: 1,
       };
     }
     if (name.length > MAX_NAME_LEN) {
       return {
         valid: false,
-        reason: `apiKeyHeader 이름이 너무 깁니다 (최대 ${MAX_NAME_LEN}자): '${name}'`,
+        reason: t("be_mcpGovernance.apiKeyHeaderNameTooLong", { maxLen: MAX_NAME_LEN, name }),
         layer: 1,
       };
     }
     if (RESERVED_HEADERS.has(name.toLowerCase())) {
       return {
         valid: false,
-        reason: `apiKeyHeader '${name}'은 예약된 HTTP 헤더입니다`,
+        reason: t("be_mcpGovernance.apiKeyHeaderReserved", { name }),
         layer: 1,
       };
     }
     if (approval.apiKeyHeader !== name) {
       return {
         valid: false,
-        reason: `승인되지 않은 apiKeyHeader: '${name}'. 승인값: ${approval.apiKeyHeader ?? "(none)"}`,
+        reason: t("be_mcpGovernance.unapprovedApiKeyHeader", { name, approvedValue: approval.apiKeyHeader ?? "(none)" }),
         layer: 1,
       };
     }
@@ -529,9 +537,7 @@ export class McpGovernance {
     if (globalOk || serverOk) return { valid: true };
     return {
       valid: false,
-      reason:
-        `allowPrivateNetworks 거부 (서버: ${approval.id}). ` +
-        `globalRules.allowPrivateNetworks 또는 서버 승인에 명시적 허용이 필요합니다.`,
+      reason: t("be_mcpGovernance.allowPrivateNetworksDenied", { serverId: approval.id }),
       layer: 1,
     };
   }
@@ -545,9 +551,11 @@ export class McpGovernance {
     ) {
       return {
         valid: false,
-        reason:
-          `connectionTimeoutMs 정책 상한 위반 (서버: ${approval.id}): ` +
-          `${approval.connectionTimeoutMs}ms > ${TOOL_TIMEOUT_POLICY.mcpRequestMaxMs}ms 최대치.`,
+        reason: t("be_mcpGovernance.connectionTimeoutPolicyViolation", {
+          serverId: approval.id,
+          timeoutMs: approval.connectionTimeoutMs,
+          maxMs: TOOL_TIMEOUT_POLICY.mcpRequestMaxMs,
+        }),
         layer: 2,
       };
     }
@@ -556,20 +564,20 @@ export class McpGovernance {
     if (approval.tlsRequired && config.url) {
       const isSecure = config.url.startsWith("https://") || config.url.startsWith("wss://");
       if (!isSecure) {
-        return { valid: false, reason: `TLS 필수: '${config.url}'은 https:// 또는 wss://여야 합니다.`, layer: 2 };
+        return { valid: false, reason: t("be_mcpGovernance.tlsRequired", { url: config.url }), layer: 2 };
       }
     }
 
     // 인증 요구 수준 체크
     if (approval.requiredAuth !== "none") {
       if (approval.requiredAuth === "api-key" && !config.apiKey) {
-        return { valid: false, reason: `API 키가 필요합니다 (서버: ${config.id})`, layer: 2 };
+        return { valid: false, reason: t("be_mcpGovernance.apiKeyRequired", { serverId: config.id }), layer: 2 };
       }
       if (approval.requiredAuth === "sso" && config.auth !== "sso") {
-        return { valid: false, reason: `SSO 인증이 필요합니다 (서버: ${config.id})`, layer: 2 };
+        return { valid: false, reason: t("be_mcpGovernance.ssoRequired", { serverId: config.id }), layer: 2 };
       }
       if (approval.requiredAuth === "oauth" && config.auth !== "oauth") {
-        return { valid: false, reason: `OAuth 인증이 필요합니다 (서버: ${config.id})`, layer: 2 };
+        return { valid: false, reason: t("be_mcpGovernance.oauthRequired", { serverId: config.id }), layer: 2 };
       }
     }
 

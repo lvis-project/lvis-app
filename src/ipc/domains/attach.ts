@@ -6,6 +6,7 @@
  * Renderer reaches these via window.lvis.attach.* (see preload.ts).
  */
 import { dialog, ipcMain, nativeImage, shell } from "electron";
+import { t } from "../../i18n/index.js";
 import { promises as fs } from "node:fs";
 import { randomBytes } from "node:crypto";
 import * as os from "node:os";
@@ -162,7 +163,7 @@ export function registerAttachHandlers(deps: IpcDeps): void {
     if (!win) return { canceled: true, files: [], rejected: [] };
 
     const result = await dialog.showOpenDialog(win, {
-      title: "첨부 파일 선택",
+      title: t("mainDialog.attachTitle"),
       properties: ["openFile", "multiSelections"],
     });
     if (result.canceled || result.filePaths.length === 0) {

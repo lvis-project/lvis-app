@@ -6,6 +6,7 @@
  * session repository and metadata model.
  */
 import type { ConversationLoop } from "../engine/conversation-loop.js";
+import { t } from "../i18n/index.js";
 import { createLogger } from "../lib/logger.js";
 import type { RoutineScope } from "../shared/routines-types.js";
 const log = createLogger("routine-engine");
@@ -68,7 +69,7 @@ export interface RoutineEngineDeps {
 function extractSummaryTag(text: string): string {
   const match = text.match(/<summary>([\s\S]*?)<\/summary>/);
   if (!match) {
-    return "[요약 형식 누락]";
+    return t("be_routineEngine.summaryTagMissing");
   }
   const content = match[1].trim();
   const codepoints = [...content];
@@ -131,7 +132,7 @@ export class RoutineEngine {
       summary = extractSummaryTag(result.text ?? "");
     } catch (err) {
       log.warn("runRoutine error (id=%s): %s", input.id, err instanceof Error ? err.message : String(err));
-      summary = `루틴 실행 중 오류: ${err instanceof Error ? err.message : String(err)}`;
+      summary = t("be_routineEngine.runRoutineError", { message: err instanceof Error ? err.message : String(err) });
     }
 
     return {

@@ -16,6 +16,7 @@
 //     `motion-safe:animate-in` class re-fire on every push.
 import { useEffect, useRef } from "react";
 import type { ReactElement } from "react";
+import { useTranslation } from "../../../i18n/react.js";
 
 interface Props {
   alternates: string[];
@@ -33,6 +34,7 @@ export function SuggestedRepliesChipRow({
   onAccept,
   onFocusChange,
 }: Props): ReactElement | null {
+  const { t } = useTranslation();
   // Imperatively move DOM focus when `focusedIdx` changes. Composer drives
   // the index from keyboard events; the chip refs receive `.focus()` here so
   // assistive tech + focus rings stay in sync with the keyboard cursor.
@@ -48,7 +50,7 @@ export function SuggestedRepliesChipRow({
     <div
       data-testid="suggested-replies-chip-row"
       role="toolbar"
-      aria-label="대체 답변 추천"
+      aria-label={t("suggestedRepliesChipRow.toolbarAriaLabel")}
       className="mx-3 mt-3 mb-1 flex gap-2 overflow-x-auto transition-opacity duration-150 motion-safe:animate-in motion-safe:fade-in motion-safe:slide-in-from-bottom-1"
     >
       {alternates.map((text, idx) => {

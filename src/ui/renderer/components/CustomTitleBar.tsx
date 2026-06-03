@@ -23,6 +23,7 @@ import { useCallback, useEffect, useState } from "react";
 import { Minus, Maximize2, Minimize2, X } from "lucide-react";
 import { Button } from "../../../components/ui/button.js";
 import { useOptionalTheme } from "../theme/ThemeProvider.js";
+import { useTranslation } from "../../../i18n/react.js";
 
 // ─── Token → hex helpers ──────────────────────────────────────────────────
 // We read the CSS variable as an HSL triple (e.g. "222.2 84% 4.9%") and
@@ -83,6 +84,7 @@ export function CustomTitleBar() {
   // below all hooks; the bridge-dependent useEffect bodies are gated with an
   // internal `if (!platformBridge) return;` so they noop when the bridge is
   // absent (jsdom / Storybook / SSR) without affecting hook count.
+  const { t } = useTranslation();
   const platformBridge = tryGetPlatformBridge();
   const isDarwin = platformBridge?.isDarwin ?? false;
   const [isMaximized, setIsMaximized] = useState(false);
@@ -168,7 +170,7 @@ export function CustomTitleBar() {
           variant="ghost"
           size="icon"
           onClick={handleMinimize}
-          title="최소화"
+          title={t("customTitleBar.minimize")}
           className="titlebar-btn titlebar-btn-minimize h-9 w-11 rounded-none text-muted-foreground hover:bg-accent hover:text-foreground"
         >
           <Minus size={14} />
@@ -179,7 +181,7 @@ export function CustomTitleBar() {
           variant="ghost"
           size="icon"
           onClick={handleMaximize}
-          title={isMaximized ? "이전 크기로" : "최대화"}
+          title={isMaximized ? t("customTitleBar.restore") : t("customTitleBar.maximize")}
           className="titlebar-btn titlebar-btn-maximize h-9 w-11 rounded-none text-muted-foreground hover:bg-accent hover:text-foreground"
         >
           {isMaximized ? <Minimize2 size={14} /> : <Maximize2 size={14} />}
@@ -190,7 +192,7 @@ export function CustomTitleBar() {
           variant="ghost"
           size="icon"
           onClick={handleClose}
-          title="닫기"
+          title={t("customTitleBar.close")}
           className="titlebar-btn titlebar-btn-close h-9 w-11 rounded-none text-muted-foreground hover:bg-destructive hover:text-destructive-foreground"
         >
           <X size={14} />

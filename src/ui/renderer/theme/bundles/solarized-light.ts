@@ -1,4 +1,5 @@
 import type { ThemeBundle } from "./types.js";
+import { t } from "../../../../i18n/runtime.js";
 
 /**
  * Solarized Light — Ethan Schoonover's pioneering balanced light theme.
@@ -10,7 +11,7 @@ import type { ThemeBundle } from "./types.js";
 export const solarizedLightBundle: ThemeBundle = {
   id: "solarized-light",
   name: "Solarized Light",
-  description: "라이트 셸 + 솔라라이즈드 클래식 + 따뜻한 베이지 서피스",
+  description: t("solarizedLight.description"),
   shell: "light",
   highContrast: false,
   tokens: {

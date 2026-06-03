@@ -1,4 +1,5 @@
 import type { ThemeBundle } from "./types.js";
+import { t } from "../../../../i18n/runtime.js";
 
 /**
  * Cherry Blossom (체리 블라썸) — the default light shell with a crisp petal
@@ -15,7 +16,7 @@ import type { ThemeBundle } from "./types.js";
 export const cherryBlossomBundle: ThemeBundle = {
   id: "cherry-blossom",
   name: "Cherry Blossom",
-  description: "라이트 셸 + 체리 블라썸 팔레트 + 선명한 인터랙션 라인",
+  description: t("cherryBlossom.description"),
   shell: "light",
   highContrast: false,
   tokens: {
