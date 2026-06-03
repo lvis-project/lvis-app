@@ -1,4 +1,6 @@
 import type { PermissionEvaluationContext } from "../../types.js";
+import { useTranslation } from "../../../../i18n/react.js";
+import { t } from "../../../../i18n/runtime.js";
 import { categoryLabel, ReviewRow } from "./PermissionDecisionCard.js";
 
 function formatList(values: readonly string[], emptyText: string): string {
@@ -6,7 +8,7 @@ function formatList(values: readonly string[], emptyText: string): string {
 }
 
 export function formatEvaluationLimits(context?: PermissionEvaluationContext): string {
-  if (!context) return "검증 환경 context 없음";
+  if (!context) return t("permissionEvaluationContextPanel.noContext");
   return [
     `policy=${context.policyMode}`,
     `headless=${context.headless ? "yes" : "no"}`,
@@ -20,13 +22,15 @@ export function PermissionEvaluationContextPanel({
 }: {
   context?: PermissionEvaluationContext;
 }) {
+  const { t } = useTranslation();
+
   if (!context) {
     return (
       <section
         className="rounded-md border border-warning/40 bg-warning/10 px-3 py-2 text-xs"
         data-testid="permission-evaluation-context-missing"
       >
-        검증 환경 payload 가 포함되지 않았습니다. 이 요청은 권한 평가 context 를 재구성하지 않습니다.
+        {t("permissionEvaluationContextPanel.missingPayload")}
       </section>
     );
   }
@@ -37,31 +41,31 @@ export function PermissionEvaluationContextPanel({
       data-testid="permission-evaluation-context"
     >
       <summary className="cursor-pointer px-3 py-2 text-xs font-semibold">
-        검증 환경 / 샌드박스 평가
+        {t("permissionEvaluationContextPanel.title")}
       </summary>
       <div className="border-t">
-        <ReviewRow label="정책">
+        <ReviewRow label={t("permissionEvaluationContextPanel.labelPolicy")}>
           {context.policyMode} · {context.headless ? "headless" : "foreground"} · {context.version}
         </ReviewRow>
-        <ReviewRow label="출처">
+        <ReviewRow label={t("permissionEvaluationContextPanel.labelSource")}>
           {context.source} · {categoryLabel(context.category)} · {context.trustOrigin}
         </ReviewRow>
-        <ReviewRow label="작업 위치">
+        <ReviewRow label={t("permissionEvaluationContextPanel.labelWorkingDir")}>
           <pre className="max-h-24 overflow-auto whitespace-pre-wrap break-all font-mono text-[11px]">
             {context.executionCwd}
           </pre>
         </ReviewRow>
-        <ReviewRow label="허용 경로">
+        <ReviewRow label={t("permissionEvaluationContextPanel.labelAllowedPaths")}>
           <pre className="max-h-24 overflow-auto whitespace-pre-wrap break-all font-mono text-[11px]">
-            {formatList(context.allowedDirectories, "허용 경로 없음")}
+            {formatList(context.allowedDirectories, t("permissionEvaluationContextPanel.emptyAllowedPaths"))}
           </pre>
         </ReviewRow>
-        <ReviewRow label="대상 경로">
+        <ReviewRow label={t("permissionEvaluationContextPanel.labelTargetPaths")}>
           <pre className="max-h-24 overflow-auto whitespace-pre-wrap break-all font-mono text-[11px]">
-            {formatList(context.targetFilePaths, "대상 경로 없음")}
+            {formatList(context.targetFilePaths, t("permissionEvaluationContextPanel.emptyTargetPaths"))}
           </pre>
         </ReviewRow>
-        <ReviewRow label="리뷰어 입력">
+        <ReviewRow label={t("permissionEvaluationContextPanel.labelReviewerInput")}>
           <pre className="max-h-24 overflow-auto whitespace-pre-wrap break-all font-mono text-[11px]">
             {[
               `framework=${context.reviewerFrameworkVersion}`,

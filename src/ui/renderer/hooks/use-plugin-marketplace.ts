@@ -2,6 +2,7 @@ import { useCallback, useState } from "react";
 import type { LvisApi } from "../types.js";
 import type { MarketplaceItem, PluginCardSummary, PluginUiExtension } from "../types.js";
 import { getHostMarketplaceApi } from "../host-marketplace-api.js";
+import { t } from "../../../i18n/runtime.js";
 
 /**
  * Phase reported by `lvis:plugins:install-progress` IPC events. Renderer
@@ -25,7 +26,7 @@ export function usePluginMarketplace(api: LvisApi) {
   // surfaces (plugin grid, settings tab, etc.) can read manifest-level
   // metadata like `auth` without going through their own card fetch.
   const [pluginCards, setPluginCards] = useState<PluginCardSummary[]>([]);
-  const [marketStatus, setMarketStatus] = useState("로딩 중...");
+  const [marketStatus, setMarketStatus] = useState(() => t("usePluginMarketplace.loading"));
   const [working, setWorking] = useState(false);
 
   const refreshViews = useCallback(async () => {
@@ -48,12 +49,12 @@ export function usePluginMarketplace(api: LvisApi) {
 
   const refreshMarketplace = useCallback(async () => {
     try {
-      setMarketStatus("로딩 중...");
+      setMarketStatus(t("usePluginMarketplace.loading"));
       const l = await api.listMarketplacePlugins();
       setMarketplace(l);
-      setMarketStatus(`플러그인 ${l.length}개`);
+      setMarketStatus(t("usePluginMarketplace.pluginCount", { count: l.length }));
     } catch (e) {
-      setMarketStatus(`실패: ${(e as Error).message}`);
+      setMarketStatus(t("usePluginMarketplace.loadFailed", { message: (e as Error).message }));
     }
   }, [api]);
 
@@ -72,9 +73,9 @@ export function usePluginMarketplace(api: LvisApi) {
         installedPluginId: result.pluginId,
         expectedVersion,
       });
-      setMarketStatus(`설치 완료: ${id}`);
+      setMarketStatus(t("usePluginMarketplace.installSuccess", { id }));
     } catch (e) {
-      setMarketStatus(`설치 실패: ${(e as Error).message}`);
+      setMarketStatus(t("usePluginMarketplace.installFailed", { message: (e as Error).message }));
       throw e;
     } finally {
       setWorking(false);
@@ -91,9 +92,9 @@ export function usePluginMarketplace(api: LvisApi) {
       await refreshMarketplace();
       await refreshViews();
       await refreshCards();
-      setMarketStatus(`제거 완료: ${id}`);
+      setMarketStatus(t("usePluginMarketplace.uninstallSuccess", { id }));
     } catch (e) {
-      setMarketStatus(`제거 실패: ${(e as Error).message}`);
+      setMarketStatus(t("usePluginMarketplace.uninstallFailed", { message: (e as Error).message }));
     } finally {
       setWorking(false);
     }
@@ -137,12 +138,16 @@ export function assertInstalledPluginVersion(
   );
   if (!card) {
     throw new Error(
-      `설치 검증 실패: ${input.requestedPluginId} manifest를 다시 읽지 못했습니다.`,
+      t("usePluginMarketplace.verifyFailedManifest", { id: input.requestedPluginId }),
     );
   }
   if (card.version !== expectedVersion) {
     throw new Error(
-      `설치 검증 실패: ${input.requestedPluginId} expected ${expectedVersion}, got ${card.version ?? "unknown"}`,
+      t("usePluginMarketplace.verifyFailedVersion", {
+        id: input.requestedPluginId,
+        expected: expectedVersion,
+        got: card.version ?? "unknown",
+      }),
     );
   }
 }

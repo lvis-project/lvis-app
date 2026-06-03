@@ -9,6 +9,7 @@ import type {
   AssistantContextMenuPersona,
 } from "../../shared/assistant-context-menu.js";
 import { UI } from "../../shared/ipc-channels.js";
+import { t } from "../../i18n/index.js";
 import { auditUnauthorized, UNAUTHORIZED_FRAME, validateSender } from "../gated.js";
 import type { IpcDeps } from "../types.js";
 
@@ -103,7 +104,7 @@ function buildAssistantContextMenu(
           checked: payload.activePersonaId === persona.id,
           click: () => sendAction(event, { requestId: payload.requestId, kind: "persona", id: persona.id }),
         }))
-        : [{ label: "사용 가능한 persona 없음", enabled: false }],
+        : [{ label: t("mainDialog.noPersonasAvailable"), enabled: false }],
     },
   ];
 

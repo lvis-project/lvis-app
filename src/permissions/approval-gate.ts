@@ -13,6 +13,7 @@
  */
 import { createHmac, randomBytes, timingSafeEqual } from "node:crypto";
 import type { WebContents } from "electron";
+import { t } from "../i18n/index.js";
 import type { PolicyFile } from "./policy-store.js";
 import type { AuditLogger } from "../audit/audit-logger.js";
 import type { NotificationService } from "../main/notification-service.js";
@@ -480,7 +481,7 @@ export class ApprovalGate {
     try {
       this.notificationService?.fire({
         kind: "approval",
-        title: "승인이 필요합니다",
+        title: t("be_approvalGate.notificationTitle"),
         body: `${fullReq.toolName}: ${fullReq.reason}`,
         contextRef: { approvalId: fullReq.id },
         urgent: true,

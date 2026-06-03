@@ -32,6 +32,8 @@ import {
   DialogTitle,
 } from "../../../components/ui/dialog.js";
 import type { AiProviderPingIpcResult } from "../../../shared/ai-provider-ping.js";
+import { t } from "../../../i18n/runtime.js";
+import { useTranslation } from "../../../i18n/react.js";
 
 export interface PersonalizedWelcomeApi {
   pingAiProvider: () => Promise<AiProviderPingIpcResult>;
@@ -60,12 +62,12 @@ type PingState =
 
 function pingFailureMessage(reason: string): string {
   if (reason === "not-configured") {
-    return "LLM 연결을 확인하지 못했습니다 — Settings 에서 API 키를 확인하세요.";
+    return t("personalizedWelcome.pingFailureApiKey");
   }
   if (/public access is disabled|private endpoint|enotfound|fetch failed|eai_again|etimedout|^timeout$/i.test(reason)) {
-    return "LLM private endpoint 연결을 확인하지 못했습니다 — VPN 또는 데모 host-map 을 확인하세요.";
+    return t("personalizedWelcome.pingFailurePrivateEndpoint");
   }
-  return "LLM 연결을 확인하지 못했습니다 — Settings 에서 API 키를 확인하세요.";
+  return t("personalizedWelcome.pingFailureApiKey");
 }
 
 function usePrefersReducedMotion(): boolean {
@@ -98,20 +100,21 @@ export function PersonalizedWelcome({
   api,
   onContinue,
 }: PersonalizedWelcomeProps) {
+  const { t } = useTranslation();
   const reduceMotion = usePrefersReducedMotion();
   const greeting = useMemo(() => {
     const trimmed = (nickname ?? "").trim();
-    if (trimmed.length === 0) return "안녕하세요 👋";
-    return `안녕하세요, ${trimmed}님 👋`;
-  }, [nickname]);
+    if (trimmed.length === 0) return t("personalizedWelcome.greetingAnonymous");
+    return t("personalizedWelcome.greetingNamed", { name: trimmed });
+  }, [nickname, t]);
 
   const introLine = useMemo(() => {
     const trimmed = (introduction ?? "").trim();
     if (trimmed.length === 0) {
-      return "LVIS 사용 준비를 시작해볼까요?";
+      return t("personalizedWelcome.introNoIntroduction");
     }
-    return `"${trimmed}" — 함께 시작해볼게요. LVIS 사용 준비를 시작합니다.`;
-  }, [introduction]);
+    return t("personalizedWelcome.introWithIntroduction", { introduction: trimmed });
+  }, [introduction, t]);
 
   const [pingState, setPingState] = useState<PingState>({ status: "loading" });
 
@@ -192,7 +195,7 @@ export function PersonalizedWelcome({
                 {greeting}
               </DialogTitle>
               <DialogDescription className="text-[11px]">
-                LVIS 가 준비를 마쳤습니다.
+                {t("personalizedWelcome.readySubtitle")}
               </DialogDescription>
             </div>
           </div>
@@ -218,7 +221,7 @@ export function PersonalizedWelcome({
                 aria-hidden="true"
                 className="inline-block h-2 w-2 animate-pulse rounded-full bg-primary"
               />
-              LLM 연결 확인 중…
+              {t("personalizedWelcome.pingLoading")}
             </div>
           )}
           {pingState.status === "success" && (
@@ -227,8 +230,7 @@ export function PersonalizedWelcome({
               className="rounded-md bg-success/10 px-2.5 py-1.5 text-[11px] text-success"
               role="status"
             >
-              LVIS 가 {pingState.vendor} · {pingState.model} 와{" "}
-              {pingState.latencyMs}ms 만에 연결됐어요.
+              {t("personalizedWelcome.pingSuccess", { vendor: pingState.vendor, model: pingState.model, latencyMs: pingState.latencyMs })}
             </div>
           )}
           {pingState.status === "failure" && (
@@ -252,7 +254,7 @@ export function PersonalizedWelcome({
                 "linear-gradient(135deg, hsl(var(--p-purple-500)), hsl(var(--p-blue-500)))",
             }}
           >
-            예, 시작할게요 →
+            {t("personalizedWelcome.continueButton")}
           </Button>
         </div>
       </DialogContent>

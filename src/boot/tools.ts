@@ -37,6 +37,7 @@ import { IdleSchedulerService, adaptPowerMonitor, type WorkerClientLite } from "
 import { fetchPublicHttpResponse } from "../core/network-guard.js";
 import { demoHostMapContainsHost } from "../main/demo-host-resolver.js";
 import { createLogger } from "../lib/logger.js";
+import { t } from "../i18n/index.js";
 const log = createLogger("lvis");
 
 type DemoHostResolverDeps = {
@@ -143,10 +144,7 @@ export function registerRequestPluginMetaTool(toolRegistry: ToolRegistry): void 
   // 실제 scope 확장은 ConversationLoop.queryLoop이 가로챈다.
   toolRegistry.register(createDynamicTool({
     name: "request_plugin",
-    description:
-      "현재 턴에 아직 선택되지 않은 enabled 플러그인 중 이번 작업에 필요한 것을 선택 요청합니다. " +
-      "요청 가능한 플러그인 목록은 system prompt '사용 가능한 플러그인' 섹션 참조. " +
-      "선택 후 같은 턴 내에서 해당 플러그인의 tool을 호출할 수 있습니다.",
+    description: t("be_tools.requestPluginDescription"),
     source: "builtin",
     category: "read",
     isReadOnly: () => true,
@@ -156,14 +154,14 @@ export function registerRequestPluginMetaTool(toolRegistry: ToolRegistry): void 
       properties: {
         pluginId: {
           type: "string",
-          description: "활성화할 플러그인 ID (카탈로그의 bold 부분)",
+          description: t("be_tools.requestPluginIdDescription"),
         },
       },
     },
     // Handled inline by ConversationLoop. If execution reaches this fallback,
     // the loop interception regressed; fail closed so traces expose it.
     execute: async () => ({
-      output: "request_plugin 오류: 대화 루프 interception 이 누락되었습니다.",
+      output: t("be_tools.requestPluginLoopError"),
       isError: true,
     }),
   }));
@@ -175,10 +173,7 @@ export function registerToolSearchMetaTool(toolRegistry: ToolRegistry): void {
   // ConversationLoop.queryLoop 이 가로챈다 (request_plugin 과 동일 패턴).
   toolRegistry.register(createDynamicTool({
     name: TOOL_SEARCH_TOOL_NAME,
-    description:
-      "system prompt 의 '<tool-catalog>' 에 나열된, 아직 로드되지 않은 도구를 검색해 " +
-      "이번 턴에 사용할 수 있도록 로드합니다. query 에 작업과 관련된 키워드(도구 이름 " +
-      "또는 기능 설명의 단어)를 주면 매칭되는 도구를 다음 라운드부터 호출할 수 있습니다.",
+    description: t("be_tools.toolSearchDescription"),
     source: "builtin",
     category: "read",
     isReadOnly: () => true,
@@ -188,14 +183,14 @@ export function registerToolSearchMetaTool(toolRegistry: ToolRegistry): void {
       properties: {
         query: {
           type: "string",
-          description: "찾으려는 도구의 이름 또는 기능 키워드",
+          description: t("be_tools.toolSearchQueryDescription"),
         },
       },
     },
     // Handled inline by ConversationLoop. If execution reaches this fallback,
     // the loop interception regressed; fail closed so traces expose it.
     execute: async () => ({
-      output: "tool_search 오류: 대화 루프 interception 이 누락되었습니다.",
+      output: t("be_tools.toolSearchLoopError"),
       isError: true,
     }),
   }));
@@ -356,15 +351,15 @@ export function registerBuiltinTools(
   const builtins: Tool[] = [
     createDynamicTool({
       name: "web_search",
-      description: "인터넷 검색을 통해 최신 정보나 지식을 찾습니다.",
+      description: t("be_tools.webSearchDescription"),
       source: "builtin",
       category: "read",
       isReadOnly: () => true,
       jsonSchema: {
         type: "object",
         properties: {
-          query: { type: "string", description: "검색어" },
-          count: { type: "integer", description: "반환할 결과 개수 (1-10)" },
+          query: { type: "string", description: t("be_tools.webSearchQueryDescription") },
+          count: { type: "integer", description: t("be_tools.webSearchCountDescription") },
         },
         required: ["query"],
       },
@@ -442,7 +437,7 @@ export function registerBuiltinTools(
           return {
             output: JSON.stringify({
               query,
-              error: "검색 중 오류 발생",
+              error: t("be_tools.webSearchError"),
               details: (error as Error).message,
             }),
             isError: true,
@@ -452,7 +447,7 @@ export function registerBuiltinTools(
     }),
     createDynamicTool({
       name: "web_fetch",
-      description: "특정 URL의 웹 페이지 내용을 읽어 텍스트로 변환합니다.",
+      description: t("be_tools.webFetchDescription"),
       source: "builtin",
       category: "read",
       categoryForInput: (input) => webFetchCategoryForInput(input, workflowDeps),
@@ -461,11 +456,10 @@ export function registerBuiltinTools(
       jsonSchema: {
         type: "object",
         properties: {
-          url: { type: "string", description: "읽어올 웹 페이지 URL" },
+          url: { type: "string", description: t("be_tools.webFetchUrlDescription") },
           allowPrivateNetwork: {
             type: "boolean",
-            description:
-              "사용자 승인 후 RFC1918/ULA 사설망 주소 접근을 허용합니다. loopback/link-local/metadata 주소는 계속 차단됩니다.",
+            description: t("be_tools.webFetchAllowPrivateNetworkDescription"),
           },
         },
         required: ["url"],
@@ -503,7 +497,7 @@ export function registerBuiltinTools(
           return {
             output: JSON.stringify({
               url,
-              error: "웹 페이지를 읽을 수 없습니다.",
+              error: t("be_tools.webFetchError"),
               details: (error as Error).message,
             }),
             isError: true,

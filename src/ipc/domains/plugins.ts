@@ -5,6 +5,7 @@
  *         lvis:notification:clicked
  */
 import { app, dialog, ipcMain, webContents } from "electron";
+import { t } from "../../i18n/index.js";
 import { realpathSync } from "node:fs";
 import { readFile } from "node:fs/promises";
 import path from "node:path";
@@ -497,9 +498,9 @@ export function registerPluginsHandlers(deps: IpcDeps): void {
       throw new Error("[security] dev mode not unlocked — enable a supported LVIS_DEV* flag in a non-packaged build");
     }
     const { filePaths, canceled } = await dialog.showOpenDialog({
-      title: "로컬 플러그인 설치 (개발자)",
+      title: t("mainDialog.installLocalPluginTitle"),
       properties: ["openDirectory"],
-      message: "plugin.json이 포함된 빌드 폴더를 선택하세요",
+      message: t("mainDialog.installLocalPluginMessage"),
     });
     if (canceled || !filePaths[0]) return null;
     const result = await pluginMarketplace.installLocal(filePaths[0]);
@@ -798,7 +799,7 @@ export function registerPluginsHandlers(deps: IpcDeps): void {
   ipcMain.handle("lvis:plugins:config:get", (e, pluginId: string) => {
     if (!validateSender(e)) {
       auditUnauthorized(auditLogger, "lvis:plugins:config:get", e);
-      return pluginConfigError("unauthorized-frame", "권한이 없는 프레임입니다.");
+      return pluginConfigError("unauthorized-frame", t("mainDialog.unauthorizedFrame"));
     }
     try {
       return { ok: true as const, config: settingsService.getPluginConfig(pluginId) };
@@ -810,7 +811,7 @@ export function registerPluginsHandlers(deps: IpcDeps): void {
   ipcMain.handle("lvis:plugins:config:set", async (e, pluginId: string, config: unknown) => {
     if (!validateSender(e)) {
       auditUnauthorized(auditLogger, "lvis:plugins:config:set", e);
-      return pluginConfigError("unauthorized-frame", "권한이 없는 프레임입니다.");
+      return pluginConfigError("unauthorized-frame", t("mainDialog.unauthorizedFrame"));
     }
     try {
       const manifest = pluginRuntime.getPluginManifest(pluginId);
@@ -838,7 +839,7 @@ export function registerPluginsHandlers(deps: IpcDeps): void {
   ipcMain.handle("lvis:plugins:config:schema:get", (e, pluginId: string) => {
     if (!validateSender(e)) {
       auditUnauthorized(auditLogger, "lvis:plugins:config:schema:get", e);
-      return pluginConfigError("unauthorized-frame", "권한이 없는 프레임입니다.");
+      return pluginConfigError("unauthorized-frame", t("mainDialog.unauthorizedFrame"));
     }
     try {
       const manifest = pluginRuntime.getPluginManifest(pluginId);
@@ -851,7 +852,7 @@ export function registerPluginsHandlers(deps: IpcDeps): void {
   ipcMain.handle("lvis:plugins:config:secret:set", async (e, pluginId: string, key: string, value: string) => {
     if (!validateSender(e)) {
       auditUnauthorized(auditLogger, "lvis:plugins:config:secret:set", e);
-      return pluginConfigError("unauthorized-frame", "권한이 없는 프레임입니다.");
+      return pluginConfigError("unauthorized-frame", t("mainDialog.unauthorizedFrame"));
     }
     try {
       const manifest = pluginRuntime.getPluginManifest(pluginId);
@@ -887,7 +888,7 @@ export function registerPluginsHandlers(deps: IpcDeps): void {
   ipcMain.handle("lvis:plugins:config:secret:list-keys", (e, pluginId: string) => {
     if (!validateSender(e)) {
       auditUnauthorized(auditLogger, "lvis:plugins:config:secret:list-keys", e);
-      return pluginConfigError("unauthorized-frame", "권한이 없는 프레임입니다.");
+      return pluginConfigError("unauthorized-frame", t("mainDialog.unauthorizedFrame"));
     }
     try {
       const manifest = pluginRuntime.getPluginManifest(pluginId);

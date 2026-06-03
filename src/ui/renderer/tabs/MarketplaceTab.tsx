@@ -11,6 +11,7 @@ import type { LvisApi, MarketplaceItem } from "../types.js";
 import type { MarketplacePackageType } from "../../../shared/assistant-context.js";
 import { SettingsPageHeader } from "../components/SettingsPageHeader.js";
 import { SettingsSection } from "../components/SettingsSection.js";
+import { useTranslation } from "../../../i18n/react.js";
 
 export interface MarketplaceTabProps {
   api: LvisApi;
@@ -30,6 +31,7 @@ export interface MarketplaceTabProps {
 }
 
 export function MarketplaceTab(props: MarketplaceTabProps) {
+  const { t, locale } = useTranslation();
   const {
     api,
     baseUrl,
@@ -44,7 +46,7 @@ export function MarketplaceTab(props: MarketplaceTabProps) {
     onImmediateChange,
   } = props;
   const [packages, setPackages] = useState<MarketplaceItem[]>([]);
-  const [packageStatus, setPackageStatus] = useState("로딩 중…");
+  const [packageStatus, setPackageStatus] = useState(() => t("marketplaceTab.statusLoading"));
   const [filter, setFilter] = useState<"all" | MarketplacePackageType>("all");
   const [workingSlug, setWorkingSlug] = useState<string | null>(null);
 
@@ -113,12 +115,12 @@ export function MarketplaceTab(props: MarketplaceTabProps) {
   }, [api, baseUrl]);
   const statusBadge = useMemo(() => {
     if (pingState.phase === "loading") {
-      return { dot: "bg-muted-foreground/40", label: "확인 중…" };
+      return { dot: "bg-muted-foreground/40", label: t("marketplaceTab.pingChecking") };
     }
-    if (!pingState.configured) return { dot: "bg-muted-foreground/40", label: "미연결" };
-    if (pingState.online) return { dot: "bg-success", label: "정상" };
-    return { dot: "bg-destructive", label: "응답 없음" };
-  }, [pingState]);
+    if (!pingState.configured) return { dot: "bg-muted-foreground/40", label: t("marketplaceTab.pingNotConnected") };
+    if (pingState.online) return { dot: "bg-success", label: t("marketplaceTab.pingOk") };
+    return { dot: "bg-destructive", label: t("marketplaceTab.pingNoResponse") };
+  }, [pingState, locale, t]);
   const openMarketplace = useCallback(() => {
     const url = baseUrl.trim();
     if (url) void api.openExternalUrl(url);
@@ -128,11 +130,11 @@ export function MarketplaceTab(props: MarketplaceTabProps) {
     try {
       const items = await api.listMarketplacePlugins();
       setPackages(items);
-      setPackageStatus(`패키지 ${items.length}개`);
+      setPackageStatus(t("marketplaceTab.packageCount", { count: String(items.length) }));
     } catch (err) {
-      setPackageStatus(`로드 실패: ${(err as Error).message}`);
+      setPackageStatus(t("marketplaceTab.loadFailed", { message: (err as Error).message }));
     }
-  }, [api]);
+  }, [api, t]);
 
   useEffect(() => {
     void refreshPackages();
@@ -163,11 +165,11 @@ export function MarketplaceTab(props: MarketplaceTabProps) {
       }
       await refreshPackages();
     } catch (err) {
-      setPackageStatus(`작업 실패: ${(err as Error).message}`);
+      setPackageStatus(t("marketplaceTab.operationFailed", { message: (err as Error).message }));
     } finally {
       setWorkingSlug(null);
     }
-  }, [api, refreshPackages]);
+  }, [api, refreshPackages, t]);
 
   const uninstallPackage = useCallback(async (item: MarketplaceItem) => {
     const packageType = item.pluginType ?? "plugin";
@@ -185,11 +187,11 @@ export function MarketplaceTab(props: MarketplaceTabProps) {
       }
       await refreshPackages();
     } catch (err) {
-      setPackageStatus(`작업 실패: ${(err as Error).message}`);
+      setPackageStatus(t("marketplaceTab.operationFailed", { message: (err as Error).message }));
     } finally {
       setWorkingSlug(null);
     }
-  }, [refreshPackages]);
+  }, [refreshPackages, t]);
 
   const filterOptions: Array<{ value: "all" | MarketplacePackageType; label: string }> = [
     { value: "all", label: "All" },
@@ -202,8 +204,8 @@ export function MarketplaceTab(props: MarketplaceTabProps) {
   return (
     <div className="space-y-6">
       <SettingsPageHeader
-        title="마켓플레이스"
-        description="플러그인 마켓플레이스 연결과 신뢰 정책을 설정합니다"
+        title={t("marketplaceTab.pageTitle")}
+        description={t("marketplaceTab.pageDescription")}
       />
 
       {/* ── Primary onboarding CTA ────────────────────────────
@@ -222,13 +224,13 @@ export function MarketplaceTab(props: MarketplaceTabProps) {
           disabled={!baseUrl.trim()}
           className="bg-gradient-to-r from-primary to-primary/80 px-6 py-5 text-base font-semibold shadow-md hover:from-primary/90 hover:to-primary/70"
           data-testid="marketplace:cta:open"
-          aria-label="마켓플레이스 웹페이지 열기"
+          aria-label={t("marketplaceTab.openMarketplaceAriaLabel")}
         >
           <Store className="mr-2 size-5" aria-hidden={true} />
-          마켓플레이스 열기 →
+          {t("marketplaceTab.openMarketplaceButton")}
         </Button>
         <p className="text-sm text-muted-foreground">
-          플러그인 · MCP · 에이전트 · 스킬을 둘러보세요
+          {t("marketplaceTab.browseCta")}
         </p>
         <div
           className="flex items-center gap-1.5 text-[11px] text-muted-foreground"
@@ -243,11 +245,11 @@ export function MarketplaceTab(props: MarketplaceTabProps) {
       </div>
 
       <SettingsSection
-        title="패키지 인벤토리"
+        title={t("marketplaceTab.inventoryTitle")}
         description={packageStatus}
         actions={
           <Button size="sm" variant="outline" className="h-7 text-xs" onClick={() => void refreshPackages()}>
-            새로고침
+            {t("marketplaceTab.refreshButton")}
           </Button>
         }
       >
@@ -267,7 +269,7 @@ export function MarketplaceTab(props: MarketplaceTabProps) {
         <ScrollArea className="h-64 rounded-md border">
           <div className="divide-y">
             {visiblePackages.length === 0 ? (
-              <div className="p-4 text-center text-xs text-muted-foreground">표시할 패키지가 없습니다.</div>
+              <div className="p-4 text-center text-xs text-muted-foreground">{t("marketplaceTab.emptyPackages")}</div>
             ) : visiblePackages.map((item) => {
               const packageType = item.pluginType ?? "plugin";
               const isWorking = workingSlug === item.id;
@@ -281,7 +283,7 @@ export function MarketplaceTab(props: MarketplaceTabProps) {
                       {packageType === "mcp" && item.mcpAuth?.mode === "oauth" && (
                         <Badge variant="secondary" className="h-5 px-1.5 text-[10px] uppercase">OAuth</Badge>
                       )}
-                      {item.installed && <Badge variant="default" className="h-5 px-1.5 text-[10px]">설치됨</Badge>}
+                      {item.installed && <Badge variant="default" className="h-5 px-1.5 text-[10px]">{t("marketplaceTab.installedBadge")}</Badge>}
                     </div>
                     <p className="mt-0.5 line-clamp-2 text-[11px] text-muted-foreground">{item.description || item.packageSpec}</p>
                     <p className="mt-0.5 font-mono text-[10px] text-muted-foreground">{item.id}</p>
@@ -293,7 +295,7 @@ export function MarketplaceTab(props: MarketplaceTabProps) {
                     disabled={isWorking || (item.installed && !canUninstall)}
                     onClick={() => void (item.installed ? uninstallPackage(item) : installPackage(item))}
                   >
-                    {isWorking ? "처리 중…" : item.installed ? "제거" : "설치"}
+                    {isWorking ? t("marketplaceTab.processingLabel") : item.installed ? t("marketplaceTab.removeButton") : t("marketplaceTab.installButton")}
                   </Button>
                 </div>
               );
@@ -309,8 +311,8 @@ export function MarketplaceTab(props: MarketplaceTabProps) {
           API key + private-network toggle) lives behind this collapse.
           Default-deployment users never have to interact with it. */}
       <SettingsSection
-        title="고급 옵션"
-        description="서버 URL · 인증 · 신뢰 정책. 기본 배포에서는 변경할 필요가 없습니다."
+        title={t("marketplaceTab.advancedTitle")}
+        description={t("marketplaceTab.advancedDescription")}
       >
         <button
           type="button"
@@ -320,23 +322,20 @@ export function MarketplaceTab(props: MarketplaceTabProps) {
           data-testid="marketplace:advanced:toggle"
         >
           <span className="inline-block w-3 text-xs leading-none">{advancedOpen ? "▾" : "▸"}</span>
-          {advancedOpen ? "고급 옵션 접기" : "고급 옵션 펼치기"}
+          {advancedOpen ? t("marketplaceTab.advancedCollapse") : t("marketplaceTab.advancedExpand")}
         </button>
 
         {advancedOpen && (
           <div className="space-y-4 pt-2" data-testid="marketplace:advanced:body">
             <div className="rounded-md border border-warning/40 bg-warning/15 px-3 py-2 text-[11px] text-warning">
-              설정은 저장 즉시 디스크에 기록되지만 <strong className="font-semibold">실제 적용 시점</strong> 은 항목마다 다릅니다 —
-              URL 변경은 마켓플레이스 오류 배너의 "다시 시도" 버튼으로 즉시 재시도,
-              API 키 변경은 앱 재시작 후 적용,
-              사설 네트워크 허용 토글은 다음 마켓플레이스 요청부터 즉시 적용됩니다.
+              {t("marketplaceTab.applyTimingWarning")}
             </div>
 
             {/* URL — draft state means typing doesn't churn the marketplace
                 endpoint on every keystroke; "저장" is disabled when draft
                 equals the committed value. */}
             <div className="space-y-2">
-              <Label className="text-sm font-medium">마켓플레이스 서버 URL</Label>
+              <Label className="text-sm font-medium">{t("marketplaceTab.serverUrlLabel")}</Label>
               <div className="flex items-center gap-2">
                 <Input
                   type="url"
@@ -351,24 +350,24 @@ export function MarketplaceTab(props: MarketplaceTabProps) {
                   size="sm"
                   onClick={commitUrl}
                   disabled={!isUrlDirty}
-                  title={isUrlDirty ? "변경된 URL을 저장합니다" : "변경 사항이 없습니다"}
+                  title={isUrlDirty ? t("marketplaceTab.urlSaveTitleDirty") : t("marketplaceTab.urlSaveTitleClean")}
                   data-testid="marketplace:url:save"
                 >
-                  저장
+                  {t("marketplaceTab.saveButton")}
                 </Button>
               </div>
               <p className="text-[11px] text-muted-foreground">
-                lvis-marketplace REST API 엔드포인트. 자체 배포 시 내부 호스트로 변경하세요. 비워두면 마켓플레이스 기능이 비활성화됩니다.
+                {t("marketplaceTab.serverUrlHelp")}
               </p>
             </div>
 
             {/* API key */}
             <div className="space-y-2">
-              <Label className="text-sm font-medium">API 키 (선택)</Label>
+              <Label className="text-sm font-medium">{t("marketplaceTab.apiKeyLabel")}</Label>
               <div className="flex items-center gap-2">
                 {hasApiKey
-                  ? <Badge variant="default" className="text-xs">설정됨</Badge>
-                  : <Badge variant="secondary" className="text-xs">미설정</Badge>}
+                  ? <Badge variant="default" className="text-xs">{t("marketplaceTab.apiKeySet")}</Badge>
+                  : <Badge variant="secondary" className="text-xs">{t("marketplaceTab.apiKeyNotSet")}</Badge>}
                 {hasApiKey && (
                   <Button
                     size="sm"
@@ -379,14 +378,14 @@ export function MarketplaceTab(props: MarketplaceTabProps) {
                       onSaved();
                     })}
                   >
-                    삭제
+                    {t("marketplaceTab.deleteApiKeyButton")}
                   </Button>
                 )}
               </div>
               <div className="flex items-center gap-2">
                 <Input
                   type="password"
-                  placeholder={hasApiKey ? "새 키로 교체" : "Bearer token (서버가 요구하는 경우)"}
+                  placeholder={hasApiKey ? t("marketplaceTab.apiKeyPlaceholderReplace") : t("marketplaceTab.apiKeyPlaceholderNew")}
                   value={apiKeyInput}
                   onChange={(e) => setApiKeyInput(e.target.value)}
                   onKeyDown={(e) => { if (e.key === "Enter" && apiKeyInput.trim()) commitApiKey(); }}
@@ -397,14 +396,14 @@ export function MarketplaceTab(props: MarketplaceTabProps) {
                   size="sm"
                   onClick={commitApiKey}
                   disabled={!apiKeyInput.trim()}
-                  title="API 키를 OS 키체인에 저장합니다"
+                  title={t("marketplaceTab.apiKeySaveTitle")}
                   data-testid="marketplace:apikey:save"
                 >
-                  저장
+                  {t("marketplaceTab.saveButton")}
                 </Button>
               </div>
               <p className="text-[11px] text-muted-foreground">
-                서버가 인증을 요구할 때만 입력하세요. 키는 OS 키체인에 암호화되어 저장됩니다.
+                {t("marketplaceTab.apiKeyHelp")}
               </p>
             </div>
 
@@ -424,13 +423,13 @@ export function MarketplaceTab(props: MarketplaceTabProps) {
                   id="marketplace-allow-private-network-label"
                   className="flex items-center gap-2 text-sm font-medium"
                 >
-                  사설 네트워크 허용 (loopback / RFC1918)
+                  {t("marketplaceTab.privateNetworkLabel")}
                   <span className="rounded-full bg-muted px-1.5 py-0.5 text-[9px] font-medium uppercase tracking-wide text-muted-foreground">
-                    즉시 적용
+                    {t("marketplaceTab.immediateApply")}
                   </span>
                 </p>
                 <p className="text-[11px] text-muted-foreground">
-                  로컬 또는 내부 마켓플레이스 서버에 접속할 때 활성화합니다. SSRF 가드를 우회하므로 외부 호스트(prod) 환경에서는 끄세요.
+                  {t("marketplaceTab.privateNetworkHelp")}
                 </p>
               </div>
             </div>

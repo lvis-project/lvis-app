@@ -18,6 +18,7 @@
 import type { ToolUseBlock } from "../../tools/executor.js";
 import { TOOL_SEARCH_TOOL_NAME } from "../../tools/registry.js";
 import { createLogger } from "../../lib/logger.js";
+import { t } from "../../i18n/index.js";
 const log = createLogger("lvis");
 
 /** Name of the meta-tool. SOT is the registry; re-exported here for the loop. */
@@ -184,19 +185,19 @@ export function handleToolSearch(
     if (typeof query !== "string" || query.trim().length === 0) {
       results.push({
         tool_use_id: tu.id,
-        content: "tool_search 오류: query (string) 필수.",
+        content: t("be_toolSearch.queryRequired"),
         is_error: true,
       });
     } else if (tokenizeQuery(query).length === 0) {
       results.push({
         tool_use_id: tu.id,
-        content: `tool_search 오류: query 에 ${MIN_CATALOG_MATCH_TOKEN_LENGTH}글자 이상의 검색 토큰이 필요합니다.`,
+        content: t("be_toolSearch.queryTokenTooShort", { minLen: String(MIN_CATALOG_MATCH_TOKEN_LENGTH) }),
         is_error: true,
       });
     } else if (turnSearches >= MAX_TOOL_SEARCH_PER_TURN) {
       results.push({
         tool_use_id: tu.id,
-        content: `tool_search 한도 초과 (턴당 최대 ${MAX_TOOL_SEARCH_PER_TURN}회). '${query}' 검색 거부.`,
+        content: t("be_toolSearch.turnLimitExceeded", { max: String(MAX_TOOL_SEARCH_PER_TURN), query }),
         is_error: true,
       });
     } else if (sessionSearches >= MAX_TOOL_SEARCH_PER_SESSION) {
@@ -206,7 +207,7 @@ export function handleToolSearch(
       );
       results.push({
         tool_use_id: tu.id,
-        content: `tool_search 세션 한도 초과 (세션당 최대 ${MAX_TOOL_SEARCH_PER_SESSION}회). '${query}' 검색 거부.`,
+        content: t("be_toolSearch.sessionLimitExceeded", { max: String(MAX_TOOL_SEARCH_PER_SESSION), query }),
         is_error: true,
       });
     } else {
@@ -220,7 +221,7 @@ export function handleToolSearch(
         alreadyLoadedToolNames.push(exactLoaded.name);
         results.push({
           tool_use_id: tu.id,
-          content: `${exactLoaded.name} 는 이미 로드되어 있습니다. 바로 호출하세요.`,
+          content: t("be_toolSearch.alreadyLoaded", { name: exactLoaded.name }),
           is_error: false,
         });
       } else {
@@ -233,15 +234,16 @@ export function handleToolSearch(
             for (const match of loadedMatches) alreadyLoadedToolNames.push(match.name);
             results.push({
               tool_use_id: tu.id,
-              content: `${loadedMatches.map((m) => m.name).join(", ")} 는 이미 로드되어 있습니다. 바로 호출하세요.`,
+              content: t("be_toolSearch.alreadyLoadedMultiple", { names: loadedMatches.map((m) => m.name).join(", ") }),
               is_error: false,
             });
           } else {
             results.push({
               tool_use_id: tu.id,
-              content:
-                `'${query}' 에 매치되는 미로드 도구 없음. ` +
-                `현재 카탈로그: ${state.catalog.map((c) => c.name).join(", ") || "(없음)"}`,
+              content: t("be_toolSearch.noMatchFound", {
+                query,
+                catalog: state.catalog.map((c) => c.name).join(", ") || t("be_toolSearch.catalogEmpty"),
+              }),
               is_error: true,
             });
           }
@@ -254,7 +256,7 @@ export function handleToolSearch(
           sessionSearches += 1;
           results.push({
             tool_use_id: tu.id,
-            content: `${matches.length}개 도구 로드됨: ${matches.map((m) => m.name).join(", ")}.`,
+            content: t("be_toolSearch.toolsPromoted", { count: String(matches.length), names: matches.map((m) => m.name).join(", ") }),
             is_error: false,
           });
         }

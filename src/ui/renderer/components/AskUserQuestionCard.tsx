@@ -25,6 +25,8 @@ import { forwardRef, useCallback, useEffect, useImperativeHandle, useMemo, useRe
 import { Button } from "../../../components/ui/button.js";
 import { Card, CardContent, CardHeader, CardTitle } from "../../../components/ui/card.js";
 import { Input } from "../../../components/ui/input.js";
+import { useTranslation } from "../../../i18n/react.js";
+import { t } from "../../../i18n/runtime.js";
 import type { LvisApi } from "../types.js";
 
 export interface AskUserQuestionItem {
@@ -122,11 +124,11 @@ function describeAnswer(item: AskUserQuestionItem, draft: DraftAnswer): string {
     const free = item.allowFreeText ? draft.freeText?.trim() : "";
     const parts = [...picks];
     if (free) parts.push(free);
-    return parts.length > 0 ? parts.join(", ") : "(미응답)";
+    return parts.length > 0 ? parts.join(", ") : t("askUserQuestionCard.noAnswer");
   }
   if (draft.choice) return draft.choice;
   if (item.allowFreeText && draft.freeText) return draft.freeText.trim();
-  return "(미응답)";
+  return t("askUserQuestionCard.noAnswer");
 }
 
 function effectiveChoices(item: AskUserQuestionItem): string[] {
@@ -162,6 +164,7 @@ export function AskUserQuestionCard({
   onResolved,
   className,
 }: AskUserQuestionCardProps) {
+  const { t } = useTranslation();
   const total = request.questions.length;
   const isMulti = total > 1;
   const [step, setStep] = useState(0);
@@ -280,7 +283,7 @@ export function AskUserQuestionCard({
   }, [currentItem, currentDraft, goNext]);
 
   const stepLabel = onConfirmStep
-    ? "검토"
+    ? t("askUserQuestionCard.reviewStep")
     : isMulti
       ? `${step + 1} / ${total}`
       : null;
@@ -288,7 +291,7 @@ export function AskUserQuestionCard({
   return (
     <Card
       ref={cardRef}
-      aria-label="질문 응답 카드"
+      aria-label={t("askUserQuestionCard.cardAriaLabel")}
       className={`w-full max-w-none border border-l-4 border-l-message-user bg-card shadow-none focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/40 ${className ?? ""}`}
       data-testid="ask-user-question-card"
       role="group"
@@ -328,7 +331,7 @@ export function AskUserQuestionCard({
       <CardHeader className="flex flex-row flex-wrap items-center justify-between gap-x-3 gap-y-1 px-3 pt-3 pb-1.5 space-y-0">
         <div className="flex min-w-0 items-center gap-2">
           <CardTitle className="text-[12px] font-medium text-muted-foreground">
-            ❓ 질문
+            ❓ {t("askUserQuestionCard.cardTitle")}
           </CardTitle>
           {stepLabel && (
             <span className="text-[10px] text-muted-foreground/70" data-testid="ask-step-label">
@@ -420,7 +423,7 @@ export function AskUserQuestionCard({
             onClick={dismiss}
             className="h-7 px-2 text-[11px]"
           >
-            건너뛰기
+            {t("askUserQuestionCard.skipButton")}
           </Button>
           <div className="flex items-center gap-2">
             {isMulti && step > 0 && (
@@ -431,7 +434,7 @@ export function AskUserQuestionCard({
                 onClick={goPrev}
                 className="h-7 px-3 text-[11px]"
               >
-                이전
+                {t("askUserQuestionCard.prevButton")}
               </Button>
             )}
             {isMulti && !onConfirmStep && (
@@ -445,7 +448,7 @@ export function AskUserQuestionCard({
                 onClick={goNext}
                 className="h-7 px-3 text-[11px]"
               >
-                {step === total - 1 ? "검토" : "다음"}
+                {step === total - 1 ? t("askUserQuestionCard.reviewStep") : t("askUserQuestionCard.nextButton")}
               </Button>
             )}
             {isMulti && onConfirmStep && (
@@ -456,7 +459,7 @@ export function AskUserQuestionCard({
                 onClick={submitAll}
                 className="h-7 px-3 text-[11px]"
               >
-                보내기
+                {t("askUserQuestionCard.sendButton")}
               </Button>
             )}
             {!isMulti &&
@@ -472,7 +475,7 @@ export function AskUserQuestionCard({
                   onClick={submitAll}
                   className="h-7 px-3 text-[11px]"
                 >
-                  보내기
+                  {t("askUserQuestionCard.sendButton")}
                 </Button>
               )}
           </div>
@@ -491,11 +494,12 @@ function KeyboardHint({
   isMulti: boolean;
   onConfirmStep: boolean;
 }) {
+  const { t } = useTranslation();
   const enterLabel = onConfirmStep
-    ? "보내기"
+    ? t("askUserQuestionCard.sendButton")
     : isMulti
-      ? "다음/검토"
-      : "보내기";
+      ? t("askUserQuestionCard.nextReviewLabel")
+      : t("askUserQuestionCard.sendButton");
   return (
     <div
       className="flex items-center gap-1.5 text-[10px] text-muted-foreground/70"
@@ -511,7 +515,7 @@ function KeyboardHint({
           <kbd className="rounded border bg-muted/50 px-1 py-[1px] font-mono text-[9px]">
             ↑↓
           </kbd>
-          <span>답변/수동입력 이동</span>
+          <span>{t("askUserQuestionCard.answerNavHint")}</span>
         </>
       )}
       {isMulti && (
@@ -520,7 +524,7 @@ function KeyboardHint({
           <kbd className="rounded border bg-muted/50 px-1 py-[1px] font-mono text-[9px]">
             ←→
           </kbd>
-          <span>질문 이동</span>
+          <span>{t("askUserQuestionCard.questionNavHint")}</span>
         </>
       )}
     </div>
@@ -559,6 +563,7 @@ function isTextEditingTarget(target: EventTarget | null): boolean {
  * outline (unselected) and filled primary (selected) button backgrounds.
  */
 function ChoiceBadge({ kind }: { kind: "recommend" | "alt" }) {
+  const { t } = useTranslation();
   const cls =
     kind === "recommend"
       ? "border border-current/60 text-inherit opacity-90"
@@ -568,7 +573,7 @@ function ChoiceBadge({ kind }: { kind: "recommend" | "alt" }) {
       className={`flex-shrink-0 rounded px-1.5 py-[1px] text-[9.5px] font-semibold tracking-wider ${cls}`}
       data-testid={`ask-badge-${kind}`}
     >
-      {kind === "recommend" ? "추천" : "대안"}
+      {kind === "recommend" ? t("askUserQuestionCard.badgeRecommend") : t("askUserQuestionCard.badgeAlt")}
     </span>
   );
 }
@@ -628,6 +633,7 @@ const QuestionForm = forwardRef<QuestionFormHandle, QuestionFormProps>(function 
   onSubmit,
   onAdvance,
 }, ref) {
+  const { t } = useTranslation();
   const choices = effectiveChoices(item);
   const recommend = recommendIndex(item);
   const alts = altIndices(item);
@@ -813,7 +819,7 @@ const QuestionForm = forwardRef<QuestionFormHandle, QuestionFormProps>(function 
             }
           }}
           onFocus={() => setFocusedIdx(freeTextIndex)}
-          placeholder={item.placeholder ?? "직접입력하기"}
+          placeholder={item.placeholder ?? t("askUserQuestionCard.freeTextPlaceholder")}
           className="h-8 text-[12px]"
           disabled={disabled}
           data-testid="ask-freetext-input"
@@ -832,10 +838,11 @@ function ConfirmReview({
   drafts: DraftAnswer[];
   onJumpTo: (idx: number) => void;
 }) {
+  const { t } = useTranslation();
   return (
     <div className="space-y-1.5" data-testid="ask-confirm-review">
       <div className="text-[10.5px] text-muted-foreground">
-        모든 답변을 확인한 뒤 보내기를 누르세요. 항목 클릭 또는 ←/→로 질문을 이동할 수 있습니다.
+        {t("askUserQuestionCard.confirmReviewInstruction")}
       </div>
       <ul className="space-y-1">
         {request.questions.map((item, i) => {

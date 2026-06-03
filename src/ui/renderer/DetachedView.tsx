@@ -25,6 +25,7 @@ import { PluginUiHostView } from "../../plugin-ui-host.js";
 import { usePluginMarketplace } from "./hooks/use-plugin-marketplace.js";
 import { useStarred } from "./hooks/use-starred.js";
 import { CustomTitleBar } from "./components/CustomTitleBar.js";
+import { useTranslation } from "../../i18n/react.js";
 
 // ─── Snap edge highlight overlay ─────────────────────────────────────────────
 
@@ -68,6 +69,7 @@ interface ContentProps {
 }
 
 function DetachedContent({ viewKey }: ContentProps) {
+  const { t } = useTranslation();
   const api = useMemo(() => getApi(), []);
   const { pluginViews, refreshViews } = usePluginMarketplace(api);
   const { starred, refreshStarred } = useStarred(api);
@@ -134,7 +136,7 @@ function DetachedContent({ viewKey }: ContentProps) {
 
   return (
     <div className="flex flex-1 items-center justify-center p-8 text-sm text-muted-foreground">
-      알 수 없는 뷰: {viewKey}
+      {t("detachedView.unknownView", { viewKey })}
     </div>
   );
 }

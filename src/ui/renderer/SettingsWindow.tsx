@@ -1,18 +1,20 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { TooltipProvider } from "../../components/ui/tooltip.js";
 import { normalizeSettingsTab } from "../../shared/settings-tabs.js";
+import { useTranslation } from "../../i18n/react.js";
 import { getApi } from "./api-client.js";
 import { SettingsContent } from "./SettingsContent.js";
 import { CustomTitleBar } from "./components/CustomTitleBar.js";
 import { ThemeProvider } from "./theme/index.js";
 
 export function SettingsWindow({ initialTab }: { initialTab: string }) {
+  const { t } = useTranslation();
   const api = useMemo(() => getApi(), []);
   const [tab, setTab] = useState(() => normalizeSettingsTab(initialTab));
 
   useEffect(() => {
-    document.title = "LVIS 설정";
-  }, []);
+    document.title = t("settingsWindow.documentTitle");
+  }, [t]);
 
   useEffect(() => {
     return api.onSettingsWindowTab((nextTab) => {

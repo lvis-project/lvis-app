@@ -10,6 +10,7 @@ import {
   type Attachment,
 } from "../types/attachments.js";
 import { collapsePath } from "../utils/attachment-markers.js";
+import { useTranslation } from "../../../i18n/react.js";
 
 const THUMB_MAX_PX = 48;
 
@@ -126,6 +127,7 @@ export function AttachmentChip({
   total: number;
   onOpenExternal?: (path: string) => void;
 }) {
+  const { t } = useTranslation();
   const [open, setOpen] = useState(false);
   return (
     <Popover open={open} onOpenChange={setOpen}>
@@ -133,9 +135,9 @@ export function AttachmentChip({
         <button
           type="button"
           data-testid="attachment-chip"
-          aria-label={`첨부 ${chipLabel(attachment)} — 정보 보기 또는 파일 열기`}
+          aria-label={t("attachmentChip.chipAriaLabel", { label: chipLabel(attachment) })}
           className="flex max-w-20 flex-col items-center gap-1 rounded-sm select-none focus:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2"
-          title="첨부 정보 보기 / 파일 열기"
+          title={t("attachmentChip.chipTitle")}
         >
           {attachment.kind === "image" ? (
             <ImageThumb att={attachment} />
@@ -182,6 +184,7 @@ export function AttachmentChipCollapsed({
   attachments: Attachment[];
   onOpenExternal?: (path: string) => void;
 }) {
+  const { t } = useTranslation();
   const [open, setOpen] = useState(false);
   const total = attachments.length;
   const isFull = total >= ATTACH_MAX_COUNT;
@@ -191,9 +194,9 @@ export function AttachmentChipCollapsed({
         <button
           type="button"
           data-testid="attachment-chip-collapsed"
-          aria-label={`첨부 ${total}개 — 목록 보기`}
+          aria-label={t("attachmentChip.collapsedAriaLabel", { total })}
           className="flex max-w-20 flex-col items-center gap-1 rounded-sm select-none focus:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2"
-          title="첨부 목록 보기"
+          title={t("attachmentChip.collapsedTitle")}
         >
           <StackVisual layers={total} />
           <span
@@ -235,14 +238,15 @@ export function AttachmentOverlay({
   attachments: Attachment[];
   onOpenExternal?: (path: string) => void;
 }) {
+  const { t } = useTranslation();
   return (
     <div data-testid="attachment-overlay-body">
       <div className="mb-2 flex items-center justify-between border-b border-border pb-1.5">
         <span className="text-xs font-semibold text-muted-foreground">
-          첨부 {attachments.length}개
+          {t("attachmentChip.overlayCount", { count: attachments.length })}
         </span>
         <span className="text-[10px] text-muted-foreground/70">
-          제거: textarea 의 [...#N] 삭제
+          {t("attachmentChip.overlayRemoveHint")}
         </span>
       </div>
       <div className="max-h-72 space-y-1 overflow-y-auto">
@@ -288,7 +292,7 @@ export function AttachmentOverlay({
                   ? `${att.mimeType} · ${att.width}×${att.height} · ${formatBytes(att.bytes)}`
                   : att.kind === "file"
                     ? `${att.ext.toUpperCase()} · ${formatBytes(att.bytes)}`
-                    : "클립보드에서 붙여넣음"}
+                    : t("attachmentChip.pastedFromClipboard")}
               </div>
             </div>
             {att.kind !== "paste" && onOpenExternal ? (
@@ -296,9 +300,9 @@ export function AttachmentOverlay({
                 type="button"
                 onClick={() => onOpenExternal(att.path)}
                 className="flex-shrink-0 rounded border border-border px-2 py-1 text-[10px] hover:bg-muted"
-                title="기본 앱으로 열기"
+                title={t("attachmentChip.openExternalTitle")}
               >
-                ↗ 열기
+                ↗ {t("attachmentChip.openExternalButton")}
               </button>
             ) : null}
           </div>

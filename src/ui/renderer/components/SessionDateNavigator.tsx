@@ -8,6 +8,7 @@ import {
   dateFromKey,
   getKoreaDateKey,
 } from "./SessionCalendarPopover.js";
+import { t } from "../../../i18n/runtime.js";
 
 /**
  * SessionDateNavigator — inline horizontal-rule + center date label that opens
@@ -105,10 +106,10 @@ export const SessionDateNavigator = memo(SessionDateNavigatorImpl);
 /** Formats a YYYY-MM-DD key as a human-readable label with 오늘/어제 annotation. */
 function formatDayLabel(dateKey: string): string {
   const todayKey = getKoreaDateKey(new Date());
-  if (dateKey === todayKey) return `${dateKey} (오늘)`;
+  if (dateKey === todayKey) return t("sessionDateNavigator.todayLabel", { dateKey });
   const y = new Date();
   y.setDate(y.getDate() - 1);
   const yKey = getKoreaDateKey(y);
-  if (dateKey === yKey) return `${dateKey} (어제)`;
+  if (dateKey === yKey) return t("sessionDateNavigator.yesterdayLabel", { dateKey });
   return dateKey;
 }

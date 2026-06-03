@@ -1,4 +1,5 @@
 import type { ThemeBundle } from "./types.js";
+import { t } from "../../../../i18n/runtime.js";
 
 /**
  * Catppuccin Latte — light pastel.
@@ -9,7 +10,7 @@ import type { ThemeBundle } from "./types.js";
 export const catppuccinLatteBundle: ThemeBundle = {
   id: "catppuccin-latte",
   name: "Catppuccin Latte",
-  description: "라이트 셸 + 모브 액센트 + 따뜻한 파스텔",
+  description: t("catppuccinLatte.description"),
   shell: "light",
   highContrast: false,
   tokens: {

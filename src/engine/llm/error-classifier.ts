@@ -2,6 +2,8 @@
  * Provider Error Classifier — LLM 오류를 사용자 친화적 메시지로 변환
  */
 
+import { t } from "../../i18n/index.js";
+
 export type ErrorCategory =
   | "api-key"
   | "rate-limit"
@@ -22,7 +24,7 @@ export function classifyProviderError(raw: string): ClassifiedError {
   if (/api_key|authentication|401|403|unauthorized/.test(lower)) {
     return {
       category: "api-key",
-      userMessage: "API 키가 유효하지 않거나 만료되었습니다. 설정에서 확인해주세요.",
+      userMessage: t("be_errorClassifier.invalidApiKey"),
       rawError: raw,
     };
   }
@@ -35,7 +37,7 @@ export function classifyProviderError(raw: string): ClassifiedError {
   if (/rate_limit|429|too many requests|requests per minute|tokens per minute|tpm|rpm|request too large|too large for/.test(lower)) {
     return {
       category: "rate-limit",
-      userMessage: "분당 처리 한도 초과 — 잠시 후 재시도하세요. 세부 한도와 재시도 시점은 provider diagnostics 를 확인하세요.",
+      userMessage: t("be_errorClassifier.rateLimitExceeded"),
       rawError: raw,
     };
   }
@@ -43,7 +45,7 @@ export function classifyProviderError(raw: string): ClassifiedError {
   if (/context_length|too many tokens|413|context window/.test(lower)) {
     return {
       category: "context-length",
-      userMessage: "대화 컨텍스트가 모델의 최대 입력 한도를 넘었습니다 — 자동 압축 또는 새 대화가 필요합니다.",
+      userMessage: t("be_errorClassifier.contextLengthExceeded"),
       rawError: raw,
     };
   }
@@ -51,7 +53,7 @@ export function classifyProviderError(raw: string): ClassifiedError {
   if (/model_not_found|404|invalid_model/.test(lower)) {
     return {
       category: "model",
-      userMessage: "선택한 모델을 찾을 수 없습니다. 설정에서 모델을 확인해주세요.",
+      userMessage: t("be_errorClassifier.modelNotFound"),
       rawError: raw,
     };
   }
@@ -59,14 +61,14 @@ export function classifyProviderError(raw: string): ClassifiedError {
   if (/fetch|econnrefused|enotfound|timeout/.test(lower)) {
     return {
       category: "network",
-      userMessage: "네트워크 연결 문제입니다.",
+      userMessage: t("be_errorClassifier.networkError"),
       rawError: raw,
     };
   }
 
   return {
     category: "unknown",
-    userMessage: `오류가 발생했습니다: ${raw}`,
+    userMessage: t("be_errorClassifier.unknownError", { raw }),
     rawError: raw,
   };
 }

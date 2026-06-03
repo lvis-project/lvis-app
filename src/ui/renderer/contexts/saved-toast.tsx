@@ -1,4 +1,5 @@
 import { createContext, useContext, useEffect, useState } from "react";
+import { useTranslation } from "../../../i18n/react.js";
 
 /**
  * Settings-wide "저장되었습니다" notifier — every successful save in the
@@ -49,6 +50,7 @@ export function useNotifySaved(): () => void {
  * re-fire the effect.
  */
 export function SavedToastFloating({ at }: { at: number | null }) {
+  const { t } = useTranslation();
   const [visible, setVisible] = useState(false);
   useEffect(() => {
     if (at == null) return;
@@ -65,7 +67,7 @@ export function SavedToastFloating({ at }: { at: number | null }) {
       className="pointer-events-none absolute left-1/2 top-2 z-20 flex -translate-x-1/2 items-center gap-1.5 rounded-full bg-success px-4 py-1.5 text-sm font-medium text-success-foreground shadow-lg ring-1 ring-success/40 motion-safe:animate-in motion-safe:fade-in motion-safe:slide-in-from-top-2 motion-safe:duration-200"
     >
       <span aria-hidden="true">✓</span>
-      <span>저장되었습니다</span>
+      <span>{t("savedToast.saved")}</span>
     </div>
   );
 }

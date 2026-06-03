@@ -3,6 +3,8 @@ import { Paperclip, User } from "lucide-react";
 import { Button } from "../../../components/ui/button.js";
 import { Checkbox } from "../../../components/ui/checkbox.js";
 import { Label } from "../../../components/ui/label.js";
+import { t } from "../../../i18n/runtime.js";
+import { useTranslation } from "../../../i18n/react.js";
 import { PluginGridButton, type PluginEntry } from "./PluginGridButton.js";
 import type { InstallPhase } from "../hooks/use-plugin-marketplace.js";
 import { CommandPopover, type QuickAction } from "./CommandPopover.js";
@@ -52,9 +54,9 @@ function attachButtonLabel(
   disabled: boolean,
   reason: "limit" | "no-api-key",
 ): string {
-  if (!disabled) return "파일/이미지 첨부 (최대 5개)";
-  if (reason === "no-api-key") return "첨부 비활성 — API 키 설정 후 사용 가능";
-  return "첨부 비활성 — 5/5 한도 도달";
+  if (!disabled) return t("inputActionBar.attachEnabled");
+  if (reason === "no-api-key") return t("inputActionBar.attachDisabledNoApiKey");
+  return t("inputActionBar.attachDisabledLimit");
 }
 
 export function InputActionBar({
@@ -81,11 +83,12 @@ export function InputActionBar({
   permissionSlot,
   approvalSlot,
 }: InputActionBarProps) {
+  const { t } = useTranslation();
   const assistantMenuRequestIdRef = useRef<string | null>(null);
   const hasAssistantContext = !!activePreset && !activePreset.isDefault;
   const assistantTitle = [
     activePreset && !activePreset.isDefault ? `Persona: ${activePreset.name}` : "",
-  ].filter(Boolean).join(" / ") || "Persona 선택";
+  ].filter(Boolean).join(" / ") || t("inputActionBar.selectPersona");
 
   const handleAssistantContextAction = useCallback((action: AssistantContextMenuAction) => {
     if (action.requestId !== assistantMenuRequestIdRef.current) return;

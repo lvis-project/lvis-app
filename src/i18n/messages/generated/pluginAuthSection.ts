@@ -1,0 +1,31 @@
+// AUTO-GENERATED — i18n migration. Source: src/ui/renderer/components/PluginAuthSection.tsx. Do not edit by hand.
+export const en = {
+  "pluginAuthSection.loginError": "Login failed. Please try again in a moment.",
+  "pluginAuthSection.logoutError": "Logout failed. Please try again in a moment.",
+  "pluginAuthSection.sectionHeading": "Auth",
+  "pluginAuthSection.working": "Processing…",
+  "pluginAuthSection.logoutButton": "Log out",
+  "pluginAuthSection.logoutHint": "Log out from the plugin screen",
+  "pluginAuthSection.checking": "Checking…",
+  "pluginAuthSection.loggingIn": "Logging in…",
+  "pluginAuthSection.openLoginWindow": "Open login window",
+  "pluginAuthSection.loginButton": "Log in",
+  "pluginAuthSection.badgeAuthed": "✓ Authenticated",
+  "pluginAuthSection.badgeUnauthed": "🔒 Not authenticated",
+  "pluginAuthSection.badgeError": "⚠ Error",
+} as const;
+export const ko: Record<keyof typeof en, string> = {
+  "pluginAuthSection.loginError": "로그인에 실패했습니다. 잠시 후 다시 시도해 주세요.",
+  "pluginAuthSection.logoutError": "로그아웃에 실패했습니다. 잠시 후 다시 시도해 주세요.",
+  "pluginAuthSection.sectionHeading": "인증",
+  "pluginAuthSection.working": "처리 중…",
+  "pluginAuthSection.logoutButton": "로그아웃",
+  "pluginAuthSection.logoutHint": "로그아웃은 플러그인 화면에서",
+  "pluginAuthSection.checking": "확인 중…",
+  "pluginAuthSection.loggingIn": "로그인 중…",
+  "pluginAuthSection.openLoginWindow": "로그인 창 열기",
+  "pluginAuthSection.loginButton": "로그인",
+  "pluginAuthSection.badgeAuthed": "✓ 인증됨",
+  "pluginAuthSection.badgeUnauthed": "🔒 미인증",
+  "pluginAuthSection.badgeError": "⚠ 오류",
+};

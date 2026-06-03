@@ -1,0 +1,33 @@
+// AUTO-GENERATED — i18n migration. Source: src/mcp/mcp-manager.ts. Do not edit by hand.
+export const en = {
+  "be_mcpManager.serverNotFound": "Server '{serverId}' not found.",
+  "be_mcpManager.invalidServerId": "Invalid server id.",
+  "be_mcpManager.invalidTransport": "Invalid transport: {transport}",
+  "be_mcpManager.stdioCommandRequired": "stdio server requires a command field.",
+  "be_mcpManager.httpUrlRequired": "http server requires a url field.",
+  "be_mcpManager.serverIdBlank": "Server id cannot be empty or whitespace-only.",
+  "be_mcpManager.governanceValidationFailed": "Governance validation failed (Layer {layer}): {reason}",
+  "be_mcpManager.serverIdAlreadyExists": "Server id '{id}' already exists.",
+  "be_mcpManager.apiKeyControlChars": "API key contains control characters (CR/LF, etc.).",
+  "be_mcpManager.apiKeyEmpty": "API key is empty.",
+  "be_mcpManager.apiKeyTooLong": "API key is too long (max 4096 characters).",
+  "be_mcpManager.serverNotApiKey": "Server '{id}' is not an API key auth server.",
+  "be_mcpManager.serverIdNotFound": "Server id '{id}' not found.",
+  "be_mcpManager.serverDoesNotExist": "Server '{serverId}' does not exist.",
+} as const;
+export const ko: Record<keyof typeof en, string> = {
+  "be_mcpManager.serverNotFound": "서버 '{serverId}'를 찾을 수 없습니다.",
+  "be_mcpManager.invalidServerId": "유효하지 않은 서버 id",
+  "be_mcpManager.invalidTransport": "유효하지 않은 transport: {transport}",
+  "be_mcpManager.stdioCommandRequired": "stdio 서버는 command 필드가 필요합니다.",
+  "be_mcpManager.httpUrlRequired": "http 서버는 url 필드가 필요합니다.",
+  "be_mcpManager.serverIdBlank": "서버 id가 비어있거나 공백만 포함할 수 없습니다.",
+  "be_mcpManager.governanceValidationFailed": "거버넌스 검증 실패 (Layer {layer}): {reason}",
+  "be_mcpManager.serverIdAlreadyExists": "서버 id '{id}'가 이미 존재합니다.",
+  "be_mcpManager.apiKeyControlChars": "API 키에 제어 문자(CR/LF 등)가 포함되어 있습니다.",
+  "be_mcpManager.apiKeyEmpty": "API 키가 비어있습니다.",
+  "be_mcpManager.apiKeyTooLong": "API 키가 너무 깁니다 (최대 4096자).",
+  "be_mcpManager.serverNotApiKey": "서버 '{id}'는 API key 인증 서버가 아닙니다.",
+  "be_mcpManager.serverIdNotFound": "서버 id '{id}'를 찾을 수 없습니다.",
+  "be_mcpManager.serverDoesNotExist": "서버 '{serverId}'가 존재하지 않습니다.",
+};

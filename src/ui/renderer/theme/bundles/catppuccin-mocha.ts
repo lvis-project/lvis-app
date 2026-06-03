@@ -1,4 +1,5 @@
 import type { ThemeBundle } from "./types.js";
+import { t } from "../../../../i18n/runtime.js";
 
 /**
  * Catppuccin Mocha — dark pastel.
@@ -11,7 +12,7 @@ import type { ThemeBundle } from "./types.js";
 export const catppuccinMochaBundle: ThemeBundle = {
   id: "catppuccin-mocha",
   name: "Catppuccin Mocha",
-  description: "다크 셸 + 모브 액센트 + 파스텔 오로라",
+  description: t("catppuccinMocha.description"),
   shell: "dark",
   highContrast: false,
   tokens: {
