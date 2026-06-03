@@ -132,11 +132,10 @@ export type OnboardingChainEvent =
   | { type: "tour-skip" }
   | { type: "plugins-close" }
   /**
-   * Emergency / external "collapse the rest of the chain to done"
-   * event. Used when the Live Auto-play demo takes over the screen
-   * mid-chain, or when any other surface decides the chain should
-   * unconditionally finish. Unlike the per-stage skip events this is
-   * always honored regardless of current stage.
+   * Emergency / external "collapse the rest of the chain to done" event,
+   * honored regardless of the current stage (unlike the per-stage skip
+   * events). Retained as a generic escape hatch for any surface that needs
+   * to unconditionally finish the chain.
    */
   | { type: "force-finish" }
   /**
