@@ -40,7 +40,6 @@ export interface InputActionBarProps {
   activePresetId: string;
   onSelectPreset: (id: string) => void;
   // Trailing — thinking
-  vendorSupportsThinking: boolean;
   enableThinkingChat: boolean;
   onToggleThinking: (enabled: boolean) => void | Promise<void>;
   // v6: 환경 컨트롤 — 첨부와 페르소나 사이. caller (ChatView) 가 실제 컴포넌트
@@ -77,7 +76,6 @@ export function InputActionBar({
   activePreset,
   activePresetId,
   onSelectPreset,
-  vendorSupportsThinking,
   enableThinkingChat,
   onToggleThinking,
   permissionSlot,

@@ -80,7 +80,6 @@ export interface ChatContextValue {
   attachmentNCounter: { current: number };
 
   // Thinking toggle
-  vendorSupportsThinking: boolean;
   enableThinkingChat: boolean;
   toggleThinking: (v: boolean) => Promise<void> | void;
 
