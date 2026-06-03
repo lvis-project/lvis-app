@@ -235,7 +235,7 @@ describe("LoginModal — chip-driven demo flow (activation → auth)", () => {
 
     await waitFor(() => {
       const err = document.querySelector('[data-testid="login-modal:error"]');
-      expect(err?.textContent).toBe("데모 자격증명이 올바르지 않습니다.");
+      expect(err?.textContent).toBe("활성화 키가 승인되지 않았습니다.");
     });
   });
 
@@ -251,9 +251,10 @@ describe("LoginModal — chip-driven demo flow (activation → auth)", () => {
 
     await waitFor(() => {
       const err = document.querySelector('[data-testid="login-modal:error"]');
-      // F3 — softened copy calls out LVIS_DEMO_VENDOR=azure-foundry.
-      expect(err?.textContent).toMatch(/데모 모드 설정 확인이 필요해요/);
-      expect(err?.textContent).toMatch(/LVIS_DEMO_VENDOR=azure-foundry/);
+      // Enterprise activation copy must NOT expose internal env var names —
+      // it points the user at their administrator instead.
+      expect(err?.textContent).toMatch(/활성화가 아직 설정되지 않았습니다/);
+      expect(err?.textContent).not.toMatch(/LVIS_DEMO_VENDOR/);
     });
   });
 
@@ -357,7 +358,7 @@ describe("LoginModal — chip-driven demo flow (activation → auth)", () => {
       const err = document.querySelector(
         '[data-testid="login-modal:activation-error"]',
       );
-      expect(err?.textContent).toMatch(/활성 코드가 올바르지 않아요/);
+      expect(err?.textContent).toMatch(/활성화 키가 올바르지 않아요/);
     });
     // Auth step MUST NOT fire when activation fails.
     expect(
