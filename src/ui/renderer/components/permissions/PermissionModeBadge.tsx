@@ -19,6 +19,7 @@ import { Inbox } from "lucide-react";
 import { useCallback, useEffect, useMemo, useState, type ReactElement } from "react";
 import { Badge } from "../../../../components/ui/badge.js";
 import { Button } from "../../../../components/ui/button.js";
+import { useTranslation } from "../../../../i18n/react.js";
 
 export type ModeBadgeVariant = "default" | "strict" | "auto" | "allow" | "unknown";
 
@@ -39,20 +40,20 @@ export interface PermissionModeBadgeProps {
   subscribe?: (handler: (mode: ModeBadgeVariant) => void) => () => void;
 }
 
-const MODE_LABELS: Record<ModeBadgeVariant, string> = {
-  default: "기본 · 읽기 허용",
-  strict: "전체 물어보기",
-  auto: "자동 검증 · 읽기 허용",
-  allow: "전체 허용 · 외부경로 승인",
-  unknown: "권한 확인",
+const MODE_LABEL_KEYS: Record<ModeBadgeVariant, string> = {
+  default: "permissionModeBadge.labelDefault",
+  strict: "permissionModeBadge.labelStrict",
+  auto: "permissionModeBadge.labelAuto",
+  allow: "permissionModeBadge.labelAllow",
+  unknown: "permissionModeBadge.labelUnknown",
 };
 
-const MODE_DESCRIPTIONS: Record<ModeBadgeVariant, string> = {
-  default: "기본: 읽기 허용, 변경 작업 승인 요청",
-  strict: "전체 물어보기: 읽기 포함 모든 도구 승인 요청",
-  auto: "자동 검증: 저위험 처리 + 자동(헤드리스) 실행과 대화형 채팅을 권한 리뷰어 검증",
-  allow: "전체 허용: 하드 차단 밖 자동 허용, 허용 디렉터리 밖 접근은 별도 승인",
-  unknown: "권한 모드 미확인",
+const MODE_DESCRIPTION_KEYS: Record<ModeBadgeVariant, string> = {
+  default: "permissionModeBadge.descDefault",
+  strict: "permissionModeBadge.descStrict",
+  auto: "permissionModeBadge.descAuto",
+  allow: "permissionModeBadge.descAllow",
+  unknown: "permissionModeBadge.descUnknown",
 };
 
 const MODE_COLOR_CLASSES: Record<ModeBadgeVariant, string> = {
@@ -77,6 +78,7 @@ export function PermissionModeBadge({
   onQueueClick,
   subscribe,
 }: PermissionModeBadgeProps): ReactElement {
+  const { t } = useTranslation();
   const [mode, setMode] = useState<ModeBadgeVariant>(modeOverride ?? "unknown");
   const [pendingPermissions, setPendingPermissions] = useState(0);
   const [pendingError, setPendingError] = useState<string | null>(null);
@@ -151,11 +153,13 @@ export function PermissionModeBadge({
 
   const queueVisible = pendingPermissions > 0 || pendingError !== null;
   const pendingText = pendingError
-    ? `, 큐 상태 확인 실패: ${pendingError}`
+    ? t("permissionModeBadge.pendingTextError", { error: pendingError })
     : pendingPermissions > 0
-      ? `, 대기 승인 ${pendingPermissions}건`
+      ? t("permissionModeBadge.pendingTextCount", { count: pendingPermissions })
       : "";
-  const queueLabel = pendingError ? "승인 확인 실패" : `승인 ${pendingPermissions}`;
+  const queueLabel = pendingError
+    ? t("permissionModeBadge.queueLabelError")
+    : t("permissionModeBadge.queueLabelCount", { count: pendingPermissions });
 
   return (
     <div className="inline-flex max-w-full min-w-0 items-center gap-1" data-testid="permission-policy-controls">
@@ -165,13 +169,13 @@ export function PermissionModeBadge({
         size="sm"
         onClick={handleClick}
         className="h-auto min-w-0 rounded-full p-0 hover:bg-transparent"
-        title={MODE_DESCRIPTIONS[mode]}
-        aria-label={`현재 권한 정책: ${MODE_DESCRIPTIONS[mode]}`}
+        title={t(MODE_DESCRIPTION_KEYS[mode])}
+        aria-label={t("permissionModeBadge.ariaLabelMode", { description: t(MODE_DESCRIPTION_KEYS[mode]) })}
         data-testid="permission-mode-badge"
         data-mode={mode}
       >
         <Badge variant="outline" className={`max-w-[9rem] truncate whitespace-nowrap text-[10px] ${MODE_COLOR_CLASSES[mode]}`}>
-          {MODE_LABELS[mode]}
+          {t(MODE_LABEL_KEYS[mode])}
         </Badge>
       </Button>
       {queueVisible && (
@@ -182,8 +186,8 @@ export function PermissionModeBadge({
           onClick={onQueueClick}
           disabled={!onQueueClick}
           className="h-auto min-w-0 rounded-full p-0 hover:bg-transparent"
-          title={`보류된 승인 큐 열기${pendingText}`}
-          aria-label={`보류된 승인 큐 열기${pendingText}`}
+          title={t("permissionModeBadge.queueButtonLabel", { pendingText })}
+          aria-label={t("permissionModeBadge.queueButtonLabel", { pendingText })}
           data-testid="permission-queue-button"
         >
           <Badge

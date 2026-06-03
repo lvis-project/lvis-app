@@ -1,6 +1,7 @@
 import { homedir } from "node:os";
 import { isAbsolute, resolve as pathResolve } from "node:path";
 
+import { t } from "../i18n/index.js";
 import { validateSandboxPath } from "../sandbox/path-validator.js";
 import {
   canonicalizePathForMatch,
@@ -192,20 +193,20 @@ export function validateShellCommandPathPolicy(
  */
 const LVIS_ALTERNATIVE_BY_COMMAND: Readonly<Record<string, string>> = {
   // Traversal commands (RECURSIVE_TRAVERSAL_COMMANDS):
-  find: "glob_files (이름 패턴 매칭) 또는 list_files (디렉토리 목록)",
-  fd: "glob_files (이름 패턴 매칭)",
-  fdfind: "glob_files (이름 패턴 매칭)",
-  rg: "grep_files (콘텐츠 검색)",
-  tree: "list_files (재귀 옵션 포함)",
-  tar: "(LVIS 내장 대안 없음 — 비재귀 ls/cat 등으로 분해하세요)",
-  unzip: "(LVIS 내장 대안 없음)",
-  zip: "(LVIS 내장 대안 없음)",
+  find: "be_shellPathPolicy.altFind",
+  fd: "be_shellPathPolicy.altFd",
+  fdfind: "be_shellPathPolicy.altFdfind",
+  rg: "be_shellPathPolicy.altRg",
+  tree: "be_shellPathPolicy.altTree",
+  tar: "be_shellPathPolicy.altTar",
+  unzip: "be_shellPathPolicy.altUnzip",
+  zip: "be_shellPathPolicy.altZip",
   // Flag-recursive commands (RECURSIVE_FLAG_COMMANDS):
-  grep: "grep_files (콘텐츠 검색)",
-  egrep: "grep_files (콘텐츠 검색 — 정규식)",
-  fgrep: "grep_files (콘텐츠 검색 — 고정 문자열)",
-  cp: "(LVIS 내장 대안 없음 — read_file + write_file 조합으로 개별 파일 처리)",
-  mv: "move_file (개별 파일 단위로)",
+  grep: "be_shellPathPolicy.altGrep",
+  egrep: "be_shellPathPolicy.altEgrep",
+  fgrep: "be_shellPathPolicy.altFgrep",
+  cp: "be_shellPathPolicy.altCp",
+  mv: "be_shellPathPolicy.altMv",
 };
 
 function buildRecursiveBlockMessage(
@@ -216,10 +217,11 @@ function buildRecursiveBlockMessage(
   const head = flag
     ? `Sandbox: recursive shell filesystem traversal is not allowed: ${commandToken} ${flag}`
     : `Sandbox: recursive shell filesystem traversal is not allowed: ${commandToken}`;
-  const alt = LVIS_ALTERNATIVE_BY_COMMAND[commandName];
+  const altKey = LVIS_ALTERNATIVE_BY_COMMAND[commandName];
+  const alt = altKey ? t(altKey) : undefined;
   const guidance = alt
-    ? ` LVIS 내장 도구 권장: ${alt}. 원래 target path 를 그대로 유지하세요 — 하위 디렉토리로 좁히지 마세요.`
-    : " 재귀 walk 는 path-policy 가 정적으로 검증할 수 없어 차단됩니다. 비재귀 명령으로 다시 시도하거나, 원래 target path 를 그대로 유지한 채 LVIS 내장 파일 도구를 사용하세요.";
+    ? ` ${t("be_shellPathPolicy.guidanceWithAlt", { alt })}`
+    : ` ${t("be_shellPathPolicy.guidanceNoAlt")}`;
   return head + guidance;
 }
 

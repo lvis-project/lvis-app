@@ -1,6 +1,7 @@
 import { Loader2, Star, RefreshCw, GitBranch, ThumbsUp, ThumbsDown, AlertTriangle } from "lucide-react";
 import ReactMarkdown from "react-markdown";
 import { memo, useMemo, useState } from "react";
+import { useTranslation } from "../../../i18n/react.js";
 import { Button } from "../../../components/ui/button.js";
 import { Input } from "../../../components/ui/input.js";
 import { Tooltip, TooltipContent, TooltipTrigger } from "../../../components/ui/tooltip.js";
@@ -25,6 +26,7 @@ function AssistantCardImpl({
   isFinal?: boolean;
   embedded?: boolean;
 }) {
+  const { t } = useTranslation();
   const [feedbackRating, setFeedbackRating] = useState<"up" | "down" | null>(null);
   const [showReasonBox, setShowReasonBox] = useState(false);
   const [reasonDraft, setReasonDraft] = useState("");
@@ -34,15 +36,15 @@ function AssistantCardImpl({
   const isSystemNotice = entry.systemNotice !== undefined;
   const systemNoticeLabel =
     entry.systemNotice === "context-error"
-      ? "시스템 알림 — 모델 한도 초과"
+      ? t("assistantCard.systemNoticeContextError")
       : entry.systemNotice === "stream-error"
-        ? "시스템 알림 — 응답 스트림 오류"
-        : "시스템 알림";
+        ? t("assistantCard.systemNoticeStreamError")
+        : t("assistantCard.systemNotice");
   const title = isSystemNotice
     ? systemNoticeLabel
     : entry.streaming
-      ? "LVIS 응답 작성 중"
-      : "LVIS 응답";
+      ? t("assistantCard.titleStreaming")
+      : t("assistantCard.title");
   const displayText = useMemo(() => detectFromStream(entry.text || "").cleanedText, [entry.text]);
   const renderedText = useMemo(() => replaceToolNamesInText(displayText), [displayText]);
   const markdownText = entry.route === "command" ? preserveCommandLineBreaks(renderedText) : renderedText;
@@ -79,11 +81,11 @@ function AssistantCardImpl({
                     size="icon"
                     className="h-5 w-5 text-muted-foreground hover:text-foreground"
                     onClick={actions.onRetry}
-                    title="다시 시도 (깊이: high)"
+                    title={t("assistantCard.retryButton")}
                   >
                     <RefreshCw className="h-3 w-3" />
                   </Button>
-                </TooltipTrigger><TooltipContent>다시 시도 (깊이: high)</TooltipContent></Tooltip>
+                </TooltipTrigger><TooltipContent>{t("assistantCard.retryButton")}</TooltipContent></Tooltip>
               )}
               {actions.onFork && (
                 <Button
@@ -92,7 +94,7 @@ function AssistantCardImpl({
                   size="icon"
                   className="h-5 w-5 text-muted-foreground hover:text-foreground"
                   onClick={actions.onFork}
-                  title="분기"
+                  title={t("assistantCard.forkButton")}
                 >
                   <GitBranch className="h-3 w-3" />
                 </Button>
@@ -104,7 +106,7 @@ function AssistantCardImpl({
                   size="icon"
                   className="h-5 w-5 text-muted-foreground hover:text-foreground"
                   onClick={actions.onToggleStar}
-                  title="즐겨찾기"
+                  title={t("assistantCard.starButton")}
                 >
                   <Star key={isStarred ? "on" : "off"} className={`h-3 w-3 ${isStarred ? "fill-emphasis text-emphasis lvis-anim-star" : ""}`} />
                 </Button>
@@ -120,7 +122,7 @@ function AssistantCardImpl({
       >
         <ReactMarkdown remarkPlugins={MARKDOWN_REMARK_PLUGINS}>
           {entry.streaming
-            ? clampDanglingMarkdownLink(markdownText) || "응답을 작성하는 중..."
+            ? clampDanglingMarkdownLink(markdownText) || t("assistantCard.streamingPlaceholder")
             : markdownText}
         </ReactMarkdown>
       </div>
@@ -140,12 +142,12 @@ function AssistantCardImpl({
                   setShowReasonBox(false);
                   void onFeedback("up");
                 }}
-                aria-label="도움이 됐어요"
+                aria-label={t("assistantCard.feedbackUp")}
               >
                 <ThumbsUp key={feedbackRating === "up" ? "on" : "off"} className={`h-3.5 w-3.5 ${feedbackRating === "up" ? "fill-success lvis-anim-pop" : ""}`} />
               </Button>
             </TooltipTrigger>
-            <TooltipContent>도움이 됐어요</TooltipContent>
+            <TooltipContent>{t("assistantCard.feedbackUp")}</TooltipContent>
           </Tooltip>
           <Tooltip>
             <TooltipTrigger asChild>
@@ -158,19 +160,19 @@ function AssistantCardImpl({
                   if (feedbackRating === "down") return;
                   setShowReasonBox(true);
                 }}
-                aria-label="개선이 필요해요"
+                aria-label={t("assistantCard.feedbackDown")}
               >
                 <ThumbsDown key={feedbackRating === "down" ? "on" : "off"} className={`h-3.5 w-3.5 ${feedbackRating === "down" ? "fill-destructive lvis-anim-pop" : ""}`} />
               </Button>
             </TooltipTrigger>
-            <TooltipContent>개선이 필요해요</TooltipContent>
+            <TooltipContent>{t("assistantCard.feedbackDown")}</TooltipContent>
           </Tooltip>
           {showReasonBox && feedbackRating !== "down" ? (
             <div className="ml-1 flex items-center gap-1">
               <Input
                 type="text"
                 maxLength={200}
-                placeholder="이유 (선택)"
+                placeholder={t("assistantCard.reasonPlaceholder")}
                 value={reasonDraft}
                 onChange={(e) => setReasonDraft(e.target.value)}
                 className="h-6 w-40 px-2 text-xs"
@@ -196,7 +198,7 @@ function AssistantCardImpl({
                   void onFeedback("down", reasonDraft.trim() || undefined);
                 }}
               >
-                전송
+                {t("assistantCard.sendButton")}
               </Button>
             </div>
           ) : null}

@@ -12,6 +12,8 @@ import type { McpServerConfig, McpServerConfigDto, McpServerState } from "../typ
 import { LONG_TOAST_TTL_MS } from "../constants.js";
 import { useNotifySaved } from "../contexts/saved-toast.js";
 import { SettingsPageHeader } from "../components/SettingsPageHeader.js";
+import { t } from "../../../i18n/runtime.js";
+import { useTranslation } from "../../../i18n/react.js";
 
 // ─── Helper types re-exported from renderer/types.ts ─
 // McpServerConfig / McpServerState 는 window.lvis.mcp 의 반환 타입
@@ -25,12 +27,15 @@ const STATUS_BADGE: Record<McpServerState["status"], string> = {
   error: "bg-destructive/15 text-destructive",
 };
 
-const STATUS_LABEL: Record<McpServerState["status"], string> = {
-  connected: "연결됨",
-  connecting: "연결 중",
-  disconnected: "연결 해제",
-  error: "오류",
-};
+function getStatusLabel(status: McpServerState["status"]): string {
+  const labels: Record<McpServerState["status"], string> = {
+    connected: t("mcpTab.statusConnected"),
+    connecting: t("mcpTab.statusConnecting"),
+    disconnected: t("mcpTab.statusDisconnected"),
+    error: t("mcpTab.statusError"),
+  };
+  return labels[status];
+}
 
 const EMPTY_FORM = {
   id: "",
@@ -94,7 +99,7 @@ export function parseCliWords(input: string): string[] {
   }
 
   if (escaping || quote) {
-    throw new Error("인용부호 또는 이스케이프가 닫히지 않았습니다.");
+    throw new Error(t("mcpTab.parseCliWordsUnclosed"));
   }
   if (current) tokens.push(current);
   return tokens;
@@ -116,13 +121,13 @@ export function validateAuthApiKey(
   apiKey: string,
 ): string | null {
   if (auth === "sso") {
-    return "SSO 인증은 아직 지원되지 않습니다.";
+    return t("mcpTab.ssoNotSupported");
   }
   if (auth === "api-key" && !apiKey.trim()) {
-    return "API Key 인증 방식은 API Key를 입력해야 합니다.";
+    return t("mcpTab.apiKeyRequired");
   }
   if (auth === "none" && apiKey.trim()) {
-    return "인증 방식이 '없음'일 때 API Key를 입력할 수 없습니다.";
+    return t("mcpTab.apiKeyNotAllowedWithNoneAuth");
   }
   return null;
 }
@@ -154,8 +159,8 @@ function parseKeyValueLines(input: string, delimiter: ":" | "="): Record<string,
       if (index <= 0) {
         throw new Error(
           delimiter === ":"
-            ? "Headers는 한 줄에 HEADER: value 형식이어야 합니다."
-            : "Env는 한 줄에 KEY=value 형식이어야 합니다.",
+            ? t("mcpTab.headersFormatError")
+            : t("mcpTab.envFormatError"),
         );
       }
       return [line.slice(0, index).trim(), line.slice(index + 1).trim()];
@@ -164,6 +169,7 @@ function parseKeyValueLines(input: string, delimiter: ":" | "="): Record<string,
 }
 
 export function McpTab() {
+  const { t } = useTranslation();
   const notifySaved = useNotifySaved();
   const formIdPrefix = useId();
   const formIds = {
@@ -224,7 +230,7 @@ export function McpTab() {
       setConfigs(configsRes);
       setConfigPath(configPathRes);
     } catch (e) {
-      setError((e as Error).message ?? "데이터를 불러오지 못했습니다.");
+      setError((e as Error).message ?? t("mcpTab.fetchError"));
     } finally {
       setLoading(false);
     }
@@ -239,7 +245,7 @@ export function McpTab() {
     async (id: string) => {
       try {
         await window.lvis.mcp.kill(id);
-        showBanner("success", `${id} 연결이 해제되었습니다.`);
+        showBanner("success", t("mcpTab.killSuccess", { id }));
         void fetchAll();
       } catch (e) {
         showBanner("error", e instanceof Error ? e.message : String(e));
@@ -257,7 +263,7 @@ export function McpTab() {
       try {
         await window.lvis.mcp.removeConfig(id);
         await fetchAll();
-        showBanner("success", `${id} 서버가 제거되었습니다.`);
+        showBanner("success", t("mcpTab.removeSuccess", { id }));
         notifySaved();
       } catch (e) {
         showBanner("error", e instanceof Error ? e.message : String(e));
@@ -272,7 +278,7 @@ export function McpTab() {
   const handleSetApiKey = useCallback(async () => {
     if (!credentialTargetId) return;
     if (!credentialApiKey.trim()) {
-      showBanner("error", "API Key를 입력하세요.");
+      showBanner("error", t("mcpTab.apiKeyEmpty"));
       return;
     }
     setCredentialBusy(true);
@@ -284,8 +290,8 @@ export function McpTab() {
       showBanner(
         result.connected ? "success" : "error",
         result.connected
-          ? `${credentialTargetId} API Key가 저장되고 연결되었습니다.`
-          : `${credentialTargetId} API Key는 저장되었지만 연결 실패: ${result.warning ?? "원인 불명"}`,
+          ? t("mcpTab.apiKeySavedConnected", { id: credentialTargetId })
+          : t("mcpTab.apiKeySavedNotConnected", { id: credentialTargetId, warning: result.warning ?? t("mcpTab.unknownCause") }),
       );
       notifySaved();
     } catch (e) {
@@ -297,13 +303,13 @@ export function McpTab() {
 
   // 서버 추가
   const handleAdd = useCallback(async () => {
-    if (!form.id.trim()) { showBanner("error", "서버 ID를 입력하세요."); return; }
+    if (!form.id.trim()) { showBanner("error", t("mcpTab.serverIdRequired")); return; }
     if (form.transport === "stdio" && !form.command.trim()) {
-      showBanner("error", "stdio 서버는 실행 명령(command)이 필요합니다.");
+      showBanner("error", t("mcpTab.stdioCommandRequired"));
       return;
     }
     if (form.transport === "http" && !form.url.trim()) {
-      showBanner("error", "http 서버는 URL이 필요합니다.");
+      showBanner("error", t("mcpTab.httpUrlRequired"));
       return;
     }
 
@@ -321,7 +327,7 @@ export function McpTab() {
       if (form.transport === "stdio") {
         const [command, ...inlineArgs] = splitCommandLine(form.command);
         if (!command) {
-          showBanner("error", "stdio 실행 파일을 입력하세요.");
+          showBanner("error", t("mcpTab.stdioExecutableRequired"));
           return;
         }
         const extraArgs = form.args.trim() ? parseCliWords(form.args) : [];
@@ -357,8 +363,8 @@ export function McpTab() {
       showBanner(
         result.connected ? "success" : "error",
         result.connected
-          ? `${config.id} 서버가 추가되고 연결되었습니다.`
-          : `${config.id} 서버 설정은 저장되었지만 연결 실패: ${result.warning ?? "원인 불명"}`,
+          ? t("mcpTab.serverAddedConnected", { id: config.id })
+          : t("mcpTab.serverAddedNotConnected", { id: config.id, warning: result.warning ?? t("mcpTab.unknownCause") }),
       );
       notifySaved();
       void fetchAll();
@@ -381,8 +387,8 @@ export function McpTab() {
   return (
     <div className="space-y-6">
       <SettingsPageHeader
-        title="MCP 서버"
-        description="MCP 서버 구성과 도구 노출을 관리합니다"
+        title={t("mcpTab.pageTitle")}
+        description={t("mcpTab.pageDescription")}
       />
 
       <div className="flex flex-col gap-4">
@@ -404,25 +410,25 @@ export function McpTab() {
 
         {/* ── Section A: 서버 목록 ────────────────────── */}
         <div className="flex items-center justify-between">
-          <h3 className="text-sm font-semibold text-foreground">MCP 서버</h3>
+          <h3 className="text-sm font-semibold text-foreground">{t("mcpTab.pageTitle")}</h3>
           <div className="flex gap-2">
             <Button variant="outline" size="sm" onClick={() => void fetchAll()} disabled={loading}>
-              새로고침
+              {t("mcpTab.refreshButton")}
             </Button>
             <Button size="sm" onClick={() => setShowForm((v) => !v)}>
-              {showForm ? "취소" : "+ 서버 추가"}
+              {showForm ? t("mcpTab.cancelButton") : t("mcpTab.addServerButton")}
             </Button>
           </div>
         </div>
 
         {loading ? (
-          <p className="text-xs text-muted-foreground">로딩 중…</p>
+          <p className="text-xs text-muted-foreground">{t("mcpTab.loading")}</p>
         ) : allIds.size === 0 ? (
           <div className="rounded-md border border-dashed p-4 text-center text-xs text-muted-foreground">
-            등록된 MCP 서버가 없습니다.
+            {t("mcpTab.emptyState")}
             <br />
             <span className="text-xs">
-              설정 파일: <code>{configPath}</code>
+              {t("mcpTab.configFileLabel")} <code>{configPath}</code>
             </span>
           </div>
         ) : (
@@ -439,7 +445,7 @@ export function McpTab() {
                         <div className="flex items-center gap-2">
                           <span className="font-mono text-xs font-semibold truncate">{id}</span>
                           <Badge className={`text-[10px] px-1.5 py-0 ${STATUS_BADGE[status]}`}>
-                            {STATUS_LABEL[status]}
+                            {getStatusLabel(status)}
                           </Badge>
                           {cfg && (
                             <Badge variant="outline" className="text-[10px] px-1.5 py-0">
@@ -454,7 +460,7 @@ export function McpTab() {
                         </div>
                         {st?.registeredTools.length ? (
                           <p className="mt-1 text-[11px] text-muted-foreground">
-                            도구: {st.registeredTools.join(", ")}
+                            {t("mcpTab.toolsLabel")} {st.registeredTools.join(", ")}
                           </p>
                         ) : null}
                         {st?.lastError && (
@@ -462,12 +468,12 @@ export function McpTab() {
                         )}
                         {st?.connectedAt && (
                           <p className="mt-0.5 text-[10px] text-muted-foreground">
-                            연결: {new Date(st.connectedAt).toLocaleString()}
+                            {t("mcpTab.connectedAtLabel")} {new Date(st.connectedAt).toLocaleString()}
                           </p>
                         )}
                         {cfg?.transport === "stdio" && cfg.command && (
                           <p className="mt-0.5 text-[10px] text-muted-foreground font-mono truncate">
-                            실행: {cfg.command}
+                            {t("mcpTab.commandLabel")} {cfg.command}
                           </p>
                         )}
                         {cfg?.transport === "http" && cfg.url && (
@@ -487,7 +493,7 @@ export function McpTab() {
                               setCredentialApiKey("");
                             }}
                           >
-                            키 설정
+                            {t("mcpTab.setKeyButton")}
                           </Button>
                         )}
                         {status === "connected" && (
@@ -497,7 +503,7 @@ export function McpTab() {
                             className="h-6 text-xs px-2 text-warning border-warning/40"
                             onClick={() => void handleKill(id)}
                           >
-                            킬
+                            {t("mcpTab.killButton")}
                           </Button>
                         )}
                         <Button
@@ -507,7 +513,7 @@ export function McpTab() {
                           disabled={loading || removingId !== null}
                           onClick={() => void handleRemove(id)}
                         >
-                          제거
+                          {t("mcpTab.removeButton")}
                         </Button>
                       </div>
                     </div>
@@ -538,7 +544,7 @@ export function McpTab() {
                           disabled={credentialBusy}
                           onClick={() => void handleSetApiKey()}
                         >
-                          저장
+                          {t("mcpTab.saveButton")}
                         </Button>
                       </div>
                     )}
@@ -554,13 +560,13 @@ export function McpTab() {
           <>
             <Separator />
             <div className="space-y-3 rounded-md border bg-muted/40 p-4">
-              <h4 className="text-xs font-semibold text-foreground">새 MCP 서버 추가</h4>
+              <h4 className="text-xs font-semibold text-foreground">{t("mcpTab.addFormTitle")}</h4>
 
               <div className="grid grid-cols-2 gap-3">
                 {/* ID */}
                 <div className="space-y-1">
                   <Label htmlFor={formIds.id} className="text-xs">
-                    서버 ID *
+                    {t("mcpTab.serverIdLabel")}
                   </Label>
                   <Input
                     id={formIds.id}
@@ -585,8 +591,8 @@ export function McpTab() {
                       setForm((f) => ({ ...f, transport: e.target.value as Transport }))
                     }
                   >
-                    <NativeSelectOption value="stdio">stdio (로컬 프로세스)</NativeSelectOption>
-                    <NativeSelectOption value="http">http (원격 서버)</NativeSelectOption>
+                    <NativeSelectOption value="stdio">{t("mcpTab.transportStdio")}</NativeSelectOption>
+                    <NativeSelectOption value="http">{t("mcpTab.transportHttp")}</NativeSelectOption>
                   </NativeSelect>
                 </div>
               </div>
@@ -605,7 +611,7 @@ export function McpTab() {
                       setForm((f) => ({ ...f, auth: e.target.value as typeof EMPTY_FORM.auth }))
                     }
                   >
-                    <NativeSelectOption value="none">없음</NativeSelectOption>
+                    <NativeSelectOption value="none">{t("mcpTab.authNone")}</NativeSelectOption>
                     <NativeSelectOption value="sso">SSO</NativeSelectOption>
                     <NativeSelectOption value="api-key">API Key</NativeSelectOption>
                   </NativeSelect>
@@ -639,12 +645,12 @@ export function McpTab() {
                       onChange={(e) => setForm((f) => ({ ...f, command: e.target.value }))}
                     />
                     <p className="text-[10px] text-muted-foreground">
-                      실행 파일만 입력하거나 전체 명령줄을 입력해도 자동 분리됩니다.
+                      {t("mcpTab.commandHint")}
                     </p>
                   </div>
                   <div className="space-y-1">
                     <Label htmlFor={formIds.args} className="text-xs">
-                      Args (추가 인자)
+                      {t("mcpTab.argsLabel")}
                     </Label>
                     <Input
                       id={formIds.args}
@@ -691,7 +697,7 @@ export function McpTab() {
                       className="size-3.5"
                     />
                     <Label htmlFor={formIds.allowPrivateNetworks} className="text-xs">
-                      사설 네트워크 허용 (localhost/로컬 네트워크)
+                      {t("mcpTab.allowPrivateNetworksLabel")}
                     </Label>
                   </div>
                   <div className="space-y-1">
@@ -710,7 +716,7 @@ export function McpTab() {
               )}
 
               <p className="text-[10px] text-muted-foreground">
-                비밀값(API key / headers / env / args)은 저장 후 다시 표시되지 않습니다.
+                {t("mcpTab.secretsNote")}
               </p>
 
               <div className="flex justify-end gap-2">
@@ -722,10 +728,10 @@ export function McpTab() {
                     setShowForm(false);
                   }}
                 >
-                  취소
+                  {t("mcpTab.cancelButton")}
                 </Button>
                 <Button size="sm" onClick={() => void handleAdd()} disabled={formBusy}>
-                  {formBusy ? "추가 중…" : "추가"}
+                  {formBusy ? t("mcpTab.addingButton") : t("mcpTab.addButton")}
                 </Button>
               </div>
             </div>

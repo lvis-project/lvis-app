@@ -37,6 +37,7 @@ import type { VerdictCache } from "./reviewer/verdict-cache.js";
 import type { DeferredQueue } from "./reviewer/deferred-queue.js";
 import { globMatch } from "../lib/glob-matcher.js";
 import { lvisHome } from "../shared/lvis-home.js";
+import { t } from "../i18n/index.js";
 import { lookupApproval, canonicalStringify } from "./user-approval-store.js";
 import { buildSandboxAuditEntry } from "../audit/sandbox-audit.js";
 import { emitSandboxAudit } from "../audit/sandbox-audit-sink.js";
@@ -576,13 +577,13 @@ export class PermissionManager {
       if (rule.action !== "deny") continue;
       if (rule.source && rule.source !== source) continue;
       if (denyTargets.some((target) => globMatch(target, rule.pattern))) {
-        return { decision: "deny", reason: `deny 규칙: ${rule.pattern}`, layer: 1 };
+        return { decision: "deny", reason: t("be_permissionManager.denyRuleReason", { pattern: rule.pattern }), layer: 1 };
       }
     }
 
     const toolModeOverride = this.toolModeOverrides.get(toolName);
     if (toolModeOverride === "strict") {
-      return { decision: "ask", reason: "MCP 서버 strict 모드", layer: 2 };
+      return { decision: "ask", reason: t("be_permissionManager.mcpServerStrictMode"), layer: 2 };
     }
 
     // Overlay-trigger origin override — write/shell/network 도구는 cached
@@ -591,7 +592,7 @@ export class PermissionManager {
     if (isOverlayTrigger && isMutating) {
       return {
         decision: "ask",
-        reason: `overlay trigger 출처 (${overlayTriggerOrigin}) — 쓰기 도구는 사용자 컨펌 필수`,
+        reason: t("be_permissionManager.overlayTriggerMutatingReason", { origin: overlayTriggerOrigin ?? "" }),
         layer: 2,
       };
     }
@@ -602,7 +603,7 @@ export class PermissionManager {
     if (this.mode === "strict") {
       return {
         decision: "ask",
-        reason: `strict 모드 (trust: ${trust}, category: ${resolvedCategory})`,
+        reason: t("be_permissionManager.strictModeReason", { trust, category: resolvedCategory }),
         layer: 2,
         ...(context.headless === true && isMutating
           ? { reviewer: { route: "headless" as const } }
@@ -619,13 +620,13 @@ export class PermissionManager {
       if (rule.action !== "allow") continue;
       if (rule.source && rule.source !== source) continue;
       if (globMatch(allowTarget, rule.pattern)) {
-        return { decision: "allow", reason: `allow 규칙: ${rule.pattern}`, layer: 3 };
+        return { decision: "allow", reason: t("be_permissionManager.allowRuleReason", { pattern: rule.pattern }), layer: 3 };
       }
     }
 
     // 5. Always-allowed (사용자 이전 승인)
     if (this.alwaysAllowed.has(allowTarget)) {
-      return { decision: "allow", reason: "사용자 영구 승인", layer: 5 };
+      return { decision: "allow", reason: t("be_permissionManager.userPermanentApproval"), layer: 5 };
     }
 
     // 6. Layer 3 — Category × Source × Trust via registry descriptor
@@ -924,7 +925,7 @@ export class PermissionManager {
     if (this.mode === "strict") {
       return {
         decision: "ask",
-        reason: `strict 모드 (trust: ${trust}, category: ${category})`,
+        reason: t("be_permissionManager.strictModeReason", { trust, category }),
         layer: 6,
       };
     }
@@ -935,7 +936,7 @@ export class PermissionManager {
     if (this.mode === "allow") {
       return {
         decision: "allow",
-        reason: `전체 허용 모드 (trust: ${trust}, category: ${category})`,
+        reason: t("be_permissionManager.allowAllModeReason", { trust, category }),
         layer: 6,
       };
     }
@@ -944,7 +945,7 @@ export class PermissionManager {
     if (trust === "low") {
       return {
         decision: "ask",
-        reason: `MCP 도구 strict 강제 (trust: low, category: ${category})`,
+        reason: t("be_permissionManager.mcpLowTrustForced", { category }),
         layer: 6,
       };
     }
@@ -960,13 +961,13 @@ export class PermissionManager {
       case "allow":
         return {
           decision: "allow",
-          reason: `${this.mode} 모드 (category: ${category}, trust: ${trust})`,
+          reason: t("be_permissionManager.modeAllowReason", { mode: this.mode, category, trust }),
           layer: 6,
         };
       case "deny":
         return {
           decision: "deny",
-          reason: `정책 거부 (category: ${category})`,
+          reason: t("be_permissionManager.policyDenyReason", { category }),
           layer: 6,
         };
       case "reviewer":
@@ -981,14 +982,14 @@ export class PermissionManager {
         if (this.hasReviewer()) {
           return {
             decision: "ask",
-            reason: `headless ${category} — reviewer agent 라우팅 대상 (executor 가 dispatchReviewer 호출)`,
+            reason: t("be_permissionManager.headlessReviewerRouted", { category }),
             layer: 6,
             reviewer: { route: "headless" },
           };
         }
         return {
           decision: "ask",
-          reason: `headless ${category} — reviewer agent 미배치, 사용자 컨펌`,
+          reason: t("be_permissionManager.headlessReviewerAbsent", { category }),
           layer: 6,
           reviewer: { route: "headless" },
         };
@@ -996,7 +997,7 @@ export class PermissionManager {
         // meta category — executor handles via tool.decisionOverride
         return {
           decision: "allow",
-          reason: `meta tool (category: ${category}) — decisionOverride 적용`,
+          reason: t("be_permissionManager.metaToolDecisionOverride", { category }),
           layer: 6,
         };
       case "ask":
@@ -1021,7 +1022,7 @@ export class PermissionManager {
           context.headless !== true && mutating && interactiveOptIn;
         return {
           decision: "ask",
-          reason: `사용자 컨펌 필요 (category: ${category}, trust: ${trust})`,
+          reason: t("be_permissionManager.userConfirmRequired", { category, trust }),
           layer: 6,
           ...(enableForegroundAutoReviewer
             ? { reviewer: { route: "foreground-auto" as const } }

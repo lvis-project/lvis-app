@@ -24,6 +24,7 @@
  * 비용 화면의 신뢰성이 유지된다.
  */
 import { memo, useState } from "react";
+import { useTranslation } from "../../../i18n/react.js";
 import { Tooltip, TooltipContent, TooltipTrigger } from "../../../components/ui/tooltip.js";
 import {
   computeCost,
@@ -106,6 +107,7 @@ function TokenCostBadgeImpl({
 }: TokenCostBadgeProps) {
   // Default = tokens. 사용자 요청: 청구액보다 토큰 수치가 더 직관적.
   // 클릭으로 cost 토글 가능 (pricing 이 있을 때만).
+  const { t } = useTranslation();
   const [mode, setMode] = useState<"tokens" | "cost">("tokens");
   const headlineTokens = freshInputTokens + tokensOut;
   if (headlineTokens === 0 && tokensIn === 0) return null;
@@ -164,10 +166,10 @@ function TokenCostBadgeImpl({
           aria-disabled={cost === null}
           aria-label={
             cost === null
-              ? "fresh + output 토큰 (비용 표시 비활성 — 가격 정보 없음)"
+              ? t("tokenCostBadge.ariaLabelNoPricing")
               : showCostMode
-                ? "추정 비용 (클릭: 토큰 표시)"
-                : "fresh + output 토큰 (클릭: 비용 표시)"
+                ? t("tokenCostBadge.ariaLabelCostMode")
+                : t("tokenCostBadge.ariaLabelTokenMode")
           }
         >
           {showCostMode ? (
@@ -175,7 +177,7 @@ function TokenCostBadgeImpl({
           ) : (
             <>
               <span>🪙 {formatTokens(headlineTokens)}</span>
-              {cost === null && <span className="text-muted-foreground">미정</span>}
+              {cost === null && <span className="text-muted-foreground">{t("tokenCostBadge.pricingUnknownBadge")}</span>}
             </>
           )}
           {cost !== null && <span className="text-[8px] opacity-50">⇅</span>}

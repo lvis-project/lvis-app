@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useRef, useState } from "react";
+import { useTranslation } from "../../i18n/react.js";
 import { Button } from "../../components/ui/button.js";
 import { Tabs, TabsList, TabsTrigger, TabsContent } from "../../components/ui/tabs.js";
 import {
@@ -52,10 +53,11 @@ function TabSaveBar({
   saving: boolean;
   settingsLoaded: boolean;
 }) {
+  const { t } = useTranslation();
   return (
     <div className="mt-4 flex justify-end border-t border-border/40 pt-3">
       <Button onClick={onSave} disabled={saving || !settingsLoaded}>
-        {saving ? "저장 중…" : "저장"}
+        {saving ? t("settingsContent.saving") : t("settingsContent.save")}
       </Button>
     </div>
   );
@@ -75,6 +77,7 @@ export function SettingsContent({
   onSaved: () => void;
   initialTab?: string;
 }) {
+  const { t } = useTranslation();
   const [tab, setTab] = useState(() => normalizeSettingsTab(initialTab));
   const [pendingPermissions, setPendingPermissions] = useState(0);
   // Floating "저장되었습니다" pulse — bumped on EVERY successful save in
@@ -225,10 +228,10 @@ export function SettingsContent({
           the active tab. `px-5` (20px) aligns the "설정" text-left with
           the nav-trigger icon-left (TabsList p-2 + trigger px-3 = 20). */}
       <div className="px-5 pt-6 mb-6">
-        <h2 className="text-xl font-semibold leading-9 tracking-tight">설정</h2>
+        <h2 className="text-xl font-semibold leading-9 tracking-tight">{t("settingsContent.sidebarHeading")}</h2>
       </div>
       <TabsList
-        aria-label="설정 카테고리"
+        aria-label={t("settingsContent.sidebarAriaLabel")}
         // Vertical sidebar — the shadcn TabsList primitive defaults to a
         // horizontal pill (`inline-flex h-10 items-center justify-center
         // rounded-md bg-muted p-1`). cn() merges class lists but only
@@ -243,27 +246,27 @@ export function SettingsContent({
       >
         <TabsTrigger value="general" className={sideTriggerCls}>
           <LayoutDashboard className={navIconCls} aria-hidden="true" />
-          일반
+          {t("settingsContent.tabGeneral")}
         </TabsTrigger>
         <TabsTrigger value="llm" className={sideTriggerCls}>
           <Brain className={navIconCls} aria-hidden="true" />
-          모델
+          {t("settingsContent.tabLlm")}
         </TabsTrigger>
         <TabsTrigger value="appearance" className={sideTriggerCls}>
           <Palette className={navIconCls} aria-hidden="true" />
-          테마
+          {t("settingsContent.tabAppearance")}
         </TabsTrigger>
         <TabsTrigger value="chat" className={sideTriggerCls}>
           <MessageSquare className={navIconCls} aria-hidden="true" />
-          채팅
+          {t("settingsContent.tabChat")}
         </TabsTrigger>
         <TabsTrigger value="web" className={sideTriggerCls}>
           <Globe className={navIconCls} aria-hidden="true" />
-          검색 (Web)
+          {t("settingsContent.tabWeb")}
         </TabsTrigger>
         <TabsTrigger value="permissions" className={sideTriggerCls}>
           <Shield className={navIconCls} aria-hidden="true" />
-          권한
+          {t("settingsContent.tabPermissions")}
           {pendingPermissions > 0 && (
             <span className="ml-auto rounded-full bg-destructive px-1.5 py-0.5 text-[10px] leading-none text-destructive-foreground">
               {pendingPermissions}
@@ -272,31 +275,31 @@ export function SettingsContent({
         </TabsTrigger>
         <TabsTrigger value="roles" className={sideTriggerCls}>
           <UserCog className={navIconCls} aria-hidden="true" />
-          역할
+          {t("settingsContent.tabRoles")}
         </TabsTrigger>
         <TabsTrigger value="usage" className={sideTriggerCls}>
           <BarChart3 className={navIconCls} aria-hidden="true" />
-          사용량
+          {t("settingsContent.tabUsage")}
         </TabsTrigger>
         <TabsTrigger value="audit" className={sideTriggerCls}>
           <FileSearch className={navIconCls} aria-hidden="true" />
-          감사
+          {t("settingsContent.tabAudit")}
         </TabsTrigger>
         <TabsTrigger value="plugin-perf" className={sideTriggerCls}>
           <Gauge className={navIconCls} aria-hidden="true" />
-          플러그인 성능
+          {t("settingsContent.tabPluginPerf")}
         </TabsTrigger>
         <TabsTrigger value="mcp" className={sideTriggerCls}>
           <Server className={navIconCls} aria-hidden="true" />
-          MCP 서버
+          {t("settingsContent.tabMcp")}
         </TabsTrigger>
         <TabsTrigger value="plugin-config" className={sideTriggerCls}>
           <Puzzle className={navIconCls} aria-hidden="true" />
-          플러그인 설정
+          {t("settingsContent.tabPluginConfig")}
         </TabsTrigger>
         <TabsTrigger value="marketplace" className={sideTriggerCls}>
           <Store className={navIconCls} aria-hidden="true" />
-          마켓플레이스
+          {t("settingsContent.tabMarketplace")}
         </TabsTrigger>
       </TabsList>
       {/* Version footer — fills dead space at the bottom of the sidebar
@@ -332,7 +335,7 @@ export function SettingsContent({
             data-testid="settings-save-error"
           >
             <div className="min-w-0">
-              <p className="font-medium">설정 저장 실패 — {s.lastSaveError.tab} 탭</p>
+              <p className="font-medium">{t("settingsContent.saveErrorMessage", { tab: s.lastSaveError.tab })}</p>
               <p className="text-[11px] opacity-80">{s.lastSaveError.message}</p>
             </div>
             <button
@@ -340,7 +343,7 @@ export function SettingsContent({
               className="text-[11px] underline opacity-80 hover:opacity-100"
               onClick={s.clearLastSaveError}
             >
-              닫기
+              {t("settingsContent.closeButton")}
             </button>
           </div>
         )}

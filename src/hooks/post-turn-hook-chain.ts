@@ -24,6 +24,7 @@ import type { IdleSchedulerService } from "../main/idle-scheduler.js";
 import type { SettingsService } from "../data/settings-store.js";
 import { createLogger } from "../lib/logger.js";
 import { EMPTY_ASSISTANT_RESPONSE_TEXT } from "../lib/chat-stream-state.js";
+import { t } from "../i18n/index.js";
 const log = createLogger("post-turn");
 
 export interface PostTurnHookContext {
@@ -179,8 +180,8 @@ export class PostTurnHookChain {
             const title = ctx.input.slice(0, 40).replace(/\n/g, " ").trim();
             if (title.length >= 3) {
               await this.deps.memoryManager.saveMemory(
-                `자동-${title}`,
-                `[사용자 요청]\n${ctx.input}\n\n[어시스턴트 응답]\n${outputForHooks.slice(0, 500)}`,
+                t("be_postTurnHookChain.autoMemoryTitle", { title }),
+                t("be_postTurnHookChain.autoMemoryBody", { input: ctx.input, output: outputForHooks.slice(0, 500) }),
               );
               log.info(`memory-extraction: auto-saved note "${title}"`);
             }

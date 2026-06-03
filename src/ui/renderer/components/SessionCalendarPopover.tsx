@@ -1,6 +1,7 @@
 import { Suspense, useEffect, useState } from "react";
 import type { Matcher } from "react-day-picker";
 import { PopoverContent } from "../../../components/ui/popover.js";
+import { useTranslation } from "../../../i18n/react.js";
 import type { SessionSummary } from "../hooks/use-sessions.js";
 import { formatHhMmKst } from "../utils/format-time.js";
 import { CalendarFallback, LazyCalendar, preloadCalendar } from "./LazyCalendar.js";
@@ -90,6 +91,7 @@ export function SessionCalendarPopover({
   initialDate,
   align = "center",
 }: SessionCalendarPopoverProps) {
+  const { t } = useTranslation();
   const today = new Date();
   const todayKey = getKoreaDateKey(today);
 
@@ -199,21 +201,21 @@ export function SessionCalendarPopover({
       {/* Step 3: Legacy session warning — no createdAt on any entry. */}
       {isLegacySession && (
         <div className="px-2 py-1 text-[10px] text-muted-foreground border-b border-border/60">
-          이 세션은 시각 정보가 없어 날짜별 점프 불가
+          {t("sessionCalendarPopover.legacySessionWarning")}
         </div>
       )}
 
       <div className="border-t border-border/70 px-1 py-2">
         <div className="mb-1 flex items-center justify-between gap-2 px-1">
           <span className="min-w-0 truncate text-[10px] font-medium text-muted-foreground">
-            {selectedKey} 대화
+            {t("sessionCalendarPopover.dateConversationsLabel", { date: selectedKey })}
           </span>
           <button
             type="button"
             onClick={() => setPickedDate(new Date())}
             className="shrink-0 rounded border border-border bg-muted/30 px-2 py-0.5 text-[10px] text-foreground/80 hover:bg-accent hover:text-accent-foreground"
           >
-            오늘
+            {t("sessionCalendarPopover.todayButton")}
           </button>
         </div>
 
@@ -228,7 +230,7 @@ export function SessionCalendarPopover({
             onClick={handleJumpToCurrentSession}
             className="mb-1 block w-full rounded px-2 py-1.5 text-left text-[11px] bg-primary/10 text-primary hover:bg-primary/20"
           >
-            현재 대화의 {currentSessionEntriesForDate.length}개 메시지로 이동
+            {t("sessionCalendarPopover.jumpToCurrentSession", { count: currentSessionEntriesForDate.length })}
             {currentSessionEntriesForDate.length > 1 && jumpCycleIdx > 0 && (
               <span className="ml-1 text-[10px] text-muted-foreground">
                 ({(jumpCycleIdx % currentSessionEntriesForDate.length) + 1}/{currentSessionEntriesForDate.length})
@@ -239,7 +241,7 @@ export function SessionCalendarPopover({
 
         {sessionsForDate.length === 0 ? (
           <div className="px-1 py-1 text-[11px] text-muted-foreground">
-            해당 날짜의 저장된 대화가 없습니다.
+            {t("sessionCalendarPopover.noSessionsForDate")}
           </div>
         ) : (
           <div className="max-h-32 space-y-1 overflow-y-auto">
@@ -263,10 +265,10 @@ export function SessionCalendarPopover({
                       : "text-popover-foreground"
                   }`}
                 >
-                  <span className="block truncate">{session.title || "제목 없는 세션"}</span>
+                  <span className="block truncate">{session.title || t("sessionCalendarPopover.untitledSession")}</span>
                   <span className="block text-[10px] text-muted-foreground">
                     {formatHhMmKst(new Date(session.modifiedAt).getTime())}
-                    {isCurrent ? " · 현재" : ""}
+                    {isCurrent ? ` · ${t("sessionCalendarPopover.currentSessionIndicator")}` : ""}
                   </span>
                 </button>
               );

@@ -1,5 +1,6 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import { ChevronDown, ChevronRight, Loader2, Wrench } from "lucide-react";
+import { useTranslation } from "../../../i18n/react.js";
 import { Badge } from "../../../components/ui/badge.js";
 import type { ChatEntry } from "../../../lib/chat-stream-state.js";
 import { parseRenderHtmlResult } from "../utils/html-preview.js";
@@ -45,6 +46,7 @@ function ToolDurationBadge({ durationMs }: { durationMs?: number }) {
  * (legacy stream events without per-tool start timestamps).
  */
 function RunningDurationBadge({ startedAt }: { startedAt?: number }) {
+  const { t } = useTranslation();
   const [now, setNow] = useState<number>(() => Date.now());
   useEffect(() => {
     if (typeof startedAt !== "number") return;
@@ -58,7 +60,7 @@ function RunningDurationBadge({ startedAt }: { startedAt?: number }) {
   return (
     <span
       className="shrink-0 font-mono text-[10px] tabular-nums opacity-70"
-      title={`${elapsed} ms (실행 중)`}
+      title={`${elapsed} ms (${t("toolGroupCard.running")})`}
       data-testid="tool-duration-running"
       aria-live="polite"
     >
@@ -126,6 +128,7 @@ function ToolStatusBadge({
   status: ToolItem["status"];
   hideFailure: boolean;
 }) {
+  const { t } = useTranslation();
   const isError = status === "error";
 
   if (isError && hideFailure) return <HiddenStatusMarker />;
@@ -135,7 +138,7 @@ function ToolStatusBadge({
       variant={isError ? "secondary" : "default"}
       className={`shrink-0 px-1 py-0 text-[10px] ${isError ? "text-destructive" : ""}`}
     >
-      {isError ? "실패" : "완료"}
+      {isError ? t("toolGroupCard.failed") : t("toolGroupCard.done")}
     </Badge>
   );
 }
@@ -158,6 +161,7 @@ function SingleToolInline({
   sessionId?: string;
   hideFailure: boolean;
 }) {
+  const { t } = useTranslation();
   const isRunning = tool.status === "running";
   const isError = tool.status === "error";
   const [open, setOpen] = useState(false);
@@ -246,13 +250,13 @@ function SingleToolInline({
         <div className="min-w-0 space-y-1 border-t px-3 py-1.5 font-mono text-[10px] lvis-anim-fade-in">
           {tool.input && (
             <div>
-              <div className="mb-0.5 text-[9px] uppercase opacity-60">입력</div>
+              <div className="mb-0.5 text-[9px] uppercase opacity-60">{t("toolGroupCard.input")}</div>
               <ToolPayloadBlock value={tool.input} />
             </div>
           )}
           {tool.result !== undefined && (
             <div>
-              <div className={`mb-0.5 text-[9px] uppercase opacity-60 ${isError ? "text-destructive" : ""}`}>{isError ? "오류" : "결과"}</div>
+              <div className={`mb-0.5 text-[9px] uppercase opacity-60 ${isError ? "text-destructive" : ""}`}>{isError ? t("toolGroupCard.error") : t("toolGroupCard.result")}</div>
               <ToolPayloadBlock value={tool.result} isError={isError} />
             </div>
           )}
@@ -297,6 +301,7 @@ export function ToolGroupCard({
   hideFailureStatus?: boolean;
 }) {
   // All hooks must be declared before any conditional return (Rules of Hooks)
+  const { t } = useTranslation();
   const tools = [...group.tools].sort((a, b) => a.displayOrder - b.displayOrder);
   const [open, setOpen] = useState(false);
   const [expandedTools, setExpandedTools] = useState<Set<string>>(() => new Set());
@@ -328,7 +333,7 @@ export function ToolGroupCard({
   const groupStatus = group.status === "running"
     ? "running"
     : hasError ? "error" : "done";
-  const groupTitle = groupStatus === "running" ? "도구 사용 중" : "도구 사용 결과";
+  const groupTitle = groupStatus === "running" ? t("toolGroupCard.toolsRunning") : t("toolGroupCard.toolsResult");
   function toggleTool(id: string) {
     setExpandedTools((prev) => {
       const next = new Set(prev);
@@ -379,7 +384,7 @@ export function ToolGroupCard({
           </span>
         )}
         <Badge variant="outline" className="px-1 py-0 text-[10px] flex-shrink-0">
-          {groupStatus === "running" ? `${doneCount}/${group.tools.length}` : `${group.tools.length}개`}
+          {groupStatus === "running" ? `${doneCount}/${group.tools.length}` : t("toolGroupCard.toolCount", { count: group.tools.length })}
         </Badge>
         {groupStatus === "running" ? (
           <Loader2 className="h-3 w-3 animate-spin flex-shrink-0" />
@@ -390,7 +395,7 @@ export function ToolGroupCard({
             variant={groupStatus === "error" ? "secondary" : "default"}
             className={`px-1 py-0 text-[10px] flex-shrink-0 ${groupStatus === "error" ? "text-destructive" : ""}`}
           >
-            {groupStatus === "error" ? "오류 있음" : "완료"}
+            {groupStatus === "error" ? t("toolGroupCard.hasErrors") : t("toolGroupCard.done")}
           </Badge>
         )}
         {open ? <ChevronDown className="h-3 w-3 flex-shrink-0" /> : <ChevronRight className="h-3 w-3 flex-shrink-0" />}
@@ -421,14 +426,14 @@ export function ToolGroupCard({
                   <div className="min-w-0 space-y-1 border-t px-2 py-1 font-mono text-[10px] lvis-anim-fade-in">
                     {tool.input && (
                       <div>
-                        <div className="mb-0.5 text-[9px] uppercase opacity-60">입력</div>
+                        <div className="mb-0.5 text-[9px] uppercase opacity-60">{t("toolGroupCard.input")}</div>
                         <ToolPayloadBlock value={tool.input} />
                       </div>
                     )}
                     {tool.result !== undefined && (
                       <div>
                         <div className={`mb-0.5 text-[9px] uppercase opacity-60 ${tool.status === "error" ? "text-destructive" : ""}`}>
-                          {tool.status === "error" ? "오류" : "결과"}
+                          {tool.status === "error" ? t("toolGroupCard.error") : t("toolGroupCard.result")}
                         </div>
                         {/* Stub results render as collapsible CompactedToolResult. */}
                         {isToolResultStub(tool.result) && sessionId ? (

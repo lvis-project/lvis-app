@@ -1,3 +1,5 @@
+import { t } from "../i18n/index.js";
+
 /**
  * Bash AST Pre-Validator — LVIS local shell safety policy
  *
@@ -57,54 +59,54 @@ export class BashAstValidator {
         id: "ifs-command-injection",
         // e.g. `r${IFS}m -rf /`, `$IFS`, `${IFS}` — IFS 조작을 통한 명령 분리
         regex: /\$\{?IFS\}?/i,
-        reason: "IFS 조작을 통한 명령 분리 우회",
+        reason: t("be_bashAstValidator.ifsInjection"),
       },
       {
         id: "brace-expansion-exec",
         // e.g. `r{m} -rf /`, `rm{,} -rf /` — brace expansion으로 rm 토큰 우회
         regex: /\b\w\{[^}]*\}\s+-[rfRF]/,
-        reason: "brace expansion으로 위험 명령 우회",
+        reason: t("be_bashAstValidator.braceExpansion"),
       },
       {
         id: "subshell-command-exec",
         // e.g. `$(echo rm) -rf /` — subshell 결과로 위험 명령 실행
         regex: new RegExp(String.raw`\$\([^)]+\)\s+-[rfRF]+\s+${dangerousRmTarget}${commandBoundary}`, "i"),
-        reason: "subshell 결과로 위험 명령 실행",
+        reason: t("be_bashAstValidator.subshellExec"),
       },
       {
         id: "variable-expansion-exec",
         // e.g. `X=rm; $X -rf /`, `${CMD} -rf ~`, `$FOO -Rf $HOME`
         // 중괄호 형태 `${VAR}`와 단순 `$VAR` 모두 캡처
         regex: new RegExp(String.raw`\$\{?\w+\}?\s+-[rfRF]+\s+${dangerousRmTarget}${commandBoundary}`, "i"),
-        reason: "변수 확장으로 위험 명령 실행",
+        reason: t("be_bashAstValidator.variableExpansion"),
       },
       {
         id: "backtick-command-substitution",
         // `...` command substitution that contains a dangerous inner command
         regex: /`[^`]*\b(rm\s+-[rfRF]|curl[^`]*\|\s*sh|sudo|eval)/i,
-        reason: "백틱 command substitution 내 위험 명령",
+        reason: t("be_bashAstValidator.backtickSubstitution"),
       },
       {
         id: "rm-rf-compound",
         // rm -rf preceded by ; && || | or newline (복합 명령 내 실행)
         // Does NOT use ^ so that a bare "rm -rf /" falls through to rm-rf-root.
         regex: new RegExp(String.raw`[;&|\n]\s*rm\s+(?:-[rfRF]+\s+)+${dangerousRmTarget}${commandBoundary}`, "i"),
-        reason: "복합 명령 내 rm -rf 위험 경로",
+        reason: t("be_bashAstValidator.rmRfCompound"),
       },
       {
         id: "rm-rf-root",
         regex: new RegExp(String.raw`\brm\s+(?:-[rfRF]+\s+)+${dangerousRmTarget}${commandBoundary}`, "i"),
-        reason: "rm -rf 위험 경로",
+        reason: t("be_bashAstValidator.rmRfRoot"),
       },
       {
         id: "curl-pipe-sh",
         regex: /\b(curl|wget|fetch)\b[^|]*\|\s*(sh|bash|zsh|fish)/i,
-        reason: "curl|sh 패턴",
+        reason: t("be_bashAstValidator.curlPipeSh"),
       },
       {
         id: "sudo-escalation",
         regex: /\b(sudo|su|doas)\b/i,
-        reason: "권한 상승 시도",
+        reason: t("be_bashAstValidator.sudoEscalation"),
       },
       {
         id: "fork-bomb",
@@ -114,7 +116,7 @@ export class BashAstValidator {
       {
         id: "eval-untrusted",
         regex: /\beval\s+\$?\{?[^}]*\}?/i,
-        reason: "eval 위험 사용",
+        reason: t("be_bashAstValidator.evalUntrusted"),
       },
       {
         id: "tty-injection",

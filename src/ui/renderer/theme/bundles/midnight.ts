@@ -1,9 +1,10 @@
 import type { ThemeBundle } from "./types.js";
+import { t } from "../../../../i18n/runtime.js";
 
 export const midnightBundle: ThemeBundle = {
   id: "midnight",
   name: "Midnight",
-  description: "다크 셸 + 마젠타 액센트 + 다크 코드",
+  description: t("midnight.description"),
   shell: "dark",
   highContrast: false,
   tokens: {

@@ -12,6 +12,7 @@
 // nothing to auto-clear).
 
 import { Button } from "../../../components/ui/button.js";
+import { useTranslation } from "../../../i18n/react.js";
 import type { BootstrapStatusEvent } from "../hooks/use-bootstrap-status.js";
 
 interface Props {
@@ -21,12 +22,13 @@ interface Props {
 }
 
 export function BootstrapStatusBanner({ status, onDismiss, onRetry }: Props): React.ReactElement | null {
+  const { t } = useTranslation();
   if (!status) return null;
 
   if (status.phase === "start") {
     return (
       <div className="flex items-center justify-between gap-2 bg-muted border border-border text-muted-foreground text-sm px-4 py-2 rounded-md mx-2 mt-2 lvis-anim-slide-down">
-        <span>매니지드 플러그인 설치 중…</span>
+        <span>{t("bootstrapStatusBanner.installing")}</span>
       </div>
     );
   }
@@ -34,7 +36,7 @@ export function BootstrapStatusBanner({ status, onDismiss, onRetry }: Props): Re
   if (status.phase === "error") {
     return (
       <div className="flex items-center justify-between gap-2 bg-destructive/15 border border-destructive/40 text-destructive text-sm px-4 py-2 rounded-md mx-2 mt-2 lvis-anim-slide-down">
-        <span>플러그인 부트스트랩 실패: {status.message}</span>
+        <span>{t("bootstrapStatusBanner.bootstrapError", { message: status.message })}</span>
         <div className="flex items-center gap-1">
           <Button
             variant="outline"
@@ -42,13 +44,13 @@ export function BootstrapStatusBanner({ status, onDismiss, onRetry }: Props): Re
             onClick={onRetry}
             className="h-auto px-2 py-0.5 text-xs text-destructive border-destructive/40 hover:bg-destructive/15"
           >
-            다시 시도
+            {t("bootstrapStatusBanner.retry")}
           </Button>
           <Button
             variant="ghost"
             size="sm"
             onClick={onDismiss}
-            aria-label="알림 닫기"
+            aria-label={t("bootstrapStatusBanner.dismissNotification")}
             className="text-destructive hover:text-destructive/80 h-auto p-1"
           >
             ✕
@@ -62,12 +64,12 @@ export function BootstrapStatusBanner({ status, onDismiss, onRetry }: Props): Re
   if (status.skippedReason) {
     return (
       <div className="flex items-center justify-between gap-2 bg-warning/15 border border-warning/40 text-warning text-sm px-4 py-2 rounded-md mx-2 mt-2 lvis-anim-slide-down">
-        <span>마켓플레이스 부트스트랩 건너뜀: {status.skippedReason}</span>
+        <span>{t("bootstrapStatusBanner.skipped", { skippedReason: status.skippedReason })}</span>
         <Button
           variant="ghost"
           size="sm"
           onClick={onDismiss}
-          aria-label="알림 닫기"
+          aria-label={t("bootstrapStatusBanner.dismissNotification")}
           className="text-warning hover:text-warning/80 h-auto p-1"
         >
           ✕
@@ -83,8 +85,8 @@ export function BootstrapStatusBanner({ status, onDismiss, onRetry }: Props): Re
       s.length > max ? `${s.slice(0, max - 1)}…` : s;
     const summary =
       status.failed.length === 1
-        ? `플러그인 ${status.failed[0].id} 설치 실패: ${truncate(status.failed[0].error)}`
-        : `${status.failed.length}개 플러그인 설치 실패`;
+        ? t("bootstrapStatusBanner.singlePluginFailed", { id: status.failed[0].id, error: truncate(status.failed[0].error) })
+        : t("bootstrapStatusBanner.multiplePluginsFailed", { count: status.failed.length });
     return (
       <div className="flex items-center justify-between gap-2 bg-destructive/15 border border-destructive/40 text-destructive text-sm px-4 py-2 rounded-md mx-2 mt-2 lvis-anim-slide-down">
         <span>{summary}</span>
@@ -95,13 +97,13 @@ export function BootstrapStatusBanner({ status, onDismiss, onRetry }: Props): Re
             onClick={onRetry}
             className="h-auto px-2 py-0.5 text-xs text-destructive border-destructive/40 hover:bg-destructive/15"
           >
-            다시 시도
+            {t("bootstrapStatusBanner.retry")}
           </Button>
           <Button
             variant="ghost"
             size="sm"
             onClick={onDismiss}
-            aria-label="알림 닫기"
+            aria-label={t("bootstrapStatusBanner.dismissNotification")}
             className="text-destructive hover:text-destructive/80 h-auto p-1"
           >
             ✕

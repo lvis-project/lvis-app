@@ -1,4 +1,5 @@
 import { Tooltip, TooltipContent, TooltipTrigger } from "../../../components/ui/tooltip.js";
+import { useTranslation } from "../../../i18n/react.js";
 
 interface TokenProgressRingProps {
   used: number;
@@ -15,6 +16,7 @@ interface TokenProgressRingProps {
  * rose > 80%. Sized at 26px to align with Warp-style toolbar buttons.
  */
 export function TokenProgressRing({ used, budget, contextBudget, tpmLimit }: TokenProgressRingProps) {
+  const { t } = useTranslation();
   const pct = Math.min(100, Math.round((used / Math.max(1, budget)) * 100));
   const displayBudget = Math.max(0, budget);
   const remaining = Math.max(0, displayBudget - used);
@@ -48,7 +50,7 @@ export function TokenProgressRing({ used, budget, contextBudget, tpmLimit }: Tok
           className="flex items-center justify-center rounded-md p-1 hover:bg-muted/60 transition-colors cursor-default focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-foreground focus-visible:ring-offset-1"
           style={{ width: 28, height: 28 }}
           data-testid="token-progress-ring"
-          title="다음 요청 입력 예측"
+          title={t("tokenProgressRing.projectedInputTitle")}
           aria-label={`Projected input ${pct} percent`}
           role="img"
           tabIndex={0}

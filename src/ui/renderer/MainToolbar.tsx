@@ -2,6 +2,7 @@ import { ArrowDownToLine, Database, Download, ExternalLink, Home, KeyRound, Menu
 import { Button } from "../../components/ui/button.js";
 import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuSeparator, DropdownMenuSub, DropdownMenuSubContent, DropdownMenuSubTrigger, DropdownMenuTrigger } from "../../components/ui/dropdown-menu.js";
 import { Tooltip, TooltipContent, TooltipTrigger } from "../../components/ui/tooltip.js";
+import { useTranslation } from "../../i18n/react.js";
 
 /**
  * App auto-update state mirrored from the main process via
@@ -80,6 +81,7 @@ export function MainToolbar({
   onDownloadAppUpdate,
   onInstallAppUpdate,
 }: MainToolbarProps) {
+  const { t } = useTranslation();
   return (
     <div data-testid="main-toolbar" className="border-b bg-card px-3 py-2">
       <div className="flex min-w-0 items-center gap-2">
@@ -91,13 +93,13 @@ export function MainToolbar({
               size="sm"
               className="h-7 w-7 p-0"
               onClick={onOpenHome}
-              title="홈"
-              aria-label="홈"
+              title={t("mainToolbar.home")}
+              aria-label={t("mainToolbar.home")}
             >
               <Home className="h-3.5 w-3.5" />
             </Button>
           </TooltipTrigger>
-          <TooltipContent>홈</TooltipContent>
+          <TooltipContent>{t("mainToolbar.home")}</TooltipContent>
         </Tooltip>
 
         {/* ── App update badge — sits immediately right of Home so users
@@ -131,7 +133,7 @@ export function MainToolbar({
                 <kbd className="rounded border border-warning/40 bg-warning/10 px-1 text-[9.5px]">⇧⌘D</kbd>
               </Button>
             </TooltipTrigger>
-            <TooltipContent>Dev Tools — Preflight 임계 조절 (Cmd/Ctrl+Shift+D)</TooltipContent>
+            <TooltipContent>{t("mainToolbar.devToolsTooltip")}</TooltipContent>
           </Tooltip>
         )}
 
@@ -150,14 +152,14 @@ export function MainToolbar({
               size="sm"
               className="h-7 w-7 p-0"
               onClick={onOpenUnifiedSearch}
-              title="통합 검색 (Cmd/Ctrl+F)"
-              aria-label="통합 검색 (Cmd/Ctrl+F)"
+              title={t("mainToolbar.unifiedSearch")}
+              aria-label={t("mainToolbar.unifiedSearch")}
               data-tour-anchor="chat-history"
             >
               <Search className="h-3.5 w-3.5" />
             </Button>
           </TooltipTrigger>
-          <TooltipContent>통합 검색 (Cmd/Ctrl+F)</TooltipContent>
+          <TooltipContent>{t("mainToolbar.unifiedSearch")}</TooltipContent>
         </Tooltip>
 
         {/* ── Current session star — immediate session-level action ───── */}
@@ -168,14 +170,14 @@ export function MainToolbar({
               size="sm"
               className="h-7 w-7 p-0"
               onClick={() => void onToggleCurrentSessionStar()}
-              title={isCurrentSessionStarred ? "현재 세션 즐겨찾기 해제" : "현재 세션 즐겨찾기"}
-              aria-label={isCurrentSessionStarred ? "현재 세션 즐겨찾기 해제" : "현재 세션 즐겨찾기"}
+              title={isCurrentSessionStarred ? t("mainToolbar.sessionUnstar") : t("mainToolbar.sessionStar")}
+              aria-label={isCurrentSessionStarred ? t("mainToolbar.sessionUnstar") : t("mainToolbar.sessionStar")}
               aria-pressed={isCurrentSessionStarred}
             >
               <Star key={isCurrentSessionStarred ? "on" : "off"} className={`h-3.5 w-3.5 ${isCurrentSessionStarred ? "fill-emphasis text-emphasis lvis-anim-star" : ""}`} />
             </Button>
           </TooltipTrigger>
-          <TooltipContent>{isCurrentSessionStarred ? "현재 세션 즐겨찾기 해제" : "현재 세션 즐겨찾기"}</TooltipContent>
+          <TooltipContent>{isCurrentSessionStarred ? t("mainToolbar.sessionUnstar") : t("mainToolbar.sessionStar")}</TooltipContent>
         </Tooltip>
 
         {/* ── Hamburger — wraps infrequent actions ────────────────────── */}
@@ -191,21 +193,21 @@ export function MainToolbar({
                   variant="ghost"
                   size="sm"
                   className="h-7 w-7 p-0"
-                  title="더 많은 메뉴"
-                  aria-label="더 많은 메뉴"
+                  title={t("mainToolbar.moreMenu")}
+                  aria-label={t("mainToolbar.moreMenu")}
                   data-tour-anchor="settings-entry"
                 >
                   <Menu className="h-3.5 w-3.5" />
                 </Button>
               </DropdownMenuTrigger>
             </TooltipTrigger>
-            <TooltipContent>더 많은 메뉴</TooltipContent>
+            <TooltipContent>{t("mainToolbar.moreMenu")}</TooltipContent>
           </Tooltip>
           <DropdownMenuContent align="end" className="w-[280px]">
             {/* ── New chat ── */}
             <DropdownMenuItem disabled={streaming} onClick={onNewChat}>
               <Plus className="mr-2 h-3.5 w-3.5" />
-              <span>새 대화</span>
+              <span>{t("mainToolbar.newChat")}</span>
             </DropdownMenuItem>
 
             <DropdownMenuSeparator />
@@ -213,15 +215,15 @@ export function MainToolbar({
             {/* ── Built-in secondary views ── */}
             <DropdownMenuItem onClick={onOpenRoutinesView}>
               <Repeat2 className="mr-2 h-3.5 w-3.5" />
-              <span>루틴</span>
+              <span>{t("mainToolbar.routines")}</span>
             </DropdownMenuItem>
             <DropdownMenuItem onClick={onOpenMemoryView}>
               <Database className="mr-2 h-3.5 w-3.5" />
-              <span>메모리</span>
+              <span>{t("mainToolbar.memory")}</span>
             </DropdownMenuItem>
             <DropdownMenuItem onClick={onOpenStarredView}>
               <Star className="mr-2 h-3.5 w-3.5" />
-              <span>즐겨찾기</span>
+              <span>{t("mainToolbar.starred")}</span>
             </DropdownMenuItem>
 
             <DropdownMenuSeparator />
@@ -229,15 +231,15 @@ export function MainToolbar({
             {/* ── Detached built-in views ── */}
             <DropdownMenuItem data-testid="toolbar-detach-routines" onClick={() => void onOpenDetachedView("routines")}>
               <ExternalLink className="mr-2 h-3.5 w-3.5" />
-              <span>루틴 새 창으로 열기</span>
+              <span>{t("mainToolbar.detachRoutines")}</span>
             </DropdownMenuItem>
             <DropdownMenuItem data-testid="toolbar-detach-memory" onClick={() => void onOpenDetachedView("memory")}>
               <ExternalLink className="mr-2 h-3.5 w-3.5" />
-              <span>메모리 새 창으로 열기</span>
+              <span>{t("mainToolbar.detachMemory")}</span>
             </DropdownMenuItem>
             <DropdownMenuItem data-testid="toolbar-detach-starred" onClick={() => void onOpenDetachedView("starred")}>
               <ExternalLink className="mr-2 h-3.5 w-3.5" />
-              <span>즐겨찾기 새 창으로 열기</span>
+              <span>{t("mainToolbar.detachStarred")}</span>
             </DropdownMenuItem>
 
             <DropdownMenuSeparator />
@@ -246,7 +248,7 @@ export function MainToolbar({
             <DropdownMenuSub>
               <DropdownMenuSubTrigger>
                 <Download className="mr-2 h-3.5 w-3.5" />
-                <span>내보내기</span>
+                <span>{t("mainToolbar.export")}</span>
               </DropdownMenuSubTrigger>
               <DropdownMenuSubContent>
                 <DropdownMenuItem onClick={() => void onExport("markdown")}>Markdown (.md)</DropdownMenuItem>
@@ -259,9 +261,9 @@ export function MainToolbar({
             {/* ── Settings ── */}
             <DropdownMenuItem onClick={onOpenSettings}>
               <KeyRound className="mr-2 h-3.5 w-3.5" />
-              <span className={hasApiKey === false ? "text-destructive" : ""}>설정</span>
+              <span className={hasApiKey === false ? "text-destructive" : ""}>{t("mainToolbar.settings")}</span>
               {hasApiKey === false && (
-                <span className="ml-auto text-[10px] text-destructive">API 키 필요</span>
+                <span className="ml-auto text-[10px] text-destructive">{t("mainToolbar.apiKeyRequired")}</span>
               )}
             </DropdownMenuItem>
           </DropdownMenuContent>
@@ -296,6 +298,7 @@ function AppUpdateBadge({
   onDownload?: () => void | Promise<void>;
   onInstall?: () => void | Promise<void>;
 }) {
+  const { t } = useTranslation();
   if (state.kind === "idle") return null;
 
   if (state.kind === "available") {
@@ -308,15 +311,15 @@ function AppUpdateBadge({
             className="h-7 gap-1 px-2 text-[11px] font-medium text-info border border-info/40 bg-info/10 hover:bg-info/20 disabled:opacity-60"
             onClick={() => void onDownload?.()}
             disabled={inFlight}
-            title={`새 버전 v${state.version} 사용 가능 — 클릭해서 다운로드`}
-            aria-label={`업데이트 다운로드 (v${state.version})`}
+            title={t("mainToolbar.updateAvailableTitle", { version: state.version })}
+            aria-label={t("mainToolbar.updateDownloadAriaLabel", { version: state.version })}
             data-testid="app-update-badge-available"
           >
             <ArrowDownToLine className="h-3 w-3" />
             <span>v{state.version}</span>
           </Button>
         </TooltipTrigger>
-        <TooltipContent>새 버전 v{state.version} 사용 가능 — 클릭해서 다운로드</TooltipContent>
+        <TooltipContent>{t("mainToolbar.updateAvailableTitle", { version: state.version })}</TooltipContent>
       </Tooltip>
     );
   }
@@ -330,15 +333,15 @@ function AppUpdateBadge({
             size="sm"
             className="h-7 gap-1 px-2 text-[11px] font-medium text-muted-foreground border border-border bg-muted/40 cursor-progress"
             disabled
-            title={`v${state.version} 다운로드 중 (${state.percent}%)`}
-            aria-label={`업데이트 다운로드 중 (${state.percent}%)`}
+            title={t("mainToolbar.downloadingTitle", { version: state.version, percent: state.percent })}
+            aria-label={t("mainToolbar.downloadingAriaLabel", { percent: state.percent })}
             data-testid="app-update-badge-downloading"
           >
             <RefreshCw className="h-3 w-3 animate-spin" />
             <span>{state.percent}%</span>
           </Button>
         </TooltipTrigger>
-        <TooltipContent>v{state.version} 다운로드 중 — {state.percent}%</TooltipContent>
+        <TooltipContent>{t("mainToolbar.downloadingTooltip", { version: state.version, percent: state.percent })}</TooltipContent>
       </Tooltip>
     );
   }
@@ -353,15 +356,15 @@ function AppUpdateBadge({
           className="h-7 gap-1 px-2 text-[11px] font-medium text-success border border-success/40 bg-success/10 hover:bg-success/20 disabled:opacity-60"
           onClick={() => void onInstall?.()}
           disabled={inFlight}
-          title={`v${state.version} 다운로드 완료 — 클릭해서 재시작 적용`}
-          aria-label={`업데이트 적용 (v${state.version})`}
+          title={t("mainToolbar.downloadedTitle", { version: state.version })}
+          aria-label={t("mainToolbar.updateInstallAriaLabel", { version: state.version })}
           data-testid="app-update-badge-downloaded"
         >
           <Download className="h-3 w-3" />
-          <span>v{state.version} 적용</span>
+          <span>{t("mainToolbar.applyUpdate", { version: state.version })}</span>
         </Button>
       </TooltipTrigger>
-      <TooltipContent>v{state.version} 다운로드 완료 — 클릭해서 재시작 적용</TooltipContent>
+      <TooltipContent>{t("mainToolbar.downloadedTitle", { version: state.version })}</TooltipContent>
     </Tooltip>
   );
 }
