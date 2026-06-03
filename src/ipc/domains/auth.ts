@@ -59,6 +59,7 @@ import {
   getDemoActiveVendor,
   getDemoCredentials,
   getDemoHostMap,
+  getDemoHostSubnet,
   getDemoVendorConfig,
   isDemoEnabled,
 } from "../../main/demo-credentials.js";
@@ -184,6 +185,7 @@ export function registerAuthHandlers(deps: IpcDeps): void {
         const hostMapError = validateDemoFoundryHostMap(
           demoConfig.baseUrl,
           getDemoHostMap(),
+          getDemoHostSubnet(),
         );
         if (hostMapError !== null) {
           progress.fail("llm-key-issuing", hostMapError, vendor);
