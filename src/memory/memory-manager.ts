@@ -1320,19 +1320,19 @@ export class MemoryManager {
     mkdirSync(this.memoryDir, { recursive: true });
     mkdirSync(this.sessionsDir, { recursive: true });
 
-    const agentsMdPath = join(this.lvisDir, "AGENTS.md");
-    if (!existsSync(agentsMdPath)) {
-      writeFileSync(agentsMdPath, getDefaultAgentsMd(), "utf-8");
-    }
+    // Atomic create-if-absent: the exclusive "wx" flag fails with EEXIST when
+    // the file already exists, so there is no check-then-write TOCTOU window.
+    this.writeDefaultIfAbsent(join(this.lvisDir, "AGENTS.md"), getDefaultAgentsMd());
+    this.writeDefaultIfAbsent(join(this.lvisDir, "user-preferences.md"), getDefaultUserPrefs());
+    this.writeDefaultIfAbsent(join(this.memoryDir, "MEMORY.md"), getDefaultMemoryIndex());
+  }
 
-    const userPrefsPath = join(this.lvisDir, "user-preferences.md");
-    if (!existsSync(userPrefsPath)) {
-      writeFileSync(userPrefsPath, getDefaultUserPrefs(), "utf-8");
-    }
-
-    const memoryIndexPath = join(this.memoryDir, "MEMORY.md");
-    if (!existsSync(memoryIndexPath)) {
-      writeFileSync(memoryIndexPath, getDefaultMemoryIndex(), "utf-8");
+  /** Write `content` only when `path` does not yet exist, atomically (no TOCTOU). */
+  private writeDefaultIfAbsent(path: string, content: string): void {
+    try {
+      writeFileSync(path, content, { encoding: "utf-8", flag: "wx" });
+    } catch (err) {
+      if ((err as NodeJS.ErrnoException).code !== "EEXIST") throw err;
     }
   }
 
