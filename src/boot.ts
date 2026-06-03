@@ -42,7 +42,6 @@ import type { BrowserWindow } from "electron";
 import { BrowserWindow as BrowserWindowValue } from "electron";
 import { randomUUID } from "node:crypto";
 import { resolve } from "node:path";
-import { adaptPowerMonitor } from "./main/idle-scheduler.js";
 import { DisabledMarketplaceFetcher, PluginMarketplaceService } from "./plugins/marketplace.js";
 import type { MarketplaceFetcher } from "./plugins/marketplace.js";
 import { CloudMarketplaceFetcher } from "./plugins/cloud-marketplace-fetcher.js";
@@ -72,7 +71,7 @@ import {
 import { openLinkWindow as openLinkWindowService } from "./main/link-window-service.js";
 import { openAuthPartitionViewer as openAuthPartitionViewerService } from "./main/auth-partition-viewer-service.js";
 
-import { type AppServices, emitEvent, onEvent } from "./boot/types.js";
+import { type AppServices, onEvent } from "./boot/types.js";
 import { PERMISSIONS, ROUTINES_V2 } from "./shared/ipc-channels.js";
 import { sendToWindow } from "./ipc/safe-send.js";
 import { broadcastPermissionConfigChanged as broadcastPermissionConfigChangedFromIpc } from "./ipc/domains/permissions.js";
@@ -90,7 +89,7 @@ import {
 import { RoutinesStore } from "./main/routines-store.js";
 import { RoutinesScheduler } from "./main/routines-scheduler.js";
 import { SessionTodoStore } from "./main/session-todo-store.js";
-import { AskUserQuestionGate, IPC_ASK_USER_QUESTION_REQUEST } from "./main/ask-user-question-gate.js";
+import { AskUserQuestionGate } from "./main/ask-user-question-gate.js";
 import { NotificationService } from "./main/notification-service.js";
 import { createSafeLlmFetch } from "./main/safe-llm-fetch.js";
 import { getDemoActiveVendor, getDemoHostMap, getDemoHostSubnet, getDemoVendorConfig } from "./main/demo-credentials.js";
@@ -122,7 +121,6 @@ import {
   createCallLlm,
   createCallLlmForPlugin,
 } from "./boot/conversation.js";
-import type { ConversationLoop } from "./engine/conversation-loop.js";
 import { ToolExecutor } from "./tools/executor.js";
 import type { PluginToolInvocationContext } from "./plugins/runtime.js";
 import {

@@ -22,7 +22,7 @@
  * Atomicity: writes use a random-suffix .tmp file + rename() so a crash
  * during write does not corrupt the store (same pattern as SkillApprovalsStore).
  */
-import { mkdir, readFile, writeFile, rename, access, constants, open, stat, chmod } from "node:fs/promises";
+import { mkdir, readFile, rename, access, constants, open, stat, chmod } from "node:fs/promises";
 import { resolve, dirname } from "node:path";
 import { createHash, randomBytes } from "node:crypto";
 import { lvisHome } from "../shared/lvis-home.js";
