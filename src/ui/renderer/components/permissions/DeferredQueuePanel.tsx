@@ -37,7 +37,6 @@ import {
   reviewTitleForCategory,
   scopeLabel,
   sensitivityLabel,
-  type ParsedSummary,
   type ReviewBasisRow,
 } from "./PermissionDecisionCard.js";
 import {
