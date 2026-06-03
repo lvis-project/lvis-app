@@ -144,7 +144,7 @@ export function PluginGridButton({
     measure();
     // Observe the composer wrapper itself (stable parent) so any
     // child-swap or chip-mounted resize re-fires `measure`.
-    const ro = new ResizeObserver(measure);
+    const ro = new window.ResizeObserver(measure);
     ro.observe(composer);
     return () => ro.disconnect();
   }, [open]);
