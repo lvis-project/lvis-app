@@ -71,7 +71,6 @@ describe("Tutorial-C PR #983 follow-up: tour anchors", () => {
       activePreset: mockPreset,
       activePresetId: "default",
       onSelectPreset: vi.fn(),
-      vendorSupportsThinking: false,
       enableThinkingChat: false,
       onToggleThinking: vi.fn(),
     };
@@ -121,7 +120,6 @@ describe("Tutorial-C PR #983 follow-up: tour anchors", () => {
       activePreset: mockPreset,
       activePresetId: "default",
       onSelectPreset: vi.fn(),
-      vendorSupportsThinking: false,
       enableThinkingChat: false,
       onToggleThinking: vi.fn(),
     };
