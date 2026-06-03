@@ -93,7 +93,7 @@ import { SessionTodoStore } from "./main/session-todo-store.js";
 import { AskUserQuestionGate, IPC_ASK_USER_QUESTION_REQUEST } from "./main/ask-user-question-gate.js";
 import { NotificationService } from "./main/notification-service.js";
 import { createSafeLlmFetch } from "./main/safe-llm-fetch.js";
-import { getDemoActiveVendor, getDemoHostMap, getDemoVendorConfig } from "./main/demo-credentials.js";
+import { getDemoActiveVendor, getDemoHostMap, getDemoHostSubnet, getDemoVendorConfig } from "./main/demo-credentials.js";
 import {
   demoFoundryHostMapFingerprint,
   demoHostMapContainsHost,
@@ -194,12 +194,14 @@ export async function bootstrap(
   const electronDirectFetch = privateEndpointSession.fetch.bind(privateEndpointSession);
   const demoActiveVendor = getDemoActiveVendor();
   const demoHostMap = getDemoHostMap();
+  const demoHostSubnet = getDemoHostSubnet();
   const demoFoundryConfig = demoActiveVendor === "azure-foundry"
     ? getDemoVendorConfig("azure-foundry")
     : null;
   const appliedDemoHostMapFingerprint = demoFoundryHostMapFingerprint(
     demoFoundryConfig?.baseUrl,
     demoHostMap,
+    demoHostSubnet,
   );
   const isAppliedDemoHostMap =
     appliedDemoHostMapFingerprint !== null &&

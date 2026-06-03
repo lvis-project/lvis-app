@@ -5,7 +5,7 @@
  * fragment files in this directory (`<namespace>.ts`, each exporting `en`/`ko`
  * objects) and merges them here.
  *
- * Fragments: 181
+ * Fragments: 179
  */
 import { en as en_app, ko as ko_app } from "./app.js";
 import { en as en_appearanceTab, ko as ko_appearanceTab } from "./appearanceTab.js";
@@ -93,8 +93,6 @@ import { en as en_defaultTourScenarios, ko as ko_defaultTourScenarios } from "./
 import { en as en_deferredApprovalChip, ko as ko_deferredApprovalChip } from "./deferredApprovalChip.js";
 import { en as en_deferredQueueDialog, ko as ko_deferredQueueDialog } from "./deferredQueueDialog.js";
 import { en as en_deferredQueuePanel, ko as ko_deferredQueuePanel } from "./deferredQueuePanel.js";
-import { en as en_demoAutoplayBanner, ko as ko_demoAutoplayBanner } from "./demoAutoplayBanner.js";
-import { en as en_demoAutoplayView, ko as ko_demoAutoplayView } from "./demoAutoplayView.js";
 import { en as en_detachedView, ko as ko_detachedView } from "./detachedView.js";
 import { en as en_devToolsPanel, ko as ko_devToolsPanel } from "./devToolsPanel.js";
 import { en as en_dropZoneOverlay, ko as ko_dropZoneOverlay } from "./dropZoneOverlay.js";
@@ -276,8 +274,6 @@ export const generatedEn: Record<string, string> = {
   ...en_deferredApprovalChip,
   ...en_deferredQueueDialog,
   ...en_deferredQueuePanel,
-  ...en_demoAutoplayBanner,
-  ...en_demoAutoplayView,
   ...en_detachedView,
   ...en_devToolsPanel,
   ...en_dropZoneOverlay,
@@ -460,8 +456,6 @@ export const generatedKo: Record<string, string> = {
   ...ko_deferredApprovalChip,
   ...ko_deferredQueueDialog,
   ...ko_deferredQueuePanel,
-  ...ko_demoAutoplayBanner,
-  ...ko_demoAutoplayView,
   ...ko_detachedView,
   ...ko_devToolsPanel,
   ...ko_dropZoneOverlay,
