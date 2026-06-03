@@ -1,5 +1,55 @@
 # Changelog
 
+## v0.2.18 — 2026-06-01
+
+### 플러그인 / 마켓플레이스
+
+- **플러그인 업데이트 stale catalog 차단 복구** (PR #1198) — 업데이트 배지는 live Marketplace catalog 로 `meeting@0.5.25` 를 감지했지만, 설치 직전 `expectedVersion` 검증은 7일 TTL offline catalog cache 의 stale `meeting@0.5.8` 값을 읽어 정상 업데이트를 차단했다. 업데이트 설치 경로의 버전 검증을 live catalog 조회로 정렬해 banner 와 install guard 가 같은 Marketplace 최신 버전을 기준으로 판단하도록 했다.
+- **일반 설치 경로 live fetch 범위 제한** (PR #1198) — `expectedVersion` 이 없는 일반 설치는 기존 catalog/list 경로를 유지하고, 업데이트처럼 기대 버전이 명시된 경우에만 live version guard 를 수행한다.
+
+### 검증
+
+- PR #1198: focused Vitest 4 files / 51 pass, `bun run typecheck`, `bun run build`, `git diff --check`, remote build-and-test / Windows permission path / CodeQL / naming-gate success, Copilot current-head inline comments 0, Cross-Cutting 3-lane review Critical=0/Major=0.
+
+## v0.2.17 — 2026-06-01
+
+### 릴리스 검증
+
+- **라이브 앱 업데이트 설치 경로 검증 릴리스** — v0.2.16 의 updater shutdown handoff 수정이 실제 GitHub 릴리스 피드에서 다음 버전 업데이트를 다운로드하고, 확인 후 종료/설치까지 완료하는지 검증하기 위한 version-only 릴리스다. 업데이트 설치 코드 경로는 v0.2.16 과 동일하며, package version bump 만으로 v0.2.16 → v0.2.17 라이브 업데이트 경로를 만든다.
+
+### 검증
+
+- v0.2.16 과 동일 코드 경로. v0.2.16 검증: Targeted Vitest 4 files / 53 pass, `bun run check:test-quality`, `bun run typecheck`, `bun run build`, `git diff --check` pass.
+
+## v0.2.16 — 2026-06-01
+
+### 앱 업데이트
+
+- **앱 업데이트 적용 재시작 경로 복구** — `quitAndInstall()` 가 먼저 BrowserWindow 를 닫고 앱 종료로 이어지는 Electron updater 계약을 LVIS 의 close-to-tray / async before-quit / plugin before-quit 핸들러가 `preventDefault()` 로 가로막아 다운로드 완료 후 재시작 설치가 진행되지 않던 문제를 수정했다. 업데이트 설치 의도를 main process 에 표시하고, 해당 경우에는 창 닫기와 종료 이벤트를 updater 가 소유하도록 둔다.
+- **업데이트 설치 IPC 경계 보강** — `lvis:update:install-now` 가 실제 재시작/설치 경로가 되었으므로 host renderer sender 를 main process 에서 검증하고, native 확인 dialog 도 같은 IPC handler 안에서 소유해 renderer 나 plugin shell 이 확인 단계를 건너뛰어 설치를 강제하지 못하게 했다.
+- **업데이트 배지 IPC race 방어** — renderer 의 초기 `getAppUpdateState()` snapshot 이 더 늦게 도착해 live update push 를 덮어쓰지 못하게 하고, install IPC 가 실패하거나 앱이 종료되지 않는 경우에는 local click gate 를 해제해 재시도 가능하게 했다.
+
+### 검증
+
+- Targeted Vitest: `release-prep`, `app-update-install-intent-source`, `use-app-update`, `plugin-runtime` — 4 files / 53 pass.
+- `bun run typecheck`, `bun run build`, `git diff --check` pass.
+
+## v0.2.15 — 2026-06-01
+
+### 플러그인 / 마켓플레이스
+
+- **플러그인 secret URL 오입력 차단** (PR #1194) — API-key 형태의 플러그인 secret 필드에 `http://` / `https://` endpoint 값이 저장되거나 provider 호출까지 흘러가는 경로를 차단했다. 저장 경계와 HostApi read 경계에서 URL-shaped 값을 거부/격리해 provider 401 에러에 잘못된 endpoint 문자열이 노출되는 문제를 막는다.
+- **마켓플레이스 업데이트 버전 검증 강화** (PR #1194) — renderer 가 전달한 기대 버전을 신뢰하지 않고, main-process install lifecycle 에서 trusted catalog version 과 먼저 대조한다. 실제 version-changing install 이 일어난 경우에만 rollback/quarantine 을 수행하고, no-op install 뒤 mismatch 는 기존 정상 런타임을 복구한다.
+
+### 안정성 / Windows 검증
+
+- **permission path SOT Windows 정렬** (PR #1194) — reviewer path-field 값과 allowedDirectories 비교를 canonical + case-fold 형태로 통일해 Windows drive/separator 차이로 허용 경로가 HIGH 로 오판되는 문제를 수정했다.
+- **persistent approval store Windows 내구성 보강** (PR #1194) — Windows 에서 directory fsync 가 EPERM 을 반환하는 환경을 best-effort 로 처리하고, persistent approval 파일의 read/modify/write 를 직렬화해 동시 rename 충돌을 제거했다.
+
+### 검증
+
+- PR #1194: 3-agent cluster review GO (architect/critic/security, MAJOR 0), `bun run typecheck`, 전체 `bunx vitest run --reporter=verbose` 473 files / 6226 pass / 24 skipped, `bun run build`, pre-push hook(`tsc --noEmit`, `vitest run`, `build`) pass, remote CI build-and-test / Windows permission path / CodeQL / naming-gate / cluster-detector success.
+
 ## v0.2.14 — 2026-05-27
 
 ### UI / 설정

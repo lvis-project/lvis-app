@@ -101,7 +101,7 @@ describe("emitSandboxAudit", () => {
     const path = sandboxAuditSinkPath();
     expect(path).toContain(TEST_HOME);
     // Must be under the audit/ subdirectory, not at the root
-    expect(path).toContain("/audit/");
+    expect(path.replace(/\\/g, "/")).toContain("/audit/");
     // Must match the daily-rotate pattern: YYYY-MM-DD.sandbox.jsonl
     expect(path).toMatch(/\d{4}-\d{2}-\d{2}\.sandbox\.jsonl$/);
   });
