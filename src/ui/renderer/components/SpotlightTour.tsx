@@ -286,11 +286,6 @@ export function SpotlightTour({
   // must not crash the ErrorBoundary. Production preload always exposes
   // the full tour API.
   //
-  // F4 — demo↔tour mutex: if the Live Auto-play demo is mid-flight,
-  // `document.body[data-demo-active]` is set by `App.tsx`. We ignore
-  // tour.start broadcasts in that case so the Spotlight backdrop can't
-  // paint over the demo overlay.
-  //
   // U6 — modal precondition: if any Radix Dialog / AlertDialog is open
   // when the tour.start broadcast arrives, queue the scenario and wait
   // for the dialog to close before mounting. Without this guard the
@@ -317,12 +312,6 @@ export function SpotlightTour({
     if (typeof subscribe !== "function") return;
     const off = subscribe(({ scenarioId }) => {
       if (typeof scenarioId !== "string" || scenarioId.length === 0) return;
-      if (
-        typeof document !== "undefined" &&
-        document.body?.getAttribute("data-demo-active") === "true"
-      ) {
-        return;
-      }
       if (activeScenarioIdRef.current === scenarioId) {
         // Same scenario already running — ignore the re-broadcast.
         return;
