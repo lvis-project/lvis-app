@@ -123,8 +123,6 @@ export interface IdleSchedulerOptions {
   cpuEmaAlpha?: number; // default 0.1 (EMA 계수)
   cpuEmaThreshold?: number; // default 0.40
   cpuSpikeThreshold?: number; // default 0.70
-  batteryFloor?: number; // default 0.20 (20%)
-  batteryIdleFloor?: number; // default 0.50 (50%)
   conversationCooldownMs?: number; // default 30000
   /**
    * cycle 1 MED: keystroke 쿨다운을 대화 쿨다운과 분리.
@@ -173,8 +171,6 @@ export class IdleSchedulerService {
   private readonly cpuEmaAlpha: number;
   private readonly cpuEmaThreshold: number;
   private readonly cpuSpikeThreshold: number;
-  private readonly batteryFloor: number;
-  private readonly batteryIdleFloor: number;
   private readonly conversationCooldownMs: number;
   private readonly keystrokeCooldownMs: number;
   private readonly chunkCooldownMs: number;
@@ -188,8 +184,6 @@ export class IdleSchedulerService {
     this.cpuEmaAlpha = opts.cpuEmaAlpha ?? 0.1;
     this.cpuEmaThreshold = opts.cpuEmaThreshold ?? 0.4;
     this.cpuSpikeThreshold = opts.cpuSpikeThreshold ?? 0.7;
-    this.batteryFloor = opts.batteryFloor ?? 0.2;
-    this.batteryIdleFloor = opts.batteryIdleFloor ?? 0.5;
     this.conversationCooldownMs = opts.conversationCooldownMs ?? 30_000;
     // cycle 1 MED: keystroke 쿨다운을 대화 쿨다운과 분리 (기존: 재사용).
     this.keystrokeCooldownMs = opts.keystrokeCooldownMs ?? 10_000;

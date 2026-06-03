@@ -4,7 +4,7 @@
  * Shows cumulative redaction stats: total hits, by-kind bar chart,
  * daily trend sparkline, and top 5 patterns.
  */
-import React, { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useState } from "react";
 import { Checkbox } from "../../../components/ui/checkbox.js";
 import { NativeSelect, NativeSelectOption } from "../../../components/ui/native-select.js";
 import { Separator } from "../../../components/ui/separator.js";

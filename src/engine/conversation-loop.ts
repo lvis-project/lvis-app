@@ -44,8 +44,6 @@ import type {
 import { collectRoundStream } from "./turn/stream-collector.js";
 import {
   handleRequestPlugin,
-  MAX_PLUGIN_EXPANSION,
-  MAX_SESSION_PLUGIN_EXPANSION,
   REQUEST_PLUGIN_TOOL,
 } from "./turn/plugin-expansion.js";
 import {

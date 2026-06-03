@@ -24,7 +24,6 @@ import { SessionTodoPanel } from "./components/SessionTodoPanel.js";
 import { MessageQueuePanel } from "./components/MessageQueuePanel.js";
 import { MessageQueueStore, formatQueueInject, type MessageQueueItem } from "./state/message-queue-store.js";
 import { SubAgentCard } from "./components/SubAgentCard.js";
-import { TokenCostBadge } from "./components/TokenCostBadge.js";
 import { TokenProgressRing } from "./components/TokenProgressRing.js";
 import { BottomActionRow } from "./components/BottomActionRow.js";
 import { PermissionModeBadge } from "./components/permissions/PermissionModeBadge.js";
@@ -40,7 +39,7 @@ import { TurnActionBar } from "./components/TurnActionBar.js";
 import { QuestionOverlay } from "./components/QuestionOverlay.js";
 import { getApi } from "./api-client.js";
 import { highlightText } from "./utils/html-preview.js";
-import { useChatContext, type ChatContextValue } from "./context/ChatContext.js";
+import { useChatContext } from "./context/ChatContext.js";
 import { InputActionBar } from "./components/InputActionBar.js";
 import { Composer, type ComposerHandle } from "./components/Composer.js";
 import { useSuggestedReplies } from "./hooks/use-suggested-replies.js";
@@ -55,7 +54,7 @@ import { buildMarkerText } from "./utils/attachment-markers.js";
 import type { PluginEntry } from "./components/PluginGridButton.js";
 import type { InstallPhase } from "./hooks/use-plugin-marketplace.js";
 import type { QuickAction } from "./components/CommandPopover.js";
-import { AskUserQuestionCard, type AskUserQuestionRequest } from "./components/AskUserQuestionCard.js";
+import { type AskUserQuestionRequest } from "./components/AskUserQuestionCard.js";
 import type { LvisApi } from "./types.js";
 import type { SubAgentSpawn } from "./components/SubAgentCard.js";
 import type { SkillBadgeProps } from "./components/SkillBadge.js";
@@ -351,7 +350,7 @@ export function ChatView({ api, onAsk, onEditSave, onFork, onToggleStar, onRetry
     rolePresets, activePreset, activePresetId, setActivePresetId,
     attachments, setAttachments, attachmentNCounter,
     vendorSupportsThinking, enableThinkingChat, toggleThinking,
-    costEstimate, costBadgeClass, activePricing, activeVendor,
+    costEstimate, costBadgeClass, activeVendor,
     hideToolFailures,
   } = useChatContext();
 

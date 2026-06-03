@@ -8,7 +8,6 @@
 import { resolve } from "node:path";
 import { app } from "electron";
 import type { BrowserWindow } from "electron";
-import type { PluginRuntime } from "../../plugins/runtime.js";
 import type { SettingsService } from "../../data/settings-store.js";
 import type { AuditLogger } from "../../audit/audit-logger.js";
 import type { MarketplaceFetcher } from "../../plugins/marketplace.js";

@@ -13,7 +13,7 @@
  *
  * No plugin-specific literals here — everything is manifest-driven.
  */
-import { app, BrowserWindow as ElectronBrowserWindow, shell } from "electron";
+import { app, BrowserWindow as ElectronBrowserWindow } from "electron";
 import type { BrowserWindow } from "electron";
 import { mkdirSync } from "node:fs";
 import { randomUUID, createHash } from "node:crypto";
@@ -32,7 +32,7 @@ import { PluginDeploymentGuard } from "../../plugins/deployment-guard.js";
 // the Tier-3 admin-bypass gate is anchored to a host-verified field, not
 // the user-writable `plugin.json` manifest.
 import { readPluginRegistry } from "../../plugins/registry.js";
-import type { PluginRegistryEntry, PluginRegistryEntryInstallSource } from "../../plugins/types.js";
+import type { PluginRegistryEntry } from "../../plugins/types.js";
 import { createPluginStorage } from "../../plugins/storage.js";
 import { shouldBlockPluginSecretRead } from "../../plugins/secret-shape.js";
 import {
@@ -394,7 +394,6 @@ export function formatPluginPendingPrompt(prompt: string, source: string): strin
 }
 
 export const OVERLAY_SUMMARY_DISPLAY_CAP = 2_000;
-export const OVERLAY_SUMMARY_TRUNCATION_MARKER = "\n…[truncated — view full in chat]";
 
 /**
  * Build the user-visible overlay preview. The full prompt still flows through
@@ -856,7 +855,6 @@ export async function initPluginRuntime(
   const {
     projectRoot,
     settingsService,
-    memoryManager,
     keywordEngine,
     toolRegistry,
     pythonPath,

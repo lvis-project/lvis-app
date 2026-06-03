@@ -295,7 +295,6 @@ export function registerPluginsHandlers(deps: IpcDeps): void {
     clearAuthPartitionService,
     listPluginAuthPartitionsService,
     forgetPluginAuthPartitionsService,
-    notificationService,
     mcpArtifactStore,
     agentArtifactStore,
     skillArtifactStore,

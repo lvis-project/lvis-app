@@ -2042,7 +2042,7 @@ export class PluginRuntime {
   // ─── Private helpers ───────────────────────────────────────────────────────
 
   private resetLoadedState(): void {
-    for (const [pluginId, list] of this.disposers) {
+    for (const [, list] of this.disposers) {
       for (const d of list) {
         try { d(); } catch (err) {
           log.error(`disposer failed: %s`, (err as Error).message);
