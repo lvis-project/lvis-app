@@ -9,7 +9,7 @@ describe("main process plugin lifecycle regression guards", () => {
   it("reports lvis:// install success only after runtime activation succeeds", async () => {
     const source = await readSource("../main.ts");
     const lifecycleSection = source.match(
-      /let installProgressSlug = params\.slug[\s\S]*?\n}\n\nfunction activateView/,
+      /let installProgressSlug = params\.slug[\s\S]*?\r?\n}\r?\n\r?\nfunction activateView/,
     )?.[0];
 
     expect(lifecycleSection, "deep-link install lifecycle section must be present").toBeTruthy();

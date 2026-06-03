@@ -1,8 +1,11 @@
 import type { PolicyFile } from "../policy-store.js";
 import type { ToolInvocationContext } from "../reviewer/risk-classifier.js";
 import { detectSandboxCapability } from "../sandbox-capability.js";
+import { canonicalizePathForMatch, caseFoldForMatch } from "../sensitive-paths.js";
 
-const DEFAULT_ALLOWED_DIRECTORIES = ["/Users/ken/work", "/Users/ken/.lvis"];
+const DEFAULT_ALLOWED_DIRECTORIES = ["/Users/ken/work", "/Users/ken/.lvis"].map((dir) =>
+  caseFoldForMatch(canonicalizePathForMatch(dir)),
+);
 
 export function makeTestPolicy(overrides: Partial<PolicyFile> = {}): PolicyFile {
   return {

@@ -123,6 +123,7 @@ export function wireReleasePrep(input: ReleasePrepInput): ReleasePrepOutput {
 
     const updater = createAutoUpdater({
       mainWindow,
+      auditLogger: bootAuditLogger,
       isEnabled: () => settingsService.get("updates")?.autoCheckEnabled ?? true,
     });
     updater.start();

@@ -8,6 +8,7 @@ import { join } from "node:path";
 import { PermissionManager } from "../permission-manager.js";
 import { VerdictCache } from "../reviewer/verdict-cache.js";
 import { DeferredQueue } from "../reviewer/deferred-queue.js";
+import { canonicalizePathForMatch, caseFoldForMatch } from "../sensitive-paths.js";
 import {
   RuleBasedRiskClassifier,
   type RiskClassifier,
@@ -19,6 +20,10 @@ import { BashTool } from "../../tools/bash.js";
 function tmpFile(name: string): string {
   const dir = mkdtempSync(join(tmpdir(), "lvis-pm-reviewer-"));
   return join(dir, name);
+}
+
+function allowedDir(path: string): string {
+  return caseFoldForMatch(canonicalizePathForMatch(path));
 }
 
 function makeManager(): {
@@ -59,7 +64,7 @@ describe("PermissionManager.dispatchReviewer", () => {
       category: "write",
       pathFields: ["path"],
       finalInput: { path: "/Users/ken/work/note.md" },
-      allowedDirectories: ["/Users/ken/work"],
+      allowedDirectories: [allowedDir("/Users/ken/work")],
       sensitivePathsAdjacent: [],
       trustOrigin: "user-keyboard" as const,
     });
@@ -74,7 +79,7 @@ describe("PermissionManager.dispatchReviewer", () => {
       category: "write",
       pathFields: ["path"],
       finalInput: { path: "/etc/passwd" },
-      allowedDirectories: ["/Users/ken/work"],
+      allowedDirectories: [allowedDir("/Users/ken/work")],
       sensitivePathsAdjacent: [],
       trustOrigin: "user-keyboard" as const,
     });
@@ -92,7 +97,7 @@ describe("PermissionManager.dispatchReviewer", () => {
       category: "write",
       pathFields: ["path"],
       finalInput: { path: "/Users/ken/work/a/b/c/d.md" },
-      allowedDirectories: ["/Users/ken/work"],
+      allowedDirectories: [allowedDir("/Users/ken/work")],
       sensitivePathsAdjacent: [],
       trustOrigin: "user-keyboard" as const,
     });
@@ -109,7 +114,7 @@ describe("PermissionManager.dispatchReviewer", () => {
         category: "write",
         pathFields: ["path"],
         finalInput: { path: "/Users/ken/work/a/b/c/d.md" },
-        allowedDirectories: ["/Users/ken/work"],
+        allowedDirectories: [allowedDir("/Users/ken/work")],
         sensitivePathsAdjacent: [],
         trustOrigin: "llm-tool-arg" as const,
       },
@@ -129,7 +134,7 @@ describe("PermissionManager.dispatchReviewer", () => {
       category: "write" as const,
       pathFields: ["path"],
       finalInput: { path: "/Users/ken/work/note.md" },
-      allowedDirectories: ["/Users/ken/work"],
+      allowedDirectories: [allowedDir("/Users/ken/work")],
       sensitivePathsAdjacent: [],
       trustOrigin: "user-keyboard" as const,
     };
@@ -153,7 +158,7 @@ describe("PermissionManager.dispatchReviewer", () => {
       category: "write" as const,
       pathFields: ["path"],
       finalInput: { path: "/Users/ken/work/note.md" },
-      allowedDirectories: ["/Users/ken/work"],
+      allowedDirectories: [allowedDir("/Users/ken/work")],
       sensitivePathsAdjacent: [],
     };
 
@@ -261,7 +266,7 @@ describe("PermissionManager.dispatchReviewer", () => {
 
   it("does not reuse reversible shell reviewer cache for destructive shell commands", async () => {
     const bash = new BashTool();
-    const allowedDirectories = ["/Users/ken/work"];
+    const allowedDirectories = [allowedDir("/Users/ken/work")];
     const firstInput = { command: "echo ok" };
     const destructiveInput = { command: "rm -rf ./build" };
     const first = await pm.dispatchReviewer("bash", {
@@ -298,13 +303,13 @@ describe("PermissionManager.dispatchReviewer", () => {
       category: "write" as const,
       pathFields: ["path"],
       finalInput: { path: "/Users/ken/work/note.md" },
-      allowedDirectories: ["/Users/ken/work"],
+      allowedDirectories: [allowedDir("/Users/ken/work")],
       sensitivePathsAdjacent: [],
       trustOrigin: "user-keyboard" as const,
     };
     await pm.dispatchReviewer("fs_write", ctxA);
     // Same input, different allowedDirectories context.
-    const ctxB = { ...ctxA, allowedDirectories: ["/different"] };
+    const ctxB = { ...ctxA, allowedDirectories: [allowedDir("/different")] };
     const r = await pm.dispatchReviewer("fs_write", ctxB);
     expect(r.cacheReason).toBe("miss-stale");
   });
@@ -327,7 +332,7 @@ describe("PermissionManager.dispatchReviewer", () => {
       category: "write" as const,
       pathFields: ["path"],
       finalInput: { path: "/Users/ken/work/note.md" },
-      allowedDirectories: ["/Users/ken/work"],
+      allowedDirectories: [allowedDir("/Users/ken/work")],
       sensitivePathsAdjacent: [],
       trustOrigin: "user-keyboard" as const,
     };
@@ -377,7 +382,7 @@ describe("PermissionManager.dispatchReviewer", () => {
       category: "write",
       pathFields: ["path"],
       finalInput: { path: "/x" },
-      allowedDirectories: ["/Users/ken/work"],
+      allowedDirectories: [allowedDir("/Users/ken/work")],
       sensitivePathsAdjacent: [],
       trustOrigin: "user-keyboard" as const,
     });
@@ -428,7 +433,7 @@ describe("MAJOR-1 R2: dispatchReviewer threads abortSignal to LlmRiskClassifier.
         category: "shell",
         pathFields: [],
         finalInput: { command: "echo hello" },
-        allowedDirectories: ["/Users/ken/work"],
+        allowedDirectories: [allowedDir("/Users/ken/work")],
         sensitivePathsAdjacent: [],
         trustOrigin: "llm-tool-arg",
       },
@@ -465,7 +470,7 @@ describe("MAJOR-1 R2: dispatchReviewer threads abortSignal to LlmRiskClassifier.
         category: "shell",
         pathFields: [],
         finalInput: { command: "echo hello" },
-        allowedDirectories: ["/Users/ken/work"],
+        allowedDirectories: [allowedDir("/Users/ken/work")],
         sensitivePathsAdjacent: [],
         trustOrigin: "llm-tool-arg",
       },

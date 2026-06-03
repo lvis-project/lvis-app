@@ -31,6 +31,7 @@ import { createLogger } from "../lib/logger.js";
 import type { UserApprovalScope, UserApprovalVerdict } from "../shared/permissions-events.js";
 
 const log = createLogger("user-approval-store");
+let persistentWriteQueue: Promise<void> = Promise.resolve();
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 
@@ -174,12 +175,34 @@ async function atomicWrite(data: ApprovalsFile): Promise<void> {
   await rename(tmp, path);
 
   // MEDIUM: fsync the directory so the rename is durable.
+  await syncDirectoryBestEffort(dir);
+}
+
+async function syncDirectoryBestEffort(dir: string): Promise<void> {
   const dirFd = await open(dir, constants.O_RDONLY);
   try {
     await dirFd.sync();
+  } catch (err) {
+    const code = (err as NodeJS.ErrnoException).code;
+    if (process.platform === "win32" && (code === "EPERM" || code === "EINVAL" || code === "ENOTSUP")) {
+      return;
+    }
+    throw err;
   } finally {
     await dirFd.close();
   }
+}
+
+async function mutatePersistentApprovals(
+  mutator: (file: ApprovalsFile) => Promise<void> | void,
+): Promise<void> {
+  const run = persistentWriteQueue.catch(() => {}).then(async () => {
+    const file = await readApprovalsFile();
+    await mutator(file);
+    await atomicWrite(file);
+  });
+  persistentWriteQueue = run.then(() => undefined, () => undefined);
+  return run;
 }
 
 // ─── Public API ───────────────────────────────────────────────────────────────
@@ -232,9 +255,9 @@ export async function recordApproval(
   }
 
   // persistent — write to disk
-  const file = await readApprovalsFile();
-  file.approvals[key] = full;
-  await atomicWrite(file);
+  await mutatePersistentApprovals((file) => {
+    file.approvals[key] = full;
+  });
   // Mirror into session cache for fast lookups.
   sessionStore.set(key, full);
 }
@@ -294,11 +317,11 @@ export async function revokeApproval(
   sessionStore.delete(key);
 
   // Mark revoked on disk (if persistent entry exists).
-  const file = await readApprovalsFile();
-  const existing = file.approvals[key];
-  if (!existing) return;
-  existing.revokedAt = new Date().toISOString();
-  await atomicWrite(file);
+  await mutatePersistentApprovals((file) => {
+    const existing = file.approvals[key];
+    if (!existing) return;
+    existing.revokedAt = new Date().toISOString();
+  });
 }
 
 /**
@@ -310,11 +333,11 @@ export async function revokeApprovalByKey(rawKey: string): Promise<void> {
   // Evict from session store.
   sessionStore.delete(rawKey);
 
-  const file = await readApprovalsFile();
-  const existing = file.approvals[rawKey];
-  if (!existing) return;
-  existing.revokedAt = new Date().toISOString();
-  await atomicWrite(file);
+  await mutatePersistentApprovals((file) => {
+    const existing = file.approvals[rawKey];
+    if (!existing) return;
+    existing.revokedAt = new Date().toISOString();
+  });
 }
 
 /**
@@ -504,12 +527,7 @@ export async function migrateCanonicalization(): Promise<void> {
     await rename(markerTmp, markerPath);
 
     // MEDIUM: fsync marker directory so rename is durable.
-    const markerDirFd = await open(markerDir, constants.O_RDONLY);
-    try {
-      await markerDirFd.sync();
-    } finally {
-      await markerDirFd.close();
-    }
+    await syncDirectoryBestEffort(markerDir);
 
     // MEDIUM: route through structured logger (bootAuditLogger not yet
     // available at this call site; createLogger routes to the same sink).
@@ -533,4 +551,5 @@ export async function migrateCanonicalization(): Promise<void> {
 /** @internal Test only — clears the session cache between test cases. */
 export function __resetSessionStoreForTest(): void {
   sessionStore.clear();
+  persistentWriteQueue = Promise.resolve();
 }

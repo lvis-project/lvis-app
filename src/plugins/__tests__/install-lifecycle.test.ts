@@ -25,10 +25,13 @@ function makeRuntime(initialPluginIds: string[] = []) {
 function makeMarketplace() {
   return {
     list: vi.fn(async () => [
-      { id: "p", slug: "lvis-plugin-p" },
-      { id: "meeting", slug: "lvis-plugin-meeting" },
+      { id: "p", slug: "lvis-plugin-p", version: "2.0.0" },
+      { id: "meeting", slug: "lvis-plugin-meeting", version: "2.0.0" },
     ]),
     install: vi.fn(async (pluginId: string) => ({ pluginId, installed: true as const })),
+    getLiveCatalogVersion: vi.fn(async () => "2.0.0"),
+    getInstalledVersion: vi.fn(async () => "1.0.0"),
+    quarantinePlugin: vi.fn(async (pluginId: string, reason: string) => ({ pluginId, reason, quarantined: true as const })),
     uninstall: vi.fn(async (pluginId: string) => ({ pluginId, uninstalled: true as const })),
     rollbackPlugin: vi.fn(async (pluginId: string) => ({ pluginId, rolledBackTo: "1.0.0" })),
     rollbackLocalInstall: vi.fn(async (pluginId: string) => ({ pluginId, rolledBack: true as const })),
@@ -109,7 +112,7 @@ describe("installMarketplacePluginWithLifecycle", () => {
   it("pre-stops an installed plugin even when it is not currently loaded", async () => {
     const runtime = makeRuntime();
     const marketplace = makeMarketplace();
-    marketplace.list.mockResolvedValueOnce([{ id: "p", slug: "lvis-plugin-p", installed: true }]);
+    marketplace.list.mockResolvedValue([{ id: "p", slug: "lvis-plugin-p", installed: true, version: "2.0.0" }]);
 
     await installMarketplacePluginWithLifecycle({
       requestedPluginId: "lvis-plugin-p",
@@ -120,6 +123,172 @@ describe("installMarketplacePluginWithLifecycle", () => {
 
     expect(runtime.removePlugin).toHaveBeenCalledWith("p");
     expect(runtime.addPlugin).toHaveBeenCalledWith("p");
+    expect(marketplace.getLiveCatalogVersion).not.toHaveBeenCalled();
+  });
+
+  it("rejects stale renderer expectedVersion before touching runtime or marketplace install", async () => {
+    const runtime = makeRuntime(["p"]);
+    const marketplace = makeMarketplace();
+    marketplace.getLiveCatalogVersion.mockResolvedValue("1.0.0");
+
+    await expect(
+      installMarketplacePluginWithLifecycle({
+        requestedPluginId: "p",
+        expectedVersion: "2.0.0",
+        pluginRuntime: runtime,
+        pluginMarketplace: marketplace,
+      }),
+    ).rejects.toThrow("version is stale");
+
+    expect(runtime.removePlugin).not.toHaveBeenCalled();
+    expect(marketplace.install).not.toHaveBeenCalled();
+    expect(marketplace.rollbackPlugin).not.toHaveBeenCalled();
+    expect(marketplace.uninstall).not.toHaveBeenCalled();
+    expect(marketplace.quarantinePlugin).not.toHaveBeenCalled();
+  });
+
+  it("checks expectedVersion against the live catalog instead of a stale cached lifecycle list", async () => {
+    const runtime = makeRuntime(["p"]);
+    const marketplace = makeMarketplace();
+    marketplace.list.mockResolvedValue([
+      { id: "p", slug: "lvis-plugin-p", installed: true, version: "1.0.0" },
+    ]);
+    marketplace.getLiveCatalogVersion.mockResolvedValue("2.0.0");
+    marketplace.getInstalledVersion
+      .mockResolvedValueOnce("1.0.0")
+      .mockResolvedValueOnce("2.0.0");
+
+    const result = await installMarketplacePluginWithLifecycle({
+      requestedPluginId: "p",
+      expectedVersion: "2.0.0",
+      pluginRuntime: runtime,
+      pluginMarketplace: marketplace,
+    });
+
+    expect(result).toEqual({ pluginId: "p", installed: true });
+    expect(marketplace.getLiveCatalogVersion).toHaveBeenCalledWith("p");
+    expect(marketplace.install).toHaveBeenCalledWith("p", expect.any(Function));
+  });
+
+
+  it("rolls back before starting when expectedVersion does not match installed manifest", async () => {
+    const runtime = makeRuntime();
+    const marketplace = makeMarketplace();
+    const installed = vi.fn();
+    marketplace.getInstalledVersion.mockResolvedValueOnce("1.0.0");
+
+    await expect(
+      installMarketplacePluginWithLifecycle({
+        requestedPluginId: "p",
+        expectedVersion: "2.0.0",
+        pluginRuntime: runtime,
+        pluginMarketplace: marketplace,
+        emitPluginInstalled: installed,
+      }),
+    ).rejects.toThrow("version mismatch");
+
+    expect(runtime.addPlugin).not.toHaveBeenCalled();
+    expect(marketplace.uninstall).toHaveBeenCalledWith("p");
+    expect(marketplace.rollbackPlugin).not.toHaveBeenCalled();
+    expect(installed).not.toHaveBeenCalled();
+  });
+
+  it("rolls back an update and restores runtime when expectedVersion verification fails", async () => {
+    const runtime = makeRuntime(["p"]);
+    const marketplace = makeMarketplace();
+    runtime.removePlugin.mockImplementationOnce(async (pluginId: string) => {
+      runtime.dropPlugin(pluginId);
+    });
+    marketplace.getInstalledVersion
+      .mockResolvedValueOnce("1.0.0")
+      .mockResolvedValueOnce("1.5.0");
+
+    await expect(
+      installMarketplacePluginWithLifecycle({
+        requestedPluginId: "p",
+        expectedVersion: "2.0.0",
+        pluginRuntime: runtime,
+        pluginMarketplace: marketplace,
+      }),
+    ).rejects.toThrow("version mismatch");
+
+    expect(marketplace.rollbackPlugin).toHaveBeenCalledWith("p");
+    expect(marketplace.uninstall).not.toHaveBeenCalled();
+    expect(runtime.addPlugin).toHaveBeenCalledWith("p");
+  });
+
+  it("restores runtime without rollback when expectedVersion mismatch follows a no-op install", async () => {
+    const runtime = makeRuntime(["p"]);
+    const marketplace = makeMarketplace();
+    runtime.removePlugin.mockImplementationOnce(async (pluginId: string) => {
+      runtime.dropPlugin(pluginId);
+    });
+    marketplace.getInstalledVersion
+      .mockResolvedValueOnce("1.0.0")
+      .mockResolvedValueOnce("1.0.0");
+
+    await expect(
+      installMarketplacePluginWithLifecycle({
+        requestedPluginId: "p",
+        expectedVersion: "2.0.0",
+        pluginRuntime: runtime,
+        pluginMarketplace: marketplace,
+      }),
+    ).rejects.toThrow("version mismatch");
+
+    expect(marketplace.rollbackPlugin).not.toHaveBeenCalled();
+    expect(marketplace.uninstall).not.toHaveBeenCalled();
+    expect(marketplace.quarantinePlugin).not.toHaveBeenCalled();
+    expect(runtime.addPlugin).toHaveBeenCalledWith("p");
+  });
+
+  it("quarantines a fresh install when expectedVersion cleanup fails", async () => {
+    const runtime = makeRuntime();
+    const marketplace = makeMarketplace();
+    marketplace.getInstalledVersion.mockResolvedValueOnce("1.0.0");
+    marketplace.uninstall.mockRejectedValueOnce(new Error("uninstall denied"));
+
+    await expect(
+      installMarketplacePluginWithLifecycle({
+        requestedPluginId: "p",
+        expectedVersion: "2.0.0",
+        pluginRuntime: runtime,
+        pluginMarketplace: marketplace,
+      }),
+    ).rejects.toThrow(/uninstall denied/);
+
+    expect(runtime.addPlugin).not.toHaveBeenCalled();
+    expect(marketplace.uninstall).toHaveBeenCalledWith("p");
+    expect(marketplace.quarantinePlugin).toHaveBeenCalledWith(
+      "p",
+      "expectedVersion fresh-install cleanup failed: uninstall denied",
+    );
+  });
+
+  it("does not restore runtime when expectedVersion rollback fails", async () => {
+    const runtime = makeRuntime(["p"]);
+    const marketplace = makeMarketplace();
+    runtime.removePlugin.mockImplementationOnce(async (pluginId: string) => {
+      runtime.dropPlugin(pluginId);
+    });
+    marketplace.getInstalledVersion
+      .mockResolvedValueOnce("1.0.0")
+      .mockResolvedValueOnce("1.5.0");
+    marketplace.rollbackPlugin.mockRejectedValueOnce(new Error("rollback failed"));
+
+    await expect(
+      installMarketplacePluginWithLifecycle({
+        requestedPluginId: "p",
+        expectedVersion: "2.0.0",
+        pluginRuntime: runtime,
+        pluginMarketplace: marketplace,
+      }),
+    ).rejects.toThrow(/rollback failed/);
+
+    expect(marketplace.rollbackPlugin).toHaveBeenCalledWith("p");
+    expect(marketplace.quarantinePlugin).toHaveBeenCalledWith("p", "expectedVersion rollback failed: rollback failed");
+    expect(marketplace.uninstall).not.toHaveBeenCalled();
+    expect(runtime.addPlugin).not.toHaveBeenCalled();
   });
 
   it("restores the previously loaded plugin when marketplace install fails after pre-stop", async () => {

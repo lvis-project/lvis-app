@@ -714,11 +714,8 @@ export type LvisApi = {
   getAppUpdateState: () => Promise<import("../../shared/update-state.js").UpdateState>;
   /** Trigger download. Valid only when state is "available". */
   downloadAppUpdate: () => Promise<{ ok: boolean; reason?: string }>;
-  /** Quit & install. Valid only when state is "downloaded". */
+  /** Quit & install after main-owned native confirmation. Valid only when state is "downloaded". */
   installAppUpdate: () => Promise<{ ok: boolean; reason?: string }>;
-  /** Confirm install via native dialog (main-process showMessageBox).
-   *  Returns { confirmed: true } only on the "재시작" button. */
-  confirmInstallAppUpdate: () => Promise<{ confirmed: boolean }>;
   onBootstrapStatus: (
     h: (status:
       | { phase: "start" }
@@ -1285,7 +1282,7 @@ export type LvisPluginsApi = {
 };
 
 export type LvisHostMarketplaceApi = {
-  installMarketplacePlugin: (id: string) => Promise<PluginMarketplaceActionResult>;
+  installMarketplacePlugin: (id: string, expectedVersion?: string) => Promise<PluginMarketplaceActionResult>;
   uninstallMarketplacePlugin: (id: string) => Promise<PluginMarketplaceActionResult>;
   installMarketplaceAgent?: (slug: string) => Promise<PluginMarketplaceActionResult>;
   uninstallMarketplaceAgent?: (slug: string) => Promise<PluginMarketplaceActionResult>;
