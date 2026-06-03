@@ -12,6 +12,7 @@
  */
 import { Badge } from "../../../components/ui/badge.js";
 import { DEFAULT_APPROVAL_QUEUE_MAX } from "../../../lib/approval-queue-reducer.js";
+import { useTranslation } from "../../../i18n/react.js";
 import { SOURCE_BADGE } from "../constants.js";
 import type { ApprovalRequest } from "../types.js";
 import { trustOriginLabel } from "../utils/trust-origin-label.js";
@@ -25,6 +26,7 @@ export function ApprovalQueueStatus({
   queue,
   max = DEFAULT_APPROVAL_QUEUE_MAX,
 }: ApprovalQueueStatusProps) {
+  const { t } = useTranslation();
   if (queue.length < 2) return null;
   // Head-of-queue is shown by the modal; list the rest.
   const waiting = queue.slice(1);
@@ -34,12 +36,12 @@ export function ApprovalQueueStatus({
     <div
       role="status"
       aria-live="polite"
-      aria-label={`승인 요청 ${queue.length}개 대기 중`}
+      aria-label={t("approvalQueueStatus.ariaLabel", { count: queue.length })}
       data-testid="approval-queue-status"
       className="fixed bottom-4 right-4 z-40 w-72 rounded-lg border border-border bg-background/95 p-3 shadow-lg backdrop-blur"
     >
       <div className="mb-2 flex items-center justify-between">
-        <span className="text-sm font-medium">대기 중인 승인</span>
+        <span className="text-sm font-medium">{t("approvalQueueStatus.pendingApprovals")}</span>
         <Badge
           variant={isFull ? "default" : "secondary"}
           className={isFull ? "bg-destructive text-destructive-foreground" : undefined}
@@ -50,7 +52,7 @@ export function ApprovalQueueStatus({
       </div>
       {isFull ? (
         <p className="mb-2 text-xs text-destructive">
-          승인 큐가 가득 차 새 요청은 거부됩니다.
+          {t("approvalQueueStatus.queueFull")}
         </p>
       ) : null}
       <ul className="max-h-56 space-y-1 overflow-y-auto text-xs">

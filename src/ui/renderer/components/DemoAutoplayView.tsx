@@ -20,6 +20,7 @@ import type {
 } from "../../../engine/demo-autoplay/types.js";
 import { Button } from "../../../components/ui/button.js";
 import { DemoAutoplayBanner } from "./DemoAutoplayBanner.js";
+import { useTranslation } from "../../../i18n/react.js";
 
 interface DemoEntry {
   id: string;
@@ -53,6 +54,7 @@ export interface DemoAuditEvent {
 }
 
 export function DemoAutoplayView({ turn, onFinished, onAuditEvent }: DemoAutoplayViewProps) {
+  const { t } = useTranslation();
   const [entries, setEntries] = useState<DemoEntry[]>([]);
   const engineRef = useRef<ScriptedTurnEngine | null>(null);
   const auditRef = useRef(onAuditEvent);
@@ -176,9 +178,9 @@ export function DemoAutoplayView({ turn, onFinished, onAuditEvent }: DemoAutopla
         >
           <span className="text-base" aria-hidden="true">👋</span>
           <div className="flex-1 text-[11.5px]">
-            <div>이런 식으로 동작해요. 직접 해보시겠어요?</div>
+            <div>{t("demoAutoplayView.takeOverPrompt")}</div>
             <div className="mt-0.5 text-[10px] text-muted-foreground">
-              언제든 키를 잡으면 demo 가 중단되고 일반 대화로 전환됩니다.
+              {t("demoAutoplayView.takeOverHint")}
             </div>
           </div>
           <Button
@@ -192,7 +194,7 @@ export function DemoAutoplayView({ turn, onFinished, onAuditEvent }: DemoAutopla
               color: "white",
             }}
           >
-            키 잡기 →
+            {t("demoAutoplayView.takeOverButton")}
           </Button>
         </div>
       </div>
@@ -201,6 +203,7 @@ export function DemoAutoplayView({ turn, onFinished, onAuditEvent }: DemoAutopla
 }
 
 function DemoEntryView({ entry }: { entry: DemoEntry }) {
+  const { t } = useTranslation();
   if (entry.kind === "user") {
     return (
       <div className="flex justify-end gap-2" data-testid="demo-entry:user">
@@ -222,7 +225,7 @@ function DemoEntryView({ entry }: { entry: DemoEntry }) {
           className="flex-1 rounded-lg rounded-tl-sm px-3 py-2"
           style={{ background: "hsl(var(--card))" }}
         >
-          <div className="mb-1 text-[10.5px] text-muted-foreground">🛠 도구 사용 요청 (데모)</div>
+          <div className="mb-1 text-[10.5px] text-muted-foreground">🛠 {t("demoAutoplayView.toolCallLabel")}</div>
           <div className="flex items-center gap-2">
             <span
               className="font-mono text-[11px] rounded px-1.5 py-0.5"
@@ -237,9 +240,9 @@ function DemoEntryView({ entry }: { entry: DemoEntry }) {
               className="rounded px-2 py-1 text-primary-foreground"
               style={{ background: "hsl(142 71% 45%)" }}
             >
-              {entry.status === "done" ? "승인됨 ✓" : "승인 (자동) ✓"}
+              {entry.status === "done" ? t("demoAutoplayView.toolApproved") : t("demoAutoplayView.toolAutoApproved")}
             </span>
-            <span className="text-muted-foreground">데모: 시연을 위해 자동 승인</span>
+            <span className="text-muted-foreground">{t("demoAutoplayView.toolAutoApproveNote")}</span>
           </div>
         </div>
       </div>
@@ -253,7 +256,7 @@ function DemoEntryView({ entry }: { entry: DemoEntry }) {
           className="flex-1 rounded-lg rounded-tl-sm px-3 py-2 font-mono text-[10.5px] text-muted-foreground"
           style={{ background: "hsl(var(--card))" }}
         >
-          📄 데모: {entry.text}
+          📄 {t("demoAutoplayView.toolResultPrefix")}{entry.text}
         </div>
       </div>
     );

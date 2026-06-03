@@ -1,4 +1,5 @@
 import type { ThemeBundle } from "./types.js";
+import { t } from "../../../../i18n/runtime.js";
 
 /**
  * High-Contrast bundle — accessibility-first.
@@ -9,7 +10,7 @@ import type { ThemeBundle } from "./types.js";
 export const highContrastBundle: ThemeBundle = {
   id: "high-contrast",
   name: "High Contrast",
-  description: "블랙 배경 + 옐로우 액센트 — 접근성 최우선",
+  description: t("highContrast.description"),
   shell: "dark",
   highContrast: true,
   tokens: {

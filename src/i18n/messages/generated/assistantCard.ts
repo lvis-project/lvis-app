@@ -1,0 +1,31 @@
+// AUTO-GENERATED — i18n migration. Source: src/ui/renderer/components/AssistantCard.tsx. Do not edit by hand.
+export const en = {
+  "assistantCard.systemNoticeContextError": "System Notice — Model Limit Exceeded",
+  "assistantCard.systemNoticeStreamError": "System Notice — Response Stream Error",
+  "assistantCard.systemNotice": "System Notice",
+  "assistantCard.titleStreaming": "LVIS is responding…",
+  "assistantCard.title": "LVIS Response",
+  "assistantCard.retryButton": "Retry (depth: high)",
+  "assistantCard.forkButton": "Fork",
+  "assistantCard.starButton": "Bookmark",
+  "assistantCard.streamingPlaceholder": "Composing response…",
+  "assistantCard.feedbackUp": "This was helpful",
+  "assistantCard.feedbackDown": "Needs improvement",
+  "assistantCard.reasonPlaceholder": "Reason (optional)",
+  "assistantCard.sendButton": "Send",
+} as const;
+export const ko: Record<keyof typeof en, string> = {
+  "assistantCard.systemNoticeContextError": "시스템 알림 — 모델 한도 초과",
+  "assistantCard.systemNoticeStreamError": "시스템 알림 — 응답 스트림 오류",
+  "assistantCard.systemNotice": "시스템 알림",
+  "assistantCard.titleStreaming": "LVIS 응답 작성 중",
+  "assistantCard.title": "LVIS 응답",
+  "assistantCard.retryButton": "다시 시도 (깊이: high)",
+  "assistantCard.forkButton": "분기",
+  "assistantCard.starButton": "즐겨찾기",
+  "assistantCard.streamingPlaceholder": "응답을 작성하는 중...",
+  "assistantCard.feedbackUp": "도움이 됐어요",
+  "assistantCard.feedbackDown": "개선이 필요해요",
+  "assistantCard.reasonPlaceholder": "이유 (선택)",
+  "assistantCard.sendButton": "전송",
+};

@@ -20,6 +20,7 @@
  */
 import { mkdir, open, readFile } from "node:fs/promises";
 import { dirname, join, resolve } from "node:path";
+import { t } from "../i18n/index.js";
 import { createLogger } from "../lib/logger.js";
 import { lvisHome } from "../shared/lvis-home.js";
 const log = createLogger("policy-store");
@@ -207,7 +208,7 @@ export async function savePolicy(
 
     // user managed: true 체크 (기존 B1 동작 유지)
     if (existing?.managed === true) {
-      throw new Error("IT 관리 정책은 사용자가 변경할 수 없습니다.");
+      throw new Error(t("be_policyStore.managedPolicyUserCannotChange"));
     }
 
     const current = existing ?? defaultPolicy();

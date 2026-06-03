@@ -34,6 +34,7 @@ import {
   DialogHeader,
   DialogTitle,
 } from "../../../components/ui/dialog.js";
+import { useTranslation } from "../../../i18n/react.js";
 
 export interface PluginShowcaseApi {
   tour: {
@@ -92,17 +93,18 @@ interface PluginDescription {
   /** Plugin id as it appears in pluginCards / manifests. */
   id: string;
   emoji: string;
-  /** Korean display name (short, ≤ 12 chars). */
+  /** i18n key for the display name (short, ≤ 12 chars). */
   label: string;
-  /** One-sentence Korean description (~80 chars). */
+  /** i18n key for the one-sentence description (~80 chars). */
   body: string;
   /** Spotlight tour id for the per-plugin walkthrough. */
   tourScenarioId: string;
   /**
-   * Short list of onboarding scenarios the plugin can run. Rendered inline
-   * inside the card when the user clicks "펼쳐보기 ↓". Each entry is a
-   * 1-line Korean phrase describing a concrete first task the plugin
-   * supports — surfaces the plugin's value without an external navigation.
+   * Short list of i18n keys for onboarding scenarios the plugin can run.
+   * Rendered inline inside the card when the user clicks the expand button.
+   * Each key resolves to a 1-line phrase describing a concrete first task
+   * the plugin supports — surfaces the plugin's value without an external
+   * navigation.
    */
   scenarios: readonly string[];
 }
@@ -118,77 +120,77 @@ const PLUGIN_DESCRIPTIONS: readonly PluginDescription[] = [
   {
     id: "meeting",
     emoji: "🎙️",
-    label: "회의 자동 요약",
-    body: "회의 녹음 → 자동 STT → 요약과 액션 아이템 추출까지 한 번에 처리합니다.",
+    label: "pluginShowcase.meetingLabel",
+    body: "pluginShowcase.meetingBody",
     tourScenarioId: "meeting-walkthrough",
     scenarios: [
-      "회의 녹음을 시작하고 실시간 STT 로 텍스트화",
-      "회의 종료 후 자동 요약과 핵심 결정사항 정리",
-      "추출된 액션 아이템을 LVIS 할 일로 등록",
-      "지난 회의 검색 — '지난주 PM 회의 요약 보여줘'",
+      "pluginShowcase.meetingScenario1",
+      "pluginShowcase.meetingScenario2",
+      "pluginShowcase.meetingScenario3",
+      "pluginShowcase.meetingScenario4",
     ],
   },
   {
     id: "local-indexer",
     emoji: "📚",
-    label: "로컬 문서 검색",
-    body: "PDF·Word·마크다운을 로컬에서 인덱싱하고 자연어로 답합니다. 문서는 외부로 나가지 않습니다.",
+    label: "pluginShowcase.localIndexerLabel",
+    body: "pluginShowcase.localIndexerBody",
     tourScenarioId: "indexer-walkthrough",
     scenarios: [
-      "폴더를 추가하면 PDF / Word / 마크다운 자동 인덱싱",
-      "자연어 검색 — '지난 분기 보안 정책 요약'",
-      "검색 결과에 원문 출처 표시 (페이지 / 섹션)",
-      "민감 정보 PII 자동 마스킹 후 인덱싱",
+      "pluginShowcase.localIndexerScenario1",
+      "pluginShowcase.localIndexerScenario2",
+      "pluginShowcase.localIndexerScenario3",
+      "pluginShowcase.localIndexerScenario4",
     ],
   },
   {
     id: "work-assistant",
     emoji: "💼",
-    label: "업무 도우미",
-    body: "이메일·일정에서 액션 아이템 후보를 추출해 적절한 시점에 카드로 알려줍니다.",
+    label: "pluginShowcase.workAssistantLabel",
+    body: "pluginShowcase.workAssistantBody",
     tourScenarioId: "work-assistant-walkthrough",
     scenarios: [
-      "받은편지함 자동 스캔 → 액션 아이템 후보 추출",
-      "오버레이 카드로 후보 검토 → 한 번에 승인/무시",
-      "발신자·키워드별 우선순위 규칙 설정",
-      "캘린더와 연결 — 미팅 1시간 전 사전 브리핑",
+      "pluginShowcase.workAssistantScenario1",
+      "pluginShowcase.workAssistantScenario2",
+      "pluginShowcase.workAssistantScenario3",
+      "pluginShowcase.workAssistantScenario4",
     ],
   },
   {
     id: "agent-hub",
     emoji: "🤖",
-    label: "Multi-agent",
-    body: "여러 에이전트가 작업을 분산해 처리하고 결과를 다시 합성합니다.",
+    label: "pluginShowcase.agentHubLabel",
+    body: "pluginShowcase.agentHubBody",
     tourScenarioId: "multi-agent-tour",
     scenarios: [
-      "리서치 / 분석을 여러 에이전트에게 동시 dispatch",
-      "에이전트별 LLM·도구 권한 분리 설정",
-      "토큰 / 비용 실시간 추적 + 한도 관리",
-      "결과를 자동 합성 → 단일 보고서로 정리",
+      "pluginShowcase.agentHubScenario1",
+      "pluginShowcase.agentHubScenario2",
+      "pluginShowcase.agentHubScenario3",
+      "pluginShowcase.agentHubScenario4",
     ],
   },
   {
     id: "ms-graph",
     emoji: "📅",
-    label: "MS Graph 연동",
-    body: "Microsoft 365 의 이메일·캘린더와 연결해 LVIS 가 일정과 메일을 활용하도록 합니다.",
+    label: "pluginShowcase.msGraphLabel",
+    body: "pluginShowcase.msGraphBody",
     tourScenarioId: "first-boot-essentials",
     scenarios: [
-      "Microsoft 365 계정 OAuth 연결",
-      "Outlook 받은편지함 → LVIS 컨텍스트로 활용",
-      "캘린더 이벤트 기반 자동 브리핑",
+      "pluginShowcase.msGraphScenario1",
+      "pluginShowcase.msGraphScenario2",
+      "pluginShowcase.msGraphScenario3",
     ],
   },
   {
     id: "internal-api",
     emoji: "🏢",
-    label: "사내 API 연동",
-    body: "사내 내부 시스템과 연동해 조직 데이터·도구를 LVIS 에서 함께 사용합니다.",
+    label: "pluginShowcase.internalApiLabel",
+    body: "pluginShowcase.internalApiBody",
     tourScenarioId: "first-boot-essentials",
     scenarios: [
-      "사내 SSO 로 내부 API 연결",
-      "조직 데이터 검색 (사번 / 부서 / 프로젝트)",
-      "사내 도구를 LVIS 에서 직접 호출",
+      "pluginShowcase.internalApiScenario1",
+      "pluginShowcase.internalApiScenario2",
+      "pluginShowcase.internalApiScenario3",
     ],
   },
 ];
@@ -226,11 +228,11 @@ export function resolveShowcaseCards(
       id,
       emoji: "🧩",
       label: id,
-      body: "사용자가 추가로 설치한 플러그인입니다. 설정 → 플러그인에서 자세히 확인할 수 있어요.",
+      body: "pluginShowcase.fallbackBody",
       tourScenarioId: "first-boot-essentials",
       scenarios: [
-        "설정 → 플러그인에서 자세한 동작 확인",
-        "플러그인 manifest 의 소개 페이지 열기",
+        "pluginShowcase.fallbackScenario1",
+        "pluginShowcase.fallbackScenario2",
       ],
     });
   }
@@ -278,6 +280,7 @@ export function PluginShowcase({
   // the prop is intentionally unused. Kept on the public interface so
   // existing call sites compile without changes.
   void _api;
+  const { t } = useTranslation();
   const reduceMotion = usePrefersReducedMotion();
   const prioritizedPluginId = useMemo(
     () => scenarioToPluginId(prioritizedScenarioId),
@@ -335,10 +338,10 @@ export function PluginShowcase({
             </span>
             <div className="min-w-0">
               <DialogTitle className="text-sm font-medium">
-                설치된 플러그인 둘러보기
+                {t("pluginShowcase.dialogTitle")}
               </DialogTitle>
               <DialogDescription className="text-[11px]">
-                각 플러그인이 무엇을 도와드리는지 1줄로 소개합니다.
+                {t("pluginShowcase.dialogDescription")}
               </DialogDescription>
             </div>
           </div>
@@ -350,8 +353,7 @@ export function PluginShowcase({
               data-testid="plugin-showcase:empty"
               className="rounded-lg bg-[hsl(var(--muted))] px-3 py-3 text-[12.5px] leading-relaxed text-muted-foreground"
             >
-              현재 설치된 플러그인이 없어요. 설정 → 마켓플레이스에서 필요한
-              도구를 추가할 수 있습니다.
+              {t("pluginShowcase.emptyState")}
             </p>
           ) : (
             <div
@@ -372,9 +374,9 @@ export function PluginShowcase({
                         {card.emoji}
                       </span>
                       <div className="min-w-0 flex-1">
-                        <div className="text-[12.5px] font-medium">{card.label}</div>
+                        <div className="text-[12.5px] font-medium">{t(card.label)}</div>
                         <div className="mt-1 text-[10.5px] leading-snug text-muted-foreground">
-                          {card.body}
+                          {t(card.body)}
                         </div>
                         <div className="mt-2 flex items-center gap-2">
                           <Button
@@ -386,7 +388,7 @@ export function PluginShowcase({
                             aria-expanded={expanded}
                             onClick={() => handleToggleExpand(card.id)}
                           >
-                            {expanded ? "접기 ↑" : "펼쳐보기 ↓"}
+                            {expanded ? t("pluginShowcase.collapseButton") : t("pluginShowcase.expandButton")}
                           </Button>
                         </div>
                         {expanded && (
@@ -405,7 +407,7 @@ export function PluginShowcase({
                                 >
                                   •
                                 </span>
-                                <span>{scenario}</span>
+                                <span>{t(scenario)}</span>
                               </li>
                             ))}
                           </ul>
@@ -428,7 +430,7 @@ export function PluginShowcase({
                 "linear-gradient(135deg, hsl(var(--p-purple-500)), hsl(var(--p-blue-500)))",
             }}
           >
-            끝내기 →
+            {t("pluginShowcase.closeButton")}
           </Button>
         </div>
       </DialogContent>

@@ -8,6 +8,7 @@
  */
 import type { ToolUseBlock } from "../../tools/executor.js";
 import { createLogger } from "../../lib/logger.js";
+import { t } from "../../i18n/index.js";
 const log = createLogger("lvis");
 
 export const REQUEST_PLUGIN_TOOL = "request_plugin";
@@ -66,19 +67,19 @@ export function handleRequestPlugin(
     if (typeof pluginId !== "string" || pluginId.length === 0) {
       results.push({
         tool_use_id: tu.id,
-        content: `request_plugin 오류: pluginId (string) 필수. Available: ${availableIds.join(", ") || "(none)"}`,
+        content: t("be_pluginExpansion.missingPluginId", { available: availableIds.join(", ") || t("be_pluginExpansion.noneAvailable") }),
         is_error: true,
       });
     } else if (!availableIds.includes(pluginId)) {
       results.push({
         tool_use_id: tu.id,
-        content: `알 수 없는 플러그인 ID '${pluginId}'. 사용 가능: ${availableIds.join(", ") || "(없음)"}`,
+        content: t("be_pluginExpansion.unknownPluginId", { pluginId, available: availableIds.join(", ") || t("be_pluginExpansion.noneAvailable") }),
         is_error: true,
       });
     } else if (turnExpansions >= MAX_PLUGIN_EXPANSION) {
       results.push({
         tool_use_id: tu.id,
-        content: `request_plugin 한도 초과 (턴당 최대 ${MAX_PLUGIN_EXPANSION}회). '${pluginId}' 활성화 거부.`,
+        content: t("be_pluginExpansion.turnLimitExceeded", { max: String(MAX_PLUGIN_EXPANSION), pluginId }),
         is_error: true,
       });
     } else if (sessionExpansions >= MAX_SESSION_PLUGIN_EXPANSION) {
@@ -88,7 +89,7 @@ export function handleRequestPlugin(
       );
       results.push({
         tool_use_id: tu.id,
-        content: `request_plugin 세션 한도 초과 (세션당 최대 ${MAX_SESSION_PLUGIN_EXPANSION}회). '${pluginId}' 활성화 거부.`,
+        content: t("be_pluginExpansion.sessionLimitExceeded", { max: String(MAX_SESSION_PLUGIN_EXPANSION), pluginId }),
         is_error: true,
       });
     } else {
@@ -100,7 +101,7 @@ export function handleRequestPlugin(
         tool_use_id: tu.id,
         // 실제 추가된 도구 수는 호출자가 rebuild 후 보강 가능하지만
         // 초기 메시지는 activation 사실만 보고한다 — 호출자가 replace 하기도 한다.
-        content: `플러그인 '${pluginId}' 활성화됨.`,
+        content: t("be_pluginExpansion.activated", { pluginId }),
         is_error: false,
       });
     }

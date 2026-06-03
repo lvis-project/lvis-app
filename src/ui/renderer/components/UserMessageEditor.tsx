@@ -1,6 +1,7 @@
 import { useState } from "react";
 import { Button } from "../../../components/ui/button.js";
 import { Textarea } from "../../../components/ui/textarea.js";
+import { useTranslation } from "../../../i18n/react.js";
 
 /**
  * Inline editor for resending a user message. Renders as a
@@ -17,6 +18,7 @@ export function UserMessageEditor({
   onSave: (next: string) => void;
   busy: boolean;
 }) {
+  const { t } = useTranslation();
   const [draft, setDraft] = useState(initialText);
   return (
     <div className="ml-auto w-full max-w-[75%] rounded-md border bg-message-user/10 p-2 text-sm">
@@ -27,8 +29,8 @@ export function UserMessageEditor({
         autoFocus
       />
       <div className="mt-1 flex justify-end gap-1">
-        <Button size="sm" variant="ghost" className="h-6 text-xs" onClick={onCancel} disabled={busy}>취소</Button>
-        <Button size="sm" className="h-6 text-xs" onClick={() => onSave(draft)} disabled={busy || !draft.trim()}>저장 후 재전송</Button>
+        <Button size="sm" variant="ghost" className="h-6 text-xs" onClick={onCancel} disabled={busy}>{t("userMessageEditor.cancelButton")}</Button>
+        <Button size="sm" className="h-6 text-xs" onClick={() => onSave(draft)} disabled={busy || !draft.trim()}>{t("userMessageEditor.saveAndResendButton")}</Button>
       </div>
     </div>
   );

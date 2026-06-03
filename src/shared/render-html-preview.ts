@@ -1,3 +1,5 @@
+import { t } from "../i18n/index.js";
+
 export const RENDER_HTML_WINDOW_MIN_WIDTH = 420;
 export const RENDER_HTML_WINDOW_MAX_WIDTH = 1600;
 export const RENDER_HTML_WINDOW_DEFAULT_WIDTH = 960;
@@ -216,10 +218,10 @@ export function buildRenderHtmlPreviewShell({
 }): string {
   const scriptsBlockedDocument = wrapRenderHtmlDocument(html, false, themeTokens);
   const scriptsAllowedDocument = wrapRenderHtmlDocument(html, true, themeTokens);
-  const shellTitle = title?.trim() || "HTML 렌더";
+  const shellTitle = title?.trim() || t("be_renderHtmlPreview.defaultTitle");
   const initialScriptsAllowed = allowScripts === true;
   const warningsHtml = warnings && warnings.length > 0
-    ? `<div class="lvis-warning" title="${escapeHtmlText(warnings.join(", "))}">정제됨: ${escapeHtmlText(warnings.join(", "))}</div>`
+    ? `<div class="lvis-warning" title="${escapeHtmlText(warnings.join(", "))}">${escapeHtmlText(t("be_renderHtmlPreview.warningsPrefix"))}${escapeHtmlText(warnings.join(", "))}</div>`
     : "";
 
   return `<!doctype html><html><head>${buildRenderHtmlPreviewShellCspMeta()}<meta charset="utf-8"><title>${escapeHtmlText(shellTitle)}</title>${buildRenderHtmlThemeStyle(themeTokens)}<style>
@@ -237,8 +239,8 @@ body{display:flex;min-height:100vh;flex-direction:column;overflow:hidden;backgro
 <div class="lvis-toolbar">
   <div class="lvis-title">${escapeHtmlText(shellTitle)}</div>
   <div class="lvis-controls">
-    <span class="lvis-pill">네트워크 차단</span>
-    ${requiresScripts ? `<label class="lvis-switch"><span>JavaScript</span><input data-render-html-script-toggle type="checkbox" ${initialScriptsAllowed ? "checked" : ""}><strong data-render-html-script-state>${initialScriptsAllowed ? "허용" : "차단"}</strong></label>` : `<span class="lvis-pill">JavaScript 없음</span>`}
+    <span class="lvis-pill">${escapeHtmlText(t("be_renderHtmlPreview.networkBlocked"))}</span>
+    ${requiresScripts ? `<label class="lvis-switch"><span>JavaScript</span><input data-render-html-script-toggle type="checkbox" ${initialScriptsAllowed ? "checked" : ""}><strong data-render-html-script-state>${initialScriptsAllowed ? escapeHtmlText(t("be_renderHtmlPreview.jsAllowed")) : escapeHtmlText(t("be_renderHtmlPreview.jsBlocked"))}</strong></label>` : `<span class="lvis-pill">${escapeHtmlText(t("be_renderHtmlPreview.jsNone"))}</span>`}
   </div>
 </div>
 ${warningsHtml}
@@ -265,7 +267,7 @@ ${warningsHtml}
     frame.srcdoc = decode(allowScripts ? documents.scriptsAllowed : documents.scriptsBlocked);
     document.body.dataset.scriptEnabled = allowScripts ? "true" : "false";
     if (toggle) toggle.checked = allowScripts;
-    if (state) state.textContent = allowScripts ? "허용" : "차단";
+    if (state) state.textContent = allowScripts ? "${escapeHtmlText(t("be_renderHtmlPreview.jsAllowed"))}" : "${escapeHtmlText(t("be_renderHtmlPreview.jsBlocked"))}";
   };
   if (toggle) toggle.addEventListener("change", (event) => render(event.currentTarget.checked));
   render(${initialScriptsAllowed ? "true" : "false"});

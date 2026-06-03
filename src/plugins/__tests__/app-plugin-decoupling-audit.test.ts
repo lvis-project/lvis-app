@@ -56,8 +56,14 @@ const FORBIDDEN_LIVE_APP_LITERALS = [
  *     ids intentionally mention scenario names (e.g. "work-assistant-demo")
  *     so the demo registry stays readable; that mention is metadata
  *     about the narrative, not a runtime invocation of any plugin.
+ *   - `i18n/` — the translation catalog (seed + generated fragments). These
+ *     are pure display copy: onboarding tour / recommendation strings that
+ *     were extracted out of `onboarding/` during the i18n migration legitimately
+ *     name plugins (e.g. "select agents from the agent-hub plugin"). Naming a
+ *     plugin in UI copy is the same allowed concern as onboarding above — never
+ *     a runtime invocation of a plugin by hardcoded id.
  */
-const ALLOWED_DIRS = new Set(["onboarding", "demo-autoplay"]);
+const ALLOWED_DIRS = new Set(["onboarding", "demo-autoplay", "i18n"]);
 
 function listSourceFiles(dir: string): string[] {
   const entries = readdirSync(dir);

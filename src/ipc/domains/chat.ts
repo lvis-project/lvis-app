@@ -6,6 +6,7 @@
  */
 import { ipcMain } from "electron";
 import type { WebContents } from "electron";
+import { t } from "../../i18n/index.js";
 import type { ChatInputOrigin, ChatSendPayload } from "../../shared/chat-origin.js";
 import { isChatSendInputOrigin } from "../../shared/chat-origin.js";
 import type { ActiveRolePrompt } from "../../data/role-presets.js";
@@ -887,7 +888,7 @@ export function registerChatHandlers(deps: IpcDeps): void {
     const stamp = new Date().toISOString().replace(/[:.]/g, "-");
     const defaultName = `lvis-chat-${sessionId.slice(0, 8)}-${stamp}.${format === "markdown" ? "md" : "json"}`;
     const dialogOptions = {
-      title: "대화 내보내기",
+      title: t("mainDialog.exportConversationTitle"),
       defaultPath: defaultName,
       filters: format === "markdown"
         ? [{ name: "Markdown", extensions: ["md"] }]
@@ -902,7 +903,8 @@ export function registerChatHandlers(deps: IpcDeps): void {
     if (format === "json") {
       body = JSON.stringify({ sessionId, exportedAt: new Date().toISOString(), messages }, null, 2);
     } else {
-      const lines: string[] = [`# LVIS 대화 내보내기`, ``, `- 세션: ${sessionId}`, `- 내보낸 시각: ${new Date().toISOString()}`, ``];
+      const exportedAt = new Date().toISOString();
+      const lines: string[] = [t("be_chatDomain.exportHeading"), ``, t("be_chatDomain.exportSessionLine", { sessionId }), t("be_chatDomain.exportTimeLine", { exportedAt }), ``];
       for (const m of messages) {
         if (m.role === "user") {
           lines.push(`## User`, ``, userContentText(m.content), ``);

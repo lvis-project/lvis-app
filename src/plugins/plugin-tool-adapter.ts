@@ -16,6 +16,7 @@ import {
   ManifestIntegrityViolation,
   manifestIntegrityState,
 } from "../permissions/manifest-integrity.js";
+import { t } from "../i18n/index.js";
 
 interface ToolSchemaEntry {
   description?: string;
@@ -50,7 +51,7 @@ function isValidTypedSchema(schema: Record<string, unknown> | undefined): boolea
 }
 
 function typedDescription(toolName: string): string {
-  return `플러그인 도구: ${toolName}. inputSchema에 선언된 필드를 평면 객체로 전달하세요.`;
+  return t("be_pluginToolAdapter.typedDescription", { toolName });
 }
 
 function buildPluginTool(

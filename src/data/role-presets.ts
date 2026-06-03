@@ -6,6 +6,8 @@
  * Agent profiles and skills are intentionally not represented here.
  */
 
+import { t } from "../i18n/index.js";
+
 export interface RolePreset {
   id: string;
   name: string;
@@ -17,7 +19,7 @@ export interface RolePreset {
 
 export const DEFAULT_PERSONA_SELECTION: RolePreset = {
   id: "default",
-  name: "기본",
+  name: t("be_rolePresets.defaultName"),
   systemPromptAdd: "",
   isDefault: true,
 };

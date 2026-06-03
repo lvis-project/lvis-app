@@ -25,6 +25,8 @@ import { Button } from "../../../../components/ui/button.js";
 import { Label } from "../../../../components/ui/label.js";
 import { NativeSelect, NativeSelectOption } from "../../../../components/ui/native-select.js";
 import type { PermissionAuditEntrySummary } from "../../types.js";
+import { useTranslation } from "../../../../i18n/react.js";
+import { t } from "../../../../i18n/runtime.js";
 
 type DecisionFilter = "all" | "allow" | "ask" | "deny" | "deferred" | "mode_change" | "manifest_violation";
 
@@ -79,6 +81,7 @@ export function AuditPanel({
   const [decisionFilter, setDecisionFilter] = useState<DecisionFilter>("all");
   const [toolFilter, setToolFilter] = useState("");
   const [expanded, setExpanded] = useState<Set<string>>(new Set());
+  const { t } = useTranslation();
 
   const api = useMemo(
     () =>
@@ -162,7 +165,7 @@ export function AuditPanel({
       aria-label="Permission audit panel"
     >
       <header className="flex items-center justify-between border-b px-3 py-2">
-        <h2 className="text-sm font-semibold">권한 감사 로그</h2>
+        <h2 className="text-sm font-semibold">{t("auditPanel.title")}</h2>
         <Button
           variant="ghost"
           size="sm"
@@ -196,7 +199,7 @@ export function AuditPanel({
           disabled={loading}
           data-testid="audit-verify-button"
         >
-          다시 검증
+          {t("auditPanel.reVerifyButton")}
         </Button>
       </section>
 
@@ -204,7 +207,7 @@ export function AuditPanel({
       <section className="flex flex-col gap-2 border-b px-3 py-2 text-xs">
         <div className="flex items-center gap-2">
           <Label htmlFor="audit-filter-decision" className="text-muted-foreground">
-            결정
+            {t("auditPanel.filterDecisionLabel")}
           </Label>
           <NativeSelect
             id="audit-filter-decision"
@@ -214,7 +217,7 @@ export function AuditPanel({
             className="w-32"
             data-testid="audit-decision-filter"
           >
-            <NativeSelectOption value="all">전체</NativeSelectOption>
+            <NativeSelectOption value="all">{t("auditPanel.filterAll")}</NativeSelectOption>
             <NativeSelectOption value="allow">allow</NativeSelectOption>
             <NativeSelectOption value="ask">ask</NativeSelectOption>
             <NativeSelectOption value="deny">deny</NativeSelectOption>
@@ -223,20 +226,20 @@ export function AuditPanel({
             <NativeSelectOption value="manifest_violation">manifest_violation</NativeSelectOption>
           </NativeSelect>
           <Label htmlFor="audit-filter-tool" className="ml-2 text-muted-foreground">
-            도구
+            {t("auditPanel.filterToolLabel")}
           </Label>
           <input
             id="audit-filter-tool"
             type="text"
             value={toolFilter}
             onChange={(e) => setToolFilter(e.target.value)}
-            placeholder="이름 검색"
+            placeholder={t("auditPanel.toolFilterPlaceholder")}
             className="flex-1 rounded border bg-background px-1 py-0.5"
             data-testid="audit-tool-filter"
           />
         </div>
         <div className="flex items-center gap-2 text-[11px] text-muted-foreground">
-          <span>마지막 {last}개 / 총 {total}건 / 파일 {summary.files} ({Math.round(summary.bytes / 1024)} KB)</span>
+          <span>{t("auditPanel.summaryStats", { last, total, files: summary.files, kb: Math.round(summary.bytes / 1024) })}</span>
           <Button
             variant="outline"
             size="sm"
@@ -247,7 +250,7 @@ export function AuditPanel({
             disabled={loading || last >= 1000}
             data-testid="audit-load-more"
           >
-            더 보기
+            {t("auditPanel.loadMoreButton")}
           </Button>
         </div>
       </section>
@@ -262,7 +265,7 @@ export function AuditPanel({
       <ol className="flex-1 overflow-y-auto" data-testid="audit-entry-list">
         {filtered.length === 0 && (
           <li className="px-3 py-6 text-center text-xs text-muted-foreground">
-            표시할 감사 기록이 없습니다.
+            {t("auditPanel.emptyState")}
           </li>
         )}
         {filtered.map((entry) => {
@@ -344,7 +347,7 @@ interface IntegrityStatus {
 
 function computeIntegrityStatus(verify: VerifyResult | null): IntegrityStatus {
   if (verify === null) {
-    return { severity: "warn", icon: "⏳", label: "감사 무결성 확인 중…" };
+    return { severity: "warn", icon: "⏳", label: t("auditPanel.integrityChecking") };
   }
   if (!verify.intact) {
     if (verify.firstBrokenFile) {
@@ -356,7 +359,7 @@ function computeIntegrityStatus(verify: VerifyResult | null): IntegrityStatus {
       return {
         severity: "broken",
         icon: "⚠",
-        label: `감사 체인 손상: ${verify.firstBrokenFile}${lineHint}`,
+        label: t("auditPanel.integrityChainBroken", { file: verify.firstBrokenFile, lineHint }),
       };
     }
     // Chain ok but seal mismatch
@@ -365,10 +368,10 @@ function computeIntegrityStatus(verify: VerifyResult | null): IntegrityStatus {
       return {
         severity: "broken",
         icon: "⚠",
-        label: `일별 봉인 불일치: ${sealMismatch.file}`,
+        label: t("auditPanel.integritySealMismatch", { file: sealMismatch.file }),
       };
     }
-    return { severity: "broken", icon: "⚠", label: "감사 무결성 손상 감지됨" };
+    return { severity: "broken", icon: "⚠", label: t("auditPanel.integrityBrokenGeneric") };
   }
   // intact === true — check if any seal is missing
   const sealMissing = verify.perDay.some((d) => d.sealMatch === null && d.totalLines > 0);
@@ -376,12 +379,12 @@ function computeIntegrityStatus(verify: VerifyResult | null): IntegrityStatus {
     return {
       severity: "warn",
       icon: "○",
-      label: `체인 OK · 봉인 미생성 일자 있음 (${verify.totalFiles}일 / ${verify.totalEntries}건)`,
+      label: t("auditPanel.integritySealMissing", { totalFiles: verify.totalFiles, totalEntries: verify.totalEntries }),
     };
   }
   return {
     severity: "ok",
     icon: "✓",
-    label: `감사 체인 정상 — ${verify.totalFiles}일 / ${verify.totalEntries}건 검증됨`,
+    label: t("auditPanel.integrityOk", { totalFiles: verify.totalFiles, totalEntries: verify.totalEntries }),
   };
 }

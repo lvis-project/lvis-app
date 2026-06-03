@@ -6,6 +6,7 @@
  */
 import { describe, it, expect, vi, beforeEach } from "vitest";
 import { fakeLlmSettings } from "../shared/__tests__/fake-llm-settings.js";
+import { t } from "../i18n/runtime.js";
 import { invokeRegisteredHandler, invokeRegisteredHandlerWithEvent } from "./test-helpers.js";
 
 // ─── Mock electron ────────────────────────────────────
@@ -401,7 +402,7 @@ describe("lvis:plugins:config:*", () => {
     expect(result).toEqual({
       ok: false,
       error: "unauthorized-frame",
-      message: "권한이 없는 프레임입니다.",
+      message: t("mainDialog.unauthorizedFrame"),
     });
   });
 
@@ -418,7 +419,7 @@ describe("lvis:plugins:config:*", () => {
     expect(result).toEqual({
       ok: false,
       error: "unauthorized-frame",
-      message: "권한이 없는 프레임입니다.",
+      message: t("mainDialog.unauthorizedFrame"),
     });
   });
 

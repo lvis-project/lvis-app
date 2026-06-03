@@ -22,6 +22,7 @@
  *     defenses.
  */
 import { randomUUID } from "node:crypto";
+import { t } from "../i18n/index.js";
 import { createDynamicTool, type Tool } from "./base.js";
 import type { SkillStore } from "../main/skill-store.js";
 import { SKILL_NAME_ALLOWLIST } from "../main/skill-store.js";
@@ -51,11 +52,7 @@ export interface SkillLoadToolDeps {
 export function createSkillLoadTool(deps: SkillLoadToolDeps): Tool {
   return createDynamicTool({
     name: "skill_load",
-    description:
-      "이름으로 skill body 를 승인 후 현재 사용자 턴의 후속 라운드에만 주입합니다. " +
-      "Skill 은 ~/.lvis/skills/<name>/SKILL.md 또는 ~/.lvis/skills/<name>.md (YAML frontmatter + markdown). " +
-      "처음 로드되는 user skill 은 사용자 승인을 요구하며, 승인은 영구 저장됩니다. " +
-      "성공 시 { loaded: true, skillName, summary } 반환.",
+    description: t("be_skillLoad.toolDescription"),
     source: "builtin",
     // C2(d): skill bodies become part of the LLM's system prompt context.
     // Even though no filesystem mutation happens, the assistant's future
@@ -72,12 +69,11 @@ export function createSkillLoadTool(deps: SkillLoadToolDeps): Tool {
       properties: {
         skillName: {
           type: "string",
-          description: "로드할 skill 이름 (파일/디렉터리명과 frontmatter name 이 일치해야 함).",
+          description: t("be_skillLoad.skillNameDescription"),
         },
         args: {
           type: "object",
-          description:
-            "skill 에 전달할 파라미터 (현재 버전은 단순 메타데이터). 선택.",
+          description: t("be_skillLoad.argsDescription"),
         },
       },
     },
@@ -136,7 +132,7 @@ export function createSkillLoadTool(deps: SkillLoadToolDeps): Tool {
           toolName: "skill_load",
           toolCategory: "meta",
           args: { skillName: skill.name },
-          reason: `skill '${skill.name}' body 를 현재 사용자 턴의 후속 라운드에만 주입합니다. 승인 기록은 영구 저장되며 현재 본문 sha256 에 바인딩됩니다 — 본문이 변경되면 다시 확인합니다.`,
+          reason: t("be_skillLoad.approvalReason", { name: skill.name }),
           source: "builtin",
           createdAt: Date.now(),
         });

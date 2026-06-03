@@ -23,6 +23,7 @@ import type { AuditLogger } from "../../audit/audit-logger.js";
 import { createLogger } from "../../lib/logger.js";
 import { emitEvent } from "../types.js";
 import { isDemoEnabled } from "../../main/demo-credentials.js";
+import { t } from "../../i18n/index.js";
 
 const log = createLogger("whitelist-bootstrap");
 
@@ -130,8 +131,8 @@ export async function wireWhitelistRegistry(input: WhitelistBootstrapInput): Pro
     try {
       emitEvent("system.toast", {
         level: "warn",
-        title: "마켓플레이스 화이트리스트 미수신",
-        body: "오프라인 상태이며 캐시된 화이트리스트가 없어 호스트 시크릿 접근이 잠금됩니다.",
+        title: t("be_whitelistBootstrap.toastTitle"),
+        body: t("be_whitelistBootstrap.toastBody"),
         source: "whitelist-bootstrap",
       });
     } catch (err) {

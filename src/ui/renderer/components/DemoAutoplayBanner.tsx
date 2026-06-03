@@ -16,6 +16,7 @@
  * `hsl(0 78% 58%)` so the visual is identical across themes.
  */
 import { Button } from "../../../components/ui/button.js";
+import { useTranslation } from "../../../i18n/react.js";
 
 export interface DemoAutoplayBannerProps {
   /** Localized title from the active script. */
@@ -29,12 +30,13 @@ const REC_DOT_BG = "hsl(0 78% 58% / 0.15)";
 const REC_DOT_FG = "hsl(0 78% 70%)";
 
 export function DemoAutoplayBanner({ titleKo, onTakeOver }: DemoAutoplayBannerProps) {
+  const { t } = useTranslation();
   return (
     <div
       data-testid="demo-autoplay-banner"
       className="flex items-center gap-2 border-b border-border px-3 py-2"
       role="status"
-      aria-label={`데모 시연 중: ${titleKo}`}
+      aria-label={t("demoAutoplayBanner.ariaLabel", { titleKo })}
     >
       <span
         aria-hidden="true"
@@ -47,7 +49,7 @@ export function DemoAutoplayBanner({ titleKo, onTakeOver }: DemoAutoplayBannerPr
         ✦
       </span>
       <div className="flex flex-col">
-        <span className="text-xs font-medium text-foreground">데모 시연</span>
+        <span className="text-xs font-medium text-foreground">{t("demoAutoplayBanner.demoLabel")}</span>
         <span className="text-[10px] text-muted-foreground">{titleKo}</span>
       </div>
       <span
@@ -73,7 +75,7 @@ export function DemoAutoplayBanner({ titleKo, onTakeOver }: DemoAutoplayBannerPr
           color: "white",
         }}
       >
-        키 잡기 →
+        {t("demoAutoplayBanner.takeOverButton")}
       </Button>
     </div>
   );

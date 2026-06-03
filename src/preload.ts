@@ -7,6 +7,7 @@ import { contextBridge, ipcRenderer } from "electron";
 import { randomUUID } from "node:crypto";
 import { resolve as pathResolve } from "node:path";
 import { pathToFileURL } from "node:url";
+import { t } from "./i18n/index.js";
 import type { McpServerConfig } from "./mcp/types.js";
 import type {
   UserApprovalHitPayload,
@@ -131,7 +132,7 @@ function invalidPluginActionResult(): PluginActionResult {
   return {
     ok: false,
     error: "invalid-result",
-    message: "플러그인 작업 결과가 올바르지 않습니다.",
+    message: t("be_preload.invalidPluginActionResult"),
   };
 }
 

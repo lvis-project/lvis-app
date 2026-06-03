@@ -19,34 +19,36 @@ import { useNotifySaved } from "../contexts/saved-toast.js";
 import { MARKDOWN_REMARK_PLUGINS } from "../utils/markdown-plugins.js";
 import { isPluginInstallKey } from "../utils/plugin-install-aliases.js";
 import { SettingsPageHeader } from "../components/SettingsPageHeader.js";
+import { t } from "../../../i18n/runtime.js";
+import { useTranslation } from "../../../i18n/react.js";
 
 type KV = { key: string; value: string };
 
-const INSTALL_PHASE_LABEL: Record<InstallPhase, string> = {
-  installing: "설치 중…",
-  downloading: "다운로드 중…",
-  verifying: "검증 중…",
-  registering: "등록 중…",
-  restarting: "재시작 중…",
-  preparing: "준비 중…",
+const INSTALL_PHASE_I18N_KEY: Record<InstallPhase, string> = {
+  installing: "pluginConfigTab.phaseInstalling",
+  downloading: "pluginConfigTab.phaseDownloading",
+  verifying: "pluginConfigTab.phaseVerifying",
+  registering: "pluginConfigTab.phaseRegistering",
+  restarting: "pluginConfigTab.phaseRestarting",
+  preparing: "pluginConfigTab.phasePreparing",
 };
 
-const PREPARATION_PHASE_LABEL: Record<string, string> = {
-  pending: "부팅 준비",
-  "installing-python": "Python 런타임 설치",
-  "installing-deps": "연관 라이브러리 다운로드/설치",
-  verifying: "설치 검증",
-  ready: "부팅 준비 완료",
-  error: "준비 실패",
+const PREPARATION_PHASE_I18N_KEY: Record<string, string> = {
+  pending: "pluginConfigTab.prepPhasePending",
+  "installing-python": "pluginConfigTab.prepPhaseInstallingPython",
+  "installing-deps": "pluginConfigTab.prepPhaseInstallingDeps",
+  verifying: "pluginConfigTab.prepPhaseVerifying",
+  ready: "pluginConfigTab.prepPhaseReady",
+  error: "pluginConfigTab.prepPhaseError",
 };
 
 function formatInstallProgress(progress: InstallProgressPayload): string {
-  if (progress.phase !== "downloading") return INSTALL_PHASE_LABEL[progress.phase];
+  if (progress.phase !== "downloading") return t(INSTALL_PHASE_I18N_KEY[progress.phase]);
   const received = formatBytes(progress.bytesDownloaded);
   if (typeof progress.bytesTotal !== "number" || progress.bytesTotal <= 0) {
-    return `다운로드 중… ${received}`;
+    return t("pluginConfigTab.downloadingBytes", { received });
   }
-  return `다운로드 중… ${received} / ${formatBytes(progress.bytesTotal)}`;
+  return t("pluginConfigTab.downloadingBytesOf", { received, total: formatBytes(progress.bytesTotal) });
 }
 
 function formatBytes(bytes: number): string {
@@ -65,18 +67,19 @@ function clampProgressPct(value: unknown): number | null {
 }
 
 function PluginPreparationStatusPanel({ plugin }: { plugin: PluginCardSummary }) {
+  const { t } = useTranslation();
   if (plugin.loadStatus !== "preparing") return null;
   const status = plugin.preparationStatus;
   const progressPct = clampProgressPct(status?.progressPct);
   const phaseLabel = status?.phase
-    ? PREPARATION_PHASE_LABEL[status.phase] ?? status.phase
-    : PREPARATION_PHASE_LABEL.pending;
-  const message = status?.message ?? "플러그인 런타임을 준비하는 중입니다.";
+    ? (PREPARATION_PHASE_I18N_KEY[status.phase] ? t(PREPARATION_PHASE_I18N_KEY[status.phase]) : status.phase)
+    : t("pluginConfigTab.prepPhasePending");
+  const message = status?.message ?? t("pluginConfigTab.preparingRuntime");
   return (
     <div className="space-y-2 rounded-sm bg-warning/10 px-3 py-2" aria-live="polite">
       <div className="flex items-start justify-between gap-3">
         <div className="min-w-0 space-y-0.5">
-          <div className="text-[10px] font-medium uppercase text-warning">준비 상태</div>
+          <div className="text-[10px] font-medium uppercase text-warning">{t("pluginConfigTab.preparationStatusLabel")}</div>
           <div className="text-xs font-medium text-foreground">{phaseLabel}</div>
           <div className="break-words text-[11px] text-muted-foreground">{message}</div>
         </div>
@@ -91,7 +94,7 @@ function PluginPreparationStatusPanel({ plugin }: { plugin: PluginCardSummary })
         />
       </div>
       <div className="text-[10px] text-muted-foreground">
-        준비가 끝나면 플러그인이 자동으로 로드됩니다.
+        {t("pluginConfigTab.preparationAutoLoad")}
       </div>
     </div>
   );
@@ -120,6 +123,7 @@ function entriesToConfig(entries: KV[]): Record<string, unknown> {
 }
 
 export function PluginConfigTab() {
+  const { t } = useTranslation();
   // Pull the dialog-wide "저장되었습니다" notifier so every successful
   // plugin-config write — manual key/value editor save, schema-form save,
   // and per-secret writes — surfaces a uniform toast next to the user's
@@ -190,11 +194,11 @@ export function PluginConfigTab() {
         return cards.length > 0 ? cards[0].id : null;
       });
     } catch (e) {
-      showBanner("error", (e as Error).message ?? "플러그인 목록 로드 실패");
+      showBanner("error", (e as Error).message ?? t("pluginConfigTab.errorLoadPlugins"));
     } finally {
       setLoading(false);
     }
-  }, [showBanner]);
+  }, [showBanner, t]);
 
   // #1176 — toggle a plugin active/inactive. Inactive plugins stay loaded but
   // their tools are hidden from the model. Optimistically reflects the new
@@ -206,17 +210,17 @@ export function PluginConfigTab() {
       try {
         const res = await getApi().setPluginEnabled(pluginId, nextEnabled);
         if (!res.ok) {
-          showBanner("error", res.message ?? "플러그인 활성 상태 변경 실패");
+          showBanner("error", res.message ?? t("pluginConfigTab.errorToggleEnabled"));
           return;
         }
         await refreshPlugins();
       } catch (e) {
-        showBanner("error", (e as Error).message ?? "플러그인 활성 상태 변경 실패");
+        showBanner("error", (e as Error).message ?? t("pluginConfigTab.errorToggleEnabled"));
       } finally {
         setTogglingId(null);
       }
     },
-    [refreshPlugins, showBanner],
+    [refreshPlugins, showBanner, t],
   );
 
   useEffect(() => {
@@ -311,13 +315,13 @@ export function PluginConfigTab() {
         if (!result.ok) {
           setEntries([]);
           setSavedConfig({});
-          showBanner("error", result.message ?? "설정 로드 실패");
+          showBanner("error", result.message ?? t("pluginConfigTab.errorLoadConfig"));
           return;
         }
         setEntries(configToEntries(result.config));
         setSavedConfig(result.config as Record<string, unknown>);
       } catch (e) {
-        if (!cancelled) showBanner("error", (e as Error).message ?? "설정 로드 실패");
+        if (!cancelled) showBanner("error", (e as Error).message ?? t("pluginConfigTab.errorLoadConfig"));
       }
     })();
     return () => { cancelled = true; };
@@ -332,13 +336,13 @@ export function PluginConfigTab() {
       return;
     }
     if (entries.some((e) => e.key === k)) {
-      showBanner("error", `키 "${k}"가 이미 존재합니다.`);
+      showBanner("error", t("pluginConfigTab.errorKeyExists", { key: k }));
       return;
     }
     setEntries((prev) => [...prev, { key: k, value: newValue }]);
     setNewKey("");
     setNewValue("");
-  }, [newKey, newValue, entries, showBanner]);
+  }, [newKey, newValue, entries, showBanner, t]);
 
   const handleRemoveEntry = useCallback((key: string) => {
     setEntries((prev) => prev.filter((e) => e.key !== key));
@@ -355,18 +359,18 @@ export function PluginConfigTab() {
       const config = entriesToConfig(entries);
       const result = await window.lvis.pluginConfig.set(selectedId, config);
       if (!result.ok) {
-        showBanner("error", result.message ?? "저장 실패");
+        showBanner("error", result.message ?? t("pluginConfigTab.errorSave"));
         return;
       }
       setEntries(configToEntries(result.config));
-      showBanner("success", "설정이 저장되었습니다.");
+      showBanner("success", t("pluginConfigTab.successSaved"));
       notifySaved();
     } catch (e) {
-      showBanner("error", (e as Error).message ?? "저장 실패");
+      showBanner("error", (e as Error).message ?? t("pluginConfigTab.errorSave"));
     } finally {
       setSaving(false);
     }
-  }, [selectedId, entries, showBanner, notifySaved]);
+  }, [selectedId, entries, showBanner, notifySaved, t]);
 
   const selectedPlugin = plugins.find((p) => p.id === selectedId);
   const selectedPluginActive = selectedPlugin
@@ -426,7 +430,7 @@ export function PluginConfigTab() {
     try {
       api = getApi();
     } catch {
-      showBanner("error", "API를 사용할 수 없습니다.");
+      showBanner("error", t("pluginConfigTab.errorApiUnavailable"));
       return;
     }
     setLocalInstalling(true);
@@ -436,39 +440,39 @@ export function PluginConfigTab() {
         // user canceled the dialog
         return;
       }
-      showBanner("success", `로컬 플러그인 "${result.pluginId}" 설치 완료. 플러그인이 재시작됩니다.`);
+      showBanner("success", t("pluginConfigTab.successLocalInstall", { pluginId: result.pluginId }));
       void refreshPlugins();
     } catch (e) {
-      showBanner("error", (e as Error).message ?? "로컬 설치 실패");
+      showBanner("error", (e as Error).message ?? t("pluginConfigTab.errorLocalInstall"));
     } finally {
       setLocalInstalling(false);
     }
-  }, [showBanner, refreshPlugins]);
+  }, [showBanner, refreshPlugins, t]);
 
   const handleUninstall = useCallback(async (pluginId: string, displayName: string) => {
     setSaving(true);
     try {
       const result = await getHostMarketplaceApi().uninstallMarketplacePlugin(pluginId);
       if (!result.ok) {
-        showBanner("error", result.message ?? "제거 실패");
+        showBanner("error", result.message ?? t("pluginConfigTab.errorUninstall"));
         return;
       }
       setPlugins((prev) => prev.filter((p) => p.id !== pluginId));
       setSelectedId((current) => (current === pluginId ? null : current));
-      showBanner("success", `${displayName} 제거 완료`);
+      showBanner("success", t("pluginConfigTab.successUninstall", { displayName }));
     } catch (e) {
-      showBanner("error", (e as Error).message ?? "제거 실패");
+      showBanner("error", (e as Error).message ?? t("pluginConfigTab.errorUninstall"));
     } finally {
       setSaving(false);
       setUninstallTarget(null);
     }
-  }, [showBanner]);
+  }, [showBanner, t]);
 
   return (
     <div className="flex flex-1 min-h-0 flex-col gap-3">
       <SettingsPageHeader
-        title="플러그인 설정"
-        description="설치된 플러그인의 개별 설정을 관리합니다"
+        title={t("pluginConfigTab.pageTitle")}
+        description={t("pluginConfigTab.pageDescription")}
       />
       <div className="flex flex-1 min-h-0 flex-col gap-3">
       <PluginUninstallDialog
@@ -492,9 +496,9 @@ export function PluginConfigTab() {
       {isDevMode && (
         <div className="flex items-center justify-between rounded-md border border-warning/40 bg-warning/15 px-3 py-2">
           <div className="space-y-0.5">
-            <p className="text-xs font-medium text-warning">개발자 도구</p>
+            <p className="text-xs font-medium text-warning">{t("pluginConfigTab.devToolsTitle")}</p>
             <p className="text-[11px] text-warning/80">
-              로컬 빌드 폴더에서 플러그인을 직접 설치합니다 (개발 모드 필요).
+              {t("pluginConfigTab.devToolsDescription")}
             </p>
           </div>
           <Button
@@ -504,16 +508,16 @@ export function PluginConfigTab() {
             onClick={() => void handleInstallLocal()}
             disabled={localInstalling}
           >
-            {localInstalling ? "설치 중…" : "로컬 폴더에서 설치"}
+            {localInstalling ? t("pluginConfigTab.phaseInstalling") : t("pluginConfigTab.installFromLocalFolder")}
           </Button>
         </div>
       )}
 
       {loading ? (
-        <p className="text-xs text-muted-foreground">로딩 중…</p>
+        <p className="text-xs text-muted-foreground">{t("pluginConfigTab.loading")}</p>
       ) : plugins.length === 0 ? (
         <div className="rounded-md border border-dashed p-4 text-center text-xs text-muted-foreground">
-          설치된 플러그인이 없습니다.
+          {t("pluginConfigTab.noPluginsInstalled")}
         </div>
       ) : (
         // Split height fills to the viewport bottom. The 180px reserve
@@ -539,7 +543,7 @@ export function PluginConfigTab() {
                     }`}
                   >
                     <div className="flex items-center gap-1 truncate">
-                      {p.isManaged && <span title="관리자 설치 플러그인">🔒</span>}
+                      {p.isManaged && <span title={t("pluginConfigTab.managedPluginTitle")}>🔒</span>}
                       <span className="truncate">{p.name}</span>
                     </div>
                     <div className="flex items-center gap-1 mt-0.5">
@@ -548,7 +552,7 @@ export function PluginConfigTab() {
                           data-testid={`plugin-config:row-status:${p.id}`}
                           className="inline-block rounded-full bg-success/15 px-1.5 py-px text-[9px] font-medium text-success"
                         >
-                          로드됨
+                          {t("pluginConfigTab.statusLoaded")}
                         </span>
                       )}
                       {p.loadStatus === "preparing" && (
@@ -556,7 +560,7 @@ export function PluginConfigTab() {
                           data-testid={`plugin-config:row-status:${p.id}`}
                           className="inline-block rounded-full bg-warning/15 px-1.5 py-px text-[9px] font-medium text-warning"
                         >
-                          준비 중
+                          {t("pluginConfigTab.statusPreparing")}
                         </span>
                       )}
                       {p.loadStatus === "failed" && (
@@ -564,7 +568,7 @@ export function PluginConfigTab() {
                           data-testid={`plugin-config:row-status:${p.id}`}
                           className="inline-block rounded-full bg-destructive/15 px-1.5 py-px text-[9px] font-medium text-destructive"
                         >
-                          실패
+                          {t("pluginConfigTab.statusFailed")}
                         </span>
                       )}
                       {p.loadStatus === "disabled" && (
@@ -572,7 +576,7 @@ export function PluginConfigTab() {
                           data-testid={`plugin-config:row-status:${p.id}`}
                           className="inline-block rounded-full bg-muted px-1.5 py-px text-[9px] font-medium text-muted-foreground"
                         >
-                          비활성
+                          {t("pluginConfigTab.statusDisabled")}
                         </span>
                       )}
                       {/* Auth status — only when manifest declares `auth` AND the runtime is
@@ -583,9 +587,9 @@ export function PluginConfigTab() {
                       {p.auth && isRuntimeCallablePlugin(p) && authStatuses.get(p.id)?.kind === "unauthed" && (
                         <span
                           className="inline-block rounded-full bg-destructive/15 px-1.5 py-px text-[9px] font-medium text-destructive"
-                          title="이 플러그인은 로그인이 필요합니다"
+                          title={t("pluginConfigTab.unauthTitle")}
                         >
-                          🔒 미인증
+                          🔒 {t("pluginConfigTab.statusUnauthed")}
                         </span>
                       )}
                     </div>
@@ -606,7 +610,7 @@ export function PluginConfigTab() {
                     <div
                       key={`in-flight:${slug}`}
                       className="flex w-full animate-pulse items-center gap-2 rounded border border-dashed border-muted px-2 py-1.5 text-xs text-muted-foreground"
-                      aria-label={`${slug} 설치 진행 중`}
+                      aria-label={t("pluginConfigTab.installingAriaLabel", { slug })}
                       aria-live="polite"
                     >
                       <span
@@ -637,24 +641,24 @@ export function PluginConfigTab() {
                     <div className="flex flex-wrap items-center gap-1">
                       <h3 className="text-sm font-semibold">{selectedPlugin.name}</h3>
                       {selectedPlugin.isManaged && (
-                        <span className="inline-flex items-center gap-0.5 rounded-full bg-info/15 px-1.5 py-px text-[9px] font-medium text-info">🔒 관리형</span>
+                        <span className="inline-flex items-center gap-0.5 rounded-full bg-info/15 px-1.5 py-px text-[9px] font-medium text-info">🔒 {t("pluginConfigTab.badgeManaged")}</span>
                       )}
                       {selectedPlugin.installPolicy === "admin" && (
                         <span
                           className="inline-flex items-center gap-0.5 rounded-full border border-destructive/30 bg-destructive/10 px-1.5 py-px text-[9px] font-medium text-destructive"
-                          title="관리자만 설치할 수 있는 플러그인입니다"
-                          aria-label="관리자 전용 플러그인"
+                          title={t("pluginConfigTab.adminOnlyTitle")}
+                          aria-label={t("pluginConfigTab.adminOnlyAriaLabel")}
                         >
-                          🔐 관리자 전용
+                          🔐 {t("pluginConfigTab.badgeAdminOnly")}
                         </span>
                       )}
                       {selectedPlugin.installPolicy === "user" && (
                         <span
                           className="inline-flex items-center gap-0.5 rounded-full border border-border bg-muted px-1.5 py-px text-[9px] font-medium text-muted-foreground"
-                          title="모든 사용자가 설치할 수 있는 플러그인입니다"
-                          aria-label="사용자 설치 가능 플러그인"
+                          title={t("pluginConfigTab.userInstallableTitle")}
+                          aria-label={t("pluginConfigTab.userInstallableAriaLabel")}
                         >
-                          사용자 설치 가능
+                          {t("pluginConfigTab.badgeUserInstallable")}
                         </span>
                       )}
                       {selectedPlugin.loadStatus && (
@@ -663,28 +667,28 @@ export function PluginConfigTab() {
                             data-testid={`plugin-config:detail-status:${selectedPlugin.id}`}
                             className="inline-block rounded-full bg-success/15 px-1.5 py-px text-[9px] font-medium text-success"
                           >
-                            로드됨
+                            {t("pluginConfigTab.statusLoaded")}
                           </span>
                         ) : selectedPlugin.loadStatus === "preparing" ? (
                           <span
                             data-testid={`plugin-config:detail-status:${selectedPlugin.id}`}
                             className="inline-block rounded-full bg-warning/15 px-1.5 py-px text-[9px] font-medium text-warning"
                           >
-                            준비 중
+                            {t("pluginConfigTab.statusPreparing")}
                           </span>
                         ) : selectedPlugin.loadStatus === "failed" ? (
                           <span
                             data-testid={`plugin-config:detail-status:${selectedPlugin.id}`}
                             className="inline-block rounded-full bg-destructive/15 px-1.5 py-px text-[9px] font-medium text-destructive"
                           >
-                            실패
+                            {t("pluginConfigTab.statusFailed")}
                           </span>
                         ) : (
                           <span
                             data-testid={`plugin-config:detail-status:${selectedPlugin.id}`}
                             className="inline-block rounded-full bg-muted px-1.5 py-px text-[9px] font-medium text-muted-foreground"
                           >
-                            비활성
+                            {t("pluginConfigTab.statusDisabled")}
                           </span>
                         )
                       )}
@@ -705,19 +709,19 @@ export function PluginConfigTab() {
                   <div className="flex items-center gap-2 shrink-0">
                     {selectedPluginRuntimeLoaded ? (
                       <label className="flex items-center gap-1.5 text-[10px] text-muted-foreground">
-                        <span>{selectedPluginActive ? "활성" : "비활성"}</span>
+                        <span>{selectedPluginActive ? t("pluginConfigTab.activeLabel") : t("pluginConfigTab.inactiveLabel")}</span>
                         <Switch
                           size="sm"
                           data-testid={`plugin-config:enabled-toggle:${selectedPlugin.id}`}
                           checked={selectedPluginActive}
                           disabled={togglingId === selectedPlugin.id}
                           onCheckedChange={(next) => void handleToggleEnabled(selectedPlugin.id, next)}
-                          aria-label={`${selectedPlugin.name} 활성/비활성 전환`}
+                          aria-label={t("pluginConfigTab.toggleAriaLabel", { name: selectedPlugin.name })}
                         />
                       </label>
                     ) : (
                       <span className="text-[10px] text-muted-foreground">
-                        {selectedPlugin.loadStatus === "preparing" ? "준비 중" : "실행 불가"}
+                        {selectedPlugin.loadStatus === "preparing" ? t("pluginConfigTab.statusPreparing") : t("pluginConfigTab.notRunnable")}
                       </span>
                     )}
                     <Button
@@ -726,9 +730,9 @@ export function PluginConfigTab() {
                       className="h-7 text-xs px-2"
                       onClick={() => setUninstallTarget(selectedPlugin)}
                       disabled={saving || selectedPlugin.isManaged}
-                      title={selectedPlugin.isManaged ? "관리자가 설치한 플러그인은 제거할 수 없습니다" : undefined}
+                      title={selectedPlugin.isManaged ? t("pluginConfigTab.managedCannotRemoveTitle") : undefined}
                     >
-                      제거
+                      {t("pluginConfigTab.uninstallButton")}
                     </Button>
                   </div>
                 </div>
@@ -782,13 +786,13 @@ export function PluginConfigTab() {
                         onClick={() => setToolsExpanded((prev) => !prev)}
                       >
                         <span className="flex items-center gap-2">
-                          <span className="text-[10px] font-medium text-muted-foreground uppercase tracking-wide">제공 툴</span>
+                          <span className="text-[10px] font-medium text-muted-foreground uppercase tracking-wide">{t("pluginConfigTab.providedToolsLabel")}</span>
                           <span className="inline-flex items-center justify-center min-w-[1.25rem] rounded-full bg-muted px-1.5 py-px text-[10px] font-medium text-muted-foreground tabular-nums">
                             {selectedPlugin.tools.length}
                           </span>
                           {!selectedPluginActive && (
                             <span className="rounded-full bg-muted px-1.5 py-px text-[9px] font-medium text-muted-foreground">
-                              모델 미노출
+                              {t("pluginConfigTab.toolsHiddenFromModel")}
                             </span>
                           )}
                         </span>
@@ -801,7 +805,7 @@ export function PluginConfigTab() {
                           data-testid={`plugin-config:tools-hidden-note:${selectedPlugin.id}`}
                           className="px-1 text-[11px] text-muted-foreground"
                         >
-                          비활성 상태에서는 이 플러그인의 도구가 모델에 노출되지 않습니다.
+                          {t("pluginConfigTab.toolsHiddenNote")}
                         </p>
                       )}
                       {toolsExpanded && selectedPlugin.tools.length > 0 && (
@@ -840,7 +844,7 @@ export function PluginConfigTab() {
                   // PARENT right-detail card has `overflow-y-auto`, so all
                   // env-config items are reachable by scrolling the card.
                   <div className="space-y-1.5">
-                    <span className="text-[10px] font-medium text-muted-foreground uppercase tracking-wide">환경 설정</span>
+                    <span className="text-[10px] font-medium text-muted-foreground uppercase tracking-wide">{t("pluginConfigTab.configSectionLabel")}</span>
                     <PluginConfigSchemaForm
                         pluginId={selectedPlugin.id}
                         schema={selectedPlugin.configSchema}
@@ -854,15 +858,15 @@ export function PluginConfigTab() {
                               values,
                             );
                             if (!result.ok) {
-                              showBanner("error", result.message ?? "저장 실패");
+                              showBanner("error", result.message ?? t("pluginConfigTab.errorSave"));
                               return;
                             }
                             setSavedConfig(result.config as Record<string, unknown>);
                             setEntries(configToEntries(result.config));
-                            showBanner("success", "설정이 저장되었습니다.");
+                            showBanner("success", t("pluginConfigTab.successSaved"));
                             notifySaved();
                           } catch (e) {
-                            showBanner("error", (e as Error).message ?? "저장 실패");
+                            showBanner("error", (e as Error).message ?? t("pluginConfigTab.errorSave"));
                           } finally {
                             setSaving(false);
                           }
@@ -874,13 +878,13 @@ export function PluginConfigTab() {
                             value,
                           );
                           if (!result.ok) {
-                            showBanner("error", result.message ?? "비밀 값 저장 실패");
+                            showBanner("error", result.message ?? t("pluginConfigTab.errorSaveSecret"));
                             return;
                           }
                           // Optimistically mark the key as present so the
                           // masked "**** (저장됨)" placeholder appears immediately.
                           setSecretsPresent((prev) => ({ ...prev, [key]: true }));
-                          showBanner("success", `${key} 저장 완료`);
+                          showBanner("success", t("pluginConfigTab.successSaveSecret", { key }));
                           notifySaved();
                         }}
                       />
@@ -897,17 +901,17 @@ export function PluginConfigTab() {
                         env vars doesn't push the Save button off-screen. */}
                     <div className="flex items-baseline justify-between">
                       <p className="text-[10px] font-medium text-muted-foreground uppercase tracking-wide">
-                        환경변수
+                        {t("pluginConfigTab.envVarsLabel")}
                       </p>
                       <span className="text-[10px] text-muted-foreground">
-                        {entries.length}개 · 값은 문자열 또는 JSON
+                        {t("pluginConfigTab.envVarsCount", { count: entries.length })}
                       </span>
                     </div>
                     <ScrollArea className="w-full rounded-md border bg-background/40 p-2" style={{ maxHeight: 220 }}>
                       <div className="space-y-1.5 pr-2">
                         {entries.length === 0 && (
                           <p className="text-xs text-muted-foreground">
-                            설정된 값이 없습니다. 아래에서 추가하세요.
+                            {t("pluginConfigTab.noEntriesHint")}
                           </p>
                         )}
                         {entries.map((entry) => (
@@ -928,7 +932,7 @@ export function PluginConfigTab() {
                               className="h-7 text-xs px-2 text-destructive border-destructive/40"
                               onClick={() => handleRemoveEntry(entry.key)}
                             >
-                              삭제
+                              {t("pluginConfigTab.deleteButton")}
                             </Button>
                           </div>
                         ))}
@@ -951,20 +955,20 @@ export function PluginConfigTab() {
                         onChange={(e) => setNewValue(e.target.value)}
                       />
                       <Button size="sm" className="h-7 text-xs px-2" onClick={handleAddEntry}>
-                        + 추가
+                        {t("pluginConfigTab.addButton")}
                       </Button>
                     </div>
 
                     <div className="flex justify-end">
                       <Button size="sm" onClick={() => void handleSave()} disabled={saving}>
-                        {saving ? "저장 중…" : "저장"}
+                        {saving ? t("pluginConfigTab.savingLabel") : t("pluginConfigTab.saveButton")}
                       </Button>
                     </div>
                   </>
                 )}
               </>
             ) : (
-              <p className="text-xs text-muted-foreground">플러그인을 선택하세요.</p>
+              <p className="text-xs text-muted-foreground">{t("pluginConfigTab.selectPluginHint")}</p>
             )}
           </div>
         </div>

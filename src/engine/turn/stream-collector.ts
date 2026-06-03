@@ -23,6 +23,7 @@ import {
   withProviderErrorClassification,
   type ProviderErrorDiagnostics,
 } from "../llm/provider-error-diagnostics.js";
+import { t } from "../../i18n/index.js";
 
 export interface StreamCollectParams {
   provider: LLMProvider;
@@ -162,7 +163,7 @@ export async function collectRoundStream(
           );
           return {
             kind: "stream_error",
-            userMessage: `오류: ${classified.userMessage}`,
+            userMessage: t("be_streamCollector.streamError", { userMessage: classified.userMessage }),
             classification,
             providerError,
           };
@@ -180,7 +181,7 @@ export async function collectRoundStream(
     const classified = classifyProviderError(raw);
     return {
       kind: "stream_error",
-      userMessage: `오류: ${classified.userMessage}`,
+      userMessage: t("be_streamCollector.streamError", { userMessage: classified.userMessage }),
       classification: classified.category,
       providerError: withProviderErrorClassification(
         extractProviderErrorDiagnostics(err),
@@ -193,7 +194,7 @@ export async function collectRoundStream(
   if (!sawMessageComplete && toolCalls.length > 0) {
     return {
       kind: "stream_error",
-      userMessage: "오류: 모델 스트림이 도구 호출 완료 신호 없이 종료되었습니다. 다시 시도해 주세요.",
+      userMessage: t("be_streamCollector.streamEndedWithoutCompletion"),
       classification: "unknown",
       providerError: {
         origin: "unknown",

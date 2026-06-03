@@ -29,6 +29,7 @@
  *     the user can paste it manually rather than getting stuck.
  */
 import { useCallback, useEffect, useState } from "react";
+import { useTranslation } from "../../../i18n/react.js";
 import { cn } from "../../../lib/utils.js";
 import {
   pickFirstTaskProposal,
@@ -64,6 +65,7 @@ export function PostTourFirstTask({
   tourCompleted,
   disabled,
 }: PostTourFirstTaskProps) {
+  const { t } = useTranslation();
   const [dismissed, setDismissed] = useState(false);
   const [accepted, setAccepted] = useState(false);
   const [proposal, setProposal] = useState<FirstTaskProposal | null>(null);
@@ -114,13 +116,13 @@ export function PostTourFirstTask({
         "border-[hsl(var(--p-purple-500)/0.4)]",
       )}
       role="dialog"
-      aria-label="LVIS 첫 작업 제안"
+      aria-label={t("postTourFirstTask.ariaLabel")}
     >
       <div
         className="text-[10px] uppercase tracking-wider"
         style={{ color: "hsl(var(--p-purple-500))" }}
       >
-        ✨ 첫 작업 제안
+        {t("postTourFirstTask.badgeLabel")}
       </div>
       <h3 className="mt-1 text-[14px] font-semibold leading-tight">
         {proposal.headlineKo}
@@ -135,7 +137,7 @@ export function PostTourFirstTask({
           onClick={onSkip}
           className="rounded-md px-2 py-1 text-[11px] text-muted-foreground hover:bg-muted"
         >
-          나중에
+          {t("postTourFirstTask.skipButton")}
         </button>
         <button
           type="button"
@@ -147,12 +149,12 @@ export function PostTourFirstTask({
             "bg-primary hover:opacity-90 disabled:opacity-60",
           )}
         >
-          {accepted ? "보냈습니다 ✓" : proposal.ctaKo}
+          {accepted ? t("postTourFirstTask.acceptedLabel") : proposal.ctaKo}
         </button>
       </div>
       {typeof api.composerSeedText !== "function" && (
         <p className="mt-2 text-[10px] text-muted-foreground">
-          ↑ 채팅 입력창에 메시지가 복사됩니다.
+          {t("postTourFirstTask.clipboardHint")}
         </p>
       )}
     </div>

@@ -6,6 +6,7 @@ import {
   type RenderHtmlThemeTokens,
 } from "../../../shared/render-html-preview.js";
 import type { RenderHtmlPayload } from "../types.js";
+import { useTranslation } from "../../../i18n/react.js";
 
 type OpenState = "idle" | "opening" | "opened" | "error";
 
@@ -33,6 +34,7 @@ export function HtmlPreview({
   autoOpen?: boolean;
   autoOpenKey?: string;
 }) {
+  const { t } = useTranslation();
   const [openState, setOpenState] = useState<OpenState>("idle");
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
   const autoOpenedKeyRef = useRef<string | null>(null);
@@ -41,7 +43,7 @@ export function HtmlPreview({
     const api = window.lvisApi.window?.openHtmlPreview;
     if (!api) {
       setOpenState("error");
-      setErrorMessage("창 열기 API가 준비되지 않았습니다.");
+      setErrorMessage(t("htmlPreview.apiNotReady"));
       return;
     }
 
@@ -49,7 +51,7 @@ export function HtmlPreview({
     setErrorMessage(null);
     const result = await api({
       html: payload.html,
-      title: payload.title ?? "HTML 렌더",
+      title: payload.title ?? t("htmlPreview.defaultTitle"),
       height: Math.max(420, payload.height + 140),
       allowScripts,
       requiresScripts,
@@ -62,7 +64,7 @@ export function HtmlPreview({
     }
     setOpenState("error");
     setErrorMessage(result.error);
-  }, [allowScripts, payload.height, payload.html, payload.title, payload.warnings, requiresScripts]);
+  }, [allowScripts, payload.height, payload.html, payload.title, payload.warnings, requiresScripts, t]);
 
   useEffect(() => {
     if (!autoOpen) return;
@@ -75,18 +77,18 @@ export function HtmlPreview({
   return (
     <div className="mt-2 overflow-hidden rounded border bg-background">
       <div className="flex items-center justify-between gap-2 border-b bg-muted/30 px-2 py-1 text-[11px] text-muted-foreground">
-        <span className="min-w-0 truncate">{payload.title ?? "HTML 미리보기"}</span>
+        <span className="min-w-0 truncate">{payload.title ?? t("htmlPreview.previewTitle")}</span>
         <span className="shrink-0 text-[10px] opacity-60">
-          별도 창 · {requiresScripts ? "JS 창에서 설정" : "JS 없음"}
+          {t("htmlPreview.separateWindow")} · {requiresScripts ? t("htmlPreview.jsWindowSetting") : t("htmlPreview.noJs")}
         </span>
       </div>
       <div className="flex items-center justify-between gap-3 px-3 py-2">
         <div className="min-w-0 text-[11px] text-muted-foreground">
           {openState === "opened"
-            ? "창을 열었습니다."
+            ? t("htmlPreview.windowOpened")
             : requiresScripts
-              ? "스크립트 실행 설정은 열린 창 상단에서 바꿀 수 있습니다."
-              : "HTML 결과를 창에서 표시합니다."}
+              ? t("htmlPreview.scriptSettingHint")
+              : t("htmlPreview.htmlResultHint")}
           {openState === "error" && errorMessage && (
             <span className="ml-2 text-destructive">{errorMessage}</span>
           )}
@@ -103,12 +105,12 @@ export function HtmlPreview({
           ) : (
             <ExternalLink className="h-3.5 w-3.5" />
           )}
-          <span>{openState === "opened" ? "다시 열기" : "창 열기"}</span>
+          <span>{openState === "opened" ? t("htmlPreview.reopenButton") : t("htmlPreview.openButton")}</span>
         </Button>
       </div>
       {payload.warnings && payload.warnings.length > 0 && (
         <div className="border-t px-2 py-1 text-[10px] text-warning">
-          정제됨: {payload.warnings.join(", ")}
+          {t("htmlPreview.sanitizedPrefix")}{payload.warnings.join(", ")}
         </div>
       )}
     </div>

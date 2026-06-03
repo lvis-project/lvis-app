@@ -12,6 +12,7 @@
  */
 
 import type { CheckpointTrigger } from "../../../lib/chat-stream-state.js";
+import { useTranslation } from "../../../i18n/react.js";
 
 type CompactStatus =
   | "summarized"
@@ -28,25 +29,25 @@ interface Variant {
 
 const STATUS_VARIANTS: Record<CompactStatus, Variant> = {
   summarized: {
-    label: "요약 완료",
+    label: "checkpointDivider.statusSummarized",
     icon: "📦",
     lineCls: "bg-action-compact/30",
     textCls: "text-action-compact/80",
   },
   content_truncated: {
-    label: "부분 절단",
+    label: "checkpointDivider.statusContentTruncated",
     icon: "✂️",
     lineCls: "bg-warning/40",
     textCls: "text-warning/90",
   },
   noop: {
-    label: "압축 불필요",
+    label: "checkpointDivider.statusNoop",
     icon: "✓",
     lineCls: "bg-muted-foreground/25",
     textCls: "text-muted-foreground/70",
   },
   reduced_insufficient_forced: {
-    label: "강제 절단",
+    label: "checkpointDivider.statusReducedInsufficient",
     icon: "⚠️",
     lineCls: "bg-destructive/40",
     textCls: "text-destructive/90",
@@ -55,19 +56,19 @@ const STATUS_VARIANTS: Record<CompactStatus, Variant> = {
 
 const TRIGGER_VARIANTS: Record<CheckpointTrigger | "default", Variant> = {
   "auto-compact": {
-    label: "자동 정리",
+    label: "checkpointDivider.triggerAutoCompact",
     icon: "📌",
     lineCls: "bg-action-compact/30",
     textCls: "text-action-compact/80",
   },
   "manual": {
-    label: "수동 정리",
+    label: "checkpointDivider.triggerManual",
     icon: "✋",
     lineCls: "bg-muted-foreground/35",
     textCls: "text-muted-foreground/80",
   },
   default: {
-    label: "자동 정리",
+    label: "checkpointDivider.triggerAutoCompact",
     icon: "📌",
     lineCls: "bg-action-compact/30",
     textCls: "text-action-compact/80",
@@ -96,6 +97,7 @@ export function CheckpointDivider({
   /** Fork a new session from this checkpoint. */
   onBranchFrom?: (compactNum: number) => void | Promise<void>;
 }) {
+  const { t } = useTranslation();
   // Status 가 명시되면 status variant 우선, 아니면 trigger variant.
   const variant: Variant = compactStatus !== undefined
     ? STATUS_VARIANTS[compactStatus]
@@ -119,13 +121,13 @@ export function CheckpointDivider({
       <div className="flex items-center gap-2">
         <span className={`h-px flex-1 ${variant.lineCls}`} />
         <span className={`text-[10px] ${variant.textCls} font-medium`}>
-          {"───"} {variant.icon} 체크포인트{compactNum !== undefined ? ` #${compactNum}` : ""} · {variant.label} (메시지 {messageCount}개) {"───"}
+          {"───"} {variant.icon} {t("checkpointDivider.checkpoint")}{compactNum !== undefined ? ` #${compactNum}` : ""} · {t(variant.label)} ({t("checkpointDivider.messageCount", { count: messageCount })}) {"───"}
         </span>
         <span className={`h-px flex-1 ${variant.lineCls}`} />
       </div>
       {truncatedDir !== undefined && (
         <div className="px-4 text-center text-[9.5px] text-muted-foreground/70">
-          원본 보존: {truncatedDir}
+          {t("checkpointDivider.originalPreserved", { dir: truncatedDir })}
         </div>
       )}
       {hasActions && (
@@ -139,9 +141,9 @@ export function CheckpointDivider({
               data-testid="ck-btn-view"
               onClick={() => { void onEnterView(compactNum); }}
               className="rounded-md border border-[hsl(var(--action-view)/0.35)] bg-[hsl(var(--action-view)/0.08)] px-3 py-1 text-[10.5px] font-medium text-[hsl(var(--action-view))] transition-colors hover:bg-[hsl(var(--action-view)/0.18)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[hsl(var(--action-view)/0.4)]"
-              aria-label={`체크포인트 #${compactNum} 시점 보기`}
+              aria-label={t("checkpointDivider.viewAriaLabel", { num: compactNum })}
             >
-              📖 이 시점 보기
+              📖 {t("checkpointDivider.viewButton")}
             </button>
           )}
           {onBranchFrom !== undefined && compactNum !== undefined && (
@@ -150,9 +152,9 @@ export function CheckpointDivider({
               data-testid="ck-btn-fork"
               onClick={() => { void onBranchFrom(compactNum); }}
               className="rounded-md border border-[hsl(var(--action-branch)/0.35)] bg-[hsl(var(--action-branch)/0.08)] px-3 py-1 text-[10.5px] font-medium text-[hsl(var(--action-branch))] transition-colors hover:bg-[hsl(var(--action-branch)/0.18)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[hsl(var(--action-branch)/0.4)]"
-              aria-label={`체크포인트 #${compactNum} 에서 새 세션 시작`}
+              aria-label={t("checkpointDivider.branchAriaLabel", { num: compactNum })}
             >
-              ↩ 여기부터 다시 시작
+              ↩ {t("checkpointDivider.branchButton")}
             </button>
           )}
         </div>

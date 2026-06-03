@@ -39,6 +39,8 @@ import {
   PermissionEvaluationContextPanel,
 } from "./permissions/PermissionEvaluationContextPanel.js";
 import { isWeakSandbox } from "../../../permissions/sandbox-capability.js";
+import { useTranslation } from "../../../i18n/react.js";
+import { t } from "../../../i18n/runtime.js";
 
 export function ToolApprovalDialog({
   open,
@@ -51,6 +53,7 @@ export function ToolApprovalDialog({
   pendingCount?: number;
   onDecide: (choice: ApprovalChoice, pattern?: string) => void;
 }) {
+  const { t: tHook } = useTranslation();
   const [expanded, setExpanded] = useState(false);
   // NL justification (required for HIGH verdict approvals)
   const [nlJustification, setNlJustification] = useState("");
@@ -136,7 +139,7 @@ export function ToolApprovalDialog({
 
   if (!request) return null;
 
-  const title = request.kind === "agent-action" ? "에이전트 작업 승인" : "도구 실행 승인";
+  const title = request.kind === "agent-action" ? tHook("toolApprovalDialog.agentActionTitle") : tHook("toolApprovalDialog.toolApprovalTitle");
   // NOTE: argsStr uses JSON.stringify for human-readable display (pretty-printed,
   // insertion-order keys). The IPC approval record uses canonicalStringify (#828)
   // which sorts object keys — key ordering may differ between what is shown here
@@ -145,7 +148,7 @@ export function ToolApprovalDialog({
   const argsTruncated = argsStr.length > 500 && !expanded;
   const argsDisplay = argsTruncated ? argsStr.slice(0, 500) + "\n…" : argsStr;
   const source = request.source ?? "unknown";
-  const sourceBadge = request.source ? SOURCE_BADGE[request.source] ?? request.source : "알 수 없음";
+  const sourceBadge = request.source ? SOURCE_BADGE[request.source] ?? request.source : tHook("toolApprovalDialog.unknown");
   const hasPending = pendingCount > 1;
   const originLabel = trustOriginLabel(request.trustOrigin);
   const category = request.toolCategory ?? "meta";
@@ -176,7 +179,7 @@ export function ToolApprovalDialog({
       >
         <DialogHeader className="sr-only">
           <DialogTitle>{title}</DialogTitle>
-          <DialogDescription>현재 대화 루프에서 실행 전 사용자 승인이 필요한 도구 요청입니다.</DialogDescription>
+          <DialogDescription>{tHook("toolApprovalDialog.dialogDescription")}</DialogDescription>
         </DialogHeader>
 
         <section className="min-h-0 flex-1 overflow-y-auto px-5 py-4" data-testid="tool-approval-card">
@@ -195,7 +198,7 @@ export function ToolApprovalDialog({
                 </h3>
                 {hasPending && (
                   <Badge variant="outline" className="shrink-0 text-[11px] text-muted-foreground">
-                    대기 중 {pendingCount - 1}개
+                    {tHook("toolApprovalDialog.pendingCount", { count: pendingCount - 1 })}
                   </Badge>
                 )}
               </div>
@@ -204,20 +207,20 @@ export function ToolApprovalDialog({
 
           <div className="space-y-3">
             <div className="grid min-w-0 gap-2 sm:grid-cols-2">
-              <SummaryTile label="도구 / 출처">
+              <SummaryTile label={tHook("toolApprovalDialog.tileToolSource")}>
                 <code>{request.toolName}</code>
                 <br />
-                출처: {sourceLabel(source)}
+                {tHook("toolApprovalDialog.sourcePrefix")}: {sourceLabel(source)}
                 {request.kind === "agent-action" && (
                   <>
                     <br />
-                    플러그인: <code>{request.sourcePluginId ?? "알 수 없음"}</code>
+                    {tHook("toolApprovalDialog.pluginPrefix")}: <code>{request.sourcePluginId ?? tHook("toolApprovalDialog.unknown")}</code>
                     <br />
-                    승인 범위: <code>{request.approvalScope ?? "알 수 없음"}</code>
+                    {tHook("toolApprovalDialog.approvalScopePrefix")}: <code>{request.approvalScope ?? tHook("toolApprovalDialog.unknown")}</code>
                   </>
                 )}
               </SummaryTile>
-              <SummaryTile label="권한 분류">
+              <SummaryTile label={tHook("toolApprovalDialog.tilePermissionCategory")}>
                 {/* Round-6 UX MINOR — drop the raw English `category`
                     token; `categoryLabel()` already conveys it in
                     Korean and the duplicate looked like a code leak. */}
@@ -263,9 +266,9 @@ export function ToolApprovalDialog({
                   htmlFor="nl-justification"
                   className="mb-1.5 block text-xs font-semibold text-destructive"
                 >
-                  {suggestedPurpose.length > 0 ? "자동 작성된 작업 목적 (필수)" : "이 작업의 목적을 한 문장으로 입력하세요 (필수)"}
+                  {suggestedPurpose.length > 0 ? tHook("toolApprovalDialog.nlLabelAutoFilled") : tHook("toolApprovalDialog.nlLabelEnterPurpose")}
                   <span className="ml-1.5 text-[10px] font-normal text-muted-foreground">
-                    범위: 이 세션만 (HIGH 고정)
+                    {tHook("toolApprovalDialog.nlScopeSessionFixed")}
                   </span>
                 </Label>
                 <Input
@@ -274,22 +277,22 @@ export function ToolApprovalDialog({
                   type="text"
                   value={nlJustification}
                   onChange={(e) => setNlJustification(e.target.value)}
-                  placeholder="예: 사용자 요청에 따라 프로젝트 디렉터리의 빌드 결과물 삭제"
+                  placeholder={tHook("toolApprovalDialog.nlPlaceholder")}
                   maxLength={500}
                   className="h-8 text-xs"
                   data-testid="nl-justification-input"
                 />
                 <p className="mt-1 text-[10px] text-muted-foreground">
                   {suggestedPurpose.length > 0
-                    ? "대화 맥락에서 목적을 채웠습니다. 다르면 수정하세요. 세션 종료 후 재승인이 필요합니다."
-                    : "높은 위험도 작업은 승인 사유를 기록합니다. 세션 종료 후 재승인이 필요합니다."}
+                    ? tHook("toolApprovalDialog.nlHintAutoFilled")
+                    : tHook("toolApprovalDialog.nlHintHighRisk")}
                 </p>
               </div>
             )}
 
             <details className="min-w-0 rounded-md border bg-muted/20">
               <summary className="cursor-pointer px-3 py-2 text-xs font-semibold">
-                전체 입력 보기
+                {tHook("toolApprovalDialog.showFullInput")}
               </summary>
               <pre className="max-h-56 max-w-full overflow-auto border-t px-3 py-2 whitespace-pre-wrap break-all font-mono text-[11px] leading-relaxed">
                 {argsDisplay}
@@ -302,7 +305,7 @@ export function ToolApprovalDialog({
                   className="h-auto px-3 pb-2 pt-0 text-[11px] text-primary underline hover:bg-transparent"
                   onClick={() => setExpanded((v) => !v)}
                 >
-                  {expanded ? "접기" : "모두 보기"}
+                  {expanded ? tHook("toolApprovalDialog.collapse") : tHook("toolApprovalDialog.showAll")}
                 </Button>
               )}
             </details>
@@ -311,7 +314,7 @@ export function ToolApprovalDialog({
           {/* Scope selector — LOW/MEDIUM only (HIGH is always session) */}
           {finalVerdict !== "high" && (
             <div className="mt-3">
-              <p className="mb-1.5 text-xs font-semibold">승인 범위</p>
+              <p className="mb-1.5 text-xs font-semibold">{tHook("toolApprovalDialog.approvalScope")}</p>
               <RadioGroup
                 value={scopeChoice}
                 onValueChange={(v) => setScopeChoice(v as UserApprovalScope)}
@@ -319,11 +322,11 @@ export function ToolApprovalDialog({
               >
                 <div className="flex items-center gap-1.5">
                   <RadioGroupItem value="session" id="scope-session" />
-                  <Label htmlFor="scope-session" className="text-xs">이 세션만</Label>
+                  <Label htmlFor="scope-session" className="text-xs">{tHook("toolApprovalDialog.scopeSession")}</Label>
                 </div>
                 <div className="flex items-center gap-1.5">
                   <RadioGroupItem value="persistent" id="scope-persistent" />
-                  <Label htmlFor="scope-persistent" className="text-xs">지속 허용</Label>
+                  <Label htmlFor="scope-persistent" className="text-xs">{tHook("toolApprovalDialog.scopePersistent")}</Label>
                 </div>
               </RadioGroup>
             </div>
@@ -336,39 +339,39 @@ export function ToolApprovalDialog({
               className="border-destructive text-destructive hover:bg-destructive/15"
               onClick={() => onDecide("deny-always", request.toolName)}
             >
-              항상 거부
+              {tHook("toolApprovalDialog.denyAlways")}
             </Button>
             <Button
               size="sm"
               variant="outline"
               onClick={() => onDecide("deny-once")}
-              title="단축키: D"
+              title={tHook("toolApprovalDialog.shortcutD")}
             >
-              거부
+              {tHook("toolApprovalDialog.denyOnce")}
             </Button>
             <Button
               size="sm"
               variant="outline"
               onClick={() => void handleApprove("allow-always", request.toolName)}
               disabled={approveDisabled}
-              title={approveDisabled ? "사유를 입력하세요" : undefined}
+              title={approveDisabled ? tHook("toolApprovalDialog.enterReason") : undefined}
               aria-describedby={approveDisabled ? "nl-justification-hint" : undefined}
             >
-              항상 허용
+              {tHook("toolApprovalDialog.allowAlways")}
             </Button>
             <Button
               size="sm"
               variant="default"
               onClick={() => void handleApprove("allow-once")}
               disabled={approveDisabled}
-              title={approveDisabled ? "사유를 입력하세요" : "단축키: A"}
+              title={approveDisabled ? tHook("toolApprovalDialog.enterReason") : tHook("toolApprovalDialog.shortcutA")}
               aria-describedby={approveDisabled ? "nl-justification-hint" : undefined}
               data-testid="approve-button"
             >
-              한 번만 허용
+              {tHook("toolApprovalDialog.allowOnce")}
             </Button>
             <span id="nl-justification-hint" className="sr-only">
-              HIGH 위험 작업은 NL 사유 입력이 필수입니다
+              {tHook("toolApprovalDialog.highRiskNlRequired")}
             </span>
           </div>
         </section>
@@ -409,7 +412,7 @@ function approvalReviewRows(
     : request.reason;
   const rows: ReviewBasisRow[] = [
     {
-      label: "출처",
+      label: t("toolApprovalDialog.rowSource"),
       value: `${sourceBadge} · ${originLabel}`,
     },
   ];
@@ -427,58 +430,58 @@ function approvalReviewRows(
     // (the SOT) so UI and reviewer prompt agree.
     let sandboxValue: string;
     if (cap.kind === "partial") {
-      sandboxValue = "⚠ OS 격리 부분적 (sandbox-exec) — 일부 제한만 적용됩니다";
+      sandboxValue = t("toolApprovalDialog.sandboxPartial");
     } else if (cap.kind === "fs-only") {
-      sandboxValue = "ℹ 파일시스템만 격리 (landlock) — 네트워크 접근은 제한되지 않습니다";
+      sandboxValue = t("toolApprovalDialog.sandboxFsOnly");
     } else if (isWeakSandbox(cap)) {
-      sandboxValue = "⚠ OS 격리 없음 — 도구가 추가 제한 없이 실행됩니다";
+      sandboxValue = t("toolApprovalDialog.sandboxNone");
     } else {
-      sandboxValue = `OS 격리 활성 (${cap.kind})`;
+      sandboxValue = t("toolApprovalDialog.sandboxActive", { kind: cap.kind });
     }
     rows.push({
-      label: "보안 격리",
+      label: t("toolApprovalDialog.rowSandbox"),
       value: sandboxValue,
       testId: "tool-approval-sandbox",
     });
   }
   if (isNonUserTrustOrigin(request.trustOrigin)) {
     rows.push({
-      label: "주의",
-      value: `이 요청은 사용자가 직접 입력한 명령이 아니라 ${originLabel}에서 시작되었습니다. 도구 인자와 대상 경로를 확인한 뒤 승인하세요.`,
+      label: t("toolApprovalDialog.rowCaution"),
+      value: t("toolApprovalDialog.cautionNonUserOrigin", { originLabel }),
     });
   }
 
   if (category === "read") {
     rows.push(
-      { label: "대상", value: request.target?.filePath ?? pickSummary(parsed, ["path", "paths", "target", "targets", "file", "directory", "resource", "query", "url", "uri"], inputSummary), monospace: true, testId: "tool-approval-input" },
-      { label: "범위", value: `${sourceLabel(source)} · ${categoryLabel(category)} · ${scopeLabel(parsed)}` },
-      { label: "민감도", value: sensitivityLabel(parsed) },
-      { label: "양", value: inputVolumeLabel(inputSummary) },
+      { label: t("toolApprovalDialog.rowTarget"), value: request.target?.filePath ?? pickSummary(parsed, ["path", "paths", "target", "targets", "file", "directory", "resource", "query", "url", "uri"], inputSummary), monospace: true, testId: "tool-approval-input" },
+      { label: t("toolApprovalDialog.rowScope"), value: `${sourceLabel(source)} · ${categoryLabel(category)} · ${scopeLabel(parsed)}` },
+      { label: t("toolApprovalDialog.rowSensitivity"), value: sensitivityLabel(parsed) },
+      { label: t("toolApprovalDialog.rowVolume"), value: inputVolumeLabel(inputSummary) },
     );
   } else if (category === "write") {
     rows.push(
-      { label: "대상", value: request.target?.filePath ?? pickSummary(parsed, ["path", "paths", "target", "targets", "file", "configKey", "taskId", "id"], inputSummary), monospace: true, testId: "tool-approval-input" },
-      { label: "변경", value: pickSummary(parsed, ["operation", "action", "mode", "patch", "content", "body", "text"], "변경 내용은 입력 요약 기준으로 확인합니다."), monospace: true },
-      { label: "영향", value: `${sourceLabel(source)} · ${categoryLabel(category)} · 파일/설정/사용자 데이터 변경 가능성` },
-      { label: "복구", value: pickSummary(parsed, ["diff", "backup", "rollback", "undo"], "복구 정보는 입력 요약에 명시되지 않음") },
+      { label: t("toolApprovalDialog.rowTarget"), value: request.target?.filePath ?? pickSummary(parsed, ["path", "paths", "target", "targets", "file", "configKey", "taskId", "id"], inputSummary), monospace: true, testId: "tool-approval-input" },
+      { label: t("toolApprovalDialog.rowChange"), value: pickSummary(parsed, ["operation", "action", "mode", "patch", "content", "body", "text"], t("toolApprovalDialog.changeNotSpecified")), monospace: true },
+      { label: t("toolApprovalDialog.rowImpact"), value: `${sourceLabel(source)} · ${categoryLabel(category)} · ${t("toolApprovalDialog.impactNote")}` },
+      { label: t("toolApprovalDialog.rowRecovery"), value: pickSummary(parsed, ["diff", "backup", "rollback", "undo"], t("toolApprovalDialog.recoveryNotSpecified")) },
     );
   } else if (category === "network") {
     rows.push(
-      { label: "엔드포인트", value: pickSummary(parsed, ["endpoint", "url", "uri", "host", "baseUrl"], "엔드포인트 정보는 입력 요약에 명시되지 않음"), monospace: true, testId: "tool-approval-input" },
-      { label: "메서드", value: pickSummary(parsed, ["method", "httpMethod"], "메서드 정보는 입력 요약에 명시되지 않음") },
-      { label: "전송 내용", value: pickSummary(parsed, ["payload", "body", "message", "text", "input", "params", "args"], payloadLabel(inputSummary)), monospace: true },
-      { label: "인증 범위", value: pickSummary(parsed, ["auth", "scope", "scopes", "tenant", "account"], "인증 범위 정보는 입력 요약에 명시되지 않음") },
+      { label: t("toolApprovalDialog.rowEndpoint"), value: pickSummary(parsed, ["endpoint", "url", "uri", "host", "baseUrl"], t("toolApprovalDialog.endpointNotSpecified")), monospace: true, testId: "tool-approval-input" },
+      { label: t("toolApprovalDialog.rowMethod"), value: pickSummary(parsed, ["method", "httpMethod"], t("toolApprovalDialog.methodNotSpecified")) },
+      { label: t("toolApprovalDialog.rowPayload"), value: pickSummary(parsed, ["payload", "body", "message", "text", "input", "params", "args"], payloadLabel(inputSummary)), monospace: true },
+      { label: t("toolApprovalDialog.rowAuthScope"), value: pickSummary(parsed, ["auth", "scope", "scopes", "tenant", "account"], t("toolApprovalDialog.authScopeNotSpecified")) },
     );
   } else if (category === "shell") {
     rows.push(
-      { label: "명령", value: pickSummary(parsed, ["command", "cmd", "args", "script", "argv"], inputSummary), monospace: true, testId: "tool-approval-input" },
-      { label: "작업 디렉토리/환경", value: pickSummary(parsed, ["cwd", "workingDirectory", "env", "environment"], "작업 디렉토리/환경 정보는 입력 요약에 명시되지 않음"), monospace: true },
-      { label: "부작용", value: "파일 변경, 네트워크 호출, dependency install, background process 가능성을 명령 기준으로 확인합니다." },
-      { label: "제한", value: formatEvaluationLimits(request.evaluationContext) },
+      { label: t("toolApprovalDialog.rowCommand"), value: pickSummary(parsed, ["command", "cmd", "args", "script", "argv"], inputSummary), monospace: true, testId: "tool-approval-input" },
+      { label: t("toolApprovalDialog.rowCwdEnv"), value: pickSummary(parsed, ["cwd", "workingDirectory", "env", "environment"], t("toolApprovalDialog.cwdEnvNotSpecified")), monospace: true },
+      { label: t("toolApprovalDialog.rowSideEffects"), value: t("toolApprovalDialog.sideEffectsNote") },
+      { label: t("toolApprovalDialog.rowLimits"), value: formatEvaluationLimits(request.evaluationContext) },
     );
   } else {
     rows.push({
-      label: "입력",
+      label: t("toolApprovalDialog.rowInput"),
       value: inputSummary,
       monospace: true,
       testId: "tool-approval-input",
@@ -486,8 +489,8 @@ function approvalReviewRows(
   }
 
   rows.push(
-    { label: "판단", value: reviewer },
-    { label: "선택", value: "이번만 허용, 항상 허용, 거부, 항상 거부를 선택할 수 있습니다." },
+    { label: t("toolApprovalDialog.rowVerdict"), value: reviewer },
+    { label: t("toolApprovalDialog.rowChoice"), value: t("toolApprovalDialog.choiceDescription") },
   );
   return rows;
 }

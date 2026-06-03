@@ -53,7 +53,10 @@ describe("preload plugin action normalization", () => {
     await expect(hostApi.installMarketplacePlugin("meeting")).resolves.toEqual({
       ok: false,
       error: "invalid-result",
-      message: "플러그인 작업 결과가 올바르지 않습니다.",
+      // preload resolves i18n at the English default — it has no settings
+      // context to switch language, and this suite re-imports it via
+      // resetModules so the runtime locale is the default.
+      message: "Plugin action result is invalid.",
     });
   });
 

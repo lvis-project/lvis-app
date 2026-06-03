@@ -1,15 +1,17 @@
+import { t } from "../../../i18n/runtime.js";
+
 export function trustOriginLabel(origin: string | undefined): string {
   switch (origin) {
     case "user-keyboard":
-      return "사용자 직접 입력";
+      return t("trustOriginLabel.userKeyboard");
     case "plugin-emitted":
-      return "플러그인 생성";
+      return t("trustOriginLabel.pluginEmitted");
     case "llm-tool-arg":
-      return "모델 생성 인자";
+      return t("trustOriginLabel.llmToolArg");
     case "file-content":
-      return "파일 내용 기반";
+      return t("trustOriginLabel.fileContent");
     case undefined:
-      return "출처 미확인";
+      return t("trustOriginLabel.unknown");
     default:
       return origin;
   }

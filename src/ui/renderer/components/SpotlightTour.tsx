@@ -32,6 +32,7 @@
  *     "shortcut: Cmd plus K" rather than the literal glyph.
  */
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { useTranslation } from "../../../i18n/react.js";
 import {
   DEFAULT_TOUR_SCENARIOS,
   getTourScenario,
@@ -254,6 +255,7 @@ export function SpotlightTour({
   onComplete,
   onDismiss,
 }: SpotlightTourProps) {
+  const { t } = useTranslation();
   const [activeScenarioId, setActiveScenarioId] = useState<string | null>(
     initialScenarioId ?? null,
   );
@@ -617,7 +619,7 @@ export function SpotlightTour({
             {stepIndex + 1}
           </span>
           <span>
-            {stepIndex + 1} / {total} 단계
+            {stepIndex + 1} / {total} {t("spotlightTour.stepUnit")}
           </span>
         </div>
         <h3
@@ -708,7 +710,7 @@ export function SpotlightTour({
               cursor: "pointer",
             }}
           >
-            건너뛰기
+            {t("spotlightTour.skip")}
           </button>
           <button
             type="button"
@@ -724,7 +726,7 @@ export function SpotlightTour({
               cursor: "pointer",
             }}
           >
-            {isLast ? "완료" : "다음 →"}
+            {isLast ? t("spotlightTour.complete") : t("spotlightTour.next")}
           </button>
         </div>
       </div>

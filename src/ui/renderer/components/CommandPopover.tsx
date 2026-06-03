@@ -4,6 +4,7 @@ import { Button } from "../../../components/ui/button.js";
 import { Popover, PopoverTrigger } from "../../../components/ui/popover.js";
 import { Tooltip, TooltipContent, TooltipTrigger } from "../../../components/ui/tooltip.js";
 import type { QuickAction } from "./command-actions.js";
+import { useTranslation } from "../../../i18n/react.js";
 export type { QuickAction } from "./command-actions.js";
 
 const LazyCommandPopoverPanel = lazy(() => import("./CommandPopoverPanel.js"));
@@ -19,6 +20,7 @@ export interface CommandPopoverProps {
 }
 
 export function CommandPopover({ actions, onInsert, open, onOpenChange }: CommandPopoverProps) {
+  const { t } = useTranslation();
   const handleOpenChange = useCallback(
     (next: boolean) => {
       onOpenChange(next);
@@ -35,7 +37,7 @@ export function CommandPopover({ actions, onInsert, open, onOpenChange }: Comman
               variant="ghost"
               size="sm"
               className="h-7 w-7 p-0"
-              aria-label="명령 팔레트 (Ctrl/Cmd+K)"
+              aria-label={t("commandPopover.ariaLabel")}
               data-testid="command-popover-trigger"
               // Tutorial-C SpotlightTour anchor (PR #983 follow-up). Step 3
               // of `first-boot-essentials` highlights this ⌘K toggle, see

@@ -1,4 +1,5 @@
 import { Fragment, useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { useTranslation } from "../../i18n/react.js";
 import { flushSync } from "react-dom";
 import { ChevronDown, KeyRound, Pencil, Star, GitBranch } from "lucide-react";
 import { Button } from "../../components/ui/button.js";
@@ -299,14 +300,15 @@ function AskUserAnswerBubble({
 }: {
   entry: Extract<ChatEntry, { kind: "ask_user_answer" }>;
 }) {
+  const { t } = useTranslation();
   if (entry.dismissed) {
     return (
       <div
         className="ml-auto w-fit min-w-0 max-w-[75%] rounded-md border border-border/70 border-l-2 border-l-muted-foreground/60 bg-card/80 px-3 py-2 text-xs text-muted-foreground"
         data-testid="ask-user-answer-bubble"
       >
-        <div className="text-[10.5px] text-muted-foreground/80">↳ 질문 건너뜀</div>
-        <div className="whitespace-pre-wrap break-words [overflow-wrap:anywhere]">기본값으로 진행</div>
+        <div className="text-[10.5px] text-muted-foreground/80">{t("chatView.askAnswerSkippedLabel")}</div>
+        <div className="whitespace-pre-wrap break-words [overflow-wrap:anywhere]">{t("chatView.askAnswerSkippedProceed")}</div>
       </div>
     );
   }
@@ -317,7 +319,7 @@ function AskUserAnswerBubble({
       data-testid="ask-user-answer-bubble"
     >
       <div className="mb-1 text-[10.5px] text-muted-foreground">
-        ↳ 내 답변{entry.rows.length > 1 ? ` (${entry.rows.length}개)` : ""}
+        {entry.rows.length > 1 ? t("chatView.askAnswerMyAnswerMultiple", { count: entry.rows.length }) : t("chatView.askAnswerMyAnswerSingle")}
       </div>
       <div className="space-y-0.5">
         {entry.rows.map((row, idx) => (
@@ -332,6 +334,7 @@ function AskUserAnswerBubble({
 }
 
 export function ChatView({ api, onAsk, onEditSave, onFork, onToggleStar, onRetryEffort, onContinueFromLastUser, isEntryStarred, onAbort, onGuide, onGuideError, onFeedback, subAgentSpawns, loadedSkills, hasAskQuestions, askQuestions, onResolveAskQuestion, plugins, onSelectPlugin, onRefreshPlugins, currentSessionKind = "main", currentSessionTitle, sessions, onLoadSession, onRefreshSessions, commandActions, commandPopoverOpen, onCommandPopoverOpenChange, installingPlugins, onOpenMarketplace, marketplaceUrlReady, onPluginPrimaryAction, onRoutineAcknowledge, onOpenPermissionQueue }: ChatViewProps) {
+  const { t } = useTranslation();
   // We still need the api for SessionTodoPanel; obtain it via singleton.
   const workflowApi = getApi();
   const debugStreamEnabled = isDebugStreamEnabled();
@@ -625,7 +628,7 @@ export function ChatView({ api, onAsk, onEditSave, onFork, onToggleStar, onRetry
   const handleBranchFrom = useCallback(async (compactNum: number) => {
     if (streaming || hasActiveStreamingEntry) {
       if (forkToastTimerRef.current) clearTimeout(forkToastTimerRef.current);
-      setForkToast("응답이 끝난 뒤 이 시점에서 다시 시작할 수 있습니다");
+      setForkToast(t("chatView.forkBusyToast"));
       forkToastTimerRef.current = setTimeout(() => setForkToast(null), SHORT_TOAST_TTL_MS);
       return;
     }
@@ -641,8 +644,8 @@ export function ChatView({ api, onAsk, onEditSave, onFork, onToggleStar, onRetry
     if (forkToastTimerRef.current) clearTimeout(forkToastTimerRef.current);
     setForkToast(
       result.shouldAutoContinue
-        ? `checkpoint #${compactNum} 에서 새 분기를 시작했습니다. 마지막 질문의 답변을 이어서 생성합니다`
-        : `checkpoint #${compactNum} 에서 새 분기를 시작했습니다`,
+        ? t("chatView.forkSuccessAutoContinue", { compactNum })
+        : t("chatView.forkSuccess", { compactNum }),
     );
     forkToastTimerRef.current = setTimeout(() => setForkToast(null), SHORT_TOAST_TTL_MS); // single-line fork confirmation needs less read time
     if (result.shouldAutoContinue) {
@@ -706,14 +709,14 @@ export function ChatView({ api, onAsk, onEditSave, onFork, onToggleStar, onRetry
         const reason = result?.error ?? "unknown";
         const count = taken.length;
         const reasonLabel =
-          reason === "queue-full" ? "대기열이 가득 차" :
-          reason === "too-long" ? "메시지가 너무 길어" :
-          reason === "no-active-turn" ? "응답이 이미 종료되어" :
+          reason === "queue-full" ? t("chatView.queueFlushFailReasonFull") :
+          reason === "too-long" ? t("chatView.queueFlushFailReasonTooLong") :
+          reason === "no-active-turn" ? t("chatView.queueFlushFailReasonNoTurn") :
           `(${reason})`;
         // Surface a user-visible error so the lost messages don't disappear
         // silently. Re-add is intentionally avoided to prevent infinite-retry
         // cascade — the user can re-type if they want to retry.
-        onGuideError(`대기 중이던 메시지 ${count}건이 ${reasonLabel} 전송되지 못했습니다.`);
+        onGuideError(t("chatView.queueFlushFailMessage", { count, reasonLabel }));
         console.warn(`[message-queue] guide flush dropped (${reason}):`, formatted.slice(0, 80));
       }
     })();
@@ -841,16 +844,16 @@ export function ChatView({ api, onAsk, onEditSave, onFork, onToggleStar, onRetry
       />
       <Tooltip>
         <TooltipTrigger asChild>
-          <span className={`text-[11px] font-mono ${costBadgeClass}`} title="예상 비용">
+          <span className={`text-[11px] font-mono ${costBadgeClass}`} title={t("chatView.estimatedCostTitle")}>
             {formatCostBadge(costEstimate.total, costEstimate.pricingKnown)}
           </span>
         </TooltipTrigger>
         <TooltipContent className="text-xs">
-          <div>입력: {costEstimate.inputTokens.toLocaleString()} tok{costEstimate.pricingKnown === false ? "" : ` · $${costEstimate.inputCost.toFixed(5)}`}</div>
-          <div>출력(추정): {costEstimate.outputTokens.toLocaleString()} tok{costEstimate.pricingKnown === false ? "" : ` · $${costEstimate.outputCost.toFixed(5)}`}</div>
+          <div>{t("chatView.costInputLabel")} {costEstimate.inputTokens.toLocaleString()} tok{costEstimate.pricingKnown === false ? "" : ` · $${costEstimate.inputCost.toFixed(5)}`}</div>
+          <div>{t("chatView.costOutputLabel")} {costEstimate.outputTokens.toLocaleString()} tok{costEstimate.pricingKnown === false ? "" : ` · $${costEstimate.outputCost.toFixed(5)}`}</div>
           {costEstimate.pricingKnown === false
-            ? <div className="font-semibold">가격 미등록 모델입니다.</div>
-            : <div className="font-semibold">합계: ${costEstimate.total.toFixed(5)}</div>}
+            ? <div className="font-semibold">{t("chatView.costUnknownModel")}</div>
+            : <div className="font-semibold">{t("chatView.costTotalLabel")} ${costEstimate.total.toFixed(5)}</div>}
         </TooltipContent>
       </Tooltip>
     </div>
@@ -941,10 +944,10 @@ export function ChatView({ api, onAsk, onEditSave, onFork, onToggleStar, onRetry
           setQuestion("");
         } else if (result?.ok === false) {
           const message =
-            result.error === "queue-full" ? "방향 지시가 너무 많아 대기열이 가득 찼습니다." :
-            result.error === "too-long" ? "방향 지시 한 건이 너무 깁니다 (최대 8000자)." :
-            result.error === "no-active-turn" ? "진행 중인 응답이 없어 방향 지시를 보낼 수 없습니다." :
-            `방향 지시 전송 실패: ${result.error}`;
+            result.error === "queue-full" ? t("chatView.guideErrorQueueFull") :
+            result.error === "too-long" ? t("chatView.guideErrorTooLong") :
+            result.error === "no-active-turn" ? t("chatView.guideErrorNoActiveTurn") :
+            t("chatView.guideErrorFailed", { error: result.error });
           onGuideError(message);
         }
       })();
@@ -1147,12 +1150,12 @@ export function ChatView({ api, onAsk, onEditSave, onFork, onToggleStar, onRetry
                 actions float top-right via absolute positioning so
                 the bubble has no header chrome. */}
             {entry.injectHint === "queue" ? (
-              <div className="mb-1 inline-flex items-center gap-1 rounded bg-message-user-foreground/10 px-1.5 py-0.5 text-[10px] text-message-user-foreground/70" title="메시지 큐에서 자동 인입">
-                ↪ 큐에서
+              <div className="mb-1 inline-flex items-center gap-1 rounded bg-message-user-foreground/10 px-1.5 py-0.5 text-[10px] text-message-user-foreground/70" title={t("chatView.queueInjectTitle")}>
+                {t("chatView.queueInjectLabel")}
               </div>
             ) : entry.injectHint === "interrupt" ? (
-              <div className="mb-1 inline-flex items-center gap-1 rounded bg-message-user-foreground/10 px-1.5 py-0.5 text-[10px] text-message-user-foreground/70" title="현재 LLM 응답 중단 후 즉시 새 메시지로 주입">
-                ⚡ 중단후 새메세지
+              <div className="mb-1 inline-flex items-center gap-1 rounded bg-message-user-foreground/10 px-1.5 py-0.5 text-[10px] text-message-user-foreground/70" title={t("chatView.interruptTitle")}>
+                {t("chatView.interruptLabel")}
               </div>
             ) : null}
             {starActive ? (
@@ -1161,13 +1164,13 @@ export function ChatView({ api, onAsk, onEditSave, onFork, onToggleStar, onRetry
             {/* Hide mutating actions in view-mode (read-only slice). */}
             {!viewMode && (
               <div className="absolute right-2 top-2 hidden gap-1 group-hover:flex bg-message-user/95 rounded">
-                <Button type="button" variant="ghost" size="icon-xs" title="편집" onClick={() => setEditingEntryIdx(idx)}>
+                <Button type="button" variant="ghost" size="icon-xs" title={t("chatView.editButtonTitle")} onClick={() => setEditingEntryIdx(idx)}>
                   <Pencil className="h-3 w-3" />
                 </Button>
-                <Button type="button" variant="ghost" size="icon-xs" title="분기" onClick={() => void onFork(idx)}>
+                <Button type="button" variant="ghost" size="icon-xs" title={t("chatView.forkButtonTitle")} onClick={() => void onFork(idx)}>
                   <GitBranch className="h-3 w-3" />
                 </Button>
-                <Button type="button" variant="ghost" size="icon-xs" title="즐겨찾기" onClick={() => void onToggleStar(idx)}>
+                <Button type="button" variant="ghost" size="icon-xs" title={t("chatView.starButtonTitle")} onClick={() => void onToggleStar(idx)}>
                   <Star key={starActive ? "on" : "off"} className={`h-3 w-3 ${starActive ? "fill-emphasis text-emphasis lvis-anim-star" : ""}`} />
                 </Button>
               </div>
@@ -1499,8 +1502,8 @@ export function ChatView({ api, onAsk, onEditSave, onFork, onToggleStar, onRetry
     >
       {hasApiKey === false && (
         <div className="absolute left-1/2 top-1/2 z-10 -translate-x-1/2 -translate-y-1/2">
-          <Card className="w-[400px]"><CardHeader className="text-center"><KeyRound className="mx-auto mb-2 h-10 w-10 text-muted-foreground" /><CardTitle>API 키 설정 필요</CardTitle><CardDescription>채팅을 시작하려면 Claude API 키를 설정해 주세요.</CardDescription></CardHeader>
-            <CardContent className="flex justify-center"><Button onClick={() => onOpenSettings()}><KeyRound className="mr-2 h-4 w-4" />설정 열기</Button></CardContent>
+          <Card className="w-[400px]"><CardHeader className="text-center"><KeyRound className="mx-auto mb-2 h-10 w-10 text-muted-foreground" /><CardTitle>{t("chatView.noApiKeyTitle")}</CardTitle><CardDescription>{t("chatView.noApiKeyDescription")}</CardDescription></CardHeader>
+            <CardContent className="flex justify-center"><Button onClick={() => onOpenSettings()}><KeyRound className="mr-2 h-4 w-4" />{t("chatView.openSettingsButton")}</Button></CardContent>
           </Card>
         </div>
       )}
@@ -1545,9 +1548,9 @@ export function ChatView({ api, onAsk, onEditSave, onFork, onToggleStar, onRetry
             aria-live={isHigh ? "assertive" : "polite"}
             className={`sticky top-0 z-30 mx-3 mt-2 rounded-md border px-3 py-2 text-xs ${tone}`}
           >
-            <span className="font-medium">권한 메모리 적용</span>
+            <span className="font-medium">{t("chatView.approvalMemoryApplied")}</span>
             <span className="ml-2 text-muted-foreground">
-              {userApprovalHitToast.toolName} · {userApprovalHitToast.scope === "persistent" ? "영구" : "세션"} · {verdict.toUpperCase()}
+              {userApprovalHitToast.toolName} · {userApprovalHitToast.scope === "persistent" ? t("chatView.approvalScopePersistent") : t("chatView.approvalScopeSession")} · {verdict.toUpperCase()}
             </span>
           </div>
         );
@@ -1557,7 +1560,7 @@ export function ChatView({ api, onAsk, onEditSave, onFork, onToggleStar, onRetry
           data-testid="current-session-kind-banner"
           className="sticky top-0 z-20 mx-3 mt-2 rounded-md border border-action-view/30 bg-action-view/10 px-3 py-2 text-xs text-action-view"
         >
-          <span className="font-medium">루틴 세션</span>
+          <span className="font-medium">{t("chatView.routineSessionLabel")}</span>
           {currentSessionTitle ? <span className="ml-2 text-muted-foreground">{currentSessionTitle}</span> : null}
         </div>
       )}
@@ -1601,7 +1604,7 @@ export function ChatView({ api, onAsk, onEditSave, onFork, onToggleStar, onRetry
             "준비되었습니다" copy so the user never sees a "로그인된 척" race
             where the empty state paints before the boot probe resolves
             (#1014 tracer: Stage B). */}
-        {visibleEntries.length === 0 && hasApiKey === true && !hasAskQuestions && !suggestedRepliesActive && <div className="py-12 text-center text-sm text-muted-foreground">LVIS 에이전트가 준비되었습니다. 질문을 입력하거나 /command를 사용하세요.</div>}
+        {visibleEntries.length === 0 && hasApiKey === true && !hasAskQuestions && !suggestedRepliesActive && <div className="py-12 text-center text-sm text-muted-foreground">{t("chatView.emptyState")}</div>}
         {transcriptEntries}
         <div ref={chatEndRef} />
       </div></ScrollArea>
@@ -1615,20 +1618,20 @@ export function ChatView({ api, onAsk, onEditSave, onFork, onToggleStar, onRetry
           data-testid="jump-to-bottom"
         >
           <ChevronDown className="mr-1 h-3.5 w-3.5" />
-          맨밑으로
+          {t("chatView.jumpToBottom")}
         </Button>
       )}
       </div>
       {contextOverflowPct >= 0.95 && (
         <div className="flex w-full max-w-full items-center gap-2 border-t bg-destructive/10 px-3 py-1.5 text-xs text-destructive">
-          <span className="font-semibold">컨텍스트 {Math.round(contextOverflowPct * 100)}% 사용</span>
-          <span>— 다음 전송에서 자동 압축을 먼저 실행합니다.</span>
+          <span className="font-semibold">{t("chatView.contextUsagePercent", { pct: Math.round(contextOverflowPct * 100) })}</span>
+          <span>{t("chatView.contextOverflowWarning")}</span>
         </div>
       )}
       {contextOverflowPct >= 0.80 && contextOverflowPct < 0.95 && (
         <div className="flex w-full max-w-full items-center gap-2 border-t bg-warning/15 px-3 py-1.5 text-xs text-warning">
-          <span className="font-semibold">컨텍스트 {Math.round(contextOverflowPct * 100)}% 사용</span>
-          <span>— 곧 자동 압축됩니다.</span>
+          <span className="font-semibold">{t("chatView.contextUsagePercent", { pct: Math.round(contextOverflowPct * 100) })}</span>
+          <span>{t("chatView.contextNearingWarning")}</span>
         </div>
       )}
       {/*
@@ -1640,14 +1643,14 @@ export function ChatView({ api, onAsk, onEditSave, onFork, onToggleStar, onRetry
       */}
       {typeof tpmPct === "number" && typeof tpmLimit === "number" && tpmPct >= 0.95 && (
         <div className="flex w-full max-w-full items-center gap-2 border-t bg-destructive/10 px-3 py-1.5 text-xs text-destructive">
-          <span className="font-semibold">분당 한도(TPM) {Math.round(tpmPct * 100)}% — {usedTokens.toLocaleString()} / {tpmLimit.toLocaleString()}</span>
-          <span>— 전송 시 분당 처리 한도 초과 가능. 잠시 대기하거나 메시지를 작게 쪼개세요.</span>
+          <span className="font-semibold">{t("chatView.tpmUsagePercent", { pct: Math.round(tpmPct * 100), used: usedTokens.toLocaleString(), limit: tpmLimit.toLocaleString() })}</span>
+          <span>{t("chatView.tpmOverflowWarning")}</span>
         </div>
       )}
       {typeof tpmPct === "number" && typeof tpmLimit === "number" && tpmPct >= 0.80 && tpmPct < 0.95 && (
         <div className="flex w-full max-w-full items-center gap-2 border-t bg-warning/15 px-3 py-1.5 text-xs text-warning">
-          <span className="font-semibold">분당 한도(TPM) {Math.round(tpmPct * 100)}% — {usedTokens.toLocaleString()} / {tpmLimit.toLocaleString()}</span>
-          <span>— 작은-tier 모델 (예: nano) 의 분당 처리량 한도에 근접.</span>
+          <span className="font-semibold">{t("chatView.tpmUsagePercent", { pct: Math.round(tpmPct * 100), used: usedTokens.toLocaleString(), limit: tpmLimit.toLocaleString() })}</span>
+          <span>{t("chatView.tpmNearingWarning")}</span>
         </div>
       )}
       {/* Assistant todo panel — anchored above the input cluster, below the

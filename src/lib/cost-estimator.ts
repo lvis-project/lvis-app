@@ -13,6 +13,8 @@
  * provider.
  */
 
+import { t } from "../i18n/index.js";
+
 export interface ModelPricingLite {
   inputPer1M: number;
   outputPer1M: number;
@@ -76,7 +78,7 @@ export function costTier(total: number): CostTier {
 }
 
 export function formatCostBadge(total: number, pricingKnown = true): string {
-  if (!pricingKnown) return "비용 미정";
+  if (!pricingKnown) return t("be_costEstimator.costUnknown");
   if (total < 0.01) return `~$${total.toFixed(4)}`;
   if (total < 1) return `~$${total.toFixed(2)}`;
   return `~$${total.toFixed(2)}`;

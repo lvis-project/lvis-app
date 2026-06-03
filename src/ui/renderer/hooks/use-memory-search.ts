@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useRef, useState } from "react";
+import { t } from "../../../i18n/runtime.js";
 import type { LvisApi } from "../types.js";
 
 export interface NoteResult {
@@ -25,7 +26,7 @@ function memoryIndexResult(content: string | undefined, query = ""): NoteResult[
   if (query.trim() && !trimmed.toLowerCase().includes(query.trim().toLowerCase())) return [];
   return [{
     filename: "MEMORY.md",
-    title: "메모리 인덱스",
+    title: t("useMemorySearch.memoryIndexTitle"),
     excerpt: stripTopHeading(trimmed),
   }];
 }

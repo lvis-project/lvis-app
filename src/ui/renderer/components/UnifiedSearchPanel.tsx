@@ -14,11 +14,13 @@ import type { LvisApi } from "../types.js";
 import { highlightText } from "../utils/html-preview.js";
 import { SessionCalendarPopover } from "./SessionCalendarPopover.js";
 import { preloadCalendar } from "./LazyCalendar.js";
+import { t } from "../../../i18n/runtime.js";
+import { useTranslation } from "../../../i18n/react.js";
 
 type ConversationMatch = {
   entryIndex: number;
   matchIndex: number;
-  role: "사용자" | "어시스턴트";
+  role: string;
   text: string;
 };
 
@@ -82,7 +84,7 @@ function routineBody(routine: RoutineRecord): string {
   return [
     routine.prePrompt,
     routine.notificationBody,
-    routine.execution === "llm-session" ? "LLM 세션" : "알림",
+    routine.execution === "llm-session" ? t("unifiedSearchPanel.executionLlmSession") : t("unifiedSearchPanel.executionNotification"),
     routine.id,
   ].filter(Boolean).join(" ");
 }
@@ -112,6 +114,7 @@ export function UnifiedSearchPanel({
   currentSessionId,
   streaming = false,
 }: UnifiedSearchPanelProps) {
+  const { t } = useTranslation();
   const [calendarOpen, setCalendarOpen] = useState(false);
   // Only user + assistant entries carry `createdAt` (reasoning entries are
   // never stamped). Excluding reasoning from the mapper avoids passing dead
@@ -171,7 +174,7 @@ export function UnifiedSearchPanel({
           return {
             entryIndex,
             matchIndex,
-            role: entry.kind === "user" ? "사용자" : "어시스턴트",
+            role: entry.kind === "user" ? t("unifiedSearchPanel.roleUser") : t("unifiedSearchPanel.roleAssistant"),
             text: entry.text,
           } satisfies ConversationMatch;
         })
@@ -183,7 +186,7 @@ export function UnifiedSearchPanel({
   const sessionResultsByTitle = useMemo(
     () =>
       sessions
-        .filter((session) => includesQuery(session.title || "제목 없는 세션", trimmedQuery, caseSensitive))
+        .filter((session) => includesQuery(session.title || t("unifiedSearchPanel.untitledSession"), trimmedQuery, caseSensitive))
         .slice(0, 8),
     [caseSensitive, sessions, trimmedQuery],
   );
@@ -259,8 +262,8 @@ export function UnifiedSearchPanel({
                 handleClose();
               }
             }}
-            placeholder="대화·세션·즐겨찾기·루틴·메모리 검색..."
-            aria-label="통합 검색"
+            placeholder={t("unifiedSearchPanel.searchPlaceholder")}
+            aria-label={t("unifiedSearchPanel.searchAriaLabel")}
             data-testid="unified-search-input"
             className="h-8 min-w-0 flex-1 bg-background text-sm"
             autoFocus={open}
@@ -276,8 +279,8 @@ export function UnifiedSearchPanel({
             size="sm"
             className="h-7 px-2 text-[11px]"
             onClick={onToggleCase}
-            title="대소문자 구분"
-            aria-label="대소문자 구분"
+            title={t("unifiedSearchPanel.caseSensitiveTitle")}
+            aria-label={t("unifiedSearchPanel.caseSensitiveTitle")}
           >
             Aa
           </Button>
@@ -302,8 +305,8 @@ export function UnifiedSearchPanel({
                 variant="ghost"
                 size="sm"
                 className="h-7 w-7 p-0"
-                title="날짜로 이동"
-                aria-label="날짜 선택"
+                title={t("unifiedSearchPanel.calendarTitle")}
+                aria-label={t("unifiedSearchPanel.calendarAriaLabel")}
               >
                 <CalendarDays className="h-3.5 w-3.5" />
               </Button>
@@ -320,7 +323,7 @@ export function UnifiedSearchPanel({
               align="end"
             />
           </Popover>
-          <Button type="button" variant="ghost" size="sm" className="h-7 w-7 p-0" onClick={handleClose} title="검색 닫기">
+          <Button type="button" variant="ghost" size="sm" className="h-7 w-7 p-0" onClick={handleClose} title={t("unifiedSearchPanel.closeTitle")}>
             <X className="h-3.5 w-3.5" />
           </Button>
         </div>
@@ -331,7 +334,7 @@ export function UnifiedSearchPanel({
             data-testid="unified-search-results"
           >
             <SearchSection
-              title="현재 대화"
+              title={t("unifiedSearchPanel.sectionCurrentConversation")}
               count={conversationResults.length}
               icon={<Search className="h-3.5 w-3.5" />}
             >
@@ -339,7 +342,7 @@ export function UnifiedSearchPanel({
                 <SearchResultButton
                   key={`${result.entryIndex}:${result.matchIndex}`}
                   label={`${result.role} · #${result.entryIndex + 1}`}
-                  meta="현재 세션"
+                  meta={t("unifiedSearchPanel.metaCurrentSession")}
                   onClick={() => onJumpToConversationMatch(result.matchIndex)}
                 >
                   {highlightText(previewText(result.text), trimmedQuery, { caseSensitive }) ?? previewText(result.text)}
@@ -348,14 +351,14 @@ export function UnifiedSearchPanel({
             </SearchSection>
 
             <SearchSection
-              title="대화 기록"
+              title={t("unifiedSearchPanel.sectionHistory")}
               count={sessionResults.length + sessionResultsByTitle.length}
               icon={<Clock3 className="h-3.5 w-3.5" />}
             >
               {sessionResults.map((session) => (
                 <SearchResultButton
                   key={`memory-session:${session.sessionId}:${session.timestamp}`}
-                  label={`대화 내용 · ${new Date(session.timestamp).toLocaleString("ko-KR")}`}
+                  label={t("unifiedSearchPanel.labelConversationContent", { date: new Date(session.timestamp).toLocaleString() })}
                   meta={session.sessionId.slice(0, 8)}
                   onClick={() => handleLoadSession(session.sessionId)}
                 >
@@ -365,24 +368,24 @@ export function UnifiedSearchPanel({
               {sessionResultsByTitle.map((session) => (
                 <SearchResultButton
                   key={`session-title:${session.id}`}
-                  label="세션 제목"
+                  label={t("unifiedSearchPanel.labelSessionTitle")}
                   meta={new Date(session.modifiedAt).toLocaleString("ko-KR", { timeZone: "Asia/Seoul" })}
                   onClick={() => handleLoadSession(session.id)}
                 >
-                  {highlightText(session.title || "제목 없는 세션", trimmedQuery, { caseSensitive }) ?? (session.title || "제목 없는 세션")}
+                  {highlightText(session.title || t("unifiedSearchPanel.untitledSession"), trimmedQuery, { caseSensitive }) ?? (session.title || t("unifiedSearchPanel.untitledSession"))}
                 </SearchResultButton>
               ))}
             </SearchSection>
 
             <SearchSection
-              title="즐겨찾기"
+              title={t("unifiedSearchPanel.sectionStarred")}
               count={starredResults.length}
               icon={<Star className="h-3.5 w-3.5" />}
             >
               {starredResults.map((item) => (
                 <SearchResultButton
                   key={`starred:${item.id}`}
-                  label={item.messageIndex === -1 ? "세션 즐겨찾기" : "메시지 즐겨찾기"}
+                  label={item.messageIndex === -1 ? t("unifiedSearchPanel.labelSessionStarred") : t("unifiedSearchPanel.labelMessageStarred")}
                   meta={new Date(item.starredAt).toLocaleString("ko-KR", { timeZone: "Asia/Seoul" })}
                   onClick={() => handleLoadSession(item.sessionId)}
                 >
@@ -392,7 +395,7 @@ export function UnifiedSearchPanel({
             </SearchSection>
 
             <SearchSection
-              title="루틴"
+              title={t("unifiedSearchPanel.sectionRoutines")}
               count={routineResults.length}
               icon={<Repeat2 className="h-3.5 w-3.5" />}
               loading={routinesLoading}
@@ -400,7 +403,7 @@ export function UnifiedSearchPanel({
               {routineResults.map((routine) => (
                 <SearchResultButton
                   key={`routine:${routine.id}`}
-                  label={routine.execution === "llm-session" ? "LLM 루틴" : "알림 루틴"}
+                  label={routine.execution === "llm-session" ? t("unifiedSearchPanel.labelLlmRoutine") : t("unifiedSearchPanel.labelNotificationRoutine")}
                   meta={routine.lastFiredAt ? new Date(routine.lastFiredAt).toLocaleString("ko-KR") : routine.id.slice(0, 8)}
                   onClick={onOpenRoutinesView}
                 >
@@ -415,7 +418,7 @@ export function UnifiedSearchPanel({
             </SearchSection>
 
             <SearchSection
-              title="메모리"
+              title={t("unifiedSearchPanel.sectionMemory")}
               count={noteResults.length}
               icon={<BookMarked className="h-3.5 w-3.5" />}
               loading={memoryLoading}
@@ -424,7 +427,7 @@ export function UnifiedSearchPanel({
                 <SearchResultButton
                   key={`note:${note.title}:${index}`}
                   label={note.title}
-                  meta={note.updatedAt ? new Date(note.updatedAt).toLocaleString("ko-KR") : "메모리"}
+                  meta={note.updatedAt ? new Date(note.updatedAt).toLocaleString() : t("unifiedSearchPanel.metaMemory")}
                   onClick={onOpenMemoryView}
                 >
                   {highlightText(previewText(note.excerpt ?? ""), trimmedQuery, { caseSensitive }) ?? previewText(note.excerpt ?? "")}
@@ -434,7 +437,7 @@ export function UnifiedSearchPanel({
 
             {noResults && (
               <div className="px-3 py-8 text-center text-xs text-muted-foreground">
-                {trimmedQuery ? "검색 결과가 없습니다." : "검색할 항목이 없습니다."}
+                {trimmedQuery ? t("unifiedSearchPanel.noResults") : t("unifiedSearchPanel.noItems")}
               </div>
             )}
           </div>
@@ -457,6 +460,7 @@ function SearchSection({
   loading?: boolean;
   children: React.ReactNode;
 }) {
+  const { t } = useTranslation();
   if (!loading && count === 0) return null;
   return (
     <section className="border-b last:border-b-0" data-testid={`unified-search-section-${title}`}>
@@ -464,7 +468,7 @@ function SearchSection({
         {icon}
         <span>{title}</span>
         <Badge variant="outline" className="h-5 px-1.5 text-[10px]">
-          {loading ? "검색 중" : count}
+          {loading ? t("unifiedSearchPanel.searching") : count}
         </Badge>
       </div>
       <div className="pb-1">{children}</div>

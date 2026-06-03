@@ -48,6 +48,7 @@ import {
 import { createLogger } from "../lib/logger.js";
 import { resolveStdioSpawnCommand } from "./uvx-command.js";
 import { trackManagedChildProcess } from "../main/managed-child-processes.js";
+import { t } from "../i18n/index.js";
 const log = createLogger("mcp-client");
 
 // ─── JSON-RPC 2.0 Types ──────────────────────────────
@@ -193,12 +194,12 @@ export class McpClient {
     if (!validation.valid) {
       this.state.status = "error";
       this.state.lastError = validation.reason;
-      throw new Error(`[mcp-client] 거버넌스 검증 실패 (Layer ${validation.layer}): ${validation.reason}`);
+      throw new Error(`[mcp-client] ${t("be_mcpClient.governanceValidationFailed", { layer: String(validation.layer), reason: validation.reason })}`);
     }
 
     if (this.config.transport !== "stdio" && this.config.transport !== "http") {
       throw new Error(
-        `[mcp-client] 현재 지원되는 transport: stdio, http. 설정: ${this.config.transport}`,
+        `[mcp-client] ${t("be_mcpClient.unsupportedTransport", { transport: this.config.transport })}`,
       );
     }
 
@@ -246,7 +247,7 @@ export class McpClient {
       if (!toolValidation.valid) {
         await this.disconnect();
         throw new Error(
-          `[mcp-client] 도구 등록 검증 실패 (Layer ${toolValidation.layer}): ${toolValidation.reason}`,
+          `[mcp-client] ${t("be_mcpClient.toolRegistrationValidationFailed", { layer: String(toolValidation.layer), reason: toolValidation.reason })}`,
         );
       }
 
@@ -274,7 +275,7 @@ export class McpClient {
   /** 서버 연결 해제 + 도구 제거 */
   async disconnect(): Promise<void> {
     this.stopHealthCheck();
-    this.rejectAllPending("서버 연결 해제");
+    this.rejectAllPending(t("be_mcpClient.serverDisconnected"));
     this.clearRegisteredToolOverrides();
 
     // ToolRegistry에서 도구 제거
@@ -294,7 +295,7 @@ export class McpClient {
   /** MCP 도구 호출 — ToolExecutor에서 사용 */
   async callTool(name: string, args: Record<string, unknown>): Promise<{ text: string; uiPayload?: McpUiPayload }> {
     if (this.state.status !== "connected" || !this.transport?.isAlive()) {
-      throw new Error(`[mcp-client] 서버 '${this.config.id}'가 연결되지 않았습니다.`);
+      throw new Error(`[mcp-client] ${t("be_mcpClient.serverNotConnected", { id: this.config.id })}`);
     }
 
     const approval = this.governance.getApproval(this.config.id);
@@ -338,7 +339,7 @@ export class McpClient {
       return { text, uiPayload };
     } catch (err) {
       const message = err instanceof Error ? err.message : String(err);
-      throw new Error(`[mcp-client] 도구 호출 실패 (${this.config.id}/${name}): ${message}`);
+      throw new Error(`[mcp-client] ${t("be_mcpClient.toolCallFailed", { id: this.config.id, name, message })}`);
     }
   }
 
@@ -355,7 +356,7 @@ export class McpClient {
    */
   async readResource(uri: string): Promise<string> {
     if (this.state.status !== "connected" || !this.transport?.isAlive()) {
-      throw new Error(`[mcp-client] 서버 '${this.config.id}'가 연결되지 않았습니다.`);
+      throw new Error(`[mcp-client] ${t("be_mcpClient.serverNotConnected", { id: this.config.id })}`);
     }
 
     interface McpResourceReadResult {
@@ -365,7 +366,7 @@ export class McpClient {
     const result = await this.sendRequest<McpResourceReadResult>("resources/read", { uri });
     const textPart = result.contents.find((c) => c.text !== undefined);
     if (!textPart?.text) {
-      throw new Error(`[mcp-client] resources/read '${uri}': 텍스트 콘텐츠 없음`);
+      throw new Error(`[mcp-client] ${t("be_mcpClient.resourceReadNoText", { uri })}`);
     }
     return textPart.text;
   }
@@ -376,7 +377,7 @@ export class McpClient {
     return new Promise<T>((resolve, reject) => {
       const transport = this.transport;
       if (!transport || !transport.isAlive()) {
-        reject(new Error(`[mcp-client] transport가 활성 상태가 아닙니다.`));
+        reject(new Error(`[mcp-client] ${t("be_mcpClient.transportNotActive")}`));
         return;
       }
 
@@ -388,7 +389,7 @@ export class McpClient {
       ) {
         reject(
           new Error(
-            `[mcp-client] 동시 요청 제한 초과 (${maxConcurrentRequests}): ${method}`,
+            `[mcp-client] ${t("be_mcpClient.concurrentRequestLimitExceeded", { max: String(maxConcurrentRequests), method })}`,
           ),
         );
         return;
@@ -399,7 +400,7 @@ export class McpClient {
 
       const timer = setTimeout(() => {
         this.pendingRequests.delete(id);
-        reject(new Error(`[mcp-client] 요청 타임아웃 (${timeout}ms): ${method}`));
+        reject(new Error(`[mcp-client] ${t("be_mcpClient.requestTimeout", { timeout: String(timeout), method })}`));
       }, timeout);
 
       this.pendingRequests.set(id, {
@@ -462,7 +463,7 @@ export class McpClient {
 
     if (response.error) {
       pending.reject(
-        new Error(`JSON-RPC 오류 [${response.error.code}]: ${response.error.message}`),
+        new Error(`${t("be_mcpClient.jsonRpcError", { code: String(response.error.code), message: response.error.message })}`),
       );
     } else {
       pending.resolve(response.result);
@@ -535,7 +536,7 @@ export class McpClient {
       if (remaining <= 0) {
         this.pendingRequests.delete(id);
         pending.reject(
-          new Error(`[mcp-client] 요청 절대 타임아웃 (${timeoutMs}ms): ${method}`),
+          new Error(`[mcp-client] ${t("be_mcpClient.requestAbsoluteTimeout", { timeout: String(timeoutMs), method })}`),
         );
         continue;
       }
@@ -543,7 +544,7 @@ export class McpClient {
       const newTimer = setTimeout(() => {
         this.pendingRequests.delete(id);
         pending.reject(
-          new Error(`[mcp-client] 요청 타임아웃 (${timeoutMs}ms): ${method}`),
+          new Error(`[mcp-client] ${t("be_mcpClient.requestTimeout", { timeout: String(timeoutMs), method })}`),
         );
       }, effectiveWindowMs);
       pending.timer = newTimer;
@@ -607,7 +608,7 @@ export class McpClient {
     const transport = this.transport;
     if (!transport || !transport.isAlive()) {
       log.warn(`${this.config.id} health check 실패: transport 비활성`);
-      this.handleTransportClose("health check: transport 비활성");
+      this.handleTransportClose(t("be_mcpClient.healthCheckTransportInactive"));
       return;
     }
 
@@ -649,7 +650,7 @@ class StdioTransport implements McpTransport {
 
   async open(): Promise<void> {
     if (!this.config.command) {
-      throw new Error(`[mcp-client] stdio transport에 command가 필요합니다.`);
+      throw new Error(`[mcp-client] ${t("be_mcpClient.stdioCommandRequired")}`);
     }
     const spawnCommand = resolveStdioSpawnCommand(this.config.command, this.config.args ?? []);
 
@@ -696,7 +697,7 @@ class StdioTransport implements McpTransport {
 
   async send(message: JsonRpcMessage): Promise<void> {
     if (!this.process?.stdin?.writable) {
-      throw new Error(`[mcp-client] stdin이 쓰기 불가 상태입니다.`);
+      throw new Error(`[mcp-client] ${t("be_mcpClient.stdinNotWritable")}`);
     }
     const json = JSON.stringify(message);
     const header = `Content-Length: ${Buffer.byteLength(json)}\r\n\r\n`;
@@ -759,13 +760,13 @@ class StdioTransport implements McpTransport {
     this.process.on("exit", (code, signal) => {
       log.warn(`${this.config.id} 프로세스 종료: code=${code}, signal=${signal}`);
       if (!this.closedExternally) {
-        this.closeHandler?.("프로세스가 예기치 않게 종료되었습니다.");
+        this.closeHandler?.(t("be_mcpClient.processExitedUnexpectedly"));
       }
     });
 
     this.process.on("error", (err) => {
       log.error(`${this.config.id} 프로세스 오류: %s`, err.message);
-      this.closeHandler?.(`프로세스 오류: ${err.message}`);
+      this.closeHandler?.(t("be_mcpClient.processError", { message: err.message }));
     });
   }
 
@@ -969,7 +970,7 @@ class HttpTransport implements McpTransport {
         throw new NetworkGuardError(`network guard: ${err.message}`);
       }
       const reason = err instanceof Error ? err.message : String(err);
-      throw new Error(`http transport fetch 실패: ${reason}`);
+      throw new Error(`${t("be_mcpClient.httpFetchFailed", { reason })}`);
     }
 
     // Response headers received — cancel the initial-response timeout.
@@ -1023,7 +1024,7 @@ class HttpTransport implements McpTransport {
       const parsed = JSON.parse(text) as JsonRpcResponse;
       this.messageHandler?.(parsed);
     } catch (err) {
-      throw new Error(`http transport JSON 파싱 실패: ${(err as Error).message}`);
+      throw new Error(`${t("be_mcpClient.httpJsonParseFailed", { message: (err as Error).message })}`);
     }
   }
 

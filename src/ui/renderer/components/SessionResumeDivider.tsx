@@ -1,3 +1,5 @@
+import { useTranslation } from "../../../i18n/react.js";
+
 /**
  * SessionResumeDivider — emerald-toned horizontal-line divider placed at the
  * head of a resumed child session's entry list when the parent session left
@@ -10,6 +12,7 @@
  * actual summary.
  */
 export function SessionResumeDivider({ preambleChars }: { preambleChars: number }) {
+  const { t } = useTranslation();
   return (
     <div
       data-testid="session-resume-divider"
@@ -17,7 +20,7 @@ export function SessionResumeDivider({ preambleChars }: { preambleChars: number 
     >
       <span className="h-px flex-1 bg-success/30" />
       <span className="text-[10px] text-success/75 font-medium">
-        ↩ 이전 대화 이어서 시작 (요약 {preambleChars}자 적용)
+        {t("sessionResumeDivider.resumeLabel", { preambleChars })}
       </span>
       <span className="h-px flex-1 bg-success/30" />
     </div>

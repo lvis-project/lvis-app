@@ -29,6 +29,7 @@
  *     { execution:"notification-only", schedule:{ repeat:{kind:"cron",
  *       expression:"0 9 * * 1"} }, notificationTitle:"월요일 알림" }
  */
+import { t } from "../i18n/index.js";
 import { createDynamicTool, type Tool } from "./base.js";
 import type { RoutinesStore } from "../main/routines-store.js";
 import type { RoutineExecution, RoutineRepeat, RoutineSchedule } from "../main/routines-store.js";
@@ -134,17 +135,7 @@ export function routineScheduleApprovalCacheKey(rawInput: unknown): string {
 export function createRoutineScheduleTool(store: RoutinesStore): Tool {
   return createDynamicTool({
     name: "routine_schedule",
-    description:
-      "지정한 예약 시각에 발화되는 루틴(자동 self-trigger)을 등록합니다. " +
-      "캘린더 일정/이벤트 조회 도구가 아니므로, '캘린더 점검', '오늘 일정', '회의 확인' 같은 " +
-      "캘린더/일정 조회 요청에는 사용하지 마십시오 (캘린더 조회는 ms-graph 플러그인). " +
-      "execution='llm-session'이면 지정 시각에 LLM 대화를 시작하고, " +
-      "'notification-only'이면 OS 알림만 발송합니다. " +
-      "반복 방식: none/daily/weekly/monthly/interval/cron. " +
-      "schedule.at 에 날짜만 제공(YYYY-MM-DD)하면 기본 시각 09:00 KST 로 처리됩니다. " +
-      "예: 매일 오전 9시 데일리 리포트 → execution:'llm-session', " +
-      "schedule:{at:'2026-05-09T09:00:00+09:00', repeat:{kind:'daily'}}, " +
-      "prePrompt:'오늘의 데일리 리포트 작성'",
+    description: t("be_routineSchedule.toolDescription"),
     source: "builtin",
     category: "write",
     approvalCacheKey: routineScheduleApprovalCacheKey,
@@ -155,25 +146,22 @@ export function createRoutineScheduleTool(store: RoutinesStore): Tool {
         execution: {
           type: "string",
           enum: ["llm-session", "notification-only"],
-          description: "실행 모드. llm-session=LLM 대화 시작, notification-only=알림만",
+          description: t("be_routineSchedule.executionDescription"),
         },
         schedule: {
           type: "object",
-          description:
-            "스케줄 설정. at: ISO 8601 or YYYY-MM-DD. " +
-            "repeat.kind: none|daily|weekly|monthly|interval|cron. " +
-            "cron 타입은 repeat.expression(5필드)만 필요.",
+          description: t("be_routineSchedule.scheduleDescription"),
           properties: {
             at: {
               type: "string",
-              description: "ISO 8601 datetime (예: '2026-05-09T09:00:00+09:00') 또는 YYYY-MM-DD",
+              description: t("be_routineSchedule.atDescription"),
             },
             repeat: {
               type: "object",
               properties: {
                 kind: { type: "string", enum: ["none", "daily", "weekly", "monthly", "interval", "cron"] },
-                intervalMs: { type: "number", description: "interval 타입 전용: ms 단위 간격" },
-                expression: { type: "string", description: "cron 타입 전용: 5필드 cron 표현식" },
+                intervalMs: { type: "number", description: t("be_routineSchedule.intervalMsDescription") },
+                expression: { type: "string", description: t("be_routineSchedule.expressionDescription") },
               },
               required: ["kind"],
             },
@@ -181,21 +169,20 @@ export function createRoutineScheduleTool(store: RoutinesStore): Tool {
         },
         prePrompt: {
           type: "string",
-          description: "execution=llm-session 시 LLM에 전달할 초기 프롬프트",
+          description: t("be_routineSchedule.prePromptDescription"),
         },
-        title: { type: "string", description: "루틴 제목 (선택)" },
+        title: { type: "string", description: t("be_routineSchedule.titleDescription") },
         notificationTitle: {
           type: "string",
-          description: "execution=notification-only 시 알림 제목",
+          description: t("be_routineSchedule.notificationTitleDescription"),
         },
         notificationBody: {
           type: "string",
-          description: "execution=notification-only 시 알림 본문",
+          description: t("be_routineSchedule.notificationBodyDescription"),
         },
         allowedPlugins: {
           type: "array",
-          description:
-            "execution=llm-session 루틴에서 노출할 플러그인 id 목록. 미지정 또는 []이면 플러그인 도구를 사용하지 않습니다.",
+          description: t("be_routineSchedule.allowedPluginsDescription"),
           items: { type: "string" },
         },
       },

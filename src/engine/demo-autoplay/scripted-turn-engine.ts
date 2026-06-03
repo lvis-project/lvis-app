@@ -14,6 +14,7 @@
  * tool. The only external surface is `FakeSandbox.resolve()` which
  * itself is a pure lookup. See proposal §3 + §5.
  */
+import { t } from "../../i18n/index.js";
 import { FakeSandbox } from "./fake-sandbox.js";
 import type {
   ScriptedAbortReason,
@@ -98,7 +99,7 @@ export class ScriptedTurnEngine {
         } else {
           // Script drift — surface a placeholder so the demo doesn't
           // hang on a missing fake result. Audit prefix still applies.
-          sink.emitToolResult(call, `(데모 script 누락: ${resolved.error})`);
+          sink.emitToolResult(call, t("be_scriptedTurnEngine.demoScriptMissing", { error: resolved.error }));
         }
       }
 

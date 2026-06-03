@@ -28,6 +28,8 @@
  *   full SandboxCapability snapshot.
  */
 
+import { t } from "../i18n/index.js";
+
 export type SandboxKind =
   | "none"
   | "bubblewrap"
@@ -130,8 +132,8 @@ export function formatSandboxCapabilityForPrompt(capability: SandboxCapability):
       case "bubblewrap":   return "bubblewrap";
       case "sandbox-exec": return "sandbox-exec";
       case "appcontainer": return "appcontainer";
-      case "partial":      return "partial [⚠ OS 격리 부분적 (sandbox-exec)]";
-      case "fs-only":      return "fs-only [ℹ 파일시스템만 격리 (landlock)]";
+      case "partial":      return t("be_sandboxCapability.partialLabel");
+      case "fs-only":      return t("be_sandboxCapability.fsOnlyLabel");
       default: {
         // Exhaustive check — if a new SandboxKind is added without updating
         // this switch, the TypeScript compiler will report an error here.

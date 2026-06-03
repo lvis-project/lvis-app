@@ -18,6 +18,7 @@
  */
 import { useCallback, useEffect, useRef, useState } from "react";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "./components/ui/card.js";
+import { t } from "./i18n/index.js";
 import { pluginPartitionName } from "./shared/plugin-partition.js";
 
 export type PluginUiExtensionView = {
@@ -135,7 +136,7 @@ export function PluginUiHostView({
   const onFinishRef = useRef(() => setLoading(false));
   const onFailRef = useRef(() => {
     setLoading(false);
-    setErrorText("Plugin webview 로딩 실패.");
+    setErrorText(t("be_pluginUiHost.webviewLoadFailed"));
   });
 
   const onDidAttachRef = useRef<((e: Event) => void) | null>(null);
@@ -181,13 +182,13 @@ export function PluginUiHostView({
         });
         if (result && (result as { ok: boolean }).ok === false) {
           if (registerAttemptRef.current?.key === registerKey) registerAttemptRef.current = null;
-          setErrorText(`Plugin webview 등록 실패: ${(result as { error?: string }).error ?? "unknown"}`);
+          setErrorText(t("be_pluginUiHost.webviewRegisterFailed", { error: (result as { error?: string }).error ?? "unknown" }));
           setLoading(false);
           return;
         }
       } catch (err) {
         if (registerAttemptRef.current?.key === registerKey) registerAttemptRef.current = null;
-        setErrorText(`Plugin webview 등록 실패: ${(err as Error).message ?? "unknown"}`);
+        setErrorText(t("be_pluginUiHost.webviewRegisterFailed", { error: (err as Error).message ?? "unknown" }));
         setLoading(false);
         return;
       }
@@ -236,12 +237,12 @@ export function PluginUiHostView({
     setShellSrcBinding(null);
     registerAttemptRef.current = null;
     if (!view) {
-      setErrorText("플러그인 뷰를 찾을 수 없습니다.");
+      setErrorText(t("be_pluginUiHost.pluginViewNotFound"));
       setLoading(false);
       return;
     }
     if (view.extension.kind === "embedded-page") {
-      setErrorText("구형 iframe UI 형식은 지원되지 않습니다. entry 기반 모듈 UI를 사용하세요.");
+      setErrorText(t("be_pluginUiHost.legacyIframeNotSupported"));
       setLoading(false);
       return;
     }
@@ -251,7 +252,7 @@ export function PluginUiHostView({
     // (keyboard shortcut, command palette 등) 가 action view 를 잘못 전달했을
     // 때 panel chrome (Card 헤더 + border) 이 회귀로 뜨지 않도록 fail-safe.
     if (view.extension.kind === "action") {
-      setErrorText("action kind 는 패널 없이 호스트가 직접 tool 을 디스패치합니다.");
+      setErrorText(t("be_pluginUiHost.actionKindNoPanel"));
       setLoading(false);
       return;
     }
@@ -271,13 +272,13 @@ export function PluginUiHostView({
   if (errorText) {
     content = <div className="px-3 py-2 text-xs text-destructive">{errorText}</div>;
   } else if (!view || !view.entryUrl) {
-    content = <div className="px-3 py-2 text-xs text-muted-foreground">UI 모듈 엔트리를 찾을 수 없습니다.</div>;
+    content = <div className="px-3 py-2 text-xs text-muted-foreground">{t("be_pluginUiHost.uiModuleEntryNotFound")}</div>;
   } else {
     const { shellUrl, preloadUrl } = readPluginAssetUrls();
     if (!shellUrl || !preloadUrl) {
       content = (
         <div className="px-3 py-2 text-xs text-muted-foreground">
-          Plugin webview 자산 URL을 lvisApi에서 찾을 수 없습니다 (preload 미주입 또는 dist 누락).
+          {t("be_pluginUiHost.webviewAssetUrlNotFound")}
         </div>
       );
     } else {
@@ -336,7 +337,7 @@ export function PluginUiHostView({
         </div>
         {loading ? (
           <div className="absolute inset-0 z-10 flex items-center justify-center bg-input-bar text-xs text-muted-foreground">
-            로딩 중...
+            {t("be_pluginUiHost.loading")}
           </div>
         ) : null}
       </div>
@@ -347,8 +348,8 @@ export function PluginUiHostView({
   return (
     <Card className="mx-auto flex min-h-0 min-w-0 flex-1 w-full max-w-6xl flex-col overflow-hidden">
       <CardHeader>
-        <CardTitle>{view ? getPluginViewLabel(view) : "플러그인 UI"}</CardTitle>
-        <CardDescription>{view?.extension.description ?? "플러그인 화면을 로딩합니다."}</CardDescription>
+        <CardTitle>{view ? getPluginViewLabel(view) : t("be_pluginUiHost.pluginUiTitle")}</CardTitle>
+        <CardDescription>{view?.extension.description ?? t("be_pluginUiHost.pluginUiLoadingDesc")}</CardDescription>
       </CardHeader>
       <CardContent className="flex min-h-0 flex-1 flex-col">
         <div className="relative h-full w-full overflow-hidden rounded-md border bg-input-bar">
@@ -357,7 +358,7 @@ export function PluginUiHostView({
           </div>
           {loading ? (
             <div className="absolute inset-0 z-10 flex items-center justify-center bg-input-bar text-xs text-muted-foreground">
-              로딩 중...
+              {t("be_pluginUiHost.loading")}
             </div>
           ) : null}
         </div>

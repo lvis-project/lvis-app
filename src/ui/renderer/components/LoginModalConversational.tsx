@@ -43,6 +43,7 @@ import {
 } from "../../../components/ui/dialog.js";
 import { Button } from "../../../components/ui/button.js";
 import type { LoginModalProps } from "./LoginModal.js";
+import { t } from "../../../i18n/runtime.js";
 
 /**
  * Hard-coded demo credentials. Match `DEFAULT_DEMO_USER` / `DEFAULT_DEMO_PASS`
@@ -55,36 +56,36 @@ const DEMO_PASSWORD = "demo123";
 function errorMessage(code: string): string {
   switch (code) {
     case "invalid-credentials":
-      return "데모 자격증명이 올바르지 않습니다.";
+      return t("loginModalConversational.errInvalidCredentials");
     case "no-demo-key":
       // This should no longer fire for a valid activation: Azure Foundry
       // payloads require both API key and endpoint before persistence.
       // If it does fire, the captured demo payload is incomplete.
-      return "데모 모드 설정 확인이 필요해요. 환경 변수 `LVIS_DEMO_VENDOR=azure-foundry` 를 설정한 뒤 다시 시도하세요. (docs/onboarding/local-demo-setup.md 참조)";
+      return t("loginModalConversational.errNoDemoKey");
     // v0.2.1 hotfix — Step 2 (llm-key-issuing) try/catch surfaces this
     // when setSecret / patch fails (disk full, Keychain locked, etc.).
     // Without this branch the renderer fell through to the generic
     // "로그인에 실패했습니다" toast — the user-reported "sandbox 준비 중"
     // fail had no actionable hint.
     case "llm-key-issuing-failed":
-      return "LLM 키 저장 중 오류가 발생했어요. 디스크 권한 또는 Keychain 상태를 확인해주세요.";
+      return t("loginModalConversational.errLlmKeyIssuingFailed");
     case "reviewer-rewire-failed":
-      return "에이전트 sandbox 초기화에 실패했습니다. 다시 시도해 주세요.";
+      return t("loginModalConversational.errReviewerRewireFailed");
     // v0.2.1 hotfix — Azure Foundry endpoint unreachable. Surfaces when
     // the host-resolver-rules first-activation race could not be healed
     // by relaunch (e.g. VPN/intranet not connected post-relaunch).
     case "endpoint-unreachable":
-      return "내부망 endpoint 에 연결할 수 없어요. VPN 또는 내부망 연결을 확인해주세요.";
+      return t("loginModalConversational.errEndpointUnreachable");
     case "invalid-foundry-endpoint":
-      return "데모 endpoint 형식이 올바르지 않아요. 발급자에게 새 활성 코드를 요청해 주세요.";
+      return t("loginModalConversational.errInvalidFoundryEndpoint");
     case "missing-foundry-host-map":
-      return "데모 private endpoint host-map 이 빠져 있어요. 발급자에게 새 활성 코드를 요청해 주세요.";
+      return t("loginModalConversational.errMissingFoundryHostMap");
     case "foundry-host-map-mismatch":
-      return "데모 endpoint 와 host-map 이 일치하지 않아요. 발급자에게 새 활성 코드를 요청해 주세요.";
+      return t("loginModalConversational.errFoundryHostMapMismatch");
     case "invalid-foundry-host-map-target":
-      return "데모 host-map 대상이 허용된 private endpoint 대역이 아니에요. 발급자에게 새 활성 코드를 요청해 주세요.";
+      return t("loginModalConversational.errInvalidFoundryHostMapTarget");
     default:
-      return "로그인에 실패했습니다.";
+      return t("loginModalConversational.errLoginFailed");
   }
 }
 
@@ -98,29 +99,29 @@ function errorMessage(code: string): string {
 function activationErrorMessage(code: string): string {
   switch (code) {
     case "invalid-code":
-      return "활성 코드가 올바르지 않아요. `LVIS-DEMO:v1:` 로 시작하는 한 줄 코드를 다시 확인해 주세요.";
+      return t("loginModalConversational.activErrInvalidCode");
     case "no-vendor":
-      return "활성 코드에 vendor 정보가 빠져 있어요. 발급자에게 다시 요청해 주세요.";
+      return t("loginModalConversational.activErrNoVendor");
     case "invalid-vendor":
-      return "활성 코드의 vendor 정보가 올바르지 않아요. 발급자에게 다시 요청해 주세요.";
+      return t("loginModalConversational.activErrInvalidVendor");
     case "no-demo-key":
-      return "활성 코드에 데모 API 키가 빠져 있어요. 발급자에게 새 활성 코드를 요청해 주세요.";
+      return t("loginModalConversational.activErrNoDemoKey");
     case "missing-foundry-endpoint":
-      return "활성 코드에 Azure Foundry endpoint 정보가 빠져 있어요. 발급자에게 새 활성 코드를 요청해 주세요.";
+      return t("loginModalConversational.activErrMissingFoundryEndpoint");
     case "invalid-foundry-endpoint":
-      return "데모 endpoint 형식이 올바르지 않아요. 발급자에게 새 활성 코드를 요청해 주세요.";
+      return t("loginModalConversational.activErrInvalidFoundryEndpoint");
     case "missing-foundry-host-map":
-      return "활성 코드에 private endpoint host-map 정보가 빠져 있어요. 발급자에게 새 활성 코드를 요청해 주세요.";
+      return t("loginModalConversational.activErrMissingFoundryHostMap");
     case "foundry-host-map-mismatch":
-      return "활성 코드의 endpoint 와 host-map 이 일치하지 않아요. 발급자에게 새 활성 코드를 요청해 주세요.";
+      return t("loginModalConversational.activErrFoundryHostMapMismatch");
     case "invalid-foundry-host-map-target":
-      return "활성 코드의 host-map 대상이 허용된 private endpoint 대역이 아니에요. 발급자에게 새 활성 코드를 요청해 주세요.";
+      return t("loginModalConversational.activErrInvalidFoundryHostMapTarget");
     case "persist-failed":
-      return "활성 코드를 저장하지 못했어요. 디스크 공간 또는 권한을 확인한 뒤 다시 시도해 주세요.";
+      return t("loginModalConversational.activErrPersistFailed");
     case "unauthorized-frame":
-      return "잘못된 요청 경로입니다. 앱을 재시작한 뒤 다시 시도해 주세요.";
+      return t("loginModalConversational.activErrUnauthorizedFrame");
     default:
-      return "활성에 실패했습니다.";
+      return t("loginModalConversational.activErrActivationFailed");
   }
 }
 
@@ -131,10 +132,10 @@ function activationErrorMessage(code: string): string {
  * user reads them sequentially. The final `⟳` line shows a blinking
  * `▍` cursor while the form is still awaiting submission.
  */
-const CHECKLIST_LINES: readonly { mark: string; label: string }[] = Object.freeze([
-  { mark: "✓", label: "자격증명 검증" },
-  { mark: "✓", label: "LLM 키 발급 (azure-foundry)" },
-  { mark: "⟳", label: "sandbox 준비 중…" },
+const CHECKLIST_LINES: readonly { mark: string; labelKey: string }[] = Object.freeze([
+  { mark: "✓", labelKey: "loginModalConversational.checklistCredentials" },
+  { mark: "✓", labelKey: "loginModalConversational.checklistLlmKey" },
+  { mark: "⟳", labelKey: "loginModalConversational.checklistSandbox" },
 ]);
 
 /**
@@ -229,12 +230,12 @@ export function LoginModalConversational({
           if (result.ok) return;
           setActivationRelaunching(false);
           setActivationNotice(null);
-          setActivationError("재시작 요청에 실패했습니다. LVIS 를 수동으로 재시작한 뒤 다시 시도해 주세요.");
+          setActivationError(t("loginModalConversational.relaunchRequestFailed"));
         })
         .catch((err) => {
           setActivationRelaunching(false);
           setActivationNotice(null);
-          setActivationError("재시작 요청 중 오류가 발생했습니다. LVIS 를 수동으로 재시작한 뒤 다시 시도해 주세요.");
+          setActivationError(t("loginModalConversational.relaunchRequestError"));
           // eslint-disable-next-line no-console
           console.error("demo.relaunchAfterActivation IPC failed", err);
         });
@@ -291,7 +292,7 @@ export function LoginModalConversational({
       }
       setError(errorMessage(result.error));
     } catch (err) {
-      setError("로그인 처리 중 오류가 발생했습니다.");
+      setError(t("loginModalConversational.errLoginProcessError"));
       // eslint-disable-next-line no-console
       console.error("loginMockup IPC failed", err);
     } finally {
@@ -338,7 +339,7 @@ export function LoginModalConversational({
         }
         setActivationOpen(true);
       } catch (err) {
-        setError("데모 활성 상태 확인 중 오류가 발생했습니다.");
+        setError(t("loginModalConversational.errDemoStatusCheckError"));
         // eslint-disable-next-line no-console
         console.error("demo.status IPC failed", err);
       } finally {
@@ -377,9 +378,7 @@ export function LoginModalConversational({
       const result = await api.demo.activate(trimmed);
       if (result.ok) {
         if (result.requiresRelaunch) {
-          setActivationNotice(
-            "활성화 적용을 위해 5초 후 자동으로 다시 시작합니다. 다시 시작 후 AI 연결 상태를 확인합니다.",
-          );
+          setActivationNotice(t("loginModalConversational.activationRelaunchNotice"));
           setActivationRelaunching(true);
           return;
         }
@@ -392,7 +391,7 @@ export function LoginModalConversational({
       }
       setActivationError(activationErrorMessage(result.error));
     } catch (err) {
-      setActivationError("활성 처리 중 오류가 발생했습니다.");
+      setActivationError(t("loginModalConversational.activErrProcessError"));
       // eslint-disable-next-line no-console
       console.error("demo.activate IPC failed", err);
     } finally {
@@ -483,7 +482,7 @@ export function LoginModalConversational({
             success token so it adapts to every bundle. */}
         <div className="flex items-center gap-2 border-b border-border/60 pb-2 text-[11px] text-muted-foreground">
           <span className="inline-block size-1.5 rounded-full bg-success" aria-hidden="true" />
-          <span>LVIS · 인증 세션 시작</span>
+          <span>{t("loginModalConversational.sessionStart")}</span>
         </div>
 
         {/* Assistant message — greeting + intent disambiguation. */}
@@ -496,8 +495,8 @@ export function LoginModalConversational({
           </div>
           <div className="space-y-1.5">
             <p className="rounded-lg rounded-tl-sm bg-muted px-3 py-2 text-[12.5px] leading-relaxed text-foreground">
-              안녕하세요. <br />
-              LVIS 는 처음이시군요. 어떤 방식으로 시작할까요?
+              {t("loginModalConversational.greeting")} <br />
+              {t("loginModalConversational.greetingPrompt")}
             </p>
           </div>
         </div>
@@ -524,9 +523,9 @@ export function LoginModalConversational({
             <span className="mr-1 inline-flex h-4 min-w-4 items-center justify-center rounded bg-primary/15 px-1 text-[10px] font-semibold text-primary">
               1
             </span>
-            데모 자격증명으로 30초 안에 체험
+            {t("loginModalConversational.chip1Label")}
             <span className="ml-2 text-[10px] text-muted-foreground">
-              자동 인증 · LLM 키 자동 발급
+              {t("loginModalConversational.chip1Sub")}
             </span>
           </button>
           <button
@@ -547,9 +546,9 @@ export function LoginModalConversational({
             <span className="mr-1 inline-flex h-4 min-w-4 items-center justify-center rounded bg-muted px-1 text-[10px] font-semibold text-muted-foreground">
               2
             </span>
-            제가 발급받은 API 키가 있어요
+            {t("loginModalConversational.chip2Label")}
             <span className="ml-2 text-[10px] text-muted-foreground">
-              설정 → LLM 탭에서 입력
+              {t("loginModalConversational.chip2Sub")}
             </span>
           </button>
           <button
@@ -557,15 +556,15 @@ export function LoginModalConversational({
             disabled
             data-testid="login-modal:chip-sso"
             className="w-full cursor-not-allowed rounded-lg border border-border bg-muted/40 px-3 py-2 text-left text-[12px] text-muted-foreground"
-            title="조직 SSO 연결은 곧 지원 예정입니다"
+            title={t("loginModalConversational.chip3Title")}
           >
             <span className="mr-1">🏢</span>
             <span className="mr-1 inline-flex h-4 min-w-4 items-center justify-center rounded bg-muted px-1 text-[10px] font-semibold text-muted-foreground">
               3
             </span>
-            조직 SSO 로 연결
+            {t("loginModalConversational.chip3Label")}
             <span className="ml-2 text-[10px] text-muted-foreground">
-              곧 지원 예정
+              {t("loginModalConversational.chip3Sub")}
             </span>
           </button>
         </div>
@@ -582,7 +581,7 @@ export function LoginModalConversational({
             data-testid="login-modal:user-turn"
           >
             <p className="rounded-lg rounded-tr-sm bg-primary/15 px-3 py-2 text-[12.5px] leading-relaxed text-foreground">
-              데모 자격증명으로 시작할게요.
+              {t("loginModalConversational.userTurnText")}
             </p>
           </div>
         )}
@@ -603,12 +602,12 @@ export function LoginModalConversational({
                 data-testid="login-modal:assistant-prompt"
               >
                 {submitting
-                  ? "활성 완료 · 데모 자격증명으로 인증을 시작합니다…"
+                  ? t("loginModalConversational.assistantSubmitting")
                   : activationRelaunching
-                    ? "활성 완료 · 호스트 적용을 위해 5초 후 자동으로 재시작합니다…"
+                    ? t("loginModalConversational.assistantRelaunching")
                     : checkingDemoStatus
-                      ? "데모 활성 상태를 확인합니다…"
-                      : "데모 활성 코드를 받으셨나요? 한 줄로 붙여넣어 주세요. 형식은 `LVIS-DEMO:v1:...` 입니다."}
+                      ? t("loginModalConversational.assistantCheckingStatus")
+                      : t("loginModalConversational.assistantPromptActivation")}
               </p>
 
               {activationOpen && !submitting && (
@@ -633,7 +632,7 @@ export function LoginModalConversational({
                     disabled={activating || activationRelaunching}
                     rows={2}
                     placeholder="LVIS-DEMO:v1:..."
-                    aria-label="데모 활성 코드"
+                    aria-label={t("loginModalConversational.activationInputAriaLabel")}
                     data-testid="login-modal:activation-code-input"
                     className="w-full rounded-md border border-border bg-background px-3 py-2 font-mono text-[11.5px] leading-snug text-foreground placeholder:text-muted-foreground/60 focus:outline-none focus:ring-2 focus:ring-primary/40 disabled:opacity-60"
                   />
@@ -650,10 +649,10 @@ export function LoginModalConversational({
                       }
                     >
                       {activationRelaunching
-                        ? "재시작 대기…"
+                        ? t("loginModalConversational.btnWaitingRelaunch")
                         : activating
-                          ? "활성 중…"
-                          : "활성 →"}
+                          ? t("loginModalConversational.btnActivating")
+                          : t("loginModalConversational.btnActivate")}
                     </Button>
                     <Button
                       type="button"
@@ -670,7 +669,7 @@ export function LoginModalConversational({
                       }}
                       disabled={activating || activationRelaunching}
                     >
-                      취소
+                      {t("loginModalConversational.btnCancel")}
                     </Button>
                   </div>
                   {activationError && (
@@ -711,13 +710,13 @@ export function LoginModalConversational({
                       isFinalSpinner && successConfirmed ? "✓" : line.mark;
                     const label =
                       isFinalSpinner && successConfirmed
-                        ? "sandbox 준비 완료"
-                        : line.label;
+                        ? t("loginModalConversational.checklistSandboxDone")
+                        : t(line.labelKey);
                     const isCheckmark =
                       mark === "✓" || (isFinalSpinner && successConfirmed);
                     return (
                       <div
-                        key={line.label}
+                        key={line.labelKey}
                         // Y3 — fade-in each newly-revealed checklist line
                         // so the cursor visually "carries" from row to
                         // row instead of resetting with each reveal. Uses
@@ -798,10 +797,10 @@ export function LoginModalConversational({
           data-testid="login-modal:footer-hint"
           className="border-t border-border/60 pt-2 text-center text-[10.5px] text-muted-foreground"
         >
-          위 선택지를 클릭하거나 <kbd className="rounded border border-border bg-muted px-1 font-mono">1</kbd>
+          {t("loginModalConversational.footerHintPre")}<kbd className="rounded border border-border bg-muted px-1 font-mono">1</kbd>
           ~
           <kbd className="rounded border border-border bg-muted px-1 font-mono">3</kbd>
-          {" "}키로 빠른 선택
+          {t("loginModalConversational.footerHintPost")}
         </p>
       </DialogContent>
     </Dialog>

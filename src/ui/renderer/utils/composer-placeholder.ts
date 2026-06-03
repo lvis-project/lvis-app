@@ -1,3 +1,4 @@
+import { t } from "../../../i18n/runtime.js";
 import type { SuggestedRepliesSnapshot } from "../hooks/use-suggested-replies.js";
 
 /**
@@ -25,10 +26,10 @@ export function computeComposerPlaceholder(opts: {
   streaming: boolean;
   suggestedReplies: SuggestedRepliesSnapshot;
 }): string {
-  if (opts.hasApiKey === false) return "API 키를 먼저 설정해 주세요...";
+  if (opts.hasApiKey === false) return t("composerPlaceholder.apiKeyMissing");
   if (hasActiveSuggestedReplies(opts.suggestedReplies)) {
     return "";
   }
-  if (opts.streaming) return "메시지 큐에 추가됩니다 (즉시 인터럽트는 ⌘⏎)";
-  return "질문 입력 (Enter 전송 · Cmd/Ctrl+V 첨부) · /command 사용 가능";
+  if (opts.streaming) return t("composerPlaceholder.streamingHint");
+  return t("composerPlaceholder.defaultHint");
 }

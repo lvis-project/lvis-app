@@ -1,4 +1,6 @@
 import { useCallback, useEffect, useRef, useState } from "react";
+import { useTranslation } from "../../../i18n/react.js";
+import { t } from "../../../i18n/runtime.js";
 import { Badge } from "../../../components/ui/badge.js";
 import { Button } from "../../../components/ui/button.js";
 import { Checkbox } from "../../../components/ui/checkbox.js";
@@ -12,7 +14,6 @@ import {
   SelectTrigger,
   SelectValue,
 } from "../../../components/ui/select.js";
-import { Separator } from "../../../components/ui/separator.js";
 import { PERMISSION_REVIEWER_FRAMEWORK } from "../../../shared/permission-reviewer-framework.js";
 import type { UserApprovalScope, UserApprovalVerdict } from "../../../shared/permissions-events.js";
 import { EXEC_MODE_OPTIONS, LONG_TOAST_TTL_MS } from "../constants.js";
@@ -37,48 +38,52 @@ const DEFAULT_REVIEWER_SETTINGS: PermissionReviewerSettings = {
   interactive: { autoApprove: "off" },
 };
 
-const REVIEWER_INTERACTIVE_OPTIONS: Array<{
+function getReviewerInteractiveOptions(): Array<{
   value: "off" | "low";
   label: string;
   description: string;
-}> = [
-  {
-    value: "off",
-    label: "끔",
-    description: "도구가 실행되기 전 항상 확인 창을 표시합니다. (기본값, 가장 안전)",
-  },
-  {
-    value: "low",
-    label: "저위험 자동 허용",
-    description:
-      "저위험으로 판단된 작업은 확인 없이 자동으로 허용합니다. " +
-      "중·고위험은 여전히 확인 창이 표시됩니다.",
-  },
-];
+}> {
+  return [
+    {
+      value: "off",
+      label: t("permissionsTab.interactiveOffLabel"),
+      description: t("permissionsTab.interactiveOffDescription"),
+    },
+    {
+      value: "low",
+      label: t("permissionsTab.interactiveLowLabel"),
+      description: t("permissionsTab.interactiveLowDescription"),
+    },
+  ];
+}
 
-const REVIEWER_MODE_OPTIONS: Array<{
+function getReviewerModeOptions(): Array<{
   value: PermissionReviewerMode;
   label: string;
   description: string;
-}> = [
-  { value: "disabled", label: "검증 끔 (자동 통과)", description: "권한 리뷰어를 끄고 카테고리 기본 정책만 적용합니다. 도구별 차단/허용 규칙은 그대로 유지됩니다." },
-  { value: "rule", label: "규칙 기반 검증", description: "로컬 규칙으로 저위험 작업만 통과시키고 중·고위험은 대기시킵니다." },
-  { value: "llm", label: "LLM 검증", description: "규칙 검증 뒤 LLM이 위험도를 올릴 수 있습니다. 낮출 수는 없습니다." },
-  { value: "strict", label: "엄격 (모두 보류)", description: "자동(헤드리스) 실행과 대화형 채팅의 변경 작업을 모두 보류 대기열로 보냅니다. 사용자가 직접 승인해야 실행됩니다." },
-];
+}> {
+  return [
+    { value: "disabled", label: t("permissionsTab.reviewerModeDisabledLabel"), description: t("permissionsTab.reviewerModeDisabledDescription") },
+    { value: "rule", label: t("permissionsTab.reviewerModeRuleLabel"), description: t("permissionsTab.reviewerModeRuleDescription") },
+    { value: "llm", label: t("permissionsTab.reviewerModeLlmLabel"), description: t("permissionsTab.reviewerModeLlmDescription") },
+    { value: "strict", label: t("permissionsTab.reviewerModeStrictLabel"), description: t("permissionsTab.reviewerModeStrictDescription") },
+  ];
+}
 
-const REVIEWER_FALLBACK_OPTIONS: Array<{
+function getReviewerFallbackOptions(): Array<{
   value: PermissionReviewerFallbackOnError;
   label: string;
   description: string;
-}> = [
-  { value: "deny", label: "차단", description: "LLM 오류나 응답 파싱 실패 시 보류 대기열로 보냅니다." },
-  { value: "rule", label: "규칙 결과 사용", description: "LLM 실패 시 로컬 규칙 결과를 그대로 적용합니다." },
-];
+}> {
+  return [
+    { value: "deny", label: t("permissionsTab.fallbackDenyLabel"), description: t("permissionsTab.fallbackDenyDescription") },
+    { value: "rule", label: t("permissionsTab.fallbackRuleLabel"), description: t("permissionsTab.fallbackRuleDescription") },
+  ];
+}
 
 function formatRevokeError(error: string | undefined, message: string | undefined): string {
   return formatIpcError(error, message, {
-    codeMap: { "invalid-key": "유효하지 않은 승인 키입니다." },
+    codeMap: { "invalid-key": t("permissionsTab.errorInvalidKey") },
   });
 }
 
@@ -86,21 +91,18 @@ function formatReviewerDispatchError(error: string): string {
   if (error.startsWith("reviewer-rewire-failed:")) {
     const detail = error.slice("reviewer-rewire-failed:".length).trim();
     return [
-      "권한 리뷰어 런타임 재연결에 실패해 이전 설정으로 복원했습니다.",
-      "공급자 API 키, 모델 이름, 오류 처리 정책을 확인한 뒤 다시 적용하세요.",
-      detail ? `상세: ${detail}` : "",
+      t("permissionsTab.errorReviewerRewireFailed"),
+      t("permissionsTab.errorReviewerRewireHint"),
+      detail ? t("permissionsTab.errorReviewerRewireDetail", { detail }) : "",
     ].filter(Boolean).join(" ");
   }
   return formatIpcError(error, undefined, {
-    codeMap: { "user-keyboard-required": "권한 리뷰어 설정 변경은 활성 사용자 입력에서만 실행할 수 있습니다." },
-    fallbackContext: "권한 리뷰어 오류",
+    codeMap: { "user-keyboard-required": t("permissionsTab.errorUserKeyboardRequired") },
+    fallbackContext: t("permissionsTab.errorReviewerFallbackContext"),
   });
 }
 
 const REVIEWER_RENAME_NOTICE_LS_KEY = "permissions.reviewer.rename-notice.dismissed-v1";
-const REVIEWER_RENAME_NOTICE_TEXT =
-  "권한 리뷰어 설정은 자동(헤드리스) 실행과 대화형 채팅 모두에 적용됩니다. " +
-  "이 패널에서 정책을 한 번 조정하면 두 영역에 동일하게 반영됩니다.";
 
 function preserveSettingsScrollPosition(): () => void {
   const scroller = document.querySelector<HTMLElement>(".lvis-settings-scroll");
@@ -114,6 +116,7 @@ function preserveSettingsScrollPosition(): () => void {
 }
 
 export function PermissionsTab() {
+  const { t } = useTranslation();
   // ── 로딩 상태 ─────────────────────────────────────
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
@@ -213,7 +216,7 @@ export function PermissionsTab() {
       setDirectories(dirRes.ok && dirRes.verb === "list" ? dirRes.userAdditions : []);
       setReviewer(reviewerRes.settings);
     } catch (e) {
-      setError((e as Error).message ?? "데이터를 불러오지 못했습니다.");
+      setError((e as Error).message ?? t("permissionsTab.errorLoadFailed"));
     } finally {
       setLoading(false);
     }
@@ -254,7 +257,7 @@ export function PermissionsTab() {
     if (!window.lvis?.userApproval) return;
     if (scope === "persistent") {
       const confirmed = window.confirm(
-        `[${toolName}] 지속 승인을 취소하시겠습니까?\n\n취소 후 복구할 수 없으며, 다음 도구 호출 시 다시 승인 요청됩니다.`,
+        t("permissionsTab.confirmRevokePersistent", { toolName }),
       );
       if (!confirmed) return;
     }
@@ -264,20 +267,20 @@ export function PermissionsTab() {
         const result = await window.lvis.userApproval.revokeByKey(key);
         if (!result.ok) {
           const message = formatRevokeError(result.error, result.message);
-          showBanner("error", `취소 실패: ${message}`);
+          showBanner("error", t("permissionsTab.errorRevokeFailed", { message }));
           return;
         }
       } catch (err) {
-        showBanner("error", `취소 실패: ${(err as Error).message}`);
+        showBanner("error", t("permissionsTab.errorRevokeFailed", { message: (err as Error).message }));
         return;
       }
       try {
         await fetchApprovals();
-        showBanner("warn", `[${toolName}] 승인이 취소되었습니다.`);
+        showBanner("warn", t("permissionsTab.successRevokeApproval", { toolName }));
       } catch (err) {
         showBanner(
           "warn",
-          `[${toolName}] 승인이 취소되었으나 목록 새로고침 실패: ${(err as Error).message}`,
+          t("permissionsTab.errorRevokeRefreshFailed", { toolName, message: (err as Error).message }),
         );
       }
     } finally {
@@ -311,7 +314,7 @@ export function PermissionsTab() {
           setMode(res.mode as ExecMode);
           modeChanged = true;
         } else {
-          showBanner("error", res.message ?? res.error ?? "실행 모드 변경에 실패했습니다.");
+          showBanner("error", res.message ?? res.error ?? t("permissionsTab.errorModeChangeFailed"));
           return;
         }
       }
@@ -338,7 +341,7 @@ export function PermissionsTab() {
         }
       }
     } catch (e) {
-      showBanner("error", `실행 모드 변경 중 오류: ${(e as Error).message}`);
+      showBanner("error", t("permissionsTab.errorModeChangeError", { message: (e as Error).message }));
     } finally {
       setModeBusy(false);
     }
@@ -353,9 +356,9 @@ export function PermissionsTab() {
       if (res.ok) {
         setRequireExplicit(next);
       } else if (res.error === "managed") {
-        showBanner("warn", "이 정책은 IT 관리자가 설정했습니다. 사용자가 변경할 수 없습니다.");
+        showBanner("warn", t("permissionsTab.errorPolicyManaged"));
       } else {
-        showBanner("error", res.message ?? "정책 변경에 실패했습니다.");
+        showBanner("error", res.message ?? t("permissionsTab.errorPolicyChangeFailed"));
       }
     } finally {
       setPolicyBusy(false);
@@ -373,7 +376,7 @@ export function PermissionsTab() {
         showBanner("error", formatReviewerDispatchError(res.error));
       }
     } catch (e) {
-      showBanner("error", `리뷰어 설정 변경 중 오류: ${(e as Error).message}`);
+      showBanner("error", t("permissionsTab.errorReviewerChangeError", { message: (e as Error).message }));
     } finally {
       setReviewerBusy(false);
     }
@@ -394,10 +397,10 @@ export function PermissionsTab() {
         setNewPattern("");
         await refreshRules();
       } else {
-        showBanner("error", res.message ?? `규칙 추가 실패 (${res.error})`);
+        showBanner("error", res.message ?? t("permissionsTab.errorRuleAddFailed", { error: res.error }));
       }
     } catch (e) {
-      showBanner("error", `규칙 추가 중 오류: ${(e as Error).message}`);
+      showBanner("error", t("permissionsTab.errorRuleAddError", { message: (e as Error).message }));
     } finally {
       setRulesBusy(false);
     }
@@ -410,10 +413,10 @@ export function PermissionsTab() {
       if (res.ok) {
         await refreshRules();
       } else {
-        showBanner("error", res.message ?? `규칙 삭제 실패 (${res.error})`);
+        showBanner("error", res.message ?? t("permissionsTab.errorRuleRemoveFailed", { error: res.error }));
       }
     } catch (e) {
-      showBanner("error", `규칙 삭제 중 오류: ${(e as Error).message}`);
+      showBanner("error", t("permissionsTab.errorRuleRemoveError", { message: (e as Error).message }));
     } finally {
       setRulesBusy(false);
     }
@@ -451,7 +454,7 @@ export function PermissionsTab() {
         };
         if (failed.requiresAcknowledgement && failed.warnings?.length) {
           setPendingDirectoryWarning({ path: dir, warnings: failed.warnings });
-          showBanner("warn", "디렉터리 경고를 확인한 뒤 다시 승인해야 저장됩니다.");
+          showBanner("warn", t("permissionsTab.warnDirectoryAckRequired"));
         } else {
           setPendingDirectoryWarning(null);
           showBanner("error", failed.error);
@@ -459,7 +462,7 @@ export function PermissionsTab() {
       }
     } catch (e) {
       setPendingDirectoryWarning(null);
-      showBanner("error", `디렉터리 추가 중 오류: ${(e as Error).message}`);
+      showBanner("error", t("permissionsTab.errorDirectoryAddError", { message: (e as Error).message }));
     } finally {
       setDirsBusy(false);
     }
@@ -476,7 +479,7 @@ export function PermissionsTab() {
         showBanner("error", res.error);
       }
     } catch (e) {
-      showBanner("error", `디렉터리 삭제 중 오류: ${(e as Error).message}`);
+      showBanner("error", t("permissionsTab.errorDirectoryRemoveError", { message: (e as Error).message }));
     } finally {
       setDirsBusy(false);
       restoreScroll();
@@ -484,7 +487,7 @@ export function PermissionsTab() {
   };
 
   if (loading) {
-    return <div className="py-8 text-center text-sm text-muted-foreground">로딩 중...</div>;
+    return <div className="py-8 text-center text-sm text-muted-foreground">{t("permissionsTab.loading")}</div>;
   }
   if (error) {
     return <div className="py-4 text-sm text-destructive">{error}</div>;
@@ -494,8 +497,8 @@ export function PermissionsTab() {
     <div className="pr-1">
       <div className="space-y-6">
         <SettingsPageHeader
-          title="권한"
-          description="도구 권한 정책, 리뷰어, 디렉터리 화이트리스트를 설정합니다"
+          title={t("permissionsTab.pageTitle")}
+          description={t("permissionsTab.pageDescription")}
         />
 
         {/* ── 인라인 배너 (§F9 — alert 대체) ── */}
@@ -509,7 +512,7 @@ export function PermissionsTab() {
               size="icon"
               className="ml-auto h-6 w-6 flex-shrink-0 opacity-60 hover:opacity-100"
               onClick={() => setBanner(null)}
-              aria-label="알림 닫기"
+              aria-label={t("permissionsTab.closeBannerAriaLabel")}
             >
               ✕
             </Button>
@@ -523,13 +526,12 @@ export function PermissionsTab() {
           >
             <div className="flex items-start gap-2">
               <Badge variant="secondary" className="mt-0.5 text-[10px] text-warning">
-                검토 대기 {quarantinedHooks.length}
+                {t("permissionsTab.hookQuarantineBadge", { count: quarantinedHooks.length })}
               </Badge>
               <div className="min-w-0 flex-1">
-                <p className="font-medium">격리된 hook 파일이 있습니다.</p>
+                <p className="font-medium">{t("permissionsTab.hookQuarantineTitle")}</p>
                 <p className="mt-1 text-[11px]">
-                  채팅 입력창에서 <code className="rounded bg-background/70 px-1 font-mono">/permission hooks list</code> 를 실행해
-                  파일을 확인한 뒤 accept 또는 reject 하세요.
+                  {t("permissionsTab.hookQuarantineInstructionBefore")}<code className="rounded bg-background/70 px-1 font-mono">/permission hooks list</code>{t("permissionsTab.hookQuarantineInstructionAfter")}
                 </p>
                 <div className="mt-2 flex flex-wrap gap-1">
                   {quarantinedHooks.slice(0, 3).map((hook) => (
@@ -550,7 +552,7 @@ export function PermissionsTab() {
                 className="h-7 px-2 text-[11px]"
                 onClick={() => void fetchAll()}
               >
-                새로고침
+                {t("permissionsTab.refreshButton")}
               </Button>
             </div>
           </div>
@@ -558,34 +560,34 @@ export function PermissionsTab() {
 
         {/* ── 현재 권한 정책 요약 ── */}
         <SettingsSection
-          title="현재 권한 정책"
-          description="기본, 전체 물어보기, 자동 검증, 전체 허용 중 하나를 선택하고 세부 리뷰어 설정을 조정합니다."
+          title={t("permissionsTab.currentPolicySummaryTitle")}
+          description={t("permissionsTab.currentPolicySummaryDescription")}
         >
           <div className="grid gap-2 sm:grid-cols-3">
             <div className="rounded-md border px-3 py-2">
-              <p className="text-[11px] font-medium text-muted-foreground">정책 프리셋</p>
+              <p className="text-[11px] font-medium text-muted-foreground">{t("permissionsTab.summaryPolicyPreset")}</p>
               <p className="mt-1 text-sm font-medium">{EXEC_MODE_OPTIONS.find((opt) => opt.value === mode)?.label ?? mode}</p>
             </div>
             <div className="rounded-md border px-3 py-2">
-              <p className="text-[11px] font-medium text-muted-foreground">권한 리뷰어</p>
-              <p className="mt-1 text-sm font-medium">{REVIEWER_MODE_OPTIONS.find((opt) => opt.value === reviewer.mode)?.label ?? reviewer.mode}</p>
+              <p className="text-[11px] font-medium text-muted-foreground">{t("permissionsTab.summaryReviewer")}</p>
+              <p className="mt-1 text-sm font-medium">{getReviewerModeOptions().find((opt) => opt.value === reviewer.mode)?.label ?? reviewer.mode}</p>
             </div>
             <div className="rounded-md border px-3 py-2">
-              <p className="text-[11px] font-medium text-muted-foreground">승인 대화상자</p>
-              <p className="mt-1 text-sm font-medium">{requireExplicit ? "명시 액션 필수" : "닫기 동작은 거부 처리"}</p>
+              <p className="text-[11px] font-medium text-muted-foreground">{t("permissionsTab.summaryApprovalDialog")}</p>
+              <p className="mt-1 text-sm font-medium">{requireExplicit ? t("permissionsTab.summaryExplicitRequired") : t("permissionsTab.summaryCloseDenies")}</p>
             </div>
           </div>
         </SettingsSection>
 
         {/* ── Section A: Permission Policy Preset ── */}
         <SettingsSection
-          title="권한 정책"
-          description="기본은 읽기 도구를 허용하고, 전체 물어보기는 읽기까지 확인합니다. 자동 검증은 자동(헤드리스) 실행과 대화형 채팅 모두를 권한 리뷰어 설정으로 검증하고, 전체 허용은 하드 차단 범위 밖의 도구를 자동 허용하되 허용 디렉터리 밖 접근은 별도 승인합니다."
+          title={t("permissionsTab.policyTitle")}
+          description={t("permissionsTab.policyDescription")}
         >
           <RadioGroup
             value={mode}
             disabled={modeBusy}
-            aria-label="권한 정책 선택"
+            aria-label={t("permissionsTab.policyAriaLabel")}
             onValueChange={(value) => void handleModeChange(value as ExecMode)}
             className="space-y-1.5"
           >
@@ -613,8 +615,8 @@ export function PermissionsTab() {
 
         {/* ── 권한 리뷰어 ── */}
         <SettingsSection
-          title="권한 리뷰어"
-          description="자동(헤드리스) 실행과 대화형 채팅 모두에 적용됩니다. 어떻게 검증할지 선택하세요. LLM 검증은 로컬 규칙 뒤에 실행되며 위험도를 낮출 수 없습니다."
+          title={t("permissionsTab.reviewerTitle")}
+          description={t("permissionsTab.reviewerDescription")}
         >
           {showRenameNotice ? (
             <div
@@ -622,25 +624,25 @@ export function PermissionsTab() {
               data-testid="reviewer-rename-notice"
               className="flex items-start gap-2 rounded-md border border-info/40 bg-info/10 px-3 py-2 text-[11px] text-info"
             >
-              <span className="flex-1">{REVIEWER_RENAME_NOTICE_TEXT}</span>
+              <span className="flex-1">{t("permissionsTab.reviewerRenameNoticeText")}</span>
               <button
                 type="button"
                 onClick={dismissRenameNotice}
-                aria-label="알림 닫기"
+                aria-label={t("permissionsTab.closeBannerAriaLabel")}
                 className="text-xs underline-offset-2 hover:underline"
               >
-                닫기
+                {t("permissionsTab.closeButton")}
               </button>
             </div>
           ) : null}
           <RadioGroup
             value={reviewer.mode}
             disabled={reviewerBusy}
-            aria-label="권한 리뷰어 선택"
+            aria-label={t("permissionsTab.reviewerAriaLabel")}
             onValueChange={(value) => void applyReviewerCommand(`mode ${value}`)}
             className="space-y-1.5"
           >
-            {REVIEWER_MODE_OPTIONS.map((opt) => (
+            {getReviewerModeOptions().map((opt) => (
               <Label
                 key={opt.value}
                 htmlFor={`reviewer-mode-${opt.value}-radio`}
@@ -663,21 +665,21 @@ export function PermissionsTab() {
 
           <div className="space-y-3 rounded-md border bg-muted/20 px-3 py-3">
             <div>
-              <p className="text-xs font-medium">LLM 검증 설정</p>
-              <p className="text-[11px] text-muted-foreground">공급자와 모델은 지능 설정의 활성 LLM을 그대로 따릅니다.</p>
+              <p className="text-xs font-medium">{t("permissionsTab.llmSettingsTitle")}</p>
+              <p className="text-[11px] text-muted-foreground">{t("permissionsTab.llmSettingsDescription")}</p>
             </div>
             <div className="grid gap-3 sm:grid-cols-2">
               <div
                 className="rounded-md border bg-background px-3 py-2 text-xs"
                 data-testid="reviewer-active-llm-source"
               >
-                <p className="font-medium">검증 LLM</p>
+                <p className="font-medium">{t("permissionsTab.llmVerificationLabel")}</p>
                 <p className="mt-1 text-[11px] text-muted-foreground">
-                  지능 설정의 현재 공급자/모델
+                  {t("permissionsTab.llmVerificationDescription")}
                 </p>
               </div>
               <Label className="space-y-1 text-xs">
-                <span className="font-medium">오류 처리</span>
+                <span className="font-medium">{t("permissionsTab.errorHandlingLabel")}</span>
                 <Select
                   value={reviewer.fallbackOnError}
                   disabled={reviewerBusy}
@@ -687,7 +689,7 @@ export function PermissionsTab() {
                     <SelectValue />
                   </SelectTrigger>
                   <SelectContent>
-                    {REVIEWER_FALLBACK_OPTIONS.map((opt) => (
+                    {getReviewerFallbackOptions().map((opt) => (
                       <SelectItem key={opt.value} value={opt.value}>{opt.label} - {opt.description}</SelectItem>
                     ))}
                   </SelectContent>
@@ -695,25 +697,24 @@ export function PermissionsTab() {
               </Label>
             </div>
             <p className="text-[11px] text-muted-foreground">
-              공급자, 모델, API 키, baseUrl, Vertex 프로젝트/리전 변경은 지능 설정에서 관리합니다.
+              {t("permissionsTab.llmProviderManagedNote")}
             </p>
 
             <div className="space-y-2 border-t pt-3">
               <div className="flex items-baseline justify-between">
-                <span className="text-xs font-medium">저위험 자동 허용</span>
+                <span className="text-xs font-medium">{t("permissionsTab.autoApproveLowRiskLabel")}</span>
               </div>
               <p className="text-[11px] text-muted-foreground">
-                위험도가 낮다고 판단된 도구 실행은 확인 없이 자동으로 허용합니다.
-                중간·높은 위험도의 실행은 어떤 경우에도 확인 창이 표시됩니다.
+                {t("permissionsTab.autoApproveLowRiskDescription")}
               </p>
               <RadioGroup
                 value={reviewer.interactive.autoApprove}
                 disabled={reviewerBusy}
-                aria-label="저위험 자동 허용 설정"
+                aria-label={t("permissionsTab.autoApproveLowRiskAriaLabel")}
                 onValueChange={(value) => void applyReviewerCommand(`interactive ${value}`)}
                 className="grid gap-2 sm:grid-cols-2"
               >
-                {REVIEWER_INTERACTIVE_OPTIONS.map((opt) => (
+                {getReviewerInteractiveOptions().map((opt) => (
                   <Label
                     key={opt.value}
                     htmlFor={`reviewer-interactive-${opt.value}-radio`}
@@ -735,7 +736,7 @@ export function PermissionsTab() {
               </RadioGroup>
               {reviewer.interactive.autoApprove === "low" && reviewer.mode === "disabled" ? (
                 <p className="rounded-md border border-warning/40 bg-warning/15 px-3 py-2 text-[11px] text-warning">
-                  ⚠ 권한 리뷰어가 꺼져 있어 저위험 자동 허용이 동작하지 않습니다. 권한 리뷰어를 "규칙 기반 검증" 또는 "LLM 검증"으로 켜세요.
+                  {t("permissionsTab.warnReviewerDisabledAutoApproveInactive")}
                 </p>
               ) : null}
               {mode === "auto" && reviewer.interactive.autoApprove === "off" ? (
@@ -743,8 +744,7 @@ export function PermissionsTab() {
                   className="rounded-md border border-warning/40 bg-warning/15 px-3 py-2 text-[11px] text-warning"
                   data-testid="permissions-legacy-auto-mode-banner"
                 >
-                  ⚠ "자동 검증" 모드에서 저위험 자동 허용이 꺼져 있습니다.
-                  저위험 작업을 확인 없이 허용하려면 위에서 "저위험 자동 허용"을 켜세요.
+                  {t("permissionsTab.warnAutoModeAutoApproveOff")}
                 </p>
               ) : null}
               {mode === "strict" && reviewer.interactive.autoApprove === "low" ? (
@@ -752,8 +752,7 @@ export function PermissionsTab() {
                   className="rounded-md border border-destructive/40 bg-destructive/10 px-3 py-2 text-[11px] text-destructive"
                   data-testid="permissions-strict-low-contradiction-banner"
                 >
-                  ⛔ "전체 물어보기" 모드는 모든 작업을 확인하지만 "저위험 자동 허용"이 켜져 있어 설정이 충돌합니다.
-                  모두 확인 정책을 유지하려면 저위험 자동 허용을 "끔"으로 변경하세요.
+                  {t("permissionsTab.warnStrictLowContradiction")}
                 </p>
               ) : null}
               {mode === "allow" ? (
@@ -761,7 +760,7 @@ export function PermissionsTab() {
                   className="rounded-md border border-warning/40 bg-warning/15 px-3 py-2 text-[11px] text-warning"
                   data-testid="permissions-allow-mode-banner"
                 >
-                  ⚠ "전체 허용" 모드는 모든 작업을 자동 허용하므로 권한 리뷰어와 저위험 자동 허용 설정이 적용되지 않습니다.
+                  {t("permissionsTab.warnAllowModeReviewerIgnored")}
                 </p>
               ) : null}
             </div>
@@ -772,11 +771,11 @@ export function PermissionsTab() {
             data-testid="reviewer-cli-mapping-panel"
           >
             <summary className="cursor-pointer px-3 py-2 text-xs font-semibold">
-              CLI 매핑 (슬래시 명령)
+              {t("permissionsTab.cliMappingTitle")}
             </summary>
             <div className="space-y-2 border-t px-3 py-3 text-[11px]">
               <p className="text-muted-foreground">
-                동일 설정을 채팅 입력창에서 슬래시 명령으로도 변경할 수 있습니다.
+                {t("permissionsTab.cliMappingDescription")}
               </p>
               <ul className="space-y-1 font-mono leading-relaxed">
                 <li><code>/permission reviewer mode &lt;disabled|rule|llm|strict&gt;</code></li>
@@ -784,7 +783,7 @@ export function PermissionsTab() {
                 <li><code>/permission reviewer fallback &lt;deny|rule&gt;</code></li>
               </ul>
               <p className="text-muted-foreground">
-                provider/model 은 지능 설정의 활성 LLM을 따릅니다.
+                {t("permissionsTab.cliMappingProviderNote")}
               </p>
             </div>
           </details>
@@ -794,21 +793,21 @@ export function PermissionsTab() {
             data-testid="reviewer-framework-panel"
           >
             <summary className="cursor-pointer px-3 py-2 text-xs font-semibold">
-              권한 리뷰어 프레임워크 / 프롬프트
+              {t("permissionsTab.frameworkPanelTitle")}
             </summary>
             <div className="space-y-3 border-t px-3 py-3 text-xs">
               <div className="grid gap-2 sm:grid-cols-2">
                 <div className="rounded border bg-background/60 px-2 py-2">
-                  <p className="text-[11px] text-muted-foreground">버전</p>
+                  <p className="text-[11px] text-muted-foreground">{t("permissionsTab.frameworkVersion")}</p>
                   <p className="mt-1 font-mono">{PERMISSION_REVIEWER_FRAMEWORK.version}</p>
                 </div>
                 <div className="rounded border bg-background/60 px-2 py-2">
-                  <p className="text-[11px] text-muted-foreground">출력 계약</p>
+                  <p className="text-[11px] text-muted-foreground">{t("permissionsTab.frameworkOutputContract")}</p>
                   <p className="mt-1 font-mono">{PERMISSION_REVIEWER_FRAMEWORK.outputContract}</p>
                 </div>
               </div>
               <div className="rounded border bg-background/60 px-2 py-2">
-                <p className="mb-1 text-[11px] font-medium text-muted-foreground">위험도 기준</p>
+                <p className="mb-1 text-[11px] font-medium text-muted-foreground">{t("permissionsTab.frameworkRiskLevels")}</p>
                 <ul className="space-y-1">
                   {PERMISSION_REVIEWER_FRAMEWORK.levels.map((level) => (
                     <li key={level.level}>
@@ -818,7 +817,7 @@ export function PermissionsTab() {
                 </ul>
               </div>
               <div className="rounded border bg-background/60 px-2 py-2">
-                <p className="mb-1 text-[11px] font-medium text-muted-foreground">판단 구성</p>
+                <p className="mb-1 text-[11px] font-medium text-muted-foreground">{t("permissionsTab.frameworkComposition")}</p>
                 <ul className="space-y-1">
                   {PERMISSION_REVIEWER_FRAMEWORK.compositionRules.map((rule) => (
                     <li key={rule}>{rule}</li>
@@ -826,14 +825,14 @@ export function PermissionsTab() {
                 </ul>
               </div>
               <div className="rounded border bg-background/60 px-2 py-2">
-                <p className="mb-1 text-[11px] font-medium text-muted-foreground">LLM 입력 필드</p>
+                <p className="mb-1 text-[11px] font-medium text-muted-foreground">{t("permissionsTab.frameworkInputFields")}</p>
                 <p className="font-mono leading-relaxed">
                   {PERMISSION_REVIEWER_FRAMEWORK.inputFields.join(" · ")}
                 </p>
               </div>
               <details className="rounded border bg-background/60">
                 <summary className="cursor-pointer px-2 py-2 text-[11px] font-medium">
-                  시스템 프롬프트 원문
+                  {t("permissionsTab.frameworkSystemPromptTitle")}
                 </summary>
                 <pre className="max-h-56 overflow-auto border-t px-2 py-2 whitespace-pre-wrap break-all font-mono text-[11px] leading-relaxed">
                   {PERMISSION_REVIEWER_FRAMEWORK.systemPrompt}
@@ -845,44 +844,44 @@ export function PermissionsTab() {
 
         {/* ── Section B: Explicit Approval Policy ── */}
         <SettingsSection
-          title="승인 대화상자 동작"
-          description="체크 시 승인 대화상자에서 모달 외부 클릭과 Escape 키가 차단되어 버튼 또는 승인 단축키로 명시적으로 결정해야 합니다."
+          title={t("permissionsTab.approvalDialogTitle")}
+          description={t("permissionsTab.approvalDialogDescription")}
         >
           <div className="flex items-center gap-3">
             <Checkbox
               checked={requireExplicit}
-              aria-label="승인 대화상자에서 버튼 또는 단축키로 명시적 승인 또는 거부를 요구"
+              aria-label={t("permissionsTab.approvalDialogCheckboxAriaLabel")}
               disabled={policyManaged || policyBusy}
               className="size-5"
               onCheckedChange={() => void handleExplicitToggle()}
             />
-            <span className="text-sm">{requireExplicit ? "활성화됨" : "비활성화됨"}</span>
-            {policyManaged && <span className="text-base" title="IT 관리자 설정">🔒</span>}
+            <span className="text-sm">{requireExplicit ? t("permissionsTab.policyEnabled") : t("permissionsTab.policyDisabled")}</span>
+            {policyManaged && <span className="text-base" title={t("permissionsTab.adminManagedTitle")}>🔒</span>}
           </div>
           {policyManaged && (
             <p className="rounded-md border border-warning/40 bg-warning/15 px-3 py-2 text-[11px] text-warning">
               {(policySource === "admin" || policySource === "merged") && policyAdminPath
-                ? `이 정책은 회사 IT 관리자가 배포했습니다 (경로: ${policyAdminPath}). 사용자가 변경할 수 없습니다.`
-                : "이 정책은 IT 관리자가 설정했습니다. 사용자가 변경할 수 없습니다."}
+                ? t("permissionsTab.adminPolicyWithPath", { policyAdminPath })
+                : t("permissionsTab.adminPolicyNoPath")}
             </p>
           )}
         </SettingsSection>
 
         {/* ── Section C: Rule Editor ── */}
         <SettingsSection
-          title="도구 규칙"
-          description={<>특정 도구 패턴에 대해 항상 허용 / 항상 거부를 설정합니다 (와일드카드 지원: <code className="text-[10px]">mcp_*</code>).</>}
+          title={t("permissionsTab.rulesTitle")}
+          description={<>{t("permissionsTab.rulesDescriptionBefore")}<code className="text-[10px]">mcp_*</code>{t("permissionsTab.rulesDescriptionAfter")}</>}
         >
           {rules.length === 0 ? (
-            <p className="text-[11px] text-muted-foreground italic">저장된 규칙이 없습니다.</p>
+            <p className="text-[11px] text-muted-foreground italic">{t("permissionsTab.rulesEmpty")}</p>
           ) : (
             <div className="rounded-md border">
               <table className="w-full table-fixed text-xs">
                 <thead>
                   <tr className="border-b bg-muted/40">
-                    <th className="px-3 py-2 text-left font-medium">패턴</th>
-                    <th className="px-3 py-2 text-left font-medium">동작</th>
-                    <th className="px-3 py-2 text-left font-medium">소스</th>
+                    <th className="px-3 py-2 text-left font-medium">{t("permissionsTab.rulesColPattern")}</th>
+                    <th className="px-3 py-2 text-left font-medium">{t("permissionsTab.rulesColAction")}</th>
+                    <th className="px-3 py-2 text-left font-medium">{t("permissionsTab.rulesColSource")}</th>
                     <th className="px-3 py-2" />
                   </tr>
                 </thead>
@@ -892,10 +891,10 @@ export function PermissionsTab() {
                       <td className="px-3 py-1.5 font-mono">{r.pattern}</td>
                       <td className="px-3 py-1.5">
                         <Badge variant={r.action === "allow" ? "default" : "secondary"} className={`text-[10px] ${r.action === "deny" ? "text-destructive" : ""}`}>
-                          {r.action === "allow" ? "허용" : "거부"}
+                          {r.action === "allow" ? t("permissionsTab.actionAllow") : t("permissionsTab.actionDeny")}
                         </Badge>
                       </td>
-                      <td className="px-3 py-1.5 text-muted-foreground">{r.source ?? "전체"}</td>
+                      <td className="px-3 py-1.5 text-muted-foreground">{r.source ?? t("permissionsTab.sourceAll")}</td>
                       <td className="px-3 py-1.5 text-right">
                         <Button
                           type="button"
@@ -917,7 +916,7 @@ export function PermissionsTab() {
           <div className="flex items-center gap-2">
             <Input
               className="h-8 flex-1 text-xs"
-              placeholder="패턴 (예: mcp_*, agent_spawn)"
+              placeholder={t("permissionsTab.patternInputPlaceholder")}
               value={newPattern}
               onChange={(e) => setNewPattern(e.target.value)}
               onKeyDown={(e) => { if (e.key === "Enter" && newPattern.trim()) void handleAddRule(); }}
@@ -930,20 +929,20 @@ export function PermissionsTab() {
                 <SelectValue />
               </SelectTrigger>
               <SelectContent>
-                <SelectItem value="allow">허용</SelectItem>
-                <SelectItem value="deny">거부</SelectItem>
+                <SelectItem value="allow">{t("permissionsTab.actionAllow")}</SelectItem>
+                <SelectItem value="deny">{t("permissionsTab.actionDeny")}</SelectItem>
               </SelectContent>
             </Select>
             <Button size="sm" className="h-8" onClick={() => void handleAddRule()} disabled={rulesBusy || !newPattern.trim()}>
-              추가
+              {t("permissionsTab.addButton")}
             </Button>
           </div>
         </SettingsSection>
 
         {/* ── Section D: Additional Directories ── */}
         <SettingsSection
-          title="허용 디렉터리"
-          description="작업 디렉터리 밖에서 파일 도구가 접근할 수 있는 사용자 승인 경로입니다."
+          title={t("permissionsTab.directoriesTitle")}
+          description={t("permissionsTab.directoriesDescription")}
           actions={
             <Button
               variant="outline"
@@ -952,18 +951,18 @@ export function PermissionsTab() {
               onClick={() => void refreshDirectories()}
               disabled={dirsBusy}
             >
-              새로고침
+              {t("permissionsTab.refreshButton")}
             </Button>
           }
         >
           {directories.length === 0 ? (
-            <p className="text-[11px] text-muted-foreground italic">추가 허용 디렉터리가 없습니다.</p>
+            <p className="text-[11px] text-muted-foreground italic">{t("permissionsTab.directoriesEmpty")}</p>
           ) : (
             <div className="rounded-md border">
               <table className="w-full text-xs">
                 <thead>
                   <tr className="border-b bg-muted/40">
-                    <th className="px-3 py-2 text-left font-medium">경로</th>
+                    <th className="px-3 py-2 text-left font-medium">{t("permissionsTab.directoriesColPath")}</th>
                     <th className="px-3 py-2" />
                   </tr>
                 </thead>
@@ -994,7 +993,7 @@ export function PermissionsTab() {
           <div className="flex items-center gap-2">
             <Input
               className="h-8 flex-1 text-xs"
-              placeholder="경로 (예: ~/Documents/project)"
+              placeholder={t("permissionsTab.directoryInputPlaceholder")}
               value={newDirectory}
               onChange={(e) => {
                 setNewDirectory(e.target.value);
@@ -1003,7 +1002,7 @@ export function PermissionsTab() {
               onKeyDown={(e) => { if (e.key === "Enter" && newDirectory.trim()) void handleAddDirectory(); }}
             />
             <Button size="sm" className="h-8" onClick={() => void handleAddDirectory()} disabled={dirsBusy || !newDirectory.trim()}>
-              추가
+              {t("permissionsTab.addButton")}
             </Button>
           </div>
           {pendingDirectoryWarning && pendingDirectoryWarning.path === newDirectory.trim() && (
@@ -1011,7 +1010,7 @@ export function PermissionsTab() {
               data-testid="directory-warning-confirmation"
               className="rounded-md border border-warning/40 bg-warning/15 px-3 py-2 text-[12px] text-warning"
             >
-              <p className="font-medium">경고 확인 필요</p>
+              <p className="font-medium">{t("permissionsTab.directoryWarningTitle")}</p>
               <ul className="mt-1 list-disc space-y-1 pl-4">
                 {pendingDirectoryWarning.warnings.map((warning) => (
                   <li key={warning}>{warning}</li>
@@ -1024,7 +1023,7 @@ export function PermissionsTab() {
                   onClick={() => void handleAddDirectory(true)}
                   disabled={dirsBusy}
                 >
-                  경고 확인 후 추가
+                  {t("permissionsTab.directoryWarningConfirmButton")}
                 </Button>
                 <Button
                   variant="outline"
@@ -1033,7 +1032,7 @@ export function PermissionsTab() {
                   onClick={() => setPendingDirectoryWarning(null)}
                   disabled={dirsBusy}
                 >
-                  취소
+                  {t("permissionsTab.cancelButton")}
                 </Button>
               </div>
             </div>
@@ -1042,8 +1041,8 @@ export function PermissionsTab() {
 
         {/* ── 사용자 승인 기록 ── */}
         <SettingsSection
-          title={`사용자 승인 기록 (${userApprovals.length})`}
-          description="세션 또는 지속적으로 기록된 도구 승인 목록입니다."
+          title={t("permissionsTab.approvalsTitle", { count: userApprovals.length })}
+          description={t("permissionsTab.approvalsDescription")}
           actions={
             <Button
               size="sm"
@@ -1052,23 +1051,23 @@ export function PermissionsTab() {
               onClick={() => void fetchApprovals()}
               disabled={approvalsBusy}
             >
-              새로고침
+              {t("permissionsTab.refreshButton")}
             </Button>
           }
         >
           {userApprovals.length === 0 ? (
-            <p className="text-[11px] text-muted-foreground">기록된 승인이 없습니다.</p>
+            <p className="text-[11px] text-muted-foreground">{t("permissionsTab.approvalsEmpty")}</p>
           ) : (
             <div className="overflow-auto rounded-md border">
               <table className="w-full text-xs">
                 <thead className="border-b bg-muted/40">
                   <tr>
-                    <th className="px-3 py-2 text-left font-medium">도구</th>
-                    <th className="px-3 py-2 text-left font-medium">범위</th>
-                    <th className="px-3 py-2 text-left font-medium">위험도</th>
-                    <th className="px-3 py-2 text-left font-medium">승인 일시</th>
-                    <th className="px-3 py-2 text-left font-medium">사유</th>
-                    <th className="px-3 py-2 text-left font-medium">액션</th>
+                    <th className="px-3 py-2 text-left font-medium">{t("permissionsTab.approvalsColTool")}</th>
+                    <th className="px-3 py-2 text-left font-medium">{t("permissionsTab.approvalsColScope")}</th>
+                    <th className="px-3 py-2 text-left font-medium">{t("permissionsTab.approvalsColRisk")}</th>
+                    <th className="px-3 py-2 text-left font-medium">{t("permissionsTab.approvalsColApprovedAt")}</th>
+                    <th className="px-3 py-2 text-left font-medium">{t("permissionsTab.approvalsColReason")}</th>
+                    <th className="px-3 py-2 text-left font-medium">{t("permissionsTab.approvalsColAction")}</th>
                   </tr>
                 </thead>
                 <tbody>
@@ -1079,10 +1078,10 @@ export function PermissionsTab() {
                       </td>
                       <td className="px-3 py-2">
                         <span className={`rounded px-1.5 py-0.5 text-[10px] font-medium ${a.scope === "persistent" ? "bg-warning/15 text-warning" : "bg-muted text-muted-foreground"}`}>
-                          {a.scope === "persistent" ? "지속" : "세션"}
+                          {a.scope === "persistent" ? t("permissionsTab.scopePersistent") : t("permissionsTab.scopeSession")}
                         </span>
                       </td>
-                      <td className="px-3 py-2">{a.verdictAtApproval.toUpperCase()}{a.verdictAtApproval === "high" ? " (HIGH 고정)" : ""}</td>
+                      <td className="px-3 py-2">{a.verdictAtApproval.toUpperCase()}{a.verdictAtApproval === "high" ? t("permissionsTab.verdictHighFixed") : ""}</td>
                       <td className="px-3 py-2 text-muted-foreground">
                         {new Date(a.approvedAt).toLocaleString()}
                       </td>
@@ -1098,7 +1097,7 @@ export function PermissionsTab() {
                           disabled={approvalsBusy}
                           onClick={() => void handleRevokeApproval(a.key, a.toolName ?? a.key.slice(0, 12), a.scope)}
                         >
-                          취소
+                          {t("permissionsTab.revokeButton")}
                         </Button>
                       </td>
                     </tr>
@@ -1111,15 +1110,15 @@ export function PermissionsTab() {
 
         {/* ── Audit Log ── */}
         <SettingsSection
-          title="감사 로그"
-          description="최근 권한 감사 기록과 체인 검증 상태를 확인합니다."
+          title={t("permissionsTab.auditLogTitle")}
+          description={t("permissionsTab.auditLogDescription")}
           actions={
             <Button size="sm" variant="outline" className="h-8 px-3 text-[12px]" onClick={() => setAuditOpen(true)}>
-              열기
+              {t("permissionsTab.auditLogOpenButton")}
             </Button>
           }
         >
-          <p className="text-[11px] text-muted-foreground">감사 로그 패널을 열어 최근 7일간의 권한 이벤트를 확인하세요.</p>
+          <p className="text-[11px] text-muted-foreground">{t("permissionsTab.auditLogHelp")}</p>
         </SettingsSection>
 
       </div>

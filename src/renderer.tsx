@@ -2,6 +2,7 @@ import { createRoot } from "react-dom/client";
 import { App } from "./ui/renderer/App.js";
 import { DetachedView } from "./ui/renderer/DetachedView.js";
 import { primeHostMarketplaceApi } from "./ui/renderer/host-marketplace-api.js";
+import { I18nSettingsProvider } from "./ui/renderer/contexts/i18n-settings-provider.js";
 
 export { App } from "./ui/renderer/App.js";
 
@@ -34,12 +35,24 @@ if (typeof document !== "undefined") {
     if (settingsInitialTab) {
       const appRoot = createRoot(root);
       void import("./ui/renderer/SettingsWindow.js").then(({ SettingsWindow }) => {
-        appRoot.render(<SettingsWindow initialTab={settingsInitialTab} />);
+        appRoot.render(
+          <I18nSettingsProvider>
+            <SettingsWindow initialTab={settingsInitialTab} />
+          </I18nSettingsProvider>,
+        );
       });
     } else if (detachedViewKey) {
-      createRoot(root).render(<DetachedView viewKey={detachedViewKey} />);
+      createRoot(root).render(
+        <I18nSettingsProvider>
+          <DetachedView viewKey={detachedViewKey} />
+        </I18nSettingsProvider>,
+      );
     } else {
-      createRoot(root).render(<App />);
+      createRoot(root).render(
+        <I18nSettingsProvider>
+          <App />
+        </I18nSettingsProvider>,
+      );
     }
   }
 }

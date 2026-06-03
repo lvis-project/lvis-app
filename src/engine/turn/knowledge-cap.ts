@@ -5,6 +5,7 @@
  * turn 범위의 카운터를 넘어서면 실행 대신 error tool_result 로 치환된다.
  */
 import type { ToolUseBlock } from "../../tools/executor.js";
+import { t } from "../../i18n/index.js";
 
 export const KNOWLEDGE_DEPTH_CAP = 3;
 export const KNOWLEDGE_TOOL_NAMES = new Set<string>([
@@ -40,7 +41,7 @@ export function applyKnowledgeDepthCap(
       if (count >= cap) {
         blocked.push({
           tool_use_id: tu.id,
-          content: `[depth cap] ${tu.name} 도구는 turn당 최대 ${cap}회만 호출 가능합니다.`,
+          content: t("be_knowledgeCap.depthCapBlocked", { name: tu.name, cap: String(cap) }),
           is_error: true,
         });
         continue;

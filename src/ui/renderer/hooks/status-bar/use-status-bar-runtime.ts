@@ -1,4 +1,5 @@
 import { useEffect } from "react";
+import { t } from "../../../../i18n/runtime.js";
 import { STATUS_BAR_RUNTIME_EMOJIS } from "../../../../shared/status-bar-emojis.js";
 import type { LvisApi } from "../../types.js";
 import type { PersistentItem } from "./types.js";
@@ -27,21 +28,21 @@ export function useStatusBarRuntime({ api, upsertPersistent }: Options): void {
           severity: "info",
           label: STATUS_BAR_RUNTIME_EMOJIS.tools,
           value: String(c.tools),
-          a11yLabel: "도구 개수",
+          a11yLabel: t("useStatusBarRuntime.toolsA11y"),
         })) return;
         if (!upsertIfCurrent({
           id: "runtime:plugins",
           severity: "info",
           label: STATUS_BAR_RUNTIME_EMOJIS.plugins,
           value: String(c.plugins),
-          a11yLabel: "플러그인 개수",
+          a11yLabel: t("useStatusBarRuntime.pluginsA11y"),
         })) return;
         if (!upsertIfCurrent({
           id: "runtime:mcps",
           severity: "info",
           label: STATUS_BAR_RUNTIME_EMOJIS.mcps,
           value: String(c.mcps),
-          a11yLabel: "MCP 서버 개수",
+          a11yLabel: t("useStatusBarRuntime.mcpsA11y"),
         })) return;
       } catch {
         // Non-fatal — counts are an awareness signal, not load-bearing.

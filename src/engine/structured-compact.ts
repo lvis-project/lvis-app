@@ -28,6 +28,7 @@ import {
   TRUNCATION_THRESHOLD_TOKENS,
   TRUNCATION_PRESERVED_LINES,
 } from "../shared/compact-status.js";
+import { t } from "../i18n/index.js";
 
 const log = createLogger("compact");
 
@@ -131,61 +132,7 @@ export interface ToolCallSummary {
  * NOTE: 이 prompt 의 `Critical Context` 섹션은 LVIS domain specific 항목 포함 — 활성 plugin /
  * routine ID / 작업 식별자 / 권한 모드. 사용자 도메인 입력으로 추가 확장 가능.
  */
-export const SUMMARY_TEMPLATE_PROMPT_V1 = `당신은 대화 상태 관리자입니다. 아래 대화를 다음 12 섹션으로 요약하세요.
-
-【절차 규칙】
-1. context-gathering budget: 본문에 명시된 사실만 사용. 추가 검색/추론 금지.
-2. early stop: 한 번의 read-through 로 12 섹션 채우기. iterative 정제 금지.
-3. done criteria: 12 헤더 모두 *non-empty* 또는 명시적 "(미정)". 빈 섹션 금지.
-4. persistence stop condition: 검증 실패 (헤더 누락) 시 1회 재시도, 2회 째 raw fallback.
-5. unsafe pending action 명시 의무: DELETE/git push/외부 호출 등 사용자 승인 필요한 액션 누락 금지.
-
-# Session State as of {{timestamp}} (compact #{{compactNum}}, templateVersion 1)
-
-## Goal
-사용자의 *현재* 최상위 목표 1-3 줄.
-
-## Constraints & Preferences
-명시된 제약 (기술/비즈/시간) + 사용자 선호. bullet.
-
-## Progress
-- [x] Done (≤ 5)
-- [-] In Progress
-- [ ] Pending
-
-## Key Decisions
-- decision (이유: why) — 5 개 이내, 최근 우선
-
-## Relevant Files
-경로:역할:상태 — read/edited/created, 마지막 동작 시점.
-
-## Next Steps
-직전 어시스턴트가 명시한 다음 액션. 없으면 "(미정)".
-
-## Critical Context
-잃으면 안 되는 것 — secret/ticket/endpoint/규칙. LVIS 도메인 specific 도 포함:
-- 활성 plugin 목록
-- 활성 routine ID
-- 작업 식별자
-- 권한 모드 (propose-only / auto)
-
-## Current Plan
-직전 LLM 의 multi-step 계획 (step k/N 진행 상황).
-
-## Verification State
-검증된/미검증 — "build pass / typecheck pass / e2e pass / human review".
-
-## Open Blockers
-풀려야 진행 가능한 외부 의존.
-
-## Unsafe Pending Actions
-사용자 승인 없이 실행되면 안 되는 액션.
-
-## Last Tool Boundary
-가장 최근 tool_use/tool_result 쌍 — round 번호 + tool 이름 + 결과 요지.
-
-대화:
-{{conversationText}}` as const;
+export const SUMMARY_TEMPLATE_PROMPT_V1: string = t("be_structuredCompact.summaryTemplatePrompt");
 
 /**
  * SUMMARY_TEMPLATE LLM 응답을 파싱. 12 섹션 모두 존재 + non-empty 인지 검증.
@@ -280,7 +227,7 @@ export function freezeBoundary(boundary: CompactBoundary): Readonly<CompactBound
 
 /** Stub message body 가 history 에 들어감 — 진짜 본문은 ⑧ slot 의 preamble. */
 const BOUNDARY_STUB_TEMPLATE = (n: number): string =>
-  `[이전 대화 요약 #${n} — 자세한 내용은 system prompt 의 ⑧ Compact Summary 섹션 참조]`;
+  t("be_structuredCompact.boundaryStub", { n: String(n) });
 
 /** parser 실패 시 1회 재시도. 2회째 raw fallback. */
 const MAX_PARSE_RETRY = 1;
@@ -959,8 +906,7 @@ async function callSummaryLLM(args: {
   let text = "";
   for await (const ev of args.llm.streamTurn({
     model: args.model,
-    systemPrompt:
-      "당신은 대화 상태 관리자입니다. 12-section structured summary 를 정확히 출력하세요. 형식 위반 금지.",
+    systemPrompt: t("be_structuredCompact.callSummarySystemPrompt"),
     messages: [{ role: "user", content: filledPrompt }],
     tools: [],
     ...(args.abortSignal !== undefined && { abortSignal: args.abortSignal }),

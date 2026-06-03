@@ -11,6 +11,7 @@ import * as https from "node:https";
 import * as tls from "node:tls";
 import { Agent, setGlobalDispatcher } from "undici";
 import { fileURLToPath, pathToFileURL } from "node:url";
+import { t } from "./i18n/index.js";
 import { bootstrap, type AppServices } from "./boot.js";
 import { getCommonChromeOptions } from "./main/window-chrome.js";
 import {
@@ -396,10 +397,10 @@ async function resolveMarketplaceActionTarget(
 type MarketplacePackageType = "plugin" | "mcp" | "agent" | "skill";
 
 function marketplacePackageLabel(packageType: MarketplacePackageType): string {
-  if (packageType === "agent") return "에이전트";
-  if (packageType === "skill") return "스킬";
-  if (packageType === "mcp") return "MCP 서버";
-  return "플러그인";
+  if (packageType === "agent") return t("be_main.labelAgent");
+  if (packageType === "skill") return t("be_main.labelSkill");
+  if (packageType === "mcp") return t("be_main.labelMcpServer");
+  return t("be_main.labelPlugin");
 }
 
 function assistantPackageChannels(packageType: "agent" | "skill"): {
@@ -427,11 +428,11 @@ async function handleAssistantMarketplaceAction(
     if (target.installed === false) {
       await dialog.showMessageBox(win, {
         type: "info",
-        buttons: ["확인"],
+        buttons: [t("be_main.btnOk")],
         defaultId: 0,
         cancelId: 0,
-        message: `${label} '${target.name}'은(는) 설치되어 있지 않습니다.`,
-        detail: "외부 링크의 제거 요청을 처리하지 않았습니다.",
+        message: t("be_main.packageNotInstalledMsg", { label, name: target.name }),
+        detail: t("be_main.packageNotInstalledDetail"),
       });
       broadcastPluginLifecycleEvent(channels.uninstallResult, {
         slug: params.slug,
@@ -442,11 +443,11 @@ async function handleAssistantMarketplaceAction(
     }
     const { response } = await dialog.showMessageBox(win, {
       type: "warning",
-      buttons: ["제거", "취소"],
+      buttons: [t("be_main.btnRemove"), t("be_main.btnCancel")],
       defaultId: 1,
       cancelId: 1,
-      message: `${label} '${target.name}'을(를) 제거하시겠습니까?`,
-      detail: "외부 링크로부터 요청된 제거입니다.",
+      message: t("be_main.packageUninstallMsg", { label, name: target.name }),
+      detail: t("be_main.packageUninstallDetail"),
     });
     if (response !== 0) return;
     void (async () => {
@@ -488,11 +489,11 @@ async function handleAssistantMarketplaceAction(
 
   const { response } = await dialog.showMessageBox(win, {
     type: "question",
-    buttons: ["설치", "취소"],
+    buttons: [t("be_main.btnInstall"), t("be_main.btnCancel")],
     defaultId: 1,
     cancelId: 1,
-    message: `${label} '${target.name}'을(를) 설치하시겠습니까?`,
-    detail: "외부 링크로부터 요청된 설치입니다.",
+    message: t("be_main.packageInstallMsg", { label, name: target.name }),
+    detail: t("be_main.packageInstallDetail"),
   });
   if (response !== 0) return;
   broadcastPluginLifecycleEvent(channels.installProgress, { slug: params.slug, phase: "installing" });
@@ -574,11 +575,11 @@ async function handleMcpMarketplaceAction(
   if (params.action === "uninstall") {
     const { response } = await dialog.showMessageBox(win, {
       type: "warning",
-      buttons: ["제거", "취소"],
+      buttons: [t("be_main.btnRemove"), t("be_main.btnCancel")],
       defaultId: 1,
       cancelId: 1,
-      message: `${label} '${target.name}'을(를) 제거하시겠습니까?`,
-      detail: "외부 링크로부터 요청된 제거입니다.",
+      message: t("be_main.packageUninstallMsg", { label, name: target.name }),
+      detail: t("be_main.packageUninstallDetail"),
     });
     if (response !== 0) return;
     void activeServices.mcpManager.removeConfig(params.slug).catch((err: Error) => {
@@ -588,11 +589,11 @@ async function handleMcpMarketplaceAction(
   }
   const { response } = await dialog.showMessageBox(win, {
     type: "question",
-    buttons: ["설치", "취소"],
+    buttons: [t("be_main.btnInstall"), t("be_main.btnCancel")],
     defaultId: 1,
     cancelId: 1,
-    message: `${label} '${target.name}'을(를) 설치하시겠습니까?`,
-    detail: "외부 링크로부터 요청된 설치입니다.",
+    message: t("be_main.packageInstallMsg", { label, name: target.name }),
+    detail: t("be_main.packageInstallDetail"),
   });
   if (response !== 0) return;
   void (async () => {
@@ -625,12 +626,11 @@ async function handleMcpLoginAction(
 
   const { response } = await dialog.showMessageBox(win, {
     type: "question",
-    buttons: ["설치 후 설정 열기", "취소"],
+    buttons: [t("be_main.btnInstallAndOpenSettings"), t("be_main.btnCancel")],
     defaultId: 1,
     cancelId: 1,
-    message: `MCP '${target.name}' 로그인을 준비하시겠습니까?`,
-    detail:
-      "OAuth 로그인을 위해 먼저 MCP 서버를 설치하고 연결 설정을 등록합니다. 토큰이나 인증 코드는 마켓플레이스 manifest에 저장되지 않습니다.",
+    message: t("be_main.mcpLoginPrepareMsg", { name: target.name }),
+    detail: t("be_main.mcpLoginPrepareDetail"),
   });
   if (response !== 0) return;
 
@@ -762,11 +762,11 @@ async function handleLvisUri(url: string) {
     if (target.isManaged) {
       await dialog.showMessageBox(win, {
         type: "warning",
-        buttons: ["확인"],
+        buttons: [t("be_main.btnOk")],
         defaultId: 0,
         cancelId: 0,
-        message: `플러그인 '${target.name}'은(는) 제거할 수 없습니다.`,
-        detail: "관리자가 설치한 플러그인은 사용자 요청으로 제거할 수 없습니다.",
+        message: t("be_main.pluginManagedCannotRemoveMsg", { name: target.name }),
+        detail: t("be_main.pluginManagedCannotRemoveDetail"),
       });
       broadcastPluginLifecycleEvent("lvis:plugins:uninstall-result", {
         slug: target.pluginId,
@@ -778,11 +778,11 @@ async function handleLvisUri(url: string) {
     if (target.installed === false) {
       await dialog.showMessageBox(win, {
         type: "info",
-        buttons: ["확인"],
+        buttons: [t("be_main.btnOk")],
         defaultId: 0,
         cancelId: 0,
-        message: `플러그인 '${target.name}'은(는) 설치되어 있지 않습니다.`,
-        detail: "외부 링크의 제거 요청을 처리하지 않았습니다.",
+        message: t("be_main.pluginNotInstalledMsg", { name: target.name }),
+        detail: t("be_main.pluginNotInstalledDetail"),
       });
       broadcastPluginLifecycleEvent("lvis:plugins:uninstall-result", {
         slug: target.pluginId,
@@ -797,11 +797,11 @@ async function handleLvisUri(url: string) {
     });
     const { response } = await dialog.showMessageBox(win, {
       type: "warning",
-      buttons: ["제거", "취소"],
+      buttons: [t("be_main.btnRemove"), t("be_main.btnCancel")],
       defaultId: 1,
       cancelId: 1,
-      message: `플러그인 '${target.name}'을(를) 제거하시겠습니까?`,
-      detail: "외부 링크로부터 요청된 제거입니다. 플러그인 파일, 로컬 데이터, 설정, 저장된 비밀값, 기록된 로그인 세션이 삭제됩니다.",
+      message: t("be_main.pluginUninstallMsg", { name: target.name }),
+      detail: t("be_main.pluginUninstallDetail"),
     });
     lvisDevLog("[lvis] handleLvisUri: uninstall dialog response", {
       slug: params.slug,
@@ -840,11 +840,11 @@ async function handleLvisUri(url: string) {
   lvisDevLog("[lvis] handleLvisUri: showing confirmation dialog", { slug: params.slug });
   const { response } = await dialog.showMessageBox(win, {
     type: "question",
-    buttons: ["설치", "취소"],
+    buttons: [t("be_main.btnInstall"), t("be_main.btnCancel")],
     defaultId: 1,
     cancelId: 1,
-    message: `플러그인 '${params.slug}'을(를) 설치하시겠습니까?`,
-    detail: "외부 링크로부터 요청된 설치입니다.",
+    message: t("be_main.pluginInstallMsg", { slug: params.slug }),
+    detail: t("be_main.pluginInstallDetail"),
   });
   lvisDevLog("[lvis] handleLvisUri: dialog response", { slug: params.slug, response });
   if (response !== 0) return;
@@ -893,7 +893,7 @@ function broadcastPluginLifecycleEvent(channel: string, payload: unknown): void 
 }
 
 function createViewMenu() {
-  if (!services) return { label: "플러그인", submenu: [] as MenuItemConstructorOptions[] };
+  if (!services) return { label: t("be_main.menuPlugins"), submenu: [] as MenuItemConstructorOptions[] };
   const pluginViews = services.pluginRuntime
     .listUiExtensions()
     .filter((item) => item.extension.slot === "sidebar")
@@ -902,9 +902,9 @@ function createViewMenu() {
       label: item.extension.displayName?.trim() || item.extension.title || item.pluginId,
     }));
   return {
-    label: "플러그인",
+    label: t("be_main.menuPlugins"),
     submenu: [
-      { label: "홈", click: () => activateView("home") },
+      { label: t("be_main.menuHome"), click: () => activateView("home") },
       ...pluginViews.map((item) => ({
         label: item.label,
         click: () => activateView(item.key),
@@ -925,7 +925,7 @@ function detachedWindowOptionsForViewKey(viewKey: string): DetachedWindowOptions
 
 function createSettingsMenuItem(): MenuItemConstructorOptions {
   return {
-    label: "설정...",
+    label: t("be_main.menuSettings"),
     accelerator: "CommandOrControl+,",
     click: () => {
       openSettingsWindow("llm");
@@ -964,14 +964,14 @@ function refreshTrayMenu(): void {
   if (!tray) return;
   tray.setContextMenu(Menu.buildFromTemplate([
     {
-      label: "LVIS 열기",
+      label: t("be_main.menuOpenLvis"),
       click: () => showOrCreateMainWindow("tray-open"),
     },
     { type: "separator" },
     createAlwaysOnTopMenuItem(),
     createSettingsMenuItem(),
     { type: "separator" },
-    { label: "종료", role: "quit" },
+    { label: t("be_main.menuQuit"), role: "quit" },
   ]));
 }
 
@@ -990,7 +990,7 @@ function ensureTray(): void {
 
 function createAlwaysOnTopMenuItem(): MenuItemConstructorOptions {
   return {
-    label: "항상 위에",
+    label: t("be_main.menuAlwaysOnTop"),
     type: "checkbox",
     checked: isMainWindowAlwaysOnTop(),
     click: () => {
@@ -1004,7 +1004,7 @@ function createAlwaysOnTopMenuItem(): MenuItemConstructorOptions {
 
 function createDisplayMenu(): MenuItemConstructorOptions {
   return {
-    label: "보기",
+    label: t("be_main.menuView"),
     submenu: [
       { role: "reload" },
       { type: "separator" },
@@ -1015,7 +1015,7 @@ function createDisplayMenu(): MenuItemConstructorOptions {
 
 function createHelpMenu(): MenuItemConstructorOptions {
   return {
-    label: "도움말",
+    label: t("be_main.menuHelp"),
     role: "help",
     submenu: [],
   };
@@ -1023,18 +1023,18 @@ function createHelpMenu(): MenuItemConstructorOptions {
 
 function createEditMenu(): MenuItemConstructorOptions {
   return {
-    label: "편집",
+    label: t("be_main.menuEdit"),
     submenu: [
-      { role: "undo", label: "실행 취소" },
-      { role: "redo", label: "다시 실행" },
+      { role: "undo", label: t("be_main.menuUndo") },
+      { role: "redo", label: t("be_main.menuRedo") },
       { type: "separator" },
-      { role: "cut", label: "잘라내기" },
-      { role: "copy", label: "복사" },
-      { role: "paste", label: "붙여넣기" },
-      { role: "pasteAndMatchStyle", label: "서식 없이 붙여넣기" },
-      { role: "delete", label: "삭제" },
+      { role: "cut", label: t("be_main.menuCut") },
+      { role: "copy", label: t("be_main.menuCopy") },
+      { role: "paste", label: t("be_main.menuPaste") },
+      { role: "pasteAndMatchStyle", label: t("be_main.menuPasteAndMatchStyle") },
+      { role: "delete", label: t("be_main.menuDelete") },
       { type: "separator" },
-      { role: "selectAll", label: "전체 선택" },
+      { role: "selectAll", label: t("be_main.menuSelectAll") },
     ],
   };
 }
@@ -1064,7 +1064,7 @@ function refreshApplicationMenu() {
           helpMenu,
         ]
       : [
-          { label: "앱", submenu: [createAlwaysOnTopMenuItem(), settingsMenuItem, { type: "separator" }, { role: "quit" }] },
+          { label: t("be_main.menuApp"), submenu: [createAlwaysOnTopMenuItem(), settingsMenuItem, { type: "separator" }, { role: "quit" }] },
           editMenu,
           createViewMenu(),
           displayMenu,
@@ -1154,7 +1154,7 @@ function openSettingsWindow(initialTabInput: unknown = "llm"): BrowserWindow {
     minWidth: SETTINGS_WINDOW_MIN_WIDTH,
     minHeight: SETTINGS_WINDOW_MIN_HEIGHT,
     show: false,
-    title: "LVIS 설정",
+    title: t("be_main.settingsWindowTitle"),
     icon: resolveAppIconPath(),
     autoHideMenuBar: true,
     // Chrome unification — spread from the shared helper so settings,
@@ -1268,11 +1268,11 @@ function registerSettingsWindowHandlers(auditLogger: AppServices["auditLogger"])
 }
 
 const BOOTSTRAP_STATUS_MESSAGES = [
-  "런타임을 준비하는 중...",
-  "사용자 설정과 메모리를 불러오는 중...",
-  "플러그인 무결성을 확인하는 중...",
-  "마켓플레이스와 동기화하는 중...",
-  "작업 화면을 여는 중...",
+  t("be_main.bootstrapStatus0"),
+  t("be_main.bootstrapStatus1"),
+  t("be_main.bootstrapStatus2"),
+  t("be_main.bootstrapStatus3"),
+  t("be_main.bootstrapStatus4"),
 ] as const;
 const BOOTSTRAP_MESSAGE_MIN_VISIBLE_MS = 500;
 const BOOTSTRAP_SPLASH_MIN_VISIBLE_MS = BOOTSTRAP_MESSAGE_MIN_VISIBLE_MS;
@@ -1377,7 +1377,7 @@ const BOOTSTRAP_SPLASH = `<!DOCTYPE html>
       <div class="dots" aria-hidden="true"><span class="dot"></span><span class="dot"></span><span class="dot"></span></div>
     </div>
   </div>
-  <div class="version" aria-label="버전 정보">
+  <div class="version" aria-label="${t("be_main.splashVersionLabel")}">
     <span>LVIS v${getLvisAppVersion()}</span>
     <span>Electron v${process.versions.electron ?? ""}</span>
     <span>Node v${process.versions.node ?? ""}</span>
@@ -1634,19 +1634,19 @@ async function main() {
   // §4.2 Step 8: window 생성 (splash 표시) — bootstrap이 mainWindow를 필요로 함
   createWindow();
 
-  updateSplashStatus("네트워크 인증서를 확인하는 중...");
+  updateSplashStatus(t("be_main.splashCheckingCerts"));
   await ensureCorporateCaInjected();
 
   // Drive splash status from the real bootstrap pipeline so the text below
   // the wordmark matches what's actually happening rather than cycling
   // through a setInterval list. The fallback idle cycle inside the splash
   // still runs until the first explicit update lands.
-  updateSplashStatus("사용자 설정과 메모리를 불러오는 중...");
+  updateSplashStatus(t("be_main.splashLoadingSettings"));
 
   // §4.2 Boot Sequence (mainWindow 전달 — PythonRuntimeBootstrapper IPC 사용)
   services = await bootstrap(projectRoot, mainWindow!, () => mainWindow);
 
-  updateSplashStatus("작업 화면을 여는 중...");
+  updateSplashStatus(t("be_main.splashOpeningWorkspace"));
 
   // `--plugin-smoke=<id,...>` exits early after verifying that the
   // named plugins mounted + initialized. Boot already awaited

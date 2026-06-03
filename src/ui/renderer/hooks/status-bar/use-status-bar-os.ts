@@ -1,4 +1,5 @@
 import { useEffect } from "react";
+import { t } from "../../../../i18n/runtime.js";
 import { STATUS_BAR_OS_EMOJIS } from "../../../../shared/status-bar-emojis.js";
 import type { LvisApi } from "../../types.js";
 import type { PersistentItem } from "./types.js";
@@ -34,7 +35,7 @@ export function useStatusBarOs({ api, upsertPersistent }: Options): void {
           severity: "info",
           label: emoji,
           value: "",
-          a11yLabel: "운영체제",
+          a11yLabel: t("useStatusBarOs.osLabel"),
         });
       } catch {
         // Non-fatal — the OS marker is decorative.

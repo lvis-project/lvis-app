@@ -1,0 +1,31 @@
+// AUTO-GENERATED — i18n migration. Source: src/ui/renderer/components/CheckpointDivider.tsx. Do not edit by hand.
+export const en = {
+  "checkpointDivider.statusSummarized": "Summarized",
+  "checkpointDivider.statusContentTruncated": "Partially Truncated",
+  "checkpointDivider.statusNoop": "No Compression Needed",
+  "checkpointDivider.statusReducedInsufficient": "Force Truncated",
+  "checkpointDivider.triggerAutoCompact": "Auto Cleanup",
+  "checkpointDivider.triggerManual": "Manual Cleanup",
+  "checkpointDivider.checkpoint": "Checkpoint",
+  "checkpointDivider.messageCount": "{count} messages",
+  "checkpointDivider.originalPreserved": "Original preserved: {dir}",
+  "checkpointDivider.viewAriaLabel": "View checkpoint #{num}",
+  "checkpointDivider.viewButton": "View this point",
+  "checkpointDivider.branchAriaLabel": "Start new session from checkpoint #{num}",
+  "checkpointDivider.branchButton": "Restart from here",
+} as const;
+export const ko: Record<keyof typeof en, string> = {
+  "checkpointDivider.statusSummarized": "요약 완료",
+  "checkpointDivider.statusContentTruncated": "부분 절단",
+  "checkpointDivider.statusNoop": "압축 불필요",
+  "checkpointDivider.statusReducedInsufficient": "강제 절단",
+  "checkpointDivider.triggerAutoCompact": "자동 정리",
+  "checkpointDivider.triggerManual": "수동 정리",
+  "checkpointDivider.checkpoint": "체크포인트",
+  "checkpointDivider.messageCount": "메시지 {count}개",
+  "checkpointDivider.originalPreserved": "원본 보존: {dir}",
+  "checkpointDivider.viewAriaLabel": "체크포인트 #{num} 시점 보기",
+  "checkpointDivider.viewButton": "이 시점 보기",
+  "checkpointDivider.branchAriaLabel": "체크포인트 #{num} 에서 새 세션 시작",
+  "checkpointDivider.branchButton": "여기부터 다시 시작",
+};

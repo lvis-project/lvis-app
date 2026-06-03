@@ -14,6 +14,7 @@ import { X } from "lucide-react";
 import { Button } from "../../../components/ui/button.js";
 import { Slider } from "../../../components/ui/slider.js";
 import type { LvisApi } from "../types.js";
+import { useTranslation } from "../../../i18n/react.js";
 
 interface PreflightStatus {
   runtimeOverride: number | null;
@@ -30,6 +31,7 @@ interface DevToolsPanelProps {
 }
 
 export function DevToolsPanel({ api, open, onClose }: DevToolsPanelProps) {
+  const { t } = useTranslation();
   const [status, setStatus] = useState<PreflightStatus | null>(null);
   const [sliderValue, setSliderValue] = useState<number>(5_000);
   const [error, setError] = useState<string | null>(null);
@@ -112,13 +114,13 @@ export function DevToolsPanel({ api, open, onClose }: DevToolsPanelProps) {
           variant="ghost"
           size="icon-xs"
           onClick={onClose}
-          aria-label="Dev tools 닫기"
+          aria-label={t("devToolsPanel.closeAriaLabel")}
         >
           <X className="h-3 w-3" />
         </Button>
       </div>
       <p className="mt-1 text-[10px] text-muted-foreground">
-        단축키: Cmd/Ctrl+Shift+D · NODE_ENV=production 에서는 숨김
+        {t("devToolsPanel.shortcutHint")}
       </p>
 
       <div className="mt-4 space-y-2">
@@ -166,9 +168,9 @@ export function DevToolsPanel({ api, open, onClose }: DevToolsPanelProps) {
           size="sm"
           className="h-7 flex-1 text-xs"
           onClick={handleClear}
-          aria-label="Override 해제"
+          aria-label={t("devToolsPanel.clearOverrideAriaLabel")}
         >
-          Override 해제
+          {t("devToolsPanel.clearOverrideButton")}
         </Button>
         <Button
           type="button"
@@ -176,9 +178,9 @@ export function DevToolsPanel({ api, open, onClose }: DevToolsPanelProps) {
           size="sm"
           className="h-7 flex-1 text-xs"
           onClick={() => void refreshStatus()}
-          aria-label="새로고침"
+          aria-label={t("devToolsPanel.refreshAriaLabel")}
         >
-          새로고침
+          {t("devToolsPanel.refreshButton")}
         </Button>
       </div>
 
@@ -189,9 +191,7 @@ export function DevToolsPanel({ api, open, onClose }: DevToolsPanelProps) {
       )}
 
       <p className="mt-3 border-t pt-2 text-[10px] text-muted-foreground">
-        설명: 슬라이더 위치가 compact 트리거 임계 (절대 token count). 작게
-        설정하면 짧은 대화만으로도 SUMMARIZED / CONTENT_TRUNCATED / FORCED 시나리오
-        재현 가능. 변경 즉시 IPC 로 engine 에 반영.
+        {t("devToolsPanel.sliderDescription")}
       </p>
     </div>
   );
