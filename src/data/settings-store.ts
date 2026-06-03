@@ -125,14 +125,6 @@ export interface FeatureFlags {
    */
   demoAutoplayEnabled?: boolean;
   /**
-   * Tutorial-X3 — index into the `DEMO_SCRIPTS` rotation. Each install
-   * boot picks `DEMO_SCRIPTS[index % len]`, then bumps the index. The
-   * value is best-effort: `undefined` falls back to 0, out-of-range
-   * values are wrapped modulo the catalog length. A single int avoids a
-   * dedicated namespace for one counter.
-   */
-  demoAutoplayRotationIndex?: number;
-  /**
    * Demo-only display preference. When `true`, the chat timeline suppresses
    * the per-tool failure pill ("실패") and the group-level "오류 있음" pill so
    * a failed tool call reads as an ordinary row (name + duration only). This
@@ -1131,14 +1123,6 @@ function normalizeFeatureFlags(input: unknown): FeatureFlags {
   }
   if (typeof obj.hideToolFailures === "boolean") {
     result.hideToolFailures = obj.hideToolFailures;
-  }
-  // Tutorial-X3 — accept the int rotation index; drop NaN / non-finite
-  // values so a corrupted on-disk state never crashes the autoplay path.
-  if (
-    typeof obj.demoAutoplayRotationIndex === "number" &&
-    Number.isFinite(obj.demoAutoplayRotationIndex)
-  ) {
-    result.demoAutoplayRotationIndex = obj.demoAutoplayRotationIndex;
   }
   return result;
 }

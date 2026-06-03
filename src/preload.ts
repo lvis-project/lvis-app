@@ -1215,16 +1215,6 @@ const api = {
       offset?: number;
     }) => ipcRenderer.invoke("lvis:audit:search", filter),
     getStats: async (lastDays: number) => ipcRenderer.invoke("lvis:audit:stats", lastDays),
-    /**
-     * Live Auto-play — renderer reports each demo phase. The main-side
-     * handler enforces the `[demo-autoplay]` prefix + `route: "demo-autoplay"`
-     * so analytics queries can filter the demo channel without inspecting
-     * per-field payloads. Proposal: docs/architecture/proposals/live-autoplay.md §8.
-     */
-    logDemoAutoplay: async (payload: { scriptId: string; phase: string; detail?: string }) =>
-      ipcRenderer.invoke("lvis:audit:log-demo-autoplay", payload) as Promise<
-        { ok: true } | { ok: false; error: string; message: string }
-      >,
   },
 
   // ─── Message feedback ────────────────────────────
