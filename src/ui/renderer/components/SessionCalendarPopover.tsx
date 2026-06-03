@@ -175,6 +175,11 @@ export function SessionCalendarPopover({
         <LazyCalendar
           mode="single"
           selected={pickedDate}
+          // Open the calendar on the selected date's month. Without this,
+          // react-day-picker v10 defaults the displayed month to *today*, so
+          // picking a divider from a previous month would open the calendar on
+          // the current month with the selection off-screen.
+          defaultMonth={pickedDate}
           onSelect={handleDateSelect}
           // Step 2: Disable future dates only. Past dates with no activity
           // remain selectable so the user can see the empty-state copy
