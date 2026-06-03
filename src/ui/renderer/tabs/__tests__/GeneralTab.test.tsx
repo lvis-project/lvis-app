@@ -119,7 +119,7 @@ describe("GeneralTab", () => {
     await waitFor(() => expect(status.textContent).toContain("미연결"));
   });
 
-  // 2026-05-20 — 인증 관리 section: 로그아웃 / 데모 자격증명 재입력
+  // 2026-05-20 — 인증 관리 section: 로그아웃 / 활성화 키 재입력
   it("renders 인증 관리 buttons (reactivate + logout)", async () => {
     const api = generalTabApi();
     const { findByTestId } = render(
@@ -127,11 +127,11 @@ describe("GeneralTab", () => {
     );
     const reactivate = await findByTestId("general-tab-reactivate-demo");
     const logout = await findByTestId("general-tab-logout");
-    expect(reactivate.textContent).toContain("데모 자격증명 재입력");
+    expect(reactivate.textContent).toContain("활성화 키 재입력");
     expect(logout.textContent).toContain("로그아웃");
   });
 
-  it("invokes onReactivateDemo when the 데모 자격증명 재입력 button is clicked", async () => {
+  it("invokes onReactivateDemo when the 활성화 키 재입력 button is clicked", async () => {
     const api = generalTabApi();
     const onReactivateDemo = vi.fn();
     const { findByTestId } = render(
