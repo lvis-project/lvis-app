@@ -367,6 +367,35 @@ describe("allowed-subnet sourcing (LVIS_DEMO_HOST_SUBNET)", () => {
     ).toBe(false);
     expect(app.commandLine.appendSwitch).not.toHaveBeenCalled();
   });
+
+  it("FAILS CLOSED when a provided subnet is present but entirely unparseable", () => {
+    const base = "https://endpoint.openai.azure.com/openai/v1/";
+    // A typo'd narrowing directive must NOT silently widen back to RFC1918 —
+    // an in-RFC1918 target that would pass the default must be rejected.
+    for (const badSubnet of ["10.182.192/24", "10.182.192.0", "/24", "garbage,also-bad", "10.0.0.0/33"]) {
+      expect(
+        validateDemoFoundryHostMap(base, "endpoint.openai.azure.com=10.182.192.7", badSubnet),
+        `subnet "${badSubnet}" must fail closed`,
+      ).toBe("invalid-foundry-host-map-target");
+      expect(
+        demoFoundryHostMapFingerprint(base, "endpoint.openai.azure.com=10.182.192.7", badSubnet),
+        `subnet "${badSubnet}" must produce no fingerprint`,
+      ).toBeNull();
+    }
+  });
+
+  it("applyDemoHostResolverRules fails closed on a malformed subnet directive", () => {
+    const app = makeApp();
+    expect(
+      applyDemoHostResolverRules(app, {
+        LVIS_DEMO_VENDOR: "azure-foundry",
+        LVIS_DEMO_ENDPOINT_AZURE_FOUNDRY: "https://example.test.openai.azure.com/openai/v1/",
+        LVIS_DEMO_HOST_MAP: "example.test.openai.azure.com=10.182.192.10",
+        LVIS_DEMO_HOST_SUBNET: "not-a-cidr",
+      }),
+    ).toBe(false);
+    expect(app.commandLine.appendSwitch).not.toHaveBeenCalled();
+  });
 });
 
 describe("demoFoundryHostMapFingerprint", () => {
