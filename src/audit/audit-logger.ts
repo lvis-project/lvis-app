@@ -23,7 +23,7 @@ import {
   statSync,
 } from "node:fs";
 import { createWriteStream } from "node:fs";
-import { unlink, rename, stat as fsStat } from "node:fs/promises";
+import { unlink, stat as fsStat } from "node:fs/promises";
 import { join } from "node:path";
 import { createInterface } from "node:readline";
 import { createGzip } from "node:zlib";

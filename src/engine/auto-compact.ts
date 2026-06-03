@@ -9,8 +9,8 @@
  * - 최근 N개 메시지는 보존 (DEFAULT_CONFIG.preserveRecentMessages = 12)
  * - 요약은 파일 참조, 진행 중인 작업, 핵심 결정을 보존
  */
-import type { GenericMessage, TokenUsage, LLMVendor, UserContentPart } from "./llm/types.js";
-import { serializeMessageForEstimation, userContentText } from "./llm/types.js";
+import type { GenericMessage, LLMVendor } from "./llm/types.js";
+import { serializeMessageForEstimation } from "./llm/types.js";
 import { lookupPricing, effectiveContextWindow } from "../shared/pricing-data.js";
 import { getUsableContext, getPreflightThreshold } from "../shared/context-budget.js";
 import { buildToolResultStrippedStub, buildToolResultTruncatedStub } from "../shared/tool-result-stub.js";

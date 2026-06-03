@@ -33,10 +33,7 @@ export {
 } from "../shared/routines-types.js";
 
 import type {
-  RoutineExecution,
-  RoutineRepeat,
   RoutineRecord,
-  RoutineSchedule,
   RoutineScope,
   AddRoutineInput,
 } from "../shared/routines-types.js";

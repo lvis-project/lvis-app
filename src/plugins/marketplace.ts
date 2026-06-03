@@ -1,7 +1,6 @@
 import { cp, mkdir, readFile, rename, rm, stat as statAsync, writeFile } from "node:fs/promises";
 import { createHash } from "node:crypto";
 import { tombstoneAndDeferredRemove } from "./installed-entry-fs.js";
-import { realpathSync } from "node:fs";
 import { dirname, isAbsolute, posix, relative, resolve } from "node:path";
 import { buildSideloadCopyFilter, rejectEscapingSymlinks } from "./sideload-filter.js";
 import { readPluginRegistry, updatePluginRegistry, withRegistryLock, writePluginRegistry } from "./registry.js";
@@ -179,12 +178,6 @@ export class MockMarketplaceFetcher implements MarketplaceFetcher {
     }
     return parsed;
   }
-}
-
-/** §9.6 — per-plugin install/rollback history. */
-interface PluginHistoryEntry {
-  version: string;
-  installedAt: string; // ISO timestamp
 }
 
 export class PluginMarketplaceService {
