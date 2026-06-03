@@ -69,6 +69,7 @@ import { persistedEnvDemoPath } from "../../main/demo-activation-loader.js";
 import {
   getDemoActiveVendor,
   getDemoHostMap,
+  getDemoHostSubnet,
   getDemoVendorConfig,
   isDemoEnabled,
   recaptureDemoCredentialsAfterActivation,
@@ -187,7 +188,7 @@ function validateActivationPayloadHostMap(
   const baseUrl =
     parsed.LVIS_DEMO_BASEURL_AZURE_FOUNDRY ??
     parsed.LVIS_DEMO_ENDPOINT_AZURE_FOUNDRY;
-  const error = validateDemoFoundryHostMap(baseUrl, parsed.LVIS_DEMO_HOST_MAP);
+  const error = validateDemoFoundryHostMap(baseUrl, parsed.LVIS_DEMO_HOST_MAP, parsed.LVIS_DEMO_HOST_SUBNET);
   if (error !== null) {
     log.warn(`activation payload has invalid azure-foundry host map: ${error}`);
   }
@@ -207,7 +208,7 @@ function demoFoundryResolverFingerprintForCurrentBoot(): string | null {
   } catch {
     return null;
   }
-  return demoFoundryHostMapFingerprint(config.baseUrl, getDemoHostMap());
+  return demoFoundryHostMapFingerprint(config.baseUrl, getDemoHostMap(), getDemoHostSubnet());
 }
 
 function demoFoundryResolverFingerprintForPayload(
@@ -218,7 +219,7 @@ function demoFoundryResolverFingerprintForPayload(
   const baseUrl =
     parsed.LVIS_DEMO_BASEURL_AZURE_FOUNDRY ??
     parsed.LVIS_DEMO_ENDPOINT_AZURE_FOUNDRY;
-  return demoFoundryHostMapFingerprint(baseUrl, parsed.LVIS_DEMO_HOST_MAP);
+  return demoFoundryHostMapFingerprint(baseUrl, parsed.LVIS_DEMO_HOST_MAP, parsed.LVIS_DEMO_HOST_SUBNET);
 }
 
 function validateActivationPayloadKey(
@@ -394,8 +395,8 @@ export function registerDemoHandlers(deps: IpcDeps): void {
       //
       // Chromium command-line switches (host-resolver-rules, used by
       // `applyDemoHostResolverRules` to map the internal Azure Foundry
-      // hostname onto the 10.182.192.0/24 intranet) are frozen after
-      // `app.whenReady()`. We only call `applyDemoHostResolverRules` once
+      // hostname onto the activation-provided intranet subnet) are frozen
+      // after `app.whenReady()`. We only call `applyDemoHostResolverRules` once
       // at boot. If `.env.demo` was absent at boot (i.e. this is the very
       // first activation), retroactive `injectDemoEnv` mutates
       // `process.env` but cannot rewire the Chromium net stack — the

@@ -147,7 +147,7 @@ describe("PersonalizedWelcome", () => {
     expect(cta.disabled).toBe(false);
   });
 
-  it("ping failure (private endpoint): points the user at VPN or demo host-map", async () => {
+  it("ping failure (private endpoint): points the user at VPN or network connection", async () => {
     const { api } = personalizedWelcomeApi(async () => ({
       configured: true,
       online: false,
@@ -164,11 +164,11 @@ describe("PersonalizedWelcome", () => {
     const failure = screen.getByTestId(
       "personalized-welcome:ping-failure",
     );
-    expect(failure.textContent).toContain("private endpoint");
-    expect(failure.textContent).toContain("host-map");
+    expect(failure.textContent).toContain("VPN");
+    expect(failure.textContent).toContain("네트워크 연결");
   });
 
-  it("ping failure (timeout): points the user at VPN or demo host-map", async () => {
+  it("ping failure (timeout): points the user at VPN or network connection", async () => {
     const { api } = personalizedWelcomeApi(async () => ({
       configured: true,
       online: false,
@@ -185,8 +185,8 @@ describe("PersonalizedWelcome", () => {
     const failure = screen.getByTestId(
       "personalized-welcome:ping-failure",
     );
-    expect(failure.textContent).toContain("private endpoint");
-    expect(failure.textContent).toContain("host-map");
+    expect(failure.textContent).toContain("VPN");
+    expect(failure.textContent).toContain("네트워크 연결");
   });
 
   it("ping failure (unauthorized-frame ok=false): surfaces warning + keeps continue enabled", async () => {

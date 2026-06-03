@@ -8,7 +8,7 @@ export const en = {
   "personalizedWelcome.pingLoading": "Checking LLM connection…",
   "personalizedWelcome.pingSuccess": "LVIS connected to {vendor} · {model} in {latencyMs}ms.",
   "personalizedWelcome.pingFailureApiKey": "Could not verify LLM connection — please check your API key in Settings.",
-  "personalizedWelcome.pingFailurePrivateEndpoint": "Could not verify LLM private endpoint connection — please check your VPN or demo host-map.",
+  "personalizedWelcome.pingFailurePrivateEndpoint": "Could not verify the connection to the LLM endpoint — please check your VPN or network connection.",
   "personalizedWelcome.continueButton": "Yes, let's go →",
 } as const;
 export const ko: Record<keyof typeof en, string> = {
@@ -20,6 +20,6 @@ export const ko: Record<keyof typeof en, string> = {
   "personalizedWelcome.pingLoading": "LLM 연결 확인 중…",
   "personalizedWelcome.pingSuccess": "LVIS 가 {vendor} · {model} 와 {latencyMs}ms 만에 연결됐어요.",
   "personalizedWelcome.pingFailureApiKey": "LLM 연결을 확인하지 못했습니다 — Settings 에서 API 키를 확인하세요.",
-  "personalizedWelcome.pingFailurePrivateEndpoint": "LLM private endpoint 연결을 확인하지 못했습니다 — VPN 또는 데모 host-map 을 확인하세요.",
+  "personalizedWelcome.pingFailurePrivateEndpoint": "LLM 엔드포인트 연결을 확인하지 못했습니다 — VPN 또는 네트워크 연결을 확인하세요.",
   "personalizedWelcome.continueButton": "예, 시작할게요 →",
 };

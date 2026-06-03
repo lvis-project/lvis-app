@@ -76,6 +76,8 @@ interface DemoState {
   baseUrls: Map<string, string>; // vendorSuffix → baseUrl
   models: Map<string, string>;   // vendorSuffix → model
   hostMap?: string;
+  /** Optional comma-separated CIDR list narrowing host-map targets. */
+  hostSubnet?: string;
   vertexProject?: string;
   vertexLocation?: string;
 }
@@ -141,6 +143,7 @@ export function captureDemoCredentials(): void {
   const vertexProject = process.env.LVIS_DEMO_VERTEX_PROJECT;
   const vertexLocation = process.env.LVIS_DEMO_VERTEX_LOCATION;
   const hostMap = process.env.LVIS_DEMO_HOST_MAP;
+  const hostSubnet = process.env.LVIS_DEMO_HOST_SUBNET;
   const rawActiveVendor = process.env.LVIS_DEMO_VENDOR;
   const activeVendor: LLMVendor = isLLMVendor(rawActiveVendor)
     ? rawActiveVendor
@@ -160,6 +163,7 @@ export function captureDemoCredentials(): void {
     baseUrls,
     models,
     ...(typeof hostMap === "string" ? { hostMap } : {}),
+    ...(typeof hostSubnet === "string" && hostSubnet.length > 0 ? { hostSubnet } : {}),
     ...(typeof vertexProject === "string" && vertexProject.length > 0 ? { vertexProject } : {}),
     ...(typeof vertexLocation === "string" && vertexLocation.length > 0 ? { vertexLocation } : {}),
   };
@@ -242,6 +246,15 @@ export function getDemoVendorConfig(vendor: string): DemoVendorConfig | null {
 
 export function getDemoHostMap(): string | undefined {
   return captured.hostMap;
+}
+
+/**
+ * Optional comma-separated CIDR list (from `LVIS_DEMO_HOST_SUBNET`) narrowing
+ * which target IPs the host map may point to. `undefined` → callers fall back
+ * to the generic private (RFC1918) ranges in the host resolver.
+ */
+export function getDemoHostSubnet(): string | undefined {
+  return captured.hostSubnet;
 }
 
 /** Test-only reset. Production code must never call this. */

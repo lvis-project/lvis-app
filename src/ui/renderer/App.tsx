@@ -34,8 +34,6 @@ import { LLM_VENDORS } from "../../shared/llm-vendor-defaults.js";
 import { buildQuickActions } from "./components/command-actions.js";
 import { MainToolbar } from "./MainToolbar.js";
 import { useAppUpdate } from "./hooks/use-app-update.js";
-import { useDemoAutoplay } from "./hooks/use-demo-autoplay.js";
-import { DemoAutoplayView } from "./components/DemoAutoplayView.js";
 import { DevToolsPanel } from "./components/DevToolsPanel.js";
 import { MainContent } from "./MainContent.js";
 import { StatusBar } from "./components/StatusBar.js";
@@ -780,34 +778,6 @@ export function App() {
     }
   }, [api, chainStage, markOnboardingCompleted]);
 
-  // Live Auto-play (proposal: docs/architecture/proposals/live-autoplay.md).
-  // Activates for returning users (onboardingCompleted=true) only when the
-  // host reports captured demo activation through `lvis:demo:status`.
-  // `features.demoAutoplayEnabled=false` is the explicit opt-out. On a fresh
-  // install the demo is gated behind onboarding so the ScenarioShowcase chain
-  // is always shown first — see `shouldActivateDemoAutoplay`
-  // (engine/demo-autoplay/types.ts §7) for the truth table.
-  const demoAutoplay = useDemoAutoplay(api);
-  // When the demo is active we collapse the rest of the Z chain because the
-  // demo is a returning-user re-engage surface. `onFinished` only disables
-  // future autoplay; onboardingCompleted is set solely by explicit chain
-  // completion. Exceptions:
-  //   - `idle` / `done`: no chain to collapse.
-  //   - `showcase`: the user has started seeing the ScenarioShowcase
-  //     intro. Demo MUST NOT yank it out from under them — if both
-  //     somehow fired together (e.g. flag flipped mid-boot), we keep the
-  //     showcase visible and let the demo abort path retire itself when
-  //     the user dismisses or completes showcase.
-  useEffect(() => {
-    if (
-      demoAutoplay.turn &&
-      chainStage !== "done" &&
-      chainStage !== "idle" &&
-      chainStage !== "showcase"
-    ) {
-      dispatchChain({ type: "force-finish" });
-    }
-  }, [demoAutoplay.turn, chainStage]);
   const vendorSupportsThinking = useMemo(() => vendorSupportsThinkingShared(llmVendor, llmModel), [llmVendor, llmModel]);
   const onOpenSettings = useCallback((tab = "llm") => {
     void api.openSettingsWindow(tab);
@@ -865,25 +835,6 @@ export function App() {
   // detached panes — so the SpotlightTour component (always mounted in
   // App.tsx) flips on. Guarded against open dialogs so the shortcut never
   // races a modal interaction.
-  //
-  // F4 — demo↔tour mutex: when the Live Auto-play demo is mid-turn the
-  // shortcut is a no-op. The Spotlight engine would otherwise paint a
-  // backdrop on top of the demo overlay, breaking the scripted flow.
-  // We capture the demo turn in a ref so the handler stays stable, and
-  // mirror the flag onto `document.body[data-demo-active]` so the
-  // SpotlightTour component (which listens to IPC `tour:start` broadcasts
-  // independent of this shortcut) can also self-guard.
-  const demoActiveRef = useRef<boolean>(false);
-  useEffect(() => {
-    demoActiveRef.current = demoAutoplay.turn !== null;
-    if (typeof document !== "undefined") {
-      if (demoActiveRef.current) {
-        document.body.setAttribute("data-demo-active", "true");
-      } else {
-        document.body.removeAttribute("data-demo-active");
-      }
-    }
-  }, [demoAutoplay.turn]);
   useEffect(() => {
     const handler = (e: KeyboardEvent) => {
       if (e.key !== "?" && e.key !== "/") return;
@@ -895,13 +846,6 @@ export function App() {
           '[role="dialog"][data-state="open"], [role="alertdialog"][data-state="open"]',
         )
       ) {
-        return;
-      }
-      // F4 — demo↔tour mutex: while the demo is running, swallow the
-      // help-shortcut so the Spotlight tour can't fire on top of the
-      // scripted overlay.
-      if (demoActiveRef.current) {
-        e.preventDefault();
         return;
       }
       e.preventDefault();
@@ -1513,22 +1457,6 @@ export function App() {
           (immediately after the active turn's entries),
           so the previous App-level FloatingQuestionPanel mount is gone.
           See <AskUserQuestionCard> + ChatView ask-question slot. */}
-      {demoAutoplay.turn && (
-        <div
-          data-testid="demo-autoplay-overlay"
-          className="fixed inset-0 z-[10000] flex items-stretch justify-center bg-background/95 backdrop-blur-sm"
-          role="dialog"
-          aria-label="LVIS Live Auto-play demo"
-        >
-          <div className="m-4 flex w-full max-w-[460px] flex-col overflow-hidden rounded-xl border border-border bg-card shadow-2xl">
-            <DemoAutoplayView
-              turn={demoAutoplay.turn}
-              onFinished={demoAutoplay.onFinished}
-              onAuditEvent={demoAutoplay.emitAuditEvent}
-            />
-          </div>
-        </div>
-      )}
       <DeferredQueueDialog open={deferredQueueOpen} onOpenChange={setDeferredQueueOpen} />
       <ApprovalDialog queue={approvalQueue} onDecide={handleApprovalDecide} />
       {/* Z onboarding chain — staged sequence of dialogs.
