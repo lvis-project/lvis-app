@@ -3,6 +3,7 @@ import { Button } from "../../../components/ui/button.js";
 import type { LvisApi, PluginPerfStats } from "../types.js";
 import { SettingsPageHeader } from "../components/SettingsPageHeader.js";
 import { SettingsSection } from "../components/SettingsSection.js";
+import { useTranslation } from "../../../i18n/react.js";
 
 type Row = {
   pluginId: string;
@@ -47,6 +48,7 @@ function BarChart({ rows }: { rows: Row[] }) {
 }
 
 export function PluginPerfTab({ api }: { api: LvisApi }) {
+  const { t } = useTranslation();
   const [rows, setRows] = useState<Row[]>([]);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -72,16 +74,16 @@ export function PluginPerfTab({ api }: { api: LvisApi }) {
   return (
     <div className="space-y-6">
       <SettingsPageHeader
-        title="플러그인 성능"
-        description="플러그인 메트릭과 자원 사용을 확인합니다"
+        title={t("pluginPerfTab.pageTitle")}
+        description={t("pluginPerfTab.pageDescription")}
       />
 
       <SettingsSection
-        title="런타임 지표"
-        description="로드된 플러그인의 런타임 성능 지표입니다."
+        title={t("pluginPerfTab.sectionTitle")}
+        description={t("pluginPerfTab.sectionDescription")}
         actions={
           <Button size="sm" variant="outline" onClick={() => void refresh()} disabled={loading}>
-            {loading ? "갱신 중..." : "새로고침"}
+            {loading ? t("pluginPerfTab.refreshing") : t("pluginPerfTab.refresh")}
           </Button>
         }
       >
@@ -92,7 +94,7 @@ export function PluginPerfTab({ api }: { api: LvisApi }) {
         )}
 
         {rows.length === 0 && !loading && !error && (
-          <p className="text-xs text-muted-foreground">로드된 플러그인이 없습니다.</p>
+          <p className="text-xs text-muted-foreground">{t("pluginPerfTab.emptyState")}</p>
         )}
 
         {rows.length > 0 && (
@@ -101,13 +103,13 @@ export function PluginPerfTab({ api }: { api: LvisApi }) {
               <table className="w-full text-xs">
                 <thead className="border-b bg-muted/40">
                   <tr>
-                    <th className="px-3 py-2 text-left font-medium">플러그인</th>
-                    <th className="px-3 py-2 text-right font-medium">시작 ms</th>
-                    <th className="px-3 py-2 text-right font-medium">호출 수</th>
-                    <th className="px-3 py-2 text-right font-medium">오류 수</th>
-                    <th className="px-3 py-2 text-right font-medium">오류율 %</th>
-                    <th className="px-3 py-2 text-right font-medium">평균 ms</th>
-                    <th className="px-3 py-2 text-left font-medium">마지막 호출</th>
+                    <th className="px-3 py-2 text-left font-medium">{t("pluginPerfTab.colPlugin")}</th>
+                    <th className="px-3 py-2 text-right font-medium">{t("pluginPerfTab.colStartupMs")}</th>
+                    <th className="px-3 py-2 text-right font-medium">{t("pluginPerfTab.colCallCount")}</th>
+                    <th className="px-3 py-2 text-right font-medium">{t("pluginPerfTab.colErrorCount")}</th>
+                    <th className="px-3 py-2 text-right font-medium">{t("pluginPerfTab.colErrorRate")}</th>
+                    <th className="px-3 py-2 text-right font-medium">{t("pluginPerfTab.colAvgMs")}</th>
+                    <th className="px-3 py-2 text-left font-medium">{t("pluginPerfTab.colLastCall")}</th>
                   </tr>
                 </thead>
                 <tbody>
@@ -137,7 +139,7 @@ export function PluginPerfTab({ api }: { api: LvisApi }) {
             </div>
 
             <div className="space-y-1">
-              <p className="text-xs font-medium">평균 실행 시간 (ms)</p>
+              <p className="text-xs font-medium">{t("pluginPerfTab.chartLabel")}</p>
               <BarChart rows={rows} />
             </div>
           </>

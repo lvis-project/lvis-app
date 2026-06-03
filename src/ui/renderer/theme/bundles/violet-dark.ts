@@ -1,4 +1,5 @@
 import type { ThemeBundle } from "./types.js";
+import { t } from "../../../../i18n/runtime.js";
 
 /**
  * Violet Dark bundle — dark shell with warm-grey surface and vivid-purple accent.
@@ -10,7 +11,7 @@ import type { ThemeBundle } from "./types.js";
 export const violetDarkBundle: ThemeBundle = {
   id: "violet-dark",
   name: "Violet Dark",
-  description: "다크 셸 + 웜그레이 서피스 + 비비드 퍼플 액센트",
+  description: t("violetDark.description"),
   shell: "dark",
   highContrast: false,
   tokens: {

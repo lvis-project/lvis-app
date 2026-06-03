@@ -13,6 +13,8 @@
  * Spec: docs/blueprints/composer-redesign-message-queue.md
  */
 
+import { t } from "../../../i18n/runtime.js";
+
 export interface MessageQueueItem {
   id: string;
   text: string;
@@ -45,7 +47,7 @@ export function formatQueueInject(items: readonly MessageQueueItem[]): string {
   if (items.length === 0) return "";
   if (items.length === 1) return items[0].text;
   return (
-    "사용자가 다음 항목을 추가 요청했습니다:\n" +
+    t("messageQueueStore.queueInjectHeader") +
     items.map((it) => `- ${it.text}`).join("\n")
   );
 }

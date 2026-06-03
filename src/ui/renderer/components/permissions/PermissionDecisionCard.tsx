@@ -1,4 +1,5 @@
 import type { ReactNode } from "react";
+import { t } from "../../../../i18n/runtime.js";
 
 export type RiskLevel = "low" | "medium" | "high";
 export type PermissionDecisionCategory = "read" | "write" | "shell" | "network" | "meta";
@@ -58,9 +59,9 @@ export function ReviewRow({
  * `level.toUpperCase()` callers leaked raw English to users.
  */
 export function riskLevelKoLabel(level: RiskLevel): string {
-  if (level === "high") return "높은 위험";
-  if (level === "medium") return "중간 위험";
-  return "낮은 위험";
+  if (level === "high") return t("permissionDecisionCard.riskHigh");
+  if (level === "medium") return t("permissionDecisionCard.riskMedium");
+  return t("permissionDecisionCard.riskLow");
 }
 
 export function levelBadgeClass(level: RiskLevel) {
@@ -76,18 +77,18 @@ export function reviewBoxClass(level: RiskLevel) {
 }
 
 export function reviewTitleForCategory(category: PermissionDecisionCategory) {
-  if (category === "read") return "읽기 판단근거";
-  if (category === "network") return "네트워크 영향범위";
-  if (category === "shell") return "명령 영향범위";
-  return "작업 영향범위";
+  if (category === "read") return t("permissionDecisionCard.reviewTitleRead");
+  if (category === "network") return t("permissionDecisionCard.reviewTitleNetwork");
+  if (category === "shell") return t("permissionDecisionCard.reviewTitleShell");
+  return t("permissionDecisionCard.reviewTitleDefault");
 }
 
 export function categoryLabel(category: PermissionDecisionCategory) {
-  if (category === "network") return "외부 전송";
-  if (category === "shell") return "명령 실행";
-  if (category === "write") return "변경";
-  if (category === "read") return "읽기";
-  return "정책";
+  if (category === "network") return t("permissionDecisionCard.categoryNetwork");
+  if (category === "shell") return t("permissionDecisionCard.categoryShell");
+  if (category === "write") return t("permissionDecisionCard.categoryWrite");
+  if (category === "read") return t("permissionDecisionCard.categoryRead");
+  return t("permissionDecisionCard.categoryMeta");
 }
 
 export function parseInputSummary(summary: string): ParsedSummary | null {
@@ -117,18 +118,18 @@ export function formatSummaryValue(value: unknown): string {
 
 export function scopeLabel(parsed: ParsedSummary | null): string {
   const scope = pickSummary(parsed, ["scope", "pathScope", "allowedDir", "allowedDirectories"], "");
-  return scope || "scope 정보는 입력 요약 기준";
+  return scope || t("permissionDecisionCard.scopeFallback");
 }
 
 export function sensitivityLabel(parsed: ParsedSummary | null): string {
   const explicit = pickSummary(parsed, ["sensitivity", "dataClass", "classification"], "");
-  return explicit || "소스 코드, 설정, 토큰, 개인/업무 데이터 포함 가능성";
+  return explicit || t("permissionDecisionCard.sensitivityFallback");
 }
 
 export function inputVolumeLabel(summary: string): string {
-  return `입력 요약 ${summary.length}자`;
+  return t("permissionDecisionCard.inputVolumeLabel", { length: summary.length });
 }
 
 export function payloadLabel(summary: string): string {
-  return `전송 내용 분류는 입력 요약 기준으로 확인 · ${summary.length}자`;
+  return t("permissionDecisionCard.payloadLabel", { length: summary.length });
 }

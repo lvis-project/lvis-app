@@ -12,6 +12,7 @@
  * electron `app.getVersion()` / `process.platform` values.
  */
 import { useCallback, useEffect, useMemo, useState } from "react";
+import { useTranslation } from "../../../i18n/react.js";
 import { Badge } from "../../../components/ui/badge.js";
 import { Button } from "../../../components/ui/button.js";
 import { Label } from "../../../components/ui/label.js";
@@ -138,6 +139,7 @@ export function GeneralTab({
   onLogout,
   onReactivateDemo,
 }: GeneralTabProps) {
+  const { t, locale } = useTranslation();
   const { stats, loading, refresh } = useWorkspaceStats(api);
   const [settings, setSettings] = useState<AppSettings | null>(null);
   const [userPrefs, setUserPrefs] = useState<string>("");
@@ -217,16 +219,16 @@ export function GeneralTab({
   );
 
   const marketplaceStatus: { dot: string; label: string } = useMemo(() => {
-    if (!stats.marketplace.configured) return { dot: "bg-muted-foreground/40", label: "미연결" };
-    if (stats.marketplace.online) return { dot: "bg-success", label: "정상" };
-    return { dot: "bg-destructive", label: "응답 없음" };
-  }, [stats.marketplace.configured, stats.marketplace.online]);
+    if (!stats.marketplace.configured) return { dot: "bg-muted-foreground/40", label: t("generalTab.marketplaceNotConnected") };
+    if (stats.marketplace.online) return { dot: "bg-success", label: t("generalTab.marketplaceOnline") };
+    return { dot: "bg-destructive", label: t("generalTab.marketplaceNoResponse") };
+  }, [stats.marketplace.configured, stats.marketplace.online, locale, t]);
 
   const lastSyncedLabel = useMemo(() => {
-    if (!stats.lastSyncedAt) return "동기화 전";
+    if (!stats.lastSyncedAt) return t("generalTab.notYetSynced");
     const dt = new Date(stats.lastSyncedAt);
-    return `마지막 동기화: ${dt.toLocaleTimeString()}`;
-  }, [stats.lastSyncedAt]);
+    return t("generalTab.lastSynced", { time: dt.toLocaleTimeString() });
+  }, [stats.lastSyncedAt, locale, t]);
 
   const avatarInitial = (honorific?.slice(0, 1) ?? provider.slice(0, 1) ?? "?").toUpperCase();
 
@@ -267,20 +269,20 @@ export function GeneralTab({
           // Logout is a credential-deletion operation. If the active vendor
           // secret remains, resetting onboarding would create a false logged-
           // out state while privileged credentials are still present.
-          setLogoutError("API 키 삭제 중 오류가 발생했습니다. 다시 시도해 주세요.");
+          setLogoutError(t("generalTab.errorDeleteApiKey"));
           return;
         }
       }
       const cleared = await api.demo.clearDemo();
       if (!cleared.ok) {
-        setLogoutError("데모 자격증명 삭제 중 오류가 발생했습니다. 다시 시도해 주세요.");
+        setLogoutError(t("generalTab.errorDeleteDemoCredentials"));
         return;
       }
       await api.updateSettings({ features: { onboardingCompleted: false } });
       setLogoutConfirmOpen(false);
       onLogout?.();
     } catch {
-      setLogoutError("로그아웃 처리 중 오류가 발생했습니다. 다시 시도해 주세요.");
+      setLogoutError(t("generalTab.errorLogout"));
     } finally {
       setLoggingOut(false);
     }
@@ -309,14 +311,14 @@ export function GeneralTab({
   return (
     <div className="space-y-6">
       <SettingsPageHeader
-        title="일반"
-        description="계정, 워크스페이스 통계, 시스템 정보를 한눈에 확인합니다"
+        title={t("generalTab.pageTitle")}
+        description={t("generalTab.pageDescription")}
       />
 
       {/* ── 계정 ──────────────────────────────────── */}
       <SettingsSection
-        title="계정"
-        description="현재 LVIS 가 사용 중인 모델 공급자와 사용자 자기소개를 보여줍니다."
+        title={t("generalTab.accountTitle")}
+        description={t("generalTab.accountDescription")}
         actions={
           <Button
             size="sm"
@@ -324,7 +326,7 @@ export function GeneralTab({
             className="h-7 text-xs"
             onClick={() => onNavigate("llm")}
           >
-            모델 설정 →
+            {t("generalTab.modelSettingsButton")}
           </Button>
         }
       >
@@ -337,7 +339,7 @@ export function GeneralTab({
           </div>
           <div className="min-w-0 flex-1 space-y-1.5">
             <div className="flex flex-wrap items-center gap-2">
-              <p className="text-base font-semibold">{honorific ?? "이름 미설정"}</p>
+              <p className="text-base font-semibold">{honorific ?? t("generalTab.nameNotSet")}</p>
               {provider && (
                 <Badge variant="secondary" className="text-[10px] uppercase">
                   {provider}
@@ -345,26 +347,26 @@ export function GeneralTab({
               )}
               {authMode === "login" ? (
                 <Badge variant="default" className="text-[10px]">
-                  로그인 모드
+                  {t("generalTab.loginModeBadge")}
                 </Badge>
               ) : (
                 <Badge variant="outline" className="text-[10px]">
-                  API 키 모드
+                  {t("generalTab.apiKeyModeBadge")}
                 </Badge>
               )}
               {hasVendorKey && (
                 <Badge variant="secondary" className="text-[10px]">
-                  키 등록됨
+                  {t("generalTab.keyRegisteredBadge")}
                 </Badge>
               )}
               {demoEnabled && (
                 <Badge variant="secondary" className="text-[10px]">
-                  데모
+                  {t("generalTab.demoBadge")}
                 </Badge>
               )}
             </div>
             <p className="text-sm text-muted-foreground" data-testid="general-tab-intro">
-              {intro ?? "자기소개가 등록되어 있지 않습니다. 역할 탭에서 MEMORY.md 를 편집할 수 있습니다."}
+              {intro ?? t("generalTab.introNotSet")}
             </p>
           </div>
         </div>
@@ -378,8 +380,8 @@ export function GeneralTab({
             · 로그아웃 — 모든 인증 + 데모 + onboarding state 초기화 →
               첫 부팅 ScenarioShowcase 재진입 */}
       <SettingsSection
-        title="인증 관리"
-        description="활성 코드를 다시 입력하거나, 모든 인증 정보를 삭제하고 첫 부팅 화면으로 돌아갈 수 있습니다."
+        title={t("generalTab.authManagementTitle")}
+        description={t("generalTab.authManagementDescription")}
       >
         <div className="flex flex-col gap-2">
           <Button
@@ -391,7 +393,7 @@ export function GeneralTab({
             data-testid="general-tab-reactivate-demo"
           >
             <KeyRound className="mr-2 size-4" aria-hidden={true} />
-            데모 자격증명 재입력
+            {t("generalTab.reactivateDemoButton")}
           </Button>
           <Button
             type="button"
@@ -402,36 +404,36 @@ export function GeneralTab({
             data-testid="general-tab-logout"
           >
             <LogOut className="mr-2 size-4" aria-hidden={true} />
-            로그아웃 (모든 인증 정보 삭제)
+            {t("generalTab.logoutButton")}
           </Button>
         </div>
       </SettingsSection>
 
       {/* ── 데모 표시 ───────────────────────────────── */}
       <SettingsSection
-        title="데모 표시"
-        description="시연 중 화면에 노출하고 싶지 않은 표시를 숨깁니다. 표시만 가릴 뿐 실제 도구 실행 결과와 감사 로그에는 영향을 주지 않습니다."
+        title={t("generalTab.demoDisplayTitle")}
+        description={t("generalTab.demoDisplayDescription")}
         actions={
           <Switch
             checked={hideToolFailures}
             onCheckedChange={onToggleHideToolFailures}
-            aria-label="도구 실패 배지 숨기기"
+            aria-label={t("generalTab.hideToolFailuresAriaLabel")}
             data-testid="general-tab-hide-tool-failures"
           />
         }
       >
         <p className="text-sm text-muted-foreground">
-          도구 호출이 실패해도 대화 타임라인에 "실패" / "오류 있음" 배지를 표시하지 않습니다.
+          {t("generalTab.hideToolFailuresHelp")}
         </p>
       </SettingsSection>
 
       <Dialog open={logoutConfirmOpen} onOpenChange={setLogoutConfirmOpen}>
         <DialogContent size="sm" data-testid="general-tab-logout-confirm">
           <DialogHeader>
-            <DialogTitle>로그아웃 하시겠습니까?</DialogTitle>
+            <DialogTitle>{t("generalTab.logoutConfirmTitle")}</DialogTitle>
           </DialogHeader>
           <p className="text-sm text-muted-foreground">
-            모든 인증 정보 + 데모 활성 상태가 삭제되고 첫 부팅 화면으로 돌아갑니다. 진행하시겠습니까?
+            {t("generalTab.logoutConfirmBody")}
           </p>
           {logoutError && (
             <p
@@ -449,7 +451,7 @@ export function GeneralTab({
               onClick={() => setLogoutConfirmOpen(false)}
               disabled={loggingOut}
             >
-              취소
+              {t("generalTab.cancelButton")}
             </Button>
             <Button
               type="button"
@@ -458,7 +460,7 @@ export function GeneralTab({
               disabled={loggingOut}
               data-testid="general-tab-logout-confirm-button"
             >
-              {loggingOut ? "처리 중…" : "로그아웃"}
+              {loggingOut ? t("generalTab.processingLabel") : t("generalTab.logoutConfirmButton")}
             </Button>
           </div>
         </DialogContent>
@@ -466,8 +468,8 @@ export function GeneralTab({
 
       {/* ── 워크스페이스 통계 ─────────────────────────── */}
       <SettingsSection
-        title="워크스페이스"
-        description="설치된 플러그인, 도구, 에이전트, 스킬, 역할 개수와 마켓플레이스 상태입니다."
+        title={t("generalTab.workspaceTitle")}
+        description={t("generalTab.workspaceDescription")}
         actions={
           <div className="flex items-center gap-2">
             <span className="text-[11px] text-muted-foreground">{lastSyncedLabel}</span>
@@ -477,7 +479,7 @@ export function GeneralTab({
               className="h-7 px-2 text-xs"
               onClick={() => void refresh()}
               disabled={loading}
-              aria-label="워크스페이스 통계 새로고침"
+              aria-label={t("generalTab.refreshStatsAriaLabel")}
             >
               <RefreshCw className="size-3" aria-hidden={true} />
             </Button>
@@ -486,11 +488,11 @@ export function GeneralTab({
       >
         <div
           role="group"
-          aria-label="워크스페이스 통계 카드"
+          aria-label={t("generalTab.statsGroupAriaLabel")}
           className="grid grid-cols-2 gap-3 sm:grid-cols-3 lg:grid-cols-5"
         >
           <StatCard
-            label="플러그인"
+            label={t("generalTab.statPlugins")}
             count={stats.pluginCount}
             icon={Puzzle}
             onClick={() => onNavigate("plugin-config")}
@@ -498,7 +500,7 @@ export function GeneralTab({
             testId="general-tab-card-plugin"
           />
           <StatCard
-            label="도구"
+            label={t("generalTab.statTools")}
             count={stats.toolCount}
             icon={Wrench}
             onClick={() => onNavigate("plugin-perf")}
@@ -506,7 +508,7 @@ export function GeneralTab({
             testId="general-tab-card-tool"
           />
           <StatCard
-            label="에이전트"
+            label={t("generalTab.statAgents")}
             count={stats.agentCount}
             icon={Bot}
             onClick={() => onNavigate("marketplace")}
@@ -514,7 +516,7 @@ export function GeneralTab({
             testId="general-tab-card-agent"
           />
           <StatCard
-            label="스킬"
+            label={t("generalTab.statSkills")}
             count={stats.skillCount}
             icon={Sparkles}
             onClick={() => onNavigate("marketplace")}
@@ -522,7 +524,7 @@ export function GeneralTab({
             testId="general-tab-card-skill"
           />
           <StatCard
-            label="역할"
+            label={t("generalTab.statRoles")}
             count={stats.roleCount}
             icon={UserCog}
             onClick={() => onNavigate("roles")}
@@ -541,11 +543,11 @@ export function GeneralTab({
           <div className="flex items-center gap-3">
             <Store className="size-4 text-muted-foreground" aria-hidden={true} />
             <div>
-              <p className="text-sm font-medium">마켓플레이스</p>
+              <p className="text-sm font-medium">{t("generalTab.marketplaceLabel")}</p>
               <p className="text-[11px] text-muted-foreground">
                 {stats.marketplace.configured
-                  ? "서버 연결 상태를 확인합니다"
-                  : "마켓플레이스 서버 URL 이 설정되어 있지 않습니다"}
+                  ? t("generalTab.marketplaceConnectedHint")
+                  : t("generalTab.marketplaceNotConfigured")}
               </p>
             </div>
           </div>
@@ -558,8 +560,8 @@ export function GeneralTab({
 
       {/* ── 시스템 동작 ─────────────────────────────── */}
       <SettingsSection
-        title="시스템 동작"
-        description="창 닫기 버튼을 눌렀을 때의 동작을 선택합니다."
+        title={t("generalTab.systemBehaviorTitle")}
+        description={t("generalTab.systemBehaviorDescription")}
       >
         <RadioGroup
           value={closeBehavior}
@@ -569,18 +571,18 @@ export function GeneralTab({
           <div className="flex items-start gap-3 rounded-md border bg-card/50 p-3">
             <RadioGroupItem value="hide-to-tray" id="close-hide-to-tray" className="mt-0.5" />
             <Label htmlFor="close-hide-to-tray" className="cursor-pointer">
-              <div className="font-medium">트레이로 숨김 (기본)</div>
+              <div className="font-medium">{t("generalTab.hideToTrayLabel")}</div>
               <div className="text-xs text-muted-foreground">
-                창을 닫아도 LVIS 가 시스템 트레이에서 계속 실행됩니다. 루틴, 브리핑, 플러그인 백그라운드 작업이 유지됩니다.
+                {t("generalTab.hideToTrayDescription")}
               </div>
             </Label>
           </div>
           <div className="flex items-start gap-3 rounded-md border bg-card/50 p-3">
             <RadioGroupItem value="quit" id="close-quit" className="mt-0.5" />
             <Label htmlFor="close-quit" className="cursor-pointer">
-              <div className="font-medium">즉시 종료</div>
+              <div className="font-medium">{t("generalTab.quitLabel")}</div>
               <div className="text-xs text-muted-foreground">
-                창을 닫으면 일반 앱처럼 LVIS 가 완전히 종료됩니다. 백그라운드 작업도 함께 중단됩니다.
+                {t("generalTab.quitDescription")}
               </div>
             </Label>
           </div>
@@ -589,25 +591,25 @@ export function GeneralTab({
 
       {/* ── 시스템 정보 ─────────────────────────────── */}
       <SettingsSection
-        title="시스템"
-        description="실행 중인 운영체제, 앱 버전, 데이터 경로 정보입니다."
+        title={t("generalTab.systemInfoTitle")}
+        description={t("generalTab.systemInfoDescription")}
       >
         <dl className="grid grid-cols-1 gap-3 text-sm sm:grid-cols-2">
           <div className="flex items-start gap-3 rounded-md border bg-card/50 p-3">
             <Cpu className="mt-0.5 size-4 shrink-0 text-muted-foreground" aria-hidden={true} />
             <div className="min-w-0">
-              <dt className="text-[11px] uppercase tracking-wide text-muted-foreground">운영체제</dt>
+              <dt className="text-[11px] uppercase tracking-wide text-muted-foreground">{t("generalTab.osLabel")}</dt>
               <dd className="font-medium">
-                {appInfo ? `${platformLabel(appInfo.platform)} · ${appInfo.arch}` : "확인 중…"}
+                {appInfo ? `${platformLabel(appInfo.platform)} · ${appInfo.arch}` : t("generalTab.loading")}
               </dd>
             </div>
           </div>
           <div className="flex items-start gap-3 rounded-md border bg-card/50 p-3">
             <Brain className="mt-0.5 size-4 shrink-0 text-muted-foreground" aria-hidden={true} />
             <div className="min-w-0">
-              <dt className="text-[11px] uppercase tracking-wide text-muted-foreground">앱 버전</dt>
+              <dt className="text-[11px] uppercase tracking-wide text-muted-foreground">{t("generalTab.appVersionLabel")}</dt>
               <dd className="font-mono text-xs" data-testid="general-tab-app-version">
-                {appInfo ? `v${appInfo.version}` : "확인 중…"}
+                {appInfo ? `v${appInfo.version}` : t("generalTab.loading")}
               </dd>
             </div>
           </div>
@@ -617,7 +619,7 @@ export function GeneralTab({
           >
             <Cpu className="mt-0.5 size-4 shrink-0 text-muted-foreground" aria-hidden={true} />
             <div className="min-w-0 flex-1">
-              <dt className="text-[11px] uppercase tracking-wide text-muted-foreground">기반 기술</dt>
+              <dt className="text-[11px] uppercase tracking-wide text-muted-foreground">{t("generalTab.techStackLabel")}</dt>
               <dd className="mt-1 grid grid-cols-2 gap-x-4 gap-y-1 font-mono text-[11px] sm:grid-cols-4">
                 <div className="flex items-baseline gap-1.5">
                   <span className="text-muted-foreground">Electron</span>
@@ -649,10 +651,10 @@ export function GeneralTab({
           <div className="flex items-start gap-3 rounded-md border bg-card/50 p-3 sm:col-span-2">
             <FolderOpen className="mt-0.5 size-4 shrink-0 text-muted-foreground" aria-hidden={true} />
             <div className="min-w-0 flex-1">
-              <dt className="text-[11px] uppercase tracking-wide text-muted-foreground">데이터 경로</dt>
+              <dt className="text-[11px] uppercase tracking-wide text-muted-foreground">{t("generalTab.dataPathLabel")}</dt>
               <dd className="flex items-center gap-2">
                 <code className="truncate rounded bg-muted px-1.5 py-0.5 font-mono text-xs">
-                  {appInfo?.userDataPath ?? "확인 중…"}
+                  {appInfo?.userDataPath ?? t("generalTab.loading")}
                 </code>
                 <Button
                   size="sm"
@@ -660,9 +662,9 @@ export function GeneralTab({
                   className="h-6 shrink-0 px-2 text-[11px]"
                   onClick={copyDataPath}
                   disabled={!appInfo}
-                  aria-label="데이터 경로 복사"
+                  aria-label={t("generalTab.copyDataPathAriaLabel")}
                 >
-                  복사
+                  {t("generalTab.copyButton")}
                 </Button>
               </dd>
             </div>

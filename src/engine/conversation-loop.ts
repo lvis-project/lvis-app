@@ -77,6 +77,7 @@ import { stripLeadingSlash } from "../shared/slash-sanitizer.js";
 import { isToolResultStubContent } from "../shared/tool-result-stub.js";
 import { createTracer, type ConversationTracer } from "../observability/conversation-trace.js";
 import { createLogger } from "../lib/logger.js";
+import { t } from "../i18n/index.js";
 const log = createLogger("lvis");
 
 interface RequestProjectionContext {
@@ -207,7 +208,7 @@ function contentTruncatedHistoryWithContextCarrier(params: {
         compactNum: params.compactNum,
         trigger: params.trigger,
         compactStatus: CompressionStatus.CONTENT_TRUNCATED,
-        summary: `${params.removedCount}개 메시지 부분 절단됨`,
+        summary: t("be_conversationLoop.contentTruncatedSummary", { count: params.removedCount }),
         ...(params.truncatedDir !== undefined ? { truncatedDir: params.truncatedDir } : {}),
       },
     },
@@ -946,7 +947,7 @@ export class ConversationLoop {
   async generateText(
     prompt: string,
     _maxTokensIgnored?: number,
-    systemPrompt = "당신은 LVIS, 사용자의 AI 비서입니다.",
+    systemPrompt = t("be_conversationLoop.generateTextSystemPrompt"),
     abortSignal?: AbortSignal,
   ): Promise<string> {
     if (!this.provider) throw new Error("LLM provider not configured");
@@ -1125,9 +1126,9 @@ export class ConversationLoop {
   }): string {
     const retryAfter = stream.providerError.rateLimit?.retryAfterSeconds;
     const waitText = retryAfter !== undefined && Number.isFinite(retryAfter)
-      ? ` 약 ${Math.ceil(retryAfter)}초 후 같은 요청을 다시 보내면`
-      : " 잠시 후 같은 요청을 다시 보내면";
-    return `분당 토큰 처리 한도(TPM)에 도달해 대화를 자동 압축했습니다.${waitText} 압축된 컨텍스트로 이어서 처리됩니다.`;
+      ? t("be_conversationLoop.rateLimitWaitKnown", { seconds: Math.ceil(retryAfter) })
+      : t("be_conversationLoop.rateLimitWaitUnknown");
+    return t("be_conversationLoop.rateLimitCompactMessage", { waitText });
   }
 
   /** 대화 이력 초기화 (새 대화) — §4.5.7 */
@@ -1470,7 +1471,7 @@ export class ConversationLoop {
       return {
         compacted: false,
         compactedAt: null,
-        summary: "LLM provider 미구성 — 압축 실행 불가.",
+        summary: t("be_conversationLoop.manualCompactNoProvider"),
         removedMessageCount: 0,
       };
     }
@@ -1478,7 +1479,7 @@ export class ConversationLoop {
       return {
         compacted: false,
         compactedAt: null,
-        summary: "이미 다른 압축이 진행 중입니다.",
+        summary: t("be_conversationLoop.manualCompactAlreadyRunning"),
         removedMessageCount: 0,
       };
     }
@@ -1523,7 +1524,7 @@ export class ConversationLoop {
         return {
           compacted: false,
           compactedAt: null,
-          summary: "컴팩트 불필요: 메시지 수가 충분히 적습니다.",
+          summary: t("be_conversationLoop.manualCompactNoop"),
           removedMessageCount: 0,
         };
       }
@@ -1547,10 +1548,10 @@ export class ConversationLoop {
 
       const compactedAt = result.boundary?.createdAt ?? new Date().toISOString();
       const summary = result.status === CompressionStatus.CONTENT_TRUNCATED
-        ? `${result.removedCount}개 메시지 부분 절단됨 (LLM 호출 생략)`
+        ? t("be_conversationLoop.manualCompactSummaryTruncated", { count: result.removedCount })
         : result.status === CompressionStatus.REDUCED_INSUFFICIENT_FORCED
-        ? `${result.removedCount}개 메시지 강제 절단됨 (compact #${this.compactNum})`
-        : `${result.removedCount}개 메시지 요약됨 (compact #${this.compactNum})`;
+        ? t("be_conversationLoop.manualCompactSummaryForced", { count: result.removedCount, num: this.compactNum })
+        : t("be_conversationLoop.manualCompactSummarySummarized", { count: result.removedCount, num: this.compactNum });
       return {
         compacted: true,
         compactedAt,
@@ -1564,7 +1565,7 @@ export class ConversationLoop {
       return {
         compacted: false,
         compactedAt: null,
-        summary: `압축 실패: ${(err as Error).message}`,
+        summary: t("be_conversationLoop.manualCompactFailed", { message: (err as Error).message }),
         removedMessageCount: 0,
       };
     } finally {
@@ -1636,7 +1637,7 @@ export class ConversationLoop {
     // §4.5.2 step 1 — REQUEST_ENTRY (main process 도달 시점)
     this.tracer.step("REQUEST_ENTRY", { inputLen: turnInput.length, inputOrigin });
     if (!this.provider) {
-      const err = "LLM 프로바이더가 설정되지 않았습니다. 설정에서 벤더와 API 키를 확인해 주세요.";
+      const err = t("be_conversationLoop.llmProviderNotConfigured");
       callbacks?.onError?.(err);
       throw new Error(err);
     }
@@ -1724,7 +1725,7 @@ export class ConversationLoop {
     const callbacksForLoop = wrappedCallbacks ?? callbacks;
 
     const baseText = routeResult.route === "skill"
-      ? `[스킬: ${routeResult.skillId}] ${turnInput}`
+      ? t("be_conversationLoop.skillRoutePrefix", { skillId: routeResult.skillId, input: turnInput })
       : turnInput;
     const attachmentParts = options?.attachments ?? [];
     const userContent: string | import("./llm/types.js").UserContentPart[] =
@@ -2114,7 +2115,7 @@ export class ConversationLoop {
       try {
         this.deps.notificationService?.fire({
           kind: "turn-end",
-          title: "응답 완료",
+          title: t("be_conversationLoop.notificationTurnEndTitle"),
           body: result.text,
           contextRef: { sessionId: this.sessionId },
         });
@@ -2242,7 +2243,7 @@ export class ConversationLoop {
           `queryLoop: EARLY-EXIT(round-cap) — assistantRoundsRun=${assistantRoundsRun} effectiveMaxRounds=${effectiveMaxRounds} totalToolCalls=${allToolCalls.length}`,
         );
         callbacks?.onError?.(
-          `라운드 한도 (${effectiveMaxRounds}) 도달 — 작업이 중단됐습니다. 더 진행하려면 새 메시지를 보내세요.`,
+          t("be_conversationLoop.roundCapError", { max: effectiveMaxRounds }),
         );
         return withServingIdentity({
           text: allToolCalls.length > 0
@@ -2283,10 +2284,10 @@ export class ConversationLoop {
           joined = kept.join("\n\n");
         }
         if (truncatedCount > 0) {
-          joined = `[일부 방향 지시 생략 — ${truncatedCount}개 항목 길이 초과로 폐기됨]\n\n${joined}`;
+          joined = t("be_conversationLoop.guidanceTruncationMarker", { count: truncatedCount, joined });
         }
         this.guidanceQueue = [];
-        const injectedContent = `[방향 지시 — 진행 중 추가 입력]\n${joined}`;
+        const injectedContent = t("be_conversationLoop.guidanceInjectionHeader", { joined });
         // Critic round 2 M1: run preflight BEFORE appending the guide so
         // compaction targets the older history and never accidentally
         // summarizes-away the just-injected guide marker. `joined` is
@@ -2399,7 +2400,7 @@ export class ConversationLoop {
         // 로 도달 — 그쪽에서 새 `classifyProviderError` 가 정확한 TPM
         // 메시지를 전달함 (issue #900).
         const userMsg =
-          "대화 이력이 모델 한도를 초과했습니다. 새 메시지를 보내면 자동 압축이 다시 시도됩니다.";
+          t("be_conversationLoop.contextErrorUserMessage");
         callbacks?.onError?.(userMsg, "context-error");
         // Issue #911: mark as systemNotice so the UI renders a destructive
         // banner (red border + warning icon) instead of a normal assistant
@@ -2502,9 +2503,10 @@ export class ConversationLoop {
         // attach systemNotice — the assistant content that was streamed
         // before the abort is real model output and stays styled normally;
         // only the "[중단됨]" suffix marks the boundary.
-        const savedText = stripSuggestedReplies(stream.text ?? "") + "\n\n[중단됨]";
+        const interruptedSuffix = t("be_conversationLoop.interruptedSuffix");
+        const savedText = stripSuggestedReplies(stream.text ?? "") + interruptedSuffix;
         this.history.append({ role: "assistant", content: savedText });
-        callbacks?.onTextDelta?.("\n\n[중단됨]");
+        callbacks?.onTextDelta?.(interruptedSuffix);
         return withServingIdentity({ text: savedText, toolCalls: allToolCalls, usage: turnUsage, stopReason: "interrupted" });
       }
 
@@ -2646,7 +2648,7 @@ export class ConversationLoop {
             `queryLoop: EARLY-EXIT(suspect-truncation) — stopReason="${stopReason}" pendingTools=0 textLen=${textContent.length} round=${roundIndex}`,
           );
           callbacks?.onError?.(
-            `응답이 ${stopReason ?? "알 수 없는 이유"} 로 조기 종료됐습니다 (round ${roundIndex}). 추가 응답 필요 시 후속 메시지로 요청하세요.`,
+            t("be_conversationLoop.suspectTruncationError", { reason: stopReason ?? "unknown reason", round: roundIndex }),
           );
         }
         return withServingIdentity({ text: textContent, toolCalls: allToolCalls, usage: turnUsage, stopReason });
@@ -2685,8 +2687,8 @@ export class ConversationLoop {
         // catalog-search guidance.
         const finalContent = !rr.is_error && rebuiltAfterPlugin
           ? scope.deferral
-            ? `${rr.content} 플러그인 도구는 카탈로그에서 검색 가능 (${catalogCountAfterPlugin}개 후보, 현재 ${toolSchemas.length}개 로드됨). 필요한 도구는 tool_search 로 로드하세요.`
-            : `${rr.content} 플러그인 도구가 모두 로드됨 (현재 ${toolSchemas.length}개 사용 가능). 바로 호출하세요.`
+            ? t("be_conversationLoop.pluginToolsDeferred", { content: rr.content, catalogCount: catalogCountAfterPlugin, loadedCount: toolSchemas.length })
+            : t("be_conversationLoop.pluginToolsEager", { content: rr.content, loadedCount: toolSchemas.length })
           : rr.content;
         this.history.append({
           role: "tool_result",
@@ -2734,7 +2736,7 @@ export class ConversationLoop {
       const addedBySearch = Math.max(0, toolSchemas.length - prevToolCountForSearch);
       for (const rr of searchOutcome.results) {
         const finalContent = !rr.is_error && rebuiltAfterSearch
-          ? `${rr.content} (현재 ${toolSchemas.length}개 사용 가능, +${addedBySearch}).`
+          ? t("be_conversationLoop.searchToolLoaded", { content: rr.content, loadedCount: toolSchemas.length, added: addedBySearch })
           : rr.content;
         this.history.append({
           role: "tool_result",
@@ -2857,9 +2859,9 @@ export class ConversationLoop {
         log.info(
           `queryLoop: EARLY-EXIT(tool-abort) — round=${roundIndex} toolResults=${allResults.length}`,
         );
-        const savedText = "[중단됨]";
+        const savedText = t("be_conversationLoop.interruptedText");
         this.history.append({ role: "assistant", content: savedText });
-        callbacks?.onTextDelta?.("\n\n[중단됨]");
+        callbacks?.onTextDelta?.(t("be_conversationLoop.interruptedSuffix"));
         return withServingIdentity({
           text: savedText,
           toolCalls: allToolCalls,
@@ -2904,7 +2906,7 @@ export class ConversationLoop {
       }
     }
 
-    return withServingIdentity({ text: "(도구 실행 라운드 한도 초과)", toolCalls: allToolCalls, usage: turnUsage });
+    return withServingIdentity({ text: t("be_conversationLoop.toolRoundLimitExceeded"), toolCalls: allToolCalls, usage: turnUsage });
   }
 
   /** Tool registry → LLM 이 받는 ToolSchema 배열로 변환. scope 필터 반영. */
@@ -3126,7 +3128,7 @@ export class ConversationLoop {
           triggeredAt: truncated.createdAt,
           trigger,
           ctxUsageAtTrigger,
-          summary: `${result.removedCount}개 메시지 부분 절단됨`,
+          summary: t("be_conversationLoop.contentTruncatedSummary", { count: result.removedCount }),
           messageCountAtTrigger: prevMessageCount,
           compactNum: this.compactNum,
         };
@@ -3149,7 +3151,7 @@ export class ConversationLoop {
         freedTokens,
         trigger,
         compactNum: this.compactNum,
-        summary: `${result.removedCount}개 메시지 부분 절단됨`,
+        summary: t("be_conversationLoop.contentTruncatedSummary", { count: result.removedCount }),
         estimatedAfter: truncated.contextTokensAfter,
         compactStatus: result.status,
         ...(result.truncatedDir !== undefined ? { truncatedDir: result.truncatedDir } : {}),
@@ -3556,7 +3558,7 @@ export class ConversationLoop {
     callbacks?: TurnCallbacks,
   ): Promise<TurnResult> {
     if (!isUserKeyboardOrigin(inputOrigin)) {
-      const result = "비키보드 출처의 slash command는 실행하지 않습니다.";
+      const result = t("be_conversationLoop.nonKeyboardSlashCommandBlocked");
       callbacks?.onTextDelta?.(result);
       callbacks?.onTurnComplete?.(result);
       return { text: result, toolCalls: [], route: "command" };
@@ -3566,49 +3568,49 @@ export class ConversationLoop {
     switch (command) {
       case "new":
         this.newConversation();
-        result = "새 대화를 시작합니다.";
+        result = t("be_conversationLoop.cmdNewConversation");
         break;
       case "remember": {
-        if (!args.trim()) { result = "사용법: /remember 기억할 내용"; break; }
+        if (!args.trim()) { result = t("be_conversationLoop.cmdRememberUsage"); break; }
         const title = args.slice(0, 40).replace(/\n/g, " ");
         await this.deps.memoryManager.saveMemory(title, args);
-        result = `기억 저장됨: ${title}`;
+        result = t("be_conversationLoop.cmdRememberSaved", { title });
         break;
       }
       case "memory": {
         const memories = this.deps.memoryManager.listMemoryEntries();
         result = memories.length === 0
-          ? "저장된 기억 없음."
+          ? t("be_conversationLoop.cmdMemoryEmpty")
           : memories.map((n) => `- ${n.title} (${n.filename})`).join("\n");
         break;
       }
       case "sessions": {
         const sessions = this.listSessions(10);
-        if (sessions.length === 0) { result = "저장된 세션 없음."; break; }
+        if (sessions.length === 0) { result = t("be_conversationLoop.cmdSessionsEmpty"); break; }
         const current = this.sessionId;
-        result = sessions.slice(0, 10).map((s) => {
-          const marker = s.id === current ? " ← 현재" : "";
+        const sessionListLines = sessions.slice(0, 10).map((s) => {
+          const marker = s.id === current ? t("be_conversationLoop.cmdSessionMarkerCurrent") : "";
           const date = s.modifiedAt.toLocaleString("ko-KR", { timeZone: "Asia/Seoul" });
           return `- ${s.id.slice(0, 8)}… (${date})${marker}`;
         }).join("\n");
-        result = `세션 목록 (최근 10개):\n${result}\n\n세션 전환: /load <세션ID>`;
+        result = t("be_conversationLoop.cmdSessionsList", { max: 10, list: sessionListLines });
         break;
       }
       case "load": {
-        if (!args.trim()) { result = "사용법: /load <세션ID>"; break; }
+        if (!args.trim()) { result = t("be_conversationLoop.cmdLoadUsage"); break; }
         const targetId = args.trim();
         // 부분 ID 매칭
         const sessions = this.listSessions();
         const match = sessions.find((s) => s.id.startsWith(targetId));
-        if (!match) { result = `세션을 찾을 수 없습니다: ${targetId}`; break; }
+        if (!match) { result = t("be_conversationLoop.cmdLoadNotFound", { id: targetId }); break; }
         const loaded = this.loadSession(match.id);
         result = loaded
-          ? `세션 복원됨: ${match.id.slice(0, 8)}… (${this.history.length}개 메시지)`
-          : `세션 로드 실패: ${match.id}`;
+          ? t("be_conversationLoop.cmdLoadSuccess", { id: match.id.slice(0, 8), count: this.history.length })
+          : t("be_conversationLoop.cmdLoadFailed", { id: match.id });
         break;
       }
       case "vendor":
-        result = `현재 벤더: ${this.getVendor()}\n세션: ${this.sessionId.slice(0, 8)}…\n누적 토큰: 입력 ${this.cumulativeUsage.inputTokens}, 출력 ${this.cumulativeUsage.outputTokens}`;
+        result = t("be_conversationLoop.cmdVendorInfo", { vendor: this.getVendor(), session: this.sessionId.slice(0, 8), input: this.cumulativeUsage.inputTokens, output: this.cumulativeUsage.outputTokens });
         break;
       case "compact": {
         // manualCompact uses the LLM compact path (12-section structured summary +
@@ -3620,7 +3622,7 @@ export class ConversationLoop {
       }
       case "tools": {
         const tools = this.deps.toolRegistry.getVisibleTools();
-        result = tools.map((t) => `${t.name} [${toolProvenanceLabel(t)}]`).join("\n") || "등록된 도구 없음";
+        result = tools.map((tool) => `${tool.name} [${toolProvenanceLabel(tool)}]`).join("\n") || t("be_conversationLoop.cmdToolsEmpty");
         break;
       }
       case "permission": {
@@ -3628,25 +3630,10 @@ export class ConversationLoop {
         break;
       }
       case "help":
-        result = `LVIS 명령어:
-/new — 새 대화 시작
-/sessions — 저장된 세션 목록
-/load <ID> — 세션 복원
-/compact — 대화 이력 압축
-/remember <내용> — 기억 저장
-/memory — 사용자 기억 목록
-/vendor — 현재 벤더/토큰 정보
-/tools — 등록된 도구 목록
-/permission — 현재 권한 모드
-/permission mode <strict|default|auto|allow> --durable — 권한 모드 변경
-/permission dir <list|allow|deny> [path] — 허용 디렉터리 관리
-/permission reviewer <show|mode|fallback|interactive> [value] — 리뷰어 설정
-/permission audit <show|verify> — 권한 감사 조회/검증
-/permission hooks <list|accept|disable|reject> [name] — script hook 신뢰 상태 관리
-/help — 이 도움말`;
+        result = t("be_conversationLoop.cmdHelp");
         break;
       default:
-        result = `알 수 없는 명령어: /${command}\n사용 가능: /new, /sessions, /load, /compact, /remember, /memory, /vendor, /tools, /permission, /help`;
+        result = t("be_conversationLoop.cmdUnknown", { command });
     }
 
     callbacks?.onTextDelta?.(result);
@@ -3671,44 +3658,44 @@ export class ConversationLoop {
       raw,
       inputOrigin,
     );
-    if (outcome.kind === "parse-error") return `권한 명령 오류: ${outcome.error}`;
+    if (outcome.kind === "parse-error") return t("be_conversationLoop.permissionParseError", { error: outcome.error });
     if (outcome.kind === "show-current") {
       const mode = this.deps.permissionManager?.getMode() ?? "default";
-      return `현재 권한 모드: ${mode}\nHook 상태: /permission hooks list`;
+      return t("be_conversationLoop.permissionShowCurrent", { mode });
     }
     if (outcome.kind === "dir") {
       const result = await dispatchPermissionDirCommand(outcome.cmd);
       if (!result.ok) {
-        const warnings = result.warnings?.length ? `\n경고:\n${result.warnings.map((w) => `- ${w}`).join("\n")}` : "";
-        const ack = result.requiresAcknowledgement ? "\n다시 실행하려면 --ack-warnings 를 명시하세요." : "";
-        return `디렉토리 권한 오류: ${result.error}${warnings}${ack}`;
+        const warnings = result.warnings?.length ? t("be_conversationLoop.permissionDirWarnings", { warnings: result.warnings.map((w) => `- ${w}`).join("\n") }) : "";
+        const ack = result.requiresAcknowledgement ? t("be_conversationLoop.permissionDirAckRequired") : "";
+        return t("be_conversationLoop.permissionDirError", { error: result.error, warnings, ack });
       }
       if (result.verb === "list") {
         return [
-          "허용 디렉토리",
-          `기본: ${result.defaults.length ? result.defaults.join(", ") : "없음"}`,
-          `사용자 추가: ${result.userAdditions.length ? result.userAdditions.join(", ") : "없음"}`,
-          `유효 범위: ${result.effective.length ? result.effective.join(", ") : "없음"}`,
+          t("be_conversationLoop.permissionDirListHeader"),
+          result.defaults.length ? t("be_conversationLoop.permissionDirListDefaults", { list: result.defaults.join(", ") }) : t("be_conversationLoop.permissionDirListDefaultsEmpty"),
+          result.userAdditions.length ? t("be_conversationLoop.permissionDirListAdditions", { list: result.userAdditions.join(", ") }) : t("be_conversationLoop.permissionDirListAdditionsEmpty"),
+          result.effective.length ? t("be_conversationLoop.permissionDirListEffective", { list: result.effective.join(", ") }) : t("be_conversationLoop.permissionDirListEffectiveEmpty"),
         ].join("\n");
       }
       if (result.verb === "allow") {
         if (result.sessionOnly && result.sessionDirectory) {
           this.addSessionAdditionalDirectory(result.sessionDirectory);
-          return `세션 한정 허용 디렉토리 추가됨: ${result.sessionDirectory}`;
+          return t("be_conversationLoop.permissionDirSessionAllowed", { dir: result.sessionDirectory });
         }
-        return `허용 디렉토리 저장됨:\n${result.persisted.map((d) => `- ${d}`).join("\n")}`;
+        return t("be_conversationLoop.permissionDirAllowed", { list: result.persisted.map((d) => `- ${d}`).join("\n") });
       }
-      return `허용 디렉토리 제거됨:\n${result.persisted.length ? result.persisted.map((d) => `- ${d}`).join("\n") : "- 없음"}`;
+      return t("be_conversationLoop.permissionDirDenied", { list: result.persisted.length ? result.persisted.map((d) => `- ${d}`).join("\n") : t("be_conversationLoop.permissionDirDeniedEmpty") });
     }
     if (outcome.kind === "reviewer") {
       const result = await dispatchPermissionReviewerCommandWithRewire(
         outcome.cmd,
         this.deps.rewireReviewerAgent,
       );
-      if (!result.ok) return `Reviewer 설정 오류: ${result.error}`;
+      if (!result.ok) return t("be_conversationLoop.permissionReviewerError", { error: result.error });
       const { mode, fallbackOnError, interactive } = result.settings;
       return [
-        "Reviewer 설정",
+        t("be_conversationLoop.permissionReviewerSettings"),
         `mode=${mode}`,
         "provider/model=active LLM settings",
         `fallbackOnError=${fallbackOnError}`,
@@ -3717,13 +3704,13 @@ export class ConversationLoop {
     }
     if (outcome.kind === "audit") {
       const auditLogger = this.deps.auditLogger;
-      if (!auditLogger) return "Audit 로거가 초기화되지 않았습니다.";
+      if (!auditLogger) return t("be_conversationLoop.permissionAuditNoLogger");
       const result = dispatchPermissionAuditCommand(outcome.cmd, {
         auditDir: auditLogger.getAuditDir(),
         secret: auditLogger.getPermissionAuditSecret(),
         sealStore: auditLogger.getPermissionAuditSealStore() ?? undefined,
       });
-      if (!result.ok) return `Audit 오류: ${result.error}`;
+      if (!result.ok) return t("be_conversationLoop.permissionAuditError", { error: result.error });
       if (result.verb === "verify") {
         return [
           `Audit verify: ${result.intact ? "intact" : "broken"}`,
@@ -3733,26 +3720,30 @@ export class ConversationLoop {
         ].join("\n");
       }
       return [
-        `Audit 최근 ${result.entries.length}개`,
+        t("be_conversationLoop.permissionAuditRecent", { count: result.entries.length }),
         ...result.entries.map((entry) => JSON.stringify(entry)),
       ].join("\n");
     }
     if (outcome.kind === "mode") {
       const pm = this.deps.permissionManager;
-      if (!pm) return "권한 매니저가 초기화되지 않았습니다.";
+      if (!pm) return t("be_conversationLoop.permissionModeNoManager");
       const { applyPermissionModeCommand } = await import("../permissions/permission-mode-apply.js");
       const result = await applyPermissionModeCommand(outcome.cmd, {
         permissionManager: pm,
         approvalGate: this.deps.approvalGate,
         auditLogger: this.deps.auditLogger,
       });
-      if (!result.ok) return `권한 모드 변경 취소: ${result.message ?? result.error}`;
+      if (!result.ok) return t("be_conversationLoop.permissionModeCancelled", { message: result.message ?? result.error });
       callbacks?.onPermissionModeChanged?.(result.mode);
-      return `권한 모드 변경됨: ${result.previous} -> ${result.mode}${result.durable ? " (durable)" : " (session)"}`;
+      return t("be_conversationLoop.permissionModeChanged", {
+        previous: result.previous,
+        mode: result.mode,
+        durability: result.durable ? t("be_conversationLoop.permissionModeDurable") : t("be_conversationLoop.permissionModeSession"),
+      });
     }
     if (outcome.kind === "rules") {
       const pm = this.deps.permissionManager;
-      if (!pm) return "권한 매니저가 초기화되지 않았습니다.";
+      if (!pm) return t("be_conversationLoop.permissionRulesNoManager");
       if (outcome.cmd.sub === "add") {
         if (outcome.cmd.action === "allow") {
           await pm.addAlwaysAllowedPersist(outcome.cmd.pattern);
@@ -3760,43 +3751,43 @@ export class ConversationLoop {
           await pm.addAlwaysDeniedPersist(outcome.cmd.pattern);
         }
         this.deps.toolRegistry.setDenyRules(pm.getVisibilityDenyRules());
-        return `권한 규칙 추가됨: ${outcome.cmd.action} ${outcome.cmd.pattern}`;
+        return t("be_conversationLoop.permissionRuleAdded", { action: outcome.cmd.action, pattern: outcome.cmd.pattern });
       }
       if (outcome.cmd.sub === "remove") {
         await pm.removeRule(outcome.cmd.pattern, outcome.cmd.action);
         this.deps.toolRegistry.setDenyRules(pm.getVisibilityDenyRules());
-        return `권한 규칙 삭제됨: ${outcome.cmd.action} ${outcome.cmd.pattern}`;
+        return t("be_conversationLoop.permissionRuleRemoved", { action: outcome.cmd.action, pattern: outcome.cmd.pattern });
       }
       const rules = await pm.listPersistedRules();
       return rules.length
         ? rules.map((rule) => `- ${rule.action} ${rule.pattern}${rule.source ? ` [${rule.source}]` : ""}`).join("\n")
-        : "권한 규칙 없음";
+        : t("be_conversationLoop.permissionRulesEmpty");
     }
     if (outcome.kind !== "hooks") {
-      return `처리되지 않은 권한 명령: ${outcome.kind}`;
+      return t("be_conversationLoop.permissionUnhandled", { kind: outcome.kind });
     }
 
     const result = await dispatchPermissionHooksCommand(outcome.cmd, {
       ...this.deps.hookTrustCommandOptions,
       manager: this.deps.scriptHookManager,
     });
-    if (!result.ok) return `Hook trust 오류: ${result.error}`;
+    if (!result.ok) return t("be_conversationLoop.hookTrustError", { error: result.error });
     if (result.verb === "list") {
       const active = result.active.length === 0
-        ? "- active: 없음"
+        ? t("be_conversationLoop.hookListActiveEmpty")
         : result.active.map((h) => `- active ${h.fileName} [${h.state}]`).join("\n");
       const disabled = result.disabled.length === 0
-        ? "- disabled: 없음"
+        ? t("be_conversationLoop.hookListDisabledEmpty")
         : result.disabled.map((h) => `- disabled ${h.fileName}`).join("\n");
-      return `Hook trust 상태\n${active}\n${disabled}`;
+      return t("be_conversationLoop.hookTrustStatus", { active, disabled });
     }
     if (result.verb === "accept") {
-      return `Hook 신뢰 등록됨: ${result.accepted.fileName}\ntrusted=${result.trusted.length}`;
+      return t("be_conversationLoop.hookAccepted", { fileName: result.accepted.fileName, count: result.trusted.length });
     }
     if (result.verb === "disable") {
-      return `Hook 비활성화됨: ${result.disabled.fileName}\ntrusted=${result.trusted.length}`;
+      return t("be_conversationLoop.hookDisabled", { fileName: result.disabled.fileName, count: result.trusted.length });
     }
-    return `Hook 영구 거부됨: ${result.rejected.fileName}\ntrusted=${result.trusted.length}`;
+    return t("be_conversationLoop.hookRejected", { fileName: result.rejected.fileName, count: result.trusted.length });
   }
 
   // Compaction uses same-session checkpoints. Automatic session forks are not

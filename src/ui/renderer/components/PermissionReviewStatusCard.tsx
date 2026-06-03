@@ -1,18 +1,20 @@
 import { AlertTriangle, CheckCircle2, Loader2, ShieldQuestion } from "lucide-react";
 import type { ChatEntry } from "../../../lib/chat-stream-state.js";
+import { t } from "../../../i18n/runtime.js";
+import { useTranslation } from "../../../i18n/react.js";
 
 type PermissionReviewEntry = Extract<ChatEntry, { kind: "permission_review" }>;
 
 function statusLabel(entry: PermissionReviewEntry): string {
-  if (entry.status === "reviewing") return "권한 검토중...";
-  if (entry.status === "auto_approved") return "권한 검토 완료 · 낮은 위험";
-  if (entry.status === "failed") return "권한 검토 실패";
+  if (entry.status === "reviewing") return t("permissionReviewStatusCard.reviewing");
+  if (entry.status === "auto_approved") return t("permissionReviewStatusCard.autoApproved");
+  if (entry.status === "failed") return t("permissionReviewStatusCard.failed");
   const level =
-    entry.verdictLevel === "high" ? "높은 위험" :
-    entry.verdictLevel === "medium" ? "중간 위험" :
-    entry.verdictLevel === "low" ? "낮은 위험" :
-    "검토 완료";
-  return `승인 필요 · ${level}`;
+    entry.verdictLevel === "high" ? t("permissionReviewStatusCard.riskHigh") :
+    entry.verdictLevel === "medium" ? t("permissionReviewStatusCard.riskMedium") :
+    entry.verdictLevel === "low" ? t("permissionReviewStatusCard.riskLow") :
+    t("permissionReviewStatusCard.reviewComplete");
+  return t("permissionReviewStatusCard.approvalRequired", { level });
 }
 
 function toneClass(entry: PermissionReviewEntry): string {
@@ -36,10 +38,11 @@ function StatusIcon({ entry }: { entry: PermissionReviewEntry }) {
 }
 
 export function PermissionReviewStatusCard({ entry }: { entry: PermissionReviewEntry }) {
-  const source = entry.source === "plugin" ? "플러그인" :
+  const { t: tComp } = useTranslation();
+  const source = entry.source === "plugin" ? tComp("permissionReviewStatusCard.sourcePlugin") :
     entry.source === "mcp" ? "MCP" :
-    entry.source === "builtin" ? "내장" :
-    "출처 미확인";
+    entry.source === "builtin" ? tComp("permissionReviewStatusCard.sourceBuiltin") :
+    tComp("permissionReviewStatusCard.sourceUnknown");
   return (
     <div
       data-testid="permission-review-status-card"
@@ -57,7 +60,7 @@ export function PermissionReviewStatusCard({ entry }: { entry: PermissionReviewE
       </div>
       {entry.approvalPurpose?.confidence === "sufficient" && (
         <div className="mt-1 min-w-0 truncate pl-5 text-[11px] text-muted-foreground">
-          목적: {entry.approvalPurpose.text}
+          {tComp("permissionReviewStatusCard.purposeLabel")} {entry.approvalPurpose.text}
         </div>
       )}
     </div>

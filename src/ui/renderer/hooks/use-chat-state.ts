@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { t } from "../../../i18n/runtime.js";
 import {
   appendImportedTriggerEntry,
   appendUserEntry,
@@ -119,7 +120,7 @@ export function useChatState(api: LvisApi) {
         if (text.length === 0) return;
         setEntries((p) => [
           ...p,
-          { kind: "system", text: `⚠️ 방향 지시 미적용 (응답 한도 도달): ${text}` },
+          { kind: "system", text: t("useChatState.guidanceDroppedText", { text }) },
         ]);
         return;
       }
@@ -306,7 +307,7 @@ export function useChatState(api: LvisApi) {
         setEntries((p) =>
           setAssistantError(
             dropPermissionReviewEntries(p),
-            `오류: ${ev.error || "알 수 없는 오류"}`,
+            t("useChatState.errorPrefix", { error: ev.error || t("useChatState.unknownError") }),
             thoughtRef.current,
             ev.systemNotice,
           ),
@@ -324,7 +325,7 @@ export function useChatState(api: LvisApi) {
           .join(", ");
         setEntries((p) => [
           ...p,
-          { kind: "system", text: `🔒 전송 전 PII ${count}건 리댁트됨${kindLabel ? ` (${kindLabel})` : ""}` },
+          { kind: "system", text: t("useChatState.piiRedactedText", { count, kindSuffix: kindLabel ? ` (${kindLabel})` : "" }) },
         ]);
       } else if (ev.type === "turn_summary") {
         // Turn aggregate footer (§ chat transcript per-turn footer) — append a
@@ -548,7 +549,7 @@ export function useChatState(api: LvisApi) {
     const unsub = api.onChatFallback(({ from, to }) => {
       if (!aliveRef.current) return;
       if (fallbackToastTimerRef.current) clearTimeout(fallbackToastTimerRef.current);
-      setFallbackToast(`⚡ ${from}→${to} 자동 전환`);
+      setFallbackToast(t("useChatState.fallbackToast", { from, to }));
       fallbackToastTimerRef.current = setTimeout(() => setFallbackToast(null), DEFAULT_TOAST_TTL_MS);
     });
     return () => {
@@ -605,7 +606,7 @@ export function useChatState(api: LvisApi) {
           setEntries(
             setAssistantError(
               prevEntries,
-              `편집 실패: ${res?.error ?? "알 수 없는 오류"}`,
+              t("useChatState.editFailedError", { error: res?.error ?? t("useChatState.unknownError") }),
               thoughtRef.current,
             ),
           );
@@ -613,7 +614,7 @@ export function useChatState(api: LvisApi) {
       } catch (err) {
         failed = true;
         setEntries((p) =>
-          setAssistantError(p, `오류: ${(err as Error).message}`, thoughtRef.current),
+          setAssistantError(p, t("useChatState.errorPrefix", { error: (err as Error).message }), thoughtRef.current),
         );
       } finally {
         setEditBusy(false);
@@ -652,14 +653,14 @@ export function useChatState(api: LvisApi) {
         setEntries(
           setAssistantError(
             prevEntries,
-            `재시도 실패: ${res?.error ?? "알 수 없는 오류"}`,
+            t("useChatState.retryFailedError", { error: res?.error ?? t("useChatState.unknownError") }),
             thoughtRef.current,
           ),
         );
       }
     } catch (err) {
       setEntries((p) =>
-        setAssistantError(p, `오류: ${(err as Error).message}`, thoughtRef.current),
+        setAssistantError(p, t("useChatState.errorPrefix", { error: (err as Error).message }), thoughtRef.current),
       );
     } finally {
       finishStreamingRequest(requestId);
@@ -715,14 +716,14 @@ export function useChatState(api: LvisApi) {
     thoughtRef.current = "";
     activeStreamIdRef.current = null;
     finalAssistantRoundClosedRef.current = false;
-    appendAssistantStatus("이 지점부터 다시 시작했습니다. 마지막 질문에 대한 답변을 이어서 생성합니다.");
+    appendAssistantStatus(t("useChatState.continueFromLastUserStatus"));
     try {
       const res = await api.chatContinueLastUser(sessionId);
       if (!res?.ok) {
-        setErrorWithThought(`이어 생성 실패: ${res?.error ?? "알 수 없는 오류"}`);
+        setErrorWithThought(t("useChatState.continueGenerationFailedError", { error: res?.error ?? t("useChatState.unknownError") }));
       }
     } catch (err) {
-      setErrorWithThought(`오류: ${(err as Error).message}`);
+      setErrorWithThought(t("useChatState.errorPrefix", { error: (err as Error).message }));
     } finally {
       finishStreamingRequest(requestId);
     }
@@ -774,11 +775,11 @@ export function useChatState(api: LvisApi) {
       try {
         const res = await api.chatCompact();
         const banner = res.compacted
-          ? `대화 압축: ${res.removedMessageCount}개 메시지 요약됨`
+          ? t("useChatState.compactBanner", { count: res.removedMessageCount })
           : res.summary;
         setEntries((p) => [...p, { kind: "system", text: banner }]);
       } catch (err) {
-        setEntries((p) => [...p, { kind: "system", text: `압축 오류: ${(err as Error).message}` }]);
+        setEntries((p) => [...p, { kind: "system", text: t("useChatState.compactError", { error: (err as Error).message }) }]);
       } finally {
         setIsCompacting(false);
       }
@@ -929,19 +930,19 @@ function formatLlmStatusMessage(ev: {
 }): string {
   if (ev.phase === "fallback") {
     const to = ev.to ? ` (${ev.to})` : "";
-    return `생각 중... 기본 모델 응답이 지연되어 백업 모델로 전환 중입니다${to}.`;
+    return t("useChatState.llmStatusFallback", { to });
   }
   if (ev.phase === "retry") {
     const attempt = ev.attempt ?? 1;
     const max = ev.maxAttempts ?? 5;
-    return `생각 중... 모델 응답이 지연되어 재시도 중입니다. (${attempt}/${max})`;
+    return t("useChatState.llmStatusRetry", { attempt, max });
   }
   if (ev.phase === "attempt") {
     const attempt = ev.attempt ?? 1;
     const max = ev.maxAttempts ?? 5;
     return attempt <= 1
-      ? "생각 중..."
-      : `생각 중... 모델 응답을 다시 기다리는 중입니다. (${attempt}/${max})`;
+      ? t("useChatState.llmStatusAttemptFirst")
+      : t("useChatState.llmStatusAttemptRetrying", { attempt, max });
   }
   return "";
 }
@@ -964,5 +965,6 @@ function dropPendingLlmStatusAssistant(entries: ChatEntry[]): ChatEntry[] {
 }
 
 function isLlmStatusAssistantText(text: string): boolean {
-  return text === "생각 중..." || text.startsWith("생각 중... ");
+  const base = t("useChatState.llmStatusAttemptFirst");
+  return text === base || text.startsWith(base + " ");
 }

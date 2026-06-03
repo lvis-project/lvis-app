@@ -5,6 +5,7 @@ import { Label } from "../../../components/ui/label.js";
 import { RadioGroup, RadioGroupItem } from "../../../components/ui/radio-group.js";
 import { SettingsPageHeader } from "../components/SettingsPageHeader.js";
 import { SettingsSection } from "../components/SettingsSection.js";
+import { useTranslation } from "../../../i18n/react.js";
 
 export interface ChatTabProps {
   autoCompact: boolean;
@@ -32,6 +33,7 @@ export function ChatTab({
   settingsLoaded,
   onImmediateChange,
 }: ChatTabProps) {
+  const { t } = useTranslation();
   // Memoize the wrapped onToggle so PrivacyTab receives a stable identity
   // across re-renders — if PrivacyTab ever memoizes via React.memo / props
   // comparison, an inline arrow would defeat it.
@@ -43,13 +45,13 @@ export function ChatTab({
   return (
     <div className="space-y-6">
       <SettingsPageHeader
-        title="채팅"
-        description="자동 컴팩트, 스트리밍 표시, 실험적 기능을 설정합니다"
+        title={t("chatTab.title")}
+        description={t("chatTab.description")}
       />
 
       <SettingsSection
-        title="대화 최적화"
-        description="긴 대화에서 이전 히스토리를 자동으로 요약해 컨텍스트를 절약합니다."
+        title={t("chatTab.conversationOptimizationTitle")}
+        description={t("chatTab.conversationOptimizationDescription")}
       >
         <div className="flex items-center gap-3 rounded-md border px-3 py-3">
           <Checkbox
@@ -62,15 +64,15 @@ export function ChatTab({
             }}
           />
           <div className="space-y-0.5">
-            <p className="text-sm font-medium">자동 컴팩트 활성화</p>
-            <p className="text-[11px] text-muted-foreground">끄면 자동 요약은 중단되고, 수동 `/compact`만 사용할 수 있습니다.</p>
+            <p className="text-sm font-medium">{t("chatTab.autoCompactLabel")}</p>
+            <p className="text-[11px] text-muted-foreground">{t("chatTab.autoCompactHint")}</p>
           </div>
         </div>
       </SettingsSection>
 
       <SettingsSection
-        title="스트림 부드럽게 표시 (Stream Smoothing)"
-        description="출력 스트림을 단어 또는 글자 단위로 부드럽게 표시합니다."
+        title={t("chatTab.streamSmoothingTitle")}
+        description={t("chatTab.streamSmoothingDescription")}
       >
         <RadioGroup
           className="flex gap-4 text-sm"
@@ -85,15 +87,15 @@ export function ChatTab({
           {(["none", "word", "char"] as const).map((opt) => (
             <Label key={opt} className="flex items-center gap-1">
               <RadioGroupItem value={opt} />
-              {opt === "none" ? "없음" : opt === "word" ? "단어" : "글자"}
+              {opt === "none" ? t("chatTab.streamOptNone") : opt === "word" ? t("chatTab.streamOptWord") : t("chatTab.streamOptChar")}
             </Label>
           ))}
         </RadioGroup>
       </SettingsSection>
 
       <SettingsSection
-        title="실험적 기능"
-        description="기본값 OFF — 설정 즉시 반영됩니다."
+        title={t("chatTab.experimentalTitle")}
+        description={t("chatTab.experimentalDescription")}
       >
         <div className="flex items-center gap-3 rounded-md border px-3 py-3">
           <Checkbox
@@ -106,17 +108,17 @@ export function ChatTab({
             }}
           />
           <div className="space-y-0.5">
-            <p className="text-sm font-medium">Experimental: idle 선호도 자동 갱신</p>
+            <p className="text-sm font-medium">{t("chatTab.idleRefreshLabel")}</p>
             <p className="text-[11px] text-muted-foreground">
-              IDLE_SCAN 동안 AGENTS.md, MEMORY.md, memories/*.md를 LLM에 보내 user-preferences.md를 갱신합니다. 기본값은 OFF입니다.
+              {t("chatTab.idleRefreshHint")}
             </p>
           </div>
         </div>
       </SettingsSection>
 
       <SettingsSection
-        title="프라이버시"
-        description="채팅 전송 전 개인정보 보호 동작을 설정합니다."
+        title={t("chatTab.privacyTitle")}
+        description={t("chatTab.privacyDescription")}
       >
         <PrivacyTab
           piiRedactEnabled={piiRedactEnabled}

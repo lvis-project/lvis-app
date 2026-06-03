@@ -1,0 +1,31 @@
+// AUTO-GENERATED — i18n migration. Source: src/ui/renderer/hooks/status-bar/use-status-bar-install.ts. Do not edit by hand.
+export const en = {
+  "useStatusBarInstall.downloadingWithProgress": "{progress} · {target} downloading",
+  "useStatusBarInstall.downloadingNoTotal": "{target} … downloading",
+  "useStatusBarInstall.verifying": "{target} verifying…",
+  "useStatusBarInstall.registering": "{target} registering…",
+  "useStatusBarInstall.restarting": "{target} restarting…",
+  "useStatusBarInstall.preparingRuntime": "{target} preparing runtime…",
+  "useStatusBarInstall.installing": "{target} installing…",
+  "useStatusBarInstall.installSuccess": "{target} installed successfully",
+  "useStatusBarInstall.installFailure": "{target} installation failed: {error}",
+  "useStatusBarInstall.uninstallSuccess": "{target} removed successfully",
+  "useStatusBarInstall.uninstallFailure": "{target} removal failed: {error}",
+  "useStatusBarInstall.labelAgent": "agent",
+  "useStatusBarInstall.labelSkill": "skill",
+} as const;
+export const ko: Record<keyof typeof en, string> = {
+  "useStatusBarInstall.downloadingWithProgress": "{progress} · {target} 다운로드 중",
+  "useStatusBarInstall.downloadingNoTotal": "{target} … 다운로드 중",
+  "useStatusBarInstall.verifying": "{target} 검증 중…",
+  "useStatusBarInstall.registering": "{target} 등록 중…",
+  "useStatusBarInstall.restarting": "{target} 재시작 중…",
+  "useStatusBarInstall.preparingRuntime": "{target} 런타임 준비 중…",
+  "useStatusBarInstall.installing": "{target} 설치 중…",
+  "useStatusBarInstall.installSuccess": "{target} 설치 완료",
+  "useStatusBarInstall.installFailure": "{target} 설치 실패: {error}",
+  "useStatusBarInstall.uninstallSuccess": "{target} 제거 완료",
+  "useStatusBarInstall.uninstallFailure": "{target} 제거 실패: {error}",
+  "useStatusBarInstall.labelAgent": "에이전트",
+  "useStatusBarInstall.labelSkill": "스킬",
+};

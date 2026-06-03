@@ -1,0 +1,33 @@
+// AUTO-GENERATED — i18n migration. Source: src/permissions/permission-manager.ts. Do not edit by hand.
+export const en = {
+  "be_permissionManager.denyRuleReason": "deny rule: {pattern}",
+  "be_permissionManager.mcpServerStrictMode": "MCP server strict mode",
+  "be_permissionManager.overlayTriggerMutatingReason": "overlay trigger origin ({origin}) — write tools require user confirmation",
+  "be_permissionManager.strictModeReason": "strict mode (trust: {trust}, category: {category})",
+  "be_permissionManager.allowRuleReason": "allow rule: {pattern}",
+  "be_permissionManager.userPermanentApproval": "user permanent approval",
+  "be_permissionManager.allowAllModeReason": "allow-all mode (trust: {trust}, category: {category})",
+  "be_permissionManager.mcpLowTrustForced": "MCP tool forced strict (trust: low, category: {category})",
+  "be_permissionManager.modeAllowReason": "{mode} mode (category: {category}, trust: {trust})",
+  "be_permissionManager.policyDenyReason": "policy deny (category: {category})",
+  "be_permissionManager.headlessReviewerRouted": "headless {category} — reviewer agent routed (executor calls dispatchReviewer)",
+  "be_permissionManager.headlessReviewerAbsent": "headless {category} — reviewer agent not configured, user confirmation required",
+  "be_permissionManager.metaToolDecisionOverride": "meta tool (category: {category}) — decisionOverride applied",
+  "be_permissionManager.userConfirmRequired": "user confirmation required (category: {category}, trust: {trust})",
+} as const;
+export const ko: Record<keyof typeof en, string> = {
+  "be_permissionManager.denyRuleReason": "deny 규칙: {pattern}",
+  "be_permissionManager.mcpServerStrictMode": "MCP 서버 strict 모드",
+  "be_permissionManager.overlayTriggerMutatingReason": "overlay trigger 출처 ({origin}) — 쓰기 도구는 사용자 컨펌 필수",
+  "be_permissionManager.strictModeReason": "strict 모드 (trust: {trust}, category: {category})",
+  "be_permissionManager.allowRuleReason": "allow 규칙: {pattern}",
+  "be_permissionManager.userPermanentApproval": "사용자 영구 승인",
+  "be_permissionManager.allowAllModeReason": "전체 허용 모드 (trust: {trust}, category: {category})",
+  "be_permissionManager.mcpLowTrustForced": "MCP 도구 strict 강제 (trust: low, category: {category})",
+  "be_permissionManager.modeAllowReason": "{mode} 모드 (category: {category}, trust: {trust})",
+  "be_permissionManager.policyDenyReason": "정책 거부 (category: {category})",
+  "be_permissionManager.headlessReviewerRouted": "headless {category} — reviewer agent 라우팅 대상 (executor 가 dispatchReviewer 호출)",
+  "be_permissionManager.headlessReviewerAbsent": "headless {category} — reviewer agent 미배치, 사용자 컨펌",
+  "be_permissionManager.metaToolDecisionOverride": "meta tool (category: {category}) — decisionOverride 적용",
+  "be_permissionManager.userConfirmRequired": "사용자 컨펌 필요 (category: {category}, trust: {trust})",
+};

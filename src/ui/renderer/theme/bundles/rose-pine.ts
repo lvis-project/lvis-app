@@ -1,4 +1,5 @@
 import type { ThemeBundle } from "./types.js";
+import { t } from "../../../../i18n/runtime.js";
 
 /**
  * Rosé Pine — soho-vibes dark theme with iris/foam/gold accents.
@@ -10,7 +11,7 @@ import type { ThemeBundle } from "./types.js";
 export const rosePineBundle: ThemeBundle = {
   id: "rose-pine",
   name: "Rosé Pine",
-  description: "다크 셸 + 아이리스 액센트 + 부드러운 로즈 톤",
+  description: t("rosePine.description"),
   shell: "dark",
   highContrast: false,
   tokens: {

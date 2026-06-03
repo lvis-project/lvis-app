@@ -13,6 +13,7 @@ import { randomUUID } from "node:crypto";
 import type { WebContents } from "electron";
 import type { NotificationService } from "./notification-service.js";
 import { createLogger } from "../lib/logger.js";
+import { t } from "../i18n/index.js";
 const log = createLogger("lvis");
 
 /**
@@ -202,10 +203,10 @@ export class AskUserQuestionGate {
       const previewBody =
         req.questions.length === 1
           ? req.questions[0].question
-          : `질문 ${req.questions.length}개 — ${req.questions[0].question}`;
+          : t("be_askUserQuestionGate.multiQuestionPreview", { count: String(req.questions.length), first: req.questions[0].question });
       this.notificationService?.fire({
         kind: "ask-user",
-        title: "질문이 도착했습니다",
+        title: t("be_askUserQuestionGate.notificationTitle"),
         body: previewBody,
         contextRef: { questionId: req.id },
       });

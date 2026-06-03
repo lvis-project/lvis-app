@@ -1,4 +1,5 @@
 import type { ThemeBundle } from "./types.js";
+import { t } from "../../../../i18n/runtime.js";
 
 /**
  * Gruvbox Dark Hard — warm retro vim palette.
@@ -10,7 +11,7 @@ import type { ThemeBundle } from "./types.js";
 export const gruvboxDarkHardBundle: ThemeBundle = {
   id: "gruvbox-dark-hard",
   name: "Gruvbox Dark Hard",
-  description: "다크 셸 + 따뜻한 오렌지 액센트 + 레트로 빔 팔레트",
+  description: t("gruvboxDarkHard.description"),
   shell: "dark",
   highContrast: false,
   tokens: {

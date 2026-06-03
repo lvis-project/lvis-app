@@ -6,6 +6,8 @@ import { formatCost, formatTokens } from "../utils/cost-format.js";
 import type { LvisApi, UsageSummaryShape, UsageTrendPt } from "../types.js";
 import { Sparkline } from "./Sparkline.js";
 import { SettingsPageHeader } from "./SettingsPageHeader.js";
+import { useTranslation } from "../../../i18n/react.js";
+import { t } from "../../../i18n/runtime.js";
 
 type Preset = "7d" | "30d" | "90d" | "all" | "custom";
 
@@ -42,12 +44,12 @@ function computeMonthlyProjection(trend: UsageTrendPt[]): { cost: number; hasUnk
 
 function formatCostWithUnknown(v: { cost: number; unknownCostTurns?: number }): string {
   const base = formatCost(v.cost);
-  return v.unknownCostTurns ? `${base} + 미정 ${v.unknownCostTurns}턴` : base;
+  return v.unknownCostTurns ? t("usageDashboard.unknownCostTurns", { base, turns: String(v.unknownCostTurns) }) : base;
 }
 
 function formatProjectedCost(v: { cost: number; hasUnknownCost: boolean }): string {
   const base = formatCost(v.cost);
-  return v.hasUnknownCost ? `${base} + 미정 포함` : base;
+  return v.hasUnknownCost ? t("usageDashboard.unknownCostIncluded", { base }) : base;
 }
 
 function formatCacheBreakdown(v: { cacheReadTokens?: number; cacheWriteTokens?: number }): string {
@@ -88,6 +90,7 @@ function buildCsvRows(summary: UsageSummaryShape): Array<Record<string, string |
 }
 
 export function UsageDashboard({ api }: { api: LvisApi }) {
+  const { t } = useTranslation();
   const [summary, setSummary] = useState<UsageSummaryShape | null>(null);
   const [loading, setLoading] = useState(true);
   const [preset, setPreset] = useState<Preset>("30d");
@@ -124,8 +127,8 @@ export function UsageDashboard({ api }: { api: LvisApi }) {
 
   const header = (
     <SettingsPageHeader
-      title="사용량"
-      description="기간별 토큰 사용량, 비용, 모델별 누적량을 확인합니다"
+      title={t("usageDashboard.title")}
+      description={t("usageDashboard.description")}
     />
   );
 
@@ -133,7 +136,7 @@ export function UsageDashboard({ api }: { api: LvisApi }) {
     return (
       <div className="space-y-5">
         {header}
-        <div className="py-6 text-center text-sm text-muted-foreground">로딩 중...</div>
+        <div className="py-6 text-center text-sm text-muted-foreground">{t("usageDashboard.loading")}</div>
       </div>
     );
   }
@@ -141,7 +144,7 @@ export function UsageDashboard({ api }: { api: LvisApi }) {
     return (
       <div className="space-y-5">
         {header}
-        <div className="py-6 text-center text-sm text-muted-foreground">사용량 데이터를 불러올 수 없습니다.</div>
+        <div className="py-6 text-center text-sm text-muted-foreground">{t("usageDashboard.loadError")}</div>
       </div>
     );
   }
@@ -161,30 +164,30 @@ export function UsageDashboard({ api }: { api: LvisApi }) {
       {header}
       <Card>
         <CardHeader className="pb-1 pt-3 px-3 flex-row items-center justify-between">
-          <CardTitle className="text-xs text-muted-foreground">기간 선택</CardTitle>
+          <CardTitle className="text-xs text-muted-foreground">{t("usageDashboard.periodSelect")}</CardTitle>
           <div className="flex gap-1 flex-wrap">
             {(["7d", "30d", "90d", "all", "custom"] as Preset[]).map((p) => (
               <Button key={p} size="sm" variant={preset === p ? "default" : "outline"} onClick={() => setPreset(p)} className="h-6 px-2 text-[11px]">
-                {p === "all" ? "전체" : p === "custom" ? "직접" : p}
+                {p === "all" ? t("usageDashboard.presetAll") : p === "custom" ? t("usageDashboard.presetCustom") : p}
               </Button>
             ))}
           </div>
         </CardHeader>
         {preset === "custom" && (
           <CardContent className="px-3 pb-3 flex gap-2 items-center">
-            <Input type="date" value={customFrom} onChange={(e) => setCustomFrom(e.target.value)} className="h-7 w-auto px-2 py-1 text-xs" aria-label="시작일" />
+            <Input type="date" value={customFrom} onChange={(e) => setCustomFrom(e.target.value)} className="h-7 w-auto px-2 py-1 text-xs" aria-label={t("usageDashboard.dateFrom")} />
             <span className="text-xs text-muted-foreground">~</span>
-            <Input type="date" value={customTo} onChange={(e) => setCustomTo(e.target.value)} className="h-7 w-auto px-2 py-1 text-xs" aria-label="종료일" />
-            <Button size="sm" onClick={load} className="h-6 px-2 text-[11px]">조회</Button>
+            <Input type="date" value={customTo} onChange={(e) => setCustomTo(e.target.value)} className="h-7 w-auto px-2 py-1 text-xs" aria-label={t("usageDashboard.dateTo")} />
+            <Button size="sm" onClick={load} className="h-6 px-2 text-[11px]">{t("usageDashboard.search")}</Button>
           </CardContent>
         )}
       </Card>
 
       <div className="grid grid-cols-3 gap-2">
         {([
-          { label: "오늘", v: summary.today },
-          { label: "이번 주", v: summary.thisWeek },
-          { label: "이번 달", v: summary.thisMonth },
+          { label: t("usageDashboard.today"), v: summary.today },
+          { label: t("usageDashboard.thisWeek"), v: summary.thisWeek },
+          { label: t("usageDashboard.thisMonth"), v: summary.thisMonth },
         ] as const).map(({ label, v }) => (
           <Card key={label}>
             <CardHeader className="pb-1 pt-3 px-3"><CardTitle className="text-xs text-muted-foreground">{label}</CardTitle></CardHeader>
@@ -199,26 +202,26 @@ export function UsageDashboard({ api }: { api: LvisApi }) {
       </div>
 
       <Card>
-        <CardHeader className="pb-1 pt-3 px-3"><CardTitle className="text-xs text-muted-foreground">토큰 추이</CardTitle></CardHeader>
+        <CardHeader className="pb-1 pt-3 px-3"><CardTitle className="text-xs text-muted-foreground">{t("usageDashboard.tokenTrend")}</CardTitle></CardHeader>
         <CardContent className="px-3 pb-3"><Sparkline points={sparkPoints} /></CardContent>
       </Card>
 
       <Card>
-        <CardHeader className="pb-1 pt-3 px-3"><CardTitle className="text-xs text-muted-foreground">월간 예상 비용</CardTitle></CardHeader>
+        <CardHeader className="pb-1 pt-3 px-3"><CardTitle className="text-xs text-muted-foreground">{t("usageDashboard.monthlyProjection")}</CardTitle></CardHeader>
         <CardContent className="px-3 pb-3">
-          <div className="text-sm">이 속도로면 월 약 <span className="font-semibold">{formatProjectedCost(projection)}</span></div>
+          <div className="text-sm">{t("usageDashboard.projectionRate")} <span className="font-semibold">{formatProjectedCost(projection)}</span></div>
           <div className="text-xs text-muted-foreground mt-0.5">
-            일평균 {formatProjectedCost(averageDailyCost)} × 30일
+            {t("usageDashboard.dailyAverage", { cost: formatProjectedCost(averageDailyCost) })}
           </div>
         </CardContent>
       </Card>
 
       <Card>
-        <CardHeader className="pb-1 pt-3 px-3"><CardTitle className="text-xs text-muted-foreground">벤더별 사용량</CardTitle></CardHeader>
+        <CardHeader className="pb-1 pt-3 px-3"><CardTitle className="text-xs text-muted-foreground">{t("usageDashboard.perVendor")}</CardTitle></CardHeader>
         <CardContent className="px-3 pb-3">
-          {summary.perVendor.length === 0 ? <div className="text-xs text-muted-foreground">데이터 없음</div> : (
+          {summary.perVendor.length === 0 ? <div className="text-xs text-muted-foreground">{t("usageDashboard.noData")}</div> : (
             <table className="w-full text-xs">
-              <thead><tr className="text-left text-muted-foreground"><th className="py-1">벤더</th><th>토큰</th><th>캐시</th><th>비용</th></tr></thead>
+              <thead><tr className="text-left text-muted-foreground"><th className="py-1">{t("usageDashboard.colVendor")}</th><th>{t("usageDashboard.colTokens")}</th><th>{t("usageDashboard.colCache")}</th><th>{t("usageDashboard.colCost")}</th></tr></thead>
               <tbody>
                 {summary.perVendor.map((v) => (
                   <tr key={v.vendor} className="border-t">
@@ -235,11 +238,11 @@ export function UsageDashboard({ api }: { api: LvisApi }) {
       </Card>
 
       <Card>
-        <CardHeader className="pb-1 pt-3 px-3"><CardTitle className="text-xs text-muted-foreground">모델별 사용량</CardTitle></CardHeader>
+        <CardHeader className="pb-1 pt-3 px-3"><CardTitle className="text-xs text-muted-foreground">{t("usageDashboard.perModel")}</CardTitle></CardHeader>
         <CardContent className="px-3 pb-3">
-          {summary.perModel.length === 0 ? <div className="text-xs text-muted-foreground">데이터 없음</div> : (
+          {summary.perModel.length === 0 ? <div className="text-xs text-muted-foreground">{t("usageDashboard.noData")}</div> : (
             <table className="w-full text-xs">
-              <thead><tr className="text-left text-muted-foreground"><th className="py-1">모델</th><th>토큰</th><th>캐시</th><th>비용</th></tr></thead>
+              <thead><tr className="text-left text-muted-foreground"><th className="py-1">{t("usageDashboard.colModel")}</th><th>{t("usageDashboard.colTokens")}</th><th>{t("usageDashboard.colCache")}</th><th>{t("usageDashboard.colCost")}</th></tr></thead>
               <tbody>
                 {summary.perModel.map((m) => (
                   <tr key={`${m.vendor}:${m.model}`} className="border-t">
@@ -258,11 +261,11 @@ export function UsageDashboard({ api }: { api: LvisApi }) {
       </Card>
 
       <Card>
-        <CardHeader className="pb-1 pt-3 px-3"><CardTitle className="text-xs text-muted-foreground">세션별 비용 Top 5</CardTitle></CardHeader>
+        <CardHeader className="pb-1 pt-3 px-3"><CardTitle className="text-xs text-muted-foreground">{t("usageDashboard.topConversations")}</CardTitle></CardHeader>
         <CardContent className="px-3 pb-3">
-          {summary.topConversations.length === 0 ? <div className="text-xs text-muted-foreground">데이터 없음</div> : (
+          {summary.topConversations.length === 0 ? <div className="text-xs text-muted-foreground">{t("usageDashboard.noData")}</div> : (
             <table className="w-full text-xs">
-              <thead><tr className="text-left text-muted-foreground"><th className="py-1">세션</th><th>턴</th><th>토큰</th><th>캐시</th><th>비용</th></tr></thead>
+              <thead><tr className="text-left text-muted-foreground"><th className="py-1">{t("usageDashboard.colSession")}</th><th>{t("usageDashboard.colTurns")}</th><th>{t("usageDashboard.colTokens")}</th><th>{t("usageDashboard.colCache")}</th><th>{t("usageDashboard.colCost")}</th></tr></thead>
               <tbody>
                 {summary.topConversations.map((c) => (
                   <tr key={c.sessionId} className="border-t">
@@ -281,7 +284,7 @@ export function UsageDashboard({ api }: { api: LvisApi }) {
 
       <div className="flex justify-end">
         <Button size="sm" variant="outline" onClick={handleExportCsv} disabled={exporting || summary.trend.length === 0} className="h-7 px-3 text-[11px]">
-          {exporting ? "내보내는 중..." : "CSV 내보내기"}
+          {exporting ? t("usageDashboard.exporting") : t("usageDashboard.exportCsv")}
         </Button>
       </div>
     </div>

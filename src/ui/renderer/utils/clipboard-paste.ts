@@ -1,3 +1,4 @@
+import { t } from "../../../i18n/runtime.js";
 import {
   PASTE_TEXT_MIN_CHARS,
   PASTE_TEXT_MIN_NEWLINES,
@@ -95,7 +96,7 @@ export async function handleClipboardPaste(
     if (file || (txt && shouldChipText(txt))) {
       return {
         handled: true,
-        warning: `첨부 ${ctx.max}개 한도에 도달 — 더 추가하려면 textarea 의 [...#N] 마커를 지워주세요`,
+        warning: t("clipboardPaste.attachmentLimitReached", { max: ctx.max }),
       };
     }
     return { handled: false };
@@ -116,7 +117,9 @@ export async function handleClipboardPaste(
     ) {
       return {
         handled: true,
-        warning: `클립보드 이미지 저장 실패${saved.error ? `: ${saved.error}` : ""}`,
+        warning: saved.error
+          ? t("clipboardPaste.imageSaveFailedWithError", { error: saved.error })
+          : t("clipboardPaste.imageSaveFailed"),
       };
     }
     const n = ctx.allocateN();

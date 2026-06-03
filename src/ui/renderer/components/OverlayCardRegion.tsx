@@ -13,6 +13,7 @@
 
 import { useOverlayContext } from "../context/OverlayContext.js";
 import { OverlayCard } from "./OverlayCard.js";
+import { useTranslation } from "../../../i18n/react.js";
 
 export interface OverlayCardRegionProps {
   /**
@@ -25,6 +26,7 @@ export interface OverlayCardRegionProps {
 }
 
 export function OverlayCardRegion({ onPluginPrimaryAction, onRoutineAcknowledge }: OverlayCardRegionProps) {
+  const { t } = useTranslation();
   const { active, queueIndex, queueTotal, prev, next, dismiss, openSession } =
     useOverlayContext();
 
@@ -63,7 +65,7 @@ export function OverlayCardRegion({ onPluginPrimaryAction, onRoutineAcknowledge 
                 }
               })();
             } : undefined}
-            primaryActionLabel="결과 보기"
+            primaryActionLabel={t("overlayCardRegion.viewResult")}
             kind="routine"
           />
         </div>
@@ -96,7 +98,7 @@ export function OverlayCardRegion({ onPluginPrimaryAction, onRoutineAcknowledge 
               dismiss(active.id);
               onPluginPrimaryAction(active.id);
             }}
-            primaryActionLabel={active.primaryActionLabel ?? "확인하기"}
+            primaryActionLabel={active.primaryActionLabel ?? t("overlayCardRegion.confirm")}
             kind="plugin"
           />
         </div>

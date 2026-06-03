@@ -4,6 +4,7 @@ import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "../..
 import { Badge } from "../../../components/ui/badge.js";
 import { ScrollArea } from "../../../components/ui/scroll-area.js";
 import type { LvisApi } from "../types.js";
+import { useTranslation } from "../../../i18n/react.js";
 
 export interface StarredItem {
   id: string;
@@ -31,19 +32,20 @@ export function StarredView({
   onJumpToSession,
   onActivateHome,
 }: StarredViewProps) {
+  const { t } = useTranslation();
   return (
     <Card className="mx-auto flex min-h-0 min-w-0 flex-1 w-full max-w-6xl flex-col overflow-hidden">
       <CardHeader>
         <div className="flex items-center justify-between">
-          <CardTitle>즐겨찾기</CardTitle>
-          <Button size="sm" variant="outline" onClick={() => void refreshStarred()}>새로고침</Button>
+          <CardTitle>{t("starredView.title")}</CardTitle>
+          <Button size="sm" variant="outline" onClick={() => void refreshStarred()}>{t("starredView.refresh")}</Button>
         </div>
-        <CardDescription>별표한 메시지는 전체 대화에서 모아볼 수 있습니다.</CardDescription>
+        <CardDescription>{t("starredView.description")}</CardDescription>
       </CardHeader>
       <CardContent className="flex min-h-0 flex-1 flex-col gap-3">
         <ScrollArea className="flex-1">
           {starred.length === 0 ? (
-            <div className="py-8 text-center text-sm text-muted-foreground">즐겨찾기한 메시지가 없습니다.</div>
+            <div className="py-8 text-center text-sm text-muted-foreground">{t("starredView.emptyState")}</div>
           ) : (
             <div className="space-y-2 pr-2">
               {starred.map((s) => (
@@ -52,7 +54,7 @@ export function StarredView({
                     <Badge variant="outline" className="text-[10px]">{s.role}</Badge>
                     <span>{new Date(s.starredAt).toLocaleString("ko-KR")}</span>
                     <span className="font-mono opacity-60">#{s.sessionId.slice(0, 8)}</span>
-                    <Button variant="ghost" size="icon-xs" className="ml-auto hover:bg-muted" title="해제" onClick={() => { void api.starredRemove({ id: s.id }).then(() => refreshStarred()); }}>
+                    <Button variant="ghost" size="icon-xs" className="ml-auto hover:bg-muted" title={t("starredView.unstar")} onClick={() => { void api.starredRemove({ id: s.id }).then(() => refreshStarred()); }}>
                       <XIcon className="h-3 w-3" />
                     </Button>
                   </div>

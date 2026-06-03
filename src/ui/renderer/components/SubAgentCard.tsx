@@ -11,6 +11,7 @@
 import { useState } from "react";
 import { Bot, ChevronDown, ChevronRight, Loader2 } from "lucide-react";
 import { Badge } from "../../../components/ui/badge.js";
+import { useTranslation } from "../../../i18n/react.js";
 
 export interface SubAgentTurn {
   turn: number;
@@ -49,6 +50,7 @@ function clipTitle(value: string): string {
 }
 
 export function SubAgentCard({ spawn }: { spawn: SubAgentSpawn }) {
+  const { t } = useTranslation();
   const [open, setOpen] = useState(spawn.status === "running");
   const isError = spawn.status === "error";
   const displayTitle = clipTitle(spawn.title);
@@ -74,7 +76,7 @@ export function SubAgentCard({ spawn }: { spawn: SubAgentSpawn }) {
             variant={isError ? "secondary" : "default"}
             className={`ml-auto shrink-0 px-1 py-0 text-[10px] ${isError ? "text-destructive" : ""}`}
           >
-            {isError ? "오류" : "완료"}
+            {isError ? t("subAgentCard.statusError") : t("subAgentCard.statusDone")}
           </Badge>
         )}
       </button>
@@ -92,7 +94,7 @@ export function SubAgentCard({ spawn }: { spawn: SubAgentSpawn }) {
           ))}
           {spawn.summary && (
             <div className="min-w-0 rounded border bg-background/40 px-2 py-1">
-              <div className="text-[10px] uppercase opacity-60">요약</div>
+              <div className="text-[10px] uppercase opacity-60">{t("subAgentCard.summaryLabel")}</div>
               <div className="mt-1 whitespace-pre-wrap break-words text-[11px] [overflow-wrap:anywhere]">
                 {spawn.summary}
               </div>

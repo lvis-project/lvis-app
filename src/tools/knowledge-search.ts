@@ -29,6 +29,7 @@
 
 import { createDynamicTool, type Tool } from "./base.js";
 import type { HybridRetriever, HybridResult } from "../main/hybrid-retriever.js";
+import { t } from "../i18n/index.js";
 
 // ─── 외부 의존 인터페이스 (Agent 4가 구현) ─────────
 
@@ -107,8 +108,7 @@ export function createKnowledgeSearchTools(
 
   const knowledgeSearchTool = createDynamicTool({
     name: "knowledge_search",
-    description:
-      "사용자 질문과 관련된 문서 chunk를 검색합니다. BM25 + 벡터 hybrid retrieval (RRF k=60) 기반으로 최대 10개 결과를 반환합니다. 결과의 chunk_id, doc_id, page, snippet을 활용하여 추가 상세가 필요하면 document_structure와 document_page_content를 호출하세요. 가장 먼저 호출해야 하는 1차 검색 도구입니다.",
+    description: t("be_knowledgeSearch.knowledgeSearchDescription"),
     source: "builtin",
     category: "read",
     isReadOnly: () => true,
@@ -117,11 +117,11 @@ export function createKnowledgeSearchTools(
       properties: {
         query: {
           type: "string",
-          description: "검색 질의 (한국어 가능, 사용자 질문을 그대로 전달해도 됨)",
+          description: t("be_knowledgeSearch.queryDescription"),
         },
         topK: {
           type: "integer",
-          description: `반환할 결과 개수 (기본 ${defaultTopK}, 최대 ${maxTopK})`,
+          description: t("be_knowledgeSearch.topKDescription", { defaultTopK, maxTopK }),
         },
       },
       required: ["query"],
@@ -170,8 +170,7 @@ export function createKnowledgeSearchTools(
 
   const documentListTool = createDynamicTool({
     name: "document_list",
-    description:
-      "인덱싱된 모든 문서의 목록(docId, docName, type)을 반환합니다. 특정 문서를 지칭해서 탐색하고 싶을 때 사용하세요.",
+    description: t("be_knowledgeSearch.documentListDescription"),
     source: "builtin",
     category: "read",
     isReadOnly: () => true,
@@ -197,8 +196,7 @@ export function createKnowledgeSearchTools(
 
   const documentStructureTool = createDynamicTool({
     name: "document_structure",
-    description:
-      "특정 문서의 로컬 인덱스 트리 구조를 반환합니다. 트리의 노드 제목을 보고 관련 페이지 범위를 추론한 다음, document_page_content로 그 범위를 읽으세요. 이는 agentic 루프의 2-hop 탐색에 사용됩니다.",
+    description: t("be_knowledgeSearch.documentStructureDescription"),
     source: "builtin",
     category: "read",
     isReadOnly: () => true,
@@ -207,7 +205,7 @@ export function createKnowledgeSearchTools(
       properties: {
         docId: {
           type: "string",
-          description: "knowledge_search 또는 document_list에서 받은 doc_id",
+          description: t("be_knowledgeSearch.docIdDescription"),
         },
       },
       required: ["docId"],
@@ -238,8 +236,7 @@ export function createKnowledgeSearchTools(
 
   const documentPageContentTool = createDynamicTool({
     name: "document_page_content",
-    description:
-      "특정 문서의 페이지 범위 내용을 반환합니다. pages 파라미터는 local indexer 표현식으로, '5' (단일 페이지), '5-7' (범위), '1,3,5-7' (복합)의 세 형식을 지원합니다. knowledge_search의 결과 또는 document_structure의 노드를 본 뒤 정확한 페이지 본문을 얻기 위해 호출하세요.",
+    description: t("be_knowledgeSearch.documentPageContentDescription"),
     source: "builtin",
     category: "read",
     isReadOnly: () => true,
@@ -252,7 +249,7 @@ export function createKnowledgeSearchTools(
         },
         pages: {
           type: "string",
-          description: "페이지 표현식 (예: '5', '5-7', '1,3,5-7')",
+          description: t("be_knowledgeSearch.pagesDescription"),
         },
       },
       required: ["docId", "pages"],

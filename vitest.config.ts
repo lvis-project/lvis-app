@@ -88,6 +88,13 @@ export default defineConfig({
         test: {
           name: "node",
           environment: "node",
+          // Backend tests were authored against the original Korean strings
+          // (dialogs, tool descriptions, prompts). After the i18n migration
+          // these resolve through t() with English as the default; this setup
+          // pins the runtime locale to Korean for node tests so the existing
+          // Korean assertions stay valid. Tests that specifically exercise the
+          // i18n default (English) set the locale explicitly themselves.
+          setupFiles: ["./src/i18n/testing/vitest-locale-ko.ts"],
           include: [
             `src/**/__tests__/${testFileGlob}`,
             `test/${testFileGlob}`,
@@ -103,6 +110,12 @@ export default defineConfig({
         test: {
           name: "jsdom",
           environment: "jsdom",
+          // Renderer tests were authored against the original Korean UI
+          // strings. After the i18n migration those strings resolve through
+          // t() with English as the default; this setup pins the runtime
+          // locale to Korean for renderer tests so the existing Korean
+          // assertions stay valid (and also verify the Korean catalog wiring).
+          setupFiles: ["./src/i18n/testing/vitest-locale-ko.ts"],
           include: rendererTestGlobs,
           exclude: baseExclude,
         },

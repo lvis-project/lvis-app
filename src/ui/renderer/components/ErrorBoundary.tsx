@@ -1,5 +1,6 @@
 import { Component, type ReactNode, type ErrorInfo } from "react";
 import { Button } from "../../../components/ui/button.js";
+import { t } from "../../../i18n/runtime.js";
 
 interface Props {
   children: ReactNode;
@@ -70,22 +71,22 @@ export class ErrorBoundary extends Component<Props, State> {
       if (this.props.compact) {
         return (
           <div className="flex items-center gap-2 px-3 py-1 text-xs text-muted-foreground border-b border-warning bg-warning/10">
-            <span>{this.props.fallback ?? "이 영역에 오류가 발생했습니다"}</span>
+            <span>{this.props.fallback ?? t("errorBoundary.compactFallback")}</span>
             {showRetry && (
-              <Button variant="link" size="sm" className="text-xs h-auto p-0" onClick={this.handleRetry}>다시 시도</Button>
+              <Button variant="link" size="sm" className="text-xs h-auto p-0" onClick={this.handleRetry}>{t("errorBoundary.retryButton")}</Button>
             )}
-            <Button variant="link" size="sm" className="text-xs h-auto p-0" onClick={() => window.location.reload()}>새로고침</Button>
+            <Button variant="link" size="sm" className="text-xs h-auto p-0" onClick={() => window.location.reload()}>{t("errorBoundary.reloadButton")}</Button>
           </div>
         );
       }
       return (
         <div className="flex flex-col items-center justify-center h-full gap-4 p-8 text-center">
-          <p className="text-sm text-muted-foreground">{this.props.fallback ?? "렌더링 오류"}</p>
+          <p className="text-sm text-muted-foreground">{this.props.fallback ?? t("errorBoundary.fullFallback")}</p>
           <div className="flex items-center gap-3">
             {showRetry && (
-              <Button variant="link" size="sm" className="text-xs h-auto p-0" onClick={this.handleRetry}>다시 시도</Button>
+              <Button variant="link" size="sm" className="text-xs h-auto p-0" onClick={this.handleRetry}>{t("errorBoundary.retryButton")}</Button>
             )}
-            <Button variant="link" size="sm" className="text-xs h-auto p-0" onClick={() => window.location.reload()}>새로고침</Button>
+            <Button variant="link" size="sm" className="text-xs h-auto p-0" onClick={() => window.location.reload()}>{t("errorBoundary.reloadButton")}</Button>
           </div>
         </div>
       );

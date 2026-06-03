@@ -1,5 +1,6 @@
 import { Button } from "../../../components/ui/button.js";
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from "../../../components/ui/dialog.js";
+import { useTranslation } from "../../../i18n/react.js";
 
 export interface PluginUninstallDialogProps {
   target: { id: string; name: string } | null;
@@ -9,19 +10,20 @@ export interface PluginUninstallDialogProps {
 }
 
 export function PluginUninstallDialog({ target, onClose, onConfirm, working }: PluginUninstallDialogProps) {
+  const { t } = useTranslation();
   return (
     <Dialog open={!!target} onOpenChange={(o) => !o && !working && onClose()}>
       <DialogContent>
         <DialogHeader>
-          <DialogTitle>플러그인 제거</DialogTitle>
+          <DialogTitle>{t("pluginUninstallDialog.title")}</DialogTitle>
           <DialogDescription>
             {target
-              ? `'${target.name}' 플러그인을 제거합니다. 로컬 데이터, 설정, 저장된 비밀값, 기록된 로그인 세션도 함께 삭제됩니다.`
+              ? t("pluginUninstallDialog.description", { name: target.name })
               : ""}
           </DialogDescription>
         </DialogHeader>
         <DialogFooter>
-          <Button variant="secondary" onClick={onClose} disabled={working}>취소</Button>
+          <Button variant="secondary" onClick={onClose} disabled={working}>{t("pluginUninstallDialog.cancelButton")}</Button>
           <Button
             variant="destructive"
             onClick={async () => {
@@ -30,7 +32,7 @@ export function PluginUninstallDialog({ target, onClose, onConfirm, working }: P
               await onConfirm(id);
             }}
             disabled={working}
-          >{working ? "제거 중..." : "제거"}</Button>
+          >{working ? t("pluginUninstallDialog.workingButton") : t("pluginUninstallDialog.confirmButton")}</Button>
         </DialogFooter>
       </DialogContent>
     </Dialog>

@@ -24,6 +24,7 @@
  *        top-level navigation, form submit, <a> 외부 링크 이동.
  */
 import { createDynamicTool, type Tool } from "./base.js";
+import { t } from "../i18n/index.js";
 
 export const MAX_HTML_BYTES = 200_000;
 export const DEFAULT_HEIGHT = 400;
@@ -55,12 +56,7 @@ export interface RenderHtmlResult {
 export function createRenderHtmlTool(): Tool {
   return createDynamicTool({
     name: "render_html",
-    description:
-      "HTML을 별도 창으로 열어 사용자에게 시각적으로 보여줍니다. Electron BrowserWindow(별도 프로세스) + 엄격한 CSP로 격리되며, 무한 루프가 있어도 메인 UI는 멈추지 않고 모든 네트워크 요청은 차단됩니다. " +
-      "허용: 인라인 CSS, data: URI 이미지/폰트, 인라인 <script>, on* 이벤트 핸들러, Function/eval, <input>/<canvas>/<svg> 등을 이용한 동적 상호작용(슬라이더로 차트 갱신 등). " +
-      "불가: 외부 URL 로드(script/css/img/font/fetch/WebSocket 전부), 부모 문서 접근, 폼 제출, top-level navigation, <a> 외부 링크, localStorage. " +
-      "차트·대시보드·인터랙티브 데모·표·다이어그램처럼 마크다운으로 표현하기 어려운 결과에 사용하세요. 라이브러리가 필요하면 코드 전체를 인라인으로 포함시켜야 합니다. " +
-      "디자인 가이드: 현재 LVIS 앱 테마 색상과 어울리도록 페이지를 구성하세요. 배경·텍스트·강조색은 가능하면 CSS 변수 hsl(var(--background)), hsl(var(--foreground)), hsl(var(--primary)), hsl(var(--muted)), hsl(var(--border)) 등을 사용하고, 카드/차트/버튼은 앱의 차분한 작업형 UI 톤에 맞춰 과한 그라데이션보다 명확한 계층·여백·대비를 우선하세요.",
+    description: t("be_renderHtml.toolDescription"),
     source: "builtin",
     category: "read",
     isReadOnly: () => true,
@@ -70,16 +66,15 @@ export function createRenderHtmlTool(): Tool {
       properties: {
         html: {
           type: "string",
-          description:
-            "완전한 HTML 조각 또는 <html> 문서. 인라인 <script>와 on* 이벤트는 허용됩니다. <iframe>/<object>/<embed>/<meta http-equiv=refresh>, <script src=...> 외부 로드, <a href=외부URL>은 자동 제거됩니다. 현재 앱 테마 토큰(--background, --foreground, --primary, --muted, --border 등)을 기준으로 페이지 색상을 맞추세요.",
+          description: t("be_renderHtml.propHtmlDescription"),
         },
         title: {
           type: "string",
-          description: "HTML 창 제목 (60자 이내).",
+          description: t("be_renderHtml.propTitleDescription"),
         },
         height: {
           type: "integer",
-          description: `프리뷰 높이(px). 기본 ${DEFAULT_HEIGHT}, 범위 ${MIN_HEIGHT}-${MAX_HEIGHT}.`,
+          description: t("be_renderHtml.propHeightDescription", { default: DEFAULT_HEIGHT, min: MIN_HEIGHT, max: MAX_HEIGHT }),
         },
       },
     },

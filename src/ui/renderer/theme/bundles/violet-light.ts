@@ -1,4 +1,5 @@
 import type { ThemeBundle } from "./types.js";
+import { t } from "../../../../i18n/runtime.js";
 
 /**
  * Violet Light bundle — light shell with warm-grey surface and vivid-purple accent.
@@ -10,7 +11,7 @@ import type { ThemeBundle } from "./types.js";
 export const violetLightBundle: ThemeBundle = {
   id: "violet-light",
   name: "Violet Light",
-  description: "라이트 셸 + 웜그레이 서피스 + 비비드 퍼플 액센트",
+  description: t("violetLight.description"),
   shell: "light",
   highContrast: false,
   tokens: {

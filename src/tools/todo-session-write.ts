@@ -15,6 +15,7 @@ import {
   type SessionTodoItem,
   type SessionTodoUpdate,
 } from "../shared/session-todo.js";
+import { t } from "../i18n/index.js";
 
 /**
  * An update changes the plan when it adds/moves an item, deletes one, or
@@ -53,15 +54,7 @@ function isMissingDeleteNoOp(
 export function createTodoSessionWriteTool(store: SessionTodoStore): Tool {
   return createDynamicTool({
     name: "todo_session_write",
-    description:
-      "현재 턴 동안 어시스턴트가 따라갈 체크리스트를 작성/갱신합니다. " +
-      "사용자 task_* 와 다름 (모든 항목이 완료된 뒤 다음 명시 사용자 입력 또는 사용자 큐 자동 인입 턴 시작 시 비워지는 휘발성 plan). id 를 같이 보내면 merge, " +
-      "생략하면 새 항목 생성. beforeId/afterId 로 중간 삽입 또는 이동 가능. " +
-      "status: pending | in_progress | completed | deleted. " +
-      "사용자가 본인의 업무·할 일·태스크를 등록·기록·추가해달라는 요청에는 " +
-      "이 도구를 사용하지 마세요 — 영구 업무 항목 등록을 지원하는 플러그인 " +
-      "도구가 노출되어 있으면 그쪽을 우선 호출하세요. 본 도구는 어시스턴트가 " +
-      "다단계 응답을 풀어가는 *내부 단계 추적* 용도로만 사용합니다.",
+    description: t("be_todoSessionWrite.toolDescription"),
     source: "builtin",
     // category="read" — the assistant's own current-turn checklist lives
     // entirely in an in-memory store this conversation owns; there is no
@@ -84,11 +77,11 @@ export function createTodoSessionWriteTool(store: SessionTodoStore): Tool {
             type: "object",
             required: ["status"],
             properties: {
-              id: { type: "string", description: "기존 항목 id — 생략 시 신규 생성. id 전달 시 content 생략 가능(기존 내용 유지)." },
-              content: { type: "string", description: "항목 내용. 신규 생성 시 필수." },
+              id: { type: "string", description: t("be_todoSessionWrite.schemaIdDesc") },
+              content: { type: "string", description: t("be_todoSessionWrite.schemaContentDesc") },
               status: { type: "string", enum: SESSION_TODO_UPDATE_STATUSES },
-              beforeId: { type: "string", description: "이 항목 앞에 삽입/이동할 기준 id. afterId 보다 우선." },
-              afterId: { type: "string", description: "이 항목 뒤에 삽입/이동할 기준 id. 기준이 없으면 뒤에 추가." },
+              beforeId: { type: "string", description: t("be_todoSessionWrite.schemaBeforeIdDesc") },
+              afterId: { type: "string", description: t("be_todoSessionWrite.schemaAfterIdDesc") },
             },
           },
         },

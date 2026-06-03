@@ -8,6 +8,7 @@
 import { app } from "electron";
 import type { BrowserWindow } from "electron";
 import { SettingsService } from "../data/settings-store.js";
+import { setLocale } from "../i18n/index.js";
 import { MemoryManager } from "../memory/memory-manager.js";
 import { KeywordEngine } from "../core/keyword-engine.js";
 import { RouteEngine } from "../core/route-engine.js";
@@ -52,6 +53,11 @@ export async function bootstrapCoreServices(mainWindow: BrowserWindow): Promise<
   const settingsService = new SettingsService({
     userDataPath: app.getPath("userData"),
   });
+
+  // Set the main-process UI locale from persisted settings so dialog titles,
+  // native menus, tray, and notifications render in the user's language.
+  // Defaults to English (the global build) when unset. See src/i18n.
+  setLocale(settingsService.get("appearance").language);
 
   // §14.2 Audit log rotation + retention — boot-time check + 1h interval
   const auditLogger = new AuditLogger();
