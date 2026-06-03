@@ -329,6 +329,19 @@ describe("allowed-subnet sourcing (LVIS_DEMO_HOST_SUBNET)", () => {
     expect(parseAllowedSubnets("")).toEqual([]);
   });
 
+  it("treats an absent/empty/whitespace-only subnet as 'not provided' (RFC1918 fallback, not fail-closed)", () => {
+    const base = "https://endpoint.openai.azure.com/openai/v1/";
+    // undefined and whitespace-only are the benign "absent" case → RFC1918
+    // floor still applies (an in-RFC1918 target passes), NOT the fail-closed
+    // path reserved for a present-but-malformed narrowing directive.
+    for (const absent of [undefined, "", "   ", "\t"]) {
+      expect(
+        validateDemoFoundryHostMap(base, "endpoint.openai.azure.com=10.182.192.7", absent),
+        `subnet ${JSON.stringify(absent)} must use the RFC1918 fallback`,
+      ).toBeNull();
+    }
+  });
+
   it("defaults to generic private (RFC1918) ranges when no subnet is provided", () => {
     // 10.x / 172.16.x / 192.168.x targets pass; public + loopback + link-local fail.
     const base = "https://endpoint.openai.azure.com/openai/v1/";
