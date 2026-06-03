@@ -22,7 +22,7 @@ export function MarketplaceUpdateBanner({
 }: {
   updates: PluginUpdateInfo[];
   onDismiss: () => void;
-  onUpdate: (pluginId: string) => Promise<void>;
+  onUpdate: (pluginId: string, expectedVersion?: string) => Promise<void>;
 }) {
   const { t } = useTranslation();
   const [busy, setBusy] = useState(false);
@@ -44,7 +44,7 @@ export function MarketplaceUpdateBanner({
     const failures: string[] = [];
     for (const u of updates) {
       try {
-        await onUpdate(u.pluginId);
+        await onUpdate(u.pluginId, u.latestVersion);
       } catch (e) {
         failures.push(`${u.pluginId}: ${(e as Error).message}`);
       }

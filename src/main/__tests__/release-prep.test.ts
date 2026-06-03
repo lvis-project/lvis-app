@@ -4,14 +4,20 @@
  * All three modules default OFF and must produce zero side-effects when the
  * user hasn't opted in. These tests lock in that invariant.
  */
-import { describe, it, expect, vi } from "vitest";
+import { beforeEach, describe, it, expect, vi } from "vitest";
 import { mkdtempSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
+import type { IpcMainInvokeEvent } from "electron";
 
-import { createAutoUpdater, type UpdaterLike } from "../auto-updater.js";
+import type { AuditEntry, AuditLogger } from "../../audit/audit-logger.js";
+import { createAutoUpdater, type AutoUpdaterDeps, type UpdaterLike } from "../auto-updater.js";
 import { startCrashReporter } from "../crash-reporter.js";
 import { TelemetryService } from "../telemetry.js";
+import {
+  clearAppUpdateInstallRequested,
+  isAppUpdateInstallRequested,
+} from "../app-update-install-intent.js";
 
 function fakeWindow() {
   const sent: Array<{ channel: string; payload: unknown }> = [];
@@ -56,11 +62,43 @@ function fakeUpdater() {
   };
 }
 
+function fakeAuditLogger() {
+  const entries: AuditEntry[] = [];
+  return {
+    entries,
+    logger: {
+      log: (entry: AuditEntry) => {
+        entries.push(entry);
+      },
+    } as AuditLogger,
+  };
+}
+
+function createTestAutoUpdater(
+  deps: Omit<AutoUpdaterDeps, "auditLogger"> & { auditLogger?: AuditLogger },
+) {
+  return createAutoUpdater({
+    ...deps,
+    auditLogger: deps.auditLogger ?? fakeAuditLogger().logger,
+  });
+}
+
+function ipcEvent(url: string): IpcMainInvokeEvent {
+  return { senderFrame: { url } } as unknown as IpcMainInvokeEvent;
+}
+
+const HOST_RENDERER_URL = "file:///Applications/LVIS.app/Contents/Resources/app.asar/dist/src/index.html";
+const PLUGIN_SHELL_URL = "file:///Applications/LVIS.app/Contents/Resources/app.asar/dist/src/plugin-ui-shell.html";
+
 describe("auto-updater", () => {
+  beforeEach(() => {
+    clearAppUpdateInstallRequested();
+  });
+
   it("does not check when disabled", async () => {
     const { win } = fakeWindow();
     const u = fakeUpdater();
-    const svc = createAutoUpdater({
+    const svc = createTestAutoUpdater({
       mainWindow: win,
       isEnabled: () => false,
       updaterFactory: () => u
@@ -72,7 +110,7 @@ describe("auto-updater", () => {
   it("checks and broadcasts available state without downloading", async () => {
     const fw = fakeWindow();
     const u = fakeUpdater();
-    const svc = createAutoUpdater({
+    const svc = createTestAutoUpdater({
       mainWindow: fw.win,
       isEnabled: () => true,
       updaterFactory: () => u
@@ -98,7 +136,7 @@ describe("auto-updater", () => {
     u.checkForUpdates = async () => {
       throw new Error("ENOTFOUND");
     };
-    const svc = createAutoUpdater({
+    const svc = createTestAutoUpdater({
       mainWindow: fw.win,
       isEnabled: () => true,
       updaterFactory: () => u
@@ -110,7 +148,7 @@ describe("auto-updater", () => {
   it("start() is idempotent and does not stack timers", () => {
     const fw = fakeWindow();
     const u = fakeUpdater();
-    const svc = createAutoUpdater({
+    const svc = createTestAutoUpdater({
       mainWindow: fw.win,
       isEnabled: () => false, // disabled so initial triggerCheck is a no-op
       updaterFactory: () => u
@@ -127,7 +165,7 @@ describe("auto-updater", () => {
   it("emits downloaded state on update-downloaded with version", async () => {
     const fw = fakeWindow();
     const u = fakeUpdater();
-    const svc = createAutoUpdater({
+    const svc = createTestAutoUpdater({
       mainWindow: fw.win,
       isEnabled: () => true,
       updaterFactory: () => u
@@ -144,7 +182,7 @@ describe("auto-updater", () => {
   it("translates download-progress events into downloading state with percent", async () => {
     const fw = fakeWindow();
     const u = fakeUpdater();
-    const svc = createAutoUpdater({
+    const svc = createTestAutoUpdater({
       mainWindow: fw.win,
       isEnabled: () => true,
       updaterFactory: () => u
@@ -163,7 +201,7 @@ describe("auto-updater", () => {
   it("downloadNow rejects when current state is not 'available'", async () => {
     const fw = fakeWindow();
     const u = fakeUpdater();
-    const svc = createAutoUpdater({
+    const svc = createTestAutoUpdater({
       mainWindow: fw.win,
       isEnabled: () => true,
       updaterFactory: () => u,
@@ -179,7 +217,7 @@ describe("auto-updater", () => {
   it("installNow rejects when current state is not 'downloaded'", async () => {
     const fw = fakeWindow();
     const u = fakeUpdater();
-    const svc = createAutoUpdater({
+    const svc = createTestAutoUpdater({
       mainWindow: fw.win,
       isEnabled: () => true,
       updaterFactory: () => u,
@@ -193,13 +231,150 @@ describe("auto-updater", () => {
     expect(u.installs).toBe(0);
   });
 
+  it("installNow invokes quitAndInstall when update is downloaded", async () => {
+    const fw = fakeWindow();
+    const u = fakeUpdater();
+    const svc = createTestAutoUpdater({
+      mainWindow: fw.win,
+      isEnabled: () => true,
+      updaterFactory: () => u,
+    });
+    await svc.triggerCheck();
+    u.emit("update-downloaded", { version: "3.0.0" });
+    const result = await svc._testOnly.installNow();
+    expect(result.ok).toBe(true);
+    expect(u.installs).toBe(1);
+    expect(isAppUpdateInstallRequested()).toBe(true);
+  });
+
+  it("installNow rejects duplicate install attempts while updater handoff is in progress", async () => {
+    const fw = fakeWindow();
+    const u = fakeUpdater();
+    const svc = createTestAutoUpdater({
+      mainWindow: fw.win,
+      isEnabled: () => true,
+      updaterFactory: () => u,
+    });
+    await svc.triggerCheck();
+    u.emit("update-downloaded", { version: "3.0.0" });
+
+    const first = await svc._testOnly.installNow();
+    const second = await svc._testOnly.installNow();
+
+    expect(first).toEqual({ ok: true });
+    expect(second).toEqual({ ok: false, reason: "install-in-progress" });
+    expect(u.installs).toBe(1);
+    expect(isAppUpdateInstallRequested()).toBe(true);
+  });
+
+  it("installNow returns ok=false when quitAndInstall throws", async () => {
+    const fw = fakeWindow();
+    const u = fakeUpdater();
+    u.quitAndInstall = () => {
+      throw new Error("quit failed");
+    };
+    const svc = createTestAutoUpdater({
+      mainWindow: fw.win,
+      isEnabled: () => true,
+      updaterFactory: () => u,
+    });
+    await svc.triggerCheck();
+    u.emit("update-downloaded", { version: "3.0.0" });
+    const result = await svc._testOnly.installNow();
+    expect(result.ok).toBe(false);
+    expect(result.reason).toContain("quit failed");
+    expect(isAppUpdateInstallRequested()).toBe(false);
+  });
+
+  it("install IPC rejects plugin shell senders and audits the attempt", async () => {
+    const fw = fakeWindow();
+    const u = fakeUpdater();
+    const audit = fakeAuditLogger();
+    const svc = createTestAutoUpdater({
+      mainWindow: fw.win,
+      auditLogger: audit.logger,
+      isEnabled: () => true,
+      updaterFactory: () => u,
+      confirmInstallForTest: async () => true,
+    });
+    await svc.triggerCheck();
+    u.emit("update-downloaded", { version: "3.0.0" });
+
+    const result = await svc._testOnly.ipcInstallNow(ipcEvent(PLUGIN_SHELL_URL));
+
+    expect(result).toEqual({ ok: false, reason: "unauthorized-frame" });
+    expect(u.installs).toBe(0);
+    expect(audit.entries).toHaveLength(1);
+    expect(audit.entries[0]?.input).toContain("lvis:update:install-now");
+    expect(audit.entries[0]?.input).toContain("plugin-ui-shell.html");
+  });
+
+  it("download IPC rejects missing sender frames before mutating updater state", async () => {
+    const fw = fakeWindow();
+    const u = fakeUpdater();
+    const audit = fakeAuditLogger();
+    const svc = createTestAutoUpdater({
+      mainWindow: fw.win,
+      auditLogger: audit.logger,
+      isEnabled: () => true,
+      updaterFactory: () => u,
+    });
+    await svc.triggerCheck();
+    u.emit("update-available", { version: "3.0.0" });
+
+    const result = await svc._testOnly.ipcDownloadNow({} as IpcMainInvokeEvent);
+
+    expect(result).toEqual({ ok: false, reason: "unauthorized-frame" });
+    expect(u.downloads).toBe(0);
+    expect(audit.entries).toHaveLength(1);
+    expect(audit.entries[0]?.input).toContain("lvis:update:download-now");
+  });
+
+  it("install IPC owns native confirmation and does not install when canceled", async () => {
+    const fw = fakeWindow();
+    const u = fakeUpdater();
+    const svc = createTestAutoUpdater({
+      mainWindow: fw.win,
+      isEnabled: () => true,
+      updaterFactory: () => u,
+      confirmInstallForTest: async () => false,
+    });
+    await svc.triggerCheck();
+    u.emit("update-downloaded", { version: "3.0.0" });
+
+    const result = await svc._testOnly.ipcInstallNow(ipcEvent(HOST_RENDERER_URL));
+
+    expect(result).toEqual({ ok: false, reason: "not-confirmed" });
+    expect(u.installs).toBe(0);
+    expect(isAppUpdateInstallRequested()).toBe(false);
+  });
+
+  it("install IPC applies the update only after trusted sender and main confirmation", async () => {
+    const fw = fakeWindow();
+    const u = fakeUpdater();
+    const svc = createTestAutoUpdater({
+      mainWindow: fw.win,
+      isEnabled: () => true,
+      updaterFactory: () => u,
+      confirmInstallForTest: async () => true,
+    });
+    await svc.triggerCheck();
+    u.emit("update-downloaded", { version: "3.0.0" });
+
+    const result = await svc._testOnly.ipcInstallNow(ipcEvent(HOST_RENDERER_URL));
+
+    expect(result).toEqual({ ok: true });
+    expect(u.installs).toBe(1);
+    expect(isAppUpdateInstallRequested()).toBe(true);
+  });
+
   it("reverts to 'available' when downloadUpdate rejects (user can retry)", async () => {
     const fw = fakeWindow();
     const u = fakeUpdater();
     u.downloadUpdate = async () => {
       throw new Error("ENETUNREACH");
     };
-    const svc = createAutoUpdater({
+    const svc = createTestAutoUpdater({
       mainWindow: fw.win,
       isEnabled: () => true,
       updaterFactory: () => u,
@@ -217,7 +392,7 @@ describe("auto-updater", () => {
   it("drops download-progress events when state is neither 'downloading' nor 'available'", async () => {
     const fw = fakeWindow();
     const u = fakeUpdater();
-    const svc = createAutoUpdater({
+    const svc = createTestAutoUpdater({
       mainWindow: fw.win,
       isEnabled: () => true,
       updaterFactory: () => u,

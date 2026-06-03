@@ -38,7 +38,10 @@ import {
   isWeakSandbox,
   type SandboxCapability,
 } from "../sandbox-capability.js";
-import { canonicalizePathForMatch } from "../sensitive-paths.js";
+import {
+  canonicalizePathForMatch,
+  caseFoldForMatch,
+} from "../sensitive-paths.js";
 
 /** Verdict level — discrete enum. The reviewer lane never uses scalars. */
 export type RiskLevel = "low" | "medium" | "high";
@@ -433,7 +436,7 @@ function extractDeclaredPaths(ctx: ToolInvocationContext): string[] {
     const values = Array.isArray(candidate) ? candidate : [candidate];
     for (const value of values) {
       if (typeof value === "string" && value.length > 0) {
-        paths.push(canonicalizePathForMatch(value));
+        paths.push(caseFoldForMatch(canonicalizePathForMatch(value)));
       }
     }
   }
@@ -554,7 +557,7 @@ const RULES: Array<(ctx: ToolInvocationContext) => RiskVerdict | null> = [
     // path-traversal defense holds even if a caller forgets to pre-
     // canonicalize. Both sides of the prefix compare are now bit-
     // identical canonical strings (security MAJOR-3).
-    const canonicalRoot = canonicalizePathForMatch(ctx.ownerPluginSandboxRoot);
+    const canonicalRoot = caseFoldForMatch(canonicalizePathForMatch(ctx.ownerPluginSandboxRoot));
     const allInside = paths.every((p) =>
       isInsideAllowed(p, [canonicalRoot]),
     );
