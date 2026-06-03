@@ -419,7 +419,14 @@ export class McpGovernance {
       }
       // Defense-in-depth: reject any other control character (U+0000..U+001F
       // except horizontal tab U+0009) in header values.
-      if (/[ --]/.test(value)) {
+      if (
+        Array.from(value).some((ch) => {
+          const cp = ch.charCodeAt(0);
+          // Reject U+0000..U+001F except horizontal tab (U+0009) and line
+          // feed (U+000A); CR/LF pairs are already rejected above.
+          return cp <= 0x1f && cp !== 0x09 && cp !== 0x0a;
+        })
+      ) {
         return {
           valid: false,
           reason: t("be_mcpGovernance.headerControlCharForbidden", { name }),
