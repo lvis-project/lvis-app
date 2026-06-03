@@ -1,20 +1,13 @@
 /**
- * Live Auto-play — scripted-turn registry (Tutorial-X3).
+ * Scripted-turn registry for the ScenarioShowcase inline preview.
  *
- * The initial demo-autoplay shipped a single `meeting-summary-demo.json`
- * script. The Tutorial-X extension adds three more — one per LVIS plugin
- * category — and rotates between them so the user sees a different first
- * scenario each boot.
+ * Holds the four canonical demo scripts (one per LVIS plugin category). The
+ * onboarding ScenarioShowcase plays one inline when the user clicks a scenario
+ * card; `getScriptByScenarioId()` resolves a card id to its scripted turn.
  *
- * Rotation policy:
- *   - Per-install index persists under `~/.lvis/onboarding/autoplay-rotation.json`
- *     via `features.demoAutoplayRotationIndex` (a single integer field on
- *     the existing settings store; no new namespace needed because the
- *     index is one int).
- *   - Selecting a script bumps the index. `useDemoAutoplay` increments
- *     when it picks the script, before passing it to the engine.
- *   - When main reports demo activation and the index is unreadable, the
- *     fallback is the first script in `DEMO_SCRIPTS`.
+ * (The former boot-time "Live Auto-play" full-screen rotation that also
+ * consumed these scripts has been removed — only the user-initiated preview
+ * remains.)
  *
  * Why an array of imports rather than a directory glob:
  *   - The renderer is bundled via tsc + Vite-like resolution; JSON imports
@@ -70,31 +63,4 @@ export function getScriptByScenarioId(
     default:
       return null;
   }
-}
-
-/**
- * Resolve the script that should play on this boot. The index is read
- * from the (caller-provided) persisted setting; out-of-range / invalid
- * values default to 0.
- */
-export function pickScript(rotationIndex: number | undefined): ScriptedTurn {
-  if (DEMO_SCRIPTS.length === 0) {
-    // Defensive — should never happen at runtime because the array is
-    // statically defined non-empty. Throw rather than silently returning
-    // a stub so the failure is loud.
-    throw new Error("demo-scripts-registry: catalog is empty");
-  }
-  const idx =
-    typeof rotationIndex === "number" && Number.isFinite(rotationIndex)
-      ? ((rotationIndex % DEMO_SCRIPTS.length) + DEMO_SCRIPTS.length) %
-        DEMO_SCRIPTS.length
-      : 0;
-  return DEMO_SCRIPTS[idx];
-}
-
-/** Bump the rotation index. `undefined` → 1 so the next boot lands on script 1. */
-export function nextRotationIndex(current: number | undefined): number {
-  const base =
-    typeof current === "number" && Number.isFinite(current) ? current : 0;
-  return (base + 1) % DEMO_SCRIPTS.length;
 }

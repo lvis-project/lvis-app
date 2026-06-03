@@ -24,9 +24,9 @@
  *        - "뒤로가기" — resets the active scenario, returning to the
  *           grid (replaces the older "다른 시나리오" copy).
  *
- * Trust boundary stays identical to the standalone DemoAutoplayView:
- * the inline engine NEVER calls `ConversationLoop` or any real tool;
- * each tool result is a hard-coded string in `scripts/*.json`. See
+ * Trust boundary: the inline scripted-turn engine NEVER calls
+ * `ConversationLoop` or any real tool; each tool result is a hard-coded
+ * string in `scripts/*.json`. See
  * `engine/demo-autoplay/scripted-turn-engine.ts`.
  *
  * Storage namespace: this view does not persist anything itself.
