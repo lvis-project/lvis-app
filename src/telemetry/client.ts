@@ -25,7 +25,7 @@
  */
 import { randomUUID } from "node:crypto";
 import { readFileSync, writeFileSync, existsSync, mkdirSync } from "node:fs";
-import { resolve, dirname } from "node:path";
+import { dirname } from "node:path";
 import type { TelemetrySettings } from "../data/settings-store.js";
 import { createLogger } from "../lib/logger.js";
 const log = createLogger("telemetry:plugin");

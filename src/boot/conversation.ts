@@ -27,8 +27,6 @@ import { HookRunner } from "../hooks/hook-runner.js";
 import { AuditLogger } from "../audit/audit-logger.js";
 import type { NotificationService } from "../main/notification-service.js";
 import type { SessionTodoStore } from "../main/session-todo-store.js";
-import { createLogger } from "../lib/logger.js";
-const log = createLogger("lvis");
 
 /**
  * Tutorial-X4 — read the user-onboarding-context markdown file synth-

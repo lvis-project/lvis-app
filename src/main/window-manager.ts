@@ -856,6 +856,11 @@ export class WindowManager {
     this._setChildPositionIfChanged(entry, pos.x, pos.y, childBounds);
   }
 
+  // Reached only by window-manager-behaviors.test.ts via a reflective cast
+  // (no production caller), so noUnusedLocals flags it. Kept because it
+  // documents+exercises the snap-delta math; the directive self-removes if a
+  // real caller is ever added.
+  // @ts-expect-error TS6133 — intentionally test-only entry point
   private _trySnap(childId: number): void {
     const entry = this._children.get(childId);
     if (!entry || entry.window.isDestroyed()) return;

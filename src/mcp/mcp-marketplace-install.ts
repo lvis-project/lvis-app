@@ -26,7 +26,7 @@ import {
 } from "../plugins/plugin-artifact-store.js";
 import type { MarketplaceFetcher } from "../plugins/marketplace-fetcher.js";
 import { parseMcpRuntimeSpec } from "../plugins/mcp-runtime-spec.js";
-import type { McpRuntimeSpec, PluginMarketplaceItem } from "../plugins/types.js";
+import type { McpRuntimeSpec } from "../plugins/types.js";
 import type { McpServerConfig } from "./types.js";
 import type { InstallerProgressEvent } from "../plugins/marketplace-installer.js";
 import { MAX_MCP_MANIFEST_BYTES } from "./safe-names.js";
