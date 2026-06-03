@@ -893,11 +893,11 @@ export async function initPluginRuntime(
             await Promise.race([
               Promise.resolve().then(() => handler()),
               new Promise<never>((_, reject) => {
-                timer = setTimeout(() => reject(new Error("shutdown handler timeout")), SHUTDOWN_TIMEOUT_MS);
+                timer = setTimeout(() => reject(new Error(`shutdown handler timeout [plugin:${pluginId}]`)), SHUTDOWN_TIMEOUT_MS);
               }),
             ]);
           } catch (err) {
-            log.warn(`shutdown handler error: %s`, (err as Error).message);
+            log.warn(`shutdown handler error [plugin:${pluginId}]: %s`, (err as Error).message);
           } finally {
             if (timer) clearTimeout(timer);
           }

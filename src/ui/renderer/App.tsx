@@ -5,7 +5,6 @@ import {
   composeImportedTriggerOutgoing,
   composeOutgoing as composeOutgoingUtil,
 } from "./utils/compose.js";
-import { vendorSupportsThinking as vendorSupportsThinkingShared } from "../../shared/vendor-capabilities.js";
 import { supportsVision } from "../../engine/llm/vendor-capabilities.js";
 import { TooltipProvider } from "../../components/ui/tooltip.js";
 import { ErrorBoundary } from "./components/ErrorBoundary.js";
@@ -778,7 +777,6 @@ export function App() {
     }
   }, [api, chainStage, markOnboardingCompleted]);
 
-  const vendorSupportsThinking = useMemo(() => vendorSupportsThinkingShared(llmVendor, llmModel), [llmVendor, llmModel]);
   const onOpenSettings = useCallback((tab = "llm") => {
     void api.openSettingsWindow(tab);
   }, [api]);
@@ -1188,7 +1186,7 @@ export function App() {
     tpmLimit, tpmPct, isTpmOverflow,
     rolePresets, activePreset, activePresetId, setActivePresetId,
     attachments, setAttachments, attachmentNCounter,
-    vendorSupportsThinking, enableThinkingChat, toggleThinking, costEstimate, costBadgeClass,
+    enableThinkingChat, toggleThinking, costEstimate, costBadgeClass,
     activePricing,
     activeVendor: llmVendor,
     hideToolFailures,

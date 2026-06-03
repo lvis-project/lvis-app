@@ -50,7 +50,6 @@ function renderBar(overrides: Partial<Parameters<typeof InputActionBar>[0]> = {}
     activePreset: mockPreset,
     activePresetId: "default",
     onSelectPreset: vi.fn(),
-    vendorSupportsThinking: false,
     enableThinkingChat: false,
     onToggleThinking: vi.fn(),
     ...overrides,
@@ -103,17 +102,12 @@ describe("InputActionBar (post indexer-removal)", () => {
     expect(leading.querySelector("[data-testid='command-popover-trigger']")).toBeTruthy();
   });
 
-  it("renders thinking checkbox when vendorSupportsThinking=true", () => {
-    const { getByText } = renderBar({ vendorSupportsThinking: true, enableThinkingChat: false });
-    expect(getByText("Thinking")).toBeTruthy();
-  });
-
-  it("renders thinking checkbox even when vendor does not support thinking — engine ignores the flag", () => {
+  it("renders thinking checkbox (always visible — engine ignores the flag on unsupported vendors)", () => {
     // Previously gated by `vendorSupportsThinking`. The toggle is now
     // always visible: vendors that don't support thinking simply ignore
     // the flag at the engine layer, but the UI surface is consistent
     // across LLM models.
-    const { getByText } = renderBar({ vendorSupportsThinking: false });
+    const { getByText } = renderBar({});
     expect(getByText("Thinking")).toBeTruthy();
   });
 

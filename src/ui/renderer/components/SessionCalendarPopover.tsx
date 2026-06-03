@@ -86,7 +86,7 @@ export function SessionCalendarPopover({
   currentSessionEntries = [],
   onLoadSession,
   onJumpToEntry,
-  onRefreshSessions,
+  onRefreshSessions: _onRefreshSessions,
   onOpenChange,
   initialDate,
   align = "center",
