@@ -123,8 +123,9 @@ function parseCidr(cidr: string): { base: number; mask: number } | null {
 
 /**
  * Parse the activation-provided allowed-subnet list (comma-separated CIDRs,
- * e.g. `10.0.0.0/24`). Malformed entries are dropped; empty/absent yields
- * `[]` so the caller falls back to {@link DEFAULT_ALLOWED_SUBNETS}.
+ * e.g. `10.0.0.0/24`). Malformed entries are dropped; empty/absent yields `[]`.
+ * The caller ({@link resolveAllowedSubnets}) distinguishes "absent" (→ RFC1918
+ * fallback) from "present-but-all-dropped" (→ fail closed).
  */
 export function parseAllowedSubnets(raw: string | undefined): string[] {
   if (typeof raw !== "string" || raw.trim().length === 0) return [];
@@ -134,13 +135,35 @@ export function parseAllowedSubnets(raw: string | undefined): string[] {
     .filter((s) => s.length > 0 && parseCidr(s) !== null);
 }
 
-/** The effective allowed-subnet list: payload-provided CIDRs, else RFC1918. */
-function resolveAllowedSubnets(rawHostSubnet: string | undefined): readonly string[] {
+/**
+ * The effective allowed-subnet list:
+ *   - subnet NOT provided (absent/empty) → the generic private (RFC1918) ranges
+ *     (backward compatible — keys issued before LVIS_DEMO_HOST_SUBNET existed).
+ *   - subnet provided and at least one CIDR parses → those CIDR(s).
+ *   - subnet provided but ENTIRELY unparseable → `null` = FAIL CLOSED. A typo'd
+ *     narrowing directive (e.g. "10.182.192/24", "/24") must never silently
+ *     widen back to the broad default — that would invert the security intent
+ *     (narrowing the SSRF target set). The host map is rejected instead.
+ */
+function resolveAllowedSubnets(rawHostSubnet: string | undefined): readonly string[] | null {
+  const isProvided = typeof rawHostSubnet === "string" && rawHostSubnet.trim().length > 0;
+  if (!isProvided) return DEFAULT_ALLOWED_SUBNETS;
   const provided = parseAllowedSubnets(rawHostSubnet);
-  return provided.length > 0 ? provided : DEFAULT_ALLOWED_SUBNETS;
+  if (provided.length === 0) {
+    log.warn(
+      "[demo-host-resolver] LVIS_DEMO_HOST_SUBNET provided but no valid CIDR parsed — failing closed (host map rejected)",
+    );
+    return null;
+  }
+  return provided;
 }
 
-function isAllowedDemoHostMapTarget(ip: string, allowedSubnets: readonly string[]): boolean {
+/**
+ * `allowedSubnets === null` is the fail-closed sentinel (a present-but-malformed
+ * subnet directive): every target is rejected.
+ */
+function isAllowedDemoHostMapTarget(ip: string, allowedSubnets: readonly string[] | null): boolean {
+  if (allowedSubnets === null) return false;
   const value = parseIpv4(ip);
   if (value === null) return false;
   return allowedSubnets.some((cidr) => {
@@ -151,8 +174,10 @@ function isAllowedDemoHostMapTarget(ip: string, allowedSubnets: readonly string[
 
 function findInvalidDemoHostMapTarget(
   entries: ReadonlyArray<readonly [string, string]>,
-  allowedSubnets: readonly string[],
+  allowedSubnets: readonly string[] | null,
 ): readonly [string, string] | null {
+  // With the fail-closed sentinel (null), every target is rejected, so the
+  // first entry is returned as the offending one.
   return entries.find(([, ip]) => !isAllowedDemoHostMapTarget(ip, allowedSubnets)) ?? null;
 }
 
