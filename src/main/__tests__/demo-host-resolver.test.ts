@@ -14,6 +14,7 @@ import {
   demoHostMapContainsHost,
   demoFoundryHostMapFingerprint,
   getAppliedDemoHostResolverFingerprint,
+  parseAllowedSubnets,
   validateDemoFoundryHostMap,
   _testOnlyResetAppliedDemoHostResolverFingerprint,
   _testOnlyParseHostMap,
@@ -262,10 +263,14 @@ describe("validateDemoFoundryHostMap — endpoint coverage", () => {
         "endpoint.openai.azure.com=169.254.169.254",
       ),
     ).toBe("invalid-foundry-host-map-target");
+    // 10.182.193.30 is in RFC1918 (10.0.0.0/8) so it is allowed by the generic
+    // default; it must be rejected only when the activation key narrows the
+    // allowed subnet to a /24 that excludes it.
     expect(
       validateDemoFoundryHostMap(
         "https://endpoint.openai.azure.com/openai/v1/",
         "endpoint.openai.azure.com=10.182.193.30",
+        "10.182.192.0/24",
       ),
     ).toBe("invalid-foundry-host-map-target");
   });
@@ -310,6 +315,57 @@ describe("validateDemoFoundryHostMap — endpoint coverage", () => {
         "endpoint.openai.azure.com=10.182.192.30,*=10.182.192.31",
       ),
     ).toBe("foundry-host-map-mismatch");
+  });
+});
+
+describe("allowed-subnet sourcing (LVIS_DEMO_HOST_SUBNET)", () => {
+  it("parseAllowedSubnets parses comma-separated CIDRs and drops malformed ones", () => {
+    expect(parseAllowedSubnets("10.182.192.0/24, 192.168.0.0/16")).toEqual([
+      "10.182.192.0/24",
+      "192.168.0.0/16",
+    ]);
+    expect(parseAllowedSubnets("not-a-cidr,10.0.0.0/33,10.0.0.0/8")).toEqual(["10.0.0.0/8"]);
+    expect(parseAllowedSubnets(undefined)).toEqual([]);
+    expect(parseAllowedSubnets("")).toEqual([]);
+  });
+
+  it("defaults to generic private (RFC1918) ranges when no subnet is provided", () => {
+    // 10.x / 172.16.x / 192.168.x targets pass; public + loopback + link-local fail.
+    const base = "https://endpoint.openai.azure.com/openai/v1/";
+    expect(validateDemoFoundryHostMap(base, "endpoint.openai.azure.com=10.182.192.5")).toBeNull();
+    expect(validateDemoFoundryHostMap(base, "endpoint.openai.azure.com=192.168.4.4")).toBeNull();
+    expect(validateDemoFoundryHostMap(base, "endpoint.openai.azure.com=8.8.8.8")).toBe(
+      "invalid-foundry-host-map-target",
+    );
+    expect(validateDemoFoundryHostMap(base, "endpoint.openai.azure.com=127.0.0.1")).toBe(
+      "invalid-foundry-host-map-target",
+    );
+  });
+
+  it("narrows the allowed targets to the activation-key subnet when provided", () => {
+    const base = "https://endpoint.openai.azure.com/openai/v1/";
+    // In-subnet target passes...
+    expect(
+      validateDemoFoundryHostMap(base, "endpoint.openai.azure.com=10.182.192.7", "10.182.192.0/24"),
+    ).toBeNull();
+    // ...a 10.x outside the /24 is rejected even though it is RFC1918.
+    expect(
+      validateDemoFoundryHostMap(base, "endpoint.openai.azure.com=10.182.193.7", "10.182.192.0/24"),
+    ).toBe("invalid-foundry-host-map-target");
+  });
+
+  it("applyDemoHostResolverRules honors a key-provided subnet", () => {
+    const app = makeApp();
+    // Target outside the key subnet → mapping skipped.
+    expect(
+      applyDemoHostResolverRules(app, {
+        LVIS_DEMO_VENDOR: "azure-foundry",
+        LVIS_DEMO_ENDPOINT_AZURE_FOUNDRY: "https://example.test.openai.azure.com/openai/v1/",
+        LVIS_DEMO_HOST_MAP: "example.test.openai.azure.com=10.182.193.10",
+        LVIS_DEMO_HOST_SUBNET: "10.182.192.0/24",
+      }),
+    ).toBe(false);
+    expect(app.commandLine.appendSwitch).not.toHaveBeenCalled();
   });
 });
 

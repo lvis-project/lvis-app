@@ -15,7 +15,12 @@
  * frozen once the network service spins up.
  *
  * Format of `LVIS_DEMO_HOST_MAP` (comma-separated `host=ip` pairs):
- *   `host1.example.com=10.182.192.3,host2.example.com=10.182.192.4`
+ *   `host1.example.com=10.0.0.3,host2.example.com=10.0.0.4`
+ *
+ * `LVIS_DEMO_HOST_SUBNET` (optional, comma-separated CIDRs) narrows which
+ * target IPs the host map may point to. When absent, targets are confined to
+ * the generic private (RFC1918) ranges. The exact intranet subnet is delivered
+ * inside the encrypted activation key — never hardcoded here.
  *
  * No-op when:
  *   - `LVIS_DEMO_VENDOR !== "azure-foundry"` (other vendors don't need
@@ -83,28 +88,72 @@ const FOUNDRY_HOST_SUFFIXES = [
   ".cognitiveservices.azure.com",
 ] as const;
 
-function isAllowedDemoHostMapTarget(ip: string): boolean {
+/**
+ * Allowed target subnets for host-map IPs when the activation payload does NOT
+ * specify `LVIS_DEMO_HOST_SUBNET`. Confines host-map redirects to the generic
+ * private (RFC1918) ranges — intranet space only, never public IPs. No
+ * organisation-specific subnet is baked into source; the exact (narrower)
+ * intranet range is delivered inside the encrypted activation key.
+ */
+const DEFAULT_ALLOWED_SUBNETS = ["10.0.0.0/8", "172.16.0.0/12", "192.168.0.0/16"] as const;
+
+/** Parse a dotted-quad IPv4 into an unsigned 32-bit number, or null if invalid. */
+function parseIpv4(ip: string): number | null {
   const octets = ip.split(".");
-  if (octets.length !== 4) return false;
-  const nums = octets.map((part) => Number.parseInt(part, 10));
-  if (
-    nums.some((n, idx) => !Number.isInteger(n) || n < 0 || n > 255 || String(n) !== octets[idx])
-  ) {
-    return false;
+  if (octets.length !== 4) return null;
+  let value = 0;
+  for (const part of octets) {
+    const n = Number.parseInt(part, 10);
+    if (!Number.isInteger(n) || n < 0 || n > 255 || String(n) !== part) return null;
+    value = (value * 256 + n) >>> 0;
   }
-  return (
-    nums[0] === 10 &&
-    nums[1] === 182 &&
-    nums[2] === 192 &&
-    nums[3] >= 1 &&
-    nums[3] <= 254
-  );
+  return value >>> 0;
+}
+
+/** Parse a `base/prefix` CIDR into its network base + mask, or null if invalid. */
+function parseCidr(cidr: string): { base: number; mask: number } | null {
+  const slash = cidr.indexOf("/");
+  if (slash <= 0) return null;
+  const base = parseIpv4(cidr.slice(0, slash).trim());
+  const prefix = Number.parseInt(cidr.slice(slash + 1).trim(), 10);
+  if (base === null || !Number.isInteger(prefix) || prefix < 0 || prefix > 32) return null;
+  const mask = prefix === 0 ? 0 : (0xffffffff << (32 - prefix)) >>> 0;
+  return { base: (base & mask) >>> 0, mask };
+}
+
+/**
+ * Parse the activation-provided allowed-subnet list (comma-separated CIDRs,
+ * e.g. `10.0.0.0/24`). Malformed entries are dropped; empty/absent yields
+ * `[]` so the caller falls back to {@link DEFAULT_ALLOWED_SUBNETS}.
+ */
+export function parseAllowedSubnets(raw: string | undefined): string[] {
+  if (typeof raw !== "string" || raw.trim().length === 0) return [];
+  return raw
+    .split(",")
+    .map((s) => s.trim())
+    .filter((s) => s.length > 0 && parseCidr(s) !== null);
+}
+
+/** The effective allowed-subnet list: payload-provided CIDRs, else RFC1918. */
+function resolveAllowedSubnets(rawHostSubnet: string | undefined): readonly string[] {
+  const provided = parseAllowedSubnets(rawHostSubnet);
+  return provided.length > 0 ? provided : DEFAULT_ALLOWED_SUBNETS;
+}
+
+function isAllowedDemoHostMapTarget(ip: string, allowedSubnets: readonly string[]): boolean {
+  const value = parseIpv4(ip);
+  if (value === null) return false;
+  return allowedSubnets.some((cidr) => {
+    const parsed = parseCidr(cidr);
+    return parsed !== null && ((value & parsed.mask) >>> 0) === parsed.base;
+  });
 }
 
 function findInvalidDemoHostMapTarget(
   entries: ReadonlyArray<readonly [string, string]>,
+  allowedSubnets: readonly string[],
 ): readonly [string, string] | null {
-  return entries.find(([, ip]) => !isAllowedDemoHostMapTarget(ip)) ?? null;
+  return entries.find(([, ip]) => !isAllowedDemoHostMapTarget(ip, allowedSubnets)) ?? null;
 }
 
 function foundryResourcePrefix(host: string): string | null {
@@ -146,6 +195,7 @@ function validatedFoundryEndpointHost(baseUrl: string | undefined): string | nul
 export function validateDemoFoundryHostMap(
   baseUrl: string | undefined,
   rawHostMap: string | undefined,
+  rawHostSubnet?: string,
 ): DemoFoundryHostMapError | null {
   if (typeof baseUrl !== "string" || baseUrl.length === 0) return null;
   let endpointHost: string;
@@ -155,9 +205,10 @@ export function validateDemoFoundryHostMap(
     return null;
   }
 
+  const allowedSubnets = resolveAllowedSubnets(rawHostSubnet);
   const entries = parseHostMap(rawHostMap);
   if (entries.length === 0) return "missing-foundry-host-map";
-  if (findInvalidDemoHostMapTarget(entries) !== null) {
+  if (findInvalidDemoHostMapTarget(entries, allowedSubnets) !== null) {
     return "invalid-foundry-host-map-target";
   }
   if (findDisallowedDemoHostMapHost(endpointHost, entries) !== null) {
@@ -194,13 +245,15 @@ function normalizedHostMapEntries(
 export function demoFoundryHostMapFingerprint(
   baseUrl: string | undefined,
   rawHostMap: string | undefined,
+  rawHostSubnet?: string,
 ): string | null {
   const endpointHost = validatedFoundryEndpointHost(baseUrl);
   if (endpointHost === null) return null;
 
+  const allowedSubnets = resolveAllowedSubnets(rawHostSubnet);
   const entries = parseHostMap(rawHostMap);
   if (entries.length === 0) return null;
-  if (findInvalidDemoHostMapTarget(entries) !== null) return null;
+  if (findInvalidDemoHostMapTarget(entries, allowedSubnets) !== null) return null;
   if (findDisallowedDemoHostMapHost(endpointHost, entries) !== null) {
     return null;
   }
@@ -233,7 +286,12 @@ export function applyDemoHostResolverRules(
   const baseUrl =
     env.LVIS_DEMO_BASEURL_AZURE_FOUNDRY ??
     env.LVIS_DEMO_ENDPOINT_AZURE_FOUNDRY;
-  const fingerprint = demoFoundryHostMapFingerprint(baseUrl, env.LVIS_DEMO_HOST_MAP);
+  const allowedSubnets = resolveAllowedSubnets(env.LVIS_DEMO_HOST_SUBNET);
+  const fingerprint = demoFoundryHostMapFingerprint(
+    baseUrl,
+    env.LVIS_DEMO_HOST_MAP,
+    env.LVIS_DEMO_HOST_SUBNET,
+  );
   if (fingerprint === null) {
     log.info(
       "[demo-host-resolver] mapping skipped (endpoint/host-map invalid or mismatched)",
@@ -247,7 +305,7 @@ export function applyDemoHostResolverRules(
     );
     return false;
   }
-  const invalidTarget = findInvalidDemoHostMapTarget(entries);
+  const invalidTarget = findInvalidDemoHostMapTarget(entries, allowedSubnets);
   if (invalidTarget !== null) {
     log.warn(
       `[demo-host-resolver] mapping skipped (host-map target outside approved demo subnet for ${invalidTarget[0]})`,

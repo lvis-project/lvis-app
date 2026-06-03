@@ -15,7 +15,7 @@ export const en = {
   "scenarioShowcase.backButton": "← Back",
   "scenarioShowcase.backButtonShort": "Back",
   "scenarioShowcase.toolRunning": "Running",
-  "scenarioShowcase.toolResultPrefix": "📄 Demo: ",
+  "scenarioShowcase.toolResultPrefix": "📄 Preview: ",
 } as const;
 export const ko: Record<keyof typeof en, string> = {
   "scenarioShowcase.meetingTitle": "회의록 정리",
@@ -33,5 +33,5 @@ export const ko: Record<keyof typeof en, string> = {
   "scenarioShowcase.backButton": "← 뒤로가기",
   "scenarioShowcase.backButtonShort": "뒤로가기",
   "scenarioShowcase.toolRunning": "실행 중",
-  "scenarioShowcase.toolResultPrefix": "📄 데모: ",
+  "scenarioShowcase.toolResultPrefix": "📄 미리보기: ",
 };
