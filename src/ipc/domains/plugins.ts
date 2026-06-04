@@ -1235,7 +1235,14 @@ export function registerPluginsHandlers(deps: IpcDeps): void {
       plog("warn", { pluginId, phase: PluginPhase.WEBVIEW_REJECT, webContentsId, reason: "entry-url-outside-install-root" }, "webview register rejected");
       return { ok: false, error: "entry-url-outside-install-root" };
     }
-    const assetEntryUrl = pluginAssetUrlFromRealPath(realRoot, realEntry);
+    const rawAssetEntryUrl = pluginAssetUrlFromRealPath(realRoot, realEntry);
+    let entrySearch = "";
+    try {
+      entrySearch = new URL(entryUrl).search;
+    } catch {
+      entrySearch = "";
+    }
+    const assetEntryUrl = entrySearch ? `${rawAssetEntryUrl}${entrySearch}` : rawAssetEntryUrl;
     const binding = { pluginId, entryUrl, assetEntryUrl };
     pluginWebviewRegistry.set(webContentsId, binding);
     flushPendingEntryUrl(webContentsId, binding);

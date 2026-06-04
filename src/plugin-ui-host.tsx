@@ -58,6 +58,12 @@ export type PluginUiExtensionView = {
     };
   };
   entryUrl?: string;
+  /**
+   * Monotonic host-runtime revision for this loaded plugin. Changes whenever
+   * the host reloads/restarts the plugin so Electron remounts the webview even
+   * when the manifest UI entry path itself stayed the same.
+   */
+  runtimeRevision?: number;
 };
 
 export type PluginUiMountContext = {
@@ -127,7 +133,7 @@ export function PluginUiHostView({
   // Shell src is empty until did-attach + registration complete for the current
   // view. Derived at render time — "" for any view key that hasn't registered.
   const [shellSrcBinding, setShellSrcBinding] = useState<{ viewKey: string; url: string } | null>(null);
-  const currentViewKey = view ? `${view.pluginId}:${view.extension.id}:${view.entryUrl ?? ""}` : "";
+  const currentViewKey = view ? `${view.pluginId}:${view.extension.id}:${view.entryUrl ?? ""}:${view.runtimeRevision ?? 0}` : "";
   const shellSrc = shellSrcBinding?.viewKey === currentViewKey ? shellSrcBinding.url : "";
 
   // Electron <webview> is a custom element — React's synthetic onLoad /
@@ -155,7 +161,7 @@ export function PluginUiHostView({
     const capturedPluginId = view.pluginId;
     const capturedExtensionId = view.extension.id;
     const capturedEntryUrl = view.entryUrl;
-    const viewKey = `${capturedPluginId}:${capturedExtensionId}:${capturedEntryUrl}`;
+    const viewKey = `${capturedPluginId}:${capturedExtensionId}:${capturedEntryUrl}:${view.runtimeRevision ?? 0}`;
     const registerKey = `${viewKey}:${wcId}`;
     const previous = registerAttemptRef.current;
     if (previous?.key === registerKey && (previous.status === "pending" || previous.status === "done")) return;
@@ -195,7 +201,7 @@ export function PluginUiHostView({
       registerAttemptRef.current = { key: registerKey, status: "done" };
       setShellSrcBinding({ viewKey, url });
     })();
-  }, [view?.pluginId, view?.entryUrl, view?.extension.id]);
+  }, [view?.pluginId, view?.entryUrl, view?.extension.id, view?.runtimeRevision]);
 
   const handleWebviewRef = useCallback((node: Electron.WebviewTag | null) => {
     const prev = webviewRef.current;
@@ -315,7 +321,7 @@ export function PluginUiHostView({
       // already equal `shellUrl` here, in which case it's a no-op.
       content = (
         <webview
-          key={`${view.pluginId}:${view.extension.id}:${view.entryUrl ?? ""}`}
+          key={`${view.pluginId}:${view.extension.id}:${view.entryUrl ?? ""}:${view.runtimeRevision ?? 0}`}
           // eslint-disable-next-line @typescript-eslint/no-explicit-any
           ref={handleWebviewRef as any}
           src={shellSrc || shellUrl}

@@ -42,6 +42,7 @@ import {
 } from "../dev-flags.js";
 import { canEmitEvent, requiredCapabilityForEmit } from "../../plugins/capabilities.js";
 import { OVERLAY_V1 } from "../../shared/ipc-channels.js";
+import { sendToWindow } from "../../ipc/safe-send.js";
 import { resolvePluginPaths } from "../../plugins/plugin-paths.js";
 import { stripLeadingSlash } from "../../shared/slash-sanitizer.js";
 import {
@@ -1087,6 +1088,12 @@ export async function initPluginRuntime(
       ) {
         keywordEngine.registerKeywords(manifest.keywords.map((k) => ({ ...k, pluginId })));
         log.debug(`plugin:${pluginId} re-registered ${manifest.keywords.length} keywords on enable`);
+      }
+      // Best-effort renderer refresh signal. Runtime/tool registry state is
+      // already updated; a closed window must not make reload fail —
+      // sendToWindow owns the isDestroyed guard + send try/catch.
+      for (const win of ElectronBrowserWindow.getAllWindows()) {
+        sendToWindow(win, "lvis:plugins:runtime-updated", { pluginId }, log);
       }
     },
     createHostApi: (pluginId: string, manifest: PluginManifest, pluginDataDir: string): PluginHostApi => {

@@ -331,6 +331,7 @@ describe("plugin theme IPC handlers", () => {
     unregisterPluginWebview(1701);
     unregisterPluginWebview(1702);
     unregisterPluginWebview(1703);
+    unregisterPluginWebview(1704);
     __resetLastThemePayloadForTests();
   });
 
@@ -390,6 +391,26 @@ describe("plugin theme IPC handlers", () => {
 
     expect(sendSpy).toHaveBeenCalledWith("lvis:plugin:event", "host.theme.changed", cached);
     expect(seen).toEqual([cached]);
+  });
+
+  it("preserves UI revision query parameters when returning the asset entry URL", () => {
+    const { root, entryUrl } = createPluginFixture();
+    const { deps } = createDeps(root);
+    registerPluginsHandlers(deps);
+    const registerWebview = getRegisteredHandler("lvis:plugin:register-webview");
+    const getEntryUrl = getRegisteredHandler("lvis:plugin:get-entry-url");
+    const versionedEntryUrl = `${entryUrl}?lvisPluginVersion=0.5.25&lvisRuntimeRevision=7`;
+
+    expect(registerWebview(rendererEvent(), {
+      webContentsId: 1704,
+      pluginId: "meeting",
+      entryUrl: versionedEntryUrl,
+    })).toEqual({ ok: true });
+
+    expect(getEntryUrl(pluginEvent(1704))).toEqual({
+      ok: true,
+      entryUrl: "lvis-plugin://asset/index.html?lvisPluginVersion=0.5.25&lvisRuntimeRevision=7",
+    });
   });
 
   it("rejects host namespace emits through the production plugin emit IPC handler", () => {
