@@ -31,20 +31,6 @@ import {
 } from "../../shared/llm-vendor-defaults.js";
 import { t } from "../../i18n/runtime.js";
 
-export const SOURCE_LABEL: Record<string, string> = {
-  get email() { return t("constants.sourceLabelEmail"); },
-  teams: "Teams",
-  get meeting() { return t("constants.sourceLabelMeeting"); },
-  get calendar() { return t("constants.sourceLabelCalendar"); },
-  get manual() { return t("constants.sourceLabelManual"); },
-};
-
-export const PRIORITY_EMOJI: Record<string, string> = {
-  high: "🔴",
-  medium: "🟡",
-  low: "🔵",
-};
-
 export const SOURCE_BADGE: Record<string, string> = {
   get builtin() { return t("constants.sourceBadgeBuiltin"); },
   get plugin() { return t("constants.sourceBadgePlugin"); },
@@ -149,5 +135,3 @@ export const EXEC_MODE_OPTIONS: { value: ExecMode; readonly label: string; reado
 export const RENDER_HTML_MIN_HEIGHT = 80;
 export const RENDER_HTML_MAX_HEIGHT = 1200;
 export const RENDER_HTML_DEFAULT_HEIGHT = 400;
-
-export const formatTaskSource = (source: string): string => SOURCE_LABEL[source] ?? source;
