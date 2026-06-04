@@ -51,8 +51,8 @@ function makeServices(
     mcpServers?: Array<{ status: string }>;
     marketplaceSettings?: {
       backend: string;
-      realCloudBaseUrl?: string;
-      realCloudAllowPrivateNetwork?: boolean;
+      cloudBaseUrl?: string;
+      cloudAllowPrivateNetwork?: boolean;
     };
   } = {},
 ) {
@@ -240,7 +240,7 @@ describe("lvis:marketplace:ping", () => {
     await setupHandlers(makeMockPermissionManager(), makeMockApprovalGate(), {
       marketplaceSettings: {
         backend: "real-cloud",
-        realCloudBaseUrl: "",
+        cloudBaseUrl: "",
       },
     });
 
@@ -264,7 +264,7 @@ describe("lvis:marketplace:ping", () => {
   });
 
   it("returns { configured: true, online: false } when real-cloud fetch throws", async () => {
-    // Use realCloudAllowPrivateNetwork=true so the handler uses the direct
+    // Use cloudAllowPrivateNetwork=true so the handler uses the direct
     // fetch path (no dynamic network-guard import) and we can control the
     // global fetch stub.
     const fetchSpy = vi.spyOn(global, "fetch").mockRejectedValueOnce(
@@ -274,8 +274,8 @@ describe("lvis:marketplace:ping", () => {
     await setupHandlers(makeMockPermissionManager(), makeMockApprovalGate(), {
       marketplaceSettings: {
         backend: "real-cloud",
-        realCloudBaseUrl: "http://127.0.0.1:9999/",
-        realCloudAllowPrivateNetwork: true,
+        cloudBaseUrl: "http://127.0.0.1:9999/",
+        cloudAllowPrivateNetwork: true,
       },
     });
 
@@ -298,8 +298,8 @@ describe("lvis:marketplace:ping", () => {
     await setupHandlers(makeMockPermissionManager(), makeMockApprovalGate(), {
       marketplaceSettings: {
         backend: "real-cloud",
-        realCloudBaseUrl: "http://127.0.0.1:9999/",
-        realCloudAllowPrivateNetwork: true,
+        cloudBaseUrl: "http://127.0.0.1:9999/",
+        cloudAllowPrivateNetwork: true,
       },
     });
 
@@ -325,8 +325,8 @@ describe("lvis:marketplace:ping", () => {
     await setupHandlers(makeMockPermissionManager(), makeMockApprovalGate(), {
       marketplaceSettings: {
         backend: "real-cloud",
-        realCloudBaseUrl: "http://127.0.0.1:9999/",
-        realCloudAllowPrivateNetwork: true,
+        cloudBaseUrl: "http://127.0.0.1:9999/",
+        cloudAllowPrivateNetwork: true,
       },
     });
 
@@ -349,8 +349,8 @@ describe("lvis:marketplace:ping", () => {
     await setupHandlers(makeMockPermissionManager(), makeMockApprovalGate(), {
       marketplaceSettings: {
         backend: "real-cloud",
-        realCloudBaseUrl: "http://127.0.0.1:9999/",
-        realCloudAllowPrivateNetwork: true,
+        cloudBaseUrl: "http://127.0.0.1:9999/",
+        cloudAllowPrivateNetwork: true,
       },
     });
 

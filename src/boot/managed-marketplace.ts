@@ -7,35 +7,27 @@ import { createLogger } from "../lib/logger.js";
 const log = createLogger("lvis");
 
 export function resolveManagedPluginBootstrap(input: {
-  marketplace: Pick<MarketplaceSettings, "backend" | "realCloudBaseUrl">;
-  isPackaged: boolean;
+  marketplace: Pick<MarketplaceSettings, "backend" | "cloudBaseUrl">;
 }): { enabled: boolean; reason?: string } {
-  const { marketplace, isPackaged } = input;
-  if (marketplace.backend === "real-cloud") {
-    const baseUrl = marketplace.realCloudBaseUrl?.trim();
-    if (baseUrl) {
-      return { enabled: true };
-    }
-    return {
-      enabled: false,
-      reason: "real-cloud backend has no configured base URL",
-    };
+  const { marketplace } = input;
+  // The cloud backend is the only marketplace backend; bootstrap is enabled iff
+  // a base URL is configured. (The former mock-backend / isPackaged skip branch
+  // was dead once the mock backend was removed.)
+  const baseUrl = marketplace.cloudBaseUrl?.trim();
+  if (baseUrl) {
+    return { enabled: true };
   }
-  if (isPackaged) {
-    return {
-      enabled: false,
-      reason: "packaged apps skip managed bootstrap when using the mock marketplace backend",
-    };
-  }
-  return { enabled: true };
+  return {
+    enabled: false,
+    reason: "marketplace backend has no configured base URL",
+  };
 }
 
 export interface RunManagedBootstrapInput {
   pluginMarketplace: PluginMarketplaceService;
   pluginRuntime: PluginRuntime;
   mainWindow: BrowserWindow | null | undefined;
-  marketplace: Pick<MarketplaceSettings, "backend" | "realCloudBaseUrl">;
-  isPackaged: boolean;
+  marketplace: Pick<MarketplaceSettings, "backend" | "cloudBaseUrl">;
 }
 
 /**
@@ -84,8 +76,8 @@ export function runManagedBootstrap(input: RunManagedBootstrapInput): Promise<vo
 }
 
 async function doRunManagedBootstrap(input: RunManagedBootstrapInput): Promise<void> {
-  const { pluginMarketplace, pluginRuntime, mainWindow, marketplace, isPackaged } = input;
-  const decision = resolveManagedPluginBootstrap({ marketplace, isPackaged });
+  const { pluginMarketplace, pluginRuntime, mainWindow, marketplace } = input;
+  const decision = resolveManagedPluginBootstrap({ marketplace });
   if (!decision.enabled) {
     log.warn(`boot: managed plugin bootstrap skipped: ${decision.reason}`);
     notifyBootstrapStatus(mainWindow, {

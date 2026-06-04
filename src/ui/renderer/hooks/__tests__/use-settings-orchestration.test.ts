@@ -23,8 +23,8 @@ function makeSettings(): AppSettings {
     webSearch: { provider: "duckduckgo" },
     privacy: { piiRedactEnabled: false },
     marketplace: {
-      realCloudBaseUrl: "",
-      realCloudAllowPrivateNetwork: false,
+      cloudBaseUrl: "",
+      cloudAllowPrivateNetwork: false,
     },
   };
 }

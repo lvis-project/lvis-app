@@ -90,7 +90,7 @@ async function setup() {
       })),
     },
     settingsService: {
-      get: vi.fn(() => ({ backend: "real-cloud", realCloudBaseUrl: "https://marketplace.example" })),
+      get: vi.fn(() => ({ backend: "real-cloud", cloudBaseUrl: "https://marketplace.example" })),
       deletePluginConfig: vi.fn(async () => undefined),
       deletePluginSecrets: vi.fn(async () => 0),
       setSecret: vi.fn(async () => undefined),
@@ -553,7 +553,7 @@ describe("plugins IPC lifecycle broadcast", () => {
       setConfigOverride: vi.fn(),
       },
       settingsService: {
-        get: vi.fn(() => ({ backend: "real-cloud", realCloudBaseUrl: "https://marketplace.example" })),
+        get: vi.fn(() => ({ backend: "real-cloud", cloudBaseUrl: "https://marketplace.example" })),
       },
       auditLogger: {
         log: vi.fn(),

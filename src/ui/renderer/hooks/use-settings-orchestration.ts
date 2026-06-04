@@ -188,8 +188,8 @@ export function useSettingsOrchestration(
       setHasWebKey(webApiKeySet);
       setPiiRedactEnabled(s.privacy?.piiRedactEnabled ?? false);
       setIdlePreferenceRefresh(s.features?.idlePreferenceRefresh ?? false);
-      setMarketplaceBaseUrl(s.marketplace?.realCloudBaseUrl ?? "");
-      setMarketplaceAllowPrivateNetwork(s.marketplace?.realCloudAllowPrivateNetwork ?? false);
+      setMarketplaceBaseUrl(s.marketplace?.cloudBaseUrl ?? "");
+      setMarketplaceAllowPrivateNetwork(s.marketplace?.cloudAllowPrivateNetwork ?? false);
       setHasMarketplaceApiKey(marketplaceKeySet);
       setFallbackChain(s.llm.fallbackChain.map((e) => ({ provider: e.provider, model: e.model })));
       setSettingsLoaded(true);
@@ -353,8 +353,8 @@ export function useSettingsOrchestration(
           chat: { autoCompact },
           privacy: { piiRedactEnabled },
           marketplace: {
-            realCloudBaseUrl: marketplaceBaseUrl.trim() || undefined,
-            realCloudAllowPrivateNetwork: marketplaceAllowPrivateNetwork,
+            cloudBaseUrl: marketplaceBaseUrl.trim() || undefined,
+            cloudAllowPrivateNetwork: marketplaceAllowPrivateNetwork,
           },
         });
         if (isIpcErrorResult(updateResult)) {

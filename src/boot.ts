@@ -553,16 +553,16 @@ export async function bootstrap(
   // running the marketplace server locally override via the settings UI.
   // Tests inject their own fetcher.
   let marketplaceFetcher: MarketplaceFetcher;
-  if (marketplaceSettings.realCloudBaseUrl) {
+  if (marketplaceSettings.cloudBaseUrl) {
     marketplaceFetcher = new CloudMarketplaceFetcher({
-      baseUrl: marketplaceSettings.realCloudBaseUrl,
+      baseUrl: marketplaceSettings.cloudBaseUrl,
       apiKey: settingsService.getSecret("marketplace.apiKey") ?? undefined,
-      allowPrivateNetwork: marketplaceSettings.realCloudAllowPrivateNetwork,
+      allowPrivateNetwork: marketplaceSettings.cloudAllowPrivateNetwork,
     });
-    log.info("boot: marketplace backend = real-cloud (%s)", marketplaceSettings.realCloudBaseUrl);
+    log.info("boot: marketplace backend = real-cloud (%s)", marketplaceSettings.cloudBaseUrl);
   } else {
     marketplaceFetcher = new DisabledMarketplaceFetcher();
-    log.warn("boot: marketplace backend disabled (no realCloudBaseUrl configured)");
+    log.warn("boot: marketplace backend disabled (no cloudBaseUrl configured)");
   }
   const pluginMarketplace = new PluginMarketplaceService(
     pluginPaths,
@@ -572,14 +572,14 @@ export async function bootstrap(
   );
 
   // Closure invoked by the settings IPC handler when MarketplaceTab fields
-  // change. Re-reads the persisted `marketplace.realCloudAllowPrivateNetwork`
+  // change. Re-reads the persisted `marketplace.cloudAllowPrivateNetwork`
   // value and pushes it into the live CloudMarketplaceFetcher so the
   // SSRF-guard bypass toggle takes effect on the next request (honoring the
   // "즉시 적용" UX badge). No-op when the fetcher is the disabled variant —
   // a disabled marketplace has no live config to refresh.
   const refreshMarketplaceFetcherConfig = (): void => {
     if (!(marketplaceFetcher instanceof CloudMarketplaceFetcher)) return;
-    const next = settingsService.get("marketplace").realCloudAllowPrivateNetwork ?? false;
+    const next = settingsService.get("marketplace").cloudAllowPrivateNetwork ?? false;
     marketplaceFetcher.updateAllowPrivateNetwork(next);
   };
 
@@ -624,7 +624,6 @@ export async function bootstrap(
     pluginRuntime,
     mainWindow,
     marketplace: marketplaceSettings,
-    isPackaged: app.isPackaged,
   });
 
   // §4.5.9: SystemPromptBuilder.

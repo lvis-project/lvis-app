@@ -9,7 +9,7 @@
  *     (default `https://marketplace.lvisai.xyz`; local dev operators can
  *     override via Settings → 마켓플레이스).
  *   - `DisabledMarketplaceFetcher`  — no-op fetcher used when boot finds
- *     no `realCloudBaseUrl`; every method throws `marketplace-disabled`.
+ *     no `cloudBaseUrl`; every method throws `marketplace-disabled`.
  *   - `MockMarketplaceFetcher`      — dev/test-only stub backed by a JSON
  *     file; constructor is gated to fail in packaged builds. Production
  *     boot never instantiates it.
