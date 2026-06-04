@@ -229,7 +229,7 @@ describe("MAJOR-2: settings:update triggers rewireReviewerAgent on azure-foundry
       settingsService: {
         ...baseDeps.settingsService,
         get: vi.fn((key: string) => {
-          if (key === "marketplace") return { realCloudAllowPrivateNetwork: false };
+          if (key === "marketplace") return { cloudAllowPrivateNetwork: false };
           llmReads += 1;
           return llmReads === 1 ? prevLlm : nextLlm;
         }),
@@ -270,7 +270,7 @@ describe("MAJOR-2: settings:update triggers rewireReviewerAgent on azure-foundry
       settingsService: {
         ...baseDeps.settingsService,
         get: vi.fn((key: string) => {
-          if (key === "marketplace") return { realCloudAllowPrivateNetwork: false };
+          if (key === "marketplace") return { cloudAllowPrivateNetwork: false };
           llmReads += 1;
           return llmReads === 1 ? prevLlm : nextLlm;
         }),
@@ -322,7 +322,7 @@ describe("MAJOR-2: settings:update triggers rewireReviewerAgent on azure-foundry
       settingsService: {
         ...baseDeps.settingsService,
         get: vi.fn((key: string) => {
-          if (key === "marketplace") return { realCloudAllowPrivateNetwork: false };
+          if (key === "marketplace") return { cloudAllowPrivateNetwork: false };
           llmReads += 1;
           return llmReads === 1 ? prevLlm : nextLlm;
         }),
@@ -384,7 +384,7 @@ describe("MAJOR-2: settings:update triggers rewireReviewerAgent on azure-foundry
       settingsService: {
         ...baseDeps.settingsService,
         get: vi.fn((key: string) => {
-          if (key === "marketplace") return { realCloudAllowPrivateNetwork: false };
+          if (key === "marketplace") return { cloudAllowPrivateNetwork: false };
           llmReads += 1;
           return llmReads === 1 ? prevLlm : nextLlm;
         }),
@@ -423,9 +423,9 @@ describe("MAJOR-2: settings:update triggers rewireReviewerAgent on azure-foundry
         ...baseDeps.settingsService,
         get: vi.fn()
           .mockReturnValueOnce({ provider: "openai", vendors: { "azure-foundry": { baseUrl: null } } })  // prevBaseUrl read (key: "llm")
-          .mockReturnValueOnce({ realCloudAllowPrivateNetwork: false })  // prevAllowPrivate read (key: "marketplace")
+          .mockReturnValueOnce({ cloudAllowPrivateNetwork: false })  // prevAllowPrivate read (key: "marketplace")
           .mockReturnValueOnce({ provider: "openai", vendors: { "azure-foundry": { baseUrl: "https://proj.services.ai.azure.com" } } })  // newBaseUrl read (key: "llm")
-          .mockReturnValueOnce({ realCloudAllowPrivateNetwork: false }),  // newAllowPrivate read (key: "marketplace")
+          .mockReturnValueOnce({ cloudAllowPrivateNetwork: false }),  // newAllowPrivate read (key: "marketplace")
         patch: vi.fn(async (p: unknown) => p),
       },
       rewireReviewerAgent: rewire,
@@ -505,9 +505,9 @@ describe("settings:update triggers refreshMarketplaceFetcherConfig on allowPriva
         ...baseDeps.settingsService,
         get: vi.fn()
           .mockReturnValueOnce({ provider: "openai", vendors: { "azure-foundry": { baseUrl: null } } })  // prevBaseUrl
-          .mockReturnValueOnce({ realCloudAllowPrivateNetwork: false })                                    // prevAllowPrivate
+          .mockReturnValueOnce({ cloudAllowPrivateNetwork: false })                                    // prevAllowPrivate
           .mockReturnValueOnce({ provider: "openai", vendors: { "azure-foundry": { baseUrl: null } } })  // newBaseUrl
-          .mockReturnValueOnce({ realCloudAllowPrivateNetwork: true }),                                    // newAllowPrivate
+          .mockReturnValueOnce({ cloudAllowPrivateNetwork: true }),                                    // newAllowPrivate
         patch: vi.fn(async (p: unknown) => p),
       },
       refreshMarketplaceFetcherConfig: refresh,
@@ -516,7 +516,7 @@ describe("settings:update triggers refreshMarketplaceFetcherConfig on allowPriva
     const { registerSettingsHandlers } = await import("../settings.js");
     registerSettingsHandlers(deps as never);
 
-    await invoke("lvis:settings:update", { marketplace: { realCloudAllowPrivateNetwork: true } });
+    await invoke("lvis:settings:update", { marketplace: { cloudAllowPrivateNetwork: true } });
 
     expect(refresh).toHaveBeenCalledOnce();
   });
@@ -531,7 +531,7 @@ describe("settings:update triggers refreshMarketplaceFetcherConfig on allowPriva
         ...baseDeps.settingsService,
         get: vi.fn((key: string) =>
           key === "marketplace"
-            ? { realCloudAllowPrivateNetwork: true }
+            ? { cloudAllowPrivateNetwork: true }
             : { provider: "openai", vendors: { "azure-foundry": { baseUrl: null } } },
         ),
         patch: vi.fn(async (p: unknown) => p),
@@ -542,7 +542,7 @@ describe("settings:update triggers refreshMarketplaceFetcherConfig on allowPriva
     const { registerSettingsHandlers } = await import("../settings.js");
     registerSettingsHandlers(deps as never);
 
-    await invoke("lvis:settings:update", { marketplace: { realCloudAllowPrivateNetwork: true } });
+    await invoke("lvis:settings:update", { marketplace: { cloudAllowPrivateNetwork: true } });
 
     expect(refresh).not.toHaveBeenCalled();
   });

@@ -8,37 +8,18 @@ import type { PluginMarketplaceService } from "../../plugins/marketplace.js";
 import type { PluginRuntime } from "../../plugins/runtime.js";
 
 describe("resolveManagedPluginBootstrap", () => {
-  it("allows mock backend bootstrap in dev", () => {
-    expect(resolveManagedPluginBootstrap({
-      marketplace: { backend: "mock" },
-      isPackaged: false,
-    })).toEqual({ enabled: true });
-  });
-
-  it("skips mock backend bootstrap in packaged builds", () => {
-    expect(resolveManagedPluginBootstrap({
-      marketplace: { backend: "mock" },
-      isPackaged: true,
-    })).toEqual({
-      enabled: false,
-      reason: "packaged apps skip managed bootstrap when using the mock marketplace backend",
-    });
-  });
-
-  it("requires a base URL for real-cloud bootstrap", () => {
+  it("disables bootstrap when no base URL is configured", () => {
     expect(resolveManagedPluginBootstrap({
       marketplace: { backend: "real-cloud" },
-      isPackaged: true,
     })).toEqual({
       enabled: false,
-      reason: "real-cloud backend has no configured base URL",
+      reason: "marketplace backend has no configured base URL",
     });
   });
 
-  it("allows real-cloud bootstrap when a base URL is configured", () => {
+  it("enables bootstrap when a base URL is configured", () => {
     expect(resolveManagedPluginBootstrap({
-      marketplace: { backend: "real-cloud", realCloudBaseUrl: "https://marketplace.lvis.internal" },
-      isPackaged: true,
+      marketplace: { backend: "real-cloud", cloudBaseUrl: "https://marketplace.lvis.internal" },
     })).toEqual({ enabled: true });
   });
 });
@@ -67,9 +48,8 @@ describe("runManagedBootstrap concurrency", () => {
       mainWindow: null,
       marketplace: {
         backend: "real-cloud" as const,
-        realCloudBaseUrl: "https://marketplace.example.com",
+        cloudBaseUrl: "https://marketplace.example.com",
       },
-      isPackaged: false,
     };
 
     // Three concurrent callers — the first kicks off ensureManagedInstalled,
@@ -101,9 +81,8 @@ describe("runManagedBootstrap concurrency", () => {
       mainWindow: null,
       marketplace: {
         backend: "real-cloud" as const,
-        realCloudBaseUrl: "https://marketplace.example.com",
+        cloudBaseUrl: "https://marketplace.example.com",
       },
-      isPackaged: false,
     };
 
     await runManagedBootstrap(input);
