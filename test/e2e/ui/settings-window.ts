@@ -1,11 +1,12 @@
 import { expect } from '@playwright/test';
 import type { ElectronApplication, Page } from 'playwright';
 import { translate } from '../../../src/i18n/translate.js';
+import { SUPPORTED_LOCALES } from '../../../src/i18n/locale.js';
 
 // The settings window title is localized (be_main.settingsWindowTitle). Resolve
 // it for every supported locale so the helpers work whatever the suite seeds.
-const SETTINGS_WINDOW_TITLES = ['ko', 'en'].map((l) =>
-  translate(l as 'ko' | 'en', 'be_main.settingsWindowTitle'),
+const SETTINGS_WINDOW_TITLES = SUPPORTED_LOCALES.map((l) =>
+  translate(l, 'be_main.settingsWindowTitle'),
 );
 
 /**
