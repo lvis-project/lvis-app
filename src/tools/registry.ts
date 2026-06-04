@@ -29,10 +29,11 @@ const log = createLogger("tool-registry");
 export const TOOL_SEARCH_TOOL_NAME = "tool_search";
 
 /**
- * §6.4 — observer fired whenever a deprecated tool is resolved via
- * {@link ToolRegistry.findByName}. Supplies enough context for an audit
- * listener (AuditLogger, cost-monitor) to log a `warn`/`tool_call` entry
- * without pulling AuditLogger into this module.
+ * §6.4 — internal event describing a deprecated-tool resolution via
+ * {@link ToolRegistry.findByName}. Carries the requested/resolved context for
+ * the `emitDeprecation` warning log. (The external observer/handler API was
+ * removed — deprecation is surfaced via `log.warn` only, not a registered
+ * listener.)
  */
 interface DeprecationEvent {
   /** Name the caller requested. */
