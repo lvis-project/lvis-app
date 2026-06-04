@@ -17,6 +17,7 @@ import {
   buildIsolatedElectronEnv,
 } from './seeded-electron';
 import { canonicalJSON } from '../../../src/plugins/whitelist/canonical-json.js';
+import { makeTestT, type TestT } from './i18n.js';
 
 const HERE = path.dirname(fileURLToPath(import.meta.url));
 
@@ -393,6 +394,8 @@ export type ElectronFixtures = {
   app: ElectronApplication;
   mainWindow: Page;
   userDataDir: string;
+  /** i18n catalog binding for locale-agnostic assertions (see ./i18n.ts). */
+  t: TestT;
 };
 export type ElectronOptions = {
   launchEnv: LaunchEnv;
@@ -412,9 +415,12 @@ export const test = base.extend<ElectronFixtures & ElectronOptions>({
   // Specs that assert the no-key / key-toggle state override with
   // `test.use({ seedApiKey: false })`.
   seedApiKey: [true, { option: true }],
-  // UI locale to seed. Defaults to ko (the specs assert the Korean catalog);
-  // the english-default-smoke spec overrides with `test.use({ seedLocale: 'en' })`.
-  seedLocale: ['ko', { option: true }],
+  // UI locale to seed. Defaults to 'en' — the production default (#1200) — so
+  // ./fixtures specs exercise the English render path; their assertions go
+  // through the `t` fixture so they resolve whatever is seeded. Specs that need
+  // Korean override with `test.use({ seedLocale: 'ko' })`; specs with their own
+  // harness pin their locale via a module-scoped `makeTestT(...)`.
+  seedLocale: ['en', { option: true }],
 
   userDataDir: async ({}, use) => {
     const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'lvis-e2e-'));
@@ -517,6 +523,11 @@ export const test = base.extend<ElectronFixtures & ElectronOptions>({
       content: '[data-testid="post-tour-first-task"]{display:none !important;}',
     });
     await use(win);
+  },
+
+  // Catalog binding for locale-agnostic assertions, bound to the seeded locale.
+  t: async ({ seedLocale }, use) => {
+    await use(makeTestT(seedLocale));
   },
 });
 
