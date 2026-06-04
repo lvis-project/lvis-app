@@ -1,18 +1,27 @@
 name: Marketplace E2E (publish ↔ install)
 
-# Opt-in only. Run manually via workflow_dispatch or when PR branches
-# explicitly include a `marketplace-e2e` label. Keeps normal CI fast.
+# Opt-in for PRs, scheduled on main. Run manually via workflow_dispatch, when a
+# PR branch includes a `marketplace-e2e` label, or nightly against main. The
+# nightly schedule prevents this (publish↔install) suite from silently rotting
+# the way the UI e2e suite did (#1212) — it is opt-in, so without a schedule it
+# would never actually run on main. Keeps per-PR CI fast (still label-gated).
 on:
   workflow_dispatch: {}
   pull_request:
     types: [labeled]
+  schedule:
+    # 02:30 KST (17:30 UTC) daily — offset from e2e.yml's 17:00 to avoid ARM
+    # runner contention. Secrets are available on schedule events.
+    - cron: '30 17 * * *'
 
 jobs:
   marketplace-e2e:
-    # workflow_dispatch (manual) OR same-repo PR labeled `marketplace-e2e`.
-    # Sibling marketplace + signing-key secrets are not exposed to forks.
+    # workflow_dispatch (manual), nightly schedule, OR same-repo PR labeled
+    # `marketplace-e2e`. Sibling marketplace + signing-key secrets are not
+    # exposed to forks.
     if: >-
       github.event_name == 'workflow_dispatch' ||
+      github.event_name == 'schedule' ||
       (github.event_name == 'pull_request' &&
        github.event.label.name == 'marketplace-e2e' &&
        github.event.pull_request.head.repo.full_name == github.repository)
