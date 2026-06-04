@@ -334,24 +334,33 @@ export class AuditLogger {
       return;
     }
 
-    // --- Rotate active daily .jsonl logs ---
-    // Match ONLY dated daily logs `YYYY-MM-DD.jsonl`. The HMAC-chained
-    // channels (`<date>.permission-audit.jsonl`, `<date>.sandbox.jsonl`) also
-    // end in `.jsonl`, but they are append-only, prevHash-linked tamper-evident
-    // chains — gzip+unlinking one mid-stream on a size threshold would sever
-    // the chain. They are deliberately excluded from rotation here.
-    const jsonlFiles = entries.filter((f) => /^\d{4}-\d{2}-\d{2}\.jsonl$/.test(f));
+    // --- Rotate .jsonl logs (plain daily logs + HMAC-chained channels) ---
+    // Plain daily logs `YYYY-MM-DD.jsonl` rotate on size OR age. The HMAC-chained
+    // channels (`<date>.permission-audit.jsonl`, `<date>.sandbox.jsonl`) are
+    // append-only, prevHash-linked tamper-evident chains: they must NEVER be
+    // SIZE-rotated (gzip+unlinking the active chain mid-day severs the prevHash
+    // links), but a CLOSED prior-day chain is sealed per UTC day, so AGE-rotation
+    // (archiving a file ≥ rotationAgeDays old, which is always a closed prior day)
+    // is safe and keeps disk bounded.
+    const jsonlFiles = entries.filter((f) => f.endsWith(".jsonl"));
     for (const fname of jsonlFiles) {
       const filePath = join(this.auditDir, fname);
+      const isHmacChain =
+        fname.endsWith(".permission-audit.jsonl") || fname.endsWith(".sandbox.jsonl");
       // Skip current active log file — only rotate if size or age threshold met
       let shouldRotate = false;
       try {
         const st = statSync(filePath);
-        if (st.size >= maxBytes) {
+        // Size-rotation applies to plain daily logs only — never an HMAC chain
+        // (that would sever today's still-appending chain).
+        if (!isHmacChain && st.size >= maxBytes) {
           shouldRotate = true;
         }
-        // Extract date from filename like "2026-04-12.jsonl"
-        const dateMatch = fname.match(/^(\d{4}-\d{2}-\d{2})\.jsonl$/);
+        // Age-rotation archives a CLOSED prior-day file. The leading-date match
+        // covers both `<date>.jsonl` and `<date>.<channel>.jsonl`; with the
+        // default 7-day age this only ever fires on a sealed prior-day chain,
+        // never today's active one.
+        const dateMatch = fname.match(/^(\d{4}-\d{2}-\d{2})\./);
         if (dateMatch) {
           const fileDate = new Date(dateMatch[1]).getTime();
           if (!isNaN(fileDate) && now - fileDate >= rotationAgeMs) {
