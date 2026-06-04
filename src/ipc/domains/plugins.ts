@@ -4,7 +4,7 @@
  *         lvis:mcp:*, lvis:plugin:* (webview bridge), lvis:file:*,
  *         lvis:notification:clicked
  */
-import { app, dialog, ipcMain, webContents } from "electron";
+import { dialog, ipcMain, webContents } from "electron";
 import { t } from "../../i18n/index.js";
 import { realpathSync } from "node:fs";
 import { readFile } from "node:fs/promises";
@@ -315,12 +315,12 @@ export function registerPluginsHandlers(deps: IpcDeps): void {
 
   const runMarketplacePing = async (): Promise<MarketplacePingResult> => {
     const settings = settingsService.get("marketplace");
-    if (settings.backend !== "real-cloud" || !settings.realCloudBaseUrl) {
+    if (settings.backend !== "real-cloud" || !settings.cloudBaseUrl) {
       return { configured: false, online: false };
     }
 
-    const base = settings.realCloudBaseUrl.replace(/\/?$/, "/");
-    const key = `${settings.backend}|${base}|${settings.realCloudAllowPrivateNetwork === true}`;
+    const base = settings.cloudBaseUrl.replace(/\/?$/, "/");
+    const key = `${settings.backend}|${base}|${settings.cloudAllowPrivateNetwork === true}`;
     const now = Date.now();
     if (
       marketplacePingCache &&
@@ -337,7 +337,7 @@ export function registerPluginsHandlers(deps: IpcDeps): void {
       try {
         const url = new URL("api/v1/health", base).toString();
         let res: Response;
-        if (settings.realCloudAllowPrivateNetwork === true) {
+        if (settings.cloudAllowPrivateNetwork === true) {
           const ctrl = new AbortController();
           const timer = setTimeout(() => ctrl.abort(), MARKETPLACE_PING_TIMEOUT_MS);
           try {
@@ -382,7 +382,6 @@ export function registerPluginsHandlers(deps: IpcDeps): void {
       pluginRuntime,
       mainWindow: getMainWindow(),
       marketplace,
-      isPackaged: app.isPackaged,
     });
     return { ok: true } as const;
   });

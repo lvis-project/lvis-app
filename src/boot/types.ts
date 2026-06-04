@@ -101,7 +101,7 @@ export interface AppServices {
   /**
    * Re-apply the live MarketplaceTab settings to the marketplace fetcher
    * constructed at boot. Currently used for the SSRF-guard bypass toggle
-   * (`marketplace.realCloudAllowPrivateNetwork`) — the field is read
+   * (`marketplace.cloudAllowPrivateNetwork`) — the field is read
    * per-request on the fetcher, so calling this after a settings patch
    * makes the toggle effective on the next marketplace request without
    * an app restart. No-op for the disabled fetcher.
