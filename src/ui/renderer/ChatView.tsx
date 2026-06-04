@@ -282,8 +282,6 @@ export interface ChatViewProps {
   installingPlugins?: ReadonlyMap<string, InstallPhase>;
   onOpenMarketplace: () => void;
   marketplaceUrlReady?: boolean;
-  /** Set of routineIds currently executing (LLM session in-flight). */
-  runningRoutines?: Set<string>;
   // Fork-based revert is replaced by the same-session checkpoint chain.
   // sessionId remains stable until the user explicitly branches from a checkpoint.
   /** Called when user confirms a plugin overlay item; id is the OverlayItem.id. */
