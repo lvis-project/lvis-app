@@ -292,14 +292,6 @@ export async function bootstrap(
     getMainWindow,
     auditLogger: bootAuditLogger,
   });
-  // Safety net: NotificationService is always constructed at this point.
-  // If it's somehow undefined, that indicates a boot-order regression
-  // (e.g. a refactor that moved the construction after a conditional branch).
-  // Throw early with a clear message so the regression is caught immediately
-  // rather than silently no-oping on every notification fire.
-  if (!notificationService) {
-    throw new Error("NotificationService failed to initialize — boot order regression");
-  }
   if (lvisHomeDocUpgradeMarkers.length > 0) {
     const markerSummary =
       lvisHomeDocUpgradeMarkers.length === 1
@@ -634,9 +626,6 @@ export async function bootstrap(
     marketplace: marketplaceSettings,
     isPackaged: app.isPackaged,
   });
-
-  // wireUpdateCheck needs a concrete fetcher for update detection.
-  const updateCheckFetcher: MarketplaceFetcher | undefined = marketplaceFetcher;
 
   // §4.5.9: SystemPromptBuilder.
   // Skills use progressive disclosure: lightweight catalog every turn, full
@@ -1050,7 +1039,7 @@ export async function bootstrap(
   });
   routinesScheduler.onNotification(({ routine }) => {
     try {
-      notificationService?.fire({
+      notificationService.fire({
         kind: "routine",
         title: routine.notificationTitle ?? routine.title ?? t("be_boot.routineNotificationFallbackTitle"),
         body: routine.notificationBody ?? "",
@@ -1276,17 +1265,13 @@ export async function bootstrap(
     settingsService,
     bootAuditLogger,
   });
-  if (updateCheckFetcher) {
-    wireUpdateCheck({
-      mainWindow,
-      settingsService,
-      marketplaceFetcher: updateCheckFetcher,
-      pluginPaths,
-    });
-  }
+  wireUpdateCheck({
+    mainWindow,
+    settingsService,
+    marketplaceFetcher,
+    pluginPaths,
+  });
 
-  // void unused imports avoidance — app reference retained for type imports.
-  void app;
   let shutdownPromise: Promise<void> | null = null;
 
   return {
