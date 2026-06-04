@@ -31,6 +31,18 @@ import os from 'node:os';
 import { fileURLToPath } from 'node:url';
 import { execSync } from 'node:child_process';
 import { buildE2eBaseSettings } from '../ui/seeded-electron.js';
+import { makeTestT } from '../ui/i18n.js';
+
+/**
+ * i18n catalog binding for locale-agnostic assertions. This spec manages its
+ * own Electron launch (it does not use the shared `./fixtures` test that injects
+ * `t`), so bind `t` here to the same locale the settings file seeds below
+ * (`buildE2eBaseSettings(true)` defaults to "ko"). Asserting against `t('key')`
+ * instead of a Korean literal keeps the toolbar-label check passing in any
+ * locale, so the suite can flip its default to the production English locale.
+ */
+const SEED_LOCALE = 'ko' as const;
+const t = makeTestT(SEED_LOCALE);
 
 const HERE = path.dirname(fileURLToPath(import.meta.url));
 const REPO_ROOT = path.resolve(HERE, '../../..');
@@ -119,7 +131,7 @@ test.describe('tab-detach + magnetic snap', () => {
     // Listen for a new window before triggering the context menu.
     const newWindowPromise = app.waitForEvent('window', { timeout: 15_000 });
 
-    await mainWindow.getByLabel('더 많은 메뉴').click();
+    await mainWindow.getByLabel(t('mainToolbar.moreMenu')).click();
     await mainWindow.getByTestId('toolbar-detach-routines').click();
 
     // Wait for the second window.

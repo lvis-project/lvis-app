@@ -113,7 +113,7 @@ test('큐 항목 수정 (더블클릭) — input 진입 + Enter commit', async (
   await expect(mainWindow.locator('[data-testid="message-queue-row-text"]').first()).toContainText("edited text");
 });
 
-test('queue-auto 자동 인입 — done event 시 큐 항목이 user bubble + "↪ 큐에서" hint 로 표시', async ({ app, mainWindow }) => {
+test('queue-auto 자동 인입 — done event 시 큐 항목이 user bubble + "↪ 큐에서" hint 로 표시', async ({ app, mainWindow, t }) => {
   // The default shared fixture intentionally starts without an LLM key. Seed
   // the active provider with a dummy key so handleAsk passes its API-key gate;
   // chatSend may fail later, but the queue user bubble must be appended first.
@@ -158,17 +158,17 @@ test('queue-auto 자동 인입 — done event 시 큐 항목이 user bubble + "�
     return true;
   });
   // user bubble 에 "↪ 큐에서" 배지 확인.
-  await expect(mainWindow.locator('text=↪ 큐에서').first()).toBeVisible({ timeout: 5_000 });
+  await expect(mainWindow.locator(`text=${t('chatView.queueInjectLabel')}`).first()).toBeVisible({ timeout: 5_000 });
   await expect(mainWindow.locator('text=끝나면 요약').first()).toBeVisible();
 });
 
-test('ApprovalQueueStatus floating chip 제거 (v6 spec)', async ({ mainWindow }) => {
+test('ApprovalQueueStatus floating chip 제거 (v6 spec)', async ({ mainWindow, t }) => {
   // ApprovalQueueStatus 는 fixed bottom-right floating chip 였음.
   // v6: in-flow DeferredApprovalChip 으로 통합 → floating 부재.
   // 기존 컴포넌트는 className 에 fixed bottom-4 right-4 z-40 사용.
   // 아예 마운트 안 하므로 .fixed.bottom-4.right-4.z-40 가 없어야 함.
   const candidates = mainWindow.locator(
-    'div.fixed.bottom-4.right-4.z-40:has-text("승인")',
+    `div.fixed.bottom-4.right-4.z-40:has-text("${t('approvalQueueStatus.pendingApprovals')}")`,
   );
   await expect(candidates).toHaveCount(0);
 });

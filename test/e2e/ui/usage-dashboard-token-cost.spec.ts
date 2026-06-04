@@ -1,8 +1,13 @@
 import fs from "node:fs";
 import path from "node:path";
-import { test, expect } from "@playwright/test";
+import { test, expect } from "./fixtures";
 import { builtMainExists, launchSeededElectron, teardownSeededElectron } from "./seeded-electron";
 import { closeSettingsWindow, openSettingsWindow } from "./settings-window";
+import { makeTestT } from "./i18n";
+
+// This spec launches its own Electron via launchSeededElectron (default ko
+// settings), independent of the fixture's seedLocale, so bind `t` to that locale.
+const t = makeTestT("ko");
 
 function todayKey(): string {
   return new Date().toISOString().slice(0, 10);
@@ -85,11 +90,11 @@ test.describe("usage dashboard token cost e2e", () => {
         await expect(settingsWindow.getByTestId("usage-dashboard")).toBeVisible({
           timeout: 10_000,
         });
-        await expect(settingsWindow.getByText("벤더별 사용량")).toBeVisible();
+        await expect(settingsWindow.getByText(t("usageDashboard.perVendor"))).toBeVisible();
 
         const vendorTableRows = settingsWindow
           .locator("table")
-          .filter({ hasText: "벤더" })
+          .filter({ hasText: t("usageDashboard.colVendor") })
           .first()
           .locator("tbody tr");
         const claudeRow = vendorTableRows.filter({ hasText: "claude" });
@@ -97,13 +102,21 @@ test.describe("usage dashboard token cost e2e", () => {
         const unknownRow = vendorTableRows.filter({ hasText: "unknown" });
 
         await expect(claudeRow).toContainText("claude");
-        await expect(claudeRow).not.toContainText("미정");
+        await expect(claudeRow).not.toContainText(t("tokenCostBadge.pricingUnknownBadge"));
         await expect(openaiRow).toContainText("openai");
-        await expect(openaiRow).not.toContainText("미정");
+        await expect(openaiRow).not.toContainText(t("tokenCostBadge.pricingUnknownBadge"));
 
         await expect(unknownRow).toContainText("unknown");
-        await expect(unknownRow).toContainText("$0 + 미정 1턴");
-        await expect(settingsWindow.getByText("미정 포함").first()).toBeVisible();
+        await expect(unknownRow).toContainText(
+          t("usageDashboard.unknownCostTurns", { base: "$0", turns: "1" }),
+        );
+        // unknownCostIncluded is "{base} + 미정 포함"; assert the static suffix
+        // (after the dynamic {base}) via the catalog rather than a literal.
+        const unknownIncludedSuffix = t("usageDashboard.unknownCostIncluded", { base: "" })
+          .split("+")
+          .pop()!
+          .trim();
+        await expect(settingsWindow.getByText(unknownIncludedSuffix).first()).toBeVisible();
 
         await expect(settingsWindow.getByText("claude-sonnet-4-6")).toBeVisible();
         await expect(settingsWindow.getByText("gpt-5.4-mini")).toBeVisible();

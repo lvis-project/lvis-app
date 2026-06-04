@@ -7,6 +7,14 @@ import {
   teardownSeededElectron,
   type SeededElectronContext,
 } from "./seeded-electron";
+import { makeTestT } from "./i18n";
+
+// This spec drives the app via `launchSeededElectron` (not the `./fixtures`
+// `test`, which exposes a `t` fixture). `launchSeededElectron` seeds the ko
+// locale (buildLlmSettings → buildE2eBaseSettings default), so bind the catalog
+// resolver to ko here. Asserting `t('key')` instead of a raw Korean literal
+// makes the assertion pass in any locale (see ./i18n.ts).
+const t = makeTestT("ko");
 
 function turnSummary(opts: {
   tokensIn: number;
@@ -91,7 +99,7 @@ test.describe("context-budget token surfaces", () => {
 
       const badge = ctx.page.getByTestId("token-cost-badge").first();
       await expect(badge).toContainText("2.0k");
-      await expect(badge).not.toContainText("미정");
+      await expect(badge).not.toContainText(t("tokenCostBadge.pricingUnknownBadge"));
       await badge.click({ force: true });
       await expect(badge).toContainText("≈");
     } finally {
@@ -238,7 +246,7 @@ test.describe("context-budget token surfaces", () => {
       });
       await expect
         .poll(async () => (await statusBar.textContent()) ?? "", { timeout: 8000 })
-        .toContain("자동 압축을 끄셨지만");
+        .toContain(t("app.compactForceRecoverValue"));
     } finally {
       await teardownSeededElectron(ctx);
     }

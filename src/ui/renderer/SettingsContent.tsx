@@ -228,7 +228,7 @@ export function SettingsContent({
           the active tab. `px-5` (20px) aligns the "설정" text-left with
           the nav-trigger icon-left (TabsList p-2 + trigger px-3 = 20). */}
       <div className="px-5 pt-6 mb-6">
-        <h2 className="text-xl font-semibold leading-9 tracking-tight">{t("settingsContent.sidebarHeading")}</h2>
+        <h2 data-testid="settings-sidebar-heading" className="text-xl font-semibold leading-9 tracking-tight">{t("settingsContent.sidebarHeading")}</h2>
       </div>
       <TabsList
         aria-label={t("settingsContent.sidebarAriaLabel")}

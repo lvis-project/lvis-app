@@ -24,10 +24,13 @@ test('immediate-apply toggle persists privacy redaction without explicit Save', 
   app,
   mainWindow,
   userDataDir,
+  t,
 }) => {
   const settingsPath = path.join(userDataDir, 'lvis-settings.json');
   const settingsWindow = await openSettingsWindow(app, mainWindow, 'chat');
-  const redactToggle = settingsWindow.getByRole('checkbox', { name: /PII 리댁트 활성화/ });
+  const redactToggle = settingsWindow.getByRole('checkbox', {
+    name: t('privacyTab.piiRedactToggleLabel'),
+  });
 
   await expect(redactToggle).toBeVisible({ timeout: 10_000 });
   if ((await redactToggle.getAttribute('aria-checked')) !== 'true') {
@@ -58,7 +61,9 @@ test('immediate-apply toggle persists privacy redaction without explicit Save', 
 
   const reopenedSettingsWindow = await openSettingsWindow(app, mainWindow, 'chat');
   await expect(
-    reopenedSettingsWindow.getByRole('checkbox', { name: /PII 리댁트 활성화/ }),
+    reopenedSettingsWindow.getByRole('checkbox', {
+      name: t('privacyTab.piiRedactToggleLabel'),
+    }),
   ).toHaveAttribute('aria-checked', 'true');
   await reopenedSettingsWindow.close();
 });
