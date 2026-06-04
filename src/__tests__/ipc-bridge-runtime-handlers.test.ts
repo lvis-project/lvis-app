@@ -95,8 +95,6 @@ function makeServices(
       deleteMemory: vi.fn(),
       searchMemoryEntries: vi.fn(() => []),
       getMemoryContext: vi.fn(() => ""),
-      getLvisMd: vi.fn(),
-      updateLvisMd: vi.fn(),
       getUserPreferences: vi.fn(),
       updateUserPreferences: vi.fn(),
     } as any,

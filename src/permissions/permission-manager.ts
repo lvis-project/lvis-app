@@ -193,8 +193,6 @@ export class PermissionManager {
   private rules: PermissionRule[] = [];
   private mode: ExecutionMode = "default";
   private readonly alwaysAllowed = new Set<string>();
-  /** Trust 수준 오버라이드 (관리자 설정) */
-  private readonly trustOverrides = new Map<string, TrustLevel>();
   /** MCP approval.toolPermissionMode 등 per-tool 실행 모드 override */
   private readonly toolModeOverrides = new Map<string, ExecutionMode>();
   /** 영구 규칙 저장 경로 (~/.lvis/permissions.json) */
@@ -383,10 +381,6 @@ export class PermissionManager {
 
   setRules(rules: PermissionRule[]): void {
     this.rules = [...rules];
-  }
-
-  setTrustOverride(toolName: string, trust: TrustLevel): void {
-    this.trustOverrides.set(toolName, trust);
   }
 
   setToolModeOverride(toolName: string, mode: ExecutionMode): void {
@@ -681,11 +675,13 @@ export class PermissionManager {
       ownerPluginSandboxRoot: input.ownerPluginSandboxRoot,
     };
     // Round-1 code-reviewer MINOR — include sandbox capability in the
-    // cache scope so a future change to OS isolation (bubblewrap on
-    // Linux, sandbox-exec on macOS) invalidates stale verdicts that
-    // were produced under different sandbox assumptions. Until OS
-    // detection lands this is a stable constant, so the scope is
-    // unchanged in practice — but the wiring is correct ahead of time.
+    // cache scope so a change to OS isolation (bubblewrap on Linux,
+    // sandbox-exec on macOS, AppContainer on Windows) invalidates stale
+    // verdicts that were produced under different sandbox assumptions.
+    // The runners are registered at boot and report their capability via
+    // setActiveSandboxCapability, so detectSandboxCapability() returns the
+    // active runner's kind/confidence (falling back to "none" only when no
+    // runner registered).
     const sandboxScope = detectSandboxCapability();
     const cacheCtx = {
       allowedDirectories: input.allowedDirectories,
@@ -889,11 +885,7 @@ export class PermissionManager {
 
   // ─── Private ─────────────────────────────────────
 
-  private resolveTrust(toolName: string, source?: ToolSource): TrustLevel {
-    // 관리자 오버라이드
-    const override = this.trustOverrides.get(toolName);
-    if (override) return override;
-    // 소스 기반
+  private resolveTrust(_toolName: string, source?: ToolSource): TrustLevel {
     return trustFromSource(source ?? "builtin");
   }
 

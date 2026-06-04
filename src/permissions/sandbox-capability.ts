@@ -18,14 +18,15 @@
  *   the LLM MUST NOT downgrade a rule-based MEDIUM/HIGH verdict to LOW
  *   purely on intent."
  *
- * Why "none" for now:
- *   We have not yet wired bubblewrap (Linux) / sandbox-exec (macOS) /
- *   AppContainer (Windows). The detection function returns `kind: "none"`
- *   with `confidence: "verified"` — the SOT correctly reports the absence
- *   of OS isolation. When isolation lands, this function is the single
- *   place to update; reviewer + UI read from this SOT. The audit chain
- *   currently stores the reviewer verdict derived from this value, not the
- *   full SandboxCapability snapshot.
+ * How the capability is resolved:
+ *   The bubblewrap (Linux) / sandbox-exec (macOS) / AppContainer (Windows)
+ *   runners are registered at boot (boot.ts); each passes its detection
+ *   result to `setActiveSandboxCapability`, so `detectSandboxCapability`
+ *   returns the registered runner's kind/confidence. It falls back to
+ *   `kind: "none"` (confidence: "verified") only when no runner registered —
+ *   the SOT then correctly reports the absence of OS isolation. Reviewer +
+ *   UI read from this SOT. The audit chain currently stores the reviewer
+ *   verdict derived from this value, not the full SandboxCapability snapshot.
  */
 
 import { t } from "../i18n/index.js";
@@ -166,13 +167,4 @@ export function isWeakSandbox(cap: SandboxCapability): boolean {
   if (cap.kind === "partial") return true;
   if (cap.confidence === "assumed") return true;
   return false;
-}
-
-/**
- * @deprecated Use {@link isWeakSandbox} instead. Kept for backwards compatibility
- * until all callers are updated.
- * @internal
- */
-export function isSandboxWeak(capability: SandboxCapability): boolean {
-  return isWeakSandbox(capability);
 }

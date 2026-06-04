@@ -42,8 +42,6 @@ export function makeConversationLoopMemoryManager(
     deleteMemory: vi.fn(),
     searchMemoryEntries: vi.fn(),
     getMemoryContext: vi.fn(),
-    getLvisMd: vi.fn(),
-    updateLvisMd: vi.fn(),
     getUserPreferences: vi.fn(),
     updateUserPreferences: vi.fn(),
   } as unknown as ConversationLoopDeps["memoryManager"];

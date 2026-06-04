@@ -1028,16 +1028,8 @@ export function registerChatHandlers(deps: IpcDeps): void {
     if (!validateSender(e)) { auditUnauthorized(auditLogger, "lvis:memory:agents-md:get", e); return UNAUTHORIZED_FRAME; }
     return memoryManager.getAgentsMd();
   });
-  ipcMain.handle("lvis:memory:lvis-md:get", (e) => {
-    if (!validateSender(e)) { auditUnauthorized(auditLogger, "lvis:memory:lvis-md:get", e); return UNAUTHORIZED_FRAME; }
-    return memoryManager.getAgentsMd();
-  });
   ipcMain.handle("lvis:memory:agents-md:update", async (e, content: string) => {
     if (!validateSender(e)) { auditUnauthorized(auditLogger, "lvis:memory:agents-md:update", e); return UNAUTHORIZED_FRAME; }
-    return memoryManager.updateAgentsMd(content);
-  });
-  ipcMain.handle("lvis:memory:lvis-md:update", async (e, content: string) => {
-    if (!validateSender(e)) { auditUnauthorized(auditLogger, "lvis:memory:lvis-md:update", e); return UNAUTHORIZED_FRAME; }
     return memoryManager.updateAgentsMd(content);
   });
   ipcMain.handle("lvis:memory:user-prefs:get", (e) => {

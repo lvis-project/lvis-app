@@ -102,7 +102,6 @@ export function registerStandardCategories(): void {
       if (mode === "allow") return "allow";
       if (mode === "strict") return "ask";
       if (headless) return "reviewer";
-      if (mode === "auto") return "ask";
       return "ask";
     },
   });
@@ -125,7 +124,6 @@ export function registerStandardCategories(): void {
       if (mode === "allow") return "allow";
       if (mode === "strict") return "ask";
       if (headless) return "reviewer";
-      if (mode === "auto") return "ask";
       return "ask";
     },
   });

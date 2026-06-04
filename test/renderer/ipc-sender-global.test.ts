@@ -53,8 +53,6 @@ const CHANNEL_MANIFEST: Record<string, "mutating" | "sensitive" | "public-read">
   "lvis:memory:sessions:search": "sensitive",
   "lvis:memory:agents-md:get": "sensitive",
   "lvis:memory:agents-md:update": "mutating",
-  "lvis:memory:lvis-md:get": "sensitive",
-  "lvis:memory:lvis-md:update": "mutating",
   "lvis:memory:user-prefs:get": "sensitive",
   "lvis:memory:user-prefs:update": "mutating",
   // Plugins
@@ -104,8 +102,6 @@ const CHANNEL_MANIFEST: Record<string, "mutating" | "sensitive" | "public-read">
   "lvis:routines:v2:remove": "mutating",
   "lvis:routines:v2:trigger-now": "mutating",
   "lvis:routines:v2:list-sessions": "public-read",
-  // Overlay v1 — primary-action is renderer→main invoke (write influence); show/update/dismiss are main→renderer push events
-  "lvis:overlay:primary-action": "mutating",
 };
 
 // ─── validateSender unit tests ───────────────────────────────────────────────
@@ -197,7 +193,6 @@ describe("ipc-bridge.ts — mutating/sensitive channels have validateSender guar
     "lvis:routines:v2:remove": "ROUTINES_V2.remove",
     "lvis:routines:v2:trigger-now": "ROUTINES_V2.triggerNow",
     "lvis:routines:v2:list-sessions": "ROUTINES_V2.listSessions",
-    "lvis:overlay:primary-action": "OVERLAY_V1.primaryAction",
     "lvis:permission:get-mode": "PERMISSIONS.getMode",
     "lvis:permission:set-mode": "PERMISSIONS.setMode",
     "lvis:permission:list-rules": "PERMISSIONS.listRules",
