@@ -100,7 +100,7 @@ describe("ConversationLoop.generateText", () => {
     const loop = buildLoop(provider);
     const controller = new AbortController();
 
-    await loop.generateText("prompt", undefined, "system", controller.signal);
+    await loop.generateText("prompt", "system", controller.signal);
     expect(provider.lastParams?.abortSignal).toBe(controller.signal);
   });
 
@@ -113,7 +113,7 @@ describe("ConversationLoop.generateText", () => {
     controller.abort();
 
     await expect(
-      loop.generateText("prompt", undefined, "system", controller.signal),
+      loop.generateText("prompt", "system", controller.signal),
     ).rejects.toThrow("LLM generation aborted");
     expect(provider.lastParams).toBeNull();
   });

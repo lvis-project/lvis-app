@@ -478,7 +478,6 @@ export function makeMockLvisApi(overrides: ApiOverrides = {}): {
       overlayDismissHandlers.add(handler);
       return () => overlayDismissHandlers.delete(handler);
     }),
-    notifyOverlayPrimary: vi.fn(async () => undefined),
 
     onAskUserQuestion: vi.fn((h: (r: unknown) => void) => {
       askUserQuestionHandlers.add(h);

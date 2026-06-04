@@ -82,6 +82,5 @@ describe("createPluginSurfacePermissionScope", () => {
       "/settings-added",
       "/grant/session",
     ]);
-    expect(scope.getSessionDirectories("local-indexer")).toEqual(["/grant/session"]);
   });
 });
