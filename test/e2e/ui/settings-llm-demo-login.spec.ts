@@ -37,6 +37,7 @@ test.use({
 test('LLM tab: demo Login click persists host-managed key and plugin resolveApiKey can read it', async ({
   app,
   mainWindow,
+  t,
 }) => {
   await mainWindow.evaluate(async () => {
     const api = (window as unknown as { lvisApi: { updateSettings: (patch: unknown) => Promise<unknown> } }).lvisApi;
@@ -45,7 +46,7 @@ test('LLM tab: demo Login click persists host-managed key and plugin resolveApiK
 
   const settingsWindow = await openSettingsWindow(app, mainWindow, 'llm');
 
-  await expect(settingsWindow.getByLabel('API 키 직접 입력', { exact: true })).toBeChecked();
+  await expect(settingsWindow.getByLabel(t('llmTab.authManual'), { exact: true })).toBeChecked();
   await settingsWindow.getByTestId('llm-api-key-input').fill(STALE_MANUAL_KEY);
 
   await settingsWindow.getByLabel('Login', { exact: true }).check();
@@ -61,7 +62,7 @@ test('LLM tab: demo Login click persists host-managed key and plugin resolveApiK
 
   const loginSection = settingsWindow.getByTestId('llm-tab:login-section');
   await expect(settingsWindow.getByTestId('login-modal')).toHaveCount(0);
-  await expect(loginSection.getByText('로그인됨')).toBeVisible();
+  await expect(loginSection.getByText(t('llmTab.loggedIn'))).toBeVisible();
   await expect(loginSection).toContainText('OpenAI');
 
   await expect
@@ -111,7 +112,7 @@ test('LLM tab: demo Login click persists host-managed key and plugin resolveApiK
   await expect(reopened.getByTestId('llm-tab:login-section')).toContainText(DEMO_MODEL);
   await expect(reopened.getByTestId('llm-tab:manual-section')).toHaveCount(0);
 
-  await reopened.getByLabel('API 키 직접 입력', { exact: true }).check();
+  await reopened.getByLabel(t('llmTab.authManual'), { exact: true }).check();
   await expect(reopened.getByTestId('llm-tab:manual-section')).toBeVisible();
   // The model field is now a <select> (was a free-text input).
   await expect(reopened.getByTestId('llm-model-select')).toBeVisible();

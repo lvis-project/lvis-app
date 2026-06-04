@@ -1,5 +1,12 @@
 import { expect } from '@playwright/test';
 import type { ElectronApplication, Page } from 'playwright';
+import { translate } from '../../../src/i18n/translate.js';
+
+// The settings window title is localized (be_main.settingsWindowTitle). Resolve
+// it for every supported locale so the helpers work whatever the suite seeds.
+const SETTINGS_WINDOW_TITLES = ['ko', 'en'].map((l) =>
+  translate(l as 'ko' | 'en', 'be_main.settingsWindowTitle'),
+);
 
 /**
  * Close the native settings window from the main process. The settings window
@@ -13,12 +20,12 @@ export async function closeSettingsWindow(
   settingsWindow: Page,
 ): Promise<void> {
   const closed = settingsWindow.waitForEvent('close');
-  await app.evaluate(({ BrowserWindow }) => {
+  await app.evaluate(({ BrowserWindow }, titles) => {
     const wins = BrowserWindow.getAllWindows();
-    const target = wins.find((w) => !w.isDestroyed() && w.getTitle() === 'LVIS 설정');
+    const target = wins.find((w) => !w.isDestroyed() && titles.includes(w.getTitle()));
     if (!target) throw new Error('settings window not found for close');
     target.close();
-  });
+  }, SETTINGS_WINDOW_TITLES);
   await closed;
 }
 
@@ -46,11 +53,10 @@ export async function openSettingsWindow(
 
   const settingsWindow = await settingsWindowPromise;
   await settingsWindow.waitForLoadState('domcontentloaded');
-  // `exact: true` — some tab bodies render their own heading containing "설정"
-  // (e.g. the plugin-config tab's "플러그인 설정"), which would otherwise make
-  // the non-exact match resolve to multiple elements under strict mode.
+  // Wait on the sidebar heading by testid — locale-stable, so the helper works
+  // whatever locale the suite seeds (previously matched the Korean "설정" text).
   await expect(
-    settingsWindow.getByRole('heading', { name: '설정', exact: true }),
+    settingsWindow.getByTestId('settings-sidebar-heading'),
   ).toBeVisible({ timeout: 10_000 });
   return settingsWindow;
 }

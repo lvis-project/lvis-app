@@ -7,6 +7,7 @@ import { test, expect } from './fixtures';
  */
 test('plugin install flow renders install/uninstall affordance, or skips', async ({
   mainWindow,
+  t,
 }) => {
   const pluginGridButton = mainWindow.locator('[data-testid="plugin-grid-button"]').first();
   const gridVisible = await pluginGridButton
@@ -26,8 +27,8 @@ test('plugin install flow renders install/uninstall affordance, or skips', async
         '[data-testid="plugin-uninstall"]',
         'button:has-text("Install")',
         'button:has-text("Uninstall")',
-        'button:has-text("설치")',
-        'button:has-text("제거")',
+        `button:has-text("${t('marketplaceTab.installButton')}")`,
+        `button:has-text("${t('marketplaceTab.removeButton')}")`,
       ].join(', '),
     )
     .first();

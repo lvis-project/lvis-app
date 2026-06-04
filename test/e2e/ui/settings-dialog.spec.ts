@@ -1,11 +1,11 @@
 import { test, expect } from './fixtures';
 import { closeSettingsWindow, openSettingsWindow } from './settings-window';
 
-test('native settings window opens and closes', async ({ app, mainWindow }) => {
+test('native settings window opens and closes', async ({ app, mainWindow, t }) => {
   const settingsWindow = await openSettingsWindow(app, mainWindow, 'chat');
 
-  await expect(settingsWindow).toHaveTitle(/LVIS 설정/);
-  await expect(settingsWindow.getByRole('tab', { name: '채팅' })).toHaveAttribute(
+  await expect(settingsWindow).toHaveTitle(t('settingsWindow.documentTitle'));
+  await expect(settingsWindow.getByRole('tab', { name: t('settingsContent.tabChat') })).toHaveAttribute(
     'data-state',
     'active',
   );

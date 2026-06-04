@@ -33,6 +33,7 @@ test.describe('compact recovery banners (#916 + #917)', () => {
   test('B1 (#916): force-recover compact_started shows OFF-override warning in StatusBar', async ({
     app,
     mainWindow,
+    t,
   }) => {
     const statusBar = mainWindow.locator('[data-testid="status-bar"]');
     await statusBar.waitFor({ state: 'visible', timeout: 15_000 });
@@ -57,7 +58,7 @@ test.describe('compact recovery banners (#916 + #917)', () => {
         async () => (await statusBar.textContent()) ?? '',
         { timeout: 8_000 },
       )
-      .toContain('자동 압축을 끄셨지만');
+      .toContain(t('app.compactForceRecoverValue'));
 
     // Cleanup: send compact_notice to clear indicator.
     await sendStreamEvent(app, {
@@ -70,6 +71,7 @@ test.describe('compact recovery banners (#916 + #917)', () => {
   test('B2 (#916): normal compact_started shows standard 자동 압축 중 label (not OFF-override)', async ({
     app,
     mainWindow,
+    t,
   }) => {
     const statusBar = mainWindow.locator('[data-testid="status-bar"]');
     await statusBar.waitFor({ state: 'visible', timeout: 15_000 });
@@ -93,10 +95,10 @@ test.describe('compact recovery banners (#916 + #917)', () => {
         async () => (await statusBar.textContent()) ?? '',
         { timeout: 8_000 },
       )
-      .toContain('자동 압축 중');
+      .toContain(t('app.compactInProgressValue'));
 
     const text = (await statusBar.textContent()) ?? '';
-    expect(text).not.toContain('자동 압축을 끄셨지만');
+    expect(text).not.toContain(t('app.compactForceRecoverValue'));
 
     await sendStreamEvent(app, {
       type: 'compact_notice',
@@ -108,6 +110,7 @@ test.describe('compact recovery banners (#916 + #917)', () => {
   test('B3 (#917): recovery_exhausted shows persistent 압축으로 복구 불가 error in StatusBar', async ({
     app,
     mainWindow,
+    t,
   }) => {
     const statusBar = mainWindow.locator('[data-testid="status-bar"]');
     await statusBar.waitFor({ state: 'visible', timeout: 15_000 });
@@ -126,12 +129,13 @@ test.describe('compact recovery banners (#916 + #917)', () => {
         async () => (await statusBar.textContent()) ?? '',
         { timeout: 8_000 },
       )
-      .toContain('압축으로 복구 불가');
+      .toContain(t('app.compactExhaustedValue'));
   });
 
   test('B4 (#917): recovery_exhausted banner persists; standard compact_started does not remove it', async ({
     app,
     mainWindow,
+    t,
   }) => {
     const statusBar = mainWindow.locator('[data-testid="status-bar"]');
     await statusBar.waitFor({ state: 'visible', timeout: 15_000 });
@@ -150,7 +154,7 @@ test.describe('compact recovery banners (#916 + #917)', () => {
         async () => (await statusBar.textContent()) ?? '',
         { timeout: 8_000 },
       )
-      .toContain('압축으로 복구 불가');
+      .toContain(t('app.compactExhaustedValue'));
 
     // Subsequent normal compact cycle should NOT remove the exhausted banner.
     await sendStreamEvent(app, {
@@ -166,6 +170,6 @@ test.describe('compact recovery banners (#916 + #917)', () => {
     });
 
     const textAfterCompact = (await statusBar.textContent()) ?? '';
-    expect(textAfterCompact).toContain('압축으로 복구 불가');
+    expect(textAfterCompact).toContain(t('app.compactExhaustedValue'));
   });
 });

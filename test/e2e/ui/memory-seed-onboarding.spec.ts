@@ -13,6 +13,7 @@ import { buildE2eBaseSettings, buildIsolatedElectronEnv } from "./seeded-electro
  *      (`features.onboardingCompleted` flipped).
  */
 import { test, expect } from "@playwright/test";
+import { makeTestT } from "./i18n";
 import { _electron as electron, type ElectronApplication, type Page } from "playwright";
 import { existsSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
@@ -22,6 +23,12 @@ import { fileURLToPath } from "node:url";
 const HERE = dirname(fileURLToPath(import.meta.url));
 const REPO_ROOT = resolve(HERE, "../../..");
 const MAIN_ENTRY = resolve(REPO_ROOT, "dist/src/main/main.js");
+
+// Locale-agnostic UI assertions: bind `t` to the locale this spec seeds via
+// buildE2eBaseSettings(false) (default "ko"). Asserting against catalog keys
+// instead of hard-coded Korean lets the suite flip its seed to the English
+// production default without rewriting these assertions. (#1212 follow-up.)
+const t = makeTestT("ko");
 
 test.describe("memory seed onboarding wizard", () => {
   test.skip(!existsSync(MAIN_ENTRY), "dist/src/main/main.js not built; run bun run build first");
@@ -81,17 +88,19 @@ test.describe("memory seed onboarding wizard", () => {
     await page.getByTestId("login-modal:chip-byok").click();
     const settingsWindow = await settingsWindowPromise;
     await settingsWindow.waitForLoadState("domcontentloaded");
-    await expect(settingsWindow.getByRole("heading", { name: "설정" })).toBeVisible({
+    await expect(
+      settingsWindow.getByRole("heading", { name: t("settingsContent.sidebarHeading") }),
+    ).toBeVisible({
       timeout: 10_000,
     });
 
     const settingsClosed = settingsWindow.waitForEvent("close");
-    await app.evaluate(({ BrowserWindow }) => {
+    await app.evaluate(({ BrowserWindow }, settingsWindowTitle) => {
       const target = BrowserWindow.getAllWindows().find(
-        (w) => !w.isDestroyed() && w.getTitle() === "LVIS 설정",
+        (w) => !w.isDestroyed() && w.getTitle() === settingsWindowTitle,
       );
       target?.close();
-    });
+    }, t("be_main.settingsWindowTitle"));
     await settingsClosed;
 
     const dialog = page.getByTestId("memory-seed-dialog");

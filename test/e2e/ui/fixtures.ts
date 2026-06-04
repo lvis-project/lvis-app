@@ -17,6 +17,7 @@ import {
   buildIsolatedElectronEnv,
 } from './seeded-electron';
 import { canonicalJSON } from '../../../src/plugins/whitelist/canonical-json.js';
+import { makeTestT, type TestT } from './i18n.js';
 
 const HERE = path.dirname(fileURLToPath(import.meta.url));
 
@@ -393,6 +394,8 @@ export type ElectronFixtures = {
   app: ElectronApplication;
   mainWindow: Page;
   userDataDir: string;
+  /** i18n catalog binding for locale-agnostic assertions (see ./i18n.ts). */
+  t: TestT;
 };
 export type ElectronOptions = {
   launchEnv: LaunchEnv;
@@ -414,7 +417,7 @@ export const test = base.extend<ElectronFixtures & ElectronOptions>({
   seedApiKey: [true, { option: true }],
   // UI locale to seed. Defaults to ko (the specs assert the Korean catalog);
   // the english-default-smoke spec overrides with `test.use({ seedLocale: 'en' })`.
-  seedLocale: ['ko', { option: true }],
+  seedLocale: ['en', { option: true }],
 
   userDataDir: async ({}, use) => {
     const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'lvis-e2e-'));
@@ -517,6 +520,11 @@ export const test = base.extend<ElectronFixtures & ElectronOptions>({
       content: '[data-testid="post-tour-first-task"]{display:none !important;}',
     });
     await use(win);
+  },
+
+  // Catalog binding for locale-agnostic assertions, bound to the seeded locale.
+  t: async ({ seedLocale }, use) => {
+    await use(makeTestT(seedLocale));
   },
 });
 

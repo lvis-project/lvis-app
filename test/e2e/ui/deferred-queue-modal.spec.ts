@@ -1,10 +1,15 @@
-import { test, expect } from "@playwright/test";
+import { test, expect } from "./fixtures";
 import { _electron as electron, type ElectronApplication, type Page } from "playwright";
 import { existsSync, mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { dirname, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { buildE2eBaseSettings, buildIsolatedElectronEnv } from "./seeded-electron";
+import { makeTestT } from "./i18n";
+
+// This spec seeds its own Electron via beforeEach (buildE2eBaseSettings(true) →
+// "ko"), independent of the fixture's seedLocale, so bind `t` to that locale.
+const t = makeTestT("ko");
 
 const HERE = dirname(fileURLToPath(import.meta.url));
 const REPO_ROOT = resolve(HERE, "../../..");
@@ -86,15 +91,15 @@ test.describe("deferred queue modal", () => {
     await page.setViewportSize({ width: 460, height: 840 });
     const queueButton = page.getByTestId("permission-pending-badge");
     await queueButton.waitFor({ state: "visible", timeout: 20_000 });
-    await expect(queueButton).toContainText("승인 1");
+    await expect(queueButton).toContainText(t("permissionModeBadge.queueLabelCount", { count: 1 }));
     await queueButton.click();
 
     const dialog = page.getByTestId("deferred-queue-dialog");
     await expect(dialog).toBeVisible();
     const entry = dialog.getByTestId("deferred-entry-dq-e2e-long-input");
     await expect(entry.locator("code", { hasText: "routine_schedule" }).first()).toBeVisible();
-    await expect(dialog.getByRole("button", { name: "허용" })).toBeVisible();
-    await expect(dialog.getByRole("button", { name: "거부" })).toBeVisible();
+    await expect(dialog.getByRole("button", { name: t("deferredQueuePanel.approveButton") })).toBeVisible();
+    await expect(dialog.getByRole("button", { name: t("deferredQueuePanel.rejectButton") })).toBeVisible();
 
     const metrics = await collectModalMetrics(page);
     expect(metrics.documentOverflowX).toBeLessThanOrEqual(1);
