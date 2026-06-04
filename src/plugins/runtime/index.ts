@@ -315,6 +315,8 @@ export class PluginRuntime {
   private readonly pendingRestartPreparations = new Map<string, Promise<void>>();
   private readonly preparationGenerations = new Map<string, number>();
   private nextPreparationGeneration = 0;
+  private readonly pluginUiRevisions = new Map<string, number>();
+  private nextPluginUiRevision = 0;
   private toolInvocationDelegate: PluginToolInvocationDelegate | null = null;
   private loaded = false;
   /** §B-1 — lazily-compiled AJV validator for plugin.schema.json. */
@@ -382,6 +384,23 @@ export class PluginRuntime {
       hostApi.storage = createPluginStorage(pluginId, pluginDataDir);
     }
     return hostApi;
+  }
+
+  private markPluginUiRevision(pluginId: string): number {
+    const revision = ++this.nextPluginUiRevision;
+    this.pluginUiRevisions.set(pluginId, revision);
+    return revision;
+  }
+
+  private getPluginUiRevision(pluginId: string): number {
+    return this.pluginUiRevisions.get(pluginId) ?? this.markPluginUiRevision(pluginId);
+  }
+
+  private buildPluginUiEntryUrl(pluginId: string, manifest: PluginManifest, entryPath: string): string {
+    const url = new URL(buildImportUrl(entryPath));
+    url.searchParams.set("lvisPluginVersion", manifest.version ?? "0");
+    url.searchParams.set("lvisRuntimeRevision", String(this.getPluginUiRevision(pluginId)));
+    return url.href;
   }
 
   // ─── Load Plan & Snapshots ─────────────────────────────────────────────────
@@ -748,6 +767,7 @@ export class PluginRuntime {
         approvedPluginAccess,
         started: false,
       });
+      this.markPluginUiRevision(manifest.id);
       this.failedPluginIds.delete(manifest.id);
       this.disabledPluginIds.delete(manifest.id);
       plog("debug", { pluginId: manifest.id, phase: PluginPhase.LOAD_OK }, "plugin loaded");
@@ -1056,6 +1076,7 @@ export class PluginRuntime {
       approvedPluginAccess,
       started: true,
     });
+    this.markPluginUiRevision(pluginId);
     this.failedPluginIds.delete(pluginId);
     this.disabledPluginIds.delete(pluginId);
     this.onEnable?.(pluginId);
@@ -1242,6 +1263,7 @@ export class PluginRuntime {
     this.failedPluginIds.delete(pluginId);
     this.failedPluginStubs.delete(pluginId);
     this.disabledPluginIds.delete(pluginId);
+    this.pluginUiRevisions.delete(pluginId);
 
     this.onDisable?.(pluginId);
   }
@@ -1480,6 +1502,7 @@ export class PluginRuntime {
       approvedPluginAccess,
       started: true,
     });
+    this.markPluginUiRevision(manifest.id);
     this.failedPluginIds.delete(manifest.id);
     this.disabledPluginIds.delete(manifest.id);
 
@@ -1579,6 +1602,7 @@ export class PluginRuntime {
     try {
       await instance.start?.();
       this.plugins.get(pluginId)!.started = true;
+      this.markPluginUiRevision(pluginId);
     } catch (err) {
       log.error(`start after reload failed: %s`, (err as Error).message);
       this.markFailed(pluginId);
@@ -1627,6 +1651,7 @@ export class PluginRuntime {
     }
     this.disabledPluginIds.add(pluginId);
     this.failedPluginIds.delete(pluginId);
+    this.pluginUiRevisions.delete(pluginId);
 
     if (this.registryPath) {
       await updatePluginRegistry(this.registryPath, (registry) => {
@@ -1796,6 +1821,7 @@ export class PluginRuntime {
       started: true,
     };
     this.plugins.set(pluginId, stub);
+    this.markPluginUiRevision(pluginId);
     this.methodMap.set(toolName, { pluginId, handler: handler as import("../types.js").PluginToolHandler });
     if (!this.perfStats.has(pluginId)) {
       this.perfStats.set(pluginId, {
@@ -2006,9 +2032,10 @@ export class PluginRuntime {
     return createPluginStorage(pluginId, pluginDataDir);
   }
 
-  listUiExtensions(): Array<{ pluginId: string; icon?: string; iconText?: string; extension: PluginUiExtension; entryUrl?: string }> {
-    const result: Array<{ pluginId: string; icon?: string; iconText?: string; extension: PluginUiExtension; entryUrl?: string }> = [];
+  listUiExtensions(): Array<{ pluginId: string; icon?: string; iconText?: string; extension: PluginUiExtension; entryUrl?: string; runtimeRevision?: number }> {
+    const result: Array<{ pluginId: string; icon?: string; iconText?: string; extension: PluginUiExtension; entryUrl?: string; runtimeRevision?: number }> = [];
     for (const [pluginId, plugin] of this.plugins) {
+      const runtimeRevision = this.getPluginUiRevision(pluginId);
       for (const extension of plugin.manifest.ui ?? []) {
         const entrySource = extension.entry ?? extension.page;
         let entryPath: string | undefined;
@@ -2032,7 +2059,8 @@ export class PluginRuntime {
           icon: plugin.manifest.icon,
           iconText: plugin.manifest.iconText,
           extension,
-          entryUrl: entryPath ? buildImportUrl(entryPath) : undefined,
+          entryUrl: entryPath ? this.buildPluginUiEntryUrl(pluginId, plugin.manifest, entryPath) : undefined,
+          runtimeRevision,
         });
       }
     }
@@ -2055,6 +2083,7 @@ export class PluginRuntime {
     this.knownToolOwners.clear();
     this.knownEventOwners.clear();
     this.plugins.clear();
+    this.pluginUiRevisions.clear();
     this.methodMap.clear();
     this.failedPluginIds.clear();
     this.failedPluginStubs.clear();

@@ -84,6 +84,19 @@ function DetachedContent({ viewKey }: ContentProps) {
     }
   }, [viewKey, refreshViews]);
 
+  // Main broadcasts lvis:plugins:runtime-updated to ALL windows after a plugin
+  // runtime restart/reload. Without this subscription a detached plugin window
+  // keeps rendering the stale webview (old runtimeRevision) until it is closed
+  // and reopened, while the main window already remounted the fresh bundle.
+  useEffect(() => {
+    if (!viewKey.startsWith("plugin:")) return;
+    if (typeof api.onPluginRuntimeUpdated !== "function") return;
+    const unsubscribe = api.onPluginRuntimeUpdated(() => {
+      void refreshViews();
+    });
+    return unsubscribe;
+  }, [viewKey, api, refreshViews]);
+
   if (viewKey === "routines") {
     return <RoutinePanel api={api} />;
   }
