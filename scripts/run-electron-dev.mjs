@@ -725,6 +725,13 @@ process.on("SIGINT", () => {
 process.on("SIGTERM", () => {
   void shutdown(0);
 });
+process.on("uncaughtException", (err) => {
+  if (err?.code === "EPERM" && err?.syscall === "watch") {
+    log("watch", `transient watcher EPERM suppressed: ${err.message}`);
+    return;
+  }
+  throw err;
+});
 process.on("exit", () => {
   if (electronProc?.pid) forceKillProcessTree(electronProc.pid);
   for (const child of children) {
