@@ -1235,15 +1235,17 @@ export function registerPluginsHandlers(deps: IpcDeps): void {
       plog("warn", { pluginId, phase: PluginPhase.WEBVIEW_REJECT, webContentsId, reason: "entry-url-outside-install-root" }, "webview register rejected");
       return { ok: false, error: "entry-url-outside-install-root" };
     }
-    const rawAssetEntryUrl = pluginAssetUrlFromRealPath(realRoot, realEntry);
+    const assetEntryUrl = pluginAssetUrlFromRealPath(realRoot, realEntry);
     let entrySearch = "";
     try {
       entrySearch = new URL(entryUrl).search;
     } catch {
       entrySearch = "";
     }
-    const assetEntryUrl = entrySearch ? `${rawAssetEntryUrl}${entrySearch}` : rawAssetEntryUrl;
-    const binding = { pluginId, entryUrl, assetEntryUrl };
+    // Carry the runtime-revision cache-bust query through to the asset URL so
+    // the shell's import() gets a fresh ESM cache key after plugin reload.
+    const versionedAssetEntryUrl = entrySearch ? `${assetEntryUrl}${entrySearch}` : assetEntryUrl;
+    const binding = { pluginId, entryUrl, assetEntryUrl: versionedAssetEntryUrl };
     pluginWebviewRegistry.set(webContentsId, binding);
     flushPendingEntryUrl(webContentsId, binding);
     plog("debug", { pluginId, phase: PluginPhase.WEBVIEW_ATTACH, webContentsId }, "webview attached");
