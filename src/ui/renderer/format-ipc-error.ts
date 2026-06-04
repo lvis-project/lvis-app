@@ -166,7 +166,6 @@ export const COMMON_IPC_ERROR_MESSAGES: Readonly<Record<string, string>> = {
   "open-failed": "formatIpcError.openFailed",
   "checkpoint-not-found": "formatIpcError.checkpointNotFound",
   "session-mismatch": "formatIpcError.sessionMismatch",
-  "no-host-file-scan-protocol": "formatIpcError.noHostFileScanProtocol",
   "preference-refresh-service-unavailable": "formatIpcError.preferenceRefreshServiceUnavailable",
   "production-disabled": "formatIpcError.productionDisabled",
 };
