@@ -6,6 +6,7 @@ import { test, expect } from './fixtures';
  */
 test('approval dialog renders approve/deny/bulk controls, or skips', async ({
   mainWindow,
+  t,
 }) => {
   const trigger = mainWindow
     .locator(
@@ -36,10 +37,14 @@ test('approval dialog renders approve/deny/bulk controls, or skips', async ({
   test.skip(!dialogVisible, 'No approval dialog reachable — skipping.');
 
   const approve = dialog
-    .locator('button:has-text("Approve"), button:has-text("승인"), button:has-text("허용")')
+    .locator(
+      `button:has-text("Approve"), button:has-text("승인"), button:has-text(${JSON.stringify(t('toolApprovalDialog.allowOnce'))})`,
+    )
     .first();
   const deny = dialog
-    .locator('button:has-text("Deny"), button:has-text("Reject"), button:has-text("거부")')
+    .locator(
+      `button:has-text("Deny"), button:has-text("Reject"), button:has-text(${JSON.stringify(t('toolApprovalDialog.denyOnce'))})`,
+    )
     .first();
   const bulk = dialog
     .locator(

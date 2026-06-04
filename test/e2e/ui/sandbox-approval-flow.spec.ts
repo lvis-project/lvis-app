@@ -15,6 +15,7 @@ import { buildE2eBaseSettings, buildIsolatedElectronEnv } from "./seeded-electro
  * as deferred-queue-modal.spec.ts).
  */
 import { test, expect } from "@playwright/test";
+import { makeTestT } from "./i18n";
 import { _electron as electron, type ElectronApplication, type Page } from "playwright";
 import { existsSync, mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
@@ -24,6 +25,12 @@ import { fileURLToPath } from "node:url";
 const HERE = dirname(fileURLToPath(import.meta.url));
 const REPO_ROOT = resolve(HERE, "../../..");
 const MAIN_ENTRY = resolve(REPO_ROOT, "dist/src/main/main.js");
+
+// Locale-agnostic UI assertions: bind `t` to the locale this spec seeds via
+// buildE2eBaseSettings(true) (default "ko"). Asserting against catalog keys
+// instead of hard-coded Korean lets the suite flip its seed to the English
+// production default without rewriting these assertions. (#1212 follow-up.)
+const t = makeTestT("ko");
 
 // ─── Helpers ─────────────────────────────────────────────────────────────────
 
@@ -157,8 +164,8 @@ test.describe("Sandbox approval flow", () => {
     await expect(approveBtn).toBeEnabled();
 
     // Scope selector should be visible
-    await expect(page.getByText("이 세션만")).toBeVisible();
-    await expect(page.getByText("지속 허용")).toBeVisible();
+    await expect(page.getByText(t("toolApprovalDialog.scopeSession"))).toBeVisible();
+    await expect(page.getByText(t("toolApprovalDialog.scopePersistent"))).toBeVisible();
   });
 
   test("partial sandbox shows correct Korean label in approval dialog", async () => {
@@ -180,9 +187,9 @@ test.describe("Sandbox approval flow", () => {
     const dialog = page.getByTestId("tool-approval-dialog");
     await expect(dialog).toBeVisible({ timeout: 5000 });
 
-    // Sandbox row should show partial isolation Korean label
+    // Sandbox row should show partial isolation label
     const sandboxRow = page.getByTestId("tool-approval-sandbox");
-    await expect(sandboxRow).toContainText("OS 격리 부분적");
+    await expect(sandboxRow).toContainText(t("toolApprovalDialog.sandboxPartial"));
   });
 
   test("PermissionsTab shows user approval records section", async () => {
@@ -218,8 +225,13 @@ test.describe("Sandbox approval flow", () => {
     const settingsWindow = await settingsWindowPromise;
     await settingsWindow.waitForLoadState("domcontentloaded");
 
-    // Permissions tab is selected by initialTab; the approval records
-    // section heading "사용자 승인 기록" should be visible inside it.
-    await expect(settingsWindow.locator(':text("사용자 승인 기록")')).toBeVisible({ timeout: 5000 });
+    // Permissions tab is selected by initialTab; the approval records section
+    // heading renders "사용자 승인 기록 ({count})". Match only the static prefix
+    // (count-agnostic, as the pre-migration assertion did) so the live record
+    // count can't flake the check, while staying locale-agnostic via the catalog.
+    const approvalsHeadingPrefix = t("permissionsTab.approvalsTitle", { count: 0 }).split("(")[0].trim();
+    await expect(
+      settingsWindow.locator(`:text(${JSON.stringify(approvalsHeadingPrefix)})`),
+    ).toBeVisible({ timeout: 5000 });
   });
 });

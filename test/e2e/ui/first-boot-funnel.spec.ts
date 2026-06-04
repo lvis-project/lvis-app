@@ -51,6 +51,7 @@ test.describe('first-boot funnel: onboarding → API key → tour completion', (
     app,
     mainWindow,
     userDataDir,
+    t,
   }) => {
     // (1) Fresh boot → the Z chain mounts the ScenarioShowcase.
     const showcase = mainWindow.getByTestId('scenario-showcase');
@@ -70,7 +71,9 @@ test.describe('first-boot funnel: onboarding → API key → tour completion', (
     await mainWindow.getByTestId('login-modal:chip-byok').click();
     const settingsWindow = await settingsWindowPromise;
     await settingsWindow.waitForLoadState('domcontentloaded');
-    await expect(settingsWindow.getByRole('heading', { name: '설정' })).toBeVisible({
+    await expect(
+      settingsWindow.getByRole('heading', { name: t('settingsContent.sidebarHeading') }),
+    ).toBeVisible({
       timeout: 10_000,
     });
 
@@ -80,7 +83,7 @@ test.describe('first-boot funnel: onboarding → API key → tour completion', (
     // we assert the persisted LLM settings (provider/authMode) flipped rather
     // than polling the OS-keychain-backed `hasApiKey`, which is not reliably
     // writable in a headless run.
-    await expect(settingsWindow.getByLabel('API 키 직접 입력', { exact: true })).toBeChecked();
+    await expect(settingsWindow.getByLabel(t('llmTab.authManual'), { exact: true })).toBeChecked();
     await settingsWindow.getByTestId('llm-api-key-input').fill(FRESH_KEY);
     await settingsWindow.getByTestId('llm-tab:save-providers').click();
     // The default fresh-boot provider is host-defined (e.g. azure-foundry),
@@ -104,12 +107,12 @@ test.describe('first-boot funnel: onboarding → API key → tour completion', (
     // Close the settings window via the main process (no in-DOM close
     // button on the native window chrome).
     const settingsClosed = settingsWindow.waitForEvent('close');
-    await app.evaluate(({ BrowserWindow }) => {
+    await app.evaluate(({ BrowserWindow }, title) => {
       const target = BrowserWindow.getAllWindows().find(
-        (w) => !w.isDestroyed() && w.getTitle() === 'LVIS 설정',
+        (w) => !w.isDestroyed() && w.getTitle() === title,
       );
       target?.close();
-    });
+    }, t('be_main.settingsWindowTitle'));
     await settingsClosed;
 
     // (4) MemorySeed wizard — the chain advanced to stage="memory" when the

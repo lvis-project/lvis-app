@@ -21,6 +21,7 @@ import { closeSettingsWindow, openSettingsWindow } from './settings-window';
 test('LLM tab: authMode toggle wraps provider configuration under login', async ({
   app,
   mainWindow,
+  t,
 }) => {
   const settingsWindow = await openSettingsWindow(app, mainWindow, 'llm');
 
@@ -39,7 +40,7 @@ test('LLM tab: authMode toggle wraps provider configuration under login', async 
   await expect(manualSection).toHaveCount(0);
   await expect(settingsWindow.getByTestId('llm-tab:open-login')).toBeVisible();
 
-  await settingsWindow.getByLabel('API 키 직접 입력', { exact: true }).check();
+  await settingsWindow.getByLabel(t('llmTab.authManual'), { exact: true }).check();
   await expect(manualSection).toBeVisible();
   await expect(loginSection).toHaveCount(0);
 
