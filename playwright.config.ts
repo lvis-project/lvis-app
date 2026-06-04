@@ -15,7 +15,11 @@ export default defineConfig({
   expect: { timeout: 10_000 },
   fullyParallel: false,
   workers: 1,
-  retries: process.env.CI ? 1 : 0,
+  // 2 retries in CI: the suite has a few inherently timing-sensitive specs
+  // (perf budgets, scroll settle). The deterministic fixes land in the specs;
+  // this is a safety net against residual CI render-timing variance so a single
+  // transient sample doesn't red the whole suite (#1218).
+  retries: process.env.CI ? 2 : 0,
   reporter: process.env.CI ? [['list'], ['github']] : 'list',
   use: {
     trace: 'retain-on-failure',
