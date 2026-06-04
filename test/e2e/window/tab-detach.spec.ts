@@ -30,6 +30,7 @@ import fs from 'node:fs';
 import os from 'node:os';
 import { fileURLToPath } from 'node:url';
 import { execSync } from 'node:child_process';
+import { buildE2eBaseSettings } from '../ui/seeded-electron.js';
 
 const HERE = path.dirname(fileURLToPath(import.meta.url));
 const REPO_ROOT = path.resolve(HERE, '../../..');
@@ -71,6 +72,13 @@ test.describe('tab-detach + magnetic snap', () => {
     userDataDir = fs.mkdtempSync(path.join(os.tmpdir(), 'lvis-e2e-detach-'));
     const lvisHomeForTest = path.join(userDataDir, 'lvis-state');
     fs.mkdirSync(lvisHomeForTest, { recursive: true, mode: 0o700 });
+    // Seed the same base settings as the shared fixture so the UI renders in
+    // Korean (this spec asserts the Korean toolbar menu label "더 많은 메뉴").
+    fs.writeFileSync(
+      path.join(userDataDir, 'lvis-settings.json'),
+      JSON.stringify(buildE2eBaseSettings(true), null, 2) + '\n',
+      'utf-8',
+    );
     killPageindexWorkers();
 
     app = await electron.launch({
