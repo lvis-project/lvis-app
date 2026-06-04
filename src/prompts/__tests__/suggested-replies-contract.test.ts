@@ -15,7 +15,6 @@ function buildMinimalPrompt(): string {
   const builder = new SystemPromptBuilder({
     memoryManager: {
       getAgentsMd: () => "",
-      getLvisMd: () => "",
       getMemoryIndex: () => "",
       getUserPreferences: () => "",
       getMemoryContext: () => "",

@@ -11,7 +11,6 @@ export interface PluginSurfacePermissionScope {
     context: PluginToolInvocationContext,
     base: PluginSurfacePermissionBase,
   ): ToolPermissionContext;
-  getSessionDirectories(subject: string): readonly string[];
 }
 
 export interface PluginSurfacePermissionScopeOptions {
@@ -59,9 +58,6 @@ export function createPluginSurfacePermissionScope(
         },
         onSessionDirectoryGrant: (directory) => addSessionDirectory(subject, directory),
       };
-    },
-    getSessionDirectories(subject: string): readonly string[] {
-      return sessionAdditionalDirectories.get(subject) ?? [];
     },
   };
 }

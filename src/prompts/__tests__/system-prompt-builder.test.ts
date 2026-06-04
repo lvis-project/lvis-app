@@ -20,7 +20,6 @@ function makeMemoryBuilder(memoryIndex: string): SystemPromptBuilder {
   return new SystemPromptBuilder({
     memoryManager: {
       getAgentsMd: () => "# Agents",
-      getLvisMd: () => "# Agents",
       getMemoryIndex: () => memoryIndex,
       getUserPreferences: () => "",
       getMemoryContext: () => "",
@@ -60,7 +59,6 @@ describe("SystemPromptBuilder — Conversation Continuity Guard", () => {
     const builder = new SystemPromptBuilder({
       memoryManager: {
         getAgentsMd: () => "",
-        getLvisMd: () => "",
         getMemoryIndex: () => "",
         getUserPreferences: () => "",
         getMemoryContext: () => "",
@@ -87,7 +85,6 @@ describe("SystemPromptBuilder — Conversation Continuity Guard", () => {
     const builder = new SystemPromptBuilder({
       memoryManager: {
         getAgentsMd: () => "",
-        getLvisMd: () => "",
         getMemoryIndex: () => "",
         getUserPreferences: () => "",
         getMemoryContext: () => "",
@@ -117,7 +114,6 @@ describe("SystemPromptBuilder — Conversation Continuity Guard", () => {
     const builder = new SystemPromptBuilder({
       memoryManager: {
         getAgentsMd: () => "",
-        getLvisMd: () => "",
         getMemoryIndex: () => "",
         getUserPreferences: () => "",
         getMemoryContext: () => "",

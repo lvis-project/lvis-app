@@ -294,8 +294,6 @@ describe("preload — plugin webview asset URLs", () => {
     ["memoryGetAgentsMd", "lvis:memory:agents-md:get"],
     ["memoryUpdateAgentsMd", "lvis:memory:agents-md:update", "# Agents"],
     ["memoryUpdateIndexSections", "lvis:memory:index:sections:update", { urgentMemory: "Keep this." }],
-    ["memoryGetLvisMd", "lvis:memory:lvis-md:get"],
-    ["memoryUpdateLvisMd", "lvis:memory:lvis-md:update", "# Agents"],
     ["memoryGetUserPrefs", "lvis:memory:user-prefs:get"],
     ["memoryUpdateUserPrefs", "lvis:memory:user-prefs:update", "# Preferences"],
     ["memoryRefreshUserPrefs", "lvis:memory:user-prefs:refresh"],

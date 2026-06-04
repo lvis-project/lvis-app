@@ -299,13 +299,6 @@ export function App() {
       // Clean up lookup ref
       overlayItemsRef.current.delete(overlayItemId);
 
-      // Notify main process (audit log + plugin notification) — best-effort
-      try {
-        await api.notifyOverlayPrimary?.(source.pluginId, source.eventId);
-      } catch {
-        // audit is best-effort; do not block the chat insert
-      }
-
       // Insert as imported_trigger entry — overlay trigger provenance preserved,
       // NOT a plain user bubble (architecture §9 plugin provenance contract)
       insertImportedTriggerEntry({

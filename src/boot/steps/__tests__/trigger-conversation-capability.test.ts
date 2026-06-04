@@ -17,7 +17,6 @@ function run(capabilities: string[]) {
     capabilities,
     dedupe: new TriggerConversationDedupe(),
     rateLimiter: new TriggerConversationRateLimiter(),
-    loopBound: true,
     auditLogger: { log: vi.fn() },
     now: () => Date.parse("2026-05-10T00:00:00.000Z"),
   });
