@@ -3961,29 +3961,11 @@ interface FeedbackEntry {
 
 ---
 
-### 15.5 D7 — 드래그 앤 드롭 파일 인덱싱
+### 15.5 D7 — 드래그 앤 드롭 파일 인덱싱 (제거됨)
 
-**파일**: `src/ui/renderer/components/DropZoneOverlay.tsx`
+**상태**: 제거됨. 호스트에 파일 스캔 프로토콜이 구현된 적이 없어 `lvis:file:scan-paths` IPC 핸들러는 항상 `{ ok: false, error: "no-host-file-scan-protocol" }` 를 반환하는 inert surface 였다. 핸들러 / preload 브리지 / 렌더러 타입 / `DropZoneOverlay` 컴포넌트 / i18n fragment 를 end-to-end 로 제거.
 
-Electron 윈도우 전체에 드래그 앤 드롭 오버레이를 제공한다. 파일을 드롭하면 `document-indexer` capability를 가진 플러그인에 경로를 전달하여 즉시 인덱싱한다.
-
-**동작 흐름**:
-1. `dragenter` 이벤트에서 `dataTransfer.types.includes("Files")` 확인 → 파일 드래그일 때만 오버레이 표시
-2. Electron 렌더러의 `File.path` 비표준 속성으로 절대 경로 추출
-3. `window.lvisApi.fileScanPaths(paths)` → `lvis:file:scan-paths` IPC → `document-indexer` capability 플러그인
-4. 결과(`indexed`, `failed`)를 토스트로 표시 (3초 후 자동 소멸)
-
-**설계 제약**:
-- dragenter/dragleave는 자식 요소 전환마다 발화 → `dragCountRef` 카운터로 실제 윈도우 진입 상태 추적
-- 텍스트 선택 드래그는 `dataTransfer.files`가 없으므로 오버레이 미표시
-- 플러그인 미설치 시: `"no-indexer"` 에러로 사용자 안내
-
-| 응답 | UI 표시 |
-|------|---------|
-| `{ ok: true, indexed: N }` | `N개 파일 인덱싱 완료` |
-| `{ ok: true, indexed: N, failed: M }` | `N개 인덱싱 완료, M개 실패` |
-| `{ ok: false, error: "no-indexer" }` | `인덱서 플러그인을 찾을 수 없습니다` |
-| 기타 오류 | `오류: <message>` |
+드롭한 파일이 윈도우를 해당 `file://` URL 로 navigate 시키는 것을 막던 `preventDefault` 가드만 보존이 필요했고, 이는 `src/ui/renderer/hooks/use-window-file-drop-guard.ts` (`useWindowFileDropGuard`) 로 추출했다. 메인 윈도우의 `will-navigate` 가드(`main.ts`)는 앱 자신이 `file://` 로 `index.html` 을 로드하므로 `file://` 를 의도적으로 허용 → 렌더러 측 드롭 가드가 실제 보호선이다.
 
 ---
 
