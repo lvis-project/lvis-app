@@ -1307,10 +1307,10 @@ export function ChatView({ api, onAsk, onEditSave, onFork, onToggleStar, onRetry
             groupEntries.push({
               idx: i,
               node: spawnNodes.length === 0 ? (
-                <ToolGroupCard key={e.groupId} group={e} embedded sessionId={currentSessionId} hideFailureStatus={hideToolFailures} />
+                <ToolGroupCard key={e.groupId} group={e} sessionId={currentSessionId} hideFailureStatus={hideToolFailures} />
               ) : (
                 <Fragment key={e.groupId}>
-                  <ToolGroupCard group={e} embedded sessionId={currentSessionId} hideFailureStatus={hideToolFailures} />
+                  <ToolGroupCard group={e} sessionId={currentSessionId} hideFailureStatus={hideToolFailures} />
                   {spawnNodes}
                 </Fragment>
               ),
@@ -1328,10 +1328,8 @@ export function ChatView({ api, onAsk, onEditSave, onFork, onToggleStar, onRetry
                 <AssistantCard
                   key={i}
                   entry={e}
-                  highlightQuery={searchHighlight}
                   isStarred={starred}
                   isFinal={false}
-                  embedded
                 />
               ),
             });
@@ -1405,7 +1403,6 @@ export function ChatView({ api, onAsk, onEditSave, onFork, onToggleStar, onRetry
           <div key={idx} data-chat-entry-index={idx} className={ringCls || undefined}>
             <AssistantCard
               entry={entry}
-              highlightQuery={searchHighlight}
               isStarred={!!isEntryStarred(idx)}
               isFinal={true}
             />
@@ -1428,7 +1425,6 @@ export function ChatView({ api, onAsk, onEditSave, onFork, onToggleStar, onRetry
           <div key={idx} data-chat-entry-index={idx} className={`${ringCls} min-w-0 w-full max-w-full overflow-x-hidden rounded-md`}>
           <AssistantCard
             entry={entry}
-            highlightQuery={searchHighlight}
             isStarred={!!isEntryStarred(idx)}
             isFinal={true}
           />
