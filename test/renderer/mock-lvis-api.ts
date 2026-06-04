@@ -103,6 +103,7 @@ export function makeMockLvisApi(overrides: ApiOverrides = {}): {
   emitBootstrapStatus: (status: unknown) => void;
   emitPluginInstallProgress: (payload: unknown) => void;
   emitPluginInstallResult: (payload: unknown) => void;
+  emitPluginRuntimeUpdated: (payload: { pluginId: string }) => void;
 } {
   let settings = overrides.settings ?? DEFAULT_SETTINGS;
   let personaPrompts = overrides.personaPrompts ?? [];
@@ -149,6 +150,7 @@ export function makeMockLvisApi(overrides: ApiOverrides = {}): {
   const bootstrapStatusHandlers = new Set<(status: unknown) => void>();
   const pluginInstallProgressHandlers = new Set<(payload: unknown) => void>();
   const pluginInstallResultHandlers = new Set<(payload: unknown) => void>();
+  const pluginRuntimeUpdatedHandlers = new Set<(payload: { pluginId: string }) => void>();
   const sessionTodoHandlers = new Set<(payload: unknown) => void>();
 
   const api: MockLvisApi = {
@@ -499,6 +501,10 @@ export function makeMockLvisApi(overrides: ApiOverrides = {}): {
       pluginInstallResultHandlers.add(handler);
       return () => pluginInstallResultHandlers.delete(handler);
     }),
+    onPluginRuntimeUpdated: vi.fn((handler: (payload: { pluginId: string }) => void) => {
+      pluginRuntimeUpdatedHandlers.add(handler);
+      return () => pluginRuntimeUpdatedHandlers.delete(handler);
+    }),
     onBootstrapStatus: vi.fn((handler: (status: unknown) => void) => {
       bootstrapStatusHandlers.add(handler);
       return () => bootstrapStatusHandlers.delete(handler);
@@ -532,6 +538,7 @@ export function makeMockLvisApi(overrides: ApiOverrides = {}): {
     emitBootstrapStatus: (status) => bootstrapStatusHandlers.forEach((h) => h(status)),
     emitPluginInstallProgress: (payload) => pluginInstallProgressHandlers.forEach((h) => h(payload)),
     emitPluginInstallResult: (payload) => pluginInstallResultHandlers.forEach((h) => h(payload)),
+    emitPluginRuntimeUpdated: (payload) => pluginRuntimeUpdatedHandlers.forEach((h) => h(payload)),
   };
 }
 

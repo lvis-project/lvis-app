@@ -34,6 +34,7 @@ export type RenderAppReturn = {
   emitViewActivate: (v: string) => void;
   emitAskUserQuestion: (r: unknown) => void;
   emitApproval: (r: unknown) => void;
+  emitPluginRuntimeUpdated: (payload: { pluginId: string }) => void;
 };
 
 export async function renderApp(opts: RenderAppOpts = {}): Promise<RenderAppReturn> {
@@ -46,6 +47,7 @@ export async function renderApp(opts: RenderAppOpts = {}): Promise<RenderAppRetu
     emitRoutineFiredV2,
     emitViewActivate,
     emitAskUserQuestion,
+    emitPluginRuntimeUpdated,
   } = makeMockLvisApi(apiOpts);
   const { ns, emitApproval } = makeMockLvisNamespace({ env: lvisEnv });
 
@@ -69,5 +71,6 @@ export async function renderApp(opts: RenderAppOpts = {}): Promise<RenderAppRetu
     emitViewActivate,
     emitAskUserQuestion,
     emitApproval,
+    emitPluginRuntimeUpdated,
   };
 }

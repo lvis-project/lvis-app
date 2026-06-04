@@ -240,6 +240,7 @@ const RESTART_DELAY_MS = parseMsEnv("LVIS_DEV_RESTART_DELAY_MS", 2500);
 const RESTART_FORCE_KILL_MS = parseMsEnv("LVIS_DEV_RESTART_FORCE_KILL_MS", 3000);
 
 const children = [];
+const fsWatchDisposers = [];
 let electronProc = null;
 let restartTimer = null;
 let shuttingDown = false;
@@ -249,6 +250,55 @@ let lastMainOutputHash = "";
 
 function log(tag, msg) {
   process.stdout.write(`[dev:${tag}] ${msg}\n`);
+}
+function startResilientWatch(tag, targetPath, onChange, options = {}) {
+  const retryDelayMs = Number.isFinite(options.retryDelayMs) ? options.retryDelayMs : 750;
+  const watchOptions = { persistent: true, ...(options.watchOptions ?? {}) };
+  let watcher = null;
+  let retryTimer = null;
+  let closed = false;
+
+  const scheduleRetry = () => {
+    if (closed || shuttingDown || retryTimer) return;
+    retryTimer = setTimeout(() => {
+      retryTimer = null;
+      start();
+    }, retryDelayMs);
+  };
+
+  const start = () => {
+    if (closed || shuttingDown) return;
+    try {
+      watcher = watch(targetPath, watchOptions, onChange);
+      watcher.on("error", (err) => {
+        log(tag, `watch error (${targetPath}): ${err.message}`);
+        try {
+          watcher?.close();
+        } catch {}
+        watcher = null;
+        scheduleRetry();
+      });
+    } catch (err) {
+      log(tag, `watch failed (${targetPath}): ${err.message}`);
+      scheduleRetry();
+    }
+  };
+
+  start();
+
+  return () => {
+    closed = true;
+    if (retryTimer) {
+      clearTimeout(retryTimer);
+      retryTimer = null;
+    }
+    if (watcher) {
+      try {
+        watcher.close();
+      } catch {}
+      watcher = null;
+    }
+  };
 }
 
 function forceKillProcessTree(pid) {
@@ -652,8 +702,14 @@ function shutdown(code = 0) {
   log("dev", "shutting down");
   const activeElectron = electronProc;
   const activeChildren = children.splice(0, children.length);
+  const activeFsWatchDisposers = fsWatchDisposers.splice(0, fsWatchDisposers.length);
   electronProc = null;
   shutdownPromise = (async () => {
+    for (const dispose of activeFsWatchDisposers) {
+      try {
+        dispose();
+      } catch {}
+    }
     await Promise.allSettled([
       ...(activeElectron ? [stopChildProcess(activeElectron)] : []),
       ...activeChildren.map((child) => stopChildProcess(child, { forceTree: process.platform === "win32" })),
@@ -668,6 +724,13 @@ process.on("SIGINT", () => {
 });
 process.on("SIGTERM", () => {
   void shutdown(0);
+});
+process.on("uncaughtException", (err) => {
+  if (err?.code === "EPERM" && err?.syscall === "watch") {
+    log("watch", `transient watcher EPERM suppressed: ${err.message}`);
+    return;
+  }
+  throw err;
 });
 process.on("exit", () => {
   if (electronProc?.pid) forceKillProcessTree(electronProc.pid);
@@ -689,31 +752,23 @@ async function main() {
 
   // Initial html copy
   copyHtml();
-  try {
-    watch(htmlSrc, { persistent: true }, () => copyHtml());
-  } catch (err) {
-    log("html", `watch failed: ${err.message}`);
-  }
+  fsWatchDisposers.push(startResilientWatch("html", htmlSrc, () => copyHtml()));
 
   // Plugin UI shell assets (html + external bootstrap js). Copy once and
   // watch each so the dev loop stays in sync without a full `bun run build`.
   copyAllPluginShellAssets();
   for (const asset of pluginShellAssets) {
-    try {
-      watch(asset.src, { persistent: true }, () => copyPluginShellAsset(asset));
-    } catch (err) {
-      log("plugin-shell", `watch failed (${asset.label}): ${err.message}`);
-    }
+    fsWatchDisposers.push(
+      startResilientWatch("plugin-shell", asset.src, () => copyPluginShellAsset(asset)),
+    );
   }
 
   // Runtime script assets imported from compiled dist/src modules.
   copyAllRuntimeScriptAssets();
   for (const asset of runtimeScriptAssets) {
-    try {
-      watch(asset.src, { persistent: true }, () => copyRuntimeScriptAsset(asset));
-    } catch (err) {
-      log("runtime-script", `watch failed (${asset.label}): ${err.message}`);
-    }
+    fsWatchDisposers.push(
+      startResilientWatch("runtime-script", asset.src, () => copyRuntimeScriptAsset(asset)),
+    );
   }
 
   // Main (esbuild --watch via build-main-esbuild.mjs). tsc -p tsconfig.json
@@ -802,16 +857,14 @@ async function main() {
   launchElectron();
 
   // Watch main output for rebuilds
-  try {
-    watch(mainOutput, { persistent: true }, () => {
+  fsWatchDisposers.push(
+    startResilientWatch("main", mainOutput, () => {
       const nextHash = hashFile(mainOutput);
       if (!nextHash || nextHash === lastMainOutputHash) return;
       lastMainOutputHash = nextHash;
       scheduleRestart();
-    });
-  } catch (err) {
-    log("main", `watch failed: ${err.message}`);
-  }
+    }),
+  );
 }
 
 main().catch((err) => {

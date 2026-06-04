@@ -1087,6 +1087,15 @@ export function App() {
   }, [api, refreshViews, refreshMarketplace, refreshCards]);
 
   useEffect(() => {
+    if (typeof api.onPluginRuntimeUpdated !== "function") return;
+    const unsubscribe = api.onPluginRuntimeUpdated(() => {
+      void refreshViews();
+      void refreshCards();
+    });
+    return unsubscribe;
+  }, [api, refreshViews, refreshCards]);
+
+  useEffect(() => {
     if (typeof api.onPluginInstallProgress !== "function") return;
     const unsubscribe = api.onPluginInstallProgress((payload) => {
       if (payload.phase !== "preparing") return;
