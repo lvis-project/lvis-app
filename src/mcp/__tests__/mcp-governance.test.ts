@@ -523,3 +523,19 @@ describe("McpGovernance — connectionTimeoutMs policy cap (ingestion clamp)", (
     expect(result.valid).toBe(true);
   });
 });
+
+describe("McpGovernance.validateServer — requiredAuth fail-closed", () => {
+  it("rejects a server requiring unsupported mtls auth (previously fell through to valid:true)", () => {
+    const governance = governanceWithPolicy(basePolicy({ requiredAuth: "mtls" }));
+    const result = governance.validateServer({
+      id: "browser-use",
+      transport: "stdio",
+      command: "uvx",
+      auth: "api-key",
+      apiKey: "sk-test",
+      apiKeyEnv: "OPENAI_API_KEY",
+    });
+    expect(result.valid).toBe(false);
+    expect(result.reason).toMatch(/mTLS/);
+  });
+});

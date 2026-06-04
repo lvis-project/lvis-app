@@ -98,6 +98,7 @@ function canonicalStringifyInner(
   }
   if (seen.has(value as object)) return '"[Circular]"';
   seen.add(value as object);
+  let result: string;
   if (Array.isArray(value)) {
     // RFC 8785 JCS — element order preserved; nested objects within an
     // array are RECURSIVELY canonicalized (keys sorted). Without this,
@@ -107,14 +108,23 @@ function canonicalStringifyInner(
     const parts = value.map(
       (e) => canonicalStringifyInner(e, seen, depth + 1),
     );
-    return `[${parts.join(",")}]`;
+    result = `[${parts.join(",")}]`;
+  } else {
+    const obj = value as Record<string, unknown>;
+    const sortedKeys = Object.keys(obj)
+      .filter(k => obj[k] !== undefined)
+      .sort();
+    const parts = sortedKeys.map(
+      k => `${JSON.stringify(k)}:${canonicalStringifyInner(obj[k], seen, depth + 1)}`,
+    );
+    result = `{${parts.join(",")}}`;
   }
-  const obj = value as Record<string, unknown>;
-  const sortedKeys = Object.keys(obj)
-    .filter(k => obj[k] !== undefined)
-    .sort();
-  const parts = sortedKeys.map(
-    k => `${JSON.stringify(k)}:${canonicalStringifyInner(obj[k], seen, depth + 1)}`,
-  );
-  return `{${parts.join(",")}}`;
+  // Path-scoped cycle detection (RFC 8785 JCS): track only ancestors on the
+  // CURRENT recursion path, so a value that legitimately appears more than
+  // once as a SIBLING (shared, non-cyclic reference) serializes normally
+  // instead of being mis-flagged "[Circular]". A genuine ancestor cycle still
+  // trips the `seen.has` guard above. Without this delete the WeakSet was
+  // add-only, breaking key symmetry / HMAC stability for shared sub-objects.
+  seen.delete(value as object);
+  return result;
 }
