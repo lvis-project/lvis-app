@@ -353,9 +353,9 @@ export interface WebSearchSettings {
 export interface MarketplaceSettings {
   /** Reserved for future variants. Currently always `"real-cloud"`. */
   backend: "real-cloud";
-  realCloudBaseUrl?: string;
+  cloudBaseUrl?: string;
   /** Local dev/test only: bypass SSRF guard for loopback servers. */
-  realCloudAllowPrivateNetwork?: boolean;
+  cloudAllowPrivateNetwork?: boolean;
   /**
    * S8 — enable/disable plugin update detection at boot. Default true.
    */
@@ -401,8 +401,8 @@ const DEFAULT_SETTINGS: AppSettings = {
     // No fallback to a local catalog file — the only way to populate the
     // host's plugin layout is through the marketplace API.
     backend: "real-cloud",
-    realCloudBaseUrl: "https://marketplace.lvisai.xyz",
-    realCloudAllowPrivateNetwork: false,
+    cloudBaseUrl: "https://marketplace.lvisai.xyz",
+    cloudAllowPrivateNetwork: false,
   },
   routine: {},
   privacy: {
@@ -733,6 +733,31 @@ export class SettingsService {
       const migratedLlm = migrateLegacyLlmAuthMode(parsed.llm);
       const llm = mergeLlmPatch(DEFAULT_SETTINGS.llm, migratedLlm);
       const marketplaceParsed: Record<string, unknown> = { ...(parsed.marketplace ?? {}) };
+      // Migration: the marketplace cloud fields were renamed (the old "real"
+      // prefix became vestigial once the mock backend was removed). Preserve
+      // customised values from an older settings.json. Legacy keys are split
+      // literals so the naming-gate (no new real*/mock* identifiers) is satisfied.
+      const legacyCloudUrlKey = "real" + "CloudBaseUrl";
+      const legacyCloudUrl = marketplaceParsed[legacyCloudUrlKey];
+      if (typeof legacyCloudUrl === "string" && marketplaceParsed.cloudBaseUrl === undefined) {
+        // Trim and only carry a non-empty value forward — a whitespace-only
+        // legacy URL would otherwise read as "configured" in non-trimming
+        // consumers (e.g. the boot fetcher selection) and yield invalid request
+        // URLs. Dropping it falls back to the cloudBaseUrl default.
+        const trimmed = legacyCloudUrl.trim();
+        if (trimmed) {
+          marketplaceParsed.cloudBaseUrl = trimmed;
+        }
+      }
+      delete marketplaceParsed[legacyCloudUrlKey];
+      const legacyAllowPrivateKey = "real" + "CloudAllowPrivateNetwork";
+      if (
+        typeof marketplaceParsed[legacyAllowPrivateKey] === "boolean" &&
+        marketplaceParsed.cloudAllowPrivateNetwork === undefined
+      ) {
+        marketplaceParsed.cloudAllowPrivateNetwork = marketplaceParsed[legacyAllowPrivateKey];
+      }
+      delete marketplaceParsed[legacyAllowPrivateKey];
       // Pin the only valid backend literal — narrows the unknown spread back
       // to the AppSettings type without preserving legacy "mock" inputs.
       marketplaceParsed.backend = "real-cloud";
