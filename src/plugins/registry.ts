@@ -45,12 +45,14 @@ interface LegacyRegistryEntry extends Omit<PluginRegistryEntry, "installSource">
  *   - else `installedBy === "user"`      → `installSource: "user"`
  *   - existing `installSource: "dev-link"` → rewritten to `"local-dev"`
  *
- * Entries with neither legacy field (and no `installSource`) are migrated
- * by stripping the deprecated fields but leaving `installSource` undefined
- * — that preserves the deployment-guard's manifest-fallback behaviour for
- * registries that pre-date both fields.
+ * Entries that are already conformant — no legacy fields, not a dev-link,
+ * with or without `installSource` — need no migration and return `null`, so
+ * the caller does not re-persist + log them on every read. For such entries
+ * `installSource` is simply left undefined, preserving the deployment-guard's
+ * manifest-fallback behaviour for registries that pre-date the field.
  *
- * The deprecated fields are always stripped from the returned entry.
+ * When an entry DOES need migration, the deprecated fields are stripped from
+ * the returned entry.
  *
  * `out.devLinkRewritten` is set to `true` when the migration crossed the
  * dev-link → local-dev boundary so the caller can emit a single-shot
