@@ -89,7 +89,6 @@ describe("createCallLlmForPlugin (Sprint 4-B §B-7)", () => {
     expect(loop.generateText).toHaveBeenCalledWith(
       "hello",
       undefined,
-      undefined,
       controller.signal,
     );
   });

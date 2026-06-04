@@ -4,7 +4,6 @@ import {
   detectSandboxCapability,
   formatSandboxCapabilityForPrompt,
   isWeakSandbox,
-  isSandboxWeak,
   type SandboxCapability,
 } from "../sandbox-capability.js";
 
@@ -29,9 +28,9 @@ describe("sandbox-capability", () => {
     );
   });
 
-  it("isSandboxWeak treats kind=none as weak regardless of confidence", () => {
+  it("isWeakSandbox treats kind=none as weak regardless of confidence", () => {
     expect(
-      isSandboxWeak({
+      isWeakSandbox({
         kind: "none",
         confidence: "verified",
         platform: "linux",
@@ -40,9 +39,9 @@ describe("sandbox-capability", () => {
     ).toBe(true);
   });
 
-  it("isSandboxWeak treats assumed confidence as weak even for non-none kinds", () => {
+  it("isWeakSandbox treats assumed confidence as weak even for non-none kinds", () => {
     expect(
-      isSandboxWeak({
+      isWeakSandbox({
         kind: "bubblewrap",
         confidence: "assumed",
         platform: "linux",
@@ -51,9 +50,9 @@ describe("sandbox-capability", () => {
     ).toBe(true);
   });
 
-  it("isSandboxWeak returns false for a verified non-none capability", () => {
+  it("isWeakSandbox returns false for a verified non-none capability", () => {
     expect(
-      isSandboxWeak({
+      isWeakSandbox({
         kind: "bubblewrap",
         confidence: "verified",
         platform: "linux",
@@ -61,7 +60,7 @@ describe("sandbox-capability", () => {
       }),
     ).toBe(false);
     expect(
-      isSandboxWeak({
+      isWeakSandbox({
         kind: "sandbox-exec",
         confidence: "verified",
         platform: "darwin",
@@ -94,7 +93,7 @@ describe("sandbox-capability — PR-A1 new kind union members", () => {
     expect(fsOnly.kind).toBe("fs-only");
   });
 
-  // ── isWeakSandbox (canonical, exported as isWeakSandbox + isSandboxWeak alias) ──
+  // ── isWeakSandbox (canonical) ──
 
   it("isWeakSandbox returns true for kind='partial' (D5: partial evidence → weak)", () => {
     expect(
@@ -138,17 +137,6 @@ describe("sandbox-capability — PR-A1 new kind union members", () => {
         reason: "AppContainer active",
       }),
     ).toBe(false);
-  });
-
-  // isSandboxWeak is an alias — spot-check that it delegates to isWeakSandbox
-  it("isSandboxWeak (alias) agrees with isWeakSandbox for kind='partial'", () => {
-    const cap: SandboxCapability = {
-      kind: "partial",
-      confidence: "verified",
-      platform: "darwin",
-      reason: "partial",
-    };
-    expect(isSandboxWeak(cap)).toBe(isWeakSandbox(cap));
   });
 
   // ── formatSandboxCapabilityForPrompt — new kind labels ────────────────────

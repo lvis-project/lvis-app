@@ -6,10 +6,9 @@
  */
 
 /**
- * Overlay IPC channels for main↔renderer overlay state sync.
+ * Overlay IPC channels for main→renderer overlay state sync.
  *
  * main → renderer: show / update / dismiss (pushed from plugin-runtime overlay runner)
- * renderer → main: primaryAction (user confirm — audit log + plugin notification)
  */
 export const OVERLAY_V1 = {
   /** main → renderer: push a new OverlayItem into the renderer queue */
@@ -18,8 +17,6 @@ export const OVERLAY_V1 = {
   update: "lvis:overlay:update",
   /** main → renderer: remove an item by id */
   dismiss: "lvis:overlay:dismiss",
-  /** renderer → main: user confirmed (primary action) a plugin overlay item */
-  primaryAction: "lvis:overlay:primary-action",
 } as const;
 
 export const ROUTINES_V2 = {
