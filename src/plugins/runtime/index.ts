@@ -1652,6 +1652,7 @@ export class PluginRuntime {
     }
     this.disabledPluginIds.add(pluginId);
     this.failedPluginIds.delete(pluginId);
+    this.pluginUiRevisions.delete(pluginId);
 
     if (this.registryPath) {
       await updatePluginRegistry(this.registryPath, (registry) => {
