@@ -1219,10 +1219,6 @@ const api = {
   submitFeedback: async (payload: { sessionId: string; messageIndex: number; rating: "up" | "down"; reason?: string }) =>
     ipcRenderer.invoke("lvis:feedback:submit", payload) as Promise<{ ok: boolean; error?: string }>,
 
-  // ─── File drag & drop indexing ────────────────────
-  fileScanPaths: async (paths: string[]) =>
-    ipcRenderer.invoke("lvis:file:scan-paths", { paths }) as Promise<{ ok: boolean; indexed?: number; failed?: number; jobId?: string; error?: string }>,
-
   // ─── View Events ─────────────────────────────────
   onViewActivate: (handler: (viewKey: string) => void) => {
     const listener = (_event: unknown, payload: { viewKey?: string }) => handler(payload?.viewKey ?? "home");

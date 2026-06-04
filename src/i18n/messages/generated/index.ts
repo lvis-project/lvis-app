@@ -5,7 +5,7 @@
  * fragment files in this directory (`<namespace>.ts`, each exporting `en`/`ko`
  * objects) and merges them here.
  *
- * Fragments: 177
+ * Fragments: 176
  */
 import { en as en_app, ko as ko_app } from "./app.js";
 import { en as en_appearanceTab, ko as ko_appearanceTab } from "./appearanceTab.js";
@@ -95,7 +95,6 @@ import { en as en_deferredQueueDialog, ko as ko_deferredQueueDialog } from "./de
 import { en as en_deferredQueuePanel, ko as ko_deferredQueuePanel } from "./deferredQueuePanel.js";
 import { en as en_detachedView, ko as ko_detachedView } from "./detachedView.js";
 import { en as en_devToolsPanel, ko as ko_devToolsPanel } from "./devToolsPanel.js";
-import { en as en_dropZoneOverlay, ko as ko_dropZoneOverlay } from "./dropZoneOverlay.js";
 import { en as en_errorBoundary, ko as ko_errorBoundary } from "./errorBoundary.js";
 import { en as en_fileEditDiff, ko as ko_fileEditDiff } from "./fileEditDiff.js";
 import { en as en_firstTaskProposals, ko as ko_firstTaskProposals } from "./firstTaskProposals.js";
@@ -274,7 +273,6 @@ export const generatedEn: Record<string, string> = {
   ...en_deferredQueuePanel,
   ...en_detachedView,
   ...en_devToolsPanel,
-  ...en_dropZoneOverlay,
   ...en_errorBoundary,
   ...en_fileEditDiff,
   ...en_firstTaskProposals,
@@ -454,7 +452,6 @@ export const generatedKo: Record<string, string> = {
   ...ko_deferredQueuePanel,
   ...ko_detachedView,
   ...ko_devToolsPanel,
-  ...ko_dropZoneOverlay,
   ...ko_errorBoundary,
   ...ko_fileEditDiff,
   ...ko_firstTaskProposals,
