@@ -58,7 +58,6 @@ type ApiOverrides = {
 const DEFAULT_SETTINGS = {
   llm: fakeLlmSettings({ provider: "openai", model: "gpt-4o-mini" }),
   chat: { systemPrompt: "", autoCompact: true },
-  roles: { presets: [] },
   webSearch: { provider: "none" },
   routine: {},
   privacy: { piiRedactEnabled: false },

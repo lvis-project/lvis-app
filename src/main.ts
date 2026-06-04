@@ -81,7 +81,7 @@ const log = createLogger("lvis");
  * dropped when the Electron process tears down. We give the flush a tiny
  * deadline so a wedged transport cannot itself defeat the timeout.
  */
-async function flushLogger(_unused?: unknown): Promise<void> {
+async function flushLogger(): Promise<void> {
   await new Promise<void>((resolve) => {
     let settled = false;
     const finish = () => {
@@ -303,7 +303,7 @@ async function runAppShutdownCleanup(options: {
       }, "shutdown cleanup timed out");
       // Flush the logger so the diagnostic above (and any preceding warn
       // about which subsystem hung) makes it to disk before the process leaves.
-      await flushLogger(log);
+      await flushLogger();
       appShutdownCompleted = true;
       if (options.exitOnTimeout) {
         app.exit(0);
@@ -313,7 +313,7 @@ async function runAppShutdownCleanup(options: {
 
     if (result.status === "failed") {
       log.error("%s: shutdown cleanup failed: %s", options.reason, errorMessage(result.error));
-      await flushLogger(log);
+      await flushLogger();
       appShutdownCompleted = true;
       return "failed";
     }
@@ -1275,7 +1275,7 @@ const BOOTSTRAP_STATUS_MESSAGES = [
   t("be_main.bootstrapStatus4"),
 ] as const;
 const BOOTSTRAP_MESSAGE_MIN_VISIBLE_MS = 500;
-const BOOTSTRAP_SPLASH_MIN_VISIBLE_MS = BOOTSTRAP_MESSAGE_MIN_VISIBLE_MS;
+const BOOTSTRAP_SPLASH_MIN_VISIBLE_MS = 500;
 let bootstrapSplashShownAt = 0;
 
 async function waitForMinimumBootstrapSplash() {

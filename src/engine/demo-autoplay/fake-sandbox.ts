@@ -1,6 +1,11 @@
 /**
  * Live Auto-play — fake sandbox.
  *
+ * Why fake: a closed-loop, pre-recorded scripted-tool sandbox for the
+ * demo/onboarding path — "fake" names the domain semantics (it executes NO real
+ * tool and is never registered in tool-registry), not a process artifact. See
+ * feedback_naming_process_metadata.md.
+ *
  * Closed-loop lookup that returns the pre-recorded result for a given
  * `ScriptedToolCall`. Trust boundary invariants:
  *
@@ -47,6 +52,3 @@ export class FakeSandbox {
     return { ok: true, result: call.fakeResultKo };
   }
 }
-
-/** Singleton — the demo path has no need for multiple sandbox instances. */
-export const fakeSandbox = new FakeSandbox();
