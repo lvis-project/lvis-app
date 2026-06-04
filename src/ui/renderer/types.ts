@@ -159,8 +159,8 @@ export type AppSettings = {
   plugins?: Record<string, never>;
   marketplace?: {
     backend?: "real-cloud";
-    realCloudBaseUrl?: string;
-    realCloudAllowPrivateNetwork?: boolean;
+    cloudBaseUrl?: string;
+    cloudAllowPrivateNetwork?: boolean;
   };
   /** Visual theme preferences. */
   appearance?: {

@@ -496,7 +496,7 @@ export function App() {
     return Array.from(installingPlugins.values()).some((phase) => phase === "preparing");
   }, [installingPlugins, pluginCards]);
 
-  // Marketplace URL — sourced from settings (marketplace.realCloudBaseUrl).
+  // Marketplace URL — sourced from settings (marketplace.cloudBaseUrl).
   const { marketplaceUrl, loaded: marketplaceUrlLoaded } = useMarketplaceUrl(api);
   // Ready only when settings have been fetched AND the URL is non-empty.
   const marketplaceUrlReady = marketplaceUrlLoaded && marketplaceUrl.length > 0;
