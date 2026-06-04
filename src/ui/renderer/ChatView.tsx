@@ -349,7 +349,7 @@ export function ChatView({ api, onAsk, onEditSave, onFork, onToggleStar, onRetry
     tpmLimit, tpmPct,
     rolePresets, activePreset, activePresetId, setActivePresetId,
     attachments, setAttachments, attachmentNCounter,
-    vendorSupportsThinking, enableThinkingChat, toggleThinking,
+    enableThinkingChat, toggleThinking,
     costEstimate, costBadgeClass, activeVendor,
     hideToolFailures,
   } = useChatContext();
@@ -1781,7 +1781,6 @@ export function ChatView({ api, onAsk, onEditSave, onFork, onToggleStar, onRetry
             activePreset={activePreset}
             activePresetId={activePresetId}
             onSelectPreset={setActivePresetId}
-            vendorSupportsThinking={vendorSupportsThinking}
             enableThinkingChat={enableThinkingChat}
             onToggleThinking={toggleThinking}
             permissionSlot={
