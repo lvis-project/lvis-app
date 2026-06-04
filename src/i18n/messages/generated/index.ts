@@ -5,7 +5,7 @@
  * fragment files in this directory (`<namespace>.ts`, each exporting `en`/`ko`
  * objects) and merges them here.
  *
- * Fragments: 179
+ * Fragments: 177
  */
 import { en as en_app, ko as ko_app } from "./app.js";
 import { en as en_appearanceTab, ko as ko_appearanceTab } from "./appearanceTab.js";
@@ -177,8 +177,6 @@ import { en as en_usePluginMarketplace, ko as ko_usePluginMarketplace } from "./
 import { en as en_useSettingsOrchestration, ko as ko_useSettingsOrchestration } from "./useSettingsOrchestration.js";
 import { en as en_useStarred, ko as ko_useStarred } from "./useStarred.js";
 import { en as en_useStatusBarInstall, ko as ko_useStatusBarInstall } from "./useStatusBarInstall.js";
-import { en as en_useStatusBarOs, ko as ko_useStatusBarOs } from "./useStatusBarOs.js";
-import { en as en_useStatusBarRuntime, ko as ko_useStatusBarRuntime } from "./useStatusBarRuntime.js";
 import { en as en_useStatusBarVendor, ko as ko_useStatusBarVendor } from "./useStatusBarVendor.js";
 import { en as en_userMessageEditor, ko as ko_userMessageEditor } from "./userMessageEditor.js";
 import { en as en_viewModeBanner, ko as ko_viewModeBanner } from "./viewModeBanner.js";
@@ -358,8 +356,6 @@ export const generatedEn: Record<string, string> = {
   ...en_useSettingsOrchestration,
   ...en_useStarred,
   ...en_useStatusBarInstall,
-  ...en_useStatusBarOs,
-  ...en_useStatusBarRuntime,
   ...en_useStatusBarVendor,
   ...en_userMessageEditor,
   ...en_viewModeBanner,
@@ -540,8 +536,6 @@ export const generatedKo: Record<string, string> = {
   ...ko_useSettingsOrchestration,
   ...ko_useStarred,
   ...ko_useStatusBarInstall,
-  ...ko_useStatusBarOs,
-  ...ko_useStatusBarRuntime,
   ...ko_useStatusBarVendor,
   ...ko_userMessageEditor,
   ...ko_viewModeBanner,

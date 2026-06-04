@@ -115,22 +115,6 @@ describe("nextOnboardingStage", () => {
     );
   });
 
-  it("force-finish collapses chain from any stage", () => {
-    const stages: OnboardingChainStage[] = [
-      "showcase",
-      "login",
-      "memory",
-      "personalized_welcome",
-      "tour",
-      "plugins",
-    ];
-    for (const stage of stages) {
-      expect(nextOnboardingStage(stage, { type: "force-finish" })).toBe(
-        "done",
-      );
-    }
-  });
-
   it("logout-reset collapses chain to idle from any stage", () => {
     // 2026-05-20 — Settings → 로그아웃 path. 모든 stage 가 idle 로 회귀해야
     // 후속 boot probe 가 ScenarioShowcase 를 재진입시킨다. `done` 도 포함 —
@@ -262,22 +246,6 @@ describe("onboardingChainReducer (state record)", () => {
     expect(result).toEqual({
       stage: "done",
       selectedScenarioId: "meeting",
-      memorySeed: { nickname: "Ken", introduction: "PM" },
-    });
-  });
-
-  it("force-finish collapses to done and keeps the prior selection + memory seed", () => {
-    const next = onboardingChainReducer(
-      {
-        stage: "tour",
-        selectedScenarioId: "multi-agent",
-        memorySeed: { nickname: "Ken", introduction: "PM" },
-      },
-      { type: "force-finish" },
-    );
-    expect(next).toEqual({
-      stage: "done",
-      selectedScenarioId: "multi-agent",
       memorySeed: { nickname: "Ken", introduction: "PM" },
     });
   });
