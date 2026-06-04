@@ -944,7 +944,6 @@ export class ConversationLoop {
    */
   async generateText(
     prompt: string,
-    _maxTokensIgnored?: number,
     systemPrompt = t("be_conversationLoop.generateTextSystemPrompt"),
     abortSignal?: AbortSignal,
   ): Promise<string> {

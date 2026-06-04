@@ -597,8 +597,6 @@ export type LvisApi = {
   memorySearchSessions: (q: string) => Promise<Array<{ sessionId: string; title?: string; matchedMessage: string; timestamp: string }>>;
   memoryGetAgentsMd: () => Promise<string>;
   memoryUpdateAgentsMd: (content: string) => Promise<unknown>;
-  memoryGetLvisMd: () => Promise<string>;
-  memoryUpdateLvisMd: (content: string) => Promise<unknown>;
   memoryGetUserPrefs: () => Promise<string>;
   memoryUpdateUserPrefs: (content: string) => Promise<unknown>;
   memoryRefreshUserPrefs: () => Promise<
@@ -682,7 +680,6 @@ export type LvisApi = {
   onOverlayShow: (handler: (item: import("./context/OverlayContext.js").OverlayItem) => void) => () => void;
   onOverlayUpdate: (handler: (id: string, patch: Partial<import("./context/OverlayContext.js").OverlayItem>) => void) => () => void;
   onOverlayDismiss: (handler: (id: string) => void) => () => void;
-  notifyOverlayPrimary: (pluginId: string, eventId: string) => Promise<void>;
   // Routine session history
   listRoutineSessionsV2: (
     routineId: string,

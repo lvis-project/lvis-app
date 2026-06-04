@@ -8,26 +8,16 @@ const log = createLogger("lvis");
 
 export function resolveManagedPluginBootstrap(input: {
   marketplace: Pick<MarketplaceSettings, "backend" | "realCloudBaseUrl">;
-  isPackaged: boolean;
 }): { enabled: boolean; reason?: string } {
-  const { marketplace, isPackaged } = input;
-  if (marketplace.backend === "real-cloud") {
-    const baseUrl = marketplace.realCloudBaseUrl?.trim();
-    if (baseUrl) {
-      return { enabled: true };
-    }
-    return {
-      enabled: false,
-      reason: "real-cloud backend has no configured base URL",
-    };
+  const { marketplace } = input;
+  const baseUrl = marketplace.realCloudBaseUrl?.trim();
+  if (baseUrl) {
+    return { enabled: true };
   }
-  if (isPackaged) {
-    return {
-      enabled: false,
-      reason: "packaged apps skip managed bootstrap when using the mock marketplace backend",
-    };
-  }
-  return { enabled: true };
+  return {
+    enabled: false,
+    reason: "real-cloud backend has no configured base URL",
+  };
 }
 
 export interface RunManagedBootstrapInput {
@@ -35,7 +25,6 @@ export interface RunManagedBootstrapInput {
   pluginRuntime: PluginRuntime;
   mainWindow: BrowserWindow | null | undefined;
   marketplace: Pick<MarketplaceSettings, "backend" | "realCloudBaseUrl">;
-  isPackaged: boolean;
 }
 
 /**
@@ -84,8 +73,8 @@ export function runManagedBootstrap(input: RunManagedBootstrapInput): Promise<vo
 }
 
 async function doRunManagedBootstrap(input: RunManagedBootstrapInput): Promise<void> {
-  const { pluginMarketplace, pluginRuntime, mainWindow, marketplace, isPackaged } = input;
-  const decision = resolveManagedPluginBootstrap({ marketplace, isPackaged });
+  const { pluginMarketplace, pluginRuntime, mainWindow, marketplace } = input;
+  const decision = resolveManagedPluginBootstrap({ marketplace });
   if (!decision.enabled) {
     log.warn(`boot: managed plugin bootstrap skipped: ${decision.reason}`);
     notifyBootstrapStatus(mainWindow, {
