@@ -2084,18 +2084,28 @@ export class ConversationLoop {
     // exhausted force-recover or TPM recovery is resolved.
     if (
       result.stopReason !== "context-error" &&
-      result.stopReason !== "stream-error" &&
-      (this.recoveryExhausted || this.rateLimitRecoveryAttempted)
+      result.stopReason !== "stream-error"
     ) {
-      const wasRecoveryExhausted = this.recoveryExhausted;
-      this.recoveryExhausted = false;
+      // A clean turn means the structural failure that drove force-recover /
+      // TPM recovery is resolved. Reset the CONSECUTIVE force-recover counter
+      // unconditionally — the budget tracks *consecutive* (not lifetime)
+      // recoveries, so separate, each-recovered context errors over a long
+      // session must NOT accumulate to the cap and permanently block all
+      // compaction. (Previously this reset was gated behind
+      // recoveryExhausted||rateLimitRecoveryAttempted, which a single
+      // successful recovery never sets — so the counter stuck and 3 separate
+      // recoveries exhausted the budget mid-session.)
       this.contextErrorRecoveryCount = 0;
-      this.rateLimitRecoveryAttempted = false;
-      log.info(
-        wasRecoveryExhausted
-          ? "runTurn: recoveryExhausted reset — clean turn, recovery re-armed"
-          : "runTurn: rate-limit recovery reset — clean turn, recovery re-armed",
-      );
+      if (this.recoveryExhausted || this.rateLimitRecoveryAttempted) {
+        const wasRecoveryExhausted = this.recoveryExhausted;
+        this.recoveryExhausted = false;
+        this.rateLimitRecoveryAttempted = false;
+        log.info(
+          wasRecoveryExhausted
+            ? "runTurn: recoveryExhausted reset — clean turn, recovery re-armed"
+            : "runTurn: rate-limit recovery reset — clean turn, recovery re-armed",
+        );
+      }
     }
 
     // Issue #260 — fire system notification on turn-end. Skip if the turn

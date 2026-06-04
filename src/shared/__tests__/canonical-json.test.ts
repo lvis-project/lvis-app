@@ -98,5 +98,24 @@ describe("canonicalStringify", () => {
       expect(canonicalStringify(a)).toBe(canonicalStringify(b));
       expect(canonicalStringify(a)).not.toContain('"[Circular]"');
     });
+
+    it("a shared (non-cyclic) sub-object referenced twice in ONE tree serializes both, not [Circular]", () => {
+      // Path-scoped cycle detection: `shared` appears under two sibling keys
+      // of the same root but is NOT a cycle. The old add-only WeakSet wrongly
+      // flagged the second occurrence "[Circular]", breaking key symmetry /
+      // HMAC stability for shared sub-objects.
+      const shared = { x: 1 };
+      const root = { a: shared, b: shared };
+      const out = canonicalStringify(root);
+      expect(out).not.toContain('"[Circular]"');
+      expect(out).toBe('{"a":{"x":1},"b":{"x":1}}');
+    });
+
+    it("a value shared between two array elements serializes both, not [Circular]", () => {
+      const shared = { k: "v" };
+      const out = canonicalStringify([shared, shared]);
+      expect(out).not.toContain('"[Circular]"');
+      expect(out).toBe('[{"k":"v"},{"k":"v"}]');
+    });
   });
 });

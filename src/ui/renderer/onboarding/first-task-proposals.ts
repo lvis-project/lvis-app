@@ -9,7 +9,8 @@
  * and surfaces the highest-priority proposal whose plugin is present.
  *
  * Each proposal has:
- *   - `pluginId` (matches the marketplace slug)
+ *   - `pluginId` (matches the installed bare manifest id, e.g. "meeting" —
+ *     the same id `pluginCards[].id` carries, NOT the marketplace slug)
  *   - `priority` (lower number wins — the order of "real first value")
  *   - `headlineKo` (the offer card title)
  *   - `bodyKo` (1–2 sentence description)
@@ -51,7 +52,7 @@ export interface FirstTaskProposal {
 function getFirstTaskProposals(): readonly FirstTaskProposal[] {
   return [
     {
-      pluginId: "lvis-plugin-meeting",
+      pluginId: "meeting",
       priority: 10,
       headlineKo: t("firstTaskProposals.meetingHeadline"),
       bodyKo: t("firstTaskProposals.meetingBody"),
@@ -59,7 +60,7 @@ function getFirstTaskProposals(): readonly FirstTaskProposal[] {
       composerSeed: t("firstTaskProposals.meetingComposerSeed"),
     },
     {
-      pluginId: "lvis-plugin-local-indexer",
+      pluginId: "local-indexer",
       priority: 20,
       headlineKo: t("firstTaskProposals.indexerHeadline"),
       bodyKo: t("firstTaskProposals.indexerBody"),
@@ -69,9 +70,9 @@ function getFirstTaskProposals(): readonly FirstTaskProposal[] {
     {
       // The marketplace package slug is `lvis-plugin-work-assistant`
       // (the published repo name); the user-facing brand is 업무 도우미.
-      // The pluginId field here matches the marketplace slug so the
-      // installed-plugin map lookup succeeds.
-      pluginId: "lvis-plugin-work-assistant",
+      // The installed-plugin set is keyed by the bare manifest id, so
+      // pluginId here is the manifest id (not the slug) for the lookup.
+      pluginId: "work-assistant",
       priority: 30,
       headlineKo: t("firstTaskProposals.workAssistantHeadline"),
       bodyKo: t("firstTaskProposals.workAssistantBody"),
@@ -79,7 +80,7 @@ function getFirstTaskProposals(): readonly FirstTaskProposal[] {
       composerSeed: t("firstTaskProposals.workAssistantComposerSeed"),
     },
     {
-      pluginId: "lvis-plugin-agent-hub",
+      pluginId: "agent-hub",
       priority: 40,
       headlineKo: t("firstTaskProposals.agentHubHeadline"),
       bodyKo: t("firstTaskProposals.agentHubBody"),

@@ -63,8 +63,11 @@ function migrateLegacyEntry(
   const hasLegacy = entry.installedBy !== undefined || entry._devLinked !== undefined;
   const hasDevLinkInstallSource = entry.installSource === "dev-link";
   // Already-conformant entries (new shape, no dev-link, no legacy fields)
-  // require no migration.
-  if (!hasLegacy && !hasDevLinkInstallSource && entry.installSource !== undefined) return null;
+  // require no migration — whether or not installSource is set. (An entry
+  // with no derivable installSource was previously rebuilt into a structurally
+  // identical object on every read, triggering a needless re-persist + log
+  // each boot.)
+  if (!hasLegacy && !hasDevLinkInstallSource) return null;
   let installSource: PluginRegistryEntryInstallSource | undefined;
   if (hasDevLinkInstallSource || entry._devLinked === true) {
     installSource = "local-dev";

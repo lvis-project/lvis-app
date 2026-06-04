@@ -150,12 +150,22 @@ function _matchesCronFields(fields: CronFields, now: Date): boolean {
         matchField(fields.dayOfWeek, 7, dayOfWeekSpec)
       : matchField(fields.dayOfWeek, dayOfWeek, dayOfWeekSpec);
 
+  const dayOfMonthMatches = matchField(fields.dayOfMonth, dayOfMonth, CRON_SPECS.dayOfMonth);
+  // Standard cron day-field rule: when BOTH day-of-month and day-of-week are
+  // restricted (neither is "*"), the schedule fires if EITHER matches (OR) —
+  // e.g. "0 0 1 * 1" means "1st of the month OR every Monday". When at least
+  // one side is "*", combine with AND (the "*" side always matches, so AND
+  // reduces to the restricted side).
+  const bothDaysRestricted = fields.dayOfMonth !== "*" && fields.dayOfWeek !== "*";
+  const dayMatches = bothDaysRestricted
+    ? dayOfMonthMatches || dayOfWeekMatches
+    : dayOfMonthMatches && dayOfWeekMatches;
+
   return (
     matchField(fields.minute, minute, CRON_SPECS.minute) &&
     matchField(fields.hour, hour, CRON_SPECS.hour) &&
-    matchField(fields.dayOfMonth, dayOfMonth, CRON_SPECS.dayOfMonth) &&
     matchField(fields.month, month, CRON_SPECS.month) &&
-    dayOfWeekMatches
+    dayMatches
   );
 }
 
