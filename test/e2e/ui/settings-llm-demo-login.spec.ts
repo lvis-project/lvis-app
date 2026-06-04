@@ -29,6 +29,9 @@ test.use({
     LVIS_E2E_RESOLVE_DEMO_KEY_PROBE: '1',
     LVIS_WHITELIST_OFFLINE: '1',
   },
+  // This spec asserts the no-key → demo-login key-persistence transition, so it
+  // must start without the default seeded LLM key.
+  seedApiKey: false,
 });
 
 test('LLM tab: demo Login click persists host-managed key and plugin resolveApiKey can read it', async ({
@@ -110,7 +113,8 @@ test('LLM tab: demo Login click persists host-managed key and plugin resolveApiK
 
   await reopened.getByLabel('API 키 직접 입력', { exact: true }).check();
   await expect(reopened.getByTestId('llm-tab:manual-section')).toBeVisible();
-  await expect(reopened.getByTestId('llm-model-input')).toBeVisible();
+  // The model field is now a <select> (was a free-text input).
+  await expect(reopened.getByTestId('llm-model-select')).toBeVisible();
   await expect(reopened.getByTestId('llm-tab:login-section')).toHaveCount(0);
 
   await closeSettingsWindow(app, reopened);
