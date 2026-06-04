@@ -738,11 +738,16 @@ export class SettingsService {
       // customised values from an older settings.json. Legacy keys are split
       // literals so the naming-gate (no new real*/mock* identifiers) is satisfied.
       const legacyCloudUrlKey = "real" + "CloudBaseUrl";
-      if (
-        typeof marketplaceParsed[legacyCloudUrlKey] === "string" &&
-        marketplaceParsed.cloudBaseUrl === undefined
-      ) {
-        marketplaceParsed.cloudBaseUrl = marketplaceParsed[legacyCloudUrlKey];
+      const legacyCloudUrl = marketplaceParsed[legacyCloudUrlKey];
+      if (typeof legacyCloudUrl === "string" && marketplaceParsed.cloudBaseUrl === undefined) {
+        // Trim and only carry a non-empty value forward — a whitespace-only
+        // legacy URL would otherwise read as "configured" in non-trimming
+        // consumers (e.g. the boot fetcher selection) and yield invalid request
+        // URLs. Dropping it falls back to the cloudBaseUrl default.
+        const trimmed = legacyCloudUrl.trim();
+        if (trimmed) {
+          marketplaceParsed.cloudBaseUrl = trimmed;
+        }
       }
       delete marketplaceParsed[legacyCloudUrlKey];
       const legacyAllowPrivateKey = "real" + "CloudAllowPrivateNetwork";
