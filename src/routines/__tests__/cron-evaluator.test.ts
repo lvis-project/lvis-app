@@ -124,6 +124,26 @@ describe("matchesCron", () => {
   });
 });
 
+describe("matchesCron — day-of-month / day-of-week OR rule (standard cron)", () => {
+  it("'0 0 1 * 1' fires on the 1st OR on Monday when BOTH day fields are restricted", () => {
+    // 2026-05-01 is the 1st and a Friday (not Monday) — matches via day-of-month.
+    expect(matchesCron("0 0 1 * 1", new Date("2026-05-01T00:00:00Z"))).toBe(true);
+    // 2026-05-11 is a Monday but the 11th — matches via day-of-week.
+    expect(matchesCron("0 0 1 * 1", new Date("2026-05-11T00:00:00Z"))).toBe(true);
+    // 2026-05-05 is a Tuesday and the 5th — neither side → no match.
+    expect(matchesCron("0 0 1 * 1", new Date("2026-05-05T00:00:00Z"))).toBe(false);
+  });
+
+  it("when only one day field is restricted it ANDs with the '*' side (unchanged)", () => {
+    // dayOfWeek='*' → reduces to day-of-month.
+    expect(matchesCron("0 0 1 * *", new Date("2026-05-01T00:00:00Z"))).toBe(true);
+    expect(matchesCron("0 0 1 * *", new Date("2026-05-02T00:00:00Z"))).toBe(false);
+    // dayOfMonth='*' → reduces to day-of-week (Monday).
+    expect(matchesCron("0 0 * * 1", new Date("2026-05-11T00:00:00Z"))).toBe(true);
+    expect(matchesCron("0 0 * * 1", new Date("2026-05-05T00:00:00Z"))).toBe(false);
+  });
+});
+
 describe("nextCronFire", () => {
   it("finds the next fire one minute ahead for * * * * *", () => {
     const from = new Date("2026-05-08T09:00:00Z");

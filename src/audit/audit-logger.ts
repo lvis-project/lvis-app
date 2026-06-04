@@ -334,8 +334,13 @@ export class AuditLogger {
       return;
     }
 
-    // --- Rotate active .jsonl files ---
-    const jsonlFiles = entries.filter((f) => f.endsWith(".jsonl"));
+    // --- Rotate active daily .jsonl logs ---
+    // Match ONLY dated daily logs `YYYY-MM-DD.jsonl`. The HMAC-chained
+    // channels (`<date>.permission-audit.jsonl`, `<date>.sandbox.jsonl`) also
+    // end in `.jsonl`, but they are append-only, prevHash-linked tamper-evident
+    // chains — gzip+unlinking one mid-stream on a size threshold would sever
+    // the chain. They are deliberately excluded from rotation here.
+    const jsonlFiles = entries.filter((f) => /^\d{4}-\d{2}-\d{2}\.jsonl$/.test(f));
     for (const fname of jsonlFiles) {
       const filePath = join(this.auditDir, fname);
       // Skip current active log file — only rotate if size or age threshold met
