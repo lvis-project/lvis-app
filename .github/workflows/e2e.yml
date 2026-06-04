@@ -1,8 +1,12 @@
 name: Playwright E2E (Electron)
 
-# Opt-in only — never part of the per-PR gate. Runs on:
+# Opt-in for PRs, scheduled on main. Runs on:
 #   - workflow_dispatch (manual, with a `ref` input to target any branch/SHA)
 #   - a same-repo PR labeled `e2e`
+#   - a nightly schedule against main — catches default-changing PRs (i18n,
+#     onboarding, activation) that the opt-in label skipped, within 24h, without
+#     adding ~75 min of ARM latency to every PR. (#1212: the i18n/activation flip
+#     broke the suite for ~10 PRs because nobody labeled them e2e.)
 # Keeps normal CI fast; this is the full Electron UI suite (merged from the
 # former e2e + ui-e2e workflows, which ran the identical suite).
 on:
@@ -14,14 +18,18 @@ on:
         default: main
   pull_request:
     types: [labeled]
+  schedule:
+    # 02:00 KST (17:00 UTC) daily — off-peak; runs against the default branch.
+    - cron: '0 17 * * *'
 
 jobs:
   e2e:
-    # workflow_dispatch (manual) OR same-repo PR labeled `e2e`.
-    # Fork PRs cannot access LVIS_REPO_READ_TOKEN, so the sibling plugin
+    # workflow_dispatch (manual), nightly schedule, OR same-repo PR labeled
+    # `e2e`. Fork PRs cannot access LVIS_REPO_READ_TOKEN, so the sibling plugin
     # clone + fixture build would fail — gate them out even if labeled.
     if: >-
       github.event_name == 'workflow_dispatch' ||
+      github.event_name == 'schedule' ||
       (github.event_name == 'pull_request' &&
        github.event.label.name == 'e2e' &&
        github.event.pull_request.head.repo.full_name == github.repository)

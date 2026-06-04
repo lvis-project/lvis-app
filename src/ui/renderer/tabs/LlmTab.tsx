@@ -282,6 +282,7 @@ export function LlmTab(props: LlmTabProps) {
                     Endpoint (baseUrl){vendorInfo.needsBaseUrl ? " *" : ` (${t("llmTab.optional")})`}
                   </Label>
                   <Input
+                    data-testid="llm-base-url-input"
                     value={baseUrl}
                     onChange={(e) => setBaseUrl(e.target.value)}
                     placeholder={(vendorInfo as any).baseUrlPlaceholder ?? "https://..."}

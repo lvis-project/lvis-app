@@ -140,7 +140,14 @@ async function setFoundryBaseUrl(
   }
 }
 
-test.describe('PermissionsTab reviewer provider dropdown — #768', () => {
+// SKIPPED: the reviewer no longer has a per-provider selection dropdown. The
+// `reviewer-provider-select` UI (#768) was removed when the reviewer provider
+// became managed centrally via the LLM/intelligence settings (the tab now shows
+// `reviewer-active-llm-source` + the "provider managed in intelligence settings"
+// note instead of a key-gated foundry/gcp-playground dropdown). These tests
+// assert removed behavior and need a rewrite against the new reviewer UI rather
+// than a fixture fix — tracked in #1212.
+test.describe.skip('PermissionsTab reviewer provider dropdown — #768', () => {
   test('foundry option is disabled when no API key + baseUrl, then enables after both are saved', async ({
     app,
     mainWindow,
