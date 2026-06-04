@@ -1534,14 +1534,6 @@ export function registerPluginsHandlers(deps: IpcDeps): void {
     return { ok: true };
   });
 
-  // ─── File-path indexing ────────────────────────────────────────────────
-  ipcMain.handle("lvis:file:scan-paths", async (e, payload: { paths: string[] }) => {
-    if (!validateSender(e)) { auditUnauthorized(auditLogger, "lvis:file:scan-paths", e); return UNAUTHORIZED_FRAME; }
-    void payload;
-    void pluginRuntime;
-    return { ok: false, error: "no-host-file-scan-protocol" };
-  });
-
   // ─── Notifications ──────────────────────────────────────────────────────
   ipcMain.handle("lvis:notification:clicked", (e, payload: unknown) => {
     if (!validateSender(e)) {
