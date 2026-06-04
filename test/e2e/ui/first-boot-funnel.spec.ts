@@ -28,7 +28,10 @@ import fs from 'node:fs';
 
 const FRESH_KEY = 'sk-e2e-first-boot-funnel-openai';
 
-test.use({ onboardingCompleted: false });
+// This spec drives the full no-key first-boot funnel (showcase → login → BYOK →
+// enter API key). Opt out of the default seeded LLM key so the chain doesn't
+// short-circuit past the showcase/key-entry steps.
+test.use({ onboardingCompleted: false, seedApiKey: false });
 
 /** Read the persisted tour-state.json under the per-test LVIS_HOME. */
 function readTourState(userDataDir: string): { completedScenarios?: string[] } | null {

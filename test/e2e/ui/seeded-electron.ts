@@ -4,6 +4,7 @@ import { tmpdir } from "node:os";
 import { dirname, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { LLM_VENDOR_DEFAULTS, type LLMVendor } from "../../../src/shared/llm-vendor-defaults.js";
+import { DEFAULT_BUNDLE_ID } from "../../../src/shared/theme-bundles.js";
 
 const HERE = dirname(fileURLToPath(import.meta.url));
 export const REPO_ROOT = resolve(HERE, "../../..");
@@ -48,7 +49,7 @@ export function buildIsolatedElectronEnv(overrides: LaunchEnv): LaunchEnv {
   };
 }
 
-export function buildE2eBaseSettings(onboardingCompleted = true): JsonObject {
+export function buildE2eBaseSettings(onboardingCompleted = true, locale: "ko" | "en" = "ko"): JsonObject {
   return {
     marketplace: {
       backend: "real-cloud",
@@ -62,7 +63,39 @@ export function buildE2eBaseSettings(onboardingCompleted = true): JsonObject {
     features: {
       onboardingCompleted,
     },
+    // Pin the UI locale for e2e. Defaults to Korean: after #1200 the production
+    // default is English (DEFAULT_LOCALE), but the specs assert the Korean
+    // catalog (mirroring src/i18n/testing/vitest-locale-ko.ts, which pins the
+    // renderer unit suite to ko for the same reason). The English boot path is
+    // covered by the english-default-smoke spec, which passes locale:"en".
+    // schemaVersion:2 is REQUIRED — settings-store normalizeAppearance only
+    // reads `language` inside the v2 branch, so without it the seed is silently
+    // ignored and the UI stays en.
+    appearance: {
+      schemaVersion: 2,
+      bundleId: DEFAULT_BUNDLE_ID,
+      language: locale,
+    },
   };
+}
+
+/**
+ * Secrets to seed into `lvis-secrets.json` so the host reports a usable LLM key
+ * at boot (`lvis:settings:has-api-key` → `getSecret("llm.apiKey.<provider>")`),
+ * which enables the chat composer. Before #1201 a demo-key path resolved this
+ * implicitly; that path is gone, so e2e seeds an explicit key for every vendor
+ * (covers whichever `llm.provider` a spec ends up with — default azure-foundry).
+ *
+ * The `plain:` prefix is honored by `getSecret` unconditionally (it is checked
+ * before the safeStorage branch), so this works in headless CI where no OS
+ * keychain / safeStorage is available.
+ */
+export function buildE2eSecrets(): Record<string, string> {
+  const secrets: Record<string, string> = {};
+  for (const vendor of Object.keys(LLM_VENDOR_DEFAULTS)) {
+    secrets[`llm.apiKey.${vendor}`] = `plain:sk-e2e-${vendor}`;
+  }
+  return secrets;
 }
 
 export type SeededElectronContext = {
