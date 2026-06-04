@@ -53,13 +53,13 @@ import { useBootstrapStatus } from "./hooks/use-bootstrap-status.js";
 import { MarketplaceUpdateBanner } from "./components/MarketplaceUpdateBanner.js";
 import { BootstrapStatusBanner } from "./components/BootstrapStatusBanner.js";
 import { DevConsoleToggle } from "./components/DevConsoleToggle.js";
-import { DropZoneOverlay } from "./components/DropZoneOverlay.js";
 import { SnapEdgeHighlight } from "./components/SnapEdgeHighlight.js";
 import { usePluginMarketplace } from "./hooks/use-plugin-marketplace.js";
 import { usePluginAuthStatuses } from "./hooks/use-plugin-auth-status.js";
 import type { Attachment } from "./types/attachments.js";
 import { useRolePresets } from "./hooks/use-role-presets.js";
 import { useAppBootstrap } from "./hooks/use-app-bootstrap.js";
+import { useWindowFileDropGuard } from "./hooks/use-window-file-drop-guard.js";
 import { useChatActions } from "./hooks/use-chat-actions.js";
 import { useChatContextValue } from "./hooks/use-chat-context-value.js";
 import { CustomTitleBar } from "./components/CustomTitleBar.js";
@@ -79,6 +79,10 @@ export function App() {
   // events as a permanent badge next to the Home button. User-gated:
   // download/install only run on explicit badge click.
   const appUpdate = useAppUpdate(api);
+
+  // Block default file:// navigation when a file is dropped onto the window
+  // (the drag-drop indexing feature was removed; this guard is all that remains).
+  useWindowFileDropGuard();
 
   // Workflow tools (S1+S2) — lifted to App level so FloatingQuestionPanel
   // survives view navigation (question state persists across view changes).
@@ -1612,7 +1616,6 @@ export function App() {
       {/* v6: ApprovalQueueStatus floating chip 제거. 큐 정보는 InputActionBar
           trailing 의 DeferredApprovalChip 으로 통합. Spec docs/blueprints/
           composer-redesign-message-queue.md "제거" 섹션. */}
-      <DropZoneOverlay />
       <DevConsoleToggle />
       {/* Snap edge highlight — shown when a detached child window enters the snap zone */}
       <SnapEdgeHighlight />
