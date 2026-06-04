@@ -13,7 +13,7 @@
  */
 import { describe, it, expect, vi } from "vitest";
 
-import { ToolRegistry, type DeprecationEvent } from "../registry.js";
+import { ToolRegistry } from "../registry.js";
 import { createDynamicTool } from "../base.js";
 
 function makeTool(
@@ -113,26 +113,19 @@ describe("§6.4 Tool Versioning — ToolRegistry", () => {
     expect(r.findByName("foo")?.version).toBe("1.5.0");
   });
 
-  it("emits deprecation event on findByName for a deprecated tool", () => {
+  it("warns on findByName for a deprecated tool", () => {
     const r = new ToolRegistry();
-    const events: DeprecationEvent[] = [];
-    r.setDeprecationHandler((e) => events.push(e));
     const warnSpy = vi.spyOn(console, "warn").mockImplementation(() => {});
 
     r.register(makeTool("old_tool", { version: "1.0.0", deprecatedSince: "1.5.0" }));
     const resolved = r.findByName("old_tool");
     expect(resolved?.name).toBe("old_tool");
-    expect(events).toHaveLength(1);
-    expect(events[0].requested).toBe("old_tool");
-    expect(events[0].deprecatedSince).toBe("1.5.0");
     expect(warnSpy).toHaveBeenCalled();
     warnSpy.mockRestore();
   });
 
   it("replacedBy transparently redirects findByName to the replacement", () => {
     const r = new ToolRegistry();
-    const events: DeprecationEvent[] = [];
-    r.setDeprecationHandler((e) => events.push(e));
     const warnSpy = vi.spyOn(console, "warn").mockImplementation(() => {});
 
     r.register(
@@ -146,10 +139,7 @@ describe("§6.4 Tool Versioning — ToolRegistry", () => {
 
     const resolved = r.findByName("old_name");
     expect(resolved?.name).toBe("new_name");
-    expect(events).toHaveLength(1);
-    expect(events[0].requested).toBe("old_name");
-    expect(events[0].resolved.name).toBe("new_name");
-    expect(events[0].replacedBy).toBe("new_name");
+    expect(warnSpy).toHaveBeenCalled();
     warnSpy.mockRestore();
   });
 
@@ -177,17 +167,5 @@ describe("§6.4 Tool Versioning — ToolRegistry", () => {
     expect(r.findByName("foo")).toBeUndefined();
     expect(r.listVersions("foo")).toEqual([]);
     expect(r.findByName("bar")?.name).toBe("bar");
-  });
-
-  it("deprecation handler throw does not break lookup", () => {
-    const r = new ToolRegistry();
-    const warnSpy = vi.spyOn(console, "warn").mockImplementation(() => {});
-    r.setDeprecationHandler(() => {
-      throw new Error("boom");
-    });
-    r.register(makeTool("foo", { version: "1.0.0", deprecatedSince: "1.5.0" }));
-    const resolved = r.findByName("foo");
-    expect(resolved?.name).toBe("foo");
-    warnSpy.mockRestore();
   });
 });

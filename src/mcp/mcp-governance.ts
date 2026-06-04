@@ -1,9 +1,9 @@
 /**
  * MCP Governance — §14.2 Policy Enforcement
  *
- * 6-Layer 검증 엔진:
- * Layer 0: 정책 파일 로드 + 무결성 검증
- * Layer 1: 서버 설치 검증 (whitelist, transport, URL, checksum)
+ * 검증 엔진:
+ * Layer 0: 정책 파일 로드
+ * Layer 1: 서버 설치 검증 (whitelist, transport, URL)
  * Layer 2: 연결 보안 검증 (TLS, auth, timeout)
  * Layer 3: 도구 등록 검증 (namespace, shadowing, max tools)
  *
@@ -39,8 +39,6 @@ const DEFAULT_POLICY: McpGovernancePolicy = {
     maxServersTotal: 10,
     blockedUrlPatterns: ["*.ngrok.io", "*.serveo.net", "*.localtunnel.me"],
     allowedUrlPatterns: [],
-    auditLevel: "full",
-    killSwitchEnabled: true,
     policyRefreshIntervalMs: 30 * 60 * 1000, // 30분
   },
 };
@@ -55,7 +53,7 @@ export class McpGovernance {
     this.policy = this.loadPolicy();
   }
 
-  // ─── Layer 0: 정책 로드 + 무결성 ─────────────────
+  // ─── Layer 0: 정책 로드 ──────────────────────────
 
   private loadPolicy(): McpGovernancePolicy {
     if (!existsSync(this.policyPath)) {
@@ -276,26 +274,6 @@ export class McpGovernance {
   /** 서버의 승인 정보 조회 */
   getApproval(serverId: string): McpServerApproval | undefined {
     return this.findApproval(serverId);
-  }
-
-  /** 승인된 서버 목록 */
-  listApprovedServers(): McpServerApproval[] {
-    return this.policy.servers.filter((s) => s.status === "approved");
-  }
-
-  /** 정책 버전 */
-  getPolicyVersion(): string {
-    return this.policy.version;
-  }
-
-  /** 감사 로깅 수준 */
-  getAuditLevel(): string {
-    return this.policy.globalRules.auditLevel;
-  }
-
-  /** 킬 스위치 상태 */
-  isKillSwitchEnabled(): boolean {
-    return this.policy.globalRules.killSwitchEnabled;
   }
 
   // ─── Private Validation ──────────────────────────

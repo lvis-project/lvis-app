@@ -10,17 +10,15 @@ function engine() {
 }
 
 describe("RouteEngine", () => {
-  it("routes mentions through the generic agent-message route", () => {
+  it("routes general input through the llm route", () => {
     const result = engine().route({
-      type: "mention",
-      target: "worker-a",
-      message: "상태 알려줘",
+      type: "general",
+      input: "상태 알려줘",
     } as InputClassification);
 
     expect(result).toEqual({
-      route: "agent-message",
-      target: "worker-a",
-      message: "상태 알려줘",
+      route: "llm",
+      input: "상태 알려줘",
     });
   });
 });

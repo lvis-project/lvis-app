@@ -1049,43 +1049,6 @@ export class MemoryManager {
   }
 
   /**
-   * Walks the parentSessionId chain starting from `sessionId` and returns all
-   * ancestor sessions in order from oldest (root) to newest (given sessionId).
-   * Stops when a session has no parentSessionId or its metadata is missing.
-   * Guards against cycles by tracking visited IDs.
-   */
-  async getCheckpointChain(sessionId: string): Promise<SessionMetadata[]> {
-    // Reject caller-provided IDs that contain path-traversal characters before any file I/O.
-    if (!isValidSessionId(sessionId)) {
-      log.warn({ sessionId }, "unsafe caller-provided sessionId rejected in getCheckpointChain");
-      return [];
-    }
-    const chain: SessionMetadata[] = [];
-    const visited = new Set<string>();
-    let currentId: string | undefined = sessionId;
-
-    while (currentId !== undefined) {
-      if (visited.has(currentId)) {
-        log.warn({ sessionId: currentId }, "cycle detected in checkpoint chain — stopping traversal");
-        break;
-      }
-      visited.add(currentId);
-      const meta = this.loadSessionMetadata(currentId);
-      if (meta === null) break;
-      chain.push(meta);
-      const nextId = meta.parentSessionId;
-      if (nextId !== undefined && !isValidSessionId(nextId)) {
-        log.warn({ sessionId: currentId, parentSessionId: nextId }, "unsafe parentSessionId rejected — stopping traversal");
-        break;
-      }
-      currentId = nextId;
-    }
-
-    chain.reverse();
-    return chain;
-  }
-
-  /**
    * 세션 삭제 — jsonl + metadata + 같은 session 의 compact archive/snapshot/sidecar 동시 제거.
    *
    * Compact pipeline 이 oversize 메시지를

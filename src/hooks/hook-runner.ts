@@ -52,7 +52,6 @@ export type PostToolUseHook = (ctx: PostHookContext) => Promise<PostHookResult |
 export class HookRunner {
   private readonly preHooks: Array<{ name: string; handler: PreToolUseHook }> = [];
   private readonly postHooks: Array<{ name: string; handler: PostToolUseHook }> = [];
-  private readonly failureHooks: Array<{ name: string; handler: PostToolUseHook }> = [];
 
   /** PreToolUse 훅 등록 */
   registerPreHook(name: string, handler: PreToolUseHook): void {
@@ -62,11 +61,6 @@ export class HookRunner {
   /** PostToolUse 훅 등록 */
   registerPostHook(name: string, handler: PostToolUseHook): void {
     this.postHooks.push({ name, handler });
-  }
-
-  /** PostToolUseFailure 훅 등록 */
-  registerFailureHook(name: string, handler: PostToolUseHook): void {
-    this.failureHooks.push({ name, handler });
   }
 
   /**
@@ -111,12 +105,11 @@ export class HookRunner {
     };
   }
 
-  /** PostToolUse 훅 실행 — 성공 시 */
+  /** PostToolUse 훅 실행 — 성공/실패 양쪽 모두 postHooks 를 실행 (`ctx.isError` 로 구분 가능) */
   async runPostHooks(ctx: PostHookContext): Promise<string | undefined> {
     const feedbacks: string[] = [];
-    const hooks = ctx.isError ? this.failureHooks : this.postHooks;
 
-    for (const hook of hooks) {
+    for (const hook of this.postHooks) {
       try {
         const result = await hook.handler(ctx);
         if (result?.feedback) feedbacks.push(result.feedback);

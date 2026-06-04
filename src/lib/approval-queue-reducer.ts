@@ -48,15 +48,3 @@ export function approvalQueueReducer(
   // payload 손상, 라이브러리 업그레이드로 새 타입 추가) 를 위해 안전한 fallback.
   return state;
 }
-
-/**
- * Returns true when the queue is at or above the cap and a new push would
- * be rejected. Exposed for callers that want to short-circuit with deny-once
- * before the request ever reaches the UI.
- */
-export function isApprovalQueueFull(
-  state: ApprovalRequest[],
-  max: number = DEFAULT_APPROVAL_QUEUE_MAX,
-): boolean {
-  return state.length >= max;
-}

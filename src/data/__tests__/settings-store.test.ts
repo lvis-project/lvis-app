@@ -169,38 +169,17 @@ describe("SettingsService role presets", () => {
     rmSync(userDataPath, { recursive: true, force: true });
   });
 
-  it("keeps roles.presets empty on a fresh install", () => {
-    const service = new SettingsService({ userDataPath });
-    expect(service.get("roles").presets).toEqual([]);
-  });
-
-  it("strips custom role preset writes so prompt files remain the only persona body store", async () => {
-    const service = new SettingsService({ userDataPath });
-    await service.patch({
-      roles: {
-        presets: [
-          { id: "default", name: "기본", systemPromptAdd: "", isDefault: true },
-          { id: "support", name: "Support", systemPromptAdd: "Be concise." },
-        ],
-      },
-    });
-
-    const reloaded = new SettingsService({ userDataPath });
-    expect(reloaded.get("roles").presets).toEqual([]);
-  });
-
-  it("normalizes invalid role settings without resetting unrelated sections", () => {
+  it("ignores unknown on-disk sections without resetting unrelated sections", () => {
     writeFileSync(
       join(userDataPath, "lvis-settings.json"),
       JSON.stringify({
-        roles: { presets: [{ id: "x", name: "", systemPromptAdd: 1 }] },
+        unknownSection: { foo: "bar" },
         chat: { systemPrompt: "preserved-prompt", autoCompact: false },
       }),
       "utf-8",
     );
 
     const service = new SettingsService({ userDataPath });
-    expect(service.get("roles").presets).toEqual([]);
     expect(service.get("chat").systemPrompt).toBe("preserved-prompt");
     expect(service.get("chat").autoCompact).toBe(false);
   });

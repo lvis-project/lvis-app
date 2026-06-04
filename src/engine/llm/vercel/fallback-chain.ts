@@ -12,7 +12,6 @@
  *   - Fallback only fires BEFORE the first stream event reaches the caller
  *     (pre-stream failure). Mid-stream recovery is not attempted because we
  *     cannot replay partial output deterministically.
- *   - auditLogger is optional; absence is silently ignored.
  */
 import type { LLMProvider, StreamEvent, StreamTurnParams } from "../types.js";
 import type { LLMVendor } from "../types.js";
@@ -27,14 +26,6 @@ export interface FallbackEntry {
   baseUrl?: string;
   vertexProject?: string;
   vertexLocation?: string;
-}
-
-export interface FallbackAuditLogger {
-  log(entry: {
-    type: "warn";
-    sessionId: string;
-    input: string;
-  }): void;
 }
 
 export interface FallbackCallbacks {
@@ -188,7 +179,6 @@ export class FallbackProvider implements LLMProvider {
     private readonly primary: LLMProvider,
     private readonly chain: FallbackEntry[],
     private readonly getApiKey: ApiKeyGetter,
-    private readonly auditLogger?: FallbackAuditLogger,
     private readonly factory?: ProviderFactory,
   ) {
     this.vendor = primary.vendor;
@@ -210,7 +200,6 @@ export class FallbackProvider implements LLMProvider {
       params,
       this.chain,
       this.getApiKey,
-      this.auditLogger,
       this.factory,
       callbacks,
     );
@@ -226,7 +215,6 @@ export async function* streamWithFallback(
   params: StreamTurnParams,
   chain: FallbackEntry[],
   getApiKey: ApiKeyGetter,
-  auditLogger?: FallbackAuditLogger,
   _createProvider: ProviderFactory = defaultCreateProvider,
   callbacks?: FallbackCallbacks,
 ): AsyncIterable<StreamEvent> {
@@ -282,11 +270,6 @@ export async function* streamWithFallback(
       const reason = err instanceof Error ? err.message : String(err);
       const msg = `fallback: ${label}→${nextLabel} reason=${reason}`;
       log.warn(`${msg}`);
-      try {
-        auditLogger?.log({ type: "warn", sessionId: "", input: msg });
-      } catch {
-        // audit failure must never block the fallback path
-      }
       callbacks?.onFallback?.(label, nextLabel);
       callbacks?.onStatus?.({ phase: "fallback", from: label, to: nextLabel, reason });
     }

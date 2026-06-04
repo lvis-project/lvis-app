@@ -34,7 +34,7 @@ export const TOOL_SEARCH_TOOL_NAME = "tool_search";
  * listener (AuditLogger, cost-monitor) to log a `warn`/`tool_call` entry
  * without pulling AuditLogger into this module.
  */
-export interface DeprecationEvent {
+interface DeprecationEvent {
   /** Name the caller requested. */
   requested: string;
   /** Resolved tool (may differ from requested when `replacedBy` redirect fires). */
@@ -153,7 +153,6 @@ export class ToolRegistry {
    */
   private readonly versioned = new Map<string, Map<string, Tool>>();
   private denyRules: DenyRule[] = [];
-  private deprecationHandler: ((event: DeprecationEvent) => void) | null = null;
 
   /**
    * Register a tool.
@@ -172,12 +171,6 @@ export class ToolRegistry {
   /** Bulk register — used by plugin load and builtin tool registration. */
   registerBatch(tools: Tool[]): void {
     for (const tool of tools) this.register(tool);
-  }
-
-  /** Remove a single tool by name (every registered version). No-op if absent. */
-  unregister(name: string): void {
-    this.tools.delete(name);
-    this.versioned.delete(name);
   }
 
   /** Remove every tool contributed by the given plugin. */
@@ -313,16 +306,6 @@ export class ToolRegistry {
     return [...map.values()].sort((a, b) =>
       compareSemver(a.version, b.version),
     );
-  }
-
-  /**
-   * Install/replace the deprecation observer. Passing `null` clears it.
-   * Wired by boot.ts to {@link AuditLogger.log} so every deprecated-tool
-   * call lands in the daily JSONL + `warn` stream without coupling the
-   * registry to AuditLogger directly.
-   */
-  setDeprecationHandler(handler: ((event: DeprecationEvent) => void) | null): void {
-    this.deprecationHandler = handler;
   }
 
   /** Full tool list (includes denied tools — for diagnostics). */
@@ -544,16 +527,6 @@ export class ToolRegistry {
     log.warn(
       `deprecated tool call: ${event.requested}@${event.resolved.version} (deprecatedSince=${event.deprecatedSince})${redirect}`,
     );
-    if (this.deprecationHandler) {
-      try {
-        this.deprecationHandler(event);
-      } catch (err) {
-        log.warn(
-          `deprecation handler threw: %s`,
-          (err as Error).message,
-        );
-      }
-    }
   }
 
   private assertNameOwnerCompatible(versionMap: Map<string, Tool>, tool: Tool): void {
