@@ -715,6 +715,8 @@ export type LvisApi = {
   onPluginUninstallResult: (h: (payload: { slug: string; success: boolean; error?: string }) => void) => () => void;
   /** #1176 — plugin active/inactive toggled (this surface or another). */
   onPluginEnabledChanged?: (h: (payload: { pluginId: string; enabled: boolean }) => void) => () => void;
+  /** Fires after a loaded plugin runtime is restarted/reloaded without a full app restart. */
+  onPluginRuntimeUpdated?: (h: (payload: { pluginId: string }) => void) => () => void;
   onAgentInstallResult: (h: (payload: { slug: string; success: boolean; agentId?: string; error?: string }) => void) => () => void;
   onAgentUninstallResult: (h: (payload: { slug: string; success: boolean; agentId?: string; error?: string }) => void) => () => void;
   onSkillInstallResult: (h: (payload: { slug: string; success: boolean; skillId?: string; error?: string }) => void) => () => void;
