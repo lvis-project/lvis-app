@@ -24,10 +24,10 @@ function makeEntry(overrides: Partial<AssistantEntry> = {}): AssistantEntry {
   };
 }
 
-function renderCard(entry: AssistantEntry, highlightQuery?: string) {
+function renderCard(entry: AssistantEntry) {
   return render(
     <TooltipProvider>
-      <AssistantCard entry={entry} highlightQuery={highlightQuery} />
+      <AssistantCard entry={entry} />
     </TooltipProvider>,
   );
 }

@@ -290,7 +290,6 @@ export function ToolGroupCard({
   hideFailureStatus = false,
 }: {
   group: Extract<ChatEntry, { kind: "tool_group" }>;
-  embedded?: boolean;
   /** Active session id for verbatim IPC fetch. When provided, stub results render as CompactedToolResult. */
   sessionId?: string;
   /**
