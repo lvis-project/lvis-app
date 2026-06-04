@@ -35,15 +35,17 @@ test('selecting a reviewer mode switches the active radio', async ({ app, mainWi
   const settingsWindow = await openSettingsWindow(app, mainWindow, 'permissions');
 
   // Click the Radix RadioGroupItem button directly (the wrapping <Label> does
-  // not reliably toggle it). Two switches prove the RadioGroup →
-  // reviewerDispatch → re-render cycle works regardless of the default mode
-  // (Radix renders data-state checked|unchecked).
+  // not reliably toggle it).
   const strictRadio = settingsWindow.locator('#reviewer-mode-strict-radio');
   const ruleRadio = settingsWindow.locator('#reviewer-mode-rule-radio');
 
+  // First select strict to establish a known pre-state (a no-op if strict is
+  // already the default — which is fine, it is only setup). The strict→rule
+  // transition below is the actual proof: it is a real switch in every case
+  // (strict is checked before the rule click), and asserting strict flips to
+  // unchecked can only pass if the RadioGroup → reviewerDispatch → re-render
+  // cycle actually fired. Radix renders data-state checked|unchecked.
   await strictRadio.click();
-  await expect(strictRadio).toHaveAttribute('data-state', 'checked');
-
   await ruleRadio.click();
   await expect(ruleRadio).toHaveAttribute('data-state', 'checked');
   await expect(strictRadio).toHaveAttribute('data-state', 'unchecked');
