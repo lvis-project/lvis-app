@@ -41,8 +41,8 @@ describe("SettingsService marketplace defaults", () => {
 
     expect(service.get("marketplace")).toEqual({
       backend: "real-cloud",
-      realCloudBaseUrl: "https://marketplace.lvisai.xyz",
-      realCloudAllowPrivateNetwork: false,
+      cloudBaseUrl: "https://marketplace.lvisai.xyz",
+      cloudAllowPrivateNetwork: false,
     });
   });
 
@@ -52,8 +52,8 @@ describe("SettingsService marketplace defaults", () => {
       JSON.stringify({
         marketplace: {
           backend: "real-cloud",
-          realCloudBaseUrl: "https://marketplace.lvis.local",
-          realCloudAllowPrivateNetwork: false,
+          cloudBaseUrl: "https://marketplace.lvis.local",
+          cloudAllowPrivateNetwork: false,
         },
       }),
       "utf-8",
@@ -63,9 +63,32 @@ describe("SettingsService marketplace defaults", () => {
 
     expect(service.get("marketplace")).toEqual({
       backend: "real-cloud",
-      realCloudBaseUrl: "https://marketplace.lvis.local",
-      realCloudAllowPrivateNetwork: false,
+      cloudBaseUrl: "https://marketplace.lvis.local",
+      cloudAllowPrivateNetwork: false,
     });
+  });
+
+  it("migrates legacy realCloud* keys → cloud* (renamed when the mock backend was removed)", () => {
+    writeFileSync(
+      join(userDataPath, "lvis-settings.json"),
+      JSON.stringify({
+        marketplace: {
+          backend: "real-cloud",
+          realCloudBaseUrl: "https://legacy.example",
+          realCloudAllowPrivateNetwork: true,
+        },
+      }),
+      "utf-8",
+    );
+
+    const service = new SettingsService({ userDataPath });
+    const mk = service.get("marketplace") as Record<string, unknown>;
+
+    expect(mk.cloudBaseUrl).toBe("https://legacy.example");
+    expect(mk.cloudAllowPrivateNetwork).toBe(true);
+    // Legacy keys are not carried forward.
+    expect(mk.realCloudBaseUrl).toBeUndefined();
+    expect(mk.realCloudAllowPrivateNetwork).toBeUndefined();
   });
 
 });
@@ -339,7 +362,7 @@ describe("SettingsService webView (B1 — external URL viewer policy)", () => {
       JSON.stringify({
         webView: { preferredFlow: badValue },
         chat: { systemPrompt: "preserved-prompt", autoCompact: false },
-        marketplace: { backend: "real-cloud", realCloudBaseUrl: "https://preserved.example" },
+        marketplace: { backend: "real-cloud", cloudBaseUrl: "https://preserved.example" },
       }),
       "utf-8",
     );
@@ -348,7 +371,7 @@ describe("SettingsService webView (B1 — external URL viewer policy)", () => {
     // Unrelated sections must be preserved (no full default reset).
     expect(service.get("chat").systemPrompt).toBe("preserved-prompt");
     expect(service.get("chat").autoCompact).toBe(false);
-    expect(service.get("marketplace").realCloudBaseUrl).toBe("https://preserved.example");
+    expect(service.get("marketplace").cloudBaseUrl).toBe("https://preserved.example");
   });
 
   it("falls back to default when webView block is not an object", () => {
@@ -412,7 +435,7 @@ describe("SettingsService system — close behavior (PR #1032)", () => {
       JSON.stringify({
         system: { closeBehavior: badValue },
         chat: { systemPrompt: "preserved-prompt", autoCompact: false },
-        marketplace: { backend: "real-cloud", realCloudBaseUrl: "https://preserved.example" },
+        marketplace: { backend: "real-cloud", cloudBaseUrl: "https://preserved.example" },
       }),
       "utf-8",
     );
@@ -420,7 +443,7 @@ describe("SettingsService system — close behavior (PR #1032)", () => {
     expect(service.get("system")).toEqual({ closeBehavior: "hide-to-tray" });
     expect(service.get("chat").systemPrompt).toBe("preserved-prompt");
     expect(service.get("chat").autoCompact).toBe(false);
-    expect(service.get("marketplace").realCloudBaseUrl).toBe("https://preserved.example");
+    expect(service.get("marketplace").cloudBaseUrl).toBe("https://preserved.example");
   });
 
   it("falls back to default when system block is not an object", () => {

@@ -1,6 +1,6 @@
 /**
  * Returns the marketplace base URL from the persisted settings
- * (`settings.marketplace.realCloudBaseUrl`) together with an explicit
+ * (`settings.marketplace.cloudBaseUrl`) together with an explicit
  * `loaded` flag.
  *
  * `loaded` is `false` until `getSettings()` resolves for the first time.
@@ -29,7 +29,7 @@ export function useMarketplaceUrl(api: LvisApi): MarketplaceUrlState {
       .getSettings()
       .then((s) => {
         if (cancelled) return;
-        setMarketplaceUrl((s.marketplace?.realCloudBaseUrl ?? "").trim());
+        setMarketplaceUrl((s.marketplace?.cloudBaseUrl ?? "").trim());
         setLoaded(true);
       })
       .catch(() => {

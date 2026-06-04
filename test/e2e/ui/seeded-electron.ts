@@ -52,7 +52,7 @@ export function buildE2eBaseSettings(onboardingCompleted = true): JsonObject {
   return {
     marketplace: {
       backend: "real-cloud",
-      realCloudBaseUrl: "",
+      cloudBaseUrl: "",
       updateCheckEnabled: false,
       updateCheckIntervalMs: 0,
     },

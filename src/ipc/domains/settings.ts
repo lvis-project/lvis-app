@@ -78,13 +78,13 @@ export function registerSettingsHandlers(deps: IpcDeps): void {
     // capturing the flag at boot only. Detect a change here and call the boot
     // closure that pushes the new value into the live fetcher instance.
     const prevAllowPrivate =
-      settingsService.get("marketplace").realCloudAllowPrivateNetwork ?? false;
+      settingsService.get("marketplace").cloudAllowPrivateNetwork ?? false;
     const result = await settingsService.patch(partial);
     const newLlm = settingsService.get("llm");
     const newActiveLlmIdentity = activeLlmIdentity(newLlm);
     const newBaseUrl = newLlm.vendors?.["azure-foundry"]?.baseUrl ?? null;
     const newAllowPrivate =
-      settingsService.get("marketplace").realCloudAllowPrivateNetwork ?? false;
+      settingsService.get("marketplace").cloudAllowPrivateNetwork ?? false;
     if (prevBaseUrl !== newBaseUrl || prevActiveLlmIdentity !== newActiveLlmIdentity) {
       try {
         deps.rewireReviewerAgent?.();
