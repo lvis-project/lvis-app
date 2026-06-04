@@ -14,6 +14,7 @@ import { mkdtempSync } from "node:fs";
 
 const runtimeTestState = vi.hoisted(() => ({
   appPrependOnceListener: vi.fn(),
+  browserWindows: [] as Array<{ isDestroyed: () => boolean; webContents: { send: (channel: string, payload: unknown) => void } }>,
   capturedRuntimeOptions: null as Record<string, unknown> | null,
   readPluginRegistry: vi.fn(async () => ({ version: 1, plugins: [] })),
   runtime: {
@@ -37,7 +38,10 @@ vi.mock("electron", () => ({
     isPackaged: false,
     prependOnceListener: runtimeTestState.appPrependOnceListener,
   },
-  BrowserWindow: vi.fn(),
+  BrowserWindow: Object.assign(vi.fn(), {
+    getAllWindows: vi.fn(() => runtimeTestState.browserWindows),
+    getFocusedWindow: vi.fn(() => null),
+  }),
   shell: {
     openExternal: vi.fn(),
   },
@@ -325,12 +329,27 @@ describe("initPluginRuntime partition policy", () => {
       | undefined;
     expect(onEnable).toBeDefined();
 
+    // onEnable must also broadcast the runtime-updated signal to every live
+    // window (destroyed ones skipped) so renderers remount plugin webviews
+    // with the fresh runtimeRevision.
+    const liveSend = vi.fn();
+    const destroyedSend = vi.fn();
+    runtimeTestState.browserWindows = [
+      { isDestroyed: () => false, webContents: { send: liveSend } },
+      { isDestroyed: () => true, webContents: { send: destroyedSend } },
+    ];
+
     onEnable!("managed-plugin");
 
     expect(installPolicy).toHaveBeenCalledWith(
       pluginPartitionName("managed-plugin"),
       { pluginRoot: "/tmp/lvis-test/plugins/managed-plugin" },
     );
+    expect(liveSend).toHaveBeenCalledWith("lvis:plugins:runtime-updated", {
+      pluginId: "managed-plugin",
+    });
+    expect(destroyedSend).not.toHaveBeenCalled();
+    runtimeTestState.browserWindows = [];
   });
 });
 

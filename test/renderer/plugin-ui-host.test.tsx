@@ -147,6 +147,33 @@ describe("PluginUiHostView — webview attach flow", () => {
     expect(registerPluginWebview).toHaveBeenCalledTimes(1);
   });
 
+  it("remounts the webview when the plugin runtime revision changes", () => {
+    const registerPluginWebview = vi.fn().mockResolvedValue({ ok: true });
+    vi.stubGlobal("lvisApi", {
+      pluginShellUrl: SHELL_URL,
+      pluginPreloadUrl: PRELOAD_URL,
+      registerPluginWebview,
+    });
+    const container = document.createElement("div");
+    document.body.appendChild(container);
+    const root = createRoot(container);
+    activeRoot = root;
+
+    act(() => {
+      root.render(<PluginUiHostView view={{ ...VIEW, runtimeRevision: 1 }} />);
+    });
+    const firstWebview = container.querySelector("webview");
+    expect(firstWebview).not.toBeNull();
+
+    act(() => {
+      root.render(<PluginUiHostView view={{ ...VIEW, runtimeRevision: 2 }} />);
+    });
+    const secondWebview = container.querySelector("webview");
+
+    expect(secondWebview).not.toBeNull();
+    expect(secondWebview).not.toBe(firstWebview);
+  });
+
   it("shows error text and removes webview when registration returns ok=false", async () => {
     const registerPluginWebview = vi.fn().mockResolvedValue({ ok: false, error: "unknown-plugin-id" });
     vi.stubGlobal("lvisApi", {
