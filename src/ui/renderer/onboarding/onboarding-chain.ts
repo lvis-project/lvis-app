@@ -132,13 +132,6 @@ export type OnboardingChainEvent =
   | { type: "tour-skip" }
   | { type: "plugins-close" }
   /**
-   * Emergency / external "collapse the rest of the chain to done" event,
-   * honored regardless of the current stage (unlike the per-stage skip
-   * events). Retained as a generic escape hatch for any surface that needs
-   * to unconditionally finish the chain.
-   */
-  | { type: "force-finish" }
-  /**
    * 2026-05-20 — Settings → 로그아웃. 모든 인증 상태를 초기화한 뒤
    * 첫 부팅 화면(ScenarioShowcase) 으로 복귀하기 위한 reducer event.
    * 모든 stage → `idle` 로 collapse 한다. 다음 useEffect 의 boot probe
@@ -161,7 +154,6 @@ export function nextOnboardingStage(
   stage: OnboardingChainStage,
   event: OnboardingChainEvent,
 ): OnboardingChainStage {
-  if (event.type === "force-finish") return "done";
   if (event.type === "logout-reset") return "idle";
   switch (stage) {
     case "idle":
@@ -252,19 +244,3 @@ export function onboardingChainReducer(
   }
   return { stage, selectedScenarioId, memorySeed };
 }
-
-/**
- * Convenience predicate set — keeps App.tsx JSX free of
- * `state.stage === "..."` litter and makes intent obvious at the call
- * site.
- */
-export const onboardingChainHelpers = {
-  isShowcase: (s: OnboardingChainStage) => s === "showcase",
-  isLogin: (s: OnboardingChainStage) => s === "login",
-  isMemory: (s: OnboardingChainStage) => s === "memory",
-  isPersonalizedWelcome: (s: OnboardingChainStage) =>
-    s === "personalized_welcome",
-  isTour: (s: OnboardingChainStage) => s === "tour",
-  isPlugins: (s: OnboardingChainStage) => s === "plugins",
-  isDone: (s: OnboardingChainStage) => s === "done",
-} as const;

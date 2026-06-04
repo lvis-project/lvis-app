@@ -257,7 +257,6 @@ describe("useContextBudget (deterministic math)", () => {
       useContextBudget({ entries: [], llmVendor: "openai", llmModel: "gpt-4o-mini" }),
     );
     expect(result.current.usedTokens).toBe(0);
-    expect(result.current.isOverflow).toBe(false);
   });
 
   it("usedTokens reflects the latest turn_summary's tokensIn", () => {

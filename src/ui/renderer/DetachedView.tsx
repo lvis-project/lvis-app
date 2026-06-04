@@ -5,7 +5,7 @@
  * Renders a minimal shell: the B1 CustomTitleBar + the actual content view.
  *
  * Supported viewKeys:
- *   "reminders", "routines", "memory", "starred",
+ *   "routines", "memory", "starred",
  *   "plugin:<pluginId>:<extensionId>"
  *
  * The snap-edge highlight (2px accent border on the main window) is handled
@@ -84,7 +84,7 @@ function DetachedContent({ viewKey }: ContentProps) {
     }
   }, [viewKey, refreshViews]);
 
-  if (viewKey === "reminders" || viewKey === "routines") {
+  if (viewKey === "routines") {
     return <RoutinePanel api={api} />;
   }
 

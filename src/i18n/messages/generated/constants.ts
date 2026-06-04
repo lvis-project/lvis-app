@@ -1,11 +1,5 @@
 // AUTO-GENERATED — i18n migration. Source: src/ui/renderer/constants.ts. Do not edit by hand.
 export const en = {
-  // SOURCE_LABEL
-  "constants.sourceLabelEmail": "Mail",
-  "constants.sourceLabelMeeting": "Meeting",
-  "constants.sourceLabelCalendar": "Calendar",
-  "constants.sourceLabelManual": "Manual",
-
   // SOURCE_BADGE
   "constants.sourceBadgeBuiltin": "Built-in",
   "constants.sourceBadgePlugin": "Plugin",
@@ -25,12 +19,6 @@ export const en = {
   "constants.execModeAllowDesc": "Tools outside hard blocks are auto-allowed; access outside allowed directories requires separate approval",
 } as const;
 export const ko: Record<keyof typeof en, string> = {
-  // SOURCE_LABEL
-  "constants.sourceLabelEmail": "메일",
-  "constants.sourceLabelMeeting": "미팅",
-  "constants.sourceLabelCalendar": "일정",
-  "constants.sourceLabelManual": "직접",
-
   // SOURCE_BADGE
   "constants.sourceBadgeBuiltin": "내장",
   "constants.sourceBadgePlugin": "플러그인",
