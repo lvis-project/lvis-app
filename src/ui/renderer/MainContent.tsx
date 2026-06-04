@@ -168,7 +168,7 @@ export function MainContent(props: MainContentProps): ReactNode {
     );
   }
 
-  if (activeView === "reminders" || activeView === "routines") {
+  if (activeView === "routines") {
     return (
       <MainPaneShell>
         <RoutinePanel
