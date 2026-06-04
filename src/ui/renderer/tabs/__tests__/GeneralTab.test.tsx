@@ -17,7 +17,6 @@ import { makeMockLvisApi } from "../../../../../test/renderer/mock-lvis-api.js";
 const GENERAL_SETTINGS = {
   llm: { authMode: "manual", provider: "openai", vendors: {}, streamSmoothing: "none", fallbackChain: [] },
   chat: { systemPrompt: "", autoCompact: true },
-  roles: { presets: [] },
   webSearch: { provider: "none" },
   features: {},
 };

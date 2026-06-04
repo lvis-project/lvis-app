@@ -324,7 +324,6 @@ describe("useStatusBar — vendor producer", () => {
         llm: fakeLlmSettings({ provider: "openai", model: "gpt-5.4" }),
         chat: { systemPrompt: "", autoCompact: false },
         webSearch: { provider: "none" },
-        roles: { presets: [] },
       })),
       openSettingsWindow: vi.fn(async () => ({ ok: true as const, windowId: 1 })),
     });
@@ -348,7 +347,6 @@ describe("useStatusBar — vendor producer", () => {
         llm: fakeLlmSettings({ provider: "openai", model: "gpt-5.4" }),
         chat: { systemPrompt: "", autoCompact: false },
         webSearch: { provider: "none" },
-        roles: { presets: [] },
       })),
       onSettingsUpdated: vi.fn((h) => {
         capturedHandler = h as (s: unknown) => void;
@@ -369,7 +367,6 @@ describe("useStatusBar — vendor producer", () => {
         llm: fakeLlmSettings({ provider: "claude", model: "claude-sonnet-4-6" }),
         chat: { systemPrompt: "", autoCompact: false },
         webSearch: { provider: "none" },
-        roles: { presets: [] },
       });
     });
 
@@ -388,7 +385,6 @@ describe("useStatusBar — vendor producer", () => {
         llm: fakeLlmSettings({ provider: "claude", model: "claude-sonnet-4-6" }),
         chat: { systemPrompt: "", autoCompact: false },
         webSearch: { provider: "none" },
-        roles: { presets: [] },
       })),
       openSettingsWindow,
     });
@@ -416,7 +412,6 @@ describe("useStatusBar — combined health producer", () => {
         llm: fakeLlmSettings({ provider: "openai", model: "gpt-5.4" }),
         chat: { systemPrompt: "", autoCompact: false },
         webSearch: { provider: "none" },
-        roles: { presets: [] },
       })),
       pingAiProvider: vi.fn(async () => ({
         configured: true as const,
@@ -577,7 +572,6 @@ describe("useStatusBar — combined health producer", () => {
         marketplace: { backend: "disabled" },
         chat: { systemPrompt: "", autoCompact: false },
         webSearch: { provider: "none" },
-        roles: { presets: [] },
       };
       for (const handler of settingsHandlers) handler(nextSettings);
     });

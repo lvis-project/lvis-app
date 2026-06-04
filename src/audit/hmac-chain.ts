@@ -34,7 +34,7 @@ import {
   writeFileSync,
   chmodSync,
 } from "node:fs";
-import { join, dirname } from "node:path";
+import { join } from "node:path";
 import { lvisHome } from "../shared/lvis-home.js";
 
 export const GENESIS_MARKER = "genesis";
@@ -430,15 +430,4 @@ export function filterPermissionAuditLines(lines: string[]): string[] {
       return false;
     }
   });
-}
-
-/**
- * Make sure the parent directory of a path exists with mode 0o700.
- * Used by the audit-logger when bootstrapping a fresh `.lvis/audit/`.
- */
-export function ensureSecureDir(path: string): void {
-  const dir = dirname(path);
-  if (!existsSync(dir)) {
-    mkdirSync(dir, { recursive: true, mode: 0o700 });
-  }
 }

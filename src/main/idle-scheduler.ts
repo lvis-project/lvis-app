@@ -163,7 +163,6 @@ export class IdleSchedulerService {
   private processing = false;
   private powerSubscribed = false;
   private readonly listeners: Array<{ event: string; handler: (...args: unknown[]) => void }> = [];
-  private stateChangeListener: IdleStateChangeListener | null = null;
   private readonly stateChangeListeners = new Set<IdleStateChangeListener>();
 
   // 파라미터 (기본값 확정)
@@ -274,15 +273,6 @@ export class IdleSchedulerService {
 
   getState(): IdleState {
     return this.state;
-  }
-
-  /**
-   * Register a late-bound state transition listener. Only one
-   * listener is supported (boot.ts owns it); repeated calls overwrite.
-   * Pass `null` to detach.
-   */
-  setStateChangeListener(listener: IdleStateChangeListener | null): void {
-    this.stateChangeListener = listener;
   }
 
   addStateChangeListener(listener: IdleStateChangeListener): () => void {
@@ -427,13 +417,9 @@ export class IdleSchedulerService {
     this.state = newState;
     this.logger(`[idle-scheduler] ${old} → ${newState} (${reason})`);
 
-    // Notify listener (boot.ts wires the RoutineEngine handoff here).
+    // Notify listeners (boot.ts wires the RoutineEngine handoff here).
     // Swallow listener errors — scheduler must never throw.
-    const listeners = [
-      ...(this.stateChangeListener ? [this.stateChangeListener] : []),
-      ...this.stateChangeListeners,
-    ];
-    for (const listener of listeners) {
+    for (const listener of this.stateChangeListeners) {
       try {
         listener(newState, old, reason);
       } catch (err) {

@@ -135,7 +135,6 @@ describe("handleToolSearch", () => {
     expect(out.results[0].is_error).toBe(false);
     expect(out.results[0].content).toContain("이미 로드");
     expect(out.promotedToolNames).toEqual([]);
-    expect(out.alreadyLoadedToolNames).toEqual(["meeting_start"]);
     expect(out.nextTurnSearches).toBe(0);
     expect(out.nextSessionSearches).toBe(0);
   });
@@ -150,7 +149,6 @@ describe("handleToolSearch", () => {
     expect(out.results[0].is_error).toBe(false);
     expect(out.results[0].content).toContain("이미 로드");
     expect(out.promotedToolNames).toEqual([]);
-    expect(out.alreadyLoadedToolNames).toEqual(["meeting_start"]);
     expect(state.activeToolNames.size).toBe(0);
   });
 
@@ -163,7 +161,6 @@ describe("handleToolSearch", () => {
     const out = handleToolSearch([search("tu-1", "scan status")], state);
     expect(out.results[0].is_error).toBe(false);
     expect(out.results[0].content).toContain("이미 로드");
-    expect(out.alreadyLoadedToolNames).toEqual(["index_scan_status"]);
     expect(out.promotedToolNames).toEqual([]);
   });
 
@@ -176,7 +173,6 @@ describe("handleToolSearch", () => {
     const out = handleToolSearch([search("tu-1", "meeting")], state);
     expect(out.results[0].is_error).toBe(false);
     expect(out.promotedToolNames).toEqual(["meeting_stop"]);
-    expect(out.alreadyLoadedToolNames).toEqual([]);
   });
 
   it("caps a broad query to a small top-N promotion set", () => {

@@ -69,7 +69,7 @@ describe("(a) primary succeeds — no fallback", () => {
     ]));
 
     const events = await collect(
-      streamWithFallback(primary, BASE_PARAMS, CHAIN, getApiKey, undefined, factorySpy),
+      streamWithFallback(primary, BASE_PARAMS, CHAIN, getApiKey, factorySpy),
     );
 
     expect(events).toHaveLength(2);
@@ -93,7 +93,7 @@ describe("(a) primary succeeds — no fallback", () => {
     ]));
 
     const pending = collect(
-      streamWithFallback(primary, BASE_PARAMS, CHAIN, getApiKey, undefined, factorySpy),
+      streamWithFallback(primary, BASE_PARAMS, CHAIN, getApiKey, factorySpy),
     );
     await vi.advanceTimersByTimeAsync(1_000);
 
@@ -124,7 +124,7 @@ describe("(b) primary transient error → fallback succeeds", () => {
     const warnSpy = vi.spyOn(console, "warn").mockImplementation(() => {});
 
     const pending = collect(
-      streamWithFallback(primary, BASE_PARAMS, CHAIN, getApiKey, undefined, factory),
+      streamWithFallback(primary, BASE_PARAMS, CHAIN, getApiKey, factory),
     );
     await vi.advanceTimersByTimeAsync(5_000);
     const events = await pending;
@@ -146,7 +146,7 @@ describe("(b) primary transient error → fallback succeeds", () => {
     const factory: ProviderFactory = vi.fn(() => fallbackProvider);
 
     const pending = collect(
-      streamWithFallback(primary, BASE_PARAMS, CHAIN, getApiKey, undefined, factory),
+      streamWithFallback(primary, BASE_PARAMS, CHAIN, getApiKey, factory),
     );
     await vi.advanceTimersByTimeAsync(5_000);
     const events = await pending;
@@ -168,7 +168,7 @@ describe("(b) primary transient error → fallback succeeds", () => {
     const factory: ProviderFactory = vi.fn(() => fallbackProvider);
 
     const pending = collect(
-      streamWithFallback(primary, BASE_PARAMS, CHAIN, getApiKey, undefined, factory, {
+      streamWithFallback(primary, BASE_PARAMS, CHAIN, getApiKey, factory, {
         onStatus: (status) => statuses.push(status),
       }),
     );
@@ -207,7 +207,7 @@ describe("(b) primary transient error → fallback succeeds", () => {
       baseUrl: "https://example.openai.azure.com/openai/deployments/gpt/",
     }];
 
-    const pending = collect(streamWithFallback(primary, BASE_PARAMS, chain, getApiKey, undefined, factory));
+    const pending = collect(streamWithFallback(primary, BASE_PARAMS, chain, getApiKey, factory));
     await vi.advanceTimersByTimeAsync(5_000);
     const events = await pending;
 
@@ -231,7 +231,7 @@ describe("(b) primary transient error → fallback succeeds", () => {
     };
     const fallbackProvider = makeProvider("openai", GOOD_EVENTS);
     const factory: ProviderFactory = vi.fn(() => fallbackProvider);
-    const provider = new FallbackProvider(primary, CHAIN, getApiKey, undefined, factory);
+    const provider = new FallbackProvider(primary, CHAIN, getApiKey, factory);
 
     const scoped = collect(provider.streamTurnWithCallbacks(BASE_PARAMS, {
       onStatus: (status) => statuses.push(status),
@@ -262,7 +262,7 @@ describe("(c) auth error → no fallback, re-throws", () => {
     const factory: ProviderFactory = vi.fn(() => makeProvider("openai", GOOD_EVENTS));
 
     const events = await collect(
-      streamWithFallback(primary, BASE_PARAMS, CHAIN, getApiKey, undefined, factory),
+      streamWithFallback(primary, BASE_PARAMS, CHAIN, getApiKey, factory),
     );
 
     // Non-retryable error event is yielded directly — factory never called.
@@ -276,7 +276,7 @@ describe("(c) auth error → no fallback, re-throws", () => {
     const factory: ProviderFactory = vi.fn(() => makeProvider("openai", GOOD_EVENTS));
 
     await expect(
-      collect(streamWithFallback(primary, BASE_PARAMS, CHAIN, getApiKey, undefined, factory)),
+      collect(streamWithFallback(primary, BASE_PARAMS, CHAIN, getApiKey, factory)),
     ).rejects.toThrow("401 unauthorized");
 
     expect(factory).not.toHaveBeenCalled();
@@ -290,7 +290,7 @@ describe("(c) auth error → no fallback, re-throws", () => {
     const factory: ProviderFactory = vi.fn(() => makeProvider("openai", GOOD_EVENTS));
 
     await expect(
-      collect(streamWithFallback(primary, BASE_PARAMS, CHAIN, getApiKey, undefined, factory)),
+      collect(streamWithFallback(primary, BASE_PARAMS, CHAIN, getApiKey, factory)),
     ).rejects.toThrow("baseUrl is required");
 
     expect(factory).not.toHaveBeenCalled();
@@ -306,7 +306,7 @@ describe("(d) AbortError → no fallback, re-throws (user cancel sacred)", () =>
     const factory: ProviderFactory = vi.fn(() => makeProvider("openai", GOOD_EVENTS));
 
     await expect(
-      collect(streamWithFallback(primary, BASE_PARAMS, CHAIN, getApiKey, undefined, factory)),
+      collect(streamWithFallback(primary, BASE_PARAMS, CHAIN, getApiKey, factory)),
     ).rejects.toMatchObject({ name: "AbortError" });
 
     expect(factory).not.toHaveBeenCalled();
@@ -326,7 +326,7 @@ describe("(d) AbortError → no fallback, re-throws (user cancel sacred)", () =>
     const params = { ...BASE_PARAMS, abortSignal: controller.signal };
 
     const pending = expect(
-      collect(streamWithFallback(primary, params, CHAIN, getApiKey, undefined, factory)),
+      collect(streamWithFallback(primary, params, CHAIN, getApiKey, factory)),
     ).rejects.toMatchObject({ name: "AbortError" });
 
     await vi.advanceTimersByTimeAsync(1_200);
@@ -359,7 +359,7 @@ describe("(e) all chain exhausted → throws last error", () => {
     const factory: ProviderFactory = vi.fn(() => alsoFailing);
 
     const pending = expect(
-      collect(streamWithFallback(primary, BASE_PARAMS, CHAIN, getApiKey, undefined, factory)),
+      collect(streamWithFallback(primary, BASE_PARAMS, CHAIN, getApiKey, factory)),
     ).rejects.toThrow("second failure");
     await vi.advanceTimersByTimeAsync(10_000);
     await pending;

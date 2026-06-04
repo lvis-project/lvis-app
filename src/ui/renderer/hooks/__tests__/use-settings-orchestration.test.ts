@@ -20,7 +20,6 @@ function makeSettings(): AppSettings {
       fallbackChain: [],
     },
     chat: { systemPrompt: "", autoCompact: true },
-    roles: { presets: [] },
     webSearch: { provider: "duckduckgo" },
     privacy: { piiRedactEnabled: false },
     marketplace: {

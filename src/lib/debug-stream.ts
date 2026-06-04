@@ -47,13 +47,3 @@ export function debugLog(scope: string, ...args: unknown[]): void {
   // eslint-disable-next-line no-console
   console.log(`[lvis-debug:${scope}]`, ...args);
 }
-
-/**
- * Shorthand for object-style logging when callers want a tagged payload
- * without composing a `{ tag: ... }` object themselves.
- */
-export function debugTag(scope: string, tag: string, payload?: Record<string, unknown>): void {
-  if (!isDebugStreamEnabled()) return;
-  // eslint-disable-next-line no-console
-  console.log(`[lvis-debug:${scope}]`, tag, payload ?? {});
-}

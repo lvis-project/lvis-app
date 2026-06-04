@@ -410,25 +410,3 @@ function backoffMs(attempt: number): number {
 function sleep(ms: number): Promise<void> {
   return new Promise((r) => setTimeout(r, ms));
 }
-
-/**
- * Feature flag helper — centralised so boot code + tests stay in sync.
- * When `true`, the marketplace-direct path is preferred over npm.
- * Default: `false` (P1 rollout — npm is default, marketplace is opt-in).
- */
-export function isMarketplaceDirectPreferred(env: NodeJS.ProcessEnv = process.env): boolean {
-  const v = env.LVIS_MARKETPLACE_PREFER_DIRECT;
-  if (!v) return false;
-  return /^(1|true|yes|on)$/i.test(v.trim());
-}
-
-/**
- * Feature flag — allow falling back to npm when marketplace-direct fails.
- * Default: `true` during P1. Flip to `false` in P2 after marketplace
- * reliability is proven by telemetry.
- */
-export function isNpmFallbackEnabled(env: NodeJS.ProcessEnv = process.env): boolean {
-  const v = env.MARKETPLACE_NPM_FALLBACK;
-  if (v === undefined) return true;
-  return /^(1|true|yes|on)$/i.test(v.trim());
-}
