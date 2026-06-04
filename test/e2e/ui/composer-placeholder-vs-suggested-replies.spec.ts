@@ -21,7 +21,7 @@ import { test, expect } from './fixtures';
  * here — that's the unit test's job. This spec is a regression smoke that
  * the placeholder hasn't simply been hardcoded back to its old form.
  */
-test('composer placeholder renders one of the known hints at rest', async ({ mainWindow }) => {
+test('composer placeholder renders one of the known hints at rest', async ({ mainWindow, t }) => {
   const textarea = mainWindow.locator('textarea').first();
   await textarea.waitFor({ state: 'visible', timeout: 10_000 });
 
@@ -30,6 +30,17 @@ test('composer placeholder renders one of the known hints at rest', async ({ mai
   // At rest the placeholder must come from one of the three non-chip
   // branches (API-key, streaming, default). An empty string would mean the
   // chip-active branch fired without any LLM signal — that's the
-  // regression we're guarding against.
-  expect(placeholder).toMatch(/질문 입력|API 키|메시지 큐/);
+  // regression we're guarding against. Match against the catalog values for
+  // those three branches so the assertion holds in any locale.
+  const escapeRegExp = (value: string): string => value.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+  const knownHints = new RegExp(
+    [
+      t('composerPlaceholder.defaultHint'),
+      t('composerPlaceholder.apiKeyMissing'),
+      t('composerPlaceholder.streamingHint'),
+    ]
+      .map(escapeRegExp)
+      .join('|'),
+  );
+  expect(placeholder).toMatch(knownHints);
 });

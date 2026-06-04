@@ -43,10 +43,27 @@ import {
   teardownSeededElectron,
   type SeededElectronContext,
 } from "./seeded-electron";
+import { makeTestT } from "./i18n";
 
 // ---------------------------------------------------------------------------
 // Helpers
 // ---------------------------------------------------------------------------
+
+// Locale-agnostic catalog binding. `launchSeededElectron` seeds the ko locale
+// (buildE2eBaseSettings default), so bind the resolver to ko — the assertions
+// below match against the catalog value rather than a hard-coded Korean literal,
+// so the suite can flip the seeded locale without rewriting them. (#1212 follow-up.)
+const t = makeTestT("ko");
+
+// The TPM / context banner catalog values carry a `{pct}` placeholder
+// (e.g. "분당 한도(TPM) {pct}% — {used} / {limit}"). Tests match only the static
+// label prefix that precedes the dynamic percentage, so slice it off the
+// rendered template. Escaped into a RegExp for the matchers that also assert a
+// dynamic percentage.
+const TPM_LABEL = t("chatView.tpmUsagePercent").split("{pct}")[0].trim();
+const CONTEXT_LABEL = t("chatView.contextUsagePercent").split("{pct}")[0].trim();
+const escapeRegExp = (s: string): string => s.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+const TPM_LABEL_RE = escapeRegExp(TPM_LABEL);
 
 function makeHistoryRows(tokensIn: number): Array<Record<string, unknown>> {
   const now = Date.now();
@@ -112,19 +129,19 @@ test.describe("TPM warning / destructive banner", () => {
 
       // tpmPct = 160_000 / 200_000 = 0.80 → warning banner (bg-warning/15)
       // Span text: "분당 한도(TPM) 80% — 160,000 / 200,000"
-      const tpmText = page.locator("span.font-semibold").filter({ hasText: /분당 한도\(TPM\)/ });
+      const tpmText = page.locator("span.font-semibold").filter({ hasText: TPM_LABEL });
       await expect(tpmText).toBeVisible({ timeout: 10_000 });
 
       // Verify text shows 80%
       const textContent = await tpmText.first().textContent();
-      expect(textContent).toMatch(/분당 한도\(TPM\) 80%/);
+      expect(textContent).toMatch(new RegExp(`${TPM_LABEL_RE} 80%`));
 
       // Warning banner parent must use bg-warning/15 class, not destructive
-      const warningDiv = page.locator("div.bg-warning\\/15").filter({ hasText: /분당 한도\(TPM\)/ });
+      const warningDiv = page.locator("div.bg-warning\\/15").filter({ hasText: TPM_LABEL });
       await expect(warningDiv).toBeVisible({ timeout: 5_000 });
 
       // Destructive-styled TPM div must NOT be present
-      const destructiveDiv = page.locator("div.bg-destructive\\/10").filter({ hasText: /분당 한도\(TPM\)/ });
+      const destructiveDiv = page.locator("div.bg-destructive\\/10").filter({ hasText: TPM_LABEL });
       await expect(destructiveDiv).toHaveCount(0);
     } finally {
       await teardownSeededElectron(ctx);
@@ -147,16 +164,18 @@ test.describe("TPM warning / destructive banner", () => {
 
       // tpmPct = 200_000 / 200_000 = 1.00 ≥ 0.95 → destructive banner
       // Text: "분당 한도(TPM) 100% — …"
-      const tpmText = page.locator("span.font-semibold").filter({ hasText: /분당 한도\(TPM\)/ });
+      const tpmText = page.locator("span.font-semibold").filter({ hasText: TPM_LABEL });
       await expect(tpmText).toBeVisible({ timeout: 10_000 });
 
       const textContent = await tpmText.first().textContent();
       // pct = 100% → "100%"
-      expect(textContent).toMatch(/분당 한도\(TPM\)\s+1\d\d%|분당 한도\(TPM\)\s+9[5-9]%/);
+      expect(textContent).toMatch(
+        new RegExp(`${TPM_LABEL_RE}\\s+1\\d\\d%|${TPM_LABEL_RE}\\s+9[5-9]%`),
+      );
 
       // Banner parent div must have bg-destructive/10 class (not bg-warning)
       // We verify via the DOM class presence
-      const bannerDiv = page.locator("div.bg-destructive\\/10").filter({ hasText: /분당 한도\(TPM\)/ });
+      const bannerDiv = page.locator("div.bg-destructive\\/10").filter({ hasText: TPM_LABEL });
       await expect(bannerDiv).toBeVisible({ timeout: 5_000 });
 
       // Send button: no API key configured → disabled (hasApiKey===false)
@@ -192,7 +211,7 @@ test.describe("TPM warning / destructive banner", () => {
       // Wait long enough for any banner to appear if it would
       await page.waitForTimeout(2_000);
 
-      const tpmBanners = page.locator("span.font-semibold").filter({ hasText: /분당 한도\(TPM\)/ });
+      const tpmBanners = page.locator("span.font-semibold").filter({ hasText: TPM_LABEL });
       await expect(tpmBanners).toHaveCount(0);
     } finally {
       await teardownSeededElectron(ctx);
@@ -215,7 +234,7 @@ test.describe("TPM warning / destructive banner", () => {
       test.skip(!booted, "Composer not visible — chat surface not booted.");
 
       // Wait for the banner to appear
-      const tpmText = page.locator("span.font-semibold").filter({ hasText: /분당 한도\(TPM\)/ });
+      const tpmText = page.locator("span.font-semibold").filter({ hasText: TPM_LABEL });
       await expect(tpmText).toBeVisible({ timeout: 10_000 });
 
       // Dark theme screenshot
@@ -260,10 +279,10 @@ test.describe("TPM warning / destructive banner", () => {
       test.skip(!booted, "Composer not visible — chat surface not booted.");
 
       // Both banners must be present
-      const tpmBanner = page.locator("span.font-semibold").filter({ hasText: /분당 한도\(TPM\)/ });
+      const tpmBanner = page.locator("span.font-semibold").filter({ hasText: TPM_LABEL });
       await expect(tpmBanner).toBeVisible({ timeout: 10_000 });
 
-      const contextBanner = page.locator("span.font-semibold").filter({ hasText: /컨텍스트/ });
+      const contextBanner = page.locator("span.font-semibold").filter({ hasText: CONTEXT_LABEL });
       await expect(contextBanner).toBeVisible({ timeout: 5_000 });
 
       // Layout regression guard: the chat-area root must not overflow horizontally.
