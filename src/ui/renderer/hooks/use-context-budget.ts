@@ -116,7 +116,6 @@ export function useContextBudget(params: {
     usedTokens,
     contextBudget,
     contextOverflowPct,
-    isOverflow: contextOverflowPct >= 1,
     // #900 #1 — undefined for models without registered tpmDefault.
     tpmLimit,
     tpmPct,
