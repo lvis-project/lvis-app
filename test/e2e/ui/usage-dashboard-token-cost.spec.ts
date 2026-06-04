@@ -110,7 +110,13 @@ test.describe("usage dashboard token cost e2e", () => {
         await expect(unknownRow).toContainText(
           t("usageDashboard.unknownCostTurns", { base: "$0", turns: "1" }),
         );
-        await expect(settingsWindow.getByText("미정 포함").first()).toBeVisible();
+        // unknownCostIncluded is "{base} + 미정 포함"; assert the static suffix
+        // (after the dynamic {base}) via the catalog rather than a literal.
+        const unknownIncludedSuffix = t("usageDashboard.unknownCostIncluded", { base: "" })
+          .split("+")
+          .pop()!
+          .trim();
+        await expect(settingsWindow.getByText(unknownIncludedSuffix).first()).toBeVisible();
 
         await expect(settingsWindow.getByText("claude-sonnet-4-6")).toBeVisible();
         await expect(settingsWindow.getByText("gpt-5.4-mini")).toBeVisible();
