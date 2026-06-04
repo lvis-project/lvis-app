@@ -39,6 +39,7 @@ export const en = {
   "be_mcpGovernance.apiKeyRequired": "API key required (server: {serverId})",
   "be_mcpGovernance.ssoRequired": "SSO authentication required (server: {serverId})",
   "be_mcpGovernance.oauthRequired": "OAuth authentication required (server: {serverId})",
+  "be_mcpGovernance.mtlsUnsupported": "mTLS (client certificate) authentication is required but is not supported (server: {serverId})",
 } as const;
 export const ko: Record<keyof typeof en, string> = {
   "be_mcpGovernance.policyNotLoaded": "거버넌스 정책이 로드되지 않았습니다.",
@@ -80,4 +81,5 @@ export const ko: Record<keyof typeof en, string> = {
   "be_mcpGovernance.apiKeyRequired": "API 키가 필요합니다 (서버: {serverId})",
   "be_mcpGovernance.ssoRequired": "SSO 인증이 필요합니다 (서버: {serverId})",
   "be_mcpGovernance.oauthRequired": "OAuth 인증이 필요합니다 (서버: {serverId})",
+  "be_mcpGovernance.mtlsUnsupported": "mTLS(클라이언트 인증서) 인증이 필요하지만 지원되지 않습니다 (서버: {serverId})",
 };

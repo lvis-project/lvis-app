@@ -579,6 +579,14 @@ export class McpGovernance {
       if (approval.requiredAuth === "oauth" && config.auth !== "oauth") {
         return { valid: false, reason: t("be_mcpGovernance.oauthRequired", { serverId: config.id }), layer: 2 };
       }
+      if (approval.requiredAuth === "mtls") {
+        // mTLS (client-certificate) auth is part of the requiredAuth union but
+        // has no client-cert validation implemented anywhere. Fail CLOSED: a
+        // server demanding mtls must never satisfy connection-security
+        // validation. Previously this case fell through to `valid: true`
+        // (fail-OPEN) because only api-key/sso/oauth were handled.
+        return { valid: false, reason: t("be_mcpGovernance.mtlsUnsupported", { serverId: config.id }), layer: 2 };
+      }
     }
 
     return { valid: true };
