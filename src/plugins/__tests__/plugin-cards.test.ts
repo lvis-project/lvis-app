@@ -140,6 +140,42 @@ describe("PluginRuntime.listPluginCards — Phase 1.5 Option C catalog", () => {
     ]);
   });
 
+  it("adds a runtime revision cache key to loaded plugin UI entry URLs", async () => {
+    const manifestA = writePlugin(tmp, "example-indexer", {
+      name: "Local Indexer",
+      tools: ["index_scan"],
+      ui: [
+        {
+          id: "local-indexer-control",
+          slot: "sidebar",
+          kind: "embedded-module",
+          title: "Local Indexer",
+          entry: "dist/ui/indexer-control.js",
+          exportName: "PluginUi",
+        },
+      ],
+    });
+    mkdirSync(join(tmp, "example-indexer", "dist", "ui"), { recursive: true });
+    writeFileSync(join(tmp, "example-indexer", "dist", "ui", "indexer-control.js"), "export default function mount() {}\n");
+
+    const runtime = new PluginRuntime({ hostRoot: tmp, manifestPaths: [manifestA] });
+    await runtime.load();
+
+    const first = runtime.listUiExtensions()[0];
+    expect(first.runtimeRevision).toBeGreaterThan(0);
+    expect(first.entryUrl).toBeTruthy();
+    const firstUrl = new URL(first.entryUrl!);
+    expect(firstUrl.searchParams.get("lvisPluginVersion")).toBe("1.0.0");
+    expect(firstUrl.searchParams.get("lvisRuntimeRevision")).toBe(String(first.runtimeRevision));
+
+    await runtime.reloadPlugin("example-indexer");
+
+    const second = runtime.listUiExtensions()[0];
+    expect(second.runtimeRevision).toBeGreaterThan(first.runtimeRevision!);
+    expect(second.entryUrl).not.toBe(first.entryUrl);
+    expect(new URL(second.entryUrl!).searchParams.get("lvisRuntimeRevision")).toBe(String(second.runtimeRevision));
+  });
+
   it("uses manifest description when toolSchemas absent", async () => {
     const manifestA = writePlugin(tmp, "example-plain", {
       name: "Plain",

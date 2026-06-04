@@ -910,6 +910,11 @@ const api = {
     ipcRenderer.on("lvis:plugins:enabled-changed", listener);
     return () => ipcRenderer.removeListener("lvis:plugins:enabled-changed", listener);
   },
+  onPluginRuntimeUpdated: (handler: (payload: { pluginId: string }) => void) => {
+    const listener = (_event: unknown, payload: Parameters<typeof handler>[0]) => handler(payload);
+    ipcRenderer.on("lvis:plugins:runtime-updated", listener);
+    return () => ipcRenderer.removeListener("lvis:plugins:runtime-updated", listener);
+  },
   onPersonaPromptsUpdated: (handler: () => void) => {
     const listener = () => handler();
     ipcRenderer.on("lvis:prompts:updated", listener);
