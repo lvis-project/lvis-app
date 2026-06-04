@@ -222,7 +222,6 @@ describe("ConversationLoop onTurnSummary", () => {
       primary,
       [{ provider: "openai", model: "gpt-5.4-mini" }],
       () => "test-key",
-      undefined,
       () => fallback,
     );
     const saveSession = vi.fn(async () => {});
@@ -302,7 +301,6 @@ describe("ConversationLoop onTurnSummary", () => {
       primary,
       [{ provider: "openai", model: "gpt-5.4-mini" }],
       () => "test-key",
-      undefined,
       () => fallback,
     );
     const saveSession = vi.fn(async () => {});

@@ -4,10 +4,21 @@
  * loudly at unit-test time rather than rendering broken demo entries.
  */
 import { describe, it, expect } from "vitest";
-import {
-  DEMO_SCRIPTS,
-  getScriptByScenarioId,
-} from "../scripts-registry.js";
+import { getScriptByScenarioId } from "../scripts-registry.js";
+import type { ScriptedTurn } from "../types.js";
+import meetingSummary from "../scripts/meeting-summary-demo.json" with { type: "json" };
+import docSearch from "../scripts/doc-search-demo.json" with { type: "json" };
+import workAssistant from "../scripts/work-assistant-demo.json" with { type: "json" };
+import multiAgent from "../scripts/multi-agent-demo.json" with { type: "json" };
+
+// Catalog assertions guard the per-scenario JSON contract directly from the
+// fixtures (the production module no longer carries an inert DEMO_SCRIPTS export).
+const DEMO_SCRIPTS: readonly ScriptedTurn[] = [
+  meetingSummary as ScriptedTurn,
+  docSearch as ScriptedTurn,
+  workAssistant as ScriptedTurn,
+  multiAgent as ScriptedTurn,
+];
 
 describe("DEMO_SCRIPTS catalog", () => {
   it("includes the 4 canonical scenario scripts", () => {

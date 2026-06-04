@@ -68,8 +68,6 @@ export interface ToolSearchOutcome {
   remaining: ToolUseBlock[];
   /** promote 에 성공한 tool name 목록 — 호출자가 toolSchemas rebuild 신호로 사용. */
   promotedToolNames: string[];
-  /** tool_search asked for a tool that is already present in provider tools[]. */
-  alreadyLoadedToolNames: string[];
   /** 갱신된 턴 카운터. */
   nextTurnSearches: number;
   /** 갱신된 세션 카운터. */
@@ -172,7 +170,6 @@ export function handleToolSearch(
   const results: ToolSearchOutcome["results"] = [];
   const remaining: ToolUseBlock[] = [];
   const promotedToolNames: string[] = [];
-  const alreadyLoadedToolNames: string[] = [];
   let turnSearches = state.turnSearches;
   let sessionSearches = state.sessionSearches;
 
@@ -218,7 +215,6 @@ export function handleToolSearch(
         (tool) => tool.name.toLowerCase() === normalizedQuery,
       );
       if (exactLoaded) {
-        alreadyLoadedToolNames.push(exactLoaded.name);
         results.push({
           tool_use_id: tu.id,
           content: t("be_toolSearch.alreadyLoaded", { name: exactLoaded.name }),
@@ -231,7 +227,6 @@ export function handleToolSearch(
         if (matches.length === 0) {
           const loadedMatches = matchCatalog(query, loadedCatalog);
           if (loadedMatches.length > 0) {
-            for (const match of loadedMatches) alreadyLoadedToolNames.push(match.name);
             results.push({
               tool_use_id: tu.id,
               content: t("be_toolSearch.alreadyLoadedMultiple", { names: loadedMatches.map((m) => m.name).join(", ") }),
@@ -268,7 +263,6 @@ export function handleToolSearch(
     results,
     remaining,
     promotedToolNames,
-    alreadyLoadedToolNames,
     nextTurnSearches: turnSearches,
     nextSessionSearches: sessionSearches,
   };

@@ -7,9 +7,7 @@
  * 감지 우선순위 (§6.1):
  * 1. 명시적 명령어 (/command)
  * 2. 스킬 키워드 (플러그인 등록)
- * 3. 에이전트 멘션 (@사람)
- * 4. 의도 + 엔티티
- * 5. 일반 대화 (fallback)
+ * 3. 일반 대화 (fallback)
  */
 
 import { parseImportedTriggerEnvelope } from "../shared/overlay-trigger-source.js";
@@ -19,7 +17,6 @@ import { parseImportedTriggerEnvelope } from "../shared/overlay-trigger-source.j
 export type InputClassification =
   | { type: "command"; command: string; args: string }
   | { type: "skill"; keyword: string; skillId: string; pluginId?: string; input: string }
-  | { type: "mention"; target: string; message: string }
   | { type: "general"; input: string };
 
 export interface SkillKeyword {
@@ -135,17 +132,7 @@ export class KeywordEngine {
       }
     }
 
-    // 3. @멘션
-    const mentionMatch = trimmed.match(/^@(\S+)\s+(.+)$/s);
-    if (mentionMatch) {
-      return {
-        type: "mention",
-        target: mentionMatch[1],
-        message: mentionMatch[2].trim(),
-      };
-    }
-
-    // 5. 일반 대화 (fallback)
+    // 3. 일반 대화 (fallback)
     return { type: "general", input: trimmed };
   }
 }

@@ -4,7 +4,6 @@
 import { describe, it, expect } from "vitest";
 import {
   approvalQueueReducer,
-  isApprovalQueueFull,
   DEFAULT_APPROVAL_QUEUE_MAX,
 } from "../approval-queue-reducer.js";
 import type { ApprovalRequest } from "../../permissions/approval-gate.js";
@@ -106,13 +105,6 @@ describe("approvalQueueReducer", () => {
       max: 3,
     });
     expect(state.map((r) => r.id)).toEqual(["b", "c", "e"]);
-  });
-
-  it("D3: isApprovalQueueFull reflects cap state", () => {
-    const full = Array.from({ length: 3 }, (_, i) => makeReq(`r${i}`));
-    expect(isApprovalQueueFull(full, 3)).toBe(true);
-    expect(isApprovalQueueFull(full.slice(0, 2), 3)).toBe(false);
-    expect(isApprovalQueueFull([], 3)).toBe(false);
   });
 
   it("shift 반복 → 순서대로 소진", () => {

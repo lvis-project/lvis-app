@@ -38,7 +38,6 @@ export const ALLOWED_VIEW_KEYS = /^(reminders|routines|memory|starred|plugin:[a-
 
 /** Human-readable window titles for built-in view keys. */
 const BUILTIN_VIEW_LABELS: Record<string, string> = {
-  tasks: "Tasks",
   reminders: "Reminders",
   routines: "Routines",
   memory: "Memory",
