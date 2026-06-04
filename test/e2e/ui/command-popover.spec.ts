@@ -99,7 +99,7 @@ test('command popover: slash command click inserts text and closes popover', asy
   expect(val).toContain('/help');
 });
 
-test('command popover: top ⌘ toolbar button is absent', async ({ mainWindow }) => {
+test('command popover: top ⌘ toolbar button is absent', async ({ mainWindow, t }) => {
   // Wait for the InputActionBar to appear (signals full React boot) before
   // asserting absence — prevents the negative assertion from passing before
   // the UI has had a chance to mount.
@@ -110,6 +110,6 @@ test('command popover: top ⌘ toolbar button is absent', async ({ mainWindow })
   test.skip(!found, 'CommandPopover trigger not found — skipping E2E.');
 
   // Verify the old top Command palette button no longer exists in MainToolbar
-  const oldButton = mainWindow.locator('button[title="명령 팔레트 (Ctrl/Cmd+K)"]');
+  const oldButton = mainWindow.locator(`button[title="${t('commandPopover.ariaLabel')}"]`);
   await expect(oldButton).not.toBeAttached({ timeout: 5_000 });
 });

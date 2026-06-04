@@ -12,7 +12,7 @@ test.use({ seedTogglePlugin: true, seedRepositoryPlugins: false });
  * (disabled) and back to "로드됨" (loaded), and that the model-tool visibility
  * note is scoped to that same plugin.
  */
-test('plugin-config Switch toggles a loaded plugin active/inactive and back', async ({ app, mainWindow }) => {
+test('plugin-config Switch toggles a loaded plugin active/inactive and back', async ({ app, mainWindow, t }) => {
   const settings = await openSettingsWindow(app, mainWindow, 'plugin-config');
   try {
     const anyToggle = settings.locator('[data-testid^="plugin-config:enabled-toggle:"]').first();
@@ -31,18 +31,18 @@ test('plugin-config Switch toggles a loaded plugin active/inactive and back', as
 
     // Initial state: active (loaded), switch checked.
     await expect(toggle).toHaveAttribute('data-state', 'checked');
-    await expect(detailStatus).toHaveText(/로드됨/);
+    await expect(detailStatus).toHaveText(t('pluginConfigTab.statusLoaded'));
 
     // Disable → loadStatus flips to "비활성", tools hidden.
     await toggle.click();
     await expect(toggle).toHaveAttribute('data-state', 'unchecked', { timeout: 15_000 });
-    await expect(detailStatus).toHaveText(/비활성/, { timeout: 15_000 });
+    await expect(detailStatus).toHaveText(t('pluginConfigTab.statusDisabled'), { timeout: 15_000 });
     await expect(hiddenNote).toBeVisible({ timeout: 15_000 });
 
     // Re-enable → loadStatus returns to "로드됨", tools re-exposed.
     await toggle.click();
     await expect(toggle).toHaveAttribute('data-state', 'checked', { timeout: 15_000 });
-    await expect(detailStatus).toHaveText(/로드됨/, { timeout: 15_000 });
+    await expect(detailStatus).toHaveText(t('pluginConfigTab.statusLoaded'), { timeout: 15_000 });
     await expect(hiddenNote).toHaveCount(0);
   } finally {
     await closeSettingsWindow(app, settings).catch(() => {});
