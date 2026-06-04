@@ -1236,14 +1236,11 @@ export function registerPluginsHandlers(deps: IpcDeps): void {
       return { ok: false, error: "entry-url-outside-install-root" };
     }
     const assetEntryUrl = pluginAssetUrlFromRealPath(realRoot, realEntry);
-    let entrySearch = "";
-    try {
-      entrySearch = new URL(entryUrl).search;
-    } catch {
-      entrySearch = "";
-    }
     // Carry the runtime-revision cache-bust query through to the asset URL so
     // the shell's import() gets a fresh ESM cache key after plugin reload.
+    // entryUrl already parsed successfully via fileURLToPath above, so this
+    // URL construction cannot throw.
+    const entrySearch = new URL(entryUrl).search;
     const versionedAssetEntryUrl = entrySearch ? `${assetEntryUrl}${entrySearch}` : assetEntryUrl;
     const binding = { pluginId, entryUrl, assetEntryUrl: versionedAssetEntryUrl };
     pluginWebviewRegistry.set(webContentsId, binding);
