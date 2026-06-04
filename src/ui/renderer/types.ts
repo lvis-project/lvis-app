@@ -153,7 +153,6 @@ export type AppSettings = {
     fallbackChain: Array<{ provider: string; model: string }>;
   };
   chat: { systemPrompt: string; autoCompact: boolean };
-  roles: { presets: RolePreset[] };
   webSearch: { provider: string };
   routine?: Record<string, unknown>;
   privacy?: { piiRedactEnabled: boolean };

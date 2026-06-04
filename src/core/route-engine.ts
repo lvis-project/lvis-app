@@ -8,9 +8,8 @@
  * 1. Governance Policy Check
  * 2. Permission Check
  * 3. Local Skill Match → 플러그인 스킬 매칭
- * 4. Agent Message Routing
- * 5. Marketplace API
- * 6. LLM Fallback → LLM 직접 대화
+ * 4. Marketplace API
+ * 5. LLM Fallback → LLM 직접 대화
  */
 import type { InputClassification } from "./keyword-engine.js";
 import type { ToolRegistry } from "../tools/registry.js";
@@ -20,7 +19,6 @@ import type { ToolRegistry } from "../tools/registry.js";
 export type RouteResult =
   | { route: "command"; command: string; args: string }
   | { route: "skill"; skillId: string; input: string }
-  | { route: "agent-message"; target: string; message: string }
   | { route: "llm"; input: string };
 
 export interface RouteEngineDeps {
@@ -59,13 +57,6 @@ export class RouteEngine {
         // 도구가 없으면 LLM으로 fallback — 스킬 컨텍스트를 포함
         return { route: "llm", input: classification.input };
       }
-
-      case "mention":
-        return {
-          route: "agent-message",
-          target: classification.target,
-          message: classification.message,
-        };
 
       case "general":
         return { route: "llm", input: classification.input };

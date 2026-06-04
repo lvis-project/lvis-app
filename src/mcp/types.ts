@@ -1,10 +1,10 @@
 /**
  * MCP Security Types — §9.5 + §14.2 Governance
  *
- * STRIDE 위협 모델 기반 6-Layer Defense-in-Depth:
+ * STRIDE 위협 모델 기반 Defense-in-Depth:
  *
  * Layer 0: Governance Policy (Pre-installation) — deny-by-default whitelist
- * Layer 1: Installation Validation — checksum, transport, URL 검증
+ * Layer 1: Installation Validation — transport, URL 검증
  * Layer 2: Connection Security — TLS, auth, timeout
  * Layer 3: Capability Restriction — tool namespace, schema validation, shadowing 방지
  * Layer 4: Runtime Permission — PermissionManager 연동, strict mode 기본
@@ -18,8 +18,6 @@ export interface McpGovernancePolicy {
   version: string;
   /** deny-by-default: 명시적 승인 없는 서버는 모두 차단 */
   defaultPolicy: "deny";
-  /** 정책 파일 무결성 검증용 HMAC (향후 RSA 서명) */
-  policySignature?: string;
   /** 승인된 서버 목록 */
   servers: McpServerApproval[];
   /** 전역 규칙 */
@@ -43,8 +41,6 @@ export interface McpServerApproval {
   transport: McpTransport;
   /** stdio: 허용된 실행 명령 (정확한 바이너리 이름) */
   allowedCommands?: string[];
-  /** stdio: 허용된 인수 패턴 */
-  allowedArgs?: string[];
   /** SSE/WebSocket: 허용된 URL (exact match 또는 *.example.com 패턴) */
   allowedUrls?: string[];
 
@@ -84,22 +80,10 @@ export interface McpServerApproval {
   toolPermissionMode: "default" | "strict" | "auto";
 
   // ─── Layer 2: 연결 제한 ────────────────────────
-  /** 응답 최대 크기 (바이트) */
-  maxResponseSizeBytes: number;
   /** 연결 타임아웃 */
   connectionTimeoutMs: number;
   /** 동시 요청 제한 */
   maxConcurrentRequests: number;
-
-  // ─── Data Scope ────────────────────────────────
-  /** 파일 접근 허용 패턴 (stdio transport) */
-  allowedFilePathPatterns?: string[];
-  /** 파일 접근 차단 패턴 */
-  blockedFilePathPatterns?: string[];
-
-  // ─── Layer 1: 무결성 ──────────────────────────
-  /** 바이너리 SHA-256 체크섬 (플랫폼별) */
-  checksums?: Record<string, string>;
 
   /**
    * Admin gate for `allowPrivateNetworks` on the matching per-server config.
@@ -119,10 +103,6 @@ export interface McpGlobalRules {
   blockedUrlPatterns: string[];
   /** 허용 URL 패턴 (allow-list, 빈 배열 = 모두 차단) */
   allowedUrlPatterns: string[];
-  /** 감사 로깅 수준 */
-  auditLevel: "full" | "summary" | "errors-only";
-  /** 킬 스위치 활성화 */
-  killSwitchEnabled: boolean;
   /** 정책 갱신 주기 (밀리초) */
   policyRefreshIntervalMs: number;
   /**

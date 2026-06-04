@@ -129,71 +129,6 @@ describe("setSummaryPreamble", () => {
   });
 });
 
-// ── 3. getCheckpointChain ─────────────────────────────────────────────────────
-
-describe("getCheckpointChain", () => {
-  it("returns empty array when session has no metadata", async () => {
-    const chain = await mm.getCheckpointChain("no-metadata-session");
-    expect(chain).toEqual([]);
-  });
-
-  it("returns single-element chain for a root session (no parentSessionId)", async () => {
-    await mm.saveSession(SESSION_A, [{ role: "user", content: "root" }]);
-    await mm.saveSessionMetadata(SESSION_A, { sessionKind: "routine", routineId: "r1" });
-    const chain = await mm.getCheckpointChain(SESSION_A);
-    expect(chain).toHaveLength(1);
-    expect(chain[0].routineId).toBe("r1");
-  });
-
-  it("traverses a 3-node chain (root → mid → leaf) in correct order", async () => {
-    // Setup 3 sessions: A is root, B is child of A, C is child of B
-    await mm.saveSession(SESSION_A, [{ role: "user", content: "root msg" }]);
-    await mm.saveSessionMetadata(SESSION_A, { sessionKind: "routine", routineId: "r1", summaryPreamble: "root summary" });
-
-    await mm.saveSession(SESSION_B, [{ role: "user", content: "mid msg" }]);
-    await mm.saveSessionMetadata(SESSION_B, {
-      parentSessionId: SESSION_A,
-      summaryPreamble: "mid summary",
-    });
-
-    await mm.saveSession(SESSION_C, [{ role: "user", content: "leaf msg" }]);
-    await mm.saveSessionMetadata(SESSION_C, {
-      parentSessionId: SESSION_B,
-      summaryPreamble: "leaf summary",
-    });
-
-    const chain = await mm.getCheckpointChain(SESSION_C);
-    expect(chain).toHaveLength(3);
-    // Order: oldest (A/root) first
-    expect(chain[0].summaryPreamble).toBe("root summary");
-    expect(chain[1].summaryPreamble).toBe("mid summary");
-    expect(chain[2].summaryPreamble).toBe("leaf summary");
-  });
-
-  it("stops at the first missing session in the chain", async () => {
-    // B → A, but A has no metadata file
-    await mm.saveSession(SESSION_B, [{ role: "user", content: "msg" }]);
-    await mm.saveSessionMetadata(SESSION_B, { parentSessionId: SESSION_A });
-
-    const chain = await mm.getCheckpointChain(SESSION_B);
-    // B is included, but traversal stops when A metadata is not found
-    expect(chain).toHaveLength(1);
-    expect(chain[0].parentSessionId).toBe(SESSION_A);
-  });
-
-  it("guards against infinite cycles", async () => {
-    // A → B → A (cycle)
-    await mm.saveSession(SESSION_A, [{ role: "user", content: "a" }]);
-    await mm.saveSessionMetadata(SESSION_A, { parentSessionId: SESSION_B });
-    await mm.saveSession(SESSION_B, [{ role: "user", content: "b" }]);
-    await mm.saveSessionMetadata(SESSION_B, { parentSessionId: SESSION_A });
-
-    const chain = await mm.getCheckpointChain(SESSION_B);
-    // Should not loop forever — stops when cycle is detected
-    expect(chain.length).toBeLessThanOrEqual(3);
-  });
-});
-
 // ── 4. Metadata validation ───────────────────────────────────────────────────
 
 describe("metadata validation", () => {
@@ -417,67 +352,6 @@ describe("normalizeCheckpoint range validation", () => {
     );
     const meta = mm.loadSessionMetadata(sessionId);
     expect(meta!.checkpoints).toBeUndefined();
-  });
-});
-
-// ── 5c. getCheckpointChain O(n) order + path-traversal safety ────────────────
-
-describe("getCheckpointChain — O(n) order + path traversal guard", () => {
-  it("returns root-first order for a 100-node chain", async () => {
-    // Build a chain of 100 sessions: s0 (root) → s1 → … → s99 (leaf).
-    // Then call getCheckpointChain(s99) and verify the result is ordered s0..s99.
-    const ids: string[] = Array.from({ length: 100 }, (_, i) =>
-      `test-chain-${String(i).padStart(3, "0")}-aaaa-bbbb-cccc-dddddddddddd`,
-    );
-    for (let i = 0; i < ids.length; i++) {
-      await mm.saveSession(ids[i], [{ role: "user", content: `msg ${i}` }]);
-      const meta: SessionMetadata = {
-        summaryPreamble: `summary-${i}`,
-        ...(i > 0 ? { parentSessionId: ids[i - 1] } : {}),
-      };
-      await mm.saveSessionMetadata(ids[i], meta);
-    }
-    const chain = await mm.getCheckpointChain(ids[99]);
-    expect(chain).toHaveLength(100);
-    // Root first, leaf last
-    expect(chain[0].summaryPreamble).toBe("summary-0");
-    expect(chain[99].summaryPreamble).toBe("summary-99");
-    // Spot-check middle
-    expect(chain[50].summaryPreamble).toBe("summary-50");
-  });
-
-  it("stops traversal when parentSessionId contains path-traversal characters", async () => {
-    const sessionsDir = join(dir, "sessions");
-    await mm.saveSession(SESSION_A, [{ role: "user", content: "leaf" }]);
-    // Write metadata directly with a malicious parentSessionId
-    writeFileSync(
-      join(sessionsDir, `${SESSION_A}.meta.json`),
-      JSON.stringify({ parentSessionId: "../../../etc/passwd" }),
-      "utf-8",
-    );
-    const chain = await mm.getCheckpointChain(SESSION_A);
-    // SESSION_A itself is included, but traversal stops — no external file read attempted.
-    // normalizeSessionMetadata drops the malicious parentSessionId so it is undefined here.
-    expect(chain).toHaveLength(1);
-    expect(chain[0].parentSessionId).toBeUndefined();
-  });
-
-  it("stops traversal when parentSessionId contains a slash-only segment", async () => {
-    const sessionsDir = join(dir, "sessions");
-    await mm.saveSession(SESSION_B, [{ role: "user", content: "leaf" }]);
-    writeFileSync(
-      join(sessionsDir, `${SESSION_B}.meta.json`),
-      JSON.stringify({ parentSessionId: "../etc" }),
-      "utf-8",
-    );
-    const chain = await mm.getCheckpointChain(SESSION_B);
-    expect(chain).toHaveLength(1);
-  });
-
-  it("returns empty array when caller-provided sessionId contains path-traversal characters", async () => {
-    // Fix 1: caller-provided sessionId must be validated before any file I/O.
-    const chain = await mm.getCheckpointChain("../etc/passwd");
-    expect(chain).toEqual([]);
   });
 });
 

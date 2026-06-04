@@ -923,7 +923,6 @@ export class ConversationLoop {
         primary,
         chain,
         (v) => this.deps.settingsService.getSecret(secretKeyFor(v)) ?? "",
-        undefined,
         createLoopProvider,
       );
     } catch {

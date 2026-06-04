@@ -47,6 +47,3 @@ export class FakeSandbox {
     return { ok: true, result: call.fakeResultKo };
   }
 }
-
-/** Singleton — the demo path has no need for multiple sandbox instances. */
-export const fakeSandbox = new FakeSandbox();

@@ -1,4 +1,4 @@
-import type { IdleSchedulerService, IdleState } from "../main/idle-scheduler.js";
+import type { IdleSchedulerService } from "../main/idle-scheduler.js";
 import { createLogger } from "../lib/logger.js";
 import type { MemoryManager } from "./memory-manager.js";
 
@@ -200,8 +200,4 @@ function clip(value: string, maxChars: number): string {
 
 function escapeAttribute(value: string): string {
   return value.replace(/&/g, "&amp;").replace(/"/g, "&quot;").replace(/</g, "&lt;");
-}
-
-export function idleStateCanRefreshPreferences(state: IdleState): boolean {
-  return state === "IDLE_SCAN";
 }

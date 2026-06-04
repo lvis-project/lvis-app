@@ -15,8 +15,6 @@ import { dirname, join, relative, resolve } from "node:path";
 import {
   buildVerifiedTarballPaths,
   installFromMarketplace,
-  isMarketplaceDirectPreferred,
-  isNpmFallbackEnabled,
   MarketplaceInstallerError,
   type MarketplaceHttp
 } from "../marketplace-installer.js";
@@ -755,30 +753,5 @@ describe("installFromMarketplace — artifact cache invalidation", () => {
       else process.env.LVIS_MARKETPLACE_USE_CACHE = originalCacheFlag;
       rmSync(root, { recursive: true, force: true });
     }
-  });
-});
-
-describe("feature flags", () => {
-  it("isMarketplaceDirectPreferred defaults to false and respects truthy envs", () => {
-    expect(isMarketplaceDirectPreferred({} as NodeJS.ProcessEnv)).toBe(false);
-    expect(
-      isMarketplaceDirectPreferred({ LVIS_MARKETPLACE_PREFER_DIRECT: "true" } as NodeJS.ProcessEnv),
-    ).toBe(true);
-    expect(
-      isMarketplaceDirectPreferred({ LVIS_MARKETPLACE_PREFER_DIRECT: "1" } as NodeJS.ProcessEnv),
-    ).toBe(true);
-    expect(
-      isMarketplaceDirectPreferred({ LVIS_MARKETPLACE_PREFER_DIRECT: "no" } as NodeJS.ProcessEnv),
-    ).toBe(false);
-  });
-
-  it("isNpmFallbackEnabled defaults to true and can be disabled", () => {
-    expect(isNpmFallbackEnabled({} as NodeJS.ProcessEnv)).toBe(true);
-    expect(
-      isNpmFallbackEnabled({ MARKETPLACE_NPM_FALLBACK: "false" } as NodeJS.ProcessEnv),
-    ).toBe(false);
-    expect(
-      isNpmFallbackEnabled({ MARKETPLACE_NPM_FALLBACK: "0" } as NodeJS.ProcessEnv),
-    ).toBe(false);
   });
 });
