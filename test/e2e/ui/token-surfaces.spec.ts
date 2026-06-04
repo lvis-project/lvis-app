@@ -81,11 +81,13 @@ test.describe("context-budget token surfaces", () => {
       await expect(ctx.page.getByText("토큰 표면 응답")).toBeVisible();
 
       const ring = ctx.page.getByTestId("token-progress-ring");
-      await expect(ring).toHaveAttribute("aria-label", "Projected input 34 percent");
+      // gpt-5.4-mini is TPM-bound (tpmDefault 200_000 in pricing-data), so the
+      // effective limit is 200K: 123,456 / 200,000 ≈ 62%.
+      await expect(ring).toHaveAttribute("aria-label", "Projected input 62 percent");
       await ring.hover({ force: true });
       await expect(ctx.page.getByText("projected input").first()).toBeVisible();
       await expect(ctx.page.getByText("123,456").first()).toBeVisible();
-      await expect(ctx.page.getByText("effective limit:").first()).toBeVisible();
+      await expect(ctx.page.getByText("effective limit (TPM):").first()).toBeVisible();
 
       const badge = ctx.page.getByTestId("token-cost-badge").first();
       await expect(badge).toContainText("2.0k");
@@ -152,7 +154,8 @@ test.describe("context-budget token surfaces", () => {
 
       await expect(ctx.page.getByTestId("token-progress-ring")).toHaveAttribute(
         "aria-label",
-        "Projected input 12 percent",
+        // post-compact projected 42,000 / 200,000 (TPM) ≈ 21%
+        "Projected input 21 percent",
       );
       await expect(ctx.page.getByTestId("token-cost-badge")).toHaveCount(1);
       await ctx.page.getByTestId("token-progress-ring").hover({ force: true });
@@ -220,7 +223,8 @@ test.describe("context-budget token surfaces", () => {
       await expect(ctx.page.getByText("큰 툴 결과 이후 응답")).toBeVisible();
       await expect(ctx.page.getByTestId("token-progress-ring")).toHaveAttribute(
         "aria-label",
-        "Projected input 50 percent",
+        // projected 180,000 / 200,000 (TPM) = 90%
+        "Projected input 90 percent",
       );
       await ctx.page.getByTestId("token-progress-ring").hover({ force: true });
       await expect(ctx.page.getByText("180,000").first()).toBeVisible();

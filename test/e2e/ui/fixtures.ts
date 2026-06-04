@@ -13,6 +13,7 @@ import {
 } from '../../../src/plugins/plugin-install-receipt.js';
 import {
   buildE2eBaseSettings,
+  buildE2eSecrets,
   buildIsolatedElectronEnv,
 } from './seeded-electron';
 import { canonicalJSON } from '../../../src/plugins/whitelist/canonical-json.js';
@@ -398,6 +399,8 @@ export type ElectronOptions = {
   onboardingCompleted: boolean;
   seedTogglePlugin: boolean;
   seedRepositoryPlugins: boolean;
+  seedApiKey: boolean;
+  seedLocale: 'ko' | 'en';
 };
 
 export const test = base.extend<ElectronFixtures & ElectronOptions>({
@@ -405,6 +408,13 @@ export const test = base.extend<ElectronFixtures & ElectronOptions>({
   onboardingCompleted: [true, { option: true }],
   seedTogglePlugin: [false, { option: true }],
   seedRepositoryPlugins: [true, { option: true }],
+  // Seed a usable LLM key so the composer is enabled (see buildE2eSecrets).
+  // Specs that assert the no-key / key-toggle state override with
+  // `test.use({ seedApiKey: false })`.
+  seedApiKey: [true, { option: true }],
+  // UI locale to seed. Defaults to ko (the specs assert the Korean catalog);
+  // the english-default-smoke spec overrides with `test.use({ seedLocale: 'en' })`.
+  seedLocale: ['ko', { option: true }],
 
   userDataDir: async ({}, use) => {
     const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'lvis-e2e-'));
@@ -416,7 +426,7 @@ export const test = base.extend<ElectronFixtures & ElectronOptions>({
     }
   },
 
-  app: async ({ userDataDir, launchEnv, onboardingCompleted, seedTogglePlugin, seedRepositoryPlugins }, use) => {
+  app: async ({ userDataDir, launchEnv, onboardingCompleted, seedTogglePlugin, seedRepositoryPlugins, seedApiKey, seedLocale }, use) => {
     const repoRoot = path.resolve(HERE, '../../..');
     const mainEntry = path.join(repoRoot, 'dist/src/main/main.js');
     if (!fs.existsSync(mainEntry)) {
@@ -434,9 +444,19 @@ export const test = base.extend<ElectronFixtures & ElectronOptions>({
     fs.mkdirSync(lvisHomeForTest, { recursive: true, mode: 0o700 });
     fs.writeFileSync(
       path.join(userDataDir, 'lvis-settings.json'),
-      JSON.stringify(buildE2eBaseSettings(onboardingCompleted), null, 2) + '\n',
+      JSON.stringify(buildE2eBaseSettings(onboardingCompleted, seedLocale), null, 2) + '\n',
       'utf-8',
     );
+    if (seedApiKey) {
+      // Seed an at-rest LLM key secret so `has-api-key` is true at boot and the
+      // composer is enabled. Written to the same userData dir as the settings
+      // file (SettingsService resolves both from options.userDataPath).
+      fs.writeFileSync(
+        path.join(userDataDir, 'lvis-secrets.json'),
+        JSON.stringify(buildE2eSecrets(), null, 2) + '\n',
+        'utf-8',
+      );
+    }
     const e2eWhitelistEnv = await seedE2ePlugins(
       repoRoot,
       lvisHomeForTest,
@@ -482,6 +502,16 @@ export const test = base.extend<ElectronFixtures & ElectronOptions>({
     await win.locator('[data-testid="main-toolbar"]').first().waitFor({
       state: 'visible',
       timeout: 60_000,
+    });
+    // Neutralize the post-tour first-task nudge (PostTourFirstTask). With
+    // onboardingCompleted seeded true the chain sits at "done" → tourCompleted,
+    // and a seeded repository plugin (e.g. meeting) yields a proposal, so the
+    // z-9000 bottom-right card renders and intercepts pointer events over the
+    // composer/toolbar. No spec asserts this overlay, so hide it globally — CSS
+    // applies even if it mounts after this point. Specs that need it can scope
+    // it back in. Keeps the harness locale/onboarding-state agnostic.
+    await win.addStyleTag({
+      content: '[data-testid="post-tour-first-task"]{display:none !important;}',
     });
     await use(win);
   },
