@@ -1230,7 +1230,6 @@ export class PluginRuntime {
         this.methodMap.delete(method);
       }
       this.plugins.delete(pluginId);
-      this.pluginUiRevisions.delete(pluginId);
 
       const pluginDisposers = this.disposers.get(pluginId);
       if (pluginDisposers) {
