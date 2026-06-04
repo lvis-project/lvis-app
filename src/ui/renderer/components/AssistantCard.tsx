@@ -19,12 +19,10 @@ function AssistantCardImpl({
   isFinal = true,
 }: {
   entry: Extract<ChatEntry, { kind: "assistant" }>;
-  highlightQuery?: string;
   actions?: { onRetry?: () => void; onFork?: () => void; onToggleStar?: () => void };
   isStarred?: boolean;
   onFeedback?: (rating: "up" | "down", reason?: string) => void | Promise<void>;
   isFinal?: boolean;
-  embedded?: boolean;
 }) {
   const { t } = useTranslation();
   const [feedbackRating, setFeedbackRating] = useState<"up" | "down" | null>(null);
