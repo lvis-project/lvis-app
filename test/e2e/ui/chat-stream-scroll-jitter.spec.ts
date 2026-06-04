@@ -85,9 +85,13 @@ async function installScrollProbe(page: Page): Promise<boolean> {
   }, CHAT_VIEWPORT_SELECTOR);
 }
 
-async function emitAndSample(page: Page, events: StreamEvent[]): Promise<boolean> {
+async function emitAndSample(
+  page: Page,
+  events: StreamEvent[],
+  opts: { waitForBottom?: boolean } = {},
+): Promise<boolean> {
   return page.evaluate(
-    async ({ selector, events }) => {
+    async ({ selector, events, waitForBottom }) => {
       const w = window as unknown as {
         __lvisChatStream?: { _emit?: (event: unknown) => void };
         __lvisScrollProbe?: { sample: () => void };
@@ -96,15 +100,29 @@ async function emitAndSample(page: Page, events: StreamEvent[]): Promise<boolean
       const emit = w.__lvisChatStream?._emit;
       if (!viewport || typeof emit !== "function") return false;
       const nextFrame = () => new Promise<void>((resolve) => requestAnimationFrame(() => resolve()));
+      const bottomGap = () => viewport.scrollHeight - viewport.scrollTop - viewport.clientHeight;
       for (const event of events) {
         emit(event);
-        await nextFrame();
-        await nextFrame();
+        if (waitForBottom) {
+          // The viewport is expected to re-pin to the bottom after the chunk.
+          // Wait (capped) until it actually reaches the bottom before sampling,
+          // instead of a fixed 2-frame wait — CI rendering can take several
+          // frames to re-pin, so a fixed wait samples a mid-layout transient and
+          // reports a bogus multi-hundred-px gap (flaky). If pinning genuinely
+          // regresses, the gap never closes and the final sample still fails.
+          for (let frame = 0; frame < 30; frame++) {
+            await nextFrame();
+            if (bottomGap() <= 2) break;
+          }
+        } else {
+          await nextFrame();
+          await nextFrame();
+        }
         w.__lvisScrollProbe?.sample();
       }
       return true;
     },
-    { selector: CHAT_VIEWPORT_SELECTOR, events },
+    { selector: CHAT_VIEWPORT_SELECTOR, events, waitForBottom: opts.waitForBottom === true },
   );
 }
 
@@ -162,7 +180,7 @@ test.describe("chat stream bottom-follow jitter", () => {
         },
       ];
 
-      expect(await emitAndSample(ctx.page, events)).toBe(true);
+      expect(await emitAndSample(ctx.page, events, { waitForBottom: true })).toBe(true);
       await expect(ctx.page.getByText("final-stream-line-23").first()).toBeVisible();
       await ctx.page.waitForFunction((selector) => {
         const viewport = document.querySelector<HTMLElement>(selector);
