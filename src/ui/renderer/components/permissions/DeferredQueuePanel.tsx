@@ -52,7 +52,6 @@ export interface DeferredQueuePanelProps {
 export function DeferredQueuePanel({ showEmpty = false, onClose }: DeferredQueuePanelProps): ReactElement | null {
   const { t } = useTranslation();
   const [pending, setPending] = useState<DeferredQueueEntry[]>([]);
-  const [activeIndex, setActiveIndex] = useState(0);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
@@ -83,13 +82,6 @@ export function DeferredQueuePanel({ showEmpty = false, onClose }: DeferredQueue
     };
   }, [refresh]);
 
-  useEffect(() => {
-    setActiveIndex((current) => {
-      if (pending.length === 0) return 0;
-      return Math.min(current, pending.length - 1);
-    });
-  }, [pending.length]);
-
   const handle = useCallback(
     async (id: string, decision: "approved" | "rejected") => {
       const api = window.lvis?.permission?.deferredResolve;
@@ -112,7 +104,7 @@ export function DeferredQueuePanel({ showEmpty = false, onClose }: DeferredQueue
   if (pending.length === 0 && !error && !showEmpty) return null;
 
   const hasPending = pending.length > 0;
-  const activeEntry = pending[activeIndex] ?? pending[0];
+  const activeEntry = pending[0];
   const activeLevel = activeEntry?.verdict.level ?? "low";
   // Round-7 architect MAJOR — Korean risk label (was raw English
   // `activeLevel.toUpperCase()` → `LOW`/`MEDIUM`/`HIGH` leaking into UI).
@@ -161,7 +153,7 @@ export function DeferredQueuePanel({ showEmpty = false, onClose }: DeferredQueue
                       {t("deferredQueuePanel.approvalTitle")}
                     </h4>
                     <Badge variant="outline" className="shrink-0 text-[11px] text-muted-foreground">
-                      {t("deferredQueuePanel.pendingBadge", { count: pending.length, current: activeIndex + 1 })}
+                      {t("deferredQueuePanel.pendingBadge", { count: pending.length, current: 1 })}
                     </Badge>
                   </div>
                 </div>
