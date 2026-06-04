@@ -20,7 +20,7 @@ export function useChatContextValue(parts: ChatContextValue): ChatContextValue {
     tpmLimit, tpmPct, isTpmOverflow,
     rolePresets, activePreset, activePresetId, setActivePresetId,
     attachments, setAttachments, attachmentNCounter,
-    vendorSupportsThinking, enableThinkingChat, toggleThinking,
+    enableThinkingChat, toggleThinking,
     costEstimate, costBadgeClass, activePricing, activeVendor,
     hideToolFailures,
   } = parts;
@@ -36,7 +36,7 @@ export function useChatContextValue(parts: ChatContextValue): ChatContextValue {
     tpmLimit, tpmPct, isTpmOverflow,
     rolePresets, activePreset, activePresetId, setActivePresetId,
     attachments, setAttachments, attachmentNCounter,
-    vendorSupportsThinking, enableThinkingChat, toggleThinking,
+    enableThinkingChat, toggleThinking,
     costEstimate, costBadgeClass, activePricing, activeVendor,
     hideToolFailures,
   }), [
@@ -50,7 +50,7 @@ export function useChatContextValue(parts: ChatContextValue): ChatContextValue {
     tpmLimit, tpmPct, isTpmOverflow,
     rolePresets, activePreset, activePresetId, setActivePresetId,
     attachments, setAttachments, attachmentNCounter,
-    vendorSupportsThinking, enableThinkingChat, toggleThinking,
+    enableThinkingChat, toggleThinking,
     costEstimate, costBadgeClass, activePricing, activeVendor,
     hideToolFailures,
   ]);

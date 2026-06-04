@@ -612,7 +612,7 @@ export class PermissionManager {
     }
 
     if (context.headless === true && isMutating) {
-      return this.categoryBasedDecision(toolName, trust, resolvedCategory, context);
+      return this.categoryBasedDecision(trust, resolvedCategory, context);
     }
 
     // 3. Allow rules
@@ -630,7 +630,7 @@ export class PermissionManager {
     }
 
     // 6. Layer 3 — Category × Source × Trust via registry descriptor
-    return this.categoryBasedDecision(toolName, trust, resolvedCategory, context);
+    return this.categoryBasedDecision(trust, resolvedCategory, context);
   }
 
   /**
@@ -916,7 +916,6 @@ export class PermissionManager {
    * trust-axis prompt after Layer 0/1 hard gates.
    */
   private categoryBasedDecision(
-    toolName: string,
     trust: TrustLevel,
     category: ToolCategory,
     context: PermissionCheckContext,
