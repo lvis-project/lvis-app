@@ -91,6 +91,21 @@ describe("SettingsService marketplace defaults", () => {
     expect(mk.realCloudAllowPrivateNetwork).toBeUndefined();
   });
 
+  it("drops a whitespace-only legacy realCloudBaseUrl and falls back to the default", () => {
+    writeFileSync(
+      join(userDataPath, "lvis-settings.json"),
+      JSON.stringify({ marketplace: { backend: "real-cloud", realCloudBaseUrl: "   " } }),
+      "utf-8",
+    );
+
+    const service = new SettingsService({ userDataPath });
+    const mk = service.get("marketplace") as Record<string, unknown>;
+
+    // Whitespace-only legacy value is dropped → default, not "   ".
+    expect(mk.cloudBaseUrl).toBe("https://marketplace.lvisai.xyz");
+    expect(mk.realCloudBaseUrl).toBeUndefined();
+  });
+
 });
 
 describe("SettingsService removes plugin-specific legacy host settings", () => {
