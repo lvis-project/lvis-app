@@ -95,6 +95,48 @@ describe("rotateAndPrune — age-triggered rotation", () => {
   });
 });
 
+describe("rotateAndPrune — HMAC-chained channels", () => {
+  it("does NOT size-rotate an active (today) permission-audit chain even when oversized", async () => {
+    // Size-rotating the active prevHash chain mid-day would gzip+unlink it and
+    // sever the tamper-evident chain. It must be left untouched.
+    const today = new Date(Date.now()).toISOString().slice(0, 10);
+    writeJsonlFile(`${today}.permission-audit.jsonl`, '{"type":"permission","prevHash":"x"}\n'.repeat(50));
+
+    const logger = new AuditLogger();
+    await logger.rotateAndPrune({ maxBytes: 10, retentionDays: 30, rotationAgeDays: 7 });
+
+    const files = listAuditFiles();
+    expect(files.some((f) => f === `${today}.permission-audit.jsonl`)).toBe(true);
+    expect(files.some((f) => f.endsWith(".gz"))).toBe(false);
+  });
+
+  it("does NOT size-rotate an active (today) sandbox chain even when oversized", async () => {
+    const today = new Date(Date.now()).toISOString().slice(0, 10);
+    writeJsonlFile(`${today}.sandbox.jsonl`, '{"type":"sandbox"}\n'.repeat(50));
+
+    const logger = new AuditLogger();
+    await logger.rotateAndPrune({ maxBytes: 10, retentionDays: 30, rotationAgeDays: 7 });
+
+    const files = listAuditFiles();
+    expect(files.some((f) => f === `${today}.sandbox.jsonl`)).toBe(true);
+    expect(files.some((f) => f.endsWith(".gz"))).toBe(false);
+  });
+
+  it("DOES age-rotate a CLOSED prior-day chain (≥ rotationAgeDays) so chain channels stay bounded", async () => {
+    // A sealed prior-day chain is safe to archive — each UTC day is an
+    // independent chain. This prevents unbounded one-file-per-day accumulation.
+    const oldDate = new Date(Date.now() - 10 * 86_400_000).toISOString().slice(0, 10);
+    writeJsonlFile(`${oldDate}.permission-audit.jsonl`, '{"type":"permission"}\n');
+
+    const logger = new AuditLogger();
+    await logger.rotateAndPrune({ maxBytes: 10 * 1024 * 1024, retentionDays: 30, rotationAgeDays: 7 });
+
+    const files = listAuditFiles();
+    expect(files.some((f) => f === `${oldDate}.permission-audit.jsonl`)).toBe(false);
+    expect(files.some((f) => f.endsWith(".gz"))).toBe(true);
+  });
+});
+
 describe("rotateAndPrune — retention / age-triggered delete", () => {
   it("deletes .gz archives older than retentionDays", async () => {
     // Archive dated 35 days ago
