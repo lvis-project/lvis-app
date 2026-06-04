@@ -632,6 +632,7 @@ export async function bootstrap(
     pluginRuntime,
     mainWindow,
     marketplace: marketplaceSettings,
+    isPackaged: app.isPackaged,
   });
 
   // wireUpdateCheck needs a concrete fetcher for update detection.
