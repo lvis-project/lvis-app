@@ -2084,17 +2084,20 @@ export class ConversationLoop {
     // exhausted force-recover or TPM recovery is resolved.
     if (
       result.stopReason !== "context-error" &&
-      result.stopReason !== "stream-error"
+      result.stopReason !== "stream-error" &&
+      result.stopReason !== "interrupted"
     ) {
-      // A clean turn means the structural failure that drove force-recover /
-      // TPM recovery is resolved. Reset the CONSECUTIVE force-recover counter
-      // unconditionally — the budget tracks *consecutive* (not lifetime)
-      // recoveries, so separate, each-recovered context errors over a long
-      // session must NOT accumulate to the cap and permanently block all
-      // compaction. (Previously this reset was gated behind
-      // recoveryExhausted||rateLimitRecoveryAttempted, which a single
+      // A genuinely-completed turn (not interrupted/aborted, not a
+      // context/stream error) means the structural failure that drove
+      // force-recover / TPM recovery is resolved. Reset the CONSECUTIVE
+      // force-recover counter so separate, each-recovered context errors over a
+      // long session do NOT accumulate to the cap and permanently block
+      // compaction. (Previously this reset was also gated behind
+      // recoveryExhausted||rateLimitRecoveryAttempted — which a single
       // successful recovery never sets — so the counter stuck and 3 separate
-      // recoveries exhausted the budget mid-session.)
+      // recoveries exhausted the budget mid-session.) Interrupted turns are
+      // EXCLUDED so a user / misbehaving UI cannot abort turns to reset the
+      // force-recover DoS hard-cap budget.
       this.contextErrorRecoveryCount = 0;
       if (this.recoveryExhausted || this.rateLimitRecoveryAttempted) {
         const wasRecoveryExhausted = this.recoveryExhausted;
