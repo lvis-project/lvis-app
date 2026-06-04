@@ -450,11 +450,14 @@ export const test = base.extend<ElectronFixtures & ElectronOptions>({
     if (seedApiKey) {
       // Seed an at-rest LLM key secret so `has-api-key` is true at boot and the
       // composer is enabled. Written to the same userData dir as the settings
-      // file (SettingsService resolves both from options.userDataPath).
+      // file (SettingsService resolves both from options.userDataPath). Use
+      // owner-only mode 0o600 to match production SettingsService.saveSecrets,
+      // so the seeded file is never group/world-readable before the app's own
+      // permission migration runs.
       fs.writeFileSync(
         path.join(userDataDir, 'lvis-secrets.json'),
         JSON.stringify(buildE2eSecrets(), null, 2) + '\n',
-        'utf-8',
+        { encoding: 'utf-8', mode: 0o600 },
       );
     }
     const e2eWhitelistEnv = await seedE2ePlugins(
