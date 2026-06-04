@@ -278,7 +278,6 @@ export type LvisApi = {
     shell: "light" | "dark";
     tokens: Record<string, string>;
   }) => Promise<{ ok: boolean; error?: string }>;
-  fileScanPaths: (paths: string[]) => Promise<{ ok: boolean; indexed?: number; failed?: number; jobId?: string; error?: string }>;
   getSettings: () => Promise<AppSettings>;
   updateSettings: (patch: DeepPartial<AppSettings>) => Promise<SettingsUpdateResult>;
   onSettingsUpdated: (handler: (settings: AppSettings) => void) => () => void;
