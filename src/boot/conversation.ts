@@ -323,26 +323,7 @@ export function createConversationLoop(deps: ConversationDeps): ConversationLoop
   });
 }
 
-/** Hard upper bound for callLlm maxTokens — prevents runaway cost from large plugin requests. */
-const CALL_LLM_MAX_TOKENS_CEILING = 4096;
-
 /**
- * Clamp a caller-supplied maxTokens value: accepts only positive finite integers,
- * caps at CALL_LLM_MAX_TOKENS_CEILING. Returns undefined when the input is invalid
- * so generateText falls back to its own default (400).
- */
-function clampMaxTokens(raw: number | undefined): number | undefined {
-  if (typeof raw === "number" && Number.isFinite(raw) && raw > 0) {
-    return Math.min(Math.floor(raw), CALL_LLM_MAX_TOKENS_CEILING);
-  }
-  return undefined;
-}
-
-/**
- * callLlm의 maxTokens는 플러그인이 실수로 큰 값을 넘겨 지연·비용 폭발이 나지
- * 않도록 호스트에서 sanitize: 유효한 양의 정수만 수용하고 상한(CALL_LLM_MAX_TOKENS_CEILING)
- * 으로 clamp. 유효하지 않으면 undefined로 넘겨 generateText의 기본값(400)을 사용.
- *
  * §B-7 — per-pluginId token bucket (default 20 calls / 10 min) +
  * audit event on every call. The bucket is a sliding-window counter keyed by
  * pluginId. Exceeding plugins receive a thrown Error; the audit logger still
@@ -385,18 +366,16 @@ export function createCallLlmForPlugin(
     fresh.push(now);
     buckets.set(pluginId, fresh);
 
-    const maxTokens = clampMaxTokens(opts?.maxTokens);
-
     try {
       auditLogger.log({
         timestamp: new Date().toISOString(),
         sessionId: "plugin",
         type: "tool_call",
-        input: `[plugin:${pluginId}] callLlm promptLen=${prompt.length} maxTokens=${maxTokens ?? "default"}`,
+        input: `[plugin:${pluginId}] callLlm promptLen=${prompt.length}`,
       });
     } catch {}
 
-    return conversationLoop.generateText(prompt, maxTokens, opts?.systemPrompt, opts?.signal);
+    return conversationLoop.generateText(prompt, opts?.systemPrompt, opts?.signal);
   };
 }
 
@@ -408,7 +387,6 @@ export function createCallLlm(
   conversationLoop: ConversationLoop,
 ): (prompt: string, opts?: { maxTokens?: number; systemPrompt?: string; signal?: AbortSignal }) => Promise<string> {
   return (prompt, opts) => {
-    const maxTokens = clampMaxTokens(opts?.maxTokens);
-    return conversationLoop.generateText(prompt, maxTokens, opts?.systemPrompt, opts?.signal);
+    return conversationLoop.generateText(prompt, opts?.systemPrompt, opts?.signal);
   };
 }

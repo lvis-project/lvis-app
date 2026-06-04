@@ -668,8 +668,6 @@ const api = {
   memorySearchSessions: async (query: string) => ipcRenderer.invoke("lvis:memory:sessions:search", query),
   memoryGetAgentsMd: async () => ipcRenderer.invoke("lvis:memory:agents-md:get") as Promise<string>,
   memoryUpdateAgentsMd: async (content: string) => ipcRenderer.invoke("lvis:memory:agents-md:update", content),
-  memoryGetLvisMd: async () => ipcRenderer.invoke("lvis:memory:lvis-md:get") as Promise<string>,
-  memoryUpdateLvisMd: async (content: string) => ipcRenderer.invoke("lvis:memory:lvis-md:update", content),
   memoryGetUserPrefs: async () => ipcRenderer.invoke("lvis:memory:user-prefs:get") as Promise<string>,
   memoryUpdateUserPrefs: async (content: string) => ipcRenderer.invoke("lvis:memory:user-prefs:update", content),
   memoryRefreshUserPrefs: async () => ipcRenderer.invoke("lvis:memory:user-prefs:refresh"),
@@ -1321,7 +1319,7 @@ const api = {
       Array<{ routineId: string; firedAt: string; sessionId: string; title: string; preview: string }>
     >,
 
-  // Overlay IPC bridges (main → renderer push + renderer → main confirm)
+  // Overlay IPC bridges (main → renderer push)
   onOverlayShow: (handler: (item: unknown) => void) => {
     const listener = (_e: unknown, item: unknown) => handler(item);
     ipcRenderer.on(OVERLAY_V1.show, listener);
@@ -1337,8 +1335,6 @@ const api = {
     ipcRenderer.on(OVERLAY_V1.dismiss, listener);
     return () => ipcRenderer.removeListener(OVERLAY_V1.dismiss, listener);
   },
-  notifyOverlayPrimary: async (pluginId: string, eventId: string) =>
-    ipcRenderer.invoke(OVERLAY_V1.primaryAction, pluginId, eventId),
 
   // todo_session_write — assistant's current-turn checklist
   listSessionTodos: async (sessionId?: string) =>

@@ -531,7 +531,6 @@ export interface EvaluateTriggerSpecInput {
   rateLimiter: TriggerConversationRateLimiter;
   /** Burst-suppress identical denial audit rows. */
   denyAuditThrottle?: TriggerDenyAuditThrottle;
-  loopBound: boolean;
   auditLogger: { log(entry: AuditEntry): void };
   now?: () => number;
 }
@@ -555,7 +554,6 @@ export function evaluateTriggerSpec(
     capabilities,
     dedupe,
     rateLimiter,
-    loopBound,
     auditLogger,
   } = input;
   const denyAuditThrottle = input.denyAuditThrottle;
@@ -595,16 +593,6 @@ export function evaluateTriggerSpec(
     return {
       kind: "deny",
       result: { accepted: false, reason: "capability_denied", source: "" },
-    };
-  }
-  // Order matters: env-fault (`loop_unavailable`) supersedes state
-  // opinions (`duplicate`, `rate_limited`) so a plugin retrying during
-  // boot ordering windows sees the actual cause.
-  if (!loopBound) {
-    auditDeny("reason=loop_unavailable");
-    return {
-      kind: "deny",
-      result: { accepted: false, reason: "loop_unavailable", source },
     };
   }
   // A too-long source is rejected outright; the regex sees the original
@@ -751,14 +739,6 @@ export interface LateBindingRefs {
           context: { origin: "plugin" | "ui"; callerPluginId?: string; ownerPluginId?: string },
         ) => Promise<unknown>)
       | null;
-  };
-  /**
-   * Trigger executor ref — kept for future use; currently always null since
-   * TriggerExecutor was removed. triggerConversation() returns loop_unavailable
-   * when this is null.
-   */
-  triggerExecutorRef: {
-    fn: null;
   };
 }
 
@@ -985,7 +965,6 @@ export async function initPluginRuntime(
     pluginCallLlmRef: { fn: null },
     conversationLoopRef: { fn: null },
     pluginToolInvokerRef: { fn: null },
-    triggerExecutorRef: { fn: null },
   };
 
   // §Step 4 — wire `app.isPackaged` into the dev-flag gate before any
@@ -1840,8 +1819,6 @@ export async function initPluginRuntime(
           dedupe: triggerConversationDedupe,
           rateLimiter: triggerConversationRateLimiter,
           denyAuditThrottle: triggerDenyAuditThrottle,
-          // Overlay runner does not need a ConversationLoop — always bound.
-          loopBound: true,
           auditLogger: bootAuditLogger,
         });
 

@@ -5,7 +5,6 @@ export function makeSystemPromptBuilder(): SystemPromptBuilder {
   return new SystemPromptBuilder({
     memoryManager: {
       getAgentsMd: () => "",
-      getLvisMd: () => "",
       getMemoryIndex: () => "",
       getUserPreferences: () => "",
       getMemoryContext: () => "",

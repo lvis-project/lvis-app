@@ -451,11 +451,6 @@ export class MemoryManager {
     return this.agentsMd;
   }
 
-  /** @deprecated Storage has moved to AGENTS.md; kept for legacy IPC/tests. */
-  getLvisMd(): string {
-    return this.getAgentsMd();
-  }
-
   getMemoryIndex(): string {
     return this.memoryIndex;
   }
@@ -616,11 +611,6 @@ export class MemoryManager {
       writeFileSync(targetPath, content, "utf-8");
     });
     this.agentsMd = content;
-  }
-
-  /** @deprecated Storage has moved to AGENTS.md; kept for legacy IPC/tests. */
-  async updateLvisMd(content: string): Promise<void> {
-    return this.updateAgentsMd(content);
   }
 
   /** user-preferences.md 업데이트 */
