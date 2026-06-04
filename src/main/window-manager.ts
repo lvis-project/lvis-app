@@ -246,7 +246,7 @@ function nearestEdge(main: Rect, child: Rect): SnapEdge | null {
 /**
  * Compute the child position when snapped to `edge` of `main`.
  */
-function snappedPosition(main: Rect, child: Rect, edge: SnapEdge, dx: number, dy: number): { x: number; y: number } {
+function snappedPosition(main: Rect, _child: Rect, edge: SnapEdge, dx: number, dy: number): { x: number; y: number } {
   switch (edge) {
     case "n":
       return { x: main.x + dx, y: main.y + dy };

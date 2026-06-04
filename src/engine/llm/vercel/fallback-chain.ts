@@ -151,7 +151,7 @@ function throwIfAborted(abortSignal?: AbortSignal): void {
 
 function waitForAttemptWindow(
   startedAt: number,
-  err: unknown,
+  _err: unknown,
   abortSignal?: AbortSignal,
 ): Promise<void> {
   const remainingMs = Math.max(0, MIN_RETRY_WINDOW_MS - (Date.now() - startedAt));
