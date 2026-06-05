@@ -77,7 +77,7 @@ Discovery: `hooks/hook-discovery.ts` resolves `~/.config/lvis/hooks/`, globs `pr
 
 **Non-goals (this phase)**
 - Input mutation (`updatedInput` / `modify`) — deferred until hook signing or managed policy exists (§6.5).
-- HTTP / MCP-tool / prompt / agent hooks — Phases 3–4, gated on new controls.
+- HTTP / MCP-tool / prompt / agent hooks — later gated milestones, behind new controls.
 - Replacing the internal `post-turn-hook-chain`.
 
 ---
@@ -117,7 +117,7 @@ Normalization means every downstream consumer (trust diff, runner, audit, trust-
 
 - `event` keys are the closed set in §5. Unknown events → entry ignored + warn-audited (fail-closed, never silently active).
 - `matcher` is a regex matched against the event's primary subject (`toolName` for tool events; empty/`*` for lifecycle events).
-- Each `handler` declares `type` (Phase 1: only `"command"`), `command` (argv string), and optional `timeoutMs`.
+- Each `handler` declares `type` (initially only `"command"`), `command` (argv string), and optional `timeoutMs`.
 - **Trust identity** of a `command` handler = the sha256 of the resolved local script/executable when the command resolves to a local file (see §6.1); plus the verbatim `command` string. Both are shown in the trust-review UI and recorded in the lockfile.
 
 ### 4.3 Backward compatibility
@@ -158,17 +158,17 @@ Each proposed event below has a **verified existing fire point**. `Blocking` sta
 
 ### 6.1 Trust for `command` handlers
 - When `command`'s argv[0]/script path resolves to a **local file**, its sha256 is the trust identity (same lockfile mechanism as `.sh`). A changed script → `changed` → re-quarantined.
-- When it resolves to a **PATH binary** (e.g. `python3`), trust is keyed on the **verbatim command string** plus the sha256 of any local script argument it references. A pure-binary command with no local script (e.g. `curl ...`) is treated as **higher-risk** and is **not permitted in Phase 1** (it has no stable local hash to anchor trust) — such commands wait for managed/signed policy.
+- When it resolves to a **PATH binary** (e.g. `python3`), trust is keyed on the **verbatim command string** plus the sha256 of any local script argument it references. A pure-binary command with no local script (e.g. `curl ...`) is treated as **higher-risk** and is **not permitted in the command-hooks milestone** (it has no stable local hash to anchor trust) — such commands wait for managed/signed policy.
 - All new/changed hooks (legacy or declarative) are quarantined by default; enrollment is user-keyboard-only via `/permission hooks accept <name>`.
 
 ### 6.2 Timeouts & environment
 - Per-handler `timeoutMs` is clamped to a hook ceiling (`DEFAULT_HOOK_TIMEOUT_MS`, raised to an explicit `HOOK_TIMEOUT_CEILING_MS` SOT if needed). Hooks remain on their **own** budget, independent of `TOOL_TIMEOUT_POLICY`. Document both ceilings so they don't drift.
 - Env allowlist is unchanged and extended only with event-specific non-secret vars (`LVIS_HOOK_EVENT`, `LVIS_HOOK_MATCHER`). Secrets never pass through.
 
-### 6.3 HTTP hooks (Phase 3 — gated)
+### 6.3 HTTP hooks (gated milestone)
 - Not allowed until a URL/host allowlist + method + body-size + timeout + redirect policy exists. HTTP hooks are an **exfiltration surface**; the design requires an explicit allowlist (no wildcard hosts) and audit of every request target before they ship.
 
-### 6.4 MCP-tool / prompt / agent hooks (Phase 4 — gated)
+### 6.4 MCP-tool / prompt / agent hooks (gated milestone)
 - These can **alter model context or decisions**, so they ship only after (a) signed or managed-only hook policy and (b) **model-visible audit** (the model/user can see that a hook influenced context). Until then they are out of scope.
 
 ### 6.5 No input mutation until signing
@@ -202,16 +202,19 @@ Audit must capture, per the acceptance criteria: **event, matcher, handler type,
 
 ---
 
-## 8. Phased rollout
+## 8. Rollout milestones
 
-| Phase | Delivers | Gate (must exist first) |
+Each milestone is gated on the security control it depends on; names are
+behavior-based, not sequence numbers.
+
+| Milestone | Delivers | Gate (must exist first) |
 |---|---|---|
-| **1** | `hooks.json` + unified registry + generic `command` hooks for the existing 3 events; trust-review UI shows command/source/event/matcher/timeout; audit extension (§7) | none (builds on current trust model) |
-| **2** | Lifecycle events: `SessionStart`, `UserPromptSubmit`, `Stop`, `PreCompact`, `PostCompact`, `PostToolUseFailure`, `PermissionDenied` at the §5 fire points | Phase 1 registry + audit |
-| **3** | HTTP hooks | URL/host allowlist + method/body/timeout/redirect policy (§6.3) |
-| **4** | MCP-tool / prompt / agent hooks | signed/managed policy + model-visible audit (§6.4) |
+| **Command hooks** | `hooks.json` + unified registry + generic `command` hooks for the existing 3 events; trust-review UI shows command/source/event/matcher/timeout; audit extension (§7) | none (builds on current trust model) |
+| **Lifecycle events** | `SessionStart`, `UserPromptSubmit`, `Stop`, `PreCompact`, `PostCompact`, `PostToolUseFailure`, `PermissionDenied` at the §5 fire points | command-hooks registry + audit |
+| **HTTP hooks** | HTTP handler type | URL/host allowlist + method/body/timeout/redirect policy (§6.3) |
+| **Remote & context hooks** | MCP-tool / prompt / agent handler types | signed/managed policy + model-visible audit (§6.4) |
 
-### Acceptance criteria → design mapping (Phase 1)
+### Acceptance criteria → design mapping (command-hooks milestone)
 - *Documented command-hook schema* → §4.2.
 - *`.sh` backward compatibility* → §4.1 (legacy synthesized into the registry), §4.3.
 - *Run Python/Node/shell/binary* → §4.2 `command` argv; §6.1 trust constraint for binary-only commands.
@@ -219,9 +222,9 @@ Audit must capture, per the acceptance criteria: **event, matcher, handler type,
 - *Audit records event/matcher/handler/command identity/decision/duration/failure* → §7.
 - *Unit tests: discovery, trust diff, command execution, timeout, invalid output, deny precedence, `.sh` back-compat* → test plan §9.
 
-## 9. Test plan (Phase 1)
+## 9. Test plan (command-hooks milestone)
 - **Discovery/normalization**: `.sh` + `hooks.json` merge into one registry; unknown event ignored+warned; matcher regex compiled safely (reject catastrophic patterns).
-- **Trust diff**: new/changed `command` script quarantined; `/permission hooks accept` restores; binary-only command rejected in Phase 1.
+- **Trust diff**: new/changed `command` script quarantined; `/permission hooks accept` restores; binary-only command rejected up front.
 - **Execution**: command runs Python/Node/shell; stdin payload shape; stdout `allow`/`deny`; non-zero exit / timeout / malformed → deny; env allowlist enforced (secret vars absent).
 - **Composition**: deny precedence across legacy + declarative; cannot upgrade deny→allow.
 - **Back-compat**: with no `hooks.json`, behavior byte-identical to today.
