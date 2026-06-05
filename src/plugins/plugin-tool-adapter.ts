@@ -12,6 +12,7 @@ import type { ToolCategory } from "../tools/types.js";
 import type { PluginRuntime } from "./runtime.js";
 import type { PluginManifest } from "./types.js";
 import { plog, PluginPhase } from "./lifecycle-log.js";
+import { lintToolInputSchema } from "./tool-schema-lint.js";
 import {
   ManifestIntegrityViolation,
   manifestIntegrityState,
@@ -176,7 +177,32 @@ export function pluginToolsForRegistration(
 ): Tool[] {
   const schemas = manifest.toolSchemas ?? {};
   const manifestVersion = manifest.version || "1.0.0";
-  return (manifest.tools ?? []).map((tool) =>
-    buildPluginTool(pluginRuntime, tool, pluginId, schemas[tool], manifestVersion),
-  );
+  const tools: Tool[] = [];
+  for (const tool of manifest.tools ?? []) {
+    const schemaEntry = schemas[tool];
+
+    // Build FIRST: structural / authority failures (non-object schema, missing
+    // category) throw here, which boot relies on to fail closed (keep the
+    // previous registry on an invalid manifest). Building before the lint means
+    // a tool with a hard error is never silently dropped — it still throws even
+    // if it would also trip the lint (e.g. a root `type:"array"`).
+    const built = buildPluginTool(pluginRuntime, tool, pluginId, schemaEntry, manifestVersion);
+
+    // #1182 — THEN provider-strict lint, fail-soft per tool. A structurally
+    // valid schema OpenAI/Azure would still 400 on (e.g. an `array` property
+    // without `items`) is dropped so it can't take down the whole turn for
+    // every flow that loads this plugin. Pure structural lint, plugin-agnostic.
+    const violations = lintToolInputSchema(schemaEntry?.inputSchema);
+    if (violations.length > 0) {
+      plog(
+        "warn",
+        { pluginId, phase: PluginPhase.REGISTER_TOOL_SKIP, toolName: tool, violations },
+        "dropping plugin tool: inputSchema fails LLM provider-strict lint",
+      );
+      continue;
+    }
+
+    tools.push(built);
+  }
+  return tools;
 }
