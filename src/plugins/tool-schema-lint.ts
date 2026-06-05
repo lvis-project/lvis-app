@@ -12,6 +12,14 @@
  * drops any tool that violates it, so one bad schema is fail-closed for that
  * tool but fail-soft for the turn.
  *
+ * Scope note: this is a cheap FAST-PATH for the one high-frequency offender, so
+ * the common case never pays a failed provider round-trip. It is deliberately
+ * NOT a complete mirror of every provider strict-mode rule — that would always
+ * lag the provider. Completeness lives at runtime in `engine/llm/
+ * rejected-tool-schema.ts` (provider-as-oracle): on an actual strict-mode 400
+ * the offending tool is dropped and the turn retried, with the provider itself
+ * as the source of truth. Grow THAT path's coverage, not this rule set.
+ *
  * Rule set (start with the high-frequency offender; extend over time):
  *  - `array-missing-items`: any schema node whose `type` includes `"array"`
  *    (single or union) MUST declare `items`. OpenAI/Azure require it.
