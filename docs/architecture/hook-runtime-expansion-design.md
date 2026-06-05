@@ -19,35 +19,35 @@ behind a phase that adds the security control it depends on first.
 
 | Event | File pattern | Fire point (`file:line`) | Blocking semantics |
 |---|---|---|---|
-| `PreToolUse` | `pre-*.sh` | `tools/executor.ts:1833` (step 4, after Layer-3 permission resolves, before execute) | **deny → tool blocked** |
-| `PostToolUse` | `post-*.sh` | `tools/executor.ts:1991` (step 7, after execute; receives `toolOutput` + `isError`) | **informational only** (tool already ran) |
-| `PermissionRequest` | `perm-*.sh` | `tools/executor.ts:1736` (only when `permission.decision === "ask"`, before `approvalGate.requestAndWait()`) | **deny → ask+execute blocked** |
+| `PreToolUse` | `pre-*.sh` | `src/tools/executor.ts:1833` (step 4, after Layer-3 permission resolves, before execute) | **deny → tool blocked** |
+| `PostToolUse` | `post-*.sh` | `src/tools/executor.ts:1991` (step 7, after execute; receives `toolOutput` + `isError`) | **informational only** (tool already ran) |
+| `PermissionRequest` | `perm-*.sh` | `src/tools/executor.ts:1736` (only when `permission.decision === "ask"`, before `approvalGate.requestAndWait()`) | **deny → ask+execute blocked** |
 
-Discovery: `hooks/hook-discovery.ts` resolves `~/.config/lvis/hooks/`, globs `pre-|post-|perm-` prefix + `.sh` suffix (`hookTypeFromName`, line 115), skips dotfiles and `.disabled/`, returns a sorted `DiscoveredHook[]` of `{ fileName, path, hookType, sha256, size }`.
+Discovery: `src/hooks/hook-discovery.ts` resolves `~/.config/lvis/hooks/`, globs `pre-|post-|perm-` prefix + `.sh` suffix (`hookTypeFromName`, line 115), skips dotfiles and `.disabled/`, returns a sorted `DiscoveredHook[]` of `{ fileName, path, hookType, sha256, size }`.
 
 ### 1.2 Trust / quarantine (the part we must preserve)
 
-- **Hash lockfile** `~/.config/lvis/hooks/.lockfile.json` (`LockfileShape`, `hook-discovery.ts:68`): `{ fileName, sha256, acceptedAt }[]`. States: `new` / `changed` / `trusted` / `removed` via `diffAgainstLockfile` (line 202).
-- **Quarantine by default**: at boot `runHookTrustWorkflow` (`hook-trust-prompt.ts:81`) moves every `new`/`changed` hook to `.disabled/` (`disableHook`, `hook-discovery.ts:285`). **No renderer prompt in production** — strict-deny.
-- **TOFU enrollment**: `/permission hooks accept <name>` (`hook-trust-commands.ts:138`) restores from `.disabled/` and records the current sha256. Per CLAUDE.md §Permission Policy this dispatches only for `trustOrigin === "user-keyboard"`.
-- **Quarantine audit**: `emitHookQuarantineAudit` (`boot/steps/hook-system-wiring.ts:80`) → `kind: "hook.quarantined"` + `appendPermissionAuditEntry`.
+- **Hash lockfile** `~/.config/lvis/hooks/.lockfile.json` (`LockfileShape`, `src/hooks/hook-discovery.ts:68`): `{ schemaVersion, updatedAt, hooks: { fileName, sha256, acceptedAt }[] }`. States: `new` / `changed` / `trusted` / `removed` via `diffAgainstLockfile` (line 202).
+- **Quarantine by default**: at boot `runHookTrustWorkflow` (`src/hooks/hook-trust-prompt.ts:81`) moves every `new`/`changed` hook to `.disabled/` (`disableHook`, `src/hooks/hook-discovery.ts:285`). **No renderer prompt in production** — strict-deny.
+- **TOFU enrollment**: `/permission hooks accept <name>` (`src/hooks/hook-trust-commands.ts:138`) restores from `.disabled/` and records the current sha256. Per CLAUDE.md §Permission Policy this dispatches only for `trustOrigin === "user-keyboard"`.
+- **Quarantine audit**: `emitHookQuarantineAudit` (`src/boot/steps/hook-system-wiring.ts:80`) → `kind: "hook.quarantined"` + `appendPermissionAuditEntry`.
 
 ### 1.3 Execution model
 
-- **Runner**: `script-hook-runner.ts:runOneHookScript`. Input = single-line JSON on **stdin** (`ScriptHookStdin`); output = stdout JSON (`ScriptHookStdout = { action: "allow"|"deny", reason }`).
-- **Timeout**: `DEFAULT_HOOK_TIMEOUT_MS = 5_000` (`script-hook-types.ts:103`) — **separate** from `TOOL_TIMEOUT_POLICY`'s 120 s global ceiling. Enforced via `SIGKILL` of the detached process group.
-- **Env allowlist**: only `LVIS_HOOK_TYPE`, `LVIS_HOOK_TOOL_NAME`, `LVIS_HOOK_TRUST_ORIGIN` pass through; `buildSafeChildEnv` strips `ANTHROPIC_API_KEY` / `AWS_*` / `GITHUB_TOKEN` / etc.
+- **Runner**: `src/hooks/script-hook-runner.ts:runOneHookScript`. Input = single-line JSON on **stdin** (`ScriptHookStdin`); output = stdout JSON (`ScriptHookStdout = { action: "allow"|"deny", reason }`).
+- **Timeout**: `DEFAULT_HOOK_TIMEOUT_MS = 5_000` (`src/hooks/script-hook-types.ts:103`) — **separate** from `TOOL_TIMEOUT_POLICY`'s 120 s global ceiling. Enforced via `SIGKILL` of the detached process group.
+- **Env allowlist**: `buildSafeChildEnv` (`src/tools/safe-env.ts`) forwards only a generic non-secret allowlist (`FORWARD_ENV_KEYS`: `PATH`, `HOME`, `USER`, `USERNAME`, `LANG`, `LC_*`, `TZ`, …) plus the three injected `LVIS_HOOK_TYPE` / `LVIS_HOOK_TOOL_NAME` / `LVIS_HOOK_TRUST_ORIGIN` vars. Everything else — `LVIS_*`, `ANTHROPIC_API_KEY`, `OPENAI_API_KEY`, `GOOGLE_*`, `AWS_*`, `GITHUB_TOKEN`, future provider secrets — is stripped.
 - **Fail-closed**: non-zero exit, timeout, spawn error, or malformed stdout → **deny**.
 - **Composition**: deny precedence — a hook may downgrade an upstream `allow` to `deny`, never upgrade `deny` to `allow`. **No `modify`/`updatedInput` action exists in v1** (deferred pending signing).
-- **DLP**: `input` strings are DLP-redacted at the caller (`script-hook-manager.ts`) before dispatch.
+- **DLP**: `input` strings are DLP-redacted at the caller (`src/hooks/script-hook-manager.ts`) before dispatch.
 
-### 1.4 What `post-turn-hook-chain.ts` is (and is NOT)
+### 1.4 What `src/hooks/post-turn-hook-chain.ts` is (and is NOT)
 
 `PostTurnHookChain` is an **internal, hardcoded** pipeline (mark-stale → checkpoint → saveSession → extractMemory → title → audit → todo → idle-poke) that runs after `queryLoop` resolves. It is **not** a user-script hook surface. The new `Stop` / `PostCompact` lifecycle events (below) are conceptually adjacent but are a **distinct, user-facing** surface — the design keeps them separate and never lets a user hook block the internal persistence chain.
 
 ### 1.5 Audit shape today
 
-`audit-schema.ts:HookResult = { hookName, hookType: "pre"|"post"|"perm", action, reason, durationMs }`, carried in `AuditAllow/Ask/Deny.hookChain[]`. This shape is **too narrow** for the expansion (no event surface beyond the 3, no handler type, no command identity, no matcher) — §7 extends it.
+`src/audit/audit-schema.ts:HookResult = { hookName, hookType: "pre"|"post"|"perm", action, reason, durationMs }`, carried in `AuditAllow/Ask/Deny.hookChain[]`. This shape is **too narrow** for the expansion (no event surface beyond the 3, no handler type, no command identity, no matcher) — §7 extends it.
 
 ---
 
@@ -133,15 +133,15 @@ Each proposed event below has a **verified existing fire point**. `Blocking` sta
 
 | Event | Fire point (`file:line`) | Subject for `matcher` | Blocking | Context payload (additions to base) |
 |---|---|---|---|---|
-| `PreToolUse` *(existing)* | `tools/executor.ts:1833` | `toolName` | **yes** | `input`, `source`, `category` |
-| `PostToolUse` *(existing)* | `tools/executor.ts:1991` | `toolName` | no | `toolOutput`, `isError` |
-| `PermissionRequest` *(existing)* | `tools/executor.ts:1736` | `toolName` | **yes** | `input`, permission verdict |
-| `PostToolUseFailure` | `tools/executor.ts:~1949` (execute returned `isError`) | `toolName` | no | `errorMessage`, `durationMs` |
-| `PermissionDenied` | `tools/executor.ts:~1707–1822` deny paths (centralize in `auditToolCall`) | `toolName` | no (observe) | `denyReason { layer, source }` |
-| `UserPromptSubmit` | `conversation-loop.ts:~1770` (after classify/route, before `queryLoop`) | input text | **yes** (deny → turn refused) | `inputText`*, `inputOrigin`, `route`, `classification` |
-| `SessionStart` | `conversation-loop.ts:~1640` (`runTurn` entry / `startRoutineConversation`) | sessionId | no | `sessionMeta` (routine scope / persona) |
-| `Stop` | `conversation-loop.ts:~1829` (`runTurn` finally, before post-turn chain) | sessionId | no | `stopReason`, `toolCount`, `durationMs` |
-| `PreCompact` | `conversation-loop.ts:~3322` (`runPreflightGuard`) / `manualCompact` | sessionId | no | `reason` (threshold/manual), `tokenEstimate` |
+| `PreToolUse` *(existing)* | `src/tools/executor.ts:1833` | `toolName` | **yes** | `input`, `source`, `category` |
+| `PostToolUse` *(existing)* | `src/tools/executor.ts:1991` | `toolName` | no | `toolOutput`, `isError` |
+| `PermissionRequest` *(existing)* | `src/tools/executor.ts:1736` | `toolName` | **yes** | `input`, permission verdict |
+| `PostToolUseFailure` | `src/tools/executor.ts:~1949` (execute returned `isError`) | `toolName` | no | `errorMessage`, `durationMs` |
+| `PermissionDenied` | `src/tools/executor.ts:~1707–1822` deny paths (centralize in `auditToolCall`) | `toolName` | no (observe) | `denyReason { layer, source }` |
+| `UserPromptSubmit` | `src/engine/conversation-loop.ts:~1770` (after classify/route, before `queryLoop`) | input text | **yes** (deny → turn refused) | `inputText`*, `inputOrigin`, `route`, `classification` |
+| `SessionStart` | `src/engine/conversation-loop.ts:~1640` (`runTurn` entry / `startRoutineConversation`) | sessionId | no | `sessionMeta` (routine scope / persona) |
+| `Stop` | `src/engine/conversation-loop.ts:~1829` (`runTurn` finally, before post-turn chain) | sessionId | no | `stopReason`, `toolCount`, `durationMs` |
+| `PreCompact` | `src/engine/conversation-loop.ts:~3322` (`runPreflightGuard`) / `manualCompact` | sessionId | no | `reason` (threshold/manual), `tokenEstimate` |
 | `PostCompact` | after `auto-compact` returns (in `runPreflightGuard` / `manualCompact`) | sessionId | no | `messagesBefore/After`, `tokensBefore/After` |
 
 \* `UserPromptSubmit` `inputText` and any tool `input` are **DLP-redacted** before dispatch (§6.6). `UserPromptSubmit` is the only **new** blocking event; it must inherit the same fail-closed semantics as `PreToolUse`.
