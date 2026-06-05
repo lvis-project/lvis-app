@@ -39,6 +39,13 @@ const log = createLogger("adapter");
 export type VercelVendor = LLMVendor | "openai-compatible";
 
 const COPILOT_BASE_URL = "https://models.github.ai/inference";
+// Tool-name aliases applied ONLY on the OpenAI Responses wire. Keep this to
+// HOST builtins (tool_search) — never alias a plugin/MCP tool here. The
+// provider-as-oracle guard (engine/llm/rejected-tool-schema.ts) drops a
+// rejected tool by matching the provider error against REGISTRY names; if a
+// third-party tool were aliased, a strict-mode 400 would name the alias and the
+// oracle would miss it on this wire. tool_search is host-controlled and never
+// 400s, so the current single entry is safe.
 const OPENAI_RESPONSES_TOOL_NAME_ALIASES: Readonly<Record<string, string>> = {
   [TOOL_SEARCH_TOOL_NAME]: OPENAI_RESPONSES_TOOL_SEARCH_ALIAS,
 };
