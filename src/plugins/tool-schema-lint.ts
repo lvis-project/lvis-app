@@ -40,14 +40,14 @@ function escapePointerSegment(key: string): string {
 function walk(node: unknown, pointer: string, out: ToolSchemaViolation[]): void {
   if (node === null || typeof node !== "object" || Array.isArray(node)) return;
   const schema = node as Record<string, unknown>;
-  const here = pointer === "" ? "/" : pointer;
 
-  // Rule: array-missing-items.
+  // Rule: array-missing-items. `pointer` is an RFC 6901 JSON Pointer — the empty
+  // string is the document root (the message prints "(root)" for readability).
   if (typeIncludesArray(schema.type) && schema.items === undefined) {
     out.push({
-      pointer: here,
+      pointer,
       rule: "array-missing-items",
-      message: `array schema at ${here} is missing "items" (OpenAI/Azure reject arrays without an items schema)`,
+      message: `array schema at ${pointer || "(root)"} is missing "items" (OpenAI/Azure reject arrays without an items schema)`,
     });
   }
 

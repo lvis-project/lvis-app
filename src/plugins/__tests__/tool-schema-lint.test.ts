@@ -79,6 +79,13 @@ describe("lintToolInputSchema — array-missing-items (#1182)", () => {
     expect(v[0].pointer).toBe("/properties/a~1b~0c");
   });
 
+  it("uses the RFC 6901 root pointer (empty string) for a root-level violation", () => {
+    const v = lintToolInputSchema({ type: "array" });
+    expect(v).toHaveLength(1);
+    expect(v[0].pointer).toBe("");
+    expect(v[0].message).toContain("(root)");
+  });
+
   it("is total — never throws on non-schema / malformed input", () => {
     expect(lintToolInputSchema(undefined)).toEqual([]);
     expect(lintToolInputSchema(null)).toEqual([]);
