@@ -97,9 +97,13 @@ describe("PluginMarketplaceService managed bootstrap", () => {
     const result = await service.ensureManagedInstalled();
 
     expect(installSpy).toHaveBeenCalled();
-    const [pluginId, actor] = installSpy.mock.calls[0]!;
+    const [pluginId, actor, catalogSnapshot] = installSpy.mock.calls[0]!;
     expect(pluginId).toBe("meeting");
     expect(actor).toBe("it-admin");
+    // #1098 — the managed path passes the catalog snapshot it already fetched
+    // so the worker installs from one consistent snapshot (no re-fetch).
+    expect(Array.isArray(catalogSnapshot)).toBe(true);
+    expect((catalogSnapshot as Array<{ id: string }>).some((p) => p.id === "meeting")).toBe(true);
     expect(result.installed).toEqual(["meeting"]);
     expect(result.failed).toEqual([]);
   });
@@ -168,9 +172,13 @@ describe("PluginMarketplaceService managed bootstrap", () => {
     const result = await service.ensureManagedInstalled();
 
     expect(installSpy).toHaveBeenCalled();
-    const [pluginId, actor] = installSpy.mock.calls[0]!;
+    const [pluginId, actor, catalogSnapshot] = installSpy.mock.calls[0]!;
     expect(pluginId).toBe("meeting");
     expect(actor).toBe("it-admin");
+    // #1098 — the managed path passes the catalog snapshot it already fetched
+    // so the worker installs from one consistent snapshot (no re-fetch).
+    expect(Array.isArray(catalogSnapshot)).toBe(true);
+    expect((catalogSnapshot as Array<{ id: string }>).some((p) => p.id === "meeting")).toBe(true);
     expect(result.installed).toEqual(["meeting"]);
     expect(result.failed).toEqual([]);
   });
