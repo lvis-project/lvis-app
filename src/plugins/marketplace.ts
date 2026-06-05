@@ -42,6 +42,17 @@ function shaOfManifest(manifest: unknown): string {
   return createHash("sha256").update(canonicalJSON(manifest)).digest("hex");
 }
 
+/**
+ * #1098 — content fingerprint of the catalog item that drove an install's
+ * escalation decision. Recorded in the escalation audit so forensics can pin
+ * the EXACT catalog snapshot used (policy + version + metadata), and the whole
+ * install transaction reads from one in-memory snapshot rather than re-fetching
+ * the catalog between the policy decision and the artifact install (TOCTOU).
+ */
+function shaOfCatalogItem(item: PluginMarketplaceItem): string {
+  return createHash("sha256").update(canonicalJSON(item)).digest("hex");
+}
+
 function resolveRollbackInstallSource(
   currentSource: PluginRegistryEntryInstallSource | undefined,
   snapshotSource: PluginRegistryEntryInstallSource | undefined,
@@ -372,9 +383,18 @@ export class PluginMarketplaceService {
     pluginId: string,
     onProgress?: (event: InstallerProgressEvent) => void,
   ): Promise<{ pluginId: string; installed: true }> {
+    // #1098 — capture ONE catalog snapshot and use it for the whole install:
+    // the escalation decision, the deployment guard, and the artifact select.
+    // Previously the escalation read `getPluginDetail` while the guard/install
+    // re-fetched `listPlugins`, leaving a TOCTOU window where the policy that
+    // drove escalation could differ from the policy/artifact actually installed.
     let actor: "user" | "it-admin" = "user";
+    let catalogSnapshot: PluginMarketplaceItem[] = [];
     try {
-      const catalogItem = await this.fetcher.getPluginDetail(pluginId);
+      catalogSnapshot = await this.fetcher.listPlugins();
+      const catalogItem = catalogSnapshot.find(
+        (x) => x.id === pluginId || x.slug === pluginId,
+      );
       if (catalogItem && normalizeInstallPolicy(catalogItem) === "admin") {
         actor = "it-admin";
         try {
@@ -382,14 +402,15 @@ export class PluginMarketplaceService {
             timestamp: new Date().toISOString(),
             sessionId: "marketplace-install",
             type: "info",
-            input: JSON.stringify({
+            pluginInstall: {
               event: "plugin-install-escalation",
               pluginId,
               catalogPolicy: "admin",
               actorOriginal: "user",
               actorEscalated: "it-admin",
               location: "marketplace.install",
-            }),
+              catalogSnapshotHash: shaOfCatalogItem(catalogItem),
+            },
           });
         } catch {
           // Audit failure must never block install.
@@ -405,16 +426,23 @@ export class PluginMarketplaceService {
       touchedEntries: new Map(),
     };
     try {
-      return await this.installWithDependencies(pluginId, actor, new Set<string>(), state, onProgress);
+      return await this.installWithDependencies(pluginId, actor, catalogSnapshot, new Set<string>(), state, onProgress);
     } catch (error) {
       await this.rollbackInstallOperation(state);
       throw error;
     }
   }
 
+  /**
+   * @param catalogSnapshot the single catalog snapshot captured by the caller
+   *   (#1098). The guard check and artifact selection read from THIS snapshot
+   *   instead of re-fetching, so the policy that drove escalation is the same
+   *   policy/artifact that gets installed.
+   */
   private async installWithDependencies(
     pluginId: string,
     actor: "user" | "it-admin",
+    catalogSnapshot: PluginMarketplaceItem[],
     seen: Set<string>,
     state: InstallOperationState,
     onProgress?: (event: InstallerProgressEvent) => void,
@@ -423,8 +451,7 @@ export class PluginMarketplaceService {
       return { pluginId, installed: true };
     }
     seen.add(pluginId);
-    const plugins = await this.fetcher.listPlugins();
-    const plugin = plugins.find((x) => x.id === pluginId || x.slug === pluginId);
+    const plugin = catalogSnapshot.find((x) => x.id === pluginId || x.slug === pluginId);
     if (!plugin) {
       throw new Error(`Plugin not found in marketplace: ${pluginId}`);
     }
@@ -606,14 +633,15 @@ export class PluginMarketplaceService {
         // bypass the public `install()` entry (which derives actor from
         // catalog) and drive `installWithDependencies` directly with
         // actor="it-admin". This is the same trust anchor as the IPC
-        // path (catalog → admin escalation), just expressed without the
-        // catalog round-trip since we already hold the catalog item.
+        // path (catalog → admin escalation). We pass the catalog snapshot
+        // (`plugins`) we already fetched above so the install reads from one
+        // consistent snapshot (#1098) rather than re-fetching the catalog.
         const state: InstallOperationState = {
           installedPluginIds: [],
           touchedEntries: new Map(),
         };
         try {
-          await this.installWithDependencies(plugin.id, "it-admin", new Set<string>(), state);
+          await this.installWithDependencies(plugin.id, "it-admin", plugins, new Set<string>(), state);
         } catch (innerErr) {
           await this.rollbackInstallOperation(state);
           throw innerErr;
@@ -1494,6 +1522,15 @@ export class PluginMarketplaceService {
         // Register in the plugin registry. installSource follows the
         // manifest's declared installPolicy so dev-sideloading an admin-policy
         // manifest doesn't silently downgrade it to a user install.
+        //
+        // #1098 — intentional boundary difference from marketplace install:
+        // there is NO actor-escalation audit here. Marketplace escalation is
+        // audited because the catalog is a remote trust anchor whose policy the
+        // user did not author; here the installPolicy comes from a local,
+        // developer-controlled manifest and the whole path is gated upstream by
+        // `isDevModeUnlocked()`, so the developer IS the authority — there is no
+        // user→it-admin escalation event to record. The admin-overwrite guard
+        // above still prevents a sideload from clobbering a managed install.
         const localInstallSource: PluginRegistryEntryInstallSource =
           manifest.installPolicy === "admin" ? "admin" : "local-dev";
         const registryManifestPath = posix.join(pluginId, "plugin.json");

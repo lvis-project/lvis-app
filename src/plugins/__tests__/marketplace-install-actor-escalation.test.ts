@@ -28,7 +28,16 @@ interface CapturedAuditEntry {
   timestamp: string;
   sessionId: string;
   type: string;
-  input: string;
+  input?: string;
+  pluginInstall?: {
+    event: string;
+    pluginId: string;
+    catalogPolicy: string;
+    actorOriginal: string;
+    actorEscalated: string;
+    location: string;
+    catalogSnapshotHash: string;
+  };
 }
 
 function makeAuditSink() {
@@ -42,6 +51,11 @@ function makeAuditSink() {
     },
   };
 }
+
+// #1098 — the escalation event is now a typed structured field (was an ad-hoc
+// JSON.stringify blob in `input`).
+const findEscalation = (entries: CapturedAuditEntry[]) =>
+  entries.find((e) => e.pluginInstall?.event === "plugin-install-escalation");
 
 describe("PluginMarketplaceService.install — actor escalation", () => {
   let testDir: string;
@@ -114,17 +128,17 @@ describe("PluginMarketplaceService.install — actor escalation", () => {
     // the escalation audit + actor derivation happen *before* download.
     await expect(service.install("mp-test")).rejects.toBeDefined();
 
-    const escalation = audit.entries.find((e) =>
-      typeof e.input === "string" && e.input.includes("plugin-install-escalation"),
-    );
+    const escalation = findEscalation(audit.entries);
     expect(escalation).toBeDefined();
-    const parsed = JSON.parse(escalation!.input) as Record<string, unknown>;
-    expect(parsed.event).toBe("plugin-install-escalation");
-    expect(parsed.pluginId).toBe("mp-test");
-    expect(parsed.catalogPolicy).toBe("admin");
-    expect(parsed.actorOriginal).toBe("user");
-    expect(parsed.actorEscalated).toBe("it-admin");
-    expect(parsed.location).toBe("marketplace.install");
+    const payload = escalation!.pluginInstall!;
+    expect(payload.event).toBe("plugin-install-escalation");
+    expect(payload.pluginId).toBe("mp-test");
+    expect(payload.catalogPolicy).toBe("admin");
+    expect(payload.actorOriginal).toBe("user");
+    expect(payload.actorEscalated).toBe("it-admin");
+    expect(payload.location).toBe("marketplace.install");
+    // #1098 — the exact catalog snapshot that drove escalation is pinned.
+    expect(payload.catalogSnapshotHash).toMatch(/^[0-9a-f]{64}$/);
   });
 
   it("does NOT emit escalation audit when catalog installPolicy === 'user'", async () => {
@@ -134,10 +148,7 @@ describe("PluginMarketplaceService.install — actor escalation", () => {
 
     await expect(service.install("mp-test")).rejects.toBeDefined();
 
-    const escalation = audit.entries.find((e) =>
-      typeof e.input === "string" && e.input.includes("plugin-install-escalation"),
-    );
-    expect(escalation).toBeUndefined();
+    expect(findEscalation(audit.entries)).toBeUndefined();
   });
 
   it("does NOT emit escalation audit when installPolicy is omitted (defaults to user)", async () => {
@@ -147,10 +158,7 @@ describe("PluginMarketplaceService.install — actor escalation", () => {
 
     await expect(service.install("mp-test")).rejects.toBeDefined();
 
-    const escalation = audit.entries.find((e) =>
-      typeof e.input === "string" && e.input.includes("plugin-install-escalation"),
-    );
-    expect(escalation).toBeUndefined();
+    expect(findEscalation(audit.entries)).toBeUndefined();
   });
 
   it("admin escalation bypasses deployment-guard (no 'installed by user' rejection)", async () => {
@@ -163,11 +171,11 @@ describe("PluginMarketplaceService.install — actor escalation", () => {
     await expect(service.install("mp-test")).rejects.not.toThrow(/installed by user/);
   });
 
-  it("falls back to actor=user when catalog detail fetch throws", async () => {
-    // Replace fetcher with one that throws on getPluginDetail. Install
-    // should still proceed with actor="user" (guard then rejects with
-    // 'installed by user' for an admin policy — but we wrote a user-policy
-    // catalog so install just fails on artifact backend).
+  it("falls back to actor=user when the catalog snapshot fetch throws", async () => {
+    // #1098 — escalation now reads from the single listPlugins snapshot. If that
+    // fetch fails, install proceeds with actor="user" (the deployment guard then
+    // re-blocks an admin policy; here a user-policy catalog just fails on the
+    // artifact backend).
     await writeCatalog("user");
     const audit = makeAuditSink();
     const paths = makeTestPluginPaths({ rootDir: testDir, pluginsRoot: pluginsDir });
@@ -176,7 +184,7 @@ describe("PluginMarketplaceService.install — actor escalation", () => {
       pluginsRoot: paths.pluginsRoot,
     });
     const fetcher = new MockMarketplaceFetcher(marketplacePath);
-    vi.spyOn(fetcher, "getPluginDetail").mockRejectedValue(new Error("network down"));
+    vi.spyOn(fetcher, "listPlugins").mockRejectedValue(new Error("network down"));
     const service = new PluginMarketplaceService(
       paths,
       fetcher,
@@ -186,9 +194,35 @@ describe("PluginMarketplaceService.install — actor escalation", () => {
 
     await expect(service.install("mp-test")).rejects.toBeDefined();
     // No escalation emitted — fetch failed, actor stayed "user".
-    const escalation = audit.entries.find((e) =>
-      typeof e.input === "string" && e.input.includes("plugin-install-escalation"),
+    expect(findEscalation(audit.entries)).toBeUndefined();
+  });
+
+  it("uses ONE catalog snapshot for escalation + install (no getPluginDetail re-fetch) — #1098 TOCTOU", async () => {
+    // The escalation decision and the guard/artifact selection must read the
+    // same snapshot. The redesign drops the separate getPluginDetail read that
+    // created the TOCTOU window; install now derives everything from a single
+    // listPlugins() snapshot.
+    await writeCatalog("admin");
+    const audit = makeAuditSink();
+    const paths = makeTestPluginPaths({ rootDir: testDir, pluginsRoot: pluginsDir });
+    const guard = new PluginDeploymentGuard({
+      registryPath: paths.registryPath,
+      pluginsRoot: paths.pluginsRoot,
+    });
+    const fetcher = new MockMarketplaceFetcher(marketplacePath);
+    const detailSpy = vi.spyOn(fetcher, "getPluginDetail");
+    const service = new PluginMarketplaceService(
+      paths,
+      fetcher,
+      guard,
+      audit.logger as unknown as ConstructorParameters<typeof PluginMarketplaceService>[3],
     );
-    expect(escalation).toBeUndefined();
+
+    await expect(service.install("mp-test")).rejects.toBeDefined();
+
+    // getPluginDetail is no longer part of the install path — the snapshot is
+    // the listPlugins() result, shared by escalation + guard + artifact.
+    expect(detailSpy).not.toHaveBeenCalled();
+    expect(findEscalation(audit.entries)?.pluginInstall?.catalogSnapshotHash).toMatch(/^[0-9a-f]{64}$/);
   });
 });

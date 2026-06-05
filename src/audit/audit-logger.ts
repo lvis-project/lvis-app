@@ -79,6 +79,27 @@ function readLastNonEmptyLineSync(filePath: string): string {
   }
 }
 
+/**
+ * Plugin install privilege-escalation audit (#1098). Emitted when a marketplace
+ * install escalates the actor user → it-admin because the catalog installPolicy
+ * is "admin". Typed (replaces an ad-hoc `JSON.stringify` blob in `input`) so
+ * forensics can identify, from a single audit row: the catalog policy that drove
+ * the escalation, the escalation source (`location`), and the EXACT catalog
+ * snapshot used (`catalogSnapshotHash`) — the last closes the TOCTOU audit gap
+ * where the audited policy and the installed artifact could otherwise diverge.
+ */
+export interface PluginInstallEscalationAudit {
+  event: "plugin-install-escalation";
+  pluginId: string;
+  catalogPolicy: "admin";
+  actorOriginal: "user";
+  actorEscalated: "it-admin";
+  /** Internal call site that performed the escalation (e.g. "marketplace.install"). */
+  location: string;
+  /** sha256 over the canonical catalog item that drove escalation AND the install — pins the exact snapshot. */
+  catalogSnapshotHash: string;
+}
+
 export interface AuditEntry {
   timestamp: string;
   sessionId: string;
@@ -89,6 +110,8 @@ export interface AuditEntry {
     totalRedactions: number;
     turnId: string;
   };
+  /** Plugin install privilege-escalation payload (#1098) — populated for install-escalation events. */
+  pluginInstall?: PluginInstallEscalationAudit;
   input?: string;
   output?: string;
   toolCalls?: Array<{
