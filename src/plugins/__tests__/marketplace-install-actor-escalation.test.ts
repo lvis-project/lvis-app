@@ -139,6 +139,9 @@ describe("PluginMarketplaceService.install — actor escalation", () => {
     expect(payload.location).toBe("marketplace.install");
     // #1098 — the exact catalog snapshot that drove escalation is pinned.
     expect(payload.catalogSnapshotHash).toMatch(/^[0-9a-f]{64}$/);
+    // Concise human-readable summary populates the Audit UI preview column.
+    expect(escalation!.input).toContain("plugin-install-escalation");
+    expect(escalation!.input).toContain("mp-test");
   });
 
   it("does NOT emit escalation audit when catalog installPolicy === 'user'", async () => {
@@ -171,11 +174,10 @@ describe("PluginMarketplaceService.install — actor escalation", () => {
     await expect(service.install("mp-test")).rejects.not.toThrow(/installed by user/);
   });
 
-  it("falls back to actor=user when the catalog snapshot fetch throws", async () => {
-    // #1098 — escalation now reads from the single listPlugins snapshot. If that
-    // fetch fails, install proceeds with actor="user" (the deployment guard then
-    // re-blocks an admin policy; here a user-policy catalog just fails on the
-    // artifact backend).
+  it("fails fast with the original error when the catalog snapshot fetch throws (no masking)", async () => {
+    // #1098 — the single listPlugins snapshot drives the whole install, so a
+    // fetch failure is fatal. The original error must propagate (not be swallowed
+    // and re-surfaced as a misleading "Plugin not found").
     await writeCatalog("user");
     const audit = makeAuditSink();
     const paths = makeTestPluginPaths({ rootDir: testDir, pluginsRoot: pluginsDir });
@@ -192,10 +194,8 @@ describe("PluginMarketplaceService.install — actor escalation", () => {
       audit.logger as unknown as ConstructorParameters<typeof PluginMarketplaceService>[3],
     );
 
-    // Fail-closed: an empty snapshot resolves no catalog item, so the install
-    // rejects with "Plugin not found" rather than proceeding on stale data.
-    await expect(service.install("mp-test")).rejects.toThrow(/not found in marketplace/i);
-    // No escalation emitted — fetch failed, actor stayed "user".
+    await expect(service.install("mp-test")).rejects.toThrow(/network down/);
+    // No escalation emitted — fetch failed before any policy decision.
     expect(findEscalation(audit.entries)).toBeUndefined();
   });
 
