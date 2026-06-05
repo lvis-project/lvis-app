@@ -60,3 +60,20 @@ export function rejectedToolNameFromError(
 
   return knownToolNames.includes(named) ? named : undefined;
 }
+
+/**
+ * Drop every tool whose name is in `dropped` from `schemas`.
+ *
+ * The turn rebuilds its tool set from scope after `request_plugin` activation
+ * and `tool_search` promotion; routing those rebuilds through this keeps any
+ * tool the provider already 400'd on this turn excluded, so a rebuild can't
+ * reintroduce it and re-break the turn.
+ */
+export function withoutDroppedTools<T extends { name: string }>(
+  schemas: readonly T[],
+  dropped: ReadonlySet<string>,
+): T[] {
+  return dropped.size === 0
+    ? [...schemas]
+    : schemas.filter((schema) => !dropped.has(schema.name));
+}

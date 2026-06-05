@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { rejectedToolNameFromError } from "../rejected-tool-schema.js";
+import { rejectedToolNameFromError, withoutDroppedTools } from "../rejected-tool-schema.js";
 import type { ProviderErrorDiagnostics } from "../provider-error-diagnostics.js";
 
 function diag(over: Partial<ProviderErrorDiagnostics>): ProviderErrorDiagnostics {
@@ -70,5 +70,20 @@ describe("rejectedToolNameFromError — provider-as-oracle (#1182)", () => {
         [],
       ),
     ).toBeUndefined();
+  });
+});
+
+describe("withoutDroppedTools — keep dropped tools out across mid-turn rebuilds", () => {
+  const tools = [{ name: "a" }, { name: "b" }, { name: "c" }];
+
+  it("returns a copy unchanged when nothing has been dropped", () => {
+    const out = withoutDroppedTools(tools, new Set());
+    expect(out.map((t) => t.name)).toEqual(["a", "b", "c"]);
+    expect(out).not.toBe(tools);
+  });
+
+  it("excludes every dropped tool (a rebuild can't reintroduce one)", () => {
+    expect(withoutDroppedTools(tools, new Set(["b"])).map((t) => t.name)).toEqual(["a", "c"]);
+    expect(withoutDroppedTools(tools, new Set(["a", "c"])).map((t) => t.name)).toEqual(["b"]);
   });
 });

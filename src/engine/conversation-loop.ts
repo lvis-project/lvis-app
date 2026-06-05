@@ -42,7 +42,7 @@ import type {
   TokenUsageByModel,
 } from "./llm/types.js";
 import { collectRoundStream } from "./turn/stream-collector.js";
-import { rejectedToolNameFromError } from "./llm/rejected-tool-schema.js";
+import { rejectedToolNameFromError, withoutDroppedTools } from "./llm/rejected-tool-schema.js";
 import {
   handleRequestPlugin,
   REQUEST_PLUGIN_TOOL,
@@ -2193,13 +2193,18 @@ export class ConversationLoop {
         },
       });
     };
-    // Option C: scope is mutable within the turn. Mutating the
-    // caller's Set directly means the next turn's fallback sees every plugin
-    // that was activated here.
-    let toolSchemas: ToolSchema[] = this.rebuildToolSchemas(scope);
     // Provider-as-oracle: tools the provider 400'd on (invalid_function_parameters)
     // and we dropped this turn. Turn-scoped — resets naturally each queryLoop call.
     const droppedToolSchemaNames = new Set<string>();
+    // Option C: scope is mutable within the turn. Mutating the caller's Set
+    // directly means the next turn's fallback sees every plugin that was
+    // activated here. Route EVERY turn rebuild through this so already-dropped
+    // tools stay excluded — a mid-turn rebuild (request_plugin / tool_search)
+    // must not reintroduce a tool the provider already rejected and re-break
+    // the turn.
+    const rebuildTurnToolSchemas = (): ToolSchema[] =>
+      withoutDroppedTools(this.rebuildToolSchemas(scope), droppedToolSchemaNames);
+    let toolSchemas: ToolSchema[] = rebuildTurnToolSchemas();
     const withServingIdentity = (
       result: {
         text: string;
@@ -2741,7 +2746,7 @@ export class ConversationLoop {
       const rebuiltAfterPlugin = pluginOutcome.activatedPluginIds.length > 0;
       if (rebuiltAfterPlugin) {
         scope.deferral = this.shouldDeferToolSchemas(scope.activePluginIds);
-        toolSchemas = this.rebuildToolSchemas(scope);
+        toolSchemas = rebuildTurnToolSchemas();
       }
       const catalogCountAfterPlugin = this.deps.toolRegistry.getToolCatalogForScope(scope).length;
       for (const rr of pluginOutcome.results) {
@@ -2795,7 +2800,7 @@ export class ConversationLoop {
 
       const rebuiltAfterSearch = searchOutcome.promotedToolNames.length > 0;
       if (rebuiltAfterSearch) {
-        toolSchemas = this.rebuildToolSchemas(scope);
+        toolSchemas = rebuildTurnToolSchemas();
       }
       const addedBySearch = Math.max(0, toolSchemas.length - prevToolCountForSearch);
       for (const rr of searchOutcome.results) {
