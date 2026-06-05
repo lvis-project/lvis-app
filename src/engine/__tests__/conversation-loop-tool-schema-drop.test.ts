@@ -42,15 +42,21 @@ function rejection(toolName: string): StreamEvent {
   } as StreamEvent;
 }
 
-function makeLoop(provider: LLMProvider) {
+type ToolSpec = { name: string; source?: "builtin" | "mcp" };
+
+function makeLoop(
+  provider: LLMProvider,
+  tools: ToolSpec[] = [{ name: "good_tool" }, { name: "bad_tool" }],
+) {
   const toolRegistry = new ToolRegistry();
-  for (const name of ["good_tool", "bad_tool"]) {
+  for (const { name, source = "builtin" } of tools) {
     toolRegistry.register(
       createDynamicTool({
         name,
         description: `${name} description`,
-        source: "builtin",
+        source,
         category: "read",
+        ...(source === "mcp" ? { mcpServerId: "test-server" } : {}),
         jsonSchema: { type: "object", properties: { q: { type: "string" } }, required: [] },
         isReadOnly: () => true,
         execute: async () => ({ output: "ok", isError: false }),
@@ -107,6 +113,29 @@ describe("ConversationLoop — provider-as-oracle tool-schema guard (#1182)", ()
     expect(provider.toolNamesPerCall).toHaveLength(2);
     expect(provider.toolNamesPerCall[1]).not.toContain("bad_tool");
     expect(result.stopReason).toBe("stream-error");
+  });
+
+  it("drops an MCP-sourced tool the same way (MCP tools have no plugin-load lint — the oracle is their only guard)", async () => {
+    const provider = new ToolRecordingProvider([
+      [rejection("mcp_bad_tool")],
+      [
+        { type: "text_delta", text: "done" },
+        { type: "message_complete", stopReason: "end_turn" },
+      ],
+    ]);
+    const loop = makeLoop(provider, [
+      { name: "good_tool", source: "builtin" },
+      { name: "mcp_bad_tool", source: "mcp" },
+    ]);
+
+    const result = await loop.runTurn("go", undefined, undefined, { inputOrigin: "user-keyboard" });
+
+    expect(result.stopReason).toBe("end_turn");
+    expect(provider.toolNamesPerCall).toHaveLength(2);
+    // The MCP tool was in scope on the first call and dropped on the retry.
+    expect(provider.toolNamesPerCall[0]).toEqual(expect.arrayContaining(["good_tool", "mcp_bad_tool"]));
+    expect(provider.toolNamesPerCall[1]).toContain("good_tool");
+    expect(provider.toolNamesPerCall[1]).not.toContain("mcp_bad_tool");
   });
 
   it("does not drop tools for a non-schema provider error (rate limit)", async () => {
