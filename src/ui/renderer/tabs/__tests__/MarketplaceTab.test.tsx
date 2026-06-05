@@ -14,8 +14,9 @@
 // @vitest-environment jsdom
 import "../../../../../test/renderer/setup.js";
 import { describe, it, expect, vi } from "vitest";
-import { fireEvent, render, waitFor } from "@testing-library/react";
+import { fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { MarketplaceTab } from "../MarketplaceTab.js";
+import type { MarketplaceItem } from "../../types.js";
 import type { LvisApi } from "../../types.js";
 import { makeMockLvisApi } from "../../../../../test/renderer/mock-lvis-api.js";
 
@@ -91,5 +92,30 @@ describe("MarketplaceTab", () => {
     // After expanding, the URL save button + body marker become visible.
     await findByTestId("marketplace:advanced:body");
     await findByTestId("marketplace:url:save");
+  });
+
+  it("routes an admin-policy plugin install through the consent dialog (#1098)", async () => {
+    const adminPlugin: MarketplaceItem = {
+      id: "admin-plug",
+      name: "Admin Plug",
+      description: "d",
+      packageSpec: "s",
+      installed: false,
+      enabled: false,
+      pluginType: "plugin",
+      installPolicy: "admin",
+    };
+    const api = marketplaceTabApi({
+      listMarketplacePlugins: vi.fn().mockResolvedValue([adminPlugin]),
+    });
+    const { findByTestId } = render(<MarketplaceTab {...defaultProps(api)} />);
+
+    fireEvent.click(await findByTestId("marketplace:action:admin-plug"));
+
+    // Clicking install on an admin plugin opens the consent dialog (privilege
+    // warning) rather than installing immediately — the actual install only
+    // runs from the dialog's acknowledged confirm button.
+    await waitFor(() => expect(screen.getByRole("alert").textContent).toContain("관리자"));
+    expect(screen.getByRole("button", { name: "관리자 권한으로 설치" })).toBeTruthy();
   });
 });
