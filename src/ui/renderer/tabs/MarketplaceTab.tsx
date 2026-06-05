@@ -11,6 +11,7 @@ import type { LvisApi, MarketplaceItem } from "../types.js";
 import type { MarketplacePackageType } from "../../../shared/assistant-context.js";
 import { SettingsPageHeader } from "../components/SettingsPageHeader.js";
 import { SettingsSection } from "../components/SettingsSection.js";
+import { PluginInstallDialog } from "../dialogs/PluginInstallDialog.js";
 import { useTranslation } from "../../../i18n/react.js";
 
 export interface MarketplaceTabProps {
@@ -49,6 +50,8 @@ export function MarketplaceTab(props: MarketplaceTabProps) {
   const [packageStatus, setPackageStatus] = useState(() => t("marketplaceTab.statusLoading"));
   const [filter, setFilter] = useState<"all" | MarketplacePackageType>("all");
   const [workingSlug, setWorkingSlug] = useState<string | null>(null);
+  // #1098 — admin-policy plugin pending an explicit UAC consent before install.
+  const [adminConsentTarget, setAdminConsentTarget] = useState<MarketplaceItem | null>(null);
 
   // URL has an explicit "저장" button — typing only updates a local draft;
   // the parent setter (and marketplace endpoint switchover) fire when Save
@@ -292,8 +295,22 @@ export function MarketplaceTab(props: MarketplaceTabProps) {
                     size="sm"
                     variant={item.installed ? "outline" : "default"}
                     className="h-7 shrink-0 px-2 text-xs"
+                    data-testid={`marketplace:action:${item.id}`}
                     disabled={isWorking || (item.installed && !canUninstall)}
-                    onClick={() => void (item.installed ? uninstallPackage(item) : installPackage(item))}
+                    onClick={() => {
+                      if (item.installed) {
+                        void uninstallPackage(item);
+                        return;
+                      }
+                      // #1098 — admin-policy plugin installs gain system-wide
+                      // privileges; gate them behind explicit consent. Other
+                      // packages (user plugins, MCP, agents, skills) stay 1-click.
+                      if (packageType === "plugin" && item.installPolicy === "admin") {
+                        setAdminConsentTarget(item);
+                        return;
+                      }
+                      void installPackage(item);
+                    }}
                   >
                     {isWorking ? t("marketplaceTab.processingLabel") : item.installed ? t("marketplaceTab.removeButton") : t("marketplaceTab.installButton")}
                   </Button>
@@ -436,6 +453,17 @@ export function MarketplaceTab(props: MarketplaceTabProps) {
           </div>
         )}
       </SettingsSection>
+
+      <PluginInstallDialog
+        target={adminConsentTarget}
+        working={workingSlug === adminConsentTarget?.id}
+        onClose={() => setAdminConsentTarget(null)}
+        onConfirm={async (id) => {
+          const item = adminConsentTarget?.id === id ? adminConsentTarget : null;
+          setAdminConsentTarget(null);
+          if (item) await installPackage(item);
+        }}
+      />
     </div>
   );
 }
