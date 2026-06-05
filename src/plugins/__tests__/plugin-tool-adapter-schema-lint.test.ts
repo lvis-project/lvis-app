@@ -77,4 +77,18 @@ describe("pluginToolsForRegistration — provider-strict lint (#1182)", () => {
       ),
     ).toThrow(/category is required/);
   });
+
+  it("lets the structural throw win over the soft-drop when a tool trips BOTH (missing category + array-no-items)", () => {
+    // Build runs before the lint, so a hard error is never masked by the
+    // fail-soft drop — the manifest still fails closed for boot.
+    expect(() =>
+      pluginToolsForRegistration(
+        runtime,
+        "p",
+        manifest({
+          both: { inputSchema: { type: "object", properties: { tags: { type: "array" } } } },
+        }),
+      ),
+    ).toThrow(/category is required/);
+  });
 });

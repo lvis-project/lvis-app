@@ -181,13 +181,18 @@ export function pluginToolsForRegistration(
   for (const tool of manifest.tools ?? []) {
     const schemaEntry = schemas[tool];
 
-    // #1182 — provider-strict lint, fail-soft per tool. A schema OpenAI/Azure
-    // would 400 on (e.g. an `array` property without `items`) is dropped so it
-    // can't take down the whole turn for every flow that loads this plugin. The
-    // host stays plugin-agnostic: pure structural lint, no plugin-specific code.
-    const violations = schemaEntry?.inputSchema
-      ? lintToolInputSchema(schemaEntry.inputSchema)
-      : [];
+    // Build FIRST: structural / authority failures (non-object schema, missing
+    // category) throw here, which boot relies on to fail closed (keep the
+    // previous registry on an invalid manifest). Building before the lint means
+    // a tool with a hard error is never silently dropped — it still throws even
+    // if it would also trip the lint (e.g. a root `type:"array"`).
+    const built = buildPluginTool(pluginRuntime, tool, pluginId, schemaEntry, manifestVersion);
+
+    // #1182 — THEN provider-strict lint, fail-soft per tool. A structurally
+    // valid schema OpenAI/Azure would still 400 on (e.g. an `array` property
+    // without `items`) is dropped so it can't take down the whole turn for
+    // every flow that loads this plugin. Pure structural lint, plugin-agnostic.
+    const violations = lintToolInputSchema(schemaEntry?.inputSchema);
     if (violations.length > 0) {
       plog(
         "warn",
@@ -197,11 +202,7 @@ export function pluginToolsForRegistration(
       continue;
     }
 
-    // Structural / authority failures (non-object schema, missing category) are
-    // intentionally NOT caught here — buildPluginTool throws, which boot relies
-    // on to fail closed (keep the previous registry on an invalid manifest).
-    // The #1182 lint above is a narrower, schema-only guard that fails soft.
-    tools.push(buildPluginTool(pluginRuntime, tool, pluginId, schemaEntry, manifestVersion));
+    tools.push(built);
   }
   return tools;
 }
