@@ -12,6 +12,7 @@ import type { ToolCategory } from "../tools/types.js";
 import type { PluginRuntime } from "./runtime.js";
 import type { PluginManifest } from "./types.js";
 import { plog, PluginPhase } from "./lifecycle-log.js";
+import { lintToolInputSchema } from "./tool-schema-lint.js";
 import {
   ManifestIntegrityViolation,
   manifestIntegrityState,
@@ -176,7 +177,31 @@ export function pluginToolsForRegistration(
 ): Tool[] {
   const schemas = manifest.toolSchemas ?? {};
   const manifestVersion = manifest.version || "1.0.0";
-  return (manifest.tools ?? []).map((tool) =>
-    buildPluginTool(pluginRuntime, tool, pluginId, schemas[tool], manifestVersion),
-  );
+  const tools: Tool[] = [];
+  for (const tool of manifest.tools ?? []) {
+    const schemaEntry = schemas[tool];
+
+    // #1182 — provider-strict lint, fail-soft per tool. A schema OpenAI/Azure
+    // would 400 on (e.g. an `array` property without `items`) is dropped so it
+    // can't take down the whole turn for every flow that loads this plugin. The
+    // host stays plugin-agnostic: pure structural lint, no plugin-specific code.
+    const violations = schemaEntry?.inputSchema
+      ? lintToolInputSchema(schemaEntry.inputSchema)
+      : [];
+    if (violations.length > 0) {
+      plog(
+        "warn",
+        { pluginId, phase: PluginPhase.REGISTER_TOOL_SKIP, toolName: tool, violations },
+        "dropping plugin tool: inputSchema fails LLM provider-strict lint",
+      );
+      continue;
+    }
+
+    // Structural / authority failures (non-object schema, missing category) are
+    // intentionally NOT caught here — buildPluginTool throws, which boot relies
+    // on to fail closed (keep the previous registry on an invalid manifest).
+    // The #1182 lint above is a narrower, schema-only guard that fails soft.
+    tools.push(buildPluginTool(pluginRuntime, tool, pluginId, schemaEntry, manifestVersion));
+  }
+  return tools;
 }
