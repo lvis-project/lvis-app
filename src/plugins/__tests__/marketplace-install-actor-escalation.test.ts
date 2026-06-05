@@ -192,7 +192,9 @@ describe("PluginMarketplaceService.install — actor escalation", () => {
       audit.logger as unknown as ConstructorParameters<typeof PluginMarketplaceService>[3],
     );
 
-    await expect(service.install("mp-test")).rejects.toBeDefined();
+    // Fail-closed: an empty snapshot resolves no catalog item, so the install
+    // rejects with "Plugin not found" rather than proceeding on stale data.
+    await expect(service.install("mp-test")).rejects.toThrow(/not found in marketplace/i);
     // No escalation emitted — fetch failed, actor stayed "user".
     expect(findEscalation(audit.entries)).toBeUndefined();
   });
