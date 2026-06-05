@@ -42,6 +42,13 @@ export type MarketplaceItem = {
   installed: boolean;
   enabled: boolean;
   isManaged?: boolean;
+  /**
+   * Install policy from the catalog manifest. "admin" plugins gain system-wide
+   * administrator privileges on install, so the marketplace UI gates them
+   * behind an explicit consent step (#1098). Delivered by the backend via
+   * `MarketplaceListItem extends PluginMarketplaceItem`.
+   */
+  installPolicy?: "admin" | "user";
   pluginType?: MarketplacePackageType;
   mcpAuth?: {
     mode: "none" | "api-key" | "sso" | "oauth";
