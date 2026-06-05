@@ -42,6 +42,7 @@ import type {
   TokenUsageByModel,
 } from "./llm/types.js";
 import { collectRoundStream } from "./turn/stream-collector.js";
+import { rejectedToolNameFromError } from "./llm/rejected-tool-schema.js";
 import {
   handleRequestPlugin,
   REQUEST_PLUGIN_TOOL,
@@ -560,6 +561,15 @@ export interface ConversationLoopDeps {
 // 수용하면서 *진정한 무한 루프* 는 여전히 차단. SubAgentRunner 는 자기 maxRounds
 // 로 clamp 하므로 영향 없음 (line 902 `Math.min`).
 const MAX_TOOL_ROUNDS = 30;
+/**
+ * Defensive cap on provider-as-oracle tool drops per turn. Termination is
+ * already guaranteed structurally (each drop strictly shrinks the finite tool
+ * set and we only drop a tool the provider named AND that is still present),
+ * so this is belt-and-suspenders against pathological churn: if more than this
+ * many distinct tools each 400 in one turn, stop dropping and let the error
+ * surface normally rather than burning rounds.
+ */
+const MAX_TOOL_SCHEMA_DROPS_PER_TURN = 5;
 /**
  * C3(a): per-round cap on the number of tool calls an assistant round can
  * issue. Pathological round-emitting many tool_use blocks at once would
@@ -2187,6 +2197,9 @@ export class ConversationLoop {
     // caller's Set directly means the next turn's fallback sees every plugin
     // that was activated here.
     let toolSchemas: ToolSchema[] = this.rebuildToolSchemas(scope);
+    // Provider-as-oracle: tools the provider 400'd on (invalid_function_parameters)
+    // and we dropped this turn. Turn-scoped — resets naturally each queryLoop call.
+    const droppedToolSchemaNames = new Set<string>();
     const withServingIdentity = (
       result: {
         text: string;
@@ -2445,6 +2458,48 @@ export class ConversationLoop {
           `queryLoop: EARLY-EXIT(stream-error) — round=${roundIndex} userMessage="${stream.userMessage.slice(0, 100)}"`,
         );
         this.tracer.step("LLM_STREAM_ERROR", streamErrorMeta);
+
+        // Provider-as-oracle recovery (#1182). The provider is the source of
+        // truth for "is this tool schema acceptable": when it rejects the whole
+        // request with a strict-mode 400 (invalid_function_parameters) naming
+        // one offending function, drop just that tool and retry the round with
+        // the reduced set — no hand-rolled mirror of the provider's rules. The
+        // plugin-load lint catches the common case for free; this catches the
+        // rest. `rejectedToolNameFromError` only returns a name still present in
+        // `toolSchemas`, so the drop strictly shrinks a finite set and the loop
+        // is guaranteed to terminate (the cap is just defensive).
+        const rejectedTool = rejectedToolNameFromError(
+          stream.providerError,
+          toolSchemas.map((s) => s.name),
+        );
+        if (
+          rejectedTool &&
+          !droppedToolSchemaNames.has(rejectedTool) &&
+          droppedToolSchemaNames.size < MAX_TOOL_SCHEMA_DROPS_PER_TURN
+        ) {
+          droppedToolSchemaNames.add(rejectedTool);
+          toolSchemas = toolSchemas.filter((s) => s.name !== rejectedTool);
+          log.warn(
+            {
+              sessionId: this.sessionId,
+              toolName: rejectedTool,
+              providerCode: stream.providerError?.providerCode,
+              remainingTools: toolSchemas.length,
+            },
+            `queryLoop: provider rejected tool inputSchema — dropping '${rejectedTool}' and retrying round (provider-as-oracle)`,
+          );
+          this.tracer.step("TOOL_SCHEMA_REJECTED", {
+            round,
+            assistantRoundIndex: roundIndex,
+            toolName: rejectedTool,
+            providerError: stream.providerError,
+          });
+          // Retry the round with the offending tool removed. Does NOT count as
+          // an assistant round (assistantRoundsRun is unchanged); the for-loop
+          // `round` counter + MAX_TOOL_ROUNDS still bound total iterations.
+          continue;
+        }
+
         if (
           this.shouldAutoCompactForRateLimit(stream) &&
           !this.rateLimitRecoveryAttempted &&
