@@ -388,38 +388,38 @@ export class PluginMarketplaceService {
     // Previously the escalation read `getPluginDetail` while the guard/install
     // re-fetched `listPlugins`, leaving a TOCTOU window where the policy that
     // drove escalation could differ from the policy/artifact actually installed.
+    //
+    // The snapshot is now REQUIRED for the whole install (not just an optional
+    // policy lookup), so a fetch failure is fatal — let the original error
+    // propagate instead of swallowing it and masking it as "Plugin not found".
+    const catalogSnapshot = await this.fetcher.listPlugins();
     let actor: "user" | "it-admin" = "user";
-    let catalogSnapshot: PluginMarketplaceItem[] = [];
-    try {
-      catalogSnapshot = await this.fetcher.listPlugins();
-      const catalogItem = catalogSnapshot.find(
-        (x) => x.id === pluginId || x.slug === pluginId,
-      );
-      if (catalogItem && normalizeInstallPolicy(catalogItem) === "admin") {
-        actor = "it-admin";
-        try {
-          this.auditLogger?.log({
-            timestamp: new Date().toISOString(),
-            sessionId: "marketplace-install",
-            type: "info",
-            pluginInstall: {
-              event: "plugin-install-escalation",
-              pluginId,
-              catalogPolicy: "admin",
-              actorOriginal: "user",
-              actorEscalated: "it-admin",
-              location: "marketplace.install",
-              catalogSnapshotHash: shaOfCatalogItem(catalogItem),
-            },
-          });
-        } catch {
-          // Audit failure must never block install.
-        }
+    const catalogItem = catalogSnapshot.find(
+      (x) => x.id === pluginId || x.slug === pluginId,
+    );
+    if (catalogItem && normalizeInstallPolicy(catalogItem) === "admin") {
+      actor = "it-admin";
+      try {
+        // Record the canonical catalog `id` (not the caller-supplied id/slug)
+        // so the audit row correlates with what the registry ultimately stores.
+        this.auditLogger?.log({
+          timestamp: new Date().toISOString(),
+          sessionId: "marketplace-install",
+          type: "info",
+          input: `plugin-install-escalation: ${catalogItem.id} (user→it-admin, catalog installPolicy=admin)`,
+          pluginInstall: {
+            event: "plugin-install-escalation",
+            pluginId: catalogItem.id,
+            catalogPolicy: "admin",
+            actorOriginal: "user",
+            actorEscalated: "it-admin",
+            location: "marketplace.install",
+            catalogSnapshotHash: shaOfCatalogItem(catalogItem),
+          },
+        });
+      } catch {
+        // Audit failure must never block install.
       }
-    } catch (err) {
-      log.warn(
-        `install: catalog policy lookup failed for ${pluginId} — proceeding with actor="user" (${(err as Error).message})`,
-      );
     }
     const state: InstallOperationState = {
       installedPluginIds: [],
