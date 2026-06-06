@@ -659,6 +659,8 @@ export class ToolExecutor {
     input: Record<string, unknown>,
     sessionId: string | undefined,
     context: ToolPermissionContext,
+    mcpServerId?: string,
+    pluginId?: string,
     toolOutput?: string,
     isError?: boolean,
   ) {
@@ -672,6 +674,9 @@ export class ToolExecutor {
       input,
       sessionId: sessionId ?? "unknown",
       trustOrigin: context.trustOrigin as HookTrustOrigin,
+      // Per-request MCP/plugin origin identity (#811 hooks-on-mcp-calls).
+      ...(mcpServerId !== undefined ? { mcpServerId } : {}),
+      ...(pluginId !== undefined ? { pluginId } : {}),
       ...(toolOutput !== undefined ? { toolOutput } : {}),
       ...(isError !== undefined ? { isError } : {}),
     };
@@ -1741,6 +1746,8 @@ export class ToolExecutor {
             finalInput,
             sessionId,
             invocationPermissionContext,
+            tool.mcpServerId,
+            tool.pluginId,
           );
           if (permHook.decision === "deny") {
             const msg = t("be_executor.hookPermissionBlock", { reason: permHook.reason });
@@ -1838,6 +1845,8 @@ export class ToolExecutor {
       finalInput,
       sessionId,
       invocationPermissionContext,
+      tool.mcpServerId,
+      tool.pluginId,
     );
     if (scriptPre.decision === "deny") {
       const msg = t("be_executor.hookBlockScript", { reason: scriptPre.reason });
@@ -1996,6 +2005,8 @@ export class ToolExecutor {
       finalInput,
       sessionId,
       invocationPermissionContext,
+      tool.mcpServerId,
+      tool.pluginId,
       content,
       isError,
     );

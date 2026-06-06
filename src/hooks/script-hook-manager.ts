@@ -38,6 +38,9 @@ export interface HookDispatchPayload {
   input: Record<string, unknown>;
   sessionId: string;
   trustOrigin: HookTrustOrigin;
+  /** Per-request MCP/plugin origin identity (#811 hooks-on-mcp-calls). */
+  mcpServerId?: string;
+  pluginId?: string;
   /** PostToolUse only. */
   toolOutput?: string;
   /** PostToolUse only. */
@@ -123,6 +126,8 @@ export class ScriptHookManager {
       input: dlpRedactInput(payload.input),
       sessionId: payload.sessionId,
       trustOrigin: payload.trustOrigin,
+      ...(payload.mcpServerId !== undefined ? { mcpServerId: payload.mcpServerId } : {}),
+      ...(payload.pluginId !== undefined ? { pluginId: payload.pluginId } : {}),
       ...(payload.toolOutput !== undefined ? { toolOutput: payload.toolOutput } : {}),
       ...(payload.isError !== undefined ? { isError: payload.isError } : {}),
     };
