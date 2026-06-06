@@ -50,10 +50,10 @@ import {
 } from "../permissions/allowed-directories.js";
 import { dispatchPermissionDirCommand } from "../permissions/permission-slash.js";
 import { HookRunner } from "../hooks/hook-runner.js";
-import type { ScriptHookManager } from "../hooks/script-hook-manager.js";
-import type { HookTrustOrigin } from "../hooks/script-hook-types.js";
+import type { ScriptHookManager, HookDispatchResult } from "../hooks/script-hook-manager.js";
+import type { HookTrustOrigin, ScriptHookInvocationResult } from "../hooks/script-hook-types.js";
 import { AuditLogger } from "../audit/audit-logger.js";
-import type { PermissionAuditEntryInput } from "../audit/audit-schema.js";
+import type { PermissionAuditEntryInput, HookResult } from "../audit/audit-schema.js";
 import { maskSensitiveData } from "../audit/dlp-filter.js";
 import type { RiskVerdict } from "../permissions/reviewer/risk-classifier.js";
 import { detectSandboxCapability } from "../permissions/sandbox-capability.js";
@@ -485,6 +485,72 @@ function permissionAuditBase(args: {
   };
 }
 
+/**
+ * Derive the `failureReason` discriminant from a fail-closed
+ * {@link ScriptHookInvocationResult}. Only a denying result that failed for an
+ * operational reason (timeout / nonzero exit / spawn-error / bad output) carries
+ * one; a clean `{action:"deny"}` verdict from a hook that ran fine returns
+ * `undefined` (it denied on policy, not on failure).
+ */
+function hookFailureReason(
+  r: ScriptHookInvocationResult,
+): HookResult["failureReason"] | undefined {
+  if (r.timedOut) return "timeout";
+  if (r.decision !== "deny") return undefined;
+  if (r.reason.startsWith("hook spawn error:")) return "spawn-error";
+  if (r.reason.startsWith("failed to serialise hook payload:")) return "spawn-error";
+  if (r.reason.startsWith("shell unavailable:")) return "spawn-error";
+  if (r.reason.startsWith("hook exited non-zero:")) return "nonzero-exit";
+  if (r.reason === "hook stdout not valid {action,reason} JSON") return "bad-output";
+  return undefined;
+}
+
+/**
+ * Map a runtime {@link HookDispatchResult} (pre / post / perm) into the audit
+ * {@link HookResult}[] surface (#811 cluster-review follow-up). Each per-script
+ * invocation result becomes one forensic row carrying its `decision`/`reason`,
+ * the `source` discriminant (`.sh` vs config), the `commandIdentity` anchor, and
+ * a `failureReason` when the hook failed closed. Returns `undefined` when the
+ * dispatch ran no matching hooks so non-hook audit rows stay clean (`hookChain`
+ * remains absent).
+ */
+function hookChainFromDispatch(
+  event: "pre" | "post" | "perm",
+  dispatch: HookDispatchResult | undefined,
+): HookResult[] | undefined {
+  if (!dispatch || dispatch.results.length === 0) return undefined;
+  return dispatch.results.map((r): HookResult => {
+    const failureReason = hookFailureReason(r);
+    return {
+      hookName: r.hookPath,
+      hookType: r.hookType,
+      action: r.decision,
+      reason: r.reason,
+      durationMs: r.durationMs,
+      // `event` today equals `hookType`; kept explicit so the closed-set surface
+      // is populated for forward-compat readers.
+      event,
+      handlerType: "command",
+      commandIdentity: r.commandIdentity,
+      source: r.source,
+      decision: r.decision,
+      ...(failureReason !== undefined ? { failureReason } : {}),
+    };
+  });
+}
+
+/**
+ * Concatenate two optional hook chains (e.g. the pre + post rows on the success
+ * path) into one, dropping empty/absent inputs. Returns `undefined` when both
+ * are empty so the audit row's `hookChain` stays absent for non-hook calls.
+ */
+function mergeHookChains(
+  ...chains: Array<HookResult[] | undefined>
+): HookResult[] | undefined {
+  const merged = chains.filter((c): c is HookResult[] => c !== undefined).flat();
+  return merged.length > 0 ? merged : undefined;
+}
+
 function permissionAuditEntryFromToolCall(args: {
   toolName: string;
   tool?: import("./base.js").Tool;
@@ -496,6 +562,7 @@ function permissionAuditEntryFromToolCall(args: {
   trustOrigin: HookTrustOrigin;
   cwd: string;
   auditDirectory?: string;
+  hookChain?: HookResult[];
 }): PermissionAuditEntryInput {
   const base = permissionAuditBase(args);
   if (args.permission?.deferred) {
@@ -518,6 +585,7 @@ function permissionAuditEntryFromToolCall(args: {
       ...base,
       decision: "deny",
       denyReasons,
+      ...(args.hookChain ? { hookChain: args.hookChain } : {}),
     };
   }
   const auditDirectory = auditDirectoryForInput(args.tool, args.input, args.cwd, args.auditDirectory);
@@ -535,6 +603,9 @@ function permissionAuditEntryFromToolCall(args: {
   }
   if (Number.isFinite(args.rateLimitRemaining)) {
     allowEntry.rateLimitRemaining = args.rateLimitRemaining;
+  }
+  if (args.hookChain) {
+    allowEntry.hookChain = args.hookChain;
   }
   return allowEntry;
 }
@@ -1754,7 +1825,7 @@ export class ToolExecutor {
             const durationMs = Date.now() - startTime;
             emitToolStart(callbacks, toolUse.name, finalInput, meta);
             callbacks?.onToolEnd?.(toolUse.name, msg, true, meta, undefined, durationMs);
-            await this.auditToolCall(sessionId, toolUse.name, source, trust, finalInput, msg, true, startTime, { ...permissionResult, decision: "deny", reason: permHook.reason }, Infinity, invocationPermissionContext, invocationCategory, executionCwd);
+            await this.auditToolCall(sessionId, toolUse.name, source, trust, finalInput, msg, true, startTime, { ...permissionResult, decision: "deny", reason: permHook.reason }, Infinity, invocationPermissionContext, invocationCategory, executionCwd, undefined, undefined, hookChainFromDispatch("perm", permHook));
             return { tool_use_id: toolUse.id, content: msg, is_error: true, durationMs };
           }
 
@@ -1853,7 +1924,7 @@ export class ToolExecutor {
       const durationMs = Date.now() - startTime;
       emitToolStart(callbacks, toolUse.name, finalInput, meta);
       callbacks?.onToolEnd?.(toolUse.name, msg, true, meta, undefined, durationMs);
-      await this.auditToolCall(sessionId, toolUse.name, source, trust, finalInput, msg, true, startTime, { decision: "deny", reason: scriptPre.reason, layer: 6 }, Infinity, invocationPermissionContext, invocationCategory, executionCwd);
+      await this.auditToolCall(sessionId, toolUse.name, source, trust, finalInput, msg, true, startTime, { decision: "deny", reason: scriptPre.reason, layer: 6 }, Infinity, invocationPermissionContext, invocationCategory, executionCwd, undefined, undefined, hookChainFromDispatch("pre", scriptPre));
       return { tool_use_id: toolUse.id, content: msg, is_error: true, durationMs };
     }
 
@@ -2068,7 +2139,15 @@ export class ToolExecutor {
       toolUse.name === "ask_user_question" && source === "builtin" && !isError
         ? redactAskUserAuditOutput(displayContent)
         : displayContent;
-    await this.auditToolCall(sessionId, toolUse.name, source, trust, finalInput, auditContent, isError, startTime, permissionResult, rateResult.remaining, invocationPermissionContext, invocationCategory, executionCwd, targetFilePath, terminationReason);
+    // Forensic hook chain on the success/post path: the pre hooks that allowed
+    // this call plus the post hooks that ran after it. `undefined` when neither
+    // fired (keeps non-hook rows clean). config-hook vs `.sh`-hook is now
+    // distinguishable via each row's `source` (#811 cluster-review follow-up).
+    const successHookChain = mergeHookChains(
+      hookChainFromDispatch("pre", scriptPre),
+      hookChainFromDispatch("post", scriptPost),
+    );
+    await this.auditToolCall(sessionId, toolUse.name, source, trust, finalInput, auditContent, isError, startTime, permissionResult, rateResult.remaining, invocationPermissionContext, invocationCategory, executionCwd, targetFilePath, terminationReason, successHookChain);
 
     return {
       tool_use_id: toolUse.id,
@@ -2191,6 +2270,7 @@ export class ToolExecutor {
     cwd?: string,
     auditDirectory?: string,
     terminationReason?: "ok" | "ceiling" | "user-abort" | "error",
+    hookChain?: HookResult[],
   ): Promise<void> {
     try {
       const inputText = JSON.stringify(input);
@@ -2235,6 +2315,7 @@ export class ToolExecutor {
       trustOrigin: auditTrustOrigin(permissionContext),
       cwd,
       auditDirectory,
+      ...(hookChain ? { hookChain } : {}),
     });
     if (!this.auditLogger.isPermissionAuditChainReady()) {
       if (this.requirePermissionAuditChain) {
