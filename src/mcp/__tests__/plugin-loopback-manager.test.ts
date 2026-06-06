@@ -80,6 +80,24 @@ describe("PluginLoopbackManager", () => {
     await expect(mgr.stop("nope")).resolves.toBeUndefined();
   });
 
+  it("syncAll reconciles: starts present plugins, stops gone ones, leaves bystanders untouched", async () => {
+    const registry = new ToolRegistry();
+    const mgr = new PluginLoopbackManager(fakeRuntime(), registry);
+
+    await mgr.syncAll([
+      { pluginId: "com.a", manifest: manifest("com.a", ["a_one"]) },
+      { pluginId: "com.b", manifest: manifest("com.b", ["b_one"]) },
+    ]);
+    expect(mgr.list().sort()).toEqual(["com.a", "com.b"]);
+    const bystander = registry.findByName("a_one");
+
+    // Re-sync with com.b removed (uninstall): b's tools gone, a's identity preserved.
+    await mgr.syncAll([{ pluginId: "com.a", manifest: manifest("com.a", ["a_one"]) }]);
+    expect(mgr.list()).toEqual(["com.a"]);
+    expect(registry.findByName("b_one")).toBeUndefined();
+    expect(registry.findByName("a_one")).toBe(bystander); // not churned (has()-guard)
+  });
+
   it("stopAll tears down every running host", async () => {
     const registry = new ToolRegistry();
     const mgr = new PluginLoopbackManager(fakeRuntime(), registry);

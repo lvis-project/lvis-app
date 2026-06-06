@@ -32,7 +32,7 @@ import { AGENT_MODE_MAP } from "../../shared/agent-mode-map.js";
 import type { LLMProvider, StreamEvent, StreamTurnParams } from "../llm/types.js";
 import { createAgentSpawnTool } from "../../tools/agent-spawn.js";
 import { fakeLlmSettings } from "../../shared/__tests__/fake-llm-settings.js";
-import { pluginToolsForRegistration } from "../../plugins/plugin-tool-adapter.js";
+import { buildPluginToolsForTest } from "../../plugins/__tests__/plugin-tool-test-fixture.js";
 import type { PluginRuntime } from "../../plugins/runtime.js";
 import type { PluginManifest } from "../../plugins/types.js";
 
@@ -273,7 +273,7 @@ describe("SubAgentRunner — sourceTools allowlist", () => {
       call: runtimeCall,
     } as unknown as PluginRuntime;
     const toolName = "index_scan";
-    for (const tool of pluginToolsForRegistration(fakeRuntime, "local-indexer", {
+    for (const tool of buildPluginToolsForTest(fakeRuntime, "local-indexer", {
       id: "local-indexer",
       name: "indexer",
       version: "1.0.0",

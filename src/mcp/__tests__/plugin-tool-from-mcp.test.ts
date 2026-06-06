@@ -14,9 +14,7 @@
 import { describe, it, expect, vi } from "vitest";
 import { mcpToolToPluginTool } from "../plugin-tool-from-mcp.js";
 import { manifestToolsToMcpTools } from "../plugin-server-projection.js";
-import { pluginToolsForRegistration } from "../../plugins/plugin-tool-adapter.js";
 import type { Tool } from "../../tools/base.js";
-import type { PluginRuntime } from "../../plugins/runtime.js";
 import type { PluginManifest } from "../../plugins/types.js";
 
 const PLUGIN_ID = "com.example.files";
@@ -78,22 +76,30 @@ function permissionFields(tool: Tool) {
   };
 }
 
-describe("mcpToolToPluginTool — forward+reverse round-trip equivalence (#1230 §5 plugin-loopback-server)", () => {
-  const fakeRuntime = {
-    isPluginEnabled: () => true,
-    call: vi.fn(async () => "ok"),
-  } as unknown as PluginRuntime;
-
+describe("mcpToolToPluginTool — reverse projection from _meta (#1230 §5 plugin-loopback-server)", () => {
   const invoke = vi.fn(async (name: string) => ({ text: `ran ${name}` }));
 
-  it("reconstructs every permission-relevant field identically from _meta", () => {
-    const direct = pluginToolsForRegistration(fakeRuntime, PLUGIN_ID, MANIFEST);
+  it("reconstructs every permission-relevant field from _meta (the production projection)", () => {
     const viaMcp = manifestToolsToMcpTools(MANIFEST).map((t) =>
       mcpToolToPluginTool(PLUGIN_ID, t, invoke),
     );
 
-    expect(viaMcp.map((t) => t.name)).toEqual(direct.map((t) => t.name));
-    expect(viaMcp.map(permissionFields)).toEqual(direct.map(permissionFields));
+    // The reverse projection is now the ONLY registration path (legacy removed);
+    // assert it yields the authoritative permission fields straight from _meta.
+    expect(viaMcp.map(permissionFields)).toEqual([
+      { name: "files_read", source: "plugin", category: "read", pluginId: PLUGIN_ID,
+        pathFields: ["path"], writesToOwnSandbox: undefined, version: "2.3.0",
+        deprecatedSince: undefined, replacedBy: undefined, isReadOnly: true },
+      { name: "files_write", source: "plugin", category: "write", pluginId: PLUGIN_ID,
+        pathFields: ["path"], writesToOwnSandbox: true, version: "9.9.9",
+        deprecatedSince: "2.0.0", replacedBy: "files_write_v2", isReadOnly: false },
+      { name: "files_exec", source: "plugin", category: "shell", pluginId: PLUGIN_ID,
+        pathFields: undefined, writesToOwnSandbox: undefined, version: "2.3.0",
+        deprecatedSince: undefined, replacedBy: undefined, isReadOnly: false },
+      { name: "files_fetch", source: "plugin", category: "network", pluginId: PLUGIN_ID,
+        pathFields: undefined, writesToOwnSandbox: undefined, version: "2.3.0",
+        deprecatedSince: undefined, replacedBy: undefined, isReadOnly: false },
+    ]);
   });
 
   it("sources the per-tool version override from _meta (9.9.9, not the manifest 2.3.0)", () => {

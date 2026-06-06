@@ -73,6 +73,35 @@ export class PluginLoopbackManager {
     }
   }
 
+  /**
+   * Reconcile the running hosts to the current runtime state: stop hosts whose
+   * plugin is gone, (re)start a host for every present plugin. This is the
+   * universal registration entry point after the legacy-removal flag-day — it
+   * replaces the old `syncPluginToolRegistry` full re-sync. A single plugin whose
+   * start throws (e.g. an invalid manifest) is logged and skipped so one bad
+   * plugin never aborts the whole boot.
+   */
+  async syncAll(entries: Array<{ pluginId: string; manifest: PluginManifest }>): Promise<void> {
+    const present = new Set(entries.map((e) => e.pluginId));
+    for (const pluginId of this.list()) {
+      if (!present.has(pluginId)) await this.stop(pluginId);
+    }
+    for (const { pluginId, manifest } of entries) {
+      // Skip already-running hosts so an uninstall re-sync only stops the removed
+      // plugin and never churns (transiently unregisters) its bystanders. A
+      // CHANGED manifest re-registers through the explicit onEnable → start path,
+      // not syncAll, so this guard never staleness-traps a reload.
+      if (this.has(pluginId)) continue;
+      try {
+        await this.start(manifest);
+      } catch (err) {
+        log.error(
+          `loopback plugin '${pluginId}' failed to register: ${(err as Error).message}`,
+        );
+      }
+    }
+  }
+
   /** Is a loopback host currently running for this plugin? */
   has(pluginId: string): boolean {
     return this.hosts.has(pluginId);
