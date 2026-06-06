@@ -11,6 +11,7 @@ import { assertMockMarketplaceAllowed, isDevModeUnlocked } from "../boot/dev-fla
 import type { PluginAccessSpec, PluginManifest, PluginMarketplaceItem, PluginRegistryEntryInstallSource, PluginUiExtension } from "./types.js";
 import { MissingDependenciesError, MissingPluginDependenciesError } from "./types.js";
 import { resolveDependencies } from "./dependency-resolver.js";
+import { isNewer } from "./update-detector.js";
 import { getCachedCatalog, isOfflineCacheEnabled, setCachedCatalog } from "./offline-cache.js";
 import type { InstallerProgressEvent } from "./marketplace-installer.js";
 import { getBundledPublicKeys } from "./publisher-keys.js";
@@ -596,9 +597,18 @@ export class PluginMarketplaceService {
 
   /**
    * Boot-time admin plugin bootstrap. Queries the marketplace catalog for
-   * every admin-policy plugin and force-installs any that are
-    * missing from the local registry. Runs as actor="it-admin" so the install-policy
-   * guard permits the install.
+   * every admin-policy plugin and:
+   *  - **force-installs** any that are missing from the local registry, and
+   *  - **auto-updates** any installed one whose catalog version is strictly
+   *    newer than the installed version.
+   * Runs as actor="it-admin" so the install-policy guard permits the install.
+   *
+   * Auto-update rationale: admin-policy plugins are IT-managed, so the signed
+   * catalog is the source of truth for which version should be deployed — when
+   * it advertises a newer version, managed clients pick it up at boot without a
+   * user click (the user-click update path stays for user-policy plugins). The
+   * update is gated to *strictly newer* versions only: a same-or-older catalog
+   * version leaves the installed plugin untouched (no surprise downgrades).
    *
    * Failure modes are intentionally graceful — marketplace unreachable or a
    * single plugin failing to install must NOT brick boot. Errors are logged
@@ -606,9 +616,14 @@ export class PluginMarketplaceService {
    */
   async ensureManagedInstalled(): Promise<{
     installed: string[];
+    updated: string[];
     failed: Array<{ id: string; error: string }>;
   }> {
-    const result = { installed: [] as string[], failed: [] as Array<{ id: string; error: string }> };
+    const result = {
+      installed: [] as string[],
+      updated: [] as string[],
+      failed: [] as Array<{ id: string; error: string }>,
+    };
     let plugins: PluginMarketplaceItem[];
     try {
       plugins = await this.fetcher.listPlugins();
@@ -627,7 +642,36 @@ export class PluginMarketplaceService {
     const registry = await readPluginRegistry(this.registryPath);
     const installedIds = await this.resolveInstalledIds(registry.plugins);
     for (const plugin of managed) {
-      if (installedIds.has(plugin.id)) continue;
+      let isUpdate = false;
+      if (installedIds.has(plugin.id)) {
+        // Already installed — auto-update only when the catalog advertises a
+        // strictly newer version (the IT-controlled catalog is the SOT for
+        // managed plugins). Same-or-older / unknown version → leave as-is.
+        //
+        // readInstalledManifestVersion re-throws on a corrupt/unreadable
+        // manifest; catch it HERE so one bad installed plugin only forfeits its
+        // own update rather than aborting the whole managed bootstrap
+        // (per-plugin isolation — pre-PR, installed plugins were skipped without
+        // reading the manifest at all, so this preserves that fail-soft
+        // posture). Reuse the `registry` already loaded above rather than
+        // re-reading it per plugin.
+        let installedVersion: string | null;
+        try {
+          installedVersion = await this.readInstalledVersionFromRegistry(registry, plugin.id);
+        } catch (err) {
+          log.warn(
+            `ensureManagedInstalled: cannot read installed version for '${plugin.id}' — skipping update: ${(err as Error).message}`,
+          );
+          continue;
+        }
+        if (!plugin.version || !installedVersion || !isNewer(plugin.version, installedVersion)) {
+          continue;
+        }
+        isUpdate = true;
+        log.info(
+          `ensureManagedInstalled: auto-updating managed plugin '${plugin.id}' ${installedVersion} → ${plugin.version}`,
+        );
+      }
       try {
         // Boot-time managed bootstrap is an internal, trusted flow —
         // bypass the public `install()` entry (which derives actor from
@@ -636,6 +680,8 @@ export class PluginMarketplaceService {
         // path (catalog → admin escalation). We pass the catalog snapshot
         // (`plugins`) we already fetched above so the install reads from one
         // consistent snapshot (#1098) rather than re-fetching the catalog.
+        // installWithDependencies reinstalls to the catalog version when the
+        // installed version differs, so the same call covers install + update.
         const state: InstallOperationState = {
           installedPluginIds: [],
           touchedEntries: new Map(),
@@ -646,11 +692,11 @@ export class PluginMarketplaceService {
           await this.rollbackInstallOperation(state);
           throw innerErr;
         }
-        result.installed.push(plugin.id);
+        (isUpdate ? result.updated : result.installed).push(plugin.id);
       } catch (err) {
         const msg = (err as Error).message;
         result.failed.push({ id: plugin.id, error: msg });
-        log.warn(`managed plugin '${plugin.id}' install failed: ${msg}`);
+        log.warn(`managed plugin '${plugin.id}' ${isUpdate ? "update" : "install"} failed: ${msg}`);
       }
     }
     return result;
@@ -959,8 +1005,31 @@ export class PluginMarketplaceService {
     // Round-3 §6: registry read errors propagate; only the manifest-missing
     // path returns null (stale registry entry).
     const registry = await readPluginRegistry(this.registryPath);
+    return this.readInstalledVersionFromRegistry(registry, pluginId);
+  }
+
+  /**
+   * Installed version for a plugin, resolved from an already-loaded registry.
+   * The single seam the managed-bootstrap loop uses so it does NOT re-read +
+   * parse the whole registry file per plugin (it reuses the registry snapshot
+   * it already holds). Manifest-missing (ENOENT) → null; other IO/parse errors
+   * propagate to the caller, which isolates them per plugin.
+   */
+  private async readInstalledVersionFromRegistry(
+    registry: { plugins: PluginRegistryEntry[] },
+    pluginId: string,
+  ): Promise<string | null> {
     const entry = registry.plugins.find((c) => c.id === pluginId);
-    if (!entry) return null;
+    return entry ? this.readInstalledManifestVersion(entry) : null;
+  }
+
+  /**
+   * Read the installed version from a registry entry's manifest. Split out of
+   * {@link getInstalledVersion} so callers that already hold the registry (e.g.
+   * the managed-bootstrap loop) don't re-read+parse the whole registry file per
+   * plugin. Manifest-missing (ENOENT) → null; other IO/parse errors propagate.
+   */
+  private async readInstalledManifestVersion(entry: PluginRegistryEntry): Promise<string | null> {
     const manifestPath = isAbsolute(entry.manifestPath)
       ? entry.manifestPath
       : resolve(dirname(this.registryPath), entry.manifestPath);

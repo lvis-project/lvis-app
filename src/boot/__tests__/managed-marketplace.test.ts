@@ -69,6 +69,27 @@ describe("runManagedBootstrap concurrency", () => {
     expect(restartAll).toHaveBeenCalledTimes(1);
   });
 
+  it("triggers a single restartAll when a managed plugin was auto-updated (nothing freshly installed)", async () => {
+    const ensureResult = { installed: [], updated: ["meeting"], failed: [] };
+    const ensureManagedInstalled = vi.fn(async () => ensureResult);
+    const restartAll = vi.fn(async () => undefined);
+    const pluginMarketplace = { ensureManagedInstalled } as unknown as PluginMarketplaceService;
+    const pluginRuntime = { restartAll } as unknown as PluginRuntime;
+
+    await runManagedBootstrap({
+      pluginMarketplace,
+      pluginRuntime,
+      mainWindow: null,
+      marketplace: {
+        backend: "real-cloud" as const,
+        cloudBaseUrl: "https://marketplace.example.com",
+      },
+    });
+
+    // The auto-updated plugin must be reloaded even though `installed` is empty.
+    expect(restartAll).toHaveBeenCalledTimes(1);
+  });
+
   it("a fresh call after the in-flight settles starts a new run", async () => {
     const ensureResult = { installed: [], failed: [] };
     const ensureManagedInstalled = vi.fn(async () => ensureResult);

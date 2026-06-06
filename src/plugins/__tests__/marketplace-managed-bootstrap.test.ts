@@ -1,5 +1,6 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { mkdir, readFile, rm, writeFile } from "node:fs/promises";
+import { mkdtempSync } from "node:fs";
 import { tmpdir } from "node:os";
 
 import { dirname, join, resolve } from "node:path";
@@ -24,10 +25,10 @@ describe("PluginMarketplaceService managed bootstrap", () => {
     // Phase 2b-1: file:-spec catalog entries route through the dev branch.
     // Round-3: LVIS_DEV=1 subsumes the deprecated LVIS_ALLOW_LINKED_PLUGIN_ENTRY.
     process.env.LVIS_DEV = "1";
-    testDir = join(
-      tmpdir(),
-      `lvis-managed-${Date.now()}-${Math.random().toString(36).slice(2)}`,
-    );
+    // mkdtempSync (atomic, unpredictable suffix, mode 0700) — the secure temp
+    // pattern; a `tmpdir()`+Date.now()/Math.random() path trips CodeQL
+    // js/insecure-temporary-file.
+    testDir = mkdtempSync(join(tmpdir(), "lvis-managed-"));
     // Phase 2a: registry.json lives under pluginsRoot (= testDir/plugins
     // when the helper picks defaults). marketplace.json is the dev mock
     // catalog and lives outside that tree so writes never collide with the
@@ -180,6 +181,149 @@ describe("PluginMarketplaceService managed bootstrap", () => {
     expect(Array.isArray(catalogSnapshot)).toBe(true);
     expect((catalogSnapshot as Array<{ id: string }>).some((p) => p.id === "meeting")).toBe(true);
     expect(result.installed).toEqual(["meeting"]);
+    expect(result.failed).toEqual([]);
+  });
+
+  async function writeAdminCatalog(version: string) {
+    await writeFile(
+      marketplacePath,
+      JSON.stringify({
+        version: 1,
+        plugins: [
+          {
+            id: "meeting",
+            name: "Meeting",
+            description: "fixture",
+            packageSpec: "file:../lvis-plugin-meeting",
+            packageName: "@lvis/plugin-meeting",
+            tools: [],
+            installPolicy: "admin",
+            version,
+          },
+        ],
+      }),
+      "utf-8",
+    );
+  }
+
+  function spyInstalledAtVersion(service: PluginMarketplaceService, installedVersion: string) {
+    vi.spyOn(
+      service as unknown as { resolveInstalledIds: (entries: unknown) => Promise<Set<string>> },
+      "resolveInstalledIds",
+    ).mockResolvedValue(new Set(["meeting"]));
+    vi.spyOn(
+      service as unknown as { readInstalledVersionFromRegistry: (r: unknown, id: string) => Promise<string | null> },
+      "readInstalledVersionFromRegistry",
+    ).mockResolvedValue(installedVersion);
+    return vi
+      .spyOn(
+        service as unknown as {
+          installWithDependencies: (...args: unknown[]) => Promise<{ pluginId: string; installed: true }>;
+        },
+        "installWithDependencies",
+      )
+      .mockResolvedValue({ pluginId: "meeting", installed: true });
+  }
+
+  it("auto-updates an installed managed plugin when the catalog version is strictly newer", async () => {
+    await writeAdminCatalog("2.0.0");
+    const service = makeManagedService(testDir, marketplacePath);
+    const installSpy = spyInstalledAtVersion(service, "1.0.0");
+
+    const result = await service.ensureManagedInstalled();
+
+    expect(installSpy).toHaveBeenCalledTimes(1);
+    const [pluginId, actor] = installSpy.mock.calls[0]!;
+    expect(pluginId).toBe("meeting");
+    expect(actor).toBe("it-admin"); // update still runs under the managed trust anchor
+    expect(result.updated).toEqual(["meeting"]);
+    expect(result.installed).toEqual([]);
+    expect(result.failed).toEqual([]);
+  });
+
+  it("does NOT update a managed plugin already at the catalog version", async () => {
+    await writeAdminCatalog("1.0.0");
+    const service = makeManagedService(testDir, marketplacePath);
+    const installSpy = spyInstalledAtVersion(service, "1.0.0");
+
+    const result = await service.ensureManagedInstalled();
+
+    expect(installSpy).not.toHaveBeenCalled();
+    expect(result.updated).toEqual([]);
+    expect(result.installed).toEqual([]);
+  });
+
+  it("does NOT downgrade a managed plugin when the installed version is newer than the catalog", async () => {
+    await writeAdminCatalog("1.0.0");
+    const service = makeManagedService(testDir, marketplacePath);
+    const installSpy = spyInstalledAtVersion(service, "2.0.0");
+
+    const result = await service.ensureManagedInstalled();
+
+    expect(installSpy).not.toHaveBeenCalled();
+    expect(result.updated).toEqual([]);
+  });
+
+  it("isolates a failed auto-update into result.failed without throwing", async () => {
+    await writeAdminCatalog("2.0.0");
+    const service = makeManagedService(testDir, marketplacePath);
+    vi.spyOn(
+      service as unknown as { resolveInstalledIds: (e: unknown) => Promise<Set<string>> },
+      "resolveInstalledIds",
+    ).mockResolvedValue(new Set(["meeting"]));
+    vi.spyOn(
+      service as unknown as { readInstalledVersionFromRegistry: (r: unknown, id: string) => Promise<string | null> },
+      "readInstalledVersionFromRegistry",
+    ).mockResolvedValue("1.0.0");
+    vi.spyOn(
+      service as unknown as { installWithDependencies: (...a: unknown[]) => Promise<unknown> },
+      "installWithDependencies",
+    ).mockRejectedValue(new Error("download failed"));
+
+    const result = await service.ensureManagedInstalled();
+
+    expect(result.failed).toEqual([{ id: "meeting", error: "download failed" }]);
+    expect(result.updated).toEqual([]);
+    expect(result.installed).toEqual([]);
+  });
+
+  it("a corrupt installed managed plugin's unreadable version does not abort install/update of others", async () => {
+    // alpha installed but its manifest version cannot be read (getInstalledVersion
+    // throws); beta is missing. The corrupt alpha must be skipped, NOT abort the
+    // whole bootstrap — beta still installs (M1 per-plugin isolation).
+    await writeFile(
+      marketplacePath,
+      JSON.stringify({
+        version: 1,
+        plugins: [
+          { id: "alpha", name: "Alpha", description: "f", packageSpec: "file:../a", packageName: "@lvis/a", tools: [], installPolicy: "admin", version: "2.0.0" },
+          { id: "beta", name: "Beta", description: "f", packageSpec: "file:../b", packageName: "@lvis/b", tools: [], installPolicy: "admin", version: "1.0.0" },
+        ],
+      }),
+      "utf-8",
+    );
+    const service = makeManagedService(testDir, marketplacePath);
+    vi.spyOn(
+      service as unknown as { resolveInstalledIds: (e: unknown) => Promise<Set<string>> },
+      "resolveInstalledIds",
+    ).mockResolvedValue(new Set(["alpha"]));
+    vi.spyOn(
+      service as unknown as { readInstalledVersionFromRegistry: (r: unknown, id: string) => Promise<string | null> },
+      "readInstalledVersionFromRegistry",
+    ).mockRejectedValue(new Error("corrupt manifest"));
+    const installSpy = vi
+      .spyOn(
+        service as unknown as { installWithDependencies: (...a: unknown[]) => Promise<{ pluginId: string; installed: true }> },
+        "installWithDependencies",
+      )
+      .mockImplementation(async (id: unknown) => ({ pluginId: id as string, installed: true }));
+
+    const result = await service.ensureManagedInstalled();
+
+    expect(installSpy).toHaveBeenCalledTimes(1);
+    expect(installSpy.mock.calls[0]![0]).toBe("beta");
+    expect(result.installed).toEqual(["beta"]);
+    expect(result.updated).toEqual([]);
     expect(result.failed).toEqual([]);
   });
 
