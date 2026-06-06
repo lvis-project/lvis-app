@@ -243,6 +243,9 @@ const RPC_UNSUPPORTED_PROTOCOL_VERSION = -32004;
 
 const CLIENT_INFO = { name: "lvis-app", version: "0.1.0" } as const;
 
+/** MCP Apps extension key (§8 `io.modelcontextprotocol/ui`, 2026-01-26 snapshot). */
+const MCP_APPS_UI_EXTENSION = "io.modelcontextprotocol/ui";
+
 const DEFAULT_REQUEST_TIMEOUT_MS = TOOL_TIMEOUT_POLICY.mcpRequestDefaultMs;
 const MAX_REQUEST_TIMEOUT_MS = TOOL_TIMEOUT_POLICY.mcpRequestMaxMs;
 const HANDSHAKE_TIMEOUT_MS = 10_000; // discover / initialize / tools/list 핸드셰이크용
@@ -319,6 +322,14 @@ export class McpClient {
    * carries the RC `_meta`; flips to "legacy" only when that probe 404s.
    */
   private mode: "rc" | "legacy" = "rc";
+  /**
+   * Whether the server ADVERTISED the MCP Apps extension (`io.modelcontextprotocol/ui`)
+   * in `server/discover`. The host honors a tool result's `_meta.ui` only when
+   * this is true — a server that did not declare Apps cannot smuggle a UI surface
+   * (the §3.7 "permission enforcement per `_meta.ui`" gate; the renderer CSP is
+   * the second layer). Legacy (dual-era) servers never advertise Apps.
+   */
+  private appsUiAdvertised = false;
 
   readonly state: McpServerState;
 
@@ -402,11 +413,16 @@ export class McpClient {
           HANDSHAKE_TIMEOUT_MS,
         );
         this.mode = "rc";
+        // §3.7 MCP Apps permission gate — only honor `_meta.ui` from a server
+        // that DECLARED the ui extension at discovery.
+        this.appsUiAdvertised =
+          discover.capabilities?.extensions?.[MCP_APPS_UI_EXTENSION] !== undefined;
         log.info(
           {
             protocol: MCP_PROTOCOL_VERSION,
             supportedVersions: discover.supportedVersions,
             server: `${discover.serverInfo.name}@${discover.serverInfo.version}`,
+            apps: this.appsUiAdvertised,
           },
           `${this.config.id} RC discover 완료`,
         );
@@ -591,7 +607,9 @@ export class McpClient {
       throw new Error(content.map((c) => c.text ?? JSON.stringify(c)).join("\n"));
     }
     const text = content.map((c) => c.text ?? JSON.stringify(c)).join("\n");
-    const uiMeta = result._meta?.ui;
+    // MCP Apps permission gate (§3.7): ignore `_meta.ui` unless the server
+    // advertised the ui extension at discovery.
+    const uiMeta = this.appsUiAdvertised ? result._meta?.ui : undefined;
     let uiPayload: McpUiPayload | undefined;
     if (uiMeta?.resourceUri) {
       uiPayload = {
