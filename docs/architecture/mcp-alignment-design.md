@@ -293,21 +293,35 @@ correctness-review GO):
   external server's `elicitation/create` routes to the host `ApprovalGate` as an
   agent-action consent ask; decision → `ElicitResult` (fail-closed: only allow-*
   → accept). Bound per-server in `McpManager` (6th `McpClient` arg), built in boot
-  from the approvalGate. sampling/roots throw (deprecated SEP-2577). Remaining
-  follow-ups: per-request `capabilityProvider` headless-derivation (needs an ALS
-  turn-context; MCP only fires interactive today) + schema-driven elicitation form
-  capture UI (v1 is consent-only).
+  from the approvalGate. sampling/roots throw (deprecated SEP-2577).
+- **A2 — per-request `capabilityProvider` headless-derivation: RESOLVED as
+  UNNECESSARY (not built).** `headless` lives on `ConversationLoop.deps.headless`
+  (per-loop-instance, fixed at construction — routine/headless loops are separate
+  instances), and `includeMcp = deps.headless !== true` already EXCLUDES MCP tools
+  from the model's tool set on a headless loop, so a headless loop never issues an
+  MCP `tools/call`. The `McpClient` default capabilityProvider (advertise
+  elicitation) is therefore correct for every MCP request that can actually occur;
+  a headless branch would be dead code superseded by a stronger existing gate.
+  Remaining A follow-up: schema-driven elicitation form-capture UI (v1 is
+  consent-only; renderer work).
 - **E8 — atomic plugin reload**: `PluginMcpHost.start` now builds tools
   registry-read-only (`buildTools`) then commits via one `replacePluginTools`
   swap; `dispose()` closes a superseded host without unregistering. A failed
   reload keeps the previous tools (no zero-tools window).
 - **E9 — cleanup**: orphan i18n catalog removed (barrel regenerated) + stale
   legacy-removal doc-comments fixed.
-- **E10 — generic-command-hooks pure foundation** (#811, inert): `hook-config.ts`
-  (parse/validate, glob matcher, closed event set, binary-only rejected, timeout
-  clamp) + `hook-registry.ts` (normalized entry + `.sh`↔config merge). NOT wired
-  — the trust+runner+boot-flip (a deliberate boot guard blocks `hooks.json` today)
-  is a separate cluster-reviewed PR.
+- **E10 — generic-command-hooks ACTIVATED** (#811 milestone-1, STEPS 1-8 DONE):
+  the inert foundation (`hook-config.ts` + `hook-registry.ts`) plus the activation
+  (`hook-config-trust.ts` TOFU trust unit = whole-file + referenced-script hash →
+  quarantine; `script-hook-runner.ts` generalized to a `RunnableHook` argv with all
+  safety preserved; `ScriptHookManager.setTrustedRegistry` consumes the unified
+  registry; `wireHookSystem` + the flipped boot guard). A `hooks.json` runs `command`
+  hooks at the 3 fire points ONLY after passing TOFU (`/permission hooks accept`);
+  untrusted/changed → quarantined, never runs. **3-agent cluster review GO
+  (security/critic/architect), all 7 security invariants PASS; full suite 6392
+  passed/0 failed + build green.** Follow-ups (non-blocking): populate the new audit
+  fields at the executor write site; broadcast slash-driven trust changes to the
+  renderer banner.
 
 **Round-2 completions (post-feedback push).** Several items first marked "gated"
 were actually implementable once the open decisions were made autonomously:
