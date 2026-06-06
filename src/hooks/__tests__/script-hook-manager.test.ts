@@ -81,6 +81,27 @@ describe("Permission policy P4 ScriptHookManager", () => {
     expect(out.reason).toContain("strict perm policy");
   });
 
+  // #811 hooks-on-mcp-calls — a hook with a matcher runs only for matching tools.
+  it("runs a matcher'd hook only for tools whose name matches the glob", async () => {
+    const m = new ScriptHookManager();
+    m.setTrustedHooks([{ ...hookFixture("pre-deny.sh", "pre"), matcher: "mcp_*" }]);
+
+    // An MCP tool matches `mcp_*` → the deny hook runs.
+    const mcpCall = await m.runPreToolUse(
+      { ...basePayload, toolName: "mcp_hr_query", source: "mcp" },
+      shellIntegrationOptions,
+    );
+    expect(mcpCall.decision).toBe("deny");
+
+    // A builtin tool does NOT match → the hook is skipped (no matching hooks).
+    const builtinCall = await m.runPreToolUse(
+      { ...basePayload, toolName: "fs_write" },
+      shellIntegrationOptions,
+    );
+    expect(builtinCall.decision).toBe("allow");
+    expect(builtinCall.results).toEqual([]);
+  });
+
   // #811 hooks-on-mcp-calls — per-request MCP identity reaches the hook so a
   // policy can deny by the SPECIFIC server, not just the coarse source.
   it("propagates mcpServerId so a hook can deny by MCP origin", async () => {
