@@ -14,6 +14,13 @@ import {
   type DiscoveredHook,
   type HookDiff,
 } from "./hook-discovery.js";
+import {
+  HOOKS_CONFIG_FILENAME,
+  defaultHooksConfigPath,
+  loadHookConfig,
+  syntheticConfigHook,
+} from "./hook-config-trust.js";
+import type { HookConfigEntry } from "./hook-config.js";
 import type { ScriptHookManager } from "./script-hook-manager.js";
 
 export interface HookTrustCommandOptions {
@@ -29,6 +36,18 @@ export interface HookTrustRow {
   sha256: string;
   state: "trusted" | "new" | "changed" | "removed" | "disabled";
   previousSha256?: string;
+  /**
+   * #811 trust-review additive fields (STEP 6 — additive, renderer-optional).
+   * `source` distinguishes a legacy `.sh` hook from the declarative `hooks.json`
+   * trust unit. For the config row we summarize its declared entries so the
+   * `/permission hooks list` text surface shows command/event/matcher without a
+   * renderer change. Absent on `.sh` rows (back-compat).
+   */
+  source?: "sh" | "config";
+  /** Number of declared command entries (config row only). */
+  entryCount?: number;
+  /** Per-entry summaries (config row only): event + matcher + command. */
+  entries?: Array<{ event: HookConfigEntry["event"]; matcher?: string; command: string }>;
 }
 
 export type HookTrustCommandResult =
@@ -71,8 +90,13 @@ function lockfilePath(opts: HookTrustCommandOptions): string {
 }
 
 function validateHookName(fileName: string): string | null {
+  // #811 — widen to admit the `hooks.json` config trust-unit identity WITHOUT
+  // loosening the `.sh` pattern. The config identity is an EXACT literal match
+  // (no glob, no path separators), so it admits no path-traversal / unexpected
+  // identity: `../hooks.json`, `a/hooks.json`, `hooks.json.bak` all still fail.
+  if (fileName === HOOKS_CONFIG_FILENAME) return null;
   if (!/^(pre|post|perm)-[A-Za-z0-9._-]+\.sh$/.test(fileName)) {
-    return "hook name must match pre-*.sh, post-*.sh, or perm-*.sh without path separators";
+    return "hook name must match pre-*.sh, post-*.sh, or perm-*.sh (or 'hooks.json') without path separators";
   }
   return null;
 }
@@ -96,18 +120,69 @@ function rowFromHook(hook: DiscoveredHook, state: HookTrustRow["state"]): HookTr
   };
 }
 
+/** Summarize parsed config entries onto a trust row (STEP 6 additive fields). */
+function withConfigSummary(row: HookTrustRow, entries: HookConfigEntry[]): HookTrustRow {
+  return {
+    ...row,
+    source: "config",
+    entryCount: entries.length,
+    entries: entries.map((e) => ({
+      event: e.event,
+      ...(e.matcher !== undefined ? { matcher: e.matcher } : {}),
+      command: e.command.join(" "),
+    })),
+  };
+}
+
+function configPath(opts: HookTrustCommandOptions): string {
+  return defaultHooksConfigPath(hooksDir(opts));
+}
+
+function disabledConfigPath(opts: HookTrustCommandOptions): string {
+  return join(disabledDir(opts), HOOKS_CONFIG_FILENAME);
+}
+
+/**
+ * Snapshot the `.sh` + `hooks.json` trust surface. The config trust unit rides
+ * the same `DiscoveredHook` flow: when `hooks.json` exists in the hooks dir it
+ * is folded into `active` (and the diff); when it only exists under `.disabled/`
+ * it is folded into `disabled`. `configEntries` carries the parsed entries of
+ * whichever copy is present, for trust-review summaries.
+ */
 function snapshot(opts: HookTrustCommandOptions): {
   active: DiscoveredHook[];
   disabled: DiscoveredHook[];
   lockfile: ReturnType<typeof readLockfile>;
   diff: HookDiff[];
+  configEntries: HookConfigEntry[];
 } {
   ensureHooksDirectory(hooksDir(opts));
   const active = discoverHooks(hooksDir(opts));
   const disabled = discoverHooks(disabledDir(opts));
   const lockfile = readLockfile(lockfilePath(opts));
+
+  // Fold the `hooks.json` trust unit in (active copy wins; else disabled copy).
+  let configEntries: HookConfigEntry[] = [];
+  const activeConfig = loadHookConfig(configPath(opts));
+  if (activeConfig.exists) {
+    const synthetic = syntheticConfigHook(activeConfig);
+    if (synthetic) {
+      active.push(synthetic);
+      configEntries = activeConfig.entries;
+    }
+  } else {
+    const disabledConfig = loadHookConfig(disabledConfigPath(opts));
+    if (disabledConfig.exists) {
+      const synthetic = syntheticConfigHook(disabledConfig);
+      if (synthetic) {
+        disabled.push(synthetic);
+        configEntries = disabledConfig.entries;
+      }
+    }
+  }
+
   const diff = diffAgainstLockfile(active, lockfile);
-  return { active, disabled, lockfile, diff };
+  return { active, disabled, lockfile, diff, configEntries };
 }
 
 async function persistTrustedHooks(
@@ -119,19 +194,44 @@ async function persistTrustedHooks(
   for (const hook of trustedHooks) byName.set(hook.fileName, hook);
   const trusted = [...byName.values()].sort((a, b) => a.fileName.localeCompare(b.fileName));
   await persistLockfile(trusted, lockfilePath(opts), previousAcceptedAt);
-  opts.manager?.setTrustedHooks(trusted);
+  // Rebuild the runtime registry: trusted `.sh` hooks + trusted `hooks.json`
+  // config entries (the latter only when the config trust unit is trusted).
+  refreshManagerRegistry(trusted, opts);
   return trusted.map((hook) => rowFromHook(hook, "trusted"));
+}
+
+/**
+ * Feed the runtime manager the unified registry derived from the trusted set.
+ * Trusted `.sh` hooks become `sh` registry entries; if the `hooks.json` trust
+ * unit is in the trusted set, its parsed entries become `config` registry
+ * entries. An untrusted `hooks.json` contributes NOTHING — its commands never
+ * reach the runtime.
+ */
+function refreshManagerRegistry(trusted: DiscoveredHook[], opts: HookTrustCommandOptions): void {
+  if (!opts.manager) return;
+  const shHooks = trusted.filter((h) => h.fileName !== HOOKS_CONFIG_FILENAME);
+  const configTrusted = trusted.some((h) => h.fileName === HOOKS_CONFIG_FILENAME);
+  const configEntries = configTrusted ? loadHookConfig(configPath(opts)).entries : [];
+  opts.manager.setTrustedRegistry(shHooks, configEntries);
 }
 
 export function listHookTrustState(
   opts: HookTrustCommandOptions = {},
 ): Extract<HookTrustCommandResult, { verb: "list" }> {
-  const { disabled, diff } = snapshot(opts);
+  const { disabled, diff, configEntries } = snapshot(opts);
   return {
     ok: true,
     verb: "list",
-    active: diff.map(rowFromDiff),
-    disabled: disabled.map((hook) => rowFromHook(hook, "disabled")),
+    active: diff.map((d) =>
+      d.hook.fileName === HOOKS_CONFIG_FILENAME
+        ? withConfigSummary(rowFromDiff(d), configEntries)
+        : rowFromDiff(d),
+    ),
+    disabled: disabled.map((hook) =>
+      hook.fileName === HOOKS_CONFIG_FILENAME
+        ? withConfigSummary(rowFromHook(hook, "disabled"), configEntries)
+        : rowFromHook(hook, "disabled"),
+    ),
   };
 }
 

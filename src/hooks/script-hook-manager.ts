@@ -1,27 +1,44 @@
 /**
  * Permission policy — Layer 6 hook runtime manager.
  *
- * Spec ref: docs/architecture/permission-policy-design.md §3 Layer 6.
+ * Spec ref: docs/architecture/permission-policy-design.md §3 Layer 6 +
+ * docs/architecture/hook-runtime-expansion-design.md §4 (#811).
  *
- * Holds the trusted hook list at runtime and exposes
+ * Holds the trusted hook registry at runtime and exposes
  * {@link runPreToolUse} / {@link runPostToolUse} / {@link runPermissionRequest}
  * — the three integration points the executor / approval-gate call into.
  *
+ * The registry is the UNIFIED list (`hook-registry.ts`): trusted legacy `.sh`
+ * hooks AND trusted declarative `hooks.json` `command` entries collapse into one
+ * normalized shape, so dispatch is origin-agnostic. CRITICAL: only entries that
+ * passed the TOFU trust gate ever land here — `setTrustedRegistry` is called by
+ * the boot pipeline / `/permission hooks accept` AFTER quarantine resolves. An
+ * untrusted or changed `hooks.json` contributes NOTHING to this registry.
+ *
  * Composition rule (v1, deny precedence):
- *   - {@link runPreToolUse} returns `decision: "deny"` when *any* hook
- *     denied. Caller treats this as a downgrade-only signal: even if
- *     upstream layers allowed, hook deny wins.
- *   - {@link runPreToolUse} returns `decision: "allow"` when no hooks
- *     deny. Caller MUST NOT promote this allow over an upstream deny.
- *   - `modify` is **NOT** supported in v1 (hook-signing follow-up once signing lands).
+ *   - {@link runPreToolUse} returns `decision: "deny"` when *any* hook denied.
+ *   - {@link runPreToolUse} returns `decision: "allow"` only when no hook denies.
+ *     Caller MUST NOT promote this allow over an upstream deny.
+ *   - `modify` is **NOT** supported in v1.
  */
-import { type DiscoveredHook, hookMatchesTool } from "./hook-discovery.js";
-import { runHookChain, type RunOneHookOptions } from "./script-hook-runner.js";
-import type {
-  HookTrustOrigin,
-  ScriptHookInvocationResult,
-  ScriptHookStdin,
-  ScriptHookType,
+import { type DiscoveredHook } from "./hook-discovery.js";
+import {
+  buildHookRegistry,
+  filterRegistryByEventAndTool,
+  type HookRegistryEntry,
+} from "./hook-registry.js";
+import type { HookConfigEntry } from "./hook-config.js";
+import {
+  runHookChain,
+  runnableFromDiscovered,
+  type RunnableHook,
+  type RunOneHookOptions,
+} from "./script-hook-runner.js";
+import {
+  type HookTrustOrigin,
+  type ScriptHookInvocationResult,
+  type ScriptHookStdin,
+  type ScriptHookType,
 } from "./script-hook-types.js";
 import { redactForLLM } from "../audit/dlp-filter.js";
 import type { ToolCategory, ToolSource } from "../tools/types.js";
@@ -55,25 +72,39 @@ export interface HookDispatchResult {
 }
 
 export class ScriptHookManager {
-  private trusted: DiscoveredHook[] = [];
+  private registry: HookRegistryEntry[] = [];
 
-   /**
-    * Replace the trusted hook list. Called by the boot pipeline once
-   * the TOFU workflow resolves; the executor / gate read from this
-    * snapshot for every tool call.
-    */
+  /**
+   * Replace the trusted hook list with legacy `.sh` hooks only. Retained for
+   * back-compat with callers that don't (yet) carry config entries. Equivalent
+   * to `setTrustedRegistry(hooks, [])`.
+   */
   setTrustedHooks(hooks: DiscoveredHook[]): void {
-    this.trusted = [...hooks];
+    this.setTrustedRegistry(hooks, []);
   }
 
-  /** Trusted hooks for the given type. Used by tests + diagnostics. */
-  hooksOfType(type: ScriptHookType): DiscoveredHook[] {
-    return this.trusted.filter((h) => h.hookType === type);
+  /**
+   * Replace the trusted registry with the unified set: trusted `.sh` hooks
+   * (origin `sh`) + trusted declarative config entries (origin `config`).
+   * Called by the boot pipeline once the TOFU workflow resolves and by
+   * `/permission hooks accept` when trust state changes. The executor /
+   * approval-gate read from this snapshot for every tool call.
+   *
+   * SECURITY: callers MUST pass ONLY trusted entries. The manager never
+   * re-validates trust — it assumes the quarantine gate already ran.
+   */
+  setTrustedRegistry(shHooks: DiscoveredHook[], configEntries: HookConfigEntry[]): void {
+    this.registry = buildHookRegistry(shHooks, configEntries);
   }
 
-  /** Total trusted hook count. */
+  /** Registry entries for the given type. Used by tests + diagnostics. */
+  hooksOfType(type: ScriptHookType): HookRegistryEntry[] {
+    return this.registry.filter((e) => e.event === type);
+  }
+
+  /** Total trusted entry count. */
   size(): number {
-    return this.trusted.length;
+    return this.registry.length;
   }
 
   /**
@@ -114,10 +145,10 @@ export class ScriptHookManager {
     payload: HookDispatchPayload,
     options?: RunOneHookOptions,
   ): Promise<HookDispatchResult> {
-    // #811 — a hook with a `matcher` runs only for tool calls whose name matches
-    // its glob (e.g. `mcp_*`); a hook with no matcher runs for every tool.
-    const hooks = this.hooksOfType(type).filter((h) => hookMatchesTool(h.matcher, payload.toolName));
-    if (hooks.length === 0) {
+    // #811 — filter by event + matcher (the same glob as `.sh` frontmatter).
+    // A config/`.sh` entry with no matcher runs for every tool.
+    const entries = filterRegistryByEventAndTool(this.registry, type, payload.toolName);
+    if (entries.length === 0) {
       return { decision: "allow", reason: "no matching hooks of this type", results: [] };
     }
     const stdinPayload: ScriptHookStdin = {
@@ -133,8 +164,34 @@ export class ScriptHookManager {
       ...(payload.toolOutput !== undefined ? { toolOutput: payload.toolOutput } : {}),
       ...(payload.isError !== undefined ? { isError: payload.isError } : {}),
     };
-    return runHookChain(hooks, stdinPayload, options);
+    // Each entry runs with its own timeout: config entries carry a per-entry
+    // (already-clamped) `timeoutMs`; `.sh` entries fall back to the default /
+    // caller-supplied option.
+    return runHookChain(entries.map(toRunnable), stdinPayload, options);
   }
+}
+
+/**
+ * Normalize one registry entry into the runner's {@link RunnableHook} shape,
+ * carrying its per-entry timeout when present (config entries) so each hook runs
+ * on its own clamped budget.
+ */
+function toRunnable(entry: HookRegistryEntry): RunnableHook {
+  if (entry.source === "sh") {
+    // `.sh` entries carry NO per-entry timeout — they fall back to the
+    // caller-supplied option (e.g. the Windows shell-integration override) or
+    // the default, exactly as before this change.
+    return runnableFromDiscovered(entry.discovered);
+  }
+  return {
+    id: entry.id,
+    hookType: entry.event,
+    command: entry.command,
+    ...(entry.matcher !== undefined ? { matcher: entry.matcher } : {}),
+    // For a config command, the forensic path is argv[0] (or the script arg).
+    hookPath: entry.command[0],
+    timeoutMs: entry.timeoutMs,
+  };
 }
 
 /**

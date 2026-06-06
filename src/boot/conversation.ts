@@ -145,10 +145,14 @@ export async function createApprovalGate(
 }
 
 export function createHookRunner(): HookRunner {
-  // Permission policy single hook path: production script hooks are discovered by
-  // wireHookSystem() from discrete pre/post/perm-*.sh files under
-  // ~/.config/lvis/hooks/. Legacy hooks.json command/http loading is not
-  // wired at boot because it bypasses the strict quarantine/accept flow.
+  // Permission policy single hook path: production external hooks are loaded by
+  // wireHookSystem() from BOTH discrete pre/post/perm-*.sh files AND a
+  // declarative ~/.config/lvis/hooks/hooks.json — but every one of them flows
+  // through the SAME TOFU quarantine/accept gate (#811). A new or changed
+  // hooks.json is quarantined to .disabled/ and its command entries NEVER run
+  // until the user runs `/permission hooks accept hooks.json`; only a trusted,
+  // unchanged config contributes runnable commands. The in-process HookRunner
+  // returned here is for internal/test hooks only and has no external surface.
   return new HookRunner();
 }
 

@@ -1,26 +1,40 @@
 /**
  * Permission policy — Layer 6 hook script runner.
  *
- * Spec ref: docs/architecture/permission-policy-design.md §3 Layer 6.
+ * Spec ref: docs/architecture/permission-policy-design.md §3 Layer 6 +
+ * docs/architecture/hook-runtime-expansion-design.md §4 / §6 (#811).
  *
- * Executes one or more pre/post/perm hook scripts. Each script:
+ * Executes one hook handler — either a legacy `pre/post/perm-*.sh` file or a
+ * declarative `hooks.json` `command` handler (Python / Node / shell + local
+ * script). Both collapse to the SAME execution contract:
  *   - receives the wire-shape JSON on stdin
  *   - returns `{ action, reason }` JSON on stdout
  *   - exit !=0  → treated as deny (fail-safe)
  *   - timeout   → treated as deny
  *   - bad JSON  → treated as deny + warn
+ *   - spawn err → treated as deny
+ *
+ * SECURITY INVARIANTS (do not regress — #811):
+ *   - **Env allowlist**: the child sees ONLY `buildSafeChildEnv`'s generic
+ *     non-secret allowlist plus the injected `LVIS_HOOK_*` vars. No
+ *     `ANTHROPIC_API_KEY` / `AWS_*` / `GITHUB_TOKEN` / `LVIS_*` secret ever
+ *     reaches a hook.
+ *   - **No shell parser for generic commands**: a `hooks.json` `command` is an
+ *     already-split argv — we spawn `argv[0]` directly with `argv.slice(1)` as
+ *     args (NO `sh -c`), so a crafted matcher/arg can't inject a second shell
+ *     command. The legacy `.sh` single-file path still goes through the resolved
+ *     shell for Windows interpreter resolution (Git-Bash / WSL), unchanged.
+ *   - **Fail-closed**: timeout / nonzero exit / bad JSON / spawn-error → deny.
  *
  * Composition rule (v1, §3 Layer 6 critic M3):
  *   - hook *can* deny what upstream allowed (deny precedence)
- *   - hook *cannot* allow what upstream denied — that's enforced at the
- *     caller (the Layer 6 result is downgrade-only). This module returns
- *     the verdict; pipeline merge logic lives in the integration site.
+ *   - hook *cannot* allow what upstream denied — enforced at the caller.
  *
- * DLP applied at the *caller* — input is already redacted before this
- * module sees it. We do not re-mask here because mismatched mask rules
- * across call sites would surface as test flakes.
+ * DLP applied at the *caller* — input is already redacted before this module
+ * sees it.
  */
 import { spawn } from "node:child_process";
+import { homedir } from "node:os";
 import { buildSafeChildEnv } from "../tools/safe-env.js";
 import {
   resolveShell,
@@ -37,6 +51,7 @@ import {
   type ScriptHookInvocationResult,
   type ScriptHookStdin,
   type ScriptHookStdout,
+  type ScriptHookType,
 } from "./script-hook-types.js";
 import type { DiscoveredHook } from "./hook-discovery.js";
 
@@ -50,59 +65,162 @@ export interface RunOneHookOptions {
 }
 
 /**
- * Run a single hook script. Pipes the canonical stdin payload, captures
+ * The minimal shape the runner needs to execute one hook handler. Both a
+ * legacy `.sh` `DiscoveredHook` and a declarative `hooks.json` `command`
+ * handler normalize into this (see `hook-registry.ts`). Decoupling the runner
+ * from `DiscoveredHook` is what lets a generic `command` argv run through the
+ * SAME fail-closed / env-allowlist / timeout machinery as a `.sh` file.
+ */
+export interface RunnableHook {
+  /** Stable identity for audit / logs (registry id or `.sh` fileName). */
+  id: string;
+  /** Closed-set internal event. */
+  hookType: ScriptHookType;
+  /**
+   * argv to execute. A single-element argv ending in `.sh` is the legacy path
+   * (runs through the resolved shell for Windows interpreter resolution);
+   * anything else is spawned directly with NO shell (argv[0] = program).
+   */
+  command: string[];
+  /** Optional glob matcher — surfaced to the hook via `LVIS_HOOK_MATCHER`. */
+  matcher?: string;
+  /** Path for audit/forensics — `.sh` abs path, or the resolved script arg. */
+  hookPath: string;
+  /**
+   * Optional per-hook timeout (ms). Config entries carry their own clamped
+   * budget here; when set it takes precedence over `RunOneHookOptions.timeoutMs`
+   * so each hook in a mixed chain runs on its own ceiling. `.sh` hooks leave it
+   * unset and fall back to the option / default.
+   */
+  timeoutMs?: number;
+}
+
+/** Adapt a legacy `DiscoveredHook` to the {@link RunnableHook} shape. */
+export function runnableFromDiscovered(hook: DiscoveredHook): RunnableHook {
+  return {
+    id: hook.fileName,
+    hookType: hook.hookType,
+    command: [hook.path],
+    ...(hook.matcher !== undefined ? { matcher: hook.matcher } : {}),
+    hookPath: hook.path,
+  };
+}
+
+/** Expand a leading `~` / `~/` to the user's home directory. */
+function expandHome(token: string): string {
+  if (token === "~") return homedir();
+  if (token.startsWith("~/") || token.startsWith("~\\")) {
+    return homedir() + token.slice(1);
+  }
+  return token;
+}
+
+/**
+ * Is this a single legacy `.sh` file that must run through the resolved shell
+ * (so Windows Git-Bash / WSL can pick the right interpreter)? Only a
+ * single-element argv whose lone token ends in `.sh` qualifies — a generic
+ * `command` (even `sh ./x.sh` or `python3 p.py`) is spawned directly.
+ */
+function isLegacyShellScript(command: string[]): boolean {
+  return command.length === 1 && command[0].toLowerCase().endsWith(".sh");
+}
+
+/**
+ * Build the injected hook env. PRESERVES the existing `LVIS_HOOK_*` set and
+ * ADDS `LVIS_HOOK_EVENT` / `LVIS_HOOK_MATCHER` (#811 §6.2). No secret vars are
+ * ever added here — `buildSafeChildEnv` is the only env the child sees.
+ */
+function buildHookEnv(payload: ScriptHookStdin, matcher: string | undefined): Record<string, string> {
+  return {
+    LVIS_HOOK_TYPE: payload.hookType,
+    // #811 — `LVIS_HOOK_EVENT` is the closed-set event (alias of TYPE for the
+    // generic-command surface); `LVIS_HOOK_MATCHER` exposes the configured glob.
+    LVIS_HOOK_EVENT: payload.hookType,
+    ...(matcher !== undefined ? { LVIS_HOOK_MATCHER: matcher } : {}),
+    LVIS_HOOK_TOOL_NAME: payload.toolName,
+    LVIS_HOOK_TRUST_ORIGIN: payload.trustOrigin,
+    // Per-request MCP-aligned origin (#811 hooks-on-mcp-calls): a hook can deny
+    // by the SPECIFIC server/plugin via env (the convenient path, alongside the
+    // full stdin JSON).
+    ...(payload.mcpServerId !== undefined ? { LVIS_HOOK_MCP_SERVER_ID: payload.mcpServerId } : {}),
+    ...(payload.pluginId !== undefined ? { LVIS_HOOK_PLUGIN_ID: payload.pluginId } : {}),
+  };
+}
+
+/**
+ * Run a single hook handler. Pipes the canonical stdin payload, captures
  * stdout (capped), enforces the timeout, and parses the verdict.
  *
- * Exit code !=0, malformed stdout, or timeout all collapse to
- * `decision: "deny"` per the spec's fail-safe rule.
+ * Accepts either a legacy `DiscoveredHook` (back-compat) or a normalized
+ * {@link RunnableHook} (declarative `command` handler). Exit code !=0,
+ * malformed stdout, timeout, or spawn error all collapse to `decision: "deny"`
+ * per the spec's fail-safe rule.
  */
 export async function runOneHookScript(
-  hook: DiscoveredHook,
+  hook: DiscoveredHook | RunnableHook,
   payload: ScriptHookStdin,
   options: RunOneHookOptions = {},
 ): Promise<ScriptHookInvocationResult> {
-  const timeoutMs = options.timeoutMs ?? DEFAULT_HOOK_TIMEOUT_MS;
+  const runnable = normalizeRunnable(hook);
+  // Per-hook timeout precedence: the runnable's own (clamped) budget wins, then
+  // the caller-supplied option, then the default. This lets a mixed chain run
+  // each config entry on its own ceiling.
+  const timeoutMs = runnable.timeoutMs ?? options.timeoutMs ?? DEFAULT_HOOK_TIMEOUT_MS;
   const cwd = options.cwd ?? process.cwd();
   const start = Date.now();
 
-  let shell;
-  try {
-    shell = resolveShell();
-  } catch (err) {
-    if (err instanceof ShellMismatchError) {
-      return {
-        hookPath: hook.path,
-        hookType: hook.hookType,
-        decision: "deny",
-        reason: `shell unavailable: ${err.message}`,
-        rawStdout: "",
-        timedOut: false,
-        durationMs: Date.now() - start,
-      };
+  const deny = (reason: string, extra: Partial<ScriptHookInvocationResult> = {}): ScriptHookInvocationResult => ({
+    hookPath: runnable.hookPath,
+    hookType: runnable.hookType,
+    decision: "deny",
+    reason,
+    rawStdout: "",
+    timedOut: false,
+    durationMs: Date.now() - start,
+    ...extra,
+  });
+
+  const hookEnv = buildHookEnv(payload, runnable.matcher);
+  const childEnvBase = buildSafeChildEnv(hookEnv);
+
+  // Decide the spawn shape. Legacy single `.sh` → resolved shell (Windows
+  // interpreter resolution). Generic command → direct spawn, NO shell.
+  let spawnCmd: string;
+  let spawnArgs: string[];
+  let spawnEnv: Record<string, string>;
+  if (isLegacyShellScript(runnable.command)) {
+    let shell;
+    try {
+      shell = resolveShell();
+    } catch (err) {
+      if (err instanceof ShellMismatchError) {
+        return deny(`shell unavailable: ${err.message}`);
+      }
+      throw err;
     }
-    throw err;
+    // The hook file path is passed via `shellCommandForHookPath` so the script's
+    // own `$0` reflects its path. Env vars are injected as inline assignments
+    // (the shell consumes them) AND via the spawn env allowlist.
+    const hookCommand = `${shellEnvAssignments(hookEnv)} ${shellCommandForHookPath(shell, runnable.command[0])}`;
+    spawnCmd = shell.cmd;
+    spawnArgs = shell.shellArgs(hookCommand);
+    spawnEnv = shellEnvForChild(shell, childEnvBase);
+  } else {
+    // Generic command-hook: spawn argv[0] directly with NO shell. Expand a
+    // leading `~` in each token (the shell would have done this; a direct
+    // spawn does not). NO shell quoting / parsing → no shell-injection surface.
+    const argv = runnable.command.map(expandHome);
+    spawnCmd = argv[0];
+    spawnArgs = argv.slice(1);
+    spawnEnv = childEnvBase;
   }
 
   return new Promise<ScriptHookInvocationResult>((resolve) => {
-    // Run via the resolved shell — so a hook can be `bash hook.sh` even
-    // on Windows under Git Bash. The hook file path is passed as $0 via
-    // `shell.shellArgs(...)` so the script's own `$0` reflects its path.
-    const hookEnv = {
-      LVIS_HOOK_TYPE: payload.hookType,
-      LVIS_HOOK_TOOL_NAME: payload.toolName,
-      LVIS_HOOK_TRUST_ORIGIN: payload.trustOrigin,
-      // Per-request MCP-aligned origin (#811 hooks-on-mcp-calls): a hook can deny
-      // by the SPECIFIC server/plugin via env (the convenient path, alongside the
-      // full stdin JSON), e.g. `[ "$LVIS_HOOK_MCP_SERVER_ID" = badsrv ] && deny`.
-      ...(payload.mcpServerId !== undefined ? { LVIS_HOOK_MCP_SERVER_ID: payload.mcpServerId } : {}),
-      ...(payload.pluginId !== undefined ? { LVIS_HOOK_PLUGIN_ID: payload.pluginId } : {}),
-    };
-    const hookCommand = `${shellEnvAssignments(hookEnv)} ${shellCommandForHookPath(shell, hook.path)}`;
-    const child = spawn(shell.cmd, shell.shellArgs(hookCommand), {
+    const child = spawn(spawnCmd, spawnArgs, {
       cwd,
       // Allowlist env — do not leak ANTHROPIC_API_KEY, AWS_*, GITHUB_TOKEN
       // etc. to hook scripts. The hook receives only the LVIS_HOOK_* vars.
-      env: shellEnvForChild(shell, buildSafeChildEnv(hookEnv)),
+      env: spawnEnv,
       stdio: ["pipe", "pipe", "pipe"],
       // Run in a new process group so SIGKILL on timeout reaps the
       // entire descendant tree (sh → script → sleep). Without this the
@@ -138,7 +256,7 @@ export async function runOneHookScript(
     });
     child.stdin?.on("error", (err: NodeJS.ErrnoException) => {
       if (err.code === "EPIPE") return;
-      log.warn("hook stdin error: %s (%s)", hook.fileName, err.message);
+      log.warn("hook stdin error: %s (%s)", runnable.id, err.message);
     });
 
     let settled = false;
@@ -156,10 +274,10 @@ export async function runOneHookScript(
       const durationMs = Date.now() - start;
 
       if (timedOut) {
-        log.warn("hook timeout: %s (%dms)", hook.fileName, timeoutMs);
+        log.warn("hook timeout: %s (%dms)", runnable.id, timeoutMs);
         resolve({
-          hookPath: hook.path,
-          hookType: hook.hookType,
+          hookPath: runnable.hookPath,
+          hookType: runnable.hookType,
           decision: "deny",
           reason: `hook timed out after ${timeoutMs}ms`,
           rawStdout: stdout,
@@ -174,8 +292,8 @@ export async function runOneHookScript(
         // Fail-safe: non-zero exit → deny. Stderr surfaces the cause.
         const tail = stderr.length > 0 ? stderr.trim().slice(0, 200) : `exit ${code}`;
         resolve({
-          hookPath: hook.path,
-          hookType: hook.hookType,
+          hookPath: runnable.hookPath,
+          hookType: runnable.hookType,
           decision: "deny",
           reason: `hook exited non-zero: ${tail}`,
           rawStdout: stdout,
@@ -189,8 +307,8 @@ export async function runOneHookScript(
       const parsed = parseHookStdout(stdout);
       if (!parsed) {
         resolve({
-          hookPath: hook.path,
-          hookType: hook.hookType,
+          hookPath: runnable.hookPath,
+          hookType: runnable.hookType,
           decision: "deny",
           reason: `hook stdout not valid {action,reason} JSON`,
           rawStdout: stdout,
@@ -201,8 +319,8 @@ export async function runOneHookScript(
         return;
       }
       resolve({
-        hookPath: hook.path,
-        hookType: hook.hookType,
+        hookPath: runnable.hookPath,
+        hookType: runnable.hookType,
         decision: parsed.action,
         reason: parsed.reason,
         rawStdout: stdout,
@@ -237,8 +355,8 @@ export async function runOneHookScript(
       if (timer) clearTimeout(timer);
       if (timeoutFallback) clearTimeout(timeoutFallback);
       resolve({
-        hookPath: hook.path,
-        hookType: hook.hookType,
+        hookPath: runnable.hookPath,
+        hookType: runnable.hookType,
         decision: "deny",
         reason: `hook spawn error: ${err.message}`,
         rawStdout: "",
@@ -255,8 +373,8 @@ export async function runOneHookScript(
       clearTimeout(timer);
       try { child.kill("SIGKILL"); } catch { /* already exited */ }
       resolve({
-        hookPath: hook.path,
-        hookType: hook.hookType,
+        hookPath: runnable.hookPath,
+        hookType: runnable.hookType,
         decision: "deny",
         reason: `failed to serialise hook payload: ${(err as Error).message}`,
         rawStdout: "",
@@ -265,6 +383,16 @@ export async function runOneHookScript(
       });
     }
   });
+}
+
+/** Coerce a `DiscoveredHook` or `RunnableHook` into the runner's working shape. */
+function normalizeRunnable(hook: DiscoveredHook | RunnableHook): RunnableHook {
+  // A RunnableHook carries `command` (string[]); a DiscoveredHook carries
+  // `path` + `fileName`. Discriminate on `command`.
+  if (Array.isArray((hook as RunnableHook).command)) {
+    return hook as RunnableHook;
+  }
+  return runnableFromDiscovered(hook as DiscoveredHook);
 }
 
 function shellEnvAssignments(env: Record<string, string>): string {
@@ -307,11 +435,13 @@ export function parseHookStdout(stdout: string): ScriptHookStdout | null {
 
 /**
  * Run a chain of hooks of the same type. Order = caller-supplied
- * (alphabetical from {@link discoverHooks}). Stops at the first deny —
- * subsequent hooks are not invoked (deny precedence + don't waste cycles).
+ * (alphabetical from {@link discoverHooks}, then config file order). Stops at
+ * the first deny — subsequent hooks are not invoked (deny precedence + don't
+ * waste cycles). Each entry may be a legacy `.sh` `DiscoveredHook` or a
+ * normalized {@link RunnableHook}.
  */
 export async function runHookChain(
-  hooks: DiscoveredHook[],
+  hooks: Array<DiscoveredHook | RunnableHook>,
   payload: ScriptHookStdin,
   options: RunOneHookOptions = {},
 ): Promise<{
@@ -324,7 +454,8 @@ export async function runHookChain(
     const r = await runOneHookScript(hook, payload, options);
     results.push(r);
     if (r.decision === "deny") {
-      return { decision: "deny", reason: `${hook.fileName}: ${r.reason}`, results };
+      const label = identityLabel(hook);
+      return { decision: "deny", reason: `${label}: ${r.reason}`, results };
     }
   }
   return {
@@ -332,4 +463,12 @@ export async function runHookChain(
     reason: hooks.length === 0 ? "no hooks" : `${hooks.length} hook(s) allowed`,
     results,
   };
+}
+
+/** Human-readable identity for chain deny messages (`.sh` fileName or registry id). */
+function identityLabel(hook: DiscoveredHook | RunnableHook): string {
+  if (Array.isArray((hook as RunnableHook).command)) {
+    return (hook as RunnableHook).id;
+  }
+  return (hook as DiscoveredHook).fileName;
 }
