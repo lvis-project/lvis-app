@@ -522,3 +522,71 @@ describe("McpGovernance.validateServer — requiredAuth fail-closed", () => {
     expect(result.reason).toMatch(/mTLS/);
   });
 });
+
+describe("McpGovernance — per-request capability gate (governance-per-request)", () => {
+  it("allows a tools/call on a server approved for the tools capability", () => {
+    const gov = governanceWithPolicy(basePolicy({ allowedCapabilities: ["tools"] }));
+    expect(gov.validateRequestCapability("browser-use", "tools/call").valid).toBe(true);
+    expect(gov.validateRequestCapability("browser-use", "tools/list").valid).toBe(true);
+  });
+
+  it("denies a resources/read on a server approved only for tools", () => {
+    const gov = governanceWithPolicy(basePolicy({ allowedCapabilities: ["tools"] }));
+    const res = gov.validateRequestCapability("browser-use", "resources/read");
+    expect(res.valid).toBe(false);
+    expect(res.reason).toMatch(/'resources' capability/);
+  });
+
+  it("denies a prompts/get unless prompts is approved; allows it once added", () => {
+    expect(
+      governanceWithPolicy(basePolicy({ allowedCapabilities: ["tools"] }))
+        .validateRequestCapability("browser-use", "prompts/get").valid,
+    ).toBe(false);
+    expect(
+      governanceWithPolicy(basePolicy({ allowedCapabilities: ["tools", "prompts"] }))
+        .validateRequestCapability("browser-use", "prompts/get").valid,
+    ).toBe(true);
+  });
+
+  it("passes protocol/control methods that exercise no gated capability", () => {
+    const gov = governanceWithPolicy(basePolicy({ allowedCapabilities: [] }));
+    expect(gov.validateRequestCapability("browser-use", "server/discover").valid).toBe(true);
+    expect(gov.validateRequestCapability("browser-use", "initialize").valid).toBe(true);
+    expect(gov.validateRequestCapability("browser-use", "ping").valid).toBe(true);
+    expect(gov.validateRequestCapability("browser-use", "notifications/initialized").valid).toBe(true);
+  });
+
+  it("fail-closed: denies an unclassified (non-control, uncapability) method", () => {
+    // CRITIC finding — unknown capability verbs must NOT sail through ungated.
+    const gov = governanceWithPolicy(basePolicy({ allowedCapabilities: ["tools"] }));
+    for (const method of ["completion/complete", "logging/setLevel", "resources/unsubscribe", "wat/evil"]) {
+      expect(gov.validateRequestCapability("browser-use", method).valid, method).toBe(false);
+    }
+  });
+
+  it("exempts MCP Apps ui:// reads from the resources capability (tools-only server)", () => {
+    // ARCHITECT finding — resources/read of a ui:// resource is the MCP Apps
+    // extension, not the core resources capability; must work for tools-only servers.
+    const gov = governanceWithPolicy(basePolicy({ allowedCapabilities: ["tools"] }));
+    expect(
+      gov.validateRequestCapability("browser-use", "resources/read", { uri: "ui://app/panel.html" }).valid,
+    ).toBe(true);
+    // A non-ui:// resources/read still requires the resources capability.
+    expect(
+      gov.validateRequestCapability("browser-use", "resources/read", { uri: "file:///etc/hosts" }).valid,
+    ).toBe(false);
+  });
+
+  it("tasks methods ride the tools capability", () => {
+    const denied = governanceWithPolicy(basePolicy({ allowedCapabilities: ["resources"] }));
+    expect(denied.validateRequestCapability("browser-use", "tasks/get").valid).toBe(false);
+    const allowed = governanceWithPolicy(basePolicy({ allowedCapabilities: ["tools"] }));
+    expect(allowed.validateRequestCapability("browser-use", "tasks/cancel").valid).toBe(true);
+  });
+
+  it("denies every request for an unapproved server (deny-by-default)", () => {
+    const gov = governanceWithPolicy(basePolicy({ status: "revoked" }));
+    expect(gov.validateRequestCapability("browser-use", "tools/call").valid).toBe(false);
+    expect(gov.validateRequestCapability("unknown-server", "server/discover").valid).toBe(false);
+  });
+});
