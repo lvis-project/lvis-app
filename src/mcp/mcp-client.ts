@@ -77,6 +77,24 @@ type JsonRpcMessage = JsonRpcRequest | JsonRpcNotification | JsonRpcResponse;
 
 // ─── MCP Protocol Types ──────────────────────────────
 
+/**
+ * A JSON-RPC error returned by the server, carrying the numeric `code` so the
+ * connect path can detect `-32601` (method-not-found → dual-era fallback) and
+ * `callTool` can map `-32003`/`-32004` (design §8). The base runner previously
+ * collapsed these to a plain `Error`, losing the code.
+ */
+class McpRpcError extends Error {
+  constructor(
+    readonly code: number,
+    message: string,
+    readonly data?: unknown,
+  ) {
+    super(message);
+    this.name = "McpRpcError";
+  }
+}
+
+/** Legacy `initialize` result — used ONLY on the dual-era external fallback. */
 interface McpInitializeResult {
   protocolVersion: string;
   capabilities: {
@@ -90,11 +108,49 @@ interface McpInitializeResult {
   };
 }
 
+/**
+ * `server/discover` result (RC). `DiscoverResult extends CacheableResult`, so
+ * `resultType`/`ttlMs`/`cacheScope` are required on the wire; we read only what
+ * this slice needs (`supportedVersions`/`capabilities`/`serverInfo`).
+ */
+interface McpDiscoverResult {
+  resultType?: string;
+  ttlMs?: number;
+  cacheScope?: "public" | "private";
+  supportedVersions: string[];
+  capabilities: {
+    tools?: Record<string, unknown>;
+    resources?: Record<string, unknown>;
+    prompts?: Record<string, unknown>;
+    completions?: Record<string, unknown>;
+    experimental?: Record<string, unknown>;
+    extensions?: Record<string, unknown>;
+  };
+  serverInfo: {
+    name: string;
+    version: string;
+    title?: string;
+  };
+  instructions?: string;
+}
+
+/** The host's per-request client capabilities (advertised in `_meta`). */
+interface McpClientCapabilities {
+  elicitation?: { form?: Record<string, never>; url?: Record<string, never> };
+  experimental?: Record<string, unknown>;
+  extensions?: Record<string, unknown>;
+}
+
 interface McpToolsListResult {
   tools: McpToolSchema[];
 }
 
 interface McpToolCallResult {
+  /**
+   * RC result discriminator (§8): "complete" | "input_required" | "task" (the
+   * last is Tasks-extension only). Absent ⇒ treat as "complete" (legacy/dual-era).
+   */
+  resultType?: string;
   content: Array<{ type: string; text?: string; [key: string]: unknown }>;
   isError?: boolean;
   /** MCP Apps spec §3.2 — optional UI extension metadata. */
@@ -113,10 +169,32 @@ interface McpToolCallResult {
 
 import { TOOL_TIMEOUT_POLICY } from "../shared/tool-timeout-policy.js";
 
-const MCP_PROTOCOL_VERSION = "2024-11-05";
+// #1230 — pre-adopt the MCP 2026-07-28 stateless Release Candidate
+// (docs/architecture/mcp-alignment-design.md §8). LVIS speaks RC by default:
+// no initialize handshake, per-request `_meta` capability negotiation,
+// `server/discover` for capabilities. MCP_LEGACY_PROTOCOL_VERSION is used ONLY
+// by the documented dual-era exception (design §0) when an EXTERNAL server does
+// not implement `server/discover` (a pre-RC server). LVIS's own plugins are
+// always RC, so that fallback never runs for first-party plugins.
+const MCP_PROTOCOL_VERSION = "2026-07-28";
+const MCP_LEGACY_PROTOCOL_VERSION = "2024-11-05";
+
+// Reserved per-request `_meta` keys (verified verbatim vs the upstream MCP
+// schema/draft/schema.ts — design §8).
+const META_PROTOCOL_VERSION = "io.modelcontextprotocol/protocolVersion";
+const META_CLIENT_INFO = "io.modelcontextprotocol/clientInfo";
+const META_CLIENT_CAPABILITIES = "io.modelcontextprotocol/clientCapabilities";
+
+// JSON-RPC / MCP error codes (verified §8).
+const RPC_METHOD_NOT_FOUND = -32601;
+const RPC_MISSING_REQUIRED_CLIENT_CAPABILITY = -32003;
+const RPC_UNSUPPORTED_PROTOCOL_VERSION = -32004;
+
+const CLIENT_INFO = { name: "lvis-app", version: "0.1.0" } as const;
+
 const DEFAULT_REQUEST_TIMEOUT_MS = TOOL_TIMEOUT_POLICY.mcpRequestDefaultMs;
 const MAX_REQUEST_TIMEOUT_MS = TOOL_TIMEOUT_POLICY.mcpRequestMaxMs;
-const HANDSHAKE_TIMEOUT_MS = 10_000; // initialize / tools/list 핸드셰이크용
+const HANDSHAKE_TIMEOUT_MS = 10_000; // discover / initialize / tools/list 핸드셰이크용
 const HEALTH_CHECK_INTERVAL_MS = 30_000;
 const MAX_BUFFERED_RESPONSES = 128;
 
@@ -169,6 +247,13 @@ export class McpClient {
   private readonly bufferedResponses = new Map<number, JsonRpcResponse>();
   private healthTimer: NodeJS.Timeout | null = null;
   private transport: McpTransport | null = null;
+  /**
+   * Protocol era resolved at connect: "rc" (2026-07-28 stateless, per-request
+   * `_meta`) or "legacy" (the documented dual-era exception for an EXTERNAL
+   * pre-RC server). Defaults to "rc" so the initial `server/discover` probe
+   * carries the RC `_meta`; flips to "legacy" only when that probe 404s.
+   */
+  private mode: "rc" | "legacy" = "rc";
 
   readonly state: McpServerState;
 
@@ -218,22 +303,56 @@ export class McpClient {
 
       await this.transport.open();
 
-      // 핸드셰이크: initialize
-      const initResult = await this.sendRequest<McpInitializeResult>("initialize", {
-        protocolVersion: MCP_PROTOCOL_VERSION,
-        capabilities: {},
-        clientInfo: { name: "lvis-app", version: "0.1.0" },
-      }, HANDSHAKE_TIMEOUT_MS);
+      // RC handshake (#1230, design §3.6): stateless — no `initialize`. Probe
+      // `server/discover` (which carries the per-request RC `_meta`) to read the
+      // server's capabilities. The probe runs in the default "rc" mode so the
+      // `_meta` is stamped.
+      try {
+        const discover = await this.sendRequest<McpDiscoverResult>(
+          "server/discover",
+          {},
+          HANDSHAKE_TIMEOUT_MS,
+        );
+        this.mode = "rc";
+        log.info(
+          {
+            protocol: MCP_PROTOCOL_VERSION,
+            supportedVersions: discover.supportedVersions,
+            server: `${discover.serverInfo.name}@${discover.serverInfo.version}`,
+          },
+          `${this.config.id} RC discover 완료`,
+        );
+      } catch (err) {
+        // Documented dual-era exception (design §0): an EXTERNAL pre-RC server
+        // does not implement `server/discover` and answers `-32601`. Fall back
+        // to the legacy `initialize` handshake. ANY other error is a real
+        // failure and propagates. LVIS's own plugins are always RC, so this
+        // never runs for first-party plugins.
+        if (!(err instanceof McpRpcError) || err.code !== RPC_METHOD_NOT_FOUND) {
+          throw err;
+        }
+        this.mode = "legacy";
+        const initResult = await this.sendRequest<McpInitializeResult>(
+          "initialize",
+          {
+            protocolVersion: MCP_LEGACY_PROTOCOL_VERSION,
+            capabilities: {},
+            clientInfo: CLIENT_INFO,
+          },
+          HANDSHAKE_TIMEOUT_MS,
+        );
+        await this.sendNotification("notifications/initialized", {});
+        log.info(
+          {
+            protocol: initResult.protocolVersion,
+            server: `${initResult.serverInfo.name}@${initResult.serverInfo.version}`,
+            era: "legacy",
+          },
+          `${this.config.id} legacy initialize 완료 (dual-era exception)`,
+        );
+      }
 
-      log.info(
-        { protocol: initResult.protocolVersion, server: `${initResult.serverInfo.name}@${initResult.serverInfo.version}` },
-        `${this.config.id} 초기화 완료`,
-      );
-
-      // 핸드셰이크: initialized notification
-      await this.sendNotification("notifications/initialized", {});
-
-      // 도구 목록 요청
+      // 도구 목록 요청 (mode-aware `_meta` via sendRequest)
       const toolsResult = await this.sendRequest<McpToolsListResult>("tools/list", {}, HANDSHAKE_TIMEOUT_MS);
       const tools = toolsResult.tools ?? [];
 
@@ -311,6 +430,21 @@ export class McpClient {
         timeoutMs,
       );
 
+      // RC result discriminator (§8). This slice handles only `complete`
+      // (and absent ⇒ complete, for the dual-era legacy path). `input_required`
+      // (MRTR) and `task` (Tasks) are NOT implemented yet — fail with a real,
+      // typed host error rather than silently degrading (No-Fallback).
+      if (result.resultType === "input_required") {
+        throw new Error(
+          `[mcp-client] tool '${name}' on '${this.config.id}' returned resultType="input_required" — the MRTR input loop is not implemented yet (milestone mrtr-input-loop)`,
+        );
+      }
+      if (result.resultType === "task") {
+        throw new Error(
+          `[mcp-client] tool '${name}' on '${this.config.id}' returned resultType="task" — the Tasks extension is not implemented yet (milestone tasks-extension)`,
+        );
+      }
+
       // 결과를 문자열로 변환
       if (result.isError) {
         const errorText = result.content
@@ -338,6 +472,17 @@ export class McpClient {
 
       return { text, uiPayload };
     } catch (err) {
+      // Map the RC capability/version errors (§8) to clearer host messages.
+      if (err instanceof McpRpcError && err.code === RPC_MISSING_REQUIRED_CLIENT_CAPABILITY) {
+        throw new Error(
+          `[mcp-client] '${this.config.id}' requires a client capability the host did not advertise for tool '${name}' (-32003): ${err.message}`,
+        );
+      }
+      if (err instanceof McpRpcError && err.code === RPC_UNSUPPORTED_PROTOCOL_VERSION) {
+        throw new Error(
+          `[mcp-client] '${this.config.id}' does not support protocol ${MCP_PROTOCOL_VERSION} for tool '${name}' (-32004): ${err.message}`,
+        );
+      }
       const message = err instanceof Error ? err.message : String(err);
       throw new Error(`[mcp-client] ${t("be_mcpClient.toolCallFailed", { id: this.config.id, name, message })}`);
     }
@@ -372,6 +517,39 @@ export class McpClient {
   }
 
   // ─── JSON-RPC Transport ─────────────────────────────
+
+  /**
+   * The host's per-request client capabilities (RC `_meta`). This slice
+   * advertises a fixed sound default; the `mrtr-input-loop`/`governance-per-request`
+   * milestones derive it from the active turn's consent state + #811 policy
+   * (design §3.6). `elicitation` declares the host CAN gather approvals.
+   */
+  private clientCapabilities(): McpClientCapabilities {
+    return { elicitation: { form: {}, url: {} }, extensions: {} };
+  }
+
+  /**
+   * Stamp the three required RC reserved `_meta` keys (protocolVersion,
+   * clientInfo, clientCapabilities) onto a request's params. In the dual-era
+   * "legacy" mode the params are returned unchanged (a pre-RC external server
+   * uses the old handshake and does not expect the RC `_meta`).
+   */
+  private withRequestMeta(params: Record<string, unknown>): Record<string, unknown> {
+    if (this.mode === "legacy") return params;
+    const existingMeta =
+      params._meta && typeof params._meta === "object" && !Array.isArray(params._meta)
+        ? (params._meta as Record<string, unknown>)
+        : {};
+    return {
+      ...params,
+      _meta: {
+        ...existingMeta,
+        [META_PROTOCOL_VERSION]: MCP_PROTOCOL_VERSION,
+        [META_CLIENT_INFO]: CLIENT_INFO,
+        [META_CLIENT_CAPABILITIES]: this.clientCapabilities(),
+      },
+    };
+  }
 
   private sendRequest<T>(method: string, params: Record<string, unknown>, timeoutMs?: number): Promise<T> {
     return new Promise<T>((resolve, reject) => {
@@ -420,7 +598,7 @@ export class McpClient {
         return;
       }
 
-      const request: JsonRpcRequest = { jsonrpc: "2.0", id, method, params };
+      const request: JsonRpcRequest = { jsonrpc: "2.0", id, method, params: this.withRequestMeta(params) };
       transport.send(request).catch((err: Error) => {
         // send 실패 → pending 정리 후 reject
         const pending = this.pendingRequests.get(id);
@@ -463,7 +641,11 @@ export class McpClient {
 
     if (response.error) {
       pending.reject(
-        new Error(`${t("be_mcpClient.jsonRpcError", { code: String(response.error.code), message: response.error.message })}`),
+        new McpRpcError(
+          response.error.code,
+          `${t("be_mcpClient.jsonRpcError", { code: String(response.error.code), message: response.error.message })}`,
+          response.error.data,
+        ),
       );
     } else {
       pending.resolve(response.result);
