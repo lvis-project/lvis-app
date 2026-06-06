@@ -523,7 +523,10 @@ function hookChainFromDispatch(
     const failureReason = hookFailureReason(r);
     return {
       hookName: r.hookPath,
-      hookType: r.hookType,
+      // `hookChainFromDispatch` only handles the tool-use events, so the narrow
+      // pre|post|perm projection comes straight from the `event` param. (The
+      // runner's `r.hookType` widened to `HookEvent` for the lifecycle surface.)
+      hookType: event,
       action: r.decision,
       reason: r.reason,
       durationMs: r.durationMs,
@@ -754,6 +757,34 @@ export class ToolExecutor {
     if (hookType === "pre") return this.scriptHookManager.runPreToolUse(payload);
     if (hookType === "post") return this.scriptHookManager.runPostToolUse(payload);
     return this.scriptHookManager.runPermissionRequest(payload);
+  }
+
+  /**
+   * Fire a NON-BLOCKING lifecycle event (#811 milestone-2). OBSERVE-ONLY: the
+   * returned decision is recorded in audit but NEVER affects control flow — the
+   * executor ignores it. Fail-soft: the manager's `runLifecycleEvent` never
+   * throws, but we additionally swallow any unexpected error so a lifecycle hook
+   * can never break a tool call. No-op when the manager is unwired (back-compat:
+   * no hooks.json ⇒ no lifecycle dispatch, behavior identical).
+   */
+  private async fireLifecycleEvent(
+    event: "PostToolUseFailure" | "PermissionDenied",
+    sessionId: string | undefined,
+    context: ToolPermissionContext,
+    payload: import("../hooks/script-hook-manager.js").LifecycleEventPayload,
+  ): Promise<HookDispatchResult | undefined> {
+    if (!this.scriptHookManager) return undefined;
+    try {
+      return await this.scriptHookManager.runLifecycleEvent(
+        event,
+        sessionId ?? "unknown",
+        context.trustOrigin as HookTrustOrigin,
+        payload,
+      );
+    } catch {
+      // Defensive: observe-only events must never break a tool call.
+      return undefined;
+    }
   }
 
   private async dispatchReviewerForHeadless(
@@ -2082,6 +2113,24 @@ export class ToolExecutor {
       isError,
     );
 
+    // ── #811 m2: PostToolUseFailure (NON-BLOCKING) ──
+    // Fires alongside PostToolUse when the tool's execute() returned isError.
+    // OBSERVE-ONLY: the deny is recorded for audit but never alters the result
+    // that already returned (mirrors PostToolUse). Payload adds errorMessage
+    // (DLP-redacted by the manager) + durationMs.
+    if (isError) {
+      await this.fireLifecycleEvent(
+        "PostToolUseFailure",
+        sessionId,
+        invocationPermissionContext,
+        {
+          toolName: toolUse.name,
+          errorMessage: content,
+          durationMs: Date.now() - startTime,
+        },
+      );
+    }
+
     if (postFeedback) content = `${content}\n\n[Hook Feedback]\n${postFeedback}`;
     if (scriptPost.results.length > 0 && scriptPost.decision === "deny") {
       content = `${content}\n\n[Script Hook Feedback]\n${scriptPost.reason}`;
@@ -2272,6 +2321,30 @@ export class ToolExecutor {
     terminationReason?: "ok" | "ceiling" | "user-abort" | "error",
     hookChain?: HookResult[],
   ): Promise<void> {
+    // ── #811 m2: PermissionDenied (NON-BLOCKING) ──
+    // `auditToolCall` is the single chokepoint every tool-deny path funnels
+    // through, so firing here observes the deny EXACTLY ONCE where it is
+    // finalized. OBSERVE-ONLY: the lifecycle hook's verdict is recorded but the
+    // deny stands regardless (control flow already returned the deny result).
+    // A user-abort is a CANCEL, not a permission denial — exclude it so a policy
+    // hook never sees false "denied" signals. `denyReason.reason` carries the
+    // finalized reason so a hook can discriminate the remaining cases (e.g.
+    // tool-not-found) itself — restoring forensic granularity beyond the layer.
+    if (
+      permission?.decision === "deny" &&
+      permissionContext !== undefined &&
+      terminationReason !== "user-abort"
+    ) {
+      await this.fireLifecycleEvent(
+        "PermissionDenied",
+        sessionId,
+        permissionContext,
+        {
+          toolName,
+          denyReason: { layer: permission.layer, source: "tool-executor", reason: permission.reason },
+        },
+      );
+    }
     try {
       const inputText = JSON.stringify(input);
       const auditInput = maskSensitiveData(inputText).masked;

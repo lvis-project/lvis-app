@@ -25,7 +25,7 @@
  */
 import { hookMatchesTool, type DiscoveredHook } from "./hook-discovery.js";
 import type { HookConfigEntry } from "./hook-config.js";
-import type { ScriptHookType } from "./script-hook-types.js";
+import type { HookEvent } from "./script-hook-types.js";
 
 /**
  * The normalized entry shape both origins collapse into. The discriminated
@@ -37,8 +37,8 @@ export type HookRegistryEntry = ShHookRegistryEntry | ConfigHookRegistryEntry;
 interface BaseHookRegistryEntry {
   /** Stable identity for trust-review / audit. */
   id: string;
-  /** Closed-set internal event. */
-  event: ScriptHookType;
+  /** Closed-set internal event (tool-use pre|post|perm OR a lifecycle event). */
+  event: HookEvent;
   /** Optional glob matcher over the tool name; absent ⇒ matches every tool. */
   matcher?: string;
   /** argv form of the command to execute (always ≥1 element). */
@@ -108,10 +108,28 @@ export function buildHookRegistry(
  */
 export function filterRegistryByEventAndTool(
   registry: HookRegistryEntry[],
-  event: ScriptHookType,
+  event: HookEvent,
   toolName: string,
 ): HookRegistryEntry[] {
   return registry.filter(
     (entry) => entry.event === event && hookMatchesTool(entry.matcher, toolName),
+  );
+}
+
+/**
+ * Filter a registry to the entries that apply to a given lifecycle `event` +
+ * `subject` (#811 milestone-2). For lifecycle events the matcher subject is the
+ * `sessionId` (or `'*'` = all) instead of a tool name; the SAME glob
+ * `hookMatchesTool` is reused so a config matcher behaves identically across
+ * tool-use and lifecycle surfaces (design §5: "Subject for matcher = sessionId").
+ * An entry with no `matcher` matches every session. Order is preserved.
+ */
+export function filterRegistryByEventAndSubject(
+  registry: HookRegistryEntry[],
+  event: HookEvent,
+  subject: string,
+): HookRegistryEntry[] {
+  return registry.filter(
+    (entry) => entry.event === event && hookMatchesTool(entry.matcher, subject),
   );
 }
