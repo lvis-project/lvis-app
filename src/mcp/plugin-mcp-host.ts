@@ -41,12 +41,18 @@ const CLIENT_INFO = { name: "lvis-app", version: "0.1.0" } as const;
 /** First-party host advertises elicitation; sampling/roots are deprecated (§8 SEP-2577). */
 const CLIENT_CAPABILITIES = { elicitation: { form: {}, url: {} }, extensions: {} } as const;
 
+/** Reserved `_meta` key carrying the plugin's raw (non-text) return value. */
+const RAW_RESULT_META = "xyz.lvis/rawResult";
+
 /** RC `CallToolResult` (the `complete` branch this host consumes). */
 interface RcToolCallResult {
   resultType?: string;
   content: Array<{ type: string; text?: string; [key: string]: unknown }>;
   isError?: boolean;
-  _meta?: { ui?: { resourceUri?: string; slot?: string; height?: number; title?: string } };
+  _meta?: {
+    ui?: { resourceUri?: string; slot?: string; height?: number; title?: string };
+    [key: string]: unknown;
+  };
 }
 
 function renderContent(content: RcToolCallResult["content"]): string {
@@ -141,7 +147,7 @@ export class PluginMcpHost {
   private async invoke(
     name: string,
     args: Record<string, unknown>,
-  ): Promise<{ text: string; uiPayload?: McpUiPayload }> {
+  ): Promise<{ text: string; uiPayload?: McpUiPayload; rawResult?: { value: unknown } }> {
     const result = (await this.request("tools/call", { name, arguments: args })) as RcToolCallResult;
 
     // RC result discriminator (§8). MRTR / Tasks are later milestones — surface a
@@ -171,7 +177,14 @@ export class PluginMcpHost {
           title: uiMeta.title,
         }
       : undefined;
-    return { text, uiPayload };
+    // Box the raw plugin return value iff the server included it (success path),
+    // so the reverse adapter can re-surface metadata.rawResult with presence
+    // preserved even when the value itself is undefined (a void plugin tool).
+    const rawResult =
+      result._meta && Object.prototype.hasOwnProperty.call(result._meta, RAW_RESULT_META)
+        ? { value: result._meta[RAW_RESULT_META] }
+        : undefined;
+    return { text, uiPayload, rawResult };
   }
 
   private request(method: string, params: Record<string, unknown>): Promise<unknown> {

@@ -49,11 +49,16 @@ export interface DiscoveredMcpTool {
  * Mirrors {@link McpClient.callTool}: returns the rendered text (+ optional MCP
  * Apps UI payload) and THROWS on a tool error, which this adapter surfaces as an
  * `isError` {@link ToolResult}.
+ *
+ * `rawResult` is the boxed structured plugin return value carried back via
+ * `_meta["xyz.lvis/rawResult"]`. It is a box (`{ value }`) rather than a bare
+ * value so "present but `undefined`" (a void plugin tool) is distinguishable
+ * from "absent" — preserving the legacy adapter's `metadata.rawResult` presence.
  */
 export type PluginMcpInvoke = (
   name: string,
   args: Record<string, unknown>,
-) => Promise<{ text: string; uiPayload?: McpUiPayload }>;
+) => Promise<{ text: string; uiPayload?: McpUiPayload; rawResult?: { value: unknown } }>;
 
 function readString(meta: Record<string, unknown>, key: string): string | undefined {
   const value = meta[`${LVIS_META_PREFIX}${key}`];
@@ -121,11 +126,17 @@ export function mcpToolToPluginTool(
       }
       const args = (typeof parsed === "object" && parsed !== null ? parsed : {}) as Record<string, unknown>;
       try {
-        const { text, uiPayload } = await invoke(tool.name, args);
+        const { text, uiPayload, rawResult } = await invoke(tool.name, args);
+        // Preserve the legacy `metadata.rawResult` / `metadata.uiPayload` channel
+        // (executor.ts + boot.ts read rawResult). rawResult is present iff the
+        // call succeeded, matching buildPluginTool's success-only metadata.
+        const metadata: Record<string, unknown> = {};
+        if (uiPayload) metadata.uiPayload = uiPayload;
+        if (rawResult) metadata.rawResult = rawResult.value;
         return {
           output: text,
           isError: false,
-          ...(uiPayload && { metadata: { uiPayload } }),
+          ...(Object.keys(metadata).length > 0 && { metadata }),
         };
       } catch (err) {
         return {
