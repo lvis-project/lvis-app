@@ -107,6 +107,20 @@ export interface ScriptHookInvocationResult {
   timedOut: boolean;
   /** Wall-clock execution time in ms. */
   durationMs: number;
+  /**
+   * Origin discriminant — a legacy `.sh` hook vs a declarative `hooks.json`
+   * `command` entry. Surfaced by the runner from the {@link RunnableHook} so the
+   * audit layer can distinguish config-hook vs `.sh`-hook denials forensically
+   * (#811 cluster-review follow-up). The runner ALWAYS populates this.
+   */
+  source: "sh" | "config";
+  /**
+   * Trust identity of the executed code: the resolved local-script sha256 for a
+   * `.sh` hook, or a sha256 of the verbatim command argv for a generic
+   * `command` entry. Lets forensics tie an audit row to the exact code that ran.
+   * Always populated by the runner.
+   */
+  commandIdentity: string;
 }
 
 /** Default per-hook timeout — spec §3 Layer 6 v1. */
