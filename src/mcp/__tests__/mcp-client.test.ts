@@ -1576,6 +1576,40 @@ describe("McpClient — 2026-07-28 RC stateless handshake (#1230)", () => {
     await client.disconnect();
   });
 
+  it("MCP Apps gate: honors _meta.ui only when the server advertised the ui extension", async () => {
+    const uiResult = {
+      resultType: "complete",
+      content: [{ type: "text", text: "x" }],
+      _meta: { ui: { resourceUri: "ui://app/p.html" } },
+    };
+    const discoverWithApps = {
+      ...RC_DISCOVER_RESULT,
+      capabilities: { tools: {}, extensions: { "io.modelcontextprotocol/ui": {} } },
+    };
+
+    // Server WITH the ui extension → _meta.ui is honored.
+    const withApps = rcHttpClient("apps", (method, id) => {
+      if (method === "server/discover") return jsonRpcResponse(id, discoverWithApps);
+      if (method === "tools/list") return jsonRpcResponse(id, { tools: [] });
+      if (method === "tools/call") return jsonRpcResponse(id, uiResult);
+      return new Response("unexpected", { status: 500 });
+    });
+    await withApps.client.connect();
+    expect((await withApps.client.callTool("q", {})).uiPayload?.resourceUri).toBe("ui://app/p.html");
+    await withApps.client.disconnect();
+
+    // Same _meta.ui from a server that did NOT advertise Apps → ignored (gate).
+    const noApps = rcHttpClient("noapps", (method, id) => {
+      if (method === "server/discover") return jsonRpcResponse(id, RC_DISCOVER_RESULT);
+      if (method === "tools/list") return jsonRpcResponse(id, { tools: [] });
+      if (method === "tools/call") return jsonRpcResponse(id, uiResult);
+      return new Response("unexpected", { status: 500 });
+    });
+    await noApps.client.connect();
+    expect((await noApps.client.callTool("q", {})).uiPayload).toBeUndefined();
+    await noApps.client.disconnect();
+  });
+
   it("MRTR runaway guard: a server stuck on input_required fails after the round bound", async () => {
     const resolver = vi.fn(async () => ({ action: "accept" }));
     const { client } = rcHttpClient(
