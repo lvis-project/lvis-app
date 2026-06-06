@@ -37,7 +37,7 @@
  */
 import {
   DEFAULT_HOOK_TIMEOUT_MS,
-  type ScriptHookType,
+  type HookEvent,
 } from "./script-hook-types.js";
 
 /**
@@ -48,8 +48,13 @@ import {
 export interface HookConfigEntry {
   /** Stable identity for trust-review / audit — `<event>#<index>` within the config. */
   id: string;
-  /** Closed-set internal event (mapped from the `hooks.json` event key). */
-  event: ScriptHookType;
+  /**
+   * Closed-set internal event (mapped from the `hooks.json` event key). Covers
+   * the three blocking tool-use events (pre|post|perm) AND the six non-blocking
+   * lifecycle events (#811 m2). Lifecycle events are config-only — they have no
+   * `.sh` prefix.
+   */
+  event: HookEvent;
   /**
    * Optional glob matcher over the tool name (decision (a)). Absent ⇒ matches
    * every tool. Matched later via `hookMatchesTool` in the registry.
@@ -72,13 +77,26 @@ export interface ParsedHookConfig {
 }
 
 /**
- * Closed-set mapping from `hooks.json` event keys to internal `ScriptHookType`.
+ * Closed-set mapping from `hooks.json` event keys to internal {@link HookEvent}.
  * Decision (b): anything not in this map is ignored + warned.
+ *
+ * The three tool-use events project onto the narrow pre|post|perm aliases (they
+ * share the legacy `.sh` prefix model). The six lifecycle events (#811 m2) map
+ * to themselves — they are config-only OBSERVE events with no `.sh` prefix and
+ * non-blocking semantics.
  */
-const EVENT_KEY_TO_TYPE: Readonly<Record<string, ScriptHookType>> = {
+const EVENT_KEY_TO_TYPE: Readonly<Record<string, HookEvent>> = {
+  // Blocking tool-use events (legacy `.sh` prefix model).
   PreToolUse: "pre",
   PostToolUse: "post",
   PermissionRequest: "perm",
+  // Non-blocking lifecycle events (config-only; #811 milestone-2, design §5).
+  PostToolUseFailure: "PostToolUseFailure",
+  PermissionDenied: "PermissionDenied",
+  SessionStart: "SessionStart",
+  Stop: "Stop",
+  PreCompact: "PreCompact",
+  PostCompact: "PostCompact",
 };
 
 function isPlainObject(v: unknown): v is Record<string, unknown> {

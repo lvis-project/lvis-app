@@ -24,6 +24,7 @@
 import { type DiscoveredHook } from "./hook-discovery.js";
 import {
   buildHookRegistry,
+  filterRegistryByEventAndSubject,
   filterRegistryByEventAndTool,
   type HookRegistryEntry,
 } from "./hook-registry.js";
@@ -36,12 +37,17 @@ import {
 } from "./script-hook-runner.js";
 import {
   type HookTrustOrigin,
+  type LifecycleHookEvent,
+  type LifecycleHookStdin,
   type ScriptHookInvocationResult,
   type ScriptHookStdin,
   type ScriptHookType,
 } from "./script-hook-types.js";
 import { redactForLLM } from "../audit/dlp-filter.js";
+import { createLogger } from "../lib/logger.js";
 import type { ToolCategory, ToolSource } from "../tools/types.js";
+
+const log = createLogger("script-hook-manager");
 
 /**
  * Inputs the manager needs to dispatch a hook. The caller (executor /
@@ -69,6 +75,41 @@ export interface HookDispatchResult {
   reason: string;
   /** Per-hook results — for audit + observability. */
   results: ScriptHookInvocationResult[];
+}
+
+/**
+ * Event-specific payload fields for a lifecycle dispatch (#811 milestone-2,
+ * design §5). The manager wraps these with the common `{ event, sessionId,
+ * trustOrigin }` envelope and DLP-redacts free-text fields before serialization.
+ * Every field is optional + event-specific so one shape covers all six
+ * non-blocking events.
+ */
+export interface LifecycleEventPayload {
+  /** PostToolUseFailure — the failing tool's name. */
+  toolName?: string;
+  /** PostToolUseFailure — tool error message (DLP-redacted before dispatch). */
+  errorMessage?: string;
+  /** PostToolUseFailure / Stop — wall-clock duration in ms. */
+  durationMs?: number;
+  /** PermissionDenied — why + where the deny was finalized (reason restores
+   * forensic granularity beyond the coarse layer/source). */
+  denyReason?: { layer: number | undefined; source: string; reason?: string };
+  /** SessionStart — non-secret session metadata (routine scope / persona). */
+  sessionMeta?: Record<string, unknown>;
+  /** Stop — terminal stop reason for the turn. */
+  stopReason?: string;
+  /** Stop — number of tool calls in the turn. */
+  toolCount?: number;
+  /** PreCompact — `"auto-compact"` (threshold) | `"manual"`. */
+  reason?: string;
+  /** PreCompact — pre-compaction token estimate. */
+  tokenEstimate?: number;
+  /** PostCompact — message counts before/after compaction. */
+  messagesBefore?: number;
+  messagesAfter?: number;
+  /** PostCompact — token estimates before/after compaction. */
+  tokensBefore?: number;
+  tokensAfter?: number;
 }
 
 export class ScriptHookManager {
@@ -140,6 +181,72 @@ export class ScriptHookManager {
     return this.runForType("perm", payload, options);
   }
 
+  /**
+   * Dispatch all hooks registered for a NON-BLOCKING lifecycle event (#811
+   * milestone-2, design §5). OBSERVE-ONLY: the returned decision is recorded for
+   * audit but MUST NEVER affect control flow — a lifecycle hook's `deny` mirrors
+   * `PostToolUse` (informational), and a hook erroring / timing out must not
+   * break the turn. The matcher subject for lifecycle events is `sessionId`
+   * (or `'*'` = all), matched via the same glob as `.sh` / tool-use matchers.
+   *
+   * Fail-soft: this method NEVER throws. A dispatch error collapses to an empty
+   * observe result so the caller can ignore it and continue.
+   */
+  async runLifecycleEvent(
+    event: LifecycleHookEvent,
+    sessionId: string,
+    trustOrigin: HookTrustOrigin,
+    payload: LifecycleEventPayload = {},
+    options?: RunOneHookOptions,
+  ): Promise<HookDispatchResult> {
+    try {
+      // Subject for lifecycle matchers is the sessionId (design §6). Reuse the
+      // same glob filter so a `'*'` / sessionId matcher behaves identically to
+      // tool-use matchers. (`'*'` / absent matcher ⇒ match every session.)
+      const entries = filterRegistryByEventAndSubject(this.registry, event, sessionId);
+      if (entries.length === 0) {
+        return { decision: "allow", reason: "no matching lifecycle hooks", results: [] };
+      }
+      const stdinPayload: LifecycleHookStdin = {
+        hookType: event,
+        event,
+        sessionId,
+        trustOrigin,
+        ...(payload.toolName !== undefined ? { toolName: payload.toolName } : {}),
+        // DLP-redact the only free-text field (§6.6): a tool error message can
+        // echo user/secret data. No tool inputs flow through lifecycle events.
+        ...(payload.errorMessage !== undefined
+          ? { errorMessage: redactForLLM(payload.errorMessage).redacted }
+          : {}),
+        ...(payload.durationMs !== undefined ? { durationMs: payload.durationMs } : {}),
+        ...(payload.denyReason !== undefined ? { denyReason: payload.denyReason } : {}),
+        ...(payload.sessionMeta !== undefined ? { sessionMeta: payload.sessionMeta } : {}),
+        ...(payload.stopReason !== undefined ? { stopReason: payload.stopReason } : {}),
+        ...(payload.toolCount !== undefined ? { toolCount: payload.toolCount } : {}),
+        ...(payload.reason !== undefined ? { reason: payload.reason } : {}),
+        ...(payload.tokenEstimate !== undefined ? { tokenEstimate: payload.tokenEstimate } : {}),
+        ...(payload.messagesBefore !== undefined ? { messagesBefore: payload.messagesBefore } : {}),
+        ...(payload.messagesAfter !== undefined ? { messagesAfter: payload.messagesAfter } : {}),
+        ...(payload.tokensBefore !== undefined ? { tokensBefore: payload.tokensBefore } : {}),
+        ...(payload.tokensAfter !== undefined ? { tokensAfter: payload.tokensAfter } : {}),
+      };
+      // runHookChain stops at the first deny — but for a non-blocking event the
+      // decision is OBSERVE-ONLY, so the caller ignores it. (Chain-stop just
+      // avoids running later hooks once one already signaled deny — the audit
+      // captures every result up to that point, same as PostToolUse.)
+      return await runHookChain(entries.map(toRunnable), stdinPayload, options);
+    } catch (err) {
+      // Fail-soft: a lifecycle dispatch must NEVER break the turn. Log + return
+      // an empty observe result so the caller continues unaffected.
+      log.warn(
+        "lifecycle hook dispatch for %s failed (non-blocking, ignored): %s",
+        event,
+        err instanceof Error ? err.message : String(err),
+      );
+      return { decision: "allow", reason: "lifecycle dispatch error (ignored)", results: [] };
+    }
+  }
+
   private async runForType(
     type: ScriptHookType,
     payload: HookDispatchPayload,
@@ -153,6 +260,8 @@ export class ScriptHookManager {
     }
     const stdinPayload: ScriptHookStdin = {
       hookType: type,
+      // Closed-set surface: for tool-use hooks `event` equals `hookType`.
+      event: type,
       toolName: payload.toolName,
       source: payload.source,
       category: payload.category,

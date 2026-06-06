@@ -124,16 +124,42 @@ describe("parseHookConfig — unknown event ignored + warned (decision b)", () =
   it("ignores an unknown event key and emits a warning", () => {
     const r = parseHookConfig({
       hooks: {
-        Stop: [{ hooks: [{ type: "command", command: "./stop.sh" }] }],
+        // A genuinely unknown key (NOT one of the closed-set lifecycle events).
+        TotallyUnknownEvent: [{ hooks: [{ type: "command", command: "./x.sh" }] }],
         PreToolUse: [{ hooks: [{ type: "command", command: "./pre.sh" }] }],
       },
     });
     // Only the known PreToolUse entry survives.
     expect(r.entries).toHaveLength(1);
     expect(r.entries[0].event).toBe("pre");
-    expect(r.warnings.some((w) => w.includes("Stop"))).toBe(true);
+    expect(r.warnings.some((w) => w.includes("TotallyUnknownEvent"))).toBe(true);
     // Never silently active.
-    expect(r.entries.some((e) => e.command[0] === "./stop.sh")).toBe(false);
+    expect(r.entries.some((e) => e.command[0] === "./x.sh")).toBe(false);
+  });
+});
+
+// #811 milestone-2 — the six non-blocking lifecycle events are now a recognized
+// part of the closed event-key set (config-only; no `.sh` prefix).
+describe("parseHookConfig — lifecycle event keys recognized (#811 m2)", () => {
+  it.each([
+    ["PostToolUseFailure"],
+    ["PermissionDenied"],
+    ["SessionStart"],
+    ["Stop"],
+    ["PreCompact"],
+    ["PostCompact"],
+  ])("maps lifecycle event %s to itself with no warning", (eventKey) => {
+    const r = parseHookConfig({
+      hooks: {
+        [eventKey]: [{ hooks: [{ type: "command", command: "./life.sh" }] }],
+      },
+    });
+    expect(r.errors).toEqual([]);
+    expect(r.entries).toHaveLength(1);
+    // Lifecycle events map to themselves (not the pre|post|perm projection).
+    expect(r.entries[0].event).toBe(eventKey);
+    // Recognized ⇒ not warned as unknown.
+    expect(r.warnings.some((w) => w.includes("unknown event"))).toBe(false);
   });
 });
 
