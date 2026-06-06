@@ -39,20 +39,27 @@ export class PluginLoopbackManager {
   ) {}
 
   /**
-   * Start (or restart) a plugin's loopback MCP host and register its tools.
-   * Idempotent: an already-running host for this id is stopped first, so a
-   * reload re-discovers the (possibly changed) manifest cleanly. Returns the
-   * registered natural tool names.
+   * Start (or atomically reload) a plugin's loopback MCP host and register its
+   * tools. ATOMIC: the new host builds + validates its full tool set and commits
+   * it in a single `replacePluginTools` swap BEFORE the previous host is torn
+   * down — so a FAILED reload (e.g. the new manifest drops a tool's category)
+   * throws with the PREVIOUS registration left fully intact (no zero-tools
+   * window). Returns the registered natural tool names.
    */
   async start(manifest: PluginManifest): Promise<string[]> {
-    await this.stop(manifest.id);
+    const previous = this.hosts.get(manifest.id);
     const host = PluginMcpHost.loopback(
       manifest,
       pluginRuntimeToolDelegate(this.runtime, manifest.id),
       this.toolRegistry,
     );
+    // host.start() is registry-read-only until its final atomic swap; if it
+    // throws, `previous` (and its registered tools) are untouched.
     const names = await host.start();
     this.hosts.set(manifest.id, host);
+    // The atomic swap already replaced the old tools — close the superseded
+    // host's transport WITHOUT unregistering (stop() would delete the new tools).
+    if (previous) await previous.dispose();
     log.info(`loopback plugin '${manifest.id}' registered ${names.length} tool(s): ${names.join(", ")}`);
     return names;
   }

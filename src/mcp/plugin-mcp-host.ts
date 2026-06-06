@@ -30,6 +30,7 @@ import { PluginMcpServer, type PluginToolDelegate } from "./plugin-mcp-server.js
 import { mcpToolToPluginTool, type DiscoveredMcpTool } from "./plugin-tool-from-mcp.js";
 import { lintToolInputSchema } from "../plugins/tool-schema-lint.js";
 import { createLogger } from "../lib/logger.js";
+import type { Tool } from "../tools/base.js";
 import type { ToolRegistry } from "../tools/registry.js";
 import type { PluginManifest } from "../plugins/types.js";
 import type { McpUiPayload } from "./types.js";
@@ -102,35 +103,52 @@ export class PluginMcpHost {
     if (this.started) {
       throw new Error(`[plugin-mcp-host] '${this.pluginId}' already started`);
     }
+    // ATOMIC reload: build the full tool set with NO registry mutation first
+    // (buildTools is registry-read-only and throws on any authority failure), so
+    // a failed reload leaves the PREVIOUS registration intact. Only once the new
+    // set is known-good do we commit it in a single replacePluginTools swap —
+    // there is never a window where the plugin has zero tools.
+    const tools = await this.buildTools();
+    this.toolRegistry.replacePluginTools([this.pluginId], tools);
+    this.registeredToolNames.length = 0;
+    this.registeredToolNames.push(...tools.map((t) => t.name));
+    this.started = true;
+    return [...this.registeredToolNames];
+  }
+
+  /**
+   * Discover + project the plugin's tools into canonical {@link Tool}s WITHOUT
+   * touching the ToolRegistry (so a prior registration survives a failed reload).
+   * On any failure it closes ONLY this host's own transport and rethrows.
+   */
+  private async buildTools(): Promise<Tool[]> {
     this.transport.onMessage((msg) => this.handleResponse(msg));
     this.transport.onClose((reason) => this.failAllPending(reason));
     await this.transport.open();
-
-    const discover = (await this.request("server/discover", {})) as {
-      supportedVersions?: string[];
-    };
-    if (!discover.supportedVersions?.includes(MCP_PROTOCOL_VERSION)) {
-      throw new Error(
-        `[plugin-mcp-host] plugin '${this.pluginId}' did not advertise RC protocol ${MCP_PROTOCOL_VERSION} ` +
-          `(got ${JSON.stringify(discover.supportedVersions)}); first-party plugins are RC-only.`,
-      );
-    }
-
-    const list = (await this.request("tools/list", {})) as { tools?: DiscoveredMcpTool[] };
     try {
+      const discover = (await this.request("server/discover", {})) as {
+        supportedVersions?: string[];
+      };
+      if (!discover.supportedVersions?.includes(MCP_PROTOCOL_VERSION)) {
+        throw new Error(
+          `[plugin-mcp-host] plugin '${this.pluginId}' did not advertise RC protocol ${MCP_PROTOCOL_VERSION} ` +
+            `(got ${JSON.stringify(discover.supportedVersions)}); first-party plugins are RC-only.`,
+        );
+      }
+
+      const list = (await this.request("tools/list", {})) as { tools?: DiscoveredMcpTool[] };
+      const tools: Tool[] = [];
       for (const tool of list.tools ?? []) {
-        // Build FIRST — parity with pluginToolsForRegistration: an authority/
-        // structural hard failure (missing xyz.lvis/category) THROWS here and
-        // fails the whole start closed, even for a tool that would ALSO trip the
-        // lint below.
+        // Build FIRST — an authority/structural hard failure (missing
+        // xyz.lvis/category) THROWS here and aborts the whole build (rollback),
+        // even for a tool that would ALSO trip the lint below.
         const registryTool = mcpToolToPluginTool(this.pluginId, tool, (name, args) =>
           this.invoke(name, args),
         );
 
         // THEN #1182 provider-strict lint, fail-soft per tool: a schema
         // OpenAI/Azure would 400 on (e.g. an `array` property with no `items`) is
-        // dropped so one bad plugin tool can't take down every turn that loads
-        // this plugin.
+        // dropped so one bad plugin tool can't take down every turn.
         const violations = lintToolInputSchema(tool.inputSchema);
         if (violations.length > 0) {
           log.warn(
@@ -140,21 +158,15 @@ export class PluginMcpHost {
           );
           continue;
         }
-
-        this.toolRegistry.register(registryTool);
-        this.registeredToolNames.push(registryTool.name);
+        tools.push(registryTool);
       }
+      return tools;
     } catch (err) {
-      // Any tool's authority projection failing fails the whole start closed —
-      // leave no half-registered plugin behind.
-      this.toolRegistry.unregisterByPlugin(this.pluginId);
-      this.registeredToolNames.length = 0;
+      // Registry-read-only path: nothing was registered, so the PREVIOUS plugin
+      // registration (if any) is untouched. Close only this host's transport.
       await this.transport.close();
       throw err;
     }
-
-    this.started = true;
-    return [...this.registeredToolNames];
   }
 
   /** Unregister the plugin's tools and close the transport. Idempotent. */
@@ -162,6 +174,21 @@ export class PluginMcpHost {
     if (!this.started) return;
     this.toolRegistry.unregisterByPlugin(this.pluginId);
     this.registeredToolNames.length = 0;
+    this.started = false;
+    await this.transport.close();
+  }
+
+  /**
+   * Close the transport WITHOUT unregistering tools — for a host SUPERSEDED by an
+   * atomic reload, where the new host's `replacePluginTools` swap already
+   * installed the replacement tools (calling `stop()` here would wrongly delete
+   * the freshly-installed set). Idempotent.
+   */
+  async dispose(): Promise<void> {
+    if (!this.started) {
+      await this.transport.close();
+      return;
+    }
     this.started = false;
     await this.transport.close();
   }
