@@ -259,12 +259,22 @@ Remaining: native-host iframe CSP/permission enforcement per `_meta.ui`
 (renderer + Playwright), and Skills-over-MCP (`skill://` Resources + digest
 verification + per-skill opt-in) — both gated on the §6 Apps/Skills snapshot pin.
 
-**`legacy-removal` (9) — blocked (flag-day).** Gated on all first-party plugins
-migrated to the loopback path, which is itself blocked: the installed in-house
-plugins (`local-indexer`, `lge-api`) ship `category: null` toolSchemas and would
-fail closed in BOTH the legacy and loopback paths (category required since
-2026-05-23), so none is a valid migration pilot. Needs category-compliant plugin
-manifests first.
+**`legacy-removal` (9) — the design's "unavoidable hard cutover"; gated by its own
+stated precondition.** CORRECTION to an earlier claim: the SDK manifest schema
+(`@lvis/plugin-sdk/schemas/plugin-manifest.schema.json`) lists `category` in
+`toolSchemas.*.required`, so the category-less installed plugins (`local-indexer`,
+`lge-api`) ALREADY fail AJV manifest validation at load and register nothing today
+— removing the legacy registration path would NOT break them (they don't load
+either way). So M9 is not blocked on "breaking installed plugins." It IS gated, per
+this doc's own §5 entry, on **(a) the signed-zip artifact format finalized** (a §6
+open decision; the out-of-process spawn mechanism is done but the marketplace
+re-sign + installed-plugin migration are not) and **(b) all first-party plugins
+migrated**. The flag-day itself — route EVERY plugin's registration through the
+loopback manager and delete `pluginToolsForRegistration` + its adapter (7 call
+sites + ~6 test files) — is the single highest-blast-radius change in the
+initiative; the boot wiring is in place (flip `LOOPBACK_MIGRATED_PLUGIN_IDS` to
+universal), so once (a)+(b) hold it is a bounded, mechanical removal best done as a
+focused change with a cluster review, not rushed.
 
 **Round-2 completions (post-feedback push).** Several items first marked "gated"
 were actually implementable once the open decisions were made autonomously:
