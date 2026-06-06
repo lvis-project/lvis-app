@@ -53,27 +53,27 @@ const log = createLogger("mcp-client");
 
 // ─── JSON-RPC 2.0 Types ──────────────────────────────
 
-interface JsonRpcRequest {
+export interface JsonRpcRequest {
   jsonrpc: "2.0";
   id: number;
   method: string;
   params?: Record<string, unknown>;
 }
 
-interface JsonRpcNotification {
+export interface JsonRpcNotification {
   jsonrpc: "2.0";
   method: string;
   params?: Record<string, unknown>;
 }
 
-interface JsonRpcResponse {
+export interface JsonRpcResponse {
   jsonrpc: "2.0";
   id: number;
   result?: unknown;
   error?: { code: number; message: string; data?: unknown };
 }
 
-type JsonRpcMessage = JsonRpcRequest | JsonRpcNotification | JsonRpcResponse;
+export type JsonRpcMessage = JsonRpcRequest | JsonRpcNotification | JsonRpcResponse;
 
 // ─── MCP Protocol Types ──────────────────────────────
 
@@ -207,8 +207,8 @@ const MAX_BUFFERED_RESPONSES = 128;
  * - `close` must resolve all pending requests as rejected.
  * - `isAlive` lets the health check poll without caring about the transport.
  */
-interface McpTransport {
-  readonly kind: "stdio" | "http";
+export interface McpTransport {
+  readonly kind: "stdio" | "http" | "loopback";
   open(): Promise<void>;
   send(message: JsonRpcMessage): Promise<void>;
   close(): Promise<void>;
@@ -262,6 +262,14 @@ export class McpClient {
     private readonly governance: McpGovernance,
     private readonly toolRegistry: ToolRegistry,
     private readonly permissionManager?: PermissionManager,
+    /**
+     * Optional pre-built transport. When provided, `connect()` uses it instead
+     * of constructing a stdio/HTTP transport from `config`. This is the seam an
+     * in-process first-party plugin uses to bind a {@link McpTransport} straight
+     * to its {@link PluginMcpServer} loopback (design §3.1 hybrid topology); the
+     * external stdio/HTTP path is unchanged when it is omitted.
+     */
+    private readonly transportOverride?: McpTransport,
   ) {
     this.state = {
       id: config.id,
@@ -291,9 +299,10 @@ export class McpClient {
     this.state.status = "connecting";
 
     try {
-      this.transport = this.config.transport === "stdio"
-        ? new StdioTransport(this.config as McpStdioServerConfig)
-        : new HttpTransport(this.config as McpHttpServerConfig);
+      this.transport = this.transportOverride
+        ?? (this.config.transport === "stdio"
+          ? new StdioTransport(this.config as McpStdioServerConfig)
+          : new HttpTransport(this.config as McpHttpServerConfig));
 
       this.transport.onMessage((msg) => this.handleResponse(msg));
       this.transport.onClose((reason) => this.handleTransportClose(reason));
