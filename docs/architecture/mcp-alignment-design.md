@@ -151,9 +151,18 @@ Ordered; each *change → unblocks → gate*. Because each plugin gets its own c
 
 ## 5a. Implementation status (`dev` branch)
 
-`stateless-client-rebuild` (1), `mrtr`-substrate, and the `plugin-loopback-server`
-(3) **mechanism** are implemented on `dev` as composable, independently-tested
-units. What remains for (3) is only the live boot flip (below).
+`stateless-client-rebuild` (1), `mrtr-input-loop` (2), and the
+`plugin-loopback-server` (3) **mechanism** are implemented on `dev` as composable,
+independently-tested units. What remains for (3) is only the live boot flip (below).
+
+`mrtr-input-loop` (2) is implemented in `McpClient.callTool`: on
+`resultType:"input_required"` it gathers each `inputRequest` via an injected
+`McpInputRequestResolver`, retries the SAME call with `inputResponses` + the
+echoed (verbatim, opaque) `requestState`, bounded by `MAX_MRTR_ROUNDS`. The client
+owns the loop; the resolver owns request meaning (elicitation → approval gate,
+sampling → host LLM — host surfaces, wired at the live-resolver step). No resolver
+⇒ fail closed (No-Fallback). The plugin host's `input_required` stays a typed
+not-yet (LVIS plugin servers don't elicit yet).
 
 Built + tested (one module each, all green under `vitest run src/mcp/`):
 - `plugin-server-projection.ts` — manifest/`toolSchemas` → `server/discover` +
