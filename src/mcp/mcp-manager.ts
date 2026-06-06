@@ -23,6 +23,7 @@ import { McpClient, scrubSecrets } from "./mcp-client.js";
 import type { ToolRegistry } from "../tools/registry.js";
 import type { PermissionManager } from "../permissions/permission-manager.js";
 import type { AuditLogger } from "../audit/audit-logger.js";
+import type { McpInputRequestResolver } from "./mcp-client.js";
 import { withFileLock } from "../lib/with-file-lock.js";
 import { createLogger } from "../lib/logger.js";
 import { lvisHome } from "../shared/lvis-home.js";
@@ -59,6 +60,13 @@ export class McpManager {
     configPath?: string,
     private readonly permissionManager?: PermissionManager,
     private readonly auditLogger?: AuditLogger,
+    /**
+     * MRTR resolver factory (milestone mrtr-input-loop). Bound per-server and
+     * passed to each McpClient so a server's `input_required` (elicitation) is
+     * gathered via the host approval gate. Omitted ⇒ clients fail closed on
+     * `input_required` (No-Fallback).
+     */
+    private readonly inputResolverFactory?: (serverId: string) => McpInputRequestResolver,
   ) {
     this.configPath = configPath ?? DEFAULT_CONFIG_PATH;
     this.configLockPath = `${this.configPath}.guard`;
@@ -163,6 +171,8 @@ export class McpManager {
       this.governance,
       this.toolRegistry,
       this.permissionManager,
+      undefined, // transportOverride — external servers build their own transport
+      this.inputResolverFactory?.(config.id), // MRTR resolver, bound to this server
     );
     this.clients.set(config.id, client);
     try {
