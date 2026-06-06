@@ -981,9 +981,10 @@ export async function initPluginRuntime(
   // Plugin-owned OAuth removed host-owned provider auth APIs. The related
   // capability is advisory metadata only; there is no host-side auth gate.
   let pluginRuntime!: PluginRuntime;
-  // Owns the loopback hosts for plugins in LOOPBACK_MIGRATED_PLUGIN_IDS
-  // (mcp-alignment-design.md §3.1). Assigned right after PluginRuntime construction;
-  // the lifecycle closures below capture it and only fire on post-boot events.
+  // Owns the loopback hosts for every plugin — each runs as an in-process MCP
+  // server (mcp-alignment-design.md §3.1). Assigned right after PluginRuntime
+  // construction; the lifecycle closures below capture it and only fire on
+  // post-boot events.
   let loopbackManager!: PluginLoopbackManager;
 
   const installLoadedPluginPartitionPolicy = (pluginId: string): void => {

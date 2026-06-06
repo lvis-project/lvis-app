@@ -8,7 +8,7 @@
  * declared `"type": ["string","array"]` without `items`).
  *
  * This is a pure structural lint — no plugin-specific knowledge, no plugin ids.
- * The registration path (`pluginToolsForRegistration`) runs it per tool and
+ * The loopback registration path (`PluginMcpHost`) runs it per tool and
  * drops any tool that violates it, so one bad schema is fail-closed for that
  * tool but fail-soft for the turn.
  *
