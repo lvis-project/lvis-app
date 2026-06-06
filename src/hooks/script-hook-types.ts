@@ -62,6 +62,16 @@ export interface ScriptHookStdin {
   input: Record<string, unknown>;
   sessionId: string;
   trustOrigin: HookTrustOrigin;
+  /**
+   * Per-request MCP-aligned identity (milestone `hooks-on-mcp-calls`, #811).
+   * Present when the tool originates from an MCP server / plugin, so a hook can
+   * key its policy on the SPECIFIC origin (e.g. "deny writes from server X") and
+   * match `mcp__*` / a plugin id — not just the coarse `source`. `category`
+   * already carries the authoritative `_meta["xyz.lvis/category"]` (the reverse
+   * projection lands it on `tool.category`).
+   */
+  mcpServerId?: string;
+  pluginId?: string;
   /** PostToolUse only — output of the underlying tool call. */
   toolOutput?: string;
   /** PostToolUse only — true when tool errored. */
