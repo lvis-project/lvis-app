@@ -183,6 +183,86 @@ describe("PluginMarketplaceService managed bootstrap", () => {
     expect(result.failed).toEqual([]);
   });
 
+  async function writeAdminCatalog(version: string) {
+    await writeFile(
+      marketplacePath,
+      JSON.stringify({
+        version: 1,
+        plugins: [
+          {
+            id: "meeting",
+            name: "Meeting",
+            description: "fixture",
+            packageSpec: "file:../lvis-plugin-meeting",
+            packageName: "@lvis/plugin-meeting",
+            tools: [],
+            installPolicy: "admin",
+            version,
+          },
+        ],
+      }),
+      "utf-8",
+    );
+  }
+
+  function spyInstalledAtVersion(service: PluginMarketplaceService, installedVersion: string) {
+    vi.spyOn(
+      service as unknown as { resolveInstalledIds: (entries: unknown) => Promise<Set<string>> },
+      "resolveInstalledIds",
+    ).mockResolvedValue(new Set(["meeting"]));
+    vi.spyOn(
+      service as unknown as { getInstalledVersion: (id: string) => Promise<string | null> },
+      "getInstalledVersion",
+    ).mockResolvedValue(installedVersion);
+    return vi
+      .spyOn(
+        service as unknown as {
+          installWithDependencies: (...args: unknown[]) => Promise<{ pluginId: string; installed: true }>;
+        },
+        "installWithDependencies",
+      )
+      .mockResolvedValue({ pluginId: "meeting", installed: true });
+  }
+
+  it("auto-updates an installed managed plugin when the catalog version is strictly newer", async () => {
+    await writeAdminCatalog("2.0.0");
+    const service = makeManagedService(testDir, marketplacePath);
+    const installSpy = spyInstalledAtVersion(service, "1.0.0");
+
+    const result = await service.ensureManagedInstalled();
+
+    expect(installSpy).toHaveBeenCalledTimes(1);
+    const [pluginId, actor] = installSpy.mock.calls[0]!;
+    expect(pluginId).toBe("meeting");
+    expect(actor).toBe("it-admin"); // update still runs under the managed trust anchor
+    expect(result.updated).toEqual(["meeting"]);
+    expect(result.installed).toEqual([]);
+    expect(result.failed).toEqual([]);
+  });
+
+  it("does NOT update a managed plugin already at the catalog version", async () => {
+    await writeAdminCatalog("1.0.0");
+    const service = makeManagedService(testDir, marketplacePath);
+    const installSpy = spyInstalledAtVersion(service, "1.0.0");
+
+    const result = await service.ensureManagedInstalled();
+
+    expect(installSpy).not.toHaveBeenCalled();
+    expect(result.updated).toEqual([]);
+    expect(result.installed).toEqual([]);
+  });
+
+  it("does NOT downgrade a managed plugin when the installed version is newer than the catalog", async () => {
+    await writeAdminCatalog("1.0.0");
+    const service = makeManagedService(testDir, marketplacePath);
+    const installSpy = spyInstalledAtVersion(service, "2.0.0");
+
+    const result = await service.ensureManagedInstalled();
+
+    expect(installSpy).not.toHaveBeenCalled();
+    expect(result.updated).toEqual([]);
+  });
+
   // Issue #92 — auto-install of `dependencies[]` is REMOVED. The behavior
   // these tests pinned (cascading recursive install of plugin-id deps,
   // including admin-policy deps under the consumer's actor) is gone:
