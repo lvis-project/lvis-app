@@ -80,6 +80,26 @@ describe("Permission policy P4 ScriptHookManager", () => {
     expect(out.decision).toBe("deny");
     expect(out.reason).toContain("strict perm policy");
   });
+
+  // #811 hooks-on-mcp-calls — per-request MCP identity reaches the hook so a
+  // policy can deny by the SPECIFIC server, not just the coarse source.
+  it("propagates mcpServerId so a hook can deny by MCP origin", async () => {
+    const m = new ScriptHookManager();
+    m.setTrustedHooks([hookFixture("pre-mcp-origin.sh", "pre")]);
+
+    const blocked = await m.runPreToolUse(
+      { ...basePayload, toolName: "mcp_blocked_query", source: "mcp", mcpServerId: "blocked-srv" },
+      shellIntegrationOptions,
+    );
+    expect(blocked.decision).toBe("deny");
+    expect(blocked.reason).toContain("blocked-srv");
+
+    const allowed = await m.runPreToolUse(
+      { ...basePayload, toolName: "mcp_other_query", source: "mcp", mcpServerId: "other-srv" },
+      shellIntegrationOptions,
+    );
+    expect(allowed.decision).toBe("allow");
+  });
 });
 
 describe("Permission policy P4 dlpRedactInput", () => {
