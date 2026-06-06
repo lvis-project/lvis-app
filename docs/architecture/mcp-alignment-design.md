@@ -8,10 +8,12 @@
 > Issues: supersedes/absorbs #885 (plugin contract simplification + MCP isolation parity) and frames
 > #811 (hook runtime expansion) in an MCP-aligned direction.
 
-> **Wire-shape caveat:** the exact MCP RC field shapes in §3 are summarized from the spec; a separate
-> verification pass pins them against the authoritative `schema/draft/schema.ts` before any wire-level
-> code lands (the first implementable slice §7 carries that pin). Where a shape is still unverified it
-> is marked _(verify)_.
+> **Wire shapes are verified.** The exact RC field shapes were pinned **verbatim** against the
+> authoritative upstream schema — `schema/draft/schema.ts` in the `modelcontextprotocol/modelcontextprotocol`
+> repo (`LATEST_PROTOCOL_VERSION = "2026-07-28"`), plus the separate `modelcontextprotocol/experimental-ext-tasks`
+> repo for Tasks. The pinned shapes are in **§8** and supersede the earlier prose summary (which had several
+> errors — see §8's correction list). `schema/draft/schema.ts` referenced below always means that **upstream**
+> file, not an in-repo path.
 
 ---
 
@@ -50,7 +52,7 @@ The **LVIS host becomes an MCP _host_** that runs **one MCP client per loaded pl
 | Plugin UI (`PluginUiExtension[]`, detached BrowserWindow) (`src/plugins/types.ts:189`) | **MCP Apps** `io.modelcontextprotocol/ui` (`_meta.ui`→`ui://` resource, `text/html;profile=mcp-app`) | Electron host uses the native-host iframe path under a host-built CSP. **Apps version axis is SEPARATE** (SEP-1865 / snapshot `2026-01-26`, postMessage `2025-06-18`) — do not couple to the core-RC milestone. |
 | Skills (`SkillOverlay`, `SKILL.md`+`references/`) (`src/main/skill-overlay.ts`) | **Skills over MCP** `io.modelcontextprotocol/skills` (skills as `skill://` Resources) | Maps cleanly (no new RPC); **SEP-2640 is Draft** — pin schema before building; never auto-execute skill-declared code without per-skill opt-in. |
 
-**Research GAPS to pin before wire-level code** (carried into §7's verification): Tasks extension method names conflict across sources; MCP Apps is not a `2026-07-28` artifact; Skills SEP-2640 is Draft; `DiscoverResult.ttlMs`/`cacheScope` normativity, MRTR `requestState`/`InputRequiredResult` optionality, `subscriptions/listen` envelope, and the enumerated capability keys were summarized from prose — byte-diff against `schema/draft/schema.ts`.
+**GAPS now resolved (see §8 for the verified shapes):** Tasks lives in a **separate** extension repo (`experimental-ext-tasks`) with methods `tasks/get`/`tasks/update`/`tasks/cancel`; `DiscoverResult.ttlMs`/`cacheScope` are **real required** fields (`CacheableResult`); `resultType` core enum is `"complete" | "input_required"` (`"task"` is extension-only); MRTR retries the **same** request with `inputResponses`+echoed `requestState` (no new id); errors are `-32003` (missing client capability) / `-32004` (unsupported version) — **no "input-required error"**; there is **no `subscriptionId` `_meta` key**; `sampling`/`roots`/`logging` are **deprecated** (SEP-2577). Still genuinely open: **MCP Apps** is not a `2026-07-28` artifact (SEP-1865, snapshot `2026-01-26`) and **Skills** SEP-2640 is Draft — both pinned at their own milestone.
 
 ---
 
@@ -92,11 +94,11 @@ The **LVIS host becomes an MCP _host_** that runs **one MCP client per loaded pl
 
 | Live HostApi surface | Target |
 |---|---|
-| `callLlm`, `resolveApiKey` (LLM access) | host's **`sampling`** client-capability — plugin-server requests `sampling/createMessage` via MRTR; host runs the LLM. _(Sampling may be deprecated in the RC — verify; if so, keep LLM access host-internal but still expressed through the per-request capability model.)_ |
+| `callLlm`, `resolveApiKey` (LLM access) | **`sampling` is deprecated in the RC (SEP-2577)** — so keep LLM access **host-internal**, surfaced through the per-request capability model (the plugin-server signals need via MRTR `input_required`; the host runs the LLM and retries). Do **not** build on the deprecated `sampling/createMessage` primitive. |
 | `agentApproval`, permission asks | host's **`elicitation`** client-capability (MRTR `elicitation/create`; form mode = approve/deny/dismiss) |
 | `openAuthWindow`, `getSecret` | **MCP authorization** (OAuth 2.1 + PKCE + RFC 8707) for HTTP plugins; env-injected creds for stdio plugins; `url`-mode elicitation drives interactive consent |
 | `showOverlay`, UI | **MCP Apps** (`_meta.ui.resourceUri`→`ui://` resource) |
-| `storage`, `config` | **host-internal** (MCP is stateless — no config/storage RPC). Storage stays the sandboxed `~/.lvis/plugins/<id>/` namespace via `openFeatureNamespace` (CLAUDE.md storage rules). |
+| `storage`, `config` | **host-internal** (MCP is stateless — no config/storage RPC). Storage stays the sandboxed per-plugin data dir via `createPluginStorage(pluginId, pluginDataDir)` rooted at `<pluginsRoot>/<pluginId>/data/` (`src/plugins/runtime/sandbox.ts`); this is the plugin path, distinct from `openFeatureNamespace`'s single-segment `~/.lvis/<featureId>/` host namespaces. |
 | `triggerConversation`, `registerKeywords`, `getInstalledPluginIds`, `onPluginsChanged`, `callTool`, event bus | **host-internal** platform surfaces (no MCP primitive); `logEvent` ≈ `notifications/message` |
 
 The host, as MCP host, advertises `sampling`/`elicitation` as per-request `clientCapabilities` — **that is the standard path** for a plugin-server to "call back" to the host. No bespoke server.
@@ -133,13 +135,13 @@ DLP redaction now redacts the `tools/call` `arguments` before the hook sees them
 
 Ordered; each *change → unblocks → gate*. Because each plugin gets its own client, RC-server plugins and (interim) legacy plugins coexist **internally** during migration — most milestones land without a flag-day.
 
-1. **`stateless-client-rebuild`** — rewrite `src/mcp/mcp-client.ts` to the RC stateless envelope: drop `initialize`/empty-capabilities; bump `MCP_PROTOCOL_VERSION`→`"2026-07-28"`; stamp the three `_meta` keys on every request; add `server/discover`; add the `resultType` branch; add the missing-capability/input-required error mapping; add HTTP headers. **Carries the documented dual-era exception** (probe `server/discover`, fall back to `initialize`) for external servers only. *Gate:* conformance fixture server (golden discover + list + call w/ `resultType`); existing external-MCP e2e green; wire shapes pinned to `schema.ts`.
+1. **`stateless-client-rebuild`** — rewrite `src/mcp/mcp-client.ts` to the RC stateless envelope: drop `initialize`/empty-capabilities; bump `MCP_PROTOCOL_VERSION`→`"2026-07-28"`; stamp the three `_meta` keys on every request; add `server/discover`; add the `resultType` branch; add the missing-capability/input-required error mapping; add HTTP headers. **Carries the documented dual-era exception** (probe `server/discover`, fall back to `initialize`) for external servers only. *Gate:* conformance fixture server (golden discover + list + call w/ `resultType`); existing external-MCP e2e green; implemented against the verified §8 shapes.
 2. **`mrtr-input-loop`** — client MRTR loop: on `input_required`, gather `inputRequests` (elicitation via approval gate, sampling via host LLM), retry with a new id, echo `requestState` verbatim. *Gate:* MRTR fixture (form + url elicitation, new-id + opacity assertions).
 3. **`plugin-loopback-server`** — define the in-process loopback transport + the stdio transport; project `PluginManifest`/`toolSchemas` → `server/discover`+`tools/list`+`tools/call`; run **one first-party plugin** as a loopback MCP server behind a per-plugin client; route `ToolRegistry` registration through MCP discovery instead of `pluginToolsForRegistration`; dialect draft-07→2020-12; category/etc. in `_meta`. *Gate:* SDK schema + validator + fixtures in **one PR** (No-Fallback); migrated plugin passes the full permission pipeline identically (category SOT from `_meta`).
 4. **`untrusted-stdio-isolation`** — out-of-process stdio runtime for marketplace plugins (+ bubblewrap/sandbox-exec), spawn/lifecycle, the spawnable-server artifact format. *Gate:* a marketplace plugin runs isolated; crash/hang containment test; artifact re-sign + installed-plugin migration path.
 5. **`governance-per-request`** — move governance from static `allowedCapabilities` whitelist to per-request capability declaration + per-request gating; keep deny-by-default, namespace, max-tools. *Gate:* **cluster review** (permissions area triggers CLAUDE.md §Cross-Cutting Review Gate — budget for it).
 6. **`hooks-on-mcp-calls`** (#811 continuation) — re-anchor `PreToolUse`/`PermissionRequest`/`PostToolUse` to the host's `tools/call`; hook stdin reads `_meta["xyz.lvis/category"]` + per-request identity; add the `mcp__.*` matcher; then continue the #811 generic-command-hooks milestone in this frame. *Gate:* deny still blocks the call; fail-closed preserved; audit HMAC chain intact.
-7. **`tasks-extension`** — adopt `io.modelcontextprotocol/tasks` for long-running plugin tools. *Gate:* **pin the Tasks wire shape against `schema.ts` first** (research conflict); durable task store survives restart.
+7. **`tasks-extension`** — adopt `io.modelcontextprotocol/tasks` for long-running plugin tools (verified: separate `experimental-ext-tasks` repo; `tasks/get`/`tasks/update`/`tasks/cancel`; `notifications/tasks` carries the full `DetailedTask`; `CreateTaskResult` sets `resultType:"task"`). *Gate:* pin the extension's draft schema at the milestone (it versions independently of the core RC); durable task store survives restart.
 8. **`apps-and-skills-extensions`** — `io.modelcontextprotocol/ui` (Apps; native-host iframe) and `io.modelcontextprotocol/skills` (skills as `skill://` Resources). *Gate:* CSP/permission enforcement per `_meta.ui`; skill digest verification; per-skill opt-in before any skill-declared code execution. Treat Apps/Skills version axes as independent of the core RC.
 9. **`legacy-removal`** — delete the now-unused HostApi surfaces replaced by MCP primitives and the `2024-11-05` client path (keep only the documented external dual-era exception). *Gate:* grep-clean of removed surfaces; all first-party plugins migrated; artifact format finalized.
 
@@ -150,7 +152,7 @@ Ordered; each *change → unblocks → gate*. Because each plugin gets its own c
 ## 6. Remaining open decisions (lower-priority; can be decided at the milestone)
 
 - **Signed-zip artifact format** — out-of-process stdio + new manifest/`_meta` fields version the artifact + SDK schema; define the re-sign + installed-plugin migration (`plugin-install-receipt.ts` SHA-256 pins). Decide at `untrusted-stdio-isolation`.
-- **Tasks wire shape** — formal (`tasks/result`/`notifications/tasks/status`) vs extension (`tasks/update`/`notifications/tasks`); pick after diffing `schema.ts`. Decide at `tasks-extension`.
+- **Tasks extension draft pinning** — `experimental-ext-tasks` versions independently of the core RC; pin its draft schema (and re-check `DetailedTask`/`notifications/tasks`) at `tasks-extension`.
 - **Apps/Skills version pinning** — pin to the `2026-01-26`/Draft snapshots now (accept churn) or defer until they ride a dated RC. Decide at `apps-and-skills-extensions`.
 - **Per-request capability source** — the exact signals (turn consent state, headless/routine mode, #811 policy) that derive the host's per-request `clientCapabilities`. Decide at `mrtr-input-loop`/`governance-per-request`.
 
@@ -163,8 +165,48 @@ Ordered; each *change → unblocks → gate*. Because each plugin gets its own c
 - **Scope (host-as-client only; no plugin/manifest changes; no flag-day):** in `src/mcp/mcp-client.ts`, add `buildRequestMeta()` stamping the three reserved `_meta` keys on **every** outbound request; add `discover()` (issue `server/discover`, parse `DiscoverResult`); add `parseResult()` reading the `resultType` discriminator (`complete` vs `input_required`/`task`) + typed error mapping; keep `complete` `tools/call` semantics identical so the `mcpToolToTool` adapter (`src/mcp/mcp-tool-adapter.ts`) is untouched. Update the handshake types; bump `MCP_PROTOCOL_VERSION`. Add the **documented dual-era exception** for external servers (probe discover → fall back to `initialize`).
 - **Honest under No-Fallback:** `input_required`/`task` return a typed "not-yet-supported" host **error** (real error, not silent fallback) — this slice does not pretend to implement MRTR/Tasks.
 - **Why it's also the right #811 substrate:** it establishes the per-request `_meta` identity object the MCP-aligned hooks policy on, and the `resultType` branch point where `PreToolUse`/MRTR interception later plugs in.
-- **Gate (CLAUDE.md):** new conformance fixture server (golden `server/discover`, `tools/list`, `tools/call`→`resultType:"complete"`) under vitest; `mcp-governance.test.ts` updated for per-request `_meta` presence; existing MCP e2e green; **no renderer change ⇒ Playwright-exempt**; `src/mcp` is **not** a cluster-sensitive dir. **Pin every wire shape in this PR against `schema/draft/schema.ts`** (don't trust prose).
+- **Gate (CLAUDE.md):** new conformance fixture server (golden `server/discover`, `tools/list`, `tools/call`→`resultType:"complete"`) under vitest; `mcp-governance.test.ts` updated for per-request `_meta` presence; existing MCP e2e green; **no renderer change ⇒ Playwright-exempt**; `src/mcp` is **not** a cluster-sensitive dir. **Implement against the verified §8 shapes** (already pinned to the upstream `schema/draft/schema.ts` — do not re-derive from prose).
 - **Out of this PR:** no manifest/SDK schema field additions (those land lockstep at `plugin-loopback-server`); no HostApi changes; no MRTR/Tasks/Apps execution.
+
+---
+
+## 8. Verified RC wire shapes (pinned to upstream `schema/draft/schema.ts`)
+
+Quoted/condensed from `modelcontextprotocol/modelcontextprotocol@main schema/draft/schema.ts`
+(`LATEST_PROTOCOL_VERSION = "2026-07-28"`) and `modelcontextprotocol/experimental-ext-tasks` (Tasks).
+
+**Per-request `_meta` (REQUIRED on every request — `RequestParams._meta` is required):**
+```ts
+RequestMetaObject {
+  progressToken?: ProgressToken;
+  "io.modelcontextprotocol/protocolVersion": string;          // required
+  "io.modelcontextprotocol/clientInfo": Implementation;        // required  {name, version, title?, description?, icons?, websiteUrl?}
+  "io.modelcontextprotocol/clientCapabilities": ClientCapabilities; // required
+  "io.modelcontextprotocol/logLevel"?: LoggingLevel;           // optional, @deprecated SEP-2577
+}
+```
+
+**Result envelope:** `Result { _meta?; resultType: "complete" | "input_required" | string; … }` — servers on this version MUST include `resultType`; absent ⇒ treat as `"complete"`. Tool response is the union `CallToolResult | InputRequiredResult` (same for resources/prompts).
+
+**`server/discover`** (server MUST implement; client MAY call): `DiscoverResult extends CacheableResult` with **required** `ttlMs: number`, `cacheScope: "public"|"private"`, `supportedVersions: string[]`, `capabilities: ServerCapabilities`, `serverInfo: Implementation`, optional `instructions`. No `cacheKey`.
+
+**MRTR:** `InputRequiredResult { inputRequests?: {[id]: CreateMessage|ListRoots|Elicit}; requestState?: string }` (≥1 of the two present). Client retries the **same** original request with params `{ inputResponses?: {[id]: …}; requestState? (echoed verbatim, opaque) }`. **No new request id required.**
+
+**Elicitation** `elicitation/create`: form `{mode?:"form", message, requestedSchema}` or url `{mode:"url", message, elicitationId, url}` → `ElicitResult { action: "accept"|"decline"|"cancel"; content? }`.
+
+**Errors:** `-32003` `MISSING_REQUIRED_CLIENT_CAPABILITY` (`data.requiredCapabilities`; HTTP 400); `-32004` `UNSUPPORTED_PROTOCOL_VERSION` (`data.{supported,requested}`). **No "input-required" error code** — input-required is a success `resultType`. Method gated behind an unadvertised *server* capability ⇒ `-32601`.
+
+**Capabilities:** `ClientCapabilities { experimental?; roots?(dep); sampling?(dep); elicitation?{form?,url?}; extensions? }`; `ServerCapabilities { experimental?; logging?(dep); completions?; prompts?{listChanged?}; resources?{subscribe?,listChanged?}; tools?{listChanged?}; extensions? }`. `extensions` keys MUST be prefixed (e.g. `"io.modelcontextprotocol/tasks"`).
+
+**`subscriptions/listen`** params `{ notifications: SubscriptionFilter{ toolsListChanged?, promptsListChanged?, resourcesListChanged?, resourceSubscriptions?: string[] } }`; server first sends `notifications/subscriptions/acknowledged`. Updates: `notifications/resources/updated {uri}`, `notifications/{tools,prompts,resources}/list_changed`. **No `subscriptionId` `_meta` key exists.**
+
+**Tool:** `{ name, title?, icons?, description?, inputSchema:{type:"object", $schema?}, outputSchema?, annotations?:ToolAnnotations, _meta? }`. **JSON Schema dialect = 2020-12** (default when no `$schema`). `ToolAnnotations { title?; readOnlyHint?=false; destructiveHint?=true; idempotentHint?=false; openWorldHint?=true }`.
+
+**`_meta` namespacing:** prefix = dot-separated labels + `/`; reverse-DNS recommended; **any prefix whose second label is `mcp` or `modelcontextprotocol` is RESERVED for MCP** (so LVIS uses e.g. `xyz.lvis/…`, never `*.mcp/…`).
+
+**Tasks (`experimental-ext-tasks`):** methods `tasks/get` / `tasks/update {taskId, inputResponses}` / `tasks/cancel {taskId}`; `CreateTaskResult = Result & Task` with `resultType:"task"`; `Task {taskId, status: "working"|"input_required"|"completed"|"failed"|"cancelled", createdAt, lastUpdatedAt, ttlMs|null, pollIntervalMs?}`; `notifications/tasks` carries the full `DetailedTask`; subscribe via `subscriptions/listen` + `{taskIds}`.
+
+**Corrections vs the earlier prose research:** `-32003`/`-32004` meanings (were swapped); no input-required error path; no `subscriptionId` key; Tasks methods are `get/update/cancel` (not `tasks/result`) and live in a separate repo; `"task"` resultType is extension-only; `ttlMs`/`cacheScope` are required; `sampling`/`roots`/`logging` deprecated (SEP-2577).
 
 ---
 
