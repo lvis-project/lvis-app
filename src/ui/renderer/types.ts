@@ -1069,6 +1069,15 @@ export interface HookTrustRow {
   sha256: string;
   state: "trusted" | "new" | "changed" | "removed" | "disabled";
   previousSha256?: string;
+  /**
+   * #811 command-hooks — additive trust-review fields. Present on the
+   * `hooks.json` config trust-unit row so the trust list can surface its
+   * declared command/event/matcher entries. Absent on legacy `.sh` rows.
+   * Mirrors `src/hooks/hook-trust-commands.ts::HookTrustRow` (additive).
+   */
+  source?: "sh" | "config";
+  entryCount?: number;
+  entries?: Array<{ event: "pre" | "post" | "perm"; matcher?: string; command: string }>;
 }
 
 export type PermissionReviewerMode = "disabled" | "rule" | "llm" | "strict";
