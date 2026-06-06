@@ -238,6 +238,42 @@ thrown handler → -32603, loop survives). Remaining (gated above this loop): th
 subprocess spawner + OS sandbox (bubblewrap/sandbox-exec) + the signed
 spawnable-artifact format (§6 open decision) + installed-plugin migration.
 
+**`hooks-on-mcp-calls` (6) — category + per-request identity DONE.** Beyond the
+transitive category, the executor now threads `tool.mcpServerId`/`tool.pluginId`
+through `runScriptHook` at all three fire points into `ScriptHookStdin` +
+`LVIS_HOOK_MCP_SERVER_ID`/`LVIS_HOOK_PLUGIN_ID` env, so a hook denies by the
+SPECIFIC origin. Remaining: `mcp__.*` matcher + generic-command-hooks (need the
+hook-expansion matcher infra).
+
+**`tasks-extension` (7) — client-side consumption DONE.** `callTool` drives a
+`CreateTaskResult` to terminal via `tasks/get` polling (pollIntervalMs-clamped,
+ceiling-bounded, `tasks/cancel` on timeout); completed → render Result&Task,
+failed/cancelled → throw, in-task `input_required` → typed not-yet. Remaining:
+server-side task CREATION + a durable store surviving restart, gated on pinning
+the `experimental-ext-tasks` draft (§6).
+
+**`apps-and-skills-extensions` (8) — Apps consumption partial; Skills + CSP
+pending.** MCP Apps `_meta.ui` → `uiPayload` + `readResource("ui://")` exist and
+the per-request gate exempts `ui://` from the core `resources` capability.
+Remaining: native-host iframe CSP/permission enforcement per `_meta.ui`
+(renderer + Playwright), and Skills-over-MCP (`skill://` Resources + digest
+verification + per-skill opt-in) — both gated on the §6 Apps/Skills snapshot pin.
+
+**`legacy-removal` (9) — blocked (flag-day).** Gated on all first-party plugins
+migrated to the loopback path, which is itself blocked: the installed in-house
+plugins (`local-indexer`, `lge-api`) ship `category: null` toolSchemas and would
+fail closed in BOTH the legacy and loopback paths (category required since
+2026-05-23), so none is a valid migration pilot. Needs category-compliant plugin
+manifests first.
+
+**Externally-blocked summary.** Milestones 1, 2, 5 are complete; 3/4/6/7 have
+their sound, decision-free cores complete and tested; the remainder is blocked on
+real external prerequisites — the §6 upstream draft/snapshot pins (M4 artifact,
+M7 tasks, M8 apps/skills), OS sandbox infra (M4), renderer/Playwright (M8),
+category-compliant installed plugins (M3 live flip, M9), and the hook-expansion
+matcher infra (M6 generic hooks). Forcing any would mean guessing an unpinned
+upstream schema or shipping unvalidated infra — both No-Fallback violations.
+
 ---
 
 ## 6. Remaining open decisions (lower-priority; can be decided at the milestone)
