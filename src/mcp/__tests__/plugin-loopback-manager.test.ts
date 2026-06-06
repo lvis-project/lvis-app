@@ -36,6 +36,19 @@ function fakeRuntime(): PluginRuntime {
   } as unknown as PluginRuntime;
 }
 
+/** A manifest whose tool has NO category — mcpToolToPluginTool throws on it. */
+function categorylessManifest(id: string, tool: string): PluginManifest {
+  return {
+    id,
+    name: id,
+    version: "2.0.0",
+    entry: "dist/index.js",
+    description: id,
+    tools: [tool],
+    toolSchemas: { [tool]: { description: tool, inputSchema: { type: "object", properties: {} } } },
+  } as unknown as PluginManifest;
+}
+
 describe("PluginLoopbackManager", () => {
   it("start registers a plugin's tools and tracks the host", async () => {
     const registry = new ToolRegistry();
@@ -78,6 +91,38 @@ describe("PluginLoopbackManager", () => {
   it("stop is a no-op for an unknown plugin", async () => {
     const mgr = new PluginLoopbackManager(fakeRuntime(), new ToolRegistry());
     await expect(mgr.stop("nope")).resolves.toBeUndefined();
+  });
+
+  it("atomic reload: a failed reload keeps the PREVIOUS tools (no zero-tools window)", async () => {
+    const registry = new ToolRegistry();
+    const mgr = new PluginLoopbackManager(fakeRuntime(), registry);
+
+    await mgr.start(manifest("com.a", ["a_one"]));
+    const before = registry.findByName("a_one");
+    expect(before?.pluginId).toBe("com.a");
+
+    // Reload com.a with a category-less tool → host.start throws during buildTools.
+    await expect(mgr.start(categorylessManifest("com.a", "a_bad"))).rejects.toThrow(
+      /no authoritative.*category/,
+    );
+
+    // Previous registration is fully intact — NOT wiped to zero.
+    expect(registry.findByName("a_one")).toBe(before);
+    expect(registry.findByName("a_bad")).toBeUndefined();
+    expect(mgr.list()).toEqual(["com.a"]);
+  });
+
+  it("atomic reload: a successful reload swaps to the new tool set", async () => {
+    const registry = new ToolRegistry();
+    const mgr = new PluginLoopbackManager(fakeRuntime(), registry);
+
+    await mgr.start(manifest("com.a", ["a_old"]));
+    expect(registry.findByName("a_old")?.pluginId).toBe("com.a");
+
+    await mgr.start(manifest("com.a", ["a_new"]));
+    expect(registry.findByName("a_old")).toBeUndefined();
+    expect(registry.findByName("a_new")?.pluginId).toBe("com.a");
+    expect(mgr.list()).toEqual(["com.a"]);
   });
 
   it("syncAll reconciles: starts present plugins, stops gone ones, leaves bystanders untouched", async () => {
