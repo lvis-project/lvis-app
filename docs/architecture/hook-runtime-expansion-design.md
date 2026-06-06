@@ -1,7 +1,14 @@
 # Hook Runtime Expansion — Design
 
-> Status: **Design / Proposal** · Issue: [#811](https://github.com/lvis-project/lvis-app/issues/811)
-> Scope: design only — no runtime implementation lands with this document.
+> Status: **milestone-1 + milestone-2 IMPLEMENTED on `dev`** (2026-06-06) · Issue: [#811](https://github.com/lvis-project/lvis-app/issues/811)
+> DONE + cluster-reviewed: command hooks (declarative `hooks.json` via TOFU trust),
+> the `mcp_*` tool matcher, per-request MCP identity in hook stdin, and ALL §5
+> lifecycle events — 6 non-blocking observe-only (PostToolUseFailure, PermissionDenied,
+> SessionStart, Stop, PreCompact, PostCompact) + 1 blocking fail-closed
+> (UserPromptSubmit). GATED milestones remain design-only, tracked as issues:
+> HTTP hooks (§6.3 → #1235); context-altering MCP/prompt/agent hooks + input
+> mutation (§6.4/§6.5 → #1236) — each needs its security control (host allowlist /
+> hook signing) FIRST.
 > Companion (to be added): `hook-runtime-reference-review.md` (full Codex / Claude Code /
 > OpenCode / Kilo Code / Warp / Hermes comparison).
 
