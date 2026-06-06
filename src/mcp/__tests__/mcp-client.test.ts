@@ -1378,6 +1378,7 @@ describe("McpClient — 2026-07-28 RC stateless handshake (#1230)", () => {
     id: string,
     responder: (method: string | undefined, rid: number) => Response,
     inputResolver?: (rid: string, request: Record<string, unknown>) => Promise<unknown>,
+    capabilityProvider?: () => { elicitation?: Record<string, unknown>; extensions?: Record<string, unknown> },
   ) {
     lookupMock.mockResolvedValue([{ address: "93.184.216.34", family: 4 }]);
     const url = `https://api.example.com/${id}/mcp`;
@@ -1392,6 +1393,7 @@ describe("McpClient — 2026-07-28 RC stateless handshake (#1230)", () => {
       undefined,
       undefined,
       inputResolver,
+      capabilityProvider,
     );
     return { client, fetchMock };
   }
@@ -1499,6 +1501,38 @@ describe("McpClient — 2026-07-28 RC stateless handshake (#1230)", () => {
       inputResponses: { q1: { action: "accept", content: { token: "abc" } } },
       requestState: "opaque-state-xyz",
     });
+    await client.disconnect();
+  });
+
+  it("derives clientCapabilities per request from the injected provider (governance-per-request)", async () => {
+    // The active turn flips from interactive (can elicit) to headless (cannot)
+    // between requests; each request's _meta must reflect the value at send time.
+    let turn = 0;
+    const provider = vi.fn(() =>
+      turn++ === 0
+        ? { elicitation: { form: {}, url: {} }, extensions: {} }
+        : { extensions: {} }, // headless: no elicitation advertised
+    );
+    const { client, fetchMock } = rcHttpClient(
+      "perreq",
+      (method, id) => {
+        if (method === "server/discover") return jsonRpcResponse(id, RC_DISCOVER_RESULT);
+        if (method === "tools/list") return jsonRpcResponse(id, { tools: [] });
+        return new Response("unexpected", { status: 500 });
+      },
+      undefined,
+      provider,
+    );
+
+    await client.connect();
+
+    const caps = fetchMock.mock.calls.map(
+      ([, i]) => readRpcParams(i as RequestInit)?._meta as Record<string, unknown>,
+    );
+    // discover (turn 0) advertised elicitation; tools/list (turn 1) did not.
+    expect(caps[0]["io.modelcontextprotocol/clientCapabilities"]).toMatchObject({ elicitation: {} });
+    expect(caps[1]["io.modelcontextprotocol/clientCapabilities"]).not.toHaveProperty("elicitation");
+    expect(provider).toHaveBeenCalledTimes(caps.length);
     await client.disconnect();
   });
 

@@ -135,11 +135,25 @@ interface McpDiscoverResult {
 }
 
 /** The host's per-request client capabilities (advertised in `_meta`). */
-interface McpClientCapabilities {
+export interface McpClientCapabilities {
   elicitation?: { form?: Record<string, never>; url?: Record<string, never> };
   experimental?: Record<string, unknown>;
   extensions?: Record<string, unknown>;
 }
+
+/**
+ * Derives the host's client capabilities for a SINGLE outbound request
+ * (milestone `governance-per-request`, design §3.6). Per-request — not connect-
+ * time — because what the host can offer varies with the active turn: an
+ * interactive turn can elicit (advertise `elicitation`); a headless/routine turn
+ * cannot (advertise none, so a server requiring it gets a clean `-32003` instead
+ * of a hung approval). The exact deriving signals (turn consent state,
+ * headless/routine mode, #811 policy) are wired by the host; omitted ⇒ a fixed
+ * sound default. This is the client-side half of per-request governance; the
+ * per-request server-capability GATING half lands with the cluster-reviewed
+ * governance change.
+ */
+export type McpClientCapabilityProvider = () => McpClientCapabilities;
 
 interface McpToolsListResult {
   tools: McpToolSchema[];
@@ -303,6 +317,13 @@ export class McpClient {
      * on `input_required` (No-Fallback — it never fabricates a response).
      */
     private readonly inputResolver?: McpInputRequestResolver,
+    /**
+     * Optional per-request client-capability provider (milestone
+     * `governance-per-request`). Called on EVERY outbound request so the
+     * advertised capabilities track the active turn. Omitted ⇒ a fixed sound
+     * default (elicitation form+url).
+     */
+    private readonly capabilityProvider?: McpClientCapabilityProvider,
   ) {
     this.state = {
       id: config.id,
@@ -596,7 +617,9 @@ export class McpClient {
    * (design §3.6). `elicitation` declares the host CAN gather approvals.
    */
   private clientCapabilities(): McpClientCapabilities {
-    return { elicitation: { form: {}, url: {} }, extensions: {} };
+    // Per-request when a provider is wired (the active turn decides); otherwise a
+    // fixed sound default. `withRequestMeta` calls this on every request.
+    return this.capabilityProvider?.() ?? { elicitation: { form: {}, url: {} }, extensions: {} };
   }
 
   /**
