@@ -3088,3 +3088,109 @@ describe("ToolExecutor — Layer 1 allowed-directories", () => {
     );
   });
 });
+
+describe("ToolExecutor — script hook denial surfaces in audit hookChain (#811 FU1)", () => {
+  it("records a denying pre script-hook in the deny audit entry's hookChain", async () => {
+    const executeSpy = vi.fn(async () => "should-not-run");
+    const registry = new ToolRegistry();
+    // Read-only tool with no path surface (so the allowed-directories layer is
+    // not engaged) that auto-allows at the permission layer — the pre
+    // script-hook is then the layer that actually denies.
+    registry.register(createDynamicTool({
+      name: "hookchain_read_probe",
+      description: "read-only probe with no path surface",
+      source: "builtin",
+      category: "read",
+      isReadOnly: () => true,
+      jsonSchema: { type: "object", properties: {} },
+      execute: async (rawInput) => ({ output: await executeSpy(rawInput), isError: false }),
+    }));
+
+    const dir = mkdtempSync(join(tmpdir(), "lvis-executor-hookchain-"));
+    try {
+      const permMgr = new PermissionManager(join(dir, "permissions.json"));
+      permMgr.setRules([{ pattern: "hookchain_read_probe", action: "allow" }]);
+
+      // Stub ScriptHookManager: the `pre` dispatch denies with one per-script
+      // invocation result carrying the new forensic fields (`source`,
+      // `commandIdentity`). This is the real `HookDispatchResult` shape the
+      // runtime manager returns — the mapper threads it into the audit.
+      const denyingInvocation = {
+        hookPath: "/home/u/.config/lvis/hooks/pre-block.sh",
+        hookType: "pre" as const,
+        decision: "deny" as const,
+        reason: "blocked by SIEM policy",
+        rawStdout: '{"action":"deny","reason":"blocked by SIEM policy"}',
+        exitCode: 0,
+        timedOut: false,
+        durationMs: 7,
+        source: "sh" as const,
+        commandIdentity: "abc123sha",
+      };
+      const scriptHookManager = {
+        runPreToolUse: vi.fn(async () => ({
+          decision: "deny" as const,
+          reason: "pre-block.sh: blocked by SIEM policy",
+          results: [denyingInvocation],
+        })),
+        runPostToolUse: vi.fn(async () => ({ decision: "allow" as const, reason: "noop", results: [] })),
+        runPermissionRequest: vi.fn(async () => ({ decision: "allow" as const, reason: "noop", results: [] })),
+      };
+
+      const appendPermissionAuditEntry = vi.fn(async (entry: Record<string, unknown>) => ({
+        ...entry,
+        prevHash: "h",
+      }));
+      const auditLogger = {
+        log: vi.fn(),
+        isPermissionAuditChainReady: vi.fn(() => true),
+        assertPermissionAuditWritable: vi.fn(),
+        appendPermissionAuditEntry,
+      };
+
+      const executor = new ToolExecutor(
+        registry,
+        undefined,
+        permMgr,
+        undefined,
+        undefined,
+        scriptHookManager as never,
+        auditLogger as never,
+      );
+
+      const result = await executor.executeAll(
+        [{ id: "tu-hookchain", name: "hookchain_read_probe", input: {} }],
+        { sessionId: "sess-hookchain", permissionContext: userPermissionContext() },
+      );
+
+      // Deny semantics unchanged: tool is blocked, execute() never runs.
+      expect(result[0].is_error).toBe(true);
+      expect(executeSpy).not.toHaveBeenCalled();
+      expect(scriptHookManager.runPreToolUse).toHaveBeenCalledOnce();
+
+      const denyEntry = appendPermissionAuditEntry.mock.calls
+        .map(([entry]) => entry)
+        .find((entry) => entry.decision === "deny");
+      expect(denyEntry).toBeDefined();
+      expect(denyEntry?.hookChain).toBeDefined();
+      const chain = denyEntry?.hookChain as Array<Record<string, unknown>>;
+      expect(chain).toHaveLength(1);
+      expect(chain[0]).toMatchObject({
+        hookName: "/home/u/.config/lvis/hooks/pre-block.sh",
+        hookType: "pre",
+        event: "pre",
+        action: "deny",
+        decision: "deny",
+        reason: "blocked by SIEM policy",
+        source: "sh",
+        commandIdentity: "abc123sha",
+        handlerType: "command",
+        durationMs: 7,
+      });
+      // A clean policy-deny (ran fine, exit 0) carries NO failureReason.
+      expect(chain[0].failureReason).toBeUndefined();
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+});

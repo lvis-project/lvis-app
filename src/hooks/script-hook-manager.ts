@@ -191,6 +191,9 @@ function toRunnable(entry: HookRegistryEntry): RunnableHook {
     // For a config command, the forensic path is argv[0] (or the script arg).
     hookPath: entry.command[0],
     timeoutMs: entry.timeoutMs,
+    // A declarative `hooks.json` command — the runner falls back to hashing the
+    // verbatim argv for `commandIdentity` (no on-disk local-script sha exists).
+    source: "config",
   };
 }
 
