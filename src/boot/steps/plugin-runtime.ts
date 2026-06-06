@@ -69,7 +69,9 @@ import {
   buildPluginConfigOverrides,
   syncPluginToolRegistry,
   syncPluginToolRegistryForPlugin,
+  LOOPBACK_MIGRATED_PLUGIN_IDS,
 } from "../plugins.js";
+import { PluginLoopbackManager } from "../../mcp/plugin-loopback-manager.js";
 import { t } from "../../i18n/index.js";
 import { createLogger } from "../../lib/logger.js";
 import { stripUntrustedTags } from "../../lib/strip-untrusted-tags.js";
@@ -984,6 +986,14 @@ export async function initPluginRuntime(
   // Plugin-owned OAuth removed host-owned provider auth APIs. The related
   // capability is advisory metadata only; there is no host-side auth gate.
   let pluginRuntime!: PluginRuntime;
+  // Owns the loopback hosts for plugins in LOOPBACK_MIGRATED_PLUGIN_IDS
+  // (mcp-alignment-design.md §3.1). Assigned right after PluginRuntime construction;
+  // the lifecycle closures below capture it and only fire on post-boot events.
+  let loopbackManager!: PluginLoopbackManager;
+
+  /** Route a plugin's lifecycle through the loopback manager when it is migrated. */
+  const isLoopbackPlugin = (pluginId: string): boolean =>
+    LOOPBACK_MIGRATED_PLUGIN_IDS.has(pluginId);
 
   const installLoadedPluginPartitionPolicy = (pluginId: string): void => {
     installPluginPartitionPolicy(pluginPartitionName(pluginId), {
@@ -1041,7 +1051,15 @@ export async function initPluginRuntime(
     },
     onDisable: (pluginId) => {
       keywordEngine.unregisterByPlugin(pluginId);
-      toolRegistry.unregisterByPlugin(pluginId);
+      if (isLoopbackPlugin(pluginId)) {
+        // The loopback manager owns this plugin's tools — stop its host (which
+        // unregisters them) instead of the legacy direct unregister.
+        void loopbackManager.stop(pluginId).catch((err) =>
+          log.error(`loopback plugin stop failed (${pluginId}): %s`, (err as Error).message),
+        );
+      } else {
+        toolRegistry.unregisterByPlugin(pluginId);
+      }
       lateBinding.conversationLoopRef.fn?.onPluginDisabled(pluginId);
     },
     onActiveStateChange: (pluginId, enabled) => {
@@ -1067,13 +1085,24 @@ export async function initPluginRuntime(
       // partition preload here so freshly managed plugin UIs get
       // window.lvisPlugin immediately instead of only after app restart.
       installLoadedPluginPartitionPolicy(pluginId);
-      try {
-        syncPluginToolRegistryForPlugin(pluginRuntime, toolRegistry, pluginId);
-      } catch (err) {
-        log.error(
-          `tool registry sync failed after plugin onEnable (${pluginId}): %s`,
-          (err as Error).message,
-        );
+      if (isLoopbackPlugin(pluginId)) {
+        // Route registration through the loopback manager (server/discover →
+        // tools/list → reverse projection) instead of the legacy direct path.
+        const manifest = pluginRuntime.getPluginManifest(pluginId);
+        if (manifest) {
+          void loopbackManager.start(manifest).catch((err) =>
+            log.error(`loopback plugin start failed (${pluginId}): %s`, (err as Error).message),
+          );
+        }
+      } else {
+        try {
+          syncPluginToolRegistryForPlugin(pluginRuntime, toolRegistry, pluginId);
+        } catch (err) {
+          log.error(
+            `tool registry sync failed after plugin onEnable (${pluginId}): %s`,
+            (err as Error).message,
+          );
+        }
       }
       // Runtime restart/reload can reach loaded+started after a prior teardown.
       // registerKeywords usually runs through hostApi during start(); keep this
@@ -1885,6 +1914,10 @@ export async function initPluginRuntime(
     clearInterval(approvalRegistryPurgeTimer);
   });
 
+  // PluginRuntime now exists — wire the loopback manager before any plugin
+  // starts (startAll fires onEnable, whose closures use it).
+  loopbackManager = new PluginLoopbackManager(pluginRuntime, toolRegistry);
+
   await pluginRuntime.startAll();
   log.info("boot: plugins loaded: %s", pluginRuntime.listToolNames());
 
@@ -1945,8 +1978,22 @@ export async function initPluginRuntime(
 
   // 플러그인 메서드를 ToolRegistry에 등록. Async dependency preparation may
   // finish between startAll() and this point, so use idempotent sync instead
-  // of duplicate-sensitive append registration.
+  // of duplicate-sensitive append registration. Loopback-migrated plugins are
+  // EXCLUDED from this sweep (owned by the manager).
   syncPluginToolRegistry(pluginRuntime, toolRegistry);
+
+  // Initial registration for loopback-migrated plugins — they are excluded from
+  // the legacy sweep above, so start their loopback hosts here. `has()` guards
+  // against a double-start if onEnable already ran during startAll.
+  for (const { pluginId, manifest } of pluginRuntime.listPluginManifests()) {
+    if (isLoopbackPlugin(pluginId) && !loopbackManager.has(pluginId)) {
+      try {
+        await loopbackManager.start(manifest);
+      } catch (err) {
+        log.error(`loopback plugin start failed at boot (${pluginId}): %s`, (err as Error).message);
+      }
+    }
+  }
 
   // I2 — Dev-mode live-reload watcher. No-op unless LVIS_DEV_RELOAD=1.
   // ToolRegistry resync runs through the runtime's `onEnable` callback wired
