@@ -97,6 +97,36 @@ describe("PluginMcpHost — first-party loopback registration + round-trip", () 
     expect(registry.findByName("notes_save")).toBeUndefined();
   });
 
+  it("drops a tool whose inputSchema fails the #1182 provider-strict lint (parity)", async () => {
+    const badManifest: PluginManifest = {
+      id: "com.example.bad",
+      name: "Bad",
+      version: "1.0.0",
+      entry: "dist/index.js",
+      description: "bad",
+      tools: ["good_tool", "bad_tool"],
+      toolSchemas: {
+        good_tool: {
+          description: "fine",
+          category: "read",
+          inputSchema: { type: "object", properties: { q: { type: "string" } } },
+        },
+        bad_tool: {
+          description: "array without items — OpenAI/Azure 400",
+          category: "read",
+          inputSchema: { type: "object", properties: { tags: { type: "array" } } },
+        },
+      },
+    } as PluginManifest;
+    const delegate: PluginToolDelegate = async () => ({ content: [{ type: "text", text: "ok" }] });
+    const registry = new ToolRegistry();
+    const host = PluginMcpHost.loopback(badManifest, delegate, registry);
+
+    const registered = await host.start();
+    expect(registered).toEqual(["good_tool"]); // bad_tool dropped fail-soft
+    expect(registry.findByName("bad_tool")).toBeUndefined();
+  });
+
   it("rejects double start", async () => {
     const delegate: PluginToolDelegate = async () => ({ content: [{ type: "text", text: "ok" }] });
     const host = PluginMcpHost.loopback(MANIFEST, delegate, new ToolRegistry());
