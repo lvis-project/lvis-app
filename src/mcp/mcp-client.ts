@@ -200,6 +200,22 @@ export type McpInputRequestResolver = (
   request: Record<string, unknown>,
 ) => Promise<unknown>;
 
+/** §8 Tasks extension — task lifecycle status (`experimental-ext-tasks`). */
+type McpTaskStatus = "working" | "input_required" | "completed" | "failed" | "cancelled";
+
+/**
+ * The task fields a `CreateTaskResult` (`= Result & Task`, §8) carries inline.
+ * Read defensively off the result (the extension versions independently of the
+ * core RC; its exact result-retrieval shape is re-verified when the
+ * `experimental-ext-tasks` draft is pinned — design §6).
+ */
+interface McpTaskState {
+  taskId: string;
+  status: McpTaskStatus;
+  ttlMs?: number | null;
+  pollIntervalMs?: number;
+}
+
 // ─── Constants ────────────────────────────────────────
 
 import { TOOL_TIMEOUT_POLICY } from "../shared/tool-timeout-policy.js";
@@ -237,6 +253,15 @@ const MAX_BUFFERED_RESPONSES = 128;
  * loop the client indefinitely. Bound the rounds; exceeding it is a typed error.
  */
 const MAX_MRTR_ROUNDS = 8;
+/**
+ * Tasks extension (§8) polling bounds. The synchronous `callTool` await is
+ * capped by the per-call `timeoutMs` (already clamped to the 120s tool ceiling);
+ * these bound the poll cadence within that window. Truly fire-and-forget tasks
+ * beyond the ceiling are a separate background-tracking UX, not this path.
+ */
+const DEFAULT_TASK_POLL_INTERVAL_MS = 1_000;
+const MIN_TASK_POLL_INTERVAL_MS = 50;
+const MAX_TASK_POLLS = 600;
 
 // ─── Transport Strategy ──────────────────────────────
 
@@ -508,33 +533,12 @@ export class McpClient {
           continue;
         }
         if (result.resultType === "task") {
-          throw new Error(
-            `[mcp-client] tool '${name}' on '${this.config.id}' returned resultType="task" — the Tasks extension is not implemented yet (milestone tasks-extension)`,
-          );
+          // Tasks extension (§8 `io.modelcontextprotocol/tasks`): a long-running
+          // tool returns a `CreateTaskResult` (Result & Task); poll to terminal.
+          return await this.awaitTask(name, args, result, timeoutMs);
         }
 
-        // 결과를 문자열로 변환
-        if (result.isError) {
-          const errorText = result.content.map((c) => c.text ?? JSON.stringify(c)).join("\n");
-          throw new Error(errorText);
-        }
-
-        const text = result.content.map((c) => c.text ?? JSON.stringify(c)).join("\n");
-
-        // MCP Apps spec §3.2 — detect UI extension in _meta.ui
-        const uiMeta = result._meta?.ui;
-        let uiPayload: McpUiPayload | undefined;
-        if (uiMeta?.resourceUri) {
-          uiPayload = {
-            serverId: this.config.id,
-            resourceUri: uiMeta.resourceUri,
-            slot: (uiMeta.slot as McpUiPayload["slot"]) ?? "chat",
-            height: uiMeta.height,
-            title: uiMeta.title,
-          };
-        }
-
-        return { text, uiPayload };
+        return this.renderToolResult(result);
       }
     } catch (err) {
       // Map the RC capability/version errors (§8) to clearer host messages.
@@ -578,6 +582,98 @@ export class McpClient {
     // requestState is opaque and MUST be echoed verbatim when present (§8).
     if (result.requestState !== undefined) retry.requestState = result.requestState;
     return retry;
+  }
+
+  /** Render a `complete` CallToolResult to text (+ MCP Apps UI). Throws on isError. */
+  private renderToolResult(result: McpToolCallResult): { text: string; uiPayload?: McpUiPayload } {
+    const content = result.content ?? [];
+    if (result.isError) {
+      throw new Error(content.map((c) => c.text ?? JSON.stringify(c)).join("\n"));
+    }
+    const text = content.map((c) => c.text ?? JSON.stringify(c)).join("\n");
+    const uiMeta = result._meta?.ui;
+    let uiPayload: McpUiPayload | undefined;
+    if (uiMeta?.resourceUri) {
+      uiPayload = {
+        serverId: this.config.id,
+        resourceUri: uiMeta.resourceUri,
+        slot: (uiMeta.slot as McpUiPayload["slot"]) ?? "chat",
+        height: uiMeta.height,
+        title: uiMeta.title,
+      };
+    }
+    return { text, uiPayload };
+  }
+
+  /** Read the inline `Task` fields off a `CreateTaskResult`/`tasks/get` result (§8). */
+  private extractTaskState(result: McpToolCallResult, name: string): McpTaskState {
+    const r = result as unknown as Record<string, unknown>;
+    const taskId = r.taskId;
+    const status = r.status;
+    if (typeof taskId !== "string" || typeof status !== "string") {
+      throw new Error(
+        `[mcp-client] tool '${name}' on '${this.config.id}' returned resultType="task" without a valid taskId/status`,
+      );
+    }
+    return {
+      taskId,
+      status: status as McpTaskStatus,
+      ttlMs: typeof r.ttlMs === "number" ? r.ttlMs : null,
+      pollIntervalMs: typeof r.pollIntervalMs === "number" ? r.pollIntervalMs : undefined,
+    };
+  }
+
+  private delay(ms: number): Promise<void> {
+    return new Promise((resolve) => setTimeout(resolve, ms));
+  }
+
+  /**
+   * Drive a `CreateTaskResult` to a terminal status (§8 Tasks). Polls `tasks/get`
+   * at the server's `pollIntervalMs` (clamped) until `completed` (→ render the
+   * Result&Task), `failed`/`cancelled` (→ throw), bounded by the per-call
+   * `timeoutMs`; on timeout it issues `tasks/cancel` and throws. In-task
+   * `input_required` is a typed not-yet (No-Fallback) — that MRTR-in-task path
+   * lands when the `experimental-ext-tasks` draft is pinned.
+   */
+  private async awaitTask(
+    name: string,
+    _args: Record<string, unknown>,
+    createResult: McpToolCallResult,
+    timeoutMs: number,
+  ): Promise<{ text: string; uiPayload?: McpUiPayload }> {
+    const deadline = Date.now() + timeoutMs;
+    let current = createResult;
+    let task = this.extractTaskState(current, name);
+    let polls = 0;
+
+    for (;;) {
+      if (task.status === "completed") {
+        return this.renderToolResult(current);
+      }
+      if (task.status === "failed" || task.status === "cancelled") {
+        throw new Error(
+          `[mcp-client] task '${task.taskId}' on '${this.config.id}' ended '${task.status}'`,
+        );
+      }
+      if (task.status === "input_required") {
+        throw new Error(
+          `[mcp-client] task '${task.taskId}' on '${this.config.id}' requires input — in-task MRTR is not implemented yet (experimental-ext-tasks draft pending)`,
+        );
+      }
+
+      if (Date.now() >= deadline || polls >= MAX_TASK_POLLS) {
+        await this.sendRequest("tasks/cancel", { taskId: task.taskId }, timeoutMs).catch(() => {});
+        throw new Error(
+          `[mcp-client] task '${task.taskId}' on '${this.config.id}' did not complete within ${timeoutMs}ms`,
+        );
+      }
+
+      polls += 1;
+      const interval = Math.max(MIN_TASK_POLL_INTERVAL_MS, task.pollIntervalMs ?? DEFAULT_TASK_POLL_INTERVAL_MS);
+      await this.delay(Math.min(interval, Math.max(0, deadline - Date.now())));
+      current = await this.sendRequest<McpToolCallResult>("tasks/get", { taskId: task.taskId }, timeoutMs);
+      task = this.extractTaskState(current, name);
+    }
   }
 
   /** 서버 상태 조회 */

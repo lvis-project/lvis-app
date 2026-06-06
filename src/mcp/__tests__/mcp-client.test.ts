@@ -1536,6 +1536,46 @@ describe("McpClient — 2026-07-28 RC stateless handshake (#1230)", () => {
     await client.disconnect();
   });
 
+  it("Tasks: polls a CreateTaskResult to completion and returns the completed result", async () => {
+    let taskGets = 0;
+    const { client } = rcHttpClient("task", (method, id) => {
+      if (method === "server/discover") return jsonRpcResponse(id, RC_DISCOVER_RESULT);
+      if (method === "tools/list") return jsonRpcResponse(id, { tools: [] });
+      if (method === "tools/call")
+        return jsonRpcResponse(id, { resultType: "task", taskId: "t1", status: "working", pollIntervalMs: 1 });
+      if (method === "tasks/get") {
+        taskGets += 1;
+        return jsonRpcResponse(
+          id,
+          taskGets >= 2
+            ? { resultType: "task", taskId: "t1", status: "completed", content: [{ type: "text", text: "task done" }] }
+            : { resultType: "task", taskId: "t1", status: "working", pollIntervalMs: 1 },
+        );
+      }
+      return new Response("unexpected", { status: 500 });
+    });
+
+    await client.connect();
+    const out = await client.callTool("q", {});
+    expect(out.text).toBe("task done");
+    expect(taskGets).toBeGreaterThanOrEqual(2);
+    await client.disconnect();
+  });
+
+  it("Tasks: a failed task throws", async () => {
+    const { client } = rcHttpClient("taskfail", (method, id) => {
+      if (method === "server/discover") return jsonRpcResponse(id, RC_DISCOVER_RESULT);
+      if (method === "tools/list") return jsonRpcResponse(id, { tools: [] });
+      if (method === "tools/call")
+        return jsonRpcResponse(id, { resultType: "task", taskId: "t2", status: "failed" });
+      return new Response("unexpected", { status: 500 });
+    });
+
+    await client.connect();
+    await expect(client.callTool("q", {})).rejects.toThrow(/ended 'failed'/);
+    await client.disconnect();
+  });
+
   it("MRTR runaway guard: a server stuck on input_required fails after the round bound", async () => {
     const resolver = vi.fn(async () => ({ action: "accept" }));
     const { client } = rcHttpClient(
