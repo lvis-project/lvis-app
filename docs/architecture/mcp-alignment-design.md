@@ -266,13 +266,35 @@ fail closed in BOTH the legacy and loopback paths (category required since
 2026-05-23), so none is a valid migration pilot. Needs category-compliant plugin
 manifests first.
 
-**Externally-blocked summary.** Milestones 1, 2, 5 are complete; 3/4/6/7 have
-their sound, decision-free cores complete and tested; the remainder is blocked on
-real external prerequisites — the §6 upstream draft/snapshot pins (M4 artifact,
-M7 tasks, M8 apps/skills), OS sandbox infra (M4), renderer/Playwright (M8),
-category-compliant installed plugins (M3 live flip, M9), and the hook-expansion
-matcher infra (M6 generic hooks). Forcing any would mean guessing an unpinned
-upstream schema or shipping unvalidated infra — both No-Fallback violations.
+**Round-2 completions (post-feedback push).** Several items first marked "gated"
+were actually implementable once the open decisions were made autonomously:
+- **M3 boot wiring DONE** — `PluginLoopbackManager` is wired into
+  `boot/steps/plugin-runtime.ts` (onEnable→start, onDisable→stop, boot-start of
+  migrated plugins; typecheck + full build green). Only ACTIVATION (populating
+  `LOOPBACK_MIGRATED_PLUGIN_IDS`) is gated — the installed in-house plugins ship
+  `category:null` and would fail closed in both paths, so no valid pilot exists.
+- **M4 out-of-process spawner DONE** — `StdioChildTransport` spawns a real
+  subprocess plugin server; a REAL `node`-subprocess test proves discover +
+  register + call round-trip + crash containment (mid-call exit → isError, not a
+  hang). Decision: the spawnable unit is the plugin entry under `node` (no new
+  signed format for the mechanism); OS sandbox is an additive `sandboxWrap`
+  command-prefix layer.
+- **M8 Apps permission gate DONE** — the host honors `_meta.ui` only from a server
+  that advertised `io.modelcontextprotocol/ui` at discovery (pinned to the
+  2026-01-26 snapshot). The renderer ui:// iframe CSP is the second layer.
+
+**Truly-blocked remainder (external prerequisites, NOT effort).** M1/M2/M5
+complete; M3/M4/M6/M7/M8 have their sound cores complete + tested. What is left
+genuinely needs inputs unavailable in-session: **upstream draft schemas I cannot
+fetch** (M7 server-side task creation = `experimental-ext-tasks` exact result
+shape; M8 Skills = SEP-2640 `skill://` schema); **renderer + Playwright** (M8
+ui:// iframe CSP); **the hook-expansion matcher infra** (M6 `mcp__.*` + generic
+command hooks — a separate feature); **a category-compliant installed plugin**
+(M3 activation); and **M9 is a terminal flag-day** — `pluginToolsForRegistration`
+is still the live path for every plugin (SOT empty), so deleting the legacy path
+now would break them all; it can only run after all plugins migrate. Forcing any
+of these means guessing an unpinned upstream schema, shipping unvalidated infra,
+or breaking live plugins — all No-Fallback violations.
 
 ---
 
