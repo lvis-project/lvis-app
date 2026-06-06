@@ -36,6 +36,8 @@ import {
   type RunOneHookOptions,
 } from "./script-hook-runner.js";
 import {
+  isBlockingLifecycleEvent,
+  USER_PROMPT_SUBMIT_EVENT,
   type HookTrustOrigin,
   type LifecycleHookEvent,
   type LifecycleHookStdin,
@@ -110,6 +112,22 @@ export interface LifecycleEventPayload {
   /** PostCompact — token estimates before/after compaction. */
   tokensBefore?: number;
   tokensAfter?: number;
+}
+
+/**
+ * Payload for the BLOCKING `UserPromptSubmit` dispatch (#811 milestone-2,
+ * design §5). `inputText` is the matcher subject AND is DLP-redacted by the
+ * manager before it reaches the hook (§6.6) — callers pass the raw prompt.
+ */
+export interface UserPromptSubmitPayload {
+  /** The user's prompt text. Matcher subject + DLP-redacted before dispatch. */
+  inputText: string;
+  /** Chat input origin (e.g. user-keyboard, plugin-emitted). */
+  inputOrigin?: string;
+  /** Resolved route for this turn (`llm` | `skill`). */
+  route?: string;
+  /** Keyword classification type (`general` | `skill` | `command`). */
+  classification?: string;
 }
 
 export class ScriptHookManager {
@@ -199,6 +217,21 @@ export class ScriptHookManager {
     payload: LifecycleEventPayload = {},
     options?: RunOneHookOptions,
   ): Promise<HookDispatchResult> {
+    // Misroute guard: the BLOCKING event must NEVER run through this observe-only
+    // path (it would swallow a deny and let a refused prompt through). Route it
+    // to {@link runUserPromptSubmit} instead. Fail closed — return a deny so a
+    // wiring bug refuses rather than silently allows.
+    if (isBlockingLifecycleEvent(event)) {
+      log.error(
+        "runLifecycleEvent called for the BLOCKING %s event — use runUserPromptSubmit; failing closed (deny)",
+        event,
+      );
+      return {
+        decision: "deny",
+        reason: `${event} is blocking — must dispatch via runUserPromptSubmit`,
+        results: [],
+      };
+    }
     try {
       // Subject for lifecycle matchers is the sessionId (design §6). Reuse the
       // same glob filter so a `'*'` / sessionId matcher behaves identically to
@@ -244,6 +277,81 @@ export class ScriptHookManager {
         err instanceof Error ? err.message : String(err),
       );
       return { decision: "allow", reason: "lifecycle dispatch error (ignored)", results: [] };
+    }
+  }
+
+  /**
+   * Dispatch the ONE BLOCKING lifecycle event — `UserPromptSubmit` (#811
+   * milestone-2, design §5). Runs the matching trusted hooks via the
+   * deny-precedence chain and returns a decision the CALLER MUST RESPECT: on
+   * `deny` the caller refuses the turn before entering queryLoop.
+   *
+   * FAIL-CLOSED (security-sensitive, mirrors `PreToolUse`):
+   *   - a hook `deny` → deny (turn refused)
+   *   - timeout / nonzero-exit / bad-json / spawn-error → deny (runHookChain /
+   *     runOneHookScript already collapse all of these to a deny result)
+   *   - an UNEXPECTED throw inside this dispatch → deny (NOT allow). Unlike the
+   *     observe-only {@link runLifecycleEvent} which swallows-and-continues, this
+   *     blocking event must fail closed.
+   *
+   * BACK-COMPAT: when NO trusted hook matches, returns `allow` with an empty
+   * `results` so the caller proceeds byte-identically to today. The matcher
+   * subject is the prompt text (or `'*'`), matched via the same glob as `.sh` /
+   * tool-use matchers.
+   *
+   * DLP: `inputText` is DLP-redacted here (§6.6, via {@link redactForLLM}) before
+   * it reaches the hook stdin / env — exactly as the observe path redacts
+   * `errorMessage` and the tool path redacts `input`.
+   */
+  async runUserPromptSubmit(
+    sessionId: string,
+    trustOrigin: HookTrustOrigin,
+    payload: UserPromptSubmitPayload,
+    options?: RunOneHookOptions,
+  ): Promise<HookDispatchResult> {
+    try {
+      // Matcher subject = the prompt text (design §5). Reuse the same glob as
+      // tool-use / lifecycle matchers (`'*'` / absent matcher ⇒ match every prompt).
+      const entries = filterRegistryByEventAndSubject(
+        this.registry,
+        USER_PROMPT_SUBMIT_EVENT,
+        payload.inputText,
+      );
+      if (entries.length === 0) {
+        // No trusted matching hook ⇒ ALLOW (back-compat: turn proceeds as today).
+        return { decision: "allow", reason: "no matching UserPromptSubmit hooks", results: [] };
+      }
+      const stdinPayload: LifecycleHookStdin = {
+        hookType: USER_PROMPT_SUBMIT_EVENT,
+        event: USER_PROMPT_SUBMIT_EVENT,
+        sessionId,
+        trustOrigin,
+        // DLP-redact the free-text prompt (§6.6) BEFORE it reaches the hook.
+        inputText: redactForLLM(payload.inputText).redacted,
+        ...(payload.inputOrigin !== undefined ? { inputOrigin: payload.inputOrigin } : {}),
+        ...(payload.route !== undefined ? { route: payload.route } : {}),
+        ...(payload.classification !== undefined ? { classification: payload.classification } : {}),
+      };
+      // Deny precedence: runHookChain stops at the first deny and returns it.
+      // All fail-closed cases (timeout/nonzero-exit/bad-json/spawn-error) are
+      // already collapsed to a deny RESULT by runOneHookScript, so the chain's
+      // returned decision is authoritative — the caller refuses on deny.
+      return await runHookChain(entries.map(toRunnable), stdinPayload, options);
+    } catch (err) {
+      // FAIL-CLOSED: a blocking event must DENY (refuse the turn) on an
+      // unexpected dispatch error — NOT allow. (Contrast runLifecycleEvent,
+      // which is observe-only and swallows-then-allows.)
+      log.warn(
+        "UserPromptSubmit hook dispatch failed (fail-closed → deny): %s",
+        err instanceof Error ? err.message : String(err),
+      );
+      return {
+        decision: "deny",
+        reason: `UserPromptSubmit dispatch error (fail-closed → deny): ${
+          err instanceof Error ? err.message : String(err)
+        }`,
+        results: [],
+      };
     }
   }
 

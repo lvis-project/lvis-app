@@ -81,9 +81,10 @@ export interface ParsedHookConfig {
  * Decision (b): anything not in this map is ignored + warned.
  *
  * The three tool-use events project onto the narrow pre|post|perm aliases (they
- * share the legacy `.sh` prefix model). The six lifecycle events (#811 m2) map
- * to themselves — they are config-only OBSERVE events with no `.sh` prefix and
- * non-blocking semantics.
+ * share the legacy `.sh` prefix model). The lifecycle events (#811 m2) map to
+ * themselves — they are config-only with no `.sh` prefix. Six are OBSERVE-only
+ * (non-blocking); `UserPromptSubmit` is BLOCKING + fail-closed (a `deny` refuses
+ * the turn) and is dispatched via the manager's blocking path.
  */
 const EVENT_KEY_TO_TYPE: Readonly<Record<string, HookEvent>> = {
   // Blocking tool-use events (legacy `.sh` prefix model).
@@ -97,6 +98,9 @@ const EVENT_KEY_TO_TYPE: Readonly<Record<string, HookEvent>> = {
   Stop: "Stop",
   PreCompact: "PreCompact",
   PostCompact: "PostCompact",
+  // The ONE blocking, fail-closed lifecycle event (config-only; #811 m2,
+  // design §5): a `deny` REFUSES the turn before queryLoop runs.
+  UserPromptSubmit: "UserPromptSubmit",
 };
 
 function isPlainObject(v: unknown): v is Record<string, unknown> {
