@@ -653,6 +653,16 @@ export class McpClient {
         return;
       }
 
+      // Per-request capability gate (milestone `governance-per-request`): every
+      // request is checked against the capability it exercises, not just a
+      // connect-time whitelist. Discovery/control methods pass; a tools/resources/
+      // prompts request on a server not approved for that capability is denied.
+      const capabilityCheck = this.governance.validateRequestCapability(this.config.id, method, params);
+      if (!capabilityCheck.valid) {
+        reject(new Error(`[mcp-client] ${capabilityCheck.reason}`));
+        return;
+      }
+
       const maxConcurrentRequests = this.governance.getApproval(this.config.id)?.maxConcurrentRequests;
       if (
         typeof maxConcurrentRequests === "number"
