@@ -3850,6 +3850,12 @@ export class ConversationLoop {
         : result.disabled.map((h) => `- disabled ${h.fileName}`).join("\n");
       return t("be_conversationLoop.hookTrustStatus", { active, disabled });
     }
+    // accept|disable|reject mutated hook trust state. Mirror the IPC hook-trust
+    // handlers (ipc/domains/permissions.ts) and notify multi-window
+    // PermissionsTab subscribers so the quarantine banner live-refreshes
+    // instead of waiting for tab re-entry. `list` is a no-op read above and
+    // does not broadcast; failed commands already returned earlier.
+    this.deps.broadcastPermissionConfigChanged?.();
     if (result.verb === "accept") {
       return t("be_conversationLoop.hookAccepted", { fileName: result.accepted.fileName, count: result.trusted.length });
     }
