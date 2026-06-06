@@ -11,6 +11,7 @@ import { assertMockMarketplaceAllowed, isDevModeUnlocked } from "../boot/dev-fla
 import type { PluginAccessSpec, PluginManifest, PluginMarketplaceItem, PluginRegistryEntryInstallSource, PluginUiExtension } from "./types.js";
 import { MissingDependenciesError, MissingPluginDependenciesError } from "./types.js";
 import { resolveDependencies } from "./dependency-resolver.js";
+import { isNewer } from "./update-detector.js";
 import { getCachedCatalog, isOfflineCacheEnabled, setCachedCatalog } from "./offline-cache.js";
 import type { InstallerProgressEvent } from "./marketplace-installer.js";
 import { getBundledPublicKeys } from "./publisher-keys.js";
@@ -596,9 +597,18 @@ export class PluginMarketplaceService {
 
   /**
    * Boot-time admin plugin bootstrap. Queries the marketplace catalog for
-   * every admin-policy plugin and force-installs any that are
-    * missing from the local registry. Runs as actor="it-admin" so the install-policy
-   * guard permits the install.
+   * every admin-policy plugin and:
+   *  - **force-installs** any that are missing from the local registry, and
+   *  - **auto-updates** any installed one whose catalog version is strictly
+   *    newer than the installed version.
+   * Runs as actor="it-admin" so the install-policy guard permits the install.
+   *
+   * Auto-update rationale: admin-policy plugins are IT-managed, so the signed
+   * catalog is the source of truth for which version should be deployed — when
+   * it advertises a newer version, managed clients pick it up at boot without a
+   * user click (the user-click update path stays for user-policy plugins). The
+   * update is gated to *strictly newer* versions only: a same-or-older catalog
+   * version leaves the installed plugin untouched (no surprise downgrades).
    *
    * Failure modes are intentionally graceful — marketplace unreachable or a
    * single plugin failing to install must NOT brick boot. Errors are logged
@@ -606,9 +616,14 @@ export class PluginMarketplaceService {
    */
   async ensureManagedInstalled(): Promise<{
     installed: string[];
+    updated: string[];
     failed: Array<{ id: string; error: string }>;
   }> {
-    const result = { installed: [] as string[], failed: [] as Array<{ id: string; error: string }> };
+    const result = {
+      installed: [] as string[],
+      updated: [] as string[],
+      failed: [] as Array<{ id: string; error: string }>,
+    };
     let plugins: PluginMarketplaceItem[];
     try {
       plugins = await this.fetcher.listPlugins();
@@ -627,7 +642,20 @@ export class PluginMarketplaceService {
     const registry = await readPluginRegistry(this.registryPath);
     const installedIds = await this.resolveInstalledIds(registry.plugins);
     for (const plugin of managed) {
-      if (installedIds.has(plugin.id)) continue;
+      let isUpdate = false;
+      if (installedIds.has(plugin.id)) {
+        // Already installed — auto-update only when the catalog advertises a
+        // strictly newer version (the IT-controlled catalog is the SOT for
+        // managed plugins). Same-or-older / unknown version → leave as-is.
+        const installedVersion = await this.getInstalledVersion(plugin.id);
+        if (!plugin.version || !installedVersion || !isNewer(plugin.version, installedVersion)) {
+          continue;
+        }
+        isUpdate = true;
+        log.info(
+          `ensureManagedInstalled: auto-updating managed plugin '${plugin.id}' ${installedVersion} → ${plugin.version}`,
+        );
+      }
       try {
         // Boot-time managed bootstrap is an internal, trusted flow —
         // bypass the public `install()` entry (which derives actor from
@@ -636,6 +664,8 @@ export class PluginMarketplaceService {
         // path (catalog → admin escalation). We pass the catalog snapshot
         // (`plugins`) we already fetched above so the install reads from one
         // consistent snapshot (#1098) rather than re-fetching the catalog.
+        // installWithDependencies reinstalls to the catalog version when the
+        // installed version differs, so the same call covers install + update.
         const state: InstallOperationState = {
           installedPluginIds: [],
           touchedEntries: new Map(),
@@ -646,11 +676,11 @@ export class PluginMarketplaceService {
           await this.rollbackInstallOperation(state);
           throw innerErr;
         }
-        result.installed.push(plugin.id);
+        (isUpdate ? result.updated : result.installed).push(plugin.id);
       } catch (err) {
         const msg = (err as Error).message;
         result.failed.push({ id: plugin.id, error: msg });
-        log.warn(`managed plugin '${plugin.id}' install failed: ${msg}`);
+        log.warn(`managed plugin '${plugin.id}' ${isUpdate ? "update" : "install"} failed: ${msg}`);
       }
     }
     return result;
