@@ -428,7 +428,10 @@ export type TurnStopReason =
   | "tool_use"
   | "interrupted"
   | "context-error"
-  | "stream-error";
+  | "stream-error"
+  // #811 m2 — a trusted UserPromptSubmit hook (or its fail-closed dispatch)
+  // REFUSED the prompt before queryLoop ran. The turn never reached the LLM.
+  | "blocked";
 
 export interface TurnResult {
   text: string;
@@ -1394,6 +1397,51 @@ export class ConversationLoop {
     }
   }
 
+  /**
+   * Fire the ONE BLOCKING lifecycle event — `UserPromptSubmit` (#811 m2, design
+   * §5) — and return its decision for the caller to RESPECT. Unlike
+   * {@link fireLifecycleEvent} (observe-only, swallow-and-continue), this is
+   * SECURITY-SENSITIVE and FAIL-CLOSED:
+   *   - manager returns `deny` (a hook denied, or its dispatch failed closed) → deny
+   *   - an UNEXPECTED throw here → deny (refuse), NEVER allow
+   *
+   * BACK-COMPAT: with NO `scriptHookManager` wired, returns `allow` so the turn
+   * proceeds byte-identically to today (no hooks.json ⇒ never refused). The
+   * manager itself also returns `allow` when no trusted hook matches, so the
+   * "no hooks ⇒ proceeds" guarantee holds at both layers. `inputText` is
+   * DLP-redacted inside the manager before it reaches any hook.
+   */
+  private async fireUserPromptSubmit(
+    payload: import("../hooks/script-hook-manager.js").UserPromptSubmitPayload,
+    sessionIdOverride?: string,
+  ): Promise<{ decision: "allow" | "deny"; reason: string }> {
+    const manager = this.deps.scriptHookManager;
+    // No manager ⇒ no hooks.json ⇒ proceed exactly as today.
+    if (!manager) return { decision: "allow", reason: "no script hook manager" };
+    try {
+      const result = await manager.runUserPromptSubmit(
+        sessionIdOverride ?? this.sessionId,
+        // The prompt's input origin is propagated into the payload; for the
+        // hook trustOrigin we attribute to "unknown" like other non-keyboard
+        // dispatches (no enrollment/mutation path through this event).
+        "unknown",
+        payload,
+      );
+      return { decision: result.decision, reason: result.reason };
+    } catch (err) {
+      // FAIL-CLOSED: a blocking event must DENY on an unexpected error — the
+      // turn is refused rather than silently allowed.
+      const message = err instanceof Error ? err.message : String(err);
+      log.error(
+        `UserPromptSubmit dispatch threw — failing closed (deny): ${message}`,
+      );
+      return {
+        decision: "deny",
+        reason: `UserPromptSubmit dispatch error (fail-closed → deny): ${message}`,
+      };
+    }
+  }
+
   /** Non-secret session metadata for the SessionStart lifecycle payload. */
   private sessionMetaForLifecycle(): Record<string, unknown> {
     return {
@@ -1766,6 +1814,40 @@ export class ConversationLoop {
         { sessionMeta: this.sessionMetaForLifecycle() },
         effectiveSessionId,
       );
+    }
+
+    // ── #811 m2: UserPromptSubmit (BLOCKING, FAIL-CLOSED) ──
+    // Fired AFTER classify/route (above) and BEFORE queryLoop. A trusted
+    // `hooks.json` UserPromptSubmit hook can REFUSE this prompt: on a `deny`
+    // (or a fail-closed timeout/error/bad-json/spawn-error) the turn is refused
+    // and queryLoop NEVER runs. With NO matching trusted hook the dispatch
+    // returns `allow` and the turn proceeds byte-identically to today.
+    const promptGate = await this.fireUserPromptSubmit({
+      inputText: turnInput,
+      inputOrigin,
+      route: routeResult.route,
+      classification: classification.type,
+    }, effectiveSessionId);
+    if (promptGate.decision === "deny") {
+      // Refuse the turn. Mirror handleCommand's blocked return: surface the
+      // refusal text to the renderer, append nothing to history (the prompt
+      // was not accepted), and return a TurnResult marked `blocked`. queryLoop
+      // is never entered.
+      this.currentAbortController = null;
+      const refusal = t("be_conversationLoop.userPromptBlocked", {
+        reason: promptGate.reason,
+      });
+      callbacks?.onTextDelta?.(refusal);
+      callbacks?.onTurnComplete?.(refusal);
+      log.warn(
+        `runTurn: UserPromptSubmit hook REFUSED the prompt (turn blocked) — ${promptGate.reason}`,
+      );
+      return {
+        text: refusal,
+        toolCalls: [],
+        route: routeResult.route,
+        stopReason: "blocked",
+      };
     }
 
     // Turn aggregate footer tracking — see TurnCallbacks.onTurnSummary.

@@ -32,6 +32,11 @@ process.stdin.on("end", () => {
     p.messagesAfter !== undefined ? "ma=" + p.messagesAfter : null,
     p.tokensBefore !== undefined ? "tb=" + p.tokensBefore : null,
     p.tokensAfter !== undefined ? "ta=" + p.tokensAfter : null,
+    // #811 m2 — UserPromptSubmit (blocking) fields.
+    p.inputText !== undefined ? "text=" + p.inputText : null,
+    p.inputOrigin !== undefined ? "origin=" + p.inputOrigin : null,
+    p.route !== undefined ? "route=" + p.route : null,
+    p.classification !== undefined ? "class=" + p.classification : null,
   ].filter((s) => s !== null);
   process.stdout.write(JSON.stringify({ action: "allow", reason: parts.join(" ") }));
 });
