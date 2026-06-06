@@ -264,6 +264,69 @@ describe("PluginMarketplaceService managed bootstrap", () => {
     expect(result.updated).toEqual([]);
   });
 
+  it("isolates a failed auto-update into result.failed without throwing", async () => {
+    await writeAdminCatalog("2.0.0");
+    const service = makeManagedService(testDir, marketplacePath);
+    vi.spyOn(
+      service as unknown as { resolveInstalledIds: (e: unknown) => Promise<Set<string>> },
+      "resolveInstalledIds",
+    ).mockResolvedValue(new Set(["meeting"]));
+    vi.spyOn(
+      service as unknown as { getInstalledVersion: (id: string) => Promise<string | null> },
+      "getInstalledVersion",
+    ).mockResolvedValue("1.0.0");
+    vi.spyOn(
+      service as unknown as { installWithDependencies: (...a: unknown[]) => Promise<unknown> },
+      "installWithDependencies",
+    ).mockRejectedValue(new Error("download failed"));
+
+    const result = await service.ensureManagedInstalled();
+
+    expect(result.failed).toEqual([{ id: "meeting", error: "download failed" }]);
+    expect(result.updated).toEqual([]);
+    expect(result.installed).toEqual([]);
+  });
+
+  it("a corrupt installed managed plugin's unreadable version does not abort install/update of others", async () => {
+    // alpha installed but its manifest version cannot be read (getInstalledVersion
+    // throws); beta is missing. The corrupt alpha must be skipped, NOT abort the
+    // whole bootstrap — beta still installs (M1 per-plugin isolation).
+    await writeFile(
+      marketplacePath,
+      JSON.stringify({
+        version: 1,
+        plugins: [
+          { id: "alpha", name: "Alpha", description: "f", packageSpec: "file:../a", packageName: "@lvis/a", tools: [], installPolicy: "admin", version: "2.0.0" },
+          { id: "beta", name: "Beta", description: "f", packageSpec: "file:../b", packageName: "@lvis/b", tools: [], installPolicy: "admin", version: "1.0.0" },
+        ],
+      }),
+      "utf-8",
+    );
+    const service = makeManagedService(testDir, marketplacePath);
+    vi.spyOn(
+      service as unknown as { resolveInstalledIds: (e: unknown) => Promise<Set<string>> },
+      "resolveInstalledIds",
+    ).mockResolvedValue(new Set(["alpha"]));
+    vi.spyOn(
+      service as unknown as { getInstalledVersion: (id: string) => Promise<string | null> },
+      "getInstalledVersion",
+    ).mockRejectedValue(new Error("corrupt manifest"));
+    const installSpy = vi
+      .spyOn(
+        service as unknown as { installWithDependencies: (...a: unknown[]) => Promise<{ pluginId: string; installed: true }> },
+        "installWithDependencies",
+      )
+      .mockImplementation(async (id: unknown) => ({ pluginId: id as string, installed: true }));
+
+    const result = await service.ensureManagedInstalled();
+
+    expect(installSpy).toHaveBeenCalledTimes(1);
+    expect(installSpy.mock.calls[0]![0]).toBe("beta");
+    expect(result.installed).toEqual(["beta"]);
+    expect(result.updated).toEqual([]);
+    expect(result.failed).toEqual([]);
+  });
+
   // Issue #92 — auto-install of `dependencies[]` is REMOVED. The behavior
   // these tests pinned (cascading recursive install of plugin-id deps,
   // including admin-policy deps under the consumer's actor) is gone:
