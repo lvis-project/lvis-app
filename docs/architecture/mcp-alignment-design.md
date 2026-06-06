@@ -149,6 +149,59 @@ Ordered; each *change → unblocks → gate*. Because each plugin gets its own c
 
 ---
 
+## 5a. Implementation status (`dev` branch)
+
+`stateless-client-rebuild` (1), `mrtr`-substrate, and the `plugin-loopback-server`
+(3) **mechanism** are implemented on `dev` as composable, independently-tested
+units. What remains for (3) is only the live boot flip (below).
+
+Built + tested (one module each, all green under `vitest run src/mcp/`):
+- `plugin-server-projection.ts` — manifest/`toolSchemas` → `server/discover` +
+  `tools/list` (dialect → 2020-12; authority under `xyz.lvis/*` `_meta`).
+- `plugin-mcp-server.ts` — the RC server methods (`server/discover`/`tools/list`/
+  `tools/call`); thrown delegate → `isError` CallToolResult; `-32004` on bad version.
+- `loopback-transport.ts` — in-process `McpTransport` (client ↔ server, no socket).
+- `plugin-tool-from-mcp.ts` — **reverse** projection: discovered MCP tool →
+  canonical `Tool`, authority read back from `_meta` (the "category SOT from
+  `_meta`" requirement); fail-closed on a missing category.
+- `plugin-mcp-host.ts` — `PluginMcpHost`, the lean **RC-only** per-plugin client
+  over a transport (loopback now, stdio next); registers natural names with
+  `source:"plugin"`; runs the #1182 provider-strict lint at registration.
+- `plugin-runtime-delegate.ts` — `pluginRuntimeToolDelegate`, reproducing
+  `buildPluginTool`'s fail-closed execute gates (inactive / integrity-disabled /
+  `ManifestIntegrityViolation` record) at the MCP boundary, with the raw return
+  value carried via `_meta["xyz.lvis/rawResult"]`.
+- `plugin-loopback-manager.ts` — `PluginLoopbackManager`, the boot seam owning
+  host lifecycle (`start`/`stop`/`stopAll`, idempotent reload).
+
+Decisions ratified during implementation:
+- **`PluginMcpHost` is separate from `McpClient`** (consistent with §0 decision 3,
+  which confines `mcp-client.ts` to external servers + the dual-era exception). A
+  first-party plugin is RC-only and never carries legacy-fallback branches
+  (No-Fallback); it registers with plugin authority + natural names, not the
+  external `category:"network"` + `mcp_` namespace. The two adapters
+  (`mcp-tool-adapter.ts` vs `plugin-tool-from-mcp.ts`) intentionally diverge
+  because the trust models differ.
+- **Structured tool output rides `_meta`.** MCP's content model is text-first, so
+  the plugin's raw (non-text) return value is carried as
+  `_meta["xyz.lvis/rawResult"]` (boxed to preserve present-but-`undefined`) and
+  re-surfaced as `metadata.rawResult` for the `executor.ts`/`boot.ts` consumers.
+- **The provider-strict lint is a client concern** → it lives in `PluginMcpHost`
+  registration, not the server projection (the server exposes its real tools; the
+  host decides what its LLM provider can consume).
+
+**Remaining for `plugin-loopback-server` — the live flip (next, gated):** route
+ONE real first-party plugin through `PluginLoopbackManager` in `boot/plugins.ts`
+(start on enable / stop on disable / restart on reload), excluding its id from the
+legacy `replacePluginTools` set so the two paths don't clobber each other. Gates
+(CLAUDE.md): this moves execution gates to the delegate → **permission/boot
+trust-boundary change ⇒ 3-agent cluster review**; it changes the live plugin
+registration path ⇒ **Playwright e2e**; choose the pilot plugin (a first-party,
+low-blast-radius one). Until then the mechanism is dormant and live behavior is
+unchanged.
+
+---
+
 ## 6. Remaining open decisions (lower-priority; can be decided at the milestone)
 
 - **Signed-zip artifact format** — out-of-process stdio + new manifest/`_meta` fields version the artifact + SDK schema; define the re-sign + installed-plugin migration (`plugin-install-receipt.ts` SHA-256 pins). Decide at `untrusted-stdio-isolation`.
