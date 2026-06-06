@@ -39,7 +39,14 @@ function completeTurn(): StreamEvent[] {
 }
 
 /** A stub manager whose lifecycle dispatch we can assert on. */
-function stubManager(lifecycleDecision: "allow" | "deny" = "allow") {
+function stubManager(
+  lifecycleDecision: "allow" | "deny" = "allow",
+  /** #811 m2 — control the BLOCKING UserPromptSubmit dispatch behavior. */
+  userPromptSubmit:
+    | { mode: "allow" }
+    | { mode: "deny"; reason?: string }
+    | { mode: "throw" } = { mode: "allow" },
+) {
   return {
     setTrustedHooks: vi.fn(),
     setTrustedRegistry: vi.fn(),
@@ -52,6 +59,20 @@ function stubManager(lifecycleDecision: "allow" | "deny" = "allow") {
       reason: "lifecycle",
       results: [],
     })),
+    runUserPromptSubmit: vi.fn(async () => {
+      if (userPromptSubmit.mode === "throw") {
+        // The loop's fire helper must treat an unexpected throw as fail-closed.
+        throw new Error("ups dispatch boom");
+      }
+      if (userPromptSubmit.mode === "deny") {
+        return {
+          decision: "deny" as const,
+          reason: userPromptSubmit.reason ?? "blocked by policy",
+          results: [],
+        };
+      }
+      return { decision: "allow" as const, reason: "no matching UserPromptSubmit hooks", results: [] };
+    }),
   };
 }
 
@@ -143,5 +164,92 @@ describe("ConversationLoop — #811 m2 lifecycle events", () => {
 
     const result = await loop.runTurn("hi", undefined, undefined, { inputOrigin: "user-keyboard" });
     expect(result.text).toBe("ok");
+  });
+});
+
+describe("ConversationLoop — #811 m2 UserPromptSubmit (BLOCKING, fail-closed)", () => {
+  it("an ALLOWING UserPromptSubmit hook → the turn proceeds (queryLoop runs)", async () => {
+    const provider = new FakeProvider([completeTurn()]);
+    const mgr = stubManager("allow", { mode: "allow" });
+    const loop = buildLoop(provider, mgr);
+    (loop as { provider: LLMProvider | null }).provider = provider;
+
+    const result = await loop.runTurn("hello", undefined, undefined, { inputOrigin: "user-keyboard" });
+    // The turn reached the LLM and returned its normal assistant text.
+    expect(result.text).toBe("ok");
+    expect(result.stopReason).toBe("end_turn");
+    // The blocking hook was dispatched with the prompt-shaped payload.
+    expect(mgr.runUserPromptSubmit).toHaveBeenCalledTimes(1);
+    const [sessionId, trustOrigin, payload] = mgr.runUserPromptSubmit.mock.calls[0];
+    expect(typeof sessionId).toBe("string");
+    expect(trustOrigin).toBe("unknown");
+    expect(payload).toMatchObject({
+      inputText: "hello",
+      inputOrigin: "user-keyboard",
+      route: "llm",
+      classification: "general",
+    });
+  });
+
+  it("a DENYING UserPromptSubmit hook REFUSES the turn — queryLoop NOT entered, blocked result", async () => {
+    const turns = vi.fn(() => completeTurn());
+    // A provider that THROWS if streamTurn is ever called — proves queryLoop never runs.
+    const provider: LLMProvider = {
+      vendor: "openai",
+      async *streamTurn() {
+        turns();
+        throw new Error("queryLoop must NOT run when the prompt is refused");
+      },
+    };
+    const mgr = stubManager("allow", { mode: "deny", reason: "policy: blocked term" });
+    const loop = buildLoop(provider, mgr);
+    (loop as { provider: LLMProvider | null }).provider = provider;
+
+    const result = await loop.runTurn("blocked term", undefined, undefined, { inputOrigin: "user-keyboard" });
+    expect(result.stopReason).toBe("blocked");
+    expect(result.toolCalls).toEqual([]);
+    // The refusal text surfaces the hook's reason; the LLM was never called.
+    expect(result.text).toContain("policy: blocked term");
+    expect(turns).not.toHaveBeenCalled();
+    // Stop should NOT fire — the turn never started its query loop.
+    expect(mgr.runLifecycleEvent.mock.calls.some((c) => c[0] === "Stop")).toBe(false);
+  });
+
+  it("a UserPromptSubmit dispatch THROW → fail-closed (turn refused, NOT allowed)", async () => {
+    const provider: LLMProvider = {
+      vendor: "openai",
+      async *streamTurn() {
+        throw new Error("queryLoop must NOT run when dispatch fails closed");
+      },
+    };
+    const mgr = stubManager("allow", { mode: "throw" });
+    const loop = buildLoop(provider, mgr);
+    (loop as { provider: LLMProvider | null }).provider = provider;
+
+    const result = await loop.runTurn("hi", undefined, undefined, { inputOrigin: "user-keyboard" });
+    // Fail-closed: an unexpected dispatch error refuses the turn.
+    expect(result.stopReason).toBe("blocked");
+    expect(result.text).toContain("fail-closed");
+  });
+
+  it("NO hooks (manager returns allow / no match) ⇒ turn proceeds (back-compat)", async () => {
+    const provider = new FakeProvider([completeTurn()]);
+    const mgr = stubManager("allow", { mode: "allow" });
+    const loop = buildLoop(provider, mgr);
+    (loop as { provider: LLMProvider | null }).provider = provider;
+
+    const result = await loop.runTurn("hi", undefined, undefined, { inputOrigin: "user-keyboard" });
+    expect(result.text).toBe("ok");
+    expect(result.stopReason).toBe("end_turn");
+  });
+
+  it("no scriptHookManager ⇒ UserPromptSubmit never dispatched, turn proceeds (byte-identical to today)", async () => {
+    const provider = new FakeProvider([completeTurn()]);
+    const loop = buildLoop(provider); // no manager at all
+    (loop as { provider: LLMProvider | null }).provider = provider;
+
+    const result = await loop.runTurn("hi", undefined, undefined, { inputOrigin: "user-keyboard" });
+    expect(result.text).toBe("ok");
+    expect(result.stopReason).toBe("end_turn");
   });
 });

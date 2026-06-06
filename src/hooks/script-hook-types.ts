@@ -55,14 +55,20 @@ export type HookTrustOrigin = TrustOriginWithUnknown;
 export type ScriptHookType = "pre" | "post" | "perm";
 
 /**
- * Lifecycle events — issue #811 milestone-2 (design §5). These are the six
- * OBSERVE-ONLY (non-blocking) lifecycle fire points. They are **config-only**:
+ * Lifecycle events — issue #811 milestone-2 (design §5). All are **config-only**:
  * a trusted `hooks.json` can register them, but there is no `.sh` prefix for
- * them (the legacy prefix model stays {@link ScriptHookType}). A lifecycle
- * hook's `deny` is RECORDED for audit but NEVER alters control flow.
+ * them (the legacy prefix model stays {@link ScriptHookType}).
  *
- * NOTE: the blocking `UserPromptSubmit` event is intentionally NOT in this set —
- * it is a separate effort with fail-closed semantics.
+ * SIX of these are OBSERVE-ONLY (non-blocking): `PostToolUseFailure`,
+ * `PermissionDenied`, `SessionStart`, `Stop`, `PreCompact`, `PostCompact`. Their
+ * `deny` is RECORDED for audit but NEVER alters control flow.
+ *
+ * ONE is BLOCKING and FAIL-CLOSED: {@link USER_PROMPT_SUBMIT_EVENT}
+ * (`"UserPromptSubmit"`, design §5). It is dispatched via the manager's blocking
+ * path ({@link ScriptHookManager.runUserPromptSubmit}); a `deny` / timeout /
+ * error / bad-json REFUSES the turn, exactly like `PreToolUse`. Discriminate it
+ * from the observe-only events with {@link isBlockingLifecycleEvent} so a future
+ * reader never routes it through the observe-only swallow-and-continue path.
  */
 export type LifecycleHookEvent =
   | "PostToolUseFailure"
@@ -70,7 +76,27 @@ export type LifecycleHookEvent =
   | "SessionStart"
   | "Stop"
   | "PreCompact"
-  | "PostCompact";
+  | "PostCompact"
+  | "UserPromptSubmit";
+
+/**
+ * The single BLOCKING, fail-closed lifecycle event (#811 milestone-2, design §5).
+ * Named constant so call sites discriminate the blocking event without
+ * stringly-typing it. A `deny` from a `UserPromptSubmit` hook REFUSES the turn.
+ */
+export const USER_PROMPT_SUBMIT_EVENT = "UserPromptSubmit" as const;
+
+/**
+ * True for the one BLOCKING lifecycle event (`UserPromptSubmit`). The six other
+ * lifecycle events are observe-only. Keeps the blocking-vs-observe split in one
+ * place so a misroute (running the blocking event through the observe path, or
+ * vice-versa) is a single-line bug, not a scattered one.
+ */
+export function isBlockingLifecycleEvent(
+  event: LifecycleHookEvent,
+): event is typeof USER_PROMPT_SUBMIT_EVENT {
+  return event === USER_PROMPT_SUBMIT_EVENT;
+}
 
 /**
  * The full closed-set hook event surface. {@link ScriptHookType} (pre|post|perm)
@@ -159,6 +185,18 @@ export interface LifecycleHookStdin {
   /** PostCompact — token estimates before/after compaction. */
   tokensBefore?: number;
   tokensAfter?: number;
+  /**
+   * UserPromptSubmit (BLOCKING, fail-closed) — the user's prompt text, ALREADY
+   * DLP-redacted at the caller (§6.6) before serialization. A hook reads this to
+   * decide whether to `deny` (refuse the turn) or `allow`.
+   */
+  inputText?: string;
+  /** UserPromptSubmit — the chat input origin (e.g. user-keyboard, plugin-emitted). */
+  inputOrigin?: string;
+  /** UserPromptSubmit — the resolved route for this turn (`llm` | `skill`). */
+  route?: string;
+  /** UserPromptSubmit — the keyword classification type (`general` | `skill` | `command`). */
+  classification?: string;
 }
 
 /**
