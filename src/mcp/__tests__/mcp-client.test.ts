@@ -1374,7 +1374,11 @@ describe("McpClient buffered response safety", () => {
 });
 
 describe("McpClient — 2026-07-28 RC stateless handshake (#1230)", () => {
-  function rcHttpClient(id: string, responder: (method: string | undefined, rid: number) => Response) {
+  function rcHttpClient(
+    id: string,
+    responder: (method: string | undefined, rid: number) => Response,
+    inputResolver?: (rid: string, request: Record<string, unknown>) => Promise<unknown>,
+  ) {
     lookupMock.mockResolvedValue([{ address: "93.184.216.34", family: 4 }]);
     const url = `https://api.example.com/${id}/mcp`;
     const fetchMock = vi.fn(async (_url: string, init?: RequestInit): Promise<Response> =>
@@ -1385,6 +1389,9 @@ describe("McpClient — 2026-07-28 RC stateless handshake (#1230)", () => {
       { id, transport: "http", url },
       governanceWithPolicy(buildPolicy([httpApproval(id, url)])),
       new ToolRegistry(),
+      undefined,
+      undefined,
+      inputResolver,
     );
     return { client, fetchMock };
   }
@@ -1430,7 +1437,7 @@ describe("McpClient — 2026-07-28 RC stateless handshake (#1230)", () => {
     await client.disconnect();
   });
 
-  it("rejects an input_required tool result — MRTR is not implemented in this slice (No-Fallback)", async () => {
+  it("fails closed on input_required when no MRTR resolver is wired (No-Fallback)", async () => {
     const { client } = rcHttpClient("ir", (method, id) => {
       if (method === "server/discover") return jsonRpcResponse(id, RC_DISCOVER_RESULT);
       if (method === "tools/list") return jsonRpcResponse(id, { tools: [] });
@@ -1439,7 +1446,78 @@ describe("McpClient — 2026-07-28 RC stateless handshake (#1230)", () => {
     });
 
     await client.connect();
+    // No resolver injected → the client cannot satisfy input_required and never
+    // fabricates a response.
     await expect(client.callTool("q", {})).rejects.toThrow(/input_required/);
+    await client.disconnect();
+  });
+
+  it("MRTR loop: resolves input_required, echoes requestState verbatim, retries to complete", async () => {
+    const calls: Array<Record<string, unknown> | undefined> = [];
+    const resolver = vi.fn(async (_rid: string, _request: Record<string, unknown>) => ({
+      action: "accept",
+      content: { token: "abc" },
+    }));
+    const { client, fetchMock } = rcHttpClient(
+      "mrtr",
+      (method, id) => {
+        if (method === "server/discover") return jsonRpcResponse(id, RC_DISCOVER_RESULT);
+        if (method === "tools/list") return jsonRpcResponse(id, { tools: [] });
+        if (method === "tools/call") {
+          // First call → input_required; second (retry) → complete.
+          const toolCalls = calls.filter(Boolean).length;
+          if (toolCalls === 0) {
+            calls.push({});
+            return jsonRpcResponse(id, {
+              resultType: "input_required",
+              inputRequests: { q1: { method: "elicitation/create", message: "need a token" } },
+              requestState: "opaque-state-xyz",
+            });
+          }
+          return jsonRpcResponse(id, { resultType: "complete", content: [{ type: "text", text: "done" }] });
+        }
+        return new Response("unexpected", { status: 500 });
+      },
+      resolver,
+    );
+
+    await client.connect();
+    const out = await client.callTool("q", { a: 1 });
+    expect(out.text).toBe("done");
+
+    // Resolver was invoked with the inputRequest keyed by its opaque id.
+    expect(resolver).toHaveBeenCalledWith("q1", { method: "elicitation/create", message: "need a token" });
+
+    // The retry (2nd tools/call) carried inputResponses + the echoed requestState.
+    const toolCallInits = fetchMock.mock.calls
+      .filter(([, i]) => readRpcMethod(i as RequestInit) === "tools/call")
+      .map(([, i]) => readRpcParams(i as RequestInit));
+    expect(toolCallInits).toHaveLength(2);
+    expect(toolCallInits[1]).toMatchObject({
+      name: "q",
+      arguments: { a: 1 },
+      inputResponses: { q1: { action: "accept", content: { token: "abc" } } },
+      requestState: "opaque-state-xyz",
+    });
+    await client.disconnect();
+  });
+
+  it("MRTR runaway guard: a server stuck on input_required fails after the round bound", async () => {
+    const resolver = vi.fn(async () => ({ action: "accept" }));
+    const { client } = rcHttpClient(
+      "runaway",
+      (method, id) => {
+        if (method === "server/discover") return jsonRpcResponse(id, RC_DISCOVER_RESULT);
+        if (method === "tools/list") return jsonRpcResponse(id, { tools: [] });
+        if (method === "tools/call")
+          return jsonRpcResponse(id, { resultType: "input_required", inputRequests: { q: {} }, requestState: "s" });
+        return new Response("unexpected", { status: 500 });
+      },
+      resolver,
+    );
+
+    await client.connect();
+    await expect(client.callTool("q", {})).rejects.toThrow(/exceeded .* input_required rounds/);
     await client.disconnect();
   });
 

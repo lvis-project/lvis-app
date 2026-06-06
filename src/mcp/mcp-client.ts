@@ -153,6 +153,14 @@ interface McpToolCallResult {
   resultType?: string;
   content: Array<{ type: string; text?: string; [key: string]: unknown }>;
   isError?: boolean;
+  /**
+   * MRTR (§8 `InputRequiredResult`) — present only when `resultType ===
+   * "input_required"`. `inputRequests` maps an opaque id → the server's request
+   * (an `Elicit` / `CreateMessage` / `ListRoots`); `requestState` is opaque and
+   * MUST be echoed verbatim on the retry. ≥1 of the two is present.
+   */
+  inputRequests?: Record<string, Record<string, unknown>>;
+  requestState?: string;
   /** MCP Apps spec §3.2 — optional UI extension metadata. */
   _meta?: {
     ui?: {
@@ -164,6 +172,19 @@ interface McpToolCallResult {
     [key: string]: unknown;
   };
 }
+
+/**
+ * Resolves ONE MRTR `inputRequest` (§8). The host wires this to its capability
+ * surfaces — elicitation → the approval-gate modal, sampling → the host LLM —
+ * and returns the response value placed under `inputResponses[id]` on retry. The
+ * client owns the LOOP (detect / gather / echo `requestState` / retry / bound);
+ * the resolver owns WHAT each request means. Absent ⇒ the client cannot satisfy
+ * `input_required` and fails with a typed error (No-Fallback).
+ */
+export type McpInputRequestResolver = (
+  id: string,
+  request: Record<string, unknown>,
+) => Promise<unknown>;
 
 // ─── Constants ────────────────────────────────────────
 
@@ -197,6 +218,11 @@ const MAX_REQUEST_TIMEOUT_MS = TOOL_TIMEOUT_POLICY.mcpRequestMaxMs;
 const HANDSHAKE_TIMEOUT_MS = 10_000; // discover / initialize / tools/list 핸드셰이크용
 const HEALTH_CHECK_INTERVAL_MS = 30_000;
 const MAX_BUFFERED_RESPONSES = 128;
+/**
+ * MRTR runaway guard (§8): a server that returns `input_required` forever would
+ * loop the client indefinitely. Bound the rounds; exceeding it is a typed error.
+ */
+const MAX_MRTR_ROUNDS = 8;
 
 // ─── Transport Strategy ──────────────────────────────
 
@@ -270,6 +296,13 @@ export class McpClient {
      * external stdio/HTTP path is unchanged when it is omitted.
      */
     private readonly transportOverride?: McpTransport,
+    /**
+     * Optional MRTR resolver (milestone `mrtr-input-loop`). When a `tools/call`
+     * returns `input_required`, each `inputRequest` is resolved through this and
+     * the responses are echoed back on retry. Omitted ⇒ the client fails closed
+     * on `input_required` (No-Fallback — it never fabricates a response).
+     */
+    private readonly inputResolver?: McpInputRequestResolver,
   ) {
     this.state = {
       id: config.id,
@@ -433,53 +466,55 @@ export class McpClient {
     );
 
     try {
-      const result = await this.sendRequest<McpToolCallResult>(
-        "tools/call",
-        { name, arguments: args },
-        timeoutMs,
-      );
+      // MRTR loop (§8): a `tools/call` may return `input_required` instead of a
+      // `complete` result; the client gathers responses for each `inputRequest`
+      // and retries the SAME logical call with `inputResponses` + the echoed
+      // (opaque) `requestState`, bounded by MAX_MRTR_ROUNDS.
+      let params: Record<string, unknown> = { name, arguments: args };
+      let rounds = 0;
+      // eslint-disable-next-line no-constant-condition
+      while (true) {
+        const result = await this.sendRequest<McpToolCallResult>("tools/call", params, timeoutMs);
 
-      // RC result discriminator (§8). This slice handles only `complete`
-      // (and absent ⇒ complete, for the dual-era legacy path). `input_required`
-      // (MRTR) and `task` (Tasks) are NOT implemented yet — fail with a real,
-      // typed host error rather than silently degrading (No-Fallback).
-      if (result.resultType === "input_required") {
-        throw new Error(
-          `[mcp-client] tool '${name}' on '${this.config.id}' returned resultType="input_required" — the MRTR input loop is not implemented yet (milestone mrtr-input-loop)`,
-        );
+        if (result.resultType === "input_required") {
+          rounds += 1;
+          if (rounds > MAX_MRTR_ROUNDS) {
+            throw new Error(
+              `[mcp-client] tool '${name}' on '${this.config.id}' exceeded ${MAX_MRTR_ROUNDS} input_required rounds (possible runaway server)`,
+            );
+          }
+          params = await this.resolveInputRequired(name, args, result);
+          continue;
+        }
+        if (result.resultType === "task") {
+          throw new Error(
+            `[mcp-client] tool '${name}' on '${this.config.id}' returned resultType="task" — the Tasks extension is not implemented yet (milestone tasks-extension)`,
+          );
+        }
+
+        // 결과를 문자열로 변환
+        if (result.isError) {
+          const errorText = result.content.map((c) => c.text ?? JSON.stringify(c)).join("\n");
+          throw new Error(errorText);
+        }
+
+        const text = result.content.map((c) => c.text ?? JSON.stringify(c)).join("\n");
+
+        // MCP Apps spec §3.2 — detect UI extension in _meta.ui
+        const uiMeta = result._meta?.ui;
+        let uiPayload: McpUiPayload | undefined;
+        if (uiMeta?.resourceUri) {
+          uiPayload = {
+            serverId: this.config.id,
+            resourceUri: uiMeta.resourceUri,
+            slot: (uiMeta.slot as McpUiPayload["slot"]) ?? "chat",
+            height: uiMeta.height,
+            title: uiMeta.title,
+          };
+        }
+
+        return { text, uiPayload };
       }
-      if (result.resultType === "task") {
-        throw new Error(
-          `[mcp-client] tool '${name}' on '${this.config.id}' returned resultType="task" — the Tasks extension is not implemented yet (milestone tasks-extension)`,
-        );
-      }
-
-      // 결과를 문자열로 변환
-      if (result.isError) {
-        const errorText = result.content
-          .map((c) => c.text ?? JSON.stringify(c))
-          .join("\n");
-        throw new Error(errorText);
-      }
-
-      const text = result.content
-        .map((c) => c.text ?? JSON.stringify(c))
-        .join("\n");
-
-      // MCP Apps spec §3.2 — detect UI extension in _meta.ui
-      const uiMeta = result._meta?.ui;
-      let uiPayload: McpUiPayload | undefined;
-      if (uiMeta?.resourceUri) {
-        uiPayload = {
-          serverId: this.config.id,
-          resourceUri: uiMeta.resourceUri,
-          slot: (uiMeta.slot as McpUiPayload["slot"]) ?? "chat",
-          height: uiMeta.height,
-          title: uiMeta.title,
-        };
-      }
-
-      return { text, uiPayload };
     } catch (err) {
       // Map the RC capability/version errors (§8) to clearer host messages.
       if (err instanceof McpRpcError && err.code === RPC_MISSING_REQUIRED_CLIENT_CAPABILITY) {
@@ -495,6 +530,33 @@ export class McpClient {
       const message = err instanceof Error ? err.message : String(err);
       throw new Error(`[mcp-client] ${t("be_mcpClient.toolCallFailed", { id: this.config.id, name, message })}`);
     }
+  }
+
+  /**
+   * Resolve one MRTR `input_required` round (§8): gather a response for each
+   * `inputRequest` via the injected resolver, then build the retry params for
+   * the SAME logical call — `{ name, arguments, inputResponses, requestState }`
+   * with `requestState` echoed verbatim (opaque). Fails closed (typed error) if
+   * no resolver is wired — the client never fabricates a response (No-Fallback).
+   */
+  private async resolveInputRequired(
+    name: string,
+    args: Record<string, unknown>,
+    result: McpToolCallResult,
+  ): Promise<Record<string, unknown>> {
+    if (!this.inputResolver) {
+      throw new Error(
+        `[mcp-client] tool '${name}' on '${this.config.id}' returned resultType="input_required" but no MRTR input resolver is wired (elicitation/sampling unavailable in this context)`,
+      );
+    }
+    const inputResponses: Record<string, unknown> = {};
+    for (const [id, request] of Object.entries(result.inputRequests ?? {})) {
+      inputResponses[id] = await this.inputResolver(id, request);
+    }
+    const retry: Record<string, unknown> = { name, arguments: args, inputResponses };
+    // requestState is opaque and MUST be echoed verbatim when present (§8).
+    if (result.requestState !== undefined) retry.requestState = result.requestState;
+    return retry;
   }
 
   /** 서버 상태 조회 */
