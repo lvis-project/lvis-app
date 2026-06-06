@@ -28,9 +28,13 @@ import type {
 import { LoopbackTransport } from "./loopback-transport.js";
 import { PluginMcpServer, type PluginToolDelegate } from "./plugin-mcp-server.js";
 import { mcpToolToPluginTool, type DiscoveredMcpTool } from "./plugin-tool-from-mcp.js";
+import { lintToolInputSchema } from "../plugins/tool-schema-lint.js";
+import { createLogger } from "../lib/logger.js";
 import type { ToolRegistry } from "../tools/registry.js";
 import type { PluginManifest } from "../plugins/types.js";
 import type { McpUiPayload } from "./types.js";
+
+const log = createLogger("plugin-mcp-host");
 
 const MCP_PROTOCOL_VERSION = "2026-07-28";
 const META_PROTOCOL_VERSION = "io.modelcontextprotocol/protocolVersion";
@@ -115,9 +119,28 @@ export class PluginMcpHost {
     const list = (await this.request("tools/list", {})) as { tools?: DiscoveredMcpTool[] };
     try {
       for (const tool of list.tools ?? []) {
+        // Build FIRST — parity with pluginToolsForRegistration: an authority/
+        // structural hard failure (missing xyz.lvis/category) THROWS here and
+        // fails the whole start closed, even for a tool that would ALSO trip the
+        // lint below.
         const registryTool = mcpToolToPluginTool(this.pluginId, tool, (name, args) =>
           this.invoke(name, args),
         );
+
+        // THEN #1182 provider-strict lint, fail-soft per tool: a schema
+        // OpenAI/Azure would 400 on (e.g. an `array` property with no `items`) is
+        // dropped so one bad plugin tool can't take down every turn that loads
+        // this plugin.
+        const violations = lintToolInputSchema(tool.inputSchema);
+        if (violations.length > 0) {
+          log.warn(
+            `plugin '${this.pluginId}' tool '${tool.name}' dropped — inputSchema fails LLM provider-strict lint: ${violations
+              .map((v) => v.rule)
+              .join(", ")}`,
+          );
+          continue;
+        }
+
         this.toolRegistry.register(registryTool);
         this.registeredToolNames.push(registryTool.name);
       }
