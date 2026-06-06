@@ -647,7 +647,21 @@ export class PluginMarketplaceService {
         // Already installed — auto-update only when the catalog advertises a
         // strictly newer version (the IT-controlled catalog is the SOT for
         // managed plugins). Same-or-older / unknown version → leave as-is.
-        const installedVersion = await this.getInstalledVersion(plugin.id);
+        //
+        // getInstalledVersion re-throws on a corrupt/unreadable manifest; catch
+        // it HERE so one bad installed plugin only forfeits its own update
+        // rather than aborting the whole managed bootstrap (per-plugin
+        // isolation — pre-PR, installed plugins were skipped without reading the
+        // manifest at all, so this preserves that fail-soft posture).
+        let installedVersion: string | null;
+        try {
+          installedVersion = await this.getInstalledVersion(plugin.id);
+        } catch (err) {
+          log.warn(
+            `ensureManagedInstalled: cannot read installed version for '${plugin.id}' — skipping update: ${(err as Error).message}`,
+          );
+          continue;
+        }
         if (!plugin.version || !installedVersion || !isNewer(plugin.version, installedVersion)) {
           continue;
         }
