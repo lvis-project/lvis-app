@@ -199,15 +199,26 @@ Decisions ratified during implementation:
   registration, not the server projection (the server exposes its real tools; the
   host decides what its LLM provider can consume).
 
-**Remaining for `plugin-loopback-server` — the live flip (next, gated):** route
-ONE real first-party plugin through `PluginLoopbackManager` in `boot/plugins.ts`
-(start on enable / stop on disable / restart on reload), excluding its id from the
-legacy `replacePluginTools` set so the two paths don't clobber each other. Gates
-(CLAUDE.md): this moves execution gates to the delegate → **permission/boot
-trust-boundary change ⇒ 3-agent cluster review**; it changes the live plugin
-registration path ⇒ **Playwright e2e**; choose the pilot plugin (a first-party,
-low-blast-radius one). Until then the mechanism is dormant and live behavior is
-unchanged.
+**`plugin-loopback-server` — boot exclusion plumbing DONE; only the live flip
+remains (gated).** `boot/plugins.ts` now has the SOT `LOOPBACK_MIGRATED_PLUGIN_IDS`
+(ships EMPTY) and the legacy sweeps (`registerPluginTools` /
+`syncPluginToolRegistry` / `syncPluginToolRegistryForPlugin`) exclude migrated
+plugins from BOTH registration and the replaced id set, so the manager's tools are
+never clobbered (unit-tested via an injectable set). **The live flip = populate
+the SOT with a pilot id + wire `PluginLoopbackManager` into the boot step's
+onEnable/onDisable + 3-agent cluster review (permission/boot trust boundary) +
+Playwright e2e.** No bundled first-party plugin exists (all are in-house
+marketplace repos; installed here: `lge-api`, `local-indexer`), so the pilot is an
+environment/product choice. Until the SOT is populated, behavior is unchanged.
+
+**`untrusted-stdio-isolation` (4) — serving core DONE; spawner/sandbox/artifact
+gated.** `stdio-framing.ts` (`frameMessage` + `StdioFrameDecoder`, byte-accurate
+Content-Length) + `stdio-server-loop.ts` (`StdioServerLoop`) implement the
+subprocess-side serving core: read framed JSON-RPC → dispatch to the SAME
+`PluginMcpServer` → write framed response (tested over in-memory paired streams; a
+thrown handler → -32603, loop survives). Remaining (gated above this loop): the
+subprocess spawner + OS sandbox (bubblewrap/sandbox-exec) + the signed
+spawnable-artifact format (§6 open decision) + installed-plugin migration.
 
 ---
 
