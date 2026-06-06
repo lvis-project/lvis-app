@@ -259,8 +259,18 @@ Remaining: native-host iframe CSP/permission enforcement per `_meta.ui`
 (renderer + Playwright), and Skills-over-MCP (`skill://` Resources + digest
 verification + per-skill opt-in) — both gated on the §6 Apps/Skills snapshot pin.
 
-**`legacy-removal` (9) — the design's "unavoidable hard cutover"; gated by its own
-stated precondition.** CORRECTION to an earlier claim: the SDK manifest schema
+**`legacy-removal` (9) — DONE (flag-day executed).** The in-process loopback is now
+the UNIVERSAL plugin registration + execution path; the legacy
+`pluginToolsForRegistration` adapter + `registerPluginTools`/`syncPluginToolRegistry`/
+`syncPluginToolRegistryForPlugin` orchestration are DELETED. `boot/steps/plugin-
+runtime.ts` routes onEnable→`manager.start`, onDisable→`manager.stop`, boot+uninstall
+→`manager.syncAll` (reconcile, has()-guarded). All deleted fail-closed gates live in
+the loopback path; fixture-building tests use the real production projection
+(`plugin-tool-test-fixture.ts`). **Verified: full suite 6328 passed/0 failed + build
+green; 3-agent cluster review GO (architect/critic/security), round 2.** Safe because
+the SDK schema requires `category` (category-less plugins already failed load).
+
+Historical note (the earlier blocker analysis, now resolved): the SDK manifest schema
 (`@lvis/plugin-sdk/schemas/plugin-manifest.schema.json`) lists `category` in
 `toolSchemas.*.required`, so the category-less installed plugins (`local-indexer`,
 `lge-api`) ALREADY fail AJV manifest validation at load and register nothing today
