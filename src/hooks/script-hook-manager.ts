@@ -15,7 +15,7 @@
  *     deny. Caller MUST NOT promote this allow over an upstream deny.
  *   - `modify` is **NOT** supported in v1 (hook-signing follow-up once signing lands).
  */
-import type { DiscoveredHook } from "./hook-discovery.js";
+import { type DiscoveredHook, hookMatchesTool } from "./hook-discovery.js";
 import { runHookChain, type RunOneHookOptions } from "./script-hook-runner.js";
 import type {
   HookTrustOrigin,
@@ -114,9 +114,11 @@ export class ScriptHookManager {
     payload: HookDispatchPayload,
     options?: RunOneHookOptions,
   ): Promise<HookDispatchResult> {
-    const hooks = this.hooksOfType(type);
+    // #811 — a hook with a `matcher` runs only for tool calls whose name matches
+    // its glob (e.g. `mcp_*`); a hook with no matcher runs for every tool.
+    const hooks = this.hooksOfType(type).filter((h) => hookMatchesTool(h.matcher, payload.toolName));
     if (hooks.length === 0) {
-      return { decision: "allow", reason: "no hooks of this type", results: [] };
+      return { decision: "allow", reason: "no matching hooks of this type", results: [] };
     }
     const stdinPayload: ScriptHookStdin = {
       hookType: type,
