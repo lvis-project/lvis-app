@@ -20,6 +20,8 @@ vi.mock("electron", () => ({
 import {
   syncPluginToolRegistry,
   syncPluginToolRegistryForPlugin,
+  registerPluginTools,
+  LOOPBACK_MIGRATED_PLUGIN_IDS,
 } from "../plugins.js";
 import { ToolRegistry } from "../../tools/registry.js";
 import { createDynamicTool } from "../../tools/base.js";
@@ -450,5 +452,101 @@ describe("syncPluginToolRegistry — plugin lifecycle sync", () => {
     expect(write?.category).toBe("write");
     expect(write?.pathFields).toEqual(["path"]);
     expect(write?.isReadOnly({})).toBe(false);
+  });
+});
+
+/**
+ * Loopback-migrated plugins (mcp-alignment-design.md §5 plugin-loopback-server)
+ * are owned by PluginLoopbackManager, so the legacy sweep must EXCLUDE them —
+ * both from registration AND from the replaced id set — or it would clobber the
+ * loopback-registered tools. The migrated set is injectable for tests; the SOT
+ * default is empty (no live change until the attested flip).
+ */
+describe("syncPluginToolRegistry — loopback-migrated exclusion", () => {
+  it("the SOT migrated set ships empty (no live flip yet)", () => {
+    expect(LOOPBACK_MIGRATED_PLUGIN_IDS.size).toBe(0);
+  });
+
+  it("excludes a migrated plugin from the legacy registration sweep", () => {
+    const registry = new ToolRegistry();
+    const runtime = stubRuntime([
+      { pluginId: "legacy", manifest: manifest("legacy", ["legacy_run"]) },
+      { pluginId: "mig", manifest: manifest("mig", ["mig_run"]) },
+    ]);
+
+    syncPluginToolRegistry(runtime, registry, new Set(["mig"]));
+
+    expect(registry.findByName("legacy_run")?.pluginId).toBe("legacy");
+    expect(registry.findByName("mig_run")).toBeUndefined(); // owned by the manager
+  });
+
+  it("does NOT clobber a migrated plugin's already-registered (loopback) tools", () => {
+    const registry = new ToolRegistry();
+    // Simulate PluginLoopbackManager having registered the migrated plugin's tool.
+    registry.register(createDynamicTool({
+      name: "mig_run",
+      description: "loopback-registered",
+      source: "plugin",
+      pluginId: "mig",
+      version: "1.0.0",
+      jsonSchema: { type: "object", properties: {} },
+      category: "read",
+      execute: async () => ({ output: "", isError: false }),
+    }));
+    const migTool = registry.findByName("mig_run");
+
+    // A full legacy sweep that also lists the migrated plugin must leave it alone.
+    syncPluginToolRegistry(
+      stubRuntime([
+        { pluginId: "legacy", manifest: manifest("legacy", ["legacy_run"]) },
+        { pluginId: "mig", manifest: manifest("mig", ["mig_run"]) },
+      ]),
+      registry,
+      new Set(["mig"]),
+    );
+
+    expect(registry.findByName("mig_run")).toBe(migTool); // identity preserved
+    expect(registry.findByName("legacy_run")?.pluginId).toBe("legacy");
+  });
+
+  it("syncPluginToolRegistryForPlugin is a no-op for a migrated plugin", () => {
+    const registry = new ToolRegistry();
+    registry.register(createDynamicTool({
+      name: "mig_run",
+      description: "loopback-registered",
+      source: "plugin",
+      pluginId: "mig",
+      version: "1.0.0",
+      jsonSchema: { type: "object", properties: {} },
+      category: "read",
+      execute: async () => ({ output: "", isError: false }),
+    }));
+    const migTool = registry.findByName("mig_run");
+
+    // Even a runtime that lists "mig" with a DIFFERENT toolset must not touch it.
+    syncPluginToolRegistryForPlugin(
+      stubRuntime([{ pluginId: "mig", manifest: manifest("mig", ["mig_other"]) }]),
+      registry,
+      "mig",
+      new Set(["mig"]),
+    );
+
+    expect(registry.findByName("mig_run")).toBe(migTool);
+    expect(registry.findByName("mig_other")).toBeUndefined();
+  });
+
+  it("registerPluginTools skips migrated plugins at boot", () => {
+    const registry = new ToolRegistry();
+    registerPluginTools(
+      stubRuntime([
+        { pluginId: "legacy", manifest: manifest("legacy", ["legacy_run"]) },
+        { pluginId: "mig", manifest: manifest("mig", ["mig_run"]) },
+      ]),
+      registry,
+      new Set(["mig"]),
+    );
+
+    expect(registry.findByName("legacy_run")?.pluginId).toBe("legacy");
+    expect(registry.findByName("mig_run")).toBeUndefined();
   });
 });
