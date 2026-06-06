@@ -10,6 +10,7 @@
 import { ConversationHistory, normalizeToolPairInvariant } from "./conversation-history.js";
 import { ToolExecutor, type ToolResult, type ToolUseBlock } from "../tools/executor.js";
 import { HookRunner } from "../hooks/hook-runner.js";
+import type { LifecycleHookEvent } from "../hooks/script-hook-types.js";
 import { markStaleToolResults, estimateMessagesTokens, estimateTokens, getModelPreflightThreshold, getModelUsableContext, isContextLengthError } from "./auto-compact.js";
 import {
   estimateRequestInputProjection,
@@ -686,6 +687,14 @@ export class ConversationLoop {
   private sessionKind: SessionKind = "main";
   private sessionRoutineId: string | null = null;
   private sessionRoutineTitle: string | null = null;
+  /**
+   * #811 m2 — the sessionId the `SessionStart` lifecycle event last fired for.
+   * SessionStart must fire ONCE per session (not per turn): runTurn fires it on
+   * the first turn whose sessionId differs from this, then records it here.
+   * Reset by `newConversation` / `loadSession` so a switched-into session
+   * re-announces its start.
+   */
+  private sessionStartFiredFor: string | null = null;
   /** K4: §4.5 11-step trace — dev 모드 활성, 프로덕션 no-op */
   private tracer: ConversationTracer = createTracer(this.sessionId);
   private cumulativeUsage: TokenUsage = { inputTokens: 0, outputTokens: 0 };
@@ -1151,6 +1160,8 @@ export class ConversationLoop {
     this.sessionKind = kind;
     this.sessionRoutineId = null;
     this.sessionRoutineTitle = null;
+    // #811 m2 — new session ⇒ SessionStart must re-fire on the next turn.
+    this.sessionStartFiredFor = null;
     this.sessionAdditionalDirectories = [];
     this.turnAdditionalDirectories = [];
     this.history.clear();
@@ -1345,6 +1356,53 @@ export class ConversationLoop {
     return this.deps.settingsService.get("chat").autoCompact ?? true;
   }
 
+  /**
+   * Fire a NON-BLOCKING lifecycle event (#811 milestone-2, design §5).
+   * OBSERVE-ONLY: the dispatch result is discarded — a lifecycle hook's `deny`
+   * is recorded in the manager's audit but NEVER affects the turn (mirrors
+   * `PostToolUse`). Fail-soft: the manager never throws and we additionally
+   * swallow any unexpected error so a misbehaving hook can never break a turn /
+   * compaction. No-op when `scriptHookManager` is unwired (back-compat: no
+   * hooks.json ⇒ no lifecycle dispatch, behavior identical to today).
+   *
+   * The matcher subject is the live `sessionId`; trustOrigin is propagated so a
+   * hook can key on origin. No secrets pass through (env allowlist unchanged).
+   */
+  private async fireLifecycleEvent(
+    event: LifecycleHookEvent,
+    payload: import("../hooks/script-hook-manager.js").LifecycleEventPayload = {},
+    sessionIdOverride?: string,
+  ): Promise<void> {
+    const manager = this.deps.scriptHookManager;
+    if (!manager) return;
+    try {
+      await manager.runLifecycleEvent(
+        event,
+        sessionIdOverride ?? this.sessionId,
+        // Lifecycle events are session-scoped, not tied to a single user input;
+        // attribute to the canonical "unknown" hook origin like other
+        // non-user-keyboard dispatches (no enrollment/mutation path here).
+        "unknown",
+        payload,
+      );
+    } catch (err) {
+      log.warn(
+        `lifecycle event ${event} dispatch failed (non-blocking, ignored): ${
+          err instanceof Error ? err.message : String(err)
+        }`,
+      );
+    }
+  }
+
+  /** Non-secret session metadata for the SessionStart lifecycle payload. */
+  private sessionMetaForLifecycle(): Record<string, unknown> {
+    return {
+      sessionKind: this.sessionKind,
+      ...(this.sessionRoutineId ? { routineId: this.sessionRoutineId } : {}),
+      ...(this.sessionRoutineTitle ? { routineTitle: this.sessionRoutineTitle } : {}),
+    };
+  }
+
   /** 세션 목록 조회 — §4.5.7 */
   listSessions(limit?: number): Array<{ id: string; modifiedAt: Date; title: string }> {
     return this.deps.memoryManager.listSessions(limit).map((session) => ({
@@ -1381,6 +1439,8 @@ export class ConversationLoop {
     }
 
     this.sessionId = sessionId;
+    // #811 m2 — switched-into session ⇒ SessionStart re-fires on its next turn.
+    this.sessionStartFiredFor = null;
     const sessionMeta = this.deps.memoryManager.loadSessionMetadata(sessionId);
     this.sessionKind = sessionMeta?.sessionKind ?? "main";
     this.sessionRoutineId = sessionMeta?.routineId ?? null;
@@ -1515,6 +1575,13 @@ export class ConversationLoop {
         estimatedBefore: requestProjection.totalTokens,
         preflight,
       });
+      // ── #811 m2: PreCompact (NON-BLOCKING) ── manual `/compact` path.
+      await this.fireLifecycleEvent("PreCompact", {
+        reason: "manual",
+        tokenEstimate: requestProjection.totalTokens,
+      });
+      const messagesBeforeCount = messagesBefore.length;
+      const tokensBefore = requestProjection.totalTokens;
       const result = await compactWithBoundary({
         messages: messagesBefore,
         llm: this.provider,
@@ -1544,6 +1611,14 @@ export class ConversationLoop {
         messagesBefore,
         projectionContext,
       );
+
+      // ── #811 m2: PostCompact (NON-BLOCKING) ── manual path, after apply.
+      await this.fireLifecycleEvent("PostCompact", {
+        messagesBefore: messagesBeforeCount,
+        messagesAfter: this.history.getMessages().length,
+        tokensBefore,
+        tokensAfter: this.lastContextInputTokens,
+      });
 
       // 영속화 — manualCompact 완료 시점에 즉시 disk 반영.
       void Promise.resolve(
@@ -1678,6 +1753,20 @@ export class ConversationLoop {
 
     // §4.5.2 step 4 — TURN_ORCHESTRATE
     this.tracer.step("TURN_ORCHESTRATE", { sessionId: this.sessionId });
+
+    // ── #811 m2: SessionStart (NON-BLOCKING) ──
+    // Fired ONCE per session, on its first real conversation turn (past the
+    // command-route short-circuit). OBSERVE-ONLY — the dispatch result is
+    // discarded. The once-per-session guard keeps "SessionStart" semantics even
+    // though runTurn runs every turn.
+    if (this.sessionStartFiredFor !== effectiveSessionId) {
+      this.sessionStartFiredFor = effectiveSessionId;
+      await this.fireLifecycleEvent(
+        "SessionStart",
+        { sessionMeta: this.sessionMetaForLifecycle() },
+        effectiveSessionId,
+      );
+    }
 
     // Turn aggregate footer tracking — see TurnCallbacks.onTurnSummary.
     // Wrap the caller-supplied tool callbacks so per-call durationMs (when
@@ -1873,6 +1962,21 @@ export class ConversationLoop {
         toolSchemas: result.finalToolSchemas,
       }),
       result.promotedToolNames,
+    );
+
+    // ── #811 m2: Stop (NON-BLOCKING) ──
+    // Fired when the turn's query loop has resolved, BEFORE the internal
+    // post-turn hook chain — a user lifecycle hook must never block the
+    // hardcoded persistence chain (design §1.4). OBSERVE-ONLY: result discarded.
+    // Payload: stopReason, toolCount, durationMs.
+    await this.fireLifecycleEvent(
+      "Stop",
+      {
+        ...(result.stopReason !== undefined ? { stopReason: result.stopReason } : {}),
+        toolCount: result.toolCalls.length,
+        durationMs: Math.max(0, Date.now() - turnStartedAt),
+      },
+      effectiveSessionId,
     );
 
     // §4.5.2 step 11 — POST_TURN
@@ -3439,6 +3543,16 @@ export class ConversationLoop {
       // part of the visible transcript contract and must survive as verbatim
       // context; otherwise the UI can show an assistant answer with no question.
       const preserveRecentTokens = Math.max(basePreserveRecentTokens, currentUserPreserveTokens);
+      // ── #811 m2: PreCompact (NON-BLOCKING) ──
+      // Fired right before the blocking LLM compaction. OBSERVE-ONLY — the
+      // dispatch result is discarded; a hook can never veto compaction.
+      // Payload: reason (auto-compact threshold here) + tokenEstimate.
+      await this.fireLifecycleEvent("PreCompact", {
+        reason: "auto-compact",
+        tokenEstimate: estimated,
+      });
+      const messagesBeforeCount = messagesBefore.length;
+      const tokensBefore = estimated;
       const compactResult = await compactWithBoundary({
         messages: messagesBefore,
         llm: this.provider,
@@ -3455,6 +3569,8 @@ export class ConversationLoop {
         log.info("preflight: LLM compact returned NOOP (history within preserveRecentTokens) — no mutation");
         this.lastContextInputTokens = contextTokensIn;
         this.lastContextInputProjectionTokens = estimated;
+        // NOOP ⇒ no compaction applied ⇒ no PostCompact (mirrors onCompactOccurred,
+        // which only emits when applyBoundaryToSession runs).
         return false;
       }
 
@@ -3474,6 +3590,15 @@ export class ConversationLoop {
       log.info(
         `preflight: APPLIED — removed=${compactResult.removedCount} estimatedAfter=${compactResult.estimatedAfter} compactNum=${this.compactNum}`,
       );
+      // ── #811 m2: PostCompact (NON-BLOCKING) ──
+      // Fired AFTER auto-compact applied. OBSERVE-ONLY. Payload: before/after
+      // message + token counts. After-counts are read post-mutation.
+      await this.fireLifecycleEvent("PostCompact", {
+        messagesBefore: messagesBeforeCount,
+        messagesAfter: this.history.getMessages().length,
+        tokensBefore,
+        tokensAfter: this.lastContextInputTokens,
+      });
       return true;
     } catch (err) {
       // LLM compact 실패 시 turn 자체는 계속 진행 — compact 미적용 history 로 stream attempt.

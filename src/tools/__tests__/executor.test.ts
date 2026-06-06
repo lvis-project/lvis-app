@@ -3194,3 +3194,176 @@ describe("ToolExecutor — script hook denial surfaces in audit hookChain (#811 
     }
   });
 });
+
+// #811 milestone-2 — NON-BLOCKING lifecycle events fired from the executor.
+describe("ToolExecutor — #811 m2 lifecycle events (PostToolUseFailure / PermissionDenied)", () => {
+  // A stub manager whose lifecycle dispatch we can assert on. The tool-use
+  // dispatches all allow (so they never interfere); `runLifecycleEvent` records
+  // its calls and can be made to DENY to prove the deny is observe-only.
+  function stubManager(lifecycleDecision: "allow" | "deny" = "allow") {
+    return {
+      runPreToolUse: vi.fn(async () => ({ decision: "allow" as const, reason: "noop", results: [] })),
+      runPostToolUse: vi.fn(async () => ({ decision: "allow" as const, reason: "noop", results: [] })),
+      runPermissionRequest: vi.fn(async () => ({ decision: "allow" as const, reason: "noop", results: [] })),
+      runLifecycleEvent: vi.fn(async () => ({
+        decision: lifecycleDecision,
+        reason: "lifecycle",
+        results: [{
+          hookPath: "x",
+          hookType: "Stop" as const,
+          decision: lifecycleDecision,
+          reason: "lifecycle",
+          rawStdout: "",
+          timedOut: false,
+          durationMs: 1,
+          source: "config" as const,
+          commandIdentity: "id",
+        }],
+      })),
+    };
+  }
+
+  it("fires PostToolUseFailure with toolName + errorMessage + durationMs when a tool errors", async () => {
+    const registry = new ToolRegistry();
+    registry.register(createDynamicTool({
+      name: "failing_probe",
+      description: "read-only probe that returns isError",
+      source: "builtin",
+      category: "read",
+      isReadOnly: () => true,
+      jsonSchema: { type: "object", properties: {} },
+      execute: async () => ({ output: "boom went the tool", isError: true }),
+    }));
+    const dir = mkdtempSync(join(tmpdir(), "lvis-executor-ptuf-"));
+    try {
+      const permMgr = new PermissionManager(join(dir, "permissions.json"));
+      permMgr.setRules([{ pattern: "failing_probe", action: "allow" }]);
+      const mgr = stubManager("deny"); // lifecycle DENIES — must NOT change result.
+      const executor = new ToolExecutor(
+        registry, undefined, permMgr, undefined, undefined, mgr as never,
+      );
+
+      const result = await executor.executeAll(
+        [{ id: "tu-fail", name: "failing_probe", input: {} }],
+        { sessionId: "sess-ptuf", permissionContext: userPermissionContext() },
+      );
+
+      // The tool error stands — the lifecycle deny is observe-only (control flow
+      // unchanged): the result is still the tool's own error output.
+      expect(result[0].is_error).toBe(true);
+      expect(result[0].content).toContain("boom went the tool");
+
+      // PostToolUseFailure fired exactly once with the right payload.
+      const ptuf = mgr.runLifecycleEvent.mock.calls.find((c) => c[0] === "PostToolUseFailure");
+      expect(ptuf).toBeDefined();
+      expect(ptuf?.[1]).toBe("sess-ptuf"); // sessionId
+      const payload = ptuf?.[3] as Record<string, unknown>;
+      expect(payload.toolName).toBe("failing_probe");
+      expect(payload.errorMessage).toContain("boom went the tool");
+      expect(typeof payload.durationMs).toBe("number");
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
+  it("does NOT fire PostToolUseFailure when a tool succeeds", async () => {
+    const registry = new ToolRegistry();
+    registry.register(createDynamicTool({
+      name: "ok_probe",
+      description: "read-only probe that succeeds",
+      source: "builtin",
+      category: "read",
+      isReadOnly: () => true,
+      jsonSchema: { type: "object", properties: {} },
+      execute: async () => ({ output: "fine", isError: false }),
+    }));
+    const dir = mkdtempSync(join(tmpdir(), "lvis-executor-ok-"));
+    try {
+      const permMgr = new PermissionManager(join(dir, "permissions.json"));
+      permMgr.setRules([{ pattern: "ok_probe", action: "allow" }]);
+      const mgr = stubManager("allow");
+      const executor = new ToolExecutor(
+        registry, undefined, permMgr, undefined, undefined, mgr as never,
+      );
+      const result = await executor.executeAll(
+        [{ id: "tu-ok", name: "ok_probe", input: {} }],
+        { sessionId: "sess-ok", permissionContext: userPermissionContext() },
+      );
+      expect(result[0].is_error).not.toBe(true);
+      const ptuf = mgr.runLifecycleEvent.mock.calls.find((c) => c[0] === "PostToolUseFailure");
+      expect(ptuf).toBeUndefined();
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
+  it("fires PermissionDenied with denyReason {layer, source} when a tool is denied", async () => {
+    const registry = new ToolRegistry();
+    const executeSpy = vi.fn(async () => "should-not-run");
+    registry.register(createDynamicTool({
+      name: "denied_probe",
+      description: "read-only probe denied at the permission layer",
+      source: "builtin",
+      category: "read",
+      isReadOnly: () => true,
+      jsonSchema: { type: "object", properties: {} },
+      execute: async (rawInput) => ({ output: await executeSpy(rawInput), isError: false }),
+    }));
+    const dir = mkdtempSync(join(tmpdir(), "lvis-executor-pd-"));
+    try {
+      const permMgr = new PermissionManager(join(dir, "permissions.json"));
+      permMgr.setRules([{ pattern: "denied_probe", action: "deny" }]);
+      const mgr = stubManager("deny");
+      const executor = new ToolExecutor(
+        registry, undefined, permMgr, undefined, undefined, mgr as never,
+      );
+
+      const result = await executor.executeAll(
+        [{ id: "tu-pd", name: "denied_probe", input: {} }],
+        { sessionId: "sess-pd", permissionContext: userPermissionContext() },
+      );
+
+      // Deny stands; execute never runs (lifecycle deny is observe-only).
+      expect(result[0].is_error).toBe(true);
+      expect(executeSpy).not.toHaveBeenCalled();
+
+      const pd = mgr.runLifecycleEvent.mock.calls.find((c) => c[0] === "PermissionDenied");
+      expect(pd).toBeDefined();
+      expect(pd?.[1]).toBe("sess-pd");
+      const payload = pd?.[3] as { toolName: string; denyReason: { source: string } };
+      expect(payload.toolName).toBe("denied_probe");
+      expect(payload.denyReason.source).toBe("tool-executor");
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
+  it("does NOT fire any lifecycle event when no manager is wired (back-compat)", async () => {
+    const registry = new ToolRegistry();
+    registry.register(createDynamicTool({
+      name: "nomgr_probe",
+      description: "read-only probe, no script-hook manager",
+      source: "builtin",
+      category: "read",
+      isReadOnly: () => true,
+      jsonSchema: { type: "object", properties: {} },
+      execute: async () => ({ output: "boom", isError: true }),
+    }));
+    const dir = mkdtempSync(join(tmpdir(), "lvis-executor-nomgr-"));
+    try {
+      const permMgr = new PermissionManager(join(dir, "permissions.json"));
+      permMgr.setRules([{ pattern: "nomgr_probe", action: "allow" }]);
+      // No scriptHookManager passed → lifecycle dispatch is a no-op.
+      const executor = new ToolExecutor(registry, undefined, permMgr);
+      const result = await executor.executeAll(
+        [{ id: "tu-nomgr", name: "nomgr_probe", input: {} }],
+        { sessionId: "sess-nomgr", permissionContext: userPermissionContext() },
+      );
+      // Tool error still returned identically — behavior unchanged.
+      expect(result[0].is_error).toBe(true);
+      expect(result[0].content).toContain("boom");
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+});
