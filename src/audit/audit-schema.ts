@@ -36,13 +36,51 @@ export interface RiskVerdict {
 /**
  * Layer 6 hook-chain result entry — captured per script in the chain
  * so audit can reconstruct which hook said what.
+ *
+ * #811 (design §7) — extended with FORWARD-COMPATIBLE optional fields for the
+ * command-hooks / lifecycle expansion. All additions are optional so existing
+ * readers and historical rows keep working; `hookType` is RETAINED as the
+ * derived back-compat alias of `event` (writers may emit both — `event` is the
+ * richer closed-set surface, `hookType` is the narrow pre|post|perm projection).
  */
 export interface HookResult {
   hookName: string;
+  /**
+   * Narrow pre|post|perm projection — derived alias of {@link event}. Kept
+   * required so back-compat readers that key on `hookType` never see `undefined`.
+   */
   hookType: "pre" | "post" | "perm";
   action: "allow" | "deny";
   reason: string;
   durationMs: number;
+  /**
+   * Closed-set lifecycle event (design §5). Today equals `hookType`; widens to
+   * the full event surface (Stop / UserPromptSubmit / …) in later milestones.
+   */
+  event?: "pre" | "post" | "perm";
+  /** The configured glob matcher that selected this hook (absent ⇒ match-all). */
+  matcher?: string;
+  /** Handler type — `"command"` today; http/mcp/prompt/agent in later phases. */
+  handlerType?: "command";
+  /**
+   * Trust identity of the command: the resolved local-script sha256, or a hash
+   * of the verbatim command string when no local anchor exists. Lets forensics
+   * tie an audit row to the exact code that ran.
+   */
+  commandIdentity?: string;
+  /**
+   * Origin discriminant — a legacy `.sh` hook vs a declarative `hooks.json`
+   * command entry. Absent on historical rows.
+   */
+  source?: "sh" | "config";
+  /**
+   * Decision surface incl. the non-blocking lifecycle outcome. `"observe"` is
+   * reserved for non-blocking events whose `deny` is recorded as a policy signal
+   * only (design §7). Today's blocking events emit `allow`/`deny`.
+   */
+  decision?: "allow" | "deny" | "observe";
+  /** Why the hook failed closed, when it did. */
+  failureReason?: "timeout" | "nonzero-exit" | "spawn-error" | "bad-output";
 }
 
 /**
