@@ -212,8 +212,8 @@ describe("PluginMarketplaceService managed bootstrap", () => {
       "resolveInstalledIds",
     ).mockResolvedValue(new Set(["meeting"]));
     vi.spyOn(
-      service as unknown as { getInstalledVersion: (id: string) => Promise<string | null> },
-      "getInstalledVersion",
+      service as unknown as { readInstalledVersionFromRegistry: (r: unknown, id: string) => Promise<string | null> },
+      "readInstalledVersionFromRegistry",
     ).mockResolvedValue(installedVersion);
     return vi
       .spyOn(
@@ -272,8 +272,8 @@ describe("PluginMarketplaceService managed bootstrap", () => {
       "resolveInstalledIds",
     ).mockResolvedValue(new Set(["meeting"]));
     vi.spyOn(
-      service as unknown as { getInstalledVersion: (id: string) => Promise<string | null> },
-      "getInstalledVersion",
+      service as unknown as { readInstalledVersionFromRegistry: (r: unknown, id: string) => Promise<string | null> },
+      "readInstalledVersionFromRegistry",
     ).mockResolvedValue("1.0.0");
     vi.spyOn(
       service as unknown as { installWithDependencies: (...a: unknown[]) => Promise<unknown> },
@@ -308,8 +308,8 @@ describe("PluginMarketplaceService managed bootstrap", () => {
       "resolveInstalledIds",
     ).mockResolvedValue(new Set(["alpha"]));
     vi.spyOn(
-      service as unknown as { getInstalledVersion: (id: string) => Promise<string | null> },
-      "getInstalledVersion",
+      service as unknown as { readInstalledVersionFromRegistry: (r: unknown, id: string) => Promise<string | null> },
+      "readInstalledVersionFromRegistry",
     ).mockRejectedValue(new Error("corrupt manifest"));
     const installSpy = vi
       .spyOn(

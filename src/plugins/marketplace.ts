@@ -648,14 +648,16 @@ export class PluginMarketplaceService {
         // strictly newer version (the IT-controlled catalog is the SOT for
         // managed plugins). Same-or-older / unknown version → leave as-is.
         //
-        // getInstalledVersion re-throws on a corrupt/unreadable manifest; catch
-        // it HERE so one bad installed plugin only forfeits its own update
-        // rather than aborting the whole managed bootstrap (per-plugin
-        // isolation — pre-PR, installed plugins were skipped without reading the
-        // manifest at all, so this preserves that fail-soft posture).
+        // readInstalledManifestVersion re-throws on a corrupt/unreadable
+        // manifest; catch it HERE so one bad installed plugin only forfeits its
+        // own update rather than aborting the whole managed bootstrap
+        // (per-plugin isolation — pre-PR, installed plugins were skipped without
+        // reading the manifest at all, so this preserves that fail-soft
+        // posture). Reuse the `registry` already loaded above rather than
+        // re-reading it per plugin.
         let installedVersion: string | null;
         try {
-          installedVersion = await this.getInstalledVersion(plugin.id);
+          installedVersion = await this.readInstalledVersionFromRegistry(registry, plugin.id);
         } catch (err) {
           log.warn(
             `ensureManagedInstalled: cannot read installed version for '${plugin.id}' — skipping update: ${(err as Error).message}`,
@@ -1003,8 +1005,31 @@ export class PluginMarketplaceService {
     // Round-3 §6: registry read errors propagate; only the manifest-missing
     // path returns null (stale registry entry).
     const registry = await readPluginRegistry(this.registryPath);
+    return this.readInstalledVersionFromRegistry(registry, pluginId);
+  }
+
+  /**
+   * Installed version for a plugin, resolved from an already-loaded registry.
+   * The single seam the managed-bootstrap loop uses so it does NOT re-read +
+   * parse the whole registry file per plugin (it reuses the registry snapshot
+   * it already holds). Manifest-missing (ENOENT) → null; other IO/parse errors
+   * propagate to the caller, which isolates them per plugin.
+   */
+  private async readInstalledVersionFromRegistry(
+    registry: { plugins: PluginRegistryEntry[] },
+    pluginId: string,
+  ): Promise<string | null> {
     const entry = registry.plugins.find((c) => c.id === pluginId);
-    if (!entry) return null;
+    return entry ? this.readInstalledManifestVersion(entry) : null;
+  }
+
+  /**
+   * Read the installed version from a registry entry's manifest. Split out of
+   * {@link getInstalledVersion} so callers that already hold the registry (e.g.
+   * the managed-bootstrap loop) don't re-read+parse the whole registry file per
+   * plugin. Manifest-missing (ENOENT) → null; other IO/parse errors propagate.
+   */
+  private async readInstalledManifestVersion(entry: PluginRegistryEntry): Promise<string | null> {
     const manifestPath = isAbsolute(entry.manifestPath)
       ? entry.manifestPath
       : resolve(dirname(this.registryPath), entry.manifestPath);
