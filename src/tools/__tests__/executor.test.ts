@@ -34,7 +34,7 @@ import { VerdictCache } from "../../permissions/reviewer/verdict-cache.js";
 import type { RiskClassifier } from "../../permissions/reviewer/risk-classifier.js";
 import { HookRunner } from "../../hooks/hook-runner.js";
 import { BashAstValidator } from "../../main/bash-ast-validator.js";
-import { pluginToolsForRegistration } from "../../plugins/plugin-tool-adapter.js";
+import { buildPluginToolsForTest } from "../../plugins/__tests__/plugin-tool-test-fixture.js";
 import type { PluginManifest } from "../../plugins/types.js";
 import type { PluginRuntime } from "../../plugins/runtime.js";
 import { mcpToolToTool } from "../../mcp/mcp-tool-adapter.js";
@@ -2692,7 +2692,7 @@ describe("ToolExecutor — Layer 1 allowed-directories", () => {
       },
     } as PluginManifest;
     const registry = new ToolRegistry();
-    for (const tool of pluginToolsForRegistration(
+    for (const tool of buildPluginToolsForTest(
       { call: pluginCall } as unknown as PluginRuntime,
       "adapter-plugin",
       manifest,
