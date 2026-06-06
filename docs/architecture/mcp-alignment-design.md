@@ -211,6 +211,24 @@ Playwright e2e.** No bundled first-party plugin exists (all are in-house
 marketplace repos; installed here: `lge-api`, `local-indexer`), so the pilot is an
 environment/product choice. Until the SOT is populated, behavior is unchanged.
 
+**`governance-per-request` (5) — client half DONE; gating half gated.** `McpClient`
+takes an injected `McpClientCapabilityProvider`, called per outbound request so
+the advertised `clientCapabilities` track the active turn (interactive → advertise
+elicitation; headless → none → clean `-32003` not a hung approval). Remaining
+(cluster-review gated, permissions area): the per-request server-capability GATING
+in `mcp-governance.ts` (move off the static connect-time `allowedCapabilities`
+whitelist) + the exact deriving signals (§6 open decision).
+
+**`hooks-on-mcp-calls` (6, #811) — category-from-`_meta` already transitively
+satisfied.** The reverse projection (`mcpToolToPluginTool`) lands
+`_meta["xyz.lvis/category"]` onto `tool.category`, and the executor's hook stdin
+(`ScriptHookStdin.category`) already reads `tool.category` — so a loopback plugin
+tool's hook already sees the authoritative MCP category, no extra wiring. Remaining
+#811 work: the `mcp__.*` tool-name matcher + per-request identity in hook stdin +
+the generic-command-hooks milestone, which build on the hook-expansion matcher
+infra (`docs/architecture/hook-runtime-expansion-design.md`) and touch the live
+executor path (`tools/executor.ts` fire points) — a focused effort of its own.
+
 **`untrusted-stdio-isolation` (4) — serving core DONE; spawner/sandbox/artifact
 gated.** `stdio-framing.ts` (`frameMessage` + `StdioFrameDecoder`, byte-accurate
 Content-Length) + `stdio-server-loop.ts` (`StdioServerLoop`) implement the
