@@ -61,8 +61,33 @@ export function buildPluginConfigOverrides(settings: SettingsService): Record<st
   return overrides;
 }
 
-export function registerPluginTools(pluginRuntime: PluginRuntime, toolRegistry: ToolRegistry): void {
-  for (const tool of pluginToolsForRuntimeEntries(pluginRuntime, pluginRuntime.listPluginManifests())) {
+/**
+ * Plugins migrated to the in-process MCP loopback path
+ * (mcp-alignment-design.md §5 `plugin-loopback-server`). Their ToolRegistry
+ * registration is owned by `PluginLoopbackManager` (server/discover → tools/list
+ * → reverse projection from `_meta`), NOT the legacy `pluginToolsForRegistration`
+ * sweep in this file — so they are EXCLUDED here, otherwise `replacePluginTools`
+ * would clobber the loopback-registered tools.
+ *
+ * **Empty by default ⇒ every plugin stays on the legacy path (no live change).**
+ * Adding a plugin id here is the live flip and is gated on the milestone
+ * attestation: 3-agent cluster review (permission/boot trust boundary) +
+ * Playwright e2e (live registration path) + wiring the manager into the boot
+ * step's onEnable/onDisable for that id.
+ */
+export const LOOPBACK_MIGRATED_PLUGIN_IDS: ReadonlySet<string> = new Set<string>([
+  // pilot id goes here once the flip is attested (cluster review + e2e)
+]);
+
+export function registerPluginTools(
+  pluginRuntime: PluginRuntime,
+  toolRegistry: ToolRegistry,
+  migratedIds: ReadonlySet<string> = LOOPBACK_MIGRATED_PLUGIN_IDS,
+): void {
+  const entries = pluginRuntime
+    .listPluginManifests()
+    .filter(({ pluginId }) => !migratedIds.has(pluginId));
+  for (const tool of pluginToolsForRuntimeEntries(pluginRuntime, entries)) {
     toolRegistry.register(tool);
   }
 }
@@ -82,12 +107,19 @@ export function registerPluginTools(pluginRuntime: PluginRuntime, toolRegistry: 
 export function syncPluginToolRegistry(
   pluginRuntime: PluginRuntime,
   toolRegistry: ToolRegistry,
+  migratedIds: ReadonlySet<string> = LOOPBACK_MIGRATED_PLUGIN_IDS,
 ): void {
-  const entries = pluginRuntime.listPluginManifests();
-  const pluginIds = new Set([
-    ...toolRegistry.listPluginIds(),
-    ...entries.map(({ pluginId }) => pluginId),
-  ]);
+  const entries = pluginRuntime
+    .listPluginManifests()
+    // Loopback-migrated plugins are owned by PluginLoopbackManager — excluding
+    // them from BOTH the rebuilt tools AND the replaced id set keeps this sweep
+    // from removing their loopback-registered tools.
+    .filter(({ pluginId }) => !migratedIds.has(pluginId));
+  const pluginIds = new Set(
+    [...toolRegistry.listPluginIds(), ...entries.map(({ pluginId }) => pluginId)].filter(
+      (pluginId) => !migratedIds.has(pluginId),
+    ),
+  );
   // ToolRegistry is the execution registry, not the model-exposure SOT.
   // Inactive runtime-loaded plugins keep tools registered so auth/config/UI
   // calls remain callable; ConversationLoop scope gates model visibility.
@@ -106,7 +138,12 @@ export function syncPluginToolRegistryForPlugin(
   pluginRuntime: PluginRuntime,
   toolRegistry: ToolRegistry,
   pluginId: string,
+  migratedIds: ReadonlySet<string> = LOOPBACK_MIGRATED_PLUGIN_IDS,
 ): void {
+  // A loopback-migrated plugin is owned by PluginLoopbackManager; the legacy
+  // per-plugin sync must not touch it (the manager's start/stop registers and
+  // unregisters its tools). Safety net in case a lifecycle path reaches here.
+  if (migratedIds.has(pluginId)) return;
   const entry = pluginRuntime
     .listPluginManifests()
     .find((candidate) => candidate.pluginId === pluginId);
