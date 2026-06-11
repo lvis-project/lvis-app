@@ -2,10 +2,10 @@
  * Settings domain IPC handlers.
  * Covers: lvis:settings:*, lvis:shell:open-external, lvis:telemetry:consent-answer
  */
-import { ipcMain } from "electron";
+import { app, ipcMain } from "electron";
 import { validateExternalUrl } from "../../shared/external-url.js";
 import { SETTINGS } from "../../shared/ipc-channels.js";
-import { validateSender, UNAUTHORIZED_FRAME, auditUnauthorized } from "../gated.js";
+import { validateSender, validateHostRendererSender, UNAUTHORIZED_FRAME, auditUnauthorized } from "../gated.js";
 import { sendToWindow } from "../safe-send.js";
 import { setLocale } from "../../i18n/index.js";
 import type { IpcDeps } from "../types.js";
@@ -209,6 +209,44 @@ export function registerSettingsHandlers(deps: IpcDeps): void {
     if (!validateSender(e)) { auditUnauthorized(auditLogger, "lvis:settings:delete-web-api-key", e); return UNAUTHORIZED_FRAME; }
     await settingsService.deleteSecret(`web.apiKey.${provider}`);
     broadcastSettingsSnapshot(deps);
+    return { ok: true };
+  });
+
+  // ─── Manual host-resolver map (requires relaunch) ─────────────────
+  //
+  // Chromium's `host-resolver-rules` command-line switch is frozen once
+  // the network service starts (`app.whenReady()`). Updating it therefore
+  // requires saving the new map then calling `app.relaunch()` + `app.exit()`
+  // so the next process reads the updated settings and installs the switch
+  // before any network service initialisation.
+  //
+  // The UI shows a confirm dialog before calling this IPC, so the user has
+  // already acknowledged the restart. The main process reacts immediately.
+  ipcMain.handle(SETTINGS.applyHostMap, async (e, hostResolverMap: unknown) => {
+    // Sensitive + relaunch-triggering channel: use the stricter host-renderer
+    // validator (fails closed on empty frame URLs, rejects plugin-ui-shell
+    // frames) rather than the base `validateSender`.
+    if (!validateHostRendererSender(e)) { auditUnauthorized(auditLogger, SETTINGS.applyHostMap, e); return UNAUTHORIZED_FRAME; }
+    // Payload guard — the renderer should only ever send a string, but reject
+    // a malformed payload before it reaches the settings store.
+    if (typeof hostResolverMap !== "string") {
+      return { ok: false, error: "invalid-host-map", message: "hostResolverMap must be a string" };
+    }
+    // The host map is only honoured in manual auth mode (demo/login uses
+    // LVIS_DEMO_HOST_MAP). Login-mode disables the field in the renderer, but
+    // re-check here so a crafted IPC call cannot persist a map that the boot
+    // path would ignore anyway — and cannot trigger an unwanted relaunch.
+    if (settingsService.get("llm").authMode !== "manual") {
+      return { ok: false, error: "auth-mode-not-manual", message: "host map is only editable in manual auth mode" };
+    }
+    // Persist the new map before relaunch so the next boot reads it.
+    await settingsService.patch({ llm: { hostResolverMap } });
+    broadcastSettingsSnapshot(deps);
+    // Arm and execute the relaunch. `app.relaunch()` queues the new process
+    // then `app.exit(0)` terminates the current one — same pattern used by
+    // the demo activation path in demo.ts.
+    app.relaunch();
+    app.exit(0);
     return { ok: true };
   });
 
