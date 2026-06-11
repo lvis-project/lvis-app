@@ -91,8 +91,13 @@ export interface SandboxAuditEntry {
   reviewer: {
     /** Verdict from the deterministic rule-based classifier. */
     ruleVerdict: "low" | "medium" | "high";
-    /** Verdict from the LLM classifier (or "high" on parse failure). */
-    llmVerdict: "low" | "medium" | "high";
+    /**
+     * Verdict from the LLM classifier (or "high" on parse failure).
+     * `null` when no LLM call was made — e.g. an explicit-approval memory
+     * hit short-circuits before the classifier runs, so recording a level
+     * here would falsely imply the LLM ran.
+     */
+    llmVerdict: "low" | "medium" | "high" | null;
     /** Final composed verdict: max(ruleVerdict, llmVerdict). */
     finalVerdict: "low" | "medium" | "high";
     /**

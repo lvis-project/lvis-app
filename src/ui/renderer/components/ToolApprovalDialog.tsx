@@ -86,7 +86,14 @@ export function ToolApprovalDialog({
   // Approve is disabled for HIGH when NL field is empty.
   const approveDisabled = finalVerdict === "high" && nlJustification.trim().length === 0;
 
-  // Wrap onDecide("allow-*") to record approval before deciding.
+  // Wrap onDecide("allow-*") to record durable approval before deciding.
+  //
+  // Only DURABLE choices (allow-session / allow-always) write to the
+  // explicit-approval memory store (Store B). "allow-once" means "this
+  // invocation only" — recording it would let the foreground memory-skip
+  // auto-allow later calls, silently widening "this time" into "this
+  // session". So allow-once never records (matches its "이번만" label).
+  //
   // CRITICAL: use canonicalStringify for args + propagate trustOrigin
   // + approvalCacheKey so that the record key matches the lookup key in
   // dispatchReviewer. Without this, user-approval memory hit rate is 0%.
@@ -95,16 +102,19 @@ export function ToolApprovalDialog({
   // test assertions on onDecide do not need to drain microtask queues.
   async function handleApprove(choice: ApprovalChoice, pattern?: string) {
     let recordPromise: Promise<unknown> | undefined;
-    if (request) {
+    const isDurable = choice === "allow-session" || choice === "allow-always";
+    if (request && isDurable) {
       // canonicalStringify: sort object keys so {a,b} and {b,a} produce the
       // same string — matching how dispatchReviewer builds the lookup key.
       const canonicalArgs = canonicalStringifyForRenderer(request.args ?? {});
+      const recordedScope: UserApprovalScope =
+        choice === "allow-always" ? "persistent" : "session";
       recordPromise = window.lvis?.userApproval?.record({
         requestId: request.id,
         toolName: request.toolName,
         args: canonicalArgs,
         source: request.source ?? "builtin",
-        scope: finalVerdict === "high" ? "session" : scopeChoice,
+        scope: recordedScope,
         verdictAtApproval: finalVerdict as UserApprovalVerdict,
         nlJustification: finalVerdict === "high" ? nlJustification.trim() : null,
         trustOrigin: request.trustOrigin,
@@ -119,6 +129,16 @@ export function ToolApprovalDialog({
     await recordPromise;
   }
 
+  // The primary Approve button grants for the scope selected in the radio
+  // group: "이 세션만" → durable session grant, "영구 허용" → persistent.
+  // HIGH verdict forces session (no persistent grant for HIGH-risk actions).
+  // This is the durable choice that the memory store records; a genuine
+  // allow-once (no record) is reached only via the explicit per-call paths.
+  const primaryApproveChoice: ApprovalChoice =
+    finalVerdict !== "high" && scopeChoice === "persistent"
+      ? "allow-always"
+      : "allow-session";
+
   // 키보드 단축키 (disabled for HIGH when NL field empty)
   useEffect(() => {
     if (!open || !request) return;
@@ -126,7 +146,7 @@ export function ToolApprovalDialog({
       if (isTextEntryShortcutTarget(e.target)) return;
       if (e.key.toLowerCase() === "a" && !e.metaKey && !e.ctrlKey) {
         e.preventDefault();
-        if (!approveDisabled) void handleApprove("allow-once");
+        if (!approveDisabled) void handleApprove(primaryApproveChoice);
       } else if (e.key.toLowerCase() === "d" && !e.metaKey && !e.ctrlKey) {
         e.preventDefault();
         onDecide("deny-once");
@@ -134,8 +154,10 @@ export function ToolApprovalDialog({
     };
     window.addEventListener("keydown", handler);
     return () => window.removeEventListener("keydown", handler);
+  // primaryApproveChoice tracks scopeChoice + finalVerdict; rebind on those
+  // so the "a" shortcut grants for the currently selected scope.
   // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [open, request, onDecide, approveDisabled]);
+  }, [open, request, onDecide, approveDisabled, scopeChoice, finalVerdict]);
 
   if (!request) return null;
 
@@ -362,13 +384,13 @@ export function ToolApprovalDialog({
             <Button
               size="sm"
               variant="default"
-              onClick={() => void handleApprove("allow-once")}
+              onClick={() => void handleApprove(primaryApproveChoice)}
               disabled={approveDisabled}
               title={approveDisabled ? tHook("toolApprovalDialog.enterReason") : tHook("toolApprovalDialog.shortcutA")}
               aria-describedby={approveDisabled ? "nl-justification-hint" : undefined}
               data-testid="approve-button"
             >
-              {tHook("toolApprovalDialog.allowOnce")}
+              {tHook("toolApprovalDialog.allow")}
             </Button>
             <span id="nl-justification-hint" className="sr-only">
               {tHook("toolApprovalDialog.highRiskNlRequired")}

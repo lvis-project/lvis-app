@@ -1113,7 +1113,7 @@ export class ToolExecutor {
     if (approval.verdictAtApproval == null) {
       console.warn(
         `[permission] foreground memory skip — legacy entry without verdictAtApproval, forcing fresh approval (tool=${toolName}, scope=${approval.scope})`,
-        { event: "legacy-r2-null-verdict", toolName, scope: approval.scope },
+        { event: "legacy-null-verdict", toolName, scope: approval.scope },
       );
       return null;
     }
@@ -1168,13 +1168,19 @@ export class ToolExecutor {
         sandbox: {
           kind: sandboxCap.kind,
           confidence: sandboxCap.confidence,
+          // No sandbox run — this is a memory skip (the tool has not executed
+          // yet). The zero telemetry below reflects "not measured", not "0ms".
           events: [],
           spawnLatencyMs: 0,
           overheadPercent: 0,
         },
         reviewer: {
-          ruleVerdict: composed.level,
-          llmVerdict: composed.level,
+          // ruleVerdict is the fresh deterministic classification of the
+          // current args; finalVerdict is the composed max(rule, stored).
+          ruleVerdict: ruleVerdict.level,
+          // No LLM call on the memory-skip path — record null rather than a
+          // composed level so the audit does not imply the classifier ran.
+          llmVerdict: null,
           finalVerdict: composed.level,
           compositionRulesTriggered: [],
           userApprovalUsed: {
@@ -1877,6 +1883,10 @@ export class ToolExecutor {
           decision: "ask",
           reason: t("be_executor.metaToolAskOverrideReason"),
           layer: 6,
+          // The tool author asked to be confirmed on EVERY invocation. Mark
+          // the ask so the Store B memory-skip below never auto-allows it from
+          // a prior session/persistent grant.
+          forceModal: true,
         };
       }
       if (permissionResult.decision === "ask" && permissionResult.reviewer?.route === "foreground-auto") {
@@ -2000,6 +2010,9 @@ export class ToolExecutor {
       if (
         permissionResult.decision === "ask" &&
         permissionResult.layer >= 3 &&
+        // A meta tool whose author declared decisionOverride="ask" is a
+        // per-invocation hard gate — never satisfied by a stored approval.
+        permissionResult.forceModal !== true &&
         invocationPermissionContext.headless !== true
       ) {
         const memorySkip = await this.tryUserApprovalMemorySkip(

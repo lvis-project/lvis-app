@@ -121,14 +121,11 @@ describe("ApprovalDialog", () => {
     await waitFor(() => {
       expect(document.body.textContent).toContain("read_file");
     });
-    const allowBtn = Array.from(document.body.querySelectorAll("button")).find(
-      (b) => b.textContent?.includes("허용"),
-    );
-    if (allowBtn) {
-      fireEvent.click(allowBtn);
-      expect(onDecide).toHaveBeenCalled();
-      expect(onDecide.mock.calls[0]?.[0]).toMatch(/allow/);
-    }
+    const allowBtn = document.body.querySelector<HTMLButtonElement>('[data-testid="approve-button"]');
+    expect(allowBtn).toBeTruthy();
+    fireEvent.click(allowBtn!);
+    expect(onDecide).toHaveBeenCalled();
+    expect(onDecide.mock.calls[0]?.[0]).toMatch(/allow/);
   });
 
   it("does not convert Enter on a focused deny button into allow-once", async () => {
@@ -175,8 +172,11 @@ describe("ApprovalDialog", () => {
     expect(denyBtn).toBeTruthy();
     denyBtn!.focus();
 
+    // The "a" shortcut grants for the selected scope (default session →
+    // allow-session), not a literal allow-once — durable grants record to
+    // Store B; allow-once would not, so it must not be the primary action.
     fireEvent.keyDown(denyBtn!, { key: "a", code: "KeyA" });
-    expect(onDecide).toHaveBeenCalledWith("allow-once", undefined);
+    expect(onDecide).toHaveBeenCalledWith("allow-session", undefined);
 
     onDecide.mockClear();
     fireEvent.keyDown(denyBtn!, { key: "d", code: "KeyD" });
@@ -414,9 +414,11 @@ describe("ApprovalDialog", () => {
     expect(approve!.disabled).toBe(false);
     fireEvent.click(approve!);
 
-    await waitFor(() => expect(onDecide).toHaveBeenCalledWith("allow-once", undefined));
+    // HIGH forces session scope → durable allow-session grant (records).
+    await waitFor(() => expect(onDecide).toHaveBeenCalledWith("allow-session", undefined));
     expect(window.lvis.userApproval.record).toHaveBeenCalledWith(
       expect.objectContaining({
+        scope: "session",
         nlJustification: "사용자 요청에 따라 프로젝트 빌드 결과를 확인합니다.",
       }),
     );
@@ -456,9 +458,11 @@ describe("ApprovalDialog", () => {
     });
     fireEvent.click(approve!);
 
-    await waitFor(() => expect(onDecide).toHaveBeenCalledWith("allow-once", undefined));
+    // HIGH forces session scope → durable allow-session grant (records).
+    await waitFor(() => expect(onDecide).toHaveBeenCalledWith("allow-session", undefined));
     expect(window.lvis.userApproval.record).toHaveBeenCalledWith(
       expect.objectContaining({
+        scope: "session",
         nlJustification: "사용자 요청에 따라 로컬 빌드 로그를 확인합니다.",
       }),
     );
@@ -509,9 +513,7 @@ describe("ApprovalDialog", () => {
     await waitFor(() => {
       expect(document.body.textContent).toContain("read_file");
     });
-    const allowBtn = Array.from(document.body.querySelectorAll("button")).find(
-      (b) => b.textContent?.includes("허용"),
-    );
+    const allowBtn = document.body.querySelector<HTMLButtonElement>('[data-testid="approve-button"]');
     expect(allowBtn).toBeTruthy();
     fireEvent.click(allowBtn!);
     await waitFor(() => expect(onDecide).toHaveBeenCalled());
@@ -530,6 +532,76 @@ describe("ApprovalDialog", () => {
     const recordPayload = (window.lvis.userApproval.record as ReturnType<typeof vi.fn>).mock.calls[0]?.[0] as Record<string, unknown>;
     const parsedArgs = JSON.parse(recordPayload.args as string) as unknown;
     expect(parsedArgs !== null && typeof parsedArgs === "object" && !Array.isArray(parsedArgs)).toBe(true);
+  });
+
+  // ── critic MAJOR-1: durable-only recording ─────────────────────────────
+  // Only durable choices (allow-session / allow-always) may write Store B.
+  // The primary "허용" button grants for the scope selected in the radio so
+  // the recorded scope always matches the user's explicit choice — it never
+  // silently records a session grant under an ephemeral "이번만" label.
+
+  it("primary approve records scope=session by default (allow-session)", async () => {
+    const onDecide = vi.fn();
+    render(
+      <ApprovalDialog queue={[makeRequest()]} onDecide={onDecide} />,
+    );
+    await waitFor(() => expect(document.body.textContent).toContain("read_file"));
+    const approve = document.body.querySelector<HTMLButtonElement>('[data-testid="approve-button"]');
+    fireEvent.click(approve!);
+    await waitFor(() => expect(onDecide).toHaveBeenCalledWith("allow-session", undefined));
+    expect(window.lvis.userApproval.record).toHaveBeenCalledWith(
+      expect.objectContaining({ scope: "session" }),
+    );
+  });
+
+  it("primary approve records scope=persistent when the persistent scope radio is selected", async () => {
+    const onDecide = vi.fn();
+    render(
+      <ApprovalDialog queue={[makeRequest()]} onDecide={onDecide} />,
+    );
+    await waitFor(() => expect(document.body.textContent).toContain("read_file"));
+    // Select the "영구 허용" (persistent) scope radio before approving.
+    const persistentRadio = document.body.querySelector<HTMLElement>("#scope-persistent");
+    expect(persistentRadio).toBeTruthy();
+    fireEvent.click(persistentRadio!);
+    const approve = document.body.querySelector<HTMLButtonElement>('[data-testid="approve-button"]');
+    fireEvent.click(approve!);
+    await waitFor(() => expect(onDecide).toHaveBeenCalledWith("allow-always", undefined));
+    expect(window.lvis.userApproval.record).toHaveBeenCalledWith(
+      expect.objectContaining({ scope: "persistent" }),
+    );
+  });
+
+  it("'항상 허용' records a persistent grant", async () => {
+    const onDecide = vi.fn();
+    render(
+      <ApprovalDialog queue={[makeRequest()]} onDecide={onDecide} />,
+    );
+    await waitFor(() => expect(document.body.textContent).toContain("read_file"));
+    const alwaysBtn = Array.from(document.body.querySelectorAll("button")).find(
+      (b) => b.textContent === "항상 허용",
+    );
+    expect(alwaysBtn).toBeTruthy();
+    fireEvent.click(alwaysBtn!);
+    await waitFor(() => expect(onDecide).toHaveBeenCalledWith("allow-always", "read_file"));
+    expect(window.lvis.userApproval.record).toHaveBeenCalledWith(
+      expect.objectContaining({ scope: "persistent" }),
+    );
+  });
+
+  it("deny choices never write Store B (no record IPC)", async () => {
+    const onDecide = vi.fn();
+    render(
+      <ApprovalDialog queue={[makeRequest()]} onDecide={onDecide} />,
+    );
+    await waitFor(() => expect(document.body.textContent).toContain("read_file"));
+    const denyBtn = Array.from(document.body.querySelectorAll("button")).find(
+      (b) => b.textContent === "거부",
+    );
+    expect(denyBtn).toBeTruthy();
+    fireEvent.click(denyBtn!);
+    expect(onDecide.mock.calls[0]?.[0]).toBe("deny-once");
+    expect(window.lvis.userApproval.record).not.toHaveBeenCalled();
   });
 });
 

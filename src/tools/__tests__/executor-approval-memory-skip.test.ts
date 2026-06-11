@@ -270,7 +270,7 @@ describe("ToolExecutor — explicit-approval memory skips the foreground modal (
       return (
         marker != null &&
         typeof marker === "object" &&
-        (marker as { event?: unknown }).event === "legacy-r2-null-verdict"
+        (marker as { event?: unknown }).event === "legacy-null-verdict"
       );
     });
     expect(legacyCall).toBeDefined();
