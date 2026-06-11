@@ -39,9 +39,11 @@ export const en = {
   // Host resolver map (requires relaunch)
   "llmTab.hostResolverMapTitle": "Host Resolver Map",
   "llmTab.hostResolverMapDesc": "Maps private IP addresses to hostnames inside the app (like /etc/hosts). One entry per line: IP hostname. Blank lines and # comments are ignored. Changes require a restart.",
-  "llmTab.hostResolverMapPlaceholder": "10.182.192.174 aif-swc-axpg-hq.cognitiveservices.azure.com\n# one entry per line",
+  "llmTab.hostResolverMapPlaceholder": "10.0.0.10 your-endpoint.example.com\n# one entry per line",
   "llmTab.hostResolverMapLoginDisabled": "Host resolver map is managed by the login session and cannot be edited manually.",
   "llmTab.hostResolverMapApply": "Save and Restart",
+  "llmTab.entryCountSingular": "{count} entry parsed",
+  "llmTab.entryCountPlural": "{count} entries parsed",
   // Relaunch confirm dialog
   "llmTab.relaunchConfirmTitle": "Restart Required",
   "llmTab.relaunchConfirmBody": "Changing the host resolver map requires the app to restart. Unsaved work will be lost. Continue?",
@@ -91,9 +93,11 @@ export const ko: Record<keyof typeof en, string> = {
   // Host resolver map
   "llmTab.hostResolverMapTitle": "호스트 리졸버 맵",
   "llmTab.hostResolverMapDesc": "앱 내부에서 사설 IP를 호스트명에 매핑합니다(/etc/hosts 방식). 한 줄에 하나씩: IP 호스트명. 빈 줄과 # 주석은 무시됩니다. 변경 후 재시작이 필요합니다.",
-  "llmTab.hostResolverMapPlaceholder": "10.182.192.174 aif-swc-axpg-hq.cognitiveservices.azure.com\n# 한 줄에 하나씩 입력",
+  "llmTab.hostResolverMapPlaceholder": "10.0.0.10 your-endpoint.example.com\n# 한 줄에 하나씩 입력",
   "llmTab.hostResolverMapLoginDisabled": "로그인 세션이 호스트 리졸버 맵을 관리하므로 수동 편집이 불가능합니다.",
   "llmTab.hostResolverMapApply": "저장 후 재시작",
+  "llmTab.entryCountSingular": "항목 {count}개 인식됨",
+  "llmTab.entryCountPlural": "항목 {count}개 인식됨",
   // Relaunch confirm dialog
   "llmTab.relaunchConfirmTitle": "재시작 필요",
   "llmTab.relaunchConfirmBody": "호스트 리졸버 맵 변경을 적용하려면 앱을 재시작해야 합니다. 저장하지 않은 작업이 손실될 수 있습니다. 계속하시겠습니까?",

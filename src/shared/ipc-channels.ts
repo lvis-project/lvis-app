@@ -71,6 +71,8 @@ export const PERMISSIONS = {
 
 export const SETTINGS = {
   updated: "lvis:settings:updated",
+  /** Persist the manual host-resolver map then relaunch to apply it. */
+  applyHostMap: "lvis:settings:apply-host-map",
 } as const;
 
 export const UI = {
