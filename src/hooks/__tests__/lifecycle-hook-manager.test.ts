@@ -13,24 +13,16 @@
  * `HookConfigEntry` pointing at a Node command fixture.
  */
 import { describe, expect, it } from "vitest";
-import { execFileSync } from "node:child_process";
 import { resolve } from "node:path";
 import { ScriptHookManager } from "../script-hook-manager.js";
 import type { HookConfigEntry } from "../hook-config.js";
 import type { LifecycleHookEvent } from "../script-hook-types.js";
+import { hasNode } from "./test-helpers.js";
 
 const FIXTURE_ROOT = resolve(__dirname, "..", "..", "..", "test", "fixtures", "hooks");
 const ECHO = resolve(FIXTURE_ROOT, "cmd-lifecycle-echo.js");
 const DENY = resolve(FIXTURE_ROOT, "cmd-lifecycle-deny.js");
 
-function hasNode(): boolean {
-  try {
-    execFileSync("node", ["--version"], { stdio: "ignore" });
-    return true;
-  } catch {
-    return false;
-  }
-}
 const HAS_NODE = hasNode();
 
 function lifecycleEntry(
