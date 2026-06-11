@@ -3,7 +3,9 @@ import type { McpGovernancePolicy } from "../types.js";
 
 /**
  * Build a governance instance whose internal policy is swapped out to the
- * in-memory one we provide. Avoids any filesystem dependency.
+ * in-memory one we provide. Avoids needing a real policy FILE on disk —
+ * `McpGovernance` still probes the path (existsSync/readFileSync) but falls
+ * back to the default policy when it is missing (see below).
  *
  * Constructing with a path that does not exist → default policy is loaded;
  * then we override via the untyped `policy` field. This mirrors how the
