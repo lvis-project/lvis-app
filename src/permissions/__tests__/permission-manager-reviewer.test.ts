@@ -505,7 +505,9 @@ describe("#664 flood guard — degraded rule reviewer does not over-defer headle
         fallbackOnError: "deny",
         interactive: { autoApprove: "low" },
       }),
-      // No streamProviderFor → adapter resolution fails → degrade to rule.
+      // Factory present (boot contract honored) but the user has not
+      // configured an API key → provider unconfigured → degrade to rule.
+      streamProviderFor: () => null,
       verdictCachePath: tmpFile("flood-cache.jsonl"),
       deferredQueuePath: tmpFile("flood-queue.jsonl"),
     });

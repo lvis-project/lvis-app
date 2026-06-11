@@ -281,8 +281,13 @@ export function wireReviewerAgent(deps: WireReviewerDeps): WireReviewerResult {
     try {
       adapter = resolveReviewerAdapter(effectiveSettings.provider, deps);
     } catch (err) {
-      // Provider-resolve failure only: the user-supplied LLM provider/API key
-      // is absent or invalid (external configuration state). Degrade to rule.
+      // Discriminate the two failure classes resolveReviewerAdapter can
+      // throw: only ReviewerProviderUnconfiguredError (user has not
+      // configured the provider/API key — the external boundary) degrades.
+      // A contract violation (boot caller forgot getSecret /
+      // streamProviderFor — a plain Error) is a caller bug and must crash
+      // boot loudly, never silently degrade.
+      if (!(err instanceof ReviewerProviderUnconfiguredError)) throw err;
       degradedToRule = true;
       runtimeMode = "llm-degraded-to-rule";
       log.warn(
@@ -425,10 +430,28 @@ function resolveEffectiveSettings(
 }
 
 /**
+ * Thrown by {@link resolveReviewerAdapter} ONLY when the user has not (yet)
+ * configured the LLM provider/API key — the *external configuration state*
+ * the degrade-to-rule boundary in {@link wireReviewerAgent} is allowed to
+ * catch. Contract violations (boot caller forgot to supply `getSecret` /
+ * `streamProviderFor`) deliberately throw a plain Error instead, so they
+ * propagate as loud boot failures and are never silently degraded.
+ */
+export class ReviewerProviderUnconfiguredError extends Error {
+  constructor(message: string) {
+    super(message);
+    this.name = "ReviewerProviderUnconfiguredError";
+  }
+}
+
+/**
  * Resolve a concrete {@link LlmReviewerProvider} adapter for the configured
- * provider name. Throws with a clear message if the provider cannot be
- * instantiated (missing key, missing factory) — atomic cutover, no silent
- * fallback per CLAUDE.md No-Fallback.
+ * provider name. Two distinct failure classes:
+ *   - {@link ReviewerProviderUnconfiguredError} — the user has not configured
+ *     the provider/API key (external boundary; wiring degrades to rule).
+ *   - plain Error — the boot caller violated the wiring contract (missing
+ *     `getSecret` / `streamProviderFor` dependency); atomic cutover, no
+ *     silent fallback per CLAUDE.md No-Fallback — this must crash boot.
  *
  * `foundry` and `gcp-playground` use direct HTTP adapters keyed from
  * the encrypted secret store via `deps.getSecret`. Other provider strings
@@ -450,7 +473,7 @@ function resolveReviewerAdapter(
       deps.getFoundryEndpoint ?? (() => null),
     );
     if (!adapter) {
-      throw new Error(
+      throw new ReviewerProviderUnconfiguredError(
         `Permission reviewer wiring: provider='foundry' — API key or endpoint not configured. ` +
         `Set the Azure AI Foundry API key ('llm.apiKey.azure-foundry') and endpoint ` +
         `('llm.vendors.azure-foundry.baseUrl') via the chat LLM provider settings, ` +
@@ -469,7 +492,7 @@ function resolveReviewerAdapter(
     }
     const adapter = createGcpPlaygroundProvider(deps.getSecret);
     if (!adapter) {
-      throw new Error(
+      throw new ReviewerProviderUnconfiguredError(
         `Permission reviewer wiring: provider='gcp-playground' — API key not configured. ` +
         `Set the Google Gemini API key ('llm.apiKey.gemini') via the chat LLM provider ` +
         `settings, or change the reviewer provider.`,
@@ -487,7 +510,7 @@ function resolveReviewerAdapter(
   }
   const upstream = deps.streamProviderFor(provider);
   if (!upstream) {
-    throw new Error(
+    throw new ReviewerProviderUnconfiguredError(
       `Permission reviewer wiring: settings.reviewer.provider='${provider}' is not configured. ` +
       `Add an API key for ${provider} or change reviewer mode.`,
     );

@@ -200,14 +200,15 @@ describe("Permission policy P4 reviewer-wiring", () => {
     expect(cacheScope?.vertexLocation).toBe("us-central1");
   });
 
-  it("mode=llm but no streamProviderFor → degrades to rule (fresh install, no boot crash)", () => {
-    // Fresh install: default mode is "llm" but the LLM provider/key is not yet
-    // configured. wireReviewerAgent must NOT throw — it degrades to the rule
-    // classifier and surfaces the degrade discriminant for the UI/boot warn.
+  it("mode=llm but streamProviderFor dependency missing → throws (boot contract violation, no silent degrade)", () => {
+    // Missing streamProviderFor is a boot WIRING bug (production boot always
+    // supplies the factory), not a user configuration state. Degrading here
+    // would silently mask a caller defect — it must crash boot loudly. The
+    // user-unconfigured case (factory present but returns null) is the
+    // degrade test below.
     const pm = new PermissionManager(join(tmpDir, "permissions.json"));
-    let result: ReturnType<typeof wireReviewerAgent>;
-    expect(() => {
-      result = wireReviewerAgent({
+    expect(() =>
+      wireReviewerAgent({
         permissionManager: pm,
         readSettings: () => ({
           mode: "llm",
@@ -218,14 +219,8 @@ describe("Permission policy P4 reviewer-wiring", () => {
         }),
         verdictCachePath: join(tmpDir, "cache-degrade.jsonl"),
         deferredQueuePath: join(tmpDir, "queue-degrade.jsonl"),
-      });
-    }).not.toThrow();
-    expect(result!.classifier).toBeInstanceOf(RuleBasedRiskClassifier);
-    expect(result!.runtimeMode).toBe("llm-degraded-to-rule");
-    // Persisted mode is preserved (still "llm") — only the runtime classifier degrades.
-    expect(result!.appliedSettings.mode).toBe("llm");
-    expect(pm.hasReviewer()).toBe(true);
-    expect(pm.isReviewerDegradedToRule()).toBe(true);
+      }),
+    ).toThrow(/no streamProviderFor supplied/);
   });
 
   it("mode=llm + factory null → degrades to rule (provider unconfigured)", () => {
@@ -599,25 +594,26 @@ describe("Permission policy P4 reviewer-wiring", () => {
 });
 
 describe("Permission policy C3 foundry/gcp wiring paths", () => {
-  it("mode=llm provider=foundry without getSecret → degrades to rule (no boot crash)", () => {
+  it("mode=llm provider=foundry without getSecret → throws (boot contract violation)", () => {
+    // Missing getSecret is a boot wiring bug — production boot always
+    // supplies the secret accessor. Must crash loudly, never degrade.
     const pm = new PermissionManager(join(tmpDir, "permissions.json"));
-    const result = wireReviewerAgent({
-      permissionManager: pm,
-      readSettings: () => ({
-        mode: "llm",
-        provider: "foundry",
-        model: "gpt-4o",
-        fallbackOnError: "deny",
-        interactive: { autoApprove: "off" },
+    expect(() =>
+      wireReviewerAgent({
+        permissionManager: pm,
+        readSettings: () => ({
+          mode: "llm",
+          provider: "foundry",
+          model: "gpt-4o",
+          fallbackOnError: "deny",
+          interactive: { autoApprove: "off" },
+        }),
+        // getSecret intentionally omitted — contract violation
+        getFoundryEndpoint: () => "https://proj.services.ai.azure.com",
+        verdictCachePath: join(tmpDir, "cache-foundry-nosecret.jsonl"),
+        deferredQueuePath: join(tmpDir, "queue-foundry-nosecret.jsonl"),
       }),
-      // getSecret intentionally omitted
-      getFoundryEndpoint: () => "https://proj.services.ai.azure.com",
-      verdictCachePath: join(tmpDir, "cache-foundry-nosecret.jsonl"),
-      deferredQueuePath: join(tmpDir, "queue-foundry-nosecret.jsonl"),
-    });
-    expect(result.classifier).toBeInstanceOf(RuleBasedRiskClassifier);
-    expect(result.runtimeMode).toBe("llm-degraded-to-rule");
-    expect(pm.isReviewerDegradedToRule()).toBe(true);
+    ).toThrow(/requires getSecret/);
   });
 
   it("mode=llm provider=foundry with getSecret returning null → degrades to rule", () => {
@@ -664,24 +660,24 @@ describe("Permission policy C3 foundry/gcp wiring paths", () => {
     expect(pm.hasReviewer()).toBe(true);
   });
 
-  it("mode=llm provider=gcp-playground without getSecret → degrades to rule (no boot crash)", () => {
+  it("mode=llm provider=gcp-playground without getSecret → throws (boot contract violation)", () => {
+    // Missing getSecret is a boot wiring bug — must crash loudly, never degrade.
     const pm = new PermissionManager(join(tmpDir, "permissions.json"));
-    const result = wireReviewerAgent({
-      permissionManager: pm,
-      readSettings: () => ({
-        mode: "llm",
-        provider: "gcp-playground",
-        model: "gemini-1.5-flash",
-        fallbackOnError: "deny",
-        interactive: { autoApprove: "off" },
+    expect(() =>
+      wireReviewerAgent({
+        permissionManager: pm,
+        readSettings: () => ({
+          mode: "llm",
+          provider: "gcp-playground",
+          model: "gemini-1.5-flash",
+          fallbackOnError: "deny",
+          interactive: { autoApprove: "off" },
+        }),
+        // getSecret intentionally omitted — contract violation
+        verdictCachePath: join(tmpDir, "cache-gcp-nosecret.jsonl"),
+        deferredQueuePath: join(tmpDir, "queue-gcp-nosecret.jsonl"),
       }),
-      // getSecret intentionally omitted
-      verdictCachePath: join(tmpDir, "cache-gcp-nosecret.jsonl"),
-      deferredQueuePath: join(tmpDir, "queue-gcp-nosecret.jsonl"),
-    });
-    expect(result.classifier).toBeInstanceOf(RuleBasedRiskClassifier);
-    expect(result.runtimeMode).toBe("llm-degraded-to-rule");
-    expect(pm.isReviewerDegradedToRule()).toBe(true);
+    ).toThrow(/requires getSecret/);
   });
 
   it("mode=llm provider=gcp-playground with getSecret returning null → degrades to rule", () => {
