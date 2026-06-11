@@ -102,8 +102,8 @@ export interface OnboardingMemorySeed {
  * boot probe sent a returning user / demo-relaunched session straight to
  * `done` without ever showing the tour. Downstream UI that should only
  * appear *after a real tour* (e.g. the post-tour first-task proposal) must
- * distinguish the two — `stage === "done"` alone cannot. `null` until the
- * chain reaches `done`.
+ * distinguish the two — `stage === "done"` alone cannot. Absent
+ * (`undefined`) until the chain reaches `done`.
  */
 export type OnboardingCompletionReason = "chain" | "probe-skip";
 
@@ -244,12 +244,15 @@ export function onboardingChainReducer(
   }
   let selectedScenarioId = state.selectedScenarioId;
   let memorySeed = state.memorySeed;
-  // Record *why* we reached `done`. Only set when the stage actually
-  // transitions to `done` so an out-of-order event (no-op stage) can't
-  // mislabel the reason. `plugins-close` = full funnel (tour shown);
-  // `probe-skip` = returning user / demo relaunch (tour never shown).
+  // Record *why* we reached `done`, ONLY on the actual transition into
+  // `done` from a non-`done` stage. Guarding on the transition (not just
+  // `stage === "done"`) prevents a late / duplicate `probe-skip` arriving
+  // while already in `done` from overwriting a correct `"chain"` reason —
+  // which would wrongly hide the post-tour UI for users who finished the
+  // full funnel. `plugins-close` = full funnel (tour shown); `probe-skip`
+  // = returning user / demo relaunch (tour never shown).
   let completionReason = state.completionReason;
-  if (stage === "done") {
+  if (stage === "done" && state.stage !== "done") {
     if (event.type === "plugins-close") completionReason = "chain";
     else if (event.type === "probe-skip") completionReason = "probe-skip";
   }
