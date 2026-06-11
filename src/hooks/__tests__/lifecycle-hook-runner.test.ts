@@ -7,22 +7,14 @@
  * secrets (design §6.2 — env allowlist unchanged).
  */
 import { describe, expect, it } from "vitest";
-import { execFileSync } from "node:child_process";
 import { resolve } from "node:path";
 import { runOneHookScript, type RunnableHook } from "../script-hook-runner.js";
 import type { LifecycleHookStdin } from "../script-hook-types.js";
+import { hasNode } from "./test-helpers.js";
 
 const FIXTURE_ROOT = resolve(__dirname, "..", "..", "..", "test", "fixtures", "hooks");
 const ENV_FIXTURE = resolve(FIXTURE_ROOT, "cmd-lifecycle-env.js");
 
-function hasNode(): boolean {
-  try {
-    execFileSync("node", ["--version"], { stdio: "ignore" });
-    return true;
-  } catch {
-    return false;
-  }
-}
 const HAS_NODE = hasNode();
 
 function lifecycleRunnable(command: string[]): RunnableHook {
