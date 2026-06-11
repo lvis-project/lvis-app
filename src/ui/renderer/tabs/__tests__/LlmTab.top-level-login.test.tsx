@@ -304,6 +304,49 @@ describe("LlmTab — top-level login toggle UI", () => {
     }
   });
 
+  // (2b) The IPC handler signals failure by RESOLVING { ok: false } (e.g.
+  // authMode-not-manual, invalid payload, or an unauthorized frame) rather
+  // than throwing. The dialog must behave identically to the thrown case:
+  // stay open with the inline error and release relaunchPending — never
+  // proceed as if the relaunch succeeded.
+  it("keeps the relaunch dialog open when applyHostMap resolves { ok: false }", async () => {
+    const api = llmTabApi();
+    vi.spyOn(
+      api as unknown as {
+        applyHostMap: (
+          v: string,
+        ) => Promise<{ ok: boolean; error?: string; message?: string }>;
+      },
+      "applyHostMap",
+    ).mockResolvedValue({ ok: false, error: "auth-mode-not-manual", message: "locked" });
+
+    const { getByTestId, queryByTestId } = render(
+      <Harness
+        initialAuthMode="manual"
+        initialHostResolverMap={"10.0.0.10 changed.example.com"}
+        loadedHostResolverMap={"10.0.0.10 endpoint.example.com"}
+        api={api}
+      />,
+    );
+
+    fireEvent.click(getByTestId("llm-tab:apply-host-map"));
+    await act(async () => {
+      fireEvent.click(getByTestId("llm-tab:relaunch-confirm"));
+    });
+    await act(async () => {
+      await Promise.resolve();
+    });
+
+    // Dialog still open with inline error; the relaunch never proceeded.
+    expect(queryByTestId("llm-tab:relaunch-confirm")).not.toBeNull();
+    const error = queryByTestId("llm-tab:relaunch-error");
+    expect(error).not.toBeNull();
+    expect(error?.getAttribute("role")).toBe("alert");
+    // Confirm button re-enabled so the user can retry.
+    const confirm = getByTestId("llm-tab:relaunch-confirm") as HTMLButtonElement;
+    expect(confirm.disabled).toBe(false);
+  });
+
   // (3) Pre-hydration the parent passes vendor="" / settingsLoaded=false. The
   // API-key label must not flash the stale first-vendor name (VENDORS[0]).
   it("does not render a stale vendor label before hydration (vendor='')", () => {

@@ -290,7 +290,9 @@ export type LvisApi = {
   getSettings: () => Promise<AppSettings>;
   updateSettings: (patch: DeepPartial<AppSettings>) => Promise<SettingsUpdateResult>;
   /** Save the manual host-resolver map and relaunch the app to apply it. */
-  applyHostMap: (hostResolverMap: string) => Promise<{ ok: boolean }>;
+  applyHostMap: (
+    hostResolverMap: string,
+  ) => Promise<{ ok: boolean; error?: string; message?: string }>;
   onSettingsUpdated: (handler: (settings: AppSettings) => void) => () => void;
   listPersonaPromptSummaries: () => Promise<{ prompts: Array<Pick<RolePreset, "id" | "name">> }>;
   listPersonaPrompts: () => Promise<{ prompts: RolePreset[] }>;
