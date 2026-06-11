@@ -272,5 +272,15 @@ export function onboardingChainReducer(
         introduction.length > 0 ? introduction : memorySeed.introduction,
     };
   }
-  return { stage, selectedScenarioId, memorySeed, completionReason };
+  // Only attach `completionReason` once it has a concrete value. Spreading
+  // `{ completionReason: undefined }` for in-progress stages would change the
+  // runtime object shape — `toEqual({...})` assertions and `"completionReason"
+  // in state` checks treat a present-but-undefined key differently from an
+  // absent one — so the key stays absent until the transition into `done`.
+  return {
+    stage,
+    selectedScenarioId,
+    memorySeed,
+    ...(completionReason !== undefined ? { completionReason } : {}),
+  };
 }
