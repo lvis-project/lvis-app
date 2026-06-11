@@ -161,13 +161,16 @@ export function App() {
   // `lvis:auth:reactivate-demo` broadcast 가 도착하면 true 로 flip 되고,
   // LoginModal 이 close 되면 false 로 reset.
   const [reactivationOpen, setReactivationOpen] = useState(false);
-  // Z chain — `tourCompleted` is derived from the chain reducer. The
-  // PostTourFirstTask still receives a boolean prop so its existing
-  // contract is unchanged; downstream consumers see `true` only after
-  // the SpotlightTour reaches its last step (mapped to chain stage
-  // "plugins" or beyond).
+  // Z chain — `tourCompleted` gates the PostTourFirstTask proposal. It is
+  // true ONLY once the user finished the full funnel (PluginShowcase closed
+  // → `done` via `plugins-close`, recorded as completionReason "chain").
+  // Two cases that previously leaked the card are now excluded:
+  //   - `plugins` stage — PluginShowcase's own Dialog is still open, so a
+  //     z-9000 card would overlay it.
+  //   - `done` reached via `probe-skip` (returning user / demo relaunch) —
+  //     the tour was never shown, so a "post-tour" proposal is wrong.
   const tourCompleted =
-    chainStage === "plugins" || chainStage === "done";
+    chainStage === "done" && chainState.completionReason === "chain";
   const [activeView, setActiveView] = useState("home");
   const [commandPopoverOpen, setCommandPopoverOpen] = useState(false);
   const [devToolsOpen, setDevToolsOpen] = useState(false);
