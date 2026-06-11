@@ -1587,7 +1587,7 @@ export function App() {
         open={chainStage === "personalized_welcome"}
         nickname={memorySeedNickname}
         introduction={memorySeedIntroduction}
-        api={{ pingAiProvider: api.pingAiProvider }}
+        pingAiProvider={api.pingAiProvider}
         onContinue={() =>
           dispatchChain({ type: "personalized-welcome-accept" })
         }
