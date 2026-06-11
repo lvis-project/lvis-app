@@ -119,6 +119,22 @@ describe("parseHostResolverMap", () => {
     expect(parseHostResolverMap("10.1.2.3 host_under!score")).toEqual([]);
   });
 
+  it("rejects a bare dot and empty labels (RFC 1123)", () => {
+    expect(parseHostResolverMap("10.1.2.3 .")).toEqual([]);
+    expect(parseHostResolverMap("10.1.2.3 a..b")).toEqual([]);
+  });
+
+  it("rejects labels starting or ending with a hyphen (RFC 1123)", () => {
+    expect(parseHostResolverMap("10.1.2.3 -host.example.com")).toEqual([]);
+    expect(parseHostResolverMap("10.1.2.3 host-.example.com")).toEqual([]);
+  });
+
+  it("accepts a hyphenated label that does not start/end with a hyphen", () => {
+    expect(parseHostResolverMap("10.1.2.3 my-host.example.com")).toEqual([
+      { hostname: "my-host.example.com", ip: "10.1.2.3" },
+    ]);
+  });
+
   it("accepts a public endpoint (manual mode is intentionally unrestricted)", () => {
     // Manual mode is a power-user surface — no RFC1918 confinement. A public
     // IP/hostname pair is a valid mapping.
