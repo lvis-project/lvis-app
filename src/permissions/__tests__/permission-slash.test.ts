@@ -1,10 +1,11 @@
-import { describe, it, expect } from "vitest";
-import { mkdtempSync, readFileSync, writeFileSync } from "node:fs";
+import { describe, it, expect, vi } from "vitest";
+import { mkdtempSync, mkdirSync, readFileSync, writeFileSync, chmodSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import {
   parsePermissionDirCommand,
   dispatchPermissionDirCommand,
+  dispatchPermissionHooksCommand,
 } from "../permission-slash.js";
 import {
   readPermissionSettings,
@@ -277,5 +278,93 @@ describe("writePermissionSettings — alias is dropped on write", () => {
     expect(raw.permissions.allowedDirectories).toBeUndefined();
     expect(raw.permissions.additionalDirectories).toEqual(["/new"]);
     expect(raw.permissions.someOtherKey).toBe(42);
+  });
+});
+
+/**
+ * FU2 — slash `/permission hooks accept|disable|reject` must broadcast
+ * `broadcastPermissionConfigChanged` so the renderer PermissionsTab quarantine
+ * banner live-refreshes (parity with the IPC hook-trust handlers in
+ * `ipc/domains/permissions.ts`). `list` is a read-only no-op and must NOT
+ * broadcast; failed commands must NOT broadcast.
+ *
+ * The broadcast decision in `conversation-loop.ts` is gated purely on the
+ * `dispatchPermissionHooksCommand` result shape (`result.ok` +
+ * `result.verb !== "list"`). This suite drives the real dispatcher against a
+ * temp hook fixture and asserts that exact predicate so a regression in the
+ * dispatcher's discriminator is caught here.
+ */
+describe("dispatchPermissionHooksCommand — renderer broadcast gating (FU2)", () => {
+  function hooksFixture() {
+    const tmpDir = mkdtempSync(join(tmpdir(), "lvis-hook-trust-bcast-"));
+    const hooksDir = join(tmpDir, "hooks");
+    const disabledDir = join(hooksDir, ".disabled");
+    const lockfilePath = join(hooksDir, ".lockfile.json");
+    mkdirSync(disabledDir, { recursive: true });
+    return { hooksDir, disabledDir, lockfilePath };
+  }
+
+  function quarantineHook(disabledDir: string, fileName: string): void {
+    const p = join(disabledDir, fileName);
+    writeFileSync(p, "#!/bin/sh\necho '{\"action\":\"deny\",\"reason\":\"x\"}'");
+    chmodSync(p, 0o755);
+  }
+
+  /**
+   * Mirrors the conversation-loop gate exactly: broadcast iff the command
+   * succeeded AND mutated trust state (accept/disable/reject), never on `list`.
+   */
+  function maybeBroadcast(
+    result: Awaited<ReturnType<typeof dispatchPermissionHooksCommand>>,
+    broadcast: () => void,
+  ): void {
+    if (!result.ok) return;
+    if (result.verb === "list") return;
+    broadcast();
+  }
+
+  it("broadcasts on a successful 'accept' (trust-state mutation)", async () => {
+    const opts = hooksFixture();
+    quarantineHook(opts.disabledDir, "perm-policy.sh");
+    const broadcast = vi.fn();
+
+    const result = await dispatchPermissionHooksCommand(
+      { verb: "hooks", sub: "accept", name: "perm-policy.sh" },
+      opts,
+    );
+
+    expect(result).toMatchObject({ ok: true, verb: "accept" });
+    maybeBroadcast(result, broadcast);
+    expect(broadcast).toHaveBeenCalledTimes(1);
+  });
+
+  it("does NOT broadcast on 'list' (read-only no-op)", async () => {
+    const opts = hooksFixture();
+    quarantineHook(opts.disabledDir, "perm-policy.sh");
+    const broadcast = vi.fn();
+
+    const result = await dispatchPermissionHooksCommand(
+      { verb: "hooks", sub: "list" },
+      opts,
+    );
+
+    expect(result).toMatchObject({ ok: true, verb: "list" });
+    maybeBroadcast(result, broadcast);
+    expect(broadcast).not.toHaveBeenCalled();
+  });
+
+  it("does NOT broadcast on a failed command (no-op mutation)", async () => {
+    const opts = hooksFixture();
+    const broadcast = vi.fn();
+
+    // No such quarantined hook → accept fails.
+    const result = await dispatchPermissionHooksCommand(
+      { verb: "hooks", sub: "accept", name: "perm-missing.sh" },
+      opts,
+    );
+
+    expect(result.ok).toBe(false);
+    maybeBroadcast(result, broadcast);
+    expect(broadcast).not.toHaveBeenCalled();
   });
 });

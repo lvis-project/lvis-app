@@ -243,8 +243,10 @@ export interface PluginRuntimeOptions {
    * removed; without it the ToolRegistry stays empty and every chat-surface
    * tool call reports `도구를 찾을 수 없습니다: <tool>` until the next
    * install / uninstall event. The boot path's initial `startAll` is NOT
-   * covered here — `registerPluginTools(...)` at the end of boot owns that
-   * one-shot registration. See `architecture.md §9.3a`.
+   * covered here — boot registration now flows through PluginLoopbackManager
+   * (each plugin runs as an in-process MCP server), wired in
+   * `boot/steps/plugin-runtime.ts`, which owns that one-shot registration.
+   * See `architecture.md §9.3a`.
    */
   onEnable?: (pluginId: string) => void;
   /**
@@ -863,9 +865,11 @@ export class PluginRuntime {
     // Symmetric to the per-plugin onDisable fan-out above: fire onEnable for
     // each plugin that survived the restart so the host's ToolRegistry sync
     // (wired in boot/steps/plugin-runtime.ts) runs without callers having to
-    // remember a follow-up `syncPluginToolRegistry`. Initial boot's `startAll`
-    // is the only path that intentionally bypasses onEnable — `registerPluginTools`
-    // owns that one-shot. See architecture.md §9.3a.
+    // remember a follow-up sync. Initial boot's `startAll` is the only path
+    // that intentionally bypasses onEnable — registration there flows through
+    // PluginLoopbackManager (each plugin runs as an in-process MCP server),
+    // wired in boot/steps/plugin-runtime.ts, which owns that one-shot.
+    // See architecture.md §9.3a.
     if (this.onEnable) {
       for (const pluginId of this.plugins.keys()) {
         this.onEnable(pluginId);
@@ -1332,8 +1336,10 @@ export class PluginRuntime {
   /**
    * Per-plugin instantiation + start. Used by `addPlugin` for post-boot
    * fresh-load installs. Boot's `startAll` intentionally bypasses this path
-   * — it runs its own inline start loop and lets `registerPluginTools` own
-   * the one-shot ToolRegistry population (see §9.3a). This method fires
+   * — it runs its own inline start loop and lets registration flow through
+   * PluginLoopbackManager (each plugin runs as an in-process MCP server),
+   * wired in boot/steps/plugin-runtime.ts, which owns the one-shot
+   * ToolRegistry population (see §9.3a). This method fires
    * `onEnable` on the start-success branch so post-boot installs converge
    * the host's transient state automatically.
    */

@@ -53,30 +53,48 @@ const log = createLogger("mcp-client");
 
 // ─── JSON-RPC 2.0 Types ──────────────────────────────
 
-interface JsonRpcRequest {
+export interface JsonRpcRequest {
   jsonrpc: "2.0";
   id: number;
   method: string;
   params?: Record<string, unknown>;
 }
 
-interface JsonRpcNotification {
+export interface JsonRpcNotification {
   jsonrpc: "2.0";
   method: string;
   params?: Record<string, unknown>;
 }
 
-interface JsonRpcResponse {
+export interface JsonRpcResponse {
   jsonrpc: "2.0";
   id: number;
   result?: unknown;
   error?: { code: number; message: string; data?: unknown };
 }
 
-type JsonRpcMessage = JsonRpcRequest | JsonRpcNotification | JsonRpcResponse;
+export type JsonRpcMessage = JsonRpcRequest | JsonRpcNotification | JsonRpcResponse;
 
 // ─── MCP Protocol Types ──────────────────────────────
 
+/**
+ * A JSON-RPC error returned by the server, carrying the numeric `code` so the
+ * connect path can detect `-32601` (method-not-found → dual-era fallback) and
+ * `callTool` can map `-32003`/`-32004` (design §8). The base runner previously
+ * collapsed these to a plain `Error`, losing the code.
+ */
+class McpRpcError extends Error {
+  constructor(
+    readonly code: number,
+    message: string,
+    readonly data?: unknown,
+  ) {
+    super(message);
+    this.name = "McpRpcError";
+  }
+}
+
+/** Legacy `initialize` result — used ONLY on the dual-era external fallback. */
 interface McpInitializeResult {
   protocolVersion: string;
   capabilities: {
@@ -90,13 +108,73 @@ interface McpInitializeResult {
   };
 }
 
+/**
+ * `server/discover` result (RC). `DiscoverResult extends CacheableResult`, so
+ * `resultType`/`ttlMs`/`cacheScope` are required on the wire; we read only what
+ * this slice needs (`supportedVersions`/`capabilities`/`serverInfo`).
+ */
+interface McpDiscoverResult {
+  resultType?: string;
+  ttlMs?: number;
+  cacheScope?: "public" | "private";
+  supportedVersions: string[];
+  capabilities: {
+    tools?: Record<string, unknown>;
+    resources?: Record<string, unknown>;
+    prompts?: Record<string, unknown>;
+    completions?: Record<string, unknown>;
+    experimental?: Record<string, unknown>;
+    extensions?: Record<string, unknown>;
+  };
+  serverInfo: {
+    name: string;
+    version: string;
+    title?: string;
+  };
+  instructions?: string;
+}
+
+/** The host's per-request client capabilities (advertised in `_meta`). */
+export interface McpClientCapabilities {
+  elicitation?: { form?: Record<string, never>; url?: Record<string, never> };
+  experimental?: Record<string, unknown>;
+  extensions?: Record<string, unknown>;
+}
+
+/**
+ * Derives the host's client capabilities for a SINGLE outbound request
+ * (milestone `governance-per-request`, design §3.6). Per-request — not connect-
+ * time — because what the host can offer varies with the active turn: an
+ * interactive turn can elicit (advertise `elicitation`); a headless/routine turn
+ * cannot (advertise none, so a server requiring it gets a clean `-32003` instead
+ * of a hung approval). The exact deriving signals (turn consent state,
+ * headless/routine mode, #811 policy) are wired by the host; omitted ⇒ a fixed
+ * sound default. This is the client-side half of per-request governance; the
+ * per-request server-capability GATING half lands with the cluster-reviewed
+ * governance change.
+ */
+export type McpClientCapabilityProvider = () => McpClientCapabilities;
+
 interface McpToolsListResult {
   tools: McpToolSchema[];
 }
 
 interface McpToolCallResult {
+  /**
+   * RC result discriminator (§8): "complete" | "input_required" | "task" (the
+   * last is Tasks-extension only). Absent ⇒ treat as "complete" (legacy/dual-era).
+   */
+  resultType?: string;
   content: Array<{ type: string; text?: string; [key: string]: unknown }>;
   isError?: boolean;
+  /**
+   * MRTR (§8 `InputRequiredResult`) — present only when `resultType ===
+   * "input_required"`. `inputRequests` maps an opaque id → the server's request
+   * (an `Elicit` / `CreateMessage` / `ListRoots`); `requestState` is opaque and
+   * MUST be echoed verbatim on the retry. ≥1 of the two is present.
+   */
+  inputRequests?: Record<string, Record<string, unknown>>;
+  requestState?: string;
   /** MCP Apps spec §3.2 — optional UI extension metadata. */
   _meta?: {
     ui?: {
@@ -109,16 +187,84 @@ interface McpToolCallResult {
   };
 }
 
+/**
+ * Resolves ONE MRTR `inputRequest` (§8). The host wires this to its capability
+ * surfaces — elicitation → the approval-gate modal, sampling → the host LLM —
+ * and returns the response value placed under `inputResponses[id]` on retry. The
+ * client owns the LOOP (detect / gather / echo `requestState` / retry / bound);
+ * the resolver owns WHAT each request means. Absent ⇒ the client cannot satisfy
+ * `input_required` and fails with a typed error (No-Fallback).
+ */
+export type McpInputRequestResolver = (
+  id: string,
+  request: Record<string, unknown>,
+) => Promise<unknown>;
+
+/** §8 Tasks extension — task lifecycle status (`experimental-ext-tasks`). */
+type McpTaskStatus = "working" | "input_required" | "completed" | "failed" | "cancelled";
+
+/**
+ * The task fields a `CreateTaskResult` (`= Result & Task`, §8) carries inline.
+ * Read defensively off the result (the extension versions independently of the
+ * core RC; its exact result-retrieval shape is re-verified when the
+ * `experimental-ext-tasks` draft is pinned — design §6).
+ */
+interface McpTaskState {
+  taskId: string;
+  status: McpTaskStatus;
+  ttlMs?: number | null;
+  pollIntervalMs?: number;
+}
+
 // ─── Constants ────────────────────────────────────────
 
 import { TOOL_TIMEOUT_POLICY } from "../shared/tool-timeout-policy.js";
 
-const MCP_PROTOCOL_VERSION = "2024-11-05";
+// #1230 — pre-adopt the MCP 2026-07-28 stateless Release Candidate
+// (docs/architecture/mcp-alignment-design.md §8). LVIS speaks RC by default:
+// no initialize handshake, per-request `_meta` capability negotiation,
+// `server/discover` for capabilities. MCP_LEGACY_PROTOCOL_VERSION is used ONLY
+// by the documented dual-era exception (design §0) when an EXTERNAL server does
+// not implement `server/discover` (a pre-RC server). LVIS's own plugins are
+// always RC, so that fallback never runs for first-party plugins.
+const MCP_PROTOCOL_VERSION = "2026-07-28";
+const MCP_LEGACY_PROTOCOL_VERSION = "2024-11-05";
+
+// Reserved per-request `_meta` keys (verified verbatim vs the upstream MCP
+// schema/draft/schema.ts — design §8).
+const META_PROTOCOL_VERSION = "io.modelcontextprotocol/protocolVersion";
+const META_CLIENT_INFO = "io.modelcontextprotocol/clientInfo";
+const META_CLIENT_CAPABILITIES = "io.modelcontextprotocol/clientCapabilities";
+
+// JSON-RPC / MCP error codes (verified §8).
+const RPC_METHOD_NOT_FOUND = -32601;
+const RPC_MISSING_REQUIRED_CLIENT_CAPABILITY = -32003;
+const RPC_UNSUPPORTED_PROTOCOL_VERSION = -32004;
+
+const CLIENT_INFO = { name: "lvis-app", version: "0.1.0" } as const;
+
+/** MCP Apps extension key (§8 `io.modelcontextprotocol/ui`, 2026-01-26 snapshot). */
+const MCP_APPS_UI_EXTENSION = "io.modelcontextprotocol/ui";
+
 const DEFAULT_REQUEST_TIMEOUT_MS = TOOL_TIMEOUT_POLICY.mcpRequestDefaultMs;
 const MAX_REQUEST_TIMEOUT_MS = TOOL_TIMEOUT_POLICY.mcpRequestMaxMs;
-const HANDSHAKE_TIMEOUT_MS = 10_000; // initialize / tools/list 핸드셰이크용
+const HANDSHAKE_TIMEOUT_MS = 10_000; // discover / initialize / tools/list 핸드셰이크용
 const HEALTH_CHECK_INTERVAL_MS = 30_000;
 const MAX_BUFFERED_RESPONSES = 128;
+/**
+ * MRTR runaway guard (§8): a server that returns `input_required` forever would
+ * loop the client indefinitely. Bound the rounds; exceeding it is a typed error.
+ */
+const MAX_MRTR_ROUNDS = 8;
+/**
+ * Tasks extension (§8) polling bounds. The synchronous `callTool` await is
+ * capped by the per-call `timeoutMs` (already clamped to the 120s tool ceiling);
+ * these bound the poll cadence within that window. Truly fire-and-forget tasks
+ * beyond the ceiling are a separate background-tracking UX, not this path.
+ */
+const DEFAULT_TASK_POLL_INTERVAL_MS = 1_000;
+const MIN_TASK_POLL_INTERVAL_MS = 50;
+const MAX_TASK_POLLS = 600;
 
 // ─── Transport Strategy ──────────────────────────────
 
@@ -129,8 +275,8 @@ const MAX_BUFFERED_RESPONSES = 128;
  * - `close` must resolve all pending requests as rejected.
  * - `isAlive` lets the health check poll without caring about the transport.
  */
-interface McpTransport {
-  readonly kind: "stdio" | "http";
+export interface McpTransport {
+  readonly kind: "stdio" | "http" | "loopback";
   open(): Promise<void>;
   send(message: JsonRpcMessage): Promise<void>;
   close(): Promise<void>;
@@ -169,6 +315,21 @@ export class McpClient {
   private readonly bufferedResponses = new Map<number, JsonRpcResponse>();
   private healthTimer: NodeJS.Timeout | null = null;
   private transport: McpTransport | null = null;
+  /**
+   * Protocol era resolved at connect: "rc" (2026-07-28 stateless, per-request
+   * `_meta`) or "legacy" (the documented dual-era exception for an EXTERNAL
+   * pre-RC server). Defaults to "rc" so the initial `server/discover` probe
+   * carries the RC `_meta`; flips to "legacy" only when that probe 404s.
+   */
+  private mode: "rc" | "legacy" = "rc";
+  /**
+   * Whether the server ADVERTISED the MCP Apps extension (`io.modelcontextprotocol/ui`)
+   * in `server/discover`. The host honors a tool result's `_meta.ui` only when
+   * this is true — a server that did not declare Apps cannot smuggle a UI surface
+   * (the §3.7 "permission enforcement per `_meta.ui`" gate; the renderer CSP is
+   * the second layer). Legacy (dual-era) servers never advertise Apps.
+   */
+  private appsUiAdvertised = false;
 
   readonly state: McpServerState;
 
@@ -177,6 +338,28 @@ export class McpClient {
     private readonly governance: McpGovernance,
     private readonly toolRegistry: ToolRegistry,
     private readonly permissionManager?: PermissionManager,
+    /**
+     * Optional pre-built transport. When provided, `connect()` uses it instead
+     * of constructing a stdio/HTTP transport from `config`. This is the seam an
+     * in-process first-party plugin uses to bind a {@link McpTransport} straight
+     * to its {@link PluginMcpServer} loopback (design §3.1 hybrid topology); the
+     * external stdio/HTTP path is unchanged when it is omitted.
+     */
+    private readonly transportOverride?: McpTransport,
+    /**
+     * Optional MRTR resolver (milestone `mrtr-input-loop`). When a `tools/call`
+     * returns `input_required`, each `inputRequest` is resolved through this and
+     * the responses are echoed back on retry. Omitted ⇒ the client fails closed
+     * on `input_required` (No-Fallback — it never fabricates a response).
+     */
+    private readonly inputResolver?: McpInputRequestResolver,
+    /**
+     * Optional per-request client-capability provider (milestone
+     * `governance-per-request`). Called on EVERY outbound request so the
+     * advertised capabilities track the active turn. Omitted ⇒ a fixed sound
+     * default (elicitation form+url).
+     */
+    private readonly capabilityProvider?: McpClientCapabilityProvider,
   ) {
     this.state = {
       id: config.id,
@@ -206,9 +389,10 @@ export class McpClient {
     this.state.status = "connecting";
 
     try {
-      this.transport = this.config.transport === "stdio"
-        ? new StdioTransport(this.config as McpStdioServerConfig)
-        : new HttpTransport(this.config as McpHttpServerConfig);
+      this.transport = this.transportOverride
+        ?? (this.config.transport === "stdio"
+          ? new StdioTransport(this.config as McpStdioServerConfig)
+          : new HttpTransport(this.config as McpHttpServerConfig));
 
       this.transport.onMessage((msg) => this.handleResponse(msg));
       this.transport.onClose((reason) => this.handleTransportClose(reason));
@@ -218,22 +402,61 @@ export class McpClient {
 
       await this.transport.open();
 
-      // 핸드셰이크: initialize
-      const initResult = await this.sendRequest<McpInitializeResult>("initialize", {
-        protocolVersion: MCP_PROTOCOL_VERSION,
-        capabilities: {},
-        clientInfo: { name: "lvis-app", version: "0.1.0" },
-      }, HANDSHAKE_TIMEOUT_MS);
+      // RC handshake (#1230, design §3.6): stateless — no `initialize`. Probe
+      // `server/discover` (which carries the per-request RC `_meta`) to read the
+      // server's capabilities. The probe runs in the default "rc" mode so the
+      // `_meta` is stamped.
+      try {
+        const discover = await this.sendRequest<McpDiscoverResult>(
+          "server/discover",
+          {},
+          HANDSHAKE_TIMEOUT_MS,
+        );
+        this.mode = "rc";
+        // §3.7 MCP Apps permission gate — only honor `_meta.ui` from a server
+        // that DECLARED the ui extension at discovery.
+        this.appsUiAdvertised =
+          discover.capabilities?.extensions?.[MCP_APPS_UI_EXTENSION] !== undefined;
+        log.info(
+          {
+            protocol: MCP_PROTOCOL_VERSION,
+            supportedVersions: discover.supportedVersions,
+            server: `${discover.serverInfo.name}@${discover.serverInfo.version}`,
+            apps: this.appsUiAdvertised,
+          },
+          `${this.config.id} RC discover 완료`,
+        );
+      } catch (err) {
+        // Documented dual-era exception (design §0): an EXTERNAL pre-RC server
+        // does not implement `server/discover` and answers `-32601`. Fall back
+        // to the legacy `initialize` handshake. ANY other error is a real
+        // failure and propagates. LVIS's own plugins are always RC, so this
+        // never runs for first-party plugins.
+        if (!(err instanceof McpRpcError) || err.code !== RPC_METHOD_NOT_FOUND) {
+          throw err;
+        }
+        this.mode = "legacy";
+        const initResult = await this.sendRequest<McpInitializeResult>(
+          "initialize",
+          {
+            protocolVersion: MCP_LEGACY_PROTOCOL_VERSION,
+            capabilities: {},
+            clientInfo: CLIENT_INFO,
+          },
+          HANDSHAKE_TIMEOUT_MS,
+        );
+        await this.sendNotification("notifications/initialized", {});
+        log.info(
+          {
+            protocol: initResult.protocolVersion,
+            server: `${initResult.serverInfo.name}@${initResult.serverInfo.version}`,
+            era: "legacy",
+          },
+          `${this.config.id} legacy initialize 완료 (dual-era exception)`,
+        );
+      }
 
-      log.info(
-        { protocol: initResult.protocolVersion, server: `${initResult.serverInfo.name}@${initResult.serverInfo.version}` },
-        `${this.config.id} 초기화 완료`,
-      );
-
-      // 핸드셰이크: initialized notification
-      await this.sendNotification("notifications/initialized", {});
-
-      // 도구 목록 요청
+      // 도구 목록 요청 (mode-aware `_meta` via sendRequest)
       const toolsResult = await this.sendRequest<McpToolsListResult>("tools/list", {}, HANDSHAKE_TIMEOUT_MS);
       const tools = toolsResult.tools ?? [];
 
@@ -305,41 +528,169 @@ export class McpClient {
     );
 
     try {
-      const result = await this.sendRequest<McpToolCallResult>(
-        "tools/call",
-        { name, arguments: args },
-        timeoutMs,
-      );
+      // MRTR loop (§8): a `tools/call` may return `input_required` instead of a
+      // `complete` result; the client gathers responses for each `inputRequest`
+      // and retries the SAME logical call with `inputResponses` + the echoed
+      // (opaque) `requestState`, bounded by MAX_MRTR_ROUNDS.
+      let params: Record<string, unknown> = { name, arguments: args };
+      let rounds = 0;
+      // eslint-disable-next-line no-constant-condition
+      while (true) {
+        const result = await this.sendRequest<McpToolCallResult>("tools/call", params, timeoutMs);
 
-      // 결과를 문자열로 변환
-      if (result.isError) {
-        const errorText = result.content
-          .map((c) => c.text ?? JSON.stringify(c))
-          .join("\n");
-        throw new Error(errorText);
+        if (result.resultType === "input_required") {
+          rounds += 1;
+          if (rounds > MAX_MRTR_ROUNDS) {
+            throw new Error(
+              `[mcp-client] tool '${name}' on '${this.config.id}' exceeded ${MAX_MRTR_ROUNDS} input_required rounds (possible runaway server)`,
+            );
+          }
+          params = await this.resolveInputRequired(name, args, result);
+          continue;
+        }
+        if (result.resultType === "task") {
+          // Tasks extension (§8 `io.modelcontextprotocol/tasks`): a long-running
+          // tool returns a `CreateTaskResult` (Result & Task); poll to terminal.
+          return await this.awaitTask(name, args, result, timeoutMs);
+        }
+
+        return this.renderToolResult(result);
       }
-
-      const text = result.content
-        .map((c) => c.text ?? JSON.stringify(c))
-        .join("\n");
-
-      // MCP Apps spec §3.2 — detect UI extension in _meta.ui
-      const uiMeta = result._meta?.ui;
-      let uiPayload: McpUiPayload | undefined;
-      if (uiMeta?.resourceUri) {
-        uiPayload = {
-          serverId: this.config.id,
-          resourceUri: uiMeta.resourceUri,
-          slot: (uiMeta.slot as McpUiPayload["slot"]) ?? "chat",
-          height: uiMeta.height,
-          title: uiMeta.title,
-        };
-      }
-
-      return { text, uiPayload };
     } catch (err) {
+      // Map the RC capability/version errors (§8) to clearer host messages.
+      if (err instanceof McpRpcError && err.code === RPC_MISSING_REQUIRED_CLIENT_CAPABILITY) {
+        throw new Error(
+          `[mcp-client] '${this.config.id}' requires a client capability the host did not advertise for tool '${name}' (-32003): ${err.message}`,
+        );
+      }
+      if (err instanceof McpRpcError && err.code === RPC_UNSUPPORTED_PROTOCOL_VERSION) {
+        throw new Error(
+          `[mcp-client] '${this.config.id}' does not support protocol ${MCP_PROTOCOL_VERSION} for tool '${name}' (-32004): ${err.message}`,
+        );
+      }
       const message = err instanceof Error ? err.message : String(err);
       throw new Error(`[mcp-client] ${t("be_mcpClient.toolCallFailed", { id: this.config.id, name, message })}`);
+    }
+  }
+
+  /**
+   * Resolve one MRTR `input_required` round (§8): gather a response for each
+   * `inputRequest` via the injected resolver, then build the retry params for
+   * the SAME logical call — `{ name, arguments, inputResponses, requestState }`
+   * with `requestState` echoed verbatim (opaque). Fails closed (typed error) if
+   * no resolver is wired — the client never fabricates a response (No-Fallback).
+   */
+  private async resolveInputRequired(
+    name: string,
+    args: Record<string, unknown>,
+    result: McpToolCallResult,
+  ): Promise<Record<string, unknown>> {
+    if (!this.inputResolver) {
+      throw new Error(
+        `[mcp-client] tool '${name}' on '${this.config.id}' returned resultType="input_required" but no MRTR input resolver is wired (elicitation/sampling unavailable in this context)`,
+      );
+    }
+    const inputResponses: Record<string, unknown> = {};
+    for (const [id, request] of Object.entries(result.inputRequests ?? {})) {
+      inputResponses[id] = await this.inputResolver(id, request);
+    }
+    const retry: Record<string, unknown> = { name, arguments: args, inputResponses };
+    // requestState is opaque and MUST be echoed verbatim when present (§8).
+    if (result.requestState !== undefined) retry.requestState = result.requestState;
+    return retry;
+  }
+
+  /** Render a `complete` CallToolResult to text (+ MCP Apps UI). Throws on isError. */
+  private renderToolResult(result: McpToolCallResult): { text: string; uiPayload?: McpUiPayload } {
+    const content = result.content ?? [];
+    if (result.isError) {
+      throw new Error(content.map((c) => c.text ?? JSON.stringify(c)).join("\n"));
+    }
+    const text = content.map((c) => c.text ?? JSON.stringify(c)).join("\n");
+    // MCP Apps permission gate (§3.7): ignore `_meta.ui` unless the server
+    // advertised the ui extension at discovery.
+    const uiMeta = this.appsUiAdvertised ? result._meta?.ui : undefined;
+    let uiPayload: McpUiPayload | undefined;
+    if (uiMeta?.resourceUri) {
+      uiPayload = {
+        serverId: this.config.id,
+        resourceUri: uiMeta.resourceUri,
+        slot: (uiMeta.slot as McpUiPayload["slot"]) ?? "chat",
+        height: uiMeta.height,
+        title: uiMeta.title,
+      };
+    }
+    return { text, uiPayload };
+  }
+
+  /** Read the inline `Task` fields off a `CreateTaskResult`/`tasks/get` result (§8). */
+  private extractTaskState(result: McpToolCallResult, name: string): McpTaskState {
+    const r = result as unknown as Record<string, unknown>;
+    const taskId = r.taskId;
+    const status = r.status;
+    if (typeof taskId !== "string" || typeof status !== "string") {
+      throw new Error(
+        `[mcp-client] tool '${name}' on '${this.config.id}' returned resultType="task" without a valid taskId/status`,
+      );
+    }
+    return {
+      taskId,
+      status: status as McpTaskStatus,
+      ttlMs: typeof r.ttlMs === "number" ? r.ttlMs : null,
+      pollIntervalMs: typeof r.pollIntervalMs === "number" ? r.pollIntervalMs : undefined,
+    };
+  }
+
+  private delay(ms: number): Promise<void> {
+    return new Promise((resolve) => setTimeout(resolve, ms));
+  }
+
+  /**
+   * Drive a `CreateTaskResult` to a terminal status (§8 Tasks). Polls `tasks/get`
+   * at the server's `pollIntervalMs` (clamped) until `completed` (→ render the
+   * Result&Task), `failed`/`cancelled` (→ throw), bounded by the per-call
+   * `timeoutMs`; on timeout it issues `tasks/cancel` and throws. In-task
+   * `input_required` is a typed not-yet (No-Fallback) — that MRTR-in-task path
+   * lands when the `experimental-ext-tasks` draft is pinned.
+   */
+  private async awaitTask(
+    name: string,
+    _args: Record<string, unknown>,
+    createResult: McpToolCallResult,
+    timeoutMs: number,
+  ): Promise<{ text: string; uiPayload?: McpUiPayload }> {
+    const deadline = Date.now() + timeoutMs;
+    let current = createResult;
+    let task = this.extractTaskState(current, name);
+    let polls = 0;
+
+    for (;;) {
+      if (task.status === "completed") {
+        return this.renderToolResult(current);
+      }
+      if (task.status === "failed" || task.status === "cancelled") {
+        throw new Error(
+          `[mcp-client] task '${task.taskId}' on '${this.config.id}' ended '${task.status}'`,
+        );
+      }
+      if (task.status === "input_required") {
+        throw new Error(
+          `[mcp-client] task '${task.taskId}' on '${this.config.id}' requires input — in-task MRTR is not implemented yet (experimental-ext-tasks draft pending)`,
+        );
+      }
+
+      if (Date.now() >= deadline || polls >= MAX_TASK_POLLS) {
+        await this.sendRequest("tasks/cancel", { taskId: task.taskId }, timeoutMs).catch(() => {});
+        throw new Error(
+          `[mcp-client] task '${task.taskId}' on '${this.config.id}' did not complete within ${timeoutMs}ms`,
+        );
+      }
+
+      polls += 1;
+      const interval = Math.max(MIN_TASK_POLL_INTERVAL_MS, task.pollIntervalMs ?? DEFAULT_TASK_POLL_INTERVAL_MS);
+      await this.delay(Math.min(interval, Math.max(0, deadline - Date.now())));
+      current = await this.sendRequest<McpToolCallResult>("tasks/get", { taskId: task.taskId }, timeoutMs);
+      task = this.extractTaskState(current, name);
     }
   }
 
@@ -373,11 +724,56 @@ export class McpClient {
 
   // ─── JSON-RPC Transport ─────────────────────────────
 
+  /**
+   * The host's per-request client capabilities (RC `_meta`). This slice
+   * advertises a fixed sound default; the `mrtr-input-loop`/`governance-per-request`
+   * milestones derive it from the active turn's consent state + #811 policy
+   * (design §3.6). `elicitation` declares the host CAN gather approvals.
+   */
+  private clientCapabilities(): McpClientCapabilities {
+    // Per-request when a provider is wired (the active turn decides); otherwise a
+    // fixed sound default. `withRequestMeta` calls this on every request.
+    return this.capabilityProvider?.() ?? { elicitation: { form: {}, url: {} }, extensions: {} };
+  }
+
+  /**
+   * Stamp the three required RC reserved `_meta` keys (protocolVersion,
+   * clientInfo, clientCapabilities) onto a request's params. In the dual-era
+   * "legacy" mode the params are returned unchanged (a pre-RC external server
+   * uses the old handshake and does not expect the RC `_meta`).
+   */
+  private withRequestMeta(params: Record<string, unknown>): Record<string, unknown> {
+    if (this.mode === "legacy") return params;
+    const existingMeta =
+      params._meta && typeof params._meta === "object" && !Array.isArray(params._meta)
+        ? (params._meta as Record<string, unknown>)
+        : {};
+    return {
+      ...params,
+      _meta: {
+        ...existingMeta,
+        [META_PROTOCOL_VERSION]: MCP_PROTOCOL_VERSION,
+        [META_CLIENT_INFO]: CLIENT_INFO,
+        [META_CLIENT_CAPABILITIES]: this.clientCapabilities(),
+      },
+    };
+  }
+
   private sendRequest<T>(method: string, params: Record<string, unknown>, timeoutMs?: number): Promise<T> {
     return new Promise<T>((resolve, reject) => {
       const transport = this.transport;
       if (!transport || !transport.isAlive()) {
         reject(new Error(`[mcp-client] ${t("be_mcpClient.transportNotActive")}`));
+        return;
+      }
+
+      // Per-request capability gate (milestone `governance-per-request`): every
+      // request is checked against the capability it exercises, not just a
+      // connect-time whitelist. Discovery/control methods pass; a tools/resources/
+      // prompts request on a server not approved for that capability is denied.
+      const capabilityCheck = this.governance.validateRequestCapability(this.config.id, method, params);
+      if (!capabilityCheck.valid) {
+        reject(new Error(`[mcp-client] ${capabilityCheck.reason}`));
         return;
       }
 
@@ -420,7 +816,7 @@ export class McpClient {
         return;
       }
 
-      const request: JsonRpcRequest = { jsonrpc: "2.0", id, method, params };
+      const request: JsonRpcRequest = { jsonrpc: "2.0", id, method, params: this.withRequestMeta(params) };
       transport.send(request).catch((err: Error) => {
         // send 실패 → pending 정리 후 reject
         const pending = this.pendingRequests.get(id);
@@ -463,7 +859,11 @@ export class McpClient {
 
     if (response.error) {
       pending.reject(
-        new Error(`${t("be_mcpClient.jsonRpcError", { code: String(response.error.code), message: response.error.message })}`),
+        new McpRpcError(
+          response.error.code,
+          `${t("be_mcpClient.jsonRpcError", { code: String(response.error.code), message: response.error.message })}`,
+          response.error.data,
+        ),
       );
     } else {
       pending.resolve(response.result);

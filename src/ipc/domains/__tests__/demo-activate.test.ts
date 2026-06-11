@@ -222,6 +222,7 @@ describe("lvis:demo:status", () => {
       ok: true,
       activated: true,
       vendor: "azure-foundry",
+      autoActivatable: false,
     });
   });
 
@@ -238,7 +239,7 @@ describe("lvis:demo:status", () => {
     demoMod.registerDemoHandlers(deps as never);
 
     const result = await invoke("lvis:demo:status");
-    expect(result).toEqual({ ok: true, activated: false, vendor: null });
+    expect(result).toEqual({ ok: true, activated: false, vendor: null, autoActivatable: false });
   });
 
   it("reports inactive when no demo credentials were captured at boot", async () => {
@@ -247,7 +248,7 @@ describe("lvis:demo:status", () => {
     demoMod.registerDemoHandlers(deps as never);
 
     const result = await invoke("lvis:demo:status");
-    expect(result).toEqual({ ok: true, activated: false, vendor: null });
+    expect(result).toEqual({ ok: true, activated: false, vendor: null, autoActivatable: false });
   });
 
   it("rejects an untrusted sender frame without leaking activation state", async () => {
@@ -691,6 +692,7 @@ describe("lvis:demo:clear", () => {
       ok: true,
       activated: false,
       vendor: null,
+      autoActivatable: false,
     });
 
     // Audit row for the clear event.
@@ -724,6 +726,7 @@ describe("lvis:demo:clear", () => {
       ok: true,
       activated: true,
       vendor: "azure-foundry",
+      autoActivatable: false,
     });
 
     expect(await invoke("lvis:demo:clear")).toEqual({ ok: true });
@@ -731,6 +734,7 @@ describe("lvis:demo:clear", () => {
       ok: true,
       activated: false,
       vendor: null,
+      autoActivatable: false,
     });
   });
 
@@ -786,5 +790,143 @@ describe("lvis:demo:activate — persist-failed audit", () => {
         input: expect.stringContaining("persist-failed"),
       }),
     );
+  });
+});
+
+describe("lvis:demo:activate-embedded — build-embedded activation key", () => {
+  async function loadWithEmbedded(code: string | null) {
+    const loaded = await loadDemoModule();
+    const embeddedMod = await import("../../../main/demo-embedded-activation.js");
+    embeddedMod._setEmbeddedActivationCodeForTest(code);
+    return { ...loaded, embeddedMod };
+  }
+
+  it("activates with the embedded code through the same validation chain", async () => {
+    const { codec, credsMod, demoMod, embeddedMod } = await loadWithEmbedded(null);
+    embeddedMod._setEmbeddedActivationCodeForTest(
+      codec.encryptActivationPayload(SAMPLE_ENV),
+    );
+    try {
+      const deps = makeDeps();
+      demoMod.registerDemoHandlers(deps as never);
+
+      const result = (await invoke("lvis:demo:activate-embedded")) as {
+        ok: true;
+        vendor: string;
+        requiresRelaunch?: boolean;
+      };
+      expect(result.ok).toBe(true);
+      expect(result.vendor).toBe("azure-foundry");
+      // First activation arms the relaunch exactly like the manual path.
+      expect(result.requiresRelaunch).toBe(true);
+
+      const persisted = readFileSync(
+        join(tempHome, "secrets", ".env.demo"),
+        "utf8",
+      );
+      expect(persisted).toBe(SAMPLE_ENV);
+      expect(credsMod.isDemoEnabled()).toBe(true);
+      expect(credsMod.getDemoActiveVendor()).toBe("azure-foundry");
+
+      // Audit row records the embedded source so support can tell a
+      // build-embedded activation apart from a pasted one.
+      expect(deps.auditLogger.log).toHaveBeenCalledWith(
+        expect.objectContaining({
+          type: "info",
+          input: expect.stringContaining("source=embedded"),
+        }),
+      );
+    } finally {
+      embeddedMod._setEmbeddedActivationCodeForTest(undefined);
+    }
+  });
+
+  it("returns no-embedded-code when the build carries no embedded key", async () => {
+    const { demoMod, embeddedMod } = await loadWithEmbedded(null);
+    try {
+      demoMod.registerDemoHandlers(makeDeps() as never);
+      const result = await invoke("lvis:demo:activate-embedded");
+      expect(result).toEqual({ ok: false, error: "no-embedded-code" });
+      expect(existsSync(join(tempHome, "secrets", ".env.demo"))).toBe(false);
+    } finally {
+      embeddedMod._setEmbeddedActivationCodeForTest(undefined);
+    }
+  });
+
+  it("surfaces invalid-code when the embedded payload cannot be decrypted", async () => {
+    const { demoMod, embeddedMod } = await loadWithEmbedded(
+      "LVIS-DEMO:v1:not-a-real-blob",
+    );
+    try {
+      const deps = makeDeps();
+      demoMod.registerDemoHandlers(deps as never);
+      const result = await invoke("lvis:demo:activate-embedded");
+      expect(result).toEqual({ ok: false, error: "invalid-code" });
+      expect(deps.auditLogger.log).toHaveBeenCalledWith(
+        expect.objectContaining({
+          type: "warn",
+          input: expect.stringContaining("source=embedded"),
+        }),
+      );
+    } finally {
+      embeddedMod._setEmbeddedActivationCodeForTest(undefined);
+    }
+  });
+
+  it("rejects an untrusted sender frame", async () => {
+    const { codec, demoMod, embeddedMod } = await loadWithEmbedded(null);
+    embeddedMod._setEmbeddedActivationCodeForTest(
+      codec.encryptActivationPayload(SAMPLE_ENV),
+    );
+    try {
+      demoMod.registerDemoHandlers(makeDeps() as never);
+      const result = await invokeWithEvent(
+        "lvis:demo:activate-embedded",
+        { senderFrame: { url: "https://evil.example/app" } },
+      );
+      expect(result).toEqual({ ok: false, error: "unauthorized-frame" });
+      expect(existsSync(join(tempHome, "secrets", ".env.demo"))).toBe(false);
+    } finally {
+      embeddedMod._setEmbeddedActivationCodeForTest(undefined);
+    }
+  });
+});
+
+describe("lvis:demo:status — autoActivatable", () => {
+  it("advertises autoActivatable when the build embeds an activation key", async () => {
+    const loaded = await loadDemoModule();
+    const embeddedMod = await import("../../../main/demo-embedded-activation.js");
+    embeddedMod._setEmbeddedActivationCodeForTest(
+      loaded.codec.encryptActivationPayload(SAMPLE_ENV),
+    );
+    try {
+      loaded.demoMod.registerDemoHandlers(makeDeps() as never);
+      const status = (await invoke("lvis:demo:status")) as {
+        ok: true;
+        activated: boolean;
+        autoActivatable: boolean;
+      };
+      expect(status.ok).toBe(true);
+      expect(status.activated).toBe(false);
+      expect(status.autoActivatable).toBe(true);
+    } finally {
+      embeddedMod._setEmbeddedActivationCodeForTest(undefined);
+    }
+  });
+
+  it("reports autoActivatable=false on builds without an embedded key", async () => {
+    const loaded = await loadDemoModule();
+    const embeddedMod = await import("../../../main/demo-embedded-activation.js");
+    embeddedMod._setEmbeddedActivationCodeForTest(null);
+    try {
+      loaded.demoMod.registerDemoHandlers(makeDeps() as never);
+      const status = (await invoke("lvis:demo:status")) as {
+        ok: true;
+        autoActivatable: boolean;
+      };
+      expect(status.autoActivatable).toBe(false);
+    } finally {
+      embeddedMod._setEmbeddedActivationCodeForTest(undefined);
+    }
   });
 });

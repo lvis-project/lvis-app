@@ -158,6 +158,8 @@ export type AppSettings = {
     vendors: Record<string, LLMVendorSettingsRenderer>;
     streamSmoothing: "none" | "word" | "char";
     fallbackChain: Array<{ provider: string; model: string }>;
+    /** Manual-mode Chromium host-resolver map (persisted /etc/hosts-style text). */
+    hostResolverMap?: string;
   };
   chat: { systemPrompt: string; autoCompact: boolean };
   webSearch: { provider: string };
@@ -202,11 +204,6 @@ export type AppSettings = {
      * `src/data/settings-store.ts` `FeatureFlags.demoAutoplayEnabled`.
      */
     demoAutoplayEnabled?: boolean;
-    /**
-     * Demo-only display flag — hides tool failure badges in the chat timeline.
-     * Main-process SOT: `src/data/settings-store.ts` `FeatureFlags.hideToolFailures`.
-     */
-    hideToolFailures?: boolean;
   };
 };
 
@@ -287,6 +284,10 @@ export type LvisApi = {
   }) => Promise<{ ok: boolean; error?: string }>;
   getSettings: () => Promise<AppSettings>;
   updateSettings: (patch: DeepPartial<AppSettings>) => Promise<SettingsUpdateResult>;
+  /** Save the manual host-resolver map and relaunch the app to apply it. */
+  applyHostMap: (
+    hostResolverMap: string,
+  ) => Promise<{ ok: boolean; error?: string; message?: string }>;
   onSettingsUpdated: (handler: (settings: AppSettings) => void) => () => void;
   listPersonaPromptSummaries: () => Promise<{ prompts: Array<Pick<RolePreset, "id" | "name">> }>;
   listPersonaPrompts: () => Promise<{ prompts: RolePreset[] }>;
@@ -384,12 +385,21 @@ export type LvisApi = {
    */
   demo: {
     status: () => Promise<
-      | { ok: true; activated: boolean; vendor: string | null }
+      | { ok: true; activated: boolean; vendor: string | null; autoActivatable: boolean }
       | { ok: false; error: "unauthorized-frame" }
     >;
     activate: (code: string) => Promise<
       | { ok: true; vendor: string; requiresRelaunch?: boolean }
       | { ok: false; error: "invalid-code" | "no-vendor" | "invalid-vendor" | "no-demo-key" | "missing-foundry-endpoint" | "invalid-foundry-endpoint" | "missing-foundry-host-map" | "foundry-host-map-mismatch" | "invalid-foundry-host-map-target" | "persist-failed" | "unauthorized-frame" }
+    >;
+    /**
+     * Embedded activation — same chain as `activate` with the build-time
+     * embedded key as the code source (`status().autoActivatable` advertises
+     * availability). `no-embedded-code` routes back to manual paste.
+     */
+    activateEmbedded: () => Promise<
+      | { ok: true; vendor: string; requiresRelaunch?: boolean }
+      | { ok: false; error: "no-embedded-code" | "invalid-code" | "no-vendor" | "invalid-vendor" | "no-demo-key" | "missing-foundry-endpoint" | "invalid-foundry-endpoint" | "missing-foundry-host-map" | "foundry-host-map-mismatch" | "invalid-foundry-host-map-target" | "persist-failed" | "unauthorized-frame" }
     >;
     relaunchAfterActivation: () => Promise<
       | { ok: true }
@@ -1069,6 +1079,15 @@ export interface HookTrustRow {
   sha256: string;
   state: "trusted" | "new" | "changed" | "removed" | "disabled";
   previousSha256?: string;
+  /**
+   * #811 command-hooks — additive trust-review fields. Present on the
+   * `hooks.json` config trust-unit row so the trust list can surface its
+   * declared command/event/matcher entries. Absent on legacy `.sh` rows.
+   * Mirrors `src/hooks/hook-trust-commands.ts::HookTrustRow` (additive).
+   */
+  source?: "sh" | "config";
+  entryCount?: number;
+  entries?: Array<{ event: "pre" | "post" | "perm"; matcher?: string; command: string }>;
 }
 
 export type PermissionReviewerMode = "disabled" | "rule" | "llm" | "strict";

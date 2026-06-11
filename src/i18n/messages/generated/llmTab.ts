@@ -36,6 +36,23 @@ export const en = {
   "llmTab.fallbackSummary": "Ordered list of vendors and models to switch to if no response arrives within 1 second or a 5xx/429/network error occurs",
   "llmTab.fallbackDesc": "If no response arrives within 1 second or a 5xx/429/network error occurs, the same model is retried 5 times before switching to each entry in order.",
   "llmTab.addEntry": "+ Add",
+  // Host resolver map (requires relaunch)
+  "llmTab.hostResolverMapTitle": "Host Resolver Map",
+  "llmTab.hostResolverMapDesc": "Maps private IP addresses to hostnames inside the app (like /etc/hosts). One entry per line: IP hostname. Blank lines and # comments are ignored. Changes require a restart.",
+  "llmTab.hostResolverMapPlaceholder": "10.0.0.10 your-endpoint.example.com\n# one entry per line",
+  "llmTab.hostResolverMapLoginDisabled": "Host resolver map is managed by the login session and cannot be edited manually.",
+  "llmTab.hostResolverMapApply": "Save and Restart",
+  "llmTab.entryCountSingular": "{count} entry parsed",
+  "llmTab.entryCountPlural": "{count} entries parsed",
+  // Relaunch confirm dialog
+  "llmTab.relaunchConfirmTitle": "Restart Required",
+  "llmTab.relaunchConfirmBody": "Changing the host resolver map requires the app to restart. Unsaved work will be lost. Continue?",
+  "llmTab.relaunchConfirmOk": "Restart Now",
+  "llmTab.relaunchConfirmCancel": "Cancel",
+  "llmTab.relaunchConfirmError": "Failed to apply the host resolver map. The app was not restarted — please try again.",
+  // Login-mode disabled field labels
+  "llmTab.loginModeDisabledHint": "Managed by login session — log out to edit manually.",
+  "llmTab.logoutToEdit": "To edit these fields, log out from the General tab.",
 } as const;
 export const ko: Record<keyof typeof en, string> = {
   "llmTab.saving": "저장 중…",
@@ -74,4 +91,21 @@ export const ko: Record<keyof typeof en, string> = {
   "llmTab.fallbackSummary": "첫 응답이 1초 안에 오지 않거나 5xx/429/네트워크 오류 시 순서대로 전환할 벤더·모델 목록",
   "llmTab.fallbackDesc": "첫 응답이 1초 안에 오지 않거나 5xx/429/네트워크 오류가 나면 같은 모델을 5회 시도한 뒤 순서대로 전환할 벤더·모델 목록입니다.",
   "llmTab.addEntry": "+ 추가",
+  // Host resolver map
+  "llmTab.hostResolverMapTitle": "호스트 리졸버 맵",
+  "llmTab.hostResolverMapDesc": "앱 내부에서 사설 IP를 호스트명에 매핑합니다(/etc/hosts 방식). 한 줄에 하나씩: IP 호스트명. 빈 줄과 # 주석은 무시됩니다. 변경 후 재시작이 필요합니다.",
+  "llmTab.hostResolverMapPlaceholder": "10.0.0.10 your-endpoint.example.com\n# 한 줄에 하나씩 입력",
+  "llmTab.hostResolverMapLoginDisabled": "로그인 세션이 호스트 리졸버 맵을 관리하므로 수동 편집이 불가능합니다.",
+  "llmTab.hostResolverMapApply": "저장 후 재시작",
+  "llmTab.entryCountSingular": "항목 {count}개 인식됨",
+  "llmTab.entryCountPlural": "항목 {count}개 인식됨",
+  // Relaunch confirm dialog
+  "llmTab.relaunchConfirmTitle": "재시작 필요",
+  "llmTab.relaunchConfirmBody": "호스트 리졸버 맵 변경을 적용하려면 앱을 재시작해야 합니다. 저장하지 않은 작업이 손실될 수 있습니다. 계속하시겠습니까?",
+  "llmTab.relaunchConfirmOk": "지금 재시작",
+  "llmTab.relaunchConfirmCancel": "취소",
+  "llmTab.relaunchConfirmError": "호스트 리졸버 맵 적용에 실패했습니다. 앱이 재시작되지 않았으니 다시 시도하세요.",
+  // Login-mode disabled field labels
+  "llmTab.loginModeDisabledHint": "로그인 세션이 관리 중 — 직접 편집하려면 로그아웃하세요.",
+  "llmTab.logoutToEdit": "이 항목을 편집하려면 General 탭에서 로그아웃하세요.",
 };

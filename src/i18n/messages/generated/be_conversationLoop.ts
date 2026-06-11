@@ -80,6 +80,7 @@ export const en = {
   "be_conversationLoop.hookAccepted": "Hook trust registered: {fileName}\ntrusted={count}",
   "be_conversationLoop.hookDisabled": "Hook disabled: {fileName}\ntrusted={count}",
   "be_conversationLoop.hookRejected": "Hook permanently rejected: {fileName}\ntrusted={count}",
+  "be_conversationLoop.userPromptBlocked": "This prompt was blocked by a trusted hook: {reason}",
 } as const;
 export const ko: Record<keyof typeof en, string> = {
   "be_conversationLoop.generateTextSystemPrompt": "당신은 LVIS, 사용자의 AI 비서입니다.",
@@ -162,4 +163,5 @@ export const ko: Record<keyof typeof en, string> = {
   "be_conversationLoop.hookAccepted": "Hook 신뢰 등록됨: {fileName}\ntrusted={count}",
   "be_conversationLoop.hookDisabled": "Hook 비활성화됨: {fileName}\ntrusted={count}",
   "be_conversationLoop.hookRejected": "Hook 영구 거부됨: {fileName}\ntrusted={count}",
+  "be_conversationLoop.userPromptBlocked": "신뢰된 hook 이 이 프롬프트를 차단했습니다: {reason}",
 };

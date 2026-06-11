@@ -1,30 +1,55 @@
 /**
  * Permission policy — Layer 6 hook runtime manager.
  *
- * Spec ref: docs/architecture/permission-policy-design.md §3 Layer 6.
+ * Spec ref: docs/architecture/permission-policy-design.md §3 Layer 6 +
+ * docs/architecture/hook-runtime-expansion-design.md §4 (#811).
  *
- * Holds the trusted hook list at runtime and exposes
+ * Holds the trusted hook registry at runtime and exposes
  * {@link runPreToolUse} / {@link runPostToolUse} / {@link runPermissionRequest}
  * — the three integration points the executor / approval-gate call into.
  *
+ * The registry is the UNIFIED list (`hook-registry.ts`): trusted legacy `.sh`
+ * hooks AND trusted declarative `hooks.json` `command` entries collapse into one
+ * normalized shape, so dispatch is origin-agnostic. CRITICAL: only entries that
+ * passed the TOFU trust gate ever land here — `setTrustedRegistry` is called by
+ * the boot pipeline / `/permission hooks accept` AFTER quarantine resolves. An
+ * untrusted or changed `hooks.json` contributes NOTHING to this registry.
+ *
  * Composition rule (v1, deny precedence):
- *   - {@link runPreToolUse} returns `decision: "deny"` when *any* hook
- *     denied. Caller treats this as a downgrade-only signal: even if
- *     upstream layers allowed, hook deny wins.
- *   - {@link runPreToolUse} returns `decision: "allow"` when no hooks
- *     deny. Caller MUST NOT promote this allow over an upstream deny.
- *   - `modify` is **NOT** supported in v1 (hook-signing follow-up once signing lands).
+ *   - {@link runPreToolUse} returns `decision: "deny"` when *any* hook denied.
+ *   - {@link runPreToolUse} returns `decision: "allow"` only when no hook denies.
+ *     Caller MUST NOT promote this allow over an upstream deny.
+ *   - `modify` is **NOT** supported in v1.
  */
-import type { DiscoveredHook } from "./hook-discovery.js";
-import { runHookChain, type RunOneHookOptions } from "./script-hook-runner.js";
-import type {
-  HookTrustOrigin,
-  ScriptHookInvocationResult,
-  ScriptHookStdin,
-  ScriptHookType,
+import { type DiscoveredHook } from "./hook-discovery.js";
+import {
+  buildHookRegistry,
+  filterRegistryByEventAndSubject,
+  filterRegistryByEventAndTool,
+  type HookRegistryEntry,
+} from "./hook-registry.js";
+import type { HookConfigEntry } from "./hook-config.js";
+import {
+  runHookChain,
+  runnableFromDiscovered,
+  type RunnableHook,
+  type RunOneHookOptions,
+} from "./script-hook-runner.js";
+import {
+  isBlockingLifecycleEvent,
+  USER_PROMPT_SUBMIT_EVENT,
+  type HookTrustOrigin,
+  type LifecycleHookEvent,
+  type LifecycleHookStdin,
+  type ScriptHookInvocationResult,
+  type ScriptHookStdin,
+  type ScriptHookType,
 } from "./script-hook-types.js";
 import { redactForLLM } from "../audit/dlp-filter.js";
+import { createLogger } from "../lib/logger.js";
 import type { ToolCategory, ToolSource } from "../tools/types.js";
+
+const log = createLogger("script-hook-manager");
 
 /**
  * Inputs the manager needs to dispatch a hook. The caller (executor /
@@ -38,6 +63,9 @@ export interface HookDispatchPayload {
   input: Record<string, unknown>;
   sessionId: string;
   trustOrigin: HookTrustOrigin;
+  /** Per-request MCP/plugin origin identity (#811 hooks-on-mcp-calls). */
+  mcpServerId?: string;
+  pluginId?: string;
   /** PostToolUse only. */
   toolOutput?: string;
   /** PostToolUse only. */
@@ -51,26 +79,91 @@ export interface HookDispatchResult {
   results: ScriptHookInvocationResult[];
 }
 
+/**
+ * Event-specific payload fields for a lifecycle dispatch (#811 milestone-2,
+ * design §5). The manager wraps these with the common `{ event, sessionId,
+ * trustOrigin }` envelope and DLP-redacts free-text fields before serialization.
+ * Every field is optional + event-specific so one shape covers all six
+ * non-blocking events.
+ */
+export interface LifecycleEventPayload {
+  /** PostToolUseFailure — the failing tool's name. */
+  toolName?: string;
+  /** PostToolUseFailure — tool error message (DLP-redacted before dispatch). */
+  errorMessage?: string;
+  /** PostToolUseFailure / Stop — wall-clock duration in ms. */
+  durationMs?: number;
+  /** PermissionDenied — why + where the deny was finalized (reason restores
+   * forensic granularity beyond the coarse layer/source). */
+  denyReason?: { layer: number | undefined; source: string; reason?: string };
+  /** SessionStart — non-secret session metadata (routine scope / persona). */
+  sessionMeta?: Record<string, unknown>;
+  /** Stop — terminal stop reason for the turn. */
+  stopReason?: string;
+  /** Stop — number of tool calls in the turn. */
+  toolCount?: number;
+  /** PreCompact — `"auto-compact"` (threshold) | `"manual"`. */
+  reason?: string;
+  /** PreCompact — pre-compaction token estimate. */
+  tokenEstimate?: number;
+  /** PostCompact — message counts before/after compaction. */
+  messagesBefore?: number;
+  messagesAfter?: number;
+  /** PostCompact — token estimates before/after compaction. */
+  tokensBefore?: number;
+  tokensAfter?: number;
+}
+
+/**
+ * Payload for the BLOCKING `UserPromptSubmit` dispatch (#811 milestone-2,
+ * design §5). `inputText` is the matcher subject AND is DLP-redacted by the
+ * manager before it reaches the hook (§6.6) — callers pass the raw prompt.
+ */
+export interface UserPromptSubmitPayload {
+  /** The user's prompt text. Matcher subject + DLP-redacted before dispatch. */
+  inputText: string;
+  /** Chat input origin (e.g. user-keyboard, plugin-emitted). */
+  inputOrigin?: string;
+  /** Resolved route for this turn (`llm` | `skill`). */
+  route?: string;
+  /** Keyword classification type (`general` | `skill` | `command`). */
+  classification?: string;
+}
+
 export class ScriptHookManager {
-  private trusted: DiscoveredHook[] = [];
+  private registry: HookRegistryEntry[] = [];
 
-   /**
-    * Replace the trusted hook list. Called by the boot pipeline once
-   * the TOFU workflow resolves; the executor / gate read from this
-    * snapshot for every tool call.
-    */
+  /**
+   * Replace the trusted hook list with legacy `.sh` hooks only. Retained for
+   * back-compat with callers that don't (yet) carry config entries. Equivalent
+   * to `setTrustedRegistry(hooks, [])`.
+   */
   setTrustedHooks(hooks: DiscoveredHook[]): void {
-    this.trusted = [...hooks];
+    this.setTrustedRegistry(hooks, []);
   }
 
-  /** Trusted hooks for the given type. Used by tests + diagnostics. */
-  hooksOfType(type: ScriptHookType): DiscoveredHook[] {
-    return this.trusted.filter((h) => h.hookType === type);
+  /**
+   * Replace the trusted registry with the unified set: trusted `.sh` hooks
+   * (origin `sh`) + trusted declarative config entries (origin `config`).
+   * Called by the boot pipeline once the TOFU workflow resolves and by
+   * `/permission hooks accept` when trust state changes. The executor /
+   * approval-gate read from this snapshot for every tool call.
+   *
+   * SECURITY: callers MUST pass ONLY trusted entries. The manager never
+   * re-validates trust — it assumes the quarantine gate already ran.
+   */
+  setTrustedRegistry(shHooks: DiscoveredHook[], configEntries: HookConfigEntry[]): void {
+    this.registry = buildHookRegistry(shHooks, configEntries);
   }
 
-  /** Total trusted hook count. */
+  /** Registry entries for the given type. Used by tests + diagnostics. */
+  hooksOfType(type: ScriptHookType): HookRegistryEntry[] {
+    return this.registry.filter((e) => e.event === type);
+  }
+
+  /** Total trusted entry count. */
   size(): number {
-    return this.trusted.length;
+    return this.registry.length;
   }
 
   /**
@@ -106,28 +199,219 @@ export class ScriptHookManager {
     return this.runForType("perm", payload, options);
   }
 
+  /**
+   * Dispatch all hooks registered for a NON-BLOCKING lifecycle event (#811
+   * milestone-2, design §5). OBSERVE-ONLY: the returned decision is recorded for
+   * audit but MUST NEVER affect control flow — a lifecycle hook's `deny` mirrors
+   * `PostToolUse` (informational), and a hook erroring / timing out must not
+   * break the turn. The matcher subject for lifecycle events is `sessionId`
+   * (or `'*'` = all), matched via the same glob as `.sh` / tool-use matchers.
+   *
+   * Fail-soft: this method NEVER throws. A dispatch error collapses to an empty
+   * observe result so the caller can ignore it and continue.
+   */
+  async runLifecycleEvent(
+    event: LifecycleHookEvent,
+    sessionId: string,
+    trustOrigin: HookTrustOrigin,
+    payload: LifecycleEventPayload = {},
+    options?: RunOneHookOptions,
+  ): Promise<HookDispatchResult> {
+    // Misroute guard: the BLOCKING event must NEVER run through this observe-only
+    // path (it would swallow a deny and let a refused prompt through). Route it
+    // to {@link runUserPromptSubmit} instead. Fail closed — return a deny so a
+    // wiring bug refuses rather than silently allows.
+    if (isBlockingLifecycleEvent(event)) {
+      log.error(
+        "runLifecycleEvent called for the BLOCKING %s event — use runUserPromptSubmit; failing closed (deny)",
+        event,
+      );
+      return {
+        decision: "deny",
+        reason: `${event} is blocking — must dispatch via runUserPromptSubmit`,
+        results: [],
+      };
+    }
+    try {
+      // Subject for lifecycle matchers is the sessionId (design §6). Reuse the
+      // same glob filter so a `'*'` / sessionId matcher behaves identically to
+      // tool-use matchers. (`'*'` / absent matcher ⇒ match every session.)
+      const entries = filterRegistryByEventAndSubject(this.registry, event, sessionId);
+      if (entries.length === 0) {
+        return { decision: "allow", reason: "no matching lifecycle hooks", results: [] };
+      }
+      const stdinPayload: LifecycleHookStdin = {
+        hookType: event,
+        event,
+        sessionId,
+        trustOrigin,
+        ...(payload.toolName !== undefined ? { toolName: payload.toolName } : {}),
+        // DLP-redact the only free-text field (§6.6): a tool error message can
+        // echo user/secret data. No tool inputs flow through lifecycle events.
+        ...(payload.errorMessage !== undefined
+          ? { errorMessage: redactForLLM(payload.errorMessage).redacted }
+          : {}),
+        ...(payload.durationMs !== undefined ? { durationMs: payload.durationMs } : {}),
+        ...(payload.denyReason !== undefined ? { denyReason: payload.denyReason } : {}),
+        ...(payload.sessionMeta !== undefined ? { sessionMeta: payload.sessionMeta } : {}),
+        ...(payload.stopReason !== undefined ? { stopReason: payload.stopReason } : {}),
+        ...(payload.toolCount !== undefined ? { toolCount: payload.toolCount } : {}),
+        ...(payload.reason !== undefined ? { reason: payload.reason } : {}),
+        ...(payload.tokenEstimate !== undefined ? { tokenEstimate: payload.tokenEstimate } : {}),
+        ...(payload.messagesBefore !== undefined ? { messagesBefore: payload.messagesBefore } : {}),
+        ...(payload.messagesAfter !== undefined ? { messagesAfter: payload.messagesAfter } : {}),
+        ...(payload.tokensBefore !== undefined ? { tokensBefore: payload.tokensBefore } : {}),
+        ...(payload.tokensAfter !== undefined ? { tokensAfter: payload.tokensAfter } : {}),
+      };
+      // runHookChain stops at the first deny — but for a non-blocking event the
+      // decision is OBSERVE-ONLY, so the caller ignores it. (Chain-stop just
+      // avoids running later hooks once one already signaled deny — the audit
+      // captures every result up to that point, same as PostToolUse.)
+      return await runHookChain(entries.map(toRunnable), stdinPayload, options);
+    } catch (err) {
+      // Fail-soft: a lifecycle dispatch must NEVER break the turn. Log + return
+      // an empty observe result so the caller continues unaffected.
+      log.warn(
+        "lifecycle hook dispatch for %s failed (non-blocking, ignored): %s",
+        event,
+        err instanceof Error ? err.message : String(err),
+      );
+      return { decision: "allow", reason: "lifecycle dispatch error (ignored)", results: [] };
+    }
+  }
+
+  /**
+   * Dispatch the ONE BLOCKING lifecycle event — `UserPromptSubmit` (#811
+   * milestone-2, design §5). Runs the matching trusted hooks via the
+   * deny-precedence chain and returns a decision the CALLER MUST RESPECT: on
+   * `deny` the caller refuses the turn before entering queryLoop.
+   *
+   * FAIL-CLOSED (security-sensitive, mirrors `PreToolUse`):
+   *   - a hook `deny` → deny (turn refused)
+   *   - timeout / nonzero-exit / bad-json / spawn-error → deny (runHookChain /
+   *     runOneHookScript already collapse all of these to a deny result)
+   *   - an UNEXPECTED throw inside this dispatch → deny (NOT allow). Unlike the
+   *     observe-only {@link runLifecycleEvent} which swallows-and-continues, this
+   *     blocking event must fail closed.
+   *
+   * BACK-COMPAT: when NO trusted hook matches, returns `allow` with an empty
+   * `results` so the caller proceeds byte-identically to today. The matcher
+   * subject is the prompt text (or `'*'`), matched via the same glob as `.sh` /
+   * tool-use matchers.
+   *
+   * DLP: `inputText` is DLP-redacted here (§6.6, via {@link redactForLLM}) before
+   * it reaches the hook stdin / env — exactly as the observe path redacts
+   * `errorMessage` and the tool path redacts `input`.
+   */
+  async runUserPromptSubmit(
+    sessionId: string,
+    trustOrigin: HookTrustOrigin,
+    payload: UserPromptSubmitPayload,
+    options?: RunOneHookOptions,
+  ): Promise<HookDispatchResult> {
+    try {
+      // Matcher subject = the prompt text (design §5). Reuse the same glob as
+      // tool-use / lifecycle matchers (`'*'` / absent matcher ⇒ match every prompt).
+      const entries = filterRegistryByEventAndSubject(
+        this.registry,
+        USER_PROMPT_SUBMIT_EVENT,
+        payload.inputText,
+      );
+      if (entries.length === 0) {
+        // No trusted matching hook ⇒ ALLOW (back-compat: turn proceeds as today).
+        return { decision: "allow", reason: "no matching UserPromptSubmit hooks", results: [] };
+      }
+      const stdinPayload: LifecycleHookStdin = {
+        hookType: USER_PROMPT_SUBMIT_EVENT,
+        event: USER_PROMPT_SUBMIT_EVENT,
+        sessionId,
+        trustOrigin,
+        // DLP-redact the free-text prompt (§6.6) BEFORE it reaches the hook.
+        inputText: redactForLLM(payload.inputText).redacted,
+        ...(payload.inputOrigin !== undefined ? { inputOrigin: payload.inputOrigin } : {}),
+        ...(payload.route !== undefined ? { route: payload.route } : {}),
+        ...(payload.classification !== undefined ? { classification: payload.classification } : {}),
+      };
+      // Deny precedence: runHookChain stops at the first deny and returns it.
+      // All fail-closed cases (timeout/nonzero-exit/bad-json/spawn-error) are
+      // already collapsed to a deny RESULT by runOneHookScript, so the chain's
+      // returned decision is authoritative — the caller refuses on deny.
+      return await runHookChain(entries.map(toRunnable), stdinPayload, options);
+    } catch (err) {
+      // FAIL-CLOSED: a blocking event must DENY (refuse the turn) on an
+      // unexpected dispatch error — NOT allow. (Contrast runLifecycleEvent,
+      // which is observe-only and swallows-then-allows.)
+      log.warn(
+        "UserPromptSubmit hook dispatch failed (fail-closed → deny): %s",
+        err instanceof Error ? err.message : String(err),
+      );
+      return {
+        decision: "deny",
+        reason: `UserPromptSubmit dispatch error (fail-closed → deny): ${
+          err instanceof Error ? err.message : String(err)
+        }`,
+        results: [],
+      };
+    }
+  }
+
   private async runForType(
     type: ScriptHookType,
     payload: HookDispatchPayload,
     options?: RunOneHookOptions,
   ): Promise<HookDispatchResult> {
-    const hooks = this.hooksOfType(type);
-    if (hooks.length === 0) {
-      return { decision: "allow", reason: "no hooks of this type", results: [] };
+    // #811 — filter by event + matcher (the same glob as `.sh` frontmatter).
+    // A config/`.sh` entry with no matcher runs for every tool.
+    const entries = filterRegistryByEventAndTool(this.registry, type, payload.toolName);
+    if (entries.length === 0) {
+      return { decision: "allow", reason: "no matching hooks of this type", results: [] };
     }
     const stdinPayload: ScriptHookStdin = {
       hookType: type,
+      // Closed-set surface: for tool-use hooks `event` equals `hookType`.
+      event: type,
       toolName: payload.toolName,
       source: payload.source,
       category: payload.category,
       input: dlpRedactInput(payload.input),
       sessionId: payload.sessionId,
       trustOrigin: payload.trustOrigin,
+      ...(payload.mcpServerId !== undefined ? { mcpServerId: payload.mcpServerId } : {}),
+      ...(payload.pluginId !== undefined ? { pluginId: payload.pluginId } : {}),
       ...(payload.toolOutput !== undefined ? { toolOutput: payload.toolOutput } : {}),
       ...(payload.isError !== undefined ? { isError: payload.isError } : {}),
     };
-    return runHookChain(hooks, stdinPayload, options);
+    // Each entry runs with its own timeout: config entries carry a per-entry
+    // (already-clamped) `timeoutMs`; `.sh` entries fall back to the default /
+    // caller-supplied option.
+    return runHookChain(entries.map(toRunnable), stdinPayload, options);
   }
+}
+
+/**
+ * Normalize one registry entry into the runner's {@link RunnableHook} shape,
+ * carrying its per-entry timeout when present (config entries) so each hook runs
+ * on its own clamped budget.
+ */
+function toRunnable(entry: HookRegistryEntry): RunnableHook {
+  if (entry.source === "sh") {
+    // `.sh` entries carry NO per-entry timeout — they fall back to the
+    // caller-supplied option (e.g. the Windows shell-integration override) or
+    // the default, exactly as before this change.
+    return runnableFromDiscovered(entry.discovered);
+  }
+  return {
+    id: entry.id,
+    hookType: entry.event,
+    command: entry.command,
+    ...(entry.matcher !== undefined ? { matcher: entry.matcher } : {}),
+    // For a config command, the forensic path is argv[0] (or the script arg).
+    hookPath: entry.command[0],
+    timeoutMs: entry.timeoutMs,
+    // A declarative `hooks.json` command — the runner falls back to hashing the
+    // verbatim argv for `commandIdentity` (no on-disk local-script sha exists).
+    source: "config",
+  };
 }
 
 /**

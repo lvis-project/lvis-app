@@ -20,6 +20,7 @@ import {
   disableHook,
   discoverHooks,
   ensureHooksDirectory,
+  hookMatchesTool,
   persistLockfile,
   readLockfile,
   type DiscoveredHook,
@@ -245,5 +246,33 @@ describe("Permission policy P4 hook-discovery", () => {
       expect(map.get("pre-a.sh")).toBe("2025-01-01");
       expect(map.get("post-b.sh")).toBe("2025-02-02");
     });
+  });
+});
+
+describe("#811 hook matcher (mcp__.* / glob)", () => {
+  it("parses the `# lvis-hook-matcher:` frontmatter directive", () => {
+    writeHook(
+      tmpDir,
+      "pre-mcp.sh",
+      "#!/bin/sh\n# lvis-hook-matcher: mcp_*\necho '{\"action\":\"allow\",\"reason\":\"ok\"}'\n",
+    );
+    const hooks = discoverHooks(tmpDir);
+    expect(hooks).toHaveLength(1);
+    expect(hooks[0].matcher).toBe("mcp_*");
+  });
+
+  it("leaves matcher undefined when no directive is present", () => {
+    writeHook(tmpDir, "pre-plain.sh", "#!/bin/sh\necho '{\"action\":\"allow\",\"reason\":\"ok\"}'\n");
+    expect(discoverHooks(tmpDir)[0].matcher).toBeUndefined();
+  });
+
+  it("hookMatchesTool: no matcher matches everything; glob anchors", () => {
+    expect(hookMatchesTool(undefined, "fs_write")).toBe(true);
+    expect(hookMatchesTool("mcp_*", "mcp_hr_query")).toBe(true);
+    expect(hookMatchesTool("mcp_*", "fs_write")).toBe(false);
+    expect(hookMatchesTool("mcp_hr_*", "mcp_hr_query")).toBe(true);
+    expect(hookMatchesTool("mcp_hr_*", "mcp_payroll_query")).toBe(false);
+    // anchored: a partial match does not pass
+    expect(hookMatchesTool("query", "mcp_hr_query")).toBe(false);
   });
 });

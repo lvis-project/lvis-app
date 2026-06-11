@@ -54,6 +54,13 @@ export interface DiscoveredHook {
   sha256: string;
   /** Bytes (for diagnostics). */
   size: number;
+  /**
+   * Optional tool-name matcher (#811 hooks-on-mcp-calls). Parsed from a
+   * `# lvis-hook-matcher: <glob>` frontmatter line; when present the hook runs
+   * ONLY for tool calls whose name matches the glob (e.g. `mcp_*` for every MCP
+   * tool, `mcp_hr_*` for one server). Absent ⇒ runs for every tool (unchanged).
+   */
+  matcher?: string;
 }
 
 export type LockfileTrustState = "new" | "changed" | "trusted" | "removed";
@@ -121,12 +128,39 @@ function hookTypeFromName(fileName: string): ScriptHookType | null {
   return null;
 }
 
-function sha256OfFile(path: string): { sha256: string; size: number } {
+/** Parse the optional `# lvis-hook-matcher: <glob>` frontmatter directive. */
+function parseMatcher(buf: Buffer): string | undefined {
+  // Only scan the first 1KB (the directive must be in the header comment block).
+  const head = buf.subarray(0, 1024).toString("utf-8");
+  const m = head.match(/^#\s*lvis-hook-matcher:\s*(\S+)\s*$/m);
+  return m ? m[1] : undefined;
+}
+
+function sha256OfFile(path: string): { sha256: string; size: number; matcher?: string } {
   const buf = readFileSync(path);
   return {
     sha256: createHash("sha256").update(buf).digest("hex"),
     size: buf.byteLength,
+    matcher: parseMatcher(buf),
   };
+}
+
+/**
+ * Does a hook apply to a tool call? A hook with no matcher applies to every tool
+ * (unchanged behavior); a hook with a matcher applies only when the glob matches
+ * the tool name. Glob: `*` → any run of chars, `?` → one char; anchored.
+ */
+export function hookMatchesTool(matcher: string | undefined, toolName: string): boolean {
+  if (!matcher) return true;
+  const regex = new RegExp(
+    "^" +
+      matcher
+        .replace(/[.+^${}()|[\]\\]/g, "\\$&")
+        .replace(/\*/g, ".*")
+        .replace(/\?/g, ".") +
+      "$",
+  );
+  return regex.test(toolName);
 }
 
 /**
@@ -158,14 +192,14 @@ export function discoverHooks(dir: string = defaultHooksDir()): DiscoveredHook[]
     if (!st.isFile()) continue;
     const hookType = hookTypeFromName(fileName);
     if (!hookType) continue;
-    let h: { sha256: string; size: number };
+    let h: { sha256: string; size: number; matcher?: string };
     try {
       h = sha256OfFile(path);
     } catch (err) {
       log.warn("hook-discovery: hash failed for %s: %s", path, (err as Error).message);
       continue;
     }
-    out.push({ path, fileName, hookType, sha256: h.sha256, size: h.size });
+    out.push({ path, fileName, hookType, sha256: h.sha256, size: h.size, matcher: h.matcher });
   }
   // Stable order — alphabetical by fileName so list/review surfaces show
   // the same order every time.
