@@ -372,13 +372,22 @@ const api = {
   demo: {
     status: async () =>
       ipcRenderer.invoke("lvis:demo:status") as Promise<
-        | { ok: true; activated: boolean; vendor: string | null }
+        | { ok: true; activated: boolean; vendor: string | null; autoActivatable: boolean }
         | { ok: false; error: "unauthorized-frame" }
       >,
     activate: async (code: string) =>
       ipcRenderer.invoke("lvis:demo:activate", { code }) as Promise<
         | { ok: true; vendor: string; requiresRelaunch?: boolean }
         | { ok: false; error: "invalid-code" | "no-vendor" | "invalid-vendor" | "no-demo-key" | "missing-foundry-endpoint" | "invalid-foundry-endpoint" | "missing-foundry-host-map" | "foundry-host-map-mismatch" | "invalid-foundry-host-map-target" | "persist-failed" | "unauthorized-frame" }
+      >,
+    // Embedded activation — same decrypt→validate→persist chain as
+    // `activate`, but the code string is the build-time embedded key
+    // (`status.autoActivatable === true` advertises it). `no-embedded-code`
+    // routes the renderer back to the manual paste input.
+    activateEmbedded: async () =>
+      ipcRenderer.invoke("lvis:demo:activate-embedded") as Promise<
+        | { ok: true; vendor: string; requiresRelaunch?: boolean }
+        | { ok: false; error: "no-embedded-code" | "invalid-code" | "no-vendor" | "invalid-vendor" | "no-demo-key" | "missing-foundry-endpoint" | "invalid-foundry-endpoint" | "missing-foundry-host-map" | "foundry-host-map-mismatch" | "invalid-foundry-host-map-target" | "persist-failed" | "unauthorized-frame" }
       >,
     relaunchAfterActivation: async () =>
       ipcRenderer.invoke("lvis:demo:relaunch-after-activation") as Promise<

@@ -6,7 +6,8 @@
 // provided by Electron at runtime, must share a singleton across plugins, or
 // need real node_modules paths at runtime.
 import { build, context } from "esbuild";
-import { rmSync } from "node:fs";
+import { existsSync, rmSync } from "node:fs";
+import { spawnSync } from "node:child_process";
 import { dirname, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 
@@ -14,6 +15,43 @@ const __dirname = dirname(fileURLToPath(import.meta.url));
 const repoRoot = resolve(__dirname, "..");
 const outfile = resolve(repoRoot, "dist", "src", "main", "main.js");
 const watchMode = process.argv.includes("--watch");
+
+// Embedded activation key (internal-distribution builds). Precedence
+// mirrors run-electron.mjs: shell env wins, the gitignored repo-root
+// `.env.demo` fills the gap. Neither source present → empty string and
+// the login flow keeps the manual activation-key paste input. The
+// activation string never enters git — it exists only in the produced
+// bundle (see src/main/demo-embedded-activation.ts for the threat-model
+// note on collapsing the codec's 2-factor delivery for these builds).
+function resolveEmbeddedActivationCode() {
+  const explicit = process.env.LVIS_EMBED_DEMO_ACTIVATION?.trim();
+  if (explicit) return explicit;
+  const envDemoPath = resolve(repoRoot, ".env.demo");
+  if (!existsSync(envDemoPath)) return "";
+  // Reuse the canonical encrypt CLI so the embed path and the manual
+  // issuance path share one codec source of truth (bun runs the TS
+  // script natively — same toolchain as the rest of the build).
+  const encrypt = spawnSync(
+    "bun",
+    [resolve(repoRoot, "scripts", "encrypt-demo-credentials.ts"), envDemoPath],
+    { encoding: "utf8" },
+  );
+  if (encrypt.status !== 0) {
+    // A present-but-unusable `.env.demo` is a build error, not a silent
+    // downgrade to manual activation — fail loud so the packaging machine
+    // never ships a build that quietly lost its zero-input demo flow.
+    process.stderr.write(
+      `[esbuild-main] embedded activation encrypt failed: ${encrypt.stderr || encrypt.error?.message || "unknown"}\n`,
+    );
+    process.exit(1);
+  }
+  return encrypt.stdout.trim();
+}
+
+const embeddedActivationCode = resolveEmbeddedActivationCode();
+process.stdout.write(
+  `[esbuild-main] embedded activation key: ${embeddedActivationCode.length > 0 ? "present" : "absent"}\n`,
+);
 
 const buildOptions = {
   entryPoints: [resolve(repoRoot, "src", "main.ts")],
@@ -23,6 +61,9 @@ const buildOptions = {
   platform: "node",
   target: ["node20"],
   legalComments: "none",
+  define: {
+    __LVIS_EMBEDDED_DEMO_ACTIVATION_CODE__: JSON.stringify(embeddedActivationCode),
+  },
   external: [
     "electron",
     "electron-updater",
