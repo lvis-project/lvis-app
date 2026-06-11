@@ -35,17 +35,18 @@ import type { AiProviderPingIpcResult } from "../../../shared/ai-provider-ping.j
 import { t } from "../../../i18n/runtime.js";
 import { useTranslation } from "../../../i18n/react.js";
 
-export interface PersonalizedWelcomeApi {
-  pingAiProvider: () => Promise<AiProviderPingIpcResult>;
-}
-
 export interface PersonalizedWelcomeProps {
   open: boolean;
   /** 호칭 the user typed into MemorySeed. Empty = neutral greeting. */
   nickname?: string;
   /** One-line 자기소개 the user typed into MemorySeed. */
   introduction?: string;
-  api: PersonalizedWelcomeApi;
+  /**
+   * Liveness probe for the configured LLM provider. Passed as a stable
+   * function reference (not wrapped in a fresh object literal) so a parent
+   * re-render does not re-fire the mount-time ping effect.
+   */
+  pingAiProvider: () => Promise<AiProviderPingIpcResult>;
   /** Fires when the user presses "예, 시작할게요 →". */
   onContinue: () => void;
 }
@@ -97,7 +98,7 @@ export function PersonalizedWelcome({
   open,
   nickname,
   introduction,
-  api,
+  pingAiProvider,
   onContinue,
 }: PersonalizedWelcomeProps) {
   const { t } = useTranslation();
@@ -129,7 +130,7 @@ export function PersonalizedWelcome({
     setPingState({ status: "loading" });
     (async () => {
       try {
-        const result = await api.pingAiProvider();
+        const result = await pingAiProvider();
         if (cancelledRef.current) return;
         // Discriminated union narrowing — IpcResult is either the
         // unauthorized-frame envelope `{ok: false, error}` or the
@@ -159,7 +160,7 @@ export function PersonalizedWelcome({
     return () => {
       cancelledRef.current = true;
     };
-  }, [open, api]);
+  }, [open, pingAiProvider]);
 
   const handleContinue = useCallback(() => {
     if (pingState.status === "loading") return;

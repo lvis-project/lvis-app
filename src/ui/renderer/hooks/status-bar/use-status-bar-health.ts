@@ -14,6 +14,15 @@ interface Options {
 
 const ITEM_ID = "health:services";
 
+/**
+ * Consecutive LLM ping failures required before flipping a previously-online
+ * dot to offline. A single transient failure (network blip, momentary endpoint
+ * hiccup) holds the last-known-good state so the status dot stops oscillating
+ * online↔offline on every flaky probe. Recovery is immediate: one successful
+ * ping clears the streak and restores online.
+ */
+const LLM_OFFLINE_HYSTERESIS = 2;
+
 type ServiceHealth =
   | { status: "checking" }
   | { status: "online"; detail?: string; latencyMs?: number }
@@ -34,6 +43,9 @@ export function useStatusBarHealth({ api, upsertPersistent, removePersistent }: 
     let intervalId: ReturnType<typeof setInterval> | null = null;
     let llm: ServiceHealth = canPingLlm ? { status: "checking" } : { status: "unavailable" };
     let market: ServiceHealth = canPingMarket ? { status: "checking" } : { status: "unavailable" };
+    // Consecutive LLM probe failures since the last online result. A single
+    // failure does not flip a previously-online dot offline (hysteresis).
+    let llmConsecutiveFailures = 0;
 
     const emit = () => {
       if (cancelled) return;
@@ -44,13 +56,30 @@ export function useStatusBarHealth({ api, upsertPersistent, removePersistent }: 
       if (!canPingLlm) return;
       const my = ++llmToken;
       if (llm.status === "checking") emit();
+      let next: ServiceHealth;
       try {
         const result = await api.pingAiProvider();
         if (cancelled || my !== llmToken) return;
-        llm = llmHealthFromPing(result);
+        next = llmHealthFromPing(result);
       } catch {
         if (cancelled || my !== llmToken) return;
-        llm = { status: "offline", detail: "ping failed" };
+        next = { status: "offline", detail: "ping failed" };
+      }
+      if (next.status === "offline") {
+        llmConsecutiveFailures += 1;
+        // Hold the last-known-good state until the failure streak crosses the
+        // hysteresis threshold. Only a previously *online* dot is held; states
+        // like not-configured/unauthorized are deterministic, not transient,
+        // so they flip through immediately.
+        if (llm.status === "online" && llmConsecutiveFailures < LLM_OFFLINE_HYSTERESIS) {
+          return;
+        }
+        llm = next;
+      } else {
+        // Any non-offline result (online / not-configured / unauthorized)
+        // clears the streak so recovery is immediate.
+        llmConsecutiveFailures = 0;
+        llm = next;
       }
       emit();
     };
