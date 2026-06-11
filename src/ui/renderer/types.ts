@@ -204,11 +204,6 @@ export type AppSettings = {
      * `src/data/settings-store.ts` `FeatureFlags.demoAutoplayEnabled`.
      */
     demoAutoplayEnabled?: boolean;
-    /**
-     * Demo-only display flag — hides tool failure badges in the chat timeline.
-     * Main-process SOT: `src/data/settings-store.ts` `FeatureFlags.hideToolFailures`.
-     */
-    hideToolFailures?: boolean;
   };
 };
 
