@@ -526,16 +526,20 @@ export function registerDemoHandlers(deps: IpcDeps): void {
       relaunchArmed = false;
       demoEffectiveForCurrentProcess = false;
       try {
+        // Write the demo-disabled sentinel FIRST, and make it load-bearing:
+        // if it fails, the whole clear fails (`clear-failed`) and `.env.demo`
+        // is left intact, so the persisted loader still owns hydration — the
+        // demo stays active rather than silently resurrecting on the next
+        // boot. Doing the sentinel after the `.env.demo` removal (or
+        // swallowing its error) would be fail-OPEN: an IO failure would leave
+        // neither file, and the embedded-key boot hydrate would re-activate a
+        // session the user explicitly logged out of. A logout is an explicit
+        // "stop using the demo" intent; the sentinel is its durable record,
+        // honored by BOTH loadPersistedDemoActivationSync and
+        // loadEmbeddedDemoActivationSync. The next activation removes it.
+        await writeEnvDemoFile(demoDisabledSentinelPath(), "");
         const envDemoPath = persistedEnvDemoPath();
         await fs.rm(envDemoPath, { force: true });
-        // Drop the demo-disabled sentinel so an embedded-key build does NOT
-        // silently re-hydrate the demo session on the next boot. A logout is
-        // an explicit "stop using the demo" intent; without the sentinel the
-        // build-embedded ciphertext would re-create `.env.demo` every launch.
-        // The next manual/embedded activation removes it again (see above).
-        try {
-          await writeEnvDemoFile(demoDisabledSentinelPath(), "");
-        } catch { /* sentinel write is best-effort — must not break clear */ }
         for (const k of Object.keys(process.env)) {
           if (k.startsWith("LVIS_DEMO_")) {
             delete process.env[k];

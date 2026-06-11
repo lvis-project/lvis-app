@@ -56,6 +56,11 @@ export function demoDisabledSentinelPath(): string {
  * without re-reading the file. Empty object when the file is absent.
  */
 export function loadPersistedDemoActivationSync(): Record<string, string> {
+  // Honor the demo-disabled sentinel symmetrically with the embedded loader:
+  // if the user logged out (`lvis:demo:clear` writes the sentinel BEFORE
+  // removing `.env.demo`), a leftover `.env.demo` — e.g. if the subsequent
+  // removal failed — must NOT silently re-activate the demo on boot.
+  if (existsSync(demoDisabledSentinelPath())) return {};
   const path = persistedEnvDemoPath();
   if (!existsSync(path)) return {};
   let text: string;

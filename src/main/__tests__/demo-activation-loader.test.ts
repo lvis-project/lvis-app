@@ -12,6 +12,7 @@ import { join } from "node:path";
 import { encryptActivationPayload } from "../demo-activation-codec.js";
 import {
   loadEmbeddedDemoActivationSync,
+  loadPersistedDemoActivationSync,
   persistedEnvDemoPath,
   demoDisabledSentinelPath,
 } from "../demo-activation-loader.js";
@@ -106,5 +107,35 @@ describe("loadEmbeddedDemoActivationSync", () => {
     _setEmbeddedActivationCodeForTest(encryptActivationPayload(SAMPLE_ENV));
     loadEmbeddedDemoActivationSync();
     expect(existsSync(persistedEnvDemoPath())).toBe(false);
+  });
+});
+
+describe("loadPersistedDemoActivationSync — sentinel symmetry", () => {
+  it("hydrates from a persisted .env.demo when no sentinel exists", () => {
+    seedSecretsDir();
+    writeFileSync(
+      persistedEnvDemoPath(),
+      "LVIS_DEMO_VENDOR=azure-foundry\n",
+      { mode: 0o600 },
+    );
+    const parsed = loadPersistedDemoActivationSync();
+    expect(parsed.LVIS_DEMO_VENDOR).toBe("azure-foundry");
+    expect(process.env.LVIS_DEMO_VENDOR).toBe("azure-foundry");
+  });
+
+  it("ignores a leftover .env.demo when the demo-disabled sentinel exists", () => {
+    // Fail-safe: if `lvis:demo:clear` wrote the sentinel but the subsequent
+    // `.env.demo` removal failed, the persisted loader must NOT re-activate
+    // the demo the user logged out of (symmetric with the embedded loader).
+    seedSecretsDir();
+    writeFileSync(
+      persistedEnvDemoPath(),
+      "LVIS_DEMO_VENDOR=azure-foundry\n",
+      { mode: 0o600 },
+    );
+    writeFileSync(demoDisabledSentinelPath(), "", { mode: 0o600 });
+    const parsed = loadPersistedDemoActivationSync();
+    expect(parsed).toEqual({});
+    expect(process.env.LVIS_DEMO_VENDOR).toBeUndefined();
   });
 });
