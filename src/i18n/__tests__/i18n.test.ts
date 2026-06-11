@@ -34,6 +34,14 @@ describe("locale", () => {
     expect(normalizeLocale("xx")).toBe("en");
     expect(normalizeLocale(undefined)).toBe("en");
   });
+
+  it("normalizeLocale handles OS locale tags from getPreferredSystemLanguages()", () => {
+    // Electron's getPreferredSystemLanguages() returns BCP-47 tags like these.
+    expect(normalizeLocale("ko-KR")).toBe("ko");
+    expect(normalizeLocale("en-GB")).toBe("en");
+    expect(normalizeLocale("zh-Hans-CN")).toBe("en"); // unsupported primary → English
+    expect(normalizeLocale("ja-JP")).toBe("en");       // unsupported primary → English
+  });
 });
 
 describe("interpolate", () => {

@@ -374,6 +374,13 @@ export interface MarketplaceSettings {
 
 export interface SettingsServiceOptions {
   userDataPath: string;
+  /**
+   * BCP-47 locale tag from the host OS (e.g. `app.getPreferredSystemLanguages()[0]`).
+   * Used only on a fresh install (no settings file) to seed the UI language from the
+   * system rather than hard-coding English. Once the user has a settings file the
+   * stored value takes precedence — this field is ignored.
+   */
+  systemLocale?: string;
 }
 
 const DEFAULT_SETTINGS: AppSettings = {
@@ -448,6 +455,7 @@ const DEFAULT_SETTINGS: AppSettings = {
 export class SettingsService {
   private readonly settingsPath: string;
   private readonly secretsPath: string;
+  private readonly systemLocale: string | undefined;
   private settings: AppSettings;
 
   constructor(options: SettingsServiceOptions) {
@@ -455,6 +463,7 @@ export class SettingsService {
     mkdirSync(dir, { recursive: true });
     this.settingsPath = resolve(dir, "lvis-settings.json");
     this.secretsPath = resolve(dir, "lvis-secrets.json");
+    this.systemLocale = options.systemLocale;
     this.migrateSecretsMode();
     const loaded = this.loadSettings() as AppSettings & { __needsV2WriteBack?: boolean };
     const needsWriteBack = loaded.__needsV2WriteBack === true;
@@ -726,7 +735,17 @@ export class SettingsService {
   // --- private helpers ---
 
   private loadSettings(): AppSettings {
-    if (!existsSync(this.settingsPath)) return structuredClone(DEFAULT_SETTINGS);
+    if (!existsSync(this.settingsPath)) {
+      const defaults = structuredClone(DEFAULT_SETTINGS);
+      // On a fresh install there is no user preference yet — seed the UI
+      // language from the host OS rather than hard-coding English.
+      // normalizeLocale coerces unsupported tags to the DEFAULT_LOCALE, so
+      // this is a legitimate external-boundary fallback, not a workaround.
+      if (this.systemLocale !== undefined) {
+        defaults.appearance.language = normalizeLocale(this.systemLocale);
+      }
+      return defaults;
+    }
     try {
       const raw = readFileSync(this.settingsPath, "utf-8");
       const parsed = JSON.parse(raw) as any;
