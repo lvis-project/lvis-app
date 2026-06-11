@@ -278,7 +278,11 @@ export function GeneralTab({
         setLogoutError(t("generalTab.errorDeleteDemoCredentials"));
         return;
       }
-      await api.updateSettings({ features: { onboardingCompleted: false } });
+      // Reset authMode to "manual" so the LLM tab immediately shows the
+      // full manual form after logout — the login session is gone, so
+      // keeping authMode==="login" would leave the form stuck in disabled
+      // state until the user toggled it manually.
+      await api.updateSettings({ llm: { authMode: "manual" }, features: { onboardingCompleted: false } });
       setLogoutConfirmOpen(false);
       onLogout?.();
     } catch {

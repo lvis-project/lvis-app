@@ -1,0 +1,108 @@
+/**
+ * Manual host resolver — applies a user-configured /etc/hosts-style mapping
+ * as a Chromium `host-resolver-rules` command-line switch.
+ *
+ * Only active when `authMode === "manual"` in the persisted LLM settings.
+ * Demo mode (`authMode === "login"`) uses `LVIS_DEMO_HOST_MAP` exclusively
+ * via `demo-host-resolver.ts`; this module is a no-op when demo mode is active.
+ *
+ * MUST be called before `app.whenReady()` — Chromium's command line is frozen
+ * once the network service starts.
+ *
+ * Format of `hostResolverMap` (persisted at `llm.hostResolverMap` in the app
+ * settings file `<userData>/lvis-settings.json`, where `<userData>` is
+ * `app.getPath("userData")`): /etc/hosts-style text, one "IP hostname" entry
+ * per line. Blank lines and lines starting with `#` are ignored. Structurally
+ * malformed lines (bad IPv4, non-DNS hostname, extra tokens) are skipped —
+ * see {@link parseHostResolverMap}.
+ *
+ * When both demo AND manual host maps are present, demo mode takes precedence
+ * (the demo map is installed by `demo-host-resolver.ts` first; this function
+ * is a no-op so the two maps never collide on the same switch).
+ */
+import { existsSync, readFileSync } from "node:fs";
+import type { App } from "electron";
+import { settingsFilePath } from "../data/settings-store.js";
+import { parseHostResolverMap, type HostResolverMapEntry } from "../shared/host-resolver-map.js";
+import { createLogger } from "../lib/logger.js";
+
+const log = createLogger("manual-host-resolver");
+
+/** Build the `host-resolver-rules` switch value from parsed entries. */
+function buildHostResolverRules(entries: ReadonlyArray<HostResolverMapEntry>): string {
+  return entries.map(({ hostname, ip }) => `MAP ${hostname} ${ip}`).join(",");
+}
+
+/**
+ * Read the app settings file and return `llm.hostResolverMap` if present and
+ * `llm.authMode === "manual"`. Returns `undefined` when the file is absent,
+ * unreadable, or the field is not set.
+ *
+ * Reads from `settingsFilePath(userDataPath)` — the same path the
+ * `SettingsService` writes to — so a map saved via the UI is the one applied
+ * on the next boot.
+ *
+ * Uses synchronous I/O because this is called before `app.whenReady()` —
+ * the async boot pipeline has not started yet.
+ */
+function readPersistedManualHostMap(userDataPath: string): string | undefined {
+  const settingsPath = settingsFilePath(userDataPath);
+  if (!existsSync(settingsPath)) return undefined;
+  try {
+    const raw = readFileSync(settingsPath, "utf-8");
+    const parsed = JSON.parse(raw) as Record<string, unknown>;
+    const llm = parsed.llm as Record<string, unknown> | undefined;
+    if (!llm) return undefined;
+    if (llm.authMode !== "manual") return undefined;
+    const map = llm.hostResolverMap;
+    if (typeof map !== "string" || map.trim().length === 0) return undefined;
+    return map;
+  } catch {
+    // Corrupt settings file — skip silently; the boot flow will surface
+    // the JSON parse error through the normal settings service path.
+    return undefined;
+  }
+}
+
+/**
+ * Apply the user-configured host-resolver map when `authMode === "manual"`
+ * and a non-empty map is persisted. MUST be called before `app.whenReady()`.
+ *
+ * `userDataPath` is `app.getPath("userData")` — the directory the
+ * `SettingsService` persists to. Threading it through (rather than
+ * hardcoding a path) keeps the reader and writer on the same file.
+ *
+ * Returns `true` when the switch was applied, `false` when no-op (demo mode
+ * active, no map configured, or map is empty after parsing).
+ *
+ * When demo mode is active (`LVIS_DEMO_VENDOR === "azure-foundry"`), this
+ * function is a no-op — the demo map takes precedence. The check is pinned to
+ * the foundry vendor so a future non-foundry demo vendor cannot silently drop
+ * the user's manual map without installing its own switch.
+ */
+export function applyManualHostResolverRules(
+  app: Pick<App, "commandLine">,
+  userDataPath: string,
+  env: NodeJS.ProcessEnv = process.env,
+): boolean {
+  // Demo mode (azure-foundry) already installs its own host-resolver-rules; do
+  // not collide. Pinned to the foundry vendor — the only demo vendor that
+  // installs a demo host map (see demo-host-resolver.ts).
+  if (env.LVIS_DEMO_VENDOR === "azure-foundry") {
+    return false;
+  }
+
+  const rawMap = readPersistedManualHostMap(userDataPath);
+  if (!rawMap) return false;
+
+  const entries = parseHostResolverMap(rawMap);
+  if (entries.length === 0) {
+    log.info("manual host-resolver map present but no valid entries — skipping");
+    return false;
+  }
+
+  const rules = buildHostResolverRules(entries);
+  app.commandLine.appendSwitch("host-resolver-rules", rules);
+  log.info(`manual host-resolver rules applied: ${entries.length} mapping(s)`);
+  return true;
+}
