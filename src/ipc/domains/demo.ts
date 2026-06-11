@@ -65,7 +65,10 @@ import {
   decryptActivationCode,
   parseEnvDemoText,
 } from "../../main/demo-activation-codec.js";
-import { persistedEnvDemoPath } from "../../main/demo-activation-loader.js";
+import {
+  demoDisabledSentinelPath,
+  persistedEnvDemoPath,
+} from "../../main/demo-activation-loader.js";
 import {
   getDemoActiveVendor,
   getDemoHostMap,
@@ -386,6 +389,28 @@ export function registerDemoHandlers(deps: IpcDeps): void {
       return { ok: false, error: "persist-failed" };
     }
 
+    // A successful (re)activation clears the demo-disabled sentinel left by
+    // a prior `lvis:demo:clear`, so an embedded-key build resumes boot-time
+    // auto-hydrate on the next launch (the user opted back in). Best-effort:
+    // a stale sentinel only costs one extra manual activation, never breaks
+    // this activation.
+    try {
+      await fs.rm(demoDisabledSentinelPath(), { force: true });
+    } catch {
+      // Best-effort for THIS activation (env is injected below regardless),
+      // but a stale sentinel makes the NEXT boot skip auto-hydrate — an
+      // unexpected logged-out state with no signal. Audit it so the
+      // "asked to activate again on next launch" symptom is debuggable.
+      try {
+        auditLogger.log({
+          timestamp: new Date().toISOString(),
+          sessionId: "auth",
+          type: "warn",
+          input: `[demo-activation] sentinel-clear-failed (source=${source})`,
+        });
+      } catch { /* audit must not break IPC */ }
+    }
+
     // Step 4 — inject the parsed values into `process.env` AND re-run the
     // demo-credentials capture so the auth IPC handler sees the new keys.
     // The injection runs first because `recaptureDemoCredentialsAfterActivation`
@@ -514,6 +539,18 @@ export function registerDemoHandlers(deps: IpcDeps): void {
       relaunchArmed = false;
       demoEffectiveForCurrentProcess = false;
       try {
+        // Write the demo-disabled sentinel FIRST, and make it load-bearing:
+        // if it fails, the whole clear fails (`clear-failed`) and `.env.demo`
+        // is left intact, so the persisted loader still owns hydration — the
+        // demo stays active rather than silently resurrecting on the next
+        // boot. Doing the sentinel after the `.env.demo` removal (or
+        // swallowing its error) would be fail-OPEN: an IO failure would leave
+        // neither file, and the embedded-key boot hydrate would re-activate a
+        // session the user explicitly logged out of. A logout is an explicit
+        // "stop using the demo" intent; the sentinel is its durable record,
+        // honored by BOTH loadPersistedDemoActivationSync and
+        // loadEmbeddedDemoActivationSync. The next activation removes it.
+        await writeEnvDemoFile(demoDisabledSentinelPath(), "");
         const envDemoPath = persistedEnvDemoPath();
         await fs.rm(envDemoPath, { force: true });
         for (const k of Object.keys(process.env)) {
