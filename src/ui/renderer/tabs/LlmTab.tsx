@@ -200,6 +200,13 @@ export function LlmTab(props: LlmTabProps) {
   } = props;
   const { t } = useTranslation();
   const vendorInfo = getVendorInfo(vendor);
+  // (B) Pre-hydration the parent initializes `vendor` to "" so the dropdown
+  // never flashes the wrong vendor. `getVendorInfo("")` still falls back to
+  // VENDORS[0], so reading `vendorInfo.label` directly would leak that stale
+  // first-vendor name into the API-key heading before settings load. Render
+  // the label only once a real vendor is hydrated; until then show nothing.
+  const vendorLabelReady = vendor !== "" && settingsLoaded;
+  const vendorLabel = vendorLabelReady ? vendorInfo.label : "";
   const hasOnSave = typeof onSave === "function";
   const activeModelValue = model.trim() || vendorInfo.defaultModel;
   const activeModelOptions = modelOptionsFor(vendor, activeModelValue);
@@ -207,22 +214,31 @@ export function LlmTab(props: LlmTabProps) {
   // Relaunch confirmation dialog state for host map changes.
   const [relaunchConfirmOpen, setRelaunchConfirmOpen] = useState(false);
   const [relaunchPending, setRelaunchPending] = useState(false);
+  const [relaunchError, setRelaunchError] = useState<string | null>(null);
 
   const handleHostMapApply = useCallback(() => {
+    setRelaunchError(null);
     setRelaunchConfirmOpen(true);
   }, []);
 
   const handleRelaunchConfirm = useCallback(async () => {
     setRelaunchPending(true);
+    setRelaunchError(null);
     try {
       await api.applyHostMap(hostResolverMap);
-      // The main process calls app.relaunch() + app.exit(0) so this
-      // renderer will terminate — no further cleanup needed here.
-    } finally {
+      // On success the main process calls app.relaunch() + app.exit(0), so
+      // this renderer terminates here — no further cleanup runs. We keep the
+      // dialog open until then so the user never sees it close without a
+      // restart actually happening.
+    } catch {
+      // Persisting the host map (or scheduling the relaunch) failed. Surface
+      // it inline and keep the dialog open so the user can retry or cancel —
+      // closing silently would falsely imply the change applied. Awaiting +
+      // catching here also prevents an unhandled promise rejection.
+      setRelaunchError(t("llmTab.relaunchConfirmError"));
       setRelaunchPending(false);
-      setRelaunchConfirmOpen(false);
     }
-  }, [api, hostResolverMap]);
+  }, [api, hostResolverMap, t]);
 
   const isLoginMode = authMode === "login";
   // Requirement D — only allow Apply when the host map has ACTUALLY changed
@@ -241,16 +257,35 @@ export function LlmTab(props: LlmTabProps) {
       />
 
       {/* Relaunch confirmation dialog — shown before applying host map changes */}
-      <Dialog open={relaunchConfirmOpen} onOpenChange={setRelaunchConfirmOpen}>
+      <Dialog
+        open={relaunchConfirmOpen}
+        onOpenChange={(open) => {
+          if (relaunchPending) return;
+          if (!open) setRelaunchError(null);
+          setRelaunchConfirmOpen(open);
+        }}
+      >
         <DialogContent>
           <DialogHeader>
             <DialogTitle>{t("llmTab.relaunchConfirmTitle")}</DialogTitle>
             <DialogDescription>{t("llmTab.relaunchConfirmBody")}</DialogDescription>
           </DialogHeader>
+          {relaunchError && (
+            <p
+              role="alert"
+              className="rounded-md bg-destructive/10 px-3 py-2 text-sm text-destructive"
+              data-testid="llm-tab:relaunch-error"
+            >
+              {relaunchError}
+            </p>
+          )}
           <DialogFooter>
             <Button
               variant="outline"
-              onClick={() => setRelaunchConfirmOpen(false)}
+              onClick={() => {
+                setRelaunchError(null);
+                setRelaunchConfirmOpen(false);
+              }}
               disabled={relaunchPending}
             >
               {t("llmTab.relaunchConfirmCancel")}
@@ -330,17 +365,20 @@ export function LlmTab(props: LlmTabProps) {
               <p className="text-[11px] text-muted-foreground">
                 {t("llmTab.loginAutoConfig")}
               </p>
-              {/* Affordance for the disabled-field hint: switch back to manual
-                  mode so the provider fields + host map become editable. */}
-              <Button
-                size="sm"
-                variant="ghost"
-                className="h-7 px-0 text-xs"
-                data-testid="llm-tab:logout-to-edit"
-                onClick={() => setAuthMode("manual")}
+              {/* Edit access is gated on logging out. Logout is owned by the
+                  single GeneralTab.performLogout path (which deletes the active
+                  vendor secret, clears the demo session, and persists
+                  llm.authMode="manual"). We deliberately do NOT offer a local
+                  authMode toggle here: setting renderer state to "manual"
+                  without persisting would desync the UI from the stored
+                  llm.authMode and revert on the next mount. Point the user at
+                  the canonical logout instead. */}
+              <p
+                className="text-[11px] text-muted-foreground"
+                data-testid="llm-tab:logout-hint"
               >
                 {t("llmTab.logoutToEdit")}
-              </Button>
+              </p>
             </div>
           )}
 
@@ -437,7 +475,9 @@ export function LlmTab(props: LlmTabProps) {
             )}
             {vendor !== "vertex-ai" && (
               <div className="space-y-2">
-                <Label className="text-sm font-medium">{vendorInfo.label} {t("llmTab.apiKey")}</Label>
+                <Label className="text-sm font-medium" data-testid="llm-tab:api-key-label">
+                  {vendorLabel ? `${vendorLabel} ` : ""}{t("llmTab.apiKey")}
+                </Label>
                 <div className="flex items-center gap-2">
                   {hasKey ? <Badge variant="default" className="text-xs">{t("llmTab.apiKeySet")}</Badge> : <Badge variant="secondary" className="text-xs">{t("llmTab.apiKeyNotSet")}</Badge>}
                   {hasKey && !isLoginMode && (

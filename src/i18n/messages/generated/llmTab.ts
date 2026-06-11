@@ -49,9 +49,10 @@ export const en = {
   "llmTab.relaunchConfirmBody": "Changing the host resolver map requires the app to restart. Unsaved work will be lost. Continue?",
   "llmTab.relaunchConfirmOk": "Restart Now",
   "llmTab.relaunchConfirmCancel": "Cancel",
+  "llmTab.relaunchConfirmError": "Failed to apply the host resolver map. The app was not restarted — please try again.",
   // Login-mode disabled field labels
   "llmTab.loginModeDisabledHint": "Managed by login session — log out to edit manually.",
-  "llmTab.logoutToEdit": "Log out",
+  "llmTab.logoutToEdit": "To edit these fields, log out from the General tab.",
 } as const;
 export const ko: Record<keyof typeof en, string> = {
   "llmTab.saving": "저장 중…",
@@ -103,7 +104,8 @@ export const ko: Record<keyof typeof en, string> = {
   "llmTab.relaunchConfirmBody": "호스트 리졸버 맵 변경을 적용하려면 앱을 재시작해야 합니다. 저장하지 않은 작업이 손실될 수 있습니다. 계속하시겠습니까?",
   "llmTab.relaunchConfirmOk": "지금 재시작",
   "llmTab.relaunchConfirmCancel": "취소",
+  "llmTab.relaunchConfirmError": "호스트 리졸버 맵 적용에 실패했습니다. 앱이 재시작되지 않았으니 다시 시도하세요.",
   // Login-mode disabled field labels
   "llmTab.loginModeDisabledHint": "로그인 세션이 관리 중 — 직접 편집하려면 로그아웃하세요.",
-  "llmTab.logoutToEdit": "로그아웃",
+  "llmTab.logoutToEdit": "이 항목을 편집하려면 General 탭에서 로그아웃하세요.",
 };
