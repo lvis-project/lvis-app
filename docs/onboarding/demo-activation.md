@@ -142,6 +142,32 @@ to internal distribution channels. The activation string itself never
 enters git: the embed sources are a gitignored file or a packaging-time
 env var, and the value exists only inside the produced bundle.
 
+### CI / release builds (GitHub Actions)
+
+Release installers are built by `.github/workflows/build-installers.yml`,
+not on a developer machine, so the embed source is supplied as a repo
+**Actions secret** rather than a local `.env.demo`:
+
+1. Generate the activation string from a `.env.demo`:
+   `npx tsx scripts/encrypt-demo-credentials.ts .env.demo` → `LVIS-DEMO:v1:<...>`
+   (the script targets `tsx`; `bun scripts/encrypt-demo-credentials.ts .env.demo`
+   also works in a bun toolchain). The secret holds the **codec ciphertext,
+   not the raw API key** — encryption already happened here.
+2. Register it as a repository secret named `LVIS_EMBED_DEMO_ACTIVATION`
+   (Settings → Secrets and variables → Actions → New repository secret,
+   or `gh secret set LVIS_EMBED_DEMO_ACTIVATION`).
+3. The Build-installer step passes it through as `LVIS_EMBED_DEMO_ACTIVATION`,
+   which `build-main-esbuild.mjs` validates and embeds verbatim into the
+   bundle (it is already ciphertext — no re-encryption). The workflow runs
+   only on `workflow_dispatch` / tag pushes, and the secret is unavailable to
+   fork / untrusted contexts (and absent when not configured), so those builds
+   embed nothing and keep the manual-paste flow.
+
+To rotate, re-issue the ciphertext and update the secret — no code change.
+Because `lvis-app` is a public repository and the codec passphrase ships
+in source, treat the embedded demo key as effectively public: use a
+rate-limited / throwaway demo key, never a production credential.
+
 ## Security model
 
 The activation codec is **deliberately low-strength** crypto with a
