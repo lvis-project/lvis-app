@@ -188,6 +188,9 @@ export function PermissionsTab() {
   const [approvalsBusy, setApprovalsBusy] = useState(false);
   const [reviewer, setReviewer] = useState<PermissionReviewerSettings>(DEFAULT_REVIEWER_SETTINGS);
   const [reviewerBusy, setReviewerBusy] = useState(false);
+  // Runtime degrade: persisted mode="llm" but wiring fell back to rule because
+  // no LLM provider/key is configured. Drives the degrade banner.
+  const [reviewerDegradedToRule, setReviewerDegradedToRule] = useState(false);
 
   // ── 초기 fetch (탭 진입 시) ───────────────────────
   const fetchAll = useCallback(async () => {
@@ -215,6 +218,7 @@ export function PermissionsTab() {
       setQuarantinedHooks(hookTrustRes.ok ? hookTrustRes.disabled : []);
       setDirectories(dirRes.ok && dirRes.verb === "list" ? dirRes.userAdditions : []);
       setReviewer(reviewerRes.settings);
+      setReviewerDegradedToRule(reviewerRes.reviewerDegradedToRule ?? false);
     } catch (e) {
       setError((e as Error).message ?? t("permissionsTab.errorLoadFailed"));
     } finally {
@@ -323,6 +327,7 @@ export function PermissionsTab() {
         const reviewerRes = await window.lvis.permission.reviewerDispatch(`mode ${targetReviewerMode}`);
         if (reviewerRes.ok) {
           setReviewer(reviewerRes.settings);
+          setReviewerDegradedToRule(reviewerRes.reviewerDegradedToRule ?? false);
         } else {
           showBanner("error", formatReviewerDispatchError(reviewerRes.error));
           return;
@@ -335,6 +340,7 @@ export function PermissionsTab() {
         );
         if (interactiveRes.ok) {
           setReviewer(interactiveRes.settings);
+          setReviewerDegradedToRule(interactiveRes.reviewerDegradedToRule ?? false);
         } else {
           showBanner("error", formatReviewerDispatchError(interactiveRes.error));
           return;
@@ -372,6 +378,7 @@ export function PermissionsTab() {
       const res = await window.lvis.permission.reviewerDispatch(rawArgs);
       if (res.ok) {
         setReviewer(res.settings);
+        setReviewerDegradedToRule(res.reviewerDegradedToRule ?? false);
       } else {
         showBanner("error", formatReviewerDispatchError(res.error));
       }
@@ -662,6 +669,16 @@ export function PermissionsTab() {
               </Label>
             ))}
           </RadioGroup>
+
+          {reviewerDegradedToRule && reviewer.mode === "llm" ? (
+            <p
+              role="status"
+              data-testid="reviewer-llm-degraded-banner"
+              className="rounded-md border border-warning/40 bg-warning/15 px-3 py-2 text-[11px] text-warning"
+            >
+              {t("permissionsTab.warnReviewerLlmDegradedToRule")}
+            </p>
+          ) : null}
 
           <div className="space-y-3 rounded-md border bg-muted/20 px-3 py-3">
             <div>
