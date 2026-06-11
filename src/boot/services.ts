@@ -50,13 +50,20 @@ export async function bootstrapCoreServices(mainWindow: BrowserWindow): Promise<
   await auditService.start();
 
   // §4.2 Step 1: Config
+  // Pass the OS locale so a fresh install seeds the UI language from the
+  // system rather than defaulting to English. getPreferredSystemLanguages()
+  // returns BCP-47 tags ordered by user preference (e.g. ["ko-KR", "en-US"]);
+  // normalizeLocale inside SettingsService coerces to a supported locale.
+  // app.getPreferredSystemLanguages() requires app.whenReady() — bootstrapCoreServices
+  // is always called after that point (see boot/index.ts).
   const settingsService = new SettingsService({
     userDataPath: app.getPath("userData"),
+    systemLocale: app.getPreferredSystemLanguages()[0],
   });
 
-  // Set the main-process UI locale from persisted settings so dialog titles,
-  // native menus, tray, and notifications render in the user's language.
-  // Defaults to English (the global build) when unset. See src/i18n.
+  // Set the main-process UI locale from persisted settings (or system-detected
+  // locale on fresh install) so dialog titles, native menus, tray, and
+  // notifications render in the user's language. See src/i18n.
   setLocale(settingsService.get("appearance").language);
 
   // §14.2 Audit log rotation + retention — boot-time check + 1h interval
