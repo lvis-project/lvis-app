@@ -25,6 +25,17 @@ export type { LLMVendor, LLMVendorSettings };
 export { LLM_VENDORS };
 
 /**
+ * Single source of truth for the settings file path. Both `SettingsService`
+ * (writer) and the pre-`whenReady` manual host-resolver reader derive the
+ * settings path from this helper so the two can never drift onto different
+ * files. `userDataPath` is `app.getPath("userData")` (e.g. on macOS
+ * `~/Library/Application Support/LVIS`).
+ */
+export function settingsFilePath(userDataPath: string): string {
+  return resolve(userDataPath, "lvis-settings.json");
+}
+
+/**
  * LLM settings — single source of truth.
  *
  * - `provider` selects the active vendor.
@@ -60,6 +71,19 @@ export interface LLMSettings {
   vendors: Record<LLMVendor, LLMVendorSettings>;
   streamSmoothing: "none" | "word" | "char";
   fallbackChain: Array<{ provider: LLMVendor; model: string }>;
+  /**
+   * Manual-mode Chromium host-resolver map. Persisted as /etc/hosts-style
+   * text (one "IP hostname" entry per line; blank lines and # comments
+   * ignored). Applied via Chromium `host-resolver-rules` command-line switch
+   * on next launch. Only honoured when `authMode === "manual"` — demo mode
+   * (`authMode === "login"`) uses `LVIS_DEMO_HOST_MAP` exclusively.
+   *
+   * Stored under the top-level `llm` namespace in the app settings file
+   * (`<userData>/lvis-settings.json`, where `<userData>` is
+   * `app.getPath("userData")`) to keep host-routing paired with the LLM
+   * endpoint it affects.
+   */
+  hostResolverMap?: string;
 }
 
 /**
@@ -72,6 +96,7 @@ export interface LLMSettingsPatch {
   vendors?: Partial<Record<LLMVendor, Partial<LLMVendorSettings>>>;
   streamSmoothing?: "none" | "word" | "char";
   fallbackChain?: Array<{ provider: LLMVendor; model: string }>;
+  hostResolverMap?: string;
 }
 
 export interface ChatSettings {
@@ -461,7 +486,7 @@ export class SettingsService {
   constructor(options: SettingsServiceOptions) {
     const dir = resolve(options.userDataPath);
     mkdirSync(dir, { recursive: true });
-    this.settingsPath = resolve(dir, "lvis-settings.json");
+    this.settingsPath = settingsFilePath(options.userDataPath);
     this.secretsPath = resolve(dir, "lvis-secrets.json");
     this.systemLocale = options.systemLocale;
     this.migrateSecretsMode();
@@ -882,6 +907,8 @@ function mergeLlmPatch(base: LLMSettings, partial: LLMSettingsPatch): LLMSetting
     vendors,
     streamSmoothing: partial.streamSmoothing ?? base.streamSmoothing,
     fallbackChain: partial.fallbackChain ?? base.fallbackChain,
+    // `undefined` means "no mapping"; an explicit empty string clears the map.
+    hostResolverMap: "hostResolverMap" in partial ? partial.hostResolverMap : base.hostResolverMap,
   };
 }
 
