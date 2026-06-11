@@ -28,6 +28,7 @@ import type { LvisApi } from "../types.js";
 import { SettingsPageHeader } from "../components/SettingsPageHeader.js";
 import { SettingsSection } from "../components/SettingsSection.js";
 import { useTranslation } from "../../../i18n/react.js";
+import { formatIpcError } from "../format-ipc-error.js";
 
 export interface FallbackEntry {
   provider: string;
@@ -229,10 +230,14 @@ export function LlmTab(props: LlmTabProps) {
       if (!result.ok) {
         // The handler resolved with a structured rejection (unauthorized
         // frame, authMode not manual, or invalid payload) rather than
-        // throwing. The relaunch never happened — surface it inline and keep
-        // the dialog open so the user can cancel; closing silently would
-        // falsely imply the change applied.
-        setRelaunchError(t("llmTab.relaunchConfirmError"));
+        // throwing. The relaunch never happened — surface the specific,
+        // localized reason (formatIpcError maps the IPC error code to a
+        // ko/en message) and keep the dialog open so the user can cancel;
+        // closing silently would falsely imply the change applied.
+        setRelaunchError(
+          formatIpcError(result.error, result.message) ||
+            t("llmTab.relaunchConfirmError"),
+        );
         setRelaunchPending(false);
         return;
       }
