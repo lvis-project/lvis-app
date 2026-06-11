@@ -2,20 +2,21 @@
  * Plugin orchestration helpers.
  *
  * - buildPluginConfigOverrides: 범용 API key 주입
- * - registerPluginTools: manifest-driven tool registry wiring
  * - registerManifestEventSubscriptions / buildManifestEventHints: event hint helpers
  * - registerPluginNotifications: OS 알림 (manifest.notificationEvents)
+ *
+ * Tool registration is NOT here — every plugin registers through
+ * `PluginLoopbackManager` (each plugin runs as an in-process MCP server), wired
+ * in `boot/steps/plugin-runtime.ts`. The legacy `pluginToolsForRegistration`
+ * adapter was removed in the MCP-alignment legacy-removal flag-day.
  */
 import { Notification } from "electron";
 import type { BrowserWindow } from "electron";
 import type { PluginRuntime } from "../plugins/runtime.js";
-import type { ToolRegistry } from "../tools/registry.js";
-import type { Tool } from "../tools/base.js";
 import type { SettingsService } from "../data/settings-store.js";
 import type { AuditLogger } from "../audit/audit-logger.js";
 import type { NotificationService } from "../main/notification-service.js";
 import { classifySubscription } from "../plugins/capabilities.js";
-import { pluginToolsForRegistration } from "../plugins/plugin-tool-adapter.js";
 import { type EventHandler, onEvent, offEvent } from "./types.js";
 import { createLogger } from "../lib/logger.js";
 const log = createLogger("lvis");
@@ -61,69 +62,12 @@ export function buildPluginConfigOverrides(settings: SettingsService): Record<st
   return overrides;
 }
 
-export function registerPluginTools(pluginRuntime: PluginRuntime, toolRegistry: ToolRegistry): void {
-  for (const tool of pluginToolsForRuntimeEntries(pluginRuntime, pluginRuntime.listPluginManifests())) {
-    toolRegistry.register(tool);
-  }
-}
-
-/**
- * Idempotent full re-sync of plugin-sourced tools in {@link ToolRegistry}
- * from the current {@link PluginRuntime} state.
- *
- * Used for lifecycle surfaces that can leave ghost tools for plugins no longer
- * in the runtime, such as uninstall. Single-plugin restart/reload paths should
- * use {@link syncPluginToolRegistryForPlugin} to avoid touching bystanders.
- *
- * The registry replacement is atomic: plugin tools are built and duplicate-
- * checked before the live registry is changed. If a manifest is invalid, the
- * previous registry remains intact.
- */
-export function syncPluginToolRegistry(
-  pluginRuntime: PluginRuntime,
-  toolRegistry: ToolRegistry,
-): void {
-  const entries = pluginRuntime.listPluginManifests();
-  const pluginIds = new Set([
-    ...toolRegistry.listPluginIds(),
-    ...entries.map(({ pluginId }) => pluginId),
-  ]);
-  // ToolRegistry is the execution registry, not the model-exposure SOT.
-  // Inactive runtime-loaded plugins keep tools registered so auth/config/UI
-  // calls remain callable; ConversationLoop scope gates model visibility.
-  const tools = pluginToolsForRuntimeEntries(pluginRuntime, entries);
-  toolRegistry.replacePluginTools(pluginIds, tools);
-}
-
-/**
- * Targeted sync for a single plugin lifecycle event.
- *
- * Replaces only that plugin's ToolRegistry entries. If the plugin is no
- * longer loaded, this removes its stale tools and leaves every bystander
- * plugin untouched.
- */
-export function syncPluginToolRegistryForPlugin(
-  pluginRuntime: PluginRuntime,
-  toolRegistry: ToolRegistry,
-  pluginId: string,
-): void {
-  const entry = pluginRuntime
-    .listPluginManifests()
-    .find((candidate) => candidate.pluginId === pluginId);
-  const tools = entry
-    ? pluginToolsForRuntimeEntries(pluginRuntime, [entry])
-    : [];
-  toolRegistry.replacePluginTools([pluginId], tools);
-}
-
-function pluginToolsForRuntimeEntries(
-  pluginRuntime: PluginRuntime,
-  entries: Array<ReturnType<PluginRuntime["listPluginManifests"]>[number]>,
-): Tool[] {
-  return entries.flatMap(({ pluginId, manifest }) =>
-    pluginToolsForRegistration(pluginRuntime, pluginId, manifest),
-  );
-}
+// legacy-removal flag-day (mcp-alignment-design.md §5): the manifest-driven
+// `pluginToolsForRegistration` registration path + its `registerPluginTools` /
+// `syncPluginToolRegistry` / `syncPluginToolRegistryForPlugin` orchestration are
+// REMOVED. Every plugin now registers through `PluginLoopbackManager` (the host
+// runs each plugin as an in-process MCP server: server/discover → tools/list →
+// reverse projection from `_meta`), wired in `boot/steps/plugin-runtime.ts`.
 
 export function registerManifestEventSubscriptions(
   pluginRuntime: PluginRuntime,

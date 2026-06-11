@@ -12,6 +12,7 @@
 import { readFileSync, existsSync } from "node:fs";
 import { join } from "node:path";
 import type {
+  McpCapability,
   McpGovernancePolicy,
   McpServerApproval,
   McpServerConfig,
@@ -30,6 +31,51 @@ import {
 } from "./safe-names.js";
 import { t } from "../i18n/index.js";
 const log = createLogger("mcp-governance");
+
+/**
+ * The methods each {@link McpCapability} covers (design §3.6,
+ * `governance-per-request`). `satisfies Record<McpCapability, string[]>` makes
+ * this exhaustive: adding a capability to the enum forces listing its methods
+ * here (build error otherwise), closing the enum↔gate SOT drift. Tasks methods
+ * ride `tools` (they manage long-running `tools/call` work).
+ */
+const CAPABILITY_METHODS = {
+  tools: ["tools/list", "tools/call", "tasks/get", "tasks/update", "tasks/cancel"],
+  resources: [
+    "resources/list",
+    "resources/read",
+    "resources/templates/list",
+    "resources/subscribe",
+    "resources/unsubscribe",
+  ],
+  prompts: ["prompts/list", "prompts/get"],
+} satisfies Record<McpCapability, string[]>;
+
+/** Inverted method → capability lookup, derived from {@link CAPABILITY_METHODS}. */
+const REQUEST_METHOD_CAPABILITY: Record<string, McpCapability> = Object.fromEntries(
+  Object.entries(CAPABILITY_METHODS).flatMap(([capability, methods]) =>
+    methods.map((method) => [method, capability as McpCapability]),
+  ),
+);
+
+/**
+ * Protocol/control methods that exercise NO gated capability — discovery, the
+ * dual-era handshake, liveness, and notifications. This is a CLOSED allowlist:
+ * everything NOT here and NOT in {@link REQUEST_METHOD_CAPABILITY} is denied
+ * (fail-closed), so a new capability verb a server invokes is denied until it is
+ * explicitly classified — rather than sailing through ungated.
+ */
+const CONTROL_METHODS: ReadonlySet<string> = new Set([
+  "server/discover",
+  "initialize",
+  "ping",
+  "notifications/initialized",
+  "notifications/cancelled",
+  "notifications/progress",
+]);
+
+/** MCP Apps (`io.modelcontextprotocol/ui`) resource scheme — an EXTENSION, not the core `resources` capability. */
+const MCP_APPS_UI_SCHEME = "ui://";
 
 const DEFAULT_POLICY: McpGovernancePolicy = {
   version: "1.0",
@@ -258,6 +304,66 @@ export class McpGovernance {
       }
     }
 
+    return { valid: true };
+  }
+
+  /**
+   * Per-request capability gate (milestone `governance-per-request`, design §3.6).
+   *
+   * Where {@link validateToolRegistration} gates ONCE at connect time on the
+   * static `allowedCapabilities` whitelist, this gates EVERY request on the
+   * capability that request actually exercises (a `tools/call` exercises
+   * `tools`, a `resources/read` exercises `resources`, …). Keeps the same
+   * deny-by-default + approved-server invariants: an unapproved server is denied,
+   * and a request exercising a capability the server was not approved for is
+   * denied — even if a prior registration slipped through. Protocol/control
+   * methods that exercise NO gated capability (`server/discover`, `ping`,
+   * notifications) pass.
+   */
+  validateRequestCapability(
+    serverId: string,
+    method: string,
+    params?: Record<string, unknown>,
+  ): ValidationResult {
+    const approval = this.findApproval(serverId);
+    if (!approval || approval.status !== "approved") {
+      return { valid: false, reason: t("be_mcpGovernance.unapprovedServerToolRegistration", { serverId }), layer: 3 };
+    }
+
+    // Protocol/control methods exercise no gated capability.
+    if (CONTROL_METHODS.has(method)) {
+      return { valid: true };
+    }
+
+    // MCP Apps `ui://` reads are the `io.modelcontextprotocol/ui` EXTENSION
+    // (gated by the Apps mechanism — `_meta.ui` + CSP), not the core `resources`
+    // capability. A tools-only server may legitimately return `_meta.ui` on a
+    // tool result and have the host fetch the `ui://` resource, so this read must
+    // NOT require `resources` (would break MCP Apps for every tools-only server).
+    if (method === "resources/read") {
+      const uri = params?.uri;
+      if (typeof uri === "string" && uri.startsWith(MCP_APPS_UI_SCHEME)) {
+        return { valid: true };
+      }
+    }
+
+    const required = REQUEST_METHOD_CAPABILITY[method];
+    if (required === undefined) {
+      // Unknown, non-control method — deny (fail-closed). A new capability verb
+      // is denied until explicitly classified, never silently ungated.
+      return {
+        valid: false,
+        reason: `MCP server '${serverId}' sent an unclassified method '${method}' (denied; not a control method and exercises no approved capability)`,
+        layer: 3,
+      };
+    }
+    if (!approval.allowedCapabilities.includes(required)) {
+      return {
+        valid: false,
+        reason: `MCP server '${serverId}' is not approved for the '${required}' capability (request '${method}')`,
+        layer: 3,
+      };
+    }
     return { valid: true };
   }
 

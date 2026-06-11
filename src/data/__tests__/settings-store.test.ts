@@ -542,6 +542,63 @@ describe("SettingsService appearance v2 — fresh install defaults", () => {
   });
 });
 
+// ─── System locale auto-detection — fresh install ────────────────────────────
+
+describe("SettingsService system locale detection", () => {
+  let userDataPath: string;
+
+  beforeEach(() => {
+    userDataPath = mkdtempSync(join(tmpdir(), "settings-locale-detect-"));
+    mockedElectron.safeStorage.isEncryptionAvailable.mockReturnValue(false);
+  });
+
+  afterEach(() => {
+    vi.clearAllMocks();
+    rmSync(userDataPath, { recursive: true, force: true });
+  });
+
+  it("fresh install with systemLocale=ko-KR seeds language as 'ko'", () => {
+    const service = new SettingsService({ userDataPath, systemLocale: "ko-KR" });
+    expect(service.get("appearance").language).toBe("ko");
+  });
+
+  it("fresh install with systemLocale=en-US seeds language as 'en'", () => {
+    const service = new SettingsService({ userDataPath, systemLocale: "en-US" });
+    expect(service.get("appearance").language).toBe("en");
+  });
+
+  it("fresh install with unsupported systemLocale falls back to 'en'", () => {
+    const service = new SettingsService({ userDataPath, systemLocale: "fr-FR" });
+    expect(service.get("appearance").language).toBe("en");
+  });
+
+  it("fresh install without systemLocale defaults to 'en'", () => {
+    const service = new SettingsService({ userDataPath });
+    expect(service.get("appearance").language).toBe("en");
+  });
+
+  it("existing settings file with explicit language is not overridden by systemLocale", () => {
+    writeFileSync(
+      join(userDataPath, "lvis-settings.json"),
+      JSON.stringify({ appearance: { schemaVersion: 2, language: "en", bundleId: DEFAULT_BUNDLE_ID } }),
+      "utf-8",
+    );
+    // Even if OS is Korean, the stored "en" is the user's explicit choice — respect it.
+    const service = new SettingsService({ userDataPath, systemLocale: "ko-KR" });
+    expect(service.get("appearance").language).toBe("en");
+  });
+
+  it("existing settings file with language='ko' is preserved regardless of systemLocale", () => {
+    writeFileSync(
+      join(userDataPath, "lvis-settings.json"),
+      JSON.stringify({ appearance: { schemaVersion: 2, language: "ko", bundleId: DEFAULT_BUNDLE_ID } }),
+      "utf-8",
+    );
+    const service = new SettingsService({ userDataPath, systemLocale: "en-US" });
+    expect(service.get("appearance").language).toBe("ko");
+  });
+});
+
 // ─── Appearance v1 → v2 migration matrix ────────────────────────────────────
 
 describe("SettingsService appearance v1 → v2 migration", () => {

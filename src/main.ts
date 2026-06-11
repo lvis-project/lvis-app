@@ -51,8 +51,12 @@ import { uninstallPluginWithLifecycle } from "./plugins/uninstall-lifecycle.js";
 import { lvisHome } from "./shared/lvis-home.js";
 import { runShutdownRoutines } from "./main/shutdown-routines.js";
 import { captureDemoCredentials } from "./main/demo-credentials.js";
-import { loadPersistedDemoActivationSync } from "./main/demo-activation-loader.js";
+import {
+  loadEmbeddedDemoActivationSync,
+  loadPersistedDemoActivationSync,
+} from "./main/demo-activation-loader.js";
 import { applyDemoHostResolverRules } from "./main/demo-host-resolver.js";
+import { applyManualHostResolverRules } from "./main/manual-host-resolver.js";
 import { forceKillManagedChildProcesses } from "./main/managed-child-processes.js";
 import { scrubPackagedProcessEnv } from "./main/packaged-env-scrub.js";
 import {
@@ -179,6 +183,14 @@ function applyRuntimeAppIcon() {
 // observes them identically to a dev-mode `.env.demo` on disk. Sync I/O so
 // the capture sees the values without an awaited boot path.
 loadPersistedDemoActivationSync();
+// Internal-distribution builds embed an activation key in the bundle. When
+// no `.env.demo` was persisted yet (fresh install), hydrate from that
+// embedded key NOW — before `captureDemoCredentials()` + the host-resolver
+// install below — so a first activation needs no relaunch (the Chromium
+// host-resolver command line is frozen after `app.whenReady()`). No-op when
+// a persisted file exists, no key is embedded, or the user logged out
+// (demo-disabled sentinel). See loadEmbeddedDemoActivationSync.
+loadEmbeddedDemoActivationSync();
 // #893 / PR #894 B1 — Capture `LVIS_DEMO_*` BEFORE the scrub so the mockup
 // auth handler can still consume the demo keys + enable flag through an
 // internal channel, while the renderer/preload/workers never observe them
@@ -194,6 +206,12 @@ captureDemoCredentials();
 // the env scrub for the same reason as `captureDemoCredentials()`: the
 // vendor + map env vars are wiped immediately after.
 applyDemoHostResolverRules(app);
+// Manual host-resolver map — applies the user-configured /etc/hosts-style
+// mapping when authMode==="manual". No-op when demo mode is active (demo
+// map takes precedence) or when no map has been configured. Reads the same
+// settings file the SettingsService writes to (under app.getPath("userData"))
+// so a map saved via Settings is the one applied on the next boot.
+applyManualHostResolverRules(app, app.getPath("userData"));
 
 if (app.isPackaged) {
   scrubPackagedProcessEnv(process.env);

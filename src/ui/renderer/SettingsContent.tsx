@@ -402,6 +402,9 @@ export function SettingsContent({
               setFallbackChain={s.setFallbackChain}
               fallbackOpen={s.fallbackOpen}
               setFallbackOpen={s.setFallbackOpen}
+              hostResolverMap={s.hostResolverMap}
+              setHostResolverMap={s.setHostResolverMap}
+              loadedHostResolverMap={s.loadedHostResolverMap}
               onSaved={onSaved}
               onImmediateChange={llmSave.schedule}
               onSave={() => {

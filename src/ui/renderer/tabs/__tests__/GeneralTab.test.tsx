@@ -158,6 +158,7 @@ describe("GeneralTab", () => {
       expect(api.deleteApiKey).toHaveBeenCalledWith("openai");
       expect(api.demo.clearDemo).toHaveBeenCalledTimes(1);
       expect(api.updateSettings).toHaveBeenCalledWith({
+        llm: { authMode: "manual" },
         features: { onboardingCompleted: false },
       });
       expect(onLogout).toHaveBeenCalledTimes(1);

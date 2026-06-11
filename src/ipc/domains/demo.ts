@@ -65,7 +65,10 @@ import {
   decryptActivationCode,
   parseEnvDemoText,
 } from "../../main/demo-activation-codec.js";
-import { persistedEnvDemoPath } from "../../main/demo-activation-loader.js";
+import {
+  demoDisabledSentinelPath,
+  persistedEnvDemoPath,
+} from "../../main/demo-activation-loader.js";
 import {
   getDemoActiveVendor,
   getDemoHostMap,
@@ -75,6 +78,7 @@ import {
   recaptureDemoCredentialsAfterActivation,
   resetDemoCredentials,
 } from "../../main/demo-credentials.js";
+import { getEmbeddedActivationCode } from "../../main/demo-embedded-activation.js";
 import {
   demoFoundryHostMapFingerprint,
   validateDemoFoundryHostMap,
@@ -265,7 +269,7 @@ export function registerDemoHandlers(deps: IpcDeps): void {
     async (
       e,
     ): Promise<
-      | { ok: true; activated: boolean; vendor: string | null }
+      | { ok: true; activated: boolean; vendor: string | null; autoActivatable: boolean }
       | { ok: false; error: "unauthorized-frame" }
     > => {
       if (!validateSender(e)) {
@@ -277,161 +281,236 @@ export function registerDemoHandlers(deps: IpcDeps): void {
         ok: true,
         activated,
         vendor: activated ? getDemoActiveVendor() : null,
+        // `autoActivatable` tells the renderer this build carries an
+        // embedded activation key, so the chip can run the activation
+        // chain without mounting the manual paste input.
+        autoActivatable: getEmbeddedActivationCode() !== null,
       };
     },
   );
+
+  type ActivationFailureCode =
+    | "invalid-code"
+    | "persist-failed"
+    | "no-vendor"
+    | "invalid-vendor"
+    | "no-demo-key"
+    | "missing-foundry-endpoint"
+    | "invalid-foundry-endpoint"
+    | "missing-foundry-host-map"
+    | "foundry-host-map-mismatch"
+    | "invalid-foundry-host-map-target";
+  type ActivationOutcome =
+    | { ok: true; vendor: string; requiresRelaunch?: boolean }
+    | { ok: false; error: ActivationFailureCode };
+
+  /**
+   * Activation core — decrypt → validate → persist → inject → recapture →
+   * relaunch decision. Shared by the manual paste handler and the
+   * embedded-key handler so both supply paths run the exact same
+   * validation chain; only the source of the code string differs.
+   * `source` is carried into log/audit rows so a support escalation can
+   * tell a pasted key apart from a build-embedded one.
+   */
+  async function performActivation(
+    code: string,
+    source: "manual" | "embedded",
+  ): Promise<ActivationOutcome> {
+    // Step 1 — decrypt. Wraps the codec throw into the kebab-case IPC
+    // error code per the CLAUDE.md error-language rule. Auth-tag mismatch
+    // (wrong passphrase / tampered ciphertext) lands here.
+    let plaintext: string;
+    try {
+      plaintext = decryptActivationCode(code);
+    } catch (err) {
+      log.info(`activation rejected (source=${source}): ${(err as Error).message}`);
+      try {
+        auditLogger.log({
+          timestamp: new Date().toISOString(),
+          sessionId: "auth",
+          type: "warn",
+          input: `[demo-activation] invalid-code (decrypt failed, source=${source})`,
+        });
+      } catch { /* audit must not break IPC */ }
+      return { ok: false, error: "invalid-code" };
+    }
+
+    // Step 2 — parse + validate vendor presence. The decrypted file must
+    // contain `LVIS_DEMO_VENDOR` for the auth IPC handler to know which
+    // vendor to activate. No vendor → no path forward; surface a distinct
+    // error so the renderer can tell the user the payload was malformed
+    // versus the code was wrong.
+    const parsed = parseEnvDemoText(plaintext);
+    const vendor = parsed.LVIS_DEMO_VENDOR;
+    if (typeof vendor !== "string" || vendor.length === 0) {
+      log.warn("activation payload missing LVIS_DEMO_VENDOR");
+      return { ok: false, error: "no-vendor" };
+    }
+    if (!isLLMVendor(vendor)) {
+      log.warn(`activation payload has invalid LVIS_DEMO_VENDOR: ${vendor}`);
+      return { ok: false, error: "invalid-vendor" };
+    }
+    const keyError = validateActivationPayloadKey(vendor, parsed);
+    if (keyError !== null) {
+      return { ok: false, error: keyError };
+    }
+    const endpointError = validateActivationPayloadEndpoint(vendor, parsed);
+    if (endpointError !== null) {
+      return { ok: false, error: endpointError };
+    }
+    const hostMapError = validateActivationPayloadHostMap(vendor, parsed);
+    if (hostMapError !== null) {
+      return { ok: false, error: hostMapError };
+    }
+
+    // Step 3 — persist to disk so the next boot auto-activates. The file
+    // path matches what `loadPersistedDemoActivation()` reads on startup
+    // — same single source of truth, no drift between write and read.
+    try {
+      await writeEnvDemoFile(persistedEnvDemoPath(), plaintext);
+    } catch (err) {
+      log.error(
+        `failed to persist .env.demo: ${(err as Error).message}`,
+      );
+      // Audit trail for the partial-state outcome (critic MAJOR M3
+      // 2026-05-19): the decrypted payload was valid but disk write
+      // failed — without an audit row the renderer's "persist-failed"
+      // toast is the only forensic evidence. invalid-code branch above
+      // already emits a warn row; symmetry across error branches keeps
+      // the audit timeline complete for support escalations.
+      try {
+        auditLogger.log({
+          timestamp: new Date().toISOString(),
+          sessionId: "auth",
+          type: "warn",
+          input: `[demo-activation] persist-failed (source=${source})`,
+        });
+      } catch { /* audit must not break IPC */ }
+      return { ok: false, error: "persist-failed" };
+    }
+
+    // A successful (re)activation clears the demo-disabled sentinel left by
+    // a prior `lvis:demo:clear`, so an embedded-key build resumes boot-time
+    // auto-hydrate on the next launch (the user opted back in). Best-effort:
+    // a stale sentinel only costs one extra manual activation, never breaks
+    // this activation.
+    try {
+      await fs.rm(demoDisabledSentinelPath(), { force: true });
+    } catch {
+      // Best-effort for THIS activation (env is injected below regardless),
+      // but a stale sentinel makes the NEXT boot skip auto-hydrate — an
+      // unexpected logged-out state with no signal. Audit it so the
+      // "asked to activate again on next launch" symptom is debuggable.
+      try {
+        auditLogger.log({
+          timestamp: new Date().toISOString(),
+          sessionId: "auth",
+          type: "warn",
+          input: `[demo-activation] sentinel-clear-failed (source=${source})`,
+        });
+      } catch { /* audit must not break IPC */ }
+    }
+
+    // Step 4 — inject the parsed values into `process.env` AND re-run the
+    // demo-credentials capture so the auth IPC handler sees the new keys.
+    // The injection runs first because `recaptureDemoCredentialsAfterActivation`
+    // reads from `process.env`.
+    injectDemoEnv(parsed);
+    recaptureDemoCredentialsAfterActivation();
+
+    try {
+      auditLogger.log({
+        timestamp: new Date().toISOString(),
+        sessionId: "auth",
+        type: "info",
+        input: `[demo-activation] activated vendor=${vendor} keys=${Object.keys(parsed).length} source=${source}`,
+      });
+    } catch { /* audit must not break IPC */ }
+
+    log.info(`demo activation succeeded: vendor=${vendor} source=${source}`);
+
+    // v0.2.1 hotfix — First-activation race fix.
+    //
+    // Chromium command-line switches (host-resolver-rules, used by
+    // `applyDemoHostResolverRules` to map the internal Azure Foundry
+    // hostname onto the activation-provided intranet subnet) are frozen
+    // after `app.whenReady()`. We only call `applyDemoHostResolverRules` once
+    // at boot. If `.env.demo` was absent at boot (i.e. this is the very
+    // first activation), retroactive `injectDemoEnv` mutates
+    // `process.env` but cannot rewire the Chromium net stack — the
+    // subsequent `loginMockup` → `refreshProvider` path probes the
+    // Azure Foundry endpoint and trips `ENOTFOUND`.
+    //
+    // The next boot path is correct: `loadPersistedDemoActivationSync()`
+    // hydrates `process.env` from `~/.lvis/secrets/.env.demo` BEFORE
+    // `applyDemoHostResolverRules()` runs, so host-resolver-rules is
+    // armed with the right hostmap by the time renderer code starts.
+    // Therefore: on activation success, ask the renderer to surface a
+    // brief "재시작 중…" message, then relaunch. In `bun run dev`,
+    // the watcher owns that relaunch via a special exit code so it can keep
+    // main/preload/renderer/style watchers alive instead of shutting down.
+    //
+    // `requiresRelaunch=true` is the renderer's cue. The renderer owns
+    // the 5s onboarding dwell, then calls `lvis:demo:relaunch-after-activation`
+    // to execute the already-armed relaunch. This keeps the message visible
+    // before the process exits while preserving the main-process-only
+    // relaunch authority.
+    const activationFoundryResolverFingerprint =
+      demoFoundryResolverFingerprintForPayload(vendor, parsed);
+    const shouldRelaunch = vendor === "azure-foundry"
+      ? activationFoundryResolverFingerprint !== demoFoundryResolverFingerprintAtBoot
+      : !demoWasEffectiveAtBoot;
+    demoEffectiveForCurrentProcess = !shouldRelaunch;
+    if (shouldRelaunch) {
+      relaunchArmed = true;
+    }
+
+    return {
+      ok: true,
+      vendor,
+      ...(shouldRelaunch ? { requiresRelaunch: true } : {}),
+    };
+  }
 
   ipcMain.handle(
     "lvis:demo:activate",
     async (
       e,
       payload: { code?: unknown },
-    ): Promise<
-      | { ok: true; vendor: string; requiresRelaunch?: boolean }
-      | { ok: false; error: "invalid-code" | "persist-failed" | "no-vendor" | "invalid-vendor" | "no-demo-key" | "missing-foundry-endpoint" | "invalid-foundry-endpoint" | "missing-foundry-host-map" | "foundry-host-map-mismatch" | "invalid-foundry-host-map-target" | "unauthorized-frame" }
-    > => {
+    ): Promise<ActivationOutcome | { ok: false; error: "unauthorized-frame" }> => {
       if (!validateSender(e)) {
         auditUnauthorized(auditLogger, "lvis:demo:activate", e);
         return { ok: false, error: UNAUTHORIZED_FRAME.error };
       }
-
       const code = typeof payload?.code === "string" ? payload.code : "";
       if (code.length === 0) {
         return { ok: false, error: "invalid-code" };
       }
+      return performActivation(code, "manual");
+    },
+  );
 
-      // Step 1 — decrypt. Wraps the codec throw into the kebab-case IPC
-      // error code per the CLAUDE.md error-language rule. Auth-tag mismatch
-      // (wrong passphrase / tampered ciphertext) lands here.
-      let plaintext: string;
-      try {
-        plaintext = decryptActivationCode(code);
-      } catch (err) {
-        log.info(`activation rejected: ${(err as Error).message}`);
-        try {
-          auditLogger.log({
-            timestamp: new Date().toISOString(),
-            sessionId: "auth",
-            type: "warn",
-            input: "[demo-activation] invalid-code (decrypt failed)",
-          });
-        } catch { /* audit must not break IPC */ }
-        return { ok: false, error: "invalid-code" };
+  ipcMain.handle(
+    "lvis:demo:activate-embedded",
+    async (
+      e,
+    ): Promise<
+      | ActivationOutcome
+      | { ok: false; error: "no-embedded-code" | "unauthorized-frame" }
+    > => {
+      if (!validateSender(e)) {
+        auditUnauthorized(auditLogger, "lvis:demo:activate-embedded", e);
+        return { ok: false, error: UNAUTHORIZED_FRAME.error };
       }
-
-      // Step 2 — parse + validate vendor presence. The decrypted file must
-      // contain `LVIS_DEMO_VENDOR` for the auth IPC handler to know which
-      // vendor to activate. No vendor → no path forward; surface a distinct
-      // error so the renderer can tell the user the payload was malformed
-      // versus the code was wrong.
-      const parsed = parseEnvDemoText(plaintext);
-      const vendor = parsed.LVIS_DEMO_VENDOR;
-      if (typeof vendor !== "string" || vendor.length === 0) {
-        log.warn("activation payload missing LVIS_DEMO_VENDOR");
-        return { ok: false, error: "no-vendor" };
+      // The embedded code is a compile-time constant, so this only fires
+      // when a renderer invokes the channel on a build without one (e.g.
+      // a stale renderer talking to a rebuilt main). Distinct error code
+      // so the renderer can route the user to the manual paste input.
+      const code = getEmbeddedActivationCode();
+      if (code === null) {
+        return { ok: false, error: "no-embedded-code" };
       }
-      if (!isLLMVendor(vendor)) {
-        log.warn(`activation payload has invalid LVIS_DEMO_VENDOR: ${vendor}`);
-        return { ok: false, error: "invalid-vendor" };
-      }
-      const keyError = validateActivationPayloadKey(vendor, parsed);
-      if (keyError !== null) {
-        return { ok: false, error: keyError };
-      }
-      const endpointError = validateActivationPayloadEndpoint(vendor, parsed);
-      if (endpointError !== null) {
-        return { ok: false, error: endpointError };
-      }
-      const hostMapError = validateActivationPayloadHostMap(vendor, parsed);
-      if (hostMapError !== null) {
-        return { ok: false, error: hostMapError };
-      }
-
-      // Step 3 — persist to disk so the next boot auto-activates. The file
-      // path matches what `loadPersistedDemoActivation()` reads on startup
-      // — same single source of truth, no drift between write and read.
-      try {
-        await writeEnvDemoFile(persistedEnvDemoPath(), plaintext);
-      } catch (err) {
-        log.error(
-          `failed to persist .env.demo: ${(err as Error).message}`,
-        );
-        // Audit trail for the partial-state outcome (critic MAJOR M3
-        // 2026-05-19): the decrypted payload was valid but disk write
-        // failed — without an audit row the renderer's "persist-failed"
-        // toast is the only forensic evidence. invalid-code branch above
-        // already emits a warn row; symmetry across error branches keeps
-        // the audit timeline complete for support escalations.
-        try {
-          auditLogger.log({
-            timestamp: new Date().toISOString(),
-            sessionId: "auth",
-            type: "warn",
-            input: "[demo-activation] persist-failed",
-          });
-        } catch { /* audit must not break IPC */ }
-        return { ok: false, error: "persist-failed" };
-      }
-
-      // Step 4 — inject the parsed values into `process.env` AND re-run the
-      // demo-credentials capture so the auth IPC handler sees the new keys.
-      // The injection runs first because `recaptureDemoCredentialsAfterActivation`
-      // reads from `process.env`.
-      injectDemoEnv(parsed);
-      recaptureDemoCredentialsAfterActivation();
-
-      try {
-        auditLogger.log({
-          timestamp: new Date().toISOString(),
-          sessionId: "auth",
-          type: "info",
-          input: `[demo-activation] activated vendor=${vendor} keys=${Object.keys(parsed).length}`,
-        });
-      } catch { /* audit must not break IPC */ }
-
-      log.info(`demo activation succeeded: vendor=${vendor}`);
-
-      // v0.2.1 hotfix — First-activation race fix.
-      //
-      // Chromium command-line switches (host-resolver-rules, used by
-      // `applyDemoHostResolverRules` to map the internal Azure Foundry
-      // hostname onto the activation-provided intranet subnet) are frozen
-      // after `app.whenReady()`. We only call `applyDemoHostResolverRules` once
-      // at boot. If `.env.demo` was absent at boot (i.e. this is the very
-      // first activation), retroactive `injectDemoEnv` mutates
-      // `process.env` but cannot rewire the Chromium net stack — the
-      // subsequent `loginMockup` → `refreshProvider` path probes the
-      // Azure Foundry endpoint and trips `ENOTFOUND`.
-      //
-      // The next boot path is correct: `loadPersistedDemoActivationSync()`
-      // hydrates `process.env` from `~/.lvis/secrets/.env.demo` BEFORE
-      // `applyDemoHostResolverRules()` runs, so host-resolver-rules is
-      // armed with the right hostmap by the time renderer code starts.
-      // Therefore: on activation success, ask the renderer to surface a
-      // brief "재시작 중…" message, then relaunch. In `bun run dev`,
-      // the watcher owns that relaunch via a special exit code so it can keep
-      // main/preload/renderer/style watchers alive instead of shutting down.
-      //
-      // `requiresRelaunch=true` is the renderer's cue. The renderer owns
-      // the 5s onboarding dwell, then calls `lvis:demo:relaunch-after-activation`
-      // to execute the already-armed relaunch. This keeps the message visible
-      // before the process exits while preserving the main-process-only
-      // relaunch authority.
-      const activationFoundryResolverFingerprint =
-        demoFoundryResolverFingerprintForPayload(vendor, parsed);
-      const shouldRelaunch = vendor === "azure-foundry"
-        ? activationFoundryResolverFingerprint !== demoFoundryResolverFingerprintAtBoot
-        : !demoWasEffectiveAtBoot;
-      demoEffectiveForCurrentProcess = !shouldRelaunch;
-      if (shouldRelaunch) {
-        relaunchArmed = true;
-      }
-
-      return {
-        ok: true,
-        vendor,
-        ...(shouldRelaunch ? { requiresRelaunch: true } : {}),
-      };
+      return performActivation(code, "embedded");
     },
   );
 
@@ -460,6 +539,18 @@ export function registerDemoHandlers(deps: IpcDeps): void {
       relaunchArmed = false;
       demoEffectiveForCurrentProcess = false;
       try {
+        // Write the demo-disabled sentinel FIRST, and make it load-bearing:
+        // if it fails, the whole clear fails (`clear-failed`) and `.env.demo`
+        // is left intact, so the persisted loader still owns hydration — the
+        // demo stays active rather than silently resurrecting on the next
+        // boot. Doing the sentinel after the `.env.demo` removal (or
+        // swallowing its error) would be fail-OPEN: an IO failure would leave
+        // neither file, and the embedded-key boot hydrate would re-activate a
+        // session the user explicitly logged out of. A logout is an explicit
+        // "stop using the demo" intent; the sentinel is its durable record,
+        // honored by BOTH loadPersistedDemoActivationSync and
+        // loadEmbeddedDemoActivationSync. The next activation removes it.
+        await writeEnvDemoFile(demoDisabledSentinelPath(), "");
         const envDemoPath = persistedEnvDemoPath();
         await fs.rm(envDemoPath, { force: true });
         for (const k of Object.keys(process.env)) {

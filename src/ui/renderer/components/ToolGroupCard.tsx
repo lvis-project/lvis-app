@@ -94,44 +94,17 @@ function ToolSourceBadge({ tool }: { tool: ToolItem }) {
 }
 
 /**
- * Neutral placeholder shown in the status-badge slot when a failure is
- * suppressed in demo mode (`features.hideToolFailures`). Carries no
- * success/failure meaning — it only keeps the row from shifting where the
- * "실패"/"오류 있음" pill used to sit. Decorative, so it is hidden from assistive
- * tech; the underlying `tool.status` stays "error" in stream state and audit.
- */
-function HiddenStatusMarker() {
-  return (
-    <span
-      className="shrink-0 select-none px-1 text-[10px] leading-none text-muted-foreground/50"
-      aria-hidden="true"
-      data-testid="tool-status-hidden"
-    >
-      ·
-    </span>
-  );
-}
-
-/**
  * Per-tool status pill — "실패" (error) or "완료" (done). Single source for the
  * success/failure badge shown on every collapsed tool row (single-tool inline
- * + grouped per-tool). When `hideFailure` is set (demo flag
- * `features.hideToolFailures`) and the tool failed, the failure pill is replaced
- * by a neutral marker so the failure is not surfaced while the slot stays
- * occupied (no layout shift). Presentation-only — `tool.status` stays "error" in
- * stream state and the audit log; success rows are never affected.
+ * + grouped per-tool).
  */
 function ToolStatusBadge({
   status,
-  hideFailure,
 }: {
   status: ToolItem["status"];
-  hideFailure: boolean;
 }) {
   const { t } = useTranslation();
   const isError = status === "error";
-
-  if (isError && hideFailure) return <HiddenStatusMarker />;
 
   return (
     <Badge
@@ -155,11 +128,9 @@ function isToolResultStub(value: unknown): value is string {
 function SingleToolInline({
   tool,
   sessionId,
-  hideFailure,
 }: {
   tool: Extract<ChatEntry, { kind: "tool_group" }>["tools"][number];
   sessionId?: string;
-  hideFailure: boolean;
 }) {
   const { t } = useTranslation();
   const isRunning = tool.status === "running";
@@ -242,7 +213,7 @@ function SingleToolInline({
         {isRunning ? (
           <Loader2 className="h-3 w-3 shrink-0 animate-spin" />
         ) : (
-          <ToolStatusBadge status={tool.status} hideFailure={hideFailure} />
+          <ToolStatusBadge status={tool.status} />
         )}
         {open ? <ChevronDown className="h-3 w-3 flex-shrink-0" /> : <ChevronRight className="h-3 w-3 flex-shrink-0" />}
       </button>
@@ -287,17 +258,10 @@ function SingleToolInline({
 export function ToolGroupCard({
   group,
   sessionId,
-  hideFailureStatus = false,
 }: {
   group: Extract<ChatEntry, { kind: "tool_group" }>;
   /** Active session id for verbatim IPC fetch. When provided, stub results render as CompactedToolResult. */
   sessionId?: string;
-  /**
-   * Demo-only display flag (`features.hideToolFailures`). When true, the
-   * "실패"/"오류 있음" status pills are suppressed. Defaults to false so the
-   * component stays pure-props (unit tests render it without a provider).
-   */
-  hideFailureStatus?: boolean;
 }) {
   // All hooks must be declared before any conditional return (Rules of Hooks)
   const { t } = useTranslation();
@@ -325,7 +289,7 @@ export function ToolGroupCard({
 
   // Single tool: render inline without group wrapper
   if (group.tools.length === 1 && group.tools[0]) {
-    return <SingleToolInline tool={group.tools[0]} sessionId={sessionId} hideFailure={hideFailureStatus} />;
+    return <SingleToolInline tool={group.tools[0]} sessionId={sessionId} />;
   }
   const doneCount = group.tools.filter((t) => t.status !== "running").length;
   const hasError = group.tools.some((t) => t.status === "error");
@@ -387,8 +351,6 @@ export function ToolGroupCard({
         </Badge>
         {groupStatus === "running" ? (
           <Loader2 className="h-3 w-3 animate-spin flex-shrink-0" />
-        ) : groupStatus === "error" && hideFailureStatus ? (
-          <HiddenStatusMarker />
         ) : (
           <Badge
             variant={groupStatus === "error" ? "secondary" : "default"}
@@ -418,7 +380,7 @@ export function ToolGroupCard({
                   {tool.status === "running" ? (
                     <Loader2 className="h-2.5 w-2.5 shrink-0 animate-spin" />
                   ) : (
-                    <ToolStatusBadge status={tool.status} hideFailure={hideFailureStatus} />
+                    <ToolStatusBadge status={tool.status} />
                   )}
                 </button>
                 {isExpanded && (

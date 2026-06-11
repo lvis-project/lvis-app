@@ -23,7 +23,7 @@ import { ToolExecutor } from "../../tools/executor.js";
 import { ToolRegistry } from "../../tools/registry.js";
 import { createDynamicTool, type Tool } from "../../tools/base.js";
 import type { ToolCategory, ToolSource } from "../../tools/types.js";
-import { pluginToolsForRegistration } from "../../plugins/plugin-tool-adapter.js";
+import { buildPluginToolsForTest } from "../../plugins/__tests__/plugin-tool-test-fixture.js";
 import type { PluginManifest } from "../../plugins/types.js";
 import type { PluginRuntime } from "../../plugins/runtime.js";
 
@@ -356,8 +356,8 @@ describe("permission-review-scenario-board-v2.html contract", () => {
       },
     } as PluginManifest;
     const runtime = { call: vi.fn() } as unknown as PluginRuntime;
-    expect(() => pluginToolsForRegistration(runtime, "bad-plugin", manifest)).toThrow(
-      /category is required/,
+    expect(() => buildPluginToolsForTest(runtime, "bad-plugin", manifest)).toThrow(
+      /no authoritative.*category/,
     );
   });
 

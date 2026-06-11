@@ -5,7 +5,7 @@
  * fragment files in this directory (`<namespace>.ts`, each exporting `en`/`ko`
  * objects) and merges them here.
  *
- * Fragments: 176
+ * Fragments: 175
  */
 import { en as en_app, ko as ko_app } from "./app.js";
 import { en as en_appearanceTab, ko as ko_appearanceTab } from "./appearanceTab.js";
@@ -43,7 +43,6 @@ import { en as en_be_permissionManager, ko as ko_be_permissionManager } from "./
 import { en as en_be_permissionModeApply, ko as ko_be_permissionModeApply } from "./be_permissionModeApply.js";
 import { en as en_be_pluginExpansion, ko as ko_be_pluginExpansion } from "./be_pluginExpansion.js";
 import { en as en_be_pluginRuntime, ko as ko_be_pluginRuntime } from "./be_pluginRuntime.js";
-import { en as en_be_pluginToolAdapter, ko as ko_be_pluginToolAdapter } from "./be_pluginToolAdapter.js";
 import { en as en_be_pluginUiHost, ko as ko_be_pluginUiHost } from "./be_pluginUiHost.js";
 import { en as en_be_policyStore, ko as ko_be_policyStore } from "./be_policyStore.js";
 import { en as en_be_postTurnHookChain, ko as ko_be_postTurnHookChain } from "./be_postTurnHookChain.js";
@@ -221,7 +220,6 @@ export const generatedEn: Record<string, string> = {
   ...en_be_permissionModeApply,
   ...en_be_pluginExpansion,
   ...en_be_pluginRuntime,
-  ...en_be_pluginToolAdapter,
   ...en_be_pluginUiHost,
   ...en_be_policyStore,
   ...en_be_postTurnHookChain,
@@ -400,7 +398,6 @@ export const generatedKo: Record<string, string> = {
   ...ko_be_permissionModeApply,
   ...ko_be_pluginExpansion,
   ...ko_be_pluginRuntime,
-  ...ko_be_pluginToolAdapter,
   ...ko_be_pluginUiHost,
   ...ko_be_policyStore,
   ...ko_be_postTurnHookChain,

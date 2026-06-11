@@ -28,6 +28,7 @@ import {
   type OnboardingChainStage,
 } from "./onboarding/onboarding-chain.js";
 import { shouldOpenDemoReactivationOnBoot } from "./onboarding/demo-reactivation-gate.js";
+import { hasSeenFirstBootTour } from "./onboarding/first-boot-tour-gate.js";
 import { LoginModal } from "./components/LoginModal.js";
 import { LLM_VENDORS } from "../../shared/llm-vendor-defaults.js";
 import { buildQuickActions } from "./components/command-actions.js";
@@ -38,7 +39,6 @@ import { MainContent } from "./MainContent.js";
 import { StatusBar } from "./components/StatusBar.js";
 import { useStatusBar, type NotificationToastMeta } from "./hooks/use-status-bar.js";
 import { useSettings } from "./hooks/use-settings.js";
-import { useHideToolFailures } from "./hooks/use-hide-tool-failures.js";
 import { lookupBillablePricingOptional } from "../../shared/pricing-data.js";
 import { estimateMultimodalTokenOverhead } from "../../shared/multimodal-token-estimate.js";
 import { useChatState } from "./hooks/use-chat-state.js";
@@ -160,13 +160,16 @@ export function App() {
   // `lvis:auth:reactivate-demo` broadcast 가 도착하면 true 로 flip 되고,
   // LoginModal 이 close 되면 false 로 reset.
   const [reactivationOpen, setReactivationOpen] = useState(false);
-  // Z chain — `tourCompleted` is derived from the chain reducer. The
-  // PostTourFirstTask still receives a boolean prop so its existing
-  // contract is unchanged; downstream consumers see `true` only after
-  // the SpotlightTour reaches its last step (mapped to chain stage
-  // "plugins" or beyond).
+  // Z chain — `tourCompleted` gates the PostTourFirstTask proposal. It is
+  // true ONLY once the user finished the full funnel (PluginShowcase closed
+  // → `done` via `plugins-close`, recorded as completionReason "chain").
+  // Two cases that previously leaked the card are now excluded:
+  //   - `plugins` stage — PluginShowcase's own Dialog is still open, so a
+  //     z-9000 card would overlay it.
+  //   - `done` reached via `probe-skip` (returning user / demo relaunch) —
+  //     the tour was never shown, so a "post-tour" proposal is wrong.
   const tourCompleted =
-    chainStage === "plugins" || chainStage === "done";
+    chainStage === "done" && chainState.completionReason === "chain";
   const [activeView, setActiveView] = useState("home");
   const [commandPopoverOpen, setCommandPopoverOpen] = useState(false);
   const [devToolsOpen, setDevToolsOpen] = useState(false);
@@ -428,8 +431,6 @@ export function App() {
 
   // LLM settings + context budget (single source of truth: src/shared/pricing-data.ts)
   const { llmVendor, llmModel, enableThinkingChat, refresh: refreshLlmSettings, toggleThinking } = useSettings(api);
-  // Demo-only: hide tool failure badges in the chat timeline (presentation flag).
-  const hideToolFailures = useHideToolFailures(api);
   const draftAttachmentTokens = useMemo(
     () => estimateMultimodalTokenOverhead(attachments
       .filter((attachment) => attachment.kind === "image")
@@ -705,6 +706,19 @@ export function App() {
           return;
         }
         if (settings.features?.onboardingCompleted === true) {
+          dispatchChain({ type: "probe-skip" });
+          return;
+        }
+        // Returning user who already saw the first-boot SpotlightTour — skip
+        // the chain even if `onboardingCompleted` was never persisted. That
+        // flag only flips at the `done` stage (after PluginShowcase closes,
+        // two stages past the tour), so a user who finished the tour but quit
+        // before closing PluginShowcase left it `false` and the spotlight
+        // re-appeared on every launch. The tour-state store is the source of
+        // truth for "has seen the tour"; the boot probe previously ignored it.
+        const tourState = await api.tour.getState().catch(() => null);
+        if (cancelled) return;
+        if (hasSeenFirstBootTour(tourState)) {
           dispatchChain({ type: "probe-skip" });
           return;
         }
@@ -1195,7 +1209,6 @@ export function App() {
     enableThinkingChat, toggleThinking, costEstimate, costBadgeClass,
     activePricing,
     activeVendor: llmVendor,
-    hideToolFailures,
   });
 
   // Bottom status bar (#231) — bottom slot for persistent items + transient

@@ -13,10 +13,7 @@ import { join } from "node:path";
 import { PluginRuntime } from "../../runtime.js";
 import { buildImportUrl } from "../sandbox.js";
 import { ToolRegistry } from "../../../tools/registry.js";
-import {
-  syncPluginToolRegistry,
-  syncPluginToolRegistryForPlugin,
-} from "../../../boot/plugins.js";
+import { PluginLoopbackManager } from "../../../mcp/plugin-loopback-manager.js";
 import { makeTestPluginRuntime } from "../../__tests__/test-helpers.js";
 
 describe("PluginRuntime lifecycle — restartPlugin", () => {
@@ -552,29 +549,33 @@ export default async function createPlugin() {
     );
 
     const toolRegistry = new ToolRegistry();
-    // Two-step binding so `onEnable` does not capture the `runtime` reference
-    // via TDZ-adjacent closure (the arrow body only runs after construction
-    // completes, but the explicit factory makes the safety obvious to readers).
+    // Mirror the production boot wiring: registration goes through the loopback
+    // manager (legacy-removal flag-day). onEnable's start is async, so the test
+    // tracks the last start promise to await it deterministically.
     let runtime!: PluginRuntime;
+    let loopbackManager!: PluginLoopbackManager;
+    let lastEnable: Promise<unknown> = Promise.resolve();
     runtime = new PluginRuntime({
       hostRoot: testDir,
       registryPath,
       pluginsRoot: installedDir,
-      onDisable: (id) => { toolRegistry.unregisterByPlugin(id); },
-      onEnable: (id) => { syncPluginToolRegistryForPlugin(runtime, toolRegistry, id); },
+      onDisable: (id) => { lastEnable = loopbackManager.stop(id); },
+      onEnable: (id) => {
+        const m = runtime.getPluginManifest(id);
+        if (m) lastEnable = loopbackManager.start(m);
+      },
     });
+    loopbackManager = new PluginLoopbackManager(runtime, toolRegistry);
     await runtime.startAll();
 
-    // Boot's `registerPluginTools(...)` is what initially populates the
-    // registry in production. Mirror that here so the post-restart state has
-    // a meaningful baseline to compare against.
-    syncPluginToolRegistry(runtime, toolRegistry);
+    // Boot's `loopbackManager.syncAll(...)` initially populates the registry.
+    await loopbackManager.syncAll(runtime.listPluginManifests());
     expect(toolRegistry.findByName(toolName)?.pluginId).toBe(pluginId);
 
-    // Restart removes the tool via onDisable, then re-registers via onEnable.
-    // Without the onEnable wiring this test fails — findByName returns
-    // undefined after the restart.
+    // Restart removes the tool via onDisable (manager.stop), then re-registers
+    // via onEnable (manager.start). Without the wiring this test fails.
     await runtime.restartPlugin(pluginId);
+    await lastEnable;
 
     expect(toolRegistry.findByName(toolName)?.pluginId).toBe(pluginId);
   });
@@ -586,20 +587,27 @@ export default async function createPlugin() {
 
     const toolRegistry = new ToolRegistry();
     let runtime!: PluginRuntime;
+    let loopbackManager!: PluginLoopbackManager;
+    let lastEnable: Promise<unknown> = Promise.resolve();
     runtime = new PluginRuntime({
       hostRoot: testDir,
       registryPath,
       pluginsRoot: installedDir,
-      onDisable: (id) => { toolRegistry.unregisterByPlugin(id); },
-      onEnable: (id) => { syncPluginToolRegistryForPlugin(runtime, toolRegistry, id); },
+      onDisable: (id) => { lastEnable = loopbackManager.stop(id); },
+      onEnable: (id) => {
+        const m = runtime.getPluginManifest(id);
+        if (m) lastEnable = loopbackManager.start(m);
+      },
     });
+    loopbackManager = new PluginLoopbackManager(runtime, toolRegistry);
     await runtime.startAll();
-    syncPluginToolRegistry(runtime, toolRegistry);
+    await loopbackManager.syncAll(runtime.listPluginManifests());
     const betaBefore = toolRegistry.findByName(beta.toolName);
     expect(betaBefore?.pluginId).toBe(beta.pluginId);
 
     runtime.setConfigOverride(alpha.pluginId, { mode: "after-save" });
     await runtime.restartPlugin(alpha.pluginId);
+    await lastEnable;
 
     expect(toolRegistry.findByName(alpha.toolName)?.pluginId).toBe(alpha.pluginId);
     expect(toolRegistry.findByName(beta.toolName)).toBe(betaBefore);

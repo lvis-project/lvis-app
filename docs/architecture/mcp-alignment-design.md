@@ -149,6 +149,217 @@ Ordered; each *change → unblocks → gate*. Because each plugin gets its own c
 
 ---
 
+## 5a. Implementation status (`dev` branch)
+
+`stateless-client-rebuild` (1), `mrtr-input-loop` (2), and the
+`plugin-loopback-server` (3) **mechanism** are implemented on `dev` as composable,
+independently-tested units. What remains for (3) is only the live boot flip (below).
+
+`mrtr-input-loop` (2) is implemented in `McpClient.callTool`: on
+`resultType:"input_required"` it gathers each `inputRequest` via an injected
+`McpInputRequestResolver`, retries the SAME call with `inputResponses` + the
+echoed (verbatim, opaque) `requestState`, bounded by `MAX_MRTR_ROUNDS`. The client
+owns the loop; the resolver owns request meaning (elicitation → approval gate,
+sampling → host LLM — host surfaces, wired at the live-resolver step). No resolver
+⇒ fail closed (No-Fallback). The plugin host's `input_required` stays a typed
+not-yet (LVIS plugin servers don't elicit yet).
+
+Built + tested (one module each, all green under `vitest run src/mcp/`):
+- `plugin-server-projection.ts` — manifest/`toolSchemas` → `server/discover` +
+  `tools/list` (dialect → 2020-12; authority under `xyz.lvis/*` `_meta`).
+- `plugin-mcp-server.ts` — the RC server methods (`server/discover`/`tools/list`/
+  `tools/call`); thrown delegate → `isError` CallToolResult; `-32004` on bad version.
+- `loopback-transport.ts` — in-process `McpTransport` (client ↔ server, no socket).
+- `plugin-tool-from-mcp.ts` — **reverse** projection: discovered MCP tool →
+  canonical `Tool`, authority read back from `_meta` (the "category SOT from
+  `_meta`" requirement); fail-closed on a missing category.
+- `plugin-mcp-host.ts` — `PluginMcpHost`, the lean **RC-only** per-plugin client
+  over a transport (loopback now, stdio next); registers natural names with
+  `source:"plugin"`; runs the #1182 provider-strict lint at registration.
+- `plugin-runtime-delegate.ts` — `pluginRuntimeToolDelegate`, reproducing
+  `buildPluginTool`'s fail-closed execute gates (inactive / integrity-disabled /
+  `ManifestIntegrityViolation` record) at the MCP boundary, with the raw return
+  value carried via `_meta["xyz.lvis/rawResult"]`.
+- `plugin-loopback-manager.ts` — `PluginLoopbackManager`, the boot seam owning
+  host lifecycle (`start`/`stop`/`stopAll`, idempotent reload).
+
+Decisions ratified during implementation:
+- **`PluginMcpHost` is separate from `McpClient`** (consistent with §0 decision 3,
+  which confines `mcp-client.ts` to external servers + the dual-era exception). A
+  first-party plugin is RC-only and never carries legacy-fallback branches
+  (No-Fallback); it registers with plugin authority + natural names, not the
+  external `category:"network"` + `mcp_` namespace. The two adapters
+  (`mcp-tool-adapter.ts` vs `plugin-tool-from-mcp.ts`) intentionally diverge
+  because the trust models differ.
+- **Structured tool output rides `_meta`.** MCP's content model is text-first, so
+  the plugin's raw (non-text) return value is carried as
+  `_meta["xyz.lvis/rawResult"]` (boxed to preserve present-but-`undefined`) and
+  re-surfaced as `metadata.rawResult` for the `executor.ts`/`boot.ts` consumers.
+- **The provider-strict lint is a client concern** → it lives in `PluginMcpHost`
+  registration, not the server projection (the server exposes its real tools; the
+  host decides what its LLM provider can consume).
+
+**`plugin-loopback-server` — boot exclusion plumbing DONE; only the live flip
+remains (gated).** `boot/plugins.ts` now has the SOT `LOOPBACK_MIGRATED_PLUGIN_IDS`
+(ships EMPTY) and the legacy sweeps (`registerPluginTools` /
+`syncPluginToolRegistry` / `syncPluginToolRegistryForPlugin`) exclude migrated
+plugins from BOTH registration and the replaced id set, so the manager's tools are
+never clobbered (unit-tested via an injectable set). **The live flip = populate
+the SOT with a pilot id + wire `PluginLoopbackManager` into the boot step's
+onEnable/onDisable + 3-agent cluster review (permission/boot trust boundary) +
+Playwright e2e.** No bundled first-party plugin exists (all are in-house
+marketplace repos; installed here: `lge-api`, `local-indexer`), so the pilot is an
+environment/product choice. Until the SOT is populated, behavior is unchanged.
+
+**`governance-per-request` (5) — client half DONE; gating half gated.** `McpClient`
+takes an injected `McpClientCapabilityProvider`, called per outbound request so
+the advertised `clientCapabilities` track the active turn (interactive → advertise
+elicitation; headless → none → clean `-32003` not a hung approval). Remaining
+(cluster-review gated, permissions area): the per-request server-capability GATING
+in `mcp-governance.ts` (move off the static connect-time `allowedCapabilities`
+whitelist) + the exact deriving signals (§6 open decision).
+
+**`hooks-on-mcp-calls` (6, #811) — category-from-`_meta` already transitively
+satisfied.** The reverse projection (`mcpToolToPluginTool`) lands
+`_meta["xyz.lvis/category"]` onto `tool.category`, and the executor's hook stdin
+(`ScriptHookStdin.category`) already reads `tool.category` — so a loopback plugin
+tool's hook already sees the authoritative MCP category, no extra wiring. Remaining
+#811 work: the `mcp__.*` tool-name matcher + per-request identity in hook stdin +
+the generic-command-hooks milestone, which build on the hook-expansion matcher
+infra (`docs/architecture/hook-runtime-expansion-design.md`) and touch the live
+executor path (`tools/executor.ts` fire points) — a focused effort of its own.
+
+**`untrusted-stdio-isolation` (4) — serving core DONE; spawner/sandbox/artifact
+gated.** `stdio-framing.ts` (`frameMessage` + `StdioFrameDecoder`, byte-accurate
+Content-Length) + `stdio-server-loop.ts` (`StdioServerLoop`) implement the
+subprocess-side serving core: read framed JSON-RPC → dispatch to the SAME
+`PluginMcpServer` → write framed response (tested over in-memory paired streams; a
+thrown handler → -32603, loop survives). Remaining (gated above this loop): the
+subprocess spawner + OS sandbox (bubblewrap/sandbox-exec) + the signed
+spawnable-artifact format (§6 open decision) + installed-plugin migration.
+
+**`hooks-on-mcp-calls` (6) — category + per-request identity DONE.** Beyond the
+transitive category, the executor now threads `tool.mcpServerId`/`tool.pluginId`
+through `runScriptHook` at all three fire points into `ScriptHookStdin` +
+`LVIS_HOOK_MCP_SERVER_ID`/`LVIS_HOOK_PLUGIN_ID` env, so a hook denies by the
+SPECIFIC origin. Remaining: `mcp__.*` matcher + generic-command-hooks (need the
+hook-expansion matcher infra).
+
+**`tasks-extension` (7) — client-side consumption DONE.** `callTool` drives a
+`CreateTaskResult` to terminal via `tasks/get` polling (pollIntervalMs-clamped,
+ceiling-bounded, `tasks/cancel` on timeout); completed → render Result&Task,
+failed/cancelled → throw, in-task `input_required` → typed not-yet. Remaining:
+server-side task CREATION + a durable store surviving restart, gated on pinning
+the `experimental-ext-tasks` draft (§6).
+
+**`apps-and-skills-extensions` (8) — Apps consumption partial; Skills + CSP
+pending.** MCP Apps `_meta.ui` → `uiPayload` + `readResource("ui://")` exist and
+the per-request gate exempts `ui://` from the core `resources` capability.
+Remaining: native-host iframe CSP/permission enforcement per `_meta.ui`
+(renderer + Playwright), and Skills-over-MCP (`skill://` Resources + digest
+verification + per-skill opt-in) — both gated on the §6 Apps/Skills snapshot pin.
+
+**`legacy-removal` (9) — DONE (flag-day executed).** The in-process loopback is now
+the UNIVERSAL plugin registration + execution path; the legacy
+`pluginToolsForRegistration` adapter + `registerPluginTools`/`syncPluginToolRegistry`/
+`syncPluginToolRegistryForPlugin` orchestration are DELETED. `boot/steps/plugin-
+runtime.ts` routes onEnable→`manager.start`, onDisable→`manager.stop`, boot+uninstall
+→`manager.syncAll` (reconcile, has()-guarded). All deleted fail-closed gates live in
+the loopback path; fixture-building tests use the real production projection
+(`plugin-tool-test-fixture.ts`). **Verified: full suite 6328 passed/0 failed + build
+green; 3-agent cluster review GO (architect/critic/security), round 2.** Safe because
+the SDK schema requires `category` (category-less plugins already failed load).
+
+Historical note (the earlier blocker analysis, now resolved): the SDK manifest schema
+(`@lvis/plugin-sdk/schemas/plugin-manifest.schema.json`) lists `category` in
+`toolSchemas.*.required`, so the category-less installed plugins (`local-indexer`,
+`lge-api`) ALREADY fail AJV manifest validation at load and register nothing today
+— removing the legacy registration path would NOT break them (they don't load
+either way). So M9 is not blocked on "breaking installed plugins." It IS gated, per
+this doc's own §5 entry, on **(a) the signed-zip artifact format finalized** (a §6
+open decision; the out-of-process spawn mechanism is done but the marketplace
+re-sign + installed-plugin migration are not) and **(b) all first-party plugins
+migrated**. The flag-day itself — route EVERY plugin's registration through the
+loopback manager and delete `pluginToolsForRegistration` + its adapter (7 call
+sites + ~6 test files) — is the single highest-blast-radius change in the
+initiative; the boot wiring is in place (flip `LOOPBACK_MIGRATED_PLUGIN_IDS` to
+universal), so once (a)+(b) hold it is a bounded, mechanical removal best done as a
+focused change with a cluster review, not rushed.
+
+**Follow-up wiring + cleanup (A + E streams, post-flag-day).** Done + verified
+(full suite 6363 passed/0 failed + build green; A1 security-review GO, E8
+correctness-review GO):
+- **A1 — MRTR elicitation resolver WIRED** (`mcp-elicitation-resolver.ts`): an
+  external server's `elicitation/create` routes to the host `ApprovalGate` as an
+  agent-action consent ask; decision → `ElicitResult` (fail-closed: only allow-*
+  → accept). Bound per-server in `McpManager` (6th `McpClient` arg), built in boot
+  from the approvalGate. sampling/roots throw (deprecated SEP-2577).
+- **A2 — per-request `capabilityProvider` headless-derivation: RESOLVED as
+  UNNECESSARY (not built).** `headless` lives on `ConversationLoop.deps.headless`
+  (per-loop-instance, fixed at construction — routine/headless loops are separate
+  instances), and `includeMcp = deps.headless !== true` already EXCLUDES MCP tools
+  from the model's tool set on a headless loop, so a headless loop never issues an
+  MCP `tools/call`. The `McpClient` default capabilityProvider (advertise
+  elicitation) is therefore correct for every MCP request that can actually occur;
+  a headless branch would be dead code superseded by a stronger existing gate.
+  Remaining A follow-up: schema-driven elicitation form-capture UI (v1 is
+  consent-only; renderer work).
+- **E8 — atomic plugin reload**: `PluginMcpHost.start` now builds tools
+  registry-read-only (`buildTools`) then commits via one `replacePluginTools`
+  swap; `dispose()` closes a superseded host without unregistering. A failed
+  reload keeps the previous tools (no zero-tools window).
+- **E9 — cleanup**: orphan i18n catalog removed (barrel regenerated) + stale
+  legacy-removal doc-comments fixed.
+- **E10 — generic-command-hooks ACTIVATED** (#811 milestone-1, STEPS 1-8 DONE):
+  the inert foundation (`hook-config.ts` + `hook-registry.ts`) plus the activation
+  (`hook-config-trust.ts` TOFU trust unit = whole-file + referenced-script hash →
+  quarantine; `script-hook-runner.ts` generalized to a `RunnableHook` argv with all
+  safety preserved; `ScriptHookManager.setTrustedRegistry` consumes the unified
+  registry; `wireHookSystem` + the flipped boot guard). A `hooks.json` runs `command`
+  hooks at the 3 fire points ONLY after passing TOFU (`/permission hooks accept`);
+  untrusted/changed → quarantined, never runs. **3-agent cluster review GO
+  (security/critic/architect), all 7 security invariants PASS; full suite 6392
+  passed/0 failed + build green.** Follow-ups (non-blocking): populate the new audit
+  fields at the executor write site; broadcast slash-driven trust changes to the
+  renderer banner.
+
+**Round-2 completions (post-feedback push).** Several items first marked "gated"
+were actually implementable once the open decisions were made autonomously:
+- **M3 boot wiring DONE** — `PluginLoopbackManager` is wired into
+  `boot/steps/plugin-runtime.ts` (onEnable→start, onDisable→stop, boot-start of
+  migrated plugins; typecheck + full build green). Only ACTIVATION (populating
+  `LOOPBACK_MIGRATED_PLUGIN_IDS`) is gated — the installed in-house plugins ship
+  `category:null` and would fail closed in both paths, so no valid pilot exists.
+- **M4 out-of-process spawner DONE** — `StdioChildTransport` spawns a real
+  subprocess plugin server; a REAL `node`-subprocess test proves discover +
+  register + call round-trip + crash containment (mid-call exit → isError, not a
+  hang). Decision: the spawnable unit is the plugin entry under `node` (no new
+  signed format for the mechanism); OS sandbox is an additive `sandboxWrap`
+  command-prefix layer.
+- **M8 Apps permission gate DONE** — the host honors `_meta.ui` only from a server
+  that advertised `io.modelcontextprotocol/ui` at discovery (pinned to the
+  2026-01-26 snapshot). The renderer ui:// iframe CSP is the second layer.
+- **M6 tool-name matcher DONE** — a hook declares `# lvis-hook-matcher: <glob>`
+  and the dispatcher runs it only for matching tool names (`mcp_*` etc.); with the
+  per-request `mcpServerId`/`pluginId` already in stdin+env, a hook can both
+  target and decide-by-origin. The broader generic-command-hooks config is a
+  separate #811 feature.
+
+**Truly-blocked remainder (external prerequisites, NOT effort).** M1/M2/M5
+complete; M3/M4/M6/M7/M8 have their sound cores complete + tested. What is left
+genuinely needs inputs unavailable in-session: **upstream draft schemas I cannot
+fetch** (M7 server-side task creation = `experimental-ext-tasks` exact result
+shape; M8 Skills = SEP-2640 `skill://` schema); **renderer + Playwright** (M8
+ui:// iframe CSP); **the hook-expansion matcher infra** (M6 `mcp__.*` + generic
+command hooks — a separate feature); **a category-compliant installed plugin**
+(M3 activation); and **M9 is a terminal flag-day** — `pluginToolsForRegistration`
+is still the live path for every plugin (SOT empty), so deleting the legacy path
+now would break them all; it can only run after all plugins migrate. Forcing any
+of these means guessing an unpinned upstream schema, shipping unvalidated infra,
+or breaking live plugins — all No-Fallback violations.
+
+---
+
 ## 6. Remaining open decisions (lower-priority; can be decided at the milestone)
 
 - **Signed-zip artifact format** — out-of-process stdio + new manifest/`_meta` fields version the artifact + SDK schema; define the re-sign + installed-plugin migration (`plugin-install-receipt.ts` SHA-256 pins). Decide at `untrusted-stdio-isolation`.
