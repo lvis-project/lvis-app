@@ -396,7 +396,20 @@ export function registerDemoHandlers(deps: IpcDeps): void {
     // this activation.
     try {
       await fs.rm(demoDisabledSentinelPath(), { force: true });
-    } catch { /* sentinel removal is best-effort — must not break activation */ }
+    } catch {
+      // Best-effort for THIS activation (env is injected below regardless),
+      // but a stale sentinel makes the NEXT boot skip auto-hydrate — an
+      // unexpected logged-out state with no signal. Audit it so the
+      // "asked to activate again on next launch" symptom is debuggable.
+      try {
+        auditLogger.log({
+          timestamp: new Date().toISOString(),
+          sessionId: "auth",
+          type: "warn",
+          input: `[demo-activation] sentinel-clear-failed (source=${source})`,
+        });
+      } catch { /* audit must not break IPC */ }
+    }
 
     // Step 4 — inject the parsed values into `process.env` AND re-run the
     // demo-credentials capture so the auth IPC handler sees the new keys.
