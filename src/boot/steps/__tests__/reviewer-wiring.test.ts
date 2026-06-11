@@ -194,42 +194,117 @@ describe("Permission policy P4 reviewer-wiring", () => {
     expect(cacheScope?.vertexLocation).toBe("us-central1");
   });
 
-  it("mode=llm but no streamProviderFor → throws (atomic cutover)", () => {
+  it("mode=llm but no streamProviderFor → degrades to rule (fresh install, no boot crash)", () => {
+    // Fresh install: default mode is "llm" but the LLM provider/key is not yet
+    // configured. wireReviewerAgent must NOT throw — it degrades to the rule
+    // classifier and surfaces the degrade discriminant for the UI/boot warn.
     const pm = new PermissionManager(join(tmpDir, "permissions.json"));
-    expect(() =>
+    let result: ReturnType<typeof wireReviewerAgent>;
+    expect(() => {
+      result = wireReviewerAgent({
+        permissionManager: pm,
+        readSettings: () => ({
+          mode: "llm",
+          provider: "openai",
+          model: "gpt-4o-mini",
+          fallbackOnError: "deny",
+          interactive: { autoApprove: "low" },
+        }),
+        verdictCachePath: join(tmpDir, "cache-degrade.jsonl"),
+        deferredQueuePath: join(tmpDir, "queue-degrade.jsonl"),
+      });
+    }).not.toThrow();
+    expect(result!.classifier).toBeInstanceOf(RuleBasedRiskClassifier);
+    expect(result!.runtimeMode).toBe("llm-degraded-to-rule");
+    // Persisted mode is preserved (still "llm") — only the runtime classifier degrades.
+    expect(result!.appliedSettings.mode).toBe("llm");
+    expect(pm.hasReviewer()).toBe(true);
+    expect(pm.isReviewerDegradedToRule()).toBe(true);
+  });
+
+  it("mode=llm + factory null → degrades to rule (provider unconfigured)", () => {
+    const pm = new PermissionManager(join(tmpDir, "permissions.json"));
+    const result = wireReviewerAgent({
+      permissionManager: pm,
+      readSettings: () => ({
+        mode: "llm",
+        provider: "anthropic",
+        model: "claude-haiku-4-5",
+        fallbackOnError: "deny",
+        interactive: { autoApprove: "low" },
+      }),
+      streamProviderFor: () => null,
+      verdictCachePath: join(tmpDir, "cache-degrade-null.jsonl"),
+      deferredQueuePath: join(tmpDir, "queue-degrade-null.jsonl"),
+    });
+    expect(result.classifier).toBeInstanceOf(RuleBasedRiskClassifier);
+    expect(result.runtimeMode).toBe("llm-degraded-to-rule");
+    expect(pm.isReviewerDegradedToRule()).toBe(true);
+  });
+
+  it("logs a boot warn on llm→rule degrade", () => {
+    const pm = new PermissionManager(join(tmpDir, "permissions.json"));
+    const warnSpy = vi.spyOn(console, "warn").mockImplementation(() => {});
+    try {
       wireReviewerAgent({
         permissionManager: pm,
         readSettings: () => ({
           mode: "llm",
           provider: "openai",
           model: "gpt-4o-mini",
-          fallbackOnError: "rule",
-          interactive: { autoApprove: "off" },
+          fallbackOnError: "deny",
+          interactive: { autoApprove: "low" },
         }),
-        verdictCachePath: join(tmpDir, "cache.jsonl"),
-        deferredQueuePath: join(tmpDir, "queue.jsonl"),
-      }),
-    ).toThrow(/streamProviderFor/);
-    expect(pm.hasReviewer()).toBe(false);
+        verdictCachePath: join(tmpDir, "cache-degrade-warn.jsonl"),
+        deferredQueuePath: join(tmpDir, "queue-degrade-warn.jsonl"),
+      });
+      const fired = warnSpy.mock.calls.some((args) =>
+        args.some((a) => typeof a === "string" && a.includes("degrading to rule classifier")),
+      );
+      expect(fired).toBe(true);
+    } finally {
+      warnSpy.mockRestore();
+    }
   });
 
-  it("mode=llm but factory returns null → throws (no silent fallback)", () => {
+  it("re-wiring after provider becomes available heals llm-degraded-to-rule → llm", () => {
     const pm = new PermissionManager(join(tmpDir, "permissions.json"));
-    expect(() =>
-      wireReviewerAgent({
-        permissionManager: pm,
-        readSettings: () => ({
-          mode: "llm",
-          provider: "anthropic",
-          model: "claude-haiku-4-5",
-          fallbackOnError: "rule",
-          interactive: { autoApprove: "off" },
-        }),
-        streamProviderFor: () => null,
-        verdictCachePath: join(tmpDir, "cache.jsonl"),
-        deferredQueuePath: join(tmpDir, "queue.jsonl"),
+    // First wiring: no provider → degraded.
+    const degraded = wireReviewerAgent({
+      permissionManager: pm,
+      readSettings: () => ({
+        mode: "llm",
+        provider: "openai",
+        model: "gpt-4o-mini",
+        fallbackOnError: "deny",
+        interactive: { autoApprove: "low" },
       }),
-    ).toThrow(/anthropic.*not configured/);
+      verdictCachePath: join(tmpDir, "cache-heal-1.jsonl"),
+      deferredQueuePath: join(tmpDir, "queue-heal-1.jsonl"),
+    });
+    expect(degraded.runtimeMode).toBe("llm-degraded-to-rule");
+    expect(pm.isReviewerDegradedToRule()).toBe(true);
+
+    // Second wiring: provider now available → heals to llm, flag clears.
+    const provider = stubProvider([
+      { type: "message_complete", stopReason: "end_turn" },
+    ]);
+    const healed = wireReviewerAgent({
+      permissionManager: pm,
+      readSettings: () => ({
+        mode: "llm",
+        provider: "openai",
+        model: "gpt-4o-mini",
+        fallbackOnError: "deny",
+        interactive: { autoApprove: "low" },
+      }),
+      streamProviderFor: () => provider,
+      verdictCachePath: join(tmpDir, "cache-heal-2.jsonl"),
+      deferredQueuePath: join(tmpDir, "queue-heal-2.jsonl"),
+    });
+    expect(healed.classifier).toBeInstanceOf(LlmRiskClassifier);
+    expect(healed.runtimeMode).toBe("llm");
+    expect(pm.isReviewerDegradedToRule()).toBe(false);
   });
 
   it("preserves caller-supplied settings on appliedSettings", () => {
@@ -382,46 +457,46 @@ describe("Permission policy P4 reviewer-wiring", () => {
 });
 
 describe("Permission policy C3 foundry/gcp wiring paths", () => {
-  it("mode=llm provider=foundry without getSecret → throws clear message", () => {
+  it("mode=llm provider=foundry without getSecret → degrades to rule (no boot crash)", () => {
     const pm = new PermissionManager(join(tmpDir, "permissions.json"));
-    expect(() =>
-      wireReviewerAgent({
-        permissionManager: pm,
-        readSettings: () => ({
-          mode: "llm",
-          provider: "foundry",
-          model: "gpt-4o",
-          fallbackOnError: "deny",
-          interactive: { autoApprove: "off" },
-        }),
-        // getSecret intentionally omitted
-        getFoundryEndpoint: () => "https://proj.services.ai.azure.com",
-        verdictCachePath: join(tmpDir, "cache-foundry-nosecret.jsonl"),
-        deferredQueuePath: join(tmpDir, "queue-foundry-nosecret.jsonl"),
+    const result = wireReviewerAgent({
+      permissionManager: pm,
+      readSettings: () => ({
+        mode: "llm",
+        provider: "foundry",
+        model: "gpt-4o",
+        fallbackOnError: "deny",
+        interactive: { autoApprove: "off" },
       }),
-    ).toThrow(/getSecret/);
-    expect(pm.hasReviewer()).toBe(false);
+      // getSecret intentionally omitted
+      getFoundryEndpoint: () => "https://proj.services.ai.azure.com",
+      verdictCachePath: join(tmpDir, "cache-foundry-nosecret.jsonl"),
+      deferredQueuePath: join(tmpDir, "queue-foundry-nosecret.jsonl"),
+    });
+    expect(result.classifier).toBeInstanceOf(RuleBasedRiskClassifier);
+    expect(result.runtimeMode).toBe("llm-degraded-to-rule");
+    expect(pm.isReviewerDegradedToRule()).toBe(true);
   });
 
-  it("mode=llm provider=foundry with getSecret returning null → throws 'API key or endpoint not configured'", () => {
+  it("mode=llm provider=foundry with getSecret returning null → degrades to rule", () => {
     const pm = new PermissionManager(join(tmpDir, "permissions.json"));
-    expect(() =>
-      wireReviewerAgent({
-        permissionManager: pm,
-        readSettings: () => ({
-          mode: "llm",
-          provider: "foundry",
-          model: "gpt-4o",
-          fallbackOnError: "deny",
-          interactive: { autoApprove: "off" },
-        }),
-        getSecret: () => null,
-        getFoundryEndpoint: () => "https://proj.services.ai.azure.com",
-        verdictCachePath: join(tmpDir, "cache-foundry-nokey.jsonl"),
-        deferredQueuePath: join(tmpDir, "queue-foundry-nokey.jsonl"),
+    const result = wireReviewerAgent({
+      permissionManager: pm,
+      readSettings: () => ({
+        mode: "llm",
+        provider: "foundry",
+        model: "gpt-4o",
+        fallbackOnError: "deny",
+        interactive: { autoApprove: "off" },
       }),
-    ).toThrow(/API key or endpoint not configured/);
-    expect(pm.hasReviewer()).toBe(false);
+      getSecret: () => null,
+      getFoundryEndpoint: () => "https://proj.services.ai.azure.com",
+      verdictCachePath: join(tmpDir, "cache-foundry-nokey.jsonl"),
+      deferredQueuePath: join(tmpDir, "queue-foundry-nokey.jsonl"),
+    });
+    expect(result.classifier).toBeInstanceOf(RuleBasedRiskClassifier);
+    expect(result.runtimeMode).toBe("llm-degraded-to-rule");
+    expect(pm.isReviewerDegradedToRule()).toBe(true);
   });
 
   it("mode=llm provider=foundry with valid secrets → wires LlmRiskClassifier", () => {
@@ -447,44 +522,44 @@ describe("Permission policy C3 foundry/gcp wiring paths", () => {
     expect(pm.hasReviewer()).toBe(true);
   });
 
-  it("mode=llm provider=gcp-playground without getSecret → throws clear message", () => {
+  it("mode=llm provider=gcp-playground without getSecret → degrades to rule (no boot crash)", () => {
     const pm = new PermissionManager(join(tmpDir, "permissions.json"));
-    expect(() =>
-      wireReviewerAgent({
-        permissionManager: pm,
-        readSettings: () => ({
-          mode: "llm",
-          provider: "gcp-playground",
-          model: "gemini-1.5-flash",
-          fallbackOnError: "deny",
-          interactive: { autoApprove: "off" },
-        }),
-        // getSecret intentionally omitted
-        verdictCachePath: join(tmpDir, "cache-gcp-nosecret.jsonl"),
-        deferredQueuePath: join(tmpDir, "queue-gcp-nosecret.jsonl"),
+    const result = wireReviewerAgent({
+      permissionManager: pm,
+      readSettings: () => ({
+        mode: "llm",
+        provider: "gcp-playground",
+        model: "gemini-1.5-flash",
+        fallbackOnError: "deny",
+        interactive: { autoApprove: "off" },
       }),
-    ).toThrow(/getSecret/);
-    expect(pm.hasReviewer()).toBe(false);
+      // getSecret intentionally omitted
+      verdictCachePath: join(tmpDir, "cache-gcp-nosecret.jsonl"),
+      deferredQueuePath: join(tmpDir, "queue-gcp-nosecret.jsonl"),
+    });
+    expect(result.classifier).toBeInstanceOf(RuleBasedRiskClassifier);
+    expect(result.runtimeMode).toBe("llm-degraded-to-rule");
+    expect(pm.isReviewerDegradedToRule()).toBe(true);
   });
 
-  it("mode=llm provider=gcp-playground with getSecret returning null → throws 'API key not configured'", () => {
+  it("mode=llm provider=gcp-playground with getSecret returning null → degrades to rule", () => {
     const pm = new PermissionManager(join(tmpDir, "permissions.json"));
-    expect(() =>
-      wireReviewerAgent({
-        permissionManager: pm,
-        readSettings: () => ({
-          mode: "llm",
-          provider: "gcp-playground",
-          model: "gemini-1.5-flash",
-          fallbackOnError: "deny",
-          interactive: { autoApprove: "off" },
-        }),
-        getSecret: () => null,
-        verdictCachePath: join(tmpDir, "cache-gcp-nokey.jsonl"),
-        deferredQueuePath: join(tmpDir, "queue-gcp-nokey.jsonl"),
+    const result = wireReviewerAgent({
+      permissionManager: pm,
+      readSettings: () => ({
+        mode: "llm",
+        provider: "gcp-playground",
+        model: "gemini-1.5-flash",
+        fallbackOnError: "deny",
+        interactive: { autoApprove: "off" },
       }),
-    ).toThrow(/API key not configured/);
-    expect(pm.hasReviewer()).toBe(false);
+      getSecret: () => null,
+      verdictCachePath: join(tmpDir, "cache-gcp-nokey.jsonl"),
+      deferredQueuePath: join(tmpDir, "queue-gcp-nokey.jsonl"),
+    });
+    expect(result.classifier).toBeInstanceOf(RuleBasedRiskClassifier);
+    expect(result.runtimeMode).toBe("llm-degraded-to-rule");
+    expect(pm.isReviewerDegradedToRule()).toBe(true);
   });
 
   it("mode=llm provider=gcp-playground with llm.apiKey.gemini → wires LlmRiskClassifier", () => {

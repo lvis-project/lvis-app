@@ -1109,6 +1109,13 @@ export type PermissionReviewerDispatchResult =
       ok: true;
       verb: "show" | "mode" | "provider" | "model" | "fallback" | "interactive";
       settings: PermissionReviewerSettings;
+      /**
+       * Runtime degrade flag — true when the persisted reviewer mode is "llm"
+       * but boot wiring could not instantiate the LLM provider (no chat
+       * provider/key configured) and fell back to the rule classifier. The UI
+       * surfaces a banner. Undefined on legacy/main builds that do not report it.
+       */
+      reviewerDegradedToRule?: boolean;
     }
   | { ok: false; error: string };
 
