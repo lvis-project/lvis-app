@@ -6,20 +6,14 @@
  */
 import { describe, it, expect, vi, afterEach } from "vitest";
 import { McpClient } from "../mcp-client.js";
-import { McpGovernance } from "../mcp-governance.js";
 import { ToolRegistry } from "../../tools/registry.js";
 import { PluginMcpServer, type PluginToolDelegate } from "../plugin-mcp-server.js";
 import { LoopbackTransport } from "../loopback-transport.js";
 import type { McpGovernancePolicy } from "../types.js";
 import type { PluginManifest } from "../../plugins/types.js";
+import { governanceWithPolicy } from "./test-helpers.js";
 
 afterEach(() => vi.restoreAllMocks());
-
-function governanceWithPolicy(policy: McpGovernancePolicy): McpGovernance {
-  const gov = new McpGovernance("/nonexistent/mcp-policy.json");
-  (gov as unknown as { policy: McpGovernancePolicy }).policy = policy;
-  return gov;
-}
 
 function approvingPolicy(id: string, command: string): McpGovernancePolicy {
   return {
