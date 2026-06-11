@@ -208,8 +208,10 @@ captureDemoCredentials();
 applyDemoHostResolverRules(app);
 // Manual host-resolver map — applies the user-configured /etc/hosts-style
 // mapping when authMode==="manual". No-op when demo mode is active (demo
-// map takes precedence) or when no map has been configured.
-applyManualHostResolverRules(app);
+// map takes precedence) or when no map has been configured. Reads the same
+// settings file the SettingsService writes to (under app.getPath("userData"))
+// so a map saved via Settings is the one applied on the next boot.
+applyManualHostResolverRules(app, app.getPath("userData"));
 
 if (app.isPackaged) {
   scrubPackagedProcessEnv(process.env);

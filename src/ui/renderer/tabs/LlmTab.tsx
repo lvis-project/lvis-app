@@ -23,6 +23,7 @@ import {
   DialogTitle,
 } from "../../../components/ui/dialog.js";
 import { REASONING_EFFORT_STEPS, VENDORS, budgetToEffortIndex } from "../constants.js";
+import { parseHostResolverMap } from "../../../shared/host-resolver-map.js";
 import type { LvisApi } from "../types.js";
 import { SettingsPageHeader } from "../components/SettingsPageHeader.js";
 import { SettingsSection } from "../components/SettingsSection.js";
@@ -71,6 +72,14 @@ export interface LlmTabProps {
   /** Manual-mode host-resolver map (persisted /etc/hosts-style text). */
   hostResolverMap: string;
   setHostResolverMap: (v: string) => void;
+  /**
+   * The host-resolver map value as last hydrated from persisted settings.
+   * Used to detect whether the textarea has actually changed — the Apply
+   * (Save and Restart) button is only enabled when the current draft differs
+   * from this, so an unchanged Apply click can never trigger a needless
+   * relaunch (requirement D).
+   */
+  loadedHostResolverMap: string;
   onSaved: () => void;
   /**
    * Called after the user changes an immediate-apply control (vendor /
@@ -152,25 +161,6 @@ function modelOptionsFor(vendorId: string, selectedModel: string): string[] {
   return options;
 }
 
-/**
- * Parse /etc/hosts-style text into [hostname, ip] pairs so the caller can
- * display a count badge. Blank lines and # comments are skipped; malformed
- * entries (missing whitespace separator) are silently dropped.
- */
-export function parseHostResolverMapText(raw: string): Array<{ hostname: string; ip: string }> {
-  const result: Array<{ hostname: string; ip: string }> = [];
-  for (const line of raw.split("\n")) {
-    const trimmed = line.trim();
-    if (!trimmed || trimmed.startsWith("#")) continue;
-    const parts = trimmed.split(/\s+/);
-    if (parts.length < 2) continue;
-    const ip = parts[0]!;
-    const hostname = parts[1]!;
-    result.push({ ip, hostname });
-  }
-  return result;
-}
-
 export function LlmTab(props: LlmTabProps) {
   const {
     api,
@@ -201,6 +191,7 @@ export function LlmTab(props: LlmTabProps) {
     setFallbackOpen,
     hostResolverMap,
     setHostResolverMap,
+    loadedHostResolverMap,
     onSaved,
     onImmediateChange,
     onSave,
@@ -234,10 +225,13 @@ export function LlmTab(props: LlmTabProps) {
   }, [api, hostResolverMap]);
 
   const isLoginMode = authMode === "login";
-  // Track the originally-loaded host map to detect actual changes.
-  // We use the hostResolverMap prop directly: only show the Apply button
-  // when the textarea has content that differs from what is currently saved.
-  const hostMapEntryCount = parseHostResolverMapText(hostResolverMap).length;
+  // Requirement D — only allow Apply when the host map has ACTUALLY changed
+  // from the last-persisted value. `loadedHostResolverMap` is the value
+  // hydrated from settings; comparing against it means an unchanged textarea
+  // leaves the Apply (Save and Restart) button disabled, so an unchanged
+  // click can never trigger a needless relaunch.
+  const hostMapChanged = hostResolverMap !== loadedHostResolverMap;
+  const hostMapEntryCount = parseHostResolverMap(hostResolverMap).length;
 
   return (
     <div className="space-y-6">
@@ -336,6 +330,17 @@ export function LlmTab(props: LlmTabProps) {
               <p className="text-[11px] text-muted-foreground">
                 {t("llmTab.loginAutoConfig")}
               </p>
+              {/* Affordance for the disabled-field hint: switch back to manual
+                  mode so the provider fields + host map become editable. */}
+              <Button
+                size="sm"
+                variant="ghost"
+                className="h-7 px-0 text-xs"
+                data-testid="llm-tab:logout-to-edit"
+                onClick={() => setAuthMode("manual")}
+              >
+                {t("llmTab.logoutToEdit")}
+              </Button>
             </div>
           )}
 
@@ -521,7 +526,9 @@ export function LlmTab(props: LlmTabProps) {
           />
           {!isLoginMode && hostMapEntryCount > 0 && (
             <p className="text-[11px] text-muted-foreground">
-              {hostMapEntryCount} {hostMapEntryCount === 1 ? "entry" : "entries"} parsed
+              {hostMapEntryCount === 1
+                ? t("llmTab.entryCountSingular", { count: hostMapEntryCount })
+                : t("llmTab.entryCountPlural", { count: hostMapEntryCount })}
             </p>
           )}
           {!isLoginMode && (
@@ -530,7 +537,7 @@ export function LlmTab(props: LlmTabProps) {
                 size="sm"
                 variant="outline"
                 onClick={handleHostMapApply}
-                disabled={saving || !settingsLoaded}
+                disabled={saving || !settingsLoaded || !hostMapChanged}
                 data-testid="llm-tab:apply-host-map"
               >
                 {t("llmTab.hostResolverMapApply")}

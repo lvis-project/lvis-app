@@ -165,6 +165,8 @@ export const COMMON_IPC_ERROR_MESSAGES: Readonly<Record<string, string>> = {
   "invalid-request-id": "formatIpcError.invalidRequestId",
   "invalid-webcontents-id": "formatIpcError.invalidWebcontentsId",
   "invalid-foundry-endpoint": "formatIpcError.invalidFoundryEndpoint",
+  "invalid-host-map": "formatIpcError.invalidHostMap",
+  "auth-mode-not-manual": "formatIpcError.authModeNotManual",
   "open-failed": "formatIpcError.openFailed",
   "checkpoint-not-found": "formatIpcError.checkpointNotFound",
   "session-mismatch": "formatIpcError.sessionMismatch",

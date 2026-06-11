@@ -13,17 +13,29 @@
  */
 import "../../../../../test/renderer/setup.js";
 import { describe, it, expect, vi } from "vitest";
-import { fireEvent, render } from "@testing-library/react";
+import { act, fireEvent, render } from "@testing-library/react";
 import { useState } from "react";
 import { LlmTab, type FallbackEntry } from "../LlmTab.js";
 import { makeMockLvisApi } from "../../../../../test/renderer/mock-lvis-api.js";
 
-function llmTabApi() {
+type HarnessApi = Parameters<typeof LlmTab>[0]["api"];
+
+function llmTabApi(): HarnessApi {
   const { api } = makeMockLvisApi();
-  return api as unknown as Parameters<typeof LlmTab>[0]["api"];
+  return api as unknown as HarnessApi;
 }
 
-function Harness({ initialAuthMode }: { initialAuthMode: "manual" | "login" }) {
+function Harness({
+  initialAuthMode,
+  initialHostResolverMap = "",
+  loadedHostResolverMap = "",
+  api,
+}: {
+  initialAuthMode: "manual" | "login";
+  initialHostResolverMap?: string;
+  loadedHostResolverMap?: string;
+  api?: HarnessApi;
+}) {
   const [authMode, setAuthMode] = useState<"manual" | "login">(initialAuthMode);
   const [vendor, setVendor] = useState("openai");
   const [keyInput, setKeyInput] = useState("");
@@ -36,10 +48,10 @@ function Harness({ initialAuthMode }: { initialAuthMode: "manual" | "login" }) {
   const [thinkingBudget, setThinkingBudget] = useState(10_000);
   const [fallbackChain, setFallbackChain] = useState<FallbackEntry[]>([]);
   const [fallbackOpen, setFallbackOpen] = useState(false);
-  const [hostResolverMap, setHostResolverMap] = useState("");
+  const [hostResolverMap, setHostResolverMap] = useState(initialHostResolverMap);
   return (
     <LlmTab
-      api={llmTabApi()}
+      api={api ?? llmTabApi()}
       vendor={vendor}
       setVendor={setVendor}
       baseUrl={baseUrl}
@@ -67,6 +79,7 @@ function Harness({ initialAuthMode }: { initialAuthMode: "manual" | "login" }) {
       setFallbackOpen={setFallbackOpen}
       hostResolverMap={hostResolverMap}
       setHostResolverMap={setHostResolverMap}
+      loadedHostResolverMap={loadedHostResolverMap}
       onSaved={vi.fn()}
     />
   );
@@ -126,6 +139,80 @@ describe("LlmTab — top-level login toggle UI", () => {
 
     const { container: manualContainer } = render(<Harness initialAuthMode="manual" />);
     expect(manualContainer.querySelector('[data-testid="llm-tab:apply-host-map"]')).not.toBeNull();
+  });
+
+  it("disables Apply when the host map is unchanged from the loaded value", () => {
+    const { container } = render(
+      <Harness
+        initialAuthMode="manual"
+        initialHostResolverMap={"10.0.0.10 endpoint.example.com"}
+        loadedHostResolverMap={"10.0.0.10 endpoint.example.com"}
+      />,
+    );
+    const applyBtn = container.querySelector(
+      '[data-testid="llm-tab:apply-host-map"]',
+    ) as HTMLButtonElement | null;
+    expect(applyBtn).not.toBeNull();
+    expect(applyBtn?.disabled).toBe(true);
+  });
+
+  it("enables Apply once the host map differs from the loaded value", () => {
+    const { container } = render(
+      <Harness
+        initialAuthMode="manual"
+        initialHostResolverMap={"10.0.0.10 changed.example.com"}
+        loadedHostResolverMap={"10.0.0.10 endpoint.example.com"}
+      />,
+    );
+    const applyBtn = container.querySelector(
+      '[data-testid="llm-tab:apply-host-map"]',
+    ) as HTMLButtonElement | null;
+    expect(applyBtn?.disabled).toBe(false);
+  });
+
+  it("opens the relaunch dialog and applies the textarea value on confirm", async () => {
+    const api = llmTabApi();
+    const applyHostMap = vi.spyOn(
+      api as unknown as { applyHostMap: (v: string) => Promise<{ ok: boolean }> },
+      "applyHostMap",
+    );
+    const { container, getByTestId } = render(
+      <Harness
+        initialAuthMode="manual"
+        initialHostResolverMap={"10.0.0.10 changed.example.com"}
+        loadedHostResolverMap={"10.0.0.10 endpoint.example.com"}
+        api={api}
+      />,
+    );
+
+    // No dialog confirm button until Apply is clicked.
+    expect(container.querySelector('[data-testid="llm-tab:relaunch-confirm"]')).toBeNull();
+
+    fireEvent.click(getByTestId("llm-tab:apply-host-map"));
+
+    // Dialog now open with confirm button.
+    const confirm = getByTestId("llm-tab:relaunch-confirm");
+    expect(confirm).not.toBeNull();
+    expect(applyHostMap).not.toHaveBeenCalled();
+
+    // Confirm → api.applyHostMap called with the current textarea value.
+    await act(async () => {
+      fireEvent.click(confirm);
+    });
+    expect(applyHostMap).toHaveBeenCalledWith("10.0.0.10 changed.example.com");
+  });
+
+  it("renders the parsed entry count for a valid host map in manual mode", () => {
+    const { container } = render(
+      <Harness
+        initialAuthMode="manual"
+        initialHostResolverMap={"10.0.0.10 a.example.com\n10.0.0.11 b.example.com"}
+        loadedHostResolverMap={""}
+      />,
+    );
+    const section = container.querySelector('[data-testid="llm-tab:host-resolver-section"]');
+    // i18n plural form interpolates the count (en: "2 entries parsed").
+    expect(section?.textContent).toContain("2");
   });
 
   it("toggles between manual and login via the auth-mode radio group", () => {
