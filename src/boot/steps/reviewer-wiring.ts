@@ -269,8 +269,30 @@ export function wireReviewerAgent(deps: WireReviewerDeps): WireReviewerResult {
     //     `rewireReviewerAgent()`, this branch instantiates the adapter
     //     successfully, and `runtimeMode` returns to "llm". No removal date is
     //     needed because the degrade has no persisted footprint.
+    //
+    // Scope discipline: the try only wraps `resolveReviewerAdapter`, which is
+    // the sole call that throws on the external boundary (missing user API
+    // key). The classifier construction + telemetry log below run *outside*
+    // the catch so that any internal programming error there (a contract
+    // violation, not an external configuration state) surfaces loudly rather
+    // than being silently swallowed as a degrade. No-Fallback strictness:
+    // only the documented external boundary is caught.
+    let adapter: LlmReviewerProvider | undefined;
     try {
-      const adapter = resolveReviewerAdapter(effectiveSettings.provider, deps);
+      adapter = resolveReviewerAdapter(effectiveSettings.provider, deps);
+    } catch (err) {
+      // Provider-resolve failure only: the user-supplied LLM provider/API key
+      // is absent or invalid (external configuration state). Degrade to rule.
+      degradedToRule = true;
+      runtimeMode = "llm-degraded-to-rule";
+      log.warn(
+        { provider: effectiveSettings.provider, error: (err as Error).message },
+        "boot: reviewer mode=llm requested but provider could not be wired — " +
+          "degrading to rule classifier. Reviewer auto-heals to llm once an LLM " +
+          "provider/API key is configured (login or Intelligence settings re-fires wiring).",
+      );
+    }
+    if (adapter) {
       const reviewerSettings: ReviewerSettings = {
         mode: "llm",
         provider: adapter,
@@ -284,16 +306,8 @@ export function wireReviewerAgent(deps: WireReviewerDeps): WireReviewerResult {
         effectiveSettings.model,
         settings.fallbackOnError,
       );
-    } catch (err) {
-      degradedToRule = true;
-      runtimeMode = "llm-degraded-to-rule";
+    } else {
       classifier = createRiskClassifier({ mode: "rule" });
-      log.warn(
-        { provider: effectiveSettings.provider, error: (err as Error).message },
-        "boot: reviewer mode=llm requested but provider could not be wired — " +
-          "degrading to rule classifier. Reviewer auto-heals to llm once an LLM " +
-          "provider/API key is configured (login or Intelligence settings re-fires wiring).",
-      );
     }
   }
 
