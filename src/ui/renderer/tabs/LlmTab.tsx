@@ -1,3 +1,4 @@
+import { useCallback, useState } from "react";
 import { Badge } from "../../../components/ui/badge.js";
 import { Button } from "../../../components/ui/button.js";
 import { Input } from "../../../components/ui/input.js";
@@ -12,6 +13,15 @@ import {
 } from "../../../components/ui/select.js";
 import { Slider } from "../../../components/ui/slider.js";
 import { Switch } from "../../../components/ui/switch.js";
+import { Textarea } from "../../../components/ui/textarea.js";
+import {
+  Dialog,
+  DialogContent,
+  DialogDescription,
+  DialogFooter,
+  DialogHeader,
+  DialogTitle,
+} from "../../../components/ui/dialog.js";
 import { REASONING_EFFORT_STEPS, VENDORS, budgetToEffortIndex } from "../constants.js";
 import type { LvisApi } from "../types.js";
 import { SettingsPageHeader } from "../components/SettingsPageHeader.js";
@@ -40,9 +50,9 @@ export interface LlmTabProps {
   /**
    * #893 — Top-level auth mode. `"manual"` (default) renders the vendor
    * dropdown + full per-vendor form (API key, baseUrl, model, vertex…);
-   * `"login"` collapses everything down to status + a single Login button
-   * whose backend decides the vendor (see `LVIS_DEMO_VENDOR`). Persisted
-   * at `llm.authMode` (top-level, not per-vendor).
+   * `"login"` renders the same fields but in a disabled state showing the
+   * active login-session values. Persisted at `llm.authMode` (top-level,
+   * not per-vendor).
    */
   authMode: "manual" | "login";
   setAuthMode: (mode: "manual" | "login") => void;
@@ -58,6 +68,9 @@ export interface LlmTabProps {
   setFallbackChain: (updater: FallbackEntry[] | ((c: FallbackEntry[]) => FallbackEntry[])) => void;
   fallbackOpen: boolean;
   setFallbackOpen: (updater: boolean | ((o: boolean) => boolean)) => void;
+  /** Manual-mode host-resolver map (persisted /etc/hosts-style text). */
+  hostResolverMap: string;
+  setHostResolverMap: (v: string) => void;
   onSaved: () => void;
   /**
    * Called after the user changes an immediate-apply control (vendor /
@@ -139,6 +152,25 @@ function modelOptionsFor(vendorId: string, selectedModel: string): string[] {
   return options;
 }
 
+/**
+ * Parse /etc/hosts-style text into [hostname, ip] pairs so the caller can
+ * display a count badge. Blank lines and # comments are skipped; malformed
+ * entries (missing whitespace separator) are silently dropped.
+ */
+export function parseHostResolverMapText(raw: string): Array<{ hostname: string; ip: string }> {
+  const result: Array<{ hostname: string; ip: string }> = [];
+  for (const line of raw.split("\n")) {
+    const trimmed = line.trim();
+    if (!trimmed || trimmed.startsWith("#")) continue;
+    const parts = trimmed.split(/\s+/);
+    if (parts.length < 2) continue;
+    const ip = parts[0]!;
+    const hostname = parts[1]!;
+    result.push({ ip, hostname });
+  }
+  return result;
+}
+
 export function LlmTab(props: LlmTabProps) {
   const {
     api,
@@ -167,6 +199,8 @@ export function LlmTab(props: LlmTabProps) {
     setFallbackChain,
     fallbackOpen,
     setFallbackOpen,
+    hostResolverMap,
+    setHostResolverMap,
     onSaved,
     onImmediateChange,
     onSave,
@@ -179,6 +213,32 @@ export function LlmTab(props: LlmTabProps) {
   const activeModelValue = model.trim() || vendorInfo.defaultModel;
   const activeModelOptions = modelOptionsFor(vendor, activeModelValue);
 
+  // Relaunch confirmation dialog state for host map changes.
+  const [relaunchConfirmOpen, setRelaunchConfirmOpen] = useState(false);
+  const [relaunchPending, setRelaunchPending] = useState(false);
+
+  const handleHostMapApply = useCallback(() => {
+    setRelaunchConfirmOpen(true);
+  }, []);
+
+  const handleRelaunchConfirm = useCallback(async () => {
+    setRelaunchPending(true);
+    try {
+      await api.applyHostMap(hostResolverMap);
+      // The main process calls app.relaunch() + app.exit(0) so this
+      // renderer will terminate — no further cleanup needed here.
+    } finally {
+      setRelaunchPending(false);
+      setRelaunchConfirmOpen(false);
+    }
+  }, [api, hostResolverMap]);
+
+  const isLoginMode = authMode === "login";
+  // Track the originally-loaded host map to detect actual changes.
+  // We use the hostResolverMap prop directly: only show the Apply button
+  // when the textarea has content that differs from what is currently saved.
+  const hostMapEntryCount = parseHostResolverMapText(hostResolverMap).length;
+
   return (
     <div className="space-y-6">
       <SettingsPageHeader
@@ -186,12 +246,39 @@ export function LlmTab(props: LlmTabProps) {
         description={t("llmTab.pageDescription")}
       />
 
+      {/* Relaunch confirmation dialog — shown before applying host map changes */}
+      <Dialog open={relaunchConfirmOpen} onOpenChange={setRelaunchConfirmOpen}>
+        <DialogContent>
+          <DialogHeader>
+            <DialogTitle>{t("llmTab.relaunchConfirmTitle")}</DialogTitle>
+            <DialogDescription>{t("llmTab.relaunchConfirmBody")}</DialogDescription>
+          </DialogHeader>
+          <DialogFooter>
+            <Button
+              variant="outline"
+              onClick={() => setRelaunchConfirmOpen(false)}
+              disabled={relaunchPending}
+            >
+              {t("llmTab.relaunchConfirmCancel")}
+            </Button>
+            <Button
+              variant="destructive"
+              onClick={() => void handleRelaunchConfirm()}
+              disabled={relaunchPending}
+              data-testid="llm-tab:relaunch-confirm"
+            >
+              {relaunchPending ? t("llmTab.saving") : t("llmTab.relaunchConfirmOk")}
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
       {/* Section A — 공급자 구성.
-          #893 top-level authMode toggle: when `login`, the vendor dropdown
-          and every per-vendor field collapse out of the DOM — only status +
-          Login button remain. Manual mode renders the full per-vendor form
-          (baseUrl / vertex / API key / model) deferred to the section's
-          저장 button. */}
+          When `authMode === "login"` the vendor dropdown and every per-vendor
+          field are rendered in a visually disabled state showing the active
+          login-session values — they are not removed from the DOM. This gives
+          the user context about what is currently active and makes it clear
+          that logging out will restore edit access. */}
       <SettingsSection
         title={t("llmTab.providerConfig")}
         id="llm-providers"
@@ -227,11 +314,9 @@ export function LlmTab(props: LlmTabProps) {
             </RadioGroup>
           </div>
 
-          {authMode === "login" ? (
+          {/* Login-mode status + action row — shown only when authMode === "login" */}
+          {isLoginMode && (
             <div className="space-y-2" data-testid="llm-tab:login-section">
-              <p className="text-[11px] text-muted-foreground">
-                {t("llmTab.activeVendor")}: <code>{vendorInfo.label}</code> ({model || vendorInfo.defaultModel})
-              </p>
               <div className="flex items-center gap-2">
                 {hasKey ? (
                   <Badge variant="default" className="text-xs">{t("llmTab.loggedIn")}</Badge>
@@ -252,112 +337,148 @@ export function LlmTab(props: LlmTabProps) {
                 {t("llmTab.loginAutoConfig")}
               </p>
             </div>
-          ) : (
-            <div className="space-y-3" data-testid="llm-tab:manual-section">
-              <div className="space-y-2">
-                <Label htmlFor="vendor-select" className="flex items-center gap-2">
-                  {t("llmTab.vendor")}
-                  <ImmediateBadge />
-                </Label>
-                <Select
-                  value={vendor}
-                  onValueChange={(v) => {
-                    setVendor(v);
-                    onImmediateChange?.();
-                  }}
-                >
-                  <SelectTrigger id="vendor-select" className="w-full">
-                    <SelectValue placeholder={t("llmTab.vendorPlaceholder")} />
-                  </SelectTrigger>
-                  <SelectContent>
-                    {VENDORS.map((v) => (
-                      <SelectItem key={v.id} value={v.id}>{v.label}</SelectItem>
-                    ))}
-                  </SelectContent>
-                </Select>
-              </div>
-              {vendor !== "vertex-ai" && (vendorInfo.needsBaseUrl || vendor === "openai" || vendor === "copilot") && (
-                <div className="space-y-2">
-                  <Label className="text-sm font-medium">
-                    Endpoint (baseUrl){vendorInfo.needsBaseUrl ? " *" : ` (${t("llmTab.optional")})`}
-                  </Label>
-                  <Input
-                    data-testid="llm-base-url-input"
-                    value={baseUrl}
-                    onChange={(e) => setBaseUrl(e.target.value)}
-                    placeholder={(vendorInfo as any).baseUrlPlaceholder ?? "https://..."}
-                  />
-                  <p className="text-[11px] text-muted-foreground">
-                    {t("llmTab.baseUrlDiscardWarning")}
-                  </p>
-                  {vendor === "azure-foundry" && (
-                    <p className="text-[11px] text-muted-foreground">
-                      {t("llmTab.azureEndpointFormat")}
-                      {" "}<code>https://{"{resource}"}.openai.azure.com/openai/v1/</code>
-                      {" "}— {t("llmTab.azureDeploymentNote")}
-                    </p>
-                  )}
-                  {(vendor === "openai" || vendor === "copilot") && (
-                    <p className="text-[11px] text-muted-foreground">
-                      {t("llmTab.proxyEndpointNote")}
-                    </p>
-                  )}
-                </div>
-              )}
-              {vendor === "vertex-ai" && (
-                <div className="space-y-2 rounded-md border p-3">
-                  <p className="text-sm font-medium">Google Vertex AI</p>
-                  <p className="text-[11px] text-muted-foreground">
-                    {t("llmTab.vertexAuthDesc1")}<code>gcloud auth application-default login</code>{t("llmTab.vertexAuthDesc2")}
-                    {t("llmTab.vertexAuthDesc3")}<code>GOOGLE_APPLICATION_CREDENTIALS</code>{t("llmTab.vertexAuthDesc4")}
-                  </p>
-                  <div className="space-y-1">
-                    <Label className="text-xs text-muted-foreground">GCP Project ID *</Label>
-                    <Input
-                      value={vertexProject}
-                      onChange={(e) => setVertexProject(e.target.value)}
-                      placeholder="my-gcp-project"
-                    />
-                  </div>
-                  <div className="space-y-1">
-                    <Label className="text-xs text-muted-foreground">Location (region) — {t("llmTab.optional")}</Label>
-                    <Input
-                      value={vertexLocation}
-                      onChange={(e) => setVertexLocation(e.target.value)}
-                      placeholder={t("llmTab.vertexLocationPlaceholder")}
-                    />
-                  </div>
-                </div>
-              )}
-              {vendor !== "vertex-ai" && (
-                <div className="space-y-2">
-                  <Label className="text-sm font-medium">{vendorInfo.label} {t("llmTab.apiKey")}</Label>
-                  <div className="flex items-center gap-2">
-                    {hasKey ? <Badge variant="default" className="text-xs">{t("llmTab.apiKeySet")}</Badge> : <Badge variant="secondary" className="text-xs">{t("llmTab.apiKeyNotSet")}</Badge>}
-                    {hasKey && <Button size="sm" variant="ghost" className="h-7 text-xs text-destructive" onClick={() => void api.deleteApiKey(vendor).then(() => { setHasKey(false); onSaved(); })}>{t("llmTab.delete")}</Button>}
-                  </div>
-                  <Input data-testid="llm-api-key-input" type="password" placeholder={hasKey ? t("llmTab.replaceKey") : vendorInfo.placeholder} value={keyInput} onChange={(e) => setKeyInput(e.target.value)} />
-                </div>
-              )}
-              <div className="space-y-2">
-                <Label htmlFor="model-select" className="text-sm font-medium">{t("llmTab.model")}</Label>
-                <Select value={activeModelValue} onValueChange={setModel}>
-                  <SelectTrigger
-                    id="model-select"
-                    className="w-full"
-                    data-testid="llm-model-select"
-                  >
-                    <SelectValue placeholder={vendorInfo.defaultModel} />
-                  </SelectTrigger>
-                  <SelectContent>
-                    {activeModelOptions.map((option) => (
-                      <SelectItem key={option} value={option}>{option}</SelectItem>
-                    ))}
-                  </SelectContent>
-                </Select>
-              </div>
-            </div>
           )}
+
+          {/* Provider form — always rendered; disabled when authMode === "login" */}
+          <div
+            className={isLoginMode ? "pointer-events-none opacity-50 select-none space-y-3" : "space-y-3"}
+            {...(isLoginMode ? { "aria-disabled": "true" as const } : {})}
+            data-testid="llm-tab:manual-section"
+          >
+            {isLoginMode && (
+              <p className="text-[11px] text-muted-foreground italic">
+                {t("llmTab.loginModeDisabledHint")}
+              </p>
+            )}
+            <div className="space-y-2">
+              <Label htmlFor="vendor-select" className="flex items-center gap-2">
+                {t("llmTab.vendor")}
+                {!isLoginMode && <ImmediateBadge />}
+              </Label>
+              <Select
+                value={vendor}
+                onValueChange={(v) => {
+                  if (isLoginMode) return;
+                  setVendor(v);
+                  onImmediateChange?.();
+                }}
+                disabled={isLoginMode}
+              >
+                <SelectTrigger id="vendor-select" className="w-full">
+                  <SelectValue placeholder={t("llmTab.vendorPlaceholder")} />
+                </SelectTrigger>
+                <SelectContent>
+                  {VENDORS.map((v) => (
+                    <SelectItem key={v.id} value={v.id}>{v.label}</SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+            </div>
+            {vendor !== "vertex-ai" && (vendorInfo.needsBaseUrl || vendor === "openai" || vendor === "copilot") && (
+              <div className="space-y-2">
+                <Label className="text-sm font-medium">
+                  Endpoint (baseUrl){vendorInfo.needsBaseUrl ? " *" : ` (${t("llmTab.optional")})`}
+                </Label>
+                <Input
+                  data-testid="llm-base-url-input"
+                  value={baseUrl}
+                  onChange={(e) => setBaseUrl(e.target.value)}
+                  placeholder={(vendorInfo as any).baseUrlPlaceholder ?? "https://..."}
+                  disabled={isLoginMode}
+                />
+                <p className="text-[11px] text-muted-foreground">
+                  {t("llmTab.baseUrlDiscardWarning")}
+                </p>
+                {vendor === "azure-foundry" && (
+                  <p className="text-[11px] text-muted-foreground">
+                    {t("llmTab.azureEndpointFormat")}
+                    {" "}<code>https://{"{resource}"}.openai.azure.com/openai/v1/</code>
+                    {" "}— {t("llmTab.azureDeploymentNote")}
+                  </p>
+                )}
+                {(vendor === "openai" || vendor === "copilot") && (
+                  <p className="text-[11px] text-muted-foreground">
+                    {t("llmTab.proxyEndpointNote")}
+                  </p>
+                )}
+              </div>
+            )}
+            {vendor === "vertex-ai" && (
+              <div className="space-y-2 rounded-md border p-3">
+                <p className="text-sm font-medium">Google Vertex AI</p>
+                <p className="text-[11px] text-muted-foreground">
+                  {t("llmTab.vertexAuthDesc1")}<code>gcloud auth application-default login</code>{t("llmTab.vertexAuthDesc2")}
+                  {t("llmTab.vertexAuthDesc3")}<code>GOOGLE_APPLICATION_CREDENTIALS</code>{t("llmTab.vertexAuthDesc4")}
+                </p>
+                <div className="space-y-1">
+                  <Label className="text-xs text-muted-foreground">GCP Project ID *</Label>
+                  <Input
+                    value={vertexProject}
+                    onChange={(e) => setVertexProject(e.target.value)}
+                    placeholder="my-gcp-project"
+                    disabled={isLoginMode}
+                  />
+                </div>
+                <div className="space-y-1">
+                  <Label className="text-xs text-muted-foreground">Location (region) — {t("llmTab.optional")}</Label>
+                  <Input
+                    value={vertexLocation}
+                    onChange={(e) => setVertexLocation(e.target.value)}
+                    placeholder={t("llmTab.vertexLocationPlaceholder")}
+                    disabled={isLoginMode}
+                  />
+                </div>
+              </div>
+            )}
+            {vendor !== "vertex-ai" && (
+              <div className="space-y-2">
+                <Label className="text-sm font-medium">{vendorInfo.label} {t("llmTab.apiKey")}</Label>
+                <div className="flex items-center gap-2">
+                  {hasKey ? <Badge variant="default" className="text-xs">{t("llmTab.apiKeySet")}</Badge> : <Badge variant="secondary" className="text-xs">{t("llmTab.apiKeyNotSet")}</Badge>}
+                  {hasKey && !isLoginMode && (
+                    <Button
+                      size="sm"
+                      variant="ghost"
+                      className="h-7 text-xs text-destructive"
+                      onClick={() => void api.deleteApiKey(vendor).then(() => { setHasKey(false); onSaved(); })}
+                    >
+                      {t("llmTab.delete")}
+                    </Button>
+                  )}
+                </div>
+                <Input
+                  data-testid="llm-api-key-input"
+                  type="password"
+                  placeholder={hasKey ? t("llmTab.replaceKey") : vendorInfo.placeholder}
+                  value={keyInput}
+                  onChange={(e) => setKeyInput(e.target.value)}
+                  disabled={isLoginMode}
+                />
+              </div>
+            )}
+            <div className="space-y-2">
+              <Label htmlFor="model-select" className="text-sm font-medium">{t("llmTab.model")}</Label>
+              <Select
+                value={activeModelValue}
+                onValueChange={setModel}
+                disabled={isLoginMode}
+              >
+                <SelectTrigger
+                  id="model-select"
+                  className="w-full"
+                  data-testid="llm-model-select"
+                >
+                  <SelectValue placeholder={vendorInfo.defaultModel} />
+                </SelectTrigger>
+                <SelectContent>
+                  {activeModelOptions.map((option) => (
+                    <SelectItem key={option} value={option}>{option}</SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+            </div>
+          </div>
+
           {hasOnSave && (
             <SectionSaveBar
               onSave={onSave!}
@@ -365,6 +486,56 @@ export function LlmTab(props: LlmTabProps) {
               settingsLoaded={settingsLoaded}
               testId="llm-tab:save-providers"
             />
+          )}
+        </div>
+      </SettingsSection>
+
+      {/* Section — Host Resolver Map.
+          Only editable in manual mode. In login mode the map is read-only
+          (demo uses LVIS_DEMO_HOST_MAP and this field has no effect). A
+          dedicated Apply button triggers the relaunch confirm dialog because
+          host-resolver-rules cannot be changed at runtime. */}
+      <SettingsSection
+        title={t("llmTab.hostResolverMapTitle")}
+        id="llm-host-resolver"
+      >
+        <div className="space-y-2" data-testid="llm-tab:host-resolver-section">
+          {isLoginMode ? (
+            <p className="text-[11px] text-muted-foreground italic">
+              {t("llmTab.hostResolverMapLoginDisabled")}
+            </p>
+          ) : (
+            <p className="text-[11px] text-muted-foreground">
+              {t("llmTab.hostResolverMapDesc")}
+            </p>
+          )}
+          <Textarea
+            data-testid="llm-host-resolver-map-input"
+            value={hostResolverMap}
+            onChange={(e) => setHostResolverMap(e.target.value)}
+            placeholder={t("llmTab.hostResolverMapPlaceholder")}
+            disabled={isLoginMode}
+            rows={5}
+            className="font-mono text-xs"
+            aria-label={t("llmTab.hostResolverMapTitle")}
+          />
+          {!isLoginMode && hostMapEntryCount > 0 && (
+            <p className="text-[11px] text-muted-foreground">
+              {hostMapEntryCount} {hostMapEntryCount === 1 ? "entry" : "entries"} parsed
+            </p>
+          )}
+          {!isLoginMode && (
+            <div className="flex justify-end">
+              <Button
+                size="sm"
+                variant="outline"
+                onClick={handleHostMapApply}
+                disabled={saving || !settingsLoaded}
+                data-testid="llm-tab:apply-host-map"
+              >
+                {t("llmTab.hostResolverMapApply")}
+              </Button>
+            </div>
           )}
         </div>
       </SettingsSection>

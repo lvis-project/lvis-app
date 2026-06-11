@@ -60,6 +60,18 @@ export interface LLMSettings {
   vendors: Record<LLMVendor, LLMVendorSettings>;
   streamSmoothing: "none" | "word" | "char";
   fallbackChain: Array<{ provider: LLMVendor; model: string }>;
+  /**
+   * Manual-mode Chromium host-resolver map. Persisted as /etc/hosts-style
+   * text (one "IP hostname" entry per line; blank lines and # comments
+   * ignored). Applied via Chromium `host-resolver-rules` command-line switch
+   * on next launch. Only honoured when `authMode === "manual"` — demo mode
+   * (`authMode === "login"`) uses `LVIS_DEMO_HOST_MAP` exclusively.
+   *
+   * Stored under the top-level `llm` namespace (same settings.json file,
+   * `~/.lvis/settings.json`) to keep host-routing paired with the LLM
+   * endpoint it affects.
+   */
+  hostResolverMap?: string;
 }
 
 /**
@@ -72,6 +84,7 @@ export interface LLMSettingsPatch {
   vendors?: Partial<Record<LLMVendor, Partial<LLMVendorSettings>>>;
   streamSmoothing?: "none" | "word" | "char";
   fallbackChain?: Array<{ provider: LLMVendor; model: string }>;
+  hostResolverMap?: string;
 }
 
 export interface ChatSettings {
@@ -882,6 +895,8 @@ function mergeLlmPatch(base: LLMSettings, partial: LLMSettingsPatch): LLMSetting
     vendors,
     streamSmoothing: partial.streamSmoothing ?? base.streamSmoothing,
     fallbackChain: partial.fallbackChain ?? base.fallbackChain,
+    // `undefined` means "no mapping"; an explicit empty string clears the map.
+    hostResolverMap: "hostResolverMap" in partial ? partial.hostResolverMap : base.hostResolverMap,
   };
 }
 

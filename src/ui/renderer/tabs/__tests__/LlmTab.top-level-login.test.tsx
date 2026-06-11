@@ -1,10 +1,15 @@
 /**
- * #893 — LlmTab top-level login toggle UI tests.
+ * LlmTab top-level login toggle UI tests.
  *
- * Verifies that when `authMode === "login"` the LlmTab renders only the
- * Login status + Login button — the vendor dropdown and every per-vendor
- * field (baseUrl, vertex, API key, model selector) must be removed from the DOM.
- * When `authMode === "manual"` the full per-vendor form returns.
+ * Verifies that when `authMode === "login"` the LlmTab renders the vendor
+ * dropdown and per-vendor fields in a DISABLED state (not removed from the
+ * DOM) — the user sees the active login-session values and understands that
+ * logging out will restore edit access.
+ *
+ * When `authMode === "manual"` the full per-vendor form is enabled and
+ * editable.
+ *
+ * Also verifies the host-resolver map textarea renders in both modes.
  */
 import "../../../../../test/renderer/setup.js";
 import { describe, it, expect, vi } from "vitest";
@@ -31,6 +36,7 @@ function Harness({ initialAuthMode }: { initialAuthMode: "manual" | "login" }) {
   const [thinkingBudget, setThinkingBudget] = useState(10_000);
   const [fallbackChain, setFallbackChain] = useState<FallbackEntry[]>([]);
   const [fallbackOpen, setFallbackOpen] = useState(false);
+  const [hostResolverMap, setHostResolverMap] = useState("");
   return (
     <LlmTab
       api={llmTabApi()}
@@ -59,47 +65,83 @@ function Harness({ initialAuthMode }: { initialAuthMode: "manual" | "login" }) {
       setFallbackChain={setFallbackChain}
       fallbackOpen={fallbackOpen}
       setFallbackOpen={setFallbackOpen}
+      hostResolverMap={hostResolverMap}
+      setHostResolverMap={setHostResolverMap}
       onSaved={vi.fn()}
     />
   );
 }
 
-describe("LlmTab — #893 top-level login toggle UI", () => {
-  it("hides vendor dropdown and per-vendor fields when authMode='login'", () => {
+describe("LlmTab — top-level login toggle UI", () => {
+  it("renders manual-section as disabled when authMode='login'", () => {
     const { container } = render(<Harness initialAuthMode="login" />);
-    // Login section visible.
+    // Login status section is visible.
     expect(container.querySelector('[data-testid="llm-tab:login-section"]')).not.toBeNull();
-    // Vendor dropdown gone.
-    expect(container.querySelector('#vendor-select')).toBeNull();
-    // Manual section absent.
-    expect(container.querySelector('[data-testid="llm-tab:manual-section"]')).toBeNull();
-    // Model selector gone.
-    expect(container.querySelector('[data-testid="llm-model-select"]')).toBeNull();
     // Login button present.
     expect(container.querySelector('[data-testid="llm-tab:open-login"]')).not.toBeNull();
+    // Manual section IS in the DOM but marked aria-disabled.
+    const manualSection = container.querySelector('[data-testid="llm-tab:manual-section"]');
+    expect(manualSection).not.toBeNull();
+    expect(manualSection?.getAttribute("aria-disabled")).toBe("true");
+    // Vendor select rendered but disabled.
+    const vendorTrigger = container.querySelector('#vendor-select');
+    expect(vendorTrigger).not.toBeNull();
+    // Model selector rendered.
+    expect(container.querySelector('[data-testid="llm-model-select"]')).not.toBeNull();
+    // API key input disabled.
+    const keyInput = container.querySelector('[data-testid="llm-api-key-input"]') as HTMLInputElement | null;
+    expect(keyInput).not.toBeNull();
+    expect(keyInput?.disabled).toBe(true);
   });
 
-  it("renders vendor dropdown and per-vendor fields when authMode='manual'", () => {
+  it("renders vendor dropdown and per-vendor fields enabled when authMode='manual'", () => {
     const { container } = render(<Harness initialAuthMode="manual" />);
-    expect(container.querySelector('[data-testid="llm-tab:manual-section"]')).not.toBeNull();
+    const manualSection = container.querySelector('[data-testid="llm-tab:manual-section"]');
+    expect(manualSection).not.toBeNull();
+    // Not aria-disabled="true" in manual mode.
+    expect(manualSection?.getAttribute("aria-disabled")).not.toBe("true");
     expect(container.querySelector('#vendor-select')).not.toBeNull();
     expect(container.querySelector('[data-testid="llm-model-select"]')).not.toBeNull();
-    expect(container.querySelector('[data-testid="llm-model-input"]')).toBeNull();
+    // Login section NOT shown in manual mode.
     expect(container.querySelector('[data-testid="llm-tab:login-section"]')).toBeNull();
+  });
+
+  it("host-resolver map textarea is disabled in login mode", () => {
+    const { container } = render(<Harness initialAuthMode="login" />);
+    const textarea = container.querySelector('[data-testid="llm-host-resolver-map-input"]') as HTMLTextAreaElement | null;
+    expect(textarea).not.toBeNull();
+    expect(textarea?.disabled).toBe(true);
+  });
+
+  it("host-resolver map textarea is enabled in manual mode", () => {
+    const { container } = render(<Harness initialAuthMode="manual" />);
+    const textarea = container.querySelector('[data-testid="llm-host-resolver-map-input"]') as HTMLTextAreaElement | null;
+    expect(textarea).not.toBeNull();
+    expect(textarea?.disabled).toBe(false);
+  });
+
+  it("apply-host-map button shown only in manual mode", () => {
+    const { container: loginContainer } = render(<Harness initialAuthMode="login" />);
+    expect(loginContainer.querySelector('[data-testid="llm-tab:apply-host-map"]')).toBeNull();
+
+    const { container: manualContainer } = render(<Harness initialAuthMode="manual" />);
+    expect(manualContainer.querySelector('[data-testid="llm-tab:apply-host-map"]')).not.toBeNull();
   });
 
   it("toggles between manual and login via the auth-mode radio group", () => {
     const { container } = render(<Harness initialAuthMode="manual" />);
-    // Manual visible initially.
-    expect(container.querySelector('[data-testid="llm-tab:manual-section"]')).not.toBeNull();
+    // Manual mode: no login section, manual section not disabled.
+    expect(container.querySelector('[data-testid="llm-tab:login-section"]')).toBeNull();
+    const manualBefore = container.querySelector('[data-testid="llm-tab:manual-section"]');
+    expect(manualBefore?.getAttribute("aria-disabled")).not.toBe("true");
 
     // Click the Login radio.
     const loginRadio = container.querySelector('#auth-mode-login') as HTMLElement;
     fireEvent.click(loginRadio);
 
-    // After toggle: login section, no manual section.
+    // After toggle: login section present, manual section disabled.
     expect(container.querySelector('[data-testid="llm-tab:login-section"]')).not.toBeNull();
-    expect(container.querySelector('[data-testid="llm-tab:manual-section"]')).toBeNull();
-    expect(container.querySelector('#vendor-select')).toBeNull();
+    const manualAfter = container.querySelector('[data-testid="llm-tab:manual-section"]');
+    expect(manualAfter?.getAttribute("aria-disabled")).toBe("true");
   });
 });
