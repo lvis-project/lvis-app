@@ -2,7 +2,7 @@
  * Settings domain IPC handlers.
  * Covers: lvis:settings:*, lvis:shell:open-external, lvis:telemetry:consent-answer
  */
-import { ipcMain } from "electron";
+import { app, ipcMain } from "electron";
 import { validateExternalUrl } from "../../shared/external-url.js";
 import { SETTINGS } from "../../shared/ipc-channels.js";
 import { validateSender, UNAUTHORIZED_FRAME, auditUnauthorized } from "../gated.js";
@@ -209,6 +209,29 @@ export function registerSettingsHandlers(deps: IpcDeps): void {
     if (!validateSender(e)) { auditUnauthorized(auditLogger, "lvis:settings:delete-web-api-key", e); return UNAUTHORIZED_FRAME; }
     await settingsService.deleteSecret(`web.apiKey.${provider}`);
     broadcastSettingsSnapshot(deps);
+    return { ok: true };
+  });
+
+  // ─── Manual host-resolver map (requires relaunch) ─────────────────
+  //
+  // Chromium's `host-resolver-rules` command-line switch is frozen once
+  // the network service starts (`app.whenReady()`). Updating it therefore
+  // requires saving the new map then calling `app.relaunch()` + `app.exit()`
+  // so the next process reads the updated settings and installs the switch
+  // before any network service initialisation.
+  //
+  // The UI shows a confirm dialog before calling this IPC, so the user has
+  // already acknowledged the restart. The main process reacts immediately.
+  ipcMain.handle("lvis:settings:apply-host-map", async (e, hostResolverMap: string) => {
+    if (!validateSender(e)) { auditUnauthorized(auditLogger, "lvis:settings:apply-host-map", e); return UNAUTHORIZED_FRAME; }
+    // Persist the new map before relaunch so the next boot reads it.
+    await settingsService.patch({ llm: { hostResolverMap } });
+    broadcastSettingsSnapshot(deps);
+    // Arm and execute the relaunch. `app.relaunch()` queues the new process
+    // then `app.exit(0)` terminates the current one — same pattern used by
+    // the demo activation path in demo.ts.
+    app.relaunch();
+    app.exit(0);
     return { ok: true };
   });
 

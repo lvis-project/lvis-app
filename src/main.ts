@@ -56,6 +56,7 @@ import {
   loadPersistedDemoActivationSync,
 } from "./main/demo-activation-loader.js";
 import { applyDemoHostResolverRules } from "./main/demo-host-resolver.js";
+import { applyManualHostResolverRules } from "./main/manual-host-resolver.js";
 import { forceKillManagedChildProcesses } from "./main/managed-child-processes.js";
 import { scrubPackagedProcessEnv } from "./main/packaged-env-scrub.js";
 import {
@@ -205,6 +206,10 @@ captureDemoCredentials();
 // the env scrub for the same reason as `captureDemoCredentials()`: the
 // vendor + map env vars are wiped immediately after.
 applyDemoHostResolverRules(app);
+// Manual host-resolver map — applies the user-configured /etc/hosts-style
+// mapping when authMode==="manual". No-op when demo mode is active (demo
+// map takes precedence) or when no map has been configured.
+applyManualHostResolverRules(app);
 
 if (app.isPackaged) {
   scrubPackagedProcessEnv(process.env);
