@@ -117,6 +117,7 @@ export const en = {
   "permissionsTab.warnAutoModeAutoApproveOff": "⚠ Auto-approve low risk is off in \"Auto-validate\" mode. To allow low-risk actions without confirmation, enable \"Auto-approve low risk\" above.",
   "permissionsTab.warnStrictLowContradiction": "⛔ \"Ask All\" mode confirms all actions, but \"Auto-approve low risk\" is on — settings conflict. To keep the confirm-all policy, set auto-approve low risk to \"Off\".",
   "permissionsTab.warnAllowModeReviewerIgnored": "⚠ \"Allow All\" mode auto-allows all actions, so the permission reviewer and auto-approve low risk settings have no effect.",
+  "permissionsTab.warnReviewerLlmDegradedToRule": "⚠ LLM validation is inactive (no LLM provider/API key configured) — currently running on rule-based validation. Configure a chat LLM provider to enable LLM validation; it switches on automatically.",
 
   // CLI mapping panel
   "permissionsTab.cliMappingTitle": "CLI Mapping (slash commands)",
@@ -284,6 +285,7 @@ export const ko: Record<keyof typeof en, string> = {
   "permissionsTab.warnAutoModeAutoApproveOff": "⚠ \"자동 검증\" 모드에서 저위험 자동 허용이 꺼져 있습니다. 저위험 작업을 확인 없이 허용하려면 위에서 \"저위험 자동 허용\"을 켜세요.",
   "permissionsTab.warnStrictLowContradiction": "⛔ \"전체 물어보기\" 모드는 모든 작업을 확인하지만 \"저위험 자동 허용\"이 켜져 있어 설정이 충돌합니다. 모두 확인 정책을 유지하려면 저위험 자동 허용을 \"끔\"으로 변경하세요.",
   "permissionsTab.warnAllowModeReviewerIgnored": "⚠ \"전체 허용\" 모드는 모든 작업을 자동 허용하므로 권한 리뷰어와 저위험 자동 허용 설정이 적용되지 않습니다.",
+  "permissionsTab.warnReviewerLlmDegradedToRule": "⚠ LLM 검증이 비활성 상태입니다 (LLM 공급자/API 키 미구성) — 현재 규칙 기반 검증으로 동작 중입니다. 채팅 LLM 공급자를 구성하면 LLM 검증이 자동으로 켜집니다.",
 
   "permissionsTab.cliMappingTitle": "CLI 매핑 (슬래시 명령)",
   "permissionsTab.cliMappingDescription": "동일 설정을 채팅 입력창에서 슬래시 명령으로도 변경할 수 있습니다.",

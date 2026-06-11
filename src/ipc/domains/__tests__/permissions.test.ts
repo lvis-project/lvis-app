@@ -90,6 +90,7 @@ function makeDeps(options: {
     removeRule: vi.fn(async () => undefined),
     getVisibilityDenyRules: vi.fn(() => []),
     getDeferredQueue: vi.fn(() => options.queue ?? null),
+    isReviewerDegradedToRule: vi.fn(() => false),
   };
   const deps = {
     conversationLoop: {
