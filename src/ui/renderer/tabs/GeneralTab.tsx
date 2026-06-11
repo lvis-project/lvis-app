@@ -17,7 +17,6 @@ import { Badge } from "../../../components/ui/badge.js";
 import { Button } from "../../../components/ui/button.js";
 import { Label } from "../../../components/ui/label.js";
 import { RadioGroup, RadioGroupItem } from "../../../components/ui/radio-group.js";
-import { Switch } from "../../../components/ui/switch.js";
 import {
   Dialog,
   DialogContent,
@@ -188,35 +187,6 @@ export function GeneralTab({
   const provider = settings?.llm.provider ?? "";
   const authMode = settings?.llm.authMode ?? "manual";
   const demoEnabled = settings?.features?.demoAutoplayEnabled === true;
-  // Demo-only display preference. Mirrored into local state so the Switch
-  // flips on the click itself (optimistic), instead of waiting for the
-  // updateSettings round-trip + cross-window `onSettingsUpdated` broadcast to
-  // flow back into `settings`. Without this, a stale/slow settings snapshot
-  // leaves the controlled Switch visually stuck while the value still persists
-  // — which reads to the user as "the toggle doesn't click". The effect below
-  // reconciles the optimistic value with the authoritative one (initial load
-  // + cross-window edits). Matches the optimistic pattern in
-  // `useSettings.toggleThinking`.
-  const [hideToolFailures, setHideToolFailures] = useState(false);
-  useEffect(() => {
-    setHideToolFailures(settings?.features?.hideToolFailures === true);
-  }, [settings?.features?.hideToolFailures]);
-
-  const onToggleHideToolFailures = useCallback(
-    (next: boolean) => {
-      setHideToolFailures(next); // optimistic — reconciled by the effect above
-      void api.updateSettings({ features: { hideToolFailures: next } }).then((res) => {
-        // Revert the optimistic flip if the IPC explicitly rejected the patch.
-        // On success the broadcast re-affirms the same value via the effect, so
-        // there is nothing to do; this only guards the (currently unreachable
-        // for a features-only patch) error branch from leaving a stuck Switch.
-        if (res && typeof res === "object" && "ok" in res && res.ok === false) {
-          setHideToolFailures(!next);
-        }
-      });
-    },
-    [api],
-  );
 
   const marketplaceStatus: { dot: string; label: string } = useMemo(() => {
     if (!stats.marketplace.configured) return { dot: "bg-muted-foreground/40", label: t("generalTab.marketplaceNotConnected") };
@@ -411,24 +381,6 @@ export function GeneralTab({
             {t("generalTab.logoutButton")}
           </Button>
         </div>
-      </SettingsSection>
-
-      {/* ── 데모 표시 ───────────────────────────────── */}
-      <SettingsSection
-        title={t("generalTab.demoDisplayTitle")}
-        description={t("generalTab.demoDisplayDescription")}
-        actions={
-          <Switch
-            checked={hideToolFailures}
-            onCheckedChange={onToggleHideToolFailures}
-            aria-label={t("generalTab.hideToolFailuresAriaLabel")}
-            data-testid="general-tab-hide-tool-failures"
-          />
-        }
-      >
-        <p className="text-sm text-muted-foreground">
-          {t("generalTab.hideToolFailuresHelp")}
-        </p>
       </SettingsSection>
 
       <Dialog open={logoutConfirmOpen} onOpenChange={setLogoutConfirmOpen}>

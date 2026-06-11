@@ -39,7 +39,6 @@ import { MainContent } from "./MainContent.js";
 import { StatusBar } from "./components/StatusBar.js";
 import { useStatusBar, type NotificationToastMeta } from "./hooks/use-status-bar.js";
 import { useSettings } from "./hooks/use-settings.js";
-import { useHideToolFailures } from "./hooks/use-hide-tool-failures.js";
 import { lookupBillablePricingOptional } from "../../shared/pricing-data.js";
 import { estimateMultimodalTokenOverhead } from "../../shared/multimodal-token-estimate.js";
 import { useChatState } from "./hooks/use-chat-state.js";
@@ -432,8 +431,6 @@ export function App() {
 
   // LLM settings + context budget (single source of truth: src/shared/pricing-data.ts)
   const { llmVendor, llmModel, enableThinkingChat, refresh: refreshLlmSettings, toggleThinking } = useSettings(api);
-  // Demo-only: hide tool failure badges in the chat timeline (presentation flag).
-  const hideToolFailures = useHideToolFailures(api);
   const draftAttachmentTokens = useMemo(
     () => estimateMultimodalTokenOverhead(attachments
       .filter((attachment) => attachment.kind === "image")
@@ -1212,7 +1209,6 @@ export function App() {
     enableThinkingChat, toggleThinking, costEstimate, costBadgeClass,
     activePricing,
     activeVendor: llmVendor,
-    hideToolFailures,
   });
 
   // Bottom status bar (#231) — bottom slot for persistent items + transient
