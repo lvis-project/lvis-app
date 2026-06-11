@@ -257,7 +257,22 @@ export function registerPermissionsHandlers(deps: IpcDeps): void {
         const intent = requireUserKeyboardIntent((args as { intent?: unknown } | undefined)?.intent);
         if (!intent.ok) return intent;
       }
-      return dispatchPermissionReviewerCommandWithRewire(parsed, deps.rewireReviewerAgent);
+      const result = await dispatchPermissionReviewerCommandWithRewire(
+        parsed,
+        deps.rewireReviewerAgent,
+      );
+      // Surface the runtime degrade flag (persisted mode="llm" but wiring fell
+      // back to rule because no provider/key is configured). This is a runtime
+      // condition computed at boot wiring, not a persisted setting, so it is
+      // read from the live PermissionManager rather than the settings file.
+      if (result.ok) {
+        const pm = conversationLoop.permissionManager;
+        return {
+          ...result,
+          reviewerDegradedToRule: pm?.isReviewerDegradedToRule() ?? false,
+        };
+      }
+      return result;
     },
   );
 
