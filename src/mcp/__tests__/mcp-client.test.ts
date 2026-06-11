@@ -47,7 +47,6 @@ vi.mock("node:child_process", () => ({
 
 // Module imports must come AFTER the mocks above.
 import { McpClient } from "../mcp-client.js";
-import { McpGovernance } from "../mcp-governance.js";
 import { ToolRegistry } from "../../tools/registry.js";
 import { PermissionManager } from "../../permissions/permission-manager.js";
 import type {
@@ -56,21 +55,9 @@ import type {
   McpServerConfig,
   McpStdioServerConfig,
 } from "../types.js";
+import { governanceWithPolicy } from "./test-helpers.js";
 
 // ─── Helpers ────────────────────────────────────────────────
-
-/**
- * Build a governance instance whose internal policy is swapped out to the
- * in-memory one we provide. Avoids any filesystem dependency.
- */
-function governanceWithPolicy(policy: McpGovernancePolicy): McpGovernance {
-  // Constructing with a path that does not exist → default policy is loaded;
-  // then we override via the untyped `policy` field. This mirrors how the
-  // governance layer behaves when IT Admin updates the file in place.
-  const gov = new McpGovernance("/nonexistent/mcp-policy.json");
-  (gov as unknown as { policy: McpGovernancePolicy }).policy = policy;
-  return gov;
-}
 
 function httpApproval(
   id: string,
@@ -160,6 +147,37 @@ function jsonRpcResponse(id: number, result: unknown): Response {
   });
 }
 
+/**
+ * #1230 — golden `server/discover` result for the RC stateless handshake. The
+ * client now probes `server/discover` first; these mock servers answer it as
+ * RC servers (so the connect path runs in "rc" mode, not the dual-era legacy
+ * fallback). Tool-call mocks below omit `resultType` ⇒ treated as "complete".
+ */
+const RC_DISCOVER_RESULT = {
+  resultType: "complete",
+  ttlMs: 0,
+  cacheScope: "public" as const,
+  supportedVersions: ["2026-07-28"],
+  capabilities: { tools: {} },
+  serverInfo: { name: "rc-mcp", version: "1.0.0" },
+};
+
+function jsonRpcErrorResponse(id: number, code: number, message: string): Response {
+  return new Response(JSON.stringify({ jsonrpc: "2.0", id, error: { code, message } }), {
+    status: 200,
+    headers: { "content-type": "application/json" },
+  });
+}
+
+function readRpcParams(init: RequestInit | undefined): Record<string, unknown> | undefined {
+  if (!init?.body) return undefined;
+  try {
+    return JSON.parse(String(init.body)).params as Record<string, unknown>;
+  } catch {
+    return undefined;
+  }
+}
+
 /** Construct a streaming SSE response from a list of byte chunks. */
 function sseResponse(chunks: string[]): Response {
   const stream = new ReadableStream<Uint8Array>({
@@ -240,6 +258,8 @@ describe("HttpTransport — happy path", () => {
         const method = readRpcMethod(init);
         const id = readRpcId(init) ?? 0;
         switch (method) {
+          case "server/discover":
+            return jsonRpcResponse(id, RC_DISCOVER_RESULT);
           case "initialize":
             return jsonRpcResponse(id, {
               protocolVersion: "2024-11-05",
@@ -296,14 +316,13 @@ describe("HttpTransport — happy path", () => {
 
     await client.disconnect();
 
-    // Verify the round-trip: initialize, initialized notification, tools/list,
-    // then one tools/call.
+    // RC round-trip (#1230): server/discover → tools/list → tools/call. The
+    // stateless RC handshake has no initialize / notifications/initialized.
     const methods = fetchMock.mock.calls
       .map(([, init]) => readRpcMethod(init as RequestInit))
       .filter(Boolean);
     expect(methods).toEqual([
-      "initialize",
-      "notifications/initialized",
+      "server/discover",
       "tools/list",
       "tools/call",
     ]);
@@ -323,6 +342,8 @@ describe("HttpTransport — happy path", () => {
         const method = readRpcMethod(init);
         const id = readRpcId(init) ?? 0;
         switch (method) {
+          case "server/discover":
+            return jsonRpcResponse(id, RC_DISCOVER_RESULT);
           case "initialize":
             return jsonRpcResponse(id, {
               protocolVersion: "2024-11-05",
@@ -443,6 +464,9 @@ describe("HttpTransport — happy path", () => {
         expect(headers.get("authorization")).toBeNull();
         const method = readRpcMethod(init);
         const id = readRpcId(init) ?? 0;
+        if (method === "server/discover") {
+          return jsonRpcResponse(id, RC_DISCOVER_RESULT);
+        }
         if (method === "initialize") {
           return jsonRpcResponse(id, {
             protocolVersion: "2024-11-05",
@@ -522,6 +546,9 @@ describe("HttpTransport — NetworkGuard", () => {
       async (_url: string, init?: RequestInit): Promise<Response> => {
         const method = readRpcMethod(init);
         const id = readRpcId(init) ?? 0;
+        if (method === "server/discover") {
+          return jsonRpcResponse(id, RC_DISCOVER_RESULT);
+        }
         if (method === "initialize") {
           return jsonRpcResponse(id, {
             protocolVersion: "2024-11-05",
@@ -606,6 +633,8 @@ describe("HttpTransport — NetworkGuard", () => {
         const method = readRpcMethod(init);
         const id = readRpcId(init) ?? 0;
         switch (method) {
+          case "server/discover":
+            return jsonRpcResponse(id, RC_DISCOVER_RESULT);
           case "initialize":
             return jsonRpcResponse(id, {
               protocolVersion: "2024-11-05",
@@ -700,6 +729,9 @@ describe("HttpTransport — SSE streaming", () => {
       async (_url: string, init?: RequestInit): Promise<Response> => {
         const method = readRpcMethod(init);
         const id = readRpcId(init) ?? 0;
+        if (method === "server/discover") {
+          return jsonRpcResponse(id, RC_DISCOVER_RESULT);
+        }
         if (method === "initialize") {
           // Split the JSON payload in half to prove the SSE reader
           // concatenates chunks before parsing.
@@ -819,6 +851,7 @@ describe("StdioTransport — regression", () => {
   it("connects via subprocess with Content-Length framed JSON-RPC", async () => {
     const fake = new FakeChildProcess();
     fake.responses = {
+      "server/discover": () => RC_DISCOVER_RESULT,
       initialize: (id) => ({
         id,
         protocolVersion: "2024-11-05",
@@ -873,6 +906,7 @@ describe("StdioTransport — regression", () => {
   it("injects apiKey into the configured stdio environment variable", async () => {
     const fake = new FakeChildProcess();
     fake.responses = {
+      "server/discover": () => RC_DISCOVER_RESULT,
       initialize: (id) => ({
         id,
         protocolVersion: "2024-11-05",
@@ -921,6 +955,7 @@ describe("StdioTransport — regression", () => {
   it("stdio — apiKey does NOT leak into environment when apiKeyEnv is absent (HIGH-3/HIGH-4)", async () => {
     const fake = new FakeChildProcess();
     fake.responses = {
+      "server/discover": () => RC_DISCOVER_RESULT,
       initialize: (id) => ({
         id,
         protocolVersion: "2024-11-05",
@@ -1109,6 +1144,9 @@ describe("HttpTransport — per-request DNS rebinding defense", () => {
         fetchCallCount += 1;
         const method = readRpcMethod(init);
         const id = readRpcId(init) ?? 0;
+        if (method === "server/discover") {
+          return jsonRpcResponse(id, RC_DISCOVER_RESULT);
+        }
         if (method === "initialize") {
           return jsonRpcResponse(id, {
             protocolVersion: "2024-11-05",
@@ -1165,6 +1203,9 @@ describe("HttpTransport — SSE stream death", () => {
       async (_url: string, init?: RequestInit): Promise<Response> => {
         const method = readRpcMethod(init);
         const id = readRpcId(init) ?? 0;
+        if (method === "server/discover") {
+          return jsonRpcResponse(id, RC_DISCOVER_RESULT);
+        }
         if (method === "initialize") {
           return jsonRpcResponse(id, {
             protocolVersion: "2024-11-05",
@@ -1316,5 +1357,275 @@ describe("McpClient buffered response safety", () => {
     expect(buffered.size).toBeLessThanOrEqual(128);
     expect(buffered.has(1)).toBe(false);
     expect(buffered.has(256)).toBe(true);
+  });
+});
+
+describe("McpClient — 2026-07-28 RC stateless handshake (#1230)", () => {
+  function rcHttpClient(
+    id: string,
+    responder: (method: string | undefined, rid: number) => Response,
+    inputResolver?: (rid: string, request: Record<string, unknown>) => Promise<unknown>,
+    capabilityProvider?: () => { elicitation?: Record<string, unknown>; extensions?: Record<string, unknown> },
+  ) {
+    lookupMock.mockResolvedValue([{ address: "93.184.216.34", family: 4 }]);
+    const url = `https://api.example.com/${id}/mcp`;
+    const fetchMock = vi.fn(async (_url: string, init?: RequestInit): Promise<Response> =>
+      responder(readRpcMethod(init), readRpcId(init) ?? 0),
+    );
+    vi.stubGlobal("fetch", fetchMock);
+    const client = new McpClient(
+      { id, transport: "http", url },
+      governanceWithPolicy(buildPolicy([httpApproval(id, url)])),
+      new ToolRegistry(),
+      undefined,
+      undefined,
+      inputResolver,
+      capabilityProvider,
+    );
+    return { client, fetchMock };
+  }
+
+  it("stamps the three reserved _meta keys + RC protocol version on every request", async () => {
+    const { client, fetchMock } = rcHttpClient("rc", (method, id) => {
+      if (method === "server/discover") return jsonRpcResponse(id, RC_DISCOVER_RESULT);
+      if (method === "tools/list") return jsonRpcResponse(id, { tools: [] });
+      return new Response("unexpected", { status: 500 });
+    });
+
+    await client.connect();
+    expect(client.getState().status).toBe("connected");
+
+    expect(fetchMock.mock.calls.length).toBeGreaterThan(0);
+    for (const [, init] of fetchMock.mock.calls) {
+      const meta = readRpcParams(init as RequestInit)?._meta as Record<string, unknown> | undefined;
+      expect(meta?.["io.modelcontextprotocol/protocolVersion"]).toBe("2026-07-28");
+      expect(meta?.["io.modelcontextprotocol/clientInfo"]).toMatchObject({ name: "lvis-app" });
+      expect(meta?.["io.modelcontextprotocol/clientCapabilities"]).toMatchObject({ elicitation: {} });
+    }
+    await client.disconnect();
+  });
+
+  it("falls back to the legacy initialize handshake when server/discover answers -32601 (dual-era exception)", async () => {
+    const { client, fetchMock } = rcHttpClient("legacy", (method, id) => {
+      if (method === "server/discover") return jsonRpcErrorResponse(id, -32601, "Method not found");
+      if (method === "initialize")
+        return jsonRpcResponse(id, { protocolVersion: "2024-11-05", capabilities: { tools: {} }, serverInfo: { name: "old", version: "0.9" } });
+      if (method === "notifications/initialized") return new Response(null, { status: 202 });
+      if (method === "tools/list") return jsonRpcResponse(id, { tools: [] });
+      return new Response("unexpected", { status: 500 });
+    });
+
+    await client.connect();
+    expect(client.getState().status).toBe("connected");
+
+    const methods = fetchMock.mock.calls.map(([, i]) => readRpcMethod(i as RequestInit)).filter(Boolean);
+    expect(methods).toEqual(["server/discover", "initialize", "notifications/initialized", "tools/list"]);
+    // legacy mode strips the RC _meta from the request envelope.
+    const initInit = fetchMock.mock.calls.find(([, i]) => readRpcMethod(i as RequestInit) === "initialize")?.[1];
+    expect(readRpcParams(initInit as RequestInit)?._meta).toBeUndefined();
+    await client.disconnect();
+  });
+
+  it("fails closed on input_required when no MRTR resolver is wired (No-Fallback)", async () => {
+    const { client } = rcHttpClient("ir", (method, id) => {
+      if (method === "server/discover") return jsonRpcResponse(id, RC_DISCOVER_RESULT);
+      if (method === "tools/list") return jsonRpcResponse(id, { tools: [] });
+      if (method === "tools/call") return jsonRpcResponse(id, { resultType: "input_required", inputRequests: {} });
+      return new Response("unexpected", { status: 500 });
+    });
+
+    await client.connect();
+    // No resolver injected → the client cannot satisfy input_required and never
+    // fabricates a response.
+    await expect(client.callTool("q", {})).rejects.toThrow(/input_required/);
+    await client.disconnect();
+  });
+
+  it("MRTR loop: resolves input_required, echoes requestState verbatim, retries to complete", async () => {
+    const calls: Array<Record<string, unknown> | undefined> = [];
+    const resolver = vi.fn(async (_rid: string, _request: Record<string, unknown>) => ({
+      action: "accept",
+      content: { token: "abc" },
+    }));
+    const { client, fetchMock } = rcHttpClient(
+      "mrtr",
+      (method, id) => {
+        if (method === "server/discover") return jsonRpcResponse(id, RC_DISCOVER_RESULT);
+        if (method === "tools/list") return jsonRpcResponse(id, { tools: [] });
+        if (method === "tools/call") {
+          // First call → input_required; second (retry) → complete.
+          const toolCalls = calls.filter(Boolean).length;
+          if (toolCalls === 0) {
+            calls.push({});
+            return jsonRpcResponse(id, {
+              resultType: "input_required",
+              inputRequests: { q1: { method: "elicitation/create", message: "need a token" } },
+              requestState: "opaque-state-xyz",
+            });
+          }
+          return jsonRpcResponse(id, { resultType: "complete", content: [{ type: "text", text: "done" }] });
+        }
+        return new Response("unexpected", { status: 500 });
+      },
+      resolver,
+    );
+
+    await client.connect();
+    const out = await client.callTool("q", { a: 1 });
+    expect(out.text).toBe("done");
+
+    // Resolver was invoked with the inputRequest keyed by its opaque id.
+    expect(resolver).toHaveBeenCalledWith("q1", { method: "elicitation/create", message: "need a token" });
+
+    // The retry (2nd tools/call) carried inputResponses + the echoed requestState.
+    const toolCallInits = fetchMock.mock.calls
+      .filter(([, i]) => readRpcMethod(i as RequestInit) === "tools/call")
+      .map(([, i]) => readRpcParams(i as RequestInit));
+    expect(toolCallInits).toHaveLength(2);
+    expect(toolCallInits[1]).toMatchObject({
+      name: "q",
+      arguments: { a: 1 },
+      inputResponses: { q1: { action: "accept", content: { token: "abc" } } },
+      requestState: "opaque-state-xyz",
+    });
+    await client.disconnect();
+  });
+
+  it("derives clientCapabilities per request from the injected provider (governance-per-request)", async () => {
+    // The active turn flips from interactive (can elicit) to headless (cannot)
+    // between requests; each request's _meta must reflect the value at send time.
+    let turn = 0;
+    const provider = vi.fn(() =>
+      turn++ === 0
+        ? { elicitation: { form: {}, url: {} }, extensions: {} }
+        : { extensions: {} }, // headless: no elicitation advertised
+    );
+    const { client, fetchMock } = rcHttpClient(
+      "perreq",
+      (method, id) => {
+        if (method === "server/discover") return jsonRpcResponse(id, RC_DISCOVER_RESULT);
+        if (method === "tools/list") return jsonRpcResponse(id, { tools: [] });
+        return new Response("unexpected", { status: 500 });
+      },
+      undefined,
+      provider,
+    );
+
+    await client.connect();
+
+    const caps = fetchMock.mock.calls.map(
+      ([, i]) => readRpcParams(i as RequestInit)?._meta as Record<string, unknown>,
+    );
+    // discover (turn 0) advertised elicitation; tools/list (turn 1) did not.
+    expect(caps[0]["io.modelcontextprotocol/clientCapabilities"]).toMatchObject({ elicitation: {} });
+    expect(caps[1]["io.modelcontextprotocol/clientCapabilities"]).not.toHaveProperty("elicitation");
+    expect(provider).toHaveBeenCalledTimes(caps.length);
+    await client.disconnect();
+  });
+
+  it("Tasks: polls a CreateTaskResult to completion and returns the completed result", async () => {
+    let taskGets = 0;
+    const { client } = rcHttpClient("task", (method, id) => {
+      if (method === "server/discover") return jsonRpcResponse(id, RC_DISCOVER_RESULT);
+      if (method === "tools/list") return jsonRpcResponse(id, { tools: [] });
+      if (method === "tools/call")
+        return jsonRpcResponse(id, { resultType: "task", taskId: "t1", status: "working", pollIntervalMs: 1 });
+      if (method === "tasks/get") {
+        taskGets += 1;
+        return jsonRpcResponse(
+          id,
+          taskGets >= 2
+            ? { resultType: "task", taskId: "t1", status: "completed", content: [{ type: "text", text: "task done" }] }
+            : { resultType: "task", taskId: "t1", status: "working", pollIntervalMs: 1 },
+        );
+      }
+      return new Response("unexpected", { status: 500 });
+    });
+
+    await client.connect();
+    const out = await client.callTool("q", {});
+    expect(out.text).toBe("task done");
+    expect(taskGets).toBeGreaterThanOrEqual(2);
+    await client.disconnect();
+  });
+
+  it("Tasks: a failed task throws", async () => {
+    const { client } = rcHttpClient("taskfail", (method, id) => {
+      if (method === "server/discover") return jsonRpcResponse(id, RC_DISCOVER_RESULT);
+      if (method === "tools/list") return jsonRpcResponse(id, { tools: [] });
+      if (method === "tools/call")
+        return jsonRpcResponse(id, { resultType: "task", taskId: "t2", status: "failed" });
+      return new Response("unexpected", { status: 500 });
+    });
+
+    await client.connect();
+    await expect(client.callTool("q", {})).rejects.toThrow(/ended 'failed'/);
+    await client.disconnect();
+  });
+
+  it("MCP Apps gate: honors _meta.ui only when the server advertised the ui extension", async () => {
+    const uiResult = {
+      resultType: "complete",
+      content: [{ type: "text", text: "x" }],
+      _meta: { ui: { resourceUri: "ui://app/p.html" } },
+    };
+    const discoverWithApps = {
+      ...RC_DISCOVER_RESULT,
+      capabilities: { tools: {}, extensions: { "io.modelcontextprotocol/ui": {} } },
+    };
+
+    // Server WITH the ui extension → _meta.ui is honored.
+    const withApps = rcHttpClient("apps", (method, id) => {
+      if (method === "server/discover") return jsonRpcResponse(id, discoverWithApps);
+      if (method === "tools/list") return jsonRpcResponse(id, { tools: [] });
+      if (method === "tools/call") return jsonRpcResponse(id, uiResult);
+      return new Response("unexpected", { status: 500 });
+    });
+    await withApps.client.connect();
+    expect((await withApps.client.callTool("q", {})).uiPayload?.resourceUri).toBe("ui://app/p.html");
+    await withApps.client.disconnect();
+
+    // Same _meta.ui from a server that did NOT advertise Apps → ignored (gate).
+    const noApps = rcHttpClient("noapps", (method, id) => {
+      if (method === "server/discover") return jsonRpcResponse(id, RC_DISCOVER_RESULT);
+      if (method === "tools/list") return jsonRpcResponse(id, { tools: [] });
+      if (method === "tools/call") return jsonRpcResponse(id, uiResult);
+      return new Response("unexpected", { status: 500 });
+    });
+    await noApps.client.connect();
+    expect((await noApps.client.callTool("q", {})).uiPayload).toBeUndefined();
+    await noApps.client.disconnect();
+  });
+
+  it("MRTR runaway guard: a server stuck on input_required fails after the round bound", async () => {
+    const resolver = vi.fn(async () => ({ action: "accept" }));
+    const { client } = rcHttpClient(
+      "runaway",
+      (method, id) => {
+        if (method === "server/discover") return jsonRpcResponse(id, RC_DISCOVER_RESULT);
+        if (method === "tools/list") return jsonRpcResponse(id, { tools: [] });
+        if (method === "tools/call")
+          return jsonRpcResponse(id, { resultType: "input_required", inputRequests: { q: {} }, requestState: "s" });
+        return new Response("unexpected", { status: 500 });
+      },
+      resolver,
+    );
+
+    await client.connect();
+    await expect(client.callTool("q", {})).rejects.toThrow(/exceeded .* input_required rounds/);
+    await client.disconnect();
+  });
+
+  it("maps a -32003 missing-required-client-capability error on a tool call", async () => {
+    const { client } = rcHttpClient("mc", (method, id) => {
+      if (method === "server/discover") return jsonRpcResponse(id, RC_DISCOVER_RESULT);
+      if (method === "tools/list") return jsonRpcResponse(id, { tools: [] });
+      if (method === "tools/call") return jsonRpcErrorResponse(id, -32003, "missing capability");
+      return new Response("unexpected", { status: 500 });
+    });
+
+    await client.connect();
+    await expect(client.callTool("q", {})).rejects.toThrow(/-32003/);
+    await client.disconnect();
   });
 });

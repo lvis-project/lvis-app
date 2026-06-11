@@ -30,6 +30,13 @@ import {
   type HookDiff,
   type LockfileShape,
 } from "./hook-discovery.js";
+import {
+  HOOKS_CONFIG_FILENAME,
+  defaultHooksConfigPath,
+  loadHookConfig,
+  syntheticConfigHook,
+} from "./hook-config-trust.js";
+import type { HookConfigEntry } from "./hook-config.js";
 import { createLogger } from "../lib/logger.js";
 
 const log = createLogger("hook-trust");
@@ -63,7 +70,8 @@ export interface RunHookTrustOptions {
 }
 
 export interface RunHookTrustResult {
-  /** Trusted hooks (will run going forward). */
+  /** Trusted hooks (will run going forward). Includes the `hooks.json` trust
+   * unit synthetic hook when the config is trusted. */
   trustedHooks: DiscoveredHook[];
   /** Hooks quarantined or rejected, now living under `.disabled/`. */
   disabledHooks: DiscoveredHook[];
@@ -71,6 +79,13 @@ export interface RunHookTrustResult {
   lockfile: LockfileShape | null;
   /** Initial diff that triggered the trust decision. Useful for audit. */
   diff: HookDiff[];
+  /**
+   * #811 — trusted declarative `hooks.json` `command` entries. EMPTY unless the
+   * `hooks.json` trust unit is in `trustedHooks` (i.e. it was already trusted or
+   * a test dispatcher approved it). An untrusted/changed `hooks.json` yields no
+   * entries — its commands never reach the runtime registry.
+   */
+  trustedConfigEntries: HookConfigEntry[];
 }
 
 /**
@@ -85,7 +100,16 @@ export async function runHookTrustWorkflow(
   // directory on fresh installs (spec §11 v2.1 binding decision).
   ensureHooksDirectory(options.hooksDir);
 
-  const discovered = discoverHooks(options.hooksDir);
+  const shHooks = discoverHooks(options.hooksDir);
+  // #811 — fold the `hooks.json` trust unit into the discovered set so it rides
+  // the SAME diff → quarantine → accept flow as `.sh` files. The synthetic hook
+  // anchors the composite trust hash; an untrusted/changed config is moved to
+  // `.disabled/` and its commands never load.
+  const configPath = defaultHooksConfigPath(options.hooksDir);
+  const loadedConfig = loadHookConfig(configPath);
+  const configHook = syntheticConfigHook(loadedConfig);
+  const discovered = configHook ? [...shHooks, configHook] : shHooks;
+
   const lockfile = readLockfile(options.lockfilePath);
   const acceptedAtMap = buildAcceptedAtMap(lockfile);
   const diff = diffAgainstLockfile(discovered, lockfile);
@@ -95,6 +119,12 @@ export async function runHookTrustWorkflow(
   );
   const trusted = diff.filter((d) => d.state === "trusted").map((d) => d.hook);
 
+  // Resolve which trusted config entries (if any) the runtime may load.
+  const configTrusted = (trustedSet: DiscoveredHook[]): HookConfigEntry[] =>
+    trustedSet.some((h) => h.fileName === HOOKS_CONFIG_FILENAME)
+      ? loadedConfig.entries
+      : [];
+
   if (newOrChanged.length === 0) {
     // Nothing to decide — but if the lockfile previously knew about
     // files that have since been deleted, refresh the lockfile so the
@@ -102,9 +132,21 @@ export async function runHookTrustWorkflow(
     const removed = diff.filter((d) => d.state === "removed");
     if (removed.length > 0 && lockfile) {
       const next = await persistLockfile(trusted, options.lockfilePath, acceptedAtMap);
-      return { trustedHooks: trusted, disabledHooks: [], lockfile: next, diff };
+      return {
+        trustedHooks: trusted,
+        disabledHooks: [],
+        lockfile: next,
+        diff,
+        trustedConfigEntries: configTrusted(trusted),
+      };
     }
-    return { trustedHooks: trusted, disabledHooks: [], lockfile, diff };
+    return {
+      trustedHooks: trusted,
+      disabledHooks: [],
+      lockfile,
+      diff,
+      trustedConfigEntries: configTrusted(trusted),
+    };
   }
 
   // Test dispatcher path; production omits it and strict-denies.
@@ -157,5 +199,6 @@ export async function runHookTrustWorkflow(
     disabledHooks: disabled,
     lockfile: next,
     diff,
+    trustedConfigEntries: configTrusted(allTrusted),
   };
 }

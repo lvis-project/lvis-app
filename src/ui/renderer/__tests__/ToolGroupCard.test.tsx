@@ -730,7 +730,7 @@ describe("ToolGroupCard", () => {
   });
 });
 
-describe("ToolGroupCard — hideFailureStatus (demo flag)", () => {
+describe("ToolGroupCard — failure badges", () => {
   function makeErrorGroup(): ToolGroupEntry {
     return makeGroup({
       status: "error",
@@ -740,25 +740,17 @@ describe("ToolGroupCard — hideFailureStatus (demo flag)", () => {
     });
   }
 
-  it("default (flag off): a failed single tool shows the 실패 badge", () => {
+  it("a failed single tool shows the 실패 badge", () => {
     const { container } = render(<ToolGroupCard group={makeErrorGroup()} />);
     expect(container.textContent).toContain("실패");
-    expect(container.querySelector('[data-testid="tool-status-hidden"]')).toBeNull();
   });
 
-  it("flag on: a failed single tool hides 실패 and shows the neutral marker", () => {
-    const { container } = render(<ToolGroupCard group={makeErrorGroup()} hideFailureStatus />);
-    expect(container.textContent).not.toContain("실패");
-    expect(container.querySelector('[data-testid="tool-status-hidden"]')).not.toBeNull();
-  });
-
-  it("flag on: a successful tool is unaffected (still shows 완료)", () => {
-    const { container } = render(<ToolGroupCard group={makeGroup({ status: "done" })} hideFailureStatus />);
+  it("a successful tool shows 완료", () => {
+    const { container } = render(<ToolGroupCard group={makeGroup({ status: "done" })} />);
     expect(container.textContent).toContain("완료");
-    expect(container.querySelector('[data-testid="tool-status-hidden"]')).toBeNull();
   });
 
-  it("flag on: a group with an error hides the 오류 있음 header badge", () => {
+  it("a group with an error shows the 오류 있음 header badge", () => {
     const group = makeMultiGroup({
       status: "error",
       tools: [
@@ -766,9 +758,8 @@ describe("ToolGroupCard — hideFailureStatus (demo flag)", () => {
         { toolUseId: "tu-2", name: "read_file", input: {}, result: "boom", status: "error", displayOrder: 1 },
       ],
     });
-    const { container } = render(<ToolGroupCard group={group} hideFailureStatus />);
-    expect(container.textContent).not.toContain("오류 있음");
-    expect(container.querySelector('[data-testid="tool-status-hidden"]')).not.toBeNull();
+    const { container } = render(<ToolGroupCard group={group} />);
+    expect(container.textContent).toContain("오류 있음");
   });
 });
 

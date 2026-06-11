@@ -27,6 +27,7 @@ export const en = {
   "loginModalConversational.activErrInvalidFoundryHostMapTarget": "The activation key's network target is not allowed. Please request a new key from your administrator.",
   "loginModalConversational.activErrPersistFailed": "Could not save the activation key. Please check disk space or permissions and try again.",
   "loginModalConversational.activErrUnauthorizedFrame": "Invalid request path. Please restart the app and try again.",
+  "loginModalConversational.activErrNoEmbeddedKey": "This build does not include a built-in activation key. Please paste the activation key from your administrator.",
   "loginModalConversational.activErrActivationFailed": "Activation failed.",
 
   // Inline errors from useEffect / callbacks
@@ -70,6 +71,7 @@ export const en = {
   "loginModalConversational.assistantSubmitting": "Activation complete · Starting authentication…",
   "loginModalConversational.assistantRelaunching": "Activation complete · Restarting automatically in 5 seconds to apply settings…",
   "loginModalConversational.assistantCheckingStatus": "Checking activation status…",
+  "loginModalConversational.assistantEmbeddedActivating": "A built-in activation key was found. Applying it automatically…",
   "loginModalConversational.assistantPromptActivation": "Do you have an activation key from your administrator? Please paste it as a single line.",
 
   // JSX — activation input
@@ -110,6 +112,7 @@ export const ko: Record<keyof typeof en, string> = {
   "loginModalConversational.activErrInvalidFoundryHostMapTarget": "활성화 키의 네트워크 대상이 허용되지 않아요. 관리자에게 새 키를 요청해 주세요.",
   "loginModalConversational.activErrPersistFailed": "활성화 키를 저장하지 못했어요. 디스크 공간 또는 권한을 확인한 뒤 다시 시도해 주세요.",
   "loginModalConversational.activErrUnauthorizedFrame": "잘못된 요청 경로입니다. 앱을 재시작한 뒤 다시 시도해 주세요.",
+  "loginModalConversational.activErrNoEmbeddedKey": "이 빌드에는 내장 활성화 키가 없습니다. 관리자에게 받은 활성화 키를 붙여넣어 주세요.",
   "loginModalConversational.activErrActivationFailed": "활성화에 실패했습니다.",
 
   // Inline errors from useEffect / callbacks
@@ -153,6 +156,7 @@ export const ko: Record<keyof typeof en, string> = {
   "loginModalConversational.assistantSubmitting": "활성화 완료 · 인증을 시작합니다…",
   "loginModalConversational.assistantRelaunching": "활성화 완료 · 설정 적용을 위해 5초 후 자동으로 재시작합니다…",
   "loginModalConversational.assistantCheckingStatus": "활성화 상태를 확인합니다…",
+  "loginModalConversational.assistantEmbeddedActivating": "내장된 활성화 키를 찾았습니다. 자동으로 적용하는 중…",
   "loginModalConversational.assistantPromptActivation": "관리자에게 받은 활성화 키가 있으신가요? 한 줄로 붙여넣어 주세요.",
 
   // JSX — activation input

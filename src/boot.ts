@@ -54,6 +54,7 @@ import { StarredStore } from "./data/starred-store.js";
 import { FeedbackStore } from "./data/feedback-store.js";
 import { McpGovernance } from "./mcp/mcp-governance.js";
 import { McpManager } from "./mcp/mcp-manager.js";
+import { createElicitationResolverFactory } from "./mcp/mcp-elicitation-resolver.js";
 import {
   openAuthWindow as openAuthWindowService,
   clearAuthPartition as clearAuthPartitionService,
@@ -1073,7 +1074,17 @@ export async function bootstrap(
 
   // §9.5: MCP Server 연결.
   const mcpGovernance = new McpGovernance();
-  const mcpManager = new McpManager(mcpGovernance, toolRegistry, undefined, permissionManager, bootAuditLogger);
+  // MRTR live-resolver wiring (milestone mrtr-input-loop): a server's
+  // `input_required` (elicitation) is gathered through the host approval gate.
+  const mcpInputResolverFactory = createElicitationResolverFactory({ approvalGate });
+  const mcpManager = new McpManager(
+    mcpGovernance,
+    toolRegistry,
+    undefined,
+    permissionManager,
+    bootAuditLogger,
+    mcpInputResolverFactory,
+  );
   try {
     const configs = await mcpManager.loadFromConfig();
     if (configs.length > 0) {
