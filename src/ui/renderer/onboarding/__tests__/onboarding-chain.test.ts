@@ -247,6 +247,9 @@ describe("onboardingChainReducer (state record)", () => {
       stage: "done",
       selectedScenarioId: "meeting",
       memorySeed: { nickname: "Ken", introduction: "PM" },
+      // Full funnel ending in `plugins-close` records the "chain" reason
+      // so the post-tour first-task proposal is allowed to fire.
+      completionReason: "chain",
     });
   });
 
@@ -267,5 +270,52 @@ describe("onboardingChainReducer (state record)", () => {
       selectedScenarioId: null,
       memorySeed: { nickname: "", introduction: "" },
     });
+  });
+});
+
+describe("onboardingChainReducer — completionReason (post-tour-first-task gate)", () => {
+  it("probe-skip → done records completionReason 'probe-skip' (tour never shown)", () => {
+    const next = onboardingChainReducer(initialOnboardingChainState, {
+      type: "probe-skip",
+    });
+    expect(next.stage).toBe("done");
+    // Returning user / demo relaunch reached `done` without the tour — the
+    // post-tour first-task proposal must NOT fire for this reason.
+    expect(next.completionReason).toBe("probe-skip");
+  });
+
+  it("plugins-close → done records completionReason 'chain' (full funnel incl. tour)", () => {
+    const atPlugins: OnboardingChainState = {
+      stage: "plugins",
+      selectedScenarioId: null,
+      memorySeed: { nickname: "", introduction: "" },
+    };
+    const next = onboardingChainReducer(atPlugins, { type: "plugins-close" });
+    expect(next.stage).toBe("done");
+    expect(next.completionReason).toBe("chain");
+  });
+
+  it("in-progress stages carry no completionReason", () => {
+    const afterShowcase = onboardingChainReducer(
+      { ...initialOnboardingChainState, stage: "showcase" },
+      { type: "showcase-start", scenarioId: "docs" },
+    );
+    expect(afterShowcase.stage).toBe("login");
+    expect(afterShowcase.completionReason).toBeUndefined();
+  });
+
+  it("logout-reset clears a prior completionReason", () => {
+    const doneViaChain = onboardingChainReducer(
+      {
+        stage: "plugins",
+        selectedScenarioId: null,
+        memorySeed: { nickname: "", introduction: "" },
+      },
+      { type: "plugins-close" },
+    );
+    expect(doneViaChain.completionReason).toBe("chain");
+    const reset = onboardingChainReducer(doneViaChain, { type: "logout-reset" });
+    expect(reset.stage).toBe("idle");
+    expect(reset.completionReason).toBeUndefined();
   });
 });
