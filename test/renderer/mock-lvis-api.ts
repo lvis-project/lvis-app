@@ -219,6 +219,7 @@ export function makeMockLvisApi(overrides: ApiOverrides = {}): {
     demo: {
       status: vi.fn(async () => ({ active: false })),
       activate: vi.fn(async () => ({ ok: true })),
+      activateEmbedded: vi.fn(async () => ({ ok: false, error: "no-embedded-code" })),
       relaunchAfterActivation: vi.fn(async () => ({ ok: true })),
       clearDemo: vi.fn(async () => ({ ok: true })),
     },

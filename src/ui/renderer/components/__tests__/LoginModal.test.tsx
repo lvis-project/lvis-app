@@ -32,7 +32,11 @@ function loginModalApi(
     | { ok: false; error: string }
   >,
   statusImpl?: () => Promise<
-    | { ok: true; activated: boolean; vendor: string | null }
+    | { ok: true; activated: boolean; vendor: string | null; autoActivatable?: boolean }
+    | { ok: false; error: string }
+  >,
+  activateEmbeddedImpl?: () => Promise<
+    | { ok: true; vendor: string; requiresRelaunch?: boolean }
     | { ok: false; error: string }
   >,
 ) {
@@ -42,10 +46,15 @@ function loginModalApi(
     openSettingsWindow: vi.fn(),
     demo: {
       status: vi.fn(
-        statusImpl ?? (async () => ({ ok: true, activated: false, vendor: null })),
+        statusImpl ??
+          (async () => ({ ok: true, activated: false, vendor: null, autoActivatable: false })),
       ),
       activate: vi.fn(
         activateImpl ?? (async () => ({ ok: true, vendor: "azure-foundry" })),
+      ),
+      activateEmbedded: vi.fn(
+        activateEmbeddedImpl ??
+          (async () => ({ ok: false, error: "no-embedded-code" })),
       ),
       relaunchAfterActivation: vi.fn(
         relaunchImpl ?? (async () => ({ ok: true })),
@@ -426,5 +435,129 @@ describe("LoginModal — chip-driven demo flow (activation → auth)", () => {
     } finally {
       vi.useRealTimers();
     }
+  });
+
+  it("auto-activates with the embedded key and never mounts the paste input", async () => {
+    const api = loginModalApi(
+      async () => ({
+        ok: true,
+        vendor: "azure-foundry",
+        fieldsApplied: ["apiKey"],
+      }),
+      undefined,
+      undefined,
+      async () => ({
+        ok: true,
+        activated: false,
+        vendor: null,
+        autoActivatable: true,
+      }),
+      async () => ({ ok: true, vendor: "azure-foundry" }),
+    );
+    render(<LoginModal api={api} open onOpenChange={() => {}} />);
+
+    await waitFor(() => {
+      expect(document.querySelector('[data-testid="login-modal:chip-demo"]')).toBeTruthy();
+    });
+    clickDemoChip();
+
+    await waitFor(() => {
+      expect(
+        (api as unknown as { demo: { activateEmbedded: ReturnType<typeof vi.fn> } }).demo
+          .activateEmbedded,
+      ).toHaveBeenCalledOnce();
+    });
+    await waitFor(() => {
+      expect(
+        (api as unknown as { loginMockup: ReturnType<typeof vi.fn> }).loginMockup,
+      ).toHaveBeenCalledWith({ username: "demo", password: "demo123" });
+    });
+    // The manual paste input never mounted and the paste IPC never fired.
+    expect(
+      document.querySelector('[data-testid="login-modal:activation-code-input"]'),
+    ).toBeNull();
+    expect(
+      (api as unknown as { demo: { activate: ReturnType<typeof vi.fn> } }).demo
+        .activate,
+    ).not.toHaveBeenCalled();
+  });
+
+  it("falls back to the paste input with an error when the embedded key is rejected", async () => {
+    const api = loginModalApi(
+      async () => ({
+        ok: true,
+        vendor: "azure-foundry",
+        fieldsApplied: ["apiKey"],
+      }),
+      undefined,
+      undefined,
+      async () => ({
+        ok: true,
+        activated: false,
+        vendor: null,
+        autoActivatable: true,
+      }),
+      async () => ({ ok: false, error: "invalid-code" }),
+    );
+    render(<LoginModal api={api} open onOpenChange={() => {}} />);
+
+    await waitFor(() => {
+      expect(document.querySelector('[data-testid="login-modal:chip-demo"]')).toBeTruthy();
+    });
+    clickDemoChip();
+
+    // The stale embedded key surfaces its activation error AND the manual
+    // input so the user can still paste a fresh key.
+    await waitFor(() => {
+      expect(
+        document.querySelector('[data-testid="login-modal:activation-code-input"]'),
+      ).toBeTruthy();
+    });
+    await waitFor(() => {
+      expect(
+        document.querySelector('[data-testid="login-modal:activation-error"]'),
+      ).toBeTruthy();
+    });
+    expect(
+      (api as unknown as { loginMockup: ReturnType<typeof vi.fn> }).loginMockup,
+    ).not.toHaveBeenCalled();
+  });
+
+  it("forceActivation keeps the manual input even when the build embeds a key", async () => {
+    const api = loginModalApi(
+      async () => ({
+        ok: true,
+        vendor: "azure-foundry",
+        fieldsApplied: ["apiKey"],
+      }),
+      undefined,
+      undefined,
+      async () => ({
+        ok: true,
+        activated: true,
+        vendor: "azure-foundry",
+        autoActivatable: true,
+      }),
+    );
+    render(
+      <LoginModal
+        api={api}
+        open
+        forceActivation
+        onOpenChange={() => {}}
+      />,
+    );
+
+    // Settings 재입력 recovery must let the user paste a *different* key
+    // than the embedded one — the embedded path must not hijack it.
+    await waitFor(() => {
+      expect(
+        document.querySelector('[data-testid="login-modal:activation-code-input"]'),
+      ).toBeTruthy();
+    });
+    expect(
+      (api as unknown as { demo: { activateEmbedded: ReturnType<typeof vi.fn> } }).demo
+        .activateEmbedded,
+    ).not.toHaveBeenCalled();
   });
 });

@@ -384,12 +384,21 @@ export type LvisApi = {
    */
   demo: {
     status: () => Promise<
-      | { ok: true; activated: boolean; vendor: string | null }
+      | { ok: true; activated: boolean; vendor: string | null; autoActivatable: boolean }
       | { ok: false; error: "unauthorized-frame" }
     >;
     activate: (code: string) => Promise<
       | { ok: true; vendor: string; requiresRelaunch?: boolean }
       | { ok: false; error: "invalid-code" | "no-vendor" | "invalid-vendor" | "no-demo-key" | "missing-foundry-endpoint" | "invalid-foundry-endpoint" | "missing-foundry-host-map" | "foundry-host-map-mismatch" | "invalid-foundry-host-map-target" | "persist-failed" | "unauthorized-frame" }
+    >;
+    /**
+     * Embedded activation — same chain as `activate` with the build-time
+     * embedded key as the code source (`status().autoActivatable` advertises
+     * availability). `no-embedded-code` routes back to manual paste.
+     */
+    activateEmbedded: () => Promise<
+      | { ok: true; vendor: string; requiresRelaunch?: boolean }
+      | { ok: false; error: "no-embedded-code" | "invalid-code" | "no-vendor" | "invalid-vendor" | "no-demo-key" | "missing-foundry-endpoint" | "invalid-foundry-endpoint" | "missing-foundry-host-map" | "foundry-host-map-mismatch" | "invalid-foundry-host-map-target" | "persist-failed" | "unauthorized-frame" }
     >;
     relaunchAfterActivation: () => Promise<
       | { ok: true }
