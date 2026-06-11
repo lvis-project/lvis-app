@@ -225,7 +225,17 @@ export function LlmTab(props: LlmTabProps) {
     setRelaunchPending(true);
     setRelaunchError(null);
     try {
-      await api.applyHostMap(hostResolverMap);
+      const result = await api.applyHostMap(hostResolverMap);
+      if (!result.ok) {
+        // The handler resolved with a structured rejection (unauthorized
+        // frame, authMode not manual, or invalid payload) rather than
+        // throwing. The relaunch never happened — surface it inline and keep
+        // the dialog open so the user can cancel; closing silently would
+        // falsely imply the change applied.
+        setRelaunchError(t("llmTab.relaunchConfirmError"));
+        setRelaunchPending(false);
+        return;
+      }
       // On success the main process calls app.relaunch() + app.exit(0), so
       // this renderer terminates here — no further cleanup runs. We keep the
       // dialog open until then so the user never sees it close without a
