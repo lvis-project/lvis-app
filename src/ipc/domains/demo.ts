@@ -65,7 +65,10 @@ import {
   decryptActivationCode,
   parseEnvDemoText,
 } from "../../main/demo-activation-codec.js";
-import { persistedEnvDemoPath } from "../../main/demo-activation-loader.js";
+import {
+  demoDisabledSentinelPath,
+  persistedEnvDemoPath,
+} from "../../main/demo-activation-loader.js";
 import {
   getDemoActiveVendor,
   getDemoHostMap,
@@ -386,6 +389,15 @@ export function registerDemoHandlers(deps: IpcDeps): void {
       return { ok: false, error: "persist-failed" };
     }
 
+    // A successful (re)activation clears the demo-disabled sentinel left by
+    // a prior `lvis:demo:clear`, so an embedded-key build resumes boot-time
+    // auto-hydrate on the next launch (the user opted back in). Best-effort:
+    // a stale sentinel only costs one extra manual activation, never breaks
+    // this activation.
+    try {
+      await fs.rm(demoDisabledSentinelPath(), { force: true });
+    } catch { /* sentinel removal is best-effort — must not break activation */ }
+
     // Step 4 — inject the parsed values into `process.env` AND re-run the
     // demo-credentials capture so the auth IPC handler sees the new keys.
     // The injection runs first because `recaptureDemoCredentialsAfterActivation`
@@ -516,6 +528,14 @@ export function registerDemoHandlers(deps: IpcDeps): void {
       try {
         const envDemoPath = persistedEnvDemoPath();
         await fs.rm(envDemoPath, { force: true });
+        // Drop the demo-disabled sentinel so an embedded-key build does NOT
+        // silently re-hydrate the demo session on the next boot. A logout is
+        // an explicit "stop using the demo" intent; without the sentinel the
+        // build-embedded ciphertext would re-create `.env.demo` every launch.
+        // The next manual/embedded activation removes it again (see above).
+        try {
+          await writeEnvDemoFile(demoDisabledSentinelPath(), "");
+        } catch { /* sentinel write is best-effort — must not break clear */ }
         for (const k of Object.keys(process.env)) {
           if (k.startsWith("LVIS_DEMO_")) {
             delete process.env[k];
