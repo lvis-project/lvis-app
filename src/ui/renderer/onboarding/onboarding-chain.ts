@@ -95,6 +95,18 @@ export interface OnboardingMemorySeed {
  * threading the picked scenario + memory seed through every downstream
  * stage.
  */
+/**
+ * How the chain arrived at the `done` stage. `done` is reached two ways
+ * (see {@link nextOnboardingStage}): `plugins-close` after the user walked
+ * the full funnel (including the SpotlightTour), or `probe-skip` when the
+ * boot probe sent a returning user / demo-relaunched session straight to
+ * `done` without ever showing the tour. Downstream UI that should only
+ * appear *after a real tour* (e.g. the post-tour first-task proposal) must
+ * distinguish the two — `stage === "done"` alone cannot. Absent
+ * (`undefined`) until the chain reaches `done`.
+ */
+export type OnboardingCompletionReason = "chain" | "probe-skip";
+
 export interface OnboardingChainState {
   stage: OnboardingChainStage;
   /**
@@ -108,6 +120,12 @@ export interface OnboardingChainState {
    * the PersonalizedWelcome card so it can address the user by name.
    */
   memorySeed: OnboardingMemorySeed;
+  /**
+   * Why the chain reached `done` — `"chain"` (full funnel incl. tour) vs
+   * `"probe-skip"` (returning user / demo relaunch, tour never shown).
+   * Absent while still in progress; cleared on `logout-reset`.
+   */
+  completionReason?: OnboardingCompletionReason;
 }
 
 export const initialOnboardingChainState: OnboardingChainState = {
@@ -226,6 +244,18 @@ export function onboardingChainReducer(
   }
   let selectedScenarioId = state.selectedScenarioId;
   let memorySeed = state.memorySeed;
+  // Record *why* we reached `done`, ONLY on the actual transition into
+  // `done` from a non-`done` stage. Guarding on the transition (not just
+  // `stage === "done"`) prevents a late / duplicate `probe-skip` arriving
+  // while already in `done` from overwriting a correct `"chain"` reason —
+  // which would wrongly hide the post-tour UI for users who finished the
+  // full funnel. `plugins-close` = full funnel (tour shown); `probe-skip`
+  // = returning user / demo relaunch (tour never shown).
+  let completionReason = state.completionReason;
+  if (stage === "done" && state.stage !== "done") {
+    if (event.type === "plugins-close") completionReason = "chain";
+    else if (event.type === "probe-skip") completionReason = "probe-skip";
+  }
   if (event.type === "showcase-start") {
     if (typeof event.scenarioId === "string" && event.scenarioId.length > 0) {
       selectedScenarioId = event.scenarioId;
@@ -242,5 +272,15 @@ export function onboardingChainReducer(
         introduction.length > 0 ? introduction : memorySeed.introduction,
     };
   }
-  return { stage, selectedScenarioId, memorySeed };
+  // Only attach `completionReason` once it has a concrete value. Spreading
+  // `{ completionReason: undefined }` for in-progress stages would change the
+  // runtime object shape — `toEqual({...})` assertions and `"completionReason"
+  // in state` checks treat a present-but-undefined key differently from an
+  // absent one — so the key stays absent until the transition into `done`.
+  return {
+    stage,
+    selectedScenarioId,
+    memorySeed,
+    ...(completionReason !== undefined ? { completionReason } : {}),
+  };
 }
