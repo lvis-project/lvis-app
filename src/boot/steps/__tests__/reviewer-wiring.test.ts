@@ -256,6 +256,7 @@ describe("Permission policy P4 reviewer-wiring", () => {
           fallbackOnError: "deny",
           interactive: { autoApprove: "low" },
         }),
+        streamProviderFor: () => null,
         verdictCachePath: join(tmpDir, "cache-degrade-warn.jsonl"),
         deferredQueuePath: join(tmpDir, "queue-degrade-warn.jsonl"),
       });
@@ -280,6 +281,7 @@ describe("Permission policy P4 reviewer-wiring", () => {
         fallbackOnError: "deny",
         interactive: { autoApprove: "low" },
       }),
+      streamProviderFor: () => null,
       verdictCachePath: join(tmpDir, "cache-heal-1.jsonl"),
       deferredQueuePath: join(tmpDir, "queue-heal-1.jsonl"),
     });
@@ -348,10 +350,12 @@ describe("Permission policy P4 reviewer-wiring", () => {
     const pm = new PermissionManager(join(tmpDir, "permissions.json"));
     const setReviewerSpy = vi.spyOn(pm, "setReviewer");
 
-    // First wiring: no provider → degraded. Capture its cacheScope.
+    // First wiring: provider unconfigured (factory returns null) → degraded.
+    // Capture its cacheScope.
     const degraded = wireReviewerAgent({
       permissionManager: pm,
       readSettings: baseSettings,
+      streamProviderFor: () => null,
       verdictCachePath: cachePath,
       deferredQueuePath: join(tmpDir, "queue-mode-flip.jsonl"),
     });
@@ -426,10 +430,12 @@ describe("Permission policy P4 reviewer-wiring", () => {
     cache.resetForTests();
     expect(cache.lookup(LOOKUP_KEY, ctxWithReviewerScope(llmScope)).reason).toBe("hit");
 
-    // Provider removed → degrade. Capture degraded scope.
+    // Provider key removed (factory now returns null) → degrade. Capture
+    // degraded scope.
     const degraded = wireReviewerAgent({
       permissionManager: pm,
       readSettings: baseSettings,
+      streamProviderFor: () => null,
       verdictCachePath: cachePath,
       deferredQueuePath: join(tmpDir, "queue-mode-flip-rev.jsonl"),
     });
