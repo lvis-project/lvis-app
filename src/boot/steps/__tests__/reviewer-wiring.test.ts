@@ -17,7 +17,13 @@ import {
   RuleBasedRiskClassifier,
   DisabledRiskClassifier,
   LlmRiskClassifier,
+  type RiskVerdict,
 } from "../../../permissions/reviewer/risk-classifier.js";
+import {
+  VerdictCache,
+  type VerdictCacheLookupKey,
+  type VerdictCacheContext,
+} from "../../../permissions/reviewer/verdict-cache.js";
 import type { LLMProvider, StreamEvent } from "../../../engine/llm/types.js";
 
 let tmpDir: string;
@@ -305,6 +311,142 @@ describe("Permission policy P4 reviewer-wiring", () => {
     expect(healed.classifier).toBeInstanceOf(LlmRiskClassifier);
     expect(healed.runtimeMode).toBe("llm");
     expect(pm.isReviewerDegradedToRule()).toBe(false);
+  });
+
+  // critic MINOR-1 regression guard. The heal test above writes degraded and
+  // healed wirings to *different* cache paths, so it never exercises the
+  // mode-flip invalidation through one shared cache file. These two cases pin
+  // that contract directly: the `cacheScope.mode` (runtimeMode) component of
+  // the invalidationKey forces a `miss-stale` when a verdict recorded under one
+  // runtime mode is looked up after the runtime flips — using the SAME physical
+  // cache file. cacheScope flows into permission-manager's cacheCtx.scope.reviewer,
+  // which feeds computeInvalidationKey; this test drives VerdictCache with that
+  // exact wiring so a regression in scope-keying is caught at the cache layer.
+  const LOOKUP_KEY: VerdictCacheLookupKey = {
+    toolName: "fs_write",
+    source: "plugin",
+    category: "write",
+    trustOrigin: "llm-tool-arg",
+    finalInput: { path: "/Users/ken/work/note.md" },
+  };
+  function ctxWithReviewerScope(
+    reviewerScope: Record<string, unknown>,
+  ): VerdictCacheContext {
+    return {
+      allowedDirectories: ["/Users/ken/work"],
+      scope: { reviewer: reviewerScope },
+    };
+  }
+
+  it("degraded→heal: stale rule verdict in shared cache is NOT served after llm heal (miss-stale)", async () => {
+    const cachePath = join(tmpDir, "cache-mode-flip.jsonl");
+    const baseSettings = () => ({
+      mode: "llm" as const,
+      provider: "openai",
+      model: "gpt-4o-mini",
+      fallbackOnError: "deny" as const,
+      interactive: { autoApprove: "low" as const },
+    });
+
+    // One spy on the shared pm — both wirings accumulate onto mock.calls in
+    // order (calls[0]=degraded, calls[1]=healed).
+    const pm = new PermissionManager(join(tmpDir, "permissions.json"));
+    const setReviewerSpy = vi.spyOn(pm, "setReviewer");
+
+    // First wiring: no provider → degraded. Capture its cacheScope.
+    const degraded = wireReviewerAgent({
+      permissionManager: pm,
+      readSettings: baseSettings,
+      verdictCachePath: cachePath,
+      deferredQueuePath: join(tmpDir, "queue-mode-flip.jsonl"),
+    });
+    expect(degraded.runtimeMode).toBe("llm-degraded-to-rule");
+    const degradedScope = setReviewerSpy.mock.calls[0][0].cacheScope!;
+    expect(degradedScope.mode).toBe("llm-degraded-to-rule");
+
+    // Record a (rule-derived) verdict under the degraded scope in the shared file.
+    const cache = new VerdictCache(cachePath);
+    const ruleVerdict: RiskVerdict = { level: "low", reason: "degraded rule verdict" };
+    await cache.store(LOOKUP_KEY, ctxWithReviewerScope(degradedScope), ruleVerdict);
+    // Sanity: served under the same (degraded) scope.
+    cache.resetForTests();
+    expect(cache.lookup(LOOKUP_KEY, ctxWithReviewerScope(degradedScope)).reason).toBe("hit");
+
+    // Second wiring: provider now available → heals to llm. Capture healed scope.
+    const provider = stubProvider([
+      { type: "message_complete", stopReason: "end_turn" },
+    ]);
+    const healed = wireReviewerAgent({
+      permissionManager: pm,
+      readSettings: baseSettings,
+      streamProviderFor: () => provider,
+      verdictCachePath: cachePath,
+      deferredQueuePath: join(tmpDir, "queue-mode-flip.jsonl"),
+    });
+    expect(healed.runtimeMode).toBe("llm");
+    const healedScope = setReviewerSpy.mock.calls[1][0].cacheScope!;
+    expect(healedScope.mode).toBe("llm");
+
+    // The stale rule verdict must NOT be served once runtime healed to llm.
+    cache.resetForTests();
+    const afterHeal = cache.lookup(LOOKUP_KEY, ctxWithReviewerScope(healedScope));
+    expect(afterHeal.hit).toBe(false);
+    expect(afterHeal.reason).toBe("miss-stale");
+  });
+
+  it("heal→degrade: healthy llm verdict in shared cache is NOT served after degrade (miss-stale)", async () => {
+    const cachePath = join(tmpDir, "cache-mode-flip-rev.jsonl");
+    const baseSettings = () => ({
+      mode: "llm" as const,
+      provider: "openai",
+      model: "gpt-4o-mini",
+      fallbackOnError: "deny" as const,
+      interactive: { autoApprove: "low" as const },
+    });
+
+    // One spy on the shared pm — both wirings accumulate onto mock.calls in
+    // order (calls[0]=healthy llm, calls[1]=degraded).
+    const provider = stubProvider([
+      { type: "message_complete", stopReason: "end_turn" },
+    ]);
+    const pm = new PermissionManager(join(tmpDir, "permissions.json"));
+    const setReviewerSpy = vi.spyOn(pm, "setReviewer");
+
+    // Healthy wiring: provider available → llm. Capture its cacheScope.
+    const healthy = wireReviewerAgent({
+      permissionManager: pm,
+      readSettings: baseSettings,
+      streamProviderFor: () => provider,
+      verdictCachePath: cachePath,
+      deferredQueuePath: join(tmpDir, "queue-mode-flip-rev.jsonl"),
+    });
+    expect(healthy.runtimeMode).toBe("llm");
+    const llmScope = setReviewerSpy.mock.calls[0][0].cacheScope!;
+    expect(llmScope.mode).toBe("llm");
+
+    // Record an llm-derived verdict under the healthy scope in the shared file.
+    const cache = new VerdictCache(cachePath);
+    const llmVerdict: RiskVerdict = { level: "medium", reason: "llm verdict" };
+    await cache.store(LOOKUP_KEY, ctxWithReviewerScope(llmScope), llmVerdict);
+    cache.resetForTests();
+    expect(cache.lookup(LOOKUP_KEY, ctxWithReviewerScope(llmScope)).reason).toBe("hit");
+
+    // Provider removed → degrade. Capture degraded scope.
+    const degraded = wireReviewerAgent({
+      permissionManager: pm,
+      readSettings: baseSettings,
+      verdictCachePath: cachePath,
+      deferredQueuePath: join(tmpDir, "queue-mode-flip-rev.jsonl"),
+    });
+    expect(degraded.runtimeMode).toBe("llm-degraded-to-rule");
+    const degradedScope = setReviewerSpy.mock.calls[1][0].cacheScope!;
+    expect(degradedScope.mode).toBe("llm-degraded-to-rule");
+
+    // The healthy llm verdict must NOT be served once runtime degraded to rule.
+    cache.resetForTests();
+    const afterDegrade = cache.lookup(LOOKUP_KEY, ctxWithReviewerScope(degradedScope));
+    expect(afterDegrade.hit).toBe(false);
+    expect(afterDegrade.reason).toBe("miss-stale");
   });
 
   it("preserves caller-supplied settings on appliedSettings", () => {
