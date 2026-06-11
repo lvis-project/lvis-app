@@ -28,6 +28,7 @@ import {
   type OnboardingChainStage,
 } from "./onboarding/onboarding-chain.js";
 import { shouldOpenDemoReactivationOnBoot } from "./onboarding/demo-reactivation-gate.js";
+import { hasSeenFirstBootTour } from "./onboarding/first-boot-tour-gate.js";
 import { LoginModal } from "./components/LoginModal.js";
 import { LLM_VENDORS } from "../../shared/llm-vendor-defaults.js";
 import { buildQuickActions } from "./components/command-actions.js";
@@ -705,6 +706,19 @@ export function App() {
           return;
         }
         if (settings.features?.onboardingCompleted === true) {
+          dispatchChain({ type: "probe-skip" });
+          return;
+        }
+        // Returning user who already saw the first-boot SpotlightTour — skip
+        // the chain even if `onboardingCompleted` was never persisted. That
+        // flag only flips at the `done` stage (after PluginShowcase closes,
+        // two stages past the tour), so a user who finished the tour but quit
+        // before closing PluginShowcase left it `false` and the spotlight
+        // re-appeared on every launch. The tour-state store is the source of
+        // truth for "has seen the tour"; the boot probe previously ignored it.
+        const tourState = await api.tour.getState().catch(() => null);
+        if (cancelled) return;
+        if (hasSeenFirstBootTour(tourState)) {
           dispatchChain({ type: "probe-skip" });
           return;
         }

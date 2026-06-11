@@ -25,7 +25,7 @@
  *   personalized_welcome — PersonalizedWelcome card mounted. Greets the
  *                         user by the 호칭 they just typed and confirms
  *                         the next phase (tour).
- *   tour                — SpotlightTour active (8-step first-boot scenario).
+ *   tour                — SpotlightTour active (7-step first-boot scenario).
  *   plugins             — PluginShowcase mounted (per-plugin descriptions).
  *   done                — chain complete; chat empty-state visible.
  *
