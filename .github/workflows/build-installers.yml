@@ -112,11 +112,15 @@ jobs:
           # create/update the release and upload assets.
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           # Embedded demo activation key for internal-distribution builds.
-          # When set, scripts/build-main-esbuild.mjs encrypts (or passes
-          # through) this LVIS-DEMO:v1:<...> string into the bundle so the
-          # demo chip activates with no paste step on fresh installs. The
-          # secret holds the codec ciphertext, NOT the raw API key — and is
-          # absent on forks/PRs, so those builds keep the manual-paste flow.
+          # The secret value is ALREADY the codec ciphertext
+          # (LVIS-DEMO:v1:<...>), NOT the raw API key. When set,
+          # scripts/build-main-esbuild.mjs validates it and embeds it verbatim
+          # into the bundle so the demo chip activates with no paste step on
+          # fresh installs (on-the-fly encryption only happens for a plaintext
+          # repo-root .env.demo, which CI does not use). This workflow runs only
+          # on workflow_dispatch / tag pushes, and the secret is unavailable to
+          # fork / untrusted contexts (and absent when not configured), so those
+          # builds embed nothing and keep the manual-paste flow.
           # See docs/onboarding/demo-activation.md (Embedded activation key).
           LVIS_EMBED_DEMO_ACTIVATION: ${{ secrets.LVIS_EMBED_DEMO_ACTIVATION }}
           CSC_LINK: ${{ secrets.CSC_LINK }}
