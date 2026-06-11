@@ -37,11 +37,18 @@ function isValidIpv4(value: string): boolean {
   return true;
 }
 
-/** DNS label charset only: lowercase letters, digits, dots, hyphens. */
-const HOSTNAME_RE = /^[a-z0-9.-]+$/;
+/**
+ * RFC 1123 hostname: dot-separated labels, each 1-63 chars from `[a-z0-9-]`,
+ * not starting or ending with a hyphen, with no empty labels; total length
+ * <= 253. Rejects structurally invalid forms like ".", "a..b", "-x", "x-"
+ * that a looser `[a-z0-9.-]+` charset would wave through — those inflate the
+ * parsed count and emit `MAP` rules Chromium silently ignores at resolve time.
+ */
+const HOSTNAME_LABEL_RE = /^[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?$/;
 
 function isValidHostname(value: string): boolean {
-  return value.length > 0 && HOSTNAME_RE.test(value);
+  if (value.length === 0 || value.length > 253) return false;
+  return value.split(".").every((label) => HOSTNAME_LABEL_RE.test(label));
 }
 
 /**
