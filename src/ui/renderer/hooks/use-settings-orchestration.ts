@@ -24,6 +24,13 @@ export interface SettingsOrchestrationState {
   hostResolverMap: string;
   setHostResolverMap: (v: string) => void;
   /**
+   * The host-resolver map as last hydrated from persisted settings. The LlmTab
+   * compares the editable `hostResolverMap` against this to decide whether the
+   * Apply (Save and Restart) button is enabled — an unchanged map keeps it
+   * disabled so an Apply click can never trigger a needless relaunch.
+   */
+  loadedHostResolverMap: string;
+  /**
    * #893 — Top-level auth mode toggle. Persisted in `llm.authMode`.
    * `"login"` collapses the vendor dropdown + per-vendor settings down to a
    * single Login button; `"manual"` (default) shows the full per-vendor
@@ -123,6 +130,10 @@ export function useSettingsOrchestration(
   const [vendor, setVendor] = useState("");
   const [keyInput, setKeyInput] = useState("");
   const [hostResolverMap, setHostResolverMap] = useState("");
+  // Snapshot of the persisted host map at hydration time. LlmTab compares the
+  // editable `hostResolverMap` against this to gate the Apply button so an
+  // unchanged map cannot trigger a relaunch.
+  const [loadedHostResolverMap, setLoadedHostResolverMap] = useState("");
   const [model, setModel] = useState("");
   const [hasKey, setHasKey] = useState(false);
   // #893 — Top-level auth mode. Hydrated from `settings.llm.authMode`.
@@ -206,6 +217,7 @@ export function useSettingsOrchestration(
       setHasMarketplaceApiKey(marketplaceKeySet);
       setFallbackChain(s.llm.fallbackChain.map((e) => ({ provider: e.provider, model: e.model })));
       setHostResolverMap(s.llm.hostResolverMap ?? "");
+      setLoadedHostResolverMap(s.llm.hostResolverMap ?? "");
       setSettingsLoaded(true);
     })();
     return () => { cancelled = true; };
@@ -268,6 +280,7 @@ export function useSettingsOrchestration(
     setStreamSmoothing(next.llm.streamSmoothing);
     setFallbackChain(next.llm.fallbackChain.map((e) => ({ provider: e.provider, model: e.model })));
     setHostResolverMap(next.llm.hostResolverMap ?? "");
+    setLoadedHostResolverMap(next.llm.hostResolverMap ?? "");
   }
 
   // Re-check web key when webProvider changes
@@ -442,6 +455,7 @@ export function useSettingsOrchestration(
     hasKey, setHasKey,
     authMode, setAuthMode,
     hostResolverMap, setHostResolverMap,
+    loadedHostResolverMap,
     autoCompact, setAutoCompact,
     enableThinking, setEnableThinking,
     thinkingBudget, setThinkingBudget,

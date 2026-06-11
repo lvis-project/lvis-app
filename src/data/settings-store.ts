@@ -25,6 +25,17 @@ export type { LLMVendor, LLMVendorSettings };
 export { LLM_VENDORS };
 
 /**
+ * Single source of truth for the settings file path. Both `SettingsService`
+ * (writer) and the pre-`whenReady` manual host-resolver reader derive the
+ * settings path from this helper so the two can never drift onto different
+ * files. `userDataPath` is `app.getPath("userData")` (e.g. on macOS
+ * `~/Library/Application Support/LVIS`).
+ */
+export function settingsFilePath(userDataPath: string): string {
+  return resolve(userDataPath, "lvis-settings.json");
+}
+
+/**
  * LLM settings — single source of truth.
  *
  * - `provider` selects the active vendor.
@@ -67,8 +78,9 @@ export interface LLMSettings {
    * on next launch. Only honoured when `authMode === "manual"` — demo mode
    * (`authMode === "login"`) uses `LVIS_DEMO_HOST_MAP` exclusively.
    *
-   * Stored under the top-level `llm` namespace (same settings.json file,
-   * `~/.lvis/settings.json`) to keep host-routing paired with the LLM
+   * Stored under the top-level `llm` namespace in the app settings file
+   * (`<userData>/lvis-settings.json`, where `<userData>` is
+   * `app.getPath("userData")`) to keep host-routing paired with the LLM
    * endpoint it affects.
    */
   hostResolverMap?: string;
@@ -474,7 +486,7 @@ export class SettingsService {
   constructor(options: SettingsServiceOptions) {
     const dir = resolve(options.userDataPath);
     mkdirSync(dir, { recursive: true });
-    this.settingsPath = resolve(dir, "lvis-settings.json");
+    this.settingsPath = settingsFilePath(options.userDataPath);
     this.secretsPath = resolve(dir, "lvis-secrets.json");
     this.systemLocale = options.systemLocale;
     this.migrateSecretsMode();
