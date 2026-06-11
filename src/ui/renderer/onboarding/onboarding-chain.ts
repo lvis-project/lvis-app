@@ -95,6 +95,18 @@ export interface OnboardingMemorySeed {
  * threading the picked scenario + memory seed through every downstream
  * stage.
  */
+/**
+ * How the chain arrived at the `done` stage. `done` is reached two ways
+ * (see {@link nextOnboardingStage}): `plugins-close` after the user walked
+ * the full funnel (including the SpotlightTour), or `probe-skip` when the
+ * boot probe sent a returning user / demo-relaunched session straight to
+ * `done` without ever showing the tour. Downstream UI that should only
+ * appear *after a real tour* (e.g. the post-tour first-task proposal) must
+ * distinguish the two — `stage === "done"` alone cannot. `null` until the
+ * chain reaches `done`.
+ */
+export type OnboardingCompletionReason = "chain" | "probe-skip";
+
 export interface OnboardingChainState {
   stage: OnboardingChainStage;
   /**
@@ -108,6 +120,12 @@ export interface OnboardingChainState {
    * the PersonalizedWelcome card so it can address the user by name.
    */
   memorySeed: OnboardingMemorySeed;
+  /**
+   * Why the chain reached `done` — `"chain"` (full funnel incl. tour) vs
+   * `"probe-skip"` (returning user / demo relaunch, tour never shown).
+   * Absent while still in progress; cleared on `logout-reset`.
+   */
+  completionReason?: OnboardingCompletionReason;
 }
 
 export const initialOnboardingChainState: OnboardingChainState = {
@@ -226,6 +244,15 @@ export function onboardingChainReducer(
   }
   let selectedScenarioId = state.selectedScenarioId;
   let memorySeed = state.memorySeed;
+  // Record *why* we reached `done`. Only set when the stage actually
+  // transitions to `done` so an out-of-order event (no-op stage) can't
+  // mislabel the reason. `plugins-close` = full funnel (tour shown);
+  // `probe-skip` = returning user / demo relaunch (tour never shown).
+  let completionReason = state.completionReason;
+  if (stage === "done") {
+    if (event.type === "plugins-close") completionReason = "chain";
+    else if (event.type === "probe-skip") completionReason = "probe-skip";
+  }
   if (event.type === "showcase-start") {
     if (typeof event.scenarioId === "string" && event.scenarioId.length > 0) {
       selectedScenarioId = event.scenarioId;
@@ -242,5 +269,5 @@ export function onboardingChainReducer(
         introduction.length > 0 ? introduction : memorySeed.introduction,
     };
   }
-  return { stage, selectedScenarioId, memorySeed };
+  return { stage, selectedScenarioId, memorySeed, completionReason };
 }
