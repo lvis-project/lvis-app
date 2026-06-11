@@ -16,16 +16,38 @@ const repoRoot = resolve(__dirname, "..");
 const outfile = resolve(repoRoot, "dist", "src", "main", "main.js");
 const watchMode = process.argv.includes("--watch");
 
-// Embedded activation key (internal-distribution builds). Precedence
-// mirrors run-electron.mjs: shell env wins, the gitignored repo-root
-// `.env.demo` fills the gap. Neither source present → empty string and
-// the login flow keeps the manual activation-key paste input. The
+// Embedded activation key (internal-distribution builds). An explicit
+// `LVIS_EMBED_DEMO_ACTIVATION` env var takes precedence over the
+// gitignored repo-root `.env.demo`; neither source present → empty string
+// and the login flow keeps the manual activation-key paste input. The
 // activation string never enters git — it exists only in the produced
 // bundle (see src/main/demo-embedded-activation.ts for the threat-model
 // note on collapsing the codec's 2-factor delivery for these builds).
+//
+// Resolved once per process: under `--watch` the embed is frozen at
+// watch-start, so adding or editing `.env.demo` mid-watch requires a
+// watcher restart to take effect. The dev flow (`bun run dev`) is
+// unaffected — run-electron.mjs injects `.env.demo` into process.env at
+// runtime, so the embedded-key path is primarily a packaged-build concern.
+const ACTIVATION_WIRE_RE = /^LVIS-DEMO:v1:[A-Za-z0-9_-]+$/;
 function resolveEmbeddedActivationCode() {
   const explicit = process.env.LVIS_EMBED_DEMO_ACTIVATION?.trim();
-  if (explicit) return explicit;
+  if (explicit) {
+    // Fail loud on a malformed env embed — same no-silent-downgrade rule
+    // the `.env.demo` branch below honors. A typo'd / plaintext / truncated
+    // value would otherwise ship `autoActivatable=true` and silently
+    // degrade to the manual-paste fallback on first launch, defeating the
+    // zero-input goal. Structural check only (cheap); the full GCM decrypt
+    // still happens at runtime in lvis:demo:activate-embedded.
+    if (!ACTIVATION_WIRE_RE.test(explicit)) {
+      process.stderr.write(
+        "[esbuild-main] LVIS_EMBED_DEMO_ACTIVATION is set but is not a valid " +
+          "LVIS-DEMO:v1:<base64url> string — refusing to embed a malformed key\n",
+      );
+      process.exit(1);
+    }
+    return explicit;
+  }
   const envDemoPath = resolve(repoRoot, ".env.demo");
   if (!existsSync(envDemoPath)) return "";
   // Reuse the canonical encrypt CLI so the embed path and the manual

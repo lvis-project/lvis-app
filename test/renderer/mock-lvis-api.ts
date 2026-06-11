@@ -217,7 +217,7 @@ export function makeMockLvisApi(overrides: ApiOverrides = {}): {
     hasMarketplaceApiKey: vi.fn(async () => false),
     deleteMarketplaceApiKey: vi.fn(async () => ({ ok: true })),
     demo: {
-      status: vi.fn(async () => ({ active: false })),
+      status: vi.fn(async () => ({ ok: true, activated: false, vendor: null, autoActivatable: false })),
       activate: vi.fn(async () => ({ ok: true })),
       activateEmbedded: vi.fn(async () => ({ ok: false, error: "no-embedded-code" })),
       relaunchAfterActivation: vi.fn(async () => ({ ok: true })),

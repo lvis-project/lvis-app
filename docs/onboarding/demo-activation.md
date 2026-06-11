@@ -106,15 +106,25 @@ string as a code block or text file.
 Internal-distribution builds can carry the activation string inside the
 binary so the demo chip activates with **no paste step at all**.
 `scripts/build-main-esbuild.mjs` resolves the embed source at build
-time — precedence mirrors `run-electron.mjs` (shell env wins, file
-fills the gap):
+time — the env var takes precedence over the gitignored `.env.demo`
+file:
 
 1. `LVIS_EMBED_DEMO_ACTIVATION` env var — a pre-issued
-   `LVIS-DEMO:v1:<...>` string, for CI/packaging pipelines.
+   `LVIS-DEMO:v1:<...>` string, for CI/packaging pipelines. Validated
+   structurally at build time; a malformed value fails the build (no
+   silent downgrade to manual paste).
 2. The gitignored repo-root `.env.demo` — encrypted on the fly with the
-   shared codec (same plaintext the manual issuance flow uses).
+   shared codec (same plaintext the manual issuance flow uses). A
+   present-but-empty/garbage `.env.demo` also fails the build by design;
+   remove the file to restore the manual-paste path.
 3. Neither present → the build embeds nothing and the login flow keeps
    the manual paste input unchanged.
+
+The embed is resolved once per build process: under `bun run build:main
+--watch` it is frozen at watch-start, so adding/editing `.env.demo`
+mid-watch requires a watcher restart. The dev flow (`bun run dev`) is
+unaffected — `run-electron.mjs` injects `.env.demo` into `process.env`
+at runtime, independent of the build-time embed.
 
 At runtime `lvis:demo:status` advertises `autoActivatable: true` when a
 key is embedded; the demo chip then calls `lvis:demo:activate-embedded`,
