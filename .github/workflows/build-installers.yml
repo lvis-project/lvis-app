@@ -111,6 +111,14 @@ jobs:
           # GH_TOKEN is required by electron-builder's GitHub publisher to
           # create/update the release and upload assets.
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          # Embedded demo activation key for internal-distribution builds.
+          # When set, scripts/build-main-esbuild.mjs encrypts (or passes
+          # through) this LVIS-DEMO:v1:<...> string into the bundle so the
+          # demo chip activates with no paste step on fresh installs. The
+          # secret holds the codec ciphertext, NOT the raw API key — and is
+          # absent on forks/PRs, so those builds keep the manual-paste flow.
+          # See docs/onboarding/demo-activation.md (Embedded activation key).
+          LVIS_EMBED_DEMO_ACTIVATION: ${{ secrets.LVIS_EMBED_DEMO_ACTIVATION }}
           CSC_LINK: ${{ secrets.CSC_LINK }}
           CSC_KEY_PASSWORD: ${{ secrets.CSC_KEY_PASSWORD }}
           APPLE_ID: ${{ secrets.APPLE_ID }}
