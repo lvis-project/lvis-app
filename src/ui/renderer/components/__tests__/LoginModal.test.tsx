@@ -32,7 +32,7 @@ function loginModalApi(
     | { ok: false; error: string }
   >,
   statusImpl?: () => Promise<
-    | { ok: true; activated: boolean; vendor: string | null; autoActivatable?: boolean }
+    | { ok: true; activated: boolean; vendor: string | null; autoActivatable: boolean }
     | { ok: false; error: string }
   >,
   activateEmbeddedImpl?: () => Promise<
@@ -147,7 +147,7 @@ describe("LoginModal — chip-driven demo flow (activation → auth)", () => {
       }),
       undefined,
       undefined,
-      async () => ({ ok: true, activated: true, vendor: "azure-foundry" }),
+      async () => ({ ok: true, activated: true, vendor: "azure-foundry", autoActivatable: false }),
     );
     render(<LoginModal api={api} open onOpenChange={() => {}} />);
 
@@ -183,7 +183,7 @@ describe("LoginModal — chip-driven demo flow (activation → auth)", () => {
       }),
       undefined,
       undefined,
-      async () => ({ ok: true, activated: true, vendor: "azure-foundry" }),
+      async () => ({ ok: true, activated: true, vendor: "azure-foundry", autoActivatable: false }),
     );
     render(
       <LoginModal
