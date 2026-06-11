@@ -707,6 +707,13 @@ export async function bootstrap(
         sendToWindow(getMainWindow(), PERMISSIONS.deferredPending, summary, log);
       },
     });
+    // A re-wire updates the runtime reviewer mode (notably the
+    // llm-degraded-to-rule → llm heal driven by login or settings:update).
+    // setReviewer itself does not broadcast, so an already-open PermissionsTab
+    // would keep showing a stale degrade banner. Push a config-changed event so
+    // its onConfigChanged subscription refetches reviewerDegradedToRule and the
+    // banner clears the moment a provider/key heals the reviewer.
+    broadcastPermissionConfigChangedFromIpc({ getMainWindow, getAppWindows: () => BrowserWindowValue.getAllWindows() } as Parameters<typeof broadcastPermissionConfigChangedFromIpc>[0]);
   };
   rewireReviewerAgent();
 
