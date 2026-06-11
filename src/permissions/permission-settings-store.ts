@@ -118,20 +118,31 @@ export interface PermissionSettingsFile {
 }
 
 const DEFAULT_REVIEWER: ReviewerSettingsBlock = {
-  // Default to "rule" (deterministic, no LLM cost). Pre-#664 this was
-  // "disabled" but "disabled" was wired as "defer-all-HIGH" — that meant a
-  // fresh install (no settings.json) silently queued every plugin write/auth
-  // tool in `~/.lvis/permissions/deferred-queue.jsonl` (#664 reproducer).
+  // Default to "llm": LLM-backed risk review (rule composition, max(rule,llm))
+  // is the strongest available classification for a fresh install. When the
+  // active chat LLM provider/key is not yet configured (fresh install before
+  // login), boot wiring cannot instantiate the reviewer adapter — instead of
+  // crashing or silently passing everything, `wireReviewerAgent` degrades to
+  // the deterministic rule classifier (see reviewer-wiring.ts). The degrade is
+  // self-healing: as soon as a provider/key is configured, the auth + settings
+  // rewire path re-fires wiring and the reviewer returns to "llm".
   //
-  // The honest-by-name choice is "rule": deterministic 36-rule heuristic
-  // with no provider dependency. Sandbox-internal plugin writes are
-  // resolved by the writesToOwnSandbox auto-LOW rule (P1) inside the
-  // classifier itself.
-  mode: "rule",
+  // `interactive.autoApprove: "low"` lets a LOW verdict in the foreground chat
+  // flow silently allow without a modal — the everyday flow is unblocked while
+  // MEDIUM/HIGH still surface to the user. The headless lane is unaffected.
+  //
+  // Why not "rule" as the default: rule is the *degraded* posture, not the
+  // intended one. Encoding "llm" as the default keeps the intent visible and
+  // makes the degrade observable (banner + boot warn) rather than baking the
+  // weaker classifier in as the silent baseline. Sandbox-internal plugin
+  // writes still collapse to LOW via the writesToOwnSandbox auto-LOW rule (P1)
+  // in either mode, so the #664 fresh-install flood does not reappear under
+  // the degraded rule classifier.
+  mode: "llm",
   provider: "openai",
   model: "gpt-4o-mini",
   fallbackOnError: "deny",
-  interactive: { autoApprove: "off" },
+  interactive: { autoApprove: "low" },
 };
 
 const REVIEWER_INTERACTIVE_AUTO_APPROVES: ReadonlySet<ReviewerInteractiveAutoApprove> =

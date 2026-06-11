@@ -110,12 +110,16 @@ describe("dispatchPermissionReviewerCommand — persistence", () => {
     const r = await dispatchPermissionReviewerCommand({ verb: "show", value: "" }, path);
     expect(r.ok).toBe(true);
     if (r.ok && r.verb === "show") {
-      // #664 P0 default change: pre-#664 was "disabled" (defer-all-HIGH),
-      // post-#664 is "rule" (deterministic baseline, no LLM call).
-      expect(r.settings.mode).toBe("rule");
+      // Default reviewer is "llm" (strongest classifier). Boot wiring degrades
+      // to rule at runtime when no LLM provider is configured (fresh install),
+      // but the persisted/default mode is "llm" so intent stays visible.
+      // interactive.autoApprove defaults to "low" so LOW foreground calls are
+      // silently allowed; MEDIUM/HIGH still surface.
+      expect(r.settings.mode).toBe("llm");
       expect(r.settings.provider).toBe("openai");
       expect(r.settings.model).toBe("gpt-4o-mini");
       expect(r.settings.fallbackOnError).toBe("deny");
+      expect(r.settings.interactive.autoApprove).toBe("low");
     }
   });
 
@@ -261,12 +265,14 @@ describe("normalizePermissionSettings — reviewer block", () => {
   it("missing reviewer block → defaults", () => {
     const settings = normalizePermissionSettings({});
     expect(settings.permissions.reviewer).toEqual({
-      // #664 P0: default flipped from "disabled" → "rule" (deterministic baseline).
-      mode: "rule",
+      // Default reviewer mode is "llm" (strongest classifier; degrades to rule
+      // at boot when no provider is configured). interactive.autoApprove "low"
+      // silently allows LOW foreground calls.
+      mode: "llm",
       provider: "openai",
       model: "gpt-4o-mini",
       fallbackOnError: "deny",
-      interactive: { autoApprove: "off" },
+      interactive: { autoApprove: "low" },
     });
   });
 
@@ -281,14 +287,15 @@ describe("normalizePermissionSettings — reviewer block", () => {
         },
       },
     });
-    // #664 P0: default flipped from "disabled" → "rule".
-    expect(settings.permissions.reviewer.mode).toBe("rule");
+    // Unknown enum values fall back to the new "llm" default (external
+    // boundary: hand-edited settings file with bad values).
+    expect(settings.permissions.reviewer.mode).toBe("llm");
     expect(settings.permissions.reviewer.provider).toBe("openai");
     expect(settings.permissions.reviewer.fallbackOnError).toBe("deny");
     expect(settings.permissions.reviewer.model).toBe("gpt-4o-mini");
   });
 
-  it("valid reviewer block round-trips", () => {
+  it("valid reviewer block round-trips (absent interactive → default low)", () => {
     const settings = normalizePermissionSettings({
       permissions: {
         reviewer: {
@@ -304,8 +311,27 @@ describe("normalizePermissionSettings — reviewer block", () => {
       provider: "anthropic",
       model: "claude-haiku-4-5",
       fallbackOnError: "deny",
-      interactive: { autoApprove: "off" },
+      // Only absent fields take the new default; explicit fields above are kept.
+      interactive: { autoApprove: "low" },
     });
+  });
+
+  it("explicit mode:rule + autoApprove:off are preserved (not overwritten by new defaults)", () => {
+    // Backward-compat: a user who explicitly configured the pre-change defaults
+    // must keep them. Only ABSENT fields fall to the new "llm"/"low" defaults.
+    const settings = normalizePermissionSettings({
+      permissions: {
+        reviewer: {
+          mode: "rule",
+          provider: "openai",
+          model: "gpt-4o-mini",
+          fallbackOnError: "deny",
+          interactive: { autoApprove: "off" },
+        },
+      },
+    });
+    expect(settings.permissions.reviewer.mode).toBe("rule");
+    expect(settings.permissions.reviewer.interactive.autoApprove).toBe("off");
   });
 });
 
@@ -339,8 +365,8 @@ describe("settings file persistence — reviewer block format", () => {
         permissions: { reviewer: { mode: "yolo", provider: "openai", model: "x", fallbackOnError: "rule" } },
       }),
     );
-    // Read normalises silently (external boundary). #664 P0: default is "rule".
+    // Read normalises silently (external boundary). Bad enum → "llm" default.
     const r = readPermissionSettings(path);
-    expect(r.permissions.reviewer.mode).toBe("rule");
+    expect(r.permissions.reviewer.mode).toBe("llm");
   });
 });

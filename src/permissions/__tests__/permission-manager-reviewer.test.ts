@@ -483,6 +483,63 @@ describe("MAJOR-1 R2: dispatchReviewer threads abortSignal to LlmRiskClassifier.
   });
 });
 
+describe("#664 flood guard — degraded rule reviewer does not over-defer headless sandbox writes", () => {
+  it("headless plugin sandbox write under llm-degraded-to-rule → LOW, no deferred-queue entry", async () => {
+    // Fresh install: default reviewer mode "llm" but no LLM provider configured.
+    // wireReviewerAgent degrades to the rule classifier. A headless plugin
+    // writing to its OWN sandbox (writesToOwnSandbox auto-LOW rule, #664 P1)
+    // must classify LOW and must NOT land on the deferred queue under the
+    // default headless defer policy ("high" — only HIGH defers). This pins the
+    // #664 fresh-install flood guard for the new llm-default + degrade path.
+    const { wireReviewerAgent } = await import("../../boot/steps/reviewer-wiring.js");
+    const { detectSandboxCapability } = await import("../sandbox-capability.js");
+    const { realpathSync } = await import("node:fs");
+
+    const pm = new PermissionManager(tmpFile("permissions.json"));
+    const wiring = wireReviewerAgent({
+      permissionManager: pm,
+      readSettings: () => ({
+        mode: "llm",
+        provider: "openai",
+        model: "gpt-4o-mini",
+        fallbackOnError: "deny",
+        interactive: { autoApprove: "low" },
+      }),
+      // No streamProviderFor → adapter resolution fails → degrade to rule.
+      verdictCachePath: tmpFile("flood-cache.jsonl"),
+      deferredQueuePath: tmpFile("flood-queue.jsonl"),
+    });
+    expect(wiring.runtimeMode).toBe("llm-degraded-to-rule");
+    expect(pm.isReviewerDegradedToRule()).toBe(true);
+
+    const TMP = realpathSync(tmpdir());
+    const sandboxRoot = `${TMP}/lvis-664-flood/.lvis/plugins/lvis-plugin-ms-graph`;
+
+    const r = await pm.dispatchReviewer(
+      "msgraph_auth",
+      {
+        source: "plugin",
+        category: "write",
+        pathFields: ["path"],
+        finalInput: { path: `${sandboxRoot}/msal-cache.bin` },
+        allowedDirectories: [allowedDir(`${TMP}/lvis-664-flood/work`)],
+        sensitivePathsAdjacent: [],
+        trustOrigin: "plugin-emitted",
+        writesToOwnSandbox: true,
+        ownerPluginSandboxRoot: sandboxRoot,
+        sandboxCapability: detectSandboxCapability(),
+      },
+      undefined,
+      // Headless lane uses the default "high" defer policy.
+      { defer: "high" },
+    );
+
+    expect(r.verdict.level).toBe("low");
+    expect(r.deferredId).toBeUndefined();
+    expect(wiring.deferredQueue.listPending()).toHaveLength(0);
+  });
+});
+
 describe("PermissionManager.checkDetailed — headless mutating reviewer lane", () => {
   it("headless+write routes through the category reviewer lane", () => {
     const { pm } = makeManager();
