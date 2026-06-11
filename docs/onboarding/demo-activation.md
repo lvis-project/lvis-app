@@ -149,14 +149,19 @@ not on a developer machine, so the embed source is supplied as a repo
 **Actions secret** rather than a local `.env.demo`:
 
 1. Generate the activation string from a `.env.demo`:
-   `bun scripts/encrypt-demo-credentials.ts .env.demo` → `LVIS-DEMO:v1:<...>`.
+   `npx tsx scripts/encrypt-demo-credentials.ts .env.demo` → `LVIS-DEMO:v1:<...>`
+   (the script targets `tsx`; `bun scripts/encrypt-demo-credentials.ts .env.demo`
+   also works in a bun toolchain). The secret holds the **codec ciphertext,
+   not the raw API key** — encryption already happened here.
 2. Register it as a repository secret named `LVIS_EMBED_DEMO_ACTIVATION`
    (Settings → Secrets and variables → Actions → New repository secret,
-   or `gh secret set LVIS_EMBED_DEMO_ACTIVATION`). The secret holds the
-   **codec ciphertext, never the raw API key**.
+   or `gh secret set LVIS_EMBED_DEMO_ACTIVATION`).
 3. The Build-installer step passes it through as `LVIS_EMBED_DEMO_ACTIVATION`,
-   which `build-main-esbuild.mjs` embeds into the bundle. The secret is
-   absent on forks and PR builds, so those keep the manual-paste flow.
+   which `build-main-esbuild.mjs` validates and embeds verbatim into the
+   bundle (it is already ciphertext — no re-encryption). The workflow runs
+   only on `workflow_dispatch` / tag pushes, and the secret is unavailable to
+   fork / untrusted contexts (and absent when not configured), so those builds
+   embed nothing and keep the manual-paste flow.
 
 To rotate, re-issue the ciphertext and update the secret — no code change.
 Because `lvis-app` is a public repository and the codec passphrase ships
