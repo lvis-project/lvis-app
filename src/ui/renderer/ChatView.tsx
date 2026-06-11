@@ -349,7 +349,6 @@ export function ChatView({ api, onAsk, onEditSave, onFork, onToggleStar, onRetry
     attachments, setAttachments, attachmentNCounter,
     enableThinkingChat, toggleThinking,
     costEstimate, costBadgeClass, activeVendor,
-    hideToolFailures,
   } = useChatContext();
 
   // Sub-agent spawns by their originating tool_use id. Used so SubAgentCard
@@ -1307,10 +1306,10 @@ export function ChatView({ api, onAsk, onEditSave, onFork, onToggleStar, onRetry
             groupEntries.push({
               idx: i,
               node: spawnNodes.length === 0 ? (
-                <ToolGroupCard key={e.groupId} group={e} sessionId={currentSessionId} hideFailureStatus={hideToolFailures} />
+                <ToolGroupCard key={e.groupId} group={e} sessionId={currentSessionId} />
               ) : (
                 <Fragment key={e.groupId}>
-                  <ToolGroupCard group={e} sessionId={currentSessionId} hideFailureStatus={hideToolFailures} />
+                  <ToolGroupCard group={e} sessionId={currentSessionId} />
                   {spawnNodes}
                 </Fragment>
               ),
@@ -1396,7 +1395,7 @@ export function ChatView({ api, onAsk, onEditSave, onFork, onToggleStar, onRetry
       } else if (entry.kind === "permission_review") {
         rendered.push(<PermissionReviewStatusCard key={`permission-review-${entry.toolUseId}`} entry={entry} />);
       } else if (entry.kind === "tool_group") {
-        rendered.push(<ToolGroupCard key={entry.groupId} group={entry} sessionId={currentSessionId} hideFailureStatus={hideToolFailures} />);
+        rendered.push(<ToolGroupCard key={entry.groupId} group={entry} sessionId={currentSessionId} />);
         for (const node of renderSpawnsForGroup(entry)) rendered.push(node);
       } else if (entry.kind === "assistant") {
         rendered.push(
@@ -1454,7 +1453,7 @@ export function ChatView({ api, onAsk, onEditSave, onFork, onToggleStar, onRetry
     } else if (entry.kind === "permission_review") {
       rendered.push(<PermissionReviewStatusCard key={`permission-review-${entry.toolUseId}`} entry={entry} />);
     } else if (entry.kind === "tool_group") {
-      rendered.push(<ToolGroupCard key={entry.groupId} group={entry} sessionId={currentSessionId} hideFailureStatus={hideToolFailures} />);
+      rendered.push(<ToolGroupCard key={entry.groupId} group={entry} sessionId={currentSessionId} />);
       for (const node of renderSpawnsForGroup(entry)) rendered.push(node);
     }
     i++;
