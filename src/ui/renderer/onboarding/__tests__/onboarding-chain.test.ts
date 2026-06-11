@@ -304,6 +304,27 @@ describe("onboardingChainReducer — completionReason (post-tour-first-task gate
     expect(afterShowcase.completionReason).toBeUndefined();
   });
 
+  it("a late probe-skip while already in done does NOT overwrite 'chain'", () => {
+    // Regression: completionReason must only be recorded on the transition
+    // INTO done. A stale/duplicate probe-skip arriving after a full-funnel
+    // completion must not flip "chain" → "probe-skip" (which would hide the
+    // post-tour UI for a user who actually finished the tour).
+    const doneViaChain = onboardingChainReducer(
+      {
+        stage: "plugins",
+        selectedScenarioId: null,
+        memorySeed: { nickname: "", introduction: "" },
+      },
+      { type: "plugins-close" },
+    );
+    expect(doneViaChain.completionReason).toBe("chain");
+    const afterLateProbe = onboardingChainReducer(doneViaChain, {
+      type: "probe-skip",
+    });
+    expect(afterLateProbe.stage).toBe("done");
+    expect(afterLateProbe.completionReason).toBe("chain");
+  });
+
   it("logout-reset clears a prior completionReason", () => {
     const doneViaChain = onboardingChainReducer(
       {
