@@ -16,6 +16,7 @@ import { describe, it, expect, vi } from "vitest";
 import { act, fireEvent, render } from "@testing-library/react";
 import { useState } from "react";
 import { LlmTab, type FallbackEntry } from "../LlmTab.js";
+import { VENDORS } from "../../constants.js";
 import { makeMockLvisApi } from "../../../../../test/renderer/mock-lvis-api.js";
 
 type HarnessApi = Parameters<typeof LlmTab>[0]["api"];
@@ -29,15 +30,19 @@ function Harness({
   initialAuthMode,
   initialHostResolverMap = "",
   loadedHostResolverMap = "",
+  initialVendor = "openai",
+  settingsLoaded = true,
   api,
 }: {
   initialAuthMode: "manual" | "login";
   initialHostResolverMap?: string;
   loadedHostResolverMap?: string;
+  initialVendor?: string;
+  settingsLoaded?: boolean;
   api?: HarnessApi;
 }) {
   const [authMode, setAuthMode] = useState<"manual" | "login">(initialAuthMode);
-  const [vendor, setVendor] = useState("openai");
+  const [vendor, setVendor] = useState(initialVendor);
   const [keyInput, setKeyInput] = useState("");
   const [model, setModel] = useState("gpt-5.4-mini");
   const [baseUrl, setBaseUrl] = useState("");
@@ -81,6 +86,7 @@ function Harness({
       setHostResolverMap={setHostResolverMap}
       loadedHostResolverMap={loadedHostResolverMap}
       onSaved={vi.fn()}
+      settingsLoaded={settingsLoaded}
     />
   );
 }
@@ -230,5 +236,94 @@ describe("LlmTab — top-level login toggle UI", () => {
     expect(container.querySelector('[data-testid="llm-tab:login-section"]')).not.toBeNull();
     const manualAfter = container.querySelector('[data-testid="llm-tab:manual-section"]');
     expect(manualAfter?.getAttribute("aria-disabled")).toBe("true");
+  });
+
+  // (1) The login-mode logout affordance must not desync renderer state from
+  // persisted llm.authMode. The old local `setAuthMode("manual")` button is
+  // removed; only a hint pointing at the canonical GeneralTab logout remains.
+  it("renders a logout hint (not a local toggle button) in login mode", () => {
+    const { container } = render(<Harness initialAuthMode="login" />);
+    // The broken local-only logout affordance is gone.
+    expect(container.querySelector('[data-testid="llm-tab:logout-to-edit"]')).toBeNull();
+    // A static hint directing the user to the canonical logout is present.
+    const hint = container.querySelector('[data-testid="llm-tab:logout-hint"]');
+    expect(hint).not.toBeNull();
+    // It is a non-interactive paragraph, not a button.
+    expect(hint?.tagName.toLowerCase()).toBe("p");
+  });
+
+  // (2) When api.applyHostMap rejects, the relaunch confirm dialog must stay
+  // open with an inline error and must not leave an unhandled promise
+  // rejection. relaunchPending is also released so the user can retry.
+  it("keeps the relaunch dialog open and surfaces an error when applyHostMap fails", async () => {
+    const unhandled: unknown[] = [];
+    const onUnhandled = (e: PromiseRejectionEvent) => {
+      e.preventDefault();
+      unhandled.push(e.reason);
+    };
+    window.addEventListener("unhandledrejection", onUnhandled);
+    try {
+      const api = llmTabApi();
+      vi.spyOn(
+        api as unknown as { applyHostMap: (v: string) => Promise<{ ok: boolean }> },
+        "applyHostMap",
+      ).mockRejectedValue(new Error("ipc failed"));
+
+      // Dialog renders in a portal (document.body), so query via the
+      // testing-library helpers that scope to the document, not `container`.
+      const { getByTestId, queryByTestId } = render(
+        <Harness
+          initialAuthMode="manual"
+          initialHostResolverMap={"10.0.0.10 changed.example.com"}
+          loadedHostResolverMap={"10.0.0.10 endpoint.example.com"}
+          api={api}
+        />,
+      );
+
+      fireEvent.click(getByTestId("llm-tab:apply-host-map"));
+      await act(async () => {
+        fireEvent.click(getByTestId("llm-tab:relaunch-confirm"));
+      });
+      // Let any pending microtasks/rejections settle.
+      await act(async () => {
+        await Promise.resolve();
+      });
+
+      // Dialog still open: confirm button + inline error present.
+      expect(queryByTestId("llm-tab:relaunch-confirm")).not.toBeNull();
+      const error = queryByTestId("llm-tab:relaunch-error");
+      expect(error).not.toBeNull();
+      expect(error?.getAttribute("role")).toBe("alert");
+      // Confirm button re-enabled so the user can retry (relaunchPending released).
+      const confirm = getByTestId("llm-tab:relaunch-confirm") as HTMLButtonElement;
+      expect(confirm.disabled).toBe(false);
+      // No unhandled promise rejection escaped.
+      expect(unhandled).toHaveLength(0);
+    } finally {
+      window.removeEventListener("unhandledrejection", onUnhandled);
+    }
+  });
+
+  // (3) Pre-hydration the parent passes vendor="" / settingsLoaded=false. The
+  // API-key label must not flash the stale first-vendor name (VENDORS[0]).
+  it("does not render a stale vendor label before hydration (vendor='')", () => {
+    const { container } = render(
+      <Harness initialAuthMode="manual" initialVendor="" settingsLoaded={false} />,
+    );
+    const label = container.querySelector('[data-testid="llm-tab:api-key-label"]');
+    expect(label).not.toBeNull();
+    // No vendor name leaked — neither the fallback first vendor nor any other.
+    for (const v of VENDORS) {
+      expect(label?.textContent ?? "").not.toContain(v.label);
+    }
+  });
+
+  it("renders the hydrated vendor label once settings load (vendor set)", () => {
+    const { container } = render(
+      <Harness initialAuthMode="manual" initialVendor="openai" settingsLoaded={true} />,
+    );
+    const label = container.querySelector('[data-testid="llm-tab:api-key-label"]');
+    const openai = VENDORS.find((v) => v.id === "openai")!;
+    expect(label?.textContent ?? "").toContain(openai.label);
   });
 });
