@@ -18,8 +18,11 @@ const ITEM_ID = "health:services";
  * Consecutive LLM ping failures required before flipping a previously-online
  * dot to offline. A single transient failure (network blip, momentary endpoint
  * hiccup) holds the last-known-good state so the status dot stops oscillating
- * online↔offline on every flaky probe. Recovery is immediate: one successful
- * ping clears the streak and restores online.
+ * online↔offline on every flaky probe. Any non-offline result resets the
+ * streak: a successful ping restores online immediately, and a transition to
+ * not-configured/unauthorized clears it too — the streak counts *consecutive
+ * offline probes* only, and a context switch (e.g. logout) makes a stale
+ * failure count meaningless.
  */
 const LLM_OFFLINE_HYSTERESIS = 2;
 
