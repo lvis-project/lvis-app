@@ -16,6 +16,7 @@ import { createHookRunner } from "../boot/conversation.js";
 import { wireHookSystem } from "../boot/steps/hook-system-wiring.js";
 import { acceptHookTrust } from "../hooks/hook-trust-commands.js";
 import { HOOKS_CONFIG_FILENAME } from "../hooks/hook-config-trust.js";
+import { writeJsonConfig } from "../hooks/__tests__/test-helpers.js";
 
 describe("boot hook runner wiring", () => {
   it("creates an in-process HookRunner with no external hook surface", async () => {
@@ -69,10 +70,6 @@ describe("boot wireHookSystem — hooks.json rides the TOFU quarantine gate (#81
     return { hooksDir, disabledDir, lockfilePath };
   }
 
-  function writeConfig(obj: unknown): void {
-    writeFileSync(configPath, JSON.stringify(obj, null, 2));
-  }
-
   const CONFIG = {
     version: 1,
     hooks: { PreToolUse: [{ hooks: [{ type: "command", command: "./policy.sh" }] }] },
@@ -85,7 +82,7 @@ describe("boot wireHookSystem — hooks.json rides the TOFU quarantine gate (#81
   });
 
   it("an UNTRUSTED hooks.json is loaded ONLY into quarantine — never into the registry", async () => {
-    writeConfig(CONFIG);
+    writeJsonConfig(configPath, CONFIG);
     const boot = await wireHookSystem(opts());
     // Production strict-deny: the config IS discovered but quarantined.
     expect(boot.manager.size()).toBe(0);
@@ -97,7 +94,7 @@ describe("boot wireHookSystem — hooks.json rides the TOFU quarantine gate (#81
   });
 
   it("a TRUSTED hooks.json loads its command entries into the registry", async () => {
-    writeConfig(CONFIG);
+    writeJsonConfig(configPath, CONFIG);
     // First boot quarantines; user accepts; second boot loads.
     const firstBoot = await wireHookSystem(opts());
     expect(firstBoot.manager.size()).toBe(0);
@@ -115,14 +112,14 @@ describe("boot wireHookSystem — hooks.json rides the TOFU quarantine gate (#81
   });
 
   it("a CHANGED hooks.json after trust is re-quarantined — commands stop running", async () => {
-    writeConfig(CONFIG);
+    writeJsonConfig(configPath, CONFIG);
     const boot1 = await wireHookSystem(opts());
     await acceptHookTrust(HOOKS_CONFIG_FILENAME, { ...opts(), manager: boot1.manager });
     const boot2 = await wireHookSystem(opts());
     expect(boot2.manager.size()).toBe(1);
 
     // Tamper with the trusted config.
-    writeConfig({ ...CONFIG, version: 999 });
+    writeJsonConfig(configPath, { ...CONFIG, version: 999 });
     const boot3 = await wireHookSystem(opts());
     // Re-quarantined: registry empty again, NO commands load from the changed config.
     expect(boot3.manager.size()).toBe(0);
