@@ -87,8 +87,8 @@ jobs:
       - name: Scope electron-builder cache dir as CommonJS
         shell: bash
         run: |
-          mkdir -p .cache/electron-builder
-          printf '{ "type": "commonjs" }\n' > .cache/electron-builder/package.json
+          mkdir -p "$ELECTRON_BUILDER_CACHE"
+          printf '{ "type": "commonjs" }\n' > "$ELECTRON_BUILDER_CACHE/package.json"
       - name: Install Linux packaging tools
         if: matrix.target == 'linux'
         run: sudo apt-get update && sudo apt-get install -y fakeroot rpm xvfb
