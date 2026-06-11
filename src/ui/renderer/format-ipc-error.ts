@@ -150,6 +150,8 @@ export const COMMON_IPC_ERROR_MESSAGES: Readonly<Record<string, string>> = {
   "missing-foundry-endpoint": "formatIpcError.missingFoundryEndpoint",
   "persist-failed": "formatIpcError.persistFailed",
   "not-armed": "formatIpcError.notArmed",
+  // Build-embedded activation key absent (lvis:demo:activate-embedded).
+  "no-embedded-code": "formatIpcError.noEmbeddedCode",
   // 2026-05-20 — Settings 로그아웃 path (`lvis:demo:clear`) 의 디스크 삭제 실패.
   "clear-failed": "formatIpcError.clearFailed",
   // ── Tutorial-C — tour:{start,mark-complete,dismiss} validation ──

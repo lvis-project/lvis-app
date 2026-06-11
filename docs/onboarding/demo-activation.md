@@ -101,6 +101,47 @@ internal channel of choice. The string is URL-safe so chat clients
 won't mangle it, but if your channel auto-wraps long lines, attach the
 string as a code block or text file.
 
+## Embedded activation key (zero-input builds)
+
+Internal-distribution builds can carry the activation string inside the
+binary so the demo chip activates with **no paste step at all**.
+`scripts/build-main-esbuild.mjs` resolves the embed source at build
+time — the env var takes precedence over the gitignored `.env.demo`
+file:
+
+1. `LVIS_EMBED_DEMO_ACTIVATION` env var — a pre-issued
+   `LVIS-DEMO:v1:<...>` string, for CI/packaging pipelines. Validated
+   structurally at build time; a malformed value fails the build (no
+   silent downgrade to manual paste).
+2. The gitignored repo-root `.env.demo` — encrypted on the fly with the
+   shared codec (same plaintext the manual issuance flow uses). A
+   present-but-empty/garbage `.env.demo` also fails the build by design;
+   remove the file to restore the manual-paste path.
+3. Neither present → the build embeds nothing and the login flow keeps
+   the manual paste input unchanged.
+
+The embed is resolved once per build process: under `bun run build:main
+--watch` it is frozen at watch-start, so adding/editing `.env.demo`
+mid-watch requires a watcher restart. The dev flow (`bun run dev`) is
+unaffected — `run-electron.mjs` injects `.env.demo` into `process.env`
+at runtime, independent of the build-time embed.
+
+At runtime `lvis:demo:status` advertises `autoActivatable: true` when a
+key is embedded; the demo chip then calls `lvis:demo:activate-embedded`,
+which runs the exact same decrypt → validate → persist → relaunch chain
+as a manual paste (audit rows carry `source=embedded`). The Settings
+"재입력" recovery path always keeps the manual input so a different key
+can be supplied, and a rejected embedded key (e.g. issued before a
+passphrase rotation) surfaces its error and falls back to manual paste.
+
+**Security trade-off (explicit owner decision):** an embedded build
+collapses the 2-factor delivery model below to 1-factor — the binary
+alone contains both the passphrase and the ciphertext, so anyone with
+the binary can recover the demo credentials. Restrict embedded builds
+to internal distribution channels. The activation string itself never
+enters git: the embed sources are a gitignored file or a packaging-time
+env var, and the value exists only inside the produced bundle.
+
 ## Security model
 
 The activation codec is **deliberately low-strength** crypto with a

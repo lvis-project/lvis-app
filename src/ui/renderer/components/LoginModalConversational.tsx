@@ -100,6 +100,8 @@ function activationErrorMessage(code: string): string {
   switch (code) {
     case "invalid-code":
       return t("loginModalConversational.activErrInvalidCode");
+    case "no-embedded-code":
+      return t("loginModalConversational.activErrNoEmbeddedKey");
     case "no-vendor":
       return t("loginModalConversational.activErrNoVendor");
     case "invalid-vendor":
@@ -301,6 +303,45 @@ export function LoginModalConversational({
   }, [api, onSuccess, onOpenChange, submitting]);
 
   /**
+   * Embedded activation — the build carries an activation key
+   * (`status.autoActivatable`), so the chip click runs the same
+   * decrypt→validate→persist chain as `submitActivation` with no paste
+   * input. Success follows the manual contract exactly: first activation
+   * arms the relaunch notice, otherwise the auth transcript starts.
+   * Failure (stale embedded key after a passphrase rotation, disk error)
+   * surfaces the activation error AND opens the manual input so the flow
+   * never dead-ends — the user can still paste a fresh key from their
+   * administrator.
+   */
+  const runEmbeddedActivation = useCallback(async () => {
+    if (activating || submitting || activationRelaunching) return;
+    setActivating(true);
+    setActivationError(null);
+    setActivationNotice(null);
+    try {
+      const result = await api.demo.activateEmbedded();
+      if (result.ok) {
+        if (result.requiresRelaunch) {
+          setActivationNotice(t("loginModalConversational.activationRelaunchNotice"));
+          setActivationRelaunching(true);
+          return;
+        }
+        void runAuthMockup();
+        return;
+      }
+      setActivationError(activationErrorMessage(result.error));
+      setActivationOpen(true);
+    } catch (err) {
+      setActivationError(t("loginModalConversational.activErrProcessError"));
+      setActivationOpen(true);
+      // eslint-disable-next-line no-console
+      console.error("demo.activateEmbedded IPC failed", err);
+    } finally {
+      setActivating(false);
+    }
+  }, [api, activating, submitting, activationRelaunching, runAuthMockup]);
+
+  /**
    * Demo chip handler. Fresh installs open the activation-input sub-state;
    * subsequent launches with `.env.demo` already loaded at boot ask the main
    * process for captured demo status and run the auth transcript immediately.
@@ -337,6 +378,16 @@ export function LoginModalConversational({
           }, 220);
           return;
         }
+        if (status.autoActivatable && !forceActivation) {
+          // Embedded activation key — skip the paste input entirely.
+          // `forceActivation` (Settings 재입력 recovery) keeps the manual
+          // path so the user can supply a *different* key than the one
+          // embedded in this build.
+          window.setTimeout(() => {
+            void runEmbeddedActivation();
+          }, 220);
+          return;
+        }
         setActivationOpen(true);
       } catch (err) {
         setError(t("loginModalConversational.errDemoStatusCheckError"));
@@ -354,6 +405,7 @@ export function LoginModalConversational({
     forceActivation,
     api,
     runAuthMockup,
+    runEmbeddedActivation,
   ]);
 
   /**
@@ -607,7 +659,9 @@ export function LoginModalConversational({
                     ? t("loginModalConversational.assistantRelaunching")
                     : checkingDemoStatus
                       ? t("loginModalConversational.assistantCheckingStatus")
-                      : t("loginModalConversational.assistantPromptActivation")}
+                      : activating && !activationOpen
+                        ? t("loginModalConversational.assistantEmbeddedActivating")
+                        : t("loginModalConversational.assistantPromptActivation")}
               </p>
 
               {activationOpen && !submitting && (
