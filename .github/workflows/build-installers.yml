@@ -70,6 +70,25 @@ jobs:
           key: ${{ runner.os }}-uv-${{ hashFiles('scripts/uv-targets.mjs', 'scripts/fetch-uv.mjs') }}
           restore-keys: |
             ${{ runner.os }}-uv-
+      # electron-builder >= 26.14 extracts its icon-conversion helper
+      # (icons@x.y.z/icon-tool.js — CommonJS, uses `require`) under
+      # ELECTRON_BUILDER_CACHE, which this workflow places INSIDE the
+      # workspace (.cache/). Node resolves that file's module scope by
+      # walking up to the nearest package.json — the repo root, whose
+      # "type": "module" makes the CJS tool execute as ESM and die with
+      # "ReferenceError: require is not defined in ES module scope"
+      # (v0.3.0 mac/win installer failure; linux passed because AppImage
+      # consumes the png directly). Scoping the ELECTRON_BUILDER_CACHE
+      # directory itself as CommonJS stops the walk at that boundary for
+      # every tool electron-builder extracts there, without touching the
+      # sibling ELECTRON_CACHE (.cache/electron) or anything else under
+      # .cache/. Local builds are unaffected — the default cache lives in
+      # the OS cache dir, outside any workspace package.json scope.
+      - name: Scope electron-builder cache dir as CommonJS
+        shell: bash
+        run: |
+          mkdir -p "$ELECTRON_BUILDER_CACHE"
+          printf '{ "type": "commonjs" }\n' > "$ELECTRON_BUILDER_CACHE/package.json"
       - name: Install Linux packaging tools
         if: matrix.target == 'linux'
         run: sudo apt-get update && sudo apt-get install -y fakeroot rpm xvfb
