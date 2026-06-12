@@ -243,6 +243,32 @@ describe("Permission policy P4 reviewer-wiring", () => {
     expect(pm.isReviewerDegradedToRule()).toBe(true);
   });
 
+  it("degraded wiring still applies interactive.autoApprove — foreground-auto stays enabled", () => {
+    // The background-adjudicator contract: setReviewer + setInteractiveAutoApprove
+    // run on the COMMON path after the llm/degrade branch, so a fresh install
+    // (degraded to rule) still gets foreground-auto LOW auto-approval. If the
+    // degrade branch ever returned early and skipped the autoApprove apply,
+    // the rule reviewer would silently stop auto-approving LOW verdicts and
+    // every mutating tool would modal — this pins the combination.
+    const pm = new PermissionManager(join(tmpDir, "permissions.json"));
+    const result = wireReviewerAgent({
+      permissionManager: pm,
+      readSettings: () => ({
+        mode: "llm",
+        provider: "openai",
+        model: "gpt-4o-mini",
+        fallbackOnError: "deny",
+        interactive: { autoApprove: "low" },
+      }),
+      streamProviderFor: () => null,
+      verdictCachePath: join(tmpDir, "cache-degrade-fa.jsonl"),
+      deferredQueuePath: join(tmpDir, "queue-degrade-fa.jsonl"),
+    });
+    expect(result.runtimeMode).toBe("llm-degraded-to-rule");
+    expect(pm.hasReviewer()).toBe(true);
+    expect(pm.getInteractiveAutoApprove()).toBe("low");
+  });
+
   it("logs a boot warn on llm→rule degrade", () => {
     const pm = new PermissionManager(join(tmpDir, "permissions.json"));
     const warnSpy = vi.spyOn(console, "warn").mockImplementation(() => {});
