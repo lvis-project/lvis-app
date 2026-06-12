@@ -107,8 +107,14 @@ export function ToolApprovalDialog({
       // canonicalStringify: sort object keys so {a,b} and {b,a} produce the
       // same string — matching how dispatchReviewer builds the lookup key.
       const canonicalArgs = canonicalStringifyForRenderer(request.args ?? {});
+      // HIGH verdicts never persist across sessions — even when the user
+      // picks "allow-always", the grant is clamped to this session (the
+      // scope radio is likewise hidden for HIGH). Re-justifying a HIGH
+      // action on the next session is the intended friction.
       const recordedScope: UserApprovalScope =
-        choice === "allow-always" ? "persistent" : "session";
+        choice === "allow-always" && finalVerdict !== "high"
+          ? "persistent"
+          : "session";
       recordPromise = window.lvis?.userApproval?.record({
         requestId: request.id,
         toolName: request.toolName,

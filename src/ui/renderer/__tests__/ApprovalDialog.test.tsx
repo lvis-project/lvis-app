@@ -589,6 +589,38 @@ describe("ApprovalDialog", () => {
     );
   });
 
+  it("HIGH verdict + '항상 허용' clamps the recorded grant to session scope", async () => {
+    // HIGH grants never persist across sessions — even allow-always records
+    // scope=session so the user must re-justify the HIGH action next session.
+    const onDecide = vi.fn();
+    render(
+      <ApprovalDialog
+        queue={[
+          makeRequest({
+            reviewerVerdict: { level: "high", reason: "destructive write" },
+          }),
+        ]}
+        onDecide={onDecide}
+      />,
+    );
+    await waitFor(() => expect(document.body.textContent).toContain("read_file"));
+    // HIGH requires a non-empty NL justification before approval enables.
+    const nlInput = document.body.querySelector<HTMLTextAreaElement>(
+      '[data-testid="nl-justification-input"]',
+    );
+    expect(nlInput).toBeTruthy();
+    fireEvent.change(nlInput!, { target: { value: "필요한 작업입니다" } });
+    const alwaysBtn = Array.from(document.body.querySelectorAll("button")).find(
+      (b) => b.textContent === "항상 허용",
+    );
+    expect(alwaysBtn).toBeTruthy();
+    fireEvent.click(alwaysBtn!);
+    await waitFor(() => expect(onDecide).toHaveBeenCalledWith("allow-always", "read_file"));
+    expect(window.lvis.userApproval.record).toHaveBeenCalledWith(
+      expect.objectContaining({ scope: "session", verdictAtApproval: "high" }),
+    );
+  });
+
   it("deny choices never write Store B (no record IPC)", async () => {
     const onDecide = vi.fn();
     render(
