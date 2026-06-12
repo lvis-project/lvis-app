@@ -1,16 +1,14 @@
 /**
- * Regression test for PR #832 fail-closed gate against legacy R-2
- * user-approval entries with `verdictAtApproval: null` (#833).
+ * Regression test for the fail-closed gate against legacy
+ * user-approval entries with `verdictAtApproval: null`.
  *
- * Pre-PR-A4 R3 (PR #786) the user-approval entry shape did not have a
+ * Earlier the user-approval entry shape did not have a
  * `verdictAtApproval` field. A naive `?? "medium"` coerce on read would
  * have turned every such legacy entry into a medium-risk memory hit —
- * fail-permissive for inputs whose original verdict was HIGH. PR #832
- * landed a fail-closed gate that rejects the memory hit and forces a
- * fresh approval flow when `verdictAtApproval == null`.
- *
- * Critic R1 (#833) flagged the absence of a regression guard. This file
- * is the guard.
+ * fail-permissive for inputs whose original verdict was HIGH. The
+ * fail-closed gate rejects the memory hit and forces a fresh approval
+ * flow when `verdictAtApproval == null`. This file is the regression
+ * guard for that gate.
  */
 import { describe, it, expect, beforeEach, afterEach, vi } from "vitest";
 import { mkdtempSync } from "node:fs";
@@ -56,7 +54,7 @@ function makeManager(): {
   return { pm, classifier };
 }
 
-describe("PermissionManager — fail-closed gate against legacy R-2 entries (#832, #833)", () => {
+describe("PermissionManager — fail-closed gate against legacy null-verdict entries", () => {
   let pm: PermissionManager;
   let warnSpy: ReturnType<typeof vi.spyOn>;
 
@@ -74,9 +72,9 @@ describe("PermissionManager — fail-closed gate against legacy R-2 entries (#83
     const broadcast = vi.fn();
     pm.setBroadcastUserApprovalHit(broadcast);
 
-    // Legacy R-2 entry — verdictAtApproval is null (the PR-A4 R3 field
-    // was absent at the time of recording, so the store returns null for
-    // pre-existing entries).
+    // Legacy entry — verdictAtApproval is null (the field was absent at
+    // the time of recording, so the store returns null for pre-existing
+    // entries).
     mockLookupResult = {
       scope: "persistent",
       verdictAtApproval: null,
@@ -104,7 +102,7 @@ describe("PermissionManager — fail-closed gate against legacy R-2 entries (#83
       return (
         marker != null &&
         typeof marker === "object" &&
-        (marker as { event?: unknown }).event === "legacy-r2-null-verdict"
+        (marker as { event?: unknown }).event === "legacy-null-verdict"
       );
     });
     expect(legacyCall).toBeDefined();
@@ -147,7 +145,7 @@ describe("PermissionManager — fail-closed gate against legacy R-2 entries (#83
     const warnedLegacy = warnSpy.mock.calls.some(
       (args: unknown[]) =>
         typeof args[0] === "string" &&
-        args[0].includes("legacy R-2 entry without verdictAtApproval"),
+        args[0].includes("legacy entry without verdictAtApproval"),
     );
     expect(warnedLegacy).toBe(false);
   });
@@ -172,7 +170,7 @@ describe("PermissionManager — fail-closed gate against legacy R-2 entries (#83
     const warnedLegacy = warnSpy.mock.calls.some(
       (args: unknown[]) =>
         typeof args[0] === "string" &&
-        args[0].includes("legacy R-2 entry without verdictAtApproval"),
+        args[0].includes("legacy entry without verdictAtApproval"),
     );
     expect(warnedLegacy).toBe(false);
   });

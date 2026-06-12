@@ -68,6 +68,14 @@ export interface PermissionCheckResult {
     verdict?: RiskVerdict;
   };
   /**
+   * Per-invocation hard-ask marker. When `true`, this `ask` decision MUST be
+   * confirmed by the user on every invocation and is NEVER auto-skipped by the
+   * explicit-approval memory store (Store B). Set when a tool author declared
+   * `decisionOverride: "ask"` ("always confirm me"); honouring it preserves the
+   * author's per-invocation intent against a prior session/persistent grant.
+   */
+  forceModal?: boolean;
+  /**
    * Layer 5 headless reviewer queue metadata. The execution result is still a
    * blocked tool call, but the audit decision must be `deferred` rather than a
    * plain deny so forensics can link it to the manual approval queue entry.
@@ -760,7 +768,7 @@ export class PermissionManager {
       // human-readable first arg stays for existing log readers.
       console.warn(
         `[permission] legacy entry without verdictAtApproval — rejecting memory hit, forcing fresh approval (tool=${toolName}, scope=${userApproval.scope})`,
-        { event: "legacy-r2-null-verdict", toolName, scope: userApproval.scope },
+        { event: "legacy-null-verdict", toolName, scope: userApproval.scope },
       );
     }
     if (userApproval && userApproval.verdictAtApproval != null) {
