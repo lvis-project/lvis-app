@@ -52,6 +52,9 @@ class StubFetcher implements MarketplaceFetcher {
   async downloadVersion() {
     throw new Error("downloadVersion stub — installArtifact is mocked in this test file");
   }
+  async listAnnouncements() {
+    return [];
+  }
 }
 
 describe("PluginMarketplaceService install → update → rollback", () => {

@@ -45,11 +45,21 @@ export function registerSettingsHandlers(deps: IpcDeps): void {
 
   ipcMain.handle("lvis:settings:update", async (e, partial) => {
     if (!validateSender(e)) { auditUnauthorized(auditLogger, "lvis:settings:update", e); return UNAUTHORIZED_FRAME; }
+    const llmPatch = (partial as Record<string, unknown> | null | undefined)
+      ?.llm as Record<string, unknown> | undefined;
+    if (
+      llmPatch &&
+      Object.prototype.hasOwnProperty.call(llmPatch, "hostResolverMap")
+    ) {
+      return {
+        ok: false,
+        error: "host-map-requires-apply-host-map",
+        message: "hostResolverMap must be changed via applyHostMap",
+      };
+    }
     // LOW: validate vendors["azure-foundry"].baseUrl at write time so an invalid
     // Foundry endpoint is rejected before it reaches the settings store.
-    const foundryPatch = (partial as Record<string, unknown> | null | undefined)
-      ?.llm as Record<string, unknown> | undefined;
-    const foundryVendorPatch = (foundryPatch?.vendors as Record<string, unknown> | undefined)
+    const foundryVendorPatch = (llmPatch?.vendors as Record<string, unknown> | undefined)
       ?.["azure-foundry"] as Record<string, unknown> | undefined;
     if (foundryVendorPatch?.baseUrl !== undefined) {
       // Minor-4: reject non-string values explicitly before String() coercion.

@@ -423,6 +423,7 @@ describe("installMcpFromMarketplace", () => {
       listPlugins: vi.fn(async () => []),
       getPluginDetail: vi.fn(async () => detail),
       downloadVersion: vi.fn(async () => ({ zipBuffer: Buffer.alloc(0), sha256: "x" })),
+      listAnnouncements: vi.fn(async () => []),
     };
   }
 

@@ -37,6 +37,7 @@ function makeFetcher(pluginType: "agent" | "skill"): MarketplaceFetcher {
     listPlugins: vi.fn(async () => [marketplaceItem(pluginType)]),
     getPluginDetail: vi.fn(async () => marketplaceItem(pluginType)),
     downloadVersion: vi.fn(),
+    listAnnouncements: vi.fn(async () => []),
   };
 }
 
