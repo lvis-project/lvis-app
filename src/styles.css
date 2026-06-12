@@ -217,6 +217,19 @@
   to   { opacity: 1; transform: scale(1); }
 }
 
+/* ─── lvis-marquee — overflow-only horizontal scroll for long banner text ───
+   Applied by MarqueeText only when the content is wider than its container.
+   The track is rendered twice side-by-side; translating it by exactly half
+   (-50%) yields a seamless loop. A leading + trailing pause is baked into the
+   keyframe timing (0–8% hold, 92–100% hold) so the text rests at each end.
+   prefers-reduced-motion: the component renders a static, truncated label
+   instead — see the @media block below, which also hard-stops the animation
+   should the class ever be applied under reduced motion. */
+@keyframes lvis-marquee {
+  0%, 8%   { transform: translateX(0); }
+  92%, 100% { transform: translateX(-50%); }
+}
+
 /* Live Auto-play — REC dot blink and type-on caret. Mockup parity:
    `/tmp/login-lvis/index.html` O-X1 (`animation: blink 1.5s infinite`). */
 @keyframes lvis-demo-autoplay-blink {
@@ -242,6 +255,22 @@
   .lvis-anim-slide-down  { animation: lvis-slide-down 180ms cubic-bezier(0.22, 1, 0.36, 1) both; }
   .lvis-anim-slide-up    { animation: lvis-slide-up 180ms cubic-bezier(0.22, 1, 0.36, 1) both; }
   .lvis-anim-zoom-in     { animation: lvis-zoom-in 180ms cubic-bezier(0.22, 1, 0.36, 1) both; }
+
+  /* Marquee: viewport clips, track holds the duplicated content and scrolls.
+     Duration is set inline by MarqueeText (proportional to overflow width) via
+     the `--lvis-marquee-duration` custom property so longer text scrolls at a
+     steady speed rather than a fixed wall-clock loop. Hovering or keyboard
+     focus pauses it. */
+  .lvis-marquee-viewport { overflow: hidden; }
+  .lvis-marquee-track {
+    display: inline-flex;
+    flex-wrap: nowrap;
+    white-space: nowrap;
+    will-change: transform;
+    animation: lvis-marquee var(--lvis-marquee-duration, 12s) linear infinite;
+  }
+  .lvis-marquee-viewport:hover .lvis-marquee-track,
+  .lvis-marquee-viewport:focus-within .lvis-marquee-track { animation-play-state: paused; }
 
   /* Height expand/collapse: works by toggling `data-expanded`. Consumer sets
      `max-height: var(--expand-max-h, 1200px)` upper bound; animation
@@ -301,6 +330,11 @@
   }
   .lvis-anim-hover {
     transition-duration: 0ms;
+  }
+  /* Marquee never scrolls under reduced motion. MarqueeText also renders the
+     static truncated variant in this case, so this is belt-and-suspenders. */
+  .lvis-marquee-track {
+    animation: none;
   }
   [data-radix-dialog-overlay][data-state="open"],
   [data-radix-dialog-content][data-state="open"] {
