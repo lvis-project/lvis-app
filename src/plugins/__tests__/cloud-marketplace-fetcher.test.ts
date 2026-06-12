@@ -266,6 +266,174 @@ describe("CloudMarketplaceFetcher (public-network path)", () => {
     });
     await expect(fetcher.listPlugins()).rejects.toThrow(/network guard:/);
   });
+
+  it("listAnnouncements() maps server rows (snake_case) and requires level", async () => {
+    mockedFetchPublic.mockResolvedValueOnce(
+      jsonResponse([
+        {
+          id: 1,
+          title: "Maintenance",
+          body: "Scheduled downtime",
+          level: "warning",
+          created_at: "2026-06-12T00:00:00Z",
+          starts_at: "2026-06-12T00:00:00Z",
+          ends_at: null,
+        },
+        // Missing level is invalid and must be dropped.
+        { id: 2, title: "Notice", body: "FYI", created_at: "2026-06-11T00:00:00Z" },
+      ]),
+    );
+    const fetcher = new CloudMarketplaceFetcher({
+      baseUrl: "https://marketplace.example.com",
+    });
+    const announcements = await fetcher.listAnnouncements();
+
+    expect(announcements).toEqual([
+      {
+        id: 1,
+        title: "Maintenance",
+        body: "Scheduled downtime",
+        level: "warning",
+        createdAt: "2026-06-12T00:00:00Z",
+        startsAt: "2026-06-12T00:00:00Z",
+        endsAt: null,
+      },
+    ]);
+    const [url] = mockedFetchPublic.mock.calls[0];
+    expect(url).toBe("https://marketplace.example.com/api/v1/announcements");
+  });
+
+  it("listAnnouncements() drops rows with no numeric id, missing level, or an invalid level", async () => {
+    mockedFetchPublic.mockResolvedValueOnce(
+      jsonResponse([
+        { title: "no id", body: "x", level: "info", created_at: "2026-06-12T00:00:00Z" },
+        { id: 4, title: "missing level", body: "x", created_at: "2026-06-12T00:00:00Z" },
+        { id: 5, title: "bad level", body: "x", level: "bogus", created_at: "2026-06-12T00:00:00Z" },
+        { id: 6, title: "ok", body: "x", level: "critical", created_at: "2026-06-12T00:00:00Z" },
+      ]),
+    );
+    const fetcher = new CloudMarketplaceFetcher({
+      baseUrl: "https://marketplace.example.com",
+    });
+    const announcements = await fetcher.listAnnouncements();
+    expect(announcements.map((a) => a.id)).toEqual([6]);
+  });
+
+  it("listAnnouncements() drops numeric string ids outside the safe integer range", async () => {
+    mockedFetchPublic.mockResolvedValueOnce(
+      jsonResponse([
+        {
+          id: "9007199254740992",
+          title: "unsafe",
+          body: "x",
+          level: "info",
+          created_at: "2026-06-12T00:00:00Z",
+        },
+        {
+          id: "9007199254740991",
+          title: "safe",
+          body: "x",
+          level: "info",
+          created_at: "2026-06-12T00:00:00Z",
+        },
+      ]),
+    );
+    const fetcher = new CloudMarketplaceFetcher({
+      baseUrl: "https://marketplace.example.com",
+    });
+    const announcements = await fetcher.listAnnouncements();
+    expect(announcements.map((a) => a.id)).toEqual([Number.MAX_SAFE_INTEGER]);
+  });
+
+  it("listAnnouncements() requires string title, body, and createdAt fields", async () => {
+    mockedFetchPublic.mockResolvedValueOnce(
+      jsonResponse([
+        {
+          id: 7,
+          title: "Typed boundary",
+          body: "x",
+          level: "info",
+          created_at: 123,
+        },
+        {
+          id: 8,
+          title: 123,
+          body: "x",
+          level: "info",
+          created_at: "2026-06-12T00:00:00Z",
+        },
+        {
+          id: 9,
+          title: "Missing body",
+          level: "info",
+          created_at: "2026-06-12T00:00:00Z",
+        },
+        {
+          id: 10,
+          title: "Valid",
+          body: "x",
+          level: "info",
+          created_at: "2026-06-12T00:00:00Z",
+        },
+      ]),
+    );
+    const fetcher = new CloudMarketplaceFetcher({
+      baseUrl: "https://marketplace.example.com",
+    });
+
+    const announcements = await fetcher.listAnnouncements();
+
+    expect(announcements.map((a) => a.id)).toEqual([10]);
+  });
+
+  it("listAnnouncements() coerces optional timestamp fields to string or null", async () => {
+    mockedFetchPublic.mockResolvedValueOnce(
+      jsonResponse([
+        {
+          id: 7,
+          title: "Typed boundary",
+          body: "x",
+          level: "info",
+          created_at: "2026-06-12T00:00:00Z",
+          starts_at: { invalid: true },
+          ends_at: false,
+        },
+      ]),
+    );
+    const fetcher = new CloudMarketplaceFetcher({
+      baseUrl: "https://marketplace.example.com",
+    });
+
+    const announcements = await fetcher.listAnnouncements();
+
+    expect(announcements[0]).toMatchObject({
+      id: 7,
+      createdAt: "2026-06-12T00:00:00Z",
+      startsAt: null,
+      endsAt: null,
+    });
+  });
+
+  it("listAnnouncements() accepts {announcements: [...]} wrapper shape", async () => {
+    mockedFetchPublic.mockResolvedValueOnce(
+      jsonResponse({
+        announcements: [
+          {
+            id: 9,
+            title: "T",
+            body: "B",
+            level: "info",
+            created_at: "2026-06-12T00:00:00Z",
+          },
+        ],
+      }),
+    );
+    const fetcher = new CloudMarketplaceFetcher({
+      baseUrl: "https://marketplace.example.com",
+    });
+    const announcements = await fetcher.listAnnouncements();
+    expect(announcements.map((a) => a.id)).toEqual([9]);
+  });
 });
 
 describe("CloudMarketplaceFetcher (private-network path)", () => {

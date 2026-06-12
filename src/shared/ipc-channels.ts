@@ -75,6 +75,10 @@ export const SETTINGS = {
   applyHostMap: "lvis:settings:apply-host-map",
 } as const;
 
+export const MARKETPLACE = {
+  announcements: "lvis:marketplace:announcements",
+} as const;
+
 export const UI = {
   assistantContextMenu: "lvis:ui:assistant-context-menu",
   assistantContextAction: "lvis:ui:assistant-context-action",
