@@ -387,6 +387,12 @@ export interface MarketplaceSettings {
    * update notifications. Default false (stable only).
    */
   canaryOptIn?: boolean;
+  /**
+   * Announcement banner ids the user has dismissed. Absent/empty until the
+   * first dismissal. The host filters these out before pushing announcements
+   * to the renderer so a dismissed banner never reappears.
+   */
+  dismissedAnnouncementIds?: number[];
 }
 
 export interface SettingsServiceOptions {

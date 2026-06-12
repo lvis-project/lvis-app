@@ -29,6 +29,7 @@ function makeStore(tmpDir: string): PluginArtifactStore {
     listPlugins: async () => [],
     getPluginDetail: async () => null,
     downloadVersion: async () => ({ zipBuffer: Buffer.alloc(0), sha256: "x" }),
+    listAnnouncements: async () => [],
   } satisfies MarketplaceFetcher;
   return new PluginArtifactStore({
     installRoot: resolve(tmpDir, "installed"),
