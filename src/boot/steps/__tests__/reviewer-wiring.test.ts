@@ -17,7 +17,13 @@ import {
   RuleBasedRiskClassifier,
   DisabledRiskClassifier,
   LlmRiskClassifier,
+  type RiskVerdict,
 } from "../../../permissions/reviewer/risk-classifier.js";
+import {
+  VerdictCache,
+  type VerdictCacheLookupKey,
+  type VerdictCacheContext,
+} from "../../../permissions/reviewer/verdict-cache.js";
 import type { LLMProvider, StreamEvent } from "../../../engine/llm/types.js";
 
 let tmpDir: string;
@@ -194,7 +200,12 @@ describe("Permission policy P4 reviewer-wiring", () => {
     expect(cacheScope?.vertexLocation).toBe("us-central1");
   });
 
-  it("mode=llm but no streamProviderFor → throws (atomic cutover)", () => {
+  it("mode=llm but streamProviderFor dependency missing → throws (boot contract violation, no silent degrade)", () => {
+    // Missing streamProviderFor is a boot WIRING bug (production boot always
+    // supplies the factory), not a user configuration state. Degrading here
+    // would silently mask a caller defect — it must crash boot loudly. The
+    // user-unconfigured case (factory present but returns null) is the
+    // degrade test below.
     const pm = new PermissionManager(join(tmpDir, "permissions.json"));
     expect(() =>
       wireReviewerAgent({
@@ -203,33 +214,240 @@ describe("Permission policy P4 reviewer-wiring", () => {
           mode: "llm",
           provider: "openai",
           model: "gpt-4o-mini",
-          fallbackOnError: "rule",
-          interactive: { autoApprove: "off" },
+          fallbackOnError: "deny",
+          interactive: { autoApprove: "low" },
         }),
-        verdictCachePath: join(tmpDir, "cache.jsonl"),
-        deferredQueuePath: join(tmpDir, "queue.jsonl"),
+        verdictCachePath: join(tmpDir, "cache-degrade.jsonl"),
+        deferredQueuePath: join(tmpDir, "queue-degrade.jsonl"),
       }),
-    ).toThrow(/streamProviderFor/);
-    expect(pm.hasReviewer()).toBe(false);
+    ).toThrow(/no streamProviderFor supplied/);
   });
 
-  it("mode=llm but factory returns null → throws (no silent fallback)", () => {
+  it("mode=llm + factory null → degrades to rule (provider unconfigured)", () => {
     const pm = new PermissionManager(join(tmpDir, "permissions.json"));
-    expect(() =>
+    const result = wireReviewerAgent({
+      permissionManager: pm,
+      readSettings: () => ({
+        mode: "llm",
+        provider: "anthropic",
+        model: "claude-haiku-4-5",
+        fallbackOnError: "deny",
+        interactive: { autoApprove: "low" },
+      }),
+      streamProviderFor: () => null,
+      verdictCachePath: join(tmpDir, "cache-degrade-null.jsonl"),
+      deferredQueuePath: join(tmpDir, "queue-degrade-null.jsonl"),
+    });
+    expect(result.classifier).toBeInstanceOf(RuleBasedRiskClassifier);
+    expect(result.runtimeMode).toBe("llm-degraded-to-rule");
+    expect(pm.isReviewerDegradedToRule()).toBe(true);
+  });
+
+  it("logs a boot warn on llm→rule degrade", () => {
+    const pm = new PermissionManager(join(tmpDir, "permissions.json"));
+    const warnSpy = vi.spyOn(console, "warn").mockImplementation(() => {});
+    try {
       wireReviewerAgent({
         permissionManager: pm,
         readSettings: () => ({
           mode: "llm",
-          provider: "anthropic",
-          model: "claude-haiku-4-5",
-          fallbackOnError: "rule",
-          interactive: { autoApprove: "off" },
+          provider: "openai",
+          model: "gpt-4o-mini",
+          fallbackOnError: "deny",
+          interactive: { autoApprove: "low" },
         }),
         streamProviderFor: () => null,
-        verdictCachePath: join(tmpDir, "cache.jsonl"),
-        deferredQueuePath: join(tmpDir, "queue.jsonl"),
+        verdictCachePath: join(tmpDir, "cache-degrade-warn.jsonl"),
+        deferredQueuePath: join(tmpDir, "queue-degrade-warn.jsonl"),
+      });
+      const fired = warnSpy.mock.calls.some((args) =>
+        args.some((a) => typeof a === "string" && a.includes("degrading to rule classifier")),
+      );
+      expect(fired).toBe(true);
+    } finally {
+      warnSpy.mockRestore();
+    }
+  });
+
+  it("re-wiring after provider becomes available heals llm-degraded-to-rule → llm", () => {
+    const pm = new PermissionManager(join(tmpDir, "permissions.json"));
+    // First wiring: no provider → degraded.
+    const degraded = wireReviewerAgent({
+      permissionManager: pm,
+      readSettings: () => ({
+        mode: "llm",
+        provider: "openai",
+        model: "gpt-4o-mini",
+        fallbackOnError: "deny",
+        interactive: { autoApprove: "low" },
       }),
-    ).toThrow(/anthropic.*not configured/);
+      streamProviderFor: () => null,
+      verdictCachePath: join(tmpDir, "cache-heal-1.jsonl"),
+      deferredQueuePath: join(tmpDir, "queue-heal-1.jsonl"),
+    });
+    expect(degraded.runtimeMode).toBe("llm-degraded-to-rule");
+    expect(pm.isReviewerDegradedToRule()).toBe(true);
+
+    // Second wiring: provider now available → heals to llm, flag clears.
+    const provider = stubProvider([
+      { type: "message_complete", stopReason: "end_turn" },
+    ]);
+    const healed = wireReviewerAgent({
+      permissionManager: pm,
+      readSettings: () => ({
+        mode: "llm",
+        provider: "openai",
+        model: "gpt-4o-mini",
+        fallbackOnError: "deny",
+        interactive: { autoApprove: "low" },
+      }),
+      streamProviderFor: () => provider,
+      verdictCachePath: join(tmpDir, "cache-heal-2.jsonl"),
+      deferredQueuePath: join(tmpDir, "queue-heal-2.jsonl"),
+    });
+    expect(healed.classifier).toBeInstanceOf(LlmRiskClassifier);
+    expect(healed.runtimeMode).toBe("llm");
+    expect(pm.isReviewerDegradedToRule()).toBe(false);
+  });
+
+  // critic MINOR-1 regression guard. The heal test above writes degraded and
+  // healed wirings to *different* cache paths, so it never exercises the
+  // mode-flip invalidation through one shared cache file. These two cases pin
+  // that contract directly: the `cacheScope.mode` (runtimeMode) component of
+  // the invalidationKey forces a `miss-stale` when a verdict recorded under one
+  // runtime mode is looked up after the runtime flips — using the SAME physical
+  // cache file. cacheScope flows into permission-manager's cacheCtx.scope.reviewer,
+  // which feeds computeInvalidationKey; this test drives VerdictCache with that
+  // exact wiring so a regression in scope-keying is caught at the cache layer.
+  const LOOKUP_KEY: VerdictCacheLookupKey = {
+    toolName: "fs_write",
+    source: "plugin",
+    category: "write",
+    trustOrigin: "llm-tool-arg",
+    finalInput: { path: "/Users/ken/work/note.md" },
+  };
+  function ctxWithReviewerScope(
+    reviewerScope: Record<string, unknown>,
+  ): VerdictCacheContext {
+    return {
+      allowedDirectories: ["/Users/ken/work"],
+      scope: { reviewer: reviewerScope },
+    };
+  }
+
+  it("degraded→heal: stale rule verdict in shared cache is NOT served after llm heal (miss-stale)", async () => {
+    const cachePath = join(tmpDir, "cache-mode-flip.jsonl");
+    const baseSettings = () => ({
+      mode: "llm" as const,
+      provider: "openai",
+      model: "gpt-4o-mini",
+      fallbackOnError: "deny" as const,
+      interactive: { autoApprove: "low" as const },
+    });
+
+    // One spy on the shared pm — both wirings accumulate onto mock.calls in
+    // order (calls[0]=degraded, calls[1]=healed).
+    const pm = new PermissionManager(join(tmpDir, "permissions.json"));
+    const setReviewerSpy = vi.spyOn(pm, "setReviewer");
+
+    // First wiring: provider unconfigured (factory returns null) → degraded.
+    // Capture its cacheScope.
+    const degraded = wireReviewerAgent({
+      permissionManager: pm,
+      readSettings: baseSettings,
+      streamProviderFor: () => null,
+      verdictCachePath: cachePath,
+      deferredQueuePath: join(tmpDir, "queue-mode-flip.jsonl"),
+    });
+    expect(degraded.runtimeMode).toBe("llm-degraded-to-rule");
+    const degradedScope = setReviewerSpy.mock.calls[0][0].cacheScope!;
+    expect(degradedScope.mode).toBe("llm-degraded-to-rule");
+
+    // Record a (rule-derived) verdict under the degraded scope in the shared file.
+    const cache = new VerdictCache(cachePath);
+    const ruleVerdict: RiskVerdict = { level: "low", reason: "degraded rule verdict" };
+    await cache.store(LOOKUP_KEY, ctxWithReviewerScope(degradedScope), ruleVerdict);
+    // Sanity: served under the same (degraded) scope.
+    cache.resetForTests();
+    expect(cache.lookup(LOOKUP_KEY, ctxWithReviewerScope(degradedScope)).reason).toBe("hit");
+
+    // Second wiring: provider now available → heals to llm. Capture healed scope.
+    const provider = stubProvider([
+      { type: "message_complete", stopReason: "end_turn" },
+    ]);
+    const healed = wireReviewerAgent({
+      permissionManager: pm,
+      readSettings: baseSettings,
+      streamProviderFor: () => provider,
+      verdictCachePath: cachePath,
+      deferredQueuePath: join(tmpDir, "queue-mode-flip.jsonl"),
+    });
+    expect(healed.runtimeMode).toBe("llm");
+    const healedScope = setReviewerSpy.mock.calls[1][0].cacheScope!;
+    expect(healedScope.mode).toBe("llm");
+
+    // The stale rule verdict must NOT be served once runtime healed to llm.
+    cache.resetForTests();
+    const afterHeal = cache.lookup(LOOKUP_KEY, ctxWithReviewerScope(healedScope));
+    expect(afterHeal.hit).toBe(false);
+    expect(afterHeal.reason).toBe("miss-stale");
+  });
+
+  it("heal→degrade: healthy llm verdict in shared cache is NOT served after degrade (miss-stale)", async () => {
+    const cachePath = join(tmpDir, "cache-mode-flip-rev.jsonl");
+    const baseSettings = () => ({
+      mode: "llm" as const,
+      provider: "openai",
+      model: "gpt-4o-mini",
+      fallbackOnError: "deny" as const,
+      interactive: { autoApprove: "low" as const },
+    });
+
+    // One spy on the shared pm — both wirings accumulate onto mock.calls in
+    // order (calls[0]=healthy llm, calls[1]=degraded).
+    const provider = stubProvider([
+      { type: "message_complete", stopReason: "end_turn" },
+    ]);
+    const pm = new PermissionManager(join(tmpDir, "permissions.json"));
+    const setReviewerSpy = vi.spyOn(pm, "setReviewer");
+
+    // Healthy wiring: provider available → llm. Capture its cacheScope.
+    const healthy = wireReviewerAgent({
+      permissionManager: pm,
+      readSettings: baseSettings,
+      streamProviderFor: () => provider,
+      verdictCachePath: cachePath,
+      deferredQueuePath: join(tmpDir, "queue-mode-flip-rev.jsonl"),
+    });
+    expect(healthy.runtimeMode).toBe("llm");
+    const llmScope = setReviewerSpy.mock.calls[0][0].cacheScope!;
+    expect(llmScope.mode).toBe("llm");
+
+    // Record an llm-derived verdict under the healthy scope in the shared file.
+    const cache = new VerdictCache(cachePath);
+    const llmVerdict: RiskVerdict = { level: "medium", reason: "llm verdict" };
+    await cache.store(LOOKUP_KEY, ctxWithReviewerScope(llmScope), llmVerdict);
+    cache.resetForTests();
+    expect(cache.lookup(LOOKUP_KEY, ctxWithReviewerScope(llmScope)).reason).toBe("hit");
+
+    // Provider key removed (factory now returns null) → degrade. Capture
+    // degraded scope.
+    const degraded = wireReviewerAgent({
+      permissionManager: pm,
+      readSettings: baseSettings,
+      streamProviderFor: () => null,
+      verdictCachePath: cachePath,
+      deferredQueuePath: join(tmpDir, "queue-mode-flip-rev.jsonl"),
+    });
+    expect(degraded.runtimeMode).toBe("llm-degraded-to-rule");
+    const degradedScope = setReviewerSpy.mock.calls[1][0].cacheScope!;
+    expect(degradedScope.mode).toBe("llm-degraded-to-rule");
+
+    // The healthy llm verdict must NOT be served once runtime degraded to rule.
+    cache.resetForTests();
+    const afterDegrade = cache.lookup(LOOKUP_KEY, ctxWithReviewerScope(degradedScope));
+    expect(afterDegrade.hit).toBe(false);
+    expect(afterDegrade.reason).toBe("miss-stale");
   });
 
   it("preserves caller-supplied settings on appliedSettings", () => {
@@ -382,7 +600,9 @@ describe("Permission policy P4 reviewer-wiring", () => {
 });
 
 describe("Permission policy C3 foundry/gcp wiring paths", () => {
-  it("mode=llm provider=foundry without getSecret → throws clear message", () => {
+  it("mode=llm provider=foundry without getSecret → throws (boot contract violation)", () => {
+    // Missing getSecret is a boot wiring bug — production boot always
+    // supplies the secret accessor. Must crash loudly, never degrade.
     const pm = new PermissionManager(join(tmpDir, "permissions.json"));
     expect(() =>
       wireReviewerAgent({
@@ -394,34 +614,33 @@ describe("Permission policy C3 foundry/gcp wiring paths", () => {
           fallbackOnError: "deny",
           interactive: { autoApprove: "off" },
         }),
-        // getSecret intentionally omitted
+        // getSecret intentionally omitted — contract violation
         getFoundryEndpoint: () => "https://proj.services.ai.azure.com",
         verdictCachePath: join(tmpDir, "cache-foundry-nosecret.jsonl"),
         deferredQueuePath: join(tmpDir, "queue-foundry-nosecret.jsonl"),
       }),
-    ).toThrow(/getSecret/);
-    expect(pm.hasReviewer()).toBe(false);
+    ).toThrow(/requires getSecret/);
   });
 
-  it("mode=llm provider=foundry with getSecret returning null → throws 'API key or endpoint not configured'", () => {
+  it("mode=llm provider=foundry with getSecret returning null → degrades to rule", () => {
     const pm = new PermissionManager(join(tmpDir, "permissions.json"));
-    expect(() =>
-      wireReviewerAgent({
-        permissionManager: pm,
-        readSettings: () => ({
-          mode: "llm",
-          provider: "foundry",
-          model: "gpt-4o",
-          fallbackOnError: "deny",
-          interactive: { autoApprove: "off" },
-        }),
-        getSecret: () => null,
-        getFoundryEndpoint: () => "https://proj.services.ai.azure.com",
-        verdictCachePath: join(tmpDir, "cache-foundry-nokey.jsonl"),
-        deferredQueuePath: join(tmpDir, "queue-foundry-nokey.jsonl"),
+    const result = wireReviewerAgent({
+      permissionManager: pm,
+      readSettings: () => ({
+        mode: "llm",
+        provider: "foundry",
+        model: "gpt-4o",
+        fallbackOnError: "deny",
+        interactive: { autoApprove: "off" },
       }),
-    ).toThrow(/API key or endpoint not configured/);
-    expect(pm.hasReviewer()).toBe(false);
+      getSecret: () => null,
+      getFoundryEndpoint: () => "https://proj.services.ai.azure.com",
+      verdictCachePath: join(tmpDir, "cache-foundry-nokey.jsonl"),
+      deferredQueuePath: join(tmpDir, "queue-foundry-nokey.jsonl"),
+    });
+    expect(result.classifier).toBeInstanceOf(RuleBasedRiskClassifier);
+    expect(result.runtimeMode).toBe("llm-degraded-to-rule");
+    expect(pm.isReviewerDegradedToRule()).toBe(true);
   });
 
   it("mode=llm provider=foundry with valid secrets → wires LlmRiskClassifier", () => {
@@ -447,7 +666,8 @@ describe("Permission policy C3 foundry/gcp wiring paths", () => {
     expect(pm.hasReviewer()).toBe(true);
   });
 
-  it("mode=llm provider=gcp-playground without getSecret → throws clear message", () => {
+  it("mode=llm provider=gcp-playground without getSecret → throws (boot contract violation)", () => {
+    // Missing getSecret is a boot wiring bug — must crash loudly, never degrade.
     const pm = new PermissionManager(join(tmpDir, "permissions.json"));
     expect(() =>
       wireReviewerAgent({
@@ -459,32 +679,31 @@ describe("Permission policy C3 foundry/gcp wiring paths", () => {
           fallbackOnError: "deny",
           interactive: { autoApprove: "off" },
         }),
-        // getSecret intentionally omitted
+        // getSecret intentionally omitted — contract violation
         verdictCachePath: join(tmpDir, "cache-gcp-nosecret.jsonl"),
         deferredQueuePath: join(tmpDir, "queue-gcp-nosecret.jsonl"),
       }),
-    ).toThrow(/getSecret/);
-    expect(pm.hasReviewer()).toBe(false);
+    ).toThrow(/requires getSecret/);
   });
 
-  it("mode=llm provider=gcp-playground with getSecret returning null → throws 'API key not configured'", () => {
+  it("mode=llm provider=gcp-playground with getSecret returning null → degrades to rule", () => {
     const pm = new PermissionManager(join(tmpDir, "permissions.json"));
-    expect(() =>
-      wireReviewerAgent({
-        permissionManager: pm,
-        readSettings: () => ({
-          mode: "llm",
-          provider: "gcp-playground",
-          model: "gemini-1.5-flash",
-          fallbackOnError: "deny",
-          interactive: { autoApprove: "off" },
-        }),
-        getSecret: () => null,
-        verdictCachePath: join(tmpDir, "cache-gcp-nokey.jsonl"),
-        deferredQueuePath: join(tmpDir, "queue-gcp-nokey.jsonl"),
+    const result = wireReviewerAgent({
+      permissionManager: pm,
+      readSettings: () => ({
+        mode: "llm",
+        provider: "gcp-playground",
+        model: "gemini-1.5-flash",
+        fallbackOnError: "deny",
+        interactive: { autoApprove: "off" },
       }),
-    ).toThrow(/API key not configured/);
-    expect(pm.hasReviewer()).toBe(false);
+      getSecret: () => null,
+      verdictCachePath: join(tmpDir, "cache-gcp-nokey.jsonl"),
+      deferredQueuePath: join(tmpDir, "queue-gcp-nokey.jsonl"),
+    });
+    expect(result.classifier).toBeInstanceOf(RuleBasedRiskClassifier);
+    expect(result.runtimeMode).toBe("llm-degraded-to-rule");
+    expect(pm.isReviewerDegradedToRule()).toBe(true);
   });
 
   it("mode=llm provider=gcp-playground with llm.apiKey.gemini → wires LlmRiskClassifier", () => {

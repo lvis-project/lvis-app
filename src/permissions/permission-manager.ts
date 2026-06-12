@@ -203,6 +203,15 @@ export class PermissionManager {
   private deferredQueue: DeferredQueue | null = null;
   private reviewerCacheScope: Record<string, unknown> = {};
   /**
+   * Runtime degrade flag — true when the persisted reviewer mode is "llm"
+   * but boot wiring could not instantiate the LLM provider adapter (fresh
+   * install: no chat provider/key configured) and fell back to the rule
+   * classifier. Surfaced to the renderer (PermissionsTab banner) so the
+   * user understands the reviewer is running rule-only until they configure
+   * a provider. Reset to false on every successful "llm" wiring.
+   */
+  private reviewerDegradedToRule = false;
+  /**
    * Issue #690 — interactive auto-approve setting. "off" by default;
    * "low" means the reviewer's LOW verdict in the foreground flow
    * skips the approval modal. Read by {@link categoryBasedDecision} to
@@ -254,11 +263,27 @@ export class PermissionManager {
     cache: VerdictCache;
     deferredQueue: DeferredQueue;
     cacheScope?: Record<string, unknown>;
+    /**
+     * True when persisted mode is "llm" but wiring degraded to the rule
+     * classifier (provider/key not configured). Defaults to false so all
+     * non-degraded callers (rule/disabled/strict, successful llm) clear it.
+     */
+    degradedToRule?: boolean;
   }): void {
     this.reviewerClassifier = deps.classifier;
     this.verdictCache = deps.cache;
     this.deferredQueue = deps.deferredQueue;
     this.reviewerCacheScope = deps.cacheScope ?? {};
+    this.reviewerDegradedToRule = deps.degradedToRule ?? false;
+  }
+
+  /**
+   * Whether the reviewer is currently running rule-only because the persisted
+   * "llm" mode could not be wired (provider/key absent). Read by the
+   * reviewer-show IPC to surface the degrade banner in PermissionsTab.
+   */
+  isReviewerDegradedToRule(): boolean {
+    return this.reviewerDegradedToRule;
   }
 
   hasReviewer(): boolean {
