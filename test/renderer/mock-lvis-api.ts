@@ -495,6 +495,7 @@ export function makeMockLvisApi(overrides: ApiOverrides = {}): {
     }),
 
     onMarketplaceUpdatesAvailable: vi.fn(() => () => {}),
+    onMarketplaceAnnouncements: vi.fn(() => () => {}),
     onPluginInstallProgress: vi.fn((handler: (payload: unknown) => void) => {
       pluginInstallProgressHandlers.add(handler);
       return () => pluginInstallProgressHandlers.delete(handler);

@@ -131,7 +131,7 @@ import {
 import { initPluginRuntime } from "./boot/steps/plugin-runtime.js";
 import { wireWhitelistRegistry } from "./boot/steps/whitelist-bootstrap.js";
 import { registerPluginEventBridge } from "./boot/steps/ipc-bridge.js";
-import { wireReleasePrep, wireUpdateCheck } from "./boot/steps/post-boot.js";
+import { wireAnnouncementCheck, wireReleasePrep, wireUpdateCheck } from "./boot/steps/post-boot.js";
 import { wireReviewerAgent } from "./boot/steps/reviewer-wiring.js";
 import { wireHookSystem } from "./boot/steps/hook-system-wiring.js";
 import { isUiOnlyRuntimeInvocation } from "./boot/plugin-tool-invocation.js";
@@ -1287,6 +1287,11 @@ export async function bootstrap(
     settingsService,
     marketplaceFetcher,
     pluginPaths,
+  });
+  wireAnnouncementCheck({
+    getMainWindow,
+    settingsService,
+    marketplaceFetcher,
   });
 
   let shutdownPromise: Promise<void> | null = null;

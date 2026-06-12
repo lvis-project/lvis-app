@@ -17,6 +17,7 @@ function makeUnusedFetcher(): MarketplaceFetcher {
     downloadVersion: async () => {
       throw new Error("unused");
     },
+    listAnnouncements: async () => [],
   };
 }
 

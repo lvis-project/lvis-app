@@ -20,6 +20,9 @@
  * registry, not by the fetcher.
  */
 import type { PluginMarketplaceItem } from "./types.js";
+import type { MarketplaceAnnouncement } from "../shared/marketplace-announcements.js";
+
+export type { MarketplaceAnnouncement } from "../shared/marketplace-announcements.js";
 
 export interface MarketplaceFetcher {
   /** Lists catalog entries (latest stable version per plugin). */
@@ -31,4 +34,6 @@ export interface MarketplaceFetcher {
     slug: string,
     version: string,
   ): Promise<{ zipBuffer: Buffer; sha256: string }>;
+  /** Lists currently-active marketplace announcements (server-filtered). */
+  listAnnouncements(): Promise<MarketplaceAnnouncement[]>;
 }
