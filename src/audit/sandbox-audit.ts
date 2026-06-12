@@ -98,7 +98,11 @@ export interface SandboxAuditEntry {
      * here would falsely imply the LLM ran.
      */
     llmVerdict: "low" | "medium" | "high" | null;
-    /** Final composed verdict: max(ruleVerdict, llmVerdict). */
+    /**
+     * Final composed verdict. With an LLM verdict present this is
+     * max(ruleVerdict, llmVerdict); when `llmVerdict` is null (memory-hit
+     * path) it is max(ruleVerdict, verdict stored at approval time).
+     */
     finalVerdict: "low" | "medium" | "high";
     /**
      * Composition rules that fired and influenced the final verdict.
