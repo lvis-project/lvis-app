@@ -924,9 +924,20 @@ export class PermissionManager {
    *   - "reviewer" → defer to reviewer agent (headless lane)
    *   - "override" → meta category — caller reads tool.decisionOverride
    *
-   * The reviewer agent is not yet wired; until it lands, "reviewer"
-   * is mapped to "ask" so the user is prompted instead of silently
-   * permitting a headless write — fail-safe per design §1 principles.
+   * The reviewer agent IS wired (default mode "llm", degrading to the rule
+   * classifier when no provider is configured — see reviewer-wiring.ts). It
+   * acts as a BACKGROUND adjudicator, not a modal text-filler:
+   *   - headless lane: "reviewer" routes to dispatchReviewer (defer policy
+   *     queues HIGH verdicts);
+   *   - foreground lane: when `interactive.autoApprove === "low"` (the
+   *     default), mutating tools are stamped `reviewer.route =
+   *     "foreground-auto"` and the executor's
+   *     dispatchReviewerForInteractiveAuto auto-allows LOW verdicts with
+   *     audit only — MEDIUM/HIGH escalate to the ApprovalGate modal, where
+   *     the LLM-authored `approvalPurpose` text gives the human context.
+   * When the reviewer is unavailable, "reviewer" maps to "ask" so the user
+   * is prompted instead of silently permitting a headless write — fail-safe
+   * per design §1 principles.
    *
    * MCP (trust: low) tools are asked in default/auto modes regardless of
    * category; explicit allow mode is the only mode that bypasses this
