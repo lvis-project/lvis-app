@@ -1,5 +1,19 @@
 # Changelog
 
+## Unreleased
+
+### 플러그인 / 마켓플레이스
+
+- **마켓플레이스 공지 배너 및 marquee 표시** (PR #1259) — Marketplace `GET /api/v1/announcements` 응답을 main-process poller 가 `lvis:marketplace:announcements` IPC 로 renderer 에 전달하고, dismiss 상태를 `settings.marketplace.dismissedAnnouncementIds` 에 저장해 재시작 후에도 숨김을 유지한다. 긴 공지/업데이트 배너 텍스트는 `MarqueeText` 로 overflow 시에만 자동 스크롤하고 reduced-motion 변경 시 정적 표시로 복귀한다.
+
+### 설정 / IPC 경계
+
+- **hostResolverMap 변경 경로 고정** (PR #1259) — generic `lvis:settings:update` 는 이제 `llm.hostResolverMap` 패치를 `host-map-requires-apply-host-map` 으로 거부한다. relaunch-sensitive host map 변경은 dedicated `SETTINGS.applyHostMap` IPC 만 사용해야 한다.
+
+### 검증
+
+- PR #1259: focused announcement/marquee Vitest 6 files / 74 pass, MarketplaceFetcher test-stub Vitest 7 files / 104 pass, `bun run typecheck`, pre-push full Vitest 505 files / 6605 pass / 14 skipped, `bun run build`, `git diff --check`.
+
 ## v0.2.18 — 2026-06-01
 
 ### 플러그인 / 마켓플레이스
