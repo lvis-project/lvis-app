@@ -1056,7 +1056,9 @@ export class ToolExecutor {
    *     Only the dialog's `allow-always` choice writes here
    *     (addAlwaysAllowedPersist).
    *   • Store B — exact-tuple user-approval memory written by
-   *     ToolApprovalDialog for EVERY choice (once/session/always) via the
+   *     ToolApprovalDialog for DURABLE choices only (allow-session /
+   *     allow-always — allow-once never records, so "this time" cannot
+   *     widen into a remembered grant) via the
    *     `userApprovalRecord` IPC. Keyed on the canonical
    *     (toolName, args, source, trustOrigin?, approvalCacheKey?) tuple.
    *
@@ -1162,7 +1164,9 @@ export class ToolExecutor {
       const auditEntry = buildSandboxAuditEntry({
         tool: {
           name: toolName,
-          args: JSON.stringify(finalInput),
+          // emitSandboxAudit's sink trusts callers to pass DLP-redacted
+          // fields (sandbox-audit-sink.ts DLP note) — mask before writing.
+          args: maskSensitiveData(JSON.stringify(finalInput)).masked,
           source,
         },
         sandbox: {
@@ -1185,7 +1189,12 @@ export class ToolExecutor {
           compositionRulesTriggered: [],
           userApprovalUsed: {
             memoryHit: true,
-            nlJustification: approval.nlJustification,
+            // Stored justification is user/LLM-authored free text — DLP-mask
+            // it like every other audit field (the sink does not re-redact).
+            nlJustification:
+              approval.nlJustification === null
+                ? null
+                : maskSensitiveData(approval.nlJustification).masked,
             verdictAtApproval: approval.verdictAtApproval,
           },
         },
@@ -1987,8 +1996,9 @@ export class ToolExecutor {
       // ── Store B: explicit-approval memory skip (foreground only) ──────────
       // checkDetailed (sync) consults Store A — durable glob rules + the
       // alwaysAllowed Set (Layers 3/5). It cannot see Store B, the exact-tuple
-      // user-approval memory written by ToolApprovalDialog for EVERY choice
-      // (once/session/always). Pre-fix, choosing "allow this session" still
+      // user-approval memory written by ToolApprovalDialog for DURABLE
+      // choices only (allow-session / allow-always; allow-once never
+      // records). Pre-fix, choosing "allow this session" still
       // re-showed the modal on the next call because the foreground ask path
       // never read Store B (only the reviewer lane did). Mirror the reviewer
       // lane's lookup here so a prior session/persistent approval for the same
