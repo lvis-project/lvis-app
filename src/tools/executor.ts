@@ -1123,6 +1123,7 @@ export class ToolExecutor {
     // Verdict escalation guard. Re-run the deterministic rule classifier on
     // the CURRENT args; if it now ranks higher than the stored verdict, the
     // invocation became more dangerous since approval — re-prompt.
+    const sandboxCapability = detectSandboxCapability();
     const ctx: ToolInvocationContext = {
       toolName,
       source,
@@ -1132,7 +1133,7 @@ export class ToolExecutor {
       finalInput,
       allowedDirectories,
       sensitivePathsAdjacent,
-      sandboxCapability: detectSandboxCapability(),
+      sandboxCapability,
       ...(context.userIntent ? { conversationContext: { recentUserMessage: context.userIntent } } : {}),
       ...(sandboxAttestation.writesToOwnSandbox !== undefined
         ? { writesToOwnSandbox: sandboxAttestation.writesToOwnSandbox }
@@ -1159,7 +1160,6 @@ export class ToolExecutor {
     // Memory hit — skip the modal. Emit an audit entry recording the skip so
     // forensics can see the auto-allow + its provenance. Swallow-on-failure:
     // an audit write must never block tool execution.
-    const sandboxCap = detectSandboxCapability();
     try {
       const auditEntry = buildSandboxAuditEntry({
         tool: {
@@ -1170,8 +1170,8 @@ export class ToolExecutor {
           source,
         },
         sandbox: {
-          kind: sandboxCap.kind,
-          confidence: sandboxCap.confidence,
+          kind: sandboxCapability.kind,
+          confidence: sandboxCapability.confidence,
           // No sandbox run — this is a memory skip (the tool has not executed
           // yet). The zero telemetry below reflects "not measured", not "0ms".
           events: [],
