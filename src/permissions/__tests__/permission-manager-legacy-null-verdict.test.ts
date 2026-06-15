@@ -45,6 +45,7 @@ import { PermissionManager } from "../permission-manager.js";
 import { VerdictCache } from "../reviewer/verdict-cache.js";
 import { DeferredQueue } from "../reviewer/deferred-queue.js";
 import {
+  LlmRiskClassifier,
   RuleBasedRiskClassifier,
   type RiskClassifier,
 } from "../reviewer/risk-classifier.js";
@@ -196,5 +197,46 @@ describe("PermissionManager — fail-closed gate against legacy null-verdict ent
         args[0].includes("legacy entry without verdictAtApproval"),
     );
     expect(warnedLegacy).toBe(false);
+  });
+
+  it("audit separates raw rule verdict, raw LLM verdict, and final composed verdict", async () => {
+    const pm = new PermissionManager(tmpFile("permissions.json"));
+    const classifier = new LlmRiskClassifier(
+      {
+        complete: vi.fn(async () => ({
+          text: '{"level":"low","reason":"llm would allow"}',
+          tokensIn: 1,
+          tokensOut: 1,
+          costUsd: 0,
+        })),
+      },
+      "gpt-4o-mini",
+    );
+    const cache = new VerdictCache(tmpFile("reviewer-cache.jsonl"));
+    const queue = new DeferredQueue(tmpFile("deferred-queue.jsonl"));
+    pm.setReviewer({ classifier, cache, deferredQueue: queue });
+
+    await pm.dispatchReviewer("bash", {
+      source: "builtin",
+      category: "shell",
+      pathFields: [],
+      finalInput: { command: "rm -rf /tmp/lvis-audit-probe" },
+      allowedDirectories: ["/Users/ken/work"],
+      sensitivePathsAdjacent: [],
+      trustOrigin: "llm-tool-arg" as const,
+    });
+
+    const auditEntry = emitSandboxAuditMock.mock.calls.at(-1)?.[0] as
+      | {
+          reviewer: {
+            ruleVerdict: string;
+            llmVerdict: string | null;
+            finalVerdict: string;
+          };
+        }
+      | undefined;
+    expect(auditEntry?.reviewer.ruleVerdict).toBe("high");
+    expect(auditEntry?.reviewer.llmVerdict).toBe("low");
+    expect(auditEntry?.reviewer.finalVerdict).toBe("high");
   });
 });
