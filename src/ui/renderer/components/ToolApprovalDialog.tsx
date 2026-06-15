@@ -89,10 +89,9 @@ export function ToolApprovalDialog({
   // Wrap onDecide("allow-*") to record durable approval before deciding.
   //
   // Only DURABLE choices (allow-session / allow-always) write to the
-  // explicit-approval memory store (Store B). "allow-once" means "this
-  // invocation only" — recording it would let the foreground memory-skip
-  // auto-allow later calls, silently widening "this time" into "this
-  // session". So allow-once never records (matches its "이번만" label).
+  // explicit-approval memory store (Store B). Any future per-call approval
+  // choice must stay unrecorded so a one-time grant cannot widen into a
+  // remembered foreground memory-skip.
   //
   // CRITICAL: use canonicalStringify for args + propagate trustOrigin
   // + approvalCacheKey so that the record key matches the lookup key in
@@ -138,8 +137,7 @@ export function ToolApprovalDialog({
   // The primary Approve button grants for the scope selected in the radio
   // group: "이 세션만" → durable session grant, "영구 허용" → persistent.
   // HIGH verdict forces session (no persistent grant for HIGH-risk actions).
-  // This is the durable choice that the memory store records; a genuine
-  // allow-once (no record) is reached only via the explicit per-call paths.
+  // This is the durable choice that the memory store records.
   const primaryApproveChoice: ApprovalChoice =
     finalVerdict !== "high" && scopeChoice === "persistent"
       ? "allow-always"
