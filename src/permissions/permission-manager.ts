@@ -743,6 +743,7 @@ export class PermissionManager {
 
     const cacheResult = cache.lookup(lookupKey, cacheCtx);
     let verdict: RiskVerdict;
+    let llmVerdictForAudit: RiskVerdict["level"] | null = null;
     let userApprovalUsed: {
       memoryHit: boolean;
       nlJustification: string | null;
@@ -854,11 +855,13 @@ export class PermissionManager {
             ? classifier.classify(ctx, { abortSignal: options?.abortSignal })
             : classifier.classify(ctx);
         verdict = classified instanceof Promise ? await classified : classified;
+        llmVerdictForAudit = classifier instanceof LlmRiskClassifier ? verdict.level : null;
         // Persist for next time (HIGH cached too — re-deny is fast).
         await cache.store(lookupKey, cacheCtx, verdict);
       } catch (err) {
         const message = err instanceof Error ? err.message : String(err);
         verdict = { level: "high", reason: `reviewer error — ${message}` };
+        llmVerdictForAudit = classifier instanceof LlmRiskClassifier ? "high" : null;
       }
     }
 
@@ -883,7 +886,7 @@ export class PermissionManager {
       },
       reviewer: {
         ruleVerdict: verdict.level,
-        llmVerdict: userApprovalUsed?.memoryHit === true ? null : verdict.level,
+        llmVerdict: llmVerdictForAudit,
         finalVerdict: verdict.level,
         compositionRulesTriggered: [],
         userApprovalUsed,
