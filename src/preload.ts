@@ -16,7 +16,8 @@ import type {
 } from "./shared/permissions-events.js";
 import type { SerializedHistoryMessage } from "./shared/chat-history.js";
 import type { StreamEvent } from "./lib/chat-stream-state.js";
-import { OVERLAY_V1, PERMISSIONS, ROUTINES_V2, SETTINGS, UI } from "./shared/ipc-channels.js";
+import { MARKETPLACE, OVERLAY_V1, PERMISSIONS, ROUTINES_V2, SETTINGS, UI } from "./shared/ipc-channels.js";
+import type { MarketplaceAnnouncementPayload } from "./shared/marketplace-announcements.js";
 import { PLUGIN_PRIVATE_NAMESPACES } from "./plugins/capabilities.js";
 import type {
   ChatSendInputOrigin,
@@ -809,6 +810,17 @@ const api = {
     const listener = (_event: unknown, updates: Parameters<typeof handler>[0]) => handler(updates);
     ipcRenderer.on("marketplace:updates-available", listener);
     return () => ipcRenderer.removeListener("marketplace:updates-available", listener);
+  },
+
+  // ─── Marketplace announcements ───────────────────
+  // The host pushes the active, not-yet-dismissed announcement set whenever
+  // the announcement poller runs (boot + interval). Dismissals are persisted
+  // by the renderer via updateSettings, and the host filters them out before
+  // the next push so a dismissed banner never reappears.
+  onMarketplaceAnnouncements: (handler: (announcements: MarketplaceAnnouncementPayload) => void) => {
+    const listener = (_event: unknown, announcements: Parameters<typeof handler>[0]) => handler(announcements);
+    ipcRenderer.on(MARKETPLACE.announcements, listener);
+    return () => ipcRenderer.removeListener(MARKETPLACE.announcements, listener);
   },
 
   // ─── App auto-update (electron-updater) ──────────

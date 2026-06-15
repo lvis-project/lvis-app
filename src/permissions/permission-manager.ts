@@ -68,6 +68,14 @@ export interface PermissionCheckResult {
     verdict?: RiskVerdict;
   };
   /**
+   * Per-invocation hard-ask marker. When `true`, this `ask` decision MUST be
+   * confirmed by the user on every invocation and is NEVER auto-skipped by the
+   * explicit-approval memory store (Store B). Set when a tool author declared
+   * `decisionOverride: "ask"` ("always confirm me"); honouring it preserves the
+   * author's per-invocation intent against a prior session/persistent grant.
+   */
+  forceModal?: boolean;
+  /**
    * Layer 5 headless reviewer queue metadata. The execution result is still a
    * blocked tool call, but the audit decision must be `deferred` rather than a
    * plain deny so forensics can link it to the manual approval queue entry.
@@ -735,11 +743,31 @@ export class PermissionManager {
 
     const cacheResult = cache.lookup(lookupKey, cacheCtx);
     let verdict: RiskVerdict;
+    let ruleVerdictForAudit: RiskVerdict["level"] | null = null;
+    let llmVerdictForAudit: RiskVerdict["level"] | null = null;
     let userApprovalUsed: {
       memoryHit: boolean;
       nlJustification: string | null;
       verdictAtApproval: UserApprovalVerdict | null;
     } | null = null;
+    const buildReviewerContext = (): ToolInvocationContext => ({
+      toolName,
+      source: input.source,
+      category: input.category,
+      pathFields: input.pathFields,
+      trustOrigin: input.trustOrigin,
+      finalInput: input.finalInput,
+      allowedDirectories: input.allowedDirectories,
+      sensitivePathsAdjacent: input.sensitivePathsAdjacent,
+      sandboxCapability: detectSandboxCapability(),
+      ...(input.conversationContext ? { conversationContext: input.conversationContext } : {}),
+      ...(input.writesToOwnSandbox !== undefined
+        ? { writesToOwnSandbox: input.writesToOwnSandbox }
+        : {}),
+      ...(input.ownerPluginSandboxRoot !== undefined
+        ? { ownerPluginSandboxRoot: input.ownerPluginSandboxRoot }
+        : {}),
+    });
 
     // Cross-cutting root-cause fix: a legacy user-approval entry may carry
     // `null verdictAtApproval` (the field was added in the user-approval-store
@@ -760,7 +788,7 @@ export class PermissionManager {
       // human-readable first arg stays for existing log readers.
       console.warn(
         `[permission] legacy entry without verdictAtApproval — rejecting memory hit, forcing fresh approval (tool=${toolName}, scope=${userApproval.scope})`,
-        { event: "legacy-r2-null-verdict", toolName, scope: userApproval.scope },
+        { event: "legacy-null-verdict", toolName, scope: userApproval.scope },
       );
     }
     if (userApproval && userApproval.verdictAtApproval != null) {
@@ -768,29 +796,13 @@ export class PermissionManager {
       // We still run the rule classifier to get a fresh verdict; we just
       // skip the LLM call. The max(rule, stored) composition would allow
       // the LLM to downgrade — rule-only is the safe choice here.
-      const ctx: ToolInvocationContext = {
-        toolName,
-        source: input.source,
-        category: input.category,
-        pathFields: input.pathFields,
-        trustOrigin: input.trustOrigin,
-        finalInput: input.finalInput,
-        allowedDirectories: input.allowedDirectories,
-        sensitivePathsAdjacent: input.sensitivePathsAdjacent,
-        sandboxCapability: detectSandboxCapability(),
-        ...(input.conversationContext ? { conversationContext: input.conversationContext } : {}),
-        ...(input.writesToOwnSandbox !== undefined
-          ? { writesToOwnSandbox: input.writesToOwnSandbox }
-          : {}),
-        ...(input.ownerPluginSandboxRoot !== undefined
-          ? { ownerPluginSandboxRoot: input.ownerPluginSandboxRoot }
-          : {}),
-      };
+      const ctx = buildReviewerContext();
       // Use the rule-based classifier for fast sync classification (no LLM call).
       // Take max(ruleVerdict, verdictAtApproval) so a stored HIGH approval cannot
       // be silently downgraded if the rule classifier now returns LOW/MEDIUM.
       const ruleClassifier = new RuleBasedRiskClassifier();
       const ruleVerdict = ruleClassifier.classify(ctx);
+      ruleVerdictForAudit = ruleVerdict.level;
       // Narrowed above: the outer `userApproval.verdictAtApproval != null`
       // gate guarantees a concrete verdict literal here.
       const storedLevel: UserApprovalVerdict = userApproval.verdictAtApproval;
@@ -816,41 +828,34 @@ export class PermissionManager {
         // broadcast failure must not block tool execution
       }
     } else if (cacheResult.hit && cacheResult.verdict) {
+      const ruleClassifier = new RuleBasedRiskClassifier();
+      ruleVerdictForAudit = ruleClassifier.classify(buildReviewerContext()).level;
       verdict = cacheResult.verdict;
     } else {
-      const ctx: ToolInvocationContext = {
-        toolName,
-        source: input.source,
-        category: input.category,
-        pathFields: input.pathFields,
-        trustOrigin: input.trustOrigin,
-        finalInput: input.finalInput,
-        allowedDirectories: input.allowedDirectories,
-        sensitivePathsAdjacent: input.sensitivePathsAdjacent,
-        sandboxCapability: detectSandboxCapability(),
-        ...(input.conversationContext ? { conversationContext: input.conversationContext } : {}),
-        ...(input.writesToOwnSandbox !== undefined
-          ? { writesToOwnSandbox: input.writesToOwnSandbox }
-          : {}),
-        ...(input.ownerPluginSandboxRoot !== undefined
-          ? { ownerPluginSandboxRoot: input.ownerPluginSandboxRoot }
-          : {}),
-      };
+      const ctx = buildReviewerContext();
       try {
         // MAJOR-1: pass abortSignal to LlmRiskClassifier.classify so user
         // cancellation aborts an in-flight LLM call. The RiskClassifier
         // interface is signal-agnostic; LlmRiskClassifier accepts the optional
         // second argument — other classifiers safely ignore extra arguments.
-        const classified =
-          classifier instanceof LlmRiskClassifier
-            ? classifier.classify(ctx, { abortSignal: options?.abortSignal })
-            : classifier.classify(ctx);
-        verdict = classified instanceof Promise ? await classified : classified;
+        if (classifier instanceof LlmRiskClassifier) {
+          const trace = await classifier.classifyWithTrace(ctx, { abortSignal: options?.abortSignal });
+          verdict = trace.finalVerdict;
+          ruleVerdictForAudit = trace.ruleVerdict.level;
+          llmVerdictForAudit = trace.llmVerdict?.level ?? null;
+        } else {
+          const classified = classifier.classify(ctx);
+          verdict = classified instanceof Promise ? await classified : classified;
+          ruleVerdictForAudit = verdict.level;
+          llmVerdictForAudit = null;
+        }
         // Persist for next time (HIGH cached too — re-deny is fast).
         await cache.store(lookupKey, cacheCtx, verdict);
       } catch (err) {
         const message = err instanceof Error ? err.message : String(err);
         verdict = { level: "high", reason: `reviewer error — ${message}` };
+        ruleVerdictForAudit = new RuleBasedRiskClassifier().classify(ctx).level;
+        llmVerdictForAudit = classifier instanceof LlmRiskClassifier ? "high" : null;
       }
     }
 
@@ -874,9 +879,8 @@ export class PermissionManager {
         overheadPercent: 0,
       },
       reviewer: {
-        // For memory-hit path, ruleVerdict === finalVerdict (no LLM).
-        ruleVerdict: verdict.level,
-        llmVerdict: verdict.level,
+        ruleVerdict: ruleVerdictForAudit ?? verdict.level,
+        llmVerdict: llmVerdictForAudit,
         finalVerdict: verdict.level,
         compositionRulesTriggered: [],
         userApprovalUsed,
@@ -924,9 +928,20 @@ export class PermissionManager {
    *   - "reviewer" → defer to reviewer agent (headless lane)
    *   - "override" → meta category — caller reads tool.decisionOverride
    *
-   * The reviewer agent is not yet wired; until it lands, "reviewer"
-   * is mapped to "ask" so the user is prompted instead of silently
-   * permitting a headless write — fail-safe per design §1 principles.
+   * The reviewer agent IS wired (default mode "llm", degrading to the rule
+   * classifier when no provider is configured — see reviewer-wiring.ts). It
+   * acts as a BACKGROUND adjudicator, not a modal text-filler:
+   *   - headless lane: "reviewer" routes to dispatchReviewer (defer policy
+   *     queues HIGH verdicts);
+   *   - foreground lane: when `interactive.autoApprove === "low"` (the
+   *     default), mutating tools are stamped `reviewer.route =
+   *     "foreground-auto"` and the executor's
+   *     dispatchReviewerForInteractiveAuto auto-allows LOW verdicts with
+   *     audit only — MEDIUM/HIGH escalate to the ApprovalGate modal, where
+   *     the LLM-authored `approvalPurpose` text gives the human context.
+   * When the reviewer is unavailable, "reviewer" maps to "ask" so the user
+   * is prompted instead of silently permitting a headless write — fail-safe
+   * per design §1 principles.
    *
    * MCP (trust: low) tools are asked in default/auto modes regardless of
    * category; explicit allow mode is the only mode that bypasses this

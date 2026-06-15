@@ -3,6 +3,7 @@
 import { useState } from "react";
 import { Button } from "../../../components/ui/button.js";
 import type { PluginUpdateInfo } from "../hooks/use-marketplace-updates.js";
+import { MarqueeText } from "./MarqueeText.js";
 import { useTranslation } from "../../../i18n/react.js";
 
 /**
@@ -64,7 +65,7 @@ export function MarketplaceUpdateBanner({
     >
       <span className="min-w-0 flex-1" title={label}>
         <span className="block truncate leading-4">{summary}</span>
-        <span className="block truncate text-[11px] leading-3 text-info/75">{details}</span>
+        <MarqueeText text={details} className="text-[11px] leading-3 text-info/75" />
         {error ? <span className="ml-2 text-destructive">{t("marketplaceUpdateBanner.partialFailure", { error })}</span> : null}
       </span>
       <div className="flex shrink-0 items-center gap-1">

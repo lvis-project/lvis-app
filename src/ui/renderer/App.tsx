@@ -49,8 +49,10 @@ import { useCostEstimate } from "./hooks/use-cost-estimate.js";
 import { useStarred } from "./hooks/use-starred.js";
 import { useSessions } from "./hooks/use-sessions.js";
 import { useMarketplaceUpdates } from "./hooks/use-marketplace-updates.js";
+import { useMarketplaceAnnouncements } from "./hooks/use-marketplace-announcements.js";
 import { useBootstrapStatus } from "./hooks/use-bootstrap-status.js";
 import { MarketplaceUpdateBanner } from "./components/MarketplaceUpdateBanner.js";
+import { MarketplaceAnnouncementBanner } from "./components/MarketplaceAnnouncementBanner.js";
 import { BootstrapStatusBanner } from "./components/BootstrapStatusBanner.js";
 import { DevConsoleToggle } from "./components/DevConsoleToggle.js";
 import { SnapEdgeHighlight } from "./components/SnapEdgeHighlight.js";
@@ -193,6 +195,7 @@ export function App() {
     return () => window.removeEventListener("keydown", onKey);
   }, []);
   const { updates: marketplaceUpdates, dismiss: dismissMarketplaceUpdates } = useMarketplaceUpdates(api);
+  const { announcements: marketplaceAnnouncements, dismiss: dismissMarketplaceAnnouncement } = useMarketplaceAnnouncements(api);
   const { status: bootstrapStatus, dismiss: dismissBootstrapStatus, retry: retryBootstrap } = useBootstrapStatus(api);
   const { queue: approvalQueue, decide: handleApprovalDecide } = useApproval();
 
@@ -1175,6 +1178,17 @@ export function App() {
   );
 
   const onNewChat = useCallback(() => { void handleNewChat(); }, [handleNewChat]);
+  const handleMarketplaceAnnouncementDismiss = useCallback(
+    (id: number) => {
+      dismissMarketplaceAnnouncement(id).catch((err) => {
+        console.error(
+          "[marketplace-announcement] dismiss persistence failed",
+          err,
+        );
+      });
+    },
+    [dismissMarketplaceAnnouncement],
+  );
 
   // ChatView context bundle — avoids drilling ~40 props through the tree.
   //
@@ -1297,6 +1311,10 @@ export function App() {
             updates={marketplaceUpdates}
             onDismiss={dismissMarketplaceUpdates}
             onUpdate={installPlugin}
+          />
+          <MarketplaceAnnouncementBanner
+            announcements={marketplaceAnnouncements}
+            onDismiss={handleMarketplaceAnnouncementDismiss}
           />
           {fallbackToast && (
             <div className="bg-warning text-warning-foreground text-xs px-4 py-2 border-b border-warning">

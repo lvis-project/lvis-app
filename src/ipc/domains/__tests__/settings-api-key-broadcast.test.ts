@@ -618,6 +618,31 @@ describe("Minor-4: settings:update rejects non-string baseUrl", () => {
   });
 });
 
+// ─── Host resolver map trust boundary ───────────────────────────────────────
+
+describe("settings:update rejects hostResolverMap changes", () => {
+  it("requires the dedicated applyHostMap IPC for manual host resolver updates", async () => {
+    const deps = makeDeps([]);
+
+    const { registerSettingsHandlers } = await import("../settings.js");
+    registerSettingsHandlers(deps as never);
+
+    const result = await invoke("lvis:settings:update", {
+      llm: {
+        authMode: "manual",
+        hostResolverMap: "10.0.0.1 endpoint.example.com",
+      },
+    });
+
+    expect(result).toMatchObject({
+      ok: false,
+      error: "host-map-requires-apply-host-map",
+    });
+    expect(deps.settingsService.patch).not.toHaveBeenCalled();
+    expect(deps.conversationLoop.refreshProvider).not.toHaveBeenCalled();
+  });
+});
+
 // ─── LOW-2: settings:update validates vendors["azure-foundry"].baseUrl ────────
 
 describe("LOW-2: settings:update validates azure-foundry baseUrl at write time", () => {

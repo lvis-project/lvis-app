@@ -157,6 +157,7 @@ describe("PluginMarketplaceService install()", () => {
       downloadVersion,
       downloadArtifact,
       fetchSignatureEnvelope,
+      listAnnouncements: async () => [],
     };
 
     const { service, npmInstallMock } = makeService(fetcher);
@@ -227,6 +228,7 @@ describe("PluginMarketplaceService install()", () => {
         status: 200,
       }),
       fetchSignatureEnvelope: async () => makeEnvelope(zipBuffer, signingKey.privateKey),
+      listAnnouncements: async () => [],
     };
 
     const { service } = makeService(fetcher);
@@ -282,6 +284,7 @@ describe("PluginMarketplaceService install()", () => {
       },
       downloadArtifact,
       fetchSignatureEnvelope,
+      listAnnouncements: async () => [],
     };
 
     const { service } = makeService(fetcher);
@@ -368,6 +371,7 @@ describe("PluginMarketplaceService install()", () => {
       },
       downloadArtifact,
       fetchSignatureEnvelope,
+      listAnnouncements: async () => [],
     };
 
     const { service } = makeService(fetcher);
@@ -445,6 +449,7 @@ describe("PluginMarketplaceService install()", () => {
       },
       downloadArtifact,
       fetchSignatureEnvelope,
+      listAnnouncements: async () => [],
     };
 
     const { service } = makeService(fetcher);
@@ -498,6 +503,7 @@ describe("PluginMarketplaceService install()", () => {
         status: 200,
       }),
       fetchSignatureEnvelope: async () => makeEnvelope(zipBuffer, signingKey.privateKey),
+      listAnnouncements: async () => [],
     };
 
     const { service } = makeService(fetcher);
@@ -545,6 +551,7 @@ describe("PluginMarketplaceService install()", () => {
         status: 200,
       }),
       fetchSignatureEnvelope: async () => makeEnvelope(zipBuffer, signingKey.privateKey),
+      listAnnouncements: async () => [],
     };
 
     const { service } = makeService(fetcher);
@@ -593,6 +600,7 @@ describe("PluginMarketplaceService install()", () => {
         status: 200,
       }),
       fetchSignatureEnvelope: async () => makeEnvelope(zipBuffer, signingKey.privateKey),
+      listAnnouncements: async () => [],
     };
 
     const { service } = makeService(fetcher);
@@ -665,6 +673,7 @@ describe("PluginMarketplaceService install()", () => {
       }),
       downloadArtifact,
       fetchSignatureEnvelope,
+      listAnnouncements: async () => [],
     };
 
     const { service } = makeService(fetcher);
@@ -721,6 +730,7 @@ describe("PluginMarketplaceService install()", () => {
         status: 200,
       }),
       fetchSignatureEnvelope: async () => makeEnvelope(body, signingKey.privateKey),
+      listAnnouncements: async () => [],
     };
 
     const { service, npmInstallMock } = makeService(fetcher);
@@ -753,6 +763,7 @@ describe("PluginMarketplaceService install()", () => {
         zipBuffer: Buffer.from(""),
         sha256: "",
       })),
+      listAnnouncements: vi.fn(async () => []),
     };
     const { service } = makeService(fetcher);
 

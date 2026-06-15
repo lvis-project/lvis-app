@@ -394,8 +394,8 @@ describe("PermissionManager.dispatchReviewer", () => {
 
 // ─── MAJOR-1 R2: abortSignal end-to-end dispatchReviewer → LlmRiskClassifier ──
 
-describe("MAJOR-1 R2: dispatchReviewer threads abortSignal to LlmRiskClassifier.classify", () => {
-  it("calls LlmRiskClassifier.classify with the supplied abortSignal", async () => {
+describe("MAJOR-1 R2: dispatchReviewer threads abortSignal to LlmRiskClassifier.classifyWithTrace", () => {
+  it("calls LlmRiskClassifier.classifyWithTrace with the supplied abortSignal", async () => {
     const { pm } = makeManager();
     const ac = new AbortController();
 
@@ -414,11 +414,11 @@ describe("MAJOR-1 R2: dispatchReviewer threads abortSignal to LlmRiskClassifier.
       })),
     };
     const llmClassifier = new LlmRiskClassifier(providerStub, "gpt-4o-mini");
-    const origClassify = llmClassifier.classify.bind(llmClassifier);
-    vi.spyOn(llmClassifier, "classify").mockImplementation(
+    const origClassifyWithTrace = llmClassifier.classifyWithTrace.bind(llmClassifier);
+    vi.spyOn(llmClassifier, "classifyWithTrace").mockImplementation(
       async (ctx: import("../reviewer/risk-classifier.js").ToolInvocationContext, opts?: { abortSignal?: AbortSignal }) => {
         capturedOpts = opts;
-        return origClassify(ctx, opts);
+        return origClassifyWithTrace(ctx, opts);
       },
     );
 

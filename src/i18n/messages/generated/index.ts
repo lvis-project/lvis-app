@@ -5,7 +5,7 @@
  * fragment files in this directory (`<namespace>.ts`, each exporting `en`/`ko`
  * objects) and merges them here.
  *
- * Fragments: 175
+ * Fragments: 176
  */
 import { en as en_app, ko as ko_app } from "./app.js";
 import { en as en_appearanceTab, ko as ko_appearanceTab } from "./appearanceTab.js";
@@ -109,6 +109,7 @@ import { en as en_lazyCalendar, ko as ko_lazyCalendar } from "./lazyCalendar.js"
 import { en as en_llmTab, ko as ko_llmTab } from "./llmTab.js";
 import { en as en_loginModalConversational, ko as ko_loginModalConversational } from "./loginModalConversational.js";
 import { en as en_mainToolbar, ko as ko_mainToolbar } from "./mainToolbar.js";
+import { en as en_marketplaceAnnouncementBanner, ko as ko_marketplaceAnnouncementBanner } from "./marketplaceAnnouncementBanner.js";
 import { en as en_marketplaceTab, ko as ko_marketplaceTab } from "./marketplaceTab.js";
 import { en as en_marketplaceUpdateBanner, ko as ko_marketplaceUpdateBanner } from "./marketplaceUpdateBanner.js";
 import { en as en_mcpAppView, ko as ko_mcpAppView } from "./mcpAppView.js";
@@ -286,6 +287,7 @@ export const generatedEn: Record<string, string> = {
   ...en_llmTab,
   ...en_loginModalConversational,
   ...en_mainToolbar,
+  ...en_marketplaceAnnouncementBanner,
   ...en_marketplaceTab,
   ...en_marketplaceUpdateBanner,
   ...en_mcpAppView,
@@ -464,6 +466,7 @@ export const generatedKo: Record<string, string> = {
   ...ko_llmTab,
   ...ko_loginModalConversational,
   ...ko_mainToolbar,
+  ...ko_marketplaceAnnouncementBanner,
   ...ko_marketplaceTab,
   ...ko_marketplaceUpdateBanner,
   ...ko_mcpAppView,

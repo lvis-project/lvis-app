@@ -1,5 +1,27 @@
 # Changelog
 
+## v0.3.1 — 2026-06-16
+
+### 권한 자동검증
+
+- **LLM 권한 자동검증 기본값** (PR #1254) — fresh install 의 권한 검증 기본 모드를 LLM reviewer 로 두고, provider 가 아직 구성되지 않은 경우에는 rule classifier 로 명확히 degrade 한다.
+- **명시 승인 상태 재사용** (PR #1253) — 사용자가 이미 `session` / `always` 로 승인해 저장된 동일 tool/input/source 조합은 foreground 권한 모달을 다시 띄우지 않고 저장된 명시 승인 상태를 먼저 확인한다. 저장 당시 verdict 보다 현재 rule verdict 가 높아진 경우에는 fail-closed 로 다시 프롬프트한다.
+- **background adjudicator 정렬** (PR #1258) — 자동 검증 모드에서 reviewer 는 foreground 차단 UI 가 아니라 background adjudicator 로 동작한다. LOW 는 audit-only auto 진행, MED/HIGH 는 명시 승인 경로로 에스컬레이션한다.
+
+### 플러그인 / 마켓플레이스
+
+- **마켓플레이스 공지 배너 및 marquee 표시** (PR #1259) — Marketplace `GET /api/v1/announcements` 응답을 main-process poller 가 `lvis:marketplace:announcements` IPC 로 renderer 에 전달하고, dismiss 상태를 `settings.marketplace.dismissedAnnouncementIds` 에 저장해 재시작 후에도 숨김을 유지한다. 긴 공지/업데이트 배너 텍스트는 `MarqueeText` 로 overflow 시에만 자동 스크롤하고 reduced-motion 변경 시 정적 표시로 복귀한다.
+
+### 설정 / IPC 경계
+
+- **hostResolverMap 변경 경로 고정** (PR #1259) — generic `lvis:settings:update` 는 이제 `llm.hostResolverMap` 패치를 `host-map-requires-apply-host-map` 으로 거부한다. relaunch-sensitive host map 변경은 dedicated `SETTINGS.applyHostMap` IPC 만 사용해야 한다.
+
+### 검증
+
+- PR #1253: permission memory skip focused Vitest, permission audit assertions, Copilot + reviewer loop Critical=0/Major=0.
+- PR #1258: permission reviewer/background adjudicator docs + contract review, Copilot + reviewer loop Critical=0/Major=0.
+- PR #1259: focused announcement/marquee Vitest 6 files / 74 pass, MarketplaceFetcher test-stub Vitest 7 files / 104 pass, `bun run typecheck`, pre-push full Vitest 505 files / 6605 pass / 14 skipped, `bun run build`, `git diff --check`.
+
 ## v0.3.0 — 2026-06-11
 
 ### 데모 자동 활성화 (zero-input)
