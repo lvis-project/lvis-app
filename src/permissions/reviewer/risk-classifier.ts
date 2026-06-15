@@ -52,6 +52,12 @@ export interface RiskVerdict {
   reason: string;
 }
 
+export interface LlmRiskClassificationTrace {
+  ruleVerdict: RiskVerdict;
+  llmVerdict: RiskVerdict | null;
+  finalVerdict: RiskVerdict;
+}
+
 /** Numeric ordering for `final = max(rule, llm)`. */
 const LEVEL_RANK: Record<RiskLevel, number> = { low: 0, medium: 1, high: 2 };
 
@@ -874,6 +880,17 @@ export class LlmRiskClassifier implements RiskClassifier {
     input: ToolInvocationContext,
     opts?: { abortSignal?: AbortSignal },
   ): Promise<RiskVerdict> {
+    const trace = await this.classifyWithTrace(input, opts);
+    return trace.finalVerdict;
+  }
+
+  // Audit callers need the raw rule + LLM verdicts separately from the
+  // composed final verdict. The public RiskClassifier interface remains the
+  // final-verdict-only surface so non-LLM classifiers stay simple.
+  async classifyWithTrace(
+    input: ToolInvocationContext,
+    opts?: { abortSignal?: AbortSignal },
+  ): Promise<LlmRiskClassificationTrace> {
     // Composition baseline (security M1) — rule first, LLM cannot downgrade.
     const ruleVerdict = this.rule.classify(input);
 
@@ -895,9 +912,10 @@ export class LlmRiskClassifier implements RiskClassifier {
       if (parsed === null) {
         // Parse failure → fallbackOnError policy
         if (this.fallbackOnError === "deny") {
-          return { level: "high", reason: "llm parse failure — fallbackOnError=deny" };
+          const finalVerdict = { level: "high", reason: "llm parse failure — fallbackOnError=deny" } as const;
+          return { ruleVerdict, llmVerdict: finalVerdict, finalVerdict };
         }
-        return ruleVerdict;
+        return { ruleVerdict, llmVerdict: null, finalVerdict: ruleVerdict };
       }
       llmVerdict = parsed;
     } catch (err) {
@@ -921,9 +939,10 @@ export class LlmRiskClassifier implements RiskClassifier {
         const rawMsg = err instanceof Error ? err.message ?? "error" : "error";
         const { masked } = maskSensitiveData(rawMsg);
         const msg = masked.slice(0, 60);
-        return { level: "high", reason: `llm error — fallback=deny (${msg})` };
+        const finalVerdict = { level: "high", reason: `llm error — fallback=deny (${msg})` } as const;
+        return { ruleVerdict, llmVerdict: finalVerdict, finalVerdict };
       }
-      return ruleVerdict;
+      return { ruleVerdict, llmVerdict: null, finalVerdict: ruleVerdict };
     }
 
     // Context-quality + weak-sandbox composition enforcement:
@@ -935,11 +954,11 @@ export class LlmRiskClassifier implements RiskClassifier {
     if (weakSandbox || weakContext) {
       if (LEVEL_RANK[llmVerdict.level] < LEVEL_RANK[ruleVerdict.level]) {
         // LLM attempted to downgrade — honour the rule verdict.
-        return ruleVerdict;
+        return { ruleVerdict, llmVerdict, finalVerdict: ruleVerdict };
       }
     }
 
-    return maxVerdict(ruleVerdict, llmVerdict);
+    return { ruleVerdict, llmVerdict, finalVerdict: maxVerdict(ruleVerdict, llmVerdict) };
   }
 }
 

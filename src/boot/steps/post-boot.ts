@@ -10,13 +10,19 @@ import { app } from "electron";
 import type { BrowserWindow } from "electron";
 import type { SettingsService } from "../../data/settings-store.js";
 import type { AuditLogger } from "../../audit/audit-logger.js";
-import type { MarketplaceFetcher } from "../../plugins/marketplace.js";
+import type {
+  MarketplaceAnnouncement,
+  MarketplaceFetcher,
+} from "../../plugins/marketplace.js";
+import { MARKETPLACE } from "../../shared/ipc-channels.js";
+import type { MarketplaceAnnouncementPayload } from "../../shared/marketplace-announcements.js";
 import type { PluginPaths } from "../../plugins/plugin-paths.js";
 import { PluginUpdateDetector, isUpdateCheckEnabled } from "../../plugins/update-detector.js";
 import { createAutoUpdater } from "../../main/auto-updater.js";
 import { startCrashReporter } from "../../main/crash-reporter.js";
 import { TelemetryService } from "../../main/telemetry.js";
 import { PluginTelemetryClient } from "../../telemetry/client.js";
+import { sendToWindow } from "../../ipc/safe-send.js";
 import { onEvent } from "../types.js";
 import { createLogger } from "../../lib/logger.js";
 const log = createLogger("lvis");
@@ -207,5 +213,162 @@ export function wireUpdateCheck(input: UpdateCheckInput): void {
 
   app.prependOnceListener("before-quit", () => {
     if (updateCheckTimer) clearInterval(updateCheckTimer);
+  });
+}
+
+export interface AnnouncementCheckInput {
+  getMainWindow: () => BrowserWindow | null;
+  settingsService: SettingsService;
+  marketplaceFetcher: MarketplaceFetcher;
+}
+
+/**
+ * Marketplace announcement polling. Fetches the server's active announcement
+ * set, drops the ids the user has already dismissed (persisted in
+ * `settings.marketplace.dismissedAnnouncementIds`), and pushes the remainder
+ * to the renderer via `MARKETPLACE.announcements`. Runs once after the real
+ * renderer load and on the same interval as the plugin update-check.
+ *
+ * The dedup key folds in the target webContents, full visible payload, and
+ * dismissed id set so a dismiss clears the banner, server-side corrections to
+ * an existing announcement id rebroadcast, and a replaced main window receives
+ * the current payload at least once.
+ */
+export function wireAnnouncementCheck(input: AnnouncementCheckInput): void {
+  const { getMainWindow, settingsService, marketplaceFetcher } = input;
+  const DEFAULT_ANNOUNCEMENT_INTERVAL_MS = 10 * 60 * 1000; // default 10m
+  const marketplaceSettings = settingsService.get("marketplace");
+  const announcementCheckEnabled =
+    (marketplaceSettings?.updateCheckEnabled ?? true) && isUpdateCheckEnabled();
+  if (!announcementCheckEnabled) return;
+
+  let lastBroadcastKey = "";
+  let nextWebContentsId = 0;
+  const webContentsIds = new WeakMap<object, number>();
+  const normalizeDismissedAnnouncementIds = (ids: unknown): number[] => {
+    if (!Array.isArray(ids)) return [];
+    const validIds = new Set<number>();
+    for (const id of ids) {
+      if (typeof id === "number" && Number.isSafeInteger(id)) {
+        validIds.add(id);
+      }
+    }
+    return Array.from(validIds).sort((a, b) => a - b);
+  };
+  const sortNewestFirst = (items: MarketplaceAnnouncement[]) =>
+    [...items].sort((a, b) => {
+      const aCreatedAt = Date.parse(a.createdAt);
+      const bCreatedAt = Date.parse(b.createdAt);
+      const aTime = Number.isFinite(aCreatedAt) ? aCreatedAt : 0;
+      const bTime = Number.isFinite(bCreatedAt) ? bCreatedAt : 0;
+      if (aTime !== bTime) return bTime - aTime;
+      return b.id - a.id;
+    });
+  const broadcastAnnouncements = (
+    visible: MarketplaceAnnouncement[],
+    dismissed: number[],
+  ) => {
+    const targetWindow = getMainWindow();
+    const webContents = targetWindow?.webContents;
+    let targetKey = "none";
+    if (webContents && typeof webContents === "object") {
+      let id = webContentsIds.get(webContents);
+      if (id === undefined) {
+        id = ++nextWebContentsId;
+        webContentsIds.set(webContents, id);
+      }
+      targetKey = `webContents:${id}`;
+    }
+    const key = JSON.stringify({
+      target: targetKey,
+      visible: visible.map((a) => ({
+        id: a.id,
+        title: a.title,
+        body: a.body,
+        level: a.level,
+        createdAt: a.createdAt,
+        startsAt: a.startsAt,
+        endsAt: a.endsAt,
+      })),
+      dismissed: normalizeDismissedAnnouncementIds(dismissed),
+    });
+    if (key === lastBroadcastKey) return false;
+    const sent = sendToWindow(
+      targetWindow,
+      MARKETPLACE.announcements,
+      visible satisfies MarketplaceAnnouncementPayload,
+      log,
+    );
+    if (!sent) return false;
+    lastBroadcastKey = key;
+    return true;
+  };
+
+  const runAnnouncementCheck = async () => {
+    try {
+      const announcements = await marketplaceFetcher.listAnnouncements();
+      const dismissedIds = normalizeDismissedAnnouncementIds(
+        settingsService.get("marketplace")?.dismissedAnnouncementIds,
+      );
+      const dismissed = new Set(dismissedIds);
+      const visible = sortNewestFirst(
+        announcements.filter((a) => !dismissed.has(a.id)),
+      );
+      if (!broadcastAnnouncements(visible, dismissedIds)) {
+        log.debug("announcement-check: no change (%d)", visible.length);
+        return;
+      }
+      log.info("announcement-check: %d announcement(s) active", visible.length);
+    } catch (err) {
+      if (broadcastAnnouncements([], [])) {
+        log.warn(
+          "announcement-check: error; cleared announcements: %s",
+          (err as Error).message,
+        );
+        return;
+      }
+      log.debug(
+        "announcement-check: still unavailable: %s",
+        (err as Error).message,
+      );
+    }
+  };
+
+  const runAfterRendererLoad = () => {
+    const win = getMainWindow();
+    if (!win || win.isDestroyed()) {
+      void runAnnouncementCheck();
+      return;
+    }
+    const webContents = win.webContents as BrowserWindow["webContents"] & {
+      getURL?: () => string;
+      isLoading?: () => boolean;
+      once?: (event: "did-finish-load", listener: () => void) => void;
+    };
+    const url = typeof webContents.getURL === "function" ? webContents.getURL() : "";
+    const loading = typeof webContents.isLoading === "function" && webContents.isLoading();
+    if (
+      typeof webContents.once === "function" &&
+      (loading || url.startsWith("data:"))
+    ) {
+      webContents.once("did-finish-load", () => void runAnnouncementCheck());
+      return;
+    }
+    void runAnnouncementCheck();
+  };
+
+  runAfterRendererLoad();
+
+  const intervalMs =
+    settingsService.get("marketplace")?.updateCheckIntervalMs ??
+    DEFAULT_ANNOUNCEMENT_INTERVAL_MS;
+  let announcementTimer: ReturnType<typeof setInterval> | undefined;
+  if (intervalMs > 0) {
+    announcementTimer = setInterval(() => void runAnnouncementCheck(), intervalMs);
+    announcementTimer.unref?.();
+  }
+
+  app.prependOnceListener("before-quit", () => {
+    if (announcementTimer) clearInterval(announcementTimer);
   });
 }

@@ -26,6 +26,7 @@ import type {
   OpenHtmlPreviewWindowResult,
 } from "../../shared/render-html-preview.js";
 import type { SessionTodoItem } from "../../shared/session-todo.js";
+import type { MarketplaceAnnouncementPayload } from "../../shared/marketplace-announcements.js";
 
 // Re-export MCP types for renderer-side consumers (type-only, no main-process runtime)
 export type { McpServerConfig, McpServerConfigDto, McpServerState };
@@ -170,6 +171,8 @@ export type AppSettings = {
     backend?: "real-cloud";
     cloudBaseUrl?: string;
     cloudAllowPrivateNetwork?: boolean;
+    /** Announcement banner ids the user has dismissed (persisted). */
+    dismissedAnnouncementIds?: number[];
   };
   /** Visual theme preferences. */
   appearance?: {
@@ -701,6 +704,13 @@ export type LvisApi = {
     limit?: number,
   ) => Promise<Array<{ routineId: string; firedAt: string; sessionId: string; title: string; preview: string }>>;
   onMarketplaceUpdatesAvailable: (h: (updates: Array<{ pluginId: string; pluginName?: string; installedVersion: string; latestVersion: string }>) => void) => () => void;
+  /**
+   * Marketplace announcement stream — the host pushes the currently-active,
+   * not-yet-dismissed announcements whenever the announcement poller runs.
+   * The renderer shows them in a banner and persists dismissals via
+   * `updateSettings({ marketplace: { dismissedAnnouncementIds } })`.
+   */
+  onMarketplaceAnnouncements: (h: (announcements: MarketplaceAnnouncementPayload) => void) => () => void;
   /**
    * App auto-update state stream — emitted by the main process whenever
    * the updater state changes (available → downloading → downloaded).

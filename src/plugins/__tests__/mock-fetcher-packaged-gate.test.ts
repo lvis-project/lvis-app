@@ -6,6 +6,10 @@
  * fail closed when any code path tries to instantiate the mock fetcher.
  */
 import { describe, it, expect, afterEach, beforeEach } from "vitest";
+import { writeFile, rm } from "node:fs/promises";
+import { mkdtempSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 import { _resetForTest, setIsPackaged } from "../../boot/dev-flags.js";
 import { DisabledMarketplaceFetcher, MockMarketplaceFetcher } from "../marketplace.js";
 
@@ -47,6 +51,92 @@ describe("MockMarketplaceFetcher — packaged-build gate", () => {
     }
     expect(caught).not.toBeNull();
     expect(caught?.message).not.toContain("/secret/path");
+  });
+});
+
+describe("MockMarketplaceFetcher — announcement fixture contract", () => {
+  let testDir: string;
+  let marketplacePath: string;
+
+  beforeEach(() => {
+    setIsPackaged(false);
+    testDir = mkdtempSync(join(tmpdir(), "lvis-mock-marketplace-"));
+    marketplacePath = join(testDir, "marketplace.json");
+  });
+
+  afterEach(async () => {
+    await rm(testDir, { recursive: true, force: true });
+    _resetForTest();
+  });
+
+  async function writeCatalog(announcements?: unknown): Promise<void> {
+    await writeFile(
+      marketplacePath,
+      JSON.stringify({
+        version: 1,
+        plugins: [],
+        ...(announcements === undefined ? {} : { announcements }),
+      }),
+      "utf-8",
+    );
+  }
+
+  it("returns valid announcement fixtures from the local catalog", async () => {
+    await writeCatalog([
+      {
+        id: 7,
+        title: "Maintenance",
+        body: "Scheduled window",
+        level: "warning",
+        createdAt: "2026-06-12T00:00:00.000Z",
+        startsAt: null,
+        endsAt: "2026-06-13T00:00:00.000Z",
+      },
+    ]);
+
+    const fetcher = new MockMarketplaceFetcher(marketplacePath);
+
+    await expect(fetcher.listAnnouncements()).resolves.toEqual([
+      {
+        id: 7,
+        title: "Maintenance",
+        body: "Scheduled window",
+        level: "warning",
+        createdAt: "2026-06-12T00:00:00.000Z",
+        startsAt: null,
+        endsAt: "2026-06-13T00:00:00.000Z",
+      },
+    ]);
+  });
+
+  it("rejects non-array announcement fixtures", async () => {
+    await writeCatalog({ id: 7 });
+
+    const fetcher = new MockMarketplaceFetcher(marketplacePath);
+
+    await expect(fetcher.listAnnouncements()).rejects.toThrow(
+      /Invalid marketplace catalog announcements/,
+    );
+  });
+
+  it("rejects malformed announcement rows", async () => {
+    await writeCatalog([
+      {
+        id: 7,
+        title: "Maintenance",
+        body: "Scheduled window",
+        level: "notice",
+        createdAt: "2026-06-12T00:00:00.000Z",
+        startsAt: null,
+        endsAt: null,
+      },
+    ]);
+
+    const fetcher = new MockMarketplaceFetcher(marketplacePath);
+
+    await expect(fetcher.listAnnouncements()).rejects.toThrow(
+      /Invalid marketplace catalog announcement at index 0/,
+    );
   });
 });
 
