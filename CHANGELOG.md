@@ -5,7 +5,7 @@
 ### 권한 자동검증
 
 - **LLM 권한 자동검증 기본값** (PR #1254) — fresh install 의 권한 검증 기본 모드를 LLM reviewer 로 두고, provider 가 아직 구성되지 않은 경우에는 rule classifier 로 명확히 degrade 한다.
-- **명시 승인 상태 재사용** (PR #1253) — 사용자가 이미 `once` / `session` / `always` 로 승인한 동일 tool/input/source 조합은 foreground 권한 모달을 다시 띄우지 않고 저장된 명시 승인 상태를 먼저 확인한다. 저장 당시 verdict 보다 현재 rule verdict 가 높아진 경우에는 fail-closed 로 다시 프롬프트한다.
+- **명시 승인 상태 재사용** (PR #1253) — 사용자가 이미 `session` / `always` 로 승인해 저장된 동일 tool/input/source 조합은 foreground 권한 모달을 다시 띄우지 않고 저장된 명시 승인 상태를 먼저 확인한다. 저장 당시 verdict 보다 현재 rule verdict 가 높아진 경우에는 fail-closed 로 다시 프롬프트한다.
 - **background adjudicator 정렬** (PR #1258) — 자동 검증 모드에서 reviewer 는 foreground 차단 UI 가 아니라 background adjudicator 로 동작한다. LOW 는 audit-only auto 진행, MED/HIGH 는 명시 승인 경로로 에스컬레이션한다.
 
 ### 플러그인 / 마켓플레이스
