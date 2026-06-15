@@ -1,6 +1,6 @@
 {
   "name": "lvis-app",
-  "version": "0.2.18",
+  "version": "0.3.1",
   "private": true,
   "type": "module",
   "imports": {

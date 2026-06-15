@@ -361,15 +361,18 @@ describe("Permission policy P4 reviewer-wiring", () => {
     };
   }
 
-  it("degraded→heal: stale rule verdict in shared cache is NOT served after llm heal (miss-stale)", async () => {
-    const cachePath = join(tmpDir, "cache-mode-flip.jsonl");
-    const baseSettings = () => ({
+  function llmReviewerSettings() {
+    return {
       mode: "llm" as const,
       provider: "openai",
       model: "gpt-4o-mini",
       fallbackOnError: "deny" as const,
       interactive: { autoApprove: "low" as const },
-    });
+    };
+  }
+
+  it("degraded→heal: stale rule verdict in shared cache is NOT served after llm heal (miss-stale)", async () => {
+    const cachePath = join(tmpDir, "cache-mode-flip.jsonl");
 
     // One spy on the shared pm — both wirings accumulate onto mock.calls in
     // order (calls[0]=degraded, calls[1]=healed).
@@ -380,7 +383,7 @@ describe("Permission policy P4 reviewer-wiring", () => {
     // Capture its cacheScope.
     const degraded = wireReviewerAgent({
       permissionManager: pm,
-      readSettings: baseSettings,
+      readSettings: llmReviewerSettings,
       streamProviderFor: () => null,
       verdictCachePath: cachePath,
       deferredQueuePath: join(tmpDir, "queue-mode-flip.jsonl"),
@@ -403,7 +406,7 @@ describe("Permission policy P4 reviewer-wiring", () => {
     ]);
     const healed = wireReviewerAgent({
       permissionManager: pm,
-      readSettings: baseSettings,
+      readSettings: llmReviewerSettings,
       streamProviderFor: () => provider,
       verdictCachePath: cachePath,
       deferredQueuePath: join(tmpDir, "queue-mode-flip.jsonl"),
@@ -421,13 +424,6 @@ describe("Permission policy P4 reviewer-wiring", () => {
 
   it("heal→degrade: healthy llm verdict in shared cache is NOT served after degrade (miss-stale)", async () => {
     const cachePath = join(tmpDir, "cache-mode-flip-rev.jsonl");
-    const baseSettings = () => ({
-      mode: "llm" as const,
-      provider: "openai",
-      model: "gpt-4o-mini",
-      fallbackOnError: "deny" as const,
-      interactive: { autoApprove: "low" as const },
-    });
 
     // One spy on the shared pm — both wirings accumulate onto mock.calls in
     // order (calls[0]=healthy llm, calls[1]=degraded).
@@ -440,7 +436,7 @@ describe("Permission policy P4 reviewer-wiring", () => {
     // Healthy wiring: provider available → llm. Capture its cacheScope.
     const healthy = wireReviewerAgent({
       permissionManager: pm,
-      readSettings: baseSettings,
+      readSettings: llmReviewerSettings,
       streamProviderFor: () => provider,
       verdictCachePath: cachePath,
       deferredQueuePath: join(tmpDir, "queue-mode-flip-rev.jsonl"),
@@ -460,7 +456,7 @@ describe("Permission policy P4 reviewer-wiring", () => {
     // degraded scope.
     const degraded = wireReviewerAgent({
       permissionManager: pm,
-      readSettings: baseSettings,
+      readSettings: llmReviewerSettings,
       streamProviderFor: () => null,
       verdictCachePath: cachePath,
       deferredQueuePath: join(tmpDir, "queue-mode-flip-rev.jsonl"),
