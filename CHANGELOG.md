@@ -1,6 +1,12 @@
 # Changelog
 
-## Unreleased
+## v0.3.1 — 2026-06-16
+
+### 권한 자동검증
+
+- **LLM 권한 자동검증 기본값** (PR #1254) — fresh install 의 권한 검증 기본 모드를 LLM reviewer 로 두고, provider 가 아직 구성되지 않은 경우에는 rule classifier 로 명확히 degrade 한다.
+- **명시 승인 상태 재사용** (PR #1253) — 사용자가 이미 `once` / `session` / `always` 로 승인한 동일 tool/input/source 조합은 foreground 권한 모달을 다시 띄우지 않고 저장된 명시 승인 상태를 먼저 확인한다. 저장 당시 verdict 보다 현재 rule verdict 가 높아진 경우에는 fail-closed 로 다시 프롬프트한다.
+- **background adjudicator 정렬** (PR #1258) — 자동 검증 모드에서 reviewer 는 foreground 차단 UI 가 아니라 background adjudicator 로 동작한다. LOW 는 audit-only auto 진행, MED/HIGH 는 명시 승인 경로로 에스컬레이션한다.
 
 ### 플러그인 / 마켓플레이스
 
@@ -12,7 +18,42 @@
 
 ### 검증
 
+- PR #1253: permission memory skip focused Vitest, permission audit assertions, Copilot + reviewer loop Critical=0/Major=0.
+- PR #1258: permission reviewer/background adjudicator docs + contract review, Copilot + reviewer loop Critical=0/Major=0.
 - PR #1259: focused announcement/marquee Vitest 6 files / 74 pass, MarketplaceFetcher test-stub Vitest 7 files / 104 pass, `bun run typecheck`, pre-push full Vitest 505 files / 6605 pass / 14 skipped, `bun run build`, `git diff --check`.
+
+## v0.3.0 — 2026-06-11
+
+### 데모 자동 활성화 (zero-input)
+
+- **빌드 임베디드 활성화 키** (PR #1237, #1239, #1242) — 내부 배포 빌드에 AES-256-GCM 암호문 형태의 데모 활성화 키를 임베드해, fresh install 에서 데모 칩 클릭만으로 키 입력(붙여넣기) 없이 즉시 활성화된다. CI 빌드는 `LVIS_EMBED_DEMO_ACTIVATION` repo secret 으로 키를 주입하며, secret 이 없는 빌드(포크/외부)는 기존 수동 붙여넣기 흐름을 유지한다.
+- **재시작 없는 첫 활성화** (PR #1242) — boot 시 임베디드 키를 복호화해 `process.env` 에 hydrate 하고 Chromium `host-resolver-rules` 를 같은 부팅에 설치해, 기존의 "첫 활성화 후 재시작" 단계를 제거했다.
+- **로그아웃 sentinel** (PR #1242) — 명시적 데모 로그아웃(`lvis:demo:clear`) 시 sentinel 파일을 fail-safe 순서(쓰기 우선)로 기록해, 임베디드 키 빌드가 다음 부팅에서 로그아웃 상태를 되살리지 않는다.
+
+### Settings / 로그인 UX
+
+- **수동(host) 입력 지원** (PR #1243) — 일반 LLM endpoint 사용자가 Settings 에서 /etc/hosts 스타일 host-resolver map 을 직접 입력할 수 있다. RFC 1123 hostname + IPv4 검증으로 잘못된 항목과 rule 주입을 차단하고, 적용 시 재시작 안내 confirm(미저장 작업 손실 경고) 후에만 재시작한다. 데모 모드의 host map 은 기존 고정값을 유지한다.
+- **로그인 상태 disabled 표시** (PR #1243) — 로그인(데모) 상태에서 vendor/baseUrl/model/host 입력 필드를 숨기는 대신 비활성화 상태로 노출하고, General 탭에서 로그오프하면 manual 모드로 전환되어 직접 입력할 수 있다.
+- **기본 선택 정렬** (PR #1243) — Settings 진입 시 vendor 가 hydration 전 stale 값("claude")으로 잠깐 표시되던 flash 를 제거했다.
+
+### i18n
+
+- **시스템 언어 감지** (PR #1240) — fresh install 의 초기 언어를 하드코딩 영어 대신 OS 시스템 언어(ko/en)로 결정한다.
+
+### 온보딩
+
+- **post-tour 하이라이트 게이트** (PR #1241, #1238) — 온보딩 완료 사유(chain vs probe-skip)를 구분해, returning user 에게 post-tour 카드가 ScenarioShowcase 위에 잘못 겹쳐 표시되던 문제를 수정했다.
+
+### 정리
+
+- **Presentation mode 제거** (PR #1244) — 데모 시연용 한시 기능이던 tool 실패 badge 숨김(`hideToolFailures`)을 일정대로 완전 제거했다. 실패/오류 badge 는 항상 표시된다.
+- **테스트 품질** (PR #1246, #1247) — 중복 테스트 헬퍼 3건을 공유 fixture 로 추출하고, 로그아웃 테스트 기대를 #1243 동작(authMode manual 전환)과 정렬했다.
+
+### 검증
+
+- dev→main 통합(PR #1245): build-and-test / Windows permission path / CodeQL / naming-gate / cluster-detector 전부 green.
+- 각 PR: 3-agent cluster review (architect/critic/security) + Copilot 리뷰 루프 통과. #1242 sentinel fail-open MAJOR, #1243 writer/reader 경로 불일치 CRITICAL 등을 머지 전 수정.
+- 로컬 packaged 빌드 검증: 임베디드 ciphertext 존재 + 평문 키/호스트 누출 0 (app.asar), fresh install 런타임에서 `lang=ko` + 데모 `activated=true` + host-resolver-rules 자동 설치 확인.
 
 ## v0.2.18 — 2026-06-01
 
