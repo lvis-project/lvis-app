@@ -18,6 +18,9 @@ import { join } from "node:path";
 // vi.mock must be at top level (hoisted). We feed the mock from a
 // per-test setter so each case can shape the lookup result.
 let mockLookupResult: unknown = null;
+const { emitSandboxAuditMock } = vi.hoisted(() => ({
+  emitSandboxAuditMock: vi.fn(async () => {}),
+}));
 
 vi.mock("../user-approval-store.js", async () => {
   const actual: typeof import("../user-approval-store.js") = await vi.importActual(
@@ -26,6 +29,15 @@ vi.mock("../user-approval-store.js", async () => {
   return {
     ...actual,
     lookupApproval: vi.fn(async () => mockLookupResult),
+  };
+});
+
+vi.mock("../../audit/sandbox-audit-sink.js", async () => {
+  const actual: typeof import("../../audit/sandbox-audit-sink.js") =
+    await vi.importActual("../../audit/sandbox-audit-sink.js");
+  return {
+    ...actual,
+    emitSandboxAudit: emitSandboxAuditMock,
   };
 });
 
@@ -61,6 +73,7 @@ describe("PermissionManager — fail-closed gate against legacy null-verdict ent
   beforeEach(() => {
     ({ pm } = makeManager());
     mockLookupResult = null;
+    emitSandboxAuditMock.mockClear();
     warnSpy = vi.spyOn(console, "warn").mockImplementation(() => {});
   });
 
@@ -141,6 +154,11 @@ describe("PermissionManager — fail-closed gate against legacy null-verdict ent
     expect(payload.toolName).toBe("fs_write");
     expect(payload.scope).toBe("persistent");
     expect(payload.verdictAtApproval).toBe("low");
+    const auditEntry = emitSandboxAuditMock.mock.calls.at(-1)?.[0] as
+      | { reviewer: { llmVerdict: string | null; userApprovalUsed: { memoryHit: boolean } | null } }
+      | undefined;
+    expect(auditEntry?.reviewer.llmVerdict).toBeNull();
+    expect(auditEntry?.reviewer.userApprovalUsed?.memoryHit).toBe(true);
     // Sanity: the warn path is NOT triggered for valid entries.
     const warnedLegacy = warnSpy.mock.calls.some(
       (args: unknown[]) =>
@@ -167,6 +185,11 @@ describe("PermissionManager — fail-closed gate against legacy null-verdict ent
     });
 
     expect(broadcast).not.toHaveBeenCalled();
+    const auditEntry = emitSandboxAuditMock.mock.calls.at(-1)?.[0] as
+      | { reviewer: { llmVerdict: string | null; userApprovalUsed: unknown } }
+      | undefined;
+    expect(auditEntry?.reviewer.llmVerdict).toBeNull();
+    expect(auditEntry?.reviewer.userApprovalUsed).toBeNull();
     const warnedLegacy = warnSpy.mock.calls.some(
       (args: unknown[]) =>
         typeof args[0] === "string" &&
