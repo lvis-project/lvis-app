@@ -92,9 +92,10 @@ export interface SandboxAuditEntry {
     /** Verdict from the deterministic rule-based classifier. */
     ruleVerdict: "low" | "medium" | "high";
     /**
-     * Raw verdict from the LLM classifier (or "high" on fail-closed parse
-     * failure). `null` when no LLM verdict is available — e.g. memory/cache
-     * hits or rule-only mode short-circuit before a provider verdict exists.
+     * Raw parsed verdict from the LLM classifier, or "high" when the LLM
+     * classifier fails closed. `null` when no LLM verdict is available —
+     * e.g. memory/cache hits, rule-only mode, or fallback-to-rule parse /
+     * provider failures where the final verdict comes from rules instead.
      */
     llmVerdict: "low" | "medium" | "high" | null;
     /**
