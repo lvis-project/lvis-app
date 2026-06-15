@@ -882,9 +882,8 @@ export class PermissionManager {
         overheadPercent: 0,
       },
       reviewer: {
-        // For memory-hit path, ruleVerdict === finalVerdict (no LLM).
         ruleVerdict: verdict.level,
-        llmVerdict: verdict.level,
+        llmVerdict: userApprovalUsed?.memoryHit === true ? null : verdict.level,
         finalVerdict: verdict.level,
         compositionRulesTriggered: [],
         userApprovalUsed,
