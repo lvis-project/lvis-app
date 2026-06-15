@@ -124,10 +124,14 @@ describe("ToolExecutor — explicit-approval memory skips the foreground modal (
     // Audit entry records the memory-hit provenance.
     expect(emitSandboxAuditMock).toHaveBeenCalled();
     const entry = emitSandboxAuditMock.mock.calls[0]?.[0] as unknown as {
-      reviewer: { userApprovalUsed: { memoryHit: boolean; verdictAtApproval: string | null } | null };
+      reviewer: {
+        llmVerdict: string | null;
+        userApprovalUsed: { memoryHit: boolean; verdictAtApproval: string | null } | null;
+      };
       tool: { name: string };
     };
     expect(entry.tool.name).toBe("write_probe");
+    expect(entry.reviewer.llmVerdict).toBeNull();
     expect(entry.reviewer.userApprovalUsed?.memoryHit).toBe(true);
     expect(entry.reviewer.userApprovalUsed?.verdictAtApproval).toBe("low");
   });
