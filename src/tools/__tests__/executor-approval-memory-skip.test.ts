@@ -23,6 +23,7 @@ import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
+import { makeWriteProbeTool } from "./approval-memory-test-fixtures.js";
 
 // Store B lookup + audit sink — shaped per-test. vi.mock factories are
 // hoisted above all imports, so the mock fns must be created via vi.hoisted
@@ -53,32 +54,12 @@ vi.mock("../../audit/sandbox-audit-sink.js", async () => {
 
 import { ToolExecutor } from "../executor.js";
 import { ToolRegistry } from "../registry.js";
-import { createDynamicTool, type Tool } from "../base.js";
 import { PermissionManager } from "../../permissions/permission-manager.js";
 
 function userPermissionContext(
   overrides: Partial<import("../executor.js").ToolPermissionContext> = {},
 ): import("../executor.js").ToolPermissionContext {
   return { trustOrigin: "user-keyboard", ...overrides };
-}
-
-function makeWriteTool(executeSpy: ReturnType<typeof vi.fn>): Tool {
-  return createDynamicTool({
-    name: "write_probe",
-    description: "write probe",
-    source: "builtin",
-    category: "write",
-    pathFields: ["path"],
-    jsonSchema: {
-      type: "object",
-      properties: { path: { type: "string" } },
-      required: ["path"],
-    },
-    execute: async (rawInput) => {
-      const value = await executeSpy(rawInput);
-      return { output: String(value), isError: false };
-    },
-  });
 }
 
 /** A permission manager whose checkDetailed returns a fixed result. */
@@ -101,7 +82,7 @@ describe("ToolExecutor — explicit-approval memory skips the foreground modal (
   it("(a) session approval → same tuple re-call skips the modal and audits memoryHit", async () => {
     const executeSpy = vi.fn(async () => "wrote");
     const registry = new ToolRegistry();
-    registry.register(makeWriteTool(executeSpy));
+    registry.register(makeWriteProbeTool(executeSpy));
 
     // Normal foreground ask (layer 6) — eligible for Store B skip.
     const permMgr = pmReturning({ decision: "ask", reason: "needs confirm", layer: 6 });
@@ -154,7 +135,7 @@ describe("ToolExecutor — explicit-approval memory skips the foreground modal (
   it("(b) prior approval but args mutated to a higher rule verdict → re-prompt (maxVerdict)", async () => {
     const executeSpy = vi.fn(async () => "wrote");
     const registry = new ToolRegistry();
-    registry.register(makeWriteTool(executeSpy));
+    registry.register(makeWriteProbeTool(executeSpy));
 
     const permMgr = pmReturning({ decision: "ask", reason: "needs confirm", layer: 6 });
 
@@ -196,7 +177,7 @@ describe("ToolExecutor — explicit-approval memory skips the foreground modal (
   it("(c) revoked / absent approval (lookup null) → re-prompt", async () => {
     const executeSpy = vi.fn(async () => "wrote");
     const registry = new ToolRegistry();
-    registry.register(makeWriteTool(executeSpy));
+    registry.register(makeWriteProbeTool(executeSpy));
 
     const permMgr = pmReturning({ decision: "ask", reason: "needs confirm", layer: 6 });
 
@@ -229,7 +210,7 @@ describe("ToolExecutor — explicit-approval memory skips the foreground modal (
   it("(d) legacy-null verdictAtApproval → re-prompt (fail-closed)", async () => {
     const executeSpy = vi.fn(async () => "wrote");
     const registry = new ToolRegistry();
-    registry.register(makeWriteTool(executeSpy));
+    registry.register(makeWriteProbeTool(executeSpy));
 
     const permMgr = pmReturning({ decision: "ask", reason: "needs confirm", layer: 6 });
 
@@ -280,7 +261,7 @@ describe("ToolExecutor — explicit-approval memory skips the foreground modal (
   it("(e) deny rule + prior approval → deny wins, Store B never consulted", async () => {
     const executeSpy = vi.fn(async () => "wrote");
     const registry = new ToolRegistry();
-    registry.register(makeWriteTool(executeSpy));
+    registry.register(makeWriteProbeTool(executeSpy));
 
     // Layer 1 deny rule.
     const permMgr = pmReturning({ decision: "deny", reason: "deny rule", layer: 1 });
@@ -320,7 +301,7 @@ describe("ToolExecutor — explicit-approval memory skips the foreground modal (
   it("(f) overlay-trigger mutating + prior approval → ask wins (layer 2 hard gate not skipped)", async () => {
     const executeSpy = vi.fn(async () => "wrote");
     const registry = new ToolRegistry();
-    registry.register(makeWriteTool(executeSpy));
+    registry.register(makeWriteProbeTool(executeSpy));
 
     // Overlay-trigger mutating guard returns ask at layer 2 (hard gate).
     const permMgr = pmReturning({
@@ -367,7 +348,7 @@ describe("ToolExecutor — explicit-approval memory skips the foreground modal (
   it("(g) headless path is unchanged — Store B is foreground-only", async () => {
     const executeSpy = vi.fn(async () => "wrote");
     const registry = new ToolRegistry();
-    registry.register(makeWriteTool(executeSpy));
+    registry.register(makeWriteProbeTool(executeSpy));
 
     // Normal foreground-eligible ask (layer 6) but headless context.
     const permMgr = pmReturning({ decision: "ask", reason: "needs confirm", layer: 6 });

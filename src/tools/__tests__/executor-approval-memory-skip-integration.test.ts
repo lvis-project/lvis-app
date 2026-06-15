@@ -26,37 +26,18 @@ import { join } from "node:path";
 
 import { ToolExecutor } from "../executor.js";
 import { ToolRegistry } from "../registry.js";
-import { createDynamicTool, type Tool } from "../base.js";
 import { PermissionManager } from "../../permissions/permission-manager.js";
 import {
   recordApproval,
   __resetSessionStoreForTest,
 } from "../../permissions/user-approval-store.js";
 import { canonicalStringify } from "../../shared/canonical-json.js";
+import { makeWriteProbeTool } from "./approval-memory-test-fixtures.js";
 
 function userPermissionContext(
   overrides: Partial<import("../executor.js").ToolPermissionContext> = {},
 ): import("../executor.js").ToolPermissionContext {
   return { trustOrigin: "user-keyboard", ...overrides };
-}
-
-function makeWriteTool(executeSpy: (input: unknown) => Promise<unknown>): Tool {
-  return createDynamicTool({
-    name: "write_probe",
-    description: "write probe",
-    source: "builtin",
-    category: "write",
-    pathFields: ["path"],
-    jsonSchema: {
-      type: "object",
-      properties: { path: { type: "string" } },
-      required: ["path"],
-    },
-    execute: async (rawInput) => {
-      const value = await executeSpy(rawInput);
-      return { output: String(value), isError: false };
-    },
-  });
 }
 
 describe("ToolExecutor — Store B memory skip end-to-end (real PermissionManager + real store)", () => {
@@ -83,7 +64,7 @@ describe("ToolExecutor — Store B memory skip end-to-end (real PermissionManage
   it("(a) deny rule wins over a prior approval — Layer 1, Store B never consulted", async () => {
     const executeSpy = vi.fn(async () => "wrote");
     const registry = new ToolRegistry();
-    registry.register(makeWriteTool(executeSpy));
+    registry.register(makeWriteProbeTool(executeSpy));
 
     const permMgr = new PermissionManager(join(dir, "permissions.json"));
     permMgr.setRules([{ pattern: "write_probe", action: "deny" }]);
@@ -122,7 +103,7 @@ describe("ToolExecutor — Store B memory skip end-to-end (real PermissionManage
   it("(b) overlay-trigger mutating ask + prior approval → modal shown — Layer 2 hard gate", async () => {
     const executeSpy = vi.fn(async () => "wrote");
     const registry = new ToolRegistry();
-    registry.register(makeWriteTool(executeSpy));
+    registry.register(makeWriteProbeTool(executeSpy));
 
     const permMgr = new PermissionManager(join(dir, "permissions.json"));
 
@@ -164,7 +145,7 @@ describe("ToolExecutor — Store B memory skip end-to-end (real PermissionManage
   it("(b') global strict mode + prior approval → modal shown — Layer 2 hard gate", async () => {
     const executeSpy = vi.fn(async () => "wrote");
     const registry = new ToolRegistry();
-    registry.register(makeWriteTool(executeSpy));
+    registry.register(makeWriteProbeTool(executeSpy));
 
     const permMgr = new PermissionManager(join(dir, "permissions.json"));
     permMgr.setMode("strict");
@@ -204,7 +185,7 @@ describe("ToolExecutor — Store B memory skip end-to-end (real PermissionManage
   it("(c) persistent-scope approval recorded via the real store skips the modal on re-call", async () => {
     const executeSpy = vi.fn(async () => "wrote");
     const registry = new ToolRegistry();
-    registry.register(makeWriteTool(executeSpy));
+    registry.register(makeWriteProbeTool(executeSpy));
 
     // Default mode + builtin write → Layer 6 normal ask (no reviewer route),
     // which is the lane eligible for the Store B skip.
@@ -244,7 +225,7 @@ describe("ToolExecutor — Store B memory skip end-to-end (real PermissionManage
   it("(d) approval under a different (trustOrigin, approvalCacheKey) does NOT match — modal shown", async () => {
     const executeSpy = vi.fn(async () => "wrote");
     const registry = new ToolRegistry();
-    registry.register(makeWriteTool(executeSpy));
+    registry.register(makeWriteProbeTool(executeSpy));
 
     const permMgr = new PermissionManager(join(dir, "permissions.json"));
 
