@@ -743,12 +743,31 @@ export class PermissionManager {
 
     const cacheResult = cache.lookup(lookupKey, cacheCtx);
     let verdict: RiskVerdict;
+    let ruleVerdictForAudit: RiskVerdict["level"] | null = null;
     let llmVerdictForAudit: RiskVerdict["level"] | null = null;
     let userApprovalUsed: {
       memoryHit: boolean;
       nlJustification: string | null;
       verdictAtApproval: UserApprovalVerdict | null;
     } | null = null;
+    const buildReviewerContext = (): ToolInvocationContext => ({
+      toolName,
+      source: input.source,
+      category: input.category,
+      pathFields: input.pathFields,
+      trustOrigin: input.trustOrigin,
+      finalInput: input.finalInput,
+      allowedDirectories: input.allowedDirectories,
+      sensitivePathsAdjacent: input.sensitivePathsAdjacent,
+      sandboxCapability: detectSandboxCapability(),
+      ...(input.conversationContext ? { conversationContext: input.conversationContext } : {}),
+      ...(input.writesToOwnSandbox !== undefined
+        ? { writesToOwnSandbox: input.writesToOwnSandbox }
+        : {}),
+      ...(input.ownerPluginSandboxRoot !== undefined
+        ? { ownerPluginSandboxRoot: input.ownerPluginSandboxRoot }
+        : {}),
+    });
 
     // Cross-cutting root-cause fix: a legacy user-approval entry may carry
     // `null verdictAtApproval` (the field was added in the user-approval-store
@@ -777,29 +796,13 @@ export class PermissionManager {
       // We still run the rule classifier to get a fresh verdict; we just
       // skip the LLM call. The max(rule, stored) composition would allow
       // the LLM to downgrade — rule-only is the safe choice here.
-      const ctx: ToolInvocationContext = {
-        toolName,
-        source: input.source,
-        category: input.category,
-        pathFields: input.pathFields,
-        trustOrigin: input.trustOrigin,
-        finalInput: input.finalInput,
-        allowedDirectories: input.allowedDirectories,
-        sensitivePathsAdjacent: input.sensitivePathsAdjacent,
-        sandboxCapability: detectSandboxCapability(),
-        ...(input.conversationContext ? { conversationContext: input.conversationContext } : {}),
-        ...(input.writesToOwnSandbox !== undefined
-          ? { writesToOwnSandbox: input.writesToOwnSandbox }
-          : {}),
-        ...(input.ownerPluginSandboxRoot !== undefined
-          ? { ownerPluginSandboxRoot: input.ownerPluginSandboxRoot }
-          : {}),
-      };
+      const ctx = buildReviewerContext();
       // Use the rule-based classifier for fast sync classification (no LLM call).
       // Take max(ruleVerdict, verdictAtApproval) so a stored HIGH approval cannot
       // be silently downgraded if the rule classifier now returns LOW/MEDIUM.
       const ruleClassifier = new RuleBasedRiskClassifier();
       const ruleVerdict = ruleClassifier.classify(ctx);
+      ruleVerdictForAudit = ruleVerdict.level;
       // Narrowed above: the outer `userApproval.verdictAtApproval != null`
       // gate guarantees a concrete verdict literal here.
       const storedLevel: UserApprovalVerdict = userApproval.verdictAtApproval;
@@ -825,42 +828,33 @@ export class PermissionManager {
         // broadcast failure must not block tool execution
       }
     } else if (cacheResult.hit && cacheResult.verdict) {
+      const ruleClassifier = new RuleBasedRiskClassifier();
+      ruleVerdictForAudit = ruleClassifier.classify(buildReviewerContext()).level;
       verdict = cacheResult.verdict;
     } else {
-      const ctx: ToolInvocationContext = {
-        toolName,
-        source: input.source,
-        category: input.category,
-        pathFields: input.pathFields,
-        trustOrigin: input.trustOrigin,
-        finalInput: input.finalInput,
-        allowedDirectories: input.allowedDirectories,
-        sensitivePathsAdjacent: input.sensitivePathsAdjacent,
-        sandboxCapability: detectSandboxCapability(),
-        ...(input.conversationContext ? { conversationContext: input.conversationContext } : {}),
-        ...(input.writesToOwnSandbox !== undefined
-          ? { writesToOwnSandbox: input.writesToOwnSandbox }
-          : {}),
-        ...(input.ownerPluginSandboxRoot !== undefined
-          ? { ownerPluginSandboxRoot: input.ownerPluginSandboxRoot }
-          : {}),
-      };
+      const ctx = buildReviewerContext();
       try {
         // MAJOR-1: pass abortSignal to LlmRiskClassifier.classify so user
         // cancellation aborts an in-flight LLM call. The RiskClassifier
         // interface is signal-agnostic; LlmRiskClassifier accepts the optional
         // second argument — other classifiers safely ignore extra arguments.
-        const classified =
-          classifier instanceof LlmRiskClassifier
-            ? classifier.classify(ctx, { abortSignal: options?.abortSignal })
-            : classifier.classify(ctx);
-        verdict = classified instanceof Promise ? await classified : classified;
-        llmVerdictForAudit = classifier instanceof LlmRiskClassifier ? verdict.level : null;
+        if (classifier instanceof LlmRiskClassifier) {
+          const trace = await classifier.classifyWithTrace(ctx, { abortSignal: options?.abortSignal });
+          verdict = trace.finalVerdict;
+          ruleVerdictForAudit = trace.ruleVerdict.level;
+          llmVerdictForAudit = trace.llmVerdict?.level ?? null;
+        } else {
+          const classified = classifier.classify(ctx);
+          verdict = classified instanceof Promise ? await classified : classified;
+          ruleVerdictForAudit = verdict.level;
+          llmVerdictForAudit = null;
+        }
         // Persist for next time (HIGH cached too — re-deny is fast).
         await cache.store(lookupKey, cacheCtx, verdict);
       } catch (err) {
         const message = err instanceof Error ? err.message : String(err);
         verdict = { level: "high", reason: `reviewer error — ${message}` };
+        ruleVerdictForAudit = new RuleBasedRiskClassifier().classify(ctx).level;
         llmVerdictForAudit = classifier instanceof LlmRiskClassifier ? "high" : null;
       }
     }
@@ -885,7 +879,7 @@ export class PermissionManager {
         overheadPercent: 0,
       },
       reviewer: {
-        ruleVerdict: verdict.level,
+        ruleVerdict: ruleVerdictForAudit ?? verdict.level,
         llmVerdict: llmVerdictForAudit,
         finalVerdict: verdict.level,
         compositionRulesTriggered: [],

@@ -268,6 +268,17 @@ describe("LlmRiskClassifier — composition rule (security M1)", () => {
     expect(v.reason).toMatch(/destructive/);
   });
 
+  it("trace preserves raw LLM verdict separately from composed final verdict", async () => {
+    const provider = makeProvider(`{"level":"low","reason":"llm tried to allow"}`);
+    const c = new LlmRiskClassifier(provider, "gpt-4o-mini");
+    const trace = await c.classifyWithTrace(
+      ctx({ category: "shell", finalInput: { command: "rm -rf /tmp/x" } }),
+    );
+    expect(trace.ruleVerdict.level).toBe("high");
+    expect(trace.llmVerdict?.level).toBe("low");
+    expect(trace.finalVerdict.level).toBe("high");
+  });
+
   it("rule MEDIUM + llm MEDIUM → MEDIUM", async () => {
     const provider = makeProvider(`{"level":"medium","reason":"agree"}`);
     const c = new LlmRiskClassifier(provider, "gpt-4o-mini");
