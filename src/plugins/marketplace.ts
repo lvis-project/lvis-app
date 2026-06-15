@@ -28,7 +28,11 @@ import { lvisHome } from "../shared/lvis-home.js";
 import type { AuditLogger } from "../audit/audit-logger.js";
 const log = createLogger("marketplace");
 
-export type { MarketplaceFetcher } from "./marketplace-fetcher.js";
+import {
+  isMarketplaceAnnouncementLevel,
+  type MarketplaceAnnouncement,
+} from "../shared/marketplace-announcements.js";
+export type { MarketplaceAnnouncement, MarketplaceFetcher } from "./marketplace-fetcher.js";
 
 function normalizeInstallPolicy(source: {
   installPolicy?: InstallPolicy;
@@ -84,7 +88,45 @@ function normalizeDependencies(
 type MarketplaceCatalog = {
   version: number;
   plugins: PluginMarketplaceItem[];
+  /** Optional dev/test announcement fixtures (mirrors GET /api/v1/announcements). */
+  announcements?: MarketplaceAnnouncement[];
 };
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return value !== null && typeof value === "object" && !Array.isArray(value);
+}
+
+function isMarketplaceAnnouncement(value: unknown): value is MarketplaceAnnouncement {
+  if (!isRecord(value)) return false;
+  return (
+    typeof value.id === "number" &&
+    Number.isSafeInteger(value.id) &&
+    typeof value.title === "string" &&
+    typeof value.body === "string" &&
+    isMarketplaceAnnouncementLevel(value.level) &&
+    typeof value.createdAt === "string" &&
+    (value.startsAt === null || typeof value.startsAt === "string") &&
+    (value.endsAt === null || typeof value.endsAt === "string")
+  );
+}
+
+function assertMarketplaceAnnouncements(
+  value: unknown,
+  marketplacePath: string,
+): MarketplaceAnnouncement[] | undefined {
+  if (value === undefined) return undefined;
+  if (!Array.isArray(value)) {
+    throw new Error(`Invalid marketplace catalog announcements: ${marketplacePath}`);
+  }
+  for (const [index, announcement] of value.entries()) {
+    if (!isMarketplaceAnnouncement(announcement)) {
+      throw new Error(
+        `Invalid marketplace catalog announcement at index ${index}: ${marketplacePath}`,
+      );
+    }
+  }
+  return value as MarketplaceAnnouncement[];
+}
 
 type InstallOperationState = {
   installedPluginIds: string[];
@@ -143,6 +185,10 @@ export class DisabledMarketplaceFetcher implements MarketplaceFetcher {
   async downloadVersion(): Promise<{ zipBuffer: Buffer; sha256: string }> {
     throw new Error(DisabledMarketplaceFetcher.ERR);
   }
+
+  async listAnnouncements(): Promise<MarketplaceAnnouncement[]> {
+    throw new Error(DisabledMarketplaceFetcher.ERR);
+  }
 }
 
 /**
@@ -182,13 +228,25 @@ export class MockMarketplaceFetcher implements MarketplaceFetcher {
     );
   }
 
+  async listAnnouncements(): Promise<MarketplaceAnnouncement[]> {
+    const catalog = await this.readCatalog();
+    return catalog.announcements ?? [];
+  }
+
   async readCatalog(): Promise<MarketplaceCatalog> {
     const raw = await readFile(this.marketplacePath, "utf-8");
-    const parsed = JSON.parse(raw) as MarketplaceCatalog;
-    if (!Array.isArray(parsed.plugins)) {
+    const parsed = JSON.parse(raw) as unknown;
+    if (!isRecord(parsed) || !Array.isArray(parsed.plugins)) {
       throw new Error(`Invalid marketplace catalog: ${this.marketplacePath}`);
     }
-    return parsed;
+    const announcements = assertMarketplaceAnnouncements(
+      parsed.announcements,
+      this.marketplacePath,
+    );
+    return {
+      ...(parsed as Omit<MarketplaceCatalog, "announcements">),
+      announcements,
+    };
   }
 }
 

@@ -20,7 +20,8 @@ function makeFetcher(plugins: PluginMarketplaceItem[]): MarketplaceFetcher {
   return {
     listPlugins: vi.fn().mockResolvedValue(plugins),
     getPluginDetail: vi.fn().mockResolvedValue(null),
-    downloadVersion: vi.fn().mockRejectedValue(new Error("not implemented"))
+    downloadVersion: vi.fn().mockRejectedValue(new Error("not implemented")),
+    listAnnouncements: vi.fn().mockResolvedValue([]),
   };
 }
 

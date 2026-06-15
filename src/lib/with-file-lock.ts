@@ -14,8 +14,7 @@
  * - `retries` option: default 5 attempts with exponential back-off (proper-lockfile built-in).
  */
 import lockfile from "proper-lockfile";
-import { mkdir } from "node:fs/promises";
-import { existsSync } from "node:fs";
+import { mkdir, open } from "node:fs/promises";
 import { dirname } from "node:path";
 
 export interface FileLockOptions {
@@ -45,11 +44,10 @@ export async function withFileLock<T>(
 
   // Ensure parent directory and a placeholder file exist so lockfile can stat it.
   await mkdir(dirname(targetPath), { recursive: true });
-  if (!existsSync(targetPath)) {
-    // Touch the file without overwriting existing content.
-    const { writeFile } = await import("node:fs/promises");
-    await writeFile(targetPath, "", { flag: "a" });
-  }
+  // Touch the file without overwriting existing content. `open(..., "a")`
+  // atomically creates it if absent, avoiding check-then-create races.
+  const handle = await open(targetPath, "a", 0o600);
+  await handle.close();
 
   const release = await lockfile.lock(targetPath, {
     stale,

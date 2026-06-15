@@ -1,6 +1,6 @@
 {
   "name": "lvis-app",
-  "version": "0.3.0",
+  "version": "0.3.1",
   "private": true,
   "type": "module",
   "imports": {
@@ -236,23 +236,17 @@
       {
         "from": "resources/agents",
         "to": "agents",
-        "filter": [
-          "*.md"
-        ]
+        "filter": ["*.md"]
       },
       {
         "from": "resources/skills",
         "to": "skills",
-        "filter": [
-          "*.md"
-        ]
+        "filter": ["*.md"]
       },
       {
         "from": "resources/prompts",
         "to": "prompts",
-        "filter": [
-          "*.md"
-        ]
+        "filter": ["*.md"]
       }
     ],
     "mac": {
@@ -271,35 +265,11 @@
         "height": 420
       },
       "contents": [
-        {
-          "x": 140,
-          "y": 130,
-          "type": "file"
-        },
-        {
-          "x": 400,
-          "y": 130,
-          "type": "link",
-          "path": "/Applications"
-        },
-        {
-          "x": 140,
-          "y": 290,
-          "type": "file",
-          "path": "build/dmg-extras/setup.command"
-        },
-        {
-          "x": 270,
-          "y": 290,
-          "type": "file",
-          "path": "build/dmg-extras/uninstall.command"
-        },
-        {
-          "x": 400,
-          "y": 290,
-          "type": "file",
-          "path": "build/dmg-extras/README.txt"
-        }
+        { "x": 140, "y": 130, "type": "file" },
+        { "x": 400, "y": 130, "type": "link", "path": "/Applications" },
+        { "x": 140, "y": 290, "type": "file", "path": "build/dmg-extras/setup.command" },
+        { "x": 270, "y": 290, "type": "file", "path": "build/dmg-extras/uninstall.command" },
+        { "x": 400, "y": 290, "type": "file", "path": "build/dmg-extras/README.txt" }
       ]
     },
     "linux": {
