@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import type { UserApprovalScope, UserApprovalVerdict } from "../../../shared/permissions-events.js";
 import { Badge } from "../../../components/ui/badge.js";
 import { Button } from "../../../components/ui/button.js";
@@ -99,7 +99,7 @@ export function ToolApprovalDialog({
   // Fire-and-await pattern: onDecide is called synchronously so the UI
   // responds immediately; the record IPC is awaited in the background so
   // test assertions on onDecide do not need to drain microtask queues.
-  async function handleApprove(choice: ApprovalChoice, pattern?: string) {
+  const handleApprove = useCallback(async (choice: ApprovalChoice, pattern?: string) => {
     let recordPromise: Promise<unknown> | undefined;
     const isDurable = choice === "allow-session" || choice === "allow-always";
     if (request && isDurable) {
@@ -132,7 +132,7 @@ export function ToolApprovalDialog({
     onDecide(choice, pattern);
     // Await the record promise in the background (non-blocking for the user).
     await recordPromise;
-  }
+  }, [request, finalVerdict, nlJustification, onDecide]);
 
   // The primary Approve button grants for the scope selected in the radio
   // group: "이 세션만" → durable session grant, "영구 허용" → persistent.
@@ -158,10 +158,7 @@ export function ToolApprovalDialog({
     };
     window.addEventListener("keydown", handler);
     return () => window.removeEventListener("keydown", handler);
-  // primaryApproveChoice tracks scopeChoice + finalVerdict; rebind on those
-  // so the "a" shortcut grants for the currently selected scope.
-  // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [open, request, onDecide, approveDisabled, scopeChoice, finalVerdict]);
+  }, [open, request, onDecide, approveDisabled, handleApprove, primaryApproveChoice]);
 
   if (!request) return null;
 
