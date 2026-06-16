@@ -1038,8 +1038,10 @@ export class ToolExecutor {
       };
     }
     return {
-      decision: "ask",
-      reason: `reviewer ${reviewer.verdict.level}: ${reviewer.verdict.reason}`,
+      decision: "deny",
+      reason:
+        `reviewer ${reviewer.verdict.level}: ${reviewer.verdict.reason}` +
+        " — no approval popup was opened; treat this as reviewer tool output and retry only after explicit user authorization for this exact action",
       layer: 5,
       reviewer: { route: "foreground-auto", verdict: reviewer.verdict },
     };
@@ -1898,6 +1900,39 @@ export class ToolExecutor {
           forceModal: true,
         };
       }
+      const sandboxAttestation = {
+        ...(tool.writesToOwnSandbox !== undefined
+          ? { writesToOwnSandbox: tool.writesToOwnSandbox }
+          : {}),
+        ...(tool.pluginId
+          ? { ownerPluginSandboxRoot: pathResolve(lvisHome(), "plugins", tool.pluginId) }
+          : {}),
+      };
+      let foregroundMemorySkipChecked = false;
+      if (permissionResult.decision === "ask" && permissionResult.reviewer?.route === "foreground-auto") {
+        if (
+          permissionResult.layer >= 3 &&
+          permissionResult.forceModal !== true &&
+          invocationPermissionContext.headless !== true
+        ) {
+          foregroundMemorySkipChecked = true;
+          const memorySkip = await this.tryUserApprovalMemorySkip(
+            toolUse.name,
+            source,
+            invocationCategory,
+            tool.pathFields ?? [],
+            finalInput,
+            invocationAllowedScope.directories,
+            sensitivePathPattern ? [sensitivePathPattern] : [],
+            invocationPermissionContext,
+            approvalCacheKey,
+            sandboxAttestation,
+          );
+          if (memorySkip) {
+            permissionResult = memorySkip;
+          }
+        }
+      }
       if (permissionResult.decision === "ask" && permissionResult.reviewer?.route === "foreground-auto") {
         const reviewerResult = await this.dispatchReviewerForInteractiveAuto(
           toolUse.name,
@@ -1914,12 +1949,7 @@ export class ToolExecutor {
           // populated from the Tool descriptor. `ownerPluginSandboxRoot` is
           // computed only when the tool is plugin-owned; builtin / MCP tools
           // have no sandbox root and the auto-LOW rule will not engage.
-          {
-            writesToOwnSandbox: tool.writesToOwnSandbox,
-            ownerPluginSandboxRoot: tool.pluginId
-              ? pathResolve(lvisHome(), "plugins", tool.pluginId)
-              : undefined,
-          },
+          sandboxAttestation,
           callbacks,
           meta,
           approvalPurpose,
@@ -1970,12 +2000,7 @@ export class ToolExecutor {
             evaluationContext,
             // Issue #664 P1 — sandbox-write attestation (see interactive
             // call site for rationale).
-            {
-              writesToOwnSandbox: tool.writesToOwnSandbox,
-              ownerPluginSandboxRoot: tool.pluginId
-                ? pathResolve(lvisHome(), "plugins", tool.pluginId)
-                : undefined,
-            },
+            sandboxAttestation,
             callbacks,
             meta,
             approvalPurpose,
@@ -2023,7 +2048,8 @@ export class ToolExecutor {
         // A meta tool whose author declared decisionOverride="ask" is a
         // per-invocation hard gate — never satisfied by a stored approval.
         permissionResult.forceModal !== true &&
-        invocationPermissionContext.headless !== true
+        invocationPermissionContext.headless !== true &&
+        foregroundMemorySkipChecked !== true
       ) {
         const memorySkip = await this.tryUserApprovalMemorySkip(
           toolUse.name,
@@ -2035,12 +2061,7 @@ export class ToolExecutor {
           sensitivePathPattern ? [sensitivePathPattern] : [],
           invocationPermissionContext,
           approvalCacheKey,
-          {
-            writesToOwnSandbox: tool.writesToOwnSandbox,
-            ownerPluginSandboxRoot: tool.pluginId
-              ? pathResolve(lvisHome(), "plugins", tool.pluginId)
-              : undefined,
-          },
+          sandboxAttestation,
         );
         if (memorySkip) {
           permissionResult = memorySkip;

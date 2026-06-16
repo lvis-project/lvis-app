@@ -8,7 +8,7 @@ import { Tooltip, TooltipContent, TooltipTrigger } from "../../components/ui/too
 import { ScrollArea } from "../../components/ui/scroll-area.js";
 import { formatCostBadge } from "../../lib/cost-estimator.js";
 import type { ChatEntry } from "../../lib/chat-stream-state.js";
-import type { UserApprovalHitPayload } from "../../shared/permissions-events.js";
+import type { PermissionReviewSuggestionPayload, UserApprovalHitPayload } from "../../shared/permissions-events.js";
 import { debugLog, isDebugStreamEnabled } from "../../lib/debug-stream.js";
 import { OverlayCardRegion } from "./components/OverlayCardRegion.js";
 import { AssistantCard } from "./components/AssistantCard.js";
@@ -27,7 +27,7 @@ import { SubAgentCard } from "./components/SubAgentCard.js";
 import { TokenProgressRing } from "./components/TokenProgressRing.js";
 import { BottomActionRow } from "./components/BottomActionRow.js";
 import { PermissionModeBadge } from "./components/permissions/PermissionModeBadge.js";
-import { DEFAULT_TOAST_TTL_MS, SHORT_TOAST_TTL_MS } from "./constants.js";
+import { DEFAULT_TOAST_TTL_MS, LONG_TOAST_TTL_MS, SHORT_TOAST_TTL_MS } from "./constants.js";
 import { SkillBadge } from "./components/SkillBadge.js";
 import { WorkGroup } from "./components/WorkGroup.js";
 import { PermissionReviewStatusCard } from "./components/PermissionReviewStatusCard.js";
@@ -387,6 +387,12 @@ export function ChatView({ api, onAsk, onEditSave, onFork, onToggleStar, onRetry
   const userApprovalHitTimerRef = useRef<ReturnType<typeof setTimeout> | null>(
     null,
   );
+  const [permissionReviewSuggestion, setPermissionReviewSuggestion] = useState<
+    (PermissionReviewSuggestionPayload & { busy?: boolean; error?: string }) | null
+  >(null);
+  const permissionReviewSuggestionTimerRef = useRef<ReturnType<typeof setTimeout> | null>(
+    null,
+  );
 
   // Cleanup fork toast timer on unmount to avoid setState-after-unmount.
   useEffect(() => {
@@ -438,6 +444,74 @@ export function ChatView({ api, onAsk, onEditSave, onFork, onToggleStar, onRetry
         clearTimeout(userApprovalHitTimerRef.current);
       }
     };
+  }, []);
+
+  useEffect(() => {
+    let api;
+    try {
+      api = getApi();
+    } catch {
+      return;
+    }
+    const unsubscribe = api.permission.onReviewSuggestion?.((payload) => {
+      if (
+        !payload ||
+        (payload.reason !== "allow-always" && payload.reason !== "repeat-allow") ||
+        typeof payload.allowCount !== "number" ||
+        typeof payload.allowAlwaysCount !== "number" ||
+        typeof payload.threshold !== "number" ||
+        typeof payload.windowMs !== "number"
+      ) {
+        console.warn("[chat] dropping malformed permission review suggestion payload", payload);
+        return;
+      }
+      if (permissionReviewSuggestionTimerRef.current) {
+        clearTimeout(permissionReviewSuggestionTimerRef.current);
+      }
+      setPermissionReviewSuggestion(payload);
+      permissionReviewSuggestionTimerRef.current = setTimeout(() => {
+        setPermissionReviewSuggestion(null);
+      }, LONG_TOAST_TTL_MS);
+    });
+    if (!unsubscribe) return;
+    return () => {
+      unsubscribe();
+      if (permissionReviewSuggestionTimerRef.current) {
+        clearTimeout(permissionReviewSuggestionTimerRef.current);
+      }
+    };
+  }, []);
+
+  const handleEnablePermissionReviewSuggestion = useCallback(async () => {
+    setPermissionReviewSuggestion((current) =>
+      current ? { ...current, busy: true, error: undefined } : current,
+    );
+    try {
+      const api = getApi();
+      const modeResult = await api.permission.setMode("auto");
+      if (!modeResult?.ok) {
+        throw new Error(modeResult?.message ?? modeResult?.error ?? "mode change failed");
+      }
+      const reviewerResult = await api.permission.reviewerDispatch("mode llm");
+      if (!reviewerResult?.ok) {
+        throw new Error(reviewerResult?.error ?? "reviewer mode change failed");
+      }
+      const interactiveResult = await api.permission.reviewerDispatch("interactive low");
+      if (!interactiveResult?.ok) {
+        throw new Error(interactiveResult?.error ?? "interactive reviewer change failed");
+      }
+      setPermissionReviewSuggestion(null);
+    } catch (err) {
+      setPermissionReviewSuggestion((current) =>
+        current
+          ? {
+              ...current,
+              busy: false,
+              error: err instanceof Error ? err.message : String(err),
+            }
+          : current,
+      );
+    }
   }, []);
 
   // In view-mode, show only the sliced entries up to the checkpoint.
@@ -1547,6 +1621,43 @@ export function ChatView({ api, onAsk, onEditSave, onFork, onToggleStar, onRetry
           </div>
         );
       })()}
+      {permissionReviewSuggestion && (
+        <div
+          data-testid="permission-review-suggestion-toast"
+          role="status"
+          aria-live="polite"
+          className="sticky top-0 z-30 mx-3 mt-2 flex min-w-0 items-center gap-2 rounded-md border border-[hsl(var(--warning)/0.4)] bg-[hsl(var(--warning)/0.1)] px-3 py-2 text-xs text-[hsl(var(--warning))]"
+        >
+          <div className="min-w-0 flex-1">
+            <span className="font-medium">{t("chatView.permissionReviewSuggestionTitle")}</span>
+            <span className="ml-2 text-muted-foreground">
+              {permissionReviewSuggestion.reason === "allow-always"
+                ? t("chatView.permissionReviewSuggestionAllowAlways")
+                : t("chatView.permissionReviewSuggestionRepeat", {
+                    count: permissionReviewSuggestion.allowCount,
+                    minutes: Math.max(1, Math.round(permissionReviewSuggestion.windowMs / 60000)),
+                  })}
+            </span>
+            {permissionReviewSuggestion.error && (
+              <span className="ml-2 text-[hsl(var(--destructive))]">
+                {permissionReviewSuggestion.error}
+              </span>
+            )}
+          </div>
+          <Button
+            type="button"
+            size="sm"
+            variant="outline"
+            className="h-7 shrink-0 px-2 text-xs"
+            disabled={permissionReviewSuggestion.busy === true}
+            onClick={() => void handleEnablePermissionReviewSuggestion()}
+          >
+            {permissionReviewSuggestion.busy === true
+              ? t("chatView.permissionReviewSuggestionBusy")
+              : t("chatView.permissionReviewSuggestionAction")}
+          </Button>
+        </div>
+      )}
       {currentSessionKind === "routine" && (
         <div
           data-testid="current-session-kind-banner"

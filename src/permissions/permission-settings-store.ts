@@ -68,7 +68,7 @@ export type ReviewerFallbackOnError = "deny" | "rule";
  *              flow. Every ask hits the modal. Default — safest.
  *   - "low"  : reviewer's LOW verdict in interactive flow silently
  *              allows the call without showing the modal. MEDIUM/HIGH
- *              still surface to the modal.
+ *              return as blocked tool results for the main LLM to handle.
  *
  * MED/HIGH is intentionally NOT auto-approvable — MEDIUM means
  * "writes to user data dir / idempotent network", which still warrants
@@ -129,7 +129,8 @@ const DEFAULT_REVIEWER: ReviewerSettingsBlock = {
   //
   // `interactive.autoApprove: "low"` lets a LOW verdict in the foreground chat
   // flow silently allow without a modal — the everyday flow is unblocked while
-  // MEDIUM/HIGH still surface to the user. The headless lane is unaffected.
+  // MEDIUM/HIGH still return to the main LLM as blocked tool results. The
+  // headless lane is unaffected.
   //
   // Why not "rule" as the default: rule is the *degraded* posture, not the
   // intended one. Encoding "llm" as the default keeps the intent visible and

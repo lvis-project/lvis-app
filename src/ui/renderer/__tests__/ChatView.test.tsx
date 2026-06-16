@@ -1858,6 +1858,55 @@ describe("ChatView — userApprovalHit disclosure toast (#793 + cluster MAJOR-2/
   });
 });
 
+describe("ChatView — permission review suggestion toast", () => {
+  type SuggestionCb = (payload: {
+    reason: "allow-always" | "repeat-allow";
+    allowCount: number;
+    allowAlwaysCount: number;
+    threshold: number;
+    windowMs: number;
+  }) => void;
+
+  it("renders the suggestion and switches through the existing permission APIs", async () => {
+    const { container, api } = await renderApp({ hasApiKey: true });
+    const onSuggestionMock = api.permission.onReviewSuggestion as unknown as ReturnType<typeof vi.fn>;
+    await waitFor(() => expect(onSuggestionMock).toHaveBeenCalled());
+    const fire = onSuggestionMock.mock.calls[0]?.[0] as SuggestionCb;
+
+    await act(async () => {
+      fire({
+        reason: "repeat-allow",
+        allowCount: 3,
+        allowAlwaysCount: 0,
+        threshold: 3,
+        windowMs: 300000,
+      });
+    });
+
+    const toast = await waitFor(() => {
+      const el = container.querySelector('[data-testid="permission-review-suggestion-toast"]');
+      expect(el).not.toBeNull();
+      return el as HTMLElement;
+    });
+    expect(toast.textContent).toContain("LLM 권한 검증으로 전환");
+    expect(toast.textContent).toContain("5분 안에 3회 승인했습니다.");
+
+    const button = Array.from(toast.querySelectorAll("button")).find((el) =>
+      el.textContent?.includes("전환"),
+    ) as HTMLButtonElement | undefined;
+    expect(button).toBeDefined();
+    await act(async () => {
+      fireEvent.click(button!);
+    });
+
+    await waitFor(() => {
+      expect(api.permission.setMode).toHaveBeenCalledWith("auto");
+      expect(api.permission.reviewerDispatch).toHaveBeenCalledWith("mode llm");
+      expect(api.permission.reviewerDispatch).toHaveBeenCalledWith("interactive low");
+    });
+  });
+});
+
 afterEach(() => {
   __resetSuggestedRepliesStoreForTests();
   __teardownSuggestedRepliesIpcForTests();

@@ -59,10 +59,13 @@ function makeDeferredEntry(overrides: Record<string, unknown> = {}) {
 }
 
 function makeDeps(options: {
-  approvalChoice?: "allow-once" | "deny-once";
+  approvalChoice?: "allow-once" | "allow-session" | "allow-always" | "deny-once";
   auditReady?: boolean;
   auditAppendError?: Error;
   queue?: Record<string, unknown> | null;
+  mode?: string;
+  interactiveAutoApprove?: "off" | "low";
+  hasReviewer?: boolean;
 } = {}) {
   const appWindows = [
     {
@@ -81,7 +84,9 @@ function makeDeps(options: {
     },
   ];
   const permissionManager = {
-    getMode: vi.fn(() => "default"),
+    getMode: vi.fn(() => options.mode ?? "default"),
+    getInteractiveAutoApprove: vi.fn(() => options.interactiveAutoApprove ?? "off"),
+    hasReviewer: vi.fn(() => options.hasReviewer ?? false),
     setMode: vi.fn(),
     setModePersist: vi.fn(async () => undefined),
     listPersistedRules: vi.fn(async () => []),
@@ -102,6 +107,7 @@ function makeDeps(options: {
         requestId: req.id,
         choice: options.approvalChoice ?? "allow-once",
       })),
+      resolve: vi.fn(),
       // #799 + CRITICAL-2 ralph iter 4: server-side ApprovalRequest binding.
       // userApprovalRecord handler reads trustOrigin/source/approvalCacheKey
       // from this snapshot; tests use a static snapshot that mirrors the
@@ -200,6 +206,65 @@ describe("permissions IPC handlers", () => {
 
     expect(result).toMatchObject({ ok: false, error: "permission-audit-write-failed" });
     expect(permissionManager.setModePersist).not.toHaveBeenCalled();
+  });
+
+  it("suggests LLM permission review after repeated default-mode approvals", async () => {
+    const { appWindows } = await setup({
+      mode: "default",
+      interactiveAutoApprove: "off",
+      hasReviewer: false,
+    });
+
+    await invoke(PERMISSIONS.approvalRespond, { requestId: "approval-1", choice: "allow-once" });
+    await invoke(PERMISSIONS.approvalRespond, { requestId: "approval-2", choice: "allow-session" });
+    await invoke(PERMISSIONS.approvalRespond, { requestId: "approval-3", choice: "allow-once" });
+
+    for (const win of appWindows) {
+      expect(win.webContents.send).toHaveBeenCalledWith(PERMISSIONS.reviewSuggestion, {
+        reason: "repeat-allow",
+        allowCount: 3,
+        allowAlwaysCount: 0,
+        threshold: 3,
+        windowMs: 300000,
+      });
+    }
+  });
+
+  it("suggests LLM permission review immediately after allow-always in default mode", async () => {
+    const { appWindows } = await setup({
+      mode: "default",
+      interactiveAutoApprove: "off",
+      hasReviewer: false,
+    });
+
+    await invoke(PERMISSIONS.approvalRespond, { requestId: "approval-always", choice: "allow-always" });
+
+    for (const win of appWindows) {
+      expect(win.webContents.send).toHaveBeenCalledWith(PERMISSIONS.reviewSuggestion, {
+        reason: "allow-always",
+        allowCount: 1,
+        allowAlwaysCount: 1,
+        threshold: 3,
+        windowMs: 300000,
+      });
+    }
+  });
+
+  it("does not suggest review switching when LLM auto-review is already active", async () => {
+    const { appWindows } = await setup({
+      mode: "default",
+      interactiveAutoApprove: "low",
+      hasReviewer: true,
+    });
+
+    await invoke(PERMISSIONS.approvalRespond, { requestId: "approval-active", choice: "allow-always" });
+
+    for (const win of appWindows) {
+      expect(win.webContents.send).not.toHaveBeenCalledWith(
+        PERMISSIONS.reviewSuggestion,
+        expect.anything(),
+      );
+    }
   });
 
   it("addRule and removeRule mutate only through parsed rule commands", async () => {
