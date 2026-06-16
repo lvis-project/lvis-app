@@ -47,3 +47,19 @@ export interface UserApprovalHitPayload {
   scope: UserApprovalScope;
   verdictAtApproval: UserApprovalVerdict;
 }
+
+export type PermissionReviewSuggestionReason = "allow-always" | "repeat-allow";
+
+/**
+ * Emitted when the foreground default-mode approval pattern suggests the user
+ * would benefit from switching to LLM-backed permission review. This is a
+ * non-blocking hint; the renderer must require an explicit user gesture before
+ * mutating the permission/reviewer settings.
+ */
+export interface PermissionReviewSuggestionPayload {
+  reason: PermissionReviewSuggestionReason;
+  allowCount: number;
+  allowAlwaysCount: number;
+  threshold: number;
+  windowMs: number;
+}
