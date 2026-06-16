@@ -66,6 +66,10 @@ export async function readRunTranscript(
   itemId: number,
   runId: string,
 ): Promise<RunTranscriptEvent[]> {
+  // Defensive: a runId is interpolated into the file path, so reject anything
+  // that could escape the namespace (engine run ids are UUIDs). The IPC layer
+  // guards too — this protects every caller.
+  if (!/^[A-Za-z0-9_-]+$/.test(runId)) return [];
   const path = runTranscriptPath(itemId, runId);
   if (!(await storage.exists(path))) return [];
   const text = await storage.readText(path);
