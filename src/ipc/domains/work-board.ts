@@ -39,6 +39,9 @@ import { fanOutToAllWindows } from "../broadcast-helpers.js";
 import type { IpcDeps } from "../types.js";
 import type { WorkItemRunResult } from "../../shared/work-board-types.js";
 import { WORK_BOARD } from "../../shared/ipc-channels.js";
+import { createDirStorage } from "../../work-board/storage.js";
+import { openFeatureNamespace } from "../../main/storage/feature-namespace.js";
+import { readRunTranscript } from "../../work-board/run-transcript.js";
 import type {
   WorkItemCreateInput,
   WorkItemUpdateInput,
@@ -239,4 +242,16 @@ export function registerWorkBoardHandlers(deps: IpcDeps): void {
       }
     },
   );
+
+  // ─── Run transcript (past run conversation) ──────
+  // Renderer → main: read a past run's persisted plan+execute conversation for
+  // the run-history view. Returns `{ events }` (empty when the file is absent).
+  ipcMain.handle(WORK_BOARD.runTranscript, async (e, itemId: number, runId: string) => {
+    if (!validateSender(e)) {
+      auditUnauthorized(auditLogger, WORK_BOARD.runTranscript, e);
+      return UNAUTHORIZED_FRAME;
+    }
+    const storage = createDirStorage(openFeatureNamespace("work-board").dir);
+    return { events: await readRunTranscript(storage, itemId, runId) };
+  });
 }

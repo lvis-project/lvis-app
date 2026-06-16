@@ -1421,6 +1421,13 @@ const api = {
       | import("./shared/work-board-types.js").WorkBoardReportResult
       | { ok: false; error: string }
     >,
+  // Read a past run's persisted transcript (plan+execute conversation) for the
+  // run-history view. Resolves with the ordered events (empty when absent).
+  getWorkBoardRunTranscript: async (itemId: number, runId: string) =>
+    ipcRenderer.invoke(WORK_BOARD.runTranscript, itemId, runId) as Promise<
+      | { events: import("./shared/work-board-types.js").RunTranscriptEvent[] }
+      | { ok: false; error: string }
+    >,
   // Live per-phase progress for an in-flight run (planning / awaiting_approval /
   // executing / denied / done / error). Payload === the engine's
   // WorkBoardRunEvent (aliased as RunProgressEventPayload).
