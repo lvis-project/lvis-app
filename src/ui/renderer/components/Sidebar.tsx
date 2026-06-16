@@ -4,7 +4,6 @@ import {
   Home,
   KanbanSquare,
   KeyRound,
-  PanelLeft,
   PanelLeftClose,
   Plus,
   Repeat2,
@@ -60,7 +59,8 @@ function NavItem({
   "data-viewkey": dataViewKey,
   trailingSlot,
 }: NavItemProps) {
-  const btn = (
+  const btn = collapsed ? (
+    /* Collapsed — perfectly square icon button */
     <button
       type="button"
       onClick={onClick}
@@ -68,21 +68,44 @@ function NavItem({
       data-testid={testId}
       data-viewkey={dataViewKey}
       className={[
-        "relative w-full flex items-center gap-2.5 rounded-md px-3 py-2 text-sm transition-colors",
+        "relative h-9 w-9 aspect-square flex items-center justify-center rounded-md transition-colors",
         "focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring",
-        collapsed ? "justify-center px-0" : "",
         isActive
-          ? "bg-primary/10 text-primary font-medium before:absolute before:left-0 before:top-1.5 before:bottom-1.5 before:w-0.5 before:rounded-full before:bg-primary"
+          ? "bg-primary/10 text-primary"
           : "text-muted-foreground hover:bg-accent hover:text-accent-foreground",
       ]
         .filter(Boolean)
         .join(" ")}
     >
-      <span className="shrink-0 h-4 w-4 flex items-center justify-center">{icon}</span>
-      {!collapsed && (
-        <span className="truncate flex-1 text-left">{label}</span>
+      {isActive && (
+        <span className="absolute left-0 top-2 bottom-2 w-0.5 rounded-full bg-primary" />
       )}
-      {!collapsed && trailingSlot && (
+      <span className="h-4 w-4 flex items-center justify-center">{icon}</span>
+    </button>
+  ) : (
+    /* Expanded — full-width row */
+    <button
+      type="button"
+      onClick={onClick}
+      aria-current={isActive ? "page" : undefined}
+      data-testid={testId}
+      data-viewkey={dataViewKey}
+      className={[
+        "relative w-full flex items-center gap-2.5 rounded-md px-2.5 py-2 text-sm transition-colors",
+        "focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring",
+        isActive
+          ? "bg-primary/10 text-primary font-medium"
+          : "text-muted-foreground hover:bg-accent hover:text-accent-foreground",
+      ]
+        .filter(Boolean)
+        .join(" ")}
+    >
+      {isActive && (
+        <span className="absolute left-0 top-1.5 bottom-1.5 w-0.5 rounded-full bg-primary" />
+      )}
+      <span className="shrink-0 h-4 w-4 flex items-center justify-center">{icon}</span>
+      <span className="truncate flex-1 text-left">{label}</span>
+      {trailingSlot && (
         <span className="ml-auto shrink-0">{trailingSlot}</span>
       )}
     </button>
@@ -91,7 +114,10 @@ function NavItem({
   if (collapsed) {
     return (
       <Tooltip>
-        <TooltipTrigger asChild>{btn}</TooltipTrigger>
+        <TooltipTrigger asChild>
+          {/* btn is already the collapsed square button element */}
+          {btn}
+        </TooltipTrigger>
         <TooltipContent side="right">{label}</TooltipContent>
       </Tooltip>
     );
@@ -231,60 +257,71 @@ export function Sidebar({
       role="navigation"
       aria-label={t("sidebar.ariaLabel", { defaultValue: "기본 탐색" })}
       className={[
-        "flex min-h-0 flex-col overflow-hidden bg-card border-r border-border shrink-0 transition-all duration-200",
+        "flex min-h-0 flex-col overflow-hidden bg-background border-r border-border shrink-0 transition-all duration-200",
         collapsed ? "w-14" : "w-56",
       ].join(" ")}
     >
-      {/* ── Brand/Home zone ─────────────────────────────────────────── */}
-      <div className="py-3 border-b border-border px-2 flex flex-col gap-1">
-        <div className={`flex items-center ${collapsed ? "justify-center" : "justify-between"}`}>
-          {/* Home nav item */}
-          <NavItem
-            viewKey="home"
-            label={t("mainToolbar.home")}
-            icon={<Home className="h-4 w-4" />}
-            isActive={activeView === "home"}
-            onClick={() => onSelect("home")}
-            collapsed={collapsed}
-            data-testid="sidebar-home"
-          />
-
-          {/* Collapse toggle — only visible when expanded or touch to collapse */}
-          {!forceCollapsed && (
-            <Tooltip>
-              <TooltipTrigger asChild>
-                <Button
-                  variant="ghost"
-                  size="icon"
-                  className="h-7 w-7 p-0 text-muted-foreground hover:text-foreground shrink-0"
-                  onClick={handleToggleCollapse}
-                  aria-expanded={!collapsed}
-                  aria-controls={navListId}
-                  aria-label={collapsed ? t("sidebar.expand", { defaultValue: "사이드바 열기" }) : t("sidebar.collapse", { defaultValue: "사이드바 닫기" })}
-                  data-testid="sidebar-collapse-toggle"
-                >
-                  {collapsed ? (
-                    <PanelLeft className="h-3.5 w-3.5" />
-                  ) : (
+      {/* ── Brand/Home zone — height matches MainToolbar (h-10 content + py-1.5 = ~52px) */}
+      <div className="h-[52px] border-b border-border px-2 flex items-center gap-1 shrink-0">
+        {collapsed ? (
+          /* Collapsed: Home icon centred; NavItem handles its own Tooltip when collapsed */
+          <div className="flex items-center justify-center w-full">
+            <NavItem
+              viewKey="home"
+              label={t("mainToolbar.home")}
+              icon={<Home className="h-4 w-4" />}
+              isActive={activeView === "home"}
+              onClick={() => onSelect("home")}
+              collapsed={collapsed}
+              data-testid="sidebar-home"
+            />
+          </div>
+        ) : (
+          /* Expanded: Home item left, collapse toggle right */
+          <>
+            <NavItem
+              viewKey="home"
+              label={t("mainToolbar.home")}
+              icon={<Home className="h-4 w-4" />}
+              isActive={activeView === "home"}
+              onClick={() => onSelect("home")}
+              collapsed={collapsed}
+              data-testid="sidebar-home"
+            />
+            {!forceCollapsed && (
+              <Tooltip>
+                <TooltipTrigger asChild>
+                  <Button
+                    variant="ghost"
+                    size="icon"
+                    className="h-9 w-9 aspect-square p-0 shrink-0 text-muted-foreground hover:text-foreground hover:bg-accent"
+                    onClick={handleToggleCollapse}
+                    aria-expanded={!collapsed}
+                    aria-controls={navListId}
+                    aria-label={t("sidebar.collapse", { defaultValue: "사이드바 닫기" })}
+                    data-testid="sidebar-collapse-toggle"
+                  >
                     <PanelLeftClose className="h-3.5 w-3.5" />
-                  )}
-                </Button>
-              </TooltipTrigger>
-              <TooltipContent side="right">
-                {collapsed ? t("sidebar.expand", { defaultValue: "사이드바 열기" }) : t("sidebar.collapse", { defaultValue: "사이드바 닫기" })}
-              </TooltipContent>
-            </Tooltip>
-          )}
-        </div>
+                  </Button>
+                </TooltipTrigger>
+                <TooltipContent side="right">
+                  {t("sidebar.collapse", { defaultValue: "사이드바 닫기" })}
+                </TooltipContent>
+              </Tooltip>
+            )}
+          </>
+        )}
+      </div>
 
-        {/* New Chat CTA */}
+      {/* ── New Chat CTA — below the top zone */}
+      <div className={`px-2 pt-2 pb-1 ${collapsed ? "flex justify-center" : ""}`}>
         {collapsed ? (
           <Tooltip>
             <TooltipTrigger asChild>
               <Button
                 variant="default"
                 size="icon"
-                className="h-9 w-9 p-0"
+                className="h-9 w-9 aspect-square p-0 shrink-0"
                 onClick={onNewChat}
                 disabled={streaming}
                 aria-label={t("mainToolbar.newChat")}
@@ -312,7 +349,7 @@ export function Sidebar({
       {/* ── Primary nav + plugins (scrollable) ──────────────────────── */}
       <div id={navListId} className="flex min-h-0 flex-1 flex-col overflow-hidden">
         {/* PRIMARY NAV group */}
-        <div className="px-2 py-2 space-y-0.5">
+        <div className={`px-2 py-2 space-y-0.5 ${collapsed ? "flex flex-col items-center" : ""}`}>
           <NavItem
             viewKey="work-board"
             label={t("mainToolbar.workBoard")}
@@ -356,7 +393,7 @@ export function Sidebar({
           <>
             <SectionDivider collapsed={collapsed} label={collapsed ? undefined : t("sidebar.pluginsLabel", { defaultValue: "플러그인" })} />
             <ScrollArea className="flex-1 min-h-0">
-              <div className="px-2 py-1 space-y-0.5">
+              <div className={`px-2 py-1 space-y-0.5 ${collapsed ? "flex flex-col items-center" : ""}`}>
                 {pluginViews.map((view) => {
                   const viewKey = toViewKey(view);
                   const isUnauthed =
@@ -383,7 +420,7 @@ export function Sidebar({
       </div>
 
       {/* ── Footer — Settings ───────────────────────────────────────── */}
-      <div className="border-t border-border py-2 px-2 mt-auto">
+      <div className={`border-t border-border py-2 px-2 mt-auto ${collapsed ? "flex justify-center" : ""}`}>
         <NavItem
           viewKey="settings"
           label={t("mainToolbar.settings")}
