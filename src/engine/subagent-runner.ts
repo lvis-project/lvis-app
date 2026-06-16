@@ -80,6 +80,19 @@ export interface SubAgentSpawnResult {
   toolCallCount: number;
   turnCount: number;
   childSessionId: string;
+  /**
+   * Structural success signal. `true` only when the child loop completed a
+   * clean `runTurn` (the `summary` is the agent's final message). `false` when
+   * the run could not produce a real result — the LLM provider was not
+   * configured, or the child loop threw — in which case `summary` carries the
+   * error text and {@link error} repeats it. Callers (WorkBoardEngine,
+   * agent_spawn) MUST branch on this rather than treating any returned
+   * `summary` as a completed run: a failed run that surfaced its error string
+   * as `summary` must not be recorded as success.
+   */
+  ok: boolean;
+  /** Failure reason when `ok === false`. Absent on a clean completion. */
+  error?: string;
 }
 
 export interface SubAgentSpawnCallbacks {
@@ -314,12 +327,23 @@ export class SubAgentRunner {
         toolCallCount: 0,
         turnCount: 0,
         childSessionId,
+        // Provider-missing is a failed spawn, not a completed run with the
+        // error text as its summary — signal it structurally so callers do
+        // not record it as success.
+        ok: false,
+        error: msg,
       };
     }
 
     let totalToolCalls = 0;
     let lastText = "";
     let turn = 0;
+    // Track whether the child loop completed cleanly. Starts false; flips true
+    // only after `runTurn` returns without throwing. The catch leaves it false
+    // so the error text surfaced as `summary` is reported as a FAILED spawn,
+    // never a completed run.
+    let ok = false;
+    let failureReason: string | undefined;
 
     // Prepend the mode preamble (posture + auto-skill recommendation) to the
     // instructions. The preamble is empty for the default mode, leaving the
@@ -364,10 +388,12 @@ export class SubAgentRunner {
       );
       totalToolCalls = result.toolCalls.length;
       lastText = result.text;
+      ok = true;
     } catch (err) {
       const msg = (err as Error).message ?? "sub-agent run failed";
       callbacks?.onError?.(msg);
       lastText = msg;
+      failureReason = msg;
     }
 
     return {
@@ -375,6 +401,8 @@ export class SubAgentRunner {
       toolCallCount: totalToolCalls,
       turnCount: turn,
       childSessionId,
+      ok,
+      ...(ok ? {} : { error: failureReason ?? lastText }),
     };
   }
 

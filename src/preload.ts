@@ -1400,6 +1400,56 @@ const api = {
     ipcRenderer.on(WORK_BOARD.itemChanged, listener);
     return () => ipcRenderer.removeListener(WORK_BOARD.itemChanged, listener);
   },
+  // Agent-orchestration run: kick off plan→approve→execute for one item. The
+  // promise resolves with the terminal WorkItemRunResult, but live phase
+  // updates flow over onWorkBoardRunProgress; coarse started/finished/failed
+  // markers (for the per-item running indicator) flow over the on* siblings.
+  // `opts.agentName` selects a named agent profile (drives the child model).
+  runWorkBoardItem: async (id: number, opts?: { agentName?: string }) =>
+    ipcRenderer.invoke(WORK_BOARD.run, id, opts) as Promise<
+      | import("./shared/work-board-types.js").WorkItemRunResult
+      | { ok: false; error: string }
+    >,
+  // Live per-phase progress for an in-flight run (planning / awaiting_approval /
+  // executing / denied / done / error). Payload === the engine's
+  // WorkBoardRunEvent (aliased as RunProgressEventPayload).
+  onWorkBoardRunProgress: (
+    handler: (payload: import("./shared/work-board-types.js").RunProgressEventPayload) => void,
+  ) => {
+    const listener = (_e: unknown, payload: Parameters<typeof handler>[0]) => handler(payload);
+    ipcRenderer.on(WORK_BOARD.runProgress, listener);
+    return () => ipcRenderer.removeListener(WORK_BOARD.runProgress, listener);
+  },
+  // Coarse marker: a run started for `itemId` (renderer sets the running flag).
+  onWorkBoardRunStarted: (
+    handler: (payload: { itemId: number; at: string }) => void,
+  ) => {
+    const listener = (_e: unknown, payload: Parameters<typeof handler>[0]) => handler(payload);
+    ipcRenderer.on(WORK_BOARD.runStarted, listener);
+    return () => ipcRenderer.removeListener(WORK_BOARD.runStarted, listener);
+  },
+  // Coarse marker: a run finished for `itemId` with a terminal status (renderer
+  // clears the running flag). `status` mirrors WorkItemRunResult.status.
+  onWorkBoardRunFinished: (
+    handler: (payload: {
+      itemId: number;
+      status: "completed" | "denied" | "not_found" | "error" | "already_running";
+      at: string;
+    }) => void,
+  ) => {
+    const listener = (_e: unknown, payload: Parameters<typeof handler>[0]) => handler(payload);
+    ipcRenderer.on(WORK_BOARD.runFinished, listener);
+    return () => ipcRenderer.removeListener(WORK_BOARD.runFinished, listener);
+  },
+  // Coarse marker: the engine threw before producing a result (renderer clears
+  // the running flag and surfaces `reason`).
+  onWorkBoardRunFailed: (
+    handler: (payload: { itemId: number; reason: string; at: string }) => void,
+  ) => {
+    const listener = (_e: unknown, payload: Parameters<typeof handler>[0]) => handler(payload);
+    ipcRenderer.on(WORK_BOARD.runFailed, listener);
+    return () => ipcRenderer.removeListener(WORK_BOARD.runFailed, listener);
+  },
 
   // Overlay IPC bridges (main → renderer push)
   onOverlayShow: (handler: (item: unknown) => void) => {

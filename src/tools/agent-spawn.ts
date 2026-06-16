@@ -188,6 +188,18 @@ export function createAgentSpawnTool(deps: AgentSpawnToolDeps): Tool {
               deps.emit({ spawnId, type: "error", message: msg }),
           },
         );
+        // A spawn that could not run (LLM provider unconfigured, child loop
+        // threw) returns `ok: false` with the error text as `summary` rather
+        // than throwing. Surface it as a tool error so the assistant does not
+        // treat the error string as a successful sub-agent result.
+        if (result.ok === false) {
+          const message = result.error ?? result.summary;
+          deps.emit({ spawnId, type: "error", message });
+          return {
+            output: JSON.stringify({ error: message }),
+            isError: true,
+          };
+        }
         deps.emit({
           spawnId,
           type: "done",
