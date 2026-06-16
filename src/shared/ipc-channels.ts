@@ -49,6 +49,16 @@ export const WORK_BOARD = {
   // (created/updated/transitioned/completed/reopened/removed) so the renderer
   // board view re-lists without polling.
   itemChanged: "lvis:work-board:item-changed",
+  // Renderer → main: kick off a plan→approve→execute run for one item.
+  // Fire-and-forget; the renderer tracks completion via the run-progress
+  // events below (mirroring the ROUTINES_V2 running-* pattern).
+  run: "lvis:work-board:run",
+  // Main → renderer: per-phase liveness for an in-flight run (WorkBoardRunEvent).
+  runProgress: "lvis:work-board:run-progress",
+  // Main → renderer: terminal markers so the renderer can clear running state.
+  runStarted: "lvis:work-board:run-started",
+  runFinished: "lvis:work-board:run-finished",
+  runFailed: "lvis:work-board:run-failed",
 } as const;
 
 export const PERMISSIONS = {
