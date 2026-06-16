@@ -251,6 +251,10 @@ export function registerWorkBoardHandlers(deps: IpcDeps): void {
       auditUnauthorized(auditLogger, WORK_BOARD.runTranscript, e);
       return UNAUTHORIZED_FRAME;
     }
+    // The renderer-supplied runId is interpolated into the transcript file path
+    // (sessions/<itemId>/<runId>.jsonl), so validate it against path traversal
+    // BEFORE the read — engine run ids are UUIDs. Anything else → empty.
+    if (typeof runId !== "string" || !/^[A-Za-z0-9_-]+$/.test(runId)) return { events: [] };
     const storage = createDirStorage(openFeatureNamespace("work-board").dir);
     return { events: await readRunTranscript(storage, itemId, runId) };
   });
