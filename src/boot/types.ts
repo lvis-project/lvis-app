@@ -128,6 +128,12 @@ export interface AppServices {
   sessionTodoStore?: import("../main/session-todo-store.js").SessionTodoStore;
   /** Work board persistence (~/.lvis/work-board/board.json) — backs the work-board IPC domain. */
   workBoardStore?: import("../main/work-board-store.js").WorkBoardStore;
+  /**
+   * Work board agent-orchestration engine — owns the plan→approve→execute run
+   * for one item. Wired after the SubAgentRunner exists at boot; reached by the
+   * work-board IPC `run` handler and the `work_board_run` LLM tool.
+   */
+  workBoardEngine?: import("../core/work-board-engine.js").WorkBoardEngine;
   askUserQuestionGate?: import("../main/ask-user-question-gate.js").AskUserQuestionGate;
   skillStore?: import("../main/skill-store.js").SkillStore;
   agentProfileStore?: import("../main/agent-profile-store.js").AgentProfileStore;

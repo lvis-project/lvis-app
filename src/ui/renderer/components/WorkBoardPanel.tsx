@@ -17,6 +17,7 @@
  * places it in.
  */
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { AlertTriangle, CheckCircle2, Loader2, Play, XCircle } from "lucide-react";
 import { t } from "../../../i18n/runtime.js";
 import { Badge } from "../../../components/ui/badge.js";
 import { Button } from "../../../components/ui/button.js";
@@ -36,6 +37,7 @@ import {
 } from "../../../components/ui/dialog.js";
 import type { LvisApi } from "../types.js";
 import type {
+  RunProgressEventPayload,
   WorkItemCreateInput,
   WorkItemPriority,
   WorkItemResolved,
@@ -113,19 +115,238 @@ function formatDue(iso: string | undefined): string {
   return date ? t("workBoard.dueLabel", { date }) : t("workBoard.noDueDate");
 }
 
+// ─── Agent-orchestration run state ─────────────────────────────────────────────
+//
+// Live per-item run state derived ENTIRELY from the host run events — there is
+// no second source of truth in the renderer. `phase` mirrors the engine's
+// WorkBoardRunEvent phases; `busy` is the coarse "a run is in flight" marker
+// driven by runStarted/runFinished/runFailed so the indicator survives the gap
+// before the first progress event AND the moment after the terminal one.
+//
+// `awaiting_approval` is intentionally surfaced as a passive notice: the engine
+// drives plan approval through the host ApprovalGate (`requestAndWait`), which
+// already renders the standard §8 approval dialog. The board does NOT fork a
+// second approve/reject control — doing so would mean two competing gates for
+// one decision. The notice points the user at the surfaced approval prompt.
+
+type RunPhase = RunProgressEventPayload["phase"];
+
+interface WorkItemRunState {
+  /** A run is in flight (between runStarted and runFinished/runFailed). */
+  busy: boolean;
+  /** Latest phase from the engine progress stream. Undefined until the first event. */
+  phase?: RunPhase;
+  /** Latest child-agent turn text for the active (planning/executing) phase. */
+  liveText?: string;
+  /** Terminal failure / denial reason (error / denied phase or runFailed). */
+  reason?: string;
+  /** Execute child's session id, set on the terminal `done` event. */
+  runSessionId?: string;
+}
+
+type RunStateMap = Record<number, WorkItemRunState | undefined>;
+
+/** Phases that should show an active spinner. */
+function isActivePhase(phase: RunPhase | undefined): boolean {
+  return phase === "planning" || phase === "executing";
+}
+
+/** True while the run is in flight (no terminal phase reached yet). */
+function isRunInFlight(run: WorkItemRunState | undefined): boolean {
+  if (!run) return false;
+  if (run.phase === "done" || run.phase === "denied" || run.phase === "error") return false;
+  return run.busy || run.phase !== undefined;
+}
+
+/**
+ * Subscribe to the four host run channels in ONE effect with a single cleanup.
+ * Returns the per-item run state map plus a `runItem` launcher. The launcher
+ * optimistically seeds `busy` so the card shows a starting indicator instantly,
+ * even before the `runStarted` broadcast lands.
+ */
+function useWorkBoardRun(api: LvisApi): {
+  runState: RunStateMap;
+  runItem: (id: number) => void;
+} {
+  const [runState, setRunState] = useState<RunStateMap>({});
+  const mountedRef = useRef(true);
+  useEffect(() => () => { mountedRef.current = false; }, []);
+
+  const patch = useCallback((id: number, next: Partial<WorkItemRunState>) => {
+    if (!mountedRef.current) return;
+    setRunState((prev) => {
+      const cur = prev[id] ?? { busy: false };
+      return { ...prev, [id]: { ...cur, ...next } };
+    });
+  }, []);
+
+  useEffect(() => {
+    const unsubs: Array<() => void> = [];
+    if (typeof api.onWorkBoardRunProgress === "function") {
+      unsubs.push(
+        api.onWorkBoardRunProgress((ev: RunProgressEventPayload) => {
+          patch(ev.itemId, {
+            phase: ev.phase,
+            // Only active phases carry live turn text; clear it on transition.
+            liveText: ev.phase === "planning" || ev.phase === "executing" ? ev.text : undefined,
+            reason: ev.phase === "error" || ev.phase === "denied" ? ev.message : undefined,
+            runSessionId: ev.runSessionId,
+            // A terminal phase ends the in-flight window even if runFinished is late.
+            busy: ev.phase !== "done" && ev.phase !== "denied" && ev.phase !== "error",
+          });
+        }),
+      );
+    }
+    if (typeof api.onWorkBoardRunStarted === "function") {
+      unsubs.push(
+        api.onWorkBoardRunStarted(({ itemId }) => {
+          patch(itemId, { busy: true, phase: undefined, liveText: undefined, reason: undefined });
+        }),
+      );
+    }
+    if (typeof api.onWorkBoardRunFinished === "function") {
+      unsubs.push(
+        api.onWorkBoardRunFinished(({ itemId, status }) => {
+          patch(itemId, {
+            busy: false,
+            phase: status === "completed" ? "done" : status === "denied" ? "denied" : status === "error" ? "error" : undefined,
+          });
+        }),
+      );
+    }
+    if (typeof api.onWorkBoardRunFailed === "function") {
+      unsubs.push(
+        api.onWorkBoardRunFailed(({ itemId, reason }) => {
+          patch(itemId, { busy: false, phase: "error", reason });
+        }),
+      );
+    }
+    return () => {
+      for (const u of unsubs) u();
+    };
+  }, [api, patch]);
+
+  const runItem = useCallback(
+    (id: number) => {
+      if (typeof api.runWorkBoardItem !== "function") return;
+      // Optimistic: show a starting indicator before runStarted lands.
+      patch(id, { busy: true, phase: undefined, liveText: undefined, reason: undefined, runSessionId: undefined });
+      void api.runWorkBoardItem(id).then((result) => {
+        if (!mountedRef.current) return;
+        if (result && "ok" in result && result.ok === false) {
+          patch(id, { busy: false, phase: "error", reason: result.error });
+          return;
+        }
+        if (result && "status" in result) {
+          patch(id, {
+            busy: false,
+            phase:
+              result.status === "completed"
+                ? "done"
+                : result.status === "denied"
+                  ? "denied"
+                  : result.status === "error" || result.status === "not_found"
+                    ? "error"
+                    : undefined,
+            reason: result.reason,
+            runSessionId: result.runSessionId,
+          });
+        }
+      }).catch((err: unknown) => {
+        if (!mountedRef.current) return;
+        patch(id, { busy: false, phase: "error", reason: (err as Error).message });
+      });
+    },
+    [api, patch],
+  );
+
+  return { runState, runItem };
+}
+
+// ─── Run indicator (live phase badge + spinner) ────────────────────────────────
+
+function RunIndicator({ run }: { run: WorkItemRunState | undefined }) {
+  if (!run) return null;
+  const inFlight = isRunInFlight(run);
+  const phase = run.phase;
+
+  // Terminal states — only render error/denied; `done` is reflected by the
+  // item's stored output in the detail modal, not a persistent card badge.
+  if (!inFlight) {
+    if (phase === "denied") {
+      return (
+        <span
+          className="inline-flex items-center gap-1 rounded px-1.5 py-0.5 text-[10px] font-medium border border-destructive/40 bg-destructive/10 text-destructive"
+          data-testid="work-board-run-denied"
+        >
+          <XCircle className="h-3 w-3" />
+          {t("workBoard.runDenied")}
+        </span>
+      );
+    }
+    if (phase === "error") {
+      return (
+        <span
+          className="inline-flex items-center gap-1 rounded px-1.5 py-0.5 text-[10px] font-medium border border-destructive/40 bg-destructive/10 text-destructive"
+          title={run.reason}
+          data-testid="work-board-run-error"
+        >
+          <AlertTriangle className="h-3 w-3" />
+          {t("workBoard.runError")}
+        </span>
+      );
+    }
+    return null;
+  }
+
+  const label =
+    phase === "planning"
+      ? t("workBoard.runPlanning")
+      : phase === "awaiting_approval"
+        ? t("workBoard.runAwaitingApproval")
+        : phase === "executing"
+          ? t("workBoard.runExecuting")
+          : t("workBoard.runStartingLabel");
+
+  // `awaiting_approval` uses the accent (primary) token with a ring so it reads
+  // as "needs you" without reaching for a raw palette color (theme-token rule).
+  // The standard host ApprovalGate dialog renders the actual approve/reject; the
+  // label here points the user at that surfaced prompt.
+  const awaiting = phase === "awaiting_approval";
+  return (
+    <span
+      className={`inline-flex items-center gap-1 rounded px-1.5 py-0.5 text-[10px] font-medium border border-primary/40 bg-primary/10 text-primary ${
+        awaiting ? "ring-1 ring-primary/40" : ""
+      }`}
+      data-testid="work-board-run-indicator"
+      data-phase={phase ?? "starting"}
+    >
+      {awaiting ? (
+        <CheckCircle2 className="h-3 w-3" />
+      ) : (
+        <Loader2 className="h-3 w-3 animate-spin" />
+      )}
+      {label}
+    </span>
+  );
+}
+
 // ─── Card for a single work item ──────────────────────────────────────────────
 
 interface WorkItemCardProps {
   item: WorkItemResolved;
+  run: WorkItemRunState | undefined;
   onStart: (id: number) => void;
   onComplete: (id: number) => void;
   onReopen: (id: number) => void;
+  onRun: (id: number) => void;
   onOpenDetail: (id: number) => void;
 }
 
-function WorkItemCard({ item, onStart, onComplete, onReopen, onOpenDetail }: WorkItemCardProps) {
+function WorkItemCard({ item, run, onStart, onComplete, onReopen, onRun, onOpenDetail }: WorkItemCardProps) {
   const overdue = item.status_resolved === "overdue";
   const isCompleted = item.status === "completed";
+  const busy = isRunInFlight(run);
   return (
     <button
       type="button"
@@ -146,19 +367,40 @@ function WorkItemCard({ item, onStart, onComplete, onReopen, onOpenDetail }: Wor
           {item.detail && (
             <p className="mt-1 line-clamp-2 text-[11px] text-muted-foreground">{item.detail}</p>
           )}
-          <div className="mt-1.5 flex items-center gap-1.5">
+          <div className="mt-1.5 flex flex-wrap items-center gap-1.5">
             {overdue && (
               <Badge variant="outline" className="border-destructive/50 text-destructive">
                 {t("workBoard.overdueBadge")}
               </Badge>
             )}
             <span className="text-[11px] text-muted-foreground">{formatDue(item.due_at)}</span>
+            <RunIndicator run={run} />
           </div>
         </div>
       </div>
       {/* Inline lifecycle actions. stopPropagation so the card's open-detail
           click does not also fire when the user only wanted to transition. */}
       <div className="mt-2 flex justify-end gap-1">
+        {!isCompleted && (
+          <Button
+            size="sm"
+            variant="ghost"
+            className="h-6 px-2 text-[11px]"
+            disabled={busy}
+            onClick={(e) => {
+              e.stopPropagation();
+              onRun(item.id);
+            }}
+            data-testid="work-board-run"
+          >
+            {busy ? (
+              <Loader2 className="mr-1 h-3 w-3 animate-spin" />
+            ) : (
+              <Play className="mr-1 h-3 w-3" />
+            )}
+            {busy ? t("workBoard.runBusyShort") : t("workBoard.runButton")}
+          </Button>
+        )}
         {item.status === "planned" && (
           <Button
             size="sm"
@@ -211,11 +453,13 @@ function WorkItemCard({ item, onStart, onComplete, onReopen, onOpenDetail }: Wor
 interface BoardColumnProps {
   heading: string;
   items: WorkItemResolved[];
+  runState: RunStateMap;
   emptyLabel: string;
   loading: boolean;
   onStart: (id: number) => void;
   onComplete: (id: number) => void;
   onReopen: (id: number) => void;
+  onRun: (id: number) => void;
   onOpenDetail: (id: number) => void;
   testId: string;
 }
@@ -223,11 +467,13 @@ interface BoardColumnProps {
 function BoardColumn({
   heading,
   items,
+  runState,
   emptyLabel,
   loading,
   onStart,
   onComplete,
   onReopen,
+  onRun,
   onOpenDetail,
   testId,
 }: BoardColumnProps) {
@@ -250,9 +496,11 @@ function BoardColumn({
               <WorkItemCard
                 key={item.id}
                 item={item}
+                run={runState[item.id]}
                 onStart={onStart}
                 onComplete={onComplete}
                 onReopen={onReopen}
+                onRun={onRun}
                 onOpenDetail={onOpenDetail}
               />
             ))}
@@ -435,8 +683,71 @@ export function WorkItemCreateDialog({ api, onClose, onCreated }: CreateDialogPr
 interface DetailDialogProps {
   api: LvisApi;
   itemId: number;
+  run: WorkItemRunState | undefined;
   onClose: () => void;
   onChanged: () => void;
+  onRun: (id: number) => void;
+}
+
+// ─── Run output panel (live + persisted plan/result) ───────────────────────────
+//
+// Renders the captured plan + execution result. Source precedence: the live run
+// state's terminal session id / liveText (current run) layered over the item's
+// persisted `plan` / `output` fields (last completed run). A monospace,
+// scrollable block keeps long agent output readable inside the modal.
+
+function RunOutputPanel({
+  item,
+  run,
+}: {
+  item: WorkItemResolved;
+  run: WorkItemRunState | undefined;
+}) {
+  const inFlight = isRunInFlight(run);
+  const plan = item.plan;
+  const output = item.output;
+  const liveText = inFlight && isActivePhase(run?.phase) ? run?.liveText : undefined;
+  const sessionId = run?.runSessionId ?? item.runSessionId;
+
+  // Nothing to show: never run AND no live activity.
+  if (!plan && !output && !liveText && !run) return null;
+
+  return (
+    <div className="space-y-2 rounded-md border bg-muted/20 p-2.5" data-testid="work-board-run-output">
+      <div className="flex items-center justify-between">
+        <RunIndicator run={run} />
+        {sessionId && (
+          <span className="text-[10px] text-muted-foreground" title={sessionId}>
+            {t("workBoard.runSessionLabel", { id: sessionId.slice(0, 8) })}
+          </span>
+        )}
+      </div>
+      {liveText && (
+        <div data-testid="work-board-run-live">
+          <div className="text-[11px] font-medium text-muted-foreground">{t("workBoard.runLiveHeading")}</div>
+          <pre className="mt-1 max-h-32 overflow-auto whitespace-pre-wrap break-words rounded bg-background/60 p-2 text-[11px] leading-relaxed">
+            {liveText}
+          </pre>
+        </div>
+      )}
+      {plan && (
+        <div data-testid="work-board-run-plan">
+          <div className="text-[11px] font-medium text-muted-foreground">{t("workBoard.runPlanHeading")}</div>
+          <pre className="mt-1 max-h-40 overflow-auto whitespace-pre-wrap break-words rounded bg-background/60 p-2 text-[11px] leading-relaxed">
+            {plan}
+          </pre>
+        </div>
+      )}
+      {output && (
+        <div data-testid="work-board-run-result">
+          <div className="text-[11px] font-medium text-muted-foreground">{t("workBoard.runOutputHeading")}</div>
+          <pre className="mt-1 max-h-48 overflow-auto whitespace-pre-wrap break-words rounded bg-background/60 p-2 text-[11px] leading-relaxed">
+            {output}
+          </pre>
+        </div>
+      )}
+    </div>
+  );
 }
 
 const STATUS_LABEL: Record<WorkItemResolved["status_resolved"], string> = {
@@ -446,9 +757,10 @@ const STATUS_LABEL: Record<WorkItemResolved["status_resolved"], string> = {
   overdue: "overdueBadge",
 };
 
-export function WorkItemDetailDialog({ api, itemId, onClose, onChanged }: DetailDialogProps) {
+export function WorkItemDetailDialog({ api, itemId, run, onClose, onChanged, onRun }: DetailDialogProps) {
   const [item, setItem] = useState<WorkItemResolved | null>(null);
   const [loadError, setLoadError] = useState("");
+  const [reloadKey, setReloadKey] = useState(0);
 
   const [title, setTitle] = useState("");
   const [detail, setDetail] = useState("");
@@ -489,7 +801,15 @@ export function WorkItemDetailDialog({ api, itemId, onClose, onChanged }: Detail
     return () => {
       cancelled = true;
     };
-  }, [api, itemId]);
+  }, [api, itemId, reloadKey]);
+
+  // When the in-flight run reaches a terminal phase, re-fetch so the persisted
+  // `plan` / `output` / `runSessionId` written by the engine land in the item.
+  const terminalPhase =
+    run?.phase === "done" || run?.phase === "denied" || run?.phase === "error";
+  useEffect(() => {
+    if (terminalPhase) setReloadKey((k) => k + 1);
+  }, [terminalPhase]);
 
   const dirty = useMemo(() => {
     if (!item) return false;
@@ -639,6 +959,7 @@ export function WorkItemDetailDialog({ api, itemId, onClose, onChanged }: Detail
               </span>
             </div>
             {actionError && <p className="text-sm text-destructive" data-testid="work-board-detail-error">{actionError}</p>}
+            <RunOutputPanel item={item} run={run} />
           </div>
         )}
 
@@ -655,6 +976,22 @@ export function WorkItemDetailDialog({ api, itemId, onClose, onChanged }: Detail
               {t("workBoard.deleteButton")}
             </Button>
             <div className="flex gap-2">
+              {!isCompleted && (
+                <Button
+                  size="sm"
+                  variant="outline"
+                  disabled={busy || isRunInFlight(run)}
+                  onClick={() => onRun(item.id)}
+                  data-testid="work-board-detail-run"
+                >
+                  {isRunInFlight(run) ? (
+                    <Loader2 className="mr-1 h-3 w-3 animate-spin" />
+                  ) : (
+                    <Play className="mr-1 h-3 w-3" />
+                  )}
+                  {isRunInFlight(run) ? t("workBoard.runBusyShort") : t("workBoard.runButton")}
+                </Button>
+              )}
               <Button size="sm" variant="outline" disabled={busy} onClick={onClose}>
                 {t("workBoard.cancelButton")}
               </Button>
@@ -780,9 +1117,26 @@ export function WorkBoardPanel({ api }: WorkBoardPanelProps) {
 
   const capReached = items.length >= MAX_ITEMS;
 
+  // Agent-orchestration run state + launcher. Subscribes to the four host run
+  // channels in a single effect (cleanup inside the hook).
+  const { runState, runItem } = useWorkBoardRun(api);
+
+  // A finished run may have written engine fields (plan/output/runStatus) onto
+  // the item; re-list so the board view reflects the persisted run result.
+  // The engine does NOT emit `itemChanged` for run-field writes (those are not
+  // board-lifecycle mutations), so the run terminal markers drive this refresh.
+  useEffect(() => {
+    if (typeof api.onWorkBoardRunFinished !== "function") return undefined;
+    const unsub = api.onWorkBoardRunFinished(() => {
+      void refresh();
+    });
+    return unsub;
+  }, [api, refresh]);
+
   const onStart = useCallback((id: number) => void handleTransition(id, "in_progress"), [handleTransition]);
   const onComplete = useCallback((id: number) => void handleComplete(id), [handleComplete]);
   const onReopen = useCallback((id: number) => void handleReopen(id), [handleReopen]);
+  const onRun = useCallback((id: number) => runItem(id), [runItem]);
   const onOpenDetail = useCallback((id: number) => setDetailId(id), []);
 
   return (
@@ -824,33 +1178,39 @@ export function WorkBoardPanel({ api }: WorkBoardPanelProps) {
             <BoardColumn
               heading={t("workBoard.columnPlanned")}
               items={planned}
+              runState={runState}
               emptyLabel={t("workBoard.emptyPlanned")}
               loading={loading}
               onStart={onStart}
               onComplete={onComplete}
               onReopen={onReopen}
+              onRun={onRun}
               onOpenDetail={onOpenDetail}
               testId="work-board-column-planned"
             />
             <BoardColumn
               heading={t("workBoard.columnInProgress")}
               items={inProgress}
+              runState={runState}
               emptyLabel={t("workBoard.emptyInProgress")}
               loading={loading}
               onStart={onStart}
               onComplete={onComplete}
               onReopen={onReopen}
+              onRun={onRun}
               onOpenDetail={onOpenDetail}
               testId="work-board-column-in-progress"
             />
             <BoardColumn
               heading={t("workBoard.columnCompleted")}
               items={completed}
+              runState={runState}
               emptyLabel={t("workBoard.emptyCompleted")}
               loading={loading}
               onStart={onStart}
               onComplete={onComplete}
               onReopen={onReopen}
+              onRun={onRun}
               onOpenDetail={onOpenDetail}
               testId="work-board-column-completed"
             />
@@ -873,11 +1233,13 @@ export function WorkBoardPanel({ api }: WorkBoardPanelProps) {
         <WorkItemDetailDialog
           api={api}
           itemId={detailId}
+          run={runState[detailId]}
           onClose={() => setDetailId(null)}
           onChanged={() => {
             setDetailId(null);
             void refresh();
           }}
+          onRun={onRun}
         />
       )}
     </>

@@ -40,6 +40,27 @@ export type WorkItemStatusResolved =
  */
 export type WorkItemPriority = "high" | "medium" | "low";
 
+/**
+ * Agent-orchestration run lifecycle for a single item, owned by the
+ * {@link WorkBoardEngine} plan→approve→execute sequence. Distinct from the
+ * board's 3-state lifecycle (`status`): an item can be `planned` (board status)
+ * while its `runStatus` walks `planning → awaiting_approval → executing →
+ * completed`. `idle` is the implicit default for items that have never been
+ * run (the field is absent on disk for those — there is no fallback default,
+ * consumers treat absent as "never run").
+ *
+ * `denied` = the user rejected (or let time out) the plan-approval modal.
+ * `error` = the engine threw during plan or execute.
+ */
+export type WorkItemRunStatus =
+  | "idle"
+  | "planning"
+  | "awaiting_approval"
+  | "executing"
+  | "completed"
+  | "denied"
+  | "error";
+
 // ── Work item record ────────────────────────────────────────────────────────
 
 /**
@@ -57,6 +78,20 @@ export interface WorkItem {
   created_at: string;
   updated_at: string;
   completed_at?: string;
+  // ── Agent-orchestration run fields (WorkBoardEngine, P2) ──
+  // All optional so existing `board.json` rows load unchanged (absent ⇒ never
+  // run). These are engine-written only — they are deliberately NOT part of
+  // `WorkItemUpdateInput`, so a user/LLM patch cannot forge a run result.
+  /** Plan→approve→execute lifecycle. Absent ⇒ never run (treated as `idle`). */
+  runStatus?: WorkItemRunStatus;
+  /** Captured plan text produced by the plan-mode child agent. */
+  plan?: string;
+  /** Captured execution OUTPUT produced by the execute-mode child agent. */
+  output?: string;
+  /** The execute child's `childSessionId` — links the run to its isolated session for audit/trace. */
+  runSessionId?: string;
+  /** ISO-8601 instant the run fields were last written. */
+  runUpdatedAt?: string;
 }
 
 /**
@@ -169,4 +204,69 @@ export interface WorkItemChangedEventPayload {
     | "removed";
   /** ISO-8601 timestamp the change was applied. */
   changedAt: string;
+}
+
+/**
+ * Progress event streamed by the {@link WorkBoardEngine} while a single item's
+ * plan→approve→execute run is in flight. Unlike {@link WorkItemChangedEventPayload}
+ * (which fires on persisted board mutations), these are transient liveness
+ * events so the renderer can show a per-item running indicator with the live
+ * plan / output text and the current phase.
+ *
+ * `phase` mirrors the run lifecycle:
+ *   - `planning`          — plan-mode child agent is running; `text` carries the latest turn text.
+ *   - `awaiting_approval` — the plan-approval modal is shown; the run is blocked on the user.
+ *   - `executing`         — execute-mode child agent is running; `text` carries the latest turn text.
+ *   - `denied`            — the user rejected (or timed out) the plan approval; the run stopped.
+ *   - `done`              — the run finished successfully (execute output persisted).
+ *   - `error`             — the run threw; `message` carries the failure reason.
+ */
+export interface WorkBoardRunEvent {
+  itemId: number;
+  phase:
+    | "planning"
+    | "awaiting_approval"
+    | "executing"
+    | "denied"
+    | "done"
+    | "error";
+  /** 1-based child-agent turn number (planning / executing phases). */
+  turn?: number;
+  /** Latest child-agent turn text (planning / executing phases). */
+  text?: string;
+  /** Failure reason (error phase) or denial reason (denied phase). */
+  message?: string;
+  /** The execute child's session id, set on the terminal `done` event. */
+  runSessionId?: string;
+  /** ISO-8601 timestamp the event was emitted. */
+  at: string;
+}
+
+/**
+ * Renderer-facing name for the run-progress wire payload. It is structurally
+ * identical to {@link WorkBoardRunEvent} (the engine's per-phase event) — the
+ * IPC layer forwards the engine event verbatim over {@link WORK_BOARD.runProgress},
+ * so there is exactly one wire shape, not a divergent copy. The alias gives the
+ * preload bridge + renderer a stable consumer-facing type name without
+ * importing the engine module (which pulls Node built-ins).
+ */
+export type RunProgressEventPayload = WorkBoardRunEvent;
+
+/**
+ * Result envelope returned by the `WORK_BOARD.run` channel — the terminal
+ * outcome of one plan→approve→execute run. Mirrors the engine's `RunItemResult`
+ * but lives here so the renderer can type the `runWorkBoardItem` return without
+ * importing the engine (Node-built-in-free). The IPC handler forwards the
+ * engine result verbatim; `not_found` is the unknown-id outcome.
+ */
+export interface WorkItemRunResult {
+  status: "completed" | "denied" | "not_found" | "error";
+  /** Captured execution OUTPUT (completed). */
+  output?: string;
+  /** Captured plan text (completed / denied). */
+  plan?: string;
+  /** The execute child's session id (completed). */
+  runSessionId?: string;
+  /** Failure / denial reason (error / denied). */
+  reason?: string;
 }

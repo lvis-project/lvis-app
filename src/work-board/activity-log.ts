@@ -25,7 +25,12 @@ export interface ActivityEvent {
     | "completed"
     | "reopened"
     | "transitioned"
-    | "deleted";
+    | "deleted"
+    // Agent-orchestration run verbs (WorkBoardEngine plan→approve→execute).
+    | "run-planned"
+    | "run-executed"
+    | "run-denied"
+    | "run-failed";
   itemId?: number;
   title?: string;
   from?: string;
