@@ -780,6 +780,15 @@ export type LvisApi = {
     | import("../../shared/work-board-types.js").WorkItemRunResult
     | { ok: false; error: string }
   >;
+  // Generate a daily / weekly personal work report (markdown) from the board
+  // state + activity log + learned memory.
+  generateWorkBoardReport?: (
+    kind: "daily" | "weekly",
+    input?: { date?: string; weekIso?: string; weekOffset?: number },
+  ) => Promise<
+    | import("../../shared/work-board-types.js").WorkBoardReportResult
+    | { ok: false; error: string }
+  >;
   // Live per-phase progress for an in-flight run. Payload === the engine's
   // WorkBoardRunEvent (aliased RunProgressEventPayload).
   onWorkBoardRunProgress: (

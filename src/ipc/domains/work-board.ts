@@ -27,8 +27,11 @@
  * at boot. When the engine is absent (boot did not construct it) the handler
  * returns `{ ok: false, error: "no-engine" }`.
  *
- * The `generate-report` channel is intentionally NOT registered here — it is
- * wired in a later phase.
+ * The `generate-report` channel produces a daily / weekly personal work report
+ * from the board state + activity log + learned memory via the host-native
+ * {@link WorkBoardReporter}, returning the generated markdown. When the
+ * reporter is absent (boot did not construct it) it returns
+ * `{ ok: false, error: "no-reporter" }`.
  */
 import { ipcMain } from "electron";
 import { validateSender, UNAUTHORIZED_FRAME, auditUnauthorized } from "../gated.js";
@@ -48,9 +51,11 @@ import type {
 const NO_STORE = { ok: false, error: "no-store" as const };
 /** Shared "engine not constructed at boot" envelope for the `run` channel. */
 const NO_ENGINE = { ok: false, error: "no-engine" as const };
+/** Shared "reporter not constructed at boot" envelope for `generate-report`. */
+const NO_REPORTER = { ok: false, error: "no-reporter" as const };
 
 export function registerWorkBoardHandlers(deps: IpcDeps): void {
-  const { workBoardStore, workBoardEngine, auditLogger, getMainWindow, getAppWindows } = deps;
+  const { workBoardStore, workBoardEngine, workBoardReport, auditLogger, getMainWindow, getAppWindows } = deps;
 
   /**
    * Fan the `itemChanged` event out to every renderer window so detached
@@ -208,4 +213,30 @@ export function registerWorkBoardHandlers(deps: IpcDeps): void {
       return { status: "error", reason } satisfies WorkItemRunResult;
     }
   });
+
+  // ─── Generate report (daily | weekly) ───────────
+  // Renderer → main: build a personal work report. The reporter returns a
+  // discriminated `{ status: "ok" | "empty" }` envelope (forwarded verbatim).
+  // An LLM provider outage surfaces as a thrown error → mapped to an `error`
+  // envelope so the renderer branches on one shape, never a raw exception.
+  ipcMain.handle(
+    WORK_BOARD.generateReport,
+    async (
+      e,
+      kind: "daily" | "weekly",
+      input?: { date?: string; weekIso?: string; weekOffset?: number },
+    ) => {
+      if (!validateSender(e)) {
+        auditUnauthorized(auditLogger, WORK_BOARD.generateReport, e);
+        return UNAUTHORIZED_FRAME;
+      }
+      if (!workBoardReport) return NO_REPORTER;
+      try {
+        return await workBoardReport.generate(kind === "weekly" ? "weekly" : "daily", input);
+      } catch (err) {
+        const reason = err instanceof Error ? err.message : String(err);
+        return { status: "error" as const, kind, reason };
+      }
+    },
+  );
 }

@@ -134,6 +134,13 @@ export interface AppServices {
    * work-board IPC `run` handler and the `work_board_run` LLM tool.
    */
   workBoardEngine?: import("../core/work-board-engine.js").WorkBoardEngine;
+  /**
+   * Host Work Board reporter (daily / weekly). Constructed at boot after the
+   * one-shot LLM caller exists; the work-board IPC domain's `generate-report`
+   * channel forwards renderer requests here. Absent ⇒ boot did not construct
+   * it (the IPC handler then returns `{ ok: false, error: "no-reporter" }`).
+   */
+  workBoardReport?: import("../work-board/work-report.js").WorkBoardReporter;
   askUserQuestionGate?: import("../main/ask-user-question-gate.js").AskUserQuestionGate;
   skillStore?: import("../main/skill-store.js").SkillStore;
   agentProfileStore?: import("../main/agent-profile-store.js").AgentProfileStore;
