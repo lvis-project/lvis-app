@@ -1,4 +1,4 @@
-import { ArrowDownToLine, Database, Download, ExternalLink, Home, KeyRound, Menu, Plus, RefreshCw, Repeat2, Search, Star, Wrench, X } from "lucide-react";
+import { ArrowDownToLine, Database, Download, ExternalLink, Home, KanbanSquare, KeyRound, Menu, Plus, RefreshCw, Repeat2, Search, Star, Wrench, X } from "lucide-react";
 import { Button } from "../../components/ui/button.js";
 import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuSeparator, DropdownMenuSub, DropdownMenuSubContent, DropdownMenuSubTrigger, DropdownMenuTrigger } from "../../components/ui/dropdown-menu.js";
 import { Tooltip, TooltipContent, TooltipTrigger } from "../../components/ui/tooltip.js";
@@ -40,6 +40,7 @@ export interface MainToolbarProps {
   onToggleCurrentSessionStar: () => void | Promise<void>;
   onExport: (format: "markdown" | "json") => void | Promise<void>;
   onOpenHome: () => void;
+  onOpenWorkBoardView: () => void;
   onOpenRoutinesView: () => void;
   onOpenMemoryView: () => void;
   onOpenSettings: () => void;
@@ -71,6 +72,7 @@ export function MainToolbar({
   onToggleCurrentSessionStar,
   onExport,
   onOpenHome,
+  onOpenWorkBoardView,
   onOpenRoutinesView,
   onOpenMemoryView,
   onOpenSettings,
@@ -217,6 +219,10 @@ export function MainToolbar({
             <DropdownMenuSeparator />
 
             {/* ── Built-in secondary views ── */}
+            <DropdownMenuItem onClick={onOpenWorkBoardView} data-testid="toolbar-work-board">
+              <KanbanSquare className="mr-2 h-3.5 w-3.5" />
+              <span>{t("mainToolbar.workBoard")}</span>
+            </DropdownMenuItem>
             <DropdownMenuItem onClick={onOpenRoutinesView}>
               <Repeat2 className="mr-2 h-3.5 w-3.5" />
               <span>{t("mainToolbar.routines")}</span>
