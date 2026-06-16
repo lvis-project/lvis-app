@@ -107,7 +107,7 @@ function makeDeps(options: {
         requestId: req.id,
         choice: options.approvalChoice ?? "allow-once",
       })),
-      resolve: vi.fn(),
+      resolve: vi.fn((_requestId: string, decision: unknown) => decision),
       // #799 + CRITICAL-2 ralph iter 4: server-side ApprovalRequest binding.
       // userApprovalRecord handler reads trustOrigin/source/approvalCacheKey
       // from this snapshot; tests use a static snapshot that mirrors the
@@ -247,6 +247,31 @@ describe("permissions IPC handlers", () => {
         threshold: 3,
         windowMs: 300000,
       });
+    }
+  });
+
+  it("does not suggest review switching when ApprovalGate forces the response to deny", async () => {
+    const { deps, appWindows } = await setup({
+      mode: "default",
+      interactiveAutoApprove: "off",
+      hasReviewer: false,
+    });
+    deps.approvalGate.resolve.mockReturnValueOnce({
+      requestId: "approval-forced-deny",
+      choice: "deny-once",
+      rememberPattern: "approval integrity check failed",
+    });
+
+    await invoke(PERMISSIONS.approvalRespond, {
+      requestId: "approval-forced-deny",
+      choice: "allow-always",
+    });
+
+    for (const win of appWindows) {
+      expect(win.webContents.send).not.toHaveBeenCalledWith(
+        PERMISSIONS.reviewSuggestion,
+        expect.anything(),
+      );
     }
   });
 

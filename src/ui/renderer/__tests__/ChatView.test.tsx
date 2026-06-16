@@ -1904,6 +1904,13 @@ describe("ChatView — permission review suggestion toast", () => {
       expect(api.permission.reviewerDispatch).toHaveBeenCalledWith("mode llm");
       expect(api.permission.reviewerDispatch).toHaveBeenCalledWith("interactive low");
     });
+    expect(api.permission.reviewerDispatch).toHaveBeenNthCalledWith(1, "mode llm");
+    expect(api.permission.reviewerDispatch).toHaveBeenNthCalledWith(2, "interactive low");
+    const reviewerDispatchOrder =
+      (api.permission.reviewerDispatch as unknown as ReturnType<typeof vi.fn>).mock.invocationCallOrder;
+    const setModeOrder =
+      (api.permission.setMode as unknown as ReturnType<typeof vi.fn>).mock.invocationCallOrder;
+    expect(reviewerDispatchOrder[1]).toBeLessThan(setModeOrder[0]);
   });
 });
 

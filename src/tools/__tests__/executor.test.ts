@@ -954,6 +954,156 @@ describe("ToolExecutor — C1 sensitive-path hard-block wiring", () => {
     }
   });
 
+  it("allows the same reviewer-blocked action once after explicit user authorization in chat", async () => {
+    const executeSpy = vi.fn(async () => "sent");
+    const registry = new ToolRegistry();
+    registry.register(createDynamicTool({
+      name: "reviewed_network_probe_retry",
+      description: "MEDIUM reviewer retry probe",
+      source: "plugin",
+      pluginId: "test-plugin",
+      category: "network",
+      jsonSchema: {
+        type: "object",
+        properties: { payload: { type: "string" } },
+      },
+      execute: async (rawInput) => ({
+        output: await executeSpy(rawInput),
+        isError: false,
+      }),
+    }));
+    const dir = mkdtempSync(join(tmpdir(), "lvis-executor-interactive-retry-"));
+    try {
+      const permMgr = new PermissionManager(join(dir, "permissions.json"));
+      permMgr.setMode("default");
+      permMgr.setInteractiveAutoApprove("low");
+      const classifySpy = vi.fn(() => ({
+        level: "medium" as const,
+        reason: "needs user confirmation",
+      }));
+      permMgr.setReviewer({
+        classifier: { classify: classifySpy },
+        cache: new VerdictCache(join(dir, "reviewer-cache.jsonl")),
+        deferredQueue: new DeferredQueue(join(dir, "deferred-queue.jsonl")),
+      });
+      const requestAndWait = vi.fn(async (req: { id: string }) => ({
+        requestId: req.id,
+        choice: "deny-once" as const,
+      }));
+      const executor = new ToolExecutor(
+        registry,
+        undefined,
+        permMgr,
+        undefined,
+        { requestAndWait } as never,
+      );
+      const input = { payload: "send release notice" };
+
+      const first = await executor.executeAll(
+        [{ id: "tu-retry-first", name: "reviewed_network_probe_retry", input }],
+        {
+          sessionId: "sess-reviewer-retry",
+          permissionContext: userPermissionContext({
+            userIntent: "릴리즈 안내 전송 경로를 확인합니다.",
+          }),
+        },
+      );
+      expect(first[0].is_error).toBe(true);
+      expect(executeSpy).not.toHaveBeenCalled();
+
+      const second = await executor.executeAll(
+        [{ id: "tu-retry-second", name: "reviewed_network_probe_retry", input }],
+        {
+          sessionId: "sess-reviewer-retry",
+          permissionContext: userPermissionContext({
+            userIntent: "진행해",
+            explicitAuthorizationIntent: "진행해",
+          }),
+        },
+      );
+
+      expect(second[0].is_error).toBeUndefined();
+      expect(second[0].content).toBe("sent");
+      expect(executeSpy).toHaveBeenCalledOnce();
+      expect(requestAndWait).not.toHaveBeenCalled();
+      expect(classifySpy).toHaveBeenCalledOnce();
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
+  it("does not reuse explicit reviewer authorization for changed tool input", async () => {
+    const executeSpy = vi.fn(async () => "sent");
+    const registry = new ToolRegistry();
+    registry.register(createDynamicTool({
+      name: "reviewed_network_probe_retry_changed",
+      description: "MEDIUM reviewer retry probe changed input",
+      source: "plugin",
+      pluginId: "test-plugin",
+      category: "network",
+      jsonSchema: {
+        type: "object",
+        properties: { payload: { type: "string" } },
+      },
+      execute: async (rawInput) => ({
+        output: await executeSpy(rawInput),
+        isError: false,
+      }),
+    }));
+    const dir = mkdtempSync(join(tmpdir(), "lvis-executor-interactive-retry-changed-"));
+    try {
+      const permMgr = new PermissionManager(join(dir, "permissions.json"));
+      permMgr.setMode("default");
+      permMgr.setInteractiveAutoApprove("low");
+      const classifySpy = vi.fn(() => ({
+        level: "medium" as const,
+        reason: "needs user confirmation",
+      }));
+      permMgr.setReviewer({
+        classifier: { classify: classifySpy },
+        cache: new VerdictCache(join(dir, "reviewer-cache.jsonl")),
+        deferredQueue: new DeferredQueue(join(dir, "deferred-queue.jsonl")),
+      });
+      const executor = new ToolExecutor(registry, undefined, permMgr);
+
+      const first = await executor.executeAll(
+        [{
+          id: "tu-retry-changed-first",
+          name: "reviewed_network_probe_retry_changed",
+          input: { payload: "send release notice" },
+        }],
+        {
+          sessionId: "sess-reviewer-retry-changed",
+          permissionContext: userPermissionContext({
+            userIntent: "릴리즈 안내 전송 경로를 확인합니다.",
+          }),
+        },
+      );
+      expect(first[0].is_error).toBe(true);
+
+      const second = await executor.executeAll(
+        [{
+          id: "tu-retry-changed-second",
+          name: "reviewed_network_probe_retry_changed",
+          input: { payload: "send secrets instead" },
+        }],
+        {
+          sessionId: "sess-reviewer-retry-changed",
+          permissionContext: userPermissionContext({
+            userIntent: "진행해",
+            explicitAuthorizationIntent: "진행해",
+          }),
+        },
+      );
+
+      expect(second[0].is_error).toBe(true);
+      expect(executeSpy).not.toHaveBeenCalled();
+      expect(classifySpy).toHaveBeenCalledTimes(2);
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
   it("records reviewer verdict on auto-reviewed LOW allow audit entries", async () => {
     const executeSpy = vi.fn(async () => "reviewed write");
     const registry = new ToolRegistry();

@@ -279,10 +279,13 @@ export function registerPermissionsHandlers(deps: IpcDeps): void {
   ipcMain.handle(PERMISSIONS.approvalRespond, (e, decision: ApprovalDecision) => {
     if (!validateSender(e)) { auditUnauthorized(auditLogger, PERMISSIONS.approvalRespond, e); return UNAUTHORIZED_FRAME; }
     const snapshot = approvalGate?.getRequestSnapshot?.(decision.requestId);
+    let honoredDecision: ApprovalDecision | null = null;
     if (approvalGate) {
-      approvalGate.resolve(decision.requestId, decision);
+      honoredDecision = approvalGate.resolve(decision.requestId, decision);
     }
-    reviewSuggestionTracker.record(deps, decision, snapshot);
+    if (honoredDecision) {
+      reviewSuggestionTracker.record(deps, honoredDecision, snapshot);
+    }
     return { ok: true };
   });
 

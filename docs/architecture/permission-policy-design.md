@@ -242,7 +242,7 @@ export function canonicalizePathForMatch(rawPath: string): string {
 
 **Eval pipeline:** numeric order short-circuit. Layer N deny → Layer N+1 ~ skip. **단 audit 에는 `denyReasons: [{layer, reason}]` 으로 *현재 deny 이유 1건* 만 기록** (forensics 가 다른 hypothetical 결정을 보고 싶으면 별도 dry-run 모드로).
 
-**Runtime mode semantics:** `default` 는 read 허용 + write/shell/network ask. `strict` 는 read 포함 모든 도구 실행을 ask. `auto` 는 user-visible write/shell/network 를 foreground reviewer 로 보내고 LOW 만 allow+audit, MED/HIGH 는 ask 로 승격한다. `auto` headless mutation 은 reviewer/deferred queue 로 보낸다. `allow` 는 명시적 전체허용 opt-in 이며 Layer 0 sensitive path, Layer 1 directory scope, deny rules, overlay-trigger-origin mutation guard 는 우회하지 않는다.
+**Runtime mode semantics:** `default` 는 read 허용 + write/shell/network ask. `strict` 는 read 포함 모든 도구 실행을 ask. `auto` 는 user-visible write/shell/network 를 foreground reviewer 로 보내고 LOW 만 allow+audit, MED/HIGH 는 approval modal 대신 reviewer tool-output block 으로 main LLM 에 반환한다. 사용자가 chat 에서 명시 승인하면 executor 는 직전 reviewer-blocked exact tuple 에 한해 1회 재시도를 허용한다. `auto` headless mutation 은 reviewer/deferred queue 로 보낸다. `allow` 는 명시적 전체허용 opt-in 이며 Layer 0 sensitive path, Layer 1 directory scope, deny rules, overlay-trigger-origin mutation guard 는 우회하지 않는다.
 
 **Auto mode 의 silent skip 금지:** `confirm` (Layer 1 외부 path) 은 auto mode 에서도 ask. Auto mode 의 자동 허용 대상은 foreground reviewer LOW 로 판정된 *user-visible write/shell/network only* (dir-confirm/headless/hard approval gates 제외).
 
@@ -305,13 +305,13 @@ registerToolCategory({
 | source × cat | default | strict | auto interactive | auto headless | allow |
 |---|---|---|---|---|---|
 | builtin × read | L0/L1 → allow | L0/L1 → ask | L0/L1 → allow | L0/L1 → allow | L0/L1 → allow |
-| builtin × write | L0/L1 → ask | L0/L1 → ask | L0/L1 → reviewer LOW allow + audit / MED-HIGH ask | L0/L1 → reviewer (L5) | L0/L1 → allow + audit |
-| builtin × shell | L0/L1 → ask + AST | L0/L1 → ask + AST | L0/L1 → reviewer LOW allow + AST + audit / MED-HIGH ask + AST | L0/L1 → reviewer | L0/L1 → allow + AST |
-| builtin × network | L0/L1 → ask + endpoint | L0/L1 → ask | L0/L1 → reviewer LOW allow + audit / MED-HIGH ask | L0/L1 → reviewer (L5) | L0/L1 → allow + audit |
+| builtin × write | L0/L1 → ask | L0/L1 → ask | L0/L1 → reviewer LOW allow + audit / MED-HIGH tool-output block + exact user-authorized retry | L0/L1 → reviewer (L5) | L0/L1 → allow + audit |
+| builtin × shell | L0/L1 → ask + AST | L0/L1 → ask + AST | L0/L1 → reviewer LOW allow + AST + audit / MED-HIGH tool-output block + exact user-authorized retry + AST | L0/L1 → reviewer | L0/L1 → allow + AST |
+| builtin × network | L0/L1 → ask + endpoint | L0/L1 → ask | L0/L1 → reviewer LOW allow + audit / MED-HIGH tool-output block + exact user-authorized retry | L0/L1 → reviewer (L5) | L0/L1 → allow + audit |
 | plugin × read | L0/L1/L4 → allow | L0/L1/L4 → ask | L0/L1/L4 → allow | L0/L1/L4 → allow, reviewer if out-of-dir | L0/L1/L4 → allow |
-| plugin × write | L0/L1/L4 → ask | L0/L1/L4 → ask | L0/L1/L4 → reviewer LOW allow + audit / MED-HIGH ask | L0/L1/L4 → reviewer | L0/L1/L4 → allow + audit |
-| plugin × shell | L0/L1/L4 → ask + AST | L0/L1/L4 → ask + AST | L0/L1/L4 → reviewer LOW allow + AST + audit / MED-HIGH ask + AST | reviewer | L0/L1/L4 → allow + AST |
-| plugin × network | L0/L1/L4 → ask + endpoint | L0/L1/L4 → ask | L0/L1/L4 → reviewer LOW allow + audit / MED-HIGH ask | reviewer | L0/L1/L4 → allow + audit |
+| plugin × write | L0/L1/L4 → ask | L0/L1/L4 → ask | L0/L1/L4 → reviewer LOW allow + audit / MED-HIGH tool-output block + exact user-authorized retry | L0/L1/L4 → reviewer | L0/L1/L4 → allow + audit |
+| plugin × shell | L0/L1/L4 → ask + AST | L0/L1/L4 → ask + AST | L0/L1/L4 → reviewer LOW allow + AST + audit / MED-HIGH tool-output block + exact user-authorized retry + AST | reviewer | L0/L1/L4 → allow + AST |
+| plugin × network | L0/L1/L4 → ask + endpoint | L0/L1/L4 → ask | L0/L1/L4 → reviewer LOW allow + audit / MED-HIGH tool-output block + exact user-authorized retry | reviewer | L0/L1/L4 → allow + audit |
 | any × meta | decisionOverride 따름 | 동 | 동 | 동 (단 deferred 후보 = override 가 ask 인 경우) | 동 |
 
 Strict mode is mode-first: it asks for `read` as well, including headless read invocations. Headless reviewer routing applies to non-read mutation categories in default/auto unless `allow` mode was explicitly selected.
@@ -379,7 +379,8 @@ interface RoutineScope {
 
       // issue #690 — interactive auto-approve. 종전 `auto` exec mode 전용
       // 가시화 lane 이 mode-independent 한 SOT 로 분리됨. "off" = 항상
-      // 모달, "low" = 리뷰어 LOW 시 모달 없이 통과. MED/HIGH 는 항상 모달.
+      // 모달, "low" = 리뷰어 LOW 시 모달 없이 통과. MED/HIGH 는
+      // modal 대신 reviewer tool-output block 으로 main LLM 에 반환.
       "interactive": { "autoApprove": "off" },  // "off" | "low"
 
       // issue #664 boot-time migration marker. Stamped the first time a
@@ -425,6 +426,16 @@ Audit chain: `AuditDeferredResolve.approvalSource: "button" |
 conservative (max 24 char input, single-sentence only, ambiguity →
 "none", negation modifiers convert approve → "none") so a stray LLM
 tool-output reflection cannot inject approval.
+
+**Foreground reviewer exact retry:** auto-review MED/HIGH foreground blocks use
+the same conservative `detectApprovalIntent()` matcher, but they do not resolve
+the deferred queue and do not open a modal. The executor records the exact
+reviewer-blocked tuple in process memory for 10 minutes:
+`sessionId + tool + source + canonical args + trustOrigin + approvalCacheKey`.
+Only a subsequent `user-keyboard` chat turn with an approval intent can consume
+that pending tuple, and only for the same tuple. Changed args, different
+origin, headless turns, plugin-emitted turns, and queue-auto turns re-enter the
+reviewer path instead of inheriting the chat approval.
 
 **Sandbox capability SOT (issue #691):**
 
