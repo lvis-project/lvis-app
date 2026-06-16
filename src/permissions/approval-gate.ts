@@ -580,9 +580,9 @@ export class ApprovalGate {
    * 렌더러 응답 수신 시 IPC 핸들러에서 호출.
    * 매칭되는 pending 항목이 없으면 무시(이중 응답 안전).
    */
-  resolve(requestId: string, decision: ApprovalDecision): void {
+  resolve(requestId: string, decision: ApprovalDecision): ApprovalDecision | null {
     const entry = this.pending.get(requestId);
-    if (!entry) return;
+    if (!entry) return null;
 
     // Confused-deputy defense — verify nonce + HMAC BEFORE honoring the
     // decision. A mismatch indicates either a malicious/compromised renderer,
@@ -597,12 +597,13 @@ export class ApprovalGate {
         type: "approval",
         output: `[approval:nonce-mismatch] ${requestId} ${formatApprovalAuditFields(entry)} choice=${decision.choice} nonceProvided=${decision.nonce ? "yes" : "no"} hmacProvided=${decision.hmac ? "yes" : "no"} → deny-once (forced)`,
       });
-      entry.resolve({
+      const forcedDecision: ApprovalDecision = {
         requestId,
         choice: "deny-once",
         rememberPattern: "approval integrity check failed",
-      });
-      return;
+      };
+      entry.resolve(forcedDecision);
+      return forcedDecision;
     }
 
     clearTimeout(entry.timer);
@@ -615,6 +616,7 @@ export class ApprovalGate {
       output: `[approval:decided] ${requestId} ${formatApprovalAuditFields(entry)} choice=${decision.choice} rememberPattern=${decision.rememberPattern ?? "none"}`,
     });
     entry.resolve(decision);
+    return decision;
   }
 
   /**

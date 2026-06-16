@@ -488,10 +488,6 @@ export function ChatView({ api, onAsk, onEditSave, onFork, onToggleStar, onRetry
     );
     try {
       const api = getApi();
-      const modeResult = await api.permission.setMode("auto");
-      if (!modeResult?.ok) {
-        throw new Error(modeResult?.message ?? modeResult?.error ?? "mode change failed");
-      }
       const reviewerResult = await api.permission.reviewerDispatch("mode llm");
       if (!reviewerResult?.ok) {
         throw new Error(reviewerResult?.error ?? "reviewer mode change failed");
@@ -499,6 +495,10 @@ export function ChatView({ api, onAsk, onEditSave, onFork, onToggleStar, onRetry
       const interactiveResult = await api.permission.reviewerDispatch("interactive low");
       if (!interactiveResult?.ok) {
         throw new Error(interactiveResult?.error ?? "interactive reviewer change failed");
+      }
+      const modeResult = await api.permission.setMode("auto");
+      if (!modeResult?.ok) {
+        throw new Error(modeResult?.message ?? modeResult?.error ?? "mode change failed");
       }
       setPermissionReviewSuggestion(null);
     } catch (err) {
