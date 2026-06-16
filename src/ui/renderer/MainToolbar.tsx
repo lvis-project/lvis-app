@@ -1,4 +1,4 @@
-import { ArrowDownToLine, Database, Download, ExternalLink, Home, KanbanSquare, KeyRound, Menu, Plus, RefreshCw, Repeat2, Search, Star, Wrench, X } from "lucide-react";
+import { ArrowDownToLine, Download, ExternalLink, Home, KeyRound, Menu, RefreshCw, Search, Star, Wrench, X } from "lucide-react";
 import { Button } from "../../components/ui/button.js";
 import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuSeparator, DropdownMenuSub, DropdownMenuSubContent, DropdownMenuSubTrigger, DropdownMenuTrigger } from "../../components/ui/dropdown-menu.js";
 import { Tooltip, TooltipContent, TooltipTrigger } from "../../components/ui/tooltip.js";
@@ -65,19 +65,19 @@ export interface MainToolbarProps {
 
 export function MainToolbar({
   activeView,
-  streaming,
+  streaming: _streaming,
   hasApiKey,
   isCurrentSessionStarred,
-  onNewChat,
+  onNewChat: _onNewChat,
   onToggleCurrentSessionStar,
   onExport,
   onOpenHome,
-  onOpenWorkBoardView,
-  onOpenRoutinesView,
-  onOpenMemoryView,
+  onOpenWorkBoardView: _onOpenWorkBoardView,
+  onOpenRoutinesView: _onOpenRoutinesView,
+  onOpenMemoryView: _onOpenMemoryView,
   onOpenSettings,
   onOpenUnifiedSearch,
-  onOpenStarredView,
+  onOpenStarredView: _onOpenStarredView,
   onOpenDetachedView,
   onOpenDevTools,
   appUpdateState = { kind: "idle" },
@@ -209,35 +209,7 @@ export function MainToolbar({
             </TooltipTrigger>
             <TooltipContent>{t("mainToolbar.moreMenu")}</TooltipContent>
           </Tooltip>
-          <DropdownMenuContent align="end" className="w-[280px]">
-            {/* ── New chat ── */}
-            <DropdownMenuItem disabled={streaming} onClick={onNewChat}>
-              <Plus className="mr-2 h-3.5 w-3.5" />
-              <span>{t("mainToolbar.newChat")}</span>
-            </DropdownMenuItem>
-
-            <DropdownMenuSeparator />
-
-            {/* ── Built-in secondary views ── */}
-            <DropdownMenuItem onClick={onOpenWorkBoardView} data-testid="toolbar-work-board">
-              <KanbanSquare className="mr-2 h-3.5 w-3.5" />
-              <span>{t("mainToolbar.workBoard")}</span>
-            </DropdownMenuItem>
-            <DropdownMenuItem onClick={onOpenRoutinesView}>
-              <Repeat2 className="mr-2 h-3.5 w-3.5" />
-              <span>{t("mainToolbar.routines")}</span>
-            </DropdownMenuItem>
-            <DropdownMenuItem onClick={onOpenMemoryView}>
-              <Database className="mr-2 h-3.5 w-3.5" />
-              <span>{t("mainToolbar.memory")}</span>
-            </DropdownMenuItem>
-            <DropdownMenuItem onClick={onOpenStarredView}>
-              <Star className="mr-2 h-3.5 w-3.5" />
-              <span>{t("mainToolbar.starred")}</span>
-            </DropdownMenuItem>
-
-            <DropdownMenuSeparator />
-
+          <DropdownMenuContent align="end" className="w-[240px]">
             {/* ── Detached built-in views ── */}
             <DropdownMenuItem data-testid="toolbar-detach-routines" onClick={() => void onOpenDetachedView("routines")}>
               <ExternalLink className="mr-2 h-3.5 w-3.5" />

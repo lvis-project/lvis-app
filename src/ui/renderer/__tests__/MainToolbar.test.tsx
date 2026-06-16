@@ -42,25 +42,25 @@ async function openHamburger() {
 }
 
 describe("MainToolbar", () => {
-  it("renders hamburger trigger and keeps 새 대화 inside the menu", async () => {
+  // Navigation items (새 대화 / 루틴 / 메모리 / 즐겨찾기 / Work Board) have moved
+  // to the persistent Sidebar. The slimmed hamburger only contains:
+  // detach items, export submenu, and settings.
+  it("renders hamburger trigger; nav items are no longer inside the hamburger", async () => {
     renderWithProvider(defaultProps());
     expect(screen.getByTitle("홈")).toBeTruthy();
     expect(screen.getByTitle("더 많은 메뉴")).toBeTruthy();
     expect(screen.queryByText("⌘ + ?")).toBeNull();
     expect(document.querySelector("[data-tour-anchor='help-shortcut-hint']")).toBeNull();
+    // 새 대화 is now in the Sidebar, not the hamburger
     expect(screen.queryByText("새 대화")).toBeNull();
     await openHamburger();
-    expect(screen.getByText("새 대화")).toBeTruthy();
+    // Nav items no longer in hamburger
+    expect(screen.queryByText("새 대화")).toBeNull();
+    expect(screen.queryByText("루틴")).toBeNull();
+    expect(screen.queryByText("메모리")).toBeNull();
+    expect(screen.queryByText("즐겨찾기")).toBeNull();
     // TokenProgressRing is now in InputActionBar, not MainToolbar
     expect(document.querySelector("[data-testid='token-progress-ring']")).toBeNull();
-  });
-
-  it("calls onNewChat when 새 대화 menu item clicked", async () => {
-    const onNewChat = vi.fn();
-    renderWithProvider(defaultProps({ onNewChat }));
-    await openHamburger();
-    fireEvent.click(screen.getByText("새 대화"));
-    expect(onNewChat).toHaveBeenCalledTimes(1);
   });
 
   it("calls onOpenHome when the home action is clicked", () => {
@@ -68,20 +68,6 @@ describe("MainToolbar", () => {
     renderWithProvider(defaultProps({ onOpenHome, activeView: "memory" }));
     fireEvent.click(screen.getByTitle("홈"));
     expect(onOpenHome).toHaveBeenCalledTimes(1);
-  });
-
-  it("calls built-in view handlers from the hamburger menu", async () => {
-    const onOpenRoutinesView = vi.fn();
-    const onOpenMemoryView = vi.fn();
-    renderWithProvider(defaultProps({ onOpenRoutinesView, onOpenMemoryView }));
-
-    await openHamburger();
-    fireEvent.click(screen.getByText("루틴"));
-    await openHamburger();
-    fireEvent.click(screen.getByText("메모리"));
-
-    expect(onOpenRoutinesView).toHaveBeenCalledTimes(1);
-    expect(onOpenMemoryView).toHaveBeenCalledTimes(1);
   });
 
   it("calls onOpenUnifiedSearch when unified search button clicked", () => {
@@ -95,14 +81,6 @@ describe("MainToolbar", () => {
     renderWithProvider(defaultProps());
     await openHamburger();
     expect(screen.queryByText("통합 검색")).toBeNull();
-  });
-
-  it("calls onOpenStarredView when 즐겨찾기 menu item clicked", async () => {
-    const onOpenStarredView = vi.fn();
-    renderWithProvider(defaultProps({ onOpenStarredView }));
-    await openHamburger();
-    fireEvent.click(screen.getByText("즐겨찾기"));
-    expect(onOpenStarredView).toHaveBeenCalledTimes(1);
   });
 
   it("opens built-in views in detached windows from the hamburger menu", async () => {
@@ -159,6 +137,13 @@ describe("MainToolbar", () => {
     // It must NOT be a DropdownMenu root (no aria-expanded on the trigger — Sub handles it differently)
     // The key correctness signal: the element role is "menuitem" not "button"
     expect(subTrigger?.getAttribute("role")).toBe("menuitem");
+  });
+
+  // data-tour-anchor attributes must remain for the SpotlightTour onboarding chain
+  it("preserves tour anchors on toolbar controls", () => {
+    renderWithProvider(defaultProps());
+    expect(document.querySelector("[data-tour-anchor='chat-history']")).toBeTruthy();
+    expect(document.querySelector("[data-tour-anchor='settings-entry']")).toBeTruthy();
   });
 });
 
