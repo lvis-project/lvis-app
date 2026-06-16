@@ -1,8 +1,13 @@
-import { describe, expect, it, vi } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 import {
+  withPluginInstallLock,
   installMarketplacePluginWithLifecycle,
   startInstalledPluginWithLifecycle,
 } from "../install-lifecycle.js";
+import {
+  beginAppUpdateInstallRequest,
+  clearAppUpdateInstallRequested,
+} from "../../main/app-update-install-intent.js";
 
 function makeRuntime(initialPluginIds: string[] = []) {
   let pluginIds = [...initialPluginIds];
@@ -40,6 +45,40 @@ function makeMarketplace() {
 }
 
 describe("installMarketplacePluginWithLifecycle", () => {
+  afterEach(() => {
+    clearAppUpdateInstallRequested();
+  });
+
+  it("rejects before touching marketplace state when app update install has started", async () => {
+    const runtime = makeRuntime(["p"]);
+    const marketplace = makeMarketplace();
+    beginAppUpdateInstallRequest();
+
+    await expect(
+      installMarketplacePluginWithLifecycle({
+        requestedPluginId: "p",
+        pluginRuntime: runtime,
+        pluginMarketplace: marketplace,
+      }),
+    ).rejects.toThrow("Plugin changes are paused while an app update is installing");
+
+    expect(marketplace.list).not.toHaveBeenCalled();
+    expect(marketplace.install).not.toHaveBeenCalled();
+    expect(runtime.removePlugin).not.toHaveBeenCalled();
+  });
+
+  it("does not enter a plugin install lock callback after app update install starts", async () => {
+    const install = vi.fn(async () => undefined);
+    beginAppUpdateInstallRequest();
+
+    await expect(withPluginInstallLock("p", install)).rejects.toMatchObject({
+      code: "app-update-install-in-progress",
+      message: expect.stringContaining("Plugin changes are paused while an app update is installing"),
+    });
+
+    expect(install).not.toHaveBeenCalled();
+  });
+
   it("stops a loaded plugin before marketplace patching and starts the installed result", async () => {
     const order: string[] = [];
     const runtime = makeRuntime(["p"]);

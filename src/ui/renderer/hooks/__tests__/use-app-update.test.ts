@@ -19,6 +19,7 @@ function appUpdateApi(
   overrides: {
     downloadAppUpdate?: () => Promise<{ ok: boolean; reason?: string }>;
     installAppUpdate?: () => Promise<{ ok: boolean; reason?: string }>;
+    skipAppUpdate?: () => Promise<{ ok: boolean; reason?: string }>;
   } = {},
 ) {
   let handler: ((state: UpdateState) => void) | null = null;
@@ -32,6 +33,7 @@ function appUpdateApi(
     getAppUpdateState: vi.fn(() => initialState),
     downloadAppUpdate: vi.fn(overrides.downloadAppUpdate ?? (async () => ({ ok: true }))),
     installAppUpdate: vi.fn(overrides.installAppUpdate ?? (async () => ({ ok: true }))),
+    skipAppUpdate: vi.fn(overrides.skipAppUpdate ?? (async () => ({ ok: true }))),
   };
   return {
     api: api as unknown as LvisApi,
@@ -118,6 +120,31 @@ describe("useAppUpdate", () => {
     });
 
     expect(rawApi.installAppUpdate).toHaveBeenCalledOnce();
+    expect(result.current.inFlight).toBe(false);
+  });
+
+  it("skips an available update and releases the click gate on the state broadcast", async () => {
+    const { api, rawApi, emit } = appUpdateApi(Promise.resolve({ kind: "idle" }), {
+      skipAppUpdate: async () => ({ ok: true }),
+    });
+    const { result } = renderHook(() => useAppUpdate(api));
+
+    act(() => {
+      emit({ kind: "available", version: "2.0.0" });
+    });
+
+    await act(async () => {
+      await result.current.skip();
+    });
+
+    expect(rawApi.skipAppUpdate).toHaveBeenCalledOnce();
+    expect(result.current.inFlight).toBe(true);
+
+    act(() => {
+      emit({ kind: "idle" });
+    });
+
+    expect(result.current.state).toEqual({ kind: "idle" });
     expect(result.current.inFlight).toBe(false);
   });
 });

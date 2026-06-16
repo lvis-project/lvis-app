@@ -18,6 +18,10 @@ import {
   clearAppUpdateInstallRequested,
   isAppUpdateInstallRequested,
 } from "../app-update-install-intent.js";
+import {
+  hasPluginInstallInFlight,
+  withPluginInstallLock,
+} from "../../plugins/install-lifecycle.js";
 
 function fakeWindow() {
   const sent: Array<{ channel: string; payload: unknown }> = [];
@@ -231,6 +235,41 @@ describe("auto-updater", () => {
     expect(u.installs).toBe(0);
   });
 
+  it("installNow reports not-downloaded before plugin install interlock state", async () => {
+    const fw = fakeWindow();
+    const u = fakeUpdater();
+    const svc = createTestAutoUpdater({
+      mainWindow: fw.win,
+      isEnabled: () => true,
+      updaterFactory: () => u,
+    });
+    await svc.triggerCheck();
+    u.emit("update-available", { version: "3.0.0" });
+
+    let releasePluginInstall!: () => void;
+    const pluginInstall = withPluginInstallLock(
+      "meeting",
+      async () =>
+        new Promise<void>((resolve) => {
+          releasePluginInstall = resolve;
+        }),
+    );
+
+    await vi.waitFor(() => expect(releasePluginInstall).toBeTypeOf("function"));
+    expect(hasPluginInstallInFlight()).toBe(true);
+
+    const result = await svc._testOnly.installNow();
+
+    expect(result.ok).toBe(false);
+    expect(result.reason).toContain("not-downloaded");
+    expect(u.installs).toBe(0);
+    expect(isAppUpdateInstallRequested()).toBe(false);
+
+    releasePluginInstall();
+    await pluginInstall;
+    expect(hasPluginInstallInFlight()).toBe(false);
+  });
+
   it("installNow invokes quitAndInstall when update is downloaded", async () => {
     const fw = fakeWindow();
     const u = fakeUpdater();
@@ -267,6 +306,39 @@ describe("auto-updater", () => {
     expect(isAppUpdateInstallRequested()).toBe(true);
   });
 
+  it("installNow rejects while a plugin install lifecycle is in progress", async () => {
+    const fw = fakeWindow();
+    const u = fakeUpdater();
+    const svc = createTestAutoUpdater({
+      mainWindow: fw.win,
+      isEnabled: () => true,
+      updaterFactory: () => u,
+    });
+    await svc.triggerCheck();
+    u.emit("update-downloaded", { version: "3.0.0" });
+
+    let releasePluginInstall!: () => void;
+    const pluginInstall = withPluginInstallLock(
+      "meeting",
+      async () =>
+        new Promise<void>((resolve) => {
+          releasePluginInstall = resolve;
+        }),
+    );
+
+    await vi.waitFor(() => expect(releasePluginInstall).toBeTypeOf("function"));
+    expect(hasPluginInstallInFlight()).toBe(true);
+    const result = await svc._testOnly.installNow();
+
+    expect(result).toEqual({ ok: false, reason: "plugin-install-in-progress" });
+    expect(u.installs).toBe(0);
+    expect(isAppUpdateInstallRequested()).toBe(false);
+
+    releasePluginInstall();
+    await pluginInstall;
+    expect(hasPluginInstallInFlight()).toBe(false);
+  });
+
   it("installNow returns ok=false when quitAndInstall throws", async () => {
     const fw = fakeWindow();
     const u = fakeUpdater();
@@ -284,6 +356,38 @@ describe("auto-updater", () => {
     expect(result.ok).toBe(false);
     expect(result.reason).toContain("quit failed");
     expect(isAppUpdateInstallRequested()).toBe(false);
+  });
+
+  it("skipVersion persists the current app update and hides only that exact version", async () => {
+    const fw = fakeWindow();
+    const u = fakeUpdater();
+    let skippedVersion: string | undefined;
+    const svc = createTestAutoUpdater({
+      mainWindow: fw.win,
+      isEnabled: () => true,
+      updaterFactory: () => u,
+      getSkippedVersion: () => skippedVersion,
+      setSkippedVersion: async (version) => {
+        skippedVersion = version;
+      },
+    });
+    await svc.triggerCheck();
+
+    u.emit("update-available", { version: "3.0.0" });
+    expect(svc._testOnly.getState()).toEqual({ kind: "available", version: "3.0.0" });
+
+    const result = await svc._testOnly.skipVersion();
+
+    expect(result).toEqual({ ok: true });
+    expect(skippedVersion).toBe("3.0.0");
+    expect(svc._testOnly.getState()).toEqual({ kind: "idle" });
+
+    u.emit("update-available", { version: "3.0.0" });
+    expect(svc._testOnly.getState()).toEqual({ kind: "idle" });
+    expect(fw.sent[fw.sent.length - 1]?.payload).toEqual({ kind: "idle" });
+
+    u.emit("update-available", { version: "3.0.1" });
+    expect(svc._testOnly.getState()).toEqual({ kind: "available", version: "3.0.1" });
   });
 
   it("install IPC rejects plugin shell senders and audits the attempt", async () => {

@@ -315,6 +315,11 @@ export interface SystemSettings {
 export interface UpdateSettings {
   /** Background update-check enabled. Download/install still requires user action. */
   autoCheckEnabled: boolean;
+  /**
+   * App version the user skipped. The updater hides only this exact version;
+   * a later version is shown again.
+   */
+  skippedVersion?: string;
 }
 
 /**
@@ -393,6 +398,12 @@ export interface MarketplaceSettings {
    * to the renderer so a dismissed banner never reappears.
    */
   dismissedAnnouncementIds?: number[];
+  /**
+   * Plugin update versions the user skipped, keyed by plugin id. A skipped
+   * plugin update is hidden only while the marketplace latestVersion equals
+   * the stored version; the next version surfaces again.
+   */
+  skippedPluginUpdates?: Record<string, string>;
 }
 
 export interface SettingsServiceOptions {
