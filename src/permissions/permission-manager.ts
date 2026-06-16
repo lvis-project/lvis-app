@@ -937,8 +937,9 @@ export class PermissionManager {
    *     default), mutating tools are stamped `reviewer.route =
    *     "foreground-auto"` and the executor's
    *     dispatchReviewerForInteractiveAuto auto-allows LOW verdicts with
-   *     audit only — MEDIUM/HIGH escalate to the ApprovalGate modal, where
-   *     the LLM-authored `approvalPurpose` text gives the human context.
+   *     audit only — MEDIUM/HIGH return a blocked tool result containing
+   *     the reviewer verdict, so the main LLM can ask the user and retry
+   *     only when the user explicitly authorizes that exact action.
    * When the reviewer is unavailable, "reviewer" maps to "ask" so the user
    * is prompted instead of silently permitting a headless write — fail-safe
    * per design §1 principles.

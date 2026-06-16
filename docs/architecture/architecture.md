@@ -1500,7 +1500,7 @@ flowchart TB
 | 2 | Action 결정 (`allow / ask / deny`) + `denyReasons[]` 수집. `confirm` 은 `ask` 의 sub-variant — auto mode 도 silent skip 금지. | §3 Layer 2 | `PermissionCheckResult.denyReasons` |
 | 3 | 5-axis category × source × mode 매트릭스. Open-Closed `ToolCategoryRegistry`. | §3 Layer 3 | `src/permissions/category-registry.ts` |
 | 4 | Routine 의 `scope.pluginIds` discriminated union (`deny-all` / `allow` / `inherit`). Boot 시 `inherit` 은 active set 으로 normalize. | §3 Layer 4 | `routine.scope.*` |
-| 5 | Reviewer agent (multi-vendor) — foreground auto-review LOW allow / MED-HIGH ask, headless MED-HIGH defer. `final = max(rule, llm)`. | §3 Layer 5 | `src/permissions/reviewer/*` |
+| 5 | Reviewer agent (multi-vendor) — foreground auto-review LOW allow / MED-HIGH tool-output block + exact user-authorized retry, headless MED-HIGH defer. `final = max(rule, llm)`. | §3 Layer 5 | `src/permissions/reviewer/*` |
 | 6 | Hook chain v1 (deny-only). `~/.config/lvis/hooks/{pre,post,perm}-*.sh`. Strict-deny quarantine lockfile + DLP-redacted stdin. | §3 Layer 6 | `src/hooks/script-hook-*` |
 | 7 | Discriminated-union audit (`AuditAllow`/`AuditAsk`/`AuditDeny`/`AuditDeferred`/`AuditModeChange`/`AuditManifestViolation`) + HMAC chain + daily seal. | §3 Layer 7 | `src/audit/audit-schema.ts`, `src/audit/hmac-chain.ts` |
 | 8 | `/permission` 슬래시 + user-keyboard origin gate + `--durable` modal confirm. Modes: `default`, `strict`, `auto`, `allow`. Mode change emits `AuditModeChange`. | §3 Layer 8 | `src/permissions/permission-slash.ts` |
@@ -1527,8 +1527,12 @@ classifier. 4-mode (`disabled` / `rule` / `llm` / `strict`) + multi-vendor adapt
 (default OpenAI gpt-4o-mini, Anthropic / Google 도 swap 가능). 항상
 rule classifier 가 baseline 으로 함께 실행되며 `final = max(rule, llm)`
 (LLM downgrade 불가). Foreground auto-review 는 LOW 만 allow + audit 하고
-MED/HIGH 는 approval modal 로 승격한다. Headless reviewer 는 LOW 만 실행하고
-MED/HIGH 는 deferred queue 에 append 되어 사용자가 큐 버튼을 열 때 surface 된다.
+MED/HIGH 는 approval modal 을 열지 않는다. 대신 reviewer 판정 사유를 tool
+output error 로 main LLM 에 반환한다. Main LLM 이 사용자에게 확인하고,
+사용자가 chat 에서 명시 승인하면 executor 는 직전 reviewer-blocked exact tuple
+(`sessionId`, tool, source, canonical args, trust origin, approval cache key) 에
+한해 1회 재시도를 허용한다. Headless reviewer 는 LOW 만 실행하고 MED/HIGH 는
+deferred queue 에 append 되어 사용자가 큐 버튼을 열 때 surface 된다.
 
 **Mode semantics (post issue #664 normalization):**
 
@@ -1791,9 +1795,9 @@ graph TB
 | Category | 의미 | 의사결정 (default mode) | 헤들리스 (routine) | 비고 |
 | --- | --- | --- | --- | --- |
 | `read` | 조회/검색 (자료를 변경하지 않음) | builtin: allow / plugin: scope-checked | allow | strict mode → ask |
-| `write` | 사용자 데이터 변경 | ask (auto → reviewer LOW allow + audit / MED-HIGH ask, allow → allow + audit) | reviewer agent unless allow mode | reviewer 미배치 시 fail-closed or user ask |
-| `shell` | 셸 명령 실행 (Bash 등) | ask + Bash AST 검증 (auto → reviewer LOW allow + AST + audit / MED-HIGH ask, allow → allow + AST) | reviewer unless allow mode | AST 검증은 executor-owned gate |
-| `network` | 외부 네트워크 호출 | ask + endpoint surface (auto → reviewer LOW allow + audit / MED-HIGH ask, allow → allow + audit) | reviewer unless allow mode | endpoint 추출은 executor-owned surface |
+| `write` | 사용자 데이터 변경 | ask (auto → reviewer LOW allow + audit / MED-HIGH tool-output block, exact user-authorized retry, allow → allow + audit) | reviewer agent unless allow mode | reviewer 미배치 시 fail-closed or user ask |
+| `shell` | 셸 명령 실행 (Bash 등) | ask + Bash AST 검증 (auto → reviewer LOW allow + AST + audit / MED-HIGH tool-output block, exact user-authorized retry, allow → allow + AST) | reviewer unless allow mode | AST 검증은 executor-owned gate |
+| `network` | 외부 네트워크 호출 | ask + endpoint surface (auto → reviewer LOW allow + audit / MED-HIGH tool-output block, exact user-authorized retry, allow → allow + audit) | reviewer unless allow mode | endpoint 추출은 executor-owned surface |
 | `meta` | 제어 흐름 / UI 프리미티브 | `decisionOverride` 따름 | 동일 | host builtin 전용; plugin 사용 금지 |
 
 `strict` 는 mode-first 정책이다. Headless 여부와 무관하게 `read` 포함 모든 도구가 ask 로 승격되며, reviewer routing 은 default/auto 의 mutation category 에만 적용된다.

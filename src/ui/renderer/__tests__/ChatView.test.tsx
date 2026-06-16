@@ -384,6 +384,22 @@ describe("ChatView", () => {
     await waitFor(() => expect(api.chatSend).toHaveBeenCalled());
   });
 
+  it("does not send while IME composition is active", async () => {
+    const { container, api } = await renderApp({ hasApiKey: true });
+    await waitFor(() => expect(api.getSettings).toHaveBeenCalled());
+    const textarea = container.querySelector("textarea") as HTMLTextAreaElement;
+    expect(textarea).toBeTruthy();
+
+    await act(async () => {
+      fireEvent.change(textarea, { target: { value: "한" } });
+      fireEvent.compositionStart(textarea);
+      fireEvent.keyDown(textarea, { key: "Enter", code: "Enter" });
+    });
+
+    expect(api.chatSend).not.toHaveBeenCalled();
+    expect(textarea.value).toBe("한");
+  });
+
   it("collapses pre-final assistant work and tools into one turn WorkGroup", async () => {
     const { container, emitChatStream } = await renderApp({ hasApiKey: true });
     await submitChatMessage(container, "일정 확인");
@@ -1855,6 +1871,81 @@ describe("ChatView — userApprovalHit disclosure toast (#793 + cluster MAJOR-2/
     unmount();
     expect(consoleErrorSpy).not.toHaveBeenCalled();
     consoleErrorSpy.mockRestore();
+  });
+});
+
+describe("ChatView — permission review suggestion toast", () => {
+  type SuggestionCb = (payload: {
+    reason: "allow-always" | "repeat-allow";
+    allowCount: number;
+    allowAlwaysCount: number;
+    threshold: number;
+    windowMs: number;
+  }) => void;
+
+  it("renders the suggestion and switches through the existing permission APIs", async () => {
+    const { container, api } = await renderApp({ hasApiKey: true });
+    const onSuggestionMock = api.permission.onReviewSuggestion as unknown as ReturnType<typeof vi.fn>;
+    await waitFor(() => expect(onSuggestionMock).toHaveBeenCalled());
+    const fire = onSuggestionMock.mock.calls[0]?.[0] as SuggestionCb;
+
+    await act(async () => {
+      fire({
+        reason: "repeat-allow",
+        allowCount: 3,
+        allowAlwaysCount: 0,
+        threshold: 3,
+        windowMs: 300000,
+      });
+    });
+
+    const toast = await waitFor(() => {
+      const el = container.querySelector('[data-testid="permission-review-suggestion-toast"]');
+      expect(el).not.toBeNull();
+      return el as HTMLElement;
+    });
+    expect(toast.textContent).toContain("LLM 권한 검증으로 전환");
+    expect(toast.textContent).toContain("5분 안에 3회 승인했습니다.");
+
+    const button = Array.from(toast.querySelectorAll("button")).find((el) =>
+      el.textContent?.includes("전환"),
+    ) as HTMLButtonElement | undefined;
+    expect(button).toBeDefined();
+    await act(async () => {
+      fireEvent.click(button!);
+    });
+
+    await waitFor(() => {
+      expect(api.permission.setMode).toHaveBeenCalledWith("auto");
+      expect(api.permission.reviewerDispatch).toHaveBeenCalledWith("mode llm");
+      expect(api.permission.reviewerDispatch).toHaveBeenCalledWith("interactive low");
+    });
+    expect(api.permission.reviewerDispatch).toHaveBeenNthCalledWith(1, "mode llm");
+    expect(api.permission.reviewerDispatch).toHaveBeenNthCalledWith(2, "interactive low");
+    const reviewerDispatchOrder =
+      (api.permission.reviewerDispatch as unknown as ReturnType<typeof vi.fn>).mock.invocationCallOrder;
+    const setModeOrder =
+      (api.permission.setMode as unknown as ReturnType<typeof vi.fn>).mock.invocationCallOrder;
+    expect(reviewerDispatchOrder[1]).toBeLessThan(setModeOrder[0]);
+  });
+
+  it("drops malformed permission review suggestion metrics", async () => {
+    const { container, api } = await renderApp({ hasApiKey: true });
+    const onSuggestionMock = api.permission.onReviewSuggestion as unknown as ReturnType<typeof vi.fn>;
+    await waitFor(() => expect(onSuggestionMock).toHaveBeenCalled());
+    const fire = onSuggestionMock.mock.calls[0]?.[0] as SuggestionCb;
+
+    await act(async () => {
+      fire({
+        reason: "repeat-allow",
+        allowCount: Number.NaN,
+        allowAlwaysCount: 0,
+        threshold: 3,
+        windowMs: 300000,
+      });
+    });
+
+    expect(container.querySelector('[data-testid="permission-review-suggestion-toast"]')).toBeNull();
   });
 });
 

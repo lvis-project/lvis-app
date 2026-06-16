@@ -1128,6 +1128,7 @@ export type ApprovalDecision = {
  * (cross-cutting review of PRs #822-#827).
  */
 import type {
+  PermissionReviewSuggestionPayload,
   UserApprovalHitPayload,
   UserApprovalScope,
   UserApprovalVerdict,
@@ -1311,6 +1312,8 @@ export type LvisPermissionApi = {
    * stored approval was applied. Returns an unsubscribe function.
    */
   onUserApprovalHit: (cb: (payload: UserApprovalHitPayload) => void) => () => void;
+  /** Subscribe to default-mode repeated-approval hints for LLM permission review. */
+  onReviewSuggestion?: (cb: (payload: PermissionReviewSuggestionPayload) => void) => () => void;
   /** Permission policy — `/permission reviewer ...` slash dispatch. */
   reviewerDispatch: (
     rawArgs: string,

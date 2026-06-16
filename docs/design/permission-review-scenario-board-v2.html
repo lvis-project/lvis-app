@@ -567,7 +567,7 @@
       <div class="mode-card active">
         <div class="mode-row"><span class="tag blue">auto-review</span><span class="tag violet">LLM on</span></div>
         <h2>LLM 자동 검토</h2>
-        <p>write/network/shell 은 reviewer 가 영향범위를 계산합니다. LOW 는 inline 통과, 현재 채팅 MED/HIGH 는 승인 모달, headless 는 수동 deferred queue 입니다.</p>
+        <p>write/network/shell 은 reviewer 가 영향범위를 계산합니다. LOW 는 inline 통과, 현재 채팅 MED/HIGH 는 reviewer tool output 으로 메인 LLM 에 반환, headless 는 수동 deferred queue 입니다.</p>
       </div>
       <div class="mode-card">
         <div class="mode-row"><span class="tag green">allow</span><span class="tag">hard gates</span></div>
@@ -580,15 +580,15 @@
       <article class="chat-shell">
         <div class="bar">
           <span class="tag amber">network</span>
-          <h2>네트워크 전송 승인 모달</h2>
+          <h2>네트워크 전송 검증 결과</h2>
         </div>
         <div class="chat-body">
           <div class="modal">
             <div class="modal-head">
               <div class="glyph">N</div>
               <div class="modal-title">
-                <h3>외부 서비스로 데이터 전송 승인 필요</h3>
-                <p>LLM reviewer 가 endpoint, auth scope, payload class, retention risk 를 평가했습니다. 실행 전 전송 대상을 확인하세요.</p>
+                <h3>외부 서비스 전송이 reviewer tool output 으로 반환됨</h3>
+                <p>LLM reviewer 가 endpoint, auth scope, payload class, retention risk 를 평가했습니다. 메인 LLM 은 이 결과를 보고 사용자에게 명시 승인을 다시 요청합니다.</p>
               </div>
               <span class="tag amber">MEDIUM</span>
             </div>
@@ -604,13 +604,11 @@
                 <div class="review-row"><b>method</b><span><code>POST</code> · TLS endpoint · known provider</span></div>
                 <div class="review-row"><b>payload</b><span>회의 요약 2.4KB, 참석자 이름 포함, 첨부 파일 없음.</span></div>
                 <div class="review-row"><b>Reviewer</b><span>MEDIUM: 사용자가 요청한 공유 작업과 일치하지만 외부 서비스에 대화 내용이 저장됩니다.</span></div>
-                <div class="review-row"><b>선택</b><span>이번만 보내기, 같은 endpoint 세션 허용, 거부. 항상 허용은 endpoint + payload class 단위로만 제안.</span></div>
+                <div class="review-row"><b>다음 단계</b><span>도구는 실행되지 않습니다. 사용자가 같은 endpoint + payload class 를 명시 승인하면 메인 LLM 이 재요청합니다.</span></div>
               </div>
             </div>
             <div class="modal-actions">
-              <button class="button danger">거부</button>
-              <button class="button">같은 endpoint 세션 허용</button>
-              <button class="button primary">이번만 보내기</button>
+              <button class="button">메인 LLM 으로 반환</button>
             </div>
           </div>
         </div>
@@ -793,25 +791,25 @@
       </article>
 
       <article class="scenario">
-        <div class="scenario-head"><span class="tag amber">S5</span><h2>auto-review MED ask</h2></div>
+        <div class="scenario-head"><span class="tag amber">S5</span><h2>auto-review MED tool output</h2></div>
         <div class="scenario-body">
-          <p class="scenario-copy">데이터 전송, overwrite, 다중 파일 변경처럼 사용자가 알아야 하는 영향범위는 MEDIUM 승인 모달로 올립니다.</p>
+          <p class="scenario-copy">데이터 전송, overwrite, 다중 파일 변경처럼 사용자가 알아야 하는 영향범위는 실행하지 않고 MEDIUM reviewer tool output 으로 메인 LLM 에 반환합니다.</p>
           <div class="scenario-list">
             <div class="scenario-row"><b>도구</b><span><code>teams_send</code> · plugin/network</span></div>
             <div class="scenario-row"><b>Reviewer</b><span>MEDIUM: 요약 내용 외부 전송 가능</span></div>
-            <div class="scenario-row"><b>UX</b><span>대상 endpoint, 전송되는 데이터 종류, 승인 범위 표시.</span></div>
+            <div class="scenario-row"><b>UX</b><span>승인 모달 없음. 메인 LLM 이 reviewer reason 을 보고 사용자 명시 승인을 요청.</span></div>
           </div>
         </div>
       </article>
 
       <article class="scenario">
-        <div class="scenario-head"><span class="tag red">S6</span><h2>auto-review HIGH ask</h2></div>
+        <div class="scenario-head"><span class="tag red">S6</span><h2>auto-review HIGH tool output</h2></div>
         <div class="scenario-body">
-          <p class="scenario-copy">shell, 삭제, 대량 변경, 민감 데이터 전송 가능성은 HIGH 승인 모달로 차단 후 사용자 결정을 받습니다.</p>
+          <p class="scenario-copy">shell, 삭제, 대량 변경, 민감 데이터 전송 가능성은 HIGH reviewer tool output 으로 차단하고, 메인 LLM 이 사용자 결정을 다시 묻습니다.</p>
           <div class="scenario-list">
             <div class="scenario-row"><b>도구</b><span><code>bash</code> 또는 <code>powershell</code></span></div>
             <div class="scenario-row"><b>Reviewer</b><span>HIGH: destructive pattern or broad mutation</span></div>
-            <div class="scenario-row"><b>UX</b><span>명령 원문, working directory, path policy, reviewer reason 표시.</span></div>
+            <div class="scenario-row"><b>UX</b><span>승인 모달 없음. 명령 원문과 reviewer reason 이 tool error 로 반환.</span></div>
           </div>
         </div>
       </article>
@@ -843,11 +841,11 @@
       <article class="scenario">
         <div class="scenario-head"><span class="tag red">S9</span><h2>reviewer timeout/error</h2></div>
         <div class="scenario-body">
-          <p class="scenario-copy">LLM 호출 실패는 외부 경계 오류입니다. 사용자가 정한 failure action 을 UI 에 노출하고 audit 합니다.</p>
+          <p class="scenario-copy">LLM 호출 실패는 외부 경계 오류입니다. foreground 는 실행하지 않고 reviewer error 를 tool output 으로 반환하며 audit 합니다.</p>
           <div class="scenario-list">
             <div class="scenario-row"><b>오류</b><span>timeout, provider error, malformed verdict</span></div>
-            <div class="scenario-row"><b>결정</b><span>deny 또는 explicit ask. 허용은 별도 명시 설정 없이는 불가.</span></div>
-            <div class="scenario-row"><b>UX</b><span>“검토 실패”와 실제 오류 요약, 재시도, 설정 열기.</span></div>
+            <div class="scenario-row"><b>결정</b><span>deny tool output. 허용은 사용자 명시 승인 후 재요청으로만 가능.</span></div>
+            <div class="scenario-row"><b>UX</b><span>“검토 실패”와 실제 오류 요약을 메인 LLM 에 반환.</span></div>
           </div>
         </div>
       </article>
@@ -903,11 +901,11 @@
       <article class="scenario">
         <div class="scenario-head"><span class="tag amber">S14</span><h2>network data egress ask</h2></div>
         <div class="scenario-body">
-          <p class="scenario-copy">외부 서비스로 요약, 파일 내용, 회의록, 사용자 데이터가 전송되는 경우에는 reviewer 가 영향범위를 설명하고 승인 모달로 올립니다.</p>
+          <p class="scenario-copy">외부 서비스로 요약, 파일 내용, 회의록, 사용자 데이터가 전송되는 경우에는 reviewer 가 영향범위를 설명하고 tool output 으로 반환합니다.</p>
           <div class="scenario-list">
             <div class="scenario-row"><b>도구</b><span><code>teams_send</code> · plugin/network</span></div>
             <div class="scenario-row"><b>전송</b><span>회의 요약 2.4KB, 수신 채널 1개, 첨부 없음.</span></div>
-            <div class="scenario-row"><b>UX</b><span>destination, payload class, auth scope, retention risk 를 함께 표시.</span></div>
+            <div class="scenario-row"><b>UX</b><span>destination, payload class, auth scope, retention risk 를 tool error 로 반환.</span></div>
           </div>
         </div>
       </article>
@@ -915,7 +913,7 @@
       <article class="scenario">
         <div class="scenario-head"><span class="tag red">S15</span><h2>network unknown or sensitive</h2></div>
         <div class="scenario-body">
-          <p class="scenario-copy">unknown host, non-HTTPS, credential 포함 payload, 광범위 token scope, 민감 파일 전송 가능성은 HIGH 로 차단 후 사용자 판단을 받습니다.</p>
+          <p class="scenario-copy">unknown host, non-HTTPS, credential 포함 payload, 광범위 token scope, 민감 파일 전송 가능성은 HIGH 로 차단 후 reviewer tool output 으로 반환합니다.</p>
           <div class="scenario-list">
             <div class="scenario-row"><b>endpoint</b><span><code>http://example-upload.local/ingest</code></span></div>
             <div class="scenario-row"><b>Reviewer</b><span>HIGH: plaintext endpoint + workspace archive upload 가능성.</span></div>
@@ -982,7 +980,7 @@
             <td>write MED</td>
             <td>ask modal</td>
             <td>ask modal</td>
-            <td>ask modal with impact summary</td>
+            <td>reviewer tool output, no modal</td>
             <td>allow + audit</td>
             <td>deferred queue</td>
           </tr>
@@ -998,7 +996,7 @@
             <td>network data egress</td>
             <td>endpoint + payload ask modal</td>
             <td>endpoint + payload ask modal</td>
-            <td>MED ask with reviewer impact summary</td>
+            <td>MED reviewer tool output</td>
             <td>allow + payload-class audit</td>
             <td>deferred queue before transmission</td>
           </tr>
@@ -1006,7 +1004,7 @@
             <td>network unknown/sensitive</td>
             <td>HIGH ask or hard deny</td>
             <td>HIGH ask or hard deny</td>
-            <td>reviewer HIGH approval modal or deny if hard gate trips</td>
+            <td>reviewer HIGH tool output or deny if hard gate trips</td>
             <td>hard gates then allow only when policy permits</td>
             <td>deferred or deny, no background send</td>
           </tr>
@@ -1014,7 +1012,7 @@
             <td>shell/HIGH</td>
             <td>AST/path checks then ask</td>
             <td>AST/path checks then ask</td>
-            <td>reviewer HIGH approval modal</td>
+            <td>reviewer HIGH tool output</td>
             <td>hard gates then allow + audit</td>
             <td>deferred queue</td>
           </tr>
