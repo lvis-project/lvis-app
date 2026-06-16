@@ -105,6 +105,18 @@ const VALID_STATUSES: readonly WorkItemStatusStored[] = [
   "completed",
 ];
 const VALID_PRIORITIES: readonly WorkItemPriority[] = ["high", "medium", "low"];
+
+/** Max run-history entries kept per item (oldest evicted from the index — the
+ * on-disk transcripts themselves are never deleted here). */
+const RUN_HISTORY_CAP = 20;
+/** Run statuses that CLOSE a run, stamping `endedAt` on its history entry. */
+const TERMINAL_RUN_STATUSES: ReadonlySet<WorkItemRunStatus> = new Set([
+  "completed",
+  "denied",
+  "error",
+]);
+/** Cap on the inline output preview stored in a run-history entry. */
+const RUN_OUTPUT_PREVIEW_CHARS = 280;
 const VALID_RUN_STATUSES: readonly WorkItemRunStatus[] = [
   "idle",
   "planning",
@@ -543,6 +555,102 @@ export class WorkBoardStore {
   }
 
   /**
+   * Open a NEW run for an item (the engine calls this at run start instead of
+   * clearing the prior result). Appends a fresh entry to `runHistory` (newest
+   * last, capped) keyed by `runId`, points the item at that `runId`, sets
+   * `runStatus="planning"`, and resets the latest plan/output/runSessionId for a
+   * clean slate. The prior run's history entry AND its on-disk transcript are
+   * left intact — re-running NEVER overwrites prior work (the user's continuity
+   * requirement). Returns `not_found` for an unknown id.
+   */
+  async beginRun(id: number, runId: string, startedAt: string): Promise<WorkItemUpdateResult> {
+    await this.ensureLoaded();
+    return withFileLock(this.filePath, async () => {
+      const board = await readFileOrEmpty(this.filePath);
+      const idx = board.items.findIndex((i) => i.id === id);
+      if (idx === -1) {
+        this.cache = board;
+        return { status: "not_found" as const, itemId: id };
+      }
+      const prior = board.items[idx];
+      const history = [
+        ...(prior.runHistory ?? []),
+        { runId, startedAt, status: "planning" as WorkItemRunStatus },
+      ];
+      const capped =
+        history.length > RUN_HISTORY_CAP ? history.slice(history.length - RUN_HISTORY_CAP) : history;
+      const updated: WorkItem = {
+        ...prior,
+        runStatus: "planning",
+        runId,
+        runUpdatedAt: startedAt,
+        runHistory: capped,
+      };
+      delete updated.plan;
+      delete updated.output;
+      delete updated.runSessionId;
+      board.items[idx] = updated;
+      await writeFileAtomic(this.filePath, board);
+      this.cache = board;
+      await appendActivity(this.activity, {
+        kind: "run-planned",
+        itemId: id,
+        title: updated.title,
+        to: "planning",
+        ts: startedAt,
+      });
+      return {
+        status: "updated" as const,
+        itemId: id,
+        item: decorate(cloneItem(updated), Date.parse(startedAt)),
+      };
+    });
+  }
+
+  /**
+   * Reconcile runs interrupted by a process exit. A run lives only in memory, so
+   * ANY item persisted in an active run phase (planning / awaiting_approval /
+   * executing) at boot belongs to a run that can no longer be in flight — its
+   * process is gone. Mark each `error` (and close its open history entry) so the
+   * item is re-runnable again (P2's runItem guard rejects active runStatus as
+   * `already_running`) and the card stops showing a permanent "running" badge.
+   * Called once at boot after load(). Returns the number of items reset.
+   */
+  async reconcileInterruptedRuns(): Promise<number> {
+    await this.ensureLoaded();
+    return withFileLock(this.filePath, async () => {
+      const board = await readFileOrEmpty(this.filePath);
+      const iso = new Date(this.now()).toISOString();
+      let count = 0;
+      for (let i = 0; i < board.items.length; i++) {
+        const it = board.items[i];
+        if (
+          it.runStatus === "planning" ||
+          it.runStatus === "awaiting_approval" ||
+          it.runStatus === "executing"
+        ) {
+          const updated: WorkItem = { ...it, runStatus: "error", runUpdatedAt: iso };
+          if (it.runId && Array.isArray(it.runHistory)) {
+            updated.runHistory = it.runHistory.map((h) =>
+              h.runId === it.runId && h.endedAt === undefined
+                ? { ...h, status: "error" as WorkItemRunStatus, endedAt: iso }
+                : h,
+            );
+          }
+          board.items[i] = updated;
+          count += 1;
+        }
+      }
+      if (count > 0) {
+        await writeFileAtomic(this.filePath, board);
+      }
+      this.cache = board;
+      if (count > 0) log.info("[work-board-store] reconciled %d interrupted run(s) → error", count);
+      return count;
+    });
+  }
+
+  /**
    * Persist the terminal result of a run — the captured plan, the captured
    * execution output, the linking run session id, and the final run status.
    * Engine-written only. One activity row (`run-executed` for the completed
@@ -588,6 +696,24 @@ export class WorkBoardStore {
       else if (result.output !== undefined) updated.output = result.output;
       if (result.runSessionId === null) delete updated.runSessionId;
       else if (result.runSessionId !== undefined) updated.runSessionId = result.runSessionId;
+      // Keep the CURRENT run's history entry (matched by runId) in sync, so the
+      // re-run history index reflects each run's final status/plan/output —
+      // without a separate write path. `endedAt` is stamped on terminal status.
+      if (updated.runId && Array.isArray(updated.runHistory)) {
+        updated.runHistory = updated.runHistory.map((h) =>
+          h.runId === updated.runId
+            ? {
+                ...h,
+                status: result.runStatus,
+                ...(typeof updated.plan === "string" ? { plan: updated.plan } : {}),
+                ...(typeof updated.output === "string"
+                  ? { outputPreview: updated.output.slice(0, RUN_OUTPUT_PREVIEW_CHARS) }
+                  : {}),
+                ...(TERMINAL_RUN_STATUSES.has(result.runStatus) ? { endedAt: iso } : {}),
+              }
+            : h,
+        );
+      }
       board.items[idx] = updated;
       await writeFileAtomic(this.filePath, board);
       this.cache = board;

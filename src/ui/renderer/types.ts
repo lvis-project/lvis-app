@@ -789,6 +789,15 @@ export type LvisApi = {
     | import("../../shared/work-board-types.js").WorkBoardReportResult
     | { ok: false; error: string }
   >;
+  // Read a past run's persisted transcript (plan+execute conversation) for the
+  // run-history view. Resolves with the ordered events (empty when absent).
+  getWorkBoardRunTranscript?: (
+    itemId: number,
+    runId: string,
+  ) => Promise<
+    | { events: import("../../shared/work-board-types.js").RunTranscriptEvent[] }
+    | { ok: false; error: string }
+  >;
   // Live per-phase progress for an in-flight run. Payload === the engine's
   // WorkBoardRunEvent (aliased RunProgressEventPayload).
   onWorkBoardRunProgress: (
