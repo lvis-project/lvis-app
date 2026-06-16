@@ -93,6 +93,7 @@ import { RoutinesScheduler } from "./main/routines-scheduler.js";
 import { WorkBoardStore } from "./main/work-board-store.js";
 import { createWorkBoardEngine, type WorkBoardEngine } from "./core/work-board-engine.js";
 import { migrateAgentHubBoardToWorkBoard } from "./boot/steps/work-board-migration.js";
+import { seedSampleWorkBoard } from "./work-board/sample-data.js";
 import { scanAndEmitDueSoon } from "./work-board/due-soon.js";
 import { createDirStorage } from "./work-board/storage.js";
 import { openFeatureNamespace } from "./main/storage/feature-namespace.js";
@@ -488,7 +489,7 @@ export async function bootstrap(
   // store loads so the store's first read picks up the migrated file. The
   // migration is a no-op once the host board exists (P2 wires the
   // runner/engine; the store is pure persistence here).
-  await migrateAgentHubBoardToWorkBoard();
+  const workBoardMigrated = await migrateAgentHubBoardToWorkBoard();
   const workBoardStore = new WorkBoardStore();
   await workBoardStore.load().catch((err) => {
     log.warn("boot: work-board load failed (non-fatal): %s", (err as Error).message);
@@ -499,6 +500,20 @@ export async function bootstrap(
   // due-soon consumer. Deferred-started (after IPC + plugins are up)
   // via services.startWorkBoardDueSoon; the timer is cleared on shutdown.
   const workBoardStorage = createDirStorage(openFeatureNamespace("work-board").dir);
+
+  // First-run onboarding: seed clearly-labelled sample items so a brand-new
+  // board demonstrates the agentic flow (create → approve → execute → output)
+  // for the user guide. One-time (keyed by a marker file) and skipped when the
+  // board was migrated or already has items — a real board is never seeded.
+  await seedSampleWorkBoard({
+    store: workBoardStore,
+    marker: workBoardStorage,
+    alreadyMigrated: workBoardMigrated,
+    now: Date.now,
+  }).catch((err) =>
+    log.warn("boot: work-board sample seed failed (non-fatal): %s", (err as Error).message),
+  );
+
   const DUE_SOON_TICK_MS = 60 * 60_000;
   let dueSoonTimer: ReturnType<typeof setInterval> | undefined;
   const runDueSoonScan = (): void => {
