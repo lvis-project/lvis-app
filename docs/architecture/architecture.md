@@ -3299,6 +3299,30 @@ graph LR
 
 이 비교 항목들은 우리 실제 요구사항(범위 공개, 승인, 감사)과 겹치는 부분이 많으며, 각 phase 설계 시 공개 동작 수준에서만 참고한다.
 
+### 10.0.3 Direction Update (2026-06-16): Host-Integrated Agentic Work Board
+
+**결정**: Work Board를 **server-backed plugin POC** (`lvis-agent-hub` 서버 + `lvis-plugin-agent-hub` bridge) 에서 **호스트 1급 도메인 (host-integrated agentic work orchestrator)** 으로 전환한다. 이는 §10.1(line above)이 명시한 미구현 갭 — *"승인 후 실제 행위 실행은 아직 연결하지 않는다"* — 을 실현하는 작업이다.
+
+**Why host, not plugin (권한 모델 정합):**
+- agentic 오케스트레이터는 본질적으로 (a) 서브에이전트 spawn, (b) §8 ApprovalGate 구동, (c) **타 플러그인 툴(mail/calendar/meeting) 오케스트레이션** 이 필요하다.
+- LVIS 권한 모델의 핵심은 **"플러그인은 다른 플러그인을 호출할 수 없다"** (§6.3 Layer 4, §9 plugin isolation). 오케스트레이터를 플러그인으로 두면 이 핵심 제약을 깨는 HostApi 구멍(`runAgentTask`/`spawnSubAgent` 등)을 다수 뚫어야 한다.
+- ∴ 오케스트레이터 = **호스트 자신**. 호스트는 `SubAgentRunner`(engine/subagent-runner.ts), `RoutineEngine`+`RoutinesScheduler`, §8 `ApprovalGate`, 전체 `ToolRegistry`(scoped view) 에 **격리 위반 없이 네이티브 접근**한다. chat sessions / routine / audit 처럼 본질적으로 호스트 권능이 필요한 도메인을 호스트 레벨로 승격하는 것이며, "host MUST NOT contain plugin-specific code" 원칙 위반이 아니다 (Work Board 는 도메인이지 특정 플러그인이 아님).
+
+**실행 모델 (plan → approve → execute):**
+1. 사용자가 Work Item 등록 → Skill(agent profile `~/.lvis/agents/<name>.md`: 리서치/초안/정리/일정조율) 선택.
+2. **PLAN**: host 가 plan-mode 서브에이전트(`SubAgentRunner`, mode=plan)를 띄워 실행 계획 수립.
+3. **APPROVE**: 계획을 §8 ApprovalGate 로 사용자 승인 (verdict → 실제 실행 연결; §10.1 갭 해소).
+4. **EXECUTE**: execute-mode 서브에이전트가 scoped ToolRegistry(타 플러그인 툴 포함)로 자율 실행. 실행 중 외부 쓰기(메일 발송 등)는 §8 게이트 재통과.
+5. 보드 상태: `진행 중` = 에이전트 라이브 작업(`runningStarted` 이벤트), `완료` = 산출물(노트/카드 첨부) + run transcript.
+
+**Agent Hub(A2A) 와의 구분:** §10 의 Agent Hub(A2A message board)는 *에이전트 간 비동기 메시징*(이영희 레플리카에게 전달)이고, Work Board(본 절)는 *사용자 자신의 작업을 자신의 서브에이전트가 자율 실행* 하는 축이다. 두 축은 §10 우산 아래 공존한다.
+
+**Hermes 차용:** Skills = agent profile, Memory = `~/.lvis/work-board/memories/{USER,MEMORY}.md` (업무 흐름 학습), Crons = RoutinesScheduler 연동 예약 실행, Self-improvement = run 결과로 skill/memory 보정.
+
+**Supersedes:** `lvis-agent-hub` 서버 + `lvis-plugin-agent-hub` 플러그인은 Work Board 기능에 대해 디커미션(서버 2026-06-15 셧다운). 저장소 `~/.lvis/plugins/agent-hub/board.json` → `~/.lvis/work-board/board.json` (부팅 1회 마이그레이션). `work_item.due_soon {itemId,title,notifiedAt}` 계약은 호스트가 계속 emit (work-assistant 소비 보존).
+
+**Phased delivery:** P1 도메인 스켈레톤(`src/work-board/`, `~/.lvis/work-board/`) + WorkItem 포팅 + 프로페셔널 칸반 UI(host renderer `activeView='work-board'`). P2 네이티브 plan→approve→execute 오케스트레이션. P3 Skills/Memory/일일·주간 reports + due_soon 계약. P4 플러그인 디커미션 + 데이터 마이그레이션 + 샘플 데이터.
+
 ### 10.1 Roadmap to Full Agent Hub
 
 Agent Hub는 모든 사용자 레플리카 에이전트가 모인 비동기 메시지 보드이다. 두 가지 축으로 작동한다:
