@@ -182,6 +182,13 @@ export interface AppServices {
    */
   startRoutinesScheduler?: () => void;
   /**
+   * Deferred Work Board due-soon scanner handle. main.ts calls this AFTER
+   * registerIpcHandlers() (mirroring startRoutinesScheduler) so the initial
+   * scan + the 60-min tick emit `agent_hub.work_item.due_soon` onto a fully
+   * wired plugin bus. The interval is cleared in `shutdown()`.
+   */
+  startWorkBoardDueSoon?: () => void;
+  /**
    * Issue #260 — system-level notification service. Auto-fires desktop
    * notifications at lifecycle points (turn-end / routine / ask-user /
    * approval / plugin / system). Constructed AFTER main window exists in boot.ts. The LLM never
