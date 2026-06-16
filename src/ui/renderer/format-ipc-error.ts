@@ -131,6 +131,9 @@ export const COMMON_IPC_ERROR_MESSAGES: Readonly<Record<string, string>> = {
   // (lvis:work-board:run). Sibling of "no-store" — the run channel is gated on
   // the engine the way CRUD channels are gated on the store.
   "no-engine": "formatIpcError.noEngine",
+  // Work-board reporter not constructed at boot (lvis:work-board:generate-report).
+  // Sibling of "no-engine" — the report channel is gated on the reporter.
+  "no-reporter": "formatIpcError.noReporter",
   "no-starred-store": "formatIpcError.noStarredStore",
   "no-session-todo-store": "formatIpcError.noSessionTodoStore",
   // ── #893 Auth mockup login ──

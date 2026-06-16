@@ -38,6 +38,7 @@ import {
 import type { LvisApi } from "../types.js";
 import type {
   RunProgressEventPayload,
+  WorkBoardReportResult,
   WorkItemCreateInput,
   WorkItemPriority,
   WorkItemResolved,
@@ -1020,33 +1021,113 @@ export function WorkItemDetailDialog({ api, itemId, run, onClose, onChanged, onR
   );
 }
 
-// ─── Reports section (coming-soon placeholder) ─────────────────────────────────
+// ─── Reports section (daily / weekly generation) ───────────────────────────────
 //
-// Report generation is a deferred surface — the `run` / `generate-report` IPC
-// channels are intentionally not registered yet. This section is a purely
-// informational "coming soon" placeholder: the buttons are permanently disabled
-// and carry NO invoke binding, so the renderer never calls an unregistered
-// handler. The daily/weekly affordances return when the runner is wired.
+// Generates a personal work report on demand: the daily / weekly buttons call
+// the `generate-report` IPC channel, which drives the host-native reporter
+// (board state + activity log + learned memory → LLM → markdown). The returned
+// markdown renders in a scrollable monospace block (mirroring the run-output
+// panel). `empty` (no activity) and `error` (LLM failure / no reporter) both
+// surface as a single discriminated result so the user always gets feedback.
 
-function ReportsSection() {
+function ReportsSection({ api }: { api: LvisApi }) {
+  const [generating, setGenerating] = useState<"daily" | "weekly" | null>(null);
+  const [result, setResult] = useState<
+    WorkBoardReportResult | { ok: false; error: string } | null
+  >(null);
+  const mountedRef = useRef(true);
+  useEffect(() => () => { mountedRef.current = false; }, []);
+
+  const run = useCallback(
+    async (kind: "daily" | "weekly") => {
+      if (typeof api.generateWorkBoardReport !== "function") return;
+      setGenerating(kind);
+      setResult(null);
+      try {
+        const r = await api.generateWorkBoardReport(kind);
+        if (mountedRef.current) setResult(r);
+      } finally {
+        if (mountedRef.current) setGenerating(null);
+      }
+    },
+    [api],
+  );
+
   return (
     <section className="rounded-md border bg-muted/20 p-3" data-testid="work-board-reports">
-      <div className="flex items-center justify-between">
-        <h3 className="text-sm font-medium text-muted-foreground">{t("workBoard.reportsHeading")}</h3>
-        <Badge variant="outline" className="text-muted-foreground">
-          {t("workBoard.comingSoonBadge")}
-        </Badge>
-      </div>
+      <h3 className="text-sm font-medium text-muted-foreground">{t("workBoard.reportsHeading")}</h3>
       <p className="mt-1 text-[11px] text-muted-foreground">{t("workBoard.reportPlaceholder")}</p>
       <div className="mt-2 flex gap-2">
-        <Button size="sm" variant="outline" disabled data-testid="work-board-report-daily">
+        <Button
+          size="sm"
+          variant="outline"
+          disabled={generating !== null}
+          onClick={() => void run("daily")}
+          data-testid="work-board-report-daily"
+        >
+          {generating === "daily" && <Loader2 className="mr-1 h-3 w-3 animate-spin" />}
           {t("workBoard.reportDaily")}
         </Button>
-        <Button size="sm" variant="outline" disabled data-testid="work-board-report-weekly">
+        <Button
+          size="sm"
+          variant="outline"
+          disabled={generating !== null}
+          onClick={() => void run("weekly")}
+          data-testid="work-board-report-weekly"
+        >
+          {generating === "weekly" && <Loader2 className="mr-1 h-3 w-3 animate-spin" />}
           {t("workBoard.reportWeekly")}
         </Button>
       </div>
+      {result && <ReportResultBlock result={result} onClose={() => setResult(null)} />}
     </section>
+  );
+}
+
+// Render the discriminated report result: `ok` → period heading + markdown,
+// `empty` → muted reason, `error` / `{ok:false}` → destructive reason.
+function ReportResultBlock({
+  result,
+  onClose,
+}: {
+  result: WorkBoardReportResult | { ok: false; error: string };
+  onClose: () => void;
+}) {
+  if ("ok" in result) {
+    return (
+      <p className="mt-2 text-[11px] text-destructive" data-testid="work-board-report-error">
+        {t("workBoard.reportFailed")}: {result.error}
+      </p>
+    );
+  }
+  if (result.status === "error") {
+    return (
+      <p className="mt-2 text-[11px] text-destructive" data-testid="work-board-report-error">
+        {t("workBoard.reportFailed")}: {result.reason}
+      </p>
+    );
+  }
+  if (result.status === "empty") {
+    return (
+      <p className="mt-2 text-[11px] text-muted-foreground" data-testid="work-board-report-empty">
+        {result.reason}
+      </p>
+    );
+  }
+  return (
+    <div className="mt-2 space-y-1" data-testid="work-board-report-result">
+      <div className="flex items-center justify-between">
+        <span className="text-[11px] font-medium text-muted-foreground">
+          {t("workBoard.reportResultHeading")} · {result.period}
+        </span>
+        <Button size="sm" variant="ghost" className="h-5 px-1 text-[11px]" onClick={onClose}>
+          {t("workBoard.reportClose")}
+        </Button>
+      </div>
+      <pre className="max-h-48 overflow-auto whitespace-pre-wrap break-words rounded bg-background/60 p-2 text-[11px] leading-relaxed">
+        {result.markdown}
+      </pre>
+    </div>
   );
 }
 
@@ -1215,7 +1296,7 @@ export function WorkBoardPanel({ api }: WorkBoardPanelProps) {
               testId="work-board-column-completed"
             />
           </div>
-          <ReportsSection />
+          <ReportsSection api={api} />
         </CardContent>
       </Card>
 
