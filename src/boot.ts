@@ -1043,6 +1043,9 @@ export async function bootstrap(
       appendMemory(workBoardStorage, [
         `${new Date().toISOString().slice(0, 10)}: 자율 실행 완료 — #${itemId} ${title}`,
       ]),
+    // Persist each run's plan+execute conversation to sessions/<id>/<runId>.jsonl
+    // so run context survives restart and accumulates across re-runs.
+    transcriptStorage: workBoardStorage,
   });
 
   // Work Board reporter — host-native daily/weekly reports. Reuses the
