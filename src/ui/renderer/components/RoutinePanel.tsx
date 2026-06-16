@@ -77,13 +77,13 @@ function describeSchedule(routine: RoutineRecord): string {
 function RoutineRow({ routine, onDismiss, onRemove, onTriggerNow, recentlyFired }: RoutineRowProps) {
   return (
     <div
-      className={`rounded-md border p-3 ${recentlyFired ? "border-warning/60 bg-warning/10" : ""}`}
+      className={`rounded-lg border bg-background p-3 shadow-sm transition-shadow hover:shadow-md ${recentlyFired ? "border-warning/60 bg-warning/10" : ""}`}
       data-testid="routine-row"
     >
       <div className="flex items-start justify-between gap-2">
         <div className="min-w-0 flex-1">
           <div className="flex items-center gap-2">
-            <span className="text-sm font-medium">{routine.title || routine.notificationTitle || routine.prePrompt?.slice(0, 30) || routine.id.slice(0, 8)}</span>
+            <span className="text-sm font-semibold leading-snug text-foreground">{routine.title || routine.notificationTitle || routine.prePrompt?.slice(0, 30) || routine.id.slice(0, 8)}</span>
             <ExecutionBadge execution={routine.execution} />
           </div>
           <div className="mt-0.5 text-[11px] text-muted-foreground">
@@ -135,13 +135,13 @@ function RoutineSessionRow({ session, onOpen }: { session: RoutineSessionListIte
   return (
     <button
       type="button"
-      className="w-full rounded-md border px-3 py-2 text-left transition hover:bg-muted/60"
+      className="w-full rounded-lg border bg-background px-3 py-2 text-left shadow-sm transition-shadow hover:shadow-md focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
       data-testid="routine-session-row"
       onClick={() => onOpen(session.sessionId)}
     >
       <div className="flex items-start justify-between gap-2">
         <div className="min-w-0">
-          <div className="truncate text-sm font-medium">{session.routineTitle}</div>
+          <div className="truncate text-sm font-semibold leading-snug text-foreground">{session.routineTitle}</div>
           <div className="mt-0.5 text-[11px] text-muted-foreground">
             {formatSessionTime(session.firedAt)}
           </div>
@@ -738,9 +738,9 @@ export function RoutinePanel({ api, onOpenSession }: RoutinePanelProps) {
         <CardContent className="flex min-h-0 flex-1 flex-col gap-3">
           <div className="grid min-h-0 flex-1 gap-3 lg:grid-cols-[minmax(0,1fr)_minmax(240px,0.72fr)]">
             <section className="flex min-h-0 flex-col gap-2" data-testid="routine-list-section">
-              <div className="flex items-center justify-between">
-                <h3 className="text-sm font-medium">{t("routinePanel.routineListHeading")}</h3>
-                <span className="text-[11px] text-muted-foreground">{t("routinePanel.itemCount", { count: String(routines.length) })}</span>
+              <div className="flex items-center justify-between rounded-t-lg border-b bg-muted/40 px-3 py-2">
+                <h3 className="text-xs font-semibold uppercase tracking-wider text-muted-foreground">{t("routinePanel.routineListHeading")}</h3>
+                <Badge variant="outline" className="h-5 px-1.5 text-[11px] tabular-nums">{routines.length}</Badge>
               </div>
               <ScrollArea className="min-h-[220px] flex-1">
                 {loading ? (
@@ -767,9 +767,9 @@ export function RoutinePanel({ api, onOpenSession }: RoutinePanelProps) {
             </section>
 
             <section className="flex min-h-0 flex-col gap-2" data-testid="routine-session-list">
-              <div className="flex items-center justify-between">
-                <h3 className="text-sm font-medium">{t("routinePanel.sessionListHeading")}</h3>
-                <span className="text-[11px] text-muted-foreground">{t("routinePanel.itemCount", { count: String(routineSessions.length) })}</span>
+              <div className="flex items-center justify-between rounded-t-lg border-b bg-muted/40 px-3 py-2">
+                <h3 className="text-xs font-semibold uppercase tracking-wider text-muted-foreground">{t("routinePanel.sessionListHeading")}</h3>
+                <Badge variant="outline" className="h-5 px-1.5 text-[11px] tabular-nums">{routineSessions.length}</Badge>
               </div>
               <ScrollArea className="min-h-[220px] flex-1">
                 {loading ? (
