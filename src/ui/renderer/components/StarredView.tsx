@@ -42,37 +42,45 @@ export function StarredView({
         </div>
         <CardDescription>{t("starredView.description")}</CardDescription>
       </CardHeader>
-      <CardContent className="flex min-h-0 flex-1 flex-col gap-3">
-        <ScrollArea className="flex-1">
-          {starred.length === 0 ? (
-            <div className="py-8 text-center text-sm text-muted-foreground">{t("starredView.emptyState")}</div>
-          ) : (
-            <div className="space-y-2 pr-2">
-              {starred.map((s) => (
-                <div key={s.id} className="rounded-md border p-3 text-sm">
-                  <div className="mb-1 flex items-center gap-2 text-[11px] text-muted-foreground">
-                    <Badge variant="outline" className="text-[10px]">{s.role}</Badge>
-                    <span>{new Date(s.starredAt).toLocaleString("ko-KR")}</span>
-                    <span className="font-mono opacity-60">#{s.sessionId.slice(0, 8)}</span>
-                    <Button variant="ghost" size="icon-xs" className="ml-auto hover:bg-muted" title={t("starredView.unstar")} onClick={() => { void api.starredRemove({ id: s.id }).then(() => refreshStarred()); }}>
-                      <XIcon className="h-3 w-3" />
-                    </Button>
+      <CardContent className="flex min-h-0 flex-1 flex-col gap-4">
+        <section className="flex min-h-0 flex-col rounded-lg border bg-muted/20 shadow-sm">
+          <div className="flex items-center justify-between rounded-t-lg border-b bg-muted/40 px-3 py-2">
+            <h3 className="text-xs font-semibold uppercase tracking-wider text-muted-foreground">{t("starredView.title")}</h3>
+            <span className="flex h-5 min-w-[20px] items-center justify-center rounded-full bg-muted px-1.5 text-[10px] font-semibold text-muted-foreground">
+              {starred.length}
+            </span>
+          </div>
+          <ScrollArea className="flex-1">
+            {starred.length === 0 ? (
+              <div className="py-8 text-center text-sm text-muted-foreground">{t("starredView.emptyState")}</div>
+            ) : (
+              <div className="space-y-2 p-2">
+                {starred.map((s) => (
+                  <div key={s.id} className="rounded-lg border bg-background shadow-sm transition-all hover:border-border hover:shadow-md">
+                    <div className="flex items-center gap-2 border-b px-3 py-1.5 text-[11px] text-muted-foreground">
+                      <Badge variant="outline" className="text-[10px]">{s.role}</Badge>
+                      <span>{new Date(s.starredAt).toLocaleString("ko-KR")}</span>
+                      <span className="font-mono opacity-60">#{s.sessionId.slice(0, 8)}</span>
+                      <Button variant="ghost" size="icon-xs" className="ml-auto hover:bg-muted" title={t("starredView.unstar")} onClick={() => { void api.starredRemove({ id: s.id }).then(() => refreshStarred()); }}>
+                        <XIcon className="h-3 w-3" />
+                      </Button>
+                    </div>
+                    <button
+                      className="w-full whitespace-pre-wrap break-words p-3 text-left text-sm font-semibold leading-snug text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring hover:opacity-80"
+                      onClick={async () => {
+                        if (s.sessionId !== currentSessionId) {
+                          const jumped = await onJumpToSession(s.sessionId);
+                          if (jumped === false) return;
+                        }
+                        onActivateHome();
+                      }}
+                    >{s.text.slice(0, 300)}{s.text.length > 300 ? "…" : ""}</button>
                   </div>
-                  <button
-                    className="w-full whitespace-pre-wrap break-words text-left text-sm hover:opacity-80"
-                    onClick={async () => {
-                      if (s.sessionId !== currentSessionId) {
-                        const jumped = await onJumpToSession(s.sessionId);
-                        if (jumped === false) return;
-                      }
-                      onActivateHome();
-                    }}
-                  >{s.text.slice(0, 300)}{s.text.length > 300 ? "…" : ""}</button>
-                </div>
-              ))}
-            </div>
-          )}
-        </ScrollArea>
+                ))}
+              </div>
+            )}
+          </ScrollArea>
+        </section>
       </CardContent>
     </Card>
   );
