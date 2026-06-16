@@ -132,6 +132,7 @@ describe("Tutorial-C PR #983 follow-up: tour anchors", () => {
       onToggleCurrentSessionStar: vi.fn(),
       onExport: vi.fn(),
       onOpenHome: vi.fn(),
+      onOpenWorkBoardView: vi.fn(),
       onOpenRoutinesView: vi.fn(),
       onOpenMemoryView: vi.fn(),
       onOpenSettings: vi.fn(),

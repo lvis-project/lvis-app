@@ -97,6 +97,7 @@ export function makeMockLvisApi(overrides: ApiOverrides = {}): {
   emitOverlayShow: (item: unknown) => void;
   emitOverlayDismiss: (id: string) => void;
   emitRoutineFiredV2: (r: unknown) => void;
+  emitWorkBoardItemChanged: (p: unknown) => void;
   emitViewActivate: (v: string) => void;
   emitAskUserQuestion: (r: unknown) => void;
   emitTourStart: (scenarioId: string) => void;
@@ -140,6 +141,7 @@ export function makeMockLvisApi(overrides: ApiOverrides = {}): {
   const overlayShowHandlers = new Set<(item: unknown) => void>();
   const overlayDismissHandlers = new Set<(id: string) => void>();
   const routineFiredV2Handlers = new Set<(r: unknown) => void>();
+  const workBoardItemChangedHandlers = new Set<(p: unknown) => void>();
   const viewHandlers = new Set<(v: string) => void>();
   const settingsUpdatedHandlers = new Set<(settings: unknown) => void>();
   const settingsWindowSavedHandlers = new Set<() => void>();
@@ -461,6 +463,33 @@ export function makeMockLvisApi(overrides: ApiOverrides = {}): {
     onRoutineRunningFinished: vi.fn((_h: (id: string) => void) => () => {}),
     onRoutineFailedV2: vi.fn((_handler: (event: { routineId: string; error: string }) => void) => () => {}),
     listRoutineSessionsV2: vi.fn(async (routineId: string) => routineSessionsByRoutine[routineId] ?? []),
+    // Work Board API — board panel subscribes to onWorkBoardItemChanged at
+    // mount, so the smoke test mock must define these even when the suite
+    // doesn't exercise the board. CRUD mocks return the store's discriminated
+    // `status` envelopes; events are no-op subscribe handles by default.
+    listWorkBoard: vi.fn(async () => ({ status: "ok", items: [] })),
+    getWorkBoardItem: vi.fn(async (id: number) => ({ status: "not_found", itemId: id })),
+    addWorkBoardItem: vi.fn(async () => ({ status: "invalid", reason: "mock" })),
+    updateWorkBoardItem: vi.fn(async (id: number) => ({ status: "not_found", itemId: id })),
+    transitionWorkBoardItem: vi.fn(async (id: number) => ({ status: "not_found", itemId: id })),
+    completeWorkBoardItem: vi.fn(async (id: number) => ({ status: "not_found", itemId: id })),
+    reopenWorkBoardItem: vi.fn(async (id: number) => ({ status: "not_found", itemId: id })),
+    removeWorkBoardItem: vi.fn(async (id: number) => ({ status: "not_found", itemId: id })),
+    runWorkBoardItem: vi.fn(async () => ({ ok: true })),
+    generateWorkBoardReport: vi.fn(async (input: { kind: string; period?: string }) => ({
+      status: "empty",
+      kind: input.kind,
+      period: input.period ?? "",
+      reason: "mock",
+    })),
+    onWorkBoardItemChanged: vi.fn((handler: (p: unknown) => void) => {
+      workBoardItemChangedHandlers.add(handler);
+      return () => workBoardItemChangedHandlers.delete(handler);
+    }),
+    onWorkBoardRunningStarted: vi.fn((_h: (p: unknown) => void) => () => {}),
+    onWorkBoardRunningFinished: vi.fn((_h: (id: number) => void) => () => {}),
+    onWorkBoardFailed: vi.fn((_h: (event: { itemId: number; error: string }) => void) => () => {}),
+    onWorkBoardDueSoon: vi.fn((_h: (p: unknown) => void) => () => {}),
     // Overlay trigger lifecycle. Tests that don't exercise the
     // trigger card just need these to be callable subscribe/no-op functions.
     onTriggerStarted: vi.fn((_h: (p: unknown) => void) => () => {}),
@@ -536,6 +565,7 @@ export function makeMockLvisApi(overrides: ApiOverrides = {}): {
     emitOverlayShow: (item) => overlayShowHandlers.forEach((h) => h(item)),
     emitOverlayDismiss: (id) => overlayDismissHandlers.forEach((h) => h(id)),
     emitRoutineFiredV2: (r) => routineFiredV2Handlers.forEach((h) => h(r)),
+    emitWorkBoardItemChanged: (p) => workBoardItemChangedHandlers.forEach((h) => h(p)),
     emitViewActivate: (v) => viewHandlers.forEach((h) => h(v)),
     emitAskUserQuestion: (r) => askUserQuestionHandlers.forEach((h) => h(r)),
     emitTourStart: (scenarioId) => tourStartHandlers.forEach((h) => h({ scenarioId })),

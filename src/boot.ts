@@ -89,6 +89,8 @@ import {
 } from "./boot/tools.js";
 import { RoutinesStore } from "./main/routines-store.js";
 import { RoutinesScheduler } from "./main/routines-scheduler.js";
+import { WorkBoardStore } from "./main/work-board-store.js";
+import { migrateAgentHubBoardToWorkBoard } from "./boot/steps/work-board-migration.js";
 import { SessionTodoStore } from "./main/session-todo-store.js";
 import { AskUserQuestionGate } from "./main/ask-user-question-gate.js";
 import { NotificationService } from "./main/notification-service.js";
@@ -473,6 +475,18 @@ export async function bootstrap(
     log.warn("boot: routines load failed (non-fatal): %s", (err as Error).message);
   });
   const routinesScheduler = new RoutinesScheduler(routinesStore);
+
+  // Work board persistence (~/.lvis/work-board/board.json). One-shot,
+  // idempotent migration of a legacy plugin-owned board runs BEFORE the
+  // store loads so the store's first read picks up the migrated file. The
+  // migration is a no-op once the host board exists (P2 wires the
+  // runner/engine; the store is pure persistence here).
+  await migrateAgentHubBoardToWorkBoard();
+  const workBoardStore = new WorkBoardStore();
+  await workBoardStore.load().catch((err) => {
+    log.warn("boot: work-board load failed (non-fatal): %s", (err as Error).message);
+  });
+
   const sessionTodoStore = new SessionTodoStore();
   const skillStore = new SkillStore();
   const agentProfileStore = new AgentProfileStore();
@@ -1303,7 +1317,7 @@ export async function bootstrap(
     systemPromptBuilder, conversationLoop, routineEngine, mcpManager, mcpArtifactStore, agentArtifactStore, skillArtifactStore,
     idleScheduler, preferenceRefreshService, bashAstValidator, auditService, auditLogger: bootAuditLogger, postTurnHookChain,
     approvalGate, rewireReviewerAgent, refreshMarketplaceFetcherConfig, refreshActiveLlmWildcard,
-    routinesStore, routinesScheduler, sessionTodoStore, askUserQuestionGate, skillStore, agentProfileStore, personaPromptStore,
+    routinesStore, routinesScheduler, workBoardStore, sessionTodoStore, askUserQuestionGate, skillStore, agentProfileStore, personaPromptStore,
     knowledgeAvailable, starredStore, feedbackStore,
     notificationService,
     scriptHookManager,
