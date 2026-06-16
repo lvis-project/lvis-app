@@ -73,8 +73,9 @@ import { openLinkWindow as openLinkWindowService } from "./main/link-window-serv
 import { openAuthPartitionViewer as openAuthPartitionViewerService } from "./main/auth-partition-viewer-service.js";
 
 import { type AppServices, onEvent } from "./boot/types.js";
-import { PERMISSIONS, ROUTINES_V2 } from "./shared/ipc-channels.js";
+import { PERMISSIONS, ROUTINES_V2, WORK_BOARD } from "./shared/ipc-channels.js";
 import { sendToWindow } from "./ipc/safe-send.js";
+import { fanOutToAllWindows } from "./ipc/broadcast-helpers.js";
 import { broadcastPermissionConfigChanged as broadcastPermissionConfigChangedFromIpc } from "./ipc/domains/permissions.js";
 import { startWatcherTelemetryCollector } from "./boot/steps/watcher-telemetry-collector.js";
 import { bootstrapCoreServices } from "./boot/services.js";
@@ -90,6 +91,7 @@ import {
 import { RoutinesStore } from "./main/routines-store.js";
 import { RoutinesScheduler } from "./main/routines-scheduler.js";
 import { WorkBoardStore } from "./main/work-board-store.js";
+import { createWorkBoardEngine, type WorkBoardEngine } from "./core/work-board-engine.js";
 import { migrateAgentHubBoardToWorkBoard } from "./boot/steps/work-board-migration.js";
 import { SessionTodoStore } from "./main/session-todo-store.js";
 import { AskUserQuestionGate } from "./main/ask-user-question-gate.js";
@@ -978,6 +980,27 @@ export async function bootstrap(
   // SystemPromptBuilder via getActiveSkillsSection. See main/skill-overlay.ts
   // for the registry; src/tools/skill-load.ts for the tool entry point.
 
+  // WorkBoardEngine — plan→approve→execute orchestration for one work item.
+  // Wired here, right after the SubAgentRunner exists, because the engine
+  // reuses the runner (via the late-bound subAgentRunnerRef closure) for both
+  // child phases. emitProgress mirrors emitAgentSpawn — it pushes a
+  // WorkBoardRunEvent to the renderer over the WORK_BOARD.runProgress channel.
+  const workBoardEngine: WorkBoardEngine = createWorkBoardEngine({
+    store: workBoardStore,
+    getRunner: () => subAgentRunnerRef.fn,
+    approvalGate,
+    getAgentProfile: (name) => agentProfileStore.load(name),
+    emitProgress: (event) => {
+      // Fan the per-phase WorkBoardRunEvent out to every open window (mirroring
+      // the itemChanged broadcast in the work-board IPC domain) so detached
+      // panels show the live running indicator in lock-step. sendToWindow's
+      // destroyed-check + send-race swallow is reused per window.
+      fanOutToAllWindows(BrowserWindowValue.getAllWindows(), WORK_BOARD.runProgress, event, {
+        logger: log,
+      });
+    },
+  });
+
   // RoutinesScheduler v2 — fires per due routine, branching on execution mode.
   // llm-session routines start a ConversationLoop with prePrompt.
   // notification-only routines fire an OS notification.
@@ -1317,7 +1340,7 @@ export async function bootstrap(
     systemPromptBuilder, conversationLoop, routineEngine, mcpManager, mcpArtifactStore, agentArtifactStore, skillArtifactStore,
     idleScheduler, preferenceRefreshService, bashAstValidator, auditService, auditLogger: bootAuditLogger, postTurnHookChain,
     approvalGate, rewireReviewerAgent, refreshMarketplaceFetcherConfig, refreshActiveLlmWildcard,
-    routinesStore, routinesScheduler, workBoardStore, sessionTodoStore, askUserQuestionGate, skillStore, agentProfileStore, personaPromptStore,
+    routinesStore, routinesScheduler, workBoardStore, workBoardEngine, sessionTodoStore, askUserQuestionGate, skillStore, agentProfileStore, personaPromptStore,
     knowledgeAvailable, starredStore, feedbackStore,
     notificationService,
     scriptHookManager,

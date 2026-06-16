@@ -127,6 +127,10 @@ export const COMMON_IPC_ERROR_MESSAGES: Readonly<Record<string, string>> = {
   "invalid_payload": "formatIpcError.invalidPayloadSnake",
   "denied_extension": "formatIpcError.deniedExtension",
   "no-store": "formatIpcError.noStore",
+  // Work-board agent-orchestration engine not constructed at boot
+  // (lvis:work-board:run). Sibling of "no-store" — the run channel is gated on
+  // the engine the way CRUD channels are gated on the store.
+  "no-engine": "formatIpcError.noEngine",
   "no-starred-store": "formatIpcError.noStarredStore",
   "no-session-todo-store": "formatIpcError.noSessionTodoStore",
   // ── #893 Auth mockup login ──
