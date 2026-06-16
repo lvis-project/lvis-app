@@ -83,6 +83,7 @@ import {
 import { t } from "../i18n/index.js";
 const log = createLogger("executor");
 const REVIEWER_AUTHORIZATION_TTL_MS = 10 * 60 * 1000;
+const REVIEWER_AUTHORIZATION_MAX_PENDING = 64;
 
 export interface ToolCallMeta {
   groupId: string;
@@ -769,6 +770,14 @@ export class ToolExecutor {
     }
   }
 
+  private capPendingReviewerAuthorizations(): void {
+    while (this.pendingReviewerAuthorizations.size >= REVIEWER_AUTHORIZATION_MAX_PENDING) {
+      const oldestKey = this.pendingReviewerAuthorizations.keys().next().value;
+      if (!oldestKey) return;
+      this.pendingReviewerAuthorizations.delete(oldestKey);
+    }
+  }
+
   private recordPendingReviewerAuthorization(input: {
     sessionId: string | undefined;
     toolName: string;
@@ -781,8 +790,12 @@ export class ToolExecutor {
     if (!input.sessionId) return;
     const now = Date.now();
     this.prunePendingReviewerAuthorizations(now);
+    const key = this.reviewerAuthorizationKey({ ...input, sessionId: input.sessionId });
+    if (!this.pendingReviewerAuthorizations.has(key)) {
+      this.capPendingReviewerAuthorizations();
+    }
     this.pendingReviewerAuthorizations.set(
-      this.reviewerAuthorizationKey({ ...input, sessionId: input.sessionId }),
+      key,
       {
         expiresAt: now + REVIEWER_AUTHORIZATION_TTL_MS,
         verdict: input.verdict,

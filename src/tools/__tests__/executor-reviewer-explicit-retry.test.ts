@@ -93,6 +93,70 @@ describe("ToolExecutor foreground reviewer explicit retry boundaries", () => {
     }
   });
 
+  it("evicts old explicit reviewer authorizations when pending retries exceed the cap", async () => {
+    const executeSpy = vi.fn(async () => "sent");
+    const classifySpy = vi.fn(() => ({
+      level: "medium" as const,
+      reason: "needs user confirmation",
+    }));
+    const dir = mkdtempSync(join(tmpdir(), "lvis-executor-retry-cap-"));
+    try {
+      const toolName = "reviewed_network_retry_cap";
+      const executor = new ToolExecutor(
+        makeReviewedNetworkProbe(toolName, executeSpy),
+        undefined,
+        makePermissionManager(dir, classifySpy),
+      );
+      const inputs = Array.from({ length: 65 }, (_, index) => ({
+        payload: `send release notice ${index}`,
+      }));
+
+      for (const [index, input] of inputs.entries()) {
+        const result = await executor.executeAll(
+          [{ id: `tu-cap-first-${index}`, name: toolName, input }],
+          {
+            sessionId: "sess-reviewer-retry-cap",
+            permissionContext: userPermissionContext({
+              userIntent: "릴리즈 안내 전송 경로를 확인합니다.",
+            }),
+          },
+        );
+        expect(result[0].is_error).toBe(true);
+      }
+
+      const oldestRetry = await executor.executeAll(
+        [{ id: "tu-cap-oldest-retry", name: toolName, input: inputs[0] }],
+        {
+          sessionId: "sess-reviewer-retry-cap",
+          permissionContext: userPermissionContext({
+            userIntent: "진행해",
+            explicitAuthorizationIntent: "진행해",
+          }),
+        },
+      );
+
+      expect(oldestRetry[0].is_error).toBe(true);
+      expect(executeSpy).not.toHaveBeenCalled();
+
+      const newestRetry = await executor.executeAll(
+        [{ id: "tu-cap-newest-retry", name: toolName, input: inputs[64] }],
+        {
+          sessionId: "sess-reviewer-retry-cap",
+          permissionContext: userPermissionContext({
+            userIntent: "진행해",
+            explicitAuthorizationIntent: "진행해",
+          }),
+        },
+      );
+
+      expect(newestRetry[0].is_error).toBeUndefined();
+      expect(newestRetry[0].content).toBe("sent");
+      expect(executeSpy).toHaveBeenCalledOnce();
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
   it("does not reuse explicit reviewer authorization across trust origins", async () => {
     const executeSpy = vi.fn(async () => "sent");
     const classifySpy = vi.fn(() => ({
