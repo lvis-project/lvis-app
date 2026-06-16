@@ -32,6 +32,7 @@ import {
   beginAppUpdateInstallRequest,
   clearAppUpdateInstallRequested,
 } from "./app-update-install-intent.js";
+import { hasPluginInstallInFlight } from "../plugins/install-lifecycle.js";
 export type { UpdateState };
 const log = createLogger("auto-updater");
 
@@ -49,6 +50,9 @@ export interface AutoUpdaterDeps {
   updaterFactory?: () => UpdaterLike;
   /** Test seam for the native destructive-action confirmation dialog. */
   confirmInstallForTest?: () => Promise<boolean>;
+  /** Persisted app-update skip state. Exact-version only; a newer version surfaces again. */
+  getSkippedVersion?: () => string | undefined;
+  setSkippedVersion?: (version: string) => Promise<void> | void;
 }
 
 /** Minimal surface of electron-updater.autoUpdater we rely on. */
@@ -93,6 +97,8 @@ export function createAutoUpdater(deps: AutoUpdaterDeps): {
     installNow: () => Promise<{ ok: boolean; reason?: string }>;
     ipcDownloadNow: (event: IpcMainInvokeEvent) => Promise<{ ok: boolean; reason?: string }>;
     ipcInstallNow: (event: IpcMainInvokeEvent) => Promise<{ ok: boolean; reason?: string }>;
+    ipcSkipVersion: (event: IpcMainInvokeEvent) => Promise<{ ok: boolean; reason?: string }>;
+    skipVersion: () => Promise<{ ok: boolean; reason?: string }>;
     confirmInstall: () => Promise<{ confirmed: boolean }>;
     getState: () => UpdateState;
   };
@@ -126,6 +132,25 @@ export function createAutoUpdater(deps: AutoUpdaterDeps): {
     }
   };
 
+  const skippedVersion = (): string | undefined => {
+    const value = deps.getSkippedVersion?.()?.trim();
+    return value ? value : undefined;
+  };
+
+  const isSkippedVersion = (version: string): boolean => skippedVersion() === version.trim();
+
+  const broadcastOrSkip = (state: UpdateState): void => {
+    if (
+      (state.kind === "available" || state.kind === "downloaded") &&
+      isSkippedVersion(state.version)
+    ) {
+      log.info("update v%s hidden because the user skipped this version", state.version);
+      broadcast({ kind: "idle" });
+      return;
+    }
+    broadcast(state);
+  };
+
   const wire = (u: UpdaterLike) => {
     if (wired) return;
     wired = true;
@@ -142,7 +167,7 @@ export function createAutoUpdater(deps: AutoUpdaterDeps): {
     u.autoDownload = false;
     u.on("update-available", (info) => {
       log.info("update-available: v%s", info.version);
-      broadcast({ kind: "available", version: info.version });
+      broadcastOrSkip({ kind: "available", version: info.version });
     });
     u.on("update-not-available", (info) => {
       log.info("update-not-available: at v%s", info.version);
@@ -164,7 +189,7 @@ export function createAutoUpdater(deps: AutoUpdaterDeps): {
     });
     u.on("update-downloaded", (info) => {
       log.info("update-downloaded: v%s", info.version);
-      broadcast({ kind: "downloaded", version: info.version });
+      broadcastOrSkip({ kind: "downloaded", version: info.version });
     });
     u.on("error", (err) => {
       log.warn("error (non-fatal): %s", err.message);
@@ -191,7 +216,7 @@ export function createAutoUpdater(deps: AutoUpdaterDeps): {
   // unavailable (dev mode, packaging gap) so the renderer can safely
   // fire-and-forget.
   const rejectUnauthorizedIpc = (
-    channel: "lvis:update:download-now" | "lvis:update:install-now",
+    channel: "lvis:update:download-now" | "lvis:update:install-now" | "lvis:update:skip-version",
     event: IpcMainInvokeEvent,
   ): { ok: false; reason: "unauthorized-frame" } => {
     auditUnauthorized(deps.auditLogger, channel, event);
@@ -209,6 +234,10 @@ export function createAutoUpdater(deps: AutoUpdaterDeps): {
     if (!u) return { ok: false, reason: "updater-unavailable" };
     if (lastState.kind !== "available") {
       return { ok: false, reason: `not-available (state=${lastState.kind})` };
+    }
+    if (isSkippedVersion(lastState.version)) {
+      broadcast({ kind: "idle" });
+      return { ok: false, reason: "update-skipped" };
     }
     log.info("user-initiated download for v%s", lastState.version);
     // Promote state immediately so the badge flips to "다운로드 중…" even
@@ -235,6 +264,13 @@ export function createAutoUpdater(deps: AutoUpdaterDeps): {
     }
     if (lastState.kind !== "downloaded") {
       return { ok: false, reason: `not-downloaded (state=${lastState.kind})` };
+    }
+    if (hasPluginInstallInFlight()) {
+      return { ok: false, reason: "plugin-install-in-progress" };
+    }
+    if (isSkippedVersion(lastState.version)) {
+      broadcast({ kind: "idle" });
+      return { ok: false, reason: "update-skipped" };
     }
     log.info("user-initiated install for v%s", lastState.version);
     try {
@@ -313,11 +349,38 @@ export function createAutoUpdater(deps: AutoUpdaterDeps): {
     if (lastState.kind !== "downloaded") {
       return { ok: false, reason: `not-downloaded (state=${lastState.kind})` };
     }
+    if (hasPluginInstallInFlight()) {
+      return { ok: false, reason: "plugin-install-in-progress" };
+    }
     const confirmation = await onConfirmInstall();
     if (!confirmation.confirmed) {
       return { ok: false, reason: "not-confirmed" };
     }
     return installDownloadedUpdate();
+  };
+
+  const skipCurrentVersion = async (): Promise<{ ok: boolean; reason?: string }> => {
+    if (lastState.kind !== "available" && lastState.kind !== "downloaded") {
+      return { ok: false, reason: `no-skippable-update (state=${lastState.kind})` };
+    }
+    const version = lastState.version;
+    try {
+      await deps.setSkippedVersion?.(version);
+      broadcast({ kind: "idle" });
+      return { ok: true };
+    } catch (err) {
+      log.warn("skip update v%s failed: %s", version, (err as Error).message);
+      return { ok: false, reason: (err as Error).message };
+    }
+  };
+
+  const onSkipVersion = async (
+    event: IpcMainInvokeEvent,
+  ): Promise<{ ok: boolean; reason?: string }> => {
+    if (!isAuthorizedHostRenderer(event)) {
+      return rejectUnauthorizedIpc("lvis:update:skip-version", event);
+    }
+    return skipCurrentVersion();
   };
 
   const onGetState = (): UpdateState => lastState;
@@ -342,6 +405,7 @@ export function createAutoUpdater(deps: AutoUpdaterDeps): {
     ipcRegistered = true;
     ipc.handle("lvis:update:download-now", onDownloadNow);
     ipc.handle("lvis:update:install-now", onInstallNow);
+    ipc.handle("lvis:update:skip-version", onSkipVersion);
     ipc.handle("lvis:update:get-state", onGetState);
   };
   const unregisterIpc = () => {
@@ -354,6 +418,7 @@ export function createAutoUpdater(deps: AutoUpdaterDeps): {
     if (!ipc) return;
     ipc.removeHandler("lvis:update:download-now");
     ipc.removeHandler("lvis:update:install-now");
+    ipc.removeHandler("lvis:update:skip-version");
     ipc.removeHandler("lvis:update:get-state");
   };
 
@@ -376,6 +441,8 @@ export function createAutoUpdater(deps: AutoUpdaterDeps): {
       installNow: installDownloadedUpdate,
       ipcDownloadNow: onDownloadNow,
       ipcInstallNow: onInstallNow,
+      ipcSkipVersion: onSkipVersion,
+      skipVersion: skipCurrentVersion,
       confirmInstall: onConfirmInstall,
       getState: onGetState,
     },
