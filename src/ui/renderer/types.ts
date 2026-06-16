@@ -769,6 +769,37 @@ export type LvisApi = {
   onWorkBoardItemChanged: (
     handler: (payload: import("../../shared/work-board-types.js").WorkItemChangedEventPayload) => void,
   ) => () => void;
+  // Agent-orchestration run: kick off plan→approve→execute for one item. The
+  // promise resolves with the terminal run result; live phase + coarse marker
+  // updates flow over the on* subscriptions below. `opts.agentName` selects a
+  // named agent profile (drives the child model for both phases).
+  runWorkBoardItem: (
+    id: number,
+    opts?: { agentName?: string },
+  ) => Promise<
+    | import("../../shared/work-board-types.js").WorkItemRunResult
+    | { ok: false; error: string }
+  >;
+  // Live per-phase progress for an in-flight run. Payload === the engine's
+  // WorkBoardRunEvent (aliased RunProgressEventPayload).
+  onWorkBoardRunProgress: (
+    handler: (payload: import("../../shared/work-board-types.js").RunProgressEventPayload) => void,
+  ) => () => void;
+  // Coarse markers so the renderer can set/clear a per-item running indicator
+  // without re-listing.
+  onWorkBoardRunStarted: (
+    handler: (payload: { itemId: number; at: string }) => void,
+  ) => () => void;
+  onWorkBoardRunFinished: (
+    handler: (payload: {
+      itemId: number;
+      status: "completed" | "denied" | "not_found" | "error";
+      at: string;
+    }) => void,
+  ) => () => void;
+  onWorkBoardRunFailed: (
+    handler: (payload: { itemId: number; reason: string; at: string }) => void,
+  ) => () => void;
   onMarketplaceUpdatesAvailable: (h: (updates: Array<{ pluginId: string; pluginName?: string; installedVersion: string; latestVersion: string }>) => void) => () => void;
   /**
    * Marketplace announcement stream — the host pushes the currently-active,

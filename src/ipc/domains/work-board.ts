@@ -18,12 +18,23 @@
  * return an English kebab-case `{ ok: false, error: "no-store" }` code so the
  * renderer can branch without parsing exceptions.
  *
- * The `run` and `generate-report` channels are intentionally NOT registered
- * here — they require the work-board runner/engine, wired in a later phase.
+ * The `run` channel kicks off the WorkBoardEngine plan→approve→execute
+ * orchestration for one item. It is fire-and-forget from the renderer's view:
+ * the handler broadcasts a `runStarted` marker, awaits the engine result, then
+ * broadcasts `runFinished` (any terminal status, incl. denied/not_found) or
+ * `runFailed` (engine threw). Live per-phase progress flows over the separate
+ * `runProgress` channel, fanned out by the engine's `emitProgress` sink wired
+ * at boot. When the engine is absent (boot did not construct it) the handler
+ * returns `{ ok: false, error: "no-engine" }`.
+ *
+ * The `generate-report` channel is intentionally NOT registered here — it is
+ * wired in a later phase.
  */
 import { ipcMain } from "electron";
 import { validateSender, UNAUTHORIZED_FRAME, auditUnauthorized } from "../gated.js";
+import { fanOutToAllWindows } from "../broadcast-helpers.js";
 import type { IpcDeps } from "../types.js";
+import type { WorkItemRunResult } from "../../shared/work-board-types.js";
 import { WORK_BOARD } from "../../shared/ipc-channels.js";
 import type {
   WorkItemCreateInput,
@@ -35,9 +46,11 @@ import type {
 
 /** Shared "store not constructed at boot" envelope for the mutating channels. */
 const NO_STORE = { ok: false, error: "no-store" as const };
+/** Shared "engine not constructed at boot" envelope for the `run` channel. */
+const NO_ENGINE = { ok: false, error: "no-engine" as const };
 
 export function registerWorkBoardHandlers(deps: IpcDeps): void {
-  const { workBoardStore, auditLogger, getMainWindow, getAppWindows } = deps;
+  const { workBoardStore, workBoardEngine, auditLogger, getMainWindow, getAppWindows } = deps;
 
   /**
    * Fan the `itemChanged` event out to every renderer window so detached
@@ -149,5 +162,50 @@ export function registerWorkBoardHandlers(deps: IpcDeps): void {
     const result = await workBoardStore.remove(id);
     if (result.status === "deleted") broadcastItemChanged(result.itemId, "removed");
     return result;
+  });
+
+  // ─── Run (plan → approve → execute) ──────────────
+  // Renderer → main: kick off the engine run for one item. The renderer awaits
+  // the terminal WorkItemRunResult, but also subscribes to the runProgress /
+  // runStarted / runFinished / runFailed broadcasts for live phase updates. The
+  // engine itself drives runProgress (per-phase) via its emitProgress sink; this
+  // handler owns only the coarse started/finished/failed markers so every window
+  // can show/clear a per-item running indicator without re-listing.
+  ipcMain.handle(WORK_BOARD.run, async (e, id: number, opts?: { agentName?: string }) => {
+    if (!validateSender(e)) {
+      auditUnauthorized(auditLogger, WORK_BOARD.run, e);
+      return UNAUTHORIZED_FRAME;
+    }
+    if (!workBoardEngine) return NO_ENGINE;
+
+    const windows = (): Array<import("electron").BrowserWindow | null | undefined> =>
+      getAppWindows?.() ?? [getMainWindow()];
+
+    fanOutToAllWindows(windows(), WORK_BOARD.runStarted, {
+      itemId: id,
+      at: new Date().toISOString(),
+    });
+    try {
+      const result: WorkItemRunResult = await workBoardEngine.runItem(
+        id,
+        opts?.agentName ? { agentName: opts.agentName } : undefined,
+      );
+      fanOutToAllWindows(windows(), WORK_BOARD.runFinished, {
+        itemId: id,
+        status: result.status,
+        at: new Date().toISOString(),
+      });
+      return result;
+    } catch (err) {
+      const reason = err instanceof Error ? err.message : String(err);
+      fanOutToAllWindows(windows(), WORK_BOARD.runFailed, {
+        itemId: id,
+        reason,
+        at: new Date().toISOString(),
+      });
+      // Surface as the engine's `error` envelope so the renderer branches on one
+      // shape — no thrown exception crossing the IPC boundary.
+      return { status: "error", reason } satisfies WorkItemRunResult;
+    }
   });
 }

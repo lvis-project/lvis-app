@@ -43,6 +43,7 @@ export {
   type WorkItemStatusStored,
   type WorkItemStatusResolved,
   type WorkItemPriority,
+  type WorkItemRunStatus,
   type WorkItem,
   type WorkItemResolved,
   type WorkItemCreateInput,
@@ -65,6 +66,7 @@ import {
   type WorkItemResolved,
   type WorkItemStatusStored,
   type WorkItemPriority,
+  type WorkItemRunStatus,
   type WorkItemCreateInput,
   type WorkItemUpdateInput,
   type WorkItemListFilter,
@@ -103,12 +105,24 @@ const VALID_STATUSES: readonly WorkItemStatusStored[] = [
   "completed",
 ];
 const VALID_PRIORITIES: readonly WorkItemPriority[] = ["high", "medium", "low"];
+const VALID_RUN_STATUSES: readonly WorkItemRunStatus[] = [
+  "idle",
+  "planning",
+  "awaiting_approval",
+  "executing",
+  "completed",
+  "denied",
+  "error",
+];
 
 function isStatus(v: unknown): v is WorkItemStatusStored {
   return typeof v === "string" && VALID_STATUSES.includes(v as WorkItemStatusStored);
 }
 function isPriority(v: unknown): v is WorkItemPriority {
   return typeof v === "string" && VALID_PRIORITIES.includes(v as WorkItemPriority);
+}
+function isRunStatus(v: unknown): v is WorkItemRunStatus {
+  return typeof v === "string" && VALID_RUN_STATUSES.includes(v as WorkItemRunStatus);
 }
 
 /**
@@ -127,6 +141,12 @@ function isValidRecord(r: unknown): r is WorkItem {
   if (typeof x.created_at !== "string") return false;
   if (typeof x.updated_at !== "string") return false;
   if (x.completed_at !== undefined && typeof x.completed_at !== "string") return false;
+  // Agent-orchestration run fields — all optional (absent on pre-P2 rows).
+  if (x.runStatus !== undefined && !isRunStatus(x.runStatus)) return false;
+  if (x.plan !== undefined && typeof x.plan !== "string") return false;
+  if (x.output !== undefined && typeof x.output !== "string") return false;
+  if (x.runSessionId !== undefined && typeof x.runSessionId !== "string") return false;
+  if (x.runUpdatedAt !== undefined && typeof x.runUpdatedAt !== "string") return false;
   return true;
 }
 
@@ -189,6 +209,27 @@ function cloneItem(it: WorkItem): WorkItem {
 
 function decorate(item: WorkItem, nowMs: number): WorkItemResolved {
   return { ...item, status_resolved: resolveStatus(item, nowMs) };
+}
+
+/**
+ * Map a run lifecycle phase to its single activity-log verb. Transient
+ * pre-terminal phases (planning / awaiting_approval / executing / idle) all log
+ * as `run-planned` — the flow log captures that a run is underway; the terminal
+ * phase rows (`run-executed` / `run-denied` / `run-failed`) carry the outcome.
+ */
+function runStatusActivityKind(
+  runStatus: WorkItemRunStatus,
+): "run-planned" | "run-executed" | "run-denied" | "run-failed" {
+  switch (runStatus) {
+    case "completed":
+      return "run-executed";
+    case "denied":
+      return "run-denied";
+    case "error":
+      return "run-failed";
+    default:
+      return "run-planned";
+  }
 }
 
 export class WorkBoardStore {
@@ -454,6 +495,104 @@ export class WorkBoardStore {
       return { status: "reopened", itemId: result.itemId, item: result.item };
     }
     return result;
+  }
+
+  /**
+   * Set the transient run lifecycle phase for an item (planning /
+   * awaiting_approval / executing / …). Engine-written only — not exposed via
+   * `WorkItemUpdateInput` so a user/LLM patch cannot forge a run phase. Returns
+   * `not_found` when the id is unknown (no fallback creation). Writes one
+   * activity row whose verb matches the phase so the flow log reconstructs the
+   * run without re-deriving it.
+   */
+  async setRunStatus(
+    id: number,
+    runStatus: WorkItemRunStatus,
+  ): Promise<WorkItemUpdateResult> {
+    await this.ensureLoaded();
+    return withFileLock(this.filePath, async () => {
+      const board = await readFileOrEmpty(this.filePath);
+      const idx = board.items.findIndex((i) => i.id === id);
+      if (idx === -1) {
+        this.cache = board;
+        return { status: "not_found" as const, itemId: id };
+      }
+      const nowMs = this.now();
+      const iso = new Date(nowMs).toISOString();
+      const updated: WorkItem = {
+        ...board.items[idx],
+        runStatus,
+        runUpdatedAt: iso,
+      };
+      board.items[idx] = updated;
+      await writeFileAtomic(this.filePath, board);
+      this.cache = board;
+      await appendActivity(this.activity, {
+        kind: runStatusActivityKind(runStatus),
+        itemId: updated.id,
+        title: updated.title,
+        to: runStatus,
+        ts: iso,
+      });
+      return {
+        status: "updated" as const,
+        itemId: id,
+        item: decorate(cloneItem(updated), nowMs),
+      };
+    });
+  }
+
+  /**
+   * Persist the terminal result of a run — the captured plan, the captured
+   * execution output, the linking run session id, and the final run status.
+   * Engine-written only. One activity row (`run-executed` for the completed
+   * path) records the outcome. Returns `not_found` for an unknown id.
+   */
+  async setRunResult(
+    id: number,
+    result: {
+      runStatus: WorkItemRunStatus;
+      plan?: string;
+      output?: string;
+      runSessionId?: string;
+    },
+  ): Promise<WorkItemUpdateResult> {
+    await this.ensureLoaded();
+    return withFileLock(this.filePath, async () => {
+      const board = await readFileOrEmpty(this.filePath);
+      const idx = board.items.findIndex((i) => i.id === id);
+      if (idx === -1) {
+        this.cache = board;
+        return { status: "not_found" as const, itemId: id };
+      }
+      const nowMs = this.now();
+      const iso = new Date(nowMs).toISOString();
+      const updated: WorkItem = {
+        ...board.items[idx],
+        runStatus: result.runStatus,
+        ...(result.plan !== undefined ? { plan: result.plan } : {}),
+        ...(result.output !== undefined ? { output: result.output } : {}),
+        ...(result.runSessionId !== undefined
+          ? { runSessionId: result.runSessionId }
+          : {}),
+        runUpdatedAt: iso,
+      };
+      board.items[idx] = updated;
+      await writeFileAtomic(this.filePath, board);
+      this.cache = board;
+      await appendActivity(this.activity, {
+        kind: runStatusActivityKind(result.runStatus),
+        itemId: updated.id,
+        title: updated.title,
+        to: result.runStatus,
+        ts: iso,
+      });
+      return {
+        status: "updated" as const,
+        itemId: id,
+        item: decorate(cloneItem(updated), nowMs),
+      };
+    });
   }
 
   /** Remove an item. */
