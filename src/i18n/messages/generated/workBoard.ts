@@ -68,8 +68,11 @@ export const en = {
   "workBoard.reportsHeading": "Reports",
   "workBoard.reportDaily": "Daily report",
   "workBoard.reportWeekly": "Weekly report",
-  "workBoard.reportPlaceholder": "Generate a summary of your board activity. (Coming soon)",
+  "workBoard.reportPlaceholder": "Generate a summary of your board activity.",
   "workBoard.comingSoonBadge": "Coming soon",
+  "workBoard.reportResultHeading": "Latest report",
+  "workBoard.reportFailed": "Report generation failed",
+  "workBoard.reportClose": "Close",
 } as const;
 export const ko: Record<keyof typeof en, string> = {
   "workBoard.panelTitle": "업무 보드",
@@ -137,6 +140,9 @@ export const ko: Record<keyof typeof en, string> = {
   "workBoard.reportsHeading": "리포트",
   "workBoard.reportDaily": "일간 리포트",
   "workBoard.reportWeekly": "주간 리포트",
-  "workBoard.reportPlaceholder": "보드 활동 요약을 생성합니다. (준비 중)",
+  "workBoard.reportPlaceholder": "보드 활동 요약을 생성합니다.",
   "workBoard.comingSoonBadge": "준비 중",
+  "workBoard.reportResultHeading": "최근 리포트",
+  "workBoard.reportFailed": "리포트 생성 실패",
+  "workBoard.reportClose": "닫기",
 };

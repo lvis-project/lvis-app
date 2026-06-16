@@ -87,6 +87,13 @@ export interface WorkBoardEngineDeps {
   getAgentProfile?: (name: string) => Promise<LoadedAgentProfile | null>;
   /** Renderer event sink — one {@link WorkBoardRunEvent} per phase transition. */
   emitProgress: (event: WorkBoardRunEvent) => void;
+  /**
+   * Optional post-run learning hook (Hermes self-improvement pillar). Called
+   * fire-and-forget AFTER a run reaches `completed` and is persisted; a throw
+   * here must never fail the already-succeeded run, so the engine swallows
+   * rejections. boot wires this to append a one-line learning to `MEMORY.md`.
+   */
+  onRunComplete?: (info: { itemId: number; title: string }) => void | Promise<void>;
 }
 
 export interface RunItemOptions {
@@ -205,7 +212,7 @@ const ACTIVE_RUN_STATUSES: ReadonlySet<string> = new Set<string>([
 export function createWorkBoardEngine(
   deps: WorkBoardEngineDeps,
 ): WorkBoardEngine {
-  const { store, getRunner, approvalGate, getAgentProfile, emitProgress } = deps;
+  const { store, getRunner, approvalGate, getAgentProfile, emitProgress, onRunComplete } = deps;
 
   /**
    * In-process single-flight guard. Holds the ids whose run is currently in
@@ -409,6 +416,14 @@ export function createWorkBoardEngine(
         phase: "done",
         runSessionId: execResult.childSessionId,
       });
+      // Self-improvement: record a one-line learning AFTER the run has already
+      // succeeded + persisted. Fire-and-forget with a swallow so a memory
+      // append failure can never turn a completed run into an error.
+      if (onRunComplete) {
+        void Promise.resolve(onRunComplete({ itemId, title: item.title })).catch((e) =>
+          log.warn("runItem onRunComplete failed (id=%d): %s", itemId, (e as Error).message),
+        );
+      }
       return {
         status: "completed",
         plan,

@@ -185,6 +185,20 @@ export type WorkItemDeleteResult =
   | { status: "not_found"; itemId: number }
   | { status: "invalid"; itemId: number; reason: string };
 
+// ── Report payloads ───────────────────────────────────────────────────────
+//
+// Renderer-safe wire shapes for the `WORK_BOARD.generateReport` channel. The
+// host-side reporter (work-board/work-report.ts) only ever returns `ok` /
+// `empty`; the IPC boundary adds the `error` variant when the underlying LLM
+// call throws, so the renderer branches on exactly one discriminated shape.
+
+export type WorkBoardReportKind = "daily" | "weekly";
+
+export type WorkBoardReportResult =
+  | { status: "ok"; kind: WorkBoardReportKind; period: string; markdown: string }
+  | { status: "empty"; kind: WorkBoardReportKind; period: string; reason: string }
+  | { status: "error"; kind: WorkBoardReportKind; reason: string };
+
 // ── Bus events ──────────────────────────────────────────────────────────────
 
 /**
