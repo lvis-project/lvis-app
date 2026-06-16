@@ -1,4 +1,4 @@
-import { ArrowDownToLine, Download, ExternalLink, Home, KeyRound, Menu, RefreshCw, Search, Star, Wrench, X } from "lucide-react";
+import { ArrowDownToLine, Download, ExternalLink, KeyRound, Menu, RefreshCw, Search, Star, Wrench, X } from "lucide-react";
 import { Button } from "../../components/ui/button.js";
 import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuSeparator, DropdownMenuSub, DropdownMenuSubContent, DropdownMenuSubTrigger, DropdownMenuTrigger } from "../../components/ui/dropdown-menu.js";
 import { Tooltip, TooltipContent, TooltipTrigger } from "../../components/ui/tooltip.js";
@@ -64,14 +64,14 @@ export interface MainToolbarProps {
 }
 
 export function MainToolbar({
-  activeView,
+  activeView: _activeView,
   streaming: _streaming,
   hasApiKey,
   isCurrentSessionStarred,
   onNewChat: _onNewChat,
   onToggleCurrentSessionStar,
   onExport,
-  onOpenHome,
+  onOpenHome: _onOpenHome,
   onOpenWorkBoardView: _onOpenWorkBoardView,
   onOpenRoutinesView: _onOpenRoutinesView,
   onOpenMemoryView: _onOpenMemoryView,
@@ -90,29 +90,11 @@ export function MainToolbar({
   return (
     <div data-testid="main-toolbar" className="h-[52px] border-b bg-card shadow-sm px-3 flex items-center">
       <div className="flex min-w-0 w-full items-center gap-2">
-        {/* ── Home anchors the primary chat view ─────────────────────── */}
-        <Tooltip>
-          <TooltipTrigger asChild>
-            <Button
-              variant={activeView === "home" ? "secondary" : "ghost"}
-              size="icon"
-              className="h-9 w-9 aspect-square p-0 shrink-0"
-              onClick={onOpenHome}
-              title={t("mainToolbar.home")}
-              aria-label={t("mainToolbar.home")}
-            >
-              <Home className="h-4 w-4" />
-            </Button>
-          </TooltipTrigger>
-          <TooltipContent>{t("mainToolbar.home")}</TooltipContent>
-        </Tooltip>
-
-        {/* ── App update badge — sits immediately right of Home so users
-            always see "an update is ready" without opening any menu. The
-            badge is permanent (NOT a toast) until acted on; clicking maps
-            to download (available) → install (downloaded). The download
-            step is the user's first explicit consent — no implicit
-            background fetch (사용자 명시 클릭 전엔 절대 다운로드 금지). */}
+        {/* ── App update badge — anchors the left edge of the toolbar now
+            that Home nav lives in the persistent Sidebar. Permanent (NOT
+            a toast) until acted on; clicking maps to download (available)
+            → install (downloaded). The download step is the user's first
+            explicit consent (사용자 명시 클릭 전엔 절대 다운로드 금지). */}
         <AppUpdateBadge
           state={appUpdateState}
           inFlight={appUpdateInFlight}

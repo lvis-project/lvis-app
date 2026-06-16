@@ -198,9 +198,9 @@ export function PluginGridButton({
           <PopoverTrigger asChild>
             <Button
               ref={triggerRef}
-              variant="ghost"
+              variant="outline"
               size="sm"
-              className="h-7 w-7 p-0"
+              className="h-7 w-7 shrink-0 bg-input-bar p-0"
               aria-label={t("pluginGridButton.openAriaLabel")}
               data-testid="plugin-grid-button"
               // SpotlightTour anchor — step 8 ("플러그인 — 회의·문서·업무 도우미")
