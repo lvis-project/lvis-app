@@ -494,6 +494,14 @@ export async function bootstrap(
   await workBoardStore.load().catch((err) => {
     log.warn("boot: work-board load failed (non-fatal): %s", (err as Error).message);
   });
+  // Reset runs interrupted by a prior process exit (persisted active runStatus
+  // with no in-flight run) so those items are re-runnable + don't show a stuck
+  // "running" badge.
+  await workBoardStore
+    .reconcileInterruptedRuns()
+    .catch((err) =>
+      log.warn("boot: work-board run reconcile failed (non-fatal): %s", (err as Error).message),
+    );
 
   // Due-soon nudge: a 60-min tick scans the board and emits
   // `work_board.work_item.due_soon` on the plugin bus for any subscribed
