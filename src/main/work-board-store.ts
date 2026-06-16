@@ -547,14 +547,23 @@ export class WorkBoardStore {
    * execution output, the linking run session id, and the final run status.
    * Engine-written only. One activity row (`run-executed` for the completed
    * path) records the outcome. Returns `not_found` for an unknown id.
+   *
+   * Field semantics mirror {@link update}'s null-clears-field convention:
+   *   - `undefined` (or omitted) → leave the existing value untouched
+   *   - `null`                   → delete the key (clear it)
+   *   - a value                  → set it
+   * The clear path is what lets the engine RESET stale plan/output/runSessionId
+   * at run START (transition to `planning`): without it the conditional-spread
+   * `set`-only path would leave a prior run's success output on a record that
+   * is now being denied or erroring, showing a green output on a failed run.
    */
   async setRunResult(
     id: number,
     result: {
       runStatus: WorkItemRunStatus;
-      plan?: string;
-      output?: string;
-      runSessionId?: string;
+      plan?: string | null;
+      output?: string | null;
+      runSessionId?: string | null;
     },
   ): Promise<WorkItemUpdateResult> {
     await this.ensureLoaded();
@@ -570,13 +579,15 @@ export class WorkBoardStore {
       const updated: WorkItem = {
         ...board.items[idx],
         runStatus: result.runStatus,
-        ...(result.plan !== undefined ? { plan: result.plan } : {}),
-        ...(result.output !== undefined ? { output: result.output } : {}),
-        ...(result.runSessionId !== undefined
-          ? { runSessionId: result.runSessionId }
-          : {}),
         runUpdatedAt: iso,
       };
+      // null → clear the key; a string → set it; undefined → leave as-is.
+      if (result.plan === null) delete updated.plan;
+      else if (result.plan !== undefined) updated.plan = result.plan;
+      if (result.output === null) delete updated.output;
+      else if (result.output !== undefined) updated.output = result.output;
+      if (result.runSessionId === null) delete updated.runSessionId;
+      else if (result.runSessionId !== undefined) updated.runSessionId = result.runSessionId;
       board.items[idx] = updated;
       await writeFileAtomic(this.filePath, board);
       this.cache = board;
