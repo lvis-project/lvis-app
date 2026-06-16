@@ -126,6 +126,8 @@ export interface AppServices {
   routinesStore?: import("../main/routines-store.js").RoutinesStore;
   routinesScheduler?: import("../main/routines-scheduler.js").RoutinesScheduler;
   sessionTodoStore?: import("../main/session-todo-store.js").SessionTodoStore;
+  /** Work board persistence (~/.lvis/work-board/board.json) — backs the work-board IPC domain. */
+  workBoardStore?: import("../main/work-board-store.js").WorkBoardStore;
   askUserQuestionGate?: import("../main/ask-user-question-gate.js").AskUserQuestionGate;
   skillStore?: import("../main/skill-store.js").SkillStore;
   agentProfileStore?: import("../main/agent-profile-store.js").AgentProfileStore;
