@@ -608,6 +608,49 @@ export class WorkBoardStore {
   }
 
   /**
+   * Reconcile runs interrupted by a process exit. A run lives only in memory, so
+   * ANY item persisted in an active run phase (planning / awaiting_approval /
+   * executing) at boot belongs to a run that can no longer be in flight — its
+   * process is gone. Mark each `error` (and close its open history entry) so the
+   * item is re-runnable again (P2's runItem guard rejects active runStatus as
+   * `already_running`) and the card stops showing a permanent "running" badge.
+   * Called once at boot after load(). Returns the number of items reset.
+   */
+  async reconcileInterruptedRuns(): Promise<number> {
+    await this.ensureLoaded();
+    return withFileLock(this.filePath, async () => {
+      const board = await readFileOrEmpty(this.filePath);
+      const iso = new Date(this.now()).toISOString();
+      let count = 0;
+      for (let i = 0; i < board.items.length; i++) {
+        const it = board.items[i];
+        if (
+          it.runStatus === "planning" ||
+          it.runStatus === "awaiting_approval" ||
+          it.runStatus === "executing"
+        ) {
+          const updated: WorkItem = { ...it, runStatus: "error", runUpdatedAt: iso };
+          if (it.runId && Array.isArray(it.runHistory)) {
+            updated.runHistory = it.runHistory.map((h) =>
+              h.runId === it.runId && h.endedAt === undefined
+                ? { ...h, status: "error" as WorkItemRunStatus, endedAt: iso }
+                : h,
+            );
+          }
+          board.items[i] = updated;
+          count += 1;
+        }
+      }
+      if (count > 0) {
+        await writeFileAtomic(this.filePath, board);
+      }
+      this.cache = board;
+      if (count > 0) log.info("[work-board-store] reconciled %d interrupted run(s) → error", count);
+      return count;
+    });
+  }
+
+  /**
    * Persist the terminal result of a run — the captured plan, the captured
    * execution output, the linking run session id, and the final run status.
    * Engine-written only. One activity row (`run-executed` for the completed
