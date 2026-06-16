@@ -72,7 +72,7 @@ import {
 import { openLinkWindow as openLinkWindowService } from "./main/link-window-service.js";
 import { openAuthPartitionViewer as openAuthPartitionViewerService } from "./main/auth-partition-viewer-service.js";
 
-import { type AppServices, onEvent } from "./boot/types.js";
+import { type AppServices, onEvent, emitEvent } from "./boot/types.js";
 import { PERMISSIONS, ROUTINES_V2, WORK_BOARD } from "./shared/ipc-channels.js";
 import { sendToWindow } from "./ipc/safe-send.js";
 import { fanOutToAllWindows } from "./ipc/broadcast-helpers.js";
@@ -93,6 +93,11 @@ import { RoutinesScheduler } from "./main/routines-scheduler.js";
 import { WorkBoardStore } from "./main/work-board-store.js";
 import { createWorkBoardEngine, type WorkBoardEngine } from "./core/work-board-engine.js";
 import { migrateAgentHubBoardToWorkBoard } from "./boot/steps/work-board-migration.js";
+import { scanAndEmitDueSoon } from "./work-board/due-soon.js";
+import { createDirStorage } from "./work-board/storage.js";
+import { openFeatureNamespace } from "./main/storage/feature-namespace.js";
+import { createWorkBoardReporter, type WorkBoardReporter } from "./work-board/work-report.js";
+import { appendMemory } from "./work-board/work-memory.js";
 import { SessionTodoStore } from "./main/session-todo-store.js";
 import { AskUserQuestionGate } from "./main/ask-user-question-gate.js";
 import { NotificationService } from "./main/notification-service.js";
@@ -488,6 +493,23 @@ export async function bootstrap(
   await workBoardStore.load().catch((err) => {
     log.warn("boot: work-board load failed (non-fatal): %s", (err as Error).message);
   });
+
+  // Due-soon nudge: a 60-min tick scans the board and emits
+  // `work_board.work_item.due_soon` on the plugin bus for any subscribed
+  // due-soon consumer. Deferred-started (after IPC + plugins are up)
+  // via services.startWorkBoardDueSoon; the timer is cleared on shutdown.
+  const workBoardStorage = createDirStorage(openFeatureNamespace("work-board").dir);
+  const DUE_SOON_TICK_MS = 60 * 60_000;
+  let dueSoonTimer: ReturnType<typeof setInterval> | undefined;
+  const runDueSoonScan = (): void => {
+    void scanAndEmitDueSoon(workBoardStore, workBoardStorage, emitEvent, Date.now())
+      .then((fired) => {
+        if (fired.length) log.info("work-board: emitted %d due_soon nudge(s)", fired.length);
+      })
+      .catch((err) =>
+        log.warn("work-board: due_soon scan failed (non-fatal): %s", (err as Error).message),
+      );
+  };
 
   const sessionTodoStore = new SessionTodoStore();
   const skillStore = new SkillStore();
@@ -999,6 +1021,23 @@ export async function bootstrap(
         logger: log,
       });
     },
+    // Self-improvement (Hermes): after a run completes, append a one-line
+    // learning to the work-board MEMORY.md. appendMemory enforces the hard
+    // line cap; the engine fires this swallow-on-error so it never fails a run.
+    onRunComplete: ({ itemId, title }) =>
+      appendMemory(workBoardStorage, [
+        `${new Date().toISOString().slice(0, 10)}: 자율 실행 완료 — #${itemId} ${title}`,
+      ]),
+  });
+
+  // Work Board reporter — host-native daily/weekly reports. Reuses the
+  // work-board namespace storage (the same activity.jsonl + memories/ the store
+  // writes) and the host one-shot LLM caller wired above.
+  const workBoardReporter: WorkBoardReporter = createWorkBoardReporter({
+    store: workBoardStore,
+    storage: workBoardStorage,
+    callLlm: lateBinding.llmCallerRef.fn,
+    emit: emitEvent,
   });
 
   // RoutinesScheduler v2 — fires per due routine, branching on execution mode.
@@ -1340,7 +1379,7 @@ export async function bootstrap(
     systemPromptBuilder, conversationLoop, routineEngine, mcpManager, mcpArtifactStore, agentArtifactStore, skillArtifactStore,
     idleScheduler, preferenceRefreshService, bashAstValidator, auditService, auditLogger: bootAuditLogger, postTurnHookChain,
     approvalGate, rewireReviewerAgent, refreshMarketplaceFetcherConfig, refreshActiveLlmWildcard,
-    routinesStore, routinesScheduler, workBoardStore, workBoardEngine, sessionTodoStore, askUserQuestionGate, skillStore, agentProfileStore, personaPromptStore,
+    routinesStore, routinesScheduler, workBoardStore, workBoardEngine, workBoardReport: workBoardReporter, sessionTodoStore, askUserQuestionGate, skillStore, agentProfileStore, personaPromptStore,
     knowledgeAvailable, starredStore, feedbackStore,
     notificationService,
     scriptHookManager,
@@ -1350,6 +1389,10 @@ export async function bootstrap(
     forgetPluginAuthPartitionsService,
     listPluginAuthPartitionsService,
     startRoutinesScheduler: () => routinesScheduler.start(),
+    startWorkBoardDueSoon: () => {
+      runDueSoonScan();
+      dueSoonTimer = setInterval(runDueSoonScan, DUE_SOON_TICK_MS);
+    },
     refreshPluginNotifications: () => {
       disposePluginNotifications();
       disposePluginNotifications = registerPluginNotifications(pluginRuntime, pluginEventBridgeWindow, notificationService, bootAuditLogger);
@@ -1367,6 +1410,7 @@ export async function bootstrap(
         preferenceRefreshService.stop();
         idleScheduler?.stop();
         routinesScheduler.stop();
+        if (dueSoonTimer) clearInterval(dueSoonTimer);
         askUserQuestionGate.disposeAll();
         mcpGovernance.stopPolicyRefresh();
         await mcpManager.disconnectAll();

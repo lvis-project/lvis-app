@@ -1705,6 +1705,11 @@ async function main() {
   // safe to start at any time — `start()` is idempotent.
   services.startRoutinesScheduler?.();
 
+  // Same deferral rationale as the routines scheduler: start the Work Board
+  // due-soon scanner after IPC + plugin bus are wired so the first emit of
+  // `work_board.work_item.due_soon` reaches any subscribed consumer.
+  services.startWorkBoardDueSoon?.();
+
   refreshApplicationMenu();
   ensureTray();
   rendererReloadReady = true;
