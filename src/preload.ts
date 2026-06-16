@@ -10,6 +10,7 @@ import { pathToFileURL } from "node:url";
 import { t } from "./i18n/index.js";
 import type { McpServerConfig } from "./mcp/types.js";
 import type {
+  PermissionReviewSuggestionPayload,
   UserApprovalHitPayload,
   UserApprovalScope,
   UserApprovalVerdict,
@@ -1149,6 +1150,13 @@ const api = {
       ipcRenderer.on(PERMISSIONS.userApprovalHit, listener);
       return () =>
         ipcRenderer.removeListener(PERMISSIONS.userApprovalHit, listener);
+    },
+    onReviewSuggestion: (cb: (payload: PermissionReviewSuggestionPayload) => void) => {
+      const listener = (_event: unknown, payload: PermissionReviewSuggestionPayload) =>
+        cb(payload);
+      ipcRenderer.on(PERMISSIONS.reviewSuggestion, listener);
+      return () =>
+        ipcRenderer.removeListener(PERMISSIONS.reviewSuggestion, listener);
     },
     /** Permission policy — `/permission reviewer ...` slash dispatch via IPC. */
     reviewerDispatch: async (rawArgs: string) =>
