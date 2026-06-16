@@ -71,6 +71,14 @@ describe("run-transcript", () => {
     expect((await readRunTranscript(storage, 1, "run-2"))[0].text).toBe("second");
   });
 
+  it("rejects a traversal-bearing runId (path-escape guard)", async () => {
+    const storage = memStorage();
+    // Plant a file the traversal would target, then prove it is NOT read.
+    storage.files["../secret.jsonl"] = JSON.stringify({ ts: "x", phase: "done", kind: "output", text: "leak" }) + "\n";
+    expect(await readRunTranscript(storage, 1, "../../secret")).toEqual([]);
+    expect(await readRunTranscript(storage, 1, "..")).toEqual([]);
+  });
+
   it("returns [] for a missing transcript and skips a torn final line", async () => {
     const storage = memStorage();
     expect(await readRunTranscript(storage, 99, "nope")).toEqual([]);
