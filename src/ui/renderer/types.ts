@@ -173,6 +173,13 @@ export type AppSettings = {
     cloudAllowPrivateNetwork?: boolean;
     /** Announcement banner ids the user has dismissed (persisted). */
     dismissedAnnouncementIds?: number[];
+    /** Plugin update versions skipped until the marketplace publishes a newer version. */
+    skippedPluginUpdates?: Record<string, string>;
+  };
+  updates?: {
+    autoCheckEnabled?: boolean;
+    /** App version skipped until a newer app version is available. */
+    skippedVersion?: string;
   };
   /** Visual theme preferences. */
   appearance?: {
@@ -730,6 +737,8 @@ export type LvisApi = {
   downloadAppUpdate: () => Promise<{ ok: boolean; reason?: string }>;
   /** Quit & install after main-owned native confirmation. Valid only when state is "downloaded". */
   installAppUpdate: () => Promise<{ ok: boolean; reason?: string }>;
+  /** Hide the current available/downloaded app update until a newer version appears. */
+  skipAppUpdate: () => Promise<{ ok: boolean; reason?: string }>;
   onBootstrapStatus: (
     h: (status:
       | { phase: "start" }

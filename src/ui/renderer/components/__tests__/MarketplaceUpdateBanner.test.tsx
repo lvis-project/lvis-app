@@ -17,6 +17,7 @@ describe("MarketplaceUpdateBanner", () => {
           update("email", "LVIS Email", "3.1.0"),
         ]}
         onDismiss={vi.fn()}
+        onSkip={vi.fn()}
         onUpdate={vi.fn()}
       />,
     );
@@ -34,6 +35,7 @@ describe("MarketplaceUpdateBanner", () => {
       <MarketplaceUpdateBanner
         updates={[update("meeting", "LVIS Meeting", "0.5.24")]}
         onDismiss={vi.fn()}
+        onSkip={vi.fn()}
         onUpdate={onUpdate}
       />,
     );
@@ -46,6 +48,7 @@ describe("MarketplaceUpdateBanner", () => {
       <MarketplaceUpdateBanner
         updates={[{ pluginId: "local-indexer", installedVersion: "1.0.0", latestVersion: "1.1.0" }]}
         onDismiss={vi.fn()}
+        onSkip={vi.fn()}
         onUpdate={vi.fn()}
       />,
     );
@@ -53,6 +56,24 @@ describe("MarketplaceUpdateBanner", () => {
     expect(screen.getByTestId("marketplace-update-banner").textContent).toContain(
       "local-indexer → 1.1.0",
     );
+  });
+
+  it("uses the close control as a skip-until-next-version action", () => {
+    const onSkip = vi.fn();
+    const onDismiss = vi.fn();
+    render(
+      <MarketplaceUpdateBanner
+        updates={[update("meeting", "LVIS Meeting", "0.5.24")]}
+        onDismiss={onDismiss}
+        onSkip={onSkip}
+        onUpdate={vi.fn()}
+      />,
+    );
+
+    screen.getByLabelText("이 플러그인 업데이트를 다음 버전까지 건너뛰기").click();
+
+    expect(onSkip).toHaveBeenCalledOnce();
+    expect(onDismiss).not.toHaveBeenCalled();
   });
 });
 
