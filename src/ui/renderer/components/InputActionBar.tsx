@@ -150,12 +150,12 @@ export function InputActionBar({
             deny-listed dangerous extensions. The chip count badge lives on
             the inline composer chip (n/5), not here. */}
         <Button
-          variant="ghost"
+          variant="outline"
           size="sm"
           onClick={() => void onAttach()}
           disabled={attachDisabled}
           data-testid="iab-attach-button"
-          className="h-7 w-7 p-0"
+          className="h-7 w-7 shrink-0 bg-input-bar p-0"
           title={attachButtonLabel(attachDisabled, attachDisabledReason)}
           aria-label={attachButtonLabel(attachDisabled, attachDisabledReason)}
         >

@@ -47,7 +47,8 @@ describe("MainToolbar", () => {
   // detach items, export submenu, and settings.
   it("renders hamburger trigger; nav items are no longer inside the hamburger", async () => {
     renderWithProvider(defaultProps());
-    expect(screen.getByTitle("홈")).toBeTruthy();
+    // Home button moved to Sidebar — not present in MainToolbar
+    expect(screen.queryByTitle("홈")).toBeNull();
     expect(screen.getByTitle("더 많은 메뉴")).toBeTruthy();
     expect(screen.queryByText("⌘ + ?")).toBeNull();
     expect(document.querySelector("[data-tour-anchor='help-shortcut-hint']")).toBeNull();
@@ -63,11 +64,10 @@ describe("MainToolbar", () => {
     expect(document.querySelector("[data-testid='token-progress-ring']")).toBeNull();
   });
 
-  it("calls onOpenHome when the home action is clicked", () => {
-    const onOpenHome = vi.fn();
-    renderWithProvider(defaultProps({ onOpenHome, activeView: "memory" }));
-    fireEvent.click(screen.getByTitle("홈"));
-    expect(onOpenHome).toHaveBeenCalledTimes(1);
+  it("does not render a Home button (Home nav is owned by the Sidebar)", () => {
+    renderWithProvider(defaultProps({ activeView: "memory" }));
+    // The sidebar owns Home navigation; MainToolbar must not duplicate it.
+    expect(screen.queryByTitle("홈")).toBeNull();
   });
 
   it("calls onOpenUnifiedSearch when unified search button clicked", () => {
