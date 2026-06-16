@@ -1433,7 +1433,7 @@ const api = {
   onWorkBoardRunFinished: (
     handler: (payload: {
       itemId: number;
-      status: "completed" | "denied" | "not_found" | "error";
+      status: "completed" | "denied" | "not_found" | "error" | "already_running";
       at: string;
     }) => void,
   ) => {

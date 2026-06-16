@@ -95,22 +95,35 @@ export interface RunItemOptions {
 }
 
 export interface RunItemResult {
-  status: "completed" | "denied" | "not_found" | "error";
+  status: "completed" | "denied" | "not_found" | "error" | "already_running";
   /** Captured execution OUTPUT (completed). */
   output?: string;
   /** Captured plan text (completed / denied). */
   plan?: string;
   /** The execute child's session id (completed). */
   runSessionId?: string;
-  /** Failure / denial reason (error / denied). */
+  /**
+   * Failure / denial reason (error / denied), or the busy explanation when
+   * `status === "already_running"` (a concurrent run of the same item is in
+   * flight — no second sub-agent was spawned).
+   */
   reason?: string;
 }
 
 export interface WorkBoardEngine {
   /**
-   * Run one item through plan → approve → execute. Idempotent only in the sense
-   * that re-running overwrites the prior run fields; concurrent runs of the
-   * same id are the caller's responsibility (the IPC layer fires-and-forgets).
+   * Run one item through plan → approve → execute.
+   *
+   * Concurrency is guaranteed by the engine, not delegated to the caller: a
+   * single in-flight run per item id is enforced by an in-process guard plus a
+   * persisted-active-status check at the top of {@link runItem}. A second
+   * `runItem` for an id whose run is already active (in this process OR per the
+   * persisted `runStatus` ∈ {planning, awaiting_approval, executing}) returns
+   * `{ status: "already_running" }` WITHOUT spawning a second sub-agent — so
+   * two windows, an LLM tool call, and the renderer can never drive two
+   * concurrent sub-agents (and never two destructive EXECUTE runs) for the same
+   * item. Re-running a *finished* item (completed / denied / error) is allowed
+   * and overwrites the prior run fields from a clean record.
    */
   runItem(itemId: number, opts?: RunItemOptions): Promise<RunItemResult>;
 }
@@ -153,10 +166,56 @@ function isDenied(decision: ApprovalDecision): boolean {
   return decision.choice.startsWith("deny");
 }
 
+/**
+ * Clamp a plan-approval decision so the durable choices (allow-always /
+ * allow-session) are treated as allow-ONCE for THIS run, and the
+ * `rememberPattern` is dropped.
+ *
+ * Why: the plan-approval gate is a coarse "approve this run's plan before it
+ * executes" decision, not a standing tool grant. If a durable choice were
+ * honored, its remember pattern (defaulting to the gate's `toolName`,
+ * `work_board_run`) would persist into the user-approval cache and one
+ * "allow always" click would permanently disable the §8 plan-approval gate
+ * for EVERY future run of EVERY item. Downgrading here guarantees each run
+ * gets a genuine fresh decision — the user always re-approves a plan before it
+ * executes. The per-run gate `id` is already unique (a fresh UUID), so no
+ * cache key can match across runs either; this clamp is the engine-owned
+ * second layer that also strips the remember intent the renderer attached.
+ */
+function clampToOnceForRun(decision: ApprovalDecision): ApprovalDecision {
+  if (decision.choice === "allow-always" || decision.choice === "allow-session") {
+    return { ...decision, choice: "allow-once", rememberPattern: undefined };
+  }
+  return decision;
+}
+
+/**
+ * Run-status values that mean a run is ACTIVE (mid-flight). A persisted item in
+ * one of these is being driven by a live `runItem` call — re-entering returns
+ * the busy envelope rather than spawning a second sub-agent. The terminal
+ * states (completed / denied / error) and `idle` are NOT active, so a finished
+ * item can be re-run.
+ */
+const ACTIVE_RUN_STATUSES: ReadonlySet<string> = new Set<string>([
+  "planning",
+  "awaiting_approval",
+  "executing",
+]);
+
 export function createWorkBoardEngine(
   deps: WorkBoardEngineDeps,
 ): WorkBoardEngine {
   const { store, getRunner, approvalGate, getAgentProfile, emitProgress } = deps;
+
+  /**
+   * In-process single-flight guard. Holds the ids whose run is currently in
+   * flight inside THIS engine instance. Combined with the persisted
+   * `runStatus` check, it rejects a concurrent run that another caller (window,
+   * LLM tool, renderer) started before the persisted status has been written —
+   * the synchronous `inFlight.has` check closes the await-gap race that a
+   * disk-status check alone would leave open.
+   */
+  const inFlight = new Set<number>();
 
   const emit = (event: Omit<WorkBoardRunEvent, "at">): void => {
     emitProgress({ ...event, at: new Date().toISOString() });
@@ -172,6 +231,31 @@ export function createWorkBoardEngine(
     }
     const item = got.item;
 
+    // ── Single-flight guard ──────────────────────────────────────────────
+    // Reject a concurrent run BEFORE spawning anything: an in-process run for
+    // this id, or a persisted run that is mid-flight (planning /
+    // awaiting_approval / executing) per the board. Either way we return the
+    // busy envelope without touching the runner — no second sub-agent, no
+    // clobbered run fields, no risk of two destructive EXECUTE runs.
+    if (inFlight.has(itemId) || ACTIVE_RUN_STATUSES.has(item.runStatus ?? "idle")) {
+      return {
+        status: "already_running",
+        reason: `Work item #${itemId} is already running (runStatus=${item.runStatus ?? "idle"}).`,
+      };
+    }
+    inFlight.add(itemId);
+    try {
+      return await runItemGuarded(itemId, item, opts);
+    } finally {
+      inFlight.delete(itemId);
+    }
+  }
+
+  async function runItemGuarded(
+    itemId: number,
+    item: WorkItem,
+    opts: RunItemOptions,
+  ): Promise<RunItemResult> {
     const runner = getRunner();
     if (!runner) {
       // The runner is late-bound after the parent ConversationLoop exists; a
@@ -207,7 +291,18 @@ export function createWorkBoardEngine(
 
     try {
       // ── PLAN ───────────────────────────────────────────────────────────
-      await store.setRunStatus(itemId, "planning");
+      // Reset the record at run START so this run begins from a clean slate:
+      // a prior run's plan / output / runSessionId is CLEARED (null → delete
+      // key), not carried forward. Without this a completed item that is
+      // re-run and then denied / errored would keep its prior success output,
+      // showing a green output on a failed run. `setRunStatus` only writes the
+      // phase, so the clear must go through `setRunResult`.
+      await store.setRunResult(itemId, {
+        runStatus: "planning",
+        plan: null,
+        output: null,
+        runSessionId: null,
+      });
       emit({ itemId, phase: "planning" });
 
       const planResult = await runner.spawn(
@@ -236,8 +331,15 @@ export function createWorkBoardEngine(
       // `kind: 'agent-action'` + `toolCategory: 'meta'` deliberately skips both
       // the read-only short-circuit and the sandbox-capability injection so the
       // user ALWAYS sees an explicit plan-approval modal (not auto-approved).
+      //
+      // The request `id` carries a fresh per-run UUID so no cache key can match
+      // across runs, and the returned decision is clamped to allow-once
+      // (`clampToOnceForRun`) so a durable "allow always" / "allow session"
+      // choice cannot persist a remembered bypass of this plan-approval gate.
+      // Together these guarantee every run gets a genuine fresh §8 decision —
+      // the plan-approval gate can never be permanently disabled by one click.
       emit({ itemId, phase: "awaiting_approval" });
-      const decision = await approvalGate.requestAndWait({
+      const rawDecision = await approvalGate.requestAndWait({
         id: `work-board-run:${itemId}:${randomUUID()}`,
         category: "agent-action",
         kind: "agent-action",
@@ -249,6 +351,7 @@ export function createWorkBoardEngine(
         createdAt: Date.now(),
         trustOrigin: "user-keyboard",
       });
+      const decision = clampToOnceForRun(rawDecision);
 
       if (isDenied(decision)) {
         await store.setRunResult(itemId, { runStatus: "denied", plan });
@@ -279,6 +382,20 @@ export function createWorkBoardEngine(
           onError: (message) => emit({ itemId, phase: "error", message }),
         },
       );
+      // A sub-agent that could not run (LLM provider unconfigured, child loop
+      // threw, aborted) returns `ok: false` with the error text as `summary`.
+      // Recording that as `completed` would show a green "done" output on a
+      // failed run — so branch on the structural signal and land the item in
+      // `error` instead, mirroring the catch path. We never treat the error
+      // text as a captured OUTPUT.
+      if (execResult.ok === false) {
+        const reason = execResult.error ?? execResult.summary;
+        log.warn("runItem execute failed (id=%d): %s", itemId, reason);
+        await store.setRunResult(itemId, { runStatus: "error" });
+        emit({ itemId, phase: "error", message: reason });
+        return { status: "error", reason };
+      }
+
       const output = execResult.summary;
 
       await store.setRunResult(itemId, {

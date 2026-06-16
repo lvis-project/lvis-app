@@ -260,13 +260,17 @@ export type RunProgressEventPayload = WorkBoardRunEvent;
  * engine result verbatim; `not_found` is the unknown-id outcome.
  */
 export interface WorkItemRunResult {
-  status: "completed" | "denied" | "not_found" | "error";
+  status: "completed" | "denied" | "not_found" | "error" | "already_running";
   /** Captured execution OUTPUT (completed). */
   output?: string;
   /** Captured plan text (completed / denied). */
   plan?: string;
   /** The execute child's session id (completed). */
   runSessionId?: string;
-  /** Failure / denial reason (error / denied). */
+  /**
+   * Failure / denial reason (error / denied), or the busy explanation when
+   * `status === "already_running"` (a concurrent run of the same item is in
+   * flight — no second sub-agent was spawned).
+   */
   reason?: string;
 }
