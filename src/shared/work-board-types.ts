@@ -93,11 +93,6 @@ export interface WorkItemUpdateInput {
   priority?: WorkItemPriority;
 }
 
-/** Target status for an explicit lifecycle transition. */
-export interface WorkItemTransitionInput {
-  to: WorkItemStatusStored;
-}
-
 /** Filter for listing work items. Empty filter returns all items. */
 export interface WorkItemListFilter {
   /** Match against `status_resolved` (so `"overdue"` is selectable). */
@@ -158,20 +153,6 @@ export type WorkItemDeleteResult =
 // ── Bus events ──────────────────────────────────────────────────────────────
 
 /**
- * Plugin-bus event payload emitted when a WorkItem's `due_at` falls inside the
- * pre-due window. Consumed by proactive plugins to nudge the user before the
- * deadline. Slim pointer payload — consumers fetch full detail via the get tool.
- */
-export interface WorkItemDueSoonEventPayload {
-  /** WorkItem id; the lookup key for the get tool. */
-  itemId: number;
-  /** WorkItem title — sufficient for a user-facing toast / brain prompt. */
-  title: string;
-  /** ISO-8601 timestamp; lets consumers de-dupe replays against their own clock. */
-  notifiedAt: string;
-}
-
-/**
  * Slim event payload emitted whenever a WorkItem is created, updated,
  * transitioned, completed, reopened, or removed so the renderer can refresh
  * its board view without re-listing on a timer.
@@ -189,43 +170,3 @@ export interface WorkItemChangedEventPayload {
   /** ISO-8601 timestamp the change was applied. */
   changedAt: string;
 }
-
-// ── Reports ─────────────────────────────────────────────────────────────────
-
-export type ReportKind = "daily" | "weekly";
-
-/** Input for generating a board report. */
-export interface ReportGenerateInput {
-  kind: ReportKind;
-  /** `YYYY-MM-DD` for daily, ISO-week (`YYYY-Www`) for weekly. Omit → now. */
-  period?: string;
-}
-
-/**
- * Event payload emitted when a report is generated and persisted. `noteId` is
- * present when the report was also mirrored into the host notes store.
- */
-export interface ReportGeneratedEventPayload {
-  kind: ReportKind;
-  /** `YYYY-MM-DD` for daily, ISO-week (`YYYY-Www`) for weekly. */
-  period: string;
-  noteId?: string;
-  /**
-   * Privacy-safe notification strings (no report body) — the host surfaces
-   * these via `notificationEvents` (titleField/bodyField). Report content
-   * itself is delivered through `saveNote`, never the OS notification.
-   */
-  title: string;
-  body: string;
-}
-
-/** Result envelope for the report-generation tool. */
-export type ReportGenerateResult =
-  | {
-      status: "generated";
-      kind: ReportKind;
-      period: string;
-      markdown: string;
-      noteId?: string;
-    }
-  | { status: "empty"; kind: ReportKind; period: string; reason: string };

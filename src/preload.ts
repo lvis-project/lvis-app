@@ -1390,51 +1390,15 @@ const api = {
       | import("./shared/work-board-types.js").WorkItemDeleteResult
       | { ok: false; error: string }
     >,
-  // run/generateReport drive a headless LLM session; they ack synchronously and
-  // surface progress via the runningStarted/runningFinished/failed events below
-  // (mirroring triggerRoutineNowV2).
-  runWorkBoardItem: async (id: number) =>
-    ipcRenderer.invoke(WORK_BOARD.run, id) as Promise<{ ok: boolean; error?: string }>,
-  generateWorkBoardReport: async (input: import("./shared/work-board-types.js").ReportGenerateInput) =>
-    ipcRenderer.invoke(WORK_BOARD.generateReport, input) as Promise<
-      | import("./shared/work-board-types.js").ReportGenerateResult
-      | { ok: false; error: string }
-    >,
-  // Board view live refresh: emitted when any item is created/updated/
-  // transitioned/completed/reopened/removed so the renderer never polls.
+  // Board view live refresh: emitted by the work-board IPC domain after any
+  // successful mutation (created/updated/transitioned/completed/reopened/
+  // removed) so the renderer board view re-lists without polling.
   onWorkBoardItemChanged: (
     handler: (payload: import("./shared/work-board-types.js").WorkItemChangedEventPayload) => void,
   ) => {
     const listener = (_e: unknown, payload: Parameters<typeof handler>[0]) => handler(payload);
     ipcRenderer.on(WORK_BOARD.itemChanged, listener);
     return () => ipcRenderer.removeListener(WORK_BOARD.itemChanged, listener);
-  },
-  // Running indicator: emitted when a run/report LLM session starts/finishes so
-  // the renderer can reflect in-flight progress per board item.
-  onWorkBoardRunningStarted: (handler: (payload: { itemId: number; title: string }) => void) => {
-    const listener = (_e: unknown, payload: Parameters<typeof handler>[0]) => handler(payload);
-    ipcRenderer.on(WORK_BOARD.runningStarted, listener);
-    return () => ipcRenderer.removeListener(WORK_BOARD.runningStarted, listener);
-  },
-  onWorkBoardRunningFinished: (handler: (itemId: number) => void) => {
-    const listener = (_e: unknown, itemId: number) => handler(itemId);
-    ipcRenderer.on(WORK_BOARD.runningFinished, listener);
-    return () => ipcRenderer.removeListener(WORK_BOARD.runningFinished, listener);
-  },
-  // failed: clears the stuck running indicator when the run/report session throws.
-  onWorkBoardFailed: (handler: (event: { itemId: number; error: string }) => void) => {
-    const listener = (_e: unknown, payload: { itemId: number; error: string }) => handler(payload);
-    ipcRenderer.on(WORK_BOARD.failed, listener);
-    return () => ipcRenderer.removeListener(WORK_BOARD.failed, listener);
-  },
-  // dueSoon: emitted when an item's due_at enters the pre-due window so the
-  // renderer can nudge the user before the deadline.
-  onWorkBoardDueSoon: (
-    handler: (payload: import("./shared/work-board-types.js").WorkItemDueSoonEventPayload) => void,
-  ) => {
-    const listener = (_e: unknown, payload: Parameters<typeof handler>[0]) => handler(payload);
-    ipcRenderer.on(WORK_BOARD.dueSoon, listener);
-    return () => ipcRenderer.removeListener(WORK_BOARD.dueSoon, listener);
   },
 
   // Overlay IPC bridges (main → renderer push)

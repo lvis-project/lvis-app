@@ -45,18 +45,10 @@ export const WORK_BOARD = {
   complete: "lvis:work-board:complete",
   reopen: "lvis:work-board:reopen",
   remove: "lvis:work-board:remove",
-  run: "lvis:work-board:run",
-  generateReport: "lvis:work-board:generate-report",
-  // Emitted when any item is created/updated/transitioned/removed so the
-  // renderer board view refreshes without polling.
+  // Emitted by the work-board IPC domain after any successful mutation
+  // (created/updated/transitioned/completed/reopened/removed) so the renderer
+  // board view re-lists without polling.
   itemChanged: "lvis:work-board:item-changed",
-  // Running indicator events (renderer reflects report/run session progress)
-  runningStarted: "lvis:work-board:running-started",
-  runningFinished: "lvis:work-board:running-finished",
-  // Emitted when a run/report session errors out so renderer can clear state
-  failed: "lvis:work-board:failed",
-  // Emitted when an item's due_at enters the pre-due window
-  dueSoon: "lvis:work-board:due-soon",
 } as const;
 
 export const PERMISSIONS = {

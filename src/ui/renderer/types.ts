@@ -764,24 +764,10 @@ export type LvisApi = {
     | import("../../shared/work-board-types.js").WorkItemDeleteResult
     | { ok: false; error: string }
   >;
-  // run/generateReport ack synchronously; progress surfaces via the
-  // onWorkBoardRunning*/onWorkBoardFailed events below.
-  runWorkBoardItem: (id: number) => Promise<{ ok: boolean; error?: string }>;
-  generateWorkBoardReport: (
-    input: import("../../shared/work-board-types.js").ReportGenerateInput,
-  ) => Promise<
-    | import("../../shared/work-board-types.js").ReportGenerateResult
-    | { ok: false; error: string }
-  >;
-  // Board view live refresh + lifecycle events.
+  // Board view live refresh: emitted after any successful board mutation so the
+  // renderer re-lists without polling.
   onWorkBoardItemChanged: (
     handler: (payload: import("../../shared/work-board-types.js").WorkItemChangedEventPayload) => void,
-  ) => () => void;
-  onWorkBoardRunningStarted: (handler: (payload: { itemId: number; title: string }) => void) => () => void;
-  onWorkBoardRunningFinished: (handler: (itemId: number) => void) => () => void;
-  onWorkBoardFailed: (handler: (event: { itemId: number; error: string }) => void) => () => void;
-  onWorkBoardDueSoon: (
-    handler: (payload: import("../../shared/work-board-types.js").WorkItemDueSoonEventPayload) => void,
   ) => () => void;
   onMarketplaceUpdatesAvailable: (h: (updates: Array<{ pluginId: string; pluginName?: string; installedVersion: string; latestVersion: string }>) => void) => () => void;
   /**

@@ -12,6 +12,8 @@
  *   - Skips (returns false) when the destination already exists — idempotent.
  *   - Skips + warns when more than one legacy board exists (ambiguous source).
  *   - Skips when the legacy board is not valid JSON.
+ *   - Skips when the legacy board parses but is the wrong shape (not an
+ *     object with an items array).
  */
 import { describe, it, expect, beforeEach, afterEach } from "vitest";
 import { mkdtempSync, rmSync, mkdirSync, writeFileSync, readFileSync, existsSync } from "node:fs";
@@ -108,6 +110,22 @@ describe("work-board migration", () => {
 
     const migrated = await migrateAgentHubBoardToWorkBoard();
 
+    expect(migrated).toBe(false);
+    expect(existsSync(destPath)).toBe(false);
+  });
+
+  it.each([
+    ["a JSON array", "[]"],
+    ["a JSON string", "\"x\""],
+    ["a JSON number", "42"],
+    ["a JSON null", "null"],
+    ["an object whose items is not an array", JSON.stringify({ version: 1, nextId: 1, items: "x" })],
+  ])("skips a parseable-but-wrong-shape legacy board (%s)", async (_label, contents) => {
+    writePluginBoard(home, "agent-hub", contents);
+
+    const migrated = await migrateAgentHubBoardToWorkBoard();
+
+    // Parseable JSON that is not a board must never be adopted — no dest write.
     expect(migrated).toBe(false);
     expect(existsSync(destPath)).toBe(false);
   });

@@ -44,6 +44,22 @@ const log = createLogger("lvis");
 const BOARD_FILE = "board.json";
 
 /**
+ * Minimal structural check that a parsed legacy value is actually a board: a
+ * non-null object carrying an `items` array. Rejects parseable-but-wrong-shape
+ * JSON (`[]`, `"x"`, `42`, `null`, `{ items: "x" }`) so it is never adopted as
+ * the host board — the store would otherwise back it up and seed empty on the
+ * next read, masking the bad migration behind a "success" log line.
+ */
+function isBoardShape(value: unknown): value is { items: unknown[] } {
+  return (
+    typeof value === "object" &&
+    value !== null &&
+    !Array.isArray(value) &&
+    Array.isArray((value as { items?: unknown }).items)
+  );
+}
+
+/**
  * Discover every `~/.lvis/plugins/<id>/data/board.json` that exists on disk.
  * Returns absolute paths. A missing plugins root yields an empty list (nothing
  * to migrate). Probes each candidate with a read rather than a stat→read pair
@@ -125,6 +141,21 @@ export async function migrateAgentHubBoardToWorkBoard(): Promise<boolean> {
     } catch {
       log.warn(
         "boot: work-board migration skipped — legacy plugin board.json (%s) is not valid JSON",
+        legacyPath,
+      );
+      return false;
+    }
+
+    // Shape-validate before adopting. Parseable-but-wrong-shape values
+    // (`[]`, `"x"`, `42`, `{ items: "x" }`) would otherwise be written
+    // verbatim and then silently seed an empty board on the store's next
+    // read while this step logged success. A board is an object with an
+    // `items` array; anything else is treated as "nothing to migrate".
+    if (
+      !isBoardShape(parsed)
+    ) {
+      log.warn(
+        "boot: work-board migration skipped — legacy plugin board.json (%s) is not a board (expected an object with an items array)",
         legacyPath,
       );
       return false;
