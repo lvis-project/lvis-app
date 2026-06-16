@@ -683,43 +683,29 @@ export function WorkItemDetailDialog({ api, itemId, onClose, onChanged }: Detail
   );
 }
 
-// ─── Reports section (daily / weekly placeholders for P3) ──────────────────────
+// ─── Reports section (coming-soon placeholder) ─────────────────────────────────
+//
+// Report generation is a deferred surface — the `run` / `generate-report` IPC
+// channels are intentionally not registered yet. This section is a purely
+// informational "coming soon" placeholder: the buttons are permanently disabled
+// and carry NO invoke binding, so the renderer never calls an unregistered
+// handler. The daily/weekly affordances return when the runner is wired.
 
-function ReportsSection({ api }: { api: LvisApi }) {
-  const [busy, setBusy] = useState<"daily" | "weekly" | null>(null);
-
-  const generate = async (kind: "daily" | "weekly") => {
-    setBusy(kind);
-    try {
-      await api.generateWorkBoardReport({ kind });
-    } finally {
-      setBusy(null);
-    }
-  };
-
+function ReportsSection() {
   return (
     <section className="rounded-md border bg-muted/20 p-3" data-testid="work-board-reports">
       <div className="flex items-center justify-between">
-        <h3 className="text-sm font-medium">{t("workBoard.reportsHeading")}</h3>
+        <h3 className="text-sm font-medium text-muted-foreground">{t("workBoard.reportsHeading")}</h3>
+        <Badge variant="outline" className="text-muted-foreground">
+          {t("workBoard.comingSoonBadge")}
+        </Badge>
       </div>
       <p className="mt-1 text-[11px] text-muted-foreground">{t("workBoard.reportPlaceholder")}</p>
       <div className="mt-2 flex gap-2">
-        <Button
-          size="sm"
-          variant="outline"
-          disabled={busy !== null}
-          onClick={() => void generate("daily")}
-          data-testid="work-board-report-daily"
-        >
+        <Button size="sm" variant="outline" disabled data-testid="work-board-report-daily">
           {t("workBoard.reportDaily")}
         </Button>
-        <Button
-          size="sm"
-          variant="outline"
-          disabled={busy !== null}
-          onClick={() => void generate("weekly")}
-          data-testid="work-board-report-weekly"
-        >
+        <Button size="sm" variant="outline" disabled data-testid="work-board-report-weekly">
           {t("workBoard.reportWeekly")}
         </Button>
       </div>
@@ -869,7 +855,7 @@ export function WorkBoardPanel({ api }: WorkBoardPanelProps) {
               testId="work-board-column-completed"
             />
           </div>
-          <ReportsSection api={api} />
+          <ReportsSection />
         </CardContent>
       </Card>
 

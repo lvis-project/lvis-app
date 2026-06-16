@@ -9,9 +9,10 @@
  * directory so report generation can reconstruct the work flow.
  *
  * The store is intentionally pure persistence — it does not own a timer or emit
- * plugin-bus events. The IPC handlers (Layer 3) call these async methods and
- * translate the returned discriminated envelopes into channel responses; the
- * due-soon scanner ({@link scanAndEmitDueSoon}) drives the deadline nudge loop.
+ * plugin-bus events. The IPC handlers (Layer 3) call these async methods,
+ * translate the returned discriminated envelopes into channel responses, and
+ * broadcast the `itemChanged` event to renderer windows after each successful
+ * mutation so the board view stays live without polling.
  *
  * `status_resolved` (the `overdue` projection) is computed locally on every
  * read — an item is `overdue` when its stored status is `planned`/`in_progress`
@@ -46,7 +47,6 @@ export {
   type WorkItemResolved,
   type WorkItemCreateInput,
   type WorkItemUpdateInput,
-  type WorkItemTransitionInput,
   type WorkItemListFilter,
   type WorkItemListResult,
   type WorkItemCreateResult,
@@ -56,12 +56,7 @@ export {
   type WorkItemCompleteResult,
   type WorkItemReopenResult,
   type WorkItemDeleteResult,
-  type WorkItemDueSoonEventPayload,
   type WorkItemChangedEventPayload,
-  type ReportKind,
-  type ReportGenerateInput,
-  type ReportGeneratedEventPayload,
-  type ReportGenerateResult,
 } from "../shared/work-board-types.js";
 
 import {
@@ -390,8 +385,20 @@ export class WorkBoardStore {
     });
   }
 
-  /** Move an item to `to`. Any-to-any across the three stored states. */
-  async transition(id: number, to: WorkItemStatusStored): Promise<WorkItemTransitionResult> {
+  /**
+   * Move an item to `to`. Any-to-any across the three stored states.
+   *
+   * Exactly one activity row is written per call, INSIDE the file lock. The
+   * `activityKind` parameter lets the `complete()` / `reopen()` wrappers stamp
+   * their domain verb (`completed` / `reopened`) on that single row instead of
+   * appending a second event out-of-lock — a logical action is one activity
+   * line, and every append happens while the board lock is held.
+   */
+  async transition(
+    id: number,
+    to: WorkItemStatusStored,
+    activityKind: "transitioned" | "completed" | "reopened" = "transitioned",
+  ): Promise<WorkItemTransitionResult> {
     if (!isStatus(to)) {
       return { status: "invalid", itemId: id, reason: `invalid target status: ${String(to)}` };
     }
@@ -413,9 +420,11 @@ export class WorkBoardStore {
       await writeFileAtomic(this.filePath, board);
       this.cache = board;
       await appendActivity(this.activity, {
-        kind: "transitioned",
+        kind: activityKind,
         itemId: updated.id,
         title: updated.title,
+        // `from`/`to` carry the status pair for the lifecycle reconstruction
+        // regardless of which verb labelled the row.
         from,
         to,
         ts: iso,
@@ -431,14 +440,8 @@ export class WorkBoardStore {
 
   /** Transition to `completed`, mapping the envelope to a complete result. */
   async complete(id: number): Promise<WorkItemCompleteResult> {
-    const result = await this.transition(id, "completed");
+    const result = await this.transition(id, "completed", "completed");
     if (result.status === "transitioned") {
-      await appendActivity(this.activity, {
-        kind: "completed",
-        itemId: result.itemId,
-        title: result.item.title,
-        ts: result.item.updated_at,
-      });
       return { status: "completed", itemId: result.itemId, item: result.item };
     }
     return result;
@@ -446,14 +449,8 @@ export class WorkBoardStore {
 
   /** Transition back to `in_progress`, mapping the envelope to a reopen result. */
   async reopen(id: number): Promise<WorkItemReopenResult> {
-    const result = await this.transition(id, "in_progress");
+    const result = await this.transition(id, "in_progress", "reopened");
     if (result.status === "transitioned") {
-      await appendActivity(this.activity, {
-        kind: "reopened",
-        itemId: result.itemId,
-        title: result.item.title,
-        ts: result.item.updated_at,
-      });
       return { status: "reopened", itemId: result.itemId, item: result.item };
     }
     return result;

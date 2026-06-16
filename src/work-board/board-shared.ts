@@ -2,11 +2,11 @@
  * Shared work-board primitives.
  *
  * This module is NOT a store — it holds the pure, side-effect-free pieces the
- * board CRUD store ({@link WorkBoardStore}) and the due-soon scanner share: the
- * on-disk board shape, the schema version, and the `overdue` projection rule.
- * The single CRUD implementation lives in `src/main/work-board-store.ts`;
- * keeping these primitives here (rather than re-deriving them per consumer)
- * means the `status_resolved` rule has exactly one definition.
+ * board CRUD store ({@link WorkBoardStore}) depends on: the on-disk board shape,
+ * the schema version, and the `overdue` projection rule. The single CRUD
+ * implementation lives in `src/main/work-board-store.ts`; keeping these
+ * primitives here (rather than re-deriving them per consumer) means the
+ * `status_resolved` rule has exactly one definition.
  *
  * `status_resolved` (the `overdue` projection) is computed on every read so
  * consumers never re-derive it: an item is `overdue` when its stored status is

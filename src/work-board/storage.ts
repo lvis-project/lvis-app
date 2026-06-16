@@ -1,20 +1,20 @@
 /**
  * Work-board storage seam.
  *
- * The domain modules (work-board-store, activity-log, due-soon, work-memory)
- * were originally written against a plugin's injected `PluginStorage` handle.
- * In the host they persist through the `~/.lvis/work-board/` feature namespace
- * — the single source of truth for the 0o700-dir / 0o600-file / atomic-write
- * contract (see {@link openFeatureNamespace}). This module defines the narrow
- * read/write surface those modules depend on and a namespace-backed
- * implementation, so the domain logic keeps its in-memory-fake testability seam
- * while never hand-rolling `fs`.
+ * The domain modules (work-board-store, activity-log) were originally written
+ * against a plugin's injected `PluginStorage` handle. In the host they persist
+ * through the `~/.lvis/work-board/` feature namespace — the single source of
+ * truth for the 0o700-dir / 0o600-file / atomic-write contract (see
+ * {@link openFeatureNamespace}). This module defines the narrow read/write
+ * surface those modules depend on and a namespace-backed implementation, so the
+ * domain logic keeps its in-memory-fake testability seam while never
+ * hand-rolling `fs`.
  *
  * All relative paths are single- or two-segment names under the feature dir
- * (`board.json`, `activity.jsonl`, `due-soon-notified.json`,
- * `memories/USER.md`). JSON files round-trip through the namespace helper's
- * atomic writer; text/JSONL files round-trip through the same path-level atomic
- * writer so a crash mid-write never leaves a half-written file.
+ * (`board.json`, `activity.jsonl`). JSON files round-trip through the namespace
+ * helper's atomic writer; text/JSONL files round-trip through the same
+ * path-level atomic writer so a crash mid-write never leaves a half-written
+ * file.
  */
 import { promises as fs } from "node:fs";
 import { join, dirname } from "node:path";
