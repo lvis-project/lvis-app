@@ -1337,6 +1337,7 @@ export function App() {
               : Promise.resolve()}
             onExport={handleExport}
             onOpenHome={() => setActiveView("home")}
+            onOpenWorkBoardView={() => setActiveView("work-board")}
             onOpenRoutinesView={() => setActiveView("routines")}
             onOpenMemoryView={() => setActiveView("memory")}
             onOpenSettings={() => onOpenSettings()}

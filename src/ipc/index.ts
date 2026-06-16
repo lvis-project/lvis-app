@@ -21,6 +21,7 @@
  *   permissions  lvis:permission:*, lvis:approval:*, lvis:policy:*
  *   window       window:*
  *   misc         lvis:routines:v2:*, lvis:session-todo:*
+ *   work-board   lvis:work-board:* (board CRUD + lifecycle; run/report deferred)
  *   ui           lvis:ui:*
  *   dev          lvis:dev:*  (only registered when !app.isPackaged)
  */
@@ -38,6 +39,7 @@ import { registerAuditHandlers } from "./domains/audit.js";
 import { registerPermissionsHandlers } from "./domains/permissions.js";
 import { registerWindowHandlers } from "./domains/window.js";
 import { registerMiscHandlers } from "./domains/misc.js";
+import { registerWorkBoardHandlers } from "./domains/work-board.js";
 import { registerAttachHandlers } from "./domains/attach.js";
 import { registerUiHandlers } from "./domains/ui.js";
 import { registerDevHandlers } from "./domains/dev.js";
@@ -77,6 +79,7 @@ export function registerIpcHandlers(
   registerPermissionsHandlers(deps);
   registerWindowHandlers(deps);
   registerMiscHandlers(deps);
+  registerWorkBoardHandlers(deps);
   registerAttachHandlers(deps);
   registerUiHandlers(deps);
   // Dev IPC is *not* registered in packaged builds — the channels never
