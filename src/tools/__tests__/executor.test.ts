@@ -867,7 +867,7 @@ describe("ToolExecutor — C1 sensitive-path hard-block wiring", () => {
     }
   });
 
-  it("interactive auto-review MEDIUM emits needs_approval, redacts reviewer input, and enters approval gate", async () => {
+  it("interactive auto-review MEDIUM returns reviewer output as a tool error without opening the approval gate", async () => {
     const executeSpy = vi.fn(async () => "should-not-run");
     const registry = new ToolRegistry();
     registry.register(createDynamicTool({
@@ -942,13 +942,9 @@ describe("ToolExecutor — C1 sensitive-path hard-block wiring", () => {
       expect(reviewReason).toContain("***@example.com");
       expect(reviewReason).not.toContain("alice@example.com");
       expect(reviewReason).not.toContain("sk-abcdefghijklmnopqrstuvwxyz");
-      expect(requestAndWait).toHaveBeenCalledWith(expect.objectContaining({
-        toolName: "reviewed_network_probe_medium",
-        approvalPurpose: expect.objectContaining({
-          confidence: "sufficient",
-          text: expect.stringContaining("테스트 알림 전송 경로"),
-        }),
-      }));
+      expect(requestAndWait).not.toHaveBeenCalled();
+      expect(result[0].content).toContain("reviewer medium");
+      expect(result[0].content).toContain("retry only after explicit user authorization");
       const reviewerCtx = classifySpy.mock.calls[0]?.[0];
       expect(reviewerCtx?.finalInput).toMatchObject({
         payload: "send ***@example.com with sk-****",
