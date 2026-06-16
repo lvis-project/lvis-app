@@ -88,20 +88,20 @@ export function MainToolbar({
 }: MainToolbarProps) {
   const { t } = useTranslation();
   return (
-    <div data-testid="main-toolbar" className="border-b bg-card px-3 py-2">
-      <div className="flex min-w-0 items-center gap-2">
+    <div data-testid="main-toolbar" className="h-[52px] border-b bg-card shadow-sm px-3 flex items-center">
+      <div className="flex min-w-0 w-full items-center gap-2">
         {/* ── Home anchors the primary chat view ─────────────────────── */}
         <Tooltip>
           <TooltipTrigger asChild>
             <Button
               variant={activeView === "home" ? "secondary" : "ghost"}
-              size="sm"
-              className="h-7 w-7 p-0"
+              size="icon"
+              className="h-9 w-9 aspect-square p-0 shrink-0"
               onClick={onOpenHome}
               title={t("mainToolbar.home")}
               aria-label={t("mainToolbar.home")}
             >
-              <Home className="h-3.5 w-3.5" />
+              <Home className="h-4 w-4" />
             </Button>
           </TooltipTrigger>
           <TooltipContent>{t("mainToolbar.home")}</TooltipContent>
@@ -155,14 +155,14 @@ export function MainToolbar({
           <TooltipTrigger asChild>
             <Button
               variant="ghost"
-              size="sm"
-              className="h-7 w-7 p-0"
+              size="icon"
+              className="h-9 w-9 aspect-square p-0 shrink-0"
               onClick={onOpenUnifiedSearch}
               title={t("mainToolbar.unifiedSearch")}
               aria-label={t("mainToolbar.unifiedSearch")}
               data-tour-anchor="chat-history"
             >
-              <Search className="h-3.5 w-3.5" />
+              <Search className="h-4 w-4" />
             </Button>
           </TooltipTrigger>
           <TooltipContent>{t("mainToolbar.unifiedSearch")}</TooltipContent>
@@ -173,14 +173,14 @@ export function MainToolbar({
           <TooltipTrigger asChild>
             <Button
               variant="ghost"
-              size="sm"
-              className="h-7 w-7 p-0"
+              size="icon"
+              className="h-9 w-9 aspect-square p-0 shrink-0"
               onClick={() => void onToggleCurrentSessionStar()}
               title={isCurrentSessionStarred ? t("mainToolbar.sessionUnstar") : t("mainToolbar.sessionStar")}
               aria-label={isCurrentSessionStarred ? t("mainToolbar.sessionUnstar") : t("mainToolbar.sessionStar")}
               aria-pressed={isCurrentSessionStarred}
             >
-              <Star key={isCurrentSessionStarred ? "on" : "off"} className={`h-3.5 w-3.5 ${isCurrentSessionStarred ? "fill-emphasis text-emphasis lvis-anim-star" : ""}`} />
+              <Star key={isCurrentSessionStarred ? "on" : "off"} className={`h-4 w-4 ${isCurrentSessionStarred ? "fill-emphasis text-emphasis lvis-anim-star" : ""}`} />
             </Button>
           </TooltipTrigger>
           <TooltipContent>{isCurrentSessionStarred ? t("mainToolbar.sessionUnstar") : t("mainToolbar.sessionStar")}</TooltipContent>
@@ -197,13 +197,13 @@ export function MainToolbar({
                     the trigger is the stable selector. */}
                 <Button
                   variant="ghost"
-                  size="sm"
-                  className="h-7 w-7 p-0"
+                  size="icon"
+                  className="h-9 w-9 aspect-square p-0 shrink-0"
                   title={t("mainToolbar.moreMenu")}
                   aria-label={t("mainToolbar.moreMenu")}
                   data-tour-anchor="settings-entry"
                 >
-                  <Menu className="h-3.5 w-3.5" />
+                  <Menu className="h-4 w-4" />
                 </Button>
               </DropdownMenuTrigger>
             </TooltipTrigger>
@@ -376,7 +376,7 @@ function SkipUpdateButton({
         <Button
           variant="ghost"
           size="icon"
-          className="h-7 w-7 text-muted-foreground hover:text-foreground disabled:opacity-60"
+          className="h-9 w-9 aspect-square text-muted-foreground hover:text-foreground disabled:opacity-60"
           onClick={() => void onSkip()}
           disabled={disabled}
           title={t("mainToolbar.skipUpdateTitle", { version })}
