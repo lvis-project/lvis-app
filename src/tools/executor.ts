@@ -18,7 +18,7 @@
  * - 순서 고정: 1→8 순차
  * - 실패 격리: Step 6 실패가 Step 8을 건너뛰지 않음
  */
-import { randomUUID } from "node:crypto";
+import { createHash, randomUUID } from "node:crypto";
 import { statSync } from "node:fs";
 import { homedir } from "node:os";
 import { resolve as pathResolve } from "node:path";
@@ -65,6 +65,7 @@ import type { UserApprovalVerdict } from "../shared/permissions-events.js";
 import { buildSandboxAuditEntry } from "../audit/sandbox-audit.js";
 import { emitSandboxAudit } from "../audit/sandbox-audit-sink.js";
 import { lvisHome } from "../shared/lvis-home.js";
+import { detectApprovalIntent } from "../permissions/approval-intent.js";
 import type {
   ApprovalPurposeSuggestion,
   PermissionReviewEvent,
@@ -81,6 +82,7 @@ import {
 } from "./tool-result-chunk.js";
 import { t } from "../i18n/index.js";
 const log = createLogger("executor");
+const REVIEWER_AUTHORIZATION_TTL_MS = 10 * 60 * 1000;
 
 export interface ToolCallMeta {
   groupId: string;
@@ -301,6 +303,13 @@ export interface ToolPermissionContext {
    */
   userIntent?: string;
   /**
+   * User-keyboard-only approval phrase for the conversational reviewer retry
+   * path. Unlike `userIntent`, this is never populated for queue/headless/plugin
+   * origins; executor still requires a matching pending reviewer-blocked exact
+   * action before it can authorize anything.
+   */
+  explicitAuthorizationIntent?: string;
+  /**
    * Invoked when the user selects "이번 1회만" (turn-scope grant) on an
    * out-of-allowed-dir approval. The conversation loop is expected to
    * remember `approvedDirectory` for the remaining tool calls inside the
@@ -342,6 +351,11 @@ export interface ExecuteOptions {
   abortSignal?: AbortSignal;
   toolResultChunkReader?: ToolResultChunkReader;
   permissionContext?: ToolPermissionContext;
+}
+
+interface PendingReviewerAuthorization {
+  expiresAt: number;
+  verdict: RiskVerdict;
 }
 
 function maskDisplayValue(value: unknown): unknown {
@@ -694,6 +708,7 @@ export class ToolExecutor {
   private readonly rateLimiter = new RateLimiter();
   private readonly bashAstValidator?: BashAstValidator;
   private readonly scriptHookManager?: ScriptHookManager;
+  private readonly pendingReviewerAuthorizations = new Map<string, PendingReviewerAuthorization>();
 
   constructor(
     toolRegistry: ToolRegistry,
@@ -726,6 +741,78 @@ export class ToolExecutor {
     if (pm === "strict") return "ask_all";
     if (pm === "auto" || pm === "allow") return "full_auto";
     return "default";
+  }
+
+  private reviewerAuthorizationKey(input: {
+    sessionId: string | undefined;
+    toolName: string;
+    source: ToolSource;
+    finalInput: Record<string, unknown>;
+    context: ToolPermissionContext;
+  }): string {
+    const components = [
+      input.sessionId ?? "session:unknown",
+      input.toolName,
+      input.source,
+      canonicalStringify(input.finalInput),
+      input.context.trustOrigin,
+      input.context.approvalCacheKey ?? "",
+    ];
+    return createHash("sha256").update(components.join("\0")).digest("hex");
+  }
+
+  private prunePendingReviewerAuthorizations(now = Date.now()): void {
+    for (const [key, pending] of this.pendingReviewerAuthorizations) {
+      if (pending.expiresAt <= now) {
+        this.pendingReviewerAuthorizations.delete(key);
+      }
+    }
+  }
+
+  private recordPendingReviewerAuthorization(input: {
+    sessionId: string | undefined;
+    toolName: string;
+    source: ToolSource;
+    finalInput: Record<string, unknown>;
+    context: ToolPermissionContext;
+    verdict: RiskVerdict;
+  }): void {
+    if (input.context.headless === true) return;
+    const now = Date.now();
+    this.prunePendingReviewerAuthorizations(now);
+    this.pendingReviewerAuthorizations.set(
+      this.reviewerAuthorizationKey(input),
+      {
+        expiresAt: now + REVIEWER_AUTHORIZATION_TTL_MS,
+        verdict: input.verdict,
+      },
+    );
+  }
+
+  private consumePendingReviewerAuthorization(input: {
+    sessionId: string | undefined;
+    toolName: string;
+    source: ToolSource;
+    finalInput: Record<string, unknown>;
+    context: ToolPermissionContext;
+  }): PermissionCheckResult | null {
+    if (input.context.headless === true) return null;
+    const intent = detectApprovalIntent(input.context.explicitAuthorizationIntent ?? "");
+    if (intent.kind !== "approve") return null;
+    const now = Date.now();
+    this.prunePendingReviewerAuthorizations(now);
+    const key = this.reviewerAuthorizationKey(input);
+    const pending = this.pendingReviewerAuthorizations.get(key);
+    if (!pending) return null;
+    this.pendingReviewerAuthorizations.delete(key);
+    return {
+      decision: "allow",
+      reason:
+        `explicit user authorization (${intent.matchedPhrase}) after reviewer ` +
+        `${pending.verdict.level}: ${pending.verdict.reason}`,
+      layer: 5,
+      reviewer: { route: "foreground-auto", verdict: pending.verdict },
+    };
   }
 
   getHookRunner(): HookRunner {
@@ -1934,6 +2021,18 @@ export class ToolExecutor {
         }
       }
       if (permissionResult.decision === "ask" && permissionResult.reviewer?.route === "foreground-auto") {
+        const explicitAuthorization = this.consumePendingReviewerAuthorization({
+          sessionId,
+          toolName: toolUse.name,
+          source,
+          finalInput,
+          context: invocationPermissionContext,
+        });
+        if (explicitAuthorization) {
+          permissionResult = explicitAuthorization;
+        }
+      }
+      if (permissionResult.decision === "ask" && permissionResult.reviewer?.route === "foreground-auto") {
         const reviewerResult = await this.dispatchReviewerForInteractiveAuto(
           toolUse.name,
           source,
@@ -1958,6 +2057,20 @@ export class ToolExecutor {
         if (reviewerResult) {
           permissionResult = reviewerResult;
         }
+      }
+      if (
+        permissionResult.decision === "deny" &&
+        permissionResult.reviewer?.route === "foreground-auto" &&
+        permissionResult.reviewer.verdict
+      ) {
+        this.recordPendingReviewerAuthorization({
+          sessionId,
+          toolName: toolUse.name,
+          source,
+          finalInput,
+          context: invocationPermissionContext,
+          verdict: permissionResult.reviewer.verdict,
+        });
       }
       if (permissionResult.decision === "deny") {
         const msg = t("be_executor.permBlockDeny", { name: toolUse.name, source, trust, reason: permissionResult.reason });
