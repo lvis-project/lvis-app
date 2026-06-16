@@ -1912,6 +1912,25 @@ describe("ChatView — permission review suggestion toast", () => {
       (api.permission.setMode as unknown as ReturnType<typeof vi.fn>).mock.invocationCallOrder;
     expect(reviewerDispatchOrder[1]).toBeLessThan(setModeOrder[0]);
   });
+
+  it("drops malformed permission review suggestion metrics", async () => {
+    const { container, api } = await renderApp({ hasApiKey: true });
+    const onSuggestionMock = api.permission.onReviewSuggestion as unknown as ReturnType<typeof vi.fn>;
+    await waitFor(() => expect(onSuggestionMock).toHaveBeenCalled());
+    const fire = onSuggestionMock.mock.calls[0]?.[0] as SuggestionCb;
+
+    await act(async () => {
+      fire({
+        reason: "repeat-allow",
+        allowCount: Number.NaN,
+        allowAlwaysCount: 0,
+        threshold: 3,
+        windowMs: 300000,
+      });
+    });
+
+    expect(container.querySelector('[data-testid="permission-review-suggestion-toast"]')).toBeNull();
+  });
 });
 
 afterEach(() => {

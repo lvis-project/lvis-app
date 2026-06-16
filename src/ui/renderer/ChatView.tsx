@@ -465,6 +465,20 @@ export function ChatView({ api, onAsk, onEditSave, onFork, onToggleStar, onRetry
         console.warn("[chat] dropping malformed permission review suggestion payload", payload);
         return;
       }
+      const numericFieldsValid =
+        Number.isFinite(payload.allowCount) &&
+        Number.isFinite(payload.allowAlwaysCount) &&
+        Number.isFinite(payload.threshold) &&
+        Number.isFinite(payload.windowMs) &&
+        payload.allowCount >= 0 &&
+        payload.allowAlwaysCount >= 0 &&
+        payload.threshold > 0 &&
+        payload.windowMs > 0 &&
+        payload.windowMs <= 24 * 60 * 60 * 1000;
+      if (!numericFieldsValid) {
+        console.warn("[chat] dropping malformed permission review suggestion payload", payload);
+        return;
+      }
       if (permissionReviewSuggestionTimerRef.current) {
         clearTimeout(permissionReviewSuggestionTimerRef.current);
       }
@@ -483,6 +497,10 @@ export function ChatView({ api, onAsk, onEditSave, onFork, onToggleStar, onRetry
   }, []);
 
   const handleEnablePermissionReviewSuggestion = useCallback(async () => {
+    if (permissionReviewSuggestionTimerRef.current) {
+      clearTimeout(permissionReviewSuggestionTimerRef.current);
+      permissionReviewSuggestionTimerRef.current = null;
+    }
     setPermissionReviewSuggestion((current) =>
       current ? { ...current, busy: true, error: undefined } : current,
     );
