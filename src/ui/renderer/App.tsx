@@ -194,7 +194,11 @@ export function App() {
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
   }, []);
-  const { updates: marketplaceUpdates, dismiss: dismissMarketplaceUpdates } = useMarketplaceUpdates(api);
+  const {
+    updates: marketplaceUpdates,
+    dismiss: dismissMarketplaceUpdates,
+    skip: skipMarketplaceUpdates,
+  } = useMarketplaceUpdates(api);
   const { announcements: marketplaceAnnouncements, dismiss: dismissMarketplaceAnnouncement } = useMarketplaceAnnouncements(api);
   const { status: bootstrapStatus, dismiss: dismissBootstrapStatus, retry: retryBootstrap } = useBootstrapStatus(api);
   const { queue: approvalQueue, decide: handleApprovalDecide } = useApproval();
@@ -1310,6 +1314,7 @@ export function App() {
           <MarketplaceUpdateBanner
             updates={marketplaceUpdates}
             onDismiss={dismissMarketplaceUpdates}
+            onSkip={skipMarketplaceUpdates}
             onUpdate={installPlugin}
           />
           <MarketplaceAnnouncementBanner
@@ -1347,6 +1352,7 @@ export function App() {
             appUpdateInFlight={appUpdate.inFlight}
             onDownloadAppUpdate={appUpdate.download}
             onInstallAppUpdate={appUpdate.install}
+            onSkipAppUpdate={appUpdate.skip}
           />
           <DevToolsPanel
             api={api}

@@ -1,6 +1,7 @@
-// S8 — Non-blocking, dismissible banner shown when plugin updates are available.
+// S8 — Non-blocking banner shown when plugin updates are available.
 
 import { useState } from "react";
+import { X } from "lucide-react";
 import { Button } from "../../../components/ui/button.js";
 import type { PluginUpdateInfo } from "../hooks/use-marketplace-updates.js";
 import { MarqueeText } from "./MarqueeText.js";
@@ -9,20 +10,22 @@ import { useTranslation } from "../../../i18n/react.js";
 /**
  * Renders a compact banner listing plugins with available updates.
  * Displayed at the top of the app when `marketplace:updates-available` fires.
- * Dismissible — calling `onDismiss` hides it until the next IPC event.
+ * Skipping persists the visible plugin versions until a newer version appears.
  *
  * "업데이트" button installs each pluginId in sequence via `onUpdate`
  * (the marketplace install endpoint replaces the existing version). After all
- * updates finish the banner self-dismisses; failures keep the banner visible
+ * updates finish the banner clears locally; failures keep the banner visible
  * with the partial-failure message.
  */
 export function MarketplaceUpdateBanner({
   updates,
   onDismiss,
+  onSkip,
   onUpdate,
 }: {
   updates: PluginUpdateInfo[];
   onDismiss: () => void;
+  onSkip: () => void | Promise<void>;
   onUpdate: (pluginId: string, expectedVersion?: string) => Promise<void>;
 }) {
   const { t } = useTranslation();
@@ -82,11 +85,13 @@ export function MarketplaceUpdateBanner({
         <Button
           variant="ghost"
           size="sm"
-          onClick={onDismiss}
-          aria-label={t("marketplaceUpdateBanner.dismissAriaLabel")}
+          onClick={() => void onSkip()}
+          disabled={busy}
+          aria-label={t("marketplaceUpdateBanner.skipAriaLabel")}
+          title={t("marketplaceUpdateBanner.skipTitle")}
           className="text-info hover:text-info/80 h-auto p-1"
         >
-          ✕
+          <X className="h-3.5 w-3.5" />
         </Button>
       </div>
     </div>
