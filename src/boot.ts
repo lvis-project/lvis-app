@@ -96,6 +96,8 @@ import { migrateAgentHubBoardToWorkBoard } from "./boot/steps/work-board-migrati
 import { scanAndEmitDueSoon } from "./work-board/due-soon.js";
 import { createDirStorage } from "./work-board/storage.js";
 import { openFeatureNamespace } from "./main/storage/feature-namespace.js";
+import { createWorkBoardReporter, type WorkBoardReporter } from "./work-board/work-report.js";
+import { appendMemory } from "./work-board/work-memory.js";
 import { SessionTodoStore } from "./main/session-todo-store.js";
 import { AskUserQuestionGate } from "./main/ask-user-question-gate.js";
 import { NotificationService } from "./main/notification-service.js";
@@ -496,11 +498,11 @@ export async function bootstrap(
   // `agent_hub.work_item.due_soon` on the plugin bus for work-assistant's
   // work-item-due-soon detector. Deferred-started (after IPC + plugins are up)
   // via services.startWorkBoardDueSoon; the timer is cleared on shutdown.
-  const dueSoonStorage = createDirStorage(openFeatureNamespace("work-board").dir);
+  const workBoardStorage = createDirStorage(openFeatureNamespace("work-board").dir);
   const DUE_SOON_TICK_MS = 60 * 60_000;
   let dueSoonTimer: ReturnType<typeof setInterval> | undefined;
   const runDueSoonScan = (): void => {
-    void scanAndEmitDueSoon(workBoardStore, dueSoonStorage, emitEvent, Date.now())
+    void scanAndEmitDueSoon(workBoardStore, workBoardStorage, emitEvent, Date.now())
       .then((fired) => {
         if (fired.length) log.info("work-board: emitted %d due_soon nudge(s)", fired.length);
       })
@@ -1019,6 +1021,23 @@ export async function bootstrap(
         logger: log,
       });
     },
+    // Self-improvement (Hermes): after a run completes, append a one-line
+    // learning to the work-board MEMORY.md. appendMemory enforces the hard
+    // line cap; the engine fires this swallow-on-error so it never fails a run.
+    onRunComplete: ({ itemId, title }) =>
+      appendMemory(workBoardStorage, [
+        `${new Date().toISOString().slice(0, 10)}: 자율 실행 완료 — #${itemId} ${title}`,
+      ]),
+  });
+
+  // Work Board reporter — host-native daily/weekly reports. Reuses the
+  // work-board namespace storage (the same activity.jsonl + memories/ the store
+  // writes) and the host one-shot LLM caller wired above.
+  const workBoardReporter: WorkBoardReporter = createWorkBoardReporter({
+    store: workBoardStore,
+    storage: workBoardStorage,
+    callLlm: lateBinding.llmCallerRef.fn,
+    emit: emitEvent,
   });
 
   // RoutinesScheduler v2 — fires per due routine, branching on execution mode.
@@ -1360,7 +1379,7 @@ export async function bootstrap(
     systemPromptBuilder, conversationLoop, routineEngine, mcpManager, mcpArtifactStore, agentArtifactStore, skillArtifactStore,
     idleScheduler, preferenceRefreshService, bashAstValidator, auditService, auditLogger: bootAuditLogger, postTurnHookChain,
     approvalGate, rewireReviewerAgent, refreshMarketplaceFetcherConfig, refreshActiveLlmWildcard,
-    routinesStore, routinesScheduler, workBoardStore, workBoardEngine, sessionTodoStore, askUserQuestionGate, skillStore, agentProfileStore, personaPromptStore,
+    routinesStore, routinesScheduler, workBoardStore, workBoardEngine, workBoardReport: workBoardReporter, sessionTodoStore, askUserQuestionGate, skillStore, agentProfileStore, personaPromptStore,
     knowledgeAvailable, starredStore, feedbackStore,
     notificationService,
     scriptHookManager,
