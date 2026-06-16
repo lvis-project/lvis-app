@@ -118,6 +118,18 @@ describe("work-report — weekly", () => {
     expect(calls).toHaveLength(0);
   });
 
+  it("rejects a traversal-bearing weekIso BEFORE any file write (security)", async () => {
+    const { callLlm, calls } = llmRecorder();
+    const storage = memStorage();
+    const reporter = createWorkBoardReporter({ store: reader([item({ id: 1 })]), storage, callLlm, now: () => NOW });
+
+    const r = await reporter.generateWeekly({ weekIso: "../../etc/evil" });
+    expect(r.status).toBe("empty"); // refused — not generated
+    expect(calls).toHaveLength(0); // no LLM call
+    // No file escaped the namespace (no write happened at all).
+    expect(Object.keys(storage.files)).toHaveLength(0);
+  });
+
   it("activity this week → ok, writes weekly markdown", async () => {
     const { callLlm, calls } = llmRecorder();
     const storage = memStorage();
