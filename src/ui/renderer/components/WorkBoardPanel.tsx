@@ -18,7 +18,9 @@
  */
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { AlertTriangle, CheckCircle2, Loader2, Play, XCircle } from "lucide-react";
+import ReactMarkdown from "react-markdown";
 import { t } from "../../../i18n/runtime.js";
+import { MARKDOWN_REMARK_PLUGINS } from "../utils/markdown-plugins.js";
 import { Badge } from "../../../components/ui/badge.js";
 import { Button } from "../../../components/ui/button.js";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "../../../components/ui/card.js";
@@ -352,8 +354,8 @@ function WorkItemCard({ item, run, onStart, onComplete, onReopen, onRun, onOpenD
   return (
     <button
       type="button"
-      className={`w-full rounded-md border p-2.5 text-left transition hover:bg-muted/60 ${
-        overdue ? "border-destructive/50 bg-destructive/5" : ""
+      className={`w-full rounded-lg border bg-background p-3 text-left shadow-sm transition-all hover:border-border hover:shadow-md focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring ${
+        overdue ? "border-destructive/50 bg-destructive/5" : "border-border/60"
       }`}
       data-testid="work-board-card"
       onClick={() => onOpenDetail(item.id)}
@@ -362,14 +364,14 @@ function WorkItemCard({ item, run, onStart, onComplete, onReopen, onRun, onOpenD
         <div className="min-w-0 flex-1">
           <div className="flex items-center gap-1.5">
             <PriorityChip priority={item.priority} />
-            <span className={`truncate text-sm font-medium ${isCompleted ? "text-muted-foreground line-through" : ""}`}>
+            <span className={`truncate text-sm font-semibold leading-snug ${isCompleted ? "text-muted-foreground line-through" : "text-foreground"}`}>
               {item.title}
             </span>
           </div>
           {item.detail && (
-            <p className="mt-1 line-clamp-2 text-[11px] text-muted-foreground">{item.detail}</p>
+            <p className="mt-1.5 line-clamp-2 text-[11px] leading-relaxed text-muted-foreground">{item.detail}</p>
           )}
-          <div className="mt-1.5 flex flex-wrap items-center gap-1.5">
+          <div className="mt-2 flex flex-wrap items-center gap-1.5">
             {overdue && (
               <Badge variant="outline" className="border-destructive/50 text-destructive">
                 {t("workBoard.overdueBadge")}
@@ -382,7 +384,7 @@ function WorkItemCard({ item, run, onStart, onComplete, onReopen, onRun, onOpenD
       </div>
       {/* Inline lifecycle actions. stopPropagation so the card's open-detail
           click does not also fire when the user only wanted to transition. */}
-      <div className="mt-2 flex justify-end gap-1">
+      <div className="mt-2.5 flex justify-end gap-1">
         {!isCompleted && (
           <Button
             size="sm"
@@ -480,20 +482,20 @@ function BoardColumn({
   testId,
 }: BoardColumnProps) {
   return (
-    <section className="flex min-h-0 flex-col gap-2 rounded-md border bg-muted/20 p-2" data-testid={testId}>
-      <div className="flex items-center justify-between px-1">
-        <h3 className="text-sm font-medium">{heading}</h3>
-        <span className="text-[11px] text-muted-foreground">
-          {t("workBoard.itemCount", { count: String(items.length) })}
+    <section className="flex min-h-0 flex-col gap-2 rounded-lg border bg-muted/20 shadow-sm" data-testid={testId}>
+      <div className="flex items-center justify-between rounded-t-lg border-b bg-muted/40 px-3 py-2">
+        <h3 className="text-xs font-semibold uppercase tracking-wider text-muted-foreground">{heading}</h3>
+        <span className="flex h-5 min-w-[20px] items-center justify-center rounded-full bg-muted px-1.5 text-[10px] font-semibold text-muted-foreground">
+          {items.length}
         </span>
       </div>
-      <ScrollArea className="min-h-[200px] flex-1">
+      <ScrollArea className="min-h-[200px] flex-1 px-2 pb-2">
         {loading ? (
           <div className="py-8 text-center text-sm text-muted-foreground">{t("workBoard.loadingLabel")}</div>
         ) : items.length === 0 ? (
           <div className="py-8 text-center text-sm text-muted-foreground">{emptyLabel}</div>
         ) : (
-          <div className="space-y-2 pr-2">
+          <div className="space-y-2">
             {items.map((item) => (
               <WorkItemCard
                 key={item.id}
@@ -727,25 +729,31 @@ function RunOutputPanel({
       {liveText && (
         <div data-testid="work-board-run-live">
           <div className="text-[11px] font-medium text-muted-foreground">{t("workBoard.runLiveHeading")}</div>
-          <pre className="mt-1 max-h-32 overflow-auto whitespace-pre-wrap break-words rounded bg-background/60 p-2 text-[11px] leading-relaxed">
-            {liveText}
-          </pre>
+          <div className="mt-1 max-h-32 overflow-auto rounded bg-background/60 p-3">
+            <div className="prose prose-sm lvis-prose max-w-none break-words [overflow-wrap:anywhere]">
+              <ReactMarkdown remarkPlugins={MARKDOWN_REMARK_PLUGINS}>{liveText}</ReactMarkdown>
+            </div>
+          </div>
         </div>
       )}
       {plan && (
         <div data-testid="work-board-run-plan">
           <div className="text-[11px] font-medium text-muted-foreground">{t("workBoard.runPlanHeading")}</div>
-          <pre className="mt-1 max-h-40 overflow-auto whitespace-pre-wrap break-words rounded bg-background/60 p-2 text-[11px] leading-relaxed">
-            {plan}
-          </pre>
+          <div className="mt-1 max-h-48 overflow-auto rounded bg-background/60 p-3">
+            <div className="prose prose-sm lvis-prose max-w-none break-words [overflow-wrap:anywhere]">
+              <ReactMarkdown remarkPlugins={MARKDOWN_REMARK_PLUGINS}>{plan}</ReactMarkdown>
+            </div>
+          </div>
         </div>
       )}
       {output && (
         <div data-testid="work-board-run-result">
           <div className="text-[11px] font-medium text-muted-foreground">{t("workBoard.runOutputHeading")}</div>
-          <pre className="mt-1 max-h-48 overflow-auto whitespace-pre-wrap break-words rounded bg-background/60 p-2 text-[11px] leading-relaxed">
-            {output}
-          </pre>
+          <div className="mt-1 max-h-48 overflow-auto rounded bg-background/60 p-3">
+            <div className="prose prose-sm lvis-prose max-w-none break-words [overflow-wrap:anywhere]">
+              <ReactMarkdown remarkPlugins={MARKDOWN_REMARK_PLUGINS}>{output}</ReactMarkdown>
+            </div>
+          </div>
         </div>
       )}
     </div>
@@ -790,11 +798,16 @@ function RunHistorySection({ api, item }: { api: LvisApi; item: WorkItemResolved
   };
 
   return (
-    <section className="rounded-md border bg-muted/20 p-2.5" data-testid="work-board-run-history">
-      <h4 className="text-xs font-medium text-muted-foreground">
-        {t("workBoard.runHistoryHeading")} ({history.length})
-      </h4>
-      <ul className="mt-1 space-y-1">
+    <section className="rounded-lg border bg-muted/20 shadow-sm" data-testid="work-board-run-history">
+      <div className="flex items-center justify-between rounded-t-lg border-b bg-muted/40 px-3 py-2">
+        <h4 className="text-xs font-semibold uppercase tracking-wider text-muted-foreground">
+          {t("workBoard.runHistoryHeading")}
+        </h4>
+        <span className="flex h-5 min-w-[20px] items-center justify-center rounded-full bg-muted px-1.5 text-[10px] font-semibold text-muted-foreground">
+          {history.length}
+        </span>
+      </div>
+      <ul className="space-y-1 p-2.5">
         {[...history].reverse().map((h) => (
           <li key={h.runId} className="text-[11px]">
             <button
@@ -814,11 +827,15 @@ function RunHistorySection({ api, item }: { api: LvisApi; item: WorkItemResolved
                 ) : events.length === 0 ? (
                   <span className="text-muted-foreground">{t("workBoard.runHistoryEmpty")}</span>
                 ) : (
-                  <pre className="max-h-40 overflow-auto whitespace-pre-wrap break-words text-[11px] leading-relaxed">
-                    {events
-                      .map((e) => `[${e.phase}${e.turn ? `#${e.turn}` : ""}] ${e.text ?? e.message ?? ""}`)
-                      .join("\n\n")}
-                  </pre>
+                  <div className="max-h-48 overflow-auto">
+                    <div className="prose prose-sm lvis-prose max-w-none break-words [overflow-wrap:anywhere]">
+                      <ReactMarkdown remarkPlugins={MARKDOWN_REMARK_PLUGINS}>
+                        {events
+                          .map((e) => `[${e.phase}${e.turn ? `#${e.turn}` : ""}] ${e.text ?? e.message ?? ""}`)
+                          .join("\n\n")}
+                      </ReactMarkdown>
+                    </div>
+                  </div>
                 )}
               </div>
             )}
@@ -1126,10 +1143,13 @@ function ReportsSection({ api }: { api: LvisApi }) {
   );
 
   return (
-    <section className="rounded-md border bg-muted/20 p-3" data-testid="work-board-reports">
-      <h3 className="text-sm font-medium text-muted-foreground">{t("workBoard.reportsHeading")}</h3>
-      <p className="mt-1 text-[11px] text-muted-foreground">{t("workBoard.reportPlaceholder")}</p>
-      <div className="mt-2 flex gap-2">
+    <section className="rounded-lg border bg-muted/20 shadow-sm" data-testid="work-board-reports">
+      <div className="flex items-center justify-between rounded-t-lg border-b bg-muted/40 px-4 py-2.5">
+        <h3 className="text-xs font-semibold uppercase tracking-wider text-muted-foreground">{t("workBoard.reportsHeading")}</h3>
+      </div>
+      <div className="p-4">
+      <p className="text-[11px] text-muted-foreground">{t("workBoard.reportPlaceholder")}</p>
+      <div className="mt-3 flex gap-2">
         <Button
           size="sm"
           variant="outline"
@@ -1152,6 +1172,7 @@ function ReportsSection({ api }: { api: LvisApi }) {
         </Button>
       </div>
       {result && <ReportResultBlock result={result} onClose={() => setResult(null)} />}
+      </div>
     </section>
   );
 }
@@ -1196,9 +1217,11 @@ function ReportResultBlock({
           {t("workBoard.reportClose")}
         </Button>
       </div>
-      <pre className="max-h-48 overflow-auto whitespace-pre-wrap break-words rounded bg-background/60 p-2 text-[11px] leading-relaxed">
-        {result.markdown}
-      </pre>
+      <div className="max-h-48 overflow-auto rounded bg-background/60 p-3">
+        <div className="prose prose-sm lvis-prose max-w-none break-words [overflow-wrap:anywhere]">
+          <ReactMarkdown remarkPlugins={MARKDOWN_REMARK_PLUGINS}>{result.markdown}</ReactMarkdown>
+        </div>
+      </div>
     </div>
   );
 }
@@ -1326,8 +1349,8 @@ export function WorkBoardPanel({ api }: WorkBoardPanelProps) {
             </div>
           </div>
         </CardHeader>
-        <CardContent className="flex min-h-0 flex-1 flex-col gap-3">
-          <div className="grid min-h-0 flex-1 gap-3 lg:grid-cols-3">
+        <CardContent className="flex min-h-0 flex-1 flex-col gap-4 overflow-y-auto">
+          <div className="grid min-h-0 gap-3 lg:grid-cols-3">
             <BoardColumn
               heading={t("workBoard.columnPlanned")}
               items={planned}
@@ -1368,7 +1391,9 @@ export function WorkBoardPanel({ api }: WorkBoardPanelProps) {
               testId="work-board-column-completed"
             />
           </div>
-          <ReportsSection api={api} />
+          <div className="border-t pt-4">
+            <ReportsSection api={api} />
+          </div>
         </CardContent>
       </Card>
 
