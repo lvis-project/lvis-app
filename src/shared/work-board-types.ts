@@ -188,6 +188,19 @@ export type WorkItemDeleteResult =
 // ── Bus events ──────────────────────────────────────────────────────────────
 
 /**
+ * Pre-due nudge payload emitted on the plugin event bus as
+ * `agent_hub.work_item.due_soon`, consumed by work-assistant's
+ * work-item-due-soon detector. Intentionally slim (a pointer, not content):
+ * the host emits it when a work item's `due_at` enters the next-24h window.
+ */
+export interface WorkItemDueSoonEventPayload {
+  itemId: number;
+  title: string;
+  /** ISO instant the nudge was emitted. */
+  notifiedAt: string;
+}
+
+/**
  * Slim event payload emitted whenever a WorkItem is created, updated,
  * transitioned, completed, reopened, or removed so the renderer can refresh
  * its board view without re-listing on a timer.
