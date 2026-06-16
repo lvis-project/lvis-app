@@ -6,6 +6,12 @@
  * maps 1:1 to a store method; the store already returns discriminated `status`
  * envelopes, so the handlers forward those verbatim — no fallback / re-shaping.
  *
+ * After every SUCCESSFUL mutating call (add / update / transition / complete /
+ * reopen / remove) the handler broadcasts a {@link WORK_BOARD.itemChanged}
+ * event to all renderer windows (mirroring how the routines v2 domain fans out
+ * its events). The board panel subscribes to this and re-lists, so the view
+ * stays live across windows and LLM-tool mutations without polling.
+ *
  * Every channel validates the sender frame and audits rejected calls through
  * the shared {@link auditUnauthorized} sink (mirroring the routines v2 domain in
  * `misc.ts`). When the store is absent (boot did not construct it) the handlers
@@ -24,13 +30,34 @@ import type {
   WorkItemUpdateInput,
   WorkItemListFilter,
   WorkItemStatusStored,
+  WorkItemChangedEventPayload,
 } from "../../main/work-board-store.js";
 
 /** Shared "store not constructed at boot" envelope for the mutating channels. */
 const NO_STORE = { ok: false, error: "no-store" as const };
 
 export function registerWorkBoardHandlers(deps: IpcDeps): void {
-  const { workBoardStore, auditLogger } = deps;
+  const { workBoardStore, auditLogger, getMainWindow, getAppWindows } = deps;
+
+  /**
+   * Fan the `itemChanged` event out to every renderer window so detached
+   * panels and other windows refresh in lock-step. Destroyed windows are
+   * skipped. Mirrors `broadcastPromptsUpdated` in the prompts domain.
+   */
+  const broadcastItemChanged = (
+    itemId: number,
+    change: WorkItemChangedEventPayload["change"],
+  ): void => {
+    const payload: WorkItemChangedEventPayload = {
+      itemId,
+      change,
+      changedAt: new Date().toISOString(),
+    };
+    for (const win of getAppWindows?.() ?? [getMainWindow()]) {
+      if (!win || win.isDestroyed()) continue;
+      win.webContents.send(WORK_BOARD.itemChanged, payload);
+    }
+  };
 
   // ─── List ────────────────────────────────────────
   ipcMain.handle(WORK_BOARD.list, async (e, filter?: WorkItemListFilter) => {
@@ -59,7 +86,9 @@ export function registerWorkBoardHandlers(deps: IpcDeps): void {
       return UNAUTHORIZED_FRAME;
     }
     if (!workBoardStore) return NO_STORE;
-    return workBoardStore.create(input);
+    const result = await workBoardStore.create(input);
+    if (result.status === "created") broadcastItemChanged(result.itemId, "created");
+    return result;
   });
 
   // ─── Update ──────────────────────────────────────
@@ -69,7 +98,9 @@ export function registerWorkBoardHandlers(deps: IpcDeps): void {
       return UNAUTHORIZED_FRAME;
     }
     if (!workBoardStore) return NO_STORE;
-    return workBoardStore.update(id, patch);
+    const result = await workBoardStore.update(id, patch);
+    if (result.status === "updated") broadcastItemChanged(result.itemId, "updated");
+    return result;
   });
 
   // ─── Transition ──────────────────────────────────
@@ -79,7 +110,9 @@ export function registerWorkBoardHandlers(deps: IpcDeps): void {
       return UNAUTHORIZED_FRAME;
     }
     if (!workBoardStore) return NO_STORE;
-    return workBoardStore.transition(id, to);
+    const result = await workBoardStore.transition(id, to);
+    if (result.status === "transitioned") broadcastItemChanged(result.itemId, "transitioned");
+    return result;
   });
 
   // ─── Complete ────────────────────────────────────
@@ -89,7 +122,9 @@ export function registerWorkBoardHandlers(deps: IpcDeps): void {
       return UNAUTHORIZED_FRAME;
     }
     if (!workBoardStore) return NO_STORE;
-    return workBoardStore.complete(id);
+    const result = await workBoardStore.complete(id);
+    if (result.status === "completed") broadcastItemChanged(result.itemId, "completed");
+    return result;
   });
 
   // ─── Reopen ──────────────────────────────────────
@@ -99,7 +134,9 @@ export function registerWorkBoardHandlers(deps: IpcDeps): void {
       return UNAUTHORIZED_FRAME;
     }
     if (!workBoardStore) return NO_STORE;
-    return workBoardStore.reopen(id);
+    const result = await workBoardStore.reopen(id);
+    if (result.status === "reopened") broadcastItemChanged(result.itemId, "reopened");
+    return result;
   });
 
   // ─── Remove ──────────────────────────────────────
@@ -109,6 +146,8 @@ export function registerWorkBoardHandlers(deps: IpcDeps): void {
       return UNAUTHORIZED_FRAME;
     }
     if (!workBoardStore) return NO_STORE;
-    return workBoardStore.remove(id);
+    const result = await workBoardStore.remove(id);
+    if (result.status === "deleted") broadcastItemChanged(result.itemId, "removed");
+    return result;
   });
 }

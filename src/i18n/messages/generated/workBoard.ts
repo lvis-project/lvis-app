@@ -56,7 +56,7 @@ export const en = {
   "workBoard.reportDaily": "Daily report",
   "workBoard.reportWeekly": "Weekly report",
   "workBoard.reportPlaceholder": "Generate a summary of your board activity. (Coming soon)",
-  "workBoard.generateReportButton": "Generate",
+  "workBoard.comingSoonBadge": "Coming soon",
 } as const;
 export const ko: Record<keyof typeof en, string> = {
   "workBoard.panelTitle": "업무 보드",
@@ -113,5 +113,5 @@ export const ko: Record<keyof typeof en, string> = {
   "workBoard.reportDaily": "일간 리포트",
   "workBoard.reportWeekly": "주간 리포트",
   "workBoard.reportPlaceholder": "보드 활동 요약을 생성합니다. (준비 중)",
-  "workBoard.generateReportButton": "생성",
+  "workBoard.comingSoonBadge": "준비 중",
 };
