@@ -369,7 +369,7 @@ function WorkItemCard({ item, run, onStart, onComplete, onReopen, onRun, onOpenD
             </span>
           </div>
           {item.detail && (
-            <p className="mt-1.5 line-clamp-2 text-[11px] leading-relaxed text-muted-foreground">{item.detail}</p>
+            <p className="mt-1.5 line-clamp-2 break-words text-[11px] leading-relaxed text-muted-foreground [overflow-wrap:anywhere]">{item.detail}</p>
           )}
           <div className="mt-2 flex flex-wrap items-center gap-1.5">
             {overdue && (
@@ -384,7 +384,7 @@ function WorkItemCard({ item, run, onStart, onComplete, onReopen, onRun, onOpenD
       </div>
       {/* Inline lifecycle actions. stopPropagation so the card's open-detail
           click does not also fire when the user only wanted to transition. */}
-      <div className="mt-2.5 flex justify-end gap-1">
+      <div className="mt-2.5 flex flex-wrap justify-end gap-1">
         {!isCompleted && (
           <Button
             size="sm"
