@@ -1,12 +1,16 @@
 /**
  * Host "due soon" scanner for the Work Board.
  *
- * work-assistant's `work-item-due-soon` detector consumes the plugin-bus event
- * `agent_hub.work_item.due_soon` { itemId, title, notifiedAt } to nudge the
+ * A subscribed `work-item-due-soon` detector consumes the plugin-bus event
+ * `work_board.work_item.due_soon` { itemId, title, notifiedAt } to nudge the
  * user before a deadline. The board is now host-owned (architecture.md
- * §10.0.3), so the HOST emits this event: a scheduler tick scans the board for
- * not-yet-completed items whose `due_at` falls inside the next 24h and fires
- * one slim pointer event per item.
+ * §10.0.3), so the HOST emits this event under its own namespace: a scheduler
+ * tick scans the board for not-yet-completed items whose `due_at` falls inside
+ * the next 24h and fires one slim pointer event per item.
+ *
+ * The event was re-namespaced from the legacy plugin name during host
+ * integration so host source carries no plugin-owned identifiers (the
+ * decoupling audit); consumers subscribe to the host name in lock-step.
  *
  * Dedupe is keyed by `${id}:${due_at}` and persisted to
  * `due-soon-notified.json` under the work-board namespace, so an item fires at
@@ -16,11 +20,6 @@
  *
  * No fallback: a missing notified file reads back as `null` (the storage
  * contract's "absent" signal), seeded as an empty map.
- *
- * NOTE (transient, until P4): the agent-hub plugin — if still installed — also
- * emits this event from its own local board until it is decommissioned. During
- * that window work-assistant may receive a duplicate nudge; the plugin is
- * removed in P4 so the host becomes the sole emitter.
  */
 import type { WorkBoardStorage } from "./storage.js";
 import type {
@@ -34,8 +33,8 @@ export const DUE_SOON_WINDOW_MS = 24 * 60 * 60_000;
 /** Relative path (under the work-board namespace) of the dedupe map. */
 export const DUE_SOON_NOTIFIED_FILE = "due-soon-notified.json";
 
-/** Host event type consumed by work-assistant's work-item-due-soon detector. */
-export const DUE_SOON_EVENT = "agent_hub.work_item.due_soon";
+/** Host event type consumed by a subscribed work-item-due-soon detector. */
+export const DUE_SOON_EVENT = "work_board.work_item.due_soon";
 
 /** Persisted dedupe map: `${id}:${due_at}` → ISO instant first notified. */
 type DueSoonNotified = Record<string, string>;
@@ -53,7 +52,7 @@ function notifiedKey(id: number, dueAt: string): string {
 }
 
 /**
- * Scan the board and emit `agent_hub.work_item.due_soon` for every
+ * Scan the board and emit `work_board.work_item.due_soon` for every
  * not-yet-completed item whose `due_at` is inside the half-open window
  * `[now, now + 24h)`, deduped by `(id, due_at)`. Returns the payloads emitted
  * on this scan (for logging / tests).

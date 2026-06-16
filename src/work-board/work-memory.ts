@@ -12,9 +12,9 @@
  *                   summarised or rewritten behind the user's back.
  *
  * All reads/writes go through the host {@link WorkBoardStorage} seam — no `fs`,
- * no fallback paths. This is the same module the agent-hub plugin shipped at
- * v0.9.0, re-aimed at the host storage surface now that the board is a
- * first-class host domain (architecture.md §10.0.3).
+ * no fallback paths. This is the same module the legacy board plugin shipped,
+ * re-aimed at the host storage surface now that the board is a first-class
+ * host domain (architecture.md §10.0.3).
  */
 import type { WorkBoardStorage } from "./storage.js";
 

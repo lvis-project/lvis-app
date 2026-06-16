@@ -420,9 +420,14 @@ export function createWorkBoardEngine(
       // succeeded + persisted. Fire-and-forget with a swallow so a memory
       // append failure can never turn a completed run into an error.
       if (onRunComplete) {
-        void Promise.resolve(onRunComplete({ itemId, title: item.title })).catch((e) =>
-          log.warn("runItem onRunComplete failed (id=%d): %s", itemId, (e as Error).message),
-        );
+        // `.then(() => hook(...))` so even a SYNCHRONOUS throw from the hook is
+        // captured by the promise chain (not just an async rejection) — the
+        // swallow guarantee must hold for any hook implementation.
+        void Promise.resolve()
+          .then(() => onRunComplete({ itemId, title: item.title }))
+          .catch((e) =>
+            log.warn("runItem onRunComplete failed (id=%d): %s", itemId, (e as Error).message),
+          );
       }
       return {
         status: "completed",

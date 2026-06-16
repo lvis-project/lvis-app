@@ -191,7 +191,7 @@ export interface AppServices {
   /**
    * Deferred Work Board due-soon scanner handle. main.ts calls this AFTER
    * registerIpcHandlers() (mirroring startRoutinesScheduler) so the initial
-   * scan + the 60-min tick emit `agent_hub.work_item.due_soon` onto a fully
+   * scan + the 60-min tick emit `work_board.work_item.due_soon` onto a fully
    * wired plugin bus. The interval is cleared in `shutdown()`.
    */
   startWorkBoardDueSoon?: () => void;
