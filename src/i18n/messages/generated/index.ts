@@ -5,7 +5,7 @@
  * fragment files in this directory (`<namespace>.ts`, each exporting `en`/`ko`
  * objects) and merges them here.
  *
- * Fragments: 176
+ * Fragments: 177
  */
 import { en as en_app, ko as ko_app } from "./app.js";
 import { en as en_appearanceTab, ko as ko_appearanceTab } from "./appearanceTab.js";
@@ -182,6 +182,7 @@ import { en as en_viewModeBanner, ko as ko_viewModeBanner } from "./viewModeBann
 import { en as en_violetDark, ko as ko_violetDark } from "./violetDark.js";
 import { en as en_violetLight, ko as ko_violetLight } from "./violetLight.js";
 import { en as en_webTab, ko as ko_webTab } from "./webTab.js";
+import { en as en_workBoard, ko as ko_workBoard } from "./workBoard.js";
 import { en as en_workGroup, ko as ko_workGroup } from "./workGroup.js";
 
 export const generatedEn: Record<string, string> = {
@@ -360,6 +361,7 @@ export const generatedEn: Record<string, string> = {
   ...en_violetDark,
   ...en_violetLight,
   ...en_webTab,
+  ...en_workBoard,
   ...en_workGroup,
 };
 
@@ -539,5 +541,6 @@ export const generatedKo: Record<string, string> = {
   ...ko_violetDark,
   ...ko_violetLight,
   ...ko_webTab,
+  ...ko_workBoard,
   ...ko_workGroup,
 };

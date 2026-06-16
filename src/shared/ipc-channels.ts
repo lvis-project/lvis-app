@@ -36,6 +36,21 @@ export const ROUTINES_V2 = {
   failed: "lvis:routines:v2:failed",
 } as const;
 
+export const WORK_BOARD = {
+  list: "lvis:work-board:list",
+  get: "lvis:work-board:get",
+  add: "lvis:work-board:add",
+  update: "lvis:work-board:update",
+  transition: "lvis:work-board:transition",
+  complete: "lvis:work-board:complete",
+  reopen: "lvis:work-board:reopen",
+  remove: "lvis:work-board:remove",
+  // Emitted by the work-board IPC domain after any successful mutation
+  // (created/updated/transitioned/completed/reopened/removed) so the renderer
+  // board view re-lists without polling.
+  itemChanged: "lvis:work-board:item-changed",
+} as const;
+
 export const PERMISSIONS = {
   getMode: "lvis:permission:get-mode",
   setMode: "lvis:permission:set-mode",

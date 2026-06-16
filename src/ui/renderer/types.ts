@@ -710,6 +710,65 @@ export type LvisApi = {
     routineId: string,
     limit?: number,
   ) => Promise<Array<{ routineId: string; firedAt: string; sessionId: string; title: string; preview: string }>>;
+  // ─── Work Board — personal board CRUD + lifecycle ───
+  // Result envelopes are the store's discriminated `status` unions (or
+  // `{ ok:false, error }` for unauthorized-frame / no-store). Shared types come
+  // from the renderer-safe `shared/work-board-types.js` (no Node built-ins).
+  listWorkBoard: (
+    filter?: import("../../shared/work-board-types.js").WorkItemListFilter,
+  ) => Promise<
+    | import("../../shared/work-board-types.js").WorkItemListResult
+    | { ok: false; error: string }
+  >;
+  getWorkBoardItem: (
+    id: number,
+  ) => Promise<
+    | import("../../shared/work-board-types.js").WorkItemGetResult
+    | { ok: false; error: string }
+  >;
+  addWorkBoardItem: (
+    input: import("../../shared/work-board-types.js").WorkItemCreateInput,
+  ) => Promise<
+    | import("../../shared/work-board-types.js").WorkItemCreateResult
+    | { ok: false; error: string }
+  >;
+  updateWorkBoardItem: (
+    id: number,
+    patch: import("../../shared/work-board-types.js").WorkItemUpdateInput,
+  ) => Promise<
+    | import("../../shared/work-board-types.js").WorkItemUpdateResult
+    | { ok: false; error: string }
+  >;
+  transitionWorkBoardItem: (
+    id: number,
+    to: import("../../shared/work-board-types.js").WorkItemStatusStored,
+  ) => Promise<
+    | import("../../shared/work-board-types.js").WorkItemTransitionResult
+    | { ok: false; error: string }
+  >;
+  completeWorkBoardItem: (
+    id: number,
+  ) => Promise<
+    | import("../../shared/work-board-types.js").WorkItemCompleteResult
+    | { ok: false; error: string }
+  >;
+  reopenWorkBoardItem: (
+    id: number,
+  ) => Promise<
+    | import("../../shared/work-board-types.js").WorkItemReopenResult
+    | { ok: false; error: string }
+  >;
+  removeWorkBoardItem: (
+    id: number,
+  ) => Promise<
+    | import("../../shared/work-board-types.js").WorkItemDeleteResult
+    | { ok: false; error: string }
+  >;
+  // Board view live refresh: emitted after any successful board mutation so the
+  // renderer re-lists without polling.
+  onWorkBoardItemChanged: (
+    handler: (payload: import("../../shared/work-board-types.js").WorkItemChangedEventPayload) => void,
+  ) => () => void;
   onMarketplaceUpdatesAvailable: (h: (updates: Array<{ pluginId: string; pluginName?: string; installedVersion: string; latestVersion: string }>) => void) => () => void;
   /**
    * Marketplace announcement stream — the host pushes the currently-active,
