@@ -33,6 +33,7 @@ import { LoginModal } from "./components/LoginModal.js";
 import { LLM_VENDORS } from "../../shared/llm-vendor-defaults.js";
 import { buildQuickActions } from "./components/command-actions.js";
 import { MainToolbar } from "./MainToolbar.js";
+import { Sidebar } from "./components/Sidebar.js";
 import { useAppUpdate } from "./hooks/use-app-update.js";
 import { DevToolsPanel } from "./components/DevToolsPanel.js";
 import { MainContent } from "./MainContent.js";
@@ -1309,6 +1310,16 @@ export function App() {
         <div className="flex h-screen flex-col overflow-hidden">
           <CustomTitleBar />
         <div className="flex min-h-0 min-w-0 flex-1 overflow-hidden">
+          <Sidebar
+            activeView={activeView}
+            onSelect={handleViewSelect}
+            pluginViews={pluginViews}
+            pluginAuthStatuses={pluginAuthStatuses}
+            hasApiKey={effectiveHasApiKey}
+            onOpenSettings={() => onOpenSettings()}
+            onNewChat={onNewChat}
+            streaming={streaming}
+          />
         <main className="flex min-h-0 min-w-0 flex-1 flex-col">
           <BootstrapStatusBanner status={bootstrapStatus} onDismiss={dismissBootstrapStatus} onRetry={() => void retryBootstrap()} />
           <MarketplaceUpdateBanner
