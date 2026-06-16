@@ -9,6 +9,7 @@ import type { InstallPhase } from "./hooks/use-plugin-marketplace.js";
 import type { QuickAction } from "./components/CommandPopover.js";
 import { MemorySearchPanel } from "./components/MemorySearchPanel.js";
 import { RoutinePanel } from "./components/RoutinePanel.js";
+import { WorkBoardPanel } from "./components/WorkBoardPanel.js";
 import { StarredView } from "./components/StarredView.js";
 import type { SessionSummary } from "./hooks/use-sessions.js";
 import type { UserKeyboardIntentSnapshot } from "../../shared/chat-origin.js";
@@ -180,6 +181,14 @@ export function MainContent(props: MainContentProps): ReactNode {
             })();
           }}
         />
+      </MainPaneShell>
+    );
+  }
+
+  if (activeView === "work-board") {
+    return (
+      <MainPaneShell>
+        <WorkBoardPanel api={api} />
       </MainPaneShell>
     );
   }

@@ -24,8 +24,9 @@ export function buildQuickActions({
   pluginViews: PluginUiExtension[];
 }): QuickAction[] {
   return [
-    { id: "home",      label: t("commandActions.goHome"),       run: () => setActiveView("home") },
-    { id: "routines",  label: t("commandActions.viewRoutines"), run: () => setActiveView("routines") },
+    { id: "home",       label: t("commandActions.goHome"),        run: () => setActiveView("home") },
+    { id: "work-board", label: t("commandActions.viewWorkBoard"), run: () => setActiveView("work-board") },
+    { id: "routines",   label: t("commandActions.viewRoutines"),  run: () => setActiveView("routines") },
     { id: "settings",  label: t("commandActions.openSettings"), run: openSettings },
     { id: "new-chat",  label: t("commandActions.newChat"),      run: handleNewChat },
     ...pluginViews.map((i) => {

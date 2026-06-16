@@ -16,7 +16,7 @@ import type {
 } from "./shared/permissions-events.js";
 import type { SerializedHistoryMessage } from "./shared/chat-history.js";
 import type { StreamEvent } from "./lib/chat-stream-state.js";
-import { MARKETPLACE, OVERLAY_V1, PERMISSIONS, ROUTINES_V2, SETTINGS, UI } from "./shared/ipc-channels.js";
+import { MARKETPLACE, OVERLAY_V1, PERMISSIONS, ROUTINES_V2, SETTINGS, UI, WORK_BOARD } from "./shared/ipc-channels.js";
 import type { MarketplaceAnnouncementPayload } from "./shared/marketplace-announcements.js";
 import { PLUGIN_PRIVATE_NAMESPACES } from "./plugins/capabilities.js";
 import type {
@@ -1343,6 +1343,99 @@ const api = {
     ipcRenderer.invoke(ROUTINES_V2.listSessions, routineId, limit) as Promise<
       Array<{ routineId: string; firedAt: string; sessionId: string; title: string; preview: string }>
     >,
+
+  // ─── Work Board ──────────────────────────────────
+  // Personal board CRUD + lifecycle. Each method maps 1:1 to a WORK_BOARD.*
+  // channel; the main-process store returns discriminated `status` envelopes
+  // (or `{ ok:false, error }` for unauthorized-frame / no-store), forwarded
+  // verbatim — no fallback / re-shaping. Shared payload + result types come
+  // from the renderer-safe `shared/work-board-types.js` (no Node built-ins).
+  listWorkBoard: async (filter?: import("./shared/work-board-types.js").WorkItemListFilter) =>
+    ipcRenderer.invoke(WORK_BOARD.list, filter) as Promise<
+      | import("./shared/work-board-types.js").WorkItemListResult
+      | { ok: false; error: string }
+    >,
+  getWorkBoardItem: async (id: number) =>
+    ipcRenderer.invoke(WORK_BOARD.get, id) as Promise<
+      | import("./shared/work-board-types.js").WorkItemGetResult
+      | { ok: false; error: string }
+    >,
+  addWorkBoardItem: async (input: import("./shared/work-board-types.js").WorkItemCreateInput) =>
+    ipcRenderer.invoke(WORK_BOARD.add, input) as Promise<
+      | import("./shared/work-board-types.js").WorkItemCreateResult
+      | { ok: false; error: string }
+    >,
+  updateWorkBoardItem: async (id: number, patch: import("./shared/work-board-types.js").WorkItemUpdateInput) =>
+    ipcRenderer.invoke(WORK_BOARD.update, id, patch) as Promise<
+      | import("./shared/work-board-types.js").WorkItemUpdateResult
+      | { ok: false; error: string }
+    >,
+  transitionWorkBoardItem: async (id: number, to: import("./shared/work-board-types.js").WorkItemStatusStored) =>
+    ipcRenderer.invoke(WORK_BOARD.transition, id, to) as Promise<
+      | import("./shared/work-board-types.js").WorkItemTransitionResult
+      | { ok: false; error: string }
+    >,
+  completeWorkBoardItem: async (id: number) =>
+    ipcRenderer.invoke(WORK_BOARD.complete, id) as Promise<
+      | import("./shared/work-board-types.js").WorkItemCompleteResult
+      | { ok: false; error: string }
+    >,
+  reopenWorkBoardItem: async (id: number) =>
+    ipcRenderer.invoke(WORK_BOARD.reopen, id) as Promise<
+      | import("./shared/work-board-types.js").WorkItemReopenResult
+      | { ok: false; error: string }
+    >,
+  removeWorkBoardItem: async (id: number) =>
+    ipcRenderer.invoke(WORK_BOARD.remove, id) as Promise<
+      | import("./shared/work-board-types.js").WorkItemDeleteResult
+      | { ok: false; error: string }
+    >,
+  // run/generateReport drive a headless LLM session; they ack synchronously and
+  // surface progress via the runningStarted/runningFinished/failed events below
+  // (mirroring triggerRoutineNowV2).
+  runWorkBoardItem: async (id: number) =>
+    ipcRenderer.invoke(WORK_BOARD.run, id) as Promise<{ ok: boolean; error?: string }>,
+  generateWorkBoardReport: async (input: import("./shared/work-board-types.js").ReportGenerateInput) =>
+    ipcRenderer.invoke(WORK_BOARD.generateReport, input) as Promise<
+      | import("./shared/work-board-types.js").ReportGenerateResult
+      | { ok: false; error: string }
+    >,
+  // Board view live refresh: emitted when any item is created/updated/
+  // transitioned/completed/reopened/removed so the renderer never polls.
+  onWorkBoardItemChanged: (
+    handler: (payload: import("./shared/work-board-types.js").WorkItemChangedEventPayload) => void,
+  ) => {
+    const listener = (_e: unknown, payload: Parameters<typeof handler>[0]) => handler(payload);
+    ipcRenderer.on(WORK_BOARD.itemChanged, listener);
+    return () => ipcRenderer.removeListener(WORK_BOARD.itemChanged, listener);
+  },
+  // Running indicator: emitted when a run/report LLM session starts/finishes so
+  // the renderer can reflect in-flight progress per board item.
+  onWorkBoardRunningStarted: (handler: (payload: { itemId: number; title: string }) => void) => {
+    const listener = (_e: unknown, payload: Parameters<typeof handler>[0]) => handler(payload);
+    ipcRenderer.on(WORK_BOARD.runningStarted, listener);
+    return () => ipcRenderer.removeListener(WORK_BOARD.runningStarted, listener);
+  },
+  onWorkBoardRunningFinished: (handler: (itemId: number) => void) => {
+    const listener = (_e: unknown, itemId: number) => handler(itemId);
+    ipcRenderer.on(WORK_BOARD.runningFinished, listener);
+    return () => ipcRenderer.removeListener(WORK_BOARD.runningFinished, listener);
+  },
+  // failed: clears the stuck running indicator when the run/report session throws.
+  onWorkBoardFailed: (handler: (event: { itemId: number; error: string }) => void) => {
+    const listener = (_e: unknown, payload: { itemId: number; error: string }) => handler(payload);
+    ipcRenderer.on(WORK_BOARD.failed, listener);
+    return () => ipcRenderer.removeListener(WORK_BOARD.failed, listener);
+  },
+  // dueSoon: emitted when an item's due_at enters the pre-due window so the
+  // renderer can nudge the user before the deadline.
+  onWorkBoardDueSoon: (
+    handler: (payload: import("./shared/work-board-types.js").WorkItemDueSoonEventPayload) => void,
+  ) => {
+    const listener = (_e: unknown, payload: Parameters<typeof handler>[0]) => handler(payload);
+    ipcRenderer.on(WORK_BOARD.dueSoon, listener);
+    return () => ipcRenderer.removeListener(WORK_BOARD.dueSoon, listener);
+  },
 
   // Overlay IPC bridges (main → renderer push)
   onOverlayShow: (handler: (item: unknown) => void) => {

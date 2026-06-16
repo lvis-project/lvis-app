@@ -14,6 +14,7 @@ function defaultProps(overrides: Partial<Parameters<typeof MainToolbar>[0]> = {}
     onToggleCurrentSessionStar: vi.fn(),
     onExport: vi.fn(),
     onOpenHome: vi.fn(),
+    onOpenWorkBoardView: vi.fn(),
     onOpenRoutinesView: vi.fn(),
     onOpenMemoryView: vi.fn(),
     onOpenSettings: vi.fn(),
