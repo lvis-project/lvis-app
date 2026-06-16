@@ -28,6 +28,7 @@ export function useAppUpdate(api: LvisApi): {
   inFlight: boolean;
   download: () => Promise<void>;
   install: () => Promise<void>;
+  skip: () => Promise<void>;
 } {
   const [state, setState] = useState<AppUpdateBadgeState>({ kind: "idle" });
   const [inFlight, setInFlight] = useState(false);
@@ -118,5 +119,20 @@ export function useAppUpdate(api: LvisApi): {
     }
   }, [api, releaseInFlight, scheduleInstallSafetyRelease]);
 
-  return { state, inFlight, download, install };
+  const skip = useCallback(async () => {
+    if (inFlightRef.current) return;
+    if (state.kind !== "available" && state.kind !== "downloaded") return;
+    inFlightRef.current = true;
+    setInFlight(true);
+    try {
+      const result = await api.skipAppUpdate();
+      if (!result.ok) {
+        releaseInFlight();
+      }
+    } catch {
+      releaseInFlight();
+    }
+  }, [api, releaseInFlight, state.kind]);
+
+  return { state, inFlight, download, install, skip };
 }

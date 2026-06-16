@@ -501,17 +501,13 @@ export function registerPluginsHandlers(deps: IpcDeps): void {
       message: t("mainDialog.installLocalPluginMessage"),
     });
     if (canceled || !filePaths[0]) return null;
-    const result = await pluginMarketplace.installLocal(filePaths[0]);
     // Atomic install — same rollback-on-addPlugin-fail contract as the
     // marketplace install path above. local-dev installs are dev-mode
     // only but a failed import (e.g. forgot to `bun run build` before
     // selecting the dir) still left a dangling registry entry pre-fix.
-    //
-    // Lock scope is post-extract because the pluginId is only known
-    // after `installLocal` reads the on-disk plugin.json; the IPC entry
-    // itself doesn't carry an id. Race window is narrow (single dev
-    // double-clicking the dialog button) but the lock costs nothing.
-    return await withPluginInstallLock(result.pluginId, async () => {
+    const pluginId = await pluginMarketplace.resolveLocalInstallPluginId(filePaths[0]);
+    return await withPluginInstallLock(pluginId, async () => {
+      const result = await pluginMarketplace.installLocal(filePaths[0]);
       try {
         await startInstalledPluginWithLifecycle({
           pluginId: result.pluginId,

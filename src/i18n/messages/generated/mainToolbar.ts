@@ -24,6 +24,8 @@ export const en = {
   "mainToolbar.downloadedTitle": "v{version} download complete — click to restart and apply",
   "mainToolbar.updateInstallAriaLabel": "Apply update (v{version})",
   "mainToolbar.applyUpdate": "v{version} Apply",
+  "mainToolbar.skipUpdateTitle": "Skip v{version} until the next version",
+  "mainToolbar.skipUpdateAriaLabel": "Skip update v{version} until the next version",
 } as const;
 export const ko: Record<keyof typeof en, string> = {
   "mainToolbar.home": "홈",
@@ -50,4 +52,6 @@ export const ko: Record<keyof typeof en, string> = {
   "mainToolbar.downloadedTitle": "v{version} 다운로드 완료 — 클릭해서 재시작 적용",
   "mainToolbar.updateInstallAriaLabel": "업데이트 적용 (v{version})",
   "mainToolbar.applyUpdate": "v{version} 적용",
+  "mainToolbar.skipUpdateTitle": "v{version}은 다음 버전까지 건너뛰기",
+  "mainToolbar.skipUpdateAriaLabel": "업데이트 v{version} 다음 버전까지 건너뛰기",
 };

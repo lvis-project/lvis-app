@@ -83,6 +83,18 @@ describe("PluginMarketplaceService.installLocal", () => {
     return new PluginMarketplaceService(paths, fetcher);
   }
 
+  it("resolves a local plugin id without mutating install storage", async () => {
+    const service = makeService();
+
+    await expect(service.resolveLocalInstallPluginId(sourceDir)).resolves.toBe("test-plugin");
+
+    expect(existsSync(join(pluginsDir, "test-plugin"))).toBe(false);
+    const registry = JSON.parse(await readFile(registryPath, "utf-8")) as {
+      plugins?: unknown[];
+    };
+    expect(registry.plugins).toEqual([]);
+  });
+
   it("skips node_modules/electron, .git, and nested node_modules/electron during cp", async () => {
     // Mimic the failure repro: source plugin repo with node_modules/electron
     // containing an .asar archive. Without the filter, Electron's patched

@@ -1,4 +1,19 @@
+import { isAppUpdateInstallRequested } from "../main/app-update-install-intent.js";
+
 const inflightInstallLocks = new Map<string, Promise<unknown>>();
+let pendingPluginInstallOperations = 0;
+
+const APP_UPDATE_INSTALL_IN_PROGRESS = "app-update-install-in-progress";
+const APP_UPDATE_INSTALL_IN_PROGRESS_MESSAGE =
+  "Plugin changes are paused while an app update is installing. Try again after LVIS restarts.";
+
+class AppUpdateInstallInProgressError extends Error {
+  readonly code = APP_UPDATE_INSTALL_IN_PROGRESS;
+
+  constructor() {
+    super(APP_UPDATE_INSTALL_IN_PROGRESS_MESSAGE);
+  }
+}
 
 type InstalledPluginStartState = "started" | "preparing";
 
@@ -62,6 +77,8 @@ export async function withPluginInstallLock<T>(
   pluginId: string,
   fn: () => Promise<T>,
 ): Promise<T> {
+  assertAppUpdateInstallNotRequested();
+  pendingPluginInstallOperations += 1;
   const prev = inflightInstallLocks.get(pluginId) ?? Promise.resolve();
   let release: () => void = () => {};
   const next = new Promise<void>((resolveNext) => {
@@ -71,13 +88,24 @@ export async function withPluginInstallLock<T>(
   inflightInstallLocks.set(pluginId, tail);
   try {
     await prev;
+    assertAppUpdateInstallNotRequested();
     return await fn();
   } finally {
     release();
+    pendingPluginInstallOperations = Math.max(0, pendingPluginInstallOperations - 1);
     if (inflightInstallLocks.get(pluginId) === tail) {
       inflightInstallLocks.delete(pluginId);
     }
   }
+}
+
+export function hasPluginInstallInFlight(): boolean {
+  return pendingPluginInstallOperations > 0;
+}
+
+function assertAppUpdateInstallNotRequested(): void {
+  if (!isAppUpdateInstallRequested()) return;
+  throw new AppUpdateInstallInProgressError();
 }
 
 export async function installMarketplacePluginWithLifecycle(options: {
@@ -104,6 +132,7 @@ export async function installMarketplacePluginWithLifecycle(options: {
     refreshPluginNotifications,
     log,
   } = options;
+  assertAppUpdateInstallNotRequested();
   const catalogState = await resolveMarketplaceLifecycleState(pluginMarketplace, requestedPluginId);
   const resolvedLifecyclePluginId = lifecyclePluginId ?? catalogState.pluginId;
   const progressSlug = eventSlug ?? resolvedLifecyclePluginId;
