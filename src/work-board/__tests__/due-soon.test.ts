@@ -18,8 +18,8 @@ import type { WorkBoardStorage } from "../storage.js";
 import type {
   WorkItem,
   WorkItemResolved,
-  WorkItemListResult,
 } from "../../shared/work-board-types.js";
+import { okListReader } from "./board-test-fixtures.js";
 
 const NOW = Date.parse("2026-06-16T00:00:00.000Z");
 
@@ -34,11 +34,6 @@ function item(partial: Partial<WorkItem> & { id: number }): WorkItemResolved {
     ...partial,
   };
   return { ...base, status_resolved: base.status };
-}
-
-/** In-memory board reader returning a fixed `ok` list. */
-function reader(items: WorkItemResolved[]): DueSoonBoardReader {
-  return { list: async (): Promise<WorkItemListResult> => ({ status: "ok", items }) };
 }
 
 /** In-memory storage capturing the dedupe map across scans. */
@@ -62,7 +57,7 @@ function recorder() {
 describe("scanAndEmitDueSoon", () => {
   it("emits for an item due inside the next 24h", async () => {
     const dueIn1h = new Date(NOW + 60 * 60_000).toISOString();
-    const store = reader([item({ id: 1, due_at: dueIn1h })]);
+    const store = okListReader([item({ id: 1, due_at: dueIn1h })]);
     const { emit, calls } = recorder();
 
     const emitted = await scanAndEmitDueSoon(store, memStorage(), emit, NOW);
@@ -76,7 +71,7 @@ describe("scanAndEmitDueSoon", () => {
   });
 
   it("does NOT emit for items outside the window or completed/undated", async () => {
-    const store = reader([
+    const store = okListReader([
       item({ id: 1 }), // no due_at
       item({ id: 2, due_at: new Date(NOW - 60_000).toISOString() }), // past due (overdue, not soon)
       item({ id: 3, due_at: new Date(NOW + DUE_SOON_WINDOW_MS).toISOString() }), // exactly +24h (half-open → excluded)
@@ -92,7 +87,7 @@ describe("scanAndEmitDueSoon", () => {
 
   it("dedupes: a second scan for the same deadline does not re-emit", async () => {
     const dueIn1h = new Date(NOW + 60 * 60_000).toISOString();
-    const store = reader([item({ id: 1, due_at: dueIn1h })]);
+    const store = okListReader([item({ id: 1, due_at: dueIn1h })]);
     const storage = memStorage();
     const { emit, calls } = recorder();
 
@@ -112,8 +107,8 @@ describe("scanAndEmitDueSoon", () => {
     const storage = memStorage();
     const { emit, calls } = recorder();
 
-    await scanAndEmitDueSoon(reader([item({ id: 1, due_at: due1 })]), storage, emit, NOW);
-    await scanAndEmitDueSoon(reader([item({ id: 1, due_at: due2 })]), storage, emit, NOW);
+    await scanAndEmitDueSoon(okListReader([item({ id: 1, due_at: due1 })]), storage, emit, NOW);
+    await scanAndEmitDueSoon(okListReader([item({ id: 1, due_at: due2 })]), storage, emit, NOW);
 
     expect(calls).toHaveLength(2);
     // The stale key is pruned; only the current deadline survives.
@@ -127,10 +122,10 @@ describe("scanAndEmitDueSoon", () => {
     const { emit } = recorder();
 
     // First scan fires + records the key.
-    await scanAndEmitDueSoon(reader([item({ id: 1, due_at: dueIn1h })]), storage, emit, NOW);
+    await scanAndEmitDueSoon(okListReader([item({ id: 1, due_at: dueIn1h })]), storage, emit, NOW);
     // Item later completed → no longer due-soon → key pruned.
     await scanAndEmitDueSoon(
-      reader([item({ id: 1, due_at: dueIn1h, status: "completed" })]),
+      okListReader([item({ id: 1, due_at: dueIn1h, status: "completed" })]),
       storage,
       emit,
       NOW + 5 * 60_000,

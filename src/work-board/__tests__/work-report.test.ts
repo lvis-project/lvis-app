@@ -8,13 +8,13 @@
  * fakes; `now()` is injected so KST windows are deterministic.
  */
 import { describe, it, expect } from "vitest";
-import { createWorkBoardReporter, type ReportBoardReader } from "../work-report.js";
+import { createWorkBoardReporter } from "../work-report.js";
 import { MEMORY_FILE } from "../work-memory.js";
+import { okListReader } from "./board-test-fixtures.js";
 import type { WorkBoardStorage } from "../storage.js";
 import type {
   WorkItem,
   WorkItemResolved,
-  WorkItemListResult,
 } from "../../shared/work-board-types.js";
 
 // 2026-06-16T03:00:00Z == 12:00 KST, Tue → KST day "2026-06-16".
@@ -33,10 +33,6 @@ function item(
     ...rest,
   };
   return { ...base, status_resolved: status_resolved ?? base.status };
-}
-
-function reader(items: WorkItemResolved[]): ReportBoardReader {
-  return { list: async (): Promise<WorkItemListResult> => ({ status: "ok", items }) };
 }
 
 /** Full in-memory WorkBoardStorage. */
@@ -71,7 +67,7 @@ function llmRecorder(reply = "# 리포트\n내용") {
 describe("work-report — daily", () => {
   it("empty board → empty envelope, no LLM call", async () => {
     const { callLlm, calls } = llmRecorder();
-    const reporter = createWorkBoardReporter({ store: reader([]), storage: memStorage(), callLlm, now: () => NOW });
+    const reporter = createWorkBoardReporter({ store: okListReader([]), storage: memStorage(), callLlm, now: () => NOW });
     const r = await reporter.generateDaily();
     expect(r.status).toBe("empty");
     expect(calls).toHaveLength(0);
@@ -79,7 +75,7 @@ describe("work-report — daily", () => {
 
   it("invalid date → empty envelope, no LLM call", async () => {
     const { callLlm, calls } = llmRecorder();
-    const reporter = createWorkBoardReporter({ store: reader([item({ id: 1 })]), storage: memStorage(), callLlm, now: () => NOW });
+    const reporter = createWorkBoardReporter({ store: okListReader([item({ id: 1 })]), storage: memStorage(), callLlm, now: () => NOW });
     const r = await reporter.generateDaily({ date: "2026-6-16" });
     expect(r).toMatchObject({ status: "empty", period: "2026-6-16" });
     expect(calls).toHaveLength(0);
@@ -88,7 +84,7 @@ describe("work-report — daily", () => {
   it("populated board → ok, writes markdown, appends memory, one LLM call", async () => {
     const { callLlm, calls } = llmRecorder();
     const storage = memStorage();
-    const reporter = createWorkBoardReporter({ store: reader([item({ id: 1 })]), storage, callLlm, now: () => NOW });
+    const reporter = createWorkBoardReporter({ store: okListReader([item({ id: 1 })]), storage, callLlm, now: () => NOW });
 
     const r = await reporter.generateDaily();
     expect(r).toMatchObject({ status: "ok", kind: "daily", period: "2026-06-16", markdown: "# 리포트\n내용" });
@@ -102,7 +98,7 @@ describe("work-report — daily", () => {
     const failing = async () => {
       throw new Error("provider down");
     };
-    const reporter = createWorkBoardReporter({ store: reader([item({ id: 1 })]), storage: memStorage(), callLlm: failing, now: () => NOW });
+    const reporter = createWorkBoardReporter({ store: okListReader([item({ id: 1 })]), storage: memStorage(), callLlm: failing, now: () => NOW });
     await expect(reporter.generateDaily()).rejects.toThrow("provider down");
   });
 });
@@ -112,7 +108,7 @@ describe("work-report — weekly", () => {
     const { callLlm, calls } = llmRecorder();
     // Item created long ago + no completion this week → nothing in the window.
     const old = item({ id: 1, created_at: "2026-01-01T00:00:00.000Z", updated_at: "2026-01-01T00:00:00.000Z" });
-    const reporter = createWorkBoardReporter({ store: reader([old]), storage: memStorage(), callLlm, now: () => NOW });
+    const reporter = createWorkBoardReporter({ store: okListReader([old]), storage: memStorage(), callLlm, now: () => NOW });
     const r = await reporter.generateWeekly();
     expect(r.status).toBe("empty");
     expect(calls).toHaveLength(0);
@@ -121,7 +117,7 @@ describe("work-report — weekly", () => {
   it("rejects a traversal-bearing weekIso BEFORE any file write (security)", async () => {
     const { callLlm, calls } = llmRecorder();
     const storage = memStorage();
-    const reporter = createWorkBoardReporter({ store: reader([item({ id: 1 })]), storage, callLlm, now: () => NOW });
+    const reporter = createWorkBoardReporter({ store: okListReader([item({ id: 1 })]), storage, callLlm, now: () => NOW });
 
     const r = await reporter.generateWeekly({ weekIso: "../../etc/evil" });
     expect(r.status).toBe("empty"); // refused — not generated
@@ -133,7 +129,7 @@ describe("work-report — weekly", () => {
   it("activity this week → ok, writes weekly markdown", async () => {
     const { callLlm, calls } = llmRecorder();
     const storage = memStorage();
-    const reporter = createWorkBoardReporter({ store: reader([item({ id: 1 })]), storage, callLlm, now: () => NOW });
+    const reporter = createWorkBoardReporter({ store: okListReader([item({ id: 1 })]), storage, callLlm, now: () => NOW });
     const r = await reporter.generateWeekly();
     expect(r.status).toBe("ok");
     expect(calls).toHaveLength(1);
@@ -146,14 +142,14 @@ describe("work-report — weekly", () => {
 describe("work-report — dispatch", () => {
   it("generate('weekly') routes to the weekly handler", async () => {
     const { callLlm } = llmRecorder();
-    const reporter = createWorkBoardReporter({ store: reader([item({ id: 1 })]), storage: memStorage(), callLlm, now: () => NOW });
+    const reporter = createWorkBoardReporter({ store: okListReader([item({ id: 1 })]), storage: memStorage(), callLlm, now: () => NOW });
     const r = await reporter.generate("weekly");
     expect(r.kind).toBe("weekly");
   });
 
   it("generate('daily') routes to the daily handler", async () => {
     const { callLlm } = llmRecorder();
-    const reporter = createWorkBoardReporter({ store: reader([item({ id: 1 })]), storage: memStorage(), callLlm, now: () => NOW });
+    const reporter = createWorkBoardReporter({ store: okListReader([item({ id: 1 })]), storage: memStorage(), callLlm, now: () => NOW });
     const r = await reporter.generate("daily");
     expect(r.kind).toBe("daily");
   });
