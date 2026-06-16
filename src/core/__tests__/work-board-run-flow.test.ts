@@ -54,12 +54,21 @@ interface SpawnCall {
 }
 
 /**
- * Fake runner. Records each spawn; returns a phase-specific canned summary.
- * `onExecute` lets a test make the EXECUTE phase throw to exercise the error
- * branch without coupling to a real ConversationLoop.
+ * Fake runner. Records each spawn; returns a phase-specific canned summary
+ * matching the real {@link SubAgentRunner} result shape (incl. the `ok`
+ * success signal).
+ *   - `onExecute` lets a test make the EXECUTE phase THROW (exercises the
+ *     engine's catch path) without coupling to a real ConversationLoop.
+ *   - `execFails` makes the EXECUTE phase RETURN `{ ok: false }` (the way the
+ *     real runner signals a provider-missing / aborted / inner-throw run) so
+ *     a failed run is not recorded as success.
+ *   - `holdPlan` is a gate promise the PLAN phase awaits before resolving,
+ *     letting a test keep a run in-flight to assert the single-flight guard.
  */
 function fakeRunner(opts?: {
   onExecute?: () => void;
+  execFails?: boolean;
+  holdPlan?: Promise<void>;
 }): { runner: SubAgentRunner; calls: SpawnCall[] } {
   const calls: SpawnCall[] = [];
   const runner = {
@@ -79,12 +88,24 @@ function fakeRunner(opts?: {
         originSessionId: input.originSessionId,
       });
       const isPlan = input.profileMode === "plan";
+      if (isPlan && opts?.holdPlan) await opts.holdPlan;
       if (!isPlan) opts?.onExecute?.();
+      if (!isPlan && opts?.execFails) {
+        return {
+          summary: "sub-agent: LLM provider not configured",
+          toolCallCount: 0,
+          turnCount: 0,
+          childSessionId: `${input.originSessionId}::exec`,
+          ok: false,
+          error: "sub-agent: LLM provider not configured",
+        };
+      }
       return {
         summary: isPlan ? "PLAN: step 1; step 2" : "OUTPUT: completed step 1; step 2",
         toolCallCount: 0,
         turnCount: 1,
         childSessionId: `${input.originSessionId}::${isPlan ? "plan" : "exec"}`,
+        ok: true,
       };
     },
   } as unknown as SubAgentRunner;
@@ -401,6 +422,220 @@ describe("WorkBoardEngine — run-flow contracts", () => {
       if (got.status !== "found") throw new Error("missing item");
       expect(got.item.runStatus).toBe("error");
       expect(got.item.output).toBeUndefined();
+    } finally {
+      cleanup();
+    }
+  });
+
+  it("lands runStatus=error when the EXECUTE sub-agent signals failure (ok:false, not a thrown error)", async () => {
+    const { store, cleanup } = tempBoard();
+    try {
+      const created = await store.create({ title: "execute fails" });
+      if (created.status !== "created") throw new Error("setup failed");
+      const id = created.itemId;
+
+      // The real SubAgentRunner does NOT throw on a provider-missing / aborted
+      // run — it returns { ok: false } with the error text as `summary`. The
+      // engine must branch on that signal and land `error`, never recording the
+      // error text as a green `completed` output.
+      const { runner, calls } = fakeRunner({ execFails: true });
+      const { gate } = fakeGate("allow-once");
+      const events: WorkBoardRunEvent[] = [];
+      const engine = createWorkBoardEngine({
+        store,
+        getRunner: () => runner,
+        approvalGate: gate,
+        emitProgress: (e) => events.push(e),
+      });
+
+      const result = await engine.runItem(id);
+
+      expect(result.status).toBe("error");
+      expect(result.reason).toContain("provider not configured");
+      // Plan + execute both ran (execute returned ok:false rather than throwing).
+      expect(calls).toHaveLength(2);
+      expect(calls[1].profileMode).toBe("execute");
+
+      // No terminal `done`; an `error` event is emitted instead.
+      const phases = events.map((e) => e.phase);
+      expect(phases).not.toContain("done");
+      expect(phases).toContain("error");
+
+      // Persisted run status is `error`; the error text is NOT recorded as output.
+      const got = await store.get(id);
+      if (got.status !== "found") throw new Error("missing item");
+      expect(got.item.runStatus).toBe("error");
+      expect(got.item.output).toBeUndefined();
+    } finally {
+      cleanup();
+    }
+  });
+
+  it("rejects a concurrent run of the same item (busy) and does NOT spawn a second agent", async () => {
+    const { store, cleanup } = tempBoard();
+    try {
+      const created = await store.create({ title: "single flight" });
+      if (created.status !== "created") throw new Error("setup failed");
+      const id = created.itemId;
+
+      // Gate the PLAN phase so the first run stays in flight while we fire a
+      // second concurrent run at the same id.
+      let releasePlan!: () => void;
+      const holdPlan = new Promise<void>((resolve) => {
+        releasePlan = resolve;
+      });
+      const { runner, calls } = fakeRunner({ holdPlan });
+      const { gate } = fakeGate("allow-once");
+      const engine = createWorkBoardEngine({
+        store,
+        getRunner: () => runner,
+        approvalGate: gate,
+        emitProgress: () => {},
+      });
+
+      // First run: starts, enters PLAN, blocks on holdPlan (still in flight).
+      const firstRun = engine.runItem(id);
+      // Deterministically wait until the first run has entered the PLAN spawn
+      // (the runner recorded its call) before racing a second run at it — this
+      // proves the first run is genuinely in flight, not merely scheduled.
+      while (calls.length === 0) {
+        await new Promise((r) => setTimeout(r, 0));
+      }
+
+      // Second concurrent run for the SAME id → busy, no spawn.
+      const busy = await engine.runItem(id);
+      expect(busy.status).toBe("already_running");
+      // Only the first run's PLAN spawn exists; the busy run spawned nothing.
+      expect(calls).toHaveLength(1);
+
+      // Let the first run finish cleanly.
+      releasePlan();
+      const first = await firstRun;
+      expect(first.status).toBe("completed");
+      // Exactly the first run's plan + execute spawns — never a second agent.
+      expect(calls).toHaveLength(2);
+    } finally {
+      cleanup();
+    }
+  });
+
+  it("rejects a run when the persisted runStatus is already active (executing)", async () => {
+    const { store, cleanup } = tempBoard();
+    try {
+      const created = await store.create({ title: "persisted active" });
+      if (created.status !== "created") throw new Error("setup failed");
+      const id = created.itemId;
+      // Simulate a run left mid-flight (e.g. another process / a crash-recovered
+      // record) by persisting an active run phase directly.
+      await store.setRunStatus(id, "executing");
+
+      const { runner, calls } = fakeRunner();
+      const { gate, requests } = fakeGate("allow-once");
+      const engine = createWorkBoardEngine({
+        store,
+        getRunner: () => runner,
+        approvalGate: gate,
+        emitProgress: () => {},
+      });
+
+      const result = await engine.runItem(id);
+      expect(result.status).toBe("already_running");
+      // No spawn, no approval — the busy guard short-circuits before either.
+      expect(calls).toHaveLength(0);
+      expect(requests).toHaveLength(0);
+    } finally {
+      cleanup();
+    }
+  });
+
+  it("clears stale run fields at run START: completed → re-run → deny leaves no residual output/runSessionId", async () => {
+    const { store, cleanup } = tempBoard();
+    try {
+      const created = await store.create({ title: "stale fields" });
+      if (created.status !== "created") throw new Error("setup failed");
+      const id = created.itemId;
+
+      // First run: completes, persisting plan + output + runSessionId.
+      {
+        const { runner } = fakeRunner();
+        const { gate } = fakeGate("allow-once");
+        const engine = createWorkBoardEngine({
+          store,
+          getRunner: () => runner,
+          approvalGate: gate,
+          emitProgress: () => {},
+        });
+        const result = await engine.runItem(id);
+        expect(result.status).toBe("completed");
+      }
+      const afterComplete = await store.get(id);
+      if (afterComplete.status !== "found") throw new Error("missing item");
+      expect(afterComplete.item.runStatus).toBe("completed");
+      expect(afterComplete.item.output).toBe("OUTPUT: completed step 1; step 2");
+      const completedSession = afterComplete.item.runSessionId;
+      expect(completedSession).toBeDefined();
+
+      // Second run on the SAME item: the user DENIES the plan this time.
+      {
+        const { runner } = fakeRunner();
+        const { gate } = fakeGate("deny-once");
+        const engine = createWorkBoardEngine({
+          store,
+          getRunner: () => runner,
+          approvalGate: gate,
+          emitProgress: () => {},
+        });
+        const result = await engine.runItem(id);
+        expect(result.status).toBe("denied");
+      }
+
+      // No residual from the prior COMPLETED run: the success output is gone and
+      // the runSessionId is no longer the completed run's execute session.
+      const afterDeny = await store.get(id);
+      if (afterDeny.status !== "found") throw new Error("missing item");
+      expect(afterDeny.item.runStatus).toBe("denied");
+      expect(afterDeny.item.output).toBeUndefined();
+      expect(afterDeny.item.runSessionId).not.toBe(completedSession);
+    } finally {
+      cleanup();
+    }
+  });
+
+  it("requires a fresh plan approval every run — an 'allow always' choice cannot remember a bypass", async () => {
+    const { store, cleanup } = tempBoard();
+    try {
+      const created = await store.create({ title: "no remembered bypass" });
+      if (created.status !== "created") throw new Error("setup failed");
+      const id = created.itemId;
+
+      // The user clicks "allow always" on the very first run's plan.
+      const { runner } = fakeRunner();
+      const { gate, requests } = fakeGate("allow-always");
+      const engine = createWorkBoardEngine({
+        store,
+        getRunner: () => runner,
+        approvalGate: gate,
+        emitProgress: () => {},
+      });
+
+      const first = await engine.runItem(id);
+      expect(first.status).toBe("completed");
+      // A second run of the same finished item must STILL hit the gate — the
+      // durable choice did not persist a bypass.
+      const second = await engine.runItem(id);
+      expect(second.status).toBe("completed");
+
+      // The gate was consulted on BOTH runs (no short-circuit / remembered allow).
+      expect(requests).toHaveLength(2);
+      // Each request carried a UNIQUE per-run id (fresh §8 decision; no cache
+      // key can match across runs).
+      const ids = requests.map((r) => (r as { id: string }).id);
+      expect(ids[0]).not.toBe(ids[1]);
+      // The gate identity is the agent-action plan gate, not an executable tool.
+      for (const r of requests) {
+        expect((r as { toolName: string }).toolName).toBe("work_board_run");
+        expect((r as { kind: string }).kind).toBe("agent-action");
+      }
     } finally {
       cleanup();
     }
