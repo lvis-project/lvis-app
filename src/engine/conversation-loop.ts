@@ -1757,6 +1757,9 @@ export class ConversationLoop {
     const turnInput = isUserKeyboardOrigin(inputOrigin) ? input : stripLeadingSlash(input);
     const toolTrustOrigin = initialToolTrustOrigin(inputOrigin, turnInput);
     const permissionUserIntent = summarizePermissionUserIntent(inputOrigin, turnInput);
+    const permissionExplicitAuthorizationIntent = isUserKeyboardOrigin(inputOrigin)
+      ? permissionUserIntent
+      : undefined;
     // Deterministic completed-plan clear: execute any clear the post-turn hook
     // marked for this session. Unconditional (no input-origin gate) so
     // routine/headless turns clear too; unfinished plans were never marked.
@@ -1994,6 +1997,7 @@ export class ConversationLoop {
           inputOrigin,
           toolTrustOrigin,
           permissionUserIntent,
+          permissionExplicitAuthorizationIntent,
           rolePrompt: options?.rolePrompt,
         },
       );
@@ -2347,6 +2351,7 @@ export class ConversationLoop {
       inputOrigin: ChatInputOrigin;
       toolTrustOrigin: ToolTrustOrigin;
       permissionUserIntent?: string;
+      permissionExplicitAuthorizationIntent?: string;
       rolePrompt?: ActiveRolePrompt;
     },
   ): Promise<{
@@ -3066,6 +3071,9 @@ export class ConversationLoop {
             getAdditionalDirectories: () => this.getTurnAdditionalDirectories(),
             trustOrigin: toolTrustOrigin,
             ...(bounds.permissionUserIntent ? { userIntent: bounds.permissionUserIntent } : {}),
+            ...(bounds.permissionExplicitAuthorizationIntent
+              ? { explicitAuthorizationIntent: bounds.permissionExplicitAuthorizationIntent }
+              : {}),
             onTurnDirectoryGrant: (path) => this.addTurnAdditionalDirectory(path),
             onSessionDirectoryGrant: (path) => this.addSessionAdditionalDirectory(path),
           },

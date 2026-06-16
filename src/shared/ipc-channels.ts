@@ -90,6 +90,8 @@ export const PERMISSIONS = {
   userApprovalList: "lvis:permissions:user-approval-list",
   // 4.1: memory-hit auto-approve disclosure (main → renderer)
   userApprovalHit: "lvis:permissions:user-approval-hit",
+  // Default-mode approval pattern hint (main → renderer)
+  reviewSuggestion: "lvis:permissions:review-suggestion",
   // Broadcast: directory config changed (main → all renderers). Emitted
   // when allowed-directories list mutates (session-add, slash-allow,
   // PermissionsTab dirDispatch). Multi-window PermissionsTab subscribes

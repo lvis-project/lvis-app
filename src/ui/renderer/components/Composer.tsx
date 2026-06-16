@@ -122,6 +122,7 @@ export const Composer = forwardRef<ComposerHandle, ComposerProps>(function Compo
   // because `e.nativeEvent.isComposing` is only available inside keydown — the
   // ghost render path needs the value at render time, not just on key events.
   const [isComposing, setIsComposing] = useState(false);
+  const isComposingRef = useRef(false);
   // PR-D ↑/↓ chip cycle: index of the currently-focused alternate chip, or
   // `null` when focus is in the textarea. Composer owns this state so the
   // textarea's keydown handler can advance it (ChipRow is otherwise a leaf
@@ -245,7 +246,7 @@ export const Composer = forwardRef<ComposerHandle, ComposerProps>(function Compo
 
   const handleKeyDown = useCallback(
     (e: React.KeyboardEvent<HTMLTextAreaElement>) => {
-      if (e.nativeEvent.isComposing) return;
+      if (e.nativeEvent.isComposing || isComposingRef.current) return;
 
       // Suggested Replies (spec §6.2):
       //   Tab (no modifier) + value empty + best != null + not dismissed
@@ -486,8 +487,14 @@ export const Composer = forwardRef<ComposerHandle, ComposerProps>(function Compo
           onChange={(e) => onTextChange(e.target.value)}
           onPaste={handlePaste}
           onKeyDown={handleKeyDown}
-          onCompositionStart={() => setIsComposing(true)}
-          onCompositionEnd={() => setIsComposing(false)}
+          onCompositionStart={() => {
+            isComposingRef.current = true;
+            setIsComposing(true);
+          }}
+          onCompositionEnd={() => {
+            isComposingRef.current = false;
+            setIsComposing(false);
+          }}
           placeholder={placeholder ?? fallbackPlaceholder}
           /* v6 layout: ~2 줄 시작 (min-h-[40px] = 2 lines @ leading-5),
              자동 확장 후 ~6 줄에서 scroll. 기존 88px 는 4 줄+ 차지해 textarea 가
