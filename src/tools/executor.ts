@@ -744,14 +744,14 @@ export class ToolExecutor {
   }
 
   private reviewerAuthorizationKey(input: {
-    sessionId: string | undefined;
+    sessionId: string;
     toolName: string;
     source: ToolSource;
     finalInput: Record<string, unknown>;
     context: ToolPermissionContext;
   }): string {
     const components = [
-      input.sessionId ?? "session:unknown",
+      input.sessionId,
       input.toolName,
       input.source,
       canonicalStringify(input.finalInput),
@@ -778,10 +778,11 @@ export class ToolExecutor {
     verdict: RiskVerdict;
   }): void {
     if (input.context.headless === true) return;
+    if (!input.sessionId) return;
     const now = Date.now();
     this.prunePendingReviewerAuthorizations(now);
     this.pendingReviewerAuthorizations.set(
-      this.reviewerAuthorizationKey(input),
+      this.reviewerAuthorizationKey({ ...input, sessionId: input.sessionId }),
       {
         expiresAt: now + REVIEWER_AUTHORIZATION_TTL_MS,
         verdict: input.verdict,
@@ -797,11 +798,12 @@ export class ToolExecutor {
     context: ToolPermissionContext;
   }): PermissionCheckResult | null {
     if (input.context.headless === true) return null;
+    if (!input.sessionId) return null;
     const intent = detectApprovalIntent(input.context.explicitAuthorizationIntent ?? "");
     if (intent.kind !== "approve") return null;
     const now = Date.now();
     this.prunePendingReviewerAuthorizations(now);
-    const key = this.reviewerAuthorizationKey(input);
+    const key = this.reviewerAuthorizationKey({ ...input, sessionId: input.sessionId });
     const pending = this.pendingReviewerAuthorizations.get(key);
     if (!pending) return null;
     this.pendingReviewerAuthorizations.delete(key);
