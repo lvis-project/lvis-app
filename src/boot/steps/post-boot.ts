@@ -130,6 +130,15 @@ export function wireReleasePrep(input: ReleasePrepInput): ReleasePrepOutput {
       mainWindow,
       auditLogger: bootAuditLogger,
       isEnabled: () => settingsService.get("updates")?.autoCheckEnabled ?? true,
+      getSkippedVersion: () => settingsService.get("updates")?.skippedVersion,
+      setSkippedVersion: async (version) => {
+        await settingsService.patch({
+          updates: {
+            ...settingsService.get("updates"),
+            skippedVersion: version,
+          },
+        });
+      },
     });
     updater.start();
     autoUpdaterStop = updater.stop;
@@ -180,7 +189,12 @@ export function wireUpdateCheck(input: UpdateCheckInput): void {
   let lastBroadcastKey = "";
   const runUpdateCheck = async () => {
     try {
-      const updates = await updateDetector.checkForUpdates();
+      const skippedPluginUpdates = readSkippedPluginUpdates(
+        settingsService.get("marketplace")?.skippedPluginUpdates,
+      );
+      const updates = (await updateDetector.checkForUpdates()).filter(
+        (update) => !isSkippedPluginUpdate(update, skippedPluginUpdates),
+      );
       const key = updates
         .map((u) => `${u.pluginId}@${u.installedVersion}->${u.latestVersion}`)
         .sort()
@@ -214,6 +228,37 @@ export function wireUpdateCheck(input: UpdateCheckInput): void {
   app.prependOnceListener("before-quit", () => {
     if (updateCheckTimer) clearInterval(updateCheckTimer);
   });
+}
+
+const RESERVED_SKIPPED_PLUGIN_UPDATE_KEYS = new Set(["__proto__", "constructor", "prototype"]);
+
+function readSkippedPluginUpdates(
+  input: unknown,
+): Record<string, string> {
+  const result = Object.create(null) as Record<string, string>;
+  if (!input || typeof input !== "object" || Array.isArray(input)) return result;
+  for (const [pluginId, version] of Object.entries(input)) {
+    const key = normalizeSkippedPluginUpdateKey(pluginId);
+    const value = typeof version === "string" ? version.trim() : "";
+    if (!key || !value) continue;
+    result[key] = value;
+  }
+  return result;
+}
+
+function isSkippedPluginUpdate(
+  update: { pluginId: string; latestVersion: string },
+  skipped: Record<string, string>,
+): boolean {
+  const key = normalizeSkippedPluginUpdateKey(update.pluginId);
+  const version = update.latestVersion.trim();
+  return Boolean(key && version && skipped[key] === version);
+}
+
+function normalizeSkippedPluginUpdateKey(pluginId: string): string | null {
+  const key = pluginId.trim();
+  if (!key || RESERVED_SKIPPED_PLUGIN_UPDATE_KEYS.has(key)) return null;
+  return key;
 }
 
 export interface AnnouncementCheckInput {

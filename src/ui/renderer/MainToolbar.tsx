@@ -1,4 +1,4 @@
-import { ArrowDownToLine, Database, Download, ExternalLink, Home, KeyRound, Menu, Plus, RefreshCw, Repeat2, Search, Star, Wrench } from "lucide-react";
+import { ArrowDownToLine, Database, Download, ExternalLink, Home, KeyRound, Menu, Plus, RefreshCw, Repeat2, Search, Star, Wrench, X } from "lucide-react";
 import { Button } from "../../components/ui/button.js";
 import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuSeparator, DropdownMenuSub, DropdownMenuSubContent, DropdownMenuSubTrigger, DropdownMenuTrigger } from "../../components/ui/dropdown-menu.js";
 import { Tooltip, TooltipContent, TooltipTrigger } from "../../components/ui/tooltip.js";
@@ -58,6 +58,8 @@ export interface MainToolbarProps {
   onDownloadAppUpdate?: () => void | Promise<void>;
   /** Triggered when the badge is in "downloaded" state and clicked. */
   onInstallAppUpdate?: () => void | Promise<void>;
+  /** Hide the current available/downloaded app update until a newer version exists. */
+  onSkipAppUpdate?: () => void | Promise<void>;
 }
 
 export function MainToolbar({
@@ -80,6 +82,7 @@ export function MainToolbar({
   appUpdateInFlight = false,
   onDownloadAppUpdate,
   onInstallAppUpdate,
+  onSkipAppUpdate,
 }: MainToolbarProps) {
   const { t } = useTranslation();
   return (
@@ -113,6 +116,7 @@ export function MainToolbar({
           inFlight={appUpdateInFlight}
           onDownload={onDownloadAppUpdate}
           onInstall={onInstallAppUpdate}
+          onSkip={onSkipAppUpdate}
         />
 
         {/* ── Dev tools indicator — only visible in non-production. */}
@@ -289,6 +293,7 @@ function AppUpdateBadge({
   inFlight = false,
   onDownload,
   onInstall,
+  onSkip,
 }: {
   state: AppUpdateBadgeState;
   /** When true, an IPC action (download/install) is in flight — disables
@@ -297,30 +302,34 @@ function AppUpdateBadge({
   inFlight?: boolean;
   onDownload?: () => void | Promise<void>;
   onInstall?: () => void | Promise<void>;
+  onSkip?: () => void | Promise<void>;
 }) {
   const { t } = useTranslation();
   if (state.kind === "idle") return null;
 
   if (state.kind === "available") {
     return (
-      <Tooltip>
-        <TooltipTrigger asChild>
-          <Button
-            variant="ghost"
-            size="sm"
-            className="h-7 gap-1 px-2 text-[11px] font-medium text-info border border-info/40 bg-info/10 hover:bg-info/20 disabled:opacity-60"
-            onClick={() => void onDownload?.()}
-            disabled={inFlight}
-            title={t("mainToolbar.updateAvailableTitle", { version: state.version })}
-            aria-label={t("mainToolbar.updateDownloadAriaLabel", { version: state.version })}
-            data-testid="app-update-badge-available"
-          >
-            <ArrowDownToLine className="h-3 w-3" />
-            <span>v{state.version}</span>
-          </Button>
-        </TooltipTrigger>
-        <TooltipContent>{t("mainToolbar.updateAvailableTitle", { version: state.version })}</TooltipContent>
-      </Tooltip>
+      <div className="flex items-center gap-1">
+        <Tooltip>
+          <TooltipTrigger asChild>
+            <Button
+              variant="ghost"
+              size="sm"
+              className="h-7 gap-1 px-2 text-[11px] font-medium text-info border border-info/40 bg-info/10 hover:bg-info/20 disabled:opacity-60"
+              onClick={() => void onDownload?.()}
+              disabled={inFlight}
+              title={t("mainToolbar.updateAvailableTitle", { version: state.version })}
+              aria-label={t("mainToolbar.updateDownloadAriaLabel", { version: state.version })}
+              data-testid="app-update-badge-available"
+            >
+              <ArrowDownToLine className="h-3 w-3" />
+              <span>v{state.version}</span>
+            </Button>
+          </TooltipTrigger>
+          <TooltipContent>{t("mainToolbar.updateAvailableTitle", { version: state.version })}</TooltipContent>
+        </Tooltip>
+        <SkipUpdateButton version={state.version} disabled={inFlight} onSkip={onSkip} />
+      </div>
     );
   }
 
@@ -348,23 +357,58 @@ function AppUpdateBadge({
 
   // downloaded
   return (
+    <div className="flex items-center gap-1">
+      <Tooltip>
+        <TooltipTrigger asChild>
+          <Button
+            variant="ghost"
+            size="sm"
+            className="h-7 gap-1 px-2 text-[11px] font-medium text-success border border-success/40 bg-success/10 hover:bg-success/20 disabled:opacity-60"
+            onClick={() => void onInstall?.()}
+            disabled={inFlight}
+            title={t("mainToolbar.downloadedTitle", { version: state.version })}
+            aria-label={t("mainToolbar.updateInstallAriaLabel", { version: state.version })}
+            data-testid="app-update-badge-downloaded"
+          >
+            <Download className="h-3 w-3" />
+            <span>{t("mainToolbar.applyUpdate", { version: state.version })}</span>
+          </Button>
+        </TooltipTrigger>
+        <TooltipContent>{t("mainToolbar.downloadedTitle", { version: state.version })}</TooltipContent>
+      </Tooltip>
+      <SkipUpdateButton version={state.version} disabled={inFlight} onSkip={onSkip} />
+    </div>
+  );
+}
+
+function SkipUpdateButton({
+  version,
+  disabled,
+  onSkip,
+}: {
+  version: string;
+  disabled?: boolean;
+  onSkip?: () => void | Promise<void>;
+}) {
+  const { t } = useTranslation();
+  if (!onSkip) return null;
+  return (
     <Tooltip>
       <TooltipTrigger asChild>
         <Button
           variant="ghost"
-          size="sm"
-          className="h-7 gap-1 px-2 text-[11px] font-medium text-success border border-success/40 bg-success/10 hover:bg-success/20 disabled:opacity-60"
-          onClick={() => void onInstall?.()}
-          disabled={inFlight}
-          title={t("mainToolbar.downloadedTitle", { version: state.version })}
-          aria-label={t("mainToolbar.updateInstallAriaLabel", { version: state.version })}
-          data-testid="app-update-badge-downloaded"
+          size="icon"
+          className="h-7 w-7 text-muted-foreground hover:text-foreground disabled:opacity-60"
+          onClick={() => void onSkip()}
+          disabled={disabled}
+          title={t("mainToolbar.skipUpdateTitle", { version })}
+          aria-label={t("mainToolbar.skipUpdateAriaLabel", { version })}
+          data-testid="app-update-skip"
         >
-          <Download className="h-3 w-3" />
-          <span>{t("mainToolbar.applyUpdate", { version: state.version })}</span>
+          <X className="h-3.5 w-3.5" />
         </Button>
       </TooltipTrigger>
-      <TooltipContent>{t("mainToolbar.downloadedTitle", { version: state.version })}</TooltipContent>
+      <TooltipContent>{t("mainToolbar.skipUpdateTitle", { version })}</TooltipContent>
     </Tooltip>
   );
 }

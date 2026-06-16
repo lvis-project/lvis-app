@@ -520,6 +520,7 @@ export function makeMockLvisApi(overrides: ApiOverrides = {}): {
     getAppUpdateState: vi.fn(async () => ({ kind: "idle" })),
     downloadAppUpdate: vi.fn(async () => ({ ok: true })),
     installAppUpdate: vi.fn(async () => ({ ok: true })),
+    skipAppUpdate: vi.fn(async () => ({ ok: true })),
 
     plugins: {
       getPerfStats: vi.fn(async () => ({})),

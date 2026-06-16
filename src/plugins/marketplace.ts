@@ -1556,6 +1556,44 @@ export class PluginMarketplaceService {
    * and register it in the plugin registry. Gated on isDevModeUnlocked() so
    * packaged builds cannot invoke this path.
    */
+  async resolveLocalInstallPluginId(sourcePath: string): Promise<string> {
+    if (!isDevModeUnlocked()) {
+      throw new Error(
+        "[security] installLocal requires dev mode — enable a supported LVIS_DEV* flag in a non-packaged build",
+      );
+    }
+
+    let srcStat: Awaited<ReturnType<typeof statAsync>>;
+    try {
+      srcStat = await statAsync(sourcePath);
+    } catch {
+      throw new Error(`[installLocal] path does not exist: ${sourcePath}`);
+    }
+    if (!srcStat.isDirectory()) {
+      throw new Error(`[installLocal] path is not a directory: ${sourcePath}`);
+    }
+
+    const manifestPath = resolve(sourcePath, "plugin.json");
+    let manifest: { id?: unknown };
+    try {
+      const raw = await readFile(manifestPath, "utf-8");
+      manifest = JSON.parse(raw) as { id?: unknown };
+    } catch {
+      throw new Error(`[installLocal] could not read plugin.json in ${sourcePath}`);
+    }
+
+    const pluginId = typeof manifest.id === "string" ? manifest.id.trim() : "";
+    if (!pluginId) {
+      throw new Error("[installLocal] plugin.json must have a non-empty 'id' field");
+    }
+    if (!/^[a-zA-Z0-9._-]+$/.test(pluginId) || pluginId.includes("..") || pluginId.includes("/")) {
+      throw new Error(
+        `[installLocal] unsafe plugin id — must match ^[a-zA-Z0-9._-]+$: ${pluginId}`,
+      );
+    }
+    return pluginId;
+  }
+
   async installLocal(sourcePath: string): Promise<{ pluginId: string; installed: true }> {
     if (!isDevModeUnlocked()) {
       throw new Error(

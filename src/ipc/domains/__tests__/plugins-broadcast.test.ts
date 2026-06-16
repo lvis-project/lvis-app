@@ -71,6 +71,7 @@ async function setup() {
       rollbackPlugin: vi.fn(async (pluginId: string) => ({ pluginId, rolledBackTo: "0.0.1" })),
       rollbackLocalInstall: vi.fn(async (pluginId: string) => ({ pluginId, rolledBack: true })),
       clearLocalInstallRollback: vi.fn(async () => undefined),
+      resolveLocalInstallPluginId: vi.fn(async () => "local-plugin"),
       installLocal: vi.fn(async () => ({ pluginId: "local-plugin", installed: true })),
     },
     pluginRuntime: {
@@ -542,6 +543,7 @@ describe("plugins IPC lifecycle broadcast", () => {
         rollbackPlugin: vi.fn(async (pluginId: string) => ({ pluginId, rolledBackTo: "0.0.1" })),
         rollbackLocalInstall: vi.fn(async (pluginId: string) => ({ pluginId, rolledBack: true })),
         clearLocalInstallRollback: vi.fn(async () => undefined),
+        resolveLocalInstallPluginId: vi.fn(async () => "local-plugin"),
         installLocal: vi.fn(async () => ({ pluginId: "local-plugin", installed: true })),
       },
       pluginRuntime: {
