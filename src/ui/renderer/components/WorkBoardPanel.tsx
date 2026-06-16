@@ -38,6 +38,7 @@ import {
 import type { LvisApi } from "../types.js";
 import type {
   RunProgressEventPayload,
+  RunTranscriptEvent,
   WorkBoardReportResult,
   WorkItemCreateInput,
   WorkItemPriority,
@@ -758,6 +759,76 @@ const STATUS_LABEL: Record<WorkItemResolved["status_resolved"], string> = {
   overdue: "overdueBadge",
 };
 
+// ─── Run history (accumulated past runs + their transcripts) ────────────────
+//
+// `item.runHistory` is the board-persisted index (newest last); each entry's
+// transcript (the plan+execute conversation) is fetched on demand from
+// `sessions/<id>/<runId>.jsonl` via getWorkBoardRunTranscript. This makes the
+// accumulation visible — re-runs add rows here instead of wiping prior work.
+function RunHistorySection({ api, item }: { api: LvisApi; item: WorkItemResolved }) {
+  const history = item.runHistory ?? [];
+  const [openRun, setOpenRun] = useState<string | null>(null);
+  const [events, setEvents] = useState<RunTranscriptEvent[]>([]);
+  const [loading, setLoading] = useState(false);
+  if (history.length === 0) return null;
+
+  const toggle = async (runId: string) => {
+    if (openRun === runId) {
+      setOpenRun(null);
+      return;
+    }
+    setOpenRun(runId);
+    setEvents([]);
+    if (typeof api.getWorkBoardRunTranscript !== "function") return;
+    setLoading(true);
+    try {
+      const r = await api.getWorkBoardRunTranscript(item.id, runId);
+      if ("events" in r) setEvents(r.events);
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  return (
+    <section className="rounded-md border bg-muted/20 p-2.5" data-testid="work-board-run-history">
+      <h4 className="text-xs font-medium text-muted-foreground">
+        {t("workBoard.runHistoryHeading")} ({history.length})
+      </h4>
+      <ul className="mt-1 space-y-1">
+        {[...history].reverse().map((h) => (
+          <li key={h.runId} className="text-[11px]">
+            <button
+              type="button"
+              onClick={() => void toggle(h.runId)}
+              className="flex w-full items-center justify-between gap-2 rounded px-1 py-0.5 text-left hover:bg-muted"
+            >
+              <span className="truncate">
+                {t(`workBoard.run_${h.status}`)} · {isoToKstDate(h.startedAt)}
+              </span>
+              <span className="text-muted-foreground">{openRun === h.runId ? "▲" : "▼"}</span>
+            </button>
+            {openRun === h.runId && (
+              <div className="mt-1 rounded bg-background/60 p-2">
+                {loading ? (
+                  <span className="text-muted-foreground">…</span>
+                ) : events.length === 0 ? (
+                  <span className="text-muted-foreground">{t("workBoard.runHistoryEmpty")}</span>
+                ) : (
+                  <pre className="max-h-40 overflow-auto whitespace-pre-wrap break-words text-[11px] leading-relaxed">
+                    {events
+                      .map((e) => `[${e.phase}${e.turn ? `#${e.turn}` : ""}] ${e.text ?? e.message ?? ""}`)
+                      .join("\n\n")}
+                  </pre>
+                )}
+              </div>
+            )}
+          </li>
+        ))}
+      </ul>
+    </section>
+  );
+}
+
 export function WorkItemDetailDialog({ api, itemId, run, onClose, onChanged, onRun }: DetailDialogProps) {
   const [item, setItem] = useState<WorkItemResolved | null>(null);
   const [loadError, setLoadError] = useState("");
@@ -961,6 +1032,7 @@ export function WorkItemDetailDialog({ api, itemId, run, onClose, onChanged, onR
             </div>
             {actionError && <p className="text-sm text-destructive" data-testid="work-board-detail-error">{actionError}</p>}
             <RunOutputPanel item={item} run={run} />
+            <RunHistorySection api={api} item={item} />
           </div>
         )}
 

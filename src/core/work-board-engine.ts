@@ -43,6 +43,11 @@ import type { LoadedAgentProfile } from "../main/agent-profile-store.js";
 import type { WorkBoardStore } from "../main/work-board-store.js";
 import type { WorkItem, WorkBoardRunEvent } from "../shared/work-board-types.js";
 import { createLogger } from "../lib/logger.js";
+import {
+  createRunTranscript,
+  type TranscriptStorage,
+  type RunTranscriptWriter,
+} from "../work-board/run-transcript.js";
 
 const log = createLogger("work-board-engine");
 
@@ -87,6 +92,14 @@ export interface WorkBoardEngineDeps {
   getAgentProfile?: (name: string) => Promise<LoadedAgentProfile | null>;
   /** Renderer event sink — one {@link WorkBoardRunEvent} per phase transition. */
   emitProgress: (event: WorkBoardRunEvent) => void;
+  /**
+   * Optional storage for persisting per-run transcripts under
+   * `sessions/<itemId>/<runId>.jsonl`. The engine streams the plan + execute
+   * conversation here so a run's context survives restart and accumulates
+   * across re-runs (see work-board/run-transcript.ts). Absent ⇒ transcripts are
+   * skipped (the run still works) — keeps existing tests deps-light.
+   */
+  transcriptStorage?: TranscriptStorage;
   /**
    * Optional post-run learning hook (Hermes self-improvement pillar). Called
    * fire-and-forget AFTER a run reaches `completed` and is persisted; a throw
@@ -135,16 +148,31 @@ export interface WorkBoardEngine {
   runItem(itemId: number, opts?: RunItemOptions): Promise<RunItemResult>;
 }
 
+/**
+ * Turn cap for the PLAN phase. Planning is "investigate briefly → produce a
+ * plan", not open-ended work — a low cap forces fast convergence and prevents
+ * the runaway loop / context blow-up observed when a plan agent kept re-asking
+ * an unanswerable clarifying question (autonomous runs have no answer channel)
+ * or retried an erroring tool. The spawn returns its best plan-so-far when the
+ * cap is hit, so the run always reaches the approval gate.
+ */
+const PLAN_MAX_TURNS = 6;
+
 /** Build the PLAN-phase task prompt from the item's title + detail. */
 function buildPlanPrompt(item: WorkItem): string {
   const detail = item.detail?.trim();
   return [
-    `You are planning how to complete the following work item. Investigate using read-only tools, then produce a concise, concrete, step-by-step PLAN. Do NOT make any changes — this is the planning phase only.`,
+    `You are planning how to complete the following work item. You are running AUTONOMOUSLY: there is NO human available to answer questions during this run.`,
+    ``,
+    `Rules:`,
+    `- Do NOT ask the user any questions and do NOT request clarification. If the request is ambiguous, pick the most reasonable interpretation, state that assumption explicitly in the plan, and proceed.`,
+    `- Investigate briefly with read-only tools only if it materially helps (a few calls at most). If a tool errors, note it and move on — never retry in a loop.`,
+    `- Make NO changes — this is the planning phase only.`,
     ``,
     `Work item #${item.id}: ${item.title}`,
     ...(detail ? [``, `Details:`, detail] : []),
     ``,
-    `Respond with the plan as your final message. Keep it actionable — the user will approve it before execution begins.`,
+    `Respond with the PLAN as your final message: a concise, concrete, step-by-step plan with any assumptions called out under an "Assumptions" heading. The user reviews and approves this plan (and your assumptions) before execution — that approval is the only human checkpoint.`,
   ].join("\n");
 }
 
@@ -152,7 +180,7 @@ function buildPlanPrompt(item: WorkItem): string {
 function buildExecutePrompt(item: WorkItem, plan: string): string {
   const detail = item.detail?.trim();
   return [
-    `Execute the following work item according to the approved plan below. You have full tools available; each individual tool call is still independently approved by the user.`,
+    `Execute the following work item according to the approved plan below. You are running AUTONOMOUSLY: do NOT ask the user any questions — proceed per the plan, and if something is ambiguous, act on the plan's stated assumptions (or the most reasonable one) and note it in your output. You have full tools available; each individual tool call is still independently approved by the user. If a tool errors, adapt or note it — never retry in a loop.`,
     ``,
     `Work item #${item.id}: ${item.title}`,
     ...(detail ? [``, `Details:`, detail] : []),
@@ -212,7 +240,8 @@ const ACTIVE_RUN_STATUSES: ReadonlySet<string> = new Set<string>([
 export function createWorkBoardEngine(
   deps: WorkBoardEngineDeps,
 ): WorkBoardEngine {
-  const { store, getRunner, approvalGate, getAgentProfile, emitProgress, onRunComplete } = deps;
+  const { store, getRunner, approvalGate, getAgentProfile, emitProgress, onRunComplete, transcriptStorage } =
+    deps;
 
   /**
    * In-process single-flight guard. Holds the ids whose run is currently in
@@ -295,21 +324,37 @@ export function createWorkBoardEngine(
     }
 
     const originSessionId = `work-board:${itemId}`;
+    const runId = randomUUID();
+    const startedAt = new Date(Date.now()).toISOString();
+
+    // Stream the run's conversation to a persisted transcript. Appends are
+    // serialized on a chain and error-swallowed so a transcript write can
+    // neither slow nor fail the run; `flushTranscript()` drains it before a
+    // terminal return. Declared OUTSIDE the try so the catch path can also
+    // record + flush the failure (block-scoped consts would be invisible there).
+    const transcript: RunTranscriptWriter | null = transcriptStorage
+      ? createRunTranscript(transcriptStorage, itemId, runId)
+      : null;
+    let transcriptChain: Promise<void> = Promise.resolve();
+    const record = (e: Parameters<RunTranscriptWriter["append"]>[0]): void => {
+      if (!transcript) return;
+      transcriptChain = transcriptChain
+        .then(() => transcript.append(e))
+        .catch((err) =>
+          log.warn("runItem transcript append failed (id=%d): %s", itemId, (err as Error).message),
+        );
+    };
+    const flushTranscript = (): Promise<void> => transcriptChain;
 
     try {
       // ── PLAN ───────────────────────────────────────────────────────────
-      // Reset the record at run START so this run begins from a clean slate:
-      // a prior run's plan / output / runSessionId is CLEARED (null → delete
-      // key), not carried forward. Without this a completed item that is
-      // re-run and then denied / errored would keep its prior success output,
-      // showing a green output on a failed run. `setRunStatus` only writes the
-      // phase, so the clear must go through `setRunResult`.
-      await store.setRunResult(itemId, {
-        runStatus: "planning",
-        plan: null,
-        output: null,
-        runSessionId: null,
-      });
+      // Open a NEW run: `beginRun` archives the prior run into `runHistory`
+      // (never overwriting it) and resets the latest plan/output for a clean
+      // slate, so a re-run that later denies/errors can't show a stale green
+      // output. Re-running preserves prior runs AND their on-disk transcripts
+      // — the user's continuity requirement.
+      await store.beginRun(itemId, runId, startedAt);
+
       emit({ itemId, phase: "planning" });
 
       const planResult = await runner.spawn(
@@ -320,14 +365,18 @@ export function createWorkBoardEngine(
           originSessionId,
           profileMode: "plan",
           profileModel: profile?.model,
+          maxTurns: PLAN_MAX_TURNS,
         },
         {
-          onTurn: (u) =>
-            emit({ itemId, phase: "planning", turn: u.turn, text: u.text }),
+          onTurn: (u) => {
+            emit({ itemId, phase: "planning", turn: u.turn, text: u.text });
+            record({ phase: "planning", kind: "turn", turn: u.turn, text: u.text });
+          },
           onError: (message) => emit({ itemId, phase: "error", message }),
         },
       );
       const plan = planResult.summary;
+      record({ phase: "awaiting_approval", kind: "plan", text: plan });
       await store.setRunResult(itemId, {
         runStatus: "awaiting_approval",
         plan,
@@ -362,7 +411,9 @@ export function createWorkBoardEngine(
 
       if (isDenied(decision)) {
         await store.setRunResult(itemId, { runStatus: "denied", plan });
+        record({ phase: "denied", kind: "decision", message: decision.choice });
         emit({ itemId, phase: "denied", message: decision.choice });
+        await flushTranscript();
         return { status: "denied", plan, reason: decision.choice };
       }
 
@@ -384,8 +435,10 @@ export function createWorkBoardEngine(
           profileModel: profile?.model,
         },
         {
-          onTurn: (u) =>
-            emit({ itemId, phase: "executing", turn: u.turn, text: u.text }),
+          onTurn: (u) => {
+            emit({ itemId, phase: "executing", turn: u.turn, text: u.text });
+            record({ phase: "executing", kind: "turn", turn: u.turn, text: u.text });
+          },
           onError: (message) => emit({ itemId, phase: "error", message }),
         },
       );
@@ -399,7 +452,9 @@ export function createWorkBoardEngine(
         const reason = execResult.error ?? execResult.summary;
         log.warn("runItem execute failed (id=%d): %s", itemId, reason);
         await store.setRunResult(itemId, { runStatus: "error" });
+        record({ phase: "error", kind: "error", message: reason });
         emit({ itemId, phase: "error", message: reason });
+        await flushTranscript();
         return { status: "error", reason };
       }
 
@@ -411,11 +466,13 @@ export function createWorkBoardEngine(
         output,
         runSessionId: execResult.childSessionId,
       });
+      record({ phase: "done", kind: "output", text: output });
       emit({
         itemId,
         phase: "done",
         runSessionId: execResult.childSessionId,
       });
+      await flushTranscript();
       // Self-improvement: record a one-line learning AFTER the run has already
       // succeeded + persisted. Fire-and-forget with a swallow so a memory
       // append failure can never turn a completed run into an error.
@@ -447,7 +504,9 @@ export function createWorkBoardEngine(
             (persistErr as Error).message,
           ),
         );
+      record({ phase: "error", kind: "error", message: reason });
       emit({ itemId, phase: "error", message: reason });
+      await flushTranscript();
       return { status: "error", reason };
     }
   }

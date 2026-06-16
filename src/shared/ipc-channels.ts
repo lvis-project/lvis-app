@@ -62,6 +62,9 @@ export const WORK_BOARD = {
   // Renderer → main: generate a daily / weekly personal work report from the
   // board state + activity log + learned memory. Returns the markdown.
   generateReport: "lvis:work-board:generate-report",
+  // Renderer → main: read a past run's persisted transcript
+  // (sessions/<itemId>/<runId>.jsonl) for the run-history view.
+  runTranscript: "lvis:work-board:run-transcript",
 } as const;
 
 export const PERMISSIONS = {
