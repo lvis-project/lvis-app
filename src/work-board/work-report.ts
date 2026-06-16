@@ -2,7 +2,7 @@
  * Work Board reports (Hermes "reporting" surface) — host-native daily + weekly.
  *
  * The board is a first-class host domain (architecture.md §10.0.3), so the HOST
- * generates the personal work reports the agent-hub plugin used to: it gathers
+ * generates the personal work reports the legacy board plugin used to: it gathers
  * the board state + the period's activity-log events + the learned work-flow
  * memory, builds a Korean prompt, calls the host one-shot LLM
  * (`ConversationLoop.generateText` via `createCallLlm`), persists the markdown
@@ -185,6 +185,18 @@ export function createWorkBoardReporter(deps: WorkBoardReporterDeps): WorkBoardR
   }
 
   async function generateWeekly(input?: WeeklyReportInput): Promise<ReportResult> {
+    // Validate a caller-supplied week label BEFORE it is interpolated into the
+    // report file path — a `../`-bearing weekIso would otherwise escape the
+    // work-board namespace on write. (Daily's date is regex-validated by
+    // kstDayBounds; weekly needs the same guard.)
+    if (input?.weekIso !== undefined && !/^\d{4}-W\d{2}$/.test(input.weekIso)) {
+      return {
+        status: "empty",
+        kind: "weekly",
+        period: input.weekIso,
+        reason: "invalid week — expected YYYY-Www",
+      };
+    }
     const ref = new Date(nowMs());
     const { start, end } = sundayWeekBoundsKst(ref, input?.weekOffset ?? 0);
     const period = input?.weekIso ?? isoWeekFor(start);

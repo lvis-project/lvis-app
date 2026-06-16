@@ -495,8 +495,8 @@ export async function bootstrap(
   });
 
   // Due-soon nudge: a 60-min tick scans the board and emits
-  // `agent_hub.work_item.due_soon` on the plugin bus for work-assistant's
-  // work-item-due-soon detector. Deferred-started (after IPC + plugins are up)
+  // `work_board.work_item.due_soon` on the plugin bus for any subscribed
+  // due-soon consumer. Deferred-started (after IPC + plugins are up)
   // via services.startWorkBoardDueSoon; the timer is cleared on shutdown.
   const workBoardStorage = createDirStorage(openFeatureNamespace("work-board").dir);
   const DUE_SOON_TICK_MS = 60 * 60_000;

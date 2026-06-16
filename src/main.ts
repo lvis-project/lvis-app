@@ -1707,7 +1707,7 @@ async function main() {
 
   // Same deferral rationale as the routines scheduler: start the Work Board
   // due-soon scanner after IPC + plugin bus are wired so the first emit of
-  // `agent_hub.work_item.due_soon` reaches work-assistant's detector.
+  // `work_board.work_item.due_soon` reaches any subscribed consumer.
   services.startWorkBoardDueSoon?.();
 
   refreshApplicationMenu();
