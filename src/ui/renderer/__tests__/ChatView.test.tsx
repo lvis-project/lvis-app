@@ -384,6 +384,22 @@ describe("ChatView", () => {
     await waitFor(() => expect(api.chatSend).toHaveBeenCalled());
   });
 
+  it("does not send while IME composition is active", async () => {
+    const { container, api } = await renderApp({ hasApiKey: true });
+    await waitFor(() => expect(api.getSettings).toHaveBeenCalled());
+    const textarea = container.querySelector("textarea") as HTMLTextAreaElement;
+    expect(textarea).toBeTruthy();
+
+    await act(async () => {
+      fireEvent.change(textarea, { target: { value: "한" } });
+      fireEvent.compositionStart(textarea);
+      fireEvent.keyDown(textarea, { key: "Enter", code: "Enter" });
+    });
+
+    expect(api.chatSend).not.toHaveBeenCalled();
+    expect(textarea.value).toBe("한");
+  });
+
   it("collapses pre-final assistant work and tools into one turn WorkGroup", async () => {
     const { container, emitChatStream } = await renderApp({ hasApiKey: true });
     await submitChatMessage(container, "일정 확인");
