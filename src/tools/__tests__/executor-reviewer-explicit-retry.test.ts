@@ -49,6 +49,50 @@ function makePermissionManager(dir: string, classifySpy: ReturnType<typeof vi.fn
 }
 
 describe("ToolExecutor foreground reviewer explicit retry boundaries", () => {
+  it("does not record or consume explicit reviewer authorization without a session id", async () => {
+    const executeSpy = vi.fn(async () => "sent");
+    const classifySpy = vi.fn(() => ({
+      level: "medium" as const,
+      reason: "needs user confirmation",
+    }));
+    const dir = mkdtempSync(join(tmpdir(), "lvis-executor-retry-nosession-"));
+    try {
+      const toolName = "reviewed_network_retry_no_session";
+      const executor = new ToolExecutor(
+        makeReviewedNetworkProbe(toolName, executeSpy),
+        undefined,
+        makePermissionManager(dir, classifySpy),
+      );
+      const input = { payload: "send release notice" };
+
+      const first = await executor.executeAll(
+        [{ id: "tu-nosession-first", name: toolName, input }],
+        {
+          permissionContext: userPermissionContext({
+            userIntent: "릴리즈 안내 전송 경로를 확인합니다.",
+          }),
+        },
+      );
+      expect(first[0].is_error).toBe(true);
+
+      const second = await executor.executeAll(
+        [{ id: "tu-nosession-second", name: toolName, input }],
+        {
+          permissionContext: userPermissionContext({
+            userIntent: "진행해",
+            explicitAuthorizationIntent: "진행해",
+          }),
+        },
+      );
+
+      expect(second[0].is_error).toBe(true);
+      expect(executeSpy).not.toHaveBeenCalled();
+      expect(classifySpy).toHaveBeenCalledTimes(2);
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
   it("does not reuse explicit reviewer authorization across trust origins", async () => {
     const executeSpy = vi.fn(async () => "sent");
     const classifySpy = vi.fn(() => ({
