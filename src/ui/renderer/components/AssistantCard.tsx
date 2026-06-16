@@ -53,16 +53,17 @@ function AssistantCardImpl({
     <div
       className={
         isSystemNotice
-          ? "group relative min-w-0 w-full max-w-full overflow-visible rounded-md border border-destructive/40 bg-destructive/5 px-3 py-2 text-sm lvis-anim-message-in"
-          : "group relative min-w-0 w-full max-w-full overflow-visible rounded-md px-3 py-2 text-sm lvis-anim-message-in"
+          ? "group relative min-w-0 w-full max-w-full overflow-visible rounded-lg border border-destructive/40 bg-destructive/5 p-3 text-sm shadow-sm lvis-anim-message-in"
+          : "group relative min-w-0 w-full max-w-full overflow-visible rounded-lg border bg-card p-3 text-sm shadow-sm transition-shadow hover:shadow-md lvis-anim-message-in"
       }
     >
+      {/* Header bar — mirrors WorkBoardPanel's SectionShell header pattern */}
       {(actions !== undefined || entry.streaming || isSystemNotice) && (
         <div
           className={
             isSystemNotice
-              ? "mb-1 flex items-center gap-2 text-[11px] font-semibold text-destructive"
-              : "mb-1 flex items-center gap-2 text-[11px] text-muted-foreground"
+              ? "mb-2 flex items-center gap-1.5 rounded border-b border-destructive/20 pb-2 text-[11px] font-semibold uppercase tracking-wider text-destructive"
+              : "mb-2 flex items-center gap-1.5 rounded border-b border-border/60 pb-2 text-[11px] font-semibold uppercase tracking-wider text-muted-foreground"
           }
         >
           {isSystemNotice ? <AlertTriangle className="h-3 w-3" /> : null}
@@ -126,7 +127,7 @@ function AssistantCardImpl({
       </div>
 
       {!entry.streaming && onFeedback ? (
-        <div className="mt-1.5 flex items-center gap-1">
+        <div className="mt-2 flex items-center gap-1 border-t border-border/40 pt-2">
           <Tooltip>
             <TooltipTrigger asChild>
               <Button
