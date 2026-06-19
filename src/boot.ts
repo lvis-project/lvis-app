@@ -461,6 +461,7 @@ export async function bootstrap(
     pythonRuntime,
     bootAuditLogger,
     mainWindow,
+    networkFetch,
     getMainWindow,
     openAuthWindowService,
     openLinkWindowService,
