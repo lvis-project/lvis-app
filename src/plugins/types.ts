@@ -205,6 +205,17 @@ export interface PluginManifest {
    */
   capabilities?: string[];
   /**
+   * Tier A host-mediated egress allow-list (§9.x). A plugin that calls
+   * `hostApi.hostFetch` may only reach hosts matching `allowedDomains`
+   * (dot-boundary suffix match — see `host-allow-list.ts`). Deny-by-default:
+   * absent or empty ⇒ no egress is permitted. `reasoning` is a human-readable
+   * justification surfaced to the user at install for broad grants.
+   */
+  networkAccess?: {
+    allowedDomains: string[];
+    reasoning?: string;
+  };
+  /**
    * 플러그인이 구독하는 이벤트 타입 목록.
    * 두 가지 형태를 모두 지원한다:
    *   - 구형 호환: `string[]` — 호스트가 중립 fallback hint를 적용.
