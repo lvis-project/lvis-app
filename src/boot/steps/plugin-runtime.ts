@@ -1502,10 +1502,12 @@ export async function initPluginRuntime(
         // URLs; the OS proxy resolves DNS, so pre-proxy IP-SSRF checks are moot
         // here and delegated to it (see the network-trust spike).
         // Egress denial: bump the per-(plugin, reason) telemetry counter +
-        // write the authoritative audit line. `reasonBucket` is one of the
-        // bounded buckets in host-secret-counters KNOWN_PREFIXES.
+        // write the authoritative audit line. `reasonBucket` goes through
+        // sanitizeKeyPrefix so an unknown bucket folds to "other" — the same
+        // cardinality guard the host-secret path uses (no raw string reaches
+        // the counter map).
         const auditEgressDeny = (reasonBucket: string, detail: string) => {
-          incrementHostSecretCounter("hostFetch_denied", pluginId, reasonBucket);
+          incrementHostSecretCounter("hostFetch_denied", pluginId, sanitizeKeyPrefix(reasonBucket));
           try {
             bootAuditLogger.log({
               timestamp: new Date().toISOString(),
