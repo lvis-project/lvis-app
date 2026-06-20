@@ -76,18 +76,18 @@ const LEVEL_PALETTE: Record<
   { container: string; body: string; dismiss: string }
 > = {
   info: {
-    container: "bg-info/15 border-info/40 text-info",
-    body: "text-info/75",
-    dismiss: "text-info hover:text-info/80",
+    container: "bg-info/(--opacity-soft) border-info/(--opacity-medium) text-info",
+    body: "text-info/(--opacity-emphatic)",
+    dismiss: "text-info hover:text-info/(--opacity-intense)",
   },
   warning: {
-    container: "bg-warning/15 border-warning/40 text-warning",
-    body: "text-warning/75",
-    dismiss: "text-warning hover:text-warning/80",
+    container: "bg-warning/(--opacity-soft) border-warning/(--opacity-medium) text-warning",
+    body: "text-warning/(--opacity-emphatic)",
+    dismiss: "text-warning hover:text-warning/(--opacity-intense)",
   },
   critical: {
-    container: "bg-destructive/15 border-destructive/40 text-destructive",
-    body: "text-destructive/75",
-    dismiss: "text-destructive hover:text-destructive/80",
+    container: "bg-destructive/(--opacity-soft) border-destructive/(--opacity-medium) text-destructive",
+    body: "text-destructive/(--opacity-emphatic)",
+    dismiss: "text-destructive hover:text-destructive/(--opacity-intense)",
   },
 };

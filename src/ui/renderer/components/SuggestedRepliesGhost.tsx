@@ -26,7 +26,7 @@ export function SuggestedRepliesGhost({ text, visible }: Props): ReactElement | 
     <div
       data-testid="suggested-replies-ghost"
       aria-hidden="true"
-      className="pointer-events-none absolute inset-0 flex items-start px-4 py-2 text-xs text-muted-foreground/60 transition-opacity duration-150 motion-safe:animate-in motion-safe:fade-in"
+      className="pointer-events-none absolute inset-0 flex items-start px-4 py-2 text-xs text-muted-foreground/(--opacity-strong) transition-opacity duration-150 motion-safe:animate-in motion-safe:fade-in"
     >
       <span className="truncate">{text}</span>
       <span className="ml-auto whitespace-nowrap pl-2 text-[10px] opacity-70">

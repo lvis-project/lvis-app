@@ -31,26 +31,26 @@ const STATUS_VARIANTS: Record<CompactStatus, Variant> = {
   summarized: {
     label: "checkpointDivider.statusSummarized",
     icon: "📦",
-    lineCls: "bg-action-compact/30",
-    textCls: "text-action-compact/80",
+    lineCls: "bg-action-compact/(--opacity-muted)",
+    textCls: "text-action-compact/(--opacity-intense)",
   },
   content_truncated: {
     label: "checkpointDivider.statusContentTruncated",
     icon: "✂️",
-    lineCls: "bg-warning/40",
-    textCls: "text-warning/90",
+    lineCls: "bg-warning/(--opacity-medium)",
+    textCls: "text-warning/(--opacity-near)",
   },
   noop: {
     label: "checkpointDivider.statusNoop",
     icon: "✓",
     lineCls: "bg-muted-foreground/25",
-    textCls: "text-muted-foreground/70",
+    textCls: "text-muted-foreground/(--opacity-stronger)",
   },
   reduced_insufficient_forced: {
     label: "checkpointDivider.statusReducedInsufficient",
     icon: "⚠️",
-    lineCls: "bg-destructive/40",
-    textCls: "text-destructive/90",
+    lineCls: "bg-destructive/(--opacity-medium)",
+    textCls: "text-destructive/(--opacity-near)",
   },
 };
 
@@ -58,20 +58,20 @@ const TRIGGER_VARIANTS: Record<CheckpointTrigger | "default", Variant> = {
   "auto-compact": {
     label: "checkpointDivider.triggerAutoCompact",
     icon: "📌",
-    lineCls: "bg-action-compact/30",
-    textCls: "text-action-compact/80",
+    lineCls: "bg-action-compact/(--opacity-muted)",
+    textCls: "text-action-compact/(--opacity-intense)",
   },
   "manual": {
     label: "checkpointDivider.triggerManual",
     icon: "✋",
     lineCls: "bg-muted-foreground/35",
-    textCls: "text-muted-foreground/80",
+    textCls: "text-muted-foreground/(--opacity-intense)",
   },
   default: {
     label: "checkpointDivider.triggerAutoCompact",
     icon: "📌",
-    lineCls: "bg-action-compact/30",
-    textCls: "text-action-compact/80",
+    lineCls: "bg-action-compact/(--opacity-muted)",
+    textCls: "text-action-compact/(--opacity-intense)",
   },
 };
 
@@ -126,7 +126,7 @@ export function CheckpointDivider({
         <span className={`h-px flex-1 ${variant.lineCls}`} />
       </div>
       {truncatedDir !== undefined && (
-        <div className="px-4 text-center text-[9.5px] text-muted-foreground/70">
+        <div className="px-4 text-center text-[9.5px] text-muted-foreground/(--opacity-stronger)">
           {t("checkpointDivider.originalPreserved", { dir: truncatedDir })}
         </div>
       )}

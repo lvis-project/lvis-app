@@ -78,6 +78,46 @@
     --action-view:    262 83% 58%;   /* violet-500 */
     --action-branch:  25  95% 53%;   /* orange-500 */
     --action-compact: 217 91% 60%;   /* blue-400 */
+
+    /* ─── Semantic opacity scale ──────────────────────────────────────────
+       Named alpha tokens for color-mix opacity modifiers. Use them through
+       Tailwind v4's CSS-variable alpha shorthand, e.g.
+       `bg-warning/(--opacity-soft)` (= `bg-warning/[var(--opacity-soft)]`),
+       instead of hand-tuned numeric modifiers (`bg-warning/15`). Values are
+       percentages because Tailwind feeds the alpha channel a `<percentage>`.
+
+       The scale collapses the ~13 ad-hoc numeric values that had crept in
+       (5/10/15/20/25/30/40/50/60/70/75/80/90) onto a labelled ladder so the
+       intent ("subtle tint" vs "strong fill") is legible at the call site and
+       a single token edit re-tunes every surface that opted in.
+
+         faint   → barely-there wash (was /5)
+         subtle  → light tint        (was /10)
+         soft    → tinted fill       (was /15)
+         light   → soft fill         (was /20)
+         muted   → secondary fill    (was /30)
+         medium  → balanced edge     (was /40, the most common border alpha)
+         half    → midpoint          (was /50)
+         strong  → assertive fill    (was /60)
+         stronger→ heavy fill        (was /70)
+         emphatic→ emphasised text   (was /75)
+         intense → near-solid text   (was /80)
+         near    → almost-opaque     (was /90)
+         solid   → opaque scrim/veil (was /95)
+    */
+    --opacity-faint:    5%;
+    --opacity-subtle:   10%;
+    --opacity-soft:     15%;
+    --opacity-light:    20%;
+    --opacity-muted:    30%;
+    --opacity-medium:   40%;
+    --opacity-half:     50%;
+    --opacity-strong:   60%;
+    --opacity-stronger: 70%;
+    --opacity-emphatic: 75%;
+    --opacity-intense:  80%;
+    --opacity-near:     90%;
+    --opacity-solid:    95%;
   }
 }
 
@@ -1462,7 +1502,10 @@
   }
 
   .lvis-theme-card-mock-bubble.is-self {
-    background: var(--mock-accent, hsl(var(--p-blue-500)));
+    /* `--mock-bubble-self` lets a theme paint the user bubble with its own
+       message-user surface (distinct from the accent pill); falls back to
+       `--mock-accent` when a card only supplies a single accent. */
+    background: var(--mock-bubble-self, var(--mock-accent, hsl(var(--p-blue-500))));
     flex: 0 0 60%;
     margin-left: auto;
   }

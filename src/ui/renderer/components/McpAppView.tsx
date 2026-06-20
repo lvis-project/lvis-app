@@ -219,7 +219,7 @@ export function McpAppView({ payload }: { payload: McpUiPayload }) {
 
   return (
     <div className="mt-2 overflow-hidden rounded border bg-background">
-      <div className="flex items-center justify-between gap-2 border-b bg-muted/30 px-2 py-1 text-[11px] text-muted-foreground">
+      <div className="flex items-center justify-between gap-2 border-b bg-muted/(--opacity-muted) px-2 py-1 text-[11px] text-muted-foreground">
         <span className="truncate">{payload.title ?? "MCP App"}</span>
         <span className="text-[10px] opacity-60">
           {t("mcpAppView.sandboxBadge")}

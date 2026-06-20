@@ -929,7 +929,6 @@ export type LvisApi = {
         allowMultiple?: boolean;
         placeholder?: string;
         summaryHint?: string;
-        suggestedAnswers?: string[];
       }>;
       createdAt: number;
     }) => void,

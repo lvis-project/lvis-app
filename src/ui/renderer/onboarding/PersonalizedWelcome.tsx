@@ -228,7 +228,7 @@ export function PersonalizedWelcome({
           {pingState.status === "success" && (
             <div
               data-testid="personalized-welcome:ping-success"
-              className="rounded-md bg-success/10 px-2.5 py-1.5 text-[11px] text-success"
+              className="rounded-md bg-success/(--opacity-subtle) px-2.5 py-1.5 text-[11px] text-success"
               role="status"
             >
               {t("personalizedWelcome.pingSuccess", { vendor: pingState.vendor, model: pingState.model, latencyMs: pingState.latencyMs })}
@@ -237,7 +237,7 @@ export function PersonalizedWelcome({
           {pingState.status === "failure" && (
             <div
               data-testid="personalized-welcome:ping-failure"
-              className="rounded-md bg-destructive/10 px-2.5 py-1.5 text-[11px] text-destructive"
+              className="rounded-md bg-destructive/(--opacity-subtle) px-2.5 py-1.5 text-[11px] text-destructive"
               role="alert"
             >
               {pingFailureMessage(pingState.reason)}

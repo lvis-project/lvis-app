@@ -162,7 +162,7 @@ describe("SessionCalendarPopover", () => {
   });
 
   describe("Step 5 — primary-tone visual for current session", () => {
-    it("applies bg-primary/15 + ring to the row whose id matches currentSessionId", async () => {
+    it("applies bg-primary/(--opacity-soft) + ring to the row whose id matches currentSessionId", async () => {
       const sessions = [
         { id: "session-a", title: "다른 대화", modifiedAt: "2026-05-15T03:00:00.000Z" },
         { id: "current-session", title: "현재 대화", modifiedAt: "2026-05-15T03:30:00.000Z" },
@@ -174,9 +174,9 @@ describe("SessionCalendarPopover", () => {
       });
       const currentBtn = (await findByText("현재 대화")).closest("button");
       const otherBtn = (await findByText("다른 대화")).closest("button");
-      expect(currentBtn?.className).toMatch(/bg-primary\/15/);
+      expect(currentBtn?.className).toMatch(/bg-primary\/\(--opacity-soft\)/);
       expect(currentBtn?.className).toMatch(/ring-1/);
-      expect(otherBtn?.className).not.toMatch(/bg-primary\/15/);
+      expect(otherBtn?.className).not.toMatch(/bg-primary\/\(--opacity-soft\)/);
     });
   });
 

@@ -145,7 +145,7 @@ export function MemorySearchPanel({ api, onOpenSession }: MemorySearchPanelProps
           </TabsList>
           <TabsContent value="notes" className="mt-2 flex-1 min-h-0 overflow-hidden rounded-lg border">
             {noteResults.length > 0 && !loading && (
-              <div className="flex items-center rounded-t-lg border-b bg-muted/40 px-3 py-2">
+              <div className="flex items-center rounded-t-lg border-b bg-muted/(--opacity-medium) px-3 py-2">
                 <span className="text-xs font-semibold uppercase tracking-wider text-muted-foreground">
                   {t("memorySearchPanel.notesTab")}
                 </span>
@@ -167,7 +167,7 @@ export function MemorySearchPanel({ api, onOpenSession }: MemorySearchPanelProps
           </TabsContent>
           <TabsContent value="sessions" className="mt-2 flex-1 min-h-0 overflow-hidden rounded-lg border">
             {sessionResults.length > 0 && !loading && (
-              <div className="flex items-center rounded-t-lg border-b bg-muted/40 px-3 py-2">
+              <div className="flex items-center rounded-t-lg border-b bg-muted/(--opacity-medium) px-3 py-2">
                 <span className="text-xs font-semibold uppercase tracking-wider text-muted-foreground">
                   {t("memorySearchPanel.sessionsTab")}
                 </span>
