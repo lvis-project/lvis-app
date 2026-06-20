@@ -15,7 +15,7 @@ export type ParsedSummary = Record<string, unknown>;
 
 export function SummaryTile({ label, children }: { label: string; children: ReactNode }) {
   return (
-    <div className="min-w-0 rounded-md border bg-muted/20 px-3 py-2">
+    <div className="min-w-0 rounded-md border bg-muted/(--opacity-light) px-3 py-2">
       <div className="text-[11px] text-muted-foreground">{label}</div>
       <div className="mt-1 break-words text-xs font-medium leading-relaxed">
         {children}
@@ -71,9 +71,9 @@ export function levelBadgeClass(level: RiskLevel) {
 }
 
 export function reviewBoxClass(level: RiskLevel) {
-  if (level === "high") return "border-destructive/50 bg-destructive/10";
-  if (level === "medium") return "border-warning/50 bg-warning/10";
-  return "border-primary/40 bg-primary/5";
+  if (level === "high") return "border-destructive/(--opacity-half) bg-destructive/(--opacity-subtle)";
+  if (level === "medium") return "border-warning/(--opacity-half) bg-warning/(--opacity-subtle)";
+  return "border-primary/(--opacity-medium) bg-primary/(--opacity-faint)";
 }
 
 export function reviewTitleForCategory(category: PermissionDecisionCategory) {

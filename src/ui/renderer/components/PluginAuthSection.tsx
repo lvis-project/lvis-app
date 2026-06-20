@@ -97,7 +97,7 @@ export function PluginAuthSection({
   return (
     <div className="space-y-1" data-testid={`plugin-auth-section-${pluginId}`}>
       <p className="text-[10px] font-medium text-muted-foreground uppercase tracking-wide">{t("pluginAuthSection.sectionHeading")}</p>
-      <div className="flex items-center justify-between gap-2 rounded-md border bg-muted/30 px-2.5 py-1.5">
+      <div className="flex items-center justify-between gap-2 rounded-md border bg-muted/(--opacity-muted) px-2.5 py-1.5">
         <div className="flex min-w-0 items-center gap-2">
           {renderBadge(state, t)}
           <div className="min-w-0">
@@ -157,21 +157,21 @@ export function PluginAuthSection({
 function renderBadge(state: PluginAuthState, t: (key: string) => string) {
   if (state.kind === "authed") {
     return (
-      <span className="inline-flex shrink-0 items-center gap-1 rounded-full bg-success/15 px-1.5 py-px text-[10px] font-medium text-success">
+      <span className="inline-flex shrink-0 items-center gap-1 rounded-full bg-success/(--opacity-soft) px-1.5 py-px text-[10px] font-medium text-success">
         {t("pluginAuthSection.badgeAuthed")}
       </span>
     );
   }
   if (state.kind === "unauthed") {
     return (
-      <span className="inline-flex shrink-0 items-center gap-1 rounded-full bg-destructive/15 px-1.5 py-px text-[10px] font-medium text-destructive">
+      <span className="inline-flex shrink-0 items-center gap-1 rounded-full bg-destructive/(--opacity-soft) px-1.5 py-px text-[10px] font-medium text-destructive">
         {t("pluginAuthSection.badgeUnauthed")}
       </span>
     );
   }
   if (state.kind === "error") {
     return (
-      <span className="inline-flex shrink-0 items-center gap-1 rounded-full bg-warning/15 px-1.5 py-px text-[10px] font-medium text-warning">
+      <span className="inline-flex shrink-0 items-center gap-1 rounded-full bg-warning/(--opacity-soft) px-1.5 py-px text-[10px] font-medium text-warning">
         {t("pluginAuthSection.badgeError")}
       </span>
     );

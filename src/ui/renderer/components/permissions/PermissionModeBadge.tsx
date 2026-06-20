@@ -192,7 +192,7 @@ export function PermissionModeBadge({
         >
           <Badge
             variant="outline"
-            className="inline-flex max-w-[7rem] items-center gap-1 truncate whitespace-nowrap border-destructive bg-destructive/10 px-2 text-[10px] text-destructive"
+            className="inline-flex max-w-[7rem] items-center gap-1 truncate whitespace-nowrap border-destructive bg-destructive/(--opacity-subtle) px-2 text-[10px] text-destructive"
             data-testid="permission-pending-badge"
           >
             <Inbox className="h-3 w-3" aria-hidden="true" />

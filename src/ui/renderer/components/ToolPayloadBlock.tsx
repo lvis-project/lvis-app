@@ -17,7 +17,7 @@ export function ToolPayloadBlock({ value, isError = false }: { value: unknown; i
     </pre>
   );
   return (
-    <div className="min-w-0 max-w-full rounded bg-muted/70 ring-1 ring-border/50">
+    <div className="min-w-0 max-w-full rounded bg-muted/(--opacity-stronger) ring-1 ring-border/(--opacity-half)">
       {scrollable ? <ScrollArea className="h-[6.9rem]">{pre}</ScrollArea> : pre}
     </div>
   );

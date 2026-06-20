@@ -18,11 +18,11 @@ export function SessionResumeDivider({ preambleChars }: { preambleChars: number 
       data-testid="session-resume-divider"
       className="flex items-center gap-2 py-2 my-2"
     >
-      <span className="h-px flex-1 bg-success/30" />
-      <span className="text-[10px] text-success/75 font-medium">
+      <span className="h-px flex-1 bg-success/(--opacity-muted)" />
+      <span className="text-[10px] text-success/(--opacity-emphatic) font-medium">
         {t("sessionResumeDivider.resumeLabel", { preambleChars })}
       </span>
-      <span className="h-px flex-1 bg-success/30" />
+      <span className="h-px flex-1 bg-success/(--opacity-muted)" />
     </div>
   );
 }

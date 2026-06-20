@@ -43,8 +43,8 @@ export function StarredView({
         <CardDescription>{t("starredView.description")}</CardDescription>
       </CardHeader>
       <CardContent className="flex min-h-0 flex-1 flex-col gap-4">
-        <section className="flex min-h-0 flex-col rounded-lg border bg-muted/20 shadow-sm">
-          <div className="flex items-center justify-between rounded-t-lg border-b bg-muted/40 px-3 py-2">
+        <section className="flex min-h-0 flex-col rounded-lg border bg-muted/(--opacity-light) shadow-sm">
+          <div className="flex items-center justify-between rounded-t-lg border-b bg-muted/(--opacity-medium) px-3 py-2">
             <h3 className="text-xs font-semibold uppercase tracking-wider text-muted-foreground">{t("starredView.title")}</h3>
             <span className="flex h-5 min-w-[20px] items-center justify-center rounded-full bg-muted px-1.5 text-[10px] font-semibold text-muted-foreground">
               {starred.length}

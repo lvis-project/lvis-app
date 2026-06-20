@@ -47,7 +47,7 @@ export function TokenProgressRing({ used, budget, contextBudget, tpmLimit }: Tok
     <Tooltip>
       <TooltipTrigger asChild>
         <div
-          className="flex items-center justify-center rounded-md p-1 hover:bg-muted/60 transition-colors cursor-default focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-foreground focus-visible:ring-offset-1"
+          className="flex items-center justify-center rounded-md p-1 hover:bg-muted/(--opacity-strong) transition-colors cursor-default focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-foreground focus-visible:ring-offset-1"
           style={{ width: 28, height: 28 }}
           data-testid="token-progress-ring"
           title={t("tokenProgressRing.projectedInputTitle")}
@@ -70,7 +70,7 @@ export function TokenProgressRing({ used, budget, contextBudget, tpmLimit }: Tok
               fill="none"
               stroke="currentColor"
               strokeWidth={strokeWidth}
-              className="text-muted-foreground/30"
+              className="text-muted-foreground/(--opacity-muted)"
             />
             {/* Foreground fill */}
             <circle
@@ -104,7 +104,7 @@ export function TokenProgressRing({ used, budget, contextBudget, tpmLimit }: Tok
             <span>{remaining.toLocaleString()}</span>
           </div>
         </div>
-        <div className="mt-1 border-t border-border/40 pt-1 space-y-0.5">
+        <div className="mt-1 border-t border-border/(--opacity-medium) pt-1 space-y-0.5">
           <div className="flex justify-between gap-3 font-semibold">
             <span>usage:</span>
             <span>{pct}%</span>

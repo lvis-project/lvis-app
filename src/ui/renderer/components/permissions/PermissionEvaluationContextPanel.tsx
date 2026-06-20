@@ -27,7 +27,7 @@ export function PermissionEvaluationContextPanel({
   if (!context) {
     return (
       <section
-        className="rounded-md border border-warning/40 bg-warning/10 px-3 py-2 text-xs"
+        className="rounded-md border border-warning/(--opacity-medium) bg-warning/(--opacity-subtle) px-3 py-2 text-xs"
         data-testid="permission-evaluation-context-missing"
       >
         {t("permissionEvaluationContextPanel.missingPayload")}
@@ -37,7 +37,7 @@ export function PermissionEvaluationContextPanel({
 
   return (
     <details
-      className="min-w-0 rounded-md border bg-muted/20"
+      className="min-w-0 rounded-md border bg-muted/(--opacity-light)"
       data-testid="permission-evaluation-context"
     >
       <summary className="cursor-pointer px-3 py-2 text-xs font-semibold">

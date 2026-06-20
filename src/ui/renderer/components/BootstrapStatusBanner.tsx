@@ -35,14 +35,14 @@ export function BootstrapStatusBanner({ status, onDismiss, onRetry }: Props): Re
 
   if (status.phase === "error") {
     return (
-      <div className="flex items-center justify-between gap-2 bg-destructive/15 border border-destructive/40 text-destructive text-sm px-4 py-2 rounded-md mx-2 mt-2 lvis-anim-slide-down">
+      <div className="flex items-center justify-between gap-2 bg-destructive/(--opacity-soft) border border-destructive/(--opacity-medium) text-destructive text-sm px-4 py-2 rounded-md mx-2 mt-2 lvis-anim-slide-down">
         <span>{t("bootstrapStatusBanner.bootstrapError", { message: status.message })}</span>
         <div className="flex items-center gap-1">
           <Button
             variant="outline"
             size="sm"
             onClick={onRetry}
-            className="h-auto px-2 py-0.5 text-xs text-destructive border-destructive/40 hover:bg-destructive/15"
+            className="h-auto px-2 py-0.5 text-xs text-destructive border-destructive/(--opacity-medium) hover:bg-destructive/(--opacity-soft)"
           >
             {t("bootstrapStatusBanner.retry")}
           </Button>
@@ -51,7 +51,7 @@ export function BootstrapStatusBanner({ status, onDismiss, onRetry }: Props): Re
             size="sm"
             onClick={onDismiss}
             aria-label={t("bootstrapStatusBanner.dismissNotification")}
-            className="text-destructive hover:text-destructive/80 h-auto p-1"
+            className="text-destructive hover:text-destructive/(--opacity-intense) h-auto p-1"
           >
             ✕
           </Button>
@@ -63,14 +63,14 @@ export function BootstrapStatusBanner({ status, onDismiss, onRetry }: Props): Re
   // phase === "complete"
   if (status.skippedReason) {
     return (
-      <div className="flex items-center justify-between gap-2 bg-warning/15 border border-warning/40 text-warning text-sm px-4 py-2 rounded-md mx-2 mt-2 lvis-anim-slide-down">
+      <div className="flex items-center justify-between gap-2 bg-warning/(--opacity-soft) border border-warning/(--opacity-medium) text-warning text-sm px-4 py-2 rounded-md mx-2 mt-2 lvis-anim-slide-down">
         <span>{t("bootstrapStatusBanner.skipped", { skippedReason: status.skippedReason })}</span>
         <Button
           variant="ghost"
           size="sm"
           onClick={onDismiss}
           aria-label={t("bootstrapStatusBanner.dismissNotification")}
-          className="text-warning hover:text-warning/80 h-auto p-1"
+          className="text-warning hover:text-warning/(--opacity-intense) h-auto p-1"
         >
           ✕
         </Button>
@@ -88,14 +88,14 @@ export function BootstrapStatusBanner({ status, onDismiss, onRetry }: Props): Re
         ? t("bootstrapStatusBanner.singlePluginFailed", { id: status.failed[0].id, error: truncate(status.failed[0].error) })
         : t("bootstrapStatusBanner.multiplePluginsFailed", { count: status.failed.length });
     return (
-      <div className="flex items-center justify-between gap-2 bg-destructive/15 border border-destructive/40 text-destructive text-sm px-4 py-2 rounded-md mx-2 mt-2 lvis-anim-slide-down">
+      <div className="flex items-center justify-between gap-2 bg-destructive/(--opacity-soft) border border-destructive/(--opacity-medium) text-destructive text-sm px-4 py-2 rounded-md mx-2 mt-2 lvis-anim-slide-down">
         <span>{summary}</span>
         <div className="flex items-center gap-1">
           <Button
             variant="outline"
             size="sm"
             onClick={onRetry}
-            className="h-auto px-2 py-0.5 text-xs text-destructive border-destructive/40 hover:bg-destructive/15"
+            className="h-auto px-2 py-0.5 text-xs text-destructive border-destructive/(--opacity-medium) hover:bg-destructive/(--opacity-soft)"
           >
             {t("bootstrapStatusBanner.retry")}
           </Button>
@@ -104,7 +104,7 @@ export function BootstrapStatusBanner({ status, onDismiss, onRetry }: Props): Re
             size="sm"
             onClick={onDismiss}
             aria-label={t("bootstrapStatusBanner.dismissNotification")}
-            className="text-destructive hover:text-destructive/80 h-auto p-1"
+            className="text-destructive hover:text-destructive/(--opacity-intense) h-auto p-1"
           >
             ✕
           </Button>
