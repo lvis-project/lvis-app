@@ -201,7 +201,7 @@ function SingleToolInline({
     <div className="min-w-0 w-full max-w-full rounded-md text-[11px] text-muted-foreground">
       <button
         type="button"
-        className="flex w-full min-w-0 items-center gap-2 px-3 py-1.5 text-left hover:bg-muted/30"
+        className="flex w-full min-w-0 items-center gap-2 px-3 py-1.5 text-left hover:bg-muted/(--opacity-muted)"
         onClick={() => setOpen((o) => !o)}
       >
         <Wrench className="h-3 w-3 flex-shrink-0" />
@@ -332,7 +332,7 @@ export function ToolGroupCard({
   return (
     <div className="min-w-0 w-full max-w-full rounded-md text-[11px] text-muted-foreground lvis-anim-message-in">
       <button
-        className="flex w-full min-w-0 items-center gap-2 px-3 py-1.5 hover:bg-muted/30"
+        className="flex w-full min-w-0 items-center gap-2 px-3 py-1.5 hover:bg-muted/(--opacity-muted)"
         onClick={() => setOpen((o) => !o)}
       >
         <Wrench className="h-3 w-3 flex-shrink-0" />
@@ -368,7 +368,7 @@ export function ToolGroupCard({
             return (
               <div key={tool.toolUseId} className="min-w-0 rounded border border-dashed/50">
                 <button
-                  className="flex w-full min-w-0 items-center gap-2 px-2 py-1 hover:bg-muted/20"
+                  className="flex w-full min-w-0 items-center gap-2 px-2 py-1 hover:bg-muted/(--opacity-light)"
                   onClick={() => toggleTool(tool.toolUseId)}
                 >
                   {isExpanded ? <ChevronDown className="h-2.5 w-2.5 flex-shrink-0" /> : <ChevronRight className="h-2.5 w-2.5 flex-shrink-0" />}

@@ -56,7 +56,7 @@ function SnapEdgeHighlight() {
 
   return (
     <div
-      className={`pointer-events-none fixed z-50 bg-primary/80 ${EDGE_BORDER_CLASSES[activeEdge]}`}
+      className={`pointer-events-none fixed z-50 bg-primary/(--opacity-intense) ${EDGE_BORDER_CLASSES[activeEdge]}`}
       aria-hidden="true"
     />
   );

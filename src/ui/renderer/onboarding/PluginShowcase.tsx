@@ -367,7 +367,7 @@ export function PluginShowcase({
                     key={card.id}
                     data-testid={`plugin-showcase:card:${card.id}`}
                     data-expanded={expanded ? "true" : "false"}
-                    className="rounded-lg border border-border/70 bg-[hsl(var(--muted))] px-3 py-3"
+                    className="rounded-lg border border-border/(--opacity-stronger) bg-[hsl(var(--muted))] px-3 py-3"
                   >
                     <div className="flex items-start gap-2">
                       <span className="text-base leading-none" aria-hidden="true">
@@ -394,7 +394,7 @@ export function PluginShowcase({
                         {expanded && (
                           <ul
                             data-testid={`plugin-showcase:card:${card.id}:scenarios`}
-                            className="mt-2 space-y-1 rounded-md bg-background/40 px-2 py-2 text-[10.5px] leading-snug text-muted-foreground"
+                            className="mt-2 space-y-1 rounded-md bg-background/(--opacity-medium) px-2 py-2 text-[10.5px] leading-snug text-muted-foreground"
                           >
                             {card.scenarios.map((scenario) => (
                               <li

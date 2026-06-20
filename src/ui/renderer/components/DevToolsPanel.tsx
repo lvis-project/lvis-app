@@ -145,7 +145,7 @@ export function DevToolsPanel({ api, open, onClose }: DevToolsPanelProps) {
         </div>
       </div>
 
-      <div className="mt-3 space-y-1 rounded-md border bg-muted/30 p-2 text-[10.5px]">
+      <div className="mt-3 space-y-1 rounded-md border bg-muted/(--opacity-muted) p-2 text-[10.5px]">
         <Row label="Provider/Model" value={status ? `${status.provider}/${status.model}` : "—"} />
         <Row
           label="Effective trigger"

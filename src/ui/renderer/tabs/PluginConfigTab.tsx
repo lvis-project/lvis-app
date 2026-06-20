@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState, type CSSProperties } from "react";
 import ReactMarkdown from "react-markdown";
 import { Button } from "../../../components/ui/button.js";
 import { Input } from "../../../components/ui/input.js";
@@ -76,7 +76,7 @@ function PluginPreparationStatusPanel({ plugin }: { plugin: PluginCardSummary })
     : t("pluginConfigTab.prepPhasePending");
   const message = status?.message ?? t("pluginConfigTab.preparingRuntime");
   return (
-    <div className="space-y-2 rounded-sm bg-warning/10 px-3 py-2" aria-live="polite">
+    <div className="space-y-2 rounded-sm bg-warning/(--opacity-subtle) px-3 py-2" aria-live="polite">
       <div className="flex items-start justify-between gap-3">
         <div className="min-w-0 space-y-0.5">
           <div className="text-[10px] font-medium uppercase text-warning">{t("pluginConfigTab.preparationStatusLabel")}</div>
@@ -87,10 +87,12 @@ function PluginPreparationStatusPanel({ plugin }: { plugin: PluginCardSummary })
           <div className="shrink-0 font-mono text-[11px] text-warning tabular-nums">{progressPct}%</div>
         )}
       </div>
-      <div className="h-1.5 w-full overflow-hidden rounded-full bg-warning/20">
+      <div className="h-1.5 w-full overflow-hidden rounded-full bg-warning/(--opacity-light)">
+        {/* Determinate fill flows through --progress so the geometry stays
+            in classes; the indeterminate state keeps the pulsing w-1/3. */}
         <div
-          className={`h-full rounded-full bg-warning transition-all ${progressPct === null ? "w-1/3 animate-pulse" : ""}`}
-          style={progressPct === null ? undefined : { width: `${progressPct}%` }}
+          className={`h-full rounded-full bg-warning transition-all ${progressPct === null ? "w-1/3 animate-pulse" : "w-[var(--progress)]"}`}
+          style={progressPct === null ? undefined : ({ "--progress": `${progressPct}%` } as CSSProperties)}
         />
       </div>
       <div className="text-[10px] text-muted-foreground">
@@ -486,7 +488,7 @@ export function PluginConfigTab() {
       {banner && (
         <div
           className={`rounded-md px-3 py-2 text-sm ${
-            banner.type === "error" ? "bg-destructive/15 text-destructive" : "bg-success/15 text-success"
+            banner.type === "error" ? "bg-destructive/(--opacity-soft) text-destructive" : "bg-success/(--opacity-soft) text-success"
           }`}
         >
           {banner.msg}
@@ -494,17 +496,17 @@ export function PluginConfigTab() {
       )}
 
       {isDevMode && (
-        <div className="flex items-center justify-between rounded-md border border-warning/40 bg-warning/15 px-3 py-2">
+        <div className="flex items-center justify-between rounded-md border border-warning/(--opacity-medium) bg-warning/(--opacity-soft) px-3 py-2">
           <div className="space-y-0.5">
             <p className="text-xs font-medium text-warning">{t("pluginConfigTab.devToolsTitle")}</p>
-            <p className="text-[11px] text-warning/80">
+            <p className="text-[11px] text-warning/(--opacity-intense)">
               {t("pluginConfigTab.devToolsDescription")}
             </p>
           </div>
           <Button
             size="sm"
             variant="outline"
-            className="h-7 shrink-0 text-xs border-warning/50 text-warning hover:bg-warning/20"
+            className="h-7 shrink-0 text-xs border-warning/(--opacity-half) text-warning hover:bg-warning/(--opacity-light)"
             onClick={() => void handleInstallLocal()}
             disabled={localInstalling}
           >
@@ -550,7 +552,7 @@ export function PluginConfigTab() {
                       {p.loadStatus === "loaded" && (
                         <span
                           data-testid={`plugin-config:row-status:${p.id}`}
-                          className="inline-block rounded-full bg-success/15 px-1.5 py-px text-[9px] font-medium text-success"
+                          className="inline-block rounded-full bg-success/(--opacity-soft) px-1.5 py-px text-[9px] font-medium text-success"
                         >
                           {t("pluginConfigTab.statusLoaded")}
                         </span>
@@ -558,7 +560,7 @@ export function PluginConfigTab() {
                       {p.loadStatus === "preparing" && (
                         <span
                           data-testid={`plugin-config:row-status:${p.id}`}
-                          className="inline-block rounded-full bg-warning/15 px-1.5 py-px text-[9px] font-medium text-warning"
+                          className="inline-block rounded-full bg-warning/(--opacity-soft) px-1.5 py-px text-[9px] font-medium text-warning"
                         >
                           {t("pluginConfigTab.statusPreparing")}
                         </span>
@@ -566,7 +568,7 @@ export function PluginConfigTab() {
                       {p.loadStatus === "failed" && (
                         <span
                           data-testid={`plugin-config:row-status:${p.id}`}
-                          className="inline-block rounded-full bg-destructive/15 px-1.5 py-px text-[9px] font-medium text-destructive"
+                          className="inline-block rounded-full bg-destructive/(--opacity-soft) px-1.5 py-px text-[9px] font-medium text-destructive"
                         >
                           {t("pluginConfigTab.statusFailed")}
                         </span>
@@ -586,7 +588,7 @@ export function PluginConfigTab() {
                           quiet for the happy-path. Click → detail panel handles login flow. */}
                       {p.auth && isRuntimeCallablePlugin(p) && authStatuses.get(p.id)?.kind === "unauthed" && (
                         <span
-                          className="inline-block rounded-full bg-destructive/15 px-1.5 py-px text-[9px] font-medium text-destructive"
+                          className="inline-block rounded-full bg-destructive/(--opacity-soft) px-1.5 py-px text-[9px] font-medium text-destructive"
                           title={t("pluginConfigTab.unauthTitle")}
                         >
                           🔒 {t("pluginConfigTab.statusUnauthed")}
@@ -594,7 +596,7 @@ export function PluginConfigTab() {
                       )}
                     </div>
                     {p.loadStatus === "preparing" && p.preparationStatus?.message && (
-                      <div className="mt-1 truncate text-[10px] text-warning/80">
+                      <div className="mt-1 truncate text-[10px] text-warning/(--opacity-intense)">
                         {p.preparationStatus.message}
                       </div>
                     )}
@@ -641,11 +643,11 @@ export function PluginConfigTab() {
                     <div className="flex flex-wrap items-center gap-1">
                       <h3 className="text-sm font-semibold">{selectedPlugin.name}</h3>
                       {selectedPlugin.isManaged && (
-                        <span className="inline-flex items-center gap-0.5 rounded-full bg-info/15 px-1.5 py-px text-[9px] font-medium text-info">🔒 {t("pluginConfigTab.badgeManaged")}</span>
+                        <span className="inline-flex items-center gap-0.5 rounded-full bg-info/(--opacity-soft) px-1.5 py-px text-[9px] font-medium text-info">🔒 {t("pluginConfigTab.badgeManaged")}</span>
                       )}
                       {selectedPlugin.installPolicy === "admin" && (
                         <span
-                          className="inline-flex items-center gap-0.5 rounded-full border border-destructive/30 bg-destructive/10 px-1.5 py-px text-[9px] font-medium text-destructive"
+                          className="inline-flex items-center gap-0.5 rounded-full border border-destructive/(--opacity-muted) bg-destructive/(--opacity-subtle) px-1.5 py-px text-[9px] font-medium text-destructive"
                           title={t("pluginConfigTab.adminOnlyTitle")}
                           aria-label={t("pluginConfigTab.adminOnlyAriaLabel")}
                         >
@@ -665,21 +667,21 @@ export function PluginConfigTab() {
                         selectedPlugin.loadStatus === "loaded" ? (
                           <span
                             data-testid={`plugin-config:detail-status:${selectedPlugin.id}`}
-                            className="inline-block rounded-full bg-success/15 px-1.5 py-px text-[9px] font-medium text-success"
+                            className="inline-block rounded-full bg-success/(--opacity-soft) px-1.5 py-px text-[9px] font-medium text-success"
                           >
                             {t("pluginConfigTab.statusLoaded")}
                           </span>
                         ) : selectedPlugin.loadStatus === "preparing" ? (
                           <span
                             data-testid={`plugin-config:detail-status:${selectedPlugin.id}`}
-                            className="inline-block rounded-full bg-warning/15 px-1.5 py-px text-[9px] font-medium text-warning"
+                            className="inline-block rounded-full bg-warning/(--opacity-soft) px-1.5 py-px text-[9px] font-medium text-warning"
                           >
                             {t("pluginConfigTab.statusPreparing")}
                           </span>
                         ) : selectedPlugin.loadStatus === "failed" ? (
                           <span
                             data-testid={`plugin-config:detail-status:${selectedPlugin.id}`}
-                            className="inline-block rounded-full bg-destructive/15 px-1.5 py-px text-[9px] font-medium text-destructive"
+                            className="inline-block rounded-full bg-destructive/(--opacity-soft) px-1.5 py-px text-[9px] font-medium text-destructive"
                           >
                             {t("pluginConfigTab.statusFailed")}
                           </span>
@@ -780,7 +782,7 @@ export function PluginConfigTab() {
                     <div className="space-y-1">
                       <button
                         type="button"
-                        className="flex w-full items-center justify-between gap-2 rounded text-left hover:bg-muted/30 -mx-1 px-1 py-1"
+                        className="flex w-full items-center justify-between gap-2 rounded text-left hover:bg-muted/(--opacity-muted) -mx-1 px-1 py-1"
                         aria-expanded={toolsExpanded}
                         aria-controls={`plugin-tools-list-${selectedPlugin.id}`}
                         onClick={() => setToolsExpanded((prev) => !prev)}
@@ -816,7 +818,7 @@ export function PluginConfigTab() {
                           {selectedPlugin.tools.map((tool) => {
                             const desc = selectedPlugin.toolDescriptions?.[tool];
                             return (
-                              <div key={tool} className="flex flex-col gap-0.5 rounded border border-border/40 bg-muted/20 px-2 py-1.5">
+                              <div key={tool} className="flex flex-col gap-0.5 rounded border border-border/(--opacity-medium) bg-muted/(--opacity-light) px-2 py-1.5">
                                 <span className="font-mono text-[11px] font-semibold">{tool}</span>
                                 {desc && (
                                   <div className="prose prose-sm lvis-prose max-w-none break-words text-[11px] text-muted-foreground [&_p]:my-0.5 [&_ul]:my-0.5 [&_ol]:my-0.5 [&_code]:text-[10px]">
@@ -907,7 +909,7 @@ export function PluginConfigTab() {
                         {t("pluginConfigTab.envVarsCount", { count: entries.length })}
                       </span>
                     </div>
-                    <ScrollArea className="w-full rounded-md border bg-background/40 p-2" style={{ maxHeight: 220 }}>
+                    <ScrollArea className="w-full rounded-md border bg-background/(--opacity-medium) p-2" style={{ maxHeight: 220 }}>
                       <div className="space-y-1.5 pr-2">
                         {entries.length === 0 && (
                           <p className="text-xs text-muted-foreground">
@@ -929,7 +931,7 @@ export function PluginConfigTab() {
                             <Button
                               variant="outline"
                               size="sm"
-                              className="h-7 text-xs px-2 text-destructive border-destructive/40"
+                              className="h-7 text-xs px-2 text-destructive border-destructive/(--opacity-medium)"
                               onClick={() => handleRemoveEntry(entry.key)}
                             >
                               {t("pluginConfigTab.deleteButton")}

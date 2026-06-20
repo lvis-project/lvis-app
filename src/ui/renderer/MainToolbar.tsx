@@ -89,7 +89,14 @@ export function MainToolbar({
   const { t } = useTranslation();
   return (
     <div data-testid="main-toolbar" className="border-b bg-card px-3 py-2">
+      {/* Three explicit zones — left (navigation + status), center (flexible
+          spacer), right (session actions). The center zone owns the single
+          flex-1 grow so the left/right groups stay pinned to their edges; it
+          is the future home for any centered titlebar content (title, view
+          breadcrumb) without disturbing the edge groups. Visually identical
+          to the prior single-spacer layout. */}
       <div className="flex min-w-0 items-center gap-2">
+        <div data-testid="main-toolbar-left" className="flex min-w-0 items-center gap-2">
         {/* ── Home anchors the primary chat view ─────────────────────── */}
         <Tooltip>
           <TooltipTrigger asChild>
@@ -136,16 +143,20 @@ export function MainToolbar({
               >
                 <Wrench className="h-3 w-3" />
                 <span>Dev</span>
-                <kbd className="rounded border border-warning/40 bg-warning/10 px-1 text-[9.5px]">⇧⌘D</kbd>
+                <kbd className="rounded border border-warning/(--opacity-medium) bg-warning/(--opacity-subtle) px-1 text-[9.5px]">⇧⌘D</kbd>
               </Button>
             </TooltipTrigger>
             <TooltipContent>{t("mainToolbar.devToolsTooltip")}</TooltipContent>
           </Tooltip>
         )}
+        </div>
 
-        {/* ── Spacer pushes remaining items to the right ─────────────── */}
-        <div className="flex-1" />
+        {/* ── Center zone — flexible spacer; reserved for future centered
+            titlebar content. Owns the sole flex-1 grow. ─────────────── */}
+        <div data-testid="main-toolbar-center" className="min-w-0 flex-1" />
 
+        {/* ── Right zone — session-level actions ─────────────────────── */}
+        <div data-testid="main-toolbar-right" className="flex items-center gap-2">
         {/* ── Unified search — opens the top-attached search panel ───────
             Z onboarding chain — this button anchors the "chat-history"
             spotlight step. The Unified Search panel surfaces both saved
@@ -278,6 +289,7 @@ export function MainToolbar({
             </DropdownMenuItem>
           </DropdownMenuContent>
         </DropdownMenu>
+        </div>
       </div>
     </div>
   );
@@ -321,7 +333,7 @@ function AppUpdateBadge({
             <Button
               variant="ghost"
               size="sm"
-              className="h-7 gap-1 px-2 text-[11px] font-medium text-info border border-info/40 bg-info/10 hover:bg-info/20 disabled:opacity-60"
+              className="h-7 gap-1 px-2 text-[11px] font-medium text-info border border-info/(--opacity-medium) bg-info/(--opacity-subtle) hover:bg-info/(--opacity-light) disabled:opacity-60"
               onClick={() => void onDownload?.()}
               disabled={inFlight}
               title={t("mainToolbar.updateAvailableTitle", { version: state.version })}
@@ -346,7 +358,7 @@ function AppUpdateBadge({
           <Button
             variant="ghost"
             size="sm"
-            className="h-7 gap-1 px-2 text-[11px] font-medium text-muted-foreground border border-border bg-muted/40 cursor-progress"
+            className="h-7 gap-1 px-2 text-[11px] font-medium text-muted-foreground border border-border bg-muted/(--opacity-medium) cursor-progress"
             disabled
             title={t("mainToolbar.downloadingTitle", { version: state.version, percent: state.percent })}
             aria-label={t("mainToolbar.downloadingAriaLabel", { percent: state.percent })}
@@ -369,7 +381,7 @@ function AppUpdateBadge({
           <Button
             variant="ghost"
             size="sm"
-            className="h-7 gap-1 px-2 text-[11px] font-medium text-success border border-success/40 bg-success/10 hover:bg-success/20 disabled:opacity-60"
+            className="h-7 gap-1 px-2 text-[11px] font-medium text-success border border-success/(--opacity-medium) bg-success/(--opacity-subtle) hover:bg-success/(--opacity-light) disabled:opacity-60"
             onClick={() => void onInstall?.()}
             disabled={inFlight}
             title={t("mainToolbar.downloadedTitle", { version: state.version })}
