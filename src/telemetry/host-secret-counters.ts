@@ -67,10 +67,13 @@ export type HostSecretDeniedReason =
  * with one entry per attacker-chosen prefix (memory DoS). Anything outside
  * this set is folded to `"other"` so the cardinality stays O(1).
  *
- * Keep this list narrow: only add a prefix when the host actually issues
- * secret keys in that namespace. Adding a prefix here does NOT grant any
- * new access — the three-tier gate in `plugin-runtime.ts` is still the
- * authority — it only changes how the counter buckets the call.
+ * Keep this list narrow. It is the bounded bucket allowlist for ALL counter
+ * dimensions, not just secret namespaces — secret-key prefixes (`llm`,
+ * `plugin`, …), whitelist-registry reason buckets, and Tier A plugin-egress
+ * reason buckets (`egress`, `capability`, …) all live here so the counter map
+ * stays O(1). Adding a bucket here does NOT grant any access — the gates in
+ * `plugin-runtime.ts` remain the authority — it only changes how the counter
+ * buckets the call. Anything not listed folds to `"other"`.
  */
 const KNOWN_PREFIXES = new Set<string>([
   "llm",
