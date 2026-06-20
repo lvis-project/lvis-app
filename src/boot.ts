@@ -104,6 +104,7 @@ import { AskUserQuestionGate } from "./main/ask-user-question-gate.js";
 import { NotificationService } from "./main/notification-service.js";
 import { createSafeLlmFetch } from "./main/safe-llm-fetch.js";
 import { getDemoActiveVendor, getDemoHostMap, getDemoHostSubnet, getDemoVendorConfig } from "./main/demo-credentials.js";
+import { createPluginNetworkFetch } from "./main/plugin-network-fetch.js";
 import {
   demoFoundryHostMapFingerprint,
   demoHostMapContainsHost,
@@ -228,6 +229,17 @@ export async function bootstrap(
     }) as typeof fetch;
   const networkFetch = createElectronFetch(electronNetFetch);
   const privateNetworkFetch = createElectronFetch(electronDirectFetch);
+  // Tier A host-mediated plugin egress: hostApi.hostFetch is backed by this
+  // chooser so demo/corporate Azure private-endpoint URLs egress through the
+  // proxy-bypassing direct session (host-resolver-rules → intranet IP), exactly
+  // like the chat LLM path. Plugins (e.g. meeting STT) that send to a mapped
+  // Azure host therefore stop being hijacked by the corporate forward proxy to
+  // the public endpoint (the 403 "public access disabled" regression).
+  const pluginNetworkFetch = createPluginNetworkFetch(
+    networkFetch,
+    privateNetworkFetch,
+    isDemoPrivateEndpointUrl,
+  );
   const llmFetch = createSafeLlmFetch(electronNetFetch, {
     privateEndpoint: {
       fetch: electronDirectFetch,
@@ -461,6 +473,7 @@ export async function bootstrap(
     pythonRuntime,
     bootAuditLogger,
     mainWindow,
+    networkFetch: pluginNetworkFetch,
     getMainWindow,
     openAuthWindowService,
     openLinkWindowService,
