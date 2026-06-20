@@ -21,7 +21,7 @@ import { installPluginPartitionPolicy } from "../../main/html-preview-partition.
 import { isAppUpdateInstallRequested } from "../../main/app-update-install-intent.js";
 import { pluginPartitionName } from "../../shared/plugin-partition.js";
 import { onEvent as onHostEvent } from "../types.js";
-import { normalizeAllowedHosts } from "../../main/host-allow-list.js";
+import { normalizeAllowedHosts, urlHostMatchesAllowList } from "../../main/host-allow-list.js";
 import { validateHttpUrl, NetworkGuardError } from "../../core/network-guard.js";
 import { AuditLogger, type AuditEntry } from "../../audit/audit-logger.js";
 import { PluginRuntime } from "../../plugins/runtime.js";
@@ -1513,6 +1513,34 @@ export async function initPluginRuntime(
         } catch (err) {
           const reason = err instanceof NetworkGuardError ? err.message : "invalid URL";
           throw new Error(`[plugin:${pluginId}] hostFetch rejected: ${reason}`);
+        }
+        // Tier A deny-by-default egress allow-list (complete mediation): the
+        // plugin may only reach hosts declared in
+        // `manifest.networkAccess.allowedDomains` (dot-boundary suffix match).
+        // Absent/empty ⇒ no egress. A malformed list is a hard reject. This is
+        // the host's per-plugin egress chokepoint — audit + allow-list live
+        // here, not in the plugin.
+        let allowedEgressHosts: string[];
+        try {
+          allowedEgressHosts = normalizeAllowedHosts(manifest.networkAccess?.allowedDomains ?? []);
+        } catch (err) {
+          const reason = err instanceof Error ? err.message : String(err);
+          throw new Error(
+            `[plugin:${pluginId}] hostFetch rejected: invalid networkAccess.allowedDomains — ${reason}`,
+          );
+        }
+        if (!urlHostMatchesAllowList(url.hostname, allowedEgressHosts)) {
+          try {
+            bootAuditLogger.log({
+              timestamp: new Date().toISOString(),
+              sessionId: "plugin",
+              type: "error",
+              input: `[plugin:${pluginId}] host_fetch_denied ${url.protocol}//${url.host} not in networkAccess.allowedDomains`,
+            });
+          } catch { /* audit must not break host */ }
+          throw new Error(
+            `[plugin:${pluginId}] hostFetch denied: ${url.host} is not in networkAccess.allowedDomains (deny-by-default)`,
+          );
         }
         try {
           bootAuditLogger.log({
