@@ -34,7 +34,16 @@ export type HostSecretCounterEvent =
   | "whitelist_fetch_failed"
   | "whitelist_cache_hit"
   | "whitelist_cache_stale"
-  | "whitelist_cache_miss_offline";
+  | "whitelist_cache_miss_offline"
+  // Tier A — plugin egress observability for `hostApi.hostFetch`. Bucketed by
+  // `(pluginId, reason)` so operators can spot an unexpected egress burst or a
+  // plugin repeatedly tripping deny-by-default. `hostFetch_egress` uses the
+  // fixed `"egress"` bucket; `hostFetch_denied` uses the denial-reason bucket
+  // (`capability` / `invalid-url` / `non-https` / `not-allowlisted` /
+  // `malformed-allowlist`). The audit log (`host_fetch` / `host_fetch_denied`)
+  // remains the authoritative record — these counters are at-a-glance only.
+  | "hostFetch_egress"
+  | "hostFetch_denied";
 
 /**
  * #893 — `hostSecret_denied` denial taxonomy. Recorded into the audit log
@@ -82,6 +91,13 @@ const KNOWN_PREFIXES = new Set<string>([
   "demo-snapshot",
   "cache",
   "default",
+  // Tier A plugin-egress buckets (hostFetch_egress / hostFetch_denied).
+  "egress",
+  "capability",
+  "invalid-url",
+  "non-https",
+  "not-allowlisted",
+  "malformed-allowlist",
 ]);
 
 /**
