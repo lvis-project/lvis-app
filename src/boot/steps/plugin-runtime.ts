@@ -1501,7 +1501,11 @@ export async function initPluginRuntime(
         // proxy/CA. validateHttpUrl rejects non-http(s) + embedded-credential
         // URLs; the OS proxy resolves DNS, so pre-proxy IP-SSRF checks are moot
         // here and delegated to it (see the network-trust spike).
-        const auditEgressDeny = (detail: string) => {
+        // Egress denial: bump the per-(plugin, reason) telemetry counter +
+        // write the authoritative audit line. `reasonBucket` is one of the
+        // bounded buckets in host-secret-counters KNOWN_PREFIXES.
+        const auditEgressDeny = (reasonBucket: string, detail: string) => {
+          incrementHostSecretCounter("hostFetch_denied", pluginId, reasonBucket);
           try {
             bootAuditLogger.log({
               timestamp: new Date().toISOString(),
@@ -1512,7 +1516,7 @@ export async function initPluginRuntime(
           } catch { /* audit must not break host */ }
         };
         if (!manifest.capabilities?.includes("external-auth-consumer")) {
-          auditEgressDeny("capability external-auth-consumer not declared");
+          auditEgressDeny("capability", "capability external-auth-consumer not declared");
           throw new Error(
             `[plugin:${pluginId}] capability not declared: external-auth-consumer (hostFetch)`,
           );
@@ -1523,13 +1527,13 @@ export async function initPluginRuntime(
           url = validateHttpUrl(raw);
         } catch (err) {
           const reason = err instanceof NetworkGuardError ? err.message : "invalid URL";
-          auditEgressDeny(`invalid URL: ${reason}`);
+          auditEgressDeny("invalid-url", `invalid URL: ${reason}`);
           throw new Error(`[plugin:${pluginId}] hostFetch rejected: ${reason}`);
         }
         // Plugin egress is https-only — validateHttpUrl permits http(s) (shared
         // util), but a plugin must not send host-mediated traffic in cleartext.
         if (url.protocol !== "https:") {
-          auditEgressDeny(`non-https scheme ${url.protocol}//${url.host}`);
+          auditEgressDeny("non-https", `non-https scheme ${url.protocol}//${url.host}`);
           throw new Error(
             `[plugin:${pluginId}] hostFetch denied: only https is permitted (got ${url.protocol})`,
           );
@@ -1545,17 +1549,18 @@ export async function initPluginRuntime(
           allowedEgressHosts = normalizeAllowedHosts(manifest.networkAccess?.allowedDomains ?? []);
         } catch (err) {
           const reason = err instanceof Error ? err.message : String(err);
-          auditEgressDeny(`invalid networkAccess.allowedDomains — ${reason}`);
+          auditEgressDeny("malformed-allowlist", `invalid networkAccess.allowedDomains — ${reason}`);
           throw new Error(
             `[plugin:${pluginId}] hostFetch rejected: invalid networkAccess.allowedDomains — ${reason}`,
           );
         }
         if (!urlHostMatchesAllowList(url.hostname, allowedEgressHosts)) {
-          auditEgressDeny(`${url.protocol}//${url.host} not in networkAccess.allowedDomains`);
+          auditEgressDeny("not-allowlisted", `${url.protocol}//${url.host} not in networkAccess.allowedDomains`);
           throw new Error(
             `[plugin:${pluginId}] hostFetch denied: ${url.host} is not in networkAccess.allowedDomains (deny-by-default)`,
           );
         }
+        incrementHostSecretCounter("hostFetch_egress", pluginId, "egress");
         try {
           bootAuditLogger.log({
             timestamp: new Date().toISOString(),
