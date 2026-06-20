@@ -16,6 +16,37 @@ const TabsList = React.forwardRef<
 ));
 TabsList.displayName = TabsPrimitive.List.displayName;
 
+/**
+ * VerticalTabsList — a TabsList configured for a vertical sidebar layout.
+ *
+ * The shadcn TabsList primitive defaults to a horizontal pill
+ * (`inline-flex h-10 items-center justify-center rounded-md bg-muted p-1`).
+ * cn() merges class lists but only tailwind-merge collapses *conflicting*
+ * utilities — the primitive's `justify-center` survives a bare override
+ * because nothing competes with it, which leaves every trigger vertically
+ * centered in the column (the "사이드바가 상단으로 안 올라옴" symptom).
+ *
+ * This wrapper bakes in the unambiguous override (`flex` not inline-flex,
+ * `flex-col`, `items-stretch`, `justify-start`, `rounded-none`,
+ * `bg-transparent`) so call sites get a vertical sidebar without restating
+ * the workaround. Caller `className` is merged last so per-instance tuning
+ * (width, padding, gap) still wins.
+ */
+const VerticalTabsList = React.forwardRef<
+  React.ElementRef<typeof TabsPrimitive.List>,
+  React.ComponentPropsWithoutRef<typeof TabsPrimitive.List>
+>(({ className, ...props }, ref) => (
+  <TabsPrimitive.List
+    ref={ref}
+    className={cn(
+      "flex flex-col items-stretch justify-start gap-1 rounded-none bg-transparent p-2",
+      className,
+    )}
+    {...props}
+  />
+));
+VerticalTabsList.displayName = "VerticalTabsList";
+
 const TabsTrigger = React.forwardRef<
   React.ElementRef<typeof TabsPrimitive.Trigger>,
   React.ComponentPropsWithoutRef<typeof TabsPrimitive.Trigger>
@@ -43,4 +74,4 @@ const TabsContent = React.forwardRef<
 ));
 TabsContent.displayName = TabsPrimitive.Content.displayName;
 
-export { Tabs, TabsList, TabsTrigger, TabsContent };
+export { Tabs, TabsList, VerticalTabsList, TabsTrigger, TabsContent };

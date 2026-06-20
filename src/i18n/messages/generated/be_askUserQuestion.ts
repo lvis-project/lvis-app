@@ -39,10 +39,6 @@ export const en = {
   "be_askUserQuestion.summaryHintDesc":
     "Row label shown next to the answer on the confirm step of a multi-question card (≤ 10 chars). " +
     "Example: 'Direction', 'Target'. If omitted, the question itself is truncated for use.",
-  "be_askUserQuestion.suggestedAnswersDesc":
-    "[deprecated — use choices + recommendedIndex/altIndices instead] " +
-    "Accepted for backward compatibility only; ignored when choices is present. " +
-    "Do not use in new calls.",
 } as const;
 export const ko: Record<keyof typeof en, string> = {
   "be_askUserQuestion.toolDescription":
@@ -84,8 +80,4 @@ export const ko: Record<keyof typeof en, string> = {
   "be_askUserQuestion.summaryHintDesc":
     "다중 질문 카드의 confirm 단계에서 답변 옆에 보일 row label (한국어 ≤ 10자). " +
     "예: '수정 방향', '대상 자료'. 생략 시 question 자체를 짧게 잘라 사용.",
-  "be_askUserQuestion.suggestedAnswersDesc":
-    "[deprecated — choices + recommendedIndex/altIndices 를 사용하세요] " +
-    "구버전 호환을 위해 받지만, choices 가 있으면 무시됩니다. " +
-    "신규 호출에서는 사용하지 마세요.",
 };

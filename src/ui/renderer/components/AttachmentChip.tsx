@@ -55,7 +55,7 @@ function FileThumb() {
 
 function PasteThumb() {
   return (
-    <div className="flex h-12 w-12 items-center justify-center rounded border border-warning/40 bg-warning/15 text-warning">
+    <div className="flex h-12 w-12 items-center justify-center rounded border border-warning/(--opacity-medium) bg-warning/(--opacity-soft) text-warning">
       <ClipboardPaste className="h-5 w-5" />
     </div>
   );
@@ -245,7 +245,7 @@ export function AttachmentOverlay({
         <span className="text-xs font-semibold text-muted-foreground">
           {t("attachmentChip.overlayCount", { count: attachments.length })}
         </span>
-        <span className="text-[10px] text-muted-foreground/70">
+        <span className="text-[10px] text-muted-foreground/(--opacity-stronger)">
           {t("attachmentChip.overlayRemoveHint")}
         </span>
       </div>
@@ -254,7 +254,7 @@ export function AttachmentOverlay({
           <div
             key={att.id}
             data-testid="overlay-item"
-            className="flex items-center gap-3 border-b border-muted/40 py-2 last:border-b-0"
+            className="flex items-center gap-3 border-b border-muted/(--opacity-medium) py-2 last:border-b-0"
           >
             <div className="flex-shrink-0">
               {att.kind === "image" ? (
@@ -287,7 +287,7 @@ export function AttachmentOverlay({
                     ? collapsePath(att.path)
                     : `+${att.lines} lines · ${att.chars} chars`}
               </div>
-              <div className="text-[10px] text-muted-foreground/70">
+              <div className="text-[10px] text-muted-foreground/(--opacity-stronger)">
                 {att.kind === "image"
                   ? `${att.mimeType} · ${att.width}×${att.height} · ${formatBytes(att.bytes)}`
                   : att.kind === "file"

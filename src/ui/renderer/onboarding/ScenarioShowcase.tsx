@@ -242,7 +242,7 @@ function ScenarioShowcaseGrid({
               type="button"
               data-testid={`scenario-showcase:card:${card.id}`}
               onClick={() => onCardClick(card.id)}
-              className="rounded-lg border border-border/70 bg-[hsl(var(--muted))] px-3 py-3 text-left transition hover:border-[hsl(var(--p-purple-500)/0.6)] hover:bg-[hsl(var(--muted))]/80 focus:outline-none focus:ring-2 focus:ring-[hsl(var(--p-purple-500))]"
+              className="rounded-lg border border-border/(--opacity-stronger) bg-[hsl(var(--muted))] px-3 py-3 text-left transition hover:border-[hsl(var(--p-purple-500)/0.6)] hover:bg-[hsl(var(--muted))]/80 focus:outline-none focus:ring-2 focus:ring-[hsl(var(--p-purple-500))]"
               aria-label={`${t(card.titleKey)} — ${t(card.bodyKey)}. ${t("scenarioShowcase.cardAriaClickHint")}`}
             >
               <div className="text-lg leading-none" aria-hidden="true">

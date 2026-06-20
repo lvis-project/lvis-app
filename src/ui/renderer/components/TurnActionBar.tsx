@@ -108,7 +108,7 @@ export function TurnActionBar({
       )}
       {onFeedback ? (
         <>
-          <span className="text-muted-foreground/30">|</span>
+          <span className="text-muted-foreground/(--opacity-muted)">|</span>
           <Tooltip>
             <TooltipTrigger asChild>
               <Button

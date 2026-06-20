@@ -48,13 +48,13 @@ export function MessageQueuePanel({ store, onSendNow }: MessageQueuePanelProps) 
 
   return (
     <div
-      className="border-x border-y border-dashed border-info/40 bg-info/5"
+      className="border-x border-y border-dashed border-info/(--opacity-medium) bg-info/(--opacity-faint)"
       data-testid="message-queue-panel"
     >
       <button
         type="button"
         onClick={() => setExpanded((e) => !e)}
-        className="flex w-full items-center gap-2 px-4 py-2 text-left hover:bg-info/10"
+        className="flex w-full items-center gap-2 px-4 py-2 text-left hover:bg-info/(--opacity-subtle)"
         aria-expanded={expanded}
       >
         {expanded ? (
@@ -150,7 +150,7 @@ function MessageQueueRow({ item, onToggle, onSendNow, onRemove, onEdit }: Messag
       className={
         "flex items-center gap-2 rounded border px-2 py-1 transition-colors " +
         (item.selected
-          ? "border-accent bg-accent/10"
+          ? "border-accent bg-accent/(--opacity-subtle)"
           : "border-transparent hover:border-border")
       }
       data-testid="message-queue-row"
@@ -188,7 +188,7 @@ function MessageQueueRow({ item, onToggle, onSendNow, onRemove, onEdit }: Messag
             }
           }}
           data-testid="message-queue-row-edit"
-          className="flex-1 rounded border border-accent/50 bg-background px-1.5 py-0.5 text-xs text-foreground focus:outline-none focus:ring-1 focus:ring-accent"
+          className="flex-1 rounded border border-accent/(--opacity-half) bg-background px-1.5 py-0.5 text-xs text-foreground focus:outline-none focus:ring-1 focus:ring-accent"
           maxLength={8000}
           aria-label={t("messageQueuePanel.editInputAriaLabel")}
         />
@@ -217,7 +217,7 @@ function MessageQueueRow({ item, onToggle, onSendNow, onRemove, onEdit }: Messag
           <button
             type="button"
             onClick={onSendNow}
-            className="inline-flex h-5 items-center gap-1 rounded border border-transparent px-1.5 text-[10px] text-accent hover:border-accent hover:bg-accent/10"
+            className="inline-flex h-5 items-center gap-1 rounded border border-transparent px-1.5 text-[10px] text-accent hover:border-accent hover:bg-accent/(--opacity-subtle)"
             aria-label={t("messageQueuePanel.sendNowAriaLabel")}
             title={t("messageQueuePanel.sendNowTitle")}
           >
@@ -226,7 +226,7 @@ function MessageQueueRow({ item, onToggle, onSendNow, onRemove, onEdit }: Messag
           <button
             type="button"
             onClick={onRemove}
-            className="inline-flex h-5 w-5 items-center justify-center rounded border border-transparent text-muted-foreground hover:border-destructive/40 hover:bg-destructive/10 hover:text-destructive"
+            className="inline-flex h-5 w-5 items-center justify-center rounded border border-transparent text-muted-foreground hover:border-destructive/(--opacity-medium) hover:bg-destructive/(--opacity-subtle) hover:text-destructive"
             aria-label={t("messageQueuePanel.removeAriaLabel")}
             title={t("messageQueuePanel.removeTitle")}
           >

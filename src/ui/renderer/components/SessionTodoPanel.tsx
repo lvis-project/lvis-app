@@ -45,16 +45,16 @@ const STATUS_BADGE: Record<SessionTodoStatus, { labelKey: string; cls: string; d
   pending: {
     labelKey: "sessionTodoPanel.statusPending",
     cls: "bg-muted text-muted-foreground",
-    dot: "bg-muted-foreground/40",
+    dot: "bg-muted-foreground/(--opacity-medium)",
   },
   in_progress: {
     labelKey: "sessionTodoPanel.statusInProgress",
-    cls: "bg-warning/15 text-warning",
+    cls: "bg-warning/(--opacity-soft) text-warning",
     dot: "bg-warning",
   },
   completed: {
     labelKey: "sessionTodoPanel.statusCompleted",
-    cls: "bg-success/15 text-success",
+    cls: "bg-success/(--opacity-soft) text-success",
     dot: "bg-success",
   },
 };
@@ -212,11 +212,11 @@ export function SessionTodoPanel({
       // The input cluster below us already draws its own `border-t bg-card`
       // — we don't double up. Side borders + dashed amber tint signal "this
       // is the assistant's running plan" without a redundant horizontal rule.
-      className="border-x border-dashed border-warning/40 bg-warning/5 text-xs transition-colors"
+      className="border-x border-dashed border-warning/(--opacity-medium) bg-warning/(--opacity-faint) text-xs transition-colors"
       data-testid="session-todo-panel"
       data-session-id={sessionId ?? ""}
     >
-      <div className="flex items-center hover:bg-warning/10">
+      <div className="flex items-center hover:bg-warning/(--opacity-subtle)">
         <Button
           type="button"
           variant="ghost"

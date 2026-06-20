@@ -149,7 +149,7 @@ export function CustomTitleBar() {
   return (
     <div
       data-testid="custom-titlebar"
-      className="flex h-9 shrink-0 items-center justify-end border-b border-border/50 bg-background text-foreground select-none"
+      className="flex h-9 shrink-0 items-center justify-end border-b border-border/(--opacity-half) bg-background text-foreground select-none"
       style={{
         // @ts-expect-error — Electron-specific CSS extension
         WebkitAppRegion: "drag",

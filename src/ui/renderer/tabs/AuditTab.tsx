@@ -28,26 +28,26 @@ const PAGE_SIZE = 50;
 
 const TYPE_BADGE: Record<string, string> = {
   // Telemetry AuditEntry types (src/audit/audit-logger.ts:85)
-  turn: "bg-info/15 text-info",
-  tool_call: "bg-success/15 text-success",
-  approval: "bg-warning/15 text-warning",
-  warn: "bg-warning/15 text-warning",
-  error: "bg-destructive/15 text-destructive",
-  mcp_connect: "bg-emphasis/15 text-emphasis",
-  kill_switch: "bg-destructive/15 text-destructive",
+  turn: "bg-info/(--opacity-soft) text-info",
+  tool_call: "bg-success/(--opacity-soft) text-success",
+  approval: "bg-warning/(--opacity-soft) text-warning",
+  warn: "bg-warning/(--opacity-soft) text-warning",
+  error: "bg-destructive/(--opacity-soft) text-destructive",
+  mcp_connect: "bg-emphasis/(--opacity-soft) text-emphasis",
+  kill_switch: "bg-destructive/(--opacity-soft) text-destructive",
   // Permission HMAC-chain AuditCommon decisions (src/audit/audit-schema.ts:85+).
   // Rows in the permission-audit jsonl have no `type` field; the row
   // normalize step falls back to `decision`. Without these keys every
   // permission row used to render the neutral muted badge — code-reviewer
   // round-3 MAJOR finding. Color-coded so allow/ask/deny are visually
   // distinct at a glance.
-  allow: "bg-success/15 text-success",
-  ask: "bg-warning/15 text-warning",
-  deny: "bg-destructive/15 text-destructive",
-  deferred: "bg-info/15 text-info",
-  deferred_resolve: "bg-info/15 text-info",
-  mode_change: "bg-emphasis/15 text-emphasis",
-  manifest_violation: "bg-destructive/15 text-destructive",
+  allow: "bg-success/(--opacity-soft) text-success",
+  ask: "bg-warning/(--opacity-soft) text-warning",
+  deny: "bg-destructive/(--opacity-soft) text-destructive",
+  deferred: "bg-info/(--opacity-soft) text-info",
+  deferred_resolve: "bg-info/(--opacity-soft) text-info",
+  mode_change: "bg-emphasis/(--opacity-soft) text-emphasis",
+  manifest_violation: "bg-destructive/(--opacity-soft) text-destructive",
 };
 
 export function AuditTab() {
@@ -159,9 +159,11 @@ export function AuditTab() {
                   <div key={typeName} className="flex items-center gap-2">
                     <span className="w-20 truncate text-[11px] font-mono">{typeName}</span>
                     <div className="flex-1 rounded-full bg-muted h-2 overflow-hidden">
+                      {/* Runtime fill ratio flows through the --progress CSS
+                          variable so the bar geometry stays in classes. */}
                       <div
-                        className="h-2 rounded-full bg-primary"
-                        style={{ width: `${Math.round((count / maxCount) * 100)}%` }}
+                        className="h-2 w-[var(--progress)] rounded-full bg-primary"
+                        style={{ "--progress": `${Math.round((count / maxCount) * 100)}%` } as React.CSSProperties}
                       />
                     </div>
                     <span className="w-8 text-right text-[11px] tabular-nums">{count}</span>
@@ -249,7 +251,7 @@ export function AuditTab() {
           }
         >
           {error && (
-            <div className="rounded-md border border-destructive/40 bg-destructive/10 px-3 py-2 text-xs text-destructive">
+            <div className="rounded-md border border-destructive/(--opacity-medium) bg-destructive/(--opacity-subtle) px-3 py-2 text-xs text-destructive">
               {error}
             </div>
           )}
@@ -262,7 +264,7 @@ export function AuditTab() {
             <div className="rounded-md border text-xs">
               <table className="w-full">
                 <thead>
-                  <tr className="border-b bg-muted/40">
+                  <tr className="border-b bg-muted/(--opacity-medium)">
                     <th className="px-3 py-2 text-left font-medium">{t("auditTab.colTimestamp")}</th>
                     <th className="px-3 py-2 text-left font-medium">{t("auditTab.colType")}</th>
                     <th className="px-3 py-2 text-left font-medium">{t("auditTab.colSourceRoute")}</th>
@@ -291,7 +293,7 @@ export function AuditTab() {
                     return (
                       <React.Fragment key={i}>
                         <tr
-                          className="cursor-pointer border-b last:border-0 hover:bg-muted/20"
+                          className="cursor-pointer border-b last:border-0 hover:bg-muted/(--opacity-light)"
                           onClick={() => setExpandedIdx(isExpanded ? null : i)}
                         >
                           <td className="px-3 py-1.5 font-mono text-[10px] text-muted-foreground whitespace-nowrap">
@@ -308,7 +310,7 @@ export function AuditTab() {
                           </td>
                         </tr>
                         {isExpanded && (
-                          <tr className="border-b last:border-0 bg-muted/30">
+                          <tr className="border-b last:border-0 bg-muted/(--opacity-muted)">
                             <td colSpan={4} className="px-3 py-2">
                               <pre className="max-h-48 overflow-auto whitespace-pre-wrap break-all rounded bg-background p-2 text-[10px]">
                                 {JSON.stringify(entry, null, 2)}

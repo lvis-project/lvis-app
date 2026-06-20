@@ -76,7 +76,7 @@ export function HtmlPreview({
 
   return (
     <div className="mt-2 overflow-hidden rounded border bg-background">
-      <div className="flex items-center justify-between gap-2 border-b bg-muted/30 px-2 py-1 text-[11px] text-muted-foreground">
+      <div className="flex items-center justify-between gap-2 border-b bg-muted/(--opacity-muted) px-2 py-1 text-[11px] text-muted-foreground">
         <span className="min-w-0 truncate">{payload.title ?? t("htmlPreview.previewTitle")}</span>
         <span className="shrink-0 text-[10px] opacity-60">
           {t("htmlPreview.separateWindow")} · {requiresScripts ? t("htmlPreview.jsWindowSetting") : t("htmlPreview.noJs")}

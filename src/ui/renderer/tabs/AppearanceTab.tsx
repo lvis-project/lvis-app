@@ -54,34 +54,34 @@ function BundleMock({ bundle }: { bundle: ThemeBundle }) {
   const userBubble = `hsl(${bundle.tokens["message-user-bg"]})`;
   const mutedBubble = `hsl(${bundle.tokens.muted})`;
 
-  const style: CSSProperties = {
-    background: bg,
-    color: text,
-    width: "100%",
-    height: "100%",
-    padding: "0.4rem 0.45rem",
-    display: "flex",
-    flexDirection: "column",
-    gap: "0.28rem",
-  };
+  // All mock geometry lives in the `.lvis-theme-card-mock-*` classes in
+  // styles.css. The only thing that varies per bundle is the color set, so
+  // those flow in as `--mock-*` custom properties the classes consume.
+  const mockVars = {
+    "--mock-bg": bg,
+    "--mock-text": text,
+    "--mock-accent": accent,
+    "--mock-bubble-self": userBubble,
+    "--mock-bubble-other": mutedBubble,
+  } as CSSProperties;
 
   return (
-    <div style={style}>
+    <div className="lvis-theme-card-mock-inner" style={mockVars}>
       {/* title bar mock */}
-      <div style={{ height: "0.45rem", borderRadius: "0.2rem", background: accent, width: "100%", flexShrink: 0 }} />
+      <div className="lvis-theme-card-mock-bar" />
       {/* assistant bubble row */}
-      <div style={{ display: "flex", alignItems: "center", gap: "0.3rem" }}>
-        <span style={{ width: "0.55rem", height: "0.55rem", borderRadius: "999px", background: accent, flexShrink: 0 }} />
-        <span style={{ height: "0.55rem", borderRadius: "0.45rem", background: mutedBubble, flex: "1 1 auto" }} />
+      <div className="lvis-theme-card-mock-row">
+        <span className="lvis-theme-card-mock-dot" />
+        <span className="lvis-theme-card-mock-bubble" />
       </div>
       {/* user bubble row */}
-      <div style={{ display: "flex" }}>
-        <span style={{ height: "0.55rem", borderRadius: "0.45rem", background: userBubble, flex: "0 0 60%", marginLeft: "auto" }} />
+      <div className="lvis-theme-card-mock-row">
+        <span className="lvis-theme-card-mock-bubble is-self" />
       </div>
       {/* assistant bubble row */}
-      <div style={{ display: "flex", alignItems: "center", gap: "0.3rem" }}>
-        <span style={{ width: "0.55rem", height: "0.55rem", borderRadius: "999px", background: accent, flexShrink: 0 }} />
-        <span style={{ height: "0.55rem", borderRadius: "0.45rem", background: mutedBubble, flex: "1 1 auto" }} />
+      <div className="lvis-theme-card-mock-row">
+        <span className="lvis-theme-card-mock-dot" />
+        <span className="lvis-theme-card-mock-bubble" />
       </div>
     </div>
   );
@@ -416,7 +416,7 @@ function LanguageSection() {
               }}
               className={`rounded-md border px-3 py-2 text-sm transition-colors ${
                 selected
-                  ? "border-primary bg-primary/10 text-foreground"
+                  ? "border-primary bg-primary/(--opacity-subtle) text-foreground"
                   : "border-border text-muted-foreground hover:bg-muted"
               }`}
             >
@@ -540,7 +540,7 @@ export function AppearanceTab() {
                   className={`rounded-full border px-3 py-1 text-xs transition-colors ${
                     checked
                       ? "border-primary bg-primary text-primary-foreground"
-                      : "border-border text-muted-foreground hover:bg-muted/50 hover:text-foreground"
+                      : "border-border text-muted-foreground hover:bg-muted/(--opacity-half) hover:text-foreground"
                   }`}
                 >
                   {t(opt.label)}
@@ -578,7 +578,7 @@ export function AppearanceTab() {
                   className={`rounded-full border px-3 py-1 transition-colors ${
                     checked
                       ? "border-primary bg-primary text-primary-foreground"
-                      : "border-border text-muted-foreground hover:bg-muted/50 hover:text-foreground"
+                      : "border-border text-muted-foreground hover:bg-muted/(--opacity-half) hover:text-foreground"
                   }`}
                   style={{ fontSize: `${opt.value * 0.75}rem` }}
                 >
@@ -620,7 +620,7 @@ export function AppearanceTab() {
                 className={`rounded-full border px-3 py-1 text-xs transition-colors ${
                   checked
                     ? "border-primary bg-primary text-primary-foreground"
-                    : "border-border text-muted-foreground hover:bg-muted/50 hover:text-foreground"
+                    : "border-border text-muted-foreground hover:bg-muted/(--opacity-half) hover:text-foreground"
                 }`}
               >
                 {t(opt.label)}

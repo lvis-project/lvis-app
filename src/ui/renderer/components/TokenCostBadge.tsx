@@ -162,7 +162,7 @@ function TokenCostBadgeImpl({
             e.stopPropagation();
             if (cost !== null) setMode((m) => (m === "tokens" ? "cost" : "tokens"));
           }}
-          className={`inline-flex items-center gap-1 rounded border border-border/40 bg-muted/30 px-1.5 py-0.5 text-[10px] tabular-nums ${cost !== null ? "cursor-pointer hover:bg-muted/60" : "cursor-default"}`}
+          className={`inline-flex items-center gap-1 rounded border border-border/(--opacity-medium) bg-muted/(--opacity-muted) px-1.5 py-0.5 text-[10px] tabular-nums ${cost !== null ? "cursor-pointer hover:bg-muted/(--opacity-strong)" : "cursor-default"}`}
           aria-disabled={cost === null}
           aria-label={
             cost === null
@@ -207,7 +207,7 @@ function TokenCostBadgeImpl({
             <span>{tokensOut.toLocaleString()}</span>
           </div>
         </div>
-        <div className="mt-1 border-t border-border/40 pt-1 space-y-0.5">
+        <div className="mt-1 border-t border-border/(--opacity-medium) pt-1 space-y-0.5">
           <div className="flex justify-between gap-3 font-semibold">
             <span>fresh + output:</span>
             <span>{headlineTokens.toLocaleString()}</span>
@@ -217,13 +217,13 @@ function TokenCostBadgeImpl({
             <span>{tokensIn.toLocaleString()}</span>
           </div>
           {cost !== null && (
-            <div className="flex justify-between gap-3 font-semibold text-success pt-0.5 border-t border-border/40">
+            <div className="flex justify-between gap-3 font-semibold text-success pt-0.5 border-t border-border/(--opacity-medium)">
               <span>≈ cost:</span>
               <span>{formatCost(cost)}</span>
             </div>
           )}
           {cost === null && (
-            <div className="flex justify-between gap-3 font-semibold text-muted-foreground pt-0.5 border-t border-border/40">
+            <div className="flex justify-between gap-3 font-semibold text-muted-foreground pt-0.5 border-t border-border/(--opacity-medium)">
               <span>cost:</span>
               <span>pricing unknown</span>
             </div>

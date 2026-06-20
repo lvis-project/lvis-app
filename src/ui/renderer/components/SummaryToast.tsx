@@ -14,9 +14,9 @@ export function SummaryToast({ summary }: { summary: string }) {
   return (
     <details
       data-testid="summary-toast"
-      className="group w-full min-w-0 max-w-full border-l-2 border-action-compact/40 bg-action-compact/5 px-4 py-2.5 mb-3 rounded-r"
+      className="group w-full min-w-0 max-w-full border-l-2 border-action-compact/(--opacity-medium) bg-action-compact/(--opacity-faint) px-4 py-2.5 mb-3 rounded-r"
     >
-      <summary className="cursor-pointer list-none text-[10px] uppercase tracking-wider text-action-compact/80 font-medium marker:hidden">
+      <summary className="cursor-pointer list-none text-[10px] uppercase tracking-wider text-action-compact/(--opacity-intense) font-medium marker:hidden">
         <span className="mr-1 inline-block transition-transform group-open:rotate-90">▸</span>
         {t("summaryToast.previousSummary")}
       </summary>
