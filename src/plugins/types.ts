@@ -869,6 +869,20 @@ export interface PluginHostApi {
    * LLM이 준비되지 않은 경우 에러를 던진다.
    */
   callLlm(prompt: string, options?: { maxTokens?: number; systemPrompt?: string; signal?: AbortSignal }): Promise<string>;
+  /**
+   * Host-mediated outbound HTTPS through Electron's `net` (Chromium network
+   * stack). Unlike a plugin's own Node `fetch`/undici, this honors the OS proxy
+   * resolution INCLUDING PAC/WPAD auto-config and the OS trust store on every
+   * platform — so a plugin whose Node libraries can't be configured for the
+   * corporate proxy/CA (e.g. MSAL) can still reach the network on a
+   * TLS-inspecting corporate network. Capability-gated (external-auth-consumer)
+   * + SSRF-validated + audited host-side.
+   *
+   * OPTIONAL: undefined on host builds that predate this capability — plugins
+   * MUST guard (`typeof hostApi.hostFetch === "function"`) and fall back to bare
+   * fetch, mirroring `resolveApiKey?`.
+   */
+  hostFetch?(input: string | URL, init?: RequestInit): Promise<Response>;
 
   /**
    * Structured log event routed through AuditLogger.

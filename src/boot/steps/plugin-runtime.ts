@@ -22,6 +22,7 @@ import { isAppUpdateInstallRequested } from "../../main/app-update-install-inten
 import { pluginPartitionName } from "../../shared/plugin-partition.js";
 import { onEvent as onHostEvent } from "../types.js";
 import { normalizeAllowedHosts } from "../../main/host-allow-list.js";
+import { validateHttpUrl, NetworkGuardError } from "../../core/network-guard.js";
 import { AuditLogger, type AuditEntry } from "../../audit/audit-logger.js";
 import { PluginRuntime } from "../../plugins/runtime.js";
 import type { PythonRuntimeBootstrapper } from "../../main/python-runtime.js";
@@ -750,6 +751,12 @@ export interface InitPluginRuntimeInput {
   pythonRuntime?: PythonRuntimeBootstrapper;
   bootAuditLogger: AuditLogger;
   mainWindow: BrowserWindow;
+  /**
+   * Electron `net`-backed fetch (Chromium stack: OS proxy incl. PAC/WPAD + OS
+   * trust store). Backs the capability-gated `hostApi.hostFetch`. Eager (exists
+   * at boot) so it needs no late binding, unlike the LLM caller.
+   */
+  networkFetch: typeof fetch;
   getMainWindow?: () => BrowserWindow | null;
   openAuthWindowService: (
     parent: BrowserWindow,
@@ -839,6 +846,7 @@ export async function initPluginRuntime(
     pythonRuntime,
     bootAuditLogger,
     mainWindow,
+    networkFetch,
     getMainWindow,
     openAuthWindowService,
     openLinkWindowService,
@@ -1485,6 +1493,38 @@ export async function initPluginRuntime(
         }
         if (!lateBinding.llmCallerRef.fn) throw new Error("LLM provider not ready");
         return lateBinding.llmCallerRef.fn(prompt, opts);
+      },
+      hostFetch: async (input, init) => {
+        // Capability-gated host-mediated egress through Electron net (Chromium
+        // stack → OS proxy incl. PAC/WPAD + OS trust store), for plugins whose
+        // Node libraries (e.g. MSAL) can't be configured for the corporate
+        // proxy/CA. validateHttpUrl rejects non-http(s) + embedded-credential
+        // URLs; the OS proxy resolves DNS, so pre-proxy IP-SSRF checks are moot
+        // here and delegated to it (see the network-trust spike).
+        if (!manifest.capabilities?.includes("external-auth-consumer")) {
+          throw new Error(
+            `[plugin:${pluginId}] capability not declared: external-auth-consumer (hostFetch)`,
+          );
+        }
+        const raw = input instanceof URL ? input.toString() : input;
+        let url: URL;
+        try {
+          url = validateHttpUrl(raw);
+        } catch (err) {
+          const reason = err instanceof NetworkGuardError ? err.message : "invalid URL";
+          throw new Error(`[plugin:${pluginId}] hostFetch rejected: ${reason}`);
+        }
+        try {
+          bootAuditLogger.log({
+            timestamp: new Date().toISOString(),
+            sessionId: "plugin",
+            type: "tool_call",
+            input: `[plugin:${pluginId}] host_fetch ${url.protocol}//${url.host}${url.pathname}`,
+          });
+        } catch { /* audit must not break host */ }
+        // redirect:"error" — a plugin egress path must not silently follow
+        // cross-origin redirects (mirrors the host LLM/auth fetch posture).
+        return networkFetch(url.toString(), { ...(init ?? {}), redirect: "error" });
       },
       logEvent: (level, message, data) => {
         try {
