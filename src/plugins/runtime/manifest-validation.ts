@@ -67,8 +67,54 @@ function schemaHasHostSecrets(schema: unknown): boolean {
   return properties?.hostSecrets !== undefined;
 }
 
+function schemaHasNetworkAccess(schema: unknown): boolean {
+  const root = asObject(schema);
+  const properties = asObject(root?.properties);
+  return properties?.networkAccess !== undefined;
+}
+
+// Tier A — networkAccess egress allow-list. Same compatibility seam as
+// hostSecrets above: a legacy SDK pin (`package.json` lags `@lvis/plugin-sdk`)
+// whose schema predates `networkAccess` would, under root
+// `additionalProperties:false`, reject every migrated plugin's manifest as an
+// unknown property and silently drop the plugin at load. Inject the field so
+// host validation stays in lockstep with the SDK SoT until the pin is bumped.
+// Mirrors lvis-plugin-sdk schemas/plugin-manifest.schema.json `networkAccess`.
+function patchNetworkAccessIntoLegacySdkSchema(schema: unknown): unknown {
+  const root = asObject(schema) as (JsonObject & { properties?: Record<string, unknown> }) | undefined;
+  if (!root?.properties || root.properties.networkAccess !== undefined) return schema;
+  root.properties.networkAccess = {
+    type: "object",
+    additionalProperties: false,
+    required: ["allowedDomains"],
+    properties: {
+      allowedDomains: {
+        type: "array",
+        minItems: 1,
+        maxItems: 16,
+        uniqueItems: true,
+        items: {
+          allOf: [
+            {
+              type: "string",
+              pattern: "^[a-z0-9]([a-z0-9-]{0,61}[a-z0-9])?(\\.[a-z0-9]([a-z0-9-]{0,61}[a-z0-9])?)+$",
+              minLength: 3,
+              maxLength: 253,
+            },
+            { not: { enum: ["com", "net", "org", "kr", "co.kr", "or.kr", "go.kr", "io", "ai", "dev", "app"] } },
+            { not: { type: "string", pattern: "(^|\\.)xn--" } },
+          ],
+        },
+      },
+      reasoning: { type: "string" },
+    },
+  };
+  return schema;
+}
+
 function patchHostCompatibilityIntoLegacySdkSchema(schema: unknown): unknown {
   patchHostSecretsIntoLegacySdkSchema(schema);
+  patchNetworkAccessIntoLegacySdkSchema(schema);
   return schema;
 }
 
@@ -150,7 +196,13 @@ export function getDeclaredEmittedEvents(manifest: PluginManifest): string[] {
  */
 export async function buildManifestValidator(): Promise<ValidateFunction> {
   const sdkSchema = await loadSdkManifestSchema();
-  const hostCompatibilityNeeded = !schemaHasHostSecrets(sdkSchema);
+  // A legacy SDK pin may lag any host-required manifest field. If EITHER
+  // hostSecrets or networkAccess is absent, the SDK's own validator would
+  // reject migrated manifests under `additionalProperties:false`, so wrap it
+  // with the host-local compatibility validator (OR semantics). Gating only on
+  // hostSecrets missed the networkAccess lag and silently dropped Tier A plugins.
+  const hostCompatibilityNeeded =
+    !schemaHasHostSecrets(sdkSchema) || !schemaHasNetworkAccess(sdkSchema);
 
   try {
     // Prefer SDK helper when available so AJV options stay in lockstep.
