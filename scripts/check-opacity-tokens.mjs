@@ -28,7 +28,7 @@
  *
  * Move the logic there and delete this script when that happens.
  */
-import { readdirSync, readFileSync, statSync } from "node:fs";
+import { readdirSync, readFileSync } from "node:fs";
 import { join, relative } from "node:path";
 
 const SRC_DIR = join(process.cwd(), "src", "ui");
@@ -58,13 +58,16 @@ const GRANDFATHERED = new Set(["25", "35"]);
 const violations = [];
 
 function walk(dir) {
-  for (const entry of readdirSync(dir)) {
-    const p = join(dir, entry);
-    const s = statSync(p);
-    if (s.isDirectory()) {
-      if (entry === "__tests__" || entry === "node_modules") continue;
+  // withFileTypes carries the entry type on the dirent itself — avoids a
+  // separate statSync(p) between the directory listing and the readFileSync,
+  // which CodeQL flags as a file-system race (the path could be swapped for a
+  // symlink/other inode in that window).
+  for (const entry of readdirSync(dir, { withFileTypes: true })) {
+    const p = join(dir, entry.name);
+    if (entry.isDirectory()) {
+      if (entry.name === "__tests__" || entry.name === "node_modules") continue;
       walk(p);
-    } else if (/\.(tsx|ts)$/.test(entry)) {
+    } else if (entry.isFile() && /\.(tsx|ts)$/.test(entry.name)) {
       const content = readFileSync(p, "utf8");
       const lines = content.split("\n");
       lines.forEach((line, i) => {
