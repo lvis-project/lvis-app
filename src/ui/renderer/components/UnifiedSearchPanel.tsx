@@ -239,7 +239,7 @@ export function UnifiedSearchPanel({
 
   return (
     <div
-      className={`border-b bg-card/95 px-3 shadow-sm backdrop-blur transition-[padding] ${
+      className={`border-b bg-card/(--opacity-solid) px-3 shadow-sm backdrop-blur transition-[padding] ${
         open ? "py-2" : "py-1.5"
       }`}
       data-testid="unified-search-panel"
@@ -330,7 +330,7 @@ export function UnifiedSearchPanel({
 
         {open && (
           <div
-            className="max-h-[min(42dvh,360px)] overflow-y-auto rounded-md border bg-background/95"
+            className="max-h-[min(42dvh,360px)] overflow-y-auto rounded-md border bg-background/(--opacity-solid)"
             data-testid="unified-search-results"
           >
             <SearchSection
@@ -490,14 +490,14 @@ function SearchResultButton({
   return (
     <button
       type="button"
-      className="flex w-full min-w-0 items-start gap-2 px-3 py-2 text-left hover:bg-muted/70"
+      className="flex w-full min-w-0 items-start gap-2 px-3 py-2 text-left hover:bg-muted/(--opacity-stronger)"
       onClick={onClick}
     >
       <FileText className="mt-0.5 h-3.5 w-3.5 shrink-0 text-muted-foreground" />
       <span className="min-w-0 flex-1">
         <span className="flex min-w-0 items-center gap-2">
           <span className="truncate text-[11px] font-medium text-muted-foreground">{label}</span>
-          {meta ? <span className="truncate text-[10px] text-muted-foreground/70">{meta}</span> : null}
+          {meta ? <span className="truncate text-[10px] text-muted-foreground/(--opacity-stronger)">{meta}</span> : null}
         </span>
         <span className="mt-0.5 block min-w-0 text-xs text-foreground [overflow-wrap:anywhere]">{children}</span>
       </span>

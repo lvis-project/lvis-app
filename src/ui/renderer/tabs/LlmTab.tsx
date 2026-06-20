@@ -119,7 +119,7 @@ function SectionSaveBar({
 }) {
   const { t } = useTranslation();
   return (
-    <div className="flex justify-end border-t border-border/40 pt-2">
+    <div className="flex justify-end border-t border-border/(--opacity-medium) pt-2">
       <Button
         size="sm"
         onClick={onSave}
@@ -288,7 +288,7 @@ export function LlmTab(props: LlmTabProps) {
           {relaunchError && (
             <p
               role="alert"
-              className="rounded-md bg-destructive/10 px-3 py-2 text-sm text-destructive"
+              className="rounded-md bg-destructive/(--opacity-subtle) px-3 py-2 text-sm text-destructive"
               data-testid="llm-tab:relaunch-error"
             >
               {relaunchError}

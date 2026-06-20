@@ -284,7 +284,7 @@ export function ToolApprovalDialog({
                 visible without scrolling when the HIGH verdict disables Approve. */}
             {/* NL justification — required for HIGH verdict */}
             {finalVerdict === "high" && (
-              <div className="mt-3 rounded-md border border-destructive/30 bg-destructive/5 p-3">
+              <div className="mt-3 rounded-md border border-destructive/(--opacity-muted) bg-destructive/(--opacity-faint) p-3">
                 <Label
                   htmlFor="nl-justification"
                   className="mb-1.5 block text-xs font-semibold text-destructive"
@@ -313,7 +313,7 @@ export function ToolApprovalDialog({
               </div>
             )}
 
-            <details className="min-w-0 rounded-md border bg-muted/20">
+            <details className="min-w-0 rounded-md border bg-muted/(--opacity-light)">
               <summary className="cursor-pointer px-3 py-2 text-xs font-semibold">
                 {tHook("toolApprovalDialog.showFullInput")}
               </summary>
@@ -359,7 +359,7 @@ export function ToolApprovalDialog({
             <Button
               size="sm"
               variant="outline"
-              className="border-destructive text-destructive hover:bg-destructive/15"
+              className="border-destructive text-destructive hover:bg-destructive/(--opacity-soft)"
               onClick={() => onDecide("deny-always", request.toolName)}
             >
               {tHook("toolApprovalDialog.denyAlways")}
