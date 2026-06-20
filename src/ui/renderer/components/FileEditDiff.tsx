@@ -49,7 +49,7 @@ export function FileEditDiff({ data }: { data: FileEditDiffData }) {
       <button
         type="button"
         onClick={() => setOpen((o) => !o)}
-        className="flex w-full min-w-0 items-center gap-2 border-b border-border bg-muted/30 px-3 py-1.5 text-[11px] text-foreground/90 hover:bg-muted/50"
+        className="flex w-full min-w-0 items-center gap-2 border-b border-border bg-muted/(--opacity-muted) px-3 py-1.5 text-[11px] text-foreground/(--opacity-near) hover:bg-muted/(--opacity-half)"
         aria-expanded={open}
       >
         {open ? (
@@ -118,7 +118,7 @@ function DiffHunk({
   return (
     <>
       {separator && (
-        <div className="border-t border-dashed border-border/60 bg-muted/20 px-3 py-0.5 text-[10px] text-muted-foreground">
+        <div className="border-t border-dashed border-border/(--opacity-strong) bg-muted/(--opacity-light) px-3 py-0.5 text-[10px] text-muted-foreground">
           @@ next hunk
         </div>
       )}
@@ -147,8 +147,8 @@ function DiffLine({
   // dark + light variants defined in styles.css and adjust automatically.
   const palette =
     kind === "added"
-      ? "bg-success/10 text-success-foreground/90"
-      : "bg-destructive/10 text-destructive-foreground/90";
+      ? "bg-success/(--opacity-subtle) text-success-foreground/(--opacity-near)"
+      : "bg-destructive/(--opacity-subtle) text-destructive-foreground/(--opacity-near)";
   const accent = kind === "added" ? "text-success" : "text-destructive";
   const sigil = kind === "added" ? "+" : "−";
   return (
@@ -320,9 +320,9 @@ export function WriteFileSidecarDiff({
     const path = filePath ?? parsed.path ?? "";
     const bytes = parsed.bytes !== undefined ? `${parsed.bytes.toLocaleString()} bytes` : "";
     return (
-      <div className="rounded px-2 py-1 font-mono text-[10px] text-muted-foreground bg-muted/30">
-        {path ? <span className="text-primary/80">{path}</span> : null}
-        {bytes ? <span className="ml-2 text-muted-foreground/60">{bytes}</span> : null}
+      <div className="rounded px-2 py-1 font-mono text-[10px] text-muted-foreground bg-muted/(--opacity-muted)">
+        {path ? <span className="text-primary/(--opacity-intense)">{path}</span> : null}
+        {bytes ? <span className="ml-2 text-muted-foreground/(--opacity-strong)">{bytes}</span> : null}
       </div>
     );
   }
@@ -368,8 +368,8 @@ export function WriteFileSidecarDiff({
           className="flex items-center gap-2 px-3 py-1.5 rounded-t-md border-b"
           style={{ backgroundColor: "hsl(var(--muted) / 0.5)" }}
         >
-          <span className="font-medium text-primary/80 truncate min-w-0">{path}</span>
-          {bytes && <span className="shrink-0 text-muted-foreground/60 text-[10px]">{bytes}</span>}
+          <span className="font-medium text-primary/(--opacity-intense) truncate min-w-0">{path}</span>
+          {bytes && <span className="shrink-0 text-muted-foreground/(--opacity-strong) text-[10px]">{bytes}</span>}
           <button
             type="button"
             className="ml-auto shrink-0 text-[10px] text-primary hover:underline"
@@ -383,7 +383,7 @@ export function WriteFileSidecarDiff({
           style={{ backgroundColor: "hsl(var(--code-bg))", color: "hsl(var(--code-fg))" }}
         >
           {hunks.length === 0 ? (
-            <div className="px-3 py-1 text-muted-foreground/60 italic">{t("fileEditDiff.noChangesShort")}</div>
+            <div className="px-3 py-1 text-muted-foreground/(--opacity-strong) italic">{t("fileEditDiff.noChangesShort")}</div>
           ) : (
             hunks.map((h, i) => (
               <div
@@ -399,7 +399,7 @@ export function WriteFileSidecarDiff({
                 }}
               >
                 <span
-                  className="shrink-0 select-none w-4 text-muted-foreground/50"
+                  className="shrink-0 select-none w-4 text-muted-foreground/(--opacity-half)"
                   style={{
                     color:
                       h.type === "added"
@@ -425,7 +425,7 @@ export function WriteFileSidecarDiff({
   // ── Error state ──────────────────────────────────────────────────────────────
   if (diffState === "error") {
     return (
-      <div className="rounded-md px-3 py-1.5 text-[11px] text-destructive/80 bg-destructive/10 flex items-center gap-2">
+      <div className="rounded-md px-3 py-1.5 text-[11px] text-destructive/(--opacity-intense) bg-destructive/(--opacity-subtle) flex items-center gap-2">
         <span className="truncate min-w-0">{errorMsg}</span>
         <button
           type="button"
@@ -446,9 +446,9 @@ export function WriteFileSidecarDiff({
       style={{ backgroundColor: "hsl(var(--muted) / 0.4)" }}
     >
       <div className="flex items-center gap-2 px-3 py-1.5">
-        <span className="font-medium text-primary/80 truncate min-w-0">{path}</span>
-        {bytes && <span className="shrink-0 text-muted-foreground/60 text-[10px]">{bytes}</span>}
-        <span className="shrink-0 text-[10px] text-warning/80 ml-1">· {t("fileEditDiff.previewLimit")}</span>
+        <span className="font-medium text-primary/(--opacity-intense) truncate min-w-0">{path}</span>
+        {bytes && <span className="shrink-0 text-muted-foreground/(--opacity-strong) text-[10px]">{bytes}</span>}
+        <span className="shrink-0 text-[10px] text-warning/(--opacity-intense) ml-1">· {t("fileEditDiff.previewLimit")}</span>
         <button
           type="button"
           disabled={isLoading}

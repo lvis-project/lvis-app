@@ -41,7 +41,7 @@ export function PluginInstallDialog({ target, onClose, onConfirm, working }: Plu
           <div className="space-y-3" data-testid="plugin-install-consent">
             <div
               role="alert"
-              className="rounded-md border border-destructive/50 bg-destructive/10 p-3 text-xs leading-relaxed text-destructive"
+              className="rounded-md border border-destructive/(--opacity-half) bg-destructive/(--opacity-subtle) p-3 text-xs leading-relaxed text-destructive"
             >
               {t("pluginInstallDialog.adminWarning", { name: target.name })}
             </div>

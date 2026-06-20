@@ -70,14 +70,14 @@ function SessionDateNavigatorImpl({
       data-testid="session-date-navigator"
       data-date={key}
       data-session-marker-id={sessionMarkerId}
-      className="sticky top-0 z-10 -mx-3 flex items-center gap-3 bg-background/90 px-3 py-3 backdrop-blur"
+      className="sticky top-0 z-10 -mx-3 flex items-center gap-3 bg-background/(--opacity-near) px-3 py-3 backdrop-blur"
     >
-      <span className="h-px flex-1 bg-border/50" />
+      <span className="h-px flex-1 bg-border/(--opacity-half)" />
       <Popover open={popoverOpen} onOpenChange={handlePopoverOpenChange}>
         <PopoverTrigger asChild>
           <button
             type="button"
-            className="inline-flex items-center gap-1.5 rounded-full border bg-card px-3 py-1 text-[11px] text-foreground/70 cursor-pointer hover:bg-muted"
+            className="inline-flex items-center gap-1.5 rounded-full border bg-card px-3 py-1 text-[11px] text-foreground/(--opacity-stronger) cursor-pointer hover:bg-muted"
           >
             <CalendarDays className="h-3 w-3" />
             {label}
@@ -96,7 +96,7 @@ function SessionDateNavigatorImpl({
           align="center"
         />
       </Popover>
-      <span className="h-px flex-1 bg-border/50" />
+      <span className="h-px flex-1 bg-border/(--opacity-half)" />
     </div>
   );
 }

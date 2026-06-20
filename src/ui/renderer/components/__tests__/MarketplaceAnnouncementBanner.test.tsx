@@ -24,7 +24,7 @@ describe("MarketplaceAnnouncementBanner", () => {
     );
     const banner = screen.getByTestId("marketplace-announcement-banner");
     expect(banner).toHaveAttribute("data-level", "warning");
-    expect(banner.className).toContain("bg-warning/15");
+    expect(banner.className).toContain("bg-warning/(--opacity-soft)");
     expect(banner.textContent).toContain("Scheduled maintenance");
   });
 
@@ -36,7 +36,7 @@ describe("MarketplaceAnnouncementBanner", () => {
       />,
     );
     const banner = screen.getByTestId("marketplace-announcement-banner");
-    expect(banner.className).toContain("bg-destructive/15");
+    expect(banner.className).toContain("bg-destructive/(--opacity-soft)");
   });
 
   it('appends an "외 N건" count when more than one is active', () => {
