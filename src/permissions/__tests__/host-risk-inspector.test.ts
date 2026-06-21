@@ -68,6 +68,10 @@ describe("inspectHostRisk — shell command classification", () => {
     expect(isReadOnlyCommand("timeout 5s ls")).toBe(true);
     expect(isReadOnlyCommand("nice -n 5 cat foo")).toBe(true);
     expect(isReadOnlyCommand("timeout 5s rm -rf /")).toBe(false);
+    // a wrapper used alone is read-only iff the wrapper itself is read-only
+    expect(isReadOnlyCommand("env")).toBe(true);
+    expect(isReadOnlyCommand("FOO=bar env")).toBe(true);
+    expect(isReadOnlyCommand("timeout")).toBe(false);
   });
 
   it("treats absolute command paths by basename", () => {
