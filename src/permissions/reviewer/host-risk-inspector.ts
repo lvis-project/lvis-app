@@ -223,9 +223,11 @@ function isReadOnlyLeaf(leaf: string): boolean {
   // Strip leading VAR=value assignments (e.g. `FOO=bar ls`).
   while (i < tokens.length && /^[A-Za-z_][A-Za-z0-9_]*=/.test(tokens[i]!)) i += 1;
   // Strip wrapper commands and their option flags to reach the real verb.
+  let lastWrapper: string | undefined;
   while (i < tokens.length) {
     const head = stripPath(tokens[i]!);
     if (WRAPPER_COMMANDS.has(head)) {
+      lastWrapper = head;
       i += 1;
       // Skip option flags that belong to the wrapper (e.g. `timeout -s KILL 5s`).
       while (i < tokens.length && tokens[i]!.startsWith("-")) i += 1;
@@ -237,7 +239,12 @@ function isReadOnlyLeaf(leaf: string): boolean {
     }
     break;
   }
-  if (i >= tokens.length) return false;
+  // A wrapper used with no following command (bare `env`, which prints the
+  // environment) is read-only iff the wrapper verb is itself a read-only
+  // command. `timeout`/`nice` alone are incomplete → non-read-only (safe).
+  if (i >= tokens.length) {
+    return lastWrapper !== undefined && READ_ONLY_COMMANDS.has(lastWrapper);
+  }
   const verb = stripPath(tokens[i]!);
   if (verb === "git") {
     const sub = tokens[i + 1];
