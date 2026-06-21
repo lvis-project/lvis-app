@@ -214,6 +214,12 @@ export type AppSettings = {
      * `src/data/settings-store.ts` `FeatureFlags.demoAutoplayEnabled`.
      */
     demoAutoplayEnabled?: boolean;
+    /**
+     * Permission policy host-classifies-risk migration gate. Mirrors the
+     * main-process SOT in `src/data/settings-store.ts`
+     * `FeatureFlags.hostClassifiesRisk`. Default false (shadow mode only).
+     */
+    hostClassifiesRisk?: boolean;
   };
 };
 
