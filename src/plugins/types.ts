@@ -214,6 +214,15 @@ export interface PluginManifest {
   networkAccess?: {
     allowedDomains: string[];
     reasoning?: string;
+    /**
+     * Declarative, user-approved governance opt-in for reaching private /
+     * loopback / link-local endpoints through `hostApi.hostFetch` (mirrors the
+     * MCP per-server `allowPrivateNetworks` escape hatch). Deny-by-default:
+     * absent/false ⇒ hostFetch rejects any allow-listed host that resolves to a
+     * non-public address (SSRF defense). Set only for on-prem / intranet
+     * plugins whose target genuinely lives on a private range.
+     */
+    allowPrivateNetworks?: boolean;
   };
   /**
    * 플러그인이 구독하는 이벤트 타입 목록.

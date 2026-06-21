@@ -21,8 +21,8 @@ import { installPluginPartitionPolicy } from "../../main/html-preview-partition.
 import { isAppUpdateInstallRequested } from "../../main/app-update-install-intent.js";
 import { pluginPartitionName } from "../../shared/plugin-partition.js";
 import { onEvent as onHostEvent } from "../types.js";
-import { normalizeAllowedHosts, urlHostMatchesAllowList } from "../../main/host-allow-list.js";
-import { validateHttpUrl, NetworkGuardError } from "../../core/network-guard.js";
+import { normalizeAllowedHosts } from "../../main/host-allow-list.js";
+import { evaluateHostFetch } from "../../main/host-fetch-guard.js";
 import { AuditLogger, type AuditEntry } from "../../audit/audit-logger.js";
 import { PluginRuntime } from "../../plugins/runtime.js";
 import type { PythonRuntimeBootstrapper } from "../../main/python-runtime.js";
@@ -1498,9 +1498,12 @@ export async function initPluginRuntime(
         // Capability-gated host-mediated egress through Electron net (Chromium
         // stack → OS proxy incl. PAC/WPAD + OS trust store), for plugins whose
         // Node libraries (e.g. MSAL) can't be configured for the corporate
-        // proxy/CA. validateHttpUrl rejects non-http(s) + embedded-credential
-        // URLs; the OS proxy resolves DNS, so pre-proxy IP-SSRF checks are moot
-        // here and delegated to it (see the network-trust spike).
+        // proxy/CA.
+        //
+        // The layered policy (scheme/credential reject → https-only →
+        // deny-by-default allow-list → DNS-aware SSRF guard) lives in the pure
+        // `evaluateHostFetch` core so it is unit-testable without the runtime.
+        // Audit + telemetry side effects stay here, the host chokepoint.
         // Egress denial: bump the per-(plugin, reason) telemetry counter +
         // write the authoritative audit line. `reasonBucket` goes through
         // sanitizeKeyPrefix so an unknown bucket folds to "other" — the same
@@ -1524,44 +1527,24 @@ export async function initPluginRuntime(
           );
         }
         const raw = input instanceof URL ? input.toString() : input;
-        let url: URL;
-        try {
-          url = validateHttpUrl(raw);
-        } catch (err) {
-          const reason = err instanceof NetworkGuardError ? err.message : "invalid URL";
-          auditEgressDeny("invalid-url", `invalid URL: ${reason}`);
-          throw new Error(`[plugin:${pluginId}] hostFetch rejected: ${reason}`);
+        // SSRF defense: an allow-listed host that resolves to a private /
+        // loopback / link-local / metadata address is rejected unless the
+        // manifest explicitly opts into `networkAccess.allowPrivateNetworks`
+        // (the declarative, user-approved governance gate). The host-suffix
+        // allow-list alone cannot stop an attacker-controlled or DNS-rebound
+        // name from pivoting to 169.254.169.254 / 127.0.0.1 / RFC1918 when
+        // `net.fetch` resolves DNS directly (off-corp, no proxy).
+        const decision = await evaluateHostFetch({
+          pluginId,
+          rawUrl: raw,
+          allowedDomains: manifest.networkAccess?.allowedDomains ?? [],
+          allowPrivateNetworks: manifest.networkAccess?.allowPrivateNetworks === true,
+        });
+        if (!decision.ok) {
+          auditEgressDeny(decision.reason, decision.detail);
+          throw new Error(decision.message);
         }
-        // Plugin egress is https-only — validateHttpUrl permits http(s) (shared
-        // util), but a plugin must not send host-mediated traffic in cleartext.
-        if (url.protocol !== "https:") {
-          auditEgressDeny("non-https", `non-https scheme ${url.protocol}//${url.host}`);
-          throw new Error(
-            `[plugin:${pluginId}] hostFetch denied: only https is permitted (got ${url.protocol})`,
-          );
-        }
-        // Tier A deny-by-default egress allow-list (complete mediation): the
-        // plugin may only reach hosts declared in
-        // `manifest.networkAccess.allowedDomains` (dot-boundary suffix match).
-        // Absent/empty ⇒ no egress. A malformed list is a hard reject. This is
-        // the host's per-plugin egress chokepoint — audit + allow-list live
-        // here, not in the plugin.
-        let allowedEgressHosts: string[];
-        try {
-          allowedEgressHosts = normalizeAllowedHosts(manifest.networkAccess?.allowedDomains ?? []);
-        } catch (err) {
-          const reason = err instanceof Error ? err.message : String(err);
-          auditEgressDeny("malformed-allowlist", `invalid networkAccess.allowedDomains — ${reason}`);
-          throw new Error(
-            `[plugin:${pluginId}] hostFetch rejected: invalid networkAccess.allowedDomains — ${reason}`,
-          );
-        }
-        if (!urlHostMatchesAllowList(url.hostname, allowedEgressHosts)) {
-          auditEgressDeny("not-allowlisted", `${url.protocol}//${url.host} not in networkAccess.allowedDomains`);
-          throw new Error(
-            `[plugin:${pluginId}] hostFetch denied: ${url.host} is not in networkAccess.allowedDomains (deny-by-default)`,
-          );
-        }
+        const url = decision.url;
         incrementHostSecretCounter("hostFetch_egress", pluginId, "egress");
         try {
           bootAuditLogger.log({
