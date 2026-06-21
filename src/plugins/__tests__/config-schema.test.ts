@@ -238,11 +238,14 @@ describe("toolSchemas authority metadata", () => {
       },
     };
     const dir = await mkdtemp(join(realpathSync(tmpdir()), "manifest-cat-less-"));
-    const file = join(dir, "plugin.json");
-    await writeFile(file, JSON.stringify(manifest), "utf-8");
-    const parsed = await parsePluginJson(file, validator);
-    expect(parsed.id).toBe("category-less-plugin");
-    await rm(dir, { recursive: true, force: true });
+    try {
+      const file = join(dir, "plugin.json");
+      await writeFile(file, JSON.stringify(manifest), "utf-8");
+      const parsed = await parsePluginJson(file, validator);
+      expect(parsed.id).toBe("category-less-plugin");
+    } finally {
+      await rm(dir, { recursive: true, force: true });
+    }
   });
 });
 
