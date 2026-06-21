@@ -10,7 +10,7 @@ import type { MemoryManager } from "../memory/memory-manager.js";
 import type { SkillCatalogEntry } from "../main/skill-store.js";
 import type { ToolCatalogEntry, ToolRegistry, ToolSchemaEntry } from "../tools/registry.js";
 import { redactFsPath } from "../audit/dlp-filter.js";
-import { estimateTokens } from "../engine/auto-compact.js";
+import { estimateTokens } from "../shared/token-estimate.js";
 import { t } from "../i18n/index.js";
 import { createLogger } from "../lib/logger.js";
 import { isOverlayTriggerOrigin } from "../shared/overlay-trigger-source.js";
