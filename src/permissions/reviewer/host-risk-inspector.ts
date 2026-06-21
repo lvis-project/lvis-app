@@ -96,9 +96,10 @@ export interface HostRiskSignals {
  * Derive the effective {@link ToolCategory} from host-owned signals.
  *
  * Order (first decisive signal wins), all default-strict on ambiguity:
- *  1. Network — a URL-shaped arg → `"network"`.
- *  2. Shell — a command-bearing arg present → parse it; a fully read-only
- *     compound → `"read"`, otherwise `"shell"`.
+ *  1. Shell — a command-bearing arg present → parse it; a fully read-only
+ *     compound → `"read"`, otherwise `"shell"`. Checked before network so a
+ *     command that invokes `curl`/`wget` stays shell-domain (higher risk).
+ *  2. Network — a URL-shaped arg on a non-shell tool → `"network"`.
  *  3. Filesystem — a path arg that escapes `allowedDirectories` → `"write"`
  *     (out-of-scope reach is mutation-equivalent for policy); a contained path
  *     arg with no read-only proof → `"write"`.
@@ -112,14 +113,18 @@ export function inspectHostRisk(signals: HostRiskSignals): ToolCategory {
   // what its arguments look like.
   if (signals.source === "mcp") return "network";
 
-  // (1) Network — a URL-shaped argument.
-  if (hasNetworkTarget(signals.finalInput)) return "network";
-
-  // (2) Shell — classify the command string if one is present.
+  // (1) Shell — a command-bearing arg means this is a shell tool, and the
+  // command (including any URL it hands to `curl`/`wget`) is shell-domain. Shell
+  // carries a HIGHER risk weight + shell-specific path policy than network, so
+  // classify it BEFORE the network scan — otherwise `{ command: "curl https://…" }`
+  // would be downgraded to `"network"` and skip the shell checks.
   const command = extractShellCommand(signals.finalInput);
   if (command !== null) {
     return isReadOnlyCommand(command) ? "read" : "shell";
   }
+
+  // (2) Network — a URL-shaped argument on a non-shell tool.
+  if (hasNetworkTarget(signals.finalInput)) return "network";
 
   // (3) Filesystem — inspect the actual path arguments.
   const paths = extractCallPaths(signals.finalInput, signals.pathFields);
