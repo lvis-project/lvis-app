@@ -93,7 +93,8 @@ function readCategory(meta: Record<string, unknown>, toolName: string): PluginTo
     {
       event: "plugin-tool-missing-category",
       toolName,
-      declared: JSON.stringify(value),
+      declared: value,
+      declaredType: typeof value,
       appliedDefault: DEFAULT_STRICT_CATEGORY,
     },
     "discovered plugin tool declares no authoritative category — applying default-strict baseline",

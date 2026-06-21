@@ -71,9 +71,8 @@ function schemaHasHostSecrets(schema: unknown): boolean {
  * Locate the `required` array that the SDK schema attaches to each toolSchemas
  * entry (`properties.toolSchemas.additionalProperties.required`). The SDK
  * references the per-tool shape inline today; if a future SDK build factors it
- * into a `$ref`, the indirection target lives under `$defs`/`definitions`, so
- * those are inspected too. Only an array that actually carries the toolSchemas
- * required keys is returned — never a sibling schema's `required`.
+ * into a `$ref`, the pointer is resolved and only the referenced definition's
+ * `required` array is returned — never a sibling schema's `required`.
  */
 function findToolSchemaRequiredArrays(schema: unknown): string[][] {
   const found: string[][] = [];
@@ -85,27 +84,34 @@ function findToolSchemaRequiredArrays(schema: unknown): string[][] {
   if (Array.isArray(direct) && direct.every((v) => typeof v === "string")) {
     found.push(direct as string[]);
   }
-  // Indirect: toolSchemas.additionalProperties may be a $ref into $defs.
+  // Indirect: toolSchemas.additionalProperties may be a `$ref` into $defs.
+  // Resolve the pointer and patch ONLY the referenced definition's `required`,
+  // not every same-shaped def (which could touch unrelated schemas).
   const refTarget = typeof additional?.$ref === "string" ? additional.$ref : undefined;
   if (refTarget) {
-    for (const defsKey of ["$defs", "definitions"] as const) {
-      const defs = asObject(root?.[defsKey]);
-      if (!defs) continue;
-      for (const def of Object.values(defs)) {
-        const defObj = asObject(def);
-        const req = defObj?.required;
-        if (
-          Array.isArray(req) &&
-          req.every((v) => typeof v === "string") &&
-          (req as string[]).includes("category") &&
-          (req as string[]).includes("inputSchema")
-        ) {
-          found.push(req as string[]);
-        }
-      }
+    const req = asObject(resolveJsonPointer(root, refTarget))?.required;
+    if (Array.isArray(req) && req.every((v) => typeof v === "string")) {
+      found.push(req as string[]);
     }
   }
   return found;
+}
+
+/**
+ * Resolve a local JSON Pointer `$ref` (e.g. `#/$defs/ToolSchema`) against the
+ * root schema. Returns undefined for external refs or a path that does not
+ * resolve. Handles the `~1`→`/` and `~0`→`~` pointer escapes.
+ */
+function resolveJsonPointer(root: unknown, ref: string): unknown {
+  if (!ref.startsWith("#/")) return undefined;
+  let current: unknown = root;
+  for (const rawSegment of ref.slice(2).split("/")) {
+    const segment = rawSegment.replace(/~1/g, "/").replace(/~0/g, "~");
+    const obj = asObject(current);
+    if (!obj) return undefined;
+    current = obj[segment];
+  }
+  return current;
 }
 
 /**
