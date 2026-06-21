@@ -151,7 +151,7 @@ export interface FeatureFlags {
    * When `false` (default), a tool invocation's effective permission category
    * is the tool's DECLARED category (`tool.categoryForInput ?? tool.category`),
    * exactly as before. When `true`, the host derives the effective category
-   * from host-owned signals only (see {@link host-risk-inspector}) and ignores
+   * from host-owned signals only (see {@link inspectHostRisk}) and ignores
    * the plugin-declared category — a tool grading its own danger is not a
    * control (MCP spec: a server can lie).
    *
