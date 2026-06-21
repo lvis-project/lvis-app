@@ -15,6 +15,13 @@ import { lookupPricing, effectiveContextWindow } from "../shared/pricing-data.js
 import { getUsableContext, getPreflightThreshold } from "../shared/context-budget.js";
 import { buildToolResultStrippedStub, buildToolResultTruncatedStub } from "../shared/tool-result-stub.js";
 import { estimateMultimodalTokenOverhead } from "../shared/multimodal-token-estimate.js";
+import { estimateTokens } from "../shared/token-estimate.js";
+
+// Token-count primitives now live in shared/token-estimate.ts (architecture
+// §4.6.2 — leaf primitive below both prompts/ and engine/). Re-exported here so
+// existing engine callers keep importing them from auto-compact unchanged.
+// estimateTokens is also imported above for use by estimateMessagesTokens.
+export { countHangul, estimateTokens } from "../shared/token-estimate.js";
 
 
 // ─── Context Window Registry ─────────────────────────
@@ -133,34 +140,11 @@ export function getRuntimePreflightOverride(): number | null {
 // ─── Types ──────────────────────────────────────────
 
 // ─── Token Estimation ───────────────────────────────
-
-/**
- * 한글 음절 (가-힣 범위, U+AC00 ~ U+D7A3) 카운트 — Korean weighting helper.
- * Anthropic/OpenAI/Gemini 토크나이저 모두 한글을 1.5~2x 비율로 토큰화하므로
- * chars/4 공식이 한글 위주 대화에서는 underestimate. 50% 이상이면 1.3x 보정.
- */
-export function countHangul(text: string): number {
-  let count = 0;
-  for (let i = 0; i < text.length; i++) {
-    const c = text.charCodeAt(i);
-    if (c >= 0xAC00 && c <= 0xD7A3) count++;
-  }
-  return count;
-}
-
-/**
- * 텍스트의 토큰 수 추정 (simple length/4 + 1 heuristic) + 한글 가중치 (P11).
- *
- * 한글 비율 ≥ 50% 면 weight 1.3 적용 (mixed-language 코드+주석 등은 ratio < 50% → weight 1.0).
- * 보수적 fallback: 모르는 문자는 기본 4-char/token 가정.
- */
-export function estimateTokens(text: string): number {
-  if (text.length === 0) return 1;
-  const hangul = countHangul(text);
-  const ratio = hangul / text.length;
-  const weight = ratio >= 0.5 ? 1.3 : 1.0;
-  return Math.ceil((text.length * weight) / 4) + 1;
-}
+//
+// estimateTokens / countHangul are re-exported from shared/token-estimate.ts
+// at the top of this module. estimateMessagesTokens stays here because it
+// depends on engine-only types (GenericMessage, wire serialization, tool-result
+// stubbing) and so cannot move down to shared/.
 
 /** 메시지 배열의 총 토큰 추정 */
 export function estimateMessagesTokens(messages: GenericMessage[]): number {
