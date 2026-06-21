@@ -392,9 +392,9 @@ export function WriteFileSidecarDiff({
                 style={{
                   backgroundColor:
                     h.type === "added"
-                      ? "hsl(142 60% 40% / 0.15)"
+                      ? "var(--diff-add)"
                       : h.type === "removed"
-                        ? "hsl(0 60% 50% / 0.15)"
+                        ? "var(--diff-remove)"
                         : "transparent",
                 }}
               >
@@ -403,9 +403,9 @@ export function WriteFileSidecarDiff({
                   style={{
                     color:
                       h.type === "added"
-                        ? "hsl(142 60% 50%)"
+                        ? "var(--diff-add-fg)"
                         : h.type === "removed"
-                          ? "hsl(0 60% 60%)"
+                          ? "var(--diff-remove-fg)"
                           : undefined,
                   }}
                 >

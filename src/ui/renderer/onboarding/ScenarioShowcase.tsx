@@ -38,9 +38,6 @@ import { Button } from "../../../components/ui/button.js";
 import {
   Dialog,
   DialogContent,
-  DialogDescription,
-  DialogHeader,
-  DialogTitle,
 } from "../../../components/ui/dialog.js";
 import { ScriptedTurnEngine } from "../../../engine/demo-autoplay/scripted-turn-engine.js";
 import type {
@@ -49,6 +46,7 @@ import type {
   ScriptedTurn,
 } from "../../../engine/demo-autoplay/types.js";
 import { getScriptByScenarioId } from "../../../engine/demo-autoplay/scripts-registry.js";
+import { OnboardingHeader } from "./OnboardingCard.js";
 import { useTranslation } from "../../../i18n/react.js";
 
 export interface ScenarioShowcaseProps {
@@ -208,28 +206,11 @@ function ScenarioShowcaseGrid({
   const { t } = useTranslation();
   return (
     <>
-      <DialogHeader className="px-6 pt-6 pb-3 space-y-0">
-        <div className="flex items-center gap-3">
-          <span
-            aria-hidden
-            className="grid h-10 w-10 place-items-center rounded-lg text-base text-primary-foreground"
-            style={{
-              background:
-                "linear-gradient(135deg, hsl(var(--p-purple-500)), hsl(var(--p-blue-500)))",
-            }}
-          >
-            ✦
-          </span>
-          <div className="min-w-0">
-            <DialogTitle className="text-sm font-semibold tracking-tight">
-              LVIS Studio
-            </DialogTitle>
-            <DialogDescription className="text-[11px]">
-              {t("scenarioShowcase.gridDescription")}
-            </DialogDescription>
-          </div>
-        </div>
-      </DialogHeader>
+      <OnboardingHeader
+        size="lg"
+        title="LVIS Studio"
+        description={t("scenarioShowcase.gridDescription")}
+      />
 
       <div className="px-6 pb-6 space-y-4">
         <div
@@ -267,10 +248,7 @@ function ScenarioShowcaseGrid({
           data-testid="scenario-showcase:start"
           onClick={onStart}
           className="w-full text-primary-foreground"
-          style={{
-            background:
-              "linear-gradient(135deg, hsl(var(--p-purple-500)), hsl(var(--p-blue-500)))",
-          }}
+          style={{ background: "var(--gradient-brand)" }}
         >
           {t("scenarioShowcase.startButton")}
         </Button>
@@ -357,10 +335,7 @@ function ScenarioShowcaseInlineDemo({
               data-testid="scenario-showcase:inline-demo:start"
               onClick={onStart}
               className="text-primary-foreground"
-              style={{
-                background:
-                  "linear-gradient(135deg, hsl(var(--p-purple-500)), hsl(var(--p-blue-500)))",
-              }}
+              style={{ background: "var(--gradient-brand)" }}
             >
               {t("scenarioShowcase.startButton")}
             </Button>
@@ -489,7 +464,10 @@ function ScenarioShowcaseDemoEntry({ entry }: { entry: DemoEntry }) {
       >
         <div
           className="max-w-[80%] rounded-lg rounded-tr-sm px-3 py-2"
-          style={{ background: "hsl(217 91% 60%)", color: "white" }}
+          style={{
+            background: "hsl(var(--message-user-bg))",
+            color: "hsl(var(--message-user-fg))",
+          }}
         >
           {entry.text}
           {entry.isFinal === false && <CursorBlink />}
@@ -562,9 +540,7 @@ function BotAvatar({ invisible = false }: { invisible?: boolean }) {
     <div
       className="grid h-7 w-7 shrink-0 place-items-center rounded-md text-[11px] text-primary-foreground"
       style={{
-        background: invisible
-          ? "transparent"
-          : "linear-gradient(135deg, hsl(var(--p-purple-500)), hsl(217 91% 60%))",
+        background: invisible ? "transparent" : "var(--gradient-brand)",
         visibility: invisible ? "hidden" : "visible",
       }}
       aria-hidden="true"
