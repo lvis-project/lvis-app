@@ -2,7 +2,7 @@
  * Risk shadow log — structured emission of host-derived vs plugin-declared
  * permission category for every tool invocation.
  *
- * Phase 1 of the host-classifies-risk migration ships with the
+ * The host-classifies-risk migration ships with the
  * `hostClassifiesRisk` feature flag OFF: enforcement still uses the DECLARED
  * category, but the host ALSO computes what it would classify the call as
  * ({@link inspectHostRisk}) and logs the pair here. Reconciling these logs

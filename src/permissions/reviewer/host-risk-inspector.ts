@@ -83,8 +83,8 @@ export interface HostRiskSignals {
   finalInput: Record<string, unknown>;
   /**
    * Path-bearing argument selectors INFERRED for this tool (dotted selectors
-   * supported). For Phase 1 these are the tool's `pathFields`; the design
-   * keeps them advisory hints — the inspector still verifies containment of
+   * supported). These are the tool's `pathFields`, kept as advisory hints —
+   * the inspector still verifies containment of
    * whatever paths actually appear in the args.
    */
   pathFields: readonly string[];
@@ -93,8 +93,8 @@ export interface HostRiskSignals {
   /**
    * The owning plugin's sandbox root (`~/.lvis/plugins/<id>/`) when known.
    * A write that stays inside the sandbox is still a write — this is supplied
-   * so future phases can reason about it, but Phase 1 does NOT classify a
-   * sandbox write down to read.
+   * so containment can be reasoned about, but a sandbox write is NEVER
+   * classified down to read.
    */
   ownerPluginSandboxRoot?: string;
   /**
