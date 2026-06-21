@@ -38,17 +38,23 @@ export interface RiskShadowRecord {
  */
 export function emitRiskShadowLog(record: RiskShadowRecord): void {
   const diverged = record.declaredCategory !== record.hostDerivedCategory;
-  log.info(
-    {
-      event: "risk-shadow",
-      toolName: record.toolName,
-      source: record.source,
-      ...(record.pluginId ? { pluginId: record.pluginId } : {}),
-      declaredCategory: record.declaredCategory,
-      hostDerivedCategory: record.hostDerivedCategory,
-      diverged,
-      enforced: record.enforced,
-    },
-    "risk-shadow",
-  );
+  const fields = {
+    event: "risk-shadow",
+    toolName: record.toolName,
+    source: record.source,
+    ...(record.pluginId ? { pluginId: record.pluginId } : {}),
+    declaredCategory: record.declaredCategory,
+    hostDerivedCategory: record.hostDerivedCategory,
+    diverged,
+    enforced: record.enforced,
+  };
+  // Only DIVERGENCES are actionable for reconciliation, and every tool call
+  // would otherwise log at INFO — far too noisy in agent loops. Log divergences
+  // at INFO (operators must see them) and agreements at DEBUG (kept for full
+  // distribution when debugging, but off the default INFO path).
+  if (diverged) {
+    log.info(fields, "risk-shadow");
+  } else {
+    log.debug(fields, "risk-shadow");
+  }
 }
