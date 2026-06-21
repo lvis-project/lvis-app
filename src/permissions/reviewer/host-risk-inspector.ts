@@ -18,11 +18,14 @@
  *  - HOST-OWNED SIGNALS ONLY: shell commands are parsed from the call args and
  *    matched against a built-in read-only command set; filesystem reach is
  *    inferred from the actual path arguments and checked against
- *    `allowedDirectories`; network reach is inferred from URL-shaped args /
- *    declared `hostFetch` routing — none of these read the declared category.
- *  - PURE: no I/O, no global state. The same canonicalization helpers used by
- *    {@link RuleBasedRiskClassifier} (sensitive-paths) are reused so path
- *    containment math is identical across the two modules.
+ *    `allowedDirectories`; network reach is inferred from URL-shaped args —
+ *    none of these read the declared category.
+ *  - NO GLOBAL STATE. Path containment reuses the same `sensitive-paths`
+ *    canonicalization as {@link RuleBasedRiskClassifier} — a bounded `realpath`
+ *    walk-up on the call's path ARGUMENTS (the only I/O here) — so containment
+ *    math is identical across the two modules. The `allowedDirectories` arrive
+ *    already canonicalized/case-folded (frozen-canonical contract) and are used
+ *    as-is, without re-walking.
  *
  * This module does NOT make the final permission decision and does NOT touch
  * {@link LlmRiskClassifier}. It only produces the effective `ToolCategory` that
@@ -129,10 +132,9 @@ export function inspectHostRisk(signals: HostRiskSignals): ToolCategory {
   // (3) Filesystem — inspect the actual path arguments.
   const paths = extractCallPaths(signals.finalInput, signals.pathFields);
   if (paths.length > 0) {
-    const allowed = signals.allowedDirectories.map((d) =>
-      caseFoldForMatch(canonicalizePathForMatch(d)),
-    );
-    const escapes = paths.some((p) => !isInsideAllowed(p, allowed));
+    // `allowedDirectories` are already canonical/case-folded (frozen contract) —
+    // re-canonicalizing would reintroduce realpath I/O and TOCTOU drift.
+    const escapes = paths.some((p) => !isInsideAllowed(p, signals.allowedDirectories));
     if (escapes) return "write";
     // A contained path argument with no read-only verb proof is still a
     // potential mutation. Default-strict: treat as write.
@@ -291,7 +293,7 @@ function getDottedFieldValue(input: Record<string, unknown>, field: string): unk
  * Containment check against canonicalized allowed dirs. Inputs MUST already be
  * canonicalized (same invariant as {@link RuleBasedRiskClassifier}).
  */
-function isInsideAllowed(path: string, allowed: string[]): boolean {
+function isInsideAllowed(path: string, allowed: readonly string[]): boolean {
   for (const a of allowed) {
     if (path === a || path.startsWith(a + "/")) return true;
   }

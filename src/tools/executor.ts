@@ -765,20 +765,25 @@ export class ToolExecutor {
     finalInput: Record<string, unknown>,
     allowedDirectories: readonly string[],
   ): ToolCategory {
-    // `meta` tools route through `decisionOverride`, not the category matrix,
-    // and the inspector does not model control-flow primitives — so a meta
-    // tool's host-derived category is meta itself (no divergence). The shadow
-    // log below still runs for it so reconciliation data covers EVERY
-    // invocation.
-    const hostDerivedCategory =
-      declaredCategory === "meta"
-        ? "meta"
-        : inspectHostRisk({
-            source: tool.source,
-            finalInput,
-            pathFields: tool.pathFields ?? [],
-            allowedDirectories,
-          });
+    // Only plugin/MCP tools carry an UNTRUSTED declared category worth
+    // re-deriving. `meta` control-flow primitives (which route through
+    // `decisionOverride`, not the category matrix) and builtins (trusted, known
+    // categories the inspector cannot re-derive — it would default-strict a
+    // read-only builtin to write) are self-consistent: their host-derived
+    // category IS the declared one. Skipping inspection for them means they
+    // never diverge, so they produce no shadow-log noise on every invocation.
+    const eligibleForHostDerivation =
+      (tool.source === "plugin" || tool.source === "mcp") &&
+      declaredCategory !== "meta";
+
+    const hostDerivedCategory = eligibleForHostDerivation
+      ? inspectHostRisk({
+          source: tool.source,
+          finalInput,
+          pathFields: tool.pathFields ?? [],
+          allowedDirectories,
+        })
+      : declaredCategory;
 
     const enforced = this.hostClassifiesRiskProvider();
     emitRiskShadowLog({
@@ -790,18 +795,6 @@ export class ToolExecutor {
       enforced,
     });
 
-    // `meta` enforcement is never re-derived — control-flow primitives keep
-    // their declared category in both flag states.
-    if (declaredCategory === "meta") return declaredCategory;
-
-    // Builtins carry trusted, known categories the inspector cannot re-derive
-    // (it has no positive read-only signal for a read-only builtin and would
-    // default-strict it to write). Only re-derive for plugin/MCP tools, whose
-    // declared category is untrusted; builtins keep their declared category
-    // even when the flag is on. Shadow logging above still runs for every
-    // source so divergence stays observable.
-    const eligibleForHostDerivation =
-      tool.source === "plugin" || tool.source === "mcp";
     return enforced && eligibleForHostDerivation
       ? hostDerivedCategory
       : declaredCategory;
