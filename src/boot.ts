@@ -827,6 +827,7 @@ export async function bootstrap(
     approvalGate,
     scriptHookManager,
     bootAuditLogger,
+    () => settingsService.get("features")?.hostClassifiesRisk ?? false,
   );
   const pluginSurfacePermissionScope = createPluginSurfacePermissionScope({
     readPersistedDirectories: () => readPermissionSettings().permissions.additionalDirectories,

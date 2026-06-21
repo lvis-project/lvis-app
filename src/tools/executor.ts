@@ -57,6 +57,8 @@ import type { PermissionAuditEntryInput, HookResult } from "../audit/audit-schem
 import { maskSensitiveData } from "../audit/dlp-filter.js";
 import type { RiskVerdict, ToolInvocationContext } from "../permissions/reviewer/risk-classifier.js";
 import { RuleBasedRiskClassifier, maxVerdict } from "../permissions/reviewer/risk-classifier.js";
+import { inspectHostRisk } from "../permissions/reviewer/host-risk-inspector.js";
+import { emitRiskShadowLog } from "../permissions/reviewer/risk-shadow-log.js";
 import { detectSandboxCapability } from "../permissions/sandbox-capability.js";
 // Store B — exact-tuple approval memory (args-scoped, session+persistent).
 // See ./executor.ts foreground modal-skip block + user-approval-store.ts.
@@ -694,6 +696,14 @@ export class ToolExecutor {
   private readonly rateLimiter = new RateLimiter();
   private readonly bashAstValidator?: BashAstValidator;
   private readonly scriptHookManager?: ScriptHookManager;
+  /**
+   * Permission policy host-classifies-risk migration gate. When this returns
+   * `true`, {@link resolveEnforcedCategory} enforces the host-derived category;
+   * when `false` (default) it enforces the plugin-declared category. Shadow
+   * logging runs regardless. Defaults to always-off so existing call sites and
+   * tests keep their current behaviour without change.
+   */
+  private readonly hostClassifiesRiskProvider: () => boolean;
 
   constructor(
     toolRegistry: ToolRegistry,
@@ -703,6 +713,7 @@ export class ToolExecutor {
     approvalGate?: ApprovalGate,
     scriptHookManager?: ScriptHookManager,
     auditLogger?: AuditLogger,
+    hostClassifiesRiskProvider?: () => boolean,
   ) {
     this.toolRegistry = toolRegistry;
     this.hookRunner = hookRunner ?? new HookRunner();
@@ -711,6 +722,7 @@ export class ToolExecutor {
     this.auditLogger = auditLogger ?? new AuditLogger();
     this.bashAstValidator = bashAstValidator;
     this.scriptHookManager = scriptHookManager;
+    this.hostClassifiesRiskProvider = hostClassifiesRiskProvider ?? (() => false);
     this.requirePermissionAuditChain = auditLogger?.isPermissionAuditChainReady() === true;
   }
 
@@ -730,6 +742,55 @@ export class ToolExecutor {
 
   getHookRunner(): HookRunner {
     return this.hookRunner;
+  }
+
+  /**
+   * Permission policy host-classifies-risk — resolve the EFFECTIVE category the
+   * policy pipeline will enforce for this invocation, and emit the shadow log.
+   *
+   * Shadow mode (always on): compute the host-derived category from host-owned
+   * signals ({@link inspectHostRisk}) and log it against the declared category
+   * so divergence can be reconciled across plugins before enforcement flips.
+   *
+   * Enforcement: when {@link hostClassifiesRiskProvider} returns `false`
+   * (Phase 1 default), the DECLARED category is returned unchanged — behaviour
+   * is identical to before this method existed. When it returns `true`, the
+   * host-derived category is returned (default-strict: never below the declared
+   * level is NOT asserted here — the inspector itself never classifies down to
+   * read without positive evidence).
+   */
+  private resolveEnforcedCategory(
+    tool: import("./base.js").Tool,
+    declaredCategory: ToolCategory,
+    finalInput: Record<string, unknown>,
+    allowedDirectories: readonly string[],
+  ): ToolCategory {
+    // `meta` tools route through `decisionOverride`, not the category matrix —
+    // the host-derived inspector does not model control-flow primitives, so
+    // leave them untouched in both shadow and enforced paths.
+    if (declaredCategory === "meta") return declaredCategory;
+
+    const hostDerivedCategory = inspectHostRisk({
+      source: tool.source,
+      finalInput,
+      pathFields: tool.pathFields ?? [],
+      allowedDirectories,
+      // hostFetch routing is inferred from the manifest networkAccess in a
+      // later phase; Phase 1 relies on URL-shaped args alone, so this stays
+      // undefined and the inspector falls back to argument inspection.
+    });
+
+    const enforced = this.hostClassifiesRiskProvider();
+    emitRiskShadowLog({
+      toolName: tool.name,
+      source: tool.source,
+      ...(tool.pluginId ? { pluginId: tool.pluginId } : {}),
+      declaredCategory,
+      hostDerivedCategory,
+      enforced,
+    });
+
+    return enforced ? hostDerivedCategory : declaredCategory;
   }
 
   private async runScriptHook(
@@ -1385,6 +1446,16 @@ export class ToolExecutor {
       ?? [];
     let invocationAllowedScope = buildAllowedScope(baseAdditionalDirectories);
     let invocationRuntimeAllowedDirectories = buildRuntimeAllowedDirectories(baseAdditionalDirectories);
+    // Permission policy host-classifies-risk — shadow mode (always) + enforced
+    // category (flag-gated). The declared category resolved above is the input;
+    // when the flag is off this is a no-op and `invocationCategory` is unchanged.
+    invocationCategory = this.resolveEnforcedCategory(
+      tool,
+      invocationCategory,
+      finalInput,
+      invocationAllowedScope.directories,
+    );
+    meta.category = invocationCategory;
     const makeEvaluationContext = (input: {
       pathFields: readonly string[];
       targetFilePaths?: readonly string[];
