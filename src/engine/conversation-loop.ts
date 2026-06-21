@@ -833,6 +833,7 @@ export class ConversationLoop {
       deps.approvalGate,
       deps.scriptHookManager,
       deps.auditLogger,
+      () => deps.settingsService.get("features")?.hostClassifiesRisk ?? false,
     );
     this.auditLogger = deps.auditLogger ?? new AuditLogger();
     this.refreshProvider();

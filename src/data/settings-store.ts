@@ -144,6 +144,24 @@ export interface FeatureFlags {
    * re-runs.
    */
   demoAutoplayEnabled?: boolean;
+  /**
+   * Permission policy — host-classifies-risk migration gate
+   * (docs/architecture/permission-policy-design.md; project_permission_review_redesign).
+   *
+   * When `false` (default), a tool invocation's effective permission category
+   * is the tool's DECLARED category (`tool.categoryForInput ?? tool.category`),
+   * exactly as before. When `true`, the host derives the effective category
+   * from host-owned signals only (see {@link inspectHostRisk}) and ignores
+   * the plugin-declared category — a tool grading its own danger is not a
+   * control (MCP spec: a server can lie).
+   *
+   * The flag ships OFF with SHADOW MODE always active: the host-derived
+   * category is computed and logged against the declared category for every
+   * invocation so the divergence can be reconciled across plugins BEFORE the
+   * flag is ever flipped. Migration can therefore only TIGHTEN, never silently
+   * change live behaviour.
+   */
+  hostClassifiesRisk?: boolean;
 }
 
 export interface AppSettings {
@@ -482,6 +500,10 @@ const DEFAULT_SETTINGS: AppSettings = {
     // chain. Any other path that wants to suppress the chain must set
     // this to `true` deliberately — no "missing key === skipped" trap.
     onboardingCompleted: false,
+    // Permission policy host-classifies-risk migration gate. Ships OFF —
+    // shadow mode logs host-derived vs declared category but enforcement
+    // still uses the declared category until this is deliberately flipped.
+    hostClassifiesRisk: false,
   },
 };
 
@@ -1182,6 +1204,9 @@ function normalizeFeatureFlags(input: unknown): FeatureFlags {
   }
   if (typeof obj.demoAutoplayEnabled === "boolean") {
     result.demoAutoplayEnabled = obj.demoAutoplayEnabled;
+  }
+  if (typeof obj.hostClassifiesRisk === "boolean") {
+    result.hostClassifiesRisk = obj.hostClassifiesRisk;
   }
   return result;
 }
