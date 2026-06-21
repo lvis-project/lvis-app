@@ -30,18 +30,13 @@
  */
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { Button } from "../../../components/ui/button.js";
-import {
-  Dialog,
-  DialogContent,
-  DialogDescription,
-  DialogHeader,
-  DialogTitle,
-} from "../../../components/ui/dialog.js";
+import { Dialog, DialogContent } from "../../../components/ui/dialog.js";
 import { Input } from "../../../components/ui/input.js";
 import { Label } from "../../../components/ui/label.js";
 import { Textarea } from "../../../components/ui/textarea.js";
 import { cn } from "../../../lib/utils.js";
 import type { LvisApi } from "../types.js";
+import { OnboardingHeader } from "../onboarding/OnboardingCard.js";
 import { inferRecommendedPlugins } from "../onboarding/plugin-recommendation-matrix.js";
 import { t } from "../../../i18n/runtime.js";
 import { useTranslation } from "../../../i18n/react.js";
@@ -275,29 +270,12 @@ export function MemorySeedDialog({
         data-testid="memory-seed-dialog"
         className="p-0 overflow-hidden"
       >
-        {/* Brand header — gradient avatar + title mirrors mockup line 441 */}
-        <DialogHeader className="px-6 pt-6 pb-3 space-y-0">
-          <div className="flex items-center gap-2">
-            <span
-              aria-hidden
-              className="grid h-7 w-7 place-items-center rounded-md text-[11px] text-primary-foreground"
-              style={{
-                background:
-                  "linear-gradient(135deg, hsl(var(--p-purple-500)), hsl(var(--p-blue-500)))",
-              }}
-            >
-              ✦
-            </span>
-            <div>
-              <DialogTitle className="text-sm font-medium">
-                {t("memorySeedDialog.brandTitle")}
-              </DialogTitle>
-              <DialogDescription className="text-[10px]">
-                {t("memorySeedDialog.brandSubtitle")}
-              </DialogDescription>
-            </div>
-          </div>
-        </DialogHeader>
+        {/* Brand header — gradient avatar + title scaffold shared with the
+            other onboarding screens via OnboardingHeader. */}
+        <OnboardingHeader
+          title={t("memorySeedDialog.brandTitle")}
+          description={t("memorySeedDialog.brandSubtitle")}
+        />
 
         <div className="px-6 pb-6 space-y-3">
           {/* LVIS welcome message card — MEMORY.md 첫 항목 안내 */}
@@ -350,8 +328,7 @@ export function MemorySeedDialog({
             data-testid="memory-seed-dialog:recommendations"
             className="rounded-lg p-3"
             style={{
-              background:
-                "linear-gradient(135deg, hsl(var(--p-purple-500) / 0.10), hsl(var(--p-orange-500) / 0.07))",
+              background: "var(--gradient-brand-soft)",
               border: "1px solid hsl(var(--p-purple-500) / 0.30)",
             }}
           >
@@ -413,10 +390,7 @@ export function MemorySeedDialog({
             data-testid="memory-seed-dialog:submit"
             onClick={handleSubmit}
             disabled={submitting}
-            style={{
-              background:
-                "linear-gradient(135deg, hsl(var(--p-purple-500)), hsl(var(--p-blue-500)))",
-            }}
+            style={{ background: "var(--gradient-brand)" }}
           >
             {t("memorySeedDialog.submitButton")}
           </Button>
