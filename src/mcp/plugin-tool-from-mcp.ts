@@ -19,18 +19,33 @@
  * namespace), `source:"plugin"`, its `pluginId`, and its DECLARED category. The
  * two adapters intentionally diverge because the trust models differ.
  *
- * Fail-closed: a tool whose `_meta` carries no valid `xyz.lvis/category` throws
- * here — exactly as `buildPluginTool` throws on a missing category — so an
- * authority-less plugin tool can never register with a silent default.
+ * DEFAULT-STRICT (host-classifies-risk, project_permission_review_redesign):
+ * a tool whose `_meta` carries no valid `xyz.lvis/category` no longer throws.
+ * A plugin grading its own danger is not a control (MCP spec: a server can
+ * lie), so a missing/invalid declaration is treated as `"write"` — the safe,
+ * write-equivalent baseline that asks foreground / routes to the reviewer
+ * headless. The authoritative effective category is derived host-side per
+ * invocation (`inspectHostRisk`); the declared value recorded here (or the
+ * strict default when absent) feeds shadow-mode reconciliation only.
  */
 import { createDynamicTool, type Tool } from "../tools/base.js";
 import type { PluginToolCategory } from "../plugins/types.js";
+import { createLogger } from "../lib/logger.js";
 import type { McpUiPayload } from "./types.js";
+
+const log = createLogger("plugin-tool-from-mcp");
 
 /** Reverse-DNS prefix for LVIS-private `_meta` keys (must mirror the forward projection). */
 const LVIS_META_PREFIX = "xyz.lvis/";
 
 const PLUGIN_TOOL_CATEGORIES: readonly PluginToolCategory[] = ["read", "write", "shell", "network"];
+
+/**
+ * Write-equivalent baseline applied when a discovered plugin tool declares no
+ * authoritative category. The deliberate safe default, NOT a bug-papering
+ * fallback: the host never auto-classifies an undeclared tool down to read.
+ */
+const DEFAULT_STRICT_CATEGORY: PluginToolCategory = "write";
 
 /**
  * The minimal shape this adapter consumes from a discovered MCP tool. Over a
@@ -70,10 +85,21 @@ function readCategory(meta: Record<string, unknown>, toolName: string): PluginTo
   if (typeof value === "string" && (PLUGIN_TOOL_CATEGORIES as readonly string[]).includes(value)) {
     return value as PluginToolCategory;
   }
-  throw new Error(
-    `Discovered plugin tool '${toolName}' has no authoritative '${LVIS_META_PREFIX}category' in _meta ` +
-      `(got ${JSON.stringify(value)}); refusing to register without a category (fail-closed).`,
+  // DEFAULT-STRICT: an authority-less tool registers as write-equivalent
+  // rather than failing the whole plugin load. The host derives the real
+  // effective category per invocation; a warn is logged so the missing
+  // declaration is visible during shadow-mode reconciliation.
+  log.warn(
+    {
+      event: "plugin-tool-missing-category",
+      toolName,
+      declared: value,
+      declaredType: typeof value,
+      appliedDefault: DEFAULT_STRICT_CATEGORY,
+    },
+    "discovered plugin tool declares no authoritative category — applying default-strict baseline",
   );
+  return DEFAULT_STRICT_CATEGORY;
 }
 
 function readPathFields(meta: Record<string, unknown>): string[] | undefined {

@@ -67,8 +67,81 @@ function schemaHasHostSecrets(schema: unknown): boolean {
   return properties?.hostSecrets !== undefined;
 }
 
-function patchHostCompatibilityIntoLegacySdkSchema(schema: unknown): unknown {
+/**
+ * Locate the `required` array that the SDK schema attaches to each toolSchemas
+ * entry (`properties.toolSchemas.additionalProperties.required`). The SDK
+ * references the per-tool shape inline today; if a future SDK build factors it
+ * into a `$ref`, the pointer is resolved and only the referenced definition's
+ * `required` array is returned — never a sibling schema's `required`.
+ */
+function findToolSchemaRequiredArrays(schema: unknown): string[][] {
+  const found: string[][] = [];
+  const root = asObject(schema);
+  const properties = asObject(root?.properties);
+  const toolSchemas = asObject(properties?.toolSchemas);
+  const additional = asObject(toolSchemas?.additionalProperties);
+  const direct = additional?.required;
+  if (Array.isArray(direct) && direct.every((v) => typeof v === "string")) {
+    found.push(direct as string[]);
+  }
+  // Indirect: toolSchemas.additionalProperties may be a `$ref` into $defs.
+  // Resolve the pointer and patch ONLY the referenced definition's `required`,
+  // not every same-shaped def (which could touch unrelated schemas).
+  const refTarget = typeof additional?.$ref === "string" ? additional.$ref : undefined;
+  if (refTarget) {
+    const req = asObject(resolveJsonPointer(root, refTarget))?.required;
+    if (Array.isArray(req) && req.every((v) => typeof v === "string")) {
+      found.push(req as string[]);
+    }
+  }
+  return found;
+}
+
+/**
+ * Resolve a local JSON Pointer `$ref` (e.g. `#/$defs/ToolSchema`) against the
+ * root schema. Returns undefined for external refs or a path that does not
+ * resolve. Handles the `~1`→`/` and `~0`→`~` pointer escapes.
+ */
+function resolveJsonPointer(root: unknown, ref: string): unknown {
+  if (!ref.startsWith("#/")) return undefined;
+  let current: unknown = root;
+  for (const rawSegment of ref.slice(2).split("/")) {
+    const segment = rawSegment.replace(/~1/g, "/").replace(/~0/g, "~");
+    const obj = asObject(current);
+    if (!obj) return undefined;
+    current = obj[segment];
+  }
+  return current;
+}
+
+/**
+ * Relax the SDK schema so a toolSchemas entry without `category` validates on
+ * the host. The host owns risk classification (default-strict at runtime), so
+ * it must tolerate a manifest that omits the declared category ahead of the SDK
+ * schema dropping the field. Mutates `schema.properties.toolSchemas.
+ * additionalProperties.required` in place, removing `"category"`. No-op when
+ * the path or the entry is absent.
+ */
+function patchCategoryOptionalIntoLegacySdkSchema(schema: unknown): unknown {
+  for (const required of findToolSchemaRequiredArrays(schema)) {
+    const idx = required.indexOf("category");
+    if (idx >= 0) required.splice(idx, 1);
+  }
+  return schema;
+}
+
+/**
+ * True when the SDK schema still REQUIRES a `category` on each toolSchemas
+ * entry — i.e. an unpatched schema that would reject a category-less manifest
+ * at load.
+ */
+function schemaRequiresToolCategory(schema: unknown): boolean {
+  return findToolSchemaRequiredArrays(schema).some((req) => req.includes("category"));
+}
+
+export function patchHostCompatibilityIntoLegacySdkSchema(schema: unknown): unknown {
   patchHostSecretsIntoLegacySdkSchema(schema);
+  patchCategoryOptionalIntoLegacySdkSchema(schema);
   return schema;
 }
 
@@ -150,7 +223,12 @@ export function getDeclaredEmittedEvents(manifest: PluginManifest): string[] {
  */
 export async function buildManifestValidator(): Promise<ValidateFunction> {
   const sdkSchema = await loadSdkManifestSchema();
-  const hostCompatibilityNeeded = !schemaHasHostSecrets(sdkSchema);
+  // Host-compat wrap is needed when the SDK schema lacks the host secrets
+  // extension OR still requires a per-tool `category`. The host classifies
+  // risk itself (default-strict), so a category-less manifest MUST load even
+  // when the shipped SDK schema still ships hostSecrets but mandates category.
+  const hostCompatibilityNeeded =
+    !schemaHasHostSecrets(sdkSchema) || schemaRequiresToolCategory(sdkSchema);
 
   try {
     // Prefer SDK helper when available so AJV options stay in lockstep.

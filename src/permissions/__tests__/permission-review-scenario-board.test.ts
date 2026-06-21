@@ -342,7 +342,10 @@ describe("permission-review-scenario-board-v2.html contract", () => {
     }
   });
 
-  it("S10 invalid plugin tool definition fails closed at SDK authority metadata", () => {
+  it("S10 a category-less plugin tool loads at the host default-strict baseline (write-equivalent)", () => {
+    // host-classifies-risk: the host no longer trusts (or requires) the plugin
+    // to declare its own danger. A category-less tool registers as
+    // write-equivalent — the safe default — instead of failing the load.
     const manifest = {
       id: "bad-plugin",
       name: "bad-plugin",
@@ -351,14 +354,15 @@ describe("permission-review-scenario-board-v2.html contract", () => {
       tools: ["bad_write"],
       toolSchemas: {
         bad_write: {
+          description: "no category declared",
           inputSchema: { type: "object", properties: { path: { type: "string" } } },
         },
       },
     } as PluginManifest;
     const runtime = { call: vi.fn() } as unknown as PluginRuntime;
-    expect(() => buildPluginToolsForTest(runtime, "bad-plugin", manifest)).toThrow(
-      /no authoritative.*category/,
-    );
+    const tools = buildPluginToolsForTest(runtime, "bad-plugin", manifest);
+    expect(tools).toHaveLength(1);
+    expect(tools[0].category).toBe("write");
   });
 
   it("S11 overlay prompt import remains separate from the tool permission path", () => {

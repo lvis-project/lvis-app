@@ -269,8 +269,17 @@ export interface PluginManifest {
     string,
     {
       description: string;
-      /** Permission category declared by the SDK manifest schema. `meta` is host-only. */
-      category: PluginToolCategory;
+      /**
+       * Permission category — now OPTIONAL (host-classifies-risk,
+       * project_permission_review_redesign). A plugin grading its own danger
+       * is not a control (MCP spec: a server can lie), so the host no longer
+       * requires it and never trusts it as the authority: the effective
+       * category is derived host-side per invocation (`inspectHostRisk`). When
+       * omitted, the host applies a write-equivalent default-strict baseline.
+       * Still accepted (and projected to `_meta` for shadow-mode
+       * reconciliation) when a plugin declares it. `meta` is host-only.
+       */
+      category?: PluginToolCategory;
       /** Filesystem argument names that must be checked against allowed directories. */
       pathFields?: string[];
       /**
