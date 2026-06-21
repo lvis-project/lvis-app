@@ -90,26 +90,13 @@ export interface HostRiskSignals {
   pathFields: readonly string[];
   /** Canonicalized allowed directories (Layer 1 scope). */
   allowedDirectories: readonly string[];
-  /**
-   * The owning plugin's sandbox root (`~/.lvis/plugins/<id>/`) when known.
-   * A write that stays inside the sandbox is still a write — this is supplied
-   * so containment can be reasoned about, but a sandbox write is NEVER
-   * classified down to read.
-   */
-  ownerPluginSandboxRoot?: string;
-  /**
-   * True when the tool routes network egress through the host-mediated
-   * `hostApi.hostFetch` chokepoint and/or declares `networkAccess` in its
-   * manifest. A host-mediated network tool is unambiguously `"network"`.
-   */
-  routesThroughHostFetch?: boolean;
 }
 
 /**
  * Derive the effective {@link ToolCategory} from host-owned signals.
  *
  * Order (first decisive signal wins), all default-strict on ambiguity:
- *  1. Network — a URL-shaped arg or host-mediated egress → `"network"`.
+ *  1. Network — a URL-shaped arg → `"network"`.
  *  2. Shell — a command-bearing arg present → parse it; a fully read-only
  *     compound → `"read"`, otherwise `"shell"`.
  *  3. Filesystem — a path arg that escapes `allowedDirectories` → `"write"`
@@ -125,8 +112,7 @@ export function inspectHostRisk(signals: HostRiskSignals): ToolCategory {
   // what its arguments look like.
   if (signals.source === "mcp") return "network";
 
-  // (1) Network — host-mediated egress or a URL-shaped argument.
-  if (signals.routesThroughHostFetch === true) return "network";
+  // (1) Network — a URL-shaped argument.
   if (hasNetworkTarget(signals.finalInput)) return "network";
 
   // (2) Shell — classify the command string if one is present.
@@ -205,6 +191,12 @@ function extractShellCommand(input: Record<string, unknown>): string | null {
  * real verb. Any unknown verb fails the whole command closed.
  */
 export function isReadOnlyCommand(command: string): boolean {
+  // Redirections (`>`, `>>`, `<`) and command substitution (`$(…)`, backticks)
+  // can write files or execute hidden commands the head-verb scan cannot see
+  // (`echo hi > out`, `ls $(rm -rf /)`). Default-strict: a command carrying any
+  // of these is not provably read-only. (Bare `${VAR}` parameter expansion does
+  // NOT execute, so it is not treated as mutating.)
+  if (/[<>`]|\$\(/.test(command)) return false;
   const leaves = splitCompound(command);
   if (leaves.length === 0) return false;
   return leaves.every((leaf) => isReadOnlyLeaf(leaf));

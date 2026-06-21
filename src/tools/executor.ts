@@ -765,20 +765,20 @@ export class ToolExecutor {
     finalInput: Record<string, unknown>,
     allowedDirectories: readonly string[],
   ): ToolCategory {
-    // `meta` tools route through `decisionOverride`, not the category matrix —
-    // the host-derived inspector does not model control-flow primitives, so
-    // leave them untouched in both shadow and enforced paths.
-    if (declaredCategory === "meta") return declaredCategory;
-
-    const hostDerivedCategory = inspectHostRisk({
-      source: tool.source,
-      finalInput,
-      pathFields: tool.pathFields ?? [],
-      allowedDirectories,
-      // hostFetch routing is not yet inferred from the manifest networkAccess
-      // here; the inspector relies on URL-shaped args alone, so this stays
-      // undefined and falls back to argument inspection.
-    });
+    // `meta` tools route through `decisionOverride`, not the category matrix,
+    // and the inspector does not model control-flow primitives — so a meta
+    // tool's host-derived category is meta itself (no divergence). The shadow
+    // log below still runs for it so reconciliation data covers EVERY
+    // invocation.
+    const hostDerivedCategory =
+      declaredCategory === "meta"
+        ? "meta"
+        : inspectHostRisk({
+            source: tool.source,
+            finalInput,
+            pathFields: tool.pathFields ?? [],
+            allowedDirectories,
+          });
 
     const enforced = this.hostClassifiesRiskProvider();
     emitRiskShadowLog({
@@ -789,6 +789,10 @@ export class ToolExecutor {
       hostDerivedCategory,
       enforced,
     });
+
+    // `meta` enforcement is never re-derived — control-flow primitives keep
+    // their declared category in both flag states.
+    if (declaredCategory === "meta") return declaredCategory;
 
     // Builtins carry trusted, known categories the inspector cannot re-derive
     // (it has no positive read-only signal for a read-only builtin and would
