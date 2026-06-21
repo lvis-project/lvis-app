@@ -18,13 +18,17 @@ const THUMB_MAX_PX = 48;
  * Color ramp for the stacked-card visual. Each successive attachment adds a
  * new colored card behind the icon-bearing top layer, so 2-vs-5 attachments
  * are visually distinct (denser stack = more cards).
+ *
+ * Each entry resolves to a per-bundle `--chip-stack-N` gradient token (keyed
+ * to the categorical `--chart-*` palette in styles.css), so the stack re-tints
+ * with the active theme bundle instead of staying fixed light-mode pastels.
  */
 const STACK_COLORS = [
-  "from-sky-300 to-sky-700",
-  "from-emerald-300 to-emerald-700",
-  "from-amber-300 to-amber-600",
-  "from-violet-300 to-violet-700",
-  "from-rose-300 to-rose-700",
+  "var(--chip-stack-1)",
+  "var(--chip-stack-2)",
+  "var(--chip-stack-3)",
+  "var(--chip-stack-4)",
+  "var(--chip-stack-5)",
 ];
 
 const STACK_OFFSET_PX = 2;
@@ -101,8 +105,14 @@ function StackVisual({ layers }: { layers: number }) {
         return (
           <div
             key={i}
-            style={{ left, top, width: 40, height: 40 }}
-            className={`absolute rounded-md border border-background bg-gradient-to-br ${STACK_COLORS[i % STACK_COLORS.length]} shadow`}
+            style={{
+              left,
+              top,
+              width: 40,
+              height: 40,
+              backgroundImage: STACK_COLORS[i % STACK_COLORS.length],
+            }}
+            className="absolute rounded-md border border-background shadow"
           />
         );
       })}

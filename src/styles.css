@@ -477,6 +477,52 @@
     --radius: 0.6rem;
   }
 
+  /* ── Tier B-derived: composite tokens ─────────────────────────────────
+   *  Diff-hunk and brand-gradient tokens are *derived* from the per-bundle
+   *  semantic tokens (--success / --destructive / --p-* primitives). Because
+   *  CSS custom properties resolve lazily at use-time, a single definition
+   *  here picks up whichever bundle's --success / --destructive is active —
+   *  so diff hunks and brand gradients adapt to every bundle (dark, light,
+   *  high-contrast) without re-declaring per bundle.
+   *
+   *  Each value is a fully-formed CSS color/gradient (hsl() wrapper included)
+   *  so call sites reference `var(--diff-add)` / `var(--gradient-brand)`
+   *  directly. The alpha-bearing diff-fill tokens keep the hunk wash subtle
+   *  while the -fg tokens carry the full-strength accent for the +/− sigils.
+   * ─────────────────────────────────────────────────────────────────── */
+  :root {
+    /* Diff hunks — add/remove fills + sigil accents */
+    --diff-add:       hsl(var(--success) / 0.15);
+    --diff-remove:    hsl(var(--destructive) / 0.15);
+    --diff-add-fg:    hsl(var(--success));
+    --diff-remove-fg: hsl(var(--destructive));
+
+    /* Brand gradient — violet → blue. The single source for the onboarding
+     * brand avatar and primary CTA fills. --gradient-brand-soft is the faint
+     * blend used behind the Memory Seed recommendation card. */
+    --gradient-brand: linear-gradient(
+      135deg,
+      hsl(var(--p-purple-500)),
+      hsl(var(--p-blue-500))
+    );
+    --gradient-brand-soft: linear-gradient(
+      135deg,
+      hsl(var(--p-purple-500) / 0.10),
+      hsl(var(--p-orange-500) / 0.07)
+    );
+
+    /* Attachment stacked-card ramp — keyed to the per-bundle categorical
+     * --chart-* palette so each successive card is visually distinct and the
+     * whole stack re-tints with the active bundle. Each is a top-left→bottom-
+     * right wash from the chart hue's light edge to its full strength, giving
+     * the cards depth against the muted chip surface. */
+    --chip-stack-1: linear-gradient(135deg, hsl(var(--chart-1) / 0.55), hsl(var(--chart-1)));
+    --chip-stack-2: linear-gradient(135deg, hsl(var(--chart-2) / 0.55), hsl(var(--chart-2)));
+    --chip-stack-3: linear-gradient(135deg, hsl(var(--chart-3) / 0.55), hsl(var(--chart-3)));
+    --chip-stack-4: linear-gradient(135deg, hsl(var(--chart-4) / 0.55), hsl(var(--chart-4)));
+    --chip-stack-5: linear-gradient(135deg, hsl(var(--chart-5) / 0.55), hsl(var(--chart-5)));
+  }
+
   /* ── Bundle token blocks ──────────────────────────────────────────────
    *  Each bundle defines ALL semantic tokens (Tier B + Tier C + action)
    *  in a single :root[data-theme-bundle="<id>"] block. Self-contained:
