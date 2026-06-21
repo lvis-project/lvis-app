@@ -86,6 +86,21 @@ describe("inspectHostRisk — network classification", () => {
   it("classifies host-mediated egress as network", () => {
     expect(signals({ finalInput: { anything: 1 }, routesThroughHostFetch: true })).toBe("network");
   });
+
+  it("classifies a URL under an arbitrary key as network (default-strict)", () => {
+    expect(signals({ finalInput: { target: "https://example.com/webhook" } })).toBe("network");
+    expect(signals({ finalInput: { callback: "wss://example.com/socket" } })).toBe("network");
+  });
+});
+
+describe("inspectHostRisk — foreign-peer (mcp) source", () => {
+  it("classifies any MCP-source tool as network, never classifying down via args", () => {
+    // A read-only-looking command from an external MCP server must NOT be
+    // downgraded to read — foreign peers are host-owned default-strict network.
+    expect(signals({ source: "mcp", finalInput: { command: "ls -la" } })).toBe("network");
+    expect(signals({ source: "mcp", finalInput: {} })).toBe("network");
+    expect(signals({ source: "mcp", finalInput: { note: "hello" } })).toBe("network");
+  });
 });
 
 describe("inspectHostRisk — filesystem classification", () => {

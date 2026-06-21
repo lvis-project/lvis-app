@@ -118,6 +118,13 @@ export interface HostRiskSignals {
  *  4. Default-strict — no positive read-only evidence → `"write"`.
  */
 export function inspectHostRisk(signals: HostRiskSignals): ToolCategory {
+  // External MCP tools are foreign peers — the host assigns them `"network"`
+  // when adapting them (mcp-tool-adapter). Argument heuristics must never
+  // classify such a tool DOWN below network on the strength of its args, so a
+  // foreign-peer call is host-owned default-strict `"network"` regardless of
+  // what its arguments look like.
+  if (signals.source === "mcp") return "network";
+
   // (1) Network — host-mediated egress or a URL-shaped argument.
   if (signals.routesThroughHostFetch === true) return "network";
   if (hasNetworkTarget(signals.finalInput)) return "network";
@@ -145,23 +152,40 @@ export function inspectHostRisk(signals: HostRiskSignals): ToolCategory {
   return "write";
 }
 
-/** True when an argument parses as an absolute/relative URL or carries a host. */
+/** True when a string carries a parseable URL with a network scheme. */
+function isNetworkUrl(value: string): boolean {
+  if (value.length === 0) return false;
+  try {
+    const u = new URL(value);
+    return (
+      u.protocol === "http:" ||
+      u.protocol === "https:" ||
+      u.protocol === "ws:" ||
+      u.protocol === "wss:"
+    );
+  } catch {
+    return false;
+  }
+}
+
+/**
+ * True when any argument is a network target. Checks the named URL-bearing
+ * fields and a bare `host` field, then — default-strict toward `"network"` —
+ * scans EVERY top-level string value for URL-shaped content, so a URL hidden
+ * under an arbitrary key still escalates instead of slipping past the heuristic.
+ */
 function hasNetworkTarget(input: Record<string, unknown>): boolean {
   for (const key of NETWORK_FIELDS) {
     const value = input[key];
-    if (typeof value !== "string" || value.length === 0) continue;
-    try {
-      // A parseable URL with a network scheme is a network target.
-      const u = new URL(value);
-      if (u.protocol === "http:" || u.protocol === "https:" || u.protocol === "ws:" || u.protocol === "wss:") {
-        return true;
-      }
-    } catch {
-      // Not a URL — fall through. A bare "host" field is handled below.
-    }
+    if (typeof value === "string" && isNetworkUrl(value)) return true;
   }
   const host = input.host;
-  return typeof host === "string" && host.length > 0;
+  if (typeof host === "string" && host.length > 0) return true;
+  // Default-strict: a network URL under any other key is still a network target.
+  for (const value of Object.values(input)) {
+    if (typeof value === "string" && isNetworkUrl(value)) return true;
+  }
+  return false;
 }
 
 /** Pull a shell command string out of the call args, if any. */
