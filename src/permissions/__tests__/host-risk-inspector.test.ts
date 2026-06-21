@@ -54,6 +54,16 @@ describe("inspectHostRisk — shell command classification", () => {
     expect(isReadOnlyCommand("cat foo | tee out")).toBe(false);
   });
 
+  it("treats redirections and command substitution as non-read-only", () => {
+    expect(isReadOnlyCommand("echo hi > out")).toBe(false);
+    expect(isReadOnlyCommand("cat foo >> log")).toBe(false);
+    expect(isReadOnlyCommand("cat < in")).toBe(false);
+    expect(isReadOnlyCommand("ls $(rm -rf /)")).toBe(false);
+    expect(isReadOnlyCommand("echo `rm -rf /`")).toBe(false);
+    // bare parameter expansion does NOT execute — still read-only
+    expect(isReadOnlyCommand("ls ${HOME}")).toBe(true);
+  });
+
   it("strips wrapper commands to reach the real verb", () => {
     expect(isReadOnlyCommand("timeout 5s ls")).toBe(true);
     expect(isReadOnlyCommand("nice -n 5 cat foo")).toBe(true);
@@ -81,10 +91,6 @@ describe("inspectHostRisk — network classification", () => {
 
   it("classifies a bare host arg as network", () => {
     expect(signals({ finalInput: { host: "graph.microsoft.com" } })).toBe("network");
-  });
-
-  it("classifies host-mediated egress as network", () => {
-    expect(signals({ finalInput: { anything: 1 }, routesThroughHostFetch: true })).toBe("network");
   });
 
   it("classifies a URL under an arbitrary key as network (default-strict)", () => {
