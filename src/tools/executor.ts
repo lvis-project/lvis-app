@@ -753,7 +753,7 @@ export class ToolExecutor {
    * so divergence can be reconciled across plugins before enforcement flips.
    *
    * Enforcement: when {@link hostClassifiesRiskProvider} returns `false`
-   * (Phase 1 default), the DECLARED category is returned unchanged — behaviour
+   * (the default), the DECLARED category is returned unchanged — behaviour
    * is identical to before this method existed. When it returns `true`, the
    * host-derived category is returned (default-strict: never below the declared
    * level is NOT asserted here — the inspector itself never classifies down to
@@ -775,9 +775,9 @@ export class ToolExecutor {
       finalInput,
       pathFields: tool.pathFields ?? [],
       allowedDirectories,
-      // hostFetch routing is inferred from the manifest networkAccess in a
-      // later phase; Phase 1 relies on URL-shaped args alone, so this stays
-      // undefined and the inspector falls back to argument inspection.
+      // hostFetch routing is not yet inferred from the manifest networkAccess
+      // here; the inspector relies on URL-shaped args alone, so this stays
+      // undefined and falls back to argument inspection.
     });
 
     const enforced = this.hostClassifiesRiskProvider();

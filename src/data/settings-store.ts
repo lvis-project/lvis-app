@@ -155,7 +155,7 @@ export interface FeatureFlags {
    * the plugin-declared category — a tool grading its own danger is not a
    * control (MCP spec: a server can lie).
    *
-   * Phase 1 ships this flag OFF with SHADOW MODE always active: the host-derived
+   * The flag ships OFF with SHADOW MODE always active: the host-derived
    * category is computed and logged against the declared category for every
    * invocation so the divergence can be reconciled across plugins BEFORE the
    * flag is ever flipped. Migration can therefore only TIGHTEN, never silently
