@@ -790,7 +790,17 @@ export class ToolExecutor {
       enforced,
     });
 
-    return enforced ? hostDerivedCategory : declaredCategory;
+    // Builtins carry trusted, known categories the inspector cannot re-derive
+    // (it has no positive read-only signal for a read-only builtin and would
+    // default-strict it to write). Only re-derive for plugin/MCP tools, whose
+    // declared category is untrusted; builtins keep their declared category
+    // even when the flag is on. Shadow logging above still runs for every
+    // source so divergence stays observable.
+    const eligibleForHostDerivation =
+      tool.source === "plugin" || tool.source === "mcp";
+    return enforced && eligibleForHostDerivation
+      ? hostDerivedCategory
+      : declaredCategory;
   }
 
   private async runScriptHook(
