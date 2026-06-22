@@ -222,8 +222,11 @@ describe("SettingsService role presets", () => {
     expect(service.get("chat").autoCompact).toBe(false);
   });
 
-  it("normalizes feature flags so idle preference refresh is opt-in boolean only", async () => {
+  it("defaults idle preference refresh on and normalizes the flag to boolean only", async () => {
     const service = new SettingsService({ userDataPath });
+    expect(service.get("features")?.idlePreferenceRefresh).toBe(true);
+
+    await service.patch({ features: { idlePreferenceRefresh: false } });
     expect(service.get("features")?.idlePreferenceRefresh).toBe(false);
 
     await service.patch({ features: { idlePreferenceRefresh: true } });
