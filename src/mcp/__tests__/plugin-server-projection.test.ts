@@ -52,6 +52,23 @@ describe("plugin-server-projection — toolSchema → MCP Tool (#1230 §3.3)", (
     }
   });
 
+  it("default-strict: a toolSchema entry without category projects write-equivalent (loads, no throw)", () => {
+    // host-classifies-risk: category is optional. A manifest that omits it
+    // must still load and project a valid (write-equivalent) declared category.
+    const tool = toolSchemaToMcpTool(
+      "uncategorized_tool",
+      {
+        description: "no category declared",
+        inputSchema: { type: "object", properties: {} },
+      },
+      "1.0.0",
+    );
+    expect(tool._meta["xyz.lvis/category"]).toBe("write");
+    // annotations reflect the write-equivalent baseline (destructive, not read-only)
+    expect(tool.annotations.readOnlyHint).toBe(false);
+    expect(tool.annotations.destructiveHint).toBe(true);
+  });
+
   it("falls back the tool version to the manifest version when omitted, else uses the tool's own", () => {
     const start = toolSchemaToMcpTool("meeting_start", BASE_MANIFEST.toolSchemas!.meeting_start, "2.1.0");
     expect(start._meta["xyz.lvis/version"]).toBe("2.1.0"); // inherits manifest version

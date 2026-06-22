@@ -12,7 +12,10 @@
 import { describe, it, expect, beforeEach } from "vitest";
 import * as AjvModule from "ajv";
 import * as AddFormatsModule from "ajv-formats";
-import { readFile } from "node:fs/promises";
+import { readFile, mkdtemp, writeFile, rm } from "node:fs/promises";
+import { realpathSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 import { createRequire } from "node:module";
 import {
   applyConfigDefaults,
@@ -22,6 +25,7 @@ import {
   stripSecretFields,
   compileConfigSchemaValidator,
 } from "../config-schema.js";
+import { patchHostCompatibilityIntoLegacySdkSchema } from "../runtime/manifest-validation.js";
 import {
   emitPluginConfigChange,
   subscribePluginConfigChange,
@@ -45,7 +49,10 @@ function buildAjv() {
 
 async function loadHostManifestSchema() {
   const raw = await readFile(SCHEMA_PATH, "utf-8");
-  return JSON.parse(raw);
+  // The host applies its compatibility relaxations (host secrets extension,
+  // optional per-tool category) before compiling the SDK schema, so tests
+  // validate against the same shape the runtime enforces.
+  return patchHostCompatibilityIntoLegacySdkSchema(JSON.parse(raw));
 }
 
 describe("US-B1 — host plugin.schema.json declares configSchema", () => {
@@ -180,14 +187,22 @@ describe("toolSchemas authority metadata", () => {
     expect(ok).toBe(true);
   });
 
-  it("AJV strict rejects toolSchemas without a category", async () => {
+  it("host schema accepts toolSchemas without a category", async () => {
+    // The host owns risk classification (default-strict at runtime), so the
+    // host-compat schema tolerates a manifest that omits the per-tool category
+    // ahead of the SDK schema dropping the field. A category, when present,
+    // must still validate (see the test above).
     const ajv = buildAjv();
     const validate = ajv.compile(await loadHostManifestSchema());
     const ok = validate(manifestWithToolSchema({
       description: "Test ping has no permission category.",
       inputSchema: { type: "object", properties: {} },
     }));
-    expect(ok).toBe(false);
+    if (!ok) {
+      // eslint-disable-next-line no-console
+      console.error("AJV errors:", validate.errors);
+    }
+    expect(ok).toBe(true);
   });
 
   it("AJV strict rejects invalid category and malformed pathFields", async () => {
@@ -200,6 +215,37 @@ describe("toolSchemas authority metadata", () => {
       inputSchema: { type: "object", properties: {} },
     }));
     expect(ok).toBe(false);
+  });
+
+  it("end-to-end: parsePluginJson loads a category-less manifest on the host", async () => {
+    const { buildManifestValidator, parsePluginJson } = await import(
+      "../runtime/manifest-validation.js"
+    );
+    const validator = await buildManifestValidator();
+    const manifest = {
+      id: "category-less-plugin",
+      name: "Category-less",
+      version: "1.0.0",
+      description: "A manifest whose toolSchemas omit the declared category.",
+      publisher: "Test fixture",
+      entry: "dist/index.js",
+      tools: ["test_ping"],
+      toolSchemas: {
+        test_ping: {
+          description: "Test ping with no permission category.",
+          inputSchema: { type: "object", properties: {} },
+        },
+      },
+    };
+    const dir = await mkdtemp(join(realpathSync(tmpdir()), "manifest-cat-less-"));
+    try {
+      const file = join(dir, "plugin.json");
+      await writeFile(file, JSON.stringify(manifest), "utf-8");
+      const parsed = await parsePluginJson(file, validator);
+      expect(parsed.id).toBe("category-less-plugin");
+    } finally {
+      await rm(dir, { recursive: true, force: true });
+    }
   });
 });
 
