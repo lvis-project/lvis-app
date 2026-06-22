@@ -27,6 +27,7 @@ import type {
 } from "../../shared/render-html-preview.js";
 import type { SessionTodoItem } from "../../shared/session-todo.js";
 import type { MarketplaceAnnouncementPayload } from "../../shared/marketplace-announcements.js";
+import type { SandboxCapabilityInfo } from "../../shared/sandbox-capability-info.js";
 
 // Re-export MCP types for renderer-side consumers (type-only, no main-process runtime)
 export type { McpServerConfig, McpServerConfigDto, McpServerState };
@@ -215,6 +216,12 @@ export type AppSettings = {
      * `FeatureFlags.hostClassifiesRisk`. Default false (shadow mode only).
      */
     hostClassifiesRisk?: boolean;
+    /**
+     * OS tool sandbox opt-in. Mirrors the main-process SOT in
+     * `src/data/settings-store.ts` `FeatureFlags.osToolSandbox`. Default
+     * false; takes effect only when a platform sandbox runner is available.
+     */
+    osToolSandbox?: boolean;
   };
 };
 
@@ -1312,6 +1319,8 @@ export type LvisPermissionApi = {
    * stored approval was applied. Returns an unsubscribe function.
    */
   onUserApprovalHit: (cb: (payload: UserApprovalHitPayload) => void) => () => void;
+  /** Read-only: honest OS sandbox capability for the current platform. */
+  sandboxCapability: () => Promise<SandboxCapabilityInfo>;
   /** Permission policy — `/permission reviewer ...` slash dispatch. */
   reviewerDispatch: (
     rawArgs: string,
