@@ -956,6 +956,11 @@ export function PermissionsTab() {
                     : t("permissionsTab.osSandboxCapabilityOther")}
               </p>
               <p className="italic">{t("permissionsTab.osSandboxRestartNote")}</p>
+              {sandboxCapability.reason ? (
+                <p data-testid="os-sandbox-detection-reason">
+                  {t("permissionsTab.osSandboxDetectionReason", { reason: sandboxCapability.reason })}
+                </p>
+              ) : null}
             </div>
           ) : null}
         </SettingsSection>
