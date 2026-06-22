@@ -100,10 +100,12 @@ export function registerPermissionsHandlers(deps: IpcDeps): void {
   });
 
   // read-only, sender guard optional — honest OS sandbox capability for the
-  // current platform. Reflects whether a runner is actually registered +
-  // detected available (not just the platform string), so the settings
-  // toggle can show "not available on this platform" rather than silently
-  // doing nothing.
+  // current platform. `available`/`kind` report the PLATFORM's potential
+  // (macOS/Linux can confine, Windows/others cannot), NOT whether a runner is
+  // currently registered — registration is boot-time + opt-in, so reporting
+  // the platform potential lets the toggle show "not available on this
+  // platform" rather than reading as unavailable merely because it's off.
+  // `enabled` separately reflects the current setting.
   ipcMain.handle(PERMISSIONS.sandboxCapability, async () => {
     const { getActiveDetection } = await import("../../permissions/sandbox-runner.js");
     const { sandboxConfinementForPlatform } = await import(

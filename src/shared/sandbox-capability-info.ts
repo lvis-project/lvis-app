@@ -23,9 +23,12 @@ export interface SandboxCapabilityInfo {
   platform: NodeJS.Platform;
   /** Whether the user setting (or env escape-hatch) currently has the sandbox enabled. */
   enabled: boolean;
-  /** True only when a runner is registered AND detected available on this host. */
+  /** Whether THIS PLATFORM can confine tools (its potential), independent of
+   * whether a runner is currently registered — so the toggle can be shown
+   * before the user opts in. macOS/Linux → true, Windows/others → false. */
   available: boolean;
-  /** Detection kind from the active runner ("full" | "partial" | "none"). */
+  /** The platform's confinement strength ("full" Linux | "partial" macOS |
+   * "none"), derived from the platform, not from a registered runner. */
   kind: "full" | "partial" | "none";
   /** Human-readable reason from runner detection (e.g. missing binary). */
   reason: string;

@@ -43,10 +43,11 @@ export interface SandboxWriteJailInput {
  * Compute the canonicalized, de-duplicated set of filesystem paths the
  * sandbox may grant write access to for this invocation.
  *
- * Pure function: canonicalization uses {@link canonicalizePathForMatch}
- * (the same normalization the reviewer's sensitive-path layer uses) so the
- * OS jail and the reviewer judgement see bit-identical path strings. No
- * spawn, no OS primitive — testable in isolation.
+ * Canonicalization uses {@link canonicalizePathForMatch} (the same
+ * normalization the reviewer's sensitive-path layer uses) so the OS jail and
+ * the reviewer judgement see bit-identical path strings. That helper performs
+ * a bounded synchronous `realpath` walk-up (the only I/O here); the function
+ * has no global state and does not spawn, so it stays testable in isolation.
  *
  * Builtins / no-plugin shell: `ownerPluginSandboxRoot` is undefined, so the
  * jail is exactly the allowed directories. A plugin-owned tool additionally
