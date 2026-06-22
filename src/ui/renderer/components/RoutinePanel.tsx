@@ -8,7 +8,7 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import { t } from "../../../i18n/runtime.js";
 import { Badge } from "../../../components/ui/badge.js";
 import { Button } from "../../../components/ui/button.js";
-import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "../../../components/ui/card.js";
+import { CardContent, CardDescription, CardHeader, CardTitle } from "../../../components/ui/card.js";
 import { Checkbox } from "../../../components/ui/checkbox.js";
 import { Input } from "../../../components/ui/input.js";
 import { Label } from "../../../components/ui/label.js";
@@ -701,7 +701,7 @@ export function RoutinePanel({ api, onOpenSession }: RoutinePanelProps) {
 
   return (
     <>
-      <Card
+      <div
         className="mx-auto flex min-h-0 min-w-0 flex-1 w-full max-w-3xl flex-col overflow-hidden"
         data-testid="routine-panel"
       >
@@ -793,7 +793,7 @@ export function RoutinePanel({ api, onOpenSession }: RoutinePanelProps) {
             </section>
           </div>
         </CardContent>
-      </Card>
+      </div>
 
       {showAddModal && (
         <AddRoutineModal

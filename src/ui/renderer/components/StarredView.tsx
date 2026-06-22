@@ -1,6 +1,6 @@
 import { X as XIcon } from "lucide-react";
 import { Button } from "../../../components/ui/button.js";
-import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "../../../components/ui/card.js";
+import { CardContent, CardDescription, CardHeader, CardTitle } from "../../../components/ui/card.js";
 import { Badge } from "../../../components/ui/badge.js";
 import { ScrollArea } from "../../../components/ui/scroll-area.js";
 import type { LvisApi } from "../types.js";
@@ -34,7 +34,7 @@ export function StarredView({
 }: StarredViewProps) {
   const { t } = useTranslation();
   return (
-    <Card className="mx-auto flex min-h-0 min-w-0 flex-1 w-full max-w-6xl flex-col overflow-hidden">
+    <div className="mx-auto flex min-h-0 min-w-0 flex-1 w-full max-w-6xl flex-col overflow-hidden">
       <CardHeader>
         <div className="flex items-center justify-between">
           <CardTitle>{t("starredView.title")}</CardTitle>
@@ -82,6 +82,6 @@ export function StarredView({
           </ScrollArea>
         </section>
       </CardContent>
-    </Card>
+    </div>
   );
 }
