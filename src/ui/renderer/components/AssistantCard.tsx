@@ -54,7 +54,7 @@ function AssistantCardImpl({
       className={
         isSystemNotice
           ? "group relative min-w-0 w-full max-w-full overflow-visible rounded-lg border border-destructive/(--opacity-medium) bg-destructive/(--opacity-faint) p-3 text-sm shadow-sm lvis-anim-message-in"
-          : "group relative min-w-0 w-full max-w-full overflow-visible rounded-lg border bg-card p-3 text-sm shadow-sm transition-shadow hover:shadow-md lvis-anim-message-in"
+          : "group relative min-w-0 w-full max-w-full overflow-visible py-1 text-sm lvis-anim-message-in"
       }
     >
       {/* Header bar — mirrors WorkBoardPanel's SectionShell header pattern */}
@@ -63,7 +63,7 @@ function AssistantCardImpl({
           className={
             isSystemNotice
               ? "mb-2 flex items-center gap-1.5 rounded border-b border-destructive/(--opacity-light) pb-2 text-[11px] font-semibold uppercase tracking-wider text-destructive"
-              : "mb-2 flex items-center gap-1.5 rounded border-b border-border/(--opacity-strong) pb-2 text-[11px] font-semibold uppercase tracking-wider text-muted-foreground"
+              : "mb-2 flex items-center gap-1.5 rounded pb-2 text-[11px] font-semibold uppercase tracking-wider text-muted-foreground"
           }
         >
           {isSystemNotice ? <AlertTriangle className="h-3 w-3" /> : null}
