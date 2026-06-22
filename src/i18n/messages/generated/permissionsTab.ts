@@ -155,6 +155,7 @@ export const en = {
   "permissionsTab.osSandboxCapabilityLinux": "Linux (bubblewrap): filesystem writes, process isolation, and network are all confined (the sandbox unshares the network namespace).",
   "permissionsTab.osSandboxCapabilityOther": "This platform's sandbox confines filesystem and process actions; network containment is not guaranteed.",
   "permissionsTab.osSandboxRestartNote": "Changes take effect after restarting the app — sandbox runners are registered at startup.",
+  "permissionsTab.osSandboxDetectionReason": "Startup check: {reason}",
   "permissionsTab.osSandboxToggleFailed": "Failed to change the OS tool sandbox setting.",
   "permissionsTab.osSandboxToggleError": "Error changing the OS tool sandbox setting: {message}",
 
@@ -335,6 +336,7 @@ export const ko: Record<keyof typeof en, string> = {
   "permissionsTab.osSandboxCapabilityLinux": "Linux(bubblewrap): 파일시스템 쓰기, 프로세스 격리, 네트워크를 모두 격리합니다(네트워크 네임스페이스를 분리).",
   "permissionsTab.osSandboxCapabilityOther": "이 플랫폼의 샌드박스는 파일시스템과 프로세스 동작을 격리하며, 네트워크 격리는 보장되지 않습니다.",
   "permissionsTab.osSandboxRestartNote": "변경 사항은 앱을 재시작한 후 적용됩니다 — 샌드박스 러너는 시작 시 등록됩니다.",
+  "permissionsTab.osSandboxDetectionReason": "시작 시 점검: {reason}",
   "permissionsTab.osSandboxToggleFailed": "OS 도구 샌드박스 설정을 변경하지 못했습니다.",
   "permissionsTab.osSandboxToggleError": "OS 도구 샌드박스 설정 변경 중 오류: {message}",
 
