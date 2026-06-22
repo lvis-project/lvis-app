@@ -120,6 +120,10 @@ describe("App plugin auth routing", () => {
     // chat mode before dispatching the command-palette action.
     await user.click(screen.getByTestId("app-mode-chat"));
     await user.click(screen.getByTestId("command-popover-trigger"));
+    // The unified SlashPicker opens on a category drill-down; the plugin-view
+    // QuickAction ("…열기") lives under the 바로가기/shortcut group. Drill into
+    // it, then select the action.
+    await user.click(await screen.findByTestId("slash-picker-cat-shortcut"));
     await user.click(await screen.findByText("Token Plugin 열기"));
 
     await waitFor(() => {
