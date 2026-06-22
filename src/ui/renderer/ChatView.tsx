@@ -1779,11 +1779,13 @@ export function ChatView({ api, onAsk, onEditSave, onFork, onToggleStar, onRetry
           scrolled the chat. The panel collapses by default once it has
           content; in the collapsed state the active item title streams next
           to the count so the user always sees what step is running. */}
-      {/* Composer dock — no opaque background. The outer white fill behind the
-          composer box was clipping the floating sidebar's drop shadow; dropping
-          it lets the shadow render while the composer box (border + bg-input-bar)
-          still reads as a distinct surface. */}
-      <div className="relative z-30 w-full max-w-full min-w-0 overflow-visible border-t">
+      {/* Composer dock — seamless. No opaque background (the outer fill behind
+          the composer box was clipping the floating sidebar's drop shadow) and
+          no top border seam: the dock now blends into the bg-background content
+          surface, so there is no hard line / pink bar between the messages and
+          the composer. The composer box (border + bg-input-bar) still reads as a
+          distinct surface on its own. */}
+      <div className="relative z-30 w-full max-w-full min-w-0 overflow-visible">
         <div className="w-full max-w-full min-w-0" data-testid="session-todo-dock">
           <SessionTodoPanel api={workflowApi} sessionId={currentSessionId} />
           <MessageQueuePanel
