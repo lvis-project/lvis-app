@@ -18,13 +18,17 @@ const THUMB_MAX_PX = 48;
  * Color ramp for the stacked-card visual. Each successive attachment adds a
  * new colored card behind the icon-bearing top layer, so 2-vs-5 attachments
  * are visually distinct (denser stack = more cards).
+ *
+ * Each entry resolves to a per-bundle `--chip-stack-N` gradient token (keyed
+ * to the categorical `--chart-*` palette in styles.css), so the stack re-tints
+ * with the active theme bundle instead of staying fixed light-mode pastels.
  */
 const STACK_COLORS = [
-  "from-sky-300 to-sky-700",
-  "from-emerald-300 to-emerald-700",
-  "from-amber-300 to-amber-600",
-  "from-violet-300 to-violet-700",
-  "from-rose-300 to-rose-700",
+  "var(--chip-stack-1)",
+  "var(--chip-stack-2)",
+  "var(--chip-stack-3)",
+  "var(--chip-stack-4)",
+  "var(--chip-stack-5)",
 ];
 
 const STACK_OFFSET_PX = 2;
@@ -55,7 +59,7 @@ function FileThumb() {
 
 function PasteThumb() {
   return (
-    <div className="flex h-12 w-12 items-center justify-center rounded border border-warning/40 bg-warning/15 text-warning">
+    <div className="flex h-12 w-12 items-center justify-center rounded border border-warning/(--opacity-medium) bg-warning/(--opacity-soft) text-warning">
       <ClipboardPaste className="h-5 w-5" />
     </div>
   );
@@ -101,8 +105,14 @@ function StackVisual({ layers }: { layers: number }) {
         return (
           <div
             key={i}
-            style={{ left, top, width: 40, height: 40 }}
-            className={`absolute rounded-md border border-background bg-gradient-to-br ${STACK_COLORS[i % STACK_COLORS.length]} shadow`}
+            style={{
+              left,
+              top,
+              width: 40,
+              height: 40,
+              backgroundImage: STACK_COLORS[i % STACK_COLORS.length],
+            }}
+            className="absolute rounded-md border border-background shadow"
           />
         );
       })}
@@ -245,7 +255,7 @@ export function AttachmentOverlay({
         <span className="text-xs font-semibold text-muted-foreground">
           {t("attachmentChip.overlayCount", { count: attachments.length })}
         </span>
-        <span className="text-[10px] text-muted-foreground/70">
+        <span className="text-[10px] text-muted-foreground/(--opacity-stronger)">
           {t("attachmentChip.overlayRemoveHint")}
         </span>
       </div>
@@ -254,7 +264,7 @@ export function AttachmentOverlay({
           <div
             key={att.id}
             data-testid="overlay-item"
-            className="flex items-center gap-3 border-b border-muted/40 py-2 last:border-b-0"
+            className="flex items-center gap-3 border-b border-muted/(--opacity-medium) py-2 last:border-b-0"
           >
             <div className="flex-shrink-0">
               {att.kind === "image" ? (
@@ -287,7 +297,7 @@ export function AttachmentOverlay({
                     ? collapsePath(att.path)
                     : `+${att.lines} lines · ${att.chars} chars`}
               </div>
-              <div className="text-[10px] text-muted-foreground/70">
+              <div className="text-[10px] text-muted-foreground/(--opacity-stronger)">
                 {att.kind === "image"
                   ? `${att.mimeType} · ${att.width}×${att.height} · ${formatBytes(att.bytes)}`
                   : att.kind === "file"

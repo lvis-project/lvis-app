@@ -10,6 +10,7 @@ import { pathToFileURL } from "node:url";
 import { t } from "./i18n/index.js";
 import type { McpServerConfig } from "./mcp/types.js";
 import type {
+  PermissionReviewSuggestionPayload,
   UserApprovalHitPayload,
   UserApprovalScope,
   UserApprovalVerdict,
@@ -1152,6 +1153,13 @@ const api = {
       return () =>
         ipcRenderer.removeListener(PERMISSIONS.userApprovalHit, listener);
     },
+    onReviewSuggestion: (cb: (payload: PermissionReviewSuggestionPayload) => void) => {
+      const listener = (_event: unknown, payload: PermissionReviewSuggestionPayload) =>
+        cb(payload);
+      ipcRenderer.on(PERMISSIONS.reviewSuggestion, listener);
+      return () =>
+        ipcRenderer.removeListener(PERMISSIONS.reviewSuggestion, listener);
+    },
     /** Permission policy — `/permission reviewer ...` slash dispatch via IPC. */
     reviewerDispatch: async (rawArgs: string) =>
       ipcRenderer.invoke(PERMISSIONS.reviewerDispatch, { rawArgs, intent: ipcUserKeyboardIntent() }),
@@ -1272,7 +1280,6 @@ const api = {
         allowMultiple?: boolean;
         placeholder?: string;
         summaryHint?: string;
-        suggestedAnswers?: string[];
       }>;
       createdAt: number;
     }) => void,
@@ -1421,6 +1428,13 @@ const api = {
   ) =>
     ipcRenderer.invoke(WORK_BOARD.generateReport, kind, input) as Promise<
       | import("./shared/work-board-types.js").WorkBoardReportResult
+      | { ok: false; error: string }
+    >,
+  // Read a past run's persisted transcript (plan+execute conversation) for the
+  // run-history view. Resolves with the ordered events (empty when absent).
+  getWorkBoardRunTranscript: async (itemId: number, runId: string) =>
+    ipcRenderer.invoke(WORK_BOARD.runTranscript, itemId, runId) as Promise<
+      | { events: import("./shared/work-board-types.js").RunTranscriptEvent[] }
       | { ok: false; error: string }
     >,
   // Live per-phase progress for an in-flight run (planning / awaiting_approval /

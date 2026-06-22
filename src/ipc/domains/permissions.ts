@@ -7,6 +7,10 @@ import { randomUUID } from "node:crypto";
 import { loadPolicy, savePolicy } from "../../permissions/policy-store.js";
 import type { ApprovalDecision } from "../../permissions/approval-gate.js";
 import { PERMISSIONS } from "../../shared/ipc-channels.js";
+import type {
+  PermissionReviewSuggestionPayload,
+  PermissionReviewSuggestionReason,
+} from "../../shared/permissions-events.js";
 import { hasUserKeyboardIntent } from "../../shared/chat-origin.js";
 import { validateSender, UNAUTHORIZED_FRAME, auditUnauthorized } from "../gated.js";
 import { sendToWindow } from "../safe-send.js";
@@ -72,6 +76,80 @@ function broadcastPermissionModeChanged(deps: IpcDeps, mode: string): void {
   }
 }
 
+const REVIEW_SUGGESTION_WINDOW_MS = 5 * 60 * 1000;
+const REVIEW_SUGGESTION_REPEAT_THRESHOLD = 3;
+const REVIEW_SUGGESTION_COOLDOWN_MS = 30 * 60 * 1000;
+
+interface ApprovalAllowSample {
+  at: number;
+  choice: ApprovalDecision["choice"];
+}
+
+function broadcastPermissionReviewSuggestion(
+  deps: IpcDeps,
+  payload: PermissionReviewSuggestionPayload,
+): void {
+  const mainWindow = deps.getMainWindow?.();
+  const windows = deps.getAppWindows?.() ?? [mainWindow];
+  for (const win of windows) {
+    sendToWindow(win, PERMISSIONS.reviewSuggestion, payload);
+  }
+}
+
+function createPermissionReviewSuggestionTracker() {
+  let samples: ApprovalAllowSample[] = [];
+  let lastSuggestedAt = 0;
+
+  return {
+    record(
+      deps: IpcDeps,
+      decision: ApprovalDecision,
+      snapshot: { toolName: string } | null | undefined,
+    ): void {
+      if (!decision.choice.startsWith("allow")) return;
+      if (snapshot?.toolName === "/permission mode") return;
+
+      const pm = deps.conversationLoop.permissionManager;
+      if (!pm) return;
+      if (pm.getMode() !== "default") return;
+      if (pm.getInteractiveAutoApprove() !== "off" && pm.hasReviewer()) return;
+
+      const now = Date.now();
+      samples = samples
+        .filter((sample) => now - sample.at <= REVIEW_SUGGESTION_WINDOW_MS)
+        .concat({ at: now, choice: decision.choice });
+
+      if (now - lastSuggestedAt < REVIEW_SUGGESTION_COOLDOWN_MS) return;
+
+      const allowAlwaysCount = samples.filter((sample) => sample.choice === "allow-always").length;
+      const reason: PermissionReviewSuggestionReason | null =
+        decision.choice === "allow-always" || allowAlwaysCount > 0
+          ? "allow-always"
+          : samples.length >= REVIEW_SUGGESTION_REPEAT_THRESHOLD
+            ? "repeat-allow"
+            : null;
+      if (reason === null) return;
+
+      lastSuggestedAt = now;
+      deps.auditLogger?.log?.({
+        timestamp: new Date().toISOString(),
+        sessionId: "permissions",
+        type: "approval",
+        output:
+          `[permission-review:suggest] reason=${reason} allowCount=${samples.length} ` +
+          `allowAlwaysCount=${allowAlwaysCount} windowMs=${REVIEW_SUGGESTION_WINDOW_MS}`,
+      });
+      broadcastPermissionReviewSuggestion(deps, {
+        reason,
+        allowCount: samples.length,
+        allowAlwaysCount,
+        threshold: REVIEW_SUGGESTION_REPEAT_THRESHOLD,
+        windowMs: REVIEW_SUGGESTION_WINDOW_MS,
+      });
+    },
+  };
+}
+
 /**
  * Notify all renderers that the allowed-directories config mutated
  * (session-add via slash dispatch / PermissionsTab dirDispatch / etc.).
@@ -92,6 +170,7 @@ export function broadcastPermissionConfigChanged(deps: IpcDeps): void {
 export function registerPermissionsHandlers(deps: IpcDeps): void {
   const { conversationLoop, approvalGate, auditLogger } = deps;
   const deferredResolveInFlight = new Set<string>();
+  const reviewSuggestionTracker = createPermissionReviewSuggestionTracker();
 
   // read-only, sender guard optional
   ipcMain.handle(PERMISSIONS.getMode, () => {
@@ -235,8 +314,13 @@ export function registerPermissionsHandlers(deps: IpcDeps): void {
   // lvis:approval:request direction is main→renderer (webContents.send) — no ipcMain.handle needed
   ipcMain.handle(PERMISSIONS.approvalRespond, (e, decision: ApprovalDecision) => {
     if (!validateSender(e)) { auditUnauthorized(auditLogger, PERMISSIONS.approvalRespond, e); return UNAUTHORIZED_FRAME; }
+    const snapshot = approvalGate?.getRequestSnapshot?.(decision.requestId);
+    let honoredDecision: ApprovalDecision | null = null;
     if (approvalGate) {
-      approvalGate.resolve(decision.requestId, decision);
+      honoredDecision = approvalGate.resolve(decision.requestId, decision);
+    }
+    if (honoredDecision) {
+      reviewSuggestionTracker.record(deps, honoredDecision, snapshot);
     }
     return { ok: true };
   });

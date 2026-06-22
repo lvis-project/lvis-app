@@ -121,7 +121,7 @@ export function OverlayCard({
   return (
     <Card
       data-testid="routine-card"
-      className="flex flex-col border-action-view/40 bg-action-view/5 shadow-md backdrop-blur lvis-anim-slide-down"
+      className="flex flex-col border-action-view/(--opacity-medium) bg-action-view/(--opacity-faint) shadow-md backdrop-blur lvis-anim-slide-down"
       role="status"
       aria-live="polite"
       aria-atomic
@@ -206,7 +206,7 @@ export function OverlayCard({
       </CardHeader>
       <CardContent className="min-h-0 overflow-hidden pt-0">
         {running ? (
-          <p className="text-xs text-muted-foreground/70">{t("overlayCard.runningDescription")}</p>
+          <p className="text-xs text-muted-foreground/(--opacity-stronger)">{t("overlayCard.runningDescription")}</p>
         ) : summary ? (
           <>
             <p
@@ -245,7 +245,7 @@ export function OverlayCard({
             )}
           </>
         ) : (
-          <p className="text-xs text-muted-foreground/50">{t("overlayCard.noSummary")}</p>
+          <p className="text-xs text-muted-foreground/(--opacity-half)">{t("overlayCard.noSummary")}</p>
         )}
         {!running && onPrimaryAction && (
           <div className="mt-2 flex justify-end">

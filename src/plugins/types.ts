@@ -205,6 +205,26 @@ export interface PluginManifest {
    */
   capabilities?: string[];
   /**
+   * Tier A host-mediated egress allow-list (§9.x). A plugin that calls
+   * `hostApi.hostFetch` may only reach hosts matching `allowedDomains`
+   * (dot-boundary suffix match — see `host-allow-list.ts`). Deny-by-default:
+   * absent or empty ⇒ no egress is permitted. `reasoning` is a human-readable
+   * justification surfaced to the user at install for broad grants.
+   */
+  networkAccess?: {
+    allowedDomains: string[];
+    reasoning?: string;
+    /**
+     * Declarative, user-approved governance opt-in for reaching private /
+     * loopback / link-local endpoints through `hostApi.hostFetch` (mirrors the
+     * MCP per-server `allowPrivateNetworks` escape hatch). Deny-by-default:
+     * absent/false ⇒ hostFetch rejects any allow-listed host that resolves to a
+     * non-public address (SSRF defense). Set only for on-prem / intranet
+     * plugins whose target genuinely lives on a private range.
+     */
+    allowPrivateNetworks?: boolean;
+  };
+  /**
    * 플러그인이 구독하는 이벤트 타입 목록.
    * 두 가지 형태를 모두 지원한다:
    *   - 구형 호환: `string[]` — 호스트가 중립 fallback hint를 적용.
@@ -878,6 +898,20 @@ export interface PluginHostApi {
    * LLM이 준비되지 않은 경우 에러를 던진다.
    */
   callLlm(prompt: string, options?: { maxTokens?: number; systemPrompt?: string; signal?: AbortSignal }): Promise<string>;
+  /**
+   * Host-mediated outbound HTTPS through Electron's `net` (Chromium network
+   * stack). Unlike a plugin's own Node `fetch`/undici, this honors the OS proxy
+   * resolution INCLUDING PAC/WPAD auto-config and the OS trust store on every
+   * platform — so a plugin whose Node libraries can't be configured for the
+   * corporate proxy/CA (e.g. MSAL) can still reach the network on a
+   * TLS-inspecting corporate network. Capability-gated (external-auth-consumer)
+   * + SSRF-validated + audited host-side.
+   *
+   * OPTIONAL: undefined on host builds that predate this capability — plugins
+   * MUST guard (`typeof hostApi.hostFetch === "function"`) and fall back to bare
+   * fetch, mirroring `resolveApiKey?`.
+   */
+  hostFetch?(input: string | URL, init?: RequestInit): Promise<Response>;
 
   /**
    * Structured log event routed through AuditLogger.
