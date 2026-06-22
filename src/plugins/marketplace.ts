@@ -9,7 +9,9 @@ import type { MarketplaceFetcher } from "./marketplace-fetcher.js";
 import { toRegistryRelativeManifestPath, type PluginPaths } from "./plugin-paths.js";
 import { assertMockMarketplaceAllowed, isDevModeUnlocked } from "../boot/dev-flags.js";
 import type { PluginAccessSpec, PluginManifest, PluginMarketplaceItem, PluginRegistryEntryInstallSource, PluginUiExtension } from "./types.js";
-import { MissingDependenciesError, MissingPluginDependenciesError } from "./types.js";
+import { IncompatibleAppVersionError, MissingDependenciesError, MissingPluginDependenciesError } from "./types.js";
+import { appVersionSatisfiesMin } from "../shared/semver-compare.js";
+import { getLvisAppVersion } from "../shared/app-version.js";
 import { resolveDependencies } from "./dependency-resolver.js";
 import { isNewer } from "./update-detector.js";
 import { getCachedCatalog, isOfflineCacheEnabled, setCachedCatalog } from "./offline-cache.js";
@@ -592,6 +594,19 @@ export class PluginMarketplaceService {
         log.warn(
           `installed plugin '${plugin.id}' artifact hash differs from marketplace catalog — reinstalling same version`,
         );
+      }
+    }
+
+    // Plugin↔app minimum-version gate — HARD BLOCK before downloading the
+    // artifact. When the plugin declares `requires.minAppVersion` higher than
+    // the running LVIS app, refuse the install and direct the user to update
+    // the app. Absent = compatible with all (purely additive). Fail-closed:
+    // an unresolvable app version ("unknown" sentinel) also blocks.
+    const minAppVersion = plugin.requires?.minAppVersion;
+    if (minAppVersion) {
+      const currentAppVersion = getLvisAppVersion();
+      if (!appVersionSatisfiesMin(currentAppVersion, minAppVersion)) {
+        throw new IncompatibleAppVersionError(minAppVersion, currentAppVersion);
       }
     }
 
@@ -1407,7 +1422,12 @@ export class PluginMarketplaceService {
     if (plugin.installPolicy) manifest.installPolicy = plugin.installPolicy;
     if (plugin.dependencies && plugin.dependencies.length > 0) manifest.dependencies = plugin.dependencies;
     if (plugin.pluginAccess) manifest.pluginAccess = plugin.pluginAccess;
-    if (plugin.requires && plugin.requires.capabilities.length > 0) manifest.requires = plugin.requires;
+    // Persist `requires` when EITHER capabilities or a minAppVersion is
+    // declared so the load-time minAppVersion gate (runtime/index.ts) can
+    // re-check after install / app downgrade.
+    if (plugin.requires && (plugin.requires.capabilities.length > 0 || plugin.requires.minAppVersion)) {
+      manifest.requires = plugin.requires;
+    }
     if (plugin.publisher) manifest.publisher = plugin.publisher;
     return manifest;
   }
