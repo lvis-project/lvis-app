@@ -1,4 +1,4 @@
-import { ArrowDownToLine, Database, Download, ExternalLink, Home, KanbanSquare, KeyRound, Menu, Plus, RefreshCw, Repeat2, Search, Star, Wrench, X } from "lucide-react";
+import { ArrowDownToLine, Download, ExternalLink, KeyRound, Menu, RefreshCw, Search, Star, Wrench, X } from "lucide-react";
 import { Button } from "../../components/ui/button.js";
 import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuSeparator, DropdownMenuSub, DropdownMenuSubContent, DropdownMenuSubTrigger, DropdownMenuTrigger } from "../../components/ui/dropdown-menu.js";
 import { Tooltip, TooltipContent, TooltipTrigger } from "../../components/ui/tooltip.js";
@@ -19,6 +19,14 @@ import { useTranslation } from "../../i18n/react.js";
  */
 import type { UpdateState } from "../../shared/update-state.js";
 export type AppUpdateBadgeState = UpdateState;
+
+/**
+ * Workspace mode. MainToolbar owns this type because it hosts the toggle UI;
+ * App.tsx imports it. "action" (default) renders built-in + plugin views
+ * inline in the main area with the sidebar expanded; "chat" pops detachable
+ * views into separate windows so the main area stays the chat.
+ */
+export type AppMode = "chat" | "action";
 
 /**
  * Dev mode 감지 — preload (`src/preload.ts`) 가 `window.__lvisDevMode` 를
@@ -47,6 +55,10 @@ export interface MainToolbarProps {
   onOpenUnifiedSearch: () => void;
   onOpenStarredView: () => void;
   onOpenDetachedView: (viewKey: "routines" | "memory" | "starred") => void | Promise<void>;
+  /** Current workspace mode (Chat / Action). Drives the segmented toggle. */
+  appMode: AppMode;
+  /** Fired when the user picks a segment in the Chat/Action toggle. */
+  onToggleAppMode: (mode: AppMode) => void;
   /** Dev mode 만 사용 — clicking the wrench opens the floating DevToolsPanel. */
   onOpenDevTools?: () => void;
   /** Latest app-update state from the main process. */
@@ -64,21 +76,23 @@ export interface MainToolbarProps {
 }
 
 export function MainToolbar({
-  activeView,
-  streaming,
+  activeView: _activeView,
+  streaming: _streaming,
   hasApiKey,
   isCurrentSessionStarred,
-  onNewChat,
+  onNewChat: _onNewChat,
   onToggleCurrentSessionStar,
   onExport,
-  onOpenHome,
-  onOpenWorkBoardView,
-  onOpenRoutinesView,
-  onOpenMemoryView,
+  onOpenHome: _onOpenHome,
+  onOpenWorkBoardView: _onOpenWorkBoardView,
+  onOpenRoutinesView: _onOpenRoutinesView,
+  onOpenMemoryView: _onOpenMemoryView,
   onOpenSettings,
   onOpenUnifiedSearch,
-  onOpenStarredView,
+  onOpenStarredView: _onOpenStarredView,
   onOpenDetachedView,
+  appMode,
+  onToggleAppMode,
   onOpenDevTools,
   appUpdateState = { kind: "idle" },
   appUpdateInFlight = false,
@@ -88,38 +102,13 @@ export function MainToolbar({
 }: MainToolbarProps) {
   const { t } = useTranslation();
   return (
-    <div data-testid="main-toolbar" className="border-b bg-card px-3 py-2">
-      {/* Three explicit zones — left (navigation + status), center (flexible
-          spacer), right (session actions). The center zone owns the single
-          flex-1 grow so the left/right groups stay pinned to their edges; it
-          is the future home for any centered titlebar content (title, view
-          breadcrumb) without disturbing the edge groups. Visually identical
-          to the prior single-spacer layout. */}
-      <div className="flex min-w-0 items-center gap-2">
-        <div data-testid="main-toolbar-left" className="flex min-w-0 items-center gap-2">
-        {/* ── Home anchors the primary chat view ─────────────────────── */}
-        <Tooltip>
-          <TooltipTrigger asChild>
-            <Button
-              variant={activeView === "home" ? "secondary" : "ghost"}
-              size="sm"
-              className="h-7 w-7 p-0"
-              onClick={onOpenHome}
-              title={t("mainToolbar.home")}
-              aria-label={t("mainToolbar.home")}
-            >
-              <Home className="h-3.5 w-3.5" />
-            </Button>
-          </TooltipTrigger>
-          <TooltipContent>{t("mainToolbar.home")}</TooltipContent>
-        </Tooltip>
-
-        {/* ── App update badge — sits immediately right of Home so users
-            always see "an update is ready" without opening any menu. The
-            badge is permanent (NOT a toast) until acted on; clicking maps
-            to download (available) → install (downloaded). The download
-            step is the user's first explicit consent — no implicit
-            background fetch (사용자 명시 클릭 전엔 절대 다운로드 금지). */}
+    <div data-testid="main-toolbar" className="h-[52px] border-b bg-card shadow-sm px-3 flex items-center">
+      <div className="flex min-w-0 w-full items-center gap-2">
+        {/* ── App update badge — anchors the left edge of the toolbar now
+            that Home nav lives in the persistent Sidebar. Permanent (NOT
+            a toast) until acted on; clicking maps to download (available)
+            → install (downloaded). The download step is the user's first
+            explicit consent (사용자 명시 클릭 전엔 절대 다운로드 금지). */}
         <AppUpdateBadge
           state={appUpdateState}
           inFlight={appUpdateInFlight}
@@ -127,6 +116,11 @@ export function MainToolbar({
           onInstall={onInstallAppUpdate}
           onSkip={onSkipAppUpdate}
         />
+
+        {/* ── Workspace mode (Chat / Action) — sits immediately after the
+            update badge, left of the Dev indicator. Action keeps views inline
+            (sidebar expanded); Chat pops detachable views into windows. */}
+        <AppModeToggle mode={appMode} onToggle={onToggleAppMode} />
 
         {/* ── Dev tools indicator — only visible in non-production. */}
         {isDevMode() && onOpenDevTools !== undefined && (
@@ -149,14 +143,10 @@ export function MainToolbar({
             <TooltipContent>{t("mainToolbar.devToolsTooltip")}</TooltipContent>
           </Tooltip>
         )}
-        </div>
 
-        {/* ── Center zone — flexible spacer; reserved for future centered
-            titlebar content. Owns the sole flex-1 grow. ─────────────── */}
-        <div data-testid="main-toolbar-center" className="min-w-0 flex-1" />
+        {/* ── Spacer pushes remaining items to the right ─────────────── */}
+        <div className="flex-1" />
 
-        {/* ── Right zone — session-level actions ─────────────────────── */}
-        <div data-testid="main-toolbar-right" className="flex items-center gap-2">
         {/* ── Unified search — opens the top-attached search panel ───────
             Z onboarding chain — this button anchors the "chat-history"
             spotlight step. The Unified Search panel surfaces both saved
@@ -166,14 +156,14 @@ export function MainToolbar({
           <TooltipTrigger asChild>
             <Button
               variant="ghost"
-              size="sm"
-              className="h-7 w-7 p-0"
+              size="icon"
+              className="h-9 w-9 aspect-square p-0 shrink-0"
               onClick={onOpenUnifiedSearch}
               title={t("mainToolbar.unifiedSearch")}
               aria-label={t("mainToolbar.unifiedSearch")}
               data-tour-anchor="chat-history"
             >
-              <Search className="h-3.5 w-3.5" />
+              <Search className="h-4 w-4" />
             </Button>
           </TooltipTrigger>
           <TooltipContent>{t("mainToolbar.unifiedSearch")}</TooltipContent>
@@ -184,14 +174,14 @@ export function MainToolbar({
           <TooltipTrigger asChild>
             <Button
               variant="ghost"
-              size="sm"
-              className="h-7 w-7 p-0"
+              size="icon"
+              className="h-9 w-9 aspect-square p-0 shrink-0"
               onClick={() => void onToggleCurrentSessionStar()}
               title={isCurrentSessionStarred ? t("mainToolbar.sessionUnstar") : t("mainToolbar.sessionStar")}
               aria-label={isCurrentSessionStarred ? t("mainToolbar.sessionUnstar") : t("mainToolbar.sessionStar")}
               aria-pressed={isCurrentSessionStarred}
             >
-              <Star key={isCurrentSessionStarred ? "on" : "off"} className={`h-3.5 w-3.5 ${isCurrentSessionStarred ? "fill-emphasis text-emphasis lvis-anim-star" : ""}`} />
+              <Star key={isCurrentSessionStarred ? "on" : "off"} className={`h-4 w-4 ${isCurrentSessionStarred ? "fill-emphasis text-emphasis lvis-anim-star" : ""}`} />
             </Button>
           </TooltipTrigger>
           <TooltipContent>{isCurrentSessionStarred ? t("mainToolbar.sessionUnstar") : t("mainToolbar.sessionStar")}</TooltipContent>
@@ -208,47 +198,19 @@ export function MainToolbar({
                     the trigger is the stable selector. */}
                 <Button
                   variant="ghost"
-                  size="sm"
-                  className="h-7 w-7 p-0"
+                  size="icon"
+                  className="h-9 w-9 aspect-square p-0 shrink-0"
                   title={t("mainToolbar.moreMenu")}
                   aria-label={t("mainToolbar.moreMenu")}
                   data-tour-anchor="settings-entry"
                 >
-                  <Menu className="h-3.5 w-3.5" />
+                  <Menu className="h-4 w-4" />
                 </Button>
               </DropdownMenuTrigger>
             </TooltipTrigger>
             <TooltipContent>{t("mainToolbar.moreMenu")}</TooltipContent>
           </Tooltip>
-          <DropdownMenuContent align="end" className="w-[280px]">
-            {/* ── New chat ── */}
-            <DropdownMenuItem disabled={streaming} onClick={onNewChat}>
-              <Plus className="mr-2 h-3.5 w-3.5" />
-              <span>{t("mainToolbar.newChat")}</span>
-            </DropdownMenuItem>
-
-            <DropdownMenuSeparator />
-
-            {/* ── Built-in secondary views ── */}
-            <DropdownMenuItem onClick={onOpenWorkBoardView} data-testid="toolbar-work-board">
-              <KanbanSquare className="mr-2 h-3.5 w-3.5" />
-              <span>{t("mainToolbar.workBoard")}</span>
-            </DropdownMenuItem>
-            <DropdownMenuItem onClick={onOpenRoutinesView}>
-              <Repeat2 className="mr-2 h-3.5 w-3.5" />
-              <span>{t("mainToolbar.routines")}</span>
-            </DropdownMenuItem>
-            <DropdownMenuItem onClick={onOpenMemoryView}>
-              <Database className="mr-2 h-3.5 w-3.5" />
-              <span>{t("mainToolbar.memory")}</span>
-            </DropdownMenuItem>
-            <DropdownMenuItem onClick={onOpenStarredView}>
-              <Star className="mr-2 h-3.5 w-3.5" />
-              <span>{t("mainToolbar.starred")}</span>
-            </DropdownMenuItem>
-
-            <DropdownMenuSeparator />
-
+          <DropdownMenuContent align="end" className="w-[240px]">
             {/* ── Detached built-in views ── */}
             <DropdownMenuItem data-testid="toolbar-detach-routines" onClick={() => void onOpenDetachedView("routines")}>
               <ExternalLink className="mr-2 h-3.5 w-3.5" />
@@ -289,8 +251,47 @@ export function MainToolbar({
             </DropdownMenuItem>
           </DropdownMenuContent>
         </DropdownMenu>
-        </div>
       </div>
+    </div>
+  );
+}
+
+/**
+ * Workspace mode segmented control — two compact segments ("채팅" / "액션").
+ * The active segment is filled (`bg-primary` / `text-primary-foreground`); the
+ * inactive segment is muted with an accent hover. Token classes only.
+ */
+function AppModeToggle({ mode, onToggle }: { mode: AppMode; onToggle: (mode: AppMode) => void }) {
+  const { t } = useTranslation();
+  const segment = (value: AppMode, label: string, ariaLabel: string) => {
+    const active = mode === value;
+    return (
+      <Button
+        variant="ghost"
+        size="sm"
+        className={`h-7 rounded-md px-2.5 text-[11px] font-medium ${
+          active
+            ? "bg-primary text-primary-foreground hover:bg-primary"
+            : "text-muted-foreground hover:bg-accent hover:text-foreground"
+        }`}
+        onClick={() => onToggle(value)}
+        aria-pressed={active}
+        aria-label={ariaLabel}
+        data-testid={`app-mode-${value}`}
+      >
+        {label}
+      </Button>
+    );
+  };
+  return (
+    <div
+      role="group"
+      aria-label={t("appMode.groupAriaLabel")}
+      className="flex items-center gap-0.5 rounded-lg border border-border bg-muted/(--opacity-medium) p-0.5 shrink-0"
+      data-testid="app-mode-toggle"
+    >
+      {segment("chat", t("appMode.chat"), t("appMode.chatAriaLabel"))}
+      {segment("action", t("appMode.action"), t("appMode.actionAriaLabel"))}
     </div>
   );
 }
@@ -416,7 +417,7 @@ function SkipUpdateButton({
         <Button
           variant="ghost"
           size="icon"
-          className="h-7 w-7 text-muted-foreground hover:text-foreground disabled:opacity-60"
+          className="h-9 w-9 aspect-square text-muted-foreground hover:text-foreground disabled:opacity-60"
           onClick={() => void onSkip()}
           disabled={disabled}
           title={t("mainToolbar.skipUpdateTitle", { version })}
