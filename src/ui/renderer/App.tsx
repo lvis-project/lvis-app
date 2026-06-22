@@ -1349,7 +1349,34 @@ export function App() {
       runningRoutines={runningRoutines}
     >
         <div className="flex h-screen flex-col overflow-hidden">
-          <CustomTitleBar />
+          {/* Single top band — window controls + the app toolbar cluster live
+              together here. The toolbar content is passed as children so it
+              renders IN the band (no separate toolbar row below it). */}
+          <CustomTitleBar>
+            <MainToolbar
+              activeView={activeView}
+              streaming={streaming}
+              hasApiKey={effectiveHasApiKey}
+              isCurrentSessionStarred={Boolean(currentSessionId && isSessionStarred(currentSessionId))}
+              onToggleCurrentSessionStar={() => currentSessionId
+                ? handleToggleSessionStar(currentSessionId, sessions.find((s) => s.id === currentSessionId)?.title)
+                : Promise.resolve()}
+              onExport={handleExport}
+              onOpenUnifiedSearch={() => {
+                searchOpenOverlay();
+              }}
+              sidebarCollapsed={sidebarCollapsed}
+              onToggleSidebar={() => setSidebarCollapsed((v) => !v)}
+              appMode={appMode}
+              onToggleAppMode={setAppMode}
+              onOpenDevTools={() => setDevToolsOpen((v) => !v)}
+              appUpdateState={appUpdate.state}
+              appUpdateInFlight={appUpdate.inFlight}
+              onDownloadAppUpdate={appUpdate.download}
+              onInstallAppUpdate={appUpdate.install}
+              onSkipAppUpdate={appUpdate.skip}
+            />
+          </CustomTitleBar>
         {/* `relative` anchors the floating-card Sidebar (absolute, inset-3).
             The content `<main>` carries left padding equal to the card width
             + insets so the floating rail never occludes the canvas. */}
@@ -1388,37 +1415,6 @@ export function App() {
               {fallbackToast}
             </div>
           )}
-          <MainToolbar
-            activeView={activeView}
-            streaming={streaming}
-            hasApiKey={effectiveHasApiKey}
-            isCurrentSessionStarred={Boolean(currentSessionId && isSessionStarred(currentSessionId))}
-            onNewChat={onNewChat}
-            onToggleCurrentSessionStar={() => currentSessionId
-              ? handleToggleSessionStar(currentSessionId, sessions.find((s) => s.id === currentSessionId)?.title)
-              : Promise.resolve()}
-            onExport={handleExport}
-            onOpenHome={() => setActiveView("home")}
-            onOpenWorkBoardView={() => setActiveView("work-board")}
-            onOpenRoutinesView={() => setActiveView("routines")}
-            onOpenMemoryView={() => setActiveView("memory")}
-            onOpenSettings={() => onOpenSettings()}
-            onOpenUnifiedSearch={() => {
-              searchOpenOverlay();
-            }}
-            onOpenStarredView={() => setActiveView("starred")}
-            onOpenDetachedView={(viewKey) => {
-              void openDetachedBuiltInView(viewKey);
-            }}
-            appMode={appMode}
-            onToggleAppMode={setAppMode}
-            onOpenDevTools={() => setDevToolsOpen((v) => !v)}
-            appUpdateState={appUpdate.state}
-            appUpdateInFlight={appUpdate.inFlight}
-            onDownloadAppUpdate={appUpdate.download}
-            onInstallAppUpdate={appUpdate.install}
-            onSkipAppUpdate={appUpdate.skip}
-          />
           <DevToolsPanel
             api={api}
             open={devToolsOpen}
@@ -1554,9 +1550,12 @@ export function App() {
             onOpenPermissionQueue={() => setDeferredQueueOpen(true)}
           />
           </ErrorBoundary>
+          {/* Status bar — last child of the chat/content column, BELOW
+              MainContent/composer and starting right of the sidebar (no longer
+              a full-width root footer; no top divider). */}
+          <StatusBar persistent={statusPersistent} visibleToast={statusVisibleToast} pendingCount={statusPendingCount} onToastClick={handleStatusToastClick} />
         </main>
         </div>
-        <StatusBar persistent={statusPersistent} visibleToast={statusVisibleToast} pendingCount={statusPendingCount} onToastClick={handleStatusToastClick} />
       </div>
 
       {/* ask_user_question cards now render inline inside ChatView

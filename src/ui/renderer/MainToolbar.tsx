@@ -1,8 +1,28 @@
-import { ArrowDownToLine, Download, ExternalLink, KeyRound, Menu, RefreshCw, Search, Star, Wrench, X } from "lucide-react";
+import { ArrowDownToLine, Download, PanelLeftClose, PanelLeftOpen, RefreshCw, Search, Star, Wrench, X } from "lucide-react";
 import { Button } from "../../components/ui/button.js";
-import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuSeparator, DropdownMenuSub, DropdownMenuSubContent, DropdownMenuSubTrigger, DropdownMenuTrigger } from "../../components/ui/dropdown-menu.js";
+import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger } from "../../components/ui/dropdown-menu.js";
 import { Tooltip, TooltipContent, TooltipTrigger } from "../../components/ui/tooltip.js";
 import { useTranslation } from "../../i18n/react.js";
+
+/**
+ * Every interactive control in the toolbar lives inside the window-control
+ * band (see CustomTitleBar). The band is an Electron drag region in its empty
+ * zones, so each control must opt OUT of dragging or it would be un-clickable.
+ * `NoDrag` wraps a control with `WebkitAppRegion: "no-drag"`.
+ */
+function NoDrag({ children, className }: { children: React.ReactNode; className?: string }) {
+  return (
+    <span
+      className={className}
+      style={{
+        // @ts-expect-error — Electron-specific CSS extension
+        WebkitAppRegion: "no-drag",
+      }}
+    >
+      {children}
+    </span>
+  );
+}
 
 /**
  * App auto-update state mirrored from the main process via
@@ -44,17 +64,13 @@ export interface MainToolbarProps {
   streaming: boolean;
   hasApiKey: boolean | null;
   isCurrentSessionStarred: boolean;
-  onNewChat: () => void;
   onToggleCurrentSessionStar: () => void | Promise<void>;
   onExport: (format: "markdown" | "json") => void | Promise<void>;
-  onOpenHome: () => void;
-  onOpenWorkBoardView: () => void;
-  onOpenRoutinesView: () => void;
-  onOpenMemoryView: () => void;
-  onOpenSettings: () => void;
   onOpenUnifiedSearch: () => void;
-  onOpenStarredView: () => void;
-  onOpenDetachedView: (viewKey: "routines" | "memory" | "starred") => void | Promise<void>;
+  /** Shell-owned sidebar collapse state (App.tsx). */
+  sidebarCollapsed: boolean;
+  /** Toggle the sidebar rail — the in-band control beside the window buttons. */
+  onToggleSidebar: () => void;
   /** Current workspace mode (Chat / Action). Drives the segmented toggle. */
   appMode: AppMode;
   /** Fired when the user picks a segment in the Chat/Action toggle. */
@@ -78,19 +94,13 @@ export interface MainToolbarProps {
 export function MainToolbar({
   activeView: _activeView,
   streaming: _streaming,
-  hasApiKey,
+  hasApiKey: _hasApiKey,
   isCurrentSessionStarred,
-  onNewChat: _onNewChat,
   onToggleCurrentSessionStar,
   onExport,
-  onOpenHome: _onOpenHome,
-  onOpenWorkBoardView: _onOpenWorkBoardView,
-  onOpenRoutinesView: _onOpenRoutinesView,
-  onOpenMemoryView: _onOpenMemoryView,
-  onOpenSettings,
   onOpenUnifiedSearch,
-  onOpenStarredView: _onOpenStarredView,
-  onOpenDetachedView,
+  sidebarCollapsed,
+  onToggleSidebar,
   appMode,
   onToggleAppMode,
   onOpenDevTools,
@@ -101,29 +111,43 @@ export function MainToolbar({
   onSkipAppUpdate,
 }: MainToolbarProps) {
   const { t } = useTranslation();
+  // The toolbar content lives IN the window-control band (CustomTitleBar). The
+  // band is the row; this component contributes only its interactive cluster,
+  // each control wrapped `no-drag` so the surrounding band stays draggable.
   return (
-    <div data-testid="main-toolbar" className="h-[52px] border-b bg-card shadow-sm px-3 flex items-center">
-      <div className="flex min-w-0 w-full items-center gap-2">
-        {/* ── App update badge — anchors the left edge of the toolbar now
-            that Home nav lives in the persistent Sidebar. Permanent (NOT
-            a toast) until acted on; clicking maps to download (available)
-            → install (downloaded). The download step is the user's first
-            explicit consent (사용자 명시 클릭 전엔 절대 다운로드 금지). */}
-        <AppUpdateBadge
-          state={appUpdateState}
-          inFlight={appUpdateInFlight}
-          onDownload={onDownloadAppUpdate}
-          onInstall={onInstallAppUpdate}
-          onSkip={onSkipAppUpdate}
-        />
+    <div data-testid="main-toolbar" className="flex min-w-0 flex-1 items-center gap-2">
+      {/* ── Sidebar collapse toggle — pinned right after the window controls,
+          wired to the shell's sidebarCollapsed (App.tsx). It lives in the band,
+          NOT inside the sidebar card. */}
+      <NoDrag>
+        <Tooltip>
+          <TooltipTrigger asChild>
+            <Button
+              variant="ghost"
+              size="icon"
+              className="h-7 w-7 aspect-square p-0 shrink-0 text-muted-foreground hover:text-foreground"
+              onClick={onToggleSidebar}
+              title={sidebarCollapsed ? t("mainToolbar.expandSidebar") : t("mainToolbar.collapseSidebar")}
+              aria-label={sidebarCollapsed ? t("mainToolbar.expandSidebar") : t("mainToolbar.collapseSidebar")}
+              aria-pressed={!sidebarCollapsed}
+              data-testid="sidebar-collapse-toggle"
+            >
+              {sidebarCollapsed ? <PanelLeftOpen className="h-4 w-4" /> : <PanelLeftClose className="h-4 w-4" />}
+            </Button>
+          </TooltipTrigger>
+          <TooltipContent>{sidebarCollapsed ? t("mainToolbar.expandSidebar") : t("mainToolbar.collapseSidebar")}</TooltipContent>
+        </Tooltip>
+      </NoDrag>
 
-        {/* ── Workspace mode (Chat / Action) — sits immediately after the
-            update badge, left of the Dev indicator. Action keeps views inline
-            (sidebar expanded); Chat pops detachable views into windows. */}
+      {/* ── Workspace mode (Chat / Action) — Action keeps views inline
+          (sidebar expanded); Chat pops detachable views into windows. */}
+      <NoDrag>
         <AppModeToggle mode={appMode} onToggle={onToggleAppMode} />
+      </NoDrag>
 
-        {/* ── Dev tools indicator — only visible in non-production. */}
-        {isDevMode() && onOpenDevTools !== undefined && (
+      {/* ── Dev badge — only visible in non-production (LVIS_DEV). */}
+      {isDevMode() && onOpenDevTools !== undefined && (
+        <NoDrag>
           <Tooltip>
             <TooltipTrigger asChild>
               <Button
@@ -142,16 +166,30 @@ export function MainToolbar({
             </TooltipTrigger>
             <TooltipContent>{t("mainToolbar.devToolsTooltip")}</TooltipContent>
           </Tooltip>
-        )}
+        </NoDrag>
+      )}
 
-        {/* ── Spacer pushes remaining items to the right ─────────────── */}
-        <div className="flex-1" />
+      {/* ── App update badge — permanent (NOT a toast) until acted on; clicking
+          maps to download (available) → install (downloaded). The download step
+          is the user's first explicit consent (사용자 명시 클릭 전엔 절대
+          다운로드 금지). */}
+      <NoDrag>
+        <AppUpdateBadge
+          state={appUpdateState}
+          inFlight={appUpdateInFlight}
+          onDownload={onDownloadAppUpdate}
+          onInstall={onInstallAppUpdate}
+          onSkip={onSkipAppUpdate}
+        />
+      </NoDrag>
 
-        {/* ── Unified search — opens the top-attached search panel ───────
-            Z onboarding chain — this button anchors the "chat-history"
-            spotlight step. The Unified Search panel surfaces both saved
-            and recent sessions, which is the "최근 대화 목록" the tour
-            references.  */}
+      {/* ── Spacer pushes the right cluster to the trailing edge (stays drag) */}
+      <div className="flex-1" aria-hidden="true" />
+
+      {/* ── Right cluster: 검색 → 별 → 내보내기 (8px gaps) ────────────── */}
+      {/* Unified search — opens the top-attached search panel. Z onboarding
+          chain anchor "chat-history" (surfaces saved + recent sessions). */}
+      <NoDrag>
         <Tooltip>
           <TooltipTrigger asChild>
             <Button
@@ -168,8 +206,10 @@ export function MainToolbar({
           </TooltipTrigger>
           <TooltipContent>{t("mainToolbar.unifiedSearch")}</TooltipContent>
         </Tooltip>
+      </NoDrag>
 
-        {/* ── Current session star — immediate session-level action ───── */}
+      {/* Current session star — immediate session-level action. */}
+      <NoDrag>
         <Tooltip>
           <TooltipTrigger asChild>
             <Button
@@ -186,72 +226,38 @@ export function MainToolbar({
           </TooltipTrigger>
           <TooltipContent>{isCurrentSessionStarred ? t("mainToolbar.sessionUnstar") : t("mainToolbar.sessionStar")}</TooltipContent>
         </Tooltip>
+      </NoDrag>
 
-        {/* ── Hamburger — wraps infrequent actions ────────────────────── */}
+      {/* Export (내보내기) — standalone band button right after the star.
+          Opens a small format menu (Markdown / JSON) and is wired to the same
+          export handler the removed hamburger used. Z onboarding chain anchor
+          "settings-entry" relocates here now that the hamburger is gone. */}
+      <NoDrag>
         <DropdownMenu>
           <Tooltip>
             <TooltipTrigger asChild>
               <DropdownMenuTrigger asChild>
-                {/* Z onboarding chain — spotlight anchor for the
-                    "settings-entry" step. Settings + Routines + Memory
-                    + Export all live inside this menu, so anchoring
-                    the trigger is the stable selector. */}
                 <Button
                   variant="ghost"
                   size="icon"
                   className="h-9 w-9 aspect-square p-0 shrink-0"
-                  title={t("mainToolbar.moreMenu")}
-                  aria-label={t("mainToolbar.moreMenu")}
+                  title={t("mainToolbar.export")}
+                  aria-label={t("mainToolbar.export")}
+                  data-testid="toolbar-export"
                   data-tour-anchor="settings-entry"
                 >
-                  <Menu className="h-4 w-4" />
+                  <Download className="h-4 w-4" />
                 </Button>
               </DropdownMenuTrigger>
             </TooltipTrigger>
-            <TooltipContent>{t("mainToolbar.moreMenu")}</TooltipContent>
+            <TooltipContent>{t("mainToolbar.export")}</TooltipContent>
           </Tooltip>
-          <DropdownMenuContent align="end" className="w-[240px]">
-            {/* ── Detached built-in views ── */}
-            <DropdownMenuItem data-testid="toolbar-detach-routines" onClick={() => void onOpenDetachedView("routines")}>
-              <ExternalLink className="mr-2 h-3.5 w-3.5" />
-              <span>{t("mainToolbar.detachRoutines")}</span>
-            </DropdownMenuItem>
-            <DropdownMenuItem data-testid="toolbar-detach-memory" onClick={() => void onOpenDetachedView("memory")}>
-              <ExternalLink className="mr-2 h-3.5 w-3.5" />
-              <span>{t("mainToolbar.detachMemory")}</span>
-            </DropdownMenuItem>
-            <DropdownMenuItem data-testid="toolbar-detach-starred" onClick={() => void onOpenDetachedView("starred")}>
-              <ExternalLink className="mr-2 h-3.5 w-3.5" />
-              <span>{t("mainToolbar.detachStarred")}</span>
-            </DropdownMenuItem>
-
-            <DropdownMenuSeparator />
-
-            {/* ── Export submenu ── */}
-            <DropdownMenuSub>
-              <DropdownMenuSubTrigger>
-                <Download className="mr-2 h-3.5 w-3.5" />
-                <span>{t("mainToolbar.export")}</span>
-              </DropdownMenuSubTrigger>
-              <DropdownMenuSubContent>
-                <DropdownMenuItem onClick={() => void onExport("markdown")}>Markdown (.md)</DropdownMenuItem>
-                <DropdownMenuItem onClick={() => void onExport("json")}>JSON (.json)</DropdownMenuItem>
-              </DropdownMenuSubContent>
-            </DropdownMenuSub>
-
-            <DropdownMenuSeparator />
-
-            {/* ── Settings ── */}
-            <DropdownMenuItem onClick={onOpenSettings}>
-              <KeyRound className="mr-2 h-3.5 w-3.5" />
-              <span className={hasApiKey === false ? "text-destructive" : ""}>{t("mainToolbar.settings")}</span>
-              {hasApiKey === false && (
-                <span className="ml-auto text-[10px] text-destructive">{t("mainToolbar.apiKeyRequired")}</span>
-              )}
-            </DropdownMenuItem>
+          <DropdownMenuContent align="end" className="w-[180px]">
+            <DropdownMenuItem data-testid="toolbar-export-markdown" onClick={() => void onExport("markdown")}>Markdown (.md)</DropdownMenuItem>
+            <DropdownMenuItem data-testid="toolbar-export-json" onClick={() => void onExport("json")}>JSON (.json)</DropdownMenuItem>
           </DropdownMenuContent>
         </DropdownMenu>
-      </div>
+      </NoDrag>
     </div>
   );
 }
