@@ -1,5 +1,6 @@
 // AUTO-GENERATED — i18n migration. Source: src/ui/renderer/components/TurnActionBar.tsx. Do not edit by hand.
 export const en = {
+  "turnActionBar.copyButton": "Copy",
   "turnActionBar.retryButton": "Retry (depth: high)",
   "turnActionBar.forkButton": "Fork",
   "turnActionBar.starButton": "Bookmark",
@@ -9,6 +10,7 @@ export const en = {
   "turnActionBar.sendButton": "Send",
 } as const;
 export const ko: Record<keyof typeof en, string> = {
+  "turnActionBar.copyButton": "복사",
   "turnActionBar.retryButton": "다시 시도 (깊이: high)",
   "turnActionBar.forkButton": "분기",
   "turnActionBar.starButton": "즐겨찾기",
