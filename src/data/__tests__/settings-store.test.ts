@@ -229,10 +229,12 @@ describe("SettingsService role presets", () => {
     await service.patch({ features: { idlePreferenceRefresh: false } });
     expect(service.get("features")?.idlePreferenceRefresh).toBe(false);
 
-    await service.patch({ features: { idlePreferenceRefresh: true } });
-    expect(service.get("features")?.idlePreferenceRefresh).toBe(true);
-
+    // A non-boolean patch is rejected — the value stays at its current `false`,
+    // NOT silently reset to the `true` default (which would mask the rejection).
     await service.patch({ features: { idlePreferenceRefresh: "yes" } as never });
+    expect(service.get("features")?.idlePreferenceRefresh).toBe(false);
+
+    await service.patch({ features: { idlePreferenceRefresh: true } });
     expect(service.get("features")?.idlePreferenceRefresh).toBe(true);
   });
 });
