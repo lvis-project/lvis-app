@@ -50,6 +50,19 @@ export interface SidebarProps {
 
 // ─── NavItem ─────────────────────────────────────────────────────────────────
 
+/**
+ * Per-section hover tone. Primary nav reads as the main surface (`accent`);
+ * the footer reads as secondary (`muted`), so its rows tint a step softer on
+ * hover. Both are theme tokens — a bundle switch re-tints every surface and
+ * the color-token gate stays clean (no raw literals).
+ */
+type NavTone = "accent" | "muted";
+
+const NAV_TONE_HOVER: Record<NavTone, string> = {
+  accent: "hover:bg-accent hover:text-accent-foreground",
+  muted: "hover:bg-muted hover:text-foreground",
+};
+
 interface NavItemProps {
   viewKey: string;
   label: string;
@@ -57,6 +70,8 @@ interface NavItemProps {
   isActive: boolean;
   onClick: () => void;
   collapsed: boolean;
+  /** Hover tone for the inactive state. Defaults to the primary `accent` surface. */
+  tone?: NavTone;
   "data-testid"?: string;
   "data-viewkey"?: string;
   "data-tour-anchor"?: string;
@@ -70,11 +85,13 @@ function NavItem({
   isActive,
   onClick,
   collapsed,
+  tone = "accent",
   "data-testid": testId,
   "data-viewkey": dataViewKey,
   "data-tour-anchor": tourAnchor,
   trailingSlot,
 }: NavItemProps) {
+  const hoverTone = NAV_TONE_HOVER[tone];
   const btn = collapsed ? (
     /* Collapsed — perfectly square icon button */
     <button
@@ -89,7 +106,7 @@ function NavItem({
         "focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring",
         isActive
           ? "bg-primary/(--opacity-subtle) text-primary"
-          : "text-muted-foreground hover:bg-accent hover:text-accent-foreground",
+          : `text-muted-foreground ${hoverTone}`,
       ]
         .filter(Boolean)
         .join(" ")}
@@ -113,7 +130,7 @@ function NavItem({
         "focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring",
         isActive
           ? "bg-primary/(--opacity-subtle) text-primary font-medium"
-          : "text-muted-foreground hover:bg-accent hover:text-accent-foreground",
+          : `text-muted-foreground ${hoverTone}`,
       ]
         .filter(Boolean)
         .join(" ")}
@@ -364,7 +381,7 @@ export function Sidebar({
       </div>
 
       {/* ── Footer — Marketplace + Settings ────────────────────────── */}
-      <div className={`border-t border-border px-2 pb-2 pt-3 mt-auto space-y-0.5 ${compact ? "flex flex-col items-center space-y-0.5" : ""}`}>
+      <div className={`border-t border-border px-2 pb-2 pt-2 mt-auto space-y-0.5 ${compact ? "flex flex-col items-center space-y-0.5" : ""}`}>
         {/* Home — placed above the marketplace, capped by this footer's border-t
             divider (which matches the composer's border-t seam). */}
         <NavItem
@@ -388,6 +405,7 @@ export function Sidebar({
             if (marketplaceUrlReady) onOpenMarketplace();
           }}
           collapsed={compact}
+          tone="muted"
           data-testid="sidebar-marketplace"
           data-tour-anchor="sidebar-marketplace"
         />
@@ -400,6 +418,7 @@ export function Sidebar({
           isActive={activeView === "settings"}
           onClick={onOpenSettings}
           collapsed={compact}
+          tone="muted"
           data-testid="sidebar-settings"
           data-tour-anchor="settings-entry"
           trailingSlot={
