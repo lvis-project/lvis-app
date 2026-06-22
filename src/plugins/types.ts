@@ -460,9 +460,11 @@ export interface PluginUiExtension {
    */
   tool?: string;
   /**
-   * Detached window defaults. `defaultMode: "detached"` opens the extension
-   * in a magnetic-snap BrowserWindow instead of rendering it inline.
-   * Width/height values are initial defaults; saved user bounds still win.
+   * Detached-window geometry hints. Used only when the host opens this
+   * extension in a magnetic-snap BrowserWindow; the decision to detach is
+   * owned solely by the app's mode (appMode: chat detaches, action stays
+   * inline), NOT by the plugin. Width/height are initial defaults; saved
+   * user bounds still win.
    */
   window?: {
     width?: number;
@@ -471,7 +473,6 @@ export interface PluginUiExtension {
     minHeight?: number;
     resizable?: boolean;
     alwaysOnTop?: boolean;
-    defaultMode?: "embedded" | "detached";
   };
 }
 

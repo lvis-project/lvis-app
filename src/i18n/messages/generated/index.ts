@@ -151,6 +151,7 @@ import { en as en_sessionResumeDivider, ko as ko_sessionResumeDivider } from "./
 import { en as en_sessionTodoPanel, ko as ko_sessionTodoPanel } from "./sessionTodoPanel.js";
 import { en as en_settingsContent, ko as ko_settingsContent } from "./settingsContent.js";
 import { en as en_settingsWindow, ko as ko_settingsWindow } from "./settingsWindow.js";
+import { en as en_sidebar, ko as ko_sidebar } from "./sidebar.js";
 import { en as en_solarizedLight, ko as ko_solarizedLight } from "./solarizedLight.js";
 import { en as en_sparkline, ko as ko_sparkline } from "./sparkline.js";
 import { en as en_spotlightTour, ko as ko_spotlightTour } from "./spotlightTour.js";
@@ -329,6 +330,7 @@ export const generatedEn: Record<string, string> = {
   ...en_sessionTodoPanel,
   ...en_settingsContent,
   ...en_settingsWindow,
+  ...en_sidebar,
   ...en_solarizedLight,
   ...en_sparkline,
   ...en_spotlightTour,
@@ -508,6 +510,7 @@ export const generatedKo: Record<string, string> = {
   ...ko_sessionTodoPanel,
   ...ko_settingsContent,
   ...ko_settingsWindow,
+  ...ko_sidebar,
   ...ko_solarizedLight,
   ...ko_sparkline,
   ...ko_spotlightTour,
