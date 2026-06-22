@@ -13,6 +13,13 @@
 
 ---
 
+> ⚠️ **HISTORICAL — everything below this line is the ORIGINAL proposal, preserved verbatim.**
+> It describes a design that has since been REMOVED (the scripted-autoplay engine,
+> the `demoAutoplayEnabled` flag, and the inline replay no longer exist). Read it as a
+> record of the original intent, NOT as a description of current behaviour. The
+> canonical first-boot flow is now the onboarding login scenario (`ScenarioShowcase`
+> grid + login CTA).
+
 ## 1. Motivation
 
 신규 사용자가 LVIS 의 *진짜 능력* 을 첫 30초 안에 보게 한다.
