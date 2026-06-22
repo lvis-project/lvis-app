@@ -58,6 +58,9 @@ if (typeof window !== "undefined") {
   if (!Element.prototype.scrollIntoView) {
     Element.prototype.scrollIntoView = function () {};
   }
+  if (!Element.prototype.scrollTo) {
+    Element.prototype.scrollTo = function () {};
+  }
   if (!Element.prototype.hasPointerCapture) {
     Element.prototype.hasPointerCapture = function () {
       return false;
