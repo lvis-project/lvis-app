@@ -492,7 +492,9 @@ const DEFAULT_SETTINGS: AppSettings = {
   plugins: {},
   pluginConfigs: {},
   features: {
+    // Idle preference refresh runs by default; users can opt out in Settings.
     idlePreferenceRefresh: true,
+
     // Fresh installs MUST start the Z onboarding chain. Persisting an
     // explicit `false` (instead of relying on `undefined`) keeps the
     // contract obvious: the flag flips to `true` exactly once, from
