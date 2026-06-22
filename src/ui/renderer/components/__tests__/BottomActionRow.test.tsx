@@ -77,6 +77,21 @@ describe("BottomActionRow", () => {
     expect(thinking.compareDocumentPosition(send) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
   });
 
+  it("keeps the whole row single-line and shrinks the token slot rather than wrapping (#1303)", () => {
+    const { getByTestId } = renderRow();
+    // The row container must never wrap to a second line.
+    const row = getByTestId("composer-bottom-action-row");
+    expect(row.className).toContain("flex-nowrap");
+    expect(row.className).not.toContain("flex-wrap");
+    // The left token/info slot must shrink (min-w-0 + overflow + nowrap), not wrap vertically.
+    const slot = getByTestId("token-slot");
+    const leftSlot = slot.parentElement;
+    expect(leftSlot?.className).toContain("flex-nowrap");
+    expect(leftSlot?.className).not.toContain("flex-wrap");
+    expect(leftSlot?.className).toContain("min-w-0");
+    expect(leftSlot?.className).toContain("overflow-hidden");
+  });
+
   it("invokes onSend when Send is clicked", () => {
     const onSend = vi.fn();
     const { getByTestId } = renderRow({ onSend });
