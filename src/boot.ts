@@ -986,7 +986,7 @@ export async function bootstrap(
     memoryManager,
     generateText: lateBinding.llmCallerRef.fn,
     idleScheduler,
-    isIdleRefreshEnabled: () => settingsService.get("features")?.idlePreferenceRefresh ?? false,
+    isIdleRefreshEnabled: () => settingsService.get("features")?.idlePreferenceRefresh ?? true,
   });
   preferenceRefreshService.start();
 
