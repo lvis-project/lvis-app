@@ -1779,7 +1779,11 @@ export function ChatView({ api, onAsk, onEditSave, onFork, onToggleStar, onRetry
           scrolled the chat. The panel collapses by default once it has
           content; in the collapsed state the active item title streams next
           to the count so the user always sees what step is running. */}
-      <div className="relative z-30 w-full max-w-full min-w-0 overflow-visible border-t bg-card/(--opacity-solid)">
+      {/* Composer dock — no opaque background. The outer white fill behind the
+          composer box was clipping the floating sidebar's drop shadow; dropping
+          it lets the shadow render while the composer box (border + bg-input-bar)
+          still reads as a distinct surface. */}
+      <div className="relative z-30 w-full max-w-full min-w-0 overflow-visible border-t">
         <div className="w-full max-w-full min-w-0" data-testid="session-todo-dock">
           <SessionTodoPanel api={workflowApi} sessionId={currentSessionId} />
           <MessageQueuePanel
@@ -1903,8 +1907,6 @@ export function ChatView({ api, onAsk, onEditSave, onFork, onToggleStar, onRetry
             activePreset={activePreset}
             activePresetId={activePresetId}
             onSelectPreset={setActivePresetId}
-            enableThinkingChat={enableThinkingChat}
-            onToggleThinking={toggleThinking}
             permissionSlot={
               <PermissionModeBadge
                 onClick={() => onOpenSettings("permissions")}
@@ -1913,10 +1915,16 @@ export function ChatView({ api, onAsk, onEditSave, onFork, onToggleStar, onRetry
             }
             approvalSlot={<DeferredApprovalChip draftText={question} />}
           />
-          {/* v6 layout: Composer (textarea) + BottomActionRow (TokenRing/
-              단축키/취소/Send) 가 하나의 흰색 컨테이너 안. 사용자 인지 = "타이핑
-              영역 + 즉시 액션" 한 묶음. shadow-md + rounded-xl 로 경계 강조. */}
-          <div className="mx-3 mb-1 rounded-xl bg-input-bar shadow-md overflow-hidden ring-1 ring-border/(--opacity-muted)">
+          {/* Composer (textarea) + BottomActionRow (TokenRing/단축키/취소/Send)
+              가 하나의 컨테이너 안. 사용자 인지 = "타이핑 영역 + 즉시 액션" 한
+              묶음.
+              `border` (not `ring`): the dock's overflow-x-hidden forces
+              overflow-y:auto, which clips a ring's top edge (the box is flush at
+              the parent's top). A border is painted inside the box, so all four
+              edges — including the top — render. Full `border-border` opacity
+              gives a clearly visible outline (was ring-border/(--opacity-muted),
+              an almost-invisible faint edge). */}
+          <div className="mx-3 mb-1 rounded-xl bg-input-bar shadow-md overflow-hidden border border-border">
           <Composer
             ref={composerRef}
             text={question}
@@ -1928,6 +1936,9 @@ export function ChatView({ api, onAsk, onEditSave, onFork, onToggleStar, onRetry
             openExternal={(p) => window.lvis.attach.openExternal(p)}
             onSend={handleComposerSend}
             suggestedReplies={suggestedReplies}
+            commandActions={commandActions}
+            inlinePlugins={plugins}
+            onSelectPlugin={onSelectPlugin}
             disabled={
               // Context/TPM red zones stay sendable: main preflight runs
               // compact before the LLM call. Slash commands still bypass
@@ -1952,6 +1963,8 @@ export function ChatView({ api, onAsk, onEditSave, onFork, onToggleStar, onRetry
               // ESC handler 와 동일: 큐를 inject + abort (멈춤 X, 입력으로 inject).
               flushQueueAsUserMessage();
             }}
+            enableThinkingChat={enableThinkingChat}
+            onToggleThinking={toggleThinking}
             />
           </div>
           {/* PermissionModeBadge + DeferredApprovalChip 모두
