@@ -86,8 +86,8 @@ interface ServerCatalogRow {
   latestStableVersion?: string;
   latest_artifact_sha256?: string | null;
   channel?: string;
-  /** S14: requires.capabilities[] exposed by the server catalog. */
-  requires?: { capabilities?: unknown[] } | null;
+  /** S14: requires.capabilities[] (+ optional min_app_version) exposed by the server catalog. */
+  requires?: { capabilities?: unknown[]; min_app_version?: unknown } | null;
   /** lvis-marketplace#52: "plugin" (default) | "mcp". */
   plugin_type?: string;
   pluginType?: string;
@@ -526,7 +526,7 @@ export class CloudMarketplaceFetcher implements MarketplaceFetcher, MarketplaceH
     if (row.channel === "canary") item.channel = "canary";
     else if (version) item.channel = "stable";
 
-    // S14: map requires.capabilities[] from the catalog row
+    // S14: map requires.capabilities[] (+ min_app_version) from the catalog row
     if (row.requires && typeof row.requires === "object") {
       const caps = row.requires.capabilities;
       const requires: RequiresSpec = {
@@ -534,6 +534,10 @@ export class CloudMarketplaceFetcher implements MarketplaceFetcher, MarketplaceH
           ? caps.filter((c): c is string => typeof c === "string")
           : [],
       };
+      const minAppVersion = row.requires.min_app_version;
+      if (typeof minAppVersion === "string" && minAppVersion.length > 0) {
+        requires.minAppVersion = minAppVersion;
+      }
       item.requires = requires;
     }
 
