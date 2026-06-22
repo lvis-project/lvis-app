@@ -524,9 +524,28 @@ export interface VerifyResult {
 /**
  * S14 — dependency specification extracted from plugin manifest's `requires` block.
  * Capabilities are kebab-case tags matching `^[a-z][a-z0-9-]*$`.
+ *
+ * NOTE: This interface is the host-side source of truth that the SDK's
+ * generated TS mirror (`lvis-plugin-sdk/src/index.ts` `RequiresSpec`) is
+ * regenerated from via `sync-from-host`. Keep it consistent with the SDK JSON
+ * schema (`schemas/plugin-manifest.schema.json`).
  */
 export interface RequiresSpec {
   capabilities: string[];
+  /**
+   * Minimum compatible LVIS app version — a plain SemVer `MAJOR.MINOR.PATCH`
+   * string (NOT a range; Obsidian-style). Absent = compatible with all
+   * versions (purely additive, backward-compatible).
+   *
+   * The host hard-blocks at BOTH boundaries when the running app version is
+   * lower than this:
+   *   - INSTALL (marketplace): throws {@link IncompatibleAppVersionError}
+   *     before the artifact is downloaded.
+   *   - LOAD (runtime): skips `start()` and surfaces a non-dismissable
+   *     "needs newer app" state (e.g. after the user downgraded the app or
+   *     sideloaded an artifact built for a newer host).
+   */
+  minAppVersion?: string;
 }
 
 /**
@@ -543,6 +562,30 @@ export class MissingDependenciesError extends Error {
     this.name = "MissingDependenciesError";
   }
 }
+
+/**
+ * Thrown by marketplace install preflight when the plugin declares
+ * `requires.minAppVersion` higher than the running LVIS app version. This is a
+ * HARD BLOCK raised BEFORE the artifact is downloaded — the user must update
+ * the app before the plugin can be installed.
+ *
+ * `required` / `current` are plain SemVer strings. The IPC layer maps this to
+ * the English error code `incompatible-app-version`; the renderer maps that
+ * code to the Korean copy (per the IPC Error Message Language Convention).
+ */
+export class IncompatibleAppVersionError extends Error {
+  readonly required: string;
+  readonly current: string;
+  constructor(required: string, current: string) {
+    super(`plugin requires LVIS >= ${required}, current ${current}`);
+    this.required = required;
+    this.current = current;
+    this.name = "IncompatibleAppVersionError";
+  }
+}
+
+/** Stable English IPC error code for {@link IncompatibleAppVersionError}. */
+export const INCOMPATIBLE_APP_VERSION_CODE = "incompatible-app-version";
 
 /**
  * Thrown by marketplace install preflight when a plugin declares
