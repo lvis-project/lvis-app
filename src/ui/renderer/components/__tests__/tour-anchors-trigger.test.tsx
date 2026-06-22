@@ -19,7 +19,7 @@ import { useEffect, useRef, useState } from "react";
 import { TooltipProvider } from "../../../../components/ui/tooltip.js";
 import { Composer, type ComposerHandle } from "../Composer.js";
 import { InputActionBar } from "../InputActionBar.js";
-import { CommandPopover } from "../CommandPopover.js";
+import { SlashPicker } from "../SlashPicker.js";
 import { MainToolbar } from "../../MainToolbar.js";
 import { StatusBar } from "../StatusBar.js";
 import type { Attachment } from "../../types/attachments.js";
@@ -71,8 +71,6 @@ describe("Tutorial-C PR #983 follow-up: tour anchors", () => {
       activePreset: mockPreset,
       activePresetId: "default",
       onSelectPreset: vi.fn(),
-      enableThinkingChat: false,
-      onToggleThinking: vi.fn(),
     };
     const { getByTestId } = render(
       <TooltipProvider>
@@ -84,11 +82,15 @@ describe("Tutorial-C PR #983 follow-up: tour anchors", () => {
     ).toBe("input-action-bar");
   });
 
-  it("CommandPopover trigger carries data-tour-anchor=command-palette-toggle", () => {
+  it("SlashPicker trigger carries data-tour-anchor=command-palette-toggle", () => {
+    // The ⌘ CommandPopover merged into the unified SlashPicker; the tour
+    // anchor moved onto the picker's trigger so step 3 still resolves.
     const { getByTestId } = render(
       <TooltipProvider>
-        <CommandPopover
+        <SlashPicker
           actions={[]}
+          plugins={[]}
+          onSelectPlugin={vi.fn()}
           onInsert={vi.fn()}
           open={false}
           onOpenChange={vi.fn()}
@@ -120,8 +122,6 @@ describe("Tutorial-C PR #983 follow-up: tour anchors", () => {
       activePreset: mockPreset,
       activePresetId: "default",
       onSelectPreset: vi.fn(),
-      enableThinkingChat: false,
-      onToggleThinking: vi.fn(),
     };
     const toolbarProps: Parameters<typeof MainToolbar>[0] = {
       activeView: "home",
