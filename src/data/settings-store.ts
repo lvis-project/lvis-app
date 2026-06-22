@@ -136,15 +136,6 @@ export interface FeatureFlags {
    */
   onboardingCompleted?: boolean;
   /**
-   * O-X1 Live Auto-play (proposal: docs/architecture/proposals/live-autoplay.md).
-   * Demo-only preference. The renderer may mount demo-autoplay only when
-   * main reports captured demo activation and onboarding has completed.
-   * `false` is the explicit opt-out. After the user takes over (any keystroke
-   * or "키 잡기 →" click), the flag is flipped to false so the demo never
-   * re-runs.
-   */
-  demoAutoplayEnabled?: boolean;
-  /**
    * Permission policy — host-classifies-risk migration gate
    * (docs/architecture/permission-policy-design.md; project_permission_review_redesign).
    *
@@ -1201,9 +1192,6 @@ function normalizeFeatureFlags(input: unknown): FeatureFlags {
   }
   if (typeof obj.onboardingCompleted === "boolean") {
     result.onboardingCompleted = obj.onboardingCompleted;
-  }
-  if (typeof obj.demoAutoplayEnabled === "boolean") {
-    result.demoAutoplayEnabled = obj.demoAutoplayEnabled;
   }
   if (typeof obj.hostClassifiesRisk === "boolean") {
     result.hostClassifiesRisk = obj.hostClassifiesRisk;
