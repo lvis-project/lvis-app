@@ -492,7 +492,7 @@ const DEFAULT_SETTINGS: AppSettings = {
   plugins: {},
   pluginConfigs: {},
   features: {
-    idlePreferenceRefresh: false,
+    idlePreferenceRefresh: true,
     // Fresh installs MUST start the Z onboarding chain. Persisting an
     // explicit `false` (instead of relying on `undefined`) keeps the
     // contract obvious: the flag flips to `true` exactly once, from
@@ -1188,7 +1188,8 @@ function normalizeSystem(input: unknown): SystemSettings {
 
 /**
  * Coerce on-disk `features` block to FeatureFlags shape.
- * Missing or invalid fields are silently dropped — all flags default to false.
+ * Missing or invalid fields are silently dropped, so each flag falls back to
+ * its value in DEFAULT_SETTINGS.features.
  */
 function normalizeFeatureFlags(input: unknown): FeatureFlags {
   if (!input || typeof input !== "object" || Array.isArray(input)) {
