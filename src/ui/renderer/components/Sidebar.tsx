@@ -381,7 +381,14 @@ export function Sidebar({
       </div>
 
       {/* ── Footer — Marketplace + Settings ────────────────────────── */}
-      <div className={`border-t border-border px-2 pb-2 pt-2 mt-auto space-y-0.5 ${compact ? "flex flex-col items-center space-y-0.5" : ""}`}>
+      {/* `pt-5` (20px): the footer is bottom-pinned (`mt-auto`), so its top edge —
+          the divider "홈의 윗 라인" — is `sidebarBottom − footerHeight`. Padding
+          above the rows raises that divider until it pixel-aligns (≈1px) with the
+          composer's `border-t` pill seam on the right at the 460×840 default
+          window. The two live in independent containers (floating-card sidebar vs
+          flex content column) with different bottom anchors, so the alignment is
+          tuned for the default size; it drifts a few px at other window heights. */}
+      <div className={`border-t border-border px-2 pb-2 pt-5 mt-auto space-y-0.5 ${compact ? "flex flex-col items-center space-y-0.5" : ""}`}>
         {/* Home — placed above the marketplace, capped by this footer's border-t
             divider (which matches the composer's border-t seam). */}
         <NavItem
