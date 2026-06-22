@@ -1023,6 +1023,8 @@ export type LvisApi = {
     closeDetached: () => Promise<{ ok: true } | { ok: false; error: string }>;
     listDetached: () => Promise<Array<{ windowId: number; viewKey: string; snapped: boolean }>>;
     loadSessionInMain: (sessionId: string) => Promise<{ ok: true } | { ok: false; error: string }>;
+    /** Resize the main window to match the workspace mode (action → 800×600 centered; chat → 기존 right-docked). */
+    resizeForMode: (mode: "chat" | "action") => Promise<{ ok: true } | { ok: false; error: string }>;
     openHtmlPreview: (payload: OpenHtmlPreviewWindowPayload) => Promise<OpenHtmlPreviewWindowResult>;
     onSnapEdge: (handler: (edge: "n" | "s" | "e" | "w" | null) => void) => () => void;
     /** Subscribe to in-place navigation (single-instance shell content swap). */
