@@ -10,7 +10,9 @@ function readRepoFile(path: string): string {
 
 describe("chat Thinking toggle styles", () => {
   it("uses the shadcn/Radix checkbox component with a semantic unchecked square", () => {
-    const component = readRepoFile("src/ui/renderer/components/InputActionBar.tsx");
+    // Thinking moved out of the inline InputActionBar checkbox into the
+    // dedicated ThinkingButton popover (toggle + depth) before Send.
+    const component = readRepoFile("src/ui/renderer/components/ThinkingButton.tsx");
     const styles = readRepoFile("src/styles.css");
     const checkbox = readRepoFile("src/components/ui/checkbox.tsx");
 
