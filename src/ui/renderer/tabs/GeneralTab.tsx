@@ -186,7 +186,6 @@ export function GeneralTab({
 
   const provider = settings?.llm.provider ?? "";
   const authMode = settings?.llm.authMode ?? "manual";
-  const demoEnabled = settings?.features?.demoAutoplayEnabled === true;
 
   const marketplaceStatus: { dot: string; label: string } = useMemo(() => {
     if (!stats.marketplace.configured) return { dot: "bg-muted-foreground/40", label: t("generalTab.marketplaceNotConnected") };
@@ -331,11 +330,6 @@ export function GeneralTab({
               {hasVendorKey && (
                 <Badge variant="secondary" className="text-[10px]">
                   {t("generalTab.keyRegisteredBadge")}
-                </Badge>
-              )}
-              {demoEnabled && (
-                <Badge variant="secondary" className="text-[10px]">
-                  {t("generalTab.demoBadge")}
                 </Badge>
               )}
             </div>
