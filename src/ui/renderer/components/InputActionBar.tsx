@@ -117,10 +117,10 @@ export function InputActionBar({
       // `first-boot-essentials` pins to this action-bar root, see
       // `default-tour-scenarios.ts`.
       data-tour-anchor="input-action-bar"
-      className="flex min-w-0 items-center gap-2 px-3 pt-2"
+      className="flex min-w-0 flex-nowrap items-center gap-1.5 px-3 pt-2"
     >
       {/* Leading cluster */}
-      <div className="flex shrink-0 items-center gap-0.5" data-testid="iab-leading">
+      <div className="flex shrink-0 flex-nowrap items-center gap-0.5" data-testid="iab-leading">
         <PluginGridButton
           plugins={plugins}
           onSelect={onSelectPlugin}
@@ -150,7 +150,7 @@ export function InputActionBar({
           onClick={() => void onAttach()}
           disabled={attachDisabled}
           data-testid="iab-attach-button"
-          className="h-7 w-7 shrink-0 bg-input-bar p-0"
+          className="h-[26px] w-[26px] shrink-0 bg-input-bar p-0"
           title={attachButtonLabel(attachDisabled, attachDisabledReason)}
           aria-label={attachButtonLabel(attachDisabled, attachDisabledReason)}
         >
@@ -171,7 +171,7 @@ export function InputActionBar({
         <Button
           variant="outline"
           size="sm"
-          className="relative h-7 w-7 shrink-0 bg-input-bar p-0"
+          className="relative h-[26px] w-[26px] shrink-0 bg-input-bar p-0"
           title={assistantTitle}
           aria-label={assistantTitle}
           data-testid="iab-assistant-context-button"
