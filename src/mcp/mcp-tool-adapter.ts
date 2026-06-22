@@ -6,6 +6,15 @@
  * Every MCP server's discovered tools flow through this single named
  * adapter so the conversion contract stays in one auditable place
  * instead of being inlined at every call site.
+ *
+ * Host-classifies-risk (project_permission_review_redesign): the hardcoded
+ * `category:"network"` below is HOST-OWNED, not self-declared. An EXTERNAL MCP
+ * server is a foreign, lowest-trust network peer (`trustFromSource("mcp")` →
+ * `"low"`), and the host treats every tool it exposes as a network-reaching
+ * operation regardless of any annotation the server sends — MCP annotations
+ * are untrusted hints ("a server can lie"). This is therefore retained as a
+ * host-derived default-strict classification, distinct from the
+ * `plugin-tool-from-mcp.ts` path (first-party loopback servers).
  */
 import { createDynamicTool, type Tool } from "../tools/base.js";
 import type { McpToolSchema, McpUiPayload } from "./types.js";
@@ -36,6 +45,7 @@ export function mcpToolToTool(
     name: namespacedName,
     description: schema.description,
     source: "mcp",
+    // Host-derived default-strict for foreign MCP peers — see file header.
     category: "network",
     mcpServerId: serverId,
     jsonSchema: {

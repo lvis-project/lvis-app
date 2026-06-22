@@ -35,6 +35,14 @@ export interface FallbackEntry {
   model: string;
 }
 
+/**
+ * Synthetic dropdown value for the demo session. It is NOT a real VENDORS entry
+ * (demo reuses azure-foundry under the hood with build-embedded credentials),
+ * so it never touches settings.llm.vendors — it only represents "활성 demo" in
+ * the provider picker.
+ */
+const DEMO_VENDOR_VALUE = "__demo__";
+
 export interface LlmTabProps {
   api: LvisApi;
   vendor: string;
@@ -60,6 +68,19 @@ export interface LlmTabProps {
   setAuthMode: (mode: "manual" | "login") => void;
   /** Fired when the user clicks the "Login" button in the auth-mode section. */
   onOpenLogin?: () => void;
+  /**
+   * True when a demo session is currently hydrated
+   * (`api.demo.status().activated`). Combined with authMode/vendor it drives
+   * whether the provider dropdown shows the synthetic "데모 체험" entry as
+   * selected.
+   */
+  demoActive: boolean;
+  /**
+   * Fired when the user picks the synthetic "데모 체험" entry from the provider
+   * dropdown. The handler restores the demo pointer if a session is already
+   * active, or kicks off embedded activation (via the login modal) otherwise.
+   */
+  onSelectDemo: () => void | Promise<void>;
   model: string;
   setModel: (v: string) => void;
   enableThinking: boolean;
@@ -180,6 +201,8 @@ export function LlmTab(props: LlmTabProps) {
     authMode,
     setAuthMode,
     onOpenLogin,
+    demoActive,
+    onSelectDemo,
     model,
     setModel,
     enableThinking,
@@ -256,6 +279,27 @@ export function LlmTab(props: LlmTabProps) {
   }, [api, hostResolverMap, t]);
 
   const isLoginMode = authMode === "login";
+  // The dropdown shows "데모 체험" as selected only when the demo SESSION is
+  // hydrated AND it is the active provider (login mode + azure-foundry, the
+  // fixed demo vendor). Otherwise the real selected vendor is shown.
+  const isDemoSelected = demoActive && isLoginMode && vendor === "azure-foundry";
+  const displayVendor = isDemoSelected ? DEMO_VENDOR_VALUE : vendor;
+  const handleVendorChange = useCallback(
+    (v: string) => {
+      if (v === DEMO_VENDOR_VALUE) {
+        void onSelectDemo();
+        return;
+      }
+      // Real vendor picked. If we were in a login/demo session, this is an
+      // explicit switch out → back to manual mode for the chosen vendor. We do
+      // NOT clear the demo session (it stays in .env.demo); the user can
+      // re-select "데모 체험" later to restore it.
+      setVendor(v);
+      if (isLoginMode) setAuthMode("manual");
+      onImmediateChange?.();
+    },
+    [onSelectDemo, setVendor, isLoginMode, setAuthMode, onImmediateChange],
+  );
   // Requirement D — only allow Apply when the host map has ACTUALLY changed
   // from the last-persisted value. `loadedHostResolverMap` is the value
   // hydrated from settings; comparing against it means an unchanged textarea
@@ -397,7 +441,27 @@ export function LlmTab(props: LlmTabProps) {
             </div>
           )}
 
-          {/* Provider form — always rendered; disabled when authMode === "login" */}
+          {/* Provider selector — ALWAYS enabled (even in login/demo). It is the
+              single provider switcher, including the synthetic "데모 체험" entry;
+              only the detail fields below stay login-gated. */}
+          <div className="space-y-2">
+            <Label htmlFor="vendor-select" className="flex items-center gap-2">
+              {t("llmTab.vendor")}
+              {!isLoginMode && <ImmediateBadge />}
+            </Label>
+            <Select value={displayVendor} onValueChange={handleVendorChange}>
+              <SelectTrigger id="vendor-select" className="w-full">
+                <SelectValue placeholder={t("llmTab.vendorPlaceholder")} />
+              </SelectTrigger>
+              <SelectContent>
+                <SelectItem value={DEMO_VENDOR_VALUE}>{t("llmTab.demoVendor")}</SelectItem>
+                {VENDORS.map((v) => (
+                  <SelectItem key={v.id} value={v.id}>{v.label}</SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
+          </div>
+          {/* Provider detail form — disabled when authMode === "login". */}
           <div
             className={isLoginMode ? "pointer-events-none opacity-50 select-none space-y-3" : "space-y-3"}
             {...(isLoginMode ? { "aria-disabled": "true" as const } : {})}
@@ -408,30 +472,6 @@ export function LlmTab(props: LlmTabProps) {
                 {t("llmTab.loginModeDisabledHint")}
               </p>
             )}
-            <div className="space-y-2">
-              <Label htmlFor="vendor-select" className="flex items-center gap-2">
-                {t("llmTab.vendor")}
-                {!isLoginMode && <ImmediateBadge />}
-              </Label>
-              <Select
-                value={vendor}
-                onValueChange={(v) => {
-                  if (isLoginMode) return;
-                  setVendor(v);
-                  onImmediateChange?.();
-                }}
-                disabled={isLoginMode}
-              >
-                <SelectTrigger id="vendor-select" className="w-full">
-                  <SelectValue placeholder={t("llmTab.vendorPlaceholder")} />
-                </SelectTrigger>
-                <SelectContent>
-                  {VENDORS.map((v) => (
-                    <SelectItem key={v.id} value={v.id}>{v.label}</SelectItem>
-                  ))}
-                </SelectContent>
-              </Select>
-            </div>
             {vendor !== "vertex-ai" && (vendorInfo.needsBaseUrl || vendor === "openai" || vendor === "copilot") && (
               <div className="space-y-2">
                 <Label className="text-sm font-medium">

@@ -3513,3 +3513,85 @@ describe("ToolExecutor — #811 m2 lifecycle events (PostToolUseFailure / Permis
     }
   });
 });
+
+describe("ToolExecutor — host-classifies-risk enforcement scope", () => {
+  // A tool whose declared category ("write") diverges from what the inspector
+  // derives from its args (a URL-shaped arg → "network"), wired through the
+  // foreground reviewer so the ENFORCED category surfaces in the reviewer's
+  // ToolInvocationContext. Both categories reach the reviewer (neither is the
+  // read-only short-circuit), so the observed category is unambiguous.
+  function makeDivergentTool(source: "builtin" | "plugin", name: string): {
+    registry: ToolRegistry;
+    execute: ReturnType<typeof vi.fn>;
+  } {
+    const execute = vi.fn(async () => "ran");
+    const registry = new ToolRegistry();
+    registry.register(createDynamicTool({
+      name,
+      description: "declared write, but a URL arg makes the inspector derive network",
+      source,
+      ...(source === "plugin" ? { pluginId: "test-plugin" } : {}),
+      category: "write",
+      jsonSchema: { type: "object", properties: { endpoint: { type: "string" } } },
+      execute: async (rawInput) => ({ output: await execute(rawInput), isError: false }),
+    }));
+    return { registry, execute };
+  }
+
+  async function enforcedCategoryFor(
+    source: "builtin" | "plugin",
+  ): Promise<import("../types.js").ToolCategory> {
+    const name = `divergent_${source}_probe`;
+    const { registry } = makeDivergentTool(source, name);
+    const dir = mkdtempSync(join(tmpdir(), `lvis-executor-hcr-${source}-`));
+    try {
+      const permMgr = new PermissionManager(join(dir, "permissions.json"));
+      permMgr.setMode("default");
+      permMgr.setInteractiveAutoApprove("low");
+      const classifySpy = vi.fn(() => ({ level: "medium" as const, reason: "review" }));
+      permMgr.setReviewer({
+        classifier: { classify: classifySpy },
+        cache: new VerdictCache(join(dir, "reviewer-cache.jsonl")),
+        deferredQueue: new DeferredQueue(join(dir, "deferred-queue.jsonl")),
+      });
+      const requestAndWait = vi.fn(async (req: { id: string }) => ({
+        requestId: req.id,
+        choice: "deny-once" as const,
+      }));
+      const executor = new ToolExecutor(
+        registry,
+        undefined,
+        permMgr,
+        undefined,
+        { requestAndWait } as never,
+        undefined,
+        undefined,
+        () => true, // hostClassifiesRisk flag ON
+      );
+      await executor.executeAll(
+        [{ id: `tu-${name}`, name, input: { endpoint: "https://example.com/api" } }],
+        { sessionId: `sess-${name}`, permissionContext: userPermissionContext() },
+      );
+      const ctx = classifySpy.mock.calls[0]?.[0] as
+        | import("../../permissions/reviewer/risk-classifier.js").ToolInvocationContext
+        | undefined;
+      if (!ctx) throw new Error("reviewer was not invoked");
+      return ctx.category;
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  }
+
+  it("keeps the DECLARED category for builtins even when the flag is on", async () => {
+    // The inspector would derive "network" from the URL arg, but builtins
+    // carry trusted known categories the inspector cannot re-derive, so the
+    // enforced category stays the declared "write".
+    expect(await enforcedCategoryFor("builtin")).toBe("write");
+  });
+
+  it("re-derives the host category for plugin tools when the flag is on", async () => {
+    // Plugin-declared categories are untrusted, so with the flag on the
+    // inspector's host-derived "network" (from the URL arg) is enforced.
+    expect(await enforcedCategoryFor("plugin")).toBe("network");
+  });
+});
