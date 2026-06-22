@@ -582,16 +582,17 @@ export function SpotlightTour({
         }}
       >
         <div
+          className="text-[11px]"
           style={{
             display: "flex",
             alignItems: "center",
             gap: 8,
-            fontSize: 11,
             color: "hsl(var(--muted-foreground))",
           }}
         >
           <span
             data-testid="spotlight-tour:step-badge"
+            className="text-[10px] font-bold"
             style={{
               display: "inline-flex",
               width: 18,
@@ -601,8 +602,6 @@ export function SpotlightTour({
               justifyContent: "center",
               background: "hsl(var(--primary))",
               color: "hsl(var(--primary-foreground))",
-              fontWeight: 700,
-              fontSize: 10,
             }}
           >
             {stepIndex + 1}
@@ -613,10 +612,8 @@ export function SpotlightTour({
         </div>
         <h3
           id={titleId}
+          className="mt-2 text-[14px] font-semibold"
           style={{
-            marginTop: 8,
-            fontSize: 14,
-            fontWeight: 600,
             letterSpacing: "-0.01em",
           }}
         >
@@ -624,10 +621,8 @@ export function SpotlightTour({
         </h3>
         <p
           id={bodyId}
+          className="mt-1.5 text-[12px] leading-relaxed"
           style={{
-            marginTop: 6,
-            fontSize: 12,
-            lineHeight: 1.6,
             color: "hsl(var(--muted-foreground))",
           }}
         >
@@ -636,19 +631,19 @@ export function SpotlightTour({
         {currentStep.keyHint && currentStep.keyHint.length > 0 ? (
           <div
             data-testid="spotlight-tour:key-hints"
-            style={{ marginTop: 8, display: "flex", gap: 6, flexWrap: "wrap" }}
+            className="mt-2"
+            style={{ display: "flex", gap: 6, flexWrap: "wrap" }}
           >
             {currentStep.keyHint.map((label) => (
               <kbd
                 key={label}
                 aria-label={`shortcut: ${label}`}
+                className="font-mono text-[11px]"
                 style={{
                   background: "hsl(var(--kbd-bg))",
                   border: "1px solid hsl(var(--kbd-border))",
                   borderRadius: 4,
                   padding: "1px 6px",
-                  fontFamily: '"SF Mono", "JetBrains Mono", Menlo, monospace',
-                  fontSize: 11,
                   color: "hsl(var(--popover-foreground))",
                 }}
               >
@@ -658,8 +653,8 @@ export function SpotlightTour({
           </div>
         ) : null}
         <div
+          className="mt-4"
           style={{
-            marginTop: 16,
             display: "flex",
             alignItems: "center",
             gap: 6,
@@ -690,12 +685,11 @@ export function SpotlightTour({
             type="button"
             data-testid="spotlight-tour:skip"
             onClick={() => closeAfterDismissal(scenario.id)}
+            className="ml-auto text-[11px]"
             style={{
-              marginLeft: "auto",
               background: "transparent",
               border: "none",
               color: "hsl(var(--muted-foreground))",
-              fontSize: 11,
               cursor: "pointer",
             }}
           >
@@ -705,10 +699,10 @@ export function SpotlightTour({
             type="button"
             data-testid="spotlight-tour:next"
             onClick={handleNext}
+            className="text-[12px]"
             style={{
               borderRadius: 6,
               padding: "6px 12px",
-              fontSize: 12,
               color: "hsl(var(--primary-foreground))",
               background: "hsl(var(--primary))",
               border: "none",
