@@ -152,7 +152,7 @@ export function useSettingsOrchestration(
   const [webKeyInput, setWebKeyInput] = useState("");
   const [hasWebKey, setHasWebKey] = useState(false);
   const [piiRedactEnabled, setPiiRedactEnabled] = useState(false);
-  const [idlePreferenceRefresh, setIdlePreferenceRefresh] = useState(false);
+  const [idlePreferenceRefresh, setIdlePreferenceRefresh] = useState(true);
   const [marketplaceBaseUrl, setMarketplaceBaseUrl] = useState("");
   const [marketplaceAllowPrivateNetwork, setMarketplaceAllowPrivateNetwork] = useState(true);
   const [hasMarketplaceApiKey, setHasMarketplaceApiKey] = useState(false);
@@ -211,7 +211,7 @@ export function useSettingsOrchestration(
       setWebProvider(s.webSearch.provider);
       setHasWebKey(webApiKeySet);
       setPiiRedactEnabled(s.privacy?.piiRedactEnabled ?? false);
-      setIdlePreferenceRefresh(s.features?.idlePreferenceRefresh ?? false);
+      setIdlePreferenceRefresh(s.features?.idlePreferenceRefresh ?? true);
       setMarketplaceBaseUrl(s.marketplace?.cloudBaseUrl ?? "");
       setMarketplaceAllowPrivateNetwork(s.marketplace?.cloudAllowPrivateNetwork ?? false);
       setHasMarketplaceApiKey(marketplaceKeySet);
@@ -229,7 +229,7 @@ export function useSettingsOrchestration(
   useEffect(() => {
     return api.onSettingsUpdated((next) => {
       setSettingsSnapshot(next);
-      setIdlePreferenceRefresh(next.features?.idlePreferenceRefresh ?? false);
+      setIdlePreferenceRefresh(next.features?.idlePreferenceRefresh ?? true);
       if (next.llm.authMode === "login") {
         const nextVendor = next.llm.provider;
         const block = next.llm.vendors[nextVendor];

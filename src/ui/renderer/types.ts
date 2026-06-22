@@ -211,11 +211,6 @@ export type AppSettings = {
     /** #893 — `true` after the user has dismissed the first-boot onboarding. */
     onboardingCompleted?: boolean;
     /**
-     * Demo-only presentation flag. Mirrors the main-process SOT in
-     * `src/data/settings-store.ts` `FeatureFlags.demoAutoplayEnabled`.
-     */
-    demoAutoplayEnabled?: boolean;
-    /**
      * Permission policy host-classifies-risk migration gate. Mirrors the
      * main-process SOT in `src/data/settings-store.ts`
      * `FeatureFlags.hostClassifiesRisk`. Default false (shadow mode only).
