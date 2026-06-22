@@ -24,6 +24,8 @@ import type {
 import { createPluginStorage } from "../storage.js";
 import type { Actor, PluginDeploymentGuard } from "../deployment-guard.js";
 import { resolveDependencies } from "../dependency-resolver.js";
+import { appVersionSatisfiesMin } from "../../shared/semver-compare.js";
+import { getLvisAppVersion } from "../../shared/app-version.js";
 import { isDevModeUnlocked } from "../../boot/dev-flags.js";
 import { verifyInstallReceipt } from "../plugin-install-receipt.js";
 import { updatePluginRegistry } from "../registry.js";
@@ -666,6 +668,14 @@ export class PluginRuntime {
       }
       this.disabledPluginIds.delete(manifest.id);
       this.failedPluginIds.delete(manifest.id);
+      // Plugin↔app minimum-version gate — HARD BLOCK at LOAD. A plugin already
+      // on disk (e.g. installed against a newer host, then the user downgraded
+      // the app, or a sideload) must NOT silently run against a too-old app.
+      // Skip activation, log an English reason, surface a "needs newer app"
+      // stub. Other plugins continue to load (isolation).
+      if (this.markIncompatibleAppVersion(manifest)) {
+        continue;
+      }
       const requiredCapabilities = manifest.requires?.capabilities ?? [];
       if (requiredCapabilities.length > 0) {
         const availableManifests = [...enabledManifestSnapshots.entries()]
@@ -1360,6 +1370,11 @@ export class PluginRuntime {
         this.markFailed(plan.pluginIdHint);
         return "failed";
       }
+    }
+
+    // Plugin↔app minimum-version gate — HARD BLOCK at LOAD (see boot path).
+    if (this.markIncompatibleAppVersion(manifest)) {
+      return "failed";
     }
 
     const requiredCapabilities = manifest.requires?.capabilities ?? [];
@@ -2196,6 +2211,36 @@ export class PluginRuntime {
     if (stub) {
       this.failedPluginStubs.set(pluginId, stub);
     }
+  }
+
+  /**
+   * Plugin↔app minimum-version gate (LOAD boundary). Returns `true` and marks
+   * the plugin failed when `manifest.requires.minAppVersion` is higher than the
+   * running LVIS app version; the caller then skips `start()`. Returns `false`
+   * (no field, or app satisfies the minimum) so the normal load path proceeds.
+   *
+   * Fail-closed: an unresolvable app version ("unknown" sentinel) blocks too.
+   * The failed-stub `description` carries the English IPC error message; the
+   * renderer maps the `incompatible-app-version` code to the Korean copy.
+   */
+  private markIncompatibleAppVersion(manifest: PluginManifest): boolean {
+    const minAppVersion = manifest.requires?.minAppVersion;
+    if (!minAppVersion) return false;
+    const currentAppVersion = getLvisAppVersion();
+    if (appVersionSatisfiesMin(currentAppVersion, minAppVersion)) return false;
+
+    const reason = `incompatible app version — plugin requires LVIS >= ${minAppVersion}, current ${currentAppVersion}`;
+    log.error(`${manifest.id} rejected — ${reason}`);
+    this.auditLog?.("error", "plugin_incompatible_app_version", {
+      pluginId: manifest.id,
+      required: minAppVersion,
+      current: currentAppVersion,
+    });
+    this.markFailed(manifest.id, {
+      name: manifest.name,
+      description: `plugin requires LVIS >= ${minAppVersion}, current ${currentAppVersion}`,
+    });
+    return true;
   }
 
   private buildPluginCard(
