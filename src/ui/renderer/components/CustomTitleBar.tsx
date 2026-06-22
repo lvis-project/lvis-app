@@ -156,7 +156,7 @@ export function CustomTitleBar({ children }: CustomTitleBarProps = {}) {
     return (
       <div
         data-testid="custom-titlebar-plain"
-        className="flex h-9 shrink-0 items-center gap-2 border-b border-border/(--opacity-half) bg-background px-3 text-foreground select-none"
+        className="flex h-8 shrink-0 items-center gap-2 border-b border-border/(--opacity-half) bg-background px-3 text-foreground select-none"
       >
         {children}
       </div>
@@ -172,7 +172,7 @@ export function CustomTitleBar({ children }: CustomTitleBarProps = {}) {
     return (
       <div
         data-testid="custom-titlebar-darwin"
-        className="flex h-9 shrink-0 items-center gap-2 border-b border-border/(--opacity-half) bg-background pl-[72px] pr-3 text-foreground select-none"
+        className="flex h-8 shrink-0 items-center gap-2 border-b border-border/(--opacity-half) bg-background pl-[72px] pr-3 text-foreground select-none"
         style={{
           // @ts-expect-error — Electron-specific CSS extension
           WebkitAppRegion: "drag",
@@ -189,7 +189,7 @@ export function CustomTitleBar({ children }: CustomTitleBarProps = {}) {
   return (
     <div
       data-testid="custom-titlebar"
-      className="flex h-9 shrink-0 items-center gap-2 border-b border-border/(--opacity-half) bg-background pl-3 text-foreground select-none"
+      className="flex h-8 shrink-0 items-center gap-2 border-b border-border/(--opacity-half) bg-background pl-3 text-foreground select-none"
       style={{
         // @ts-expect-error — Electron-specific CSS extension
         WebkitAppRegion: "drag",
@@ -215,7 +215,7 @@ export function CustomTitleBar({ children }: CustomTitleBarProps = {}) {
           size="icon"
           onClick={handleMinimize}
           title={t("customTitleBar.minimize")}
-          className="titlebar-btn titlebar-btn-minimize h-9 w-11 rounded-none text-muted-foreground hover:bg-accent hover:text-foreground"
+          className="titlebar-btn titlebar-btn-minimize h-8 w-11 rounded-none text-muted-foreground hover:bg-accent hover:text-foreground"
         >
           <Minus size={14} />
         </Button>
@@ -226,7 +226,7 @@ export function CustomTitleBar({ children }: CustomTitleBarProps = {}) {
           size="icon"
           onClick={handleMaximize}
           title={isMaximized ? t("customTitleBar.restore") : t("customTitleBar.maximize")}
-          className="titlebar-btn titlebar-btn-maximize h-9 w-11 rounded-none text-muted-foreground hover:bg-accent hover:text-foreground"
+          className="titlebar-btn titlebar-btn-maximize h-8 w-11 rounded-none text-muted-foreground hover:bg-accent hover:text-foreground"
         >
           {isMaximized ? <Minimize2 size={14} /> : <Maximize2 size={14} />}
         </Button>
@@ -237,7 +237,7 @@ export function CustomTitleBar({ children }: CustomTitleBarProps = {}) {
           size="icon"
           onClick={handleClose}
           title={t("customTitleBar.close")}
-          className="titlebar-btn titlebar-btn-close h-9 w-11 rounded-none text-muted-foreground hover:bg-destructive hover:text-destructive-foreground"
+          className="titlebar-btn titlebar-btn-close h-8 w-11 rounded-none text-muted-foreground hover:bg-destructive hover:text-destructive-foreground"
         >
           <X size={14} />
         </Button>

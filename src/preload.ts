@@ -1608,6 +1608,15 @@ const api = {
       ipcRenderer.invoke("lvis:window:load-session-in-main", sessionId) as Promise<
         { ok: true } | { ok: false; error: string }
       >,
+    /**
+     * Resize the main window to match the current workspace mode.
+     * "action" → centered 800×600 on the primary work area;
+     * "chat" → the right-docked initial bounds (computeInitialMainWindowBounds).
+     */
+    resizeForMode: async (mode: "chat" | "action") =>
+      ipcRenderer.invoke("lvis:window:resize-for-mode", mode) as Promise<
+        { ok: true } | { ok: false; error: string }
+      >,
     /** Open a render_html result in an isolated BrowserWindow. */
     openHtmlPreview: async (payload: OpenHtmlPreviewWindowPayload) =>
       ipcRenderer.invoke("lvis:window:open-html-preview", payload) as Promise<OpenHtmlPreviewWindowResult>,
