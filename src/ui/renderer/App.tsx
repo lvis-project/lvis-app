@@ -182,13 +182,18 @@ export function App() {
   // detachment (there is no plugin-side mode flag).
   const [appMode, setAppMode] = useState<AppMode>("action");
   // Sidebar collapse is owned by the shell (the floating-card Sidebar reads it
-  // as a prop and never manages its own state). Action mode defaults the rail
-  // expanded (a default, NOT a lock — the user may still collapse it).
+  // as a prop and never manages its own state). The rail width is coupled to
+  // appMode in both directions (see the effect below): action expands it, chat
+  // collapses it — a per-transition default, NOT a lock.
   const [sidebarCollapsed, setSidebarCollapsed] = useState(false);
-  // Entering action mode expands the rail (one-shot default on transition, so
-  // the user can still collapse it afterward without it snapping back).
+  // appMode drives the rail's default width on each mode transition: action
+  // mode expands it (wide working layout — inline views need the room), chat
+  // mode collapses it to the focused icon rail (views detach to windows). This
+  // makes toggling visibly widen/narrow the shell. It is a per-transition
+  // default, NOT a lock — the user may still collapse/expand manually within a
+  // mode without it snapping back until the next mode switch.
   useEffect(() => {
-    if (appMode === "action") setSidebarCollapsed(false);
+    setSidebarCollapsed(appMode === "chat");
   }, [appMode]);
   const [commandPopoverOpen, setCommandPopoverOpen] = useState(false);
   const [devToolsOpen, setDevToolsOpen] = useState(false);
