@@ -14,6 +14,10 @@ import type { ValidateFunction } from "ajv";
 import type { PluginManifest, InstallPolicy } from "../types.js";
 import { createLogger } from "../../lib/logger.js";
 
+// Re-exported here so manifest/plugin-loading consumers can import the
+// minAppVersion gate error + IPC code alongside the other manifest contracts.
+export { IncompatibleAppVersionError, INCOMPATIBLE_APP_VERSION_CODE } from "../types.js";
+
 /**
  * Stable SemVer pattern (MAJOR.MINOR.PATCH, no leading zeros, no pre-release,
  * no build metadata). Single source of this regex inside lvis-app — also
@@ -594,6 +598,26 @@ export async function parsePluginJson(
             `"hostSecrets": { "read": ["llm.apiKey.openai"] }`,
           );
         }
+      }
+    }
+  }
+
+  // Plugin↔app minimum-version gate — re-validate the format at host load even
+  // though the SDK JSON-schema mirrors the same `pattern` (same rationale as
+  // hostSecrets above: a plugin shipped against a stale SDK schema must not
+  // smuggle a non-SemVer `minAppVersion`). The host enforces compatibility at
+  // install + load against this value, so a malformed string would make the
+  // `compareSemver` gate fail-closed silently — fail loud here instead.
+  const requiresRaw: unknown = (parsed as { requires?: unknown }).requires;
+  if (requiresRaw && typeof requiresRaw === "object" && !Array.isArray(requiresRaw)) {
+    const minAppVersionRaw: unknown = (requiresRaw as { minAppVersion?: unknown }).minAppVersion;
+    if (minAppVersionRaw !== undefined) {
+      if (typeof minAppVersionRaw !== "string" || !STABLE_SEMVER_RE.test(minAppVersionRaw)) {
+        fail(
+          "requires.minAppVersion",
+          "must be a stable SemVer string MAJOR.MINOR.PATCH (no range, pre-release, build metadata, or leading zeros) — manifest_schema",
+          `"requires": { "minAppVersion": "1.4.0" }`,
+        );
       }
     }
   }
