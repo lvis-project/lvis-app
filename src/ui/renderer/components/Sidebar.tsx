@@ -41,9 +41,9 @@ export interface SidebarProps {
   /** `true` once the marketplace URL has finished loading. Controls button enabled state. */
   marketplaceUrlReady?: boolean;
   /**
-   * Collapse state is owned by the shell (App). The collapse/expand toggle lives
-   * in the band (MainToolbar), next to the traffic lights — not in this card.
-   * When `true` the floating card narrows to an icon-only rail.
+   * Collapse state is owned by the shell (App.tsx). The collapse/expand toggle
+   * lives in the top window-control band, beside the window controls — not in
+   * this card. When `true` the floating card narrows to an icon-only rail.
    */
   collapsed: boolean;
 }

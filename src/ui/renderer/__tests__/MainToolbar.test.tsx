@@ -10,17 +10,13 @@ function defaultProps(overrides: Partial<Parameters<typeof MainToolbar>[0]> = {}
     streaming: false,
     hasApiKey: true as boolean | null,
     isCurrentSessionStarred: false,
-    onNewChat: vi.fn(),
     onToggleCurrentSessionStar: vi.fn(),
     onExport: vi.fn(),
-    onOpenHome: vi.fn(),
-    onOpenWorkBoardView: vi.fn(),
-    onOpenRoutinesView: vi.fn(),
-    onOpenMemoryView: vi.fn(),
-    onOpenSettings: vi.fn(),
     onOpenUnifiedSearch: vi.fn(),
-    onOpenStarredView: vi.fn(),
-    onOpenDetachedView: vi.fn(),
+    sidebarCollapsed: false,
+    onToggleSidebar: vi.fn(),
+    appMode: "action" as const,
+    onToggleAppMode: vi.fn(),
     ...overrides,
   };
 }
@@ -33,40 +29,28 @@ function renderWithProvider(props: Parameters<typeof MainToolbar>[0]) {
   );
 }
 
-/** Open the hamburger menu dropdown via pointerDown (Radix UI trigger) */
-async function openHamburger() {
-  const hamburger = screen.getByTitle("더 많은 메뉴");
-  fireEvent.pointerDown(hamburger);
-  // Wait for dropdown items to appear (rendered into document.body portal)
-  await waitFor(() => expect(screen.queryByText("설정")).toBeTruthy());
+/** Open the standalone export dropdown (Radix trigger fires on pointerDown). */
+async function openExport() {
+  const exportBtn = screen.getByTestId("toolbar-export");
+  fireEvent.pointerDown(exportBtn);
+  await waitFor(() => expect(screen.queryByTestId("toolbar-export-markdown")).toBeTruthy());
 }
 
 describe("MainToolbar", () => {
-  // Navigation items (새 대화 / 루틴 / 메모리 / 즐겨찾기 / Work Board) have moved
-  // to the persistent Sidebar. The slimmed hamburger only contains:
-  // detach items, export submenu, and settings.
-  it("renders hamburger trigger; nav items are no longer inside the hamburger", async () => {
+  // The toolbar content now lives in the window-control band. The hamburger
+  // menu is gone entirely: nav lives in the Sidebar, Settings moved to the
+  // Sidebar, and Export is a standalone band button after the star.
+  it("no longer renders a hamburger / more-menu trigger", () => {
     renderWithProvider(defaultProps());
-    // Home button moved to Sidebar — not present in MainToolbar
+    expect(screen.queryByTitle("더 많은 메뉴")).toBeNull();
+    // Home + 새 대화 nav owned by the Sidebar — never in the toolbar.
     expect(screen.queryByTitle("홈")).toBeNull();
-    expect(screen.getByTitle("더 많은 메뉴")).toBeTruthy();
-    expect(screen.queryByText("⌘ + ?")).toBeNull();
-    expect(document.querySelector("[data-tour-anchor='help-shortcut-hint']")).toBeNull();
-    // 새 대화 is now in the Sidebar, not the hamburger
     expect(screen.queryByText("새 대화")).toBeNull();
-    await openHamburger();
-    // Nav items no longer in hamburger
-    expect(screen.queryByText("새 대화")).toBeNull();
-    expect(screen.queryByText("루틴")).toBeNull();
-    expect(screen.queryByText("메모리")).toBeNull();
-    expect(screen.queryByText("즐겨찾기")).toBeNull();
-    // TokenProgressRing is now in InputActionBar, not MainToolbar
     expect(document.querySelector("[data-testid='token-progress-ring']")).toBeNull();
   });
 
   it("does not render a Home button (Home nav is owned by the Sidebar)", () => {
     renderWithProvider(defaultProps({ activeView: "memory" }));
-    // The sidebar owns Home navigation; MainToolbar must not duplicate it.
     expect(screen.queryByTitle("홈")).toBeNull();
   });
 
@@ -77,36 +61,6 @@ describe("MainToolbar", () => {
     expect(onOpenUnifiedSearch).toHaveBeenCalledTimes(1);
   });
 
-  it("hamburger does not contain a duplicate search item", async () => {
-    renderWithProvider(defaultProps());
-    await openHamburger();
-    expect(screen.queryByText("통합 검색")).toBeNull();
-  });
-
-  it("opens built-in views in detached windows from the hamburger menu", async () => {
-    const onOpenDetachedView = vi.fn();
-    renderWithProvider(defaultProps({ onOpenDetachedView }));
-
-    await openHamburger();
-    fireEvent.click(screen.getByTestId("toolbar-detach-routines"));
-    await openHamburger();
-    fireEvent.click(screen.getByTestId("toolbar-detach-memory"));
-    await openHamburger();
-    fireEvent.click(screen.getByTestId("toolbar-detach-starred"));
-
-    expect(onOpenDetachedView).toHaveBeenNthCalledWith(1, "routines");
-    expect(onOpenDetachedView).toHaveBeenNthCalledWith(2, "memory");
-    expect(onOpenDetachedView).toHaveBeenNthCalledWith(3, "starred");
-  });
-
-  it("calls onOpenSettings when 설정 menu item clicked", async () => {
-    const onOpenSettings = vi.fn();
-    renderWithProvider(defaultProps({ onOpenSettings }));
-    await openHamburger();
-    fireEvent.click(screen.getByText("설정"));
-    expect(onOpenSettings).toHaveBeenCalledTimes(1);
-  });
-
   it("calls onToggleCurrentSessionStar when top star action clicked", () => {
     const onToggleCurrentSessionStar = vi.fn();
     renderWithProvider(defaultProps({ onToggleCurrentSessionStar }));
@@ -114,32 +68,57 @@ describe("MainToolbar", () => {
     expect(onToggleCurrentSessionStar).toHaveBeenCalledTimes(1);
   });
 
+  // The collapse toggle lives in the band, wired to the shell's sidebarCollapsed.
+  it("renders the sidebar collapse toggle and fires onToggleSidebar", () => {
+    const onToggleSidebar = vi.fn();
+    renderWithProvider(defaultProps({ onToggleSidebar, sidebarCollapsed: false }));
+    const toggle = screen.getByTestId("sidebar-collapse-toggle");
+    expect(toggle.getAttribute("aria-pressed")).toBe("true");
+    expect(toggle.getAttribute("title")).toBe("사이드바 접기");
+    fireEvent.click(toggle);
+    expect(onToggleSidebar).toHaveBeenCalledTimes(1);
+  });
+
+  it("shows the expand affordance when the sidebar is collapsed", () => {
+    renderWithProvider(defaultProps({ sidebarCollapsed: true }));
+    const toggle = screen.getByTestId("sidebar-collapse-toggle");
+    expect(toggle.getAttribute("aria-pressed")).toBe("false");
+    expect(toggle.getAttribute("title")).toBe("사이드바 펼치기");
+  });
+
+  // Export is a standalone band button (검색 → 별 → 내보내기). Clicking opens
+  // a small format menu; selecting a format calls the export handler — the
+  // same handler the removed hamburger submenu used.
+  it("exports markdown from the standalone export button", async () => {
+    const onExport = vi.fn();
+    renderWithProvider(defaultProps({ onExport }));
+    await openExport();
+    fireEvent.click(screen.getByTestId("toolbar-export-markdown"));
+    expect(onExport).toHaveBeenCalledWith("markdown");
+  });
+
+  it("exports json from the standalone export button", async () => {
+    const onExport = vi.fn();
+    renderWithProvider(defaultProps({ onExport }));
+    await openExport();
+    fireEvent.click(screen.getByTestId("toolbar-export-json"));
+    expect(onExport).toHaveBeenCalledWith("json");
+  });
+
   it("exposes semantic state for compact icon actions", () => {
     renderWithProvider(defaultProps({ isCurrentSessionStarred: true }));
-    expect(screen.getByTitle("더 많은 메뉴")).toHaveAttribute("aria-label", "더 많은 메뉴");
+    expect(screen.getByTitle("내보내기")).toHaveAttribute("aria-label", "내보내기");
     expect(screen.getByTitle("현재 세션 즐겨찾기 해제")).toHaveAttribute("aria-pressed", "true");
   });
 
-  it("keeps hamburger enabled while streaming", () => {
+  it("keeps the export button enabled while streaming", () => {
     renderWithProvider(defaultProps({ streaming: true }));
-    expect(screen.getByTitle("더 많은 메뉴")).not.toBeDisabled();
+    expect(screen.getByTestId("toolbar-export")).not.toBeDisabled();
   });
 
-  // SEV-2-A regression: 내보내기 trigger must be a DropdownMenuSubTrigger (not a nested DropdownMenu).
-  it("내보내기 is rendered as a DropdownMenuSubTrigger with correct data attributes", async () => {
-    renderWithProvider(defaultProps());
-    await openHamburger();
-
-    // DropdownMenuSubTrigger renders with data-radix-collection-item (it's a menu item)
-    // and has [data-state] managed by Radix Sub. Verify it exists and is the right element type.
-    const subTrigger = screen.getByText("내보내기").closest("[data-radix-collection-item]");
-    expect(subTrigger).toBeTruthy();
-    // It must NOT be a DropdownMenu root (no aria-expanded on the trigger — Sub handles it differently)
-    // The key correctness signal: the element role is "menuitem" not "button"
-    expect(subTrigger?.getAttribute("role")).toBe("menuitem");
-  });
-
-  // data-tour-anchor attributes must remain for the SpotlightTour onboarding chain
+  // data-tour-anchor attributes must remain for the SpotlightTour onboarding
+  // chain. "settings-entry" relocated to the export button now that the
+  // hamburger (its previous host) is gone.
   it("preserves tour anchors on toolbar controls", () => {
     renderWithProvider(defaultProps());
     expect(document.querySelector("[data-tour-anchor='chat-history']")).toBeTruthy();
