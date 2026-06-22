@@ -59,12 +59,12 @@ export function BottomActionRow({
   return (
     <div
       data-testid="composer-bottom-action-row"
-      className="flex flex-wrap items-center gap-3 px-3 pt-1 pb-2"
+      className="flex flex-nowrap items-center gap-3 px-3 pt-1 pb-2"
     >
-      <div className="flex min-w-0 flex-1 flex-wrap items-center gap-2">
+      <div className="flex min-w-0 flex-1 flex-nowrap items-center gap-2 overflow-hidden">
         {tokenSlot}
       </div>
-      <div className="flex shrink-0 items-center gap-2">
+      <div className="flex shrink-0 flex-nowrap items-center gap-1.5">
         <ShortcutsButton />
         <ThinkingButton enabled={enableThinkingChat} onToggle={onToggleThinking} />
         {isBusy && (
@@ -84,7 +84,7 @@ export function BottomActionRow({
           onClick={onSend}
           disabled={isSendDisabled}
           data-testid="composer-send-button"
-          className="inline-flex h-7 items-center gap-1.5 px-3 text-xs font-semibold"
+          className="inline-flex h-[26px] items-center gap-1.5 px-3 text-xs font-semibold"
         >
           <span>{t("bottomActionRow.sendButton")}</span>
           <KbdInverse>⏎</KbdInverse>
