@@ -178,8 +178,8 @@ export function App() {
   // inline behavior: built-in + plugin views render inline in the main area and
   // the sidebar defaults expanded. In "chat" mode, selecting a detachable view
   // opens it in a separate window while the main area stays the chat. appMode
-  // is the SOLE authority for inline-vs-detached and OVERRIDES a plugin's
-  // `window.defaultMode: "detached"`.
+  // is the SOLE authority for inline-vs-detached; plugins cannot request
+  // detachment (there is no plugin-side mode flag).
   const [appMode, setAppMode] = useState<AppMode>("action");
   // Sidebar collapse is owned by the shell (the floating-card Sidebar reads it
   // as a prop and never manages its own state). Action mode defaults the rail
@@ -579,9 +579,10 @@ export function App() {
     [api, setErrorWithThought],
   );
 
-  // When a plugin view declares `window.defaultMode: "detached"`, selecting
-  // it opens a separate magnetic-snap BrowserWindow instead of
-  // switching the main window's active view.
+  // In chat mode (appMode === "chat"), selecting a plugin view opens a
+  // separate magnetic-snap BrowserWindow instead of switching the main
+  // window's active view. The app's mode is the sole authority for this;
+  // plugins do not get a say.
   //
   // If the owning plugin declares `manifest.auth` AND its current state is
   // unauthed, embedded views invoke loginTool before navigating. Detached
@@ -634,9 +635,9 @@ export function App() {
           })();
           return;
         }
-        // appMode is the SOLE authority for inline-vs-detached — it OVERRIDES a
-        // plugin's `window.defaultMode: "detached"`. Action keeps every plugin
-        // view INLINE; chat pops every plugin view into a detached window.
+        // appMode is the SOLE authority for inline-vs-detached. Action keeps
+        // every plugin view INLINE; chat pops every plugin view into a
+        // detached window. Plugins have no say in this decision.
         if (appMode === "chat") {
           void openDetachedPluginView(key);
           return;
