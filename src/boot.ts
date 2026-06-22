@@ -1243,20 +1243,25 @@ export async function bootstrap(
   // Runs after MCP connects so the full service graph is ready before
   // adding OS-level spawn isolation.
   //
-  // Linux:   bubblewrap (bwrap) — verified-kernel CLONE_NEWNET
-  // macOS:   sandbox-exec SBPL profile — PARTIAL (known bypasses)
+  // Linux:   bubblewrap (bwrap) — verified-kernel CLONE_NEWNET (fs + process + network)
+  // macOS:   sandbox-exec SBPL profile — PARTIAL (fs + process; network not contained)
   // Windows: AppContainer — detect-only; native Win32 N-API binding pending.
   //          detect() returns available=false so registration is skipped.
   //
-  // All platforms: LVIS_SANDBOX_ENABLED=1 required (default off)
-  // until the always-on policy hook is wired.
-  // TODO: remove the env-gate and make sandbox always-on.
+  // Gate: the user-facing `osToolSandbox` feature flag (Settings → 권한),
+  // with the `LVIS_SANDBOX_ENABLED=1` environment variable as an escape-hatch
+  // override. Registration also requires the platform runner to detect()
+  // available — an unavailable runner stays unregistered so the toggle
+  // reflects platform reality rather than silently doing nothing.
   {
     const { registerSandboxRunner: _registerRunner, sealSandboxRunnerRegistry } = await import(
       "./permissions/sandbox-runner.js"
     );
+    const sandboxOptIn =
+      (settingsService.get("features")?.osToolSandbox ?? false) ||
+      process.env["LVIS_SANDBOX_ENABLED"] === "1";
 
-    if (process.platform === "linux" && process.env["LVIS_SANDBOX_ENABLED"] === "1") {
+    if (process.platform === "linux" && sandboxOptIn) {
       const { BwrapRunner } = await import("./permissions/runners/bwrap-runner.js");
       const bwrapRunner = new BwrapRunner();
       const detection = await bwrapRunner.detect();
@@ -1273,7 +1278,7 @@ export async function bootstrap(
     }
 
     // §691: macOS sandbox-exec runner (PARTIAL — known bypass paths).
-    if (process.platform === "darwin" && process.env["LVIS_SANDBOX_ENABLED"] === "1") {
+    if (process.platform === "darwin" && sandboxOptIn) {
       const { SandboxExecRunner } = await import("./permissions/runners/sandbox-exec-runner.js");
       const sandboxExecRunner = new SandboxExecRunner();
       const detection = await sandboxExecRunner.detect();
@@ -1288,13 +1293,13 @@ export async function bootstrap(
       }
     } else if (process.platform === "darwin") {
       log.info(
-        "boot: macOS sandbox runner gated off (set LVIS_SANDBOX_ENABLED=1 to enable)",
+        "boot: macOS sandbox runner gated off (enable via Settings → 권한 'OS 도구 샌드박스' or LVIS_SANDBOX_ENABLED=1)",
       );
     }
 
     // §691: Windows AppContainer runner (detect-only; native Win32 binding pending).
     // detect() always returns available=false so registration is skipped.
-    if (process.platform === "win32" && process.env["LVIS_SANDBOX_ENABLED"] === "1") {
+    if (process.platform === "win32" && sandboxOptIn) {
       const { AppContainerRunner } = await import("./permissions/runners/appcontainer-runner.js");
       const appContainerRunner = new AppContainerRunner();
       const detection = await appContainerRunner.detect();

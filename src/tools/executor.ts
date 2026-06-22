@@ -2323,6 +2323,12 @@ export class ToolExecutor {
     const executionContext: ToolExecutionContext = {
       cwd: executionCwd,
       extraAllowedDirectories: [...new Set(invocationRuntimeAllowedDirectories)],
+      // Owner plugin sandbox root — same derivation the reviewer uses
+      // (executor permission path). Plugin-owned tools confine their OS
+      // write-jail to `~/.lvis/plugins/<pluginId>/`; builtins pass undefined.
+      ...(tool.pluginId
+        ? { ownerPluginSandboxRoot: pathResolve(lvisHome(), "plugins", tool.pluginId) }
+        : {}),
       metadata: {
         sessionId: sessionId ?? "unknown",
         // C3(b): spawn depth visible to tools — `agent_spawn` reads this

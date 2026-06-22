@@ -23,6 +23,7 @@ import {
   validateShellWorkingDirectory,
 } from "./shell-path-policy.js";
 import { getSandboxRunner } from "../permissions/sandbox-runner.js";
+import { deriveSandboxWritePaths } from "../permissions/sandbox-write-jail.js";
 import { TOOL_TIMEOUT_POLICY } from "../shared/tool-timeout-policy.js";
 import { trackManagedChildProcess } from "../main/managed-child-processes.js";
 
@@ -183,17 +184,26 @@ export class PowerShellTool extends ZodTool<typeof PowerShellToolInputSchema> {
     // On Windows, AppContainerRunner.detect() returns available=false (native
     // binding pending), so getSandboxRunner("win32") returns undefined and this
     // block is skipped — Windows falls through to spawnPowerShell.
-    // On macOS, SandboxExecRunner is registered when LVIS_SANDBOX_ENABLED=1, so
-    // pwsh on macOS will run inside the sandbox-exec PARTIAL profile.
-    // MEDIUM: Gated on LVIS_SANDBOX_ENABLED=1 (default off) — parity with bash.ts.
-    // TODO: remove the env-gate and make sandbox always-on once policy hook lands.
+    // A runner is registered at boot only on user opt-in (Settings → 권한
+    // 'OS 도구 샌드박스' or the LVIS_SANDBOX_ENABLED escape-hatch) AND when the
+    // platform runner detected available — parity with bash.ts. A registered
+    // runner here therefore means the sandbox is on; on macOS pwsh runs inside
+    // the sandbox-exec PARTIAL profile.
     const sandboxRunner = getSandboxRunner(process.platform as NodeJS.Platform);
-    const sandboxEnabled = process.env["LVIS_SANDBOX_ENABLED"] === "1";
-    if (sandboxRunner && sandboxEnabled) {
+    if (sandboxRunner) {
+      // Namespace-scoped write-jail (owner plugin sandbox root ∪ allowed
+      // directories), not the bare cwd. cwd stays readable.
+      const writePaths = deriveSandboxWritePaths({
+        ...(ctx.ownerPluginSandboxRoot !== undefined
+          ? { ownerPluginSandboxRoot: ctx.ownerPluginSandboxRoot }
+          : {}),
+        allowedDirectories: [resolvedCwd, ...ctx.extraAllowedDirectories],
+      });
       return await spawnPowerShellWithSandbox(
         sandboxRunner,
         input.command,
         resolvedCwd,
+        writePaths,
         input.timeoutSeconds,
       );
     }
@@ -364,12 +374,13 @@ $commands = @(
  * Mirrors spawnWithSandbox in bash.ts — WHATWG ReadableStream<Uint8Array>
  * drained through per-stream TextDecoder for CJK boundary safety.
  *
- * @internal — called only when LVIS_SANDBOX_ENABLED=1 and a runner is registered.
+ * @internal — called only when a sandbox runner is registered (user opt-in).
  */
 async function spawnPowerShellWithSandbox(
   runner: import("../permissions/sandbox-runner.js").SandboxRunner,
   command: string,
   cwd: string,
+  writePaths: readonly string[],
   timeoutSeconds: number,
 ): Promise<ToolResult> {
   const executable = resolvePowerShellExecutable();
@@ -390,7 +401,7 @@ async function spawnPowerShellWithSandbox(
             process.env["USERPROFILE"] ?? "C:\\Users",
           ]
         : ["/etc", "/usr", process.env["HOME"] ?? "/home"],
-      fsWritePaths: [cwd],
+      fsWritePaths: [...writePaths],
       processIsolated: true,
     },
     { env: safeEnv, cwd },
