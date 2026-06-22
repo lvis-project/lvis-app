@@ -32,7 +32,8 @@ import { hasSeenFirstBootTour } from "./onboarding/first-boot-tour-gate.js";
 import { LoginModal } from "./components/LoginModal.js";
 import { LLM_VENDORS } from "../../shared/llm-vendor-defaults.js";
 import { buildQuickActions } from "./components/command-actions.js";
-import { MainToolbar } from "./MainToolbar.js";
+import { MainToolbar, type AppMode } from "./MainToolbar.js";
+import { Sidebar } from "./components/Sidebar.js";
 import { useAppUpdate } from "./hooks/use-app-update.js";
 import { DevToolsPanel } from "./components/DevToolsPanel.js";
 import { MainContent } from "./MainContent.js";
@@ -173,6 +174,22 @@ export function App() {
   const tourCompleted =
     chainStage === "done" && chainState.completionReason === "chain";
   const [activeView, setActiveView] = useState("home");
+  // Workspace mode (Chat / Action). Default "action" preserves the historical
+  // inline behavior: built-in + plugin views render inline in the main area and
+  // the sidebar defaults expanded. In "chat" mode, selecting a detachable view
+  // opens it in a separate window while the main area stays the chat. appMode
+  // is the SOLE authority for inline-vs-detached; plugins cannot request
+  // detachment (there is no plugin-side mode flag).
+  const [appMode, setAppMode] = useState<AppMode>("action");
+  // Sidebar collapse is owned by the shell (the floating-card Sidebar reads it
+  // as a prop and never manages its own state). Action mode defaults the rail
+  // expanded (a default, NOT a lock — the user may still collapse it).
+  const [sidebarCollapsed, setSidebarCollapsed] = useState(false);
+  // Entering action mode expands the rail (one-shot default on transition, so
+  // the user can still collapse it afterward without it snapping back).
+  useEffect(() => {
+    if (appMode === "action") setSidebarCollapsed(false);
+  }, [appMode]);
   const [commandPopoverOpen, setCommandPopoverOpen] = useState(false);
   const [devToolsOpen, setDevToolsOpen] = useState(false);
 
@@ -562,9 +579,10 @@ export function App() {
     [api, setErrorWithThought],
   );
 
-  // When a plugin view declares `window.defaultMode: "detached"`, selecting
-  // it opens a separate magnetic-snap BrowserWindow instead of
-  // switching the main window's active view.
+  // In chat mode (appMode === "chat"), selecting a plugin view opens a
+  // separate magnetic-snap BrowserWindow instead of switching the main
+  // window's active view. The app's mode is the sole authority for this;
+  // plugins do not get a say.
   //
   // If the owning plugin declares `manifest.auth` AND its current state is
   // unauthed, embedded views invoke loginTool before navigating. Detached
@@ -617,8 +635,10 @@ export function App() {
           })();
           return;
         }
-        const isDetachedView = view.extension.window?.defaultMode === "detached";
-        if (isDetachedView) {
+        // appMode is the SOLE authority for inline-vs-detached. Action keeps
+        // every plugin view INLINE; chat pops every plugin view into a
+        // detached window. Plugins have no say in this decision.
+        if (appMode === "chat") {
           void openDetachedPluginView(key);
           return;
         }
@@ -661,9 +681,26 @@ export function App() {
           return;
         }
       }
+      // Chat mode: built-in detachable views open in a separate window; home
+      // (and every action-mode path) stays inline.
+      if (
+        appMode === "chat" &&
+        (key === "routines" || key === "memory" || key === "starred")
+      ) {
+        void openDetachedBuiltInView(key);
+        return;
+      }
       setActiveView(key);
     },
-    [api, pluginViews, pluginAuthStatuses, pluginCards, openDetachedPluginView],
+    [
+      api,
+      appMode,
+      pluginViews,
+      pluginAuthStatuses,
+      pluginCards,
+      openDetachedPluginView,
+      openDetachedBuiltInView,
+    ],
   );
 
   // If the currently-open plugin view belongs to a plugin that just got
@@ -1308,8 +1345,28 @@ export function App() {
     >
         <div className="flex h-screen flex-col overflow-hidden">
           <CustomTitleBar />
-        <div className="flex min-h-0 min-w-0 flex-1 overflow-hidden">
-        <main className="flex min-h-0 min-w-0 flex-1 flex-col">
+        {/* `relative` anchors the floating-card Sidebar (absolute, inset-3).
+            The content `<main>` carries left padding equal to the card width
+            + insets so the floating rail never occludes the canvas. */}
+        <div className="relative flex min-h-0 min-w-0 flex-1 overflow-hidden">
+          <Sidebar
+            activeView={activeView}
+            onSelect={handleViewSelect}
+            pluginViews={pluginViews}
+            pluginAuthStatuses={pluginAuthStatuses}
+            hasApiKey={effectiveHasApiKey}
+            onOpenSettings={() => onOpenSettings()}
+            onNewChat={onNewChat}
+            streaming={streaming}
+            onOpenMarketplace={onOpenMarketplace}
+            marketplaceUrlReady={marketplaceUrlReady}
+            collapsed={sidebarCollapsed}
+          />
+        <main
+          className={`flex min-h-0 min-w-0 flex-1 flex-col bg-card transition-[padding] duration-200 ease-out motion-reduce:transition-none ${
+            sidebarCollapsed ? "pl-[5rem]" : "pl-[15.5rem]"
+          }`}
+        >
           <BootstrapStatusBanner status={bootstrapStatus} onDismiss={dismissBootstrapStatus} onRetry={() => void retryBootstrap()} />
           <MarketplaceUpdateBanner
             updates={marketplaceUpdates}
@@ -1348,6 +1405,8 @@ export function App() {
             onOpenDetachedView={(viewKey) => {
               void openDetachedBuiltInView(viewKey);
             }}
+            appMode={appMode}
+            onToggleAppMode={setAppMode}
             onOpenDevTools={() => setDevToolsOpen((v) => !v)}
             appUpdateState={appUpdate.state}
             appUpdateInFlight={appUpdate.inFlight}
