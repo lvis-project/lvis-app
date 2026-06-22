@@ -26,9 +26,12 @@ import type {
   PermissionReviewerSettings,
   PermissionRule,
 } from "../types.js";
+import type { SandboxCapabilityInfo } from "../../../shared/sandbox-capability-info.js";
 import { AuditPanel } from "../components/permissions/AuditPanel.js";
 import { SettingsPageHeader } from "../components/SettingsPageHeader.js";
 import { SettingsSection } from "../components/SettingsSection.js";
+import { getApi } from "../api-client.js";
+import { isIpcErrorResult } from "../types.js";
 
 const DEFAULT_REVIEWER_SETTINGS: PermissionReviewerSettings = {
   mode: "disabled",
@@ -192,12 +195,17 @@ export function PermissionsTab() {
   // no LLM provider/key is configured. Drives the degrade banner.
   const [reviewerDegradedToRule, setReviewerDegradedToRule] = useState(false);
 
+  // ── OS Tool Sandbox ───────────────────────────────
+  const [sandboxCapability, setSandboxCapability] = useState<SandboxCapabilityInfo | null>(null);
+  const [sandboxEnabled, setSandboxEnabled] = useState(false);
+  const [sandboxBusy, setSandboxBusy] = useState(false);
+
   // ── 초기 fetch (탭 진입 시) ───────────────────────
   const fetchAll = useCallback(async () => {
     setLoading(true);
     setError(null);
     try {
-      const [modeRes, policyRes, rulesRes, hookTrustRes, dirRes, reviewerRes] =
+      const [modeRes, policyRes, rulesRes, hookTrustRes, dirRes, reviewerRes, sandboxRes, settingsRes] =
         await Promise.all([
           window.lvis.permission.getMode(),
           window.lvis.policy.get(),
@@ -205,6 +213,8 @@ export function PermissionsTab() {
           window.lvis.permission.hookTrustList(),
           window.lvis.permission.dirDispatch("list"),
           window.lvis.permission.reviewerDispatch("show"),
+          window.lvis.permission.sandboxCapability(),
+          getApi().getSettings(),
         ]);
       if (!reviewerRes.ok) {
         throw new Error(reviewerRes.error);
@@ -219,6 +229,8 @@ export function PermissionsTab() {
       setDirectories(dirRes.ok && dirRes.verb === "list" ? dirRes.userAdditions : []);
       setReviewer(reviewerRes.settings);
       setReviewerDegradedToRule(reviewerRes.reviewerDegradedToRule ?? false);
+      setSandboxCapability(sandboxRes);
+      setSandboxEnabled(settingsRes.features?.osToolSandbox ?? false);
     } catch (e) {
       setError((e as Error).message ?? t("permissionsTab.errorLoadFailed"));
     } finally {
@@ -368,6 +380,29 @@ export function PermissionsTab() {
       }
     } finally {
       setPolicyBusy(false);
+    }
+  };
+
+  const handleSandboxToggle = async () => {
+    if (sandboxBusy) return;
+    const next = !sandboxEnabled;
+    setSandboxBusy(true);
+    setSandboxEnabled(next);
+    try {
+      const res = await getApi().updateSettings({ features: { osToolSandbox: next } });
+      if (isIpcErrorResult(res)) {
+        setSandboxEnabled(!next);
+        showBanner("error", res.message ?? t("permissionsTab.osSandboxToggleFailed"));
+        return;
+      }
+      // Re-read capability so the activation note reflects the new state.
+      const capability = await window.lvis.permission.sandboxCapability();
+      setSandboxCapability(capability);
+    } catch (e) {
+      setSandboxEnabled(!next);
+      showBanner("error", t("permissionsTab.osSandboxToggleError", { message: (e as Error).message }));
+    } finally {
+      setSandboxBusy(false);
     }
   };
 
@@ -882,6 +917,46 @@ export function PermissionsTab() {
                 : t("permissionsTab.adminPolicyNoPath")}
             </p>
           )}
+        </SettingsSection>
+
+        {/* ── OS Tool Sandbox ── */}
+        <SettingsSection
+          title={t("permissionsTab.osSandboxTitle")}
+          description={t("permissionsTab.osSandboxDescription")}
+        >
+          <div className="flex items-center gap-3">
+            <Checkbox
+              checked={sandboxEnabled}
+              data-testid="os-sandbox-toggle"
+              aria-label={t("permissionsTab.osSandboxCheckboxAriaLabel")}
+              disabled={sandboxBusy || !(sandboxCapability?.available ?? false)}
+              className="size-5"
+              onCheckedChange={() => void handleSandboxToggle()}
+            />
+            <span className="text-sm">
+              {sandboxEnabled ? t("permissionsTab.osSandboxEnabled") : t("permissionsTab.osSandboxDisabled")}
+            </span>
+          </div>
+          {sandboxCapability && !sandboxCapability.available ? (
+            <p
+              data-testid="os-sandbox-unavailable"
+              className="rounded-md border border-warning/40 bg-warning/15 px-3 py-2 text-[11px] text-warning"
+            >
+              {t("permissionsTab.osSandboxUnavailable", { platform: sandboxCapability.platform })}
+            </p>
+          ) : null}
+          {sandboxCapability && sandboxCapability.available ? (
+            <div className="space-y-1 rounded-md border bg-muted/20 px-3 py-2 text-[11px] text-muted-foreground">
+              <p className="font-medium text-foreground">{t("permissionsTab.osSandboxCapabilityHeading")}</p>
+              <p>
+                {sandboxCapability.platform === "darwin"
+                  ? t("permissionsTab.osSandboxCapabilityMac")
+                  : sandboxCapability.platform === "linux"
+                    ? t("permissionsTab.osSandboxCapabilityLinux")
+                    : t("permissionsTab.osSandboxCapabilityOther")}
+              </p>
+            </div>
+          ) : null}
         </SettingsSection>
 
         {/* ── Section C: Rule Editor ── */}
