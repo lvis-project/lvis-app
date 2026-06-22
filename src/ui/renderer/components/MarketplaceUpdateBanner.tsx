@@ -63,7 +63,7 @@ export function MarketplaceUpdateBanner({
 
   return (
     <div
-      className="flex h-11 items-center justify-between gap-2 overflow-hidden bg-info/(--opacity-soft) border border-info/(--opacity-medium) text-info text-sm px-4 py-1.5 rounded-md mx-2 mt-2 lvis-anim-slide-down"
+      className="flex h-11 items-center justify-between gap-2 overflow-hidden bg-popover border border-info/(--opacity-medium) text-info text-sm px-4 py-1.5 rounded-md mx-2 mt-2 shadow-lg lvis-anim-slide-down"
       data-testid="marketplace-update-banner"
     >
       <span className="min-w-0 flex-1" title={label}>
