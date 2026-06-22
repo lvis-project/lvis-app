@@ -37,9 +37,11 @@ export interface SandboxCapabilityInfo {
 }
 
 /**
- * Compute the per-platform confinement profile. Pure — no I/O. The `kind`
- * argument comes from the active runner's detection so an unavailable runner
- * reports no confinement.
+ * Compute the per-platform confinement profile — a pure (no-I/O) mapping of
+ * `(platform, kind)` to what is confined. `kind` reflects the platform's
+ * confinement STRENGTH (the caller derives it from the platform, not from a
+ * registered runner), so this describes the platform's POTENTIAL confinement;
+ * `"none"` reports nothing confined.
  */
 export function sandboxConfinementForPlatform(
   platform: NodeJS.Platform,
