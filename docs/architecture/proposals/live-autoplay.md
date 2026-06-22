@@ -1,11 +1,24 @@
 # Live Auto-play — LVIS 가 스스로 1턴 시연
 
-> **Status**: proposal (PR-E — minimal viable + architectural SOT)
+> **Status**: SUPERSEDED — the scripted demo-autoplay layer was removed once the
+> onboarding login scenario became the canonical first-boot flow. The
+> `ScenarioShowcase` grid + login CTA remain; the inline scripted-turn replay,
+> the `demoAutoplayEnabled` flag, and the `engine/demo-autoplay/` engine were
+> deleted. This document is kept as a historical record of the original
+> proposal only.
+> **Status (original)**: proposal (minimal viable + architectural SOT)
 > **Owner**: Onboarding / Tutorial track
 > **Mockup SOT**: `/tmp/login-lvis/index.html` O-X1 (innovation onboarding cluster)
 > **Scope**: Onboarding 의 가장 혁신적 부분 — 사용자 클릭 없이 LVIS 가 *스스로* demo turn 1회를 자동 시연.
 
 ---
+
+> ⚠️ **HISTORICAL — everything below this line is the ORIGINAL proposal, preserved verbatim.**
+> It describes a design that has since been REMOVED (the scripted-autoplay engine,
+> the `demoAutoplayEnabled` flag, and the inline replay no longer exist). Read it as a
+> record of the original intent, NOT as a description of current behaviour. The
+> canonical first-boot flow is now the onboarding login scenario (`ScenarioShowcase`
+> grid + login CTA).
 
 ## 1. Motivation
 
