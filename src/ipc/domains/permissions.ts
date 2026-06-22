@@ -99,6 +99,40 @@ export function registerPermissionsHandlers(deps: IpcDeps): void {
     return { mode };
   });
 
+  // read-only, sender guard optional — honest OS sandbox capability for the
+  // current platform. Reflects whether a runner is actually registered +
+  // detected available (not just the platform string), so the settings
+  // toggle can show "not available on this platform" rather than silently
+  // doing nothing.
+  ipcMain.handle(PERMISSIONS.sandboxCapability, async () => {
+    const { getActiveDetection } = await import("../../permissions/sandbox-runner.js");
+    const { sandboxConfinementForPlatform } = await import(
+      "../../shared/sandbox-capability-info.js"
+    );
+    const platform = process.platform;
+    const detection = getActiveDetection(platform);
+    const enabled =
+      (deps.settingsService.get("features")?.osToolSandbox ?? false) ||
+      process.env["LVIS_SANDBOX_ENABLED"] === "1";
+    // Map the platform to the simplified confinement strength. Linux bwrap
+    // confines fs + process + network ("full"); macOS Seatbelt confines
+    // fs + process only ("partial"); Windows + others have no runner ("none").
+    // The gate (enabled) only controls whether a runner is registered at boot,
+    // not what the platform is capable of, so report the platform's potential
+    // even when off — the toggle text stays honest before the user opts in.
+    const kind: "full" | "partial" | "none" =
+      platform === "linux" ? "full" : platform === "darwin" ? "partial" : "none";
+    const available = kind !== "none";
+    return {
+      platform,
+      enabled,
+      available,
+      kind,
+      reason: detection?.reason ?? "",
+      confines: sandboxConfinementForPlatform(platform, kind),
+    };
+  });
+
   ipcMain.handle(PERMISSIONS.setMode, async (e, payload: unknown) => {
     if (!validateSender(e)) { auditUnauthorized(auditLogger, PERMISSIONS.setMode, e); return UNAUTHORIZED_FRAME; }
     const body = payloadRecord(payload);

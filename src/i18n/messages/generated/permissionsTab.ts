@@ -143,6 +143,20 @@ export const en = {
   "permissionsTab.adminPolicyWithPath": "This policy was deployed by the company IT administrator (path: {policyAdminPath}). Users cannot change it.",
   "permissionsTab.adminPolicyNoPath": "This policy is managed by the IT administrator. Users cannot change it.",
 
+  // OS Tool Sandbox section
+  "permissionsTab.osSandboxTitle": "OS Tool Sandbox",
+  "permissionsTab.osSandboxDescription": "Confine shell and tool processes inside an OS-level sandbox when they run. This is a kernel-enforced boundary that survives prompt injection — separate from approval prompts. Off by default; turn it on to opt in.",
+  "permissionsTab.osSandboxCheckboxAriaLabel": "Enable the OS tool sandbox",
+  "permissionsTab.osSandboxEnabled": "Enabled",
+  "permissionsTab.osSandboxDisabled": "Disabled",
+  "permissionsTab.osSandboxUnavailable": "The OS tool sandbox is not available on this platform ({platform}); tools run unconfined here.",
+  "permissionsTab.osSandboxCapabilityHeading": "What this confines on your platform:",
+  "permissionsTab.osSandboxCapabilityMac": "macOS (Seatbelt): filesystem writes and process actions are confined. Network is NOT confined — sandbox-exec does not block loopback/IPv6/DNS. Treat network as unrestricted for now.",
+  "permissionsTab.osSandboxCapabilityLinux": "Linux (bubblewrap): filesystem writes, process isolation, and network are all confined (the sandbox unshares the network namespace).",
+  "permissionsTab.osSandboxCapabilityOther": "This platform's sandbox confines filesystem and process actions; network containment is not guaranteed.",
+  "permissionsTab.osSandboxToggleFailed": "Failed to change the OS tool sandbox setting.",
+  "permissionsTab.osSandboxToggleError": "Error changing the OS tool sandbox setting: {message}",
+
   // Rules section
   "permissionsTab.rulesTitle": "Tool Rules",
   "permissionsTab.rulesDescriptionBefore": "Set always-allow / always-deny for specific tool patterns (wildcard supported: ",
@@ -307,6 +321,20 @@ export const ko: Record<keyof typeof en, string> = {
   "permissionsTab.adminManagedTitle": "IT 관리자 설정",
   "permissionsTab.adminPolicyWithPath": "이 정책은 회사 IT 관리자가 배포했습니다 (경로: {policyAdminPath}). 사용자가 변경할 수 없습니다.",
   "permissionsTab.adminPolicyNoPath": "이 정책은 IT 관리자가 설정했습니다. 사용자가 변경할 수 없습니다.",
+
+  // OS Tool Sandbox section
+  "permissionsTab.osSandboxTitle": "OS 도구 샌드박스",
+  "permissionsTab.osSandboxDescription": "셸 및 도구 프로세스 실행 시 OS 수준 샌드박스 안에 격리합니다. 프롬프트 인젝션에도 견디는 커널 강제 경계로, 승인 대화상자와는 별개 축입니다. 기본 비활성화이며, 켜서 사용 설정합니다.",
+  "permissionsTab.osSandboxCheckboxAriaLabel": "OS 도구 샌드박스 사용",
+  "permissionsTab.osSandboxEnabled": "활성화됨",
+  "permissionsTab.osSandboxDisabled": "비활성화됨",
+  "permissionsTab.osSandboxUnavailable": "이 플랫폼({platform})에서는 OS 도구 샌드박스를 사용할 수 없습니다. 도구가 격리 없이 실행됩니다.",
+  "permissionsTab.osSandboxCapabilityHeading": "이 플랫폼에서 격리하는 범위:",
+  "permissionsTab.osSandboxCapabilityMac": "macOS(Seatbelt): 파일시스템 쓰기와 프로세스 동작을 격리합니다. 네트워크는 격리하지 않습니다 — sandbox-exec는 loopback/IPv6/DNS를 차단하지 못합니다. 현재 네트워크는 제한되지 않은 것으로 간주하세요.",
+  "permissionsTab.osSandboxCapabilityLinux": "Linux(bubblewrap): 파일시스템 쓰기, 프로세스 격리, 네트워크를 모두 격리합니다(네트워크 네임스페이스를 분리).",
+  "permissionsTab.osSandboxCapabilityOther": "이 플랫폼의 샌드박스는 파일시스템과 프로세스 동작을 격리하며, 네트워크 격리는 보장되지 않습니다.",
+  "permissionsTab.osSandboxToggleFailed": "OS 도구 샌드박스 설정을 변경하지 못했습니다.",
+  "permissionsTab.osSandboxToggleError": "OS 도구 샌드박스 설정 변경 중 오류: {message}",
 
   "permissionsTab.rulesTitle": "도구 규칙",
   "permissionsTab.rulesDescriptionBefore": "특정 도구 패턴에 대해 항상 허용 / 항상 거부를 설정합니다 (와일드카드 지원: ",
