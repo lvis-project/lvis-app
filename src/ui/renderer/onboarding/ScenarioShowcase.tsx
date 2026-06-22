@@ -16,10 +16,8 @@ import { Button } from "../../../components/ui/button.js";
 import {
   Dialog,
   DialogContent,
-  DialogDescription,
-  DialogHeader,
-  DialogTitle,
 } from "../../../components/ui/dialog.js";
+import { OnboardingHeader } from "./OnboardingCard.js";
 import { useTranslation } from "../../../i18n/react.js";
 
 export interface ScenarioShowcaseProps {
@@ -125,28 +123,11 @@ function ScenarioShowcaseGrid({
   const { t } = useTranslation();
   return (
     <>
-      <DialogHeader className="px-6 pt-6 pb-3 space-y-0">
-        <div className="flex items-center gap-3">
-          <span
-            aria-hidden
-            className="grid h-10 w-10 place-items-center rounded-lg text-base text-primary-foreground"
-            style={{
-              background:
-                "linear-gradient(135deg, hsl(var(--p-purple-500)), hsl(var(--p-blue-500)))",
-            }}
-          >
-            ✦
-          </span>
-          <div className="min-w-0">
-            <DialogTitle className="text-sm font-semibold tracking-tight">
-              LVIS Studio
-            </DialogTitle>
-            <DialogDescription className="text-[11px]">
-              {t("scenarioShowcase.gridDescription")}
-            </DialogDescription>
-          </div>
-        </div>
-      </DialogHeader>
+      <OnboardingHeader
+        size="lg"
+        title="LVIS Studio"
+        description={t("scenarioShowcase.gridDescription")}
+      />
 
       <div className="px-6 pb-6 space-y-4">
         <div
@@ -157,7 +138,7 @@ function ScenarioShowcaseGrid({
             <div
               key={card.id}
               data-testid={`scenario-showcase:card:${card.id}`}
-              className="rounded-lg border border-border/70 bg-[hsl(var(--muted))] px-3 py-3 text-left"
+              className="rounded-lg border border-border/(--opacity-stronger) bg-[hsl(var(--muted))] px-3 py-3 text-left"
             >
               <div className="text-lg leading-none" aria-hidden="true">
                 {card.icon}
@@ -175,10 +156,7 @@ function ScenarioShowcaseGrid({
           data-testid="scenario-showcase:start"
           onClick={onStart}
           className="w-full text-primary-foreground"
-          style={{
-            background:
-              "linear-gradient(135deg, hsl(var(--p-purple-500)), hsl(var(--p-blue-500)))",
-          }}
+          style={{ background: "var(--gradient-brand)" }}
         >
           {t("scenarioShowcase.startButton")}
         </Button>

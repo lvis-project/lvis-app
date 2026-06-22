@@ -136,6 +136,53 @@ describe("ToolExecutor — explicit-approval memory skips the foreground modal (
     expect(entry.reviewer.userApprovalUsed?.verdictAtApproval).toBe("low");
   });
 
+  it("(a2) foreground-auto reviewer path checks Store B before reviewer dispatch", async () => {
+    const executeSpy = vi.fn(async () => "wrote");
+    const registry = new ToolRegistry();
+    registry.register(makeWriteProbeTool(executeSpy));
+
+    const permMgr = pmReturning({
+      decision: "ask",
+      reason: "foreground reviewer route",
+      layer: 6,
+      reviewer: { route: "foreground-auto" },
+    });
+    const classifySpy = vi.fn(() => ({ level: "high" as const, reason: "should not run" }));
+    permMgr.setReviewer({
+      classifier: { classify: classifySpy },
+      cache: {} as never,
+      deferredQueue: {} as never,
+    });
+    state.lookupResult = {
+      scope: "session",
+      verdictAtApproval: "low",
+      nlJustification: null,
+      revokedAt: null,
+    };
+
+    const requestAndWait = vi.fn();
+    const executor = new ToolExecutor(
+      registry,
+      undefined,
+      permMgr,
+      undefined,
+      { requestAndWait } as never,
+    );
+
+    const result = await executor.executeAll(
+      [{ id: "tu-foreground-auto-skip", name: "write_probe", input: { path: join(dir, "file.txt") } }],
+      {
+        sessionId: "sess-foreground-auto-skip",
+        permissionContext: userPermissionContext({ additionalDirectories: [dir] }),
+      },
+    );
+
+    expect(result[0].is_error).toBeUndefined();
+    expect(executeSpy).toHaveBeenCalledTimes(1);
+    expect(classifySpy).not.toHaveBeenCalled();
+    expect(requestAndWait).not.toHaveBeenCalled();
+  });
+
   it("(b) prior approval but args mutated to a higher rule verdict → re-prompt (maxVerdict)", async () => {
     const executeSpy = vi.fn(async () => "wrote");
     const registry = new ToolRegistry();

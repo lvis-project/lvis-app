@@ -53,7 +53,7 @@ function AssistantCardImpl({
     <div
       className={
         isSystemNotice
-          ? "group relative min-w-0 w-full max-w-full overflow-visible rounded-md border border-destructive/40 bg-destructive/5 px-3 py-2 text-sm lvis-anim-message-in"
+          ? "group relative min-w-0 w-full max-w-full overflow-visible rounded-md border border-destructive/(--opacity-medium) bg-destructive/(--opacity-faint) px-3 py-2 text-sm lvis-anim-message-in"
           : "group relative min-w-0 w-full max-w-full overflow-visible rounded-md px-3 py-2 text-sm lvis-anim-message-in"
       }
     >

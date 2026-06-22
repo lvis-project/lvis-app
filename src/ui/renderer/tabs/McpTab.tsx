@@ -21,10 +21,10 @@ import { useTranslation } from "../../../i18n/react.js";
 type Transport = "stdio" | "http";
 
 const STATUS_BADGE: Record<McpServerState["status"], string> = {
-  connected: "bg-success/15 text-success",
-  connecting: "bg-warning/15 text-warning",
+  connected: "bg-success/(--opacity-soft) text-success",
+  connecting: "bg-warning/(--opacity-soft) text-warning",
   disconnected: "bg-muted text-muted-foreground",
-  error: "bg-destructive/15 text-destructive",
+  error: "bg-destructive/(--opacity-soft) text-destructive",
 };
 
 function getStatusLabel(status: McpServerState["status"]): string {
@@ -396,7 +396,7 @@ export function McpTab() {
         {banner && (
           <div
             className={`rounded-md px-3 py-2 text-sm ${
-              banner.type === "error" ? "bg-destructive/15 text-destructive" : "bg-success/15 text-success"
+              banner.type === "error" ? "bg-destructive/(--opacity-soft) text-destructive" : "bg-success/(--opacity-soft) text-success"
             }`}
           >
             {banner.msg}
@@ -405,7 +405,7 @@ export function McpTab() {
 
         {/* 에러 */}
         {error && (
-          <div className="rounded-md bg-destructive/15 px-3 py-2 text-sm text-destructive">{error}</div>
+          <div className="rounded-md bg-destructive/(--opacity-soft) px-3 py-2 text-sm text-destructive">{error}</div>
         )}
 
         {/* ── Section A: 서버 목록 ────────────────────── */}
@@ -500,7 +500,7 @@ export function McpTab() {
                           <Button
                             variant="outline"
                             size="sm"
-                            className="h-6 text-xs px-2 text-warning border-warning/40"
+                            className="h-6 text-xs px-2 text-warning border-warning/(--opacity-medium)"
                             onClick={() => void handleKill(id)}
                           >
                             {t("mcpTab.killButton")}
@@ -509,7 +509,7 @@ export function McpTab() {
                         <Button
                           variant="outline"
                           size="sm"
-                          className="h-6 text-xs px-2 text-destructive border-destructive/40"
+                          className="h-6 text-xs px-2 text-destructive border-destructive/(--opacity-medium)"
                           disabled={loading || removingId !== null}
                           onClick={() => void handleRemove(id)}
                         >
@@ -559,7 +559,7 @@ export function McpTab() {
         {showForm && (
           <>
             <Separator />
-            <div className="space-y-3 rounded-md border bg-muted/40 p-4">
+            <div className="space-y-3 rounded-md border bg-muted/(--opacity-medium) p-4">
               <h4 className="text-xs font-semibold text-foreground">{t("mcpTab.addFormTitle")}</h4>
 
               <div className="grid grid-cols-2 gap-3">

@@ -7,7 +7,6 @@
 import { useCallback, useEffect, useState } from "react";
 import { Checkbox } from "../../../components/ui/checkbox.js";
 import { NativeSelect, NativeSelectOption } from "../../../components/ui/native-select.js";
-import { Separator } from "../../../components/ui/separator.js";
 import { useTranslation } from "../../../i18n/react.js";
 
 interface DlpStats {
@@ -104,39 +103,46 @@ export function PrivacyTab({ piiRedactEnabled, onToggle }: PrivacyTabProps) {
 
   return (
     <div className="space-y-4">
-      {/* ── Toggle ── */}
-      <div className="space-y-2">
-        <div>
-          <p className="text-sm font-medium">{t("privacyTab.piiRedactTitle")}</p>
+      {/* ── Toggle section ── */}
+      <div className="rounded-lg border bg-background shadow-sm">
+        {/* section header bar */}
+        <div className="rounded-t-lg border-b bg-muted/(--opacity-medium) px-3 py-2">
+          <p className="text-xs font-semibold uppercase tracking-wider text-muted-foreground">
+            {t("privacyTab.piiRedactTitle")}
+          </p>
+        </div>
+        <div className="p-3 space-y-3">
           <p className="text-[11px] text-muted-foreground">
             {t("privacyTab.piiRedactDescription")}
           </p>
-        </div>
-        <div className="flex items-center gap-3 rounded-md border px-3 py-3">
-          <Checkbox
-            checked={piiRedactEnabled}
-            aria-labelledby="pii-redact-toggle-label"
-            className="size-5"
-            onCheckedChange={onToggle}
-          />
-          <div className="space-y-0.5">
-            <p id="pii-redact-toggle-label" className="text-sm font-medium">
-              {t("privacyTab.piiRedactToggleLabel")}
-            </p>
-            <p className="text-[11px] text-muted-foreground">
-              {t("privacyTab.piiRedactToggleDescription")}
-            </p>
+          <div className="flex items-center gap-3 rounded-lg border bg-background px-3 py-3 shadow-sm focus-within:ring-2 focus-within:ring-ring">
+            <Checkbox
+              checked={piiRedactEnabled}
+              aria-labelledby="pii-redact-toggle-label"
+              className="size-5"
+              onCheckedChange={onToggle}
+            />
+            <div className="space-y-0.5">
+              <p id="pii-redact-toggle-label" className="text-sm font-semibold leading-snug text-foreground">
+                {t("privacyTab.piiRedactToggleLabel")}
+              </p>
+              <p className="text-[11px] text-muted-foreground">
+                {t("privacyTab.piiRedactToggleDescription")}
+              </p>
+            </div>
           </div>
         </div>
       </div>
 
       {/* ── Stats (only shown when enabled) ── */}
       {piiRedactEnabled && (
-        <>
-          <Separator />
-          <div className="space-y-3">
-            <div className="flex items-center justify-between">
-              <p className="text-sm font-medium">{t("privacyTab.dlpStatsTitle")}</p>
+        <div className="border-t pt-4 space-y-4">
+          {/* Stats section header bar with inline day picker */}
+          <div className="rounded-lg border bg-background shadow-sm">
+            <div className="rounded-t-lg border-b bg-muted/(--opacity-medium) px-3 py-2 flex items-center justify-between">
+              <p className="text-xs font-semibold uppercase tracking-wider text-muted-foreground">
+                {t("privacyTab.dlpStatsTitle")}
+              </p>
               <NativeSelect
                 size="sm"
                 className="w-28"
@@ -149,87 +155,113 @@ export function PrivacyTab({ piiRedactEnabled, onToggle }: PrivacyTabProps) {
               </NativeSelect>
             </div>
 
-            {statsError && (
-              <div className="rounded-md border border-destructive/40 bg-destructive/10 px-3 py-2 text-xs text-destructive">
-                {statsError}
-              </div>
-            )}
-
-            {stats && (
-              <div className="space-y-4">
-                {/* Total */}
-                <div className="rounded-md border px-4 py-3 text-center">
-                  <p className="text-[11px] text-muted-foreground">{t("privacyTab.totalRedactions", { days })}</p>
-                  <p className="text-2xl font-semibold tabular-nums">{stats.totalHits.toLocaleString()}</p>
+            <div className="p-3 space-y-4">
+              {statsError && (
+                <div className="rounded-md border border-destructive/(--opacity-medium) bg-destructive/(--opacity-subtle) px-3 py-2 text-xs text-destructive">
+                  {statsError}
                 </div>
+              )}
 
-                {/* By Kind bar chart */}
-                {Object.keys(stats.byKind).length > 0 ? (
-                  <div className="space-y-1.5">
-                    <p className="text-[11px] text-muted-foreground font-medium">{t("privacyTab.byKindTitle")}</p>
-                    {Object.entries(stats.byKind)
-                      .sort((a, b) => b[1] - a[1])
-                      .map(([kind, count]) => (
-                        <div key={kind} className="flex items-center gap-2">
-                          <span className="w-24 truncate text-[11px] font-mono">{kind}</span>
-                          <Bar value={count} max={maxKind} />
-                          <span className="w-8 text-right text-[11px] tabular-nums">{count}</span>
-                        </div>
-                      ))}
+              {stats && (
+                <div className="space-y-4">
+                  {/* Total card */}
+                  <div className="rounded-lg border bg-background shadow-sm px-4 py-3 text-center">
+                    <p className="text-[11px] text-muted-foreground">{t("privacyTab.totalRedactions", { days })}</p>
+                    <p className="text-2xl font-semibold tabular-nums text-foreground leading-snug">
+                      {stats.totalHits.toLocaleString()}
+                    </p>
                   </div>
-                ) : (
-                  <p className="text-[11px] text-muted-foreground italic">{t("privacyTab.noDetectionRecords")}</p>
-                )}
 
-                {/* Daily trend sparkline */}
-                <div className="space-y-1.5">
-                  <p className="text-[11px] text-muted-foreground font-medium">{t("privacyTab.dailyTrendTitle")}</p>
-                  <div className="overflow-x-auto">
-                    <Sparkline byDay={stats.byDay} />
+                  {/* By Kind bar chart */}
+                  {Object.keys(stats.byKind).length > 0 ? (
+                    <div className="space-y-2 border-t pt-4">
+                      <div className="flex items-center gap-2">
+                        <p className="text-xs font-semibold uppercase tracking-wider text-muted-foreground">
+                          {t("privacyTab.byKindTitle")}
+                        </p>
+                        <span className="inline-flex items-center rounded-full border bg-muted px-2 py-0.5 text-[10px] font-medium text-muted-foreground tabular-nums">
+                          {Object.keys(stats.byKind).length}
+                        </span>
+                      </div>
+                      <div className="space-y-1.5">
+                        {Object.entries(stats.byKind)
+                          .sort((a, b) => b[1] - a[1])
+                          .map(([kind, count]) => (
+                            <div key={kind} className="flex items-center gap-2">
+                              <span className="w-24 truncate text-[11px] font-mono">{kind}</span>
+                              <Bar value={count} max={maxKind} />
+                              <span className="w-8 text-right text-[11px] tabular-nums">{count}</span>
+                            </div>
+                          ))}
+                      </div>
+                    </div>
+                  ) : (
+                    <p className="text-[11px] text-muted-foreground italic">{t("privacyTab.noDetectionRecords")}</p>
+                  )}
+
+                  {/* Daily trend sparkline */}
+                  <div className="space-y-2 border-t pt-4">
+                    <p className="text-xs font-semibold uppercase tracking-wider text-muted-foreground">
+                      {t("privacyTab.dailyTrendTitle")}
+                    </p>
+                    <div className="overflow-x-auto">
+                      <Sparkline byDay={stats.byDay} />
+                    </div>
+                    {Object.keys(stats.byDay).length > 0 && (
+                      <div className="flex justify-between text-[10px] text-muted-foreground" style={{ width: 240 }}>
+                        <span>{Object.keys(stats.byDay).sort()[0]}</span>
+                        <span>{Object.keys(stats.byDay).sort().at(-1)}</span>
+                      </div>
+                    )}
                   </div>
-                  {Object.keys(stats.byDay).length > 0 && (
-                    <div className="flex justify-between text-[10px] text-muted-foreground" style={{ width: 240 }}>
-                      <span>{Object.keys(stats.byDay).sort()[0]}</span>
-                      <span>{Object.keys(stats.byDay).sort().at(-1)}</span>
+
+                  {/* Top 5 patterns */}
+                  {stats.topPatterns.length > 0 && (
+                    <div className="space-y-2 border-t pt-4">
+                      <div className="flex items-center gap-2">
+                        <p className="text-xs font-semibold uppercase tracking-wider text-muted-foreground">
+                          {t("privacyTab.topPatternsTitle")}
+                        </p>
+                        <span className="inline-flex items-center rounded-full border bg-muted px-2 py-0.5 text-[10px] font-medium text-muted-foreground tabular-nums">
+                          {stats.topPatterns.length}
+                        </span>
+                      </div>
+                      <div className="rounded-lg border bg-background shadow-sm text-xs overflow-hidden">
+                        <table className="w-full">
+                          <thead>
+                            <tr className="border-b bg-muted/(--opacity-medium)">
+                              <th className="px-3 py-1.5 text-left text-xs font-semibold uppercase tracking-wider text-muted-foreground">
+                                {t("privacyTab.tableHeaderPattern")}
+                              </th>
+                              <th className="px-3 py-1.5 text-right text-xs font-semibold uppercase tracking-wider text-muted-foreground">
+                                {t("privacyTab.tableHeaderCount")}
+                              </th>
+                            </tr>
+                          </thead>
+                          <tbody>
+                            {stats.topPatterns.map(({ kind, count }, i) => (
+                              <tr key={kind} className="border-b last:border-0 hover:bg-muted/(--opacity-medium) transition-colors">
+                                <td className="px-3 py-1.5 font-mono text-foreground">
+                                  <span className="mr-2 text-muted-foreground">{i + 1}.</span>
+                                  {kind}
+                                </td>
+                                <td className="px-3 py-1.5 text-right tabular-nums text-foreground">{count}</td>
+                              </tr>
+                            ))}
+                          </tbody>
+                        </table>
+                      </div>
                     </div>
                   )}
                 </div>
+              )}
 
-                {/* Top 5 patterns */}
-                {stats.topPatterns.length > 0 && (
-                  <div className="space-y-1.5">
-                    <p className="text-[11px] text-muted-foreground font-medium">{t("privacyTab.topPatternsTitle")}</p>
-                    <div className="rounded-md border text-xs">
-                      <table className="w-full">
-                        <thead>
-                          <tr className="border-b bg-muted/40">
-                            <th className="px-3 py-1.5 text-left font-medium">{t("privacyTab.tableHeaderPattern")}</th>
-                            <th className="px-3 py-1.5 text-right font-medium">{t("privacyTab.tableHeaderCount")}</th>
-                          </tr>
-                        </thead>
-                        <tbody>
-                          {stats.topPatterns.map(({ kind, count }, i) => (
-                            <tr key={kind} className="border-b last:border-0">
-                              <td className="px-3 py-1.5 font-mono">
-                                <span className="mr-2 text-muted-foreground">{i + 1}.</span>
-                                {kind}
-                              </td>
-                              <td className="px-3 py-1.5 text-right tabular-nums">{count}</td>
-                            </tr>
-                          ))}
-                        </tbody>
-                      </table>
-                    </div>
-                  </div>
-                )}
-              </div>
-            )}
-
-            {!stats && !statsError && (
-              <p className="text-[11px] text-muted-foreground italic">{t("privacyTab.statsLoading")}</p>
-            )}
+              {!stats && !statsError && (
+                <p className="text-[11px] text-muted-foreground italic">{t("privacyTab.statsLoading")}</p>
+              )}
+            </div>
           </div>
-        </>
+        </div>
       )}
     </div>
   );

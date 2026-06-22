@@ -18,7 +18,9 @@
  */
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { AlertTriangle, CheckCircle2, Loader2, Play, XCircle } from "lucide-react";
+import ReactMarkdown from "react-markdown";
 import { t } from "../../../i18n/runtime.js";
+import { MARKDOWN_REMARK_PLUGINS } from "../utils/markdown-plugins.js";
 import { Badge } from "../../../components/ui/badge.js";
 import { Button } from "../../../components/ui/button.js";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "../../../components/ui/card.js";
@@ -38,6 +40,7 @@ import {
 import type { LvisApi } from "../types.js";
 import type {
   RunProgressEventPayload,
+  RunTranscriptEvent,
   WorkBoardReportResult,
   WorkItemCreateInput,
   WorkItemPriority,
@@ -78,9 +81,9 @@ const PRIORITY_OPTIONS: WorkItemPriority[] = ["high", "medium", "low"];
 function PriorityChip({ priority }: { priority: WorkItemPriority }) {
   const cls =
     priority === "high"
-      ? "border-destructive/40 bg-destructive/10 text-destructive"
+      ? "border-destructive/(--opacity-medium) bg-destructive/(--opacity-subtle) text-destructive"
       : priority === "medium"
-        ? "border-primary/40 bg-primary/10 text-primary"
+        ? "border-primary/(--opacity-medium) bg-primary/(--opacity-subtle) text-primary"
         : "text-muted-foreground";
   return (
     <span
@@ -277,7 +280,7 @@ function RunIndicator({ run }: { run: WorkItemRunState | undefined }) {
     if (phase === "denied") {
       return (
         <span
-          className="inline-flex items-center gap-1 rounded px-1.5 py-0.5 text-[10px] font-medium border border-destructive/40 bg-destructive/10 text-destructive"
+          className="inline-flex items-center gap-1 rounded px-1.5 py-0.5 text-[10px] font-medium border border-destructive/(--opacity-medium) bg-destructive/(--opacity-subtle) text-destructive"
           data-testid="work-board-run-denied"
         >
           <XCircle className="h-3 w-3" />
@@ -288,7 +291,7 @@ function RunIndicator({ run }: { run: WorkItemRunState | undefined }) {
     if (phase === "error") {
       return (
         <span
-          className="inline-flex items-center gap-1 rounded px-1.5 py-0.5 text-[10px] font-medium border border-destructive/40 bg-destructive/10 text-destructive"
+          className="inline-flex items-center gap-1 rounded px-1.5 py-0.5 text-[10px] font-medium border border-destructive/(--opacity-medium) bg-destructive/(--opacity-subtle) text-destructive"
           title={run.reason}
           data-testid="work-board-run-error"
         >
@@ -316,8 +319,8 @@ function RunIndicator({ run }: { run: WorkItemRunState | undefined }) {
   const awaiting = phase === "awaiting_approval";
   return (
     <span
-      className={`inline-flex items-center gap-1 rounded px-1.5 py-0.5 text-[10px] font-medium border border-primary/40 bg-primary/10 text-primary ${
-        awaiting ? "ring-1 ring-primary/40" : ""
+      className={`inline-flex items-center gap-1 rounded px-1.5 py-0.5 text-[10px] font-medium border border-primary/(--opacity-medium) bg-primary/(--opacity-subtle) text-primary ${
+        awaiting ? "ring-1 ring-primary/(--opacity-medium)" : ""
       }`}
       data-testid="work-board-run-indicator"
       data-phase={phase ?? "starting"}
@@ -351,8 +354,8 @@ function WorkItemCard({ item, run, onStart, onComplete, onReopen, onRun, onOpenD
   return (
     <button
       type="button"
-      className={`w-full rounded-md border p-2.5 text-left transition hover:bg-muted/60 ${
-        overdue ? "border-destructive/50 bg-destructive/5" : ""
+      className={`w-full rounded-lg border bg-background p-3 text-left shadow-sm transition-all hover:border-border hover:shadow-md focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring ${
+        overdue ? "border-destructive/(--opacity-half) bg-destructive/(--opacity-faint)" : "border-border/(--opacity-strong)"
       }`}
       data-testid="work-board-card"
       onClick={() => onOpenDetail(item.id)}
@@ -361,16 +364,16 @@ function WorkItemCard({ item, run, onStart, onComplete, onReopen, onRun, onOpenD
         <div className="min-w-0 flex-1">
           <div className="flex items-center gap-1.5">
             <PriorityChip priority={item.priority} />
-            <span className={`truncate text-sm font-medium ${isCompleted ? "text-muted-foreground line-through" : ""}`}>
+            <span className={`truncate text-sm font-semibold leading-snug ${isCompleted ? "text-muted-foreground line-through" : "text-foreground"}`}>
               {item.title}
             </span>
           </div>
           {item.detail && (
-            <p className="mt-1 line-clamp-2 text-[11px] text-muted-foreground">{item.detail}</p>
+            <p className="mt-1.5 line-clamp-2 break-words text-[11px] leading-relaxed text-muted-foreground [overflow-wrap:anywhere]">{item.detail}</p>
           )}
-          <div className="mt-1.5 flex flex-wrap items-center gap-1.5">
+          <div className="mt-2 flex flex-wrap items-center gap-1.5">
             {overdue && (
-              <Badge variant="outline" className="border-destructive/50 text-destructive">
+              <Badge variant="outline" className="border-destructive/(--opacity-half) text-destructive">
                 {t("workBoard.overdueBadge")}
               </Badge>
             )}
@@ -381,7 +384,7 @@ function WorkItemCard({ item, run, onStart, onComplete, onReopen, onRun, onOpenD
       </div>
       {/* Inline lifecycle actions. stopPropagation so the card's open-detail
           click does not also fire when the user only wanted to transition. */}
-      <div className="mt-2 flex justify-end gap-1">
+      <div className="mt-2.5 flex flex-wrap justify-end gap-1">
         {!isCompleted && (
           <Button
             size="sm"
@@ -479,20 +482,20 @@ function BoardColumn({
   testId,
 }: BoardColumnProps) {
   return (
-    <section className="flex min-h-0 flex-col gap-2 rounded-md border bg-muted/20 p-2" data-testid={testId}>
-      <div className="flex items-center justify-between px-1">
-        <h3 className="text-sm font-medium">{heading}</h3>
-        <span className="text-[11px] text-muted-foreground">
-          {t("workBoard.itemCount", { count: String(items.length) })}
+    <section className="flex min-h-0 flex-col gap-2 rounded-lg border bg-muted/(--opacity-light) shadow-sm" data-testid={testId}>
+      <div className="flex items-center justify-between rounded-t-lg border-b bg-muted/(--opacity-medium) px-3 py-2">
+        <h3 className="text-xs font-semibold uppercase tracking-wider text-muted-foreground">{heading}</h3>
+        <span className="flex h-5 min-w-[20px] items-center justify-center rounded-full bg-muted px-1.5 text-[10px] font-semibold text-muted-foreground">
+          {items.length}
         </span>
       </div>
-      <ScrollArea className="min-h-[200px] flex-1">
+      <ScrollArea className="min-h-[200px] flex-1 px-2 pb-2">
         {loading ? (
           <div className="py-8 text-center text-sm text-muted-foreground">{t("workBoard.loadingLabel")}</div>
         ) : items.length === 0 ? (
           <div className="py-8 text-center text-sm text-muted-foreground">{emptyLabel}</div>
         ) : (
-          <div className="space-y-2 pr-2">
+          <div className="space-y-2">
             {items.map((item) => (
               <WorkItemCard
                 key={item.id}
@@ -536,7 +539,7 @@ function PriorityPicker({
             disabled={disabled}
             onClick={() => onChange(opt)}
             className={`flex items-center gap-1 rounded-md border px-2 py-1 text-xs transition-colors disabled:opacity-50 ${
-              active ? "border-primary bg-primary/10 font-medium" : "text-muted-foreground hover:bg-muted/60"
+              active ? "border-primary bg-primary/(--opacity-subtle) font-medium" : "text-muted-foreground hover:bg-muted/(--opacity-strong)"
             }`}
             data-testid={`work-board-priority-${opt}`}
           >
@@ -714,7 +717,7 @@ function RunOutputPanel({
   if (!plan && !output && !liveText && !run) return null;
 
   return (
-    <div className="space-y-2 rounded-md border bg-muted/20 p-2.5" data-testid="work-board-run-output">
+    <div className="space-y-2 rounded-md border bg-muted/(--opacity-light) p-2.5" data-testid="work-board-run-output">
       <div className="flex items-center justify-between">
         <RunIndicator run={run} />
         {sessionId && (
@@ -726,25 +729,31 @@ function RunOutputPanel({
       {liveText && (
         <div data-testid="work-board-run-live">
           <div className="text-[11px] font-medium text-muted-foreground">{t("workBoard.runLiveHeading")}</div>
-          <pre className="mt-1 max-h-32 overflow-auto whitespace-pre-wrap break-words rounded bg-background/60 p-2 text-[11px] leading-relaxed">
-            {liveText}
-          </pre>
+          <div className="mt-1 max-h-32 overflow-auto rounded bg-background/(--opacity-strong) p-3">
+            <div className="prose prose-sm lvis-prose max-w-none break-words [overflow-wrap:anywhere]">
+              <ReactMarkdown remarkPlugins={MARKDOWN_REMARK_PLUGINS}>{liveText}</ReactMarkdown>
+            </div>
+          </div>
         </div>
       )}
       {plan && (
         <div data-testid="work-board-run-plan">
           <div className="text-[11px] font-medium text-muted-foreground">{t("workBoard.runPlanHeading")}</div>
-          <pre className="mt-1 max-h-40 overflow-auto whitespace-pre-wrap break-words rounded bg-background/60 p-2 text-[11px] leading-relaxed">
-            {plan}
-          </pre>
+          <div className="mt-1 max-h-48 overflow-auto rounded bg-background/(--opacity-strong) p-3">
+            <div className="prose prose-sm lvis-prose max-w-none break-words [overflow-wrap:anywhere]">
+              <ReactMarkdown remarkPlugins={MARKDOWN_REMARK_PLUGINS}>{plan}</ReactMarkdown>
+            </div>
+          </div>
         </div>
       )}
       {output && (
         <div data-testid="work-board-run-result">
           <div className="text-[11px] font-medium text-muted-foreground">{t("workBoard.runOutputHeading")}</div>
-          <pre className="mt-1 max-h-48 overflow-auto whitespace-pre-wrap break-words rounded bg-background/60 p-2 text-[11px] leading-relaxed">
-            {output}
-          </pre>
+          <div className="mt-1 max-h-48 overflow-auto rounded bg-background/(--opacity-strong) p-3">
+            <div className="prose prose-sm lvis-prose max-w-none break-words [overflow-wrap:anywhere]">
+              <ReactMarkdown remarkPlugins={MARKDOWN_REMARK_PLUGINS}>{output}</ReactMarkdown>
+            </div>
+          </div>
         </div>
       )}
     </div>
@@ -757,6 +766,85 @@ const STATUS_LABEL: Record<WorkItemResolved["status_resolved"], string> = {
   completed: "columnCompleted",
   overdue: "overdueBadge",
 };
+
+// ─── Run history (accumulated past runs + their transcripts) ────────────────
+//
+// `item.runHistory` is the board-persisted index (newest last); each entry's
+// transcript (the plan+execute conversation) is fetched on demand from
+// `sessions/<id>/<runId>.jsonl` via getWorkBoardRunTranscript. This makes the
+// accumulation visible — re-runs add rows here instead of wiping prior work.
+function RunHistorySection({ api, item }: { api: LvisApi; item: WorkItemResolved }) {
+  const history = item.runHistory ?? [];
+  const [openRun, setOpenRun] = useState<string | null>(null);
+  const [events, setEvents] = useState<RunTranscriptEvent[]>([]);
+  const [loading, setLoading] = useState(false);
+  if (history.length === 0) return null;
+
+  const toggle = async (runId: string) => {
+    if (openRun === runId) {
+      setOpenRun(null);
+      return;
+    }
+    setOpenRun(runId);
+    setEvents([]);
+    if (typeof api.getWorkBoardRunTranscript !== "function") return;
+    setLoading(true);
+    try {
+      const r = await api.getWorkBoardRunTranscript(item.id, runId);
+      if ("events" in r) setEvents(r.events);
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  return (
+    <section className="rounded-lg border bg-muted/(--opacity-light) shadow-sm" data-testid="work-board-run-history">
+      <div className="flex items-center justify-between rounded-t-lg border-b bg-muted/(--opacity-medium) px-3 py-2">
+        <h4 className="text-xs font-semibold uppercase tracking-wider text-muted-foreground">
+          {t("workBoard.runHistoryHeading")}
+        </h4>
+        <span className="flex h-5 min-w-[20px] items-center justify-center rounded-full bg-muted px-1.5 text-[10px] font-semibold text-muted-foreground">
+          {history.length}
+        </span>
+      </div>
+      <ul className="space-y-1 p-2.5">
+        {[...history].reverse().map((h) => (
+          <li key={h.runId} className="text-[11px]">
+            <button
+              type="button"
+              onClick={() => void toggle(h.runId)}
+              className="flex w-full items-center justify-between gap-2 rounded px-1 py-0.5 text-left hover:bg-muted"
+            >
+              <span className="truncate">
+                {t(`workBoard.run_${h.status}`)} · {isoToKstDate(h.startedAt)}
+              </span>
+              <span className="text-muted-foreground">{openRun === h.runId ? "▲" : "▼"}</span>
+            </button>
+            {openRun === h.runId && (
+              <div className="mt-1 rounded bg-background/(--opacity-strong) p-2">
+                {loading ? (
+                  <span className="text-muted-foreground">…</span>
+                ) : events.length === 0 ? (
+                  <span className="text-muted-foreground">{t("workBoard.runHistoryEmpty")}</span>
+                ) : (
+                  <div className="max-h-48 overflow-auto">
+                    <div className="prose prose-sm lvis-prose max-w-none break-words [overflow-wrap:anywhere]">
+                      <ReactMarkdown remarkPlugins={MARKDOWN_REMARK_PLUGINS}>
+                        {events
+                          .map((e) => `[${e.phase}${e.turn ? `#${e.turn}` : ""}] ${e.text ?? e.message ?? ""}`)
+                          .join("\n\n")}
+                      </ReactMarkdown>
+                    </div>
+                  </div>
+                )}
+              </div>
+            )}
+          </li>
+        ))}
+      </ul>
+    </section>
+  );
+}
 
 export function WorkItemDetailDialog({ api, itemId, run, onClose, onChanged, onRun }: DetailDialogProps) {
   const [item, setItem] = useState<WorkItemResolved | null>(null);
@@ -961,6 +1049,7 @@ export function WorkItemDetailDialog({ api, itemId, run, onClose, onChanged, onR
             </div>
             {actionError && <p className="text-sm text-destructive" data-testid="work-board-detail-error">{actionError}</p>}
             <RunOutputPanel item={item} run={run} />
+            <RunHistorySection api={api} item={item} />
           </div>
         )}
 
@@ -1054,10 +1143,13 @@ function ReportsSection({ api }: { api: LvisApi }) {
   );
 
   return (
-    <section className="rounded-md border bg-muted/20 p-3" data-testid="work-board-reports">
-      <h3 className="text-sm font-medium text-muted-foreground">{t("workBoard.reportsHeading")}</h3>
-      <p className="mt-1 text-[11px] text-muted-foreground">{t("workBoard.reportPlaceholder")}</p>
-      <div className="mt-2 flex gap-2">
+    <section className="rounded-lg border bg-muted/(--opacity-light) shadow-sm" data-testid="work-board-reports">
+      <div className="flex items-center justify-between rounded-t-lg border-b bg-muted/(--opacity-medium) px-4 py-2.5">
+        <h3 className="text-xs font-semibold uppercase tracking-wider text-muted-foreground">{t("workBoard.reportsHeading")}</h3>
+      </div>
+      <div className="p-4">
+      <p className="text-[11px] text-muted-foreground">{t("workBoard.reportPlaceholder")}</p>
+      <div className="mt-3 flex gap-2">
         <Button
           size="sm"
           variant="outline"
@@ -1080,6 +1172,7 @@ function ReportsSection({ api }: { api: LvisApi }) {
         </Button>
       </div>
       {result && <ReportResultBlock result={result} onClose={() => setResult(null)} />}
+      </div>
     </section>
   );
 }
@@ -1124,9 +1217,11 @@ function ReportResultBlock({
           {t("workBoard.reportClose")}
         </Button>
       </div>
-      <pre className="max-h-48 overflow-auto whitespace-pre-wrap break-words rounded bg-background/60 p-2 text-[11px] leading-relaxed">
-        {result.markdown}
-      </pre>
+      <div className="max-h-48 overflow-auto rounded bg-background/(--opacity-strong) p-3">
+        <div className="prose prose-sm lvis-prose max-w-none break-words [overflow-wrap:anywhere]">
+          <ReactMarkdown remarkPlugins={MARKDOWN_REMARK_PLUGINS}>{result.markdown}</ReactMarkdown>
+        </div>
+      </div>
     </div>
   );
 }
@@ -1254,8 +1349,8 @@ export function WorkBoardPanel({ api }: WorkBoardPanelProps) {
             </div>
           </div>
         </CardHeader>
-        <CardContent className="flex min-h-0 flex-1 flex-col gap-3">
-          <div className="grid min-h-0 flex-1 gap-3 lg:grid-cols-3">
+        <CardContent className="flex min-h-0 flex-1 flex-col gap-4 overflow-y-auto">
+          <div className="grid min-h-0 gap-3 lg:grid-cols-3">
             <BoardColumn
               heading={t("workBoard.columnPlanned")}
               items={planned}
@@ -1296,7 +1391,9 @@ export function WorkBoardPanel({ api }: WorkBoardPanelProps) {
               testId="work-board-column-completed"
             />
           </div>
-          <ReportsSection api={api} />
+          <div className="border-t pt-4">
+            <ReportsSection api={api} />
+          </div>
         </CardContent>
       </Card>
 

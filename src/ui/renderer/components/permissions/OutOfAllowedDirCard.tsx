@@ -112,7 +112,7 @@ export function OutOfAllowedDirCard({
 
         <div className="space-y-3 py-2">
           {warnOrigin && (
-            <section className="rounded border border-warning/40 bg-warning/15 px-3 py-2 text-xs text-warning">
+            <section className="rounded border border-warning/(--opacity-medium) bg-warning/(--opacity-soft) px-3 py-2 text-xs text-warning">
               {t("outOfAllowedDirCard.originWarning", { originLabel })}
             </section>
           )}
@@ -130,7 +130,7 @@ export function OutOfAllowedDirCard({
             <p className="mb-1 text-xs font-medium text-muted-foreground">
               {t("outOfAllowedDirCard.currentAllowedLabel", { count: currentAllowed.length })}
             </p>
-            <ul className="max-h-24 overflow-y-auto rounded border bg-muted/50 p-2 text-xs font-mono break-all">
+            <ul className="max-h-24 overflow-y-auto rounded border bg-muted/(--opacity-half) p-2 text-xs font-mono break-all">
               {currentAllowed.length === 0 ? (
                 <li className="text-muted-foreground">{t("outOfAllowedDirCard.emptyAllowed")}</li>
               ) : (
@@ -144,14 +144,14 @@ export function OutOfAllowedDirCard({
               <p className="mb-1 text-xs font-medium text-muted-foreground">
                 {t("outOfAllowedDirCard.suggestedParentLabel")}
               </p>
-              <p className="rounded bg-info/10 px-2 py-1 text-sm font-mono text-info break-all">
+              <p className="rounded bg-info/(--opacity-subtle) px-2 py-1 text-sm font-mono text-info break-all">
                 {suggestedParent}
               </p>
             </section>
           )}
 
           {adjacencyWarnings.length > 0 && (
-            <section className="rounded border border-destructive/40 bg-destructive/10 p-2 text-sm">
+            <section className="rounded border border-destructive/(--opacity-medium) bg-destructive/(--opacity-subtle) p-2 text-sm">
               <p className="mb-1 font-medium text-destructive">
                 {t("outOfAllowedDirCard.adjacencyWarningTitle")}
               </p>
@@ -171,7 +171,7 @@ export function OutOfAllowedDirCard({
 
           <PermissionEvaluationContextPanel context={request.evaluationContext} />
 
-          <section className="rounded border bg-muted/30 p-2">
+          <section className="rounded border bg-muted/(--opacity-muted) p-2">
             <p className="mb-1 text-xs font-medium text-muted-foreground">
               {t("outOfAllowedDirCard.retypeLabel", { confirmName })}
             </p>

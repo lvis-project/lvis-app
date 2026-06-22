@@ -8,7 +8,7 @@ import { Tooltip, TooltipContent, TooltipTrigger } from "../../components/ui/too
 import { ScrollArea } from "../../components/ui/scroll-area.js";
 import { formatCostBadge } from "../../lib/cost-estimator.js";
 import type { ChatEntry } from "../../lib/chat-stream-state.js";
-import type { UserApprovalHitPayload } from "../../shared/permissions-events.js";
+import type { PermissionReviewSuggestionPayload, UserApprovalHitPayload } from "../../shared/permissions-events.js";
 import { debugLog, isDebugStreamEnabled } from "../../lib/debug-stream.js";
 import { OverlayCardRegion } from "./components/OverlayCardRegion.js";
 import { AssistantCard } from "./components/AssistantCard.js";
@@ -27,7 +27,7 @@ import { SubAgentCard } from "./components/SubAgentCard.js";
 import { TokenProgressRing } from "./components/TokenProgressRing.js";
 import { BottomActionRow } from "./components/BottomActionRow.js";
 import { PermissionModeBadge } from "./components/permissions/PermissionModeBadge.js";
-import { DEFAULT_TOAST_TTL_MS, SHORT_TOAST_TTL_MS } from "./constants.js";
+import { DEFAULT_TOAST_TTL_MS, LONG_TOAST_TTL_MS, SHORT_TOAST_TTL_MS } from "./constants.js";
 import { SkillBadge } from "./components/SkillBadge.js";
 import { WorkGroup } from "./components/WorkGroup.js";
 import { PermissionReviewStatusCard } from "./components/PermissionReviewStatusCard.js";
@@ -211,7 +211,7 @@ function ImportedTriggerCard({ entry }: { entry: ImportedTriggerEntry }) {
   const envelopeSource = parseImportedTriggerEnvelope(entry.prompt);
   return (
     <div
-      className="mx-3 my-1 rounded border border-action-view/20 bg-action-view/5 px-3 py-2 text-xs"
+      className="mx-3 my-1 rounded border border-action-view/(--opacity-light) bg-action-view/(--opacity-faint) px-3 py-2 text-xs"
     >
       <div className="flex items-center gap-1 text-action-view font-medium">
         <span>●</span>
@@ -301,10 +301,10 @@ function AskUserAnswerBubble({
   if (entry.dismissed) {
     return (
       <div
-        className="ml-auto w-fit min-w-0 max-w-[75%] rounded-md border border-border/70 border-l-2 border-l-muted-foreground/60 bg-card/80 px-3 py-2 text-xs text-muted-foreground"
+        className="ml-auto w-fit min-w-0 max-w-[75%] rounded-md border border-border/(--opacity-stronger) border-l-2 border-l-muted-foreground/(--opacity-strong) bg-card/(--opacity-intense) px-3 py-2 text-xs text-muted-foreground"
         data-testid="ask-user-answer-bubble"
       >
-        <div className="text-[10.5px] text-muted-foreground/80">{t("chatView.askAnswerSkippedLabel")}</div>
+        <div className="text-[10.5px] text-muted-foreground/(--opacity-intense)">{t("chatView.askAnswerSkippedLabel")}</div>
         <div className="whitespace-pre-wrap break-words [overflow-wrap:anywhere]">{t("chatView.askAnswerSkippedProceed")}</div>
       </div>
     );
@@ -312,7 +312,7 @@ function AskUserAnswerBubble({
 
   return (
     <div
-      className="ml-auto w-fit min-w-0 max-w-[75%] rounded-md border border-border/70 border-l-2 border-l-message-user bg-card/90 px-3 py-2 text-xs text-card-foreground shadow-sm"
+      className="ml-auto w-fit min-w-0 max-w-[75%] rounded-md border border-border/(--opacity-stronger) border-l-2 border-l-message-user bg-card/(--opacity-near) px-3 py-2 text-xs text-card-foreground shadow-sm"
       data-testid="ask-user-answer-bubble"
     >
       <div className="mb-1 text-[10.5px] text-muted-foreground">
@@ -387,6 +387,12 @@ export function ChatView({ api, onAsk, onEditSave, onFork, onToggleStar, onRetry
   const userApprovalHitTimerRef = useRef<ReturnType<typeof setTimeout> | null>(
     null,
   );
+  const [permissionReviewSuggestion, setPermissionReviewSuggestion] = useState<
+    (PermissionReviewSuggestionPayload & { busy?: boolean; error?: string }) | null
+  >(null);
+  const permissionReviewSuggestionTimerRef = useRef<ReturnType<typeof setTimeout> | null>(
+    null,
+  );
 
   // Cleanup fork toast timer on unmount to avoid setState-after-unmount.
   useEffect(() => {
@@ -438,6 +444,92 @@ export function ChatView({ api, onAsk, onEditSave, onFork, onToggleStar, onRetry
         clearTimeout(userApprovalHitTimerRef.current);
       }
     };
+  }, []);
+
+  useEffect(() => {
+    let api;
+    try {
+      api = getApi();
+    } catch {
+      return;
+    }
+    const unsubscribe = api.permission.onReviewSuggestion?.((payload) => {
+      if (
+        !payload ||
+        (payload.reason !== "allow-always" && payload.reason !== "repeat-allow") ||
+        typeof payload.allowCount !== "number" ||
+        typeof payload.allowAlwaysCount !== "number" ||
+        typeof payload.threshold !== "number" ||
+        typeof payload.windowMs !== "number"
+      ) {
+        console.warn("[chat] dropping malformed permission review suggestion payload", payload);
+        return;
+      }
+      const numericFieldsValid =
+        Number.isFinite(payload.allowCount) &&
+        Number.isFinite(payload.allowAlwaysCount) &&
+        Number.isFinite(payload.threshold) &&
+        Number.isFinite(payload.windowMs) &&
+        payload.allowCount >= 0 &&
+        payload.allowAlwaysCount >= 0 &&
+        payload.threshold > 0 &&
+        payload.windowMs > 0 &&
+        payload.windowMs <= 24 * 60 * 60 * 1000;
+      if (!numericFieldsValid) {
+        console.warn("[chat] dropping malformed permission review suggestion payload", payload);
+        return;
+      }
+      if (permissionReviewSuggestionTimerRef.current) {
+        clearTimeout(permissionReviewSuggestionTimerRef.current);
+      }
+      setPermissionReviewSuggestion(payload);
+      permissionReviewSuggestionTimerRef.current = setTimeout(() => {
+        setPermissionReviewSuggestion(null);
+      }, LONG_TOAST_TTL_MS);
+    });
+    if (!unsubscribe) return;
+    return () => {
+      unsubscribe();
+      if (permissionReviewSuggestionTimerRef.current) {
+        clearTimeout(permissionReviewSuggestionTimerRef.current);
+      }
+    };
+  }, []);
+
+  const handleEnablePermissionReviewSuggestion = useCallback(async () => {
+    if (permissionReviewSuggestionTimerRef.current) {
+      clearTimeout(permissionReviewSuggestionTimerRef.current);
+      permissionReviewSuggestionTimerRef.current = null;
+    }
+    setPermissionReviewSuggestion((current) =>
+      current ? { ...current, busy: true, error: undefined } : current,
+    );
+    try {
+      const api = getApi();
+      const reviewerResult = await api.permission.reviewerDispatch("mode llm");
+      if (!reviewerResult?.ok) {
+        throw new Error(reviewerResult?.error ?? "reviewer mode change failed");
+      }
+      const interactiveResult = await api.permission.reviewerDispatch("interactive low");
+      if (!interactiveResult?.ok) {
+        throw new Error(interactiveResult?.error ?? "interactive reviewer change failed");
+      }
+      const modeResult = await api.permission.setMode("auto");
+      if (!modeResult?.ok) {
+        throw new Error(modeResult?.message ?? modeResult?.error ?? "mode change failed");
+      }
+      setPermissionReviewSuggestion(null);
+    } catch (err) {
+      setPermissionReviewSuggestion((current) =>
+        current
+          ? {
+              ...current,
+              busy: false,
+              error: err instanceof Error ? err.message : String(err),
+            }
+          : current,
+      );
+    }
   }, []);
 
   // In view-mode, show only the sliced entries up to the checkpoint.
@@ -1108,7 +1200,7 @@ export function ChatView({ api, onAsk, onEditSave, onFork, onToggleStar, onRetry
     const ringClassFor = (entryIdx: number) => {
       const isMatch = searchMatchSet.has(entryIdx);
       const isCurrentMatch = searchOpen && searchMatches[searchIdx] === entryIdx;
-      return isCurrentMatch ? "ring-2 ring-primary" : isMatch ? "ring-1 ring-primary/40" : "";
+      return isCurrentMatch ? "ring-2 ring-primary" : isMatch ? "ring-1 ring-primary/(--opacity-medium)" : "";
     };
     const ringCls = ringClassFor(idx);
 
@@ -1146,11 +1238,11 @@ export function ChatView({ api, onAsk, onEditSave, onFork, onToggleStar, onRetry
                 actions float top-right via absolute positioning so
                 the bubble has no header chrome. */}
             {entry.injectHint === "queue" ? (
-              <div className="mb-1 inline-flex items-center gap-1 rounded bg-message-user-foreground/10 px-1.5 py-0.5 text-[10px] text-message-user-foreground/70" title={t("chatView.queueInjectTitle")}>
+              <div className="mb-1 inline-flex items-center gap-1 rounded bg-message-user-foreground/(--opacity-subtle) px-1.5 py-0.5 text-[10px] text-message-user-foreground/(--opacity-stronger)" title={t("chatView.queueInjectTitle")}>
                 {t("chatView.queueInjectLabel")}
               </div>
             ) : entry.injectHint === "interrupt" ? (
-              <div className="mb-1 inline-flex items-center gap-1 rounded bg-message-user-foreground/10 px-1.5 py-0.5 text-[10px] text-message-user-foreground/70" title={t("chatView.interruptTitle")}>
+              <div className="mb-1 inline-flex items-center gap-1 rounded bg-message-user-foreground/(--opacity-subtle) px-1.5 py-0.5 text-[10px] text-message-user-foreground/(--opacity-stronger)" title={t("chatView.interruptTitle")}>
                 {t("chatView.interruptLabel")}
               </div>
             ) : null}
@@ -1159,7 +1251,7 @@ export function ChatView({ api, onAsk, onEditSave, onFork, onToggleStar, onRetry
             ) : null}
             {/* Hide mutating actions in view-mode (read-only slice). */}
             {!viewMode && (
-              <div className="absolute right-2 top-2 hidden gap-1 group-hover:flex bg-message-user/95 rounded">
+              <div className="absolute right-2 top-2 hidden gap-1 group-hover:flex bg-message-user/(--opacity-solid) rounded">
                 <Button type="button" variant="ghost" size="icon-xs" title={t("chatView.editButtonTitle")} onClick={() => setEditingEntryIdx(idx)}>
                   <Pencil className="h-3 w-3" />
                 </Button>
@@ -1190,7 +1282,7 @@ export function ChatView({ api, onAsk, onEditSave, onFork, onToggleStar, onRetry
         <div
           key={idx}
           data-testid="system-entry"
-          className="mx-auto text-center text-xs text-muted-foreground py-1 px-3 rounded-full bg-muted/50"
+          className="mx-auto text-center text-xs text-muted-foreground py-1 px-3 rounded-full bg-muted/(--opacity-half)"
         >
           {entry.text}
         </div>,
@@ -1547,10 +1639,47 @@ export function ChatView({ api, onAsk, onEditSave, onFork, onToggleStar, onRetry
           </div>
         );
       })()}
+      {permissionReviewSuggestion && (
+        <div
+          data-testid="permission-review-suggestion-toast"
+          role="status"
+          aria-live="polite"
+          className="sticky top-0 z-30 mx-3 mt-2 flex min-w-0 items-center gap-2 rounded-md border border-[hsl(var(--warning)/0.4)] bg-[hsl(var(--warning)/0.1)] px-3 py-2 text-xs text-[hsl(var(--warning))]"
+        >
+          <div className="min-w-0 flex-1">
+            <span className="font-medium">{t("chatView.permissionReviewSuggestionTitle")}</span>
+            <span className="ml-2 text-muted-foreground">
+              {permissionReviewSuggestion.reason === "allow-always"
+                ? t("chatView.permissionReviewSuggestionAllowAlways")
+                : t("chatView.permissionReviewSuggestionRepeat", {
+                    count: permissionReviewSuggestion.allowCount,
+                    minutes: Math.max(1, Math.round(permissionReviewSuggestion.windowMs / 60000)),
+                  })}
+            </span>
+            {permissionReviewSuggestion.error && (
+              <span className="ml-2 text-[hsl(var(--destructive))]">
+                {permissionReviewSuggestion.error}
+              </span>
+            )}
+          </div>
+          <Button
+            type="button"
+            size="sm"
+            variant="outline"
+            className="h-7 shrink-0 px-2 text-xs"
+            disabled={permissionReviewSuggestion.busy === true}
+            onClick={() => void handleEnablePermissionReviewSuggestion()}
+          >
+            {permissionReviewSuggestion.busy === true
+              ? t("chatView.permissionReviewSuggestionBusy")
+              : t("chatView.permissionReviewSuggestionAction")}
+          </Button>
+        </div>
+      )}
       {currentSessionKind === "routine" && (
         <div
           data-testid="current-session-kind-banner"
-          className="sticky top-0 z-20 mx-3 mt-2 rounded-md border border-action-view/30 bg-action-view/10 px-3 py-2 text-xs text-action-view"
+          className="sticky top-0 z-20 mx-3 mt-2 rounded-md border border-action-view/(--opacity-muted) bg-action-view/(--opacity-subtle) px-3 py-2 text-xs text-action-view"
         >
           <span className="font-medium">{t("chatView.routineSessionLabel")}</span>
           {currentSessionTitle ? <span className="ml-2 text-muted-foreground">{currentSessionTitle}</span> : null}
@@ -1605,7 +1734,7 @@ export function ChatView({ api, onAsk, onEditSave, onFork, onToggleStar, onRetry
           type="button"
           size="sm"
           variant="secondary"
-          className="absolute bottom-4 right-5 z-20 h-8 rounded-full border bg-background/90 px-3 text-xs shadow-md backdrop-blur"
+          className="absolute bottom-4 right-5 z-20 h-8 rounded-full border bg-background/(--opacity-near) px-3 text-xs shadow-md backdrop-blur"
           onClick={() => scrollChatToBottom("smooth")}
           data-testid="jump-to-bottom"
         >
@@ -1615,13 +1744,13 @@ export function ChatView({ api, onAsk, onEditSave, onFork, onToggleStar, onRetry
       )}
       </div>
       {contextOverflowPct >= 0.95 && (
-        <div className="flex w-full max-w-full items-center gap-2 border-t bg-destructive/10 px-3 py-1.5 text-xs text-destructive">
+        <div className="flex w-full max-w-full items-center gap-2 border-t bg-destructive/(--opacity-subtle) px-3 py-1.5 text-xs text-destructive">
           <span className="font-semibold">{t("chatView.contextUsagePercent", { pct: Math.round(contextOverflowPct * 100) })}</span>
           <span>{t("chatView.contextOverflowWarning")}</span>
         </div>
       )}
       {contextOverflowPct >= 0.80 && contextOverflowPct < 0.95 && (
-        <div className="flex w-full max-w-full items-center gap-2 border-t bg-warning/15 px-3 py-1.5 text-xs text-warning">
+        <div className="flex w-full max-w-full items-center gap-2 border-t bg-warning/(--opacity-soft) px-3 py-1.5 text-xs text-warning">
           <span className="font-semibold">{t("chatView.contextUsagePercent", { pct: Math.round(contextOverflowPct * 100) })}</span>
           <span>{t("chatView.contextNearingWarning")}</span>
         </div>
@@ -1634,13 +1763,13 @@ export function ChatView({ api, onAsk, onEditSave, onFork, onToggleStar, onRetry
         영상의 271K nano 사고 patterns 를 사전 경고.
       */}
       {typeof tpmPct === "number" && typeof tpmLimit === "number" && tpmPct >= 0.95 && (
-        <div className="flex w-full max-w-full items-center gap-2 border-t bg-destructive/10 px-3 py-1.5 text-xs text-destructive">
+        <div className="flex w-full max-w-full items-center gap-2 border-t bg-destructive/(--opacity-subtle) px-3 py-1.5 text-xs text-destructive">
           <span className="font-semibold">{t("chatView.tpmUsagePercent", { pct: Math.round(tpmPct * 100), used: usedTokens.toLocaleString(), limit: tpmLimit.toLocaleString() })}</span>
           <span>{t("chatView.tpmOverflowWarning")}</span>
         </div>
       )}
       {typeof tpmPct === "number" && typeof tpmLimit === "number" && tpmPct >= 0.80 && tpmPct < 0.95 && (
-        <div className="flex w-full max-w-full items-center gap-2 border-t bg-warning/15 px-3 py-1.5 text-xs text-warning">
+        <div className="flex w-full max-w-full items-center gap-2 border-t bg-warning/(--opacity-soft) px-3 py-1.5 text-xs text-warning">
           <span className="font-semibold">{t("chatView.tpmUsagePercent", { pct: Math.round(tpmPct * 100), used: usedTokens.toLocaleString(), limit: tpmLimit.toLocaleString() })}</span>
           <span>{t("chatView.tpmNearingWarning")}</span>
         </div>
@@ -1650,7 +1779,7 @@ export function ChatView({ api, onAsk, onEditSave, onFork, onToggleStar, onRetry
           scrolled the chat. The panel collapses by default once it has
           content; in the collapsed state the active item title streams next
           to the count so the user always sees what step is running. */}
-      <div className="relative z-30 w-full max-w-full min-w-0 overflow-visible border-t border-border/70 bg-card/95">
+      <div className="relative z-30 w-full max-w-full min-w-0 overflow-visible border-t border-border/(--opacity-stronger) bg-card/(--opacity-solid)">
         <div className="w-full max-w-full min-w-0" data-testid="session-todo-dock">
           <SessionTodoPanel api={workflowApi} sessionId={currentSessionId} />
           <MessageQueuePanel

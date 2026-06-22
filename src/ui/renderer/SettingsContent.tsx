@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { useTranslation } from "../../i18n/react.js";
 import { Button } from "../../components/ui/button.js";
-import { Tabs, TabsList, TabsTrigger, TabsContent } from "../../components/ui/tabs.js";
+import { Tabs, VerticalTabsList, TabsTrigger, TabsContent } from "../../components/ui/tabs.js";
 import {
   Brain,
   Palette,
@@ -55,7 +55,7 @@ function TabSaveBar({
 }) {
   const { t } = useTranslation();
   return (
-    <div className="mt-4 flex justify-end border-t border-border/40 pt-3">
+    <div className="mt-4 flex justify-end border-t border-border/(--opacity-medium) pt-3">
       <Button onClick={onSave} disabled={saving || !settingsLoaded}>
         {saving ? t("settingsContent.saving") : t("settingsContent.save")}
       </Button>
@@ -190,7 +190,7 @@ export function SettingsContent({
   // justify-center` (which would center-align the icon+label horizontally).
   const sideTriggerCls =
     "flex w-full items-center justify-start gap-2.5 overflow-hidden whitespace-nowrap rounded-md px-3 py-2 text-sm font-medium " +
-    "text-muted-foreground hover:bg-accent/60 hover:text-foreground " +
+    "text-muted-foreground hover:bg-accent/(--opacity-strong) hover:text-foreground " +
     "data-[state=active]:bg-accent data-[state=active]:text-accent-foreground " +
     "data-[state=active]:shadow-none";
   // Common icon class so the 12 nav entries render at a uniform 16px.
@@ -230,19 +230,12 @@ export function SettingsContent({
       <div className="px-5 pt-6 mb-6">
         <h2 data-testid="settings-sidebar-heading" className="text-xl font-semibold leading-9 tracking-tight">{t("settingsContent.sidebarHeading")}</h2>
       </div>
-      <TabsList
+      {/* VerticalTabsList bakes in the shadcn vertical-sidebar override
+          (flex-col + justify-start + rounded-none + bg-transparent); only
+          the instance-specific column behaviour stays here. */}
+      <VerticalTabsList
         aria-label={t("settingsContent.sidebarAriaLabel")}
-        // Vertical sidebar — the shadcn TabsList primitive defaults to a
-        // horizontal pill (`inline-flex h-10 items-center justify-center
-        // rounded-md bg-muted p-1`). cn() merges class lists but only
-        // tailwind-merge collapses conflicting utilities — the primitive's
-        // `justify-center` survived previous overrides because we never
-        // specified a competing `justify-*`, which left every trigger
-        // vertically centered in the column (the "사이드바가 상단으로 안
-        // 올라옴" symptom). Explicit `justify-start` + `h-full` + plain
-        // `flex` (not inline-flex) + `rounded-none bg-transparent` make
-        // the override unambiguous.
-        className="flex flex-1 flex-col items-stretch justify-start gap-1 overflow-y-auto rounded-none bg-transparent p-2"
+        className="flex-1 overflow-y-auto"
       >
         <TabsTrigger value="general" className={sideTriggerCls}>
           <LayoutDashboard className={navIconCls} aria-hidden="true" />
@@ -301,11 +294,11 @@ export function SettingsContent({
           <Store className={navIconCls} aria-hidden="true" />
           {t("settingsContent.tabMarketplace")}
         </TabsTrigger>
-      </TabsList>
+      </VerticalTabsList>
       {/* Version footer — fills dead space at the bottom of the sidebar
           tastefully. Static text only; no IPC needed. */}
       <div className="shrink-0 border-t px-3 py-2.5">
-        <span className="text-[11px] tabular-nums text-muted-foreground/60 select-none">
+        <span className="text-[11px] tabular-nums text-muted-foreground/(--opacity-strong) select-none">
           v0.1.8
         </span>
       </div>
@@ -331,7 +324,7 @@ export function SettingsContent({
         {s.lastSaveError && (
           <div
             role="alert"
-            className="mb-3 flex items-start justify-between gap-2 rounded-md border border-destructive/40 bg-destructive/10 px-3 py-2 text-xs text-destructive"
+            className="mb-3 flex items-start justify-between gap-2 rounded-md border border-destructive/(--opacity-medium) bg-destructive/(--opacity-subtle) px-3 py-2 text-xs text-destructive"
             data-testid="settings-save-error"
           >
             <div className="min-w-0">

@@ -38,7 +38,7 @@ export function ApprovalQueueStatus({
       aria-live="polite"
       aria-label={t("approvalQueueStatus.ariaLabel", { count: queue.length })}
       data-testid="approval-queue-status"
-      className="fixed bottom-4 right-4 z-40 w-72 rounded-lg border border-border bg-background/95 p-3 shadow-lg backdrop-blur"
+      className="fixed bottom-4 right-4 z-40 w-72 rounded-lg border border-border bg-background/(--opacity-solid) p-3 shadow-lg backdrop-blur"
     >
       <div className="mb-2 flex items-center justify-between">
         <span className="text-sm font-medium">{t("approvalQueueStatus.pendingApprovals")}</span>
@@ -60,7 +60,7 @@ export function ApprovalQueueStatus({
           <li
             key={req.id}
             data-testid="approval-queue-item"
-            className="rounded border border-border/50 bg-muted/40 px-2 py-1"
+            className="rounded border border-border/(--opacity-half) bg-muted/(--opacity-medium) px-2 py-1"
           >
             <div className="flex items-center justify-between gap-2">
               <span className="truncate font-mono">{req.toolName}</span>

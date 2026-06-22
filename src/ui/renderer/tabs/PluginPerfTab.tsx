@@ -101,7 +101,7 @@ export function PluginPerfTab({ api }: { api: LvisApi }) {
           <>
             <div className="overflow-x-auto rounded-md border">
               <table className="w-full text-xs">
-                <thead className="border-b bg-muted/40">
+                <thead className="border-b bg-muted/(--opacity-medium)">
                   <tr>
                     <th className="px-3 py-2 text-left font-medium">{t("pluginPerfTab.colPlugin")}</th>
                     <th className="px-3 py-2 text-right font-medium">{t("pluginPerfTab.colStartupMs")}</th>
@@ -117,7 +117,7 @@ export function PluginPerfTab({ api }: { api: LvisApi }) {
                     const rate = errorRate(r.stats);
                     const avg = avgExecMs(r.stats);
                     return (
-                      <tr key={r.pluginId} className="border-b last:border-b-0 hover:bg-muted/20">
+                      <tr key={r.pluginId} className="border-b last:border-b-0 hover:bg-muted/(--opacity-light)">
                         <td className="px-3 py-2 font-mono">{r.pluginId}</td>
                         <td className="px-3 py-2 text-right tabular-nums">{r.stats.startupMs}</td>
                         <td className="px-3 py-2 text-right tabular-nums">{r.stats.toolCallCount}</td>

@@ -104,6 +104,7 @@ import { AskUserQuestionGate } from "./main/ask-user-question-gate.js";
 import { NotificationService } from "./main/notification-service.js";
 import { createSafeLlmFetch } from "./main/safe-llm-fetch.js";
 import { getDemoActiveVendor, getDemoHostMap, getDemoHostSubnet, getDemoVendorConfig } from "./main/demo-credentials.js";
+import { createPluginNetworkFetch } from "./main/plugin-network-fetch.js";
 import {
   demoFoundryHostMapFingerprint,
   demoHostMapContainsHost,
@@ -228,6 +229,17 @@ export async function bootstrap(
     }) as typeof fetch;
   const networkFetch = createElectronFetch(electronNetFetch);
   const privateNetworkFetch = createElectronFetch(electronDirectFetch);
+  // Tier A host-mediated plugin egress: hostApi.hostFetch is backed by this
+  // chooser so demo/corporate Azure private-endpoint URLs egress through the
+  // proxy-bypassing direct session (host-resolver-rules → intranet IP), exactly
+  // like the chat LLM path. Plugins (e.g. meeting STT) that send to a mapped
+  // Azure host therefore stop being hijacked by the corporate forward proxy to
+  // the public endpoint (the 403 "public access disabled" regression).
+  const pluginNetworkFetch = createPluginNetworkFetch(
+    networkFetch,
+    privateNetworkFetch,
+    isDemoPrivateEndpointUrl,
+  );
   const llmFetch = createSafeLlmFetch(electronNetFetch, {
     privateEndpoint: {
       fetch: electronDirectFetch,
@@ -461,6 +473,7 @@ export async function bootstrap(
     pythonRuntime,
     bootAuditLogger,
     mainWindow,
+    networkFetch: pluginNetworkFetch,
     getMainWindow,
     openAuthWindowService,
     openLinkWindowService,
@@ -494,6 +507,14 @@ export async function bootstrap(
   await workBoardStore.load().catch((err) => {
     log.warn("boot: work-board load failed (non-fatal): %s", (err as Error).message);
   });
+  // Reset runs interrupted by a prior process exit (persisted active runStatus
+  // with no in-flight run) so those items are re-runnable + don't show a stuck
+  // "running" badge.
+  await workBoardStore
+    .reconcileInterruptedRuns()
+    .catch((err) =>
+      log.warn("boot: work-board run reconcile failed (non-fatal): %s", (err as Error).message),
+    );
 
   // Due-soon nudge: a 60-min tick scans the board and emits
   // `work_board.work_item.due_soon` on the plugin bus for any subscribed
@@ -1044,6 +1065,9 @@ export async function bootstrap(
       appendMemory(workBoardStorage, [
         `${new Date().toISOString().slice(0, 10)}: 자율 실행 완료 — #${itemId} ${title}`,
       ]),
+    // Persist each run's plan+execute conversation to sessions/<id>/<runId>.jsonl
+    // so run context survives restart and accumulates across re-runs.
+    transcriptStorage: workBoardStorage,
   });
 
   // Work Board reporter — host-native daily/weekly reports. Reuses the

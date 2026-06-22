@@ -139,9 +139,55 @@ function schemaRequiresToolCategory(schema: unknown): boolean {
   return findToolSchemaRequiredArrays(schema).some((req) => req.includes("category"));
 }
 
+function schemaHasNetworkAccess(schema: unknown): boolean {
+  const root = asObject(schema);
+  const properties = asObject(root?.properties);
+  return properties?.networkAccess !== undefined;
+}
+
+// Tier A — networkAccess egress allow-list. Same compatibility seam as
+// hostSecrets above: a legacy SDK pin (`package.json` lags `@lvis/plugin-sdk`)
+// whose schema predates `networkAccess` would, under root
+// `additionalProperties:false`, reject every migrated plugin's manifest as an
+// unknown property and silently drop the plugin at load. Inject the field so
+// host validation stays in lockstep with the SDK SoT until the pin is bumped.
+// Mirrors lvis-plugin-sdk schemas/plugin-manifest.schema.json `networkAccess`.
+function patchNetworkAccessIntoLegacySdkSchema(schema: unknown): unknown {
+  const root = asObject(schema) as (JsonObject & { properties?: Record<string, unknown> }) | undefined;
+  if (!root?.properties || root.properties.networkAccess !== undefined) return schema;
+  root.properties.networkAccess = {
+    type: "object",
+    additionalProperties: false,
+    required: ["allowedDomains"],
+    properties: {
+      allowedDomains: {
+        type: "array",
+        minItems: 1,
+        maxItems: 16,
+        uniqueItems: true,
+        items: {
+          allOf: [
+            {
+              type: "string",
+              pattern: "^[a-z0-9]([a-z0-9-]{0,61}[a-z0-9])?(\\.[a-z0-9]([a-z0-9-]{0,61}[a-z0-9])?)+$",
+              minLength: 3,
+              maxLength: 253,
+            },
+            { not: { enum: ["com", "net", "org", "kr", "co.kr", "or.kr", "go.kr", "io", "ai", "dev", "app"] } },
+            { not: { type: "string", pattern: "(^|\\.)xn--" } },
+          ],
+        },
+      },
+      reasoning: { type: "string" },
+    },
+  };
+  return schema;
+}
+
 export function patchHostCompatibilityIntoLegacySdkSchema(schema: unknown): unknown {
   patchHostSecretsIntoLegacySdkSchema(schema);
   patchCategoryOptionalIntoLegacySdkSchema(schema);
+  patchNetworkAccessIntoLegacySdkSchema(schema);
   return schema;
 }
 
@@ -223,12 +269,17 @@ export function getDeclaredEmittedEvents(manifest: PluginManifest): string[] {
  */
 export async function buildManifestValidator(): Promise<ValidateFunction> {
   const sdkSchema = await loadSdkManifestSchema();
-  // Host-compat wrap is needed when the SDK schema lacks the host secrets
-  // extension OR still requires a per-tool `category`. The host classifies
-  // risk itself (default-strict), so a category-less manifest MUST load even
-  // when the shipped SDK schema still ships hostSecrets but mandates category.
+  // Host-compat wrap is needed when the shipped SDK schema lags ANY host-
+  // required manifest field — missing hostSecrets, missing networkAccess (Tier
+  // A egress allow-list), or still mandating a per-tool `category`. Under root
+  // `additionalProperties:false` the SDK's own validator would reject migrated
+  // manifests, and the host classifies risk itself (default-strict) so a
+  // category-less manifest MUST still load. Wrap with the host-local validator
+  // (OR semantics) whenever any of these holds.
   const hostCompatibilityNeeded =
-    !schemaHasHostSecrets(sdkSchema) || schemaRequiresToolCategory(sdkSchema);
+    !schemaHasHostSecrets(sdkSchema) ||
+    !schemaHasNetworkAccess(sdkSchema) ||
+    schemaRequiresToolCategory(sdkSchema);
 
   try {
     // Prefer SDK helper when available so AJV options stay in lockstep.
