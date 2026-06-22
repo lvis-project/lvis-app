@@ -34,9 +34,9 @@ export function CommandPopover({ actions, onInsert, open, onOpenChange }: Comman
         <TooltipTrigger asChild>
           <PopoverTrigger asChild>
             <Button
-              variant="ghost"
+              variant="outline"
               size="sm"
-              className="h-7 w-7 p-0"
+              className="h-7 w-7 shrink-0 bg-input-bar p-0"
               aria-label={t("commandPopover.ariaLabel")}
               data-testid="command-popover-trigger"
               // Tutorial-C SpotlightTour anchor (PR #983 follow-up). Step 3

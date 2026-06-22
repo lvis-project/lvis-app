@@ -4,7 +4,6 @@ import { test, expect } from './fixtures';
 type PluginViewSummary = {
   pluginId: string;
   extensionId: string;
-  defaultMode?: "embedded" | "detached";
   viewKey: string;
 };
 
@@ -18,7 +17,6 @@ async function listPluginViews(
       .map((view) => ({
         pluginId: view.pluginId,
         extensionId: view.extension.id,
-        defaultMode: view.extension.window?.defaultMode,
         viewKey: `plugin:${view.pluginId}:${view.extension.id}`,
       }));
   });
@@ -31,9 +29,12 @@ async function listPluginViews(
  */
 test('embedded plugin view creates a plugin shell webview guest', async ({ app, mainWindow }) => {
   const pluginViews = await listPluginViews(mainWindow);
-  const embeddedView = pluginViews.find((view) => view.defaultMode !== 'detached');
+  // Any sidebar view can render inline — whether a view detaches is decided by
+  // the app's mode (appMode), not the plugin, so there is no per-view embedded
+  // flag to filter on. Action mode (the inline path) activates it in place.
+  const embeddedView = pluginViews[0];
 
-  test.skip(!embeddedView, 'No embedded plugin view available in this build');
+  test.skip(!embeddedView, 'No plugin view available in this build');
 
   await app.evaluate(({ BrowserWindow }, viewKey) => {
     const win = BrowserWindow.getAllWindows()[0];
@@ -69,9 +70,12 @@ test('embedded plugin view creates a plugin shell webview guest', async ({ app, 
 
 test('detached plugin view creates a detached host window plus plugin shell guest', async ({ app, mainWindow }) => {
   const pluginViews = await listPluginViews(mainWindow);
-  const detachedTarget = pluginViews.find((view) => view.defaultMode === 'detached');
+  // Detachment is driven by the app's mode (appMode === 'chat'), not a plugin
+  // flag; the host openDetached IPC is the path under test, so any sidebar view
+  // is a valid target.
+  const detachedTarget = pluginViews[0];
 
-  test.skip(!detachedTarget, 'No detached plugin view available in this build');
+  test.skip(!detachedTarget, 'No plugin view available in this build');
 
   const detachedWindowPromise = app.waitForEvent('window');
   const openResult = await mainWindow.evaluate(

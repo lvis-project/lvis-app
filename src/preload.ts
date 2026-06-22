@@ -1108,6 +1108,8 @@ const api = {
       return () =>
         ipcRenderer.removeListener(PERMISSIONS.configChanged, listener);
     },
+    /** Read-only: honest OS sandbox capability for the current platform. */
+    sandboxCapability: async () => ipcRenderer.invoke(PERMISSIONS.sandboxCapability),
     listRules: async () => ipcRenderer.invoke(PERMISSIONS.listRules),
     addRule: async (pattern: string, action: string) =>
       ipcRenderer.invoke(PERMISSIONS.addRule, { pattern, action, intent: ipcUserKeyboardIntent() }),

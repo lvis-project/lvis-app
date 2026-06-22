@@ -96,6 +96,14 @@ export interface ToolExecutionContext {
    * sandbox check. The full allow-list is `cwd ∪ extraAllowedDirectories`.
    */
   extraAllowedDirectories: readonly string[];
+  /**
+   * Owner plugin sandbox root (`~/.lvis/plugins/<pluginId>/`) when the
+   * invoking tool is plugin-owned, else undefined for builtins. Threaded
+   * from the executor so the OS sandbox write-jail (see
+   * {@link ../permissions/sandbox-write-jail.js deriveSandboxWritePaths})
+   * can confine writes to the plugin's namespace rather than the bare cwd.
+   */
+  ownerPluginSandboxRoot?: string;
   metadata: Record<string, unknown>;
   /**
    * Per-turn abort signal threaded down from `ConversationLoop.runTurn`.
