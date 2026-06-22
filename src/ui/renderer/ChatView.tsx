@@ -10,6 +10,7 @@ import { formatCostBadge } from "../../lib/cost-estimator.js";
 import type { ChatEntry } from "../../lib/chat-stream-state.js";
 import type { PermissionReviewSuggestionPayload, UserApprovalHitPayload } from "../../shared/permissions-events.js";
 import { debugLog, isDebugStreamEnabled } from "../../lib/debug-stream.js";
+import { detectFromStream } from "../../lib/stream-markers.js";
 import { OverlayCardRegion } from "./components/OverlayCardRegion.js";
 import { AssistantCard } from "./components/AssistantCard.js";
 import { UserMessageEditor } from "./components/UserMessageEditor.js";
@@ -1526,6 +1527,7 @@ export function ChatView({ api, onAsk, onEditSave, onFork, onToggleStar, onRetry
             pricing={summaryPricing}
             vendor={summaryVendor ?? activeVendor}
             isStarred={!!isEntryStarred(idx)}
+            copyText={detectFromStream(entry.text || "").cleanedText || undefined}
             actions={viewMode ? {} : {
               onRetry: () => void onRetryEffort(),
               onFork: () => void onFork(idx),
