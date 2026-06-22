@@ -195,7 +195,7 @@ export function MainToolbar({
             <Button
               variant="ghost"
               size="icon"
-              className="h-9 w-9 aspect-square p-0 shrink-0"
+              className="h-7 w-7 aspect-square p-0 shrink-0"
               onClick={onOpenUnifiedSearch}
               title={t("mainToolbar.unifiedSearch")}
               aria-label={t("mainToolbar.unifiedSearch")}
@@ -215,7 +215,7 @@ export function MainToolbar({
             <Button
               variant="ghost"
               size="icon"
-              className="h-9 w-9 aspect-square p-0 shrink-0"
+              className="h-7 w-7 aspect-square p-0 shrink-0"
               onClick={() => void onToggleCurrentSessionStar()}
               title={isCurrentSessionStarred ? t("mainToolbar.sessionUnstar") : t("mainToolbar.sessionStar")}
               aria-label={isCurrentSessionStarred ? t("mainToolbar.sessionUnstar") : t("mainToolbar.sessionStar")}
@@ -240,7 +240,7 @@ export function MainToolbar({
                 <Button
                   variant="ghost"
                   size="icon"
-                  className="h-9 w-9 aspect-square p-0 shrink-0"
+                  className="h-7 w-7 aspect-square p-0 shrink-0"
                   title={t("mainToolbar.export")}
                   aria-label={t("mainToolbar.export")}
                   data-testid="toolbar-export"
@@ -275,7 +275,7 @@ function AppModeToggle({ mode, onToggle }: { mode: AppMode; onToggle: (mode: App
       <Button
         variant="ghost"
         size="sm"
-        className={`h-7 rounded-md px-2.5 text-[11px] font-medium ${
+        className={`h-6 rounded-md px-2 text-[11px] font-medium ${
           active
             ? "bg-primary text-primary-foreground hover:bg-primary"
             : "text-muted-foreground hover:bg-accent hover:text-foreground"
@@ -293,7 +293,7 @@ function AppModeToggle({ mode, onToggle }: { mode: AppMode; onToggle: (mode: App
     <div
       role="group"
       aria-label={t("appMode.groupAriaLabel")}
-      className="flex items-center gap-0.5 rounded-lg border border-border bg-muted/(--opacity-medium) p-0.5 shrink-0"
+      className="flex h-7 items-center gap-0.5 rounded-lg border border-border bg-muted/(--opacity-medium) p-px shrink-0"
       data-testid="app-mode-toggle"
     >
       {segment("chat", t("appMode.chat"), t("appMode.chatAriaLabel"))}
@@ -423,7 +423,7 @@ function SkipUpdateButton({
         <Button
           variant="ghost"
           size="icon"
-          className="h-9 w-9 aspect-square text-muted-foreground hover:text-foreground disabled:opacity-60"
+          className="h-7 w-7 aspect-square text-muted-foreground hover:text-foreground disabled:opacity-60"
           onClick={() => void onSkip()}
           disabled={disabled}
           title={t("mainToolbar.skipUpdateTitle", { version })}
