@@ -33,6 +33,7 @@ import { LoginModal } from "./components/LoginModal.js";
 import { LLM_VENDORS } from "../../shared/llm-vendor-defaults.js";
 import { buildQuickActions } from "./components/command-actions.js";
 import { MainToolbar } from "./MainToolbar.js";
+import { Sidebar } from "./components/Sidebar.js";
 import { useAppUpdate } from "./hooks/use-app-update.js";
 import { DevToolsPanel } from "./components/DevToolsPanel.js";
 import { MainContent } from "./MainContent.js";
@@ -173,6 +174,10 @@ export function App() {
   const tourCompleted =
     chainStage === "done" && chainState.completionReason === "chain";
   const [activeView, setActiveView] = useState("home");
+  // Sidebar collapse is owned by the shell (the floating-card Sidebar reads it
+  // as a prop and never manages its own state). Default expanded; the recovered
+  // redesign's in-band collapse toggle is tracked as an unrecovered gap.
+  const [sidebarCollapsed] = useState(false);
   const [commandPopoverOpen, setCommandPopoverOpen] = useState(false);
   const [devToolsOpen, setDevToolsOpen] = useState(false);
 
@@ -1308,8 +1313,28 @@ export function App() {
     >
         <div className="flex h-screen flex-col overflow-hidden">
           <CustomTitleBar />
-        <div className="flex min-h-0 min-w-0 flex-1 overflow-hidden">
-        <main className="flex min-h-0 min-w-0 flex-1 flex-col">
+        {/* `relative` anchors the floating-card Sidebar (absolute, inset-3).
+            The content `<main>` carries left padding equal to the card width
+            + insets so the floating rail never occludes the canvas. */}
+        <div className="relative flex min-h-0 min-w-0 flex-1 overflow-hidden">
+          <Sidebar
+            activeView={activeView}
+            onSelect={handleViewSelect}
+            pluginViews={pluginViews}
+            pluginAuthStatuses={pluginAuthStatuses}
+            hasApiKey={effectiveHasApiKey}
+            onOpenSettings={() => onOpenSettings()}
+            onNewChat={onNewChat}
+            streaming={streaming}
+            onOpenMarketplace={onOpenMarketplace}
+            marketplaceUrlReady={marketplaceUrlReady}
+            collapsed={sidebarCollapsed}
+          />
+        <main
+          className={`flex min-h-0 min-w-0 flex-1 flex-col bg-card transition-[padding] duration-200 ease-out motion-reduce:transition-none ${
+            sidebarCollapsed ? "pl-[5rem]" : "pl-[15.5rem]"
+          }`}
+        >
           <BootstrapStatusBanner status={bootstrapStatus} onDismiss={dismissBootstrapStatus} onRetry={() => void retryBootstrap()} />
           <MarketplaceUpdateBanner
             updates={marketplaceUpdates}

@@ -120,17 +120,10 @@ describe("Star flow (Phase 3 regression net)", () => {
       starred,
     });
     await waitFor(() => expect(api.starredList).toHaveBeenCalled());
-    const menuButton = await waitFor(() => {
-      const el = container.querySelector('button[title="더 많은 메뉴"]');
-      if (!el) throw new Error("hamburger menu button not found");
-      return el as HTMLButtonElement;
-    });
-    await user.click(menuButton);
+    // Navigation moved from the hamburger menu to the persistent sidebar.
     await user.click(await waitFor(() => {
-      const el = Array.from(document.body.querySelectorAll('[role="menuitem"]')).find((item) =>
-        item.textContent?.trim() === "즐겨찾기",
-      );
-      if (!el) throw new Error("starred view menu item not found");
+      const el = container.querySelector('[data-testid="sidebar-starred"]');
+      if (!el) throw new Error("sidebar starred nav item not found");
       return el as HTMLElement;
     }));
     await waitFor(() => {
@@ -156,17 +149,10 @@ describe("Star flow (Phase 3 regression net)", () => {
       starred,
     });
     await waitFor(() => expect(api.starredList).toHaveBeenCalled());
-    const menuButton = await waitFor(() => {
-      const el = container.querySelector('button[title="더 많은 메뉴"]');
-      if (!el) throw new Error("hamburger menu button not found");
-      return el as HTMLButtonElement;
-    });
-    await user.click(menuButton);
+    // Navigation moved from the hamburger menu to the persistent sidebar.
     await user.click(await waitFor(() => {
-      const el = Array.from(document.body.querySelectorAll('[role="menuitem"]')).find((item) =>
-        item.textContent?.trim() === "즐겨찾기",
-      );
-      if (!el) throw new Error("starred view menu item not found");
+      const el = container.querySelector('[data-testid="sidebar-starred"]');
+      if (!el) throw new Error("sidebar starred nav item not found");
       return el as HTMLElement;
     }));
 
