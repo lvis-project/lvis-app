@@ -23,9 +23,15 @@ import { randomUUID } from "node:crypto";
 import { existsSync, readFileSync, writeFileSync, renameSync } from "node:fs";
 import { join } from "node:path";
 import { validateSender, auditUnauthorized, UNAUTHORIZED_FRAME } from "../ipc-bridge.js";
+import { validateHostRendererSender } from "../ipc/gated.js";
 import type { AuditLogger } from "../audit/audit-logger.js";
 import { lvisHome } from "../shared/lvis-home.js";
 import { resolveAppIconPath } from "./app-icon.js";
+import { computeInitialMainWindowBounds } from "./main-window-bounds.js";
+
+/** Action-mode main-window size: centered on the work area, clamped to fit. */
+const ACTION_MODE_WIDTH = 800;
+const ACTION_MODE_HEIGHT = 600;
 
 /**
  * Allowlist for viewKey values accepted by the detach IPC handlers.
@@ -1040,6 +1046,37 @@ export class WindowManager {
         ipcMain.on("lvis:window:load-session-in-main-result", listener);
         main.webContents.send("lvis:window:load-session-in-main", { sessionId, requestId });
       });
+    });
+
+    // Resize the main window to match the active workspace mode.
+    //   action → centered 800×600 (clamped to the work area), the focused
+    //            working canvas where inline views need room.
+    //   chat   → the 기존 right-docked initial bounds (the same geometry the
+    //            window boots with), computed from the primary work area.
+    // State-mutating channel — validateHostRendererSender (rejects plugin UI
+    // shells), mirroring the other host-only window IPCs.
+    ipcMain.handle("lvis:window:resize-for-mode", (event: IpcMainInvokeEvent, mode: unknown) => {
+      if (!validateHostRendererSender(event)) {
+        auditUnauthorized(auditLogger, "lvis:window:resize-for-mode", event);
+        return UNAUTHORIZED_FRAME;
+      }
+      if (mode !== "chat" && mode !== "action") {
+        return { ok: false, error: "invalid-mode" };
+      }
+      const main = this.getMainWindow();
+      if (!main || main.isDestroyed()) return { ok: false, error: "main-window-not-found" };
+
+      const { workArea } = screen.getPrimaryDisplay();
+      if (mode === "action") {
+        const width = Math.min(workArea.width, ACTION_MODE_WIDTH);
+        const height = Math.min(workArea.height, ACTION_MODE_HEIGHT);
+        const x = Math.round(workArea.x + (workArea.width - width) / 2);
+        const y = Math.round(workArea.y + (workArea.height - height) / 2);
+        main.setBounds({ x, y, width, height }, true);
+      } else {
+        main.setBounds(computeInitialMainWindowBounds(workArea), true);
+      }
+      return { ok: true };
     });
   }
 }

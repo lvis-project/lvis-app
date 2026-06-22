@@ -225,4 +225,71 @@ describe("WindowManager IPC — validateSender guard", () => {
       expect(result).toEqual({ ok: false, error: "invalid-session-id" });
     });
   });
+
+  describe("lvis:window:resize-for-mode", () => {
+    function makeMainWindow() {
+      return {
+        id: 7,
+        on: vi.fn(),
+        isDestroyed: vi.fn(() => false),
+        setBounds: vi.fn(),
+        webContents: { send: vi.fn() },
+      };
+    }
+
+    it("returns UNAUTHORIZED_FRAME and audits for unauthorized sender", async () => {
+      const handler = handleMap.get("lvis:window:resize-for-mode")!;
+      const result = await handler(unauthorizedEvent(), "action");
+      expect(result).toEqual(UNAUTHORIZED_FRAME);
+      expect(auditLogger.log).toHaveBeenCalledOnce();
+    });
+
+    it("rejects an invalid mode", async () => {
+      const main = makeMainWindow();
+      wm.registerMainWindow(main as never);
+      fromId.mockReturnValue(main);
+      const handler = handleMap.get("lvis:window:resize-for-mode")!;
+      const result = await handler(trustedEvent(), "fullscreen");
+      expect(result).toEqual({ ok: false, error: "invalid-mode" });
+      expect(main.setBounds).not.toHaveBeenCalled();
+    });
+
+    it("returns main-window-not-found when no main window is registered", async () => {
+      fromId.mockReturnValue(null);
+      const handler = handleMap.get("lvis:window:resize-for-mode")!;
+      const result = await handler(trustedEvent(), "action");
+      expect(result).toEqual({ ok: false, error: "main-window-not-found" });
+    });
+
+    it("centers an 800×600 window on the work area for action mode", async () => {
+      const main = makeMainWindow();
+      wm.registerMainWindow(main as never);
+      fromId.mockReturnValue(main);
+      const handler = handleMap.get("lvis:window:resize-for-mode")!;
+      const result = await handler(trustedEvent(), "action");
+      expect(result).toEqual({ ok: true });
+      // workArea 1920×1080 → centered 800×600
+      expect(main.setBounds).toHaveBeenCalledWith(
+        { x: 560, y: 240, width: 800, height: 600 },
+        true,
+      );
+    });
+
+    it("restores the right-docked initial bounds for chat mode", async () => {
+      const main = makeMainWindow();
+      wm.registerMainWindow(main as never);
+      fromId.mockReturnValue(main);
+      const handler = handleMap.get("lvis:window:resize-for-mode")!;
+      const result = await handler(trustedEvent(), "chat");
+      expect(result).toEqual({ ok: true });
+      // chat mode uses computeInitialMainWindowBounds — a right-docked,
+      // narrower-than-action bounds (not centered, not 800 wide).
+      const bounds = main.setBounds.mock.calls[0]?.[0] as {
+        x: number; y: number; width: number; height: number;
+      };
+      expect(bounds.width).toBeLessThan(800);
+      expect(bounds.x + bounds.width).toBeLessThanOrEqual(1920);
+      expect(main.setBounds.mock.calls[0]?.[1]).toBe(true);
+    });
+  });
 });

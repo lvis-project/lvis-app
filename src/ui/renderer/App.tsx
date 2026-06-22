@@ -195,6 +195,12 @@ export function App() {
   useEffect(() => {
     setSidebarCollapsed(appMode === "chat");
   }, [appMode]);
+  // Resize the OS window to match the mode: action mode is a centered 800×600
+  // working canvas; chat mode restores the 기존 right-docked initial bounds.
+  // The bridge is optional (absent in jsdom / non-Electron); guard accordingly.
+  useEffect(() => {
+    void api.window?.resizeForMode?.(appMode);
+  }, [appMode, api]);
   const [commandPopoverOpen, setCommandPopoverOpen] = useState(false);
   const [devToolsOpen, setDevToolsOpen] = useState(false);
 
