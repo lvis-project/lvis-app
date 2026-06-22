@@ -110,6 +110,14 @@ function installApi(disabledBatches: HookTrustRow[][]) {
       }),
       /** C3 — key-driven dynamic activation: return true for openai by default. */
       reviewerProviderHasKey: vi.fn(async (provider: string) => provider === "openai"),
+      sandboxCapability: vi.fn(async () => ({
+        platform: "linux" as NodeJS.Platform,
+        enabled: false,
+        available: true,
+        kind: "full" as const,
+        reason: "",
+        confines: { filesystem: true, process: true, network: true },
+      })),
     },
     policy: {
       get: vi.fn(async () => ({
@@ -121,6 +129,10 @@ function installApi(disabledBatches: HookTrustRow[][]) {
     },
   };
   (globalThis as unknown as { window: typeof window }).window.lvis = lvis as never;
+  (globalThis as unknown as { window: typeof window }).window.lvisApi = {
+    getSettings: vi.fn(async () => ({ features: { osToolSandbox: false } })),
+    updateSettings: vi.fn(async () => ({})),
+  } as never;
   return lvis;
 }
 

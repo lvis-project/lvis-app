@@ -110,6 +110,35 @@ export function SettingsContent({
   const llmSave = useDebouncedSave(() => void s.save("llm"));
   // #893 — login modal open state. Driven by the LlmTab "로그인" button.
   const [loginOpen, setLoginOpen] = useState(false);
+  // Demo-session activeness — drives the synthetic "데모 체험" entry in the LLM
+  // provider dropdown. Hydrated from api.demo.status() on mount + after any
+  // login (a successful login may be a demo activation).
+  const [demoActive, setDemoActive] = useState(false);
+  const refreshDemoActive = useCallback(() => {
+    void api.demo.status().then(
+      (st) => setDemoActive(st.ok && st.activated === true),
+      () => {},
+    );
+  }, [api]);
+  useEffect(() => {
+    refreshDemoActive();
+  }, [refreshDemoActive]);
+  // Picking "데모 체험" from the provider dropdown. If a demo session is already
+  // hydrated, just restore the pointer (no modal). Otherwise open the login
+  // modal, whose conversational variant auto-activates the build-embedded key.
+  const handleSelectDemo = useCallback(async () => {
+    const st = await api.demo.status().catch(() => null);
+    if (st?.ok && st.activated) {
+      s.setVendor("azure-foundry");
+      s.setAuthMode("login");
+      setDemoActive(true);
+      return;
+    }
+    llmSave.cancel();
+    s.invalidateLlmDraftSaves();
+    s.setKeyInput("");
+    setLoginOpen(true);
+  }, [api, s, llmSave]);
   const chatSave = useDebouncedSave(() => void s.save("chat"));
   const webSave = useDebouncedSave(() => void s.save("web"));
   const marketplaceSave = useDebouncedSave(() => void s.save("marketplace"));
@@ -385,6 +414,8 @@ export function SettingsContent({
                 s.setKeyInput("");
                 setLoginOpen(true);
               }}
+              demoActive={demoActive}
+              onSelectDemo={handleSelectDemo}
               model={s.model}
               setModel={s.setModel}
               enableThinking={s.enableThinking}
@@ -504,6 +535,9 @@ export function SettingsContent({
           s.hydrateLlmFromSettings(settings);
           void api.hasApiKey(provider).then((hasKey) => s.setHasKey(hasKey));
         });
+        // A successful login may be a demo activation — refresh so the provider
+        // dropdown reflects the now-active "데모 체험" entry without a reload.
+        refreshDemoActive();
         onSaved();
       }}
     />

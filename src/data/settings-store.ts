@@ -136,14 +136,43 @@ export interface FeatureFlags {
    */
   onboardingCompleted?: boolean;
   /**
-   * O-X1 Live Auto-play (proposal: docs/architecture/proposals/live-autoplay.md).
-   * Demo-only preference. The renderer may mount demo-autoplay only when
-   * main reports captured demo activation and onboarding has completed.
-   * `false` is the explicit opt-out. After the user takes over (any keystroke
-   * or "키 잡기 →" click), the flag is flipped to false so the demo never
-   * re-runs.
+   * Permission policy — host-classifies-risk migration gate
+   * (docs/architecture/permission-policy-design.md; project_permission_review_redesign).
+   *
+   * When `false` (default), a tool invocation's effective permission category
+   * is the tool's DECLARED category (`tool.categoryForInput ?? tool.category`),
+   * exactly as before. When `true`, the host derives the effective category
+   * from host-owned signals only (see {@link inspectHostRisk}) and ignores
+   * the plugin-declared category — a tool grading its own danger is not a
+   * control (MCP spec: a server can lie).
+   *
+   * The flag ships OFF with SHADOW MODE always active: the host-derived
+   * category is computed and logged against the declared category for every
+   * invocation so the divergence can be reconciled across plugins BEFORE the
+   * flag is ever flipped. Migration can therefore only TIGHTEN, never silently
+   * change live behaviour.
    */
-  demoAutoplayEnabled?: boolean;
+  hostClassifiesRisk?: boolean;
+  /**
+   * OS tool sandbox — when `true` (and a platform runner is available), shell
+   * and tool spawns are confined by the OS sandbox runner (Linux bubblewrap,
+   * macOS Seatbelt/sandbox-exec). Default `false` (opt-in).
+   *
+   * Orthogonal to {@link hostClassifiesRisk}: sandbox-enforcement (is the
+   * action kernel-confined when it runs) and risk-classification (does the
+   * action need approval) are independent axes — a sandboxed action still
+   * needs approval, and an unsandboxed platform still classifies risk.
+   *
+   * Capability is platform-dependent and honestly reported, not overclaimed:
+   *   - macOS: filesystem + process confinement, NOT network (sandbox-exec
+   *     does not block loopback/IPv6/DNS).
+   *   - Linux: filesystem + process + network (`--unshare-net`).
+   *   - Windows: not yet available — runs unconfined; the toggle reflects this.
+   *
+   * `LVIS_SANDBOX_ENABLED=1` remains an environment escape-hatch override, but
+   * this setting is the primary, user-discoverable control.
+   */
+  osToolSandbox?: boolean;
 }
 
 export interface AppSettings {
@@ -474,7 +503,9 @@ const DEFAULT_SETTINGS: AppSettings = {
   plugins: {},
   pluginConfigs: {},
   features: {
-    idlePreferenceRefresh: false,
+    // Idle preference refresh runs by default; users can opt out in Settings.
+    idlePreferenceRefresh: true,
+
     // Fresh installs MUST start the Z onboarding chain. Persisting an
     // explicit `false` (instead of relying on `undefined`) keeps the
     // contract obvious: the flag flips to `true` exactly once, from
@@ -482,6 +513,14 @@ const DEFAULT_SETTINGS: AppSettings = {
     // chain. Any other path that wants to suppress the chain must set
     // this to `true` deliberately — no "missing key === skipped" trap.
     onboardingCompleted: false,
+    // Permission policy host-classifies-risk migration gate. Ships OFF —
+    // shadow mode logs host-derived vs declared category but enforcement
+    // still uses the declared category until this is deliberately flipped.
+    hostClassifiesRisk: false,
+    // OS tool sandbox. Ships OFF (opt-in) but user-visible — boot only
+    // registers the runner when this is true AND the platform runner is
+    // available.
+    osToolSandbox: false,
   },
 };
 
@@ -1166,7 +1205,8 @@ function normalizeSystem(input: unknown): SystemSettings {
 
 /**
  * Coerce on-disk `features` block to FeatureFlags shape.
- * Missing or invalid fields are silently dropped — all flags default to false.
+ * Missing or invalid fields are silently dropped, so each flag falls back to
+ * its value in DEFAULT_SETTINGS.features.
  */
 function normalizeFeatureFlags(input: unknown): FeatureFlags {
   if (!input || typeof input !== "object" || Array.isArray(input)) {
@@ -1180,8 +1220,11 @@ function normalizeFeatureFlags(input: unknown): FeatureFlags {
   if (typeof obj.onboardingCompleted === "boolean") {
     result.onboardingCompleted = obj.onboardingCompleted;
   }
-  if (typeof obj.demoAutoplayEnabled === "boolean") {
-    result.demoAutoplayEnabled = obj.demoAutoplayEnabled;
+  if (typeof obj.hostClassifiesRisk === "boolean") {
+    result.hostClassifiesRisk = obj.hostClassifiesRisk;
+  }
+  if (typeof obj.osToolSandbox === "boolean") {
+    result.osToolSandbox = obj.osToolSandbox;
   }
   return result;
 }

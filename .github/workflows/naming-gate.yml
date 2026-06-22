@@ -27,7 +27,11 @@ jobs:
         run: |
           base_sha=$(git merge-base origin/${{ github.base_ref }} HEAD)
           echo "base_sha=$base_sha" >> "$GITHUB_OUTPUT"
-          git diff --name-only "$base_sha"...HEAD \
+          # Exclude DELETED files (--diff-filter=d): a deletion cannot introduce a
+          # prohibited identifier or a new prefixed file, and checking a deleted
+          # path makes the `head -30 "$file"` prefix-justification check fail
+          # spuriously (the file is gone) — e.g. removing a legacy `fake-*.ts`.
+          git diff --name-only --diff-filter=d "$base_sha"...HEAD \
             | grep -Ev '^(docs/blueprints/|\.github/|.*/__tests__/|.*/__mocks__/|test/|tests/|.*\.test\.|.*\.spec\.|.*\.lock|.*lock\.json|CHANGELOG)' \
             | grep -E '\.(ts|tsx|py|js|mjs|cjs|md)$' > /tmp/changed.txt || true
           echo "changed files:"

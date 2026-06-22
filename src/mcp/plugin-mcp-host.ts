@@ -139,9 +139,11 @@ export class PluginMcpHost {
       const list = (await this.request("tools/list", {})) as { tools?: DiscoveredMcpTool[] };
       const tools: Tool[] = [];
       for (const tool of list.tools ?? []) {
-        // Build FIRST — an authority/structural hard failure (missing
-        // xyz.lvis/category) THROWS here and aborts the whole build (rollback),
-        // even for a tool that would ALSO trip the lint below.
+        // Build FIRST — a structural hard failure THROWS here and aborts the
+        // whole build (rollback). A missing/invalid xyz.lvis/category no longer
+        // hard-fails (host-classifies-risk: default-strict write-equivalent);
+        // the remaining authority hard failure is the RC protocol mismatch
+        // checked above.
         const registryTool = mcpToolToPluginTool(this.pluginId, tool, (name, args) =>
           this.invoke(name, args),
         );
