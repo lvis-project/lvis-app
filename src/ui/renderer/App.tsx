@@ -1448,7 +1448,7 @@ export function App() {
             collapsed={sidebarCollapsed}
           />
         <main
-          className={`flex min-h-0 min-w-0 flex-1 flex-col bg-card transition-[padding] duration-200 ease-out motion-reduce:transition-none ${
+          className={`flex min-h-0 min-w-0 flex-1 flex-col bg-background transition-[padding] duration-200 ease-out motion-reduce:transition-none ${
             sidebarCollapsed ? "pl-[5rem]" : "pl-[15.5rem]"
           }`}
         >

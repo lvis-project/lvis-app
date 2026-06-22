@@ -9,6 +9,12 @@ export const en = {
   "bottomActionRow.thinkingDepthLow": "Low",
   "bottomActionRow.thinkingDepthMedium": "Medium",
   "bottomActionRow.thinkingDepthHigh": "High",
+  "bottomActionRow.shortcuts": "Shortcuts",
+  "bottomActionRow.shortcutSend": "Send",
+  "bottomActionRow.shortcutNewline": "New line",
+  "bottomActionRow.shortcutImmediate": "Inject immediately",
+  "bottomActionRow.shortcutCancel": "Cancel LLM",
+  "bottomActionRow.shortcutPalette": "Commands / resources",
 } as const;
 export const ko: Record<keyof typeof en, string> = {
   "bottomActionRow.newline": "줄바꿈",
@@ -20,4 +26,10 @@ export const ko: Record<keyof typeof en, string> = {
   "bottomActionRow.thinkingDepthLow": "낮음",
   "bottomActionRow.thinkingDepthMedium": "중간",
   "bottomActionRow.thinkingDepthHigh": "높음",
+  "bottomActionRow.shortcuts": "단축키",
+  "bottomActionRow.shortcutSend": "전송",
+  "bottomActionRow.shortcutNewline": "줄바꿈",
+  "bottomActionRow.shortcutImmediate": "즉시 주입",
+  "bottomActionRow.shortcutCancel": "LLM 취소",
+  "bottomActionRow.shortcutPalette": "커맨드 / 리소스",
 };
