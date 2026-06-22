@@ -44,8 +44,9 @@ export type PluginUiExtensionView = {
     /** kind="action" 전용 dispatch target — host 가 api.callPluginMethod 로 호출. */
     tool?: string;
     /**
-     * Detached window defaults. `defaultMode: "detached"` opens the extension
-     * in a separate BrowserWindow rather than rendering it inline.
+     * Detached-window geometry hints. Applied only when the host opens this
+     * extension in a separate BrowserWindow; whether it detaches at all is
+     * decided solely by the app's mode (appMode), not the plugin.
      */
     window?: {
       width?: number;
@@ -54,7 +55,6 @@ export type PluginUiExtensionView = {
       minHeight?: number;
       resizable?: boolean;
       alwaysOnTop?: boolean;
-      defaultMode?: "embedded" | "detached";
     };
   };
   entryUrl?: string;
