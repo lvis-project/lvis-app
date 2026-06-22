@@ -924,16 +924,18 @@ export function ChatView({ api, onAsk, onEditSave, onFork, onToggleStar, onRetry
   }, [handleComposerSend]);
 
   const tokenSlot = useMemo(() => (
-    <div className="flex min-w-0 items-center gap-2">
-      <TokenProgressRing
-        used={usedTokens}
-        budget={effectiveBudget}
-        contextBudget={contextBudget}
-        tpmLimit={tpmLimit}
-      />
+    <div className="flex min-w-0 items-center gap-2 overflow-hidden">
+      <div className="shrink-0">
+        <TokenProgressRing
+          used={usedTokens}
+          budget={effectiveBudget}
+          contextBudget={contextBudget}
+          tpmLimit={tpmLimit}
+        />
+      </div>
       <Tooltip>
         <TooltipTrigger asChild>
-          <span className={`text-[11px] font-mono ${costBadgeClass}`} title={t("chatView.estimatedCostTitle")}>
+          <span className={`min-w-0 truncate text-[11px] font-mono ${costBadgeClass}`} title={t("chatView.estimatedCostTitle")}>
             {formatCostBadge(costEstimate.total, costEstimate.pricingKnown)}
           </span>
         </TooltipTrigger>

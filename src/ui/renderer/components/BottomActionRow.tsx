@@ -61,7 +61,7 @@ export function BottomActionRow({
       data-testid="composer-bottom-action-row"
       className="flex flex-nowrap items-center gap-3 px-3 pt-1 pb-2"
     >
-      <div className="flex min-w-0 flex-1 flex-wrap items-center gap-2">
+      <div className="flex min-w-0 flex-1 flex-nowrap items-center gap-2 overflow-hidden">
         {tokenSlot}
       </div>
       <div className="flex shrink-0 flex-nowrap items-center gap-1.5">
