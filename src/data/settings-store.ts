@@ -153,6 +153,26 @@ export interface FeatureFlags {
    * change live behaviour.
    */
   hostClassifiesRisk?: boolean;
+  /**
+   * OS tool sandbox — when `true` (and a platform runner is available), shell
+   * and tool spawns are confined by the OS sandbox runner (Linux bubblewrap,
+   * macOS Seatbelt/sandbox-exec). Default `false` (opt-in).
+   *
+   * Orthogonal to {@link hostClassifiesRisk}: sandbox-enforcement (is the
+   * action kernel-confined when it runs) and risk-classification (does the
+   * action need approval) are independent axes — a sandboxed action still
+   * needs approval, and an unsandboxed platform still classifies risk.
+   *
+   * Capability is platform-dependent and honestly reported, not overclaimed:
+   *   - macOS: filesystem + process confinement, NOT network (sandbox-exec
+   *     does not block loopback/IPv6/DNS).
+   *   - Linux: filesystem + process + network (`--unshare-net`).
+   *   - Windows: not yet available — runs unconfined; the toggle reflects this.
+   *
+   * `LVIS_SANDBOX_ENABLED=1` remains an environment escape-hatch override, but
+   * this setting is the primary, user-discoverable control.
+   */
+  osToolSandbox?: boolean;
 }
 
 export interface AppSettings {
@@ -497,6 +517,10 @@ const DEFAULT_SETTINGS: AppSettings = {
     // shadow mode logs host-derived vs declared category but enforcement
     // still uses the declared category until this is deliberately flipped.
     hostClassifiesRisk: false,
+    // OS tool sandbox. Ships OFF (opt-in) but user-visible — boot only
+    // registers the runner when this is true AND the platform runner is
+    // available.
+    osToolSandbox: false,
   },
 };
 
@@ -1198,6 +1222,9 @@ function normalizeFeatureFlags(input: unknown): FeatureFlags {
   }
   if (typeof obj.hostClassifiesRisk === "boolean") {
     result.hostClassifiesRisk = obj.hostClassifiesRisk;
+  }
+  if (typeof obj.osToolSandbox === "boolean") {
+    result.osToolSandbox = obj.osToolSandbox;
   }
   return result;
 }
