@@ -72,6 +72,7 @@ import { useMarketplaceUrl } from "./hooks/use-marketplace-url.js";
 import { OverlayContextProvider } from "./context/OverlayContext.js";
 import { UnifiedSearchPanel } from "./components/UnifiedSearchPanel.js";
 import type { UserKeyboardIntentSnapshot } from "../../shared/chat-origin.js";
+import { normalizeSettingsTab } from "../../shared/settings-tabs.js";
 
 // ─── App ────────────────────────────────────────────
 
@@ -174,6 +175,12 @@ export function App() {
   const tourCompleted =
     chainStage === "done" && chainState.completionReason === "chain";
   const [activeView, setActiveView] = useState("home");
+  // Inline-settings (action mode): which tab SettingsContent opens on, and the
+  // view to return to via the back-to-home affordance. In chat mode Settings
+  // detaches to its own BrowserWindow instead (see onOpenSettings), so these
+  // only drive the action-mode activeView==="settings" inline render.
+  const [settingsTab, setSettingsTab] = useState("general");
+  const settingsReturnViewRef = useRef("home");
   // Workspace mode (Chat / Action). Default "action" preserves the historical
   // inline behavior: built-in + plugin views render inline in the main area and
   // the sidebar defaults expanded. In "chat" mode, selecting a detachable view
@@ -716,6 +723,16 @@ export function App() {
     if (activePluginView) return;
     setActiveView("home");
   }, [activeView, activePluginView]);
+
+  // Inline settings exists only in action mode. Switching to chat mode while it
+  // is open returns to home so chat mode's detached-Settings contract holds (a
+  // subsequent sidebar Settings click then opens the detached BrowserWindow).
+  useEffect(() => {
+    if (appMode === "chat" && activeView === "settings") {
+      setActiveView(settingsReturnViewRef.current === "settings" ? "home" : settingsReturnViewRef.current);
+    }
+  }, [appMode, activeView]);
+
   const checkApiKey = useCallback(async () => { const h = await api.hasApiKey(); setHasApiKey(h); return h; }, [api]);
 
   // Z onboarding chain — first-boot probe.
@@ -837,9 +854,39 @@ export function App() {
     }
   }, [api, chainStage, markOnboardingCompleted]);
 
+  // appMode is the SOLE authority for inline-vs-detached, mirroring the other
+  // views (업무보드/루틴/메모리/별표 + plugin views). In action mode Settings
+  // joins that inline pattern: setActiveView("settings") + MainContent renders
+  // SettingsContent inline. In chat mode Settings keeps the existing detached
+  // BrowserWindow path untouched. Re-selecting Settings while already on the
+  // inline view is a no-op (only the tab is refreshed) so the view never
+  // re-mounts and loses its place.
   const onOpenSettings = useCallback((tab = "llm") => {
-    void api.openSettingsWindow(tab);
-  }, [api]);
+    if (appMode === "chat") {
+      void api.openSettingsWindow(tab);
+      return;
+    }
+    setSettingsTab(normalizeSettingsTab(tab));
+    setActiveView((current) => {
+      // Only capture the return view on the first entry into settings; a
+      // re-click while already inline must not overwrite it with "settings".
+      if (current !== "settings") settingsReturnViewRef.current = current;
+      return "settings";
+    });
+  }, [api, appMode]);
+
+  const handleCloseInlineSettings = useCallback(() => {
+    const target = settingsReturnViewRef.current;
+    setActiveView(target === "settings" ? "home" : target);
+  }, []);
+
+  // Inline settings save → refresh the same live state the detached window's
+  // onSettingsWindowSaved listener refreshes (api key + LLM settings), without
+  // an IPC round-trip since the content renders in-process.
+  const handleInlineSettingsSaved = useCallback(() => {
+    void checkApiKey();
+    void refreshLlmSettings();
+  }, [checkApiKey, refreshLlmSettings]);
 
   useEffect(() => {
     return api.onSettingsWindowSaved(() => {
@@ -1507,6 +1554,9 @@ export function App() {
           <MainContent
             activeView={activeView}
             api={api}
+            settingsTab={settingsTab}
+            onSettingsSaved={handleInlineSettingsSaved}
+            onCloseSettings={handleCloseInlineSettings}
             starred={starred}
             currentSessionId={currentSessionId}
             currentSessionKind={currentSessionKind}
