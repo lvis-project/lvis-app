@@ -301,7 +301,7 @@ function AskUserAnswerBubble({
   if (entry.dismissed) {
     return (
       <div
-        className="ml-auto w-fit min-w-0 max-w-[75%] rounded-md border border-border/(--opacity-stronger) border-l-2 border-l-muted-foreground/(--opacity-strong) bg-card/(--opacity-intense) px-3 py-2 text-xs text-muted-foreground"
+        className="ml-auto w-fit min-w-0 max-w-[75%] rounded-lg border border-border/(--opacity-strong) border-l-2 border-l-muted-foreground/(--opacity-strong) bg-card/(--opacity-intense) px-3 py-2 text-xs text-muted-foreground shadow-sm"
         data-testid="ask-user-answer-bubble"
       >
         <div className="text-[10.5px] text-muted-foreground/(--opacity-intense)">{t("chatView.askAnswerSkippedLabel")}</div>
@@ -312,7 +312,7 @@ function AskUserAnswerBubble({
 
   return (
     <div
-      className="ml-auto w-fit min-w-0 max-w-[75%] rounded-md border border-border/(--opacity-stronger) border-l-2 border-l-message-user bg-card/(--opacity-near) px-3 py-2 text-xs text-card-foreground shadow-sm"
+      className="ml-auto w-fit min-w-0 max-w-[75%] rounded-lg border border-border/(--opacity-strong) border-l-2 border-l-message-user bg-card/(--opacity-near) px-3 py-2.5 text-xs text-card-foreground shadow-sm"
       data-testid="ask-user-answer-bubble"
     >
       <div className="mb-1 text-[10.5px] text-muted-foreground">
@@ -1233,7 +1233,7 @@ export function ChatView({ api, onAsk, onEditSave, onFork, onToggleStar, onRetry
         const starId = isEntryStarred(idx);
         const starActive = !!starId;
         rendered.push(
-          <div key={idx} data-chat-entry-index={idx} className={`group relative ml-auto w-fit min-w-0 max-w-[75%] overflow-hidden rounded-md bg-message-user px-3.5 py-2 text-sm text-message-user-foreground ${userGapCls} ${ringCls}`}>
+          <div key={idx} data-chat-entry-index={idx} className={`group relative ml-auto w-fit min-w-0 max-w-[75%] overflow-hidden rounded-lg bg-message-user px-3.5 py-2.5 text-sm text-message-user-foreground shadow-sm ${userGapCls} ${ringCls}`}>
             {/* "나" label removed — sender is implicit. Star + hover
                 actions float top-right via absolute positioning so
                 the bubble has no header chrome. */}
@@ -1282,7 +1282,7 @@ export function ChatView({ api, onAsk, onEditSave, onFork, onToggleStar, onRetry
         <div
           key={idx}
           data-testid="system-entry"
-          className="mx-auto text-center text-xs text-muted-foreground py-1 px-3 rounded-full bg-muted/(--opacity-half)"
+          className="mx-auto text-center text-xs text-muted-foreground py-1 px-3 rounded-full bg-muted/(--opacity-medium) border border-border/(--opacity-medium)"
         >
           {entry.text}
         </div>,
@@ -1491,7 +1491,7 @@ export function ChatView({ api, onAsk, onEditSave, onFork, onToggleStar, onRetry
         for (const node of renderSpawnsForGroup(entry)) rendered.push(node);
       } else if (entry.kind === "assistant") {
         rendered.push(
-          <div key={idx} data-chat-entry-index={idx} className={ringCls || undefined}>
+          <div key={idx} data-chat-entry-index={idx} className={`min-w-0 w-full max-w-full overflow-x-hidden rounded-lg${ringCls ? ` ${ringCls}` : ""}`}>
             <AssistantCard
               entry={entry}
               isStarred={!!isEntryStarred(idx)}
@@ -1513,7 +1513,7 @@ export function ChatView({ api, onAsk, onEditSave, onFork, onToggleStar, onRetry
         ? lookupBillablePricingOptional(summary.vendorProvider, summary.vendorModel)
         : undefined;
       rendered.push(
-          <div key={idx} data-chat-entry-index={idx} className={`${ringCls} min-w-0 w-full max-w-full overflow-x-hidden rounded-md`}>
+          <div key={idx} data-chat-entry-index={idx} className={`${ringCls} min-w-0 w-full max-w-full overflow-x-hidden rounded-lg`}>
           <AssistantCard
             entry={entry}
             isStarred={!!isEntryStarred(idx)}
@@ -1685,7 +1685,7 @@ export function ChatView({ api, onAsk, onEditSave, onFork, onToggleStar, onRetry
           {currentSessionTitle ? <span className="ml-2 text-muted-foreground">{currentSessionTitle}</span> : null}
         </div>
       )}
-      <ScrollArea type="always" className="lvis-chat-scroll h-full min-h-0 min-w-0 max-w-full" viewportRef={scrollViewportRef}><div className="min-w-0 w-full max-w-full overflow-x-hidden space-y-3 px-3 py-4">
+      <ScrollArea type="always" className="lvis-chat-scroll h-full min-h-0 min-w-0 max-w-full" viewportRef={scrollViewportRef}><div className="min-w-0 w-full max-w-full overflow-x-hidden space-y-4 px-4 py-5">
         {/* Today's date badge stays a selector for explicit session loads only.
             currentSessionEntries enables in-session day jumping via
             SessionCalendarPopover Step 4 — pass entries with createdAt + index.
@@ -1725,7 +1725,7 @@ export function ChatView({ api, onAsk, onEditSave, onFork, onToggleStar, onRetry
             "준비되었습니다" copy so the user never sees a "로그인된 척" race
             where the empty state paints before the boot probe resolves
             (#1014 tracer: Stage B). */}
-        {visibleEntries.length === 0 && hasApiKey === true && !hasAskQuestions && !suggestedRepliesActive && <div className="py-12 text-center text-sm text-muted-foreground">{t("chatView.emptyState")}</div>}
+        {visibleEntries.length === 0 && hasApiKey === true && !hasAskQuestions && !suggestedRepliesActive && <div className="py-12 text-center text-sm text-muted-foreground lvis-anim-fade-in">{t("chatView.emptyState")}</div>}
         {transcriptEntries}
         <div ref={chatEndRef} />
       </div></ScrollArea>
@@ -1734,7 +1734,7 @@ export function ChatView({ api, onAsk, onEditSave, onFork, onToggleStar, onRetry
           type="button"
           size="sm"
           variant="secondary"
-          className="absolute bottom-4 right-5 z-20 h-8 rounded-full border bg-background/(--opacity-near) px-3 text-xs shadow-md backdrop-blur"
+          className="absolute bottom-4 right-5 z-20 h-8 rounded-full border border-border/(--opacity-strong) bg-card/(--opacity-solid) px-3 text-xs shadow-md backdrop-blur"
           onClick={() => scrollChatToBottom("smooth")}
           data-testid="jump-to-bottom"
         >
@@ -1779,7 +1779,7 @@ export function ChatView({ api, onAsk, onEditSave, onFork, onToggleStar, onRetry
           scrolled the chat. The panel collapses by default once it has
           content; in the collapsed state the active item title streams next
           to the count so the user always sees what step is running. */}
-      <div className="relative z-30 w-full max-w-full min-w-0 overflow-visible border-t border-border/(--opacity-stronger) bg-card/(--opacity-solid)">
+      <div className="relative z-30 w-full max-w-full min-w-0 overflow-visible border-t bg-card/(--opacity-solid)">
         <div className="w-full max-w-full min-w-0" data-testid="session-todo-dock">
           <SessionTodoPanel api={workflowApi} sessionId={currentSessionId} />
           <MessageQueuePanel
@@ -1916,7 +1916,7 @@ export function ChatView({ api, onAsk, onEditSave, onFork, onToggleStar, onRetry
           {/* v6 layout: Composer (textarea) + BottomActionRow (TokenRing/
               단축키/취소/Send) 가 하나의 흰색 컨테이너 안. 사용자 인지 = "타이핑
               영역 + 즉시 액션" 한 묶음. shadow-md + rounded-xl 로 경계 강조. */}
-          <div className="mx-3 rounded-xl bg-input-bar shadow-md overflow-hidden">
+          <div className="mx-3 mb-1 rounded-xl bg-input-bar shadow-md overflow-hidden ring-1 ring-border/(--opacity-muted)">
           <Composer
             ref={composerRef}
             text={question}
