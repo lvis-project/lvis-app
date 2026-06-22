@@ -20,6 +20,7 @@
 import type { ReactNode } from "react";
 import { Square } from "lucide-react";
 import { Button } from "../../../components/ui/button.js";
+import { ThinkingButton } from "./ThinkingButton.js";
 import type { UserKeyboardIntentSnapshot } from "../../../shared/chat-origin.js";
 import { useTranslation } from "../../../i18n/react.js";
 
@@ -34,6 +35,9 @@ export interface BottomActionRowProps {
   onSend: () => void;
   /** ESC 취소 = LLM abort (큐 보존). LLM busy 일 때만 노출. */
   onCancel: () => void;
+  /** Thinking (extended reasoning) mode — toggle + depth button, before Send. */
+  enableThinkingChat: boolean;
+  onToggleThinking: (next: boolean) => void | Promise<void>;
 }
 
 export function BottomActionRow({
@@ -42,6 +46,8 @@ export function BottomActionRow({
   isSendDisabled,
   onSend,
   onCancel,
+  enableThinkingChat,
+  onToggleThinking,
 }: BottomActionRowProps) {
   const { t } = useTranslation();
   return (
@@ -66,6 +72,7 @@ export function BottomActionRow({
         )}
       </div>
       <div className="flex shrink-0 items-center gap-2">
+        <ThinkingButton enabled={enableThinkingChat} onToggle={onToggleThinking} />
         {isBusy && (
           <button
             type="button"
