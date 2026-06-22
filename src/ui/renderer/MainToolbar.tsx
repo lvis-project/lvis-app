@@ -21,6 +21,14 @@ import type { UpdateState } from "../../shared/update-state.js";
 export type AppUpdateBadgeState = UpdateState;
 
 /**
+ * Workspace mode. MainToolbar owns this type because it hosts the toggle UI;
+ * App.tsx imports it. "action" (default) renders built-in + plugin views
+ * inline in the main area with the sidebar expanded; "chat" pops detachable
+ * views into separate windows so the main area stays the chat.
+ */
+export type AppMode = "chat" | "action";
+
+/**
  * Dev mode 감지 — preload (`src/preload.ts`) 가 `window.__lvisDevMode` 를
  * runtime 에 set. main process 가 `scripts/run-electron.mjs` 에서
  * NODE_ENV=development 설정한 결과를 reads. webpack build-time 치환에 의존
@@ -47,6 +55,10 @@ export interface MainToolbarProps {
   onOpenUnifiedSearch: () => void;
   onOpenStarredView: () => void;
   onOpenDetachedView: (viewKey: "routines" | "memory" | "starred") => void | Promise<void>;
+  /** Current workspace mode (Chat / Action). Drives the segmented toggle. */
+  appMode: AppMode;
+  /** Fired when the user picks a segment in the Chat/Action toggle. */
+  onToggleAppMode: (mode: AppMode) => void;
   /** Dev mode 만 사용 — clicking the wrench opens the floating DevToolsPanel. */
   onOpenDevTools?: () => void;
   /** Latest app-update state from the main process. */
@@ -79,6 +91,8 @@ export function MainToolbar({
   onOpenUnifiedSearch,
   onOpenStarredView: _onOpenStarredView,
   onOpenDetachedView,
+  appMode,
+  onToggleAppMode,
   onOpenDevTools,
   appUpdateState = { kind: "idle" },
   appUpdateInFlight = false,
@@ -102,6 +116,11 @@ export function MainToolbar({
           onInstall={onInstallAppUpdate}
           onSkip={onSkipAppUpdate}
         />
+
+        {/* ── Workspace mode (Chat / Action) — sits immediately after the
+            update badge, left of the Dev indicator. Action keeps views inline
+            (sidebar expanded); Chat pops detachable views into windows. */}
+        <AppModeToggle mode={appMode} onToggle={onToggleAppMode} />
 
         {/* ── Dev tools indicator — only visible in non-production. */}
         {isDevMode() && onOpenDevTools !== undefined && (
@@ -233,6 +252,46 @@ export function MainToolbar({
           </DropdownMenuContent>
         </DropdownMenu>
       </div>
+    </div>
+  );
+}
+
+/**
+ * Workspace mode segmented control — two compact segments ("채팅" / "액션").
+ * The active segment is filled (`bg-primary` / `text-primary-foreground`); the
+ * inactive segment is muted with an accent hover. Token classes only.
+ */
+function AppModeToggle({ mode, onToggle }: { mode: AppMode; onToggle: (mode: AppMode) => void }) {
+  const { t } = useTranslation();
+  const segment = (value: AppMode, label: string, ariaLabel: string) => {
+    const active = mode === value;
+    return (
+      <Button
+        variant="ghost"
+        size="sm"
+        className={`h-7 rounded-md px-2.5 text-[11px] font-medium ${
+          active
+            ? "bg-primary text-primary-foreground hover:bg-primary"
+            : "text-muted-foreground hover:bg-accent hover:text-foreground"
+        }`}
+        onClick={() => onToggle(value)}
+        aria-pressed={active}
+        aria-label={ariaLabel}
+        data-testid={`app-mode-${value}`}
+      >
+        {label}
+      </Button>
+    );
+  };
+  return (
+    <div
+      role="group"
+      aria-label={t("appMode.groupAriaLabel")}
+      className="flex items-center gap-0.5 rounded-lg border border-border bg-muted/(--opacity-medium) p-0.5 shrink-0"
+      data-testid="app-mode-toggle"
+    >
+      {segment("chat", t("appMode.chat"), t("appMode.chatAriaLabel"))}
+      {segment("action", t("appMode.action"), t("appMode.actionAriaLabel"))}
     </div>
   );
 }
