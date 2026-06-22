@@ -41,11 +41,6 @@ export interface AskUserQuestionItem {
   placeholder?: string;
   /** Confirm-step row label override (≤ 10 Korean chars). Falls back to a truncated question. */
   summaryHint?: string;
-  /**
-   * @deprecated Pre-recommend/alt API. Kept for backward compat;
-   * ignored by the renderer when `choices` is non-empty.
-   */
-  suggestedAnswers?: string[];
 }
 
 export interface AskUserQuestionRequest {
@@ -175,7 +170,6 @@ export class AskUserQuestionGate {
         allowMultiple: q.allowMultiple === true ? true : undefined,
         placeholder: q.placeholder,
         summaryHint: q.summaryHint,
-        suggestedAnswers: q.suggestedAnswers,
       })),
       createdAt: Date.now(),
     };

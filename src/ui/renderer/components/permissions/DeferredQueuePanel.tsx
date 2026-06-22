@@ -124,7 +124,7 @@ export function DeferredQueuePanel({ showEmpty = false, onClose }: DeferredQueue
         </header>
       )}
       {error && (
-        <p className="mb-2 rounded bg-destructive/10 px-2 py-1 text-xs text-destructive">
+        <p className="mb-2 rounded bg-destructive/(--opacity-subtle) px-2 py-1 text-xs text-destructive">
           {error}
         </p>
       )}
@@ -189,7 +189,7 @@ export function DeferredQueuePanel({ showEmpty = false, onClose }: DeferredQueue
                   ))}
                 </div>
                 <PermissionEvaluationContextPanel context={activeEntry.evaluationContext} />
-                <details className="min-w-0 rounded-md border bg-muted/20">
+                <details className="min-w-0 rounded-md border bg-muted/(--opacity-light)">
                   <summary className="cursor-pointer px-3 py-2 text-xs font-semibold">
                     {t("deferredQueuePanel.showFullInput")}
                   </summary>
@@ -213,7 +213,7 @@ export function DeferredQueuePanel({ showEmpty = false, onClose }: DeferredQueue
                 <Button
                   size="sm"
                   variant="outline"
-                  className="border-destructive text-destructive hover:bg-destructive/15"
+                  className="border-destructive text-destructive hover:bg-destructive/(--opacity-soft)"
                   disabled={busy}
                   onClick={() => handle(activeEntry.id, "rejected")}
                 >

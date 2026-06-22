@@ -80,11 +80,6 @@ export function createAskUserQuestionTool(deps: AskUserQuestionToolDeps): Tool {
                 type: "string",
                 description: t("be_askUserQuestion.summaryHintDesc"),
               },
-              suggestedAnswers: {
-                type: "array",
-                items: { type: "string" },
-                description: t("be_askUserQuestion.suggestedAnswersDesc"),
-              },
             },
           },
         },
@@ -182,13 +177,6 @@ export function createAskUserQuestionTool(deps: AskUserQuestionToolDeps): Tool {
           typeof q.summaryHint === "string" && q.summaryHint.trim().length > 0
             ? q.summaryHint.trim()
             : undefined;
-        // Legacy `suggestedAnswers` kept for backward compat — only honored
-        // when `choices` is absent so new callers don't accidentally double-list.
-        const filteredSuggestedAnswers = Array.isArray(q.suggestedAnswers)
-          ? (q.suggestedAnswers as unknown[]).filter(
-              (s): s is string => typeof s === "string" && s.trim().length > 0,
-            ).slice(0, 3)
-          : undefined;
         // Multi-select is only meaningful with at least one choice; otherwise
         // the field has no surface to apply to. Emit `true` only when on so
         // the absence is a clean undefined for downstream equality checks.
@@ -207,12 +195,6 @@ export function createAskUserQuestionTool(deps: AskUserQuestionToolDeps): Tool {
           allowMultiple,
           placeholder,
           summaryHint,
-          suggestedAnswers:
-            (!filteredChoices || filteredChoices.length === 0) &&
-            filteredSuggestedAnswers &&
-            filteredSuggestedAnswers.length > 0
-              ? filteredSuggestedAnswers
-              : undefined,
         });
       }
       const response = await gate.ask({

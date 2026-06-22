@@ -139,6 +139,92 @@ function webFetchFetchImpl(
   }) as typeof fetch;
 }
 
+// ─── web_search provider response shapes ────────────────────────────
+// Narrow interfaces + runtime shape guards for the external search-provider
+// responses. The provider boundary is untrusted: a response-shape change must
+// surface as an explicit `isError` diagnostic, not silently degrade to an
+// empty result array (which an untyped cast plus an `?? []` fallback hid).
+
+interface TavilyResult {
+  title?: unknown;
+  content?: unknown;
+  url?: unknown;
+}
+interface TavilyResponse {
+  results?: TavilyResult[];
+}
+interface SerperOrganic {
+  title?: unknown;
+  snippet?: unknown;
+  link?: unknown;
+}
+interface SerperResponse {
+  organic?: SerperOrganic[];
+}
+
+/** A single normalized search hit emitted to the model. */
+interface NormalizedSearchResult {
+  title: string;
+  snippet: string;
+  url: string;
+}
+
+export class WebSearchShapeError extends Error {
+  constructor(message: string) {
+    super(message);
+    this.name = "WebSearchShapeError";
+  }
+}
+
+function asString(value: unknown): string {
+  return typeof value === "string" ? value : "";
+}
+
+/**
+ * Validates a Tavily response against the documented `{ results: [...] }`
+ * shape. Throws {@link WebSearchShapeError} on a mismatch so a provider change
+ * surfaces as a tool error rather than an empty result set.
+ */
+export function parseTavilyResponse(data: unknown): NormalizedSearchResult[] {
+  if (typeof data !== "object" || data === null) {
+    throw new WebSearchShapeError("Tavily response was not a JSON object");
+  }
+  const { results } = data as TavilyResponse;
+  if (results === undefined) {
+    throw new WebSearchShapeError("Tavily response missing `results`");
+  }
+  if (!Array.isArray(results)) {
+    throw new WebSearchShapeError("Tavily `results` was not an array");
+  }
+  return results.map((r) => ({
+    title: asString(r?.title),
+    snippet: asString(r?.content),
+    url: asString(r?.url),
+  }));
+}
+
+/**
+ * Validates a Serper response against the documented `{ organic: [...] }`
+ * shape. Throws {@link WebSearchShapeError} on a mismatch.
+ */
+export function parseSerperResponse(data: unknown): NormalizedSearchResult[] {
+  if (typeof data !== "object" || data === null) {
+    throw new WebSearchShapeError("Serper response was not a JSON object");
+  }
+  const { organic } = data as SerperResponse;
+  if (organic === undefined) {
+    throw new WebSearchShapeError("Serper response missing `organic`");
+  }
+  if (!Array.isArray(organic)) {
+    throw new WebSearchShapeError("Serper `organic` was not an array");
+  }
+  return organic.map((r) => ({
+    title: asString(r?.title),
+    snippet: asString(r?.snippet),
+    url: asString(r?.link),
+  }));
+}
+
 export function registerRequestPluginMetaTool(toolRegistry: ToolRegistry): void {
   // Option C — request_plugin 메타 툴 (항상 활성, scope filter 통과)
   // 실제 scope 확장은 ConversationLoop.queryLoop이 가로챈다.
@@ -384,13 +470,10 @@ export function registerBuiltinTools(
               headers: { "Content-Type": "application/json" },
               body: JSON.stringify({ api_key: apiKey, query, search_depth: "basic", max_results: count }),
             });
-            const data = await res.json() as any;
+            const data: unknown = await res.json();
+            const results = parseTavilyResponse(data);
             return {
-              output: JSON.stringify({
-                query,
-                provider: "Tavily",
-                results: data.results?.map((r: any) => ({ title: r.title, snippet: r.content, url: r.url })) || [],
-              }),
+              output: JSON.stringify({ query, provider: "Tavily", results }),
               isError: false,
             };
           }
@@ -400,13 +483,10 @@ export function registerBuiltinTools(
               headers: { "X-API-KEY": apiKey, "Content-Type": "application/json" },
               body: JSON.stringify({ q: query, num: count }),
             });
-            const data = await res.json() as any;
+            const data: unknown = await res.json();
+            const results = parseSerperResponse(data);
             return {
-              output: JSON.stringify({
-                query,
-                provider: "Serper",
-                results: data.organic?.map((r: any) => ({ title: r.title, snippet: r.snippet, url: r.link })) || [],
-              }),
+              output: JSON.stringify({ query, provider: "Serper", results }),
               isError: false,
             };
           }
@@ -417,7 +497,7 @@ export function registerBuiltinTools(
             body: `q=${encodeURIComponent(query)}`,
           });
           const ddgHtml = await ddgRes.text();
-          const results: any[] = [];
+          const results: NormalizedSearchResult[] = [];
           const resultBlocks = ddgHtml.split(/class="result\s/g).slice(1, count + 1);
           for (const block of resultBlocks) {
             const urlMatch = block.match(/class="result__a"[^>]*href="([^"]+)"[^>]*>([^<]+)/);

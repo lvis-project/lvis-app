@@ -218,7 +218,7 @@ describe("permission-review-scenario-board-v2.html contract", () => {
     }
   });
 
-  it("S5 auto-review MED foreground mutation opens approval", async () => {
+  it("S5 auto-review MED foreground mutation returns reviewer output without approval", async () => {
     const { pm, cleanup } = makeManager("auto", fixedClassifier({ level: "medium", reason: "external summary send" }));
     try {
       const { tool, execute } = makeTool({
@@ -234,17 +234,16 @@ describe("permission-review-scenario-board-v2.html contract", () => {
         gate,
         input: { endpoint: "https://teams.microsoft.com/webhook", payload: "meeting summary" },
       });
-      expect(result[0].is_error).toBeUndefined();
-      expect(execute).toHaveBeenCalledOnce();
-      expect(gate.requestAndWait).toHaveBeenCalledWith(expect.objectContaining({
-        reason: expect.stringContaining("reviewer medium"),
-      }));
+      expect(result[0].is_error).toBe(true);
+      expect(execute).not.toHaveBeenCalled();
+      expect(gate.requestAndWait).not.toHaveBeenCalled();
+      expect(result[0].content).toContain("reviewer medium");
     } finally {
       cleanup();
     }
   });
 
-  it("S6 auto-review HIGH foreground shell is blocked behind approval", async () => {
+  it("S6 auto-review HIGH foreground shell is returned as reviewer tool output", async () => {
     const { pm, cleanup } = makeManager("auto", fixedClassifier({ level: "high", reason: "destructive shell" }));
     try {
       const { tool, execute } = makeTool({ name: "bash", category: "shell" });
@@ -258,9 +257,8 @@ describe("permission-review-scenario-board-v2.html contract", () => {
       });
       expect(result[0].is_error).toBe(true);
       expect(execute).not.toHaveBeenCalled();
-      expect(gate.requestAndWait).toHaveBeenCalledWith(expect.objectContaining({
-        reason: expect.stringContaining("reviewer high"),
-      }));
+      expect(gate.requestAndWait).not.toHaveBeenCalled();
+      expect(result[0].content).toContain("reviewer high");
     } finally {
       cleanup();
     }
@@ -311,7 +309,7 @@ describe("permission-review-scenario-board-v2.html contract", () => {
     }));
   });
 
-  it("S9 reviewer timeout/error fails closed into explicit approval", async () => {
+  it("S9 reviewer timeout/error fails closed as reviewer tool output", async () => {
     const classifier: RiskClassifier = {
       classify: vi.fn(() => {
         throw new Error("provider timeout");
@@ -334,9 +332,8 @@ describe("permission-review-scenario-board-v2.html contract", () => {
       });
       expect(result[0].is_error).toBe(true);
       expect(execute).not.toHaveBeenCalled();
-      expect(gate.requestAndWait).toHaveBeenCalledWith(expect.objectContaining({
-        reason: expect.stringContaining("reviewer high"),
-      }));
+      expect(gate.requestAndWait).not.toHaveBeenCalled();
+      expect(result[0].content).toContain("reviewer high");
     } finally {
       cleanup();
     }
@@ -427,7 +424,7 @@ describe("permission-review-scenario-board-v2.html contract", () => {
     }
   });
 
-  it("S14 network data egress asks with reviewer impact", async () => {
+  it("S14 network data egress returns reviewer impact as tool output", async () => {
     const { pm, cleanup } = makeManager("auto");
     try {
       const { tool } = makeTool({
@@ -448,15 +445,14 @@ describe("permission-review-scenario-board-v2.html contract", () => {
         },
       });
       expect(result[0].is_error).toBe(true);
-      expect(gate.requestAndWait).toHaveBeenCalledWith(expect.objectContaining({
-        reason: expect.stringContaining("reviewer medium: network graph data operation"),
-      }));
+      expect(gate.requestAndWait).not.toHaveBeenCalled();
+      expect(result[0].content).toContain("reviewer medium: network graph data operation");
     } finally {
       cleanup();
     }
   });
 
-  it("S15 unknown or sensitive network target is HIGH and requires approval", async () => {
+  it("S15 unknown or sensitive network target is HIGH and returns reviewer output", async () => {
     const { pm, cleanup } = makeManager("auto");
     try {
       const { tool, execute } = makeTool({
@@ -474,9 +470,8 @@ describe("permission-review-scenario-board-v2.html contract", () => {
       });
       expect(result[0].is_error).toBe(true);
       expect(execute).not.toHaveBeenCalled();
-      expect(gate.requestAndWait).toHaveBeenCalledWith(expect.objectContaining({
-        reason: expect.stringContaining("reviewer high"),
-      }));
+      expect(gate.requestAndWait).not.toHaveBeenCalled();
+      expect(result[0].content).toContain("reviewer high");
     } finally {
       cleanup();
     }

@@ -56,11 +56,11 @@ export function SubAgentCard({ spawn }: { spawn: SubAgentSpawn }) {
   const displayTitle = clipTitle(spawn.title);
   return (
     <div
-      className={`w-full max-w-full min-w-0 rounded-md border text-xs ${isError ? "border-destructive/40 bg-destructive/5" : "border-info/40 bg-info/5"}`}
+      className={`w-full max-w-full min-w-0 rounded-md border text-xs ${isError ? "border-destructive/(--opacity-medium) bg-destructive/(--opacity-faint)" : "border-info/(--opacity-medium) bg-info/(--opacity-faint)"}`}
       data-testid="sub-agent-card"
     >
       <button
-        className="flex w-full min-w-0 items-center gap-2 px-3 py-1.5 hover:bg-info/10"
+        className="flex w-full min-w-0 items-center gap-2 px-3 py-1.5 hover:bg-info/(--opacity-subtle)"
         onClick={() => setOpen((o) => !o)}
       >
         {open ? <ChevronDown className="h-3 w-3" /> : <ChevronRight className="h-3 w-3" />}
@@ -93,7 +93,7 @@ export function SubAgentCard({ spawn }: { spawn: SubAgentSpawn }) {
             </div>
           ))}
           {spawn.summary && (
-            <div className="min-w-0 rounded border bg-background/40 px-2 py-1">
+            <div className="min-w-0 rounded border bg-background/(--opacity-medium) px-2 py-1">
               <div className="text-[10px] uppercase opacity-60">{t("subAgentCard.summaryLabel")}</div>
               <div className="mt-1 whitespace-pre-wrap break-words text-[11px] [overflow-wrap:anywhere]">
                 {spawn.summary}
@@ -104,7 +104,7 @@ export function SubAgentCard({ spawn }: { spawn: SubAgentSpawn }) {
             </div>
           )}
           {spawn.errorMessage && (
-            <div className="rounded border border-destructive/40 bg-destructive/5 px-2 py-1 text-[11px] text-destructive">
+            <div className="rounded border border-destructive/(--opacity-medium) bg-destructive/(--opacity-faint) px-2 py-1 text-[11px] text-destructive">
               {spawn.errorMessage}
             </div>
           )}

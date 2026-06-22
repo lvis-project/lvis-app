@@ -92,6 +92,14 @@ export interface WorkItem {
   runSessionId?: string;
   /** ISO-8601 instant the run fields were last written. */
   runUpdatedAt?: string;
+  /** Current run's id — links the latest run to its transcript file. */
+  runId?: string;
+  /**
+   * Append-only index of past runs (newest last), each pointing to a persisted
+   * transcript `sessions/<id>/<runId>.jsonl`. Re-running archives the prior run
+   * here instead of discarding it, so run history accumulates.
+   */
+  runHistory?: WorkItemRunHistoryEntry[];
 }
 
 /**
@@ -248,15 +256,51 @@ export interface WorkItemChangedEventPayload {
  *   - `done`              — the run finished successfully (execute output persisted).
  *   - `error`             — the run threw; `message` carries the failure reason.
  */
+/**
+ * Lifecycle phase of an in-flight run — shared by the live {@link WorkBoardRunEvent}
+ * and the persisted {@link RunTranscriptEvent}.
+ */
+export type WorkBoardRunPhase =
+  | "planning"
+  | "awaiting_approval"
+  | "executing"
+  | "denied"
+  | "done"
+  | "error";
+
+/**
+ * One line of a persisted run transcript (`sessions/<itemId>/<runId>.jsonl`).
+ * The renderer reads these to render a run's accumulated conversation; the
+ * main-side append writer lives in `work-board/run-transcript.ts`.
+ */
+export interface RunTranscriptEvent {
+  ts: string;
+  phase: WorkBoardRunPhase;
+  kind: "turn" | "plan" | "output" | "decision" | "error";
+  turn?: number;
+  text?: string;
+  message?: string;
+}
+
+/**
+ * One entry in a work item's run history (the `board.json` index). Points at
+ * the persisted transcript `sessions/<itemId>/<runId>.jsonl`. Re-running an
+ * item appends here instead of discarding the prior run, so history accumulates.
+ */
+export interface WorkItemRunHistoryEntry {
+  runId: string;
+  startedAt: string;
+  endedAt?: string;
+  status: WorkItemRunStatus;
+  /** Plan text captured for this run (if it reached approval). */
+  plan?: string;
+  /** Short preview of the run's output (if it completed). */
+  outputPreview?: string;
+}
+
 export interface WorkBoardRunEvent {
   itemId: number;
-  phase:
-    | "planning"
-    | "awaiting_approval"
-    | "executing"
-    | "denied"
-    | "done"
-    | "error";
+  phase: WorkBoardRunPhase;
   /** 1-based child-agent turn number (planning / executing phases). */
   turn?: number;
   /** Latest child-agent turn text (planning / executing phases). */
