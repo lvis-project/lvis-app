@@ -1448,21 +1448,30 @@ export function App() {
             collapsed={sidebarCollapsed}
           />
         <main
-          className={`flex min-h-0 min-w-0 flex-1 flex-col bg-background transition-[padding] duration-200 ease-out motion-reduce:transition-none ${
+          className={`relative flex min-h-0 min-w-0 flex-1 flex-col bg-background transition-[padding] duration-200 ease-out motion-reduce:transition-none ${
             sidebarCollapsed ? "pl-[5rem]" : "pl-[15.5rem]"
           }`}
         >
-          <BootstrapStatusBanner status={bootstrapStatus} onDismiss={dismissBootstrapStatus} onRetry={() => void retryBootstrap()} />
-          <MarketplaceUpdateBanner
-            updates={marketplaceUpdates}
-            onDismiss={dismissMarketplaceUpdates}
-            onSkip={skipMarketplaceUpdates}
-            onUpdate={installPlugin}
-          />
-          <MarketplaceAnnouncementBanner
-            announcements={marketplaceAnnouncements}
-            onDismiss={handleMarketplaceAnnouncementDismiss}
-          />
+          {/* Floating notification stack — update/announcement banners are an
+              OVERLAY, not in-flow content. They float over the canvas anchored
+              top-right so they never push MainContent or the composer down. The
+              wrapper is pointer-events-none (clicks pass through the gaps); each
+              banner card re-enables pointer-events so Update/dismiss still work.
+              `top-2 right-2` keeps the stack below the window-control band and
+              clear of the search/star/export controls in the toolbar. */}
+          <div className="pointer-events-none absolute right-2 top-2 z-50 flex w-full max-w-md flex-col gap-2 [&>*]:pointer-events-auto [&>*]:m-0">
+            <BootstrapStatusBanner status={bootstrapStatus} onDismiss={dismissBootstrapStatus} onRetry={() => void retryBootstrap()} />
+            <MarketplaceUpdateBanner
+              updates={marketplaceUpdates}
+              onDismiss={dismissMarketplaceUpdates}
+              onSkip={skipMarketplaceUpdates}
+              onUpdate={installPlugin}
+            />
+            <MarketplaceAnnouncementBanner
+              announcements={marketplaceAnnouncements}
+              onDismiss={handleMarketplaceAnnouncementDismiss}
+            />
+          </div>
           {fallbackToast && (
             <div className="bg-warning text-warning-foreground text-xs px-4 py-2 border-b border-warning">
               {fallbackToast}
