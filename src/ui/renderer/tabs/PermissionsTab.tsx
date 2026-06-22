@@ -955,6 +955,7 @@ export function PermissionsTab() {
                     ? t("permissionsTab.osSandboxCapabilityLinux")
                     : t("permissionsTab.osSandboxCapabilityOther")}
               </p>
+              <p className="italic">{t("permissionsTab.osSandboxRestartNote")}</p>
             </div>
           ) : null}
         </SettingsSection>
