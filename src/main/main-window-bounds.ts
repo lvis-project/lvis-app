@@ -13,6 +13,15 @@ const MAIN_WINDOW_TOP_GAP = 24;
 const MAIN_WINDOW_BOTTOM_GAP = 24;
 const MAIN_WINDOW_RIGHT_GAP = 10;
 
+/**
+ * Action-mode window size — a centered working canvas. SoT shared by the
+ * initial-bounds path (createWindow, when the persisted mode is "action") and
+ * the runtime resize-for-mode tween (window-manager). Centralized here so the
+ * two code paths cannot drift to different dimensions.
+ */
+export const ACTION_MODE_WIDTH = 800;
+export const ACTION_MODE_HEIGHT = 600;
+
 function initialMainWindowY(
   workArea: WorkAreaBounds,
   height: number,
@@ -36,6 +45,24 @@ export function computeInitialMainWindowBounds(
   return {
     x: workArea.x + workArea.width - width - rightGap,
     y: initialMainWindowY(workArea, height, platform),
+    width,
+    height,
+  };
+}
+
+/**
+ * Action-mode bounds: centered {@link ACTION_MODE_WIDTH}×{@link ACTION_MODE_HEIGHT}
+ * canvas, clamped to the work area. Used both for the initial window bounds when
+ * the persisted mode is "action" and for the resize-for-mode tween target.
+ */
+export function computeActionModeBounds(
+  workArea: WorkAreaBounds
+): { x: number; y: number; width: number; height: number } {
+  const width = Math.min(workArea.width, ACTION_MODE_WIDTH);
+  const height = Math.min(workArea.height, ACTION_MODE_HEIGHT);
+  return {
+    x: Math.round(workArea.x + (workArea.width - width) / 2),
+    y: Math.round(workArea.y + (workArea.height - height) / 2),
     width,
     height,
   };
