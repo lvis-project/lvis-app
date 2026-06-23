@@ -36,12 +36,12 @@ jobs:
       MARKETPLACE_SIGNING_PRIVATE_KEY_POC_V1: ${{ secrets.M4_MARKETPLACE_SIGNING_KEY_POC_V1 }}
     steps:
       - name: Checkout lvis-app
-        uses: actions/checkout@v6
+        uses: actions/checkout@v7
         with:
           path: lvis-app
 
       - name: Checkout lvis-marketplace
-        uses: actions/checkout@v6
+        uses: actions/checkout@v7
         with:
           repository: lvis-project/lvis-marketplace
           path: lvis-marketplace
