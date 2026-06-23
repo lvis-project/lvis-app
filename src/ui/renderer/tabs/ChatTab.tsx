@@ -99,7 +99,7 @@ export function ChatTab({
       >
         <div className="flex items-center gap-3 rounded-md border px-3 py-3">
           <Checkbox
-            checked={idlePreferenceRefresh ?? false}
+            checked={idlePreferenceRefresh ?? true}
             disabled={!settingsLoaded}
             data-testid="idle-preference-refresh-toggle"
             className="size-5"

@@ -35,6 +35,7 @@ import {
   validateShellWorkingDirectory,
 } from "./shell-path-policy.js";
 import { getSandboxRunner } from "../permissions/sandbox-runner.js";
+import { deriveSandboxWritePaths } from "../permissions/sandbox-write-jail.js";
 import { TOOL_TIMEOUT_POLICY } from "../shared/tool-timeout-policy.js";
 import { trackManagedChildProcess } from "../main/managed-child-processes.js";
 
@@ -127,24 +128,30 @@ export class BashTool extends ZodTool<typeof BashToolInputSchema> {
     }
 
     // §691: SandboxRunner spawn path (first consumer of SandboxedProcess).
-    // If a runner is registered for the current platform (Linux bwrap,
-    // macOS sandbox-exec, or Windows AppContainer), delegate spawn to it.
+    // A runner is registered at boot only when the user opted in (Settings →
+    // 권한 'OS 도구 샌드박스' or the LVIS_SANDBOX_ENABLED escape-hatch) AND the
+    // platform runner detected available. So a registered runner here means
+    // the sandbox is on — no separate runtime gate is needed.
     // The sandboxed process exposes stdout/stderr as WHATWG
     // ReadableStream<Uint8Array>; we pipe through TextDecoderStream for
     // UTF-8 string capture (CJK multi-byte boundary safe).
     //
-    // MEDIUM: Gated on LVIS_SANDBOX_ENABLED=1. Default off pending the
-    // policy-hook wiring that enables always-on. This prevents bwrap from
-    // breaking all Linux users before the full policy rollout.
-    // TODO: remove the env-gate and make sandbox always-on once policy hook lands.
-    //
-    // If no runner is registered or sandbox is not enabled (isolation=none, detect-and-skip),
+    // If no runner is registered (isolation=none, detect-and-skip / opt-out),
     // fall through to the existing spawnWithTimeout path unchanged — composition
     // rule + reviewer judgment remain the safety net.
     const sandboxRunner = getSandboxRunner(process.platform as NodeJS.Platform);
-    const sandboxEnabled = process.env["LVIS_SANDBOX_ENABLED"] === "1";
-    if (sandboxRunner && sandboxEnabled) {
-      return await spawnWithSandbox(sandboxRunner, input.command, resolvedCwd, input.timeoutSeconds);
+    if (sandboxRunner) {
+      // Write-jail = canonicalized union of the owner plugin sandbox root
+      // (when plugin-owned) and the in-scope allowed directories
+      // (cwd ∪ user-authorized extras). cwd stays readable but is no
+      // longer the write boundary.
+      const writePaths = deriveSandboxWritePaths({
+        ...(ctx.ownerPluginSandboxRoot !== undefined
+          ? { ownerPluginSandboxRoot: ctx.ownerPluginSandboxRoot }
+          : {}),
+        allowedDirectories: [resolvedCwd, ...ctx.extraAllowedDirectories],
+      });
+      return await spawnWithSandbox(sandboxRunner, input.command, resolvedCwd, writePaths, input.timeoutSeconds);
     }
 
     return await spawnWithTimeout(input.command, resolvedCwd, input.timeoutSeconds); // isolation=none path
@@ -186,16 +193,20 @@ interface SpawnResult {
  * (SIGTERM to bwrap wrapper, which propagates into the namespace).
  *
  * The sandboxed process is given a conservative capability set:
- *   - `networkBlocked: true` — no outbound egress (verified-kernel CLONE_NEWNET)
- *   - `fsReadPaths: ["/etc", "/usr"]` — minimal read mounts
- *   - `fsWritePaths: [resolvedCwd]` — write access only to the working dir
- *   - `processIsolated: true` — separate PID namespace
+ *   - `networkBlocked: true` — egress policy is runner-dependent: Linux bwrap
+ *     verified-kernel CLONE_NEWNET fully blocks it; macOS sandbox-exec is
+ *     PARTIAL (loopback/IPv6/DNS still reachable).
+ *   - `fsReadPaths: ["/etc", "/usr", HOME]` — minimal read mounts; the
+ *     working dir is also readable.
+ *   - `fsWritePaths: writePaths` — the namespace-scoped write-jail derived by
+ *     {@link ../permissions/sandbox-write-jail.js deriveSandboxWritePaths}
+ *     (owner plugin sandbox root ∪ allowed directories), NOT the bare cwd.
+ *   - `processIsolated: true` — separate PID namespace (Linux only; macOS
+ *     informational).
  *
  * Policy notes:
  *   - Network policy will be refined when the always-on policy hook lands.
  *   - fsReadPaths will be extended based on per-platform tool analysis.
- *   - The cwd bind is the only write path — tools that need broader write
- *     access must request it via the capability system.
  *
  * @internal — only exported for testing.
  */
@@ -203,6 +214,7 @@ export async function spawnWithSandbox(
   runner: import("../permissions/sandbox-runner.js").SandboxRunner,
   command: string,
   resolvedCwd: string,
+  writePaths: readonly string[],
   timeoutSeconds: number,
 ): Promise<SpawnResult> {
   const shell = resolveShell();
@@ -226,7 +238,7 @@ export async function spawnWithSandbox(
         "/usr",
         process.env["HOME"] ?? "/home",
       ],
-      fsWritePaths: [resolvedCwd],
+      fsWritePaths: [...writePaths],
       processIsolated: true,
     },
     // CRITICAL: pass cwd so the runner applies --chdir inside the namespace.

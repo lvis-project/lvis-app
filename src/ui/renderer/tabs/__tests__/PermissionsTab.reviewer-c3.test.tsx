@@ -91,6 +91,14 @@ function installApi(providerKeys: Partial<Record<string, boolean>> = {}) {
         };
       }),
       reviewerProviderHasKey,
+      sandboxCapability: vi.fn(async () => ({
+        platform: "linux" as NodeJS.Platform,
+        enabled: false,
+        available: true,
+        kind: "full" as const,
+        reason: "",
+        confines: { filesystem: true, process: true, network: true },
+      })),
       onManifestViolation: vi.fn(() => () => undefined),
       auditShow: vi.fn(async () => ({
         ok: true as const,
@@ -122,6 +130,8 @@ function installApi(providerKeys: Partial<Record<string, boolean>> = {}) {
   // useEffect that subscribes to settings changes doesn't throw.
   const lvisApi = {
     onSettingsUpdated: vi.fn(() => () => undefined),
+    getSettings: vi.fn(async () => ({ features: { osToolSandbox: false } })),
+    updateSettings: vi.fn(async () => ({})),
   };
   (globalThis as unknown as { window: { lvisApi?: unknown } }).window.lvisApi = lvisApi;
   return lvis;
