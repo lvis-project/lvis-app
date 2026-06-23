@@ -19,7 +19,7 @@ import { useEffect, useRef, useState } from "react";
 import { TooltipProvider } from "../../../../components/ui/tooltip.js";
 import { Composer, type ComposerHandle } from "../Composer.js";
 import { InputActionBar } from "../InputActionBar.js";
-import { CommandPopover } from "../CommandPopover.js";
+import { SlashPicker } from "../SlashPicker.js";
 import { MainToolbar } from "../../MainToolbar.js";
 import { StatusBar } from "../StatusBar.js";
 import type { Attachment } from "../../types/attachments.js";
@@ -65,14 +65,21 @@ describe("Tutorial-C PR #983 follow-up: tour anchors", () => {
       commandActions: [],
       commandPopoverOpen: false,
       onCommandPopoverOpenChange: vi.fn(),
+      ringSlot: null,
       onAttach: vi.fn(),
       attachDisabled: false,
       rolePresets: [mockPreset],
       activePreset: mockPreset,
       activePresetId: "default",
       onSelectPreset: vi.fn(),
+      isBusy: false,
+      isSendDisabled: false,
+      onSend: vi.fn(),
+      onCancel: vi.fn(),
       enableThinkingChat: false,
       onToggleThinking: vi.fn(),
+      statusRow: { active: false, vendorModel: "", permissionMode: "unknown", pendingApprovals: 0 },
+      contextPercent: null,
     };
     const { getByTestId } = render(
       <TooltipProvider>
@@ -84,11 +91,15 @@ describe("Tutorial-C PR #983 follow-up: tour anchors", () => {
     ).toBe("input-action-bar");
   });
 
-  it("CommandPopover trigger carries data-tour-anchor=command-palette-toggle", () => {
+  it("SlashPicker trigger carries data-tour-anchor=command-palette-toggle", () => {
+    // The ⌘ CommandPopover merged into the unified SlashPicker; the tour
+    // anchor moved onto the picker's trigger so step 3 still resolves.
     const { getByTestId } = render(
       <TooltipProvider>
-        <CommandPopover
+        <SlashPicker
           actions={[]}
+          plugins={[]}
+          onSelectPlugin={vi.fn()}
           onInsert={vi.fn()}
           open={false}
           onOpenChange={vi.fn()}
@@ -114,14 +125,21 @@ describe("Tutorial-C PR #983 follow-up: tour anchors", () => {
       commandActions: [],
       commandPopoverOpen: false,
       onCommandPopoverOpenChange: vi.fn(),
+      ringSlot: null,
       onAttach: vi.fn(),
       attachDisabled: false,
       rolePresets: [mockPreset],
       activePreset: mockPreset,
       activePresetId: "default",
       onSelectPreset: vi.fn(),
+      isBusy: false,
+      isSendDisabled: false,
+      onSend: vi.fn(),
+      onCancel: vi.fn(),
       enableThinkingChat: false,
       onToggleThinking: vi.fn(),
+      statusRow: { active: false, vendorModel: "", permissionMode: "unknown", pendingApprovals: 0 },
+      contextPercent: null,
     };
     const toolbarProps: Parameters<typeof MainToolbar>[0] = {
       activeView: "home",
@@ -161,10 +179,12 @@ describe("Tutorial-C PR #983 follow-up: tour anchors", () => {
     );
     const scenario = getTourScenario("first-boot-essentials");
     expect(scenario).toBeTruthy();
-    // Z chain expansion — must be 7 steps (host UI + plugin entry).
-    // Hard-pin so a future re-trim cannot silently
-    // revert without test diff.
-    expect(scenario!.steps).toHaveLength(7);
+    // 6 host-UI steps. The input-area relayout (#1311) folded plugin views
+    // into the command palette (SlashPicker), so the old dedicated "plugin
+    // grid" step was removed — the command-palette step now covers how the
+    // user reaches plugins. Hard-pin so a future re-trim cannot silently
+    // revert without a test diff.
+    expect(scenario!.steps).toHaveLength(6);
     for (const step of scenario!.steps) {
       const found = document.querySelector(step.anchorSelector);
       expect(
@@ -184,7 +204,10 @@ describe("Tutorial-C PR #983 follow-up: tour anchors", () => {
     expect(anchors.has('[data-tour-anchor="chat-history"]')).toBe(true);
     expect(anchors.has('[data-tour-anchor="settings-entry"]')).toBe(true);
     expect(anchors.has('[data-tour-anchor="status-bar-vendor"]')).toBe(true);
-    expect(anchors.has('[data-tour-anchor="plugin-entry"]')).toBe(true);
+    // The plugin-entry anchor was intentionally removed by #1311 — plugins are
+    // reached via the command palette (covered by the command-palette-toggle
+    // step above), so the first-boot tour no longer references it.
+    expect(anchors.has('[data-tour-anchor="plugin-entry"]')).toBe(false);
   });
 });
 

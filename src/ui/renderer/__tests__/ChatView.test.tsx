@@ -1713,7 +1713,7 @@ describe("ChatView", () => {
     const finalBody = assistantBodies.find((el) => el.textContent?.includes("최종 답변")) as HTMLElement | undefined;
     const finalRingWrapper = finalBody?.parentElement?.parentElement;
 
-    expect(finalRingWrapper?.className).toContain("ring-1 ring-primary/40");
+    expect(finalRingWrapper?.className).toContain("ring-1 ring-primary/(--opacity-medium)");
   });
 
 });

@@ -32,7 +32,8 @@ import { hasSeenFirstBootTour } from "./onboarding/first-boot-tour-gate.js";
 import { LoginModal } from "./components/LoginModal.js";
 import { LLM_VENDORS } from "../../shared/llm-vendor-defaults.js";
 import { buildQuickActions } from "./components/command-actions.js";
-import { MainToolbar } from "./MainToolbar.js";
+import { MainToolbar, type AppMode } from "./MainToolbar.js";
+import { Sidebar } from "./components/Sidebar.js";
 import { useAppUpdate } from "./hooks/use-app-update.js";
 import { DevToolsPanel } from "./components/DevToolsPanel.js";
 import { MainContent } from "./MainContent.js";
@@ -71,6 +72,7 @@ import { useMarketplaceUrl } from "./hooks/use-marketplace-url.js";
 import { OverlayContextProvider } from "./context/OverlayContext.js";
 import { UnifiedSearchPanel } from "./components/UnifiedSearchPanel.js";
 import type { UserKeyboardIntentSnapshot } from "../../shared/chat-origin.js";
+import { normalizeSettingsTab } from "../../shared/settings-tabs.js";
 
 // ─── App ────────────────────────────────────────────
 
@@ -173,6 +175,50 @@ export function App() {
   const tourCompleted =
     chainStage === "done" && chainState.completionReason === "chain";
   const [activeView, setActiveView] = useState("home");
+  // Inline-settings (action mode): which tab SettingsContent opens on, and the
+  // view to return to via the back-to-home affordance. In chat mode Settings
+  // detaches to its own BrowserWindow instead (see onOpenSettings), so these
+  // only drive the action-mode activeView==="settings" inline render.
+  const [settingsTab, setSettingsTab] = useState("general");
+  const settingsReturnViewRef = useRef("home");
+  // Workspace mode (Chat / Action). Default "action" preserves the historical
+  // inline behavior: built-in + plugin views render inline in the main area and
+  // the sidebar defaults expanded. In "chat" mode, selecting a detachable view
+  // opens it in a separate window while the main area stays the chat. appMode
+  // is the SOLE authority for inline-vs-detached; plugins cannot request
+  // detachment (there is no plugin-side mode flag).
+  const [appMode, setAppMode] = useState<AppMode>("action");
+  // Sidebar collapse is owned by the shell (the floating-card Sidebar reads it
+  // as a prop and never manages its own state). The rail width is coupled to
+  // appMode in both directions (see the effect below): action expands it, chat
+  // collapses it — a per-transition default, NOT a lock.
+  const [sidebarCollapsed, setSidebarCollapsed] = useState(false);
+  // appMode drives the rail's default width on each mode transition: action
+  // mode expands it (wide working layout — inline views need the room), chat
+  // mode collapses it to the focused icon rail (views detach to windows). This
+  // makes toggling visibly widen/narrow the shell. It is a per-transition
+  // default, NOT a lock — the user may still collapse/expand manually within a
+  // mode without it snapping back until the next mode switch.
+  useEffect(() => {
+    setSidebarCollapsed(appMode === "chat");
+  }, [appMode]);
+  // Resize the OS window to match the mode: action mode is a centered 800×600
+  // working canvas; chat mode restores the 기존 right-docked initial bounds.
+  // The bridge is optional (absent in jsdom / non-Electron); guard accordingly.
+  useEffect(() => {
+    void api.window?.resizeForMode?.(appMode);
+  }, [appMode, api]);
+  // Action mode is the inline workspace: every view renders in the main tab,
+  // so any windows that were detached in chat mode must close on the
+  // transition. The login/auth window is ALWAYS a separate window
+  // regardless of mode and is excluded by the main process (auth windows are
+  // never tracked as detached tabs). Fire-on-transition only: this depends
+  // solely on stable refs (appMode + the stable api) and never sets state, so
+  // it cannot re-trigger itself (#1312 render-loop guard).
+  useEffect(() => {
+    if (appMode !== "action") return;
+    void api.window?.closeAllDetached?.();
+  }, [appMode, api]);
   const [commandPopoverOpen, setCommandPopoverOpen] = useState(false);
   const [devToolsOpen, setDevToolsOpen] = useState(false);
 
@@ -521,11 +567,6 @@ export function App() {
     void api.openExternalUrl(marketplaceUrl);
   }, [api, marketplaceUrl, marketplaceUrlReady]);
 
-  const refreshPluginSurfaces = useCallback(() => {
-    void refreshCards();
-    void refreshViews();
-  }, [refreshCards, refreshViews]);
-
   const openDetachedPluginView = useCallback(
     async (viewKey: string): Promise<boolean> => {
       const openDetached = api.window?.openDetached;
@@ -545,7 +586,7 @@ export function App() {
   );
 
   const openDetachedBuiltInView = useCallback(
-    async (viewKey: "routines" | "memory" | "starred"): Promise<boolean> => {
+    async (viewKey: "work-board" | "routines" | "memory" | "starred"): Promise<boolean> => {
       const openDetached = api.window?.openDetached;
       if (!openDetached) {
         setErrorWithThought(t("app.errorCannotOpenNewWindow"));
@@ -562,9 +603,10 @@ export function App() {
     [api, setErrorWithThought],
   );
 
-  // When a plugin view declares `window.defaultMode: "detached"`, selecting
-  // it opens a separate magnetic-snap BrowserWindow instead of
-  // switching the main window's active view.
+  // In chat mode (appMode === "chat"), selecting a plugin view opens a
+  // separate magnetic-snap BrowserWindow instead of switching the main
+  // window's active view. The app's mode is the sole authority for this;
+  // plugins do not get a say.
   //
   // If the owning plugin declares `manifest.auth` AND its current state is
   // unauthed, embedded views invoke loginTool before navigating. Detached
@@ -617,8 +659,10 @@ export function App() {
           })();
           return;
         }
-        const isDetachedView = view.extension.window?.defaultMode === "detached";
-        if (isDetachedView) {
+        // appMode is the SOLE authority for inline-vs-detached. Action keeps
+        // every plugin view INLINE; chat pops every plugin view into a
+        // detached window. Plugins have no say in this decision.
+        if (appMode === "chat") {
           void openDetachedPluginView(key);
           return;
         }
@@ -626,44 +670,59 @@ export function App() {
         const status = pluginAuthStatuses.get(view.pluginId);
         const card = pluginCards.find((c) => c.id === view.pluginId);
         const loginTool = card?.auth?.loginTool;
-        // Race guard: status arrives via one IPC, pluginCards via another.
-        // If status says "unauthed" but the cards haven't populated yet
-        // (`card` undefined → `loginTool` undefined), navigating now would
-        // strand the user on the broken-unauthed view — exactly what the
-        // PR aimed to prevent. Abort silently; the user can click again
-        // once the cards arrive (badge keeps prompting them).
-        if (status?.kind === "unauthed" && !loginTool) {
-          console.warn(
-            `[plugin-auth] ${view.pluginId} unauthed but pluginCards not yet loaded — aborting click`,
-          );
-          return;
-        }
+        // Action mode contract: EVERY plugin view renders inline,
+        // including unauthed ones. The view navigates immediately and shows
+        // its own auth/login affordance inline; the login itself still opens
+        // through `loginTool` → openAuthWindow as a separate window. We do NOT
+        // silently abort navigation, and we do NOT gate navigation on login
+        // completing — that previously stranded users on whatever view they
+        // were already on whenever the plugin reported unauthed (or whenever
+        // the pluginCards IPC had not yet populated `loginTool`).
+        //
+        // Security contract preserved: an unauthed plugin still routes through
+        // its declared `loginTool`; navigating inline does not grant the view
+        // any authenticated data — the plugin surface gates its own content on
+        // auth state. There is no token_login bypass here.
         if (status?.kind === "unauthed" && loginTool) {
           void (async () => {
             try {
               await api.callPluginMethod(loginTool);
             } catch (err) {
-              // User cancelled / IPC rejected — leave them on the current
-              // view, do NOT navigate to the still-unauthed plugin view.
-              // Cancellation is a normal user choice, not an error: log
-              // at warn so renderer DevTools doesn't paint it red.
+              // Cancellation / IPC rejection is a normal user choice, not an
+              // error: log at warn so renderer DevTools doesn't paint it red.
+              // Navigation already happened below, so the user lands on the
+              // plugin's own inline auth affordance regardless.
               console.warn(
                 `[plugin-auth] ${view.pluginId} loginTool ${loginTool} did not complete (cancelled or IPC rejected)`,
                 err,
               );
-              return;
             }
-            // Login resolved — navigate to the view the user originally
-            // wanted. The `<pluginId>.auth.changed` event will flip the
-            // badge separately via the live-poll path.
-            setActiveView(key);
           })();
-          return;
         }
+      }
+      // Chat mode: built-in detachable views open in a separate window; home
+      // (and every action-mode path) stays inline.
+      if (
+        appMode === "chat" &&
+        (key === "work-board" ||
+          key === "routines" ||
+          key === "memory" ||
+          key === "starred")
+      ) {
+        void openDetachedBuiltInView(key);
+        return;
       }
       setActiveView(key);
     },
-    [api, pluginViews, pluginAuthStatuses, pluginCards, openDetachedPluginView],
+    [
+      api,
+      appMode,
+      pluginViews,
+      pluginAuthStatuses,
+      pluginCards,
+      openDetachedPluginView,
+      openDetachedBuiltInView,
+    ],
   );
 
   // If the currently-open plugin view belongs to a plugin that just got
@@ -674,6 +733,16 @@ export function App() {
     if (activePluginView) return;
     setActiveView("home");
   }, [activeView, activePluginView]);
+
+  // Inline settings exists only in action mode. Switching to chat mode while it
+  // is open returns to home so chat mode's detached-Settings contract holds (a
+  // subsequent sidebar Settings click then opens the detached BrowserWindow).
+  useEffect(() => {
+    if (appMode === "chat" && activeView === "settings") {
+      setActiveView(settingsReturnViewRef.current === "settings" ? "home" : settingsReturnViewRef.current);
+    }
+  }, [appMode, activeView]);
+
   const checkApiKey = useCallback(async () => { const h = await api.hasApiKey(); setHasApiKey(h); return h; }, [api]);
 
   // Z onboarding chain — first-boot probe.
@@ -795,9 +864,39 @@ export function App() {
     }
   }, [api, chainStage, markOnboardingCompleted]);
 
+  // appMode is the SOLE authority for inline-vs-detached, mirroring the other
+  // views (업무보드/루틴/메모리/별표 + plugin views). In action mode Settings
+  // joins that inline pattern: setActiveView("settings") + MainContent renders
+  // SettingsContent inline. In chat mode Settings keeps the existing detached
+  // BrowserWindow path untouched. Re-selecting Settings while already on the
+  // inline view is a no-op (only the tab is refreshed) so the view never
+  // re-mounts and loses its place.
   const onOpenSettings = useCallback((tab = "llm") => {
-    void api.openSettingsWindow(tab);
-  }, [api]);
+    if (appMode === "chat") {
+      void api.openSettingsWindow(tab);
+      return;
+    }
+    setSettingsTab(normalizeSettingsTab(tab));
+    setActiveView((current) => {
+      // Only capture the return view on the first entry into settings; a
+      // re-click while already inline must not overwrite it with "settings".
+      if (current !== "settings") settingsReturnViewRef.current = current;
+      return "settings";
+    });
+  }, [api, appMode]);
+
+  const handleCloseInlineSettings = useCallback(() => {
+    const target = settingsReturnViewRef.current;
+    setActiveView(target === "settings" ? "home" : target);
+  }, []);
+
+  // Inline settings save → refresh the same live state the detached window's
+  // onSettingsWindowSaved listener refreshes (api key + LLM settings), without
+  // an IPC round-trip since the content renders in-process.
+  const handleInlineSettingsSaved = useCallback(() => {
+    void checkApiKey();
+    void refreshLlmSettings();
+  }, [checkApiKey, refreshLlmSettings]);
 
   useEffect(() => {
     return api.onSettingsWindowSaved(() => {
@@ -1307,54 +1406,81 @@ export function App() {
       runningRoutines={runningRoutines}
     >
         <div className="flex h-screen flex-col overflow-hidden">
-          <CustomTitleBar />
-        <div className="flex min-h-0 min-w-0 flex-1 overflow-hidden">
-        <main className="flex min-h-0 min-w-0 flex-1 flex-col">
-          <BootstrapStatusBanner status={bootstrapStatus} onDismiss={dismissBootstrapStatus} onRetry={() => void retryBootstrap()} />
-          <MarketplaceUpdateBanner
-            updates={marketplaceUpdates}
-            onDismiss={dismissMarketplaceUpdates}
-            onSkip={skipMarketplaceUpdates}
-            onUpdate={installPlugin}
+          {/* Single top band — window controls + the app toolbar cluster live
+              together here. The toolbar content is passed as children so it
+              renders IN the band (no separate toolbar row below it). */}
+          <CustomTitleBar>
+            <MainToolbar
+              activeView={activeView}
+              streaming={streaming}
+              hasApiKey={effectiveHasApiKey}
+              isCurrentSessionStarred={Boolean(currentSessionId && isSessionStarred(currentSessionId))}
+              onToggleCurrentSessionStar={() => currentSessionId
+                ? handleToggleSessionStar(currentSessionId, sessions.find((s) => s.id === currentSessionId)?.title)
+                : Promise.resolve()}
+              onExport={handleExport}
+              onOpenUnifiedSearch={() => {
+                searchOpenOverlay();
+              }}
+              sidebarCollapsed={sidebarCollapsed}
+              onToggleSidebar={() => setSidebarCollapsed((v) => !v)}
+              appMode={appMode}
+              onToggleAppMode={setAppMode}
+              onOpenDevTools={() => setDevToolsOpen((v) => !v)}
+              appUpdateState={appUpdate.state}
+              appUpdateInFlight={appUpdate.inFlight}
+              onDownloadAppUpdate={appUpdate.download}
+              onInstallAppUpdate={appUpdate.install}
+              onSkipAppUpdate={appUpdate.skip}
+            />
+          </CustomTitleBar>
+        {/* `relative` anchors the floating-card Sidebar (absolute, inset-3).
+            The content `<main>` carries left padding equal to the card width
+            + insets so the floating rail never occludes the canvas. */}
+        <div className="relative flex min-h-0 min-w-0 flex-1 overflow-hidden">
+          <Sidebar
+            activeView={activeView}
+            onSelect={handleViewSelect}
+            pluginViews={pluginViews}
+            pluginAuthStatuses={pluginAuthStatuses}
+            hasApiKey={effectiveHasApiKey}
+            onOpenSettings={() => onOpenSettings()}
+            onNewChat={onNewChat}
+            streaming={streaming}
+            onOpenMarketplace={onOpenMarketplace}
+            marketplaceUrlReady={marketplaceUrlReady}
+            collapsed={sidebarCollapsed}
           />
-          <MarketplaceAnnouncementBanner
-            announcements={marketplaceAnnouncements}
-            onDismiss={handleMarketplaceAnnouncementDismiss}
-          />
+        <main
+          className={`relative flex min-h-0 min-w-0 flex-1 flex-col bg-background transition-[padding] duration-200 ease-out motion-reduce:transition-none ${
+            sidebarCollapsed ? "pl-[5rem]" : "pl-[15.5rem]"
+          }`}
+        >
+          {/* Floating notification stack — update/announcement banners are an
+              OVERLAY, not in-flow content. They float over the canvas anchored
+              top-right so they never push MainContent or the composer down. The
+              wrapper is pointer-events-none (clicks pass through the gaps); each
+              banner card re-enables pointer-events so Update/dismiss still work.
+              `top-2 right-2` keeps the stack below the window-control band and
+              clear of the search/star/export controls in the toolbar. */}
+          <div className="pointer-events-none absolute right-2 top-2 z-50 flex w-full max-w-md flex-col gap-2 [&>*]:pointer-events-auto [&>*]:m-0">
+            <BootstrapStatusBanner status={bootstrapStatus} onDismiss={dismissBootstrapStatus} onRetry={() => void retryBootstrap()} />
+            <MarketplaceUpdateBanner
+              updates={marketplaceUpdates}
+              onDismiss={dismissMarketplaceUpdates}
+              onSkip={skipMarketplaceUpdates}
+              onUpdate={installPlugin}
+            />
+            <MarketplaceAnnouncementBanner
+              announcements={marketplaceAnnouncements}
+              onDismiss={handleMarketplaceAnnouncementDismiss}
+            />
+          </div>
           {fallbackToast && (
             <div className="bg-warning text-warning-foreground text-xs px-4 py-2 border-b border-warning">
               {fallbackToast}
             </div>
           )}
-          <MainToolbar
-            activeView={activeView}
-            streaming={streaming}
-            hasApiKey={effectiveHasApiKey}
-            isCurrentSessionStarred={Boolean(currentSessionId && isSessionStarred(currentSessionId))}
-            onNewChat={onNewChat}
-            onToggleCurrentSessionStar={() => currentSessionId
-              ? handleToggleSessionStar(currentSessionId, sessions.find((s) => s.id === currentSessionId)?.title)
-              : Promise.resolve()}
-            onExport={handleExport}
-            onOpenHome={() => setActiveView("home")}
-            onOpenWorkBoardView={() => setActiveView("work-board")}
-            onOpenRoutinesView={() => setActiveView("routines")}
-            onOpenMemoryView={() => setActiveView("memory")}
-            onOpenSettings={() => onOpenSettings()}
-            onOpenUnifiedSearch={() => {
-              searchOpenOverlay();
-            }}
-            onOpenStarredView={() => setActiveView("starred")}
-            onOpenDetachedView={(viewKey) => {
-              void openDetachedBuiltInView(viewKey);
-            }}
-            onOpenDevTools={() => setDevToolsOpen((v) => !v)}
-            appUpdateState={appUpdate.state}
-            appUpdateInFlight={appUpdate.inFlight}
-            onDownloadAppUpdate={appUpdate.download}
-            onInstallAppUpdate={appUpdate.install}
-            onSkipAppUpdate={appUpdate.skip}
-          />
           <DevToolsPanel
             api={api}
             open={devToolsOpen}
@@ -1447,6 +1573,9 @@ export function App() {
           <MainContent
             activeView={activeView}
             api={api}
+            settingsTab={settingsTab}
+            onSettingsSaved={handleInlineSettingsSaved}
+            onCloseSettings={handleCloseInlineSettings}
             starred={starred}
             currentSessionId={currentSessionId}
             currentSessionKind={currentSessionKind}
@@ -1477,22 +1606,20 @@ export function App() {
             onResolveAskQuestion={dismissAskQuestion}
             plugins={pluginEntries}
             onSelectPlugin={handleViewSelect}
-            onRefreshPlugins={refreshPluginSurfaces}
             commandActions={commandActions}
             commandPopoverOpen={commandPopoverOpen}
             onCommandPopoverOpenChange={setCommandPopoverOpen}
-            installingPlugins={installingPlugins}
-            onOpenMarketplace={onOpenMarketplace}
-            marketplaceUrlReady={marketplaceUrlReady}
             activePluginView={activePluginView ?? null}
             onPluginPrimaryAction={(id) => { void handlePluginPrimaryAction(id); }}
             onRoutineAcknowledge={handleRoutineAcknowledge}
-            onOpenPermissionQueue={() => setDeferredQueueOpen(true)}
           />
           </ErrorBoundary>
+          {/* Status bar — last child of the chat/content column, BELOW
+              MainContent/composer and starting right of the sidebar (no longer
+              a full-width root footer; no top divider). */}
+          <StatusBar persistent={statusPersistent} visibleToast={statusVisibleToast} pendingCount={statusPendingCount} onToastClick={handleStatusToastClick} />
         </main>
         </div>
-        <StatusBar persistent={statusPersistent} visibleToast={statusVisibleToast} pendingCount={statusPendingCount} onToastClick={handleStatusToastClick} />
       </div>
 
       {/* ask_user_question cards now render inline inside ChatView
@@ -1660,9 +1787,9 @@ export function App() {
         installedPluginIds={pluginCards.map((c) => c.id)}
         tourCompleted={tourCompleted}
       />
-      {/* v6: ApprovalQueueStatus floating chip 제거. 큐 정보는 InputActionBar
-          trailing 의 DeferredApprovalChip 으로 통합. Spec docs/blueprints/
-          composer-redesign-message-queue.md "제거" 섹션. */}
+      {/* v6: ApprovalQueueStatus floating chip 제거. 자연어 승인 칩
+          (DeferredApprovalChip) 은 ChatView 의 컴포저 바로 위에서 렌더된다.
+          Spec docs/blueprints/composer-redesign-message-queue.md "제거" 섹션. */}
       <DevConsoleToggle />
       {/* Snap edge highlight — shown when a detached child window enters the snap zone */}
       <SnapEdgeHighlight />

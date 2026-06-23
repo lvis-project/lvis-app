@@ -36,7 +36,11 @@ function fakeRuntime(): PluginRuntime {
   } as unknown as PluginRuntime;
 }
 
-/** A manifest whose tool has NO category — mcpToolToPluginTool throws on it. */
+/**
+ * A category-less manifest. Under host-classifies-risk this loads as
+ * write-equivalent (default-strict) rather than throwing — used to pin that
+ * the missing-category hard-fail is gone.
+ */
 function categorylessManifest(id: string, tool: string): PluginManifest {
   return {
     id,
@@ -93,6 +97,20 @@ describe("PluginLoopbackManager", () => {
     await expect(mgr.stop("nope")).resolves.toBeUndefined();
   });
 
+  it("category-less reload now loads write-equivalent (default-strict), not a hard fail", async () => {
+    const registry = new ToolRegistry();
+    const mgr = new PluginLoopbackManager(fakeRuntime(), registry);
+
+    await mgr.start(manifest("com.a", ["a_one"]));
+    // host-classifies-risk: a category-less tool no longer aborts the load — it
+    // registers at the write-equivalent default-strict baseline.
+    await expect(mgr.start(categorylessManifest("com.a", "a_bad"))).resolves.toEqual(["a_bad"]);
+    expect(registry.findByName("a_bad")?.category).toBe("write");
+    // The reload atomically swapped com.a's tool set.
+    expect(registry.findByName("a_one")).toBeUndefined();
+    expect(mgr.list()).toEqual(["com.a"]);
+  });
+
   it("atomic reload: a failed reload keeps the PREVIOUS tools (no zero-tools window)", async () => {
     const registry = new ToolRegistry();
     const mgr = new PluginLoopbackManager(fakeRuntime(), registry);
@@ -100,16 +118,19 @@ describe("PluginLoopbackManager", () => {
     await mgr.start(manifest("com.a", ["a_one"]));
     const before = registry.findByName("a_one");
     expect(before?.pluginId).toBe("com.a");
+    // A bystander plugin owns the name the reload will try to claim.
+    await mgr.start(manifest("com.b", ["clash"]));
 
-    // Reload com.a with a category-less tool → host.start throws during buildTools.
-    await expect(mgr.start(categorylessManifest("com.a", "a_bad"))).rejects.toThrow(
-      /no authoritative.*category/,
+    // Reload com.a declaring a tool name already owned by com.b → the atomic
+    // swap's cross-plugin name-collision guard throws, leaving com.a's previous
+    // registration fully intact (no zero-tools window).
+    await expect(mgr.start(manifest("com.a", ["clash"]))).rejects.toThrow(
+      /name collision/i,
     );
 
-    // Previous registration is fully intact — NOT wiped to zero.
     expect(registry.findByName("a_one")).toBe(before);
-    expect(registry.findByName("a_bad")).toBeUndefined();
-    expect(mgr.list()).toEqual(["com.a"]);
+    expect(registry.findByName("clash")?.pluginId).toBe("com.b");
+    expect(mgr.list().sort()).toEqual(["com.a", "com.b"]);
   });
 
   it("atomic reload: a successful reload swaps to the new tool set", async () => {

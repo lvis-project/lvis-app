@@ -118,9 +118,9 @@ export function MarketplaceTab(props: MarketplaceTabProps) {
   }, [api, baseUrl]);
   const statusBadge = useMemo(() => {
     if (pingState.phase === "loading") {
-      return { dot: "bg-muted-foreground/40", label: t("marketplaceTab.pingChecking") };
+      return { dot: "bg-muted-foreground/(--opacity-medium)", label: t("marketplaceTab.pingChecking") };
     }
-    if (!pingState.configured) return { dot: "bg-muted-foreground/40", label: t("marketplaceTab.pingNotConnected") };
+    if (!pingState.configured) return { dot: "bg-muted-foreground/(--opacity-medium)", label: t("marketplaceTab.pingNotConnected") };
     if (pingState.online) return { dot: "bg-success", label: t("marketplaceTab.pingOk") };
     return { dot: "bg-destructive", label: t("marketplaceTab.pingNoResponse") };
   }, [pingState, locale, t]);
@@ -217,7 +217,7 @@ export function MarketplaceTab(props: MarketplaceTabProps) {
           / auth knobs sit behind the "고급 옵션" collapse below so the
           surface stays decluttered. */}
       <div
-        className="flex flex-col items-center gap-3 rounded-xl border border-primary/30 bg-gradient-to-br from-primary/10 via-primary/5 to-transparent px-4 py-6 text-center"
+        className="flex flex-col items-center gap-3 rounded-xl border border-primary/(--opacity-muted) bg-gradient-to-br from-primary/(--opacity-subtle) via-primary/(--opacity-faint) to-transparent px-4 py-6 text-center"
         data-testid="marketplace:cta"
       >
         <Button
@@ -225,7 +225,7 @@ export function MarketplaceTab(props: MarketplaceTabProps) {
           size="lg"
           onClick={openMarketplace}
           disabled={!baseUrl.trim()}
-          className="bg-gradient-to-r from-primary to-primary/80 px-6 py-5 text-base font-semibold shadow-md hover:from-primary/90 hover:to-primary/70"
+          className="bg-gradient-to-r from-primary to-primary/(--opacity-intense) px-6 py-5 text-base font-semibold shadow-md hover:from-primary/(--opacity-near) hover:to-primary/(--opacity-stronger)"
           data-testid="marketplace:cta:open"
           aria-label={t("marketplaceTab.openMarketplaceAriaLabel")}
         >
@@ -344,7 +344,7 @@ export function MarketplaceTab(props: MarketplaceTabProps) {
 
         {advancedOpen && (
           <div className="space-y-4 pt-2" data-testid="marketplace:advanced:body">
-            <div className="rounded-md border border-warning/40 bg-warning/15 px-3 py-2 text-[11px] text-warning">
+            <div className="rounded-md border border-warning/(--opacity-medium) bg-warning/(--opacity-soft) px-3 py-2 text-[11px] text-warning">
               {t("marketplaceTab.applyTimingWarning")}
             </div>
 

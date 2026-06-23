@@ -1,6 +1,6 @@
 import { X as XIcon } from "lucide-react";
 import { Button } from "../../../components/ui/button.js";
-import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "../../../components/ui/card.js";
+import { CardContent, CardDescription, CardHeader, CardTitle } from "../../../components/ui/card.js";
 import { Badge } from "../../../components/ui/badge.js";
 import { ScrollArea } from "../../../components/ui/scroll-area.js";
 import type { LvisApi } from "../types.js";
@@ -34,7 +34,7 @@ export function StarredView({
 }: StarredViewProps) {
   const { t } = useTranslation();
   return (
-    <Card className="mx-auto flex min-h-0 min-w-0 flex-1 w-full max-w-6xl flex-col overflow-hidden">
+    <div className="mx-auto flex min-h-0 min-w-0 flex-1 w-full max-w-6xl flex-col overflow-hidden">
       <CardHeader>
         <div className="flex items-center justify-between">
           <CardTitle>{t("starredView.title")}</CardTitle>
@@ -43,8 +43,8 @@ export function StarredView({
         <CardDescription>{t("starredView.description")}</CardDescription>
       </CardHeader>
       <CardContent className="flex min-h-0 flex-1 flex-col gap-4">
-        <section className="flex min-h-0 flex-col rounded-lg border bg-muted/20 shadow-sm">
-          <div className="flex items-center justify-between rounded-t-lg border-b bg-muted/40 px-3 py-2">
+        <section className="flex min-h-0 flex-col rounded-lg border bg-muted/(--opacity-light) shadow-sm">
+          <div className="flex items-center justify-between rounded-t-lg border-b bg-muted/(--opacity-medium) px-3 py-2">
             <h3 className="text-xs font-semibold uppercase tracking-wider text-muted-foreground">{t("starredView.title")}</h3>
             <span className="flex h-5 min-w-[20px] items-center justify-center rounded-full bg-muted px-1.5 text-[10px] font-semibold text-muted-foreground">
               {starred.length}
@@ -82,6 +82,6 @@ export function StarredView({
           </ScrollArea>
         </section>
       </CardContent>
-    </Card>
+    </div>
   );
 }

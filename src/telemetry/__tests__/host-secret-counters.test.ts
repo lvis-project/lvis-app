@@ -73,4 +73,25 @@ describe("host-secret-counters (#893)", () => {
       expect(getHostSecretCounter("hostSecret_denied", "evil.plugin", "attacker0")).toBe(0);
     });
   });
+
+  // Tier A — plugin egress observability counters (hostApi.hostFetch)
+  describe("hostFetch egress counters (Tier A)", () => {
+    it("counts allowed egress per plugin under the fixed 'egress' bucket", () => {
+      incrementHostSecretCounter("hostFetch_egress", "meeting", "egress");
+      incrementHostSecretCounter("hostFetch_egress", "meeting", "egress");
+      incrementHostSecretCounter("hostFetch_egress", "ms-graph", "egress");
+      expect(getHostSecretCounter("hostFetch_egress", "meeting", "egress")).toBe(2);
+      expect(getHostSecretCounter("hostFetch_egress", "ms-graph", "egress")).toBe(1);
+    });
+
+    it("buckets denials by reason, and the egress reason buckets are NOT folded to 'other'", () => {
+      incrementHostSecretCounter("hostFetch_denied", "p", "capability");
+      incrementHostSecretCounter("hostFetch_denied", "p", "not-allowlisted");
+      expect(getHostSecretCounter("hostFetch_denied", "p", "capability")).toBe(1);
+      expect(getHostSecretCounter("hostFetch_denied", "p", "not-allowlisted")).toBe(1);
+      for (const b of ["egress", "capability", "invalid-url", "non-https", "not-allowlisted", "malformed-allowlist"]) {
+        expect(sanitizeKeyPrefix(b)).toBe(b);
+      }
+    });
+  });
 });

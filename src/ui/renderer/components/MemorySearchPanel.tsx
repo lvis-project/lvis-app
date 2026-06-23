@@ -2,7 +2,7 @@ import { useState } from "react";
 import { Input } from "../../../components/ui/input.js";
 import { Tabs, TabsList, TabsTrigger, TabsContent } from "../../../components/ui/tabs.js";
 import { ScrollArea } from "../../../components/ui/scroll-area.js";
-import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "../../../components/ui/card.js";
+import { CardContent, CardDescription, CardHeader, CardTitle } from "../../../components/ui/card.js";
 import { useMemorySearch, type NoteResult, type SessionResult } from "../hooks/use-memory-search.js";
 import type { LvisApi } from "../types.js";
 import { t } from "../../../i18n/runtime.js";
@@ -111,7 +111,7 @@ export function MemorySearchPanel({ api, onOpenSession }: MemorySearchPanelProps
   const { query, setQuery, noteResults, sessionResults, loading } = useMemorySearch(api);
 
   return (
-    <Card className="mx-auto flex min-h-0 min-w-0 flex-1 w-full max-w-6xl flex-col overflow-hidden">
+    <div className="mx-auto flex min-h-0 min-w-0 flex-1 w-full max-w-6xl flex-col overflow-hidden">
       <CardHeader className="pb-4">
         <CardTitle>{t("memorySearchPanel.panelTitle")}</CardTitle>
         <CardDescription>{t("memorySearchPanel.panelDescription")}</CardDescription>
@@ -145,7 +145,7 @@ export function MemorySearchPanel({ api, onOpenSession }: MemorySearchPanelProps
           </TabsList>
           <TabsContent value="notes" className="mt-2 flex-1 min-h-0 overflow-hidden rounded-lg border">
             {noteResults.length > 0 && !loading && (
-              <div className="flex items-center rounded-t-lg border-b bg-muted/40 px-3 py-2">
+              <div className="flex items-center rounded-t-lg border-b bg-muted/(--opacity-medium) px-3 py-2">
                 <span className="text-xs font-semibold uppercase tracking-wider text-muted-foreground">
                   {t("memorySearchPanel.notesTab")}
                 </span>
@@ -167,7 +167,7 @@ export function MemorySearchPanel({ api, onOpenSession }: MemorySearchPanelProps
           </TabsContent>
           <TabsContent value="sessions" className="mt-2 flex-1 min-h-0 overflow-hidden rounded-lg border">
             {sessionResults.length > 0 && !loading && (
-              <div className="flex items-center rounded-t-lg border-b bg-muted/40 px-3 py-2">
+              <div className="flex items-center rounded-t-lg border-b bg-muted/(--opacity-medium) px-3 py-2">
                 <span className="text-xs font-semibold uppercase tracking-wider text-muted-foreground">
                   {t("memorySearchPanel.sessionsTab")}
                 </span>
@@ -195,6 +195,6 @@ export function MemorySearchPanel({ api, onOpenSession }: MemorySearchPanelProps
           </TabsContent>
         </Tabs>
       </CardContent>
-    </Card>
+    </div>
   );
 }

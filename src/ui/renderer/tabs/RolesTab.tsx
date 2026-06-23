@@ -300,7 +300,7 @@ export function RolesTab({ api }: { api: LvisApi }) {
           ))}
         </div>
 
-        <div className="min-h-[420px] rounded-md border border-border/80 bg-background/60 p-3">
+        <div className="min-h-[420px] rounded-md border border-border/(--opacity-intense) bg-background/(--opacity-strong) p-3">
           <div className="mb-3 flex items-center justify-between gap-3">
             <div className="text-sm font-semibold">{selectedSection ? sectionLabel(selectedSection) : null}</div>
             {loading ? <Badge variant="secondary">{t("rolesTab.loadingBadge")}</Badge> : null}
@@ -329,7 +329,7 @@ export function RolesTab({ api }: { api: LvisApi }) {
                     <Button size="sm" onClick={saveQuickMemory} disabled={!quickMemory.trim() || saving === "quick-memory"}>{t("rolesTab.saveToSectionButton")}</Button>
                   </div>
                 </div>
-                <div className="space-y-2 border-t border-border/70 pt-3">
+                <div className="space-y-2 border-t border-border/(--opacity-stronger) pt-3">
                   <Input value={detailMemoryTitle} onChange={(event) => setDetailMemoryTitle(event.target.value)} placeholder={t("rolesTab.detailMemoryTitlePlaceholder")} />
                   <Textarea value={detailMemory} onChange={(event) => setDetailMemory(event.target.value)} placeholder={t("rolesTab.detailMemoryPlaceholder")} className="min-h-[110px] text-xs" />
                   <Textarea value={detailLinks} onChange={(event) => setDetailLinks(event.target.value)} placeholder={t("rolesTab.referenceLinkPlaceholder")} className="min-h-[70px] text-xs" />
@@ -355,7 +355,7 @@ export function RolesTab({ api }: { api: LvisApi }) {
             <div className="space-y-3">
               <div className="space-y-2">
                 {rolePresets.map((preset) => (
-                  <div key={preset.id} className="rounded-md border border-border/70 p-2">
+                  <div key={preset.id} className="rounded-md border border-border/(--opacity-stronger) p-2">
                     <div className="flex items-center justify-between gap-2">
                       <div className="min-w-0">
                         <div className="truncate text-sm font-medium">
@@ -372,7 +372,7 @@ export function RolesTab({ api }: { api: LvisApi }) {
                   </div>
                 ))}
               </div>
-              <div className="rounded-md border border-border/70 p-3">
+              <div className="rounded-md border border-border/(--opacity-stronger) p-3">
                 <div className="mb-2 text-sm font-medium">{editingId ? t("rolesTab.editPromptHeading") : t("rolesTab.newRolePromptHeading")}</div>
                 <div className="space-y-2">
                   <Input placeholder={t("rolesTab.namePlaceholder")} value={draft.name} onChange={(event) => setDraft({ ...draft, name: event.target.value })} />
@@ -387,7 +387,7 @@ export function RolesTab({ api }: { api: LvisApi }) {
           ) : null}
 
           {section === "preview" ? (
-            <pre className="overflow-auto rounded-md bg-muted/50 p-3 text-xs leading-5">
+            <pre className="overflow-auto rounded-md bg-muted/(--opacity-half) p-3 text-xs leading-5">
 {`AGENTS.md                  -> project / org / agent operating context
 memories/MEMORY.md          -> urgent memory, references, and saved-memory index
 memories/*.md               -> detailed long-term memories with references

@@ -63,12 +63,12 @@ export function MarketplaceUpdateBanner({
 
   return (
     <div
-      className="flex h-11 items-center justify-between gap-2 overflow-hidden bg-info/15 border border-info/40 text-info text-sm px-4 py-1.5 rounded-md mx-2 mt-2 lvis-anim-slide-down"
+      className="flex h-11 items-center justify-between gap-2 overflow-hidden bg-popover border border-info/(--opacity-medium) text-info text-sm px-4 py-1.5 rounded-md mx-2 mt-2 shadow-lg lvis-anim-slide-down"
       data-testid="marketplace-update-banner"
     >
       <span className="min-w-0 flex-1" title={label}>
         <span className="block truncate leading-4">{summary}</span>
-        <MarqueeText text={details} className="text-[11px] leading-3 text-info/75" />
+        <MarqueeText text={details} className="text-[11px] leading-3 text-info/(--opacity-emphatic)" />
         {error ? <span className="ml-2 text-destructive">{t("marketplaceUpdateBanner.partialFailure", { error })}</span> : null}
       </span>
       <div className="flex shrink-0 items-center gap-1">
@@ -89,7 +89,7 @@ export function MarketplaceUpdateBanner({
           disabled={busy}
           aria-label={t("marketplaceUpdateBanner.skipAriaLabel")}
           title={t("marketplaceUpdateBanner.skipTitle")}
-          className="text-info hover:text-info/80 h-auto p-1"
+          className="text-info hover:text-info/(--opacity-intense) h-auto p-1"
         >
           <X className="h-3.5 w-3.5" />
         </Button>

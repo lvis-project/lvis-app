@@ -18,7 +18,10 @@
  */
 import type { Tool } from "./base.js";
 import type { DenyRule } from "./types.js";
+import { compareSemver } from "../shared/semver-compare.js";
 import { createLogger } from "../lib/logger.js";
+
+export { compareSemver };
 const log = createLogger("tool-registry");
 
 /**
@@ -60,69 +63,6 @@ export interface ToolCatalogEntry {
   source: Extract<Tool["source"], "plugin" | "mcp">;
   pluginId?: string;
   mcpServerId?: string;
-}
-
-/**
- * Compare two semver-ish version strings. Returns `a < b ? -1 : a > b ? 1 : 0`.
- *
- * Implements semver pre-release precedence correctly: the numeric core
- * (`major.minor.patch`) is compared first, then a version *with* a pre-release
- * tag ranks BELOW the same core without one (`1.0.0-beta` < `1.0.0`), and two
- * pre-releases compare identifier-by-identifier (numeric identifiers compared
- * numerically and ranked below alphanumeric ones; a larger identifier set wins
- * when all earlier identifiers are equal). Build metadata (`+…`) is ignored.
- * Non-numeric *core* segments fall back to lexical compare. Good enough for
- * picking "latest" among registered versions without pulling in `semver`.
- *
- * Exported for unit testing; prefer `listVersions` / `pickLatest` at call sites.
- */
-export function compareSemver(a: string, b: string): number {
-  const parse = (v: string): { core: string[]; pre: string[] } => {
-    const noBuild = v.split("+", 1)[0] ?? v;
-    const dash = noBuild.indexOf("-");
-    const coreStr = dash === -1 ? noBuild : noBuild.slice(0, dash);
-    const preStr = dash === -1 ? "" : noBuild.slice(dash + 1);
-    return { core: coreStr.split("."), pre: preStr === "" ? [] : preStr.split(".") };
-  };
-  const pa = parse(a);
-  const pb = parse(b);
-
-  // 1. Numeric core (pad the shorter side with "0").
-  const coreLen = Math.max(pa.core.length, pb.core.length);
-  for (let i = 0; i < coreLen; i++) {
-    const sa = pa.core[i] ?? "0";
-    const sb = pb.core[i] ?? "0";
-    const na = Number(sa);
-    const nb = Number(sb);
-    const bothNum = !Number.isNaN(na) && !Number.isNaN(nb);
-    if (bothNum) {
-      if (na !== nb) return na < nb ? -1 : 1;
-    } else if (sa !== sb) {
-      return sa < sb ? -1 : 1;
-    }
-  }
-
-  // 2. Equal core: a release outranks its own pre-release.
-  if (pa.pre.length === 0 && pb.pre.length === 0) return 0;
-  if (pa.pre.length === 0) return 1;
-  if (pb.pre.length === 0) return -1;
-
-  // 3. Both pre-release: compare dot-separated identifiers.
-  const preLen = Math.max(pa.pre.length, pb.pre.length);
-  for (let i = 0; i < preLen; i++) {
-    const ia = pa.pre[i];
-    const ib = pb.pre[i];
-    if (ia === undefined) return -1; // fewer identifiers → lower precedence
-    if (ib === undefined) return 1;
-    if (ia === ib) continue;
-    const aNum = /^\d+$/.test(ia);
-    const bNum = /^\d+$/.test(ib);
-    if (aNum && bNum) return Number(ia) < Number(ib) ? -1 : 1;
-    if (aNum) return -1; // numeric identifiers rank below alphanumeric
-    if (bNum) return 1;
-    return ia < ib ? -1 : 1; // lexical ASCII
-  }
-  return 0;
 }
 
 /**

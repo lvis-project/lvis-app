@@ -25,14 +25,18 @@ function toast(overrides: Partial<ToastItem> = {}): ToastItem {
 }
 
 describe("StatusBar", () => {
-  it("renders the LVIS placeholder when there are no persistent items", () => {
+  // wb-final removed the LVIS brand mark from app chrome. The empty status bar
+  // renders no brand logo/text — only a zero-footprint spacer that keeps the
+  // flex layout stable until the first persistent item arrives.
+  it("renders no LVIS brand placeholder when there are no persistent items", () => {
     render(<StatusBar persistent={[]} visibleToast={null} />);
-    expect(screen.getByText("LVIS")).toBeInTheDocument();
+    expect(screen.queryByText("LVIS")).toBeNull();
+    expect(screen.queryByRole("img", { name: "LVIS" })).toBeNull();
   });
 
-  it("marks the placeholder logo as decorative so LVIS is announced once", () => {
+  it("still renders the status-bar container when empty", () => {
     render(<StatusBar persistent={[]} visibleToast={null} />);
-    expect(screen.queryByRole("img", { name: "LVIS" })).toBeNull();
+    expect(screen.getByTestId("status-bar")).toBeInTheDocument();
   });
 
   it("renders persistent items with label and value", () => {

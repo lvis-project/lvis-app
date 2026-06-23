@@ -22,6 +22,11 @@ import {
 } from "../types/attachments.js";
 import { findMarkerAt, parseMarkers } from "../utils/attachment-markers.js";
 import { handleClipboardPaste } from "../utils/clipboard-paste.js";
+import { InlineSlashMenu } from "./InlineSlashMenu.js";
+import { useInlineSlashMenu } from "../hooks/use-inline-slash-menu.js";
+import { useSlashPickerRuntime } from "../hooks/use-slash-picker-runtime.js";
+import type { QuickAction } from "./command-actions.js";
+import type { PluginEntry } from "./PluginGridButton.js";
 import type { UserKeyboardIntentSnapshot } from "../../../shared/chat-origin.js";
 import { SuggestedRepliesGhost } from "./SuggestedRepliesGhost.js";
 import { SuggestedRepliesChipRow } from "./SuggestedRepliesChipRow.js";
@@ -87,6 +92,17 @@ export interface ComposerProps {
    * Spec: `docs/architecture/proposals/suggested-replies-ghost-text.md` §6.2.
    */
   suggestedReplies?: SuggestedRepliesSnapshot;
+  /**
+   * View shortcuts (홈/루틴/설정 + plugin views) surfaced under the `shortcut`
+   * category of the inline "/" autocomplete menu. Same array the action-row
+   * SlashPicker receives. When omitted the inline menu still offers built-in
+   * slash commands.
+   */
+  commandActions?: QuickAction[];
+  /** Installed plugins surfaced under the inline menu's `plugin` category. */
+  inlinePlugins?: PluginEntry[];
+  /** Open a plugin view when its inline-menu item is accepted. */
+  onSelectPlugin?: (viewKey: string) => void;
 }
 
 /**
@@ -112,6 +128,9 @@ export const Composer = forwardRef<ComposerHandle, ComposerProps>(function Compo
     placeholder,
     onWarning,
     suggestedReplies,
+    commandActions = [],
+    inlinePlugins = [],
+    onSelectPlugin,
   },
   ref,
 ) {
@@ -128,6 +147,42 @@ export const Composer = forwardRef<ComposerHandle, ComposerProps>(function Compo
   // textarea's keydown handler can advance it (ChipRow is otherwise a leaf
   // and would have no way to know about the textarea's key events).
   const [chipFocusIdx, setChipFocusIdx] = useState<number | null>(null);
+  // Caret mirror — the inline "/" menu needs the cursor index, but the value is
+  // controlled so selectionStart lives only on the DOM node. Synced on every
+  // event that can move the caret (change / keyup / click / select).
+  const [caret, setCaret] = useState(0);
+  const syncCaret = useCallback(() => {
+    const ta = taRef.current;
+    if (ta) setCaret(ta.selectionStart ?? 0);
+  }, []);
+
+  // Live MCP-server tools + registered skills back the inline menu's mcp /
+  // skills categories (real host IPC). Fetched only while the composer is
+  // enabled so it stays parallel with the SlashPicker popover's data.
+  const { mcpTools, skills } = useSlashPickerRuntime(!disabled);
+
+  // Inline "/" autocomplete — derives an open/filtered menu from the controlled
+  // text + caret and owns accept/replace. Keyboard nav is wired into
+  // handleKeyDown below; rendering is the InlineSlashMenu at the end.
+  const inlineSlash = useInlineSlashMenu({
+    text,
+    caret,
+    enabled: !disabled,
+    isComposing,
+    commandActions,
+    plugins: inlinePlugins,
+    mcpTools,
+    skills,
+    onSelectPlugin: onSelectPlugin ?? (() => {}),
+    taRef,
+    onTextChange,
+  });
+  const {
+    open: inlineOpen,
+    move: inlineMove,
+    accept: inlineAccept,
+    close: inlineClose,
+  } = inlineSlash;
 
   const captureUserKeyboardIntent = useCallback((): UserKeyboardIntentSnapshot => {
     const api = (globalThis as typeof globalThis & {
@@ -247,6 +302,39 @@ export const Composer = forwardRef<ComposerHandle, ComposerProps>(function Compo
   const handleKeyDown = useCallback(
     (e: React.KeyboardEvent<HTMLTextAreaElement>) => {
       if (e.nativeEvent.isComposing || isComposingRef.current) return;
+
+      // Inline "/" autocomplete owns navigation while open. This MUST run
+      // before the suggested-reply Tab/Arrow branches and the Enter→onSend
+      // branch, so Enter accepts the highlighted item instead of sending and
+      // arrows drive the menu instead of the chip cycle.
+      if (inlineOpen) {
+        if (e.key === "ArrowDown") {
+          e.preventDefault();
+          inlineMove(1);
+          return;
+        }
+        if (e.key === "ArrowUp") {
+          e.preventDefault();
+          inlineMove(-1);
+          return;
+        }
+        if (
+          (e.key === "Enter" || e.key === "Tab") &&
+          !e.shiftKey &&
+          !e.altKey &&
+          !e.ctrlKey &&
+          !e.metaKey
+        ) {
+          e.preventDefault();
+          inlineAccept();
+          return;
+        }
+        if (e.key === "Escape") {
+          e.preventDefault();
+          inlineClose();
+          return;
+        }
+      }
 
       // Suggested Replies (spec §6.2):
       //   Tab (no modifier) + value empty + best != null + not dismissed
@@ -389,7 +477,19 @@ export const Composer = forwardRef<ComposerHandle, ComposerProps>(function Compo
         onSend(captureUserKeyboardIntent());
       }
     },
-    [captureUserKeyboardIntent, disabled, onSend, text, onTextChange, suggestedReplies, chipFocusIdx],
+    [
+      captureUserKeyboardIntent,
+      disabled,
+      onSend,
+      text,
+      onTextChange,
+      suggestedReplies,
+      chipFocusIdx,
+      inlineOpen,
+      inlineMove,
+      inlineAccept,
+      inlineClose,
+    ],
   );
 
   const isFull = liveAttachments.length >= ATTACH_MAX_COUNT;
@@ -484,9 +584,15 @@ export const Composer = forwardRef<ComposerHandle, ComposerProps>(function Compo
           // `default-tour-scenarios.ts` in the same commit.
           data-tour-anchor="composer-input"
           value={text}
-          onChange={(e) => onTextChange(e.target.value)}
+          onChange={(e) => {
+            onTextChange(e.target.value);
+            syncCaret();
+          }}
           onPaste={handlePaste}
           onKeyDown={handleKeyDown}
+          onKeyUp={syncCaret}
+          onClick={syncCaret}
+          onSelect={syncCaret}
           onCompositionStart={() => {
             isComposingRef.current = true;
             setIsComposing(true);
@@ -494,6 +600,7 @@ export const Composer = forwardRef<ComposerHandle, ComposerProps>(function Compo
           onCompositionEnd={() => {
             isComposingRef.current = false;
             setIsComposing(false);
+            syncCaret();
           }}
           placeholder={placeholder ?? fallbackPlaceholder}
           /* v6 layout: ~2 줄 시작 (min-h-[40px] = 2 lines @ leading-5),
@@ -519,6 +626,14 @@ export const Composer = forwardRef<ComposerHandle, ComposerProps>(function Compo
           {t("composer.attachLimitWarning", { max: ATTACH_MAX_COUNT })}
         </div>
       ) : null}
+      <InlineSlashMenu
+        open={inlineOpen}
+        items={inlineSlash.items}
+        activeIndex={inlineSlash.activeIndex}
+        anchorRef={taRef}
+        onHover={inlineSlash.setActiveIndex}
+        onSelect={inlineSlash.accept}
+      />
     </div>
   );
 });

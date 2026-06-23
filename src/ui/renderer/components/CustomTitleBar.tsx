@@ -1,12 +1,21 @@
 /**
- * CustomTitleBar — cross-platform custom window chrome.
+ * CustomTitleBar — cross-platform custom window chrome, now the single top
+ * band that also hosts the app toolbar content.
  *
- * Win/Linux: renders a 36 px drag band with Minimize / Maximize / Close
- *            buttons in the trailing corner.
- * macOS:     renders a 36 px drag-only band — matches Win/Linux height so the
- *            top chrome looks consistent across platforms, and gives the
- *            OS-drawn traffic lights ((36-12)/2 = 12 px) breathing room above
- *            and below. No buttons are shown.
+ * The band content (sidebar-collapse toggle, Chat/Action mode, Dev badge,
+ * search / star / export) is passed in as `children` and rendered in the
+ * band's left + middle, LEFT of the native window controls. There is no
+ * separate toolbar row below the band — the toolbar lives IN the band.
+ *
+ * Win/Linux: renders the band with `children` on the left + middle and the
+ *            native Minimize / Maximize / Close buttons pinned to the trailing
+ *            corner. The band stays a drag region in empty zones; every
+ *            interactive control opts out via `WebkitAppRegion: "no-drag"`.
+ * macOS:     no renderer-drawn window buttons — the OS draws the traffic
+ *            lights into the `hiddenInset` area (trafficLightPosition
+ *            {x:14,y:12}). The band renders `children` with left padding so the
+ *            first control clears the traffic lights (x:72), keeping the band a
+ *            drag region elsewhere.
  *
  * Platform detection uses `window.lvisPlatform.isDarwin` (set by preload)
  * rather than a UA sniff — throw if the bridge is absent so misconfigurations
@@ -19,7 +28,7 @@
  * `window.lvisWindow.syncTitleBarTheme` so the Electron titleBarOverlay
  * (Win/Linux native layer) matches our CSS tokens.
  */
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useState, type ReactNode } from "react";
 import { Minus, Maximize2, Minimize2, X } from "lucide-react";
 import { Button } from "../../../components/ui/button.js";
 import { useOptionalTheme } from "../theme/ThemeProvider.js";
@@ -78,7 +87,18 @@ function getWindowBridge(): {
 
 // ─── Component ────────────────────────────────────────────────────────────
 
-export function CustomTitleBar() {
+export interface CustomTitleBarProps {
+  /**
+   * Band content — the app toolbar cluster (collapse toggle, Chat/Action mode,
+   * Dev badge, search / star / export). Rendered in the band's left + middle,
+   * LEFT of the native window controls. Interactive controls inside must wrap
+   * themselves `WebkitAppRegion: "no-drag"`; the band itself is a drag region
+   * in the gaps between them.
+   */
+  children?: ReactNode;
+}
+
+export function CustomTitleBar({ children }: CustomTitleBarProps = {}) {
   // Rules-of-hooks: all hook calls MUST come before any early return so the
   // hook order stays stable across renders. The platformBridge check is moved
   // below all hooks; the bridge-dependent useEffect bodies are gated with an
@@ -126,36 +146,60 @@ export function CustomTitleBar() {
 
   // Early returns (all AFTER hooks have been called):
   // - No preload bridge → non-Electron environment (jsdom / Storybook / SSR).
+  //   When band content is passed we still render a plain band hosting it
+  //   (no native window buttons, no drag region — there is no OS chrome to
+  //   integrate with) so the toolbar is never silently dropped. When no
+  //   children are passed there is nothing to show, so render nothing.
   // - Fullscreen → OS/Electron draws fullscreen chrome.
-  if (!platformBridge) return null;
+  if (!platformBridge) {
+    if (children === undefined || children === null) return null;
+    return (
+      <div
+        data-testid="custom-titlebar-plain"
+        className="flex h-8 shrink-0 items-center gap-2 border-b border-border/(--opacity-half) bg-background px-3 text-foreground select-none"
+      >
+        {children}
+      </div>
+    );
+  }
   if (isFullscreen) return null;
 
   if (isDarwin) {
-    // macOS: drag-only band; traffic lights are drawn by the OS in the inset.
+    // macOS: the OS draws the traffic lights into the hiddenInset area
+    // (trafficLightPosition {x:14,y:12}). The band stays a drag region and
+    // hosts the toolbar content with left padding (pl-[72px]) so the first
+    // control clears the traffic lights.
     return (
       <div
         data-testid="custom-titlebar-darwin"
+        className="flex h-8 shrink-0 items-center gap-2 border-b border-border/(--opacity-half) bg-background pl-[72px] pr-3 text-foreground select-none"
         style={{
-          height: 36,
           // @ts-expect-error — Electron-specific CSS extension
           WebkitAppRegion: "drag",
-          flexShrink: 0,
         }}
-      />
+        onDoubleClick={handleDoubleClick}
+      >
+        {children}
+      </div>
     );
   }
 
-  // Win / Linux: full control bar.
+  // Win / Linux: band hosts the toolbar content on the left + middle, with the
+  // native − □ × cluster pinned to the trailing corner.
   return (
     <div
       data-testid="custom-titlebar"
-      className="flex h-9 shrink-0 items-center justify-end border-b border-border/50 bg-background text-foreground select-none"
+      className="flex h-8 shrink-0 items-center gap-2 border-b border-border/(--opacity-half) bg-background pl-3 text-foreground select-none"
       style={{
         // @ts-expect-error — Electron-specific CSS extension
         WebkitAppRegion: "drag",
       }}
       onDoubleClick={handleDoubleClick}
     >
+      {children}
+      {/* Spacer pushes the native window controls to the trailing corner; the
+          empty span stays a drag region. */}
+      <div className="flex-1" aria-hidden="true" />
       {/* no-drag wrapper so buttons receive mouse events */}
       <div
         className="flex h-full items-stretch"
@@ -171,7 +215,7 @@ export function CustomTitleBar() {
           size="icon"
           onClick={handleMinimize}
           title={t("customTitleBar.minimize")}
-          className="titlebar-btn titlebar-btn-minimize h-9 w-11 rounded-none text-muted-foreground hover:bg-accent hover:text-foreground"
+          className="titlebar-btn titlebar-btn-minimize h-8 w-11 rounded-none text-muted-foreground hover:bg-accent hover:text-foreground"
         >
           <Minus size={14} />
         </Button>
@@ -182,7 +226,7 @@ export function CustomTitleBar() {
           size="icon"
           onClick={handleMaximize}
           title={isMaximized ? t("customTitleBar.restore") : t("customTitleBar.maximize")}
-          className="titlebar-btn titlebar-btn-maximize h-9 w-11 rounded-none text-muted-foreground hover:bg-accent hover:text-foreground"
+          className="titlebar-btn titlebar-btn-maximize h-8 w-11 rounded-none text-muted-foreground hover:bg-accent hover:text-foreground"
         >
           {isMaximized ? <Minimize2 size={14} /> : <Maximize2 size={14} />}
         </Button>
@@ -193,7 +237,7 @@ export function CustomTitleBar() {
           size="icon"
           onClick={handleClose}
           title={t("customTitleBar.close")}
-          className="titlebar-btn titlebar-btn-close h-9 w-11 rounded-none text-muted-foreground hover:bg-destructive hover:text-destructive-foreground"
+          className="titlebar-btn titlebar-btn-close h-8 w-11 rounded-none text-muted-foreground hover:bg-destructive hover:text-destructive-foreground"
         >
           <X size={14} />
         </Button>

@@ -106,7 +106,7 @@ export function PrivacyTab({ piiRedactEnabled, onToggle }: PrivacyTabProps) {
       {/* ── Toggle section ── */}
       <div className="rounded-lg border bg-background shadow-sm">
         {/* section header bar */}
-        <div className="rounded-t-lg border-b bg-muted/40 px-3 py-2">
+        <div className="rounded-t-lg border-b bg-muted/(--opacity-medium) px-3 py-2">
           <p className="text-xs font-semibold uppercase tracking-wider text-muted-foreground">
             {t("privacyTab.piiRedactTitle")}
           </p>
@@ -139,7 +139,7 @@ export function PrivacyTab({ piiRedactEnabled, onToggle }: PrivacyTabProps) {
         <div className="border-t pt-4 space-y-4">
           {/* Stats section header bar with inline day picker */}
           <div className="rounded-lg border bg-background shadow-sm">
-            <div className="rounded-t-lg border-b bg-muted/40 px-3 py-2 flex items-center justify-between">
+            <div className="rounded-t-lg border-b bg-muted/(--opacity-medium) px-3 py-2 flex items-center justify-between">
               <p className="text-xs font-semibold uppercase tracking-wider text-muted-foreground">
                 {t("privacyTab.dlpStatsTitle")}
               </p>
@@ -157,7 +157,7 @@ export function PrivacyTab({ piiRedactEnabled, onToggle }: PrivacyTabProps) {
 
             <div className="p-3 space-y-4">
               {statsError && (
-                <div className="rounded-md border border-destructive/40 bg-destructive/10 px-3 py-2 text-xs text-destructive">
+                <div className="rounded-md border border-destructive/(--opacity-medium) bg-destructive/(--opacity-subtle) px-3 py-2 text-xs text-destructive">
                   {statsError}
                 </div>
               )}
@@ -229,7 +229,7 @@ export function PrivacyTab({ piiRedactEnabled, onToggle }: PrivacyTabProps) {
                       <div className="rounded-lg border bg-background shadow-sm text-xs overflow-hidden">
                         <table className="w-full">
                           <thead>
-                            <tr className="border-b bg-muted/40">
+                            <tr className="border-b bg-muted/(--opacity-medium)">
                               <th className="px-3 py-1.5 text-left text-xs font-semibold uppercase tracking-wider text-muted-foreground">
                                 {t("privacyTab.tableHeaderPattern")}
                               </th>
@@ -240,7 +240,7 @@ export function PrivacyTab({ piiRedactEnabled, onToggle }: PrivacyTabProps) {
                           </thead>
                           <tbody>
                             {stats.topPatterns.map(({ kind, count }, i) => (
-                              <tr key={kind} className="border-b last:border-0 hover:bg-muted/40 transition-colors">
+                              <tr key={kind} className="border-b last:border-0 hover:bg-muted/(--opacity-medium) transition-colors">
                                 <td className="px-3 py-1.5 font-mono text-foreground">
                                   <span className="mr-2 text-muted-foreground">{i + 1}.</span>
                                   {kind}

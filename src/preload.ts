@@ -1108,6 +1108,8 @@ const api = {
       return () =>
         ipcRenderer.removeListener(PERMISSIONS.configChanged, listener);
     },
+    /** Read-only: honest OS sandbox capability for the current platform. */
+    sandboxCapability: async () => ipcRenderer.invoke(PERMISSIONS.sandboxCapability),
     listRules: async () => ipcRenderer.invoke(PERMISSIONS.listRules),
     addRule: async (pattern: string, action: string) =>
       ipcRenderer.invoke(PERMISSIONS.addRule, { pattern, action, intent: ipcUserKeyboardIntent() }),
@@ -1278,7 +1280,6 @@ const api = {
         allowMultiple?: boolean;
         placeholder?: string;
         summaryHint?: string;
-        suggestedAnswers?: string[];
       }>;
       createdAt: number;
     }) => void,
@@ -1603,8 +1604,26 @@ const api = {
       ipcRenderer.invoke("lvis:window:list-detached") as Promise<
         Array<{ windowId: number; viewKey: string; snapped: boolean }>
       >,
+    /**
+     * Close ALL detached windows (fired on the action-mode transition so every
+     * view re-renders inline). Auth/login windows are excluded by the main
+     * process — they are never tracked as detached tabs.
+     */
+    closeAllDetached: async () =>
+      ipcRenderer.invoke("lvis:window:close-all-detached") as Promise<
+        { ok: true } | { ok: false; error: string }
+      >,
     loadSessionInMain: async (sessionId: string) =>
       ipcRenderer.invoke("lvis:window:load-session-in-main", sessionId) as Promise<
+        { ok: true } | { ok: false; error: string }
+      >,
+    /**
+     * Resize the main window to match the current workspace mode.
+     * "action" → centered 800×600 on the primary work area;
+     * "chat" → the right-docked initial bounds (computeInitialMainWindowBounds).
+     */
+    resizeForMode: async (mode: "chat" | "action") =>
+      ipcRenderer.invoke("lvis:window:resize-for-mode", mode) as Promise<
         { ok: true } | { ok: false; error: string }
       >,
     /** Open a render_html result in an isolated BrowserWindow. */

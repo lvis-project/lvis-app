@@ -64,7 +64,7 @@ export function SavedToastFloating({ at }: { at: number | null }) {
       role="status"
       aria-live="polite"
       data-testid="settings-saved-toast"
-      className="pointer-events-none absolute left-1/2 top-2 z-20 flex -translate-x-1/2 items-center gap-1.5 rounded-full bg-success px-4 py-1.5 text-sm font-medium text-success-foreground shadow-lg ring-1 ring-success/40 motion-safe:animate-in motion-safe:fade-in motion-safe:slide-in-from-top-2 motion-safe:duration-200"
+      className="pointer-events-none absolute left-1/2 top-2 z-20 flex -translate-x-1/2 items-center gap-1.5 rounded-full bg-success px-4 py-1.5 text-sm font-medium text-success-foreground shadow-lg ring-1 ring-success/(--opacity-medium) motion-safe:animate-in motion-safe:fade-in motion-safe:slide-in-from-top-2 motion-safe:duration-200"
     >
       <span aria-hidden="true">✓</span>
       <span>{t("savedToast.saved")}</span>

@@ -198,9 +198,9 @@ export function PluginGridButton({
           <PopoverTrigger asChild>
             <Button
               ref={triggerRef}
-              variant="ghost"
+              variant="outline"
               size="sm"
-              className="h-7 w-7 p-0"
+              className="h-7 w-7 shrink-0 bg-input-bar p-0"
               aria-label={t("pluginGridButton.openAriaLabel")}
               data-testid="plugin-grid-button"
               // SpotlightTour anchor — step 8 ("플러그인 — 회의·문서·업무 도우미")
@@ -237,7 +237,7 @@ export function PluginGridButton({
         {isEmpty ? (
           <div className="py-6 text-center" data-testid="plugin-grid-empty">
             <div className="mb-3 flex justify-center">
-              <span className="flex h-11 w-11 items-center justify-center rounded-full border border-dashed border-muted-foreground/40 text-muted-foreground">
+              <span className="flex h-11 w-11 items-center justify-center rounded-full border border-dashed border-muted-foreground/(--opacity-medium) text-muted-foreground">
                 <Plug className="h-5 w-5" />
               </span>
             </div>
@@ -307,7 +307,7 @@ export function PluginGridButton({
                     {isInstalling && (
                       <>
                         <span
-                          className="install-overlay absolute inset-0 rounded-full bg-background/60"
+                          className="install-overlay absolute inset-0 rounded-full bg-background/(--opacity-strong)"
                           aria-hidden="true"
                         />
                         <span
@@ -362,7 +362,7 @@ export function PluginGridButton({
                 <span className="plugin-icon relative flex h-11 w-11 items-center justify-center rounded-full bg-muted">
                   <Plug className="h-7 w-7 opacity-40" strokeWidth={1.6} />
                   <span
-                    className="install-overlay absolute inset-0 rounded-full bg-background/60"
+                    className="install-overlay absolute inset-0 rounded-full bg-background/(--opacity-strong)"
                     aria-hidden="true"
                   />
                   <span
@@ -398,7 +398,7 @@ export function PluginGridButton({
               title={t("pluginGridButton.openMarketplace")}
               aria-label={t("pluginGridButton.openMarketplace")}
             >
-              <span className="plugin-icon flex h-11 w-11 items-center justify-center rounded-full border border-dashed border-muted-foreground/40 text-muted-foreground">
+              <span className="plugin-icon flex h-11 w-11 items-center justify-center rounded-full border border-dashed border-muted-foreground/(--opacity-medium) text-muted-foreground">
                 {marketplaceUrlReady ? (
                   <ExternalLink className="h-[18px] w-[18px]" />
                 ) : (

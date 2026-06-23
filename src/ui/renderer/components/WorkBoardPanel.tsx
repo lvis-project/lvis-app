@@ -23,7 +23,7 @@ import { t } from "../../../i18n/runtime.js";
 import { MARKDOWN_REMARK_PLUGINS } from "../utils/markdown-plugins.js";
 import { Badge } from "../../../components/ui/badge.js";
 import { Button } from "../../../components/ui/button.js";
-import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "../../../components/ui/card.js";
+import { CardContent, CardDescription, CardHeader, CardTitle } from "../../../components/ui/card.js";
 import { Checkbox } from "../../../components/ui/checkbox.js";
 import { Input } from "../../../components/ui/input.js";
 import { Label } from "../../../components/ui/label.js";
@@ -81,9 +81,9 @@ const PRIORITY_OPTIONS: WorkItemPriority[] = ["high", "medium", "low"];
 function PriorityChip({ priority }: { priority: WorkItemPriority }) {
   const cls =
     priority === "high"
-      ? "border-destructive/40 bg-destructive/10 text-destructive"
+      ? "border-destructive/(--opacity-medium) bg-destructive/(--opacity-subtle) text-destructive"
       : priority === "medium"
-        ? "border-primary/40 bg-primary/10 text-primary"
+        ? "border-primary/(--opacity-medium) bg-primary/(--opacity-subtle) text-primary"
         : "text-muted-foreground";
   return (
     <span
@@ -280,7 +280,7 @@ function RunIndicator({ run }: { run: WorkItemRunState | undefined }) {
     if (phase === "denied") {
       return (
         <span
-          className="inline-flex items-center gap-1 rounded px-1.5 py-0.5 text-[10px] font-medium border border-destructive/40 bg-destructive/10 text-destructive"
+          className="inline-flex items-center gap-1 rounded px-1.5 py-0.5 text-[10px] font-medium border border-destructive/(--opacity-medium) bg-destructive/(--opacity-subtle) text-destructive"
           data-testid="work-board-run-denied"
         >
           <XCircle className="h-3 w-3" />
@@ -291,7 +291,7 @@ function RunIndicator({ run }: { run: WorkItemRunState | undefined }) {
     if (phase === "error") {
       return (
         <span
-          className="inline-flex items-center gap-1 rounded px-1.5 py-0.5 text-[10px] font-medium border border-destructive/40 bg-destructive/10 text-destructive"
+          className="inline-flex items-center gap-1 rounded px-1.5 py-0.5 text-[10px] font-medium border border-destructive/(--opacity-medium) bg-destructive/(--opacity-subtle) text-destructive"
           title={run.reason}
           data-testid="work-board-run-error"
         >
@@ -319,8 +319,8 @@ function RunIndicator({ run }: { run: WorkItemRunState | undefined }) {
   const awaiting = phase === "awaiting_approval";
   return (
     <span
-      className={`inline-flex items-center gap-1 rounded px-1.5 py-0.5 text-[10px] font-medium border border-primary/40 bg-primary/10 text-primary ${
-        awaiting ? "ring-1 ring-primary/40" : ""
+      className={`inline-flex items-center gap-1 rounded px-1.5 py-0.5 text-[10px] font-medium border border-primary/(--opacity-medium) bg-primary/(--opacity-subtle) text-primary ${
+        awaiting ? "ring-1 ring-primary/(--opacity-medium)" : ""
       }`}
       data-testid="work-board-run-indicator"
       data-phase={phase ?? "starting"}
@@ -355,7 +355,7 @@ function WorkItemCard({ item, run, onStart, onComplete, onReopen, onRun, onOpenD
     <button
       type="button"
       className={`w-full rounded-lg border bg-background p-3 text-left shadow-sm transition-all hover:border-border hover:shadow-md focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring ${
-        overdue ? "border-destructive/50 bg-destructive/5" : "border-border/60"
+        overdue ? "border-destructive/(--opacity-half) bg-destructive/(--opacity-faint)" : "border-border/(--opacity-strong)"
       }`}
       data-testid="work-board-card"
       onClick={() => onOpenDetail(item.id)}
@@ -373,7 +373,7 @@ function WorkItemCard({ item, run, onStart, onComplete, onReopen, onRun, onOpenD
           )}
           <div className="mt-2 flex flex-wrap items-center gap-1.5">
             {overdue && (
-              <Badge variant="outline" className="border-destructive/50 text-destructive">
+              <Badge variant="outline" className="border-destructive/(--opacity-half) text-destructive">
                 {t("workBoard.overdueBadge")}
               </Badge>
             )}
@@ -482,8 +482,8 @@ function BoardColumn({
   testId,
 }: BoardColumnProps) {
   return (
-    <section className="flex min-h-0 flex-col gap-2 rounded-lg border bg-muted/20 shadow-sm" data-testid={testId}>
-      <div className="flex items-center justify-between rounded-t-lg border-b bg-muted/40 px-3 py-2">
+    <section className="flex min-h-0 flex-col gap-2 rounded-lg border bg-muted/(--opacity-light) shadow-sm" data-testid={testId}>
+      <div className="flex items-center justify-between rounded-t-lg border-b bg-muted/(--opacity-medium) px-3 py-2">
         <h3 className="text-xs font-semibold uppercase tracking-wider text-muted-foreground">{heading}</h3>
         <span className="flex h-5 min-w-[20px] items-center justify-center rounded-full bg-muted px-1.5 text-[10px] font-semibold text-muted-foreground">
           {items.length}
@@ -539,7 +539,7 @@ function PriorityPicker({
             disabled={disabled}
             onClick={() => onChange(opt)}
             className={`flex items-center gap-1 rounded-md border px-2 py-1 text-xs transition-colors disabled:opacity-50 ${
-              active ? "border-primary bg-primary/10 font-medium" : "text-muted-foreground hover:bg-muted/60"
+              active ? "border-primary bg-primary/(--opacity-subtle) font-medium" : "text-muted-foreground hover:bg-muted/(--opacity-strong)"
             }`}
             data-testid={`work-board-priority-${opt}`}
           >
@@ -717,7 +717,7 @@ function RunOutputPanel({
   if (!plan && !output && !liveText && !run) return null;
 
   return (
-    <div className="space-y-2 rounded-md border bg-muted/20 p-2.5" data-testid="work-board-run-output">
+    <div className="space-y-2 rounded-md border bg-muted/(--opacity-light) p-2.5" data-testid="work-board-run-output">
       <div className="flex items-center justify-between">
         <RunIndicator run={run} />
         {sessionId && (
@@ -729,7 +729,7 @@ function RunOutputPanel({
       {liveText && (
         <div data-testid="work-board-run-live">
           <div className="text-[11px] font-medium text-muted-foreground">{t("workBoard.runLiveHeading")}</div>
-          <div className="mt-1 max-h-32 overflow-auto rounded bg-background/60 p-3">
+          <div className="mt-1 max-h-32 overflow-auto rounded bg-background/(--opacity-strong) p-3">
             <div className="prose prose-sm lvis-prose max-w-none break-words [overflow-wrap:anywhere]">
               <ReactMarkdown remarkPlugins={MARKDOWN_REMARK_PLUGINS}>{liveText}</ReactMarkdown>
             </div>
@@ -739,7 +739,7 @@ function RunOutputPanel({
       {plan && (
         <div data-testid="work-board-run-plan">
           <div className="text-[11px] font-medium text-muted-foreground">{t("workBoard.runPlanHeading")}</div>
-          <div className="mt-1 max-h-48 overflow-auto rounded bg-background/60 p-3">
+          <div className="mt-1 max-h-48 overflow-auto rounded bg-background/(--opacity-strong) p-3">
             <div className="prose prose-sm lvis-prose max-w-none break-words [overflow-wrap:anywhere]">
               <ReactMarkdown remarkPlugins={MARKDOWN_REMARK_PLUGINS}>{plan}</ReactMarkdown>
             </div>
@@ -749,7 +749,7 @@ function RunOutputPanel({
       {output && (
         <div data-testid="work-board-run-result">
           <div className="text-[11px] font-medium text-muted-foreground">{t("workBoard.runOutputHeading")}</div>
-          <div className="mt-1 max-h-48 overflow-auto rounded bg-background/60 p-3">
+          <div className="mt-1 max-h-48 overflow-auto rounded bg-background/(--opacity-strong) p-3">
             <div className="prose prose-sm lvis-prose max-w-none break-words [overflow-wrap:anywhere]">
               <ReactMarkdown remarkPlugins={MARKDOWN_REMARK_PLUGINS}>{output}</ReactMarkdown>
             </div>
@@ -798,8 +798,8 @@ function RunHistorySection({ api, item }: { api: LvisApi; item: WorkItemResolved
   };
 
   return (
-    <section className="rounded-lg border bg-muted/20 shadow-sm" data-testid="work-board-run-history">
-      <div className="flex items-center justify-between rounded-t-lg border-b bg-muted/40 px-3 py-2">
+    <section className="rounded-lg border bg-muted/(--opacity-light) shadow-sm" data-testid="work-board-run-history">
+      <div className="flex items-center justify-between rounded-t-lg border-b bg-muted/(--opacity-medium) px-3 py-2">
         <h4 className="text-xs font-semibold uppercase tracking-wider text-muted-foreground">
           {t("workBoard.runHistoryHeading")}
         </h4>
@@ -821,7 +821,7 @@ function RunHistorySection({ api, item }: { api: LvisApi; item: WorkItemResolved
               <span className="text-muted-foreground">{openRun === h.runId ? "▲" : "▼"}</span>
             </button>
             {openRun === h.runId && (
-              <div className="mt-1 rounded bg-background/60 p-2">
+              <div className="mt-1 rounded bg-background/(--opacity-strong) p-2">
                 {loading ? (
                   <span className="text-muted-foreground">…</span>
                 ) : events.length === 0 ? (
@@ -1143,8 +1143,8 @@ function ReportsSection({ api }: { api: LvisApi }) {
   );
 
   return (
-    <section className="rounded-lg border bg-muted/20 shadow-sm" data-testid="work-board-reports">
-      <div className="flex items-center justify-between rounded-t-lg border-b bg-muted/40 px-4 py-2.5">
+    <section className="rounded-lg border bg-muted/(--opacity-light) shadow-sm" data-testid="work-board-reports">
+      <div className="flex items-center justify-between rounded-t-lg border-b bg-muted/(--opacity-medium) px-4 py-2.5">
         <h3 className="text-xs font-semibold uppercase tracking-wider text-muted-foreground">{t("workBoard.reportsHeading")}</h3>
       </div>
       <div className="p-4">
@@ -1217,7 +1217,7 @@ function ReportResultBlock({
           {t("workBoard.reportClose")}
         </Button>
       </div>
-      <div className="max-h-48 overflow-auto rounded bg-background/60 p-3">
+      <div className="max-h-48 overflow-auto rounded bg-background/(--opacity-strong) p-3">
         <div className="prose prose-sm lvis-prose max-w-none break-words [overflow-wrap:anywhere]">
           <ReactMarkdown remarkPlugins={MARKDOWN_REMARK_PLUGINS}>{result.markdown}</ReactMarkdown>
         </div>
@@ -1317,7 +1317,7 @@ export function WorkBoardPanel({ api }: WorkBoardPanelProps) {
 
   return (
     <>
-      <Card
+      <div
         className="mx-auto flex min-h-0 min-w-0 flex-1 w-full max-w-6xl flex-col overflow-hidden"
         data-testid="work-board-panel"
       >
@@ -1395,7 +1395,7 @@ export function WorkBoardPanel({ api }: WorkBoardPanelProps) {
             <ReportsSection api={api} />
           </div>
         </CardContent>
-      </Card>
+      </div>
 
       {showCreate && (
         <WorkItemCreateDialog

@@ -34,7 +34,16 @@ export type HostSecretCounterEvent =
   | "whitelist_fetch_failed"
   | "whitelist_cache_hit"
   | "whitelist_cache_stale"
-  | "whitelist_cache_miss_offline";
+  | "whitelist_cache_miss_offline"
+  // Tier A — plugin egress observability for `hostApi.hostFetch`. Bucketed by
+  // `(pluginId, reason)` so operators can spot an unexpected egress burst or a
+  // plugin repeatedly tripping deny-by-default. `hostFetch_egress` uses the
+  // fixed `"egress"` bucket; `hostFetch_denied` uses the denial-reason bucket
+  // (`capability` / `invalid-url` / `non-https` / `not-allowlisted` /
+  // `malformed-allowlist`). The audit log (`host_fetch` / `host_fetch_denied`)
+  // remains the authoritative record — these counters are at-a-glance only.
+  | "hostFetch_egress"
+  | "hostFetch_denied";
 
 /**
  * #893 — `hostSecret_denied` denial taxonomy. Recorded into the audit log
@@ -58,10 +67,13 @@ export type HostSecretDeniedReason =
  * with one entry per attacker-chosen prefix (memory DoS). Anything outside
  * this set is folded to `"other"` so the cardinality stays O(1).
  *
- * Keep this list narrow: only add a prefix when the host actually issues
- * secret keys in that namespace. Adding a prefix here does NOT grant any
- * new access — the three-tier gate in `plugin-runtime.ts` is still the
- * authority — it only changes how the counter buckets the call.
+ * Keep this list narrow. It is the bounded bucket allowlist for ALL counter
+ * dimensions, not just secret namespaces — secret-key prefixes (`llm`,
+ * `plugin`, …), whitelist-registry reason buckets, and Tier A plugin-egress
+ * reason buckets (`egress`, `capability`, …) all live here so the counter map
+ * stays O(1). Adding a bucket here does NOT grant any access — the gates in
+ * `plugin-runtime.ts` remain the authority — it only changes how the counter
+ * buckets the call. Anything not listed folds to `"other"`.
  */
 const KNOWN_PREFIXES = new Set<string>([
   "llm",
@@ -82,6 +94,13 @@ const KNOWN_PREFIXES = new Set<string>([
   "demo-snapshot",
   "cache",
   "default",
+  // Tier A plugin-egress buckets (hostFetch_egress / hostFetch_denied).
+  "egress",
+  "capability",
+  "invalid-url",
+  "non-https",
+  "not-allowlisted",
+  "malformed-allowlist",
 ]);
 
 /**
