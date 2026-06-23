@@ -14,7 +14,6 @@ function defaultProps(overrides: Partial<Parameters<typeof MainToolbar>[0]> = {}
     onExport: vi.fn(),
     onOpenUnifiedSearch: vi.fn(),
     sidebarCollapsed: false,
-    onToggleSidebar: vi.fn(),
     appMode: "action" as const,
     onToggleAppMode: vi.fn(),
     ...overrides,
@@ -68,22 +67,21 @@ describe("MainToolbar", () => {
     expect(onToggleCurrentSessionStar).toHaveBeenCalledTimes(1);
   });
 
-  // The collapse toggle lives in the band, wired to the shell's sidebarCollapsed.
-  it("renders the sidebar collapse toggle and fires onToggleSidebar", () => {
-    const onToggleSidebar = vi.fn();
-    renderWithProvider(defaultProps({ onToggleSidebar, sidebarCollapsed: false }));
-    const toggle = screen.getByTestId("sidebar-collapse-toggle");
-    expect(toggle.getAttribute("aria-pressed")).toBe("true");
-    expect(toggle.getAttribute("title")).toBe("사이드바 접기");
-    fireEvent.click(toggle);
-    expect(onToggleSidebar).toHaveBeenCalledTimes(1);
+  // The collapse toggle moved OUT of the band onto the floating sidebar card's
+  // right edge (see Sidebar.tsx / Sidebar tests). The band no longer hosts it.
+  it("no longer renders the sidebar collapse toggle (it lives on the sidebar card)", () => {
+    renderWithProvider(defaultProps());
+    expect(screen.queryByTestId("sidebar-collapse-toggle")).toBeNull();
   });
 
-  it("shows the expand affordance when the sidebar is collapsed", () => {
+  // The leading cluster (search/star/export) is left-padded so it begins to the
+  // right of the floating sidebar edge; the offset tracks sidebarCollapsed.
+  it("offsets the band content past the sidebar (expanded vs collapsed)", () => {
+    const expanded = renderWithProvider(defaultProps({ sidebarCollapsed: false }));
+    expect(screen.getByTestId("main-toolbar").className).toContain("pl-[15.5rem]");
+    expanded.unmount();
     renderWithProvider(defaultProps({ sidebarCollapsed: true }));
-    const toggle = screen.getByTestId("sidebar-collapse-toggle");
-    expect(toggle.getAttribute("aria-pressed")).toBe("false");
-    expect(toggle.getAttribute("title")).toBe("사이드바 펼치기");
+    expect(screen.getByTestId("main-toolbar").className).toContain("pl-[5rem]");
   });
 
   // Export is a standalone band button (검색 → 별 → 내보내기). Clicking opens
