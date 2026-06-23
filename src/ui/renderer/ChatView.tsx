@@ -24,7 +24,6 @@ import { MessageQueuePanel } from "./components/MessageQueuePanel.js";
 import { MessageQueueStore, formatQueueInject, type MessageQueueItem } from "./state/message-queue-store.js";
 import { SubAgentCard } from "./components/SubAgentCard.js";
 import { TokenProgressRing } from "./components/TokenProgressRing.js";
-import { BottomActionRow } from "./components/BottomActionRow.js";
 import { DEFAULT_TOAST_TTL_MS, LONG_TOAST_TTL_MS, SHORT_TOAST_TTL_MS } from "./constants.js";
 import { SkillBadge } from "./components/SkillBadge.js";
 import { WorkGroup } from "./components/WorkGroup.js";
@@ -40,6 +39,7 @@ import { getApi } from "./api-client.js";
 import { highlightText } from "./utils/html-preview.js";
 import { useChatContext } from "./context/ChatContext.js";
 import { InputActionBar } from "./components/InputActionBar.js";
+import { useInputStatusRow } from "./hooks/use-input-status-row.js";
 import { Composer, type ComposerHandle } from "./components/Composer.js";
 import { useSuggestedReplies } from "./hooks/use-suggested-replies.js";
 import { computeComposerPlaceholder, hasActiveSuggestedReplies } from "./utils/composer-placeholder.js";
@@ -912,6 +912,94 @@ export function ChatView({ api, onAsk, onEditSave, onFork, onToggleStar, onRetry
     handleComposerSend({ inputOrigin: "user-keyboard", token: "" });
   }, [handleComposerSend]);
 
+  // Attach picker — opens the native file dialog via window.lvis.attach
+  // (attach lives ONLY on window.lvis, not window.lvisApi; see preload.ts
+  // contextBridge "lvis" → attach). The disable gate (attachments cap /
+  // no-api-key) is applied by the InputActionBar attachDisabled prop, so this
+  // handler only runs when attaching is allowed.
+  const handleAttach = useCallback(async () => {
+    const result = await window.lvis.attach.openFile();
+    if (result.canceled) return;
+    if (result.rejected.length > 0) {
+      console.warn("attachment rejected (deny-list):", result.rejected, "deny:", DENY_EXTENSIONS);
+    }
+    // Build all candidate attachments first. The 5-cap is enforced at *commit*
+    // time inside the setAttachments updater, so a concurrent clipboard paste
+    // during the readImage await cannot push us past the limit (the updater
+    // receives the latest committed state, not the closure-captured one).
+    const candidates: Attachment[] = [];
+    for (const f of result.files) {
+      const n = ++attachmentNCounter.current;
+      if (f.isImage) {
+        const img = await window.lvis.attach.readImage(f.path);
+        if (
+          !img.ok ||
+          !img.dataUrl ||
+          !img.mimeType ||
+          img.width === undefined ||
+          img.height === undefined ||
+          img.bytes === undefined
+        ) {
+          console.warn("readImage failed", f.path, img.error);
+          continue;
+        }
+        candidates.push({
+          id: `img-${Date.now()}-${n}`,
+          n,
+          kind: "image",
+          path: f.path,
+          mimeType: img.mimeType,
+          width: img.width,
+          height: img.height,
+          bytes: img.bytes,
+          dataUrl: img.dataUrl,
+        });
+      } else {
+        candidates.push({
+          id: `file-${Date.now()}-${n}`,
+          n,
+          kind: "file",
+          path: f.path,
+          name: f.name,
+          ext: f.ext,
+          bytes: f.bytes,
+        });
+      }
+    }
+    if (candidates.length === 0) {
+      composerRef.current?.focus();
+      return;
+    }
+    // Atomic commit: setAttachments AND text-insert MUST land in the same
+    // render commit, otherwise Composer's marker-sync useEffect runs between
+    // the two and clears `attachments`. Putting both inside one flushSync
+    // batches them so the next render sees attachments + marker text consistent.
+    let acceptedMarkers = "";
+    flushSync(() => {
+      setAttachments((prev) => {
+        const remaining = Math.max(0, ATTACH_MAX_COUNT - prev.length);
+        const accepted = candidates.slice(0, remaining);
+        if (accepted.length < candidates.length) {
+          console.warn(
+            `${candidates.length - accepted.length} attachment(s) dropped — ${ATTACH_MAX_COUNT}-cap reached during async open/read`,
+          );
+        }
+        acceptedMarkers = accepted.map((a) => `${buildMarkerText(a)} `).join("");
+        return [...prev, ...accepted];
+      });
+      if (acceptedMarkers) {
+        if (composerRef.current) {
+          composerRef.current.insertAtCursor(acceptedMarkers);
+        } else {
+          setQuestion((prev) => prev + acceptedMarkers);
+        }
+      }
+    });
+    // Return focus to the composer textarea so the user can keep typing
+    // immediately after the file dialog closes.
+    composerRef.current?.focus();
+  }, [attachmentNCounter, setAttachments, setQuestion]);
+
   // Token progress ring — square, hover=percent, click=detail. The former
   // sibling cost badge is gone: the cost/amount now lives INSIDE the ring's
   // click-detail popover (a single flat surface), so the action row carries
@@ -926,6 +1014,20 @@ export function ChatView({ api, onAsk, onEditSave, onFork, onToggleStar, onRetry
       costClass={costBadgeClass}
     />
   ), [contextBudget, costBadgeClass, costEstimate, effectiveBudget, tpmLimit, usedTokens]);
+
+  // Status sub-row (in the unified InputActionBar) — model / permission /
+  // active state. Resolved from the same IPC the former window-StatusBar
+  // producers used; the window StatusBar is notifications-only now.
+  const inputStatusRow = useInputStatusRow(api);
+  // Context-percent — the SAME value the TokenProgressRing's primary ring
+  // renders (used / effectiveBudget). Null before the first usage carrier so
+  // the sub-row dims rather than showing a misleading 0%.
+  const inputContextPercent = useMemo<number | null>(() => {
+    if (usedTokens <= 0) return null;
+    return Math.min(100, Math.round((usedTokens / Math.max(1, effectiveBudget)) * 100));
+  }, [usedTokens, effectiveBudget]);
+  const onOpenModelSettings = useCallback(() => onOpenSettings("llm"), [onOpenSettings]);
+  const onOpenInputPermissions = useCallback(() => onOpenSettings("permissions"), [onOpenSettings]);
 
   // ESC 우선순위
   //   1. 모달 (Radix Dialog [data-state="open"]) → 모달이 가로챔 (defensive)
@@ -1775,137 +1877,18 @@ export function ChatView({ api, onAsk, onEditSave, onFork, onToggleStar, onRetry
           />
         </div>
         <div className="w-full max-w-full min-w-0 overflow-x-hidden pb-1 space-y-2">
-          <InputActionBar
-            plugins={plugins}
-            onSelectPlugin={onSelectPlugin}
-            onInsertSlashCommand={handleInsertSlashCommand}
-            commandActions={commandActions}
-            commandPopoverOpen={commandPopoverOpen}
-            onCommandPopoverOpenChange={onCommandPopoverOpenChange}
-            ringSlot={ringSlot}
-            attachDisabled={
-              attachments.length >= ATTACH_MAX_COUNT ||
-              hasApiKey === false
-            }
-            attachDisabledReason={
-              hasApiKey === false
-                ? "no-api-key"
-                : "limit"
-            }
-            onAttach={async () => {
-            const result = await window.lvis.attach.openFile();
-            if (result.canceled) return;
-            if (result.rejected.length > 0) {
-              console.warn("attachment rejected (deny-list):", result.rejected, "deny:", DENY_EXTENSIONS);
-            }
-            // Build all candidate attachments first. The 5-cap is enforced
-            // at *commit* time inside the setAttachments updater, so a
-            // concurrent clipboard paste during the readImage await cannot
-            // push us past the limit (the updater receives the latest
-            // committed state, not the closure-captured one).
-            const candidates: Attachment[] = [];
-            for (const f of result.files) {
-              const n = ++attachmentNCounter.current;
-              if (f.isImage) {
-                const img = await window.lvis.attach.readImage(f.path);
-                if (
-                  !img.ok ||
-                  !img.dataUrl ||
-                  !img.mimeType ||
-                  img.width === undefined ||
-                  img.height === undefined ||
-                  img.bytes === undefined
-                ) {
-                  console.warn("readImage failed", f.path, img.error);
-                  continue;
-                }
-                candidates.push({
-                  id: `img-${Date.now()}-${n}`,
-                  n,
-                  kind: "image",
-                  path: f.path,
-                  mimeType: img.mimeType,
-                  width: img.width,
-                  height: img.height,
-                  bytes: img.bytes,
-                  dataUrl: img.dataUrl,
-                });
-              } else {
-                candidates.push({
-                  id: `file-${Date.now()}-${n}`,
-                  n,
-                  kind: "file",
-                  path: f.path,
-                  name: f.name,
-                  ext: f.ext,
-                  bytes: f.bytes,
-                });
-              }
-            }
-            if (candidates.length === 0) {
-              composerRef.current?.focus();
-              return;
-            }
-            // Atomic commit: setAttachments AND text-insert MUST land in
-            // the same render commit, otherwise Composer's marker-sync
-            // useEffect runs between the two and clears `attachments`
-            // (because text still has no marker → liveAttachments=[] →
-            // mismatch → destructive cleanup). Putting both inside one
-            // flushSync batches them so the next render sees attachments
-            // and marker text consistent.
-            let acceptedMarkers = "";
-            flushSync(() => {
-              setAttachments((prev) => {
-                const remaining = Math.max(0, ATTACH_MAX_COUNT - prev.length);
-                const accepted = candidates.slice(0, remaining);
-                if (accepted.length < candidates.length) {
-                  console.warn(
-                    `${candidates.length - accepted.length} attachment(s) dropped — ${ATTACH_MAX_COUNT}-cap reached during async open/read`,
-                  );
-                }
-                acceptedMarkers = accepted.map((a) => `${buildMarkerText(a)} `).join("");
-                return [...prev, ...accepted];
-              });
-              // Insert at caret in the SAME flushSync — batched with
-              // setAttachments into one render so the destructive sync
-              // useEffect never sees a mismatch.
-              if (acceptedMarkers) {
-                if (composerRef.current) {
-                  composerRef.current.insertAtCursor(acceptedMarkers);
-                } else {
-                  setQuestion((prev) => prev + acceptedMarkers);
-                }
-              }
-            });
-            // Return focus to the composer textarea so the user can keep
-            // typing or use Cmd/Ctrl+A immediately after the file dialog
-            // closes — without this, focus stays on the action bar button
-            // and the next keystroke goes nowhere visible.
-            composerRef.current?.focus();
-            }}
-            rolePresets={rolePresets}
-            activePreset={activePreset}
-            activePresetId={activePresetId}
-            onSelectPreset={setActivePresetId}
-          />
-          {/* §8 agent-approval surface. The input re-layout moved permission
-              status to the StatusBar (read-only text) and removed the action
-              row's permission/approval slots; this interactive natural-language
-              approval chip has no place in the StatusBar, so it renders here —
-              directly above the composer, the position its own contract
-              describes ("surfaces above the composer"). It self-hides
-              (returns null) unless the draft expresses an approve/reject intent
-              AND exactly one queue entry is pending. */}
+          {/* §8 agent-approval surface — interactive natural-language approval
+              chip. Renders directly above the composer (the position its own
+              contract describes); self-hides unless the draft expresses an
+              approve/reject intent AND exactly one queue entry is pending. */}
           <DeferredApprovalChip draftText={question} />
-          {/* Composer (textarea) + BottomActionRow (TokenRing/단축키/취소/Send)
-              가 하나의 컨테이너 안. 사용자 인지 = "타이핑 영역 + 즉시 액션" 한
-              묶음.
+          {/* ONE unified input box: textarea + the single InputActionBar
+              (action row + status sub-row). The window StatusBar is
+              notifications-only; the model / permission / active / context%
+              cells live in the bar's status sub-row.
               `border` (not `ring`): the dock's overflow-x-hidden forces
-              overflow-y:auto, which clips a ring's top edge (the box is flush at
-              the parent's top). A border is painted inside the box, so all four
-              edges — including the top — render. Full `border-border` opacity
-              gives a clearly visible outline (was ring-border/(--opacity-muted),
-              an almost-invisible faint edge). */}
+              overflow-y:auto, which clips a ring's top edge; a border paints
+              inside the box so all four edges render. */}
           <div className="mx-3 mb-1 rounded-xl bg-input-bar shadow-md overflow-hidden border border-border">
           <Composer
             ref={composerRef}
@@ -1931,7 +1914,24 @@ export function ChatView({ api, onAsk, onEditSave, onFork, onToggleStar, onRetry
             onWarning={(msg) => console.warn(msg)}
             placeholder={computeComposerPlaceholder({ hasApiKey, streaming, suggestedReplies })}
           />
-          <BottomActionRow
+          <InputActionBar
+            plugins={plugins}
+            onSelectPlugin={onSelectPlugin}
+            onInsertSlashCommand={handleInsertSlashCommand}
+            commandActions={commandActions}
+            commandPopoverOpen={commandPopoverOpen}
+            onCommandPopoverOpenChange={onCommandPopoverOpenChange}
+            ringSlot={ringSlot}
+            attachDisabled={
+              attachments.length >= ATTACH_MAX_COUNT ||
+              hasApiKey === false
+            }
+            attachDisabledReason={hasApiKey === false ? "no-api-key" : "limit"}
+            onAttach={handleAttach}
+            rolePresets={rolePresets}
+            activePreset={activePreset}
+            activePresetId={activePresetId}
+            onSelectPreset={setActivePresetId}
             isBusy={streaming}
             isSendDisabled={
               (hasApiKey === false || viewMode !== null) &&
@@ -1946,11 +1946,12 @@ export function ChatView({ api, onAsk, onEditSave, onFork, onToggleStar, onRetry
             }}
             enableThinkingChat={enableThinkingChat}
             onToggleThinking={toggleThinking}
-            />
+            statusRow={inputStatusRow}
+            contextPercent={inputContextPercent}
+            onOpenModelSettings={onOpenModelSettings}
+            onOpenPermissions={onOpenInputPermissions}
+          />
           </div>
-          {/* PermissionModeBadge → StatusBar (read-only mode text).
-              DeferredApprovalChip → above the composer (interactive surface).
-              Neither lives in the action row after the input re-layout. */}
         </div>
         <QuestionOverlay
           api={api}
