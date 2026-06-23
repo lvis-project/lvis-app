@@ -28,11 +28,10 @@ import { isAuthOwned } from "./auth-window-registry.js";
 import type { AuditLogger } from "../audit/audit-logger.js";
 import { lvisHome } from "../shared/lvis-home.js";
 import { resolveAppIconPath } from "./app-icon.js";
-import { computeInitialMainWindowBounds } from "./main-window-bounds.js";
-
-/** Action-mode main-window size: centered on the work area, clamped to fit. */
-const ACTION_MODE_WIDTH = 800;
-const ACTION_MODE_HEIGHT = 600;
+import {
+  computeInitialMainWindowBounds,
+  computeActionModeBounds,
+} from "./main-window-bounds.js";
 
 /**
  * Allowlist for viewKey values accepted by the detach IPC handlers.
@@ -1194,13 +1193,9 @@ export class WindowManager {
 
       const { workArea } = screen.getPrimaryDisplay();
       if (mode === "action") {
-        const width = Math.min(workArea.width, ACTION_MODE_WIDTH);
-        const height = Math.min(workArea.height, ACTION_MODE_HEIGHT);
-        const x = Math.round(workArea.x + (workArea.width - width) / 2);
-        const y = Math.round(workArea.y + (workArea.height - height) / 2);
         // Manual easeOut tween (uniform on every platform). The native animate
         // flag is macOS-only and is intentionally NOT passed anymore.
-        this.animateBoundsTo(main, { x, y, width, height });
+        this.animateBoundsTo(main, computeActionModeBounds(workArea));
       } else {
         this.animateBoundsTo(main, computeInitialMainWindowBounds(workArea));
       }

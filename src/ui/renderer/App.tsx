@@ -33,6 +33,7 @@ import { LoginModal } from "./components/LoginModal.js";
 import { LLM_VENDORS } from "../../shared/llm-vendor-defaults.js";
 import { buildQuickActions } from "./components/command-actions.js";
 import { MainToolbar, type AppMode } from "./MainToolbar.js";
+import { DEFAULT_APP_MODE, isAppMode } from "../../shared/initial-app-mode.js";
 import { Sidebar } from "./components/Sidebar.js";
 import { useAppUpdate } from "./hooks/use-app-update.js";
 import { DevToolsPanel } from "./components/DevToolsPanel.js";
@@ -75,6 +76,23 @@ import type { UserKeyboardIntentSnapshot } from "../../shared/chat-origin.js";
 import { normalizeSettingsTab } from "../../shared/settings-tabs.js";
 
 // ─── App ────────────────────────────────────────────
+
+/**
+ * Read the persisted workspace mode that the main process injected before the
+ * renderer loaded (preload exposes it as `window.__lvisInitialAppMode`, mirror
+ * of the `__lvisInitialTheme` prime). Reading it here — at `useState`
+ * initializer time, before first paint — means the shell renders the correct
+ * mode layout on frame 0 instead of mounting in "action" and tweening to the
+ * restored mode in a post-mount effect (the wrong-mode flash).
+ *
+ * `DEFAULT_APP_MODE` ("action") covers the non-Electron test harness and the
+ * cold-boot-before-settings window — both legitimate first-run defaults.
+ */
+function readInitialAppMode(): AppMode {
+  if (typeof window === "undefined") return DEFAULT_APP_MODE;
+  const raw = (window as { __lvisInitialAppMode?: unknown }).__lvisInitialAppMode;
+  return isAppMode(raw) ? raw : DEFAULT_APP_MODE;
+}
 
 export function App() {
   const { t } = useTranslation();
@@ -187,25 +205,57 @@ export function App() {
   // opens it in a separate window while the main area stays the chat. appMode
   // is the SOLE authority for inline-vs-detached; plugins cannot request
   // detachment (there is no plugin-side mode flag).
-  const [appMode, setAppMode] = useState<AppMode>("action");
+  // Seed from the persisted workspace mode injected by the main process
+  // (preload's `window.__lvisInitialAppMode`). Reading it at initializer time
+  // — before first paint — makes the shell render the saved mode's layout on
+  // frame 0 (expanded rail for action, collapsed for chat) with no wrong-mode
+  // flash followed by a post-mount tween. Defaults to "action" on first run /
+  // non-Electron harness.
+  const [appMode, setAppModeState] = useState<AppMode>(readInitialAppMode);
   // Sidebar collapse is owned by the shell (the floating-card Sidebar reads it
-  // as a prop and never manages its own state). The rail width is coupled to
-  // appMode in both directions (see the effect below): action expands it, chat
-  // collapses it — a per-transition default, NOT a lock.
-  const [sidebarCollapsed, setSidebarCollapsed] = useState(false);
+  // as a prop and never manages its own state). Seeded from the same persisted
+  // mode so the rail starts at the correct width on frame 0 (no post-mount
+  // width tween). The rail width is coupled to appMode on each transition (see
+  // the effect below): action expands it, chat collapses it — a per-transition
+  // default, NOT a lock.
+  const [sidebarCollapsed, setSidebarCollapsed] = useState(() => readInitialAppMode() === "chat");
+  // Persist appMode to host settings and update local state. Guarded against
+  // no-op writes (same mode) so a re-render or repeated toggle never fires a
+  // redundant IPC write. Stable identity (useCallback with only `api`) so it is
+  // safe in effect deps — no unstable-callback render loop (#1312 guard).
+  const setAppMode = useCallback((next: AppMode) => {
+    setAppModeState((prev) => {
+      if (prev === next) return prev;
+      // Persist the new mode so the next boot seeds from it. Fire-and-forget:
+      // a failed write only means the next launch falls back to the previous
+      // saved value — never blocks the toggle or surfaces an error toast.
+      void api.updateSettings({ system: { appMode: next } });
+      return next;
+    });
+  }, [api]);
   // appMode drives the rail's default width on each mode transition: action
   // mode expands it (wide working layout — inline views need the room), chat
   // mode collapses it to the focused icon rail (views detach to windows). This
   // makes toggling visibly widen/narrow the shell. It is a per-transition
   // default, NOT a lock — the user may still collapse/expand manually within a
-  // mode without it snapping back until the next mode switch.
+  // mode without it snapping back until the next mode switch. On the initial
+  // mount this re-asserts the already-seeded value (a no-op render), so it
+  // costs nothing and keeps the transition semantics in one place.
   useEffect(() => {
     setSidebarCollapsed(appMode === "chat");
   }, [appMode]);
-  // Resize the OS window to match the mode: action mode is a centered 800×600
-  // working canvas; chat mode restores the 기존 right-docked initial bounds.
-  // The bridge is optional (absent in jsdom / non-Electron); guard accordingly.
+  // Resize the OS window to match the mode on mode CHANGES only. The window is
+  // already created at the persisted mode's bounds (main.ts initialMainWindowBounds),
+  // so firing resizeForMode on the initial mount would issue a same-target tween
+  // — a needless animation on boot. The first-run ref skips that mount call;
+  // subsequent toggles resize as before. The bridge is optional (absent in
+  // jsdom / non-Electron); guard accordingly.
+  const resizeForModeMountedRef = useRef(false);
   useEffect(() => {
+    if (!resizeForModeMountedRef.current) {
+      resizeForModeMountedRef.current = true;
+      return;
+    }
     void api.window?.resizeForMode?.(appMode);
   }, [appMode, api]);
   // Action mode is the inline workspace: every view renders in the main tab,
