@@ -160,7 +160,11 @@ export function StatusBar(props: StatusBarProps) {
         {visibleToast !== null && (() => {
           const toast = visibleToast;
           const clickable = toast.notification !== undefined && typeof onToastClick === "function";
-          const baseClass = `flex min-w-0 items-center gap-1.5 truncate lvis-anim-slide-up ${SEVERITY_TEXT[toast.severity]}`;
+          // Opaque pill background so the toast stays legible over the chat
+          // content behind it (the bar's own bg-background is otherwise the
+          // only fill, and a transparent toast washed out against light
+          // surfaces). bg-card + a subtle border give a clear chip.
+          const baseClass = `flex min-w-0 items-center gap-1.5 truncate rounded-md border border-border bg-card px-2 py-0.5 shadow-sm lvis-anim-slide-up ${SEVERITY_TEXT[toast.severity]}`;
           const dot = (
             <span
               className={`h-1.5 w-1.5 shrink-0 rounded-full ${SEVERITY_DOT[toast.severity]}`}
