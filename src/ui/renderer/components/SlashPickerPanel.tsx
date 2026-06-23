@@ -10,7 +10,7 @@
  */
 import { Suspense, useCallback, useEffect, useRef, useState } from "react";
 import type { KeyboardEvent as ReactKeyboardEvent } from "react";
-import { ChevronRight } from "lucide-react";
+import { ChevronLeft, ChevronRight } from "lucide-react";
 import {
   Command,
   CommandEmpty,
@@ -81,12 +81,18 @@ export function SlashPickerPanel({
           return;
         }
         onClose();
+      } else if (e.key === "Backspace" && step !== null && query.length === 0) {
+        // Backspace on an empty query pops one drill level (cmdk pages-stack),
+        // matching Esc — so the user backs out without closing the picker.
+        e.stopPropagation();
+        e.preventDefault();
+        setStep(null);
       } else if (composingRef.current && e.key === "Enter") {
         e.stopPropagation();
         e.preventDefault();
       }
     },
-    [onClose, step],
+    [onClose, step, query],
   );
 
   const runSlash = useCallback(
@@ -147,38 +153,45 @@ export function SlashPickerPanel({
       ? [step]
       : CATEGORY_ORDER;
 
+  const CommandCatIcon = CATEGORY_ICON.command;
   const renderCommandRow = (c: SlashCommand) => (
     <CommandItem
       key={c.cmd}
       value={`${c.cmd} ${t(c.labelKey)}`}
       onSelect={() => runSlash(c.cmd)}
+      className="gap-2"
     >
-      <span className="font-mono text-xs text-muted-foreground w-28 shrink-0">{c.cmd}</span>
-      <span className="text-xs">{t(c.labelKey)}</span>
+      <CommandCatIcon className="h-3.5 w-3.5 shrink-0 text-muted-foreground" />
+      <div className="flex min-w-0 flex-1 flex-col">
+        <span className="font-mono text-xs">{c.cmd}</span>
+        <span className="text-[11px] text-muted-foreground line-clamp-1">{t(c.labelKey)}</span>
+      </div>
     </CommandItem>
   );
 
+  const ActionCatIcon = CATEGORY_ICON.shortcut;
   const renderActionRow = (a: QuickAction) => (
-    <CommandItem key={a.id} value={a.label} onSelect={() => runAction(a)}>
-      <span className="text-xs">{a.label}</span>
+    <CommandItem key={a.id} value={a.label} onSelect={() => runAction(a)} className="gap-2">
+      <ActionCatIcon className="h-3.5 w-3.5 shrink-0 text-muted-foreground" />
+      <span className="min-w-0 flex-1 truncate text-xs">{a.label}</span>
     </CommandItem>
   );
 
   const renderPluginRow = (p: PluginEntry) => {
     const Icon = pluginIconFor({ icon: p.icon, iconText: p.iconText });
     return (
-      <CommandItem key={p.viewKey} value={p.label} onSelect={() => runPlugin(p)}>
+      <CommandItem key={p.viewKey} value={p.label} onSelect={() => runPlugin(p)} className="gap-2">
         <Suspense fallback={<span className="h-3.5 w-3.5 shrink-0" />}>
           <Icon className="h-3.5 w-3.5 shrink-0 text-muted-foreground" />
         </Suspense>
-        <span className="text-xs">{p.label}</span>
+        <span className="min-w-0 flex-1 truncate text-xs">{p.label}</span>
       </CommandItem>
     );
   };
 
   const McpIcon = CATEGORY_ICON.mcp;
   const renderMcpRow = (m: McpToolEntry) => (
-    <CommandItem key={`${m.serverId}/${m.name}`} value={`${m.name} ${m.serverId}`} onSelect={() => runText(m.name)}>
+    <CommandItem key={`${m.serverId}/${m.name}`} value={`${m.name} ${m.serverId}`} onSelect={() => runText(m.name)} className="gap-2">
       <McpIcon className="h-3.5 w-3.5 shrink-0 text-muted-foreground" />
       <div className="flex min-w-0 flex-1 flex-col">
         <span className="font-mono text-xs">{m.name}</span>
@@ -189,7 +202,7 @@ export function SlashPickerPanel({
 
   const SkillIcon = CATEGORY_ICON.skills;
   const renderSkillRow = (s: SkillEntry) => (
-    <CommandItem key={s.name} value={`${s.name} ${s.description}`} onSelect={() => runText(s.name)}>
+    <CommandItem key={s.name} value={`${s.name} ${s.description}`} onSelect={() => runText(s.name)} className="gap-2">
       <SkillIcon className="h-3.5 w-3.5 shrink-0 text-muted-foreground" />
       <div className="flex min-w-0 flex-1 flex-col">
         <span className="text-xs">{s.name}</span>
@@ -257,6 +270,24 @@ export function SlashPickerPanel({
                   </CommandItem>
                 );
               })}
+            </CommandGroup>
+          )}
+
+          {/* 2nd-depth back affordance — a cmdk-styled row that pops one level
+              back to the root category list in ONE action (NOT closing the
+              picker). Esc/Backspace mirror this (handleKeyDownCapture). Only
+              shown while drilled and not searching. */}
+          {step !== null && !searching && (
+            <CommandGroup data-testid="slash-picker-back">
+              <CommandItem
+                value="__back__"
+                onSelect={() => setStep(null)}
+                className="gap-2 text-muted-foreground"
+                data-testid="slash-picker-back-row"
+              >
+                <ChevronLeft className="h-3.5 w-3.5 shrink-0" />
+                <span className="min-w-0 flex-1 truncate text-xs">{catLabel(step)}</span>
+              </CommandItem>
             </CommandGroup>
           )}
 

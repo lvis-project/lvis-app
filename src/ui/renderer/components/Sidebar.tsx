@@ -83,16 +83,24 @@ function isDarwinPlatform(): boolean {
 // ─── NavItem ─────────────────────────────────────────────────────────────────
 
 /**
- * Per-section hover tone. Primary nav reads as the main surface (`accent`);
- * the footer reads as secondary (`muted`), so its rows tint a step softer on
- * hover. Both are theme tokens — a bundle switch re-tints every surface and
- * the color-token gate stays clean (no raw literals).
+ * Per-section / per-item tone. Primary nav reads as the main surface
+ * (`accent`); the footer reads as secondary (`muted`), so its rows tint a step
+ * softer on hover. The three footer launchers (`home` / `marketplace` /
+ * `settings`) each carry a DISTINCT resting tint so they are visually
+ * separable yet cohesive: each maps to a theme color token at a subtle resting
+ * opacity that deepens one step on hover. All tokens — a bundle switch
+ * re-tints every surface and the color-token gate stays clean (no raw
+ * literals).
  */
-type NavTone = "accent" | "muted";
+type NavTone = "accent" | "muted" | "home" | "marketplace" | "settings";
 
 const NAV_TONE_HOVER: Record<NavTone, string> = {
   accent: "hover:bg-accent hover:text-accent-foreground",
   muted: "hover:bg-muted hover:text-foreground",
+  // Resting tint + a one-step-deeper hover, each a distinct theme color.
+  home: "bg-info/(--opacity-faint) hover:bg-info/(--opacity-subtle) hover:text-foreground",
+  marketplace: "bg-success/(--opacity-faint) hover:bg-success/(--opacity-subtle) hover:text-foreground",
+  settings: "bg-warning/(--opacity-faint) hover:bg-warning/(--opacity-subtle) hover:text-foreground",
 };
 
 interface NavItemProps {
@@ -646,6 +654,7 @@ export function Sidebar({
           isActive={activeView === "home"}
           onClick={() => onSelect("home")}
           collapsed={compact}
+          tone="home"
           data-testid="sidebar-home"
         />
         {/* Divider between Home and Marketplace */}
@@ -660,7 +669,7 @@ export function Sidebar({
             if (marketplaceUrlReady) onOpenMarketplace();
           }}
           collapsed={compact}
-          tone="muted"
+          tone="marketplace"
           data-testid="sidebar-marketplace"
           data-tour-anchor="sidebar-marketplace"
         />
@@ -673,7 +682,7 @@ export function Sidebar({
           isActive={activeView === "settings"}
           onClick={onOpenSettings}
           collapsed={compact}
-          tone="muted"
+          tone="settings"
           data-testid="sidebar-settings"
           data-tour-anchor="settings-entry"
           trailingSlot={

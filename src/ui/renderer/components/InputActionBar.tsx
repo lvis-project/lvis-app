@@ -404,11 +404,11 @@ function ShortcutsButton() {
           <PopoverTrigger asChild>
             <Button
               type="button"
-              variant="outline"
+              variant="ghost"
               size="icon"
               data-testid="composer-shortcuts-button"
               aria-label={label}
-              className="h-[26px] w-[26px] shrink-0 bg-input-bar text-muted-foreground"
+              className="h-[26px] w-[26px] shrink-0 text-muted-foreground"
             >
               <HelpCircle className="h-3.5 w-3.5" />
             </Button>
