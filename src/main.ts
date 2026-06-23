@@ -1578,6 +1578,10 @@ function createWindow(options: { showBootstrapSplash?: boolean } = {}) {
   // reload index.html. IPC handlers are registered on the main-process side and
   // survive a renderer restart — the reloaded renderer reconnects automatically.
   win.webContents.on("render-process-gone", (_e, details) => {
+    if (appShutdownStarted || appShutdownCompleted) {
+      log.info({ details }, "main window renderer process gone during app shutdown");
+      return;
+    }
     log.error({ details }, "main window renderer process gone");
     if (!rendererReloadReady) {
       pendingRendererReload = true;
@@ -1883,13 +1887,18 @@ app.on("web-contents-created", (_event, contents) => {
 });
 
 app.on("child-process-gone", (_event, details) => {
-  log.error({
+  const payload = {
     type: details.type,
     reason: details.reason,
     exitCode: details.exitCode,
     serviceName: details.serviceName ?? "",
     name: details.name ?? "",
-  }, "child process gone");
+  };
+  if (appShutdownStarted || appShutdownCompleted) {
+    log.info(payload, "child process gone during app shutdown");
+    return;
+  }
+  log.error(payload, "child process gone");
 });
 
 app.on("window-all-closed", () => {
