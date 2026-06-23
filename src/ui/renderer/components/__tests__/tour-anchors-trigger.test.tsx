@@ -79,7 +79,6 @@ describe("Tutorial-C PR #983 follow-up: tour anchors", () => {
       enableThinkingChat: false,
       onToggleThinking: vi.fn(),
       statusRow: { active: false, vendorModel: "", permissionMode: "unknown", pendingApprovals: 0 },
-      contextPercent: null,
     };
     const { getByTestId } = render(
       <TooltipProvider>
@@ -139,7 +138,6 @@ describe("Tutorial-C PR #983 follow-up: tour anchors", () => {
       enableThinkingChat: false,
       onToggleThinking: vi.fn(),
       statusRow: { active: false, vendorModel: "", permissionMode: "unknown", pendingApprovals: 0 },
-      contextPercent: null,
     };
     const toolbarProps: Parameters<typeof MainToolbar>[0] = {
       activeView: "home",
