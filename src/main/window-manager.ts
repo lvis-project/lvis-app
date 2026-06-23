@@ -24,6 +24,7 @@ import { existsSync, readFileSync, writeFileSync, renameSync } from "node:fs";
 import { join } from "node:path";
 import { validateSender, auditUnauthorized, UNAUTHORIZED_FRAME } from "../ipc-bridge.js";
 import { validateHostRendererSender } from "../ipc/gated.js";
+import { isAuthOwned } from "./auth-window-registry.js";
 import type { AuditLogger } from "../audit/audit-logger.js";
 import { lvisHome } from "../shared/lvis-home.js";
 import { resolveAppIconPath } from "./app-icon.js";
@@ -40,7 +41,7 @@ const ACTION_MODE_HEIGHT = 600;
  * where each segment is alphanumeric with dots/underscores/hyphens.
  * toViewKey() in api-client.ts produces exactly this shape.
  */
-export const ALLOWED_VIEW_KEYS = /^(reminders|routines|memory|starred|plugin:[a-z0-9][a-z0-9_.-]*:[a-z0-9][a-z0-9_.-]*)$/;
+export const ALLOWED_VIEW_KEYS = /^(reminders|routines|memory|starred|work-board|plugin:[a-z0-9][a-z0-9_.-]*:[a-z0-9][a-z0-9_.-]*)$/;
 
 /** Human-readable window titles for built-in view keys. */
 const BUILTIN_VIEW_LABELS: Record<string, string> = {
@@ -48,6 +49,7 @@ const BUILTIN_VIEW_LABELS: Record<string, string> = {
   routines: "Routines",
   memory: "Memory",
   starred: "Starred",
+  "work-board": "Work Board",
 };
 
 function isPluginViewKey(viewKey: string): boolean {
@@ -639,6 +641,32 @@ export class WindowManager {
     }
   }
 
+  /**
+   * Close EVERY detached tab this manager tracks. Used by action mode (the
+   * sole inline-vs-detached authority): switching to action sweeps all open
+   * detached windows shut so every view re-renders inline in the main tab.
+   *
+   * Auth/login windows are EXPLICITLY out of scope and MUST NOT be closed
+   * here. They live in a separate surface — `auth-window-service.ts` creates
+   * them and tags their webContents via the `auth-window-registry` — and are
+   * NEVER inserted into `this._children`. Because this method only iterates
+   * `getDetachedWindows()` (which is derived solely from `_children`), an auth
+   * window can never be reached. The guard below is defense-in-depth so a
+   * future change that (incorrectly) routes an auth window through `_children`
+   * still cannot have it swept away by an action-mode transition: the
+   * login/auth window is ALWAYS a separate window regardless of appMode.
+   */
+  closeAllDetached(): void {
+    for (const win of this.getDetachedWindows()) {
+      if (win.isDestroyed()) continue;
+      // Defense-in-depth: never close an auth-owned window. Auth windows are
+      // not tracked in `_children`, so this is a guard, not the primary
+      // mechanism — see the doc comment above.
+      if (isAuthOwned(win.webContents)) continue;
+      win.close();
+    }
+  }
+
   getMainWindow(): BrowserWindow | null {
     if (this._mainWindowId === null) return null;
     return BrowserWindow.fromId(this._mainWindowId) ?? null;
@@ -1088,6 +1116,20 @@ export class WindowManager {
         return UNAUTHORIZED_FRAME;
       }
       return this.listChildren();
+    });
+
+    // Close all detached tabs — fired by the host renderer when appMode
+    // transitions to "action" so every view re-renders inline. State-mutating
+    // and host-only: validateHostRendererSender rejects plugin UI shells,
+    // mirroring resize-for-mode. Auth/login windows are excluded by
+    // closeAllDetached() itself (they are not tracked in `_children`).
+    ipcMain.handle("lvis:window:close-all-detached", (event: IpcMainInvokeEvent) => {
+      if (!validateHostRendererSender(event)) {
+        auditUnauthorized(auditLogger, "lvis:window:close-all-detached", event);
+        return UNAUTHORIZED_FRAME;
+      }
+      this.closeAllDetached();
+      return { ok: true };
     });
 
     ipcMain.handle("lvis:window:load-session-in-main", async (event: IpcMainInvokeEvent, sessionId: unknown) => {

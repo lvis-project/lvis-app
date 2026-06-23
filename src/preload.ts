@@ -1604,6 +1604,15 @@ const api = {
       ipcRenderer.invoke("lvis:window:list-detached") as Promise<
         Array<{ windowId: number; viewKey: string; snapped: boolean }>
       >,
+    /**
+     * Close ALL detached windows (fired on the action-mode transition so every
+     * view re-renders inline). Auth/login windows are excluded by the main
+     * process — they are never tracked as detached tabs.
+     */
+    closeAllDetached: async () =>
+      ipcRenderer.invoke("lvis:window:close-all-detached") as Promise<
+        { ok: true } | { ok: false; error: string }
+      >,
     loadSessionInMain: async (sessionId: string) =>
       ipcRenderer.invoke("lvis:window:load-session-in-main", sessionId) as Promise<
         { ok: true } | { ok: false; error: string }
