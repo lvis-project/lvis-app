@@ -41,7 +41,7 @@ const ACTION_MODE_HEIGHT = 600;
  * where each segment is alphanumeric with dots/underscores/hyphens.
  * toViewKey() in api-client.ts produces exactly this shape.
  */
-export const ALLOWED_VIEW_KEYS = /^(reminders|routines|memory|starred|plugin:[a-z0-9][a-z0-9_.-]*:[a-z0-9][a-z0-9_.-]*)$/;
+export const ALLOWED_VIEW_KEYS = /^(reminders|routines|memory|starred|work-board|plugin:[a-z0-9][a-z0-9_.-]*:[a-z0-9][a-z0-9_.-]*)$/;
 
 /** Human-readable window titles for built-in view keys. */
 const BUILTIN_VIEW_LABELS: Record<string, string> = {
@@ -49,6 +49,7 @@ const BUILTIN_VIEW_LABELS: Record<string, string> = {
   routines: "Routines",
   memory: "Memory",
   starred: "Starred",
+  "work-board": "Work Board",
 };
 
 function isPluginViewKey(viewKey: string): boolean {
