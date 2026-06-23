@@ -172,7 +172,7 @@ export function CustomTitleBar({ children }: CustomTitleBarProps = {}) {
     return (
       <div
         data-testid="custom-titlebar-darwin"
-        className="flex h-8 shrink-0 items-center gap-2 border-b border-border/(--opacity-half) bg-background pl-20 pr-3 text-foreground select-none"
+        className="flex h-8 shrink-0 items-center gap-2 border-b border-border/(--opacity-half) bg-background pl-20 pr-3 pt-3 text-foreground select-none"
         style={{
           // @ts-expect-error — Electron-specific CSS extension
           WebkitAppRegion: "drag",
@@ -189,7 +189,7 @@ export function CustomTitleBar({ children }: CustomTitleBarProps = {}) {
   return (
     <div
       data-testid="custom-titlebar"
-      className="flex h-8 shrink-0 items-center gap-2 border-b border-border/(--opacity-half) bg-background pl-3 text-foreground select-none"
+      className="flex h-8 shrink-0 items-center gap-2 border-b border-border/(--opacity-half) bg-background pl-3 pt-3 text-foreground select-none"
       style={{
         // @ts-expect-error — Electron-specific CSS extension
         WebkitAppRegion: "drag",
@@ -200,9 +200,12 @@ export function CustomTitleBar({ children }: CustomTitleBarProps = {}) {
       {/* Spacer pushes the native window controls to the trailing corner; the
           empty span stays a drag region. */}
       <div className="flex-1" aria-hidden="true" />
-      {/* no-drag wrapper so buttons receive mouse events */}
+      {/* no-drag wrapper so buttons receive mouse events. The band carries a
+          top padding (pt-3) to lower the toolbar content onto the controls
+          line; the native window buttons must still span the FULL band height,
+          so `-mt-3 h-8` cancels that padding for this group only. */}
       <div
-        className="flex h-full items-stretch"
+        className="-mt-3 flex h-8 items-stretch"
         style={{
           // @ts-expect-error — Electron-specific CSS extension
           WebkitAppRegion: "no-drag",
