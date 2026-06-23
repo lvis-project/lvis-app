@@ -4,12 +4,28 @@ import { LONG_TOAST_TTL_MS } from "../constants.js";
 import type { PersistentItem, ToastItem } from "./status-bar/types.js";
 import { useStatusBarNotifications } from "./status-bar/use-status-bar-notifications.js";
 import { useStatusBarInstall } from "./status-bar/use-status-bar-install.js";
-import { useStatusBarVendor } from "./status-bar/use-status-bar-vendor.js";
-import { useStatusBarHealth } from "./status-bar/use-status-bar-health.js";
 
 // Re-export shared types so existing call sites (App.tsx, StatusBar.tsx, tests)
 // continue to import from this module without changes.
 export type { StatusBarSeverity, NotificationToastMeta, PersistentItem, ToastItem } from "./status-bar/types.js";
+
+/**
+ * Compare two persistent items by their display-relevant fields only. The
+ * `onClick` handler is intentionally excluded: producers may build a fresh
+ * closure on every run, but a changed handler identity must not be treated as
+ * a state change (that would defeat the loop guard in `upsertPersistent`).
+ */
+function samePersistentDisplay(a: PersistentItem, b: PersistentItem): boolean {
+  return (
+    a.id === b.id &&
+    a.severity === b.severity &&
+    a.label === b.label &&
+    a.value === b.value &&
+    a.dot === b.dot &&
+    a.a11yLabel === b.a11yLabel &&
+    a.tooltip === b.tooltip
+  );
+}
 
 /**
  * Status-bar event surface shared between persistent (left slot) and
@@ -111,6 +127,14 @@ export function useStatusBar(opts: UseStatusBarOptions) {
     setPersistent((prev) => {
       const idx = prev.findIndex((p) => p.id === item.id);
       if (idx === -1) return [...prev, item];
+      // Defense-in-depth against render loops: if a producer re-runs and upserts
+      // a structurally identical item (same display fields), return the SAME
+      // array so no re-render is triggered. Only `onClick` identity may differ
+      // between runs (producers build a fresh closure each time); since the
+      // handler is not display state we ignore it here and keep the existing
+      // item's reference. This prevents an unstable producer callback from
+      // driving an infinite upsert → new-array → re-render loop.
+      if (samePersistentDisplay(prev[idx], item)) return prev;
       const next = [...prev];
       next[idx] = item;
       return next;
@@ -122,17 +146,14 @@ export function useStatusBar(opts: UseStatusBarOptions) {
   }, []);
 
   // ── Producers (each in its own file under status-bar/)
-  // Status bar keeps one compact services health dot plus the active LLM
-  // vendor/model and transient toasts. Plugin/tool/MCP counts stay in
-  // Settings where their detail panes live.
+  // The window status bar is NOTIFICATIONS-ONLY: it surfaces transient toasts
+  // (notifications + install/lifecycle progress). The persistent model /
+  // permission / active-state cells moved into the unified InputActionBar
+  // status sub-row (see useInputStatusRow). `upsertPersistent` /
+  // `removePersistent` remain for the transient pre-turn auto-compact
+  // indicator (App.tsx), which is operational state, not a model cell.
   useStatusBarNotifications({ api, pushToast });
   useStatusBarInstall({ api, pushToast });
-  // Producer registration order determines left-to-right render order in
-  // the status bar (StatusBar.tsx maps the persistent array as-is). The
-  // combined health dot sits immediately before the provider/model cell so
-  // one green indicator means both the LLM provider and marketplace are live.
-  useStatusBarHealth({ api, upsertPersistent, removePersistent });
-  useStatusBarVendor({ api, upsertPersistent });
 
   return {
     persistent,

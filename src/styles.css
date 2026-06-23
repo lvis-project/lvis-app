@@ -78,6 +78,46 @@
     --action-view:    262 83% 58%;   /* violet-500 */
     --action-branch:  25  95% 53%;   /* orange-500 */
     --action-compact: 217 91% 60%;   /* blue-400 */
+
+    /* ─── Semantic opacity scale ──────────────────────────────────────────
+       Named alpha tokens for color-mix opacity modifiers. Use them through
+       Tailwind v4's CSS-variable alpha shorthand, e.g.
+       `bg-warning/(--opacity-soft)` (= `bg-warning/[var(--opacity-soft)]`),
+       instead of hand-tuned numeric modifiers (`bg-warning/15`). Values are
+       percentages because Tailwind feeds the alpha channel a `<percentage>`.
+
+       The scale collapses the ~13 ad-hoc numeric values that had crept in
+       (5/10/15/20/25/30/40/50/60/70/75/80/90) onto a labelled ladder so the
+       intent ("subtle tint" vs "strong fill") is legible at the call site and
+       a single token edit re-tunes every surface that opted in.
+
+         faint   → barely-there wash (was /5)
+         subtle  → light tint        (was /10)
+         soft    → tinted fill       (was /15)
+         light   → soft fill         (was /20)
+         muted   → secondary fill    (was /30)
+         medium  → balanced edge     (was /40, the most common border alpha)
+         half    → midpoint          (was /50)
+         strong  → assertive fill    (was /60)
+         stronger→ heavy fill        (was /70)
+         emphatic→ emphasised text   (was /75)
+         intense → near-solid text   (was /80)
+         near    → almost-opaque     (was /90)
+         solid   → opaque scrim/veil (was /95)
+    */
+    --opacity-faint:    5%;
+    --opacity-subtle:   10%;
+    --opacity-soft:     15%;
+    --opacity-light:    20%;
+    --opacity-muted:    30%;
+    --opacity-medium:   40%;
+    --opacity-half:     50%;
+    --opacity-strong:   60%;
+    --opacity-stronger: 70%;
+    --opacity-emphatic: 75%;
+    --opacity-intense:  80%;
+    --opacity-near:     90%;
+    --opacity-solid:    95%;
   }
 }
 
@@ -228,23 +268,6 @@
 @keyframes lvis-marquee {
   0%, 8%   { transform: translateX(0); }
   92%, 100% { transform: translateX(-50%); }
-}
-
-/* Live Auto-play — REC dot blink and type-on caret. Mockup parity:
-   `/tmp/login-lvis/index.html` O-X1 (`animation: blink 1.5s infinite`). */
-@keyframes lvis-demo-autoplay-blink {
-  0%, 60% { opacity: 1; }
-  61%, 100% { opacity: 0.25; }
-}
-@keyframes lvis-demo-autoplay-cursor {
-  0%, 50% { opacity: 1; }
-  51%, 100% { opacity: 0; }
-}
-.demo-autoplay-rec-dot {
-  animation: lvis-demo-autoplay-blink 1.5s infinite;
-}
-.demo-autoplay-cursor {
-  animation: lvis-demo-autoplay-cursor 0.9s steps(2, jump-none) infinite;
 }
 
 @layer components {
@@ -435,6 +458,52 @@
 
     /* Shape — does not vary by theme */
     --radius: 0.6rem;
+  }
+
+  /* ── Tier B-derived: composite tokens ─────────────────────────────────
+   *  Diff-hunk and brand-gradient tokens are *derived* from the per-bundle
+   *  semantic tokens (--success / --destructive / --p-* primitives). Because
+   *  CSS custom properties resolve lazily at use-time, a single definition
+   *  here picks up whichever bundle's --success / --destructive is active —
+   *  so diff hunks and brand gradients adapt to every bundle (dark, light,
+   *  high-contrast) without re-declaring per bundle.
+   *
+   *  Each value is a fully-formed CSS color/gradient (hsl() wrapper included)
+   *  so call sites reference `var(--diff-add)` / `var(--gradient-brand)`
+   *  directly. The alpha-bearing diff-fill tokens keep the hunk wash subtle
+   *  while the -fg tokens carry the full-strength accent for the +/− sigils.
+   * ─────────────────────────────────────────────────────────────────── */
+  :root {
+    /* Diff hunks — add/remove fills + sigil accents */
+    --diff-add:       hsl(var(--success) / 0.15);
+    --diff-remove:    hsl(var(--destructive) / 0.15);
+    --diff-add-fg:    hsl(var(--success));
+    --diff-remove-fg: hsl(var(--destructive));
+
+    /* Brand gradient — violet → blue. The single source for the onboarding
+     * brand avatar and primary CTA fills. --gradient-brand-soft is the faint
+     * blend used behind the Memory Seed recommendation card. */
+    --gradient-brand: linear-gradient(
+      135deg,
+      hsl(var(--p-purple-500)),
+      hsl(var(--p-blue-500))
+    );
+    --gradient-brand-soft: linear-gradient(
+      135deg,
+      hsl(var(--p-purple-500) / 0.10),
+      hsl(var(--p-orange-500) / 0.07)
+    );
+
+    /* Attachment stacked-card ramp — keyed to the per-bundle categorical
+     * --chart-* palette so each successive card is visually distinct and the
+     * whole stack re-tints with the active bundle. Each is a top-left→bottom-
+     * right wash from the chart hue's light edge to its full strength, giving
+     * the cards depth against the muted chip surface. */
+    --chip-stack-1: linear-gradient(135deg, hsl(var(--chart-1) / 0.55), hsl(var(--chart-1)));
+    --chip-stack-2: linear-gradient(135deg, hsl(var(--chart-2) / 0.55), hsl(var(--chart-2)));
+    --chip-stack-3: linear-gradient(135deg, hsl(var(--chart-3) / 0.55), hsl(var(--chart-3)));
+    --chip-stack-4: linear-gradient(135deg, hsl(var(--chart-4) / 0.55), hsl(var(--chart-4)));
+    --chip-stack-5: linear-gradient(135deg, hsl(var(--chart-5) / 0.55), hsl(var(--chart-5)));
   }
 
   /* ── Bundle token blocks ──────────────────────────────────────────────
@@ -1462,7 +1531,10 @@
   }
 
   .lvis-theme-card-mock-bubble.is-self {
-    background: var(--mock-accent, hsl(var(--p-blue-500)));
+    /* `--mock-bubble-self` lets a theme paint the user bubble with its own
+       message-user surface (distinct from the accent pill); falls back to
+       `--mock-accent` when a card only supplies a single accent. */
+    background: var(--mock-bubble-self, var(--mock-accent, hsl(var(--p-blue-500))));
     flex: 0 0 60%;
     margin-left: auto;
   }

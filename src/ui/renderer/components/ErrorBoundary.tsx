@@ -70,7 +70,7 @@ export class ErrorBoundary extends Component<Props, State> {
       const showRetry = typeof this.props.onReset === "function";
       if (this.props.compact) {
         return (
-          <div className="flex items-center gap-2 px-3 py-1 text-xs text-muted-foreground border-b border-warning bg-warning/10">
+          <div className="flex items-center gap-2 px-3 py-1 text-xs text-muted-foreground border-b border-warning bg-warning/(--opacity-subtle)">
             <span>{this.props.fallback ?? t("errorBoundary.compactFallback")}</span>
             {showRetry && (
               <Button variant="link" size="sm" className="text-xs h-auto p-0" onClick={this.handleRetry}>{t("errorBoundary.retryButton")}</Button>

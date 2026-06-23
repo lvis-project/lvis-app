@@ -49,6 +49,14 @@ function installLvisApi() {
       },
     })),
     reviewerProviderHasKey: vi.fn(async (provider: string) => provider === "openai"),
+    sandboxCapability: vi.fn(async () => ({
+      platform: "linux" as NodeJS.Platform,
+      enabled: false,
+      available: true,
+      kind: "full" as const,
+      reason: "",
+      confines: { filesystem: true, process: true, network: true },
+    })),
   };
   (window as unknown as { lvis: unknown }).lvis = {
     permission,
@@ -60,6 +68,10 @@ function installLvisApi() {
       })),
       set: vi.fn(),
     },
+  };
+  (window as unknown as { lvisApi: unknown }).lvisApi = {
+    getSettings: vi.fn(async () => ({ features: { osToolSandbox: false } })),
+    updateSettings: vi.fn(async () => ({})),
   };
   return permission;
 }

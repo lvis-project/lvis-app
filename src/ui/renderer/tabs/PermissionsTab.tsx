@@ -26,9 +26,12 @@ import type {
   PermissionReviewerSettings,
   PermissionRule,
 } from "../types.js";
+import type { SandboxCapabilityInfo } from "../../../shared/sandbox-capability-info.js";
 import { AuditPanel } from "../components/permissions/AuditPanel.js";
 import { SettingsPageHeader } from "../components/SettingsPageHeader.js";
 import { SettingsSection } from "../components/SettingsSection.js";
+import { getApi } from "../api-client.js";
+import { isIpcErrorResult } from "../types.js";
 
 const DEFAULT_REVIEWER_SETTINGS: PermissionReviewerSettings = {
   mode: "disabled",
@@ -192,12 +195,17 @@ export function PermissionsTab() {
   // no LLM provider/key is configured. Drives the degrade banner.
   const [reviewerDegradedToRule, setReviewerDegradedToRule] = useState(false);
 
+  // ── OS Tool Sandbox ───────────────────────────────
+  const [sandboxCapability, setSandboxCapability] = useState<SandboxCapabilityInfo | null>(null);
+  const [sandboxEnabled, setSandboxEnabled] = useState(false);
+  const [sandboxBusy, setSandboxBusy] = useState(false);
+
   // ── 초기 fetch (탭 진입 시) ───────────────────────
   const fetchAll = useCallback(async () => {
     setLoading(true);
     setError(null);
     try {
-      const [modeRes, policyRes, rulesRes, hookTrustRes, dirRes, reviewerRes] =
+      const [modeRes, policyRes, rulesRes, hookTrustRes, dirRes, reviewerRes, sandboxRes, settingsRes] =
         await Promise.all([
           window.lvis.permission.getMode(),
           window.lvis.policy.get(),
@@ -205,6 +213,8 @@ export function PermissionsTab() {
           window.lvis.permission.hookTrustList(),
           window.lvis.permission.dirDispatch("list"),
           window.lvis.permission.reviewerDispatch("show"),
+          window.lvis.permission.sandboxCapability(),
+          getApi().getSettings(),
         ]);
       if (!reviewerRes.ok) {
         throw new Error(reviewerRes.error);
@@ -219,6 +229,8 @@ export function PermissionsTab() {
       setDirectories(dirRes.ok && dirRes.verb === "list" ? dirRes.userAdditions : []);
       setReviewer(reviewerRes.settings);
       setReviewerDegradedToRule(reviewerRes.reviewerDegradedToRule ?? false);
+      setSandboxCapability(sandboxRes);
+      setSandboxEnabled(settingsRes.features?.osToolSandbox ?? false);
     } catch (e) {
       setError((e as Error).message ?? t("permissionsTab.errorLoadFailed"));
     } finally {
@@ -371,6 +383,29 @@ export function PermissionsTab() {
     }
   };
 
+  const handleSandboxToggle = async () => {
+    if (sandboxBusy) return;
+    const next = !sandboxEnabled;
+    setSandboxBusy(true);
+    setSandboxEnabled(next);
+    try {
+      const res = await getApi().updateSettings({ features: { osToolSandbox: next } });
+      if (isIpcErrorResult(res)) {
+        setSandboxEnabled(!next);
+        showBanner("error", res.message ?? t("permissionsTab.osSandboxToggleFailed"));
+        return;
+      }
+      // Re-read capability so the activation note reflects the new state.
+      const capability = await window.lvis.permission.sandboxCapability();
+      setSandboxCapability(capability);
+    } catch (e) {
+      setSandboxEnabled(!next);
+      showBanner("error", t("permissionsTab.osSandboxToggleError", { message: (e as Error).message }));
+    } finally {
+      setSandboxBusy(false);
+    }
+  };
+
   const applyReviewerCommand = async (rawArgs: string) => {
     if (reviewerBusy) return;
     setReviewerBusy(true);
@@ -510,7 +545,7 @@ export function PermissionsTab() {
 
         {/* ── 인라인 배너 (§F9 — alert 대체) ── */}
         {banner && (
-          <div className={`flex items-start gap-2 rounded-md border px-3 py-2 text-[12px] ${banner.type === "error" ? "border-destructive/40 bg-destructive/10 text-destructive" : "border-warning/40 bg-warning/15 text-warning"}`}>
+          <div className={`flex items-start gap-2 rounded-md border px-3 py-2 text-[12px] ${banner.type === "error" ? "border-destructive/(--opacity-medium) bg-destructive/(--opacity-subtle) text-destructive" : "border-warning/(--opacity-medium) bg-warning/(--opacity-soft) text-warning"}`}>
             <span className="mt-0.5 flex-shrink-0">{banner.type === "error" ? "⚠" : "🔒"}</span>
             <span>{banner.msg}</span>
             <Button
@@ -529,7 +564,7 @@ export function PermissionsTab() {
         {quarantinedHooks.length > 0 && (
           <div
             data-testid="hook-quarantine-notice"
-            className="rounded-md border border-warning/40 bg-warning/15 px-3 py-2 text-[12px] text-warning"
+            className="rounded-md border border-warning/(--opacity-medium) bg-warning/(--opacity-soft) px-3 py-2 text-[12px] text-warning"
           >
             <div className="flex items-start gap-2">
               <Badge variant="secondary" className="mt-0.5 text-[10px] text-warning">
@@ -538,16 +573,16 @@ export function PermissionsTab() {
               <div className="min-w-0 flex-1">
                 <p className="font-medium">{t("permissionsTab.hookQuarantineTitle")}</p>
                 <p className="mt-1 text-[11px]">
-                  {t("permissionsTab.hookQuarantineInstructionBefore")}<code className="rounded bg-background/70 px-1 font-mono">/permission hooks list</code>{t("permissionsTab.hookQuarantineInstructionAfter")}
+                  {t("permissionsTab.hookQuarantineInstructionBefore")}<code className="rounded bg-background/(--opacity-stronger) px-1 font-mono">/permission hooks list</code>{t("permissionsTab.hookQuarantineInstructionAfter")}
                 </p>
                 <div className="mt-2 flex flex-wrap gap-1">
                   {quarantinedHooks.slice(0, 3).map((hook) => (
-                    <code key={hook.fileName} className="rounded border border-warning/40 bg-background/70 px-1.5 py-0.5 font-mono text-[10px]">
+                    <code key={hook.fileName} className="rounded border border-warning/(--opacity-medium) bg-background/(--opacity-stronger) px-1.5 py-0.5 font-mono text-[10px]">
                       {hook.fileName}
                     </code>
                   ))}
                   {quarantinedHooks.length > 3 && (
-                    <span className="text-[10px] text-warning/80">
+                    <span className="text-[10px] text-warning/(--opacity-intense)">
                       +{quarantinedHooks.length - 3}
                     </span>
                   )}
@@ -603,7 +638,7 @@ export function PermissionsTab() {
                 key={opt.value}
                 htmlFor={`exec-mode-${opt.value}-radio`}
                 data-testid={`exec-mode-${opt.value}`}
-                className={`flex h-auto w-full cursor-pointer items-start justify-start gap-2.5 rounded-md border px-3 py-2 text-left text-sm font-normal ${mode === opt.value ? "border-primary bg-primary/10 hover:bg-primary/10" : "border-muted hover:border-muted-foreground/40"}`}
+                className={`flex h-auto w-full cursor-pointer items-start justify-start gap-2.5 rounded-md border px-3 py-2 text-left text-sm font-normal ${mode === opt.value ? "border-primary bg-primary/(--opacity-subtle) hover:bg-primary/(--opacity-subtle)" : "border-muted hover:border-muted-foreground/(--opacity-medium)"}`}
               >
                 <RadioGroupItem
                   id={`exec-mode-${opt.value}-radio`}
@@ -629,7 +664,7 @@ export function PermissionsTab() {
             <div
               role="status"
               data-testid="reviewer-rename-notice"
-              className="flex items-start gap-2 rounded-md border border-info/40 bg-info/10 px-3 py-2 text-[11px] text-info"
+              className="flex items-start gap-2 rounded-md border border-info/(--opacity-medium) bg-info/(--opacity-subtle) px-3 py-2 text-[11px] text-info"
             >
               <span className="flex-1">{t("permissionsTab.reviewerRenameNoticeText")}</span>
               <button
@@ -654,7 +689,7 @@ export function PermissionsTab() {
                 key={opt.value}
                 htmlFor={`reviewer-mode-${opt.value}-radio`}
                 data-testid={`reviewer-mode-${opt.value}`}
-                className={`flex h-auto w-full cursor-pointer items-start justify-start gap-2.5 rounded-md border px-3 py-2 text-left text-sm font-normal ${reviewer.mode === opt.value ? "border-primary bg-primary/10 hover:bg-primary/10" : "border-muted hover:border-muted-foreground/40"}`}
+                className={`flex h-auto w-full cursor-pointer items-start justify-start gap-2.5 rounded-md border px-3 py-2 text-left text-sm font-normal ${reviewer.mode === opt.value ? "border-primary bg-primary/(--opacity-subtle) hover:bg-primary/(--opacity-subtle)" : "border-muted hover:border-muted-foreground/(--opacity-medium)"}`}
               >
                 <RadioGroupItem
                   id={`reviewer-mode-${opt.value}-radio`}
@@ -674,13 +709,13 @@ export function PermissionsTab() {
             <p
               role="status"
               data-testid="reviewer-llm-degraded-banner"
-              className="rounded-md border border-warning/40 bg-warning/15 px-3 py-2 text-[11px] text-warning"
+              className="rounded-md border border-warning/(--opacity-medium) bg-warning/(--opacity-soft) px-3 py-2 text-[11px] text-warning"
             >
               {t("permissionsTab.warnReviewerLlmDegradedToRule")}
             </p>
           ) : null}
 
-          <div className="space-y-3 rounded-md border bg-muted/20 px-3 py-3">
+          <div className="space-y-3 rounded-md border bg-muted/(--opacity-light) px-3 py-3">
             <div>
               <p className="text-xs font-medium">{t("permissionsTab.llmSettingsTitle")}</p>
               <p className="text-[11px] text-muted-foreground">{t("permissionsTab.llmSettingsDescription")}</p>
@@ -736,7 +771,7 @@ export function PermissionsTab() {
                     key={opt.value}
                     htmlFor={`reviewer-interactive-${opt.value}-radio`}
                     data-testid={`reviewer-interactive-${opt.value}`}
-                    className={`flex h-auto w-full cursor-pointer items-start justify-start gap-2.5 rounded-md border px-3 py-2 text-left text-xs font-normal ${reviewer.interactive.autoApprove === opt.value ? "border-primary bg-primary/10 hover:bg-primary/10" : "border-muted hover:border-muted-foreground/40"}`}
+                    className={`flex h-auto w-full cursor-pointer items-start justify-start gap-2.5 rounded-md border px-3 py-2 text-left text-xs font-normal ${reviewer.interactive.autoApprove === opt.value ? "border-primary bg-primary/(--opacity-subtle) hover:bg-primary/(--opacity-subtle)" : "border-muted hover:border-muted-foreground/(--opacity-medium)"}`}
                   >
                     <RadioGroupItem
                       id={`reviewer-interactive-${opt.value}-radio`}
@@ -752,13 +787,13 @@ export function PermissionsTab() {
                 ))}
               </RadioGroup>
               {reviewer.interactive.autoApprove === "low" && reviewer.mode === "disabled" ? (
-                <p className="rounded-md border border-warning/40 bg-warning/15 px-3 py-2 text-[11px] text-warning">
+                <p className="rounded-md border border-warning/(--opacity-medium) bg-warning/(--opacity-soft) px-3 py-2 text-[11px] text-warning">
                   {t("permissionsTab.warnReviewerDisabledAutoApproveInactive")}
                 </p>
               ) : null}
               {mode === "auto" && reviewer.interactive.autoApprove === "off" ? (
                 <p
-                  className="rounded-md border border-warning/40 bg-warning/15 px-3 py-2 text-[11px] text-warning"
+                  className="rounded-md border border-warning/(--opacity-medium) bg-warning/(--opacity-soft) px-3 py-2 text-[11px] text-warning"
                   data-testid="permissions-legacy-auto-mode-banner"
                 >
                   {t("permissionsTab.warnAutoModeAutoApproveOff")}
@@ -766,7 +801,7 @@ export function PermissionsTab() {
               ) : null}
               {mode === "strict" && reviewer.interactive.autoApprove === "low" ? (
                 <p
-                  className="rounded-md border border-destructive/40 bg-destructive/10 px-3 py-2 text-[11px] text-destructive"
+                  className="rounded-md border border-destructive/(--opacity-medium) bg-destructive/(--opacity-subtle) px-3 py-2 text-[11px] text-destructive"
                   data-testid="permissions-strict-low-contradiction-banner"
                 >
                   {t("permissionsTab.warnStrictLowContradiction")}
@@ -774,7 +809,7 @@ export function PermissionsTab() {
               ) : null}
               {mode === "allow" ? (
                 <p
-                  className="rounded-md border border-warning/40 bg-warning/15 px-3 py-2 text-[11px] text-warning"
+                  className="rounded-md border border-warning/(--opacity-medium) bg-warning/(--opacity-soft) px-3 py-2 text-[11px] text-warning"
                   data-testid="permissions-allow-mode-banner"
                 >
                   {t("permissionsTab.warnAllowModeReviewerIgnored")}
@@ -784,7 +819,7 @@ export function PermissionsTab() {
           </div>
 
           <details
-            className="rounded-md border bg-muted/20"
+            className="rounded-md border bg-muted/(--opacity-light)"
             data-testid="reviewer-cli-mapping-panel"
           >
             <summary className="cursor-pointer px-3 py-2 text-xs font-semibold">
@@ -806,7 +841,7 @@ export function PermissionsTab() {
           </details>
 
           <details
-            className="rounded-md border bg-muted/20"
+            className="rounded-md border bg-muted/(--opacity-light)"
             data-testid="reviewer-framework-panel"
           >
             <summary className="cursor-pointer px-3 py-2 text-xs font-semibold">
@@ -814,16 +849,16 @@ export function PermissionsTab() {
             </summary>
             <div className="space-y-3 border-t px-3 py-3 text-xs">
               <div className="grid gap-2 sm:grid-cols-2">
-                <div className="rounded border bg-background/60 px-2 py-2">
+                <div className="rounded border bg-background/(--opacity-strong) px-2 py-2">
                   <p className="text-[11px] text-muted-foreground">{t("permissionsTab.frameworkVersion")}</p>
                   <p className="mt-1 font-mono">{PERMISSION_REVIEWER_FRAMEWORK.version}</p>
                 </div>
-                <div className="rounded border bg-background/60 px-2 py-2">
+                <div className="rounded border bg-background/(--opacity-strong) px-2 py-2">
                   <p className="text-[11px] text-muted-foreground">{t("permissionsTab.frameworkOutputContract")}</p>
                   <p className="mt-1 font-mono">{PERMISSION_REVIEWER_FRAMEWORK.outputContract}</p>
                 </div>
               </div>
-              <div className="rounded border bg-background/60 px-2 py-2">
+              <div className="rounded border bg-background/(--opacity-strong) px-2 py-2">
                 <p className="mb-1 text-[11px] font-medium text-muted-foreground">{t("permissionsTab.frameworkRiskLevels")}</p>
                 <ul className="space-y-1">
                   {PERMISSION_REVIEWER_FRAMEWORK.levels.map((level) => (
@@ -833,7 +868,7 @@ export function PermissionsTab() {
                   ))}
                 </ul>
               </div>
-              <div className="rounded border bg-background/60 px-2 py-2">
+              <div className="rounded border bg-background/(--opacity-strong) px-2 py-2">
                 <p className="mb-1 text-[11px] font-medium text-muted-foreground">{t("permissionsTab.frameworkComposition")}</p>
                 <ul className="space-y-1">
                   {PERMISSION_REVIEWER_FRAMEWORK.compositionRules.map((rule) => (
@@ -841,13 +876,13 @@ export function PermissionsTab() {
                   ))}
                 </ul>
               </div>
-              <div className="rounded border bg-background/60 px-2 py-2">
+              <div className="rounded border bg-background/(--opacity-strong) px-2 py-2">
                 <p className="mb-1 text-[11px] font-medium text-muted-foreground">{t("permissionsTab.frameworkInputFields")}</p>
                 <p className="font-mono leading-relaxed">
                   {PERMISSION_REVIEWER_FRAMEWORK.inputFields.join(" · ")}
                 </p>
               </div>
-              <details className="rounded border bg-background/60">
+              <details className="rounded border bg-background/(--opacity-strong)">
                 <summary className="cursor-pointer px-2 py-2 text-[11px] font-medium">
                   {t("permissionsTab.frameworkSystemPromptTitle")}
                 </summary>
@@ -876,12 +911,58 @@ export function PermissionsTab() {
             {policyManaged && <span className="text-base" title={t("permissionsTab.adminManagedTitle")}>🔒</span>}
           </div>
           {policyManaged && (
-            <p className="rounded-md border border-warning/40 bg-warning/15 px-3 py-2 text-[11px] text-warning">
+            <p className="rounded-md border border-warning/(--opacity-medium) bg-warning/(--opacity-soft) px-3 py-2 text-[11px] text-warning">
               {(policySource === "admin" || policySource === "merged") && policyAdminPath
                 ? t("permissionsTab.adminPolicyWithPath", { policyAdminPath })
                 : t("permissionsTab.adminPolicyNoPath")}
             </p>
           )}
+        </SettingsSection>
+
+        {/* ── OS Tool Sandbox ── */}
+        <SettingsSection
+          title={t("permissionsTab.osSandboxTitle")}
+          description={t("permissionsTab.osSandboxDescription")}
+        >
+          <div className="flex items-center gap-3">
+            <Checkbox
+              checked={sandboxEnabled}
+              data-testid="os-sandbox-toggle"
+              aria-label={t("permissionsTab.osSandboxCheckboxAriaLabel")}
+              disabled={sandboxBusy || !(sandboxCapability?.available ?? false)}
+              className="size-5"
+              onCheckedChange={() => void handleSandboxToggle()}
+            />
+            <span className="text-sm">
+              {sandboxEnabled ? t("permissionsTab.osSandboxEnabled") : t("permissionsTab.osSandboxDisabled")}
+            </span>
+          </div>
+          {sandboxCapability && !sandboxCapability.available ? (
+            <p
+              data-testid="os-sandbox-unavailable"
+              className="rounded-md border border-warning/(--opacity-medium) bg-warning/(--opacity-soft) px-3 py-2 text-[11px] text-warning"
+            >
+              {t("permissionsTab.osSandboxUnavailable", { platform: sandboxCapability.platform })}
+            </p>
+          ) : null}
+          {sandboxCapability && sandboxCapability.available ? (
+            <div className="space-y-1 rounded-md border bg-muted/(--opacity-light) px-3 py-2 text-[11px] text-muted-foreground">
+              <p className="font-medium text-foreground">{t("permissionsTab.osSandboxCapabilityHeading")}</p>
+              <p>
+                {sandboxCapability.platform === "darwin"
+                  ? t("permissionsTab.osSandboxCapabilityMac")
+                  : sandboxCapability.platform === "linux"
+                    ? t("permissionsTab.osSandboxCapabilityLinux")
+                    : t("permissionsTab.osSandboxCapabilityOther")}
+              </p>
+              <p className="italic">{t("permissionsTab.osSandboxRestartNote")}</p>
+              {sandboxCapability.reason ? (
+                <p data-testid="os-sandbox-detection-reason">
+                  {t("permissionsTab.osSandboxDetectionReason", { reason: sandboxCapability.reason })}
+                </p>
+              ) : null}
+            </div>
+          ) : null}
         </SettingsSection>
 
         {/* ── Section C: Rule Editor ── */}
@@ -895,7 +976,7 @@ export function PermissionsTab() {
             <div className="rounded-md border">
               <table className="w-full table-fixed text-xs">
                 <thead>
-                  <tr className="border-b bg-muted/40">
+                  <tr className="border-b bg-muted/(--opacity-medium)">
                     <th className="px-3 py-2 text-left font-medium">{t("permissionsTab.rulesColPattern")}</th>
                     <th className="px-3 py-2 text-left font-medium">{t("permissionsTab.rulesColAction")}</th>
                     <th className="px-3 py-2 text-left font-medium">{t("permissionsTab.rulesColSource")}</th>
@@ -904,7 +985,7 @@ export function PermissionsTab() {
                 </thead>
                 <tbody>
                   {rules.map((r, i) => (
-                    <tr key={`${r.pattern}:${r.action}:${i}`} className="border-b last:border-0 hover:bg-muted/20">
+                    <tr key={`${r.pattern}:${r.action}:${i}`} className="border-b last:border-0 hover:bg-muted/(--opacity-light)">
                       <td className="px-3 py-1.5 font-mono">{r.pattern}</td>
                       <td className="px-3 py-1.5">
                         <Badge variant={r.action === "allow" ? "default" : "secondary"} className={`text-[10px] ${r.action === "deny" ? "text-destructive" : ""}`}>
@@ -978,14 +1059,14 @@ export function PermissionsTab() {
             <div className="rounded-md border">
               <table className="w-full text-xs">
                 <thead>
-                  <tr className="border-b bg-muted/40">
+                  <tr className="border-b bg-muted/(--opacity-medium)">
                     <th className="px-3 py-2 text-left font-medium">{t("permissionsTab.directoriesColPath")}</th>
                     <th className="px-3 py-2" />
                   </tr>
                 </thead>
                 <tbody>
                   {directories.map((dir) => (
-                    <tr key={dir} className="border-b last:border-0 hover:bg-muted/20">
+                    <tr key={dir} className="border-b last:border-0 hover:bg-muted/(--opacity-light)">
                       <td className="min-w-0 px-3 py-1.5 font-mono text-[11px]">
                         <span className="block whitespace-normal break-all" title={dir}>{dir}</span>
                       </td>
@@ -1025,7 +1106,7 @@ export function PermissionsTab() {
           {pendingDirectoryWarning && pendingDirectoryWarning.path === newDirectory.trim() && (
             <div
               data-testid="directory-warning-confirmation"
-              className="rounded-md border border-warning/40 bg-warning/15 px-3 py-2 text-[12px] text-warning"
+              className="rounded-md border border-warning/(--opacity-medium) bg-warning/(--opacity-soft) px-3 py-2 text-[12px] text-warning"
             >
               <p className="font-medium">{t("permissionsTab.directoryWarningTitle")}</p>
               <ul className="mt-1 list-disc space-y-1 pl-4">
@@ -1077,7 +1158,7 @@ export function PermissionsTab() {
           ) : (
             <div className="overflow-auto rounded-md border">
               <table className="w-full text-xs">
-                <thead className="border-b bg-muted/40">
+                <thead className="border-b bg-muted/(--opacity-medium)">
                   <tr>
                     <th className="px-3 py-2 text-left font-medium">{t("permissionsTab.approvalsColTool")}</th>
                     <th className="px-3 py-2 text-left font-medium">{t("permissionsTab.approvalsColScope")}</th>
@@ -1094,7 +1175,7 @@ export function PermissionsTab() {
                         {a.toolName ?? a.key.slice(0, 12)}
                       </td>
                       <td className="px-3 py-2">
-                        <span className={`rounded px-1.5 py-0.5 text-[10px] font-medium ${a.scope === "persistent" ? "bg-warning/15 text-warning" : "bg-muted text-muted-foreground"}`}>
+                        <span className={`rounded px-1.5 py-0.5 text-[10px] font-medium ${a.scope === "persistent" ? "bg-warning/(--opacity-soft) text-warning" : "bg-muted text-muted-foreground"}`}>
                           {a.scope === "persistent" ? t("permissionsTab.scopePersistent") : t("permissionsTab.scopeSession")}
                         </span>
                       </td>

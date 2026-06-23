@@ -61,11 +61,6 @@ export interface AskUserQuestionItem {
    * by prompt contract. Falls back to a truncated `question` when absent.
    */
   summaryHint?: string;
-  /**
-   * @deprecated Pre-recommend/alt API. The pre-existing 3-suggestion
-   * chip array. Treated as `choices` if `choices` is missing.
-   */
-  suggestedAnswers?: string[];
 }
 
 export interface AskUserQuestionRequest {
@@ -111,7 +106,7 @@ function isAnswerComplete(item: AskUserQuestionItem, draft: DraftAnswer): boolea
 }
 
 function selectedChoicesForMulti(item: AskUserQuestionItem, draft: DraftAnswer): string[] {
-  const list = effectiveChoices(item);
+  const list = choicesOf(item);
   if (!item.allowMultiple || !draft.choiceIndices) return [];
   return draft.choiceIndices
     .filter((i) => i >= 0 && i < list.length)
@@ -131,14 +126,12 @@ function describeAnswer(item: AskUserQuestionItem, draft: DraftAnswer): string {
   return t("askUserQuestionCard.noAnswer");
 }
 
-function effectiveChoices(item: AskUserQuestionItem): string[] {
-  if (item.choices && item.choices.length > 0) return item.choices;
-  if (item.suggestedAnswers && item.suggestedAnswers.length > 0) return item.suggestedAnswers;
-  return [];
+function choicesOf(item: AskUserQuestionItem): string[] {
+  return item.choices && item.choices.length > 0 ? item.choices : [];
 }
 
 function recommendIndex(item: AskUserQuestionItem): number | null {
-  const list = effectiveChoices(item);
+  const list = choicesOf(item);
   const r = item.recommendedIndex;
   if (typeof r !== "number") return null;
   if (r < 0 || r >= list.length) return null;
@@ -146,7 +139,7 @@ function recommendIndex(item: AskUserQuestionItem): number | null {
 }
 
 function altIndices(item: AskUserQuestionItem): Set<number> {
-  const list = effectiveChoices(item);
+  const list = choicesOf(item);
   const recommend = recommendIndex(item);
   const out = new Set<number>();
   for (const i of item.altIndices ?? []) {
@@ -292,7 +285,7 @@ export function AskUserQuestionCard({
     <Card
       ref={cardRef}
       aria-label={t("askUserQuestionCard.cardAriaLabel")}
-      className={`w-full max-w-none border border-l-4 border-l-message-user bg-card shadow-none focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/40 ${className ?? ""}`}
+      className={`w-full max-w-none border border-l-4 border-l-message-user bg-card shadow-none focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/(--opacity-medium) ${className ?? ""}`}
       data-testid="ask-user-question-card"
       role="group"
       tabIndex={0}
@@ -334,7 +327,7 @@ export function AskUserQuestionCard({
             ❓ {t("askUserQuestionCard.cardTitle")}
           </CardTitle>
           {stepLabel && (
-            <span className="text-[10px] text-muted-foreground/70" data-testid="ask-step-label">
+            <span className="text-[10px] text-muted-foreground/(--opacity-stronger)" data-testid="ask-step-label">
               · {stepLabel}
             </span>
           )}
@@ -342,7 +335,7 @@ export function AskUserQuestionCard({
         <KeyboardHint
           hasAnswerNavigation={Boolean(
             currentItem &&
-              effectiveChoices(currentItem).length +
+              choicesOf(currentItem).length +
                 (currentItem.allowFreeText ? 1 : 0) >
                 1,
           )}
@@ -502,17 +495,17 @@ function KeyboardHint({
       : t("askUserQuestionCard.sendButton");
   return (
     <div
-      className="flex items-center gap-1.5 text-[10px] text-muted-foreground/70"
+      className="flex items-center gap-1.5 text-[10px] text-muted-foreground/(--opacity-stronger)"
       data-testid="ask-keyboard-hint"
     >
-      <kbd className="rounded border bg-muted/50 px-1 py-[1px] font-mono text-[9px]">
+      <kbd className="rounded border bg-muted/(--opacity-half) px-1 py-[1px] font-mono text-[9px]">
         Enter
       </kbd>
       <span>{enterLabel}</span>
       {hasAnswerNavigation && (
         <>
           <span aria-hidden="true">·</span>
-          <kbd className="rounded border bg-muted/50 px-1 py-[1px] font-mono text-[9px]">
+          <kbd className="rounded border bg-muted/(--opacity-half) px-1 py-[1px] font-mono text-[9px]">
             ↑↓
           </kbd>
           <span>{t("askUserQuestionCard.answerNavHint")}</span>
@@ -521,7 +514,7 @@ function KeyboardHint({
       {isMulti && (
         <>
           <span aria-hidden="true">·</span>
-          <kbd className="rounded border bg-muted/50 px-1 py-[1px] font-mono text-[9px]">
+          <kbd className="rounded border bg-muted/(--opacity-half) px-1 py-[1px] font-mono text-[9px]">
             ←→
           </kbd>
           <span>{t("askUserQuestionCard.questionNavHint")}</span>
@@ -557,7 +550,7 @@ function isTextEditingTarget(target: EventTarget | null): boolean {
  * ChoiceBadge — visible in ALL button states (default/outline/selected).
  *
  * When the parent Button is `variant="default"` (selected), its background
- * becomes `bg-primary` and `text-primary` / `bg-primary/15` become
+ * becomes `bg-primary` and `text-primary` / `bg-primary/(--opacity-soft)` become
  * invisible.  Using a ring-based border-only style with `currentColor`
  * fallback text ensures the badge reads correctly against both the
  * outline (unselected) and filled primary (selected) button backgrounds.
@@ -566,8 +559,8 @@ function ChoiceBadge({ kind }: { kind: "recommend" | "alt" }) {
   const { t } = useTranslation();
   const cls =
     kind === "recommend"
-      ? "border border-current/60 text-inherit opacity-90"
-      : "border border-current/40 text-inherit opacity-60";
+      ? "border border-current/(--opacity-strong) text-inherit opacity-90"
+      : "border border-current/(--opacity-medium) text-inherit opacity-60";
   return (
     <span
       className={`flex-shrink-0 rounded px-1.5 py-[1px] text-[9.5px] font-semibold tracking-wider ${cls}`}
@@ -634,7 +627,7 @@ const QuestionForm = forwardRef<QuestionFormHandle, QuestionFormProps>(function 
   onAdvance,
 }, ref) {
   const { t } = useTranslation();
-  const choices = effectiveChoices(item);
+  const choices = choicesOf(item);
   const recommend = recommendIndex(item);
   const alts = altIndices(item);
   const freeTextIndex = item.allowFreeText ? choices.length : -1;
@@ -778,8 +771,8 @@ const QuestionForm = forwardRef<QuestionFormHandle, QuestionFormProps>(function 
                     aria-hidden="true"
                     className={`inline-flex h-3.5 w-3.5 flex-shrink-0 items-center justify-center rounded-sm border ${
                       selected
-                        ? "border-current bg-current/15 text-inherit"
-                        : "border-current/40 text-inherit"
+                        ? "border-current bg-current/(--opacity-soft) text-inherit"
+                        : "border-current/(--opacity-medium) text-inherit"
                     }`}
                   >
                     {selected ? "✓" : ""}
@@ -851,7 +844,7 @@ function ConfirmReview({
             <li key={i}>
               <button
                 type="button"
-                className="w-full rounded-md border px-2.5 py-1.5 text-left hover:bg-muted/60"
+                className="w-full rounded-md border px-2.5 py-1.5 text-left hover:bg-muted/(--opacity-strong)"
                 onClick={() => onJumpTo(i)}
               >
                 <div className="text-[10.5px] text-muted-foreground">{label}</div>

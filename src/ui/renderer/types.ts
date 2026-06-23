@@ -27,6 +27,7 @@ import type {
 } from "../../shared/render-html-preview.js";
 import type { SessionTodoItem } from "../../shared/session-todo.js";
 import type { MarketplaceAnnouncementPayload } from "../../shared/marketplace-announcements.js";
+import type { SandboxCapabilityInfo } from "../../shared/sandbox-capability-info.js";
 
 // Re-export MCP types for renderer-side consumers (type-only, no main-process runtime)
 export type { McpServerConfig, McpServerConfigDto, McpServerState };
@@ -210,10 +211,17 @@ export type AppSettings = {
     /** #893 — `true` after the user has dismissed the first-boot onboarding. */
     onboardingCompleted?: boolean;
     /**
-     * Demo-only presentation flag. Mirrors the main-process SOT in
-     * `src/data/settings-store.ts` `FeatureFlags.demoAutoplayEnabled`.
+     * Permission policy host-classifies-risk migration gate. Mirrors the
+     * main-process SOT in `src/data/settings-store.ts`
+     * `FeatureFlags.hostClassifiesRisk`. Default false (shadow mode only).
      */
-    demoAutoplayEnabled?: boolean;
+    hostClassifiesRisk?: boolean;
+    /**
+     * OS tool sandbox opt-in. Mirrors the main-process SOT in
+     * `src/data/settings-store.ts` `FeatureFlags.osToolSandbox`. Default
+     * false; takes effect only when a platform sandbox runner is available.
+     */
+    osToolSandbox?: boolean;
   };
 };
 
@@ -929,7 +937,6 @@ export type LvisApi = {
         allowMultiple?: boolean;
         placeholder?: string;
         summaryHint?: string;
-        suggestedAnswers?: string[];
       }>;
       createdAt: number;
     }) => void,
@@ -1015,7 +1022,11 @@ export type LvisApi = {
     openDetached: (viewKey: string) => Promise<{ ok: true; windowId: number } | { ok: false; error: string }>;
     closeDetached: () => Promise<{ ok: true } | { ok: false; error: string }>;
     listDetached: () => Promise<Array<{ windowId: number; viewKey: string; snapped: boolean }>>;
+    /** Close all detached windows (fired on the action-mode transition). Auth/login windows are excluded. */
+    closeAllDetached: () => Promise<{ ok: true } | { ok: false; error: string }>;
     loadSessionInMain: (sessionId: string) => Promise<{ ok: true } | { ok: false; error: string }>;
+    /** Resize the main window to match the workspace mode (action → 800×600 centered; chat → 기존 right-docked). */
+    resizeForMode: (mode: "chat" | "action") => Promise<{ ok: true } | { ok: false; error: string }>;
     openHtmlPreview: (payload: OpenHtmlPreviewWindowPayload) => Promise<OpenHtmlPreviewWindowResult>;
     onSnapEdge: (handler: (edge: "n" | "s" | "e" | "w" | null) => void) => () => void;
     /** Subscribe to in-place navigation (single-instance shell content swap). */
@@ -1321,6 +1332,8 @@ export type LvisPermissionApi = {
    * stored approval was applied. Returns an unsubscribe function.
    */
   onUserApprovalHit: (cb: (payload: UserApprovalHitPayload) => void) => () => void;
+  /** Read-only: honest OS sandbox capability for the current platform. */
+  sandboxCapability: () => Promise<SandboxCapabilityInfo>;
   /** Subscribe to default-mode repeated-approval hints for LLM permission review. */
   onReviewSuggestion?: (cb: (payload: PermissionReviewSuggestionPayload) => void) => () => void;
   /** Permission policy — `/permission reviewer ...` slash dispatch. */

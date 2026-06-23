@@ -195,7 +195,7 @@ export function SessionCalendarPopover({
           modifiersClassNames={{
             // Other-session dates: subdued dot (edge case 5 — streaming guard lives on buttons below).
             hasSession:
-              "after:absolute after:bottom-0.5 after:left-1/2 after:h-1 after:w-1 after:-translate-x-1/2 after:rounded-full after:bg-primary/80 [&>button]:font-semibold",
+              "after:absolute after:bottom-0.5 after:left-1/2 after:h-1 after:w-1 after:-translate-x-1/2 after:rounded-full after:bg-primary/(--opacity-intense) [&>button]:font-semibold",
             // Step 5: Current-session message dates: stronger primary dot.
             hasCurrentSessionMessage:
               "after:absolute after:bottom-0.5 after:left-1/2 after:h-1 after:w-1 after:-translate-x-1/2 after:rounded-full after:bg-primary [&>button]:font-semibold",
@@ -205,12 +205,12 @@ export function SessionCalendarPopover({
 
       {/* Step 3: Legacy session warning — no createdAt on any entry. */}
       {isLegacySession && (
-        <div className="px-2 py-1 text-[10px] text-muted-foreground border-b border-border/60">
+        <div className="px-2 py-1 text-[10px] text-muted-foreground border-b border-border/(--opacity-strong)">
           {t("sessionCalendarPopover.legacySessionWarning")}
         </div>
       )}
 
-      <div className="border-t border-border/70 px-1 py-2">
+      <div className="border-t border-border/(--opacity-stronger) px-1 py-2">
         <div className="mb-1 flex items-center justify-between gap-2 px-1">
           <span className="min-w-0 truncate text-[10px] font-medium text-muted-foreground">
             {t("sessionCalendarPopover.dateConversationsLabel", { date: selectedKey })}
@@ -218,7 +218,7 @@ export function SessionCalendarPopover({
           <button
             type="button"
             onClick={() => setPickedDate(new Date())}
-            className="shrink-0 rounded border border-border bg-muted/30 px-2 py-0.5 text-[10px] text-foreground/80 hover:bg-accent hover:text-accent-foreground"
+            className="shrink-0 rounded border border-border bg-muted/(--opacity-muted) px-2 py-0.5 text-[10px] text-foreground/(--opacity-intense) hover:bg-accent hover:text-accent-foreground"
           >
             {t("sessionCalendarPopover.todayButton")}
           </button>
@@ -233,7 +233,7 @@ export function SessionCalendarPopover({
           <button
             type="button"
             onClick={handleJumpToCurrentSession}
-            className="mb-1 block w-full rounded px-2 py-1.5 text-left text-[11px] bg-primary/10 text-primary hover:bg-primary/20"
+            className="mb-1 block w-full rounded px-2 py-1.5 text-left text-[11px] bg-primary/(--opacity-subtle) text-primary hover:bg-primary/(--opacity-light)"
           >
             {t("sessionCalendarPopover.jumpToCurrentSession", { count: currentSessionEntriesForDate.length })}
             {currentSessionEntriesForDate.length > 1 && jumpCycleIdx > 0 && (
@@ -266,7 +266,7 @@ export function SessionCalendarPopover({
                   className={`block w-full rounded px-2 py-1.5 text-left text-[11px] hover:bg-accent hover:text-accent-foreground disabled:cursor-not-allowed disabled:opacity-50 ${
                     isCurrent
                       ? // Step 5: primary tone for current session row.
-                        "bg-primary/15 text-foreground ring-1 ring-primary/30"
+                        "bg-primary/(--opacity-soft) text-foreground ring-1 ring-primary/(--opacity-muted)"
                       : "text-popover-foreground"
                   }`}
                 >
