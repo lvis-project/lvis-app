@@ -10,7 +10,7 @@
  */
 import { Suspense, useCallback, useEffect, useRef, useState } from "react";
 import type { KeyboardEvent as ReactKeyboardEvent } from "react";
-import { ChevronRight } from "lucide-react";
+import { ChevronLeft, ChevronRight } from "lucide-react";
 import {
   Command,
   CommandEmpty,
@@ -150,28 +150,29 @@ export function SlashPickerPanel({
   const renderCommandRow = (c: SlashCommand) => (
     <CommandItem
       key={c.cmd}
+      className="gap-2.5"
       value={`${c.cmd} ${t(c.labelKey)}`}
       onSelect={() => runSlash(c.cmd)}
     >
       <span className="font-mono text-xs text-muted-foreground w-28 shrink-0">{c.cmd}</span>
-      <span className="text-xs">{t(c.labelKey)}</span>
+      <span className="min-w-0 flex-1 truncate text-xs">{t(c.labelKey)}</span>
     </CommandItem>
   );
 
   const renderActionRow = (a: QuickAction) => (
-    <CommandItem key={a.id} value={a.label} onSelect={() => runAction(a)}>
-      <span className="text-xs">{a.label}</span>
+    <CommandItem key={a.id} className="gap-2.5" value={a.label} onSelect={() => runAction(a)}>
+      <span className="min-w-0 flex-1 truncate text-xs">{a.label}</span>
     </CommandItem>
   );
 
   const renderPluginRow = (p: PluginEntry) => {
     const Icon = pluginIconFor({ icon: p.icon, iconText: p.iconText });
     return (
-      <CommandItem key={p.viewKey} value={p.label} onSelect={() => runPlugin(p)}>
+      <CommandItem key={p.viewKey} className="gap-2.5" value={p.label} onSelect={() => runPlugin(p)}>
         <Suspense fallback={<span className="h-3.5 w-3.5 shrink-0" />}>
           <Icon className="h-3.5 w-3.5 shrink-0 text-muted-foreground" />
         </Suspense>
-        <span className="text-xs">{p.label}</span>
+        <span className="min-w-0 flex-1 truncate text-xs">{p.label}</span>
       </CommandItem>
     );
   };
@@ -258,6 +259,22 @@ export function SlashPickerPanel({
                 );
               })}
             </CommandGroup>
+          )}
+
+          {/* Drilled-view header: a visible BACK affordance (‹ {category}) that
+              pops to the root category list in ONE action. Esc also works
+              (handleKeyDownCapture). Adopts the approved stepped-popover .back
+              design (accent, semibold). */}
+          {!searching && step !== null && (
+            <CommandItem
+              value="__back__"
+              onSelect={() => setStep(null)}
+              className="gap-2.5 text-accent"
+              data-testid="slash-picker-back"
+            >
+              <ChevronLeft className="h-3.5 w-3.5 shrink-0" />
+              <span className="min-w-0 flex-1 truncate text-xs font-semibold">{catLabel(step)}</span>
+            </CommandItem>
           )}
 
           {/* Item lists — one group per visible category (drilled or searched). */}
