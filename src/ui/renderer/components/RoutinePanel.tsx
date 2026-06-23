@@ -702,7 +702,7 @@ export function RoutinePanel({ api, onOpenSession }: RoutinePanelProps) {
   return (
     <>
       <div
-        className="mx-auto flex min-h-0 min-w-0 flex-1 w-full max-w-3xl flex-col overflow-hidden"
+        className="mx-auto flex min-h-0 min-w-0 flex-1 w-full max-w-6xl flex-col overflow-hidden"
         data-testid="routine-panel"
       >
         <CardHeader>
@@ -737,12 +737,14 @@ export function RoutinePanel({ api, onOpenSession }: RoutinePanelProps) {
         </CardHeader>
         <CardContent className="flex min-h-0 flex-1 flex-col gap-3">
           <div className="grid min-h-0 flex-1 gap-3 lg:grid-cols-[minmax(0,1fr)_minmax(240px,0.72fr)]">
-            <section className="flex min-h-0 flex-col gap-2" data-testid="routine-list-section">
+            <section className="flex min-h-0 flex-col gap-2 rounded-lg border bg-muted/(--opacity-light) shadow-sm" data-testid="routine-list-section">
               <div className="flex items-center justify-between rounded-t-lg border-b bg-muted/(--opacity-medium) px-3 py-2">
                 <h3 className="text-xs font-semibold uppercase tracking-wider text-muted-foreground">{t("routinePanel.routineListHeading")}</h3>
-                <Badge variant="outline" className="h-5 px-1.5 text-[11px] tabular-nums">{routines.length}</Badge>
+                <span className="flex h-5 min-w-[20px] items-center justify-center rounded-full bg-muted px-1.5 text-[10px] font-semibold text-muted-foreground">
+                  {routines.length}
+                </span>
               </div>
-              <ScrollArea className="min-h-[220px] flex-1">
+              <ScrollArea className="min-h-[220px] flex-1 px-2 pb-2">
                 {loading ? (
                   <div className="py-8 text-center text-sm text-muted-foreground">{t("routinePanel.loadingLabel")}</div>
                 ) : routines.length === 0 ? (
@@ -750,7 +752,7 @@ export function RoutinePanel({ api, onOpenSession }: RoutinePanelProps) {
                     {t("routinePanel.noRoutinesEmpty")}
                   </div>
                 ) : (
-                  <div className="space-y-2 pr-2">
+                  <div className="space-y-2">
                     {routines.map((r) => (
                       <RoutineRow
                         key={r.id}
@@ -766,12 +768,14 @@ export function RoutinePanel({ api, onOpenSession }: RoutinePanelProps) {
               </ScrollArea>
             </section>
 
-            <section className="flex min-h-0 flex-col gap-2" data-testid="routine-session-list">
+            <section className="flex min-h-0 flex-col gap-2 rounded-lg border bg-muted/(--opacity-light) shadow-sm" data-testid="routine-session-list">
               <div className="flex items-center justify-between rounded-t-lg border-b bg-muted/(--opacity-medium) px-3 py-2">
                 <h3 className="text-xs font-semibold uppercase tracking-wider text-muted-foreground">{t("routinePanel.sessionListHeading")}</h3>
-                <Badge variant="outline" className="h-5 px-1.5 text-[11px] tabular-nums">{routineSessions.length}</Badge>
+                <span className="flex h-5 min-w-[20px] items-center justify-center rounded-full bg-muted px-1.5 text-[10px] font-semibold text-muted-foreground">
+                  {routineSessions.length}
+                </span>
               </div>
-              <ScrollArea className="min-h-[220px] flex-1">
+              <ScrollArea className="min-h-[220px] flex-1 px-2 pb-2">
                 {loading ? (
                   <div className="py-8 text-center text-sm text-muted-foreground">{t("routinePanel.loadingLabel")}</div>
                 ) : routineSessions.length === 0 ? (
@@ -779,7 +783,7 @@ export function RoutinePanel({ api, onOpenSession }: RoutinePanelProps) {
                     {t("routinePanel.noSessionsEmpty")}
                   </div>
                 ) : (
-                  <div className="space-y-2 pr-2">
+                  <div className="space-y-2">
                     {routineSessions.map((session) => (
                       <RoutineSessionRow
                         key={`${session.routineId}:${session.firedAt}:${session.sessionId}`}
