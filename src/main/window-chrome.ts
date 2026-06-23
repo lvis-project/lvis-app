@@ -9,9 +9,10 @@
  * source-of-truth governs the platform branching.
  *
  *  - macOS: keep native frame; `hiddenInset` removes the title bar but keeps
- *           the OS-drawn traffic lights, positioned 14 px from the left and
- *           vertically centered inside the 36 px CustomTitleBar:
- *             y = (36 - 12) / 2 = 12
+ *           the OS-drawn traffic lights, positioned 18 px from the left with a
+ *           modest top inset (y:16) so they breathe inside the band. The band /
+ *           titlebar left clearance grows in lockstep (CustomTitleBar pl) so the
+ *           leftmost cluster button never hover-overlaps the OS lights.
  *  - Win/Linux: remove native frame entirely; `CustomTitleBar.tsx` renders
  *               our own minimize / maximize / close buttons in the renderer.
  *
@@ -30,6 +31,6 @@ export function getCommonChromeOptions(): Partial<BrowserWindowConstructorOption
   return {
     frame: isDarwin,
     titleBarStyle: isDarwin ? "hiddenInset" : "hidden",
-    trafficLightPosition: isDarwin ? { x: 14, y: 12 } : undefined,
+    trafficLightPosition: isDarwin ? { x: 18, y: 16 } : undefined,
   };
 }

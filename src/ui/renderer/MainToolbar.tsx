@@ -1,6 +1,5 @@
-import { ArrowDownToLine, Download, RefreshCw, Search, Star, Wrench, X } from "lucide-react";
+import { ArrowDownToLine, Download, RefreshCw, Wrench, X } from "lucide-react";
 import { Button } from "../../components/ui/button.js";
-import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger } from "../../components/ui/dropdown-menu.js";
 import { Tooltip, TooltipContent, TooltipTrigger } from "../../components/ui/tooltip.js";
 import { useTranslation } from "../../i18n/react.js";
 
@@ -9,6 +8,12 @@ import { useTranslation } from "../../i18n/react.js";
  * band (see CustomTitleBar). The band is an Electron drag region in its empty
  * zones, so each control must opt OUT of dragging or it would be un-clickable.
  * `NoDrag` wraps a control with `WebkitAppRegion: "no-drag"`.
+ *
+ * The search / star / export controls + the collapse toggle no longer live
+ * here — they moved into the floating sidebar's CLUSTER STRIP next to the
+ * traffic lights (see Sidebar.tsx). This band now hosts only the right-aligned
+ * controls: the app-update badge, the Dev badge, and the Chat/Action mode
+ * toggle.
  */
 function NoDrag({ children, className }: { children: React.ReactNode; className?: string }) {
   return (
@@ -63,17 +68,6 @@ export interface MainToolbarProps {
   activeView: string;
   streaming: boolean;
   hasApiKey: boolean | null;
-  isCurrentSessionStarred: boolean;
-  onToggleCurrentSessionStar: () => void | Promise<void>;
-  onExport: (format: "markdown" | "json") => void | Promise<void>;
-  onOpenUnifiedSearch: () => void;
-  /**
-   * Shell-owned sidebar collapse state (App.tsx). The collapse TOGGLE now lives
-   * on the floating sidebar card's right edge (not in this band), but the band
-   * still needs the width to left-pad its content so the search/star/export
-   * cluster starts immediately to the right of the sidebar edge.
-   */
-  sidebarCollapsed: boolean;
   /** Current workspace mode (Chat / Action). Drives the segmented toggle. */
   appMode: AppMode;
   /** Fired when the user picks a segment in the Chat/Action toggle. */
@@ -98,11 +92,6 @@ export function MainToolbar({
   activeView: _activeView,
   streaming: _streaming,
   hasApiKey: _hasApiKey,
-  isCurrentSessionStarred,
-  onToggleCurrentSessionStar,
-  onExport,
-  onOpenUnifiedSearch,
-  sidebarCollapsed,
   appMode,
   onToggleAppMode,
   onOpenDevTools,
@@ -114,97 +103,17 @@ export function MainToolbar({
 }: MainToolbarProps) {
   const { t } = useTranslation();
   // The toolbar content lives IN the window-control band (CustomTitleBar). The
-  // band is the row; this component contributes only its interactive cluster,
-  // each control wrapped `no-drag` so the surrounding band stays draggable.
-  //
-  // Left padding offsets the content past the floating sidebar card so the
-  // leading search/star/export cluster begins immediately to the RIGHT of the
-  // sidebar edge. The offset tracks the sidebar width (collapsed vs expanded),
-  // mirroring the main canvas's pl-[5rem]/pl-[15.5rem]. The sidebar (z-30)
-  // overlays the band's own traffic-light pl in this zone, so the leading
-  // controls never collide with the macOS lights.
+  // search / star / export controls + the collapse toggle moved into the
+  // floating sidebar's cluster strip next to the traffic lights, so this band
+  // hosts only the RIGHT-aligned controls. A leading spacer (stays a drag
+  // region) pushes them to the far-right edge; each control is wrapped `no-drag`
+  // so the surrounding band stays draggable.
   return (
     <div
       data-testid="main-toolbar"
-      className={`flex min-w-0 flex-1 items-center gap-2 transition-[padding] duration-200 ease-out motion-reduce:transition-none ${
-        sidebarCollapsed ? "pl-[5rem]" : "pl-[15.5rem]"
-      }`}
+      className="flex min-w-0 flex-1 items-center gap-2"
     >
-      {/* ── Leading cluster: 검색 → 별 → 내보내기 — starts right after the
-          floating sidebar edge (8px gaps). ─────────────────────────────── */}
-      {/* Unified search — opens the top-attached search panel. Z onboarding
-          chain anchor "chat-history" (surfaces saved + recent sessions). */}
-      <NoDrag>
-        <Tooltip>
-          <TooltipTrigger asChild>
-            <Button
-              variant="ghost"
-              size="icon"
-              className="h-7 w-7 aspect-square p-0 shrink-0"
-              onClick={onOpenUnifiedSearch}
-              title={t("mainToolbar.unifiedSearch")}
-              aria-label={t("mainToolbar.unifiedSearch")}
-              data-tour-anchor="chat-history"
-            >
-              <Search className="h-4 w-4" />
-            </Button>
-          </TooltipTrigger>
-          <TooltipContent>{t("mainToolbar.unifiedSearch")}</TooltipContent>
-        </Tooltip>
-      </NoDrag>
-
-      {/* Current session star — immediate session-level action. */}
-      <NoDrag>
-        <Tooltip>
-          <TooltipTrigger asChild>
-            <Button
-              variant="ghost"
-              size="icon"
-              className="h-7 w-7 aspect-square p-0 shrink-0"
-              onClick={() => void onToggleCurrentSessionStar()}
-              title={isCurrentSessionStarred ? t("mainToolbar.sessionUnstar") : t("mainToolbar.sessionStar")}
-              aria-label={isCurrentSessionStarred ? t("mainToolbar.sessionUnstar") : t("mainToolbar.sessionStar")}
-              aria-pressed={isCurrentSessionStarred}
-            >
-              <Star key={isCurrentSessionStarred ? "on" : "off"} className={`h-4 w-4 ${isCurrentSessionStarred ? "fill-emphasis text-emphasis lvis-anim-star" : ""}`} />
-            </Button>
-          </TooltipTrigger>
-          <TooltipContent>{isCurrentSessionStarred ? t("mainToolbar.sessionUnstar") : t("mainToolbar.sessionStar")}</TooltipContent>
-        </Tooltip>
-      </NoDrag>
-
-      {/* Export (내보내기) — standalone band button right after the star.
-          Opens a small format menu (Markdown / JSON) and is wired to the same
-          export handler the removed hamburger used. Z onboarding chain anchor
-          "settings-entry" relocates here now that the hamburger is gone. */}
-      <NoDrag>
-        <DropdownMenu>
-          <Tooltip>
-            <TooltipTrigger asChild>
-              <DropdownMenuTrigger asChild>
-                <Button
-                  variant="ghost"
-                  size="icon"
-                  className="h-7 w-7 aspect-square p-0 shrink-0"
-                  title={t("mainToolbar.export")}
-                  aria-label={t("mainToolbar.export")}
-                  data-testid="toolbar-export"
-                  data-tour-anchor="settings-entry"
-                >
-                  <Download className="h-4 w-4" />
-                </Button>
-              </DropdownMenuTrigger>
-            </TooltipTrigger>
-            <TooltipContent>{t("mainToolbar.export")}</TooltipContent>
-          </Tooltip>
-          <DropdownMenuContent align="start" className="w-[180px]">
-            <DropdownMenuItem data-testid="toolbar-export-markdown" onClick={() => void onExport("markdown")}>Markdown (.md)</DropdownMenuItem>
-            <DropdownMenuItem data-testid="toolbar-export-json" onClick={() => void onExport("json")}>JSON (.json)</DropdownMenuItem>
-          </DropdownMenuContent>
-        </DropdownMenu>
-      </NoDrag>
-
-      {/* ── Spacer pushes the trailing cluster to the far-right edge (stays drag) */}
+      {/* ── Spacer pushes the trailing controls to the far-right edge (stays drag) */}
       <div className="flex-1" aria-hidden="true" />
 
       {/* ── App update badge — permanent (NOT a toast) until acted on; clicking
