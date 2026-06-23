@@ -14,9 +14,9 @@
  *   - seeded files are chmod 0o600 (POSIX)
  *
  * Dev-mode resolution (`app.isPackaged === false`) reads packaged resources
- * from `join(process.cwd(), "resources", …)`, so the test points `process.cwd`
- * at a temp fixtures root and `LVIS_HOME` at a temp home — no real ~/.lvis or
- * repo resources are touched.
+ * from `join(app.getAppPath(), "resources", …)` — a cwd-independent anchor — so
+ * the test points `app.getAppPath()` at a temp fixtures root and `LVIS_HOME` at
+ * a temp home — no real ~/.lvis or repo resources are touched.
  *
  * The packaged launch smoke verifies that resources ship and seed on real
  * first launch; this file keeps the deterministic seed/upgrade semantics.
@@ -36,7 +36,7 @@ import { tmpdir } from "node:os";
 import { join, dirname } from "node:path";
 import { app } from "electron";
 
-vi.mock("electron", () => ({ app: { isPackaged: false } }));
+vi.mock("electron", () => ({ app: { isPackaged: false, getAppPath: () => "" } }));
 
 import {
   listLvisHomeDocUpgradeMarkers,
@@ -45,7 +45,7 @@ import {
 
 let fixtures: string;
 let home: string;
-let cwdSpy: ReturnType<typeof vi.spyOn>;
+let appPathSpy: ReturnType<typeof vi.spyOn>;
 const prevLvisHome = process.env.LVIS_HOME;
 const originalResourcesPath = (process as NodeJS.Process & { resourcesPath?: string }).resourcesPath;
 
@@ -60,7 +60,7 @@ beforeEach(() => {
   fixtures = mkdtempSync(join(tmpdir(), "lvis-seed-fix-"));
   home = mkdtempSync(join(tmpdir(), "lvis-seed-home-"));
   process.env.LVIS_HOME = home;
-  cwdSpy = vi.spyOn(process, "cwd").mockReturnValue(fixtures);
+  appPathSpy = vi.spyOn(app, "getAppPath").mockReturnValue(fixtures);
 
   writeRes("AGENTS.md", "AGENTS v1\n");
   writeRes(join("agents", "executor.md"), "executor v1\n");
@@ -69,7 +69,7 @@ beforeEach(() => {
 });
 
 afterEach(() => {
-  cwdSpy.mockRestore();
+  appPathSpy.mockRestore();
   rmSync(fixtures, { recursive: true, force: true });
   rmSync(home, { recursive: true, force: true });
   if (prevLvisHome === undefined) delete process.env.LVIS_HOME;
@@ -98,6 +98,26 @@ describe("seedLvisHomeDocs — first boot", () => {
     expect(readFileSync(join(home, "prompts", "summarizer.md"), "utf8")).toBe(
       "summarizer v1\n",
     );
+  });
+
+  it("resolves dev resources independent of process.cwd() (regression: chdir-before-seed)", () => {
+    // ensureWorkspaceCwd() chdir()s the main process to ~/.lvis/workspace before
+    // boot. Seeding must still find the repo's resources/ via the stable
+    // app.getAppPath() anchor, not a cwd-relative join.
+    const originalCwd = process.cwd();
+    const elsewhere = mkdtempSync(join(tmpdir(), "lvis-seed-cwd-"));
+    process.chdir(elsewhere);
+    try {
+      const r = seedLvisHomeDocs();
+      expect(r.seeded).toContain("AGENTS.md");
+      expect(r.seeded).toContain(join("skills", "report-writing.md"));
+      expect(readFileSync(join(home, "skills", "report-writing.md"), "utf8")).toBe(
+        "report v1\n",
+      );
+    } finally {
+      process.chdir(originalCwd);
+      rmSync(elsewhere, { recursive: true, force: true });
+    }
   });
 
   it("seeds files as 0o600 (POSIX)", () => {

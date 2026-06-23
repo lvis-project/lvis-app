@@ -251,6 +251,13 @@ function resolvePackagedResource(name: string): string | null {
   }
 
   // Dev mode: repo's `resources/` directory.
-  const dev = join(process.cwd(), "resources", name);
+  //
+  // Anchor on `app.getAppPath()` — Electron resolves this to the directory of
+  // the app's `package.json` (the repo root under `bun run start`), and it is
+  // *cwd-independent*. We must NOT use `process.cwd()` here: ensureWorkspaceCwd()
+  // chdir()s the main process to `~/.lvis/workspace` before boot, so a cwd-based
+  // join would point at `~/.lvis/workspace/resources/<name>` (nonexistent) and
+  // silently skip seeding AGENTS.md/agents/skills/prompts on a fresh home.
+  const dev = join(app.getAppPath(), "resources", name);
   return existsSync(dev) ? dev : null;
 }
