@@ -1,6 +1,7 @@
 import { Suspense } from "react";
 import {
   Database,
+  Download,
   Home,
   KanbanSquare,
   KeyRound,
@@ -8,9 +9,11 @@ import {
   PanelLeftOpen,
   Plus,
   Repeat2,
+  Search,
   ShoppingBag,
   Star,
 } from "lucide-react";
+import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger } from "../../../components/ui/dropdown-menu.js";
 import { Button } from "../../../components/ui/button.js";
 import { ScrollArea } from "../../../components/ui/scroll-area.js";
 import { Tooltip, TooltipContent, TooltipTrigger } from "../../../components/ui/tooltip.js";
@@ -44,12 +47,21 @@ export interface SidebarProps {
   marketplaceUrlReady?: boolean;
   /**
    * Collapse state is owned by the shell (App.tsx). The collapse/expand toggle
-   * lives on THIS card's right edge (see `onToggleCollapse`). When `true` the
-   * floating card narrows to an icon-only rail.
+   * is the FIRST button in the cluster strip next to the traffic lights (see
+   * `onToggleCollapse`). When `true` the card body retracts and the cluster
+   * pops OUT of the floating surface into the bare band.
    */
   collapsed: boolean;
-  /** Toggle the rail — the control pinned to this card's right edge. */
+  /** Toggle the rail — the leading cluster button next to the traffic lights. */
   onToggleCollapse: () => void;
+  /** Open the unified search overlay — second button in the cluster strip. */
+  onOpenUnifiedSearch: () => void;
+  /** Whether the current session is starred — drives the cluster star fill. */
+  isCurrentSessionStarred: boolean;
+  /** Toggle the current session star — third button in the cluster strip. */
+  onToggleCurrentSessionStar: () => void | Promise<void>;
+  /** Export the current session — fourth button in the cluster strip. */
+  onExport: (format: "markdown" | "json") => void | Promise<void>;
 }
 
 // ─── Platform bridge (darwin traffic-light line) ───────────────────────────────
@@ -145,7 +157,7 @@ function NavItem({
       data-viewkey={dataViewKey}
       data-tour-anchor={tourAnchor}
       className={[
-        "relative w-full flex items-center gap-2.5 rounded-md px-2.5 py-2 text-sm transition-colors",
+        "relative w-full flex items-center gap-2.5 rounded-md px-2.5 py-1.5 text-[13px] transition-colors",
         "focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring",
         isActive
           ? "bg-primary/(--opacity-subtle) text-primary font-medium"
@@ -256,6 +268,116 @@ function SectionDivider({ collapsed, label }: { collapsed: boolean; label?: stri
   );
 }
 
+// ─── ClusterStrip ──────────────────────────────────────────────────────────
+//
+// The horizontal button cluster that sits next to the OS traffic lights:
+//   [펼침/닫힘 collapse toggle] → [검색 search] → [즐겨찾기 star] → [내보내기 export]
+// Always rendered (both expanded + collapsed). When the surrounding card is
+// expanded it forms the card's top strip; when collapsed it stands bare in the
+// band. Each control is an h-7 w-7 icon button with ~8px gaps; the whole strip
+// is a single h-7 items-center row so every glyph centers on the lights' line.
+function ClusterStrip({
+  collapsed,
+  onToggleCollapse,
+  onOpenUnifiedSearch,
+  isCurrentSessionStarred,
+  onToggleCurrentSessionStar,
+  onExport,
+}: {
+  collapsed: boolean;
+  onToggleCollapse: () => void;
+  onOpenUnifiedSearch: () => void;
+  isCurrentSessionStarred: boolean;
+  onToggleCurrentSessionStar: () => void | Promise<void>;
+  onExport: (format: "markdown" | "json") => void | Promise<void>;
+}) {
+  const { t } = useTranslation();
+  return (
+    <div className="flex h-7 shrink-0 items-center gap-2 px-1" data-testid="sidebar-cluster">
+      {/* 펼침/닫힘 — shell-owned collapse toggle. Leftmost, next to the lights. */}
+      <Tooltip>
+        <TooltipTrigger asChild>
+          <Button
+            variant="ghost"
+            size="icon"
+            className="h-7 w-7 aspect-square p-0 shrink-0 text-muted-foreground hover:text-foreground"
+            onClick={onToggleCollapse}
+            title={collapsed ? t("mainToolbar.expandSidebar") : t("mainToolbar.collapseSidebar")}
+            aria-label={collapsed ? t("mainToolbar.expandSidebar") : t("mainToolbar.collapseSidebar")}
+            aria-pressed={!collapsed}
+            data-testid="sidebar-collapse-toggle"
+          >
+            {collapsed ? <PanelLeftOpen className="h-4 w-4" /> : <PanelLeftClose className="h-4 w-4" />}
+          </Button>
+        </TooltipTrigger>
+        <TooltipContent side="bottom">{collapsed ? t("mainToolbar.expandSidebar") : t("mainToolbar.collapseSidebar")}</TooltipContent>
+      </Tooltip>
+
+      {/* 검색 — unified search. Tour anchor "chat-history". */}
+      <Tooltip>
+        <TooltipTrigger asChild>
+          <Button
+            variant="ghost"
+            size="icon"
+            className="h-7 w-7 aspect-square p-0 shrink-0"
+            onClick={onOpenUnifiedSearch}
+            title={t("mainToolbar.unifiedSearch")}
+            aria-label={t("mainToolbar.unifiedSearch")}
+            data-tour-anchor="chat-history"
+          >
+            <Search className="h-4 w-4" />
+          </Button>
+        </TooltipTrigger>
+        <TooltipContent side="bottom">{t("mainToolbar.unifiedSearch")}</TooltipContent>
+      </Tooltip>
+
+      {/* 즐겨찾기 — current-session star. */}
+      <Tooltip>
+        <TooltipTrigger asChild>
+          <Button
+            variant="ghost"
+            size="icon"
+            className="h-7 w-7 aspect-square p-0 shrink-0"
+            onClick={() => void onToggleCurrentSessionStar()}
+            title={isCurrentSessionStarred ? t("mainToolbar.sessionUnstar") : t("mainToolbar.sessionStar")}
+            aria-label={isCurrentSessionStarred ? t("mainToolbar.sessionUnstar") : t("mainToolbar.sessionStar")}
+            aria-pressed={isCurrentSessionStarred}
+          >
+            <Star key={isCurrentSessionStarred ? "on" : "off"} className={`h-4 w-4 ${isCurrentSessionStarred ? "fill-emphasis text-emphasis lvis-anim-star" : ""}`} />
+          </Button>
+        </TooltipTrigger>
+        <TooltipContent side="bottom">{isCurrentSessionStarred ? t("mainToolbar.sessionUnstar") : t("mainToolbar.sessionStar")}</TooltipContent>
+      </Tooltip>
+
+      {/* 내보내기 — export menu (Markdown / JSON). Tour anchor "settings-entry". */}
+      <DropdownMenu>
+        <Tooltip>
+          <TooltipTrigger asChild>
+            <DropdownMenuTrigger asChild>
+              <Button
+                variant="ghost"
+                size="icon"
+                className="h-7 w-7 aspect-square p-0 shrink-0"
+                title={t("mainToolbar.export")}
+                aria-label={t("mainToolbar.export")}
+                data-testid="toolbar-export"
+                data-tour-anchor="settings-entry"
+              >
+                <Download className="h-4 w-4" />
+              </Button>
+            </DropdownMenuTrigger>
+          </TooltipTrigger>
+          <TooltipContent side="bottom">{t("mainToolbar.export")}</TooltipContent>
+        </Tooltip>
+        <DropdownMenuContent align="start" className="w-[180px]">
+          <DropdownMenuItem data-testid="toolbar-export-markdown" onClick={() => void onExport("markdown")}>Markdown (.md)</DropdownMenuItem>
+          <DropdownMenuItem data-testid="toolbar-export-json" onClick={() => void onExport("json")}>JSON (.json)</DropdownMenuItem>
+        </DropdownMenuContent>
+      </DropdownMenu>
+    </div>
+  );
+}
+
 // ─── Sidebar ─────────────────────────────────────────────────────────────────
 
 export function Sidebar({
@@ -271,75 +393,97 @@ export function Sidebar({
   marketplaceUrlReady = false,
   collapsed,
   onToggleCollapse,
+  onOpenUnifiedSearch,
+  isCurrentSessionStarred,
+  onToggleCurrentSessionStar,
+  onExport,
 }: SidebarProps) {
   const { t } = useTranslation();
 
   // The collapsed rail shows icons only; `compact` mirrors `collapsed`. There is
   // no hover-expand — the card is a consistent floating panel in every mode.
   const compact = collapsed;
-  // On darwin the card's top margin lets the OS traffic lights (x:14,y:12) breathe
-  // above it; the header strip is tuned so the collapse toggle's center lands on
-  // the lights' line. Win/Linux + non-Electron have no OS lights to align against.
+  // On darwin the OS traffic lights (x:18,y:16) sit just left of the cluster
+  // strip. The aside's top inset is tuned so the strip's buttons land on the
+  // lights' line. Win/Linux + non-Electron have no OS lights to align against.
   const darwinTopClearance = isDarwinPlatform();
 
   const navListId = "sidebar-nav-list";
 
   return (
-    // The sidebar is a FLOATING card — inset on all sides with rounded corners +
-    // shadow, a distinct surface (bg-card) over the content row. (The CONTENT
-    // pages are NOT floating — that's handled separately by removing each view's
-    // outer Card box so content fills the canvas.) Toggle lives in the band.
+    // The sidebar is a FLOATING-CARD shell. The <aside> is a TRANSPARENT
+    // positioning container anchored next to the traffic lights; it never paints
+    // a surface itself. Two zones live inside:
+    //   1. The CLUSTER STRIP (toggle → search → star → export) — ALWAYS rendered,
+    //      sitting on the traffic-light line.
+    //   2. The card SURFACE wrapper — carries `bg-card`/border/shadow/rounded and
+    //      holds the strip + nav body when EXPANDED. When COLLAPSED the surface
+    //      retracts (body removed) and the cluster pops OUT into the bare band
+    //      with NO surface behind it. The strip's screen position is identical in
+    //      both states; the only visual delta is the card surface behind it.
+    // top-4 (16px) puts the strip on the new traffic-light line (y:16) on darwin;
+    // win/linux + non-Electron align a touch higher (top-1.5) with no OS lights.
     <aside
       data-testid="primary-sidebar"
       role="navigation"
       aria-label={t("sidebar.ariaLabel")}
       className={[
-        // top-1.5 (≈6px) gives the floating card a clean top margin so it reads
-        // as a card with breathing room reaching UP toward the traffic-light row
-        // — NOT crammed flush to y:0. (The prior top-0 looked "forcibly pulled
-        // up".) It still reaches up into the band region; the lights sit in the
-        // tidy strip above it.
-        "absolute left-3 top-1.5 bottom-3 z-30 flex min-h-0 flex-col overflow-hidden rounded-2xl border border-border bg-card shadow-2xl transition-[width] duration-200 ease-out motion-reduce:transition-none",
-        collapsed ? "w-14" : "w-56",
+        "absolute left-2 bottom-3 z-30 flex min-h-0 flex-col",
+        darwinTopClearance ? "top-4" : "top-1.5",
       ].join(" ")}
-      // The card overlays the Electron drag band (it extends to top-0). Mark it
-      // no-drag so its controls stay clickable; the OS traffic lights still own
-      // their own hit region above the padded content.
+      // The aside overlays the Electron drag band. Mark it no-drag so its controls
+      // stay clickable; the OS traffic lights still own their hit region to the
+      // left of the cluster.
       style={{
         // @ts-expect-error — Electron-specific CSS extension
         WebkitAppRegion: "no-drag",
       }}
     >
-      {/* ── Header strip — collapse/expand toggle pinned to the card's RIGHT
-          edge, on the SAME horizontal line as the macOS traffic lights. The OS
-          lights own the left (x:14, center ≈y:18); the toggle owns the right.
-          With the card at top-1.5 (≈6px) and the toggle a h-7 (28px) button, a
-          zero top pad (`pt-0`) puts the toggle's center at ≈6+0+14 = y:20 — on
-          the lights' line, not a row below it (a prior `pt-7` dropped it a full
-          line down; even `pt-0.5` measured ~y:23, a touch low). Win/linux +
-          non-Electron have no OS lights, so a plain `pt-1` top strip is enough. */}
-      <div className={`flex items-center justify-end px-1 ${darwinTopClearance ? "pt-0" : "pt-1"}`}>
-        <Tooltip>
-          <TooltipTrigger asChild>
-            <Button
-              variant="ghost"
-              size="icon"
-              className="h-7 w-7 aspect-square p-0 shrink-0 text-muted-foreground hover:text-foreground"
-              onClick={onToggleCollapse}
-              title={collapsed ? t("mainToolbar.expandSidebar") : t("mainToolbar.collapseSidebar")}
-              aria-label={collapsed ? t("mainToolbar.expandSidebar") : t("mainToolbar.collapseSidebar")}
-              aria-pressed={!collapsed}
-              data-testid="sidebar-collapse-toggle"
-            >
-              {collapsed ? <PanelLeftOpen className="h-4 w-4" /> : <PanelLeftClose className="h-4 w-4" />}
-            </Button>
-          </TooltipTrigger>
-          <TooltipContent side="right">{collapsed ? t("mainToolbar.expandSidebar") : t("mainToolbar.collapseSidebar")}</TooltipContent>
-        </Tooltip>
-      </div>
+      {/* ── EXPANDED: the cluster strip sits ON the card surface (its top strip).
+          COLLAPSED: the outer wrapper carries NO surface tokens, so the cluster
+          pops OUT into the bare band; the nav body below keeps its own compact
+          icon-rail surface so nav stays reachable. The width tween animates the
+          surface in/out; the cluster strip itself never unmounts. */}
+      <div
+        data-testid="sidebar-card"
+        data-surface={collapsed ? "bare" : "card"}
+        className={[
+          "flex min-h-0 flex-col transition-[width] duration-200 ease-out motion-reduce:transition-none",
+          collapsed
+            ? // Bare region: width hugs its widest child (the cluster strip,
+              // ≈144px); no surface tokens — transparent, on the band. `items-start`
+              // left-aligns the narrower icon-rail body under the cluster.
+              "w-auto items-start"
+            : "w-56 overflow-hidden rounded-2xl border border-border bg-card shadow-2xl",
+        ].join(" ")}
+      >
+        {/* ── Cluster strip — [펼침/닫힘 toggle] → [검색] → [즐겨찾기] → [내보내기],
+            ~8px gaps, each h-7 w-7. Sits on the traffic-light line. When the card
+            is expanded this is the card's top strip; when collapsed it stands bare
+            in the band. Always rendered — never hidden in either state. */}
+        <ClusterStrip
+          collapsed={collapsed}
+          onToggleCollapse={onToggleCollapse}
+          onOpenUnifiedSearch={onOpenUnifiedSearch}
+          isCurrentSessionStarred={isCurrentSessionStarred}
+          onToggleCurrentSessionStar={onToggleCurrentSessionStar}
+          onExport={onExport}
+        />
 
-      {/* ── New Chat CTA — below the header strip. */}
-      <div className={`px-2 pt-1 pb-1 ${compact ? "flex justify-center" : ""}`}>
+      {/* ── Card body — new chat + nav + footer. EXPANDED: inline within the card
+          surface above. COLLAPSED: its own compact icon-rail surface below the
+          bare cluster (mt-1.5 gap), so nav stays reachable while the cluster has
+          popped out of the floating surface. */}
+      <div
+        className={
+          collapsed
+            ? "mt-1.5 w-14 flex min-h-0 flex-1 flex-col overflow-hidden rounded-2xl border border-border bg-card shadow-2xl"
+            : "flex min-h-0 flex-1 flex-col overflow-hidden"
+        }
+      >
+      {/* ── New Chat CTA — `pt-2.5` (≈10px) gives the card body breathing room
+          below the cluster strip (R6 — not flush against it). */}
+      <div className={`px-2 pt-2.5 pb-1 ${compact ? "flex justify-center" : ""}`}>
         {compact ? (
           <Tooltip>
             <TooltipTrigger asChild>
@@ -500,6 +644,8 @@ export function Sidebar({
             ) : undefined
           }
         />
+      </div>
+      </div>
       </div>
     </aside>
   );

@@ -20,7 +20,7 @@ import { TooltipProvider } from "../../../../components/ui/tooltip.js";
 import { Composer, type ComposerHandle } from "../Composer.js";
 import { InputActionBar } from "../InputActionBar.js";
 import { SlashPicker } from "../SlashPicker.js";
-import { MainToolbar } from "../../MainToolbar.js";
+import { Sidebar } from "../Sidebar.js";
 import { StatusBar } from "../StatusBar.js";
 import type { Attachment } from "../../types/attachments.js";
 import type { RolePreset } from "../../../../data/role-presets.js";
@@ -139,26 +139,28 @@ describe("Tutorial-C PR #983 follow-up: tour anchors", () => {
       onToggleThinking: vi.fn(),
       statusRow: { active: false, vendorModel: "", permissionMode: "unknown", pendingApprovals: 0 },
     };
-    const toolbarProps: Parameters<typeof MainToolbar>[0] = {
+    // The "chat-history" (search) + "settings-entry" (export) tour anchors moved
+    // from MainToolbar into the floating sidebar's cluster strip (#1319), so the
+    // Sidebar is the host component that must carry them now.
+    const sidebarProps: Parameters<typeof Sidebar>[0] = {
       activeView: "home",
-      streaming: false,
+      onSelect: vi.fn(),
+      pluginViews: [],
       hasApiKey: true,
-      isCurrentSessionStarred: false,
+      onOpenSettings: vi.fn(),
       onNewChat: vi.fn(),
+      streaming: false,
+      onOpenMarketplace: vi.fn(),
+      collapsed: false,
+      onToggleCollapse: vi.fn(),
+      onOpenUnifiedSearch: vi.fn(),
+      isCurrentSessionStarred: false,
       onToggleCurrentSessionStar: vi.fn(),
       onExport: vi.fn(),
-      onOpenHome: vi.fn(),
-      onOpenWorkBoardView: vi.fn(),
-      onOpenRoutinesView: vi.fn(),
-      onOpenMemoryView: vi.fn(),
-      onOpenSettings: vi.fn(),
-      onOpenUnifiedSearch: vi.fn(),
-      onOpenStarredView: vi.fn(),
-      onOpenDetachedView: vi.fn(),
     };
     render(
       <TooltipProvider>
-        <MainToolbar {...toolbarProps} />
+        <Sidebar {...sidebarProps} />
         <ComposerHarness />
         <InputActionBar {...inputActionBarProps} />
         <StatusBar
