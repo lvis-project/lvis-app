@@ -18,7 +18,7 @@ describe("tombstoneAndDeferredRemove", () => {
   });
 
   afterEach(async () => {
-    await rm(pluginsRoot, { recursive: true, force: true });
+    await rm(pluginsRoot, { recursive: true, force: true, maxRetries: 5, retryDelay: 50 });
   });
 
   it("renames the install dir into +tombstones+/<id>-<ts>-<rand>", async () => {
