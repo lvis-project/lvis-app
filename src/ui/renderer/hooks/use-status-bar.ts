@@ -1,12 +1,9 @@
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import type { LvisApi } from "../types.js";
 import { LONG_TOAST_TTL_MS } from "../constants.js";
 import type { PersistentItem, ToastItem } from "./status-bar/types.js";
 import { useStatusBarNotifications } from "./status-bar/use-status-bar-notifications.js";
 import { useStatusBarInstall } from "./status-bar/use-status-bar-install.js";
-import { useStatusBarVendor } from "./status-bar/use-status-bar-vendor.js";
-import { useStatusBarHealth } from "./status-bar/use-status-bar-health.js";
-import { useStatusBarPermission } from "./status-bar/use-status-bar-permission.js";
 
 // Re-export shared types so existing call sites (App.tsx, StatusBar.tsx, tests)
 // continue to import from this module without changes.
@@ -51,12 +48,6 @@ interface UseStatusBarOptions {
    * Korean sentence, short enough to feel ephemeral.
    */
   defaultToastTtlMs?: number;
-  /**
-   * Opens Settings → Permissions when the status-bar permission cell is
-   * clicked. The permission/review status moved here from the input action
-   * row (rendered as plain text after the model name).
-   */
-  onOpenPermissions?: () => void;
 }
 
 /**
@@ -67,27 +58,10 @@ interface UseStatusBarOptions {
  */
 const TOAST_QUEUE_CAP = 50;
 
-/**
- * Left-slot render priority. Lower sorts first. The combined health dot sits
- * just before the provider/model cell (StatusBar joins them visually), and the
- * permission/review status renders immediately after the model name. Items not
- * listed here keep their insertion order *after* these anchored cells (e.g. the
- * transient pre-turn compact indicator).
- */
-const PERSISTENT_ORDER: Record<string, number> = {
-  "health:services": 0,
-  "vendor:llm": 1,
-  "permission:mode": 2,
-};
-
-function persistentSortKey(id: string): number {
-  return PERSISTENT_ORDER[id] ?? 100;
-}
-
 export function useStatusBar(opts: UseStatusBarOptions) {
   // LONG_TOAST_TTL_MS (5 s) gives comfortable reading time for a Korean
   // phrase; callers that need a shorter or longer window pass defaultToastTtlMs.
-  const { api, defaultToastTtlMs = LONG_TOAST_TTL_MS, onOpenPermissions } = opts;
+  const { api, defaultToastTtlMs = LONG_TOAST_TTL_MS } = opts;
   const [persistent, setPersistent] = useState<PersistentItem[]>([]);
   const [toasts, setToasts] = useState<ToastItem[]>([]);
 
@@ -172,36 +146,17 @@ export function useStatusBar(opts: UseStatusBarOptions) {
   }, []);
 
   // ── Producers (each in its own file under status-bar/)
-  // Status bar keeps one compact services health dot plus the active LLM
-  // vendor/model and transient toasts. Plugin/tool/MCP counts stay in
-  // Settings where their detail panes live.
+  // The window status bar is NOTIFICATIONS-ONLY: it surfaces transient toasts
+  // (notifications + install/lifecycle progress). The persistent model /
+  // permission / active-state cells moved into the unified InputActionBar
+  // status sub-row (see useInputStatusRow). `upsertPersistent` /
+  // `removePersistent` remain for the transient pre-turn auto-compact
+  // indicator (App.tsx), which is operational state, not a model cell.
   useStatusBarNotifications({ api, pushToast });
   useStatusBarInstall({ api, pushToast });
-  // Producer registration order determines left-to-right render order in
-  // the status bar (StatusBar.tsx maps the persistent array as-is). The
-  // combined health dot sits immediately before the provider/model cell so
-  // one green indicator means both the LLM provider and marketplace are live.
-  useStatusBarHealth({ api, upsertPersistent, removePersistent });
-  useStatusBarVendor({ api, upsertPersistent });
-  // Registered AFTER vendor so the permission/review status renders to the
-  // right of the model name (plain text, divider-separated).
-  useStatusBarPermission({ api, upsertPersistent, onOpenPermissions });
-
-  // Stable priority sort so the model/permission cells render in a fixed order
-  // regardless of which producer's async fetch resolves first.
-  const orderedPersistent = useMemo(() => {
-    return persistent
-      .map((item, idx) => ({ item, idx }))
-      .sort((a, b) => {
-        const ka = persistentSortKey(a.item.id);
-        const kb = persistentSortKey(b.item.id);
-        return ka !== kb ? ka - kb : a.idx - b.idx;
-      })
-      .map((x) => x.item);
-  }, [persistent]);
 
   return {
-    persistent: orderedPersistent,
+    persistent,
     toasts,
     /** The single toast currently visible in the status bar (queue head). */
     visibleToast,
