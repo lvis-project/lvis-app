@@ -61,9 +61,16 @@ import { forceKillManagedChildProcesses } from "./main/managed-child-processes.j
 import { scrubPackagedProcessEnv } from "./main/packaged-env-scrub.js";
 import {
   computeInitialMainWindowBounds,
+  computeActionModeBounds,
   MAIN_WINDOW_MIN_HEIGHT,
   MAIN_WINDOW_MIN_WIDTH,
 } from "./main/main-window-bounds.js";
+import {
+  INITIAL_APP_MODE_ARG_PREFIX,
+  isAppMode,
+  type InitialAppMode,
+} from "./shared/initial-app-mode.js";
+import { readPersistedAppModeSync } from "./main/persisted-app-mode.js";
 import { createLvisTrayIcon } from "./main/tray-icon.js";
 import {
   resolveShutdownCleanupTimeoutMs,
@@ -275,9 +282,34 @@ const SETTINGS_WINDOW_MIN_WIDTH = 820;
 const SETTINGS_WINDOW_MIN_HEIGHT = 560;
 const rendererIndexUrl = () => pathToFileURL(resolve(__dirname, "..", "index.html")).toString();
 
+/**
+ * Persisted workspace mode used to size the main window and prime the renderer
+ * at creation time.
+ *
+ * The first `createWindow()` runs BEFORE the async bootstrap assigns
+ * `services`, so the in-memory `SettingsService` is not yet available. In that
+ * window we read `system.appMode` straight from the settings file on disk
+ * (mirrors `manual-host-resolver.ts`'s pre-`whenReady` sync read). Once the
+ * service exists (re-create on macOS re-activation, recovery paths) we prefer
+ * its in-memory value so an unsaved-to-disk in-session change is honored.
+ *
+ * Defaulting to "action" when nothing is persisted is the legitimate first-run
+ * default, not a bug-papering fallback.
+ */
+function readPersistedAppMode(): InitialAppMode {
+  const live = services?.settingsService.getAll().system?.appMode;
+  if (isAppMode(live)) return live;
+  return readPersistedAppModeSync(app.getPath("userData"));
+}
+
 function initialMainWindowBounds(): { x: number; y: number; width: number; height: number } {
   const { workArea } = screen.getPrimaryDisplay();
-  return computeInitialMainWindowBounds(workArea);
+  // Size the window to match the persisted mode at CREATION time so the OS
+  // window never opens chat-shaped then animates to action (or vice-versa)
+  // after the renderer mounts. action → centered 800×600; chat → right-docked.
+  return readPersistedAppMode() === "action"
+    ? computeActionModeBounds(workArea)
+    : computeInitialMainWindowBounds(workArea);
 }
 
 async function runAppShutdownCleanup(options: {
@@ -1480,6 +1512,17 @@ function initialThemeArgs(): string[] {
   return [`${INITIAL_THEME_ARG_PREFIX}${serialized}`];
 }
 
+/**
+ * Serialize the persisted workspace mode into `additionalArguments` so the
+ * preload can expose `window.__lvisInitialAppMode` and the renderer's first
+ * React render seeds `appMode` from the saved value (no wrong-mode flash). The
+ * value is always one of the validated `AppMode` literals, so no size cap is
+ * needed (unlike the theme payload). Wire format SoT: `initial-app-mode.ts`.
+ */
+function initialAppModeArgs(): string[] {
+  return [`${INITIAL_APP_MODE_ARG_PREFIX}${readPersistedAppMode()}`];
+}
+
 function createWindow(options: { showBootstrapSplash?: boolean } = {}) {
   const showBootstrapSplash = options.showBootstrapSplash ?? true;
   const preloadPath = resolve(__dirname, "..", "preload.cjs");
@@ -1508,9 +1551,11 @@ function createWindow(options: { showBootstrapSplash?: boolean } = {}) {
       // the main UI. The <webview> tag is gated by webPreferences.webviewTag.
       webviewTag: true,
       preload: preloadPath,
-      // Pass the host's cached lastThemePayload to the renderer so
-      // ThemeProvider can init from frame 0. See initialThemeArgs() above.
-      additionalArguments: initialThemeArgs(),
+      // Pass the host's cached lastThemePayload + persisted appMode to the
+      // renderer so ThemeProvider and the App shell can both init from frame 0
+      // (no flash of fallback theme / wrong mode). See initialThemeArgs() and
+      // initialAppModeArgs() above.
+      additionalArguments: [...initialThemeArgs(), ...initialAppModeArgs()],
     },
   });
 
