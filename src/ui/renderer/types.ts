@@ -204,6 +204,8 @@ export type AppSettings = {
   /** Window close-button behaviour. SOT: `SystemSettings` in settings-store. */
   system?: {
     closeBehavior: "hide-to-tray" | "quit";
+    /** Persisted workspace mode (chat vs action). SOT: `SystemSettings`. */
+    appMode?: "chat" | "action";
   };
   /** Experimental feature flags — all default false. */
   features?: {
