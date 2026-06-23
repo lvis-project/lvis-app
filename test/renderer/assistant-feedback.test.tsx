@@ -70,9 +70,10 @@ describe("D6 AssistantCard feedback buttons", () => {
       fireEvent.click(thumbsDownBtn);
     });
 
-    // Reason input box should appear
+    // Reason input now opens in a Popover portaled to document.body (floats
+    // above the 👎 button), so query the whole document, not just `container`.
     const reasonInput = await waitFor(() => {
-      const el = container.querySelector('input[placeholder="이유 (선택)"]');
+      const el = document.querySelector('input[placeholder="이유 (선택)"]');
       if (!el) throw new Error("reason input not found");
       return el as HTMLInputElement;
     });
