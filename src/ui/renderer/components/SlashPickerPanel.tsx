@@ -10,7 +10,7 @@
  */
 import { Suspense, useCallback, useEffect, useRef, useState } from "react";
 import type { KeyboardEvent as ReactKeyboardEvent } from "react";
-import { ChevronRight } from "lucide-react";
+import { ChevronLeft, ChevronRight } from "lucide-react";
 import {
   Command,
   CommandEmpty,
@@ -81,12 +81,18 @@ export function SlashPickerPanel({
           return;
         }
         onClose();
+      } else if (e.key === "Backspace" && step !== null && query.length === 0) {
+        // Backspace on an empty query pops the page stack back to root (cmdk
+        // "pages" idiom) — same one-action back as the visible back row / Esc.
+        e.stopPropagation();
+        e.preventDefault();
+        setStep(null);
       } else if (composingRef.current && e.key === "Enter") {
         e.stopPropagation();
         e.preventDefault();
       }
     },
-    [onClose, step],
+    [onClose, step, query],
   );
 
   const runSlash = useCallback(
@@ -147,20 +153,33 @@ export function SlashPickerPanel({
       ? [step]
       : CATEGORY_ORDER;
 
+  // All drilled item rows share ONE two-line cmdk layout: a fixed-size leading
+  // icon box (h-5 w-5, shrink-0 — never collapses onto the label) + a flex-col
+  // text wrapper (name + optional description). This matches the root category
+  // rows and the mcp/skill rows so the 2nd depth reads as polished as the 1st
+  // depth, and the fixed icon box prevents the icon/label overlap ("EPEP").
+  const CommandIcon = CATEGORY_ICON.command;
   const renderCommandRow = (c: SlashCommand) => (
     <CommandItem
       key={c.cmd}
       value={`${c.cmd} ${t(c.labelKey)}`}
       onSelect={() => runSlash(c.cmd)}
     >
-      <span className="font-mono text-xs text-muted-foreground w-28 shrink-0">{c.cmd}</span>
-      <span className="text-xs">{t(c.labelKey)}</span>
+      <CommandIcon className="h-5 w-5 shrink-0 rounded-[5px] bg-muted p-1 text-muted-foreground" />
+      <div className="flex min-w-0 flex-1 flex-col">
+        <span className="font-mono text-xs">{c.cmd}</span>
+        <span className="text-[11px] text-muted-foreground line-clamp-1">{t(c.labelKey)}</span>
+      </div>
     </CommandItem>
   );
 
+  const ActionIcon = CATEGORY_ICON.shortcut;
   const renderActionRow = (a: QuickAction) => (
     <CommandItem key={a.id} value={a.label} onSelect={() => runAction(a)}>
-      <span className="text-xs">{a.label}</span>
+      <ActionIcon className="h-5 w-5 shrink-0 rounded-[5px] bg-muted p-1 text-muted-foreground" />
+      <div className="flex min-w-0 flex-1 flex-col">
+        <span className="text-xs">{a.label}</span>
+      </div>
     </CommandItem>
   );
 
@@ -168,10 +187,12 @@ export function SlashPickerPanel({
     const Icon = pluginIconFor({ icon: p.icon, iconText: p.iconText });
     return (
       <CommandItem key={p.viewKey} value={p.label} onSelect={() => runPlugin(p)}>
-        <Suspense fallback={<span className="h-3.5 w-3.5 shrink-0" />}>
-          <Icon className="h-3.5 w-3.5 shrink-0 text-muted-foreground" />
+        <Suspense fallback={<span className="h-5 w-5 shrink-0 rounded-[5px] bg-muted" />}>
+          <Icon className="h-5 w-5 shrink-0 rounded-[5px] bg-muted p-1 text-muted-foreground" />
         </Suspense>
-        <span className="text-xs">{p.label}</span>
+        <div className="flex min-w-0 flex-1 flex-col">
+          <span className="text-xs">{p.label}</span>
+        </div>
       </CommandItem>
     );
   };
@@ -179,7 +200,7 @@ export function SlashPickerPanel({
   const McpIcon = CATEGORY_ICON.mcp;
   const renderMcpRow = (m: McpToolEntry) => (
     <CommandItem key={`${m.serverId}/${m.name}`} value={`${m.name} ${m.serverId}`} onSelect={() => runText(m.name)}>
-      <McpIcon className="h-3.5 w-3.5 shrink-0 text-muted-foreground" />
+      <McpIcon className="h-5 w-5 shrink-0 rounded-[5px] bg-muted p-1 text-muted-foreground" />
       <div className="flex min-w-0 flex-1 flex-col">
         <span className="font-mono text-xs">{m.name}</span>
         <span className="text-[11px] text-muted-foreground line-clamp-1">{m.serverId}</span>
@@ -190,7 +211,7 @@ export function SlashPickerPanel({
   const SkillIcon = CATEGORY_ICON.skills;
   const renderSkillRow = (s: SkillEntry) => (
     <CommandItem key={s.name} value={`${s.name} ${s.description}`} onSelect={() => runText(s.name)}>
-      <SkillIcon className="h-3.5 w-3.5 shrink-0 text-muted-foreground" />
+      <SkillIcon className="h-5 w-5 shrink-0 rounded-[5px] bg-muted p-1 text-muted-foreground" />
       <div className="flex min-w-0 flex-1 flex-col">
         <span className="text-xs">{s.name}</span>
         <span className="text-[11px] text-muted-foreground line-clamp-1">{s.description}</span>
@@ -243,7 +264,7 @@ export function SlashPickerPanel({
                     onSelect={() => setStep(c)}
                     data-testid={`slash-picker-cat-${c}`}
                   >
-                    <Icon className="h-3.5 w-3.5 shrink-0 text-muted-foreground" />
+                    <Icon className="h-5 w-5 shrink-0 rounded-[5px] bg-muted p-1 text-muted-foreground" />
                     <div className="flex min-w-0 flex-1 flex-col">
                       <span className="text-xs">{catLabel(c)}</span>
                       <span className="text-[11px] text-muted-foreground line-clamp-1">
@@ -257,6 +278,28 @@ export function SlashPickerPanel({
                   </CommandItem>
                 );
               })}
+            </CommandGroup>
+          )}
+
+          {/* Drilled-view back row — a discoverable, one-click affordance that
+              pops the page stack back to the root category list (NOT closing the
+              picker). Keyboard equivalent: Esc / Backspace-on-empty-query (wired
+              in handleKeyDownCapture). Only shown when drilled and not searching
+              (search already flattens to the cross-category view). */}
+          {!searching && step !== null && (
+            <CommandGroup data-testid="slash-picker-back">
+              <CommandItem
+                value="__back__"
+                onSelect={() => setStep(null)}
+                data-testid="slash-picker-back-row"
+                className="text-accent-foreground"
+              >
+                <ChevronLeft className="h-3.5 w-3.5 shrink-0 text-accent" />
+                <span className="text-xs font-medium text-accent">{t("slashPicker.back")}</span>
+                <span className="ml-1 truncate text-[11px] text-muted-foreground">
+                  {catLabel(step)}
+                </span>
+              </CommandItem>
             </CommandGroup>
           )}
 

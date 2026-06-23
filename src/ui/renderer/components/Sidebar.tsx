@@ -83,16 +83,25 @@ function isDarwinPlatform(): boolean {
 // ─── NavItem ─────────────────────────────────────────────────────────────────
 
 /**
- * Per-section hover tone. Primary nav reads as the main surface (`accent`);
- * the footer reads as secondary (`muted`), so its rows tint a step softer on
- * hover. Both are theme tokens — a bundle switch re-tints every surface and
- * the color-token gate stays clean (no raw literals).
+ * Per-item hover tone. HOVER-ONLY — every tone leaves the rest state with NO
+ * persistent background (the row is bare until hovered). Primary nav reads as
+ * the main surface (`accent`); plugin rows share that `accent` surface. The
+ * three footer items each get a DISTINCT hover tint so they read apart from
+ * BOTH the regular/plugin hover AND from each other:
+ *   - home        → info tint
+ *   - marketplace → action-view tint
+ *   - settings    → warning tint
+ * All are theme tokens at a subtle opacity — a bundle switch re-tints every
+ * surface and the color-token gate stays clean (no raw literals).
  */
-type NavTone = "accent" | "muted";
+type NavTone = "accent" | "muted" | "home" | "marketplace" | "settings";
 
 const NAV_TONE_HOVER: Record<NavTone, string> = {
   accent: "hover:bg-accent hover:text-accent-foreground",
   muted: "hover:bg-muted hover:text-foreground",
+  home: "hover:bg-info/(--opacity-subtle) hover:text-info",
+  marketplace: "hover:bg-action-view/(--opacity-subtle) hover:text-action-view",
+  settings: "hover:bg-warning/(--opacity-subtle) hover:text-warning",
 };
 
 interface NavItemProps {
@@ -646,6 +655,7 @@ export function Sidebar({
           isActive={activeView === "home"}
           onClick={() => onSelect("home")}
           collapsed={compact}
+          tone="home"
           data-testid="sidebar-home"
         />
         {/* Divider between Home and Marketplace */}
@@ -660,7 +670,7 @@ export function Sidebar({
             if (marketplaceUrlReady) onOpenMarketplace();
           }}
           collapsed={compact}
-          tone="muted"
+          tone="marketplace"
           data-testid="sidebar-marketplace"
           data-tour-anchor="sidebar-marketplace"
         />
@@ -673,7 +683,7 @@ export function Sidebar({
           isActive={activeView === "settings"}
           onClick={onOpenSettings}
           collapsed={compact}
-          tone="muted"
+          tone="settings"
           data-testid="sidebar-settings"
           data-tour-anchor="settings-entry"
           trailingSlot={

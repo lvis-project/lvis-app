@@ -246,18 +246,24 @@ describe("InputActionBar (unified bar)", () => {
     }
   });
 
-  // ── Status sub-row ──────────────────────────────────────────────────────
-  it("renders the status sub-row with model + permission + the ring (after permission)", () => {
+  // ── Status sub-row (REVERSED layout) ─────────────────────────────────────
+  it("renders the status sub-row with the ring leading, then permission · model · active dot", () => {
     const { getByTestId } = renderBar();
     const row = getByTestId("iab-status-row");
     expect(row).toBeTruthy();
     expect(getByTestId("iab-status-model").textContent).toContain("OpenAI · gpt-5.4");
-    // The TokenProgressRing widget now lives in the status row.
+    // The TokenProgressRing widget now LEADS the status row (left edge).
     const ringHost = getByTestId("iab-status-ring");
     expect(ringHost.querySelector("[data-testid='ring-slot']")).toBeTruthy();
-    // …positioned AFTER the permission cell.
+    // Reversed order: ring PRECEDES the permission cell.
     const permission = getByTestId("iab-status-permission");
-    expect(permission.compareDocumentPosition(ringHost) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+    expect(ringHost.compareDocumentPosition(permission) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+    // …and within the right-aligned cluster, permission precedes the model.
+    const model = getByTestId("iab-status-model");
+    expect(permission.compareDocumentPosition(model) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+    // The active-status dot sits at the far trailing edge, after the model.
+    const activeDot = getByTestId("iab-status-active-dot");
+    expect(model.compareDocumentPosition(activeDot) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
     // The separate context-percent text cell is gone.
     expect(row.querySelector("[data-testid='iab-status-context']")).toBeNull();
   });

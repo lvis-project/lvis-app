@@ -11,6 +11,7 @@ export const en = {
   "slashPicker.catSkills": "Skills",
   "slashPicker.catSkillsDesc": "Registered assistant skills",
   "slashPicker.inlineHint": "↑↓ navigate · ⏎ select · esc dismiss",
+  "slashPicker.back": "Back",
 } as const;
 export const ko: Record<keyof typeof en, string> = {
   "slashPicker.catCommand": "커맨드",
@@ -24,4 +25,5 @@ export const ko: Record<keyof typeof en, string> = {
   "slashPicker.catSkills": "스킬",
   "slashPicker.catSkillsDesc": "등록된 어시스턴트 스킬",
   "slashPicker.inlineHint": "↑↓ 이동 · ⏎ 선택 · esc 닫기",
+  "slashPicker.back": "뒤로",
 };

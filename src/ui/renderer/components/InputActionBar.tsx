@@ -9,14 +9,15 @@
  *     LEADING:  [⌘ slash/command picker] → [persona] → [attach]
  *     TRAILING: [? shortcuts] → [thinking] → [(cancel — busy only)] → [send]
  *
- *   STATUS SUB-ROW (bottom, compact single line):
- *     [● active] · [vendor · model] · [permission — per-mode TEXT color] · [ring]
+ *   STATUS SUB-ROW (bottom, compact single line, REVERSED):
+ *     [ring] <spacer> [permission — per-mode TEXT color] · [vendor · model] · [● active]
  *
  * The window StatusBar is notifications-only after this change; the persistent
  * model / permission / active cells moved here. The TokenProgressRing widget
- * lives at the END of this sub-row (after permission); the % / cost detail is
- * surfaced on the ring's hover/click — there is no separate context-percent
- * text cell.
+ * leads at the START (left); the permission / vendor·model / active cells form
+ * a right-aligned cluster with the online-status dot at the far trailing edge.
+ * The % / cost detail is surfaced on the ring's hover/click — there is no
+ * separate context-percent text cell.
  *
  * Spec: docs/blueprints/composer-redesign-message-queue.md
  */
@@ -279,13 +280,15 @@ export function InputActionBar({
 }
 
 /**
- * Status sub-row — compact single line at the bottom of the unified bar:
- *   [● active] · [vendor · model] · [permission — per-mode text color] · [ring]
+ * Status sub-row — compact single line at the bottom of the unified bar,
+ * REVERSED layout:
+ *   [ring] <flex spacer> [permission — per-mode text color] · [vendor · model] · [● active]
  *
  * Permission is plain text colored per-mode (no pill/outline). The
- * TokenProgressRing widget sits at the END (after permission); the usage % /
- * cost detail is surfaced on the ring's hover/click — there is no separate
- * context-percent text cell.
+ * TokenProgressRing widget leads at the START (left); permission / vendor·model
+ * / active form a right-aligned cluster with the online-status dot at the far
+ * trailing edge. The usage % / cost detail is surfaced on the ring's
+ * hover/click — there is no separate context-percent text cell.
  */
 function StatusSubRow({
   statusRow,
@@ -311,61 +314,65 @@ function StatusSubRow({
       data-testid="iab-status-row"
       className="flex min-w-0 flex-nowrap items-center gap-1.5 px-3 pb-1.5 text-[11px] text-muted-foreground"
     >
-      {/* Active-state dot. */}
-      <span
-        data-testid="iab-status-active-dot"
-        className={`h-1.5 w-1.5 shrink-0 rounded-full ${active ? "bg-success" : "bg-muted-foreground/(--opacity-muted)"}`}
-        aria-label={active ? t("inputActionBar.statusActive") : t("inputActionBar.statusInactive")}
-      />
-
-      {/* Vendor · model. */}
-      {onOpenModelSettings ? (
-        <button
-          type="button"
-          onClick={onOpenModelSettings}
-          data-testid="iab-status-model"
-          className="min-w-0 shrink truncate text-left hover:opacity-80 focus:outline-none focus-visible:ring-1 focus-visible:ring-ring"
-          title={vendorModel}
-        >
-          {vendorModel}
-        </button>
-      ) : (
-        <span data-testid="iab-status-model" className="min-w-0 shrink truncate" title={vendorModel}>
-          {vendorModel}
-        </span>
-      )}
-
-      <span className="shrink-0 opacity-30" aria-hidden="true">·</span>
-
-      {/* Permission — plain text, per-mode color, no pill/outline. */}
-      {onOpenPermissions ? (
-        <button
-          type="button"
-          onClick={onOpenPermissions}
-          data-testid="iab-status-permission"
-          data-mode={permissionMode}
-          className={`shrink-0 truncate hover:opacity-80 focus:outline-none focus-visible:ring-1 focus-visible:ring-ring ${PERMISSION_TEXT_COLOR[permissionMode]}`}
-          title={permissionText}
-        >
-          {permissionText}
-        </button>
-      ) : (
-        <span
-          data-testid="iab-status-permission"
-          data-mode={permissionMode}
-          className={`shrink-0 truncate ${PERMISSION_TEXT_COLOR[permissionMode]}`}
-          title={permissionText}
-        >
-          {permissionText}
-        </span>
-      )}
-
       {/* Token progress ring — square, hover=percent, click=detail (+cost).
-          Pushed to the END of the row (ml-auto) so it sits at the trailing
-          edge after the permission cell. */}
-      <span className="ml-auto shrink-0" data-testid="iab-status-ring">
+          Leads at the START (left) of the reversed row. */}
+      <span className="shrink-0" data-testid="iab-status-ring">
         {ringSlot}
       </span>
+
+      {/* Right-aligned cluster: [permission] · [vendor · model] · [● active].
+          `ml-auto` on the cluster pushes it to the trailing edge so the ring
+          stays left and the online-status dot lands at the far right end. */}
+      <div className="ml-auto flex min-w-0 flex-nowrap items-center gap-1.5">
+        {/* Permission — plain text, per-mode color, no pill/outline. */}
+        {onOpenPermissions ? (
+          <button
+            type="button"
+            onClick={onOpenPermissions}
+            data-testid="iab-status-permission"
+            data-mode={permissionMode}
+            className={`shrink-0 truncate hover:opacity-80 focus:outline-none focus-visible:ring-1 focus-visible:ring-ring ${PERMISSION_TEXT_COLOR[permissionMode]}`}
+            title={permissionText}
+          >
+            {permissionText}
+          </button>
+        ) : (
+          <span
+            data-testid="iab-status-permission"
+            data-mode={permissionMode}
+            className={`shrink-0 truncate ${PERMISSION_TEXT_COLOR[permissionMode]}`}
+            title={permissionText}
+          >
+            {permissionText}
+          </span>
+        )}
+
+        <span className="shrink-0 opacity-30" aria-hidden="true">·</span>
+
+        {/* Vendor · model. */}
+        {onOpenModelSettings ? (
+          <button
+            type="button"
+            onClick={onOpenModelSettings}
+            data-testid="iab-status-model"
+            className="min-w-0 shrink truncate text-left hover:opacity-80 focus:outline-none focus-visible:ring-1 focus-visible:ring-ring"
+            title={vendorModel}
+          >
+            {vendorModel}
+          </button>
+        ) : (
+          <span data-testid="iab-status-model" className="min-w-0 shrink truncate" title={vendorModel}>
+            {vendorModel}
+          </span>
+        )}
+
+        {/* Active-state dot — far trailing edge. */}
+        <span
+          data-testid="iab-status-active-dot"
+          className={`h-1.5 w-1.5 shrink-0 rounded-full ${active ? "bg-success" : "bg-muted-foreground/(--opacity-muted)"}`}
+          aria-label={active ? t("inputActionBar.statusActive") : t("inputActionBar.statusInactive")}
+        />
+      </div>
     </div>
   );
 }
@@ -404,11 +411,16 @@ function ShortcutsButton() {
           <PopoverTrigger asChild>
             <Button
               type="button"
-              variant="outline"
+              variant="ghost"
               size="icon"
               data-testid="composer-shortcuts-button"
               aria-label={label}
-              className="h-[26px] w-[26px] shrink-0 bg-input-bar text-muted-foreground"
+              // The HelpCircle glyph is a complete circle-"?" affordance on its
+              // own; a wrapping outline/border draws a box-in-box (circle inside
+              // a rounded square). Use ghost (no border) so the glyph's own
+              // circle is the only visible outline. Size kept (h/w-[26px]) so the
+              // action row layout stays stable.
+              className="h-[26px] w-[26px] shrink-0 text-muted-foreground"
             >
               <HelpCircle className="h-3.5 w-3.5" />
             </Button>
