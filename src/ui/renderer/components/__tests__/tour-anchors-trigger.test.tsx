@@ -161,10 +161,12 @@ describe("Tutorial-C PR #983 follow-up: tour anchors", () => {
     );
     const scenario = getTourScenario("first-boot-essentials");
     expect(scenario).toBeTruthy();
-    // Z chain expansion — must be 7 steps (host UI + plugin entry).
-    // Hard-pin so a future re-trim cannot silently
-    // revert without test diff.
-    expect(scenario!.steps).toHaveLength(7);
+    // 6 host-UI steps. The input-area relayout (#1311) folded plugin views
+    // into the command palette (SlashPicker), so the old dedicated "plugin
+    // grid" step was removed — the command-palette step now covers how the
+    // user reaches plugins. Hard-pin so a future re-trim cannot silently
+    // revert without a test diff.
+    expect(scenario!.steps).toHaveLength(6);
     for (const step of scenario!.steps) {
       const found = document.querySelector(step.anchorSelector);
       expect(
@@ -184,7 +186,10 @@ describe("Tutorial-C PR #983 follow-up: tour anchors", () => {
     expect(anchors.has('[data-tour-anchor="chat-history"]')).toBe(true);
     expect(anchors.has('[data-tour-anchor="settings-entry"]')).toBe(true);
     expect(anchors.has('[data-tour-anchor="status-bar-vendor"]')).toBe(true);
-    expect(anchors.has('[data-tour-anchor="plugin-entry"]')).toBe(true);
+    // The plugin-entry anchor was intentionally removed by #1311 — plugins are
+    // reached via the command palette (covered by the command-palette-toggle
+    // step above), so the first-boot tour no longer references it.
+    expect(anchors.has('[data-tour-anchor="plugin-entry"]')).toBe(false);
   });
 });
 
