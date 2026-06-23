@@ -24,7 +24,10 @@ describe("MarketplaceAnnouncementBanner", () => {
     );
     const banner = screen.getByTestId("marketplace-announcement-banner");
     expect(banner).toHaveAttribute("data-level", "warning");
-    expect(banner.className).toContain("bg-warning/(--opacity-soft)");
+    // Card fill is the opaque popover surface so chat content cannot bleed
+    // through the floating overlay; the level color rides on the border/text.
+    expect(banner.className).toContain("bg-popover");
+    expect(banner.className).toContain("border-warning/(--opacity-medium)");
     expect(banner.textContent).toContain("Scheduled maintenance");
   });
 
@@ -36,7 +39,8 @@ describe("MarketplaceAnnouncementBanner", () => {
       />,
     );
     const banner = screen.getByTestId("marketplace-announcement-banner");
-    expect(banner.className).toContain("bg-destructive/(--opacity-soft)");
+    expect(banner.className).toContain("bg-popover");
+    expect(banner.className).toContain("border-destructive/(--opacity-medium)");
   });
 
   it('appends an "외 N건" count when more than one is active', () => {
