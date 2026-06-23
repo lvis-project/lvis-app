@@ -247,7 +247,7 @@ describe("InputActionBar (unified bar)", () => {
   });
 
   // ── Status sub-row ──────────────────────────────────────────────────────
-  it("renders the status sub-row with model + permission + the ring (after permission)", () => {
+  it("renders the status sub-row in reversed order: ring (left) before permission · model · dot", () => {
     const { getByTestId } = renderBar();
     const row = getByTestId("iab-status-row");
     expect(row).toBeTruthy();
@@ -255,9 +255,9 @@ describe("InputActionBar (unified bar)", () => {
     // The TokenProgressRing widget now lives in the status row.
     const ringHost = getByTestId("iab-status-ring");
     expect(ringHost.querySelector("[data-testid='ring-slot']")).toBeTruthy();
-    // …positioned AFTER the permission cell.
+    // …positioned BEFORE the permission cell (reversed row: ring is leftmost).
     const permission = getByTestId("iab-status-permission");
-    expect(permission.compareDocumentPosition(ringHost) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+    expect(permission.compareDocumentPosition(ringHost) & Node.DOCUMENT_POSITION_PRECEDING).toBeTruthy();
     // The separate context-percent text cell is gone.
     expect(row.querySelector("[data-testid='iab-status-context']")).toBeNull();
   });
