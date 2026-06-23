@@ -717,38 +717,17 @@ export function App() {
           return;
         }
 
-        const status = pluginAuthStatuses.get(view.pluginId);
-        const card = pluginCards.find((c) => c.id === view.pluginId);
-        const loginTool = card?.auth?.loginTool;
-        // Action mode contract: EVERY plugin view renders inline,
-        // including unauthed ones. The view navigates immediately and shows
-        // its own auth/login affordance inline; the login itself still opens
-        // through `loginTool` → openAuthWindow as a separate window. We do NOT
-        // silently abort navigation, and we do NOT gate navigation on login
-        // completing — that previously stranded users on whatever view they
-        // were already on whenever the plugin reported unauthed (or whenever
-        // the pluginCards IPC had not yet populated `loginTool`).
-        //
-        // Security contract preserved: an unauthed plugin still routes through
-        // its declared `loginTool`; navigating inline does not grant the view
-        // any authenticated data — the plugin surface gates its own content on
-        // auth state. There is no token_login bypass here.
-        if (status?.kind === "unauthed" && loginTool) {
-          void (async () => {
-            try {
-              await api.callPluginMethod(loginTool);
-            } catch (err) {
-              // Cancellation / IPC rejection is a normal user choice, not an
-              // error: log at warn so renderer DevTools doesn't paint it red.
-              // Navigation already happened below, so the user lands on the
-              // plugin's own inline auth affordance regardless.
-              console.warn(
-                `[plugin-auth] ${view.pluginId} loginTool ${loginTool} did not complete (cancelled or IPC rejected)`,
-                err,
-              );
-            }
-          })();
-        }
+        // Action mode contract: EVERY plugin view renders inline, including
+        // unauthed ones. The view navigates immediately (below) and the inline
+        // plugin webview owns its auth flow — its own bootstrapAuth is the SOLE
+        // driver of `loginTool` → openAuthWindow. The host deliberately does NOT
+        // auto-call `loginTool` here: doing so raced the webview's own bootstrap
+        // and opened TWO login windows for the same account (EP double-login).
+        // We do NOT gate navigation on auth — the user lands on the inline view
+        // and the plugin surface gates its own content on auth state (no
+        // token_login bypass; no authenticated data granted by navigation).
+        // Detached-view login behaviour is unchanged (handled above via
+        // openDetachedPluginView, which never calls loginTool from here).
       }
       // Chat mode: built-in detachable views open in a separate window; home
       // (and every action-mode path) stays inline.
@@ -768,8 +747,6 @@ export function App() {
       api,
       appMode,
       pluginViews,
-      pluginAuthStatuses,
-      pluginCards,
       openDetachedPluginView,
       openDetachedBuiltInView,
     ],
