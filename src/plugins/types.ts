@@ -205,6 +205,26 @@ export interface PluginManifest {
    */
   capabilities?: string[];
   /**
+   * Tier A host-mediated egress allow-list (§9.x). A plugin that calls
+   * `hostApi.hostFetch` may only reach hosts matching `allowedDomains`
+   * (dot-boundary suffix match — see `host-allow-list.ts`). Deny-by-default:
+   * absent or empty ⇒ no egress is permitted. `reasoning` is a human-readable
+   * justification surfaced to the user at install for broad grants.
+   */
+  networkAccess?: {
+    allowedDomains: string[];
+    reasoning?: string;
+    /**
+     * Declarative, user-approved governance opt-in for reaching private /
+     * loopback / link-local endpoints through `hostApi.hostFetch` (mirrors the
+     * MCP per-server `allowPrivateNetworks` escape hatch). Deny-by-default:
+     * absent/false ⇒ hostFetch rejects any allow-listed host that resolves to a
+     * non-public address (SSRF defense). Set only for on-prem / intranet
+     * plugins whose target genuinely lives on a private range.
+     */
+    allowPrivateNetworks?: boolean;
+  };
+  /**
    * 플러그인이 구독하는 이벤트 타입 목록.
    * 두 가지 형태를 모두 지원한다:
    *   - 구형 호환: `string[]` — 호스트가 중립 fallback hint를 적용.
@@ -269,8 +289,17 @@ export interface PluginManifest {
     string,
     {
       description: string;
-      /** Permission category declared by the SDK manifest schema. `meta` is host-only. */
-      category: PluginToolCategory;
+      /**
+       * Permission category — now OPTIONAL (host-classifies-risk,
+       * project_permission_review_redesign). A plugin grading its own danger
+       * is not a control (MCP spec: a server can lie), so the host no longer
+       * requires it and never trusts it as the authority: the effective
+       * category is derived host-side per invocation (`inspectHostRisk`). When
+       * omitted, the host applies a write-equivalent default-strict baseline.
+       * Still accepted (and projected to `_meta` for shadow-mode
+       * reconciliation) when a plugin declares it. `meta` is host-only.
+       */
+      category?: PluginToolCategory;
       /** Filesystem argument names that must be checked against allowed directories. */
       pathFields?: string[];
       /**
@@ -431,9 +460,11 @@ export interface PluginUiExtension {
    */
   tool?: string;
   /**
-   * Detached window defaults. `defaultMode: "detached"` opens the extension
-   * in a magnetic-snap BrowserWindow instead of rendering it inline.
-   * Width/height values are initial defaults; saved user bounds still win.
+   * Detached-window geometry hints. Used only when the host opens this
+   * extension in a magnetic-snap BrowserWindow; the decision to detach is
+   * owned solely by the app's mode (appMode: chat detaches, action stays
+   * inline), NOT by the plugin. Width/height are initial defaults; saved
+   * user bounds still win.
    */
   window?: {
     width?: number;
@@ -442,7 +473,6 @@ export interface PluginUiExtension {
     minHeight?: number;
     resizable?: boolean;
     alwaysOnTop?: boolean;
-    defaultMode?: "embedded" | "detached";
   };
 }
 
@@ -494,9 +524,28 @@ export interface VerifyResult {
 /**
  * S14 — dependency specification extracted from plugin manifest's `requires` block.
  * Capabilities are kebab-case tags matching `^[a-z][a-z0-9-]*$`.
+ *
+ * NOTE: This interface is the host-side source of truth that the SDK's
+ * generated TS mirror (`lvis-plugin-sdk/src/index.ts` `RequiresSpec`) is
+ * regenerated from via `sync-from-host`. Keep it consistent with the SDK JSON
+ * schema (`schemas/plugin-manifest.schema.json`).
  */
 export interface RequiresSpec {
   capabilities: string[];
+  /**
+   * Minimum compatible LVIS app version — a plain SemVer `MAJOR.MINOR.PATCH`
+   * string (NOT a range; Obsidian-style). Absent = compatible with all
+   * versions (purely additive, backward-compatible).
+   *
+   * The host hard-blocks at BOTH boundaries when the running app version is
+   * lower than this:
+   *   - INSTALL (marketplace): throws {@link IncompatibleAppVersionError}
+   *     before the artifact is downloaded.
+   *   - LOAD (runtime): skips `start()` and surfaces a non-dismissable
+   *     "needs newer app" state (e.g. after the user downgraded the app or
+   *     sideloaded an artifact built for a newer host).
+   */
+  minAppVersion?: string;
 }
 
 /**
@@ -513,6 +562,30 @@ export class MissingDependenciesError extends Error {
     this.name = "MissingDependenciesError";
   }
 }
+
+/**
+ * Thrown by marketplace install preflight when the plugin declares
+ * `requires.minAppVersion` higher than the running LVIS app version. This is a
+ * HARD BLOCK raised BEFORE the artifact is downloaded — the user must update
+ * the app before the plugin can be installed.
+ *
+ * `required` / `current` are plain SemVer strings. The IPC layer maps this to
+ * the English error code `incompatible-app-version`; the renderer maps that
+ * code to the Korean copy (per the IPC Error Message Language Convention).
+ */
+export class IncompatibleAppVersionError extends Error {
+  readonly required: string;
+  readonly current: string;
+  constructor(required: string, current: string) {
+    super(`plugin requires LVIS >= ${required}, current ${current}`);
+    this.required = required;
+    this.current = current;
+    this.name = "IncompatibleAppVersionError";
+  }
+}
+
+/** Stable English IPC error code for {@link IncompatibleAppVersionError}. */
+export const INCOMPATIBLE_APP_VERSION_CODE = "incompatible-app-version";
 
 /**
  * Thrown by marketplace install preflight when a plugin declares
@@ -869,6 +942,20 @@ export interface PluginHostApi {
    * LLM이 준비되지 않은 경우 에러를 던진다.
    */
   callLlm(prompt: string, options?: { maxTokens?: number; systemPrompt?: string; signal?: AbortSignal }): Promise<string>;
+  /**
+   * Host-mediated outbound HTTPS through Electron's `net` (Chromium network
+   * stack). Unlike a plugin's own Node `fetch`/undici, this honors the OS proxy
+   * resolution INCLUDING PAC/WPAD auto-config and the OS trust store on every
+   * platform — so a plugin whose Node libraries can't be configured for the
+   * corporate proxy/CA (e.g. MSAL) can still reach the network on a
+   * TLS-inspecting corporate network. Capability-gated (external-auth-consumer)
+   * + SSRF-validated + audited host-side.
+   *
+   * OPTIONAL: undefined on host builds that predate this capability — plugins
+   * MUST guard (`typeof hostApi.hostFetch === "function"`) and fall back to bare
+   * fetch, mirroring `resolveApiKey?`.
+   */
+  hostFetch?(input: string | URL, init?: RequestInit): Promise<Response>;
 
   /**
    * Structured log event routed through AuditLogger.

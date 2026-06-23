@@ -4,12 +4,11 @@ import { flushSync } from "react-dom";
 import { ChevronDown, KeyRound, Pencil, Star, GitBranch } from "lucide-react";
 import { Button } from "../../components/ui/button.js";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "../../components/ui/card.js";
-import { Tooltip, TooltipContent, TooltipTrigger } from "../../components/ui/tooltip.js";
 import { ScrollArea } from "../../components/ui/scroll-area.js";
-import { formatCostBadge } from "../../lib/cost-estimator.js";
 import type { ChatEntry } from "../../lib/chat-stream-state.js";
 import type { PermissionReviewSuggestionPayload, UserApprovalHitPayload } from "../../shared/permissions-events.js";
 import { debugLog, isDebugStreamEnabled } from "../../lib/debug-stream.js";
+import { detectFromStream } from "../../lib/stream-markers.js";
 import { OverlayCardRegion } from "./components/OverlayCardRegion.js";
 import { AssistantCard } from "./components/AssistantCard.js";
 import { UserMessageEditor } from "./components/UserMessageEditor.js";
@@ -25,12 +24,11 @@ import { MessageQueuePanel } from "./components/MessageQueuePanel.js";
 import { MessageQueueStore, formatQueueInject, type MessageQueueItem } from "./state/message-queue-store.js";
 import { SubAgentCard } from "./components/SubAgentCard.js";
 import { TokenProgressRing } from "./components/TokenProgressRing.js";
-import { BottomActionRow } from "./components/BottomActionRow.js";
-import { PermissionModeBadge } from "./components/permissions/PermissionModeBadge.js";
 import { DEFAULT_TOAST_TTL_MS, LONG_TOAST_TTL_MS, SHORT_TOAST_TTL_MS } from "./constants.js";
 import { SkillBadge } from "./components/SkillBadge.js";
 import { WorkGroup } from "./components/WorkGroup.js";
 import { PermissionReviewStatusCard } from "./components/PermissionReviewStatusCard.js";
+import { DeferredApprovalChip } from "./components/DeferredApprovalChip.js";
 import { TurnActionBar } from "./components/TurnActionBar.js";
 // TurnSummaryFooter 컴포넌트는 2026-05-07 폐기. 토큰 정보는 TurnActionBar 의
 // TokenCostBadge (provider-truth, 토글 + tooltip breakdown) 가 단일 source 로
@@ -41,10 +39,10 @@ import { getApi } from "./api-client.js";
 import { highlightText } from "./utils/html-preview.js";
 import { useChatContext } from "./context/ChatContext.js";
 import { InputActionBar } from "./components/InputActionBar.js";
+import { useInputStatusRow } from "./hooks/use-input-status-row.js";
 import { Composer, type ComposerHandle } from "./components/Composer.js";
 import { useSuggestedReplies } from "./hooks/use-suggested-replies.js";
 import { computeComposerPlaceholder, hasActiveSuggestedReplies } from "./utils/composer-placeholder.js";
-import { DeferredApprovalChip } from "./components/DeferredApprovalChip.js";
 import {
   ATTACH_MAX_COUNT,
   DENY_EXTENSIONS,
@@ -52,7 +50,6 @@ import {
 } from "./types/attachments.js";
 import { buildMarkerText } from "./utils/attachment-markers.js";
 import type { PluginEntry } from "./components/PluginGridButton.js";
-import type { InstallPhase } from "./hooks/use-plugin-marketplace.js";
 import type { QuickAction } from "./components/CommandPopover.js";
 import { type AskUserQuestionRequest } from "./components/AskUserQuestionCard.js";
 import type { LvisApi } from "./types.js";
@@ -211,7 +208,7 @@ function ImportedTriggerCard({ entry }: { entry: ImportedTriggerEntry }) {
   const envelopeSource = parseImportedTriggerEnvelope(entry.prompt);
   return (
     <div
-      className="mx-3 my-1 rounded border border-action-view/20 bg-action-view/5 px-3 py-2 text-xs"
+      className="mx-3 my-1 rounded border border-action-view/(--opacity-light) bg-action-view/(--opacity-faint) px-3 py-2 text-xs"
     >
       <div className="flex items-center gap-1 text-action-view font-medium">
         <span>●</span>
@@ -263,12 +260,10 @@ export interface ChatViewProps {
   askQuestions: AskUserQuestionRequest[];
   /** Called when a card submits or is dismissed; removes it from `askQuestions`. */
   onResolveAskQuestion: (id: string) => void;
-  /** Plugin list for InputActionBar plugin grid */
+  /** Plugin list — surfaced inside the SlashPicker's plugin category. */
   plugins: PluginEntry[];
   /** Navigate to a plugin view */
   onSelectPlugin: (viewKey: string) => void;
-  /** Refresh plugin cards/views before opening the plugin grid. */
-  onRefreshPlugins?: () => void;
   currentSessionKind?: "main" | "routine";
   currentSessionTitle?: string;
   sessions?: SessionSummary[];
@@ -279,17 +274,12 @@ export interface ChatViewProps {
   /** Controlled open state for CommandPopover */
   commandPopoverOpen: boolean;
   onCommandPopoverOpenChange: (open: boolean) => void;
-  installingPlugins?: ReadonlyMap<string, InstallPhase>;
-  onOpenMarketplace: () => void;
-  marketplaceUrlReady?: boolean;
   // Fork-based revert is replaced by the same-session checkpoint chain.
   // sessionId remains stable until the user explicitly branches from a checkpoint.
   /** Called when user confirms a plugin overlay item; id is the OverlayItem.id. */
   onPluginPrimaryAction?: (overlayItemId: string) => void;
   /** Called when a completed routine overlay result has been seen or dismissed. */
   onRoutineAcknowledge?: (routineId: string, firedAt: string) => void;
-  /** Opens the non-interruptive deferred permission queue modal. */
-  onOpenPermissionQueue?: () => void;
 }
 
 function AskUserAnswerBubble({
@@ -301,10 +291,10 @@ function AskUserAnswerBubble({
   if (entry.dismissed) {
     return (
       <div
-        className="ml-auto w-fit min-w-0 max-w-[75%] rounded-md border border-border/70 border-l-2 border-l-muted-foreground/60 bg-card/80 px-3 py-2 text-xs text-muted-foreground"
+        className="ml-auto w-fit min-w-0 max-w-[75%] rounded-lg border border-border/(--opacity-strong) border-l-2 border-l-muted-foreground/(--opacity-strong) bg-card/(--opacity-intense) px-3 py-2 text-xs text-muted-foreground shadow-sm"
         data-testid="ask-user-answer-bubble"
       >
-        <div className="text-[10.5px] text-muted-foreground/80">{t("chatView.askAnswerSkippedLabel")}</div>
+        <div className="text-[10.5px] text-muted-foreground/(--opacity-intense)">{t("chatView.askAnswerSkippedLabel")}</div>
         <div className="whitespace-pre-wrap break-words [overflow-wrap:anywhere]">{t("chatView.askAnswerSkippedProceed")}</div>
       </div>
     );
@@ -312,7 +302,7 @@ function AskUserAnswerBubble({
 
   return (
     <div
-      className="ml-auto w-fit min-w-0 max-w-[75%] rounded-md border border-border/70 border-l-2 border-l-message-user bg-card/90 px-3 py-2 text-xs text-card-foreground shadow-sm"
+      className="ml-auto w-fit min-w-0 max-w-[75%] rounded-lg border border-border/(--opacity-strong) border-l-2 border-l-message-user bg-card/(--opacity-near) px-3 py-2.5 text-xs text-card-foreground shadow-sm"
       data-testid="ask-user-answer-bubble"
     >
       <div className="mb-1 text-[10.5px] text-muted-foreground">
@@ -330,7 +320,7 @@ function AskUserAnswerBubble({
   );
 }
 
-export function ChatView({ api, onAsk, onEditSave, onFork, onToggleStar, onRetryEffort, onContinueFromLastUser, isEntryStarred, onAbort, onGuide, onGuideError, onFeedback, subAgentSpawns, loadedSkills, hasAskQuestions, askQuestions, onResolveAskQuestion, plugins, onSelectPlugin, onRefreshPlugins, currentSessionKind = "main", currentSessionTitle, sessions, onLoadSession, onRefreshSessions, commandActions, commandPopoverOpen, onCommandPopoverOpenChange, installingPlugins, onOpenMarketplace, marketplaceUrlReady, onPluginPrimaryAction, onRoutineAcknowledge, onOpenPermissionQueue }: ChatViewProps) {
+export function ChatView({ api, onAsk, onEditSave, onFork, onToggleStar, onRetryEffort, onContinueFromLastUser, isEntryStarred, onAbort, onGuide, onGuideError, onFeedback, subAgentSpawns, loadedSkills, hasAskQuestions, askQuestions, onResolveAskQuestion, plugins, onSelectPlugin, currentSessionKind = "main", currentSessionTitle, sessions, onLoadSession, onRefreshSessions, commandActions, commandPopoverOpen, onCommandPopoverOpenChange, onPluginPrimaryAction, onRoutineAcknowledge }: ChatViewProps) {
   const { t } = useTranslation();
   // We still need the api for SessionTodoPanel; obtain it via singleton.
   const workflowApi = getApi();
@@ -922,30 +912,122 @@ export function ChatView({ api, onAsk, onEditSave, onFork, onToggleStar, onRetry
     handleComposerSend({ inputOrigin: "user-keyboard", token: "" });
   }, [handleComposerSend]);
 
-  const tokenSlot = useMemo(() => (
-    <div className="flex min-w-0 items-center gap-2">
-      <TokenProgressRing
-        used={usedTokens}
-        budget={effectiveBudget}
-        contextBudget={contextBudget}
-        tpmLimit={tpmLimit}
-      />
-      <Tooltip>
-        <TooltipTrigger asChild>
-          <span className={`text-[11px] font-mono ${costBadgeClass}`} title={t("chatView.estimatedCostTitle")}>
-            {formatCostBadge(costEstimate.total, costEstimate.pricingKnown)}
-          </span>
-        </TooltipTrigger>
-        <TooltipContent className="text-xs">
-          <div>{t("chatView.costInputLabel")} {costEstimate.inputTokens.toLocaleString()} tok{costEstimate.pricingKnown === false ? "" : ` · $${costEstimate.inputCost.toFixed(5)}`}</div>
-          <div>{t("chatView.costOutputLabel")} {costEstimate.outputTokens.toLocaleString()} tok{costEstimate.pricingKnown === false ? "" : ` · $${costEstimate.outputCost.toFixed(5)}`}</div>
-          {costEstimate.pricingKnown === false
-            ? <div className="font-semibold">{t("chatView.costUnknownModel")}</div>
-            : <div className="font-semibold">{t("chatView.costTotalLabel")} ${costEstimate.total.toFixed(5)}</div>}
-        </TooltipContent>
-      </Tooltip>
-    </div>
+  // Attach picker — opens the native file dialog via window.lvis.attach
+  // (attach lives ONLY on window.lvis, not window.lvisApi; see preload.ts
+  // contextBridge "lvis" → attach). The disable gate (attachments cap /
+  // no-api-key) is applied by the InputActionBar attachDisabled prop, so this
+  // handler only runs when attaching is allowed.
+  const handleAttach = useCallback(async () => {
+    const result = await window.lvis.attach.openFile();
+    if (result.canceled) return;
+    if (result.rejected.length > 0) {
+      console.warn("attachment rejected (deny-list):", result.rejected, "deny:", DENY_EXTENSIONS);
+    }
+    // Build all candidate attachments first. The 5-cap is enforced at *commit*
+    // time inside the setAttachments updater, so a concurrent clipboard paste
+    // during the readImage await cannot push us past the limit (the updater
+    // receives the latest committed state, not the closure-captured one).
+    const candidates: Attachment[] = [];
+    for (const f of result.files) {
+      const n = ++attachmentNCounter.current;
+      if (f.isImage) {
+        const img = await window.lvis.attach.readImage(f.path);
+        if (
+          !img.ok ||
+          !img.dataUrl ||
+          !img.mimeType ||
+          img.width === undefined ||
+          img.height === undefined ||
+          img.bytes === undefined
+        ) {
+          console.warn("readImage failed", f.path, img.error);
+          continue;
+        }
+        candidates.push({
+          id: `img-${Date.now()}-${n}`,
+          n,
+          kind: "image",
+          path: f.path,
+          mimeType: img.mimeType,
+          width: img.width,
+          height: img.height,
+          bytes: img.bytes,
+          dataUrl: img.dataUrl,
+        });
+      } else {
+        candidates.push({
+          id: `file-${Date.now()}-${n}`,
+          n,
+          kind: "file",
+          path: f.path,
+          name: f.name,
+          ext: f.ext,
+          bytes: f.bytes,
+        });
+      }
+    }
+    if (candidates.length === 0) {
+      composerRef.current?.focus();
+      return;
+    }
+    // Atomic commit: setAttachments AND text-insert MUST land in the same
+    // render commit, otherwise Composer's marker-sync useEffect runs between
+    // the two and clears `attachments`. Putting both inside one flushSync
+    // batches them so the next render sees attachments + marker text consistent.
+    let acceptedMarkers = "";
+    flushSync(() => {
+      setAttachments((prev) => {
+        const remaining = Math.max(0, ATTACH_MAX_COUNT - prev.length);
+        const accepted = candidates.slice(0, remaining);
+        if (accepted.length < candidates.length) {
+          console.warn(
+            `${candidates.length - accepted.length} attachment(s) dropped — ${ATTACH_MAX_COUNT}-cap reached during async open/read`,
+          );
+        }
+        acceptedMarkers = accepted.map((a) => `${buildMarkerText(a)} `).join("");
+        return [...prev, ...accepted];
+      });
+      if (acceptedMarkers) {
+        if (composerRef.current) {
+          composerRef.current.insertAtCursor(acceptedMarkers);
+        } else {
+          setQuestion((prev) => prev + acceptedMarkers);
+        }
+      }
+    });
+    // Return focus to the composer textarea so the user can keep typing
+    // immediately after the file dialog closes.
+    composerRef.current?.focus();
+  }, [attachmentNCounter, setAttachments, setQuestion]);
+
+  // Token progress ring — square, hover=percent, click=detail. The former
+  // sibling cost badge is gone: the cost/amount now lives INSIDE the ring's
+  // click-detail popover (a single flat surface), so the action row carries
+  // only the ring itself.
+  const ringSlot = useMemo(() => (
+    <TokenProgressRing
+      used={usedTokens}
+      budget={effectiveBudget}
+      contextBudget={contextBudget}
+      tpmLimit={tpmLimit}
+      costEstimate={costEstimate}
+      costClass={costBadgeClass}
+    />
   ), [contextBudget, costBadgeClass, costEstimate, effectiveBudget, tpmLimit, usedTokens]);
+
+  // Status sub-row (in the unified InputActionBar) — model / permission /
+  // active state. Resolved from the same IPC the former window-StatusBar
+  // producers used; the window StatusBar is notifications-only now.
+  const inputStatusRow = useInputStatusRow(api);
+  // Context-percent — the SAME value the TokenProgressRing's primary ring
+  // renders (used / effectiveBudget). Null before the first usage carrier so
+  // the sub-row dims rather than showing a misleading 0%.
+  const inputContextPercent = useMemo<number | null>(() => {
+    if (usedTokens <= 0) return null;
+    return Math.min(100, Math.round((usedTokens / Math.max(1, effectiveBudget)) * 100));
+  }, [usedTokens, effectiveBudget]);
+  const onOpenModelSettings = useCallback(() => onOpenSettings("llm"), [onOpenSettings]);
+  const onOpenInputPermissions = useCallback(() => onOpenSettings("permissions"), [onOpenSettings]);
 
   // ESC 우선순위
   //   1. 모달 (Radix Dialog [data-state="open"]) → 모달이 가로챔 (defensive)
@@ -1200,7 +1282,7 @@ export function ChatView({ api, onAsk, onEditSave, onFork, onToggleStar, onRetry
     const ringClassFor = (entryIdx: number) => {
       const isMatch = searchMatchSet.has(entryIdx);
       const isCurrentMatch = searchOpen && searchMatches[searchIdx] === entryIdx;
-      return isCurrentMatch ? "ring-2 ring-primary" : isMatch ? "ring-1 ring-primary/40" : "";
+      return isCurrentMatch ? "ring-2 ring-primary" : isMatch ? "ring-1 ring-primary/(--opacity-medium)" : "";
     };
     const ringCls = ringClassFor(idx);
 
@@ -1233,16 +1315,16 @@ export function ChatView({ api, onAsk, onEditSave, onFork, onToggleStar, onRetry
         const starId = isEntryStarred(idx);
         const starActive = !!starId;
         rendered.push(
-          <div key={idx} data-chat-entry-index={idx} className={`group relative ml-auto w-fit min-w-0 max-w-[75%] overflow-hidden rounded-md bg-message-user px-3.5 py-2 text-sm text-message-user-foreground ${userGapCls} ${ringCls}`}>
+          <div key={idx} data-chat-entry-index={idx} className={`group relative ml-auto w-fit min-w-0 max-w-[75%] overflow-hidden rounded-lg bg-message-user px-3.5 py-2.5 text-sm text-message-user-foreground shadow-sm ${userGapCls} ${ringCls}`}>
             {/* "나" label removed — sender is implicit. Star + hover
                 actions float top-right via absolute positioning so
                 the bubble has no header chrome. */}
             {entry.injectHint === "queue" ? (
-              <div className="mb-1 inline-flex items-center gap-1 rounded bg-message-user-foreground/10 px-1.5 py-0.5 text-[10px] text-message-user-foreground/70" title={t("chatView.queueInjectTitle")}>
+              <div className="mb-1 inline-flex items-center gap-1 rounded bg-message-user-foreground/(--opacity-subtle) px-1.5 py-0.5 text-[10px] text-message-user-foreground/(--opacity-stronger)" title={t("chatView.queueInjectTitle")}>
                 {t("chatView.queueInjectLabel")}
               </div>
             ) : entry.injectHint === "interrupt" ? (
-              <div className="mb-1 inline-flex items-center gap-1 rounded bg-message-user-foreground/10 px-1.5 py-0.5 text-[10px] text-message-user-foreground/70" title={t("chatView.interruptTitle")}>
+              <div className="mb-1 inline-flex items-center gap-1 rounded bg-message-user-foreground/(--opacity-subtle) px-1.5 py-0.5 text-[10px] text-message-user-foreground/(--opacity-stronger)" title={t("chatView.interruptTitle")}>
                 {t("chatView.interruptLabel")}
               </div>
             ) : null}
@@ -1251,7 +1333,7 @@ export function ChatView({ api, onAsk, onEditSave, onFork, onToggleStar, onRetry
             ) : null}
             {/* Hide mutating actions in view-mode (read-only slice). */}
             {!viewMode && (
-              <div className="absolute right-2 top-2 hidden gap-1 group-hover:flex bg-message-user/95 rounded">
+              <div className="absolute right-2 top-2 hidden gap-1 group-hover:flex bg-message-user/(--opacity-solid) rounded">
                 <Button type="button" variant="ghost" size="icon-xs" title={t("chatView.editButtonTitle")} onClick={() => setEditingEntryIdx(idx)}>
                   <Pencil className="h-3 w-3" />
                 </Button>
@@ -1282,7 +1364,7 @@ export function ChatView({ api, onAsk, onEditSave, onFork, onToggleStar, onRetry
         <div
           key={idx}
           data-testid="system-entry"
-          className="mx-auto text-center text-xs text-muted-foreground py-1 px-3 rounded-full bg-muted/50"
+          className="mx-auto text-center text-xs text-muted-foreground py-1 px-3 rounded-full bg-muted/(--opacity-medium) border border-border/(--opacity-medium)"
         >
           {entry.text}
         </div>,
@@ -1491,7 +1573,7 @@ export function ChatView({ api, onAsk, onEditSave, onFork, onToggleStar, onRetry
         for (const node of renderSpawnsForGroup(entry)) rendered.push(node);
       } else if (entry.kind === "assistant") {
         rendered.push(
-          <div key={idx} data-chat-entry-index={idx} className={ringCls || undefined}>
+          <div key={idx} data-chat-entry-index={idx} className={`min-w-0 w-full max-w-full overflow-x-hidden rounded-lg${ringCls ? ` ${ringCls}` : ""}`}>
             <AssistantCard
               entry={entry}
               isStarred={!!isEntryStarred(idx)}
@@ -1513,7 +1595,7 @@ export function ChatView({ api, onAsk, onEditSave, onFork, onToggleStar, onRetry
         ? lookupBillablePricingOptional(summary.vendorProvider, summary.vendorModel)
         : undefined;
       rendered.push(
-          <div key={idx} data-chat-entry-index={idx} className={`${ringCls} min-w-0 w-full max-w-full overflow-x-hidden rounded-md`}>
+          <div key={idx} data-chat-entry-index={idx} className={`${ringCls} min-w-0 w-full max-w-full overflow-x-hidden rounded-lg`}>
           <AssistantCard
             entry={entry}
             isStarred={!!isEntryStarred(idx)}
@@ -1526,6 +1608,7 @@ export function ChatView({ api, onAsk, onEditSave, onFork, onToggleStar, onRetry
             pricing={summaryPricing}
             vendor={summaryVendor ?? activeVendor}
             isStarred={!!isEntryStarred(idx)}
+            copyText={detectFromStream(entry.text || "").cleanedText || undefined}
             actions={viewMode ? {} : {
               onRetry: () => void onRetryEffort(),
               onFork: () => void onFork(idx),
@@ -1679,13 +1762,13 @@ export function ChatView({ api, onAsk, onEditSave, onFork, onToggleStar, onRetry
       {currentSessionKind === "routine" && (
         <div
           data-testid="current-session-kind-banner"
-          className="sticky top-0 z-20 mx-3 mt-2 rounded-md border border-action-view/30 bg-action-view/10 px-3 py-2 text-xs text-action-view"
+          className="sticky top-0 z-20 mx-3 mt-2 rounded-md border border-action-view/(--opacity-muted) bg-action-view/(--opacity-subtle) px-3 py-2 text-xs text-action-view"
         >
           <span className="font-medium">{t("chatView.routineSessionLabel")}</span>
           {currentSessionTitle ? <span className="ml-2 text-muted-foreground">{currentSessionTitle}</span> : null}
         </div>
       )}
-      <ScrollArea type="always" className="lvis-chat-scroll h-full min-h-0 min-w-0 max-w-full" viewportRef={scrollViewportRef}><div className="min-w-0 w-full max-w-full overflow-x-hidden space-y-3 px-3 py-4">
+      <ScrollArea type="always" className="lvis-chat-scroll h-full min-h-0 min-w-0 max-w-full" viewportRef={scrollViewportRef}><div className="min-w-0 w-full max-w-full overflow-x-hidden space-y-4 px-4 py-5">
         {/* Today's date badge stays a selector for explicit session loads only.
             currentSessionEntries enables in-session day jumping via
             SessionCalendarPopover Step 4 — pass entries with createdAt + index.
@@ -1725,7 +1808,7 @@ export function ChatView({ api, onAsk, onEditSave, onFork, onToggleStar, onRetry
             "준비되었습니다" copy so the user never sees a "로그인된 척" race
             where the empty state paints before the boot probe resolves
             (#1014 tracer: Stage B). */}
-        {visibleEntries.length === 0 && hasApiKey === true && !hasAskQuestions && !suggestedRepliesActive && <div className="py-12 text-center text-sm text-muted-foreground">{t("chatView.emptyState")}</div>}
+        {visibleEntries.length === 0 && hasApiKey === true && !hasAskQuestions && !suggestedRepliesActive && <div className="py-12 text-center text-sm text-muted-foreground lvis-anim-fade-in">{t("chatView.emptyState")}</div>}
         {transcriptEntries}
         <div ref={chatEndRef} />
       </div></ScrollArea>
@@ -1734,7 +1817,7 @@ export function ChatView({ api, onAsk, onEditSave, onFork, onToggleStar, onRetry
           type="button"
           size="sm"
           variant="secondary"
-          className="absolute bottom-4 right-5 z-20 h-8 rounded-full border bg-background/90 px-3 text-xs shadow-md backdrop-blur"
+          className="absolute bottom-4 right-5 z-20 h-8 rounded-full border border-border/(--opacity-strong) bg-card/(--opacity-solid) px-3 text-xs shadow-md backdrop-blur"
           onClick={() => scrollChatToBottom("smooth")}
           data-testid="jump-to-bottom"
         >
@@ -1744,13 +1827,13 @@ export function ChatView({ api, onAsk, onEditSave, onFork, onToggleStar, onRetry
       )}
       </div>
       {contextOverflowPct >= 0.95 && (
-        <div className="flex w-full max-w-full items-center gap-2 border-t bg-destructive/10 px-3 py-1.5 text-xs text-destructive">
+        <div className="flex w-full max-w-full items-center gap-2 border-t bg-destructive/(--opacity-subtle) px-3 py-1.5 text-xs text-destructive">
           <span className="font-semibold">{t("chatView.contextUsagePercent", { pct: Math.round(contextOverflowPct * 100) })}</span>
           <span>{t("chatView.contextOverflowWarning")}</span>
         </div>
       )}
       {contextOverflowPct >= 0.80 && contextOverflowPct < 0.95 && (
-        <div className="flex w-full max-w-full items-center gap-2 border-t bg-warning/15 px-3 py-1.5 text-xs text-warning">
+        <div className="flex w-full max-w-full items-center gap-2 border-t bg-warning/(--opacity-soft) px-3 py-1.5 text-xs text-warning">
           <span className="font-semibold">{t("chatView.contextUsagePercent", { pct: Math.round(contextOverflowPct * 100) })}</span>
           <span>{t("chatView.contextNearingWarning")}</span>
         </div>
@@ -1763,13 +1846,13 @@ export function ChatView({ api, onAsk, onEditSave, onFork, onToggleStar, onRetry
         영상의 271K nano 사고 patterns 를 사전 경고.
       */}
       {typeof tpmPct === "number" && typeof tpmLimit === "number" && tpmPct >= 0.95 && (
-        <div className="flex w-full max-w-full items-center gap-2 border-t bg-destructive/10 px-3 py-1.5 text-xs text-destructive">
+        <div className="flex w-full max-w-full items-center gap-2 border-t bg-destructive/(--opacity-subtle) px-3 py-1.5 text-xs text-destructive">
           <span className="font-semibold">{t("chatView.tpmUsagePercent", { pct: Math.round(tpmPct * 100), used: usedTokens.toLocaleString(), limit: tpmLimit.toLocaleString() })}</span>
           <span>{t("chatView.tpmOverflowWarning")}</span>
         </div>
       )}
       {typeof tpmPct === "number" && typeof tpmLimit === "number" && tpmPct >= 0.80 && tpmPct < 0.95 && (
-        <div className="flex w-full max-w-full items-center gap-2 border-t bg-warning/15 px-3 py-1.5 text-xs text-warning">
+        <div className="flex w-full max-w-full items-center gap-2 border-t bg-warning/(--opacity-soft) px-3 py-1.5 text-xs text-warning">
           <span className="font-semibold">{t("chatView.tpmUsagePercent", { pct: Math.round(tpmPct * 100), used: usedTokens.toLocaleString(), limit: tpmLimit.toLocaleString() })}</span>
           <span>{t("chatView.tpmNearingWarning")}</span>
         </div>
@@ -1779,7 +1862,13 @@ export function ChatView({ api, onAsk, onEditSave, onFork, onToggleStar, onRetry
           scrolled the chat. The panel collapses by default once it has
           content; in the collapsed state the active item title streams next
           to the count so the user always sees what step is running. */}
-      <div className="relative z-30 w-full max-w-full min-w-0 overflow-visible border-t border-border/70 bg-card/95">
+      {/* Composer dock — seamless. No opaque background (the outer fill behind
+          the composer box was clipping the floating sidebar's drop shadow) and
+          no top border seam: the dock now blends into the bg-background content
+          surface, so there is no hard line / pink bar between the messages and
+          the composer. The composer box (border + bg-input-bar) still reads as a
+          distinct surface on its own. */}
+      <div className="relative z-30 w-full max-w-full min-w-0 overflow-visible">
         <div className="w-full max-w-full min-w-0" data-testid="session-todo-dock">
           <SessionTodoPanel api={workflowApi} sessionId={currentSessionId} />
           <MessageQueuePanel
@@ -1788,135 +1877,19 @@ export function ChatView({ api, onAsk, onEditSave, onFork, onToggleStar, onRetry
           />
         </div>
         <div className="w-full max-w-full min-w-0 overflow-x-hidden pb-1 space-y-2">
-          <InputActionBar
-            plugins={plugins}
-            onSelectPlugin={onSelectPlugin}
-            onRefreshPlugins={onRefreshPlugins}
-            installingPlugins={installingPlugins}
-            onOpenMarketplace={onOpenMarketplace}
-            marketplaceUrlReady={marketplaceUrlReady}
-            onInsertSlashCommand={handleInsertSlashCommand}
-            commandActions={commandActions}
-            commandPopoverOpen={commandPopoverOpen}
-            onCommandPopoverOpenChange={onCommandPopoverOpenChange}
-            attachDisabled={
-              attachments.length >= ATTACH_MAX_COUNT ||
-              hasApiKey === false
-            }
-            attachDisabledReason={
-              hasApiKey === false
-                ? "no-api-key"
-                : "limit"
-            }
-            onAttach={async () => {
-            const result = await window.lvis.attach.openFile();
-            if (result.canceled) return;
-            if (result.rejected.length > 0) {
-              console.warn("attachment rejected (deny-list):", result.rejected, "deny:", DENY_EXTENSIONS);
-            }
-            // Build all candidate attachments first. The 5-cap is enforced
-            // at *commit* time inside the setAttachments updater, so a
-            // concurrent clipboard paste during the readImage await cannot
-            // push us past the limit (the updater receives the latest
-            // committed state, not the closure-captured one).
-            const candidates: Attachment[] = [];
-            for (const f of result.files) {
-              const n = ++attachmentNCounter.current;
-              if (f.isImage) {
-                const img = await window.lvis.attach.readImage(f.path);
-                if (
-                  !img.ok ||
-                  !img.dataUrl ||
-                  !img.mimeType ||
-                  img.width === undefined ||
-                  img.height === undefined ||
-                  img.bytes === undefined
-                ) {
-                  console.warn("readImage failed", f.path, img.error);
-                  continue;
-                }
-                candidates.push({
-                  id: `img-${Date.now()}-${n}`,
-                  n,
-                  kind: "image",
-                  path: f.path,
-                  mimeType: img.mimeType,
-                  width: img.width,
-                  height: img.height,
-                  bytes: img.bytes,
-                  dataUrl: img.dataUrl,
-                });
-              } else {
-                candidates.push({
-                  id: `file-${Date.now()}-${n}`,
-                  n,
-                  kind: "file",
-                  path: f.path,
-                  name: f.name,
-                  ext: f.ext,
-                  bytes: f.bytes,
-                });
-              }
-            }
-            if (candidates.length === 0) {
-              composerRef.current?.focus();
-              return;
-            }
-            // Atomic commit: setAttachments AND text-insert MUST land in
-            // the same render commit, otherwise Composer's marker-sync
-            // useEffect runs between the two and clears `attachments`
-            // (because text still has no marker → liveAttachments=[] →
-            // mismatch → destructive cleanup). Putting both inside one
-            // flushSync batches them so the next render sees attachments
-            // and marker text consistent.
-            let acceptedMarkers = "";
-            flushSync(() => {
-              setAttachments((prev) => {
-                const remaining = Math.max(0, ATTACH_MAX_COUNT - prev.length);
-                const accepted = candidates.slice(0, remaining);
-                if (accepted.length < candidates.length) {
-                  console.warn(
-                    `${candidates.length - accepted.length} attachment(s) dropped — ${ATTACH_MAX_COUNT}-cap reached during async open/read`,
-                  );
-                }
-                acceptedMarkers = accepted.map((a) => `${buildMarkerText(a)} `).join("");
-                return [...prev, ...accepted];
-              });
-              // Insert at caret in the SAME flushSync — batched with
-              // setAttachments into one render so the destructive sync
-              // useEffect never sees a mismatch.
-              if (acceptedMarkers) {
-                if (composerRef.current) {
-                  composerRef.current.insertAtCursor(acceptedMarkers);
-                } else {
-                  setQuestion((prev) => prev + acceptedMarkers);
-                }
-              }
-            });
-            // Return focus to the composer textarea so the user can keep
-            // typing or use Cmd/Ctrl+A immediately after the file dialog
-            // closes — without this, focus stays on the action bar button
-            // and the next keystroke goes nowhere visible.
-            composerRef.current?.focus();
-            }}
-            rolePresets={rolePresets}
-            activePreset={activePreset}
-            activePresetId={activePresetId}
-            onSelectPreset={setActivePresetId}
-            enableThinkingChat={enableThinkingChat}
-            onToggleThinking={toggleThinking}
-            permissionSlot={
-              <PermissionModeBadge
-                onClick={() => onOpenSettings("permissions")}
-                onQueueClick={onOpenPermissionQueue}
-              />
-            }
-            approvalSlot={<DeferredApprovalChip draftText={question} />}
-          />
-          {/* v6 layout: Composer (textarea) + BottomActionRow (TokenRing/
-              단축키/취소/Send) 가 하나의 흰색 컨테이너 안. 사용자 인지 = "타이핑
-              영역 + 즉시 액션" 한 묶음. shadow-md + rounded-xl 로 경계 강조. */}
-          <div className="mx-3 rounded-xl bg-input-bar shadow-md overflow-hidden">
+          {/* §8 agent-approval surface — interactive natural-language approval
+              chip. Renders directly above the composer (the position its own
+              contract describes); self-hides unless the draft expresses an
+              approve/reject intent AND exactly one queue entry is pending. */}
+          <DeferredApprovalChip draftText={question} />
+          {/* ONE unified input box: textarea + the single InputActionBar
+              (action row + status sub-row). The window StatusBar is
+              notifications-only; the model / permission / active / context%
+              cells live in the bar's status sub-row.
+              `border` (not `ring`): the dock's overflow-x-hidden forces
+              overflow-y:auto, which clips a ring's top edge; a border paints
+              inside the box so all four edges render. */}
+          <div className="mx-3 mb-1 rounded-xl bg-input-bar shadow-md overflow-hidden border border-border">
           <Composer
             ref={composerRef}
             text={question}
@@ -1928,6 +1901,9 @@ export function ChatView({ api, onAsk, onEditSave, onFork, onToggleStar, onRetry
             openExternal={(p) => window.lvis.attach.openExternal(p)}
             onSend={handleComposerSend}
             suggestedReplies={suggestedReplies}
+            commandActions={commandActions}
+            inlinePlugins={plugins}
+            onSelectPlugin={onSelectPlugin}
             disabled={
               // Context/TPM red zones stay sendable: main preflight runs
               // compact before the LLM call. Slash commands still bypass
@@ -1938,8 +1914,24 @@ export function ChatView({ api, onAsk, onEditSave, onFork, onToggleStar, onRetry
             onWarning={(msg) => console.warn(msg)}
             placeholder={computeComposerPlaceholder({ hasApiKey, streaming, suggestedReplies })}
           />
-          <BottomActionRow
-            tokenSlot={tokenSlot}
+          <InputActionBar
+            plugins={plugins}
+            onSelectPlugin={onSelectPlugin}
+            onInsertSlashCommand={handleInsertSlashCommand}
+            commandActions={commandActions}
+            commandPopoverOpen={commandPopoverOpen}
+            onCommandPopoverOpenChange={onCommandPopoverOpenChange}
+            ringSlot={ringSlot}
+            attachDisabled={
+              attachments.length >= ATTACH_MAX_COUNT ||
+              hasApiKey === false
+            }
+            attachDisabledReason={hasApiKey === false ? "no-api-key" : "limit"}
+            onAttach={handleAttach}
+            rolePresets={rolePresets}
+            activePreset={activePreset}
+            activePresetId={activePresetId}
+            onSelectPreset={setActivePresetId}
             isBusy={streaming}
             isSendDisabled={
               (hasApiKey === false || viewMode !== null) &&
@@ -1952,10 +1944,14 @@ export function ChatView({ api, onAsk, onEditSave, onFork, onToggleStar, onRetry
               // ESC handler 와 동일: 큐를 inject + abort (멈춤 X, 입력으로 inject).
               flushQueueAsUserMessage();
             }}
-            />
+            enableThinkingChat={enableThinkingChat}
+            onToggleThinking={toggleThinking}
+            statusRow={inputStatusRow}
+            contextPercent={inputContextPercent}
+            onOpenModelSettings={onOpenModelSettings}
+            onOpenPermissions={onOpenInputPermissions}
+          />
           </div>
-          {/* PermissionModeBadge + DeferredApprovalChip 모두
-              InputActionBar trailing 으로 이전 완료. 본 자리 비움. */}
         </div>
         <QuestionOverlay
           api={api}

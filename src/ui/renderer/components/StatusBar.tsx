@@ -1,5 +1,4 @@
 import type { PersistentItem, StatusBarSeverity, ToastItem } from "../hooks/use-status-bar.js";
-import { LvisLogo } from "./LvisLogo.js";
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "../../../components/ui/tooltip.js";
 
 const EMOJI_FONT_STACK =
@@ -58,17 +57,17 @@ export function StatusBar(props: StatusBarProps) {
   return (
     <TooltipProvider>
     <footer
-      className="flex h-6 shrink-0 items-center justify-between gap-3 border-t bg-background px-3 text-[11px] text-muted-foreground"
+      className="flex h-6 shrink-0 items-center justify-between gap-3 bg-background px-3 text-[11px] text-muted-foreground"
       data-testid="status-bar"
       role="status"
       aria-live="polite"
     >
       <div className="flex min-w-0 items-center truncate">
         {persistent.length === 0 ? (
-          <span className="flex items-center gap-1.5 opacity-60">
-            <LvisLogo className="h-3.5 w-3.5 shrink-0" decorative />
-            <span>LVIS</span>
-          </span>
+          // Empty state — no brand mark (wb-final removed LVIS chrome
+          // branding). A zero-footprint spacer keeps the flex layout stable
+          // until the first persistent item (model / permission) arrives.
+          <span aria-hidden="true" />
         ) : (
           persistent.map((item, idx) => {
             const previous = idx > 0 ? persistent[idx - 1] : undefined;
@@ -161,7 +160,11 @@ export function StatusBar(props: StatusBarProps) {
         {visibleToast !== null && (() => {
           const toast = visibleToast;
           const clickable = toast.notification !== undefined && typeof onToastClick === "function";
-          const baseClass = `flex min-w-0 items-center gap-1.5 truncate lvis-anim-slide-up ${SEVERITY_TEXT[toast.severity]}`;
+          // Opaque pill background so the toast stays legible over the chat
+          // content behind it (the bar's own bg-background is otherwise the
+          // only fill, and a transparent toast washed out against light
+          // surfaces). bg-card + a subtle border give a clear chip.
+          const baseClass = `flex min-w-0 items-center gap-1.5 truncate rounded-md border border-border bg-card px-2 py-0.5 shadow-sm lvis-anim-slide-up ${SEVERITY_TEXT[toast.severity]}`;
           const dot = (
             <span
               className={`h-1.5 w-1.5 shrink-0 rounded-full ${SEVERITY_DOT[toast.severity]}`}

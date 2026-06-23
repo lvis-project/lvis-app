@@ -111,6 +111,13 @@ export const COMMON_IPC_ERROR_MESSAGES: Readonly<Record<string, string>> = {
   "install-failed": "formatIpcError.installFailed",
   "uninstall-failed": "formatIpcError.uninstallFailed",
   "marketplace-disabled": "formatIpcError.marketplaceDisabled",
+  // Plugin↔app minimum-version gate (install + load). The English IPC message
+  // carries the concrete versions ("plugin requires LVIS >= X, current Y");
+  // callsites that have the structured {required,current} fields render the
+  // parameterized Korean copy ("이 플러그인은 LVIS X 이상이 필요합니다…") via
+  // their own formatter. This generic key is the fallback for callers that
+  // surface the bare code.
+  "incompatible-app-version": "formatIpcError.incompatibleAppVersion",
   // Frame-trust gate (used by chat.ts + plugins.ts pluginConfigError helper).
   // The plain "unauthorized" entry above already maps to "권한이 없습니다." but
   // "unauthorized-frame" carries a distinct semantic (the *frame/window* failed

@@ -19,15 +19,15 @@ function statusLabel(entry: PermissionReviewEntry): string {
 
 function toneClass(entry: PermissionReviewEntry): string {
   if (entry.status === "reviewing") {
-    return "border-info/40 bg-info/5 text-info";
+    return "border-info/(--opacity-medium) bg-info/(--opacity-faint) text-info";
   }
   if (entry.status === "auto_approved") {
-    return "border-success/40 bg-success/5 text-success";
+    return "border-success/(--opacity-medium) bg-success/(--opacity-faint) text-success";
   }
   if (entry.status === "failed" || entry.verdictLevel === "high") {
-    return "border-destructive/40 bg-destructive/5 text-destructive";
+    return "border-destructive/(--opacity-medium) bg-destructive/(--opacity-faint) text-destructive";
   }
-  return "border-warning/40 bg-warning/10 text-warning";
+  return "border-warning/(--opacity-medium) bg-warning/(--opacity-subtle) text-warning";
 }
 
 function StatusIcon({ entry }: { entry: PermissionReviewEntry }) {

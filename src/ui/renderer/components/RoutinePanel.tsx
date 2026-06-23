@@ -8,7 +8,7 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import { t } from "../../../i18n/runtime.js";
 import { Badge } from "../../../components/ui/badge.js";
 import { Button } from "../../../components/ui/button.js";
-import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "../../../components/ui/card.js";
+import { CardContent, CardDescription, CardHeader, CardTitle } from "../../../components/ui/card.js";
 import { Checkbox } from "../../../components/ui/checkbox.js";
 import { Input } from "../../../components/ui/input.js";
 import { Label } from "../../../components/ui/label.js";
@@ -77,7 +77,7 @@ function describeSchedule(routine: RoutineRecord): string {
 function RoutineRow({ routine, onDismiss, onRemove, onTriggerNow, recentlyFired }: RoutineRowProps) {
   return (
     <div
-      className={`rounded-lg border bg-background p-3 shadow-sm transition-shadow hover:shadow-md ${recentlyFired ? "border-warning/60 bg-warning/10" : ""}`}
+      className={`rounded-lg border bg-background p-3 shadow-sm transition-shadow hover:shadow-md ${recentlyFired ? "border-warning/(--opacity-strong) bg-warning/(--opacity-subtle)" : ""}`}
       data-testid="routine-row"
     >
       <div className="flex items-start justify-between gap-2">
@@ -379,7 +379,7 @@ export function AddRoutineModal({ api, onClose, onAdded }: AddRoutineModalProps)
         </DialogHeader>
 
         {/* Tab selector for the three routine input styles. */}
-        <div className="mb-4 flex gap-1 rounded-md border p-1 bg-muted/30" role="tablist">
+        <div className="mb-4 flex gap-1 rounded-md border p-1 bg-muted/(--opacity-muted)" role="tablist">
           {(["form", "cron", "natural"] as InputTab[]).map((tabKey) => (
             <button
               key={tabKey}
@@ -559,7 +559,7 @@ export function AddRoutineModal({ api, onClose, onAdded }: AddRoutineModalProps)
                       {pluginCards.map((plugin) => (
                         <Label
                           key={plugin.id}
-                          className="flex min-w-0 items-center gap-2 rounded px-2 py-1 text-xs hover:bg-muted/60"
+                          className="flex min-w-0 items-center gap-2 rounded px-2 py-1 text-xs hover:bg-muted/(--opacity-strong)"
                         >
                           <Checkbox
                             checked={allowedPluginIds.includes(plugin.id)}
@@ -701,7 +701,7 @@ export function RoutinePanel({ api, onOpenSession }: RoutinePanelProps) {
 
   return (
     <>
-      <Card
+      <div
         className="mx-auto flex min-h-0 min-w-0 flex-1 w-full max-w-3xl flex-col overflow-hidden"
         data-testid="routine-panel"
       >
@@ -738,7 +738,7 @@ export function RoutinePanel({ api, onOpenSession }: RoutinePanelProps) {
         <CardContent className="flex min-h-0 flex-1 flex-col gap-3">
           <div className="grid min-h-0 flex-1 gap-3 lg:grid-cols-[minmax(0,1fr)_minmax(240px,0.72fr)]">
             <section className="flex min-h-0 flex-col gap-2" data-testid="routine-list-section">
-              <div className="flex items-center justify-between rounded-t-lg border-b bg-muted/40 px-3 py-2">
+              <div className="flex items-center justify-between rounded-t-lg border-b bg-muted/(--opacity-medium) px-3 py-2">
                 <h3 className="text-xs font-semibold uppercase tracking-wider text-muted-foreground">{t("routinePanel.routineListHeading")}</h3>
                 <Badge variant="outline" className="h-5 px-1.5 text-[11px] tabular-nums">{routines.length}</Badge>
               </div>
@@ -767,7 +767,7 @@ export function RoutinePanel({ api, onOpenSession }: RoutinePanelProps) {
             </section>
 
             <section className="flex min-h-0 flex-col gap-2" data-testid="routine-session-list">
-              <div className="flex items-center justify-between rounded-t-lg border-b bg-muted/40 px-3 py-2">
+              <div className="flex items-center justify-between rounded-t-lg border-b bg-muted/(--opacity-medium) px-3 py-2">
                 <h3 className="text-xs font-semibold uppercase tracking-wider text-muted-foreground">{t("routinePanel.sessionListHeading")}</h3>
                 <Badge variant="outline" className="h-5 px-1.5 text-[11px] tabular-nums">{routineSessions.length}</Badge>
               </div>
@@ -793,7 +793,7 @@ export function RoutinePanel({ api, onOpenSession }: RoutinePanelProps) {
             </section>
           </div>
         </CardContent>
-      </Card>
+      </div>
 
       {showAddModal && (
         <AddRoutineModal

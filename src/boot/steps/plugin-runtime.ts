@@ -22,6 +22,7 @@ import { isAppUpdateInstallRequested } from "../../main/app-update-install-inten
 import { pluginPartitionName } from "../../shared/plugin-partition.js";
 import { onEvent as onHostEvent } from "../types.js";
 import { normalizeAllowedHosts } from "../../main/host-allow-list.js";
+import { evaluateHostFetch } from "../../main/host-fetch-guard.js";
 import { AuditLogger, type AuditEntry } from "../../audit/audit-logger.js";
 import { PluginRuntime } from "../../plugins/runtime.js";
 import type { PythonRuntimeBootstrapper } from "../../main/python-runtime.js";
@@ -750,6 +751,12 @@ export interface InitPluginRuntimeInput {
   pythonRuntime?: PythonRuntimeBootstrapper;
   bootAuditLogger: AuditLogger;
   mainWindow: BrowserWindow;
+  /**
+   * Electron `net`-backed fetch (Chromium stack: OS proxy incl. PAC/WPAD + OS
+   * trust store). Backs the capability-gated `hostApi.hostFetch`. Eager (exists
+   * at boot) so it needs no late binding, unlike the LLM caller.
+   */
+  networkFetch: typeof fetch;
   getMainWindow?: () => BrowserWindow | null;
   openAuthWindowService: (
     parent: BrowserWindow,
@@ -839,6 +846,7 @@ export async function initPluginRuntime(
     pythonRuntime,
     bootAuditLogger,
     mainWindow,
+    networkFetch,
     getMainWindow,
     openAuthWindowService,
     openLinkWindowService,
@@ -1485,6 +1493,70 @@ export async function initPluginRuntime(
         }
         if (!lateBinding.llmCallerRef.fn) throw new Error("LLM provider not ready");
         return lateBinding.llmCallerRef.fn(prompt, opts);
+      },
+      hostFetch: async (input, init) => {
+        // Capability-gated host-mediated egress through Electron net (Chromium
+        // stack → OS proxy incl. PAC/WPAD + OS trust store), for plugins whose
+        // Node libraries (e.g. MSAL) can't be configured for the corporate
+        // proxy/CA.
+        //
+        // The layered policy (scheme/credential reject → https-only →
+        // deny-by-default allow-list → DNS-aware SSRF guard) lives in the pure
+        // `evaluateHostFetch` core so it is unit-testable without the runtime.
+        // Audit + telemetry side effects stay here, the host chokepoint.
+        // Egress denial: bump the per-(plugin, reason) telemetry counter +
+        // write the authoritative audit line. `reasonBucket` goes through
+        // sanitizeKeyPrefix so an unknown bucket folds to "other" — the same
+        // cardinality guard the host-secret path uses (no raw string reaches
+        // the counter map).
+        const auditEgressDeny = (reasonBucket: string, detail: string) => {
+          incrementHostSecretCounter("hostFetch_denied", pluginId, sanitizeKeyPrefix(reasonBucket));
+          try {
+            bootAuditLogger.log({
+              timestamp: new Date().toISOString(),
+              sessionId: "plugin",
+              type: "error",
+              input: `[plugin:${pluginId}] host_fetch_denied ${detail}`,
+            });
+          } catch { /* audit must not break host */ }
+        };
+        if (!manifest.capabilities?.includes("external-auth-consumer")) {
+          auditEgressDeny("capability", "capability external-auth-consumer not declared");
+          throw new Error(
+            `[plugin:${pluginId}] capability not declared: external-auth-consumer (hostFetch)`,
+          );
+        }
+        const raw = input instanceof URL ? input.toString() : input;
+        // SSRF defense: an allow-listed host that resolves to a private /
+        // loopback / link-local / metadata address is rejected unless the
+        // manifest explicitly opts into `networkAccess.allowPrivateNetworks`
+        // (the declarative, user-approved governance gate). The host-suffix
+        // allow-list alone cannot stop an attacker-controlled or DNS-rebound
+        // name from pivoting to 169.254.169.254 / 127.0.0.1 / RFC1918 when
+        // `net.fetch` resolves DNS directly (off-corp, no proxy).
+        const decision = await evaluateHostFetch({
+          pluginId,
+          rawUrl: raw,
+          allowedDomains: manifest.networkAccess?.allowedDomains ?? [],
+          allowPrivateNetworks: manifest.networkAccess?.allowPrivateNetworks === true,
+        });
+        if (!decision.ok) {
+          auditEgressDeny(decision.reason, decision.detail);
+          throw new Error(decision.message);
+        }
+        const url = decision.url;
+        incrementHostSecretCounter("hostFetch_egress", pluginId, "egress");
+        try {
+          bootAuditLogger.log({
+            timestamp: new Date().toISOString(),
+            sessionId: "plugin",
+            type: "tool_call",
+            input: `[plugin:${pluginId}] host_fetch ${url.protocol}//${url.host}${url.pathname}`,
+          });
+        } catch { /* audit must not break host */ }
+        // redirect:"error" — a plugin egress path must not silently follow
+        // cross-origin redirects (mirrors the host LLM/auth fetch posture).
+        return networkFetch(url.toString(), { ...(init ?? {}), redirect: "error" });
       },
       logEvent: (level, message, data) => {
         try {

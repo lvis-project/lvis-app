@@ -209,7 +209,7 @@ export function DeferredApprovalChip({
       data-testid="deferred-approval-chip"
       data-target-id={target.id}
       data-target-source={target.source}
-      className="mx-3 mb-2 flex flex-col gap-1 rounded-md border border-primary/30 bg-primary/5 px-3 py-2 text-xs"
+      className="mx-3 mb-2 flex flex-col gap-1 rounded-md border border-primary/(--opacity-muted) bg-primary/(--opacity-faint) px-3 py-2 text-xs"
     >
       <div className="flex items-center gap-2">
         <span

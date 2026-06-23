@@ -181,10 +181,10 @@ export function AuditPanel({
       <section
         className={`flex items-center gap-2 border-b px-3 py-2 text-xs ${
           integrityStatus.severity === "ok"
-            ? "bg-success/10 text-success"
+            ? "bg-success/(--opacity-subtle) text-success"
             : integrityStatus.severity === "warn"
-              ? "bg-warning/10 text-warning"
-              : "bg-destructive/10 text-destructive"
+              ? "bg-warning/(--opacity-subtle) text-warning"
+              : "bg-destructive/(--opacity-subtle) text-destructive"
         }`}
         data-testid="audit-integrity-banner"
         data-severity={integrityStatus.severity}
@@ -256,7 +256,7 @@ export function AuditPanel({
       </section>
 
       {error && (
-        <p className="border-b bg-destructive/10 px-3 py-1 text-xs text-destructive">
+        <p className="border-b bg-destructive/(--opacity-subtle) px-3 py-1 text-xs text-destructive">
           {error}
         </p>
       )}
@@ -295,7 +295,7 @@ export function AuditPanel({
               </button>
               {isOpen && (
                 <pre
-                  className="mt-1 overflow-x-auto rounded bg-muted/40 px-2 py-1 text-[11px]"
+                  className="mt-1 overflow-x-auto rounded bg-muted/(--opacity-medium) px-2 py-1 text-[11px]"
                   data-testid={`audit-entry-detail-${entry.auditId}`}
                 >
                   {JSON.stringify(entry, null, 2)}

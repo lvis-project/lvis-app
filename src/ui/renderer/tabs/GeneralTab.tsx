@@ -119,7 +119,7 @@ function StatCard({ label, count, icon: Icon, onClick, loading, testId }: StatCa
       type="button"
       onClick={onClick}
       data-testid={testId}
-      className="flex flex-col items-start gap-2 rounded-lg border bg-card p-4 text-left transition-colors hover:border-primary/60 hover:bg-accent/40 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+      className="flex flex-col items-start gap-2 rounded-lg border bg-card p-4 text-left transition-colors hover:border-primary/(--opacity-strong) hover:bg-accent/(--opacity-medium) focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
     >
       <div className="flex items-center gap-2 text-muted-foreground">
         <Icon className="size-4" aria-hidden={true} />
@@ -186,10 +186,9 @@ export function GeneralTab({
 
   const provider = settings?.llm.provider ?? "";
   const authMode = settings?.llm.authMode ?? "manual";
-  const demoEnabled = settings?.features?.demoAutoplayEnabled === true;
 
   const marketplaceStatus: { dot: string; label: string } = useMemo(() => {
-    if (!stats.marketplace.configured) return { dot: "bg-muted-foreground/40", label: t("generalTab.marketplaceNotConnected") };
+    if (!stats.marketplace.configured) return { dot: "bg-muted-foreground/(--opacity-medium)", label: t("generalTab.marketplaceNotConnected") };
     if (stats.marketplace.online) return { dot: "bg-success", label: t("generalTab.marketplaceOnline") };
     return { dot: "bg-destructive", label: t("generalTab.marketplaceNoResponse") };
   }, [stats.marketplace.configured, stats.marketplace.online, locale, t]);
@@ -306,7 +305,7 @@ export function GeneralTab({
       >
         <div className="flex items-start gap-4">
           <div
-            className="flex size-12 shrink-0 items-center justify-center rounded-full bg-primary/15 text-lg font-semibold text-primary"
+            className="flex size-12 shrink-0 items-center justify-center rounded-full bg-primary/(--opacity-soft) text-lg font-semibold text-primary"
             aria-hidden="true"
           >
             {avatarInitial}
@@ -331,11 +330,6 @@ export function GeneralTab({
               {hasVendorKey && (
                 <Badge variant="secondary" className="text-[10px]">
                   {t("generalTab.keyRegisteredBadge")}
-                </Badge>
-              )}
-              {demoEnabled && (
-                <Badge variant="secondary" className="text-[10px]">
-                  {t("generalTab.demoBadge")}
                 </Badge>
               )}
             </div>
@@ -394,7 +388,7 @@ export function GeneralTab({
           {logoutError && (
             <p
               role="alert"
-              className="rounded-md bg-destructive/10 px-3 py-2 text-sm text-destructive"
+              className="rounded-md bg-destructive/(--opacity-subtle) px-3 py-2 text-sm text-destructive"
               data-testid="general-tab-logout-error"
             >
               {logoutError}
@@ -493,7 +487,7 @@ export function GeneralTab({
         <button
           type="button"
           onClick={() => onNavigate("marketplace")}
-          className="flex w-full items-center justify-between rounded-md border bg-card px-4 py-3 text-left transition-colors hover:border-primary/60 hover:bg-accent/40 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+          className="flex w-full items-center justify-between rounded-md border bg-card px-4 py-3 text-left transition-colors hover:border-primary/(--opacity-strong) hover:bg-accent/(--opacity-medium) focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
           data-testid="general-tab-marketplace-status"
         >
           <div className="flex items-center gap-3">
@@ -524,7 +518,7 @@ export function GeneralTab({
           onValueChange={onCloseBehaviorChange}
           className="gap-3"
         >
-          <div className="flex items-start gap-3 rounded-md border bg-card/50 p-3">
+          <div className="flex items-start gap-3 rounded-md border bg-card/(--opacity-half) p-3">
             <RadioGroupItem value="hide-to-tray" id="close-hide-to-tray" className="mt-0.5" />
             <Label htmlFor="close-hide-to-tray" className="cursor-pointer">
               <div className="font-medium">{t("generalTab.hideToTrayLabel")}</div>
@@ -533,7 +527,7 @@ export function GeneralTab({
               </div>
             </Label>
           </div>
-          <div className="flex items-start gap-3 rounded-md border bg-card/50 p-3">
+          <div className="flex items-start gap-3 rounded-md border bg-card/(--opacity-half) p-3">
             <RadioGroupItem value="quit" id="close-quit" className="mt-0.5" />
             <Label htmlFor="close-quit" className="cursor-pointer">
               <div className="font-medium">{t("generalTab.quitLabel")}</div>
@@ -551,7 +545,7 @@ export function GeneralTab({
         description={t("generalTab.systemInfoDescription")}
       >
         <dl className="grid grid-cols-1 gap-3 text-sm sm:grid-cols-2">
-          <div className="flex items-start gap-3 rounded-md border bg-card/50 p-3">
+          <div className="flex items-start gap-3 rounded-md border bg-card/(--opacity-half) p-3">
             <Cpu className="mt-0.5 size-4 shrink-0 text-muted-foreground" aria-hidden={true} />
             <div className="min-w-0">
               <dt className="text-[11px] uppercase tracking-wide text-muted-foreground">{t("generalTab.osLabel")}</dt>
@@ -560,7 +554,7 @@ export function GeneralTab({
               </dd>
             </div>
           </div>
-          <div className="flex items-start gap-3 rounded-md border bg-card/50 p-3">
+          <div className="flex items-start gap-3 rounded-md border bg-card/(--opacity-half) p-3">
             <Brain className="mt-0.5 size-4 shrink-0 text-muted-foreground" aria-hidden={true} />
             <div className="min-w-0">
               <dt className="text-[11px] uppercase tracking-wide text-muted-foreground">{t("generalTab.appVersionLabel")}</dt>
@@ -570,7 +564,7 @@ export function GeneralTab({
             </div>
           </div>
           <div
-            className="flex items-start gap-3 rounded-md border bg-card/50 p-3 sm:col-span-2"
+            className="flex items-start gap-3 rounded-md border bg-card/(--opacity-half) p-3 sm:col-span-2"
             data-testid="general-tab-stack-info"
           >
             <Cpu className="mt-0.5 size-4 shrink-0 text-muted-foreground" aria-hidden={true} />
@@ -604,7 +598,7 @@ export function GeneralTab({
               </dd>
             </div>
           </div>
-          <div className="flex items-start gap-3 rounded-md border bg-card/50 p-3 sm:col-span-2">
+          <div className="flex items-start gap-3 rounded-md border bg-card/(--opacity-half) p-3 sm:col-span-2">
             <FolderOpen className="mt-0.5 size-4 shrink-0 text-muted-foreground" aria-hidden={true} />
             <div className="min-w-0 flex-1">
               <dt className="text-[11px] uppercase tracking-wide text-muted-foreground">{t("generalTab.dataPathLabel")}</dt>

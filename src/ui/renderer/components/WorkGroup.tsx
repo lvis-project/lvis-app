@@ -97,7 +97,7 @@ function WorkGroupImpl({ stepCount, streaming, children, turnDurationMs }: WorkG
         {streaming
           ? <Loader2 className="h-3 w-3 animate-spin flex-shrink-0" />
           : null}
-        <span className="min-w-0 font-medium text-foreground/90">
+        <span className="min-w-0 font-medium text-foreground/(--opacity-near)">
           {streaming ? t("workGroup.working") : t("workGroup.work")}
         </span>
         {/*

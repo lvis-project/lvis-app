@@ -35,7 +35,7 @@ export function MarketplaceAnnouncementBanner({
 
   return (
     <div
-      className={`flex h-11 items-center justify-between gap-2 overflow-hidden text-sm px-4 py-1.5 rounded-md mx-2 mt-2 lvis-anim-slide-down border ${palette.container}`}
+      className={`flex h-11 items-center justify-between gap-2 overflow-hidden text-sm px-4 py-1.5 rounded-md mx-2 mt-2 shadow-lg lvis-anim-slide-down border bg-popover ${palette.container}`}
       data-testid="marketplace-announcement-banner"
       data-level={current.level}
     >
@@ -76,18 +76,18 @@ const LEVEL_PALETTE: Record<
   { container: string; body: string; dismiss: string }
 > = {
   info: {
-    container: "bg-info/15 border-info/40 text-info",
-    body: "text-info/75",
-    dismiss: "text-info hover:text-info/80",
+    container: "border-info/(--opacity-medium) text-info",
+    body: "text-info/(--opacity-emphatic)",
+    dismiss: "text-info hover:text-info/(--opacity-intense)",
   },
   warning: {
-    container: "bg-warning/15 border-warning/40 text-warning",
-    body: "text-warning/75",
-    dismiss: "text-warning hover:text-warning/80",
+    container: "border-warning/(--opacity-medium) text-warning",
+    body: "text-warning/(--opacity-emphatic)",
+    dismiss: "text-warning hover:text-warning/(--opacity-intense)",
   },
   critical: {
-    container: "bg-destructive/15 border-destructive/40 text-destructive",
-    body: "text-destructive/75",
-    dismiss: "text-destructive hover:text-destructive/80",
+    container: "border-destructive/(--opacity-medium) text-destructive",
+    body: "text-destructive/(--opacity-emphatic)",
+    dismiss: "text-destructive hover:text-destructive/(--opacity-intense)",
   },
 };

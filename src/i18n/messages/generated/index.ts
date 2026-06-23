@@ -5,7 +5,7 @@
  * fragment files in this directory (`<namespace>.ts`, each exporting `en`/`ko`
  * objects) and merges them here.
  *
- * Fragments: 177
+ * Fragments: 176
  */
 import { en as en_app, ko as ko_app } from "./app.js";
 import { en as en_appearanceTab, ko as ko_appearanceTab } from "./appearanceTab.js";
@@ -56,7 +56,6 @@ import { en as en_be_routineEngine, ko as ko_be_routineEngine } from "./be_routi
 import { en as en_be_routineSchedule, ko as ko_be_routineSchedule } from "./be_routineSchedule.js";
 import { en as en_be_runtimeIndex, ko as ko_be_runtimeIndex } from "./be_runtimeIndex.js";
 import { en as en_be_sandboxCapability, ko as ko_be_sandboxCapability } from "./be_sandboxCapability.js";
-import { en as en_be_scriptedTurnEngine, ko as ko_be_scriptedTurnEngine } from "./be_scriptedTurnEngine.js";
 import { en as en_be_shellPathPolicy, ko as ko_be_shellPathPolicy } from "./be_shellPathPolicy.js";
 import { en as en_be_shutdownRoutines, ko as ko_be_shutdownRoutines } from "./be_shutdownRoutines.js";
 import { en as en_be_skillList, ko as ko_be_skillList } from "./be_skillList.js";
@@ -152,6 +151,8 @@ import { en as en_sessionResumeDivider, ko as ko_sessionResumeDivider } from "./
 import { en as en_sessionTodoPanel, ko as ko_sessionTodoPanel } from "./sessionTodoPanel.js";
 import { en as en_settingsContent, ko as ko_settingsContent } from "./settingsContent.js";
 import { en as en_settingsWindow, ko as ko_settingsWindow } from "./settingsWindow.js";
+import { en as en_sidebar, ko as ko_sidebar } from "./sidebar.js";
+import { en as en_slashPicker, ko as ko_slashPicker } from "./slashPicker.js";
 import { en as en_solarizedLight, ko as ko_solarizedLight } from "./solarizedLight.js";
 import { en as en_sparkline, ko as ko_sparkline } from "./sparkline.js";
 import { en as en_spotlightTour, ko as ko_spotlightTour } from "./spotlightTour.js";
@@ -235,7 +236,6 @@ export const generatedEn: Record<string, string> = {
   ...en_be_routineSchedule,
   ...en_be_runtimeIndex,
   ...en_be_sandboxCapability,
-  ...en_be_scriptedTurnEngine,
   ...en_be_shellPathPolicy,
   ...en_be_shutdownRoutines,
   ...en_be_skillList,
@@ -331,6 +331,8 @@ export const generatedEn: Record<string, string> = {
   ...en_sessionTodoPanel,
   ...en_settingsContent,
   ...en_settingsWindow,
+  ...en_sidebar,
+  ...en_slashPicker,
   ...en_solarizedLight,
   ...en_sparkline,
   ...en_spotlightTour,
@@ -415,7 +417,6 @@ export const generatedKo: Record<string, string> = {
   ...ko_be_routineSchedule,
   ...ko_be_runtimeIndex,
   ...ko_be_sandboxCapability,
-  ...ko_be_scriptedTurnEngine,
   ...ko_be_shellPathPolicy,
   ...ko_be_shutdownRoutines,
   ...ko_be_skillList,
@@ -511,6 +512,8 @@ export const generatedKo: Record<string, string> = {
   ...ko_sessionTodoPanel,
   ...ko_settingsContent,
   ...ko_settingsWindow,
+  ...ko_sidebar,
+  ...ko_slashPicker,
   ...ko_solarizedLight,
   ...ko_sparkline,
   ...ko_spotlightTour,

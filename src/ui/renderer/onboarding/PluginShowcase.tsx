@@ -27,13 +27,8 @@
  */
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { Button } from "../../../components/ui/button.js";
-import {
-  Dialog,
-  DialogContent,
-  DialogDescription,
-  DialogHeader,
-  DialogTitle,
-} from "../../../components/ui/dialog.js";
+import { Dialog, DialogContent } from "../../../components/ui/dialog.js";
+import { OnboardingHeader } from "./OnboardingCard.js";
 import { useTranslation } from "../../../i18n/react.js";
 
 export interface PluginShowcaseApi {
@@ -324,28 +319,10 @@ export function PluginShowcase({
         data-reduce-motion={reduceMotion ? "true" : "false"}
         className="p-0 overflow-hidden"
       >
-        <DialogHeader className="px-6 pt-6 pb-3 space-y-0">
-          <div className="flex items-center gap-2">
-            <span
-              aria-hidden
-              className="grid h-7 w-7 place-items-center rounded-md text-[11px] text-primary-foreground"
-              style={{
-                background:
-                  "linear-gradient(135deg, hsl(var(--p-purple-500)), hsl(var(--p-blue-500)))",
-              }}
-            >
-              ✦
-            </span>
-            <div className="min-w-0">
-              <DialogTitle className="text-sm font-medium">
-                {t("pluginShowcase.dialogTitle")}
-              </DialogTitle>
-              <DialogDescription className="text-[11px]">
-                {t("pluginShowcase.dialogDescription")}
-              </DialogDescription>
-            </div>
-          </div>
-        </DialogHeader>
+        <OnboardingHeader
+          title={t("pluginShowcase.dialogTitle")}
+          description={t("pluginShowcase.dialogDescription")}
+        />
 
         <div className="px-6 pb-6 space-y-3">
           {cards.length === 0 ? (
@@ -367,7 +344,7 @@ export function PluginShowcase({
                     key={card.id}
                     data-testid={`plugin-showcase:card:${card.id}`}
                     data-expanded={expanded ? "true" : "false"}
-                    className="rounded-lg border border-border/70 bg-[hsl(var(--muted))] px-3 py-3"
+                    className="rounded-lg border border-border/(--opacity-stronger) bg-[hsl(var(--muted))] px-3 py-3"
                   >
                     <div className="flex items-start gap-2">
                       <span className="text-base leading-none" aria-hidden="true">
@@ -394,7 +371,7 @@ export function PluginShowcase({
                         {expanded && (
                           <ul
                             data-testid={`plugin-showcase:card:${card.id}:scenarios`}
-                            className="mt-2 space-y-1 rounded-md bg-background/40 px-2 py-2 text-[10.5px] leading-snug text-muted-foreground"
+                            className="mt-2 space-y-1 rounded-md bg-background/(--opacity-medium) px-2 py-2 text-[10.5px] leading-snug text-muted-foreground"
                           >
                             {card.scenarios.map((scenario) => (
                               <li
@@ -425,10 +402,7 @@ export function PluginShowcase({
             data-testid="plugin-showcase:close"
             onClick={handleClose}
             className="w-full text-primary-foreground"
-            style={{
-              background:
-                "linear-gradient(135deg, hsl(var(--p-purple-500)), hsl(var(--p-blue-500)))",
-            }}
+            style={{ background: "var(--gradient-brand)" }}
           >
             {t("pluginShowcase.closeButton")}
           </Button>

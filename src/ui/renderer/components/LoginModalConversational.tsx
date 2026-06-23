@@ -532,7 +532,7 @@ export function LoginModalConversational({
         {/* System line — quiet status row that frames the modal as a
             chat session rather than a credential form. Uses the
             success token so it adapts to every bundle. */}
-        <div className="flex items-center gap-2 border-b border-border/60 pb-2 text-[11px] text-muted-foreground">
+        <div className="flex items-center gap-2 border-b border-border/(--opacity-strong) pb-2 text-[11px] text-muted-foreground">
           <span className="inline-block size-1.5 rounded-full bg-success" aria-hidden="true" />
           <span>{t("loginModalConversational.sessionStart")}</span>
         </div>
@@ -569,10 +569,10 @@ export function LoginModalConversational({
               checkingDemoStatus ||
               activationOpen
             }
-            className="w-full rounded-lg border border-primary/40 bg-primary/10 px-3 py-2 text-left text-[12px] text-primary hover:bg-primary/15 disabled:opacity-60"
+            className="w-full rounded-lg border border-primary/(--opacity-medium) bg-primary/(--opacity-subtle) px-3 py-2 text-left text-[12px] text-primary hover:bg-primary/(--opacity-soft) disabled:opacity-60"
           >
             <span className="mr-1">⚡</span>
-            <span className="mr-1 inline-flex h-4 min-w-4 items-center justify-center rounded bg-primary/15 px-1 text-[10px] font-semibold text-primary">
+            <span className="mr-1 inline-flex h-4 min-w-4 items-center justify-center rounded bg-primary/(--opacity-soft) px-1 text-[10px] font-semibold text-primary">
               1
             </span>
             {t("loginModalConversational.chip1Label")}
@@ -592,7 +592,7 @@ export function LoginModalConversational({
               onOpenChange(false);
             }}
             disabled={submitting || activationRelaunching}
-            className="w-full rounded-lg border border-border bg-muted/40 px-3 py-2 text-left text-[12px] text-foreground hover:bg-muted/60 disabled:opacity-60"
+            className="w-full rounded-lg border border-border bg-muted/(--opacity-medium) px-3 py-2 text-left text-[12px] text-foreground hover:bg-muted/(--opacity-strong) disabled:opacity-60"
           >
             <span className="mr-1">🔑</span>
             <span className="mr-1 inline-flex h-4 min-w-4 items-center justify-center rounded bg-muted px-1 text-[10px] font-semibold text-muted-foreground">
@@ -607,7 +607,7 @@ export function LoginModalConversational({
             type="button"
             disabled
             data-testid="login-modal:chip-sso"
-            className="w-full cursor-not-allowed rounded-lg border border-border bg-muted/40 px-3 py-2 text-left text-[12px] text-muted-foreground"
+            className="w-full cursor-not-allowed rounded-lg border border-border bg-muted/(--opacity-medium) px-3 py-2 text-left text-[12px] text-muted-foreground"
             title={t("loginModalConversational.chip3Title")}
           >
             <span className="mr-1">🏢</span>
@@ -632,7 +632,7 @@ export function LoginModalConversational({
             className="flex justify-end pt-2 lvis-anim-slide-up"
             data-testid="login-modal:user-turn"
           >
-            <p className="rounded-lg rounded-tr-sm bg-primary/15 px-3 py-2 text-[12.5px] leading-relaxed text-foreground">
+            <p className="rounded-lg rounded-tr-sm bg-primary/(--opacity-soft) px-3 py-2 text-[12.5px] leading-relaxed text-foreground">
               {t("loginModalConversational.userTurnText")}
             </p>
           </div>
@@ -688,7 +688,7 @@ export function LoginModalConversational({
                     placeholder="LVIS-DEMO:v1:..."
                     aria-label={t("loginModalConversational.activationInputAriaLabel")}
                     data-testid="login-modal:activation-code-input"
-                    className="w-full rounded-md border border-border bg-background px-3 py-2 font-mono text-[11.5px] leading-snug text-foreground placeholder:text-muted-foreground/60 focus:outline-none focus:ring-2 focus:ring-primary/40 disabled:opacity-60"
+                    className="w-full rounded-md border border-border bg-background px-3 py-2 font-mono text-[11.5px] leading-snug text-foreground placeholder:text-muted-foreground/(--opacity-strong) focus:outline-none focus:ring-2 focus:ring-primary/(--opacity-medium) disabled:opacity-60"
                   />
                   <div className="flex items-center gap-2">
                     <Button
@@ -730,7 +730,7 @@ export function LoginModalConversational({
                     <p
                       data-testid="login-modal:activation-error"
                       role="alert"
-                      className="rounded-md bg-destructive/10 px-2 py-1.5 text-[11.5px] leading-relaxed text-destructive"
+                      className="rounded-md bg-destructive/(--opacity-subtle) px-2 py-1.5 text-[11.5px] leading-relaxed text-destructive"
                     >
                       {activationError}
                     </p>
@@ -739,7 +739,7 @@ export function LoginModalConversational({
                     <p
                       data-testid="login-modal:activation-notice"
                       role="status"
-                      className="rounded-md bg-success/10 px-2 py-1.5 text-[11.5px] leading-relaxed text-success"
+                      className="rounded-md bg-success/(--opacity-subtle) px-2 py-1.5 text-[11.5px] leading-relaxed text-success"
                     >
                       {activationNotice}
                     </p>
@@ -750,7 +750,7 @@ export function LoginModalConversational({
               {checklistRevealed > 0 && (
                 <pre
                   data-testid="login-modal:auth-checklist"
-                  className="rounded-md border border-border bg-background/60 px-3 py-2 font-mono text-[11.5px] leading-[1.7] text-foreground"
+                  className="rounded-md border border-border bg-background/(--opacity-strong) px-3 py-2 font-mono text-[11.5px] leading-[1.7] text-foreground"
                 >
                   {CHECKLIST_LINES.slice(0, checklistRevealed).map((line, i) => {
                     const isLast = i === checklistRevealed - 1;
@@ -831,7 +831,7 @@ export function LoginModalConversational({
             </div>
             <p
               data-testid="login-modal:error"
-              className="rounded-lg rounded-tl-sm bg-destructive/10 px-3 py-2 text-[12.5px] leading-relaxed text-destructive"
+              className="rounded-lg rounded-tl-sm bg-destructive/(--opacity-subtle) px-3 py-2 text-[12.5px] leading-relaxed text-destructive"
               role="alert"
             >
               {error}
@@ -849,7 +849,7 @@ export function LoginModalConversational({
             "위 선택지를 클릭하거나 `1`~`3` 키로 빠른 선택" line. */}
         <p
           data-testid="login-modal:footer-hint"
-          className="border-t border-border/60 pt-2 text-center text-[10.5px] text-muted-foreground"
+          className="border-t border-border/(--opacity-strong) pt-2 text-center text-[10.5px] text-muted-foreground"
         >
           {t("loginModalConversational.footerHintPre")}<kbd className="rounded border border-border bg-muted px-1 font-mono">1</kbd>
           ~
