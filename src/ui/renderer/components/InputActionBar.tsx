@@ -6,15 +6,17 @@
  * separate bottom turn-control row (L24246). Layout:
  *
  *   ACTION ROW (single line):
- *     LEADING:  [⌘ slash/command picker] → [persona] → [attach] → [ring]
+ *     LEADING:  [⌘ slash/command picker] → [persona] → [attach]
  *     TRAILING: [? shortcuts] → [thinking] → [(cancel — busy only)] → [send]
  *
  *   STATUS SUB-ROW (bottom, compact single line):
- *     [● active] · [vendor · model] · [permission — per-mode TEXT color] · [context %]
+ *     [● active] · [vendor · model] · [permission — per-mode TEXT color] · [ring]
  *
  * The window StatusBar is notifications-only after this change; the persistent
- * model / permission / active cells moved here, with the token-context percent
- * (the same value the ring uses) added.
+ * model / permission / active cells moved here. The TokenProgressRing widget
+ * lives at the END of this sub-row (after permission); the % / cost detail is
+ * surfaced on the ring's hover/click — there is no separate context-percent
+ * text cell.
  *
  * Spec: docs/blueprints/composer-redesign-message-queue.md
  */
@@ -43,7 +45,9 @@ export interface InputActionBarProps {
   commandActions: QuickAction[];
   commandPopoverOpen: boolean;
   onCommandPopoverOpenChange: (open: boolean) => void;
-  // Leading — token progress ring (composed by the caller: ring + cost detail).
+  // Status sub-row — token progress ring (composed by the caller: ring + cost
+  // detail). Rendered at the END of the status sub-row, after the permission
+  // cell. The ring surfaces %/cost on hover/click.
   ringSlot: ReactNode;
   // Leading — attachment picker (single unified button, no count badge —
   // count lives on the in-composer chip).
@@ -78,11 +82,6 @@ export interface InputActionBarProps {
   // Status sub-row.
   /** Resolved model / permission / active fields (from useInputStatusRow). */
   statusRow: InputStatusRow;
-  /**
-   * Token-context fill percent (the SAME value the TokenProgressRing renders),
-   * surfaced as text in the status sub-row. Null when no live token data yet.
-   */
-  contextPercent: number | null;
   /** Opens Settings → LLM when the model cell is clicked. */
   onOpenModelSettings?: () => void;
   /** Opens Settings → Permissions when the permission cell is clicked. */
@@ -139,7 +138,6 @@ export function InputActionBar({
   enableThinkingChat,
   onToggleThinking,
   statusRow,
-  contextPercent,
   onOpenModelSettings,
   onOpenPermissions,
 }: InputActionBarProps) {
@@ -190,7 +188,8 @@ export function InputActionBar({
     >
       {/* ── ACTION ROW ──────────────────────────────────────────────── */}
       <div className="flex min-w-0 flex-nowrap items-center gap-1.5 px-3 pt-2">
-        {/* Leading cluster — [command/slash] → [persona] → [attach] → [ring]. */}
+        {/* Leading cluster — [command/slash] → [persona] → [attach].
+            The token ring moved to the status sub-row (after permission). */}
         <div className="flex shrink-0 flex-nowrap items-center gap-0.5" data-testid="iab-leading">
           <SlashPicker
             actions={commandActions}
@@ -234,9 +233,6 @@ export function InputActionBar({
           >
             <Paperclip className="h-3.5 w-3.5" />
           </Button>
-
-          {/* Token progress ring — square, hover=percent, click=detail (+cost). */}
-          {ringSlot}
         </div>
 
         {/* Trailing cluster — turn controls (? · thinking · cancel · send). */}
@@ -274,7 +270,7 @@ export function InputActionBar({
       {/* ── STATUS SUB-ROW ──────────────────────────────────────────── */}
       <StatusSubRow
         statusRow={statusRow}
-        contextPercent={contextPercent}
+        ringSlot={ringSlot}
         onOpenModelSettings={onOpenModelSettings}
         onOpenPermissions={onOpenPermissions}
       />
@@ -284,20 +280,21 @@ export function InputActionBar({
 
 /**
  * Status sub-row — compact single line at the bottom of the unified bar:
- *   [● active] · [vendor · model] · [permission — per-mode text color] · [context %]
+ *   [● active] · [vendor · model] · [permission — per-mode text color] · [ring]
  *
- * Permission is plain text colored per-mode (no pill/outline). Context-percent
- * mirrors the value the TokenProgressRing renders; it dims when no live token
- * data is available yet.
+ * Permission is plain text colored per-mode (no pill/outline). The
+ * TokenProgressRing widget sits at the END (after permission); the usage % /
+ * cost detail is surfaced on the ring's hover/click — there is no separate
+ * context-percent text cell.
  */
 function StatusSubRow({
   statusRow,
-  contextPercent,
+  ringSlot,
   onOpenModelSettings,
   onOpenPermissions,
 }: {
   statusRow: InputStatusRow;
-  contextPercent: number | null;
+  ringSlot: ReactNode;
   onOpenModelSettings?: () => void;
   onOpenPermissions?: () => void;
 }) {
@@ -363,15 +360,11 @@ function StatusSubRow({
         </span>
       )}
 
-      <span className="shrink-0 opacity-30" aria-hidden="true">·</span>
-
-      {/* Context-percent — same value the ring renders. Dimmed when no data. */}
-      <span
-        data-testid="iab-status-context"
-        className={`shrink-0 tabular-nums ${contextPercent === null ? "opacity-40" : ""}`}
-        title={t("inputActionBar.statusContextTitle")}
-      >
-        {contextPercent === null ? "—%" : `${contextPercent}%`}
+      {/* Token progress ring — square, hover=percent, click=detail (+cost).
+          Pushed to the END of the row (ml-auto) so it sits at the trailing
+          edge after the permission cell. */}
+      <span className="ml-auto shrink-0" data-testid="iab-status-ring">
+        {ringSlot}
       </span>
     </div>
   );
