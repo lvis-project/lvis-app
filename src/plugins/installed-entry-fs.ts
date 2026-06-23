@@ -37,6 +37,13 @@ import { join } from "node:path";
  */
 export const TOMBSTONE_SUBDIR = "+tombstones+";
 
+const RECURSIVE_REMOVE_OPTIONS = {
+  recursive: true,
+  force: true,
+  maxRetries: 5,
+  retryDelay: 50,
+} as const;
+
 /**
  * Atomic Windows-safe directory removal.
  *
@@ -86,7 +93,7 @@ export async function tombstoneAndDeferredRemove(
     if ((err as NodeJS.ErrnoException).code === "ENOENT") return null;
     throw err;
   }
-  rm(tombstone, { recursive: true, force: true }).catch((rmErr) => {
+  rm(tombstone, RECURSIVE_REMOVE_OPTIONS).catch((rmErr) => {
     options.onDeferredRmError?.(tombstone, rmErr as Error);
   });
   return tombstone;
