@@ -4,11 +4,11 @@
  * v6 layout: TOP ROW (환경 컨트롤) ↔ BOTTOM ROW (Turn 컨트롤) 분리.
  * 본 컴포넌트는 BOTTOM ROW 전체를 담당:
  *
- *   info cluster (좌, grow):
- *     [○ TokenRing $]
- *
  *   actions cluster (우):
  *     [? 단축키] [생각 모드] [■ 취소(busy, 컴팩트 원형 stop)] [↑ 전송 ⏎]
+ *
+ * The token progress ring moved to the InputActionBar leading cluster
+ * ([command] → [persona] → [ring]), so this row no longer hosts it.
  *
  * Send 버튼 라벨은 isBusy 상관없이 항상 "전송" 으로 고정. 큐 인입 시맨틱은
  * textarea placeholder ("메시지 큐에 추가됩니다 ...") 로 표현해 버튼이 두 줄로
@@ -31,8 +31,6 @@ import type { UserKeyboardIntentSnapshot } from "../../../shared/chat-origin.js"
 import { useTranslation } from "../../../i18n/react.js";
 
 export interface BottomActionRowProps {
-  /** TokenProgressRing + cost badge 슬롯. ChatView 가 합성해서 주입. */
-  tokenSlot: ReactNode;
   /** LLM busy (streaming/도구 실행 등) 여부. Send 라벨/취소 노출 결정. */
   isBusy: boolean;
   /** Send 버튼 disable 결정 — text 비고 첨부 없으면 true. */
@@ -47,7 +45,6 @@ export interface BottomActionRowProps {
 }
 
 export function BottomActionRow({
-  tokenSlot,
   isBusy,
   isSendDisabled,
   onSend,
@@ -59,11 +56,8 @@ export function BottomActionRow({
   return (
     <div
       data-testid="composer-bottom-action-row"
-      className="flex flex-nowrap items-center gap-3 px-3 pt-1 pb-2"
+      className="flex flex-nowrap items-center justify-end gap-3 px-3 pt-1 pb-2"
     >
-      <div className="flex min-w-0 flex-1 flex-nowrap items-center gap-2 overflow-hidden">
-        {tokenSlot}
-      </div>
       <div className="flex shrink-0 flex-nowrap items-center gap-1.5">
         <ShortcutsButton />
         <ThinkingButton enabled={enableThinkingChat} onToggle={onToggleThinking} />
