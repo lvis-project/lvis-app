@@ -148,7 +148,7 @@ describe("runtime manifest validation hardening", () => {
     expect(runtime.listPluginIds()).toContain("p-notif");
     expect(
       cap.warns.some((w) =>
-        /notificationEvents\[0\]\.event 'meeting\.ghost' not declared in eventSubscriptions/.test(w),
+        /Plugin manifest 'p-notif': notificationEvents\[0\]\.event 'meeting\.ghost' not declared in eventSubscriptions/.test(w),
       ),
     ).toBe(true);
   });
