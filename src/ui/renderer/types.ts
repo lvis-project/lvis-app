@@ -1022,6 +1022,8 @@ export type LvisApi = {
     openDetached: (viewKey: string) => Promise<{ ok: true; windowId: number } | { ok: false; error: string }>;
     closeDetached: () => Promise<{ ok: true } | { ok: false; error: string }>;
     listDetached: () => Promise<Array<{ windowId: number; viewKey: string; snapped: boolean }>>;
+    /** Close all detached windows (fired on the action-mode transition). Auth/login windows are excluded. */
+    closeAllDetached: () => Promise<{ ok: true } | { ok: false; error: string }>;
     loadSessionInMain: (sessionId: string) => Promise<{ ok: true } | { ok: false; error: string }>;
     /** Resize the main window to match the workspace mode (action → 800×600 centered; chat → 기존 right-docked). */
     resizeForMode: (mode: "chat" | "action") => Promise<{ ok: true } | { ok: false; error: string }>;
