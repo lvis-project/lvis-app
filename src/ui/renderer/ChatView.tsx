@@ -1019,13 +1019,9 @@ export function ChatView({ api, onAsk, onEditSave, onFork, onToggleStar, onRetry
   // active state. Resolved from the same IPC the former window-StatusBar
   // producers used; the window StatusBar is notifications-only now.
   const inputStatusRow = useInputStatusRow(api);
-  // Context-percent — the SAME value the TokenProgressRing's primary ring
-  // renders (used / effectiveBudget). Null before the first usage carrier so
-  // the sub-row dims rather than showing a misleading 0%.
-  const inputContextPercent = useMemo<number | null>(() => {
-    if (usedTokens <= 0) return null;
-    return Math.min(100, Math.round((usedTokens / Math.max(1, effectiveBudget)) * 100));
-  }, [usedTokens, effectiveBudget]);
+  // The token-context percent is no longer surfaced as a separate text cell in
+  // the status sub-row — the TokenProgressRing (which now lives at the end of
+  // that row) renders the % / cost detail on hover/click.
   const onOpenModelSettings = useCallback(() => onOpenSettings("llm"), [onOpenSettings]);
   const onOpenInputPermissions = useCallback(() => onOpenSettings("permissions"), [onOpenSettings]);
 
@@ -1947,7 +1943,6 @@ export function ChatView({ api, onAsk, onEditSave, onFork, onToggleStar, onRetry
             enableThinkingChat={enableThinkingChat}
             onToggleThinking={toggleThinking}
             statusRow={inputStatusRow}
-            contextPercent={inputContextPercent}
             onOpenModelSettings={onOpenModelSettings}
             onOpenPermissions={onOpenInputPermissions}
           />

@@ -1,4 +1,4 @@
-import { ArrowDownToLine, Download, PanelLeftClose, PanelLeftOpen, RefreshCw, Search, Star, Wrench, X } from "lucide-react";
+import { ArrowDownToLine, Download, RefreshCw, Search, Star, Wrench, X } from "lucide-react";
 import { Button } from "../../components/ui/button.js";
 import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger } from "../../components/ui/dropdown-menu.js";
 import { Tooltip, TooltipContent, TooltipTrigger } from "../../components/ui/tooltip.js";
@@ -67,10 +67,13 @@ export interface MainToolbarProps {
   onToggleCurrentSessionStar: () => void | Promise<void>;
   onExport: (format: "markdown" | "json") => void | Promise<void>;
   onOpenUnifiedSearch: () => void;
-  /** Shell-owned sidebar collapse state (App.tsx). */
+  /**
+   * Shell-owned sidebar collapse state (App.tsx). The collapse TOGGLE now lives
+   * on the floating sidebar card's right edge (not in this band), but the band
+   * still needs the width to left-pad its content so the search/star/export
+   * cluster starts immediately to the right of the sidebar edge.
+   */
   sidebarCollapsed: boolean;
-  /** Toggle the sidebar rail — the in-band control beside the window buttons. */
-  onToggleSidebar: () => void;
   /** Current workspace mode (Chat / Action). Drives the segmented toggle. */
   appMode: AppMode;
   /** Fired when the user picks a segment in the Chat/Action toggle. */
@@ -100,7 +103,6 @@ export function MainToolbar({
   onExport,
   onOpenUnifiedSearch,
   sidebarCollapsed,
-  onToggleSidebar,
   appMode,
   onToggleAppMode,
   onOpenDevTools,
@@ -114,79 +116,22 @@ export function MainToolbar({
   // The toolbar content lives IN the window-control band (CustomTitleBar). The
   // band is the row; this component contributes only its interactive cluster,
   // each control wrapped `no-drag` so the surrounding band stays draggable.
+  //
+  // Left padding offsets the content past the floating sidebar card so the
+  // leading search/star/export cluster begins immediately to the RIGHT of the
+  // sidebar edge. The offset tracks the sidebar width (collapsed vs expanded),
+  // mirroring the main canvas's pl-[5rem]/pl-[15.5rem]. The sidebar (z-30)
+  // overlays the band's own traffic-light pl in this zone, so the leading
+  // controls never collide with the macOS lights.
   return (
-    <div data-testid="main-toolbar" className="flex min-w-0 flex-1 items-center gap-2">
-      {/* ── Sidebar collapse toggle — pinned right after the window controls,
-          wired to the shell's sidebarCollapsed (App.tsx). It lives in the band,
-          NOT inside the sidebar card. */}
-      <NoDrag>
-        <Tooltip>
-          <TooltipTrigger asChild>
-            <Button
-              variant="ghost"
-              size="icon"
-              className="h-7 w-7 aspect-square p-0 shrink-0 text-muted-foreground hover:text-foreground"
-              onClick={onToggleSidebar}
-              title={sidebarCollapsed ? t("mainToolbar.expandSidebar") : t("mainToolbar.collapseSidebar")}
-              aria-label={sidebarCollapsed ? t("mainToolbar.expandSidebar") : t("mainToolbar.collapseSidebar")}
-              aria-pressed={!sidebarCollapsed}
-              data-testid="sidebar-collapse-toggle"
-            >
-              {sidebarCollapsed ? <PanelLeftOpen className="h-4 w-4" /> : <PanelLeftClose className="h-4 w-4" />}
-            </Button>
-          </TooltipTrigger>
-          <TooltipContent>{sidebarCollapsed ? t("mainToolbar.expandSidebar") : t("mainToolbar.collapseSidebar")}</TooltipContent>
-        </Tooltip>
-      </NoDrag>
-
-      {/* ── Workspace mode (Chat / Action) — Action keeps views inline
-          (sidebar expanded); Chat pops detachable views into windows. */}
-      <NoDrag>
-        <AppModeToggle mode={appMode} onToggle={onToggleAppMode} />
-      </NoDrag>
-
-      {/* ── Dev badge — only visible in non-production (LVIS_DEV). */}
-      {isDevMode() && onOpenDevTools !== undefined && (
-        <NoDrag>
-          <Tooltip>
-            <TooltipTrigger asChild>
-              <Button
-                variant="ghost"
-                size="sm"
-                className="h-7 gap-1 px-2 text-[10.5px] font-mono text-warning"
-                onClick={onOpenDevTools}
-                title="Dev Tools (Cmd/Ctrl+Shift+D)"
-                aria-label="Dev Tools (Cmd/Ctrl+Shift+D)"
-                data-testid="dev-tools-toggle"
-              >
-                <Wrench className="h-3 w-3" />
-                <span>Dev</span>
-                <kbd className="rounded border border-warning/(--opacity-medium) bg-warning/(--opacity-subtle) px-1 text-[9.5px]">⇧⌘D</kbd>
-              </Button>
-            </TooltipTrigger>
-            <TooltipContent>{t("mainToolbar.devToolsTooltip")}</TooltipContent>
-          </Tooltip>
-        </NoDrag>
-      )}
-
-      {/* ── App update badge — permanent (NOT a toast) until acted on; clicking
-          maps to download (available) → install (downloaded). The download step
-          is the user's first explicit consent (사용자 명시 클릭 전엔 절대
-          다운로드 금지). */}
-      <NoDrag>
-        <AppUpdateBadge
-          state={appUpdateState}
-          inFlight={appUpdateInFlight}
-          onDownload={onDownloadAppUpdate}
-          onInstall={onInstallAppUpdate}
-          onSkip={onSkipAppUpdate}
-        />
-      </NoDrag>
-
-      {/* ── Spacer pushes the right cluster to the trailing edge (stays drag) */}
-      <div className="flex-1" aria-hidden="true" />
-
-      {/* ── Right cluster: 검색 → 별 → 내보내기 (8px gaps) ────────────── */}
+    <div
+      data-testid="main-toolbar"
+      className={`flex min-w-0 flex-1 items-center gap-2 transition-[padding] duration-200 ease-out motion-reduce:transition-none ${
+        sidebarCollapsed ? "pl-[5rem]" : "pl-[15.5rem]"
+      }`}
+    >
+      {/* ── Leading cluster: 검색 → 별 → 내보내기 — starts right after the
+          floating sidebar edge (8px gaps). ─────────────────────────────── */}
       {/* Unified search — opens the top-attached search panel. Z onboarding
           chain anchor "chat-history" (surfaces saved + recent sessions). */}
       <NoDrag>
@@ -252,11 +197,60 @@ export function MainToolbar({
             </TooltipTrigger>
             <TooltipContent>{t("mainToolbar.export")}</TooltipContent>
           </Tooltip>
-          <DropdownMenuContent align="end" className="w-[180px]">
+          <DropdownMenuContent align="start" className="w-[180px]">
             <DropdownMenuItem data-testid="toolbar-export-markdown" onClick={() => void onExport("markdown")}>Markdown (.md)</DropdownMenuItem>
             <DropdownMenuItem data-testid="toolbar-export-json" onClick={() => void onExport("json")}>JSON (.json)</DropdownMenuItem>
           </DropdownMenuContent>
         </DropdownMenu>
+      </NoDrag>
+
+      {/* ── Spacer pushes the trailing cluster to the far-right edge (stays drag) */}
+      <div className="flex-1" aria-hidden="true" />
+
+      {/* ── App update badge — permanent (NOT a toast) until acted on; clicking
+          maps to download (available) → install (downloaded). The download step
+          is the user's first explicit consent (사용자 명시 클릭 전엔 절대
+          다운로드 금지). */}
+      <NoDrag>
+        <AppUpdateBadge
+          state={appUpdateState}
+          inFlight={appUpdateInFlight}
+          onDownload={onDownloadAppUpdate}
+          onInstall={onInstallAppUpdate}
+          onSkip={onSkipAppUpdate}
+        />
+      </NoDrag>
+
+      {/* ── Dev badge — only visible in non-production (LVIS_DEV). Stays next to
+          the mode toggle at the far-right end. */}
+      {isDevMode() && onOpenDevTools !== undefined && (
+        <NoDrag>
+          <Tooltip>
+            <TooltipTrigger asChild>
+              <Button
+                variant="ghost"
+                size="sm"
+                className="h-7 gap-1 px-2 text-[10.5px] font-mono text-warning"
+                onClick={onOpenDevTools}
+                title="Dev Tools (Cmd/Ctrl+Shift+D)"
+                aria-label="Dev Tools (Cmd/Ctrl+Shift+D)"
+                data-testid="dev-tools-toggle"
+              >
+                <Wrench className="h-3 w-3" />
+                <span>Dev</span>
+                <kbd className="rounded border border-warning/(--opacity-medium) bg-warning/(--opacity-subtle) px-1 text-[9.5px]">⇧⌘D</kbd>
+              </Button>
+            </TooltipTrigger>
+            <TooltipContent>{t("mainToolbar.devToolsTooltip")}</TooltipContent>
+          </Tooltip>
+        </NoDrag>
+      )}
+
+      {/* ── Workspace mode (Chat / Action) — pinned to the FAR-RIGHT end of the
+          top bar. Action keeps views inline (sidebar expanded); Chat pops
+          detachable views into windows. */}
+      <NoDrag>
+        <AppModeToggle mode={appMode} onToggle={onToggleAppMode} />
       </NoDrag>
     </div>
   );
