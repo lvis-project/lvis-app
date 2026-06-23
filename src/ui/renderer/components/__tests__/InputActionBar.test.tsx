@@ -44,6 +44,7 @@ function renderBar(overrides: Partial<Parameters<typeof InputActionBar>[0]> = {}
     commandActions: [],
     commandPopoverOpen: false,
     onCommandPopoverOpenChange: vi.fn(),
+    ringSlot: <span data-testid="ring-slot" />,
     onAttach: vi.fn(),
     attachDisabled: false,
     rolePresets: [mockPreset],
@@ -82,25 +83,33 @@ describe("InputActionBar (post indexer-removal)", () => {
     expect(container.querySelector('[title="문서 첨부"]')).toBeNull();
   });
 
-  it("does not render TokenProgressRing inside the plugin action bar", () => {
+  it("renders the token ring slot inside the leading cluster", () => {
+    // Directive (D): the ring now lives in the leading cluster (after the
+    // persona button), no longer in the BottomActionRow.
     const { getByTestId } = renderBar();
     const leading = getByTestId("iab-leading");
-    expect(leading.querySelector("[data-testid='token-progress-ring']")).toBeNull();
+    expect(leading.querySelector("[data-testid='ring-slot']")).toBeTruthy();
   });
 
-  it("renders PluginGridButton inside leading cluster", () => {
-    const { getByTestId } = renderBar();
-    const leading = getByTestId("iab-leading");
-    expect(leading.querySelector("[data-testid='plugin-grid-button']")).toBeTruthy();
+  it("does NOT render the legacy PluginGridButton (plugins live in the sidebar + slash picker)", () => {
+    const { container } = renderBar();
+    expect(container.querySelector("[data-testid='plugin-grid-button']")).toBeNull();
   });
 
-  it("renders the unified slash-picker trigger inside leading cluster", () => {
-    // The ⌘ CommandPopover was merged into the unified SlashPicker; its
-    // trigger keeps the `command-popover-trigger` testid + the
-    // command-palette-toggle tour anchor so existing wiring stays live.
+  it("leading cluster order is [command picker] → [persona] → [ring]", () => {
+    // Directive (D): the slash/command picker leads, then the persona button,
+    // then the token progress ring.
     const { getByTestId } = renderBar();
     const leading = getByTestId("iab-leading");
-    expect(leading.querySelector("[data-testid='command-popover-trigger']")).toBeTruthy();
+    const picker = leading.querySelector("[data-testid='command-popover-trigger']");
+    const persona = leading.querySelector("[data-testid='iab-assistant-context-button']");
+    const ring = leading.querySelector("[data-testid='ring-slot']");
+    expect(picker).toBeTruthy();
+    expect(persona).toBeTruthy();
+    expect(ring).toBeTruthy();
+    // DOM order check via compareDocumentPosition (FOLLOWING = 4).
+    expect(picker!.compareDocumentPosition(persona!) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+    expect(persona!.compareDocumentPosition(ring!) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
   });
 
   it("no longer renders the inline Thinking checkbox (moved to BottomActionRow)", () => {
@@ -201,14 +210,18 @@ describe("InputActionBar (post indexer-removal)", () => {
     }
   });
 
-  it("keeps fixed trailing controls shrink-proof while permission slots clip first", () => {
-    const { getByTestId } = renderBar({
-      permissionSlot: <span data-testid="long-permission-slot">자동 검증 · 읽기 허용 · 매우 긴 권한 상태 텍스트</span>,
-      approvalSlot: <span data-testid="long-approval-slot">승인 확인 실패 · 매우 긴 큐 상태 텍스트</span>,
-    });
+  it("no longer renders the permission/approval slots (moved to the status bar)", () => {
+    // Directive (E): the permission/review status now renders as plain text in
+    // the bottom StatusBar after the model name, so the action row carries no
+    // permission pill / approval chip / permission-slot wrapper any more.
+    const { container } = renderBar();
+    expect(container.querySelector("[data-testid='iab-permission-slots']")).toBeNull();
+    expect(container.querySelector("[data-testid='permission-mode-badge']")).toBeNull();
+  });
+
+  it("keeps the trailing attach button shrink-proof", () => {
+    const { getByTestId } = renderBar();
     expect(getByTestId("iab-trailing").className).toContain("overflow-hidden");
-    expect(getByTestId("iab-permission-slots").className).toContain("min-w-0");
-    expect(getByTestId("iab-permission-slots").className).toContain("overflow-hidden");
-    expect(getByTestId("iab-assistant-context-button").className).toContain("shrink-0");
+    expect(getByTestId("iab-attach-button").className).toContain("shrink-0");
   });
 });

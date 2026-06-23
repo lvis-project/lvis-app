@@ -5,7 +5,6 @@ import { ChatContextProvider, type ChatContextValue } from "./context/ChatContex
 import { ChatView } from "./ChatView.js";
 import type { PluginEntry } from "./components/PluginGridButton.js";
 import type { AskUserQuestionRequest } from "./components/AskUserQuestionCard.js";
-import type { InstallPhase } from "./hooks/use-plugin-marketplace.js";
 import type { QuickAction } from "./components/CommandPopover.js";
 import { MemorySearchPanel } from "./components/MemorySearchPanel.js";
 import { RoutinePanel } from "./components/RoutinePanel.js";
@@ -63,25 +62,19 @@ export interface MainContentProps {
   askQuestions: AskUserQuestionRequest[];
   /** Removes a request once the user submits or dismisses it. */
   onResolveAskQuestion: (id: string) => void;
-  // plugin grid for InputActionBar
+  // plugins — surfaced inside the SlashPicker plugin category
   plugins: PluginEntry[];
   onSelectPlugin: (viewKey: string) => void;
-  onRefreshPlugins?: () => void;
   // command popover
   commandActions: QuickAction[];
   commandPopoverOpen: boolean;
   onCommandPopoverOpenChange: (open: boolean) => void;
-  installingPlugins?: ReadonlyMap<string, InstallPhase>;
-  onOpenMarketplace: () => void;
-  marketplaceUrlReady?: boolean;
   // plugin view
   activePluginView: PluginView | null;
   /** Called when user confirms a plugin overlay item; id is the OverlayItem.id. */
   onPluginPrimaryAction: (overlayItemId: string) => void;
   /** Called when a completed routine overlay result has been seen or dismissed. */
   onRoutineAcknowledge?: (routineId: string, firedAt: string) => void;
-  /** Opens the non-interruptive deferred permission queue modal. */
-  onOpenPermissionQueue?: () => void;
 }
 
 function MainPaneShell({ children, padded = true }: { children: ReactNode; padded?: boolean }) {
@@ -118,7 +111,6 @@ function HomeChatPane(props: MainContentProps) {
         onResolveAskQuestion={props.onResolveAskQuestion}
         plugins={props.plugins}
         onSelectPlugin={props.onSelectPlugin}
-        onRefreshPlugins={props.onRefreshPlugins}
         currentSessionKind={props.currentSessionKind}
         currentSessionTitle={props.currentSessionTitle}
         sessions={props.sessions}
@@ -127,12 +119,8 @@ function HomeChatPane(props: MainContentProps) {
         commandActions={props.commandActions}
         commandPopoverOpen={props.commandPopoverOpen}
         onCommandPopoverOpenChange={props.onCommandPopoverOpenChange}
-        installingPlugins={props.installingPlugins}
-        onOpenMarketplace={props.onOpenMarketplace}
-        marketplaceUrlReady={props.marketplaceUrlReady}
         onPluginPrimaryAction={props.onPluginPrimaryAction}
         onRoutineAcknowledge={props.onRoutineAcknowledge}
-        onOpenPermissionQueue={props.onOpenPermissionQueue}
       />
     </ChatContextProvider>
   );
