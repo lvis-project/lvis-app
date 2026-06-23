@@ -21,7 +21,7 @@ describe("check-test-duplicates", () => {
     expect(isScannedTestSource("_helpers.ts")).toBe(true);
     expect(isScannedTestSource("fixtures.ts")).toBe(true);
     expect(isScannedTestSource("test/fixture-support.ts")).toBe(true);
-    expect(isScannedTestSource("test/e2e/agent-hub/fixtures/agent-hub-mock-server.ts")).toBe(true);
+    expect(isScannedTestSource("test/e2e/ui/fixtures.ts")).toBe(true);
     expect(isScannedTestSource("test/renderer/render-app.tsx")).toBe(true);
     expect(isScannedTestSource("test/e2e/ui/settings-window.ts")).toBe(true);
     expect(isScannedTestSource("src/shared/__tests__/fake-llm-settings.ts")).toBe(true);
