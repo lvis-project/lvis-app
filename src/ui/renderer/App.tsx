@@ -556,11 +556,6 @@ export function App() {
     void api.openExternalUrl(marketplaceUrl);
   }, [api, marketplaceUrl, marketplaceUrlReady]);
 
-  const refreshPluginSurfaces = useCallback(() => {
-    void refreshCards();
-    void refreshViews();
-  }, [refreshCards, refreshViews]);
-
   const openDetachedPluginView = useCallback(
     async (viewKey: string): Promise<boolean> => {
       const openDetached = api.window?.openDetached;
@@ -1333,7 +1328,7 @@ export function App() {
   // toast. Other toast producers leave `notification` undefined so this
   // handler is a no-op for them.
   const { persistent: statusPersistent, visibleToast: statusVisibleToast, pendingCount: statusPendingCount, removeToast: statusRemoveToast, upsertPersistent: statusUpsertPersistent, removePersistent: statusRemovePersistent } =
-    useStatusBar({ api });
+    useStatusBar({ api, onOpenPermissions: () => onOpenSettings("permissions") });
 
   // Show a persistent StatusBar indicator while a pre-turn auto-compact runs.
   // `compact_started` sets isCompacting → this effect upserts the item.
@@ -1602,17 +1597,12 @@ export function App() {
             onResolveAskQuestion={dismissAskQuestion}
             plugins={pluginEntries}
             onSelectPlugin={handleViewSelect}
-            onRefreshPlugins={refreshPluginSurfaces}
             commandActions={commandActions}
             commandPopoverOpen={commandPopoverOpen}
             onCommandPopoverOpenChange={setCommandPopoverOpen}
-            installingPlugins={installingPlugins}
-            onOpenMarketplace={onOpenMarketplace}
-            marketplaceUrlReady={marketplaceUrlReady}
             activePluginView={activePluginView ?? null}
             onPluginPrimaryAction={(id) => { void handlePluginPrimaryAction(id); }}
             onRoutineAcknowledge={handleRoutineAcknowledge}
-            onOpenPermissionQueue={() => setDeferredQueueOpen(true)}
           />
           </ErrorBoundary>
           {/* Status bar — last child of the chat/content column, BELOW
@@ -1788,9 +1778,9 @@ export function App() {
         installedPluginIds={pluginCards.map((c) => c.id)}
         tourCompleted={tourCompleted}
       />
-      {/* v6: ApprovalQueueStatus floating chip 제거. 큐 정보는 InputActionBar
-          trailing 의 DeferredApprovalChip 으로 통합. Spec docs/blueprints/
-          composer-redesign-message-queue.md "제거" 섹션. */}
+      {/* v6: ApprovalQueueStatus floating chip 제거. 자연어 승인 칩
+          (DeferredApprovalChip) 은 ChatView 의 컴포저 바로 위에서 렌더된다.
+          Spec docs/blueprints/composer-redesign-message-queue.md "제거" 섹션. */}
       <DevConsoleToggle />
       {/* Snap edge highlight — shown when a detached child window enters the snap zone */}
       <SnapEdgeHighlight />
