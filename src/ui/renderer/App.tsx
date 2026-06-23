@@ -1455,7 +1455,11 @@ export function App() {
       addFireRef={addFireRef}
       runningRoutines={runningRoutines}
     >
-        <div className="flex h-screen flex-col overflow-hidden">
+        {/* `relative` makes THIS full-height shell column the positioning
+            context for the floating-card Sidebar, so the card's `top-0` reaches
+            the window top — extending UP into the traffic-light band and
+            reclaiming that vertical space on the left. */}
+        <div className="relative flex h-screen flex-col overflow-hidden">
           {/* Single top band — window controls + the app toolbar cluster live
               together here. The toolbar content is passed as children so it
               renders IN the band (no separate toolbar row below it). */}
@@ -1473,7 +1477,6 @@ export function App() {
                 searchOpenOverlay();
               }}
               sidebarCollapsed={sidebarCollapsed}
-              onToggleSidebar={() => setSidebarCollapsed((v) => !v)}
               appMode={appMode}
               onToggleAppMode={setAppMode}
               onOpenDevTools={() => setDevToolsOpen((v) => !v)}
@@ -1484,23 +1487,25 @@ export function App() {
               onSkipAppUpdate={appUpdate.skip}
             />
           </CustomTitleBar>
-        {/* `relative` anchors the floating-card Sidebar (absolute, inset-3).
-            The content `<main>` carries left padding equal to the card width
-            + insets so the floating rail never occludes the canvas. */}
+        {/* The floating-card Sidebar is anchored against the full-height shell
+            column above (NOT this content row) so its `top-0` spans up into the
+            band. The content `<main>` carries left padding equal to the card
+            width + insets so the rail never occludes the canvas. */}
+        <Sidebar
+          activeView={activeView}
+          onSelect={handleViewSelect}
+          pluginViews={pluginViews}
+          pluginAuthStatuses={pluginAuthStatuses}
+          hasApiKey={effectiveHasApiKey}
+          onOpenSettings={() => onOpenSettings()}
+          onNewChat={onNewChat}
+          streaming={streaming}
+          onOpenMarketplace={onOpenMarketplace}
+          marketplaceUrlReady={marketplaceUrlReady}
+          collapsed={sidebarCollapsed}
+          onToggleCollapse={() => setSidebarCollapsed((v) => !v)}
+        />
         <div className="relative flex min-h-0 min-w-0 flex-1 overflow-hidden">
-          <Sidebar
-            activeView={activeView}
-            onSelect={handleViewSelect}
-            pluginViews={pluginViews}
-            pluginAuthStatuses={pluginAuthStatuses}
-            hasApiKey={effectiveHasApiKey}
-            onOpenSettings={() => onOpenSettings()}
-            onNewChat={onNewChat}
-            streaming={streaming}
-            onOpenMarketplace={onOpenMarketplace}
-            marketplaceUrlReady={marketplaceUrlReady}
-            collapsed={sidebarCollapsed}
-          />
         <main
           className={`relative flex min-h-0 min-w-0 flex-1 flex-col bg-background transition-[padding] duration-200 ease-out motion-reduce:transition-none ${
             sidebarCollapsed ? "pl-[5rem]" : "pl-[15.5rem]"
