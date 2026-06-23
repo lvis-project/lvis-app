@@ -719,6 +719,17 @@ export class ToolExecutor {
    * tests keep their current behaviour without change.
    */
   private readonly hostClassifiesRiskProvider: () => boolean;
+  /**
+   * Auth-class classifier. Returns `true` iff `toolName` is the owning plugin
+   * manifest's `auth.loginTool` or `auth.logoutTool` (NOT `statusTool` — status
+   * is read-only and must stay silent). An auth-class tool is a deliberate,
+   * sensitive user decision (sign-in / sign-out): it must surface the SAME
+   * ApprovalGate modal on EVERY lane — UI click and agent-triggered — instead
+   * of silently passing (UI origin) or hard-denying via the foreground-auto
+   * reviewer (agent origin). Defaults to always-false so existing tests and
+   * non-plugin call sites keep their behaviour.
+   */
+  private readonly isAuthClassToolProvider: (toolName: string) => boolean;
   private readonly pendingReviewerAuthorizations = new Map<string, PendingReviewerAuthorization>();
 
   constructor(
@@ -730,6 +741,7 @@ export class ToolExecutor {
     scriptHookManager?: ScriptHookManager,
     auditLogger?: AuditLogger,
     hostClassifiesRiskProvider?: () => boolean,
+    isAuthClassToolProvider?: (toolName: string) => boolean,
   ) {
     this.toolRegistry = toolRegistry;
     this.hookRunner = hookRunner ?? new HookRunner();
@@ -739,7 +751,21 @@ export class ToolExecutor {
     this.bashAstValidator = bashAstValidator;
     this.scriptHookManager = scriptHookManager;
     this.hostClassifiesRiskProvider = hostClassifiesRiskProvider ?? (() => false);
+    this.isAuthClassToolProvider = isAuthClassToolProvider ?? (() => false);
     this.requirePermissionAuditChain = auditLogger?.isPermissionAuditChainReady() === true;
+  }
+
+  /**
+   * True iff `toolName` is an auth-class tool (a plugin manifest's
+   * `auth.loginTool` / `auth.logoutTool`). Guards against a throwing provider
+   * so a classifier error can never crash the permission pipeline.
+   */
+  private isAuthClassTool(toolName: string): boolean {
+    try {
+      return this.isAuthClassToolProvider(toolName) === true;
+    } catch {
+      return false;
+    }
   }
 
   /**
@@ -2080,6 +2106,27 @@ export class ToolExecutor {
           forceModal: true,
         };
       }
+      // Auth-class consistency — a plugin's loginTool/logoutTool surfaces the
+      // SAME ApprovalGate modal on EVERY lane. Without this, a UI-origin call
+      // (headless:false, no reviewer route) silently passes and an
+      // agent-origin call (headless:true) hits the foreground-auto reviewer
+      // hard-deny. Forcing a forceModal `ask` makes both lanes converge on the
+      // real approval popup. statusTool is excluded by the classifier (read-only
+      // status must stay silent). `forceModal` also lets the headless ask block
+      // below fall through to the modal instead of the headless-deny, and keeps
+      // Store B from auto-allowing a prior grant. A pre-existing hard `deny`
+      // (Layer 1-2: deny rules, out-of-scope plugin) is never softened.
+      if (this.isAuthClassTool(toolUse.name) && permissionResult.decision !== "deny") {
+        permissionResult = {
+          decision: "ask",
+          reason: t("be_executor.authClassApprovalReason"),
+          // Keep the original hard-gate layer (1-2) when present so the Store B
+          // memory-skip's `layer >= 3` guard still treats it as a hard ask;
+          // otherwise pin to the category lane (3).
+          layer: permissionResult.layer >= 3 ? permissionResult.layer : 3,
+          forceModal: true,
+        };
+      }
       const sandboxAttestation = {
         ...(tool.writesToOwnSandbox !== undefined
           ? { writesToOwnSandbox: tool.writesToOwnSandbox }
@@ -2176,7 +2223,13 @@ export class ToolExecutor {
         return { tool_use_id: toolUse.id, content: msg, is_error: true, durationMs };
       }
       if (permissionResult.decision === "ask") {
-        if (invocationPermissionContext.headless === true) {
+        // Auth-class tools (forceModal) deliberately route the agent lane to the
+        // SAME interactive ApprovalGate modal as the UI lane — a login/logout is
+        // a user decision, not a headless reviewer verdict. Skip the headless
+        // deny/reviewer block so the decision falls through to the modal below.
+        const authClassForceModal =
+          permissionResult.forceModal === true && this.isAuthClassTool(toolUse.name);
+        if (invocationPermissionContext.headless === true && !authClassForceModal) {
           const headlessReviewerRoute =
             permissionResult.reviewer?.route === "headless" ||
             this.permissionManager?.getMode() === "strict";

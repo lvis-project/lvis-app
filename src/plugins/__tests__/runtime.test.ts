@@ -955,6 +955,66 @@ describe("PluginRuntime.disable", () => {
   });
 });
 
+describe("PluginRuntime.isAuthClassTool", () => {
+  let testDir: string;
+  let installedDir: string;
+  let registryPath: string;
+
+  beforeEach(async () => {
+    testDir = mkdtempSync(join(tmpdir(), "lvis-authclass-rt-"));
+    installedDir = join(testDir, "plugins");
+    await mkdir(installedDir, { recursive: true });
+    registryPath = join(installedDir, "registry.json");
+  });
+
+  afterEach(async () => {
+    await rm(testDir, { recursive: true, force: true });
+    vi.restoreAllMocks();
+  });
+
+  it("classifies loginTool/logoutTool as auth-class but NOT statusTool or other tools", async () => {
+    const { manifestPath } = await writeTestPlugin({
+      rootDir: testDir,
+      pluginsRoot: installedDir,
+      registryPath,
+    }, {
+      id: "auth-plugin",
+      tools: ["auth_status", "auth_login", "auth_logout", "auth_clock"],
+      entrySource: makeTestPluginEntrySource({
+        auth_status: JSON.stringify({ authenticated: false }),
+        auth_login: JSON.stringify("logged-in"),
+        auth_logout: JSON.stringify("logged-out"),
+        auth_clock: JSON.stringify("clocked"),
+      }),
+      manifest: {
+        uiCallable: ["auth_status", "auth_login", "auth_logout"],
+        auth: {
+          statusTool: "auth_status",
+          loginTool: "auth_login",
+          logoutTool: "auth_logout",
+        },
+      },
+    });
+    await writeTestPluginRegistry({ registryPath }, [{ id: "auth-plugin", manifestPath, enabled: true }]);
+    const guard = new PluginDeploymentGuard({ registryPath, pluginsRoot: installedDir });
+    const runtime = makeTestPluginRuntime(
+      { rootDir: testDir, registryPath, pluginsRoot: installedDir },
+      { deploymentGuard: guard },
+    );
+    await runtime.load();
+
+    // loginTool + logoutTool → auth-class
+    expect(runtime.isAuthClassTool("auth_login")).toBe(true);
+    expect(runtime.isAuthClassTool("auth_logout")).toBe(true);
+    // statusTool is read-only — must stay silent (NOT auth-class)
+    expect(runtime.isAuthClassTool("auth_status")).toBe(false);
+    // ordinary write tool → NOT auth-class
+    expect(runtime.isAuthClassTool("auth_clock")).toBe(false);
+    // unknown / unowned tool → false
+    expect(runtime.isAuthClassTool("does_not_exist")).toBe(false);
+  });
+});
+
 /**
  * Trusted-path filter for registry-listed manifests. Marketplace installs
  * write under `~/.lvis/plugins/{slug}/`, which lives outside the project
