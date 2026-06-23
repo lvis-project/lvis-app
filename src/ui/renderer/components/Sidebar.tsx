@@ -314,11 +314,11 @@ export function Sidebar({
           edge, on the SAME horizontal line as the macOS traffic lights. The OS
           lights own the left (x:14, center ≈y:18); the toggle owns the right.
           With the card at top-1.5 (≈6px) and the toggle a h-7 (28px) button, a
-          small `pt-0.5` (2px) puts the toggle's center at ≈6+2+14 = y:22 — on
-          the lights' line, not a row below it (the prior `pt-7` dropped it a full
-          line down, which read as "a weird spot"). Win/linux + non-Electron have
-          no OS lights, so a plain `pt-1` top strip is enough. */}
-      <div className={`flex items-center justify-end px-1 ${darwinTopClearance ? "pt-0.5" : "pt-1"}`}>
+          zero top pad (`pt-0`) puts the toggle's center at ≈6+0+14 = y:20 — on
+          the lights' line, not a row below it (a prior `pt-7` dropped it a full
+          line down; even `pt-0.5` measured ~y:23, a touch low). Win/linux +
+          non-Electron have no OS lights, so a plain `pt-1` top strip is enough. */}
+      <div className={`flex items-center justify-end px-1 ${darwinTopClearance ? "pt-0" : "pt-1"}`}>
         <Tooltip>
           <TooltipTrigger asChild>
             <Button
