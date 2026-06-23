@@ -71,6 +71,11 @@ import {
   INITIAL_THEME_ARG_MAX_BYTES,
   type InitialThemePrime,
 } from "./shared/initial-theme.js";
+import {
+  INITIAL_APP_MODE_ARG_PREFIX,
+  isAppMode,
+  type InitialAppMode,
+} from "./shared/initial-app-mode.js";
 
 type LvisInitialThemePayload = Readonly<InitialThemePrime>;
 
@@ -125,6 +130,28 @@ if (lvisInitialTheme && typeof document !== "undefined") {
     // Non-fatal: ThemeProvider's async hydrate still runs as a fallback.
   }
 }
+
+// ─── AppMode race-window-zero prime ──────────────────────────────────────────
+// Main passes the persisted workspace mode into the main BrowserWindow via
+// `webPreferences.additionalArguments` so the renderer can seed its first React
+// render from the saved value — the shell paints the correct mode layout on
+// frame 0 instead of mounting in "action" and tweening to "chat" post-mount
+// (which would be a visible wrong-mode flash). Wire format SoT lives in
+// `src/shared/initial-app-mode.ts`. See main.ts:initialAppModeArgs().
+function readInitialAppModeArg(): InitialAppMode | null {
+  try {
+    const arg = process.argv.findLast(
+      (a): a is string => typeof a === "string" && a.startsWith(INITIAL_APP_MODE_ARG_PREFIX),
+    );
+    if (!arg) return null;
+    const value = arg.slice(INITIAL_APP_MODE_ARG_PREFIX.length);
+    return isAppMode(value) ? value : null;
+  } catch {
+    return null;
+  }
+}
+
+const lvisInitialAppMode = readInitialAppModeArg();
 
 type PluginActionResult =
   | { ok: true; pluginId: string; installed?: true; uninstalled?: true; version?: string }
@@ -1703,6 +1730,13 @@ const api = {
 // when main has nothing cached yet (cold-boot first window). Frozen so the
 // renderer cannot mutate it.
 contextBridge.exposeInMainWorld("__lvisInitialTheme", lvisInitialTheme);
+
+// Expose the persisted workspace mode so App.tsx can seed its `appMode` /
+// `sidebarCollapsed` state synchronously on mount (frame-0 correct layout, no
+// wrong-mode flash). `null` when main passed no prime (cold-boot before
+// settings, or non-Electron test harness) — the renderer then defaults to
+// "action" exactly as before.
+contextBridge.exposeInMainWorld("__lvisInitialAppMode", lvisInitialAppMode);
 
 contextBridge.exposeInMainWorld("lvisApi", api);
 // Dev mode runtime flag — main process sets NODE_ENV=development in
