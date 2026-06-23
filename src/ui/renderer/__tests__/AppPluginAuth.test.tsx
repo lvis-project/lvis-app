@@ -30,7 +30,6 @@ describe("App plugin auth routing", () => {
           kind: "embedded-module",
           title: "Token Plugin",
           entry: "dist/ui.js",
-          window: { defaultMode: "detached" as const },
         },
         entryUrl: "file:///token-plugin/dist/ui.js",
       },
@@ -89,6 +88,11 @@ describe("App plugin auth routing", () => {
       tool === "token_status" ? { authenticated: false } : { ok: true },
     );
 
+    // Detachment is owned by the app's mode, not the plugin: enter chat mode so
+    // selecting any plugin view routes through the detached-window path. (Action
+    // mode would keep it inline and run the embedded auth flow instead.)
+    fireEvent.click(screen.getByTestId("app-mode-chat"));
+
     fireEvent.click(screen.getByTestId("plugin-grid-button"));
     const cell = await screen.findByTestId("plugin-cell-plugin-token-plugin-main");
     fireEvent.click(cell);
@@ -96,6 +100,9 @@ describe("App plugin auth routing", () => {
     await waitFor(() => {
       expect(api.window.openDetached).toHaveBeenCalledWith("plugin:token-plugin:main");
     });
+    // Security property preserved: a detached, unauthenticated view must open
+    // directly through the plugin's own login surface — the host must NOT call
+    // the loginTool with no arguments on its behalf.
     expect(api.callPluginMethod).not.toHaveBeenCalledWith("token_login");
   });
 
@@ -109,12 +116,21 @@ describe("App plugin auth routing", () => {
     await waitFor(() => {
       expect(api.listPluginUiExtensions).toHaveBeenCalled();
     });
+    // appMode (chat) is the sole authority for detaching, so put the app in
+    // chat mode before dispatching the command-palette action.
+    await user.click(screen.getByTestId("app-mode-chat"));
     await user.click(screen.getByTestId("command-popover-trigger"));
+    // The unified SlashPicker opens on a category drill-down; the plugin-view
+    // QuickAction ("…열기") lives under the 바로가기/shortcut group. Drill into
+    // it, then select the action.
+    await user.click(await screen.findByTestId("slash-picker-cat-shortcut"));
     await user.click(await screen.findByText("Token Plugin 열기"));
 
     await waitFor(() => {
       expect(api.window.openDetached).toHaveBeenCalledWith("plugin:token-plugin:main");
     });
+    // Security property preserved: command-palette routing to a detached view
+    // must not have the host invoke the plugin's loginTool on its behalf.
     expect(api.callPluginMethod).not.toHaveBeenCalledWith("token_login");
   });
 
@@ -124,6 +140,10 @@ describe("App plugin auth routing", () => {
     api.callPluginMethod.mockImplementation(async (tool: string) =>
       tool === "token_status" ? { authenticated: false } : { ok: true },
     );
+
+    // Chat mode routes the selection through openDetached so the failure path
+    // under test is reachable (action mode would render inline, never detaching).
+    fireEvent.click(screen.getByTestId("app-mode-chat"));
 
     fireEvent.click(screen.getByTestId("plugin-grid-button"));
     const cell = await screen.findByTestId("plugin-cell-plugin-token-plugin-main");

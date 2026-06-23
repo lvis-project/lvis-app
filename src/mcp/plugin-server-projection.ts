@@ -35,6 +35,14 @@ const LVIS_META_PREFIX = "xyz.lvis/";
 /** JSON Schema 2020-12 dialect URI (the RC default for tool inputSchema). */
 const JSON_SCHEMA_2020_12 = "https://json-schema.org/draft/2020-12/schema";
 
+/**
+ * Write-equivalent baseline used when a `toolSchemas` entry omits `category`
+ * (host-classifies-risk, project_permission_review_redesign). The declared
+ * category is optional and advisory; when absent the host projects the safe,
+ * write-equivalent default rather than rejecting the manifest. Never read.
+ */
+const DEFAULT_STRICT_CATEGORY: PluginToolCategory = "write";
+
 /** MCP `ToolAnnotations` (hints only — NOT authoritative). */
 export interface McpToolAnnotations {
   readOnlyHint: boolean;
@@ -99,8 +107,15 @@ export function toolSchemaToMcpTool(
 ): McpToolProjection {
   const inputSchema = { ...entry.inputSchema, $schema: JSON_SCHEMA_2020_12 };
 
+  // `category` is now optional (host-classifies-risk). When the plugin omits
+  // it, project the write-equivalent default-strict baseline so the manifest
+  // still loads and the reverse adapter reads a valid category. The host never
+  // trusts this value as the authority — it derives the effective category per
+  // invocation — but it remains the declared value for shadow reconciliation.
+  const declaredCategory: PluginToolCategory = entry.category ?? DEFAULT_STRICT_CATEGORY;
+
   const meta: Record<string, unknown> = {
-    [`${LVIS_META_PREFIX}category`]: entry.category,
+    [`${LVIS_META_PREFIX}category`]: declaredCategory,
     [`${LVIS_META_PREFIX}version`]: entry.version ?? manifestVersion,
   };
   if (entry.pathFields !== undefined) meta[`${LVIS_META_PREFIX}pathFields`] = entry.pathFields;
@@ -112,7 +127,7 @@ export function toolSchemaToMcpTool(
     name,
     description: entry.description,
     inputSchema,
-    annotations: annotationsForCategory(entry.category),
+    annotations: annotationsForCategory(declaredCategory),
     _meta: meta,
   };
 }
