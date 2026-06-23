@@ -1,10 +1,31 @@
 import "../../../../test/renderer/setup.ts";
 import { describe, expect, it } from "vitest";
-import { fireEvent, screen, waitFor } from "@testing-library/react";
+import { screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { renderApp } from "../../../../test/renderer/render-app.js";
 
 describe("App plugin auth routing", () => {
+  // #1311 (input-area relayout) removed the standalone plugin-grid button from
+  // the action bar; plugin views are now reached through the unified
+  // SlashPicker. These helpers drive a plugin selection through the new entry
+  // point: open the picker, drill into the 플러그인(plugin) category, then click
+  // the plugin's view row by its label. The auth/detach SECURITY behavior under
+  // test is unchanged — selection still routes through the same App
+  // handleViewSelect path — only the UI affordance moved.
+  const openPluginCategory = async (user: ReturnType<typeof userEvent.setup>) => {
+    await user.click(screen.getByTestId("command-popover-trigger"));
+    await user.click(await screen.findByTestId("slash-picker-cat-plugin"));
+  };
+  const selectPluginView = async (
+    user: ReturnType<typeof userEvent.setup>,
+    label: string,
+  ) => {
+    await openPluginCategory(user);
+    // Scope the row lookup to the picker's plugin group — the plugin's own
+    // title can also appear elsewhere in the tree (e.g. a loaded inline view).
+    const group = await screen.findByTestId("slash-group-plugin");
+    await user.click(await within(group).findByText(label));
+  };
   const detachedPluginFixture = {
     pluginCards: [
       {
@@ -36,7 +57,14 @@ describe("App plugin auth routing", () => {
     ],
   };
 
-  it("renders a preparing plugin grid cell from plugin-card UI metadata before the view loads", async () => {
+  it("surfaces a preparing plugin's view as a selectable entry in the picker's plugin category", async () => {
+    // The preparing-cell visual detail (aria-busy, phase/progress label, title)
+    // is asserted directly against the component in
+    // PluginGridButton.test.tsx ("shows preparation detail for preparing
+    // registered plugin cells"). At the App level after #1311 the contract is:
+    // a preparing plugin card that declares a UI extension still appears as a
+    // reachable entry inside the SlashPicker's 플러그인 category.
+    const user = userEvent.setup();
     const { api } = await renderApp({
       pluginCards: [
         {
@@ -72,17 +100,13 @@ describe("App plugin auth routing", () => {
       expect(api.listPluginCards).toHaveBeenCalled();
     });
 
-    fireEvent.click(screen.getByTestId("plugin-grid-button"));
-
-    const cell = await screen.findByTestId("plugin-cell-plugin-local-indexer-local-indexer-control");
-    expect(cell).toHaveAttribute("aria-busy", "true");
-    expect(cell).toBeDisabled();
-    expect(screen.getByTestId("plugin-cell-plugin-local-indexer-local-indexer-control-phase")).toHaveTextContent("준비");
-    expect(screen.getByTestId("plugin-cell-plugin-local-indexer-local-indexer-control-preparation")).toHaveTextContent("Python 10%");
-    expect(cell).toHaveAttribute("title", expect.stringContaining("Python 10%"));
+    await openPluginCategory(user);
+    const group = await screen.findByTestId("slash-group-plugin");
+    expect(await within(group).findByText("로컬 인덱서")).toBeInTheDocument();
   });
 
   it("opens an unauthenticated detached plugin view without invoking loginTool", async () => {
+    const user = userEvent.setup();
     const { api } = await renderApp(detachedPluginFixture);
     api.callPluginMethod.mockImplementation(async (tool: string) =>
       tool === "token_status" ? { authenticated: false } : { ok: true },
@@ -91,11 +115,9 @@ describe("App plugin auth routing", () => {
     // Detachment is owned by the app's mode, not the plugin: enter chat mode so
     // selecting any plugin view routes through the detached-window path. (Action
     // mode would keep it inline and run the embedded auth flow instead.)
-    fireEvent.click(screen.getByTestId("app-mode-chat"));
+    await user.click(screen.getByTestId("app-mode-chat"));
 
-    fireEvent.click(screen.getByTestId("plugin-grid-button"));
-    const cell = await screen.findByTestId("plugin-cell-plugin-token-plugin-main");
-    fireEvent.click(cell);
+    await selectPluginView(user, "Token Plugin");
 
     await waitFor(() => {
       expect(api.window.openDetached).toHaveBeenCalledWith("plugin:token-plugin:main");
@@ -135,6 +157,7 @@ describe("App plugin auth routing", () => {
   });
 
   it("surfaces detached-window open failures instead of dropping them", async () => {
+    const user = userEvent.setup();
     const { api } = await renderApp(detachedPluginFixture);
     api.window.openDetached.mockResolvedValueOnce({ ok: false, error: "window denied" });
     api.callPluginMethod.mockImplementation(async (tool: string) =>
@@ -143,11 +166,9 @@ describe("App plugin auth routing", () => {
 
     // Chat mode routes the selection through openDetached so the failure path
     // under test is reachable (action mode would render inline, never detaching).
-    fireEvent.click(screen.getByTestId("app-mode-chat"));
+    await user.click(screen.getByTestId("app-mode-chat"));
 
-    fireEvent.click(screen.getByTestId("plugin-grid-button"));
-    const cell = await screen.findByTestId("plugin-cell-plugin-token-plugin-main");
-    fireEvent.click(cell);
+    await selectPluginView(user, "Token Plugin");
 
     await waitFor(() => {
       expect(screen.getByText(/플러그인 창을 열 수 없습니다/)).toBeInTheDocument();
@@ -190,9 +211,11 @@ describe("App plugin auth routing", () => {
       tool === "oauth_status" ? { authenticated: false } : { authenticated: true },
     );
 
-    fireEvent.click(screen.getByTestId("plugin-grid-button"));
-    const cell = await screen.findByTestId("plugin-cell-plugin-oauth-plugin-main");
-    fireEvent.click(cell);
+    const user = userEvent.setup();
+    // Default appMode is action: selecting the view renders it inline and the
+    // embedded auth flow runs (no detachment), so the unauthed view must invoke
+    // loginTool before navigating.
+    await selectPluginView(user, "OAuth Plugin");
 
     await waitFor(() => {
       expect(api.callPluginMethod).toHaveBeenCalledWith("oauth_login");
