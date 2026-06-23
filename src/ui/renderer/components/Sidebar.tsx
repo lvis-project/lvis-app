@@ -65,12 +65,13 @@ export interface SidebarProps {
 }
 
 // ─── Platform bridge (darwin traffic-light line) ───────────────────────────────
-// On macOS the OS draws the traffic lights at {x:14,y:12} (≈12px diameter, so
-// their vertical center sits at ≈y:18). The floating card carries a small top
-// margin (top-1.5 ≈ 6px) so it reads as a floating card with breathing room
-// reaching UP toward the lights — NOT crammed flush to y:0. The collapse toggle
-// lives in a thin header strip on the card's right edge; its vertical center is
-// tuned to land on the SAME line as the lights (see the strip padding below).
+// On macOS the OS draws the traffic lights at {x:18,y:16} (≈12px diameter, so
+// their visual center sits at ≈y:22, ≈x:[18..76]). The floating card is anchored
+// at top-2 (8px) so the h-7 cluster strip's center lands on that line; the strip
+// carries a left clearance (≈76px) so its leftmost button starts at x≈84, just
+// RIGHT of the lights with no hover overlap. The cluster ([펼침/닫힘 toggle] →
+// [검색] → [즐겨찾기] → [내보내기]) is the card's top strip when expanded and pops
+// out bare in the band when collapsed.
 // Returns false when the preload bridge is absent (jsdom / Storybook / SSR) —
 // no native chrome to align against there.
 function isDarwinPlatform(): boolean {
@@ -270,14 +271,25 @@ function SectionDivider({ collapsed, label }: { collapsed: boolean; label?: stri
 
 // ─── ClusterStrip ──────────────────────────────────────────────────────────
 //
-// The horizontal button cluster that sits next to the OS traffic lights:
+// The horizontal button cluster that sits ON the OS traffic-light LINE, RIGHT
+// AFTER the lights:
 //   [펼침/닫힘 collapse toggle] → [검색 search] → [즐겨찾기 star] → [내보내기 export]
 // Always rendered (both expanded + collapsed). When the surrounding card is
 // expanded it forms the card's top strip; when collapsed it stands bare in the
-// band. Each control is an h-7 w-7 icon button with ~8px gaps; the whole strip
-// is a single h-7 items-center row so every glyph centers on the lights' line.
+// band. Each control is an h-7 w-7 icon button with TIGHT ~2px gaps (gap-0.5);
+// the whole strip is a single h-7 items-center row so every glyph centers on
+// the lights' line.
+//
+// `leadClearance` left-pads the FIRST button past the OS traffic lights on
+// darwin. The lights occupy roughly x in [18 .. 76] (trafficLightPosition.x:18
+// + ~58px for the 3 lights). The card surface starts at the aside's `left-2`
+// (≈8px), so the strip needs ≈76px of internal left padding to push its
+// leftmost button to x≈84 (lights end + ~8px gap) with NO hover overlap. The
+// card surface still paints behind the lights — the OS draws the lights ON TOP
+// of the webview, so that is purely cosmetic backing, not a collision.
 function ClusterStrip({
   collapsed,
+  leadClearance,
   onToggleCollapse,
   onOpenUnifiedSearch,
   isCurrentSessionStarred,
@@ -285,6 +297,8 @@ function ClusterStrip({
   onExport,
 }: {
   collapsed: boolean;
+  /** True on darwin — left-pad the first button past the OS traffic lights. */
+  leadClearance: boolean;
   onToggleCollapse: () => void;
   onOpenUnifiedSearch: () => void;
   isCurrentSessionStarred: boolean;
@@ -293,7 +307,15 @@ function ClusterStrip({
 }) {
   const { t } = useTranslation();
   return (
-    <div className="flex h-7 shrink-0 items-center gap-2 px-1" data-testid="sidebar-cluster">
+    <div
+      className={[
+        "flex h-7 shrink-0 items-center gap-0.5 pr-1",
+        // Clear the OS lights on darwin (≈76px from the card's left edge → first
+        // button lands at x≈84). Win/Linux + non-Electron have no OS lights.
+        leadClearance ? "pl-[4.75rem]" : "pl-1",
+      ].join(" ")}
+      data-testid="sidebar-cluster"
+    >
       {/* 펼침/닫힘 — shell-owned collapse toggle. Leftmost, next to the lights. */}
       <Tooltip>
         <TooltipTrigger asChild>
@@ -421,7 +443,9 @@ export function Sidebar({
     //      retracts (body removed) and the cluster pops OUT into the bare band
     //      with NO surface behind it. The strip's screen position is identical in
     //      both states; the only visual delta is the card surface behind it.
-    // top-4 (16px) puts the strip on the new traffic-light line (y:16) on darwin;
+    // top-2 (8px) lands the h-7 (28px) cluster strip's center at ≈22px — the OS
+    // traffic lights' visual center (trafficLightPosition.y:16 + ≈6px half of
+    // their ≈12px diameter). So the cluster sits ON the lights' line on darwin.
     // win/linux + non-Electron align a touch higher (top-1.5) with no OS lights.
     <aside
       data-testid="primary-sidebar"
@@ -429,7 +453,7 @@ export function Sidebar({
       aria-label={t("sidebar.ariaLabel")}
       className={[
         "absolute left-2 bottom-3 z-30 flex min-h-0 flex-col",
-        darwinTopClearance ? "top-4" : "top-1.5",
+        darwinTopClearance ? "top-2" : "top-1.5",
       ].join(" ")}
       // The aside overlays the Electron drag band. Mark it no-drag so its controls
       // stay clickable; the OS traffic lights still own their hit region to the
@@ -463,6 +487,7 @@ export function Sidebar({
             in the band. Always rendered — never hidden in either state. */}
         <ClusterStrip
           collapsed={collapsed}
+          leadClearance={darwinTopClearance}
           onToggleCollapse={onToggleCollapse}
           onOpenUnifiedSearch={onOpenUnifiedSearch}
           isCurrentSessionStarred={isCurrentSessionStarred}
@@ -477,7 +502,12 @@ export function Sidebar({
       <div
         className={
           collapsed
-            ? "mt-1.5 w-14 flex min-h-0 flex-1 flex-col overflow-hidden rounded-2xl border border-border bg-card shadow-2xl"
+            ? // Collapsed: a compact icon-rail card BELOW the bare cluster,
+              // pinned to the aside's left edge (left-2 ≈ 8px) so it stays within
+              // the main content's collapsed left padding (pl-20 ≈ 80px). The
+              // cluster strip above keeps its own lead clearance to clear the OS
+              // lights; the rail does NOT inherit that clearance.
+              "mt-1.5 w-14 flex min-h-0 flex-1 flex-col overflow-hidden rounded-2xl border border-border bg-card shadow-2xl"
             : "flex min-h-0 flex-1 flex-col overflow-hidden"
         }
       >
