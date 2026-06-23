@@ -18,15 +18,23 @@ function makeApi(overrides: Record<string, unknown> = {}): LvisApi {
   } as unknown as LvisApi;
 }
 
+function makePersistentSink(): {
+  items: PersistentItem[];
+  upsertPersistent: (item: PersistentItem) => void;
+} {
+  const items: PersistentItem[] = [];
+  const upsertPersistent = (item: PersistentItem) => {
+    const i = items.findIndex((p) => p.id === item.id);
+    if (i === -1) items.push(item);
+    else items[i] = item;
+  };
+  return { items, upsertPersistent };
+}
+
 describe("useStatusBarPermission", () => {
   it("renders the active permission mode as a plain-text value item (no pill/badge)", async () => {
     const api = makeApi();
-    const items: PersistentItem[] = [];
-    const upsertPersistent = (item: PersistentItem) => {
-      const i = items.findIndex((p) => p.id === item.id);
-      if (i === -1) items.push(item);
-      else items[i] = item;
-    };
+    const { items, upsertPersistent } = makePersistentSink();
     renderHook(() => useStatusBarPermission({ api, upsertPersistent }));
 
     await waitFor(() => {
@@ -42,12 +50,7 @@ describe("useStatusBarPermission", () => {
     const api = makeApi({
       deferredList: vi.fn(async () => ({ ok: true, pending: [{}, {}], total: 2 })),
     });
-    const items: PersistentItem[] = [];
-    const upsertPersistent = (item: PersistentItem) => {
-      const i = items.findIndex((p) => p.id === item.id);
-      if (i === -1) items.push(item);
-      else items[i] = item;
-    };
+    const { items, upsertPersistent } = makePersistentSink();
     renderHook(() => useStatusBarPermission({ api, upsertPersistent }));
 
     await waitFor(() => {
