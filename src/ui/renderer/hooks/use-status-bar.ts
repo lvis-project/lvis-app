@@ -13,6 +13,24 @@ import { useStatusBarPermission } from "./status-bar/use-status-bar-permission.j
 export type { StatusBarSeverity, NotificationToastMeta, PersistentItem, ToastItem } from "./status-bar/types.js";
 
 /**
+ * Compare two persistent items by their display-relevant fields only. The
+ * `onClick` handler is intentionally excluded: producers may build a fresh
+ * closure on every run, but a changed handler identity must not be treated as
+ * a state change (that would defeat the loop guard in `upsertPersistent`).
+ */
+function samePersistentDisplay(a: PersistentItem, b: PersistentItem): boolean {
+  return (
+    a.id === b.id &&
+    a.severity === b.severity &&
+    a.label === b.label &&
+    a.value === b.value &&
+    a.dot === b.dot &&
+    a.a11yLabel === b.a11yLabel &&
+    a.tooltip === b.tooltip
+  );
+}
+
+/**
  * Status-bar event surface shared between persistent (left slot) and
  * transient (right slot) items. The bottom status bar (#231) reads from
  * this hook; producers subscribe to host events that already exist
@@ -135,6 +153,14 @@ export function useStatusBar(opts: UseStatusBarOptions) {
     setPersistent((prev) => {
       const idx = prev.findIndex((p) => p.id === item.id);
       if (idx === -1) return [...prev, item];
+      // Defense-in-depth against render loops: if a producer re-runs and upserts
+      // a structurally identical item (same display fields), return the SAME
+      // array so no re-render is triggered. Only `onClick` identity may differ
+      // between runs (producers build a fresh closure each time); since the
+      // handler is not display state we ignore it here and keep the existing
+      // item's reference. This prevents an unstable producer callback from
+      // driving an infinite upsert → new-array → re-render loop.
+      if (samePersistentDisplay(prev[idx], item)) return prev;
       const next = [...prev];
       next[idx] = item;
       return next;
