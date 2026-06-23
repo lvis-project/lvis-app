@@ -13,9 +13,9 @@
  *            interactive control opts out via `WebkitAppRegion: "no-drag"`.
  * macOS:     no renderer-drawn window buttons — the OS draws the traffic
  *            lights into the `hiddenInset` area (trafficLightPosition
- *            {x:14,y:12}). The band renders `children` with left padding so the
- *            first control clears the traffic lights (x:72), keeping the band a
- *            drag region elsewhere.
+ *            {x:18,y:16}). The band renders `children` with left padding (pl-20
+ *            ≈ 80px) so the first control clears the traffic lights, keeping the
+ *            band a drag region elsewhere.
  *
  * Platform detection uses `window.lvisPlatform.isDarwin` (set by preload)
  * rather than a UA sniff — throw if the bridge is absent so misconfigurations
@@ -166,13 +166,13 @@ export function CustomTitleBar({ children }: CustomTitleBarProps = {}) {
 
   if (isDarwin) {
     // macOS: the OS draws the traffic lights into the hiddenInset area
-    // (trafficLightPosition {x:14,y:12}). The band stays a drag region and
-    // hosts the toolbar content with left padding (pl-[72px]) so the first
-    // control clears the traffic lights.
+    // (trafficLightPosition {x:18,y:16}). The band stays a drag region and
+    // hosts the toolbar content with left padding (pl-20 ≈ 80px) so the first
+    // control clears the traffic lights with no hover overlap.
     return (
       <div
         data-testid="custom-titlebar-darwin"
-        className="flex h-8 shrink-0 items-center gap-2 border-b border-border/(--opacity-half) bg-background pl-[72px] pr-3 text-foreground select-none"
+        className="flex h-8 shrink-0 items-center gap-2 border-b border-border/(--opacity-half) bg-background pl-20 pr-3 text-foreground select-none"
         style={{
           // @ts-expect-error — Electron-specific CSS extension
           WebkitAppRegion: "drag",
