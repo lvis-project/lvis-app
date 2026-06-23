@@ -15,7 +15,6 @@ vi.mock("../../api-client.js", () => ({
 
 function renderRow(overrides: Partial<Parameters<typeof BottomActionRow>[0]> = {}) {
   const props: Parameters<typeof BottomActionRow>[0] = {
-    tokenSlot: <span data-testid="token-slot">tokens</span>,
     isBusy: false,
     isSendDisabled: false,
     onSend: vi.fn(),
@@ -77,19 +76,15 @@ describe("BottomActionRow", () => {
     expect(thinking.compareDocumentPosition(send) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
   });
 
-  it("keeps the whole row single-line and shrinks the token slot rather than wrapping (#1303)", () => {
+  it("keeps the whole row single-line and right-justified (#1303 / ring moved to action bar)", () => {
     const { getByTestId } = renderRow();
     // The row container must never wrap to a second line.
     const row = getByTestId("composer-bottom-action-row");
     expect(row.className).toContain("flex-nowrap");
     expect(row.className).not.toContain("flex-wrap");
-    // The left token/info slot must shrink (min-w-0 + overflow + nowrap), not wrap vertically.
-    const slot = getByTestId("token-slot");
-    const leftSlot = slot.parentElement;
-    expect(leftSlot?.className).toContain("flex-nowrap");
-    expect(leftSlot?.className).not.toContain("flex-wrap");
-    expect(leftSlot?.className).toContain("min-w-0");
-    expect(leftSlot?.className).toContain("overflow-hidden");
+    // The token ring moved to the InputActionBar leading cluster, so this row
+    // no longer hosts a token slot — its turn controls sit flush-right.
+    expect(row.className).toContain("justify-end");
   });
 
   it("invokes onSend when Send is clicked", () => {
@@ -105,7 +100,6 @@ describe("BottomActionRow", () => {
     rerender(
       <TooltipProvider>
         <BottomActionRow
-          tokenSlot={<span>t</span>}
           isBusy
           isSendDisabled={false}
           onSend={vi.fn()}

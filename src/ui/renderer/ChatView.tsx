@@ -4,9 +4,7 @@ import { flushSync } from "react-dom";
 import { ChevronDown, KeyRound, Pencil, Star, GitBranch } from "lucide-react";
 import { Button } from "../../components/ui/button.js";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "../../components/ui/card.js";
-import { Tooltip, TooltipContent, TooltipTrigger } from "../../components/ui/tooltip.js";
 import { ScrollArea } from "../../components/ui/scroll-area.js";
-import { formatCostBadge } from "../../lib/cost-estimator.js";
 import type { ChatEntry } from "../../lib/chat-stream-state.js";
 import type { PermissionReviewSuggestionPayload, UserApprovalHitPayload } from "../../shared/permissions-events.js";
 import { debugLog, isDebugStreamEnabled } from "../../lib/debug-stream.js";
@@ -27,11 +25,11 @@ import { MessageQueueStore, formatQueueInject, type MessageQueueItem } from "./s
 import { SubAgentCard } from "./components/SubAgentCard.js";
 import { TokenProgressRing } from "./components/TokenProgressRing.js";
 import { BottomActionRow } from "./components/BottomActionRow.js";
-import { PermissionModeBadge } from "./components/permissions/PermissionModeBadge.js";
 import { DEFAULT_TOAST_TTL_MS, LONG_TOAST_TTL_MS, SHORT_TOAST_TTL_MS } from "./constants.js";
 import { SkillBadge } from "./components/SkillBadge.js";
 import { WorkGroup } from "./components/WorkGroup.js";
 import { PermissionReviewStatusCard } from "./components/PermissionReviewStatusCard.js";
+import { DeferredApprovalChip } from "./components/DeferredApprovalChip.js";
 import { TurnActionBar } from "./components/TurnActionBar.js";
 // TurnSummaryFooter 컴포넌트는 2026-05-07 폐기. 토큰 정보는 TurnActionBar 의
 // TokenCostBadge (provider-truth, 토글 + tooltip breakdown) 가 단일 source 로
@@ -45,7 +43,6 @@ import { InputActionBar } from "./components/InputActionBar.js";
 import { Composer, type ComposerHandle } from "./components/Composer.js";
 import { useSuggestedReplies } from "./hooks/use-suggested-replies.js";
 import { computeComposerPlaceholder, hasActiveSuggestedReplies } from "./utils/composer-placeholder.js";
-import { DeferredApprovalChip } from "./components/DeferredApprovalChip.js";
 import {
   ATTACH_MAX_COUNT,
   DENY_EXTENSIONS,
@@ -53,7 +50,6 @@ import {
 } from "./types/attachments.js";
 import { buildMarkerText } from "./utils/attachment-markers.js";
 import type { PluginEntry } from "./components/PluginGridButton.js";
-import type { InstallPhase } from "./hooks/use-plugin-marketplace.js";
 import type { QuickAction } from "./components/CommandPopover.js";
 import { type AskUserQuestionRequest } from "./components/AskUserQuestionCard.js";
 import type { LvisApi } from "./types.js";
@@ -264,12 +260,10 @@ export interface ChatViewProps {
   askQuestions: AskUserQuestionRequest[];
   /** Called when a card submits or is dismissed; removes it from `askQuestions`. */
   onResolveAskQuestion: (id: string) => void;
-  /** Plugin list for InputActionBar plugin grid */
+  /** Plugin list — surfaced inside the SlashPicker's plugin category. */
   plugins: PluginEntry[];
   /** Navigate to a plugin view */
   onSelectPlugin: (viewKey: string) => void;
-  /** Refresh plugin cards/views before opening the plugin grid. */
-  onRefreshPlugins?: () => void;
   currentSessionKind?: "main" | "routine";
   currentSessionTitle?: string;
   sessions?: SessionSummary[];
@@ -280,17 +274,12 @@ export interface ChatViewProps {
   /** Controlled open state for CommandPopover */
   commandPopoverOpen: boolean;
   onCommandPopoverOpenChange: (open: boolean) => void;
-  installingPlugins?: ReadonlyMap<string, InstallPhase>;
-  onOpenMarketplace: () => void;
-  marketplaceUrlReady?: boolean;
   // Fork-based revert is replaced by the same-session checkpoint chain.
   // sessionId remains stable until the user explicitly branches from a checkpoint.
   /** Called when user confirms a plugin overlay item; id is the OverlayItem.id. */
   onPluginPrimaryAction?: (overlayItemId: string) => void;
   /** Called when a completed routine overlay result has been seen or dismissed. */
   onRoutineAcknowledge?: (routineId: string, firedAt: string) => void;
-  /** Opens the non-interruptive deferred permission queue modal. */
-  onOpenPermissionQueue?: () => void;
 }
 
 function AskUserAnswerBubble({
@@ -331,7 +320,7 @@ function AskUserAnswerBubble({
   );
 }
 
-export function ChatView({ api, onAsk, onEditSave, onFork, onToggleStar, onRetryEffort, onContinueFromLastUser, isEntryStarred, onAbort, onGuide, onGuideError, onFeedback, subAgentSpawns, loadedSkills, hasAskQuestions, askQuestions, onResolveAskQuestion, plugins, onSelectPlugin, onRefreshPlugins, currentSessionKind = "main", currentSessionTitle, sessions, onLoadSession, onRefreshSessions, commandActions, commandPopoverOpen, onCommandPopoverOpenChange, installingPlugins, onOpenMarketplace, marketplaceUrlReady, onPluginPrimaryAction, onRoutineAcknowledge, onOpenPermissionQueue }: ChatViewProps) {
+export function ChatView({ api, onAsk, onEditSave, onFork, onToggleStar, onRetryEffort, onContinueFromLastUser, isEntryStarred, onAbort, onGuide, onGuideError, onFeedback, subAgentSpawns, loadedSkills, hasAskQuestions, askQuestions, onResolveAskQuestion, plugins, onSelectPlugin, currentSessionKind = "main", currentSessionTitle, sessions, onLoadSession, onRefreshSessions, commandActions, commandPopoverOpen, onCommandPopoverOpenChange, onPluginPrimaryAction, onRoutineAcknowledge }: ChatViewProps) {
   const { t } = useTranslation();
   // We still need the api for SessionTodoPanel; obtain it via singleton.
   const workflowApi = getApi();
@@ -923,31 +912,19 @@ export function ChatView({ api, onAsk, onEditSave, onFork, onToggleStar, onRetry
     handleComposerSend({ inputOrigin: "user-keyboard", token: "" });
   }, [handleComposerSend]);
 
-  const tokenSlot = useMemo(() => (
-    <div className="flex min-w-0 items-center gap-2 overflow-hidden">
-      <div className="shrink-0">
-        <TokenProgressRing
-          used={usedTokens}
-          budget={effectiveBudget}
-          contextBudget={contextBudget}
-          tpmLimit={tpmLimit}
-        />
-      </div>
-      <Tooltip>
-        <TooltipTrigger asChild>
-          <span className={`min-w-0 truncate text-[11px] font-mono ${costBadgeClass}`} title={t("chatView.estimatedCostTitle")}>
-            {formatCostBadge(costEstimate.total, costEstimate.pricingKnown)}
-          </span>
-        </TooltipTrigger>
-        <TooltipContent className="text-xs">
-          <div>{t("chatView.costInputLabel")} {costEstimate.inputTokens.toLocaleString()} tok{costEstimate.pricingKnown === false ? "" : ` · $${costEstimate.inputCost.toFixed(5)}`}</div>
-          <div>{t("chatView.costOutputLabel")} {costEstimate.outputTokens.toLocaleString()} tok{costEstimate.pricingKnown === false ? "" : ` · $${costEstimate.outputCost.toFixed(5)}`}</div>
-          {costEstimate.pricingKnown === false
-            ? <div className="font-semibold">{t("chatView.costUnknownModel")}</div>
-            : <div className="font-semibold">{t("chatView.costTotalLabel")} ${costEstimate.total.toFixed(5)}</div>}
-        </TooltipContent>
-      </Tooltip>
-    </div>
+  // Token progress ring — square, hover=percent, click=detail. The former
+  // sibling cost badge is gone: the cost/amount now lives INSIDE the ring's
+  // click-detail popover (a single flat surface), so the action row carries
+  // only the ring itself.
+  const ringSlot = useMemo(() => (
+    <TokenProgressRing
+      used={usedTokens}
+      budget={effectiveBudget}
+      contextBudget={contextBudget}
+      tpmLimit={tpmLimit}
+      costEstimate={costEstimate}
+      costClass={costBadgeClass}
+    />
   ), [contextBudget, costBadgeClass, costEstimate, effectiveBudget, tpmLimit, usedTokens]);
 
   // ESC 우선순위
@@ -1801,14 +1778,11 @@ export function ChatView({ api, onAsk, onEditSave, onFork, onToggleStar, onRetry
           <InputActionBar
             plugins={plugins}
             onSelectPlugin={onSelectPlugin}
-            onRefreshPlugins={onRefreshPlugins}
-            installingPlugins={installingPlugins}
-            onOpenMarketplace={onOpenMarketplace}
-            marketplaceUrlReady={marketplaceUrlReady}
             onInsertSlashCommand={handleInsertSlashCommand}
             commandActions={commandActions}
             commandPopoverOpen={commandPopoverOpen}
             onCommandPopoverOpenChange={onCommandPopoverOpenChange}
+            ringSlot={ringSlot}
             attachDisabled={
               attachments.length >= ATTACH_MAX_COUNT ||
               hasApiKey === false
@@ -1913,14 +1887,16 @@ export function ChatView({ api, onAsk, onEditSave, onFork, onToggleStar, onRetry
             activePreset={activePreset}
             activePresetId={activePresetId}
             onSelectPreset={setActivePresetId}
-            permissionSlot={
-              <PermissionModeBadge
-                onClick={() => onOpenSettings("permissions")}
-                onQueueClick={onOpenPermissionQueue}
-              />
-            }
-            approvalSlot={<DeferredApprovalChip draftText={question} />}
           />
+          {/* §8 agent-approval surface. The input re-layout moved permission
+              status to the StatusBar (read-only text) and removed the action
+              row's permission/approval slots; this interactive natural-language
+              approval chip has no place in the StatusBar, so it renders here —
+              directly above the composer, the position its own contract
+              describes ("surfaces above the composer"). It self-hides
+              (returns null) unless the draft expresses an approve/reject intent
+              AND exactly one queue entry is pending. */}
+          <DeferredApprovalChip draftText={question} />
           {/* Composer (textarea) + BottomActionRow (TokenRing/단축키/취소/Send)
               가 하나의 컨테이너 안. 사용자 인지 = "타이핑 영역 + 즉시 액션" 한
               묶음.
@@ -1956,7 +1932,6 @@ export function ChatView({ api, onAsk, onEditSave, onFork, onToggleStar, onRetry
             placeholder={computeComposerPlaceholder({ hasApiKey, streaming, suggestedReplies })}
           />
           <BottomActionRow
-            tokenSlot={tokenSlot}
             isBusy={streaming}
             isSendDisabled={
               (hasApiKey === false || viewMode !== null) &&
@@ -1973,8 +1948,9 @@ export function ChatView({ api, onAsk, onEditSave, onFork, onToggleStar, onRetry
             onToggleThinking={toggleThinking}
             />
           </div>
-          {/* PermissionModeBadge + DeferredApprovalChip 모두
-              InputActionBar trailing 으로 이전 완료. 본 자리 비움. */}
+          {/* PermissionModeBadge → StatusBar (read-only mode text).
+              DeferredApprovalChip → above the composer (interactive surface).
+              Neither lives in the action row after the input re-layout. */}
         </div>
         <QuestionOverlay
           api={api}

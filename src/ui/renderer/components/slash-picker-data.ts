@@ -6,16 +6,30 @@
  * icons, and matching semantics stay identical — the two surfaces cannot drift.
  *
  * Categories present on this base: built-in slash commands, view shortcuts
- * (the QuickAction list — 홈/루틴/설정/플러그인 뷰), and installed plugins.
- * MCP-tool and assistant-skill enumeration is intentionally NOT a category
- * here: this app exposes no renderer-side data source for live MCP tools or
- * skills (only aggregate counts via `getRuntimeCounts`), so adding those
- * categories would require new IPC plumbing rather than a layout recovery.
+ * (the QuickAction list — 홈/루틴/설정/플러그인 뷰), installed plugins, live
+ * MCP-server tools, and registered assistant skills. MCP tools come from
+ * `window.lvis.mcp.servers()` (each connected server's `registeredTools`) and
+ * skills from `window.lvis.listSkills()` — both are existing read-only host
+ * IPCs, so these categories are wired to REAL data (no fake/stub fallback).
  */
-import { Terminal, Zap, Puzzle, type LucideIcon } from "lucide-react";
+import { Terminal, Zap, Puzzle, Server, Sparkles, type LucideIcon } from "lucide-react";
 import { t } from "../../../i18n/runtime.js";
 import type { QuickAction } from "./command-actions.js";
 import type { PluginEntry } from "./PluginGridButton.js";
+
+/** A single live MCP-server tool, namespaced by its server. */
+export interface McpToolEntry {
+  /** Namespaced tool name as registered (e.g. "serverId__toolName"). */
+  name: string;
+  /** Originating MCP server id. */
+  serverId: string;
+}
+
+/** A single registered assistant skill. */
+export interface SkillEntry {
+  name: string;
+  description: string;
+}
 
 /** A built-in slash command. `labelKey` resolves to a human label via i18n. */
 export interface SlashCommand {
@@ -48,15 +62,17 @@ export const SLASH_COMMANDS: SlashCommand[] = [
 ];
 
 /** The drill-down category model — one step per group, with a global search. */
-export type Category = "command" | "shortcut" | "plugin";
+export type Category = "command" | "shortcut" | "plugin" | "mcp" | "skills";
 
 /** Stable category order for both the popover drill-down and the inline menu. */
-export const CATEGORY_ORDER: Category[] = ["command", "shortcut", "plugin"];
+export const CATEGORY_ORDER: Category[] = ["command", "shortcut", "plugin", "mcp", "skills"];
 
 export const CATEGORY_ICON: Record<Category, LucideIcon> = {
   command: Terminal,
   shortcut: Zap,
   plugin: Puzzle,
+  mcp: Server,
+  skills: Sparkles,
 };
 
 /** Human label for a category header (i18n). */
@@ -68,6 +84,10 @@ export function catLabel(category: Category): string {
       return t("slashPicker.catShortcut");
     case "plugin":
       return t("slashPicker.catPlugin");
+    case "mcp":
+      return t("slashPicker.catMcp");
+    case "skills":
+      return t("slashPicker.catSkills");
   }
 }
 
@@ -80,6 +100,10 @@ export function catDescription(category: Category): string {
       return t("slashPicker.catShortcutDesc");
     case "plugin":
       return t("slashPicker.catPluginDesc");
+    case "mcp":
+      return t("slashPicker.catMcpDesc");
+    case "skills":
+      return t("slashPicker.catSkillsDesc");
   }
 }
 
@@ -112,4 +136,22 @@ export function filterPlugins(plugins: PluginEntry[], query: string): PluginEntr
   const q = normalizeSlashQuery(query);
   if (!q) return plugins;
   return plugins.filter((p) => p.label.toLowerCase().includes(q));
+}
+
+/** Filter live MCP-server tools by name or server-id substring. */
+export function filterMcpTools(tools: McpToolEntry[], query: string): McpToolEntry[] {
+  const q = normalizeSlashQuery(query);
+  if (!q) return tools;
+  return tools.filter(
+    (m) => m.name.toLowerCase().includes(q) || m.serverId.toLowerCase().includes(q),
+  );
+}
+
+/** Filter registered skills by name or description substring. */
+export function filterSkills(skills: SkillEntry[], query: string): SkillEntry[] {
+  const q = normalizeSlashQuery(query);
+  if (!q) return skills;
+  return skills.filter(
+    (s) => s.name.toLowerCase().includes(q) || s.description.toLowerCase().includes(q),
+  );
 }

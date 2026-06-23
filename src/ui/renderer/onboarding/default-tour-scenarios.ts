@@ -94,15 +94,16 @@ export interface TourScenario {
 /**
  * `first-boot-essentials` — the canonical first-login tour.
  *
- * Z onboarding chain extension (2026-05-19): the tour grew from 4 → 7
- * steps so the user lands with a full mental model of the host UI
- * before plugins are introduced. Steps cover recent chat history, the
- * Settings/menu entry, the vendor/model status-bar indicator, and the
- * plugin grid entry so the user discovers the plugin surface during the
- * first-boot tour rather than stumbling on it later. Each anchor is pinned
- * to a `data-tour-anchor=` attribute on a
- * production DOM element so renderer refactors break the tour visibly
- * (test in `__tests__/tour-anchors-trigger.test.tsx`).
+ * The tour walks the user through the host UI so they land with a full
+ * mental model: the composer, the input action bar, the command palette,
+ * recent chat history, the Settings/menu entry, and the vendor/model
+ * status-bar indicator. Plugins no longer have a dedicated step — the
+ * input-area relayout folded plugin views into the command palette
+ * (SlashPicker), so the palette step (anchor `command-palette-toggle`)
+ * already covers how the user reaches plugins. Each anchor is pinned to a
+ * `data-tour-anchor=` attribute on a production DOM element so renderer
+ * refactors break the tour visibly (test in
+ * `__tests__/tour-anchors-trigger.test.tsx`).
  */
 function buildFirstBootEssentials(): TourScenario {
   return {
@@ -149,12 +150,6 @@ function buildFirstBootEssentials(): TourScenario {
         anchorSelector: '[data-tour-anchor="status-bar-vendor"]',
         title: t("defaultTourScenarios.firstBootStep6Title"),
         body: t("defaultTourScenarios.firstBootStep6Body"),
-        completionTrigger: { kind: "manual" },
-      },
-      {
-        anchorSelector: '[data-tour-anchor="plugin-entry"]',
-        title: t("defaultTourScenarios.firstBootStep7Title"),
-        body: t("defaultTourScenarios.firstBootStep7Body"),
         completionTrigger: { kind: "manual" },
       },
     ],

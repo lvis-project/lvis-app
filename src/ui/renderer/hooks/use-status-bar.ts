@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import type { LvisApi } from "../types.js";
 import { LONG_TOAST_TTL_MS } from "../constants.js";
 import type { PersistentItem, ToastItem } from "./status-bar/types.js";
@@ -6,10 +6,29 @@ import { useStatusBarNotifications } from "./status-bar/use-status-bar-notificat
 import { useStatusBarInstall } from "./status-bar/use-status-bar-install.js";
 import { useStatusBarVendor } from "./status-bar/use-status-bar-vendor.js";
 import { useStatusBarHealth } from "./status-bar/use-status-bar-health.js";
+import { useStatusBarPermission } from "./status-bar/use-status-bar-permission.js";
 
 // Re-export shared types so existing call sites (App.tsx, StatusBar.tsx, tests)
 // continue to import from this module without changes.
 export type { StatusBarSeverity, NotificationToastMeta, PersistentItem, ToastItem } from "./status-bar/types.js";
+
+/**
+ * Compare two persistent items by their display-relevant fields only. The
+ * `onClick` handler is intentionally excluded: producers may build a fresh
+ * closure on every run, but a changed handler identity must not be treated as
+ * a state change (that would defeat the loop guard in `upsertPersistent`).
+ */
+function samePersistentDisplay(a: PersistentItem, b: PersistentItem): boolean {
+  return (
+    a.id === b.id &&
+    a.severity === b.severity &&
+    a.label === b.label &&
+    a.value === b.value &&
+    a.dot === b.dot &&
+    a.a11yLabel === b.a11yLabel &&
+    a.tooltip === b.tooltip
+  );
+}
 
 /**
  * Status-bar event surface shared between persistent (left slot) and
@@ -32,6 +51,12 @@ interface UseStatusBarOptions {
    * Korean sentence, short enough to feel ephemeral.
    */
   defaultToastTtlMs?: number;
+  /**
+   * Opens Settings → Permissions when the status-bar permission cell is
+   * clicked. The permission/review status moved here from the input action
+   * row (rendered as plain text after the model name).
+   */
+  onOpenPermissions?: () => void;
 }
 
 /**
@@ -42,10 +67,27 @@ interface UseStatusBarOptions {
  */
 const TOAST_QUEUE_CAP = 50;
 
+/**
+ * Left-slot render priority. Lower sorts first. The combined health dot sits
+ * just before the provider/model cell (StatusBar joins them visually), and the
+ * permission/review status renders immediately after the model name. Items not
+ * listed here keep their insertion order *after* these anchored cells (e.g. the
+ * transient pre-turn compact indicator).
+ */
+const PERSISTENT_ORDER: Record<string, number> = {
+  "health:services": 0,
+  "vendor:llm": 1,
+  "permission:mode": 2,
+};
+
+function persistentSortKey(id: string): number {
+  return PERSISTENT_ORDER[id] ?? 100;
+}
+
 export function useStatusBar(opts: UseStatusBarOptions) {
   // LONG_TOAST_TTL_MS (5 s) gives comfortable reading time for a Korean
   // phrase; callers that need a shorter or longer window pass defaultToastTtlMs.
-  const { api, defaultToastTtlMs = LONG_TOAST_TTL_MS } = opts;
+  const { api, defaultToastTtlMs = LONG_TOAST_TTL_MS, onOpenPermissions } = opts;
   const [persistent, setPersistent] = useState<PersistentItem[]>([]);
   const [toasts, setToasts] = useState<ToastItem[]>([]);
 
@@ -111,6 +153,14 @@ export function useStatusBar(opts: UseStatusBarOptions) {
     setPersistent((prev) => {
       const idx = prev.findIndex((p) => p.id === item.id);
       if (idx === -1) return [...prev, item];
+      // Defense-in-depth against render loops: if a producer re-runs and upserts
+      // a structurally identical item (same display fields), return the SAME
+      // array so no re-render is triggered. Only `onClick` identity may differ
+      // between runs (producers build a fresh closure each time); since the
+      // handler is not display state we ignore it here and keep the existing
+      // item's reference. This prevents an unstable producer callback from
+      // driving an infinite upsert → new-array → re-render loop.
+      if (samePersistentDisplay(prev[idx], item)) return prev;
       const next = [...prev];
       next[idx] = item;
       return next;
@@ -133,9 +183,25 @@ export function useStatusBar(opts: UseStatusBarOptions) {
   // one green indicator means both the LLM provider and marketplace are live.
   useStatusBarHealth({ api, upsertPersistent, removePersistent });
   useStatusBarVendor({ api, upsertPersistent });
+  // Registered AFTER vendor so the permission/review status renders to the
+  // right of the model name (plain text, divider-separated).
+  useStatusBarPermission({ api, upsertPersistent, onOpenPermissions });
+
+  // Stable priority sort so the model/permission cells render in a fixed order
+  // regardless of which producer's async fetch resolves first.
+  const orderedPersistent = useMemo(() => {
+    return persistent
+      .map((item, idx) => ({ item, idx }))
+      .sort((a, b) => {
+        const ka = persistentSortKey(a.item.id);
+        const kb = persistentSortKey(b.item.id);
+        return ka !== kb ? ka - kb : a.idx - b.idx;
+      })
+      .map((x) => x.item);
+  }, [persistent]);
 
   return {
-    persistent,
+    persistent: orderedPersistent,
     toasts,
     /** The single toast currently visible in the status bar (queue head). */
     visibleToast,
