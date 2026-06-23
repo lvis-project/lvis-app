@@ -156,7 +156,7 @@ export function CustomTitleBar({ children }: CustomTitleBarProps = {}) {
     return (
       <div
         data-testid="custom-titlebar-plain"
-        className="flex h-8 shrink-0 items-center gap-2 border-b border-border/(--opacity-half) bg-background px-3 text-foreground select-none"
+        className="flex h-11 shrink-0 items-center gap-2 border-b border-border/(--opacity-half) bg-background px-3 text-foreground select-none"
       >
         {children}
       </div>
@@ -168,11 +168,14 @@ export function CustomTitleBar({ children }: CustomTitleBarProps = {}) {
     // macOS: the OS draws the traffic lights into the hiddenInset area
     // (trafficLightPosition {x:18,y:16}). The band stays a drag region and
     // hosts the toolbar content with left padding (pl-20 ≈ 80px) so the first
-    // control clears the traffic lights with no hover overlap.
+    // control clears the traffic lights with no hover overlap. The band is
+    // h-11 (44px) with items-center, so an h-7 (28px) control sits centered at
+    // cy≈22 — on the traffic-light line — fully contained with ≈8px clearance
+    // top and bottom (no clipping below the band edge).
     return (
       <div
         data-testid="custom-titlebar-darwin"
-        className="flex h-8 shrink-0 items-center gap-2 border-b border-border/(--opacity-half) bg-background pl-20 pr-3 pt-3 text-foreground select-none"
+        className="flex h-11 shrink-0 items-center gap-2 border-b border-border/(--opacity-half) bg-background pl-20 pr-3 text-foreground select-none"
         style={{
           // @ts-expect-error — Electron-specific CSS extension
           WebkitAppRegion: "drag",
@@ -189,7 +192,7 @@ export function CustomTitleBar({ children }: CustomTitleBarProps = {}) {
   return (
     <div
       data-testid="custom-titlebar"
-      className="flex h-8 shrink-0 items-center gap-2 border-b border-border/(--opacity-half) bg-background pl-3 pt-3 text-foreground select-none"
+      className="flex h-11 shrink-0 items-center gap-2 border-b border-border/(--opacity-half) bg-background pl-3 text-foreground select-none"
       style={{
         // @ts-expect-error — Electron-specific CSS extension
         WebkitAppRegion: "drag",
@@ -200,12 +203,12 @@ export function CustomTitleBar({ children }: CustomTitleBarProps = {}) {
       {/* Spacer pushes the native window controls to the trailing corner; the
           empty span stays a drag region. */}
       <div className="flex-1" aria-hidden="true" />
-      {/* no-drag wrapper so buttons receive mouse events. The band carries a
-          top padding (pt-3) to lower the toolbar content onto the controls
-          line; the native window buttons must still span the FULL band height,
-          so `-mt-3 h-8` cancels that padding for this group only. */}
+      {/* no-drag wrapper so buttons receive mouse events. The band vertically
+          centers its content (items-center); the native window buttons must
+          still span the FULL band height (h-11) so their hover fill reaches the
+          band's top and bottom edges. */}
       <div
-        className="-mt-3 flex h-8 items-stretch"
+        className="flex h-11 items-stretch"
         style={{
           // @ts-expect-error — Electron-specific CSS extension
           WebkitAppRegion: "no-drag",
@@ -218,7 +221,7 @@ export function CustomTitleBar({ children }: CustomTitleBarProps = {}) {
           size="icon"
           onClick={handleMinimize}
           title={t("customTitleBar.minimize")}
-          className="titlebar-btn titlebar-btn-minimize h-8 w-11 rounded-none text-muted-foreground hover:bg-accent hover:text-foreground"
+          className="titlebar-btn titlebar-btn-minimize h-full w-11 rounded-none text-muted-foreground hover:bg-accent hover:text-foreground"
         >
           <Minus size={14} />
         </Button>
@@ -229,7 +232,7 @@ export function CustomTitleBar({ children }: CustomTitleBarProps = {}) {
           size="icon"
           onClick={handleMaximize}
           title={isMaximized ? t("customTitleBar.restore") : t("customTitleBar.maximize")}
-          className="titlebar-btn titlebar-btn-maximize h-8 w-11 rounded-none text-muted-foreground hover:bg-accent hover:text-foreground"
+          className="titlebar-btn titlebar-btn-maximize h-full w-11 rounded-none text-muted-foreground hover:bg-accent hover:text-foreground"
         >
           {isMaximized ? <Minimize2 size={14} /> : <Maximize2 size={14} />}
         </Button>
@@ -240,7 +243,7 @@ export function CustomTitleBar({ children }: CustomTitleBarProps = {}) {
           size="icon"
           onClick={handleClose}
           title={t("customTitleBar.close")}
-          className="titlebar-btn titlebar-btn-close h-8 w-11 rounded-none text-muted-foreground hover:bg-destructive hover:text-destructive-foreground"
+          className="titlebar-btn titlebar-btn-close h-full w-11 rounded-none text-muted-foreground hover:bg-destructive hover:text-destructive-foreground"
         >
           <X size={14} />
         </Button>

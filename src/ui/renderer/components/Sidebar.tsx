@@ -276,9 +276,10 @@ function SectionDivider({ collapsed, label }: { collapsed: boolean; label?: stri
 //   [펼침/닫힘 collapse toggle] → [검색 search] → [즐겨찾기 star] → [내보내기 export]
 // Always rendered (both expanded + collapsed). When the surrounding card is
 // expanded it forms the card's top strip; when collapsed it stands bare in the
-// band. Each control is an h-7 w-7 icon button with TIGHT ~2px gaps (gap-0.5);
-// the whole strip is a single h-7 items-center row so every glyph centers on
-// the lights' line.
+// band. Each control is an h-6 w-6 icon button (24px, ~4px pad around the 16px
+// glyph) with TIGHT ~2px gaps (gap-0.5) so the hover-highlight box hugs the
+// icon and never pops out of the band; the whole strip is a single h-7
+// items-center row so every glyph centers on the lights' line.
 //
 // `leadClearance` left-pads the FIRST button past the OS traffic lights on
 // darwin. The lights occupy roughly x in [18 .. 76] (trafficLightPosition.x:18
@@ -322,7 +323,7 @@ function ClusterStrip({
           <Button
             variant="ghost"
             size="icon"
-            className="h-7 w-7 aspect-square p-0 shrink-0 text-muted-foreground hover:text-foreground"
+            className="h-6 w-6 aspect-square p-0 shrink-0 text-muted-foreground hover:text-foreground"
             onClick={onToggleCollapse}
             title={collapsed ? t("mainToolbar.expandSidebar") : t("mainToolbar.collapseSidebar")}
             aria-label={collapsed ? t("mainToolbar.expandSidebar") : t("mainToolbar.collapseSidebar")}
@@ -341,7 +342,7 @@ function ClusterStrip({
           <Button
             variant="ghost"
             size="icon"
-            className="h-7 w-7 aspect-square p-0 shrink-0"
+            className="h-6 w-6 aspect-square p-0 shrink-0"
             onClick={onOpenUnifiedSearch}
             title={t("mainToolbar.unifiedSearch")}
             aria-label={t("mainToolbar.unifiedSearch")}
@@ -359,7 +360,7 @@ function ClusterStrip({
           <Button
             variant="ghost"
             size="icon"
-            className="h-7 w-7 aspect-square p-0 shrink-0"
+            className="h-6 w-6 aspect-square p-0 shrink-0"
             onClick={() => void onToggleCurrentSessionStar()}
             title={isCurrentSessionStarred ? t("mainToolbar.sessionUnstar") : t("mainToolbar.sessionStar")}
             aria-label={isCurrentSessionStarred ? t("mainToolbar.sessionUnstar") : t("mainToolbar.sessionStar")}
@@ -379,7 +380,7 @@ function ClusterStrip({
               <Button
                 variant="ghost"
                 size="icon"
-                className="h-7 w-7 aspect-square p-0 shrink-0"
+                className="h-6 w-6 aspect-square p-0 shrink-0"
                 title={t("mainToolbar.export")}
                 aria-label={t("mainToolbar.export")}
                 data-testid="toolbar-export"
@@ -622,15 +623,14 @@ export function Sidebar({
         {pluginViews.length === 0 && <div className="flex-1" />}
       </div>
 
-      {/* ── Footer — Marketplace + Settings ────────────────────────── */}
-      {/* `pt-5` (20px): the footer is bottom-pinned (`mt-auto`), so its top edge —
-          the divider "홈의 윗 라인" — is `sidebarBottom − footerHeight`. Padding
-          above the rows raises that divider until it pixel-aligns (≈1px) with the
-          composer's `border-t` pill seam on the right at the 460×840 default
-          window. The two live in independent containers (floating-card sidebar vs
-          flex content column) with different bottom anchors, so the alignment is
-          tuned for the default size; it drifts a few px at other window heights. */}
-      <div className={`border-t border-border px-2 pb-2 pt-5 mt-auto space-y-0.5 ${compact ? "flex flex-col items-center space-y-0.5" : ""}`}>
+      {/* ── Footer — Home + Marketplace + Settings ───────────────────── */}
+      {/* Bottom-pinned (`mt-auto`). The Home-top divider (this footer's
+          `border-t`) and the Home row share the SAME uniform spacing rhythm as
+          the primary nav group above (`py-2` + `space-y-0.5`) — no bespoke
+          margin correction. The divider LINE is kept; only the earlier
+          composer-seam-alignment padding was removed so the footer reads as one
+          uniform nav rhythm at every window height. */}
+      <div className={`border-t border-border px-2 py-2 mt-auto space-y-0.5 ${compact ? "flex flex-col items-center space-y-0.5" : ""}`}>
         {/* Home — placed above the marketplace, capped by this footer's border-t
             divider (which matches the composer's border-t seam). */}
         <NavItem
