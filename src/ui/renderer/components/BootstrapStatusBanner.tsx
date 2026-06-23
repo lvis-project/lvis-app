@@ -27,7 +27,7 @@ export function BootstrapStatusBanner({ status, onDismiss, onRetry }: Props): Re
 
   if (status.phase === "start") {
     return (
-      <div className="flex items-center justify-between gap-2 bg-muted border border-border text-muted-foreground text-sm px-4 py-2 rounded-md mx-2 mt-2 lvis-anim-slide-down">
+      <div className="flex items-center justify-between gap-2 bg-popover border border-border text-muted-foreground text-sm px-4 py-2 rounded-md mx-2 mt-2 shadow-lg lvis-anim-slide-down">
         <span>{t("bootstrapStatusBanner.installing")}</span>
       </div>
     );
@@ -35,7 +35,7 @@ export function BootstrapStatusBanner({ status, onDismiss, onRetry }: Props): Re
 
   if (status.phase === "error") {
     return (
-      <div className="flex items-center justify-between gap-2 bg-destructive/(--opacity-soft) border border-destructive/(--opacity-medium) text-destructive text-sm px-4 py-2 rounded-md mx-2 mt-2 lvis-anim-slide-down">
+      <div className="flex items-center justify-between gap-2 bg-popover border border-destructive/(--opacity-medium) text-destructive text-sm px-4 py-2 rounded-md mx-2 mt-2 shadow-lg lvis-anim-slide-down">
         <span>{t("bootstrapStatusBanner.bootstrapError", { message: status.message })}</span>
         <div className="flex items-center gap-1">
           <Button
@@ -63,7 +63,7 @@ export function BootstrapStatusBanner({ status, onDismiss, onRetry }: Props): Re
   // phase === "complete"
   if (status.skippedReason) {
     return (
-      <div className="flex items-center justify-between gap-2 bg-warning/(--opacity-soft) border border-warning/(--opacity-medium) text-warning text-sm px-4 py-2 rounded-md mx-2 mt-2 lvis-anim-slide-down">
+      <div className="flex items-center justify-between gap-2 bg-popover border border-warning/(--opacity-medium) text-warning text-sm px-4 py-2 rounded-md mx-2 mt-2 shadow-lg lvis-anim-slide-down">
         <span>{t("bootstrapStatusBanner.skipped", { skippedReason: status.skippedReason })}</span>
         <Button
           variant="ghost"
@@ -88,7 +88,7 @@ export function BootstrapStatusBanner({ status, onDismiss, onRetry }: Props): Re
         ? t("bootstrapStatusBanner.singlePluginFailed", { id: status.failed[0].id, error: truncate(status.failed[0].error) })
         : t("bootstrapStatusBanner.multiplePluginsFailed", { count: status.failed.length });
     return (
-      <div className="flex items-center justify-between gap-2 bg-destructive/(--opacity-soft) border border-destructive/(--opacity-medium) text-destructive text-sm px-4 py-2 rounded-md mx-2 mt-2 lvis-anim-slide-down">
+      <div className="flex items-center justify-between gap-2 bg-popover border border-destructive/(--opacity-medium) text-destructive text-sm px-4 py-2 rounded-md mx-2 mt-2 shadow-lg lvis-anim-slide-down">
         <span>{summary}</span>
         <div className="flex items-center gap-1">
           <Button
