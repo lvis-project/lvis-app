@@ -478,7 +478,11 @@ export function Sidebar({
             ? // Bare region: width hugs its widest child (the cluster strip,
               // ≈144px); no surface tokens — transparent, on the band. `items-start`
               // left-aligns the narrower icon-rail body under the cluster.
-              "w-auto items-start"
+              // `flex-1 min-h-0` stretches the bare column to the aside's bottom
+              // (matching the expanded card) so the collapsed icon-rail body below
+              // — itself `flex-1` — fills top-to-bottom in chat mode instead of
+              // hugging content height.
+              "w-auto items-start flex-1 min-h-0"
             : // Expanded: `flex-1 min-h-0` stretches the card to the aside's
               // bottom (matching the full-height aside + the collapsed rail's
               // flex-1 body), so the surface reaches near the window bottom
@@ -511,8 +515,10 @@ export function Sidebar({
               // pinned to the aside's left edge (left-2 ≈ 8px) so it stays within
               // the main content's collapsed left padding (pl-20 ≈ 80px). The
               // cluster strip above keeps its own lead clearance to clear the OS
-              // lights; the rail does NOT inherit that clearance.
-              "mt-1.5 w-14 flex min-h-0 flex-1 flex-col overflow-hidden rounded-2xl border border-border bg-card shadow-2xl"
+              // lights; the rail does NOT inherit that clearance. `mt-2.5`
+              // (≈10px) gives the rail card adequate top margin below the band so
+              // it is not flush against the cluster strip in chat mode.
+              "mt-2.5 w-14 flex min-h-0 flex-1 flex-col overflow-hidden rounded-2xl border border-border bg-card shadow-2xl"
             : "flex min-h-0 flex-1 flex-col overflow-hidden"
         }
       >
