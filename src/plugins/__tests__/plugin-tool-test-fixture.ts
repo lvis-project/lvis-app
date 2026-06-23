@@ -39,8 +39,9 @@ export function buildPluginToolsForTest(
 
   const tools: Tool[] = [];
   for (const mcpTool of manifestToolsToMcpTools(manifest)) {
-    // Build FIRST (authority/missing-category is a hard throw), THEN the #1182
-    // provider-strict lint drop — same order as PluginMcpHost.start.
+    // Build FIRST, THEN the #1182 provider-strict lint drop — same order as
+    // PluginMcpHost.start. A missing/invalid category no longer hard-throws
+    // (host-classifies-risk: default-strict write-equivalent).
     const built = mcpToolToPluginTool(pluginId, mcpTool, invoke);
     if (lintToolInputSchema(mcpTool.inputSchema).length > 0) continue;
     tools.push(built);

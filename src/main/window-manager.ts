@@ -23,9 +23,15 @@ import { randomUUID } from "node:crypto";
 import { existsSync, readFileSync, writeFileSync, renameSync } from "node:fs";
 import { join } from "node:path";
 import { validateSender, auditUnauthorized, UNAUTHORIZED_FRAME } from "../ipc-bridge.js";
+import { validateHostRendererSender } from "../ipc/gated.js";
 import type { AuditLogger } from "../audit/audit-logger.js";
 import { lvisHome } from "../shared/lvis-home.js";
 import { resolveAppIconPath } from "./app-icon.js";
+import { computeInitialMainWindowBounds } from "./main-window-bounds.js";
+
+/** Action-mode main-window size: centered on the work area, clamped to fit. */
+const ACTION_MODE_WIDTH = 800;
+const ACTION_MODE_HEIGHT = 600;
 
 /**
  * Allowlist for viewKey values accepted by the detach IPC handlers.
@@ -320,6 +326,12 @@ export class WindowManager {
    */
   private _hiddenByMaximize = new Set<number>();
   private _mainMoveTimer: ReturnType<typeof setTimeout> | null = null;
+  /**
+   * Active resize-for-mode tween interval. At most one tween runs at a time —
+   * a new tween cancels any in-flight one so rapid chat↔action toggling does
+   * not overlap animations; the latest target always wins and lands exactly.
+   */
+  private _resizeTween: ReturnType<typeof setInterval> | null = null;
   private _preloadPath: string;
   private _distRoot: string;
   private _getInitialThemeArgs: () => string[];
@@ -630,6 +642,84 @@ export class WindowManager {
   getMainWindow(): BrowserWindow | null {
     if (this._mainWindowId === null) return null;
     return BrowserWindow.fromId(this._mainWindowId) ?? null;
+  }
+
+  /**
+   * Smoothly animate a window to `target` bounds via a manual, cancellable
+   * tween. Electron's `setBounds(bounds, animate=true)` flag is macOS-ONLY —
+   * Windows/Linux ignore it and snap instantly. This interpolates x/y/width/
+   * height with an easeOutCubic curve on a ~60fps interval so the resize is
+   * smooth uniformly on every platform.
+   *
+   * Cancellation: any in-flight tween (`_resizeTween`) is cleared before a new
+   * one starts, so rapid chat↔action toggling never overlaps animations — the
+   * latest target wins and still lands EXACTLY on `target` (the final step
+   * snaps to the precise integer bounds rather than an interpolated value).
+   */
+  animateBoundsTo(
+    win: BrowserWindow,
+    target: { x: number; y: number; width: number; height: number },
+    opts: { durationMs?: number } = {},
+  ): void {
+    const durationMs = opts.durationMs ?? 220;
+
+    // Cancel any in-flight tween — latest target wins.
+    if (this._resizeTween !== null) {
+      clearInterval(this._resizeTween);
+      this._resizeTween = null;
+    }
+
+    if (win.isDestroyed()) return;
+
+    const start = win.getBounds();
+    const sameTarget =
+      start.x === target.x &&
+      start.y === target.y &&
+      start.width === target.width &&
+      start.height === target.height;
+    if (sameTarget || durationMs <= 0) {
+      win.setBounds(target, false);
+      return;
+    }
+
+    const frameMs = 16; // ≈60fps
+    const startedAt = Date.now();
+    // easeOutCubic: fast start, gentle settle.
+    const ease = (t: number): number => 1 - Math.pow(1 - t, 3);
+
+    this._resizeTween = setInterval(() => {
+      if (win.isDestroyed()) {
+        if (this._resizeTween !== null) {
+          clearInterval(this._resizeTween);
+          this._resizeTween = null;
+        }
+        return;
+      }
+
+      const elapsed = Date.now() - startedAt;
+      const linear = Math.min(1, elapsed / durationMs);
+
+      if (linear >= 1) {
+        // Final step — snap to the EXACT target, never an interpolated value.
+        if (this._resizeTween !== null) {
+          clearInterval(this._resizeTween);
+          this._resizeTween = null;
+        }
+        win.setBounds(target, false);
+        return;
+      }
+
+      const k = ease(linear);
+      win.setBounds(
+        {
+          x: Math.round(start.x + (target.x - start.x) * k),
+          y: Math.round(start.y + (target.y - start.y) * k),
+          width: Math.round(start.width + (target.width - start.width) * k),
+          height: Math.round(start.height + (target.height - start.height) * k),
+        },
+        false,
+      );
+    }, frameMs);
   }
 
   listChildren(): Array<{ windowId: number; viewKey: string; snapped: boolean }> {
@@ -1040,6 +1130,39 @@ export class WindowManager {
         ipcMain.on("lvis:window:load-session-in-main-result", listener);
         main.webContents.send("lvis:window:load-session-in-main", { sessionId, requestId });
       });
+    });
+
+    // Resize the main window to match the active workspace mode.
+    //   action → centered 800×600 (clamped to the work area), the focused
+    //            working canvas where inline views need room.
+    //   chat   → the 기존 right-docked initial bounds (the same geometry the
+    //            window boots with), computed from the primary work area.
+    // State-mutating channel — validateHostRendererSender (rejects plugin UI
+    // shells), mirroring the other host-only window IPCs.
+    ipcMain.handle("lvis:window:resize-for-mode", (event: IpcMainInvokeEvent, mode: unknown) => {
+      if (!validateHostRendererSender(event)) {
+        auditUnauthorized(auditLogger, "lvis:window:resize-for-mode", event);
+        return UNAUTHORIZED_FRAME;
+      }
+      if (mode !== "chat" && mode !== "action") {
+        return { ok: false, error: "invalid-mode" };
+      }
+      const main = this.getMainWindow();
+      if (!main || main.isDestroyed()) return { ok: false, error: "main-window-not-found" };
+
+      const { workArea } = screen.getPrimaryDisplay();
+      if (mode === "action") {
+        const width = Math.min(workArea.width, ACTION_MODE_WIDTH);
+        const height = Math.min(workArea.height, ACTION_MODE_HEIGHT);
+        const x = Math.round(workArea.x + (workArea.width - width) / 2);
+        const y = Math.round(workArea.y + (workArea.height - height) / 2);
+        // Manual easeOut tween (uniform on every platform). The native animate
+        // flag is macOS-only and is intentionally NOT passed anymore.
+        this.animateBoundsTo(main, { x, y, width, height });
+      } else {
+        this.animateBoundsTo(main, computeInitialMainWindowBounds(workArea));
+      }
+      return { ok: true };
     });
   }
 }

@@ -19,6 +19,7 @@ export const en = {
   "settingsContent.tabMarketplace": "Marketplace",
   "settingsContent.saveErrorMessage": "Settings save failed — {tab} tab",
   "settingsContent.closeButton": "Close",
+  "settingsContent.backToHome": "Back",
 } as const;
 export const ko: Record<keyof typeof en, string> = {
   "settingsContent.saving": "저장 중…",
@@ -40,4 +41,5 @@ export const ko: Record<keyof typeof en, string> = {
   "settingsContent.tabMarketplace": "마켓플레이스",
   "settingsContent.saveErrorMessage": "설정 저장 실패 — {tab} 탭",
   "settingsContent.closeButton": "닫기",
+  "settingsContent.backToHome": "뒤로",
 };

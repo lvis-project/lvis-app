@@ -11,6 +11,7 @@ import { MemorySearchPanel } from "./components/MemorySearchPanel.js";
 import { RoutinePanel } from "./components/RoutinePanel.js";
 import { WorkBoardPanel } from "./components/WorkBoardPanel.js";
 import { StarredView } from "./components/StarredView.js";
+import { SettingsInlineView } from "./SettingsInlineView.js";
 import type { SessionSummary } from "./hooks/use-sessions.js";
 import type { UserKeyboardIntentSnapshot } from "../../shared/chat-origin.js";
 
@@ -21,6 +22,11 @@ type StarredItem = Parameters<typeof StarredView>[0]["starred"][number];
 export interface MainContentProps {
   activeView: string;
   api: Api;
+  // inline settings (action mode) — chat mode detaches Settings to its own
+  // BrowserWindow and never routes through this branch.
+  settingsTab: string;
+  onSettingsSaved: () => void;
+  onCloseSettings: () => void;
   // starred
   starred: StarredItem[];
   currentSessionId: string;
@@ -180,6 +186,19 @@ export function MainContent(props: MainContentProps): ReactNode {
               if (loaded !== false) props.onActivateHome();
             })();
           }}
+        />
+      </MainPaneShell>
+    );
+  }
+
+  if (activeView === "settings") {
+    return (
+      <MainPaneShell padded={false}>
+        <SettingsInlineView
+          api={api}
+          initialTab={props.settingsTab}
+          onSaved={props.onSettingsSaved}
+          onBack={props.onCloseSettings}
         />
       </MainPaneShell>
     );

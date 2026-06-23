@@ -60,6 +60,14 @@ function installApi(opts: { mode: "llm" | "rule"; degraded: boolean }) {
         throw new Error(`unexpected reviewerDispatch: ${rawArgs}`);
       }),
       reviewerProviderHasKey: vi.fn(async (provider: string) => provider === "openai"),
+      sandboxCapability: vi.fn(async () => ({
+        platform: "linux" as NodeJS.Platform,
+        enabled: false,
+        available: true,
+        kind: "full" as const,
+        reason: "",
+        confines: { filesystem: true, process: true, network: true },
+      })),
       onManifestViolation: vi.fn(() => () => undefined),
       auditShow: vi.fn(async () => ({
         ok: true as const,
@@ -88,6 +96,8 @@ function installApi(opts: { mode: "llm" | "rule"; degraded: boolean }) {
   (globalThis as unknown as { window: typeof window }).window.lvis = lvis as never;
   (globalThis as unknown as { window: { lvisApi?: unknown } }).window.lvisApi = {
     onSettingsUpdated: vi.fn(() => () => undefined),
+    getSettings: vi.fn(async () => ({ features: { osToolSandbox: false } })),
+    updateSettings: vi.fn(async () => ({})),
   };
   return lvis;
 }

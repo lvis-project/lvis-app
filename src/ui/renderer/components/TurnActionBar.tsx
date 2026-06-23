@@ -1,5 +1,5 @@
-import { RefreshCw, GitBranch, Star, ThumbsUp, ThumbsDown } from "lucide-react";
-import { useMemo, useState } from "react";
+import { Copy, Check, RefreshCw, GitBranch, Star, ThumbsUp, ThumbsDown } from "lucide-react";
+import { useMemo, useRef, useState } from "react";
 import { Button } from "../../../components/ui/button.js";
 import { Input } from "../../../components/ui/input.js";
 import { Tooltip, TooltipContent, TooltipTrigger } from "../../../components/ui/tooltip.js";
@@ -23,6 +23,7 @@ export function TurnActionBar({
   pricing,
   vendor,
   isStarred,
+  copyText,
   actions,
   onFeedback,
 }: {
@@ -40,6 +41,12 @@ export function TurnActionBar({
   /** Active vendor — selects cache-cost branching in TokenCostBadge. */
   vendor?: LLMVendor;
   isStarred?: boolean;
+  /**
+   * Plain text of this turn's assistant message (the same cleaned text the
+   * user sees rendered). When provided, a leading Copy button writes it to
+   * the clipboard. Omitted in view-mode / when there is nothing to copy.
+   */
+  copyText?: string;
   actions?: { onRetry?: () => void; onFork?: () => void; onToggleStar?: () => void };
   onFeedback?: (rating: "up" | "down", reason?: string) => void | Promise<void>;
 }) {
@@ -47,6 +54,17 @@ export function TurnActionBar({
   const [feedbackRating, setFeedbackRating] = useState<"up" | "down" | null>(null);
   const [showReasonBox, setShowReasonBox] = useState(false);
   const [reasonDraft, setReasonDraft] = useState("");
+  const [copied, setCopied] = useState(false);
+  const copyResetTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+
+  const handleCopy = () => {
+    const text = copyText ?? "";
+    if (!text) return;
+    void navigator.clipboard.writeText(text);
+    setCopied(true);
+    if (copyResetTimer.current) clearTimeout(copyResetTimer.current);
+    copyResetTimer.current = setTimeout(() => setCopied(false), 1500);
+  };
 
   // Centralized KST formatter — keeps wall-clock display consistent between
   // TurnActionBar and SessionCalendarPopover regardless of OS timezone.
@@ -57,6 +75,28 @@ export function TurnActionBar({
       {timestampLabel ? <span className="shrink-0">{timestampLabel}</span> : null}
       {turnSummary ? <TokenCostBadge {...turnSummary} pricing={pricing} vendor={vendor} /> : null}
       <div className="flex-1" />
+      {copyText ? (
+        <Tooltip>
+          <TooltipTrigger asChild>
+            <Button
+              type="button"
+              variant="ghost"
+              size="icon"
+              className={`h-5 w-5 ${copied ? "text-success" : "text-muted-foreground hover:text-foreground"}`}
+              title={t("turnActionBar.copyButton")}
+              aria-label={t("turnActionBar.copyButton")}
+              onClick={handleCopy}
+            >
+              {copied ? (
+                <Check key="on" className="h-3 w-3 lvis-anim-pop" />
+              ) : (
+                <Copy key="off" className="h-3 w-3" />
+              )}
+            </Button>
+          </TooltipTrigger>
+          <TooltipContent>{t("turnActionBar.copyButton")}</TooltipContent>
+        </Tooltip>
+      ) : null}
       {actions?.onRetry && (
         <Tooltip>
           <TooltipTrigger asChild>

@@ -5,21 +5,28 @@
  * 본 컴포넌트는 BOTTOM ROW 전체를 담당:
  *
  *   info cluster (좌, grow):
- *     [○ TokenRing $] [⇧⏎ 줄바꿈] [⌘⏎ 즉시(busy)]
+ *     [○ TokenRing $]
  *
  *   actions cluster (우):
- *     [■ 취소(busy, 컴팩트 원형 stop)] [↑ 전송 ⏎]
+ *     [? 단축키] [생각 모드] [■ 취소(busy, 컴팩트 원형 stop)] [↑ 전송 ⏎]
  *
  * Send 버튼 라벨은 isBusy 상관없이 항상 "전송" 으로 고정. 큐 인입 시맨틱은
- * textarea placeholder ("메시지 큐에 추가됩니다 ...") 와 ⌘⏎ hint 로 표현해
- * 버튼이 두 줄로 줄바꿈되는 레이아웃 깨짐을 방지.
+ * textarea placeholder ("메시지 큐에 추가됩니다 ...") 로 표현해 버튼이 두 줄로
+ * 줄바꿈되는 레이아웃 깨짐을 방지.
+ *
+ * Keyboard shortcuts are no longer rendered as variable-width inline hint text
+ * (⇧⏎ 줄바꿈 / ⌘⏎ 즉시). Instead a single fixed-size "?" button surfaces them
+ * on demand via a tidy popover, so the action row width stays stable.
  *
  * Spec: docs/blueprints/composer-redesign-message-queue.md
  */
 
 import type { ReactNode } from "react";
-import { Square } from "lucide-react";
+import { HelpCircle, Square } from "lucide-react";
 import { Button } from "../../../components/ui/button.js";
+import { Popover, PopoverContent, PopoverTrigger } from "../../../components/ui/popover.js";
+import { Tooltip, TooltipContent, TooltipTrigger } from "../../../components/ui/tooltip.js";
+import { ThinkingButton } from "./ThinkingButton.js";
 import type { UserKeyboardIntentSnapshot } from "../../../shared/chat-origin.js";
 import { useTranslation } from "../../../i18n/react.js";
 
@@ -34,6 +41,9 @@ export interface BottomActionRowProps {
   onSend: () => void;
   /** ESC 취소 = LLM abort (큐 보존). LLM busy 일 때만 노출. */
   onCancel: () => void;
+  /** Thinking (extended reasoning) mode — toggle + depth button, before Send. */
+  enableThinkingChat: boolean;
+  onToggleThinking: (next: boolean) => void | Promise<void>;
 }
 
 export function BottomActionRow({
@@ -42,30 +52,21 @@ export function BottomActionRow({
   isSendDisabled,
   onSend,
   onCancel,
+  enableThinkingChat,
+  onToggleThinking,
 }: BottomActionRowProps) {
   const { t } = useTranslation();
   return (
     <div
       data-testid="composer-bottom-action-row"
-      className="flex flex-wrap items-center gap-3 px-3 pt-1 pb-2"
+      className="flex flex-nowrap items-center gap-3 px-3 pt-1 pb-2"
     >
-      <div className="flex min-w-0 flex-1 flex-wrap items-center gap-2">
+      <div className="flex min-w-0 flex-1 flex-nowrap items-center gap-2 overflow-hidden">
         {tokenSlot}
-        <span className="inline-flex items-center gap-1 text-[11px] text-muted-foreground">
-          <Kbd>⇧⏎</Kbd>
-          <span>{t("bottomActionRow.newline")}</span>
-        </span>
-        {isBusy && (
-          <span
-            className="inline-flex items-center gap-1 text-[11px] text-muted-foreground"
-            data-testid="composer-hint-immediate"
-          >
-            <Kbd>⌘⏎</Kbd>
-            <span>{t("bottomActionRow.immediateInject")}</span>
-          </span>
-        )}
       </div>
-      <div className="flex shrink-0 items-center gap-2">
+      <div className="flex shrink-0 flex-nowrap items-center gap-1.5">
+        <ShortcutsButton />
+        <ThinkingButton enabled={enableThinkingChat} onToggle={onToggleThinking} />
         {isBusy && (
           <button
             type="button"
@@ -83,7 +84,7 @@ export function BottomActionRow({
           onClick={onSend}
           disabled={isSendDisabled}
           data-testid="composer-send-button"
-          className="inline-flex h-7 items-center gap-1.5 px-3 text-xs font-semibold"
+          className="inline-flex h-[26px] items-center gap-1.5 px-3 text-xs font-semibold"
         >
           <span>{t("bottomActionRow.sendButton")}</span>
           <KbdInverse>⏎</KbdInverse>
@@ -110,6 +111,62 @@ export function makeBottomActionSendHandler(
     };
     baseSend(intent);
   };
+}
+
+/**
+ * ShortcutsButton — fixed-size "?" affordance that replaces the old
+ * variable-width inline keyboard hints. Hover surfaces a "단축키" tooltip;
+ * click opens a tidy popover listing every composer keybinding. Fixed form
+ * (h-[26px] w-[26px]) keeps the action row layout stable regardless of locale.
+ */
+function ShortcutsButton() {
+  const { t } = useTranslation();
+  const label = t("bottomActionRow.shortcuts");
+  return (
+    <Popover>
+      <Tooltip>
+        <TooltipTrigger asChild>
+          <PopoverTrigger asChild>
+            <Button
+              type="button"
+              variant="outline"
+              size="icon"
+              data-testid="composer-shortcuts-button"
+              aria-label={label}
+              className="h-[26px] w-[26px] shrink-0 bg-input-bar text-muted-foreground"
+            >
+              <HelpCircle className="h-3.5 w-3.5" />
+            </Button>
+          </PopoverTrigger>
+        </TooltipTrigger>
+        <TooltipContent side="top">{label}</TooltipContent>
+      </Tooltip>
+
+      <PopoverContent align="end" className="w-56 p-2" data-testid="composer-shortcuts-popover">
+        <div className="px-1 pb-1.5 text-[11px] font-medium text-muted-foreground">{label}</div>
+        <div className="flex flex-col gap-0.5">
+          <ShortcutRow keys={["⏎"]} label={t("bottomActionRow.shortcutSend")} />
+          <ShortcutRow keys={["⇧⏎"]} label={t("bottomActionRow.shortcutNewline")} />
+          <ShortcutRow keys={["⌘⏎"]} label={t("bottomActionRow.shortcutImmediate")} />
+          <ShortcutRow keys={["Esc"]} label={t("bottomActionRow.shortcutCancel")} />
+          <ShortcutRow keys={["⌘K"]} label={t("bottomActionRow.shortcutPalette")} />
+        </div>
+      </PopoverContent>
+    </Popover>
+  );
+}
+
+function ShortcutRow({ keys, label }: { keys: string[]; label: string }) {
+  return (
+    <div className="flex items-center justify-between gap-3 rounded px-1 py-0.5 text-[11px]">
+      <span className="text-foreground">{label}</span>
+      <span className="inline-flex items-center gap-1">
+        {keys.map((k) => (
+          <Kbd key={k}>{k}</Kbd>
+        ))}
+      </span>
+    </div>
+  );
 }
 
 function Kbd({ children }: { children: ReactNode }) {

@@ -87,6 +87,9 @@ export const PERMISSIONS = {
   auditVerify: "lvis:permissions:audit-verify",
   hookTrustList: "lvis:permissions:hook-trust-list",
   manifestViolation: "lvis:permissions:manifest-violation",
+  // Read-only: OS sandbox capability for the current platform — drives the
+  // honest, platform-aware "OS 도구 샌드박스" toggle description in PermissionsTab.
+  sandboxCapability: "lvis:permissions:sandbox-capability",
   // User-approval store
   userApprovalRecord: "lvis:permissions:user-approval-record",
   userApprovalRevoke: "lvis:permissions:user-approval-revoke",

@@ -33,6 +33,7 @@ import {
   withPluginInstallLock,
 } from "../../plugins/install-lifecycle.js";
 import { uninstallPluginWithLifecycle } from "../../plugins/uninstall-lifecycle.js";
+import { IncompatibleAppVersionError, INCOMPATIBLE_APP_VERSION_CODE } from "../../plugins/types.js";
 import { lvisHome } from "../../shared/lvis-home.js";
 const log = createLogger("lvis");
 const MARKETPLACE_PING_TIMEOUT_MS = 15_000;
@@ -415,10 +416,18 @@ export function registerPluginsHandlers(deps: IpcDeps): void {
       });
     } catch (err) {
       const message = errMessage(err) || "addPlugin failed";
+      // Plugin↔app minimum-version gate — surface the stable English IPC code
+      // so the renderer maps it to the Korean "needs newer app" copy + update
+      // link (per the IPC Error Message Language Convention). Other install
+      // failures keep their plain message.
+      const code = err instanceof IncompatibleAppVersionError
+        ? INCOMPATIBLE_APP_VERSION_CODE
+        : undefined;
       broadcastPluginLifecycleEvent("lvis:plugins:install-result", {
         slug: lifecycleSlug,
         success: false,
-        error: message,
+        error: code ?? message,
+        ...(code ? { message } : {}),
       });
       throw err;
     }

@@ -1,13 +1,11 @@
 import { useCallback, useEffect, useRef, type MouseEvent, type ReactNode } from "react";
 import { Paperclip, User } from "lucide-react";
 import { Button } from "../../../components/ui/button.js";
-import { Checkbox } from "../../../components/ui/checkbox.js";
-import { Label } from "../../../components/ui/label.js";
 import { t } from "../../../i18n/runtime.js";
 import { useTranslation } from "../../../i18n/react.js";
 import { PluginGridButton, type PluginEntry } from "./PluginGridButton.js";
 import type { InstallPhase } from "../hooks/use-plugin-marketplace.js";
-import { CommandPopover, type QuickAction } from "./CommandPopover.js";
+import { SlashPicker, type QuickAction } from "./SlashPicker.js";
 import type { RolePreset } from "../../../data/role-presets.js";
 import type { AssistantContextMenuAction } from "../../../shared/assistant-context-menu.js";
 
@@ -39,9 +37,6 @@ export interface InputActionBarProps {
   activePreset: RolePreset | null | undefined;
   activePresetId: string;
   onSelectPreset: (id: string) => void;
-  // Trailing — thinking
-  enableThinkingChat: boolean;
-  onToggleThinking: (enabled: boolean) => void | Promise<void>;
   // v6: 환경 컨트롤 — 첨부와 페르소나 사이. caller (ChatView) 가 실제 컴포넌트
   // 인스턴스를 주입. InputActionBar 는 PermissionModeBadge /
   // DeferredApprovalChip 의 구체 타입에 의존 X (slot pattern).
@@ -76,8 +71,6 @@ export function InputActionBar({
   activePreset,
   activePresetId,
   onSelectPreset,
-  enableThinkingChat,
-  onToggleThinking,
   permissionSlot,
   approvalSlot,
 }: InputActionBarProps) {
@@ -124,10 +117,10 @@ export function InputActionBar({
       // `first-boot-essentials` pins to this action-bar root, see
       // `default-tour-scenarios.ts`.
       data-tour-anchor="input-action-bar"
-      className="flex min-w-0 items-center gap-2 px-3 pt-2"
+      className="flex min-w-0 flex-nowrap items-center gap-1.5 px-3 pt-2"
     >
       {/* Leading cluster */}
-      <div className="flex shrink-0 items-center gap-0.5" data-testid="iab-leading">
+      <div className="flex shrink-0 flex-nowrap items-center gap-0.5" data-testid="iab-leading">
         <PluginGridButton
           plugins={plugins}
           onSelect={onSelectPlugin}
@@ -136,8 +129,10 @@ export function InputActionBar({
           onOpenMarketplace={onOpenMarketplace}
           marketplaceUrlReady={marketplaceUrlReady}
         />
-        <CommandPopover
+        <SlashPicker
           actions={commandActions}
+          plugins={plugins}
+          onSelectPlugin={onSelectPlugin}
           onInsert={onInsertSlashCommand}
           open={commandPopoverOpen}
           onOpenChange={onCommandPopoverOpenChange}
@@ -150,12 +145,12 @@ export function InputActionBar({
             deny-listed dangerous extensions. The chip count badge lives on
             the inline composer chip (n/5), not here. */}
         <Button
-          variant="ghost"
+          variant="outline"
           size="sm"
           onClick={() => void onAttach()}
           disabled={attachDisabled}
           data-testid="iab-attach-button"
-          className="h-7 w-7 p-0"
+          className="h-[26px] w-[26px] shrink-0 bg-input-bar p-0"
           title={attachButtonLabel(attachDisabled, attachDisabledReason)}
           aria-label={attachButtonLabel(attachDisabled, attachDisabledReason)}
         >
@@ -176,7 +171,7 @@ export function InputActionBar({
         <Button
           variant="outline"
           size="sm"
-          className="relative h-7 w-7 shrink-0 bg-input-bar p-0"
+          className="relative h-[26px] w-[26px] shrink-0 bg-input-bar p-0"
           title={assistantTitle}
           aria-label={assistantTitle}
           data-testid="iab-assistant-context-button"
@@ -189,18 +184,9 @@ export function InputActionBar({
           )}
         </Button>
 
-        {/* Thinking checkbox — UI-only for now (vendorSupports gate removed
-            so the toggle is always visible regardless of LLM model). Toggle
-            wires through to existing onToggleThinking; on vendors that
-            don't support thinking the engine simply ignores the flag. */}
-        <Label className="flex shrink-0 cursor-pointer select-none items-center gap-1.5 text-muted-foreground">
-          <Checkbox
-            className="size-3.5"
-            checked={enableThinkingChat}
-            onCheckedChange={(checked) => void onToggleThinking(checked === true)}
-          />
-          <span className="text-[11px]">Thinking</span>
-        </Label>
+        {/* Thinking moved out of this row into a dedicated ThinkingButton in
+            the BottomActionRow (toggle + Low/Mid/High depth, before Send), so
+            it no longer competes for space here and gains a depth control. */}
       </div>
     </div>
   );

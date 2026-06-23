@@ -50,8 +50,6 @@ function renderBar(overrides: Partial<Parameters<typeof InputActionBar>[0]> = {}
     activePreset: mockPreset,
     activePresetId: "default",
     onSelectPreset: vi.fn(),
-    enableThinkingChat: false,
-    onToggleThinking: vi.fn(),
     ...overrides,
   };
   return render(
@@ -96,31 +94,22 @@ describe("InputActionBar (post indexer-removal)", () => {
     expect(leading.querySelector("[data-testid='plugin-grid-button']")).toBeTruthy();
   });
 
-  it("renders CommandPopover trigger inside leading cluster", () => {
+  it("renders the unified slash-picker trigger inside leading cluster", () => {
+    // The ⌘ CommandPopover was merged into the unified SlashPicker; its
+    // trigger keeps the `command-popover-trigger` testid + the
+    // command-palette-toggle tour anchor so existing wiring stays live.
     const { getByTestId } = renderBar();
     const leading = getByTestId("iab-leading");
     expect(leading.querySelector("[data-testid='command-popover-trigger']")).toBeTruthy();
   });
 
-  it("renders thinking checkbox (always visible — engine ignores the flag on unsupported vendors)", () => {
-    // Previously gated by `vendorSupportsThinking`. The toggle is now
-    // always visible: vendors that don't support thinking simply ignore
-    // the flag at the engine layer, but the UI surface is consistent
-    // across LLM models.
-    const { getByText } = renderBar({});
-    expect(getByText("Thinking")).toBeTruthy();
-  });
-
-  it("uses the shadcn checkbox affordance for Thinking", () => {
-    const { getByRole } = renderBar({ enableThinkingChat: false });
-    const checkbox = getByRole("checkbox", { name: "Thinking" });
-    expect(checkbox).toHaveAttribute("data-state", "unchecked");
-    // shadcn v4 Checkbox: rounded-[4px] + border-input + data-checked state.
-    expect(checkbox.className).toContain("rounded-[4px]");
-    expect(checkbox.className).toContain("border-input");
-    expect(checkbox.className).toContain("data-checked:bg-primary");
-    expect(checkbox.className).not.toContain("bg-white");
-    expect(checkbox.className).not.toContain("appearance-auto");
+  it("no longer renders the inline Thinking checkbox (moved to BottomActionRow)", () => {
+    // Thinking is now a dedicated ThinkingButton (toggle + depth) before Send
+    // in the BottomActionRow, so the action bar must not carry the old inline
+    // checkbox/label any more.
+    const { queryByText, container } = renderBar({});
+    expect(queryByText("Thinking")).toBeNull();
+    expect(container.querySelector("[role='checkbox']")).toBeNull();
   });
 
   it("paperclip attach button calls onAttach when clicked and not disabled", () => {
@@ -213,7 +202,7 @@ describe("InputActionBar (post indexer-removal)", () => {
   });
 
   it("keeps fixed trailing controls shrink-proof while permission slots clip first", () => {
-    const { getByTestId, getByText } = renderBar({
+    const { getByTestId } = renderBar({
       permissionSlot: <span data-testid="long-permission-slot">자동 검증 · 읽기 허용 · 매우 긴 권한 상태 텍스트</span>,
       approvalSlot: <span data-testid="long-approval-slot">승인 확인 실패 · 매우 긴 큐 상태 텍스트</span>,
     });
@@ -221,6 +210,5 @@ describe("InputActionBar (post indexer-removal)", () => {
     expect(getByTestId("iab-permission-slots").className).toContain("min-w-0");
     expect(getByTestId("iab-permission-slots").className).toContain("overflow-hidden");
     expect(getByTestId("iab-assistant-context-button").className).toContain("shrink-0");
-    expect(getByText("Thinking").parentElement?.className).toContain("shrink-0");
   });
 });

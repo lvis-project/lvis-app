@@ -57,7 +57,7 @@ describe("App smoke (Phase 1 infra)", () => {
     expect(api.starredList).toHaveBeenCalledTimes(1);
   });
 
-  it("opens the native settings window from the API key prompt", async () => {
+  it("opens settings inline (action mode) from the API key prompt", async () => {
     const { container, api } = await renderApp({ hasApiKey: false });
     await waitFor(() => expect(api.getSettings).toHaveBeenCalled());
     await waitFor(() => expect(container.textContent).toContain("API 키 설정 필요"));
@@ -70,7 +70,14 @@ describe("App smoke (Phase 1 infra)", () => {
       fireEvent.click(settingsButton!);
     });
 
-    await waitFor(() => expect(api.openSettingsWindow).toHaveBeenCalledWith("llm"));
+    // Default appMode is "action" — Settings renders INLINE in the main area
+    // (same setActiveView + MainContent path as 업무보드/루틴/메모리/별표), so
+    // the detached BrowserWindow IPC must NOT fire and chat must not send.
+    await waitFor(() =>
+      expect(container.querySelector('[data-testid="settings-sidebar-heading"]')).toBeTruthy(),
+    );
+    expect(container.querySelector('[data-testid="settings-inline-back"]')).toBeTruthy();
+    expect(api.openSettingsWindow).not.toHaveBeenCalled();
     expect(api.chatSend).not.toHaveBeenCalled();
   });
 
@@ -81,6 +88,65 @@ describe("App smoke (Phase 1 infra)", () => {
     expect(api.addStarred).toHaveBeenCalledWith(entry);
     const list = await api.listStarred();
     expect(Array.isArray(list)).toBe(true);
+  });
+});
+
+describe("Settings inline (action mode) vs detached (chat mode)", () => {
+  it("renders Settings inline, marks the sidebar item active, and returns home", async () => {
+    const { container, api } = await renderApp();
+    await waitFor(() => expect(api.getSettings).toHaveBeenCalled());
+
+    const sidebarSettings = container.querySelector(
+      '[data-testid="sidebar-settings"]',
+    ) as HTMLElement | null;
+    expect(sidebarSettings).toBeTruthy();
+
+    await act(async () => {
+      fireEvent.click(sidebarSettings!);
+    });
+
+    // Inline render via setActiveView + MainContent — never the detached window.
+    await waitFor(() =>
+      expect(container.querySelector('[data-testid="settings-sidebar-heading"]')).toBeTruthy(),
+    );
+    expect(api.openSettingsWindow).not.toHaveBeenCalled();
+    // Sidebar item shows ACTIVE state (aria-current=page) while inline.
+    expect(
+      container
+        .querySelector('[data-testid="sidebar-settings"]')
+        ?.getAttribute("aria-current"),
+    ).toBe("page");
+
+    // Re-clicking while already on settings is a no-op (view stays mounted).
+    await act(async () => {
+      fireEvent.click(container.querySelector('[data-testid="sidebar-settings"]')!);
+    });
+    expect(container.querySelector('[data-testid="settings-sidebar-heading"]')).toBeTruthy();
+
+    // Back-to-home affordance returns to the prior/home view.
+    await act(async () => {
+      fireEvent.click(container.querySelector('[data-testid="settings-inline-back"]')!);
+    });
+    await waitFor(() =>
+      expect(container.querySelector('[data-testid="settings-sidebar-heading"]')).toBeFalsy(),
+    );
+  });
+
+  it("detaches Settings to its own window in chat mode (unchanged path)", async () => {
+    const { container, api } = await renderApp();
+    await waitFor(() => expect(api.getSettings).toHaveBeenCalled());
+
+    await act(async () => {
+      fireEvent.click(container.querySelector('[data-testid="app-mode-chat"]')!);
+    });
+    await act(async () => {
+      fireEvent.click(container.querySelector('[data-testid="sidebar-settings"]')!);
+    });
+
+    // Chat mode keeps the existing detached BrowserWindow path; nothing renders
+    // inline.
+    await waitFor(() => expect(api.openSettingsWindow).toHaveBeenCalled());
+    expect(container.querySelector('[data-testid="settings-sidebar-heading"]')).toBeFalsy();
   });
 });
 

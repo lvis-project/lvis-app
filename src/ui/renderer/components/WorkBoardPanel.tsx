@@ -23,7 +23,7 @@ import { t } from "../../../i18n/runtime.js";
 import { MARKDOWN_REMARK_PLUGINS } from "../utils/markdown-plugins.js";
 import { Badge } from "../../../components/ui/badge.js";
 import { Button } from "../../../components/ui/button.js";
-import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "../../../components/ui/card.js";
+import { CardContent, CardDescription, CardHeader, CardTitle } from "../../../components/ui/card.js";
 import { Checkbox } from "../../../components/ui/checkbox.js";
 import { Input } from "../../../components/ui/input.js";
 import { Label } from "../../../components/ui/label.js";
@@ -1317,7 +1317,7 @@ export function WorkBoardPanel({ api }: WorkBoardPanelProps) {
 
   return (
     <>
-      <Card
+      <div
         className="mx-auto flex min-h-0 min-w-0 flex-1 w-full max-w-6xl flex-col overflow-hidden"
         data-testid="work-board-panel"
       >
@@ -1395,7 +1395,7 @@ export function WorkBoardPanel({ api }: WorkBoardPanelProps) {
             <ReportsSection api={api} />
           </div>
         </CardContent>
-      </Card>
+      </div>
 
       {showCreate && (
         <WorkItemCreateDialog

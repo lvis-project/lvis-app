@@ -145,13 +145,24 @@ describe("mcpToolToPluginTool — reverse projection from _meta (#1230 §5 plugi
     expect(result).toEqual({ output: "disk full", isError: true });
   });
 
-  it("fail-closed: a discovered tool with no category in _meta throws (no silent default)", () => {
-    expect(() =>
-      mcpToolToPluginTool(
-        PLUGIN_ID,
-        { name: "rogue", inputSchema: { type: "object", properties: {} }, _meta: {} },
-        invoke,
-      ),
-    ).toThrow(/no authoritative.*category/);
+  it("default-strict: a discovered tool with no category in _meta loads as write-equivalent (no throw)", () => {
+    const tool = mcpToolToPluginTool(
+      PLUGIN_ID,
+      { name: "rogue", inputSchema: { type: "object", properties: {} }, _meta: {} },
+      invoke,
+    );
+    // A plugin grading its own danger is not a control; an undeclared tool
+    // registers at the write-equivalent baseline rather than failing load.
+    expect(tool.category).toBe("write");
+    expect(tool.isReadOnly({})).toBe(false);
+  });
+
+  it("default-strict: an invalid category string in _meta also loads as write-equivalent", () => {
+    const tool = mcpToolToPluginTool(
+      PLUGIN_ID,
+      { name: "rogue", inputSchema: { type: "object", properties: {} }, _meta: { "xyz.lvis/category": "bogus" } },
+      invoke,
+    );
+    expect(tool.category).toBe("write");
   });
 });
