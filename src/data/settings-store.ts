@@ -328,8 +328,20 @@ export interface WebViewSettings {
  */
 export type SystemCloseBehavior = "hide-to-tray" | "quit";
 
+/**
+ * Workspace mode persisted across restarts. `"action"` is the inline working
+ * layout (expanded sidebar, centered 800×600 window); `"chat"` is the focused
+ * chat layout (collapsed icon rail, right-docked window). Persisted here so the
+ * renderer can seed its first render from the saved value (no flash of the
+ * wrong mode) and the main process can size the window correctly at creation.
+ * SoT for the value union lives in `src/shared/initial-app-mode.ts`.
+ */
+export type SystemAppMode = "chat" | "action";
+
 export interface SystemSettings {
   closeBehavior: SystemCloseBehavior;
+  /** Persisted workspace mode (chat vs action). Default "action". */
+  appMode: SystemAppMode;
 }
 
 /**
@@ -499,6 +511,7 @@ const DEFAULT_SETTINGS: AppSettings = {
   },
   system: {
     closeBehavior: "hide-to-tray",
+    appMode: "action",
   },
   plugins: {},
   pluginConfigs: {},
@@ -684,6 +697,15 @@ export class SettingsService {
         log.warn(
           `system.closeBehavior patch ignored (received ${JSON.stringify(rawBehavior)}), keeping %s`,
           this.settings.system.closeBehavior,
+        );
+      }
+      const rawAppMode = partial.system.appMode;
+      if (typeof rawAppMode === "string" && (VALID_APP_MODES as readonly string[]).includes(rawAppMode)) {
+        next.appMode = rawAppMode as SystemAppMode;
+      } else if (rawAppMode !== undefined) {
+        log.warn(
+          `system.appMode patch ignored (received ${JSON.stringify(rawAppMode)}), keeping %s`,
+          this.settings.system.appMode,
         );
       }
       this.settings.system = next;
@@ -1184,23 +1206,39 @@ function normalizeWebView(input: unknown): WebViewSettings {
 }
 
 const VALID_CLOSE_BEHAVIORS: readonly SystemCloseBehavior[] = ["hide-to-tray", "quit"];
+const VALID_APP_MODES: readonly SystemAppMode[] = ["chat", "action"];
 
 function normalizeSystem(input: unknown): SystemSettings {
   if (!input || typeof input !== "object" || Array.isArray(input)) {
     return { ...DEFAULT_SETTINGS.system };
   }
-  const obj = input as { closeBehavior?: unknown };
-  const raw = obj.closeBehavior;
-  if (typeof raw === "string" && (VALID_CLOSE_BEHAVIORS as readonly string[]).includes(raw)) {
-    return { closeBehavior: raw as SystemCloseBehavior };
-  }
-  if (raw !== undefined) {
+  const obj = input as { closeBehavior?: unknown; appMode?: unknown };
+  // Each field is normalized independently: a missing/invalid field falls
+  // back to its default while a valid sibling is preserved (mirrors the
+  // per-field patch path in `update`).
+  const result: SystemSettings = { ...DEFAULT_SETTINGS.system };
+  const rawBehavior = obj.closeBehavior;
+  if (
+    typeof rawBehavior === "string" &&
+    (VALID_CLOSE_BEHAVIORS as readonly string[]).includes(rawBehavior)
+  ) {
+    result.closeBehavior = rawBehavior as SystemCloseBehavior;
+  } else if (rawBehavior !== undefined) {
     log.warn(
-      `system.closeBehavior invalid (received ${JSON.stringify(raw)}), using default %s`,
+      `system.closeBehavior invalid (received ${JSON.stringify(rawBehavior)}), using default %s`,
       DEFAULT_SETTINGS.system.closeBehavior,
     );
   }
-  return { ...DEFAULT_SETTINGS.system };
+  const rawAppMode = obj.appMode;
+  if (typeof rawAppMode === "string" && (VALID_APP_MODES as readonly string[]).includes(rawAppMode)) {
+    result.appMode = rawAppMode as SystemAppMode;
+  } else if (rawAppMode !== undefined) {
+    log.warn(
+      `system.appMode invalid (received ${JSON.stringify(rawAppMode)}), using default %s`,
+      DEFAULT_SETTINGS.system.appMode,
+    );
+  }
+  return result;
 }
 
 /**
