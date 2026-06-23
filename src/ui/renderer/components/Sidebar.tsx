@@ -4,6 +4,8 @@ import {
   Home,
   KanbanSquare,
   KeyRound,
+  PanelLeftClose,
+  PanelLeftOpen,
   Plus,
   Repeat2,
   ShoppingBag,
@@ -42,10 +44,24 @@ export interface SidebarProps {
   marketplaceUrlReady?: boolean;
   /**
    * Collapse state is owned by the shell (App.tsx). The collapse/expand toggle
-   * lives in the top window-control band, beside the window controls — not in
-   * this card. When `true` the floating card narrows to an icon-only rail.
+   * lives on THIS card's right edge (see `onToggleCollapse`). When `true` the
+   * floating card narrows to an icon-only rail.
    */
   collapsed: boolean;
+  /** Toggle the rail — the control pinned to this card's right edge. */
+  onToggleCollapse: () => void;
+}
+
+// ─── Platform bridge (darwin traffic-light clearance) ──────────────────────────
+// On macOS the OS draws the traffic lights at {x:14,y:12}. The floating card now
+// extends to the window top (top-0), so its top-left would sit under the lights.
+// We add top padding on darwin to push the New Chat CTA below them. Returns false
+// when the preload bridge is absent (jsdom / Storybook / SSR) — no native chrome
+// to clear there.
+function isDarwinPlatform(): boolean {
+  return (
+    (window as unknown as { lvisPlatform?: { isDarwin: boolean } }).lvisPlatform?.isDarwin ?? false
+  );
 }
 
 // ─── NavItem ─────────────────────────────────────────────────────────────────
@@ -251,12 +267,16 @@ export function Sidebar({
   onOpenMarketplace,
   marketplaceUrlReady = false,
   collapsed,
+  onToggleCollapse,
 }: SidebarProps) {
   const { t } = useTranslation();
 
   // The collapsed rail shows icons only; `compact` mirrors `collapsed`. There is
   // no hover-expand — the card is a consistent floating panel in every mode.
   const compact = collapsed;
+  // On darwin the card top sits under the OS traffic lights (x:14,y:12); pad the
+  // card content below them. Win/Linux + non-Electron need no clearance.
+  const darwinTopClearance = isDarwinPlatform();
 
   const navListId = "sidebar-nav-list";
 
@@ -270,12 +290,47 @@ export function Sidebar({
       role="navigation"
       aria-label={t("sidebar.ariaLabel")}
       className={[
-        "absolute left-3 top-3 bottom-3 z-30 flex min-h-0 flex-col overflow-hidden rounded-2xl border border-border bg-card shadow-2xl transition-[width] duration-200 ease-out motion-reduce:transition-none",
+        // top-0 lets the floating card extend UP into the traffic-light band,
+        // reclaiming the vertical space on the left. `overflow-visible` so the
+        // collapse toggle pinned to the right edge can sit half outside.
+        "absolute left-3 top-0 bottom-3 z-30 flex min-h-0 flex-col overflow-hidden rounded-2xl border border-border bg-card shadow-2xl transition-[width] duration-200 ease-out motion-reduce:transition-none",
         collapsed ? "w-14" : "w-56",
       ].join(" ")}
+      // The card overlays the Electron drag band (it extends to top-0). Mark it
+      // no-drag so its controls stay clickable; the OS traffic lights still own
+      // their own hit region above the padded content.
+      style={{
+        // @ts-expect-error — Electron-specific CSS extension
+        WebkitAppRegion: "no-drag",
+      }}
     >
-      {/* ── New Chat CTA — top of the card */}
-      <div className={`px-2 pt-2 pb-1 ${compact ? "flex justify-center" : ""}`}>
+      {/* ── Header strip — collapse/expand toggle aligned to the card's RIGHT
+          edge. On darwin this strip sits in the traffic-light band: the OS
+          lights own the left (x:14), the toggle owns the right. `pt-7` on darwin
+          drops the strip's content below the lights' vertical center while the
+          toggle stays right of them; win/linux + non-Electron need no clearance. */}
+      <div className={`flex items-center justify-end px-1 ${darwinTopClearance ? "pt-7" : "pt-1"}`}>
+        <Tooltip>
+          <TooltipTrigger asChild>
+            <Button
+              variant="ghost"
+              size="icon"
+              className="h-7 w-7 aspect-square p-0 shrink-0 text-muted-foreground hover:text-foreground"
+              onClick={onToggleCollapse}
+              title={collapsed ? t("mainToolbar.expandSidebar") : t("mainToolbar.collapseSidebar")}
+              aria-label={collapsed ? t("mainToolbar.expandSidebar") : t("mainToolbar.collapseSidebar")}
+              aria-pressed={!collapsed}
+              data-testid="sidebar-collapse-toggle"
+            >
+              {collapsed ? <PanelLeftOpen className="h-4 w-4" /> : <PanelLeftClose className="h-4 w-4" />}
+            </Button>
+          </TooltipTrigger>
+          <TooltipContent side="right">{collapsed ? t("mainToolbar.expandSidebar") : t("mainToolbar.collapseSidebar")}</TooltipContent>
+        </Tooltip>
+      </div>
+
+      {/* ── New Chat CTA — below the header strip. */}
+      <div className={`px-2 pt-1 pb-1 ${compact ? "flex justify-center" : ""}`}>
         {compact ? (
           <Tooltip>
             <TooltipTrigger asChild>

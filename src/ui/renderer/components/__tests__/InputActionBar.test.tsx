@@ -74,7 +74,6 @@ function renderBar(overrides: Partial<Parameters<typeof InputActionBar>[0]> = {}
     enableThinkingChat: false,
     onToggleThinking: vi.fn(),
     statusRow: defaultStatusRow,
-    contextPercent: 42,
     ...overrides,
   };
   return render(
@@ -107,17 +106,17 @@ describe("InputActionBar (unified bar)", () => {
     expect(getByTestId("iab-trailing")).toBeTruthy();
   });
 
-  it("leading cluster order is [command] → [persona] → [attach] → [ring]", () => {
+  it("leading cluster order is [command] → [persona] → [attach] (ring moved to status row)", () => {
     const { getByTestId } = renderBar();
     const leading = getByTestId("iab-leading");
     const picker = leading.querySelector("[data-testid='command-popover-trigger']");
     const persona = leading.querySelector("[data-testid='iab-assistant-context-button']");
     const attach = leading.querySelector("[data-testid='iab-attach-button']");
-    const ring = leading.querySelector("[data-testid='ring-slot']");
-    expect(picker && persona && attach && ring).toBeTruthy();
+    expect(picker && persona && attach).toBeTruthy();
     expect(picker!.compareDocumentPosition(persona!) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
     expect(persona!.compareDocumentPosition(attach!) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
-    expect(attach!.compareDocumentPosition(ring!) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+    // The ring is NO LONGER in the leading action cluster.
+    expect(leading.querySelector("[data-testid='ring-slot']")).toBeNull();
   });
 
   it("trailing cluster order is [?] → [thinking] → [send]", () => {
@@ -187,7 +186,6 @@ describe("InputActionBar (unified bar)", () => {
           enableThinkingChat={false}
           onToggleThinking={vi.fn()}
           statusRow={defaultStatusRow}
-          contextPercent={42}
         />
       </TooltipProvider>,
     );
@@ -249,12 +247,19 @@ describe("InputActionBar (unified bar)", () => {
   });
 
   // ── Status sub-row ──────────────────────────────────────────────────────
-  it("renders the status sub-row with model + permission + context-percent", () => {
+  it("renders the status sub-row with model + permission + the ring (after permission)", () => {
     const { getByTestId } = renderBar();
     const row = getByTestId("iab-status-row");
     expect(row).toBeTruthy();
     expect(getByTestId("iab-status-model").textContent).toContain("OpenAI · gpt-5.4");
-    expect(getByTestId("iab-status-context").textContent).toContain("42%");
+    // The TokenProgressRing widget now lives in the status row.
+    const ringHost = getByTestId("iab-status-ring");
+    expect(ringHost.querySelector("[data-testid='ring-slot']")).toBeTruthy();
+    // …positioned AFTER the permission cell.
+    const permission = getByTestId("iab-status-permission");
+    expect(permission.compareDocumentPosition(ringHost) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+    // The separate context-percent text cell is gone.
+    expect(row.querySelector("[data-testid='iab-status-context']")).toBeNull();
   });
 
   it("colors the permission text per mode (no pill/outline)", () => {
@@ -275,13 +280,6 @@ describe("InputActionBar (unified bar)", () => {
       expect(perm.getAttribute("data-mode")).toBe(mode);
       unmount();
     }
-  });
-
-  it("dims the context-percent and shows an em-dash when no live token data", () => {
-    const { getByTestId } = renderBar({ contextPercent: null });
-    const ctx = getByTestId("iab-status-context");
-    expect(ctx.textContent).toContain("—");
-    expect(ctx.className).toContain("opacity-40");
   });
 
   it("renders the active-state dot green when active, muted when inactive", () => {
