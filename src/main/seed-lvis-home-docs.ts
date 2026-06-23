@@ -8,7 +8,8 @@ import {
   readdirSync,
   constants as fsConstants,
 } from "node:fs";
-import { join } from "node:path";
+import { join, dirname, parse as parsePath } from "node:path";
+import { fileURLToPath } from "node:url";
 import { lvisHome } from "../shared/lvis-home.js";
 
 export interface LvisHomeDocUpgradeMarker {
@@ -250,7 +251,58 @@ function resolvePackagedResource(name: string): string | null {
     return existsSync(packaged) ? packaged : null;
   }
 
-  // Dev mode: repo's `resources/` directory.
-  const dev = join(process.cwd(), "resources", name);
+  // Dev / vitest mode: repo's `resources/` directory.
+  //
+  // Anchor on THIS MODULE's own location and walk up to the first ancestor
+  // that actually contains a `resources/skills` directory. This is fully
+  // cwd-independent — it must NOT use `process.cwd()` (ensureWorkspaceCwd()
+  // chdir()s the main process to `~/.lvis/workspace` before boot, so a
+  // cwd-based join points at the nonexistent `~/.lvis/workspace/resources/`
+  // and silently skips seeding) — and it must NOT use `app.getAppPath()`:
+  // under `bun run start` the launcher runs `electron dist/src/main/main.js`
+  // (a script-file arg), so getAppPath() resolves to the SCRIPT directory
+  // `dist/src/main`, whose `resources/` does not exist.
+  //
+  // The module dir is `dist/src/main` in the esbuild bundle (climb 3 to the
+  // repo root) and `src/main` under vitest (climb 2); the walk-up reaches the
+  // repo root in both shapes without hardcoding a climb count.
+  const root = packagedResourceRoot();
+  if (root === null) return null;
+  const dev = join(root, "resources", name);
   return existsSync(dev) ? dev : null;
+}
+
+/**
+ * Walk up from this module's own directory to the first ancestor containing a
+ * `resources/skills` directory, and return that ancestor (the repo root in
+ * dev/vitest). Resolved once per process — the layout is fixed at build time.
+ *
+ * This is the resolution itself, not a guess-chain: if no ancestor carries a
+ * `resources/` tree, there is no packaged-resource root to seed from and we
+ * return null so the caller skips (genuine absence, not a papered-over bug).
+ */
+let cachedResourceRoot: string | null | undefined;
+function packagedResourceRoot(): string | null {
+  // Explicit override anchor: lets the unit test (and any out-of-tree
+  // packaging layout) point the resolver at a known root WITHOUT mutating
+  // process.cwd() or the module location. Not cached — the test sets a fresh
+  // fixtures root per case via `beforeEach`.
+  const override = process.env.LVIS_RESOURCE_ROOT?.trim();
+  if (override) {
+    return existsSync(join(override, "resources", "skills")) ? override : null;
+  }
+
+  if (cachedResourceRoot !== undefined) return cachedResourceRoot;
+  let dir = dirname(fileURLToPath(import.meta.url));
+  const fsRoot = parsePath(dir).root;
+  for (;;) {
+    if (existsSync(join(dir, "resources", "skills"))) {
+      cachedResourceRoot = dir;
+      return dir;
+    }
+    if (dir === fsRoot) break;
+    dir = dirname(dir);
+  }
+  cachedResourceRoot = null;
+  return null;
 }
