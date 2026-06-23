@@ -208,6 +208,17 @@ export function App() {
   useEffect(() => {
     void api.window?.resizeForMode?.(appMode);
   }, [appMode, api]);
+  // Action mode is the inline workspace: every view renders in the main tab,
+  // so any windows that were detached in chat mode must close on the
+  // transition. The login/auth window is ALWAYS a separate window
+  // regardless of mode and is excluded by the main process (auth windows are
+  // never tracked as detached tabs). Fire-on-transition only: this depends
+  // solely on stable refs (appMode + the stable api) and never sets state, so
+  // it cannot re-trigger itself (#1312 render-loop guard).
+  useEffect(() => {
+    if (appMode !== "action") return;
+    void api.window?.closeAllDetached?.();
+  }, [appMode, api]);
   const [commandPopoverOpen, setCommandPopoverOpen] = useState(false);
   const [devToolsOpen, setDevToolsOpen] = useState(false);
 
@@ -575,7 +586,7 @@ export function App() {
   );
 
   const openDetachedBuiltInView = useCallback(
-    async (viewKey: "routines" | "memory" | "starred"): Promise<boolean> => {
+    async (viewKey: "work-board" | "routines" | "memory" | "starred"): Promise<boolean> => {
       const openDetached = api.window?.openDetached;
       if (!openDetached) {
         setErrorWithThought(t("app.errorCannotOpenNewWindow"));
@@ -659,46 +670,44 @@ export function App() {
         const status = pluginAuthStatuses.get(view.pluginId);
         const card = pluginCards.find((c) => c.id === view.pluginId);
         const loginTool = card?.auth?.loginTool;
-        // Race guard: status arrives via one IPC, pluginCards via another.
-        // If status says "unauthed" but the cards haven't populated yet
-        // (`card` undefined → `loginTool` undefined), navigating now would
-        // strand the user on the broken-unauthed view — exactly what the
-        // PR aimed to prevent. Abort silently; the user can click again
-        // once the cards arrive (badge keeps prompting them).
-        if (status?.kind === "unauthed" && !loginTool) {
-          console.warn(
-            `[plugin-auth] ${view.pluginId} unauthed but pluginCards not yet loaded — aborting click`,
-          );
-          return;
-        }
+        // Action mode contract: EVERY plugin view renders inline,
+        // including unauthed ones. The view navigates immediately and shows
+        // its own auth/login affordance inline; the login itself still opens
+        // through `loginTool` → openAuthWindow as a separate window. We do NOT
+        // silently abort navigation, and we do NOT gate navigation on login
+        // completing — that previously stranded users on whatever view they
+        // were already on whenever the plugin reported unauthed (or whenever
+        // the pluginCards IPC had not yet populated `loginTool`).
+        //
+        // Security contract preserved: an unauthed plugin still routes through
+        // its declared `loginTool`; navigating inline does not grant the view
+        // any authenticated data — the plugin surface gates its own content on
+        // auth state. There is no token_login bypass here.
         if (status?.kind === "unauthed" && loginTool) {
           void (async () => {
             try {
               await api.callPluginMethod(loginTool);
             } catch (err) {
-              // User cancelled / IPC rejected — leave them on the current
-              // view, do NOT navigate to the still-unauthed plugin view.
-              // Cancellation is a normal user choice, not an error: log
-              // at warn so renderer DevTools doesn't paint it red.
+              // Cancellation / IPC rejection is a normal user choice, not an
+              // error: log at warn so renderer DevTools doesn't paint it red.
+              // Navigation already happened below, so the user lands on the
+              // plugin's own inline auth affordance regardless.
               console.warn(
                 `[plugin-auth] ${view.pluginId} loginTool ${loginTool} did not complete (cancelled or IPC rejected)`,
                 err,
               );
-              return;
             }
-            // Login resolved — navigate to the view the user originally
-            // wanted. The `<pluginId>.auth.changed` event will flip the
-            // badge separately via the live-poll path.
-            setActiveView(key);
           })();
-          return;
         }
       }
       // Chat mode: built-in detachable views open in a separate window; home
       // (and every action-mode path) stays inline.
       if (
         appMode === "chat" &&
-        (key === "routines" || key === "memory" || key === "starred")
+        (key === "work-board" ||
+          key === "routines" ||
+          key === "memory" ||
+          key === "starred")
       ) {
         void openDetachedBuiltInView(key);
         return;
@@ -875,13 +884,6 @@ export function App() {
       return "settings";
     });
   }, [api, appMode]);
-
-  // Stable reference for the status-bar permission cell's onClick. An inline
-  // arrow here would change identity every render, re-running the
-  // useStatusBarPermission effect (deps include this callback), which upserts a
-  // fresh persistent item → new array → re-render → infinite loop. Memoizing
-  // gives the effect a fixed point.
-  const onOpenPermissions = useCallback(() => onOpenSettings("permissions"), [onOpenSettings]);
 
   const handleCloseInlineSettings = useCallback(() => {
     const target = settingsReturnViewRef.current;
@@ -1335,7 +1337,7 @@ export function App() {
   // toast. Other toast producers leave `notification` undefined so this
   // handler is a no-op for them.
   const { persistent: statusPersistent, visibleToast: statusVisibleToast, pendingCount: statusPendingCount, removeToast: statusRemoveToast, upsertPersistent: statusUpsertPersistent, removePersistent: statusRemovePersistent } =
-    useStatusBar({ api, onOpenPermissions });
+    useStatusBar({ api });
 
   // Show a persistent StatusBar indicator while a pre-turn auto-compact runs.
   // `compact_started` sets isCompacting → this effect upserts the item.
