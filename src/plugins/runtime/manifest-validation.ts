@@ -709,7 +709,7 @@ export async function parsePluginJson(
     const e = notifEvents[i]?.event;
     if (typeof e === "string" && !subsTypes.has(e)) {
       log.warn(
-        `notificationEvents[${i}].event '${e}' not declared in eventSubscriptions — OS notification will still fire, but plugin won't receive the event via hostApi.onEvent`,
+        `Plugin manifest '${pid}': notificationEvents[${i}].event '${e}' not declared in eventSubscriptions — OS notification will still fire, but plugin won't receive the event via hostApi.onEvent`,
       );
     }
   }
