@@ -29,6 +29,7 @@ import { DEFAULT_TOAST_TTL_MS, LONG_TOAST_TTL_MS, SHORT_TOAST_TTL_MS } from "./c
 import { SkillBadge } from "./components/SkillBadge.js";
 import { WorkGroup } from "./components/WorkGroup.js";
 import { PermissionReviewStatusCard } from "./components/PermissionReviewStatusCard.js";
+import { DeferredApprovalChip } from "./components/DeferredApprovalChip.js";
 import { TurnActionBar } from "./components/TurnActionBar.js";
 // TurnSummaryFooter 컴포넌트는 2026-05-07 폐기. 토큰 정보는 TurnActionBar 의
 // TokenCostBadge (provider-truth, 토글 + tooltip breakdown) 가 단일 source 로
@@ -1887,6 +1888,15 @@ export function ChatView({ api, onAsk, onEditSave, onFork, onToggleStar, onRetry
             activePresetId={activePresetId}
             onSelectPreset={setActivePresetId}
           />
+          {/* §8 agent-approval surface. The input re-layout moved permission
+              status to the StatusBar (read-only text) and removed the action
+              row's permission/approval slots; this interactive natural-language
+              approval chip has no place in the StatusBar, so it renders here —
+              directly above the composer, the position its own contract
+              describes ("surfaces above the composer"). It self-hides
+              (returns null) unless the draft expresses an approve/reject intent
+              AND exactly one queue entry is pending. */}
+          <DeferredApprovalChip draftText={question} />
           {/* Composer (textarea) + BottomActionRow (TokenRing/단축키/취소/Send)
               가 하나의 컨테이너 안. 사용자 인지 = "타이핑 영역 + 즉시 액션" 한
               묶음.
@@ -1938,8 +1948,9 @@ export function ChatView({ api, onAsk, onEditSave, onFork, onToggleStar, onRetry
             onToggleThinking={toggleThinking}
             />
           </div>
-          {/* PermissionModeBadge + DeferredApprovalChip 모두
-              InputActionBar trailing 으로 이전 완료. 본 자리 비움. */}
+          {/* PermissionModeBadge → StatusBar (read-only mode text).
+              DeferredApprovalChip → above the composer (interactive surface).
+              Neither lives in the action row after the input re-layout. */}
         </div>
         <QuestionOverlay
           api={api}
