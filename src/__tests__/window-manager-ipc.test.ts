@@ -368,7 +368,7 @@ describe("WindowManager IPC — validateSender guard", () => {
       expect(result).toEqual({ ok: false, error: "main-window-not-found" });
     });
 
-    it("centers an 800×600 window on the work area for action mode", async () => {
+    it("centers a 1243×768 window on the work area for action mode", async () => {
       const main = makeMainWindow();
       wm.registerMainWindow(main as never);
       fromId.mockReturnValue(main);
@@ -377,9 +377,9 @@ describe("WindowManager IPC — validateSender guard", () => {
       expect(result).toEqual({ ok: true });
       // The tween emits intermediate setBounds frames; flush it to completion.
       flushTween();
-      // workArea 1920×1080 → centered 800×600. The LAST setBounds call must
-      // land EXACTLY on the target (intermediate interpolated frames allowed).
-      expect(lastBounds(main)).toEqual({ x: 560, y: 240, width: 800, height: 600 });
+      // workArea 1920×1080 → centered 1243×768 (golden ratio). The LAST setBounds
+      // call must land EXACTLY on the target (intermediate interpolated frames allowed).
+      expect(lastBounds(main)).toEqual({ x: 339, y: 156, width: 1243, height: 768 });
     });
 
     it("restores the right-docked initial bounds for chat mode", async () => {
@@ -409,10 +409,10 @@ describe("WindowManager IPC — validateSender guard", () => {
       await handler(trustedEvent(), "chat");
       flushTween();
       // The latest (chat) target wins: final bounds are the chat geometry,
-      // never the abandoned action 800×600.
+      // never the abandoned action 1243×768.
       const bounds = lastBounds(main);
       expect(bounds.width).toBeLessThan(800);
-      expect(bounds).not.toEqual({ x: 560, y: 240, width: 800, height: 600 });
+      expect(bounds).not.toEqual({ x: 339, y: 156, width: 1243, height: 768 });
     });
   });
 });

@@ -3,6 +3,7 @@ import { useMemo, useRef, useState } from "react";
 import { Button } from "../../../components/ui/button.js";
 import { Input } from "../../../components/ui/input.js";
 import { Tooltip, TooltipContent, TooltipTrigger } from "../../../components/ui/tooltip.js";
+import { Popover, PopoverContent, PopoverTrigger } from "../../../components/ui/popover.js";
 import { TokenCostBadge, type TokenCostBadgePricing, type TokenCostBadgeProps } from "./TokenCostBadge.js";
 import type { LLMVendor } from "../../../shared/llm-vendor-defaults.js";
 import { formatHhMmKst } from "../utils/format-time.js";
@@ -71,7 +72,7 @@ export function TurnActionBar({
   const timestampLabel = useMemo(() => formatHhMmKst(timestamp), [timestamp]);
 
   return (
-    <div className="flex items-center gap-2 text-xs text-muted-foreground mt-0.5 px-3">
+    <div className="flex items-center gap-1 text-xs text-muted-foreground mt-0.5 px-3">
       {timestampLabel ? <span className="shrink-0">{timestampLabel}</span> : null}
       {turnSummary ? <TokenCostBadge {...turnSummary} pricing={pricing} vendor={vendor} /> : null}
       <div className="flex-1" />
@@ -169,26 +170,39 @@ export function TurnActionBar({
             </TooltipTrigger>
             <TooltipContent>{t("turnActionBar.feedbackUp")}</TooltipContent>
           </Tooltip>
-          <Tooltip>
-            <TooltipTrigger asChild>
-              <Button
-                type="button"
-                variant="ghost"
-                size="icon"
-                className={`h-5 w-5 ${feedbackRating === "down" ? "text-destructive" : "text-muted-foreground hover:text-foreground"}`}
-                onClick={() => {
-                  if (feedbackRating === "down") return;
-                  setShowReasonBox(true);
-                }}
-                aria-label={t("turnActionBar.feedbackDown")}
-              >
-                <ThumbsDown key={feedbackRating === "down" ? "on" : "off"} className={`h-3 w-3 ${feedbackRating === "down" ? "fill-destructive lvis-anim-pop" : ""}`} />
-              </Button>
-            </TooltipTrigger>
-            <TooltipContent>{t("turnActionBar.feedbackDown")}</TooltipContent>
-          </Tooltip>
-          {showReasonBox && feedbackRating !== "down" ? (
-            <div className="flex items-center gap-1">
+          {/* Dislike + reason POPOVER: the reason input floats ABOVE the 👎
+              button (side="top", Radix collision-aware) instead of appending
+              inline to the row, so it never overflows off-screen. */}
+          <Popover
+            open={showReasonBox && feedbackRating !== "down"}
+            onOpenChange={(open) => {
+              if (open && feedbackRating === "down") return;
+              setShowReasonBox(open);
+              if (!open) setReasonDraft("");
+            }}
+          >
+            <Tooltip>
+              <TooltipTrigger asChild>
+                <PopoverTrigger asChild>
+                  <Button
+                    type="button"
+                    variant="ghost"
+                    size="icon"
+                    className={`h-5 w-5 ${feedbackRating === "down" ? "text-destructive" : "text-muted-foreground hover:text-foreground"}`}
+                    aria-label={t("turnActionBar.feedbackDown")}
+                  >
+                    <ThumbsDown key={feedbackRating === "down" ? "on" : "off"} className={`h-3 w-3 ${feedbackRating === "down" ? "fill-destructive lvis-anim-pop" : ""}`} />
+                  </Button>
+                </PopoverTrigger>
+              </TooltipTrigger>
+              <TooltipContent>{t("turnActionBar.feedbackDown")}</TooltipContent>
+            </Tooltip>
+            <PopoverContent
+              side="top"
+              align="end"
+              className="flex w-auto items-center gap-1 p-2"
+              data-testid="turn-feedback-reason-popover"
+            >
               <Input
                 type="text"
                 maxLength={200}
@@ -196,6 +210,7 @@ export function TurnActionBar({
                 value={reasonDraft}
                 onChange={(e) => setReasonDraft(e.target.value)}
                 className="h-6 w-36 px-2 text-xs"
+                autoFocus
                 onKeyDown={(e) => {
                   if (e.key === "Enter") {
                     setFeedbackRating("down");
@@ -220,8 +235,8 @@ export function TurnActionBar({
               >
                 {t("turnActionBar.sendButton")}
               </Button>
-            </div>
-          ) : null}
+            </PopoverContent>
+          </Popover>
         </>
       ) : null}
     </div>
