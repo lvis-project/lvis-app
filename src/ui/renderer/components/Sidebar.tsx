@@ -52,12 +52,15 @@ export interface SidebarProps {
   onToggleCollapse: () => void;
 }
 
-// ─── Platform bridge (darwin traffic-light clearance) ──────────────────────────
-// On macOS the OS draws the traffic lights at {x:14,y:12}. The floating card now
-// extends to the window top (top-0), so its top-left would sit under the lights.
-// We add top padding on darwin to push the New Chat CTA below them. Returns false
-// when the preload bridge is absent (jsdom / Storybook / SSR) — no native chrome
-// to clear there.
+// ─── Platform bridge (darwin traffic-light line) ───────────────────────────────
+// On macOS the OS draws the traffic lights at {x:14,y:12} (≈12px diameter, so
+// their vertical center sits at ≈y:18). The floating card carries a small top
+// margin (top-1.5 ≈ 6px) so it reads as a floating card with breathing room
+// reaching UP toward the lights — NOT crammed flush to y:0. The collapse toggle
+// lives in a thin header strip on the card's right edge; its vertical center is
+// tuned to land on the SAME line as the lights (see the strip padding below).
+// Returns false when the preload bridge is absent (jsdom / Storybook / SSR) —
+// no native chrome to align against there.
 function isDarwinPlatform(): boolean {
   return (
     (window as unknown as { lvisPlatform?: { isDarwin: boolean } }).lvisPlatform?.isDarwin ?? false
@@ -274,8 +277,9 @@ export function Sidebar({
   // The collapsed rail shows icons only; `compact` mirrors `collapsed`. There is
   // no hover-expand — the card is a consistent floating panel in every mode.
   const compact = collapsed;
-  // On darwin the card top sits under the OS traffic lights (x:14,y:12); pad the
-  // card content below them. Win/Linux + non-Electron need no clearance.
+  // On darwin the card's top margin lets the OS traffic lights (x:14,y:12) breathe
+  // above it; the header strip is tuned so the collapse toggle's center lands on
+  // the lights' line. Win/Linux + non-Electron have no OS lights to align against.
   const darwinTopClearance = isDarwinPlatform();
 
   const navListId = "sidebar-nav-list";
@@ -290,10 +294,12 @@ export function Sidebar({
       role="navigation"
       aria-label={t("sidebar.ariaLabel")}
       className={[
-        // top-0 lets the floating card extend UP into the traffic-light band,
-        // reclaiming the vertical space on the left. `overflow-visible` so the
-        // collapse toggle pinned to the right edge can sit half outside.
-        "absolute left-3 top-0 bottom-3 z-30 flex min-h-0 flex-col overflow-hidden rounded-2xl border border-border bg-card shadow-2xl transition-[width] duration-200 ease-out motion-reduce:transition-none",
+        // top-1.5 (≈6px) gives the floating card a clean top margin so it reads
+        // as a card with breathing room reaching UP toward the traffic-light row
+        // — NOT crammed flush to y:0. (The prior top-0 looked "forcibly pulled
+        // up".) It still reaches up into the band region; the lights sit in the
+        // tidy strip above it.
+        "absolute left-3 top-1.5 bottom-3 z-30 flex min-h-0 flex-col overflow-hidden rounded-2xl border border-border bg-card shadow-2xl transition-[width] duration-200 ease-out motion-reduce:transition-none",
         collapsed ? "w-14" : "w-56",
       ].join(" ")}
       // The card overlays the Electron drag band (it extends to top-0). Mark it
@@ -304,12 +310,15 @@ export function Sidebar({
         WebkitAppRegion: "no-drag",
       }}
     >
-      {/* ── Header strip — collapse/expand toggle aligned to the card's RIGHT
-          edge. On darwin this strip sits in the traffic-light band: the OS
-          lights own the left (x:14), the toggle owns the right. `pt-7` on darwin
-          drops the strip's content below the lights' vertical center while the
-          toggle stays right of them; win/linux + non-Electron need no clearance. */}
-      <div className={`flex items-center justify-end px-1 ${darwinTopClearance ? "pt-7" : "pt-1"}`}>
+      {/* ── Header strip — collapse/expand toggle pinned to the card's RIGHT
+          edge, on the SAME horizontal line as the macOS traffic lights. The OS
+          lights own the left (x:14, center ≈y:18); the toggle owns the right.
+          With the card at top-1.5 (≈6px) and the toggle a h-7 (28px) button, a
+          small `pt-0.5` (2px) puts the toggle's center at ≈6+2+14 = y:22 — on
+          the lights' line, not a row below it (the prior `pt-7` dropped it a full
+          line down, which read as "a weird spot"). Win/linux + non-Electron have
+          no OS lights, so a plain `pt-1` top strip is enough. */}
+      <div className={`flex items-center justify-end px-1 ${darwinTopClearance ? "pt-0.5" : "pt-1"}`}>
         <Tooltip>
           <TooltipTrigger asChild>
             <Button
