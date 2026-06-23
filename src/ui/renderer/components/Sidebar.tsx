@@ -478,7 +478,11 @@ export function Sidebar({
               // ≈144px); no surface tokens — transparent, on the band. `items-start`
               // left-aligns the narrower icon-rail body under the cluster.
               "w-auto items-start"
-            : "w-56 overflow-hidden rounded-2xl border border-border bg-card shadow-2xl",
+            : // Expanded: `flex-1 min-h-0` stretches the card to the aside's
+              // bottom (matching the full-height aside + the collapsed rail's
+              // flex-1 body), so the surface reaches near the window bottom
+              // instead of collapsing to content height.
+              "w-56 flex-1 min-h-0 overflow-hidden rounded-2xl border border-border bg-card shadow-2xl",
         ].join(" ")}
       >
         {/* ── Cluster strip — [펼침/닫힘 toggle] → [검색] → [즐겨찾기] → [내보내기],
