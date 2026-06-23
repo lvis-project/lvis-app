@@ -19,8 +19,9 @@ const MAIN_WINDOW_RIGHT_GAP = 10;
  * the runtime resize-for-mode tween (window-manager). Centralized here so the
  * two code paths cannot drift to different dimensions.
  */
-export const ACTION_MODE_WIDTH = 800;
-export const ACTION_MODE_HEIGHT = 600;
+// Golden-ratio landscape: height 768, width = round(768 × φ) = 1243 (φ≈1.618).
+export const ACTION_MODE_WIDTH = 1243;
+export const ACTION_MODE_HEIGHT = 768;
 
 function initialMainWindowY(
   workArea: WorkAreaBounds,
