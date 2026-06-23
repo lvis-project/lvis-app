@@ -161,6 +161,81 @@ describe("WindowManager IPC — validateSender guard", () => {
     });
   });
 
+  describe("lvis:window:close-all-detached", () => {
+    /**
+     * Build a fake detached child window and insert it directly into the
+     * manager's private `_children` map (the same registry getDetachedWindows()
+     * reads). `webContents.id` lets the auth-owned registry distinguish auth
+     * windows from ordinary detached tabs.
+     */
+    function injectChild(
+      wm: InstanceType<typeof WindowManager>,
+      id: number,
+      viewKey: string,
+    ) {
+      const win = {
+        id,
+        isDestroyed: vi.fn(() => false),
+        close: vi.fn(),
+        // `once` is needed because markAsAuthOwned() subscribes to the
+        // webContents lifecycle events for automatic registry cleanup.
+        webContents: { id, once: vi.fn() },
+      };
+      // Reach into the private children map — the production code only exposes
+      // it via getDetachedWindows()/closeAllDetached(), which is exactly what
+      // we are exercising.
+      (wm as unknown as { _children: Map<number, { window: typeof win; viewKey: string }> })
+        ._children.set(id, { window: win, viewKey });
+      return win;
+    }
+
+    it("returns UNAUTHORIZED_FRAME and audits for an unauthorized sender", async () => {
+      const handler = handleMap.get("lvis:window:close-all-detached")!;
+      const result = await handler(unauthorizedEvent());
+      expect(result).toEqual(UNAUTHORIZED_FRAME);
+      expect(auditLogger.log).toHaveBeenCalledOnce();
+    });
+
+    it("rejects a plugin-ui-shell sender (validateHostRendererSender guard)", async () => {
+      const pluginShellEvent = {
+        senderFrame: { url: "file:///Applications/Lvis.app/dist/plugin-ui-shell.html" },
+        sender: {},
+      } as unknown as IpcMainInvokeEvent;
+      const handler = handleMap.get("lvis:window:close-all-detached")!;
+      const result = await handler(pluginShellEvent);
+      expect(result).toEqual(UNAUTHORIZED_FRAME);
+      expect(auditLogger.log).toHaveBeenCalledOnce();
+    });
+
+    it("closes every tracked detached tab", async () => {
+      const a = injectChild(wm, 11, "routines");
+      const b = injectChild(wm, 12, "plugin:meeting:meeting-control");
+      const handler = handleMap.get("lvis:window:close-all-detached")!;
+      const result = await handler(trustedEvent());
+      expect(result).toEqual({ ok: true });
+      expect(a.close).toHaveBeenCalledOnce();
+      expect(b.close).toHaveBeenCalledOnce();
+    });
+
+    it("does NOT close auth/login windows even if they were tracked", async () => {
+      // Import the registry with the SAME bare specifier window-manager uses
+      // (no cache-bust) so we share the post-resetModules module instance — its
+      // `authOwnedIds` Set is the one window-manager's isAuthOwned() reads.
+      const { markAsAuthOwned } = await import("../main/auth-window-registry.js");
+      const detached = injectChild(wm, 21, "routines");
+      const authWin = injectChild(wm, 22, "memory");
+      // Tag the auth window's webContents as auth-owned — mirrors what
+      // auth-window-service does at creation time. The action-mode sweep MUST
+      // skip it: the login/auth window is always a separate window.
+      markAsAuthOwned(authWin.webContents as never);
+      const handler = handleMap.get("lvis:window:close-all-detached")!;
+      const result = await handler(trustedEvent());
+      expect(result).toEqual({ ok: true });
+      expect(detached.close).toHaveBeenCalledOnce();
+      expect(authWin.close).not.toHaveBeenCalled();
+    });
+  });
+
   describe("lvis:window:load-session-in-main", () => {
     it("forwards a valid session id to the registered main window and waits for renderer acknowledgement", async () => {
       const mainWebContents = { send: vi.fn() };
