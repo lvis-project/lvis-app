@@ -24,6 +24,7 @@ import { findMarkerAt, parseMarkers } from "../utils/attachment-markers.js";
 import { handleClipboardPaste } from "../utils/clipboard-paste.js";
 import { InlineSlashMenu } from "./InlineSlashMenu.js";
 import { useInlineSlashMenu } from "../hooks/use-inline-slash-menu.js";
+import { useSlashPickerRuntime } from "../hooks/use-slash-picker-runtime.js";
 import type { QuickAction } from "./command-actions.js";
 import type { PluginEntry } from "./PluginGridButton.js";
 import type { UserKeyboardIntentSnapshot } from "../../../shared/chat-origin.js";
@@ -155,6 +156,11 @@ export const Composer = forwardRef<ComposerHandle, ComposerProps>(function Compo
     if (ta) setCaret(ta.selectionStart ?? 0);
   }, []);
 
+  // Live MCP-server tools + registered skills back the inline menu's mcp /
+  // skills categories (real host IPC). Fetched only while the composer is
+  // enabled so it stays parallel with the SlashPicker popover's data.
+  const { mcpTools, skills } = useSlashPickerRuntime(!disabled);
+
   // Inline "/" autocomplete — derives an open/filtered menu from the controlled
   // text + caret and owns accept/replace. Keyboard nav is wired into
   // handleKeyDown below; rendering is the InlineSlashMenu at the end.
@@ -165,6 +171,8 @@ export const Composer = forwardRef<ComposerHandle, ComposerProps>(function Compo
     isComposing,
     commandActions,
     plugins: inlinePlugins,
+    mcpTools,
+    skills,
     onSelectPlugin: onSelectPlugin ?? (() => {}),
     taRef,
     onTextChange,

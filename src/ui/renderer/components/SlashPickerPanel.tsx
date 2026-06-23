@@ -2,10 +2,11 @@
  * SlashPickerPanel — the popover body for SlashPicker.
  *
  * Stepped drill-down: the root view lists categories (command / shortcut /
- * plugin) as collapsible rows; selecting one opens its items. A non-empty
- * search query collapses the drill-down into a flat cross-category result list
- * so the user can still match everything at once. Lazy-loaded (cmdk) so the app
- * does not import the Command palette at startup.
+ * plugin / mcp / skills) as collapsible rows; selecting one opens its items.
+ * The 2nd-depth (drilled) item list reuses the SAME two-line cmdk row design
+ * as the root. A non-empty search query collapses the drill-down into a flat
+ * cross-category result list so the user can still match everything at once.
+ * Lazy-loaded (cmdk) so the app does not import the Command palette at startup.
  */
 import { Suspense, useCallback, useEffect, useRef, useState } from "react";
 import type { KeyboardEvent as ReactKeyboardEvent } from "react";
@@ -21,6 +22,7 @@ import {
 import { PopoverContent } from "../../../components/ui/popover.js";
 import { useTranslation } from "../../../i18n/react.js";
 import { pluginIconFor } from "../utils/plugin-icon.js";
+import { useSlashPickerRuntime } from "../hooks/use-slash-picker-runtime.js";
 import type { QuickAction } from "./command-actions.js";
 import type { PluginEntry } from "./PluginGridButton.js";
 import {
@@ -29,9 +31,13 @@ import {
   catDescription,
   catLabel,
   filterActions,
+  filterMcpTools,
   filterPlugins,
+  filterSkills,
   filterSlashCommands,
   type Category,
+  type McpToolEntry,
+  type SkillEntry,
   type SlashCommand,
 } from "./slash-picker-data.js";
 
@@ -56,6 +62,9 @@ export function SlashPickerPanel({
   const [step, setStep] = useState<Category | null>(null);
   const inputRef = useRef<HTMLInputElement>(null);
   const composingRef = useRef(false);
+  // Live MCP-server tools + registered skills (real host IPC, fetched while
+  // the panel is mounted/open).
+  const { mcpTools, skills } = useSlashPickerRuntime(true);
 
   useEffect(() => {
     const id = setTimeout(() => inputRef.current?.focus(), 50);
@@ -104,15 +113,30 @@ export function SlashPickerPanel({
     [onClose, onSelectPlugin],
   );
 
+  // MCP tools and skills are referenced into the draft as plain text (their
+  // namespaced name), so the user can compose a request that names them. This
+  // mirrors how shortcuts/plugins resolve to a single onClose + side effect.
+  const runText = useCallback(
+    (text: string) => {
+      onClose();
+      onInsert(text + " ");
+    },
+    [onClose, onInsert],
+  );
+
   const searching = query.trim().length > 0;
   const matchedCommands = filterSlashCommands(query);
   const matchedActions = filterActions(actions, query);
   const matchedPlugins = filterPlugins(plugins, query);
+  const matchedMcpTools = filterMcpTools(mcpTools, query);
+  const matchedSkills = filterSkills(skills, query);
 
   const counts: Record<Category, number> = {
     command: matchedCommands.length,
     shortcut: matchedActions.length,
     plugin: matchedPlugins.length,
+    mcp: matchedMcpTools.length,
+    skills: matchedSkills.length,
   };
 
   // Which categories render: when searching, every category with a hit; when
@@ -151,6 +175,28 @@ export function SlashPickerPanel({
       </CommandItem>
     );
   };
+
+  const McpIcon = CATEGORY_ICON.mcp;
+  const renderMcpRow = (m: McpToolEntry) => (
+    <CommandItem key={`${m.serverId}/${m.name}`} value={`${m.name} ${m.serverId}`} onSelect={() => runText(m.name)}>
+      <McpIcon className="h-3.5 w-3.5 shrink-0 text-muted-foreground" />
+      <div className="flex min-w-0 flex-1 flex-col">
+        <span className="font-mono text-xs">{m.name}</span>
+        <span className="text-[11px] text-muted-foreground line-clamp-1">{m.serverId}</span>
+      </div>
+    </CommandItem>
+  );
+
+  const SkillIcon = CATEGORY_ICON.skills;
+  const renderSkillRow = (s: SkillEntry) => (
+    <CommandItem key={s.name} value={`${s.name} ${s.description}`} onSelect={() => runText(s.name)}>
+      <SkillIcon className="h-3.5 w-3.5 shrink-0 text-muted-foreground" />
+      <div className="flex min-w-0 flex-1 flex-col">
+        <span className="text-xs">{s.name}</span>
+        <span className="text-[11px] text-muted-foreground line-clamp-1">{s.description}</span>
+      </div>
+    </CommandItem>
+  );
 
   return (
     <PopoverContent
@@ -228,6 +274,16 @@ export function SlashPickerPanel({
           {visibleCategories.includes("plugin") && (searching || step === "plugin") && (
             <CommandGroup heading={catLabel("plugin")} data-testid="slash-group-plugin">
               {matchedPlugins.map(renderPluginRow)}
+            </CommandGroup>
+          )}
+          {visibleCategories.includes("mcp") && (searching || step === "mcp") && (
+            <CommandGroup heading={catLabel("mcp")} data-testid="slash-group-mcp">
+              {matchedMcpTools.map(renderMcpRow)}
+            </CommandGroup>
+          )}
+          {visibleCategories.includes("skills") && (searching || step === "skills") && (
+            <CommandGroup heading={catLabel("skills")} data-testid="slash-group-skills">
+              {matchedSkills.map(renderSkillRow)}
             </CommandGroup>
           )}
         </CommandList>

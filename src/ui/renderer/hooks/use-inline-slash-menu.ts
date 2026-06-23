@@ -19,9 +19,13 @@ import type { PluginEntry } from "../components/PluginGridButton.js";
 import {
   CATEGORY_ORDER,
   filterActions,
+  filterMcpTools,
   filterPlugins,
+  filterSkills,
   filterSlashCommands,
   type Category,
+  type McpToolEntry,
+  type SkillEntry,
 } from "../components/slash-picker-data.js";
 import { detectSlashQuery } from "../utils/slash-trigger.js";
 
@@ -45,6 +49,10 @@ export interface UseInlineSlashMenuArgs {
   isComposing: boolean;
   commandActions: QuickAction[];
   plugins: PluginEntry[];
+  /** Live MCP-server tools (real host IPC) — referenced as text on accept. */
+  mcpTools: McpToolEntry[];
+  /** Registered skills (real host IPC) — referenced as text on accept. */
+  skills: SkillEntry[];
   onSelectPlugin: (viewKey: string) => void;
   taRef: RefObject<HTMLTextAreaElement | null>;
   onTextChange: (next: string) => void;
@@ -67,6 +75,8 @@ export function useInlineSlashMenu({
   isComposing,
   commandActions,
   plugins,
+  mcpTools,
+  skills,
   onSelectPlugin,
   taRef,
   onTextChange,
@@ -156,10 +166,30 @@ export function useInlineSlashMenu({
             },
           });
         }
+      } else if (cat === "mcp") {
+        for (const m of filterMcpTools(mcpTools, q)) {
+          out.push({
+            category: "mcp",
+            key: `mcp:${m.serverId}/${m.name}`,
+            label: m.name,
+            hint: m.serverId,
+            apply: (range) => spliceText(range, `${m.name} `),
+          });
+        }
+      } else if (cat === "skills") {
+        for (const s of filterSkills(skills, q)) {
+          out.push({
+            category: "skills",
+            key: `skill:${s.name}`,
+            label: s.name,
+            hint: s.description,
+            apply: (range) => spliceText(range, `${s.name} `),
+          });
+        }
       }
     }
     return out;
-  }, [trigger, t, commandActions, plugins, spliceText, stripTrigger, onSelectPlugin]);
+  }, [trigger, t, commandActions, plugins, mcpTools, skills, spliceText, stripTrigger, onSelectPlugin]);
 
   // Reset the active row whenever the result set changes shape.
   useEffect(() => {
