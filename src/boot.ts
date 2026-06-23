@@ -849,6 +849,9 @@ export async function bootstrap(
     scriptHookManager,
     bootAuditLogger,
     () => settingsService.get("features")?.hostClassifiesRisk ?? false,
+    // Auth-class classifier — a plugin's loginTool/logoutTool must show the
+    // SAME approval modal on the UI lane (this executor) as on the agent lane.
+    (toolName) => pluginRuntime.isAuthClassTool(toolName),
   );
   const pluginSurfacePermissionScope = createPluginSurfacePermissionScope({
     readPersistedDirectories: () => readPermissionSettings().permissions.additionalDirectories,

@@ -487,6 +487,13 @@ export interface ConversationLoopDeps {
      * Used by {@link resolveToolScope} to drop inactive plugins from scope.
      */
     isPluginEnabled?(pluginId: string): boolean;
+    /**
+     * Auth-class classifier — true iff `toolName` is the owning plugin's
+     * `auth.loginTool`/`auth.logoutTool`. Lets the agent lane route a plugin
+     * sign-in/sign-out to the ApprovalGate modal instead of the foreground-auto
+     * reviewer hard-deny, matching the UI lane.
+     */
+    isAuthClassTool?(toolName: string): boolean;
   };
   /**
    * Fixed-scope support for callers that already made a plugin-scope decision.
@@ -834,6 +841,7 @@ export class ConversationLoop {
       deps.scriptHookManager,
       deps.auditLogger,
       () => deps.settingsService.get("features")?.hostClassifiesRisk ?? false,
+      (toolName) => deps.pluginRuntime?.isAuthClassTool?.(toolName) ?? false,
     );
     this.auditLogger = deps.auditLogger ?? new AuditLogger();
     this.refreshProvider();

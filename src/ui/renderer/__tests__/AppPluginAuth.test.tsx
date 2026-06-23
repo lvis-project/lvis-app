@@ -176,7 +176,12 @@ describe("App plugin auth routing", () => {
     expect(screen.getByText(/window denied/)).toBeInTheDocument();
   });
 
-  it("keeps loginTool flow for unauthenticated embedded plugin views", async () => {
+  it("does NOT auto-call loginTool for an unauthenticated inline embedded view (webview bootstrapAuth is the sole driver)", async () => {
+    // Login-window dedup fix: an inline embedded view owns its auth flow — its
+    // own webview bootstrapAuth drives loginTool → openAuthWindow. The host must
+    // NOT additionally auto-call loginTool here, or TWO login windows open for
+    // the same account. Navigation still happens inline (no detach); the plugin
+    // surface gates its own content on auth state.
     const { api } = await renderApp({
       pluginCards: [
         {
@@ -212,15 +217,14 @@ describe("App plugin auth routing", () => {
     );
 
     const user = userEvent.setup();
-    // Default appMode is action: selecting the view renders it inline and the
-    // embedded auth flow runs (no detachment), so the unauthed view must invoke
-    // loginTool before navigating.
+    // Default appMode is action: selecting the view renders it inline. The host
+    // must NOT fire loginTool — the inline webview bootstraps its own auth.
     await selectPluginView(user, "OAuth Plugin");
 
-    await waitFor(() => {
-      expect(api.callPluginMethod).toHaveBeenCalledWith("oauth_login");
-    });
+    // Navigation is inline, never detached.
     expect(api.window.openDetached).not.toHaveBeenCalled();
+    // The host did not auto-call the plugin's loginTool on its behalf.
+    expect(api.callPluginMethod).not.toHaveBeenCalledWith("oauth_login");
   });
 
   it("navigates an unauthenticated plugin view inline in action mode even with no loginTool (no silent abort)", async () => {
