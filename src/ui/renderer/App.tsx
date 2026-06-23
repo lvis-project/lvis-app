@@ -876,6 +876,13 @@ export function App() {
     });
   }, [api, appMode]);
 
+  // Stable reference for the status-bar permission cell's onClick. An inline
+  // arrow here would change identity every render, re-running the
+  // useStatusBarPermission effect (deps include this callback), which upserts a
+  // fresh persistent item → new array → re-render → infinite loop. Memoizing
+  // gives the effect a fixed point.
+  const onOpenPermissions = useCallback(() => onOpenSettings("permissions"), [onOpenSettings]);
+
   const handleCloseInlineSettings = useCallback(() => {
     const target = settingsReturnViewRef.current;
     setActiveView(target === "settings" ? "home" : target);
@@ -1328,7 +1335,7 @@ export function App() {
   // toast. Other toast producers leave `notification` undefined so this
   // handler is a no-op for them.
   const { persistent: statusPersistent, visibleToast: statusVisibleToast, pendingCount: statusPendingCount, removeToast: statusRemoveToast, upsertPersistent: statusUpsertPersistent, removePersistent: statusRemovePersistent } =
-    useStatusBar({ api, onOpenPermissions: () => onOpenSettings("permissions") });
+    useStatusBar({ api, onOpenPermissions });
 
   // Show a persistent StatusBar indicator while a pre-turn auto-compact runs.
   // `compact_started` sets isCompacting → this effect upserts the item.
