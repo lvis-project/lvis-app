@@ -43,7 +43,7 @@ jobs:
       LVIS_E2E: "1"
     steps:
       - name: Checkout lvis-app
-        uses: actions/checkout@v6
+        uses: actions/checkout@v7
         with:
           path: lvis-app
           # dispatch targets the `ref` input; PR/label uses the event ref.
