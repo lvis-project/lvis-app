@@ -25,7 +25,6 @@ const E2E_PLUGIN_REPOS = [
   'lvis-plugin-local-indexer',
   'lvis-plugin-meeting',
   'lvis-plugin-work-assistant',
-  'lvis-plugin-agent-hub',
 ] as const;
 
 const E2E_RESOLVE_DEMO_KEY_TOOL = 'meeting_resolve_demo_key';
@@ -59,9 +58,7 @@ function manifestIdentitySha256FromPluginJson(pluginJsonPath: string): string {
 
 function prepareE2eManifest(manifest: E2eManifest, enableDemoKeyProbe: boolean): E2eManifest {
   const base = { ...manifest };
-  if (base.id !== 'agent-hub') {
-    delete base.python;
-  }
+  delete base.python;
   if (!enableDemoKeyProbe || base.id !== 'meeting') return base;
 
   const declaredHostKeyNames = Array.isArray(base.hostSecrets?.read)
@@ -316,38 +313,24 @@ async function seedE2ePlugins(
       }
 
       const targetDist = path.join(pluginDir, 'dist');
-      if (manifest.id === 'agent-hub') {
-        const sourceDist = path.join(sourceDir, 'dist');
-        if (!fs.existsSync(sourceDist)) {
-          throw new Error(`[e2e] agent-hub dist missing: ${sourceDist}`);
-        }
-        fs.cpSync(sourceDist, targetDist, {
-          recursive: true,
-          force: true,
-          filter: (src) =>
-            !src.includes(`${path.sep}.git${path.sep}`) &&
-            !src.includes(`${path.sep}node_modules${path.sep}`),
-        });
-      } else {
-        const uiEntries = Array.isArray((manifest as { ui?: unknown }).ui)
-          ? ((manifest as { ui: Array<{ entry?: unknown; displayName?: unknown }> }).ui)
-          : [];
-        fs.mkdirSync(targetDist, { recursive: true, mode: 0o700 });
+      const uiEntries = Array.isArray((manifest as { ui?: unknown }).ui)
+        ? ((manifest as { ui: Array<{ entry?: unknown; displayName?: unknown }> }).ui)
+        : [];
+      fs.mkdirSync(targetDist, { recursive: true, mode: 0o700 });
+      fs.writeFileSync(
+        path.join(targetDist, 'hostPlugin.js'),
+        buildHostPluginStub(manifest.id, enableDemoKeyProbe),
+        'utf-8',
+      );
+      for (const ui of uiEntries) {
+        if (typeof ui.entry !== 'string' || !ui.entry.startsWith('dist/')) continue;
+        const uiPath = path.join(pluginDir, ui.entry);
+        fs.mkdirSync(path.dirname(uiPath), { recursive: true, mode: 0o700 });
         fs.writeFileSync(
-          path.join(targetDist, 'hostPlugin.js'),
-          buildHostPluginStub(manifest.id, enableDemoKeyProbe),
+          uiPath,
+          E2E_PLUGIN_UI_STUB_SOURCE,
           'utf-8',
         );
-        for (const ui of uiEntries) {
-          if (typeof ui.entry !== 'string' || !ui.entry.startsWith('dist/')) continue;
-          const uiPath = path.join(pluginDir, ui.entry);
-          fs.mkdirSync(path.dirname(uiPath), { recursive: true, mode: 0o700 });
-          fs.writeFileSync(
-            uiPath,
-            E2E_PLUGIN_UI_STUB_SOURCE,
-            'utf-8',
-          );
-        }
       }
 
       const receiptFiles = ['plugin.json'];

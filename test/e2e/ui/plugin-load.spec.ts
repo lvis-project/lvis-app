@@ -11,7 +11,6 @@ const PLUGIN_VIEWS = [
   // PluginGridButton derives testid from viewKey (`plugin:<manifest.id>:<view.id>`),
   // so we follow the manifest id here.
   { id: 'work-assistant', label: 'Proactive', testId: 'plugin-cell-plugin-work-assistant-detector-control' },
-  { id: 'agent-hub', label: '업무 보드', testId: 'plugin-cell-plugin-agent-hub-agent-hub-panel' },
 ] as const;
 
 test('plugins with UI extensions appear in the composer plugin grid', async ({ mainWindow }) => {
