@@ -88,11 +88,18 @@ function isDarwinPlatform(): boolean {
  * hover. Both are theme tokens — a bundle switch re-tints every surface and
  * the color-token gate stays clean (no raw literals).
  */
-type NavTone = "accent" | "muted";
+type NavTone = "accent" | "muted" | "home" | "marketplace" | "settings";
 
 const NAV_TONE_HOVER: Record<NavTone, string> = {
   accent: "hover:bg-accent hover:text-accent-foreground",
   muted: "hover:bg-muted hover:text-foreground",
+  // Per-ITEM hover tints for the footer trio (Home / Marketplace / Settings).
+  // HOVER-only (no persistent background) and each distinct from the
+  // regular-nav (accent) and plugin hovers — all theme tokens so the
+  // color-token gate stays clean.
+  home: "hover:bg-info/(--opacity-light) hover:text-foreground",
+  marketplace: "hover:bg-primary/(--opacity-subtle) hover:text-foreground",
+  settings: "hover:bg-success/(--opacity-faint) hover:text-foreground",
 };
 
 interface NavItemProps {
@@ -646,6 +653,7 @@ export function Sidebar({
           isActive={activeView === "home"}
           onClick={() => onSelect("home")}
           collapsed={compact}
+          tone="home"
           data-testid="sidebar-home"
         />
         {/* Divider between Home and Marketplace */}
@@ -660,7 +668,7 @@ export function Sidebar({
             if (marketplaceUrlReady) onOpenMarketplace();
           }}
           collapsed={compact}
-          tone="muted"
+          tone="marketplace"
           data-testid="sidebar-marketplace"
           data-tour-anchor="sidebar-marketplace"
         />
@@ -673,7 +681,7 @@ export function Sidebar({
           isActive={activeView === "settings"}
           onClick={onOpenSettings}
           collapsed={compact}
-          tone="muted"
+          tone="settings"
           data-testid="sidebar-settings"
           data-tour-anchor="settings-entry"
           trailingSlot={

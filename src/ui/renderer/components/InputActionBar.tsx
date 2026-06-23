@@ -311,12 +311,40 @@ function StatusSubRow({
       data-testid="iab-status-row"
       className="flex min-w-0 flex-nowrap items-center gap-1.5 px-3 pb-1.5 text-[11px] text-muted-foreground"
     >
-      {/* Active-state dot. */}
-      <span
-        data-testid="iab-status-active-dot"
-        className={`h-1.5 w-1.5 shrink-0 rounded-full ${active ? "bg-success" : "bg-muted-foreground/(--opacity-muted)"}`}
-        aria-label={active ? t("inputActionBar.statusActive") : t("inputActionBar.statusInactive")}
-      />
+      {/* REVERSED row order (user): ring on the LEFT, then a right-aligned
+          cluster [permission · vendor·model · active-dot] with the dot at the
+          far right. */}
+
+      {/* Token progress ring — now LEFTMOST. */}
+      <span className="shrink-0" data-testid="iab-status-ring">
+        {ringSlot}
+      </span>
+
+      {/* Permission — plain text, per-mode color; ml-auto pushes the trailing
+          cluster (permission · model · dot) to the right edge. */}
+      {onOpenPermissions ? (
+        <button
+          type="button"
+          onClick={onOpenPermissions}
+          data-testid="iab-status-permission"
+          data-mode={permissionMode}
+          className={`ml-auto shrink-0 truncate hover:opacity-80 focus:outline-none focus-visible:ring-1 focus-visible:ring-ring ${PERMISSION_TEXT_COLOR[permissionMode]}`}
+          title={permissionText}
+        >
+          {permissionText}
+        </button>
+      ) : (
+        <span
+          data-testid="iab-status-permission"
+          data-mode={permissionMode}
+          className={`ml-auto shrink-0 truncate ${PERMISSION_TEXT_COLOR[permissionMode]}`}
+          title={permissionText}
+        >
+          {permissionText}
+        </span>
+      )}
+
+      <span className="shrink-0 opacity-30" aria-hidden="true">·</span>
 
       {/* Vendor · model. */}
       {onOpenModelSettings ? (
@@ -337,35 +365,12 @@ function StatusSubRow({
 
       <span className="shrink-0 opacity-30" aria-hidden="true">·</span>
 
-      {/* Permission — plain text, per-mode color, no pill/outline. */}
-      {onOpenPermissions ? (
-        <button
-          type="button"
-          onClick={onOpenPermissions}
-          data-testid="iab-status-permission"
-          data-mode={permissionMode}
-          className={`shrink-0 truncate hover:opacity-80 focus:outline-none focus-visible:ring-1 focus-visible:ring-ring ${PERMISSION_TEXT_COLOR[permissionMode]}`}
-          title={permissionText}
-        >
-          {permissionText}
-        </button>
-      ) : (
-        <span
-          data-testid="iab-status-permission"
-          data-mode={permissionMode}
-          className={`shrink-0 truncate ${PERMISSION_TEXT_COLOR[permissionMode]}`}
-          title={permissionText}
-        >
-          {permissionText}
-        </span>
-      )}
-
-      {/* Token progress ring — square, hover=percent, click=detail (+cost).
-          Pushed to the END of the row (ml-auto) so it sits at the trailing
-          edge after the permission cell. */}
-      <span className="ml-auto shrink-0" data-testid="iab-status-ring">
-        {ringSlot}
-      </span>
+      {/* Active-state dot — now TRAILING (far right). */}
+      <span
+        data-testid="iab-status-active-dot"
+        className={`h-1.5 w-1.5 shrink-0 rounded-full ${active ? "bg-success" : "bg-muted-foreground/(--opacity-muted)"}`}
+        aria-label={active ? t("inputActionBar.statusActive") : t("inputActionBar.statusInactive")}
+      />
     </div>
   );
 }
@@ -404,11 +409,11 @@ function ShortcutsButton() {
           <PopoverTrigger asChild>
             <Button
               type="button"
-              variant="outline"
+              variant="ghost"
               size="icon"
               data-testid="composer-shortcuts-button"
               aria-label={label}
-              className="h-[26px] w-[26px] shrink-0 bg-input-bar text-muted-foreground"
+              className="h-[26px] w-[26px] shrink-0 text-muted-foreground"
             >
               <HelpCircle className="h-3.5 w-3.5" />
             </Button>
