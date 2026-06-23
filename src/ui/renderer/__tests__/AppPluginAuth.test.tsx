@@ -222,4 +222,59 @@ describe("App plugin auth routing", () => {
     });
     expect(api.window.openDetached).not.toHaveBeenCalled();
   });
+
+  it("navigates an unauthenticated plugin view inline in action mode even with no loginTool (no silent abort)", async () => {
+    // BUG 3 regression: action mode must render EVERY plugin view inline,
+    // including an unauthed plugin whose card has no loginTool (or whose cards
+    // have not yet populated). The old code silently `return`ed, stranding the
+    // user on their previous view. The fix navigates inline regardless; the
+    // plugin surface shows its own auth affordance. No detachment, and the host
+    // does not fabricate a loginTool call.
+    const user = userEvent.setup();
+    const { api } = await renderApp({
+      pluginCards: [
+        {
+          id: "noauthtool-plugin",
+          name: "No-LoginTool Plugin",
+          description: "Reports unauthed but declares no loginTool",
+          sampleTools: [],
+          capabilities: [],
+          tools: [],
+          loadStatus: "loaded",
+          auth: {
+            statusTool: "nlt_status",
+          },
+        },
+      ],
+      pluginUiExtensions: [
+        {
+          pluginId: "noauthtool-plugin",
+          extension: {
+            id: "main",
+            slot: "sidebar",
+            kind: "embedded-module",
+            title: "No-LoginTool Plugin",
+            entry: "dist/ui.js",
+          },
+          entryUrl: "file:///noauthtool-plugin/dist/ui.js",
+        },
+      ],
+    });
+    api.callPluginMethod.mockImplementation(async (tool: string) =>
+      tool === "nlt_status" ? { authenticated: false } : { ok: true },
+    );
+
+    // Default appMode is action — selection must navigate inline. The picker
+    // closing is the observable navigation side-effect (handleViewSelect ran to
+    // completion instead of bailing out early).
+    await selectPluginView(user, "No-LoginTool Plugin");
+
+    await waitFor(() => {
+      expect(screen.queryByTestId("slash-group-plugin")).not.toBeInTheDocument();
+    });
+    // Inline, not detached; and with no loginTool declared the host must not
+    // invoke one (no token_login / fabricated login bypass).
+    expect(api.window.openDetached).not.toHaveBeenCalled();
+    expect(api.callPluginMethod).not.toHaveBeenCalledWith("nlt_login");
+  });
 });
