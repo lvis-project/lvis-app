@@ -1468,15 +1468,6 @@ export function App() {
               activeView={activeView}
               streaming={streaming}
               hasApiKey={effectiveHasApiKey}
-              isCurrentSessionStarred={Boolean(currentSessionId && isSessionStarred(currentSessionId))}
-              onToggleCurrentSessionStar={() => currentSessionId
-                ? handleToggleSessionStar(currentSessionId, sessions.find((s) => s.id === currentSessionId)?.title)
-                : Promise.resolve()}
-              onExport={handleExport}
-              onOpenUnifiedSearch={() => {
-                searchOpenOverlay();
-              }}
-              sidebarCollapsed={sidebarCollapsed}
               appMode={appMode}
               onToggleAppMode={setAppMode}
               onOpenDevTools={() => setDevToolsOpen((v) => !v)}
@@ -1504,6 +1495,14 @@ export function App() {
           marketplaceUrlReady={marketplaceUrlReady}
           collapsed={sidebarCollapsed}
           onToggleCollapse={() => setSidebarCollapsed((v) => !v)}
+          onOpenUnifiedSearch={() => {
+            searchOpenOverlay();
+          }}
+          isCurrentSessionStarred={Boolean(currentSessionId && isSessionStarred(currentSessionId))}
+          onToggleCurrentSessionStar={() => currentSessionId
+            ? handleToggleSessionStar(currentSessionId, sessions.find((s) => s.id === currentSessionId)?.title)
+            : Promise.resolve()}
+          onExport={handleExport}
         />
         <div className="relative flex min-h-0 min-w-0 flex-1 overflow-hidden">
         <main
