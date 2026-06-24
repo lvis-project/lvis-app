@@ -74,6 +74,33 @@ describe("useStatusBar — toast TTL eviction", () => {
 
     expect(result.current.toasts).toHaveLength(0);
   });
+
+  it("extends long toast TTL so marquee text can finish flowing", async () => {
+    const api = statusBarApi();
+    const { result } = renderHook(() =>
+      useStatusBar({ api, defaultToastTtlMs: 3000 }),
+    );
+    const longMessage =
+      "Plugin login failed. code: non-corp-network. Corporate network or VPN is required. Please connect and try again.";
+
+    vi.setSystemTime(0);
+    act(() => {
+      result.current.pushToast({ severity: "error", message: longMessage, ttlMs: 5000 });
+    });
+
+    const ttlMs = result.current.visibleToast?.ttlMs ?? 0;
+    expect(ttlMs).toBeGreaterThan(5000);
+
+    await act(async () => {
+      vi.advanceTimersByTime(5100);
+    });
+    expect(result.current.visibleToast?.message).toBe(longMessage);
+
+    await act(async () => {
+      vi.advanceTimersByTime(ttlMs);
+    });
+    expect(result.current.visibleToast).toBeNull();
+  });
 });
 
 // ─────────────────────────────────────────────────────────────────────────────

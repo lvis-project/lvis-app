@@ -940,9 +940,8 @@ function formatLlmStatusMessage(ev: {
   if (ev.phase === "attempt") {
     const attempt = ev.attempt ?? 1;
     const max = ev.maxAttempts ?? 5;
-    return attempt <= 1
-      ? t("useChatState.llmStatusAttemptFirst")
-      : t("useChatState.llmStatusAttemptRetrying", { attempt, max });
+    if (attempt <= 1) return "";
+    return t("useChatState.llmStatusAttemptRetrying", { attempt, max });
   }
   return "";
 }

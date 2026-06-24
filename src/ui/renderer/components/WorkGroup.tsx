@@ -1,4 +1,4 @@
-import { memo, useEffect, useRef, useState } from "react";
+import { Children, memo, useEffect, useRef, useState } from "react";
 import { ChevronDown, ChevronRight, Loader2 } from "lucide-react";
 import { debugLog, isDebugStreamEnabled } from "../../../lib/debug-stream.js";
 import { formatDuration } from "../../../lib/turn-summary-format.js";
@@ -36,6 +36,7 @@ function WorkGroupImpl({ stepCount, streaming, children, turnDurationMs }: WorkG
   const debugStreamEnabled = isDebugStreamEnabled();
   const [open, setOpen] = useState(streaming);
   const prevStreaming = useRef(streaming);
+  const hasChildren = Children.count(children) > 0;
 
   // Diagnostic-only: stable per-instance id (mount-time only). Lets the user
   // correlate "WG[3] mount", "WG[3] render", "WG[3] effect" across logs.
@@ -118,7 +119,7 @@ function WorkGroupImpl({ stepCount, streaming, children, turnDurationMs }: WorkG
             : <ChevronRight className="h-3 w-3 flex-shrink-0 opacity-50" />
         )}
       </button>
-      {open && (
+      {open && hasChildren && (
         <div className="min-w-0 space-y-1.5 pl-1 pt-1 text-foreground">
           {children}
         </div>

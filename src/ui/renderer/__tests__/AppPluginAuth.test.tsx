@@ -173,9 +173,9 @@ describe("App plugin auth routing", () => {
     });
   });
 
-  it("detached login failure opens the plugin panel and surfaces a safe auth error code", async () => {
+  it("detached login failure keeps the plugin panel closed and surfaces a safe auth error code as a toast", async () => {
     const user = userEvent.setup();
-    const { api } = await renderApp(detachedPluginFixture);
+    const { api, emitPluginEvent } = await renderApp(detachedPluginFixture);
     const nonCorpError = Object.assign(new Error("[non-corp-network] outside corporate network"), {
       code: "non-corp-network",
     });
@@ -191,11 +191,26 @@ describe("App plugin auth routing", () => {
     await waitFor(() => {
       expect(api.callPluginMethod).toHaveBeenCalledWith("token_login");
     });
+    expect(api.window.openDetached).not.toHaveBeenCalled();
     await waitFor(() => {
-      expect(api.window.openDetached).toHaveBeenCalledWith("plugin:token-plugin:main");
+      const statusBar = within(screen.getByTestId("composer-toast-dock")).getByTestId("status-bar");
+      expect(statusBar).toHaveTextContent(/code: non-corp-network/);
+      expect(statusBar).toHaveTextContent(/사내망 또는 VPN 연결이 필요합니다/);
     });
-    expect(await screen.findByText(/code: non-corp-network/)).toBeInTheDocument();
-    expect(screen.getByText(/사내망 또는 VPN 연결이 필요합니다/)).toBeInTheDocument();
+    const statusCallCountBeforeAuthChanged = api.callPluginMethod.mock.calls.filter(
+      ([tool]) => tool === "token_status",
+    ).length;
+    emitPluginEvent("token-plugin.auth.changed", { authenticated: true });
+    await waitFor(() => {
+      expect(
+        api.callPluginMethod.mock.calls.filter(([tool]) => tool === "token_status").length,
+      ).toBeGreaterThan(statusCallCountBeforeAuthChanged);
+    });
+    expect(api.window.openDetached).not.toHaveBeenCalled();
+    const assistantBodies = screen.queryAllByTestId("assistant-message-body");
+    expect(
+      assistantBodies.some((body) => body.textContent?.includes("non-corp-network")),
+    ).toBe(false);
   });
 
   it("routes command-palette plugin actions through detached-window handling (authed)", async () => {
