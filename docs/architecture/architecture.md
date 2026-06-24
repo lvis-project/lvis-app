@@ -1770,19 +1770,35 @@ Layer 0–8 의 permission policy 는 *어떤 도구 호출을 허용/거부* �
   no-fallback 룰에 따라 boot 를 fail-closed 로 abort 한다 (unsandboxed plain
   spawn 으로 silently drop 하지 않는다).
 - **Capability SOT**: boot 에서 ASRT init 성공 시
-  `setActiveSandboxCapability({ kind: "asrt", confidence: "verified", … })` 로
-  발행한다. `detectSandboxCapability()` 가 이를 reviewer + UI 에 공급하고,
-  reviewer 의 `kind === "asrt"` → strong relaxation 은 이 경로로만 도달 가능하다.
+  `setActiveSandboxCapability({ kind: "asrt", confidence: "verified",
+  confines: { filesystem, process, network }, … })` 로 발행한다 (`confines` 는
+  machine-checkable 격리 표면 — network honesty 감사 + 향후 substrate 별 강제용).
   Gate OFF / Windows / Linux deps-missing 에서는 발행하지 않으므로 SOT 는
   `kind: "none"` 으로 남는다.
+- **Substrate-aware reviewer capability (필수 불변식)**: process-global
+  `detectSandboxCapability()` 의 `asrt` 는 **ASRT-wrapped host-shell substrate**
+  (`wrapToolCommand` → `spawnWithSandbox` 를 타는 `bash`/`powershell` builtin)
+  에만 해당한다. plugin/MCP 도구의 side-effect 는 ASRT 로 감싸지지 않은 long-lived
+  worker (isolation=none) 에서, 기타 in-process builtin 은 host 프로세스 내에서
+  실행되므로 둘 다 OS 격리가 없다. 따라서 reviewer/risk-classifier 에 공급하는
+  capability 는 `resolveReviewerSandboxCapability(source, toolName)` 로 **그 호출의
+  실행 substrate** 를 반영한다: host-shell 경로만 genuine `detectSandboxCapability()`
+  (gate ON 시 `asrt`) 를 받고, 나머지는 강제 `kind: "none"` 을 받아
+  `isWeakSandbox` 가 weak 으로 판정한다. 이로써 LLM reviewer 는 unsandboxed effect
+  에 대해 MEDIUM/HIGH → LOW downgrade (auto-approve) 를 할 수 없다 — host 샌드박스
+  ON 이 비격리 plugin/MCP 도구의 승인 게이트를 *완화* 하던 역효과를 차단한다.
+  동일 resolver 가 verdict-cache scope 와 audit 에도 쓰여 substrate 간 verdict
+  교차 재사용을 막는다.
 - **알려진 follow-up**: long-lived worker(ep-api / local-indexer 의 Python
   워커)의 egress 는 아직 이 shared floor 로 완전히 수렴되지 않은 문서화된
   후속 작업이다 (§9 plugin egress 참조).
 
 **Files:** `src/permissions/asrt-sandbox.ts` (어댑터 + NETWORK ENFORCEMENT
 MODEL 헤더), `src/permissions/sandbox-capability.ts` (capability SOT +
-`setActiveSandboxCapability` / `isWeakSandbox`), `src/permissions/sandbox-write-jail.ts`,
-`src/tools/bash.ts` (spawn 경로), `src/boot.ts` (gate 결정 + capability 발행).
+`setActiveSandboxCapability` / `isWeakSandbox` / `resolveReviewerSandboxCapability`),
+`src/permissions/permission-manager.ts` (dispatchReviewer 가 substrate-aware
+capability 를 reviewer/cache/audit 에 공급), `src/permissions/sandbox-write-jail.ts`,
+`src/tools/bash.ts` (ASRT-wrapped spawn 경로), `src/boot.ts` (gate 결정 + capability 발행).
 
 
 ### 6.4 Tool Registry & Taxonomy — 빌트인 도구 카탈로그
@@ -2573,8 +2589,8 @@ wrapper(macOS Seatbelt / Linux bwrap)로 감싼다.
   완전히 수렴시키는 것은 문서화된 후속 작업이다. 현행 plugin egress 의 일부는
   여전히 HostApi `hostFetch` chokepoint (Tier A NetworkGuard) 를 경유한다.
 - **Apache attribution / 라이선스**: ASRT (`@anthropic-ai/sandbox-runtime`) 는
-  Apache-2.0 이며 NOTICE attribution 을 유지한다; LVIS 자체 라이선스는 MIT 로
-  변동 없다.
+  Apache-2.0 이며 attribution 은 repo 루트의 `THIRD-PARTY-NOTICES.md` 에 유지한다;
+  LVIS 자체 라이선스는 MIT 로 변동 없다.
 
 ### 9.2 Plugin Manifest Spec
 
