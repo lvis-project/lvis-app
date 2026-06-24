@@ -30,7 +30,7 @@ describe("Chat stream sequencing (Phase 3.2 regression net)", () => {
     });
   });
 
-  it("reasoning_delta events render reasoning content", async () => {
+  it("reasoning_delta events render a (collapsed) reasoning card", async () => {
     const { container, api, emitChatStream } = await renderApp();
     await waitFor(() => expect(api.getSettings).toHaveBeenCalled());
     await submitChatMessage(container, "think");
@@ -40,7 +40,11 @@ describe("Chat stream sequencing (Phase 3.2 regression net)", () => {
       emitChatStream({ type: "reasoning_delta", text: "inner reasoning chain" });
     });
     await waitFor(() => {
-      expect(container.textContent).toContain("inner reasoning chain");
+      // The reasoning card renders, but its body is COLLAPSED by default — the
+      // live "생각 중..." header shows while the raw chain stays hidden until
+      // the user clicks to expand.
+      expect(container.textContent).toContain("생각 중...");
+      expect(container.textContent).not.toContain("inner reasoning chain");
     });
   });
 
