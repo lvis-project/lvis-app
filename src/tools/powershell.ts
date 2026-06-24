@@ -17,12 +17,16 @@ import {
   type ToolExecutionContext,
   type ToolResult,
 } from "./base.js";
-import { buildSafeChildEnv } from "./safe-env.js";
+import { buildSafeChildEnv, buildSandboxedChildEnv } from "./safe-env.js";
 import {
   validateShellCommandPathPolicy,
   validateShellWorkingDirectory,
 } from "./shell-path-policy.js";
-import { getSandboxRunner } from "../permissions/sandbox-runner.js";
+import {
+  isAsrtSandboxActive,
+  wrapToolCommand,
+  cleanupAsrtSandboxAfterCommand,
+} from "../permissions/asrt-sandbox.js";
 import { deriveSandboxWritePaths } from "../permissions/sandbox-write-jail.js";
 import { TOOL_TIMEOUT_POLICY } from "../shared/tool-timeout-policy.js";
 import { trackManagedChildProcess } from "../main/managed-child-processes.js";
@@ -180,17 +184,15 @@ export class PowerShellTool extends ZodTool<typeof PowerShellToolInputSchema> {
       return { output: preflightError, isError: true, metadata: { preflightDenied: true } };
     }
 
-    // §691: SandboxRunner adoption for PowerShell spawn path.
-    // On Windows, AppContainerRunner.detect() returns available=false (native
-    // binding pending), so getSandboxRunner("win32") returns undefined and this
-    // block is skipped — Windows falls through to spawnPowerShell.
-    // A runner is registered at boot only on user opt-in (Settings → 권한
-    // 'OS 도구 샌드박스' or the LVIS_SANDBOX_ENABLED escape-hatch) AND when the
-    // platform runner detected available — parity with bash.ts. A registered
-    // runner here therefore means the sandbox is on; on macOS pwsh runs inside
-    // the sandbox-exec PARTIAL profile.
-    const sandboxRunner = getSandboxRunner(process.platform as NodeJS.Platform);
-    if (sandboxRunner) {
+    // §691: ASRT (Anthropic sandbox-runtime) adoption for the PowerShell spawn
+    // path — parity with bash.ts. The sandbox is gated once at boot
+    // (`initializeAsrtSandbox`); `isAsrtSandboxActive()` reflects that decision
+    // with no runtime re-evaluation. On Windows the boot path fails closed, so
+    // this stays false there and pwsh falls through to the plain spawn.
+    //
+    // When the gate is OFF (the DEFAULT), this is skipped and pwsh runs via the
+    // unchanged `spawnPowerShell` path.
+    if (isAsrtSandboxActive()) {
       // Namespace-scoped write-jail (owner plugin sandbox root ∪ allowed
       // directories), not the bare cwd. cwd stays readable.
       const writePaths = deriveSandboxWritePaths({
@@ -200,7 +202,6 @@ export class PowerShellTool extends ZodTool<typeof PowerShellToolInputSchema> {
         allowedDirectories: [resolvedCwd, ...ctx.extraAllowedDirectories],
       });
       return await spawnPowerShellWithSandbox(
-        sandboxRunner,
         input.command,
         resolvedCwd,
         writePaths,
@@ -370,99 +371,133 @@ $commands = @(
 `;
 
 /**
- * Execute a PowerShell command via the registered {@link SandboxRunner}.
- * Mirrors spawnWithSandbox in bash.ts — WHATWG ReadableStream<Uint8Array>
- * drained through per-stream TextDecoder for CJK boundary safety.
+ * POSIX single-quote escape one argument so it survives the `<shell> -c <wrap>`
+ * layer that ASRT's `wrapWithSandboxArgv` returns on macOS/Linux. Wrap in single
+ * quotes and replace each embedded `'` with `'\''`. Self-contained (no
+ * shell-quote dependency, which is only transitively present).
+ */
+function posixSingleQuote(arg: string): string {
+  return `'${arg.replace(/'/g, "'\\''")}'`;
+}
+
+/**
+ * Execute a PowerShell command under the ASRT sandbox — parity with bash.ts's
+ * {@link spawnWithSandbox}.
  *
- * @internal — called only when a sandbox runner is registered (user opt-in).
+ * ASRT wraps a SHELL COMMAND STRING (its mac/linux argv is `[<shell>, -c,
+ * <wrapped>]`), so we render the pwsh invocation as a single POSIX-quoted
+ * command line and hand that to {@link wrapToolCommand}. The host then spawns
+ * the returned argv with `shell: false` (the wrapper argv already invokes the
+ * shell; a second shell would double-parse).
+ *
+ * Filesystem jail mirrors bash.ts: `allowWrite` = the derived write-jail, and
+ * the read-jail HOME-leak fix denies `$HOME` then re-allows cwd + write paths.
+ *
+ * @internal — called only when the ASRT sandbox is active (user opt-in).
  */
 async function spawnPowerShellWithSandbox(
-  runner: import("../permissions/sandbox-runner.js").SandboxRunner,
   command: string,
   cwd: string,
   writePaths: readonly string[],
   timeoutSeconds: number,
 ): Promise<ToolResult> {
   const executable = resolvePowerShellExecutable();
-  const safeEnv = Object.fromEntries(
-    Object.entries(buildSafeChildEnv()).filter(
-      (entry): entry is [string, string] => typeof entry[1] === "string",
-    ),
-  );
-
-  const proc = await runner.spawn(
+  // Render: pwsh -NoLogo -NoProfile -NonInteractive -Command '<command>'
+  const pwshCommandLine = [
     executable,
-    ["-NoLogo", "-NoProfile", "-NonInteractive", "-Command", command],
-    {
-      networkBlocked: true,
-      fsReadPaths: process.platform === "win32"
-        ? [
-            process.env["SystemRoot"] ?? "C:\\Windows",
-            process.env["USERPROFILE"] ?? "C:\\Users",
-          ]
-        : ["/etc", "/usr", process.env["HOME"] ?? "/home"],
-      fsWritePaths: [...writePaths],
-      processIsolated: true,
-    },
-    { env: safeEnv, cwd },
-  );
+    "-NoLogo",
+    "-NoProfile",
+    "-NonInteractive",
+    "-Command",
+    posixSingleQuote(command),
+  ].join(" ");
 
-  const chunks: string[] = [];
+  const home = process.env["HOME"];
+  const allowRead = [cwd, ...writePaths];
+  const filesystem = {
+    allowWrite: [...writePaths],
+    allowRead,
+    ...(home !== undefined && home !== "" ? { denyRead: [home] } : {}),
+  };
 
-  async function drainStream(stream: ReadableStream<Uint8Array>): Promise<void> {
-    const decoder = new TextDecoder("utf-8");
-    const reader = stream.getReader();
-    try {
-      for (;;) {
-        const { done, value } = await reader.read();
-        if (done) break;
-        chunks.push(decoder.decode(value, { stream: true }));
-      }
-      const flushed = decoder.decode(undefined, { stream: false });
-      if (flushed) chunks.push(flushed);
-    } finally {
-      reader.releaseLock();
-    }
-  }
-
-  let timedOut = false;
-  let code: number | undefined;
-
-  const timeoutHandle = setTimeout(async () => {
-    timedOut = true;
-    await proc.abort();
-  }, timeoutSeconds * 1000);
-
+  const abortController = new AbortController();
+  let wrapped: { argv: string[]; env: NodeJS.ProcessEnv };
   try {
-    await Promise.all([drainStream(proc.stdout), drainStream(proc.stderr)]);
-    code = await proc.exitCode;
+    wrapped = await wrapToolCommand(pwshCommandLine, {
+      filesystem,
+      abortSignal: abortController.signal,
+    });
   } catch (err) {
-    code = undefined;
-    chunks.push(`\nspawn failed: ${(err as Error).message}`);
-  } finally {
-    clearTimeout(timeoutHandle);
-  }
-
-  const combined = chunks.join("").replace(/\r\n/g, "\n").trim();
-  const output = combined.length === 0
-    ? "(no output)"
-    : combined.length > OUTPUT_CAP
-      ? combined.slice(0, OUTPUT_CAP) + TRUNCATION_MARKER
-      : combined;
-
-  if (timedOut) {
     return {
-      output: `PowerShell command timed out after ${timeoutSeconds} seconds.\n${output}`,
+      output: `PowerShell spawn failed: ${(err as Error).message}`,
       isError: true,
-      metadata: { returncode: code ?? null, timedOut: true, sandboxed: true },
+      metadata: { sandboxed: true },
     };
   }
 
-  return {
-    output,
-    isError: code !== 0,
-    metadata: { returncode: code ?? null, sandboxed: true },
-  };
+  const [cmd, ...args] = wrapped.argv;
+  if (cmd === undefined) {
+    return {
+      output: "PowerShell spawn failed: ASRT returned an empty argv",
+      isError: true,
+      metadata: { sandboxed: true },
+    };
+  }
+
+  return await new Promise<ToolResult>((resolveResult) => {
+    const child: PipedChild = spawn(cmd, args, {
+      cwd,
+      stdio: ["ignore", "pipe", "pipe"],
+      shell: false,
+      env: buildSandboxedChildEnv(wrapped.env),
+    });
+    trackManagedChildProcess(child, { label: "tool:powershell:asrt" });
+
+    const chunks: Buffer[] = [];
+    const collect = (chunk: Buffer): void => {
+      chunks.push(chunk);
+    };
+    child.stdout.on("data", collect);
+    child.stderr.on("data", collect);
+
+    let settled = false;
+    let timedOut = false;
+    const timer = setTimeout(() => {
+      timedOut = true;
+      abortController.abort();
+      terminateProcess(child);
+    }, timeoutSeconds * 1000);
+
+    const finish = (code: number | null): void => {
+      if (settled) return;
+      settled = true;
+      clearTimeout(timer);
+      void cleanupAsrtSandboxAfterCommand();
+      const output = formatOutput(Buffer.concat(chunks).toString("utf-8"));
+      resolveResult({
+        output: timedOut
+          ? `PowerShell command timed out after ${timeoutSeconds} seconds.\n${output}`
+          : output,
+        isError: timedOut || code !== 0,
+        metadata: { returncode: code, timedOut, sandboxed: true },
+      });
+    };
+
+    child.on("close", (code) => finish(code));
+    child.on("error", (err) => {
+      if (settled) return;
+      settled = true;
+      clearTimeout(timer);
+      void cleanupAsrtSandboxAfterCommand();
+      resolveResult({
+        output: err && "code" in err && err.code === "ENOENT"
+          ? `PowerShell executable not found: ${executable}`
+          : `PowerShell spawn failed: ${err.message}`,
+        isError: true,
+        metadata: { sandboxed: true },
+      });
+    });
+  });
 }
 
 async function spawnPowerShell(
