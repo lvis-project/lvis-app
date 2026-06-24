@@ -7,11 +7,23 @@
  */
 import type { PublicKeyInput } from "./envelope-verifier.js";
 
+// Key rotation in progress: the marketplace server is migrating its plugin
+// signing key from `poc-v1` (proof-of-concept) to `prod-v1` (production).
+// Both are active trust anchors during the transition — most catalog plugins
+// are still signed with `poc-v1`, while newer re-publishes (e.g. `meeting`)
+// carry `prod-v1`. `verifyEnvelope` accepts any key in this map, so keeping
+// both lets either generation install. Values are the base64 of the raw
+// 32-byte ed25519 public keys. Retire `poc-v1` only after every catalog
+// artifact has been re-signed with `prod-v1` (and any offline-cache TTL
+// referencing it has expired). NOTE: commit `prod-v1.pub` to
+// lvis-marketplace/schemas/keys/ so this anchor has an out-of-band source
+// (the repo currently ships only poc-v1.pub).
 export const MARKETPLACE_PUBLIC_KEYS: Readonly<Record<string, string>> = Object.freeze({
   "poc-v1": "Qm3FUAMek2r5OkXCurgX6dNYSqiT1GRnjb5fWfuOoao=",
+  "prod-v1": "JnmneLJZ3G9TiC+JU0naTDlOdIHC07PB+BToCIarL8E=",
 });
 
-export const MARKETPLACE_PRIMARY_KEY_ID = "poc-v1" as const;
+export const MARKETPLACE_PRIMARY_KEY_ID = "prod-v1" as const;
 
 /**
  * #893 Stage 2 — Trust roots for the marketplace whitelist registry.
