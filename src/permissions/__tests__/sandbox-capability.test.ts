@@ -1,9 +1,11 @@
-import { describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it } from "vitest";
 
 import {
+  __resetActiveSandboxCapabilityForTest,
   detectSandboxCapability,
   formatSandboxCapabilityForPrompt,
   isWeakSandbox,
+  setActiveSandboxCapability,
   type SandboxCapability,
 } from "../sandbox-capability.js";
 
@@ -79,6 +81,40 @@ describe("sandbox-capability", () => {
     expect(formatSandboxCapabilityForPrompt(cap)).toBe(
       "executionSandbox=asrt (verified, darwin) — ASRT (Seatbelt) active — fs+process+network contained",
     );
+  });
+});
+
+// ─── Active capability publish (boot ASRT-init path) ─────────────────────────
+
+describe("sandbox-capability — setActiveSandboxCapability publish", () => {
+  afterEach(() => {
+    __resetActiveSandboxCapabilityForTest();
+  });
+
+  it("publishes kind='asrt' (verified) so detectSandboxCapability + the reviewer strong-relaxation become reachable when the gate is ON", () => {
+    // Mirrors boot.ts: when the gate is ON and initializeAsrtSandbox succeeds,
+    // boot publishes the active capability to the SOT.
+    setActiveSandboxCapability({
+      kind: "asrt",
+      confidence: "verified",
+      platform: "darwin",
+      reason: "ASRT (Seatbelt) active — fs+process+network contained",
+    });
+    const cap = detectSandboxCapability();
+    expect(cap.kind).toBe("asrt");
+    expect(cap.confidence).toBe("verified");
+    // The 'asrt'-strong branch in isWeakSandbox is now reachable: a verified
+    // ASRT capability is NOT weak, so the reviewer's strong relaxation applies.
+    expect(isWeakSandbox(cap)).toBe(false);
+  });
+
+  it("falls back to kind='none' (verified) when no capability was published (gate OFF / Windows fail-closed / Linux deps-missing)", () => {
+    // No setActiveSandboxCapability call — the SOT reports the absence of OS
+    // isolation, matching the default-OFF posture and the non-initialized paths.
+    const cap = detectSandboxCapability();
+    expect(cap.kind).toBe("none");
+    expect(cap.confidence).toBe("verified");
+    expect(isWeakSandbox(cap)).toBe(true);
   });
 });
 
@@ -162,7 +198,7 @@ describe("sandbox-capability — SandboxKind union members", () => {
       kind: "partial",
       confidence: "assumed",
       platform: "darwin",
-      reason: "partial sandbox-exec",
+      reason: "partial OS isolation",
     };
     const result = formatSandboxCapabilityForPrompt(cap);
     expect(result).toContain("partial");

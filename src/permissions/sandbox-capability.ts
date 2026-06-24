@@ -51,9 +51,10 @@ export type SandboxKind =
  *   - "assumed"           — inferred from platform without active probe (used
  *     when a probe is expensive or not yet implemented).
  *   - "policy-best-effort" — binary confirmed present + executable, but the
- *     sandbox profile is a best-effort policy (e.g. macOS sandbox-exec SBPL).
- *     Known bypass paths exist; enforcement is weaker than "verified".
- *     Used for macOS sandbox-exec (PARTIAL) to distinguish from assumed.
+ *     sandbox profile is a best-effort policy with known bypass paths;
+ *     enforcement is weaker than "verified". Reserved for a future PARTIAL
+ *     backend; no current platform reports this (macOS + Linux are verified
+ *     ASRT). Distinguishes a best-effort policy from "assumed".
  */
 export type SandboxConfidence = "verified" | "assumed" | "policy-best-effort";
 
@@ -122,7 +123,7 @@ export function detectSandboxCapability(): SandboxCapability {
  *   "executionSandbox=none (verified, darwin) — no OS sandbox configured for the host process"
  *
  * Labels for extended kinds:
- *   partial  → "⚠ OS 격리 부분적 (sandbox-exec)"
+ *   partial  → "⚠ OS 격리 부분적"
  *   fs-only  → "ℹ 파일시스템만 격리 (landlock)"
  */
 export function formatSandboxCapabilityForPrompt(capability: SandboxCapability): string {

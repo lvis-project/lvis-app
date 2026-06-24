@@ -128,8 +128,8 @@ export interface ApprovalRequest {
   /**
    * Issue #691 round-1 user request — OS-level execution sandbox SOT,
    * surfaced to the approval dialog so the user can see whether the
-   * tool will run under bubblewrap / sandbox-exec / AppContainer or
-   * with no isolation. Captured at request build time by the executor
+   * tool will run under the ASRT OS sandbox (macOS Seatbelt / Linux bwrap)
+   * or with no isolation. Captured at request build time by the executor
    * (and by {@link ApprovalGate} for non-tool approvals) from
    * {@link detectSandboxCapability}; immutable thereafter.
    *

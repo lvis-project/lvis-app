@@ -162,9 +162,9 @@ export interface FeatureFlags {
    */
   hostClassifiesRisk?: boolean;
   /**
-   * OS tool sandbox — when `true` (and a platform runner is available), shell
-   * and tool spawns are confined by the OS sandbox runner (Linux bubblewrap,
-   * macOS Seatbelt/sandbox-exec). Default `false` (opt-in).
+   * OS tool sandbox — when `true` (and the platform is supported), shell and
+   * tool spawns are confined by the Anthropic Sandbox Runtime (ASRT; macOS
+   * Seatbelt / Linux bwrap backends). Default `false` (opt-in).
    *
    * Orthogonal to {@link hostClassifiesRisk}: sandbox-enforcement (is the
    * action kernel-confined when it runs) and risk-classification (does the
@@ -172,10 +172,12 @@ export interface FeatureFlags {
    * needs approval, and an unsandboxed platform still classifies risk.
    *
    * Capability is platform-dependent and honestly reported, not overclaimed:
-   *   - macOS: filesystem + process confinement, NOT network (sandbox-exec
-   *     does not block loopback/IPv6/DNS).
-   *   - Linux: filesystem + process + network (`--unshare-net`).
-   *   - Windows: not yet available — runs unconfined; the toggle reflects this.
+   *   - macOS (Seatbelt via ASRT): filesystem + process + network egress
+   *     confinement. Network egress is deny-by-default, confined to the
+   *     shared strict-union allow-list (loopback proxy floor).
+   *   - Linux (bwrap via ASRT): filesystem + process + network egress
+   *     confinement (same strict-union floor).
+   *   - Windows: fail-closed — runs unconfined; the toggle reflects this.
    *
    * `LVIS_SANDBOX_ENABLED=1` remains an environment escape-hatch override, but
    * this setting is the primary, user-discoverable control.
