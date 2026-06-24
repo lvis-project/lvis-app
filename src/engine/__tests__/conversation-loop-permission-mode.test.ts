@@ -101,6 +101,7 @@ describe("ConversationLoop permission mode slash events", () => {
         fromMode: "default",
         toMode: "auto",
         durable: true,
+        confirmationSource: "builtin-slash",
       }),
     );
     expect(onPermissionModeChanged).toHaveBeenCalledWith("auto");

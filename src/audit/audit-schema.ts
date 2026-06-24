@@ -226,6 +226,12 @@ export interface AuditModeChange extends AuditCommon {
   fromMode: PermissionMode;
   toMode: PermissionMode;
   durable: boolean;
+  /**
+   * Present when a built-in user action is the explicit confirmation surface
+   * for a durable mode change, so no secondary tool approval dialog was shown.
+   * Historical rows omit this field.
+   */
+  confirmationSource?: "settings-ui" | "builtin-slash";
 }
 
 /**
