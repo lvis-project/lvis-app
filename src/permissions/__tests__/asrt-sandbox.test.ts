@@ -31,7 +31,13 @@ import {
   isAsrtSandboxSupported,
   checkAsrtDependencies,
   computeUnionAllowedDomains,
+  normalizeUnionForAsrt,
 } from "../asrt-sandbox.js";
+// ASRT-contract guards: the real vendored matcher + parent-proxy resolver, so
+// the host-side fixes are proven against ASRT 0.0.59's ACTUAL semantics (not a
+// re-implementation that could drift from the package).
+import { matchesDomainPattern } from "@anthropic-ai/sandbox-runtime/dist/sandbox/domain-pattern.js";
+import { resolveParentProxy } from "@anthropic-ai/sandbox-runtime/dist/sandbox/parent-proxy.js";
 
 /**
  * The wrap/initialize assertions need the platform's sandbox dependencies to be
@@ -336,5 +342,97 @@ describe("asrt-sandbox — computeUnionAllowedDomains (shared-config enforcement
       ["", "ok.example", undefined as unknown as string],
     ]);
     expect(union).toEqual(["ok.example"]);
+  });
+});
+
+describe("asrt-sandbox — parentProxy direct-connect floor (PR #1356 MAJOR, corrected)", () => {
+  /**
+   * Pins the ASRT 0.0.59 contract the buildSandboxConfig default path depends
+   * on: resolveParentProxy (parent-proxy.js:46) is
+   *   `cfg?.http ?? process.env.HTTP_PROXY ?? process.env.http_proxy`.
+   * An EMPTY object `{}` (the prior buggy value) has no `http` key, so the `??`
+   * chain STILL inherits the host HTTP_PROXY — identical to passing nothing.
+   * Only EXPLICIT EMPTY STRINGS short-circuit the chain (`'' ?? x` ⇒ `''`) and
+   * yield genuine direct-connect. The fix emits `{ http: '', https: '' }` on
+   * the default path, so resolveParentProxy returns undefined (no host-proxy
+   * chaining) even with a host HTTP_PROXY set.
+   */
+  it("explicit empty strings → no host-proxy inheritance; {} would inherit (proves the floor)", () => {
+    const prev = process.env.HTTP_PROXY;
+    process.env.HTTP_PROXY = "http://host-proxy.invalid:3128";
+    try {
+      // The value buildSandboxConfig emits on the DEFAULT path (no corporateProxy).
+      const direct = resolveParentProxy({ http: "", https: "" });
+      expect(direct).toBeUndefined(); // direct-connect, no inheritance
+
+      // The OLD buggy value — proves why `{}` is NOT a secure floor.
+      const inherited = resolveParentProxy({});
+      expect(inherited).toBeDefined();
+      expect(inherited?.httpUrl?.href).toContain("host-proxy.invalid");
+
+      // Sanity: undefined behaves identically to `{}` (both inherit).
+      expect(resolveParentProxy(undefined)?.httpUrl?.href).toContain("host-proxy.invalid");
+    } finally {
+      if (prev === undefined) delete process.env.HTTP_PROXY;
+      else process.env.HTTP_PROXY = prev;
+    }
+  });
+
+  it("a trusted corporateProxy value is honored (still no host-env inheritance path)", () => {
+    const prev = process.env.HTTP_PROXY;
+    process.env.HTTP_PROXY = "http://host-proxy.invalid:3128";
+    try {
+      // What buildSandboxConfig emits when corporateProxy.http is set.
+      const corp = resolveParentProxy({ http: "http://corp-proxy.example:8080", https: "" });
+      expect(corp?.httpUrl?.href).toContain("corp-proxy.example");
+      expect(corp?.httpUrl?.href).not.toContain("host-proxy.invalid");
+    } finally {
+      if (prev === undefined) delete process.env.HTTP_PROXY;
+      else process.env.HTTP_PROXY = prev;
+    }
+  });
+});
+
+describe("asrt-sandbox — normalizeUnionForAsrt (domain-matching alignment, PR #1356 MINOR)", () => {
+  /**
+   * ASRT matchesDomainPattern (domain-pattern.js:23) matches a BARE domain
+   * EXACTLY; a strict subdomain needs `*.d`. LVIS hostFetch treats a bare
+   * domain as a dot-boundary SUFFIX. normalizeUnionForAsrt emits both `d` and
+   * `*.d` so ASRT's matcher reproduces the suffix semantics. These assertions
+   * run the REAL vendored matcher against the normalized list.
+   */
+  it("emits apex + wildcard for each bare domain (order-stable, deduped)", () => {
+    expect(normalizeUnionForAsrt(["example.com"])).toEqual([
+      "example.com",
+      "*.example.com",
+    ]);
+    expect(
+      normalizeUnionForAsrt(["a.example", "a.example", "b.example"]),
+    ).toEqual(["a.example", "*.a.example", "b.example", "*.b.example"]);
+  });
+
+  it("passes wildcard entries through unchanged; drops `*` and empties", () => {
+    expect(normalizeUnionForAsrt(["*.example.com"])).toEqual(["*.example.com"]);
+    expect(normalizeUnionForAsrt(["*", "", "  "])).toEqual([]);
+  });
+
+  it("normalized bare domain matches the apex AND subdomains under the REAL ASRT matcher", () => {
+    const normalized = normalizeUnionForAsrt(["example.com"]);
+    const matches = (host: string) =>
+      normalized.some((p) => matchesDomainPattern(host, p));
+    // Apex + strict subdomains are ALLOWED (mirrors LVIS suffix semantics).
+    expect(matches("example.com")).toBe(true);
+    expect(matches("sub.example.com")).toBe(true);
+    expect(matches("a.b.example.com")).toBe(true);
+    // A different registrable domain and a suffix-spoof are NOT allowed.
+    expect(matches("notexample.com")).toBe(false);
+    expect(matches("example.com.attacker.com")).toBe(false);
+  });
+
+  it("a RAW bare domain (un-normalized) would NOT match subdomains under ASRT — the divergence the fix closes", () => {
+    // This is the bug: without normalization, ASRT's exact match rejects the
+    // subdomain that LVIS hostFetch would have allowed.
+    expect(matchesDomainPattern("sub.example.com", "example.com")).toBe(false);
+    expect(matchesDomainPattern("example.com", "example.com")).toBe(true);
   });
 });
