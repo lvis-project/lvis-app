@@ -693,10 +693,10 @@ describe("LlmRiskClassifier — R-1 weak context no-downgrade", () => {
         category: "shell",
         finalInput: { command: "make build" },
         sandboxCapability: {
-          kind: "bubblewrap",
+          kind: "asrt",
           confidence: "verified",
           platform: "linux",
-          reason: "bwrap active",
+          reason: "ASRT (bwrap) active",
         },
         // No conversationContext → isContextMissingIntent = true
       }),
@@ -717,10 +717,10 @@ describe("LlmRiskClassifier — R-1 weak context no-downgrade", () => {
         category: "shell",
         finalInput: { command: "make build" },
         sandboxCapability: {
-          kind: "bubblewrap",
+          kind: "asrt",
           confidence: "verified",
           platform: "linux",
-          reason: "bwrap active",
+          reason: "ASRT (bwrap) active",
         },
         conversationContext: { recentUserMessage: "ok" },  // 2 chars < 5
       }),
@@ -741,10 +741,10 @@ describe("LlmRiskClassifier — R-1 weak context no-downgrade", () => {
         category: "write",
         finalInput: { path: "/Users/ken/work/note.md" },
         sandboxCapability: {
-          kind: "bubblewrap",
+          kind: "asrt",
           confidence: "verified",
           platform: "linux",
-          reason: "bwrap active",
+          reason: "ASRT (bwrap) active",
         },
         conversationContext: { recentUserMessage: "이 파일 저장해줘" },  // 9 chars ≥ 5
       }),

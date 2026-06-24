@@ -3,12 +3,15 @@
  * enforces. Shared between main (IPC handler) and any caller that needs to
  * report capability truthfully — NO overclaiming.
  *
- * Platform reality (see runner sources under src/permissions/runners/):
- *   - macOS (Seatbelt/sandbox-exec): filesystem + process confinement, but
- *     NOT network — sandbox-exec does not block loopback/IPv6/DNS. Full
- *     network containment is a later proxy/loopback-jail layer.
- *   - Linux (bubblewrap): filesystem + process + network (`--unshare-net`).
- *   - Windows: not yet available — tools run unconfined.
+ * Platform reality (now backed by the Anthropic Sandbox Runtime — see
+ * src/permissions/asrt-sandbox.ts):
+ *   - macOS (Seatbelt via ASRT): filesystem + process confinement, AND network
+ *     — ASRT routes egress through a loopback proxy enforcing the global
+ *     strict-union allow-list, so egress IS contained (no longer the old
+ *     sandbox-exec fake floor that left loopback/IPv6/DNS open).
+ *   - Linux (bubblewrap via ASRT): filesystem + process + network.
+ *   - Windows: fail-closed — tools run unconfined (srt-win is a network-only
+ *     half-sandbox LVIS does not adopt).
  */
 
 /** What the sandbox confines, by platform. `network` is false where egress is not contained. */
@@ -51,13 +54,15 @@ export function sandboxConfinementForPlatform(
     return { filesystem: false, process: false, network: false };
   }
   if (platform === "darwin") {
-    // Seatbelt confines fs + process; network is NOT contained (PARTIAL).
-    return { filesystem: true, process: true, network: false };
-  }
-  if (platform === "linux") {
-    // bubblewrap unshares fs + pid + net.
+    // Seatbelt via ASRT confines fs + process; network egress is contained by
+    // ASRT's loopback proxy + global strict-union allow-list (REAL floor, not
+    // the old sandbox-exec fake floor).
     return { filesystem: true, process: true, network: true };
   }
-  // Windows + anything else: no runner.
+  if (platform === "linux") {
+    // bubblewrap via ASRT confines fs + pid + net.
+    return { filesystem: true, process: true, network: true };
+  }
+  // Windows + anything else: fail-closed, no sandbox.
   return { filesystem: false, process: false, network: false };
 }
