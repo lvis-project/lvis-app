@@ -28,7 +28,23 @@ import {
   wrapToolCommand,
   cleanupAsrtSandboxAfterCommand,
   isAsrtSandboxSupported,
+  checkAsrtDependencies,
 } from "../asrt-sandbox.js";
+
+/**
+ * The wrap/initialize assertions need the platform's sandbox dependencies to be
+ * actually present (Linux: bwrap + socat + ripgrep). `isSupportedPlatform()` is
+ * only a platform check — a Linux CI runner returns true there but may lack the
+ * binaries, in which case `initialize` correctly throws (the same fail-closed
+ * signal boot.ts honors). Gate the live tests on the honest precondition:
+ * supported platform AND no dependency errors. Returns the boolean so each test
+ * can early-return as a skip.
+ */
+async function asrtCanInitialize(): Promise<boolean> {
+  if (!(await isAsrtSandboxSupported())) return false;
+  const deps = await checkAsrtDependencies();
+  return deps.errors.length === 0;
+}
 
 afterEach(async () => {
   // Always return to the gated-OFF baseline so cross-test state never leaks.
@@ -71,8 +87,9 @@ describe("asrt-sandbox — gate default OFF", () => {
 
 describe("asrt-sandbox — active flag lifecycle (boot-time, no runtime injection)", () => {
   it("flips to true on initialize and back to false on reset", async () => {
-    if (!(await isAsrtSandboxSupported())) {
-      // Unsupported platform — initialize would fail-closed at boot anyway.
+    if (!(await asrtCanInitialize())) {
+      // Unsupported platform or missing sandbox deps — initialize would
+      // fail-closed at boot anyway; the gate stays OFF.
       expect(isAsrtSandboxActive()).toBe(false);
       return;
     }
@@ -86,7 +103,7 @@ describe("asrt-sandbox — active flag lifecycle (boot-time, no runtime injectio
 
 describe("asrt-sandbox — gate ON wraps a real command under the OS sandbox", () => {
   it("returns ASRT argv whose wrapped echo runs and resolves vendor binaries", async () => {
-    if (!(await isAsrtSandboxSupported())) return;
+    if (!(await asrtCanInitialize())) return;
 
     const writeDir = mkdtempSync(join(tmpdir(), "asrt-test-"));
     try {
@@ -117,7 +134,7 @@ describe("asrt-sandbox — gate ON wraps a real command under the OS sandbox", (
 
 describe("asrt-sandbox — per-command trust boundary (security MINOR)", () => {
   it("a per-command filesystem wrap cannot carry a weakening flag (no such field)", async () => {
-    if (!(await isAsrtSandboxSupported())) return;
+    if (!(await asrtCanInitialize())) return;
 
     await initializeAsrtSandbox({ allowedDomains: [] });
     // The WrapOptions surface only exposes `filesystem` + `abortSignal`. There
