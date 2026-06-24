@@ -158,19 +158,13 @@ beforeEach(() => {
 });
 
 describe("permissions IPC handlers", () => {
-  it("setMode routes through durable slash confirmation before persisting", async () => {
+  it("setMode persists internal durable mode changes with audit but no approval prompt", async () => {
     const { deps, permissionManager } = await setup({ approvalChoice: "allow-once" });
 
     const result = await invoke(PERMISSIONS.setMode, { mode: "auto", intent: USER_INTENT });
 
     expect(result).toEqual({ ok: true, mode: "auto" });
-    expect(deps.approvalGate.requestAndWait).toHaveBeenCalledWith(
-      expect.objectContaining({
-        toolName: "/permission mode",
-        args: expect.objectContaining({ fromMode: "default", toMode: "auto", durable: true }),
-        trustOrigin: "user-keyboard",
-      }),
-    );
+    expect(deps.approvalGate.requestAndWait).not.toHaveBeenCalled();
     expect(permissionManager.setModePersist).toHaveBeenCalledWith("auto");
     expect(deps.auditLogger.appendPermissionAuditEntry).toHaveBeenCalledWith(
       expect.objectContaining({ decision: "mode_change", fromMode: "default", toMode: "auto", durable: true }),
@@ -187,13 +181,13 @@ describe("permissions IPC handlers", () => {
     }
   });
 
-  it("setMode does not persist when durable confirmation is denied", async () => {
+  it("setMode ignores approval denial because built-in settings changes do not request approval", async () => {
     const { permissionManager } = await setup({ approvalChoice: "deny-once" });
 
     const result = await invoke(PERMISSIONS.setMode, { mode: "strict", intent: USER_INTENT });
 
-    expect(result).toMatchObject({ ok: false, error: "durable-mode-denied" });
-    expect(permissionManager.setModePersist).not.toHaveBeenCalled();
+    expect(result).toEqual({ ok: true, mode: "strict" });
+    expect(permissionManager.setModePersist).toHaveBeenCalledWith("strict");
   });
 
   it("setMode fails closed before persisting when permission audit append fails", async () => {

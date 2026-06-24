@@ -121,6 +121,7 @@ describe("PermissionsTab — reviewer prompt-only Settings UI", () => {
     await waitFor(() =>
       expect(screen.getByTestId("reviewer-prompt-panel")).toBeInTheDocument(),
     );
+    expect(screen.getByTestId("exec-mode-auto")).toContainElement(screen.getByTestId("reviewer-prompt-panel"));
     expect(screen.queryByTestId("reviewer-llm-degraded-banner")).toBeNull();
   });
 
@@ -132,6 +133,7 @@ describe("PermissionsTab — reviewer prompt-only Settings UI", () => {
     await waitFor(() =>
       expect(screen.getByTestId("reviewer-prompt-panel")).toBeInTheDocument(),
     );
+    expect(screen.getByTestId("exec-mode-auto")).toContainElement(screen.getByTestId("reviewer-prompt-panel"));
     expect(screen.queryByTestId("reviewer-llm-degraded-banner")).toBeNull();
     expect(screen.queryByTestId("reviewer-framework-panel")).toBeNull();
   });
@@ -144,6 +146,7 @@ describe("PermissionsTab — reviewer prompt-only Settings UI", () => {
     await waitFor(() =>
       expect(screen.getByTestId("reviewer-prompt-panel")).toBeInTheDocument(),
     );
+    expect(screen.getByTestId("exec-mode-auto")).toContainElement(screen.getByTestId("reviewer-prompt-panel"));
     expect(screen.queryByTestId("reviewer-llm-degraded-banner")).toBeNull();
     expect(screen.queryByTestId("reviewer-framework-panel")).toBeNull();
   });
