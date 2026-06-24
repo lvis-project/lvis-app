@@ -1,9 +1,8 @@
 /**
- * Permission policy C3 — Settings UI active-LLM following tests.
+ * Permission policy C3 — hidden Settings reviewer controls.
  *
- * Provider/model are no longer reviewer-local controls. The reviewer follows
- * the active Intelligence LLM identity, so this panel must not query or mutate
- * legacy `permissions.reviewer.provider/model` as if they were authoritative.
+ * Provider/model are no longer reviewer-local controls. In Settings, auto mode
+ * exposes the read-only prompt panel only; reviewer config stays slash/internal.
  */
 import "../../../../../test/renderer/setup.js";
 import { act, cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
@@ -156,32 +155,33 @@ describe("PermissionsTab C3 — active LLM following", () => {
       render(<PermissionsTab />);
     });
     await waitFor(() =>
-      expect(screen.getByTestId("reviewer-active-llm-source")).toBeInTheDocument(),
+      expect(screen.getByTestId("reviewer-prompt-panel")).toBeInTheDocument(),
     );
     expect(api.permission.reviewerProviderHasKey).not.toHaveBeenCalled();
   });
 
-  it("renders active LLM source instead of reviewer provider/model controls", async () => {
+  it("renders the prompt panel instead of reviewer provider/model controls", async () => {
     installApi();
     await act(async () => {
       render(<PermissionsTab />);
     });
     await waitFor(() =>
-      expect(screen.queryByTestId("reviewer-active-llm-source")).toBeInTheDocument(),
+      expect(screen.queryByTestId("reviewer-prompt-panel")).toBeInTheDocument(),
     );
+    expect(screen.queryByTestId("reviewer-active-llm-source")).toBeNull();
     expect(screen.queryByTestId("reviewer-provider-select")).toBeNull();
     expect(screen.queryByTestId("reviewer-model-input")).toBeNull();
   });
 
-  it("shows that provider/model are controlled by Intelligence settings", async () => {
+  it("shows the read-only permission reviewer prompt in auto mode", async () => {
     installApi();
     await act(async () => {
       render(<PermissionsTab />);
     });
     await waitFor(() =>
-      expect(screen.queryByText(/지능 설정의 현재 공급자\/모델/)).toBeInTheDocument(),
+      expect(screen.queryByText("검증 프롬프트")).toBeInTheDocument(),
     );
-    expect(screen.getByText(/provider\/model 은 지능 설정의 활성 LLM을 따릅니다/)).toBeInTheDocument();
+    expect(screen.getByTestId("reviewer-system-prompt")).toHaveTextContent("UNTRUSTED_INPUT");
   });
 
   it("does not refresh legacy provider keys after a successful reviewerDispatch", async () => {
@@ -190,7 +190,7 @@ describe("PermissionsTab C3 — active LLM following", () => {
       render(<PermissionsTab />);
     });
     await waitFor(() =>
-      expect(screen.getByTestId("reviewer-active-llm-source")).toBeInTheDocument(),
+      expect(screen.getByTestId("reviewer-prompt-panel")).toBeInTheDocument(),
     );
 
     // Re-selecting the auto-verification mode auto-wires `mode llm`.
@@ -229,7 +229,7 @@ describe("PermissionsTab C3 — active LLM following", () => {
       render(<PermissionsTab />);
     });
     await waitFor(() =>
-      expect(screen.getByTestId("reviewer-active-llm-source")).toBeInTheDocument(),
+      expect(screen.getByTestId("reviewer-prompt-panel")).toBeInTheDocument(),
     );
 
     // Toggle away and back to re-trigger the auto-wired `mode llm` (which fails).

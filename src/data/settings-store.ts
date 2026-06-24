@@ -12,7 +12,9 @@ import {
   DEFAULT_LLM_VENDOR,
   freshVendorBlocks,
   isLLMVendor,
+  LLM_VENDOR_DEFAULTS,
   LLM_VENDORS,
+  normalizeLlmVendorModel,
   type LLMVendor,
   type LLMVendorSettings,
 } from "../shared/llm-vendor-defaults.js";
@@ -944,6 +946,15 @@ function mergeLlmPatch(base: LLMSettings, partial: LLMSettingsPatch): LLMSetting
       if (incoming) vendors[v] = { ...vendors[v], ...incoming };
     }
   }
+  for (const v of LLM_VENDORS) {
+    const model = typeof vendors[v].model === "string"
+      ? vendors[v].model
+      : LLM_VENDOR_DEFAULTS[v].model;
+    vendors[v] = {
+      ...vendors[v],
+      model: normalizeLlmVendorModel(v, model),
+    };
+  }
   // Coerce stale on-disk `provider` (e.g. a since-removed vendor name) to the
   // base provider — `vendors[provider]` would otherwise be undefined and
   // crash refreshProvider/stream-collector at first turn. The type guard
@@ -955,12 +966,18 @@ function mergeLlmPatch(base: LLMSettings, partial: LLMSettingsPatch): LLMSetting
     partial.authMode === "login" || partial.authMode === "manual"
       ? partial.authMode
       : base.authMode;
+  const fallbackChain = (partial.fallbackChain ?? base.fallbackChain).map((entry) => ({
+    ...entry,
+    model: isLLMVendor(entry.provider)
+      ? normalizeLlmVendorModel(entry.provider, entry.model)
+      : entry.model,
+  }));
   return {
     authMode,
     provider,
     vendors,
     streamSmoothing: partial.streamSmoothing ?? base.streamSmoothing,
-    fallbackChain: partial.fallbackChain ?? base.fallbackChain,
+    fallbackChain,
     // `undefined` means "no mapping"; an explicit empty string clears the map.
     hostResolverMap: "hostResolverMap" in partial ? partial.hostResolverMap : base.hostResolverMap,
   };
