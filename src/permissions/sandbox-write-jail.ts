@@ -1,7 +1,7 @@
 /**
  * Derive the OS sandbox write-jail for a shell/tool spawn.
  *
- * The OS runner (Linux bwrap `--bind`, macOS sandbox-exec `file-write*`)
+ * The ASRT OS sandbox (Linux bwrap `--bind`, macOS Seatbelt `file-write*`)
  * confines writes to an explicit allow-list. This module computes that
  * allow-list from the SAME signals the permission reviewer uses, so the
  * kernel-enforced write boundary matches the §Storage-namespace rule

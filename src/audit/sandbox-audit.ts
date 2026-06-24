@@ -27,8 +27,8 @@ import type { UserApprovalVerdict } from "../shared/permissions-events.js";
 
 /**
  * An observable event captured during a single sandboxed tool execution.
- * Runner implementations emit these as they intercept syscalls
- * (via bwrap seccomp / sandbox-exec / AppContainer filter logs).
+ * The Anthropic Sandbox Runtime (ASRT) backends surface these as they
+ * intercept syscalls / proxy egress (Linux bwrap seccomp, macOS Seatbelt).
  */
 export type SandboxEvent =
   | {

@@ -202,12 +202,22 @@ export function registerPermissionsHandlers(deps: IpcDeps): void {
     const kind: "full" | "partial" | "none" =
       platform === "linux" || platform === "darwin" ? "full" : "none";
     const available = kind !== "none";
+    // Meaningful, platform-honest reason surfaced to the UI alongside the
+    // capability (PermissionsTab `osSandboxDetectionReason` renders it when
+    // non-empty). ASRT confines fs + process + network egress on macOS
+    // (Seatbelt) and Linux (bwrap); Windows + others are fail-closed.
+    const reason =
+      platform === "darwin"
+        ? "ASRT (Seatbelt) confines filesystem, process, and network egress when enabled"
+        : platform === "linux"
+          ? "ASRT (bwrap) confines filesystem, process, and network egress when enabled"
+          : "OS sandbox is fail-closed on this platform; tools run unconfined";
     return {
       platform,
       enabled,
       available,
       kind,
-      reason: "",
+      reason,
       confines: sandboxConfinementForPlatform(platform, kind),
     };
   });

@@ -1733,6 +1733,74 @@ broken file + line 표시). `/permission audit verify` 는 keychain 의
 `src/ui/renderer/components/permissions/PermissionModeBadge.tsx`.
 
 
+#### 6.3.9 — OS 실행 샌드박스 (ASRT)
+
+Layer 0–8 의 permission policy 는 *어떤 도구 호출을 허용/거부* 하는지를
+결정하지만, 허용된 shell/도구 spawn 을 OS 수준에서 물리적으로 격리하지는
+않는다. OS 실행 샌드박스가 그 격리를 담당하며, 백엔드는
+**ASRT (`@anthropic-ai/sandbox-runtime`)** 이다 — 레거시 per-OS 러너 레지스트리
+(bubblewrap / sandbox-exec / AppContainer 를 host 가 직접 호출하던 구조) 는
+제거되었고 ASRT 어댑터(`src/permissions/asrt-sandbox.ts`)가 단일 경로다.
+
+- **백엔드**: macOS 는 Seatbelt 프로파일, Linux 는 bwrap+seccomp — 둘 다
+  capability SOT 에서 단일 `kind: "asrt"` 로 보고된다.
+- **Spawn 모델**: ASRT 는 워크로드를 직접 spawn 하지 않는다. `wrapToolCommand`
+  가 OS-confined wrapper 의 `{ argv, env }` 를 반환하고 host(`tools/bash.ts`)
+  가 `shell: false` 로 직접 spawn 한다.
+- **Filesystem jail (per-wrap)**: write-jail 은 owner plugin sandbox root ∪
+  허용 디렉토리로 canonicalize 한 union (bare cwd 아님). read-jail 은
+  `denyRead: [$HOME]` 후 cwd + write paths 만 re-allow 한다.
+- **Network floor (shared, deny-by-default)**: ASRT 0.0.59 의
+  `filterNetworkRequest` 는 *모듈-레벨 SHARED config* 만 읽으므로, egress 는
+  boot 에서 `strictAllowlist: true` + 모든 로드된 plugin manifest 의
+  `networkAccess.allowedDomains` UNION 을 SHARED config 로 설정해 강제한다
+  (loopback proxy 가 strict-union 바닥). 이는 *per-worker* 격리가 아니라
+  UNION allow-list 다 — sandboxed process 는 *임의의* 로드된 plugin 이 선언한
+  도메인에 도달할 수 있다. LVIS 1st-party plugin 신뢰 모델 하에서 허용되며,
+  true per-worker 격리는 per-process proxy 를 갖춘 future ASRT 가 필요하다.
+- **Gate**: `osToolSandbox` feature flag (Settings → 권한) 또는
+  `LVIS_SANDBOX_ENABLED=1`. **DEFAULT OFF** — 명시적 opt-in 전까지 도구는
+  isolation=none 으로 실행된다. Gate 는 boot 에서 *정확히 한 번* 결정되며
+  runtime 변경 채널은 없다.
+- **Windows**: **fail-closed**. ASRT 의 win32 경로(srt-win.exe)는 network-only
+  half-sandbox (fs 격리 없음 + UAC 설치/재로그인 요구) 이므로 채택하지 않는다.
+  별도 `LVIS_SANDBOX_WINDOWS=1` opt-in (기본 off) 없이는 초기화하지 않으며,
+  현행 win32 동작은 isolation=none 이다.
+- **Linux deps-missing**: gate ON 인데 `bwrap`/`socat`/`ripgrep` 가 없으면
+  no-fallback 룰에 따라 boot 를 fail-closed 로 abort 한다 (unsandboxed plain
+  spawn 으로 silently drop 하지 않는다).
+- **Capability SOT**: boot 에서 ASRT init 성공 시
+  `setActiveSandboxCapability({ kind: "asrt", confidence: "verified",
+  confines: { filesystem, process, network }, … })` 로 발행한다 (`confines` 는
+  machine-checkable 격리 표면 — network honesty 감사 + 향후 substrate 별 강제용).
+  Gate OFF / Windows / Linux deps-missing 에서는 발행하지 않으므로 SOT 는
+  `kind: "none"` 으로 남는다.
+- **Substrate-aware reviewer capability (필수 불변식)**: process-global
+  `detectSandboxCapability()` 의 `asrt` 는 **ASRT-wrapped host-shell substrate**
+  (`wrapToolCommand` → `spawnWithSandbox` 를 타는 `bash`/`powershell` builtin)
+  에만 해당한다. plugin/MCP 도구의 side-effect 는 ASRT 로 감싸지지 않은 long-lived
+  worker (isolation=none) 에서, 기타 in-process builtin 은 host 프로세스 내에서
+  실행되므로 둘 다 OS 격리가 없다. 따라서 reviewer/risk-classifier 에 공급하는
+  capability 는 `resolveReviewerSandboxCapability(source, toolName)` 로 **그 호출의
+  실행 substrate** 를 반영한다: host-shell 경로만 genuine `detectSandboxCapability()`
+  (gate ON 시 `asrt`) 를 받고, 나머지는 강제 `kind: "none"` 을 받아
+  `isWeakSandbox` 가 weak 으로 판정한다. 이로써 LLM reviewer 는 unsandboxed effect
+  에 대해 MEDIUM/HIGH → LOW downgrade (auto-approve) 를 할 수 없다 — host 샌드박스
+  ON 이 비격리 plugin/MCP 도구의 승인 게이트를 *완화* 하던 역효과를 차단한다.
+  동일 resolver 가 verdict-cache scope 와 audit 에도 쓰여 substrate 간 verdict
+  교차 재사용을 막는다.
+- **알려진 follow-up**: long-lived worker(lge-api / local-indexer 의 Python
+  워커)의 egress 는 아직 이 shared floor 로 완전히 수렴되지 않은 문서화된
+  후속 작업이다 (§9 plugin egress 참조).
+
+**Files:** `src/permissions/asrt-sandbox.ts` (어댑터 + NETWORK ENFORCEMENT
+MODEL 헤더), `src/permissions/sandbox-capability.ts` (capability SOT +
+`setActiveSandboxCapability` / `isWeakSandbox` / `resolveReviewerSandboxCapability`),
+`src/permissions/permission-manager.ts` (dispatchReviewer 가 substrate-aware
+capability 를 reviewer/cache/audit 에 공급), `src/permissions/sandbox-write-jail.ts`,
+`src/tools/bash.ts` (ASRT-wrapped spawn 경로), `src/boot.ts` (gate 결정 + capability 발행).
+
+
 ### 6.4 Tool Registry & Taxonomy — 빌트인 도구 카탈로그
 
 > the LLM backend가 호출할 수 있는 **빌트인 도구**와 **플러그인 도구**를 구분하고, 카테고리별로 분류한다.
@@ -2500,6 +2568,29 @@ graph TB
     ACTIVATE --> KW_REG
     ACTIVATE --> EVENT_REG
 ```
+
+**Plugin 실행 격리 — OS 샌드박스 (ASRT)**
+
+Plugin 도구/워커 spawn 도 §6.3.9 의 OS 실행 샌드박스(ASRT) 경로로 격리된다.
+샌드박스가 켜지면(gate, DEFAULT-OFF) host 가 spawn 하는 child argv 를 ASRT
+wrapper(macOS Seatbelt / Linux bwrap)로 감싼다.
+
+- **Network egress floor**: deny-by-default. egress 허용 도메인은 boot 에서
+  로드된 *모든* plugin manifest 의 `networkAccess.allowedDomains` UNION 으로
+  계산되어 ASRT SHARED config 에 `strictAllowlist: true` 와 함께 설정된다
+  (loopback proxy strict-union 바닥). manifest 에 도메인을 선언하지 않은
+  plugin 의 sandboxed 자식은 네트워크 egress 가 없다. 단 이는 *per-worker*
+  격리가 아니라 UNION 이므로, sandboxed 자식은 임의의 로드된 plugin 이 선언한
+  도메인에 도달 가능하다 (LVIS 1st-party 신뢰 모델 하에서 허용; per-worker
+  격리는 future ASRT 필요).
+- **Windows fail-closed**: §6.3.9 와 동일 — 채택하지 않음.
+- **알려진 follow-up**: long-lived worker (예: `lvis-plugin-lge-api` /
+  `lvis-plugin-local-indexer` 의 Python 워커) 의 egress 를 이 shared floor 로
+  완전히 수렴시키는 것은 문서화된 후속 작업이다. 현행 plugin egress 의 일부는
+  여전히 HostApi `hostFetch` chokepoint (Tier A NetworkGuard) 를 경유한다.
+- **Apache attribution / 라이선스**: ASRT (`@anthropic-ai/sandbox-runtime`) 는
+  Apache-2.0 이며 attribution 은 repo 루트의 `THIRD-PARTY-NOTICES.md` 에 유지한다;
+  LVIS 자체 라이선스는 MIT 로 변동 없다.
 
 ### 9.2 Plugin Manifest Spec
 

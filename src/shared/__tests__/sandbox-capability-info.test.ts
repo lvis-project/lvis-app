@@ -14,7 +14,7 @@ describe("sandboxConfinementForPlatform", () => {
     });
   });
 
-  it("Linux confines filesystem + process + network (bubblewrap via ASRT)", () => {
+  it("Linux confines filesystem + process + network (bwrap via ASRT)", () => {
     expect(sandboxConfinementForPlatform("linux", "full")).toEqual({
       filesystem: true,
       process: true,

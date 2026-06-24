@@ -231,6 +231,18 @@ Permission policy 구현은 `docs/architecture/permission-policy-design.md` 와 
 - Non-user-origin 입력(plugin overlay, file-content, LLM tool arg)은 slash command 로 dispatch 되면 안 된다. Leading slash 는 plain text 로 sanitize 하고, `/permission` dispatcher 는 `trustOrigin === "user-keyboard"` 만 처리한다.
 - Headless/routine 실행은 allow rule/auto mode 로 write/shell/network 를 우회하지 않는다. Mutating tool 은 reviewer layer 를 먼저 통과하고 HIGH 는 deferred queue 로 보낸다.
 
+### OS Execution Sandbox — ASRT (현행)
+
+OS 수준 실행 격리는 **ASRT (`@anthropic-ai/sandbox-runtime`)** 가 단일 백엔드다. 레거시 per-OS 러너 레지스트리(host 가 bubblewrap / sandbox-exec / AppContainer 를 직접 호출하던 구조)는 제거되었다 (PR #1358). 상세는 architecture.md §6.3.9 / §9.1.
+
+- **백엔드**: macOS = Seatbelt, Linux = bwrap (capability SOT 에서 단일 `kind: "asrt"`). 둘 다 filesystem + process + **network egress** 를 격리한다.
+- **Network floor**: deny-by-default. boot 에서 로드된 모든 plugin manifest `networkAccess.allowedDomains` 의 UNION + `strictAllowlist: true` 를 ASRT SHARED config 로 설정 (loopback proxy strict-union 바닥). per-worker 격리가 아니라 UNION allow-list — 1st-party 신뢰 모델 하 허용.
+- **Gate**: `osToolSandbox` flag (Settings → 권한) 또는 `LVIS_SANDBOX_ENABLED=1`. **DEFAULT OFF** — opt-in 전까지 isolation=none. boot 에서 한 번만 결정, runtime 변경 채널 없음.
+- **Windows**: **fail-closed** — srt-win 은 network-only half-sandbox 이므로 미채택. `LVIS_SANDBOX_WINDOWS=1` (기본 off) 없이는 초기화 안 함. 현행 win32 = isolation=none.
+- **Linux deps-missing**: gate ON 인데 bwrap/socat/ripgrep 부재 시 no-fallback 룰에 따라 boot fail-closed abort (unsandboxed plain spawn 금지).
+- **알려진 follow-up**: long-lived worker (lge-api / local-indexer 의 Python 워커) egress 를 이 shared floor 로 완전히 수렴시키는 작업이 남아 있음 — 일부는 여전히 HostApi `hostFetch` chokepoint 경유.
+- **라이선스**: ASRT 는 Apache-2.0 — attribution 은 repo 루트 `THIRD-PARTY-NOTICES.md` 에 유지. LVIS 자체 라이선스는 MIT 로 불변.
+
 ## IPC Error Message Language Convention (REQUIRED)
 
 LVIS 는 IPC layer 와 UI layer 의 i18n 책임을 분리한다.
