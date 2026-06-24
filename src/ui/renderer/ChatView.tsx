@@ -1885,7 +1885,7 @@ export function ChatView({ api, onAsk, onEditSave, onFork, onToggleStar, onRetry
               `border` (not `ring`): the dock's overflow-x-hidden forces
               overflow-y:auto, which clips a ring's top edge; a border paints
               inside the box so all four edges render. */}
-          <div className="mx-3 mb-1 rounded-xl bg-input-bar shadow-md overflow-hidden border border-border">
+          <div className="mx-3 mb-2 rounded-xl bg-input-bar shadow-md overflow-hidden border border-border">
           <Composer
             ref={composerRef}
             text={question}

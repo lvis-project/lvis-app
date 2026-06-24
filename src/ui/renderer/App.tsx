@@ -1484,7 +1484,7 @@ export function App() {
         <div className="relative flex min-h-0 min-w-0 flex-1 overflow-hidden">
         <main
           className={`relative flex min-h-0 min-w-0 flex-1 flex-col bg-background transition-[padding] duration-200 ease-out motion-reduce:transition-none ${
-            sidebarCollapsed ? "pl-[5rem]" : "pl-[15.5rem]"
+            sidebarCollapsed ? "pl-[4rem]" : "pl-[14.5rem]"
           }`}
         >
           {/* Floating notification stack — update/announcement banners are an
@@ -1645,10 +1645,16 @@ export function App() {
             onRoutineAcknowledge={handleRoutineAcknowledge}
           />
           </ErrorBoundary>
-          {/* Status bar — last child of the chat/content column, BELOW
-              MainContent/composer and starting right of the sidebar (no longer
-              a full-width root footer; no top divider). */}
-          <StatusBar persistent={statusPersistent} visibleToast={statusVisibleToast} pendingCount={statusPendingCount} onToastClick={handleStatusToastClick} />
+          {/* Notification area — OVERLAYS the composer's status sub-row (the
+              ring/permission/model section) instead of taking its own in-flow
+              row, so it never adds height. Anchored to the composer box bottom
+              (inset-x-3 = the composer's mx-3, bottom-3 = the composer's bottom
+              margin) so the h-6 bar covers the status sub-row. The StatusBar is
+              transparent when empty (the ring section shows through) and paints
+              its own bg only when a toast/persistent indicator is present. */}
+          <div className="pointer-events-none absolute inset-x-3 bottom-3 z-40 [&>*]:pointer-events-auto">
+            <StatusBar persistent={statusPersistent} visibleToast={statusVisibleToast} pendingCount={statusPendingCount} onToastClick={handleStatusToastClick} />
+          </div>
         </main>
         </div>
       </div>
