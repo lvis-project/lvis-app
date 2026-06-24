@@ -1505,7 +1505,7 @@ export function ChatView({ api, onAsk, onEditSave, onFork, onToggleStar, onRetry
             // Active turn: keep bucketed in the open "작업 중..." group.
             pendingRevisions.push(entryRenderRevision({ entry: e, idx: i, searchHighlight, starred: false }));
             if (pendingGroup.length === 0) pendingGroupStart = i;
-            pendingGroup.push({ idx: i, node: <ReasoningCard key={i} entry={e} /> });
+            pendingGroup.push({ idx: i, node: <ReasoningCard entry={e} /> });
           } else {
             // Completed turn: render standalone OUTSIDE the WorkGroup so it
             // stays visible after the group collapses. Flush any open tool
@@ -1513,7 +1513,7 @@ export function ChatView({ api, onAsk, onEditSave, onFork, onToggleStar, onRetry
             flushGroup();
             rendered.push(
               <div key={i} data-chat-entry-index={i}>
-                <ReasoningCard key={i} entry={e} />
+                <ReasoningCard entry={e} />
               </div>
             );
           }
