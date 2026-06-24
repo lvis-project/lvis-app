@@ -23,7 +23,8 @@ export function ReasoningCard({
   const [open, setOpen] = useState(false);
 
   const title = streaming ? t("reasoningCard.thinkingTitle") : t("reasoningCard.thoughtCompleteTitle");
-  const bodyVisible = open;
+  const hasBody = entry.text.trim().length > 0;
+  const bodyVisible = open && hasBody;
 
   return (
     <div className="min-w-0 w-full max-w-full rounded-md text-sm text-muted-foreground lvis-anim-message-in">
@@ -47,7 +48,7 @@ export function ReasoningCard({
       </button>
       {bodyVisible && (
         <div className="ml-3 min-w-0 whitespace-pre-wrap break-words border-l-2 border-muted py-1 pl-3 text-[11px] italic leading-5 text-muted-foreground/(--opacity-intense) [overflow-wrap:anywhere] lvis-anim-fade-in">
-          {entry.text || (streaming ? t("reasoningCard.thinkingBody") : "")}
+          {entry.text}
         </div>
       )}
     </div>

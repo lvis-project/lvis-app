@@ -38,7 +38,6 @@ import { Sidebar } from "./components/Sidebar.js";
 import { useAppUpdate } from "./hooks/use-app-update.js";
 import { DevToolsPanel } from "./components/DevToolsPanel.js";
 import { MainContent } from "./MainContent.js";
-import { StatusBar } from "./components/StatusBar.js";
 import { useStatusBar, type NotificationToastMeta } from "./hooks/use-status-bar.js";
 import { useSettings } from "./hooks/use-settings.js";
 import { lookupBillablePricingOptional } from "../../shared/pricing-data.js";
@@ -151,10 +150,21 @@ export function App() {
     entries, streaming, isCompacting, compactTriggerSource, isRecoveryExhausted, beginStreamingRequest, finishStreamingRequest, editingEntryIdx, setEditingEntryIdx, editBusy,
     entryIndexToHistoryIndex, handleEditSave, handleRetryEffort, handleContinueFromLastUser,
     resetStreamAccumulators, setErrorWithThought, handleCompactCommand,
-    clearForNewChat, appendUserEntry, appendAssistantStatus, appendSystemEntry, applyInitialSession, applyLoadedSession, truncateToEntry,
+    clearForNewChat, appendUserEntry, appendSystemEntry, applyInitialSession, applyLoadedSession, truncateToEntry,
     fallbackToast,
     insertImportedTriggerEntry,
   } = useChatState(api);
+  // Top chat-area status surface: persistent operational items plus transient
+  // toasts. Initialized early because plugin auth selection can emit toasts.
+  const {
+    persistent: statusPersistent,
+    visibleToast: statusVisibleToast,
+    pendingCount: statusPendingCount,
+    pushToast: statusPushToast,
+    removeToast: statusRemoveToast,
+    upsertPersistent: statusUpsertPersistent,
+    removePersistent: statusRemovePersistent,
+  } = useStatusBar({ api });
   const [question, setQuestion] = useState("");
   const chatEndRef = useRef<HTMLDivElement>(null);
   const turnRequestRef = useRef(0);
@@ -171,6 +181,7 @@ export function App() {
   const pendingDetachedAuthOpenRef = useRef<Map<string, string>>(new Map());
   const pendingInlineAuthOpenRef = useRef<Map<string, string>>(new Map());
   const pluginAuthLoginInflightRef = useRef<Set<string>>(new Set());
+  const failedPluginAuthOpenRef = useRef<Set<string>>(new Set());
   // Ref so handlePluginPrimaryAction (defined before handleAsk) can call
   // handleAsk without a forward-declaration TS error. Updated each render.
   const handleAskRef = useRef<(
@@ -793,6 +804,7 @@ export function App() {
         // plugin views inline; chat pops plugin views into detached windows.
         if (!loginTool || authState === "authed") {
           clearPluginAuthError(view.pluginId);
+          failedPluginAuthOpenRef.current.delete(view.pluginId);
           openPluginView();
           return;
         }
@@ -803,6 +815,7 @@ export function App() {
             : pendingInlineAuthOpenRef.current;
         pendingMap.set(view.pluginId, key);
         clearPluginAuthError(view.pluginId);
+        failedPluginAuthOpenRef.current.delete(view.pluginId);
 
         const inflightKey = `${view.pluginId}:${loginTool}`;
         if (pluginAuthLoginInflightRef.current.has(inflightKey)) {
@@ -821,14 +834,14 @@ export function App() {
               err,
             );
             pendingMap.delete(view.pluginId);
+            failedPluginAuthOpenRef.current.add(view.pluginId);
             const message = formatPluginAuthLoginError(err);
             setPluginAuthErrors((prev) => {
               const next = new Map(prev);
               next.set(view.pluginId, message);
               return next;
             });
-            openPluginView();
-            setErrorWithThought(message);
+            statusPushToast({ severity: "error", message, ttlMs: 10000 });
           } finally {
             pluginAuthLoginInflightRef.current.delete(inflightKey);
           }
@@ -861,6 +874,7 @@ export function App() {
       refreshPluginAuthStatus,
       clearPluginAuthError,
       formatPluginAuthLoginError,
+      statusPushToast,
     ],
   );
 
@@ -875,6 +889,10 @@ export function App() {
       pendingInlineAuthOpenRef.current.size === 0
     ) return;
     for (const [pluginId, viewKey] of [...pendingDetachedAuthOpenRef.current]) {
+      if (failedPluginAuthOpenRef.current.has(pluginId)) {
+        pendingDetachedAuthOpenRef.current.delete(pluginId);
+        continue;
+      }
       const kind = pluginAuthStatuses.get(pluginId)?.kind;
       if (kind === "authed") {
         pendingDetachedAuthOpenRef.current.delete(pluginId);
@@ -884,6 +902,10 @@ export function App() {
       }
     }
     for (const [pluginId, viewKey] of [...pendingInlineAuthOpenRef.current]) {
+      if (failedPluginAuthOpenRef.current.has(pluginId)) {
+        pendingInlineAuthOpenRef.current.delete(pluginId);
+        continue;
+      }
       const kind = pluginAuthStatuses.get(pluginId)?.kind;
       if (kind === "authed") {
         pendingInlineAuthOpenRef.current.delete(pluginId);
@@ -901,6 +923,7 @@ export function App() {
         if (pluginAuthStatuses.get(pluginId)?.kind === "authed") {
           next ??= new Map(prev);
           next.delete(pluginId);
+          failedPluginAuthOpenRef.current.delete(pluginId);
         }
       }
       return next ?? prev;
@@ -1260,7 +1283,6 @@ export function App() {
         appendUserEntry(trimmed, opts?.injectHint);
       }
       resetStreamAccumulators();
-      appendAssistantStatus(t("app.thinkingStatus"));
       try {
         await api.chatSend(
           outgoing,
@@ -1314,7 +1336,6 @@ export function App() {
       checkApiKey,
       composeOutgoing,
       appendUserEntry,
-      appendAssistantStatus,
       resetStreamAccumulators,
       beginStreamingRequest,
       finishStreamingRequest,
@@ -1510,17 +1531,10 @@ export function App() {
     activeVendor: llmVendor,
   });
 
-  // Bottom status bar (#231) — bottom slot for persistent items + transient
-  // toasts. The hook subscribes to existing install-progress / install-result
-  // / uninstall-result events and reads the routine schedule from settings,
-  // so wiring it here is enough to surface lifecycle feedback.
   // Issue #260 — when a notification toast is clicked, dispatch the click via
   // notifyClick IPC (which restores+focuses the window) and dismiss the
   // toast. Other toast producers leave `notification` undefined so this
   // handler is a no-op for them.
-  const { persistent: statusPersistent, visibleToast: statusVisibleToast, pendingCount: statusPendingCount, removeToast: statusRemoveToast, upsertPersistent: statusUpsertPersistent, removePersistent: statusRemovePersistent } =
-    useStatusBar({ api });
-
   // Show a persistent StatusBar indicator while a pre-turn auto-compact runs.
   // `compact_started` sets isCompacting → this effect upserts the item.
   // `compact_notice` clears isCompacting → this effect removes the item.
@@ -1672,29 +1686,6 @@ export function App() {
               onDismiss={handleMarketplaceAnnouncementDismiss}
             />
           </div>
-          {/* Transient status TOASTS (install progress, lifecycle results, the
-              pre-turn auto-compact indicator) get their OWN top-LEFT region —
-              distinct from the top-right banner stack above, which is for
-              persistent, actionable Update/Dismiss banners. Left/right split
-              means a toast and a banner can show at once without colliding.
-              Shares the same sidebar-width left inset as the banner stack so a
-              toast pill never overlaps the floating sidebar card. Toasts are
-              ephemeral + queue-advanced (one pill + “+N” for the rest), so this
-              region never stacks. Renders nothing when idle (StatusBar returns
-              null). */}
-          <div
-            className={`pointer-events-none absolute top-2 z-50 transition-[left] duration-200 ease-out motion-reduce:transition-none [&>*]:pointer-events-auto ${
-              sidebarCollapsed ? "left-[4.5rem]" : "left-[15rem]"
-            }`}
-          >
-            <StatusBar
-              persistent={statusPersistent}
-              visibleToast={statusVisibleToast}
-              pendingCount={statusPendingCount}
-              onToastClick={handleStatusToastClick}
-              onToastDismiss={(toast) => statusRemoveToast(toast.id)}
-            />
-          </div>
           {fallbackToast && (
             <div className="bg-warning text-warning-foreground text-xs px-4 py-2 border-b border-warning">
               {fallbackToast}
@@ -1832,12 +1823,18 @@ export function App() {
             pluginAuthError={activePluginAuthError}
             onPluginPrimaryAction={(id) => { void handlePluginPrimaryAction(id); }}
             onRoutineAcknowledge={handleRoutineAcknowledge}
+            statusBar={{
+              persistent: statusPersistent,
+              visibleToast: statusVisibleToast,
+              pendingCount: statusPendingCount,
+              onToastClick: handleStatusToastClick,
+              onToastDismiss: (toast) => statusRemoveToast(toast.id),
+            }}
           />
           </ErrorBoundary>
-          {/* Bottom StatusBar removed — its notifications now render in the
-              top-right floating banner stack (merged with the plugin-install /
-              marketplace banners). The composer's own status sub-row keeps
-              showing the ring / permission / model cells. */}
+          {/* StatusBar notifications render inside ChatView, directly above
+              the composer. The composer's own status sub-row keeps showing
+              the ring / permission / model cells. */}
         </main>
         </div>
       </div>
