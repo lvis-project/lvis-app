@@ -19,13 +19,15 @@
  *   purely on intent."
  *
  * How the capability is resolved:
- *   The bubblewrap (Linux) / sandbox-exec (macOS) / AppContainer (Windows)
- *   runners are registered at boot (boot.ts); each passes its detection
- *   result to `setActiveSandboxCapability`, so `detectSandboxCapability`
- *   returns the registered runner's kind/confidence. It falls back to
- *   `kind: "none"` (confidence: "verified") only when no runner registered —
- *   the SOT then correctly reports the absence of OS isolation. Reviewer +
- *   UI read from this SOT. The audit chain currently stores the reviewer
+ *   OS isolation is now backed by the Anthropic Sandbox Runtime (ASRT) —
+ *   see asrt-sandbox.ts. The legacy per-OS runner registry
+ *   (bubblewrap / sandbox-exec / AppContainer) was removed; ASRT provides the
+ *   host-tool filesystem jail + global strict-union network enforcement. When
+ *   the ASRT path is active it reports `kind: "asrt"`; the SOT falls back to
+ *   `kind: "none"` (confidence: "verified") when the sandbox gate is off
+ *   (DEFAULT) — the reviewer + UI then correctly report the absence of OS
+ *   isolation. The active capability is published via
+ *   `setActiveSandboxCapability`. The audit chain currently stores the reviewer
  *   verdict derived from this value, not the full SandboxCapability snapshot.
  */
 
@@ -33,10 +35,10 @@ import { t } from "../i18n/index.js";
 
 export type SandboxKind =
   | "none"
-  | "bubblewrap"
-  | "sandbox-exec"
-  | "appcontainer"
-  /** OS-level isolation present but evidence quality is PARTIAL (e.g. sandbox-exec partial profile). */
+  /** OS isolation provided by the Anthropic Sandbox Runtime (ASRT). Backend is
+   * bwrap on Linux, Seatbelt on macOS; both report as a single `asrt` kind. */
+  | "asrt"
+  /** OS-level isolation present but evidence quality is PARTIAL. */
   | "partial"
   /** Filesystem-only isolation (landlock-only — future-proofing for Linux landlock runner). */
   | "fs-only";
@@ -65,20 +67,17 @@ export interface SandboxCapability {
 }
 
 /**
- * MAJOR-1 SOT fix: active capability cache. Set by {@link setActiveSandboxCapability}
- * which is called from sandbox-runner.ts after a runner is registered with its
- * detection result. Avoids circular import (sandbox-runner already imports from
- * this module as `import type`; we expose a setter here so the dependency stays
- * one-directional at the value level).
+ * Active capability cache. Set by {@link setActiveSandboxCapability} when the
+ * ASRT sandbox path is initialized at boot. Defaults to `undefined` (the SOT
+ * then reports `kind: "none"`).
  */
 let _activeCapability: SandboxCapability | undefined;
 
 /**
- * Store the active sandbox capability after boot-time runner registration.
- * Called by sandbox-runner.ts → registerSandboxRunner when a detection result
- * is provided. Subsequent calls to detectSandboxCapability return this value.
+ * Store the active sandbox capability after the ASRT sandbox is initialized at
+ * boot. Subsequent calls to detectSandboxCapability return this value.
  *
- * @internal — only sandbox-runner.ts and tests should call this.
+ * @internal — only the boot-time ASRT init path and tests should call this.
  */
 export function setActiveSandboxCapability(cap: SandboxCapability): void {
   _activeCapability = cap;
@@ -95,12 +94,12 @@ export function __resetActiveSandboxCapabilityForTest(): void {
 /**
  * Detect the OS execution sandbox available to spawned shell commands.
  *
- * MAJOR-1 fix: returns the capability stored by {@link setActiveSandboxCapability}
- * when a runner has been registered at boot with its detection result. Falls back
- * to kind="none" only when no runner is registered (isolation=none, detect-and-skip).
+ * Returns the capability stored by {@link setActiveSandboxCapability} when the
+ * ASRT sandbox path was initialized at boot. Falls back to kind="none" when no
+ * sandbox is active (the gate is DEFAULT-OFF; isolation=none).
  *
  * This is the single SOT the reviewer and UI consult — all callers automatically
- * see the correct kind after BwrapRunner registration without re-probing the OS.
+ * see the correct kind once ASRT is active without re-probing the OS.
  */
 export function detectSandboxCapability(): SandboxCapability {
   if (_activeCapability) {
@@ -130,9 +129,7 @@ export function formatSandboxCapabilityForPrompt(capability: SandboxCapability):
   const kindLabel = (() => {
     switch (capability.kind) {
       case "none":         return "none";
-      case "bubblewrap":   return "bubblewrap";
-      case "sandbox-exec": return "sandbox-exec";
-      case "appcontainer": return "appcontainer";
+      case "asrt":         return "asrt";
       case "partial":      return t("be_sandboxCapability.partialLabel");
       case "fs-only":      return t("be_sandboxCapability.fsOnlyLabel");
       default: {
@@ -160,7 +157,7 @@ export function formatSandboxCapabilityForPrompt(capability: SandboxCapability):
  *
  * `fs-only` is NOT weak — it is strong-for-fs. The composition rule
  * handles network egress separately for fs-only runners.
- * Anything else (verified bubblewrap / sandbox-exec) is "strong".
+ * Anything else (verified `asrt`) is "strong".
  */
 export function isWeakSandbox(cap: SandboxCapability): boolean {
   if (cap.kind === "none") return true;
