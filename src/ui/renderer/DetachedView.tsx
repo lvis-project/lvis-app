@@ -20,6 +20,7 @@ import { ErrorBoundary } from "./components/ErrorBoundary.js";
 import { getApi, toViewKey } from "./api-client.js";
 import { RoutinePanel } from "./components/RoutinePanel.js";
 import { MemorySearchPanel } from "./components/MemorySearchPanel.js";
+import { WorkBoardPanel } from "./components/WorkBoardPanel.js";
 import { StarredView } from "./components/StarredView.js";
 import { PluginUiHostView } from "../../plugin-ui-host.js";
 import { usePluginMarketplace } from "./hooks/use-plugin-marketplace.js";
@@ -96,6 +97,10 @@ function DetachedContent({ viewKey }: ContentProps) {
     });
     return unsubscribe;
   }, [viewKey, api, refreshViews]);
+
+  if (viewKey === "work-board") {
+    return <WorkBoardPanel api={api} />;
+  }
 
   if (viewKey === "routines") {
     return <RoutinePanel api={api} />;
