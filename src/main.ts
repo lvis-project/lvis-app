@@ -1497,10 +1497,23 @@ function initialThemeArgs(): string[] {
   // frame-0 paint. `colorScheme` / `reducedMotion` / `fonts` are renderer-
   // only and hydrate from settings.json a few ms later, so embedding them in
   // argv is pure overhead.
+  // User font overrides live in `settings.appearance.font`, NOT in the cached
+  // plugin-theme payload — so they're read straight from the in-memory
+  // settings service (already normalized at write time by settings-store's
+  // `isValidFontFamilyOverride` + `FONT_SIZE_SCALE_VALUES` guards). Carrying
+  // them in the frame-0 prime makes a detached/new window paint at the
+  // configured size + family instead of flashing the 1.0 / HOST_FONT_STACK
+  // default until React hydrates. `"system"` family + a missing/1.0 scale are
+  // the defaults, so they're left off the wire (no override → omit the field).
+  const font = services?.settingsService.getAll().appearance?.font;
+  const fontSizeScale = typeof font?.sizeScale === "number" ? font.sizeScale : undefined;
+  const fontFamily = font?.family && font.family !== "system" ? font.family : undefined;
   const prime: InitialThemePrime = {
     bundleId: payload.bundleId,
     shell: payload.shell,
     ...(payload.tokens ? { tokens: payload.tokens } : {}),
+    ...(fontSizeScale !== undefined ? { fontSizeScale } : {}),
+    ...(fontFamily !== undefined ? { fontFamily } : {}),
   };
   let serialized: string;
   try {
