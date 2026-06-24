@@ -144,6 +144,35 @@ describe("App plugin auth routing", () => {
     expect(api.callPluginMethod).not.toHaveBeenCalledWith("token_login");
   });
 
+  it("detached login completes → host opens the deferred panel on the unauthed→authed transition", async () => {
+    const user = userEvent.setup();
+    const { api, emitPluginEvent } = await renderApp(detachedPluginFixture);
+    // Start unauthenticated.
+    let authed = false;
+    api.callPluginMethod.mockImplementation(async (tool: string) =>
+      tool === "token_status" ? { authenticated: authed } : { ok: true },
+    );
+
+    await user.click(screen.getByTestId("app-mode-chat"));
+    await selectPluginView(user, "Token Plugin");
+
+    // Unauthed: host fires loginTool (opens SSO window) and DEFERS the panel.
+    await waitFor(() => {
+      expect(api.callPluginMethod).toHaveBeenCalledWith("token_login");
+    });
+    expect(api.window.openDetached).not.toHaveBeenCalled();
+
+    // Login completes: status flips to authed and the plugin emits
+    // `<pluginId>.auth.changed`, which re-fetches status. The host's one-shot
+    // effect then opens the DEFERRED panel (login-window-closes → panel-opens).
+    authed = true;
+    emitPluginEvent("token-plugin.auth.changed", { authenticated: true });
+
+    await waitFor(() => {
+      expect(api.window.openDetached).toHaveBeenCalledWith("plugin:token-plugin:main");
+    });
+  });
+
   it("routes command-palette plugin actions through detached-window handling (authed)", async () => {
     const user = userEvent.setup();
     const { api } = await renderApp(detachedPluginFixture);
