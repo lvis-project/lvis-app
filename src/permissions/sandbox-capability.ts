@@ -21,7 +21,7 @@
  * How the capability is resolved:
  *   OS isolation is now backed by the Anthropic Sandbox Runtime (ASRT) —
  *   see asrt-sandbox.ts. The legacy per-OS runner registry
- *   (bubblewrap / sandbox-exec / AppContainer) was removed; ASRT provides the
+ *   (bwrap / sandbox-exec / AppContainer) was removed; ASRT provides the
  *   host-tool filesystem jail + global strict-union network enforcement. When
  *   the ASRT path is active it reports `kind: "asrt"`; the SOT falls back to
  *   `kind: "none"` (confidence: "verified") when the sandbox gate is off
@@ -32,6 +32,8 @@
  */
 
 import { t } from "../i18n/index.js";
+import type { ToolSource } from "../tools/types.js";
+import type { SandboxConfinement } from "../shared/sandbox-capability-info.js";
 
 export type SandboxKind =
   | "none"
@@ -51,9 +53,10 @@ export type SandboxKind =
  *   - "assumed"           — inferred from platform without active probe (used
  *     when a probe is expensive or not yet implemented).
  *   - "policy-best-effort" — binary confirmed present + executable, but the
- *     sandbox profile is a best-effort policy (e.g. macOS sandbox-exec SBPL).
- *     Known bypass paths exist; enforcement is weaker than "verified".
- *     Used for macOS sandbox-exec (PARTIAL) to distinguish from assumed.
+ *     sandbox profile is a best-effort policy with known bypass paths;
+ *     enforcement is weaker than "verified". Reserved for a future PARTIAL
+ *     backend; no current platform reports this (macOS + Linux are verified
+ *     ASRT). Distinguishes a best-effort policy from "assumed".
  */
 export type SandboxConfidence = "verified" | "assumed" | "policy-best-effort";
 
@@ -64,6 +67,17 @@ export interface SandboxCapability {
   platform: NodeJS.Platform;
   /** Short human-readable explanation, surfaced to UI + reviewer prompt. */
   reason: string;
+  /**
+   * What this capability ACTUALLY confines (filesystem / process / network),
+   * for the substrate it describes. Machine-checkable so network honesty is
+   * auditable and future per-substrate enforcement can assert against it.
+   *
+   * Optional so existing callers/fixtures that only assert kind/confidence
+   * remain valid; the honest producers ({@link setActiveSandboxCapability}
+   * publish site + the substrate-aware resolver) populate it. Absence means
+   * "not declared" — callers MUST NOT read absence as "all confined".
+   */
+  confines?: SandboxConfinement;
 }
 
 /**
@@ -114,6 +128,62 @@ export function detectSandboxCapability(): SandboxCapability {
 }
 
 /**
+ * Tool names whose effects run on the ASRT-wrapped host-shell substrate.
+ *
+ * ONLY the `bash` / `powershell` builtin shell tools route their workload
+ * through {@link wrapToolCommand} (→ `spawnWithSandbox` in bash.ts /
+ * powershell.ts), which is the per-command OS jail. Every other execution
+ * substrate is NOT ASRT-wrapped:
+ *   - `plugin` / `mcp` tools run in the LONG-LIVED MCP worker (mcp-client.ts
+ *     spawns it PLAIN — isolation=none; `wrapWorkerCommand` is staged-uncalled).
+ *   - other `builtin` tools (read_file, write_file, list_files, …) run
+ *     IN-PROCESS in the host — no OS jail either.
+ */
+const ASRT_WRAPPED_SHELL_TOOLS: ReadonlySet<string> = new Set(["bash", "powershell"]);
+
+/**
+ * Resolve the sandbox capability to feed the reviewer/risk-classifier for a
+ * SPECIFIC tool call, reflecting that call's EXECUTION SUBSTRATE rather than
+ * the process-global capability.
+ *
+ * THE INVARIANT (security): the `asrt` reviewer relaxation
+ * ({@link isWeakSandbox} === false) must apply ONLY to executions GENUINELY
+ * isolated by ASRT. The process-global {@link detectSandboxCapability} reports
+ * `asrt` once the boot gate is ON, but that only describes the host-shell
+ * substrate — plugin/MCP tool side-effects run in the unwrapped long-lived
+ * worker (isolation=none), and in-process builtin tools are not jailed either.
+ * Presenting the global `asrt` for those calls would let the LLM downgrade a
+ * MEDIUM/HIGH verdict to LOW (auto-approve) for an UNSANDBOXED effect — the
+ * exact opposite of enabling the sandbox.
+ *
+ * Mapping:
+ *   - `builtin` + tool ∈ {bash, powershell} → the genuine
+ *     {@link detectSandboxCapability} (the ASRT-wrapped shell path; `asrt`
+ *     when the gate is ON, already `none` when it is OFF).
+ *   - everything else (plugin, mcp, other builtin) → a forced `none`
+ *     capability so {@link isWeakSandbox} treats the call as WEAK and the
+ *     reviewer cannot relax.
+ */
+export function resolveReviewerSandboxCapability(
+  source: ToolSource,
+  toolName: string,
+): SandboxCapability {
+  if (source === "builtin" && ASRT_WRAPPED_SHELL_TOOLS.has(toolName)) {
+    return detectSandboxCapability();
+  }
+  return {
+    kind: "none",
+    confidence: "verified",
+    platform: process.platform,
+    reason:
+      source === "builtin"
+        ? "in-process builtin tool — not ASRT-wrapped (isolation=none)"
+        : "plugin/MCP worker not ASRT-wrapped (isolation=none)",
+    confines: { filesystem: false, process: false, network: false },
+  };
+}
+
+/**
  * Format the capability for inclusion in the reviewer LLM prompt.
  *
  * The format is stable + grep-able so the reviewer's response can be
@@ -122,7 +192,7 @@ export function detectSandboxCapability(): SandboxCapability {
  *   "executionSandbox=none (verified, darwin) — no OS sandbox configured for the host process"
  *
  * Labels for extended kinds:
- *   partial  → "⚠ OS 격리 부분적 (sandbox-exec)"
+ *   partial  → "⚠ OS 격리 부분적"
  *   fs-only  → "ℹ 파일시스템만 격리 (landlock)"
  */
 export function formatSandboxCapabilityForPrompt(capability: SandboxCapability): string {

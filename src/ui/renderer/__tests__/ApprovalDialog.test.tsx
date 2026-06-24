@@ -232,17 +232,17 @@ describe("ApprovalDialog", () => {
     });
   });
 
-  it("renders the sandbox capability row WITHOUT ⚠ when kind=bubblewrap + confidence=verified", async () => {
+  it("renders the sandbox capability row WITHOUT ⚠ when kind=asrt + confidence=verified", async () => {
     render(
       <ApprovalDialog
         queue={[makeRequest({
           toolName: "bash",
           toolCategory: "shell",
           sandboxCapability: {
-            kind: "bubblewrap",
+            kind: "asrt",
             confidence: "verified",
             platform: "linux",
-            reason: "bwrap binary present + invocable",
+            reason: "ASRT (bwrap) active — fs+process+network contained",
           },
         })]}
         onDecide={vi.fn()}
@@ -253,7 +253,7 @@ describe("ApprovalDialog", () => {
       expect(row).toBeTruthy();
       // Round-5 UX MAJOR — strong sandbox renders "OS 격리 활성".
       expect(row!.textContent).toContain("OS 격리 활성");
-      expect(row!.textContent).toContain("bubblewrap");
+      expect(row!.textContent).toContain("asrt");
       expect(row!.textContent).not.toContain("⚠");
     });
   });
@@ -268,7 +268,7 @@ describe("ApprovalDialog", () => {
             kind: "partial",
             confidence: "verified",
             platform: "darwin",
-            reason: "sandbox-exec partial profile",
+            reason: "partial OS isolation profile",
           },
         })]}
         onDecide={vi.fn()}
@@ -281,7 +281,6 @@ describe("ApprovalDialog", () => {
       // (partial isolation IS present — "OS 격리 없음" was factually wrong)
       expect(row!.textContent).toContain("⚠");
       expect(row!.textContent).toContain("OS 격리 부분적");
-      expect(row!.textContent).toContain("sandbox-exec");
     });
   });
 
