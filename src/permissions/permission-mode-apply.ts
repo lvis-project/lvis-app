@@ -24,11 +24,12 @@ export async function applyPermissionModeCommand(
     permissionManager: PermissionManager;
     approvalGate?: ApprovalGate;
     auditLogger?: Pick<AuditLogger, "isPermissionAuditChainReady" | "appendPermissionAuditEntry">;
+    skipApproval?: boolean;
   },
 ): Promise<PermissionModeApplyResult> {
   const previous = deps.permissionManager.getMode();
 
-  if (cmd.durable) {
+  if (cmd.durable && !deps.skipApproval) {
     if (!deps.approvalGate) {
       return {
         ok: false,

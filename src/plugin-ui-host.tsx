@@ -124,9 +124,11 @@ function readPluginAssetUrls(): { shellUrl: string; preloadUrl: string } {
 export function PluginUiHostView({
   view,
   showChrome = true,
+  authError = null,
 }: {
   view: PluginUiExtensionView | null;
   showChrome?: boolean;
+  authError?: string | null;
 }) {
   const [errorText, setErrorText] = useState<string | null>(null);
   const [loading, setLoading] = useState(false);
@@ -338,8 +340,15 @@ export function PluginUiHostView({
   if (!showChrome) {
     return (
       <div className="relative h-full w-full overflow-hidden">
-        <div className="h-full overflow-hidden">
-          {content}
+        <div className="flex h-full flex-col overflow-hidden">
+          {authError ? (
+            <div className="border-b border-destructive/30 bg-destructive/10 px-3 py-2 text-xs text-destructive">
+              {authError}
+            </div>
+          ) : null}
+          <div className="min-h-0 flex-1 overflow-hidden">
+            {content}
+          </div>
         </div>
         {loading ? (
           <div className="absolute inset-0 z-10 flex items-center justify-center bg-input-bar text-xs text-muted-foreground">
@@ -350,6 +359,12 @@ export function PluginUiHostView({
     );
   }
 
+  const authErrorBanner = authError ? (
+    <div className="mb-3 rounded-md border border-destructive/30 bg-destructive/10 px-3 py-2 text-xs text-destructive">
+      {authError}
+    </div>
+  ) : null;
+
   // Default: render with Card chrome (for inline plugin views)
   return (
     <Card className="mx-auto flex min-h-0 min-w-0 flex-1 w-full max-w-6xl flex-col overflow-hidden">
@@ -358,6 +373,7 @@ export function PluginUiHostView({
         <CardDescription>{view?.extension.description ?? t("be_pluginUiHost.pluginUiLoadingDesc")}</CardDescription>
       </CardHeader>
       <CardContent className="flex min-h-0 flex-1 flex-col">
+        {authErrorBanner}
         <div className="relative h-full w-full overflow-hidden rounded-md border bg-input-bar">
           <div className="h-full overflow-hidden">
             {content}

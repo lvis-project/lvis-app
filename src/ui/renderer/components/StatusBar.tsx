@@ -1,5 +1,7 @@
 import type { PersistentItem, StatusBarSeverity, ToastItem } from "../hooks/use-status-bar.js";
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "../../../components/ui/tooltip.js";
+import { X } from "lucide-react";
+import { t } from "../../../i18n/runtime.js";
 
 const EMOJI_FONT_STACK =
   "'Apple Color Emoji', 'Segoe UI Emoji', 'Noto Color Emoji', 'Twemoji Mozilla', sans-serif";
@@ -35,6 +37,7 @@ export interface StatusBarProps {
    * the IPC call and dismiss the toast in a single pass.
    */
   onToastClick?: (toast: ToastItem) => void;
+  onToastDismiss?: (toast: ToastItem) => void;
 }
 
 const SEVERITY_DOT: Record<StatusBarSeverity, string> = {
@@ -52,7 +55,7 @@ const SEVERITY_TEXT: Record<StatusBarSeverity, string> = {
 };
 
 export function StatusBar(props: StatusBarProps) {
-  const { persistent, visibleToast, pendingCount = 0, onToastClick } = props;
+  const { persistent, visibleToast, pendingCount = 0, onToastClick, onToastDismiss } = props;
 
   // Now rendered inside the top-right banner stack (the bottom bar is gone).
   // Render nothing when there is no persistent indicator and no toast, so the
@@ -165,44 +168,52 @@ export function StatusBar(props: StatusBarProps) {
         {visibleToast !== null && (() => {
           const toast = visibleToast;
           const clickable = toast.notification !== undefined && typeof onToastClick === "function";
-          // Opaque pill background so the toast stays legible over the chat
-          // content behind it (the bar's own bg-background is otherwise the
-          // only fill, and a transparent toast washed out against light
-          // surfaces). bg-card + a subtle border give a clear chip.
-          const baseClass = `flex min-w-0 items-center gap-1.5 truncate rounded-md border border-border bg-card px-2 py-0.5 shadow-sm lvis-anim-slide-up ${SEVERITY_TEXT[toast.severity]}`;
+          const dismissible = typeof onToastDismiss === "function";
+          const baseClass =
+            "flex min-w-0 max-w-md items-center gap-3 rounded-lg border border-border bg-card/(--opacity-solid) px-4 py-3 text-[13px] text-card-foreground shadow-2xl lvis-anim-slide-up";
           const dot = (
             <span
-              className={`h-1.5 w-1.5 shrink-0 rounded-full ${SEVERITY_DOT[toast.severity]}`}
+              className={`h-2 w-2 shrink-0 rounded-full ${SEVERITY_DOT[toast.severity]}`}
               aria-hidden="true"
             />
           );
           const pendingBadge = pendingCount > 0 ? (
-            <span className="shrink-0 opacity-50 tabular-nums">+{pendingCount}</span>
+            <span className="shrink-0 rounded-full border border-border bg-background/(--opacity-stronger) px-1.5 py-0.5 text-[11px] text-muted-foreground tabular-nums">+{pendingCount}</span>
+          ) : null;
+          const dismissButton = dismissible ? (
+            <button
+              type="button"
+              onClick={() => onToastDismiss?.(toast)}
+              className="inline-flex h-6 w-6 shrink-0 items-center justify-center rounded-md text-muted-foreground hover:bg-muted hover:text-foreground focus:outline-none focus-visible:ring-1 focus-visible:ring-ring"
+              aria-label={t("statusBar.toastDismissAriaLabel")}
+            >
+              <X className="h-3.5 w-3.5" aria-hidden="true" />
+            </button>
           ) : null;
           if (clickable) {
             return (
-              <>
+              <div key={toast.id} className={baseClass}>
+                {dot}
+                <span className="min-w-0 flex-1 truncate">{toast.message}</span>
                 <button
-                  key={toast.id}
                   type="button"
                   onClick={() => onToastClick?.(toast)}
-                  className={`${baseClass} cursor-pointer hover:opacity-80 focus:outline-none focus-visible:ring-1 focus-visible:ring-ring`}
+                  className="shrink-0 text-[12px] font-medium text-foreground underline underline-offset-4 hover:text-primary focus:outline-none focus-visible:ring-1 focus-visible:ring-ring"
                 >
-                  {dot}
-                  <span className="truncate">{toast.message}</span>
+                  {t("statusBar.toastDetailsAction")}
                 </button>
+                {dismissButton}
                 {pendingBadge}
-              </>
+              </div>
             );
           }
           return (
-            <>
-              <span key={toast.id} className={baseClass}>
-                {dot}
-                <span className="truncate">{toast.message}</span>
-              </span>
+            <div key={toast.id} className={baseClass}>
+              {dot}
+              <span className="min-w-0 flex-1 truncate">{toast.message}</span>
+              {dismissButton}
               {pendingBadge}
-            </>
+            </div>
           );
         })()}
       </div>

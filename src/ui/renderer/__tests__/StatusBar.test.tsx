@@ -80,7 +80,7 @@ describe("StatusBar", () => {
     });
     render(<StatusBar persistent={[]} visibleToast={notif} onToastClick={onToastClick} />);
     const btn = screen.getByRole("button", {
-      name: /질문이 도착했습니다/,
+      name: /자세히 알아보기|Learn more/,
     });
     fireEvent.click(btn);
     expect(onToastClick).toHaveBeenCalledTimes(1);
@@ -93,6 +93,21 @@ describe("StatusBar", () => {
         }),
       }),
     );
+  });
+
+  it("dismisses the visible toast from the close button", () => {
+    const onToastDismiss = vi.fn();
+    render(
+      <StatusBar
+        persistent={[]}
+        visibleToast={toast({ id: "toast:d", message: "Claude Fable 5는 현재 사용할 수 없습니다." })}
+        onToastDismiss={onToastDismiss}
+      />,
+    );
+
+    fireEvent.click(screen.getByRole("button", { name: /알림 닫기|Dismiss notification/ }));
+
+    expect(onToastDismiss).toHaveBeenCalledWith(expect.objectContaining({ id: "toast:d" }));
   });
 
   it("renders non-notification toasts as plain spans (no click handler)", () => {
@@ -180,17 +195,17 @@ describe("StatusBar", () => {
     };
     const { container } = render(
       <StatusBar
-        persistent={[
-          pingItem,
-          persistent({ id: "vendor:llm", label: "🔷", value: "Azure · gpt-4o" }),
-        ]}
-        visibleToast={null}
-      />,
+          persistent={[
+            pingItem,
+            persistent({ id: "vendor:llm", label: "🔷", value: "Azure · gpt-5.4-mini" }),
+          ]}
+          visibleToast={null}
+        />,
     );
     expect(container.querySelector('[data-testid="status-bar"]')?.textContent).not.toContain("|");
     const dot = container.querySelector('[data-testid="status-bar-dot-health:services"]');
     expect(dot?.className).toContain("bg-success");
-    expect(screen.getByText("Azure · gpt-4o")).toBeInTheDocument();
+    expect(screen.getByText("Azure · gpt-5.4-mini")).toBeInTheDocument();
   });
 
   it("uses role=status with aria-live=polite for screen-reader updates", () => {

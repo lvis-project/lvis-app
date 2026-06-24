@@ -168,6 +168,9 @@ export function AskUserQuestionCard({
   const submitButtonRef = useRef<HTMLButtonElement | null>(null);
   const questionFormRef = useRef<QuestionFormHandle | null>(null);
   const cardRef = useRef<HTMLDivElement | null>(null);
+  const onConfirmStep = isMulti && step === total;
+  const currentItem = onConfirmStep ? null : request.questions[step];
+  const currentDraft = drafts[step];
 
   // New request → reset all internal state. The id is the discriminator
   // so re-rendering the same card with the same questions keeps state.
@@ -176,16 +179,12 @@ export function AskUserQuestionCard({
     setDrafts(request.questions.map(() => ({})));
   }, [request.id, request.questions]);
 
-  // Auto-focus on mount so ArrowUp/Down can reach the card-level handler
-  // immediately — without this, focus stays on the chat composer and arrow
-  // keys move the textarea cursor instead of navigating chips.
+  // Keep focus on the active question page so ArrowUp/Down continue to reach
+  // the card-level handler after a step transition removes the old choice.
   useEffect(() => {
+    if (onConfirmStep) return;
     cardRef.current?.focus();
-  }, [request.id]);
-
-  const onConfirmStep = isMulti && step === total;
-  const currentItem = onConfirmStep ? null : request.questions[step];
-  const currentDraft = drafts[step];
+  }, [request.id, step, onConfirmStep]);
 
   const allAnswered = useMemo(
     () => request.questions.every((item, i) => isAnswerComplete(item, drafts[i])),

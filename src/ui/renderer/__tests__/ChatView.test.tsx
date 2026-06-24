@@ -400,7 +400,7 @@ describe("ChatView", () => {
     expect(textarea.value).toBe("한");
   });
 
-  it("keeps pre-final assistant prose visible and tools in a collapsible WorkGroup", async () => {
+  it("collapses pre-final assistant work and tools into one turn WorkGroup", async () => {
     const { container, emitChatStream } = await renderApp({ hasApiKey: true });
     await submitChatMessage(container, "일정 확인");
     await act(async () => {
@@ -439,14 +439,15 @@ describe("ChatView", () => {
       emitChatStream({ type: "done" });
     });
     await waitFor(() => {
-      // Only the single calendar tool stays in the WorkGroup now that the
-      // work-phase prose is rendered standalone (1 step, not 2).
-      expect(container.textContent).toMatch(/작업\s*1단계/);
+      // Tighter than two separate `toContain("작업")` + `toContain("2단계")` —
+      // those would pass even if WorkGroup spans degenerated to `작업단계`
+      // (lost the count). `/작업\s*\d+단계/` requires the count digit between
+      // the label and the suffix, which is what WorkGroup actually renders.
+      expect(container.textContent).toMatch(/작업\s*2단계/);
       expect(container.textContent).not.toContain("calendar list");
       expect(container.textContent).not.toContain("__calendar_result__");
       expect(container.textContent).toContain("두번째 답변입니다");
-      // Intermediate work-phase prose stays visible after turn end.
-      expect(container.textContent).toContain("첫번째 답변입니다");
+      expect(container.textContent).not.toContain("첫번째 답변입니다");
     });
 
     await act(async () => {
@@ -454,6 +455,7 @@ describe("ChatView", () => {
     });
 
     await waitFor(() => {
+      expect(container.textContent).toContain("첫번째 답변입니다");
       expect(container.textContent).toContain("calendar list");
       expect(container.textContent).not.toContain("__calendar_result__");
     });
@@ -508,10 +510,7 @@ describe("ChatView", () => {
     });
 
     await waitFor(() => {
-      // Work-phase prose is visible standalone; the tool card renders
-      // (collapsed) so its result can be expanded.
-      expect(container.textContent).toContain("도구를 확인합니다");
-      expect(container.textContent).toContain("calendar list");
+      expect(container.textContent).toMatch(/작업\s*1단계/);
     });
 
     const toolButton = Array.from(container.querySelectorAll("button")).find((button) =>
@@ -585,9 +584,7 @@ describe("ChatView", () => {
 
     await waitFor(() => {
       expect(container.textContent).toContain("현재 최종");
-      // Reasoning renders standalone now, so the WorkGroup holds only the
-      // single tool (1 step, not 2).
-      expect(container.textContent).toMatch(/작업\s*1단계/);
+      expect(container.textContent).toMatch(/작업\s*2단계/);
       expect(container.textContent).not.toContain("current session probe");
     });
 
@@ -844,7 +841,7 @@ describe("ChatView", () => {
     expect(container.textContent).not.toMatch(/≈ \$/);
   });
 
-  it("keeps a pre-final assistant round + reasoning visible standalone (no tools, no WorkGroup)", async () => {
+  it("keeps a one-step pre-final assistant round inside WorkGroup", async () => {
     const { container, emitChatStream } = await renderApp({ hasApiKey: true });
     await submitChatMessage(container, "추론 확인");
     await act(async () => {
@@ -869,17 +866,15 @@ describe("ChatView", () => {
       emitChatStream({ type: "done" });
     });
     await waitFor(() => {
-      // No tool activity → no WorkGroup. Intermediate prose + final answer
-      // are both visible; the reasoning card header shows but its body is
-      // collapsed until clicked.
-      expect(container.querySelector("[data-testid=\"work-group\"]")).toBeNull();
+      expect(container.textContent).toMatch(/작업\s*2단계/);
       expect(container.textContent).toContain("최종 답변입니다");
-      expect(container.textContent).toContain("첫번째 답변입니다");
-      expect(container.textContent).toContain("생각 완료");
-      expect(container.textContent).not.toContain("생각 중입니다");
+      expect(container.textContent).not.toContain("첫번째 답변입니다");
     });
 
-    // Expand the standalone reasoning card → thought body becomes visible.
+    await act(async () => {
+      fireEvent.click(container.querySelector("[data-testid=\"work-group\"] button")!);
+    });
+
     for (const button of Array.from(container.querySelectorAll("button"))) {
       if (button.textContent?.includes("생각 완료")) {
         await act(async () => {
@@ -889,7 +884,8 @@ describe("ChatView", () => {
     }
 
     await waitFor(() => {
-      expect(container.textContent).toContain("생각 중입니다");
+      expect(container.textContent).toContain("첫번째 답변입니다");
+      expect(container.textContent).toContain("생각 완료");
     });
   });
 
@@ -931,7 +927,7 @@ describe("ChatView", () => {
     });
   });
 
-  it("keeps a tool_use assistant round visible standalone while the turn is still active", async () => {
+  it("moves a tool_use assistant round into the active WorkGroup before tool events arrive", async () => {
     const { container, api, emitChatStream } = await renderApp({ hasApiKey: true });
     const pendingSend = deferred<{ ok: true }>();
     api.chatSend.mockImplementationOnce(async () => pendingSend.promise);
@@ -947,10 +943,11 @@ describe("ChatView", () => {
       });
     });
 
-    // Work-phase assistant prose stays visible (rendered standalone, not
-    // hidden inside a collapsible WorkGroup).
     await waitFor(() => {
-      expect(container.textContent).toContain("도구를 바로 호출하겠습니다");
+      const workGroup = container.querySelector("[data-testid=\"work-group\"]");
+      expect(workGroup).toBeTruthy();
+      expect(workGroup!.textContent).toContain("작업 중...");
+      expect(workGroup!.textContent).toContain("도구를 바로 호출하겠습니다");
     });
     await act(async () => {
       pendingSend.resolve({ ok: true });
@@ -1439,12 +1436,60 @@ describe("ChatView", () => {
     }
   });
 
-  // Reasoning + tool + assistant sequence: after the turn completes the
-  // reasoning entry must remain VISIBLE as a standalone, collapsed-by-default
-  // + expandable ReasoningCard (it is NOT swallowed by the WorkGroup
-  // collapse), while tool activity stays in the collapsible WorkGroup and
-  // the final assistant text is visible.
-  it("renders reasoning as a standalone collapsed ReasoningCard while tools stay in WorkGroup (reasoning+tool+end_turn)", async () => {
+  it("moves a tool_use assistant round into the active WorkGroup before tool events arrive", async () => {
+    const { container, api, emitChatStream } = await renderApp({ hasApiKey: true });
+    const pendingSend = deferred<{ ok: true }>();
+    api.chatSend.mockImplementationOnce(async () => pendingSend.promise);
+    await submitChatMessage(container, "직접 도구 호출");
+    await act(async () => {
+      emitChatStream({ type: "text_delta", text: "도구를 바로 호출하겠습니다" });
+      emitChatStream({
+        type: "assistant_round",
+        text: "도구를 바로 호출하겠습니다",
+        thought: "",
+        stopReason: "tool_use",
+        hasToolCalls: true,
+      });
+    });
+
+    await waitFor(() => {
+      const workGroup = container.querySelector("[data-testid=\"work-group\"]");
+      expect(workGroup).toBeTruthy();
+      expect(workGroup!.textContent).toContain("작업 중...");
+      expect(workGroup!.textContent).toContain("도구를 바로 호출하겠습니다");
+    });
+    await act(async () => {
+      pendingSend.resolve({ ok: true });
+      await Promise.resolve();
+    });
+  });
+
+  it("strips meta markers and renders Markdown for assistant_round text", async () => {
+    const { container, emitChatStream } = await renderApp({ hasApiKey: true });
+    await submitChatMessage(container, "마크다운 확인");
+    await act(async () => {
+      emitChatStream({ type: "text_delta", text: "결과는 **정상**입니다.<title>마크다운 렌더링 확인</title>" });
+      emitChatStream({
+        type: "assistant_round",
+        text: "결과는 **정상**입니다.<title>마크다운 렌더링 확인</title>",
+        thought: "",
+        stopReason: "end_turn",
+        hasToolCalls: false,
+      });
+      emitChatStream({ type: "done" });
+    });
+
+    await waitFor(() => {
+      expect(container.textContent).toContain("결과는 정상입니다.");
+      expect(container.textContent).not.toContain("<title>");
+      expect(container.querySelector('[data-testid="assistant-message-body"] strong')?.textContent).toBe("정상");
+    });
+  });
+
+  // Regression guard for Copilot PR #545 round-1 comments ③④.
+  // Reasoning + tool + assistant sequence: reasoning entry must be bucketed
+  // inside WorkGroup while the final assistant text stays visible standalone.
+  it("keeps reasoning bucketed in WorkGroup while assistant text stays visible (reasoning+tool+end_turn)", async () => {
     const { container, emitChatStream } = await renderApp({ hasApiKey: true });
     await submitChatMessage(container, "오늘 일정");
     await act(async () => {
@@ -1465,30 +1510,13 @@ describe("ChatView", () => {
       emitChatStream({ type: "done" });
     });
     await waitFor(() => {
-      // Final assistant text must be visible.
+      // Final assistant text must be visible
       expect(container.textContent).toContain("오늘 일정 정리해드릴게요");
-      // Reasoning card header ("생각 완료") is visible after the turn, but
-      // its body (the thought text) is collapsed until clicked.
-      expect(container.textContent).toContain("생각 완료");
-      expect(container.textContent).not.toContain("사용자 질문을 분석합니다");
-      // The single tool stays in a collapsible WorkGroup (1 step now that
-      // reasoning is rendered standalone outside the group).
-      expect(container.textContent).toMatch(/작업\s*1단계/);
+      // Reasoning and tool results are one completed WorkGroup and collapse together.
+      expect(container.textContent).toMatch(/작업\s*2단계/);
       expect(container.textContent).not.toContain("calendar list");
       expect(container.textContent).not.toContain("__calendar_result__");
     });
-    // Expand the standalone ReasoningCard → thought text becomes visible.
-    const reasoningButton = Array.from(container.querySelectorAll("button")).find((button) =>
-      button.textContent?.includes("생각 완료"),
-    ) as HTMLButtonElement | undefined;
-    expect(reasoningButton).toBeTruthy();
-    await act(async () => {
-      fireEvent.click(reasoningButton!);
-    });
-    await waitFor(() => {
-      expect(container.textContent).toContain("사용자 질문을 분석합니다");
-    });
-    // The tool WorkGroup expands independently to reveal the tool card.
     await act(async () => {
       fireEvent.click(container.querySelector("[data-testid=\"work-group\"] button")!);
     });
@@ -1508,7 +1536,7 @@ describe("ChatView", () => {
     });
   });
 
-  it("replays persisted pre-final work keeping reasoning + intermediate prose visible, tools in WorkGroups", async () => {
+  it("replays persisted pre-final assistant work as one collapsed turn WorkGroup", async () => {
     const { container } = await renderApp({
       hasApiKey: true,
       history: {
@@ -1544,41 +1572,32 @@ describe("ChatView", () => {
 
     await waitFor(() => {
       const transcriptText = container.textContent ?? "";
-      // Final + intermediate assistant prose are BOTH visible on load,
-      // intermediate before final.
+      expect(transcriptText).toContain("5단계");
       expect(transcriptText).toContain("최종 답변입니다.");
-      const middle = transcriptText.indexOf("중간 확인 내용은 사용자에게 보여야 합니다.");
-      const final = transcriptText.indexOf("최종 답변입니다.");
-      expect(middle).toBeGreaterThanOrEqual(0);
-      expect(final).toBeGreaterThan(middle);
-      // Reasoning cards are present (collapsed headers visible) but their
-      // thought bodies stay hidden until expanded.
-      expect(transcriptText).toContain("생각 완료");
-      expect(transcriptText).not.toContain("첫 번째 검색 계획");
-      expect(transcriptText).not.toContain("두 번째 도구 결과를 검증");
-      // Tools split into two collapsible WorkGroups (one per tool round),
-      // collapsed by default so tool names + results are hidden.
       expect(transcriptText).not.toContain("웹 검색");
       expect(transcriptText).not.toContain("검색 결과");
       expect(transcriptText).not.toContain("웹 페이지 가져오기");
       expect(transcriptText).not.toContain("본문");
-      expect(container.querySelectorAll("[data-testid=\"work-group\"]")).toHaveLength(2);
+      expect(transcriptText).not.toContain("중간 확인 내용은 사용자에게 보여야 합니다.");
+      expect(container.querySelectorAll("[data-testid=\"work-group\"]")).toHaveLength(1);
     });
 
-    // Expand both WorkGroups to reveal the tool cards.
     await act(async () => {
-      for (const wg of Array.from(container.querySelectorAll("[data-testid=\"work-group\"] button"))) {
-        fireEvent.click(wg as HTMLButtonElement);
-      }
+      fireEvent.click(container.querySelector("[data-testid=\"work-group\"] button")!);
     });
 
     await waitFor(() => {
       const transcriptText = container.textContent ?? "";
+      const middle = transcriptText.indexOf("중간 확인 내용은 사용자에게 보여야 합니다.");
+      const final = transcriptText.indexOf("최종 답변입니다.");
+      expect(transcriptText).not.toContain("첫 번째 검색 계획");
+      expect(transcriptText).not.toContain("두 번째 도구 결과를 검증");
       expect(transcriptText).toContain("웹 검색");
       expect(transcriptText).toContain("웹 페이지 가져오기");
-      // Tool results stay collapsed until the individual tool cards open.
       expect(transcriptText).not.toContain("검색 결과");
       expect(transcriptText).not.toContain("본문");
+      expect(middle).toBeGreaterThanOrEqual(0);
+      expect(final).toBeGreaterThan(middle);
     });
 
     const toolButtons = Array.from(container.querySelectorAll("button"));
@@ -1598,7 +1617,7 @@ describe("ChatView", () => {
     });
   });
 
-  it("keeps intermediate prose visible while preserving final search highlight", async () => {
+  it("keeps pre-final search matches collapsed while preserving final highlight", async () => {
     const { container } = await renderApp({
       hasApiKey: true,
       history: {
@@ -1634,9 +1653,7 @@ describe("ChatView", () => {
 
     await waitFor(() => {
       expect(container.textContent).toContain("needle 최종 답변입니다.");
-      // Intermediate work-phase prose stays visible (no longer hidden inside
-      // a collapsed WorkGroup).
-      expect(container.textContent).toContain("needle 중간 답변은 계속 보여야 합니다.");
+      expect(container.textContent).not.toContain("needle 중간 답변은 계속 보여야 합니다.");
     });
 
     await act(async () => {

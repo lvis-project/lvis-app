@@ -157,6 +157,7 @@ import { en as en_solarizedLight, ko as ko_solarizedLight } from "./solarizedLig
 import { en as en_sparkline, ko as ko_sparkline } from "./sparkline.js";
 import { en as en_spotlightTour, ko as ko_spotlightTour } from "./spotlightTour.js";
 import { en as en_starredView, ko as ko_starredView } from "./starredView.js";
+import { en as en_statusBar, ko as ko_statusBar } from "./statusBar.js";
 import { en as en_subAgentCard, ko as ko_subAgentCard } from "./subAgentCard.js";
 import { en as en_suggestedRepliesChipRow, ko as ko_suggestedRepliesChipRow } from "./suggestedRepliesChipRow.js";
 import { en as en_summaryToast, ko as ko_summaryToast } from "./summaryToast.js";
@@ -337,6 +338,7 @@ export const generatedEn: Record<string, string> = {
   ...en_sparkline,
   ...en_spotlightTour,
   ...en_starredView,
+  ...en_statusBar,
   ...en_subAgentCard,
   ...en_suggestedRepliesChipRow,
   ...en_summaryToast,
@@ -518,6 +520,7 @@ export const generatedKo: Record<string, string> = {
   ...ko_sparkline,
   ...ko_spotlightTour,
   ...ko_starredView,
+  ...ko_statusBar,
   ...ko_subAgentCard,
   ...ko_suggestedRepliesChipRow,
   ...ko_summaryToast,

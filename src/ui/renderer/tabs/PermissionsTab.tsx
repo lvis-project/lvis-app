@@ -14,19 +14,18 @@ import {
   SelectTrigger,
   SelectValue,
 } from "../../../components/ui/select.js";
-import { PERMISSION_REVIEWER_FRAMEWORK } from "../../../shared/permission-reviewer-framework.js";
 import type { UserApprovalScope, UserApprovalVerdict } from "../../../shared/permissions-events.js";
 import { EXEC_MODE_OPTIONS, LONG_TOAST_TTL_MS } from "../constants.js";
 import { formatIpcError } from "../format-ipc-error.js";
 import type {
   ExecMode,
   HookTrustRow,
-  PermissionReviewerFallbackOnError,
   PermissionReviewerMode,
   PermissionReviewerSettings,
   PermissionRule,
 } from "../types.js";
 import type { SandboxCapabilityInfo } from "../../../shared/sandbox-capability-info.js";
+import { PERMISSION_REVIEWER_FRAMEWORK } from "../../../shared/permission-reviewer-framework.js";
 import { AuditPanel } from "../components/permissions/AuditPanel.js";
 import { SettingsPageHeader } from "../components/SettingsPageHeader.js";
 import { SettingsSection } from "../components/SettingsSection.js";
@@ -40,36 +39,6 @@ const DEFAULT_REVIEWER_SETTINGS: PermissionReviewerSettings = {
   fallbackOnError: "deny",
   interactive: { autoApprove: "off" },
 };
-
-function getReviewerInteractiveOptions(): Array<{
-  value: "off" | "low";
-  label: string;
-  description: string;
-}> {
-  return [
-    {
-      value: "off",
-      label: t("permissionsTab.interactiveOffLabel"),
-      description: t("permissionsTab.interactiveOffDescription"),
-    },
-    {
-      value: "low",
-      label: t("permissionsTab.interactiveLowLabel"),
-      description: t("permissionsTab.interactiveLowDescription"),
-    },
-  ];
-}
-
-function getReviewerFallbackOptions(): Array<{
-  value: PermissionReviewerFallbackOnError;
-  label: string;
-  description: string;
-}> {
-  return [
-    { value: "deny", label: t("permissionsTab.fallbackDenyLabel"), description: t("permissionsTab.fallbackDenyDescription") },
-    { value: "rule", label: t("permissionsTab.fallbackRuleLabel"), description: t("permissionsTab.fallbackRuleDescription") },
-  ];
-}
 
 function formatRevokeError(error: string | undefined, message: string | undefined): string {
   return formatIpcError(error, message, {
@@ -91,8 +60,6 @@ function formatReviewerDispatchError(error: string): string {
     fallbackContext: t("permissionsTab.errorReviewerFallbackContext"),
   });
 }
-
-const REVIEWER_RENAME_NOTICE_LS_KEY = "permissions.reviewer.rename-notice.dismissed-v1";
 
 function preserveSettingsScrollPosition(): () => void {
   const scroller = document.querySelector<HTMLElement>(".lvis-settings-scroll");
@@ -119,25 +86,6 @@ export function PermissionsTab() {
     if (bannerTimerRef.current) clearTimeout(bannerTimerRef.current);
     setBanner({ type, msg });
     bannerTimerRef.current = setTimeout(() => setBanner(null), LONG_TOAST_TTL_MS);
-  }, []);
-
-  // ── 권한 리뷰어 rename 1회 안내 ───────────────────
-  const [showRenameNotice, setShowRenameNotice] = useState(false);
-  useEffect(() => {
-    if (typeof window === "undefined") return;
-    try {
-      if (window.localStorage.getItem(REVIEWER_RENAME_NOTICE_LS_KEY) !== "1") {
-        setShowRenameNotice(true);
-      }
-    } catch {
-      // LocalStorage unavailable — fail closed (don't show banner repeatedly)
-    }
-  }, []);
-  const dismissRenameNotice = useCallback(() => {
-    setShowRenameNotice(false);
-    try {
-      window.localStorage.setItem(REVIEWER_RENAME_NOTICE_LS_KEY, "1");
-    } catch {}
   }, []);
 
   // ── Execution Mode ────────────────────────────────
@@ -177,10 +125,6 @@ export function PermissionsTab() {
   }>>([]);
   const [approvalsBusy, setApprovalsBusy] = useState(false);
   const [reviewer, setReviewer] = useState<PermissionReviewerSettings>(DEFAULT_REVIEWER_SETTINGS);
-  const [reviewerBusy, setReviewerBusy] = useState(false);
-  // Runtime degrade: persisted mode="llm" but wiring fell back to rule because
-  // no LLM provider/key is configured. Drives the degrade banner.
-  const [reviewerDegradedToRule, setReviewerDegradedToRule] = useState(false);
 
   // ── OS Tool Sandbox ───────────────────────────────
   const [sandboxCapability, setSandboxCapability] = useState<SandboxCapabilityInfo | null>(null);
@@ -215,7 +159,6 @@ export function PermissionsTab() {
       setQuarantinedHooks(hookTrustRes.ok ? hookTrustRes.disabled : []);
       setDirectories(dirRes.ok && dirRes.verb === "list" ? dirRes.userAdditions : []);
       setReviewer(reviewerRes.settings);
-      setReviewerDegradedToRule(reviewerRes.reviewerDegradedToRule ?? false);
       setSandboxCapability(sandboxRes);
       setSandboxEnabled(settingsRes.features?.osToolSandbox ?? false);
     } catch (e) {
@@ -326,7 +269,6 @@ export function PermissionsTab() {
         const reviewerRes = await window.lvis.permission.reviewerDispatch(`mode ${targetReviewerMode}`);
         if (reviewerRes.ok) {
           setReviewer(reviewerRes.settings);
-          setReviewerDegradedToRule(reviewerRes.reviewerDegradedToRule ?? false);
         } else {
           showBanner("error", formatReviewerDispatchError(reviewerRes.error));
           return;
@@ -339,7 +281,6 @@ export function PermissionsTab() {
         );
         if (interactiveRes.ok) {
           setReviewer(interactiveRes.settings);
-          setReviewerDegradedToRule(interactiveRes.reviewerDegradedToRule ?? false);
         } else {
           showBanner("error", formatReviewerDispatchError(interactiveRes.error));
           return;
@@ -390,24 +331,6 @@ export function PermissionsTab() {
       showBanner("error", t("permissionsTab.osSandboxToggleError", { message: (e as Error).message }));
     } finally {
       setSandboxBusy(false);
-    }
-  };
-
-  const applyReviewerCommand = async (rawArgs: string) => {
-    if (reviewerBusy) return;
-    setReviewerBusy(true);
-    try {
-      const res = await window.lvis.permission.reviewerDispatch(rawArgs);
-      if (res.ok) {
-        setReviewer(res.settings);
-        setReviewerDegradedToRule(res.reviewerDegradedToRule ?? false);
-      } else {
-        showBanner("error", formatReviewerDispatchError(res.error));
-      }
-    } catch (e) {
-      showBanner("error", t("permissionsTab.errorReviewerChangeError", { message: (e as Error).message }));
-    } finally {
-      setReviewerBusy(false);
     }
   };
 
@@ -638,197 +561,26 @@ export function PermissionsTab() {
           </RadioGroup>
         </SettingsSection>
 
-        {/* ── 권한 리뷰어 (자동 검증 모드 전용) ── */}
         {mode === "auto" && (
-        <SettingsSection
-          title={t("permissionsTab.reviewerTitle")}
-          description={t("permissionsTab.reviewerDescription")}
-        >
-          {showRenameNotice ? (
-            <div
-              role="status"
-              data-testid="reviewer-rename-notice"
-              className="flex items-start gap-2 rounded-md border border-info/(--opacity-medium) bg-info/(--opacity-subtle) px-3 py-2 text-[11px] text-info"
-            >
-              <span className="flex-1">{t("permissionsTab.reviewerRenameNoticeText")}</span>
-              <button
-                type="button"
-                onClick={dismissRenameNotice}
-                aria-label={t("permissionsTab.closeBannerAriaLabel")}
-                className="text-xs underline-offset-2 hover:underline"
-              >
-                {t("permissionsTab.closeButton")}
-              </button>
-            </div>
-          ) : null}
-
-          {reviewerDegradedToRule && reviewer.mode === "llm" ? (
-            <p
-              role="status"
-              data-testid="reviewer-llm-degraded-banner"
-              className="rounded-md border border-warning/(--opacity-medium) bg-warning/(--opacity-soft) px-3 py-2 text-[11px] text-warning"
-            >
-              {t("permissionsTab.warnReviewerLlmDegradedToRule")}
-            </p>
-          ) : null}
-
-          <div className="space-y-3 rounded-md border bg-muted/(--opacity-light) px-3 py-3">
-            <div>
-              <p className="text-xs font-medium">{t("permissionsTab.llmSettingsTitle")}</p>
-              <p className="text-[11px] text-muted-foreground">{t("permissionsTab.llmSettingsDescription")}</p>
-            </div>
-            <div className="grid gap-3 sm:grid-cols-2">
-              <div
-                className="rounded-md border bg-background px-3 py-2 text-xs"
-                data-testid="reviewer-active-llm-source"
-              >
-                <p className="font-medium">{t("permissionsTab.llmVerificationLabel")}</p>
-                <p className="mt-1 text-[11px] text-muted-foreground">
-                  {t("permissionsTab.llmVerificationDescription")}
-                </p>
-              </div>
-              <Label className="space-y-1 text-xs">
-                <span className="font-medium">{t("permissionsTab.errorHandlingLabel")}</span>
-                <Select
-                  value={reviewer.fallbackOnError}
-                  disabled={reviewerBusy}
-                  onValueChange={(value) => void applyReviewerCommand(`fallback ${value}`)}
-                >
-                  <SelectTrigger data-testid="reviewer-fallback-select" className="w-full text-xs">
-                    <SelectValue />
-                  </SelectTrigger>
-                  <SelectContent>
-                    {getReviewerFallbackOptions().map((opt) => (
-                      <SelectItem key={opt.value} value={opt.value}>{opt.label} - {opt.description}</SelectItem>
-                    ))}
-                  </SelectContent>
-                </Select>
-              </Label>
-            </div>
-            <p className="text-[11px] text-muted-foreground">
-              {t("permissionsTab.llmProviderManagedNote")}
-            </p>
-
-            <div className="space-y-2 border-t pt-3">
-              <div className="flex items-baseline justify-between">
-                <span className="text-xs font-medium">{t("permissionsTab.autoApproveLowRiskLabel")}</span>
-              </div>
-              <p className="text-[11px] text-muted-foreground">
-                {t("permissionsTab.autoApproveLowRiskDescription")}
-              </p>
-              <RadioGroup
-                value={reviewer.interactive.autoApprove}
-                disabled={reviewerBusy}
-                aria-label={t("permissionsTab.autoApproveLowRiskAriaLabel")}
-                onValueChange={(value) => void applyReviewerCommand(`interactive ${value}`)}
-                className="grid gap-2 sm:grid-cols-2"
-              >
-                {getReviewerInteractiveOptions().map((opt) => (
-                  <Label
-                    key={opt.value}
-                    htmlFor={`reviewer-interactive-${opt.value}-radio`}
-                    data-testid={`reviewer-interactive-${opt.value}`}
-                    className={`flex h-auto w-full cursor-pointer items-start justify-start gap-2.5 rounded-md border px-3 py-2 text-left text-xs font-normal ${reviewer.interactive.autoApprove === opt.value ? "border-primary bg-primary/(--opacity-subtle) hover:bg-primary/(--opacity-subtle)" : "border-muted hover:border-muted-foreground/(--opacity-medium)"}`}
-                  >
-                    <RadioGroupItem
-                      id={`reviewer-interactive-${opt.value}-radio`}
-                      value={opt.value}
-                      aria-label={opt.label}
-                      className="mt-0.5"
-                    />
-                    <span className="flex-1 space-y-0.5">
-                      <span className="block font-medium">{opt.label}</span>
-                      <span className="block text-[11px] text-muted-foreground">{opt.description}</span>
-                    </span>
-                  </Label>
-                ))}
-              </RadioGroup>
-              {reviewer.interactive.autoApprove === "off" ? (
-                <p
-                  className="rounded-md border border-warning/(--opacity-medium) bg-warning/(--opacity-soft) px-3 py-2 text-[11px] text-warning"
-                  data-testid="permissions-legacy-auto-mode-banner"
-                >
-                  {t("permissionsTab.warnAutoModeAutoApproveOff")}
-                </p>
-              ) : null}
-            </div>
-          </div>
-
-          <details
-            className="rounded-md border bg-muted/(--opacity-light)"
-            data-testid="reviewer-cli-mapping-panel"
+          <SettingsSection
+            title={t("permissionsTab.reviewerPromptTitle")}
+            description={t("permissionsTab.reviewerPromptDescription")}
           >
-            <summary className="cursor-pointer px-3 py-2 text-xs font-semibold">
-              {t("permissionsTab.cliMappingTitle")}
-            </summary>
-            <div className="space-y-2 border-t px-3 py-3 text-[11px]">
-              <p className="text-muted-foreground">
-                {t("permissionsTab.cliMappingDescription")}
-              </p>
-              <ul className="space-y-1 font-mono leading-relaxed">
-                <li><code>/permission reviewer mode &lt;disabled|rule|llm|strict&gt;</code></li>
-                <li><code>/permission reviewer interactive &lt;off|low&gt;</code></li>
-                <li><code>/permission reviewer fallback &lt;deny|rule&gt;</code></li>
-              </ul>
-              <p className="text-muted-foreground">
-                {t("permissionsTab.cliMappingProviderNote")}
-              </p>
-            </div>
-          </details>
-
-          <details
-            className="rounded-md border bg-muted/(--opacity-light)"
-            data-testid="reviewer-framework-panel"
-          >
-            <summary className="cursor-pointer px-3 py-2 text-xs font-semibold">
-              {t("permissionsTab.frameworkPanelTitle")}
-            </summary>
-            <div className="space-y-3 border-t px-3 py-3 text-xs">
-              <div className="grid gap-2 sm:grid-cols-2">
-                <div className="rounded border bg-background/(--opacity-strong) px-2 py-2">
-                  <p className="text-[11px] text-muted-foreground">{t("permissionsTab.frameworkVersion")}</p>
-                  <p className="mt-1 font-mono">{PERMISSION_REVIEWER_FRAMEWORK.version}</p>
-                </div>
-                <div className="rounded border bg-background/(--opacity-strong) px-2 py-2">
-                  <p className="text-[11px] text-muted-foreground">{t("permissionsTab.frameworkOutputContract")}</p>
-                  <p className="mt-1 font-mono">{PERMISSION_REVIEWER_FRAMEWORK.outputContract}</p>
-                </div>
-              </div>
-              <div className="rounded border bg-background/(--opacity-strong) px-2 py-2">
-                <p className="mb-1 text-[11px] font-medium text-muted-foreground">{t("permissionsTab.frameworkRiskLevels")}</p>
-                <ul className="space-y-1">
-                  {PERMISSION_REVIEWER_FRAMEWORK.levels.map((level) => (
-                    <li key={level.level}>
-                      <span className="font-mono uppercase">{level.level}</span> · {level.definition}
-                    </li>
-                  ))}
-                </ul>
-              </div>
-              <div className="rounded border bg-background/(--opacity-strong) px-2 py-2">
-                <p className="mb-1 text-[11px] font-medium text-muted-foreground">{t("permissionsTab.frameworkComposition")}</p>
-                <ul className="space-y-1">
-                  {PERMISSION_REVIEWER_FRAMEWORK.compositionRules.map((rule) => (
-                    <li key={rule}>{rule}</li>
-                  ))}
-                </ul>
-              </div>
-              <div className="rounded border bg-background/(--opacity-strong) px-2 py-2">
-                <p className="mb-1 text-[11px] font-medium text-muted-foreground">{t("permissionsTab.frameworkInputFields")}</p>
-                <p className="font-mono leading-relaxed">
-                  {PERMISSION_REVIEWER_FRAMEWORK.inputFields.join(" · ")}
-                </p>
-              </div>
-              <details className="rounded border bg-background/(--opacity-strong)">
-                <summary className="cursor-pointer px-2 py-2 text-[11px] font-medium">
-                  {t("permissionsTab.frameworkSystemPromptTitle")}
-                </summary>
-                <pre className="max-h-56 overflow-auto border-t px-2 py-2 whitespace-pre-wrap break-all font-mono text-[11px] leading-relaxed">
-                  {PERMISSION_REVIEWER_FRAMEWORK.systemPrompt}
-                </pre>
-              </details>
-            </div>
-          </details>
-        </SettingsSection>
+            <details
+              className="rounded-md border bg-muted/(--opacity-light)"
+              data-testid="reviewer-prompt-panel"
+            >
+              <summary className="cursor-pointer px-3 py-2 text-xs font-semibold">
+                {t("permissionsTab.frameworkSystemPromptTitle")}
+              </summary>
+              <pre
+                className="max-h-56 overflow-auto border-t px-3 py-3 whitespace-pre-wrap break-all font-mono text-[11px] leading-relaxed"
+                data-testid="reviewer-system-prompt"
+              >
+                {PERMISSION_REVIEWER_FRAMEWORK.systemPrompt}
+              </pre>
+            </details>
+          </SettingsSection>
         )}
 
         {/* ── Section B: Explicit Approval Policy ── */}
