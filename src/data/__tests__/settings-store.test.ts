@@ -237,6 +237,15 @@ describe("SettingsService role presets", () => {
     await service.patch({ features: { idlePreferenceRefresh: true } });
     expect(service.get("features")?.idlePreferenceRefresh).toBe(true);
   });
+
+  it("ships the OS tool sandbox (ASRT) gate OFF by default", () => {
+    // The ASRT migration must not change runtime behavior on a fresh install:
+    // the boot gate is `features.osToolSandbox || LVIS_SANDBOX_ENABLED`, so the
+    // shipped default of this flag being false is what keeps the sandbox dormant
+    // until a user opts in.
+    const service = new SettingsService({ userDataPath });
+    expect(service.get("features")?.osToolSandbox ?? false).toBe(false);
+  });
 });
 
 describe("SettingsService LLM per-vendor patching", () => {

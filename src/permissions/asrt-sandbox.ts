@@ -32,6 +32,7 @@ import type {
   SandboxRuntimeConfig,
   NetworkConfig,
   FilesystemConfig,
+  SandboxAskCallback,
 } from "@anthropic-ai/sandbox-runtime";
 
 /**
@@ -80,13 +81,60 @@ export interface TrustedSandboxSettings {
 }
 
 /**
- * Per-command wrap options. `cwd` scopes filesystem jailing; `customConfig` is
- * merged on top of the initialized config by ASRT for this command only.
+ * Per-command filesystem scoping. This is the ONLY config a caller may vary
+ * per command, and it can only ever NARROW or RE-SHAPE the filesystem jail —
+ * it cannot widen network egress and cannot carry any sandbox-weakening flag.
+ *
+ * ⚠️ TRUST BOUNDARY (security MINOR from the PR #1355 cluster review) ⚠️
+ * `wrapWithSandboxArgv` accepts a `customConfig: Partial<SandboxRuntimeConfig>`
+ * that ASRT merges over the initialized config for this command only — that is
+ * the single channel through which a per-command call could otherwise smuggle
+ * a weakening flag (`allowAppleEvents`, `enableWeakerNetworkIsolation`,
+ * `network.allowAllUnixSockets`) past the trusted-settings gate. To keep that
+ * channel safe by construction, callers pass ONLY this narrow filesystem shape;
+ * {@link toCustomConfig} maps it to the exact `{ filesystem }` slice handed to
+ * ASRT. There is deliberately no field here for network or weakening flags, so
+ * a plugin/project-influenced call site cannot reach them.
+ */
+export interface PerCommandFilesystem {
+  /** Paths the child may write for this command (the derived write-jail). */
+  readonly allowWrite?: readonly string[];
+  /** Paths the child may read (e.g. cwd re-allowed after a HOME-wide deny). */
+  readonly allowRead?: readonly string[];
+  /** Paths the child is denied reading (e.g. $HOME, to fix the read-jail leak). */
+  readonly denyRead?: readonly string[];
+  /** Paths the child is denied writing (takes precedence over allowWrite). */
+  readonly denyWrite?: readonly string[];
+}
+
+/**
+ * Per-command wrap options. `filesystem` scopes the per-command read/write jail
+ * (the only thing allowed to vary per command — see {@link PerCommandFilesystem}).
  */
 export interface WrapOptions {
-  readonly cwd?: string;
-  readonly customConfig?: Partial<SandboxRuntimeConfig>;
+  readonly filesystem?: PerCommandFilesystem;
   readonly abortSignal?: AbortSignal;
+}
+
+/**
+ * Map the trust-safe {@link PerCommandFilesystem} to the `customConfig` slice
+ * ASRT merges for this command. Only the `filesystem` section is ever produced
+ * here: network and weakening flags are intentionally unreachable from a
+ * per-command call so the trusted-settings gate cannot be bypassed.
+ */
+function toCustomConfig(
+  filesystem: PerCommandFilesystem | undefined,
+): Partial<SandboxRuntimeConfig> | undefined {
+  if (filesystem === undefined) return undefined;
+  const fs: FilesystemConfig = {
+    denyRead: [...(filesystem.denyRead ?? [])],
+    allowWrite: [...(filesystem.allowWrite ?? [])],
+    denyWrite: [...(filesystem.denyWrite ?? [])],
+    ...(filesystem.allowRead !== undefined
+      ? { allowRead: [...filesystem.allowRead] }
+      : {}),
+  };
+  return { filesystem: fs };
 }
 
 /** The host spawns this; ASRT never spawns the workload itself. */
@@ -103,6 +151,23 @@ export interface SandboxWrapResult {
 async function loadSandboxManager() {
   const mod = await import("@anthropic-ai/sandbox-runtime");
   return mod.SandboxManager;
+}
+
+/**
+ * Whether {@link initializeAsrtSandbox} has run to completion in this process.
+ *
+ * This is the host-tool spawn path's gate: tool code (bash.ts/powershell.ts)
+ * asks THIS module — not the settings service — whether to route through ASRT,
+ * so the gate is decided once at boot and cannot be re-evaluated mid-run. That
+ * preserves the seal-after-boot security property the §691 registry had: there
+ * is no runtime channel to flip the sandbox on/off after boot. Set to `true`
+ * only on a successful `initialize`; stays `false` after {@link resetAsrtSandbox}.
+ */
+let active = false;
+
+/** Host-tool spawn gate. True once {@link initializeAsrtSandbox} succeeds. */
+export function isAsrtSandboxActive(): boolean {
+  return active;
 }
 
 /**
@@ -167,11 +232,28 @@ function buildSandboxConfig(trustedSettings: TrustedSandboxSettings): SandboxRun
  */
 export async function initializeAsrtSandbox(
   trustedSettings: TrustedSandboxSettings,
+  askCb?: SandboxAskCallback,
   enableLogMonitor = false,
 ): Promise<void> {
   const SandboxManager = await loadSandboxManager();
   const config = buildSandboxConfig(trustedSettings);
-  await SandboxManager.initialize(config, undefined, enableLogMonitor);
+  await SandboxManager.initialize(config, askCb, enableLogMonitor);
+  active = true;
+}
+
+/**
+ * Check that the platform's sandbox dependencies are present (Linux: bwrap +
+ * socat + ripgrep). Returns ASRT's `{ errors, warnings }` — a non-empty
+ * `errors` means the sandbox CANNOT run on this host. Boot uses this to
+ * fail-closed (refuse to run unsandboxed) when the gate is ON but the deps are
+ * missing, rather than silently downgrading to isolation=none.
+ */
+export async function checkAsrtDependencies(): Promise<{
+  errors: string[];
+  warnings: string[];
+}> {
+  const SandboxManager = await loadSandboxManager();
+  return SandboxManager.checkDependencies();
 }
 
 /**
@@ -187,7 +269,7 @@ export async function wrapToolCommand(
   return SandboxManager.wrapWithSandboxArgv(
     command,
     undefined,
-    options.customConfig,
+    toCustomConfig(options.filesystem),
     options.abortSignal,
   );
 }
@@ -206,7 +288,7 @@ export async function wrapWorkerCommand(
   return SandboxManager.wrapWithSandboxArgv(
     command,
     undefined,
-    options.customConfig,
+    toCustomConfig(options.filesystem),
     options.abortSignal,
   );
 }
@@ -238,6 +320,7 @@ export async function cleanupAsrtSandboxAfterCommand(): Promise<void> {
 export async function resetAsrtSandbox(): Promise<void> {
   const SandboxManager = await loadSandboxManager();
   await SandboxManager.reset();
+  active = false;
 }
 
 /**
