@@ -90,7 +90,10 @@ describe("manifest validation — auth cross-field", () => {
       description: "auth fixture",
       publisher: "tests",
       entry: "dist/hostPlugin.js",
-      tools: ["test_status", "test_login", "test_signout"],
+      // Migrated shape: auth tools live in uiCallable[] ONLY, never tools[]
+      // (tools[] is the LLM-facing surface). The leak-rejection test overrides
+      // `tools` explicitly to re-introduce the pre-migration violation.
+      tools: [],
       uiCallable: ["test_status", "test_login", "test_signout"],
       ...extra,
     };
@@ -297,7 +300,10 @@ describe("manifest validation — auth cross-field", () => {
   // host's destructive-name rule is also surfaced through the auth slot.
   it("does not currently reject destructive-looking tool names in auth (host posture is plugin-author responsibility per §2.2)", async () => {
     await writeManifest({
-      tools: ["test_status", "test_email_delete"],
+      // Auth tools stay in uiCallable[] only (migrated shape); the point of this
+      // test is that a destructive-looking NAME is not name-gated by the host,
+      // not the tools[] placement rule.
+      tools: [],
       uiCallable: ["test_status", "test_email_delete"],
       auth: {
         statusTool: "test_status",
@@ -311,35 +317,26 @@ describe("manifest validation — auth cross-field", () => {
 
   // architecture.md §9.4a: auth is a host-managed lifecycle, not an LLM
   // capability. Auth tools (statusTool/loginTool/logoutTool) must live in
-  // uiCallable[] ONLY — never in tools[], which is the LLM-facing surface.
-  // Soft warn for migration safety (plugins drop them from tools[] in
-  // parallel PRs); CI gates promote to error once migration completes.
-  it("warns when an auth tool appears in tools[] (auth must be host-managed, not LLM-callable)", async () => {
-    const warnSpy = vi.spyOn(console, "warn").mockImplementation(() => undefined);
-    try {
-      // Base fixture lists test_status/test_login/test_signout in BOTH tools[]
-      // and uiCallable[] — the pre-migration state this rule targets.
-      await writeManifest({
-        emittedEvents: ["test-plugin.auth.changed"],
-        auth: {
-          statusTool: "test_status",
-          loginTool: "test_login",
-          logoutTool: "test_signout",
-        },
-      });
-      const validator = TEST_VALIDATOR;
-      await parsePluginJson(manifestPath, validator);
-      const warnMessages = warnSpy.mock.calls.map((c) => c.join(" "));
-      expect(
-        warnMessages.some(
-          (m) => m.includes("auth tool") && m.includes("tools[]"),
-        ),
-      ).toBe(true);
-      // Names the offending tools so the author can act.
-      expect(warnMessages.some((m) => m.includes("'test_login'"))).toBe(true);
-    } finally {
-      warnSpy.mockRestore();
-    }
+  // uiCallable[] ONLY — never in tools[], which is the LLM-facing surface
+  // (projected verbatim to the model). Hard fail: both shipped auth plugins are
+  // migrated, so rejecting at load is the sole guard against a regression
+  // silently re-exposing auth as an LLM tool (there is no CI gate for it).
+  it("REJECTS when an auth tool appears in tools[] (auth must be host-managed, not LLM-callable)", async () => {
+    // Override the (migrated) base fixture to re-introduce the leak: an auth
+    // tool listed in tools[].
+    await writeManifest({
+      tools: ["test_login"],
+      emittedEvents: ["test-plugin.auth.changed"],
+      auth: {
+        statusTool: "test_status",
+        loginTool: "test_login",
+        logoutTool: "test_signout",
+      },
+    });
+    const validator = TEST_VALIDATOR;
+    await expect(parsePluginJson(manifestPath, validator)).rejects.toThrow(
+      /auth tool.*must not appear in tools\[\]|'test_login'/,
+    );
   });
 
   it("does NOT warn when auth tools are only in uiCallable[] (migrated state)", async () => {
