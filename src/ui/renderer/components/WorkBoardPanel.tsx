@@ -364,7 +364,7 @@ function WorkItemCard({ item, run, onStart, onComplete, onReopen, onRun, onOpenD
         <div className="min-w-0 flex-1">
           <div className="flex items-center gap-1.5">
             <PriorityChip priority={item.priority} />
-            <span className={`truncate text-sm font-semibold leading-snug ${isCompleted ? "text-muted-foreground line-through" : "text-foreground"}`}>
+            <span className={`min-w-0 line-clamp-1 text-sm font-semibold leading-snug ${isCompleted ? "text-muted-foreground line-through" : "text-foreground"}`}>
               {item.title}
             </span>
           </div>
@@ -815,7 +815,7 @@ function RunHistorySection({ api, item }: { api: LvisApi; item: WorkItemResolved
               onClick={() => void toggle(h.runId)}
               className="flex w-full items-center justify-between gap-2 rounded px-1 py-0.5 text-left hover:bg-muted"
             >
-              <span className="truncate">
+              <span className="min-w-0 line-clamp-1">
                 {t(`workBoard.run_${h.status}`)} · {isoToKstDate(h.startedAt)}
               </span>
               <span className="text-muted-foreground">{openRun === h.runId ? "▲" : "▼"}</span>
