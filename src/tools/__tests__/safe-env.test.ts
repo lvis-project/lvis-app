@@ -6,7 +6,7 @@
 import { describe, it, expect, beforeEach, afterEach } from "vitest";
 import { vi } from "vitest";
 
-import { buildSafeChildEnv } from "../safe-env.js";
+import { buildSafeChildEnv, buildSandboxedChildEnv } from "../safe-env.js";
 
 const SAFE_KEYS = ["PATH", "HOME", "USER", "USERNAME", "LANG", "LC_ALL", "LC_CTYPE", "TZ", "TERM", "SHELL", "TMPDIR", "TMP", "TEMP", "PWD"] as const;
 
@@ -144,5 +144,73 @@ describe("buildSafeChildEnv — extra merging", () => {
     const envWithEmpty = buildSafeChildEnv({});
     const envWithNoArg = buildSafeChildEnv();
     expect(Object.keys(envWithEmpty)).toEqual(Object.keys(envWithNoArg));
+  });
+});
+
+describe("buildSandboxedChildEnv — ASRT env composition (PR #1356 allow-list)", () => {
+  it("strips host secrets on the sandbox path (wrapped env carrying them does not re-leak)", () => {
+    // ASRT's wrapped env = process.env + its additions. Simulate it carrying
+    // the host secrets verbatim (same value as process.env) — they must NOT
+    // appear in the composed child env.
+    const wrapped: NodeJS.ProcessEnv = {
+      ...process.env,
+      HTTP_PROXY: "http://localhost:9999",
+    };
+    const env = buildSandboxedChildEnv(wrapped);
+    for (const key of SECRET_KEYS) {
+      expect(Object.prototype.hasOwnProperty.call(env, key)).toBe(false);
+    }
+  });
+
+  it("preserves ASRT proxy keys it added", () => {
+    const wrapped: NodeJS.ProcessEnv = {
+      ...process.env,
+      HTTP_PROXY: "http://srt:tok@localhost:8080",
+      HTTPS_PROXY: "http://srt:tok@localhost:8080",
+      ALL_PROXY: "socks5h://srt:tok@localhost:1080",
+      NO_PROXY: "localhost,127.0.0.1",
+    };
+    const env = buildSandboxedChildEnv(wrapped);
+    expect(env.HTTP_PROXY).toBe("http://srt:tok@localhost:8080");
+    expect(env.HTTPS_PROXY).toBe("http://srt:tok@localhost:8080");
+    expect(env.ALL_PROXY).toBe("socks5h://srt:tok@localhost:1080");
+    expect(env.NO_PROXY).toBe("localhost,127.0.0.1");
+  });
+
+  it("preserves ASRT CA-cert keys it added (NODE_EXTRA_CA_CERTS et al.)", () => {
+    const wrapped: NodeJS.ProcessEnv = {
+      ...process.env,
+      NODE_EXTRA_CA_CERTS: "/tmp/srt-ca.pem",
+      SSL_CERT_FILE: "/tmp/srt-ca.pem",
+      REQUESTS_CA_BUNDLE: "/tmp/srt-ca.pem",
+      PIP_CERT: "/tmp/srt-ca.pem",
+    };
+    const env = buildSandboxedChildEnv(wrapped);
+    expect(env.NODE_EXTRA_CA_CERTS).toBe("/tmp/srt-ca.pem");
+    expect(env.SSL_CERT_FILE).toBe("/tmp/srt-ca.pem");
+    expect(env.REQUESTS_CA_BUNDLE).toBe("/tmp/srt-ca.pem");
+    expect(env.PIP_CERT).toBe("/tmp/srt-ca.pem");
+  });
+
+  it("does NOT propagate a non-allow-listed key even when it differs from process.env", () => {
+    // A future ASRT (or a tampered wrap) emits a non-allow-listed key with a
+    // value that differs from process.env. Under the old "overlay anything that
+    // differs" rule this would leak; the explicit allow-list refuses it.
+    const wrapped: NodeJS.ProcessEnv = {
+      ...process.env,
+      ANTHROPIC_API_KEY: "sk-MUTATED-leaked-value", // differs from process.env
+      SOME_FUTURE_ASRT_VAR: "unexpected",
+      HTTP_PROXY: "http://localhost:8080", // allow-listed → should pass
+    };
+    const env = buildSandboxedChildEnv(wrapped);
+    expect(Object.prototype.hasOwnProperty.call(env, "ANTHROPIC_API_KEY")).toBe(false);
+    expect(Object.prototype.hasOwnProperty.call(env, "SOME_FUTURE_ASRT_VAR")).toBe(false);
+    expect(env.HTTP_PROXY).toBe("http://localhost:8080");
+  });
+
+  it("includes the safe baseline (PATH/HOME) alongside ASRT additions", () => {
+    const env = buildSandboxedChildEnv({ ...process.env, HTTP_PROXY: "http://localhost:8080" });
+    expect(env.PATH).toBe("/usr/bin:/bin");
+    expect(env.HOME).toBe("/home/testuser");
   });
 });

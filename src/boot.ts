@@ -1292,8 +1292,10 @@ export async function bootstrap(
   //     opt-in (`LVIS_SANDBOX_WINDOWS=1`) is set, which defaults off. Current
   //     win32 behavior is isolation=none, so leaving it off is not a regression.
   //   - Linux: if the gate is on but `checkDependencies()` reports errors
-  //     (bwrap / socat / ripgrep missing) we FAIL-CLOSED — refuse to run rather
-  //     than silently dropping to isolation=none (no-fallback rule).
+  //     (bwrap / socat / ripgrep missing) we FAIL-CLOSED — throw to abort boot
+  //     rather than silently dropping to isolation=none (no-fallback rule). The
+  //     operator must install the deps or turn the gate off; we never honor the
+  //     sandbox opt-in by running tools unsandboxed.
   {
     const {
       initializeAsrtSandbox,
@@ -1319,10 +1321,20 @@ export async function bootstrap(
         // missing. macOS/Windows checkDependencies has no hard errors here.
         const deps = await checkAsrtDependencies();
         if (deps.errors.length > 0) {
-          log.error(
-            "boot: OS tool sandbox is ON but its dependencies are missing — failing closed (tools will NOT run sandboxed-or-unsandboxed): %s",
-            deps.errors.join("; "),
-          );
+          // FAIL-CLOSED (PR #1356 architect finding). The operator explicitly
+          // requested the sandbox; ASRT cannot run because bwrap/socat/ripgrep
+          // are missing. The no-fallback rule forbids silently dropping to an
+          // unsandboxed plain spawn — that would honor the opt-in name while
+          // delivering isolation=none. Throw so boot aborts loudly: the
+          // operator must install the deps or turn the gate off, NOT discover
+          // later that "sandboxed" tools ran with no sandbox.
+          const message =
+            "boot: OS tool sandbox is ON but its dependencies are missing — refusing to start. " +
+            "Install the sandbox dependencies (Linux: bwrap, socat, ripgrep) or disable the sandbox " +
+            "(Settings → 권한 'OS 도구 샌드박스' off, or unset LVIS_SANDBOX_ENABLED). " +
+            `Missing: ${deps.errors.join("; ")}`;
+          log.error(message);
+          throw new Error(message);
         } else {
           if (deps.warnings.length > 0) {
             log.warn("boot: ASRT dependency warnings: %s", deps.warnings.join("; "));

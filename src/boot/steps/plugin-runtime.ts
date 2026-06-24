@@ -1030,13 +1030,26 @@ export async function initPluginRuntime(
           message: t("be_pluginRuntime.pluginRuntimePreparationStarting"),
           progressPct: 5,
         });
-        const runtime = await pythonRuntime.ensureReadyForPluginManifest(manifestPath, win, (status) => {
-          reportProgress?.({
-            phase: status.phase,
-            message: status.msg,
-            progressPct: status.pct,
-          });
-        });
+        const runtime = await pythonRuntime.ensureReadyForPluginManifest(
+          manifestPath,
+          win,
+          (status) => {
+            reportProgress?.({
+              phase: status.phase,
+              message: status.msg,
+              progressPct: status.pct,
+            });
+          },
+          // Per-worker ASRT sandbox policy (Tier-A worker egress): feed this
+          // plugin's trusted, host-validated manifest egress allow-list so its
+          // Python worker can only reach its declared domains under a strict
+          // hard-deny when the OS tool sandbox gate is on. Only consulted when
+          // the gate is active; gate-off ⇒ inert.
+          {
+            pluginId,
+            allowedDomains: manifest.networkAccess?.allowedDomains ?? [],
+          },
+        );
         if (!runtime) {
           throw new Error(`plugin '${pluginId}' declares host-managed Python but no accessible lockfile was found`);
         }
