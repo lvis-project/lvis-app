@@ -1506,10 +1506,14 @@ export function App() {
               announcements={marketplaceAnnouncements}
               onDismiss={handleMarketplaceAnnouncementDismiss}
             />
-            {/* Status notifications (install progress, lifecycle results, the
-                pre-turn auto-compact indicator) — merged into this top-right
-                banner stack; the bottom StatusBar is gone. Renders nothing when
-                there is no toast/persistent indicator. */}
+          </div>
+          {/* Transient status TOASTS (install progress, lifecycle results, the
+              pre-turn auto-compact indicator) get their OWN top-center region —
+              distinct from the top-right banner stack above, which is for
+              persistent, actionable Update/Dismiss banners. Toasts are
+              ephemeral + queue-advanced; a centered pill reads as a toast, not
+              a banner. Renders nothing when idle (StatusBar returns null). */}
+          <div className="pointer-events-none absolute left-1/2 top-2 z-50 -translate-x-1/2 [&>*]:pointer-events-auto">
             <StatusBar persistent={statusPersistent} visibleToast={statusVisibleToast} pendingCount={statusPendingCount} onToastClick={handleStatusToastClick} />
           </div>
           {fallbackToast && (
