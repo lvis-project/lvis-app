@@ -16,7 +16,6 @@ export function ReasoningCard({
   entry,
 }: {
   entry: Extract<ChatEntry, { kind: "reasoning" }>;
-  embedded?: boolean;
 }) {
   const { t } = useTranslation();
   const streaming = entry.streaming === true;
