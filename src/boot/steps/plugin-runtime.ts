@@ -1040,15 +1040,15 @@ export async function initPluginRuntime(
               progressPct: status.pct,
             });
           },
-          // Per-worker ASRT sandbox policy (Tier-A worker egress): feed this
-          // plugin's trusted, host-validated manifest egress allow-list so its
-          // Python worker can only reach its declared domains under a strict
-          // hard-deny when the OS tool sandbox gate is on. Only consulted when
-          // the gate is active; gate-off ⇒ inert.
-          {
-            pluginId,
-            allowedDomains: manifest.networkAccess?.allowedDomains ?? [],
-          },
+          // Per-worker ASRT sandbox policy (Tier-A worker egress): the plugin
+          // id scopes the worker's per-command FILESYSTEM write-jail to its
+          // sandbox root when the OS tool sandbox gate is on. Network egress is
+          // NOT scoped per-worker here — ASRT 0.0.59 cannot enforce a
+          // per-command network override (inert; see asrt-sandbox.ts NETWORK
+          // ENFORCEMENT MODEL). This plugin's manifest egress allow-list is
+          // enforced via the SHARED-config UNION boot computes from all loaded
+          // manifests (strictAllowlist). Only consulted when the gate is active.
+          { pluginId },
         );
         if (!runtime) {
           throw new Error(`plugin '${pluginId}' declares host-managed Python but no accessible lockfile was found`);

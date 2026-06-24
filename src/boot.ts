@@ -1300,6 +1300,7 @@ export async function bootstrap(
     const {
       initializeAsrtSandbox,
       checkAsrtDependencies,
+      computeUnionAllowedDomains,
     } = await import("./permissions/asrt-sandbox.js");
 
     const sandboxOptIn =
@@ -1339,59 +1340,53 @@ export async function bootstrap(
           if (deps.warnings.length > 0) {
             log.warn("boot: ASRT dependency warnings: %s", deps.warnings.join("; "));
           }
-          // askCb — interactive host tools prompt the user when a command
-          // tries to reach a network host outside the (deny-by-default) allow
-          // list. This is NOT strictAllowlist (that hard-denies, reserved for
-          // workers in a later PR). No reachable window / any error ⇒ DENY
-          // (secure floor). Decision is recorded in the boot audit log.
-          const askCb = async (params: { host: string; port: number | undefined }): Promise<boolean> => {
-            const target = params.port !== undefined ? `${params.host}:${params.port}` : params.host;
-            try {
-              const win = getMainWindow();
-              if (win === null) {
-                bootAuditLogger.log({
-                  timestamp: new Date().toISOString(),
-                  sessionId: "boot",
-                  type: "approval",
-                  input: `sandbox-network-ask host=${target}`,
-                  output: "denied: no window to prompt",
-                });
-                return false;
-              }
-              const { dialog } = await import("electron");
-              const result = await dialog.showMessageBox(win, {
-                type: "question",
-                buttons: [t("common.cancel"), t("common.allow")],
-                defaultId: 0,
-                cancelId: 0,
-                title: t("sandbox.networkAskTitle"),
-                message: t("sandbox.networkAskMessage", { host: target }),
-              });
-              const allowed = result.response === 1;
-              bootAuditLogger.log({
-                timestamp: new Date().toISOString(),
-                sessionId: "boot",
-                type: "approval",
-                input: `sandbox-network-ask host=${target}`,
-                output: allowed ? "allowed" : "denied",
-              });
-              return allowed;
-            } catch (err) {
-              log.warn("boot: sandbox network ask failed for %s: %s", target, (err as Error).message);
-              return false;
-            }
-          };
+          // ENFORCED network model (corrects WIRING-A #1356 — see asrt-sandbox.ts
+          // NETWORK ENFORCEMENT MODEL header). ASRT 0.0.59's filterNetworkRequest
+          // reads ONLY the SHARED config; the per-command customConfig.network is
+          // inert for allow/deny. So we set the SHARED config here to:
+          //   strictAllowlist: true  ⇒ GLOBAL hard-deny on any out-of-allow-list
+          //                            host, with NO askCb fallthrough (strict
+          //                            bypasses the callback entirely). The
+          //                            WIRING-A interactive askCb prompt cannot
+          //                            coexist with strict and is removed.
+          //   allowedDomains: UNION  ⇒ every loaded, host-validated plugin's
+          //                            manifest.networkAccess.allowedDomains
+          //                            (∪ an optional trusted host baseline,
+          //                            empty by default). Computed from the
+          //                            trusted plugin-runtime seam.
+          // Because filterNetworkRequest reads this shared config, egress is
+          // genuinely ENFORCED for BOTH workers and host tools.
+          //
+          // TRADE-OFF (honest): this is a UNION allow-list, not per-worker
+          // isolation — a sandboxed process may reach any domain declared by ANY
+          // loaded plugin. Acceptable under LVIS's 1st-party plugin trust model;
+          // true per-worker isolation needs a future ASRT with per-process
+          // proxies. See asrt-sandbox.ts header.
+          //
+          // Manifests are already loaded here (this block runs AFTER
+          // initPluginRuntime), so the union is computed once at init — no
+          // deferred updateConfig needed.
+          const manifestAllowLists = pluginRuntime
+            .listPluginIds()
+            .map((id) => pluginRuntime.getPluginManifest(id)?.networkAccess?.allowedDomains ?? []);
+          // Trusted host baseline for host tools is empty by default — no
+          // settings surface grants host-tool egress beyond the plugin union.
+          const unionAllowedDomains = computeUnionAllowedDomains(manifestAllowLists, []);
 
-          // Trust boundary: config is built from TRUSTED host settings ONLY.
-          // For the host-tool path the trusted policy is network deny-by-default
-          // (empty allowedDomains ⇒ no egress unless askCb approves) and no
-          // weakening flags. Per-command filesystem scoping (the write-jail and
-          // the HOME read-deny) is applied at the call site via wrapToolCommand's
+          // Trust boundary: WEAKENING flags are NOT set here (deny-by-default,
+          // no Apple events / weaker isolation / unix-socket opening). Only the
+          // enforced allow-list + strict flag. Per-command filesystem scoping
+          // (write-jail + HOME read-deny) is applied at the call site via the
           // narrow `filesystem` option, never here as a weakening channel.
-          await initializeAsrtSandbox({ allowedDomains: [] }, askCb);
+          await initializeAsrtSandbox({
+            allowedDomains: unionAllowedDomains,
+            strictAllowlist: true,
+          });
           log.info(
-            "boot: ASRT OS tool sandbox initialized (%s, network deny-by-default + askCb prompt)",
+            "boot: ASRT OS tool sandbox initialized (%s, strict allow-list enforced, %d union domains across %d plugins)",
             process.platform,
+            unionAllowedDomains.length,
+            manifestAllowLists.length,
           );
         }
       }
