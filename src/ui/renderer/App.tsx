@@ -1513,7 +1513,7 @@ export function App() {
               persistent, actionable Update/Dismiss banners. Toasts are
               ephemeral + queue-advanced; a centered pill reads as a toast, not
               a banner. Renders nothing when idle (StatusBar returns null). */}
-          <div className="pointer-events-none absolute left-1/2 top-2 z-50 -translate-x-1/2 [&>*]:pointer-events-auto">
+          <div className="pointer-events-none absolute left-2 top-2 z-50 [&>*]:pointer-events-auto">
             <StatusBar persistent={statusPersistent} visibleToast={statusVisibleToast} pendingCount={statusPendingCount} onToastClick={handleStatusToastClick} />
           </div>
           {fallbackToast && (

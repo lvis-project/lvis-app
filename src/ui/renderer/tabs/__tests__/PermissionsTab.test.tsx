@@ -153,13 +153,13 @@ describe("PermissionsTab hook quarantine notice", () => {
       render(<PermissionsTab />);
     });
 
-    expect(screen.getByTestId("exec-mode-default")).toHaveTextContent("기본");
+    expect(screen.getByTestId("exec-mode-default")).toHaveTextContent("쓰기만 확인");
     expect(screen.getByText(/읽기 도구는 허용/)).toBeTruthy();
-    expect(screen.getByTestId("exec-mode-strict")).toHaveTextContent("전체 물어보기");
+    expect(screen.getByTestId("exec-mode-strict")).toHaveTextContent("모두 확인");
     expect(screen.getByText(/읽기까지 포함해 모든 도구/)).toBeTruthy();
     expect(screen.getByTestId("exec-mode-auto")).toHaveTextContent("자동 검증");
     expect(screen.getByText(/권한 리뷰어가 검증/)).toBeTruthy();
-    expect(screen.getByTestId("exec-mode-allow")).toHaveTextContent("전체 허용");
+    expect(screen.getByTestId("exec-mode-allow")).toHaveTextContent("모두 허용");
   });
 
   it("keeps the rendered mode unchanged when durable mode confirmation fails", async () => {

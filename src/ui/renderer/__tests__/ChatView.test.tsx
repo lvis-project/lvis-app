@@ -1154,7 +1154,7 @@ describe("ChatView", () => {
     });
   });
 
-  it("collapses standalone reasoning when thinking completes", async () => {
+  it("keeps standalone reasoning collapsed (header only) DURING and after thinking", async () => {
     const { container, emitChatStream } = await renderApp({ hasApiKey: true });
     await submitChatMessage(container, "생각만 확인");
     await act(async () => {
@@ -1162,8 +1162,10 @@ describe("ChatView", () => {
     });
 
     await waitFor(() => {
+      // The thinking header shows while streaming, but the reasoning body stays
+      // COLLAPSED (no auto-expand) — it reveals only on user click.
       expect(container.textContent).toContain("생각 중...");
-      expect(container.textContent).toContain("완료되면 접혀야 하는 생각");
+      expect(container.textContent).not.toContain("완료되면 접혀야 하는 생각");
     });
 
     await act(async () => {
@@ -1171,9 +1173,8 @@ describe("ChatView", () => {
     });
 
     await waitFor(() => {
-      // PR #623: standalone reasoning collapses to "생각 완료" header with
-      // the raw thought hidden. The legacy "응답이 비어있습니다." placeholder
-      // is no longer rendered for tool/text-empty turns.
+      // After completion the header reads "생각 완료" and the raw thought stays
+      // hidden. The legacy "응답이 비어있습니다." placeholder is not rendered.
       expect(container.textContent).toContain("생각 완료");
       expect(container.textContent).not.toContain("응답이 비어있습니다.");
       expect(container.textContent).not.toContain("완료되면 접혀야 하는 생각");
