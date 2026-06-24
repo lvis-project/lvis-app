@@ -544,9 +544,9 @@ export function PluginConfigTab() {
                       selectedId === p.id ? "bg-accent font-semibold" : ""
                     }`}
                   >
-                    <div className="flex items-center gap-1 truncate">
+                    <div className="flex items-center gap-1 min-w-0">
                       {p.isManaged && <span title={t("pluginConfigTab.managedPluginTitle")}>🔒</span>}
-                      <span className="truncate">{p.name}</span>
+                      <span className="min-w-0 line-clamp-1">{p.name}</span>
                     </div>
                     <div className="flex items-center gap-1 mt-0.5">
                       {p.loadStatus === "loaded" && (
@@ -596,7 +596,7 @@ export function PluginConfigTab() {
                       )}
                     </div>
                     {p.loadStatus === "preparing" && p.preparationStatus?.message && (
-                      <div className="mt-1 truncate text-[10px] text-warning/(--opacity-intense)">
+                      <div className="mt-1 line-clamp-2 text-[10px] text-warning/(--opacity-intense)">
                         {p.preparationStatus.message}
                       </div>
                     )}
@@ -620,8 +620,8 @@ export function PluginConfigTab() {
                         aria-hidden="true"
                       />
                       <span className="flex min-w-0 flex-col">
-                        <span className="truncate">{slug}</span>
-                        <span className="truncate text-[9px] opacity-70">
+                        <span className="line-clamp-1 [overflow-wrap:anywhere]">{slug}</span>
+                        <span className="line-clamp-1 [overflow-wrap:anywhere] text-[9px] opacity-70">
                           {formatInstallProgress(progress)}
                         </span>
                       </span>

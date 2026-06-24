@@ -141,7 +141,7 @@ function RoutineSessionRow({ session, onOpen }: { session: RoutineSessionListIte
     >
       <div className="flex items-start justify-between gap-2">
         <div className="min-w-0">
-          <div className="truncate text-sm font-semibold leading-snug text-foreground">{session.routineTitle}</div>
+          <div className="line-clamp-1 text-sm font-semibold leading-snug text-foreground">{session.routineTitle}</div>
           <div className="mt-0.5 text-[11px] text-muted-foreground">
             {formatSessionTime(session.firedAt)}
           </div>
@@ -566,7 +566,7 @@ export function AddRoutineModal({ api, onClose, onAdded }: AddRoutineModalProps)
                             onCheckedChange={() => toggleAllowedPlugin(plugin.id)}
                             data-testid={`routine-allowed-plugin-${plugin.id}`}
                           />
-                          <span className="truncate">{plugin.name}</span>
+                          <span className="min-w-0 line-clamp-1">{plugin.name}</span>
                         </Label>
                       ))}
                     </div>
