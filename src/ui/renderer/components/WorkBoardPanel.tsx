@@ -482,7 +482,7 @@ function BoardColumn({
   testId,
 }: BoardColumnProps) {
   return (
-    <section className="flex min-h-0 flex-col gap-2 rounded-lg border bg-muted/(--opacity-light) shadow-sm" data-testid={testId}>
+    <section className="flex min-h-0 flex-col gap-2 overflow-hidden rounded-lg border bg-muted/(--opacity-light) shadow-sm" data-testid={testId}>
       <div className="flex items-center justify-between rounded-t-lg border-b bg-muted/(--opacity-medium) px-3 py-2">
         <h3 className="text-xs font-semibold uppercase tracking-wider text-muted-foreground">{heading}</h3>
         <span className="flex h-5 min-w-[20px] items-center justify-center rounded-full bg-muted px-1.5 text-[10px] font-semibold text-muted-foreground">
@@ -1350,7 +1350,7 @@ export function WorkBoardPanel({ api }: WorkBoardPanelProps) {
           </div>
         </CardHeader>
         <CardContent className="flex min-h-0 flex-1 flex-col gap-4 overflow-y-auto">
-          <div className="grid min-h-0 gap-3 lg:grid-cols-3">
+          <div className="grid min-h-0 gap-3 sm:grid-cols-3">
             <BoardColumn
               heading={t("workBoard.columnPlanned")}
               items={planned}
