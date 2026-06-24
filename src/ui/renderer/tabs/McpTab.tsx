@@ -443,7 +443,7 @@ export function McpTab() {
                     <div className="flex items-start justify-between gap-2">
                       <div className="flex-1 min-w-0">
                         <div className="flex items-center gap-2">
-                          <span className="font-mono text-xs font-semibold truncate">{id}</span>
+                          <span className="font-mono text-xs font-semibold line-clamp-1 min-w-0">{id}</span>
                           <Badge className={`text-[10px] px-1.5 py-0 ${STATUS_BADGE[status]}`}>
                             {getStatusLabel(status)}
                           </Badge>
@@ -464,7 +464,7 @@ export function McpTab() {
                           </p>
                         ) : null}
                         {st?.lastError && (
-                          <p className="mt-1 text-[11px] text-destructive truncate">{st.lastError}</p>
+                          <p className="mt-1 text-[11px] text-destructive line-clamp-2">{st.lastError}</p>
                         )}
                         {st?.connectedAt && (
                           <p className="mt-0.5 text-[10px] text-muted-foreground">
@@ -472,12 +472,12 @@ export function McpTab() {
                           </p>
                         )}
                         {cfg?.transport === "stdio" && cfg.command && (
-                          <p className="mt-0.5 text-[10px] text-muted-foreground font-mono truncate">
+                          <p className="mt-0.5 text-[10px] text-muted-foreground font-mono line-clamp-1 [overflow-wrap:anywhere]">
                             {t("mcpTab.commandLabel")} {cfg.command}
                           </p>
                         )}
                         {cfg?.transport === "http" && cfg.url && (
-                          <p className="mt-0.5 text-[10px] text-muted-foreground font-mono truncate">
+                          <p className="mt-0.5 text-[10px] text-muted-foreground font-mono line-clamp-1 [overflow-wrap:anywhere]">
                             URL: {cfg.url}
                           </p>
                         )}
