@@ -28,12 +28,12 @@ function NoteRow({ note }: { note: NoteResult }) {
       onClick={() => setExpanded((v) => !v)}
     >
       <div className="flex min-w-0 items-baseline justify-between gap-2">
-        <span className="min-w-0 flex-1 truncate text-sm font-semibold leading-snug text-foreground">{note.title}</span>
+        <span className="min-w-0 flex-1 line-clamp-1 text-sm font-semibold leading-snug text-foreground">{note.title}</span>
         {note.updatedAt ? (
           <span className="shrink-0 text-[10px] text-muted-foreground">{relativeTime(note.updatedAt)}</span>
         ) : null}
       </div>
-      <p className={`mt-1 text-xs text-muted-foreground ${expanded ? "whitespace-pre-wrap break-words" : "truncate"}`}>
+      <p className={`mt-1 text-xs text-muted-foreground ${expanded ? "whitespace-pre-wrap break-words" : "line-clamp-1"}`}>
         {note.excerpt}
       </p>
     </button>
@@ -81,20 +81,20 @@ function SessionRow({
       aria-label={t("memorySearchPanel.openChatAriaLabel", { title: session.title ?? session.sessionId.slice(0, 8) })}
     >
       <div className="flex min-w-0 items-baseline justify-between gap-2">
-        <span className="min-w-0 flex-1 truncate text-sm font-semibold leading-snug text-foreground">
+        <span className="min-w-0 flex-1 line-clamp-1 text-sm font-semibold leading-snug text-foreground">
           {session.title || t("memorySearchPanel.sessionFallbackTitle", { id: session.sessionId.slice(0, 8) })}
         </span>
         <span className="shrink-0 text-[10px] text-muted-foreground">{relativeTime(session.timestamp)}</span>
       </div>
       <div className="mt-1 flex min-w-0 items-center justify-between gap-2">
-        <span className="min-w-0 truncate font-mono text-[10px] text-muted-foreground">
+        <span className="min-w-0 line-clamp-1 font-mono text-[10px] text-muted-foreground">
           {session.sessionId.slice(0, 8)}
         </span>
         <span className="shrink-0 text-[10px] text-muted-foreground">
           {loading ? t("memorySearchPanel.loading") : failed ? t("memorySearchPanel.loadFailed") : onOpenSession ? t("memorySearchPanel.clickToOpen") : t("memorySearchPanel.clickToExpand")}
         </span>
       </div>
-      <p className={`mt-1 text-xs text-muted-foreground ${expanded ? "whitespace-pre-wrap break-words" : "truncate"}`}>
+      <p className={`mt-1 text-xs text-muted-foreground ${expanded ? "whitespace-pre-wrap break-words" : "line-clamp-1"}`}>
         {session.matchedMessage}
       </p>
     </button>
