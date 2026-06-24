@@ -59,7 +59,7 @@ import type { RiskVerdict, ToolInvocationContext } from "../permissions/reviewer
 import { RuleBasedRiskClassifier, maxVerdict } from "../permissions/reviewer/risk-classifier.js";
 import { inspectHostRisk } from "../permissions/reviewer/host-risk-inspector.js";
 import { emitRiskShadowLog } from "../permissions/reviewer/risk-shadow-log.js";
-import { detectSandboxCapability } from "../permissions/sandbox-capability.js";
+import { resolveReviewerSandboxCapability } from "../permissions/sandbox-capability.js";
 // Store B — exact-tuple approval memory (args-scoped, session+persistent).
 // See ./executor.ts foreground modal-skip block + user-approval-store.ts.
 import { lookupApproval, canonicalStringify } from "../permissions/user-approval-store.js";
@@ -1295,7 +1295,10 @@ export class ToolExecutor {
     // Verdict escalation guard. Re-run the deterministic rule classifier on
     // the CURRENT args; if it now ranks higher than the stored verdict, the
     // invocation became more dangerous since approval — re-prompt.
-    const sandboxCapability = detectSandboxCapability();
+    // Substrate-aware (NOT process-global): a plugin/MCP or in-process builtin
+    // call resolves to a "none" capability so the audit + any sandbox-sensitive
+    // rule reflect that this call's effects are NOT ASRT-isolated.
+    const sandboxCapability = resolveReviewerSandboxCapability(source, toolName);
     const ctx: ToolInvocationContext = {
       toolName,
       source,
@@ -1640,8 +1643,10 @@ export class ToolExecutor {
           sensitivePathPattern: requestSensitivePathPattern,
           // Issue #691 round-1 user request — sandbox capability surfaced
           // to the dialog so the user can see whether the tool will run
-          // under OS isolation or with no protection.
-          sandboxCapability: detectSandboxCapability(),
+          // under OS isolation or with no protection. Substrate-aware so a
+          // plugin/MCP or in-process builtin call honestly shows "none" rather
+          // than the process-global "asrt" that only the host-shell path earns.
+          sandboxCapability: resolveReviewerSandboxCapability(source, toolUse.name),
           evaluationContext: makeEvaluationContext({
             pathFields: reviewerPathFields,
             targetFilePaths: [outOfAllowedTarget.filePath],
@@ -2298,7 +2303,10 @@ export class ToolExecutor {
             // matches dispatchReviewer lookup key — end-to-end symmetry.
             ...(approvalCacheKey ? { approvalCacheKey } : {}),
             // Issue #691 round-1 — sandbox capability for the dialog.
-            sandboxCapability: detectSandboxCapability(),
+            // Substrate-aware: plugin/MCP + in-process builtins show "none"
+            // (their effects are not ASRT-wrapped); only bash/powershell may
+            // show the active "asrt" when the gate is ON.
+            sandboxCapability: resolveReviewerSandboxCapability(source, toolUse.name),
             evaluationContext,
           };
 

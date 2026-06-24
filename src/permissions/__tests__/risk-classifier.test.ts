@@ -593,7 +593,7 @@ describe("LlmRiskClassifier — new kind='partial' (D5) no-downgrade", () => {
           kind: "partial",
           confidence: "verified",
           platform: "darwin",
-          reason: "sandbox-exec partial profile",
+          reason: "partial OS isolation profile",
         },
       }),
     );
@@ -618,7 +618,7 @@ describe("LlmRiskClassifier — new kind='partial' (D5) no-downgrade", () => {
           kind: "partial",
           confidence: "verified",
           platform: "darwin",
-          reason: "sandbox-exec partial profile",
+          reason: "partial OS isolation profile",
         },
       }),
     );

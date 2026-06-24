@@ -9,7 +9,7 @@
  *     — ASRT routes egress through a loopback proxy enforcing the global
  *     strict-union allow-list, so egress IS contained (no longer the old
  *     sandbox-exec fake floor that left loopback/IPv6/DNS open).
- *   - Linux (bubblewrap via ASRT): filesystem + process + network.
+ *   - Linux (bwrap via ASRT): filesystem + process + network.
  *   - Windows: fail-closed — tools run unconfined (srt-win is a network-only
  *     half-sandbox LVIS does not adopt).
  */
@@ -60,7 +60,7 @@ export function sandboxConfinementForPlatform(
     return { filesystem: true, process: true, network: true };
   }
   if (platform === "linux") {
-    // bubblewrap via ASRT confines fs + pid + net.
+    // bwrap via ASRT confines fs + pid + net.
     return { filesystem: true, process: true, network: true };
   }
   // Windows + anything else: fail-closed, no sandbox.

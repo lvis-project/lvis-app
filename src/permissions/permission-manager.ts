@@ -31,7 +31,7 @@ import {
   type RiskVerdict,
   type ToolInvocationContext,
 } from "./reviewer/risk-classifier.js";
-import { detectSandboxCapability } from "./sandbox-capability.js";
+import { resolveReviewerSandboxCapability } from "./sandbox-capability.js";
 import type { PermissionEvaluationContext } from "./evaluation-context.js";
 import type { VerdictCache } from "./reviewer/verdict-cache.js";
 import type { DeferredQueue } from "./reviewer/deferred-queue.js";
@@ -709,10 +709,13 @@ export class PermissionManager {
     };
     // Include the sandbox capability in the cache scope so a change to OS
     // isolation invalidates stale verdicts produced under different sandbox
-    // assumptions. The ASRT sandbox publishes its capability at boot via
-    // setActiveSandboxCapability, so detectSandboxCapability() returns the
-    // active kind/confidence (falling back to "none" when the sandbox is off).
-    const sandboxScope = detectSandboxCapability();
+    // assumptions. Substrate-aware (same resolver the reviewer consults): a
+    // plugin/MCP verdict cached under the unwrapped-worker "none" substrate
+    // must not collide with the host-shell "asrt" substrate once the gate is
+    // ON. The ASRT sandbox publishes its capability at boot via
+    // setActiveSandboxCapability; the host-shell path then sees the active
+    // kind/confidence while non-wrapped substrates stay "none".
+    const sandboxScope = resolveReviewerSandboxCapability(input.source, toolName);
     const cacheCtx = {
       allowedDirectories: input.allowedDirectories,
       scope: {
@@ -756,7 +759,12 @@ export class PermissionManager {
       finalInput: input.finalInput,
       allowedDirectories: input.allowedDirectories,
       sensitivePathsAdjacent: input.sensitivePathsAdjacent,
-      sandboxCapability: detectSandboxCapability(),
+      // Substrate-aware (NOT process-global): only the ASRT-wrapped host-shell
+      // path may present `asrt` to the reviewer. plugin/MCP (unwrapped worker)
+      // and in-process builtins resolve to `none` so isWeakSandbox stays weak
+      // and the LLM cannot downgrade a MEDIUM/HIGH verdict for an unsandboxed
+      // effect. See resolveReviewerSandboxCapability for the invariant.
+      sandboxCapability: resolveReviewerSandboxCapability(input.source, toolName),
       ...(input.conversationContext ? { conversationContext: input.conversationContext } : {}),
       ...(input.writesToOwnSandbox !== undefined
         ? { writesToOwnSandbox: input.writesToOwnSandbox }
@@ -860,7 +868,10 @@ export class PermissionManager {
     // Emit a sandbox audit entry for every dispatchReviewer call so the
     // audit log captures reviewer composition signals + user-approval provenance.
     // Failures are swallowed so audit never blocks tool execution.
-    const sandboxCap = detectSandboxCapability();
+    // Record the SUBSTRATE-aware capability the reviewer actually saw (not the
+    // process-global) so the audit honestly reflects the isolation in force for
+    // THIS call's execution substrate.
+    const sandboxCap = resolveReviewerSandboxCapability(input.source, toolName);
     const auditEntry = buildSandboxAuditEntry({
       tool: {
         name: toolName,
