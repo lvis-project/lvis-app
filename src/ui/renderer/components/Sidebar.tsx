@@ -90,16 +90,40 @@ function isDarwinPlatform(): boolean {
  */
 type NavTone = "accent" | "muted" | "home" | "marketplace" | "settings";
 
-const NAV_TONE_HOVER: Record<NavTone, string> = {
-  accent: "hover:bg-accent hover:text-accent-foreground",
-  muted: "hover:bg-muted hover:text-foreground",
-  // Per-ITEM hover tints for the footer trio (Home / Marketplace / Settings).
-  // HOVER-only (no persistent background) and each distinct from the
-  // regular-nav (accent) and plugin hovers — all theme tokens so the
-  // color-token gate stays clean.
-  home: "hover:bg-info/(--opacity-light) hover:text-foreground",
-  marketplace: "hover:bg-primary/(--opacity-subtle) hover:text-foreground",
-  settings: "hover:bg-success/(--opacity-faint) hover:text-foreground",
+/**
+ * Per-tone styling: `hover` (inactive hover tint), `active` (selected bg+text),
+ * `bar` (the left active-indicator bar color). The footer trio (Home /
+ * Marketplace / Settings) each carry a distinct color so the ACTIVE state
+ * matches that item's hover tint (e.g. Home = blue/info on both hover AND
+ * active, not the shared primary). All theme tokens — the color-token gate
+ * stays clean.
+ */
+const NAV_TONE: Record<NavTone, { hover: string; active: string; bar: string }> = {
+  accent: {
+    hover: "hover:bg-accent hover:text-accent-foreground",
+    active: "bg-primary/(--opacity-subtle) text-primary",
+    bar: "bg-primary",
+  },
+  muted: {
+    hover: "hover:bg-muted hover:text-foreground",
+    active: "bg-primary/(--opacity-subtle) text-primary",
+    bar: "bg-primary",
+  },
+  home: {
+    hover: "hover:bg-info/(--opacity-light) hover:text-foreground",
+    active: "bg-info/(--opacity-light) text-info",
+    bar: "bg-info",
+  },
+  marketplace: {
+    hover: "hover:bg-primary/(--opacity-subtle) hover:text-foreground",
+    active: "bg-primary/(--opacity-subtle) text-primary",
+    bar: "bg-primary",
+  },
+  settings: {
+    hover: "hover:bg-success/(--opacity-faint) hover:text-foreground",
+    active: "bg-success/(--opacity-faint) text-success",
+    bar: "bg-success",
+  },
 };
 
 interface NavItemProps {
@@ -130,7 +154,7 @@ function NavItem({
   "data-tour-anchor": tourAnchor,
   trailingSlot,
 }: NavItemProps) {
-  const hoverTone = NAV_TONE_HOVER[tone];
+  const toneStyle = NAV_TONE[tone];
   const btn = collapsed ? (
     /* Collapsed — perfectly square icon button */
     <button
@@ -144,14 +168,14 @@ function NavItem({
         "relative h-9 w-9 aspect-square flex items-center justify-center rounded-md transition-colors",
         "focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring",
         isActive
-          ? "bg-primary/(--opacity-subtle) text-primary"
-          : `text-muted-foreground ${hoverTone}`,
+          ? toneStyle.active
+          : `text-muted-foreground ${toneStyle.hover}`,
       ]
         .filter(Boolean)
         .join(" ")}
     >
       {isActive && (
-        <span className="absolute left-0 top-2 bottom-2 w-0.5 rounded-full bg-primary" />
+        <span className={`absolute left-0 top-2 bottom-2 w-0.5 rounded-full ${toneStyle.bar}`} />
       )}
       <span className="h-4 w-4 flex items-center justify-center">{icon}</span>
     </button>
@@ -168,14 +192,14 @@ function NavItem({
         "relative w-full flex items-center gap-2.5 rounded-md px-2.5 py-1.5 text-[13px] transition-colors",
         "focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring",
         isActive
-          ? "bg-primary/(--opacity-subtle) text-primary font-medium"
-          : `text-muted-foreground ${hoverTone}`,
+          ? `${toneStyle.active} font-medium`
+          : `text-muted-foreground ${toneStyle.hover}`,
       ]
         .filter(Boolean)
         .join(" ")}
     >
       {isActive && (
-        <span className="absolute left-0 top-1.5 bottom-1.5 w-0.5 rounded-full bg-primary" />
+        <span className={`absolute left-0 top-1.5 bottom-1.5 w-0.5 rounded-full ${toneStyle.bar}`} />
       )}
       <span className="shrink-0 h-4 w-4 flex items-center justify-center">{icon}</span>
       <span className="min-w-0 truncate flex-1 text-left">{label}</span>
