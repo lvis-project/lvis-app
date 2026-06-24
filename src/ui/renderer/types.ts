@@ -1113,15 +1113,16 @@ export type ApprovalRequest = {
   /**
    * Issue #691 — OS-level execution sandbox capability captured at
    * request build time. Renderer surfaces this in the approval card so
-   * the user can see whether the tool will run under bubblewrap /
-   * sandbox-exec / AppContainer or with no isolation.
+   * the user can see whether the tool will run under the ASRT sandbox
+   * (`asrt`) or with no isolation.
    *
-   * Round-3 code-reviewer MAJOR — `platform` is typed `NodeJS.Platform`
-   * (strict enum) instead of `string` so the renderer type cannot
-   * silently widen the canonical SOT shape.
+   * Mirrors the canonical SandboxKind union in
+   * src/permissions/sandbox-capability.ts. `platform` is typed
+   * `NodeJS.Platform` (strict enum) instead of `string` so the renderer type
+   * cannot silently widen the canonical SOT shape.
    */
   sandboxCapability?: {
-    kind: "none" | "bubblewrap" | "sandbox-exec" | "appcontainer" | "partial" | "fs-only";
+    kind: "none" | "asrt" | "partial" | "fs-only";
     confidence: "verified" | "assumed" | "policy-best-effort";
     platform: NodeJS.Platform;
     reason: string;

@@ -707,14 +707,11 @@ export class PermissionManager {
       writesToOwnSandbox: input.writesToOwnSandbox,
       ownerPluginSandboxRoot: input.ownerPluginSandboxRoot,
     };
-    // Round-1 code-reviewer MINOR — include sandbox capability in the
-    // cache scope so a change to OS isolation (bubblewrap on Linux,
-    // sandbox-exec on macOS, AppContainer on Windows) invalidates stale
-    // verdicts that were produced under different sandbox assumptions.
-    // The runners are registered at boot and report their capability via
+    // Include the sandbox capability in the cache scope so a change to OS
+    // isolation invalidates stale verdicts produced under different sandbox
+    // assumptions. The ASRT sandbox publishes its capability at boot via
     // setActiveSandboxCapability, so detectSandboxCapability() returns the
-    // active runner's kind/confidence (falling back to "none" only when no
-    // runner registered).
+    // active kind/confidence (falling back to "none" when the sandbox is off).
     const sandboxScope = detectSandboxCapability();
     const cacheCtx = {
       allowedDirectories: input.allowedDirectories,
