@@ -1,5 +1,39 @@
 # Changelog
 
+## v0.4.0 — 2026-06-25
+
+### 채팅 / 작업 진행 UI
+
+- **즉시 WorkGroup 진행 표시** (PR #1351) — 사용자가 메시지를 보내면 모델의 `thinking`/status 이벤트를 기다리지 않고 기존 WorkGroup 진행 헤더(`작업 중...`)가 바로 표시된다. 별도 assistant placeholder 나 standalone `Thinking...` 본문은 만들지 않는다.
+- **reasoning / 중간 작업 묶음 복구** (PR #1348, #1349, #1351) — 최종 응답 전에 생성되는 reasoning, 도구 호출, 중간 assistant round 가 다시 WorkGroup 안에 묶이도록 정렬했다. 모델 응답 전 `Thinking...` 텍스트가 본문에 먼저 뜨던 회귀도 제거했다.
+- **질문 카드 키보드 흐름 복구** (PR #1350) — ask-user-question 카드 페이지 전환 후에도 첫 번째 질문으로 포커스가 돌아가고 방향키 선택 흐름이 유지되도록 했다.
+
+### 플러그인 / 인증 / 토스트
+
+- **host-managed 플러그인 인증 경로 정렬** (PR #1343, #1346, #1351) — 플러그인 인증 실패는 silent fail 이 아니라 채팅 입력 영역 위 토스트로 노출하고, 로그인 실패 시 플러그인 창을 열지 않도록 순서를 정렬했다.
+- **토스트 위치와 형태 개선** (PR #1351) — 토스트를 입력창 위의 별도 floating card 가 아니라 composer 뒤에서 올라오는 겹침 형태로 배치하고, severity 별 색상과 긴 메시지 흐름 표시를 추가했다.
+- **플러그인 UI callable manifest 허용** (PR #1344) — UI callable tool schema 가 host validation 에서 정상 통과하도록 manifest 검증 경로를 보강했다.
+
+### 권한 / 설정
+
+- **권한 설정 단순화와 Auto-verify 프롬프트 표시 정렬** (PR #1347, #1350) — Permission Reviewing 탭이 다시 노출되는 회귀를 정리하고, reviewer prompt 는 Auto-verify 영역 안의 read-only collapse 로 확인할 수 있게 했다.
+- **내장 slash command 권한 요청 회귀 수정** (PR #1350) — 내부 slash command 는 권한 팝업을 띄우지 않고 telemetry/audit 경로만 남기도록 정렬했다.
+
+### 레이아웃 / 창
+
+- **Detached Work Board / 창 레이아웃 보강** (PR #1340, #1341, #1342) — 분리 창의 work board 컬럼 레이아웃과 폰트 초기화 경로를 안정화했다.
+- **ScrollArea / overflow 정리** (PR #1337, #1338, #1339) — imported trigger card, memory panel, scroll area 계열의 잘림/overflow 회귀를 정리했다.
+
+### 알려진 후속 작업
+
+- 토스트 후속 이슈는 별도 추적한다: #1352 (`자세히 알아보기` 미동작, marquee 정지, X 영역 경계 fade 처리).
+- Auto-review 진행 카드가 빠른 리뷰 경로에서 사용자가 보기 전에 사라질 수 있다: #1353.
+
+### 검증
+
+- PR #1351: local `bun run test` 전체 535 files / 6825 pass / 35 skipped, `bun run typecheck`, `bun run build`, remote build-and-test / Windows permission path / CodeQL / naming-gate / cluster-detector green.
+- Release baseline: `main@b029aa74` 에서 `bun run build` green 후 릴리즈 준비.
+
 ## v0.3.1 — 2026-06-16
 
 ### 권한 자동검증
