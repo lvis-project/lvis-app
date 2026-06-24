@@ -66,6 +66,7 @@
     "@ai-sdk/google-vertex": "^4.0.112",
     "@ai-sdk/openai": "^3.0.53",
     "@ai-sdk/openai-compatible": "~2.0.41",
+    "@anthropic-ai/sandbox-runtime": "0.0.59",
     "@lvis/plugin-sdk": "github:lvis-project/lvis-plugin-sdk#v5.13.0",
     "adm-zip": "^0.5.16",
     "ai": "~6.0.168",
@@ -181,6 +182,9 @@
       "!node_modules/**/tsconfig*.json",
       "!resources/uv{,/**/*}",
       "!resources/uv-runtime{,/**/*}"
+    ],
+    "asarUnpack": [
+      "node_modules/@anthropic-ai/sandbox-runtime/vendor/**"
     ],
     "directories": {
       "output": "release"
