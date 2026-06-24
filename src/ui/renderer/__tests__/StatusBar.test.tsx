@@ -70,6 +70,7 @@ describe("StatusBar", () => {
     let toastCard = container.querySelector('[data-testid="status-toast-message"]')?.parentElement;
     expect(toastCard?.className).toContain("bg-warning");
     expect(toastCard?.className).toContain("border-warning");
+    expect(toastCard?.className).not.toContain("shadow");
 
     rerender(<StatusBar persistent={[]} visibleToast={toast({ severity: "error" })} />);
     toastCard = container.querySelector('[data-testid="status-toast-message"]')?.parentElement;
