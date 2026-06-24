@@ -384,6 +384,25 @@ describe("ChatView", () => {
     await waitFor(() => expect(api.chatSend).toHaveBeenCalled());
   });
 
+  it("shows the WorkGroup progress immediately after send before model events arrive", async () => {
+    const pendingSend = deferred<{ ok: true }>();
+    const { container, api } = await renderApp({ hasApiKey: true });
+    api.chatSend.mockImplementationOnce(async () => pendingSend.promise);
+
+    await submitChatMessage(container, "바로 진행 상태 확인");
+
+    await waitFor(() => expect(api.chatSend).toHaveBeenCalled());
+    await waitFor(() => {
+      expect(container.querySelector('[data-testid="work-group"]')?.textContent).toContain("작업 중...");
+    });
+    expect(container.querySelectorAll('[data-testid="assistant-message-body"]')).toHaveLength(0);
+
+    await act(async () => {
+      pendingSend.resolve({ ok: true });
+      await pendingSend.promise;
+    });
+  });
+
   it("does not render a standalone Thinking assistant body before stream output", async () => {
     const pendingSend = deferred<{ ok: true }>();
     const { container, api, emitChatStream } = await renderApp({ hasApiKey: true });
