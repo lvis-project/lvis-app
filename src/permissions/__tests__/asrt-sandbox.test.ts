@@ -30,6 +30,7 @@ import {
   cleanupAsrtSandboxAfterCommand,
   isAsrtSandboxSupported,
   checkAsrtDependencies,
+  computeUnionAllowedDomains,
 } from "../asrt-sandbox.js";
 
 /**
@@ -170,20 +171,109 @@ describe("asrt-sandbox — idempotency guard (PR #1356 NIT)", () => {
   });
 });
 
-describe("asrt-sandbox — worker strict hard-deny network (Tier-A worker egress)", () => {
-  it("wrapWorkerCommand applies the per-worker network policy (strict allow-list)", async () => {
+describe("asrt-sandbox — worker wrap carries only the filesystem jail", () => {
+  it("wrapWorkerCommand wraps with no per-command network override (network is the shared config)", async () => {
     if (!(await asrtCanInitialize())) return;
-    await initializeAsrtSandbox({ allowedDomains: [] });
-    // A worker wrap carries its OWN strict network allow-list, independent of
-    // the boot-time host-tool policy. The wrap succeeds and returns argv/env
-    // that the host spawns; the strict policy is enforced by the OS sandbox.
+    await initializeAsrtSandbox({ allowedDomains: [], strictAllowlist: true });
+    // WrapOptions exposes only `filesystem` + `abortSignal` — there is no
+    // `network` channel (it would be INERT in ASRT 0.0.59; enforcement is the
+    // shared config). The wrap succeeds with the filesystem slice only.
     const { argv } = await wrapWorkerCommand("echo worker-ok", {
-      network: { allowedDomains: ["example.com"], strictAllowlist: true },
       filesystem: { allowWrite: [], allowRead: [] },
     });
     expect(argv.length).toBeGreaterThanOrEqual(3);
     expect(argv[1]).toBe("-c");
   });
+});
+
+describe("asrt-sandbox — REAL enforcement via the SHARED config (strict union allow-list)", () => {
+  /**
+   * The cluster review demands enforcement proof, not a shape assertion. This
+   * exercises the ACTUALLY-configured shared SandboxManager: a host IN the
+   * union allow-list is permitted through the egress proxy; a host OUTSIDE it
+   * is HARD-DENIED at the proxy with NO askCb fallthrough (strictAllowlist).
+   *
+   * Probe hosts: both `example.com` and `example.org` are real, resolvable IANA
+   * reserved-example domains that return HTTP 200, so the ONLY variable is
+   * whether they are on the shared allow-list. (A non-resolvable TLD like
+   * `*.test` would conflate a DNS failure with a proxy denial.)
+   *
+   * Verified verbatim on darwin:
+   *   union=[example.com] strict → example.com: code=0 http=200 (ALLOWED);
+   *                                example.org: code=56 "CONNECT tunnel failed,
+   *                                response 403" (HARD-DENIED, no askCb).
+   *
+   * Skipped when the live network can't reach example.com (the in-union host
+   * must succeed for the deny side to be a meaningful contrast).
+   */
+  const curlProbe = async (url: string) => {
+    const { argv, env } = await wrapWorkerCommand(
+      `curl -sS -o /dev/null -w '%{http_code}' --max-time 8 ${url}`,
+      { filesystem: { allowWrite: [], allowRead: [] } },
+    );
+    const res = await runArgv(argv, env);
+    cleanupAsrtSandboxAfterCommand();
+    return res;
+  };
+  const httpOk = (r: { code: number | null; stdout: string }) =>
+    r.code === 0 && /^[23]\d\d$/.test(r.stdout.trim());
+
+  it("in-union host is permitted and out-of-union host is hard-denied with NO askCb", async () => {
+    if (!(await asrtCanInitialize())) return;
+    if (process.platform !== "darwin" && process.platform !== "linux") return;
+
+    const askCalls: Array<{ host: string }> = [];
+    const recordingAskCb = async (p: { host: string; port: number | undefined }) => {
+      askCalls.push({ host: p.host });
+      return true; // would ALLOW if ever consulted — strict must bypass it.
+    };
+
+    // Shared config: union includes example.com, NOT example.org.
+    // strictAllowlist hard-denies everything else.
+    await initializeAsrtSandbox(
+      { allowedDomains: ["example.com"], strictAllowlist: true },
+      recordingAskCb,
+    );
+
+    const allowed = await curlProbe("https://example.com");
+    const denied = await curlProbe("https://example.org");
+
+    // In-union host must reach the network; if it can't, the host is offline —
+    // skip rather than assert a false negative.
+    if (!httpOk(allowed)) return;
+
+    // Out-of-union host is HARD-DENIED at the egress proxy: never a 2xx/3xx.
+    expect(httpOk(denied)).toBe(false);
+    // Strict means the askCb is NEVER consulted — prove no interactive
+    // fallthrough for the out-of-union host (the WIRING-A model is superseded).
+    expect(askCalls).toHaveLength(0);
+  }, 60_000);
+
+  it("changing the union changes the result (the shared config genuinely enforces)", async () => {
+    if (!(await asrtCanInitialize())) return;
+    if (process.platform !== "darwin" && process.platform !== "linux") return;
+
+    // Sanity: example.com reachable? If not, the host is offline — skip.
+    await initializeAsrtSandbox({ allowedDomains: ["example.com"], strictAllowlist: true });
+    const reachable = httpOk(await curlProbe("https://example.com"));
+    // With example.org OUT of the union it is denied.
+    const beforeAdd = await curlProbe("https://example.org");
+    await resetAsrtSandbox();
+    if (!reachable) return;
+    expect(httpOk(beforeAdd)).toBe(false);
+
+    // Now ADD example.org to the union → the SHARED config now PERMITS it
+    // (no longer a strict hard-deny on a config-rule miss). Same probe, same
+    // host — only the shared allow-list changed. This is the property the inert
+    // per-command override could never provide.
+    await initializeAsrtSandbox({
+      allowedDomains: ["example.com", "example.org"],
+      strictAllowlist: true,
+    });
+    const afterAdd = await curlProbe("https://example.org");
+    await resetAsrtSandbox();
+    expect(httpOk(afterAdd)).toBe(true);
+  }, 60_000);
 });
 
 describe("asrt-sandbox — parentProxy explicit (PR #1356 security MINOR)", () => {
@@ -200,9 +290,8 @@ describe("asrt-sandbox — parentProxy explicit (PR #1356 security MINOR)", () =
     const prev = process.env.HTTP_PROXY;
     process.env.HTTP_PROXY = HOST_PROXY;
     try {
-      await initializeAsrtSandbox({ allowedDomains: ["example.com"] });
+      await initializeAsrtSandbox({ allowedDomains: ["example.com"], strictAllowlist: true });
       const { env } = await wrapWorkerCommand("echo proxy-check", {
-        network: { allowedDomains: ["example.com"], strictAllowlist: true },
         filesystem: { allowWrite: [], allowRead: [] },
       });
       const childEnv = buildSandboxedChildEnv(env);
@@ -216,5 +305,36 @@ describe("asrt-sandbox — parentProxy explicit (PR #1356 security MINOR)", () =
       if (prev === undefined) delete process.env.HTTP_PROXY;
       else process.env.HTTP_PROXY = prev;
     }
+  });
+});
+
+describe("asrt-sandbox — computeUnionAllowedDomains (shared-config enforcement seam)", () => {
+  it("unions every plugin's manifest allow-list, deduped and order-stable", () => {
+    const union = computeUnionAllowedDomains([
+      ["a.example", "b.example"],
+      ["b.example", "c.example"],
+      [],
+    ]);
+    expect(union).toEqual(["a.example", "b.example", "c.example"]);
+  });
+
+  it("prepends the trusted host baseline ahead of the manifest union (still deduped)", () => {
+    const union = computeUnionAllowedDomains(
+      [["a.example"], ["base.example"]],
+      ["base.example", "host.example"],
+    );
+    expect(union).toEqual(["base.example", "host.example", "a.example"]);
+  });
+
+  it("empty manifests + empty baseline ⇒ empty union (deny-by-default)", () => {
+    expect(computeUnionAllowedDomains([], [])).toEqual([]);
+    expect(computeUnionAllowedDomains([[], []])).toEqual([]);
+  });
+
+  it("drops empty/non-string entries (defensive against malformed manifest fields)", () => {
+    const union = computeUnionAllowedDomains([
+      ["", "ok.example", undefined as unknown as string],
+    ]);
+    expect(union).toEqual(["ok.example"]);
   });
 });

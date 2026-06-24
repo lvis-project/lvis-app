@@ -117,25 +117,30 @@ export interface PythonRuntimeBootstrapperOptions {
   onStatus?: (status: BootstrapStatus) => void;
   /**
    * Per-worker ASRT sandbox policy for this runtime's uv/python spawns. Set
-   * from the owning plugin's manifest at prepare time so each plugin's Python
-   * worker egress is confined to ITS declared `networkAccess.allowedDomains`
-   * (strict hard-deny) and its writes are jailed to its plugin sandbox root +
-   * the runtime dir. Undefined ⇒ no manifest is associated (e.g. the host's
-   * default bootstrapper); the worker then runs with a deny-all network policy
-   * when the gate is on. Only consulted when {@link isAsrtSandboxActive}.
+   * from the owning plugin's trusted, host-validated manifest at prepare time.
+   * Used to scope the per-command FILESYSTEM write-jail to the plugin's sandbox
+   * root (`~/.lvis/plugins/<pluginId>/`) + the runtime dir. Only consulted when
+   * {@link isAsrtSandboxActive}.
+   *
+   * NETWORK: worker egress is NOT scoped here per-worker — ASRT 0.0.59 cannot
+   * enforce a per-command network override (it is inert; see asrt-sandbox.ts
+   * NETWORK ENFORCEMENT MODEL header). Egress is enforced by the SHARED config
+   * boot sets from the manifest UNION (strictAllowlist). The owning plugin's
+   * `manifest.networkAccess.allowedDomains` reaches the worker by being part of
+   * that boot-computed union, so it is captured at the boot seam, not here.
    */
   workerSandbox?: WorkerSandboxPolicy;
 }
 
 /**
- * The owning-plugin signals needed to sandbox a Python worker spawn. Built from
- * the trusted, host-validated manifest — never from per-call/attacker input.
+ * The owning-plugin signal needed to scope a Python worker's FILESYSTEM jail.
+ * Built from the trusted, host-validated manifest — never from
+ * per-call/attacker input. (Network egress is enforced via the boot-computed
+ * shared-config union, not per-worker — see {@link PythonRuntimeBootstrapperOptions.workerSandbox}.)
  */
 export interface WorkerSandboxPolicy {
   /** The owning plugin's id (`~/.lvis/plugins/<pluginId>/` is the write root). */
   readonly pluginId: string;
-  /** `manifest.networkAccess.allowedDomains` — deny-by-default when empty. */
-  readonly allowedDomains: readonly string[];
 }
 
 function isWithinDirectory(candidatePath: string, directoryPath: string): boolean {
@@ -499,15 +504,16 @@ export class PythonRuntimeBootstrapper {
       return { proc, cleanup: () => {} };
     }
 
-    // Gate ON: wrap via ASRT. The worker's egress allow-list comes from its
-    // owning plugin's manifest (strict hard-deny); writes are jailed to the
-    // plugin sandbox root + this runtime dir. No askCb — workers cannot answer
-    // an interactive prompt.
-    const allowedDomains = this.options.workerSandbox?.allowedDomains ?? [];
+    // Gate ON: wrap via ASRT. Worker egress is enforced by the SHARED config
+    // set at boot (strictAllowlist + the manifest UNION) — NOT by a per-command
+    // network override, which is INERT in ASRT 0.0.59 (filterNetworkRequest
+    // reads only the shared config; see asrt-sandbox.ts NETWORK ENFORCEMENT
+    // MODEL header). The wrap carries ONLY the per-command FILESYSTEM jail,
+    // which IS enforced (baked into the seatbelt profile / bwrap binds per wrap):
+    // writes are jailed to the plugin sandbox root + this runtime dir.
     const writePaths = this.workerWritePaths();
     const command = [bin, ...args].map(shellQuoteArg).join(" ");
     const { argv, env: wrappedEnv } = await wrapWorkerCommand(command, {
-      network: { allowedDomains, strictAllowlist: true },
       filesystem: { allowWrite: writePaths, allowRead: writePaths },
     });
     const [cmd, ...wrappedArgs] = argv;

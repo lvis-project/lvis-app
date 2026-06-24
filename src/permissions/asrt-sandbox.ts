@@ -1,10 +1,11 @@
 /**
- * Anthropic Sandbox Runtime (ASRT) host adapter — DORMANT.
+ * Anthropic Sandbox Runtime (ASRT) host adapter.
  *
- * This module is the foundation for migrating LVIS process sandboxing onto
- * `@anthropic-ai/sandbox-runtime`. Nothing imports it yet: it is additive and
- * has ZERO runtime effect until a future PR wires it into the boot sequence and
- * the sandbox-runner registry. Do not add behavior that runs at import time.
+ * This module wires LVIS process sandboxing onto
+ * `@anthropic-ai/sandbox-runtime`. It is gated DEFAULT-OFF: nothing runs through
+ * it until boot opts in (Settings → 권한 'OS 도구 샌드박스' or
+ * `LVIS_SANDBOX_ENABLED=1`) and `initializeAsrtSandbox` succeeds. Do not add
+ * behavior that runs at import time.
  *
  * ASRT does NOT spawn the workload. It validates a config (zod), starts its
  * proxy/helper machinery on `initialize`, and `wrapWith*Argv` returns the
@@ -13,6 +14,39 @@
  * `node_modules/@anthropic-ai/sandbox-runtime/vendor/**` and are executed as
  * separate processes — packaging must `asarUnpack` that glob (see
  * `package.json` build.asarUnpack) or the binaries cannot exec from an asar.
+ *
+ * ─────────────────────────────────────────────────────────────────────────────
+ * NETWORK ENFORCEMENT MODEL — READ BEFORE EDITING (ASRT 0.0.59 constraint) ⚠️
+ * ASRT's runtime egress decision lives in `filterNetworkRequest()`
+ * (dist/sandbox/sandbox-manager.js). The proxy filter closures are bound as
+ * `filter: (port, host) => filterNetworkRequest(port, host, sandboxAskCallback)`
+ * and that function reads ONLY the module-level SHARED `config`:
+ *     for (const d of config.network.deniedDomains) …   // deny first
+ *     for (const d of config.network.allowedDomains) …  // then allow
+ *     if (!sandboxAskCallback || config.network.strictAllowlist) return false; // strict ⇒ hard-deny
+ * The SHARED `config` is assigned ONLY by `initialize()` (`config = runtimeConfig`)
+ * and `updateConfig()` (`config = structuredClone(...)`).
+ *
+ * The `customConfig` argument to `wrapWithSandboxArgv(command, binShell,
+ * customConfig)` is NEVER consulted by `filterNetworkRequest` — it only decides
+ * whether to route the command through the proxy (`hasNetworkConfig`) and scopes
+ * credential `injectHosts`. So a per-command `customConfig.network` cannot
+ * enforce egress; it is INERT for allow/deny. Therefore network egress is
+ * enforced by setting the SHARED config (allowedDomains UNION + strictAllowlist)
+ * at {@link initializeAsrtSandbox} / {@link updateAsrtSandboxConfig}, NOT per
+ * wrap. Per-command `customConfig` carries ONLY the filesystem jail, which IS
+ * enforced (macOS bakes it into the seatbelt profile per wrap; Linux into the
+ * bwrap binds).
+ *
+ * TRADE-OFF (honest): the enforced model is a UNION allow-list — strictAllowlist
+ * + the union of every loaded plugin's `manifest.networkAccess.allowedDomains`
+ * (∪ an optional trusted host baseline). A sandboxed worker can therefore reach
+ * any domain declared by ANY loaded plugin, not only its own. This is acceptable
+ * under LVIS's 1st-party plugin trust model. TRUE per-worker network isolation
+ * would require a future ASRT with per-process proxies / distinct egress auth
+ * tokens; 0.0.59's single shared proxy + single shared config cannot express it.
+ * Do NOT claim per-worker network isolation.
+ * ─────────────────────────────────────────────────────────────────────────────
  *
  * ─────────────────────────────────────────────────────────────────────────────
  * ESM-in-Electron note: ASRT is ESM-only (`"type": "module"`). The LVIS main
@@ -47,15 +81,28 @@ import type {
  *                                       documented data-exfiltration vector.
  *   - `network.allowAllUnixSockets`   — removes the per-socket allow-list.
  *
- * These MUST be sourced exclusively from trusted user/host configuration. They
- * MUST NEVER be derived from plugin manifests, project-local config, MCP server
- * input, or any other untrusted/attacker-influenced surface. Do not add a code
- * path that lets plugin/project config set any of these flags. Network is
- * deny-by-default: an empty `allowedDomains` means the sandboxed process has no
- * network egress.
+ * The WEAKENING fields MUST be sourced exclusively from trusted user/host
+ * configuration. They MUST NEVER be derived from plugin manifests,
+ * project-local config, MCP server input, or any other
+ * untrusted/attacker-influenced surface. Do not add a code path that lets
+ * plugin/project config set any of these flags. Network is deny-by-default: an
+ * empty `allowedDomains` means the sandboxed process has no network egress.
+ *
+ * NOTE on `allowedDomains`: this is the SHARED, enforced egress allow-list
+ * (see the NETWORK ENFORCEMENT MODEL header). Boot computes it as the UNION of
+ * every loaded, host-validated `manifest.networkAccess.allowedDomains` (∪ an
+ * optional trusted host baseline) via {@link computeUnionAllowedDomains}. The
+ * union itself is derived from manifests — a trusted seam (the host validated
+ * those manifests at install) — but the WEAKENING flags above never are.
  */
 export interface TrustedSandboxSettings {
-  /** Domains the sandboxed process may reach. Empty/omitted ⇒ no network. */
+  /**
+   * The SHARED, ENFORCED egress allow-list. Empty/omitted ⇒ no network egress
+   * (deny-by-default). Set this to the manifest UNION (+ trusted baseline) so
+   * `filterNetworkRequest` allows exactly those domains. With
+   * `strictAllowlist: true` any host not on this list is hard-denied with no
+   * askCb fallthrough. See {@link computeUnionAllowedDomains}.
+   */
   readonly allowedDomains?: readonly string[];
   /** Domains explicitly denied (takes precedence over allow). */
   readonly deniedDomains?: readonly string[];
@@ -259,11 +306,23 @@ function buildSandboxConfig(trustedSettings: TrustedSandboxSettings): SandboxRun
 /**
  * Initialize the ASRT {@link SandboxManager} singleton from TRUSTED settings.
  *
- * Builds the config from trusted host/user settings ONLY (never plugin/project
- * config — see {@link TrustedSandboxSettings}) and calls `initialize`, which
- * starts ASRT's proxy/helper machinery. Idempotent re-initialization is the
- * caller's responsibility; prefer {@link updateAsrtSandboxConfig} to change a
- * live config.
+ * Builds the config from trusted settings (network `allowedDomains` is the
+ * manifest UNION via {@link computeUnionAllowedDomains}; the WEAKENING flags
+ * come from trusted host/user settings ONLY — see {@link TrustedSandboxSettings})
+ * and calls `initialize`, which starts ASRT's proxy/helper machinery and
+ * assigns the SHARED `config` that `filterNetworkRequest` enforces against.
+ * Idempotent re-initialization is the caller's responsibility; prefer
+ * {@link updateAsrtSandboxConfig} to change a live config.
+ *
+ * askCb SUPERSESSION (corrects WIRING-A #1356): the enforced model is GLOBAL
+ * strict hard-deny — boot sets `strictAllowlist: true`. Under strict,
+ * `filterNetworkRequest` NEVER calls the askCb (it hard-denies on any
+ * out-of-union host: `if (!sandboxAskCallback || config.network.strictAllowlist)
+ * return false`). The interactive host-tool askCb prompt added in WIRING-A is
+ * therefore inert under strict and is NOT passed at boot anymore. `askCb` stays
+ * an optional param only for a NON-strict configuration (not used by the
+ * shipped enforced model); when `strictAllowlist` is true it is dead weight by
+ * design.
  *
  * @param enableLogMonitor  Forwarded to ASRT (violation log monitor). Default
  *                          off to avoid surprising background activity.
@@ -330,63 +389,24 @@ export async function wrapToolCommand(
 }
 
 /**
- * Per-worker network policy. Workers (Python uv/runtime spawns) are
- * NON-INTERACTIVE, so they get a strict, hard-deny allow-list fed from the
- * owning plugin's `manifest.networkAccess.allowedDomains` — NOT the host-tool
- * askCb prompt. This narrow network slice is the only network channel a worker
- * wrap may carry; it can only ever NARROW egress to the worker's declared
- * domains, never widen it or carry a sandbox-weakening flag.
- */
-export interface WorkerNetworkPolicy {
-  /** The worker's declared egress allow-list (manifest.networkAccess.allowedDomains). */
-  readonly allowedDomains: readonly string[];
-  /**
-   * Hard-deny outside the allow-list (no implicit infra domains, no askCb
-   * prompt). Always true for workers — they cannot answer an interactive
-   * prompt. Defaults to true when omitted.
-   */
-  readonly strictAllowlist?: boolean;
-}
-
-/** Per-worker wrap options: the filesystem jail plus the worker network policy. */
-export interface WorkerWrapOptions extends WrapOptions {
-  readonly network?: WorkerNetworkPolicy;
-}
-
-/**
- * Map a {@link WorkerNetworkPolicy} + filesystem slice to the per-command
- * `customConfig` ASRT merges. Unlike {@link toCustomConfig} (filesystem-only,
- * used by the host-tool path), the worker path additionally carries a `network`
- * slice so each worker is confined to ITS plugin's declared `allowedDomains`
- * under a strict hard-deny — distinct from the boot-time host-tool policy.
- */
-function toWorkerCustomConfig(
-  options: WorkerWrapOptions,
-): Partial<SandboxRuntimeConfig> | undefined {
-  const fsConfig = toCustomConfig(options.filesystem);
-  if (options.network === undefined) return fsConfig;
-  const network: NetworkConfig = {
-    allowedDomains: [...options.network.allowedDomains],
-    deniedDomains: [],
-    // Workers are non-interactive: strict hard-deny by default (no askCb).
-    strictAllowlist: options.network.strictAllowlist ?? true,
-  };
-  return { ...(fsConfig ?? {}), network };
-}
-
-/**
- * Wrap a WORKER command for sandboxed execution, returning the `{ argv, env }`
- * the host must spawn. Same wrapping primitive as {@link wrapToolCommand}, but
- * carries a per-worker {@link WorkerNetworkPolicy}: the worker's egress is
- * confined to its owning plugin's declared `allowedDomains` under a strict
- * hard-deny (NON-INTERACTIVE — no askCb prompt), and its filesystem jail is
- * scoped to the worker's plugin sandbox root + needed dirs.
+ * Wrap a WORKER command (Python uv/runtime spawns) for sandboxed execution,
+ * returning the `{ argv, env }` the host must spawn. Same wrapping primitive as
+ * {@link wrapToolCommand}: the per-command channel carries ONLY the filesystem
+ * jail (scoped to the worker's plugin sandbox root + needed dirs).
+ *
+ * NETWORK: workers do NOT carry a per-command network override — that channel
+ * is INERT in ASRT 0.0.59 (`filterNetworkRequest` reads the SHARED config, not
+ * `customConfig`; see the module header). Worker egress is ENFORCED by the
+ * shared config set at boot: `strictAllowlist: true` + the UNION of every
+ * loaded plugin's manifest allow-list. Workers are NON-INTERACTIVE; strict
+ * hard-denies any out-of-union host with no askCb fallthrough. The owning
+ * plugin's declared domains reach the worker only by being part of that union.
  */
 export async function wrapWorkerCommand(
   command: string,
-  options: WorkerWrapOptions = {},
+  options: WrapOptions = {},
 ): Promise<SandboxWrapResult> {
-  // Self-enforcing gate (PR #1356 NIT) — same rationale as wrapToolCommand.
+  // Self-enforcing gate — same rationale as wrapToolCommand.
   if (!isAsrtSandboxActive()) {
     throw new Error("wrapWorkerCommand: ASRT sandbox is not active (initialize at boot first)");
   }
@@ -394,9 +414,51 @@ export async function wrapWorkerCommand(
   return SandboxManager.wrapWithSandboxArgv(
     command,
     undefined,
-    toWorkerCustomConfig(options),
+    toCustomConfig(options.filesystem),
     options.abortSignal,
   );
+}
+
+/**
+ * Compute the SHARED, enforced egress allow-list as the UNION of every loaded,
+ * host-validated plugin manifest's `networkAccess.allowedDomains` plus an
+ * optional TRUSTED host baseline (default empty). Deduped, order-stable.
+ *
+ * This is the trusted seam for the network enforcement model: the host
+ * validated these manifests at install, so the union is a trusted input to the
+ * SHARED ASRT config (set via {@link initializeAsrtSandbox} /
+ * {@link updateAsrtSandboxConfig}). Because ASRT's `filterNetworkRequest` reads
+ * that shared config, the union is genuinely enforced for BOTH workers and host
+ * tools under `strictAllowlist: true`.
+ *
+ * TRADE-OFF: this is a union, NOT per-worker isolation — see the module header.
+ *
+ * @param manifestAllowLists  one entry per loaded plugin: its
+ *                            `manifest.networkAccess.allowedDomains` (or `[]`).
+ * @param trustedBaseline     optional trusted host-settings allow-list for host
+ *                            tools; defaults to empty (no baseline egress).
+ */
+export function computeUnionAllowedDomains(
+  manifestAllowLists: readonly (readonly string[])[],
+  trustedBaseline: readonly string[] = [],
+): string[] {
+  const seen = new Set<string>();
+  const union: string[] = [];
+  for (const domain of trustedBaseline) {
+    if (typeof domain === "string" && domain.length > 0 && !seen.has(domain)) {
+      seen.add(domain);
+      union.push(domain);
+    }
+  }
+  for (const list of manifestAllowLists) {
+    for (const domain of list) {
+      if (typeof domain === "string" && domain.length > 0 && !seen.has(domain)) {
+        seen.add(domain);
+        union.push(domain);
+      }
+    }
+  }
+  return union;
 }
 
 /**
