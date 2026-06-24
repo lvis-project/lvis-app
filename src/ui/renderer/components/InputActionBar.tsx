@@ -29,7 +29,7 @@ import { t } from "../../../i18n/runtime.js";
 import { useTranslation } from "../../../i18n/react.js";
 import type { PluginEntry } from "./PluginGridButton.js";
 import { SlashPicker, type QuickAction } from "./SlashPicker.js";
-import { ThinkingButton } from "./ThinkingButton.js";
+import { ReasoningSlider } from "./ReasoningSlider.js";
 import type { RolePreset } from "../../../data/role-presets.js";
 import type { AssistantContextMenuAction } from "../../../shared/assistant-context-menu.js";
 import type { UserKeyboardIntentSnapshot } from "../../../shared/chat-origin.js";
@@ -241,7 +241,7 @@ export function InputActionBar({
           data-testid="iab-trailing"
         >
           <ShortcutsButton />
-          <ThinkingButton enabled={enableThinkingChat} onToggle={onToggleThinking} />
+          {/* Reasoning control moved to the status sub-row (between model and dot). */}
           {isBusy && (
             <button
               type="button"
@@ -273,6 +273,8 @@ export function InputActionBar({
         ringSlot={ringSlot}
         onOpenModelSettings={onOpenModelSettings}
         onOpenPermissions={onOpenPermissions}
+        enableThinkingChat={enableThinkingChat}
+        onToggleThinking={onToggleThinking}
       />
     </div>
   );
@@ -292,85 +294,118 @@ function StatusSubRow({
   ringSlot,
   onOpenModelSettings,
   onOpenPermissions,
+  enableThinkingChat,
+  onToggleThinking,
 }: {
   statusRow: InputStatusRow;
   ringSlot: ReactNode;
   onOpenModelSettings?: () => void;
   onOpenPermissions?: () => void;
+  enableThinkingChat: boolean;
+  onToggleThinking: (next: boolean) => void | Promise<void>;
 }) {
   const { t } = useTranslation();
   const { active, vendorModel, permissionMode, pendingApprovals } = statusRow;
+  // Mode label ONLY — the pending-approval count is now its own separate
+  // button before the permission cell (no longer appended to the label text).
   const permissionLabel = t(PERMISSION_LABEL_KEYS[permissionMode]);
-  const permissionText =
-    pendingApprovals > 0
-      ? `${permissionLabel}${t("permissionModeBadge.pendingTextCount", { count: pendingApprovals })}`
-      : permissionLabel;
 
   return (
     <div
       data-testid="iab-status-row"
       className="flex min-w-0 flex-nowrap items-center gap-1.5 px-3 pb-1.5 text-[11px] text-muted-foreground"
     >
-      {/* REVERSED row order (user): ring on the LEFT, then a right-aligned
-          cluster [permission · vendor·model · active-dot] with the dot at the
-          far right. */}
+      {/* Status sub-row order (user): ring on the LEFT; then a right-aligned
+          cluster — [대기 승인 N] · permission(mode only) · vendor·model ·
+          추론 slider · active-dot. */}
 
-      {/* Token progress ring — now LEFTMOST. */}
+      {/* Token progress ring — leftmost. */}
       <span className="shrink-0" data-testid="iab-status-ring">
         {ringSlot}
       </span>
 
-      {/* Permission — plain text, per-mode color; ml-auto pushes the trailing
-          cluster (permission · model · dot) to the right edge. */}
-      {onOpenPermissions ? (
-        <button
-          type="button"
-          onClick={onOpenPermissions}
-          data-testid="iab-status-permission"
-          data-mode={permissionMode}
-          className={`ml-auto shrink-0 truncate hover:opacity-80 focus:outline-none focus-visible:ring-1 focus-visible:ring-ring ${PERMISSION_TEXT_COLOR[permissionMode]}`}
-          title={permissionText}
-        >
-          {permissionText}
-        </button>
-      ) : (
+      <div className="ml-auto flex min-w-0 flex-nowrap items-center gap-1.5">
+        {/* Pending approvals — its OWN button, BEFORE the permission cell. */}
+        {pendingApprovals > 0 && (
+          <>
+            {onOpenPermissions ? (
+              <button
+                type="button"
+                onClick={onOpenPermissions}
+                data-testid="iab-status-pending"
+                className="shrink-0 rounded-full border border-warning px-1.5 tabular-nums text-warning hover:opacity-80 focus:outline-none focus-visible:ring-1 focus-visible:ring-ring"
+                title={t("permissionModeBadge.queueButtonLabel", { pendingText: "" })}
+              >
+                {t("permissionModeBadge.queueLabelCount", { count: pendingApprovals })}
+              </button>
+            ) : (
+              <span
+                data-testid="iab-status-pending"
+                className="shrink-0 rounded-full border border-warning px-1.5 tabular-nums text-warning"
+              >
+                {t("permissionModeBadge.queueLabelCount", { count: pendingApprovals })}
+              </span>
+            )}
+            <span className="shrink-0 opacity-30" aria-hidden="true">·</span>
+          </>
+        )}
+
+        {/* Permission — mode label ONLY, per-mode color. */}
+        {onOpenPermissions ? (
+          <button
+            type="button"
+            onClick={onOpenPermissions}
+            data-testid="iab-status-permission"
+            data-mode={permissionMode}
+            className={`shrink-0 truncate hover:opacity-80 focus:outline-none focus-visible:ring-1 focus-visible:ring-ring ${PERMISSION_TEXT_COLOR[permissionMode]}`}
+            title={permissionLabel}
+          >
+            {permissionLabel}
+          </button>
+        ) : (
+          <span
+            data-testid="iab-status-permission"
+            data-mode={permissionMode}
+            className={`shrink-0 truncate ${PERMISSION_TEXT_COLOR[permissionMode]}`}
+            title={permissionLabel}
+          >
+            {permissionLabel}
+          </span>
+        )}
+
+        <span className="shrink-0 opacity-30" aria-hidden="true">·</span>
+
+        {/* Vendor · model. */}
+        {onOpenModelSettings ? (
+          <button
+            type="button"
+            onClick={onOpenModelSettings}
+            data-testid="iab-status-model"
+            className="min-w-0 shrink truncate text-left hover:opacity-80 focus:outline-none focus-visible:ring-1 focus-visible:ring-ring"
+            title={vendorModel}
+          >
+            {vendorModel}
+          </button>
+        ) : (
+          <span data-testid="iab-status-model" className="min-w-0 shrink truncate" title={vendorModel}>
+            {vendorModel}
+          </span>
+        )}
+
+        <span className="shrink-0 opacity-30" aria-hidden="true">·</span>
+
+        {/* 추론 (reasoning) slider — BETWEEN the model cell and the dot. */}
+        <ReasoningSlider enabled={enableThinkingChat} onToggle={onToggleThinking} />
+
+        <span className="shrink-0 opacity-30" aria-hidden="true">·</span>
+
+        {/* Active-state dot — trailing (far right). */}
         <span
-          data-testid="iab-status-permission"
-          data-mode={permissionMode}
-          className={`ml-auto shrink-0 truncate ${PERMISSION_TEXT_COLOR[permissionMode]}`}
-          title={permissionText}
-        >
-          {permissionText}
-        </span>
-      )}
-
-      <span className="shrink-0 opacity-30" aria-hidden="true">·</span>
-
-      {/* Vendor · model. */}
-      {onOpenModelSettings ? (
-        <button
-          type="button"
-          onClick={onOpenModelSettings}
-          data-testid="iab-status-model"
-          className="min-w-0 shrink truncate text-left hover:opacity-80 focus:outline-none focus-visible:ring-1 focus-visible:ring-ring"
-          title={vendorModel}
-        >
-          {vendorModel}
-        </button>
-      ) : (
-        <span data-testid="iab-status-model" className="min-w-0 shrink truncate" title={vendorModel}>
-          {vendorModel}
-        </span>
-      )}
-
-      <span className="shrink-0 opacity-30" aria-hidden="true">·</span>
-
-      {/* Active-state dot — now TRAILING (far right). */}
-      <span
-        data-testid="iab-status-active-dot"
-        className={`h-1.5 w-1.5 shrink-0 rounded-full ${active ? "bg-success" : "bg-muted-foreground/(--opacity-muted)"}`}
-        aria-label={active ? t("inputActionBar.statusActive") : t("inputActionBar.statusInactive")}
-      />
+          data-testid="iab-status-active-dot"
+          className={`h-1.5 w-1.5 shrink-0 rounded-full ${active ? "bg-success" : "bg-muted-foreground/(--opacity-muted)"}`}
+          aria-label={active ? t("inputActionBar.statusActive") : t("inputActionBar.statusInactive")}
+        />
+      </div>
     </div>
   );
 }
