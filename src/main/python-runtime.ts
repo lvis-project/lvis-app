@@ -20,7 +20,12 @@ import { t } from "../i18n/index.js";
 import { createLogger } from "../lib/logger.js";
 import { resolvePluginPaths } from "../plugins/plugin-paths.js";
 import { readPluginRegistry, resolveManifestPathsFromRegistry } from "../plugins/registry.js";
-import { getSandboxRunner } from "../permissions/sandbox-runner.js";
+import {
+  isAsrtSandboxActive,
+  wrapWorkerCommand,
+  cleanupAsrtSandboxAfterCommand,
+} from "../permissions/asrt-sandbox.js";
+import { buildSandboxedChildEnv } from "../tools/safe-env.js";
 import { resolveUvTarget, type UvTarget } from "../../scripts/uv-targets.mjs";
 import { lvisHome } from "../shared/lvis-home.js";
 import { trackManagedChildProcess } from "./managed-child-processes.js";
@@ -76,6 +81,18 @@ function summarizeUvCommand(args: string[]): string {
   return ["uv", ...args.slice(0, 3)].join(" ");
 }
 
+/**
+ * Single-quote a command token for the shell so it can be assembled into the
+ * one `command` string ASRT's `wrapWorkerCommand` accepts (the wrapper re-runs
+ * it through a shell). Empty string ⇒ `''`. Embedded single quotes use the
+ * standard `'\''` escape. Only used on the sandboxed worker path; the plain
+ * path passes argv to `spawn` directly and never shell-parses.
+ */
+function shellQuoteArg(arg: string): string {
+  if (arg === "") return "''";
+  return `'${arg.replace(/'/g, "'\\''")}'`;
+}
+
 export interface PythonRuntimeBootstrapperOptions {
   /**
    * Test/embedding injection: absolute plugin.json paths whose directory may
@@ -98,6 +115,27 @@ export interface PythonRuntimeBootstrapperOptions {
   forceSetup?: boolean;
   /** Optional observer for status surfaces that need scoped progress. */
   onStatus?: (status: BootstrapStatus) => void;
+  /**
+   * Per-worker ASRT sandbox policy for this runtime's uv/python spawns. Set
+   * from the owning plugin's manifest at prepare time so each plugin's Python
+   * worker egress is confined to ITS declared `networkAccess.allowedDomains`
+   * (strict hard-deny) and its writes are jailed to its plugin sandbox root +
+   * the runtime dir. Undefined ⇒ no manifest is associated (e.g. the host's
+   * default bootstrapper); the worker then runs with a deny-all network policy
+   * when the gate is on. Only consulted when {@link isAsrtSandboxActive}.
+   */
+  workerSandbox?: WorkerSandboxPolicy;
+}
+
+/**
+ * The owning-plugin signals needed to sandbox a Python worker spawn. Built from
+ * the trusted, host-validated manifest — never from per-call/attacker input.
+ */
+export interface WorkerSandboxPolicy {
+  /** The owning plugin's id (`~/.lvis/plugins/<pluginId>/` is the write root). */
+  readonly pluginId: string;
+  /** `manifest.networkAccess.allowedDomains` — deny-by-default when empty. */
+  readonly allowedDomains: readonly string[];
 }
 
 function isWithinDirectory(candidatePath: string, directoryPath: string): boolean {
@@ -170,6 +208,7 @@ export class PythonRuntimeBootstrapper {
     manifestPath: string,
     mainWindow: BrowserWindow,
     onStatus?: (status: BootstrapStatus) => void,
+    workerSandbox?: WorkerSandboxPolicy,
   ): Promise<RuntimeResult | null> {
     const lockFileName = this.options.lockFileName ?? LOCK_FILE_RESOURCE_NAME;
     const candidates = await this.lockCandidatesFromManifest(manifestPath, lockFileName);
@@ -199,6 +238,11 @@ export class PythonRuntimeBootstrapper {
       runtimeDir,
       forceSetup: false,
       onStatus: onStatus ?? this.options.onStatus,
+      ...(workerSandbox !== undefined
+        ? { workerSandbox }
+        : this.options.workerSandbox !== undefined
+          ? { workerSandbox: this.options.workerSandbox }
+          : {}),
     });
     return bootstrapper.ensureReady(mainWindow);
   }
@@ -430,75 +474,134 @@ export class PythonRuntimeBootstrapper {
 
   // ─── private: 실행 헬퍼 ──────────────────────────
 
-  private runUv(
+  /**
+   * Spawn a worker process (uv / python), routing through the ASRT sandbox when
+   * the OS tool sandbox gate is ON (`isAsrtSandboxActive()` — decided once at
+   * boot, no runtime channel). Workers are NON-INTERACTIVE: the network policy
+   * is a strict hard-deny allow-list fed from the owning plugin's manifest
+   * (no askCb prompt), and writes are jailed to the plugin sandbox root + the
+   * runtime dir. Gate OFF ⇒ plain `spawn` exactly as before (unchanged).
+   *
+   * Returns the spawned child plus a `cleanup` the caller MUST invoke once the
+   * process settles (releases the per-command ASRT proxy/helper state; a no-op
+   * on the gate-OFF path).
+   */
+  private async spawnWorkerProcess(
+    bin: string,
+    args: string[],
+    env: NodeJS.ProcessEnv,
+    label: string,
+  ): Promise<{ proc: ReturnType<typeof spawn>; cleanup: () => void }> {
+    if (!isAsrtSandboxActive()) {
+      // isolation=none path — unchanged from pre-migration behavior.
+      const proc = spawn(bin, args, { env, stdio: ["ignore", "pipe", "pipe"] });
+      trackManagedChildProcess(proc, { label });
+      return { proc, cleanup: () => {} };
+    }
+
+    // Gate ON: wrap via ASRT. The worker's egress allow-list comes from its
+    // owning plugin's manifest (strict hard-deny); writes are jailed to the
+    // plugin sandbox root + this runtime dir. No askCb — workers cannot answer
+    // an interactive prompt.
+    const allowedDomains = this.options.workerSandbox?.allowedDomains ?? [];
+    const writePaths = this.workerWritePaths();
+    const command = [bin, ...args].map(shellQuoteArg).join(" ");
+    const { argv, env: wrappedEnv } = await wrapWorkerCommand(command, {
+      network: { allowedDomains, strictAllowlist: true },
+      filesystem: { allowWrite: writePaths, allowRead: writePaths },
+    });
+    const [cmd, ...wrappedArgs] = argv;
+    if (cmd === undefined) {
+      throw new Error("python-runtime: ASRT returned an empty argv for worker spawn");
+    }
+    // shell:false — the wrapper argv is the literal program+args (it already
+    // contains the shell invocation); a second shell would double-parse.
+    const proc = spawn(cmd, wrappedArgs, {
+      stdio: ["ignore", "pipe", "pipe"],
+      shell: false,
+      // Safe whitelist + ASRT's added proxy/CA env only — host secrets stripped.
+      env: buildSandboxedChildEnv(wrappedEnv),
+    });
+    trackManagedChildProcess(proc, { label: `${label}:asrt` });
+    return { proc, cleanup: () => cleanupAsrtSandboxAfterCommand() };
+  }
+
+  /**
+   * Write-jail for sandboxed worker spawns: the owning plugin's sandbox root
+   * (`~/.lvis/plugins/<pluginId>/`) when known, unioned with this runtime dir
+   * (venv / uv-cache / python install live here and uv must write them).
+   */
+  private workerWritePaths(): string[] {
+    const paths = [this.runtimeDir()];
+    const pluginId = this.options.workerSandbox?.pluginId;
+    if (pluginId !== undefined && pluginId !== "") {
+      paths.push(path.join(lvisHome(), "plugins", pluginId));
+    }
+    return paths;
+  }
+
+  private async runUv(
     uvBin: string,
     args: string[],
     extraEnv: Record<string, string> = {}
   ): Promise<string> {
-    return new Promise((resolve, reject) => {
-      // Whitelist-only env — only the uv subprocess needs PATH/HOME/locale.
-      // uv only needs PATH + HOME + locale + tmp dirs. Callers supply
-      // UV_PYTHON_INSTALL_DIR via extraEnv.
-      const allowedEnvKeys = new Set<string>([
-        "PATH",
-        "HOME",
-        "USERPROFILE",
-        "LANG",
-        "LC_ALL",
-        "TMPDIR",
-        "TEMP",
-        "TMP",
-        "SYSTEMROOT",
-        "NODE_ENV",
-        // Issue #713 escape hatches: let users override cache location and
-        // hardlink mode via OS env when their drive layout still trips uv
-        // (e.g. ~/.lvis itself bridging volumes via subpath junctions).
-        "UV_CACHE_DIR",
-        "UV_LINK_MODE",
-      ]);
-      const env: NodeJS.ProcessEnv = {};
-      for (const key of allowedEnvKeys) {
-        const value = process.env[key];
-        if (value !== undefined) env[key] = value;
-      }
-      Object.assign(env, extraEnv);
-      // uv가 interactive prompt를 띄우지 않도록
-      env.UV_NO_PROGRESS = "1";
-      // Default uv cache co-located with the LVIS runtime; user-provided
-      // UV_CACHE_DIR (via the whitelist above or extraEnv) takes precedence.
-      if (env.UV_CACHE_DIR === undefined) {
-        env.UV_CACHE_DIR = this.uvCacheDir();
-      }
+    // Whitelist-only env — only the uv subprocess needs PATH/HOME/locale.
+    // uv only needs PATH + HOME + locale + tmp dirs. Callers supply
+    // UV_PYTHON_INSTALL_DIR via extraEnv.
+    const allowedEnvKeys = new Set<string>([
+      "PATH",
+      "HOME",
+      "USERPROFILE",
+      "LANG",
+      "LC_ALL",
+      "TMPDIR",
+      "TEMP",
+      "TMP",
+      "SYSTEMROOT",
+      "NODE_ENV",
+      // Issue #713 escape hatches: let users override cache location and
+      // hardlink mode via OS env when their drive layout still trips uv
+      // (e.g. ~/.lvis itself bridging volumes via subpath junctions).
+      "UV_CACHE_DIR",
+      "UV_LINK_MODE",
+    ]);
+    const env: NodeJS.ProcessEnv = {};
+    for (const key of allowedEnvKeys) {
+      const value = process.env[key];
+      if (value !== undefined) env[key] = value;
+    }
+    Object.assign(env, extraEnv);
+    // uv가 interactive prompt를 띄우지 않도록
+    env.UV_NO_PROGRESS = "1";
+    // Default uv cache co-located with the LVIS runtime; user-provided
+    // UV_CACHE_DIR (via the whitelist above or extraEnv) takes precedence.
+    if (env.UV_CACHE_DIR === undefined) {
+      env.UV_CACHE_DIR = this.uvCacheDir();
+    }
 
-      // §691: SandboxRunner adoption gate for uv spawn.
-      // When LVIS_SANDBOX_ENABLED=1 and a runner is registered, log the
-      // intent. Full adoption is deferred until SandboxedProcess exposes a
-      // Node.js-compatible stream API (SandboxedProcess uses WHATWG
-      // ReadableStream; runUv uses .on("data") event emitter pattern).
-      // Tracking: #691 spawn-path follow-up.
-      if (process.env.LVIS_SANDBOX_ENABLED === "1") {
-        const runner = getSandboxRunner(process.platform);
-        if (runner) {
-          // Runner is available — future: wrap spawn via runner.spawn()
-          // once SandboxedProcess stream compat is resolved.
-          void this.log("[python-runtime] LVIS_SANDBOX_ENABLED: uv runner available (full adoption pending stream compat)");
-        }
-      }
+    // ASRT-or-plain spawn (gate decided at boot). Acquired before the result
+    // Promise so a wrap failure rejects the call rather than hanging.
+    const { proc, cleanup } = await this.spawnWorkerProcess(uvBin, args, env, "python-runtime:uv");
 
-      const proc = spawn(uvBin, args, { env, stdio: ["ignore", "pipe", "pipe"] });
-      trackManagedChildProcess(proc, { label: "python-runtime:uv" });
-
+    return new Promise<string>((resolve, reject) => {
       let stdout = "";
       let stderr = "";
       let stderrBytes = 0;
       let stderrChunks = 0;
+      let settled = false;
+      const settle = (fn: () => void): void => {
+        if (settled) return;
+        settled = true;
+        cleanup();
+        fn();
+      };
 
-      proc.stdout.on("data", (chunk: Buffer) => {
+      proc.stdout?.on("data", (chunk: Buffer) => {
         const text = chunk.toString();
         stdout += text;
       });
 
-      proc.stderr.on("data", (chunk: Buffer) => {
+      proc.stderr?.on("data", (chunk: Buffer) => {
         const text = chunk.toString();
         stderr = appendTail(stderr, text, UV_STDERR_TAIL_LIMIT_CHARS);
         stderrBytes += chunk.byteLength;
@@ -507,9 +610,9 @@ export class PythonRuntimeBootstrapper {
 
       proc.on("error", (err: NodeJS.ErrnoException) => {
         if (err.code === "ENOENT") {
-          reject(new Error(t("be_pythonRuntime.errUvExecEnoent", { uvBin })));
+          settle(() => reject(new Error(t("be_pythonRuntime.errUvExecEnoent", { uvBin }))));
         } else {
-          reject(new Error(t("be_pythonRuntime.errUvExecError", { message: err.message })));
+          settle(() => reject(new Error(t("be_pythonRuntime.errUvExecError", { message: err.message }))));
         }
       });
 
@@ -525,11 +628,13 @@ export class PythonRuntimeBootstrapper {
           );
         }
         if (code === 0) {
-          resolve(stdout);
+          settle(() => resolve(stdout));
         } else {
-          reject(
-            new Error(
-              t("be_pythonRuntime.errUvCommandFailed", { code: String(code), args: args.join(" "), stderr: stderr.slice(-1000) })
+          settle(() =>
+            reject(
+              new Error(
+                t("be_pythonRuntime.errUvCommandFailed", { code: String(code), args: args.join(" "), stderr: stderr.slice(-1000) })
+              )
             )
           );
         }
@@ -537,52 +642,62 @@ export class PythonRuntimeBootstrapper {
     });
   }
 
-  private runPython(pythonBin: string, args: string[]): Promise<string> {
-    return new Promise((resolve, reject) => {
-      // Whitelist-only env — same rationale as runUv(). Only OS-essential
-      // variables propagate into the verification subprocess so that no
-      // host secrets (OPENAI_API_KEY, AWS creds, …) are leaked.
-      const allowedEnvKeys = new Set<string>([
-        "PATH",
-        "HOME",
-        "USERPROFILE",
-        "LANG",
-        "LC_ALL",
-        "TMPDIR",
-        "TEMP",
-        "TMP",
-        "SYSTEMROOT",
-        "NODE_ENV",
-      ]);
-      const safeEnv: NodeJS.ProcessEnv = {};
-      for (const key of allowedEnvKeys) {
-        const value = process.env[key];
-        if (value !== undefined) safeEnv[key] = value;
-      }
-      const proc = spawn(pythonBin, args, { env: safeEnv, stdio: ["ignore", "pipe", "pipe"] });
-      trackManagedChildProcess(proc, { label: "python-runtime:python" });
+  private async runPython(pythonBin: string, args: string[]): Promise<string> {
+    // Whitelist-only env — same rationale as runUv(). Only OS-essential
+    // variables propagate into the verification subprocess so that no
+    // host secrets (OPENAI_API_KEY, AWS creds, …) are leaked.
+    const allowedEnvKeys = new Set<string>([
+      "PATH",
+      "HOME",
+      "USERPROFILE",
+      "LANG",
+      "LC_ALL",
+      "TMPDIR",
+      "TEMP",
+      "TMP",
+      "SYSTEMROOT",
+      "NODE_ENV",
+    ]);
+    const safeEnv: NodeJS.ProcessEnv = {};
+    for (const key of allowedEnvKeys) {
+      const value = process.env[key];
+      if (value !== undefined) safeEnv[key] = value;
+    }
 
+    // ASRT-or-plain spawn (gate decided at boot), mirroring runUv().
+    const { proc, cleanup } = await this.spawnWorkerProcess(pythonBin, args, safeEnv, "python-runtime:python");
+
+    return new Promise<string>((resolve, reject) => {
       let stdout = "";
       let stderr = "";
+      let settled = false;
+      const settle = (fn: () => void): void => {
+        if (settled) return;
+        settled = true;
+        cleanup();
+        fn();
+      };
 
-      proc.stdout.on("data", (chunk: Buffer) => { stdout += chunk.toString(); });
-      proc.stderr.on("data", (chunk: Buffer) => { stderr += chunk.toString(); });
+      proc.stdout?.on("data", (chunk: Buffer) => { stdout += chunk.toString(); });
+      proc.stderr?.on("data", (chunk: Buffer) => { stderr += chunk.toString(); });
 
       proc.on("error", (err: NodeJS.ErrnoException) => {
         if (err.code === "ENOENT") {
-          reject(new Error(t("be_pythonRuntime.errPythonExecEnoent", { pythonBin })));
+          settle(() => reject(new Error(t("be_pythonRuntime.errPythonExecEnoent", { pythonBin }))));
         } else {
-          reject(new Error(t("be_pythonRuntime.errPythonExecError", { message: err.message })));
+          settle(() => reject(new Error(t("be_pythonRuntime.errPythonExecError", { message: err.message }))));
         }
       });
 
       proc.on("close", (code) => {
         if (code === 0) {
-          resolve(stdout.trim());
+          settle(() => resolve(stdout.trim()));
         } else {
-          reject(
-            new Error(
-              t("be_pythonRuntime.errPythonVerifyFailed", { code: String(code), stdout, stderr: stderr.slice(-500) })
+          settle(() =>
+            reject(
+              new Error(
+                t("be_pythonRuntime.errPythonVerifyFailed", { code: String(code), stdout, stderr: stderr.slice(-500) })
+              )
             )
           );
         }

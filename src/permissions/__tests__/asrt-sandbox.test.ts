@@ -26,6 +26,7 @@ import {
   initializeAsrtSandbox,
   resetAsrtSandbox,
   wrapToolCommand,
+  wrapWorkerCommand,
   cleanupAsrtSandboxAfterCommand,
   isAsrtSandboxSupported,
   checkAsrtDependencies,
@@ -145,5 +146,75 @@ describe("asrt-sandbox — per-command trust boundary (security MINOR)", () => {
       filesystem: { allowWrite: [], allowRead: [] },
     });
     expect(argv.length).toBeGreaterThanOrEqual(3);
+  });
+});
+
+describe("asrt-sandbox — self-enforcing gate (PR #1356 NIT)", () => {
+  it("wrapToolCommand throws when the sandbox is not active", async () => {
+    expect(isAsrtSandboxActive()).toBe(false);
+    await expect(wrapToolCommand("echo nope")).rejects.toThrow(/not active/i);
+  });
+
+  it("wrapWorkerCommand throws when the sandbox is not active", async () => {
+    expect(isAsrtSandboxActive()).toBe(false);
+    await expect(wrapWorkerCommand("echo nope")).rejects.toThrow(/not active/i);
+  });
+});
+
+describe("asrt-sandbox — idempotency guard (PR #1356 NIT)", () => {
+  it("initialize throws if already active (double-init is a loud failure)", async () => {
+    if (!(await asrtCanInitialize())) return;
+    await initializeAsrtSandbox({ allowedDomains: [] });
+    expect(isAsrtSandboxActive()).toBe(true);
+    await expect(initializeAsrtSandbox({ allowedDomains: [] })).rejects.toThrow(/already active/i);
+  });
+});
+
+describe("asrt-sandbox — worker strict hard-deny network (Tier-A worker egress)", () => {
+  it("wrapWorkerCommand applies the per-worker network policy (strict allow-list)", async () => {
+    if (!(await asrtCanInitialize())) return;
+    await initializeAsrtSandbox({ allowedDomains: [] });
+    // A worker wrap carries its OWN strict network allow-list, independent of
+    // the boot-time host-tool policy. The wrap succeeds and returns argv/env
+    // that the host spawns; the strict policy is enforced by the OS sandbox.
+    const { argv } = await wrapWorkerCommand("echo worker-ok", {
+      network: { allowedDomains: ["example.com"], strictAllowlist: true },
+      filesystem: { allowWrite: [], allowRead: [] },
+    });
+    expect(argv.length).toBeGreaterThanOrEqual(3);
+    expect(argv[1]).toBe("-c");
+  });
+});
+
+describe("asrt-sandbox — parentProxy explicit (PR #1356 security MINOR)", () => {
+  it("the composed child env never carries the host HTTP_PROXY (no covert egress chain)", async () => {
+    if (!(await asrtCanInitialize())) return;
+    // Set a bogus host proxy. Two layers must prevent it reaching the child:
+    //   1. network.parentProxy is set explicitly to {} so ASRT's egress proxy
+    //      does NOT chain through the host proxy (resolveParentProxy would
+    //      otherwise silently inherit process.env.HTTP_PROXY);
+    //   2. buildSandboxedChildEnv strips the host HTTP_PROXY from the child env
+    //      because ASRT did not change it (it equals process.env).
+    const { buildSandboxedChildEnv } = await import("../../tools/safe-env.js");
+    const HOST_PROXY = "http://host-proxy.invalid:3128";
+    const prev = process.env.HTTP_PROXY;
+    process.env.HTTP_PROXY = HOST_PROXY;
+    try {
+      await initializeAsrtSandbox({ allowedDomains: ["example.com"] });
+      const { env } = await wrapWorkerCommand("echo proxy-check", {
+        network: { allowedDomains: ["example.com"], strictAllowlist: true },
+        filesystem: { allowWrite: [], allowRead: [] },
+      });
+      const childEnv = buildSandboxedChildEnv(env);
+      // The host's external proxy must never reach the sandboxed child. Any
+      // HTTP_PROXY present must be ASRT's own localhost egress proxy.
+      if (childEnv.HTTP_PROXY !== undefined) {
+        expect(childEnv.HTTP_PROXY).not.toContain("host-proxy.invalid");
+      }
+      cleanupAsrtSandboxAfterCommand();
+    } finally {
+      if (prev === undefined) delete process.env.HTTP_PROXY;
+      else process.env.HTTP_PROXY = prev;
+    }
   });
 });

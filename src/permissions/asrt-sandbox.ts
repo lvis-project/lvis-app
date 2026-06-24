@@ -78,6 +78,28 @@ export interface TrustedSandboxSettings {
     readonly enableWeakerNetworkIsolation?: boolean;
     readonly allowAllUnixSockets?: boolean;
   };
+  /**
+   * Upstream HTTP/HTTPS proxy the sandbox's egress proxy should chain through
+   * for outbound connections (corporate-proxy passthrough). TRUSTED-ONLY.
+   *
+   * SECURITY (PR #1356 MINOR -- parentProxy explicit):
+   * ASRT's `resolveParentProxy` SILENTLY inherits the HOST process's
+   * `HTTP_PROXY`/`HTTPS_PROXY`/`NO_PROXY` env vars when `network.parentProxy`
+   * is absent. That implicit inheritance is a covert egress channel: a
+   * sandboxed child's traffic would tunnel through whatever proxy the host
+   * happened to have configured. We therefore set `network.parentProxy`
+   * EXPLICITLY in {@link buildSandboxConfig} on every initialize:
+   *   - default (this field omitted): empty proxy config so ASRT connects
+   *     directly and does NOT chain through the host proxy (the secure floor);
+   *   - present: only the explicit, trusted corporate-proxy URLs below are
+   *     used -- never the ambient host env.
+   * This field is the ONLY way to opt a sandbox into a parent proxy.
+   */
+  readonly corporateProxy?: {
+    readonly http?: string;
+    readonly https?: string;
+    readonly noProxy?: string;
+  };
 }
 
 /**
@@ -190,6 +212,22 @@ function buildSandboxConfig(trustedSettings: TrustedSandboxSettings): SandboxRun
     ...(trustedSettings.weakening?.allowAllUnixSockets !== undefined
       ? { allowAllUnixSockets: trustedSettings.weakening.allowAllUnixSockets }
       : {}),
+    // parentProxy EXPLICIT (PR #1356 security MINOR). ASRT's resolveParentProxy
+    // silently inherits the host HTTP_PROXY/HTTPS_PROXY/NO_PROXY env when this
+    // is absent — a covert egress channel. We always set it: empty {} ⇒ no
+    // parent-proxy chaining (direct connect, the secure floor); only an
+    // explicit trusted corporateProxy ever populates it.
+    parentProxy: {
+      ...(trustedSettings.corporateProxy?.http !== undefined
+        ? { http: trustedSettings.corporateProxy.http }
+        : {}),
+      ...(trustedSettings.corporateProxy?.https !== undefined
+        ? { https: trustedSettings.corporateProxy.https }
+        : {}),
+      ...(trustedSettings.corporateProxy?.noProxy !== undefined
+        ? { noProxy: trustedSettings.corporateProxy.noProxy }
+        : {}),
+    },
   };
 
   const filesystem: FilesystemConfig = {
@@ -235,6 +273,16 @@ export async function initializeAsrtSandbox(
   askCb?: SandboxAskCallback,
   enableLogMonitor = false,
 ): Promise<void> {
+  // Idempotency guard (PR #1356 NIT). The boot gate must decide exactly once;
+  // a double-initialize means two boot paths raced or a runtime channel tried
+  // to re-seal the sandbox with a different config. Fail loud rather than
+  // silently overwriting the live config — use updateAsrtSandboxConfig to
+  // change a live config.
+  if (active) {
+    throw new Error(
+      "initializeAsrtSandbox: already active — refusing to re-initialize (use updateAsrtSandboxConfig to change a live config)",
+    );
+  }
   const SandboxManager = await loadSandboxManager();
   const config = buildSandboxConfig(trustedSettings);
   await SandboxManager.initialize(config, askCb, enableLogMonitor);
@@ -265,6 +313,13 @@ export async function wrapToolCommand(
   command: string,
   options: WrapOptions = {},
 ): Promise<SandboxWrapResult> {
+  // Self-enforcing gate (PR #1356 NIT). Do not depend on the caller to check
+  // isAsrtSandboxActive() first — a wrap with no initialized SandboxManager is
+  // a bug, so throw rather than silently wrapping against an uninitialized
+  // singleton.
+  if (!isAsrtSandboxActive()) {
+    throw new Error("wrapToolCommand: ASRT sandbox is not active (initialize at boot first)");
+  }
   const SandboxManager = await loadSandboxManager();
   return SandboxManager.wrapWithSandboxArgv(
     command,
@@ -275,20 +330,71 @@ export async function wrapToolCommand(
 }
 
 /**
+ * Per-worker network policy. Workers (Python uv/runtime spawns) are
+ * NON-INTERACTIVE, so they get a strict, hard-deny allow-list fed from the
+ * owning plugin's `manifest.networkAccess.allowedDomains` — NOT the host-tool
+ * askCb prompt. This narrow network slice is the only network channel a worker
+ * wrap may carry; it can only ever NARROW egress to the worker's declared
+ * domains, never widen it or carry a sandbox-weakening flag.
+ */
+export interface WorkerNetworkPolicy {
+  /** The worker's declared egress allow-list (manifest.networkAccess.allowedDomains). */
+  readonly allowedDomains: readonly string[];
+  /**
+   * Hard-deny outside the allow-list (no implicit infra domains, no askCb
+   * prompt). Always true for workers — they cannot answer an interactive
+   * prompt. Defaults to true when omitted.
+   */
+  readonly strictAllowlist?: boolean;
+}
+
+/** Per-worker wrap options: the filesystem jail plus the worker network policy. */
+export interface WorkerWrapOptions extends WrapOptions {
+  readonly network?: WorkerNetworkPolicy;
+}
+
+/**
+ * Map a {@link WorkerNetworkPolicy} + filesystem slice to the per-command
+ * `customConfig` ASRT merges. Unlike {@link toCustomConfig} (filesystem-only,
+ * used by the host-tool path), the worker path additionally carries a `network`
+ * slice so each worker is confined to ITS plugin's declared `allowedDomains`
+ * under a strict hard-deny — distinct from the boot-time host-tool policy.
+ */
+function toWorkerCustomConfig(
+  options: WorkerWrapOptions,
+): Partial<SandboxRuntimeConfig> | undefined {
+  const fsConfig = toCustomConfig(options.filesystem);
+  if (options.network === undefined) return fsConfig;
+  const network: NetworkConfig = {
+    allowedDomains: [...options.network.allowedDomains],
+    deniedDomains: [],
+    // Workers are non-interactive: strict hard-deny by default (no askCb).
+    strictAllowlist: options.network.strictAllowlist ?? true,
+  };
+  return { ...(fsConfig ?? {}), network };
+}
+
+/**
  * Wrap a WORKER command for sandboxed execution, returning the `{ argv, env }`
- * the host must spawn. Same wrapping primitive as {@link wrapToolCommand};
- * kept separate so tool- and worker-specific policy can diverge later without
- * touching call sites.
+ * the host must spawn. Same wrapping primitive as {@link wrapToolCommand}, but
+ * carries a per-worker {@link WorkerNetworkPolicy}: the worker's egress is
+ * confined to its owning plugin's declared `allowedDomains` under a strict
+ * hard-deny (NON-INTERACTIVE — no askCb prompt), and its filesystem jail is
+ * scoped to the worker's plugin sandbox root + needed dirs.
  */
 export async function wrapWorkerCommand(
   command: string,
-  options: WrapOptions = {},
+  options: WorkerWrapOptions = {},
 ): Promise<SandboxWrapResult> {
+  // Self-enforcing gate (PR #1356 NIT) — same rationale as wrapToolCommand.
+  if (!isAsrtSandboxActive()) {
+    throw new Error("wrapWorkerCommand: ASRT sandbox is not active (initialize at boot first)");
+  }
   const SandboxManager = await loadSandboxManager();
   return SandboxManager.wrapWithSandboxArgv(
     command,
     undefined,
-    toCustomConfig(options.filesystem),
+    toWorkerCustomConfig(options),
     options.abortSignal,
   );
 }
