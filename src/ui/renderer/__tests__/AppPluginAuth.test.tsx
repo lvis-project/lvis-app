@@ -105,7 +105,7 @@ describe("App plugin auth routing", () => {
     expect(await within(group).findByText("로컬 인덱서")).toBeInTheDocument();
   });
 
-  it("opens an unauthenticated detached plugin view without invoking loginTool", async () => {
+  it("detached unauthenticated auth plugin → host fires loginTool and does NOT open the panel (login-first)", async () => {
     const user = userEvent.setup();
     const { api } = await renderApp(detachedPluginFixture);
     api.callPluginMethod.mockImplementation(async (tool: string) =>
@@ -113,26 +113,44 @@ describe("App plugin auth routing", () => {
     );
 
     // Detachment is owned by the app's mode, not the plugin: enter chat mode so
-    // selecting any plugin view routes through the detached-window path. (Action
-    // mode would keep it inline and run the embedded auth flow instead.)
+    // selecting any plugin view routes through the detached-window path.
     await user.click(screen.getByTestId("app-mode-chat"));
 
     await selectPluginView(user, "Token Plugin");
 
+    // Auth is a host-managed lifecycle (architecture.md §9.4a): for an unauthed
+    // auth plugin the host fires the loginTool (opens the SSO window ONLY)...
     await waitFor(() => {
-      expect(api.window.openDetached).toHaveBeenCalledWith("plugin:token-plugin:main");
+      expect(api.callPluginMethod).toHaveBeenCalledWith("token_login");
     });
-    // Security property preserved: a detached, unauthenticated view must open
-    // directly through the plugin's own login surface — the host must NOT call
-    // the loginTool with no arguments on its behalf.
-    expect(api.callPluginMethod).not.toHaveBeenCalledWith("token_login");
+    // ...and must NOT open the detached panel until the plugin reports authed.
+    expect(api.window.openDetached).not.toHaveBeenCalled();
   });
 
-  it("routes command-palette plugin actions through detached-window handling", async () => {
+  it("detached authenticated auth plugin → host opens the panel without firing loginTool", async () => {
     const user = userEvent.setup();
     const { api } = await renderApp(detachedPluginFixture);
     api.callPluginMethod.mockImplementation(async (tool: string) =>
-      tool === "token_status" ? { authenticated: false } : { ok: true },
+      tool === "token_status" ? { authenticated: true } : { ok: true },
+    );
+
+    await user.click(screen.getByTestId("app-mode-chat"));
+    await selectPluginView(user, "Token Plugin");
+
+    // Already authed → open the detached panel directly, no login round-trip.
+    await waitFor(() => {
+      expect(api.window.openDetached).toHaveBeenCalledWith("plugin:token-plugin:main");
+    });
+    expect(api.callPluginMethod).not.toHaveBeenCalledWith("token_login");
+  });
+
+  it("routes command-palette plugin actions through detached-window handling (authed)", async () => {
+    const user = userEvent.setup();
+    const { api } = await renderApp(detachedPluginFixture);
+    // Authed so the command-palette selection reaches the detached-open path
+    // (an unauthed auth plugin would route to loginTool instead).
+    api.callPluginMethod.mockImplementation(async (tool: string) =>
+      tool === "token_status" ? { authenticated: true } : { ok: true },
     );
 
     await waitFor(() => {
@@ -151,8 +169,6 @@ describe("App plugin auth routing", () => {
     await waitFor(() => {
       expect(api.window.openDetached).toHaveBeenCalledWith("plugin:token-plugin:main");
     });
-    // Security property preserved: command-palette routing to a detached view
-    // must not have the host invoke the plugin's loginTool on its behalf.
     expect(api.callPluginMethod).not.toHaveBeenCalledWith("token_login");
   });
 
@@ -160,8 +176,10 @@ describe("App plugin auth routing", () => {
     const user = userEvent.setup();
     const { api } = await renderApp(detachedPluginFixture);
     api.window.openDetached.mockResolvedValueOnce({ ok: false, error: "window denied" });
+    // Authed so selection reaches openDetached (the failure path under test);
+    // an unauthed auth plugin would route to loginTool and never open a window.
     api.callPluginMethod.mockImplementation(async (tool: string) =>
-      tool === "token_status" ? { authenticated: false } : { ok: true },
+      tool === "token_status" ? { authenticated: true } : { ok: true },
     );
 
     // Chat mode routes the selection through openDetached so the failure path
