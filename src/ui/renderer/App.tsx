@@ -181,6 +181,7 @@ export function App() {
   const pendingDetachedAuthOpenRef = useRef<Map<string, string>>(new Map());
   const pendingInlineAuthOpenRef = useRef<Map<string, string>>(new Map());
   const pluginAuthLoginInflightRef = useRef<Set<string>>(new Set());
+  const failedPluginAuthOpenRef = useRef<Set<string>>(new Set());
   // Ref so handlePluginPrimaryAction (defined before handleAsk) can call
   // handleAsk without a forward-declaration TS error. Updated each render.
   const handleAskRef = useRef<(
@@ -803,6 +804,7 @@ export function App() {
         // plugin views inline; chat pops plugin views into detached windows.
         if (!loginTool || authState === "authed") {
           clearPluginAuthError(view.pluginId);
+          failedPluginAuthOpenRef.current.delete(view.pluginId);
           openPluginView();
           return;
         }
@@ -813,6 +815,7 @@ export function App() {
             : pendingInlineAuthOpenRef.current;
         pendingMap.set(view.pluginId, key);
         clearPluginAuthError(view.pluginId);
+        failedPluginAuthOpenRef.current.delete(view.pluginId);
 
         const inflightKey = `${view.pluginId}:${loginTool}`;
         if (pluginAuthLoginInflightRef.current.has(inflightKey)) {
@@ -831,6 +834,7 @@ export function App() {
               err,
             );
             pendingMap.delete(view.pluginId);
+            failedPluginAuthOpenRef.current.add(view.pluginId);
             const message = formatPluginAuthLoginError(err);
             setPluginAuthErrors((prev) => {
               const next = new Map(prev);
@@ -838,7 +842,6 @@ export function App() {
               return next;
             });
             statusPushToast({ severity: "error", message, ttlMs: 10000 });
-            openPluginView();
           } finally {
             pluginAuthLoginInflightRef.current.delete(inflightKey);
           }
@@ -886,6 +889,10 @@ export function App() {
       pendingInlineAuthOpenRef.current.size === 0
     ) return;
     for (const [pluginId, viewKey] of [...pendingDetachedAuthOpenRef.current]) {
+      if (failedPluginAuthOpenRef.current.has(pluginId)) {
+        pendingDetachedAuthOpenRef.current.delete(pluginId);
+        continue;
+      }
       const kind = pluginAuthStatuses.get(pluginId)?.kind;
       if (kind === "authed") {
         pendingDetachedAuthOpenRef.current.delete(pluginId);
@@ -895,6 +902,10 @@ export function App() {
       }
     }
     for (const [pluginId, viewKey] of [...pendingInlineAuthOpenRef.current]) {
+      if (failedPluginAuthOpenRef.current.has(pluginId)) {
+        pendingInlineAuthOpenRef.current.delete(pluginId);
+        continue;
+      }
       const kind = pluginAuthStatuses.get(pluginId)?.kind;
       if (kind === "authed") {
         pendingInlineAuthOpenRef.current.delete(pluginId);
@@ -912,6 +923,7 @@ export function App() {
         if (pluginAuthStatuses.get(pluginId)?.kind === "authed") {
           next ??= new Map(prev);
           next.delete(pluginId);
+          failedPluginAuthOpenRef.current.delete(pluginId);
         }
       }
       return next ?? prev;

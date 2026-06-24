@@ -170,10 +170,10 @@ export function StatusBar(props: StatusBarProps) {
           const clickable = toast.notification !== undefined && typeof onToastClick === "function";
           const dismissible = typeof onToastDismiss === "function";
           const baseClass =
-            `flex min-w-0 w-full items-center gap-3 rounded-t-xl rounded-b-md border px-4 py-3 text-[13px] lvis-anim-slide-up ${TOAST_TONE[toast.severity]}`;
+            `flex min-w-0 w-full items-start gap-2 overflow-hidden rounded-t-xl rounded-b-md border px-3 pb-6 pt-2.5 text-[13px] lvis-anim-slide-up ${TOAST_TONE[toast.severity]}`;
           const dot = (
             <span
-              className={`h-2 w-2 shrink-0 rounded-full ${SEVERITY_DOT[toast.severity]}`}
+              className={`mt-1 h-2 w-2 shrink-0 rounded-full ${SEVERITY_DOT[toast.severity]}`}
               aria-hidden="true"
             />
           );
@@ -184,7 +184,7 @@ export function StatusBar(props: StatusBarProps) {
             <button
               type="button"
               onClick={() => onToastDismiss?.(toast)}
-              className="inline-flex h-6 w-6 shrink-0 items-center justify-center rounded-md text-muted-foreground hover:bg-muted hover:text-foreground focus:outline-none focus-visible:ring-1 focus-visible:ring-ring"
+              className="mt-[-0.125rem] inline-flex h-6 w-6 shrink-0 items-center justify-center rounded-md text-muted-foreground hover:bg-muted hover:text-foreground focus:outline-none focus-visible:ring-1 focus-visible:ring-ring"
               aria-label={t("statusBar.toastDismissAriaLabel")}
             >
               <X className="h-3.5 w-3.5" aria-hidden="true" />
