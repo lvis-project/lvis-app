@@ -54,10 +54,15 @@ const SEVERITY_TEXT: Record<StatusBarSeverity, string> = {
 export function StatusBar(props: StatusBarProps) {
   const { persistent, visibleToast, pendingCount = 0, onToastClick } = props;
 
+  // Now rendered inside the top-right banner stack (the bottom bar is gone).
+  // Render nothing when there is no persistent indicator and no toast, so the
+  // stack does not float an empty card.
+  if ((!persistent || persistent.length === 0) && !visibleToast) return null;
+
   return (
     <TooltipProvider>
     <footer
-      className="flex h-6 shrink-0 items-center justify-between gap-3 bg-background px-3 text-[11px] text-muted-foreground"
+      className="inline-flex max-w-md items-center gap-3 rounded-lg border border-border bg-popover px-3 py-1.5 text-[11px] text-muted-foreground shadow-md"
       data-testid="status-bar"
       role="status"
       aria-live="polite"

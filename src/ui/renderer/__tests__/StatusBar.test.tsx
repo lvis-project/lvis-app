@@ -34,9 +34,9 @@ describe("StatusBar", () => {
     expect(screen.queryByRole("img", { name: "LVIS" })).toBeNull();
   });
 
-  it("still renders the status-bar container when empty", () => {
+  it("renders nothing when empty (notifications moved to the top-right banner stack)", () => {
     render(<StatusBar persistent={[]} visibleToast={null} />);
-    expect(screen.getByTestId("status-bar")).toBeInTheDocument();
+    expect(screen.queryByTestId("status-bar")).toBeNull();
   });
 
   it("renders persistent items with label and value", () => {
@@ -47,8 +47,7 @@ describe("StatusBar", () => {
 
   it("renders only the visible toast message on the right slot", () => {
     const t1 = toast({ id: "toast:1", message: "agent-hub 설치 중…" });
-    const t2 = toast({ id: "toast:2", message: "agent-hub 설치 완료", severity: "success" });
-    // Only visibleToast (t1) is shown; t2 contributes to pendingCount only.
+    // Only visibleToast (t1) is shown; one more toast is queued (pendingCount=1).
     render(<StatusBar persistent={[]} visibleToast={t1} pendingCount={1} />);
     expect(screen.getByText("agent-hub 설치 중…")).toBeInTheDocument();
     expect(screen.queryByText("agent-hub 설치 완료")).not.toBeInTheDocument();
@@ -195,7 +194,7 @@ describe("StatusBar", () => {
   });
 
   it("uses role=status with aria-live=polite for screen-reader updates", () => {
-    const { container } = render(<StatusBar persistent={[]} visibleToast={null} />);
+    const { container } = render(<StatusBar persistent={[]} visibleToast={toast()} />);
     // Query the footer directly — rendering surfaces it with role="status".
     const footer = container.querySelector("footer");
     expect(footer).not.toBeNull();
