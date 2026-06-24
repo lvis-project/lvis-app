@@ -4017,7 +4017,11 @@ export class ConversationLoop {
         permissionManager: pm,
         approvalGate: this.deps.approvalGate,
         auditLogger: this.deps.auditLogger,
-        skipApproval: true,
+        approvalBypass: {
+          source: "builtin-slash",
+          trustOrigin: "user-keyboard",
+          explicitUserAction: true,
+        },
       });
       if (!result.ok) return t("be_conversationLoop.permissionModeCancelled", { message: result.message ?? result.error });
       callbacks?.onPermissionModeChanged?.(result.mode);

@@ -199,6 +199,16 @@ export function PermissionsTab() {
     };
   }, [fetchAll, fetchApprovals]);
 
+  useEffect(() => {
+    const unsubscribe = window.lvis?.permission?.onModeChanged?.((nextMode) => {
+      setMode((nextMode as ExecMode) ?? "default");
+      void fetchAll();
+    });
+    return () => {
+      unsubscribe?.();
+    };
+  }, [fetchAll]);
+
   const handleRevokeApproval = async (key: string, toolName: string, scope: UserApprovalScope) => {
     if (!window.lvis?.userApproval) return;
     if (scope === "persistent") {

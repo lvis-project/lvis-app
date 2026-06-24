@@ -167,7 +167,13 @@ describe("permissions IPC handlers", () => {
     expect(deps.approvalGate.requestAndWait).not.toHaveBeenCalled();
     expect(permissionManager.setModePersist).toHaveBeenCalledWith("auto");
     expect(deps.auditLogger.appendPermissionAuditEntry).toHaveBeenCalledWith(
-      expect.objectContaining({ decision: "mode_change", fromMode: "default", toMode: "auto", durable: true }),
+      expect.objectContaining({
+        decision: "mode_change",
+        fromMode: "default",
+        toMode: "auto",
+        durable: true,
+        confirmationSource: "settings-ui",
+      }),
     );
   });
 

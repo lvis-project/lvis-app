@@ -238,7 +238,11 @@ export function registerPermissionsHandlers(deps: IpcDeps): void {
       permissionManager: pm,
       approvalGate,
       auditLogger,
-      skipApproval: true,
+      approvalBypass: {
+        source: "settings-ui",
+        trustOrigin: "user-keyboard",
+        explicitUserAction: true,
+      },
     });
     if (!result.ok) return result;
     broadcastPermissionModeChanged(deps, result.mode);

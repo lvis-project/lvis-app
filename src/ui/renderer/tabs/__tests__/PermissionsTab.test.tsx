@@ -382,6 +382,28 @@ describe("PermissionsTab hook quarantine notice", () => {
     expect(screen.queryByTestId("reviewer-mode-disabled")).toBeNull();
   });
 
+  it("refreshes an already-open Settings tab when another window changes permission mode", async () => {
+    const api = installApi([[]]);
+    api.permission.getMode
+      .mockResolvedValueOnce({ mode: "default" })
+      .mockResolvedValue({ mode: "auto" });
+
+    await act(async () => {
+      render(<PermissionsTab />);
+    });
+
+    expect(screen.queryByTestId("reviewer-prompt-panel")).toBeNull();
+    const onModeChanged = api.permission.onModeChanged.mock.calls[0]?.[0] as ((mode: string) => void) | undefined;
+    expect(onModeChanged).toBeTruthy();
+
+    await act(async () => {
+      onModeChanged?.("auto");
+    });
+
+    expect(screen.getByTestId("reviewer-prompt-panel")).toBeTruthy();
+    expect(screen.getByTestId("exec-mode-auto")).toContainElement(screen.getByTestId("reviewer-prompt-panel"));
+  });
+
   it("does not expose the reviewer fallback policy in Settings", async () => {
     const api = installApi([[]]);
 
