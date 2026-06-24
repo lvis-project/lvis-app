@@ -608,10 +608,12 @@ export async function parsePluginJson(
     // surface, and listing an auth tool there would expose sign-in/sign-out as
     // an agent-callable tool. They belong in uiCallable[] only.
     //
-    // Soft warn (not hard fail) for migration safety — plugins drop auth tools
-    // from tools[] in parallel PRs; a hard fail would break already-loaded
-    // plugins mid-migration. Matches the `auth.changed` soft-warn precedent
-    // above. The CI naming/host gates promote this to an error post-migration.
+    // Hard fail: both shipped auth plugins (lge-api, ms-graph) are migrated —
+    // their auth tools live in uiCallable[] only, never tools[] — so rejecting
+    // can no longer break a mid-migration plugin. This is the SOLE guard against
+    // a regression silently re-exposing auth as an LLM tool: `tools[]` is
+    // projected to the model verbatim (manifestToolsToMcpTools), and there is no
+    // CI gate for this (naming-gate covers process-metadata identifiers only).
     const authToolNames = ([
       parsed.auth.statusTool,
       parsed.auth.loginTool,
@@ -621,8 +623,11 @@ export async function parsePluginJson(
       ? authToolNames.filter((name) => parsed.tools.includes(name))
       : [];
     if (leakedAuthTools.length > 0) {
-      log.warn(
-        `plugin '${pid}' declares auth tool(s) ${leakedAuthTools.map((n) => `'${n}'`).join(", ")} in tools[] — auth is a host-managed lifecycle and these tools must not be LLM-callable. Remove them from tools[] (keep them in uiCallable[]). See architecture.md §9.4a.`,
+      const names = leakedAuthTools.map((n) => `'${n}'`).join(", ");
+      fail(
+        "tools",
+        `auth tool(s) ${names} must not appear in tools[] — auth is a host-managed lifecycle, not an LLM-callable tool`,
+        `remove ${names} from tools[] (keep them in uiCallable[] only). See architecture.md §9.4a`,
       );
     }
   }
