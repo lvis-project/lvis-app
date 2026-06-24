@@ -42,7 +42,7 @@ describe("sandbox-capability", () => {
   it("isWeakSandbox treats assumed confidence as weak even for non-none kinds", () => {
     expect(
       isWeakSandbox({
-        kind: "bubblewrap",
+        kind: "asrt",
         confidence: "assumed",
         platform: "linux",
         reason: "",
@@ -53,35 +53,53 @@ describe("sandbox-capability", () => {
   it("isWeakSandbox returns false for a verified non-none capability", () => {
     expect(
       isWeakSandbox({
-        kind: "bubblewrap",
+        kind: "asrt",
         confidence: "verified",
         platform: "linux",
-        reason: "bwrap present + invocable",
+        reason: "ASRT (bwrap) active",
       }),
     ).toBe(false);
     expect(
       isWeakSandbox({
-        kind: "sandbox-exec",
+        kind: "asrt",
         confidence: "verified",
         platform: "darwin",
-        reason: "sandbox-exec gating enforced",
+        reason: "ASRT (Seatbelt) active",
       }),
     ).toBe(false);
   });
+
+  it("formatSandboxCapabilityForPrompt emits the 'asrt' kind label", () => {
+    const cap: SandboxCapability = {
+      kind: "asrt",
+      confidence: "verified",
+      platform: "darwin",
+      reason: "ASRT (Seatbelt) active — fs+process+network contained",
+    };
+    expect(formatSandboxCapabilityForPrompt(cap)).toBe(
+      "executionSandbox=asrt (verified, darwin) — ASRT (Seatbelt) active — fs+process+network contained",
+    );
+  });
 });
 
-// ─── PR-A1 additions: new SandboxKind union members ──────────────────────────
+// ─── SandboxKind union members ───────────────────────────────────────────────
 
-describe("sandbox-capability — PR-A1 new kind union members", () => {
-  it("SandboxKind type includes 'partial' and 'fs-only' (compile-time check via assignment)", () => {
+describe("sandbox-capability — SandboxKind union members", () => {
+  it("SandboxKind type includes 'asrt', 'partial' and 'fs-only' (compile-time check via assignment)", () => {
     // If SandboxKind did not include these values, this block would fail
     // to compile (caught by typecheck). Runtime assertion confirms the
     // value round-trips through the type.
+    const asrt: SandboxCapability = {
+      kind: "asrt",
+      confidence: "verified",
+      platform: "darwin",
+      reason: "ASRT active",
+    };
     const partial: SandboxCapability = {
       kind: "partial",
       confidence: "verified",
       platform: "darwin",
-      reason: "sandbox-exec partial profile active",
+      reason: "partial profile active",
     };
     const fsOnly: SandboxCapability = {
       kind: "fs-only",
@@ -89,6 +107,7 @@ describe("sandbox-capability — PR-A1 new kind union members", () => {
       platform: "linux",
       reason: "landlock filesystem isolation only",
     };
+    expect(asrt.kind).toBe("asrt");
     expect(partial.kind).toBe("partial");
     expect(fsOnly.kind).toBe("fs-only");
   });
@@ -117,24 +136,21 @@ describe("sandbox-capability — PR-A1 new kind union members", () => {
     ).toBe(false);
   });
 
-  it("isWeakSandbox returns false for verified bubblewrap (unchanged)", () => {
+  it("isWeakSandbox returns false for verified asrt (strong)", () => {
     expect(
       isWeakSandbox({
-        kind: "bubblewrap",
+        kind: "asrt",
         confidence: "verified",
         platform: "linux",
-        reason: "bwrap present",
+        reason: "ASRT (bwrap) active",
       }),
     ).toBe(false);
-  });
-
-  it("isWeakSandbox returns false for verified appcontainer", () => {
     expect(
       isWeakSandbox({
-        kind: "appcontainer",
+        kind: "asrt",
         confidence: "verified",
-        platform: "win32",
-        reason: "AppContainer active",
+        platform: "darwin",
+        reason: "ASRT (Seatbelt) active",
       }),
     ).toBe(false);
   });
@@ -184,15 +200,15 @@ describe("sandbox-capability — PR-A1 new kind union members", () => {
 // ─── Fixture snapshot: sandbox-eval-verdicts.json ────────────────────────────
 
 describe("sandbox-eval-verdicts fixture", () => {
-  it("fixture file has all 8 expected cases (PR-A3: +sandbox-exec +appcontainer)", async () => {
+  it("fixture file has all 6 expected cases (per-OS runner kinds replaced by 'asrt')", async () => {
     const fixture = (await import("./__fixtures__/sandbox-eval-verdicts.json", {
       with: { type: "json" },
     })).default as Record<string, { rule: string; llm: string; final: string }>;
 
-    expect(Object.keys(fixture)).toHaveLength(8);
+    expect(Object.keys(fixture)).toHaveLength(6);
     expect(fixture["kind=none + benign tool"]).toEqual({ rule: "low", llm: "low", final: "low" });
     expect(fixture["kind=none + risky tool"]).toEqual({ rule: "medium", llm: "low", final: "medium" });
-    expect(fixture["kind=bubblewrap + risky tool"]).toEqual({ rule: "medium", llm: "low", final: "medium" });
+    expect(fixture["kind=asrt + risky tool"]).toEqual({ rule: "medium", llm: "low", final: "medium" });
     expect(fixture["kind=partial + risky tool"]).toEqual({ rule: "medium", llm: "low", final: "medium" });
     expect(fixture["kind=fs-only + high-risk write"]).toEqual({ rule: "high", llm: "medium", final: "high" });
     expect(fixture["weak context + benign tool"]).toEqual({ rule: "medium", llm: "low", final: "medium" });

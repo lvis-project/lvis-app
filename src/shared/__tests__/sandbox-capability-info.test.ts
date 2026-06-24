@@ -6,15 +6,15 @@ import { describe, it, expect } from "vitest";
 import { sandboxConfinementForPlatform } from "../sandbox-capability-info.js";
 
 describe("sandboxConfinementForPlatform", () => {
-  it("macOS confines filesystem + process but NOT network (Seatbelt is PARTIAL)", () => {
-    expect(sandboxConfinementForPlatform("darwin", "partial")).toEqual({
+  it("macOS confines filesystem + process + network (Seatbelt via ASRT — egress contained by the loopback proxy + strict-union allow-list)", () => {
+    expect(sandboxConfinementForPlatform("darwin", "full")).toEqual({
       filesystem: true,
       process: true,
-      network: false,
+      network: true,
     });
   });
 
-  it("Linux confines filesystem + process + network (bubblewrap --unshare-net)", () => {
+  it("Linux confines filesystem + process + network (bubblewrap via ASRT)", () => {
     expect(sandboxConfinementForPlatform("linux", "full")).toEqual({
       filesystem: true,
       process: true,
@@ -22,7 +22,7 @@ describe("sandboxConfinementForPlatform", () => {
     });
   });
 
-  it("Windows confines nothing — no runner available", () => {
+  it("Windows confines nothing — fail-closed, no sandbox", () => {
     expect(sandboxConfinementForPlatform("win32", "none")).toEqual({
       filesystem: false,
       process: false,
@@ -43,7 +43,7 @@ describe("sandboxConfinementForPlatform", () => {
     });
   });
 
-  it("never claims network containment on macOS even when active", () => {
-    expect(sandboxConfinementForPlatform("darwin", "partial").network).toBe(false);
+  it("claims REAL network containment on macOS when active (ASRT loopback-proxy floor)", () => {
+    expect(sandboxConfinementForPlatform("darwin", "full").network).toBe(true);
   });
 });

@@ -186,30 +186,28 @@ export function registerPermissionsHandlers(deps: IpcDeps): void {
   // platform" rather than reading as unavailable merely because it's off.
   // `enabled` separately reflects the current setting.
   ipcMain.handle(PERMISSIONS.sandboxCapability, async () => {
-    const { getActiveDetection } = await import("../../permissions/sandbox-runner.js");
     const { sandboxConfinementForPlatform } = await import(
       "../../shared/sandbox-capability-info.js"
     );
     const platform = process.platform;
-    const detection = getActiveDetection(platform);
     const enabled =
       (deps.settingsService.get("features")?.osToolSandbox ?? false) ||
       process.env["LVIS_SANDBOX_ENABLED"] === "1";
-    // Map the platform to the simplified confinement strength. Linux bwrap
-    // confines fs + process + network ("full"); macOS Seatbelt confines
-    // fs + process only ("partial"); Windows + others have no runner ("none").
-    // The gate (enabled) only controls whether a runner is registered at boot,
-    // not what the platform is capable of, so report the platform's potential
-    // even when off — the toggle text stays honest before the user opts in.
+    // Map the platform to the simplified confinement strength. Both macOS
+    // (Seatbelt via ASRT) and Linux (bwrap via ASRT) confine fs + process +
+    // network ("full"); Windows + others are fail-closed ("none"). The gate
+    // (enabled) only controls whether the ASRT sandbox initializes at boot, not
+    // what the platform is capable of, so report the platform's potential even
+    // when off — the toggle text stays honest before the user opts in.
     const kind: "full" | "partial" | "none" =
-      platform === "linux" ? "full" : platform === "darwin" ? "partial" : "none";
+      platform === "linux" || platform === "darwin" ? "full" : "none";
     const available = kind !== "none";
     return {
       platform,
       enabled,
       available,
       kind,
-      reason: detection?.reason ?? "",
+      reason: "",
       confines: sandboxConfinementForPlatform(platform, kind),
     };
   });
