@@ -1484,7 +1484,7 @@ export function App() {
         <div className="relative flex min-h-0 min-w-0 flex-1 overflow-hidden">
         <main
           className={`relative flex min-h-0 min-w-0 flex-1 flex-col bg-background transition-[padding] duration-200 ease-out motion-reduce:transition-none ${
-            sidebarCollapsed ? "pl-[5rem]" : "pl-[15.5rem]"
+            sidebarCollapsed ? "pl-[4rem]" : "pl-[14.5rem]"
           }`}
         >
           {/* Floating notification stack — update/announcement banners are an
@@ -1506,6 +1506,15 @@ export function App() {
               announcements={marketplaceAnnouncements}
               onDismiss={handleMarketplaceAnnouncementDismiss}
             />
+          </div>
+          {/* Transient status TOASTS (install progress, lifecycle results, the
+              pre-turn auto-compact indicator) get their OWN top-center region —
+              distinct from the top-right banner stack above, which is for
+              persistent, actionable Update/Dismiss banners. Toasts are
+              ephemeral + queue-advanced; a centered pill reads as a toast, not
+              a banner. Renders nothing when idle (StatusBar returns null). */}
+          <div className="pointer-events-none absolute left-1/2 top-2 z-50 -translate-x-1/2 [&>*]:pointer-events-auto">
+            <StatusBar persistent={statusPersistent} visibleToast={statusVisibleToast} pendingCount={statusPendingCount} onToastClick={handleStatusToastClick} />
           </div>
           {fallbackToast && (
             <div className="bg-warning text-warning-foreground text-xs px-4 py-2 border-b border-warning">
@@ -1645,10 +1654,10 @@ export function App() {
             onRoutineAcknowledge={handleRoutineAcknowledge}
           />
           </ErrorBoundary>
-          {/* Status bar — last child of the chat/content column, BELOW
-              MainContent/composer and starting right of the sidebar (no longer
-              a full-width root footer; no top divider). */}
-          <StatusBar persistent={statusPersistent} visibleToast={statusVisibleToast} pendingCount={statusPendingCount} onToastClick={handleStatusToastClick} />
+          {/* Bottom StatusBar removed — its notifications now render in the
+              top-right floating banner stack (merged with the plugin-install /
+              marketplace banners). The composer's own status sub-row keeps
+              showing the ring / permission / model cells. */}
         </main>
         </div>
       </div>
