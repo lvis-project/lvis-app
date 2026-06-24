@@ -30,6 +30,7 @@ import { WorkGroup } from "./components/WorkGroup.js";
 import { PermissionReviewStatusCard } from "./components/PermissionReviewStatusCard.js";
 import { DeferredApprovalChip } from "./components/DeferredApprovalChip.js";
 import { TurnActionBar } from "./components/TurnActionBar.js";
+import { StatusBar, type StatusBarProps } from "./components/StatusBar.js";
 // TurnSummaryFooter 컴포넌트는 2026-05-07 폐기. 토큰 정보는 TurnActionBar 의
 // TokenCostBadge (provider-truth, 토글 + tooltip breakdown) 가 단일 source 로
 // 표시. 시간 정보는 WorkGroup 헤더의 ⏱ T 가 흡수. turn_summary entry 는
@@ -280,6 +281,8 @@ export interface ChatViewProps {
   onPluginPrimaryAction?: (overlayItemId: string) => void;
   /** Called when a completed routine overlay result has been seen or dismissed. */
   onRoutineAcknowledge?: (routineId: string, firedAt: string) => void;
+  /** Toast surface rendered directly above the composer input. */
+  statusBar?: StatusBarProps;
 }
 
 function AskUserAnswerBubble({
@@ -320,7 +323,7 @@ function AskUserAnswerBubble({
   );
 }
 
-export function ChatView({ api, onAsk, onEditSave, onFork, onToggleStar, onRetryEffort, onContinueFromLastUser, isEntryStarred, onAbort, onGuide, onGuideError, onFeedback, subAgentSpawns, loadedSkills, hasAskQuestions, askQuestions, onResolveAskQuestion, plugins, onSelectPlugin, currentSessionKind = "main", currentSessionTitle, sessions, onLoadSession, onRefreshSessions, commandActions, commandPopoverOpen, onCommandPopoverOpenChange, onPluginPrimaryAction, onRoutineAcknowledge }: ChatViewProps) {
+export function ChatView({ api, onAsk, onEditSave, onFork, onToggleStar, onRetryEffort, onContinueFromLastUser, isEntryStarred, onAbort, onGuide, onGuideError, onFeedback, subAgentSpawns, loadedSkills, hasAskQuestions, askQuestions, onResolveAskQuestion, plugins, onSelectPlugin, currentSessionKind = "main", currentSessionTitle, sessions, onLoadSession, onRefreshSessions, commandActions, commandPopoverOpen, onCommandPopoverOpenChange, onPluginPrimaryAction, onRoutineAcknowledge, statusBar }: ChatViewProps) {
   const { t } = useTranslation();
   // We still need the api for SessionTodoPanel; obtain it via singleton.
   const workflowApi = getApi();
@@ -1345,6 +1348,27 @@ export function ChatView({ api, onAsk, onEditSave, onFork, onToggleStar, onRetry
           </div>
         );
       }
+      const hasCurrentTurnOutput = activeEntries
+        .slice(idx + 1)
+        .some(
+          (nextEntry) =>
+            nextEntry.kind === "assistant" ||
+            nextEntry.kind === "reasoning" ||
+            nextEntry.kind === "tool_group" ||
+            nextEntry.kind === "permission_review",
+        );
+      if (streaming && idx === lastTurnStartIdx && !hasCurrentTurnOutput) {
+        rendered.push(
+          <WorkGroup
+            key={`wg-${currentSessionId}:${idx}:active-start`}
+            stepCount={0}
+            streaming
+            revision={`${currentSessionId}:${idx}:active-start`}
+          >
+            {null}
+          </WorkGroup>,
+        );
+      }
       i++;
       continue;
     }
@@ -1872,7 +1896,7 @@ export function ChatView({ api, onAsk, onEditSave, onFork, onToggleStar, onRetry
             onSendNow={handleMessageQueueSendNow}
           />
         </div>
-        <div className="w-full max-w-full min-w-0 overflow-x-hidden pb-1 space-y-2">
+        <div className="w-full max-w-full min-w-0 overflow-x-hidden pb-1">
           {/* §8 agent-approval surface — interactive natural-language approval
               chip. Renders directly above the composer (the position its own
               contract describes); self-hides unless the draft expresses an
@@ -1885,7 +1909,16 @@ export function ChatView({ api, onAsk, onEditSave, onFork, onToggleStar, onRetry
               `border` (not `ring`): the dock's overflow-x-hidden forces
               overflow-y:auto, which clips a ring's top edge; a border paints
               inside the box so all four edges render. */}
-          <div className="mx-3 mb-2 rounded-xl bg-input-bar shadow-md overflow-hidden border border-border">
+          <div className="relative mx-3 mb-2 pt-9">
+            {statusBar && (statusBar.visibleToast !== null || statusBar.persistent.length > 0) ? (
+              <div
+                className="absolute inset-x-3 top-0 z-0 min-w-0"
+                data-testid="composer-toast-dock"
+              >
+                <StatusBar {...statusBar} />
+              </div>
+            ) : null}
+            <div className="relative z-10 rounded-xl bg-input-bar shadow-md overflow-hidden border border-border">
           <Composer
             ref={composerRef}
             text={question}
@@ -1946,6 +1979,7 @@ export function ChatView({ api, onAsk, onEditSave, onFork, onToggleStar, onRetry
             onOpenModelSettings={onOpenModelSettings}
             onOpenPermissions={onOpenInputPermissions}
           />
+            </div>
           </div>
         </div>
         <QuestionOverlay
