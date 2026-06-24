@@ -765,7 +765,7 @@ describe("ApprovalGate", () => {
   it("auto-injects sandboxCapability for tool-kind requests (round-4 test-engineer MAJOR)", () => {
     const wc = makeMockWebContents();
     const stub = vi.fn(() => ({
-      kind: "bubblewrap" as const,
+      kind: "asrt" as const,
       confidence: "verified" as const,
       platform: "linux" as NodeJS.Platform,
       reason: "stubbed for test",
@@ -782,7 +782,7 @@ describe("ApprovalGate", () => {
     expect(stub).toHaveBeenCalledOnce();
     const sent = (wc.send.mock.calls[0] as [string, ApprovalRequest])[1];
     expect(sent.sandboxCapability).toEqual(expect.objectContaining({
-      kind: "bubblewrap",
+      kind: "asrt",
       platform: "linux",
     }));
   });
@@ -790,7 +790,7 @@ describe("ApprovalGate", () => {
   it("preserves an explicitly-provided sandboxCapability without re-detecting (round-4 test-engineer MAJOR)", () => {
     const wc = makeMockWebContents();
     const stub = vi.fn(() => ({
-      kind: "bubblewrap" as const,
+      kind: "asrt" as const,
       confidence: "verified" as const,
       platform: "linux" as NodeJS.Platform,
       reason: "should NOT be used",
@@ -826,14 +826,14 @@ describe("ApprovalGate", () => {
     gate.requestAndWait(makeRequest({ id: "req-real-default" }));
     const sent = (wc.send.mock.calls[0] as [string, ApprovalRequest])[1];
     expect(sent.sandboxCapability).toBeDefined();
-    expect(sent.sandboxCapability?.kind).toMatch(/^(none|bubblewrap|sandbox-exec|appcontainer)$/);
+    expect(sent.sandboxCapability?.kind).toMatch(/^(none|asrt)$/);
     expect(sent.sandboxCapability?.platform).toBe(process.platform);
   });
 
   it("does NOT inject sandboxCapability for toolCategory=meta requests (round-5 critic MAJOR-1)", () => {
     const wc = makeMockWebContents();
     const stub = vi.fn(() => ({
-      kind: "bubblewrap" as const,
+      kind: "asrt" as const,
       confidence: "verified" as const,
       platform: "linux" as NodeJS.Platform,
       reason: "should NOT be used",
@@ -864,7 +864,7 @@ describe("ApprovalGate", () => {
   it("does NOT inject sandboxCapability for agent-action requests", () => {
     const wc = makeMockWebContents();
     const stub = vi.fn(() => ({
-      kind: "bubblewrap" as const,
+      kind: "asrt" as const,
       confidence: "verified" as const,
       platform: "linux" as NodeJS.Platform,
       reason: "should NOT be used",
@@ -896,7 +896,7 @@ describe("ApprovalGate", () => {
   it("does NOT inject sandboxCapability for out-of-allowed-dir kind (round-4 critic CRITICAL C2)", () => {
     const wc = makeMockWebContents();
     const stub = vi.fn(() => ({
-      kind: "bubblewrap" as const,
+      kind: "asrt" as const,
       confidence: "verified" as const,
       platform: "linux" as NodeJS.Platform,
       reason: "should NOT be used",
