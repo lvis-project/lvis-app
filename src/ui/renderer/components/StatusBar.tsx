@@ -57,7 +57,9 @@ export function StatusBar(props: StatusBarProps) {
   return (
     <TooltipProvider>
     <footer
-      className="flex h-6 shrink-0 items-center justify-between gap-3 bg-background px-3 text-[11px] text-muted-foreground"
+      className={`flex h-6 shrink-0 items-center justify-between gap-3 rounded-b-xl px-3 text-[11px] text-muted-foreground ${
+        persistent || visibleToast ? "bg-background" : "bg-transparent"
+      }`}
       data-testid="status-bar"
       role="status"
       aria-live="polite"
