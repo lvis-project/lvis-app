@@ -132,6 +132,13 @@ export function App() {
   // `${pluginId}:${tool}`. Prevents duplicate fires from rapid double-clicks
   // when no panel transition is visible to throttle the user naturally.
   const pluginActionInflightRef = useRef<Set<string>>(new Set());
+  // Detached auth gate — plugins awaiting an unauthed→authed transition before
+  // their detached panel opens. Keyed by pluginId → the detached view key to
+  // open once `manifest.auth` status flips to `authed`. Populated by
+  // handleViewSelect when a detached auth plugin is selected while unauthed
+  // (the host fires loginTool to open the SSO window, NOT the panel); drained
+  // by the auth-transition effect below. See architecture.md §9.4a.
+  const pendingDetachedAuthOpenRef = useRef<Map<string, string>>(new Map());
   // Ref so handlePluginPrimaryAction (defined before handleAsk) can call
   // handleAsk without a forward-declaration TS error. Updated each render.
   const handleAskRef = useRef<(
@@ -658,11 +665,18 @@ export function App() {
   // window's active view. The app's mode is the sole authority for this;
   // plugins do not get a say.
   //
-  // If the owning plugin declares `manifest.auth` AND its current state is
-  // unauthed, embedded views invoke loginTool before navigating. Detached
-  // views open directly so plugin-owned login UIs can collect their own
-  // credentials through the plugin surface instead of the host calling
-  // loginTool with no arguments.
+  // Auth is a HOST-managed lifecycle (architecture.md §9.4a): the agent never
+  // calls login/logout, and the detached/chat path is login-first and
+  // host-generic off `manifest.auth`. Selecting a detached auth plugin:
+  //   • authed   → open the detached panel.
+  //   • unauthed → call loginTool via callPluginMethod (opens the SSO window
+  //     ONLY, not the panel), record a pending open, and open the panel when
+  //     the plugin's status transitions unauthed→authed (the usePluginAuthStatuses
+  //     hook subscribes `${id}.auth.changed`; the effect below drains the ref).
+  //   • status not yet loaded (loading/undefined) → race guard: open directly
+  //     so a slow status fetch never traps the user behind a blank gate.
+  // Plugins WITHOUT `manifest.auth` open the detached panel directly. The
+  // inline (action-mode) path is unchanged.
   const handleViewSelect = useCallback(
     (key: string) => {
       if (key.startsWith("plugin:")) {
@@ -713,6 +727,41 @@ export function App() {
         // every plugin view INLINE; chat pops every plugin view into a
         // detached window. Plugins have no say in this decision.
         if (appMode === "chat") {
+          const card = pluginCards.find((c) => c.id === view.pluginId);
+          const loginTool = card?.auth?.loginTool;
+          // Non-auth plugin (or no declared loginTool) → open directly.
+          if (!loginTool) {
+            void openDetachedPluginView(key);
+            return;
+          }
+          const authState = pluginAuthStatuses.get(view.pluginId)?.kind;
+          if (authState === "authed") {
+            void openDetachedPluginView(key);
+            return;
+          }
+          if (authState === "unauthed") {
+            // Host-managed login-first: fire loginTool (opens the SSO window
+            // ONLY, never the panel), then open the panel when status flips to
+            // authed. The auth-transition effect drains this ref.
+            pendingDetachedAuthOpenRef.current.set(view.pluginId, key);
+            void (async () => {
+              try {
+                await api.callPluginMethod(loginTool);
+              } catch (err) {
+                // Raw err.message may carry OAuth/Bearer fragments — keep raw
+                // in console only, surface a generic message to the user.
+                console.warn(
+                  `[plugin-auth] ${view.pluginId} loginTool '${loginTool}' failed`,
+                  err,
+                );
+                pendingDetachedAuthOpenRef.current.delete(view.pluginId);
+                setErrorWithThought(t("app.errorCannotRunPluginAction"));
+              }
+            })();
+            return;
+          }
+          // Status not yet loaded (loading / undefined) — race guard: open
+          // directly rather than trapping the user behind an unresolved gate.
           void openDetachedPluginView(key);
           return;
         }
@@ -726,8 +775,9 @@ export function App() {
         // We do NOT gate navigation on auth — the user lands on the inline view
         // and the plugin surface gates its own content on auth state (no
         // token_login bypass; no authenticated data granted by navigation).
-        // Detached-view login behaviour is unchanged (handled above via
-        // openDetachedPluginView, which never calls loginTool from here).
+        // Detached-view login is host-managed (handled above): the host fires
+        // loginTool to open the SSO window and opens the panel only after the
+        // status transitions to authed. The inline path here is untouched.
       }
       // Chat mode: built-in detachable views open in a separate window; home
       // (and every action-mode path) stays inline.
@@ -747,10 +797,31 @@ export function App() {
       api,
       appMode,
       pluginViews,
+      pluginCards,
+      pluginAuthStatuses,
       openDetachedPluginView,
       openDetachedBuiltInView,
+      setErrorWithThought,
     ],
   );
+
+  // Detached auth gate drain — when a plugin the user selected while unauthed
+  // transitions to authed (the usePluginAuthStatuses hook updates the map on
+  // `${id}.auth.changed`), open the detached panel that was deferred. Only
+  // unauthed→authed opens the panel; an `error` status clears the pending
+  // entry without opening so a failed login never silently pops a window.
+  useEffect(() => {
+    if (pendingDetachedAuthOpenRef.current.size === 0) return;
+    for (const [pluginId, viewKey] of [...pendingDetachedAuthOpenRef.current]) {
+      const kind = pluginAuthStatuses.get(pluginId)?.kind;
+      if (kind === "authed") {
+        pendingDetachedAuthOpenRef.current.delete(pluginId);
+        void openDetachedPluginView(viewKey);
+      } else if (kind === "error") {
+        pendingDetachedAuthOpenRef.current.delete(pluginId);
+      }
+    }
+  }, [pluginAuthStatuses, openDetachedPluginView]);
 
   // If the currently-open plugin view belongs to a plugin that just got
   // uninstalled, fall back to home so the renderer doesn't render a "view

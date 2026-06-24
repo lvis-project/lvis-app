@@ -600,6 +600,31 @@ export async function parsePluginJson(
         );
       }
     }
+
+    // architecture.md §9.4a: auth is a HOST-managed lifecycle, not an LLM
+    // capability. The auth tools (statusTool/loginTool/logoutTool) are invoked
+    // only through the host UI surface (callFromUi, gated by uiCallable[]) and
+    // must NOT appear in tools[] — tools[] is the LLM-facing registration
+    // surface, and listing an auth tool there would expose sign-in/sign-out as
+    // an agent-callable tool. They belong in uiCallable[] only.
+    //
+    // Soft warn (not hard fail) for migration safety — plugins drop auth tools
+    // from tools[] in parallel PRs; a hard fail would break already-loaded
+    // plugins mid-migration. Matches the `auth.changed` soft-warn precedent
+    // above. The CI naming/host gates promote this to an error post-migration.
+    const authToolNames = ([
+      parsed.auth.statusTool,
+      parsed.auth.loginTool,
+      parsed.auth.logoutTool,
+    ] as Array<unknown>).filter((v): v is string => typeof v === "string" && v.length > 0);
+    const leakedAuthTools = Array.isArray(parsed.tools)
+      ? authToolNames.filter((name) => parsed.tools.includes(name))
+      : [];
+    if (leakedAuthTools.length > 0) {
+      log.warn(
+        `plugin '${pid}' declares auth tool(s) ${leakedAuthTools.map((n) => `'${n}'`).join(", ")} in tools[] — auth is a host-managed lifecycle and these tools must not be LLM-callable. Remove them from tools[] (keep them in uiCallable[]). See architecture.md §9.4a.`,
+      );
+    }
   }
 
   // keywords[].skillId must be in tools[].
