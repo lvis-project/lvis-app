@@ -29,12 +29,16 @@ import {
   type ToolExecutionContext,
   type ToolResult,
 } from "./base.js";
-import { buildSafeChildEnv } from "./safe-env.js";
+import { buildSafeChildEnv, buildSandboxedChildEnv } from "./safe-env.js";
 import {
   validateShellCommandPathPolicy,
   validateShellWorkingDirectory,
 } from "./shell-path-policy.js";
-import { getSandboxRunner } from "../permissions/sandbox-runner.js";
+import {
+  isAsrtSandboxActive,
+  wrapToolCommand,
+  cleanupAsrtSandboxAfterCommand,
+} from "../permissions/asrt-sandbox.js";
 import { deriveSandboxWritePaths } from "../permissions/sandbox-write-jail.js";
 import { TOOL_TIMEOUT_POLICY } from "../shared/tool-timeout-policy.js";
 import { trackManagedChildProcess } from "../main/managed-child-processes.js";
@@ -127,20 +131,16 @@ export class BashTool extends ZodTool<typeof BashToolInputSchema> {
       return { output: commandPathViolation, isError: true };
     }
 
-    // §691: SandboxRunner spawn path (first consumer of SandboxedProcess).
-    // A runner is registered at boot only when the user opted in (Settings →
-    // 권한 'OS 도구 샌드박스' or the LVIS_SANDBOX_ENABLED escape-hatch) AND the
-    // platform runner detected available. So a registered runner here means
-    // the sandbox is on — no separate runtime gate is needed.
-    // The sandboxed process exposes stdout/stderr as WHATWG
-    // ReadableStream<Uint8Array>; we pipe through TextDecoderStream for
-    // UTF-8 string capture (CJK multi-byte boundary safe).
+    // §691: ASRT (Anthropic sandbox-runtime) spawn path. The sandbox is gated
+    // at boot — `initializeAsrtSandbox` runs only when the user opted in
+    // (Settings → 권한 'OS 도구 샌드박스' or the LVIS_SANDBOX_ENABLED escape-hatch)
+    // AND the platform supports it. `isAsrtSandboxActive()` reflects that single
+    // boot-time decision; there is no runtime gate to re-evaluate here.
     //
-    // If no runner is registered (isolation=none, detect-and-skip / opt-out),
-    // fall through to the existing spawnWithTimeout path unchanged — composition
-    // rule + reviewer judgment remain the safety net.
-    const sandboxRunner = getSandboxRunner(process.platform as NodeJS.Platform);
-    if (sandboxRunner) {
+    // When the gate is OFF (the DEFAULT — osToolSandbox ships false), this is
+    // skipped and we fall through to the plain `spawnWithTimeout` path,
+    // unchanged from pre-migration behavior.
+    if (isAsrtSandboxActive()) {
       // Write-jail = canonicalized union of the owner plugin sandbox root
       // (when plugin-owned) and the in-scope allowed directories
       // (cwd ∪ user-authorized extras). cwd stays readable but is no
@@ -151,7 +151,7 @@ export class BashTool extends ZodTool<typeof BashToolInputSchema> {
           : {}),
         allowedDirectories: [resolvedCwd, ...ctx.extraAllowedDirectories],
       });
-      return await spawnWithSandbox(sandboxRunner, input.command, resolvedCwd, writePaths, input.timeoutSeconds);
+      return await spawnWithSandbox(input.command, resolvedCwd, writePaths, input.timeoutSeconds);
     }
 
     return await spawnWithTimeout(input.command, resolvedCwd, input.timeoutSeconds); // isolation=none path
@@ -182,129 +182,134 @@ interface SpawnResult {
 }
 
 /**
- * Execute a shell command via the registered {@link SandboxRunner} for the
- * current platform (Linux bwrap, macOS sandbox-exec, or Windows AppContainer).
+ * Execute a shell command under the ASRT (Anthropic sandbox-runtime) sandbox.
  *
- * The command is run as `bash -c <command>` inside the sandbox. stdout and
- * stderr are merged into a single string output (matching the behaviour of
- * {@link spawnWithTimeout}) via TextDecoderStream UTF-8 decoding.
+ * ASRT does not spawn the workload: {@link wrapToolCommand} returns the
+ * `{ argv, env }` for the OS-confined wrapper (macOS Seatbelt profile, Linux
+ * bwrap+seccomp) and the host spawns it here with `shell: false` (the wrapper
+ * argv already contains the shell invocation; a second shell would double-parse
+ * the command). After exit, {@link cleanupAsrtSandboxAfterCommand} releases the
+ * per-command proxy/helper state.
  *
- * Timeout: after `timeoutSeconds` the process is aborted via `proc.abort()`
- * (SIGTERM to bwrap wrapper, which propagates into the namespace).
- *
- * The sandboxed process is given a conservative capability set:
- *   - `networkBlocked: true` — egress policy is runner-dependent: Linux bwrap
- *     verified-kernel CLONE_NEWNET fully blocks it; macOS sandbox-exec is
- *     PARTIAL (loopback/IPv6/DNS still reachable).
- *   - `fsReadPaths: ["/etc", "/usr", HOME]` — minimal read mounts; the
- *     working dir is also readable.
- *   - `fsWritePaths: writePaths` — the namespace-scoped write-jail derived by
+ * Filesystem jail (per-command, trust-safe — see asrt-sandbox.PerCommandFilesystem):
+ *   - `allowWrite: writePaths` — the namespace-scoped write-jail derived by
  *     {@link ../permissions/sandbox-write-jail.js deriveSandboxWritePaths}
  *     (owner plugin sandbox root ∪ allowed directories), NOT the bare cwd.
- *   - `processIsolated: true` — separate PID namespace (Linux only; macOS
- *     informational).
+ *   - read-jail HOME-leak fix: `denyRead: [$HOME]` then re-allow the cwd and
+ *     the write paths via `allowRead`. ASRT's denyRead takes precedence over
+ *     allowRead's parent, so this denies the broad home dir while keeping the
+ *     working tree readable — closing the old bwrap/sandbox-exec leak where the
+ *     entire HOME was mounted readable.
  *
- * Policy notes:
- *   - Network policy will be refined when the always-on policy hook lands.
- *   - fsReadPaths will be extended based on per-platform tool analysis.
+ * Network egress is governed by the trusted boot config (deny-by-default; the
+ * boot askCb prompts for unmatched hosts), NOT per command.
  *
  * @internal — only exported for testing.
  */
 export async function spawnWithSandbox(
-  runner: import("../permissions/sandbox-runner.js").SandboxRunner,
   command: string,
   resolvedCwd: string,
   writePaths: readonly string[],
   timeoutSeconds: number,
 ): Promise<SpawnResult> {
-  const shell = resolveShell();
-  // Pass only string-valued env entries (SandboxRunner env type is Record<string,string>).
-  // CRITICAL: runner uses --clearenv + --setenv so only these entries enter the sandbox.
-  const safeEnv = Object.fromEntries(
-    Object.entries(shellEnvForChild(shell, buildSafeChildEnv())).filter(
-      (entry): entry is [string, string] => typeof entry[1] === "string",
-    ),
-  );
+  const home = process.env["HOME"];
+  // Read-jail HOME-leak fix: deny the whole home dir, then re-allow the working
+  // tree (cwd + write paths). Omitting denyRead when HOME is unset avoids
+  // denying nothing-meaningful; the write paths are always re-allowed for read.
+  const allowRead = [resolvedCwd, ...writePaths];
+  const filesystem = {
+    allowWrite: [...writePaths],
+    allowRead,
+    ...(home !== undefined && home !== "" ? { denyRead: [home] } : {}),
+  };
 
-  const proc = await runner.spawn(
-    shell.cmd,
-    shell.shellArgs(command),
-    {
-      networkBlocked: true,
-      // MEDIUM: /lib /lib64 /bin /sbin are now provided by the runner's base
-      // whitelist. Caller still specifies /etc /usr + HOME for shell/locale/git.
-      fsReadPaths: [
-        "/etc",
-        "/usr",
-        process.env["HOME"] ?? "/home",
-      ],
-      fsWritePaths: [...writePaths],
-      processIsolated: true,
-    },
-    // CRITICAL: pass cwd so the runner applies --chdir inside the namespace.
-    { env: safeEnv, cwd: resolvedCwd },
-  );
-
-  const chunks: string[] = [];
-
-  // HIGH: per-stream TextDecoder instance — a single shared decoder would
-  // corrupt multi-byte CJK sequences when stdout and stderr are drained
-  // concurrently because TextDecoder is stateful (stream: true mode buffers
-  // incomplete byte sequences across calls).
-  async function drainStream(stream: ReadableStream<Uint8Array>): Promise<void> {
-    const decoder = new TextDecoder("utf-8");
-    const reader = stream.getReader();
-    try {
-      for (;;) {
-        const { done, value } = await reader.read();
-        if (done) break;
-        chunks.push(decoder.decode(value, { stream: true }));
-      }
-      // Flush any remaining bytes held by the decoder.
-      const flushed = decoder.decode(undefined, { stream: false });
-      if (flushed) chunks.push(flushed);
-    } finally {
-      reader.releaseLock();
-    }
-  }
-
-  let timedOut = false;
-  let code: number | undefined;
-
-  const timeoutHandle = setTimeout(async () => {
-    timedOut = true;
-    await proc.abort();
-  }, timeoutSeconds * 1000);
-
+  const abortController = new AbortController();
+  let wrapped: { argv: string[]; env: NodeJS.ProcessEnv };
   try {
-    // Drain stdout and stderr concurrently, then wait for exit.
-    await Promise.all([drainStream(proc.stdout), drainStream(proc.stderr)]);
-    code = await proc.exitCode;
+    wrapped = await wrapToolCommand(command, {
+      filesystem,
+      abortSignal: abortController.signal,
+    });
   } catch (err) {
-    // HIGH: signal kill or spawn error — preserve the error message for
-    // diagnostic parity with spawnWithTimeout's "spawn failed: …" path.
-    code = undefined;
-    chunks.push(`\nspawn failed: ${(err as Error).message}`);
-  } finally {
-    clearTimeout(timeoutHandle);
-  }
-
-  const combined = chunks.join("");
-  const formatted = formatOutput(combined);
-
-  if (timedOut) {
     return {
-      output: formatTimeoutOutput(formatted, command, timeoutSeconds),
+      output: `spawn failed: ${(err as Error).message}`,
       isError: true,
-      metadata: { returncode: code ?? null, timedOut: true, sandboxed: true },
+      metadata: { sandboxed: true },
     };
   }
 
-  return {
-    output: formatted,
-    isError: code !== 0,
-    metadata: { returncode: code ?? null, sandboxed: true },
-  };
+  const [cmd, ...args] = wrapped.argv;
+  if (cmd === undefined) {
+    return {
+      output: "spawn failed: ASRT returned an empty argv",
+      isError: true,
+      metadata: { sandboxed: true },
+    };
+  }
+
+  return await new Promise<SpawnResult>((resolveResult) => {
+    // CRITICAL: shell:false — the wrapper argv is the literal program+args; a
+    // shell here would re-parse and break quoting / inject a second shell.
+    const child: PipedChild = spawn(cmd, args, {
+      cwd: resolvedCwd,
+      stdio: ["ignore", "pipe", "pipe"],
+      shell: false,
+      // Safe whitelist + ASRT's added proxy/CA env only — secrets stay stripped.
+      env: buildSandboxedChildEnv(wrapped.env),
+    });
+    trackManagedChildProcess(child, { label: "tool:bash:asrt" });
+
+    const chunks: Buffer[] = [];
+    const collect = (c: Buffer): void => {
+      chunks.push(c);
+    };
+    child.stdout.on("data", collect);
+    child.stderr.on("data", collect);
+
+    let settled = false;
+    let timedOut = false;
+    const timer = setTimeout(() => {
+      timedOut = true;
+      abortController.abort();
+      terminateProcess(child);
+    }, timeoutSeconds * 1000);
+
+    const finish = (code: number | null): void => {
+      if (settled) return;
+      settled = true;
+      clearTimeout(timer);
+      // Per-command cleanup (proxy/helper state) after the wrapped command ends.
+      void cleanupAsrtSandboxAfterCommand();
+      const combined = Buffer.concat(chunks).toString("utf-8");
+      const formatted = formatOutput(combined);
+      if (timedOut) {
+        resolveResult({
+          output: formatTimeoutOutput(formatted, command, timeoutSeconds),
+          isError: true,
+          metadata: { returncode: code, timedOut: true, sandboxed: true },
+        });
+      } else {
+        resolveResult({
+          output: formatted,
+          isError: code !== 0,
+          metadata: { returncode: code, sandboxed: true },
+        });
+      }
+    };
+
+    child.on("close", (code) => finish(code));
+    child.on("error", (err) => {
+      if (settled) return;
+      settled = true;
+      clearTimeout(timer);
+      void cleanupAsrtSandboxAfterCommand();
+      resolveResult({
+        output: `spawn failed: ${err.message}`,
+        isError: true,
+        metadata: { sandboxed: true },
+      });
+    });
+  });
 }
 
 async function spawnWithTimeout(
