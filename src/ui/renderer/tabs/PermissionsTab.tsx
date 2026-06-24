@@ -552,36 +552,31 @@ export function PermissionsTab() {
                   aria-label={opt.label}
                   className="mt-0.5"
                 />
-                <span>
+                <span className="min-w-0 flex-1">
                   <span className="font-medium">{opt.label}</span>
                   <span className="ml-1.5 text-[11px] text-muted-foreground">{opt.description}</span>
+                  {opt.value === "auto" && mode === "auto" && (
+                    <details
+                      className="mt-2 rounded-md border bg-muted/(--opacity-light)"
+                      data-testid="reviewer-prompt-panel"
+                      onClick={(event) => event.stopPropagation()}
+                    >
+                      <summary className="cursor-pointer px-3 py-2 text-[11px] font-semibold text-muted-foreground">
+                        {t("permissionsTab.frameworkSystemPromptTitle")}
+                      </summary>
+                      <pre
+                        className="max-h-44 overflow-auto border-t px-3 py-3 whitespace-pre-wrap break-all font-mono text-[11px] leading-relaxed"
+                        data-testid="reviewer-system-prompt"
+                      >
+                        {PERMISSION_REVIEWER_FRAMEWORK.systemPrompt}
+                      </pre>
+                    </details>
+                  )}
                 </span>
               </Label>
             ))}
           </RadioGroup>
         </SettingsSection>
-
-        {mode === "auto" && (
-          <SettingsSection
-            title={t("permissionsTab.reviewerPromptTitle")}
-            description={t("permissionsTab.reviewerPromptDescription")}
-          >
-            <details
-              className="rounded-md border bg-muted/(--opacity-light)"
-              data-testid="reviewer-prompt-panel"
-            >
-              <summary className="cursor-pointer px-3 py-2 text-xs font-semibold">
-                {t("permissionsTab.frameworkSystemPromptTitle")}
-              </summary>
-              <pre
-                className="max-h-56 overflow-auto border-t px-3 py-3 whitespace-pre-wrap break-all font-mono text-[11px] leading-relaxed"
-                data-testid="reviewer-system-prompt"
-              >
-                {PERMISSION_REVIEWER_FRAMEWORK.systemPrompt}
-              </pre>
-            </details>
-          </SettingsSection>
-        )}
 
         {/* ── Section B: Explicit Approval Policy ── */}
         <SettingsSection
