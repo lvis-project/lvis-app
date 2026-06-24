@@ -5,7 +5,7 @@
  * fragment files in this directory (`<namespace>.ts`, each exporting `en`/`ko`
  * objects) and merges them here.
  *
- * Fragments: 176
+ * Fragments: 179
  */
 import { en as en_app, ko as ko_app } from "./app.js";
 import { en as en_appearanceTab, ko as ko_appearanceTab } from "./appearanceTab.js";

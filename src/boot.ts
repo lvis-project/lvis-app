@@ -1303,6 +1303,9 @@ export async function bootstrap(
       computeUnionAllowedDomains,
       normalizeUnionForAsrt,
     } = await import("./permissions/asrt-sandbox.js");
+    const { setActiveSandboxCapability } = await import(
+      "./permissions/sandbox-capability.js"
+    );
 
     const sandboxOptIn =
       (settingsService.get("features")?.osToolSandbox ?? false) ||
@@ -1388,6 +1391,24 @@ export async function bootstrap(
           await initializeAsrtSandbox({
             allowedDomains: unionAllowedDomains,
             strictAllowlist: true,
+          });
+          // Publish the active capability to the SOT now that ASRT is
+          // genuinely initialized (gate ON, deps present, not Windows-blocked).
+          // detectSandboxCapability + the reviewer/UI consumers read this; the
+          // reviewer's `kind === 'asrt'` → strong relaxation becomes reachable
+          // ONLY here. When the gate is OFF — or on the Windows fail-closed /
+          // Linux deps-missing paths above where ASRT is NOT initialized — we
+          // never call this, so the SOT stays kind="none" (isolation=none),
+          // matching reality. ASRT confines fs + process + network on both
+          // macOS (Seatbelt) and Linux (bwrap); the per-wrap FS jail + the
+          // shared strict-union network floor are both enforced.
+          const asrtBackend =
+            process.platform === "darwin" ? "Seatbelt" : "bwrap";
+          setActiveSandboxCapability({
+            kind: "asrt",
+            confidence: "verified",
+            platform: process.platform,
+            reason: `ASRT (${asrtBackend}) active — fs+process+network contained`,
           });
           log.info(
             "boot: ASRT OS tool sandbox initialized (%s, strict allow-list enforced, %d union domains across %d plugins)",
