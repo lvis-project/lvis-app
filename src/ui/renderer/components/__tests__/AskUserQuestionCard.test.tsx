@@ -477,7 +477,8 @@ describe("AskUserQuestionCard — 4-direction card-level arrow navigation", () =
   });
 
   /**
-   * ArrowDown on the card container must move focus to the next choice button.
+   * ArrowDown on the card container must move focus from the visible cursor
+   * at answer 1 to the next choice button.
    * Regression: before this fix, ArrowUp/Down on the card surface had no effect.
    */
   it("ArrowDown from card surface moves focus to next choice answer", async () => {
@@ -495,13 +496,13 @@ describe("AskUserQuestionCard — 4-direction card-level arrow navigation", () =
     const card = getByTestId("ask-user-question-card");
     card.focus();
 
-    // First ArrowDown from card surface → focusedIdx sentinel -1, so focusAnswerAt(-1+1)=0 → "빨강".
+    // The page starts with answer 1 ("빨강") as the visible cursor, so
+    // ArrowDown from the card surface moves to answer 2 ("파랑").
     await act(async () => { fireEvent.keyDown(card, { key: "ArrowDown" }); });
 
-    // Focus must have moved to the FIRST choice button "빨강" (index 0).
     expect(document.activeElement).not.toBe(card);
     expect(document.activeElement?.tagName.toLowerCase()).toBe("button");
-    expect(document.activeElement?.textContent).toContain("빨강");
+    expect(document.activeElement?.textContent).toContain("파랑");
   });
 
   /**
@@ -552,10 +553,10 @@ describe("AskUserQuestionCard — 4-direction card-level arrow navigation", () =
     const card = getByTestId("ask-user-question-card");
     card.focus();
 
-    // ArrowDown from card surface → sentinel -1, focusAnswerAt(0) → "A" (first choice).
+    // The page starts at "A", so ArrowDown from card surface moves to "B".
     await act(async () => { fireEvent.keyDown(card, { key: "ArrowDown" }); });
     expect(document.activeElement?.tagName.toLowerCase()).toBe("button");
-    expect(document.activeElement?.textContent).toContain("A");
+    expect(document.activeElement?.textContent).toContain("B");
     // Still on Q1, not Q2.
     expect(queryByText("Q2")).toBeNull();
 
@@ -675,24 +676,22 @@ describe("AskUserQuestionCard — ArrowDown suppressed on confirm step", () => {
 });
 
 // ---------------------------------------------------------------------------
-// Auto-focus on mount — the long-standing "ArrowUp/Down doesn't work"
-// regression was actually a focus management gap: card was rendered but
-// never claimed keyboard focus, so arrow keys couldn't reach arrowNav.
+// Auto-focus on mount/step change — focus starts at answer 1 so arrow keys
+// have a visible cursor and do not inherit the prior page's cursor position.
 // ---------------------------------------------------------------------------
 
 describe("AskUserQuestionCard — auto-focus on mount enables arrow nav", () => {
-  it("focuses the card container immediately when the request mounts", async () => {
+  it("focuses the first answer immediately when the request mounts", async () => {
     const api = askUserQuestionApi();
     const request = makeRequest();
-    const { getByTestId } = render(
+    const { getByText } = render(
       <AskUserQuestionCard api={api as never} request={request} onResolved={vi.fn()} />,
     );
 
-    const card = getByTestId("ask-user-question-card");
-    expect(document.activeElement).toBe(card);
+    await waitFor(() => expect(document.activeElement).toBe(getByText("빨강").closest("button")));
   });
 
-  it("ArrowDown works right after mount with no prior interaction", async () => {
+  it("ArrowDown moves from the first answer to the second answer right after mount", async () => {
     const api = askUserQuestionApi();
     const request = makeRequest({
       questions: [
@@ -700,15 +699,39 @@ describe("AskUserQuestionCard — auto-focus on mount enables arrow nav", () => 
       ],
     });
 
-    const { getByTestId } = render(
+    const { getByText } = render(
       <AskUserQuestionCard api={api as never} request={request} onResolved={vi.fn()} />,
     );
 
-    const card = getByTestId("ask-user-question-card");
-    // Note: no manual card.focus() — auto-focus on mount must have done it.
-    await act(async () => { fireEvent.keyDown(card, { key: "ArrowDown" }); });
+    await waitFor(() => expect(document.activeElement).toBe(getByText("빨강").closest("button")));
+    await act(async () => { fireEvent.keyDown(document.activeElement!, { key: "ArrowDown" }); });
 
-    expect(document.activeElement?.textContent).toContain("빨강");
+    expect(document.activeElement?.textContent).toContain("파랑");
+  });
+
+  it("restores focus to the first answer after advancing to the next question", async () => {
+    const api = askUserQuestionApi();
+    const request = makeRequest({
+      questions: [
+        { question: "Q1", choices: ["A"], allowFreeText: false },
+        { question: "Q2", choices: ["X", "Y"], allowFreeText: false },
+      ],
+    });
+
+    const { getByTestId, getByText } = render(
+      <AskUserQuestionCard api={api as never} request={request} onResolved={vi.fn()} />,
+    );
+
+    await act(async () => {
+      fireEvent.keyDown(getByText("A").closest("button")!, { key: "Enter" });
+    });
+
+    await waitFor(() => expect(document.activeElement).toBe(getByText("X").closest("button")));
+    await act(async () => {
+      fireEvent.keyDown(document.activeElement!, { key: "ArrowDown" });
+    });
+
+    expect(document.activeElement?.textContent).toContain("Y");
   });
 });
 

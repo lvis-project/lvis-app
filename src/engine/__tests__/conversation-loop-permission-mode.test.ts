@@ -29,6 +29,16 @@ function makeLoop() {
       mode = next;
     }),
   };
+  const approvalGate = {
+    requestAndWait: vi.fn(async (req: { id: string }) => ({
+      requestId: req.id,
+      choice: "allow-once" as const,
+    })),
+  };
+  const auditLogger = {
+    isPermissionAuditChainReady: vi.fn(() => true),
+    appendPermissionAuditEntry: vi.fn(async () => undefined),
+  };
   const loop = new ConversationLoop(({
     settingsService: {
       get: () => fakeLlmSettings(),
@@ -46,10 +56,12 @@ function makeLoop() {
       listSessions: () => [],
     },
     permissionManager,
+    approvalGate,
+    auditLogger,
     disableSessionPersistence: true,
   } as unknown) as ConstructorParameters<typeof ConversationLoop>[0]);
   (loop as unknown as { provider: LLMProvider | null }).provider = new UnusedProvider();
-  return { loop, permissionManager };
+  return { loop, permissionManager, approvalGate, auditLogger };
 }
 
 describe("ConversationLoop permission mode slash events", () => {
@@ -67,5 +79,31 @@ describe("ConversationLoop permission mode slash events", () => {
     expect(result.text).toContain("권한 모드 변경됨: default -> allow");
     expect(permissionManager.setMode).toHaveBeenCalledWith("allow");
     expect(onPermissionModeChanged).toHaveBeenCalledWith("allow");
+  });
+
+  it("applies durable built-in /permission mode changes without approval popup", async () => {
+    const { loop, permissionManager, approvalGate, auditLogger } = makeLoop();
+    const onPermissionModeChanged = vi.fn();
+
+    const result = await loop.runTurn(
+      "/permission mode auto --durable",
+      { onPermissionModeChanged },
+      undefined,
+      { inputOrigin: "user-keyboard" },
+    );
+
+    expect(result.text).toContain("권한 모드 변경됨: default -> auto");
+    expect(permissionManager.setModePersist).toHaveBeenCalledWith("auto");
+    expect(approvalGate.requestAndWait).not.toHaveBeenCalled();
+    expect(auditLogger.appendPermissionAuditEntry).toHaveBeenCalledWith(
+      expect.objectContaining({
+        decision: "mode_change",
+        fromMode: "default",
+        toMode: "auto",
+        durable: true,
+        confirmationSource: "builtin-slash",
+      }),
+    );
+    expect(onPermissionModeChanged).toHaveBeenCalledWith("auto");
   });
 });

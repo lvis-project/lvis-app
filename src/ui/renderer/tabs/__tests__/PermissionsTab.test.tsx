@@ -1,6 +1,6 @@
 // @vitest-environment jsdom
 import "../../../../../test/renderer/setup.js";
-import { act, fireEvent, render, screen, waitFor } from "@testing-library/react";
+import { act, fireEvent, render, screen } from "@testing-library/react";
 import type { ReactNode } from "react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { cleanup } from "@testing-library/react";
@@ -337,7 +337,7 @@ describe("PermissionsTab hook quarantine notice", () => {
     expect(screen.queryByTestId("hook-quarantine-notice")).toBeNull();
   });
 
-  it("hides the reviewer section unless the auto-verification mode is active", async () => {
+  it("does not render the reviewer settings section", async () => {
     const api = installApi([[]]);
 
     await act(async () => {
@@ -347,40 +347,64 @@ describe("PermissionsTab hook quarantine notice", () => {
     expect(api.permission.reviewerDispatch).toHaveBeenCalledWith("show");
     expect(screen.getAllByText("명시 액션 필수").length).toBeGreaterThan(0);
 
-    // Default mode (쓰기만 확인) → reviewer config must NOT be rendered.
     expect(screen.queryByTestId("reviewer-active-llm-source")).toBeNull();
     expect(screen.queryByTestId("reviewer-fallback-select")).toBeNull();
     expect(screen.queryByTestId("reviewer-framework-panel")).toBeNull();
+    expect(screen.queryByTestId("reviewer-cli-mapping-panel")).toBeNull();
+    expect(screen.queryByTestId("reviewer-prompt-panel")).toBeNull();
+    expect(screen.queryByTestId("permissions-legacy-auto-mode-banner")).toBeNull();
+    expect(screen.queryByTestId("reviewer-llm-degraded-banner")).toBeNull();
   });
 
-  it("reveals the reviewer config (auto-wired to LLM) when 자동 검증 is selected", async () => {
+  it("keeps hidden reviewer auto-wiring and shows only the prompt collapse inside 자동 검증", async () => {
     const api = installApi([[]]);
 
     await act(async () => {
       render(<PermissionsTab />);
     });
 
-    // Reviewer section starts hidden under the default mode.
-    expect(screen.queryByTestId("reviewer-framework-panel")).toBeNull();
-
     await act(async () => {
       fireEvent.click(screen.getByTestId("exec-mode-auto"));
     });
 
-    // exec-mode-auto auto-wires reviewer to llm (no standalone reviewer radio).
     expect(api.permission.reviewerDispatch).toHaveBeenCalledWith("mode llm");
-    expect(screen.getByTestId("reviewer-active-llm-source")).toBeTruthy();
+    expect(api.permission.reviewerDispatch).toHaveBeenCalledWith("interactive low");
+    expect(screen.queryByTestId("reviewer-active-llm-source")).toBeNull();
     expect(screen.queryByTestId("reviewer-provider-select")).toBeNull();
-    expect(screen.getByTestId("reviewer-fallback-select")).toBeTruthy();
+    expect(screen.queryByTestId("reviewer-fallback-select")).toBeNull();
     expect(screen.queryByTestId("reviewer-model-input")).toBeNull();
-    expect(screen.getByTestId("reviewer-framework-panel")).toBeTruthy();
-    expect(screen.getByText("permission-reviewer-framework/v1")).toBeTruthy();
-    // The removed standalone reviewer-mode radio must not reappear.
+    expect(screen.queryByTestId("reviewer-framework-panel")).toBeNull();
+    expect(screen.getByTestId("reviewer-prompt-panel")).toBeTruthy();
+    expect(screen.getByTestId("exec-mode-auto")).toContainElement(screen.getByTestId("reviewer-prompt-panel"));
+    expect(screen.queryByText("검증 프롬프트")).toBeNull();
+    expect(screen.getByTestId("reviewer-system-prompt")).toHaveTextContent("UNTRUSTED_INPUT");
     expect(screen.queryByTestId("reviewer-mode-llm")).toBeNull();
     expect(screen.queryByTestId("reviewer-mode-disabled")).toBeNull();
   });
 
-  it("exposes the LLM reviewer fallback policy instead of hiding fail-open behavior", async () => {
+  it("refreshes an already-open Settings tab when another window changes permission mode", async () => {
+    const api = installApi([[]]);
+    api.permission.getMode
+      .mockResolvedValueOnce({ mode: "default" })
+      .mockResolvedValue({ mode: "auto" });
+
+    await act(async () => {
+      render(<PermissionsTab />);
+    });
+
+    expect(screen.queryByTestId("reviewer-prompt-panel")).toBeNull();
+    const onModeChanged = api.permission.onModeChanged.mock.calls[0]?.[0] as ((mode: string) => void) | undefined;
+    expect(onModeChanged).toBeTruthy();
+
+    await act(async () => {
+      onModeChanged?.("auto");
+    });
+
+    expect(screen.getByTestId("reviewer-prompt-panel")).toBeTruthy();
+    expect(screen.getByTestId("exec-mode-auto")).toContainElement(screen.getByTestId("reviewer-prompt-panel"));
+  });
+
+  it("does not expose the reviewer fallback policy in Settings", async () => {
     const api = installApi([[]]);
 
     await act(async () => {
@@ -389,23 +413,13 @@ describe("PermissionsTab hook quarantine notice", () => {
     await act(async () => {
       fireEvent.click(screen.getByTestId("exec-mode-auto"));
     });
-    await act(async () => {
-      fireEvent.pointerDown(screen.getByTestId("reviewer-fallback-select"), {
-        button: 0,
-        ctrlKey: false,
-        pointerId: 1,
-        pointerType: "mouse",
-      });
-    });
-    await waitFor(() => {
-      expect(screen.getByText(/규칙 결과 사용/)).toBeTruthy();
-    });
-    await act(async () => {
-      fireEvent.click(screen.getByText(/규칙 결과 사용/));
-    });
 
-    expect(api.permission.reviewerDispatch).toHaveBeenCalledWith("fallback rule");
-    expect(screen.getByTestId("reviewer-fallback-select").textContent).toContain("규칙 결과 사용");
+    expect(screen.queryByTestId("reviewer-fallback-select")).toBeNull();
+    expect(screen.getByTestId("reviewer-prompt-panel")).toBeTruthy();
+    expect(screen.getByTestId("exec-mode-auto")).toContainElement(screen.getByTestId("reviewer-prompt-panel"));
+    expect(api.permission.reviewerDispatch).not.toHaveBeenCalledWith(
+      expect.stringMatching(/^fallback\b/),
+    );
   });
 
   it("does not expose legacy reviewer provider/model controls", async () => {
@@ -420,17 +434,16 @@ describe("PermissionsTab hook quarantine notice", () => {
 
     expect(screen.queryByTestId("reviewer-provider-select")).toBeNull();
     expect(screen.queryByTestId("reviewer-model-input")).toBeNull();
-    expect(screen.getByTestId("reviewer-active-llm-source")).toHaveTextContent(
-      "지능 설정의 현재 공급자/모델",
-    );
+    expect(screen.queryByTestId("reviewer-active-llm-source")).toBeNull();
+    expect(screen.getByTestId("reviewer-prompt-panel")).toBeTruthy();
+    expect(screen.getByTestId("exec-mode-auto")).toContainElement(screen.getByTestId("reviewer-prompt-panel"));
     expect(api.permission.reviewerDispatch).not.toHaveBeenCalledWith(
       expect.stringMatching(/^(provider|model)\b/),
     );
   });
 
-  it("toggles interactive auto-approve through reviewerDispatch (issue #690)", async () => {
+  it("does not render reviewer interactive controls even when the stored mode is auto", async () => {
     const api = installApi([[]]);
-    // Reviewer interactive controls only render under the auto-verification mode.
     api.permission.getMode.mockResolvedValueOnce({ mode: "auto" });
     api.permission.reviewerDispatch.mockImplementation(async (rawArgs: string) => {
       if (rawArgs === "show") {
@@ -446,97 +459,17 @@ describe("PermissionsTab hook quarantine notice", () => {
           },
         };
       }
-      if (rawArgs === "interactive low") {
-        return {
-          ok: true as const,
-          verb: "interactive" as const,
-          settings: {
-            mode: "llm" as const,
-            provider: "openai" as const,
-            model: "gpt-4o-mini",
-            fallbackOnError: "deny" as const,
-            interactive: { autoApprove: "low" as const },
-          },
-        };
-      }
       throw new Error(`unexpected reviewerDispatch: ${rawArgs}`);
     });
 
     await act(async () => {
       render(<PermissionsTab />);
     });
-    const off = screen.getByRole("radio", { name: "끔" });
-    const low = screen.getByRole("radio", { name: "저위험 자동 허용" });
-    // Initial state: "off" is selected.
-    expect(off.getAttribute("aria-checked")).toBe("true");
-    expect(low.getAttribute("aria-checked")).toBe("false");
-
-    await act(async () => {
-      fireEvent.click(low);
-    });
-
-    expect(api.permission.reviewerDispatch).toHaveBeenCalledWith("interactive low");
-    expect(low.getAttribute("aria-checked")).toBe("true");
-    expect(off.getAttribute("aria-checked")).toBe("false");
-  });
-
-  // TODO(arrow-key-e2e): jsdom + radix-ui's RovingFocusGroup doesn't fire the
-  // RadioGroup keyboard handler in a way that `fireEvent.keyDown` (or even
-  // `@testing-library/user-event`'s `keyboard("{ArrowRight}")`) can drive
-  // through to `onValueChange`. The handler depends on browser-only state
-  // (document.activeElement set via real keyboard, PointerEvent provenance
-  // tracking) that jsdom does not fully model. Re-enabled by f5780143 + then
-  // ed230d94 dedupe but failing on `main` since landing — see PR for context.
-  // Track keyboard navigation in a Playwright e2e instead; the click path of
-  // the same radio is already covered above ("toggles interactive auto-approve
-  // through reviewerDispatch").
-  it.skip("supports arrow-key navigation for the low-risk auto-allow radio group", async () => {
-    const api = installApi([[]]);
-    api.permission.reviewerDispatch.mockImplementation(async (rawArgs: string) => {
-      if (rawArgs === "show") {
-        return {
-          ok: true as const,
-          verb: "show" as const,
-          settings: {
-            mode: "rule" as const,
-            provider: "openai" as const,
-            model: "gpt-4o-mini",
-            fallbackOnError: "deny" as const,
-            interactive: { autoApprove: "off" as const },
-          },
-        };
-      }
-      if (rawArgs === "interactive low") {
-        return {
-          ok: true as const,
-          verb: "interactive" as const,
-          settings: {
-            mode: "rule" as const,
-            provider: "openai" as const,
-            model: "gpt-4o-mini",
-            fallbackOnError: "deny" as const,
-            interactive: { autoApprove: "low" as const },
-          },
-        };
-      }
-      throw new Error(`unexpected reviewerDispatch: ${rawArgs}`);
-    });
-
-    await act(async () => {
-      render(<PermissionsTab />);
-    });
-    const off = screen.getByRole("radio", { name: "끔" });
-    const low = screen.getByRole("radio", { name: "저위험 자동 허용" });
-    expect(off.getAttribute("aria-checked")).toBe("true");
-    expect(low.getAttribute("aria-checked")).toBe("false");
-    off.focus();
-
-    await act(async () => {
-      fireEvent.keyDown(off, { key: "ArrowRight" });
-    });
-
-    expect(api.permission.reviewerDispatch).toHaveBeenCalledWith("interactive low");
-    expect(low.getAttribute("aria-checked")).toBe("true");
+    expect(screen.queryByTestId("reviewer-interactive-off")).toBeNull();
+    expect(screen.queryByTestId("reviewer-interactive-low")).toBeNull();
+    expect(screen.queryByTestId("permissions-legacy-auto-mode-banner")).toBeNull();
+    expect(screen.getByTestId("reviewer-prompt-panel")).toBeTruthy();
+    expect(screen.getByTestId("exec-mode-auto")).toContainElement(screen.getByTestId("reviewer-prompt-panel"));
   });
 
   it("surfaces the reviewer rewire failure when entering the auto-verification mode", async () => {
@@ -731,14 +664,18 @@ describe("PermissionsTab hook quarantine notice", () => {
     expect(screen.getByText("/tmp/project/.git")).toBeTruthy();
   });
 
-  it("renders the legacy auto-mode banner when mode=auto + interactive.autoApprove=off (round-5 test-engineer MAJOR)", async () => {
+  it("renders only the prompt panel when mode=auto + interactive.autoApprove=off", async () => {
     const api = installApi([[]]);
     api.permission.getMode.mockResolvedValueOnce({ mode: "auto" });
     // Note: reviewerDispatch("show") default returns interactive.autoApprove="off".
     await act(async () => {
       render(<PermissionsTab />);
     });
-    expect(screen.getByTestId("permissions-legacy-auto-mode-banner")).toBeTruthy();
+    expect(screen.getByTestId("reviewer-prompt-panel")).toBeTruthy();
+    expect(screen.getByTestId("exec-mode-auto")).toContainElement(screen.getByTestId("reviewer-prompt-panel"));
+    expect(screen.queryByTestId("permissions-legacy-auto-mode-banner")).toBeNull();
+    expect(screen.queryByTestId("reviewer-active-llm-source")).toBeNull();
+    expect(screen.queryByTestId("reviewer-framework-panel")).toBeNull();
   });
 
   it("hides the reviewer section (and its banners) entirely under strict mode", async () => {

@@ -33,6 +33,19 @@ function renderCard(entry: AssistantEntry) {
 }
 
 describe("AssistantCard — slash command newline fix", () => {
+  it("does not render an empty streaming placeholder before model text arrives", () => {
+    const { container } = renderCard(makeEntry({ text: "", streaming: true }));
+    expect(container.querySelector("[data-testid='assistant-message-body']")).toBeNull();
+    expect(container.textContent).not.toContain("응답을 작성하는 중");
+    expect(container.textContent).not.toMatch(/LVIS/i);
+  });
+
+  it("renders streaming content without a pre-response LVIS title", () => {
+    const { container } = renderCard(makeEntry({ text: "부분 응답", streaming: true }));
+    expect(container.textContent).toContain("부분 응답");
+    expect(container.textContent).not.toMatch(/LVIS.*RESPONDING|LVIS 응답/i);
+  });
+
   it("renders Markdown for route=command entries", () => {
     const { container } = renderCard(makeEntry({ text: "표 제목은 **진하게** 표시", route: "command" }));
     const body = container.querySelector("[data-testid='assistant-message-body']");

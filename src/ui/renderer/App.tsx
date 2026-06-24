@@ -77,6 +77,36 @@ import { normalizeSettingsTab } from "../../shared/settings-tabs.js";
 
 // ─── App ────────────────────────────────────────────
 
+const SAFE_PLUGIN_AUTH_ERROR_CODE = /^[A-Za-z0-9][A-Za-z0-9._:-]{0,80}$/;
+
+function stringField(value: unknown, key: "code" | "error" | "message"): string | null {
+  if (!value || typeof value !== "object") return null;
+  const field = (value as Record<string, unknown>)[key];
+  return typeof field === "string" && field.trim().length > 0 ? field.trim() : null;
+}
+
+function sanitizePluginAuthErrorCode(value: string | null | undefined): string | null {
+  if (!value) return null;
+  const code = value.trim();
+  return SAFE_PLUGIN_AUTH_ERROR_CODE.test(code) ? code : null;
+}
+
+function extractPluginAuthErrorCode(err: unknown): string | null {
+  const explicitCode =
+    sanitizePluginAuthErrorCode(stringField(err, "code")) ??
+    sanitizePluginAuthErrorCode(stringField(err, "error"));
+  if (explicitCode) return explicitCode;
+
+  const message =
+    err instanceof Error
+      ? err.message
+      : typeof err === "string"
+        ? err
+        : stringField(err, "message");
+  const bracketCode = message?.match(/\[([A-Za-z0-9][A-Za-z0-9._:-]{0,80})\]/)?.[1];
+  return sanitizePluginAuthErrorCode(bracketCode);
+}
+
 /**
  * Read the persisted workspace mode that the main process injected before the
  * renderer loaded (preload exposes it as `window.__lvisInitialAppMode`, mirror
@@ -139,6 +169,8 @@ export function App() {
   // (the host fires loginTool to open the SSO window, NOT the panel); drained
   // by the auth-transition effect below. See architecture.md §9.4a.
   const pendingDetachedAuthOpenRef = useRef<Map<string, string>>(new Map());
+  const pendingInlineAuthOpenRef = useRef<Map<string, string>>(new Map());
+  const pluginAuthLoginInflightRef = useRef<Set<string>>(new Set());
   // Ref so handlePluginPrimaryAction (defined before handleAsk) can call
   // handleAsk without a forward-declaration TS error. Updated each render.
   const handleAskRef = useRef<(
@@ -457,7 +489,8 @@ export function App() {
   // (PluginGridButton). Hoisting to App.tsx means a single live-poll
   // + event-bridge subscription serves both surfaces — no duplicate
   // listeners, no stale-state divergence between the two views.
-  const { statuses: pluginAuthStatuses } = usePluginAuthStatuses(api, pluginCards);
+  const { statuses: pluginAuthStatuses, refresh: refreshPluginAuthStatus } = usePluginAuthStatuses(api, pluginCards);
+  const [pluginAuthErrors, setPluginAuthErrors] = useState<Map<string, string>>(new Map());
 
   // Role preset, cost preview, multimodal attachments
   const { rolePresets, activePreset, activePresetId, setActivePresetId } = useRolePresets(api);
@@ -558,6 +591,7 @@ export function App() {
     useContextBudget({ entries, llmVendor, llmModel, draftText: question, draftExtraTokens: draftAttachmentTokens });
 
   const activePluginView = useMemo(() => pluginViews.find((i) => toViewKey(i) === activeView), [pluginViews, activeView]);
+  const activePluginAuthError = activePluginView ? pluginAuthErrors.get(activePluginView.pluginId) ?? null : null;
 
   // Build flat PluginEntry list for InputActionBar plugin grid.
   // `unauthed` is set when the owning plugin declares `manifest.auth` AND its
@@ -660,23 +694,44 @@ export function App() {
     [api, setErrorWithThought],
   );
 
+  const clearPluginAuthError = useCallback((pluginId: string) => {
+    setPluginAuthErrors((prev) => {
+      if (!prev.has(pluginId)) return prev;
+      const next = new Map(prev);
+      next.delete(pluginId);
+      return next;
+    });
+  }, []);
+
+  const formatPluginAuthLoginError = useCallback(
+    (err: unknown): string => {
+      const code = extractPluginAuthErrorCode(err);
+      const detail =
+        code === "non-corp-network"
+          ? t("app.pluginAuthLoginFailedNonCorpNetwork")
+          : t("app.pluginAuthLoginFailedGeneric");
+      return code
+        ? t("app.pluginAuthLoginFailedWithCode", { code, detail })
+        : t("app.pluginAuthLoginFailedNoCode", { detail });
+    },
+    [t],
+  );
+
   // In chat mode (appMode === "chat"), selecting a plugin view opens a
   // separate magnetic-snap BrowserWindow instead of switching the main
   // window's active view. The app's mode is the sole authority for this;
   // plugins do not get a say.
   //
   // Auth is a HOST-managed lifecycle (architecture.md §9.4a): the agent never
-  // calls login/logout, and the detached/chat path is login-first and
-  // host-generic off `manifest.auth`. Selecting a detached auth plugin:
-  //   • authed   → open the detached panel.
-  //   • unauthed → call loginTool via callPluginMethod (opens the SSO window
-  //     ONLY, not the panel), record a pending open, and open the panel when
-  //     the plugin's status transitions unauthed→authed (the usePluginAuthStatuses
-  //     hook subscribes `${id}.auth.changed`; the effect below drains the ref).
-  //   • status not yet loaded (loading/undefined) → race guard: open directly
-  //     so a slow status fetch never traps the user behind a blank gate.
-  // Plugins WITHOUT `manifest.auth` open the detached panel directly. The
-  // inline (action-mode) path is unchanged.
+  // calls login/logout, and auth plugin view selection is login-first and
+  // host-generic off `manifest.auth`. Selecting an auth plugin view:
+  //   • authed   → open the plugin panel/page.
+  //   • not authed → call loginTool via callPluginMethod (opens the SSO
+  //     window), record a pending open, and open the panel/page when the
+  //     plugin's status transitions to authed.
+  //   • login failure → still open the plugin panel/page and surface a
+  //     sanitized error code so the failure is not silent.
+  // Plugins WITHOUT `manifest.auth.loginTool` open directly.
   const handleViewSelect = useCallback(
     (key: string) => {
       if (key.startsWith("plugin:")) {
@@ -723,61 +778,62 @@ export function App() {
           })();
           return;
         }
+        const card = pluginCards.find((c) => c.id === view.pluginId);
+        const loginTool = card?.auth?.loginTool;
+        const authState = pluginAuthStatuses.get(view.pluginId)?.kind;
+        const openPluginView = () => {
+          if (appMode === "chat") {
+            void openDetachedPluginView(key);
+          } else {
+            setActiveView(key);
+          }
+        };
+
         // appMode is the SOLE authority for inline-vs-detached. Action keeps
-        // every plugin view INLINE; chat pops every plugin view into a
-        // detached window. Plugins have no say in this decision.
-        if (appMode === "chat") {
-          const card = pluginCards.find((c) => c.id === view.pluginId);
-          const loginTool = card?.auth?.loginTool;
-          // Non-auth plugin (or no declared loginTool) → open directly.
-          if (!loginTool) {
-            void openDetachedPluginView(key);
-            return;
-          }
-          const authState = pluginAuthStatuses.get(view.pluginId)?.kind;
-          if (authState === "authed") {
-            void openDetachedPluginView(key);
-            return;
-          }
-          if (authState === "unauthed") {
-            // Host-managed login-first: fire loginTool (opens the SSO window
-            // ONLY, never the panel), then open the panel when status flips to
-            // authed. The auth-transition effect drains this ref.
-            pendingDetachedAuthOpenRef.current.set(view.pluginId, key);
-            void (async () => {
-              try {
-                await api.callPluginMethod(loginTool);
-              } catch (err) {
-                // Raw err.message may carry OAuth/Bearer fragments — keep raw
-                // in console only, surface a generic message to the user.
-                console.warn(
-                  `[plugin-auth] ${view.pluginId} loginTool '${loginTool}' failed`,
-                  err,
-                );
-                pendingDetachedAuthOpenRef.current.delete(view.pluginId);
-                setErrorWithThought(t("app.errorCannotRunPluginAction"));
-              }
-            })();
-            return;
-          }
-          // Status not yet loaded (loading / undefined) — race guard: open
-          // directly rather than trapping the user behind an unresolved gate.
-          void openDetachedPluginView(key);
+        // plugin views inline; chat pops plugin views into detached windows.
+        if (!loginTool || authState === "authed") {
+          clearPluginAuthError(view.pluginId);
+          openPluginView();
           return;
         }
 
-        // Action mode contract: EVERY plugin view renders inline, including
-        // unauthed ones. The view navigates immediately (below) and the inline
-        // plugin webview owns its auth flow — its own bootstrapAuth is the SOLE
-        // driver of `loginTool` → openAuthWindow. The host deliberately does NOT
-        // auto-call `loginTool` here: doing so raced the webview's own bootstrap
-        // and opened TWO login windows for the same account (EP double-login).
-        // We do NOT gate navigation on auth — the user lands on the inline view
-        // and the plugin surface gates its own content on auth state (no
-        // token_login bypass; no authenticated data granted by navigation).
-        // Detached-view login is host-managed (handled above): the host fires
-        // loginTool to open the SSO window and opens the panel only after the
-        // status transitions to authed. The inline path here is untouched.
+        const pendingMap =
+          appMode === "chat"
+            ? pendingDetachedAuthOpenRef.current
+            : pendingInlineAuthOpenRef.current;
+        pendingMap.set(view.pluginId, key);
+        clearPluginAuthError(view.pluginId);
+
+        const inflightKey = `${view.pluginId}:${loginTool}`;
+        if (pluginAuthLoginInflightRef.current.has(inflightKey)) {
+          return;
+        }
+        pluginAuthLoginInflightRef.current.add(inflightKey);
+        void (async () => {
+          try {
+            await api.callPluginMethod(loginTool);
+            refreshPluginAuthStatus(view.pluginId);
+          } catch (err) {
+            // Raw err.message may carry OAuth/Bearer fragments — keep raw in
+            // console only, and surface a sanitized code-oriented message.
+            console.warn(
+              `[plugin-auth] ${view.pluginId} loginTool '${loginTool}' failed`,
+              err,
+            );
+            pendingMap.delete(view.pluginId);
+            const message = formatPluginAuthLoginError(err);
+            setPluginAuthErrors((prev) => {
+              const next = new Map(prev);
+              next.set(view.pluginId, message);
+              return next;
+            });
+            openPluginView();
+            setErrorWithThought(message);
+          } finally {
+            pluginAuthLoginInflightRef.current.delete(inflightKey);
+          }
+        })();
+        return;
       }
       // Chat mode: built-in detachable views open in a separate window; home
       // (and every action-mode path) stays inline.
@@ -802,16 +858,22 @@ export function App() {
       openDetachedPluginView,
       openDetachedBuiltInView,
       setErrorWithThought,
+      refreshPluginAuthStatus,
+      clearPluginAuthError,
+      formatPluginAuthLoginError,
     ],
   );
 
-  // Detached auth gate drain — when a plugin the user selected while unauthed
+  // Auth gate drain — when a plugin the user selected while unauthed
   // transitions to authed (the usePluginAuthStatuses hook updates the map on
-  // `${id}.auth.changed`), open the detached panel that was deferred. Only
-  // unauthed→authed opens the panel; an `error` status clears the pending
-  // entry without opening so a failed login never silently pops a window.
+  // `${id}.auth.changed` or a manual refresh), open the panel/page that was
+  // deferred. Only authed opens; an `error` status clears the pending entry
+  // without silently navigating.
   useEffect(() => {
-    if (pendingDetachedAuthOpenRef.current.size === 0) return;
+    if (
+      pendingDetachedAuthOpenRef.current.size === 0 &&
+      pendingInlineAuthOpenRef.current.size === 0
+    ) return;
     for (const [pluginId, viewKey] of [...pendingDetachedAuthOpenRef.current]) {
       const kind = pluginAuthStatuses.get(pluginId)?.kind;
       if (kind === "authed") {
@@ -821,7 +883,29 @@ export function App() {
         pendingDetachedAuthOpenRef.current.delete(pluginId);
       }
     }
+    for (const [pluginId, viewKey] of [...pendingInlineAuthOpenRef.current]) {
+      const kind = pluginAuthStatuses.get(pluginId)?.kind;
+      if (kind === "authed") {
+        pendingInlineAuthOpenRef.current.delete(pluginId);
+        setActiveView(viewKey);
+      } else if (kind === "error") {
+        pendingInlineAuthOpenRef.current.delete(pluginId);
+      }
+    }
   }, [pluginAuthStatuses, openDetachedPluginView]);
+
+  useEffect(() => {
+    setPluginAuthErrors((prev) => {
+      let next: Map<string, string> | null = null;
+      for (const pluginId of prev.keys()) {
+        if (pluginAuthStatuses.get(pluginId)?.kind === "authed") {
+          next ??= new Map(prev);
+          next.delete(pluginId);
+        }
+      }
+      return next ?? prev;
+    });
+  }, [pluginAuthStatuses]);
 
   // If the currently-open plugin view belongs to a plugin that just got
   // uninstalled, fall back to home so the renderer doesn't render a "view
@@ -1603,7 +1687,13 @@ export function App() {
               sidebarCollapsed ? "left-[4.5rem]" : "left-[15rem]"
             }`}
           >
-            <StatusBar persistent={statusPersistent} visibleToast={statusVisibleToast} pendingCount={statusPendingCount} onToastClick={handleStatusToastClick} />
+            <StatusBar
+              persistent={statusPersistent}
+              visibleToast={statusVisibleToast}
+              pendingCount={statusPendingCount}
+              onToastClick={handleStatusToastClick}
+              onToastDismiss={(toast) => statusRemoveToast(toast.id)}
+            />
           </div>
           {fallbackToast && (
             <div className="bg-warning text-warning-foreground text-xs px-4 py-2 border-b border-warning">
@@ -1739,6 +1829,7 @@ export function App() {
             commandPopoverOpen={commandPopoverOpen}
             onCommandPopoverOpenChange={setCommandPopoverOpen}
             activePluginView={activePluginView ?? null}
+            pluginAuthError={activePluginAuthError}
             onPluginPrimaryAction={(id) => { void handlePluginPrimaryAction(id); }}
             onRoutineAcknowledge={handleRoutineAcknowledge}
           />

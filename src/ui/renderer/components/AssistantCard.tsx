@@ -46,9 +46,15 @@ function AssistantCardImpl({
   const displayText = useMemo(() => detectFromStream(entry.text || "").cleanedText, [entry.text]);
   const renderedText = useMemo(() => replaceToolNamesInText(displayText), [displayText]);
   const markdownText = entry.route === "command" ? preserveCommandLineBreaks(renderedText) : renderedText;
+  const hasRenderableText = markdownText.trim().length > 0;
+  const hasHeaderTitle = title.trim().length > 0;
+  const showHeader = actions !== undefined || isSystemNotice || (entry.streaming && hasHeaderTitle);
   // chars/4 token estimate 제거 (2026-05-07): TurnActionBar 의 TokenCostBadge
   // 가 provider-reported 값을 단일 source 로 표시. 카드 헤더의 ~tok 배지는
   // 한국어 2-3× under-estimate 거짓 정보였음.
+  if (entry.streaming && !isSystemNotice && !hasRenderableText) {
+    return null;
+  }
   return (
     <div
       className={
@@ -58,7 +64,7 @@ function AssistantCardImpl({
       }
     >
       {/* Header bar — mirrors WorkBoardPanel's SectionShell header pattern */}
-      {(actions !== undefined || entry.streaming || isSystemNotice) && (
+      {showHeader && (
         <div
           className={
             isSystemNotice
@@ -120,9 +126,7 @@ function AssistantCardImpl({
         data-testid="assistant-message-body"
       >
         <ReactMarkdown remarkPlugins={MARKDOWN_REMARK_PLUGINS}>
-          {entry.streaming
-            ? clampDanglingMarkdownLink(markdownText) || t("assistantCard.streamingPlaceholder")
-            : markdownText}
+          {entry.streaming ? clampDanglingMarkdownLink(markdownText) : markdownText}
         </ReactMarkdown>
       </div>
 

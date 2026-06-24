@@ -86,12 +86,14 @@ export interface LLMVendorSettings {
   thinkingBudgetTokens: number;
 }
 
+const RETIRED_LLM_MODEL_IDS = new Set(["gpt-4o"]);
+
 const DEFAULT_MODEL: Record<LLMVendor, string> = {
   claude: "claude-sonnet-4-6",
   openai: "gpt-5.4-mini",
   gemini: "gemini-2.5-flash",
-  copilot: "gpt-4o",
-  "azure-foundry": "gpt-4o",
+  copilot: "gpt-5.4-mini",
+  "azure-foundry": "gpt-5.4-mini",
   "vertex-ai": "gemini-2.5-flash",
 };
 
@@ -113,7 +115,6 @@ export const LLM_VENDOR_MODEL_OPTIONS: Readonly<Record<LLMVendor, readonly strin
       "gpt-4.1-mini",
       "o4-mini",
       "o3",
-      "gpt-4o",
     ],
     gemini: [
       "gemini-2.5-flash",
@@ -123,19 +124,17 @@ export const LLM_VENDOR_MODEL_OPTIONS: Readonly<Record<LLMVendor, readonly strin
       "gemini-2.0-flash-lite",
     ],
     copilot: [
-      "gpt-4o",
-      "gpt-5.4-nano",
       "gpt-5.4-mini",
       "gpt-5.4",
+      "gpt-5.4-nano",
       "gpt-4.1",
       "gpt-4.1-mini",
       "claude-sonnet-4-6",
     ],
     "azure-foundry": [
-      "gpt-4o",
-      "gpt-5.4-nano",
       "gpt-5.4-mini",
       "gpt-5.4",
+      "gpt-5.4-nano",
       "gpt-4.1",
       "gpt-4.1-mini",
     ],
@@ -163,6 +162,14 @@ export function isModelAvailableForVendor(
 ): boolean {
   if (!isLLMVendor(vendor)) return false;
   return LLM_VENDOR_MODEL_OPTIONS[vendor].includes(model);
+}
+
+export function isRetiredLlmModel(model: string): boolean {
+  return RETIRED_LLM_MODEL_IDS.has(model.trim().toLowerCase());
+}
+
+export function normalizeLlmVendorModel(vendor: LLMVendor, model: string): string {
+  return isRetiredLlmModel(model) ? DEFAULT_MODEL[vendor] : model;
 }
 
 function defaultBlock(vendor: LLMVendor): LLMVendorSettings {

@@ -637,9 +637,10 @@ export async function dispatchPermissionHooksCommand(
 export type SlashTrustOrigin = TrustOriginWithUnknown;
 
 /**
- * Top-level dispatch result. The renderer's slash handler turns
- * this into either a parsed command + side-effect, a modal
- * confirmation request (durable mutations), or plain-text echo.
+ * Top-level dispatch result. The slash handler turns this into either a
+ * parsed internal command + side-effect or plain-text echo. Built-in slash
+ * commands are their own user-keyboard approval surface; they do not request a
+ * second confirmation modal.
  */
 export type PermissionSlashOutcome =
   | { kind: "rejected-non-user-origin"; sanitized: string }
@@ -661,9 +662,9 @@ export type PermissionSlashOutcome =
  *      a sanitized version (leading `/` stripped, per spec §3 Layer 8).
  *   2. If the input doesn't start with `/permission` → caller-error
  *      (the dispatcher is only reached when the prefix matched).
- *   3. Otherwise parse the subcommand and return an outcome that
- *      tells the caller whether a modal confirmation is required
- *      (durable mode change, durable hook accept).
+   *   3. Otherwise parse the subcommand and return an outcome. Internal
+   *      user-keyboard slash commands do not request permission modals; durable
+   *      mode changes are still audited and persisted by the executor.
  */
 export function dispatchPermissionSlash(
   rawInput: string,
@@ -716,13 +717,10 @@ export function dispatchPermissionSlash(
       if ("ok" in parsed && parsed.ok === false) {
         return { kind: "parse-error", error: parsed.error };
       }
-      // Durable mutations require modal confirmation regardless of
-      // origin (spec §3 Layer 8 — even from user-keyboard, durable
-      // changes need an explicit button click).
       return {
         kind: "mode",
         cmd: parsed as PermissionModeCommand,
-        needsModal: (parsed as PermissionModeCommand).durable,
+        needsModal: false,
       };
     }
     case "rules": {

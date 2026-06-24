@@ -5,6 +5,8 @@ import {
   LLM_VENDOR_DEFAULTS,
   LLM_VENDOR_MODEL_OPTIONS,
   freshVendorBlocks,
+  isRetiredLlmModel,
+  normalizeLlmVendorModel,
 } from "../llm-vendor-defaults.js";
 
 describe("isLLMVendor", () => {
@@ -64,6 +66,21 @@ describe("LLMVendorSettings — #893 top-level authMode promotion", () => {
 describe("LLM vendor defaults", () => {
   it("uses gpt-5.4-mini as the OpenAI default model", () => {
     expect(LLM_VENDOR_DEFAULTS.openai.model).toBe("gpt-5.4-mini");
+  });
+
+  it("does not offer gpt-4o in user-selectable LLM model options", () => {
+    for (const v of LLM_VENDORS) {
+      expect(LLM_VENDOR_MODEL_OPTIONS[v]).not.toContain("gpt-4o");
+      expect(LLM_VENDOR_DEFAULTS[v].model).not.toBe("gpt-4o");
+    }
+  });
+
+  it("normalizes the retired exact gpt-4o model id to each provider default", () => {
+    expect(isRetiredLlmModel("gpt-4o")).toBe(true);
+    expect(isRetiredLlmModel("gpt-4o-mini")).toBe(false);
+    expect(isRetiredLlmModel("gpt-4o-deployment")).toBe(false);
+    expect(normalizeLlmVendorModel("openai", "gpt-4o")).toBe("gpt-5.4-mini");
+    expect(normalizeLlmVendorModel("azure-foundry", "gpt-4o")).toBe("gpt-5.4-mini");
   });
 
   it("uses gemini-2.5-flash as the Gemini default model", () => {
