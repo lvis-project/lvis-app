@@ -156,7 +156,7 @@ describe("sandbox-capability — SandboxKind union members", () => {
         kind: "partial",
         confidence: "verified",
         platform: "darwin",
-        reason: "partial sandbox-exec profile",
+        reason: "partial OS isolation profile",
       }),
     ).toBe(true);
   });

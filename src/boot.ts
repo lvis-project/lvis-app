@@ -1306,6 +1306,9 @@ export async function bootstrap(
     const { setActiveSandboxCapability } = await import(
       "./permissions/sandbox-capability.js"
     );
+    const { sandboxConfinementForPlatform } = await import(
+      "./shared/sandbox-capability-info.js"
+    );
 
     const sandboxOptIn =
       (settingsService.get("features")?.osToolSandbox ?? false) ||
@@ -1409,6 +1412,10 @@ export async function bootstrap(
             confidence: "verified",
             platform: process.platform,
             reason: `ASRT (${asrtBackend}) active — fs+process+network contained`,
+            // Machine-checkable confinement for the host-shell substrate. ASRT
+            // confines fs + process + network egress on macOS (Seatbelt) and
+            // Linux (bwrap); both are full per sandboxConfinementForPlatform.
+            confines: sandboxConfinementForPlatform(process.platform, "full"),
           });
           log.info(
             "boot: ASRT OS tool sandbox initialized (%s, strict allow-list enforced, %d union domains across %d plugins)",

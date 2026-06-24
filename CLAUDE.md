@@ -241,7 +241,7 @@ OS 수준 실행 격리는 **ASRT (`@anthropic-ai/sandbox-runtime`)** 가 단일
 - **Windows**: **fail-closed** — srt-win 은 network-only half-sandbox 이므로 미채택. `LVIS_SANDBOX_WINDOWS=1` (기본 off) 없이는 초기화 안 함. 현행 win32 = isolation=none.
 - **Linux deps-missing**: gate ON 인데 bwrap/socat/ripgrep 부재 시 no-fallback 룰에 따라 boot fail-closed abort (unsandboxed plain spawn 금지).
 - **알려진 follow-up**: long-lived worker (lge-api / local-indexer 의 Python 워커) egress 를 이 shared floor 로 완전히 수렴시키는 작업이 남아 있음 — 일부는 여전히 HostApi `hostFetch` chokepoint 경유.
-- **라이선스**: ASRT 는 Apache-2.0 — NOTICE attribution 유지. LVIS 자체 라이선스는 MIT 로 불변.
+- **라이선스**: ASRT 는 Apache-2.0 — attribution 은 repo 루트 `THIRD-PARTY-NOTICES.md` 에 유지. LVIS 자체 라이선스는 MIT 로 불변.
 
 ## IPC Error Message Language Convention (REQUIRED)
 
