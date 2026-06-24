@@ -1489,12 +1489,22 @@ export function App() {
         >
           {/* Floating notification stack — update/announcement banners are an
               OVERLAY, not in-flow content. They float over the canvas anchored
-              top-right so they never push MainContent or the composer down. The
+              top-RIGHT so they never push MainContent or the composer down. The
               wrapper is pointer-events-none (clicks pass through the gaps); each
               banner card re-enables pointer-events so Update/dismiss still work.
-              `top-2 right-2` keeps the stack below the window-control band and
-              clear of the search/star/export controls in the toolbar. */}
-          <div className="pointer-events-none absolute right-2 top-2 z-50 flex w-full max-w-md flex-col gap-2 [&>*]:pointer-events-auto [&>*]:m-0">
+              The left edge is inset by the sidebar width (`left-[4.5rem]` /
+              `left-[15rem]`, tracking <main>'s collapsed/expanded padding) so a
+              wide banner (max-w-md) in a narrow window can never slide UNDER the
+              floating sidebar card — absolute positioning resolves against
+              main's padding box, which starts at the window edge beneath the
+              rail. Multiple DISTINCT banners (bootstrap / update / announcement)
+              stack vertically; each component collapses its own N items into a
+              single counted card, so the stack height stays bounded. */}
+          <div
+            className={`pointer-events-none absolute right-2 top-2 z-50 ml-auto flex max-w-md flex-col gap-2 transition-[left] duration-200 ease-out motion-reduce:transition-none [&>*]:pointer-events-auto [&>*]:m-0 ${
+              sidebarCollapsed ? "left-[4.5rem]" : "left-[15rem]"
+            }`}
+          >
             <BootstrapStatusBanner status={bootstrapStatus} onDismiss={dismissBootstrapStatus} onRetry={() => void retryBootstrap()} />
             <MarketplaceUpdateBanner
               updates={marketplaceUpdates}
@@ -1508,12 +1518,20 @@ export function App() {
             />
           </div>
           {/* Transient status TOASTS (install progress, lifecycle results, the
-              pre-turn auto-compact indicator) get their OWN top-center region —
+              pre-turn auto-compact indicator) get their OWN top-LEFT region —
               distinct from the top-right banner stack above, which is for
-              persistent, actionable Update/Dismiss banners. Toasts are
-              ephemeral + queue-advanced; a centered pill reads as a toast, not
-              a banner. Renders nothing when idle (StatusBar returns null). */}
-          <div className="pointer-events-none absolute left-2 top-2 z-50 [&>*]:pointer-events-auto">
+              persistent, actionable Update/Dismiss banners. Left/right split
+              means a toast and a banner can show at once without colliding.
+              Shares the same sidebar-width left inset as the banner stack so a
+              toast pill never overlaps the floating sidebar card. Toasts are
+              ephemeral + queue-advanced (one pill + “+N” for the rest), so this
+              region never stacks. Renders nothing when idle (StatusBar returns
+              null). */}
+          <div
+            className={`pointer-events-none absolute top-2 z-50 transition-[left] duration-200 ease-out motion-reduce:transition-none [&>*]:pointer-events-auto ${
+              sidebarCollapsed ? "left-[4.5rem]" : "left-[15rem]"
+            }`}
+          >
             <StatusBar persistent={statusPersistent} visibleToast={statusVisibleToast} pendingCount={statusPendingCount} onToastClick={handleStatusToastClick} />
           </div>
           {fallbackToast && (
