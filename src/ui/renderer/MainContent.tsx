@@ -76,6 +76,7 @@ export interface MainContentProps {
   onPluginPrimaryAction: (overlayItemId: string) => void;
   /** Called when a completed routine overlay result has been seen or dismissed. */
   onRoutineAcknowledge?: (routineId: string, firedAt: string) => void;
+  statusBar?: Parameters<typeof ChatView>[0]["statusBar"];
 }
 
 function MainPaneShell({ children, padded = true }: { children: ReactNode; padded?: boolean }) {
@@ -122,6 +123,7 @@ function HomeChatPane(props: MainContentProps) {
         onCommandPopoverOpenChange={props.onCommandPopoverOpenChange}
         onPluginPrimaryAction={props.onPluginPrimaryAction}
         onRoutineAcknowledge={props.onRoutineAcknowledge}
+        statusBar={props.statusBar}
       />
     </ChatContextProvider>
   );

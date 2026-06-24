@@ -30,6 +30,7 @@ import { WorkGroup } from "./components/WorkGroup.js";
 import { PermissionReviewStatusCard } from "./components/PermissionReviewStatusCard.js";
 import { DeferredApprovalChip } from "./components/DeferredApprovalChip.js";
 import { TurnActionBar } from "./components/TurnActionBar.js";
+import { StatusBar, type StatusBarProps } from "./components/StatusBar.js";
 // TurnSummaryFooter 컴포넌트는 2026-05-07 폐기. 토큰 정보는 TurnActionBar 의
 // TokenCostBadge (provider-truth, 토글 + tooltip breakdown) 가 단일 source 로
 // 표시. 시간 정보는 WorkGroup 헤더의 ⏱ T 가 흡수. turn_summary entry 는
@@ -280,6 +281,8 @@ export interface ChatViewProps {
   onPluginPrimaryAction?: (overlayItemId: string) => void;
   /** Called when a completed routine overlay result has been seen or dismissed. */
   onRoutineAcknowledge?: (routineId: string, firedAt: string) => void;
+  /** Toast surface rendered directly above the composer input. */
+  statusBar?: StatusBarProps;
 }
 
 function AskUserAnswerBubble({
@@ -320,7 +323,7 @@ function AskUserAnswerBubble({
   );
 }
 
-export function ChatView({ api, onAsk, onEditSave, onFork, onToggleStar, onRetryEffort, onContinueFromLastUser, isEntryStarred, onAbort, onGuide, onGuideError, onFeedback, subAgentSpawns, loadedSkills, hasAskQuestions, askQuestions, onResolveAskQuestion, plugins, onSelectPlugin, currentSessionKind = "main", currentSessionTitle, sessions, onLoadSession, onRefreshSessions, commandActions, commandPopoverOpen, onCommandPopoverOpenChange, onPluginPrimaryAction, onRoutineAcknowledge }: ChatViewProps) {
+export function ChatView({ api, onAsk, onEditSave, onFork, onToggleStar, onRetryEffort, onContinueFromLastUser, isEntryStarred, onAbort, onGuide, onGuideError, onFeedback, subAgentSpawns, loadedSkills, hasAskQuestions, askQuestions, onResolveAskQuestion, plugins, onSelectPlugin, currentSessionKind = "main", currentSessionTitle, sessions, onLoadSession, onRefreshSessions, commandActions, commandPopoverOpen, onCommandPopoverOpenChange, onPluginPrimaryAction, onRoutineAcknowledge, statusBar }: ChatViewProps) {
   const { t } = useTranslation();
   // We still need the api for SessionTodoPanel; obtain it via singleton.
   const workflowApi = getApi();
@@ -1878,6 +1881,11 @@ export function ChatView({ api, onAsk, onEditSave, onFork, onToggleStar, onRetry
               contract describes); self-hides unless the draft expresses an
               approve/reject intent AND exactly one queue entry is pending. */}
           <DeferredApprovalChip draftText={question} />
+          {statusBar && (statusBar.visibleToast !== null || statusBar.persistent.length > 0) ? (
+            <div className="mx-3 w-auto max-w-full min-w-0" data-testid="composer-toast-dock">
+              <StatusBar {...statusBar} />
+            </div>
+          ) : null}
           {/* ONE unified input box: textarea + the single InputActionBar
               (action row + status sub-row). The window StatusBar is
               notifications-only; the model / permission / active / context%
