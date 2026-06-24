@@ -20,7 +20,6 @@ import { t } from "../i18n/index.js";
 import { createLogger } from "../lib/logger.js";
 import { resolvePluginPaths } from "../plugins/plugin-paths.js";
 import { readPluginRegistry, resolveManifestPathsFromRegistry } from "../plugins/registry.js";
-import { getSandboxRunner } from "../permissions/sandbox-runner.js";
 import { resolveUvTarget, type UvTarget } from "../../scripts/uv-targets.mjs";
 import { lvisHome } from "../shared/lvis-home.js";
 import { trackManagedChildProcess } from "./managed-child-processes.js";
@@ -430,6 +429,15 @@ export class PythonRuntimeBootstrapper {
 
   // ─── private: 실행 헬퍼 ──────────────────────────
 
+  /**
+   * Run a uv command. These are SETUP-ONLY spawns (uv python install / venv /
+   * pip sync) that run at boot BEFORE the ASRT sandbox is initialized, so they
+   * are NOT routed through the sandbox — they legitimately need PyPI egress to
+   * materialize the runtime before any plugin worker exists. The long-lived
+   * plugin worker (the real network-egress doer) is a separate spawn path that
+   * a follow-up wires through {@link wrapWorkerCommand}; do not re-add a sandbox
+   * branch here (it would always plain-spawn — the gate is not yet active).
+   */
   private runUv(
     uvBin: string,
     args: string[],
@@ -468,21 +476,6 @@ export class PythonRuntimeBootstrapper {
       // UV_CACHE_DIR (via the whitelist above or extraEnv) takes precedence.
       if (env.UV_CACHE_DIR === undefined) {
         env.UV_CACHE_DIR = this.uvCacheDir();
-      }
-
-      // §691: SandboxRunner adoption gate for uv spawn.
-      // When LVIS_SANDBOX_ENABLED=1 and a runner is registered, log the
-      // intent. Full adoption is deferred until SandboxedProcess exposes a
-      // Node.js-compatible stream API (SandboxedProcess uses WHATWG
-      // ReadableStream; runUv uses .on("data") event emitter pattern).
-      // Tracking: #691 spawn-path follow-up.
-      if (process.env.LVIS_SANDBOX_ENABLED === "1") {
-        const runner = getSandboxRunner(process.platform);
-        if (runner) {
-          // Runner is available — future: wrap spawn via runner.spawn()
-          // once SandboxedProcess stream compat is resolved.
-          void this.log("[python-runtime] LVIS_SANDBOX_ENABLED: uv runner available (full adoption pending stream compat)");
-        }
       }
 
       const proc = spawn(uvBin, args, { env, stdio: ["ignore", "pipe", "pipe"] });
@@ -537,6 +530,10 @@ export class PythonRuntimeBootstrapper {
     });
   }
 
+  /**
+   * Run a python command for import verification. SETUP-ONLY (see {@link runUv}
+   * — runs at boot before the ASRT sandbox is active, so it is not sandboxed).
+   */
   private runPython(pythonBin: string, args: string[]): Promise<string> {
     return new Promise((resolve, reject) => {
       // Whitelist-only env — same rationale as runUv(). Only OS-essential
