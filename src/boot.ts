@@ -1263,106 +1263,131 @@ export async function bootstrap(
     });
   })();
 
-  // §691: Per-OS sandbox runner detection + boot-phase registry seal.
-  // Runs after MCP connects so the full service graph is ready before
-  // adding OS-level spawn isolation.
+  // §691: OS-level tool sandbox — initialized via Anthropic sandbox-runtime
+  // (ASRT). Runs after MCP connects so the full service graph is ready before
+  // adding spawn isolation.
   //
-  // Linux:   bubblewrap (bwrap) — verified-kernel CLONE_NEWNET (fs + process + network)
-  // macOS:   sandbox-exec SBPL profile — PARTIAL (fs + process; network not contained)
-  // Windows: AppContainer — detect-only; native Win32 N-API binding pending.
-  //          detect() returns available=false so registration is skipped.
+  // ASRT replaces the prior per-OS runners (bwrap / sandbox-exec). It does not
+  // spawn the workload: `initialize` starts its proxy/helper machinery and the
+  // host-tool spawn path (bash.ts/powershell.ts) calls `wrapToolCommand` to get
+  // the `{ argv, env }` it spawns itself.
   //
-  // Gate: the user-facing `osToolSandbox` feature flag (Settings → 권한),
-  // with the `LVIS_SANDBOX_ENABLED=1` environment variable as an escape-hatch
-  // override. Registration also requires the platform runner to detect()
-  // available — an unavailable runner stays unregistered so the toggle
-  // reflects platform reality rather than silently doing nothing.
+  // Gate: SAME as before — the user-facing `osToolSandbox` feature flag
+  // (Settings → 권한) OR the `LVIS_SANDBOX_ENABLED=1` env escape-hatch. DEFAULT
+  // OFF (osToolSandbox ships false; the env var is unset), so this migration
+  // does NOT change runtime behavior unless a user has deliberately opted in.
+  //
+  // SECURITY PROPERTY (preserved from the old sealed registry): the sandbox
+  // gate is decided exactly once here at boot. `initializeAsrtSandbox` flips the
+  // module-level active flag that bash.ts/powershell.ts read; there is no
+  // runtime channel to enable/disable it after boot, so nothing can inject an
+  // untrusted sandbox config mid-run.
+  //
+  // Platform policy:
+  //   - macOS / Linux: initialize ASRT when the gate is on.
+  //   - Windows: FAIL-CLOSED. ASRT's `isSupportedPlatform()` returns true on
+  //     win32, but the Windows path (srt-win.exe) is network-only (no fs
+  //     isolation) + needs UAC install + re-login — a half-sandbox we do not
+  //     adopt. We do NOT initialize ASRT on win32 unless a SEPARATE explicit
+  //     opt-in (`LVIS_SANDBOX_WINDOWS=1`) is set, which defaults off. Current
+  //     win32 behavior is isolation=none, so leaving it off is not a regression.
+  //   - Linux: if the gate is on but `checkDependencies()` reports errors
+  //     (bwrap / socat / ripgrep missing) we FAIL-CLOSED — refuse to run rather
+  //     than silently dropping to isolation=none (no-fallback rule).
   {
-    const { registerSandboxRunner: _registerRunner, sealSandboxRunnerRegistry } = await import(
-      "./permissions/sandbox-runner.js"
-    );
+    const {
+      initializeAsrtSandbox,
+      checkAsrtDependencies,
+    } = await import("./permissions/asrt-sandbox.js");
+
     const sandboxOptIn =
       (settingsService.get("features")?.osToolSandbox ?? false) ||
       process.env["LVIS_SANDBOX_ENABLED"] === "1";
 
-    if (process.platform === "linux" && sandboxOptIn) {
-      const { BwrapRunner } = await import("./permissions/runners/bwrap-runner.js");
-      const bwrapRunner = new BwrapRunner();
-      const detection = await bwrapRunner.detect();
-      if (detection.available) {
-        // MAJOR-1: pass detection so sandbox-capability SOT reflects the active runner.
-        _registerRunner("linux", bwrapRunner, detection);
-        log.info("boot: bwrap runner registered — %s", detection.reason);
-      } else {
-        log.warn(
-          "boot: bwrap runner unavailable — %s. Linux tools will run with isolation=none.",
-          detection.reason,
-        );
-      }
-    }
+    if (sandboxOptIn) {
+      // Windows fail-closed behind a separate explicit opt-in (defaults off).
+      const windowsOptIn = process.env["LVIS_SANDBOX_WINDOWS"] === "1";
+      const platformBlocked = process.platform === "win32" && !windowsOptIn;
 
-    // §691: macOS sandbox-exec runner (PARTIAL — known bypass paths).
-    if (process.platform === "darwin" && sandboxOptIn) {
-      const { SandboxExecRunner } = await import("./permissions/runners/sandbox-exec-runner.js");
-      const sandboxExecRunner = new SandboxExecRunner();
-      const detection = await sandboxExecRunner.detect();
-      if (detection.available) {
-        _registerRunner("darwin", sandboxExecRunner, detection);
-        log.info("boot: sandbox-exec runner registered (PARTIAL) — %s", detection.reason);
-      } else {
+      if (platformBlocked) {
         log.warn(
-          "boot: sandbox-exec runner unavailable — %s. macOS tools will run with isolation=none.",
-          detection.reason,
+          "boot: OS tool sandbox requested but Windows is fail-closed (srt-win is a network-only half-sandbox). " +
+            "Tools run with isolation=none. Set LVIS_SANDBOX_WINDOWS=1 to force-enable (not recommended).",
         );
+      } else {
+        // Linux: refuse to run unsandboxed when the gate is on but deps are
+        // missing. macOS/Windows checkDependencies has no hard errors here.
+        const deps = await checkAsrtDependencies();
+        if (deps.errors.length > 0) {
+          log.error(
+            "boot: OS tool sandbox is ON but its dependencies are missing — failing closed (tools will NOT run sandboxed-or-unsandboxed): %s",
+            deps.errors.join("; "),
+          );
+        } else {
+          if (deps.warnings.length > 0) {
+            log.warn("boot: ASRT dependency warnings: %s", deps.warnings.join("; "));
+          }
+          // askCb — interactive host tools prompt the user when a command
+          // tries to reach a network host outside the (deny-by-default) allow
+          // list. This is NOT strictAllowlist (that hard-denies, reserved for
+          // workers in a later PR). No reachable window / any error ⇒ DENY
+          // (secure floor). Decision is recorded in the boot audit log.
+          const askCb = async (params: { host: string; port: number | undefined }): Promise<boolean> => {
+            const target = params.port !== undefined ? `${params.host}:${params.port}` : params.host;
+            try {
+              const win = getMainWindow();
+              if (win === null) {
+                bootAuditLogger.log({
+                  timestamp: new Date().toISOString(),
+                  sessionId: "boot",
+                  type: "approval",
+                  input: `sandbox-network-ask host=${target}`,
+                  output: "denied: no window to prompt",
+                });
+                return false;
+              }
+              const { dialog } = await import("electron");
+              const result = await dialog.showMessageBox(win, {
+                type: "question",
+                buttons: [t("common.cancel"), t("common.allow")],
+                defaultId: 0,
+                cancelId: 0,
+                title: t("sandbox.networkAskTitle"),
+                message: t("sandbox.networkAskMessage", { host: target }),
+              });
+              const allowed = result.response === 1;
+              bootAuditLogger.log({
+                timestamp: new Date().toISOString(),
+                sessionId: "boot",
+                type: "approval",
+                input: `sandbox-network-ask host=${target}`,
+                output: allowed ? "allowed" : "denied",
+              });
+              return allowed;
+            } catch (err) {
+              log.warn("boot: sandbox network ask failed for %s: %s", target, (err as Error).message);
+              return false;
+            }
+          };
+
+          // Trust boundary: config is built from TRUSTED host settings ONLY.
+          // For the host-tool path the trusted policy is network deny-by-default
+          // (empty allowedDomains ⇒ no egress unless askCb approves) and no
+          // weakening flags. Per-command filesystem scoping (the write-jail and
+          // the HOME read-deny) is applied at the call site via wrapToolCommand's
+          // narrow `filesystem` option, never here as a weakening channel.
+          await initializeAsrtSandbox({ allowedDomains: [] }, askCb);
+          log.info(
+            "boot: ASRT OS tool sandbox initialized (%s, network deny-by-default + askCb prompt)",
+            process.platform,
+          );
+        }
       }
     } else if (process.platform === "darwin") {
       log.info(
-        "boot: macOS sandbox runner gated off (enable via Settings → 권한 'OS 도구 샌드박스' or LVIS_SANDBOX_ENABLED=1)",
+        "boot: OS tool sandbox gated off (enable via Settings → 권한 'OS 도구 샌드박스' or LVIS_SANDBOX_ENABLED=1)",
       );
     }
-
-    // §691: Windows AppContainer runner (detect-only; native Win32 binding pending).
-    // detect() always returns available=false so registration is skipped.
-    if (process.platform === "win32" && sandboxOptIn) {
-      const { AppContainerRunner } = await import("./permissions/runners/appcontainer-runner.js");
-      const appContainerRunner = new AppContainerRunner();
-      const detection = await appContainerRunner.detect();
-      if (detection.available) {
-        _registerRunner("win32", appContainerRunner, detection);
-        log.info("boot: AppContainer runner registered — %s", detection.reason);
-      } else {
-        log.warn(
-          "boot: AppContainer runner unavailable — %s. Windows tools will run with isolation=none.",
-          detection.reason,
-        );
-      }
-    }
-
-    // §691: Wire the "mcp" slot with the active platform runner.
-    // MCP child processes (StdioTransport) need bidirectional stdin — the
-    // SandboxRunner interface does not yet support stdin pipes, so MCP spawn
-    // is not replaced here. The "mcp" registry slot is pre-populated so
-    // that capability reporting (getSandboxRunner("mcp")) reflects the OS
-    // isolation level that would apply once full MCP sandboxing is wired.
-    // Full wiring will replace StdioTransport.open() with a SandboxedProcess
-    // variant that adds stdin support.
-    {
-      const { getSandboxRunner: _getRunner, getActiveDetection } = await import(
-        "./permissions/sandbox-runner.js"
-      );
-      const platformKey = process.platform as NodeJS.Platform;
-      const platformRunner = _getRunner(platformKey);
-      const platformDetection = getActiveDetection(platformKey);
-      if (platformRunner && platformDetection) {
-        _registerRunner("mcp", platformRunner, platformDetection);
-        log.info("boot: mcp sandbox slot wired to %s runner", platformKey);
-      }
-    }
-
-    // Seal the registry after all boot-time runners are registered.
-    // Post-seal registration throws in production (NODE_ENV !== "test")
-    // to prevent runtime injection of untrusted runners (issue #691 follow-up).
-    sealSandboxRunnerRegistry();
   }
 
   log.info("boot: ready (%d tools, %d plugins, %d mcp)", toolRegistry.size, pluginRuntime.listPluginIds().length, mcpManager.listServers().filter(s => s.status === "connected").length);

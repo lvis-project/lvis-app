@@ -13,6 +13,7 @@
 export const en = {
   // ── Common / shared ───────────────────────────────────────────────
   "common.cancel": "Cancel",
+  "common.allow": "Allow",
   "common.confirm": "Confirm",
   "common.ok": "OK",
   "common.save": "Save",
@@ -23,6 +24,11 @@ export const en = {
   "common.loading": "Loading…",
   "common.error": "Error",
   "common.thinking": "Thinking…",
+
+  // ── OS tool sandbox (ASRT) network prompt ─────────────────────────
+  "sandbox.networkAskTitle": "Network access request",
+  "sandbox.networkAskMessage":
+    "A sandboxed tool is trying to reach {host}, which is not on the allow list. Allow this connection?",
 
   // ── Settings → Appearance → Language ──────────────────────────────
   "settings.appearance.language.title": "Language",
