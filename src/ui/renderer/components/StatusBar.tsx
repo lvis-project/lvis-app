@@ -53,6 +53,13 @@ const SEVERITY_TEXT: Record<StatusBarSeverity, string> = {
   error: "text-destructive",
 };
 
+const TOAST_TONE: Record<StatusBarSeverity, string> = {
+  info: "border-info/(--opacity-medium) bg-info/(--opacity-faint) text-foreground",
+  success: "border-success/(--opacity-medium) bg-success/(--opacity-faint) text-success",
+  warning: "border-warning/(--opacity-medium) bg-warning/(--opacity-faint) text-warning",
+  error: "border-destructive/(--opacity-medium) bg-destructive/(--opacity-faint) text-destructive",
+};
+
 export function StatusBar(props: StatusBarProps) {
   const { persistent, visibleToast, pendingCount = 0, onToastClick, onToastDismiss } = props;
 
@@ -163,7 +170,7 @@ export function StatusBar(props: StatusBarProps) {
           const clickable = toast.notification !== undefined && typeof onToastClick === "function";
           const dismissible = typeof onToastDismiss === "function";
           const baseClass =
-            "flex min-w-0 w-full items-center gap-3 rounded-xl border border-border bg-card/(--opacity-solid) px-4 py-3 text-[13px] text-card-foreground shadow-2xl lvis-anim-slide-up";
+            `flex min-w-0 w-full items-center gap-3 rounded-t-xl rounded-b-md border px-4 py-3 text-[13px] lvis-anim-slide-up ${TOAST_TONE[toast.severity]}`;
           const dot = (
             <span
               className={`h-2 w-2 shrink-0 rounded-full ${SEVERITY_DOT[toast.severity]}`}

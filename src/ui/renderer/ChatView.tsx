@@ -1875,17 +1875,12 @@ export function ChatView({ api, onAsk, onEditSave, onFork, onToggleStar, onRetry
             onSendNow={handleMessageQueueSendNow}
           />
         </div>
-        <div className="w-full max-w-full min-w-0 overflow-x-hidden pb-1 space-y-2">
+        <div className="w-full max-w-full min-w-0 overflow-x-hidden pb-1">
           {/* §8 agent-approval surface — interactive natural-language approval
               chip. Renders directly above the composer (the position its own
               contract describes); self-hides unless the draft expresses an
               approve/reject intent AND exactly one queue entry is pending. */}
           <DeferredApprovalChip draftText={question} />
-          {statusBar && (statusBar.visibleToast !== null || statusBar.persistent.length > 0) ? (
-            <div className="mx-3 w-auto max-w-full min-w-0" data-testid="composer-toast-dock">
-              <StatusBar {...statusBar} />
-            </div>
-          ) : null}
           {/* ONE unified input box: textarea + the single InputActionBar
               (action row + status sub-row). The window StatusBar is
               notifications-only; the model / permission / active / context%
@@ -1893,7 +1888,16 @@ export function ChatView({ api, onAsk, onEditSave, onFork, onToggleStar, onRetry
               `border` (not `ring`): the dock's overflow-x-hidden forces
               overflow-y:auto, which clips a ring's top edge; a border paints
               inside the box so all four edges render. */}
-          <div className="mx-3 mb-2 rounded-xl bg-input-bar shadow-md overflow-hidden border border-border">
+          <div className="relative mx-3 mb-2 pt-7">
+            {statusBar && (statusBar.visibleToast !== null || statusBar.persistent.length > 0) ? (
+              <div
+                className="absolute inset-x-4 top-0 z-0 min-w-0"
+                data-testid="composer-toast-dock"
+              >
+                <StatusBar {...statusBar} />
+              </div>
+            ) : null}
+            <div className="relative z-10 rounded-xl bg-input-bar shadow-md overflow-hidden border border-border">
           <Composer
             ref={composerRef}
             text={question}
@@ -1954,6 +1958,7 @@ export function ChatView({ api, onAsk, onEditSave, onFork, onToggleStar, onRetry
             onOpenModelSettings={onOpenModelSettings}
             onOpenPermissions={onOpenInputPermissions}
           />
+            </div>
           </div>
         </div>
         <QuestionOverlay
