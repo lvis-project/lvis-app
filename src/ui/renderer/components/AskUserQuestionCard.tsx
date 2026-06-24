@@ -168,6 +168,9 @@ export function AskUserQuestionCard({
   const submitButtonRef = useRef<HTMLButtonElement | null>(null);
   const questionFormRef = useRef<QuestionFormHandle | null>(null);
   const cardRef = useRef<HTMLDivElement | null>(null);
+  const onConfirmStep = isMulti && step === total;
+  const currentItem = onConfirmStep ? null : request.questions[step];
+  const currentDraft = drafts[step];
 
   // New request → reset all internal state. The id is the discriminator
   // so re-rendering the same card with the same questions keeps state.
@@ -176,16 +179,17 @@ export function AskUserQuestionCard({
     setDrafts(request.questions.map(() => ({})));
   }, [request.id, request.questions]);
 
-  // Auto-focus on mount so ArrowUp/Down can reach the card-level handler
-  // immediately — without this, focus stays on the chat composer and arrow
-  // keys move the textarea cursor instead of navigating chips.
+  // Keep focus on the active question's first answer so keyboard navigation
+  // restarts from item 1 after every step transition.
   useEffect(() => {
-    cardRef.current?.focus();
-  }, [request.id]);
-
-  const onConfirmStep = isMulti && step === total;
-  const currentItem = onConfirmStep ? null : request.questions[step];
-  const currentDraft = drafts[step];
+    if (onConfirmStep) return;
+    const frame = requestAnimationFrame(() => {
+      if (!questionFormRef.current?.focusFirstAnswer()) {
+        cardRef.current?.focus();
+      }
+    });
+    return () => cancelAnimationFrame(frame);
+  }, [request.id, step, onConfirmStep]);
 
   const allAnswered = useMemo(
     () => request.questions.every((item, i) => isAnswerComplete(item, drafts[i])),
@@ -589,10 +593,12 @@ export type ChoiceResult =
  * Imperative handle exposed to the parent card so it can delegate card-level
  * ArrowUp/Down keypresses into the QuestionForm's roving-tabIndex navigation.
  *
+ * `focusFirstAnswer()` — focus answer/input index 0 when a page mounts.
  * `arrowNav(delta)` — delta: +1 (ArrowDown) or -1 (ArrowUp). Returns true
  * when there are answers to navigate (i.e. the event was handled).
  */
 export interface QuestionFormHandle {
+  focusFirstAnswer(): boolean;
   arrowNav(delta: 1 | -1): boolean;
 }
 
@@ -669,6 +675,11 @@ const QuestionForm = forwardRef<QuestionFormHandle, QuestionFormProps>(function 
   // roving-tabIndex choice navigation. Fixes the regression where Up/Down
   // had no effect when the card container held focus.
   useImperativeHandle(ref, () => ({
+    focusFirstAnswer(): boolean {
+      if (answerCount <= 0) return false;
+      focusAnswerAt(0);
+      return true;
+    },
     arrowNav(delta: 1 | -1): boolean {
       if (answerCount <= 0) return false;
       // When no choice is focused yet (sentinel -1), treat ArrowDown as "go to
@@ -686,11 +697,11 @@ const QuestionForm = forwardRef<QuestionFormHandle, QuestionFormProps>(function 
   // Reset focused idx when the question item changes (step transition).
   // Prevents out-of-range focusedIdx when the new step has fewer choices,
   // which would leave all option buttons with tabIndex={-1} (keyboard nav broken).
-  // Uses -1 sentinel (no choice focused) when there is no recommended index so that
-  // the first ArrowDown from the card surface lands on index 0 (not index 1).
+  // Step changes start at index 0 so the visible cursor always lands on the
+  // first answer of the new page, not the last cursor position from the old page.
   useEffect(() => {
-    setFocusedIdx(recommendIndex(item) ?? -1);
-  }, [choices.length, freeTextIndex, item]);
+    setFocusedIdx(answerCount > 0 ? 0 : -1);
+  }, [answerCount, item]);
 
   // Sync focused idx when the draft's selected choice changes externally.
   useEffect(() => {
@@ -751,6 +762,7 @@ const QuestionForm = forwardRef<QuestionFormHandle, QuestionFormProps>(function 
             // Roving tabIndex: only the focused item (or selected item when
             // none is explicitly focused) is in the tab order.
             const isTabStop = focusedIdx === i || (focusedIdx < 0 && i === 0);
+            const focused = focusedIdx === i;
             return (
               <Button
                 key={`${i}:${c}`}
@@ -764,7 +776,7 @@ const QuestionForm = forwardRef<QuestionFormHandle, QuestionFormProps>(function 
                 onClick={() => onChoose(c, i)}
                 onKeyDown={(e) => handleChoiceKeyDown(e, i)}
                 onFocus={() => setFocusedIdx(i)}
-                className="h-auto justify-start gap-2 px-2.5 py-1.5 text-[12px]"
+                className={`h-auto justify-start gap-2 px-2.5 py-1.5 text-[12px] ${focused ? "ring-2 ring-primary/(--opacity-medium) ring-offset-1 ring-offset-background" : ""}`}
               >
                 {item.allowMultiple && (
                   <span

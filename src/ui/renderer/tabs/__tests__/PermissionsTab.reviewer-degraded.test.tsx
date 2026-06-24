@@ -1,8 +1,7 @@
 // @vitest-environment jsdom
 /**
- * Reviewer LLM-degraded-to-rule banner — surfaces the runtime degrade state
- * (persisted mode="llm" but boot wiring fell back to the rule classifier
- * because no LLM provider/key is configured).
+ * Reviewer prompt panel visibility — Settings no longer exposes reviewer
+ * controls or degraded banners. Auto mode keeps only the read-only prompt view.
  */
 import "../../../../../test/renderer/setup.js";
 import { act, cleanup, render, screen, waitFor } from "@testing-library/react";
@@ -104,7 +103,7 @@ function installApi(opts: { mode: "llm" | "rule"; degraded: boolean }) {
   return lvis;
 }
 
-describe("PermissionsTab — LLM reviewer degraded-to-rule banner", () => {
+describe("PermissionsTab — reviewer prompt-only Settings UI", () => {
   beforeEach(() => {
     vi.clearAllMocks();
     delete (window as unknown as { lvis?: unknown }).lvis;
@@ -114,35 +113,41 @@ describe("PermissionsTab — LLM reviewer degraded-to-rule banner", () => {
     delete (window as unknown as { lvis?: unknown }).lvis;
   });
 
-  it("shows the degrade banner when mode=llm and reviewerDegradedToRule=true", async () => {
+  it("shows the prompt panel, not a degraded reviewer banner, when mode=llm and reviewerDegradedToRule=true", async () => {
     installApi({ mode: "llm", degraded: true });
     await act(async () => {
       render(<PermissionsTab />);
     });
     await waitFor(() =>
-      expect(screen.getByTestId("reviewer-llm-degraded-banner")).toBeInTheDocument(),
+      expect(screen.getByTestId("reviewer-prompt-panel")).toBeInTheDocument(),
     );
+    expect(screen.getByTestId("exec-mode-auto")).toContainElement(screen.getByTestId("reviewer-prompt-panel"));
+    expect(screen.queryByTestId("reviewer-llm-degraded-banner")).toBeNull();
   });
 
-  it("hides the banner when reviewerDegradedToRule=false (llm wired normally)", async () => {
+  it("shows the prompt panel when reviewerDegradedToRule=false (llm wired normally)", async () => {
     installApi({ mode: "llm", degraded: false });
     await act(async () => {
       render(<PermissionsTab />);
     });
     await waitFor(() =>
-      expect(screen.getByTestId("reviewer-framework-panel")).toBeInTheDocument(),
+      expect(screen.getByTestId("reviewer-prompt-panel")).toBeInTheDocument(),
     );
+    expect(screen.getByTestId("exec-mode-auto")).toContainElement(screen.getByTestId("reviewer-prompt-panel"));
     expect(screen.queryByTestId("reviewer-llm-degraded-banner")).toBeNull();
+    expect(screen.queryByTestId("reviewer-framework-panel")).toBeNull();
   });
 
-  it("hides the banner when persisted mode is rule (no degrade applicable)", async () => {
+  it("shows the prompt panel when persisted mode is rule", async () => {
     installApi({ mode: "rule", degraded: false });
     await act(async () => {
       render(<PermissionsTab />);
     });
     await waitFor(() =>
-      expect(screen.getByTestId("reviewer-framework-panel")).toBeInTheDocument(),
+      expect(screen.getByTestId("reviewer-prompt-panel")).toBeInTheDocument(),
     );
+    expect(screen.getByTestId("exec-mode-auto")).toContainElement(screen.getByTestId("reviewer-prompt-panel"));
     expect(screen.queryByTestId("reviewer-llm-degraded-banner")).toBeNull();
+    expect(screen.queryByTestId("reviewer-framework-panel")).toBeNull();
   });
 });
