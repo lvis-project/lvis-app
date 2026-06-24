@@ -1506,6 +1506,11 @@ export function App() {
               announcements={marketplaceAnnouncements}
               onDismiss={handleMarketplaceAnnouncementDismiss}
             />
+            {/* Status notifications (install progress, lifecycle results, the
+                pre-turn auto-compact indicator) — merged into this top-right
+                banner stack; the bottom StatusBar is gone. Renders nothing when
+                there is no toast/persistent indicator. */}
+            <StatusBar persistent={statusPersistent} visibleToast={statusVisibleToast} pendingCount={statusPendingCount} onToastClick={handleStatusToastClick} />
           </div>
           {fallbackToast && (
             <div className="bg-warning text-warning-foreground text-xs px-4 py-2 border-b border-warning">
@@ -1645,16 +1650,10 @@ export function App() {
             onRoutineAcknowledge={handleRoutineAcknowledge}
           />
           </ErrorBoundary>
-          {/* Notification area — OVERLAYS the composer's status sub-row (the
-              ring/permission/model section) instead of taking its own in-flow
-              row, so it never adds height. Anchored to the composer box bottom
-              (inset-x-3 = the composer's mx-3, bottom-3 = the composer's bottom
-              margin) so the h-6 bar covers the status sub-row. The StatusBar is
-              transparent when empty (the ring section shows through) and paints
-              its own bg only when a toast/persistent indicator is present. */}
-          <div className="pointer-events-none absolute inset-x-3 bottom-3 z-40 [&>*]:pointer-events-auto">
-            <StatusBar persistent={statusPersistent} visibleToast={statusVisibleToast} pendingCount={statusPendingCount} onToastClick={handleStatusToastClick} />
-          </div>
+          {/* Bottom StatusBar removed — its notifications now render in the
+              top-right floating banner stack (merged with the plugin-install /
+              marketplace banners). The composer's own status sub-row keeps
+              showing the ring / permission / model cells. */}
         </main>
         </div>
       </div>
