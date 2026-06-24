@@ -1301,6 +1301,7 @@ export async function bootstrap(
       initializeAsrtSandbox,
       checkAsrtDependencies,
       computeUnionAllowedDomains,
+      normalizeUnionForAsrt,
     } = await import("./permissions/asrt-sandbox.js");
 
     const sandboxOptIn =
@@ -1371,7 +1372,13 @@ export async function bootstrap(
             .map((id) => pluginRuntime.getPluginManifest(id)?.networkAccess?.allowedDomains ?? []);
           // Trusted host baseline for host tools is empty by default — no
           // settings surface grants host-tool egress beyond the plugin union.
-          const unionAllowedDomains = computeUnionAllowedDomains(manifestAllowLists, []);
+          // Normalize for ASRT's matcher: a bare `example.com` matches EXACTLY
+          // in ASRT (domain-pattern.js), whereas LVIS hostFetch treats it as a
+          // dot-boundary suffix. normalizeUnionForAsrt emits both `d` and `*.d`
+          // so the sandbox enforces the SAME hosts the fetch path advertises.
+          const unionAllowedDomains = normalizeUnionForAsrt(
+            computeUnionAllowedDomains(manifestAllowLists, []),
+          );
 
           // Trust boundary: WEAKENING flags are NOT set here (deny-by-default,
           // no Apple events / weaker isolation / unix-socket opening). Only the

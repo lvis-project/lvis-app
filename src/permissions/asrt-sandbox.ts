@@ -129,15 +129,17 @@ export interface TrustedSandboxSettings {
    * Upstream HTTP/HTTPS proxy the sandbox's egress proxy should chain through
    * for outbound connections (corporate-proxy passthrough). TRUSTED-ONLY.
    *
-   * SECURITY (PR #1356 MINOR -- parentProxy explicit):
-   * ASRT's `resolveParentProxy` SILENTLY inherits the HOST process's
-   * `HTTP_PROXY`/`HTTPS_PROXY`/`NO_PROXY` env vars when `network.parentProxy`
-   * is absent. That implicit inheritance is a covert egress channel: a
-   * sandboxed child's traffic would tunnel through whatever proxy the host
-   * happened to have configured. We therefore set `network.parentProxy`
-   * EXPLICITLY in {@link buildSandboxConfig} on every initialize:
-   *   - default (this field omitted): empty proxy config so ASRT connects
-   *     directly and does NOT chain through the host proxy (the secure floor);
+   * SECURITY (PR #1356 MINOR -- parentProxy explicit, corrected here):
+   * ASRT's `resolveParentProxy` (parent-proxy.js:46) does
+   * `cfg?.http ?? process.env.HTTP_PROXY ?? process.env.http_proxy`. An EMPTY
+   * object `{}` has no `http` key, so `cfg?.http` is `undefined` and the `??`
+   * chain STILL inherits the HOST `HTTP_PROXY`/`HTTPS_PROXY` env — a covert
+   * egress channel identical to passing no config at all. Only an EXPLICIT
+   * EMPTY STRING short-circuits the chain (`'' ?? x` ⇒ `''`) and yields genuine
+   * direct-connect. {@link buildSandboxConfig} therefore ALWAYS sets
+   * `network.parentProxy.http`/`.https` explicitly:
+   *   - default (this field omitted): empty strings ⇒ ASRT connects directly
+   *     and does NOT chain through the host proxy (the secure floor);
    *   - present: only the explicit, trusted corporate-proxy URLs below are
    *     used -- never the ambient host env.
    * This field is the ONLY way to opt a sandbox into a parent proxy.
@@ -259,18 +261,25 @@ function buildSandboxConfig(trustedSettings: TrustedSandboxSettings): SandboxRun
     ...(trustedSettings.weakening?.allowAllUnixSockets !== undefined
       ? { allowAllUnixSockets: trustedSettings.weakening.allowAllUnixSockets }
       : {}),
-    // parentProxy EXPLICIT (PR #1356 security MINOR). ASRT's resolveParentProxy
-    // silently inherits the host HTTP_PROXY/HTTPS_PROXY/NO_PROXY env when this
-    // is absent — a covert egress channel. We always set it: empty {} ⇒ no
-    // parent-proxy chaining (direct connect, the secure floor); only an
-    // explicit trusted corporateProxy ever populates it.
+    // parentProxy EXPLICIT (PR #1356 security MINOR — corrected). ASRT's
+    // resolveParentProxy (dist/sandbox/parent-proxy.js:46) reads
+    //   `cfg?.http ?? process.env.HTTP_PROXY ?? process.env.http_proxy`.
+    // An EMPTY object `{}` has no `http` key ⇒ `cfg?.http` is `undefined` ⇒ the
+    // `??` chain STILL falls through to the host `process.env.HTTP_PROXY`
+    // (identical to passing no parentProxy at all). Only an EXPLICIT EMPTY
+    // STRING short-circuits the `??` chain (`'' ?? x` ⇒ `''`), yielding genuine
+    // direct-connect with NO host-proxy chaining. So the secure floor is
+    // `{ http: '', https: '' }`, NOT `{}`.
+    //
+    // We therefore always set http/https explicitly:
+    //   - default (no trusted corporateProxy): empty strings ⇒ direct-connect,
+    //     the secure floor — ASRT never inherits the ambient host proxy;
+    //   - present: only the explicit, trusted corporate-proxy URLs are used.
+    // `noProxy` carries no inheritance hazard (its only effect is to BYPASS the
+    // proxy, never to add egress), so it is set only when explicitly supplied.
     parentProxy: {
-      ...(trustedSettings.corporateProxy?.http !== undefined
-        ? { http: trustedSettings.corporateProxy.http }
-        : {}),
-      ...(trustedSettings.corporateProxy?.https !== undefined
-        ? { https: trustedSettings.corporateProxy.https }
-        : {}),
+      http: trustedSettings.corporateProxy?.http ?? "",
+      https: trustedSettings.corporateProxy?.https ?? "",
       ...(trustedSettings.corporateProxy?.noProxy !== undefined
         ? { noProxy: trustedSettings.corporateProxy.noProxy }
         : {}),
@@ -324,6 +333,12 @@ function buildSandboxConfig(trustedSettings: TrustedSandboxSettings): SandboxRun
  * shipped enforced model); when `strictAllowlist` is true it is dead weight by
  * design.
  *
+ * @param askCb  RESERVED FOR NON-STRICT; INERT UNDER STRICT. The shipped model
+ *               always sets `strictAllowlist: true`, where ASRT bypasses the
+ *               callback entirely (hard-deny). Kept so a future non-strict
+ *               configuration has a hook; boot does not pass it. The wiring
+ *               test passes a recording callback purely to PROVE strict never
+ *               consults it.
  * @param enableLogMonitor  Forwarded to ASRT (violation log monitor). Default
  *                          off to avoid surprising background activity.
  */
@@ -389,10 +404,20 @@ export async function wrapToolCommand(
 }
 
 /**
- * Wrap a WORKER command (Python uv/runtime spawns) for sandboxed execution,
- * returning the `{ argv, env }` the host must spawn. Same wrapping primitive as
+ * Wrap a WORKER command (the long-lived plugin worker — MCP/python — that
+ * actually performs runtime network egress) for sandboxed execution, returning
+ * the `{ argv, env }` the host must spawn. Same wrapping primitive as
  * {@link wrapToolCommand}: the per-command channel carries ONLY the filesystem
  * jail (scoped to the worker's plugin sandbox root + needed dirs).
+ *
+ * STAGED FOR THE WORKER-EGRESS FOLLOW-UP — NO CALLER YET. This is intentionally
+ * exported-but-unused: closing the long-lived-worker network egress gap is a
+ * deliberately-separated follow-up PR (it needs per-plugin domain declaration +
+ * dynamic user-configured-endpoint plumbing wired through the actual worker
+ * spawn in mcp-client.ts). The Python SETUP spawns (python-runtime.ts
+ * runUv/runPython) are NOT the egress doer — they run at boot before the gate
+ * is active and legitimately need PyPI egress, so they plain-spawn. Do not
+ * treat this as accidental dead code; the follow-up wires the real caller.
  *
  * NETWORK: workers do NOT carry a per-command network override — that channel
  * is INERT in ASRT 0.0.59 (`filterNetworkRequest` reads the SHARED config, not
@@ -459,6 +484,56 @@ export function computeUnionAllowedDomains(
     }
   }
   return union;
+}
+
+/**
+ * Align an allow-list with ASRT's domain-matching semantics so it enforces the
+ * SAME hosts LVIS's host-fetch allow-list does.
+ *
+ * SEMANTICS DIVERGENCE (PR #1356 MINOR): ASRT's `matchesDomainPattern`
+ * (dist/sandbox/domain-pattern.js:23) matches a BARE `example.com` EXACTLY —
+ * `h === pattern` — so `sub.example.com` is NOT covered; a strict subdomain
+ * needs the explicit `*.example.com` pattern (`h.endsWith('.' + base)`). LVIS's
+ * own `urlHostMatchesAllowList` (host-allow-list.ts) instead treats a bare
+ * `example.com` as a DOT-BOUNDARY SUFFIX — it allows `sub.example.com` too.
+ * Passing the manifest union RAW would therefore enforce a STRICTER set under
+ * ASRT than the host fetch path advertises (a plugin that declared
+ * `example.com` and reaches `api.example.com` via hostFetch would be silently
+ * hard-denied by the sandbox).
+ *
+ * Normalization: for each BARE domain `d` we emit BOTH `d` (the apex, exact
+ * match) AND `*.d` (every strict subdomain) so ASRT's two matcher branches
+ * together reproduce LVIS's dot-boundary suffix match. Entries already in
+ * wildcard form (`*.d`) pass through unchanged; the deny-all `*` (only valid in
+ * deniedDomains) and empty entries are dropped. Deduped, order-stable (apex
+ * before its wildcard).
+ */
+export function normalizeUnionForAsrt(
+  domains: readonly string[],
+): string[] {
+  const seen = new Set<string>();
+  const out: string[] = [];
+  const add = (entry: string): void => {
+    if (!seen.has(entry)) {
+      seen.add(entry);
+      out.push(entry);
+    }
+  };
+  for (const raw of domains) {
+    if (typeof raw !== "string") continue;
+    const d = raw.trim().toLowerCase();
+    if (d.length === 0 || d === "*") continue;
+    if (d.startsWith("*.")) {
+      // Already a wildcard — pass through (no apex implied by a bare `*.d`).
+      add(d);
+      continue;
+    }
+    // Bare domain: emit apex + every strict subdomain to mirror LVIS's
+    // dot-boundary suffix match against ASRT's exact/`*.` two-branch matcher.
+    add(d);
+    add(`*.${d}`);
+  }
+  return out;
 }
 
 /**
