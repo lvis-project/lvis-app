@@ -114,6 +114,25 @@ const buildOptions = {
     "real-require",
     "atomic-sleep",
     "on-exit-leak-free",
+    // ── ASRT (Anthropic sandbox-runtime) — MUST stay external ────────────
+    // INVARIANT (PAIRED with the `asarUnpack` of
+    // `node_modules/@anthropic-ai/sandbox-runtime/vendor/**` in package.json;
+    // the foundation PR added that unpack): ASRT locates its own vendor
+    // binaries (Linux seccomp loader, Windows srt-win.exe) filesystem-relative
+    // to its module — `dist/sandbox/generate-seccomp-filter.js` does
+    // `dirname(fileURLToPath(import.meta.url))` then joins `../../vendor/...`.
+    // Because this bundle is `bundle:true` + `format:esm` with no splitting,
+    // esbuild would INLINE a reachable dynamic import of ASRT into main.js,
+    // which rewrites `import.meta.url` to main.js's own path — so the
+    // `../../vendor/...` walk resolves to the wrong directory and the vendor
+    // binaries cannot be found at runtime (the same failure class pino hit).
+    // Keeping ASRT external makes it a real node_modules entry that resolves
+    // its vendor dir at runtime. Its transitive deps (`@pondwader/socks5-server`,
+    // `shell-quote`, `node-forge`, `commander`, `zod`) ride along automatically:
+    // esbuild stops at the external boundary and never bundles them, so they
+    // resolve from node_modules normally. If either side of the pair is
+    // dropped, the runtime vendor smoke (scripts/asrt-runtime-smoke.mjs) fails.
+    "@anthropic-ai/sandbox-runtime",
   ],
   logLevel: "info",
   // Inlined CommonJS modules reference CJS-only `require` directly; the ESM

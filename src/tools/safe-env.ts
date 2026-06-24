@@ -52,3 +52,28 @@ export function buildSafeChildEnv(
   }
   return { ...safe, ...extra };
 }
+
+/**
+ * Compose the env for an ASRT-sandboxed child.
+ *
+ * ASRT's `wrapWithSandboxArgv` returns `env` = the parent `process.env` plus
+ * the proxy / CA-cert variables it ADDS for sandbox networking (HTTP_PROXY,
+ * ALL_PROXY, NODE_EXTRA_CA_CERTS, …). Passing that env verbatim would leak the
+ * host secrets the {@link buildSafeChildEnv} whitelist exists to strip.
+ *
+ * So we start from the safe whitelist baseline and overlay ONLY the keys ASRT
+ * actually changed relative to `process.env` (its proxy additions/overrides).
+ * A stripped secret has an identical value in `process.env` and `wrapped.env`,
+ * so it never matches the "differs" test and is never re-introduced — the
+ * secret-stripping guarantee holds while ASRT's network plumbing survives.
+ */
+export function buildSandboxedChildEnv(
+  wrappedEnv: NodeJS.ProcessEnv,
+): Record<string, string> {
+  const env = buildSafeChildEnv();
+  for (const [key, value] of Object.entries(wrappedEnv)) {
+    if (value === undefined) continue;
+    if (process.env[key] !== value) env[key] = value;
+  }
+  return env;
+}
