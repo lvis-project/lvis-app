@@ -8,6 +8,7 @@ import type { SeedMessageKey } from "./en.js";
 export const ko: Record<SeedMessageKey, string> = {
   // ── Common / shared ───────────────────────────────────────────────
   "common.cancel": "취소",
+  "common.allow": "허용",
   "common.confirm": "확인",
   "common.ok": "확인",
   "common.save": "저장",
@@ -18,6 +19,11 @@ export const ko: Record<SeedMessageKey, string> = {
   "common.loading": "불러오는 중…",
   "common.error": "오류",
   "common.thinking": "생각 중...",
+
+  // ── OS 도구 샌드박스(ASRT) 네트워크 프롬프트 ─────────────────────
+  "sandbox.networkAskTitle": "네트워크 접근 요청",
+  "sandbox.networkAskMessage":
+    "샌드박스에서 실행 중인 도구가 허용 목록에 없는 {host} 에 연결하려고 합니다. 이 연결을 허용하시겠습니까?",
 
   // ── Settings → Appearance → Language ──────────────────────────────
   "settings.appearance.language.title": "언어",
