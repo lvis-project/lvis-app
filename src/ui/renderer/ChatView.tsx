@@ -1888,10 +1888,10 @@ export function ChatView({ api, onAsk, onEditSave, onFork, onToggleStar, onRetry
               `border` (not `ring`): the dock's overflow-x-hidden forces
               overflow-y:auto, which clips a ring's top edge; a border paints
               inside the box so all four edges render. */}
-          <div className="relative mx-3 mb-2 pt-7">
+          <div className="relative mx-3 mb-2 pt-9">
             {statusBar && (statusBar.visibleToast !== null || statusBar.persistent.length > 0) ? (
               <div
-                className="absolute inset-x-4 top-0 z-0 min-w-0"
+                className="absolute inset-x-3 top-0 z-0 min-w-0"
                 data-testid="composer-toast-dock"
               >
                 <StatusBar {...statusBar} />
