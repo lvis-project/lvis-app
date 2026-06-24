@@ -1726,31 +1726,6 @@ export class PluginRuntime {
     return this.methodMap.get(method)?.pluginId ?? this.knownToolOwners.get(method);
   }
 
-  /**
-   * Resolve the manifest for a pluginId from either the loaded set or the
-   * known-manifest cache (a plugin may be declared/known before it is fully
-   * loaded). Returns undefined when neither holds it.
-   */
-  private manifestForPlugin(pluginId: string): PluginManifest | undefined {
-    return this.plugins.get(pluginId)?.manifest ?? this.knownPluginManifests.get(pluginId);
-  }
-
-  /**
-   * Auth-class classifier consumed by the permission pipeline (ToolExecutor).
-   * A tool is auth-class iff it equals the owning plugin manifest's
-   * `auth.loginTool` or `auth.logoutTool` — the deliberate sign-in / sign-out
-   * actions. `auth.statusTool` is intentionally EXCLUDED: status is a read-only
-   * probe that must stay silent (no approval modal). Auth-class tools surface
-   * the SAME ApprovalGate modal on every lane (UI click + agent-triggered).
-   */
-  isAuthClassTool(toolName: string): boolean {
-    const pluginId = this.resolveToolOwner(toolName);
-    if (!pluginId) return false;
-    const auth = this.manifestForPlugin(pluginId)?.auth;
-    if (!auth) return false;
-    return toolName === auth.loginTool || toolName === auth.logoutTool;
-  }
-
   assertPluginToolAccess(callerPluginId: string, method: string): void {
     const targetPluginId = this.resolveToolOwner(method);
     if (!targetPluginId || targetPluginId === callerPluginId) return;

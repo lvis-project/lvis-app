@@ -309,4 +309,60 @@ describe("manifest validation — auth cross-field", () => {
     expect(parsed.auth?.loginTool).toBe("test_email_delete");
   });
 
+  // architecture.md §9.4a: auth is a host-managed lifecycle, not an LLM
+  // capability. Auth tools (statusTool/loginTool/logoutTool) must live in
+  // uiCallable[] ONLY — never in tools[], which is the LLM-facing surface.
+  // Soft warn for migration safety (plugins drop them from tools[] in
+  // parallel PRs); CI gates promote to error once migration completes.
+  it("warns when an auth tool appears in tools[] (auth must be host-managed, not LLM-callable)", async () => {
+    const warnSpy = vi.spyOn(console, "warn").mockImplementation(() => undefined);
+    try {
+      // Base fixture lists test_status/test_login/test_signout in BOTH tools[]
+      // and uiCallable[] — the pre-migration state this rule targets.
+      await writeManifest({
+        emittedEvents: ["test-plugin.auth.changed"],
+        auth: {
+          statusTool: "test_status",
+          loginTool: "test_login",
+          logoutTool: "test_signout",
+        },
+      });
+      const validator = TEST_VALIDATOR;
+      await parsePluginJson(manifestPath, validator);
+      const warnMessages = warnSpy.mock.calls.map((c) => c.join(" "));
+      expect(
+        warnMessages.some(
+          (m) => m.includes("auth tool") && m.includes("tools[]"),
+        ),
+      ).toBe(true);
+      // Names the offending tools so the author can act.
+      expect(warnMessages.some((m) => m.includes("'test_login'"))).toBe(true);
+    } finally {
+      warnSpy.mockRestore();
+    }
+  });
+
+  it("does NOT warn when auth tools are only in uiCallable[] (migrated state)", async () => {
+    const warnSpy = vi.spyOn(console, "warn").mockImplementation(() => undefined);
+    try {
+      await writeManifest({
+        // tools[] holds only non-auth tools; auth tools live in uiCallable[].
+        tools: ["test_other"],
+        uiCallable: ["test_status", "test_login", "test_signout"],
+        emittedEvents: ["test-plugin.auth.changed"],
+        auth: {
+          statusTool: "test_status",
+          loginTool: "test_login",
+          logoutTool: "test_signout",
+        },
+      });
+      const validator = TEST_VALIDATOR;
+      await parsePluginJson(manifestPath, validator);
+      const warnMessages = warnSpy.mock.calls.map((c) => c.join(" "));
+      expect(warnMessages.some((m) => m.includes("must not be LLM-callable"))).toBe(false);
+    } finally {
+      warnSpy.mockRestore();
+    }
+  });
+
 });
