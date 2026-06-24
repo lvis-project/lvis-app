@@ -1348,6 +1348,27 @@ export function ChatView({ api, onAsk, onEditSave, onFork, onToggleStar, onRetry
           </div>
         );
       }
+      const hasCurrentTurnOutput = activeEntries
+        .slice(idx + 1)
+        .some(
+          (nextEntry) =>
+            nextEntry.kind === "assistant" ||
+            nextEntry.kind === "reasoning" ||
+            nextEntry.kind === "tool_group" ||
+            nextEntry.kind === "permission_review",
+        );
+      if (streaming && idx === lastTurnStartIdx && !hasCurrentTurnOutput) {
+        rendered.push(
+          <WorkGroup
+            key={`wg-${currentSessionId}:${idx}:active-start`}
+            stepCount={0}
+            streaming
+            revision={`${currentSessionId}:${idx}:active-start`}
+          >
+            {null}
+          </WorkGroup>,
+        );
+      }
       i++;
       continue;
     }
