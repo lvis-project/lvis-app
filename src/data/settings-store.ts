@@ -17,6 +17,12 @@ import {
   type LLMVendorSettings,
 } from "../shared/llm-vendor-defaults.js";
 import { BUNDLE_IDS, DEFAULT_BUNDLE_ID } from "../shared/theme-bundles.js";
+import {
+  FONT_SIZE_SCALE_VALUES,
+  type FontSizeScale,
+  type AppearanceFontSettings,
+  isValidFontFamilyOverride,
+} from "../shared/appearance-font.js";
 import { DEFAULT_LOCALE, normalizeLocale, type Locale } from "../i18n/index.js";
 import { createLogger } from "../lib/logger.js";
 const log = createLogger("settings");
@@ -239,23 +245,25 @@ export interface AppearanceSettingsV1 {
  * User-configurable font preferences (Track A scope expansion).
  *
  * `family` — `"system"` keeps the built-in HOST_FONT_STACK (default). Any other
- * value MUST match the validator below (`isValidFontFamilyOverride`); rejected
- * values fall back to `"system"` at normalize time so a corrupt settings.json
- * cannot break first paint.
+ * value MUST match `isValidFontFamilyOverride`; rejected values fall back to
+ * `"system"` at normalize time so a corrupt settings.json cannot break first
+ * paint.
  *
  * `sizeScale` — multiplicative on `1rem`. Discrete preset values keep the UI
  * legible at every step (a free slider would let users pick `0.4` and lock
  * themselves out of the settings dialog).
+ *
+ * The values + validators live in `src/shared/appearance-font.ts` (a zero-import
+ * pure module) so the renderer preload can enforce the same contract on the
+ * frame-0 theme prime without pulling this store's `electron`/`node:fs` deps.
+ * Re-exported here so existing import sites stay unchanged.
  */
-export const FONT_SIZE_SCALE_VALUES = [0.875, 1, 1.125, 1.25] as const;
-export type FontSizeScale = (typeof FONT_SIZE_SCALE_VALUES)[number];
-
-export interface AppearanceFontSettings {
-  /** `"system"` = HOST_FONT_STACK default; otherwise a validated raw CSS font-family stack. */
-  family?: "system" | string;
-  /** Multiplier on `1rem` base. Allowed: 0.875 / 1 / 1.125 / 1.25. */
-  sizeScale?: FontSizeScale;
-}
+export {
+  FONT_SIZE_SCALE_VALUES,
+  type FontSizeScale,
+  type AppearanceFontSettings,
+  isValidFontFamilyOverride,
+} from "../shared/appearance-font.js";
 
 /** v2 appearance settings — single bundle, optional followSystem + font overrides. */
 export interface AppearanceSettings {
@@ -269,29 +277,6 @@ export interface AppearanceSettings {
    * the choice survives restarts and is read by both main and renderer.
    */
   language?: Locale;
-}
-
-/**
- * Allow Unicode letters/digits (Hangul, CJK, Latin, …), single space, commas,
- * hyphens, single/double quotes, and underscores in a user-supplied font-family
- * stack. The Unicode class is required because JS `\w` is ASCII-only — without
- * `\p{L}` Korean users typing `맑은 고딕, sans-serif` would be silently rejected
- * (PR #672 critic CRITICAL #3). Explicitly excludes every CSS injection
- * metachar (`;`, `{`, `}`, `(`, `)`, `:`, `<`, `>`, `\`, `` ` ``, `/`, `*`, `=`)
- * and embedded newlines/tabs (whitespace is narrowed to ASCII space) so the
- * value cannot break out of the `font-family` declaration.
- *
- * 200-char cap prevents a malicious or oversized settings.json from bloating
- * every CSS var lookup.
- */
-const _FONT_FAMILY_RE = /^[\p{L}\p{N} ,"'_-]+$/u;
-const _FONT_FAMILY_MAX = 200;
-
-export function isValidFontFamilyOverride(value: unknown): value is string {
-  return typeof value === "string"
-    && value.length > 0
-    && value.length <= _FONT_FAMILY_MAX
-    && _FONT_FAMILY_RE.test(value);
 }
 
 /**
