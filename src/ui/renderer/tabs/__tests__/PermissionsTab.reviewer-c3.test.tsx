@@ -41,7 +41,9 @@ function installApi(providerKeys: Partial<Record<string, boolean>> = {}) {
 
   const lvis = {
     permission: {
-      getMode: vi.fn(async () => ({ mode: "default" })),
+      // The reviewer config only renders under the auto-verification mode now
+      // that the permission UI exposes a single axis.
+      getMode: vi.fn(async () => ({ mode: "auto" })),
       setMode: vi.fn(async (mode: string) => ({ ok: true, mode })),
       onModeChanged: vi.fn(() => () => undefined),
       listRules: vi.fn(async () => []),
@@ -188,11 +190,15 @@ describe("PermissionsTab C3 — active LLM following", () => {
       render(<PermissionsTab />);
     });
     await waitFor(() =>
-      expect(screen.getByTestId("reviewer-mode-llm")).toBeInTheDocument(),
+      expect(screen.getByTestId("reviewer-active-llm-source")).toBeInTheDocument(),
     );
 
+    // Re-selecting the auto-verification mode auto-wires `mode llm`.
     await act(async () => {
-      fireEvent.click(screen.getByTestId("reviewer-mode-llm"));
+      fireEvent.click(screen.getByTestId("exec-mode-default"));
+    });
+    await act(async () => {
+      fireEvent.click(screen.getByTestId("exec-mode-auto"));
     });
 
     expect(api.permission.reviewerDispatch).toHaveBeenCalledWith("mode llm");
@@ -223,11 +229,15 @@ describe("PermissionsTab C3 — active LLM following", () => {
       render(<PermissionsTab />);
     });
     await waitFor(() =>
-      expect(screen.getByTestId("reviewer-mode-llm")).toBeInTheDocument(),
+      expect(screen.getByTestId("reviewer-active-llm-source")).toBeInTheDocument(),
     );
 
+    // Toggle away and back to re-trigger the auto-wired `mode llm` (which fails).
     await act(async () => {
-      fireEvent.click(screen.getByTestId("reviewer-mode-llm"));
+      fireEvent.click(screen.getByTestId("exec-mode-default"));
+    });
+    await act(async () => {
+      fireEvent.click(screen.getByTestId("exec-mode-auto"));
     });
 
     expect(api.permission.reviewerProviderHasKey).not.toHaveBeenCalled();

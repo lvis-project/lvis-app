@@ -60,19 +60,6 @@ function getReviewerInteractiveOptions(): Array<{
   ];
 }
 
-function getReviewerModeOptions(): Array<{
-  value: PermissionReviewerMode;
-  label: string;
-  description: string;
-}> {
-  return [
-    { value: "disabled", label: t("permissionsTab.reviewerModeDisabledLabel"), description: t("permissionsTab.reviewerModeDisabledDescription") },
-    { value: "rule", label: t("permissionsTab.reviewerModeRuleLabel"), description: t("permissionsTab.reviewerModeRuleDescription") },
-    { value: "llm", label: t("permissionsTab.reviewerModeLlmLabel"), description: t("permissionsTab.reviewerModeLlmDescription") },
-    { value: "strict", label: t("permissionsTab.reviewerModeStrictLabel"), description: t("permissionsTab.reviewerModeStrictDescription") },
-  ];
-}
-
 function getReviewerFallbackOptions(): Array<{
   value: PermissionReviewerFallbackOnError;
   label: string;
@@ -605,14 +592,10 @@ export function PermissionsTab() {
           title={t("permissionsTab.currentPolicySummaryTitle")}
           description={t("permissionsTab.currentPolicySummaryDescription")}
         >
-          <div className="grid gap-2 sm:grid-cols-3">
+          <div className="grid gap-2 sm:grid-cols-2">
             <div className="rounded-md border px-3 py-2">
               <p className="text-[11px] font-medium text-muted-foreground">{t("permissionsTab.summaryPolicyPreset")}</p>
               <p className="mt-1 text-sm font-medium">{EXEC_MODE_OPTIONS.find((opt) => opt.value === mode)?.label ?? mode}</p>
-            </div>
-            <div className="rounded-md border px-3 py-2">
-              <p className="text-[11px] font-medium text-muted-foreground">{t("permissionsTab.summaryReviewer")}</p>
-              <p className="mt-1 text-sm font-medium">{getReviewerModeOptions().find((opt) => opt.value === reviewer.mode)?.label ?? reviewer.mode}</p>
             </div>
             <div className="rounded-md border px-3 py-2">
               <p className="text-[11px] font-medium text-muted-foreground">{t("permissionsTab.summaryApprovalDialog")}</p>
@@ -655,7 +638,8 @@ export function PermissionsTab() {
           </RadioGroup>
         </SettingsSection>
 
-        {/* ── 권한 리뷰어 ── */}
+        {/* ── 권한 리뷰어 (자동 검증 모드 전용) ── */}
+        {mode === "auto" && (
         <SettingsSection
           title={t("permissionsTab.reviewerTitle")}
           description={t("permissionsTab.reviewerDescription")}
@@ -677,33 +661,6 @@ export function PermissionsTab() {
               </button>
             </div>
           ) : null}
-          <RadioGroup
-            value={reviewer.mode}
-            disabled={reviewerBusy}
-            aria-label={t("permissionsTab.reviewerAriaLabel")}
-            onValueChange={(value) => void applyReviewerCommand(`mode ${value}`)}
-            className="space-y-1.5"
-          >
-            {getReviewerModeOptions().map((opt) => (
-              <Label
-                key={opt.value}
-                htmlFor={`reviewer-mode-${opt.value}-radio`}
-                data-testid={`reviewer-mode-${opt.value}`}
-                className={`flex h-auto w-full cursor-pointer items-start justify-start gap-2.5 rounded-md border px-3 py-2 text-left text-sm font-normal ${reviewer.mode === opt.value ? "border-primary bg-primary/(--opacity-subtle) hover:bg-primary/(--opacity-subtle)" : "border-muted hover:border-muted-foreground/(--opacity-medium)"}`}
-              >
-                <RadioGroupItem
-                  id={`reviewer-mode-${opt.value}-radio`}
-                  value={opt.value}
-                  aria-label={opt.label}
-                  className="mt-0.5"
-                />
-                <span className="min-w-0">
-                  <span className="font-medium">{opt.label}</span>
-                  <span className="ml-1.5 text-[11px] text-muted-foreground">{opt.description}</span>
-                </span>
-              </Label>
-            ))}
-          </RadioGroup>
 
           {reviewerDegradedToRule && reviewer.mode === "llm" ? (
             <p
@@ -786,33 +743,12 @@ export function PermissionsTab() {
                   </Label>
                 ))}
               </RadioGroup>
-              {reviewer.interactive.autoApprove === "low" && reviewer.mode === "disabled" ? (
-                <p className="rounded-md border border-warning/(--opacity-medium) bg-warning/(--opacity-soft) px-3 py-2 text-[11px] text-warning">
-                  {t("permissionsTab.warnReviewerDisabledAutoApproveInactive")}
-                </p>
-              ) : null}
-              {mode === "auto" && reviewer.interactive.autoApprove === "off" ? (
+              {reviewer.interactive.autoApprove === "off" ? (
                 <p
                   className="rounded-md border border-warning/(--opacity-medium) bg-warning/(--opacity-soft) px-3 py-2 text-[11px] text-warning"
                   data-testid="permissions-legacy-auto-mode-banner"
                 >
                   {t("permissionsTab.warnAutoModeAutoApproveOff")}
-                </p>
-              ) : null}
-              {mode === "strict" && reviewer.interactive.autoApprove === "low" ? (
-                <p
-                  className="rounded-md border border-destructive/(--opacity-medium) bg-destructive/(--opacity-subtle) px-3 py-2 text-[11px] text-destructive"
-                  data-testid="permissions-strict-low-contradiction-banner"
-                >
-                  {t("permissionsTab.warnStrictLowContradiction")}
-                </p>
-              ) : null}
-              {mode === "allow" ? (
-                <p
-                  className="rounded-md border border-warning/(--opacity-medium) bg-warning/(--opacity-soft) px-3 py-2 text-[11px] text-warning"
-                  data-testid="permissions-allow-mode-banner"
-                >
-                  {t("permissionsTab.warnAllowModeReviewerIgnored")}
                 </p>
               ) : null}
             </div>
@@ -893,6 +829,7 @@ export function PermissionsTab() {
             </div>
           </details>
         </SettingsSection>
+        )}
 
         {/* ── Section B: Explicit Approval Policy ── */}
         <SettingsSection

@@ -20,7 +20,9 @@ import { PermissionsTab } from "../PermissionsTab.js";
 function installApi(opts: { mode: "llm" | "rule"; degraded: boolean }) {
   const lvis = {
     permission: {
-      getMode: vi.fn(async () => ({ mode: "default" })),
+      // The reviewer config (and its degrade banner) only renders under the
+      // auto-verification mode now that the permission UI has a single axis.
+      getMode: vi.fn(async () => ({ mode: "auto" })),
       setMode: vi.fn(async (mode: string) => ({ ok: true, mode })),
       onModeChanged: vi.fn(() => () => undefined),
       listRules: vi.fn(async () => []),
@@ -128,7 +130,7 @@ describe("PermissionsTab — LLM reviewer degraded-to-rule banner", () => {
       render(<PermissionsTab />);
     });
     await waitFor(() =>
-      expect(screen.getByTestId("reviewer-mode-llm")).toBeInTheDocument(),
+      expect(screen.getByTestId("reviewer-framework-panel")).toBeInTheDocument(),
     );
     expect(screen.queryByTestId("reviewer-llm-degraded-banner")).toBeNull();
   });
@@ -139,7 +141,7 @@ describe("PermissionsTab — LLM reviewer degraded-to-rule banner", () => {
       render(<PermissionsTab />);
     });
     await waitFor(() =>
-      expect(screen.getByTestId("reviewer-mode-rule")).toBeInTheDocument(),
+      expect(screen.getByTestId("reviewer-framework-panel")).toBeInTheDocument(),
     );
     expect(screen.queryByTestId("reviewer-llm-degraded-banner")).toBeNull();
   });

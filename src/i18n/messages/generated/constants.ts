@@ -28,9 +28,9 @@ export const ko: Record<keyof typeof en, string> = {
   "constants.webProviderSerperPlaceholder": "키 입력...",
 
   // EXEC_MODE_OPTIONS
-  "constants.execModeDefaultLabel": "쓰기만 확인",
+  "constants.execModeDefaultLabel": "쓰기 확인",
   "constants.execModeDefaultDesc": "읽기 도구는 허용하고 변경·셸·네트워크는 승인 요청",
-  "constants.execModeStrictLabel": "모두 확인",
+  "constants.execModeStrictLabel": "전체 확인",
   "constants.execModeStrictDesc": "읽기까지 포함해 모든 도구 실행 전 승인 요청",
   "constants.execModeAutoLabel": "자동 검증",
   "constants.execModeAutoDesc": "저위험 작업은 감사 기록으로 처리하고 자동(헤드리스) 실행과 대화형 채팅 모두를 권한 리뷰어가 검증",

@@ -200,15 +200,22 @@ export function CustomTitleBar({ children }: CustomTitleBarProps = {}) {
       onDoubleClick={handleDoubleClick}
     >
       {children}
-      {/* Spacer pushes the native window controls to the trailing corner; the
-          empty span stays a drag region. */}
-      <div className="flex-1" aria-hidden="true" />
+      {/* No spacer here: `children` (MainToolbar) is `flex-1` and already grows
+          to fill the band, with its OWN inner spacer right-aligning its trailing
+          cluster (chat/action toggle last). A second flex-1 spacer here split
+          the free space 50/50 with MainToolbar, stranding the toggle mid-band
+          instead of flush against the − □ × controls. MainToolbar's empty area
+          inherits the band's drag region, so dragging is preserved. */}
       {/* no-drag wrapper so buttons receive mouse events. The band vertically
           centers its content (items-center); the native window buttons must
           still span the FULL band height (h-11) so their hover fill reaches the
-          band's top and bottom edges. */}
+          band's top and bottom edges. `ml-auto` pins the cluster to the trailing
+          corner directly — robust whether or not `children` are present. The
+          main window passes a `flex-1` MainToolbar that eats the leading slack,
+          and the detached / settings windows pass NO children, so without this
+          the cluster would strand flush-left in those windows. */}
       <div
-        className="flex h-11 items-stretch"
+        className="ml-auto flex h-11 items-stretch"
         style={{
           // @ts-expect-error — Electron-specific CSS extension
           WebkitAppRegion: "no-drag",
