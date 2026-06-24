@@ -173,7 +173,7 @@ describe("App plugin auth routing", () => {
     });
   });
 
-  it("detached login failure opens the plugin panel and surfaces a safe auth error code", async () => {
+  it("detached login failure opens the plugin panel and surfaces a safe auth error code as a toast", async () => {
     const user = userEvent.setup();
     const { api } = await renderApp(detachedPluginFixture);
     const nonCorpError = Object.assign(new Error("[non-corp-network] outside corporate network"), {
@@ -194,8 +194,15 @@ describe("App plugin auth routing", () => {
     await waitFor(() => {
       expect(api.window.openDetached).toHaveBeenCalledWith("plugin:token-plugin:main");
     });
-    expect(await screen.findByText(/code: non-corp-network/)).toBeInTheDocument();
-    expect(screen.getByText(/사내망 또는 VPN 연결이 필요합니다/)).toBeInTheDocument();
+    await waitFor(() => {
+      const statusBar = screen.getByTestId("status-bar");
+      expect(statusBar).toHaveTextContent(/code: non-corp-network/);
+      expect(statusBar).toHaveTextContent(/사내망 또는 VPN 연결이 필요합니다/);
+    });
+    const assistantBodies = screen.queryAllByTestId("assistant-message-body");
+    expect(
+      assistantBodies.some((body) => body.textContent?.includes("non-corp-network")),
+    ).toBe(false);
   });
 
   it("routes command-palette plugin actions through detached-window handling (authed)", async () => {
