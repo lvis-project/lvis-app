@@ -26,7 +26,7 @@ describe("PermissionModeBadge", () => {
     const { getByTestId } = render(<PermissionModeBadge mode="strict" />);
     const badge = getByTestId("permission-mode-badge");
     expect(badge.getAttribute("data-mode")).toBe("strict");
-    expect(badge.textContent).toContain("전체 물어보기");
+    expect(badge.textContent).toContain("모두 확인");
   });
 
   it("calls fetcher and reflects 'auto' on mount", async () => {
@@ -52,7 +52,7 @@ describe("PermissionModeBadge", () => {
     await waitFor(() => {
       const badge = screen.getByTestId("permission-mode-badge");
       expect(badge.getAttribute("data-mode")).toBe("allow");
-      expect(badge.textContent).toContain("외부경로 승인");
+      expect(badge.textContent).toContain("모두 허용");
     });
   });
 

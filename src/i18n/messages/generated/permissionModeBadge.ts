@@ -1,9 +1,9 @@
 // AUTO-GENERATED — i18n migration. Source: src/ui/renderer/components/permissions/PermissionModeBadge.tsx. Do not edit by hand.
 export const en = {
-  "permissionModeBadge.labelDefault": "Default · Read allowed",
-  "permissionModeBadge.labelStrict": "Ask for everything",
-  "permissionModeBadge.labelAuto": "Auto-verify · Read allowed",
-  "permissionModeBadge.labelAllow": "Allow all · External path approval",
+  "permissionModeBadge.labelDefault": "Confirm writes",
+  "permissionModeBadge.labelStrict": "Confirm all",
+  "permissionModeBadge.labelAuto": "Auto-verify",
+  "permissionModeBadge.labelAllow": "Allow all",
   "permissionModeBadge.labelUnknown": "Permission check",
   "permissionModeBadge.descDefault": "Default: read allowed, approval required for write operations",
   "permissionModeBadge.descStrict": "Ask for everything: approval required for all tools including reads",
@@ -18,10 +18,10 @@ export const en = {
   "permissionModeBadge.queueButtonLabel": "Open pending approval queue{pendingText}",
 } as const;
 export const ko: Record<keyof typeof en, string> = {
-  "permissionModeBadge.labelDefault": "기본 · 읽기 허용",
-  "permissionModeBadge.labelStrict": "전체 물어보기",
-  "permissionModeBadge.labelAuto": "자동 검증 · 읽기 허용",
-  "permissionModeBadge.labelAllow": "전체 허용 · 외부경로 승인",
+  "permissionModeBadge.labelDefault": "쓰기만 확인",
+  "permissionModeBadge.labelStrict": "모두 확인",
+  "permissionModeBadge.labelAuto": "자동 검증",
+  "permissionModeBadge.labelAllow": "모두 허용",
   "permissionModeBadge.labelUnknown": "권한 확인",
   "permissionModeBadge.descDefault": "기본: 읽기 허용, 변경 작업 승인 요청",
   "permissionModeBadge.descStrict": "전체 물어보기: 읽기 포함 모든 도구 승인 요청",

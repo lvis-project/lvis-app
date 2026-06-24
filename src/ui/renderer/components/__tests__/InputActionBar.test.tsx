@@ -119,15 +119,18 @@ describe("InputActionBar (unified bar)", () => {
     expect(leading.querySelector("[data-testid='ring-slot']")).toBeNull();
   });
 
-  it("trailing cluster order is [?] → [thinking] → [send]", () => {
+  it("trailing cluster order is [?] → [send] (reasoning moved to the status row)", () => {
     const { getByTestId } = renderBar();
     const trailing = getByTestId("iab-trailing");
     const help = trailing.querySelector("[data-testid='composer-shortcuts-button']");
-    const thinking = trailing.querySelector("[data-testid='thinking-button']");
     const send = trailing.querySelector("[data-testid='composer-send-button']");
-    expect(help && thinking && send).toBeTruthy();
-    expect(help!.compareDocumentPosition(thinking!) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
-    expect(thinking!.compareDocumentPosition(send!) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+    expect(help && send).toBeTruthy();
+    expect(help!.compareDocumentPosition(send!) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+    // Reasoning/thinking is no longer in the trailing cluster — it now lives in
+    // the status sub-row (between vendor·model and the active dot).
+    expect(trailing.querySelector("[data-testid='thinking-button']")).toBeNull();
+    const statusRow = getByTestId("iab-status-row");
+    expect(statusRow.querySelector("[data-testid='reasoning-slider']")).toBeTruthy();
   });
 
   it("does NOT render the legacy PluginGridButton (plugins live in the sidebar + slash picker)", () => {
@@ -294,10 +297,16 @@ describe("InputActionBar (unified bar)", () => {
     expect(getByTestId2("iab-status-active-dot").className).not.toContain("bg-success");
   });
 
-  it("appends the pending-approval count to the permission text", () => {
+  it("renders the pending-approval count as a SEPARATE button before the permission cell", () => {
     const { getByTestId } = renderBar({
       statusRow: { ...defaultStatusRow, permissionMode: "auto", pendingApprovals: 2 },
     });
-    expect(getByTestId("iab-status-permission").textContent).toContain("2");
+    // The count is its own button now — NOT appended to the permission label.
+    expect(getByTestId("iab-status-pending").textContent).toContain("2");
+    expect(getByTestId("iab-status-permission").textContent).not.toContain("2");
+    // …and it precedes the permission cell.
+    const pending = getByTestId("iab-status-pending");
+    const permission = getByTestId("iab-status-permission");
+    expect(pending.compareDocumentPosition(permission) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
   });
 });
