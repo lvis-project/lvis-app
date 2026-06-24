@@ -63,6 +63,20 @@ describe("StatusBar", () => {
     expect(text).toHaveTextContent(message);
   });
 
+  it("tints toast background by severity", () => {
+    const { container, rerender } = render(
+      <StatusBar persistent={[]} visibleToast={toast({ severity: "warning" })} />,
+    );
+    let toastCard = container.querySelector('[data-testid="status-toast-message"]')?.parentElement;
+    expect(toastCard?.className).toContain("bg-warning");
+    expect(toastCard?.className).toContain("border-warning");
+
+    rerender(<StatusBar persistent={[]} visibleToast={toast({ severity: "error" })} />);
+    toastCard = container.querySelector('[data-testid="status-toast-message"]')?.parentElement;
+    expect(toastCard?.className).toContain("bg-destructive");
+    expect(toastCard?.className).toContain("border-destructive");
+  });
+
   it("shows no toast when visibleToast is null", () => {
     render(<StatusBar persistent={[]} visibleToast={null} />);
     expect(screen.queryByRole("button")).toBeNull();
