@@ -12,7 +12,8 @@
  *
  * Transport-agnostic above the framing: it takes plain Node streams, so it is
  * tested over in-memory paired streams without spawning a real process. The
- * subprocess spawner + OS sandbox (bubblewrap / sandbox-exec) + the signed
+ * subprocess spawner + OS sandbox (the Anthropic Sandbox Runtime — macOS
+ * Seatbelt / Linux bwrap) + the signed
  * spawnable-artifact format are the REMAINING `untrusted-stdio-isolation` work
  * (the artifact format is the §6 open decision) and sit above this loop.
  *

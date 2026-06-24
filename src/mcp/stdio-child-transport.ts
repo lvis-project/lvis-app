@@ -12,9 +12,9 @@
  * Isolation/containment: because the plugin runs in a separate process, a crash
  * or hang is contained — `exit`/`error` surface via `onClose` (rejecting the
  * client's pending requests), and `close()` SIGTERMs the child. OS sandboxing
- * (bubblewrap / sandbox-exec) is an ADDITIONAL hardening layer applied by
- * prefixing the spawn command (e.g. `bwrap --unshare-all -- node entry`); the
- * process boundary here is the containment primitive it builds on.
+ * (the Anthropic Sandbox Runtime — macOS Seatbelt / Linux bwrap) is an
+ * ADDITIONAL hardening layer applied by wrapping the spawn argv; the process
+ * boundary here is the containment primitive it builds on.
  */
 import { spawn, type ChildProcess } from "node:child_process";
 import { frameMessage, StdioFrameDecoder } from "./stdio-framing.js";
@@ -25,7 +25,8 @@ export interface StdioChildOptions {
   env?: Record<string, string>;
   /**
    * Optional sandbox wrapper: given the base command+args, return the wrapped
-   * command+args (e.g. bubblewrap). Identity by default (process isolation only).
+   * command+args (e.g. via the ASRT argv wrapper). Identity by default
+   * (process isolation only).
    */
   sandboxWrap?: (command: string, args: string[]) => { command: string; args: string[] };
 }
