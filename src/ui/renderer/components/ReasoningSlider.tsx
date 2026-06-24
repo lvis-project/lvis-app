@@ -1,10 +1,12 @@
 /**
- * ReasoningSlider — compact 4-step reasoning control for the composer status
- * sub-row (between the vendor·model cell and the online-status dot).
+ * ReasoningSlider — compact reasoning control for the composer status sub-row
+ * (between the vendor·model cell and the online-status dot).
  *
- * Replaces the old on/off ThinkingButton + separate depth popover with a single
- * 4-step slider:
- *   0 = 추론 없음 (thinking off)
+ * The status row shows only a small TRIGGER ("추론 {level}" + chevron). Clicking
+ * it opens a popover that holds the actual 4-step slider — the row stays
+ * uncluttered and the slider has room to be usable.
+ *
+ *   0 = 없음  (thinking off)
  *   1 = 낮음  (thinking on, 4k budget)
  *   2 = 중간  (thinking on, 10k budget)
  *   3 = 높음  (thinking on, 24k budget)
@@ -14,6 +16,8 @@
  * through the renderer api — the same self-contained pattern ThinkingButton used.
  */
 import { useCallback, useEffect, useState } from "react";
+import { ChevronDown } from "lucide-react";
+import { Popover, PopoverContent, PopoverTrigger } from "../../../components/ui/popover.js";
 import { useTranslation } from "../../../i18n/react.js";
 import { getApi } from "../api-client.js";
 import { DEFAULT_LLM_VENDOR, isLLMVendor, type LLMVendor } from "../../../shared/llm-vendor-defaults.js";
@@ -104,26 +108,55 @@ export function ReasoningSlider({ enabled, onToggle }: ReasoningSliderProps) {
 
   const reasoningLabel = t("bottomActionRow.reasoning");
   return (
-    <span
-      className="flex shrink-0 items-center gap-1.5"
-      data-testid="reasoning-slider"
-      data-level={level}
-    >
-      <span className="shrink-0">{reasoningLabel}</span>
-      <input
-        type="range"
-        min={0}
-        max={3}
-        step={1}
-        value={level}
-        onChange={(e) => apply(Number(e.target.value))}
-        aria-label={`${reasoningLabel}: ${levelLabels[level]}`}
-        title={`${reasoningLabel}: ${levelLabels[level]}`}
-        className="lvis-reasoning-range h-1 w-14 shrink-0 cursor-pointer accent-primary"
-      />
-      <span className={`shrink-0 tabular-nums ${level > 0 ? "text-primary" : ""}`}>
-        {levelLabels[level]}
-      </span>
-    </span>
+    <Popover>
+      <PopoverTrigger asChild>
+        <button
+          type="button"
+          data-testid="reasoning-slider"
+          data-level={level}
+          title={`${reasoningLabel}: ${levelLabels[level]}`}
+          className="flex shrink-0 items-center gap-0.5 cursor-pointer hover:opacity-80 focus:outline-none focus-visible:ring-1 focus-visible:ring-ring"
+        >
+          <span className="shrink-0">{reasoningLabel}</span>
+          <span className={`shrink-0 tabular-nums ${level > 0 ? "text-primary" : ""}`}>
+            {levelLabels[level]}
+          </span>
+          <ChevronDown className="h-3 w-3 shrink-0 opacity-60" aria-hidden="true" />
+        </button>
+      </PopoverTrigger>
+      <PopoverContent
+        align="end"
+        side="top"
+        sideOffset={6}
+        className="w-52 p-3"
+        data-testid="reasoning-popover"
+      >
+        <div className="mb-2 text-[11px] font-medium text-muted-foreground">{reasoningLabel}</div>
+        <input
+          type="range"
+          min={0}
+          max={3}
+          step={1}
+          value={level}
+          onChange={(e) => apply(Number(e.target.value))}
+          aria-label={`${reasoningLabel}: ${levelLabels[level]}`}
+          className="lvis-reasoning-range h-1 w-full cursor-pointer accent-primary"
+        />
+        <div className="mt-1.5 flex justify-between text-[10px] text-muted-foreground">
+          {levelLabels.map((label, idx) => (
+            <button
+              key={label}
+              type="button"
+              onClick={() => apply(idx)}
+              className={`shrink-0 cursor-pointer hover:text-foreground ${
+                idx === level ? "font-medium text-primary" : ""
+              }`}
+            >
+              {label}
+            </button>
+          ))}
+        </div>
+      </PopoverContent>
+    </Popover>
   );
 }
