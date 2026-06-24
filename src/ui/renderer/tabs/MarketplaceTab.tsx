@@ -281,7 +281,7 @@ export function MarketplaceTab(props: MarketplaceTabProps) {
                 <div key={`${packageType}:${item.id}`} className="flex items-start justify-between gap-3 p-2">
                   <div className="min-w-0">
                     <div className="flex min-w-0 items-center gap-1.5">
-                      <span className="truncate text-sm font-medium">{item.name}</span>
+                      <span className="min-w-0 line-clamp-1 text-sm font-medium">{item.name}</span>
                       <Badge variant="secondary" className="h-5 px-1.5 text-[10px] uppercase">{packageType}</Badge>
                       {packageType === "mcp" && item.mcpAuth?.mode === "oauth" && (
                         <Badge variant="secondary" className="h-5 px-1.5 text-[10px] uppercase">OAuth</Badge>
