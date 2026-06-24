@@ -384,6 +384,26 @@ describe("ChatView", () => {
     await waitFor(() => expect(api.chatSend).toHaveBeenCalled());
   });
 
+  it("does not render a standalone Thinking assistant body before stream output", async () => {
+    const pendingSend = deferred<{ ok: true }>();
+    const { container, api, emitChatStream } = await renderApp({ hasApiKey: true });
+    api.chatSend.mockImplementationOnce(async () => pendingSend.promise);
+
+    await submitChatMessage(container, "대기 상태 확인");
+
+    await waitFor(() => expect(api.chatSend).toHaveBeenCalled());
+    await act(async () => {
+      emitChatStream({ type: "llm_status", phase: "attempt", attempt: 1 });
+    });
+    const assistantBodies = Array.from(container.querySelectorAll('[data-testid="assistant-message-body"]'));
+    expect(assistantBodies).toHaveLength(0);
+
+    await act(async () => {
+      pendingSend.resolve({ ok: true });
+      await pendingSend.promise;
+    });
+  });
+
   it("does not send while IME composition is active", async () => {
     const { container, api } = await renderApp({ hasApiKey: true });
     await waitFor(() => expect(api.getSettings).toHaveBeenCalled());
