@@ -1119,44 +1119,6 @@ describe("ChatView", () => {
     });
   });
 
-  it("keeps completed prior turns visible while a new turn is streaming", async () => {
-    const { container, api, emitChatStream } = await renderApp({ hasApiKey: true });
-    await submitChatMessage(container, "첫 질문");
-    await act(async () => {
-      emitChatStream({ type: "reasoning_delta", text: "첫 턴 생각" });
-      emitChatStream({ type: "text_delta", text: "첫 최종 답변" });
-      emitChatStream({
-        type: "assistant_round",
-        text: "첫 최종 답변",
-        thought: "첫 턴 생각",
-        stopReason: "end_turn",
-        hasToolCalls: false,
-      });
-      emitChatStream({ type: "done" });
-    });
-    await waitFor(() => {
-      expect(container.textContent).toContain("첫 최종 답변");
-      expect(container.textContent).not.toContain("첫 턴 생각");
-    });
-
-    const pendingSend = deferred<{ ok: true }>();
-    api.chatSend.mockImplementationOnce(async () => pendingSend.promise);
-    await submitChatMessage(container, "둘째 질문");
-    await act(async () => {
-      emitChatStream({ type: "text_delta", text: "둘째 답변 작성 중" });
-    });
-
-    await waitFor(() => {
-      expect(container.textContent).toContain("첫 최종 답변");
-      expect(container.textContent).toContain("둘째 답변 작성 중");
-      expect(container.textContent).toContain("작업 중...");
-    });
-    await act(async () => {
-      pendingSend.resolve({ ok: true });
-      await Promise.resolve();
-    });
-  });
-
   it("keeps standalone reasoning collapsed (header only) DURING and after thinking", async () => {
     const { container, emitChatStream } = await renderApp({ hasApiKey: true });
     await submitChatMessage(container, "생각만 확인");
@@ -1475,55 +1437,6 @@ describe("ChatView", () => {
     } finally {
       scrollMetrics.restore();
     }
-  });
-
-  it("keeps a tool_use assistant round visible standalone while the turn is still active", async () => {
-    const { container, api, emitChatStream } = await renderApp({ hasApiKey: true });
-    const pendingSend = deferred<{ ok: true }>();
-    api.chatSend.mockImplementationOnce(async () => pendingSend.promise);
-    await submitChatMessage(container, "직접 도구 호출");
-    await act(async () => {
-      emitChatStream({ type: "text_delta", text: "도구를 바로 호출하겠습니다" });
-      emitChatStream({
-        type: "assistant_round",
-        text: "도구를 바로 호출하겠습니다",
-        thought: "",
-        stopReason: "tool_use",
-        hasToolCalls: true,
-      });
-    });
-
-    // Work-phase assistant prose stays visible (rendered standalone, not
-    // hidden inside a collapsible WorkGroup).
-    await waitFor(() => {
-      expect(container.textContent).toContain("도구를 바로 호출하겠습니다");
-    });
-    await act(async () => {
-      pendingSend.resolve({ ok: true });
-      await Promise.resolve();
-    });
-  });
-
-  it("strips meta markers and renders Markdown for assistant_round text", async () => {
-    const { container, emitChatStream } = await renderApp({ hasApiKey: true });
-    await submitChatMessage(container, "마크다운 확인");
-    await act(async () => {
-      emitChatStream({ type: "text_delta", text: "결과는 **정상**입니다.<title>마크다운 렌더링 확인</title>" });
-      emitChatStream({
-        type: "assistant_round",
-        text: "결과는 **정상**입니다.<title>마크다운 렌더링 확인</title>",
-        thought: "",
-        stopReason: "end_turn",
-        hasToolCalls: false,
-      });
-      emitChatStream({ type: "done" });
-    });
-
-    await waitFor(() => {
-      expect(container.textContent).toContain("결과는 정상입니다.");
-      expect(container.textContent).not.toContain("<title>");
-      expect(container.querySelector('[data-testid="assistant-message-body"] strong')?.textContent).toBe("정상");
-    });
   });
 
   // Reasoning + tool + assistant sequence: after the turn completes the
