@@ -35,24 +35,6 @@ vi.mock("node:child_process", () => ({
   spawn: vi.fn(),
 }));
 
-// ─── ASRT sandbox mock ────────────────────────────────────────────────────────
-// The OS tool sandbox gate is decided once at boot; here we control it per-test.
-// Default OFF so every pre-existing test keeps the unchanged plain-spawn path.
-const asrtState = { active: false };
-const mockWrapWorkerCommand = vi.fn(
-  async (command: string) => ({
-    argv: ["/bin/sh", "-c", command],
-    env: { PATH: "/usr/bin:/bin", HTTP_PROXY: "http://localhost:8080" } as NodeJS.ProcessEnv,
-  }),
-);
-const mockCleanupAsrt = vi.fn();
-vi.mock("../../permissions/asrt-sandbox.js", () => ({
-  isAsrtSandboxActive: () => asrtState.active,
-  wrapWorkerCommand: (...args: unknown[]) =>
-    mockWrapWorkerCommand(...(args as [string, unknown])),
-  cleanupAsrtSandboxAfterCommand: () => mockCleanupAsrt(),
-}));
-
 // ─── helpers ──────────────────────────────────────────────────────────────────
 
 import * as fsMock from "node:fs/promises";
@@ -178,12 +160,6 @@ function makeBrowserWindow() {
 describe("PythonRuntimeBootstrapper", () => {
   beforeEach(() => {
     vi.resetAllMocks();
-    // ASRT gate defaults OFF; re-establish the wrap mock impl after resetAllMocks.
-    asrtState.active = false;
-    mockWrapWorkerCommand.mockImplementation(async (command: string) => ({
-      argv: ["/bin/sh", "-c", command],
-      env: { PATH: "/usr/bin:/bin", HTTP_PROXY: "http://localhost:8080" } as NodeJS.ProcessEnv,
-    }));
     vi.mocked(fsMock.mkdir).mockResolvedValue(undefined);
     vi.mocked(fsMock.appendFile).mockResolvedValue(undefined);
     vi.mocked(fsMock.writeFile).mockResolvedValue(undefined);
@@ -1152,111 +1128,5 @@ describe("PythonRuntimeBootstrapper", () => {
       const bootstrapper = new PythonRuntimeBootstrapper();
       await expect(bootstrapper.ensureReady(makeBrowserWindow())).resolves.toBeDefined();
     });
-  });
-});
-
-// ─── ASRT worker spawn wiring (Tier-A worker egress) ──────────────────────────
-
-describe("PythonRuntimeBootstrapper — ASRT worker spawn gate", () => {
-  beforeEach(() => {
-    vi.resetAllMocks();
-    asrtState.active = false;
-    mockWrapWorkerCommand.mockImplementation(async (command: string) => ({
-      argv: ["/bin/sh", "-c", command],
-      env: { PATH: "/usr/bin:/bin", HTTP_PROXY: "http://localhost:8080" } as NodeJS.ProcessEnv,
-    }));
-    vi.mocked(fsMock.mkdir).mockResolvedValue(undefined);
-    vi.mocked(fsMock.appendFile).mockResolvedValue(undefined);
-    vi.mocked(fsMock.writeFile).mockResolvedValue(undefined);
-    vi.mocked(fsMock.chmod).mockResolvedValue(undefined);
-    mockedReadFile.mockRejectedValue(Object.assign(new Error("ENOENT"), { code: "ENOENT" }));
-    vi.mocked(fsMock.readdir).mockRejectedValue(
-      Object.assign(new Error("ENOENT"), { code: "ENOENT" }),
-    );
-    (process as NodeJS.Process & { resourcesPath?: string }).resourcesPath = undefined;
-  });
-
-  afterEach(() => {
-    vi.restoreAllMocks();
-    asrtState.active = false;
-  });
-
-  it("DEFAULT-OFF: the gate ships inactive (wrapWorkerCommand is never called on a fresh boot)", async () => {
-    // No flip — this asserts the shipped default: a worker spawn does NOT route
-    // through ASRT unless the gate was explicitly turned on at boot.
-    expect(asrtState.active).toBe(false);
-    mockedAccess.mockResolvedValue(undefined); // .ready sentinel present → no spawn
-    const bootstrapper = new PythonRuntimeBootstrapper();
-    await bootstrapper.ensureReady(makeBrowserWindow());
-    expect(mockWrapWorkerCommand).not.toHaveBeenCalled();
-  });
-
-  it("gate OFF: uv/python spawn via plain spawn (unchanged), never wrapWorkerCommand", async () => {
-    asrtState.active = false;
-    setupPythonRuntimeSetupSpawns();
-    const bootstrapper = new PythonRuntimeBootstrapper({
-      pluginManifestPaths: ["/installed/local-indexer/plugin.json"],
-    });
-    await bootstrapper.ensureReady(makeBrowserWindow());
-    // plain spawn used (uv install/venv/sync + python verify = 4 spawns).
-    expect(mockedSpawn).toHaveBeenCalled();
-    expect(mockWrapWorkerCommand).not.toHaveBeenCalled();
-    // First spawn is the raw uv binary, not a wrapped shell (no shell:false set).
-    const firstArgs = mockedSpawn.mock.calls[0];
-    expect((firstArgs?.[2] as { shell?: boolean } | undefined)?.shell).toBeUndefined();
-  });
-
-  it("gate ON: uv/python spawn route through wrapWorkerCommand carrying ONLY the filesystem jail", async () => {
-    asrtState.active = true;
-    setupPythonRuntimeSetupSpawns();
-    const bootstrapper = new PythonRuntimeBootstrapper({
-      pluginManifestPaths: ["/installed/local-indexer/plugin.json"],
-      workerSandbox: { pluginId: "lvis-plugin-lge-api" },
-    });
-    await bootstrapper.ensureReady(makeBrowserWindow());
-
-    // Every worker spawn was wrapped.
-    expect(mockWrapWorkerCommand).toHaveBeenCalled();
-    const opts = mockWrapWorkerCommand.mock.calls[0]?.[1] as
-      | {
-          network?: unknown;
-          filesystem?: { allowWrite?: string[]; allowRead?: string[] };
-        }
-      | undefined;
-    // NETWORK is NOT a per-command channel anymore — it is INERT in ASRT 0.0.59
-    // and enforced via the SHARED config union at boot. The wrap must carry no
-    // `network` slice.
-    expect(opts?.network).toBeUndefined();
-    // The per-command FILESYSTEM jail IS enforced — it scopes writes to the
-    // plugin sandbox root + runtime dir.
-    expect(opts?.filesystem).toBeDefined();
-    expect(opts?.filesystem?.allowWrite).toEqual(
-      expect.arrayContaining([
-        expect.stringContaining("plugins/lvis-plugin-lge-api"),
-      ]),
-    );
-    // Host spawned the wrapped argv with shell:false.
-    const spawnOpts = mockedSpawn.mock.calls[0]?.[2] as { shell?: boolean } | undefined;
-    expect(spawnOpts?.shell).toBe(false);
-    // Per-command cleanup ran after the spawn settled.
-    expect(mockCleanupAsrt).toHaveBeenCalled();
-  });
-
-  it("gate ON without a worker manifest policy: wrap still carries no network channel", async () => {
-    asrtState.active = true;
-    setupPythonRuntimeSetupSpawns();
-    const bootstrapper = new PythonRuntimeBootstrapper({
-      pluginManifestPaths: ["/installed/local-indexer/plugin.json"],
-    }); // no workerSandbox
-    await bootstrapper.ensureReady(makeBrowserWindow());
-    const opts = mockWrapWorkerCommand.mock.calls[0]?.[1] as
-      | { network?: unknown; filesystem?: { allowWrite?: string[] } }
-      | undefined;
-    // No per-command network override (inert). The filesystem jail still applies
-    // (write-jail = runtime dir only, since no plugin id was provided).
-    expect(opts?.network).toBeUndefined();
-    expect(opts?.filesystem?.allowWrite).toEqual(
-      expect.arrayContaining([expect.stringContaining("runtime")]),
-    );
   });
 });

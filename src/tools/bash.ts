@@ -201,8 +201,11 @@ interface SpawnResult {
  *     working tree readable — closing the old bwrap/sandbox-exec leak where the
  *     entire HOME was mounted readable.
  *
- * Network egress is governed by the trusted boot config (deny-by-default; the
- * boot askCb prompts for unmatched hosts), NOT per command.
+ * Network egress is governed by the SHARED boot config, NOT per command: boot
+ * sets `strictAllowlist: true` + the UNION of every loaded plugin's manifest
+ * allow-list (see asrt-sandbox.ts NETWORK ENFORCEMENT MODEL header). Under
+ * strict, any out-of-union host is HARD-DENIED at the egress proxy with NO
+ * askCb fallthrough — there is no interactive prompt for unmatched hosts.
  *
  * @internal — only exported for testing.
  */
