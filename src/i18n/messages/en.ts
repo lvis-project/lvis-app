@@ -25,11 +25,6 @@ export const en = {
   "common.error": "Error",
   "common.thinking": "Thinking…",
 
-  // ── OS tool sandbox (ASRT) network prompt ─────────────────────────
-  "sandbox.networkAskTitle": "Network access request",
-  "sandbox.networkAskMessage":
-    "A sandboxed tool is trying to reach {host}, which is not on the allow list. Allow this connection?",
-
   // ── Settings → Appearance → Language ──────────────────────────────
   "settings.appearance.language.title": "Language",
   "settings.appearance.language.description":

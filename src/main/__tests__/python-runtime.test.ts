@@ -1206,23 +1206,35 @@ describe("PythonRuntimeBootstrapper — ASRT worker spawn gate", () => {
     expect((firstArgs?.[2] as { shell?: boolean } | undefined)?.shell).toBeUndefined();
   });
 
-  it("gate ON: uv/python spawn route through wrapWorkerCommand with the plugin's strict allow-list", async () => {
+  it("gate ON: uv/python spawn route through wrapWorkerCommand carrying ONLY the filesystem jail", async () => {
     asrtState.active = true;
     setupPythonRuntimeSetupSpawns();
     const bootstrapper = new PythonRuntimeBootstrapper({
       pluginManifestPaths: ["/installed/local-indexer/plugin.json"],
-      workerSandbox: { pluginId: "lvis-plugin-lge-api", allowedDomains: ["api.lge.example"] },
+      workerSandbox: { pluginId: "lvis-plugin-lge-api" },
     });
     await bootstrapper.ensureReady(makeBrowserWindow());
 
     // Every worker spawn was wrapped.
     expect(mockWrapWorkerCommand).toHaveBeenCalled();
-    // The network policy fed the plugin's declared allow-list under strict hard-deny.
     const opts = mockWrapWorkerCommand.mock.calls[0]?.[1] as
-      | { network?: { allowedDomains: string[]; strictAllowlist?: boolean } }
+      | {
+          network?: unknown;
+          filesystem?: { allowWrite?: string[]; allowRead?: string[] };
+        }
       | undefined;
-    expect(opts?.network?.allowedDomains).toEqual(["api.lge.example"]);
-    expect(opts?.network?.strictAllowlist).toBe(true);
+    // NETWORK is NOT a per-command channel anymore — it is INERT in ASRT 0.0.59
+    // and enforced via the SHARED config union at boot. The wrap must carry no
+    // `network` slice.
+    expect(opts?.network).toBeUndefined();
+    // The per-command FILESYSTEM jail IS enforced — it scopes writes to the
+    // plugin sandbox root + runtime dir.
+    expect(opts?.filesystem).toBeDefined();
+    expect(opts?.filesystem?.allowWrite).toEqual(
+      expect.arrayContaining([
+        expect.stringContaining("plugins/lvis-plugin-lge-api"),
+      ]),
+    );
     // Host spawned the wrapped argv with shell:false.
     const spawnOpts = mockedSpawn.mock.calls[0]?.[2] as { shell?: boolean } | undefined;
     expect(spawnOpts?.shell).toBe(false);
@@ -1230,7 +1242,7 @@ describe("PythonRuntimeBootstrapper — ASRT worker spawn gate", () => {
     expect(mockCleanupAsrt).toHaveBeenCalled();
   });
 
-  it("gate ON without a worker manifest policy: deny-all egress (empty allow-list)", async () => {
+  it("gate ON without a worker manifest policy: wrap still carries no network channel", async () => {
     asrtState.active = true;
     setupPythonRuntimeSetupSpawns();
     const bootstrapper = new PythonRuntimeBootstrapper({
@@ -1238,9 +1250,13 @@ describe("PythonRuntimeBootstrapper — ASRT worker spawn gate", () => {
     }); // no workerSandbox
     await bootstrapper.ensureReady(makeBrowserWindow());
     const opts = mockWrapWorkerCommand.mock.calls[0]?.[1] as
-      | { network?: { allowedDomains: string[]; strictAllowlist?: boolean } }
+      | { network?: unknown; filesystem?: { allowWrite?: string[] } }
       | undefined;
-    expect(opts?.network?.allowedDomains).toEqual([]);
-    expect(opts?.network?.strictAllowlist).toBe(true);
+    // No per-command network override (inert). The filesystem jail still applies
+    // (write-jail = runtime dir only, since no plugin id was provided).
+    expect(opts?.network).toBeUndefined();
+    expect(opts?.filesystem?.allowWrite).toEqual(
+      expect.arrayContaining([expect.stringContaining("runtime")]),
+    );
   });
 });
