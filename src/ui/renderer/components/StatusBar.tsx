@@ -62,7 +62,7 @@ export function StatusBar(props: StatusBarProps) {
   return (
     <TooltipProvider>
     <footer
-      className="inline-flex max-w-md items-center gap-3 rounded-lg border border-border bg-popover px-3 py-1.5 text-[11px] text-muted-foreground shadow-md"
+      className="inline-flex max-w-md items-center gap-3 text-[11px] text-muted-foreground"
       data-testid="status-bar"
       role="status"
       aria-live="polite"
