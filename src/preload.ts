@@ -72,6 +72,10 @@ import {
   type InitialThemePrime,
 } from "./shared/initial-theme.js";
 import {
+  FONT_SIZE_SCALE_VALUES,
+  isValidFontFamilyOverride,
+} from "./data/settings-store.js";
+import {
   INITIAL_APP_MODE_ARG_PREFIX,
   isAppMode,
   type InitialAppMode,
@@ -94,7 +98,13 @@ function readInitialThemeArg(): LvisInitialThemePayload | null {
     if (json.length > INITIAL_THEME_ARG_MAX_BYTES) return null;
     const parsed: unknown = JSON.parse(json);
     if (!parsed || typeof parsed !== "object") return null;
-    const p = parsed as { bundleId?: unknown; shell?: unknown; tokens?: unknown };
+    const p = parsed as {
+      bundleId?: unknown;
+      shell?: unknown;
+      tokens?: unknown;
+      fontSizeScale?: unknown;
+      fontFamily?: unknown;
+    };
     if (typeof p.bundleId !== "string") return null;
     if (p.shell !== "light" && p.shell !== "dark") return null;
     const tokens: Record<string, string> = {};
@@ -105,7 +115,22 @@ function readInitialThemeArg(): LvisInitialThemePayload | null {
         }
       }
     }
-    return Object.freeze({ bundleId: p.bundleId, shell: p.shell, tokens: Object.freeze(tokens) });
+    // Font overrides are validated against the same SoT guards the settings
+    // store enforces at write time (`FONT_SIZE_SCALE_VALUES`,
+    // `isValidFontFamilyOverride`) so a tampered argv cannot inject an arbitrary
+    // scale or a CSS-injection font-family. Invalid → field stays undefined and
+    // the renderer's hydrate applies the persisted value.
+    const out: InitialThemePrime = { bundleId: p.bundleId, shell: p.shell, tokens: Object.freeze(tokens) };
+    if (
+      typeof p.fontSizeScale === "number" &&
+      (FONT_SIZE_SCALE_VALUES as readonly number[]).includes(p.fontSizeScale)
+    ) {
+      out.fontSizeScale = p.fontSizeScale;
+    }
+    if (isValidFontFamilyOverride(p.fontFamily)) {
+      out.fontFamily = p.fontFamily;
+    }
+    return Object.freeze(out);
   } catch {
     return null;
   }
@@ -125,6 +150,20 @@ if (lvisInitialTheme && typeof document !== "undefined") {
       for (const [k, v] of Object.entries(lvisInitialTheme.tokens)) {
         root.style.setProperty(k, v);
       }
+    }
+    // User font overrides — same documentElement CSS-var hooks ThemeProvider's
+    // `applySettingsAppearance` sets after hydrate (`--lvis-font-size-scale`,
+    // `--lvis-font-family`), consumed by `styles.css` `html`/`body`. Painting
+    // them here makes a detached/new window render at the configured size +
+    // family on frame 0 instead of the 1.0 / HOST_FONT_STACK default. Absent
+    // fields mean "user is on the default", so we leave the var unset — the
+    // styles.css `var(…, fallback)` then resolves to the default, matching the
+    // main window.
+    if (typeof lvisInitialTheme.fontSizeScale === "number") {
+      root.style.setProperty("--lvis-font-size-scale", String(lvisInitialTheme.fontSizeScale));
+    }
+    if (typeof lvisInitialTheme.fontFamily === "string") {
+      root.style.setProperty("--lvis-font-family", lvisInitialTheme.fontFamily);
     }
   } catch {
     // Non-fatal: ThemeProvider's async hydrate still runs as a fallback.
