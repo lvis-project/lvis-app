@@ -640,14 +640,20 @@ export async function parsePluginJson(
     }
   }
 
-  // toolSchemas keys must be a subset of tools[].
+  // A toolSchemas entry must back either an LLM tool (tools[]) OR a UI-only
+  // method (uiCallable[]). Auth methods (login/logout/status) are uiCallable —
+  // NOT LLM tools (host-managed auth lifecycle) — yet keep a schema so the host
+  // can render the auth surface and validate the UI's payload (e.g. the login
+  // `force` flag). Allowing uiCallable here is what lets auth live outside
+  // tools[] without dropping its schema.
   const schemaKeys = parsed.toolSchemas ? Object.keys(parsed.toolSchemas) : [];
+  const uiCallableKeys = Array.isArray(parsed.uiCallable) ? parsed.uiCallable : [];
   for (const k of schemaKeys) {
-    if (!parsed.tools.includes(k)) {
+    if (!parsed.tools.includes(k) && !uiCallableKeys.includes(k)) {
       fail(
         `toolSchemas['${k}']`,
-        `key not in tools[]`,
-        `remove the key or add '${k}' to tools[]`,
+        `key not in tools[] or uiCallable[]`,
+        `remove the key or add '${k}' to tools[] or uiCallable[]`,
       );
     }
   }
