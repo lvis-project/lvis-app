@@ -14,10 +14,10 @@ import {
 import type { SandboxCapability } from "../sandbox-capability.js";
 
 const STRONG_CAP: SandboxCapability = {
-  kind: "bubblewrap",
+  kind: "asrt",
   confidence: "verified",
   platform: "linux",
-  reason: "bwrap detected",
+  reason: "ASRT (bwrap) detected",
 };
 
 const WEAK_CAP: SandboxCapability = {

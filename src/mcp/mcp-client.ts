@@ -1054,23 +1054,17 @@ class StdioTransport implements McpTransport {
     }
     const spawnCommand = resolveStdioSpawnCommand(this.config.command, this.config.args ?? []);
 
-    // MCP stdio spawn path. The "mcp" registry slot is
-    // pre-populated in boot.ts with the active OS runner so capability
-    // reporting (getSandboxRunner("mcp")) reflects the OS isolation level.
-    // Full sandbox adoption for MCP (wrapping this spawn via SandboxRunner.spawn())
-    // requires SandboxedProcess to expose a writable stdin channel for
-    // JSON-RPC Content-Length framing — tracked as a follow-up in #691.
-    // The LVIS_SANDBOX_ENABLED gate below logs runner availability so boot
-    // telemetry captures the sandbox status without blocking MCP startup.
+    // MCP stdio spawn path. HONEST isolation reporting: this long-lived worker
+    // is NOT yet wrapped by ASRT, so its OS isolation is `none` regardless of
+    // whether the host-tool sandbox gate is on. Wrapping it requires routing
+    // the spawn through ASRT's wrapWorkerCommand AND exposing a writable stdin
+    // channel for JSON-RPC Content-Length framing.
+    // TODO(worker-egress follow-up): wrap this long-lived worker via
+    //   wrapWorkerCommand (src/permissions/asrt-sandbox.ts) so its egress is
+    //   enforced by the same global strict-union allow-list as host tools.
     if (process.env.LVIS_SANDBOX_ENABLED === "1") {
-      const { getSandboxRunner } = await import("../permissions/sandbox-runner.js");
-      const runner = getSandboxRunner("mcp") ?? getSandboxRunner(process.platform);
-      if (runner) {
-        // Runner available — full adoption pending stdin stream support.
-        // Capability is already reflected in detectSandboxCapability() SOT.
-        // eslint-disable-next-line no-console
-        console.debug("[mcp-client] LVIS_SANDBOX_ENABLED: MCP runner available (full adoption pending stdin support)");
-      }
+      // eslint-disable-next-line no-console
+      console.debug("[mcp-client] LVIS_SANDBOX_ENABLED: MCP worker isolation=none (ASRT worker wrapping pending — see worker-egress follow-up)");
     }
     this.process = spawn(spawnCommand.command, spawnCommand.args, {
       stdio: ["pipe", "pipe", "pipe"],

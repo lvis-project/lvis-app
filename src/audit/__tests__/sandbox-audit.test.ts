@@ -52,7 +52,7 @@ describe("buildSandboxAuditEntry", () => {
 
   it("preserves all sandbox fields including events array", () => {
     const sandboxWithEvents: SandboxAuditEntry["sandbox"] = {
-      kind: "bubblewrap",
+      kind: "asrt",
       confidence: "verified",
       events: [
         { type: "egress_attempted", blocked: true, target: "evil.example.com" },
@@ -125,9 +125,7 @@ describe("buildSandboxAuditEntry", () => {
   it("accepts all SandboxKind values in the sandbox field", () => {
     const kinds: SandboxAuditEntry["sandbox"]["kind"][] = [
       "none",
-      "bubblewrap",
-      "sandbox-exec",
-      "appcontainer",
+      "asrt",
       "partial",
       "fs-only",
     ];
