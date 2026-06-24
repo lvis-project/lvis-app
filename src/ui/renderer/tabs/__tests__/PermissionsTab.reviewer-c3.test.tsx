@@ -160,7 +160,7 @@ describe("PermissionsTab C3 — active LLM following", () => {
     expect(api.permission.reviewerProviderHasKey).not.toHaveBeenCalled();
   });
 
-  it("renders the prompt panel instead of reviewer provider/model controls", async () => {
+  it("renders the prompt collapse inside Auto-verify instead of reviewer provider/model controls", async () => {
     installApi();
     await act(async () => {
       render(<PermissionsTab />);
@@ -168,19 +168,22 @@ describe("PermissionsTab C3 — active LLM following", () => {
     await waitFor(() =>
       expect(screen.queryByTestId("reviewer-prompt-panel")).toBeInTheDocument(),
     );
+    expect(screen.getByTestId("exec-mode-auto")).toContainElement(screen.getByTestId("reviewer-prompt-panel"));
     expect(screen.queryByTestId("reviewer-active-llm-source")).toBeNull();
     expect(screen.queryByTestId("reviewer-provider-select")).toBeNull();
     expect(screen.queryByTestId("reviewer-model-input")).toBeNull();
   });
 
-  it("shows the read-only permission reviewer prompt in auto mode", async () => {
+  it("shows the read-only permission reviewer prompt collapsed under Auto-verify", async () => {
     installApi();
     await act(async () => {
       render(<PermissionsTab />);
     });
     await waitFor(() =>
-      expect(screen.queryByText("검증 프롬프트")).toBeInTheDocument(),
+      expect(screen.getByTestId("reviewer-prompt-panel")).toBeInTheDocument(),
     );
+    expect(screen.queryByText("검증 프롬프트")).toBeNull();
+    expect(screen.getByTestId("exec-mode-auto")).toContainElement(screen.getByTestId("reviewer-prompt-panel"));
     expect(screen.getByTestId("reviewer-system-prompt")).toHaveTextContent("UNTRUSTED_INPUT");
   });
 

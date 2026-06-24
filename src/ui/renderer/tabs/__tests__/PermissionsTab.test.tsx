@@ -356,7 +356,7 @@ describe("PermissionsTab hook quarantine notice", () => {
     expect(screen.queryByTestId("reviewer-llm-degraded-banner")).toBeNull();
   });
 
-  it("keeps the hidden reviewer auto-wiring and shows only the prompt panel when 자동 검증 is selected", async () => {
+  it("keeps hidden reviewer auto-wiring and shows only the prompt collapse inside 자동 검증", async () => {
     const api = installApi([[]]);
 
     await act(async () => {
@@ -375,6 +375,8 @@ describe("PermissionsTab hook quarantine notice", () => {
     expect(screen.queryByTestId("reviewer-model-input")).toBeNull();
     expect(screen.queryByTestId("reviewer-framework-panel")).toBeNull();
     expect(screen.getByTestId("reviewer-prompt-panel")).toBeTruthy();
+    expect(screen.getByTestId("exec-mode-auto")).toContainElement(screen.getByTestId("reviewer-prompt-panel"));
+    expect(screen.queryByText("검증 프롬프트")).toBeNull();
     expect(screen.getByTestId("reviewer-system-prompt")).toHaveTextContent("UNTRUSTED_INPUT");
     expect(screen.queryByTestId("reviewer-mode-llm")).toBeNull();
     expect(screen.queryByTestId("reviewer-mode-disabled")).toBeNull();
@@ -392,6 +394,7 @@ describe("PermissionsTab hook quarantine notice", () => {
 
     expect(screen.queryByTestId("reviewer-fallback-select")).toBeNull();
     expect(screen.getByTestId("reviewer-prompt-panel")).toBeTruthy();
+    expect(screen.getByTestId("exec-mode-auto")).toContainElement(screen.getByTestId("reviewer-prompt-panel"));
     expect(api.permission.reviewerDispatch).not.toHaveBeenCalledWith(
       expect.stringMatching(/^fallback\b/),
     );
@@ -411,6 +414,7 @@ describe("PermissionsTab hook quarantine notice", () => {
     expect(screen.queryByTestId("reviewer-model-input")).toBeNull();
     expect(screen.queryByTestId("reviewer-active-llm-source")).toBeNull();
     expect(screen.getByTestId("reviewer-prompt-panel")).toBeTruthy();
+    expect(screen.getByTestId("exec-mode-auto")).toContainElement(screen.getByTestId("reviewer-prompt-panel"));
     expect(api.permission.reviewerDispatch).not.toHaveBeenCalledWith(
       expect.stringMatching(/^(provider|model)\b/),
     );
@@ -443,6 +447,7 @@ describe("PermissionsTab hook quarantine notice", () => {
     expect(screen.queryByTestId("reviewer-interactive-low")).toBeNull();
     expect(screen.queryByTestId("permissions-legacy-auto-mode-banner")).toBeNull();
     expect(screen.getByTestId("reviewer-prompt-panel")).toBeTruthy();
+    expect(screen.getByTestId("exec-mode-auto")).toContainElement(screen.getByTestId("reviewer-prompt-panel"));
   });
 
   it("surfaces the reviewer rewire failure when entering the auto-verification mode", async () => {
@@ -645,6 +650,7 @@ describe("PermissionsTab hook quarantine notice", () => {
       render(<PermissionsTab />);
     });
     expect(screen.getByTestId("reviewer-prompt-panel")).toBeTruthy();
+    expect(screen.getByTestId("exec-mode-auto")).toContainElement(screen.getByTestId("reviewer-prompt-panel"));
     expect(screen.queryByTestId("permissions-legacy-auto-mode-banner")).toBeNull();
     expect(screen.queryByTestId("reviewer-active-llm-source")).toBeNull();
     expect(screen.queryByTestId("reviewer-framework-panel")).toBeNull();

@@ -1452,7 +1452,7 @@ export function ChatView({ api, onAsk, onEditSave, onFork, onToggleStar, onRetry
         if (e.kind === "reasoning") {
           if (cls === "intermediate") {
             groupRevisions.push(entryRenderRevision({ entry: e, idx: i, searchHighlight, starred: false }));
-            groupEntries.push({ idx: i, node: <ReasoningCard key={i} entry={e} embedded /> });
+            groupEntries.push({ idx: i, node: <ReasoningCard key={i} entry={e} /> });
           } else {
             break;
           }

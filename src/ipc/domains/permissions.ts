@@ -238,6 +238,7 @@ export function registerPermissionsHandlers(deps: IpcDeps): void {
       permissionManager: pm,
       approvalGate,
       auditLogger,
+      skipApproval: true,
     });
     if (!result.ok) return result;
     broadcastPermissionModeChanged(deps, result.mode);
