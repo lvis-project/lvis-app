@@ -1425,102 +1425,162 @@ export function ChatView({ api, onAsk, onEditSave, onFork, onToggleStar, onRetry
       continue;
     }
 
-    // ── Intermediate: collect contiguous turn work into one WorkGroup ──
+    // ── Intermediate: tool activity collapses into a WorkGroup, but
+    //    reasoning and assistant prose stay VISIBLE on completed turns ──
+    //
+    // On a COMPLETED turn, reasoning ("thinking") cards and work-phase
+    // assistant prose are rendered OUTSIDE the WorkGroup so they survive the
+    // group's collapse-on-turn-end. Only `tool_group` / `permission_review`
+    // / `ask_user_answer` entries accumulate into the collapsible WorkGroup
+    // (that grouping affordance is intentional — #565). Reasoning uses the
+    // standalone, collapsed-by-default + expandable ReasoningCard, so the
+    // brain-icon header remains after the turn completes and the user opts in
+    // to read the thought. (Regression fix: WorkGroup previously wrapped
+    // reasoning + prose and hid them when the turn ended.)
+    //
+    // On the ACTIVE streaming turn we still bucket everything into the
+    // "작업 중..." WorkGroup (it renders open while streaming, so the live
+    // text is visible) — keeping the in-progress spinner affordance intact.
+    // The split to standalone happens once the turn completes.
     if (entryClassMap.get(i) === "intermediate") {
-      const groupStart = i;
       const groupTurnStart = entryTurnStartMap.get(i) ?? 0;
       // Spinner is shown only while this WorkGroup belongs to the currently active turn
       const groupIsActiveTurn = groupTurnStart === lastTurnStartIdx && streaming;
       if (debugStreamEnabled && groupIsActiveTurn) {
         debugLog("ChatView", "WorkGroup:render-decision", {
-          groupStart,
+          groupStart: i,
           groupTurnStart,
           lastTurnStartIdx,
           globalStreaming: streaming,
           groupIsActiveTurn,
         });
       }
-      const groupEntries: { idx: number; node: React.ReactNode }[] = [];
-      const groupRevisions: string[] = [];
+
+      // Buffer for the currently-open tool WorkGroup. Flushed (emitted)
+      // when a reasoning / assistant-prose entry interrupts the run, or at
+      // the end of the intermediate stretch, so multiple tool groups in one
+      // turn stay collapsible and ordered relative to the visible prose.
+      let pendingGroup: { idx: number; node: React.ReactNode }[] = [];
+      let pendingRevisions: string[] = [];
+      let pendingGroupStart = i;
+
+      const flushGroup = () => {
+        if (pendingGroup.length === 0) return;
+        const entriesToEmit = pendingGroup;
+        const revisionsToEmit = pendingRevisions;
+        const startIdx = pendingGroupStart;
+        const groupSummary = turnSummaryByTurnStart.get(groupTurnStart);
+        // Use the actual buffered tool/permission/ask count — the group no
+        // longer contains reasoning or assistant prose, so this is the
+        // true step count even when a turn produces multiple groups split
+        // by visible prose. (turn_summary.toolCount covers the whole turn
+        // and would over-count a single split group.)
+        rendered.push(
+          <WorkGroup
+            key={`wg-${currentSessionId}:${startIdx}`}
+            stepCount={entriesToEmit.length}
+            streaming={groupIsActiveTurn}
+            turnDurationMs={groupSummary?.turnDurationMs}
+            revision={[currentSessionId, ...revisionsToEmit].join("||")}
+          >
+            {entriesToEmit.map((ge) => (
+              <div key={ge.idx} data-chat-entry-index={ge.idx}>
+                {ge.node}
+              </div>
+            ))}
+          </WorkGroup>
+        );
+        pendingGroup = [];
+        pendingRevisions = [];
+      };
 
       while (i < activeEntries.length) {
         const e = activeEntries[i];
         if (!e) { i++; continue; }
         if ((entryTurnStartMap.get(i) ?? groupTurnStart) !== groupTurnStart) break;
         const cls = entryClassMap.get(i);
-        if (cls === "final") break;
+        if (cls !== "intermediate") break;
         if (e.kind === "reasoning") {
-          if (cls === "intermediate") {
-            groupRevisions.push(entryRenderRevision({ entry: e, idx: i, searchHighlight, starred: false }));
-            groupEntries.push({ idx: i, node: <ReasoningCard key={i} entry={e} embedded /> });
+          if (groupIsActiveTurn) {
+            // Active turn: keep bucketed in the open "작업 중..." group.
+            pendingRevisions.push(entryRenderRevision({ entry: e, idx: i, searchHighlight, starred: false }));
+            if (pendingGroup.length === 0) pendingGroupStart = i;
+            pendingGroup.push({ idx: i, node: <ReasoningCard key={i} entry={e} /> });
           } else {
-            break;
-          }
-        } else if (e.kind === "permission_review") {
-          if (cls === "intermediate") {
-            groupRevisions.push(entryRenderRevision({ entry: e, idx: i, searchHighlight, starred: false }));
-            groupEntries.push({
-              idx: i,
-              node: <PermissionReviewStatusCard key={`permission-review-${e.toolUseId}`} entry={e} />,
-            });
-          } else {
-            break;
-          }
-        } else if (e.kind === "tool_group") {
-          if (cls === "intermediate") {
-            const spawnRevisions = e.tools.flatMap((tool) =>
-              (spawnsByToolUseId.get(tool.toolUseId) ?? []).map(subAgentRevision),
+            // Completed turn: render standalone OUTSIDE the WorkGroup so it
+            // stays visible after the group collapses. Flush any open tool
+            // group first to preserve order.
+            flushGroup();
+            rendered.push(
+              <div key={i} data-chat-entry-index={i}>
+                <ReasoningCard key={i} entry={e} />
+              </div>
             );
-            const spawnNodes = renderSpawnsForGroup(e);
-            groupRevisions.push(entryRenderRevision({ entry: e, idx: i, searchHighlight, starred: false, spawnRevisions }));
-            groupEntries.push({
-              idx: i,
-              node: spawnNodes.length === 0 ? (
-                <ToolGroupCard key={e.groupId} group={e} sessionId={currentSessionId} />
-              ) : (
-                <Fragment key={e.groupId}>
-                  <ToolGroupCard group={e} sessionId={currentSessionId} />
-                  {spawnNodes}
-                </Fragment>
-              ),
-            });
-          } else {
-            break;
           }
         } else if (e.kind === "assistant") {
-          if (cls === "intermediate") {
-            const starred = !!isEntryStarred(i);
-            groupRevisions.push(entryRenderRevision({ entry: e, idx: i, searchHighlight, starred }));
-            groupEntries.push({
+          const starred = !!isEntryStarred(i);
+          if (groupIsActiveTurn) {
+            // Active turn: keep bucketed in the open "작업 중..." group.
+            pendingRevisions.push(entryRenderRevision({ entry: e, idx: i, searchHighlight, starred }));
+            if (pendingGroup.length === 0) pendingGroupStart = i;
+            pendingGroup.push({
               idx: i,
-              node: (
+              node: <AssistantCard key={i} entry={e} isStarred={starred} isFinal={false} />,
+            });
+          } else {
+            // Completed turn: work-phase prose stays VISIBLE standalone
+            // (isFinal false → no TurnActionBar, hover-only actions). Flush
+            // the open tool group first so prose appears after the tools
+            // that preceded it.
+            flushGroup();
+            rendered.push(
+              <div key={i} data-chat-entry-index={i} className={`min-w-0 w-full max-w-full overflow-x-hidden rounded-lg${ringClassFor(i) ? ` ${ringClassFor(i)}` : ""}`}>
                 <AssistantCard
-                  key={i}
                   entry={e}
                   isStarred={starred}
                   isFinal={false}
                 />
-              ),
-            });
-          } else {
-            break;
+              </div>
+            );
           }
+        } else if (e.kind === "permission_review") {
+          pendingRevisions.push(entryRenderRevision({ entry: e, idx: i, searchHighlight, starred: false }));
+          if (pendingGroup.length === 0) pendingGroupStart = i;
+          pendingGroup.push({
+            idx: i,
+            node: <PermissionReviewStatusCard key={`permission-review-${e.toolUseId}`} entry={e} />,
+          });
+        } else if (e.kind === "tool_group") {
+          const spawnRevisions = e.tools.flatMap((tool) =>
+            (spawnsByToolUseId.get(tool.toolUseId) ?? []).map(subAgentRevision),
+          );
+          const spawnNodes = renderSpawnsForGroup(e);
+          pendingRevisions.push(entryRenderRevision({ entry: e, idx: i, searchHighlight, starred: false, spawnRevisions }));
+          if (pendingGroup.length === 0) pendingGroupStart = i;
+          pendingGroup.push({
+            idx: i,
+            node: spawnNodes.length === 0 ? (
+              <ToolGroupCard key={e.groupId} group={e} sessionId={currentSessionId} />
+            ) : (
+              <Fragment key={e.groupId}>
+                <ToolGroupCard group={e} sessionId={currentSessionId} />
+                {spawnNodes}
+              </Fragment>
+            ),
+          });
         } else if (e.kind === "ask_user_answer") {
           // ask_user_question 의 사용자 응답 카드도 같은 turn 의
-          // WorkGroup 안에 inline 으로 흡수. 이전: 이 branch 가 없어
-          // default break 로 떨어지면서 WorkGroup 가 분리 → 사용자가
-          // "작업 3단계 + 작업 9단계" 로 보이던 UX 분리 (2026-05-07).
-          // entryTurnStartMap 에는 ask_user_answer 가 없어 line 901
-          // 의 fallback 으로 같은 turn 처리되었으나, 여기서 명시 push
-          // 가 없으면 default `break` 로 떨어짐. 안전을 위해 walkback
-          // 으로 turnStart 일치 검증.
+          // WorkGroup 안에 inline 으로 흡수. entryTurnStartMap 에는
+          // ask_user_answer 가 없어 fallback 으로 같은 turn 처리되므로
+          // walkback 으로 turnStart 일치 검증.
           let aaTurnStart = -1;
           for (let k = i; k >= 0; k--) {
             if (isTurnStartEntry(activeEntries[k])) { aaTurnStart = k; break; }
           }
           if (aaTurnStart === groupTurnStart) {
-            groupRevisions.push(entryRenderRevision({ entry: e, idx: i, searchHighlight, starred: false }));
-            groupEntries.push({
+            pendingRevisions.push(entryRenderRevision({ entry: e, idx: i, searchHighlight, starred: false }));
+            if (pendingGroup.length === 0) pendingGroupStart = i;
+            pendingGroup.push({
               idx: i,
               node: <AskUserAnswerBubble key={`ask-${i}`} entry={e} />,
             });
@@ -1533,28 +1593,7 @@ export function ChatView({ api, onAsk, onEditSave, onFork, onToggleStar, onRetry
         i++;
       }
 
-      if (groupEntries.length > 0) {
-        // Prefer the turn_summary's authoritative `toolCount` over
-        // groupEntries.length — the latter includes reasoning /
-        // assistant bubbles / ask_user_answer / inline sub-agent
-        // cards and would diverge from the actual tool-call count.
-        const groupSummary = turnSummaryByTurnStart.get(groupTurnStart);
-        rendered.push(
-          <WorkGroup
-            key={`wg-${currentSessionId}:${groupStart}`}
-            stepCount={groupSummary?.toolCount ?? groupEntries.length}
-            streaming={groupIsActiveTurn}
-            turnDurationMs={groupSummary?.turnDurationMs}
-            revision={[currentSessionId, ...groupRevisions].join("||")}
-          >
-            {groupEntries.map((ge) => (
-              <div key={ge.idx} data-chat-entry-index={ge.idx}>
-                {ge.node}
-              </div>
-            ))}
-          </WorkGroup>
-        );
-      }
+      flushGroup();
       continue;
     }
 
