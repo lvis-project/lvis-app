@@ -2,19 +2,18 @@ import type { PersistentItem, StatusBarSeverity, ToastItem } from "../hooks/use-
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "../../../components/ui/tooltip.js";
 import { X } from "lucide-react";
 import { t } from "../../../i18n/runtime.js";
+import { MarqueeText } from "./MarqueeText.js";
 
 const EMOJI_FONT_STACK =
   "'Apple Color Emoji', 'Segoe UI Emoji', 'Noto Color Emoji', 'Twemoji Mozilla', sans-serif";
 const EMOJI_STYLE = { fontFamily: EMOJI_FONT_STACK };
 
 /**
- * Bottom status bar (#231). Two slots:
- *   - left: persistent items (next routine, online/offline, …)
- *   - right: transient toasts (install progress, lifecycle results, …)
+ * Composer-adjacent status/toast surface.
  *
  * Component is intentionally presentational — all state and producer
- * wiring lives in `useStatusBar`. Keep it under ~24px of vertical space
- * to match iTerm / VS Code / Windows Terminal proportions.
+ * wiring lives in `useStatusBar`. In chat it is rendered directly above the
+ * composer so transient failures stay near the user's current input focus.
  *
  * Issue #260 — toasts originating from the notification system carry a
  * `notification` meta. When provided, `onToastClick` fires on click; the
@@ -57,27 +56,21 @@ const SEVERITY_TEXT: Record<StatusBarSeverity, string> = {
 export function StatusBar(props: StatusBarProps) {
   const { persistent, visibleToast, pendingCount = 0, onToastClick, onToastDismiss } = props;
 
-  // Now rendered inside the top-right banner stack (the bottom bar is gone).
   // Render nothing when there is no persistent indicator and no toast, so the
-  // stack does not float an empty card.
+  // composer dock does not reserve empty vertical space.
   if ((!persistent || persistent.length === 0) && !visibleToast) return null;
 
   return (
     <TooltipProvider>
     <footer
-      className="inline-flex max-w-md items-center gap-3 text-[11px] text-muted-foreground"
+      className="flex w-full min-w-0 items-center gap-3 text-[11px] text-muted-foreground"
       data-testid="status-bar"
       role="status"
       aria-live="polite"
     >
-      <div className="flex min-w-0 items-center truncate">
-        {persistent.length === 0 ? (
-          // Empty state — no brand mark (wb-final removed LVIS chrome
-          // branding). A zero-footprint spacer keeps the flex layout stable
-          // until the first persistent item (model / permission) arrives.
-          <span aria-hidden="true" />
-        ) : (
-          persistent.map((item, idx) => {
+      {persistent.length > 0 ? (
+        <div className="flex min-w-0 items-center truncate">
+          {persistent.map((item, idx) => {
             const previous = idx > 0 ? persistent[idx - 1] : undefined;
             const joinWithPrevious =
               previous?.id === "health:services" && item.id === "vendor:llm";
@@ -161,16 +154,16 @@ export function StatusBar(props: StatusBarProps) {
                 )}
               </span>
             );
-          })
-        )}
-      </div>
-      <div className="flex min-w-0 items-center gap-2 truncate">
+          })}
+        </div>
+      ) : null}
+      <div className="flex min-w-0 flex-1 items-center gap-2">
         {visibleToast !== null && (() => {
           const toast = visibleToast;
           const clickable = toast.notification !== undefined && typeof onToastClick === "function";
           const dismissible = typeof onToastDismiss === "function";
           const baseClass =
-            "flex min-w-0 max-w-md items-center gap-3 rounded-lg border border-border bg-card/(--opacity-solid) px-4 py-3 text-[13px] text-card-foreground shadow-2xl lvis-anim-slide-up";
+            "flex min-w-0 w-full items-center gap-3 rounded-xl border border-border bg-card/(--opacity-solid) px-4 py-3 text-[13px] text-card-foreground shadow-2xl lvis-anim-slide-up";
           const dot = (
             <span
               className={`h-2 w-2 shrink-0 rounded-full ${SEVERITY_DOT[toast.severity]}`}
@@ -194,7 +187,11 @@ export function StatusBar(props: StatusBarProps) {
             return (
               <div key={toast.id} className={baseClass}>
                 {dot}
-                <span className="min-w-0 flex-1 truncate">{toast.message}</span>
+                <MarqueeText
+                  text={toast.message}
+                  className="flex-1 text-left"
+                  data-testid="status-toast-message"
+                />
                 <button
                   type="button"
                   onClick={() => onToastClick?.(toast)}
@@ -210,7 +207,11 @@ export function StatusBar(props: StatusBarProps) {
           return (
             <div key={toast.id} className={baseClass}>
               {dot}
-              <span className="min-w-0 flex-1 truncate">{toast.message}</span>
+              <MarqueeText
+                text={toast.message}
+                className="flex-1 text-left"
+                data-testid="status-toast-message"
+              />
               {dismissButton}
               {pendingBadge}
             </div>

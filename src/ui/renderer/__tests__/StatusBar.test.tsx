@@ -49,10 +49,18 @@ describe("StatusBar", () => {
     const t1 = toast({ id: "toast:1", message: "agent-hub 설치 중…" });
     // Only visibleToast (t1) is shown; one more toast is queued (pendingCount=1).
     render(<StatusBar persistent={[]} visibleToast={t1} pendingCount={1} />);
-    expect(screen.getByText("agent-hub 설치 중…")).toBeInTheDocument();
+    expect(screen.getByTestId("status-toast-message")).toHaveTextContent("agent-hub 설치 중…");
     expect(screen.queryByText("agent-hub 설치 완료")).not.toBeInTheDocument();
     // pending badge shows +1
     expect(screen.getByText("+1")).toBeInTheDocument();
+  });
+
+  it("renders toast text through the marquee surface so long messages can flow", () => {
+    const message = "Plugin login failed. code: non-corp-network. Corporate network or VPN is required.";
+    render(<StatusBar persistent={[]} visibleToast={toast({ message })} pendingCount={0} />);
+    const text = screen.getByTestId("status-toast-message");
+    expect(text).toHaveAttribute("title", message);
+    expect(text).toHaveTextContent(message);
   });
 
   it("shows no toast when visibleToast is null", () => {

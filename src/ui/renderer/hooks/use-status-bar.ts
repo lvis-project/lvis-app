@@ -57,6 +57,17 @@ interface UseStatusBarOptions {
  * generous headroom while bounding memory + re-render cost.
  */
 const TOAST_QUEUE_CAP = 50;
+const TOAST_MARQUEE_CHAR_THRESHOLD = 48;
+const TOAST_MARQUEE_BASE_TTL_MS = 2500;
+const TOAST_MARQUEE_MS_PER_CHAR = 220;
+const TOAST_MARQUEE_MAX_TTL_MS = 45_000;
+
+function resolveToastTtlMs(message: string, requestedTtlMs: number): number {
+  const charCount = Array.from(message).length;
+  if (charCount <= TOAST_MARQUEE_CHAR_THRESHOLD) return requestedTtlMs;
+  const scrollTtlMs = TOAST_MARQUEE_BASE_TTL_MS + charCount * TOAST_MARQUEE_MS_PER_CHAR;
+  return Math.max(requestedTtlMs, Math.min(TOAST_MARQUEE_MAX_TTL_MS, scrollTtlMs));
+}
 
 export function useStatusBar(opts: UseStatusBarOptions) {
   // LONG_TOAST_TTL_MS (5 s) gives comfortable reading time for a Korean
@@ -77,7 +88,7 @@ export function useStatusBar(opts: UseStatusBarOptions) {
       notification?: ToastItem["notification"];
     }) => {
       const id = `toast:${++toastCounterRef.current}`;
-      const ttlMs = input.ttlMs ?? defaultToastTtlMs;
+      const ttlMs = resolveToastTtlMs(input.message, input.ttlMs ?? defaultToastTtlMs);
       const expiresAt = Date.now() + ttlMs;
       setToasts((prev) => {
         const newItem: ToastItem = {
