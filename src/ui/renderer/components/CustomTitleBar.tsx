@@ -209,9 +209,13 @@ export function CustomTitleBar({ children }: CustomTitleBarProps = {}) {
       {/* no-drag wrapper so buttons receive mouse events. The band vertically
           centers its content (items-center); the native window buttons must
           still span the FULL band height (h-11) so their hover fill reaches the
-          band's top and bottom edges. */}
+          band's top and bottom edges. `ml-auto` pins the cluster to the trailing
+          corner directly — robust whether or not `children` are present. The
+          main window passes a `flex-1` MainToolbar that eats the leading slack,
+          and the detached / settings windows pass NO children, so without this
+          the cluster would strand flush-left in those windows. */}
       <div
-        className="flex h-11 items-stretch"
+        className="ml-auto flex h-11 items-stretch"
         style={{
           // @ts-expect-error — Electron-specific CSS extension
           WebkitAppRegion: "no-drag",
