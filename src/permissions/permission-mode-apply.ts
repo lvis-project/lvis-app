@@ -18,18 +18,29 @@ export type PermissionModeApplyResult =
       message: string;
     };
 
+export interface PermissionModeApprovalBypass {
+  source: "settings-ui" | "builtin-slash";
+  trustOrigin: "user-keyboard";
+  explicitUserAction: true;
+}
+
 export async function applyPermissionModeCommand(
   cmd: PermissionModeCommand,
   deps: {
     permissionManager: PermissionManager;
     approvalGate?: ApprovalGate;
     auditLogger?: Pick<AuditLogger, "isPermissionAuditChainReady" | "appendPermissionAuditEntry">;
-    skipApproval?: boolean;
+    approvalBypass?: PermissionModeApprovalBypass;
   },
 ): Promise<PermissionModeApplyResult> {
   const previous = deps.permissionManager.getMode();
 
-  if (cmd.durable && !deps.skipApproval) {
+  const hasTrustedBuiltInConfirmation =
+    deps.approvalBypass?.explicitUserAction === true &&
+    deps.approvalBypass.trustOrigin === "user-keyboard" &&
+    (deps.approvalBypass.source === "settings-ui" || deps.approvalBypass.source === "builtin-slash");
+
+  if (cmd.durable && !hasTrustedBuiltInConfirmation) {
     if (!deps.approvalGate) {
       return {
         ok: false,
@@ -76,6 +87,7 @@ export async function applyPermissionModeCommand(
         fromMode: previous,
         toMode: cmd.mode,
         durable: cmd.durable,
+        confirmationSource: hasTrustedBuiltInConfirmation ? deps.approvalBypass?.source : undefined,
       });
     } catch (err) {
       return {
