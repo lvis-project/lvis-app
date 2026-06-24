@@ -24,6 +24,7 @@ import {
 } from "../../../components/ui/dialog.js";
 import { REASONING_EFFORT_STEPS, VENDORS, budgetToEffortIndex } from "../constants.js";
 import { parseHostResolverMap } from "../../../shared/host-resolver-map.js";
+import { isRetiredLlmModel } from "../../../shared/llm-vendor-defaults.js";
 import type { LvisApi } from "../types.js";
 import { SettingsPageHeader } from "../components/SettingsPageHeader.js";
 import { SettingsSection } from "../components/SettingsSection.js";
@@ -176,7 +177,7 @@ function modelOptionsFor(vendorId: string, selectedModel: string): string[] {
   }
 
   const currentModel = selectedModel.trim();
-  if (currentModel && !options.includes(currentModel)) {
+  if (currentModel && !isRetiredLlmModel(currentModel) && !options.includes(currentModel)) {
     options.unshift(currentModel);
   }
 
@@ -232,7 +233,10 @@ export function LlmTab(props: LlmTabProps) {
   const vendorLabelReady = vendor !== "" && settingsLoaded;
   const vendorLabel = vendorLabelReady ? vendorInfo.label : "";
   const hasOnSave = typeof onSave === "function";
-  const activeModelValue = model.trim() || vendorInfo.defaultModel;
+  const trimmedModel = model.trim();
+  const activeModelValue = trimmedModel && !isRetiredLlmModel(trimmedModel)
+    ? trimmedModel
+    : vendorInfo.defaultModel;
   const activeModelOptions = modelOptionsFor(vendor, activeModelValue);
 
   // Relaunch confirmation dialog state for host map changes.
@@ -719,7 +723,10 @@ export function LlmTab(props: LlmTabProps) {
               <p className="text-[11px] text-muted-foreground">{t("llmTab.fallbackDesc")}</p>
               {fallbackChain.map((entry, idx) => {
                 const fallbackVendorInfo = getVendorInfo(entry.provider);
-                const fallbackModelValue = entry.model.trim() || fallbackVendorInfo.defaultModel;
+                const trimmedFallbackModel = entry.model.trim();
+                const fallbackModelValue = trimmedFallbackModel && !isRetiredLlmModel(trimmedFallbackModel)
+                  ? trimmedFallbackModel
+                  : fallbackVendorInfo.defaultModel;
                 const fallbackModelOptions = modelOptionsFor(entry.provider, fallbackModelValue);
                 return (
                   <div key={idx} className="flex gap-2">

@@ -12,12 +12,15 @@
  *  - [↑ 즉시] 버튼: 그 1 개만 즉시 inject (LLM abort + 다른 항목 잔존)
  *  - [✕] 버튼: 그 1 개만 큐에서 제거
  *
- * 단축키 없음 — 행별 액션은 마우스 only.
+ * 키보드:
+ *  - ↑/↓: 큐 행 이동
+ *  - Space/Enter: 현재 행 선택 토글
+ *  - Delete/Backspace: 현재 행 제거
  *
  * Spec: docs/blueprints/composer-redesign-message-queue.md
  */
 
-import { useSyncExternalStore, useState, useMemo, useCallback, useRef } from "react";
+import { useSyncExternalStore, useState, useMemo, useCallback, useEffect, useRef } from "react";
 import { ChevronDown, ChevronRight, MessageSquarePlus, ArrowUp, X, Pencil } from "lucide-react";
 import { Badge } from "../../../components/ui/badge.js";
 import type { MessageQueueStore, MessageQueueItem } from "../state/message-queue-store.js";
@@ -38,13 +41,26 @@ export function MessageQueuePanel({ store, onSendNow }: MessageQueuePanelProps) 
   );
 
   const [expanded, setExpanded] = useState(true);
+  const rowRefs = useRef<(HTMLLIElement | null)[]>([]);
 
   const selectedCount = useMemo(
     () => items.reduce((n, it) => (it.selected ? n + 1 : n), 0),
     [items],
   );
 
+  useEffect(() => {
+    if (!expanded || items.length === 0) return;
+    const frame = requestAnimationFrame(() => rowRefs.current[0]?.focus());
+    return () => cancelAnimationFrame(frame);
+  }, [expanded, items.length]);
+
   if (items.length === 0) return null;
+
+  const focusRow = (index: number) => {
+    if (items.length === 0) return;
+    const next = (index + items.length) % items.length;
+    rowRefs.current[next]?.focus();
+  };
 
   return (
     <div
@@ -83,14 +99,16 @@ export function MessageQueuePanel({ store, onSendNow }: MessageQueuePanelProps) 
           className="flex max-h-[35vh] flex-col gap-0.5 overflow-y-auto px-2 pb-2"
           data-testid="message-queue-list"
         >
-          {items.map((item) => (
+          {items.map((item, index) => (
             <MessageQueueRow
               key={item.id}
               item={item}
+              rowRef={(node) => { rowRefs.current[index] = node; }}
               onToggle={() => store.toggleSelect(item.id)}
               onSendNow={() => onSendNow(item)}
               onRemove={() => store.remove(item.id)}
               onEdit={(next) => store.update(item.id, next)}
+              onMoveFocus={(delta) => focusRow(index + delta)}
             />
           ))}
         </ul>
@@ -101,14 +119,30 @@ export function MessageQueuePanel({ store, onSendNow }: MessageQueuePanelProps) 
 
 interface MessageQueueRowProps {
   item: MessageQueueItem;
+  rowRef: (node: HTMLLIElement | null) => void;
   onToggle: () => void;
   onSendNow: () => void;
   onRemove: () => void;
   /** 텍스트 수정 — Enter / blur 로 저장. 빈 텍스트 또는 cap 초과 시 throw. */
   onEdit: (newText: string) => void;
+  onMoveFocus: (delta: 1 | -1) => void;
 }
 
-function MessageQueueRow({ item, onToggle, onSendNow, onRemove, onEdit }: MessageQueueRowProps) {
+function isTextEditingTarget(target: EventTarget | null): boolean {
+  if (!(target instanceof HTMLElement)) return false;
+  if (target.isContentEditable) return true;
+  return target instanceof HTMLInputElement || target instanceof HTMLTextAreaElement;
+}
+
+function MessageQueueRow({
+  item,
+  rowRef,
+  onToggle,
+  onSendNow,
+  onRemove,
+  onEdit,
+  onMoveFocus,
+}: MessageQueueRowProps) {
   const { t } = useTranslation();
   const [editing, setEditing] = useState(false);
   const [draft, setDraft] = useState(item.text);
@@ -147,14 +181,34 @@ function MessageQueueRow({ item, onToggle, onSendNow, onRemove, onEdit }: Messag
 
   return (
     <li
+      ref={rowRef}
       className={
-        "flex items-center gap-2 rounded border px-2 py-1 transition-colors " +
+        "flex items-center gap-2 rounded border px-2 py-1 transition-colors focus:outline-none focus:ring-1 focus:ring-info/(--opacity-strong) " +
         (item.selected
           ? "border-accent bg-accent/(--opacity-subtle)"
           : "border-transparent hover:border-border")
       }
       data-testid="message-queue-row"
       data-selected={item.selected ? "true" : "false"}
+      tabIndex={editing ? -1 : 0}
+      aria-selected={item.selected}
+      onKeyDown={(e) => {
+        if (editing) return;
+        if (isTextEditingTarget(e.target)) return;
+        if (e.key === "ArrowDown") {
+          e.preventDefault();
+          onMoveFocus(1);
+        } else if (e.key === "ArrowUp") {
+          e.preventDefault();
+          onMoveFocus(-1);
+        } else if ((e.key === "Enter" || e.key === " ") && e.target === e.currentTarget) {
+          e.preventDefault();
+          onToggle();
+        } else if ((e.key === "Delete" || e.key === "Backspace") && e.target === e.currentTarget) {
+          e.preventDefault();
+          onRemove();
+        }
+      }}
     >
       <button
         type="button"

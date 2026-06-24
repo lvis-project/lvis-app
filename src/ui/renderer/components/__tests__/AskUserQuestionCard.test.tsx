@@ -710,6 +710,32 @@ describe("AskUserQuestionCard — auto-focus on mount enables arrow nav", () => 
 
     expect(document.activeElement?.textContent).toContain("빨강");
   });
+
+  it("restores card focus after advancing to the next question", async () => {
+    const api = askUserQuestionApi();
+    const request = makeRequest({
+      questions: [
+        { question: "Q1", choices: ["A"], allowFreeText: false },
+        { question: "Q2", choices: ["X", "Y"], allowFreeText: false },
+      ],
+    });
+
+    const { getByTestId, getByText } = render(
+      <AskUserQuestionCard api={api as never} request={request} onResolved={vi.fn()} />,
+    );
+
+    await act(async () => {
+      fireEvent.keyDown(getByText("A").closest("button")!, { key: "Enter" });
+    });
+
+    const card = getByTestId("ask-user-question-card");
+    await waitFor(() => expect(document.activeElement).toBe(card));
+    await act(async () => {
+      fireEvent.keyDown(card, { key: "ArrowDown" });
+    });
+
+    expect(document.activeElement?.textContent).toContain("X");
+  });
 });
 
 // ---------------------------------------------------------------------------
