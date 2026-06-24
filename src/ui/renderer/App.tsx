@@ -151,10 +151,21 @@ export function App() {
     entries, streaming, isCompacting, compactTriggerSource, isRecoveryExhausted, beginStreamingRequest, finishStreamingRequest, editingEntryIdx, setEditingEntryIdx, editBusy,
     entryIndexToHistoryIndex, handleEditSave, handleRetryEffort, handleContinueFromLastUser,
     resetStreamAccumulators, setErrorWithThought, handleCompactCommand,
-    clearForNewChat, appendUserEntry, appendAssistantStatus, appendSystemEntry, applyInitialSession, applyLoadedSession, truncateToEntry,
+    clearForNewChat, appendUserEntry, appendSystemEntry, applyInitialSession, applyLoadedSession, truncateToEntry,
     fallbackToast,
     insertImportedTriggerEntry,
   } = useChatState(api);
+  // Top chat-area status surface: persistent operational items plus transient
+  // toasts. Initialized early because plugin auth selection can emit toasts.
+  const {
+    persistent: statusPersistent,
+    visibleToast: statusVisibleToast,
+    pendingCount: statusPendingCount,
+    pushToast: statusPushToast,
+    removeToast: statusRemoveToast,
+    upsertPersistent: statusUpsertPersistent,
+    removePersistent: statusRemovePersistent,
+  } = useStatusBar({ api });
   const [question, setQuestion] = useState("");
   const chatEndRef = useRef<HTMLDivElement>(null);
   const turnRequestRef = useRef(0);
@@ -827,8 +838,8 @@ export function App() {
               next.set(view.pluginId, message);
               return next;
             });
+            statusPushToast({ severity: "error", message, ttlMs: 10000 });
             openPluginView();
-            setErrorWithThought(message);
           } finally {
             pluginAuthLoginInflightRef.current.delete(inflightKey);
           }
@@ -861,6 +872,7 @@ export function App() {
       refreshPluginAuthStatus,
       clearPluginAuthError,
       formatPluginAuthLoginError,
+      statusPushToast,
     ],
   );
 
@@ -1260,7 +1272,6 @@ export function App() {
         appendUserEntry(trimmed, opts?.injectHint);
       }
       resetStreamAccumulators();
-      appendAssistantStatus(t("app.thinkingStatus"));
       try {
         await api.chatSend(
           outgoing,
@@ -1314,7 +1325,6 @@ export function App() {
       checkApiKey,
       composeOutgoing,
       appendUserEntry,
-      appendAssistantStatus,
       resetStreamAccumulators,
       beginStreamingRequest,
       finishStreamingRequest,
@@ -1510,17 +1520,10 @@ export function App() {
     activeVendor: llmVendor,
   });
 
-  // Bottom status bar (#231) — bottom slot for persistent items + transient
-  // toasts. The hook subscribes to existing install-progress / install-result
-  // / uninstall-result events and reads the routine schedule from settings,
-  // so wiring it here is enough to surface lifecycle feedback.
   // Issue #260 — when a notification toast is clicked, dispatch the click via
   // notifyClick IPC (which restores+focuses the window) and dismiss the
   // toast. Other toast producers leave `notification` undefined so this
   // handler is a no-op for them.
-  const { persistent: statusPersistent, visibleToast: statusVisibleToast, pendingCount: statusPendingCount, removeToast: statusRemoveToast, upsertPersistent: statusUpsertPersistent, removePersistent: statusRemovePersistent } =
-    useStatusBar({ api });
-
   // Show a persistent StatusBar indicator while a pre-turn auto-compact runs.
   // `compact_started` sets isCompacting → this effect upserts the item.
   // `compact_notice` clears isCompacting → this effect removes the item.
