@@ -64,7 +64,7 @@ export const en = {
 
   // Page header
   "permissionsTab.pageTitle": "Permissions",
-  "permissionsTab.pageDescription": "Configure tool permission policies, reviewer settings, and the directory allowlist.",
+  "permissionsTab.pageDescription": "Configure tool permission policies, approval behavior, and the directory allowlist.",
 
   // Banner
   "permissionsTab.closeBannerAriaLabel": "Close notification",
@@ -80,7 +80,7 @@ export const en = {
 
   // Current policy summary section
   "permissionsTab.currentPolicySummaryTitle": "Current Permission Policy",
-  "permissionsTab.currentPolicySummaryDescription": "Select one of: Default, Ask All, Auto-validate, or Allow All, then adjust the reviewer settings in detail.",
+  "permissionsTab.currentPolicySummaryDescription": "Select one of: Default, Ask All, Auto-validate, or Allow All.",
   "permissionsTab.summaryPolicyPreset": "Policy preset",
   "permissionsTab.summaryReviewer": "Permission reviewer",
   "permissionsTab.summaryApprovalDialog": "Approval dialog",
@@ -132,6 +132,8 @@ export const en = {
   "permissionsTab.frameworkComposition": "Judgment composition",
   "permissionsTab.frameworkInputFields": "LLM input fields",
   "permissionsTab.frameworkSystemPromptTitle": "System prompt (raw)",
+  "permissionsTab.reviewerPromptTitle": "Validation Prompt",
+  "permissionsTab.reviewerPromptDescription": "Auto-validate mode uses this built-in prompt for permission risk classification. Settings are changed by policy mode, not in this panel.",
 
   // Approval dialog section
   "permissionsTab.approvalDialogTitle": "Approval Dialog Behavior",
@@ -257,7 +259,7 @@ export const ko: Record<keyof typeof en, string> = {
   "permissionsTab.errorDirectoryRemoveError": "디렉터리 삭제 중 오류: {message}",
 
   "permissionsTab.pageTitle": "권한",
-  "permissionsTab.pageDescription": "도구 권한 정책, 리뷰어, 디렉터리 화이트리스트를 설정합니다",
+  "permissionsTab.pageDescription": "도구 권한 정책, 승인 동작, 디렉터리 화이트리스트를 설정합니다",
 
   "permissionsTab.closeBannerAriaLabel": "알림 닫기",
 
@@ -269,7 +271,7 @@ export const ko: Record<keyof typeof en, string> = {
   "permissionsTab.refreshButton": "새로고침",
 
   "permissionsTab.currentPolicySummaryTitle": "현재 권한 정책",
-  "permissionsTab.currentPolicySummaryDescription": "기본, 전체 물어보기, 자동 검증, 전체 허용 중 하나를 선택하고 세부 리뷰어 설정을 조정합니다.",
+  "permissionsTab.currentPolicySummaryDescription": "기본, 전체 물어보기, 자동 검증, 전체 허용 중 하나를 선택합니다.",
   "permissionsTab.summaryPolicyPreset": "정책 프리셋",
   "permissionsTab.summaryReviewer": "권한 리뷰어",
   "permissionsTab.summaryApprovalDialog": "승인 대화상자",
@@ -314,6 +316,8 @@ export const ko: Record<keyof typeof en, string> = {
   "permissionsTab.frameworkComposition": "판단 구성",
   "permissionsTab.frameworkInputFields": "LLM 입력 필드",
   "permissionsTab.frameworkSystemPromptTitle": "시스템 프롬프트 원문",
+  "permissionsTab.reviewerPromptTitle": "검증 프롬프트",
+  "permissionsTab.reviewerPromptDescription": "자동 검증 모드는 이 내장 프롬프트로 권한 위험도를 분류합니다. 이 패널에서는 설정을 변경하지 않고 정책 모드만으로 동작합니다.",
 
   "permissionsTab.approvalDialogTitle": "승인 대화상자 동작",
   "permissionsTab.approvalDialogDescription": "체크 시 승인 대화상자에서 모달 외부 클릭과 Escape 키가 차단되어 버튼 또는 승인 단축키로 명시적으로 결정해야 합니다.",

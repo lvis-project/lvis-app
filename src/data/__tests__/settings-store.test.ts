@@ -272,9 +272,9 @@ describe("SettingsService LLM per-vendor patching", () => {
       },
     });
 
-    // User switches to azure-foundry and saves with the FRESH Foundry block
-    // (default model) — this is what the renderer's hydrateVendorBlock +
-    // save() path produces.
+    // User switches to azure-foundry and saves a retired Foundry model.
+    // The retired exact gpt-4o id is normalized, but the patch must still not
+    // leak across vendor blocks.
     await service.patch({
       llm: {
         provider: "azure-foundry",
@@ -284,7 +284,7 @@ describe("SettingsService LLM per-vendor patching", () => {
 
     const llm = service.get("llm");
     expect(llm.provider).toBe("azure-foundry");
-    expect(llm.vendors["azure-foundry"].model).toBe("gpt-4o");
+    expect(llm.vendors["azure-foundry"].model).toBe("gpt-5.4-mini");
     // The OpenAI block must still hold the user-tuned value, not be
     // overwritten by the Foundry save.
     expect(llm.vendors.openai.model).toBe("gpt-5-turbo");

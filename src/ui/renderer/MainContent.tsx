@@ -71,6 +71,7 @@ export interface MainContentProps {
   onCommandPopoverOpenChange: (open: boolean) => void;
   // plugin view
   activePluginView: PluginView | null;
+  pluginAuthError?: string | null;
   /** Called when user confirms a plugin overlay item; id is the OverlayItem.id. */
   onPluginPrimaryAction: (overlayItemId: string) => void;
   /** Called when a completed routine overlay result has been seen or dismissed. */
@@ -210,7 +211,10 @@ export function MainContent(props: MainContentProps): ReactNode {
 
   return (
     <MainPaneShell>
-      <PluginUiHostView view={props.activePluginView ?? null} />
+      <PluginUiHostView
+        view={props.activePluginView ?? null}
+        authError={props.pluginAuthError ?? null}
+      />
     </MainPaneShell>
   );
 }

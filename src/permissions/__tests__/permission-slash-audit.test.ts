@@ -9,7 +9,8 @@
  *   - parsePermissionModeCommand: durable flag + invalid mode.
  *   - parsePermissionHooksCommand: list / accept / disable.
  *   - dispatchPermissionSlash: trust-origin gate (user-keyboard vs other),
- *     leading-slash strip on plugin-emitted, durable mode → needsModal.
+ *     leading-slash strip on plugin-emitted, built-in slash commands do not
+ *     request permission modals.
  *   - readRecentAuditEntries: returns newest-first across files.
  *   - verifyAllAuditFiles: detects tamper + seal mismatch.
  */
@@ -291,12 +292,12 @@ describe("dispatchPermissionSlash — subcommand routing", () => {
     expect(result).toMatchObject({ kind: "reviewer" });
   });
 
-  it("routes 'mode auto --durable' with needsModal=true", () => {
+  it("routes 'mode auto --durable' with needsModal=false for built-in slash commands", () => {
     const result = dispatchPermissionSlash(
       "/permission mode auto --durable",
       "user-keyboard",
     );
-    expect(result).toMatchObject({ kind: "mode", needsModal: true });
+    expect(result).toMatchObject({ kind: "mode", needsModal: false });
   });
 
   it("routes 'mode auto' (session) with needsModal=false", () => {

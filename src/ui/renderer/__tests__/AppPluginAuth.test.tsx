@@ -173,6 +173,31 @@ describe("App plugin auth routing", () => {
     });
   });
 
+  it("detached login failure opens the plugin panel and surfaces a safe auth error code", async () => {
+    const user = userEvent.setup();
+    const { api } = await renderApp(detachedPluginFixture);
+    const nonCorpError = Object.assign(new Error("[non-corp-network] outside corporate network"), {
+      code: "non-corp-network",
+    });
+    api.callPluginMethod.mockImplementation(async (tool: string) => {
+      if (tool === "token_status") return { authenticated: false };
+      if (tool === "token_login") throw nonCorpError;
+      return { ok: true };
+    });
+
+    await user.click(screen.getByTestId("app-mode-chat"));
+    await selectPluginView(user, "Token Plugin");
+
+    await waitFor(() => {
+      expect(api.callPluginMethod).toHaveBeenCalledWith("token_login");
+    });
+    await waitFor(() => {
+      expect(api.window.openDetached).toHaveBeenCalledWith("plugin:token-plugin:main");
+    });
+    expect(await screen.findByText(/code: non-corp-network/)).toBeInTheDocument();
+    expect(screen.getByText(/사내망 또는 VPN 연결이 필요합니다/)).toBeInTheDocument();
+  });
+
   it("routes command-palette plugin actions through detached-window handling (authed)", async () => {
     const user = userEvent.setup();
     const { api } = await renderApp(detachedPluginFixture);
@@ -223,13 +248,8 @@ describe("App plugin auth routing", () => {
     expect(screen.getByText(/window denied/)).toBeInTheDocument();
   });
 
-  it("does NOT auto-call loginTool for an unauthenticated inline embedded view (webview bootstrapAuth is the sole driver)", async () => {
-    // Login-window dedup fix: an inline embedded view owns its auth flow — its
-    // own webview bootstrapAuth drives loginTool → openAuthWindow. The host must
-    // NOT additionally auto-call loginTool here, or TWO login windows open for
-    // the same account. Navigation still happens inline (no detach); the plugin
-    // surface gates its own content on auth state.
-    const { api } = await renderApp({
+  it("auto-calls loginTool for an unauthenticated inline embedded view before navigating", async () => {
+    const { api, emitPluginEvent } = await renderApp({
       pluginCards: [
         {
           id: "oauth-plugin",
@@ -259,19 +279,25 @@ describe("App plugin auth routing", () => {
         },
       ],
     });
+    let authed = false;
     api.callPluginMethod.mockImplementation(async (tool: string) =>
-      tool === "oauth_status" ? { authenticated: false } : { authenticated: true },
+      tool === "oauth_status" ? { authenticated: authed } : { authenticated: true },
     );
 
     const user = userEvent.setup();
-    // Default appMode is action: selecting the view renders it inline. The host
-    // must NOT fire loginTool — the inline webview bootstraps its own auth.
     await selectPluginView(user, "OAuth Plugin");
 
-    // Navigation is inline, never detached.
+    await waitFor(() => {
+      expect(api.callPluginMethod).toHaveBeenCalledWith("oauth_login");
+    });
     expect(api.window.openDetached).not.toHaveBeenCalled();
-    // The host did not auto-call the plugin's loginTool on its behalf.
-    expect(api.callPluginMethod).not.toHaveBeenCalledWith("oauth_login");
+
+    authed = true;
+    emitPluginEvent("oauth-plugin.auth.changed", { authenticated: true });
+
+    await waitFor(() => {
+      expect(screen.queryByTestId("slash-group-plugin")).not.toBeInTheDocument();
+    });
   });
 
   it("navigates an unauthenticated plugin view inline in action mode even with no loginTool (no silent abort)", async () => {

@@ -102,6 +102,27 @@ describe("PluginUiHostView — loading state", () => {
     expect(getByText(/Plugin webview 자산 URL을 lvisApi에서 찾을 수 없습니다/)).toBeTruthy();
   });
 
+  it("shows auth error banner above inline plugin content", () => {
+    stubLvisApi("", "file:///preload.cjs");
+    const { getByText } = render(
+      <PluginUiHostView view={makeView()} authError="플러그인 로그인 실패 code: non-corp-network" />,
+    );
+    expect(getByText("플러그인 로그인 실패 code: non-corp-network")).toBeTruthy();
+    expect(getByText(/Plugin webview 자산 URL을 lvisApi에서 찾을 수 없습니다/)).toBeTruthy();
+  });
+
+  it("shows auth error banner for detached plugin content", () => {
+    stubLvisApi("", "file:///preload.cjs");
+    const { getByText } = render(
+      <PluginUiHostView
+        view={makeView()}
+        showChrome={false}
+        authError="플러그인 로그인 실패 code: non-corp-network"
+      />,
+    );
+    expect(getByText("플러그인 로그인 실패 code: non-corp-network")).toBeTruthy();
+  });
+
   it("does NOT show loading overlay for embedded-page kind (legacy)", () => {
     stubLvisApi();
     const view = makeView();
