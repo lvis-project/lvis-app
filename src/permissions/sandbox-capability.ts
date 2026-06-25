@@ -234,28 +234,54 @@ export function __resetWrappedMcpServersForTest(): void {
 const _wrappedPluginWorkerIds = new Set<string>();
 
 /**
- * Record that `workerId`'s plugin worker was spawned through the ASRT wrap.
- * @internal — only {@link spawnWorker}'s wrapped-spawn path and tests call this.
+ * Compose the COLLISION-FREE registry key for a plugin worker. `workerId` is
+ * stable only WITHIN a plugin (two plugins may both name a worker "main"), so
+ * the marker MUST be scoped by `pluginId` — keying on `workerId` alone lets
+ * plugin B inherit plugin A's `asrt` signal, defeating the no-leak invariant.
+ * Both ids are `safeSegment`-sanitized upstream (no `/`), but may still contain
+ * other characters, so the composition must be UNAMBIGUOUS: `(pluginId,
+ * workerId)` must map 1:1 to the key — e.g. `("a:b","c")` must NOT collide with
+ * `("a","b:c")`.
+ *
+ * TODO(human): return a collision-free key string from `pluginId` + `workerId`.
+ * Pick a scheme that round-trips uniquely (a delimiter that can't appear in a
+ * sanitized segment, or a length-prefixed / encoded join). This is the contract
+ * PR D-3 consumes when it threads `pluginId` into the reviewer resolver below.
  */
-export function markPluginWorkerWrapped(workerId: string): void {
-  _wrappedPluginWorkerIds.add(workerId);
+function pluginWorkerKey(pluginId: string, workerId: string): string {
+  // Length-prefix the pluginId so the (pluginId, workerId) split is unambiguous
+  // for ANY input — the leading `<len>:` fixes where pluginId ends, so even an
+  // id containing `:` cannot forge another pair's key: ("a:b","c") → "3:a:b:c"
+  // vs ("a","b:c") → "1:a:b:c" differ on the length prefix. Self-contained
+  // (does NOT lean on safeSegment stripping the delimiter — this is a no-leak
+  // security boundary), and the middle `:` keeps it readable for audit/telemetry.
+  return `${pluginId.length}:${pluginId}:${workerId}`;
 }
 
 /**
- * Drop `workerId`'s wrapped marker (worker exited / stopped / wrap failed).
+ * Record that a plugin worker (`pluginId`/`workerId`) was spawned through the
+ * ASRT wrap.
+ * @internal — only {@link spawnWorker}'s wrapped-spawn path and tests call this.
+ */
+export function markPluginWorkerWrapped(pluginId: string, workerId: string): void {
+  _wrappedPluginWorkerIds.add(pluginWorkerKey(pluginId, workerId));
+}
+
+/**
+ * Drop a plugin worker's wrapped marker (worker exited / stopped / wrap failed).
  * Idempotent.
  * @internal — only {@link spawnWorker} and tests call this.
  */
-export function unmarkPluginWorkerWrapped(workerId: string): void {
-  _wrappedPluginWorkerIds.delete(workerId);
+export function unmarkPluginWorkerWrapped(pluginId: string, workerId: string): void {
+  _wrappedPluginWorkerIds.delete(pluginWorkerKey(pluginId, workerId));
 }
 
 /**
- * Whether `workerId`'s plugin worker is currently wrapped through ASRT.
+ * Whether a plugin worker (`pluginId`/`workerId`) is currently wrapped through ASRT.
  * @internal — exported for the reviewer resolver + tests.
  */
-export function isPluginWorkerWrapped(workerId: string): boolean {
-  return _wrappedPluginWorkerIds.has(workerId);
+export function isPluginWorkerWrapped(pluginId: string, workerId: string): boolean {
+  return _wrappedPluginWorkerIds.has(pluginWorkerKey(pluginId, workerId));
 }
 
 /**
@@ -327,6 +353,7 @@ export function resolveReviewerSandboxCapability(
   toolName: string,
   mcpServerId?: string,
   workerId?: string,
+  pluginId?: string,
 ): SandboxCapability {
   if (source === "builtin" && ASRT_WRAPPED_SHELL_TOOLS.has(toolName)) {
     return detectSandboxCapability();
@@ -338,12 +365,17 @@ export function resolveReviewerSandboxCapability(
   // worker id is in the plugin-worker wrapped registry (only populated by
   // spawnWorker's wrapped path, cleared on exit/stop/failure/teardown); (2) the
   // active capability is a genuine verified `asrt`. Both must hold (no-leak).
-  if (source === "plugin" && workerId !== undefined && isPluginWorkerWrapped(workerId)) {
+  if (
+    source === "plugin" &&
+    pluginId !== undefined &&
+    workerId !== undefined &&
+    isPluginWorkerWrapped(pluginId, workerId)
+  ) {
     const active = detectSandboxCapability();
     if (active.kind === "asrt") {
       return {
         ...active,
-        reason: `plugin worker '${workerId}' ASRT-wrapped — ${active.reason}`,
+        reason: `plugin worker '${pluginId}/${workerId}' ASRT-wrapped — ${active.reason}`,
       };
     }
   }
