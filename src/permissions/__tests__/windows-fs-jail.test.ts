@@ -98,7 +98,7 @@ describe("stampWindowsFsDeny", () => {
 
   it("FAILS CLOSED — throws on a non-zero exit", () => {
     spawnSyncMock.mockReturnValue({ status: 13, signal: null, stdout: "", stderr: "boom" });
-    expect(() => stampWindowsFsDeny({ denyRead: [], denyWrite: [] }, 1)).toThrow(/acl stamp failed.*boom/s);
+    expect(() => stampWindowsFsDeny({ denyRead: [], denyWrite: [] }, 1, "g")).toThrow(/acl stamp failed.*boom/s);
   });
 });
 
@@ -125,11 +125,11 @@ describe("restoreWindowsFsDeny", () => {
       ]),
       stderr: "",
     });
-    expect(() => restoreWindowsFsDeny(99)).toThrow(/left 1 path\(s\) stamped.*b\.key/s);
+    expect(() => restoreWindowsFsDeny(99, "g")).toThrow(/left 1 path\(s\) stamped.*b\.key/s);
   });
 
   it("FAILS CLOSED on unparseable --json output", () => {
     spawnSyncMock.mockReturnValue({ status: 0, signal: null, stdout: "not-json", stderr: "" });
-    expect(() => restoreWindowsFsDeny(1)).toThrow(/left 1 path\(s\) stamped.*unparseable/s);
+    expect(() => restoreWindowsFsDeny(1, "g")).toThrow(/left 1 path\(s\) stamped.*unparseable/s);
   });
 });
