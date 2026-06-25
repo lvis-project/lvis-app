@@ -1049,6 +1049,10 @@ export class ToolExecutor {
         ...(sandboxAttestation.ownerPluginSandboxRoot !== undefined
           ? { ownerPluginSandboxRoot: sandboxAttestation.ownerPluginSandboxRoot }
           : {}),
+        // worker-egress PR1: thread the MCP server id so the reviewer reports the
+        // genuine asrt capability for a wrapped external MCP worker (and the
+        // verdict cache scopes by the correct substrate).
+        ...(meta.mcpServerId !== undefined ? { mcpServerId: meta.mcpServerId } : {}),
       },
       {
         allowedPluginIds: context.allowedPluginIds
@@ -1166,6 +1170,8 @@ export class ToolExecutor {
           ...(sandboxAttestation.ownerPluginSandboxRoot !== undefined
             ? { ownerPluginSandboxRoot: sandboxAttestation.ownerPluginSandboxRoot }
             : {}),
+          // worker-egress PR1: thread the MCP server id (see headless dispatch).
+          ...(meta.mcpServerId !== undefined ? { mcpServerId: meta.mcpServerId } : {}),
         },
         {
           allowedPluginIds: context.allowedPluginIds
@@ -1267,6 +1273,7 @@ export class ToolExecutor {
     context: ToolPermissionContext,
     approvalCacheKey: string | undefined,
     sandboxAttestation: { writesToOwnSandbox?: boolean; ownerPluginSandboxRoot?: string },
+    mcpServerId?: string,
   ): Promise<PermissionCheckResult | null> {
     // Identity = exactly what ToolApprovalDialog stored (canonical finalInput).
     const canonicalArgs = canonicalStringify(finalInput);
@@ -1297,8 +1304,9 @@ export class ToolExecutor {
     // invocation became more dangerous since approval — re-prompt.
     // Substrate-aware (NOT process-global): a plugin/MCP or in-process builtin
     // call resolves to a "none" capability so the audit + any sandbox-sensitive
-    // rule reflect that this call's effects are NOT ASRT-isolated.
-    const sandboxCapability = resolveReviewerSandboxCapability(source, toolName);
+    // rule reflect that this call's effects are NOT ASRT-isolated — except a
+    // genuinely ASRT-wrapped external MCP worker (worker-egress PR1, keyed on id).
+    const sandboxCapability = resolveReviewerSandboxCapability(source, toolName, mcpServerId);
     const ctx: ToolInvocationContext = {
       toolName,
       source,
@@ -1645,8 +1653,10 @@ export class ToolExecutor {
           // to the dialog so the user can see whether the tool will run
           // under OS isolation or with no protection. Substrate-aware so a
           // plugin/MCP or in-process builtin call honestly shows "none" rather
-          // than the process-global "asrt" that only the host-shell path earns.
-          sandboxCapability: resolveReviewerSandboxCapability(source, toolUse.name),
+          // than the process-global "asrt" that only the host-shell path earns
+          // — and the GENUINE asrt for an ASRT-wrapped external MCP worker
+          // (worker-egress PR1), keyed on its specific server id.
+          sandboxCapability: resolveReviewerSandboxCapability(source, toolUse.name, tool.mcpServerId),
           evaluationContext: makeEvaluationContext({
             pathFields: reviewerPathFields,
             targetFilePaths: [outOfAllowedTarget.filePath],
@@ -2112,6 +2122,7 @@ export class ToolExecutor {
             invocationPermissionContext,
             approvalCacheKey,
             sandboxAttestation,
+            tool.mcpServerId,
           );
           if (memorySkip) {
             permissionResult = memorySkip;
@@ -2273,6 +2284,7 @@ export class ToolExecutor {
           invocationPermissionContext,
           approvalCacheKey,
           sandboxAttestation,
+          tool.mcpServerId,
         );
         if (memorySkip) {
           permissionResult = memorySkip;
@@ -2305,8 +2317,9 @@ export class ToolExecutor {
             // Issue #691 round-1 — sandbox capability for the dialog.
             // Substrate-aware: plugin/MCP + in-process builtins show "none"
             // (their effects are not ASRT-wrapped); only bash/powershell may
-            // show the active "asrt" when the gate is ON.
-            sandboxCapability: resolveReviewerSandboxCapability(source, toolUse.name),
+            // show the active "asrt" when the gate is ON — plus a genuinely
+            // ASRT-wrapped external MCP worker (worker-egress PR1), keyed on id.
+            sandboxCapability: resolveReviewerSandboxCapability(source, toolUse.name, tool.mcpServerId),
             evaluationContext,
           };
 

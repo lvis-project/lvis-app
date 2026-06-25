@@ -27,6 +27,7 @@
  * - 도구는 mcp_{prefix}_{name} 네임스페이스로 ToolRegistry에 등록
  */
 import { spawn, type ChildProcess } from "node:child_process";
+import { join } from "node:path";
 import type {
   McpHttpServerConfig,
   McpServerConfig,
@@ -48,6 +49,18 @@ import {
 import { createLogger } from "../lib/logger.js";
 import { resolveStdioSpawnCommand } from "./uvx-command.js";
 import { trackManagedChildProcess } from "../main/managed-child-processes.js";
+import {
+  isAsrtSandboxActive,
+  wrapWorkerCommand,
+  cleanupAsrtSandboxAfterCommand,
+} from "../permissions/asrt-sandbox.js";
+import { buildSandboxedChildEnv } from "../tools/safe-env.js";
+import {
+  markMcpServerWrapped,
+  unmarkMcpServerWrapped,
+} from "../permissions/sandbox-capability.js";
+import { shellQuote, resolveShell } from "../lib/shell-resolver.js";
+import { lvisHome } from "../shared/lvis-home.js";
 import { t } from "../i18n/index.js";
 const log = createLogger("mcp-client");
 
@@ -1037,6 +1050,23 @@ class StdioTransport implements McpTransport {
   private messageHandler: ((msg: JsonRpcResponse) => void) | null = null;
   private closeHandler: ((reason: string) => void) | null = null;
   private closedExternally = false;
+  /**
+   * True only when THIS transport's worker was actually spawned through the
+   * ASRT wrap (worker-egress PR1). Drives both the per-command cleanup on close
+   * (Linux bwrap mount teardown) AND the reviewer's genuine-capability signal
+   * via {@link markMcpServerWrapped}. Stays false on the plain-spawn path so an
+   * unwrapped server never reports `asrt` to the reviewer (no-leak invariant).
+   */
+  private wrappedThroughAsrt = false;
+  /**
+   * One-shot guard for the ASRT cleanup that fires on ANY child termination
+   * (unexpected crash, OS kill, or the explicit close() path). Ensures
+   * `unmarkMcpServerWrapped` + `cleanupAsrtSandboxAfterCommand` run EXACTLY
+   * ONCE per wrapped worker lifetime regardless of exit cause (worker-egress
+   * PR1 MAJOR fix — unexpected child death previously bypassed cleanup,
+   * violating the no-leak invariant and leaking the bwrap ref-count).
+   */
+  private asrtCleanupRan = false;
 
   constructor(private readonly config: McpStdioServerConfig) {}
 
@@ -1054,39 +1084,199 @@ class StdioTransport implements McpTransport {
     }
     const spawnCommand = resolveStdioSpawnCommand(this.config.command, this.config.args ?? []);
 
-    // MCP stdio spawn path. HONEST isolation reporting: this long-lived worker
-    // is NOT yet wrapped by ASRT, so its OS isolation is `none` regardless of
-    // whether the host-tool sandbox gate is on. Wrapping it requires routing
-    // the spawn through ASRT's wrapWorkerCommand AND exposing a writable stdin
-    // channel for JSON-RPC Content-Length framing.
-    // TODO(worker-egress follow-up): wrap this long-lived worker via
-    //   wrapWorkerCommand (src/permissions/asrt-sandbox.ts) so its egress is
-    //   enforced by the same global strict-union allow-list as host tools.
-    if (process.env.LVIS_SANDBOX_ENABLED === "1") {
-      // eslint-disable-next-line no-console
-      console.debug("[mcp-client] LVIS_SANDBOX_ENABLED: MCP worker isolation=none (ASRT worker wrapping pending — see worker-egress follow-up)");
+    // Minimal, secret-stripped base env (Least Privilege). On the PLAIN path this
+    // is the spawn env verbatim; on the WRAPPED path it is the baseline that the
+    // ASRT proxy keys are merged onto (see buildWrappedStdioEnv).
+    const baseEnv: NodeJS.ProcessEnv = {
+      // C2 fix: 최소 환경변수만 허용 — API 키 유출 방지 (Least Privilege)
+      PATH: process.env.PATH,
+      HOME: process.env.HOME ?? process.env.USERPROFILE, // Windows 호환
+      USERPROFILE: process.env.USERPROFILE,
+      APPDATA: process.env.APPDATA,
+      LANG: process.env.LANG,
+      NODE_ENV: process.env.NODE_ENV,
+      ...this.config.env, // 관리자 승인 환경변수만
+      ...(this.config.apiKey && this.config.apiKeyEnv
+        ? { [this.config.apiKeyEnv]: this.config.apiKey }
+        : {}),
+    };
+
+    // worker-egress PR1 — gate DEFAULT-OFF. When the OS-tool sandbox is active,
+    // route this long-lived stdio worker through ASRT's wrapWorkerCommand so its
+    // egress is enforced by the SAME global strict-union allow-list as host tools
+    // and its writes are confined to the per-server filesystem jail. ASRT is
+    // stdio-transparent: it wraps as `[shell, -c, <wrapped>]` (mac/linux) / a real
+    // argv (win32); a child spawned with inherited stdio:["pipe","pipe","pipe"]
+    // passes stdin/stdout through, so MCP's Content-Length framing survives.
+    // Gate OFF ⇒ the plain spawn below is UNCHANGED.
+    if (isAsrtSandboxActive()) {
+      try {
+        await this.openWrapped(spawnCommand, baseEnv);
+        return;
+      } catch (err) {
+        // Wrap setup failed (e.g. ASRT could not produce an argv). FAIL CLOSED:
+        // do NOT silently fall back to an unconfined plain spawn — that would
+        // defeat the gate the operator turned on. Surface the error so connect
+        // fails and the server stays down until the sandbox is healthy.
+        this.wrappedThroughAsrt = false;
+        unmarkMcpServerWrapped(this.config.id);
+        throw err instanceof Error ? err : new Error(String(err));
+      }
     }
+
     this.process = spawn(spawnCommand.command, spawnCommand.args, {
       stdio: ["pipe", "pipe", "pipe"],
       // Windows: 콘솔 창 생성 방지 (창이 뜨면 stdout 파이프 동작이 달라짐)
       windowsHide: true,
-      env: {
-        // C2 fix: 최소 환경변수만 허용 — API 키 유출 방지 (Least Privilege)
-        PATH: process.env.PATH,
-        HOME: process.env.HOME ?? process.env.USERPROFILE, // Windows 호환
-        USERPROFILE: process.env.USERPROFILE,
-        APPDATA: process.env.APPDATA,
-        LANG: process.env.LANG,
-        NODE_ENV: process.env.NODE_ENV,
-        ...this.config.env, // 관리자 승인 환경변수만
-        ...(this.config.apiKey && this.config.apiKeyEnv
-          ? { [this.config.apiKeyEnv]: this.config.apiKey }
-          : {}),
-      },
+      env: baseEnv,
     });
 
     trackManagedChildProcess(this.process, { label: `mcp:${this.config.id}` });
     this.setupProcessHandlers();
+  }
+
+  /**
+   * Spawn the stdio worker WRAPPED by ASRT (worker-egress PR1). The filesystem
+   * jail confines writes to the host-derived per-server sandbox root and denies
+   * reads of the host secrets dir (closing the read-jail leak the prior review
+   * flagged). Network egress is governed by the SHARED boot config (strict union
+   * allow-list), not per command. Only invoked when {@link isAsrtSandboxActive}.
+   */
+  private async openWrapped(
+    spawnCommand: { command: string; args: string[] },
+    baseEnv: NodeJS.ProcessEnv,
+  ): Promise<void> {
+    // FAIL-CLOSED filesystem jail (deny-by-default A.a): the host populates
+    // `sandboxRoot` at connect time. If it is somehow still absent (e.g. a
+    // direct StdioTransport construction in a test), grant NO writable path at
+    // all — NEVER cwd / NEVER HOME / NEVER any pre-existing dir.
+    const sandboxRoot = this.config.sandboxRoot;
+    const allowWrite = sandboxRoot ? [sandboxRoot] : [];
+    // Runtime dirs the worker legitimately needs to READ to start (its own jail
+    // root + the system temp dir). HOME is NOT re-allowed for read.
+    const tmpDir = process.env.TMPDIR ?? process.env.TEMP ?? process.env.TMP;
+    const allowRead = [
+      ...(sandboxRoot ? [sandboxRoot] : []),
+      ...(tmpDir ? [tmpDir] : []),
+    ];
+    // denyRead takes precedence in ASRT — deny the host secrets dir so a wrapped
+    // worker can never read `~/.lvis/secrets/**` (encrypted API keys etc.).
+    const denyRead = [join(lvisHome(), "secrets")];
+
+    // Assemble the command string DEFENSIVELY: shell-quote the resolved binary
+    // and every arg so a path with spaces / metacharacters cannot mis-split or
+    // inject a second command. ASRT runs this string under a POSIX shell.
+    const cmdline = [spawnCommand.command, ...spawnCommand.args]
+      .map((part) => shellQuote(part))
+      .join(" ");
+
+    // binShell: mirror bash.ts — on win32 hand ASRT the ABSOLUTE Git Bash / sh
+    // path so the POSIX-quoted command string is interpreted by a POSIX shell on
+    // every platform (ASRT defaults to `cmd` on win32, which would mis-parse
+    // single-quoted cmdlines). On mac/linux leave it undefined (ASRT uses bash).
+    // FAIL CLOSED on win32: if Git Bash is not resolvable, throw rather than
+    // silently falling back to cmd.exe — cmd.exe mis-parses POSIX single-quoting
+    // and would run an incorrectly split command in an unconfined shell.
+    let binShell: string | undefined;
+    if (process.platform === "win32") {
+      let resolvedShell: string | undefined;
+      try {
+        const candidate = resolveShell().cmd;
+        if (/^[A-Za-z]:[\\/]/.test(candidate)) resolvedShell = candidate;
+      } catch {
+        // resolveShell() threw — fall through to fail-closed error below.
+      }
+      if (resolvedShell === undefined) {
+        throw new Error(
+          "[mcp-client] ASRT-wrapped MCP requires Git Bash (or a POSIX shell) on Windows — " +
+            "cmd.exe cannot interpret the POSIX-single-quoted command string safely. " +
+            "Install Git for Windows and ensure git-bash.exe is resolvable.",
+        );
+      }
+      binShell = resolvedShell;
+    }
+
+    const { argv, env } = await wrapWorkerCommand(cmdline, {
+      filesystem: { allowWrite, allowRead, denyRead },
+      ...(binShell !== undefined ? { binShell } : {}),
+    });
+
+    const [cmd, ...args] = argv;
+    if (cmd === undefined) {
+      throw new Error("[mcp-client] ASRT returned an empty argv for the MCP worker wrap");
+    }
+
+    this.wrappedThroughAsrt = true;
+    markMcpServerWrapped(this.config.id);
+
+    this.process = spawn(cmd, args, {
+      // stdin pipe MUST stay writable for JSON-RPC Content-Length framing.
+      stdio: ["pipe", "pipe", "pipe"],
+      shell: false,
+      windowsHide: true,
+      env: this.buildWrappedStdioEnv(baseEnv, env),
+    });
+
+    trackManagedChildProcess(this.process, { label: `mcp:${this.config.id}:asrt` });
+    this.setupProcessHandlers();
+  }
+
+  /**
+   * Compose the WRAPPED worker's env per platform (worker-egress PR1, the 3b
+   * cross-platform gotcha):
+   *   - mac/linux: ASRT bakes the proxy into the command string and returns
+   *     `env === process.env`; buildSandboxedChildEnv contributes only the
+   *     allow-listed proxy/CA keys ASRT actually CHANGED (none extra here), so we
+   *     keep the existing minimal/secret-stripped base env unchanged.
+   *   - win32: ASRT returns a proxy-CARRYING env (srt-win forwards the proxy
+   *     vars verbatim); buildSandboxedChildEnv extracts ONLY those allow-listed
+   *     proxy/CA keys so the Windows proxy set propagates while host secrets
+   *     stay stripped.
+   * In both cases the per-server base env (PATH/HOME/... + approved config.env +
+   * apiKey) is preserved and the allow-listed ASRT proxy keys are merged on top.
+   */
+  private buildWrappedStdioEnv(
+    baseEnv: NodeJS.ProcessEnv,
+    wrappedEnv: NodeJS.ProcessEnv,
+  ): NodeJS.ProcessEnv {
+    // buildSandboxedChildEnv (safe-env.ts) returns a safe-whitelist baseline PLUS
+    // ONLY the ASRT proxy/CA/SANDBOX_RUNTIME keys ASRT changed relative to
+    // process.env. The keys that are present in that composed env but NOT in the
+    // safe baseline are exactly the ASRT-injected proxy overlay — none on
+    // mac/linux (proxy baked into the command string), the proxy set on win32
+    // (srt-win forwards it via env). Overlay that proxy set onto our per-server
+    // base env so the worker keeps its approved config.env + apiKey AND egress.
+    const asrtComposed = buildSandboxedChildEnv(wrappedEnv);
+    const safeBaseline = buildSandboxedChildEnv(process.env);
+    const proxyOverlay: Record<string, string> = {};
+    for (const [key, value] of Object.entries(asrtComposed)) {
+      if (value === undefined) continue;
+      if (safeBaseline[key] === value) continue; // part of the static baseline, not an ASRT injection
+      proxyOverlay[key] = value;
+    }
+    return { ...baseEnv, ...proxyOverlay };
+  }
+
+  /**
+   * Release the per-command ASRT state exactly ONCE per wrapped worker lifetime,
+   * regardless of how the child process ends (explicit close(), unexpected crash,
+   * OS kill, spawn error). Idempotency is guaranteed by the `asrtCleanupRan`
+   * flag: whoever fires first (the process 'exit'/'error' handler OR close())
+   * runs the cleanup; the second caller is a no-op.
+   *
+   * Consequences of running this:
+   *   1. Drops the no-leak reviewer marker (`unmarkMcpServerWrapped`) so a later
+   *      reconnect that takes the plain-spawn path cannot inherit a stale `asrt`
+   *      report — exactly the leak class #1359 targeted.
+   *   2. Runs `cleanupAsrtSandboxAfterCommand()` — decrements the ASRT
+   *      activeSandboxCount ref-counter and tears down Linux bwrap mount artifacts.
+   */
+  private runAsrtCleanupOnce(): void {
+    if (!this.wrappedThroughAsrt || this.asrtCleanupRan) return;
+    this.asrtCleanupRan = true;
+    this.wrappedThroughAsrt = false;
+    unmarkMcpServerWrapped(this.config.id);
+    void cleanupAsrtSandboxAfterCommand();
   }
 
   async send(message: JsonRpcMessage): Promise<void> {
@@ -1104,6 +1294,11 @@ class StdioTransport implements McpTransport {
 
   async close(): Promise<void> {
     this.closedExternally = true;
+    // worker-egress PR1: release the per-command ASRT state via the idempotent
+    // one-shot helper. This is the EXPLICIT-CLOSE path; the unexpected-exit path
+    // (process 'exit'/'error' handlers in setupProcessHandlers) calls the same
+    // helper. Whichever fires first wins; the second is a no-op.
+    this.runAsrtCleanupOnce();
     // Capture the process reference BEFORE nulling `this.process` so the
     // SIGKILL fallback timer can still reach it. Without this, `close()` used
     // to null the field synchronously and the 3-second timer would dereference
@@ -1153,6 +1348,10 @@ class StdioTransport implements McpTransport {
 
     this.process.on("exit", (code, signal) => {
       log.warn(`${this.config.id} 프로세스 종료: code=${code}, signal=${signal}`);
+      // worker-egress PR1 MAJOR fix: fire ASRT cleanup on ANY child termination,
+      // including unexpected crashes/kills. The idempotent one-shot helper ensures
+      // this and the explicit close() path do not double-run the cleanup.
+      this.runAsrtCleanupOnce();
       if (!this.closedExternally) {
         this.closeHandler?.(t("be_mcpClient.processExitedUnexpectedly"));
       }
@@ -1160,6 +1359,8 @@ class StdioTransport implements McpTransport {
 
     this.process.on("error", (err) => {
       log.error(`${this.config.id} 프로세스 오류: %s`, err.message);
+      // Same idempotent cleanup for the error path (spawn failure, broken pipe).
+      this.runAsrtCleanupOnce();
       this.closeHandler?.(t("be_mcpClient.processError", { message: err.message }));
     });
   }
