@@ -661,11 +661,30 @@ describe("asrt-sandbox — sensitive read deny-list (host-secret hardening)", ()
     expect(paths).toContain(join(home, ".ssh"));
     expect(paths).toContain(join(home, ".aws"));
     expect(paths).toContain(join(home, ".config", "gcloud"));
+    expect(paths).toContain(join(home, ".config", "gh"));
+    expect(paths).toContain(join(home, ".config", "git"));
     expect(paths).toContain(join(home, ".kube", "config"));
     expect(paths).toContain(join(home, ".gnupg"));
     expect(paths).toContain(join(home, ".npmrc"));
     expect(paths).toContain(join(home, ".netrc"));
+    expect(paths).toContain(join(home, ".git-credentials"));
     expect(paths).toContain(join(home, ".docker", "config.json"));
+
+    // LVIS ~/.lvis permission / auth-partition namespaces.
+    expect(paths).toContain(join(FAKE_LVIS_HOME, "permissions"));
+    expect(paths).toContain(join(FAKE_LVIS_HOME, "permissions.json"));
+    expect(paths).toContain(join(FAKE_LVIS_HOME, "policy.json"));
+    expect(paths).toContain(join(FAKE_LVIS_HOME, "plugins", "auth-partitions.json"));
+
+    // Electron userData dir (deny whole dir — covers OAuth session cookies/tokens,
+    // Cookies SQLite, Local/Session Storage, lvis-secrets.json, etc.).
+    const expectedUserData =
+      process.platform === "darwin"
+        ? join(home, "Library", "Application Support", "LVIS")
+        : process.platform === "win32"
+          ? join(home, "AppData", "Roaming", "LVIS")
+          : join(home, ".config", "LVIS");
+    expect(paths).toContain(expectedUserData);
 
     // No duplicates (deduped, order-stable).
     expect(new Set(paths).size).toBe(paths.length);
@@ -679,7 +698,8 @@ describe("asrt-sandbox — sensitive read deny-list (host-secret hardening)", ()
     expect(paths).not.toContain(home);
     // A clearly-legit subpath (not a credential store) must NOT be denied.
     expect(paths).not.toContain(join(home, ".cargo"));
-    expect(paths).not.toContain(join(home, ".config")); // only ~/.config/gcloud is denied
+    // ~/.config wholesale must never be denied — only specific subdirs.
+    expect(paths).not.toContain(join(home, ".config"));
   });
 
   it("buildSandboxConfig unions the sensitive deny-list into filesystem.denyRead", () => {
