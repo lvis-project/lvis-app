@@ -24,7 +24,10 @@ import type {
   PermissionReviewerSettings,
   PermissionRule,
 } from "../types.js";
-import type { SandboxCapabilityInfo } from "../../../shared/sandbox-capability-info.js";
+import type {
+  SandboxCapabilityInfo,
+  SandboxWindowsStatusInfo,
+} from "../../../shared/sandbox-capability-info.js";
 import { PERMISSION_REVIEWER_FRAMEWORK } from "../../../shared/permission-reviewer-framework.js";
 import { AuditPanel } from "../components/permissions/AuditPanel.js";
 import { SettingsPageHeader } from "../components/SettingsPageHeader.js";
@@ -130,6 +133,14 @@ export function PermissionsTab() {
   const [sandboxCapability, setSandboxCapability] = useState<SandboxCapabilityInfo | null>(null);
   const [sandboxEnabled, setSandboxEnabled] = useState(false);
   const [sandboxBusy, setSandboxBusy] = useState(false);
+  // Windows srt-win consent flow. `windowsStatus` holds the latest readiness
+  // snapshot once the user opts in on win32; the consent panel renders off it.
+  // `windowsInstallBusy` disables the "Install now" button while the UAC prompt
+  // is in flight. `windowsInstallCancelled` shows the "Install cancelled" banner
+  // after a UAC dismissal.
+  const [windowsStatus, setWindowsStatus] = useState<SandboxWindowsStatusInfo | null>(null);
+  const [windowsInstallBusy, setWindowsInstallBusy] = useState(false);
+  const [windowsInstallCancelled, setWindowsInstallCancelled] = useState(false);
 
   // ── 초기 fetch (탭 진입 시) ───────────────────────
   const fetchAll = useCallback(async () => {
@@ -160,7 +171,15 @@ export function PermissionsTab() {
       setDirectories(dirRes.ok && dirRes.verb === "list" ? dirRes.userAdditions : []);
       setReviewer(reviewerRes.settings);
       setSandboxCapability(sandboxRes);
-      setSandboxEnabled(settingsRes.features?.osToolSandbox ?? false);
+      const osSandboxOn = settingsRes.features?.osToolSandbox ?? false;
+      setSandboxEnabled(osSandboxOn);
+      // On win32 with the setting already ON, surface the consent/relogin state
+      // on tab entry so the panel persists across navigations until ready.
+      if (sandboxRes.platform === "win32" && osSandboxOn) {
+        setWindowsStatus(await window.lvis.permission.sandboxWindowsStatus());
+      } else {
+        setWindowsStatus(null);
+      }
     } catch (e) {
       setError((e as Error).message ?? t("permissionsTab.errorLoadFailed"));
     } finally {
@@ -326,6 +345,8 @@ export function PermissionsTab() {
     const next = !sandboxEnabled;
     setSandboxBusy(true);
     setSandboxEnabled(next);
+    // Clear any stale "Install cancelled" banner whenever the toggle moves.
+    setWindowsInstallCancelled(false);
     try {
       const res = await getApi().updateSettings({ features: { osToolSandbox: next } });
       if (isIpcErrorResult(res)) {
@@ -336,11 +357,52 @@ export function PermissionsTab() {
       // Re-read capability so the activation note reflects the new state.
       const capability = await window.lvis.permission.sandboxCapability();
       setSandboxCapability(capability);
+      // Windows: enabling the setting alone does NOT confine anything — srt-win
+      // needs a one-time admin install + relogin. When the user flips the toggle
+      // ON on win32, fetch the readiness snapshot so the consent panel can guide
+      // the (explicit, non-auto) install. Turning OFF clears the panel.
+      if (capability.platform === "win32") {
+        if (next) {
+          const status = await window.lvis.permission.sandboxWindowsStatus();
+          setWindowsStatus(status);
+        } else {
+          setWindowsStatus(null);
+        }
+      }
     } catch (e) {
       setSandboxEnabled(!next);
       showBanner("error", t("permissionsTab.osSandboxToggleError", { message: (e as Error).message }));
     } finally {
       setSandboxBusy(false);
+    }
+  };
+
+  // The ONLY user-consented privilege-escalation trigger. Invoked from an
+  // explicit "Install now" click inside the win32 consent panel — never
+  // automatically. Triggers ASRT's single self-elevating UAC prompt.
+  const handleWindowsInstall = async () => {
+    if (windowsInstallBusy) return;
+    setWindowsInstallBusy(true);
+    setWindowsInstallCancelled(false);
+    try {
+      const result = await window.lvis.permission.sandboxWindowsInstall();
+      if (result.cancelled) {
+        // UAC dismissed — not an error. Revert the toggle + setting and show the
+        // cancelled banner. The user can re-opt-in to re-attempt.
+        setWindowsInstallCancelled(true);
+        setSandboxEnabled(false);
+        setWindowsStatus(null);
+        await getApi().updateSettings({ features: { osToolSandbox: false } });
+        return;
+      }
+      // Install ran — refresh the readiness snapshot so the panel advances to
+      // the relogin-pending state (verbatim instructions still drive the copy).
+      const status = await window.lvis.permission.sandboxWindowsStatus();
+      setWindowsStatus(status);
+    } catch (e) {
+      showBanner("error", t("permissionsTab.osSandboxWindowsInstallError", { message: (e as Error).message }));
+    } finally {
+      setWindowsInstallBusy(false);
     }
   };
 
@@ -647,7 +709,9 @@ export function PermissionsTab() {
                   ? t("permissionsTab.osSandboxCapabilityMac")
                   : sandboxCapability.platform === "linux"
                     ? t("permissionsTab.osSandboxCapabilityLinux")
-                    : t("permissionsTab.osSandboxCapabilityOther")}
+                    : sandboxCapability.platform === "win32"
+                      ? t("permissionsTab.osSandboxCapabilityWindows")
+                      : t("permissionsTab.osSandboxCapabilityOther")}
               </p>
               <p className="italic">{t("permissionsTab.osSandboxRestartNote")}</p>
               {sandboxCapability.reason ? (
@@ -656,6 +720,55 @@ export function PermissionsTab() {
                 </p>
               ) : null}
             </div>
+          ) : null}
+          {/* ── Windows srt-win consent flow ── */}
+          {windowsInstallCancelled ? (
+            <p
+              data-testid="os-sandbox-windows-install-cancelled"
+              className="rounded-md border border-warning/(--opacity-medium) bg-warning/(--opacity-soft) px-3 py-2 text-[11px] text-warning"
+            >
+              {t("permissionsTab.osSandboxWindowsInstallCancelled")}
+            </p>
+          ) : null}
+          {sandboxEnabled && windowsStatus?.applicable && !windowsStatus.ready ? (
+            windowsStatus.groupState === "created-not-on-token" &&
+            windowsStatus.wfpState === "installed" ? (
+              // Install ran; only the relogin remains. Show the verbatim ASRT
+              // instruction text + a pending-relogin visual.
+              <div
+                data-testid="os-sandbox-windows-relogin"
+                className="space-y-2 rounded-md border border-info/(--opacity-medium) bg-info/(--opacity-soft) px-3 py-2 text-[11px] text-info"
+              >
+                <p className="font-medium">{t("permissionsTab.osSandboxWindowsReloginHeading")}</p>
+                <p className="whitespace-pre-line font-mono text-foreground">{windowsStatus.instructions}</p>
+                <p className="italic">{t("permissionsTab.osSandboxWindowsReloginPending")}</p>
+              </div>
+            ) : (
+              // Not yet installed. EXPLICIT consent: warning card + an "Install
+              // now" button. No auto-UAC — the user must click.
+              <div
+                data-testid="os-sandbox-windows-consent"
+                className="space-y-2 rounded-md border border-warning/(--opacity-medium) bg-warning/(--opacity-soft) px-3 py-2 text-[11px] text-warning"
+              >
+                <p className="font-medium">{t("permissionsTab.osSandboxWindowsConsentHeading")}</p>
+                <p>{t("permissionsTab.osSandboxWindowsConsentBody")}</p>
+                {windowsStatus.instructions ? (
+                  <p className="whitespace-pre-line font-mono text-foreground">{windowsStatus.instructions}</p>
+                ) : null}
+                <Button
+                  type="button"
+                  size="sm"
+                  variant="default"
+                  data-testid="os-sandbox-windows-install"
+                  disabled={windowsInstallBusy}
+                  onClick={() => void handleWindowsInstall()}
+                >
+                  {windowsInstallBusy
+                    ? t("permissionsTab.osSandboxWindowsInstalling")
+                    : t("permissionsTab.osSandboxWindowsInstallButton")}
+                </Button>
+              </div>
+            )
           ) : null}
         </SettingsSection>
 

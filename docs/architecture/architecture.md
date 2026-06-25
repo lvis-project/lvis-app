@@ -1766,15 +1766,35 @@ Layer 0–8 의 permission policy 는 *어떤 도구 호출을 허용/거부* �
   opt-in 제거). srt-win.exe 는 **NETWORK-only** 샌드박스다 — WFP +
   restricted-token job 으로 egress 만 격리하고 **filesystem/process 격리는
   없다** (ASRT 0.0.59). srt-win.exe 는 **번들** (asarUnpack vendor/**) 이라
-  다운로드가 없으나, 1회 UAC 설치 + 재로그인 (discriminator group 이 토큰에
-  enable + WFP filter 설치) 이 필요하며 `checkAsrtDependencies()` 가 그때까지
-  errors 로 보고한다. **Windows 는 deps-missing 시 hard-throw 하지 않는다** —
-  throw 는 설치/재로그인 전 first-run 을 brick 하기 때문. 대신
-  `isAsrtSandboxActive()` 를 FALSE 로 유지(호스트 셸 도구는 비격리 plain spawn)
-  하고 "Windows sandbox requested but not installed/relogged — tools run with NO
-  OS isolation until setup completes" loud 신호를 남긴다 (설치 UX 는 후속 PR).
-  win32 가 ready 면 ASRT 를 정상 초기화하고 **network-only capability**
-  (`confines.filesystem === false`) 를 발행한다.
+  **다운로드가 없다** — 활성화는 *오직* 1회 UAC 설치 + 재로그인만 트리거한다.
+  1회 UAC 설치 + 재로그인 (discriminator group 이 토큰에 enable + WFP filter
+  설치) 이 필요하며 `checkAsrtDependencies()` 가 그때까지 errors 로 보고한다.
+  **Windows 는 deps-missing 시 hard-throw 하지 않는다** — throw 는 설치/재로그인
+  전 first-run 을 brick 하기 때문. 대신 `isAsrtSandboxActive()` 를 FALSE 로
+  유지(호스트 셸 도구는 비격리 plain spawn)하고 "Windows sandbox requested but
+  not installed/relogged — tools run with NO OS isolation until setup completes"
+  loud 신호를 남긴다. win32 가 ready 면 ASRT 를 정상 초기화하고 **network-only
+  capability** (`confines.filesystem === false`) 를 발행한다.
+- **Windows 설치/재로그인 consent UX**: Settings → 권한 의 "OS 도구 샌드박스"
+  토글을 win32 에서 ON 으로 하면 `sandboxWindowsStatus` IPC (read-only —
+  `getWindowsGroupStatus` + `getWindowsWfpStatus`, UAC 없음) 로 readiness 를
+  조회한다. `ready === false` 면 명시적 **consent 패널** (경고 카드 +
+  verbatim `windowsInstallInstructions` 텍스트 + "Install now" 버튼) 을
+  렌더한다. **auto-UAC 금지** — 버튼 클릭만이 `sandboxWindowsInstall` IPC
+  (MUTATING, sender-frame-guarded + user-keyboard intent — peer mutating
+  handler 인 `addRule` 와 동일 가드) 를 호출하고, 이것이 ASRT
+  `installWindowsSandbox({ proxyPortRange: DEFAULT_WINDOWS_PROXY_PORT_RANGE })`
+  의 **단일 self-elevating UAC** 를 트리거하는 *유일한* privilege-escalation
+  진입점이다. UAC 거부 → `{cancelled:true}` (throw 아님) → 토글 revert +
+  "Install cancelled" 배너. 성공 → relogin 지시 상태 (verbatim instructions +
+  "pending relogin" 비주얼). 설치는 재로그인 전 네트워크를 끊지 않는다
+  (WFP filter-0 가 non-member 트래픽을 PERMIT). i18n: `permissionsTab.osSandboxWindows*`
+  (EN+KO).
+- **Settings-UI win32 capability reconcile**: `sandboxCapability` IPC 는 이전에
+  win32 → `available:false`/`kind:"none"` 을 보고해 boot 가 발행하는
+  network-only `asrt` capability 와 **divergence** 했다. 이제 win32 →
+  `available:true`/`kind:"partial"` (Windows 는 network egress 를 격리할 수
+  있다) + network-only `confines` 를 보고해 toggle UI 와 boot SOT 가 일치한다.
 - **Linux deps-missing**: gate ON 인데 `bwrap`/`socat`/`ripgrep` 가 없으면
   no-fallback 룰에 따라 boot 를 fail-closed 로 abort 한다 (unsandboxed plain
   spawn 으로 silently drop 하지 않는다). mac/linux 만 hard-throw; Windows 는
@@ -1803,6 +1823,29 @@ Layer 0–8 의 permission policy 는 *어떤 도구 호출을 허용/거부* �
   ON 이 비격리 plugin/MCP 도구의 승인 게이트를 *완화* 하던 역효과를 차단한다.
   동일 resolver 가 verdict-cache scope 와 audit 에도 쓰여 substrate 간 verdict
   교차 재사용을 막는다.
+- **Asymmetric reviewer relaxation (network relaxes, FS 안 함)**: win32 의
+  network-only `confines` 가 reviewer 의 `sandboxRelaxesCategory` 를 *비대칭*
+  으로 작동시킨다 — `network` 카테고리는 relax (egress 가 실제 격리되므로) 하지만
+  `write`/`shell`/`read`/`meta` (filesystem-bearing) 는 relax 안 한다 (Windows
+  에 FS jail 이 없으므로). ToolApprovalDialog 의 보안-격리 라벨도 동일하게 정직
+  하다 (PR2 finding b): 이전에는 confines-blind `isWeakSandbox` 가 win32 의
+  write/shell 도구에도 "OS 격리 활성" 을 표시했는데, 이제 `confines.filesystem`
+  이 false 면 per-dimension 라벨 ("네트워크만 격리 [net:✓ fs:✗ proc:✗]") 을
+  표시한다 (display-only — relaxation control 자체는 미변경).
+- **pwsh 7 binShell (PR2 finding c)**: win32 의 `resolvePowerShellExecutable()`
+  은 PowerShell 7 (`pwsh.exe`) 이 PATH 에 있으면 그것을, 없으면 Windows
+  PowerShell 5.1 (`powershell.exe`) 을 선택한다. 샌드박스 spawn 경로는 resolve
+  된 flavor 에 맞춰 ASRT 에 `binShell='pwsh'|'powershell'` 을 넘겨 sandboxed ==
+  unsandboxed shell flavor 를 보장한다 (이전엔 항상 `'powershell'` 고정이라
+  pwsh-7 호스트가 샌드박스 ON 시 5.1 로 silently downgrade 됐다).
+- **Per-platform packaging prune**: 최상위 `asarUnpack: vendor/**` glob 은
+  유지하되 per-target `files` negation 으로 각 플랫폼이 실행하지 않는 바이너리를
+  제거한다 — mac → `srt-win/**` + `seccomp/**` 제외, linux → `srt-win/**`
+  제외, win → `seccomp/**` 제외 (각 플랫폼은 자신이 실행하는 바이너리만 유지).
+  `scripts/electron-after-pack.cjs` 의 `assertSandboxVendorBinaries` 가 packed
+  artifact 에서 KEPT 바이너리 present+executable, PRUNED 바이너리 absent 를
+  hard-assert 하므로 prune drift 가 빌드를 깬다. 런타임 resolver
+  (`getSrtWinPath()` 등) 는 미변경.
 - **알려진 follow-up**: long-lived worker(ep-api / local-indexer 의 Python
   워커)의 egress 는 아직 이 shared floor 로 완전히 수렴되지 않은 문서화된
   후속 작업이다 (§9 plugin egress 참조).
