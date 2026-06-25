@@ -1283,19 +1283,29 @@ export async function bootstrap(
   // runtime channel to enable/disable it after boot, so nothing can inject an
   // untrusted sandbox config mid-run.
   //
-  // Platform policy:
-  //   - macOS / Linux: initialize ASRT when the gate is on.
-  //   - Windows: FAIL-CLOSED. ASRT's `isSupportedPlatform()` returns true on
-  //     win32, but the Windows path (srt-win.exe) is network-only (no fs
-  //     isolation) + needs UAC install + re-login — a half-sandbox we do not
-  //     adopt. We do NOT initialize ASRT on win32 unless a SEPARATE explicit
-  //     opt-in (`LVIS_SANDBOX_WINDOWS=1`) is set, which defaults off. Current
-  //     win32 behavior is isolation=none, so leaving it off is not a regression.
-  //   - Linux: if the gate is on but `checkDependencies()` reports errors
-  //     (bwrap / socat / ripgrep missing) we FAIL-CLOSED — throw to abort boot
-  //     rather than silently dropping to isolation=none (no-fallback rule). The
-  //     operator must install the deps or turn the gate off; we never honor the
-  //     sandbox opt-in by running tools unsandboxed.
+  // Platform policy (ALL platforms share the SAME gate now — there is no
+  // separate Windows opt-in):
+  //   - macOS / Linux: initialize ASRT when the gate is on and deps are present.
+  //     If the gate is on but `checkDependencies()` reports errors (Linux: bwrap
+  //     / socat / ripgrep missing) we FAIL-CLOSED — THROW to abort boot rather
+  //     than silently dropping to isolation=none (no-fallback rule). The
+  //     operator must install the deps or turn the gate off.
+  //   - Windows (srt-win.exe): NETWORK-only sandbox (WFP + restricted-token; NO
+  //     filesystem jail in ASRT 0.0.59). srt-win is BUNDLED (asarUnpack vendor/**),
+  //     so there is no download — but it needs a one-time UAC install + a
+  //     re-login before its discriminator group is enabled in the token, which
+  //     `checkAsrtDependencies()` → ASRT `checkWindowsDependencies` reports as
+  //     errors until the group is 'ready' AND the WFP filter set is installed.
+  //     Windows does NOT hard-throw on deps-missing: a throw would BRICK the
+  //     first run (the user cannot complete the install/relogin before boot even
+  //     reaches the prompt). Instead we keep `isAsrtSandboxActive()` FALSE (host
+  //     shell tools run UNSANDBOXED — isolation=none) and emit a LOUD signal so
+  //     the gap is visible. The install/relogin UX is a separate follow-up;
+  //     until it lands, an opted-in Windows host with the sandbox not yet
+  //     installed runs tools with NO OS isolation, by design, with this warning.
+  //     When win32 IS ready → initialize ASRT normally and publish a
+  //     NETWORK-ONLY capability (confines.filesystem === false), which is what
+  //     makes the reviewer's per-category relaxation bite on Windows.
   {
     const {
       initializeAsrtSandbox,
@@ -1315,27 +1325,38 @@ export async function bootstrap(
       process.env["LVIS_SANDBOX_ENABLED"] === "1";
 
     if (sandboxOptIn) {
-      // Windows fail-closed behind a separate explicit opt-in (defaults off).
-      const windowsOptIn = process.env["LVIS_SANDBOX_WINDOWS"] === "1";
-      const platformBlocked = process.platform === "win32" && !windowsOptIn;
-
-      if (platformBlocked) {
-        log.warn(
-          "boot: OS tool sandbox requested but Windows is fail-closed (srt-win is a network-only half-sandbox). " +
-            "Tools run with isolation=none. Set LVIS_SANDBOX_WINDOWS=1 to force-enable (not recommended).",
-        );
-      } else {
-        // Linux: refuse to run unsandboxed when the gate is on but deps are
-        // missing. macOS/Windows checkDependencies has no hard errors here.
-        const deps = await checkAsrtDependencies();
-        if (deps.errors.length > 0) {
-          // FAIL-CLOSED (PR #1356 architect finding). The operator explicitly
-          // requested the sandbox; ASRT cannot run because bwrap/socat/ripgrep
-          // are missing. The no-fallback rule forbids silently dropping to an
-          // unsandboxed plain spawn — that would honor the opt-in name while
-          // delivering isolation=none. Throw so boot aborts loudly: the
-          // operator must install the deps or turn the gate off, NOT discover
-          // later that "sandboxed" tools ran with no sandbox.
+      const deps = await checkAsrtDependencies();
+      if (deps.errors.length > 0) {
+        if (process.platform === "win32") {
+          // WINDOWS NOT-READY: do NOT hard-throw. srt-win needs a one-time UAC
+          // install + re-login (group must be enabled in the token + WFP filters
+          // installed) that the user cannot complete before boot reaches this
+          // point — a throw would brick first-run. So we keep the sandbox
+          // INACTIVE (isAsrtSandboxActive() stays false → host shell tools run
+          // via the plain spawn path, isolation=none) and never publish a
+          // capability, so the reviewer/UI SOT honestly reports kind="none".
+          // This is the ONLY platform where an opted-in gate does not result in
+          // either an active sandbox or an aborted boot — Windows trades the
+          // hard fail-closed for a non-bricking loud signal until the install
+          // UX (a separate follow-up) lands. Loud on purpose so the gap is
+          // never silent.
+          log.warn(
+            "boot: OS tool sandbox is ON but the Windows network sandbox (srt-win) is NOT installed/relogged — " +
+              "tools run with NO OS isolation until setup completes. " +
+              "Complete the one-time install + re-login (the in-app setup flow is a follow-up). " +
+              "Windows is NETWORK-ONLY (no filesystem jail) even once installed. " +
+              `Detail: ${deps.errors.join("; ")}`,
+          );
+        } else {
+          // mac/linux FAIL-CLOSED (PR #1356 architect finding). The operator
+          // explicitly requested the sandbox; ASRT cannot run because
+          // bwrap/socat/ripgrep are missing. The no-fallback rule forbids
+          // silently dropping to an unsandboxed plain spawn — that would honor
+          // the opt-in name while delivering isolation=none. Throw so boot
+          // aborts loudly: the operator must install the deps or turn the gate
+          // off, NOT discover later that "sandboxed" tools ran with no sandbox.
+          // (Windows is excluded above — a throw there would brick first-run
+          // before the install/relogin can happen.)
           const message =
             "boot: OS tool sandbox is ON but its dependencies are missing — refusing to start. " +
             "Install the sandbox dependencies (Linux: bwrap, socat, ripgrep) or disable the sandbox " +
@@ -1343,7 +1364,8 @@ export async function bootstrap(
             `Missing: ${deps.errors.join("; ")}`;
           log.error(message);
           throw new Error(message);
-        } else {
+        }
+      } else {
           if (deps.warnings.length > 0) {
             log.warn("boot: ASRT dependency warnings: %s", deps.warnings.join("; "));
           }
@@ -1396,35 +1418,54 @@ export async function bootstrap(
             strictAllowlist: true,
           });
           // Publish the active capability to the SOT now that ASRT is
-          // genuinely initialized (gate ON, deps present, not Windows-blocked).
-          // detectSandboxCapability + the reviewer/UI consumers read this; the
-          // reviewer's `kind === 'asrt'` → strong relaxation becomes reachable
-          // ONLY here. When the gate is OFF — or on the Windows fail-closed /
-          // Linux deps-missing paths above where ASRT is NOT initialized — we
-          // never call this, so the SOT stays kind="none" (isolation=none),
-          // matching reality. ASRT confines fs + process + network on both
-          // macOS (Seatbelt) and Linux (bwrap); the per-wrap FS jail + the
-          // shared strict-union network floor are both enforced.
+          // genuinely initialized (gate ON, deps present). detectSandboxCapability
+          // + the reviewer/UI consumers read this; the reviewer's per-category
+          // relaxation (sandboxRelaxesCategory) reads the `confines` we publish
+          // here. When the gate is OFF — or on the Windows-not-ready / mac-linux
+          // deps-missing paths above where ASRT is NOT initialized — we never
+          // call this, so the SOT stays kind="none" (isolation=none), matching
+          // reality.
+          //
+          // Per-platform confinement (HONEST, not hardcoded full):
+          //   - macOS (Seatbelt) / Linux (bwrap): full — fs + process + network.
+          //   - Windows (srt-win): NETWORK-ONLY — confines.filesystem === false.
+          //     This PARTIAL-confine capability is what exercises the reviewer's
+          //     sandboxRelaxesCategory live: it relaxes `network` but NOT
+          //     `write`/`shell`/`read` (filesystem-bearing) categories.
+          // `sandboxConfinementForPlatform(platform, "full")` returns the
+          // network-only shape for win32 and the full shape for mac/linux.
           const asrtBackend =
-            process.platform === "darwin" ? "Seatbelt" : "bwrap";
+            process.platform === "darwin"
+              ? "Seatbelt"
+              : process.platform === "win32"
+                ? "srt-win"
+                : "bwrap";
+          const confines = sandboxConfinementForPlatform(
+            process.platform,
+            "full",
+          );
+          const reason =
+            process.platform === "win32"
+              ? `ASRT (${asrtBackend}) active — network egress contained, NO filesystem jail`
+              : `ASRT (${asrtBackend}) active — fs+process+network contained`;
           setActiveSandboxCapability({
             kind: "asrt",
             confidence: "verified",
             platform: process.platform,
-            reason: `ASRT (${asrtBackend}) active — fs+process+network contained`,
-            // Machine-checkable confinement for the host-shell substrate. ASRT
-            // confines fs + process + network egress on macOS (Seatbelt) and
-            // Linux (bwrap); both are full per sandboxConfinementForPlatform.
-            confines: sandboxConfinementForPlatform(process.platform, "full"),
+            reason,
+            // Machine-checkable confinement for the host-shell substrate. Full
+            // on mac/linux; network-only on Windows (srt-win has no FS jail in
+            // ASRT 0.0.59) — see sandboxConfinementForPlatform.
+            confines,
           });
           log.info(
-            "boot: ASRT OS tool sandbox initialized (%s, strict allow-list enforced, %d union domains across %d plugins)",
+            "boot: ASRT OS tool sandbox initialized (%s, %s, strict allow-list enforced, %d union domains across %d plugins)",
             process.platform,
+            asrtBackend,
             unionAllowedDomains.length,
             manifestAllowLists.length,
           );
         }
-      }
     } else if (process.platform === "darwin") {
       log.info(
         "boot: OS tool sandbox gated off (enable via Settings → 권한 'OS 도구 샌드박스' or LVIS_SANDBOX_ENABLED=1)",
