@@ -39,6 +39,10 @@ import {
   toExplicitFiles,
   stampWindowsFsDeny,
   restoreWindowsFsDeny,
+  recoverWindowsFsStamps,
+  resolveSrtWinPath,
+  assertSrtWinAclContract,
+  __resetAclContractCheckForTest,
 } from "../windows-fs-jail.js";
 
 afterEach(() => {
@@ -131,5 +135,50 @@ describe("restoreWindowsFsDeny", () => {
   it("FAILS CLOSED on unparseable --json output", () => {
     spawnSyncMock.mockReturnValue({ status: 0, signal: null, stdout: "not-json", stderr: "" });
     expect(() => restoreWindowsFsDeny(1, "g")).toThrow(/left 1 path\(s\) stamped.*unparseable/s);
+  });
+});
+
+describe("recoverWindowsFsStamps", () => {
+  it("invokes `acl recover --name <g> --json` (no --force by default)", () => {
+    spawnSyncMock.mockReturnValue({ status: 0, signal: null, stdout: "[]", stderr: "" });
+    recoverWindowsFsStamps("g");
+    const [, args] = spawnSyncMock.mock.calls[0]!;
+    expect(args).toEqual(["acl", "recover", "--name", "g", "--json"]);
+  });
+
+  it("splices --force BEFORE --name when force=true", () => {
+    spawnSyncMock.mockReturnValue({ status: 0, signal: null, stdout: "[]", stderr: "" });
+    recoverWindowsFsStamps("g", true);
+    const [, args] = spawnSyncMock.mock.calls[0]!;
+    expect(args).toEqual(["acl", "recover", "--force", "--name", "g", "--json"]);
+  });
+
+  it("FAILS CLOSED on a non-zero exit", () => {
+    spawnSyncMock.mockReturnValue({ status: 1, signal: null, stdout: "", stderr: "db poison" });
+    expect(() => recoverWindowsFsStamps("g")).toThrow(/acl recover failed.*db poison/s);
+  });
+});
+
+describe("resolveSrtWinPath / assertSrtWinAclContract", () => {
+  it("returns the SRT_WIN_PATH override verbatim", () => {
+    // process.env.SRT_WIN_PATH is set at the top of this file.
+    expect(resolveSrtWinPath()).toBe("C:\\srt-win.exe");
+  });
+
+  it("assertSrtWinAclContract passes for the installed (verified) ASRT version", () => {
+    __resetAclContractCheckForTest();
+    expect(() => assertSrtWinAclContract()).not.toThrow();
+  });
+});
+
+describe("injectHolderPid — option-region scope (security hardening)", () => {
+  it("ignores a discrete '--holder-pid' element AFTER '--' (never short-circuits the fence)", () => {
+    const decoy = ["exe", "exec", "--name", "g", "--", "cmd.exe", "--holder-pid", "999"];
+    const out = injectHolderPid(decoy, 7);
+    const sep = out.indexOf("--");
+    expect(out[sep - 2]).toBe("--holder-pid");
+    expect(out[sep - 1]).toBe("7");
+    // the attacker-region decoy after `--` is untouched
+    expect(out.slice(sep)).toEqual(["--", "cmd.exe", "--holder-pid", "999"]);
   });
 });
