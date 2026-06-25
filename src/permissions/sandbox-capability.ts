@@ -32,7 +32,7 @@
  */
 
 import { t } from "../i18n/index.js";
-import type { ToolSource } from "../tools/types.js";
+import type { ToolCategory, ToolSource } from "../tools/types.js";
 import type { SandboxConfinement } from "../shared/sandbox-capability-info.js";
 
 export type SandboxKind =
@@ -191,6 +191,17 @@ export function resolveReviewerSandboxCapability(
  *
  *   "executionSandbox=none (verified, darwin) — no OS sandbox configured for the host process"
  *
+ * When the capability declares {@link SandboxCapability.confines}, the
+ * per-dimension confinement is appended so the reviewer LLM sees an HONEST
+ * picture of what is (and is NOT) jailed — e.g. a Windows network-only ASRT
+ * confines egress but not the filesystem, and the LLM must not relax a
+ * filesystem-write risk on the strength of a network jail:
+ *
+ *   "executionSandbox=asrt (verified, win32) confines[net:✓ fs:✗ proc:✗] — …"
+ *
+ * The suffix is omitted when `confines` is absent (legacy/`none` capabilities)
+ * so the historical grep-stable strings are preserved.
+ *
  * Labels for extended kinds:
  *   partial  → "⚠ OS 격리 부분적"
  *   fs-only  → "ℹ 파일시스템만 격리 (landlock)"
@@ -210,9 +221,14 @@ export function formatSandboxCapabilityForPrompt(capability: SandboxCapability):
       }
     }
   })();
+  const confinesLabel = capability.confines
+    ? ` confines[net:${capability.confines.network ? "✓" : "✗"} ` +
+      `fs:${capability.confines.filesystem ? "✓" : "✗"} ` +
+      `proc:${capability.confines.process ? "✓" : "✗"}]`
+    : "";
   return (
-    `executionSandbox=${kindLabel} (${capability.confidence}, ${capability.platform}) ` +
-    `— ${capability.reason}`
+    `executionSandbox=${kindLabel} (${capability.confidence}, ${capability.platform})` +
+    `${confinesLabel} — ${capability.reason}`
   );
 }
 
@@ -234,4 +250,42 @@ export function isWeakSandbox(cap: SandboxCapability): boolean {
   if (cap.kind === "partial") return true;
   if (cap.confidence === "assumed") return true;
   return false;
+}
+
+/**
+ * Whether the reviewer may relax (allow an LLM downgrade of a rule-based
+ * MEDIUM/HIGH verdict to LOW) for a tool call of the given {@link ToolCategory}
+ * under this capability — per-CATEGORY, gated on the matching `confines`
+ * dimension.
+ *
+ * Why per-category (and not the binary {@link isWeakSandbox}):
+ *   {@link isWeakSandbox} is confines-BLIND — it returns "strong" for ANY
+ *   verified non-none ASRT capability, which is correct only while every ASRT
+ *   substrate is FULL-confine (mac/linux: {filesystem, process, network} all
+ *   true). A NETWORK-ONLY ASRT (Windows: confines.filesystem === false) is
+ *   genuinely strong for egress but provides NO filesystem jail — so the
+ *   reviewer must NOT relax a filesystem-WRITE risk on its strength. This gates
+ *   the relaxation on the dimension that actually covers the category:
+ *     - `network`                       → confines.network
+ *     - `write` / `shell` / `read` / `meta` (all filesystem-bearing effects)
+ *                                        → confines.filesystem
+ *
+ * Behaviour invariant (dormancy): a full-confine ASRT relaxes ALL categories,
+ * making this IDENTICAL to today's `isWeakSandbox(cap) === false` (relax all).
+ * The only capability the category gating bites is a PARTIAL-confine one, which
+ * no producer emits yet — so wiring this in is a no-op on mac/linux.
+ */
+export function sandboxRelaxesCategory(
+  cap: SandboxCapability,
+  category: ToolCategory,
+): boolean {
+  // none/partial/assumed never relax — unchanged from the binary gate.
+  if (isWeakSandbox(cap)) return false;
+  // LEGACY: a verified non-none capability WITHOUT a declared `confines` field
+  // keeps the old all-or-nothing behaviour, so existing fixtures and
+  // mac/linux-verified ASRT (published with full confines) are unaffected.
+  if (!cap.confines) return true;
+  if (category === "network") return cap.confines.network === true;
+  // write / shell / read / meta — all filesystem-bearing effects.
+  return cap.confines.filesystem === true;
 }

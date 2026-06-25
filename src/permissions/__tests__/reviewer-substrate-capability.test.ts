@@ -18,6 +18,7 @@ import {
   isWeakSandbox,
   resolveReviewerSandboxCapability,
   setActiveSandboxCapability,
+  type SandboxCapability,
 } from "../sandbox-capability.js";
 import {
   LlmRiskClassifier,
@@ -184,6 +185,108 @@ describe("substrate-aware capability — end-to-end reviewer prompt + downgrade 
       }),
     );
     // weak substrate → LLM LOW cannot pull the MEDIUM rule verdict down.
+    expect(verdict.level).toBe("medium");
+  });
+});
+
+describe("network-only asrt — per-category relaxation gating (Windows posture, dormant)", () => {
+  // A synthetic NETWORK-ONLY ASRT capability — confines egress but provides no
+  // filesystem jail. No producer emits this yet (Windows ASRT lands in a later
+  // PR), so these tests exercise the DORMANT category-gating path directly.
+  //
+  // Composition contract (design §401/§512): final = max(rule, llm); the LLM is
+  // escalate-only and can NEVER pull a verdict below the rule. The per-category
+  // guard therefore manifests as the explicit no-downgrade enforcement: for a
+  // category the sandbox does NOT relax (no matching confines dimension), an LLM
+  // LOW is rejected and the rule verdict is honoured. For a category the sandbox
+  // DOES relax (e.g. network egress is jailed), the guard does not fire and the
+  // max(rule, llm) composition applies — an LLM escalation is still honoured.
+  const networkOnlyAsrt = (): SandboxCapability => ({
+    kind: "asrt",
+    confidence: "verified",
+    platform: "win32",
+    reason: "ASRT (srt-win) active — network egress contained, no fs jail",
+    confines: { filesystem: false, process: false, network: true },
+  });
+
+  const llmProvider = (level: "low" | "high"): LlmReviewerProvider => ({
+    complete: vi.fn(async () => ({
+      text: `{"level":"${level}","reason":"llm opinion"}`,
+      tokensIn: 1,
+      tokensOut: 1,
+      costUsd: 0,
+    })),
+  });
+
+  it("guard FIRES for a shell-category rule-MEDIUM (no fs jail → LLM LOW cannot downgrade)", async () => {
+    const classifier = new LlmRiskClassifier(llmProvider("low"), "gpt-4o-mini");
+    const verdict = await classifier.classify(
+      ctx({
+        toolName: "bash",
+        source: "builtin",
+        category: "shell",
+        finalInput: { command: "make build" }, // rule → MEDIUM (shell unclassified)
+        sandboxCapability: networkOnlyAsrt(),
+        conversationContext: { recentUserMessage: "please build the project for me" },
+      }),
+    );
+    // confines.filesystem === false → sandboxRelaxesCategory('shell') === false
+    // → guard fires → MEDIUM rule verdict survives the LLM LOW.
+    expect(verdict.level).toBe("medium");
+  });
+
+  it("guard FIRES for a write-category rule-MEDIUM (no fs jail → LLM LOW cannot downgrade)", async () => {
+    const classifier = new LlmRiskClassifier(llmProvider("low"), "gpt-4o-mini");
+    const verdict = await classifier.classify(
+      ctx({
+        toolName: "write_file",
+        source: "builtin",
+        category: "write",
+        pathFields: ["path"],
+        // Deep inside an allowed dir → rule → MEDIUM ("write deep inside allowed").
+        finalInput: { path: "/Users/ken/work/nested/dir/output.txt" },
+        sandboxCapability: networkOnlyAsrt(),
+        conversationContext: { recentUserMessage: "please write the output file for me" },
+      }),
+    );
+    expect(verdict.level).toBe("medium");
+  });
+
+  it("relaxation IS allowed for the network category — guard does NOT fire, max(rule, llm) applies (LLM escalation honoured)", async () => {
+    // Network egress IS jailed → sandboxRelaxesCategory('network') === true →
+    // the no-downgrade guard does NOT short-circuit; the standard max(rule, llm)
+    // composition runs. An escalating LLM (HIGH) is still honoured.
+    const classifier = new LlmRiskClassifier(llmProvider("high"), "gpt-4o-mini");
+    const verdict = await classifier.classify(
+      ctx({
+        toolName: "http_request",
+        source: "builtin",
+        category: "network",
+        finalInput: { url: "http://localhost:8080/build" }, // rule → MEDIUM (localhost)
+        sandboxCapability: networkOnlyAsrt(),
+        conversationContext: { recentUserMessage: "please fetch the local build status for me" },
+      }),
+    );
+    expect(verdict.level).toBe("high");
+  });
+
+  it("network-category relaxation does NOT bleed into a write call on the SAME network-only cap (guard still fires for write)", async () => {
+    // Same capability, escalate-only LLM is irrelevant here: an LLM LOW on a
+    // write-category call must NOT relax (filesystem is not jailed) even though
+    // the same cap WOULD relax the network category — proves the gate is keyed
+    // on the call's category, not the capability alone.
+    const classifier = new LlmRiskClassifier(llmProvider("low"), "gpt-4o-mini");
+    const verdict = await classifier.classify(
+      ctx({
+        toolName: "write_file",
+        source: "builtin",
+        category: "write",
+        pathFields: ["path"],
+        finalInput: { path: "/Users/ken/work/nested/dir/output.txt" }, // rule → MEDIUM
+        sandboxCapability: networkOnlyAsrt(),
+        conversationContext: { recentUserMessage: "please write the output file for me" },
+      }),
+    );
     expect(verdict.level).toBe("medium");
   });
 });
