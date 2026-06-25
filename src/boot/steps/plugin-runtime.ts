@@ -86,6 +86,7 @@ import {
   verifyApprovalResponder,
   ApprovalOriginError,
 } from "../../permissions/agent-action-requester.js";
+import { spawnWorker } from "../../permissions/worker-spawn.js";
 const log = createLogger("lvis");
 
 export function declaresHostManagedPythonRuntime(manifest: PluginManifest): boolean {
@@ -1574,6 +1575,17 @@ export async function initPluginRuntime(
       onShutdown: (handler) => {
         pluginShutdownHandlers.push({ pluginId, handler });
       },
+      // ─── Host-mediated worker spawn (worker-confinement PR D-1) ───────
+      // HOST PRIMITIVE — NO PRODUCTION CALLER YET. Exposes the host's
+      // {@link spawnWorker} (src/permissions/worker-spawn.ts) on the per-plugin
+      // hostApi surface with `pluginId` bound from THIS hostApi instance (a
+      // plugin can never name another plugin's namespace). The local-indexer
+      // worker is wired to this in PR D-3 (which owns the plugin/worker UDS
+      // contract); there is intentionally no caller in this PR. When the ASRT
+      // gate is ON (non-Windows) the worker runs ASRT-wrapped with a
+      // bind-mounted UDS control channel; gate OFF / win32 ⇒ a plain spawn that
+      // returns `socketPath: null` (legacy TCP fallback signal).
+      spawnWorker: (workerSpec) => spawnWorker({ ...workerSpec, pluginId }),
       // ─── §B3 외부 URL viewer + host public preference read ────────────
       // openExternalUrl: Settings → webView.preferredFlow 토글에 따라
       //   "in-app"  → light BrowserWindow (link-window-service)
