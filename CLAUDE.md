@@ -235,11 +235,11 @@ Permission policy 구현은 `docs/architecture/permission-policy-design.md` 와 
 
 OS 수준 실행 격리는 **ASRT (`@anthropic-ai/sandbox-runtime`)** 가 단일 백엔드다. 레거시 per-OS 러너 레지스트리(host 가 bubblewrap / sandbox-exec / AppContainer 를 직접 호출하던 구조)는 제거되었다 (PR #1358). 상세는 architecture.md §6.3.9 / §9.1.
 
-- **백엔드**: macOS = Seatbelt, Linux = bwrap (capability SOT 에서 단일 `kind: "asrt"`). 둘 다 filesystem + process + **network egress** 를 격리한다.
+- **백엔드**: macOS = Seatbelt, Linux = bwrap, Windows = srt-win (capability SOT 에서 단일 `kind: "asrt"`, substrate 별 `confines` 로 구분). macOS/Linux 는 filesystem + process + **network egress** 를 전부 격리하지만, **Windows (srt-win) 은 NETWORK-only** (WFP + restricted-token; filesystem/process 격리 없음 — ASRT 0.0.59).
 - **Network floor**: deny-by-default. boot 에서 로드된 모든 plugin manifest `networkAccess.allowedDomains` 의 UNION + `strictAllowlist: true` 를 ASRT SHARED config 로 설정 (loopback proxy strict-union 바닥). per-worker 격리가 아니라 UNION allow-list — 1st-party 신뢰 모델 하 허용.
 - **Gate**: `osToolSandbox` flag (Settings → 권한) 또는 `LVIS_SANDBOX_ENABLED=1`. **DEFAULT OFF** — opt-in 전까지 isolation=none. boot 에서 한 번만 결정, runtime 변경 채널 없음.
-- **Windows**: **fail-closed** — srt-win 은 network-only half-sandbox 이므로 미채택. `LVIS_SANDBOX_WINDOWS=1` (기본 off) 없이는 초기화 안 함. 현행 win32 = isolation=none.
-- **Linux deps-missing**: gate ON 인데 bwrap/socat/ripgrep 부재 시 no-fallback 룰에 따라 boot fail-closed abort (unsandboxed plain spawn 금지).
+- **Windows (srt-win)**: 동일 gate 에 합류 (`LVIS_SANDBOX_WINDOWS` opt-in 제거). srt-win.exe 는 **번들** (asarUnpack vendor/**, 다운로드 없음) 이나 1회 UAC 설치 + 재로그인 필요. **win32-not-ready 시 hard-throw 안 함** (first-run brick 방지) — `isAsrtSandboxActive()` FALSE 유지(호스트 셸 도구 비격리) + "NO OS isolation until setup completes" loud 신호. 설치/재로그인 UX 는 후속 PR. ready 면 **network-only capability** (`confines.filesystem === false`) 발행 → reviewer `sandboxRelaxesCategory` live (network relax, write/shell relax 안 함).
+- **Linux deps-missing (mac/linux 만)**: gate ON 인데 bwrap/socat/ripgrep 부재 시 no-fallback 룰에 따라 boot fail-closed abort (unsandboxed plain spawn 금지). Windows 는 위의 non-bricking 경로.
 - **알려진 follow-up**: long-lived worker (lge-api / local-indexer 의 Python 워커) egress 를 이 shared floor 로 완전히 수렴시키는 작업이 남아 있음 — 일부는 여전히 HostApi `hostFetch` chokepoint 경유.
 - **라이선스**: ASRT 는 Apache-2.0 — attribution 은 repo 루트 `THIRD-PARTY-NOTICES.md` 에 유지. LVIS 자체 라이선스는 MIT 로 불변.
 
