@@ -102,3 +102,4 @@ jobs:
           src/permissions/__tests__/allowed-directories.test.ts
           src/tools/__tests__/executor.test.ts
           src/boot/__tests__/plugin-surface-permissions.test.ts
+          src/permissions/__tests__/windows-sandbox-logic.test.ts

@@ -226,12 +226,35 @@ export async function spawnWithSandbox(
     ...(home !== undefined && home !== "" ? { denyRead: [home] } : {}),
   };
 
+  // binShell threading: the bash tool runs a POSIX shell command. On
+  // mac/linux ASRT defaults to `/bin/bash` for the `-c` wrapper, so we leave
+  // binShell undefined (unchanged behaviour). On win32 ASRT would otherwise
+  // default to `cmd` — wrong for a POSIX command — so we hand it the ABSOLUTE
+  // Git Bash / sh.exe path resolved by {@link resolveShell}. ASRT's
+  // `parseWindowsBinShell` requires the bash path to be ABSOLUTE; the resolved
+  // shell may be a bare `sh`/`bash` from PATH (not absolute), in which case we
+  // leave binShell undefined and let ASRT resolve the inner shell rather than
+  // throw on a relative path. The resolved shell path is trusted host
+  // shell-detection (never workspace content), satisfying the binShell trust
+  // requirement.
+  let binShell: string | undefined;
+  if (process.platform === "win32") {
+    try {
+      const resolved = resolveShell().cmd;
+      if (/^[A-Za-z]:[\\/]/.test(resolved)) binShell = resolved;
+    } catch {
+      // Shell resolution failed (no POSIX shell on PATH); let ASRT default and
+      // surface any resulting error through the normal spawn path.
+    }
+  }
+
   const abortController = new AbortController();
   let wrapped: { argv: string[]; env: NodeJS.ProcessEnv };
   try {
     wrapped = await wrapToolCommand(command, {
       filesystem,
       abortSignal: abortController.signal,
+      ...(binShell !== undefined ? { binShell } : {}),
     });
   } catch (err) {
     return {
@@ -250,6 +273,15 @@ export async function spawnWithSandbox(
     };
   }
 
+  // Per-platform env: on win32 ASRT returns a REAL env carrying the proxy
+  // set (srt-win forwards its env verbatim — the proxy vars are NOT baked into
+  // the command string as on mac/linux, where `wrapped.env` IS process.env).
+  // buildSandboxedChildEnv composes the SAME secret-stripped result on both: the
+  // safe whitelist baseline + ONLY the allow-listed proxy/CA/SANDBOX_RUNTIME
+  // keys ASRT set/changed. So the Windows proxy set is propagated (the "spread")
+  // while mac/linux gains nothing extra, and host secrets stay stripped on both.
+  const childEnv = buildSandboxedChildEnv(wrapped.env);
+
   return await new Promise<SpawnResult>((resolveResult) => {
     // CRITICAL: shell:false — the wrapper argv is the literal program+args; a
     // shell here would re-parse and break quoting / inject a second shell.
@@ -257,8 +289,7 @@ export async function spawnWithSandbox(
       cwd: resolvedCwd,
       stdio: ["ignore", "pipe", "pipe"],
       shell: false,
-      // Safe whitelist + ASRT's added proxy/CA env only — secrets stay stripped.
-      env: buildSandboxedChildEnv(wrapped.env),
+      env: childEnv,
     });
     trackManagedChildProcess(child, { label: "tool:bash:asrt" });
 

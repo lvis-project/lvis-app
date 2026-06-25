@@ -66,8 +66,42 @@ import type {
   SandboxRuntimeConfig,
   NetworkConfig,
   FilesystemConfig,
+  WindowsConfig,
   SandboxAskCallback,
 } from "@anthropic-ai/sandbox-runtime";
+
+/**
+ * The loopback PERMIT port range srt-win's egress proxy binds on Windows.
+ *
+ * SINGLE SOURCE OF TRUTH (Windows network model): the value the install flow
+ * WFP-permits (`installWindowsSandbox({ proxyPortRange })`) MUST equal the value
+ * the runtime config sets (`config.windows.proxyPortRange`), or the proxy binds
+ * a port the WFP filter blocks and ALL egress hard-fails. Both sides reference
+ * THIS one constant — {@link buildSandboxConfig} sources the runtime value from
+ * it; the Windows install/relogin UX (a separate follow-up) sources the WFP
+ * value from the same export.
+ *
+ * Why not `export … from "@anthropic-ai/sandbox-runtime"`: ASRT is ESM-only and
+ * deliberately NOT statically imported (a static import inlines its source into
+ * the main bundle and breaks its vendor-binary resolution — see the module
+ * header). So this mirrors ASRT 0.0.59's `DEFAULT_WINDOWS_PROXY_PORT_RANGE`
+ * value `[60080, 60089]` as a plain literal. A unit test (asrt-sandbox.test.ts)
+ * pins this against ASRT's REAL exported constant so any upstream drift fails
+ * CI rather than silently desyncing the proxy bind from the WFP permit.
+ */
+export const DEFAULT_WINDOWS_PROXY_PORT_RANGE: readonly [number, number] = [
+  60080, 60089,
+];
+
+/**
+ * The local discriminator group srt-win keys its WFP filters on. Mirrors ASRT
+ * 0.0.59's `DEFAULT_WINDOWS_GROUP_NAME` (= `sandbox-runtime-net`) for the same
+ * single-source-of-truth reason as {@link DEFAULT_WINDOWS_PROXY_PORT_RANGE}: the
+ * runtime config and the install flow must name the SAME group. Pinned as a
+ * literal (ASRT is dynamically imported, never statically) and verified against
+ * ASRT's real export by a unit test so upstream drift fails CI.
+ */
+export const DEFAULT_WINDOWS_GROUP_NAME = "sandbox-runtime-net";
 
 /**
  * The subset of ASRT configuration that is ONLY ever permitted to originate
@@ -149,6 +183,19 @@ export interface TrustedSandboxSettings {
     readonly https?: string;
     readonly noProxy?: string;
   };
+  /**
+   * Windows-only sandbox settings (srt-win network backend). TRUSTED-ONLY —
+   * the proxy port range must agree with what the install flow WFP-permits.
+   *
+   * `proxyPortRange`: the loopback PERMIT range srt-win's egress proxy binds.
+   * Defaults to {@link DEFAULT_WINDOWS_PROXY_PORT_RANGE} when omitted (which is
+   * also what the install WFP-permits by default), so the proxy bind range
+   * always matches the WFP rule. Set explicitly only when an enterprise install
+   * used a non-default range. Has no effect off win32.
+   */
+  readonly windows?: {
+    readonly proxyPortRange?: readonly [number, number];
+  };
 }
 
 /**
@@ -185,6 +232,27 @@ export interface PerCommandFilesystem {
 export interface WrapOptions {
   readonly filesystem?: PerCommandFilesystem;
   readonly abortSignal?: AbortSignal;
+  /**
+   * The INNER shell ASRT should run the command under. Cross-platform string
+   * surface forwarded verbatim to `wrapWithSandboxArgv(command, binShell, …)`:
+   *   - Windows: `'powershell'` | `'pwsh'` | `'cmd'` | an absolute Git Bash /
+   *     sh.exe path — ASRT's `parseWindowsBinShell` renders the executable
+   *     ITSELF (e.g. `powershell.exe -NoProfile -Command <command>`). The caller
+   *     therefore passes the BARE command, NOT a pre-rendered `powershell.exe
+   *     -Command '…'` string (pre-rendering + a default `cmd` binShell produced
+   *     a `cmd /c "powershell.exe -Command …"` DOUBLE shell).
+   *   - macOS/Linux: the POSIX shell to run `-c <wrapped>` under (defaults to
+   *     `/bin/bash` inside ASRT when omitted). LVIS leaves this undefined on
+   *     POSIX — the wrapped command already names the shell — so the historical
+   *     mac/linux behaviour is unchanged.
+   *
+   * TRUST: on Windows the inner shell runs INSIDE the restricted-token sandbox,
+   * so an unexpected value is not a sandbox escape; but a bash `path` must still
+   * originate from trusted host shell-detection (never workspace content) — it
+   * is an arbitrary-exec footgun otherwise. LVIS only ever passes the fixed
+   * shell-name discriminants here or a trusted resolved shell path.
+   */
+  readonly binShell?: string;
 }
 
 /**
@@ -248,8 +316,12 @@ export function isAsrtSandboxActive(): boolean {
  * has an empty allow-list, which ASRT treats as "no egress". Weakening flags
  * default to `false`/absent and are only set when explicitly present in the
  * trusted `weakening` object.
+ *
+ * @internal Exported for unit tests only (the Windows-logic tests assert the
+ * win32 `windows.proxyPortRange` emission with `process.platform` forced). Not
+ * part of the module's runtime API — boot uses {@link initializeAsrtSandbox}.
  */
-function buildSandboxConfig(trustedSettings: TrustedSandboxSettings): SandboxRuntimeConfig {
+export function buildSandboxConfig(trustedSettings: TrustedSandboxSettings): SandboxRuntimeConfig {
   const network: NetworkConfig = {
     // Deny-by-default — empty allow-list ⇒ no network egress.
     allowedDomains: [...(trustedSettings.allowedDomains ?? [])],
@@ -295,9 +367,29 @@ function buildSandboxConfig(trustedSettings: TrustedSandboxSettings): SandboxRun
       : {}),
   };
 
+  // Windows-only: pin the egress proxy bind range so it matches the WFP permit
+  // (the install flow permits the SAME range — see DEFAULT_WINDOWS_PROXY_PORT_RANGE).
+  // Always emitted on win32 (default range when not supplied) so the runtime
+  // config and the WFP rule never desync. Inert on mac/linux — ASRT ignores the
+  // `windows` section off Windows, but we only emit it on win32 to keep the
+  // config minimal and the non-Windows config shape unchanged.
+  const windows: WindowsConfig | undefined =
+    process.platform === "win32"
+      ? {
+          // Name the SAME discriminator group the install WFP-keyed on, so the
+          // restricted-token child resolves to the installed filter set.
+          groupName: DEFAULT_WINDOWS_GROUP_NAME,
+          proxyPortRange: [
+            ...(trustedSettings.windows?.proxyPortRange ??
+              DEFAULT_WINDOWS_PROXY_PORT_RANGE),
+          ] as [number, number],
+        }
+      : undefined;
+
   return {
     network,
     filesystem,
+    ...(windows !== undefined ? { windows } : {}),
     // TRUSTED-ONLY weakening flags (see TrustedSandboxSettings trust-boundary
     // note). Only set when explicitly supplied by trusted settings.
     ...(trustedSettings.weakening?.allowAppleEvents !== undefined
@@ -397,7 +489,7 @@ export async function wrapToolCommand(
   const SandboxManager = await loadSandboxManager();
   return SandboxManager.wrapWithSandboxArgv(
     command,
-    undefined,
+    options.binShell,
     toCustomConfig(options.filesystem),
     options.abortSignal,
   );
@@ -438,7 +530,7 @@ export async function wrapWorkerCommand(
   const SandboxManager = await loadSandboxManager();
   return SandboxManager.wrapWithSandboxArgv(
     command,
-    undefined,
+    options.binShell,
     toCustomConfig(options.filesystem),
     options.abortSignal,
   );
