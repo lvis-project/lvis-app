@@ -155,6 +155,17 @@ export interface TrustedSandboxSettings {
   /** Paths the child is denied writing (takes precedence). */
   readonly denyWrite?: readonly string[];
   /**
+   * macOS-only: directories whose Unix-domain sockets the child may bind /
+   * connect (emitted as `network.allowUnixSockets`, the seatbelt `(subpath
+   * <dir>)` allow). The worker-UDS control channel uses this — see the WORKER
+   * UDS header. TRUSTED-ONLY: host-allocated worker control-socket dirs, never
+   * a plugin-supplied value. Ignored on Linux (seccomp is path-blind — the
+   * `allowAllUnixSockets` weakening + the `--bind` of the writable dir apply
+   * instead) and on Windows (no UDS primitive). Maintained additively at
+   * runtime via {@link registerWorkerUnixSocketDir}.
+   */
+  readonly allowUnixSocketDirs?: readonly string[];
+  /**
    * Sandbox-weakening flags. TRUSTED-ONLY (see the trust-boundary note above).
    * Never wire a plugin/project-config path to any field in this object.
    */
@@ -272,6 +283,86 @@ export interface WrapOptions {
    * shell-name discriminants here or a trusted resolved shell path.
    */
   readonly binShell?: string;
+}
+
+/**
+ * ─────────────────────────────────────────────────────────────────────────────
+ * WORKER UDS CONTROL CHANNEL — SHARED-CONFIG, NOT PER-COMMAND ⚠️ (ASRT 0.0.59)
+ * A long-lived HTTP plugin worker the HOST connects INBOUND to needs a Unix-
+ * domain-socket (UDS) control channel — loopback TCP is unreachable through
+ * Linux's bwrap `--unshare-net` namespace. The Unix-socket ALLOW config that
+ * lets the worker `bind()` the socket is enforced through ASRT's SHARED config,
+ * NOT the per-command `customConfig`:
+ *   sandbox-manager.js `getAllowUnixSockets()` / `getAllowAllUnixSockets()` read
+ *   the module-level SHARED `config` (lines 555-559), and `wrapWithSandbox`
+ *   feeds THOSE into `generateSandboxProfile` (macOS) / `wrapCommandWithSandbox-
+ *   Linux` (linux). A per-command `customConfig.network.allowUnixSockets` is
+ *   NEVER consulted for the seatbelt/seccomp UDS rules — it is INERT, the SAME
+ *   class of inertness as the egress allow-list (see the module header).
+ * VERIFIED empirically on darwin (uds probe): a per-command allowUnixSockets ⇒
+ * the worker's `listen()` fails with EPERM; the SAME value on the SHARED config
+ * ⇒ the bind succeeds and the host reaches /health over the socket.
+ *
+ * SCOPING (verified): on macOS `allowUnixSockets` must contain the socket's
+ * DIRECTORY (the seatbelt rule is `(subpath <dir>)`); the socket-FILE path
+ * gives EPERM. On Linux the path is ignored (seccomp is path-blind) — the
+ * `--bind` of the writable socketDir (a per-command `allowWrite`, which DOES
+ * compose) scopes WHERE the worker can create the socket; the trusted
+ * `allowAllUnixSockets` weakening only re-permits the AF_UNIX syscall family.
+ *
+ * So the worker-UDS allowance is maintained as a LIVE addition to the SHARED
+ * config: {@link registerWorkerUnixSocketDir} adds a worker's socketDir and
+ * pushes an `updateConfig`; {@link unregisterWorkerUnixSocketDir} removes it.
+ * The base trusted settings (the manifest egress union, denyRead floor, etc.)
+ * are remembered at init/update so the rebuild is additive, never clobbering.
+ * ─────────────────────────────────────────────────────────────────────────────
+ */
+
+/**
+ * The trusted settings last applied via {@link initializeAsrtSandbox} /
+ * {@link updateAsrtSandboxConfig}. Remembered so worker-UDS register/unregister
+ * can rebuild the SHARED config additively (the manifest egress union, denyRead
+ * floor, weakening flags, etc. are preserved). Undefined before the first init.
+ */
+let _baseTrustedSettings: TrustedSandboxSettings | undefined;
+
+/**
+ * Live set of host-allocated worker control-socket DIRECTORIES currently
+ * registered for UDS access (see the WORKER UDS header). Each entry contributes
+ * a macOS `allowUnixSockets` `(subpath <dir>)` allow; their presence also turns
+ * on the Linux `allowAllUnixSockets` weakening (path-blind seccomp re-permit).
+ * Maintained by {@link registerWorkerUnixSocketDir} / its unregister.
+ */
+const _workerUnixSocketDirs = new Set<string>();
+
+/**
+ * Merge the live worker-UDS state into a base {@link TrustedSandboxSettings} to
+ * produce the effective settings for the SHARED config. macOS: union the
+ * registered dirs into `allowRead`-independent `allowUnixSockets` via a new
+ * field; Linux: when ANY worker dir is registered, force the trusted
+ * `allowAllUnixSockets` weakening on (the base value otherwise).
+ */
+function withWorkerUnixSockets(
+  base: TrustedSandboxSettings,
+): TrustedSandboxSettings {
+  if (_workerUnixSocketDirs.size === 0) return base;
+  const dirs = [..._workerUnixSocketDirs];
+  return {
+    ...base,
+    allowUnixSocketDirs: [
+      ...(base.allowUnixSocketDirs ?? []),
+      ...dirs,
+    ],
+    weakening: {
+      ...base.weakening,
+      // Linux needs the AF_UNIX seccomp re-permit for any worker UDS; macOS
+      // ignores this (it uses the path-scoped allowUnixSockets above).
+      allowAllUnixSockets:
+        process.platform === "linux"
+          ? true
+          : base.weakening?.allowAllUnixSockets,
+    },
+  };
 }
 
 /**
@@ -498,6 +589,13 @@ export function buildSandboxConfig(trustedSettings: TrustedSandboxSettings): San
     ...(trustedSettings.weakening?.allowAllUnixSockets !== undefined
       ? { allowAllUnixSockets: trustedSettings.weakening.allowAllUnixSockets }
       : {}),
+    // macOS worker-UDS control-channel allow (the seatbelt `(subpath <dir>)`
+    // rule). Host-allocated worker control-socket dirs only. Emitted whenever
+    // present; ASRT ignores it off macOS. See the WORKER UDS header.
+    ...(trustedSettings.allowUnixSocketDirs !== undefined &&
+    trustedSettings.allowUnixSocketDirs.length > 0
+      ? { allowUnixSockets: [...trustedSettings.allowUnixSocketDirs] }
+      : {}),
     // parentProxy EXPLICIT (PR #1356 security MINOR — corrected). ASRT's
     // resolveParentProxy (dist/sandbox/parent-proxy.js:46) reads
     //   `cfg?.http ?? process.env.HTTP_PROXY ?? process.env.http_proxy`.
@@ -632,7 +730,13 @@ export async function initializeAsrtSandbox(
     );
   }
   const SandboxManager = await loadSandboxManager();
-  const config = buildSandboxConfig(trustedSettings);
+  // Remember the base settings so worker-UDS register/unregister can rebuild
+  // the SHARED config additively (see the WORKER UDS header). On a fresh init
+  // there are no registered worker sockets yet, so the effective config equals
+  // the base; withWorkerUnixSockets is a no-op until a worker registers.
+  _baseTrustedSettings = trustedSettings;
+  _workerUnixSocketDirs.clear();
+  const config = buildSandboxConfig(withWorkerUnixSockets(trustedSettings));
   await SandboxManager.initialize(config, askCb, enableLogMonitor);
   active = true;
 }
@@ -690,13 +794,27 @@ export async function wrapToolCommand(
  * wrapped — they run at boot before the gate is active and legitimately need
  * PyPI egress, so they plain-spawn.
  *
- * NETWORK: workers do NOT carry a per-command network override — that channel
- * is INERT in ASRT 0.0.59 (`filterNetworkRequest` reads the SHARED config, not
- * `customConfig`; see the module header). Worker egress is ENFORCED by the
- * shared config set at boot: `strictAllowlist: true` + the UNION of every
- * loaded plugin's manifest allow-list. Workers are NON-INTERACTIVE; strict
- * hard-denies any out-of-union host with no askCb fallthrough. The owning
- * plugin's declared domains reach the worker only by being part of that union.
+ * EGRESS: workers do NOT carry a per-command egress override — the
+ * `allowedDomains`/`deniedDomains` channel is INERT in ASRT 0.0.59
+ * (`filterNetworkRequest` reads the SHARED config, not `customConfig`; see the
+ * module header). Worker egress is ENFORCED by the shared config set at boot:
+ * `strictAllowlist: true` + the UNION of every loaded plugin's manifest
+ * allow-list. Workers are NON-INTERACTIVE; strict hard-denies any out-of-union
+ * host with no askCb fallthrough. The owning plugin's declared domains reach
+ * the worker only by being part of that union.
+ *
+ * UDS CONTROL CHANNEL: a worker the HOST connects INBOUND to (an HTTP worker)
+ * needs a Unix-domain-socket control channel — loopback TCP is unreachable
+ * through Linux's bwrap `--unshare-net` namespace. The per-command channel
+ * here ONLY carries the filesystem jail, whose `allowWrite` includes the
+ * worker's host-allocated socketDir → that becomes the Linux `--bind <dir>
+ * <dir>` mount (host-visible from both namespaces) and, on macOS, the writable
+ * region where the socket file may be created. The Unix-socket ALLOW config
+ * (macOS `allowUnixSockets` / Linux `allowAllUnixSockets`) is INERT per-command
+ * in ASRT 0.0.59 — it MUST live on the SHARED config and is managed by
+ * {@link registerWorkerUnixSocketDir} (see the WORKER UDS header). The
+ * {@link spawnWorker} primitive (worker-spawn.ts) drives both: it registers the
+ * socketDir on the shared config, then wraps with the FS jail here.
  */
 export async function wrapWorkerCommand(
   command: string,
@@ -892,13 +1010,66 @@ export function computeDynamicEndpointHosts(
 
 /**
  * Replace the live ASRT config (TRUSTED settings only). Pass-through to
- * `SandboxManager.updateConfig`.
+ * `SandboxManager.updateConfig`. Remembers these as the new base settings so a
+ * subsequent worker-UDS register/unregister rebuilds additively, and re-applies
+ * the CURRENTLY-registered worker UDS dirs onto the new base (a live config
+ * refresh must not drop a running worker's control-socket allowance).
  */
 export async function updateAsrtSandboxConfig(
   trustedSettings: TrustedSandboxSettings,
 ): Promise<void> {
   const SandboxManager = await loadSandboxManager();
-  SandboxManager.updateConfig(buildSandboxConfig(trustedSettings));
+  _baseTrustedSettings = trustedSettings;
+  SandboxManager.updateConfig(
+    buildSandboxConfig(withWorkerUnixSockets(trustedSettings)),
+  );
+}
+
+/**
+ * Register a host-allocated worker control-socket DIRECTORY for UDS access and
+ * push the rebuilt SHARED config (worker-confinement PR D-1). The per-command
+ * `customConfig.network.allowUnixSockets` is INERT in ASRT 0.0.59 (see the
+ * WORKER UDS header), so the allowance MUST live on the shared config — this is
+ * the additive mutator {@link spawnWorker} calls right before it spawns a
+ * wrapped HTTP worker.
+ *
+ * macOS: adds the dir to `network.allowUnixSockets` (the seatbelt `(subpath
+ * <dir>)` allow — the dir, NOT the socket file, which gives EPERM). Linux: the
+ * dir is path-ignored by seccomp; its presence forces the trusted
+ * `allowAllUnixSockets` weakening on (the `--bind` of the writable dir scopes
+ * WHERE). No-op when the gate is off or already registered.
+ *
+ * TRUSTED-ONLY: `socketDir` must be a host-allocated path (a plugin sandbox-root
+ * subtree), never a plugin/manifest/MCP-supplied value.
+ */
+export async function registerWorkerUnixSocketDir(socketDir: string): Promise<void> {
+  if (!active || _baseTrustedSettings === undefined) {
+    throw new Error(
+      "registerWorkerUnixSocketDir: ASRT sandbox is not active (initialize at boot first)",
+    );
+  }
+  if (_workerUnixSocketDirs.has(socketDir)) return;
+  _workerUnixSocketDirs.add(socketDir);
+  const SandboxManager = await loadSandboxManager();
+  SandboxManager.updateConfig(
+    buildSandboxConfig(withWorkerUnixSockets(_baseTrustedSettings)),
+  );
+}
+
+/**
+ * Drop a worker control-socket dir's UDS allowance and push the rebuilt SHARED
+ * config. Idempotent. Called by {@link spawnWorker} on worker exit/stop so a
+ * dead worker's socket allowance does not linger on the shared config.
+ */
+export async function unregisterWorkerUnixSocketDir(socketDir: string): Promise<void> {
+  if (!_workerUnixSocketDirs.delete(socketDir)) return;
+  // If the sandbox was already torn down, there is nothing to update — the
+  // reset cleared the live config and the worker set; this is a no-op.
+  if (!active || _baseTrustedSettings === undefined) return;
+  const SandboxManager = await loadSandboxManager();
+  SandboxManager.updateConfig(
+    buildSandboxConfig(withWorkerUnixSockets(_baseTrustedSettings)),
+  );
 }
 
 /**
@@ -918,12 +1089,20 @@ export async function resetAsrtSandbox(): Promise<void> {
   const SandboxManager = await loadSandboxManager();
   await SandboxManager.reset();
   active = false;
-  // worker-egress PR1: drop every wrapped-MCP-server marker so a torn-down
-  // sandbox cannot leave a stale `asrt` signal the reviewer would honour. Lazy
-  // import keeps the module-load edge one-way (sandbox-capability is renderer-
-  // safe and never imports back into this main-only module).
-  const { clearWrappedMcpServers } = await import("./sandbox-capability.js");
+  // worker-confinement PR D-1: drop the remembered base settings + live worker
+  // UDS dirs so a fresh init starts from a clean slate (no stale socket allow).
+  _baseTrustedSettings = undefined;
+  _workerUnixSocketDirs.clear();
+  // worker-egress PR1 + worker-confinement PR D-1: drop every wrapped-worker
+  // marker (MCP servers AND host-spawned plugin workers) so a torn-down sandbox
+  // cannot leave a stale `asrt` signal the reviewer would honour. Lazy import
+  // keeps the module-load edge one-way (sandbox-capability is renderer-safe and
+  // never imports back into this main-only module).
+  const { clearWrappedMcpServers, clearWrappedPluginWorkers } = await import(
+    "./sandbox-capability.js"
+  );
   clearWrappedMcpServers();
+  clearWrappedPluginWorkers();
 }
 
 /**
