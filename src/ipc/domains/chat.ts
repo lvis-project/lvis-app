@@ -29,12 +29,27 @@ import {
   stripSuggestedReplies,
 } from "../../engine/suggested-replies.js";
 import type { SessionKind } from "../../memory/memory-manager.js";
+import type { LLMSettings } from "../../data/settings-store.js";
 const log = createLogger("chat");
 const SESSION_KIND_VALUES = new Set<SessionKind | "all">(["main", "routine", "all"]);
 const SESSION_ID_REGEX = /^[a-zA-Z0-9_\-]+$/;
 
 function isSafeSessionId(sessionId: unknown): sessionId is string {
   return typeof sessionId === "string" && SESSION_ID_REGEX.test(sessionId);
+}
+
+/**
+ * Stable signature of EVERY vendor block's configured `baseUrl` (order-stable
+ * by vendor id). Mirrors the helper in settings.ts; kept local to avoid a
+ * cross-domain import dependency. Used to guard ASRT sandbox live-refresh calls
+ * so the refresh fires only when an endpoint actually changed.
+ */
+function vendorBaseUrlSignature(llm: LLMSettings): string {
+  const vendors = llm.vendors ?? {};
+  return Object.keys(vendors)
+    .sort()
+    .map((id) => `${id}=${vendors[id as keyof typeof vendors]?.baseUrl ?? ""}`)
+    .join("|");
 }
 
 export type { SerializedHistoryMessage } from "../../shared/chat-history.js";
@@ -853,6 +868,7 @@ export function registerChatHandlers(deps: IpcDeps): void {
     const prevLlm = settingsService.get("llm");
     const provider = prevLlm.provider;
     const prevBlock = prevLlm.vendors[provider];
+    const prevVendorBaseUrlSig = vendorBaseUrlSignature(prevLlm);
     await settingsService.patch({
       llm: {
         vendors: {
@@ -864,6 +880,12 @@ export function registerChatHandlers(deps: IpcDeps): void {
         },
       },
     });
+    // ASRT choke-point: the spread includes prevBlock.baseUrl if set, so if
+    // a baseUrl was present it remains unchanged and the guard is a no-op.
+    // Included for completeness in case future patches extend this handler.
+    if (vendorBaseUrlSignature(settingsService.get("llm")) !== prevVendorBaseUrlSig) {
+      deps.refreshSandboxNetworkConfig?.();
+    }
     conversationLoop.refreshProvider();
     try {
       return await continueFromLastUserTurn({ requireTerminalUser: false, restoreOnFailure: false });
@@ -871,6 +893,12 @@ export function registerChatHandlers(deps: IpcDeps): void {
       await settingsService.patch({
         llm: { vendors: { [provider]: prevBlock } },
       });
+      // Restore path: if the forward patch triggered a sandbox refresh but
+      // the restore brings baseUrl back to the same value, the guard here is
+      // also a no-op (prevBlock was the original, sig matches original).
+      if (vendorBaseUrlSignature(settingsService.get("llm")) !== prevVendorBaseUrlSig) {
+        deps.refreshSandboxNetworkConfig?.();
+      }
       conversationLoop.refreshProvider();
     }
   });

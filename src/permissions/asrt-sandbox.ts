@@ -695,7 +695,9 @@ export function computeDynamicEndpointHosts(
     if (trimmed.length === 0) continue;
     let hostname: string;
     try {
-      hostname = new URL(trimmed).hostname;
+      // Strip trailing dot from FQDN-style URLs (e.g. `res.openai.azure.com.`)
+      // so they normalize to the bare hostname the ASRT matcher expects.
+      hostname = new URL(trimmed).hostname.replace(/\.$/, "");
     } catch {
       // Malformed endpoint — NOT a wildcard, NOT an allow-all fallback. It
       // simply contributes no host (deny-by-default per the no-fallback rule).

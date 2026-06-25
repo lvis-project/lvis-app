@@ -1442,9 +1442,7 @@ export async function bootstrap(
           // Manifests are already loaded here (this block runs AFTER
           // initPluginRuntime), so the union is computed once at init — no
           // deferred updateConfig needed.
-          const manifestAllowLists = pluginRuntime
-            .listPluginIds()
-            .map((id) => pluginRuntime.getPluginManifest(id)?.networkAccess?.allowedDomains ?? []);
+          //
           // Build the enforced allow-list via the SAME builder the live-refresh
           // closure uses (buildSandboxUnionDomains): manifest UNION ∪ host-
           // resolved DYNAMIC endpoint hostnames (user-configured vendor baseUrls
@@ -1453,6 +1451,11 @@ export async function bootstrap(
           // hard-denied without this). Trusted host baseline stays empty.
           // normalizeUnionForAsrt (inside the builder) emits both `d` and `*.d`
           // so the sandbox enforces the SAME hosts the hostFetch path advertises.
+          // Plugin count for the log — buildSandboxUnionDomains computes the
+          // actual union internally; this one-liner only supplies the count.
+          const manifestAllowLists = pluginRuntime
+            .listPluginIds()
+            .map((id) => pluginRuntime.getPluginManifest(id)?.networkAccess?.allowedDomains ?? []);
           const unionAllowedDomains = await buildSandboxUnionDomains();
 
           // Trust boundary: WEAKENING flags are NOT set here (deny-by-default,
