@@ -296,6 +296,57 @@ describe("StdioTransport ASRT wrap — gate ON", () => {
 
     await client.disconnect();
   });
+
+  it("UNEXPECTED child exit releases the wrapped marker + cleanup runs exactly once (MAJOR fix)", async () => {
+    gateActive = true;
+    const sandboxRoot = join(lvisHome(), "mcp", "crash", "sandbox");
+    const fake = new FakeChildProcess();
+    fake.responses = handshakeResponses("crash");
+    wrapWorkerCommandMock.mockResolvedValueOnce({
+      argv: ["/bin/bash", "-c", "sandbox-exec ... lvis-mcp-crash"],
+      env: { ...process.env },
+    });
+    spawnMock.mockReturnValueOnce(fake);
+
+    const gov = governanceWithPolicy(
+      buildPolicy([stdioApproval("crash", "lvis-mcp-crash")]),
+    );
+    const config: McpStdioServerConfig = {
+      id: "crash",
+      transport: "stdio",
+      command: "lvis-mcp-crash",
+      sandboxRoot,
+    };
+    const client = new McpClient(config, gov, new ToolRegistry());
+    await client.connect();
+
+    // Server is wrapped while running.
+    expect(isMcpServerWrapped("crash")).toBe(true);
+
+    // Simulate unexpected child exit WITHOUT calling client.disconnect() /
+    // close() — e.g. the server binary crashes or is killed by the OS.
+    fake.emit("exit", 1, null);
+
+    // The no-leak invariant: the wrapped marker must be cleared immediately.
+    expect(isMcpServerWrapped("crash")).toBe(false);
+    // Per-command ASRT cleanup (bwrap teardown / ref-count decrement) ran.
+    expect(cleanupMock).toHaveBeenCalledTimes(1);
+    // Reviewer now reports none — no stale asrt for the dead server id.
+    setActiveSandboxCapability({
+      kind: "asrt",
+      confidence: "verified",
+      platform: "darwin",
+      reason: "test",
+      confines: { filesystem: true, process: true, network: true },
+    });
+    expect(resolveReviewerSandboxCapability("mcp", "mcp_crash_x", "crash").kind).toBe("none");
+
+    // NOW also call disconnect() to exercise the explicit-close path.
+    // cleanupMock must NOT be called a second time (idempotency).
+    await client.disconnect();
+    expect(cleanupMock).toHaveBeenCalledTimes(1); // still exactly once
+    expect(isMcpServerWrapped("crash")).toBe(false); // still gone
+  });
 });
 
 // ─── Reviewer reconciliation — wrapped→asrt, unwrapped→none ──
