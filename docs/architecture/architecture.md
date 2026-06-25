@@ -1762,18 +1762,32 @@ Layer 0–8 의 permission policy 는 *어떤 도구 호출을 허용/거부* �
   `LVIS_SANDBOX_ENABLED=1`. **DEFAULT OFF** — 명시적 opt-in 전까지 도구는
   isolation=none 으로 실행된다. Gate 는 boot 에서 *정확히 한 번* 결정되며
   runtime 변경 채널은 없다.
-- **Windows**: **fail-closed**. ASRT 의 win32 경로(srt-win.exe)는 network-only
-  half-sandbox (fs 격리 없음 + UAC 설치/재로그인 요구) 이므로 채택하지 않는다.
-  별도 `LVIS_SANDBOX_WINDOWS=1` opt-in (기본 off) 없이는 초기화하지 않으며,
-  현행 win32 동작은 isolation=none 이다.
+- **Windows (srt-win)**: 동일 gate 에 합류한다 (`LVIS_SANDBOX_WINDOWS` 별도
+  opt-in 제거). srt-win.exe 는 **NETWORK-only** 샌드박스다 — WFP +
+  restricted-token job 으로 egress 만 격리하고 **filesystem/process 격리는
+  없다** (ASRT 0.0.59). srt-win.exe 는 **번들** (asarUnpack vendor/**) 이라
+  다운로드가 없으나, 1회 UAC 설치 + 재로그인 (discriminator group 이 토큰에
+  enable + WFP filter 설치) 이 필요하며 `checkAsrtDependencies()` 가 그때까지
+  errors 로 보고한다. **Windows 는 deps-missing 시 hard-throw 하지 않는다** —
+  throw 는 설치/재로그인 전 first-run 을 brick 하기 때문. 대신
+  `isAsrtSandboxActive()` 를 FALSE 로 유지(호스트 셸 도구는 비격리 plain spawn)
+  하고 "Windows sandbox requested but not installed/relogged — tools run with NO
+  OS isolation until setup completes" loud 신호를 남긴다 (설치 UX 는 후속 PR).
+  win32 가 ready 면 ASRT 를 정상 초기화하고 **network-only capability**
+  (`confines.filesystem === false`) 를 발행한다.
 - **Linux deps-missing**: gate ON 인데 `bwrap`/`socat`/`ripgrep` 가 없으면
   no-fallback 룰에 따라 boot 를 fail-closed 로 abort 한다 (unsandboxed plain
-  spawn 으로 silently drop 하지 않는다).
+  spawn 으로 silently drop 하지 않는다). mac/linux 만 hard-throw; Windows 는
+  위의 non-bricking 신호 경로를 탄다.
 - **Capability SOT**: boot 에서 ASRT init 성공 시
   `setActiveSandboxCapability({ kind: "asrt", confidence: "verified",
   confines: { filesystem, process, network }, … })` 로 발행한다 (`confines` 는
-  machine-checkable 격리 표면 — network honesty 감사 + 향후 substrate 별 강제용).
-  Gate OFF / Windows / Linux deps-missing 에서는 발행하지 않으므로 SOT 는
+  machine-checkable 격리 표면 — network honesty 감사 + substrate 별 강제용).
+  mac/linux 는 full `{fs,proc,net: true}`, **win32 는 network-only
+  `{fs:false, proc:false, net:true}`** 를 발행한다 — 이 PARTIAL-confine
+  capability 가 reviewer 의 `sandboxRelaxesCategory` 를 live 로 작동시킨다
+  (network 는 relax, write/shell/read 는 relax 안 함). Gate OFF /
+  Windows-not-ready / Linux deps-missing 에서는 발행하지 않으므로 SOT 는
   `kind: "none"` 으로 남는다.
 - **Substrate-aware reviewer capability (필수 불변식)**: process-global
   `detectSandboxCapability()` 의 `asrt` 는 **ASRT-wrapped host-shell substrate**
@@ -2583,7 +2597,8 @@ wrapper(macOS Seatbelt / Linux bwrap)로 감싼다.
   격리가 아니라 UNION 이므로, sandboxed 자식은 임의의 로드된 plugin 이 선언한
   도메인에 도달 가능하다 (LVIS 1st-party 신뢰 모델 하에서 허용; per-worker
   격리는 future ASRT 필요).
-- **Windows fail-closed**: §6.3.9 와 동일 — 채택하지 않음.
+- **Windows (srt-win, network-only)**: §6.3.9 와 동일 — 동일 gate, network-only
+  capability, win32-not-ready 시 non-bricking 신호 (hard-throw 안 함).
 - **알려진 follow-up**: long-lived worker (예: `lvis-plugin-ep-api` /
   `lvis-plugin-local-indexer` 의 Python 워커) 의 egress 를 이 shared floor 로
   완전히 수렴시키는 것은 문서화된 후속 작업이다. 현행 plugin egress 의 일부는

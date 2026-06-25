@@ -10,8 +10,13 @@
  *     strict-union allow-list, so egress IS contained (no longer the old
  *     sandbox-exec fake floor that left loopback/IPv6/DNS open).
  *   - Linux (bwrap via ASRT): filesystem + process + network.
- *   - Windows: fail-closed — tools run unconfined (srt-win is a network-only
- *     half-sandbox LVIS does not adopt).
+ *   - Windows (srt-win via ASRT): NETWORK egress only. srt-win enforces egress
+ *     with a WFP filter set + a restricted-token job, routing the child through
+ *     the loopback proxy — but it provides NO filesystem and NO process
+ *     isolation (ASRT 0.0.59 has no Windows FS jail). This is a PARTIAL-confine
+ *     substrate: honest about what it does and does NOT contain. The reviewer's
+ *     per-category relaxation (sandboxRelaxesCategory) relaxes `network` but NOT
+ *     filesystem-bearing categories on Windows precisely because of this.
  */
 
 /** What the sandbox confines, by platform. `network` is false where egress is not contained. */
@@ -63,6 +68,15 @@ export function sandboxConfinementForPlatform(
     // bwrap via ASRT confines fs + pid + net.
     return { filesystem: true, process: true, network: true };
   }
-  // Windows + anything else: fail-closed, no sandbox.
+  if (platform === "win32") {
+    // srt-win via ASRT confines NETWORK egress only (WFP + restricted-token
+    // job routing the child through the loopback proxy). ASRT 0.0.59 has NO
+    // Windows filesystem jail and no process confinement — so this substrate is
+    // honestly PARTIAL: network-only. This is what makes the reviewer's
+    // per-category relaxation bite on Windows (network relaxes, write/shell do
+    // NOT).
+    return { filesystem: false, process: false, network: true };
+  }
+  // Anything else: fail-closed, no sandbox.
   return { filesystem: false, process: false, network: false };
 }
