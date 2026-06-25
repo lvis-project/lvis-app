@@ -629,6 +629,87 @@ export function normalizeUnionForAsrt(
 }
 
 /**
+ * The TRUSTED host-settings slice {@link computeDynamicEndpointHosts} reads.
+ * Intentionally a structural subset of `AppSettings` (not an import of it) so
+ * the function is pure, unit-testable in isolation, and tolerant of partial
+ * settings shapes (test doubles, pre-migration files). Only the LLM vendor
+ * blocks' user-configured `baseUrl`s are consulted — the dynamic endpoints a
+ * sandboxed worker actually reaches.
+ */
+export interface DynamicEndpointSettings {
+  readonly llm?: {
+    readonly vendors?: Record<string, { readonly baseUrl?: string } | undefined>;
+  };
+}
+
+/**
+ * Extract the host-resolved DYNAMIC endpoint HOSTNAMES from TRUSTED settings, so
+ * the shared strict-union allow-list reflects not just static manifest domains
+ * but ALSO the user-configured endpoints a sandboxed worker actually reaches.
+ *
+ * WHY THIS EXISTS — the union gap this closes:
+ * The boot union is built from each loaded plugin's
+ * `manifest.networkAccess.allowedDomains`. But some plugins' REAL egress host is
+ * NOT a static manifest domain — it is USER-CONFIGURED. The concrete case:
+ * local-indexer's embedding + image-caption calls go to the host's Azure OpenAI
+ * resource, resolved host-side as `settings.llm.vendors["azure-foundry"].baseUrl`
+ * (the same value `hostApi.resolveApiKey({ vendor: "azure-openai" })` returns —
+ * see main/host-api/resolve-api-key.ts, where "azure-openai" maps to
+ * "azure-foundry"). The indexer's manifest `networkAccess` is null, so it
+ * contributes NOTHING to the static union — its endpoint would be hard-denied
+ * under strict enforcement. The host-resolved endpoint string is the DYNAMIC
+ * source of truth that must feed the union. A user-set custom `baseUrl` on ANY
+ * vendor block is treated the same way (a custom endpoint a worker would reuse).
+ *
+ * DYNAMIC SOURCE: every `llm.vendors[*].baseUrl` present in trusted settings.
+ * This is the ONLY place the host holds a configured-endpoint URL string that a
+ * worker would reach; there is no separate host-side embedding/caption endpoint
+ * setting (the indexer resolves both through the same Azure resource baseUrl).
+ *
+ * NO-FALLBACK (deny-by-default): each URL is reduced to `new URL(s).hostname`.
+ * A malformed/empty/whitespace `baseUrl` (or a parse that yields no hostname)
+ * contributes NOTHING — it is NOT a wildcard and NOT an "allow all" fallback. A
+ * missing endpoint simply isn't in the union, so strict enforcement hard-denies
+ * it and the plugin surfaces its own "endpoint not configured" error. Deduped,
+ * order-stable.
+ *
+ * @param settings  TRUSTED host/user settings (or a structural subset). Never a
+ *                  plugin/project/MCP-influenced surface — these hosts widen the
+ *                  enforced allow-list, so they must originate from trusted
+ *                  settings only (same trust seam as the manifest union).
+ * @returns bare hostnames (e.g. `my-resource.openai.azure.com`), ready to feed
+ *          {@link computeUnionAllowedDomains} alongside the manifest allow-lists
+ *          (then {@link normalizeUnionForAsrt} for ASRT's matcher).
+ */
+export function computeDynamicEndpointHosts(
+  settings: DynamicEndpointSettings | undefined,
+): string[] {
+  const seen = new Set<string>();
+  const hosts: string[] = [];
+  const vendors = settings?.llm?.vendors;
+  if (!vendors) return hosts;
+  for (const block of Object.values(vendors)) {
+    const raw = block?.baseUrl;
+    if (typeof raw !== "string") continue;
+    const trimmed = raw.trim();
+    if (trimmed.length === 0) continue;
+    let hostname: string;
+    try {
+      hostname = new URL(trimmed).hostname;
+    } catch {
+      // Malformed endpoint — NOT a wildcard, NOT an allow-all fallback. It
+      // simply contributes no host (deny-by-default per the no-fallback rule).
+      continue;
+    }
+    const host = hostname.trim().toLowerCase();
+    if (host.length === 0 || seen.has(host)) continue;
+    seen.add(host);
+    hosts.push(host);
+  }
+  return hosts;
+}
+
+/**
  * Replace the live ASRT config (TRUSTED settings only). Pass-through to
  * `SandboxManager.updateConfig`.
  */
