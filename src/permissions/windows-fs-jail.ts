@@ -44,7 +44,9 @@ import { createRequire } from "node:module";
 import { dirname, join } from "node:path";
 import { existsSync, statSync } from "node:fs";
 
-import { DEFAULT_WINDOWS_GROUP_NAME } from "./asrt-sandbox.js";
+// NOTE: `groupName` is passed in by callers (asrt-sandbox.ts forwards
+// DEFAULT_WINDOWS_GROUP_NAME) rather than imported here — that would create an
+// asrt-sandbox ↔ windows-fs-jail import cycle.
 
 /** The deny-list the host hands the win32 FS jail (resolved to explicit files). */
 export interface WindowsFsDeny {
@@ -136,7 +138,7 @@ export function injectHolderPid(argv: readonly string[], holderPid: number): str
 export function stampWindowsFsDeny(
   deny: WindowsFsDeny,
   holderPid: number,
-  groupName: string = DEFAULT_WINDOWS_GROUP_NAME,
+  groupName: string,
 ): void {
   const exe = resolveSrtWinPath();
   const input = JSON.stringify({ denyRead: deny.denyRead, denyWrite: deny.denyWrite });
@@ -160,7 +162,7 @@ export function stampWindowsFsDeny(
  */
 export function restoreWindowsFsDeny(
   holderPid: number,
-  groupName: string = DEFAULT_WINDOWS_GROUP_NAME,
+  groupName: string,
 ): void {
   const exe = resolveSrtWinPath();
   const r = spawnSync(
@@ -186,9 +188,9 @@ export function restoreWindowsFsDeny(
 }
 
 /** Run `srt-win acl recover --json` (crash recovery: prune dead holders). */
-export function recoverWindowsFsStamps(force = false): void {
+export function recoverWindowsFsStamps(groupName: string, force = false): void {
   const exe = resolveSrtWinPath();
-  const args = ["acl", "recover", "--json"];
+  const args = ["acl", "recover", "--name", groupName, "--json"];
   if (force) args.splice(2, 0, "--force");
   const r = spawnSync(exe, args, { encoding: "utf8", timeout: 15000 });
   if (r.status !== 0) {
