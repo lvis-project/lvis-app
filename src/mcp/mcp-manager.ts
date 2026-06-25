@@ -166,8 +166,20 @@ export class McpManager {
       this.clients.delete(config.id);
     }
 
+    // worker-egress PR1: the HOST decides the stdio worker's filesystem-jail
+    // root — it is NEVER sourced from plugin/renderer/marketplace/config-file
+    // input. `connectServer` is the single chokepoint every external MCP server
+    // config passes through before `new McpClient`, so the invariant "the host
+    // always sets sandboxRoot" is established here (deny-by-default A.a). Any
+    // value that rode in on `config` (e.g. a tampered servers.json) is dropped
+    // and overwritten with the host-derived per-server root.
+    const connectConfig =
+      config.transport === "stdio"
+        ? { ...config, sandboxRoot: await this.ensureStdioSandboxRoot(config.id) }
+        : config;
+
     const client = new McpClient(
-      config,
+      connectConfig,
       this.governance,
       this.toolRegistry,
       this.permissionManager,
@@ -213,6 +225,37 @@ export class McpManager {
     await Promise.all(promises);
     this.clients.clear();
     log.info("모든 MCP 서버 연결 해제 완료");
+  }
+
+  /**
+   * Host-derive (and create) the per-server filesystem-jail root for an external
+   * stdio MCP worker — `~/.lvis/mcp/<serverId>/sandbox/` (worker-egress PR1).
+   *
+   * This is the ONLY writable path the ASRT-wrapped worker is granted. The
+   * directory is created mode 0o700 per the storage-namespace convention so the
+   * jail exists before the worker spawns. The server id is sanitized to a single
+   * path segment (no separators / parent traversal) so a crafted id cannot
+   * escape the `~/.lvis/mcp/` namespace; if sanitization empties the id the
+   * server is rejected rather than silently jailing into a shared dir.
+   *
+   * On failure to create the dir we DO NOT fall back to a permissive path — we
+   * throw, and the caller's connect fails closed (No-Fallback).
+   */
+  private async ensureStdioSandboxRoot(serverId: string): Promise<string> {
+    // Collapse to a single safe path segment: keep alnum / dash / underscore /
+    // dot, replace everything else with `_`, and strip leading dots so a
+    // sanitized id can never be `.` / `..` (parent traversal).
+    const safeId = serverId
+      .replace(/[^A-Za-z0-9._-]/g, "_")
+      .replace(/^\.+/, "");
+    if (safeId.length === 0) {
+      throw new Error(
+        `[mcp-manager] cannot derive a sandbox root for server id '${serverId}' (empty after sanitization)`,
+      );
+    }
+    const root = join(lvisHome(), "mcp", safeId, "sandbox");
+    await mkdir(root, { recursive: true, mode: 0o700 });
+    return root;
   }
 
   // ─── Kill Switch (§10.1) ────────────────────────────
@@ -513,7 +556,11 @@ export class McpManager {
     // - headers: may contain bearer/session tokens
     // - env: may contain injected credentials
     // - args: may embed secrets on stdio command lines
-    const { apiKey: _apiKey, headers: _headers, env: _env, args: _args, ...safe } = config;
+    // - sandboxRoot: host-derived filesystem-jail path; never a renderer concern
+    //   and never sourced from renderer input (worker-egress PR1).
+    const { apiKey: _apiKey, headers: _headers, env: _env, args: _args, ...rest } =
+      config;
+    const { sandboxRoot: _sandboxRoot, ...safe } = rest as Record<string, unknown>;
     return safe as McpServerConfigDto;
   }
 

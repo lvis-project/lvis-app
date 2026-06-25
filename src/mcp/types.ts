@@ -160,6 +160,22 @@ export interface McpStdioServerConfig extends McpServerConfigBase {
   env?: Record<string, string>;
   /** Safe env var name that receives apiKey at process launch. */
   apiKeyEnv?: string;
+  /**
+   * HOST-POPULATED filesystem-jail root for the ASRT-wrapped worker spawn
+   * (worker-egress PR1). When the OS-tool sandbox gate is ON, the stdio worker
+   * is wrapped through {@link ../permissions/asrt-sandbox.js wrapWorkerCommand}
+   * and this directory is the ONLY path the wrapped process may write — its
+   * per-server sandbox root under `~/.lvis/mcp/<serverId>/`.
+   *
+   * TRUST: this field is populated EXCLUSIVELY by the host at connect time
+   * (`McpManager.connectServer` derives it from {@link lvisHome}); it MUST NEVER
+   * originate from plugin/renderer/marketplace/config-file input (those are
+   * untrusted surfaces — a server-supplied write-jail root would defeat the
+   * jail). It is therefore deliberately NOT persisted to `servers.json` and is
+   * stripped from the renderer DTO. When ABSENT at wrap time the worker is
+   * wrapped DENY-ALL-WRITES (fail-closed) — never a HOME-wide or cwd fallback.
+   */
+  sandboxRoot?: string;
   url?: never;
   headers?: never;
   apiKeyHeader?: never;
@@ -221,7 +237,7 @@ type DistributiveOmit<T, K extends PropertyKey> = T extends unknown ? Omit<T, K>
  */
 export type McpServerConfigDto = DistributiveOmit<
   McpServerConfig,
-  "apiKey" | "headers" | "env" | "args"
+  "apiKey" | "headers" | "env" | "args" | "sandboxRoot"
 >;
 
 export interface McpToolSchema {

@@ -167,6 +167,13 @@ export interface ReviewerDispatchInput {
    * sandbox-write auto-LOW rule.
    */
   ownerPluginSandboxRoot?: string;
+  /**
+   * worker-egress PR1 — originating external MCP stdio server id (from
+   * `Tool.mcpServerId`). Threaded so the reviewer reports the GENUINE asrt
+   * capability for a server whose worker was actually ASRT-wrapped (and so the
+   * verdict cache scopes by the real substrate). Omitted for non-MCP calls.
+   */
+  mcpServerId?: string;
 }
 
 /**
@@ -715,7 +722,7 @@ export class PermissionManager {
     // ON. The ASRT sandbox publishes its capability at boot via
     // setActiveSandboxCapability; the host-shell path then sees the active
     // kind/confidence while non-wrapped substrates stay "none".
-    const sandboxScope = resolveReviewerSandboxCapability(input.source, toolName);
+    const sandboxScope = resolveReviewerSandboxCapability(input.source, toolName, input.mcpServerId);
     const cacheCtx = {
       allowedDirectories: input.allowedDirectories,
       scope: {
@@ -763,8 +770,9 @@ export class PermissionManager {
       // path may present `asrt` to the reviewer. plugin/MCP (unwrapped worker)
       // and in-process builtins resolve to `none` so isWeakSandbox stays weak
       // and the LLM cannot downgrade a MEDIUM/HIGH verdict for an unsandboxed
-      // effect. See resolveReviewerSandboxCapability for the invariant.
-      sandboxCapability: resolveReviewerSandboxCapability(input.source, toolName),
+      // effect — except a genuinely ASRT-wrapped external MCP worker
+      // (worker-egress PR1, keyed on input.mcpServerId). See the resolver invariant.
+      sandboxCapability: resolveReviewerSandboxCapability(input.source, toolName, input.mcpServerId),
       ...(input.conversationContext ? { conversationContext: input.conversationContext } : {}),
       ...(input.writesToOwnSandbox !== undefined
         ? { writesToOwnSandbox: input.writesToOwnSandbox }
@@ -870,8 +878,8 @@ export class PermissionManager {
     // Failures are swallowed so audit never blocks tool execution.
     // Record the SUBSTRATE-aware capability the reviewer actually saw (not the
     // process-global) so the audit honestly reflects the isolation in force for
-    // THIS call's execution substrate.
-    const sandboxCap = resolveReviewerSandboxCapability(input.source, toolName);
+    // THIS call's execution substrate (incl. a wrapped MCP worker — PR1).
+    const sandboxCap = resolveReviewerSandboxCapability(input.source, toolName, input.mcpServerId);
     const auditEntry = buildSandboxAuditEntry({
       tool: {
         name: toolName,
