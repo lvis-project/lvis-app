@@ -32,6 +32,8 @@ import {
   checkAsrtDependencies,
   computeUnionAllowedDomains,
   normalizeUnionForAsrt,
+  DEFAULT_WINDOWS_PROXY_PORT_RANGE,
+  buildSandboxConfig,
 } from "../asrt-sandbox.js";
 // ASRT-contract guards: the real vendored matcher + parent-proxy resolver, so
 // the host-side fixes are proven against ASRT 0.0.59's ACTUAL semantics (not a
@@ -434,5 +436,43 @@ describe("asrt-sandbox — normalizeUnionForAsrt (domain-matching alignment, PR 
     // subdomain that LVIS hostFetch would have allowed.
     expect(matchesDomainPattern("sub.example.com", "example.com")).toBe(false);
     expect(matchesDomainPattern("example.com", "example.com")).toBe(true);
+  });
+});
+
+describe("asrt-sandbox — proxyPortRange single SOT (install↔config consistency)", () => {
+  /**
+   * The WFP rule stamped at install time MUST cover exactly the port range the
+   * srt-win egress proxy binds at runtime. Both the install handler
+   * (ipc/domains/permissions.ts sandboxWindowsInstall) and buildSandboxConfig
+   * (asrt-sandbox.ts) source their range from the SAME local
+   * DEFAULT_WINDOWS_PROXY_PORT_RANGE constant — the local mirror of ASRT's
+   * value. This test pins the invariant: the local constant is identical to
+   * ASRT's real export, so the WFP-permitted range (stamped at install) equals
+   * the proxy bind range (at runtime) by construction, and any upstream drift
+   * in ASRT fails this test rather than silently desyncing the two paths.
+   */
+  it("local DEFAULT_WINDOWS_PROXY_PORT_RANGE matches ASRT's real export", async () => {
+    const asrt = await import("@anthropic-ai/sandbox-runtime");
+    // Both references must be the identical value — the install path and the
+    // buildSandboxConfig runtime path converge on this one constant.
+    expect(DEFAULT_WINDOWS_PROXY_PORT_RANGE).toEqual(asrt.DEFAULT_WINDOWS_PROXY_PORT_RANGE);
+  });
+
+  it("buildSandboxConfig emits the local SOT constant as windows.proxyPortRange (win32 path)", () => {
+    // Force win32 so the windows section is emitted regardless of the actual
+    // platform running CI. The install handler sources the same local constant,
+    // so this assertion proves both paths use the same value.
+    const prevPlatform = Object.getOwnPropertyDescriptor(process, "platform");
+    Object.defineProperty(process, "platform", { value: "win32", configurable: true });
+    try {
+      const config = buildSandboxConfig({ allowedDomains: [] });
+      // The windows section must be present and use the local SOT constant.
+      expect(config.windows).toBeDefined();
+      expect(config.windows!.proxyPortRange).toEqual(DEFAULT_WINDOWS_PROXY_PORT_RANGE);
+    } finally {
+      if (prevPlatform) {
+        Object.defineProperty(process, "platform", prevPlatform);
+      }
+    }
   });
 });

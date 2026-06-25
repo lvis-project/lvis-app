@@ -395,6 +395,19 @@ export function PermissionsTab() {
         await getApi().updateSettings({ features: { osToolSandbox: false } });
         return;
       }
+      // Defensive: an error shape from the IPC (install threw or returned ok:false).
+      // Revert to the same safe state as a cancellation so the toggle is never
+      // left half-enabled. Show an error banner with the reason.
+      if ("ok" in result && result.ok === false) {
+        setSandboxEnabled(false);
+        setWindowsStatus(null);
+        await getApi().updateSettings({ features: { osToolSandbox: false } });
+        const detail = (result as { ok: false; message?: string; error?: string }).message
+          ?? (result as { ok: false; message?: string; error?: string }).error
+          ?? "unknown error";
+        showBanner("error", t("permissionsTab.osSandboxWindowsInstallError", { message: detail }));
+        return;
+      }
       // Install ran — refresh the readiness snapshot so the panel advances to
       // the relogin-pending state (verbatim instructions still drive the copy).
       const status = await window.lvis.permission.sandboxWindowsStatus();
