@@ -824,6 +824,51 @@ export type PluginLifecycleEventPayload =
   | { pluginId: string };
 
 /**
+ * The spec a plugin hands `PluginHostApi.spawnWorker`. `pluginId` is NOT part of
+ * the spec — the host binds it from the calling hostApi instance, so a plugin
+ * cannot spawn a worker under another plugin's namespace. (The host-internal
+ * primitive in `src/permissions/worker-spawn.ts` accepts the same shape plus
+ * the bound `pluginId`.)
+ */
+export interface PluginWorkerSpec {
+  /** Stable per-worker id — names the control dir + the reviewer registry key. */
+  readonly workerId: string;
+  /** The worker executable to spawn (absolute path or PATH-resolved name). */
+  readonly command: string;
+  /** Argv for the worker. The UDS path is injected per `udsArgName`. */
+  readonly args?: readonly string[];
+  /** Extra env merged onto the host's secret-stripped base env. */
+  readonly env?: Record<string, string | undefined>;
+  /** Paths the worker may write. The host-allocated control-socket dir is
+   *  unioned on automatically. */
+  readonly allowWritePaths?: readonly string[];
+  /**
+   * How the host tells the worker WHERE to bind the control socket (only when
+   * the returned `socketPath` is non-null):
+   *   - a string like `"--uds"` → appends `[udsArgName, socketPath]` to args;
+   *   - `{ env: "LVIS_CONTROL_SOCKET" }` → sets that env var to socketPath.
+   * Omitted ⇒ the worker is not told the path through this primitive.
+   */
+  readonly udsArgName?: string | { readonly env: string };
+}
+
+/**
+ * The handle `PluginHostApi.spawnWorker` resolves to. `socketPath` is the
+ * host-side UDS path to connect to, or `null` on the legacy (gate-OFF / win32)
+ * plain-spawn path — `null` signals the caller to use the legacy TCP channel.
+ */
+export interface SpawnedPluginWorker {
+  readonly socketPath: string | null;
+  readonly pid: number | undefined;
+  /** Stop the worker (SIGTERM → SIGKILL grace) + release ASRT/UDS state. */
+  stop(): void;
+  /** Subscribe to worker stdout (utf-8 chunks). */
+  onStdout(listener: (chunk: string) => void): void;
+  /** Subscribe to worker stderr (utf-8 chunks). */
+  onStderr(listener: (chunk: string) => void): void;
+}
+
+/**
  * Host API — 플러그인이 호스트 서비스에 접근하는 인터페이스.
  * 플러그인 제거 시 해당 플러그인이 등록한 모든 것이 자동 정리된다.
  */
@@ -969,6 +1014,28 @@ export interface PluginHostApi {
    * are logged but do not block quit.
    */
   onShutdown(handler: () => void | Promise<void>): void;
+
+  /**
+   * Spawn a long-lived plugin worker, host-mediated and (when the OS-tool ASRT
+   * sandbox gate is ON, non-Windows) ASRT-wrapped with a bind-mounted Unix-
+   * domain-socket (UDS) control channel — for an HTTP worker the host connects
+   * INBOUND to (the real dynamic-endpoint egress doer; e.g. local-indexer's
+   * embedding worker).
+   *
+   * `pluginId` is bound by the host from THIS hostApi instance — a plugin
+   * cannot spawn a worker under another plugin's namespace. The worker's
+   * control dir lives under the plugin's own `~/.lvis/plugins/<pluginId>/run/
+   * <workerId>/` (host-allocated, 0o700; socket 0o600).
+   *
+   * Returns a handle whose `socketPath` is the host-side path to connect to
+   * (undici `Agent({ connect: { socketPath } })` / `http.request({ socketPath })`)
+   * — or `null` when the worker was plain-spawned (gate OFF, or Windows where
+   * ASRT is network-only), signalling the caller to use the legacy TCP channel.
+   *
+   * OPTIONAL: undefined on host builds that predate this primitive — guard with
+   * `typeof hostApi.spawnWorker === "function"`, mirroring `resolveApiKey?`.
+   */
+  spawnWorker?(spec: PluginWorkerSpec): Promise<SpawnedPluginWorker>;
   // ─── 외부 포털 interactive 인증 (쿠키 수집) ──────────────────────────
   /**
    * Electron BrowserWindow로 외부 포털 로그인 페이지를 띄우고,
