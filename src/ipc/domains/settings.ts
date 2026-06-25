@@ -25,6 +25,22 @@ function broadcastSettingsSnapshot(deps: IpcDeps): void {
   }
 }
 
+/**
+ * Stable signature of EVERY vendor block's configured `baseUrl` (order-stable by
+ * vendor id). The ASRT shared network union includes the host-resolved DYNAMIC
+ * endpoint hostnames derived from these user-configured baseUrls, so ANY
+ * vendor's baseUrl change — not just the active one or Foundry — must trigger a
+ * sandbox network live-refresh. Used to detect that change across a settings
+ * patch and call `refreshSandboxNetworkConfig`.
+ */
+function vendorBaseUrlSignature(llm: LLMSettings): string {
+  const vendors = llm.vendors ?? {};
+  const entries = Object.keys(vendors)
+    .sort()
+    .map((id) => `${id}=${vendors[id as keyof typeof vendors]?.baseUrl ?? ""}`);
+  return entries.join("|");
+}
+
 function activeLlmIdentity(llm: LLMSettings): string {
   const provider = llm.provider;
   const block = llm.vendors?.[provider];
@@ -83,6 +99,10 @@ export function registerSettingsHandlers(deps: IpcDeps): void {
     // MAJOR-2 legacy guard: still detect Foundry baseUrl changes even when
     // the active provider is not Foundry, preserving the prior explicit rewire.
     const prevBaseUrl = prevLlm.vendors?.["azure-foundry"]?.baseUrl ?? null;
+    // ASRT dynamic-endpoint union: capture EVERY vendor baseUrl so a change to
+    // any user-configured endpoint (e.g. the indexer's Azure OpenAI resource)
+    // triggers a sandbox network live-refresh, not just an active/Foundry change.
+    const prevVendorBaseUrlSig = vendorBaseUrlSignature(prevLlm);
     // PR #795 follow-up: the MarketplaceTab "즉시 적용" badge on the SSRF-bypass
     // toggle promised next-request activation, but the marketplace fetcher was
     // capturing the flag at boot only. Detect a change here and call the boot
@@ -134,6 +154,13 @@ export function registerSettingsHandlers(deps: IpcDeps): void {
     // #893 — vendor/baseUrl may have changed; re-sync the plugin wildcard so
     // `hostApi.config.get("hostApiKey")` stays consistent with the active vendor.
     deps.refreshActiveLlmWildcard?.();
+    // ASRT dynamic-endpoint union: when any vendor baseUrl changed, recompute the
+    // shared strict-union and live-swap the ASRT network config so the new
+    // endpoint host is enforced/allowed (and the old one dropped) without a
+    // restart. No-op inside the closure when the sandbox gate is OFF.
+    if (vendorBaseUrlSignature(newLlm) !== prevVendorBaseUrlSig) {
+      deps.refreshSandboxNetworkConfig?.();
+    }
     broadcastSettingsSnapshot(deps);
     return result;
   });

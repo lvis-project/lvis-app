@@ -688,6 +688,55 @@ export async function bootstrap(
   });
   refreshActiveLlmWildcard();
 
+  // ── ASRT shared network-config union builder + live refresh ──────────────
+  // The shared strict-union allow-list ASRT enforces = the UNION of every
+  // loaded plugin's manifest `networkAccess.allowedDomains` PLUS the host-
+  // resolved DYNAMIC endpoint hostnames (user-configured vendor baseUrls a
+  // sandboxed worker actually reaches — e.g. local-indexer's Azure OpenAI
+  // resource). Both the boot init block (below) and the live-refresh closure
+  // (here) build the union the SAME way so they never drift.
+  const buildSandboxUnionDomains = async (): Promise<string[]> => {
+    const { computeUnionAllowedDomains, normalizeUnionForAsrt, computeDynamicEndpointHosts } =
+      await import("./permissions/asrt-sandbox.js");
+    const manifestAllowLists = pluginRuntime
+      .listPluginIds()
+      .map((id) => pluginRuntime.getPluginManifest(id)?.networkAccess?.allowedDomains ?? []);
+    const dynamicEndpointHosts = computeDynamicEndpointHosts(settingsService.getAll());
+    return normalizeUnionForAsrt(
+      computeUnionAllowedDomains([...manifestAllowLists, dynamicEndpointHosts], []),
+    );
+  };
+
+  // Closure invoked by the settings IPC handler when a vendor/embedding
+  // endpoint changes. Recomputes the dynamic-endpoint union and LIVE-SWAPS the
+  // shared ASRT network config so a reconfigured endpoint is enforced/allowed
+  // without an app restart. The network config is a SAFE, GLOBAL live swap
+  // (filterNetworkRequest reads the shared config; updateConfig replaces it).
+  // GATED: no-op when ASRT is not active (gate OFF, or deps-missing/Windows-
+  // not-ready paths where the sandbox was never initialized) — there is no live
+  // config to update, and we must not initialize one outside the boot gate.
+  const refreshSandboxNetworkConfig = (): void => {
+    void (async () => {
+      const { isAsrtSandboxActive, updateAsrtSandboxConfig } = await import(
+        "./permissions/asrt-sandbox.js"
+      );
+      if (!isAsrtSandboxActive()) return;
+      const allowedDomains = await buildSandboxUnionDomains();
+      // Same trusted shape boot init uses: enforced allow-list + strict, no
+      // weakening flags. Per-command filesystem scoping is unaffected.
+      await updateAsrtSandboxConfig({ allowedDomains, strictAllowlist: true });
+      log.info(
+        "boot: ASRT network config live-refreshed (%d union domains after settings change)",
+        allowedDomains.length,
+      );
+    })().catch((err) => {
+      log.warn(
+        "boot: ASRT network config live-refresh failed: %s",
+        err instanceof Error ? err.message : String(err),
+      );
+    });
+  };
+
   // §9.5 — Managed plugin bootstrap. Mandatory enterprise plugins are fetched
   // from the marketplace on boot (VS Code-style), not packaged in app source.
   // Graceful: marketplace unreachable or per-plugin failure never bricks boot.
@@ -1310,8 +1359,6 @@ export async function bootstrap(
     const {
       initializeAsrtSandbox,
       checkAsrtDependencies,
-      computeUnionAllowedDomains,
-      normalizeUnionForAsrt,
     } = await import("./permissions/asrt-sandbox.js");
     const { setActiveSandboxCapability } = await import(
       "./permissions/sandbox-capability.js"
@@ -1395,18 +1442,21 @@ export async function bootstrap(
           // Manifests are already loaded here (this block runs AFTER
           // initPluginRuntime), so the union is computed once at init — no
           // deferred updateConfig needed.
+          //
+          // Build the enforced allow-list via the SAME builder the live-refresh
+          // closure uses (buildSandboxUnionDomains): manifest UNION ∪ host-
+          // resolved DYNAMIC endpoint hostnames (user-configured vendor baseUrls
+          // a worker reaches — e.g. local-indexer's Azure OpenAI resource, whose
+          // null manifest networkAccess contributes nothing static and would be
+          // hard-denied without this). Trusted host baseline stays empty.
+          // normalizeUnionForAsrt (inside the builder) emits both `d` and `*.d`
+          // so the sandbox enforces the SAME hosts the hostFetch path advertises.
+          // Plugin count for the log — buildSandboxUnionDomains computes the
+          // actual union internally; this one-liner only supplies the count.
           const manifestAllowLists = pluginRuntime
             .listPluginIds()
             .map((id) => pluginRuntime.getPluginManifest(id)?.networkAccess?.allowedDomains ?? []);
-          // Trusted host baseline for host tools is empty by default — no
-          // settings surface grants host-tool egress beyond the plugin union.
-          // Normalize for ASRT's matcher: a bare `example.com` matches EXACTLY
-          // in ASRT (domain-pattern.js), whereas LVIS hostFetch treats it as a
-          // dot-boundary suffix. normalizeUnionForAsrt emits both `d` and `*.d`
-          // so the sandbox enforces the SAME hosts the fetch path advertises.
-          const unionAllowedDomains = normalizeUnionForAsrt(
-            computeUnionAllowedDomains(manifestAllowLists, []),
-          );
+          const unionAllowedDomains = await buildSandboxUnionDomains();
 
           // Trust boundary: WEAKENING flags are NOT set here (deny-by-default,
           // no Apple events / weaker isolation / unix-socket opening). Only the
@@ -1531,7 +1581,7 @@ export async function bootstrap(
     memoryManager, keywordEngine, routeEngine, toolRegistry,
     systemPromptBuilder, conversationLoop, routineEngine, mcpManager, mcpArtifactStore, agentArtifactStore, skillArtifactStore,
     idleScheduler, preferenceRefreshService, bashAstValidator, auditService, auditLogger: bootAuditLogger, postTurnHookChain,
-    approvalGate, rewireReviewerAgent, refreshMarketplaceFetcherConfig, refreshActiveLlmWildcard,
+    approvalGate, rewireReviewerAgent, refreshMarketplaceFetcherConfig, refreshActiveLlmWildcard, refreshSandboxNetworkConfig,
     routinesStore, routinesScheduler, workBoardStore, workBoardEngine, workBoardReport: workBoardReporter, sessionTodoStore, askUserQuestionGate, skillStore, agentProfileStore, personaPromptStore,
     knowledgeAvailable, starredStore, feedbackStore,
     notificationService,
