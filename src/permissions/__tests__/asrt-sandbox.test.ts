@@ -676,14 +676,25 @@ describe("asrt-sandbox — sensitive read deny-list (host-secret hardening)", ()
     expect(paths).toContain(join(FAKE_LVIS_HOME, "policy.json"));
     expect(paths).toContain(join(FAKE_LVIS_HOME, "plugins", "auth-partitions.json"));
 
+    // FIX 3: drift-sync paths added to match SENSITIVE_PATH_PATTERNS.
+    expect(paths).toContain(join(FAKE_LVIS_HOME, "certs"));
+    expect(paths).toContain(join(FAKE_LVIS_HOME, "keys"));
+    expect(paths).toContain(join(home, ".azure"));
+    expect(paths).toContain(join(home, ".pgpass"));
+    expect(paths).toContain(join(home, ".gitconfig"));
+    expect(paths).toContain(join(home, ".bash_history"));
+    expect(paths).toContain(join(home, ".zsh_history"));
+
     // Electron userData dir (deny whole dir — covers OAuth session cookies/tokens,
     // Cookies SQLite, Local/Session Storage, lvis-secrets.json, etc.).
+    // FIX 1: Linux base mirrors Electron's XDG_CONFIG_HOME resolution.
+    const xdgBase = process.env.XDG_CONFIG_HOME ?? join(home, ".config");
     const expectedUserData =
       process.platform === "darwin"
         ? join(home, "Library", "Application Support", "LVIS")
         : process.platform === "win32"
           ? join(home, "AppData", "Roaming", "LVIS")
-          : join(home, ".config", "LVIS");
+          : join(xdgBase, "LVIS");
     expect(paths).toContain(expectedUserData);
 
     // No duplicates (deduped, order-stable).
@@ -700,6 +711,64 @@ describe("asrt-sandbox — sensitive read deny-list (host-secret hardening)", ()
     expect(paths).not.toContain(join(home, ".cargo"));
     // ~/.config wholesale must never be denied — only specific subdirs.
     expect(paths).not.toContain(join(home, ".config"));
+  });
+
+  it("FIX 1 — Linux XDG_CONFIG_HOME: when set, userData base uses $XDG_CONFIG_HOME not ~/.config", () => {
+    // This test only exercises the XDG path on Linux (the env var is harmless
+    // on other platforms since darwin/win32 branches never read it).
+    if (process.platform !== "linux") return;
+    const home = homedir();
+    const fakeXdg = join(tmpdir(), "fake-xdg-config-home");
+    const prevXdg = process.env.XDG_CONFIG_HOME;
+    try {
+      process.env.XDG_CONFIG_HOME = fakeXdg;
+      const paths = getDefaultSensitiveReadDenyPaths();
+      // Must deny the XDG-resolved path.
+      expect(paths).toContain(join(fakeXdg, "LVIS"));
+      // Must NOT deny the default ~/.config/LVIS when XDG is overridden
+      // (belt-and-suspenders is the caller's choice; this SOT mirrors Electron).
+      expect(paths).not.toContain(join(home, ".config", "LVIS"));
+    } finally {
+      if (prevXdg === undefined) delete process.env.XDG_CONFIG_HOME;
+      else process.env.XDG_CONFIG_HOME = prevXdg;
+    }
+  });
+
+  it("FIX 2 — userDataDir param: exact path is denied when provided (handles --user-data-dir)", () => {
+    const home = homedir();
+    const customUserData = join(tmpdir(), "custom-electron-userData-for-test");
+    const paths = getDefaultSensitiveReadDenyPaths(customUserData);
+    // The exact provided path must be denied.
+    expect(paths).toContain(customUserData);
+    // No duplicates.
+    expect(new Set(paths).size).toBe(paths.length);
+    // Over-deny safety: the derived fallback is NOT additionally added when
+    // the exact path is provided (the dedup set handles this if they collide,
+    // but the function uses the provided value exclusively for the userData slot).
+    // Verify the provided path is present exactly once.
+    expect(paths.filter((p) => p === customUserData).length).toBe(1);
+  });
+
+  it("FIX 2 — userDataDir absent: falls back to per-platform derived path (no electron import)", () => {
+    const home = homedir();
+    const paths = getDefaultSensitiveReadDenyPaths(); // no arg → fallback
+    const xdgBase = process.env.XDG_CONFIG_HOME ?? join(home, ".config");
+    const fallback =
+      process.platform === "darwin"
+        ? join(home, "Library", "Application Support", "LVIS")
+        : process.platform === "win32"
+          ? join(home, "AppData", "Roaming", "LVIS")
+          : join(xdgBase, "LVIS");
+    expect(paths).toContain(fallback);
+  });
+
+  it("FIX 2 — buildSandboxConfig threads userDataDir into deny-list", () => {
+    const customUserData = join(tmpdir(), "threaded-userData-deny-test");
+    const config = buildSandboxConfig({
+      allowedDomains: [],
+      userDataDir: customUserData,
+    });
+    expect(config.filesystem.denyRead).toContain(customUserData);
   });
 
   it("buildSandboxConfig unions the sensitive deny-list into filesystem.denyRead", () => {
