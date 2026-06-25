@@ -116,6 +116,16 @@ export interface AppServices {
    * next call without an app restart.
    */
   refreshActiveLlmWildcard?: () => void;
+  /**
+   * Live-refresh the shared ASRT sandbox network allow-list after a settings
+   * change. Recomputes the strict-union (plugin manifest domains ∪ host-resolved
+   * DYNAMIC vendor endpoint hostnames — e.g. a reconfigured Azure OpenAI / custom
+   * baseUrl) and swaps the live ASRT config so a reconfigured endpoint is
+   * enforced/allowed without an app restart. No-op when the sandbox gate is OFF
+   * (ASRT never initialized) — there is no live config to update. Invoked from
+   * the settings IPC handler when a vendor/endpoint changes.
+   */
+  refreshSandboxNetworkConfig?: () => void;
   /** Whether knowledge search tools were successfully registered. */
   knowledgeAvailable: boolean;
   /** Starred messages persistence (~/.lvis/starred.json) */
