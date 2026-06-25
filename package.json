@@ -266,7 +266,11 @@
         "zip"
       ],
       "entitlements": "build/entitlements.mac.plist",
-      "entitlementsInherit": "build/entitlements.mac.plist"
+      "entitlementsInherit": "build/entitlements.mac.plist",
+      "files": [
+        "!node_modules/@anthropic-ai/sandbox-runtime/vendor/srt-win{,/**/*}",
+        "!node_modules/@anthropic-ai/sandbox-runtime/vendor/seccomp{,/**/*}"
+      ]
     },
     "dmg": {
       "artifactName": "${productName}-${version}-mac-${arch}.${ext}",
@@ -312,6 +316,9 @@
         "AppImage",
         "deb",
         "rpm"
+      ],
+      "files": [
+        "!node_modules/@anthropic-ai/sandbox-runtime/vendor/srt-win{,/**/*}"
       ]
     },
     "appImage": {
@@ -326,6 +333,9 @@
     "win": {
       "target": [
         "nsis"
+      ],
+      "files": [
+        "!node_modules/@anthropic-ai/sandbox-runtime/vendor/seccomp{,/**/*}"
       ]
     },
     "nsis": {

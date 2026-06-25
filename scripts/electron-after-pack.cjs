@@ -1,5 +1,6 @@
 const { createHash } = require("node:crypto");
-const { existsSync, readFileSync, readdirSync, rmSync } = require("node:fs");
+const { existsSync, readFileSync, readdirSync, rmSync, statSync } = require("node:fs");
+const { constants: fsConstants, accessSync } = require("node:fs");
 const { join } = require("node:path");
 const { gunzipSync } = require("node:zlib");
 
@@ -89,9 +90,108 @@ function sha256Hex(buffer) {
   return createHash("sha256").update(buffer).digest("hex");
 }
 
+/**
+ * Per-platform sandbox-runtime (ASRT) vendor binary assertion.
+ *
+ * The top-level `asarUnpack: vendor/**` glob unpacks the whole vendor dir, then
+ * per-target `files` negations in package.json prune the binaries the platform
+ * never executes (mac → no srt-win + no seccomp; linux → no srt-win;
+ * win → no seccomp). This guard makes that prune a HARD invariant of the packed
+ * artifact rather than an electron-builder config detail nobody re-checks:
+ *   - the KEPT binary (the one this platform's backend spawns) must be present
+ *     and executable;
+ *   - the PRUNED binary must be absent (no dead weight shipped per platform).
+ *
+ * Resolution mirrors ASRT's getSrtWinPath()/seccomp resolver: the unpacked
+ * vendor dir under `app.asar.unpacked`. We do NOT call the resolvers here (they
+ * run in the app process at runtime, not in the packer), so this assertion is
+ * independent + fails the build loudly if the prune drifts.
+ */
+function assertSandboxVendorBinaries(context) {
+  const platform = context.electronPlatformName;
+  const resourcesDir = electronResourcesDir(context);
+  const vendorDir = join(
+    resourcesDir,
+    "app.asar.unpacked",
+    "node_modules",
+    "@anthropic-ai",
+    "sandbox-runtime",
+    "vendor",
+  );
+
+  // Per-platform: [keptSubdir, keptBinaryBasename] + [prunedSubdir...].
+  // srt-win.exe (Windows) and apply-seccomp (Linux) are vendored per-arch under
+  // {x64,arm64}; the binary the host actually runs depends on the packed arch,
+  // so we assert the binary exists under AT LEAST the packed arch dir.
+  //
+  // electron-builder's `context.arch` is the numeric Arch enum (1=x64, 3=arm64,
+  // …). Map only the two arch dirs ASRT vendors; any other/unknown value falls
+  // back to scanning all vendored arch dirs (null), which still asserts the
+  // binary is present + executable without a brittle dependency on builder-util.
+  const ARCH_DIR_BY_ENUM = { 1: "x64", 3: "arm64" };
+  const arch = ARCH_DIR_BY_ENUM[context.arch] ?? null;
+  const matrix = {
+    win32: { keep: { dir: "srt-win", binary: "srt-win.exe" }, prune: ["seccomp"] },
+    linux: { keep: { dir: "seccomp", binary: "apply-seccomp" }, prune: ["srt-win"] },
+    darwin: { keep: null, prune: ["srt-win", "seccomp"] },
+  };
+  const spec = matrix[platform];
+  if (!spec) return;
+
+  // PRUNED dirs must be gone entirely.
+  for (const pruned of spec.prune) {
+    const prunedDir = join(vendorDir, pruned);
+    if (existsSync(prunedDir)) {
+      throw new Error(
+        `packaged sandbox-runtime vendor binary not pruned for ${platform}: ${prunedDir} should be absent`,
+      );
+    }
+  }
+
+  if (!spec.keep) return;
+
+  // KEPT binary must be present + executable under the packed arch (and, when
+  // arch is unknown, under any vendored arch dir).
+  const keepRoot = join(vendorDir, spec.keep.dir);
+  if (!existsSync(keepRoot)) {
+    throw new Error(
+      `packaged sandbox-runtime vendor binary missing for ${platform}: ${keepRoot} (kept binary directory absent)`,
+    );
+  }
+  const archDirs = arch ? [arch] : readdirSync(keepRoot);
+  let found = false;
+  for (const archDir of archDirs) {
+    const binPath = join(keepRoot, archDir, spec.keep.binary);
+    if (!existsSync(binPath)) continue;
+    found = true;
+    const mode = statSync(binPath).mode;
+    // On Windows execute permission is implicit (no POSIX x-bit); assert the
+    // file is a regular non-empty file. On POSIX assert the owner-execute bit.
+    if (platform === "win32") {
+      if (statSync(binPath).size === 0) {
+        throw new Error(`packaged srt-win binary is empty: ${binPath}`);
+      }
+    } else {
+      try {
+        accessSync(binPath, fsConstants.X_OK);
+      } catch {
+        throw new Error(
+          `packaged sandbox-runtime vendor binary not executable for ${platform}: ${binPath} (mode ${(mode & 0o777).toString(8)})`,
+        );
+      }
+    }
+  }
+  if (!found) {
+    throw new Error(
+      `packaged sandbox-runtime vendor binary missing for ${platform}: ${spec.keep.binary} under ${keepRoot} (arch dirs: ${archDirs.join(", ")})`,
+    );
+  }
+}
+
 module.exports = async function afterPack(context) {
   const keepWebgl = process.env.LVIS_KEEP_WEBGL === "1";
   assertBundledUvResource(context);
+  assertSandboxVendorBinaries(context);
 
   if (context.electronPlatformName === "linux") {
     for (const file of LINUX_GPU_RUNTIME_FILES) {

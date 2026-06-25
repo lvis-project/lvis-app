@@ -26,6 +26,54 @@ export interface SandboxConfinement {
   network: boolean;
 }
 
+/**
+ * Windows srt-win install readiness, returned to the renderer's consent panel.
+ *
+ * `ready` is the single boolean the UI gates on: the discriminator group is
+ * enabled in the current token (`groupState === "ready"`) AND the WFP filter set
+ * is installed (`wfpState === "installed"`). Until both hold, the sandbox cannot
+ * confine egress and boot keeps `isAsrtSandboxActive()` false.
+ *
+ * `applicable` is false on every non-win32 platform — the renderer renders the
+ * macOS/Linux capability copy instead of the Windows consent flow. The state
+ * fields are `null` there (no Windows backend to query).
+ *
+ * `instructions` is the VERBATIM ASRT `windowsInstallInstructions(...)` text,
+ * tailored to the observed group state (e.g. only the relogin step remains once
+ * the install ran). Empty string when not applicable.
+ */
+export interface SandboxWindowsStatusInfo {
+  /** True only on win32. Non-win32 → false, with null state fields. */
+  applicable: boolean;
+  /** `absent` | `created-not-on-token` | `ready`, or null off-win32. */
+  groupState: "absent" | "created-not-on-token" | "ready" | null;
+  /** `absent` | `installed`, or null off-win32. */
+  wfpState: "absent" | "installed" | null;
+  /** group === "ready" AND wfp === "installed". Always false off-win32. */
+  ready: boolean;
+  /** Verbatim ASRT install/relogin instructions. Empty off-win32. */
+  instructions: string;
+}
+
+/**
+ * Result of the user-consented Windows install (one self-elevating UAC).
+ *
+ * `cancelled: true` means the user dismissed the UAC prompt — NOT an error; the
+ * install simply didn't run and the toggle should revert. On success the
+ * post-install group + WFP state is returned so the renderer can advance to the
+ * relogin-pending visual without a second round trip.
+ */
+export interface SandboxWindowsInstallResult {
+  /** True when the user dismissed UAC. Mutually exclusive with the state fields. */
+  cancelled?: true;
+  /** Post-install group state (absent when `cancelled`). */
+  groupState?: "absent" | "created-not-on-token" | "ready";
+  /** Post-install WFP state (absent when `cancelled`). */
+  wfpState?: "absent" | "installed";
+  /** group === "ready" AND wfp === "installed" post-install. */
+  ready?: boolean;
+}
+
 /** Capability snapshot returned to the renderer for the settings toggle. */
 export interface SandboxCapabilityInfo {
   platform: NodeJS.Platform;
