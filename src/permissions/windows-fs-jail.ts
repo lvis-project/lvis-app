@@ -17,7 +17,8 @@
  *       rejected — explicit absolute file paths only.
  *   - `srt-win acl restore --holder-pid <PID> [--name <group>] --json`
  *       Releases this holder's claim; `--json` emits a per-path outcome array.
- *   - `srt-win acl recover [--force] --json`  ← crash recovery.
+ *   - `srt-win acl recover [--name <group>] [--force] --json`  ← crash recovery
+ *       (the `Recover` clap variant flattens GroupRef, so `--name` is accepted).
  *   - `srt-win exec ... --holder-pid <PID> -- <target>`  ← opens a
  *       no-FILE_SHARE_DELETE handle on every stamped file until the child
  *       exits, so the OS refuses delete/rename (DACL alone cannot fence that).
@@ -35,7 +36,8 @@
  * VERIFICATION — darwin-untestable. `srt-win.exe` is a Windows binary; CI
  * `windows-latest` exercises the wiring/logic, but REAL deny-enforcement (an
  * out-of-jail write is blocked; a stamped file survives delete) requires the
- * documented MANUAL WINDOWS QA gate (#1367) BEFORE the confines flip (PR-W3).
+ * documented MANUAL WINDOWS QA gate (#1367) BEFORE the confines flip (the
+ * deny-only reviewer relaxation, tracked in #1367).
  * This module is reachable ONLY behind the existing default-OFF sandbox gate.
  */
 
@@ -62,13 +64,52 @@ function srtWinArchDir(arch: string): string {
   throw new Error(`[windows-fs-jail] unsupported Windows arch '${arch}'`);
 }
 
+/** ASRT versions whose `srt-win acl` CLI contract this shim has been verified
+ *  against (the clap definitions in `vendor/srt-win-src/src/{main,acl}.rs`).
+ *  Both 0.0.59 and 0.0.60 were confirmed to expose the same `acl`/`exec
+ *  --holder-pid` interface. A bump OUTSIDE this set must re-verify before the
+ *  FS jail is trusted. */
+const VERIFIED_ASRT_VERSIONS = new Set(["0.0.59", "0.0.60"]);
+let _aclContractChecked = false;
+
+/**
+ * FAIL-CLOSED drift guard for the UNDOCUMENTED, unexported `srt-win acl` CLI: a
+ * silent ASRT version bump could rename flags or change the stdin shape. Assert
+ * the installed version is one whose contract we verified; throw LOUDLY
+ * otherwise so callers degrade to network-only (never silently mis-driving the
+ * CLI). Memoized — cheap on the hot path. The shim's unit tests pin the argv we
+ * SEND; this pins the binary we send it TO.
+ */
+export function assertSrtWinAclContract(): void {
+  if (_aclContractChecked) return;
+  const require = createRequire(import.meta.url);
+  const { version } = require("@anthropic-ai/sandbox-runtime/package.json") as {
+    version: string;
+  };
+  if (!VERIFIED_ASRT_VERSIONS.has(version)) {
+    throw new Error(
+      `[windows-fs-jail] srt-win acl contract verified only for ASRT ` +
+        `${[...VERIFIED_ASRT_VERSIONS].join("/")}, but ${version} is installed — ` +
+        `re-verify the acl CLI (vendor/srt-win-src/src/{main,acl}.rs) before trusting the FS jail`,
+    );
+  }
+  _aclContractChecked = true;
+}
+
+/** @internal test seam — reset the memoized contract check. */
+export function __resetAclContractCheckForTest(): void {
+  _aclContractChecked = false;
+}
+
 /**
  * Locate the bundled `srt-win.exe`. ASRT does NOT export its own
  * `getSrtWinPath()` from the package entry, so we resolve the package root and
  * mirror its `vendor/srt-win/<arch>/srt-win.exe` layout (the asarUnpack target
  * the packaging seam already keeps). `SRT_WIN_PATH` overrides for tests/QA.
+ * Asserts the ASRT version contract first (drift guard).
  */
 export function resolveSrtWinPath(): string {
+  assertSrtWinAclContract();
   const override = process.env.SRT_WIN_PATH;
   if (override && override !== "") return override;
   const require = createRequire(import.meta.url);
@@ -89,10 +130,16 @@ export function resolveSrtWinPath(): string {
  * host deny floor ({@link getDefaultSensitiveReadDenyPaths}) mixes files and
  * dirs (e.g. `~/.ssh`, `~/.aws`), so narrow to paths that exist AND are regular
  * files. A dir in the floor is dropped here (it cannot be stamped as a single
- * path); covering a whole sensitive DIRECTORY on Windows is a PR-W3 concern
- * (enumerate-and-stamp, or rely on the parent-stamp inheritance acl applies).
- * Returns the explicit-file subset; callers log what was dropped (no silent
- * truncation — see the No-Fallback rule).
+ * path); covering a whole sensitive DIRECTORY on Windows is a follow-up concern
+ * (tracked in #1367 — enumerate-and-stamp, or the parent-stamp inheritance acl
+ * applies). Returns the explicit-file subset; callers MUST log what was dropped
+ * (no silent truncation — see the No-Fallback rule).
+ *
+ * `statSync` (not `lstatSync`) follows symlinks, and existsSync→statSync is a
+ * check-then-use TOCTOU against the separate `srt-win acl` process. Both are
+ * accepted: every floor path is HOST-DERIVED (os.homedir()/lvisHome()), never
+ * attacker input, and the binary independently re-rejects dirs/globs — so the
+ * worst case is a host path silently dropped (surfaced by the caller's log).
  */
 export function toExplicitFiles(paths: readonly string[]): {
   readonly files: string[];
@@ -119,13 +166,17 @@ export function toExplicitFiles(paths: readonly string[]): {
  * target separator. Idempotent: a no-op if already present.
  */
 export function injectHolderPid(argv: readonly string[], holderPid: number): string[] {
-  if (argv.includes("--holder-pid")) return [...argv];
   const sep = argv.indexOf("--");
   if (sep < 0) {
     throw new Error(
       "[windows-fs-jail] cannot inject --holder-pid: no '--' target separator in srt-win argv",
     );
   }
+  // Idempotency scoped to the EXEC OPTION region (before `--`) ONLY. The child
+  // command lands as a single opaque element AFTER `--`; a literal "--holder-pid"
+  // inside it must NOT short-circuit the host's real fence (a whole-argv
+  // includes() would let a crafted command silently skip confinement).
+  if (argv.slice(0, sep).includes("--holder-pid")) return [...argv];
   return [...argv.slice(0, sep), "--holder-pid", String(holderPid), ...argv.slice(sep)];
 }
 
