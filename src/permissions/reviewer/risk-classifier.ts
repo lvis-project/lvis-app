@@ -35,7 +35,7 @@ import { maskSensitiveData } from "../../audit/dlp-filter.js";
 import { PERMISSION_REVIEWER_SYSTEM_PROMPT } from "../../shared/permission-reviewer-framework.js";
 import {
   formatSandboxCapabilityForPrompt,
-  isWeakSandbox,
+  sandboxRelaxesCategory,
   type SandboxCapability,
 } from "../sandbox-capability.js";
 import {
@@ -91,9 +91,9 @@ export interface ToolInvocationContext {
   sensitivePathsAdjacent: string[];
   /**
    * OS-level execution sandbox capability — the reviewer SOT for issue
-   * #691. Constructed by {@link detectSandboxCapability} at the dispatch
-   * site (single producer) and threaded here so the LLM prompt sees the
-   * same value used by the reviewer. The current audit schema records the
+   * #691. Constructed by {@link resolveReviewerSandboxCapability} at the
+   * dispatch site (single producer) and threaded here so the LLM prompt sees
+   * the same value used by the reviewer. The current audit schema records the
    * resulting reviewer verdict, not the full SandboxCapability snapshot.
    * Required: callers MUST supply it so a missing field cannot silently
    * downgrade the reviewer's safety posture.
@@ -945,13 +945,16 @@ export class LlmRiskClassifier implements RiskClassifier {
       return { ruleVerdict, llmVerdict: null, finalVerdict: ruleVerdict };
     }
 
-    // Context-quality + weak-sandbox composition enforcement:
-    // When sandbox is weak (kind=none/partial or confidence=assumed) OR
-    // conversation context lacks explicit intent, prevent the LLM from
-    // downgrading a rule-based MEDIUM/HIGH verdict to LOW.
-    const weakSandbox = isWeakSandbox(input.sandboxCapability);
+    // Context-quality + per-category sandbox composition enforcement:
+    // The sandbox relaxation is now per-CATEGORY — it applies only when the
+    // capability's `confines` dimension that covers this call's category is
+    // genuinely jailed (network risk ↔ confines.network; filesystem-bearing
+    // write/shell/read/meta ↔ confines.filesystem). When the sandbox does NOT
+    // relax this category, OR conversation context lacks explicit intent,
+    // prevent the LLM from downgrading a rule-based MEDIUM/HIGH verdict to LOW.
+    const sandboxRelaxes = sandboxRelaxesCategory(input.sandboxCapability, input.category);
     const weakContext = isContextMissingIntent(input);
-    if (weakSandbox || weakContext) {
+    if (!sandboxRelaxes || weakContext) {
       if (LEVEL_RANK[llmVerdict.level] < LEVEL_RANK[ruleVerdict.level]) {
         // LLM attempted to downgrade — honour the rule verdict.
         return { ruleVerdict, llmVerdict, finalVerdict: ruleVerdict };
