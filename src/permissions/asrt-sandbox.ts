@@ -333,8 +333,23 @@ export function isAsrtSandboxActive(): boolean {
  *   - `~/.lvis/audit.log` + `~/.lvis/audit` — audit trail
  *   - `~/.lvis/settings.json` — cross-cutting host settings (holds vendor
  *                               baseUrls / may hold credentials)
+ *   - `~/.lvis/permissions`, `~/.lvis/permissions.json`, `~/.lvis/policy.json`,
+ *     `~/.lvis/plugins/auth-partitions.json` — permission / auth-partition state
+ *   - Electron userData dir (productName="LVIS") — whole dir, deny-by-default so
+ *     future Electron auth artefacts are covered automatically:
+ *       macOS: ~/Library/Application Support/LVIS
+ *       Linux: ~/.config/LVIS
+ *       Windows: ~/AppData/Roaming/LVIS
+ *     Contains: plugin OAuth session cookies/tokens (Partitions/), Cookies (SQLite),
+ *     Local/Session Storage, Network Persistent State, Trust Tokens,
+ *     lvis-secrets.json (safeStorage-encrypted plugin secrets). None of these are
+ *     ever legitimately needed by a sandboxed tool/worker.
+ *     Derived via os.homedir() + known per-platform join — no `electron` import,
+ *     so this module remains safe to import in any non-renderer context.
  *   - `~/.ssh`, `~/.aws`, `~/.config/gcloud`, `~/.kube/config`, `~/.gnupg`
  *                         — standard cloud / SSH / GPG credential stores
+ *   - `~/.config/gh`      — GitHub CLI OAuth token (hosts.yml)
+ *   - `~/.config/git`, `~/.git-credentials` — git credential store
  *   - `~/.npmrc`, `~/.netrc`, `~/.docker/config.json` — registry / netrc /
  *                         docker auth token files
  *
@@ -342,9 +357,14 @@ export function isAsrtSandboxActive(): boolean {
  *   - `$HOME` WHOLESALE — denying all of `~` would break most legit shell tools
  *     (a build reading `~/.cargo`, `~/.rustup`, `~/.config`, etc.). We deny
  *     SPECIFIC secret/history subpaths only.
+ *   - `~/.config` WHOLESALE — only specific subdirs (~/.config/gcloud, ~/.config/gh,
+ *     ~/.config/git) are denied, not all of ~/.config.
  *   - the cwd / working tree, the plugin's own sandbox root, system dirs
  *     (`/usr`, `/lib`, `/bin`), `$TMPDIR` — a legit tool/worker needs these.
  *     They are never on this list.
+ *   - macOS Keychain DBs (~/Library/Keychains) and browser cookie stores — these
+ *     are encrypted-at-rest and outside ASRT's filesystem threat model; consciously
+ *     excluded so a future reader knows they were not forgotten.
  *
  * PLATFORM: every entry is a LITERAL absolute path (NO glob chars). On macOS the
  * stripped path is a recursive seatbelt subpath; on Linux bwrap deny-binds the
@@ -363,6 +383,15 @@ export function isAsrtSandboxActive(): boolean {
 export function getDefaultSensitiveReadDenyPaths(): string[] {
   const home = homedir();
   const lvis = lvisHome();
+  // Electron userData dir for productName="LVIS" (package.json build.productName).
+  // Derived from os.homedir() + known per-platform join — NO `electron` import,
+  // keeping this module safe for any non-renderer context.
+  const electronUserData =
+    process.platform === "darwin"
+      ? join(home, "Library", "Application Support", "LVIS")
+      : process.platform === "win32"
+        ? join(home, "AppData", "Roaming", "LVIS")
+        : join(home, ".config", "LVIS"); // linux default
   const raw = [
     // ── LVIS host-domain sensitive namespaces (~/.lvis/<feature>/) ──
     join(lvis, "secrets"), // encrypted API keys (the only prior deny)
@@ -371,14 +400,25 @@ export function getDefaultSensitiveReadDenyPaths(): string[] {
     join(lvis, "audit.log"), // audit trail (file)
     join(lvis, "audit"), // audit trail (dir form, if present)
     join(lvis, "settings.json"), // cross-cutting settings (may hold credentials)
+    join(lvis, "permissions"), // permission state dir
+    join(lvis, "permissions.json"), // permission state file (flat form)
+    join(lvis, "policy.json"), // policy state
+    join(lvis, "plugins", "auth-partitions.json"), // plugin auth-partition state
+    // ── Electron userData dir (whole dir — deny-by-default for future artefacts) ──
+    // Contains plugin OAuth session cookies/tokens, Cookies (SQLite), Local/Session
+    // Storage, Network Persistent State, Trust Tokens, lvis-secrets.json.
+    electronUserData,
     // ── Standard credential / secret stores under the real home ──
     join(home, ".ssh"), // SSH private keys + known_hosts
     join(home, ".aws"), // AWS access keys
     join(home, ".config", "gcloud"), // Google Cloud credentials
+    join(home, ".config", "gh"), // GitHub CLI OAuth token (hosts.yml)
+    join(home, ".config", "git"), // git credential config
     join(home, ".kube", "config"), // Kubernetes cluster credentials
     join(home, ".gnupg"), // GPG private keyring
     join(home, ".npmrc"), // npm registry auth token
     join(home, ".netrc"), // generic machine credentials
+    join(home, ".git-credentials"), // git credential store (file)
     join(home, ".docker", "config.json"), // docker registry auth
   ];
   const seen = new Set<string>();
