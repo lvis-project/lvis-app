@@ -35,6 +35,14 @@ import { t } from "../i18n/index.js";
 import type { ToolCategory, ToolSource } from "../tools/types.js";
 import type { SandboxConfinement } from "../shared/sandbox-capability-info.js";
 
+// RENDERER-SAFETY: this module is imported by the renderer (ToolApprovalDialog
+// uses isWeakSandbox / the types), so it MUST NOT statically import
+// `asrt-sandbox.js` — that package (`@anthropic-ai/sandbox-runtime`) pulls Node
+// built-ins (`fs`/`child_process`/`net`) into the renderer webpack bundle. The
+// "is a server genuinely wrapped" signal therefore comes from the MAIN-process
+// wrapped registry below (only StdioTransport, main-only, populates it) plus the
+// active capability snapshot — never a direct gate call into asrt-sandbox.
+
 export type SandboxKind =
   | "none"
   /** OS isolation provided by the Anthropic Sandbox Runtime (ASRT). Backend is
@@ -137,12 +145,72 @@ export function detectSandboxCapability(): SandboxCapability {
  * through {@link wrapToolCommand} (→ `spawnWithSandbox` in bash.ts /
  * powershell.ts), which is the per-command OS jail. Every other execution
  * substrate is NOT ASRT-wrapped:
- *   - `plugin` / `mcp` tools run in the LONG-LIVED MCP worker (mcp-client.ts
- *     spawns it PLAIN — isolation=none; `wrapWorkerCommand` is staged-uncalled).
+ *   - `mcp` tools run in the LONG-LIVED MCP worker. EXTERNAL stdio servers
+ *     are wrapped via `wrapWorkerCommand` in `StdioTransport.openWrapped`
+ *     (worker-egress PR1) when the gate is ON; per-server confinement is
+ *     reported through the wrapped-registry below. Plugin loopback servers
+ *     use `LoopbackTransport` (in-process) — not ASRT-wrapped.
  *   - other `builtin` tools (read_file, write_file, list_files, …) run
  *     IN-PROCESS in the host — no OS jail either.
  */
 const ASRT_WRAPPED_SHELL_TOOLS: ReadonlySet<string> = new Set(["bash", "powershell"]);
+
+/**
+ * The set of EXTERNAL MCP stdio server ids whose worker was ACTUALLY spawned
+ * through the ASRT wrap in THIS process (worker-egress PR1).
+ *
+ * Populated by {@link markMcpServerWrapped} from `StdioTransport.openWrapped`
+ * only on the wrapped path, and cleared by {@link unmarkMcpServerWrapped} on
+ * transport close (or a failed wrap). This is the per-server "wrapped" signal
+ * {@link resolveReviewerSandboxCapability} consults so an MCP tool call reports
+ * the GENUINE asrt capability ONLY for a server that is genuinely confined —
+ * an unwrapped server (gate off, wrap failed, pre-existing) still reports
+ * `none`. Membership here is necessary but NOT sufficient: the resolver also
+ * re-checks {@link detectSandboxCapability} so a torn-down sandbox cannot leave
+ * a stale `asrt` report.
+ */
+const _wrappedMcpServerIds = new Set<string>();
+
+/**
+ * Record that `serverId`'s stdio worker was spawned through the ASRT wrap.
+ * @internal — only StdioTransport's wrapped-spawn path and tests call this.
+ */
+export function markMcpServerWrapped(serverId: string): void {
+  _wrappedMcpServerIds.add(serverId);
+}
+
+/**
+ * Drop `serverId`'s wrapped marker (transport closed or wrap failed). Idempotent.
+ * @internal — only StdioTransport and tests call this.
+ */
+export function unmarkMcpServerWrapped(serverId: string): void {
+  _wrappedMcpServerIds.delete(serverId);
+}
+
+/**
+ * Whether `serverId`'s worker is currently wrapped through ASRT.
+ * @internal — exported for the reviewer resolver + tests.
+ */
+export function isMcpServerWrapped(serverId: string): boolean {
+  return _wrappedMcpServerIds.has(serverId);
+}
+
+/**
+ * Drop every wrapped-MCP-server marker. Called by {@link resetAsrtSandbox} on
+ * sandbox teardown so no stale `asrt` signal survives, and by test teardown.
+ * @internal
+ */
+export function clearWrappedMcpServers(): void {
+  _wrappedMcpServerIds.clear();
+}
+
+/**
+ * Reset the wrapped-MCP-server registry. Test teardown only.
+ * @internal
+ */
+export function __resetWrappedMcpServersForTest(): void {
+  clearWrappedMcpServers();
+}
 
 /**
  * Resolve the sandbox capability to feed the reviewer/risk-classifier for a
@@ -163,16 +231,51 @@ const ASRT_WRAPPED_SHELL_TOOLS: ReadonlySet<string> = new Set(["bash", "powershe
  *   - `builtin` + tool ∈ {bash, powershell} → the genuine
  *     {@link detectSandboxCapability} (the ASRT-wrapped shell path; `asrt`
  *     when the gate is ON, already `none` when it is OFF).
- *   - everything else (plugin, mcp, other builtin) → a forced `none`
+ *   - `mcp` + the originating server was ACTUALLY wrapped through ASRT
+ *     (worker-egress PR1: gate ON + {@link isAsrtSandboxActive} +
+ *     {@link isMcpServerWrapped}) → the genuine {@link detectSandboxCapability}
+ *     (the wrapped worker IS confined — mac/linux full, win32 network-only).
+ *   - everything else (plugin, UNWRAPPED mcp, other builtin) → a forced `none`
  *     capability so {@link isWeakSandbox} treats the call as WEAK and the
  *     reviewer cannot relax.
+ *
+ * NO-LEAK INVARIANT (the #1359 review catch): never report `asrt` for a worker
+ * this process did not wrap. An MCP server reports `asrt` ONLY when its specific
+ * id is in the wrapped registry AND the sandbox is still active — a gate-off,
+ * wrap-failed, or pre-existing-unwrapped server stays `none`.
+ *
+ * @param mcpServerId  Originating MCP server id, threaded from `Tool.mcpServerId`.
+ *                     Required to report `asrt` for an `mcp` call; omitted ⇒ the
+ *                     call resolves to `none` (the historical default), so every
+ *                     pre-existing call site keeps its exact behaviour.
  */
 export function resolveReviewerSandboxCapability(
   source: ToolSource,
   toolName: string,
+  mcpServerId?: string,
 ): SandboxCapability {
   if (source === "builtin" && ASRT_WRAPPED_SHELL_TOOLS.has(toolName)) {
     return detectSandboxCapability();
+  }
+  // worker-egress PR1: a wrapped external MCP stdio worker genuinely runs under
+  // ASRT — report its real capability so the reviewer composition reflects the
+  // actual confinement (and not the false `none` the unwrapped worker earned).
+  //
+  // Liveness is established by TWO main-process-only signals, no renderer-unsafe
+  // gate call: (1) the server id is in the wrapped registry — only populated by
+  // StdioTransport's wrapped-spawn path (gate ON + wrap succeeded) and cleared on
+  // close/failure/teardown; (2) the active capability is a genuine verified
+  // `asrt` — published by boot and cleared on {@link resetAsrtSandbox}. Both must
+  // hold, so a torn-down sandbox (active reset) or an unwrapped server (not in the
+  // registry) falls through to `none` (no-leak invariant).
+  if (source === "mcp" && mcpServerId !== undefined && isMcpServerWrapped(mcpServerId)) {
+    const active = detectSandboxCapability();
+    if (active.kind === "asrt") {
+      return {
+        ...active,
+        reason: `external MCP stdio worker '${mcpServerId}' ASRT-wrapped — ${active.reason}`,
+      };
+    }
   }
   return {
     kind: "none",
