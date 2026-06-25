@@ -67,6 +67,22 @@ import { validateDemoFoundryHostMap } from "../../main/demo-host-resolver.js";
 import { validateFoundryEndpoint } from "../../permissions/reviewer/provider-adapters.js";
 import { LoginProgressEmitter } from "../../main/login-progress-emitter.js";
 import type { IpcDeps } from "../types.js";
+import type { LLMSettings } from "../../data/settings-store.js";
+
+/**
+ * Stable signature of EVERY vendor block's configured `baseUrl` (order-stable
+ * by vendor id). Used to detect a baseUrl change across the login-mockup patch
+ * and trigger `refreshSandboxNetworkConfig` if a vendor endpoint changed.
+ * Mirrors the same helper in settings.ts — kept local so auth.ts has no
+ * cross-domain import dependency on settings.ts.
+ */
+function vendorBaseUrlSignature(llm: LLMSettings): string {
+  const vendors = llm.vendors ?? {};
+  return Object.keys(vendors)
+    .sort()
+    .map((id) => `${id}=${vendors[id as keyof typeof vendors]?.baseUrl ?? ""}`)
+    .join("|");
+}
 
 const log = createLogger("auth-ipc");
 
@@ -281,6 +297,14 @@ export function registerAuthHandlers(deps: IpcDeps): void {
       // provider refresh so the user sees the agent sandbox spin up. On
       // rewire failure we roll the settings store back to its prior state
       // and report `reviewer-rewire-failed`.
+      //
+      // ASRT choke-point: the llm-key-issuing step above may have patched a
+      // vendor baseUrl (when demoConfig.baseUrl is set). Capture the signature
+      // AFTER that patch completes so the sandbox live-refresh fires here if
+      // any vendor endpoint changed, matching the settings:update choke-point.
+      const postPatchLlm = settingsService.get("llm");
+      const postPatchVendorSig = vendorBaseUrlSignature(postPatchLlm);
+      const prevVendorSig = vendorBaseUrlSignature(prevLlm);
       try {
         await progress.runStep(
           "sandbox-preparing",
@@ -291,6 +315,13 @@ export function registerAuthHandlers(deps: IpcDeps): void {
             // chat provider/model, so this login path must rewire through
             // the same closure as settings:update.
             deps.rewireReviewerAgent?.();
+            // ASRT sandbox choke-point: when the login patch included a vendor
+            // baseUrl change, live-refresh the ASRT shared network union so the
+            // new endpoint host is enforced immediately (no restart required).
+            // No-op when the sandbox gate is OFF or no baseUrl changed.
+            if (postPatchVendorSig !== prevVendorSig) {
+              deps.refreshSandboxNetworkConfig?.();
+            }
           },
           vendor,
         );

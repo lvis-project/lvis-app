@@ -32,6 +32,8 @@ import {
   checkAsrtDependencies,
   computeUnionAllowedDomains,
   normalizeUnionForAsrt,
+  computeDynamicEndpointHosts,
+  updateAsrtSandboxConfig,
   DEFAULT_WINDOWS_PROXY_PORT_RANGE,
   buildSandboxConfig,
 } from "../asrt-sandbox.js";
@@ -282,6 +284,57 @@ describe("asrt-sandbox — REAL enforcement via the SHARED config (strict union 
     await resetAsrtSandbox();
     expect(httpOk(afterAdd)).toBe(true);
   }, 60_000);
+
+  it("a host derived from a CONFIGURED endpoint (settings → computeDynamicEndpointHosts) is allowed; live-refresh swaps it", async () => {
+    if (!(await asrtCanInitialize())) return;
+    if (process.platform !== "darwin" && process.platform !== "linux") return;
+
+    // DYNAMIC-ENDPOINT PROVENANCE: the allow-list host comes from a SETTINGS
+    // baseUrl reduced via computeDynamicEndpointHosts — the exact boot path for
+    // a user-configured Azure/embedding endpoint — NOT a hardcoded literal.
+    // example.com/.org stand in for the configured resource (CI-reachable IANA
+    // domains; a real *.openai.azure.com is not resolvable offline).
+    const dynamicHostsFor = (baseUrl: string) =>
+      computeDynamicEndpointHosts({ llm: { vendors: { "azure-foundry": { baseUrl } } } });
+
+    // Union built from the CONFIGURED endpoint (example.com), normalized for
+    // ASRT exactly as boot does.
+    const initialUnion = normalizeUnionForAsrt(
+      computeUnionAllowedDomains([dynamicHostsFor("https://example.com/openai/v1")], []),
+    );
+    expect(initialUnion).toContain("example.com");
+
+    await initializeAsrtSandbox({ allowedDomains: initialUnion, strictAllowlist: true });
+    const configuredAllowed = await curlProbe("https://example.com");
+    const reachable = httpOk(configuredAllowed);
+    // A host NOT derived from any configured endpoint is HARD-DENIED.
+    const nonConfiguredDenied = await curlProbe("https://example.org");
+
+    if (!reachable) {
+      await resetAsrtSandbox();
+      return; // offline — the allow side can't be proven, skip the contrast.
+    }
+    // The configured-endpoint host is reachable; the non-configured one is not.
+    expect(httpOk(nonConfiguredDenied)).toBe(false);
+
+    // LIVE-REFRESH: user reconfigures the endpoint to example.org. Recompute the
+    // union from the NEW settings value and swap the live ASRT config (the same
+    // updateAsrtSandboxConfig call refreshSandboxNetworkConfig makes). No
+    // re-initialize — this is the live network swap.
+    const refreshedUnion = normalizeUnionForAsrt(
+      computeUnionAllowedDomains([dynamicHostsFor("https://example.org/openai/v1")], []),
+    );
+    expect(refreshedUnion).toContain("example.org");
+    await updateAsrtSandboxConfig({ allowedDomains: refreshedUnion, strictAllowlist: true });
+
+    // After the live refresh: the NEW configured host is allowed, the OLD one
+    // is now hard-denied — proving the swap took effect with no restart.
+    const newHostAllowed = await curlProbe("https://example.org");
+    const oldHostDenied = await curlProbe("https://example.com");
+    await resetAsrtSandbox();
+    expect(httpOk(newHostAllowed)).toBe(true);
+    expect(httpOk(oldHostDenied)).toBe(false);
+  }, 60_000);
 });
 
 describe("asrt-sandbox — parentProxy explicit (PR #1356 security MINOR)", () => {
@@ -344,6 +397,96 @@ describe("asrt-sandbox — computeUnionAllowedDomains (shared-config enforcement
       ["", "ok.example", undefined as unknown as string],
     ]);
     expect(union).toEqual(["ok.example"]);
+  });
+});
+
+describe("asrt-sandbox — computeDynamicEndpointHosts (user-configured endpoint union seam)", () => {
+  /**
+   * Some plugins' real egress host is NOT a static manifest domain but
+   * USER-CONFIGURED — notably local-indexer's embedding/caption calls hit the
+   * host's Azure OpenAI resource (`llm.vendors["azure-foundry"].baseUrl`, the
+   * same value resolveApiKey hands the worker). This extractor reduces every
+   * configured vendor baseUrl to its hostname so the union reflects what
+   * plugins actually reach. No-fallback: a malformed/empty endpoint yields NO
+   * host (never a wildcard / allow-all).
+   */
+  it("extracts the hostname from an Azure OpenAI resource baseUrl", () => {
+    expect(
+      computeDynamicEndpointHosts({
+        llm: {
+          vendors: {
+            "azure-foundry": {
+              baseUrl: "https://my-resource.openai.azure.com/openai/deployments/x",
+            },
+          },
+        },
+      }),
+    ).toEqual(["my-resource.openai.azure.com"]);
+  });
+
+  it("collects hostnames across multiple configured vendors, deduped + order-stable", () => {
+    expect(
+      computeDynamicEndpointHosts({
+        llm: {
+          vendors: {
+            "azure-foundry": { baseUrl: "https://res.openai.azure.com/v1" },
+            openai: { baseUrl: "https://proxy.internal.example:8443/v1" },
+            // duplicate host (different path) collapses to one entry
+            copilot: { baseUrl: "https://res.openai.azure.com/other" },
+          },
+        },
+      }),
+    ).toEqual(["res.openai.azure.com", "proxy.internal.example"]);
+  });
+
+  it("a malformed/empty/whitespace baseUrl contributes NOTHING (deny-by-default, NOT a wildcard)", () => {
+    expect(
+      computeDynamicEndpointHosts({
+        llm: {
+          vendors: {
+            "azure-foundry": { baseUrl: "not a url" },
+            openai: { baseUrl: "" },
+            copilot: { baseUrl: "   " },
+            gemini: { baseUrl: undefined },
+            // a value present but not even a string
+            claude: { baseUrl: 123 as unknown as string },
+          },
+        },
+      }),
+    ).toEqual([]);
+    // No vendors / no llm section ⇒ empty (never an allow-all fallback).
+    expect(computeDynamicEndpointHosts({})).toEqual([]);
+    expect(computeDynamicEndpointHosts(undefined)).toEqual([]);
+    expect(computeDynamicEndpointHosts({ llm: {} })).toEqual([]);
+  });
+
+  it("the boot union includes BOTH static manifest domains AND dynamic endpoint hosts", () => {
+    // Mirrors the boot wiring: union over [...manifestAllowLists, dynamicHosts].
+    const manifestAllowLists = [["plugin-a.example"], ["plugin-b.example"]];
+    const dynamicHosts = computeDynamicEndpointHosts({
+      llm: { vendors: { "azure-foundry": { baseUrl: "https://res.openai.azure.com" } } },
+    });
+    const union = normalizeUnionForAsrt(
+      computeUnionAllowedDomains([...manifestAllowLists, dynamicHosts], []),
+    );
+    // Static manifest domains present (apex + wildcard) …
+    expect(union).toContain("plugin-a.example");
+    expect(union).toContain("*.plugin-a.example");
+    expect(union).toContain("plugin-b.example");
+    // … AND the host-resolved dynamic endpoint host (apex + wildcard).
+    expect(union).toContain("res.openai.azure.com");
+    expect(union).toContain("*.res.openai.azure.com");
+  });
+
+  it("a union with NO dynamic hosts is unchanged from the static-only union (default-OFF safety)", () => {
+    const manifestAllowLists = [["plugin-a.example"]];
+    const withoutDynamic = normalizeUnionForAsrt(
+      computeUnionAllowedDomains([...manifestAllowLists, []], []),
+    );
+    const staticOnly = normalizeUnionForAsrt(
+      computeUnionAllowedDomains(manifestAllowLists, []),
+    );
+    expect(withoutDynamic).toEqual(staticOnly);
   });
 });
 
