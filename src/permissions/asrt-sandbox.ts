@@ -767,11 +767,32 @@ export async function initializeAsrtSandbox(
   // (no false relaxation) — and is surfaced LOUD, never silently swallowed.
   // Darwin-untestable: real enforcement is the manual Windows QA gate (#1367).
   if (process.platform === "win32") {
+    // Best-effort crash recovery FIRST (prune a prior crash's dead holders),
+    // DECOUPLED in its own try/catch so a recover hiccup never disables an
+    // otherwise-stampable jail (recover is cleanup, not a stamp precondition).
     try {
-      const floorFiles = toExplicitFiles(
+      recoverWindowsFsStamps(DEFAULT_WINDOWS_GROUP_NAME);
+    } catch (err) {
+      console.warn(
+        `[asrt-sandbox] Windows FS jail: acl recover (crash cleanup) failed, ` +
+          `continuing to stamp: ${err instanceof Error ? err.message : String(err)}`,
+      );
+    }
+    try {
+      const { files: floorFiles, droppedNonFiles } = toExplicitFiles(
         getDefaultSensitiveReadDenyPaths(trustedSettings.userDataDir),
-      ).files;
-      recoverWindowsFsStamps(DEFAULT_WINDOWS_GROUP_NAME); // prune a prior crash's dead holders
+      );
+      if (droppedNonFiles.length > 0) {
+        // No-Fallback: the dropped paths are exactly the sensitive DIRECTORIES
+        // (~/.ssh, ~/.aws, ~/.lvis/secrets, the Electron userData dir) that acl
+        // (file-only) cannot stamp — surface them LOUD so "FS jail active" is
+        // never read as "those dirs are protected" (dir coverage tracked in #1367).
+        console.warn(
+          `[asrt-sandbox] Windows FS jail: ${droppedNonFiles.length} sensitive ` +
+            `DIRECTORY path(s) NOT stamped (acl stamps explicit files only; dir ` +
+            `coverage tracked in #1367): ${droppedNonFiles.join(", ")}`,
+        );
+      }
       stampWindowsFsDeny(
         { denyRead: floorFiles, denyWrite: floorFiles },
         process.pid,
