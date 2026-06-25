@@ -38,7 +38,10 @@ import type { SandboxConfinement } from "../shared/sandbox-capability-info.js";
 export type SandboxKind =
   | "none"
   /** OS isolation provided by the Anthropic Sandbox Runtime (ASRT). Backend is
-   * bwrap on Linux, Seatbelt on macOS; both report as a single `asrt` kind. */
+   * bwrap on Linux, Seatbelt on macOS (both full-confine), and srt-win on
+   * Windows (NETWORK-ONLY — no filesystem jail). All report as a single `asrt`
+   * kind; the per-substrate `confines` field distinguishes full vs network-only,
+   * which is what {@link sandboxRelaxesCategory} reads for Windows. */
   | "asrt"
   /** OS-level isolation present but evidence quality is PARTIAL. */
   | "partial"
