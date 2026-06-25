@@ -90,6 +90,14 @@ export const PERMISSIONS = {
   // Read-only: OS sandbox capability for the current platform — drives the
   // honest, platform-aware "OS 도구 샌드박스" toggle description in PermissionsTab.
   sandboxCapability: "lvis:permissions:sandbox-capability",
+  // Read-only: Windows srt-win install readiness (group + WFP state) + the
+  // verbatim ASRT install instructions. Drives the win32 consent panel in
+  // PermissionsTab. Non-win32 returns a clean "not-applicable" shape.
+  sandboxWindowsStatus: "lvis:permissions:sandbox-windows-status",
+  // MUTATING (sender-frame-guarded): the ONLY user-consented privilege
+  // escalation entry point — triggers ASRT installWindowsSandbox's single
+  // self-elevating UAC prompt. Never auto-triggered.
+  sandboxWindowsInstall: "lvis:permissions:sandbox-windows-install",
   // User-approval store
   userApprovalRecord: "lvis:permissions:user-approval-record",
   userApprovalRevoke: "lvis:permissions:user-approval-revoke",

@@ -421,7 +421,7 @@ function parseArgs(args: unknown): ParsedSummary | null {
   return args as ParsedSummary;
 }
 
-function approvalReviewRows(
+export function approvalReviewRows(
   request: ApprovalRequest,
   category: PermissionDecisionCategory,
   inputSummary: string,
@@ -458,6 +458,20 @@ function approvalReviewRows(
       sandboxValue = t("toolApprovalDialog.sandboxFsOnly");
     } else if (isWeakSandbox(cap)) {
       sandboxValue = t("toolApprovalDialog.sandboxNone");
+    } else if (cap.confines && !cap.confines.filesystem) {
+      // PR2 finding b — confines honesty. `isWeakSandbox` is confines-BLIND: it
+      // reports "strong" for ANY verified non-none ASRT, which on Windows
+      // (network-only srt-win, confines.filesystem === false) wrongly printed a
+      // blanket "OS 격리 활성" for a write/shell tool that has NO FS jail. When
+      // the capability declares a non-full confinement, show the per-dimension
+      // breakdown so the label matches what is actually contained. Display-only:
+      // the actual relaxation control (sandboxRelaxesCategory, per-category) is
+      // untouched and lives in the reviewer.
+      sandboxValue = t("toolApprovalDialog.sandboxNetworkOnly", {
+        net: cap.confines.network ? "✓" : "✗",
+        fs: cap.confines.filesystem ? "✓" : "✗",
+        proc: cap.confines.process ? "✓" : "✗",
+      });
     } else {
       sandboxValue = t("toolApprovalDialog.sandboxActive", { kind: cap.kind });
     }

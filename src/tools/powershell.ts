@@ -7,7 +7,8 @@
  */
 import { spawn, type ChildProcessByStdio } from "node:child_process";
 import { createHash } from "node:crypto";
-import { isAbsolute, resolve as pathResolve } from "node:path";
+import { existsSync } from "node:fs";
+import { delimiter, isAbsolute, join, resolve as pathResolve } from "node:path";
 import type { Readable } from "node:stream";
 import { z } from "zod";
 
@@ -284,8 +285,55 @@ function isSwitchEnabled(element: string, switches: ReadonlySet<string>): boolea
   return value === undefined || value === "" || value === "true" || value === "$true";
 }
 
-function resolvePowerShellExecutable(): string {
-  return process.platform === "win32" ? "powershell.exe" : "pwsh";
+/**
+ * Resolve the PowerShell executable for the host.
+ *
+ * Off-Windows: `pwsh` (PowerShell 7 — the only flavor that exists there).
+ *
+ * Windows: prefer `pwsh.exe` (PowerShell 7) when it is on PATH, falling back to
+ * `powershell.exe` (Windows PowerShell 5.1, always present). PR2 finding c: the
+ * UNSANDBOXED spawn path already runs whatever this resolves, so the SANDBOXED
+ * path must pass a matching `binShell` ('pwsh' vs 'powershell') to ASRT —
+ * otherwise an enabled sandbox would silently downgrade a pwsh-7 host to
+ * Windows PowerShell 5.1 (different language/cmdlet surface). `binShellForExecutable`
+ * derives the ASRT binShell token from this result so the two stay in lockstep.
+ */
+export function resolvePowerShellExecutable(): string {
+  if (process.platform !== "win32") return "pwsh";
+  return win32PwshOnPath() ? "pwsh.exe" : "powershell.exe";
+}
+
+/**
+ * Synchronous PATH probe for `pwsh.exe` on Windows. Walks `PATH` entries and
+ * appends each `PATHEXT` suffix (defaulting to the standard set) so a bare
+ * `pwsh` directory entry is matched. Pure existence check — no spawn — so it is
+ * cheap and side-effect-free.
+ */
+function win32PwshOnPath(): boolean {
+  const pathEnv = process.env["PATH"] ?? process.env["Path"] ?? "";
+  if (pathEnv === "") return false;
+  const exts = (process.env["PATHEXT"] ?? ".COM;.EXE;.BAT;.CMD")
+    .split(";")
+    .map((e) => e.trim())
+    .filter((e) => e !== "");
+  for (const dir of pathEnv.split(delimiter)) {
+    if (dir === "") continue;
+    if (existsSync(join(dir, "pwsh.exe"))) return true;
+    for (const ext of exts) {
+      if (existsSync(join(dir, `pwsh${ext}`))) return true;
+    }
+  }
+  return false;
+}
+
+/**
+ * Map a resolved PowerShell executable to the ASRT cross-platform `binShell`
+ * token. `parseWindowsBinShell` accepts both 'pwsh'/'pwsh.exe' and
+ * 'powershell'/'powershell.exe'; we hand it the bare token so the inner shell
+ * ASRT renders matches the flavor the unsandboxed path would have run.
+ */
+export function binShellForExecutable(executable: string): "pwsh" | "powershell" {
+  return executable.toLowerCase().startsWith("pwsh") ? "pwsh" : "powershell";
 }
 
 async function parsePowerShellAst(command: string): Promise<PowerShellAstSummary> {
@@ -428,13 +476,15 @@ async function spawnPowerShellWithSandbox(
         "-Command",
         posixSingleQuote(command),
       ].join(" ");
-  // ASRT's cross-platform binShell string. 'powershell' on win32 (Windows
-  // PowerShell), 'pwsh' off-Windows (PowerShell Core); both are accepted by
-  // ASRT's parseWindowsBinShell, and off-Windows binShell is only meaningful as
-  // the inner shell name — the mac/linux path renders pwsh into the command
-  // string above, so we keep binShell undefined there to leave ASRT's
-  // established `/bin/bash -c` wrapping unchanged.
-  const binShell = isWindows ? "powershell" : undefined;
+  // ASRT's cross-platform binShell string. On win32 it MUST match the flavor
+  // `resolvePowerShellExecutable()` chose ('pwsh' when PowerShell 7 is on PATH,
+  // else 'powershell' for Windows PowerShell 5.1) so the sandboxed inner shell
+  // equals the unsandboxed one — both tokens are accepted by ASRT's
+  // parseWindowsBinShell. Off-Windows binShell is only meaningful as the inner
+  // shell name; the mac/linux path renders pwsh into the command string above,
+  // so we keep binShell undefined there to leave ASRT's established
+  // `/bin/bash -c` wrapping unchanged.
+  const binShell = isWindows ? binShellForExecutable(executable) : undefined;
 
   const home = process.env["HOME"];
   const allowRead = [cwd, ...writePaths];
