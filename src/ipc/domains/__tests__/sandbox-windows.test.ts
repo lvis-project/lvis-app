@@ -11,6 +11,7 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 import { PERMISSIONS } from "../../../shared/ipc-channels.js";
 import { UNAUTHORIZED_FRAME } from "../../gated.js";
+import { setProcessPlatform } from "../../../testing/process-platform.js";
 
 const handlers = new Map<string, (...args: unknown[]) => unknown>();
 const USER_INTENT = { inputOrigin: "user-keyboard", userActivation: true };
@@ -85,9 +86,6 @@ async function setup() {
 }
 
 const ORIGINAL_PLATFORM = process.platform;
-function setPlatform(platform: NodeJS.Platform) {
-  Object.defineProperty(process, "platform", { value: platform, configurable: true });
-}
 
 beforeEach(() => {
   asrtState.groupState = "absent";
@@ -97,12 +95,12 @@ beforeEach(() => {
 });
 
 afterEach(() => {
-  setPlatform(ORIGINAL_PLATFORM);
+  setProcessPlatform(ORIGINAL_PLATFORM);
 });
 
 describe("sandboxWindowsStatus", () => {
   it("returns a not-applicable shape off win32 (no ASRT call)", async () => {
-    setPlatform("darwin");
+    setProcessPlatform("darwin");
     await setup();
     const result = await invoke(PERMISSIONS.sandboxWindowsStatus, null);
     expect(result).toEqual({
@@ -115,7 +113,7 @@ describe("sandboxWindowsStatus", () => {
   });
 
   it("created-not-on-token + WFP absent → ready:false with verbatim instructions", async () => {
-    setPlatform("win32");
+    setProcessPlatform("win32");
     asrtState.groupState = "created-not-on-token";
     asrtState.wfpState = "absent";
     await setup();
@@ -129,7 +127,7 @@ describe("sandboxWindowsStatus", () => {
   });
 
   it("group ready + WFP installed → ready:true", async () => {
-    setPlatform("win32");
+    setProcessPlatform("win32");
     asrtState.groupState = "ready";
     asrtState.wfpState = "installed";
     await setup();
@@ -140,7 +138,7 @@ describe("sandboxWindowsStatus", () => {
   });
 
   it("group ready but WFP absent → ready:false (both conditions required)", async () => {
-    setPlatform("win32");
+    setProcessPlatform("win32");
     asrtState.groupState = "ready";
     asrtState.wfpState = "absent";
     await setup();
@@ -151,7 +149,7 @@ describe("sandboxWindowsStatus", () => {
 
 describe("sandboxWindowsInstall", () => {
   it("rejects a foreign frame with UNAUTHORIZED_FRAME (sender guard)", async () => {
-    setPlatform("win32");
+    setProcessPlatform("win32");
     await setup();
     const foreignEvent = { senderFrame: { url: "https://evil.example" } };
     const result = await invoke(PERMISSIONS.sandboxWindowsInstall, foreignEvent, { intent: USER_INTENT });
@@ -159,7 +157,7 @@ describe("sandboxWindowsInstall", () => {
   });
 
   it("rejects a submission without user-keyboard intent", async () => {
-    setPlatform("win32");
+    setProcessPlatform("win32");
     await setup();
     const result = (await invoke(PERMISSIONS.sandboxWindowsInstall, null, {})) as Record<string, unknown>;
     expect(result.ok).toBe(false);
@@ -167,7 +165,7 @@ describe("sandboxWindowsInstall", () => {
   });
 
   it("returns {cancelled:true} when the user dismisses UAC (not an error)", async () => {
-    setPlatform("win32");
+    setProcessPlatform("win32");
     asrtState.installResult = { cancelled: true };
     await setup();
     const result = await invoke(PERMISSIONS.sandboxWindowsInstall, null, { intent: USER_INTENT });
@@ -178,7 +176,7 @@ describe("sandboxWindowsInstall", () => {
   });
 
   it("returns post-install group + WFP state on success", async () => {
-    setPlatform("win32");
+    setProcessPlatform("win32");
     asrtState.installResult = {
       group: { state: "created-not-on-token" },
       wfp: { state: "installed" },
@@ -192,7 +190,7 @@ describe("sandboxWindowsInstall", () => {
   });
 
   it("reports ready:true when install lands group ready + WFP installed", async () => {
-    setPlatform("win32");
+    setProcessPlatform("win32");
     asrtState.installResult = {
       group: { state: "ready" },
       wfp: { state: "installed" },
@@ -203,7 +201,7 @@ describe("sandboxWindowsInstall", () => {
   });
 
   it("refuses off win32 (not-applicable)", async () => {
-    setPlatform("linux");
+    setProcessPlatform("linux");
     await setup();
     const result = (await invoke(PERMISSIONS.sandboxWindowsInstall, null, { intent: USER_INTENT })) as Record<string, unknown>;
     expect(result.ok).toBe(false);
@@ -213,7 +211,7 @@ describe("sandboxWindowsInstall", () => {
 
 describe("sandboxCapability win32 reconcile", () => {
   it("reports win32 as available with network-only confines (matches boot SOT)", async () => {
-    setPlatform("win32");
+    setProcessPlatform("win32");
     await setup();
     const result = (await invoke(PERMISSIONS.sandboxCapability, null)) as {
       platform: string;
@@ -229,7 +227,7 @@ describe("sandboxCapability win32 reconcile", () => {
   });
 
   it("still reports darwin as full-confine available", async () => {
-    setPlatform("darwin");
+    setProcessPlatform("darwin");
     await setup();
     const result = (await invoke(PERMISSIONS.sandboxCapability, null)) as {
       available: boolean;
