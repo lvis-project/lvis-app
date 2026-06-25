@@ -39,12 +39,12 @@ describe("resolveReviewerSandboxCapability — plugin-worker substrate awareness
       reason: "ASRT (Seatbelt) active — fs+process+network contained",
       confines: { filesystem: true, process: true, network: true },
     });
-    markPluginWorkerWrapped("embed");
+    markPluginWorkerWrapped("local-indexer", "embed");
 
-    const cap = resolveReviewerSandboxCapability("plugin", "index_search", undefined, "embed");
+    const cap = resolveReviewerSandboxCapability("plugin", "index_search", undefined, "embed", "local-indexer");
     expect(cap.kind).toBe("asrt");
     expect(isWeakSandbox(cap)).toBe(false); // wrapped → reviewer may relax
-    expect(cap.reason).toContain("plugin worker 'embed' ASRT-wrapped");
+    expect(cap.reason).toContain("plugin worker 'local-indexer/embed' ASRT-wrapped");
   });
 
   it("forces none for a plugin tool whose worker is NOT in the registry, even when the global cap is asrt", () => {
@@ -57,7 +57,7 @@ describe("resolveReviewerSandboxCapability — plugin-worker substrate awareness
       confines: { filesystem: true, process: true, network: true },
     });
     // …but THIS worker was never wrapped (no host-spawned worker / win32 legacy).
-    const cap = resolveReviewerSandboxCapability("plugin", "index_search", undefined, "other-worker");
+    const cap = resolveReviewerSandboxCapability("plugin", "index_search", undefined, "other-worker", "local-indexer");
     expect(cap.kind).toBe("none");
     expect(isWeakSandbox(cap)).toBe(true);
   });
@@ -70,7 +70,7 @@ describe("resolveReviewerSandboxCapability — plugin-worker substrate awareness
       reason: "ASRT active",
       confines: { filesystem: true, process: true, network: true },
     });
-    markPluginWorkerWrapped("embed");
+    markPluginWorkerWrapped("local-indexer", "embed");
     // workerId omitted → resolves to none (every pre-existing plugin call site).
     const cap = resolveReviewerSandboxCapability("plugin", "index_search");
     expect(cap.kind).toBe("none");
@@ -84,28 +84,51 @@ describe("resolveReviewerSandboxCapability — plugin-worker substrate awareness
       reason: "ASRT active",
       confines: { filesystem: true, process: true, network: true },
     });
-    markPluginWorkerWrapped("embed");
-    expect(resolveReviewerSandboxCapability("plugin", "index_search", undefined, "embed").kind).toBe("asrt");
+    markPluginWorkerWrapped("local-indexer", "embed");
+    expect(resolveReviewerSandboxCapability("plugin", "index_search", undefined, "embed", "local-indexer").kind).toBe("asrt");
 
-    unmarkPluginWorkerWrapped("embed");
-    expect(isPluginWorkerWrapped("embed")).toBe(false);
-    expect(resolveReviewerSandboxCapability("plugin", "index_search", undefined, "embed").kind).toBe("none");
+    unmarkPluginWorkerWrapped("local-indexer", "embed");
+    expect(isPluginWorkerWrapped("local-indexer", "embed")).toBe(false);
+    expect(resolveReviewerSandboxCapability("plugin", "index_search", undefined, "embed", "local-indexer").kind).toBe("none");
   });
 
   it("forces none after the sandbox is torn down (active cap cleared) even if the marker lingers", () => {
     // Marker present but the active capability is gone (resetAsrtSandbox cleared
     // it). The resolver re-checks detectSandboxCapability → none (no stale asrt).
-    markPluginWorkerWrapped("embed");
+    markPluginWorkerWrapped("local-indexer", "embed");
     __resetActiveSandboxCapabilityForTest(); // simulate sandbox torn down
-    const cap = resolveReviewerSandboxCapability("plugin", "index_search", undefined, "embed");
+    const cap = resolveReviewerSandboxCapability("plugin", "index_search", undefined, "embed", "local-indexer");
     expect(cap.kind).toBe("none");
   });
 
   it("clearWrappedPluginWorkers drops every marker (teardown no-leak)", () => {
-    markPluginWorkerWrapped("a");
-    markPluginWorkerWrapped("b");
+    markPluginWorkerWrapped("plugin-a", "a");
+    markPluginWorkerWrapped("plugin-b", "b");
     clearWrappedPluginWorkers();
-    expect(isPluginWorkerWrapped("a")).toBe(false);
-    expect(isPluginWorkerWrapped("b")).toBe(false);
+    expect(isPluginWorkerWrapped("plugin-a", "a")).toBe(false);
+    expect(isPluginWorkerWrapped("plugin-b", "b")).toBe(false);
+  });
+
+  it("plugin-scoped key: two plugins sharing a workerId do NOT collide (MAJOR-4 no-leak)", () => {
+    setActiveSandboxCapability({
+      kind: "asrt",
+      confidence: "verified",
+      platform: "darwin",
+      reason: "ASRT active",
+      confines: { filesystem: true, process: true, network: true },
+    });
+    // Plugin A wraps a worker named "main"; plugin B has a worker with the SAME
+    // id but it was NEVER wrapped. Keying on workerId alone would let B inherit
+    // A's asrt signal and falsely relax the reviewer for an UNCONFINED call.
+    markPluginWorkerWrapped("plugin-a", "main");
+    expect(isPluginWorkerWrapped("plugin-a", "main")).toBe(true);
+    expect(isPluginWorkerWrapped("plugin-b", "main")).toBe(false);
+    expect(
+      resolveReviewerSandboxCapability("plugin", "index_search", undefined, "main", "plugin-b").kind,
+    ).toBe("none");
+    // A's exit must not flip B (and B was never set): unmark A, B still absent.
+    unmarkPluginWorkerWrapped("plugin-a", "main");
+    expect(isPluginWorkerWrapped("plugin-a", "main")).toBe(false);
+    expect(isPluginWorkerWrapped("plugin-b", "main")).toBe(false);
   });
 });

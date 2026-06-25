@@ -55,7 +55,7 @@
 
 import { spawn, type ChildProcess } from "node:child_process";
 import { mkdir } from "node:fs/promises";
-import { unlinkSync, rmdirSync } from "node:fs";
+import { unlinkSync, rmdirSync, chmodSync, lstatSync } from "node:fs";
 import { join, resolve as pathResolve } from "node:path";
 
 import { lvisHome } from "../shared/lvis-home.js";
@@ -68,6 +68,7 @@ import {
   cleanupAsrtSandboxAfterCommand,
   registerWorkerUnixSocketDir,
   unregisterWorkerUnixSocketDir,
+  getDefaultSensitiveReadDenyPaths,
 } from "./asrt-sandbox.js";
 import {
   markPluginWorkerWrapped,
@@ -216,13 +217,13 @@ export async function spawnWorker(spec: SpawnWorkerSpec): Promise<SpawnedWorker>
   // without cleanup BEFORE recreating the dir.
   removeSocketArtifacts(socketPath, socketDir);
   await mkdir(socketDir, { recursive: true, mode: 0o700 });
-
-  // Tell the worker where to bind (the injection mechanism; the worker contract
-  // is PR D-3). Either append `[name, path]` to argv or set an env var.
-  if (typeof spec.udsArgName === "string") {
-    args.push(spec.udsArgName, socketPath);
-  } else if (spec.udsArgName && typeof spec.udsArgName === "object") {
-    baseEnv[spec.udsArgName.env] = socketPath;
+  // `mkdir({recursive,mode})` only applies `mode` to dirs it CREATES — a
+  // pre-existing leaf (e.g. left by an older build under a looser umask) keeps
+  // its old mode. Force 0o700 unconditionally, and reject a symlinked socketDir
+  // (a same-user attacker pre-seeding the path can't redirect the bind/binds).
+  chmodSync(socketDir, 0o700);
+  if (lstatSync(socketDir).isSymbolicLink()) {
+    throw new Error(`[worker-spawn] refusing symlinked control dir: ${socketDir}`);
   }
 
   // Tell the worker where to bind (the injection mechanism; the worker contract
@@ -240,6 +241,13 @@ export async function spawnWorker(spec: SpawnWorkerSpec): Promise<SpawnedWorker>
   const tmpDir = process.env.TMPDIR ?? process.env.TEMP ?? process.env.TMP;
   const allowRead = [socketDir, ...(spec.allowWritePaths ?? []), ...(tmpDir ? [tmpDir] : [])];
 
+  // FAIL-CLOSED read jail: a per-command `denyRead` REPLACES the shared boot
+  // floor in ASRT (`customConfig?.filesystem?.denyRead ?? config.filesystem
+  // .denyRead` — an empty-but-present array is NOT nullish), so it must be
+  // restated here or the worker regains read of `~/.lvis/secrets`, `~/.ssh`,
+  // `~/.aws`, … — the SAME SOT bash/MCP wraps restate (the #1365 floor).
+  const denyRead = getDefaultSensitiveReadDenyPaths();
+
   // UDS allow — SHARED config, NOT per-command (the per-command channel is INERT
   // for the seatbelt/seccomp UDS rules in ASRT 0.0.59; see asrt-sandbox.ts's
   // WORKER UDS header). Register the socketDir so the live shared config grants
@@ -247,6 +255,7 @@ export async function spawnWorker(spec: SpawnWorkerSpec): Promise<SpawnedWorker>
   // `allowAllUnixSockets` weakening (the `--bind` of the writable dir scopes
   // WHERE). MUST happen BEFORE the wrap so the spawned profile carries it.
   let registered = false;
+  let wrapped = false;
   try {
     await registerWorkerUnixSocketDir(socketDir);
     registered = true;
@@ -257,8 +266,11 @@ export async function spawnWorker(spec: SpawnWorkerSpec): Promise<SpawnedWorker>
     // per-command wrap carries ONLY the filesystem jail (the `--bind`).
     const cmdline = [spec.command, ...args].map((part) => shellQuote(part)).join(" ");
     const { argv, env } = await wrapWorkerCommand(cmdline, {
-      filesystem: { allowWrite, allowRead },
+      filesystem: { allowWrite, allowRead, denyRead },
     });
+    // The wrap incremented ASRT's per-command state (Linux activeSandboxCount,
+    // proxy ref); from here a failure MUST decrement it (see the catch).
+    wrapped = true;
 
     const [cmd, ...wrappedArgs] = argv;
     if (cmd === undefined) {
@@ -266,7 +278,9 @@ export async function spawnWorker(spec: SpawnWorkerSpec): Promise<SpawnedWorker>
     }
 
     // Mark the reviewer wrapped-registry: this worker genuinely runs under ASRT.
-    markPluginWorkerWrapped(safeWorker);
+    // Keyed plugin-scoped (NOT workerId alone) so two plugins sharing a workerId
+    // (e.g. "main") cannot collide into a false `asrt` no-leak signal.
+    markPluginWorkerWrapped(safePlugin, safeWorker);
 
     const child = spawn(cmd, wrappedArgs, {
       stdio: ["ignore", "pipe", "pipe"],
@@ -286,7 +300,7 @@ export async function spawnWorker(spec: SpawnWorkerSpec): Promise<SpawnedWorker>
     const cleanupOnce = (): void => {
       if (cleanupRan) return;
       cleanupRan = true;
-      unmarkPluginWorkerWrapped(safeWorker);
+      unmarkPluginWorkerWrapped(safePlugin, safeWorker);
       void unregisterWorkerUnixSocketDir(socketDir);
       void cleanupAsrtSandboxAfterCommand();
       removeSocketArtifacts(socketPath, socketDir);
@@ -299,6 +313,13 @@ export async function spawnWorker(spec: SpawnWorkerSpec): Promise<SpawnedWorker>
   } catch (err) {
     // FAIL CLOSED: wrap/spawn setup failed. Roll back the shared-config UDS
     // allow + socket artifacts so a failed spawn leaves no lingering allowance.
+    // If the wrap had SUCCEEDED (failure was the post-wrap spawn / empty-argv),
+    // also decrement ASRT's per-command state and drop the reviewer marker —
+    // `cleanupOnce` never wired up, so the catch owns that teardown.
+    if (wrapped) {
+      unmarkPluginWorkerWrapped(safePlugin, safeWorker);
+      void cleanupAsrtSandboxAfterCommand();
+    }
     if (registered) void unregisterWorkerUnixSocketDir(socketDir);
     removeSocketArtifacts(socketPath, socketDir);
     throw err instanceof Error ? err : new Error(String(err));

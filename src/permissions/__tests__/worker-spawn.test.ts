@@ -31,12 +31,19 @@ const mkdirMock = vi.fn<(path: unknown, opts?: unknown) => Promise<undefined>>((
 );
 const unlinkSyncMock = vi.fn<(path: unknown) => void>(() => undefined);
 const rmdirSyncMock = vi.fn<(path: unknown) => void>(() => undefined);
+const chmodSyncMock = vi.fn<(path: unknown, mode: unknown) => void>(() => undefined);
+// Default: the control dir is a real dir, NOT a symlink (the security check).
+const lstatSyncMock = vi.fn<(path: unknown) => { isSymbolicLink: () => boolean }>(() => ({
+  isSymbolicLink: () => false,
+}));
 vi.mock("node:fs/promises", () => ({
   mkdir: (path: unknown, opts?: unknown) => mkdirMock(path, opts),
 }));
 vi.mock("node:fs", () => ({
   unlinkSync: (path: unknown) => unlinkSyncMock(path),
   rmdirSync: (path: unknown) => rmdirSyncMock(path),
+  chmodSync: (path: unknown, mode: unknown) => chmodSyncMock(path, mode),
+  lstatSync: (path: unknown) => lstatSyncMock(path),
 }));
 
 // ─── child_process mock ─────────────────────────────────────
@@ -68,6 +75,8 @@ vi.mock("../asrt-sandbox.js", () => ({
   cleanupAsrtSandboxAfterCommand: () => cleanupMock(),
   registerWorkerUnixSocketDir: (dir: string) => registerUdsMock(dir),
   unregisterWorkerUnixSocketDir: (dir: string) => unregisterUdsMock(dir),
+  // The host-secret read floor restated on the worker wrap (#1365 SOT).
+  getDefaultSensitiveReadDenyPaths: () => ["/home/u/.lvis/secrets", "/home/u/.ssh"],
 }));
 
 // Module imports AFTER the mocks.
@@ -146,8 +155,8 @@ describe("spawnWorker — gate OFF (default)", () => {
     expect(worker.socketPath).toBeNull();
     expect(worker.pid).toBe(4242);
     // Worker NOT marked wrapped → reviewer stays none.
-    expect(isPluginWorkerWrapped("embed")).toBe(false);
-    const cap = resolveReviewerSandboxCapability("plugin", "index_search", undefined, "embed");
+    expect(isPluginWorkerWrapped("local-indexer", "embed")).toBe(false);
+    const cap = resolveReviewerSandboxCapability("plugin", "index_search", undefined, "embed", "local-indexer");
     expect(cap.kind).toBe("none");
   });
 });
@@ -196,15 +205,23 @@ describe("spawnWorker — gate ON (macOS)", () => {
     expect(wrapWorkerCommandMock).toHaveBeenCalledTimes(1);
     const [cmdline, options] = wrapWorkerCommandMock.mock.calls[0] as [
       string,
-      { filesystem: { allowWrite: string[]; allowRead: string[] }; allowUnixSocketPath?: string; allowAllUnixSockets?: boolean },
+      { filesystem: { allowWrite: string[]; allowRead: string[]; denyRead?: string[] }; allowUnixSocketPath?: string; allowAllUnixSockets?: boolean },
     ];
     expect(options.filesystem.allowWrite[0]).toBe(socketDir);
     expect(options.filesystem.allowWrite).toContain("/data/index");
     expect(options.allowUnixSocketPath).toBeUndefined();
     expect(options.allowAllUnixSockets).toBeUndefined();
-    // The udsArgName was injected into the command before wrapping.
+    // The host-secret read floor MUST be restated on the worker wrap — a
+    // per-command denyRead REPLACES (not unions) the shared boot floor in ASRT,
+    // so an absent/empty denyRead re-exposes ~/.lvis/secrets, ~/.ssh, … to the
+    // worker. Non-empty array here proves the #1365 floor is carried.
+    expect(Array.isArray(options.filesystem.denyRead)).toBe(true);
+    expect(options.filesystem.denyRead?.length ?? 0).toBeGreaterThan(0);
+    // The udsArgName was injected EXACTLY once (a duplicated injection would feed
+    // the worker `--uds <path> --uds <path>` and break its arg contract).
     expect(cmdline).toContain("--uds");
     expect(cmdline).toContain(socketPath);
+    expect((cmdline.match(/--uds/g) ?? []).length).toBe(1);
 
     // Spawn ran the WRAPPED argv, shell:false, stdin ignored.
     const [scmd, sargs, sopts] = spawnMock.mock.calls[0] as [string, string[], { shell: boolean }];
@@ -214,10 +231,10 @@ describe("spawnWorker — gate ON (macOS)", () => {
 
     // Non-null socketPath + reviewer reports genuine asrt for the plugin tool.
     expect(worker.socketPath).toBe(socketPath);
-    expect(isPluginWorkerWrapped("embed")).toBe(true);
-    const cap = resolveReviewerSandboxCapability("plugin", "index_search", undefined, "embed");
+    expect(isPluginWorkerWrapped("local-indexer", "embed")).toBe(true);
+    const cap = resolveReviewerSandboxCapability("plugin", "index_search", undefined, "embed", "local-indexer");
     expect(cap.kind).toBe("asrt");
-    expect(cap.reason).toContain("plugin worker 'embed' ASRT-wrapped");
+    expect(cap.reason).toContain("plugin worker 'local-indexer/embed' ASRT-wrapped");
   });
 
   it("injects the UDS path via env when udsArgName is the env form", async () => {
@@ -302,18 +319,18 @@ describe("spawnWorker — idempotent any-exit cleanup", () => {
       workerId: "embed",
       command: "/opt/worker",
     });
-    expect(isPluginWorkerWrapped("embed")).toBe(true);
+    expect(isPluginWorkerWrapped("local-indexer", "embed")).toBe(true);
 
     const socketDir = join(lvisHome(), "plugins", "local-indexer", "run", "embed");
     // Child dies unexpectedly → exit fires cleanup.
     child.emit("exit", 1, null);
-    expect(isPluginWorkerWrapped("embed")).toBe(false);
+    expect(isPluginWorkerWrapped("local-indexer", "embed")).toBe(false);
     expect(cleanupMock).toHaveBeenCalledTimes(1);
     // The shared-config UDS allow is released exactly once.
     expect(unregisterUdsMock).toHaveBeenCalledTimes(1);
     expect(unregisterUdsMock).toHaveBeenCalledWith(socketDir);
     // Reviewer falls back to none (no stale asrt) after the worker is gone.
-    expect(resolveReviewerSandboxCapability("plugin", "index_search", undefined, "embed").kind).toBe("none");
+    expect(resolveReviewerSandboxCapability("plugin", "index_search", undefined, "embed", "local-indexer").kind).toBe("none");
 
     // stop() after exit must NOT double-run cleanup.
     worker.stop();
@@ -339,7 +356,7 @@ describe("spawnWorker — idempotent any-exit cleanup", () => {
 
     worker.stop();
     expect(cleanupMock).toHaveBeenCalledTimes(1);
-    expect(isPluginWorkerWrapped("embed")).toBe(false);
+    expect(isPluginWorkerWrapped("local-indexer", "embed")).toBe(false);
 
     child.emit("exit", 0, "SIGTERM");
     expect(cleanupMock).toHaveBeenCalledTimes(1);
@@ -369,6 +386,6 @@ describe("spawnWorker — Windows with gate ON", () => {
     const [cmd, args] = spawnMock.mock.calls[0] as [string, string[]];
     expect(cmd).toBe("C:/worker.exe");
     expect(args).toEqual(["--serve"]);
-    expect(isPluginWorkerWrapped("embed")).toBe(false);
+    expect(isPluginWorkerWrapped("local-indexer", "embed")).toBe(false);
   });
 });
