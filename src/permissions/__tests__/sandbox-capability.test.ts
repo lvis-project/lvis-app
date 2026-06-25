@@ -5,9 +5,11 @@ import {
   detectSandboxCapability,
   formatSandboxCapabilityForPrompt,
   isWeakSandbox,
+  sandboxRelaxesCategory,
   setActiveSandboxCapability,
   type SandboxCapability,
 } from "../sandbox-capability.js";
+import type { ToolCategory } from "../../tools/types.js";
 
 describe("sandbox-capability", () => {
   it("detectSandboxCapability returns kind=none/confidence=verified for the current host", () => {
@@ -228,6 +230,140 @@ describe("sandbox-capability — SandboxKind union members", () => {
     };
     // Existing tests rely on this exact format — must not regress.
     expect(formatSandboxCapabilityForPrompt(cap)).toBe(
+      "executionSandbox=none (verified, darwin) — no OS sandbox configured for the host process",
+    );
+  });
+});
+
+// ─── sandboxRelaxesCategory — per-category relaxation truth table ────────────
+
+describe("sandboxRelaxesCategory — per-category, confines-gated relaxation", () => {
+  const ALL_CATEGORIES: ToolCategory[] = ["read", "write", "shell", "network", "meta"];
+  const FS_CATEGORIES: ToolCategory[] = ["read", "write", "shell", "meta"];
+
+  it("full-confine asrt relaxes ALL 5 categories (mac/linux dormancy — identical to isWeakSandbox=false)", () => {
+    const fullConfine: SandboxCapability = {
+      kind: "asrt",
+      confidence: "verified",
+      platform: "darwin",
+      reason: "ASRT (Seatbelt) active — fs+process+network contained",
+      confines: { filesystem: true, process: true, network: true },
+    };
+    // Behaviour invariant: isWeakSandbox is false AND every category relaxes —
+    // exactly today's all-or-nothing relax-all behaviour, so no mac/linux change.
+    expect(isWeakSandbox(fullConfine)).toBe(false);
+    for (const category of ALL_CATEGORIES) {
+      expect(sandboxRelaxesCategory(fullConfine, category)).toBe(true);
+    }
+  });
+
+  it("NETWORK-ONLY asrt relaxes 'network' but NOT write/shell/read/meta (Windows posture)", () => {
+    const networkOnly: SandboxCapability = {
+      kind: "asrt",
+      confidence: "verified",
+      platform: "win32",
+      reason: "ASRT (srt-win) active — network egress contained, no fs jail",
+      confines: { filesystem: false, process: false, network: true },
+    };
+    expect(sandboxRelaxesCategory(networkOnly, "network")).toBe(true);
+    for (const category of FS_CATEGORIES) {
+      expect(sandboxRelaxesCategory(networkOnly, category)).toBe(false);
+    }
+  });
+
+  it("none capability relaxes NOTHING", () => {
+    const none: SandboxCapability = {
+      kind: "none",
+      confidence: "verified",
+      platform: "darwin",
+      reason: "no OS sandbox configured for the host process",
+      confines: { filesystem: false, process: false, network: false },
+    };
+    for (const category of ALL_CATEGORIES) {
+      expect(sandboxRelaxesCategory(none, category)).toBe(false);
+    }
+  });
+
+  it("partial capability relaxes NOTHING (weak)", () => {
+    const partial: SandboxCapability = {
+      kind: "partial",
+      confidence: "verified",
+      platform: "darwin",
+      reason: "partial OS isolation profile",
+      confines: { filesystem: true, process: false, network: true },
+    };
+    for (const category of ALL_CATEGORIES) {
+      expect(sandboxRelaxesCategory(partial, category)).toBe(false);
+    }
+  });
+
+  it("assumed-confidence asrt relaxes NOTHING (weak)", () => {
+    const assumed: SandboxCapability = {
+      kind: "asrt",
+      confidence: "assumed",
+      platform: "linux",
+      reason: "ASRT presumed active",
+      confines: { filesystem: true, process: true, network: true },
+    };
+    for (const category of ALL_CATEGORIES) {
+      expect(sandboxRelaxesCategory(assumed, category)).toBe(false);
+    }
+  });
+
+  it("no-confines (legacy) verified asrt relaxes ALL categories (back-compat)", () => {
+    // A verified non-none capability WITHOUT a declared confines field keeps the
+    // old all-or-nothing behaviour, so mac/linux-verified asrt published without
+    // confines (and existing fixtures) are unaffected.
+    const legacy: SandboxCapability = {
+      kind: "asrt",
+      confidence: "verified",
+      platform: "linux",
+      reason: "ASRT (bwrap) active",
+    };
+    expect(legacy.confines).toBeUndefined();
+    for (const category of ALL_CATEGORIES) {
+      expect(sandboxRelaxesCategory(legacy, category)).toBe(true);
+    }
+  });
+});
+
+// ─── formatSandboxCapabilityForPrompt — confines surfacing ───────────────────
+
+describe("formatSandboxCapabilityForPrompt — per-dimension confines", () => {
+  it("surfaces confines[net/fs/proc] for a network-only asrt so the LLM sees honest confinement", () => {
+    const networkOnly: SandboxCapability = {
+      kind: "asrt",
+      confidence: "verified",
+      platform: "win32",
+      reason: "ASRT (srt-win) active — network egress contained, no fs jail",
+      confines: { filesystem: false, process: false, network: true },
+    };
+    const result = formatSandboxCapabilityForPrompt(networkOnly);
+    expect(result).toContain("executionSandbox=asrt (verified, win32)");
+    expect(result).toContain("confines[net:✓ fs:✗ proc:✗]");
+  });
+
+  it("surfaces all-✓ confines for a full-confine asrt", () => {
+    const full: SandboxCapability = {
+      kind: "asrt",
+      confidence: "verified",
+      platform: "darwin",
+      reason: "ASRT (Seatbelt) active",
+      confines: { filesystem: true, process: true, network: true },
+    };
+    expect(formatSandboxCapabilityForPrompt(full)).toContain("confines[net:✓ fs:✓ proc:✓]");
+  });
+
+  it("omits the confines suffix when confines is absent (preserves legacy grep-stable string)", () => {
+    const noConfines: SandboxCapability = {
+      kind: "none",
+      confidence: "verified",
+      platform: "darwin",
+      reason: "no OS sandbox configured for the host process",
+    };
+    const result = formatSandboxCapabilityForPrompt(noConfines);
+    expect(result).not.toContain("confines[");
+    expect(result).toBe(
       "executionSandbox=none (verified, darwin) — no OS sandbox configured for the host process",
     );
   });
