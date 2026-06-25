@@ -65,6 +65,13 @@
 import { homedir } from "node:os";
 import { join } from "node:path";
 import { lvisHome } from "../shared/lvis-home.js";
+import {
+  stampWindowsFsDeny,
+  restoreWindowsFsDeny,
+  recoverWindowsFsStamps,
+  toExplicitFiles,
+  injectHolderPid,
+} from "./windows-fs-jail.js";
 
 import type {
   SandboxRuntimeConfig,
@@ -414,6 +421,16 @@ async function loadSandboxManager() {
  */
 let active = false;
 
+/**
+ * win32 only (Windows FS completion — lvis-app#1367): the holder PID under which
+ * the Windows sensitive-floor DACL stamps are held — the LONG-LIVED host
+ * (process.pid) — or null when the FS jail is inactive (off-win32, gate-off, or
+ * a stamp that failed → network-only, no false confinement claim).
+ * {@link wrapToolCommand}/{@link wrapWorkerCommand} inject `exec --holder-pid
+ * <this>` ONLY when it is set; {@link resetAsrtSandbox} restores under it.
+ */
+let _windowsFsJailHolderPid: number | null = null;
+
 /** Host-tool spawn gate. True once {@link initializeAsrtSandbox} succeeds. */
 export function isAsrtSandboxActive(): boolean {
   return active;
@@ -739,6 +756,58 @@ export async function initializeAsrtSandbox(
   const config = buildSandboxConfig(withWorkerUnixSockets(trustedSettings));
   await SandboxManager.initialize(config, askCb, enableLogMonitor);
   active = true;
+  // Windows FS completion (lvis-app#1367): ASRT's win32 wrap does NOT apply
+  // `customConfig.filesystem`; the FS-deny primitive lives in the dark
+  // `srt-win acl` CLI (upstream anthropic-experimental/sandbox-runtime#336).
+  // Stamp the host's sensitive deny-floor (read AND write/delete protected)
+  // under THIS long-lived process, then fence each wrapped child with
+  // `exec --holder-pid` (see applyWindowsHolderFence). FAIL-CLOSED but
+  // NON-BRICKING: a failed stamp (e.g. WFP group not yet installed) degrades to
+  // network-only — holderPid stays null so confines.filesystem is NEVER claimed
+  // (no false relaxation) — and is surfaced LOUD, never silently swallowed.
+  // Darwin-untestable: real enforcement is the manual Windows QA gate (#1367).
+  if (process.platform === "win32") {
+    // Best-effort crash recovery FIRST (prune a prior crash's dead holders),
+    // DECOUPLED in its own try/catch so a recover hiccup never disables an
+    // otherwise-stampable jail (recover is cleanup, not a stamp precondition).
+    try {
+      recoverWindowsFsStamps(DEFAULT_WINDOWS_GROUP_NAME);
+    } catch (err) {
+      console.warn(
+        `[asrt-sandbox] Windows FS jail: acl recover (crash cleanup) failed, ` +
+          `continuing to stamp: ${err instanceof Error ? err.message : String(err)}`,
+      );
+    }
+    try {
+      const { files: floorFiles, droppedNonFiles } = toExplicitFiles(
+        getDefaultSensitiveReadDenyPaths(trustedSettings.userDataDir),
+      );
+      if (droppedNonFiles.length > 0) {
+        // No-Fallback: the dropped paths are exactly the sensitive DIRECTORIES
+        // (~/.ssh, ~/.aws, ~/.lvis/secrets, the Electron userData dir) that acl
+        // (file-only) cannot stamp — surface them LOUD so "FS jail active" is
+        // never read as "those dirs are protected" (dir coverage tracked in #1367).
+        console.warn(
+          `[asrt-sandbox] Windows FS jail: ${droppedNonFiles.length} sensitive ` +
+            `DIRECTORY path(s) NOT stamped (acl stamps explicit files only; dir ` +
+            `coverage tracked in #1367): ${droppedNonFiles.join(", ")}`,
+        );
+      }
+      stampWindowsFsDeny(
+        { denyRead: floorFiles, denyWrite: floorFiles },
+        process.pid,
+        DEFAULT_WINDOWS_GROUP_NAME,
+      );
+      _windowsFsJailHolderPid = process.pid;
+    } catch (err) {
+      _windowsFsJailHolderPid = null;
+      console.error(
+        `[asrt-sandbox] Windows FS jail INACTIVE this session (network-only) — ` +
+          `could not stamp the sensitive deny-floor: ` +
+          `${err instanceof Error ? err.message : String(err)}`,
+      );
+    }
+  }
 }
 
 /**
@@ -754,6 +823,19 @@ export async function checkAsrtDependencies(): Promise<{
 }> {
   const SandboxManager = await loadSandboxManager();
   return SandboxManager.checkDependencies();
+}
+
+/**
+ * win32 FS-jail fence (lvis-app#1367): when the Windows sensitive-floor stamps
+ * are active (see {@link _windowsFsJailHolderPid}), inject `exec --holder-pid
+ * <hostPid>` into the wrapped argv so srt-win opens a no-FILE_SHARE_DELETE
+ * handle on every stamped file for the child's lifetime — a DACL alone cannot
+ * fence delete/rename (the parent dir authorizes delete). A no-op off-win32 or
+ * when the jail is inactive. Darwin-untestable — manual Windows QA (#1367).
+ */
+function applyWindowsHolderFence(wrapped: SandboxWrapResult): SandboxWrapResult {
+  if (process.platform !== "win32" || _windowsFsJailHolderPid === null) return wrapped;
+  return { ...wrapped, argv: injectHolderPid(wrapped.argv, _windowsFsJailHolderPid) };
 }
 
 /**
@@ -773,12 +855,13 @@ export async function wrapToolCommand(
     throw new Error("wrapToolCommand: ASRT sandbox is not active (initialize at boot first)");
   }
   const SandboxManager = await loadSandboxManager();
-  return SandboxManager.wrapWithSandboxArgv(
+  const wrapped = await SandboxManager.wrapWithSandboxArgv(
     command,
     options.binShell,
     toCustomConfig(options.filesystem),
     options.abortSignal,
   );
+  return applyWindowsHolderFence(wrapped);
 }
 
 /**
@@ -825,12 +908,13 @@ export async function wrapWorkerCommand(
     throw new Error("wrapWorkerCommand: ASRT sandbox is not active (initialize at boot first)");
   }
   const SandboxManager = await loadSandboxManager();
-  return SandboxManager.wrapWithSandboxArgv(
+  const wrapped = await SandboxManager.wrapWithSandboxArgv(
     command,
     options.binShell,
     toCustomConfig(options.filesystem),
     options.abortSignal,
   );
+  return applyWindowsHolderFence(wrapped);
 }
 
 /**
@@ -1089,6 +1173,23 @@ export async function resetAsrtSandbox(): Promise<void> {
   const SandboxManager = await loadSandboxManager();
   await SandboxManager.reset();
   active = false;
+  // Windows FS completion (lvis-app#1367): release the sensitive-floor DACL
+  // stamps held under this process. Non-bricking — a restore failure leaves
+  // files stamped (recoverable via `srt-win acl recover --force`), surfaced
+  // LOUD (No-Fallback rule), never silently swallowed.
+  if (_windowsFsJailHolderPid !== null) {
+    const holderPid = _windowsFsJailHolderPid;
+    _windowsFsJailHolderPid = null;
+    try {
+      restoreWindowsFsDeny(holderPid, DEFAULT_WINDOWS_GROUP_NAME);
+    } catch (err) {
+      console.error(
+        `[asrt-sandbox] Windows FS jail restore failed — paths may remain ` +
+          `stamped (\`srt-win acl recover --force\` to clear): ` +
+          `${err instanceof Error ? err.message : String(err)}`,
+      );
+    }
+  }
   // worker-confinement PR D-1: drop the remembered base settings + live worker
   // UDS dirs so a fresh init starts from a clean slate (no stale socket allow).
   _baseTrustedSettings = undefined;
