@@ -739,6 +739,12 @@ export async function resetAsrtSandbox(): Promise<void> {
   const SandboxManager = await loadSandboxManager();
   await SandboxManager.reset();
   active = false;
+  // worker-egress PR1: drop every wrapped-MCP-server marker so a torn-down
+  // sandbox cannot leave a stale `asrt` signal the reviewer would honour. Lazy
+  // import keeps the module-load edge one-way (sandbox-capability is renderer-
+  // safe and never imports back into this main-only module).
+  const { clearWrappedMcpServers } = await import("./sandbox-capability.js");
+  clearWrappedMcpServers();
 }
 
 /**

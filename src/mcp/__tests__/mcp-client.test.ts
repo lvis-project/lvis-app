@@ -55,7 +55,12 @@ import type {
   McpServerConfig,
   McpStdioServerConfig,
 } from "../types.js";
-import { governanceWithPolicy } from "./test-helpers.js";
+import {
+  governanceWithPolicy,
+  stdioApproval,
+  buildPolicy,
+  FakeChildProcess,
+} from "./test-helpers.js";
 
 // ─── Helpers ────────────────────────────────────────────────
 
@@ -82,44 +87,6 @@ function httpApproval(
   };
 }
 
-function stdioApproval(
-  id: string,
-  command: string,
-  overrides: Partial<McpGovernancePolicy["servers"][number]> = {},
-): McpGovernancePolicy["servers"][number] {
-  return {
-    id,
-    name: id,
-    status: "approved",
-    transport: "stdio",
-    allowedCommands: [command],
-    requiredAuth: "none",
-    tlsRequired: false,
-    allowedCapabilities: ["tools"],
-    maxTools: 16,
-    toolNamePrefix: id,
-    toolPermissionMode: "default",
-    connectionTimeoutMs: 5_000,
-    maxConcurrentRequests: 4,
-    ...overrides,
-  };
-}
-
-function buildPolicy(
-  approvals: McpGovernancePolicy["servers"],
-): McpGovernancePolicy {
-  return {
-    version: "1.0-test",
-    defaultPolicy: "deny",
-    servers: approvals,
-    globalRules: {
-      maxServersTotal: 10,
-      blockedUrlPatterns: [],
-      allowedUrlPatterns: [],
-      policyRefreshIntervalMs: 60_000,
-    },
-  };
-}
 
 /** Simple JSON-RPC body matcher. */
 function readRpcMethod(init: RequestInit | undefined): string | undefined {
@@ -775,77 +742,6 @@ describe("HttpTransport — SSE streaming", () => {
 });
 
 // ─── 5. stdio regression ────────────────────────────────────
-
-/**
- * Fake ChildProcess that lets us drive stdout from the test and captures
- * stdin writes so we can observe Content-Length framed traffic.
- */
-class FakeChildProcess extends EventEmitter {
-  stdout = new PassThrough();
-  stderr = new PassThrough();
-  stdin = {
-    writable: true,
-    write: (chunk: string) => {
-      this.stdinBuffer += chunk;
-      this.parseAndRespond();
-      return true;
-    },
-    end: () => {
-      this.stdin.writable = false;
-    },
-  };
-  exitCode: number | null = null;
-  private stdinBuffer = "";
-
-  // Prepared responses keyed by method name.
-  responses: Record<string, (id: number) => unknown> = {};
-
-  kill(_signal?: string): boolean {
-    this.exitCode = 0;
-    this.emit("exit", 0, null);
-    return true;
-  }
-
-  /**
-   * Walks `stdinBuffer`, extracts every complete Content-Length framed
-   * JSON-RPC request, and writes a framed response back on stdout.
-   */
-  private parseAndRespond(): void {
-    // eslint-disable-next-line no-constant-condition
-    while (true) {
-      const headerEnd = this.stdinBuffer.indexOf("\r\n\r\n");
-      if (headerEnd === -1) return;
-      const header = this.stdinBuffer.slice(0, headerEnd);
-      const m = header.match(/Content-Length:\s*(\d+)/i);
-      if (!m) {
-        this.stdinBuffer = this.stdinBuffer.slice(headerEnd + 4);
-        continue;
-      }
-      const len = parseInt(m[1], 10);
-      const bodyStart = headerEnd + 4;
-      if (this.stdinBuffer.length < bodyStart + len) return;
-      const body = this.stdinBuffer.slice(bodyStart, bodyStart + len);
-      this.stdinBuffer = this.stdinBuffer.slice(bodyStart + len);
-      try {
-        const req = JSON.parse(body) as {
-          method: string;
-          id?: number;
-        };
-        // Notifications have no id → do not reply.
-        if (req.id === undefined) continue;
-        const builder = this.responses[req.method];
-        if (!builder) continue;
-        const result = builder(req.id);
-        const payload = JSON.stringify({ jsonrpc: "2.0", id: req.id, result });
-        const frame = `Content-Length: ${Buffer.byteLength(payload)}\r\n\r\n${payload}`;
-        // Defer slightly so the client's Promise has time to register.
-        queueMicrotask(() => this.stdout.write(frame));
-      } catch {
-        /* ignore malformed */
-      }
-    }
-  }
-}
 
 describe("StdioTransport — regression", () => {
   it("connects via subprocess with Content-Length framed JSON-RPC", async () => {
