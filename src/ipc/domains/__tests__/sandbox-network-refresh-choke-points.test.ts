@@ -42,21 +42,8 @@ vi.mock("../../../engine/conversation-loop.js", () => ({}), { virtual: true });
 
 const ORIGINAL_ENV = { ...process.env };
 
-function invoke(channel: string, ...args: unknown[]): Promise<unknown> {
-  const fn = handlers.get(channel);
-  if (!fn) throw new Error(`No handler registered for: ${channel}`);
-  return Promise.resolve(
-    fn(
-      {
-        frameId: 0,
-        processId: 0,
-        frame: { url: "file:///app/index.html" },
-        senderFrame: { url: "file:///app/index.html" },
-      } as never,
-      ...args,
-    ),
-  );
-}
+// Use the shared invoker from test-helpers rather than a local duplicate.
+const invoke = makeAppIpcInvoker(handlers);
 
 // ── CHOKE POINT 1: lvis:settings:update ──────────────────────────────────────
 
