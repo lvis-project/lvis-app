@@ -735,7 +735,6 @@ describe("asrt-sandbox — sensitive read deny-list (host-secret hardening)", ()
   });
 
   it("FIX 2 — userDataDir param: exact path is denied when provided (handles --user-data-dir)", () => {
-    const home = homedir();
     const customUserData = join(tmpdir(), "custom-electron-userData-for-test");
     const paths = getDefaultSensitiveReadDenyPaths(customUserData);
     // The exact provided path must be denied.
