@@ -15,10 +15,10 @@
  * The wrap/spawn assertions are guarded to supported platforms (darwin/linux);
  * the flag + trust-boundary assertions run everywhere.
  */
-import { describe, it, expect, afterEach } from "vitest";
+import { describe, it, expect, afterEach, beforeEach } from "vitest";
 import { spawn } from "node:child_process";
 import { mkdtempSync, rmSync } from "node:fs";
-import { tmpdir } from "node:os";
+import { homedir, tmpdir } from "node:os";
 import { join } from "node:path";
 
 import {
@@ -36,6 +36,7 @@ import {
   updateAsrtSandboxConfig,
   DEFAULT_WINDOWS_PROXY_PORT_RANGE,
   buildSandboxConfig,
+  getDefaultSensitiveReadDenyPaths,
 } from "../asrt-sandbox.js";
 // ASRT-contract guards: the real vendored matcher + parent-proxy resolver, so
 // the host-side fixes are proven against ASRT 0.0.59's ACTUAL semantics (not a
@@ -617,5 +618,191 @@ describe("asrt-sandbox — proxyPortRange single SOT (install↔config consisten
         Object.defineProperty(process, "platform", prevPlatform);
       }
     }
+  });
+});
+
+describe("asrt-sandbox — sensitive read deny-list (host-secret hardening)", () => {
+  // getDefaultSensitiveReadDenyPaths derives `~/.lvis/*` from lvisHome() (which
+  // honors the LVIS_HOME env override) and the standard credential stores from
+  // os.homedir(). Pin LVIS_HOME to a deterministic value so the ~/.lvis assertions
+  // are stable across machines; restore it after each test.
+  const FAKE_LVIS_HOME = join(tmpdir(), "lvis-readdeny-test-home", ".lvis");
+  let prevLvisHome: string | undefined;
+
+  beforeEach(() => {
+    prevLvisHome = process.env.LVIS_HOME;
+    process.env.LVIS_HOME = FAKE_LVIS_HOME;
+  });
+  afterEach(() => {
+    if (prevLvisHome === undefined) delete process.env.LVIS_HOME;
+    else process.env.LVIS_HOME = prevLvisHome;
+  });
+
+  it("returns the expected absolute sensitive paths (LVIS namespaces + standard credential stores)", () => {
+    const paths = getDefaultSensitiveReadDenyPaths();
+    const home = homedir();
+
+    // Every entry is an absolute path with NO glob char (literal — works on both
+    // macOS seatbelt subpath and Linux bwrap deny-bind; ASRT only expands globs).
+    for (const p of paths) {
+      expect(p.startsWith("/") || /^[A-Za-z]:[\\/]/.test(p)).toBe(true);
+      expect(/[*?[\]]/.test(p)).toBe(false);
+    }
+
+    // LVIS host-domain sensitive namespaces, derived from the (overridden) lvisHome.
+    expect(paths).toContain(join(FAKE_LVIS_HOME, "secrets"));
+    expect(paths).toContain(join(FAKE_LVIS_HOME, "sessions"));
+    expect(paths).toContain(join(FAKE_LVIS_HOME, "routine"));
+    expect(paths).toContain(join(FAKE_LVIS_HOME, "audit.log"));
+    expect(paths).toContain(join(FAKE_LVIS_HOME, "audit"));
+    expect(paths).toContain(join(FAKE_LVIS_HOME, "settings.json"));
+
+    // Standard credential / secret stores under the real home.
+    expect(paths).toContain(join(home, ".ssh"));
+    expect(paths).toContain(join(home, ".aws"));
+    expect(paths).toContain(join(home, ".config", "gcloud"));
+    expect(paths).toContain(join(home, ".config", "gh"));
+    expect(paths).toContain(join(home, ".config", "git"));
+    expect(paths).toContain(join(home, ".kube", "config"));
+    expect(paths).toContain(join(home, ".gnupg"));
+    expect(paths).toContain(join(home, ".npmrc"));
+    expect(paths).toContain(join(home, ".netrc"));
+    expect(paths).toContain(join(home, ".git-credentials"));
+    expect(paths).toContain(join(home, ".docker", "config.json"));
+
+    // LVIS ~/.lvis permission / auth-partition namespaces.
+    expect(paths).toContain(join(FAKE_LVIS_HOME, "permissions"));
+    expect(paths).toContain(join(FAKE_LVIS_HOME, "permissions.json"));
+    expect(paths).toContain(join(FAKE_LVIS_HOME, "policy.json"));
+    expect(paths).toContain(join(FAKE_LVIS_HOME, "plugins", "auth-partitions.json"));
+
+    // FIX 3: drift-sync paths added to match SENSITIVE_PATH_PATTERNS.
+    expect(paths).toContain(join(FAKE_LVIS_HOME, "certs"));
+    expect(paths).toContain(join(FAKE_LVIS_HOME, "keys"));
+    expect(paths).toContain(join(home, ".azure"));
+    expect(paths).toContain(join(home, ".pgpass"));
+    expect(paths).toContain(join(home, ".gitconfig"));
+    expect(paths).toContain(join(home, ".bash_history"));
+    expect(paths).toContain(join(home, ".zsh_history"));
+
+    // Electron userData dir (deny whole dir — covers OAuth session cookies/tokens,
+    // Cookies SQLite, Local/Session Storage, lvis-secrets.json, etc.).
+    // FIX 1: Linux base mirrors Electron's XDG_CONFIG_HOME resolution.
+    const xdgBase = process.env.XDG_CONFIG_HOME ?? join(home, ".config");
+    const expectedUserData =
+      process.platform === "darwin"
+        ? join(home, "Library", "Application Support", "LVIS")
+        : process.platform === "win32"
+          ? join(home, "AppData", "Roaming", "LVIS")
+          : join(xdgBase, "LVIS");
+    expect(paths).toContain(expectedUserData);
+
+    // No duplicates (deduped, order-stable).
+    expect(new Set(paths).size).toBe(paths.length);
+  });
+
+  it("does NOT deny $HOME wholesale (over-deny safety — legit shell tools still read ~)", () => {
+    const paths = getDefaultSensitiveReadDenyPaths();
+    const home = homedir();
+    // The bare home dir must never be on the deny-list — denying all of ~ would
+    // break tools reading ~/.cargo, ~/.config, etc. We deny SPECIFIC subpaths.
+    expect(paths).not.toContain(home);
+    // A clearly-legit subpath (not a credential store) must NOT be denied.
+    expect(paths).not.toContain(join(home, ".cargo"));
+    // ~/.config wholesale must never be denied — only specific subdirs.
+    expect(paths).not.toContain(join(home, ".config"));
+  });
+
+  it("FIX 1 — Linux XDG_CONFIG_HOME: when set, userData base uses $XDG_CONFIG_HOME not ~/.config", () => {
+    // This test only exercises the XDG path on Linux (the env var is harmless
+    // on other platforms since darwin/win32 branches never read it).
+    if (process.platform !== "linux") return;
+    const home = homedir();
+    const fakeXdg = join(tmpdir(), "fake-xdg-config-home");
+    const prevXdg = process.env.XDG_CONFIG_HOME;
+    try {
+      process.env.XDG_CONFIG_HOME = fakeXdg;
+      const paths = getDefaultSensitiveReadDenyPaths();
+      // Must deny the XDG-resolved path.
+      expect(paths).toContain(join(fakeXdg, "LVIS"));
+      // Must NOT deny the default ~/.config/LVIS when XDG is overridden
+      // (belt-and-suspenders is the caller's choice; this SOT mirrors Electron).
+      expect(paths).not.toContain(join(home, ".config", "LVIS"));
+    } finally {
+      if (prevXdg === undefined) delete process.env.XDG_CONFIG_HOME;
+      else process.env.XDG_CONFIG_HOME = prevXdg;
+    }
+  });
+
+  it("FIX 2 — userDataDir param: exact path is denied when provided (handles --user-data-dir)", () => {
+    const customUserData = join(tmpdir(), "custom-electron-userData-for-test");
+    const paths = getDefaultSensitiveReadDenyPaths(customUserData);
+    // The exact provided path must be denied.
+    expect(paths).toContain(customUserData);
+    // No duplicates.
+    expect(new Set(paths).size).toBe(paths.length);
+    // Over-deny safety: the derived fallback is NOT additionally added when
+    // the exact path is provided (the dedup set handles this if they collide,
+    // but the function uses the provided value exclusively for the userData slot).
+    // Verify the provided path is present exactly once.
+    expect(paths.filter((p) => p === customUserData).length).toBe(1);
+  });
+
+  it("FIX 2 — userDataDir absent: falls back to per-platform derived path (no electron import)", () => {
+    const home = homedir();
+    const paths = getDefaultSensitiveReadDenyPaths(); // no arg → fallback
+    const xdgBase = process.env.XDG_CONFIG_HOME ?? join(home, ".config");
+    const fallback =
+      process.platform === "darwin"
+        ? join(home, "Library", "Application Support", "LVIS")
+        : process.platform === "win32"
+          ? join(home, "AppData", "Roaming", "LVIS")
+          : join(xdgBase, "LVIS");
+    expect(paths).toContain(fallback);
+  });
+
+  it("FIX 2 — buildSandboxConfig threads userDataDir into deny-list", () => {
+    const customUserData = join(tmpdir(), "threaded-userData-deny-test");
+    const config = buildSandboxConfig({
+      allowedDomains: [],
+      userDataDir: customUserData,
+    });
+    expect(config.filesystem.denyRead).toContain(customUserData);
+  });
+
+  it("buildSandboxConfig unions the sensitive deny-list into filesystem.denyRead", () => {
+    const config = buildSandboxConfig({ allowedDomains: [], strictAllowlist: true });
+    const sensitive = getDefaultSensitiveReadDenyPaths();
+    for (const p of sensitive) {
+      expect(config.filesystem.denyRead).toContain(p);
+    }
+    // Secrets is part of the floor (the prior single-entry deny is subsumed).
+    expect(config.filesystem.denyRead).toContain(join(FAKE_LVIS_HOME, "secrets"));
+  });
+
+  it("buildSandboxConfig keeps a caller-supplied denyRead AND adds the sensitive floor (union, deduped)", () => {
+    const extra = join(tmpdir(), "caller-supplied-deny-xyz");
+    const config = buildSandboxConfig({ allowedDomains: [], denyRead: [extra] });
+    // Caller entry survives.
+    expect(config.filesystem.denyRead).toContain(extra);
+    // Sensitive floor is still present.
+    expect(config.filesystem.denyRead).toContain(join(FAKE_LVIS_HOME, "secrets"));
+    // Passing a path already on the floor does not duplicate it.
+    const dupConfig = buildSandboxConfig({
+      allowedDomains: [],
+      denyRead: [join(FAKE_LVIS_HOME, "secrets")],
+    });
+    const occurrences = dupConfig.filesystem.denyRead.filter(
+      (p) => p === join(FAKE_LVIS_HOME, "secrets"),
+    ).length;
+    expect(occurrences).toBe(1);
+  });
+
+  it("default-OFF: computing the deny-list / config does NOT activate the sandbox gate", () => {
+    // Pure functions — no side effect on the boot-time spawn gate.
+    expect(isAsrtSandboxActive()).toBe(false);
+    getDefaultSensitiveReadDenyPaths();
+    buildSandboxConfig({ allowedDomains: [] });
+    expect(isAsrtSandboxActive()).toBe(false);
   });
 });

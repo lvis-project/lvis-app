@@ -3,15 +3,16 @@
  *
  * Confines EXTERNAL MCP stdio servers (the ones StdioTransport spawns) under the
  * ASRT sandbox: filesystem jail (write-confined to the host-derived per-server
- * sandbox root, read-deny of `~/.lvis/secrets`) + the shared strict-union
- * network (enforced by the boot config, not per command). Gate DEFAULT-OFF.
+ * sandbox root + the CENTRALIZED sensitive-read DENY-LIST — secrets, session/
+ * routine history, ~/.ssh, ~/.aws, etc.) + the shared strict-union network
+ * (enforced by the boot config, not per command). Gate DEFAULT-OFF.
  *
  * These tests stub ASRT (`wrapWorkerCommand`) + `child_process.spawn` to assert
  * the WIRING — they do NOT exercise the real Seatbelt/bwrap backend (that is the
  * macOS runtime smoke run separately). Covered:
  *   - gate OFF  → plain spawn, args UNCHANGED, no wrap, reviewer reports `none`.
  *   - gate ON   → wrapWorkerCommand called with the FS jail (allowWrite=[root],
- *                 denyRead includes the secrets dir), spawn receives the wrapped
+ *                 denyRead = the centralized sensitive deny-list), spawn receives the wrapped
  *                 argv with shell:false + stdin pipe; per-platform env preserves
  *                 the secret-stripped base + the apiKey and overlays ASRT proxy
  *                 keys on win32.
@@ -20,6 +21,7 @@
  */
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 import { join } from "node:path";
+import { homedir } from "node:os";
 
 // ─── child_process mock ─────────────────────────────────────
 const spawnMock = vi.fn<
@@ -36,15 +38,26 @@ const wrapWorkerCommandMock = vi.fn<
   (command: string, options?: unknown) => Promise<{ argv: string[]; env: NodeJS.ProcessEnv }>
 >();
 const cleanupMock = vi.fn(() => Promise.resolve());
-vi.mock("../../permissions/asrt-sandbox.js", () => ({
-  isAsrtSandboxActive: () => gateActive,
-  wrapWorkerCommand: (command: string, options?: unknown) =>
-    wrapWorkerCommandMock(command, options),
-  cleanupAsrtSandboxAfterCommand: () => cleanupMock(),
-}));
+vi.mock("../../permissions/asrt-sandbox.js", async () => {
+  // Use the REAL getDefaultSensitiveReadDenyPaths so the wrap test asserts the
+  // genuine centralized deny-list (not a re-implementation that could drift).
+  const actual = await vi.importActual<
+    typeof import("../../permissions/asrt-sandbox.js")
+  >("../../permissions/asrt-sandbox.js");
+  return {
+    isAsrtSandboxActive: () => gateActive,
+    wrapWorkerCommand: (command: string, options?: unknown) =>
+      wrapWorkerCommandMock(command, options),
+    cleanupAsrtSandboxAfterCommand: () => cleanupMock(),
+    getDefaultSensitiveReadDenyPaths: actual.getDefaultSensitiveReadDenyPaths,
+  };
+});
 
 // Module imports must come AFTER the mocks above.
 import { McpClient } from "../mcp-client.js";
+// Resolves to the mock export above (which delegates to the REAL impl via
+// vi.importActual), so the assertion checks the genuine deny-list.
+import { getDefaultSensitiveReadDenyPaths } from "../../permissions/asrt-sandbox.js";
 import { ToolRegistry } from "../../tools/registry.js";
 import {
   resolveReviewerSandboxCapability,
@@ -141,7 +154,7 @@ describe("StdioTransport ASRT wrap — gate OFF (default)", () => {
 // ─── Gate ON — wrapped spawn + FS jail + per-platform env ───
 
 describe("StdioTransport ASRT wrap — gate ON", () => {
-  it("routes the spawn through wrapWorkerCommand with the FS jail + secrets read-deny", async () => {
+  it("routes the spawn through wrapWorkerCommand with the FS jail + sensitive read deny-list", async () => {
     gateActive = true;
     const sandboxRoot = join(lvisHome(), "mcp", "fs", "sandbox");
     const fake = new FakeChildProcess();
@@ -179,10 +192,17 @@ describe("StdioTransport ASRT wrap — gate ON", () => {
     expect(cmdline).toContain("'/tmp'");
     // Write-jail = ONLY the per-server sandbox root.
     expect(options.filesystem.allowWrite).toEqual([sandboxRoot]);
-    // Read-jail re-allows the root; never HOME.
+    // The root + tmp are re-allowed for read; HOME is never re-allowed wholesale.
     expect(options.filesystem.allowRead).toContain(sandboxRoot);
-    // The host secrets dir is read-DENIED (closes the read-jail leak).
+    // The worker wrap applies the CENTRALIZED sensitive read DENY-LIST (deny-list,
+    // not a read-allow jail): secrets + session/routine history + standard
+    // credential stores are all read-DENIED, not just `~/.lvis/secrets`.
+    const sensitive = getDefaultSensitiveReadDenyPaths();
+    expect(options.filesystem.denyRead).toEqual(sensitive);
     expect(options.filesystem.denyRead).toContain(join(lvisHome(), "secrets"));
+    expect(options.filesystem.denyRead).toContain(join(lvisHome(), "sessions"));
+    expect(options.filesystem.denyRead).toContain(join(homedir(), ".ssh"));
+    expect(options.filesystem.denyRead).toContain(join(homedir(), ".aws"));
 
     // spawn ran the WRAPPED argv with shell:false + a writable stdin pipe.
     const [spawnedCmd, spawnedArgs, spawnOpts] = spawnMock.mock.calls[0] as [
