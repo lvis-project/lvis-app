@@ -20,17 +20,14 @@ import {
   resolvePowerShellExecutable,
   binShellForExecutable,
 } from "../powershell.js";
+import { setProcessPlatform } from "../../testing/process-platform.js";
 
 const ORIGINAL_PLATFORM = process.platform;
 const ORIGINAL_PATH = process.env["PATH"];
 const ORIGINAL_PATHEXT = process.env["PATHEXT"];
 
-function setPlatform(platform: NodeJS.Platform) {
-  Object.defineProperty(process, "platform", { value: platform, configurable: true });
-}
-
 afterEach(() => {
-  Object.defineProperty(process, "platform", { value: ORIGINAL_PLATFORM, configurable: true });
+  setProcessPlatform(ORIGINAL_PLATFORM);
   if (ORIGINAL_PATH === undefined) delete process.env["PATH"];
   else process.env["PATH"] = ORIGINAL_PATH;
   if (ORIGINAL_PATHEXT === undefined) delete process.env["PATHEXT"];
@@ -54,17 +51,17 @@ describe("binShellForExecutable", () => {
 
 describe("resolvePowerShellExecutable off-win32", () => {
   it("returns pwsh on darwin/linux regardless of PATH", () => {
-    setPlatform("darwin");
+    setProcessPlatform("darwin");
     process.env["PATH"] = "/usr/bin";
     expect(resolvePowerShellExecutable()).toBe("pwsh");
-    setPlatform("linux");
+    setProcessPlatform("linux");
     expect(resolvePowerShellExecutable()).toBe("pwsh");
   });
 });
 
 describe("resolvePowerShellExecutable on win32", () => {
   it("prefers pwsh.exe when it is on PATH (sandboxed flavor == unsandboxed)", () => {
-    setPlatform("win32");
+    setProcessPlatform("win32");
     const dir = mkdtempSync(join(tmpdir(), "lvis-pwsh-"));
     const pwshPath = join(dir, "pwsh.exe");
     writeFileSync(pwshPath, "");
@@ -79,7 +76,7 @@ describe("resolvePowerShellExecutable on win32", () => {
   });
 
   it("falls back to powershell.exe when pwsh.exe is absent from PATH", () => {
-    setPlatform("win32");
+    setProcessPlatform("win32");
     // A directory with no pwsh.exe in it.
     const dir = mkdtempSync(join(tmpdir(), "lvis-nopwsh-"));
     process.env["PATH"] = dir;
@@ -91,7 +88,7 @@ describe("resolvePowerShellExecutable on win32", () => {
   });
 
   it("finds pwsh via a bare PATHEXT suffix entry (pwsh + .EXE)", () => {
-    setPlatform("win32");
+    setProcessPlatform("win32");
     const dir = mkdtempSync(join(tmpdir(), "lvis-pwshext-"));
     // Only the suffix-appended form exists; the bare 'pwsh.exe' literal probe
     // and the PATHEXT loop both look at the same path here, but assert the
@@ -104,7 +101,7 @@ describe("resolvePowerShellExecutable on win32", () => {
   });
 
   it("returns powershell.exe when PATH is empty", () => {
-    setPlatform("win32");
+    setProcessPlatform("win32");
     process.env["PATH"] = "";
     expect(resolvePowerShellExecutable()).toBe("powershell.exe");
   });
