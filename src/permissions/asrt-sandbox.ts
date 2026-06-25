@@ -200,6 +200,21 @@ export interface TrustedSandboxSettings {
   readonly windows?: {
     readonly proxyPortRange?: readonly [number, number];
   };
+  /**
+   * The REAL Electron `app.getPath("userData")` for this process, threaded in
+   * from a TRUSTED main-process caller (boot.ts) that CAN import `electron`.
+   *
+   * When present: this EXACT path is denied (handles `--user-data-dir`,
+   * XDG_CONFIG_HOME, and future productName changes correctly).
+   * When absent: {@link getDefaultSensitiveReadDenyPaths} falls back to a
+   * per-platform os.homedir() + literal derivation so there is always SOME
+   * coverage even without the threaded value (e.g. the mcp-client wrap path).
+   *
+   * IMPORTANT: do NOT derive this from plugin manifests, project config, or
+   * any untrusted source — only from `electron.app.getPath("userData")` in
+   * the main process.
+   */
+  readonly userDataDir?: string;
 }
 
 /**
@@ -335,23 +350,26 @@ export function isAsrtSandboxActive(): boolean {
  *                               baseUrls / may hold credentials)
  *   - `~/.lvis/permissions`, `~/.lvis/permissions.json`, `~/.lvis/policy.json`,
  *     `~/.lvis/plugins/auth-partitions.json` — permission / auth-partition state
+ *   - `~/.lvis/certs`, `~/.lvis/keys` — CA bundles / signing keys (drift-sync with
+ *     SENSITIVE_PATH_PATTERNS in src/permissions/sensitive-paths.ts)
  *   - Electron userData dir (productName="LVIS") — whole dir, deny-by-default so
- *     future Electron auth artefacts are covered automatically:
+ *     future Electron auth artefacts are covered automatically.
+ *     Exact path when `userDataDir` is provided by a trusted caller (handles
+ *     `--user-data-dir` + XDG_CONFIG_HOME + future renames); falls back to:
  *       macOS: ~/Library/Application Support/LVIS
- *       Linux: ~/.config/LVIS
+ *       Linux: ${XDG_CONFIG_HOME:-~/.config}/LVIS  (mirrors Electron's resolution)
  *       Windows: ~/AppData/Roaming/LVIS
  *     Contains: plugin OAuth session cookies/tokens (Partitions/), Cookies (SQLite),
  *     Local/Session Storage, Network Persistent State, Trust Tokens,
- *     lvis-secrets.json (safeStorage-encrypted plugin secrets). None of these are
- *     ever legitimately needed by a sandboxed tool/worker.
- *     Derived via os.homedir() + known per-platform join — no `electron` import,
- *     so this module remains safe to import in any non-renderer context.
- *   - `~/.ssh`, `~/.aws`, `~/.config/gcloud`, `~/.kube/config`, `~/.gnupg`
- *                         — standard cloud / SSH / GPG credential stores
+ *     lvis-secrets.json (safeStorage-encrypted plugin secrets).
+ *   - `~/.ssh`, `~/.aws`, `~/.azure`, `~/.config/gcloud`, `~/.kube/config`,
+ *     `~/.gnupg` — standard cloud / SSH / GPG credential stores
  *   - `~/.config/gh`      — GitHub CLI OAuth token (hosts.yml)
- *   - `~/.config/git`, `~/.git-credentials` — git credential store
- *   - `~/.npmrc`, `~/.netrc`, `~/.docker/config.json` — registry / netrc /
- *                         docker auth token files
+ *   - `~/.config/git`, `~/.gitconfig`, `~/.git-credentials` — git credential stores
+ *   - `~/.npmrc`, `~/.netrc`, `~/.pgpass`, `~/.docker/config.json` — registry /
+ *                         netrc / PostgreSQL / docker auth files
+ *   - `~/.bash_history`, `~/.zsh_history` — shell histories (may contain pasted
+ *                         secrets / tokens)
  *
  * WHAT IS DELIBERATELY NOT DENIED (over-deny safety):
  *   - `$HOME` WHOLESALE — denying all of `~` would break most legit shell tools
@@ -375,23 +393,38 @@ export function isAsrtSandboxActive(): boolean {
  *
  * NO-FALLBACK (deny-by-default): paths are derived from `os.homedir()` /
  * {@link lvisHome} — host-trusted. A path that does not exist on disk is
- * harmless to list (ASRT denies the subpath regardless of existence). There is
- * deliberately NO "allow if not found" branch.
+ * harmless to list (ASRT denies it regardless; note: Linux bwrap silently
+ * skips non-existent deny-bind paths, but this is still safe — a
+ * non-existent dir cannot be read). There is deliberately NO "allow if not
+ * found" branch.
  *
+ * @param userDataDir  The REAL `app.getPath("userData")` from a trusted
+ *   main-process caller (boot.ts). When provided, this EXACT path is denied
+ *   and handles `--user-data-dir`, XDG_CONFIG_HOME, and future productName
+ *   changes correctly. When absent (e.g. the mcp-client wrap path), falls
+ *   back to a per-platform os.homedir()-derived path so there is always SOME
+ *   coverage. Do NOT supply this from untrusted sources.
  * @returns deduped, order-stable absolute paths to deny reads of.
  */
-export function getDefaultSensitiveReadDenyPaths(): string[] {
+export function getDefaultSensitiveReadDenyPaths(userDataDir?: string): string[] {
   const home = homedir();
   const lvis = lvisHome();
-  // Electron userData dir for productName="LVIS" (package.json build.productName).
-  // Derived from os.homedir() + known per-platform join — NO `electron` import,
-  // keeping this module safe for any non-renderer context.
+  // Electron userData dir — exact path when provided by a trusted caller;
+  // otherwise derived from os.homedir() + per-platform literal (NO `electron`
+  // import — keeps this module safe for any non-renderer context).
+  // FIX 1 (security MINOR): Linux base honors XDG_CONFIG_HOME, mirroring
+  // Electron's own resolution: `process.env.XDG_CONFIG_HOME || ~/.config`.
   const electronUserData =
-    process.platform === "darwin"
+    userDataDir ??
+    (process.platform === "darwin"
       ? join(home, "Library", "Application Support", "LVIS")
       : process.platform === "win32"
         ? join(home, "AppData", "Roaming", "LVIS")
-        : join(home, ".config", "LVIS"); // linux default
+        : join(
+            // Linux: mirror Electron's XDG_CONFIG_HOME resolution.
+            process.env.XDG_CONFIG_HOME ?? join(home, ".config"),
+            "LVIS",
+          ));
   const raw = [
     // ── LVIS host-domain sensitive namespaces (~/.lvis/<feature>/) ──
     join(lvis, "secrets"), // encrypted API keys (the only prior deny)
@@ -404,6 +437,10 @@ export function getDefaultSensitiveReadDenyPaths(): string[] {
     join(lvis, "permissions.json"), // permission state file (flat form)
     join(lvis, "policy.json"), // policy state
     join(lvis, "plugins", "auth-partitions.json"), // plugin auth-partition state
+    // FIX 3: drift-sync with SENSITIVE_PATH_PATTERNS (src/permissions/sensitive-paths.ts).
+    // Both lists must be kept in sync. When adding to either, mirror it here.
+    join(lvis, "certs"), // corporate CA bundle + extracted certs
+    join(lvis, "keys"), // signing / encryption keys
     // ── Electron userData dir (whole dir — deny-by-default for future artefacts) ──
     // Contains plugin OAuth session cookies/tokens, Cookies (SQLite), Local/Session
     // Storage, Network Persistent State, Trust Tokens, lvis-secrets.json.
@@ -411,6 +448,7 @@ export function getDefaultSensitiveReadDenyPaths(): string[] {
     // ── Standard credential / secret stores under the real home ──
     join(home, ".ssh"), // SSH private keys + known_hosts
     join(home, ".aws"), // AWS access keys
+    join(home, ".azure"), // Azure credentials (drift-sync: sensitive-paths.ts)
     join(home, ".config", "gcloud"), // Google Cloud credentials
     join(home, ".config", "gh"), // GitHub CLI OAuth token (hosts.yml)
     join(home, ".config", "git"), // git credential config
@@ -418,8 +456,12 @@ export function getDefaultSensitiveReadDenyPaths(): string[] {
     join(home, ".gnupg"), // GPG private keyring
     join(home, ".npmrc"), // npm registry auth token
     join(home, ".netrc"), // generic machine credentials
+    join(home, ".pgpass"), // PostgreSQL credentials (drift-sync: sensitive-paths.ts)
+    join(home, ".gitconfig"), // git global config (credential.helper, tokens)
     join(home, ".git-credentials"), // git credential store (file)
     join(home, ".docker", "config.json"), // docker registry auth
+    join(home, ".bash_history"), // shell history (may contain pasted secrets)
+    join(home, ".zsh_history"), // shell history (may contain pasted secrets)
   ];
   const seen = new Set<string>();
   const out: string[] = [];
@@ -489,7 +531,7 @@ export function buildSandboxConfig(trustedSettings: TrustedSandboxSettings): San
   // config.filesystem.denyRead` — a per-command denyRead REPLACES this, it does
   // not union, so wraps that need this floor must restate it; see openWrapped in
   // mcp-client.ts). Deduped, order-stable (sensitive floor first, then caller's).
-  const sensitiveDenyRead = getDefaultSensitiveReadDenyPaths();
+  const sensitiveDenyRead = getDefaultSensitiveReadDenyPaths(trustedSettings.userDataDir);
   const denyReadUnion: string[] = [];
   const denyReadSeen = new Set<string>();
   for (const p of [...sensitiveDenyRead, ...(trustedSettings.denyRead ?? [])]) {

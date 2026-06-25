@@ -1466,6 +1466,10 @@ export async function bootstrap(
           await initializeAsrtSandbox({
             allowedDomains: unionAllowedDomains,
             strictAllowlist: true,
+            // Thread the REAL Electron userData path so the deny-list is exact
+            // (handles --user-data-dir, XDG_CONFIG_HOME, future renames).
+            // Safe: boot.ts is main-process only and already imports electron.
+            userDataDir: app.getPath("userData"),
           });
           // Publish the active capability to the SOT now that ASRT is
           // genuinely initialized (gate ON, deps present). detectSandboxCapability
