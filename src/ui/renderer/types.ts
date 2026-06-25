@@ -27,7 +27,12 @@ import type {
 } from "../../shared/render-html-preview.js";
 import type { SessionTodoItem } from "../../shared/session-todo.js";
 import type { MarketplaceAnnouncementPayload } from "../../shared/marketplace-announcements.js";
-import type { SandboxCapabilityInfo } from "../../shared/sandbox-capability-info.js";
+import type {
+  SandboxCapabilityInfo,
+  SandboxConfinement,
+  SandboxWindowsStatusInfo,
+  SandboxWindowsInstallResult,
+} from "../../shared/sandbox-capability-info.js";
 
 // Re-export MCP types for renderer-side consumers (type-only, no main-process runtime)
 export type { McpServerConfig, McpServerConfigDto, McpServerState };
@@ -1126,6 +1131,16 @@ export type ApprovalRequest = {
     confidence: "verified" | "assumed" | "policy-best-effort";
     platform: NodeJS.Platform;
     reason: string;
+    /**
+     * Per-dimension confinement (filesystem / process / network) for the
+     * substrate this capability describes. Mirrors the optional `confines`
+     * field on the canonical SandboxCapability so the approval dialog can show
+     * an HONEST label — e.g. a Windows network-only ASRT confines egress but
+     * NOT the filesystem, and the dialog must not show "OS isolation active"
+     * for a write/shell tool that has no FS jail. Absent ⇒ "not declared";
+     * callers MUST NOT read absence as "all confined".
+     */
+    confines?: SandboxConfinement;
   };
 };
 export type ApprovalDecision = {
@@ -1337,6 +1352,15 @@ export type LvisPermissionApi = {
   onUserApprovalHit: (cb: (payload: UserApprovalHitPayload) => void) => () => void;
   /** Read-only: honest OS sandbox capability for the current platform. */
   sandboxCapability: () => Promise<SandboxCapabilityInfo>;
+  /** Read-only: Windows srt-win install readiness (group + WFP + verbatim instructions). */
+  sandboxWindowsStatus: () => Promise<SandboxWindowsStatusInfo>;
+  /**
+   * MUTATING: trigger the one-time Windows srt-win install (one self-elevating
+   * UAC prompt). The ONLY user-consented privilege-escalation entry point —
+   * call ONLY from an explicit "Install now" click. Resolves `{cancelled:true}`
+   * on UAC dismissal (revert the toggle), else the post-install group + WFP state.
+   */
+  sandboxWindowsInstall: () => Promise<SandboxWindowsInstallResult>;
   /** Subscribe to default-mode repeated-approval hints for LLM permission review. */
   onReviewSuggestion?: (cb: (payload: PermissionReviewSuggestionPayload) => void) => () => void;
   /** Permission policy — `/permission reviewer ...` slash dispatch. */

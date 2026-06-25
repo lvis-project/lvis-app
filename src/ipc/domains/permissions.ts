@@ -31,6 +31,10 @@ import {
   listApprovals,
   canonicalStringify,
 } from "../../permissions/user-approval-store.js";
+import type {
+  SandboxWindowsStatusInfo,
+  SandboxWindowsInstallResult,
+} from "../../shared/sandbox-capability-info.js";
 
 function validateRulePatternInput(pattern: unknown): { ok: true; pattern: string } | { ok: false; error: string; message: string } {
   if (typeof pattern !== "string") {
@@ -193,25 +197,39 @@ export function registerPermissionsHandlers(deps: IpcDeps): void {
     const enabled =
       (deps.settingsService.get("features")?.osToolSandbox ?? false) ||
       process.env["LVIS_SANDBOX_ENABLED"] === "1";
-    // Map the platform to the simplified confinement strength. Both macOS
-    // (Seatbelt via ASRT) and Linux (bwrap via ASRT) confine fs + process +
-    // network ("full"); Windows + others are fail-closed ("none"). The gate
-    // (enabled) only controls whether the ASRT sandbox initializes at boot, not
-    // what the platform is capable of, so report the platform's potential even
-    // when off — the toggle text stays honest before the user opts in.
+    // Map the platform to the simplified confinement strength. macOS (Seatbelt)
+    // and Linux (bwrap) confine fs + process + network ("full"). Windows
+    // (srt-win) confines NETWORK egress only — there is no FS/process jail in
+    // ASRT 0.0.59 — which is a genuine PARTIAL confinement, NOT "none". Earlier
+    // this handler reported win32 → none/available:false, which DIVERGED from
+    // the boot capability that publishes `asrt` (network-only confines) once
+    // srt-win is installed + relogged. The reviewer's per-category relaxation
+    // and the settings toggle both read this seam, so report win32's real
+    // potential here: Windows CAN confine network egress.
+    //
+    // The gate (enabled) only controls whether the ASRT sandbox initializes at
+    // boot, not what the platform is capable of, so report the platform's
+    // potential even when off — the toggle text stays honest before opt-in.
     const kind: "full" | "partial" | "none" =
-      platform === "linux" || platform === "darwin" ? "full" : "none";
+      platform === "linux" || platform === "darwin"
+        ? "full"
+        : platform === "win32"
+          ? "partial"
+          : "none";
     const available = kind !== "none";
     // Meaningful, platform-honest reason surfaced to the UI alongside the
     // capability (PermissionsTab `osSandboxDetectionReason` renders it when
     // non-empty). ASRT confines fs + process + network egress on macOS
-    // (Seatbelt) and Linux (bwrap); Windows + others are fail-closed.
+    // (Seatbelt) and Linux (bwrap); network egress ONLY on Windows (srt-win);
+    // other platforms are fail-closed.
     const reason =
       platform === "darwin"
         ? "ASRT (Seatbelt) confines filesystem, process, and network egress when enabled"
         : platform === "linux"
           ? "ASRT (bwrap) confines filesystem, process, and network egress when enabled"
-          : "OS sandbox is fail-closed on this platform; tools run unconfined";
+          : platform === "win32"
+            ? "ASRT (srt-win) confines network egress only — NO filesystem jail; needs a one-time admin install + relogin"
+            : "OS sandbox is fail-closed on this platform; tools run unconfined";
     return {
       platform,
       enabled,
@@ -219,6 +237,84 @@ export function registerPermissionsHandlers(deps: IpcDeps): void {
       kind,
       reason,
       confines: sandboxConfinementForPlatform(platform, kind),
+    };
+  });
+
+  // read-only, sender guard optional — Windows srt-win install readiness. Reads
+  // ASRT's live group + WFP enumeration (no marker file) and the verbatim
+  // install/relogin instructions, so the win32 consent panel can show the exact
+  // step that remains. Non-win32 → a clean "not-applicable" shape (the renderer
+  // falls back to the mac/linux capability copy). Read-only: no UAC, no
+  // mutation — querying state never escalates privilege.
+  ipcMain.handle(PERMISSIONS.sandboxWindowsStatus, async (): Promise<SandboxWindowsStatusInfo> => {
+    if (process.platform !== "win32") {
+      return {
+        applicable: false,
+        groupState: null,
+        wfpState: null,
+        ready: false,
+        instructions: "",
+      };
+    }
+    // ASRT is ESM-only and deliberately NOT statically imported (a static import
+    // inlines its source into the main bundle and breaks its vendor-binary
+    // resolution — see asrt-sandbox.ts module header). Pull the Windows status
+    // helpers in lazily, same as the spawn path.
+    const {
+      getWindowsGroupStatus,
+      getWindowsWfpStatus,
+      windowsInstallInstructions,
+    } = await import("@anthropic-ai/sandbox-runtime");
+    const group = getWindowsGroupStatus({});
+    const wfp = getWindowsWfpStatus();
+    return {
+      applicable: true,
+      groupState: group.state,
+      wfpState: wfp.state,
+      ready: group.state === "ready" && wfp.state === "installed",
+      // Verbatim ASRT text, tailored to the observed group state. `undefined`
+      // sublayer GUID → ASRT's compile-time default (same as install with no
+      // --sublayer-guid), matching the install handler below.
+      instructions: windowsInstallInstructions({}, undefined, group.state),
+    };
+  });
+
+  // MUTATING (sender-frame-guarded + user-keyboard intent) — the SINGLE
+  // user-consented privilege-escalation entry point. Triggers ASRT's one
+  // self-elevating UAC prompt via installWindowsSandbox(). NEVER auto-triggered:
+  // the renderer only invokes this from an explicit "Install now" click inside
+  // the consent panel. Guard pattern mirrors the peer mutating handlers
+  // (addRule/removeRule/setMode): foreign frames are rejected + audited, and a
+  // synthetic submission without an active user gesture is refused.
+  ipcMain.handle(PERMISSIONS.sandboxWindowsInstall, async (e, payload: unknown): Promise<SandboxWindowsInstallResult | typeof UNAUTHORIZED_FRAME | { ok: false; error: string; message: string }> => {
+    if (!validateSender(e)) { auditUnauthorized(auditLogger, PERMISSIONS.sandboxWindowsInstall, e); return UNAUTHORIZED_FRAME; }
+    const body = payloadRecord(payload);
+    const intent = requireUserKeyboardIntent(body.intent);
+    if (!intent.ok) return intent;
+    if (process.platform !== "win32") {
+      return { ok: false, error: "not-applicable", message: "Windows sandbox install is only available on win32" };
+    }
+    // proxyPortRange MUST equal the runtime config's windows.proxyPortRange or
+    // the egress proxy binds a port the WFP filter blocks and ALL egress
+    // hard-fails. Both sides reference the SAME local re-exported SOT constant
+    // (DEFAULT_WINDOWS_PROXY_PORT_RANGE from asrt-sandbox.ts), which mirrors
+    // ASRT's value and is drift-pinned by a unit test. Do NOT source the range
+    // from a separate ASRT dynamic import here — that would create a second
+    // resolution path that could silently desync if ASRT updates the default.
+    const { DEFAULT_WINDOWS_PROXY_PORT_RANGE } = await import(
+      "../../permissions/asrt-sandbox.js"
+    );
+    const { installWindowsSandbox } = await import("@anthropic-ai/sandbox-runtime");
+    const result = installWindowsSandbox({ proxyPortRange: DEFAULT_WINDOWS_PROXY_PORT_RANGE });
+    // UAC dismissal is a user choice, not an error — surface it so the renderer
+    // reverts the toggle and shows the "Install cancelled" banner.
+    if (result.cancelled) {
+      return { cancelled: true };
+    }
+    return {
+      groupState: result.group.state,
+      wfpState: result.wfp.state,
+      ready: result.group.state === "ready" && result.wfp.state === "installed",
     };
   });
 
