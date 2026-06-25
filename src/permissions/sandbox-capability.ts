@@ -213,6 +213,95 @@ export function __resetWrappedMcpServersForTest(): void {
 }
 
 /**
+ * The set of PLUGIN WORKER ids whose long-lived worker was ACTUALLY spawned
+ * through the ASRT wrap in THIS process (worker-confinement via UDS — PR D-1).
+ *
+ * This mirrors {@link _wrappedMcpServerIds} for the OTHER long-lived worker
+ * substrate: a `source === 'plugin'` tool whose side-effects run in a
+ * host-spawned, ASRT-wrapped plugin worker ({@link spawnWorker} in
+ * worker-spawn.ts). Populated by {@link markPluginWorkerWrapped} from the
+ * wrapped-spawn path (gate ON + wrap succeeded) and cleared by
+ * {@link unmarkPluginWorkerWrapped} on any worker exit / stop / failed wrap.
+ *
+ * This is the per-worker "wrapped" signal {@link resolveReviewerSandboxCapability}
+ * consults so a plugin tool call reports the GENUINE asrt capability ONLY for a
+ * worker that is genuinely confined — an unwrapped worker (gate off, wrap
+ * failed, win32 legacy path, or a plugin with no host-spawned worker) stays
+ * `none`. Membership is necessary but NOT sufficient: the resolver also
+ * re-checks {@link detectSandboxCapability} so a torn-down sandbox cannot leave
+ * a stale `asrt` report (the #1359/#1364 no-leak invariant).
+ */
+const _wrappedPluginWorkerIds = new Set<string>();
+
+/**
+ * Compose the COLLISION-FREE registry key for a plugin worker. `workerId` is
+ * stable only WITHIN a plugin (two plugins may both name a worker "main"), so
+ * the marker MUST be scoped by `pluginId` — keying on `workerId` alone lets
+ * plugin B inherit plugin A's `asrt` signal, defeating the no-leak invariant.
+ * Both ids are `safeSegment`-sanitized upstream (no `/`), but may still contain
+ * other characters, so the composition must be UNAMBIGUOUS: `(pluginId,
+ * workerId)` must map 1:1 to the key — e.g. `("a:b","c")` must NOT collide with
+ * `("a","b:c")`.
+ *
+ * TODO(human): return a collision-free key string from `pluginId` + `workerId`.
+ * Pick a scheme that round-trips uniquely (a delimiter that can't appear in a
+ * sanitized segment, or a length-prefixed / encoded join). This is the contract
+ * PR D-3 consumes when it threads `pluginId` into the reviewer resolver below.
+ */
+function pluginWorkerKey(pluginId: string, workerId: string): string {
+  // Length-prefix the pluginId so the (pluginId, workerId) split is unambiguous
+  // for ANY input — the leading `<len>:` fixes where pluginId ends, so even an
+  // id containing `:` cannot forge another pair's key: ("a:b","c") → "3:a:b:c"
+  // vs ("a","b:c") → "1:a:b:c" differ on the length prefix. Self-contained
+  // (does NOT lean on safeSegment stripping the delimiter — this is a no-leak
+  // security boundary), and the middle `:` keeps it readable for audit/telemetry.
+  return `${pluginId.length}:${pluginId}:${workerId}`;
+}
+
+/**
+ * Record that a plugin worker (`pluginId`/`workerId`) was spawned through the
+ * ASRT wrap.
+ * @internal — only {@link spawnWorker}'s wrapped-spawn path and tests call this.
+ */
+export function markPluginWorkerWrapped(pluginId: string, workerId: string): void {
+  _wrappedPluginWorkerIds.add(pluginWorkerKey(pluginId, workerId));
+}
+
+/**
+ * Drop a plugin worker's wrapped marker (worker exited / stopped / wrap failed).
+ * Idempotent.
+ * @internal — only {@link spawnWorker} and tests call this.
+ */
+export function unmarkPluginWorkerWrapped(pluginId: string, workerId: string): void {
+  _wrappedPluginWorkerIds.delete(pluginWorkerKey(pluginId, workerId));
+}
+
+/**
+ * Whether a plugin worker (`pluginId`/`workerId`) is currently wrapped through ASRT.
+ * @internal — exported for the reviewer resolver + tests.
+ */
+export function isPluginWorkerWrapped(pluginId: string, workerId: string): boolean {
+  return _wrappedPluginWorkerIds.has(pluginWorkerKey(pluginId, workerId));
+}
+
+/**
+ * Drop every wrapped-plugin-worker marker. Called by {@link resetAsrtSandbox}
+ * on sandbox teardown so no stale `asrt` signal survives, and by test teardown.
+ * @internal
+ */
+export function clearWrappedPluginWorkers(): void {
+  _wrappedPluginWorkerIds.clear();
+}
+
+/**
+ * Reset the wrapped-plugin-worker registry. Test teardown only.
+ * @internal
+ */
+export function __resetWrappedPluginWorkersForTest(): void {
+  clearWrappedPluginWorkers();
+}
+
+/**
  * Resolve the sandbox capability to feed the reviewer/risk-classifier for a
  * SPECIFIC tool call, reflecting that call's EXECUTION SUBSTRATE rather than
  * the process-global capability.
@@ -235,27 +324,60 @@ export function __resetWrappedMcpServersForTest(): void {
  *     (worker-egress PR1: gate ON + {@link isAsrtSandboxActive} +
  *     {@link isMcpServerWrapped}) → the genuine {@link detectSandboxCapability}
  *     (the wrapped worker IS confined — mac/linux full, win32 network-only).
- *   - everything else (plugin, UNWRAPPED mcp, other builtin) → a forced `none`
- *     capability so {@link isWeakSandbox} treats the call as WEAK and the
- *     reviewer cannot relax.
+ *   - `plugin` + the originating worker was ACTUALLY wrapped through ASRT
+ *     (worker-confinement PR D-1: gate ON + {@link isPluginWorkerWrapped}) →
+ *     the genuine {@link detectSandboxCapability} (the host-spawned plugin
+ *     worker IS confined; see {@link spawnWorker}). Requires `workerId`.
+ *   - everything else (UNWRAPPED plugin, UNWRAPPED mcp, other builtin) → a
+ *     forced `none` capability so {@link isWeakSandbox} treats the call as WEAK
+ *     and the reviewer cannot relax.
  *
  * NO-LEAK INVARIANT (the #1359 review catch): never report `asrt` for a worker
- * this process did not wrap. An MCP server reports `asrt` ONLY when its specific
- * id is in the wrapped registry AND the sandbox is still active — a gate-off,
- * wrap-failed, or pre-existing-unwrapped server stays `none`.
+ * this process did not wrap. An MCP server / plugin worker reports `asrt` ONLY
+ * when its specific id is in the corresponding wrapped registry AND the sandbox
+ * is still active — a gate-off, wrap-failed, win32-legacy, or pre-existing
+ * unwrapped worker stays `none`.
  *
  * @param mcpServerId  Originating MCP server id, threaded from `Tool.mcpServerId`.
  *                     Required to report `asrt` for an `mcp` call; omitted ⇒ the
  *                     call resolves to `none` (the historical default), so every
  *                     pre-existing call site keeps its exact behaviour.
+ * @param workerId     Originating plugin-worker id, threaded from the plugin
+ *                     tool descriptor (PR D-3 wires the producer). Required to
+ *                     report `asrt` for a `plugin` call; omitted ⇒ the call
+ *                     resolves to `none` (the historical default for plugin
+ *                     tools), so every pre-existing call site is unchanged.
  */
 export function resolveReviewerSandboxCapability(
   source: ToolSource,
   toolName: string,
   mcpServerId?: string,
+  workerId?: string,
+  pluginId?: string,
 ): SandboxCapability {
   if (source === "builtin" && ASRT_WRAPPED_SHELL_TOOLS.has(toolName)) {
     return detectSandboxCapability();
+  }
+  // worker-confinement PR D-1: a wrapped host-spawned plugin worker genuinely
+  // runs under ASRT — report its real capability so the reviewer composition
+  // reflects the actual confinement (not the false `none` the unwrapped worker
+  // earned). Same TWO main-process-only signals as the MCP branch: (1) the
+  // worker id is in the plugin-worker wrapped registry (only populated by
+  // spawnWorker's wrapped path, cleared on exit/stop/failure/teardown); (2) the
+  // active capability is a genuine verified `asrt`. Both must hold (no-leak).
+  if (
+    source === "plugin" &&
+    pluginId !== undefined &&
+    workerId !== undefined &&
+    isPluginWorkerWrapped(pluginId, workerId)
+  ) {
+    const active = detectSandboxCapability();
+    if (active.kind === "asrt") {
+      return {
+        ...active,
+        reason: `plugin worker '${pluginId}/${workerId}' ASRT-wrapped — ${active.reason}`,
+      };
+    }
   }
   // worker-egress PR1: a wrapped external MCP stdio worker genuinely runs under
   // ASRT — report its real capability so the reviewer composition reflects the

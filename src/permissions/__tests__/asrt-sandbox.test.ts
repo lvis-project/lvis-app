@@ -28,8 +28,6 @@ import {
   wrapToolCommand,
   wrapWorkerCommand,
   cleanupAsrtSandboxAfterCommand,
-  isAsrtSandboxSupported,
-  checkAsrtDependencies,
   computeUnionAllowedDomains,
   normalizeUnionForAsrt,
   computeDynamicEndpointHosts,
@@ -37,27 +35,15 @@ import {
   DEFAULT_WINDOWS_PROXY_PORT_RANGE,
   buildSandboxConfig,
   getDefaultSensitiveReadDenyPaths,
+  registerWorkerUnixSocketDir,
+  unregisterWorkerUnixSocketDir,
 } from "../asrt-sandbox.js";
+import { asrtCanInitialize } from "./test-helpers.js";
 // ASRT-contract guards: the real vendored matcher + parent-proxy resolver, so
 // the host-side fixes are proven against ASRT 0.0.59's ACTUAL semantics (not a
 // re-implementation that could drift from the package).
 import { matchesDomainPattern } from "@anthropic-ai/sandbox-runtime/dist/sandbox/domain-pattern.js";
 import { resolveParentProxy } from "@anthropic-ai/sandbox-runtime/dist/sandbox/parent-proxy.js";
-
-/**
- * The wrap/initialize assertions need the platform's sandbox dependencies to be
- * actually present (Linux: bwrap + socat + ripgrep). `isSupportedPlatform()` is
- * only a platform check — a Linux CI runner returns true there but may lack the
- * binaries, in which case `initialize` correctly throws (the same fail-closed
- * signal boot.ts honors). Gate the live tests on the honest precondition:
- * supported platform AND no dependency errors. Returns the boolean so each test
- * can early-return as a skip.
- */
-async function asrtCanInitialize(): Promise<boolean> {
-  if (!(await isAsrtSandboxSupported())) return false;
-  const deps = await checkAsrtDependencies();
-  return deps.errors.length === 0;
-}
 
 afterEach(async () => {
   // Always return to the gated-OFF baseline so cross-test state never leaks.
@@ -805,4 +791,47 @@ describe("asrt-sandbox — sensitive read deny-list (host-secret hardening)", ()
     buildSandboxConfig({ allowedDomains: [] });
     expect(isAsrtSandboxActive()).toBe(false);
   });
+});
+
+describe("asrt-sandbox — worker-UDS shared-config emission (worker-confinement PR D-1)", () => {
+  it("buildSandboxConfig emits network.allowUnixSockets from allowUnixSocketDirs", () => {
+    const cfg = buildSandboxConfig({
+      allowedDomains: [],
+      strictAllowlist: true,
+      allowUnixSocketDirs: ["/run/a", "/run/b"],
+    });
+    expect(cfg.network.allowUnixSockets).toEqual(["/run/a", "/run/b"]);
+  });
+
+  it("buildSandboxConfig omits allowUnixSockets when no dirs are supplied (default shape unchanged)", () => {
+    const cfg = buildSandboxConfig({ allowedDomains: [], strictAllowlist: true });
+    expect(cfg.network.allowUnixSockets).toBeUndefined();
+  });
+});
+
+describe("asrt-sandbox — worker-UDS register/unregister (shared-config, not per-command)", () => {
+  it("registerWorkerUnixSocketDir throws when the sandbox is not active (self-enforcing gate)", async () => {
+    await expect(registerWorkerUnixSocketDir("/run/x")).rejects.toThrow(/not active/);
+  });
+
+  it("unregisterWorkerUnixSocketDir is a no-op (does not throw) when the sandbox is not active", async () => {
+    await expect(unregisterWorkerUnixSocketDir("/run/x")).resolves.toBeUndefined();
+  });
+
+  it("register/unregister round-trip on a LIVE sandbox keeps the config consistent (idempotent)", async () => {
+    if (!(await asrtCanInitialize())) return;
+    if (process.platform !== "darwin" && process.platform !== "linux") return;
+
+    await initializeAsrtSandbox({ allowedDomains: ["example.com"], strictAllowlist: true });
+    // First register pushes the dir; a duplicate register is a no-op (idempotent).
+    await registerWorkerUnixSocketDir("/run/worker-a");
+    await registerWorkerUnixSocketDir("/run/worker-a");
+    // Unregister of an unknown dir is a no-op; the known dir unregisters cleanly.
+    await unregisterWorkerUnixSocketDir("/run/unknown");
+    await unregisterWorkerUnixSocketDir("/run/worker-a");
+    // Reset clears the live worker set so the next init starts clean.
+    await resetAsrtSandbox();
+    // After teardown a register must throw again (no stale base settings).
+    await expect(registerWorkerUnixSocketDir("/run/worker-a")).rejects.toThrow(/not active/);
+  }, 60_000);
 });
