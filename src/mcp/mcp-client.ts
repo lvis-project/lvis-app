@@ -1175,6 +1175,8 @@ class StdioTransport implements McpTransport {
     // deny-only (`allowRead` only re-allows nested regions inside a deny).
     // Worker-needed dirs (its sandbox root, tmp) are re-allowed via `allowRead`
     // above and are never on the deny-list.
+    // No userDataDir arg here — mcp-client does not import electron. The
+    // fallback per-platform derivation (XDG-aware on Linux) provides coverage.
     const denyRead = getDefaultSensitiveReadDenyPaths();
 
     // Assemble the command string DEFENSIVELY: shell-quote the resolved binary
