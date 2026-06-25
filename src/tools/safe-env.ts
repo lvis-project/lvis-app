@@ -106,6 +106,12 @@ const ASRT_SANDBOX_ENV_KEYS: ReadonlySet<string> = new Set([
   "DENO_CERT",
   // Sandbox-scoped temp dir.
   "TMPDIR",
+  // Windows (srt-win) emits this benign marker on the sandboxed child's env so
+  // the child can tell it is running inside the sandbox. It carries no secret,
+  // but it IS an env mutation ASRT makes — allow-list it so the honest
+  // "propagate exactly what ASRT changed" contract stays complete rather than
+  // silently dropping a key ASRT actually set.
+  "SANDBOX_RUNTIME",
 ]);
 
 /**

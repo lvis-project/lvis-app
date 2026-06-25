@@ -384,14 +384,25 @@ function posixSingleQuote(arg: string): string {
  * Execute a PowerShell command under the ASRT sandbox — parity with bash.ts's
  * {@link spawnWithSandbox}.
  *
- * ASRT wraps a SHELL COMMAND STRING (its mac/linux argv is `[<shell>, -c,
- * <wrapped>]`), so we render the pwsh invocation as a single POSIX-quoted
- * command line and hand that to {@link wrapToolCommand}. The host then spawns
- * the returned argv with `shell: false` (the wrapper argv already invokes the
- * shell; a second shell would double-parse).
+ * BINSHELL THREADING (fixes a Windows double-shell bug):
+ *   ASRT renders the inner shell ITSELF from the `binShell` argument
+ *   (`wrapWithSandboxArgv(command, binShell, …)` → on Windows
+ *   `parseWindowsBinShell('powershell')` → `powershell.exe -NoProfile -Command
+ *   <command>`). So on win32 we hand ASRT the BARE command and pass
+ *   `binShell='powershell'` ('pwsh' off-Windows). Pre-rendering `powershell.exe
+ *   -Command '<command>'` AND leaving binShell undefined (the prior code)
+ *   defaulted ASRT to `cmd` and produced `cmd /c "powershell.exe -Command …"` —
+ *   a DOUBLE shell. ASRT's `parseWindowsBinShell` accepts 'powershell'/'pwsh'.
+ *
+ *   On mac/linux ASRT wraps a SHELL COMMAND STRING (argv `[<shell>, -c,
+ *   <wrapped>]`). pwsh is invoked there only as a `-Command` payload of the
+ *   POSIX shell, so we still render the pwsh invocation as a single POSIX-quoted
+ *   command line for that path (preserving the established mac/linux behaviour).
  *
  * Filesystem jail mirrors bash.ts: `allowWrite` = the derived write-jail, and
  * the read-jail HOME-leak fix denies `$HOME` then re-allows cwd + write paths.
+ * (On win32 ASRT 0.0.59 has no FS jail — the filesystem slice is harmlessly
+ * ignored; network is the only Windows confinement.)
  *
  * @internal — called only when the ASRT sandbox is active (user opt-in).
  */
@@ -402,15 +413,28 @@ async function spawnPowerShellWithSandbox(
   timeoutSeconds: number,
 ): Promise<ToolResult> {
   const executable = resolvePowerShellExecutable();
-  // Render: pwsh -NoLogo -NoProfile -NonInteractive -Command '<command>'
-  const pwshCommandLine = [
-    executable,
-    "-NoLogo",
-    "-NoProfile",
-    "-NonInteractive",
-    "-Command",
-    posixSingleQuote(command),
-  ].join(" ");
+  const isWindows = process.platform === "win32";
+  // Windows: hand ASRT the BARE command + binShell='powershell' so ASRT renders
+  // `powershell.exe -NoProfile -Command <command>` itself (no pre-render → no
+  // double shell). mac/linux: render the pwsh invocation into the command
+  // string ASRT runs under its POSIX `-c` shell, as before.
+  const sandboxCommand = isWindows
+    ? command
+    : [
+        executable,
+        "-NoLogo",
+        "-NoProfile",
+        "-NonInteractive",
+        "-Command",
+        posixSingleQuote(command),
+      ].join(" ");
+  // ASRT's cross-platform binShell string. 'powershell' on win32 (Windows
+  // PowerShell), 'pwsh' off-Windows (PowerShell Core); both are accepted by
+  // ASRT's parseWindowsBinShell, and off-Windows binShell is only meaningful as
+  // the inner shell name — the mac/linux path renders pwsh into the command
+  // string above, so we keep binShell undefined there to leave ASRT's
+  // established `/bin/bash -c` wrapping unchanged.
+  const binShell = isWindows ? "powershell" : undefined;
 
   const home = process.env["HOME"];
   const allowRead = [cwd, ...writePaths];
@@ -423,9 +447,10 @@ async function spawnPowerShellWithSandbox(
   const abortController = new AbortController();
   let wrapped: { argv: string[]; env: NodeJS.ProcessEnv };
   try {
-    wrapped = await wrapToolCommand(pwshCommandLine, {
+    wrapped = await wrapToolCommand(sandboxCommand, {
       filesystem,
       abortSignal: abortController.signal,
+      ...(binShell !== undefined ? { binShell } : {}),
     });
   } catch (err) {
     return {
@@ -444,12 +469,23 @@ async function spawnPowerShellWithSandbox(
     };
   }
 
+  // Per-platform env: on win32 ASRT returns a REAL env carrying the proxy
+  // set the sandboxed child needs (srt-win forwards its env verbatim — the proxy
+  // vars are NOT baked into the command string as they are on mac/linux). On
+  // mac/linux `wrapped.env` IS process.env (the proxy is in the wrapped command
+  // string). Either way buildSandboxedChildEnv composes the SAME secret-stripped
+  // result: it starts from the safe whitelist baseline and overlays ONLY the
+  // allow-listed proxy/CA/SANDBOX_RUNTIME keys ASRT set/changed — so on win32
+  // the proxy set is propagated (the "spread") and on mac/linux nothing extra
+  // leaks (ASRT changed nothing in process.env). Secrets stay stripped on both.
+  const childEnv = buildSandboxedChildEnv(wrapped.env);
+
   return await new Promise<ToolResult>((resolveResult) => {
     const child: PipedChild = spawn(cmd, args, {
       cwd,
       stdio: ["ignore", "pipe", "pipe"],
       shell: false,
-      env: buildSandboxedChildEnv(wrapped.env),
+      env: childEnv,
     });
     trackManagedChildProcess(child, { label: "tool:powershell:asrt" });
 
