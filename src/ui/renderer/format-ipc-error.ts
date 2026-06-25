@@ -42,6 +42,8 @@ export const COMMON_IPC_ERROR_MESSAGES: Readonly<Record<string, string>> = {
   "managed": "formatIpcError.managed",
   "durable-mode-denied": "formatIpcError.durableModeDenied",
   "missing-durable-confirm": "formatIpcError.missingDurableConfirm",
+  // Windows-only IPC (sandboxWindowsInstall) refused on a non-win32 platform.
+  "not-applicable": "formatIpcError.notApplicable",
 
   // ── Payload / validation ──
   "invalid-payload": "formatIpcError.invalidPayload",

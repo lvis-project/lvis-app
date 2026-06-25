@@ -1176,6 +1176,16 @@ const api = {
     },
     /** Read-only: honest OS sandbox capability for the current platform. */
     sandboxCapability: async () => ipcRenderer.invoke(PERMISSIONS.sandboxCapability),
+    /** Read-only: Windows srt-win install readiness (group + WFP + instructions). */
+    sandboxWindowsStatus: async () => ipcRenderer.invoke(PERMISSIONS.sandboxWindowsStatus),
+    /**
+     * MUTATING: trigger the one-time Windows srt-win install (one self-elevating
+     * UAC prompt). The ONLY user-consented privilege-escalation entry point —
+     * only ever called from an explicit "Install now" click. Auto-injects the
+     * user-keyboard intent the sender-guarded handler requires.
+     */
+    sandboxWindowsInstall: async () =>
+      ipcRenderer.invoke(PERMISSIONS.sandboxWindowsInstall, { intent: ipcUserKeyboardIntent() }),
     listRules: async () => ipcRenderer.invoke(PERMISSIONS.listRules),
     addRule: async (pattern: string, action: string) =>
       ipcRenderer.invoke(PERMISSIONS.addRule, { pattern, action, intent: ipcUserKeyboardIntent() }),
