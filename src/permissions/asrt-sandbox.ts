@@ -62,6 +62,10 @@
  * ─────────────────────────────────────────────────────────────────────────────
  */
 
+import { homedir } from "node:os";
+import { join } from "node:path";
+import { lvisHome } from "../shared/lvis-home.js";
+
 import type {
   SandboxRuntimeConfig,
   NetworkConfig,
@@ -310,6 +314,85 @@ export function isAsrtSandboxActive(): boolean {
 }
 
 /**
+ * The SINGLE SOURCE OF TRUTH for the host-secret / sensitive read deny-list.
+ *
+ * ⚠️ HONEST SCOPE — this is a DENY-LIST, NOT a read-ALLOW jail ⚠️
+ * ASRT 0.0.59's filesystem READ model is deny-only (sandbox-manager.js
+ * `getFsReadConfig` / `wrapWithSandbox`): `filesystem.denyRead` becomes the
+ * `denyOnly` set (seatbelt `(deny file-read* (subpath …))` / bwrap path-deny)
+ * and `filesystem.allowRead` is `allowWithinDeny` — it only RE-ALLOWS a nested
+ * region INSIDE a covering deny, so it is INERT without one. There is no clean
+ * "deny everything, allow only X" read jail in ASRT, so we cannot allow-list
+ * reads; we can only enumerate the KNOWN-sensitive subpaths to deny. A path not
+ * on this list stays readable. Do NOT describe this as a read jail.
+ *
+ * WHAT IS DENIED (absolute, derived from the real host home + `~/.lvis` layout):
+ *   - `~/.lvis/secrets`   — encrypted API keys / secrets (was the only prior deny)
+ *   - `~/.lvis/sessions`  — chat session history (architecture §5)
+ *   - `~/.lvis/routine`   — routine v2 session history (CLAUDE.md Q9 namespace)
+ *   - `~/.lvis/audit.log` + `~/.lvis/audit` — audit trail
+ *   - `~/.lvis/settings.json` — cross-cutting host settings (holds vendor
+ *                               baseUrls / may hold credentials)
+ *   - `~/.ssh`, `~/.aws`, `~/.config/gcloud`, `~/.kube/config`, `~/.gnupg`
+ *                         — standard cloud / SSH / GPG credential stores
+ *   - `~/.npmrc`, `~/.netrc`, `~/.docker/config.json` — registry / netrc /
+ *                         docker auth token files
+ *
+ * WHAT IS DELIBERATELY NOT DENIED (over-deny safety):
+ *   - `$HOME` WHOLESALE — denying all of `~` would break most legit shell tools
+ *     (a build reading `~/.cargo`, `~/.rustup`, `~/.config`, etc.). We deny
+ *     SPECIFIC secret/history subpaths only.
+ *   - the cwd / working tree, the plugin's own sandbox root, system dirs
+ *     (`/usr`, `/lib`, `/bin`), `$TMPDIR` — a legit tool/worker needs these.
+ *     They are never on this list.
+ *
+ * PLATFORM: every entry is a LITERAL absolute path (NO glob chars). On macOS the
+ * stripped path is a recursive seatbelt subpath; on Linux bwrap deny-binds the
+ * literal path (bwrap cannot glob — ASRT only `expandGlobPattern`s entries that
+ * CONTAIN glob chars, so literals are safe on both). Windows has NO filesystem
+ * isolation in ASRT 0.0.59 (network-only srt-win) so denyRead is simply a no-op
+ * there — harmless, never crashes.
+ *
+ * NO-FALLBACK (deny-by-default): paths are derived from `os.homedir()` /
+ * {@link lvisHome} — host-trusted. A path that does not exist on disk is
+ * harmless to list (ASRT denies the subpath regardless of existence). There is
+ * deliberately NO "allow if not found" branch.
+ *
+ * @returns deduped, order-stable absolute paths to deny reads of.
+ */
+export function getDefaultSensitiveReadDenyPaths(): string[] {
+  const home = homedir();
+  const lvis = lvisHome();
+  const raw = [
+    // ── LVIS host-domain sensitive namespaces (~/.lvis/<feature>/) ──
+    join(lvis, "secrets"), // encrypted API keys (the only prior deny)
+    join(lvis, "sessions"), // chat session history
+    join(lvis, "routine"), // routine v2 session history
+    join(lvis, "audit.log"), // audit trail (file)
+    join(lvis, "audit"), // audit trail (dir form, if present)
+    join(lvis, "settings.json"), // cross-cutting settings (may hold credentials)
+    // ── Standard credential / secret stores under the real home ──
+    join(home, ".ssh"), // SSH private keys + known_hosts
+    join(home, ".aws"), // AWS access keys
+    join(home, ".config", "gcloud"), // Google Cloud credentials
+    join(home, ".kube", "config"), // Kubernetes cluster credentials
+    join(home, ".gnupg"), // GPG private keyring
+    join(home, ".npmrc"), // npm registry auth token
+    join(home, ".netrc"), // generic machine credentials
+    join(home, ".docker", "config.json"), // docker registry auth
+  ];
+  const seen = new Set<string>();
+  const out: string[] = [];
+  for (const p of raw) {
+    if (!seen.has(p)) {
+      seen.add(p);
+      out.push(p);
+    }
+  }
+  return out;
+}
+
+/**
  * Build a fully-resolved {@link SandboxRuntimeConfig} from TRUSTED settings.
  *
  * Deny-by-default: when no `allowedDomains` are supplied the network section
@@ -358,8 +441,25 @@ export function buildSandboxConfig(trustedSettings: TrustedSandboxSettings): San
     },
   };
 
+  // denyRead floor: ALWAYS union the centralized host-secret / sensitive read
+  // deny-list ({@link getDefaultSensitiveReadDenyPaths}) onto any caller-supplied
+  // denyRead. This is the SHARED config's read deny — the floor ASRT applies when
+  // a per-command wrap supplies NO `customConfig.filesystem.denyRead` of its own
+  // (ASRT's wrapWithSandbox does `customConfig?.filesystem?.denyRead ??
+  // config.filesystem.denyRead` — a per-command denyRead REPLACES this, it does
+  // not union, so wraps that need this floor must restate it; see openWrapped in
+  // mcp-client.ts). Deduped, order-stable (sensitive floor first, then caller's).
+  const sensitiveDenyRead = getDefaultSensitiveReadDenyPaths();
+  const denyReadUnion: string[] = [];
+  const denyReadSeen = new Set<string>();
+  for (const p of [...sensitiveDenyRead, ...(trustedSettings.denyRead ?? [])]) {
+    if (!denyReadSeen.has(p)) {
+      denyReadSeen.add(p);
+      denyReadUnion.push(p);
+    }
+  }
   const filesystem: FilesystemConfig = {
-    denyRead: [...(trustedSettings.denyRead ?? [])],
+    denyRead: denyReadUnion,
     allowWrite: [...(trustedSettings.allowWrite ?? [])],
     denyWrite: [...(trustedSettings.denyWrite ?? [])],
     ...(trustedSettings.allowRead !== undefined

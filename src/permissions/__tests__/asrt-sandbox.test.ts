@@ -15,10 +15,10 @@
  * The wrap/spawn assertions are guarded to supported platforms (darwin/linux);
  * the flag + trust-boundary assertions run everywhere.
  */
-import { describe, it, expect, afterEach } from "vitest";
+import { describe, it, expect, afterEach, beforeEach } from "vitest";
 import { spawn } from "node:child_process";
 import { mkdtempSync, rmSync } from "node:fs";
-import { tmpdir } from "node:os";
+import { homedir, tmpdir } from "node:os";
 import { join } from "node:path";
 
 import {
@@ -36,6 +36,7 @@ import {
   updateAsrtSandboxConfig,
   DEFAULT_WINDOWS_PROXY_PORT_RANGE,
   buildSandboxConfig,
+  getDefaultSensitiveReadDenyPaths,
 } from "../asrt-sandbox.js";
 // ASRT-contract guards: the real vendored matcher + parent-proxy resolver, so
 // the host-side fixes are proven against ASRT 0.0.59's ACTUAL semantics (not a
@@ -617,5 +618,103 @@ describe("asrt-sandbox — proxyPortRange single SOT (install↔config consisten
         Object.defineProperty(process, "platform", prevPlatform);
       }
     }
+  });
+});
+
+describe("asrt-sandbox — sensitive read deny-list (host-secret hardening)", () => {
+  // getDefaultSensitiveReadDenyPaths derives `~/.lvis/*` from lvisHome() (which
+  // honors the LVIS_HOME env override) and the standard credential stores from
+  // os.homedir(). Pin LVIS_HOME to a deterministic value so the ~/.lvis assertions
+  // are stable across machines; restore it after each test.
+  const FAKE_LVIS_HOME = join(tmpdir(), "lvis-readdeny-test-home", ".lvis");
+  let prevLvisHome: string | undefined;
+
+  beforeEach(() => {
+    prevLvisHome = process.env.LVIS_HOME;
+    process.env.LVIS_HOME = FAKE_LVIS_HOME;
+  });
+  afterEach(() => {
+    if (prevLvisHome === undefined) delete process.env.LVIS_HOME;
+    else process.env.LVIS_HOME = prevLvisHome;
+  });
+
+  it("returns the expected absolute sensitive paths (LVIS namespaces + standard credential stores)", () => {
+    const paths = getDefaultSensitiveReadDenyPaths();
+    const home = homedir();
+
+    // Every entry is an absolute path with NO glob char (literal — works on both
+    // macOS seatbelt subpath and Linux bwrap deny-bind; ASRT only expands globs).
+    for (const p of paths) {
+      expect(p.startsWith("/") || /^[A-Za-z]:[\\/]/.test(p)).toBe(true);
+      expect(/[*?[\]]/.test(p)).toBe(false);
+    }
+
+    // LVIS host-domain sensitive namespaces, derived from the (overridden) lvisHome.
+    expect(paths).toContain(join(FAKE_LVIS_HOME, "secrets"));
+    expect(paths).toContain(join(FAKE_LVIS_HOME, "sessions"));
+    expect(paths).toContain(join(FAKE_LVIS_HOME, "routine"));
+    expect(paths).toContain(join(FAKE_LVIS_HOME, "audit.log"));
+    expect(paths).toContain(join(FAKE_LVIS_HOME, "audit"));
+    expect(paths).toContain(join(FAKE_LVIS_HOME, "settings.json"));
+
+    // Standard credential / secret stores under the real home.
+    expect(paths).toContain(join(home, ".ssh"));
+    expect(paths).toContain(join(home, ".aws"));
+    expect(paths).toContain(join(home, ".config", "gcloud"));
+    expect(paths).toContain(join(home, ".kube", "config"));
+    expect(paths).toContain(join(home, ".gnupg"));
+    expect(paths).toContain(join(home, ".npmrc"));
+    expect(paths).toContain(join(home, ".netrc"));
+    expect(paths).toContain(join(home, ".docker", "config.json"));
+
+    // No duplicates (deduped, order-stable).
+    expect(new Set(paths).size).toBe(paths.length);
+  });
+
+  it("does NOT deny $HOME wholesale (over-deny safety — legit shell tools still read ~)", () => {
+    const paths = getDefaultSensitiveReadDenyPaths();
+    const home = homedir();
+    // The bare home dir must never be on the deny-list — denying all of ~ would
+    // break tools reading ~/.cargo, ~/.config, etc. We deny SPECIFIC subpaths.
+    expect(paths).not.toContain(home);
+    // A clearly-legit subpath (not a credential store) must NOT be denied.
+    expect(paths).not.toContain(join(home, ".cargo"));
+    expect(paths).not.toContain(join(home, ".config")); // only ~/.config/gcloud is denied
+  });
+
+  it("buildSandboxConfig unions the sensitive deny-list into filesystem.denyRead", () => {
+    const config = buildSandboxConfig({ allowedDomains: [], strictAllowlist: true });
+    const sensitive = getDefaultSensitiveReadDenyPaths();
+    for (const p of sensitive) {
+      expect(config.filesystem.denyRead).toContain(p);
+    }
+    // Secrets is part of the floor (the prior single-entry deny is subsumed).
+    expect(config.filesystem.denyRead).toContain(join(FAKE_LVIS_HOME, "secrets"));
+  });
+
+  it("buildSandboxConfig keeps a caller-supplied denyRead AND adds the sensitive floor (union, deduped)", () => {
+    const extra = join(tmpdir(), "caller-supplied-deny-xyz");
+    const config = buildSandboxConfig({ allowedDomains: [], denyRead: [extra] });
+    // Caller entry survives.
+    expect(config.filesystem.denyRead).toContain(extra);
+    // Sensitive floor is still present.
+    expect(config.filesystem.denyRead).toContain(join(FAKE_LVIS_HOME, "secrets"));
+    // Passing a path already on the floor does not duplicate it.
+    const dupConfig = buildSandboxConfig({
+      allowedDomains: [],
+      denyRead: [join(FAKE_LVIS_HOME, "secrets")],
+    });
+    const occurrences = dupConfig.filesystem.denyRead.filter(
+      (p) => p === join(FAKE_LVIS_HOME, "secrets"),
+    ).length;
+    expect(occurrences).toBe(1);
+  });
+
+  it("default-OFF: computing the deny-list / config does NOT activate the sandbox gate", () => {
+    // Pure functions — no side effect on the boot-time spawn gate.
+    expect(isAsrtSandboxActive()).toBe(false);
+    getDefaultSensitiveReadDenyPaths();
+    buildSandboxConfig({ allowedDomains: [] });
+    expect(isAsrtSandboxActive()).toBe(false);
   });
 });

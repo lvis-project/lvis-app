@@ -27,7 +27,6 @@
  * - 도구는 mcp_{prefix}_{name} 네임스페이스로 ToolRegistry에 등록
  */
 import { spawn, type ChildProcess } from "node:child_process";
-import { join } from "node:path";
 import type {
   McpHttpServerConfig,
   McpServerConfig,
@@ -53,6 +52,7 @@ import {
   isAsrtSandboxActive,
   wrapWorkerCommand,
   cleanupAsrtSandboxAfterCommand,
+  getDefaultSensitiveReadDenyPaths,
 } from "../permissions/asrt-sandbox.js";
 import { buildSandboxedChildEnv } from "../tools/safe-env.js";
 import {
@@ -60,7 +60,6 @@ import {
   unmarkMcpServerWrapped,
 } from "../permissions/sandbox-capability.js";
 import { shellQuote, resolveShell } from "../lib/shell-resolver.js";
-import { lvisHome } from "../shared/lvis-home.js";
 import { t } from "../i18n/index.js";
 const log = createLogger("mcp-client");
 
@@ -1137,10 +1136,15 @@ class StdioTransport implements McpTransport {
 
   /**
    * Spawn the stdio worker WRAPPED by ASRT (worker-egress PR1). The filesystem
-   * jail confines writes to the host-derived per-server sandbox root and denies
-   * reads of the host secrets dir (closing the read-jail leak the prior review
-   * flagged). Network egress is governed by the SHARED boot config (strict union
-   * allow-list), not per command. Only invoked when {@link isAsrtSandboxActive}.
+   * write-jail confines writes to the host-derived per-server sandbox root. For
+   * reads it applies the CENTRALIZED host-secret / sensitive read DENY-LIST
+   * ({@link getDefaultSensitiveReadDenyPaths}) — secrets, session/routine
+   * history, `~/.ssh`, `~/.aws`, etc. — so a wrapped worker cannot read them.
+   * This is a deny-list of known-sensitive subpaths, NOT a read-allow jail:
+   * ASRT 0.0.59's read model is deny-only, so a path not on the list stays
+   * readable (the worker still needs cwd / its sandbox root / tmp). Network
+   * egress is governed by the SHARED boot config (strict union allow-list), not
+   * per command. Only invoked when {@link isAsrtSandboxActive}.
    */
   private async openWrapped(
     spawnCommand: { command: string; args: string[] },
@@ -1159,9 +1163,19 @@ class StdioTransport implements McpTransport {
       ...(sandboxRoot ? [sandboxRoot] : []),
       ...(tmpDir ? [tmpDir] : []),
     ];
-    // denyRead takes precedence in ASRT — deny the host secrets dir so a wrapped
-    // worker can never read `~/.lvis/secrets/**` (encrypted API keys etc.).
-    const denyRead = [join(lvisHome(), "secrets")];
+    // denyRead is the per-command read deny-list. ASRT's wrapWithSandbox reads
+    // `customConfig?.filesystem?.denyRead ?? config.filesystem.denyRead` — a
+    // per-command denyRead REPLACES the shared boot-config floor, it does NOT
+    // union. So a wrapped worker that only restated the secrets dir would lose
+    // the boot-config sensitive-read floor. Restate the CENTRALIZED deny-list
+    // here ({@link getDefaultSensitiveReadDenyPaths}, the SAME SOT the boot
+    // config unions) so a wrapped worker can never read `~/.lvis/secrets`,
+    // session/routine history, `~/.ssh`, `~/.aws`, etc. This is a DENY-LIST of
+    // known-sensitive subpaths, NOT a read-allow jail — ASRT's read model is
+    // deny-only (`allowRead` only re-allows nested regions inside a deny).
+    // Worker-needed dirs (its sandbox root, tmp) are re-allowed via `allowRead`
+    // above and are never on the deny-list.
+    const denyRead = getDefaultSensitiveReadDenyPaths();
 
     // Assemble the command string DEFENSIVELY: shell-quote the resolved binary
     // and every arg so a path with spaces / metacharacters cannot mis-split or
