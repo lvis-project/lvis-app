@@ -294,12 +294,17 @@ export function registerPermissionsHandlers(deps: IpcDeps): void {
     if (process.platform !== "win32") {
       return { ok: false, error: "not-applicable", message: "Windows sandbox install is only available on win32" };
     }
-    const { installWindowsSandbox, DEFAULT_WINDOWS_PROXY_PORT_RANGE } = await import(
-      "@anthropic-ai/sandbox-runtime"
-    );
     // proxyPortRange MUST equal the runtime config's windows.proxyPortRange or
     // the egress proxy binds a port the WFP filter blocks and ALL egress
-    // hard-fails — both reference ASRT's DEFAULT_WINDOWS_PROXY_PORT_RANGE.
+    // hard-fails. Both sides reference the SAME local re-exported SOT constant
+    // (DEFAULT_WINDOWS_PROXY_PORT_RANGE from asrt-sandbox.ts), which mirrors
+    // ASRT's value and is drift-pinned by a unit test. Do NOT source the range
+    // from a separate ASRT dynamic import here — that would create a second
+    // resolution path that could silently desync if ASRT updates the default.
+    const { DEFAULT_WINDOWS_PROXY_PORT_RANGE } = await import(
+      "../../permissions/asrt-sandbox.js"
+    );
+    const { installWindowsSandbox } = await import("@anthropic-ai/sandbox-runtime");
     const result = installWindowsSandbox({ proxyPortRange: DEFAULT_WINDOWS_PROXY_PORT_RANGE });
     // UAC dismissal is a user choice, not an error — surface it so the renderer
     // reverts the toggle and shows the "Install cancelled" banner.

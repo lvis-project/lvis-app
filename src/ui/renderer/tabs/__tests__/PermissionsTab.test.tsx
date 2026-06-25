@@ -709,3 +709,117 @@ describe("PermissionsTab hook quarantine notice", () => {
     expect(screen.queryByTestId("permissions-legacy-auto-mode-banner")).toBeNull();
   });
 });
+
+describe("PermissionsTab — handleWindowsInstall error-shape robustness", () => {
+  /**
+   * When sandboxWindowsInstall returns an error shape (ok: false), the handler
+   * must NOT leave the toggle half-enabled. It should revert sandboxEnabled to
+   * false, persist osToolSandbox=false, and show an error banner — identical
+   * behavior to a cancellation, but with an error message instead of the
+   * cancelled banner.
+   */
+  function installApiWithWindows(overrides: {
+    sandboxWindowsInstall?: ReturnType<typeof vi.fn>;
+    sandboxWindowsStatus?: ReturnType<typeof vi.fn>;
+  } = {}) {
+    const windowsStatus = {
+      applicable: true,
+      groupState: "absent" as const,
+      wfpState: "absent" as const,
+      ready: false,
+      instructions: "Run srt-win install…",
+    };
+    const lvis = {
+      permission: {
+        getMode: vi.fn(async () => ({ mode: "default" })),
+        setMode: vi.fn(async (mode: string) => ({ ok: true, mode })),
+        onModeChanged: vi.fn(() => () => undefined),
+        listRules: vi.fn(async () => []),
+        addRule: vi.fn(async () => ({ ok: true, rule: { pattern: "x", action: "allow" } })),
+        removeRule: vi.fn(async () => ({ ok: true })),
+        deferredList: vi.fn(async () => ({ ok: true, pending: [], total: 0 })),
+        deferredResolve: vi.fn(async () => ({ ok: true })),
+        onDeferredPending: vi.fn(() => () => undefined),
+        hookTrustList: vi.fn(async () => ({ ok: true, active: [], disabled: [], totalDisabled: 0 })),
+        dirDispatch: vi.fn(async () => ({
+          ok: true as const,
+          verb: "list" as const,
+          defaults: [],
+          userAdditions: [],
+          effective: [],
+        })),
+        reviewerDispatch: vi.fn(async () => ({
+          ok: true as const,
+          verb: "show" as const,
+          settings: {
+            mode: "disabled" as const,
+            provider: "openai" as const,
+            model: "gpt-4o-mini",
+            fallbackOnError: "deny" as const,
+            interactive: { autoApprove: "off" as const },
+          },
+        })),
+        reviewerProviderHasKey: vi.fn(async () => false),
+        sandboxCapability: vi.fn(async () => ({
+          platform: "win32" as NodeJS.Platform,
+          enabled: true,
+          available: true,
+          kind: "full" as const,
+          reason: "",
+          confines: { filesystem: true, process: true, network: true },
+        })),
+        sandboxWindowsStatus: overrides.sandboxWindowsStatus ?? vi.fn(async () => windowsStatus),
+        sandboxWindowsInstall: overrides.sandboxWindowsInstall ?? vi.fn(async () => ({ cancelled: true })),
+      },
+      policy: {
+        get: vi.fn(async () => ({
+          requireExplicitApproval: true,
+          managed: false,
+          source: "defaults",
+        })),
+        set: vi.fn(async () => ({ ok: true })),
+      },
+    };
+    (globalThis as unknown as { window: typeof window }).window.lvis = lvis as never;
+    const updateSettings = vi.fn(async () => ({}));
+    (globalThis as unknown as { window: typeof window }).window.lvisApi = {
+      // osToolSandbox=true so the component loads into the Windows consent state
+      getSettings: vi.fn(async () => ({ features: { osToolSandbox: true } })),
+      updateSettings,
+    } as never;
+    return { lvis, updateSettings };
+  }
+
+  it("reverts toggle + persists osToolSandbox=false + shows error banner on ok:false error shape", async () => {
+    const { updateSettings } = installApiWithWindows({
+      sandboxWindowsInstall: vi.fn(async () => ({
+        ok: false as const,
+        error: "install-failed",
+        message: "srt-win returned non-zero",
+      })),
+    });
+
+    await act(async () => {
+      render(<PermissionsTab />);
+    });
+
+    // The consent panel must be visible (sandboxEnabled=true, applicable, not ready).
+    const installBtn = screen.getByTestId("os-sandbox-windows-consent");
+    expect(installBtn).toBeTruthy();
+
+    // Click "Install now" (i18n key osSandboxWindowsInstallButton → "지금 설치") — triggers the error-shape branch.
+    await act(async () => {
+      fireEvent.click(screen.getByText("지금 설치"));
+    });
+
+    // osToolSandbox must be reverted to false (same as cancel).
+    expect(updateSettings).toHaveBeenCalledWith({ features: { osToolSandbox: false } });
+
+    // An error banner must appear (the i18n key osSandboxWindowsInstallError
+    // wraps the detail: "Windows 샌드박스 설치 오류: {message}").
+    expect(screen.getByText(/srt-win returned non-zero/)).toBeTruthy();
+
+    // The consent panel must no longer be visible (toggle reverted → sandboxEnabled=false).
+    expect(screen.queryByTestId("os-sandbox-windows-consent")).toBeNull();
+  });
+});
