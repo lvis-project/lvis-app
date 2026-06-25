@@ -1058,6 +1058,15 @@ class StdioTransport implements McpTransport {
    * unwrapped server never reports `asrt` to the reviewer (no-leak invariant).
    */
   private wrappedThroughAsrt = false;
+  /**
+   * One-shot guard for the ASRT cleanup that fires on ANY child termination
+   * (unexpected crash, OS kill, or the explicit close() path). Ensures
+   * `unmarkMcpServerWrapped` + `cleanupAsrtSandboxAfterCommand` run EXACTLY
+   * ONCE per wrapped worker lifetime regardless of exit cause (worker-egress
+   * PR1 MAJOR fix — unexpected child death previously bypassed cleanup,
+   * violating the no-leak invariant and leaking the bwrap ref-count).
+   */
+  private asrtCleanupRan = false;
 
   constructor(private readonly config: McpStdioServerConfig) {}
 
@@ -1163,16 +1172,28 @@ class StdioTransport implements McpTransport {
 
     // binShell: mirror bash.ts — on win32 hand ASRT the ABSOLUTE Git Bash / sh
     // path so the POSIX-quoted command string is interpreted by a POSIX shell on
-    // every platform (ASRT defaults to `cmd` on win32, which would mis-parse the
-    // single-quoting). On mac/linux leave it undefined (ASRT defaults to bash).
+    // every platform (ASRT defaults to `cmd` on win32, which would mis-parse
+    // single-quoted cmdlines). On mac/linux leave it undefined (ASRT uses bash).
+    // FAIL CLOSED on win32: if Git Bash is not resolvable, throw rather than
+    // silently falling back to cmd.exe — cmd.exe mis-parses POSIX single-quoting
+    // and would run an incorrectly split command in an unconfined shell.
     let binShell: string | undefined;
     if (process.platform === "win32") {
+      let resolvedShell: string | undefined;
       try {
-        const resolved = resolveShell().cmd;
-        if (/^[A-Za-z]:[\\/]/.test(resolved)) binShell = resolved;
+        const candidate = resolveShell().cmd;
+        if (/^[A-Za-z]:[\\/]/.test(candidate)) resolvedShell = candidate;
       } catch {
-        // No POSIX shell resolved — let ASRT default and surface any error.
+        // resolveShell() threw — fall through to fail-closed error below.
       }
+      if (resolvedShell === undefined) {
+        throw new Error(
+          "[mcp-client] ASRT-wrapped MCP requires Git Bash (or a POSIX shell) on Windows — " +
+            "cmd.exe cannot interpret the POSIX-single-quoted command string safely. " +
+            "Install Git for Windows and ensure git-bash.exe is resolvable.",
+        );
+      }
+      binShell = resolvedShell;
     }
 
     const { argv, env } = await wrapWorkerCommand(cmdline, {
@@ -1236,6 +1257,28 @@ class StdioTransport implements McpTransport {
     return { ...baseEnv, ...proxyOverlay };
   }
 
+  /**
+   * Release the per-command ASRT state exactly ONCE per wrapped worker lifetime,
+   * regardless of how the child process ends (explicit close(), unexpected crash,
+   * OS kill, spawn error). Idempotency is guaranteed by the `asrtCleanupRan`
+   * flag: whoever fires first (the process 'exit'/'error' handler OR close())
+   * runs the cleanup; the second caller is a no-op.
+   *
+   * Consequences of running this:
+   *   1. Drops the no-leak reviewer marker (`unmarkMcpServerWrapped`) so a later
+   *      reconnect that takes the plain-spawn path cannot inherit a stale `asrt`
+   *      report — exactly the leak class #1359 targeted.
+   *   2. Runs `cleanupAsrtSandboxAfterCommand()` — decrements the ASRT
+   *      activeSandboxCount ref-counter and tears down Linux bwrap mount artifacts.
+   */
+  private runAsrtCleanupOnce(): void {
+    if (!this.wrappedThroughAsrt || this.asrtCleanupRan) return;
+    this.asrtCleanupRan = true;
+    this.wrappedThroughAsrt = false;
+    unmarkMcpServerWrapped(this.config.id);
+    void cleanupAsrtSandboxAfterCommand();
+  }
+
   async send(message: JsonRpcMessage): Promise<void> {
     if (!this.process?.stdin?.writable) {
       throw new Error(`[mcp-client] ${t("be_mcpClient.stdinNotWritable")}`);
@@ -1251,15 +1294,11 @@ class StdioTransport implements McpTransport {
 
   async close(): Promise<void> {
     this.closedExternally = true;
-    // worker-egress PR1: release the per-command ASRT state when THIS transport
-    // was wrapped (Linux bwrap mount teardown; no-op on mac), and drop the
-    // reviewer's wrapped-server signal so a later unwrapped instance of the same
-    // id never inherits a stale `asrt` report. Only when we actually wrapped.
-    if (this.wrappedThroughAsrt) {
-      this.wrappedThroughAsrt = false;
-      unmarkMcpServerWrapped(this.config.id);
-      void cleanupAsrtSandboxAfterCommand();
-    }
+    // worker-egress PR1: release the per-command ASRT state via the idempotent
+    // one-shot helper. This is the EXPLICIT-CLOSE path; the unexpected-exit path
+    // (process 'exit'/'error' handlers in setupProcessHandlers) calls the same
+    // helper. Whichever fires first wins; the second is a no-op.
+    this.runAsrtCleanupOnce();
     // Capture the process reference BEFORE nulling `this.process` so the
     // SIGKILL fallback timer can still reach it. Without this, `close()` used
     // to null the field synchronously and the 3-second timer would dereference
@@ -1309,6 +1348,10 @@ class StdioTransport implements McpTransport {
 
     this.process.on("exit", (code, signal) => {
       log.warn(`${this.config.id} 프로세스 종료: code=${code}, signal=${signal}`);
+      // worker-egress PR1 MAJOR fix: fire ASRT cleanup on ANY child termination,
+      // including unexpected crashes/kills. The idempotent one-shot helper ensures
+      // this and the explicit close() path do not double-run the cleanup.
+      this.runAsrtCleanupOnce();
       if (!this.closedExternally) {
         this.closeHandler?.(t("be_mcpClient.processExitedUnexpectedly"));
       }
@@ -1316,6 +1359,8 @@ class StdioTransport implements McpTransport {
 
     this.process.on("error", (err) => {
       log.error(`${this.config.id} 프로세스 오류: %s`, err.message);
+      // Same idempotent cleanup for the error path (spawn failure, broken pipe).
+      this.runAsrtCleanupOnce();
       this.closeHandler?.(t("be_mcpClient.processError", { message: err.message }));
     });
   }

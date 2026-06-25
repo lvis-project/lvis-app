@@ -145,8 +145,11 @@ export function detectSandboxCapability(): SandboxCapability {
  * through {@link wrapToolCommand} (→ `spawnWithSandbox` in bash.ts /
  * powershell.ts), which is the per-command OS jail. Every other execution
  * substrate is NOT ASRT-wrapped:
- *   - `plugin` / `mcp` tools run in the LONG-LIVED MCP worker (mcp-client.ts
- *     spawns it PLAIN — isolation=none; `wrapWorkerCommand` is staged-uncalled).
+ *   - `mcp` tools run in the LONG-LIVED MCP worker. EXTERNAL stdio servers
+ *     are wrapped via `wrapWorkerCommand` in `StdioTransport.openWrapped`
+ *     (worker-egress PR1) when the gate is ON; per-server confinement is
+ *     reported through the wrapped-registry below. Plugin loopback servers
+ *     use `LoopbackTransport` (in-process) — not ASRT-wrapped.
  *   - other `builtin` tools (read_file, write_file, list_files, …) run
  *     IN-PROCESS in the host — no OS jail either.
  */

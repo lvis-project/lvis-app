@@ -502,14 +502,11 @@ export async function wrapToolCommand(
  * {@link wrapToolCommand}: the per-command channel carries ONLY the filesystem
  * jail (scoped to the worker's plugin sandbox root + needed dirs).
  *
- * STAGED FOR THE WORKER-EGRESS FOLLOW-UP — NO CALLER YET. This is intentionally
- * exported-but-unused: closing the long-lived-worker network egress gap is a
- * deliberately-separated follow-up PR (it needs per-plugin domain declaration +
- * dynamic user-configured-endpoint plumbing wired through the actual worker
- * spawn in mcp-client.ts). The Python SETUP spawns (python-runtime.ts
- * runUv/runPython) are NOT the egress doer — they run at boot before the gate
- * is active and legitimately need PyPI egress, so they plain-spawn. Do not
- * treat this as accidental dead code; the follow-up wires the real caller.
+ * Caller: `StdioTransport.openWrapped` in `mcp-client.ts` (worker-egress PR1)
+ * wraps every external MCP stdio worker when {@link isAsrtSandboxActive}. The
+ * Python SETUP spawns (`python-runtime.ts` `runUv`/`runPython`) are NOT
+ * wrapped — they run at boot before the gate is active and legitimately need
+ * PyPI egress, so they plain-spawn.
  *
  * NETWORK: workers do NOT carry a per-command network override — that channel
  * is INERT in ASRT 0.0.59 (`filterNetworkRequest` reads the SHARED config, not
