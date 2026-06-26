@@ -18,7 +18,7 @@ import { realpathSync } from "node:fs";
 import { lstat, mkdir, readFile, readdir, realpath, rm, stat, writeFile } from "node:fs/promises";
 import { dirname, isAbsolute, join, resolve, sep } from "node:path";
 import { PluginStorageError, type PluginStorage } from "./types.js";
-import { recordChokepoint } from "../permissions/effect-ledger.js";
+import { instrumentEffectsByPath } from "../permissions/hostapi-effect-recorder.js";
 
 export { PluginStorageError } from "./types.js";
 
@@ -166,94 +166,90 @@ export function createPluginStorage(
   }
 
   // Effect ledger (observability) — PluginStorage is the PRIMARY host-mediated
-  // plugin persistence path, so every method records its host-observed effect on
-  // the ambient per-invocation ledger (a no-op outside an invocation scope, e.g.
-  // boot-time construction). A read records the ABSENCE of any mutating effect
-  // (positive read evidence); the write variants are what flip
-  // `hasMutatingEffect`. Recorded BEFORE the guard()/op so a path that is later
-  // rejected still over-classifies as mutating — the safe (fail-closed) direction.
-  // Without this, a plugin tool that mutates ONLY via storage would be recorded
-  // `hostObservable:true, hasMutatingEffect:false` = a confirmed host-observed
-  // read, a fail-open seed for the future read-recognition gate. `target` is the
-  // relative path inside the plugin's OWN data root (never a secret value).
-  return {
-    resolve: (...segments) => guardLexicalOnly(segments.length === 0 ? "." : join(...segments)),
+  // plugin persistence path. Its methods are NOT instrumented one-by-one here;
+  // instead the whole object is wrapped by {@link instrumentEffectsByPath} below,
+  // which records each method's host-observed effect (looked up by its
+  // `storage.<method>` PATH in the classification SOT) on the ambient
+  // per-invocation ledger BEFORE the op runs (a no-op outside an invocation
+  // scope). A read records the ABSENCE of a mutation (positive read evidence);
+  // the write variants flip `hasMutatingEffect`. Without this, a plugin tool
+  // that mutates ONLY via storage would be recorded `hostObservable:true,
+  // hasMutatingEffect:false` — a confirmed host-observed read, a fail-open seed
+  // for the future read-recognition gate. Wrapping at this construction boundary
+  // (rather than per-method) covers EVERY storage instance uniformly — the four
+  // `createPluginStorage` call-sites and any future storage method.
+  return instrumentEffectsByPath(
+    {
+      resolve: (...segments) => guardLexicalOnly(segments.length === 0 ? "." : join(...segments)),
 
-    async read(rel) {
-      recordChokepoint("storageRead", rel);
-      const target = await guard(rel);
-      return readFile(target);
-    },
+      async read(rel) {
+        const target = await guard(rel);
+        return readFile(target);
+      },
 
-    async readText(rel, encoding = "utf-8") {
-      recordChokepoint("storageRead", rel);
-      const target = await guard(rel);
-      return readFile(target, encoding);
-    },
+      async readText(rel, encoding = "utf-8") {
+        const target = await guard(rel);
+        return readFile(target, encoding);
+      },
 
-    async readJson<T = unknown>(rel: string): Promise<T | null> {
-      recordChokepoint("storageRead", rel);
-      const target = await guard(rel);
-      try {
-        const text = await readFile(target, "utf-8");
-        return JSON.parse(text) as T;
-      } catch (err) {
-        if ((err as NodeJS.ErrnoException).code === "ENOENT") return null;
-        throw err;
-      }
-    },
+      async readJson<T = unknown>(rel: string): Promise<T | null> {
+        const target = await guard(rel);
+        try {
+          const text = await readFile(target, "utf-8");
+          return JSON.parse(text) as T;
+        } catch (err) {
+          if ((err as NodeJS.ErrnoException).code === "ENOENT") return null;
+          throw err;
+        }
+      },
 
-    async write(rel, data, encoding) {
-      recordChokepoint("storageWrite", rel);
-      const target = await guard(rel);
-      await ensureParent(target);
-      if (typeof data === "string") {
-        await writeFile(target, data, encoding ?? "utf-8");
-      } else {
-        await writeFile(target, data);
-      }
-    },
+      async write(rel, data, encoding) {
+        const target = await guard(rel);
+        await ensureParent(target);
+        if (typeof data === "string") {
+          await writeFile(target, data, encoding ?? "utf-8");
+        } else {
+          await writeFile(target, data);
+        }
+      },
 
-    async writeJson<T>(rel: string, value: T, indent = 2): Promise<void> {
-      recordChokepoint("storageWrite", rel);
-      const target = await guard(rel);
-      await ensureParent(target);
-      await writeFile(target, JSON.stringify(value, null, indent), "utf-8");
-    },
+      async writeJson<T>(rel: string, value: T, indent = 2): Promise<void> {
+        const target = await guard(rel);
+        await ensureParent(target);
+        await writeFile(target, JSON.stringify(value, null, indent), "utf-8");
+      },
 
-    async rm(rel, options) {
-      recordChokepoint("storageRm", rel);
-      const target = await guard(rel);
-      await rm(target, { recursive: options?.recursive ?? false, force: true });
-    },
+      async rm(rel, options) {
+        const target = await guard(rel);
+        await rm(target, { recursive: options?.recursive ?? false, force: true });
+      },
 
-    async list(rel = ".") {
-      recordChokepoint("storageRead", rel);
-      const target = await guard(rel);
-      try {
-        return await readdir(target);
-      } catch (err) {
-        if ((err as NodeJS.ErrnoException).code === "ENOENT") return [];
-        throw err;
-      }
-    },
+      async list(rel = ".") {
+        const target = await guard(rel);
+        try {
+          return await readdir(target);
+        } catch (err) {
+          if ((err as NodeJS.ErrnoException).code === "ENOENT") return [];
+          throw err;
+        }
+      },
 
-    async exists(rel) {
-      recordChokepoint("storageRead", rel);
-      const target = await guard(rel);
-      try {
-        await stat(target);
-        return true;
-      } catch (err) {
-        if ((err as NodeJS.ErrnoException).code === "ENOENT") return false;
-        throw err;
-      }
-    },
+      async exists(rel) {
+        const target = await guard(rel);
+        try {
+          await stat(target);
+          return true;
+        } catch (err) {
+          if ((err as NodeJS.ErrnoException).code === "ENOENT") return false;
+          throw err;
+        }
+      },
 
-    async mkdir(rel) {
-      recordChokepoint("storageMkdir", rel);
-      const target = await guard(rel);
-      await mkdir(target, { recursive: true });
-    },
-  };
+      async mkdir(rel) {
+        const target = await guard(rel);
+        await mkdir(target, { recursive: true });
+      },
+    } satisfies PluginStorage,
+    "storage",
+  );
 }
