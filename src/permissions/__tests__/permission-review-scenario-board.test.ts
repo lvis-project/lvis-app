@@ -218,7 +218,9 @@ describe("permission-review-scenario-board-v2.html contract", () => {
     }
   });
 
-  it("S5 auto-review MED foreground mutation returns reviewer output without approval", async () => {
+  it("S5 auto-review MED foreground mutation routes to the approval modal (user authority)", async () => {
+    // Phase 0: a non-LOW foreground verdict ASKS the user instead of silently
+    // hard-denying. Here the user allows → the mutation runs.
     const { pm, cleanup } = makeManager("auto", fixedClassifier({ level: "medium", reason: "external summary send" }));
     try {
       const { tool, execute } = makeTool({
@@ -234,16 +236,18 @@ describe("permission-review-scenario-board-v2.html contract", () => {
         gate,
         input: { endpoint: "https://teams.microsoft.com/webhook", payload: "meeting summary" },
       });
-      expect(result[0].is_error).toBe(true);
-      expect(execute).not.toHaveBeenCalled();
-      expect(gate.requestAndWait).not.toHaveBeenCalled();
-      expect(result[0].content).toContain("reviewer medium");
+      expect(result[0].is_error).toBeUndefined();
+      expect(execute).toHaveBeenCalledOnce();
+      expect(gate.requestAndWait).toHaveBeenCalledOnce();
+      expect(gate.requestAndWait).toHaveBeenCalledWith(expect.objectContaining({
+        reviewerVerdict: expect.objectContaining({ level: "medium" }),
+      }));
     } finally {
       cleanup();
     }
   });
 
-  it("S6 auto-review HIGH foreground shell is returned as reviewer tool output", async () => {
+  it("S6 auto-review HIGH foreground shell routes to the approval modal; deny-once blocks execution", async () => {
     const { pm, cleanup } = makeManager("auto", fixedClassifier({ level: "high", reason: "destructive shell" }));
     try {
       const { tool, execute } = makeTool({ name: "bash", category: "shell" });
@@ -255,10 +259,13 @@ describe("permission-review-scenario-board-v2.html contract", () => {
         input: { command: "rm -rf ./build" },
         trustOrigin: "llm-tool-arg",
       });
+      // deny-by-default preserved: user denies → blocked, no execution.
       expect(result[0].is_error).toBe(true);
       expect(execute).not.toHaveBeenCalled();
-      expect(gate.requestAndWait).not.toHaveBeenCalled();
-      expect(result[0].content).toContain("reviewer high");
+      expect(gate.requestAndWait).toHaveBeenCalledOnce();
+      expect(gate.requestAndWait).toHaveBeenCalledWith(expect.objectContaining({
+        reviewerVerdict: expect.objectContaining({ level: "high" }),
+      }));
     } finally {
       cleanup();
     }
@@ -309,7 +316,7 @@ describe("permission-review-scenario-board-v2.html contract", () => {
     }));
   });
 
-  it("S9 reviewer timeout/error fails closed as reviewer tool output", async () => {
+  it("S9 reviewer timeout/error fails closed to HIGH and routes to the approval modal; deny-once blocks", async () => {
     const classifier: RiskClassifier = {
       classify: vi.fn(() => {
         throw new Error("provider timeout");
@@ -330,10 +337,13 @@ describe("permission-review-scenario-board-v2.html contract", () => {
         gate,
         input: { endpoint: "https://teams.microsoft.com/webhook", payload: "summary" },
       });
+      // Fail-closed HIGH still asks the user (not a silent deny); deny → blocked.
       expect(result[0].is_error).toBe(true);
       expect(execute).not.toHaveBeenCalled();
-      expect(gate.requestAndWait).not.toHaveBeenCalled();
-      expect(result[0].content).toContain("reviewer high");
+      expect(gate.requestAndWait).toHaveBeenCalledOnce();
+      expect(gate.requestAndWait).toHaveBeenCalledWith(expect.objectContaining({
+        reviewerVerdict: expect.objectContaining({ level: "high" }),
+      }));
     } finally {
       cleanup();
     }
@@ -424,10 +434,10 @@ describe("permission-review-scenario-board-v2.html contract", () => {
     }
   });
 
-  it("S14 network data egress returns reviewer impact as tool output", async () => {
+  it("S14 network data egress routes its reviewer impact to the approval modal; deny-once blocks", async () => {
     const { pm, cleanup } = makeManager("auto");
     try {
-      const { tool } = makeTool({
+      const { tool, execute } = makeTool({
         name: "teams_send",
         category: "network",
         source: "plugin",
@@ -445,14 +455,20 @@ describe("permission-review-scenario-board-v2.html contract", () => {
         },
       });
       expect(result[0].is_error).toBe(true);
-      expect(gate.requestAndWait).not.toHaveBeenCalled();
-      expect(result[0].content).toContain("reviewer medium: network graph data operation");
+      expect(execute).not.toHaveBeenCalled();
+      expect(gate.requestAndWait).toHaveBeenCalledOnce();
+      expect(gate.requestAndWait).toHaveBeenCalledWith(expect.objectContaining({
+        reviewerVerdict: expect.objectContaining({
+          level: "medium",
+          reason: "network graph data operation",
+        }),
+      }));
     } finally {
       cleanup();
     }
   });
 
-  it("S15 unknown or sensitive network target is HIGH and returns reviewer output", async () => {
+  it("S15 unknown or sensitive network target is HIGH and routes to the approval modal; deny-once blocks", async () => {
     const { pm, cleanup } = makeManager("auto");
     try {
       const { tool, execute } = makeTool({
@@ -470,8 +486,10 @@ describe("permission-review-scenario-board-v2.html contract", () => {
       });
       expect(result[0].is_error).toBe(true);
       expect(execute).not.toHaveBeenCalled();
-      expect(gate.requestAndWait).not.toHaveBeenCalled();
-      expect(result[0].content).toContain("reviewer high");
+      expect(gate.requestAndWait).toHaveBeenCalledOnce();
+      expect(gate.requestAndWait).toHaveBeenCalledWith(expect.objectContaining({
+        reviewerVerdict: expect.objectContaining({ level: "high" }),
+      }));
     } finally {
       cleanup();
     }

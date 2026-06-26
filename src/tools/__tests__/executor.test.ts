@@ -867,7 +867,7 @@ describe("ToolExecutor — C1 sensitive-path hard-block wiring", () => {
     }
   });
 
-  it("interactive auto-review MEDIUM returns reviewer output as a tool error without opening the approval gate", async () => {
+  it("interactive auto-review MEDIUM opens the approval gate with the reviewer verdict (deny-once blocks execution)", async () => {
     const executeSpy = vi.fn(async () => "should-not-run");
     const registry = new ToolRegistry();
     registry.register(createDynamicTool({
@@ -929,6 +929,9 @@ describe("ToolExecutor — C1 sensitive-path hard-block wiring", () => {
         },
       );
 
+      // Phase 0: a non-LOW foreground verdict now routes to the user approval
+      // modal instead of silently hard-denying. The user is the authority — a
+      // deny-once at the gate yields a blocked tool result (no execution).
       expect(result[0].is_error).toBe(true);
       expect(executeSpy).not.toHaveBeenCalled();
       expect(permissionReviewEvents.map((event) => event.status)).toEqual([
@@ -942,9 +945,13 @@ describe("ToolExecutor — C1 sensitive-path hard-block wiring", () => {
       expect(reviewReason).toContain("***@example.com");
       expect(reviewReason).not.toContain("alice@example.com");
       expect(reviewReason).not.toContain("sk-abcdefghijklmnopqrstuvwxyz");
-      expect(requestAndWait).not.toHaveBeenCalled();
-      expect(result[0].content).toContain("reviewer medium");
-      expect(result[0].content).toContain("retry only after explicit user authorization");
+      // The modal opened, carrying the Layer-5 reviewer verdict and reason so
+      // the dialog can render the risk (HIGH forces session-only + NL).
+      expect(requestAndWait).toHaveBeenCalledTimes(1);
+      expect(requestAndWait).toHaveBeenCalledWith(expect.objectContaining({
+        reviewerVerdict: expect.objectContaining({ level: "medium" }),
+        reason: expect.stringContaining("reviewer medium"),
+      }));
       const reviewerCtx = classifySpy.mock.calls[0]?.[0];
       expect(reviewerCtx?.finalInput).toMatchObject({
         payload: "send ***@example.com with sk-****",
@@ -954,7 +961,7 @@ describe("ToolExecutor — C1 sensitive-path hard-block wiring", () => {
     }
   });
 
-  it("allows the same reviewer-blocked action once after explicit user authorization in chat", async () => {
+  it("reviewer-rated write asks once; allow-always suppresses the prompt on the next identical call", async () => {
     const executeSpy = vi.fn(async () => "sent");
     const registry = new ToolRegistry();
     registry.register(createDynamicTool({
@@ -986,9 +993,12 @@ describe("ToolExecutor — C1 sensitive-path hard-block wiring", () => {
         cache: new VerdictCache(join(dir, "reviewer-cache.jsonl")),
         deferredQueue: new DeferredQueue(join(dir, "deferred-queue.jsonl")),
       });
+      // The user picks "allow-always" at the modal — the executor persists an
+      // always-allow rule so the next identical call short-circuits before the
+      // reviewer/modal lane (no re-prompt).
       const requestAndWait = vi.fn(async (req: { id: string }) => ({
         requestId: req.id,
-        choice: "deny-once" as const,
+        choice: "allow-always" as const,
       }));
       const executor = new ToolExecutor(
         registry,
@@ -1008,25 +1018,99 @@ describe("ToolExecutor — C1 sensitive-path hard-block wiring", () => {
           }),
         },
       );
-      expect(first[0].is_error).toBe(true);
-      expect(executeSpy).not.toHaveBeenCalled();
+      // First call: reviewer rated non-LOW → modal opened → user allow-always → executed.
+      expect(first[0].is_error).toBeUndefined();
+      expect(first[0].content).toBe("sent");
+      expect(requestAndWait).toHaveBeenCalledTimes(1);
+      expect(requestAndWait).toHaveBeenCalledWith(expect.objectContaining({
+        reviewerVerdict: expect.objectContaining({ level: "medium" }),
+      }));
 
       const second = await executor.executeAll(
         [{ id: "tu-retry-second", name: "reviewed_network_probe_retry", input }],
         {
           sessionId: "sess-reviewer-retry",
           permissionContext: userPermissionContext({
-            userIntent: "진행해",
-            explicitAuthorizationIntent: "진행해",
+            userIntent: "다시 전송",
           }),
         },
       );
 
+      // Second identical call: allow-always rule satisfies it without re-prompting.
       expect(second[0].is_error).toBeUndefined();
       expect(second[0].content).toBe("sent");
-      expect(executeSpy).toHaveBeenCalledOnce();
-      expect(requestAndWait).not.toHaveBeenCalled();
+      expect(executeSpy).toHaveBeenCalledTimes(2);
+      expect(requestAndWait).toHaveBeenCalledTimes(1);
       expect(classifySpy).toHaveBeenCalledOnce();
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
+  it("Phase 0 foreground deny→ask change does not affect the headless lane (still defers to the queue, no modal)", async () => {
+    const executeSpy = vi.fn(async () => "sent");
+    const registry = new ToolRegistry();
+    registry.register(createDynamicTool({
+      name: "reviewed_network_probe_headless",
+      description: "MEDIUM reviewer headless probe",
+      source: "plugin",
+      pluginId: "test-plugin",
+      category: "network",
+      jsonSchema: {
+        type: "object",
+        properties: { payload: { type: "string" } },
+      },
+      execute: async (rawInput) => ({
+        output: await executeSpy(rawInput),
+        isError: false,
+      }),
+    }));
+    const dir = mkdtempSync(join(tmpdir(), "lvis-executor-headless-defer-"));
+    try {
+      const permMgr = new PermissionManager(join(dir, "permissions.json"));
+      permMgr.setMode("auto");
+      permMgr.setInteractiveAutoApprove("low");
+      const classifySpy = vi.fn(() => ({
+        level: "medium" as const,
+        reason: "headless data egress",
+      }));
+      const queue = new DeferredQueue(join(dir, "deferred-queue.jsonl"));
+      permMgr.setReviewer({
+        classifier: { classify: classifySpy },
+        cache: new VerdictCache(join(dir, "reviewer-cache.jsonl")),
+        deferredQueue: queue,
+      });
+      const requestAndWait = vi.fn(async (req: { id: string }) => ({
+        requestId: req.id,
+        choice: "allow-once" as const,
+      }));
+      const executor = new ToolExecutor(
+        registry,
+        undefined,
+        permMgr,
+        undefined,
+        { requestAndWait } as never,
+      );
+
+      const result = await executor.executeAll(
+        [{ id: "tu-headless-defer", name: "reviewed_network_probe_headless", input: { payload: "send summary" } }],
+        {
+          sessionId: "sess-headless-defer",
+          permissionContext: userPermissionContext({
+            headless: true,
+            trustOrigin: "llm-tool-arg",
+          }),
+        },
+      );
+
+      // Headless has no renderer — the foreground deny→ask flip must NOT leak
+      // here. The request defers to the manual queue, the modal is never opened,
+      // and the tool does not execute.
+      expect(result[0].is_error).toBe(true);
+      expect(executeSpy).not.toHaveBeenCalled();
+      expect(requestAndWait).not.toHaveBeenCalled();
+      expect(queue.listPending()).toHaveLength(1);
+      expect(queue.listPending()[0].verdict.level).toBe("medium");
     } finally {
       rmSync(dir, { recursive: true, force: true });
     }
