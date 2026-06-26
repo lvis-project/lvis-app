@@ -84,6 +84,7 @@ vi.mock("../../plugins/registry.js", () => ({
 }));
 
 import { initPluginRuntime } from "../../boot/steps/plugin-runtime.js";
+import { KNOWN_CAPABILITIES } from "../../plugins/capabilities.js";
 import { HOSTAPI_EFFECT_BY_PATH } from "../effect-kind.js";
 import { instrumentEffectsByPath, isPlainNamespace } from "../hostapi-effect-recorder.js";
 import {
@@ -139,9 +140,14 @@ async function buildRealHostApi(): Promise<PluginHostApi> {
   const createHostApi = harness.capturedRuntimeOptions?.createHostApi as CreateHostApi | undefined;
   expect(createHostApi, "initPluginRuntime must register a createHostApi factory").toBeDefined();
   const pluginDataDir = mkdtempSync(join(tmpdir(), "lvis-hostapi-completeness-"));
+  // Build with the FULL capability vocabulary, not a sampled subset. A
+  // namespace/method wired ONLY under a capability ABSENT from the fixture would
+  // escape BOTH the non-plain-namespace assertion AND the SOT-coverage assertion
+  // below (it would never be enumerated), so completeness coverage must enumerate
+  // every conditionally-wired method — declare the maximal capability set.
   return createHostApi!(
     "completeness-plugin",
-    { id: "completeness-plugin", config: {}, capabilities: ["external-auth-consumer", "host:overlay"] },
+    { id: "completeness-plugin", config: {}, capabilities: [...KNOWN_CAPABILITIES] },
     pluginDataDir,
   );
 }

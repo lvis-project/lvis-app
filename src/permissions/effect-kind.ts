@@ -178,14 +178,24 @@ export function methodEffect(method: string): Effect {
  * How the recording wrapper classifies one hostApi method PATH.
  *
  * `kind` is the recorded {@link ChokepointKind} (whose read/write class comes
- * from {@link CHOKEPOINT_EFFECT}). `effectFromArgs` overrides that class from
- * the call arguments (only `hostFetch`, whose effect is the HTTP verb the host
- * owns). `targetFromArgs` extracts a coarse, NON-SECRET forensic descriptor
- * (origin, config key, scope) — never a secret value, body, or token.
+ * from {@link CHOKEPOINT_EFFECT}). `targetFromArgs` extracts a coarse,
+ * NON-SECRET forensic descriptor (origin, config key, scope) — never a secret
+ * value, body, or token.
+ *
+ * `selfRecorded` marks a chokepoint whose effect the GENERIC recorder must NOT
+ * derive — the only one is `hostFetch`, the lone VERB-derived egress. Its
+ * read/write class depends on a plugin-controlled arg VALUE (the HTTP method),
+ * so deriving it in the recorder would read that value INDEPENDENTLY of the
+ * wire: a stateful getter could return a safe verb to the recorder and a
+ * mutating verb to the wire (a value-divergence forgery — a write recorded as a
+ * confirmed read). A `selfRecorded` chokepoint instead snapshots the verb to a
+ * primitive EXACTLY ONCE in its host closure and records the effect + pins the
+ * wire from that single read, so the recorded effect == the wire verb by
+ * construction. The generic recorder skips it (no second read, no double-record).
  */
 export interface HostApiEffectSpec {
   kind: ChokepointKind;
-  effectFromArgs?: (args: readonly unknown[]) => Effect;
+  selfRecorded?: boolean;
   targetFromArgs?: (args: readonly unknown[]) => string | undefined;
 }
 
@@ -226,14 +236,6 @@ function objectStringField(field: string) {
     const value = (args[0] as Record<string, unknown> | undefined)?.[field];
     return typeof value === "string" ? value : undefined;
   };
-}
-
-/** hostFetch effect — the HTTP verb (host-owned, non-forgeable) drives it. */
-function hostFetchEffect(args: readonly unknown[]): Effect {
-  const init = args[1] as { method?: unknown } | undefined;
-  const method =
-    typeof init?.method === "string" && init.method.length > 0 ? init.method : "GET";
-  return methodEffect(method);
 }
 
 /**
@@ -281,7 +283,12 @@ export const HOSTAPI_EFFECT_BY_PATH: Record<string, HostApiEffectSpec> = {
   // callLlm carries the prompt BODY to an external provider; target stays
   // undefined (the provider is not in args and the prompt is never a target).
   callLlm: { kind: "callLlm" },
-  hostFetch: { kind: "hostFetch", effectFromArgs: hostFetchEffect, targetFromArgs: urlOriginArg },
+  // hostFetch is the ONLY verb-derived chokepoint: its read/write class comes
+  // from the HTTP method, a plugin-controlled arg VALUE. `selfRecorded` keeps the
+  // generic recorder from re-reading that value (which would diverge from the
+  // wire); the hostFetch host closure snapshots the verb ONCE and records the
+  // effect + target + pins the wire from that single read (plugin-runtime.ts).
+  hostFetch: { kind: "hostFetch", selfRecorded: true },
   spawnWorker: { kind: "spawnWorker" },
   openExternalUrl: { kind: "openExternalUrl", targetFromArgs: urlOriginArg },
   openAuthWindow: { kind: "openAuthWindow", targetFromArgs: urlOriginFromOpts },
