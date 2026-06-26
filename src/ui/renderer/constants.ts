@@ -65,6 +65,12 @@ const VENDOR_UI: Record<LLMVendor, VendorUiMeta> = {
     placeholder: "service account (unused — uses ADC)",
     needsBaseUrl: false,
   },
+  "openai-compatible": {
+    label: "Custom (OpenAI-compatible)",
+    placeholder: "API key (or any value if unauthenticated)",
+    needsBaseUrl: true,
+    baseUrlPlaceholder: "http://10.231.108.187:8001/v1",
+  },
 };
 
 export const VENDORS = LLM_VENDORS.map((id) => ({
