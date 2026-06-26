@@ -46,6 +46,9 @@ const INSTRUMENTED = Symbol("lvis.hostApiEffectInstrumented");
 /** One-time-per-path guard for the unmapped-method dev warning. */
 const warnedUnmappedPaths = new Set<string>();
 
+/** One-time-per-path guard for the undefined-static-effect fail-closed warning. */
+const warnedUndefinedStaticEffect = new Set<string>();
+
 /** One-time-per-path guard for the un-instrumented non-plain-namespace warning. */
 const warnedNonPlainNamespaces = new Set<string>();
 
@@ -71,28 +74,39 @@ function recordEffectForPath(path: string, args: readonly unknown[]): void {
     return;
   }
 
+  // SECURITY — a `selfRecorded` chokepoint records its OWN effect inside its host
+  // closure from a SINGLE snapshot of the verb that ALSO pins the wire
+  // (plugin-runtime.ts hostFetch). The generic recorder must NOT re-read that
+  // plugin-controlled VALUE here: a second, independent read is exactly the
+  // value-divergence forgery vector — a stateful getter returning a safe verb to
+  // the recorder and a mutating verb to the wire would record a confirmed READ
+  // for an executed WRITE. Skip it entirely: no read, no double-record (the
+  // single-recording-point property is preserved, the closure owns it).
+  if (spec.selfRecorded) return;
+
   // SECURITY — fail-CLOSED effect, decided + recorded BEFORE any plugin-arg
   // extraction. The read/write CLASS comes from the host-owned SOT, never from a
-  // plugin-controlled arg getter: a malicious 1st-party plugin could pass a
-  // stateful getter that THROWS on the recorder's read but returns a usable
-  // value on the real operation's later read. If effect classification depended
-  // on that getter, the throw would drop the whole record and the executed
-  // mutation would surface as a confirmed READ — the exact fail-open seed this
-  // model exists to remove. Static chokepoints take their class from
-  // CHOKEPOINT_EFFECT (no args). The only verb-derived chokepoint (hostFetch)
-  // MUST read the HTTP method from args; if that read/normalize throws we fail
-  // CLOSED to "write" so a throw can never drop the effect or downgrade a write
-  // to a read.
-  let effect: Effect;
-  if (spec.effectFromArgs) {
-    try {
-      effect = spec.effectFromArgs(args);
-    } catch {
-      effect = "write";
-    }
-  } else {
-    effect = CHOKEPOINT_EFFECT[spec.kind as StaticChokepointKind];
+  // plugin-controlled arg getter, so a stateful/throwing getter on the args can
+  // NEVER flip read↔write for a static chokepoint. hostFetch (the only
+  // verb-derived chokepoint) self-records above, so EVERY path reaching here is
+  // static. FAIL-CLOSED on the lookup: a kind somehow absent from
+  // CHOKEPOINT_EFFECT (e.g. a future verb-derived kind excluded from
+  // StaticChokepointKind that forgot to mark itself selfRecorded — the `as` cast
+  // would otherwise hide it) must NEVER yield `undefined` → hasMutatingEffect
+  // false → a silent fail-open READ; default to "write" and warn once so the gap
+  // is wired into the SOT.
+  const staticEffect = CHOKEPOINT_EFFECT[spec.kind as StaticChokepointKind] as
+    | Effect
+    | undefined;
+  if (staticEffect === undefined && !warnedUndefinedStaticEffect.has(path)) {
+    warnedUndefinedStaticEffect.add(path);
+    log.warn(
+      "hostApi method '%s' (kind '%s') has no CHOKEPOINT_EFFECT entry — recorded fail-closed as 'write'; add it to CHOKEPOINT_EFFECT or mark the chokepoint selfRecorded (effect-kind.ts)",
+      path,
+      spec.kind,
+    );
   }
+  const effect: Effect = staticEffect ?? "write";
   // Commit the {kind, effect} to the ledger NOW (the ledger holds `entry` by
   // reference), so `hasMutatingEffect` is locked in before any forensic-target
   // getter — which touches plugin-controlled args — can run.

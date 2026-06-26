@@ -33,7 +33,7 @@ async function record<T extends object>(
 
 const noop = (..._args: unknown[]): unknown => undefined;
 
-describe("instrumentEffectsByPath — static vs verb-derived effect", () => {
+describe("instrumentEffectsByPath — static effect + selfRecorded skip", () => {
   it("records a static READ for a read-classified method", async () => {
     const effects = await record({ getInstalledPluginIds: noop }, (w) => {
       w.getInstalledPluginIds();
@@ -48,27 +48,22 @@ describe("instrumentEffectsByPath — static vs verb-derived effect", () => {
     expect(effects).toEqual([{ kind: "registerKeywords", effect: "write", target: undefined }]);
   });
 
-  it("derives hostFetch effect from the HTTP verb (POST=write, default GET=read)", async () => {
+  it("SKIPS hostFetch — the only verb-derived chokepoint is selfRecorded in its closure", async () => {
+    // hostFetch's effect depends on the HTTP verb (a plugin-controlled arg
+    // VALUE). The generic recorder must NOT re-read that value (a second,
+    // independent read is the value-divergence forgery vector), so it records
+    // NOTHING here — the real hostFetch host closure snapshots the verb ONCE and
+    // records the effect + pins the wire from that single read. The end-to-end
+    // single-read guarantee is covered in host-fetch-verb-snapshot.test.ts.
     const post = await record({ hostFetch: noop }, (w) => {
       w.hostFetch("https://api.example.com/x?token=secret", { method: "POST" });
     });
-    expect(post).toEqual([{ kind: "hostFetch", effect: "write", target: "https://api.example.com" }]);
+    expect(post).toEqual([]);
 
     const get = await record({ hostFetch: noop }, (w) => {
       w.hostFetch("https://api.example.com/x");
     });
-    expect(get).toEqual([{ kind: "hostFetch", effect: "read", target: "https://api.example.com" }]);
-
-    const emptyMethod = await record({ hostFetch: noop }, (w) => {
-      w.hostFetch("https://api.example.com/x", { method: "" });
-    });
-    expect(emptyMethod[0].effect).toBe("read");
-
-    // URL-object input → origin extractor returns undefined (string-only).
-    const urlObj = await record({ hostFetch: noop }, (w) => {
-      w.hostFetch(new URL("https://api.example.com"));
-    });
-    expect(urlObj).toEqual([{ kind: "hostFetch", effect: "read" }]);
+    expect(get).toEqual([]);
   });
 });
 
@@ -250,49 +245,6 @@ describe("instrumentEffectsByPath — a hostile arg getter cannot suppress the e
     },
   });
 
-  it("hostFetch: a STATEFUL init.method getter (throws on the recorder's read, returns on the operation's) still records WRITE, not read", async () => {
-    // The exact suppression vector: throw on the recorder's FIRST read of the
-    // verb, then hand the real operation a usable mutating verb. The effect must
-    // fail CLOSED to write so the executed mutation is NEVER mis-recorded as a
-    // confirmed host-observed read.
-    let accessCount = 0;
-    const statefulInit = {
-      get method(): string {
-        accessCount += 1;
-        if (accessCount === 1) throw new Error("hostile: throw on the recorder's read");
-        return "POST"; // the real operation gets a usable mutating verb
-      },
-    };
-    const operationSawVerb: string[] = [];
-    const api = {
-      hostFetch: (_url: string, init: { method: string }): void => {
-        operationSawVerb.push(init.method);
-      },
-    };
-    const effects = await record(api, (w) => {
-      (w.hostFetch as (u: string, i: unknown) => unknown)(
-        "https://api.example.com/x",
-        statefulInit,
-      );
-    });
-    // Verb read threw → effect fails closed to write; the URL target (a separate
-    // arg) is still extracted.
-    expect(effects).toEqual([{ kind: "hostFetch", effect: "write", target: "https://api.example.com" }]);
-    // …and the real mutation DID execute with the usable verb — the attack the
-    // fail-closed effect neutralizes.
-    expect(operationSawVerb).toEqual(["POST"]);
-  });
-
-  it("hostFetch: an always-throwing init.method getter still fails CLOSED to write", async () => {
-    const effects = await record({ hostFetch: noop }, (w) => {
-      (w.hostFetch as (u: string, i: unknown) => unknown)(
-        "https://api.example.com/x",
-        throwingField("method"),
-      );
-    });
-    expect(effects).toEqual([{ kind: "hostFetch", effect: "write", target: "https://api.example.com" }]);
-  });
-
   it("triggerConversation: a throwing spec.source getter costs only the target, never the write effect", async () => {
     const effects = await record({ triggerConversation: noop }, (w) => {
       (w.triggerConversation as (s: unknown) => unknown)(throwingField("source"));
@@ -315,13 +267,12 @@ describe("instrumentEffectsByPath — a hostile arg getter cannot suppress the e
   });
 
   it("the suppression-resistant record flips hasMutatingEffect to true", async () => {
-    const wrapped = instrumentEffectsByPath({ hostFetch: noop });
+    const wrapped = instrumentEffectsByPath({ triggerConversation: noop });
     const ledger = createEffectLedger("cid-hostile");
     await runWithEffectLedger(ledger, async () => {
-      (wrapped.hostFetch as (u: string, i: unknown) => unknown)(
-        "https://api.example.com/x",
-        throwingField("method"),
-      );
+      // A throwing target getter costs only the forensic descriptor — the static
+      // write effect is already on the ledger, so the plugin cannot hide its write.
+      (wrapped.triggerConversation as (s: unknown) => unknown)(throwingField("source"));
     });
     expect(ledger.summary().hasMutatingEffect).toBe(true); // a plugin cannot hide its own write
   });
