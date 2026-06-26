@@ -23,7 +23,16 @@ const INSTALL_HANDOFF_SAFETY_RELEASE_MS = 10_000;
  * `lvis:update:install-now`. Keeping the native dialog and install trigger
  * in one IPC handler prevents a renderer caller from skipping confirmation.
  */
-export function useAppUpdate(api: LvisApi): {
+export function useAppUpdate(
+  api: LvisApi,
+  /**
+   * Called when "apply update" can't self-install (unsigned macOS build) — the
+   * main process has opened the release page and returned
+   * `reason: "manual-install-required"`. The consumer surfaces a toast so the
+   * badge click isn't a silent no-op.
+   */
+  onNeedsManualInstall?: () => void,
+): {
   state: AppUpdateBadgeState;
   inFlight: boolean;
   download: () => Promise<void>;
@@ -107,6 +116,12 @@ export function useAppUpdate(api: LvisApi): {
     try {
       const result = await api.installAppUpdate();
       if (!result.ok) {
+        // Unsigned macOS builds can't self-install (Squirrel.Mac needs a
+        // Developer ID); the main process opened the release page instead of
+        // leaving a silent no-op. Surface that fallback to the user.
+        if (result.reason === "manual-install-required") {
+          onNeedsManualInstall?.();
+        }
         releaseInFlight();
         return;
       }
@@ -117,7 +132,7 @@ export function useAppUpdate(api: LvisApi): {
     } catch {
       releaseInFlight();
     }
-  }, [api, releaseInFlight, scheduleInstallSafetyRelease]);
+  }, [api, releaseInFlight, scheduleInstallSafetyRelease, onNeedsManualInstall]);
 
   const skip = useCallback(async () => {
     if (inFlightRef.current) return;
