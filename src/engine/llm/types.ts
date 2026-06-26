@@ -323,7 +323,7 @@ export type StreamEvent =
   | { type: "text_delta"; text: string }
   | { type: "reasoning_delta"; text: string }
   | { type: "tool_call"; id: string; name: string; input: Record<string, unknown> }
-  | { type: "message_complete"; stopReason: "end_turn" | "tool_use"; usage?: TokenUsage; thinkingBlocks?: ThinkingBlock[] }
+  | { type: "message_complete"; stopReason: "end_turn" | "tool_use" | "max_tokens"; usage?: TokenUsage; thinkingBlocks?: ThinkingBlock[] }
   | {
       type: "error";
       error: string;
@@ -372,6 +372,15 @@ export interface StreamTurnParams {
   enableThinking?: boolean;
   /** Token budget for Claude extended thinking (1024–32000). Defaults to 10 000 when enableThinking is true. */
   thinkingBudgetTokens?: number;
+  /**
+   * finish_reason=length CONTINUATION. When true, the FINAL message in
+   * `messages` is a partial assistant turn the model must CONTINUE verbatim
+   * (not restart). Only the openai-compatible (vLLM) path acts on it today —
+   * it sets `continue_final_message:true` + `add_generation_prompt:false` so
+   * vLLM re-opens the trailing assistant message with zero seam tokens. Other
+   * vendors ignore it (see vendorSupportsLengthContinuation).
+   */
+  continuationPrefill?: boolean;
   /** Abort signal to cancel the streaming request. Providers forward to the underlying SDK when supported. */
   abortSignal?: AbortSignal;
 }

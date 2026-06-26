@@ -50,7 +50,7 @@ export type StreamEvent = {
   verdictLevel?: PermissionReviewRiskLevel;
   approvalPurpose?: ApprovalPurposeSuggestion;
   roundIndex?: number;
-  stopReason?: "end_turn" | "tool_use";
+  stopReason?: "end_turn" | "tool_use" | "max_tokens";
   hasToolCalls?: boolean;
   removedMessages?: number;
   freedTokens?: number;
