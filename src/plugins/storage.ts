@@ -18,6 +18,7 @@ import { realpathSync } from "node:fs";
 import { lstat, mkdir, readFile, readdir, realpath, rm, stat, writeFile } from "node:fs/promises";
 import { dirname, isAbsolute, join, resolve, sep } from "node:path";
 import { PluginStorageError, type PluginStorage } from "./types.js";
+import { recordChokepoint } from "../permissions/effect-ledger.js";
 
 export { PluginStorageError } from "./types.js";
 
@@ -164,20 +165,34 @@ export function createPluginStorage(
     await mkdir(dirname(absPath), { recursive: true });
   }
 
+  // Effect ledger (observability) — PluginStorage is the PRIMARY host-mediated
+  // plugin persistence path, so every method records its host-observed effect on
+  // the ambient per-invocation ledger (a no-op outside an invocation scope, e.g.
+  // boot-time construction). A read records the ABSENCE of any mutating effect
+  // (positive read evidence); the write variants are what flip
+  // `hasMutatingEffect`. Recorded BEFORE the guard()/op so a path that is later
+  // rejected still over-classifies as mutating — the safe (fail-closed) direction.
+  // Without this, a plugin tool that mutates ONLY via storage would be recorded
+  // `hostObservable:true, hasMutatingEffect:false` = a confirmed host-observed
+  // read, a fail-open seed for the future read-recognition gate. `target` is the
+  // relative path inside the plugin's OWN data root (never a secret value).
   return {
     resolve: (...segments) => guardLexicalOnly(segments.length === 0 ? "." : join(...segments)),
 
     async read(rel) {
+      recordChokepoint("storageRead", rel);
       const target = await guard(rel);
       return readFile(target);
     },
 
     async readText(rel, encoding = "utf-8") {
+      recordChokepoint("storageRead", rel);
       const target = await guard(rel);
       return readFile(target, encoding);
     },
 
     async readJson<T = unknown>(rel: string): Promise<T | null> {
+      recordChokepoint("storageRead", rel);
       const target = await guard(rel);
       try {
         const text = await readFile(target, "utf-8");
@@ -189,6 +204,7 @@ export function createPluginStorage(
     },
 
     async write(rel, data, encoding) {
+      recordChokepoint("storageWrite", rel);
       const target = await guard(rel);
       await ensureParent(target);
       if (typeof data === "string") {
@@ -199,17 +215,20 @@ export function createPluginStorage(
     },
 
     async writeJson<T>(rel: string, value: T, indent = 2): Promise<void> {
+      recordChokepoint("storageWrite", rel);
       const target = await guard(rel);
       await ensureParent(target);
       await writeFile(target, JSON.stringify(value, null, indent), "utf-8");
     },
 
     async rm(rel, options) {
+      recordChokepoint("storageRm", rel);
       const target = await guard(rel);
       await rm(target, { recursive: options?.recursive ?? false, force: true });
     },
 
     async list(rel = ".") {
+      recordChokepoint("storageRead", rel);
       const target = await guard(rel);
       try {
         return await readdir(target);
@@ -220,6 +239,7 @@ export function createPluginStorage(
     },
 
     async exists(rel) {
+      recordChokepoint("storageRead", rel);
       const target = await guard(rel);
       try {
         await stat(target);
@@ -231,6 +251,7 @@ export function createPluginStorage(
     },
 
     async mkdir(rel) {
+      recordChokepoint("storageMkdir", rel);
       const target = await guard(rel);
       await mkdir(target, { recursive: true });
     },

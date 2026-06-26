@@ -16,7 +16,9 @@ import {
   runWithEffectLedger,
   currentEffectLedger,
   recordEffect,
+  recordChokepoint,
 } from "../effect-ledger.js";
+import { CHOKEPOINT_EFFECT } from "../effect-kind.js";
 
 describe("createEffectLedger — read/write summary", () => {
   it("classifies a read-only invocation as non-mutating", () => {
@@ -127,5 +129,49 @@ describe("recordEffect — out of scope", () => {
   it("is a silent no-op when no ledger is bound", () => {
     expect(() => recordEffect({ kind: "config.set", effect: "write" })).not.toThrow();
     expect(currentEffectLedger()).toBeUndefined();
+  });
+});
+
+describe("recordChokepoint — newly instrumented host-mediated mutating chokepoints", () => {
+  // Every host-mediated MUTATION chokepoint must classify as a write, else a
+  // plugin tool that mutates only through it would record hasMutatingEffect:false
+  // = a confirmed host-observed read (fail-open). The SOT pins the classification.
+  const WRITE_CHOKEPOINTS = [
+    "storageWrite",
+    "storageRm",
+    "storageMkdir",
+    "clearAuthPartition",
+    "openAuthWindow",
+    "triggerConversation",
+    "agentApprovalRespond",
+  ] as const;
+
+  it("all newly instrumented mutating chokepoints are classified write in the SOT", () => {
+    for (const kind of WRITE_CHOKEPOINTS) {
+      expect(CHOKEPOINT_EFFECT[kind]).toBe("write");
+    }
+    // The storage READ variant records positive read evidence without mutating.
+    expect(CHOKEPOINT_EFFECT.storageRead).toBe("read");
+  });
+
+  it("recordChokepoint of any mutating chokepoint flips hasMutatingEffect", async () => {
+    for (const kind of WRITE_CHOKEPOINTS) {
+      const ledger = createEffectLedger();
+      await runWithEffectLedger(ledger, async () => {
+        recordChokepoint(kind, "t");
+      });
+      expect(ledger.summary().hasMutatingEffect).toBe(true);
+      expect(ledger.summary().effects[0]).toMatchObject({ kind, effect: "write" });
+    }
+  });
+
+  it("a storageRead alone is a non-mutating, host-observed read", async () => {
+    const ledger = createEffectLedger();
+    await runWithEffectLedger(ledger, async () => {
+      recordChokepoint("storageRead", "data.json");
+    });
+    const summary = ledger.summary();
+    expect(summary.hasMutatingEffect).toBe(false);
+    expect(summary.effects).toEqual([{ kind: "storageRead", effect: "read", target: "data.json" }]);
   });
 });

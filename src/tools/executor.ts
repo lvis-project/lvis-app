@@ -88,6 +88,13 @@ import { t } from "../i18n/index.js";
 const log = createLogger("executor");
 const REVIEWER_AUTHORIZATION_TTL_MS = 10 * 60 * 1000;
 const REVIEWER_AUTHORIZATION_MAX_PENDING = 64;
+/**
+ * One-time guard for the shadow-sink construction warning. Process-wide so the
+ * permission-shadow reconciliation dataset's deliverability is flagged at most
+ * once even when many ToolExecutors are constructed (boot wires one production
+ * executor; tests construct many). See {@link ToolExecutor.warnIfShadowSinkUnwired}.
+ */
+let shadowSinkWarningEmitted = false;
 
 export interface ToolCallMeta {
   groupId: string;
@@ -742,6 +749,41 @@ export class ToolExecutor {
     this.scriptHookManager = scriptHookManager;
     this.hostClassifiesRiskProvider = hostClassifiesRiskProvider ?? (() => false);
     this.requirePermissionAuditChain = auditLogger?.isPermissionAuditChainReady() === true;
+    this.warnIfShadowSinkUnwired(auditLogger === undefined);
+  }
+
+  /**
+   * Observability dataset detectability — the permission-shadow reconciliation
+   * records (risk + effect shadow) are the ONLY output of the host-effect
+   * observability stage, and {@link emitRiskShadowLog}/{@link emitEffectShadowLog}
+   * deliberately swallow {@link AuditLogger.logShadow} failures so the shadow path
+   * can never break a tool call. The cost is that a silently-empty dataset is
+   * undetectable: an executor wired without a real AuditLogger (the `?? new
+   * AuditLogger()` fallback) or one whose shadow channel is unwritable would drop
+   * the entire dataset with no signal. Surface a ONE-TIME warning so that
+   * condition is detectable. Never throws — observability must never break a tool
+   * call, and a logging probe must not break construction.
+   */
+  private warnIfShadowSinkUnwired(unwired: boolean): void {
+    if (shadowSinkWarningEmitted) return;
+    try {
+      if (unwired) {
+        shadowSinkWarningEmitted = true;
+        log.warn(
+          "[permission-shadow] ToolExecutor constructed without an AuditLogger — the host-effect reconciliation dataset is routed to a fresh fallback channel; verify the production executor wires the shared AuditLogger.",
+        );
+        return;
+      }
+      if (!this.auditLogger.isShadowChannelWritable()) {
+        shadowSinkWarningEmitted = true;
+        log.warn(
+          "[permission-shadow] shadow reconciliation channel is unwritable (%s) — risk/effect shadow records will be silently dropped.",
+          this.auditLogger.getPermissionShadowLogFile(),
+        );
+      }
+    } catch {
+      // A detectability probe must never break ToolExecutor construction.
+    }
   }
 
   /**

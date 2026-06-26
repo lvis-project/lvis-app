@@ -11,9 +11,11 @@
  * Race safety: withFileLock 으로 동시 write + rotate 경쟁 방지.
  */
 import {
+  accessSync,
   appendFileSync,
   chmodSync,
   closeSync,
+  constants as fsConstants,
   mkdirSync,
   existsSync,
   openSync,
@@ -262,6 +264,28 @@ export class AuditLogger {
   /** Permission policy — accessor for the dedicated shadow channel file (tests). */
   getPermissionShadowLogFile(): string {
     return this.permissionShadowLogFile;
+  }
+
+  /**
+   * Permission policy — probe whether the dedicated shadow channel can be
+   * appended to. {@link logShadow} swallows write failures (observability must
+   * never break a tool call), so a silently-undeliverable shadow dataset is
+   * otherwise undetectable. A construction-time caller (the ToolExecutor) uses
+   * this to surface a ONE-TIME warning when the reconciliation dataset would be
+   * silently empty. Checks W_OK on the existing channel file, falling back to the
+   * audit directory when the file has not been created yet. Returns `false` on
+   * any access error rather than throwing — a probe must never break a caller.
+   */
+  isShadowChannelWritable(): boolean {
+    try {
+      const probeTarget = existsSync(this.permissionShadowLogFile)
+        ? this.permissionShadowLogFile
+        : this.auditDir;
+      accessSync(probeTarget, fsConstants.W_OK);
+      return true;
+    } catch {
+      return false;
+    }
   }
 
   /**

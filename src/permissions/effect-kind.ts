@@ -36,7 +36,27 @@ export type ChokepointKind =
   | "callTool-child"
   | "hostFetch"
   | "spawnWorker"
-  | "openExternalUrl";
+  | "openExternalUrl"
+  // ─── PluginStorage (~/.lvis/plugins/<id>/) — the PRIMARY plugin persistence
+  // path. A read records the host-observed ABSENCE of a mutation (dataset
+  // completeness); the three write variants are what flip `hasMutatingEffect`.
+  // Every host-mediated MUTATION chokepoint must record, else the executor's
+  // `hostObservable:true` for an in-process plugin tool would be a lie — a
+  // storage-only mutation would otherwise look like a confirmed host-observed
+  // read (a fail-open seed for the future read-recognition gate).
+  | "storageRead"
+  | "storageWrite"
+  | "storageRm"
+  | "storageMkdir"
+  // ─── Other host-mediated mutating chokepoints reached only via hostApi.
+  // `clearAuthPartition` destructively wipes an Electron session partition;
+  // `openAuthWindow` persists auth cookies/session; `triggerConversation`
+  // stages an overlay prompt; `agentApprovalRespond` resolves a pending
+  // approval. All mutate host-owned state, so all must record (see above).
+  | "clearAuthPartition"
+  | "openAuthWindow"
+  | "triggerConversation"
+  | "agentApprovalRespond";
 
 /**
  * Chokepoints whose effect class is fixed (everything except `hostFetch`,
@@ -64,6 +84,17 @@ export const CHOKEPOINT_EFFECT: Record<StaticChokepointKind, Effect> = {
   "callTool-child": "write",
   spawnWorker: "write",
   openExternalUrl: "write",
+  // PluginStorage — reads recorded for dataset completeness (positive read
+  // evidence); writes/rm/mkdir mutate the plugin's persisted data.
+  storageRead: "read",
+  storageWrite: "write",
+  storageRm: "write",
+  storageMkdir: "write",
+  // Host-mediated mutations reached only via hostApi closures.
+  clearAuthPartition: "write",
+  openAuthWindow: "write",
+  triggerConversation: "write",
+  agentApprovalRespond: "write",
 };
 
 /** Method-safe verbs whose host-observed effect is a read. */

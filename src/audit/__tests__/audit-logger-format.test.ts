@@ -149,6 +149,22 @@ describe("AuditLogger.log() — format invariants", () => {
   });
 });
 
+describe("AuditLogger.isShadowChannelWritable() — shadow dataset detectability", () => {
+  it("reports a writable shadow channel for a normal audit dir", () => {
+    const logger = new AuditLogger();
+    expect(logger.isShadowChannelWritable()).toBe(true);
+  });
+
+  it("reports unwritable when the audit dir is removed out from under it", () => {
+    const dir = mkdtempSync(join(tmpdir(), "lvis-shadow-probe-"));
+    const logger = new AuditLogger(dir);
+    rmSync(dir, { recursive: true, force: true });
+    // The probe must surface the silently-undeliverable dataset, never throw.
+    expect(() => logger.isShadowChannelWritable()).not.toThrow();
+    expect(logger.isShadowChannelWritable()).toBe(false);
+  });
+});
+
 describe("AuditLogger.logTurn() — helper correctness", () => {
   it("writes a turn entry with truncated input/output (500 chars max)", () => {
     const logger = new AuditLogger();

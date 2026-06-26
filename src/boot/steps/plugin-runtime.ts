@@ -1674,6 +1674,22 @@ export async function initPluginRuntime(
       // 로그에는 origin + path 만 기록 — SAML/OAuth URL 에 담기는 민감 query
       // (SAMLRequest, code, state, session id 등) 은 유출 방지 위해 제외.
       openAuthWindow: (async (opts: OpenAuthWindowBaseOptions & { returnFinalUrl?: boolean }) => {
+        // Effect ledger (observability) — opening an auth window persists
+        // cookies/session into the plugin's partition: a host-mediated WRITE
+        // (effect class sourced from the CHOKEPOINT_EFFECT SOT). Recorded BEFORE
+        // the capability check so a later-rejected call still over-classifies as
+        // mutating (the safe direction). `target` is origin-only — the auth URL's
+        // path/query can carry sensitive SSO tokens.
+        recordChokepoint(
+          "openAuthWindow",
+          (() => {
+            try {
+              return new URL(opts.url).origin;
+            } catch {
+              return undefined;
+            }
+          })(),
+        );
         const safeUrlForLog = (() => {
           try {
             const parsed = new URL(opts.url);
@@ -1841,6 +1857,13 @@ export async function initPluginRuntime(
       // `openAuthWindow` cannot silently SSO via residual IdP cookies.
       // Capability + partition allow-list mirror `openAuthWindow`.
       clearAuthPartition: async (partition: string): Promise<void> => {
+        // Effect ledger (observability) — wiping cookies/storage/cache/HTTP-auth
+        // from an auth partition is a destructive host-mediated WRITE (effect
+        // class sourced from the CHOKEPOINT_EFFECT SOT). Recorded BEFORE the
+        // capability/partition checks so a later-rejected call still
+        // over-classifies as mutating (the safe direction). `target` is the
+        // plugin's own partition name (non-secret).
+        recordChokepoint("clearAuthPartition", typeof partition === "string" ? partition : undefined);
         if (!manifest.capabilities?.includes("external-auth-consumer")) {
           try {
             bootAuditLogger.log({
@@ -1943,6 +1966,13 @@ export async function initPluginRuntime(
           nonce?: string,
           hmac?: string,
         ): Promise<void> => {
+          // Effect ledger (observability) — resolving a pending approval mutates
+          // host-owned approval-gate state: a host-mediated WRITE (effect class
+          // sourced from the CHOKEPOINT_EFFECT SOT). Recorded BEFORE the responder
+          // verification so a later-rejected respond still over-classifies as
+          // mutating (the safe direction). No `target` — requestId is an internal
+          // correlation handle, not a forensic pivot value.
+          recordChokepoint("agentApprovalRespond");
           const approvedAccess = pluginRuntime.getApprovedPluginAccess(pluginId);
           const allowedScopes: string[] =
             Array.isArray(approvedAccess?.agentApprovalScopes)
@@ -1970,6 +2000,15 @@ export async function initPluginRuntime(
       // message into main chat via the imported_trigger mechanism.
       //
       triggerConversation: async (spec: ConversationTriggerSpec) => {
+        // Effect ledger (observability) — staging an overlay prompt pushes
+        // host-owned OverlayContext state to the renderer: a host-mediated WRITE
+        // (effect class sourced from the CHOKEPOINT_EFFECT SOT). Recorded BEFORE
+        // the trigger-spec gate so a later-denied trigger still over-classifies as
+        // mutating (the safe direction). `target` is the coarse spec source.
+        recordChokepoint(
+          "triggerConversation",
+          typeof spec?.source === "string" ? spec.source : undefined,
+        );
         const decision = evaluateTriggerSpec({
           spec,
           pluginId,
