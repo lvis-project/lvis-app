@@ -82,6 +82,12 @@ function createTestAutoUpdater(
   deps: Omit<AutoUpdaterDeps, "auditLogger"> & { auditLogger?: AuditLogger },
 ) {
   return createAutoUpdater({
+    // Default to the signed / self-installable path plus a no-op guide opener so
+    // existing install tests exercise quitAndInstall deterministically (the real
+    // codesign probe would otherwise return false on an unsigned CI runner).
+    // Tests targeting the unsigned fallback override canSelfInstall/openExternal.
+    canSelfInstall: () => true,
+    openExternal: () => {},
     ...deps,
     auditLogger: deps.auditLogger ?? fakeAuditLogger().logger,
   });
@@ -339,22 +345,48 @@ describe("auto-updater", () => {
     expect(hasPluginInstallInFlight()).toBe(false);
   });
 
-  it("installNow returns ok=false when quitAndInstall throws", async () => {
+  it("installNow opens the update guide + returns manual-install-required when quitAndInstall throws", async () => {
     const fw = fakeWindow();
     const u = fakeUpdater();
     u.quitAndInstall = () => {
       throw new Error("quit failed");
     };
+    const opened: string[] = [];
     const svc = createTestAutoUpdater({
       mainWindow: fw.win,
       isEnabled: () => true,
       updaterFactory: () => u,
+      openExternal: (url) => opened.push(url),
     });
     await svc.triggerCheck();
     u.emit("update-downloaded", { version: "3.0.0" });
     const result = await svc._testOnly.installNow();
-    expect(result.ok).toBe(false);
-    expect(result.reason).toContain("quit failed");
+    // Reactive safety net: a throwing quitAndInstall must not leave a dead
+    // button — it opens the homepage guide and signals manual install.
+    expect(result).toEqual({ ok: false, reason: "manual-install-required" });
+    expect(opened).toEqual(["https://lvisai.xyz"]);
+    expect(isAppUpdateInstallRequested()).toBe(false);
+  });
+
+  it("installNow opens the update guide instead of quitAndInstall on an unsigned build", async () => {
+    const fw = fakeWindow();
+    const u = fakeUpdater();
+    const opened: string[] = [];
+    const svc = createTestAutoUpdater({
+      mainWindow: fw.win,
+      isEnabled: () => true,
+      updaterFactory: () => u,
+      canSelfInstall: () => false,
+      openExternal: (url) => opened.push(url),
+    });
+    await svc.triggerCheck();
+    u.emit("update-downloaded", { version: "3.0.0" });
+    const result = await svc._testOnly.installNow();
+    // Proactive: an unsigned macOS build can't self-install, so quitAndInstall
+    // is never attempted — open the guide and tell the renderer.
+    expect(result).toEqual({ ok: false, reason: "manual-install-required" });
+    expect(u.installs).toBe(0);
+    expect(opened).toEqual(["https://lvisai.xyz"]);
     expect(isAppUpdateInstallRequested()).toBe(false);
   });
 
