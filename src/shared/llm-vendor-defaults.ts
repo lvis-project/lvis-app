@@ -96,7 +96,7 @@ const DEFAULT_MODEL: Record<LLMVendor, string> = {
   copilot: "gpt-5.4-mini",
   "azure-foundry": "gpt-5.4-mini",
   "vertex-ai": "gemini-2.5-flash",
-  "openai-compatible": "qwen3.6",
+  "openai-compatible": "Qwen3.6-35B-A3B-NVFP4",
 };
 
 export const LLM_VENDOR_MODEL_OPTIONS: Readonly<Record<LLMVendor, readonly string[]>> =
@@ -150,7 +150,7 @@ export const LLM_VENDOR_MODEL_OPTIONS: Readonly<Record<LLMVendor, readonly strin
     // including a LiteLLM gateway that fronts several backends behind one /v1
     // and routes by model id. The list seeds the dropdown with the known LVIS
     // cluster models; users point baseUrl at their own gateway/server.
-    "openai-compatible": ["qwen3.6", "nemotron"],
+    "openai-compatible": ["Qwen3.6-35B-A3B-NVFP4", "Nemotron-3-Nano-30B-A3B-FP8"],
   });
 
 /**
