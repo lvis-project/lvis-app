@@ -128,6 +128,12 @@ export interface SpawnedWorker {
   onStdout(listener: WorkerOutputListener): void;
   /** Subscribe to worker stderr (utf-8). */
   onStderr(listener: WorkerOutputListener): void;
+  /**
+   * Subscribe to worker EXIT (crash or normal). Fires once when the child
+   * process exits — the consumer needs this to mark the worker dead and recover
+   * (the handle owns lifecycle, so without it a crashed worker is undetectable).
+   */
+  onExit(listener: (info: { code: number | null; signal: NodeJS.Signals | null }) => void): void;
 }
 
 /** Sanitize an id to a single safe path segment (mirrors mcp-manager). */
@@ -362,6 +368,9 @@ function makeHandle(
     },
     onStderr(listener: WorkerOutputListener): void {
       child.stderr?.on("data", (chunk: Buffer) => listener(chunk.toString("utf-8")));
+    },
+    onExit(listener): void {
+      child.once("exit", (code, signal) => listener({ code, signal }));
     },
     stop(): void {
       if (stopped) return;
