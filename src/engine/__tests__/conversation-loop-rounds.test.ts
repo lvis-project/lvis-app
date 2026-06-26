@@ -1015,4 +1015,176 @@ describe("ConversationLoop queryLoop", () => {
       rmSync(dir, { recursive: true, force: true });
     }
   });
+
+  // ─── finish_reason=length CONTINUATION ──────────────────────────────────
+  // A truncated round (stopReason "max_tokens") with 0 tool calls re-invokes
+  // the model with a wire-only assistant prefill (vLLM continue_final_message),
+  // stitching the partials into ONE merged assistant message. Continuation is
+  // gated on the openai-compatible vendor; see vendorSupportsLengthContinuation.
+
+  it("continues a max_tokens round and returns the stitched assistant text (openai-compatible)", async () => {
+    const toolRegistry = new ToolRegistry();
+    const provider = new RecordingPromptProvider([
+      [
+        { type: "text_delta", text: "Part one " },
+        { type: "message_complete", stopReason: "max_tokens" },
+      ],
+      [
+        { type: "text_delta", text: "and part two." },
+        { type: "message_complete", stopReason: "end_turn" },
+      ],
+    ]);
+    const loop = new ConversationLoop(({
+      settingsService: { get: () => fakeLlmSettings({ provider: "openai-compatible" }), getSecret: () => "test-key" },
+      systemPromptBuilder: { build: () => "system" },
+      keywordEngine: new KeywordEngine(),
+      routeEngine: new RouteEngine({ toolRegistry }),
+      toolRegistry,
+      memoryManager: { saveSession: () => {}, listSessions: () => [] },
+    } as unknown) as ConstructorParameters<typeof ConversationLoop>[0]);
+    (loop as { provider: LLMProvider | null }).provider = provider;
+
+    const result = await loop.runTurn("write a long answer", undefined, undefined, { inputOrigin: "user-keyboard" });
+
+    // Did NOT terminate on the truncated round; stitched both parts.
+    expect(result.stopReason).toBe("end_turn");
+    expect(result.text).toBe("Part one and part two.");
+    // History holds exactly ONE assistant message with the merged content.
+    const assistants = loop.getHistory().getMessages().filter((m) => m.role === "assistant");
+    expect(assistants).toHaveLength(1);
+    expect((assistants[0] as { content: string }).content).toBe("Part one and part two.");
+    // The 2nd request injected a wire-only trailing assistant PREFILL = part one.
+    const round2 = provider.messages[1];
+    expect(round2.at(-1)).toEqual({ role: "assistant", content: "Part one " });
+  });
+
+  it("fires onAssistantRound exactly once (terminal) across a 2-round continued turn", async () => {
+    const toolRegistry = new ToolRegistry();
+    const provider = new RecordingPromptProvider([
+      [
+        { type: "text_delta", text: "Part one " },
+        { type: "message_complete", stopReason: "max_tokens" },
+      ],
+      [
+        { type: "text_delta", text: "and part two." },
+        { type: "message_complete", stopReason: "end_turn" },
+      ],
+    ]);
+    const loop = new ConversationLoop(({
+      settingsService: { get: () => fakeLlmSettings({ provider: "openai-compatible" }), getSecret: () => "test-key" },
+      systemPromptBuilder: { build: () => "system" },
+      keywordEngine: new KeywordEngine(),
+      routeEngine: new RouteEngine({ toolRegistry }),
+      toolRegistry,
+      memoryManager: { saveSession: () => {}, listSessions: () => [] },
+    } as unknown) as ConstructorParameters<typeof ConversationLoop>[0]);
+    (loop as { provider: LLMProvider | null }).provider = provider;
+
+    const rounds: Array<{ text: string; stopReason: string }> = [];
+    await loop.runTurn(
+      "write a long answer",
+      { onAssistantRound: ({ text, stopReason }) => rounds.push({ text, stopReason }) },
+      undefined,
+      { inputOrigin: "user-keyboard" },
+    );
+
+    // The continuation round must NOT close the UI card — onAssistantRound
+    // fires once, at the terminal round, with the merged text.
+    expect(rounds).toEqual([{ text: "Part one and part two.", stopReason: "end_turn" }]);
+  });
+
+  it("caps runaway max_tokens continuations instead of looping forever", async () => {
+    const toolRegistry = new ToolRegistry();
+    let calls = 0;
+    class InfiniteLengthProvider implements LLMProvider {
+      readonly vendor = "openai" as const;
+      async *streamTurn(): AsyncIterable<StreamEvent> {
+        calls += 1;
+        yield { type: "text_delta", text: `chunk-${calls} ` };
+        yield { type: "message_complete", stopReason: "max_tokens" };
+      }
+    }
+    const loop = new ConversationLoop(({
+      settingsService: { get: () => fakeLlmSettings({ provider: "openai-compatible" }), getSecret: () => "test-key" },
+      systemPromptBuilder: { build: () => "system" },
+      keywordEngine: new KeywordEngine(),
+      routeEngine: new RouteEngine({ toolRegistry }),
+      toolRegistry,
+      memoryManager: { saveSession: () => {}, listSessions: () => [] },
+    } as unknown) as ConstructorParameters<typeof ConversationLoop>[0]);
+    (loop as { provider: LLMProvider | null }).provider = new InfiniteLengthProvider();
+
+    const result = await loop.runTurn("runaway", undefined, undefined, { inputOrigin: "user-keyboard" });
+
+    // 1 initial round + MAX_LENGTH_CONTINUATIONS(3) = 4 provider calls, well under 30.
+    expect(calls).toBe(4);
+    expect(result.stopReason).toBe("max_tokens");           // residual truncation surfaced
+    // Every chunk stitched with inter-chunk whitespace preserved (raw carry);
+    // the final committed answer's trailing whitespace is trimmed once on merge.
+    expect(result.text).toBe("chunk-1 chunk-2 chunk-3 chunk-4"); // every chunk stitched
+  });
+
+  it("does NOT continue a max_tokens round for a non-openai-compatible vendor", async () => {
+    const toolRegistry = new ToolRegistry();
+    let calls = 0;
+    class CountingProvider implements LLMProvider {
+      readonly vendor = "openai" as const;
+      async *streamTurn(): AsyncIterable<StreamEvent> {
+        calls += 1;
+        yield { type: "text_delta", text: "cut off" };
+        yield { type: "message_complete", stopReason: "max_tokens" };
+      }
+    }
+    const loop = new ConversationLoop(({
+      settingsService: { get: () => fakeLlmSettings({ provider: "openai" }), getSecret: () => "test-key" },
+      systemPromptBuilder: { build: () => "system" },
+      keywordEngine: new KeywordEngine(),
+      routeEngine: new RouteEngine({ toolRegistry }),
+      toolRegistry,
+      memoryManager: { saveSession: () => {}, listSessions: () => [] },
+    } as unknown) as ConstructorParameters<typeof ConversationLoop>[0]);
+    (loop as { provider: LLMProvider | null }).provider = new CountingProvider();
+
+    const result = await loop.runTurn("x", undefined, undefined, { inputOrigin: "user-keyboard" });
+    expect(calls).toBe(1);                 // terminated immediately, no continuation
+    expect(result.stopReason).toBe("max_tokens");
+    expect(result.text).toBe("cut off");
+  });
+
+  it("continues truncation INSIDE <think> without losing or duplicating reasoning", async () => {
+    const toolRegistry = new ToolRegistry();
+    const provider = new RecordingPromptProvider([
+      // Round 1: reasoning only, truncated mid-think (no text_delta, no </think>).
+      [
+        { type: "reasoning_delta", text: "step1 " },
+        { type: "message_complete", stopReason: "max_tokens" },
+      ],
+      // Round 2: finishes reasoning, then answers, clean end_turn.
+      [
+        { type: "reasoning_delta", text: "step2" },
+        { type: "text_delta", text: "the answer" },
+        { type: "message_complete", stopReason: "end_turn" },
+      ],
+    ]);
+    const loop = new ConversationLoop(({
+      settingsService: { get: () => fakeLlmSettings({ provider: "openai-compatible" }), getSecret: () => "test-key" },
+      systemPromptBuilder: { build: () => "system" },
+      keywordEngine: new KeywordEngine(),
+      routeEngine: new RouteEngine({ toolRegistry }),
+      toolRegistry,
+      memoryManager: { saveSession: () => {}, listSessions: () => [] },
+    } as unknown) as ConstructorParameters<typeof ConversationLoop>[0]);
+    (loop as { provider: LLMProvider | null }).provider = provider;
+
+    const result = await loop.runTurn("reason then answer", undefined, undefined, { inputOrigin: "user-keyboard" });
+
+    expect(result.text).toBe("the answer");                 // answer only in result text
+    // Round-2 prefill re-opened the think block with the accumulated reasoning, no closing tag.
+    expect(provider.messages[1].at(-1)).toEqual({ role: "assistant", content: "<think>\nstep1 " });
+    // History: ONE assistant message; reasoning concatenated, not duplicated.
+    const assistant = loop.getHistory().getMessages().find((m) => m.role === "assistant") as
+      { content: string; thought?: string };
+    expect(assistant.content).toBe("the answer");
+    expect(assistant.thought).toBe("step1 step2");
+  });
 });
