@@ -30,8 +30,13 @@
  * hostApi's observable behavior. Lookup is an O(1) object access on the hot path.
  */
 import { createLogger } from "../lib/logger.js";
-import { HOSTAPI_EFFECT_BY_PATH, type StaticChokepointKind } from "./effect-kind.js";
-import { recordChokepoint, recordEffect } from "./effect-ledger.js";
+import {
+  CHOKEPOINT_EFFECT,
+  HOSTAPI_EFFECT_BY_PATH,
+  type Effect,
+  type StaticChokepointKind,
+} from "./effect-kind.js";
+import { recordChokepoint, recordEffect, type EffectEntry } from "./effect-ledger.js";
 
 const log = createLogger("hostapi-effect-recorder");
 
@@ -40,6 +45,9 @@ const INSTRUMENTED = Symbol("lvis.hostApiEffectInstrumented");
 
 /** One-time-per-path guard for the unmapped-method dev warning. */
 const warnedUnmappedPaths = new Set<string>();
+
+/** One-time-per-path guard for the un-instrumented non-plain-namespace warning. */
+const warnedNonPlainNamespaces = new Set<string>();
 
 /**
  * Record the host-observed effect for one hostApi method PATH against the
@@ -57,24 +65,78 @@ function recordEffectForPath(path: string, args: readonly unknown[]): void {
         path,
       );
     }
+    // `path` is the host-derived method name (not a plugin-controlled arg), so a
+    // hostile plugin cannot use it to suppress this fail-closed mutating record.
     recordChokepoint("unclassifiedHostApiMethod", path);
     return;
   }
-  const target = spec.targetFromArgs?.(args);
+
+  // SECURITY — fail-CLOSED effect, decided + recorded BEFORE any plugin-arg
+  // extraction. The read/write CLASS comes from the host-owned SOT, never from a
+  // plugin-controlled arg getter: a malicious 1st-party plugin could pass a
+  // stateful getter that THROWS on the recorder's read but returns a usable
+  // value on the real operation's later read. If effect classification depended
+  // on that getter, the throw would drop the whole record and the executed
+  // mutation would surface as a confirmed READ — the exact fail-open seed this
+  // model exists to remove. Static chokepoints take their class from
+  // CHOKEPOINT_EFFECT (no args). The only verb-derived chokepoint (hostFetch)
+  // MUST read the HTTP method from args; if that read/normalize throws we fail
+  // CLOSED to "write" so a throw can never drop the effect or downgrade a write
+  // to a read.
+  let effect: Effect;
   if (spec.effectFromArgs) {
-    // Verb-derived effect (hostFetch) — class is not static.
-    recordEffect({ kind: spec.kind, effect: spec.effectFromArgs(args), ...(target !== undefined ? { target } : {}) });
-    return;
+    try {
+      effect = spec.effectFromArgs(args);
+    } catch {
+      effect = "write";
+    }
+  } else {
+    effect = CHOKEPOINT_EFFECT[spec.kind as StaticChokepointKind];
   }
-  // Static class — sourced from the CHOKEPOINT_EFFECT SOT via recordChokepoint.
-  recordChokepoint(spec.kind as StaticChokepointKind, target);
+  // Commit the {kind, effect} to the ledger NOW (the ledger holds `entry` by
+  // reference), so `hasMutatingEffect` is locked in before any forensic-target
+  // getter — which touches plugin-controlled args — can run.
+  const entry: EffectEntry = { kind: spec.kind, effect };
+  recordEffect(entry);
+
+  // The forensic `target` is an OPTIONAL, NON-SECRET descriptor (origin / key
+  // name / scope-source string) read from plugin-controlled args. It runs in a
+  // LOCAL try/catch AFTER the effect is recorded: a throwing/hostile getter
+  // costs only the descriptor and can NEVER suppress or alter the already-
+  // recorded effect. It must never start capturing secret VALUES.
+  try {
+    const target = spec.targetFromArgs?.(args);
+    if (target !== undefined) entry.target = target;
+  } catch {
+    /* target is best-effort — the mutating effect is already on the ledger */
+  }
 }
 
-/** Recurse only into plain namespace objects (e.g. storage/config/agentApproval). */
-function isPlainNamespace(value: unknown): value is Record<string, unknown> {
+/**
+ * Recurse only into plain namespace objects (e.g. storage/config/agentApproval).
+ * Exported so the completeness test asserts the SAME traversal surface the
+ * wrapper instruments — a hostApi namespace that is NOT plain (class instance /
+ * custom prototype) would otherwise pass completeness yet be copied verbatim and
+ * left UNINSTRUMENTED by the wrapper (a silent fail-open one level up).
+ */
+export function isPlainNamespace(value: unknown): value is Record<string, unknown> {
   if (value === null || typeof value !== "object" || Array.isArray(value)) return false;
   const proto = Object.getPrototypeOf(value);
   return proto === Object.prototype || proto === null;
+}
+
+/**
+ * True if `value` carries any function-valued leaf, scanning the SAME traversal
+ * surface the wrapper and completeness test use (own-enumerable keys of
+ * non-array objects). Used to warn when a NON-plain namespace that holds
+ * method(s) is copied through un-instrumented.
+ */
+function hasFunctionLeaf(value: unknown): boolean {
+  if (typeof value === "function") return true;
+  if (value === null || typeof value !== "object" || Array.isArray(value)) return false;
+  return Object.keys(value as Record<string, unknown>).some((key) =>
+    hasFunctionLeaf((value as Record<string, unknown>)[key]),
+  );
 }
 
 /**
@@ -105,11 +167,33 @@ export function instrumentEffectsByPath<T extends object>(target: T, prefix = ""
         }
         // Delegate with the ORIGINAL namespace as `this` so methods that read
         // `this` keep working; preserves args / return value / async / throw.
+        // ASSUMPTION: hostApi methods do not self-delegate. A method that called
+        // a sibling via `this.sibling()` would reach the ORIGINAL (un-wrapped)
+        // sibling — `this === target`, not `wrapped` — bypassing the wrapper, so
+        // the sibling's effect would NOT be recorded. No hostApi method
+        // self-delegates today; if one ever does it must record explicitly (or
+        // be split so each leaf is invoked directly through the wrapper).
         return Reflect.apply(original, target, callArgs);
       };
     } else if (isPlainNamespace(value)) {
       wrapped[key] = instrumentEffectsByPath(value, path);
     } else {
+      // Non-function value that is NOT a plain namespace (class instance /
+      // custom prototype / array). The wrapper only INSTRUMENTS plain
+      // namespaces, so this is copied through verbatim — but if it carries
+      // function leaves they are left UNINSTRUMENTED (a silent fail-open one
+      // level up). We cannot safely wrap arbitrary prototype methods without
+      // risking behavior changes, so we emit a one-time fail-closed WARN and
+      // rely on the completeness test (which shares the SAME isPlainNamespace
+      // predicate) to REJECT such a namespace in CI — it must be made a plain
+      // object or instrumented explicitly.
+      if (hasFunctionLeaf(value) && !warnedNonPlainNamespaces.has(path)) {
+        warnedNonPlainNamespaces.add(path);
+        log.warn(
+          "hostApi value '%s' is a non-plain object carrying method(s) — those methods are NOT effect-instrumented (fail-open); make it a plain-object namespace or instrument it explicitly (the completeness test will reject it)",
+          path,
+        );
+      }
       wrapped[key] = value;
     }
   }
