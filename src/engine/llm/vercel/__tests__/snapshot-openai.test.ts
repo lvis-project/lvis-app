@@ -50,7 +50,7 @@ describe("VercelUnifiedProvider openai — L1/L2/L3 (mocked streamText)", () => 
       return {
         ...actual,
         streamText: vi.fn(() => ({
-          fullStream: (async function* () {
+          stream: (async function* () {
             yield { type: "text-delta", id: "t1", text: "hello " };
             yield { type: "text-delta", id: "t1", text: "world" };
             yield {
@@ -112,7 +112,7 @@ describe("VercelUnifiedProvider openai — L1/L2/L3 (mocked streamText)", () => 
       return {
         ...actual,
         streamText: vi.fn(() => ({
-          fullStream: (async function* () {
+          stream: (async function* () {
             yield {
               type: "tool-call",
               toolCallId: "call_1",
@@ -179,7 +179,7 @@ describe("VercelUnifiedProvider openai — L1/L2/L3 (mocked streamText)", () => 
   it("aliases LVIS tool_search on OpenAI Responses wire and restores stream events", async () => {
     vi.resetModules();
     const streamTextSpy = vi.fn(() => ({
-      fullStream: (async function* () {
+      stream: (async function* () {
         yield {
           type: "text-delta",
           id: "txt-1",
@@ -279,11 +279,11 @@ describe("VercelUnifiedProvider openai — L1/L2/L3 (mocked streamText)", () => 
     );
 
     const callArg = streamTextSpy.mock.calls[0]![0] as {
-      system?: string;
+      instructions?: string;
       tools?: Record<string, unknown>;
       messages?: Array<{ role: string; content: unknown[] }>;
     };
-    expect(callArg.system).toBe("call tool_search({ query }) when needed");
+    expect(callArg.instructions).toBe("call tool_search({ query }) when needed");
     expect(Object.keys(callArg.tools ?? {})).toEqual(["lvis_tool_search"]);
     expect(callArg.messages?.[1]).toMatchObject({
       role: "assistant",
@@ -363,7 +363,7 @@ describe("VercelUnifiedProvider openai — L1/L2/L3 (mocked streamText)", () => 
       return {
         ...actual,
         streamText: vi.fn(() => ({
-          fullStream: (async function* () {
+          stream: (async function* () {
             yield { type: "text-delta", id: "t1", text: "ok" };
             yield {
               type: "finish",
@@ -404,7 +404,7 @@ describe("VercelUnifiedProvider copilot — L1/L2/L3 (mocked streamText)", () =>
   it("reasoning_effort is dropped on tool turns with gpt-5.x (legacy 400 guard)", async () => {
     vi.resetModules();
     const streamTextSpy = vi.fn(() => ({
-      fullStream: (async function* () {
+      stream: (async function* () {
         yield {
           type: "tool-call",
           toolCallId: "c1",
@@ -462,7 +462,7 @@ describe("VercelUnifiedProvider copilot — L1/L2/L3 (mocked streamText)", () =>
   it("reasoning_effort IS passed on non-tool Copilot turns with gpt-5.x", async () => {
     vi.resetModules();
     const streamTextSpy = vi.fn(() => ({
-      fullStream: (async function* () {
+      stream: (async function* () {
         yield { type: "text-delta", id: "t1", text: "ok" };
         yield {
           type: "finish",
@@ -508,7 +508,7 @@ describe("VercelUnifiedProvider copilot — L1/L2/L3 (mocked streamText)", () =>
   it("OpenAI Responses API keeps reasoning_effort on tool turns (no legacy guard)", async () => {
     vi.resetModules();
     const streamTextSpy = vi.fn(() => ({
-      fullStream: (async function* () {
+      stream: (async function* () {
         yield {
           type: "tool-call",
           toolCallId: "c1",
@@ -575,7 +575,7 @@ describe("VercelUnifiedProvider openai-compatible", () => {
       return {
         ...actual,
         streamText: vi.fn(() => ({
-          fullStream: (async function* () {
+          stream: (async function* () {
             yield { type: "text-delta", id: "t1", text: "ok" };
             yield {
               type: "finish",
@@ -622,7 +622,7 @@ describe("VercelUnifiedProvider openai-compatible", () => {
   it("forwards enable_thinking per request via chat_template_kwargs (multi-user toggle)", async () => {
     vi.resetModules();
     const streamTextSpy = vi.fn(() => ({
-      fullStream: (async function* () {
+      stream: (async function* () {
         yield {
           type: "finish",
           finishReason: "stop",
@@ -677,7 +677,7 @@ describe("VercelUnifiedProvider openai — custom baseUrl proxy guard", () => {
   it("drops reasoning_effort on tool turns for gpt-5.x when custom baseUrl is set", async () => {
     vi.resetModules();
     const streamTextSpy = vi.fn(() => ({
-      fullStream: (async function* () {
+      stream: (async function* () {
         yield {
           type: "tool-call",
           toolCallId: "c1",
@@ -749,7 +749,7 @@ describe("VercelUnifiedProvider — sampling params removed (CTRL simplification
   ): Promise<Record<string, unknown>> => {
     vi.resetModules();
     const streamTextSpy = vi.fn(() => ({
-      fullStream: (async function* () {
+      stream: (async function* () {
         yield { type: "text-delta", id: "t1", text: "ok" };
         yield {
           type: "finish",

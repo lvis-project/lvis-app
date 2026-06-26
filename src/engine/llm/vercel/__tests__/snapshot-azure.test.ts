@@ -21,7 +21,7 @@ describe("VercelUnifiedProvider azure-foundry", () => {
       return {
         ...actual,
         streamText: vi.fn(() => ({
-          fullStream: (async function* () {
+          stream: (async function* () {
             yield { type: "text-delta", id: "t1", text: "hi" };
             yield {
               type: "finish",
@@ -67,7 +67,7 @@ describe("VercelUnifiedProvider azure-foundry", () => {
   it("passes Azure reasoning options when thinking is enabled", async () => {
     vi.resetModules();
     const streamTextSpy = vi.fn(() => ({
-      fullStream: (async function* () {
+      stream: (async function* () {
         yield { type: "reasoning-start", id: "r1" };
         yield { type: "reasoning-delta", id: "r1", text: "checking" };
         yield { type: "reasoning-end", id: "r1" };
@@ -120,7 +120,7 @@ describe("VercelUnifiedProvider azure-foundry", () => {
   it("aliases LVIS tool_search on Azure Responses wire and restores stream events", async () => {
     vi.resetModules();
     const streamTextSpy = vi.fn(() => ({
-      fullStream: (async function* () {
+      stream: (async function* () {
         yield {
           type: "reasoning-delta",
           id: "rsn-1",
@@ -233,11 +233,11 @@ describe("VercelUnifiedProvider azure-foundry", () => {
     );
 
     const callArg = streamTextSpy.mock.calls[0]![0] as {
-      system?: string;
+      instructions?: string;
       tools?: Record<string, unknown>;
       messages?: Array<{ role: string; content: unknown[] }>;
     };
-    expect(callArg.system).toBe("call tool_search({ query }) when needed");
+    expect(callArg.instructions).toBe("call tool_search({ query }) when needed");
     expect(Object.keys(callArg.tools ?? {})).toEqual(["lvis_tool_search"]);
     expect(callArg.messages?.[1]).toMatchObject({
       role: "assistant",

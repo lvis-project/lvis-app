@@ -20,7 +20,7 @@ describe("VercelUnifiedProvider vertex-ai", () => {
       return {
         ...actual,
         streamText: vi.fn(() => ({
-          fullStream: (async function* () {
+          stream: (async function* () {
             yield { type: "text-delta", id: "t1", text: "ok" };
             yield {
               type: "finish",
@@ -74,7 +74,7 @@ describe("VercelUnifiedProvider vertex-ai", () => {
       return {
         ...actual,
         streamText: vi.fn(() => ({
-          fullStream: (async function* () {
+          stream: (async function* () {
             yield {
               type: "finish",
               finishReason: "stop",
@@ -130,7 +130,7 @@ describe("VercelUnifiedProvider vertex-ai", () => {
       return {
         ...actual,
         streamText: vi.fn(() => ({
-          fullStream: (async function* () { /* empty */ })(),
+          stream: (async function* () { /* empty */ })(),
         })),
       };
     });
