@@ -31,6 +31,7 @@ import {
   ensurePublicHttpUrl,
   NetworkGuardError,
 } from "../core/network-guard.js";
+import { methodEffect, type Effect } from "../permissions/effect-kind.js";
 
 /** Reason buckets used for egress-denial telemetry + audit detail. */
 export type HostFetchDenyReason =
@@ -58,18 +59,16 @@ export interface HostFetchAllow {
   method: string;
   /**
    * Host-observed effect class derived from the method alone (NON-FORGEABLE —
-   * the host owns the verb at the egress chokepoint, not the plugin). Safe verbs
-   * (GET/HEAD/OPTIONS) are reads; everything else is a write. Observability only:
-   * this changes NO egress decision — the allow-list / SSRF / deny-by-default
-   * layers below are unaffected.
+   * the host owns the verb at the egress chokepoint, not the plugin). Computed
+   * from the SINGLE-SOT {@link methodEffect}: safe verbs (GET/HEAD/OPTIONS) are
+   * reads; everything else is a write. Observability only: this changes NO
+   * egress decision — the allow-list / SSRF / deny-by-default layers below are
+   * unaffected.
    */
-  effect: "read" | "write";
+  effect: Effect;
 }
 
 export type HostFetchDecision = HostFetchAllow | HostFetchDeny;
-
-/** Method-safe verbs whose host-observed effect is a read. */
-const READ_METHODS = new Set(["GET", "HEAD", "OPTIONS"]);
 
 export interface HostFetchGuardInput {
   pluginId: string;
@@ -126,7 +125,7 @@ export async function evaluateHostFetch(
   // chokepoint, not from anything the plugin self-declares. Recorded on the
   // allow decision; it does not participate in any deny branch below.
   const normalizedMethod = method.toUpperCase();
-  const effect: "read" | "write" = READ_METHODS.has(normalizedMethod) ? "read" : "write";
+  const effect: Effect = methodEffect(normalizedMethod);
 
   let url: URL;
   try {

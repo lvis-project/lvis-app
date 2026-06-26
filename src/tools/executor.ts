@@ -59,7 +59,8 @@ import type { RiskVerdict, ToolInvocationContext } from "../permissions/reviewer
 import { RuleBasedRiskClassifier, maxVerdict } from "../permissions/reviewer/risk-classifier.js";
 import { inspectHostRisk } from "../permissions/reviewer/host-risk-inspector.js";
 import { emitRiskShadowLog, emitEffectShadowLog } from "../permissions/reviewer/risk-shadow-log.js";
-import { createEffectLedger, runWithEffectLedger, type EffectLedger } from "../permissions/effect-ledger.js";
+import { createEffectLedger, runWithEffectLedger, currentEffectLedger, type EffectLedger } from "../permissions/effect-ledger.js";
+import { CHOKEPOINT_EFFECT } from "../permissions/effect-kind.js";
 import { resolveReviewerSandboxCapability } from "../permissions/sandbox-capability.js";
 // Store B — exact-tuple approval memory (args-scoped, session+persistent).
 // See ./executor.ts foreground modal-skip block + user-approval-store.ts.
@@ -867,6 +868,7 @@ export class ToolExecutor {
     declaredCategory: ToolCategory,
     finalInput: Record<string, unknown>,
     allowedDirectories: readonly string[],
+    correlationId: string,
   ): ToolCategory {
     // Only plugin/MCP tools carry an UNTRUSTED declared category worth
     // re-deriving. `meta` control-flow primitives (which route through
@@ -897,6 +899,9 @@ export class ToolExecutor {
         declaredCategory,
         hostDerivedCategory,
         enforced,
+        // Same id as the post-exec effect shadow for THIS invocation → the
+        // category shadow and the effect shadow join on this key.
+        correlationId,
       },
       this.auditLogger,
     );
@@ -1587,17 +1592,26 @@ export class ToolExecutor {
     // the host-derived one (flag on) — the effect shadow reconciles the declared
     // category against the host-observed effect summary post-execution.
     const declaredCategoryForEffectShadow = invocationCategory;
+    // Capture any AMBIENT (parent) ledger BEFORE opening this invocation's own
+    // ledger. For a top-level tool this is undefined; for a re-entrant
+    // `callTool(M)` it is the OUTER wrapper's ledger, so a MUTATING inner tool
+    // can propagate a child-mutation marker back onto the wrapper (a
+    // read-declared wrapper that mutates via delegation must not look like a read).
+    const parentEffectLedger = currentEffectLedger();
+    // Per-invocation effect ledger (observability only — no enforcement). A
+    // fresh ledger per executeOne; bound to the async chain around Step 6 so the
+    // in-process plugin hostApi closures record their host-mediated effects here.
+    // Created BEFORE resolveEnforcedCategory so its correlationId threads into
+    // BOTH the category shadow (here) and the effect shadow (post-exec).
+    const effectLedger: EffectLedger = createEffectLedger();
     invocationCategory = this.resolveEnforcedCategory(
       tool,
       invocationCategory,
       finalInput,
       invocationAllowedScope.directories,
+      effectLedger.correlationId,
     );
     meta.category = invocationCategory;
-    // Per-invocation effect ledger (observability only — no enforcement). A
-    // fresh ledger per executeOne; bound to the async chain around Step 6 so the
-    // in-process plugin hostApi closures record their host-mediated effects here.
-    const effectLedger: EffectLedger = createEffectLedger();
     const makeEvaluationContext = (input: {
       pathFields: readonly string[];
       targetFilePaths?: readonly string[];
@@ -2585,11 +2599,30 @@ export class ToolExecutor {
 
     // ── Effect shadow (observability only) ───────────────────────────
     // The execution has returned, so the per-invocation ledger now holds the
-    // host-observed effects. Emit the audit-grade EFFECT shadow record for
-    // plugin/MCP invocations (builtins never touch the hostApi closures, so
-    // their ledger is empty — no reconciliation value). `hasMutatingEffect` is
-    // the host-owned read/write classification for this call; it drives NO
-    // permission decision here — a later read-recognition gate consumes it.
+    // host-observed effects. This is the dedicated shadow reconciliation log
+    // (NOT the HMAC audit-grade channel). `hasMutatingEffect` is the host-owned
+    // read/write classification for this call; it drives NO permission decision
+    // here — a later read-recognition gate consumes it.
+    const effectSummary = effectLedger.summary();
+    // Propagate a MUTATING inner invocation onto the parent (outer wrapper)
+    // ledger. Without this a read-declared wrapper W that delegates a mutation
+    // via callTool(M) would record `hasMutatingEffect:false` on its OWN ledger
+    // (M's write lives only on M's inner ledger), which a later read-recognition
+    // gate could treat as a confirmed read — fail-permissive. The marker surfaces
+    // W's ledger as mutating. Effect class from the SOT.
+    if (parentEffectLedger && effectSummary.hasMutatingEffect) {
+      parentEffectLedger.record({
+        kind: "callTool-child",
+        effect: CHOKEPOINT_EFFECT["callTool-child"],
+        target: tool.name,
+      });
+    }
+    // Emit the EFFECT shadow record for plugin/MCP invocations (builtins never
+    // touch the hostApi closures, so their ledger is empty — no reconciliation
+    // value). `hostObservable` is false for external MCP tools: their effects are
+    // NOT host-mediated, so an empty ledger is NOT a confirmed read and a later
+    // read-recognition gate MUST fail closed on it. In-process plugin tools route
+    // through the instrumented hostApi closures, so they are host-observable.
     if (tool.source === "plugin" || tool.source === "mcp") {
       emitEffectShadowLog(
         {
@@ -2597,7 +2630,8 @@ export class ToolExecutor {
           source: tool.source,
           ...(tool.pluginId ? { pluginId: tool.pluginId } : {}),
           declaredCategory: declaredCategoryForEffectShadow,
-          hostObservedEffect: effectLedger.summary(),
+          hostObservable: tool.source === "plugin",
+          hostObservedEffect: effectSummary,
         },
         this.auditLogger,
       );

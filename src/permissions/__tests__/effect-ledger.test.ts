@@ -37,17 +37,24 @@ describe("createEffectLedger — read/write summary", () => {
   });
 
   it("an empty ledger is non-mutating", () => {
-    expect(createEffectLedger().summary()).toEqual({
+    expect(createEffectLedger("pinned-empty").summary()).toEqual({
+      correlationId: "pinned-empty",
       hasMutatingEffect: false,
       effects: [],
     });
+  });
+
+  it("the summary carries the ledger's correlationId (the cross-shadow join key)", () => {
+    const ledger = createEffectLedger("pinned-corr");
+    ledger.record({ kind: "config.set", effect: "write" });
+    expect(ledger.summary().correlationId).toBe("pinned-corr");
   });
 
   it("summary returns a defensive copy (mutating it cannot corrupt the ledger)", () => {
     const ledger = createEffectLedger();
     ledger.record({ kind: "config.set", effect: "write" });
     const snap = ledger.summary();
-    snap.effects.push({ kind: "forged", effect: "read" });
+    snap.effects.push({ kind: "config.get", effect: "read" });
     expect(ledger.summary().effects).toHaveLength(1);
   });
 

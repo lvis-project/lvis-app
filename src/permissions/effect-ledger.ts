@@ -11,9 +11,9 @@
  * host can later compute `hasMutatingEffect` for that call.
  *
  * OBSERVABILITY ONLY: the ledger records effects and the summary is logged to
- * the audit-grade shadow channel. It drives NO permission decision yet — a
- * later read-recognition gate is what consumes the reconciliation dataset this
- * builds.
+ * the dedicated shadow reconciliation channel (a plain, non-HMAC audit channel —
+ * NOT audit-grade). It drives NO permission decision yet — a later
+ * read-recognition gate is what consumes the reconciliation dataset this builds.
  *
  * Threading: a ledger is bound for the duration of one invocation via
  * {@link AsyncLocalStorage} (mirrors `plugins/runtime/origin-chain.ts`). The
@@ -27,24 +27,38 @@
  */
 import { AsyncLocalStorage } from "node:async_hooks";
 import { randomUUID } from "node:crypto";
+import {
+  CHOKEPOINT_EFFECT,
+  type ChokepointKind,
+  type Effect,
+  type StaticChokepointKind,
+} from "./effect-kind.js";
 
-/** Whether an observed host-mediated effect mutated state or only read it. */
-export type Effect = "read" | "write";
+// Re-export the chokepoint vocabulary so existing importers of `Effect` from
+// this module keep working; the SOT for the kind→effect mapping is effect-kind.ts.
+export type { Effect, ChokepointKind } from "./effect-kind.js";
 
 /**
- * One host-mediated effect observed during an invocation. `kind` names the
- * host chokepoint (e.g. `"config.set"`, `"hostFetch"`); `target` is a coarse,
- * NON-SECRET descriptor (host+path, config key, worker id) kept for forensic
- * pivoting — callers must never pass secret VALUES here.
+ * One host-mediated effect observed during an invocation. `kind` is a
+ * {@link ChokepointKind} naming the host chokepoint (e.g. `"config.set"`,
+ * `"hostFetch"`); `target` is a coarse, NON-SECRET descriptor (origin, config
+ * key, worker id) kept for forensic pivoting — callers must never pass secret
+ * VALUES here.
  */
 export interface EffectEntry {
-  kind: string;
+  kind: ChokepointKind;
   effect: Effect;
   target?: string;
 }
 
 /** Aggregate read/write classification for one invocation. */
 export interface EffectSummary {
+  /**
+   * The owning ledger's {@link EffectLedger.correlationId}. Threaded into BOTH
+   * the category shadow and the effect shadow for one invocation so the two
+   * rows join in the reconciliation dataset.
+   */
+  correlationId: string;
   /** True iff any recorded effect was a `"write"`. The host-owned read/write bit. */
   hasMutatingEffect: boolean;
   /** The recorded effects in observation order (defensive copy). */
@@ -75,6 +89,7 @@ export function createEffectLedger(correlationId?: string): EffectLedger {
     },
     summary(): EffectSummary {
       return {
+        correlationId: id,
         hasMutatingEffect: effects.some((e) => e.effect === "write"),
         effects: effects.slice(),
       };
@@ -111,4 +126,14 @@ export function currentEffectLedger(): EffectLedger | undefined {
  */
 export function recordEffect(entry: EffectEntry): void {
   storage.getStore()?.record(entry);
+}
+
+/**
+ * Record a STATIC-effect chokepoint onto the ambient ledger, sourcing the
+ * read/write class from the {@link CHOKEPOINT_EFFECT} SOT rather than repeating
+ * a string literal at the call-site. `hostFetch` is excluded — its effect is
+ * verb-derived and recorded explicitly via {@link recordEffect}.
+ */
+export function recordChokepoint(kind: StaticChokepointKind, target?: string): void {
+  recordEffect({ kind, effect: CHOKEPOINT_EFFECT[kind], target });
 }

@@ -22,6 +22,7 @@ import { ToolRegistry } from "../registry.js";
 import { createDynamicTool } from "../base.js";
 import { AuditLogger, type AuditEntry } from "../../audit/audit-logger.js";
 import { recordEffect } from "../../permissions/effect-ledger.js";
+import type { ChokepointKind } from "../../permissions/effect-kind.js";
 
 function userPermissionContext(): import("../executor.js").ToolPermissionContext {
   return { trustOrigin: "user-keyboard" };
@@ -34,7 +35,7 @@ function userPermissionContext(): import("../executor.js").ToolPermissionContext
  */
 function makePluginTool(
   name: string,
-  effects: Array<{ kind: string; effect: "read" | "write"; target?: string }>,
+  effects: Array<{ kind: ChokepointKind; effect: "read" | "write"; target?: string }>,
 ) {
   return createDynamicTool({
     name,
@@ -51,7 +52,8 @@ function makePluginTool(
   });
 }
 
-function effectShadowRows(auditDir: string): Array<Record<string, unknown>> {
+/** Rows of a given shadow `event` ("effect-shadow" | "risk-shadow") across all channels. */
+function shadowRows(auditDir: string, event: string): Array<Record<string, unknown>> {
   const files = readdirSync(auditDir).filter((f) => f.endsWith(".jsonl"));
   const rows: Array<Record<string, unknown>> = [];
   for (const f of files) {
@@ -59,10 +61,14 @@ function effectShadowRows(auditDir: string): Array<Record<string, unknown>> {
       if (!line) continue;
       const entry = JSON.parse(line) as AuditEntry;
       const out = entry.output ?? "";
-      if (out.includes("effect-shadow")) rows.push(JSON.parse(out) as Record<string, unknown>);
+      if (out.includes(event)) rows.push(JSON.parse(out) as Record<string, unknown>);
     }
   }
   return rows;
+}
+
+function effectShadowRows(auditDir: string): Array<Record<string, unknown>> {
+  return shadowRows(auditDir, "effect-shadow");
 }
 
 describe("executor effect ledger — host-observed read/write shadow", () => {
@@ -154,5 +160,105 @@ describe("executor effect ledger — host-observed read/write shadow", () => {
     const ro = effectShadowRows(auditDir).filter((r) => r.toolName === "lvis-plugin-x_readonly2");
     expect(mut[0].hasMutatingEffect).toBe(true);
     expect(ro[0].hasMutatingEffect).toBe(false);
+  });
+
+  it("a read-declared wrapper that callTool→mutating-tool ⇒ outer hasMutatingEffect:true", async () => {
+    const registry = new ToolRegistry();
+    registry.register(
+      makePluginTool("lvis-plugin-x_inner_mut", [{ kind: "config.set", effect: "write", target: "k" }]),
+    );
+    let executorRef!: ToolExecutor;
+    const wrapper = createDynamicTool({
+      name: "lvis-plugin-x_wrapper",
+      description: "read-declared wrapper delegating a mutation via callTool",
+      source: "plugin",
+      pluginId: "lvis-plugin-x",
+      category: "read",
+      isReadOnly: () => true,
+      jsonSchema: { type: "object", properties: {} },
+      execute: async () => {
+        // Stand in for ctx.callTool(M): the hostApi closure records a nested READ
+        // marker on the outer ledger, then re-enters the SAME executor for the
+        // inner mutating tool from within the wrapper's (outer) ledger scope.
+        recordEffect({ kind: "callTool", effect: "read", target: "lvis-plugin-x_inner_mut" });
+        await executorRef.executeAll(
+          [{ id: "tu-inner", name: "lvis-plugin-x_inner_mut", input: {} }],
+          { sessionId: "sess-inner", permissionContext: userPermissionContext() },
+        );
+        return { output: "ok", isError: false };
+      },
+    });
+    registry.register(wrapper);
+    executorRef = newExecutor(registry);
+    await executorRef.executeAll(
+      [{ id: "tu-wrap", name: "lvis-plugin-x_wrapper", input: {} }],
+      { sessionId: "sess-wrap", permissionContext: userPermissionContext() },
+    );
+
+    const wrapRows = effectShadowRows(auditDir).filter((r) => r.toolName === "lvis-plugin-x_wrapper");
+    expect(wrapRows).toHaveLength(1);
+    // The wrapper's OWN ledger surfaces the delegated mutation via callTool-child —
+    // without this propagation a later read-recognition gate would treat the
+    // wrapper as a safe read (fail-permissive).
+    expect(wrapRows[0].hasMutatingEffect).toBe(true);
+    expect(wrapRows[0].effects).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({ kind: "callTool-child", effect: "write", target: "lvis-plugin-x_inner_mut" }),
+      ]),
+    );
+    // The inner tool's own shadow is also mutating.
+    const innerRows = effectShadowRows(auditDir).filter((r) => r.toolName === "lvis-plugin-x_inner_mut");
+    expect(innerRows[0].hasMutatingEffect).toBe(true);
+  });
+
+  it("the category shadow + effect shadow for ONE invocation share a correlationId", async () => {
+    const registry = new ToolRegistry();
+    registry.register(
+      makePluginTool("lvis-plugin-x_corr", [{ kind: "config.get", effect: "read", target: "k" }]),
+    );
+    await newExecutor(registry).executeAll(
+      [{ id: "tu-corr", name: "lvis-plugin-x_corr", input: {} }],
+      { sessionId: "sess-corr", permissionContext: userPermissionContext() },
+    );
+    const cat = shadowRows(auditDir, "risk-shadow").filter((r) => r.toolName === "lvis-plugin-x_corr");
+    const eff = effectShadowRows(auditDir).filter((r) => r.toolName === "lvis-plugin-x_corr");
+    expect(cat).toHaveLength(1);
+    expect(eff).toHaveLength(1);
+    // The id is present (non-empty) in BOTH emitted rows ...
+    expect(typeof cat[0].correlationId).toBe("string");
+    expect((cat[0].correlationId as string).length).toBeGreaterThan(0);
+    // ... and identical, so the pre-exec category shadow and the post-exec effect
+    // shadow JOIN on a single key.
+    expect(cat[0].correlationId).toBe(eff[0].correlationId);
+  });
+
+  it("an external MCP invocation records hostObservable:false (not a confirmed read)", async () => {
+    const registry = new ToolRegistry();
+    registry.register(
+      createDynamicTool({
+        name: "remote_mcp_tool",
+        description: "external mcp tool — effects not host-mediated",
+        source: "mcp",
+        mcpServerId: "srv-x",
+        category: "read",
+        isReadOnly: () => true,
+        jsonSchema: { type: "object", properties: {} },
+        // No recordEffect calls — an MCP tool runs out-of-process and never reaches
+        // the instrumented host closures, so its ledger is empty.
+        execute: async () => ({ output: "ok", isError: false }),
+      }),
+    );
+    await newExecutor(registry).executeAll(
+      [{ id: "tu-mcp", name: "remote_mcp_tool", input: {} }],
+      { sessionId: "sess-mcp", permissionContext: userPermissionContext() },
+    );
+    const rows = effectShadowRows(auditDir).filter((r) => r.toolName === "remote_mcp_tool");
+    expect(rows).toHaveLength(1);
+    // An empty ledger alone is indistinguishable from a confirmed read; the
+    // hostObservable:false marker is what lets a later read-recognition gate fail
+    // CLOSED instead of auto-relaxing an unobservable MCP tool to read.
+    expect(rows[0].hostObservable).toBe(false);
+    expect(rows[0].hasMutatingEffect).toBe(false);
+    expect(rows[0].effects).toEqual([]);
   });
 });
