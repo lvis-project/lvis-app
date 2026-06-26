@@ -241,3 +241,111 @@ describe("instrumentEffectsByPath — fail-closed default + purity", () => {
     expect(ret).toBe("ok"); // method still ran + returned despite the recording failure
   });
 });
+
+describe("instrumentEffectsByPath — a hostile arg getter cannot suppress the effect signal", () => {
+  /** An object whose named property THROWS on access (a hostile getter). */
+  const throwingField = (field: string): Record<string, unknown> => ({
+    get [field](): never {
+      throw new Error(`hostile ${field} getter`);
+    },
+  });
+
+  it("hostFetch: a STATEFUL init.method getter (throws on the recorder's read, returns on the operation's) still records WRITE, not read", async () => {
+    // The exact suppression vector: throw on the recorder's FIRST read of the
+    // verb, then hand the real operation a usable mutating verb. The effect must
+    // fail CLOSED to write so the executed mutation is NEVER mis-recorded as a
+    // confirmed host-observed read.
+    let accessCount = 0;
+    const statefulInit = {
+      get method(): string {
+        accessCount += 1;
+        if (accessCount === 1) throw new Error("hostile: throw on the recorder's read");
+        return "POST"; // the real operation gets a usable mutating verb
+      },
+    };
+    const operationSawVerb: string[] = [];
+    const api = {
+      hostFetch: (_url: string, init: { method: string }): void => {
+        operationSawVerb.push(init.method);
+      },
+    };
+    const effects = await record(api, (w) => {
+      (w.hostFetch as (u: string, i: unknown) => unknown)(
+        "https://api.example.com/x",
+        statefulInit,
+      );
+    });
+    // Verb read threw → effect fails closed to write; the URL target (a separate
+    // arg) is still extracted.
+    expect(effects).toEqual([{ kind: "hostFetch", effect: "write", target: "https://api.example.com" }]);
+    // …and the real mutation DID execute with the usable verb — the attack the
+    // fail-closed effect neutralizes.
+    expect(operationSawVerb).toEqual(["POST"]);
+  });
+
+  it("hostFetch: an always-throwing init.method getter still fails CLOSED to write", async () => {
+    const effects = await record({ hostFetch: noop }, (w) => {
+      (w.hostFetch as (u: string, i: unknown) => unknown)(
+        "https://api.example.com/x",
+        throwingField("method"),
+      );
+    });
+    expect(effects).toEqual([{ kind: "hostFetch", effect: "write", target: "https://api.example.com" }]);
+  });
+
+  it("triggerConversation: a throwing spec.source getter costs only the target, never the write effect", async () => {
+    const effects = await record({ triggerConversation: noop }, (w) => {
+      (w.triggerConversation as (s: unknown) => unknown)(throwingField("source"));
+    });
+    expect(effects).toEqual([{ kind: "triggerConversation", effect: "write", target: undefined }]);
+  });
+
+  it("openAuthWindow: a throwing opts.url getter still records the write effect", async () => {
+    const effects = await record({ openAuthWindow: noop }, (w) => {
+      (w.openAuthWindow as (o: unknown) => unknown)(throwingField("url"));
+    });
+    expect(effects).toEqual([{ kind: "openAuthWindow", effect: "write", target: undefined }]);
+  });
+
+  it("agentApproval.request: a throwing input.scope getter still records the write effect", async () => {
+    const effects = await record({ agentApproval: { request: noop } }, (w) => {
+      (w.agentApproval.request as (i: unknown) => unknown)(throwingField("scope"));
+    });
+    expect(effects).toEqual([{ kind: "agentApprovalRequest", effect: "write", target: undefined }]);
+  });
+
+  it("the suppression-resistant record flips hasMutatingEffect to true", async () => {
+    const wrapped = instrumentEffectsByPath({ hostFetch: noop });
+    const ledger = createEffectLedger("cid-hostile");
+    await runWithEffectLedger(ledger, async () => {
+      (wrapped.hostFetch as (u: string, i: unknown) => unknown)(
+        "https://api.example.com/x",
+        throwingField("method"),
+      );
+    });
+    expect(ledger.summary().hasMutatingEffect).toBe(true); // a plugin cannot hide its own write
+  });
+});
+
+describe("instrumentEffectsByPath — non-plain namespace is left UNINSTRUMENTED (the gap the completeness test guards)", () => {
+  it("copies a class-instance namespace verbatim — its methods record nothing", async () => {
+    class CustomProtoNamespace {
+      // class field → an OWN-enumerable function property, but the prototype is
+      // CustomProtoNamespace.prototype (NOT Object.prototype) → non-plain.
+      doMutation = (): string => "mutated";
+    }
+    const instance = new CustomProtoNamespace();
+    const effects = await record(
+      { ns: instance, getInstalledPluginIds: noop } as Record<string, unknown>,
+      (w) => {
+        // verbatim-copied namespace → the method is NOT wrapped → records nothing
+        (w.ns as CustomProtoNamespace).doMutation();
+        (w.getInstalledPluginIds as () => unknown)();
+      },
+    );
+    // Only the instrumented top-level method recorded; the non-plain namespace's
+    // method left no effect — exactly why the completeness test rejects such a
+    // namespace so it can never ship.
+    expect(effects).toEqual([{ kind: "getInstalledPluginIds", effect: "read", target: undefined }]);
+  });
+});
