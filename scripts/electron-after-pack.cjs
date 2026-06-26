@@ -91,13 +91,23 @@ function sha256Hex(buffer) {
 }
 
 /**
- * Per-platform sandbox-runtime (ASRT) vendor binary assertion.
+ * Per-platform sandbox-runtime (ASRT) vendor binary prune + assertion.
  *
  * The top-level `asarUnpack: vendor/**` glob unpacks the whole vendor dir, then
- * per-target `files` negations in package.json prune the binaries the platform
- * never executes (mac → no srt-win + no seccomp; linux → no srt-win;
- * win → no seccomp). This guard makes that prune a HARD invariant of the packed
- * artifact rather than an electron-builder config detail nobody re-checks:
+ * this afterPack prunes the binaries the platform never executes (mac → no
+ * srt-win + no seccomp; linux → no srt-win; win → no seccomp).
+ *
+ * Why the prune lives here and NOT in per-target `build.{mac,win,linux}.files`:
+ * electron-builder REPLACES (not merges) the top-level `build.files` allow-list
+ * with a platform `files` array when one is present. A negation-only platform
+ * `files` array therefore drops the entire positive allow-list AND every base
+ * negation, so electron-builder falls back to its default glob and the whole
+ * repo root + raw node_modules leak into app.asar. We delete the wrong-platform
+ * vendor dirs from the already-unpacked output here instead, sidestepping that
+ * replace-not-merge footgun while keeping the top-level allow-list intact.
+ *
+ * After pruning we assert the result is a HARD invariant of the packed artifact
+ * rather than an electron-builder config detail nobody re-checks:
  *   - the KEPT binary (the one this platform's backend spawns) must be present
  *     and executable;
  *   - the PRUNED binary must be absent (no dead weight shipped per platform).
@@ -138,9 +148,12 @@ function assertSandboxVendorBinaries(context) {
   const spec = matrix[platform];
   if (!spec) return;
 
-  // PRUNED dirs must be gone entirely.
+  // Prune the wrong-platform vendor dirs. The top-level allow-list packs all
+  // vendored binaries; we delete the ones this platform never executes here
+  // (rather than via per-target `files`, which would replace the allow-list).
   for (const pruned of spec.prune) {
     const prunedDir = join(vendorDir, pruned);
+    rmSync(prunedDir, { recursive: true, force: true });
     if (existsSync(prunedDir)) {
       throw new Error(
         `packaged sandbox-runtime vendor binary not pruned for ${platform}: ${prunedDir} should be absent`,
