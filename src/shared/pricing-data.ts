@@ -236,6 +236,7 @@ export const DEFAULT_PRICING: Record<PricingVendor, Record<string, ModelPricing>
   // custom models fall back to FALLBACK_PRICING.
   "openai-compatible": {
     "qwen3.6": { inputPer1M: 0, outputPer1M: 0, contextWindow: 262_144 },
+    nemotron: { inputPer1M: 0, outputPer1M: 0, contextWindow: 131_072 },
   },
 };
 
