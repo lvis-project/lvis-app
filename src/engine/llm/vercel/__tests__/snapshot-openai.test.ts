@@ -618,6 +618,59 @@ describe("VercelUnifiedProvider openai-compatible", () => {
     vi.doUnmock("ai");
     vi.doUnmock("@ai-sdk/openai-compatible");
   });
+
+  it("forwards enable_thinking per request via chat_template_kwargs (multi-user toggle)", async () => {
+    vi.resetModules();
+    const streamTextSpy = vi.fn(() => ({
+      fullStream: (async function* () {
+        yield {
+          type: "finish",
+          finishReason: "stop",
+          totalUsage: { inputTokens: 1, outputTokens: 1 },
+        };
+      })(),
+    }));
+    vi.doMock("ai", async () => {
+      const actual = await vi.importActual<typeof import("ai")>("ai");
+      return { ...actual, streamText: streamTextSpy };
+    });
+    vi.doMock("@ai-sdk/openai-compatible", () => ({
+      createOpenAICompatible: vi.fn(() => vi.fn(() => ({ __mock: "compat" }))),
+    }));
+
+    const { VercelUnifiedProvider } = await import("../adapter.js");
+    const provider = new VercelUnifiedProvider(
+      "openai-compatible",
+      "k",
+      "https://example.test/v1",
+    );
+
+    // The flag travels in each request body, so two concurrent users with
+    // opposite settings hit the same stateless server without interfering.
+    for (const enableThinking of [true, false]) {
+      streamTextSpy.mockClear();
+      await collect(
+        provider.streamTurn({
+          model: "qwen3.6",
+          systemPrompt: "sys",
+          messages: [{ role: "user", content: "hi" }],
+          enableThinking,
+        }),
+      );
+      expect(streamTextSpy).toHaveBeenCalledWith(
+        expect.objectContaining({
+          providerOptions: expect.objectContaining({
+            "lvis-compat": {
+              chat_template_kwargs: { enable_thinking: enableThinking },
+            },
+          }),
+        }),
+      );
+    }
+
+    vi.doUnmock("ai");
+    vi.doUnmock("@ai-sdk/openai-compatible");
+  });
 });
 
 describe("VercelUnifiedProvider openai — custom baseUrl proxy guard", () => {

@@ -14,6 +14,7 @@ export const LLM_VENDORS = [
   "copilot",
   "azure-foundry",
   "vertex-ai",
+  "openai-compatible",
 ] as const;
 
 export type LLMVendor = (typeof LLM_VENDORS)[number];
@@ -95,6 +96,7 @@ const DEFAULT_MODEL: Record<LLMVendor, string> = {
   copilot: "gpt-5.4-mini",
   "azure-foundry": "gpt-5.4-mini",
   "vertex-ai": "gemini-2.5-flash",
+  "openai-compatible": "qwen3.6",
 };
 
 export const LLM_VENDOR_MODEL_OPTIONS: Readonly<Record<LLMVendor, readonly string[]>> =
@@ -144,6 +146,10 @@ export const LLM_VENDOR_MODEL_OPTIONS: Readonly<Record<LLMVendor, readonly strin
       "gemini-2.0-flash",
       "gemini-2.5-flash-lite",
     ],
+    // Self-hosted OpenAI-compatible endpoints (vLLM / SGLang / llama.cpp …).
+    // The model id is endpoint-defined; the list seeds the dropdown with the
+    // known LVIS vLLM deployment. Users point baseUrl at their own server.
+    "openai-compatible": ["qwen3.6"],
   });
 
 /**

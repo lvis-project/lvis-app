@@ -108,6 +108,13 @@ export const MODEL_COMPLEXITY_MAP: Readonly<
     mid: "gemini-2.5-flash",
     high: "gemini-2.5-pro",
   }),
+  // Custom OpenAI-compatible endpoints expose a single endpoint-defined model,
+  // so every tier resolves to it (the dropdown lists exactly this id).
+  "openai-compatible": Object.freeze({
+    low: "qwen3.6",
+    mid: "qwen3.6",
+    high: "qwen3.6",
+  }),
 });
 
 /**
