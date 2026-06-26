@@ -1,5 +1,5 @@
 /**
- * Executor → EffectLedger → audit-grade effect shadow (Phases 1-2, observability).
+ * Executor → EffectLedger → shadow reconciliation effect shadow (Phases 1-2, observability).
  *
  * End-to-end proof of the host-owned read/write signal threading:
  *   - the executor binds a fresh per-invocation ledger around Step 6 (execute);
