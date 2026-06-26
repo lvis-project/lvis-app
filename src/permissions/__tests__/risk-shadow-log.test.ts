@@ -1,8 +1,8 @@
 /**
  * Risk + effect shadow-log emission tests (host-classifies-risk shadow mode).
  *
- * The shadow log is the audit-grade reconciliation dataset that must pass
- * before effect-boundary gating is enabled. These tests pin:
+ * The shadow log is the (plain, non-HMAC) shadow reconciliation dataset that
+ * must pass before effect-boundary gating is enabled. These tests pin:
  *   (a) every CATEGORY emission carries the declared vs host-derived pair and
  *       a correctly derived `diverged` flag;
  *   (b) every EFFECT emission carries the declared category + host-observed
