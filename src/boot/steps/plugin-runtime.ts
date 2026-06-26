@@ -28,6 +28,8 @@ import { PluginRuntime } from "../../plugins/runtime.js";
 import type { PythonRuntimeBootstrapper } from "../../main/python-runtime.js";
 import { currentInvocationOrigin } from "../../plugins/runtime/origin-chain.js";
 import { instrumentEffectsByPath } from "../../permissions/hostapi-effect-recorder.js";
+import { recordEffect } from "../../permissions/effect-ledger.js";
+import { methodEffect } from "../../permissions/effect-kind.js";
 import { startPluginDevWatcher } from "../../plugins/dev-watcher.js";
 import { PluginDeploymentGuard } from "../../plugins/deployment-guard.js";
 // #958 round-1 security MEDIUM — read installSource from the registry so
@@ -1537,6 +1539,38 @@ export async function initPluginRuntime(
             });
           } catch { /* audit must not break host */ }
         };
+        // ─── Verb snapshot — SINGLE read of the (plugin-controlled) HTTP method.
+        // Destructuring `method` out of `init` invokes its getter EXACTLY ONCE;
+        // `restInit` carries every OTHER field by value and NO LONGER holds the
+        // `method` getter, so the wire spread below cannot re-invoke it. The
+        // recorded effect, the audit verb, and the wire verb are ALL derived from
+        // this one primitive, so a stateful getter (GET to the recorder, POST to
+        // the wire) can no longer record a confirmed READ for an executed WRITE.
+        // The host owns the verb here — non-forgeable. Default "GET" mirrors
+        // `fetch`'s default when init.method is omitted/empty/non-string.
+        const { method: rawVerb, ...restInit } = init ?? {};
+        const methodSnapshot =
+          typeof rawVerb === "string" && rawVerb.length > 0 ? rawVerb.toUpperCase() : "GET";
+        // hostFetch is the ONLY verb-derived chokepoint, so the generic recorder
+        // skips it (effect-kind.ts marks it `selfRecorded`) and THIS is the single
+        // recording point — no second read, no double-record. Recorded BEFORE the
+        // capability/SSRF gates so a denied egress still surfaces its attempted
+        // effect, matching the prior wrapper-records-first ordering. Target is the
+        // ORIGIN only (no path/query that can carry tokens); string input only,
+        // mirroring the previous urlOriginArg extractor.
+        let effectTarget: string | undefined;
+        if (typeof input === "string") {
+          try {
+            effectTarget = new URL(input).origin;
+          } catch {
+            /* best-effort forensic origin — never blocks the record */
+          }
+        }
+        recordEffect({
+          kind: "hostFetch",
+          effect: methodEffect(methodSnapshot),
+          ...(effectTarget !== undefined ? { target: effectTarget } : {}),
+        });
         if (!manifest.capabilities?.includes("external-auth-consumer")) {
           auditEgressDeny("capability", "capability external-auth-consumer not declared");
           throw new Error(
@@ -1544,11 +1578,6 @@ export async function initPluginRuntime(
           );
         }
         const raw = input instanceof URL ? input.toString() : input;
-        // Method drives the host-observed effect (read for GET/HEAD/OPTIONS,
-        // write otherwise). The host owns the verb here — non-forgeable. Default
-        // "GET" mirrors `fetch`'s default when init.method is omitted.
-        const method =
-          typeof init?.method === "string" && init.method.length > 0 ? init.method : "GET";
         // SSRF defense: an allow-listed host that resolves to a private /
         // loopback / link-local / metadata address is rejected unless the
         // manifest explicitly opts into `networkAccess.allowPrivateNetworks`
@@ -1559,7 +1588,7 @@ export async function initPluginRuntime(
         const decision = await evaluateHostFetch({
           pluginId,
           rawUrl: raw,
-          method,
+          method: methodSnapshot,
           allowedDomains: manifest.networkAccess?.allowedDomains ?? [],
           allowPrivateNetworks: manifest.networkAccess?.allowPrivateNetworks === true,
         });
@@ -1568,9 +1597,9 @@ export async function initPluginRuntime(
           throw new Error(decision.message);
         }
         const url = decision.url;
-        // The recording wrapper records the host-observed effect for this egress
-        // (verb-derived: POST/PUT/PATCH/DELETE = write, GET/HEAD/OPTIONS = read;
-        // target ORIGIN-ONLY) from the call arguments BEFORE this closure runs.
+        // The host-observed effect for this egress was recorded above from the
+        // SAME verb snapshot that drives `decision` and pins the wire below, so
+        // the recorded effect == decision.effect == the wire verb (no divergence).
         incrementHostSecretCounter("hostFetch_egress", pluginId, "egress");
         try {
           bootAuditLogger.log({
@@ -1582,7 +1611,14 @@ export async function initPluginRuntime(
         } catch { /* audit must not break host */ }
         // redirect:"error" — a plugin egress path must not silently follow
         // cross-origin redirects (mirrors the host LLM/auth fetch posture).
-        return networkFetch(url.toString(), { ...(init ?? {}), redirect: "error" });
+        // method PINNED to the snapshot: `restInit` excludes the original
+        // `method` getter, so the wire verb is the single-read primitive, never a
+        // re-read of a live (possibly stateful) getter.
+        return networkFetch(url.toString(), {
+          ...restInit,
+          method: methodSnapshot,
+          redirect: "error",
+        });
       },
       logEvent: (level, message, data) => {
         try {
