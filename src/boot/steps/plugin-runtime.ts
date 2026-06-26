@@ -27,6 +27,9 @@ import { AuditLogger, type AuditEntry } from "../../audit/audit-logger.js";
 import { PluginRuntime } from "../../plugins/runtime.js";
 import type { PythonRuntimeBootstrapper } from "../../main/python-runtime.js";
 import { currentInvocationOrigin } from "../../plugins/runtime/origin-chain.js";
+import { instrumentEffectsByPath } from "../../permissions/hostapi-effect-recorder.js";
+import { recordEffect } from "../../permissions/effect-ledger.js";
+import { methodEffect } from "../../permissions/effect-kind.js";
 import { startPluginDevWatcher } from "../../plugins/dev-watcher.js";
 import { PluginDeploymentGuard } from "../../plugins/deployment-guard.js";
 // #958 round-1 security MEDIUM — read installSource from the registry so
@@ -1128,7 +1131,17 @@ export async function initPluginRuntime(
       // preserve array element order) restores the pin.
       const canonical = canonicalJSON(manifest);
       const manifestSha256 = createHash("sha256").update(canonical).digest("hex");
-      return ({
+      // Structural effect observability — wrap the whole hostApi so EVERY method
+      // (and any future-added one) auto-records its host-observed effect on the
+      // ambient per-invocation ledger, looked up by method PATH in the
+      // classification SOT. This is the SINGLE recording point: it replaces the
+      // per-closure manual `recordChokepoint` calls that kept missing methods
+      // across review rounds. The wrapper is a PURE side-effect (records, never
+      // alters behavior), and the completeness test + fail-closed default
+      // guarantee no method can be silently un-instrumented. `storage` is already
+      // instrumented at its own construction boundary, so the wrapper's
+      // idempotence guard leaves it untouched (no double-recording).
+      return instrumentEffectsByPath<PluginHostApi>({
       storage: createPluginStorage(pluginId, pluginDataDir, (msg, meta) => {
         try {
           bootAuditLogger.log({
@@ -1468,6 +1481,11 @@ export async function initPluginRuntime(
         return null;
       },
       callTool: async <T = unknown>(toolName: string, payload?: unknown): Promise<T> => {
+        // The recording wrapper records a `callTool` READ marker on the OUTER
+        // ledger; re-entering the executor opens a FRESH inner ledger scope, so
+        // the nested tool's own mutating effects are counted there, not here. If
+        // the inner tool MUTATES, the executor propagates a `callTool-child` WRITE
+        // back onto this outer ledger (see executor.ts).
         pluginRuntime.assertPluginToolAccess(pluginId, toolName);
         const invoker = lateBinding.pluginToolInvokerRef.fn;
         if (!invoker) {
@@ -1521,6 +1539,38 @@ export async function initPluginRuntime(
             });
           } catch { /* audit must not break host */ }
         };
+        // ─── Verb snapshot — SINGLE read of the (plugin-controlled) HTTP method.
+        // Destructuring `method` out of `init` invokes its getter EXACTLY ONCE;
+        // `restInit` carries every OTHER field by value and NO LONGER holds the
+        // `method` getter, so the wire spread below cannot re-invoke it. The
+        // recorded effect, the audit verb, and the wire verb are ALL derived from
+        // this one primitive, so a stateful getter (GET to the recorder, POST to
+        // the wire) can no longer record a confirmed READ for an executed WRITE.
+        // The host owns the verb here — non-forgeable. Default "GET" mirrors
+        // `fetch`'s default when init.method is omitted/empty/non-string.
+        const { method: rawVerb, ...restInit } = init ?? {};
+        const methodSnapshot =
+          typeof rawVerb === "string" && rawVerb.length > 0 ? rawVerb.toUpperCase() : "GET";
+        // hostFetch is the ONLY verb-derived chokepoint, so the generic recorder
+        // skips it (effect-kind.ts marks it `selfRecorded`) and THIS is the single
+        // recording point — no second read, no double-record. Recorded BEFORE the
+        // capability/SSRF gates so a denied egress still surfaces its attempted
+        // effect, matching the prior wrapper-records-first ordering. Target is the
+        // ORIGIN only (no path/query that can carry tokens); string input only,
+        // mirroring the previous urlOriginArg extractor.
+        let effectTarget: string | undefined;
+        if (typeof input === "string") {
+          try {
+            effectTarget = new URL(input).origin;
+          } catch {
+            /* best-effort forensic origin — never blocks the record */
+          }
+        }
+        recordEffect({
+          kind: "hostFetch",
+          effect: methodEffect(methodSnapshot),
+          ...(effectTarget !== undefined ? { target: effectTarget } : {}),
+        });
         if (!manifest.capabilities?.includes("external-auth-consumer")) {
           auditEgressDeny("capability", "capability external-auth-consumer not declared");
           throw new Error(
@@ -1538,6 +1588,7 @@ export async function initPluginRuntime(
         const decision = await evaluateHostFetch({
           pluginId,
           rawUrl: raw,
+          method: methodSnapshot,
           allowedDomains: manifest.networkAccess?.allowedDomains ?? [],
           allowPrivateNetworks: manifest.networkAccess?.allowPrivateNetworks === true,
         });
@@ -1546,18 +1597,28 @@ export async function initPluginRuntime(
           throw new Error(decision.message);
         }
         const url = decision.url;
+        // The host-observed effect for this egress was recorded above from the
+        // SAME verb snapshot that drives `decision` and pins the wire below, so
+        // the recorded effect == decision.effect == the wire verb (no divergence).
         incrementHostSecretCounter("hostFetch_egress", pluginId, "egress");
         try {
           bootAuditLogger.log({
             timestamp: new Date().toISOString(),
             sessionId: "plugin",
             type: "tool_call",
-            input: `[plugin:${pluginId}] host_fetch ${url.protocol}//${url.host}${url.pathname}`,
+            input: `[plugin:${pluginId}] host_fetch ${url.protocol}//${url.host}${url.pathname} method=${decision.method} effect=${decision.effect}`,
           });
         } catch { /* audit must not break host */ }
         // redirect:"error" — a plugin egress path must not silently follow
         // cross-origin redirects (mirrors the host LLM/auth fetch posture).
-        return networkFetch(url.toString(), { ...(init ?? {}), redirect: "error" });
+        // method PINNED to the snapshot: `restInit` excludes the original
+        // `method` getter, so the wire verb is the single-read primitive, never a
+        // re-read of a live (possibly stateful) getter.
+        return networkFetch(url.toString(), {
+          ...restInit,
+          method: methodSnapshot,
+          redirect: "error",
+        });
       },
       logEvent: (level, message, data) => {
         try {
@@ -1585,7 +1646,9 @@ export async function initPluginRuntime(
       // gate is ON (non-Windows) the worker runs ASRT-wrapped with a
       // bind-mounted UDS control channel; gate OFF / win32 ⇒ a plain spawn that
       // returns `socketPath: null` (legacy TCP fallback signal).
-      spawnWorker: (workerSpec) => spawnWorker({ ...workerSpec, pluginId }),
+      spawnWorker: (workerSpec) => {
+        return spawnWorker({ ...workerSpec, pluginId });
+      },
       // ─── §B3 외부 URL viewer + host public preference read ────────────
       // openExternalUrl: Settings → webView.preferredFlow 토글에 따라
       //   "in-app"  → light BrowserWindow (link-window-service)

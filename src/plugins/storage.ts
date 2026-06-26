@@ -18,6 +18,7 @@ import { realpathSync } from "node:fs";
 import { lstat, mkdir, readFile, readdir, realpath, rm, stat, writeFile } from "node:fs/promises";
 import { dirname, isAbsolute, join, resolve, sep } from "node:path";
 import { PluginStorageError, type PluginStorage } from "./types.js";
+import { instrumentEffectsByPath } from "../permissions/hostapi-effect-recorder.js";
 
 export { PluginStorageError } from "./types.js";
 
@@ -164,7 +165,20 @@ export function createPluginStorage(
     await mkdir(dirname(absPath), { recursive: true });
   }
 
-  return {
+  // Effect ledger (observability) — PluginStorage is the PRIMARY host-mediated
+  // plugin persistence path. Its methods are NOT instrumented one-by-one here;
+  // instead the whole object is wrapped by {@link instrumentEffectsByPath} below,
+  // which records each method's host-observed effect (looked up by its
+  // `storage.<method>` PATH in the classification SOT) on the ambient
+  // per-invocation ledger BEFORE the op runs (a no-op outside an invocation
+  // scope). A read records the ABSENCE of a mutation (positive read evidence);
+  // the write variants flip `hasMutatingEffect`. Without this, a plugin tool
+  // that mutates ONLY via storage would be recorded `hostObservable:true,
+  // hasMutatingEffect:false` — a confirmed host-observed read, a fail-open seed
+  // for the future read-recognition gate. Wrapping at this construction boundary
+  // (rather than per-method) covers EVERY storage instance uniformly — the four
+  // `createPluginStorage` call-sites and any future storage method.
+  const raw: PluginStorage = {
     resolve: (...segments) => guardLexicalOnly(segments.length === 0 ? "." : join(...segments)),
 
     async read(rel) {
@@ -235,4 +249,5 @@ export function createPluginStorage(
       await mkdir(target, { recursive: true });
     },
   };
+  return instrumentEffectsByPath(raw, "storage");
 }
