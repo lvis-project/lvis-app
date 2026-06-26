@@ -27,6 +27,7 @@ import { AuditLogger, type AuditEntry } from "../../audit/audit-logger.js";
 import { PluginRuntime } from "../../plugins/runtime.js";
 import type { PythonRuntimeBootstrapper } from "../../main/python-runtime.js";
 import { currentInvocationOrigin } from "../../plugins/runtime/origin-chain.js";
+import { recordEffect } from "../../permissions/effect-ledger.js";
 import { startPluginDevWatcher } from "../../plugins/dev-watcher.js";
 import { PluginDeploymentGuard } from "../../plugins/deployment-guard.js";
 // #958 round-1 security MEDIUM — read installSource from the registry so
@@ -1153,6 +1154,8 @@ export async function initPluginRuntime(
       //   the underlying bus rejects cross-plugin observation.
       config: {
         get: <T = unknown>(key: string): T | undefined => {
+          // Effect ledger (observability) — a config read is non-mutating.
+          recordEffect({ kind: "config.get", effect: "read", target: key });
           // PR #894 B2 follow-up — merge wildcard slot (`hostApiVendor` etc.)
           // BETWEEN manifest defaults and plugin-specific overrides so a
           // plugin's own config can shadow a host-injected value (rare, but
@@ -1172,6 +1175,10 @@ export async function initPluginRuntime(
               `[plugin:${pluginId}] config.set('${key}'): secret fields must be saved via hostApi.setSecret(), not config.set().`,
             );
           }
+          // Effect ledger (observability) — config.set persists state: a
+          // host-mediated WRITE. Recorded after the secret-field reject so a
+          // rejected set is not counted as a successful mutation.
+          recordEffect({ kind: "config.set", effect: "write", target: key });
           const current = settingsService.getPluginConfig(pluginId) ?? {};
           // structuredClone so we never accidentally hand the plugin our
           // internal record reference.
@@ -1228,6 +1235,9 @@ export async function initPluginRuntime(
         log.info(`plugin:${pluginId} registered ${keywords.length} keywords`);
       },
       emitEvent: (type, data) => {
+        // Effect ledger (observability) — an emitted event is an in-memory bus
+        // signal that persists nothing on its own; treated as a read.
+        recordEffect({ kind: "emitEvent", effect: "read", target: type });
         plog("debug", { pluginId, phase: PluginPhase.CAPABILITY_CHECK, eventType: type }, "checking emit capability");
         const manifest = pluginRuntime?.getPluginManifest(pluginId);
         const manifestCapabilities = manifest?.capabilities ?? [];
@@ -1353,6 +1363,9 @@ export async function initPluginRuntime(
         // Audit log lines additionally cap `key` to 64 chars so an attacker
         // can't bloat the JSONL with megabyte-long denied keys.
         const auditKey = key.slice(0, 64);
+        // Effect ledger (observability) — a secret READ (already allow-list
+        // gated below). `target` is the capped key NAME, never the value.
+        recordEffect({ kind: "getSecret", effect: "read", target: auditKey });
         // Tier 1 — own namespace.
         if (key.startsWith(`plugin.${pluginId}.`)) {
           const value = settingsService.getSecret(key);
@@ -1468,6 +1481,11 @@ export async function initPluginRuntime(
         return null;
       },
       callTool: async <T = unknown>(toolName: string, payload?: unknown): Promise<T> => {
+        // Effect ledger (observability) — re-entering the executor re-gates and
+        // opens a FRESH ledger scope for the nested tool, so its own mutating
+        // effects are counted there, not here. Record only a nested READ marker
+        // on the outer ledger to avoid double-counting.
+        recordEffect({ kind: "callTool", effect: "read", target: toolName });
         pluginRuntime.assertPluginToolAccess(pluginId, toolName);
         const invoker = lateBinding.pluginToolInvokerRef.fn;
         if (!invoker) {
@@ -1528,6 +1546,11 @@ export async function initPluginRuntime(
           );
         }
         const raw = input instanceof URL ? input.toString() : input;
+        // Method drives the host-observed effect (read for GET/HEAD/OPTIONS,
+        // write otherwise). The host owns the verb here — non-forgeable. Default
+        // "GET" mirrors `fetch`'s default when init.method is omitted.
+        const method =
+          typeof init?.method === "string" && init.method.length > 0 ? init.method : "GET";
         // SSRF defense: an allow-listed host that resolves to a private /
         // loopback / link-local / metadata address is rejected unless the
         // manifest explicitly opts into `networkAccess.allowPrivateNetworks`
@@ -1538,6 +1561,7 @@ export async function initPluginRuntime(
         const decision = await evaluateHostFetch({
           pluginId,
           rawUrl: raw,
+          method,
           allowedDomains: manifest.networkAccess?.allowedDomains ?? [],
           allowPrivateNetworks: manifest.networkAccess?.allowPrivateNetworks === true,
         });
@@ -1546,13 +1570,20 @@ export async function initPluginRuntime(
           throw new Error(decision.message);
         }
         const url = decision.url;
+        // Effect ledger (observability) — record the host-observed effect for
+        // this egress. A mutating verb (POST/PUT/PATCH/DELETE) is a write.
+        recordEffect({
+          kind: "hostFetch",
+          effect: decision.effect,
+          target: `${url.host}${url.pathname}`,
+        });
         incrementHostSecretCounter("hostFetch_egress", pluginId, "egress");
         try {
           bootAuditLogger.log({
             timestamp: new Date().toISOString(),
             sessionId: "plugin",
             type: "tool_call",
-            input: `[plugin:${pluginId}] host_fetch ${url.protocol}//${url.host}${url.pathname}`,
+            input: `[plugin:${pluginId}] host_fetch ${url.protocol}//${url.host}${url.pathname} method=${decision.method} effect=${decision.effect}`,
           });
         } catch { /* audit must not break host */ }
         // redirect:"error" — a plugin egress path must not silently follow
@@ -1585,7 +1616,12 @@ export async function initPluginRuntime(
       // gate is ON (non-Windows) the worker runs ASRT-wrapped with a
       // bind-mounted UDS control channel; gate OFF / win32 ⇒ a plain spawn that
       // returns `socketPath: null` (legacy TCP fallback signal).
-      spawnWorker: (workerSpec) => spawnWorker({ ...workerSpec, pluginId }),
+      spawnWorker: (workerSpec) => {
+        // Effect ledger (observability) — spawning a confined worker is a
+        // host-mediated side effect (process creation): a write.
+        recordEffect({ kind: "spawnWorker", effect: "write" });
+        return spawnWorker({ ...workerSpec, pluginId });
+      },
       // ─── §B3 외부 URL viewer + host public preference read ────────────
       // openExternalUrl: Settings → webView.preferredFlow 토글에 따라
       //   "in-app"  → light BrowserWindow (link-window-service)
@@ -1595,6 +1631,20 @@ export async function initPluginRuntime(
       // getAppPreference: HOST_PUBLIC_PREFERENCE_KEYS allowlist 만 read 허용.
       //   거부된 key 는 throw 하지 않고 undefined 반환 + 1회/key/session warn.
       openExternalUrl: async (url: string): Promise<void> => {
+        // Effect ledger (observability) — opening an external URL drives an
+        // out-of-app side effect (system browser / link window): a write.
+        // `target` is the origin only — query strings can carry sensitive data.
+        recordEffect({
+          kind: "openExternalUrl",
+          effect: "write",
+          target: (() => {
+            try {
+              return new URL(url).origin;
+            } catch {
+              return undefined;
+            }
+          })(),
+        });
         await routeExternalUrl({
           url,
           pluginId,
