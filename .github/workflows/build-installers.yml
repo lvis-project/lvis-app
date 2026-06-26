@@ -44,11 +44,6 @@ jobs:
     env:
       ELECTRON_CACHE: ${{ github.workspace }}/.cache/electron
       ELECTRON_BUILDER_CACHE: ${{ github.workspace }}/.cache/electron-builder
-      # app.asar footprint ceiling (scripts/check-package-footprint.mjs default 100).
-      # Raised to 150 for v0.4.1: the ASRT sandbox runtime (@anthropic-ai/sandbox-runtime,
-      # dist ~7MB + deps in-asar; vendor/** is asarUnpacked) pushed the archive past 100MB.
-      # Trimming raw in-asar packages (lucide-react / date-fns) tracked separately.
-      LVIS_MAX_APP_ASAR_MB: "150"
     steps:
       - uses: actions/checkout@v7
         with:
