@@ -105,13 +105,16 @@ describe("emitRiskShadowLog — category shadow", () => {
     expect(p.enforced).toBe(true);
   });
 
-  it("returns void — it is a pure side-effect sink that cannot alter a decision", () => {
-    const { logger } = collectingAudit();
-    const result = emitRiskShadowLog(
+  it("is a pure side-effect sink that cannot alter a decision (void by type)", () => {
+    const { entries, logger } = collectingAudit();
+    // The void return is TS-enforced; assert the BEHAVIOUR (it only emits one
+    // shadow row and exposes no decision surface) rather than the return value.
+    emitRiskShadowLog(
       { toolName: "t", source: "mcp", declaredCategory: "network", hostDerivedCategory: "network", enforced: false, correlationId: "corr-cat-4" },
       logger,
     );
-    expect(result).toBeUndefined();
+    expect(entries).toHaveLength(1);
+    expect(payload(entries[0]).correlationId).toBe("corr-cat-4");
   });
 });
 
