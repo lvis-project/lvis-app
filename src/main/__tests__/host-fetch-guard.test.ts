@@ -75,6 +75,75 @@ describe("evaluateHostFetch — allow-list + scheme gating", () => {
   });
 });
 
+describe("evaluateHostFetch — method-awareness (host-observed effect)", () => {
+  async function allowedWithMethod(method?: string) {
+    lookupMock.mockResolvedValueOnce([{ address: "93.184.216.34", family: 4 }]);
+    return evaluateHostFetch({
+      pluginId: "p",
+      rawUrl: "https://api.example.com/x",
+      allowedDomains: ALLOW,
+      ...(method !== undefined ? { method } : {}),
+    });
+  }
+
+  it.each(["GET", "HEAD", "OPTIONS", "get", "head", "options"])(
+    "classifies safe verb %s as effect=read",
+    async (method) => {
+      const decision = await allowedWithMethod(method);
+      expect(decision.ok).toBe(true);
+      if (decision.ok) {
+        expect(decision.effect).toBe("read");
+        expect(decision.method).toBe(method.toUpperCase());
+      }
+    },
+  );
+
+  it.each(["POST", "PUT", "PATCH", "DELETE", "post", "put", "patch", "delete"])(
+    "classifies mutating verb %s as effect=write",
+    async (method) => {
+      const decision = await allowedWithMethod(method);
+      expect(decision.ok).toBe(true);
+      if (decision.ok) {
+        expect(decision.effect).toBe("write");
+        expect(decision.method).toBe(method.toUpperCase());
+      }
+    },
+  );
+
+  it("defaults to GET / effect=read when method is omitted", async () => {
+    const decision = await allowedWithMethod(undefined);
+    expect(decision.ok).toBe(true);
+    if (decision.ok) {
+      expect(decision.method).toBe("GET");
+      expect(decision.effect).toBe("read");
+    }
+  });
+
+  it("method does NOT change a deny decision — allow-list still wins (byte-for-byte)", async () => {
+    const decision = await evaluateHostFetch({
+      pluginId: "p",
+      rawUrl: "https://evil.com/x",
+      allowedDomains: ALLOW,
+      method: "POST",
+    });
+    expect(decision.ok).toBe(false);
+    if (!decision.ok) expect(decision.reason).toBe("not-allowlisted");
+    expect(lookupMock).not.toHaveBeenCalled();
+  });
+
+  it("method does NOT bypass the SSRF guard — a POST to a private IP is still blocked", async () => {
+    lookupMock.mockResolvedValueOnce([{ address: "127.0.0.1", family: 4 }]);
+    const decision = await evaluateHostFetch({
+      pluginId: "p",
+      rawUrl: "https://api.example.com/x",
+      allowedDomains: ALLOW,
+      method: "POST",
+    });
+    expect(decision.ok).toBe(false);
+    if (!decision.ok) expect(decision.reason).toBe("ssrf-blocked");
+  });
+});
+
 describe("evaluateHostFetch — SSRF guard on allow-listed names", () => {
   it("rejects an allow-listed name resolving to the AWS metadata IP", async () => {
     lookupMock.mockResolvedValueOnce([{ address: "169.254.169.254", family: 4 }]);
