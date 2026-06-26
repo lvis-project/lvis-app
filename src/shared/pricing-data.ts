@@ -36,7 +36,8 @@ export type PricingVendor =
   | "gemini"
   | "copilot"
   | "azure-foundry"
-  | "vertex-ai";
+  | "vertex-ai"
+  | "openai-compatible";
 
 /** $ per 1M tokens, plus context window metadata. */
 export interface ModelPricing {
@@ -230,6 +231,12 @@ export const DEFAULT_PRICING: Record<PricingVendor, Record<string, ModelPricing>
   // infer from the alias alone.
   "azure-foundry": {},
   "vertex-ai": {},
+  // Self-hosted OpenAI-compatible endpoints (vLLM/SGLang): no per-token billing.
+  // Seed the known LVIS deployment with its native context window; unknown
+  // custom models fall back to FALLBACK_PRICING.
+  "openai-compatible": {
+    "qwen3.6": { inputPer1M: 0, outputPer1M: 0, contextWindow: 262_144 },
+  },
 };
 
 export const FALLBACK_PRICING: ModelPricing = {
@@ -441,7 +448,8 @@ export function computeCost(
     }
     case "openai":
     case "copilot":
-    case "azure-foundry": {
+    case "azure-foundry":
+    case "openai-compatible": {
       // `prompt_tokens` 가 cached 를 이미 포함 — cacheRead 를 또 더하면
       // double-count. Instead split the provider-reported prompt tokens into
       // fresh + cached portions so OpenAI/Azure published cached-input rates
