@@ -1213,11 +1213,19 @@ export class ToolExecutor {
         reviewer: { route: "foreground-auto", verdict: reviewer.verdict },
       };
     }
+    // Foreground non-LOW verdict → route to the user approval modal rather
+    // than silently hard-denying. The user is the authority: the
+    // ToolApprovalDialog renders the reviewer verdict (HIGH forces a
+    // session-only grant requiring NL justification), so a HIGH-risk action
+    // ASKS and only executes on an explicit user allow. Pre-fix this branch
+    // returned "deny" with a "no approval popup was opened" reason, which —
+    // with plugin tool categories removed (host-classifies-risk incomplete) —
+    // silently blocked every plugin tool that defaulted to category "write".
+    // deny-by-default is preserved: a deny-once at the modal yields a blocked
+    // tool result; only allow lets the effect run.
     return {
-      decision: "deny",
-      reason:
-        `reviewer ${reviewer.verdict.level}: ${reviewer.verdict.reason}` +
-        " — no approval popup was opened; treat this as reviewer tool output and retry only after explicit user authorization for this exact action",
+      decision: "ask",
+      reason: `reviewer ${reviewer.verdict.level}: ${reviewer.verdict.reason}`,
       layer: 5,
       reviewer: { route: "foreground-auto", verdict: reviewer.verdict },
     };
