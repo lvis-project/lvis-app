@@ -188,6 +188,17 @@ export class AuditLogger {
    * doesn't have to filter heterogeneous shapes.
    */
   private readonly permissionAuditLogFile: string;
+  /**
+   * Permission policy — DEDICATED shadow reconciliation channel. Format
+   * `<date>.permission-shadow.jsonl`. The host-classifies-risk shadow path
+   * (category + effect shadow) writes here, NOT to the canonical telemetry
+   * channel (`<date>.jsonl`), so high-volume per-invocation shadow records
+   * cannot accelerate the telemetry file's size-rotation and evict real
+   * turn/tool_call/approval telemetry. Mirrors the existing channel-separation
+   * convention (`*.permission-audit.jsonl`, `*.sandbox.jsonl`). This is a PLAIN,
+   * non-HMAC channel — it is NOT tamper-evident / audit-grade.
+   */
+  private readonly permissionShadowLogFile: string;
   /** Permission policy — HMAC chain state. Wired via `setupPermissionAuditChain`. Null = uninitialized chain. */
   private permissionAuditSecret: string | null = null;
   /** Memoized last serialized line so each append knows the prevHash without re-reading the file. */
@@ -206,6 +217,7 @@ export class AuditLogger {
     const date = new Date().toISOString().slice(0, 10);
     this.logFile = join(this.auditDir, `${date}.jsonl`);
     this.permissionAuditLogFile = join(this.auditDir, `${date}.permission-audit.jsonl`);
+    this.permissionShadowLogFile = join(this.auditDir, `${date}.permission-shadow.jsonl`);
   }
 
   log(entry: AuditEntry): void {
@@ -223,6 +235,33 @@ export class AuditLogger {
     } catch {
       // Audit 실패가 앱 동작을 차단하면 안 됨
     }
+  }
+
+  /**
+   * Permission policy — append one record to the DEDICATED shadow
+   * reconciliation channel (`<date>.permission-shadow.jsonl`), kept separate
+   * from the canonical telemetry channel so per-invocation shadow volume never
+   * evicts real telemetry. Same plain-JSONL shape + 0o600 hardening as
+   * {@link log}; this is NOT the HMAC-chained audit-grade channel. Failures are
+   * swallowed — shadow logging must never break a tool invocation.
+   */
+  logShadow(entry: AuditEntry): void {
+    try {
+      const line = JSON.stringify(entry) + "\n";
+      appendFileSync(this.permissionShadowLogFile, line, { encoding: "utf-8", mode: 0o600 });
+      try {
+        chmodSync(this.permissionShadowLogFile, 0o600);
+      } catch {
+        // Non-fatal — chmod failure must not block shadow writes.
+      }
+    } catch {
+      // Shadow logging must never break a tool invocation.
+    }
+  }
+
+  /** Permission policy — accessor for the dedicated shadow channel file (tests). */
+  getPermissionShadowLogFile(): string {
+    return this.permissionShadowLogFile;
   }
 
   /**
