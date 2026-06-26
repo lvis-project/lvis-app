@@ -27,7 +27,7 @@ import { AuditLogger, type AuditEntry } from "../../audit/audit-logger.js";
 import { PluginRuntime } from "../../plugins/runtime.js";
 import type { PythonRuntimeBootstrapper } from "../../main/python-runtime.js";
 import { currentInvocationOrigin } from "../../plugins/runtime/origin-chain.js";
-import { recordEffect } from "../../permissions/effect-ledger.js";
+import { recordChokepoint, recordEffect } from "../../permissions/effect-ledger.js";
 import { startPluginDevWatcher } from "../../plugins/dev-watcher.js";
 import { PluginDeploymentGuard } from "../../plugins/deployment-guard.js";
 // #958 round-1 security MEDIUM — read installSource from the registry so
@@ -1154,8 +1154,9 @@ export async function initPluginRuntime(
       //   the underlying bus rejects cross-plugin observation.
       config: {
         get: <T = unknown>(key: string): T | undefined => {
-          // Effect ledger (observability) — a config read is non-mutating.
-          recordEffect({ kind: "config.get", effect: "read", target: key });
+          // Effect ledger (observability) — a config read is non-mutating
+          // (effect class sourced from the CHOKEPOINT_EFFECT SOT).
+          recordChokepoint("config.get", key);
           // PR #894 B2 follow-up — merge wildcard slot (`hostApiVendor` etc.)
           // BETWEEN manifest defaults and plugin-specific overrides so a
           // plugin's own config can shadow a host-injected value (rare, but
@@ -1176,9 +1177,10 @@ export async function initPluginRuntime(
             );
           }
           // Effect ledger (observability) — config.set persists state: a
-          // host-mediated WRITE. Recorded after the secret-field reject so a
-          // rejected set is not counted as a successful mutation.
-          recordEffect({ kind: "config.set", effect: "write", target: key });
+          // host-mediated WRITE (effect class sourced from the CHOKEPOINT_EFFECT
+          // SOT). Recorded after the secret-field reject so a rejected set is not
+          // counted as a successful mutation.
+          recordChokepoint("config.set", key);
           const current = settingsService.getPluginConfig(pluginId) ?? {};
           // structuredClone so we never accidentally hand the plugin our
           // internal record reference.
@@ -1236,8 +1238,9 @@ export async function initPluginRuntime(
       },
       emitEvent: (type, data) => {
         // Effect ledger (observability) — an emitted event is an in-memory bus
-        // signal that persists nothing on its own; treated as a read.
-        recordEffect({ kind: "emitEvent", effect: "read", target: type });
+        // signal that persists nothing on its own; treated as a read (effect
+        // class sourced from the CHOKEPOINT_EFFECT SOT).
+        recordChokepoint("emitEvent", type);
         plog("debug", { pluginId, phase: PluginPhase.CAPABILITY_CHECK, eventType: type }, "checking emit capability");
         const manifest = pluginRuntime?.getPluginManifest(pluginId);
         const manifestCapabilities = manifest?.capabilities ?? [];
@@ -1364,8 +1367,9 @@ export async function initPluginRuntime(
         // can't bloat the JSONL with megabyte-long denied keys.
         const auditKey = key.slice(0, 64);
         // Effect ledger (observability) — a secret READ (already allow-list
-        // gated below). `target` is the capped key NAME, never the value.
-        recordEffect({ kind: "getSecret", effect: "read", target: auditKey });
+        // gated below; effect class sourced from the CHOKEPOINT_EFFECT SOT).
+        // `target` is the capped key NAME, never the value.
+        recordChokepoint("getSecret", auditKey);
         // Tier 1 — own namespace.
         if (key.startsWith(`plugin.${pluginId}.`)) {
           const value = settingsService.getSecret(key);
@@ -1484,8 +1488,10 @@ export async function initPluginRuntime(
         // Effect ledger (observability) — re-entering the executor re-gates and
         // opens a FRESH ledger scope for the nested tool, so its own mutating
         // effects are counted there, not here. Record only a nested READ marker
-        // on the outer ledger to avoid double-counting.
-        recordEffect({ kind: "callTool", effect: "read", target: toolName });
+        // on the outer ledger to avoid double-counting (effect class sourced from
+        // the CHOKEPOINT_EFFECT SOT). If the inner tool MUTATES, the executor
+        // additionally propagates a `callTool-child` WRITE onto this outer ledger.
+        recordChokepoint("callTool", toolName);
         pluginRuntime.assertPluginToolAccess(pluginId, toolName);
         const invoker = lateBinding.pluginToolInvokerRef.fn;
         if (!invoker) {
@@ -1571,11 +1577,14 @@ export async function initPluginRuntime(
         }
         const url = decision.url;
         // Effect ledger (observability) — record the host-observed effect for
-        // this egress. A mutating verb (POST/PUT/PATCH/DELETE) is a write.
+        // this egress. A mutating verb (POST/PUT/PATCH/DELETE) is a write
+        // (`decision.effect` from the methodEffect SOT). `target` is ORIGIN-ONLY
+        // (no pathname/query) to match openExternalUrl and avoid recording an
+        // id/token that a path segment could carry — DLP parity.
         recordEffect({
           kind: "hostFetch",
           effect: decision.effect,
-          target: `${url.host}${url.pathname}`,
+          target: url.origin,
         });
         incrementHostSecretCounter("hostFetch_egress", pluginId, "egress");
         try {
@@ -1618,8 +1627,9 @@ export async function initPluginRuntime(
       // returns `socketPath: null` (legacy TCP fallback signal).
       spawnWorker: (workerSpec) => {
         // Effect ledger (observability) — spawning a confined worker is a
-        // host-mediated side effect (process creation): a write.
-        recordEffect({ kind: "spawnWorker", effect: "write" });
+        // host-mediated side effect (process creation): a write (effect class
+        // sourced from the CHOKEPOINT_EFFECT SOT).
+        recordChokepoint("spawnWorker");
         return spawnWorker({ ...workerSpec, pluginId });
       },
       // ─── §B3 외부 URL viewer + host public preference read ────────────
@@ -1632,19 +1642,19 @@ export async function initPluginRuntime(
       //   거부된 key 는 throw 하지 않고 undefined 반환 + 1회/key/session warn.
       openExternalUrl: async (url: string): Promise<void> => {
         // Effect ledger (observability) — opening an external URL drives an
-        // out-of-app side effect (system browser / link window): a write.
-        // `target` is the origin only — query strings can carry sensitive data.
-        recordEffect({
-          kind: "openExternalUrl",
-          effect: "write",
-          target: (() => {
+        // out-of-app side effect (system browser / link window): a write (effect
+        // class sourced from the CHOKEPOINT_EFFECT SOT). `target` is the origin
+        // only — query strings can carry sensitive data.
+        recordChokepoint(
+          "openExternalUrl",
+          (() => {
             try {
               return new URL(url).origin;
             } catch {
               return undefined;
             }
           })(),
-        });
+        );
         await routeExternalUrl({
           url,
           pluginId,
