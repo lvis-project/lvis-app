@@ -248,13 +248,27 @@ export class VercelUnifiedProvider implements LLMProvider {
       // carries its own flag — multi-user safe: the server is stateless, so
       // one user with thinking ON and another with it OFF never interfere.
       if (slot === "openai-compatible") {
+        const compatOptions: Record<string, unknown> = {
+          chat_template_kwargs: {
+            enable_thinking: params.enableThinking === true,
+          },
+        };
+        // finish_reason=length CONTINUATION. The conversation loop appended a
+        // partial assistant turn as the FINAL message and set this flag. vLLM's
+        // `continue_final_message` re-opens that trailing assistant message and
+        // resumes generation with ZERO seam tokens (no role header, no BOS, no
+        // re-emitted <think>). It is mutually exclusive with
+        // add_generation_prompt, which we pin to false. Both are top-level vLLM
+        // body fields that the @ai-sdk openai-compatible provider forwards
+        // verbatim from providerOptions[name]. Requires last message
+        // role === "assistant" (guaranteed by the loop's wire injection).
+        if (params.continuationPrefill === true) {
+          compatOptions.continue_final_message = true;
+          compatOptions.add_generation_prompt = false;
+        }
         providerOptions = {
           ...(providerOptions ?? {}),
-          [OPENAI_COMPAT_PROVIDER_NAME]: {
-            chat_template_kwargs: {
-              enable_thinking: params.enableThinking === true,
-            },
-          },
+          [OPENAI_COMPAT_PROVIDER_NAME]: compatOptions,
         };
       }
 
