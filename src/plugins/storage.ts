@@ -178,78 +178,76 @@ export function createPluginStorage(
   // for the future read-recognition gate. Wrapping at this construction boundary
   // (rather than per-method) covers EVERY storage instance uniformly — the four
   // `createPluginStorage` call-sites and any future storage method.
-  return instrumentEffectsByPath(
-    {
-      resolve: (...segments) => guardLexicalOnly(segments.length === 0 ? "." : join(...segments)),
+  const raw: PluginStorage = {
+    resolve: (...segments) => guardLexicalOnly(segments.length === 0 ? "." : join(...segments)),
 
-      async read(rel) {
-        const target = await guard(rel);
-        return readFile(target);
-      },
+    async read(rel) {
+      const target = await guard(rel);
+      return readFile(target);
+    },
 
-      async readText(rel, encoding = "utf-8") {
-        const target = await guard(rel);
-        return readFile(target, encoding);
-      },
+    async readText(rel, encoding = "utf-8") {
+      const target = await guard(rel);
+      return readFile(target, encoding);
+    },
 
-      async readJson<T = unknown>(rel: string): Promise<T | null> {
-        const target = await guard(rel);
-        try {
-          const text = await readFile(target, "utf-8");
-          return JSON.parse(text) as T;
-        } catch (err) {
-          if ((err as NodeJS.ErrnoException).code === "ENOENT") return null;
-          throw err;
-        }
-      },
+    async readJson<T = unknown>(rel: string): Promise<T | null> {
+      const target = await guard(rel);
+      try {
+        const text = await readFile(target, "utf-8");
+        return JSON.parse(text) as T;
+      } catch (err) {
+        if ((err as NodeJS.ErrnoException).code === "ENOENT") return null;
+        throw err;
+      }
+    },
 
-      async write(rel, data, encoding) {
-        const target = await guard(rel);
-        await ensureParent(target);
-        if (typeof data === "string") {
-          await writeFile(target, data, encoding ?? "utf-8");
-        } else {
-          await writeFile(target, data);
-        }
-      },
+    async write(rel, data, encoding) {
+      const target = await guard(rel);
+      await ensureParent(target);
+      if (typeof data === "string") {
+        await writeFile(target, data, encoding ?? "utf-8");
+      } else {
+        await writeFile(target, data);
+      }
+    },
 
-      async writeJson<T>(rel: string, value: T, indent = 2): Promise<void> {
-        const target = await guard(rel);
-        await ensureParent(target);
-        await writeFile(target, JSON.stringify(value, null, indent), "utf-8");
-      },
+    async writeJson<T>(rel: string, value: T, indent = 2): Promise<void> {
+      const target = await guard(rel);
+      await ensureParent(target);
+      await writeFile(target, JSON.stringify(value, null, indent), "utf-8");
+    },
 
-      async rm(rel, options) {
-        const target = await guard(rel);
-        await rm(target, { recursive: options?.recursive ?? false, force: true });
-      },
+    async rm(rel, options) {
+      const target = await guard(rel);
+      await rm(target, { recursive: options?.recursive ?? false, force: true });
+    },
 
-      async list(rel = ".") {
-        const target = await guard(rel);
-        try {
-          return await readdir(target);
-        } catch (err) {
-          if ((err as NodeJS.ErrnoException).code === "ENOENT") return [];
-          throw err;
-        }
-      },
+    async list(rel = ".") {
+      const target = await guard(rel);
+      try {
+        return await readdir(target);
+      } catch (err) {
+        if ((err as NodeJS.ErrnoException).code === "ENOENT") return [];
+        throw err;
+      }
+    },
 
-      async exists(rel) {
-        const target = await guard(rel);
-        try {
-          await stat(target);
-          return true;
-        } catch (err) {
-          if ((err as NodeJS.ErrnoException).code === "ENOENT") return false;
-          throw err;
-        }
-      },
+    async exists(rel) {
+      const target = await guard(rel);
+      try {
+        await stat(target);
+        return true;
+      } catch (err) {
+        if ((err as NodeJS.ErrnoException).code === "ENOENT") return false;
+        throw err;
+      }
+    },
 
-      async mkdir(rel) {
-        const target = await guard(rel);
-        await mkdir(target, { recursive: true });
-      },
-    } satisfies PluginStorage,
-    "storage",
-  );
+    async mkdir(rel) {
+      const target = await guard(rel);
+      await mkdir(target, { recursive: true });
+    },
+  };
+  return instrumentEffectsByPath(raw, "storage");
 }
