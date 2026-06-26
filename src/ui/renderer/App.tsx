@@ -126,10 +126,6 @@ function readInitialAppMode(): AppMode {
 export function App() {
   const { t } = useTranslation();
   const api = useMemo(() => getApi(), []);
-  // App auto-update badge state — surfaces the main-process electron-updater
-  // events as a permanent badge next to the Home button. User-gated:
-  // download/install only run on explicit badge click.
-  const appUpdate = useAppUpdate(api);
 
   // Block default file:// navigation when a file is dropped onto the window
   // (the drag-drop indexing feature was removed; this guard is all that remains).
@@ -165,6 +161,26 @@ export function App() {
     upsertPersistent: statusUpsertPersistent,
     removePersistent: statusRemovePersistent,
   } = useStatusBar({ api });
+
+  // App auto-update badge — surfaces main-process electron-updater events as a
+  // permanent badge next to the Home button. User-gated: download/install only
+  // run on explicit badge click. Declared after useStatusBar so the unsigned-
+  // build manual-install fallback can raise a toast: an unsigned macOS build
+  // can't self-install (Squirrel.Mac needs a Developer ID), so the main process
+  // opens the release page and signals "manual-install-required" here instead
+  // of leaving the badge a dead button.
+  const appUpdate = useAppUpdate(api, () => {
+    // Unsigned macOS build can't self-install (Squirrel.Mac needs a Developer
+    // ID); the main process opened the LVIS homepage, which hosts the manual
+    // update guide. Tell the user to finish up, quit, then update per the guide.
+    statusPushToast({
+      severity: "warning",
+      message:
+        "작업을 마무리하고 종료 후 업데이트를 진행하세요. 홈페이지에 나와있는 가이드에 따라 진행해 주세요.",
+      ttlMs: 20000,
+    });
+  });
+
   const [question, setQuestion] = useState("");
   const chatEndRef = useRef<HTMLDivElement>(null);
   const turnRequestRef = useRef(0);

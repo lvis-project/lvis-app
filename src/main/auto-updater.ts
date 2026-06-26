@@ -21,7 +21,9 @@
  * All credentials/publish config are declared in package.json `build.publish`
  * — NEVER in code. Users supply signing certs + GH_TOKEN at release time.
  */
+import { spawnSync } from "node:child_process";
 import { createRequire } from "node:module";
+import { app, shell } from "electron";
 import type { BrowserWindow, IpcMain, IpcMainInvokeEvent } from "electron";
 import type { AuditLogger } from "../audit/audit-logger.js";
 import { auditUnauthorized, validateHostRendererSender } from "../ipc/gated.js";
@@ -50,6 +52,14 @@ export interface AutoUpdaterDeps {
   updaterFactory?: () => UpdaterLike;
   /** Test seam for the native destructive-action confirmation dialog. */
   confirmInstallForTest?: () => Promise<boolean>;
+  /**
+   * Test seam for the macOS self-install capability check. Production resolves
+   * it via a `codesign` probe (Developer ID present?); tests inject a boolean
+   * so the install path is deterministic across CI platforms.
+   */
+  canSelfInstall?: () => boolean;
+  /** Test seam for opening the manual-update guide. Defaults to shell.openExternal. */
+  openExternal?: (url: string) => void;
   /** Persisted app-update skip state. Exact-version only; a newer version surfaces again. */
   getSkippedVersion?: () => string | undefined;
   setSkippedVersion?: (version: string) => Promise<void> | void;
@@ -82,6 +92,48 @@ export interface UpdaterLike {
 // rather than introducing a fifth variant whose badge UX is unclear.
 
 export const CHECK_INTERVAL_MS = 4 * 60 * 60 * 1000;
+
+/**
+ * macOS Squirrel.Mac can only swap a running app bundle in place when that
+ * bundle is signed with a Developer ID — the staged update's signature must
+ * chain to the same identity as the running app. Ad-hoc / unsigned builds
+ * (LVIS ships these whenever a release runs without CSC_LINK) make
+ * quitAndInstall a silent no-op: the update downloads but never applies, so
+ * "apply update" looks like a dead button. We detect that up front so the
+ * install action can fall back to a manual download instead.
+ *
+ * Linux (AppImage) and Windows (NSIS) self-update without a Developer-ID
+ * signature, so this gate is darwin-only. Cached — a running process can't
+ * change its own signature.
+ */
+let _canSelfInstall: boolean | null = null;
+function canSelfInstall(): boolean {
+  if (_canSelfInstall !== null) return _canSelfInstall;
+  if (process.platform !== "darwin") {
+    _canSelfInstall = true;
+    return _canSelfInstall;
+  }
+  try {
+    // `codesign -dv` writes its report to stderr; the Developer ID authority
+    // line is present only for a properly signed bundle (absent for adhoc).
+    const r = spawnSync("/usr/bin/codesign", ["-dv", "--verbose=2", app.getPath("exe")], {
+      encoding: "utf8",
+    });
+    const report = `${r.stdout ?? ""}${r.stderr ?? ""}`;
+    _canSelfInstall = /Authority=Developer ID Application/.test(report);
+  } catch {
+    _canSelfInstall = false;
+  }
+  return _canSelfInstall;
+}
+
+/**
+ * LVIS homepage — hosts the manual update guide (download + replace steps).
+ * Opening it is the unsigned-build fallback for "apply update": the user
+ * finishes their work, quits, and follows the guide there since the app can't
+ * self-install an unsigned macOS build.
+ */
+const UPDATE_GUIDE_URL = "https://lvisai.xyz";
 
 export function createAutoUpdater(deps: AutoUpdaterDeps): {
   start: () => void;
@@ -272,7 +324,28 @@ export function createAutoUpdater(deps: AutoUpdaterDeps): {
       broadcast({ kind: "idle" });
       return { ok: false, reason: "update-skipped" };
     }
-    log.info("user-initiated install for v%s", lastState.version);
+    const version = lastState.version;
+    log.info("user-initiated install for v%s", version);
+    // Open the LVIS homepage update guide (test-seamed). Wrapped so a missing
+    // shell binding can never turn the fallback into an unhandled throw.
+    const openUpdateGuide = (): void => {
+      try {
+        (deps.openExternal ?? ((url: string) => void shell.openExternal(url)))(UPDATE_GUIDE_URL);
+      } catch (err) {
+        log.warn("failed to open update guide: %s", (err as Error).message);
+      }
+    };
+    // Unsigned/ad-hoc macOS builds physically cannot self-install (Squirrel.Mac
+    // requires a Developer ID). Rather than call quitAndInstall() and leave a
+    // dead button, open the homepage update guide and tell the renderer to
+    // surface that path. `reason: "manual-install-required"` is the signal the
+    // badge uses (see use-app-update.ts).
+    const selfInstallable = deps.canSelfInstall ? deps.canSelfInstall() : canSelfInstall();
+    if (!selfInstallable) {
+      log.info("self-install unsupported (unsigned build) — opening update guide for v%s", version);
+      openUpdateGuide();
+      return { ok: false, reason: "manual-install-required" };
+    }
     try {
       // Main-owned confirmation runs before this function is called from IPC,
       // so by the time we get here the user has already accepted. The first
@@ -286,8 +359,12 @@ export function createAutoUpdater(deps: AutoUpdaterDeps): {
     } catch (err) {
       installInProgress = false;
       clearAppUpdateInstallRequested();
-      log.warn("quitAndInstall failed: %s", (err as Error).message);
-      return { ok: false, reason: (err as Error).message };
+      // Reactive safety net: if quitAndInstall throws despite the signature
+      // check passing (e.g. a partially-signed bundle), still hand the user a
+      // working install path instead of swallowing the failure silently.
+      log.warn("quitAndInstall failed: %s — opening update guide", (err as Error).message);
+      openUpdateGuide();
+      return { ok: false, reason: "manual-install-required" };
     }
   };
 
