@@ -108,12 +108,13 @@ export const MODEL_COMPLEXITY_MAP: Readonly<
     mid: "gemini-2.5-flash",
     high: "gemini-2.5-pro",
   }),
-  // Custom OpenAI-compatible endpoints expose a single endpoint-defined model,
-  // so every tier resolves to it (the dropdown lists exactly this id).
+  // Custom OpenAI-compatible endpoints are endpoint-defined; every tier resolves
+  // to the primary cluster model (the dropdown's default), which must also be
+  // present in LLM_VENDOR_MODEL_OPTIONS[vendor].
   "openai-compatible": Object.freeze({
-    low: "qwen3.6",
-    mid: "qwen3.6",
-    high: "qwen3.6",
+    low: "Qwen3.6-35B-A3B-NVFP4",
+    mid: "Qwen3.6-35B-A3B-NVFP4",
+    high: "Qwen3.6-35B-A3B-NVFP4",
   }),
 });
 
