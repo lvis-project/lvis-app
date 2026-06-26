@@ -66,3 +66,20 @@ export function supportsVision(vendor: LLMVendor, model: string): boolean {
       return false;
   }
 }
+
+/**
+ * finish_reason=length CONTINUATION capability. When a round ends truncated
+ * (stopReason "max_tokens") the conversation loop re-invokes the model to
+ * CONTINUE the partial answer instead of showing it cut off. The mechanism is
+ * vendor-specific; v1 ships only the vLLM/openai-compatible path (native
+ * `continue_final_message`, zero-seam). Other vendors fall back to the existing
+ * truncation notice until their prefill path is wired:
+ *   - claude  → assistant-prefill (blocked while extended thinking is ON)
+ *   - openai/gemini/copilot/azure-foundry/vertex → append partial + "continue"
+ *     user reprompt + host stitch
+ * This predicate is the SINGLE seam: extend it (and add the matching adapter
+ * branch) to light up another vendor.
+ */
+export function vendorSupportsLengthContinuation(vendor: LLMVendor): boolean {
+  return vendor === "openai-compatible";
+}
