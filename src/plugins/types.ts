@@ -866,6 +866,13 @@ export interface SpawnedPluginWorker {
   onStdout(listener: (chunk: string) => void): void;
   /** Subscribe to worker stderr (utf-8 chunks). */
   onStderr(listener: (chunk: string) => void): void;
+  /**
+   * Subscribe to worker EXIT (crash or normal). Fires once when the worker
+   * process exits. The handle owns lifecycle, so a consumer MUST use this to
+   * detect a crashed worker (mark it dead / restart) — without it `isRunning`
+   * style state can never go false after a crash.
+   */
+  onExit(listener: (info: { code: number | null; signal: NodeJS.Signals | null }) => void): void;
 }
 
 /**
