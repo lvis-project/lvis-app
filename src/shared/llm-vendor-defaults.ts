@@ -146,10 +146,11 @@ export const LLM_VENDOR_MODEL_OPTIONS: Readonly<Record<LLMVendor, readonly strin
       "gemini-2.0-flash",
       "gemini-2.5-flash-lite",
     ],
-    // Self-hosted OpenAI-compatible endpoints (vLLM / SGLang / llama.cpp …).
-    // The model id is endpoint-defined; the list seeds the dropdown with the
-    // known LVIS vLLM deployment. Users point baseUrl at their own server.
-    "openai-compatible": ["qwen3.6"],
+    // Self-hosted OpenAI-compatible endpoints (vLLM / SGLang / llama.cpp …),
+    // including a LiteLLM gateway that fronts several backends behind one /v1
+    // and routes by model id. The list seeds the dropdown with the known LVIS
+    // cluster models; users point baseUrl at their own gateway/server.
+    "openai-compatible": ["qwen3.6", "nemotron"],
   });
 
 /**
