@@ -378,7 +378,7 @@ describe("VercelUnifiedProvider claude — adapter wiring (mocked streamText)", 
   it("claude-4.x + thinking uses adaptive thinking; tools add beta header", async () => {
     vi.resetModules();
     const streamTextSpy = vi.fn(() => ({
-      fullStream: (async function* () {
+      stream: (async function* () {
         yield {
           type: "finish",
           finishReason: "stop",
@@ -436,7 +436,7 @@ describe("VercelUnifiedProvider claude — adapter wiring (mocked streamText)", 
   it("claude-3.x — no `context-1m-2025-08-07` header (model lacks contextWindow1MBeta)", async () => {
     vi.resetModules();
     const streamTextSpy = vi.fn(() => ({
-      fullStream: (async function* () {
+      stream: (async function* () {
         yield {
           type: "finish",
           finishReason: "stop",
@@ -478,7 +478,7 @@ describe("VercelUnifiedProvider claude — adapter wiring (mocked streamText)", 
   it("claude-3.x + thinking uses budget-based enabled thinking", async () => {
     vi.resetModules();
     const streamTextSpy = vi.fn(() => ({
-      fullStream: (async function* () {
+      stream: (async function* () {
         yield {
           type: "finish",
           finishReason: "stop",
@@ -525,7 +525,7 @@ describe("VercelUnifiedProvider claude — adapter wiring (mocked streamText)", 
   it("thinking disabled → no providerOptions, no beta header", async () => {
     vi.resetModules();
     const streamTextSpy = vi.fn(() => ({
-      fullStream: (async function* () {
+      stream: (async function* () {
         yield {
           type: "finish",
           finishReason: "stop",

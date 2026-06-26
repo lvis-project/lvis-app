@@ -41,7 +41,7 @@ describe.skipIf(!SHOULD_RUN)("probe: openai gpt-5 responses API", () => {
         },
       });
 
-      for await (const part of result.fullStream) {
+      for await (const part of result.stream) {
         order.push((part as any).type);
       }
     } finally {
