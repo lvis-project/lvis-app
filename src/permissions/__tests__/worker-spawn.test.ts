@@ -361,6 +361,37 @@ describe("spawnWorker — idempotent any-exit cleanup", () => {
     child.emit("exit", 0, "SIGTERM");
     expect(cleanupMock).toHaveBeenCalledTimes(1);
   });
+
+  it("onExit forwards the child's exit (code + signal) to the consumer", async () => {
+    withPlatform("darwin");
+    gateActive = true;
+    setActiveSandboxCapability({
+      kind: "asrt",
+      confidence: "verified",
+      platform: "darwin",
+      reason: "ASRT active",
+      confines: { filesystem: true, process: true, network: true },
+    });
+    wrapWorkerCommandMock.mockResolvedValueOnce({
+      argv: ["/bin/bash", "-c", "wrapped"],
+      env: { ...process.env },
+    });
+    const child = new StubWorkerChild();
+    spawnMock.mockReturnValueOnce(child);
+
+    const worker = await spawnWorker({
+      pluginId: "local-indexer",
+      workerId: "embed",
+      command: "/opt/worker",
+    });
+
+    // The consumer owns lifecycle via the handle — onExit is how it learns the
+    // worker died (a crash with no onExit would leave the consumer's state stuck).
+    const exits: Array<{ code: number | null; signal: NodeJS.Signals | null }> = [];
+    worker.onExit((info) => exits.push(info));
+    child.emit("exit", 3, null);
+    expect(exits).toEqual([{ code: 3, signal: null }]);
+  });
 });
 
 // ─── Windows + gate ON → legacy plain spawn (no UDS) ────────
