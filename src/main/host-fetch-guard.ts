@@ -54,14 +54,33 @@ export interface HostFetchDeny {
 export interface HostFetchAllow {
   ok: true;
   url: URL;
+  /** Normalized HTTP method this decision was evaluated for (uppercased). */
+  method: string;
+  /**
+   * Host-observed effect class derived from the method alone (NON-FORGEABLE —
+   * the host owns the verb at the egress chokepoint, not the plugin). Safe verbs
+   * (GET/HEAD/OPTIONS) are reads; everything else is a write. Observability only:
+   * this changes NO egress decision — the allow-list / SSRF / deny-by-default
+   * layers below are unaffected.
+   */
+  effect: "read" | "write";
 }
 
 export type HostFetchDecision = HostFetchAllow | HostFetchDeny;
+
+/** Method-safe verbs whose host-observed effect is a read. */
+const READ_METHODS = new Set(["GET", "HEAD", "OPTIONS"]);
 
 export interface HostFetchGuardInput {
   pluginId: string;
   /** Raw target passed by the plugin (string or URL, already stringified). */
   rawUrl: string;
+  /**
+   * HTTP method of the request — defaults to `"GET"` when omitted (matches the
+   * `init.method` default at the hostFetch chokepoint). Used ONLY to compute the
+   * host-observed {@link HostFetchAllow.effect}; it does not gate egress.
+   */
+  method?: string;
   /** `manifest.networkAccess.allowedDomains` — deny-by-default when empty. */
   allowedDomains: string[];
   /**
@@ -98,10 +117,16 @@ export async function evaluateHostFetch(
   const {
     pluginId,
     rawUrl,
+    method = "GET",
     allowedDomains,
     allowPrivateNetworks = false,
     ensurePublicUrl = ensurePublicHttpUrl,
   } = input;
+  // Host-observed effect — derived from the verb the host holds at the
+  // chokepoint, not from anything the plugin self-declares. Recorded on the
+  // allow decision; it does not participate in any deny branch below.
+  const normalizedMethod = method.toUpperCase();
+  const effect: "read" | "write" = READ_METHODS.has(normalizedMethod) ? "read" : "write";
 
   let url: URL;
   try {
@@ -163,5 +188,5 @@ export async function evaluateHostFetch(
     );
   }
 
-  return { ok: true, url };
+  return { ok: true, url, method: normalizedMethod, effect };
 }

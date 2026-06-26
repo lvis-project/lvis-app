@@ -58,7 +58,8 @@ import { maskSensitiveData } from "../audit/dlp-filter.js";
 import type { RiskVerdict, ToolInvocationContext } from "../permissions/reviewer/risk-classifier.js";
 import { RuleBasedRiskClassifier, maxVerdict } from "../permissions/reviewer/risk-classifier.js";
 import { inspectHostRisk } from "../permissions/reviewer/host-risk-inspector.js";
-import { emitRiskShadowLog } from "../permissions/reviewer/risk-shadow-log.js";
+import { emitRiskShadowLog, emitEffectShadowLog } from "../permissions/reviewer/risk-shadow-log.js";
+import { createEffectLedger, runWithEffectLedger, type EffectLedger } from "../permissions/effect-ledger.js";
 import { resolveReviewerSandboxCapability } from "../permissions/sandbox-capability.js";
 // Store B — exact-tuple approval memory (args-scoped, session+persistent).
 // See ./executor.ts foreground modal-skip block + user-approval-store.ts.
@@ -888,14 +889,17 @@ export class ToolExecutor {
       : declaredCategory;
 
     const enforced = this.hostClassifiesRiskProvider();
-    emitRiskShadowLog({
-      toolName: tool.name,
-      source: tool.source,
-      ...(tool.pluginId ? { pluginId: tool.pluginId } : {}),
-      declaredCategory,
-      hostDerivedCategory,
-      enforced,
-    });
+    emitRiskShadowLog(
+      {
+        toolName: tool.name,
+        source: tool.source,
+        ...(tool.pluginId ? { pluginId: tool.pluginId } : {}),
+        declaredCategory,
+        hostDerivedCategory,
+        enforced,
+      },
+      this.auditLogger,
+    );
 
     return enforced && eligibleForHostDerivation
       ? hostDerivedCategory
@@ -1579,6 +1583,10 @@ export class ToolExecutor {
     // Permission policy host-classifies-risk — shadow mode (always) + enforced
     // category (flag-gated). The declared category resolved above is the input;
     // when the flag is off this is a no-op and `invocationCategory` is unchanged.
+    // Snapshot the DECLARED category before resolveEnforcedCategory may swap in
+    // the host-derived one (flag on) — the effect shadow reconciles the declared
+    // category against the host-observed effect summary post-execution.
+    const declaredCategoryForEffectShadow = invocationCategory;
     invocationCategory = this.resolveEnforcedCategory(
       tool,
       invocationCategory,
@@ -1586,6 +1594,10 @@ export class ToolExecutor {
       invocationAllowedScope.directories,
     );
     meta.category = invocationCategory;
+    // Per-invocation effect ledger (observability only — no enforcement). A
+    // fresh ledger per executeOne; bound to the async chain around Step 6 so the
+    // in-process plugin hostApi closures record their host-mediated effects here.
+    const effectLedger: EffectLedger = createEffectLedger();
     const makeEvaluationContext = (input: {
       pathFields: readonly string[];
       targetFilePaths?: readonly string[];
@@ -2537,7 +2549,12 @@ export class ToolExecutor {
     const outcome = await runWithCeiling(
       async (signal) => {
         const ctx: ToolExecutionContext = { ...executionContext, abortSignal: signal };
-        return tool.execute(finalInput, ctx);
+        // Bind the per-invocation effect ledger for the async chain of this
+        // execution so the in-process plugin hostApi closures record onto it.
+        // AsyncLocalStorage propagates through the loopback transport (the same
+        // path `currentInvocationOrigin` relies on); a re-entrant callTool opens
+        // its own ledger scope, so nested effects never double-count here.
+        return runWithEffectLedger(effectLedger, () => tool.execute(finalInput, ctx));
       },
       effectiveCeilingMs,
       abortSignal,
@@ -2564,6 +2581,26 @@ export class ToolExecutor {
             ? t("be_executor.toolExecutionCancelled")
             : outcome.error.message || t("be_executor.toolExecutionUnknownError");
       isError = true;
+    }
+
+    // ── Effect shadow (observability only) ───────────────────────────
+    // The execution has returned, so the per-invocation ledger now holds the
+    // host-observed effects. Emit the audit-grade EFFECT shadow record for
+    // plugin/MCP invocations (builtins never touch the hostApi closures, so
+    // their ledger is empty — no reconciliation value). `hasMutatingEffect` is
+    // the host-owned read/write classification for this call; it drives NO
+    // permission decision here — a later read-recognition gate consumes it.
+    if (tool.source === "plugin" || tool.source === "mcp") {
+      emitEffectShadowLog(
+        {
+          toolName: tool.name,
+          source: tool.source,
+          ...(tool.pluginId ? { pluginId: tool.pluginId } : {}),
+          declaredCategory: declaredCategoryForEffectShadow,
+          hostObservedEffect: effectLedger.summary(),
+        },
+        this.auditLogger,
+      );
     }
 
     if (terminationReason === "user-abort") {
