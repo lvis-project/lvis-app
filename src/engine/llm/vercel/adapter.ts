@@ -20,7 +20,6 @@ import type {
 import { genericToModelMessages } from "./message-mapper.js";
 import { fullStreamToStreamEvent } from "./stream-mapper.js";
 import { mapAiSdkErrorToLvis } from "./error-mapper.js";
-import { createLogger } from "../../../lib/logger.js";
 import { lookupPricing } from "../../../shared/pricing-data.js";
 import {
   normalizeProviderToolAliasText,
@@ -28,7 +27,6 @@ import {
   PROVIDER_TOOL_SEARCH_TEXT_ALIASES,
 } from "../../../shared/tool-name-aliases.js";
 import { TOOL_SEARCH_TOOL_NAME } from "../../../tools/registry.js";
-const log = createLogger("adapter");
 
 /**
  * Vendor slot recognised by VercelUnifiedProvider. Extends LLMVendor with
@@ -39,6 +37,16 @@ const log = createLogger("adapter");
 export type VercelVendor = LLMVendor | "openai-compatible";
 
 const COPILOT_BASE_URL = "https://models.github.ai/inference";
+/**
+ * Provider name handed to `createOpenAICompatible({ name })`. The @ai-sdk
+ * openai-compatible model derives `providerOptionsName` from this (the part
+ * before the first "."), and forwards any *unknown* keys under
+ * `providerOptions[name]` straight into the HTTP request body. We use that
+ * passthrough to ship vLLM's `chat_template_kwargs` per request. Keep the
+ * createOpenAICompatible `name` and the providerOptions key in lockstep via
+ * this single constant — a drift would silently drop the thinking toggle.
+ */
+const OPENAI_COMPAT_PROVIDER_NAME = "lvis-compat";
 // Tool-name aliases applied ONLY on the OpenAI Responses wire. Keep this to
 // HOST builtins (tool_search) — never alias a plugin/MCP tool here. The
 // provider-as-oracle guard (engine/llm/rejected-tool-schema.ts) drops a
@@ -147,7 +155,6 @@ export interface VercelProviderExtras {
 }
 
 export class VercelUnifiedProvider implements LLMProvider {
-  private static warnedCompatThinking = false;
   readonly vendor: LLMVendor;
   private readonly vendorSlot: VercelVendor;
   private readonly apiKey: string;
@@ -214,19 +221,6 @@ export class VercelUnifiedProvider implements LLMProvider {
         (slot === "copilot" && isGpt5 && hasTools) ||
         (slot === "openai" && Boolean(this.baseUrl) && isGpt5 && hasTools);
 
-      // One-shot warn: openai-compatible silently ignores enableThinking.
-      if (
-        slot === "openai-compatible" &&
-        params.enableThinking === true &&
-        !VercelUnifiedProvider.warnedCompatThinking
-      ) {
-        VercelUnifiedProvider.warnedCompatThinking = true;
-        log.warn(
-          "enableThinking=true is silently ignored " +
-            "for vendor=openai-compatible (endpoint does not expose reasoning_effort).",
-        );
-      }
-
       const useReasoning =
         params.enableThinking === true &&
         isOpenAIReasoning &&
@@ -245,6 +239,24 @@ export class VercelUnifiedProvider implements LLMProvider {
               },
             }
           : undefined;
+
+      // OpenAI-compatible (vLLM/SGLang) reasoning toggle. Standard OpenAI Chat
+      // Completions has no reasoning switch, but vLLM honors a per-request
+      // `chat_template_kwargs.enable_thinking` that the model's chat template
+      // reads. The @ai-sdk openai-compatible provider forwards unknown keys
+      // under providerOptions[name] into the request body, so each request
+      // carries its own flag — multi-user safe: the server is stateless, so
+      // one user with thinking ON and another with it OFF never interfere.
+      if (slot === "openai-compatible") {
+        providerOptions = {
+          ...(providerOptions ?? {}),
+          [OPENAI_COMPAT_PROVIDER_NAME]: {
+            chat_template_kwargs: {
+              enable_thinking: params.enableThinking === true,
+            },
+          },
+        };
+      }
 
       // Anthropic-specific wiring: adaptive (4.x) vs budget-based (3.x) thinking
       // plus beta-header opt-ins (interleaved-thinking when thinking+tools,
@@ -404,7 +416,7 @@ export class VercelUnifiedProvider implements LLMProvider {
         );
       }
       const compat = createOpenAICompatible({
-        name: "lvis-compat",
+        name: OPENAI_COMPAT_PROVIDER_NAME,
         baseURL: this.baseUrl,
         apiKey: this.apiKey,
         ...(this.customFetch ? { fetch: this.customFetch } : {}),

@@ -24,6 +24,7 @@ export const LLM_VENDOR_LABELS: Record<LLMVendor, string> = {
   copilot: "GitHub Copilot",
   "azure-foundry": "Azure AI Foundry",
   "vertex-ai": "Google Vertex AI",
+  "openai-compatible": "Custom (OpenAI-compatible)",
 };
 
 export const LLM_DEFAULT_MODELS: Record<LLMVendor, string> = Object.freeze(
