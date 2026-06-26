@@ -71,7 +71,6 @@ export type ChokepointKind =
   | "callLlm" // body-bearing external LLM egress
   | "openAuthPartitionViewer" // silent-SSO load refreshes/persists partition cookies
   | "agentApprovalRequest" // registers an issuer entry + creates a pending gate entry
-  | "showOverlay" // pushes an overlay card to the renderer
   // READS — pure reads / self-subscriptions / host telemetry (non-mutating):
   | "config.onChange" // self-subscription to observe a config key (auto-cleaned)
   | "onEvent" // self-subscription to a host event (auto-cleaned)
@@ -129,7 +128,6 @@ export const CHOKEPOINT_EFFECT: Record<StaticChokepointKind, Effect> = {
   callLlm: "write",
   openAuthPartitionViewer: "write",
   agentApprovalRequest: "write",
-  showOverlay: "write",
   // Structural-completeness vocabulary — reads (pure reads / self-subscriptions
   // / host telemetry). A subscription registers the plugin to OBSERVE and is
   // auto-disposed on plugin disable, so it does not flip a tool to mutating;
@@ -290,7 +288,6 @@ export const HOSTAPI_EFFECT_BY_PATH: Record<string, HostApiEffectSpec> = {
   openAuthPartitionViewer: { kind: "openAuthPartitionViewer", targetFromArgs: urlOriginFromOpts },
   clearAuthPartition: { kind: "clearAuthPartition", targetFromArgs: firstStringArg },
   triggerConversation: { kind: "triggerConversation", targetFromArgs: objectStringField("source") },
-  showOverlay: { kind: "showOverlay" },
   // ─── agentApproval.* ──────────────────────────────────────────────────────
   "agentApproval.request": {
     kind: "agentApprovalRequest",

@@ -85,7 +85,7 @@ vi.mock("../../plugins/registry.js", () => ({
 
 import { initPluginRuntime } from "../../boot/steps/plugin-runtime.js";
 import { HOSTAPI_EFFECT_BY_PATH } from "../effect-kind.js";
-import { instrumentEffectsByPath } from "../hostapi-effect-recorder.js";
+import { instrumentEffectsByPath, isPlainNamespace } from "../hostapi-effect-recorder.js";
 import {
   createEffectLedger,
   runWithEffectLedger,
@@ -146,8 +146,22 @@ async function buildRealHostApi(): Promise<PluginHostApi> {
   );
 }
 
-/** Recursively collect every function-valued leaf method PATH (dotted). */
-function collectFunctionPaths(obj: unknown, prefix: string, out: string[]): void {
+/**
+ * Recursively collect every function-valued leaf method PATH (dotted) into
+ * `out`, AND every non-plain namespace path into `nonPlainNamespaces`. The
+ * recording wrapper only INSTRUMENTS plain namespaces (the shared
+ * {@link isPlainNamespace} predicate); a non-plain namespace (class instance /
+ * custom prototype) would pass the path-completeness check yet be copied
+ * verbatim and left UNINSTRUMENTED by the wrapper — a silent fail-open one level
+ * up. Flagging it here keeps the test and the wrapper on the SAME traversal
+ * surface so such a namespace fails CI and must be handled.
+ */
+function collectFunctionPaths(
+  obj: unknown,
+  prefix: string,
+  out: string[],
+  nonPlainNamespaces: string[],
+): void {
   if (obj === null || typeof obj !== "object") return;
   for (const key of Object.keys(obj as Record<string, unknown>)) {
     const value = (obj as Record<string, unknown>)[key];
@@ -155,7 +169,8 @@ function collectFunctionPaths(obj: unknown, prefix: string, out: string[]): void
     if (typeof value === "function") {
       out.push(path);
     } else if (value !== null && typeof value === "object" && !Array.isArray(value)) {
-      collectFunctionPaths(value, path, out);
+      if (!isPlainNamespace(value)) nonPlainNamespaces.push(path);
+      collectFunctionPaths(value, path, out, nonPlainNamespaces);
     }
   }
 }
@@ -169,7 +184,8 @@ describe("hostApi effect classification — STRUCTURAL completeness", () => {
   it("every function-valued method of the REAL hostApi is classified in the SOT", async () => {
     const hostApi = await buildRealHostApi();
     const paths: string[] = [];
-    collectFunctionPaths(hostApi, "", paths);
+    const nonPlainNamespaces: string[] = [];
+    collectFunctionPaths(hostApi, "", paths, nonPlainNamespaces);
 
     // Sanity: enumeration actually found the surface (guards against a refactor
     // that hides methods behind non-enumerable props and silently passes).
@@ -180,11 +196,40 @@ describe("hostApi effect classification — STRUCTURAL completeness", () => {
     expect(paths).toContain("openAuthPartitionViewer");
     expect(paths).toContain("registerKeywords");
 
+    // The wrapper only INSTRUMENTS plain namespaces; a non-plain namespace would
+    // pass the path check below yet be left uninstrumented by the wrapper. Assert
+    // there are none so the test and the wrapper agree on the traversal surface.
+    expect(
+      nonPlainNamespaces,
+      `Non-plain hostApi namespace(s) the recording wrapper would NOT instrument — make them plain objects or instrument explicitly: ${nonPlainNamespaces.join(", ")}`,
+    ).toEqual([]);
+
     const unmapped = paths.filter((p) => !(p in HOSTAPI_EFFECT_BY_PATH));
     expect(
       unmapped,
       `Uninstrumented hostApi method(s) — add to HOSTAPI_EFFECT_BY_PATH (effect-kind.ts): ${unmapped.join(", ")}`,
     ).toEqual([]);
+  });
+
+  it("a non-plain namespace is FLAGGED by the shared predicate (wrapper/test traversal alignment)", () => {
+    class CustomProtoNamespace {
+      // class field → an OWN-enumerable function property, but the prototype is
+      // CustomProtoNamespace.prototype (NOT Object.prototype) → non-plain.
+      doMutation = (): string => "mutated";
+    }
+    const fauxHostApi = { registerKeywords: () => {}, ns: new CustomProtoNamespace() };
+    const paths: string[] = [];
+    const nonPlainNamespaces: string[] = [];
+    collectFunctionPaths(fauxHostApi, "", paths, nonPlainNamespaces);
+
+    // Its method IS enumerated (so a path-only completeness check would pass)…
+    expect(paths).toContain("ns.doMutation");
+    // …but it is ALSO flagged as a non-plain namespace, which the completeness
+    // assertion rejects — closing the wrapper/test traversal asymmetry.
+    expect(nonPlainNamespaces).toEqual(["ns"]);
+    // And the wrapper confirms the gap it guards: the non-plain namespace is
+    // copied through verbatim (NOT instrumented).
+    expect(instrumentEffectsByPath(fauxHostApi).ns).toBe(fauxHostApi.ns);
   });
 
   it("records a fail-closed WRITE + the SOT entry's effect is honored for a known method", async () => {
