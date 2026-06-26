@@ -316,7 +316,11 @@ export class VercelUnifiedProvider implements LLMProvider {
       try {
         const result = streamText({
           model,
-          system: useOpenAIResponsesAliases
+          // v7 renamed the system-prompt option `system` → `instructions`
+          // (`system` remains a deprecated fallback). The LVIS messages array
+          // never carries a system-role message, so the prompt flows solely
+          // through this top-level option.
+          instructions: useOpenAIResponsesAliases
             ? remapSystemPromptForOpenAIResponses(params.systemPrompt)
             : params.systemPrompt,
           messages,
@@ -332,7 +336,10 @@ export class VercelUnifiedProvider implements LLMProvider {
             : {}),
           ...(headers ? { headers } : {}),
         });
-        fullStream = result.fullStream as AsyncIterable<
+        // v7 renamed the full event stream `fullStream` → `stream`
+        // (`fullStream` remains a deprecated alias). The local variable and
+        // mapper retain the historical name; only the SDK accessor moves.
+        fullStream = result.stream as AsyncIterable<
           Record<string, unknown> & { type: string }
         >;
       } catch (syncErr) {

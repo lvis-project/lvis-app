@@ -259,7 +259,7 @@ describe("VercelUnifiedProvider gemini — adapter smoke (mocked ai.streamText)"
       return {
         ...actual,
         streamText: vi.fn(() => ({
-          fullStream: (async function* () {
+          stream: (async function* () {
             yield { type: "text-delta", id: "t1", text: "hi" };
             yield {
               type: "finish",
@@ -301,7 +301,7 @@ describe("VercelUnifiedProvider gemini — adapter smoke (mocked ai.streamText)"
   it("forwards abortSignal to streamText()", async () => {
     vi.resetModules();
     const streamTextSpy = vi.fn(() => ({
-      fullStream: (async function* () {
+      stream: (async function* () {
         yield {
           type: "finish",
           finishReason: "stop",
