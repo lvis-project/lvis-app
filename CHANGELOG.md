@@ -1,5 +1,31 @@
 # Changelog
 
+## v0.4.1 — 2026-06-26
+
+전부 **default-OFF** 인 OS 샌드박스 인프라 릴리즈 — `LVIS_SANDBOX_ENABLED`(또는 features.osToolSandbox)를 켜기 전에는 런타임 동작이 v0.4.0 과 동일하다.
+
+### OS 샌드박스 — ASRT 마이그레이션
+
+- **`@anthropic-ai/sandbox-runtime`(ASRT)로 교체** (PR #1355, #1356, #1357, #1358) — 구 per-OS 샌드박스 러너(`sandbox-exec-runner`/`bwrap-runner`)를 제거하고 호스트 도구·워커 spawn 을 ASRT 로 재배선했다. macOS Seatbelt / Linux bwrap(full FS+network+process) / Windows srt-win(network-only). strict-union egress enforcement(`strictAllowlist` + 로드된 플러그인 매니페스트 allow-list 의 union), parentProxy 직결 차단, 호스트 secret-dir read deny-floor.
+- **동적 endpoint + 외부 MCP 워커 egress** (PR #1363, #1364) — 신뢰설정의 Azure/임베딩 endpoint hostname 을 egress union 에 live-feed; 외부 MCP stdio 서버를 ASRT 로 래핑(crash-시 cleanup 포함).
+- **secret-dir read deny-list 중앙화** (PR #1365) — `~/.lvis/secrets`/`~/.ssh`/`~/.aws` 등을 boot config + 워커 wrap 에 일관 적용.
+- **substrate-aware reviewer relaxation** (PR #1359, #1360) — per-category relaxation 이 `confines`(fs/process/network) 를 읽어, 비-샌드박스 워커로의 relaxation 누수를 차단.
+
+### Windows 샌드박스
+
+- **Windows ASRT 네트워크 샌드박스 + 동의 UX** (PR #1361, #1362) — srt-win(WFP machine-wide filter + 그룹 SID + restricted-token job)로 network-only 격리, 1회 UAC 설치 + 재로그인 동의 플로우(silent 금지), per-platform 패키징 prune.
+- **Windows FS-jail shim (dormant)** (PR #1368) — srt-win.exe 의 `acl` deny-list + `exec --holder-pid` fence 를 구동하는 호스트 shim. default-OFF·dormant(confines 미플립), 실 enforcement 는 수동 Windows QA 게이트.
+
+### 플러그인 워커 격리 (worker-confinement)
+
+- **host-mediated `spawnWorker` + bind-mount UDS** (PR #1366) — 플러그인이 워커를 직접 spawn 하지 않고 호스트가 ASRT-confined 로 wrap+spawn 하는 `hostApi.spawnWorker` 도입. HTTP 워커의 inbound 제어채널을 bind-mount Unix-domain-socket 으로(Linux bwrap `--unshare-net` loopback 차단 해소), 3-OS 균일. reviewer no-leak 레지스트리, FS jail, 토큰 인증.
+- **워커 crash 감지(`onExit`)** (PR #1375) — `SpawnedPluginWorker.onExit` 추가로 소비자가 워커 crash 를 감지해 재시작할 수 있게 함.
+
+### 검증
+
+- macOS gate-ON 실런타임 스모크(실 Seatbelt: 도구 confine + egress deny + FS jail) + 단위 스위트 green. Linux bwrap = Linux CI, Windows srt-win = windows-latest CI + 수동 QA(darwin 검증 불가).
+- 각 보안 PR 3-에이전트 적대 클러스터 리뷰 통과.
+
 ## v0.4.0 — 2026-06-25
 
 ### 채팅 / 작업 진행 UI
