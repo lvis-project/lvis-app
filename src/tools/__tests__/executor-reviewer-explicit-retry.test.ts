@@ -93,7 +93,14 @@ describe("ToolExecutor foreground reviewer explicit retry boundaries", () => {
     }
   });
 
-  it("evicts old explicit reviewer authorizations when pending retries exceed the cap", async () => {
+  it("no longer auto-allows reviewer-rated retries via text authorization (modal supersedes text re-auth)", async () => {
+    // Phase 0: the foreground reviewer lane now ASKS (routes to the approval
+    // modal) instead of returning a silent deny. Because the deny-path-only
+    // recordPendingReviewerAuthorization is never reached, the text-based
+    // "진행해" re-authorization path is dormant: a chat retry no longer grants
+    // execution on its own — user authority lives in the approval modal. With
+    // no approval gate wired here, the reviewer-rated call fails closed both
+    // times, including the explicit-intent retry.
     const executeSpy = vi.fn(async () => "sent");
     const classifySpy = vi.fn(() => ({
       level: "medium" as const,
@@ -107,25 +114,21 @@ describe("ToolExecutor foreground reviewer explicit retry boundaries", () => {
         undefined,
         makePermissionManager(dir, classifySpy),
       );
-      const inputs = Array.from({ length: 65 }, (_, index) => ({
-        payload: `send release notice ${index}`,
-      }));
+      const input = { payload: "send release notice" };
 
-      for (const [index, input] of inputs.entries()) {
-        const result = await executor.executeAll(
-          [{ id: `tu-cap-first-${index}`, name: toolName, input }],
-          {
-            sessionId: "sess-reviewer-retry-cap",
-            permissionContext: userPermissionContext({
-              userIntent: "릴리즈 안내 전송 경로를 확인합니다.",
-            }),
-          },
-        );
-        expect(result[0].is_error).toBe(true);
-      }
+      const first = await executor.executeAll(
+        [{ id: "tu-cap-first", name: toolName, input }],
+        {
+          sessionId: "sess-reviewer-retry-cap",
+          permissionContext: userPermissionContext({
+            userIntent: "릴리즈 안내 전송 경로를 확인합니다.",
+          }),
+        },
+      );
+      expect(first[0].is_error).toBe(true);
 
-      const oldestRetry = await executor.executeAll(
-        [{ id: "tu-cap-oldest-retry", name: toolName, input: inputs[0] }],
+      const retry = await executor.executeAll(
+        [{ id: "tu-cap-retry", name: toolName, input }],
         {
           sessionId: "sess-reviewer-retry-cap",
           permissionContext: userPermissionContext({
@@ -135,23 +138,9 @@ describe("ToolExecutor foreground reviewer explicit retry boundaries", () => {
         },
       );
 
-      expect(oldestRetry[0].is_error).toBe(true);
+      // Text re-auth is dormant — the retry is NOT auto-allowed.
+      expect(retry[0].is_error).toBe(true);
       expect(executeSpy).not.toHaveBeenCalled();
-
-      const newestRetry = await executor.executeAll(
-        [{ id: "tu-cap-newest-retry", name: toolName, input: inputs[64] }],
-        {
-          sessionId: "sess-reviewer-retry-cap",
-          permissionContext: userPermissionContext({
-            userIntent: "진행해",
-            explicitAuthorizationIntent: "진행해",
-          }),
-        },
-      );
-
-      expect(newestRetry[0].is_error).toBeUndefined();
-      expect(newestRetry[0].content).toBe("sent");
-      expect(executeSpy).toHaveBeenCalledOnce();
     } finally {
       rmSync(dir, { recursive: true, force: true });
     }
