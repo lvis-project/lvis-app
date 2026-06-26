@@ -137,9 +137,16 @@ export async function* fullStreamToStreamEvent(
         };
         // Honor finishReason explicitly when present; fallback to sticky
         // hasToolCalls only when finishReason is missing.
-        let stopReason: "tool_use" | "end_turn";
+        let stopReason: "tool_use" | "end_turn" | "max_tokens";
         if (p.finishReason === "tool-calls") {
           stopReason = "tool_use";
+        } else if (p.finishReason === "length") {
+          // AI SDK emits finishReason "length" when the model hit its
+          // output-token cap mid-generation. Surface it as a DISTINCT
+          // truncation signal. This branch MUST precede the generic
+          // `else if (p.finishReason)` below — otherwise "length" is collapsed
+          // into a clean "end_turn" and the truncation is hidden from the loop.
+          stopReason = "max_tokens";
         } else if (p.finishReason) {
           stopReason = "end_turn";
         } else {

@@ -47,6 +47,12 @@ export interface StreamCollectParams {
     thinkingBudgetTokens: number;
   };
   abortSignal?: AbortSignal;
+  /**
+   * Forwarded to StreamTurnParams.continuationPrefill — when true the trailing
+   * assistant message in `messages` is a partial turn to be CONTINUED (vLLM
+   * continue_final_message).
+   */
+  continuationPrefill?: boolean;
   /** stream 이벤트 콜백 — UI 로 delta 방출. */
   onReasoningDelta?: (text: string) => void;
   onTextDelta?: (text: string) => void;
@@ -60,7 +66,7 @@ export type StreamCollectResult =
       thought: string;
       thinkingBlocks: ThinkingBlock[];
       toolCalls: ToolCallBlock[];
-      stopReason: "end_turn" | "tool_use";
+      stopReason: "end_turn" | "tool_use" | "max_tokens";
       usage?: TokenUsage;
     }
   /** 외부 abort 로 중단됨 — 부분 텍스트 반환. */
@@ -95,6 +101,7 @@ export async function collectRoundStream(
     toolSchemas,
     llmSettings,
     abortSignal,
+    continuationPrefill,
     onReasoningDelta,
     onTextDelta,
   } = params;
@@ -107,7 +114,7 @@ export async function collectRoundStream(
   let thought = "";
   let thinkingBlocks: ThinkingBlock[] = [];
   const toolCalls: ToolCallBlock[] = [];
-  let stopReason: "end_turn" | "tool_use" = "end_turn";
+  let stopReason: "end_turn" | "tool_use" | "max_tokens" = "end_turn";
   let usage: TokenUsage | undefined;
   let sawMessageComplete = false;
 
@@ -124,6 +131,7 @@ export async function collectRoundStream(
       streamSmoothing: llmSettings.streamSmoothing as never,
       enableThinking: llmSettings.enableThinking,
       thinkingBudgetTokens: llmSettings.thinkingBudgetTokens,
+      ...(continuationPrefill ? { continuationPrefill: true } : {}),
       abortSignal,
     }) as AsyncIterable<StreamEvent>) {
       if (abortSignal?.aborted) return { kind: "interrupted", text };

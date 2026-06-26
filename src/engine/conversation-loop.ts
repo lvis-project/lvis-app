@@ -43,6 +43,7 @@ import type {
   TokenUsageByModel,
 } from "./llm/types.js";
 import { collectRoundStream } from "./turn/stream-collector.js";
+import { vendorSupportsLengthContinuation } from "./llm/vendor-capabilities.js";
 import { rejectedToolNameFromError, withoutDroppedTools } from "./llm/rejected-tool-schema.js";
 import {
   handleRequestPlugin,
@@ -286,7 +287,7 @@ export interface TurnCallbacks {
     roundIndex: number;
     text: string;
     thought: string;
-    stopReason: "end_turn" | "tool_use";
+    stopReason: "end_turn" | "tool_use" | "max_tokens";
     hasToolCalls: boolean;
   }) => void;
   onTurnComplete?: (fullText: string) => void;
@@ -426,6 +427,10 @@ export interface TurnCallbacks {
 export type TurnStopReason =
   | "end_turn"
   | "tool_use"
+  // Output-token cap hit. After the continuation loop exhausts its cap
+  // (MAX_LENGTH_CONTINUATIONS) the turn returns with this reason so the
+  // UI/notification gates surface the residual truncation explicitly.
+  | "max_tokens"
   | "interrupted"
   | "context-error"
   | "stream-error"
@@ -565,6 +570,15 @@ export interface ConversationLoopDeps {
 // 수용하면서 *진정한 무한 루프* 는 여전히 차단. SubAgentRunner 는 자기 maxRounds
 // 로 clamp 하므로 영향 없음 (line 902 `Math.min`).
 const MAX_TOOL_ROUNDS = 30;
+/**
+ * Hard cap on finish_reason=length CONTINUATIONS per logical assistant answer.
+ * Codex/Anthropic/OpenAI guidance converge on 2–3. AND-ed with: (a) a
+ * zero-progress break (a round adding no text AND no reasoning ends the chain),
+ * (b) the global MAX_TOOL_ROUNDS budget, and (c) the per-iteration `round < 30`
+ * for-bound. Any one tripping stops the chain — defense against a model that
+ * always returns "max_tokens".
+ */
+const MAX_LENGTH_CONTINUATIONS = 3;
 /**
  * Defensive cap on provider-as-oracle tool drops per turn. Termination is
  * already guaranteed structurally (each drop strictly shrinks the finite tool
@@ -2440,6 +2454,15 @@ export class ConversationLoop {
     let toolTrustOrigin = bounds.toolTrustOrigin;
     // C3(a): assistant-round counter — used by the maxRounds break below.
     let assistantRoundsRun = 0;
+    // finish_reason=length CONTINUATION carry. While a logical answer is being
+    // continued across rounds we accumulate its raw text + reasoning here and
+    // DEFER the history append + onAssistantRound until the chain terminates —
+    // so the user sees ONE coherent answer and history holds ONE assistant
+    // message. `continuationPrefillText !== undefined` ⇒ next round continues.
+    let continuationsRun = 0;
+    let continuationCarryText = "";
+    let continuationCarryThought = "";
+    let continuationPrefillText: string | undefined = undefined;
     // C3(a): effective round budget. Default = MAX_TOOL_ROUNDS (30); when a
     // caller supplies maxRounds (sub-agent runner) clamp to it. Negative or
     // zero falls back to default so callers keep working unchanged.
@@ -2487,7 +2510,10 @@ export class ConversationLoop {
       // `collectRoundStream`, giving the IPC handler an injection point.
       // The atomic `currentAbortController` check inside `queueGuidance`
       // closes the only true race.
-      if (round > 0 && this.guidanceQueue.length > 0) {
+      // Do not interrupt an in-flight length-continuation with queued guidance:
+      // it would push a user message after the assistant prefill and break the
+      // continue_final_message "last message is assistant" precondition.
+      if (round > 0 && this.guidanceQueue.length > 0 && continuationPrefillText === undefined) {
         // Truncate from the head — preserve the user's MOST RECENT guides
         // since older queued items may have been superseded. Worst case
         // (16 × 8000 chars = 128KB joined) is capped at
@@ -2557,7 +2583,20 @@ export class ConversationLoop {
       }
 
       // ─── Stream attempt — token preflight 가 사전 압축 처리하므로 mid-loop retry 없음 ───
-      const messagesForRound = this.history.getMessages();
+      const baseMessagesForRound = this.history.getMessages();
+      // finish_reason=length CONTINUATION: when continuing, append a WIRE-ONLY
+      // partial assistant turn (NOT persisted to history) as the final message.
+      // The openai-compatible adapter pairs this with continue_final_message so
+      // vLLM resumes it verbatim. For mid-<think> truncation the prefill text is
+      // `<think>\n…` (open, no closing tag) so the model finishes reasoning
+      // before answering; add_generation_prompt:false blocks a 2nd auto <think>.
+      const messagesForRound =
+        continuationPrefillText !== undefined
+          ? [
+              ...baseMessagesForRound,
+              { role: "assistant" as const, content: continuationPrefillText },
+            ]
+          : baseMessagesForRound;
       this.lastRoundInputProjection = estimateRequestInputProjection({
         systemPrompt,
         messages: messagesForRound,
@@ -2599,9 +2638,14 @@ export class ConversationLoop {
         toolSchemas,
         llmSettings: { ...activeBlock, streamSmoothing: llmSettings.streamSmoothing },
         abortSignal,
+        continuationPrefill: continuationPrefillText !== undefined,
         onReasoningDelta: callbacks?.onReasoningDelta,
         onTextDelta: callbacks?.onTextDelta,
       });
+      // One-shot: clear so a following tool round or terminal round does not
+      // re-inject the prefill. The continuation branch below re-sets it when the
+      // chain extends. (Carry text/thought persist independently for stitching.)
+      continuationPrefillText = undefined;
 
       // EARLY-EXIT (safety net): token estimator drift 로 context_error 도달 시
       // 사용자 안내 + turn 종료. retry 없음 — mid-loop history mutation 으로 LLM tool-chain
@@ -2765,7 +2809,12 @@ export class ConversationLoop {
         // before the abort is real model output and stays styled normally;
         // only the "[중단됨]" suffix marks the boundary.
         const interruptedSuffix = t("be_conversationLoop.interruptedSuffix");
-        const savedText = stripSuggestedReplies(stream.text ?? "") + interruptedSuffix;
+        // length-continuation: if the user aborts mid-chain, prepend the raw
+        // accumulated prefix so the persisted + returned text is the full
+        // partial answer, not just the last continuation round. Strip the
+        // suggested-replies block ONCE on the merged raw text (carry is "" on a
+        // non-continued turn ⇒ identical to the prior behavior).
+        const savedText = stripSuggestedReplies(continuationCarryText + (stream.text ?? "")) + interruptedSuffix;
         this.history.append({ role: "assistant", content: savedText });
         callbacks?.onTextDelta?.(interruptedSuffix);
         return withServingIdentity({ text: savedText, toolCalls: allToolCalls, usage: turnUsage, stopReason: "interrupted" });
@@ -2829,7 +2878,59 @@ export class ConversationLoop {
       // back to the parent via runTurn's return value, (c) plugin/routine
       // generateText callers — orthogonal strip is also applied in
       // generateText() but defense in depth.
-      const textContent = stripSuggestedReplies(streamText);
+      // finish_reason=length CONTINUATION: carry the RAW (un-stripped) text
+      // across rounds so the wire prefill resumes vLLM verbatim — zero seam,
+      // trailing whitespace preserved (stripSuggestedReplies trimEnd would
+      // otherwise eat the boundary whitespace between a truncated round and its
+      // continuation). The suggested-replies block is stripped ONCE on the fully
+      // merged answer below — a max_tokens-truncated round never holds a
+      // complete block. With no continuation in flight the carry is "" so
+      // mergedRawText === streamText and mergedText === stripSuggestedReplies(
+      // streamText); every non-continuation path is byte-for-byte unchanged.
+      const mergedRawText = continuationCarryText + streamText;
+      const mergedThought = continuationCarryThought + thoughtContent;
+      const mergedText = stripSuggestedReplies(mergedRawText);
+
+      // ─── finish_reason=length CONTINUATION ──────────────────────────────────
+      // A truncated round (stopReason "max_tokens") with NO tool calls is not a
+      // finished turn. Instead of terminating (cut-off answer + suspect-
+      // truncation notice), re-invoke the model to CONTINUE the partial answer.
+      // We DEFER the history append + onAssistantRound here so deltas keep
+      // streaming into the SAME open UI card and history ends up with ONE merged
+      // assistant message. (`madeProgress` is the zero-progress break.)
+      const madeProgress = streamText.length > 0 || thoughtContent.length > 0;
+      const willContinue =
+        stopReason === "max_tokens" &&
+        pendingToolCalls.length === 0 &&
+        vendorSupportsLengthContinuation(llmSettings.provider) &&
+        continuationsRun < MAX_LENGTH_CONTINUATIONS &&
+        assistantRoundsRun + 1 < effectiveMaxRounds &&
+        madeProgress;
+
+      if (willContinue) {
+        continuationCarryText = mergedRawText;
+        continuationCarryThought = mergedThought;
+        // Wire prefill for the next round. If the answer body has started
+        // (mergedRawText non-empty) continue it verbatim — vLLM already split
+        // any reasoning into reasoning_content. If we truncated INSIDE <think>
+        // (no answer text yet) re-open the think block; the model emits its own
+        // closing </think> before answering.
+        continuationPrefillText =
+          mergedRawText.length > 0 ? mergedRawText : `<think>\n${mergedThought}`;
+        continuationsRun += 1;
+        assistantRoundsRun += 1; // counts against the global round budget
+        this.tracer.step("LENGTH_CONTINUATION", {
+          round: roundIndex,
+          continuationsRun,
+          carryTextLen: continuationCarryText.length,
+          reopenedThink: mergedRawText.length === 0,
+        });
+        // roundIndex is intentionally NOT incremented — the continuation is the
+        // SAME logical assistant round from the UI's perspective, and we must
+        // NOT fire onAssistantRound (it would close the streaming card and the
+        // renderer would drop every subsequent delta).
+        continue;
+      }
 
       // Cap BEFORE persisting to history. Anthropic + OpenAI strict
       // APIs reject mismatches between assistant.tool_use blocks and the
@@ -2848,10 +2949,12 @@ export class ConversationLoop {
 
       // thinkingBlocks는 tool_use 체인이 이어지는 다음 요청에만 signature 그대로 포함되어야 Anthropic이 수락한다.
       const preserveThinkingBlocks = stopReason === "tool_use" && pendingToolCallsCapped.length > 0;
+      // Persist the MERGED answer (carry + this round). Non-continued turns have
+      // empty carries ⇒ original single-round content.
       this.history.append({
         role: "assistant",
-        content: wasCapped ? `${textContent}\n\n[capped at ${MAX_TOOL_CALLS_PER_ROUND} of ${pendingToolCalls.length} tool_use blocks]` : textContent,
-        ...(thoughtContent && { thought: thoughtContent }),
+        content: wasCapped ? `${mergedText}\n\n[capped at ${MAX_TOOL_CALLS_PER_ROUND} of ${pendingToolCalls.length} tool_use blocks]` : mergedText,
+        ...(mergedThought && { thought: mergedThought }),
         ...(preserveThinkingBlocks && roundThinkingBlocks.length > 0 && { thinkingBlocks: roundThinkingBlocks }),
         // Persist only the capped slice — these are the only blocks
         // that will receive a matching tool_result. Streaming UI still sees
@@ -2859,6 +2962,9 @@ export class ConversationLoop {
         // user can observe the original LLM intent (and the cap message).
         ...(pendingToolCallsCapped.length > 0 && { toolCalls: pendingToolCallsCapped }),
       });
+      // Continuation chain (if any) terminates HERE — merged message committed.
+      continuationCarryText = "";
+      continuationCarryThought = "";
 
       // §4.5.2 step 8 — REASONING_ACCUMULATE
       if (thoughtContent.length > 0) {
@@ -2866,8 +2972,8 @@ export class ConversationLoop {
       }
       callbacks?.onAssistantRound?.({
         roundIndex,
-        text: textContent,
-        thought: thoughtContent,
+        text: mergedText,
+        thought: mergedThought,
         stopReason,
         // The UI / telemetry callback receives the un-capped count so the
         // user sees the LLM's full intent — only persisted history is capped.
@@ -2877,7 +2983,7 @@ export class ConversationLoop {
       this.tracer.step("ROUND_COMMIT", {
         round: roundIndex,
         stopReason,
-        textLen: textContent.length,
+        textLen: mergedText.length,
         toolCallCount: pendingToolCalls.length,
       });
       roundIndex += 1;
@@ -2906,13 +3012,13 @@ export class ConversationLoop {
         // 면 WARN 로 명시적 진단 — 28-step abandonment 의 가능한 원인.
         if (stopReason !== "end_turn" && pendingToolCalls.length === 0) {
           log.warn(
-            `queryLoop: EARLY-EXIT(suspect-truncation) — stopReason="${stopReason}" pendingTools=0 textLen=${textContent.length} round=${roundIndex}`,
+            `queryLoop: EARLY-EXIT(suspect-truncation) — stopReason="${stopReason}" pendingTools=0 textLen=${mergedText.length} round=${roundIndex}`,
           );
           callbacks?.onError?.(
             t("be_conversationLoop.suspectTruncationError", { reason: stopReason ?? "unknown reason", round: roundIndex }),
           );
         }
-        return withServingIdentity({ text: textContent, toolCalls: allToolCalls, usage: turnUsage, stopReason });
+        return withServingIdentity({ text: mergedText, toolCalls: allToolCalls, usage: turnUsage, stopReason });
       }
 
       // §4.5.6 tool execution — request_plugin 가로채기 + knowledge depth cap + executor 호출
