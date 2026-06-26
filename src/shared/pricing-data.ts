@@ -235,8 +235,8 @@ export const DEFAULT_PRICING: Record<PricingVendor, Record<string, ModelPricing>
   // Seed the known LVIS deployment with its native context window; unknown
   // custom models fall back to FALLBACK_PRICING.
   "openai-compatible": {
-    "qwen3.6": { inputPer1M: 0, outputPer1M: 0, contextWindow: 262_144 },
-    nemotron: { inputPer1M: 0, outputPer1M: 0, contextWindow: 131_072 },
+    "Qwen3.6-35B-A3B-NVFP4": { inputPer1M: 0, outputPer1M: 0, contextWindow: 262_144 },
+    "Nemotron-3-Nano-30B-A3B-FP8": { inputPer1M: 0, outputPer1M: 0, contextWindow: 131_072 },
   },
 };
 
