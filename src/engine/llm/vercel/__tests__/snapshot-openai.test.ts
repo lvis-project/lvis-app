@@ -671,6 +671,103 @@ describe("VercelUnifiedProvider openai-compatible", () => {
     vi.doUnmock("ai");
     vi.doUnmock("@ai-sdk/openai-compatible");
   });
+
+  it("injects continue_final_message + add_generation_prompt:false when continuationPrefill is set", async () => {
+    vi.resetModules();
+    const streamTextSpy = vi.fn(() => ({
+      stream: (async function* () {
+        yield {
+          type: "finish",
+          finishReason: "length",
+          totalUsage: { inputTokens: 1, outputTokens: 1 },
+        };
+      })(),
+    }));
+    vi.doMock("ai", async () => {
+      const actual = await vi.importActual<typeof import("ai")>("ai");
+      return { ...actual, streamText: streamTextSpy };
+    });
+    vi.doMock("@ai-sdk/openai-compatible", () => ({
+      createOpenAICompatible: vi.fn(() => vi.fn(() => ({ __mock: "compat" }))),
+    }));
+
+    const { VercelUnifiedProvider } = await import("../adapter.js");
+    const provider = new VercelUnifiedProvider(
+      "openai-compatible",
+      "k",
+      "https://example.test/v1",
+    );
+
+    await collect(
+      provider.streamTurn({
+        model: "qwen3.6",
+        systemPrompt: "sys",
+        messages: [
+          { role: "user", content: "write a long answer" },
+          { role: "assistant", content: "Part one " },
+        ],
+        continuationPrefill: true,
+      }),
+    );
+
+    const callArg = streamTextSpy.mock.calls[0]![0] as {
+      providerOptions: { "lvis-compat": Record<string, unknown> };
+      messages: Array<{ role: string }>;
+    };
+    expect(callArg.providerOptions["lvis-compat"]).toMatchObject({
+      continue_final_message: true,
+      add_generation_prompt: false,
+    });
+    // continue_final_message precondition: the LAST wire message is assistant.
+    expect(callArg.messages.at(-1)?.role).toBe("assistant");
+
+    vi.doUnmock("ai");
+    vi.doUnmock("@ai-sdk/openai-compatible");
+  });
+
+  it("omits continue_final_message when continuationPrefill is absent", async () => {
+    vi.resetModules();
+    const streamTextSpy = vi.fn(() => ({
+      stream: (async function* () {
+        yield {
+          type: "finish",
+          finishReason: "stop",
+          totalUsage: { inputTokens: 1, outputTokens: 1 },
+        };
+      })(),
+    }));
+    vi.doMock("ai", async () => {
+      const actual = await vi.importActual<typeof import("ai")>("ai");
+      return { ...actual, streamText: streamTextSpy };
+    });
+    vi.doMock("@ai-sdk/openai-compatible", () => ({
+      createOpenAICompatible: vi.fn(() => vi.fn(() => ({ __mock: "compat" }))),
+    }));
+
+    const { VercelUnifiedProvider } = await import("../adapter.js");
+    const provider = new VercelUnifiedProvider(
+      "openai-compatible",
+      "k",
+      "https://example.test/v1",
+    );
+
+    await collect(
+      provider.streamTurn({
+        model: "qwen3.6",
+        systemPrompt: "sys",
+        messages: [{ role: "user", content: "hi" }],
+      }),
+    );
+
+    const compatOptions = (streamTextSpy.mock.calls[0]![0] as {
+      providerOptions: { "lvis-compat": Record<string, unknown> };
+    }).providerOptions["lvis-compat"];
+    expect("continue_final_message" in compatOptions).toBe(false);
+    expect("add_generation_prompt" in compatOptions).toBe(false);
+
+    vi.doUnmock("ai");
+    vi.doUnmock("@ai-sdk/openai-compatible");
+  });
 });
 
 describe("VercelUnifiedProvider openai — custom baseUrl proxy guard", () => {

@@ -30,7 +30,8 @@ export type TraceStepName =
   | "TOOL_EXECUTE"          // 9. ToolExecutor.executeAll
   | "ROUND_COMMIT"          // 10. assistant_round 확정
   | "POST_TURN"             // 11. PostTurnHookChain.run
-  | "GUIDANCE_INJECTED";    // out-of-band — mid-stream "guide" utterance consumed at round boundary
+  | "GUIDANCE_INJECTED"     // out-of-band — mid-stream "guide" utterance consumed at round boundary
+  | "LENGTH_CONTINUATION";  // out-of-band — finish_reason=length 잘림 → 부분 답변 verbatim 이어쓰기 (vLLM continue_final_message)
 
 export interface TraceEntry {
   ts: string;

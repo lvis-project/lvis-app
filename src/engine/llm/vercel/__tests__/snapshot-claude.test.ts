@@ -219,6 +219,23 @@ describe("stream-mapper — Claude signature capture per-step", () => {
     }
   });
 
+  it("maps finishReason 'length' to a distinct 'max_tokens' stopReason (not end_turn)", async () => {
+    const canned = [
+      { type: "text-delta", id: "t1", text: "truncated" },
+      {
+        type: "finish",
+        finishReason: "length",
+        totalUsage: { inputTokens: 3, outputTokens: 4 },
+      },
+    ];
+    const events = await collect(fullStreamToStreamEvent(fromArray(canned)));
+    const last = events.at(-1);
+    expect(last?.type).toBe("message_complete");
+    if (last?.type === "message_complete") {
+      expect(last.stopReason).toBe("max_tokens");
+    }
+  });
+
   it("short-reasoning-then-tool with missing signature → log-and-skip (#12433)", async () => {
     const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
     const canned = [
