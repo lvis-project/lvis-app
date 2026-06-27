@@ -1321,10 +1321,16 @@ export async function bootstrap(
   // host-tool spawn path (bash.ts/powershell.ts) calls `wrapToolCommand` to get
   // the `{ argv, env }` it spawns itself.
   //
-  // Gate: SAME as before — the user-facing `osToolSandbox` feature flag
-  // (Settings → 권한) OR the `LVIS_SANDBOX_ENABLED=1` env escape-hatch. DEFAULT
-  // OFF (osToolSandbox ships false; the env var is unset), so this migration
-  // does NOT change runtime behavior unless a user has deliberately opted in.
+  // Gate: the user-facing `osToolSandbox` feature flag (Settings → 권한) OR the
+  // `LVIS_SANDBOX_ENABLED=1` env escape-hatch. Both now DEFAULT ON (osToolSandbox
+  // ships true). Because the default is ON, the gate distinguishes HOW the
+  // on-signal arrived (decideSandboxGate in boot/steps/sandbox-gate.ts):
+  //   - EXPLICIT env (`LVIS_SANDBOX_ENABLED=1`): a deliberate power-user/CI
+  //     signal — stays FAIL-CLOSED (abort) when the sandbox can't activate.
+  //   - DEFAULT / Settings toggle: GRACEFUL — when the sandbox can't activate
+  //     (Linux deps missing, init failure, Windows not-yet-installed) it does NOT
+  //     abort; it degrades to unsandboxed (isolation=none, the same posture as
+  //     sandbox-OFF) with a LOUD one-time warning and continues boot.
   //
   // SECURITY PROPERTY (preserved from the old sealed registry): the sandbox
   // gate is decided exactly once here at boot. `initializeAsrtSandbox` flips the
@@ -1332,13 +1338,15 @@ export async function bootstrap(
   // runtime channel to enable/disable it after boot, so nothing can inject an
   // untrusted sandbox config mid-run.
   //
-  // Platform policy (ALL platforms share the SAME gate now — there is no
-  // separate Windows opt-in):
+  // Platform policy (ALL platforms share the SAME gate — there is no separate
+  // Windows opt-in):
   //   - macOS / Linux: initialize ASRT when the gate is on and deps are present.
   //     If the gate is on but `checkDependencies()` reports errors (Linux: bwrap
-  //     / socat / ripgrep missing) we FAIL-CLOSED — THROW to abort boot rather
-  //     than silently dropping to isolation=none (no-fallback rule). The
-  //     operator must install the deps or turn the gate off.
+  //     / socat / ripgrep missing) the branch depends on the on-signal: the
+  //     EXPLICIT env opt-in FAIL-CLOSES (THROW, no unsandboxed plain spawn —
+  //     no-fallback rule), while the DEFAULT/settings-on path DEGRADES gracefully
+  //     (loud warn + unsandboxed, non-bricking). A throw on the default path
+  //     would brick every Linux host without the deps now that the flag ships ON.
   //   - Windows (srt-win.exe): NETWORK-only sandbox (WFP + restricted-token; NO
   //     filesystem jail in ASRT 0.0.59). srt-win is BUNDLED (asarUnpack vendor/**),
   //     so there is no download — but it needs a one-time UAC install + a
@@ -1366,73 +1374,81 @@ export async function bootstrap(
     const { sandboxConfinementForPlatform } = await import(
       "./shared/sandbox-capability-info.js"
     );
+    const { decideSandboxGate, shouldWarnHostClassifyInterlock } = await import(
+      "./boot/steps/sandbox-gate.js"
+    );
 
-    const sandboxOptIn =
-      (settingsService.get("features")?.osToolSandbox ?? false) ||
-      process.env["LVIS_SANDBOX_ENABLED"] === "1";
+    // Two independent on-signals. `explicitEnv` (LVIS_SANDBOX_ENABLED=1) is the
+    // deliberate "I really mean it" override; `settingOn` is the shipped default
+    // (now true) / Settings toggle. The DISTINCTION drives degrade-vs-abort: see
+    // decideSandboxGate.
+    const explicitEnv = process.env["LVIS_SANDBOX_ENABLED"] === "1";
+    const settingOn = settingsService.get("features")?.osToolSandbox ?? false;
+    const sandboxOptIn = settingOn || explicitEnv;
 
-    // Flag-interlock warning (no hard interlock — the flags stay independent).
-    // `hostClassifiesRisk` removes the foreground per-call human approval for
-    // plugin tools and gates them at the host-mediated effect boundary instead.
-    // That boundary does NOT observe off-hostApi mutations (direct node:fs / bare
-    // fetch / detached async frame) — only the OS sandbox (osToolSandbox / ASRT)
-    // contains that residual. Enabling host-classify ALONE (sandbox OFF) is
-    // therefore strictly weaker for that residual than today's pre-exec ask (which
-    // at least lets the user deny the call). Warn LOUDLY once at boot so the
-    // operator can make the default-flip decision with eyes open; we deliberately
-    // do NOT block — the flags remain independently togglable.
-    if ((settingsService.get("features")?.hostClassifiesRisk ?? false) && !sandboxOptIn) {
-      log.warn(
-        "boot: hostClassifiesRisk is ON but the OS tool sandbox (osToolSandbox / LVIS_SANDBOX_ENABLED) is OFF — " +
-          "effect-boundary classification does NOT contain off-hostApi mutations (direct node:fs, bare fetch, " +
-          "detached async frames) without the OS sandbox. For that residual, host-classify WITHOUT the sandbox is " +
-          "weaker than the pre-exec ask it replaces. Enable osToolSandbox to contain it, or keep the pre-exec ask " +
-          "(turn hostClassifiesRisk off) until the sandbox is on.",
-      );
-    }
+    // Tracks whether ASRT genuinely activated this boot. The interlock warning
+    // below keys on THIS (not on `sandboxOptIn`), so the degraded path (gate ON,
+    // sandbox inactive) still fires it. See shouldWarnHostClassifyInterlock.
+    let sandboxActive = false;
 
     if (sandboxOptIn) {
       const deps = await checkAsrtDependencies();
-      if (deps.errors.length > 0) {
+      const decision = decideSandboxGate({
+        settingOn,
+        explicitEnv,
+        platform: process.platform,
+        depsOk: deps.errors.length === 0,
+      });
+
+      if (decision.action === "abort") {
+        // EXPLICIT opt-in (LVIS_SANDBOX_ENABLED=1) on mac/linux + the sandbox
+        // cannot activate (bwrap/socat/ripgrep missing). The operator demanded
+        // the sandbox by name; the no-fallback rule forbids silently dropping to
+        // an unsandboxed plain spawn — that would honor the opt-in name while
+        // delivering isolation=none. Throw so boot aborts loudly. Reachable ONLY
+        // for the explicit env opt-in: the DEFAULT/settings-on path degrades
+        // instead (decideSandboxGate), and Windows never aborts (a throw would
+        // brick first-run before the install/relogin can happen).
+        const message =
+          "boot: OS tool sandbox is ON via LVIS_SANDBOX_ENABLED=1 but its dependencies are missing — refusing to start. " +
+          "Install the sandbox dependencies (Linux: bwrap, socat, ripgrep) or unset LVIS_SANDBOX_ENABLED. " +
+          `Missing: ${deps.errors.join("; ")}`;
+        log.error(message);
+        throw new Error(message);
+      } else if (decision.action === "degrade") {
+        // DEFAULT / settings-on (NOT the explicit env) + the sandbox cannot
+        // activate (Linux deps missing, or Windows srt-win not installed/relogged).
+        // GRACEFUL, non-bricking: keep the sandbox INACTIVE (isAsrtSandboxActive()
+        // stays false → host shell tools run via the plain spawn path,
+        // isolation=none) and never publish a capability, so the reviewer/UI SOT
+        // honestly reports kind="none". This is the SAME runtime posture as
+        // sandbox-OFF, a known-safe state. We do NOT abort because the flag now
+        // ships ON: a host missing the deps must degrade, not brick. LOUD on
+        // purpose so the gap is never silent. (Set LVIS_SANDBOX_ENABLED=1 to make
+        // mac/linux fail-closed instead.)
+        const detail = deps.errors.join("; ");
         if (process.platform === "win32") {
-          // WINDOWS NOT-READY: do NOT hard-throw. srt-win needs a one-time UAC
-          // install + re-login (group must be enabled in the token + WFP filters
-          // installed) that the user cannot complete before boot reaches this
-          // point — a throw would brick first-run. So we keep the sandbox
-          // INACTIVE (isAsrtSandboxActive() stays false → host shell tools run
-          // via the plain spawn path, isolation=none) and never publish a
-          // capability, so the reviewer/UI SOT honestly reports kind="none".
-          // This is the ONLY platform where an opted-in gate does not result in
-          // either an active sandbox or an aborted boot — Windows trades the
-          // hard fail-closed for a non-bricking loud signal until the install
-          // UX (a separate follow-up) lands. Loud on purpose so the gap is
-          // never silent.
           log.warn(
             "boot: OS tool sandbox is ON but the Windows network sandbox (srt-win) is NOT installed/relogged — " +
               "tools run with NO OS isolation until setup completes. " +
               "Complete the one-time install + re-login (the in-app setup flow is a follow-up). " +
               "Windows is NETWORK-ONLY (no filesystem jail) even once installed. " +
-              `Detail: ${deps.errors.join("; ")}`,
+              `Detail: ${detail}`,
           );
         } else {
-          // mac/linux FAIL-CLOSED (PR #1356 architect finding). The operator
-          // explicitly requested the sandbox; ASRT cannot run because
-          // bwrap/socat/ripgrep are missing. The no-fallback rule forbids
-          // silently dropping to an unsandboxed plain spawn — that would honor
-          // the opt-in name while delivering isolation=none. Throw so boot
-          // aborts loudly: the operator must install the deps or turn the gate
-          // off, NOT discover later that "sandboxed" tools ran with no sandbox.
-          // (Windows is excluded above — a throw there would brick first-run
-          // before the install/relogin can happen.)
-          const message =
-            "boot: OS tool sandbox is ON but its dependencies are missing — refusing to start. " +
-            "Install the sandbox dependencies (Linux: bwrap, socat, ripgrep) or disable the sandbox " +
-            "(Settings → 권한 'OS 도구 샌드박스' off, or unset LVIS_SANDBOX_ENABLED). " +
-            `Missing: ${deps.errors.join("; ")}`;
-          log.error(message);
-          throw new Error(message);
+          log.warn(
+            "boot: OS tool sandbox is ON by default but its dependencies are missing — " +
+              "tools run with NO OS isolation (unsandboxed, isolation=none) until the deps are installed. " +
+              "Install the sandbox dependencies (Linux: bwrap, socat, ripgrep) to activate it, or turn it off " +
+              "in Settings → 권한 'OS 도구 샌드박스'. (Set LVIS_SANDBOX_ENABLED=1 to make this fail-closed instead.) " +
+              `Missing: ${detail}`,
+          );
         }
       } else {
+        // decision.action === "activate" — deps present, initialize ASRT. Wrapped
+        // so a runtime init FAILURE degrades-or-aborts by the SAME explicit-vs-
+        // default rule (see the catch below), not an unconditional boot abort.
+        try {
           if (deps.warnings.length > 0) {
             log.warn("boot: ASRT dependency warnings: %s", deps.warnings.join("; "));
           }
@@ -1539,10 +1555,65 @@ export async function bootstrap(
             unionAllowedDomains.length,
             manifestAllowLists.length,
           );
+          sandboxActive = true;
+        } catch (initErr) {
+          // Init FAILURE (initializeAsrtSandbox threw despite deps present) is the
+          // SAME "cannot activate" condition as deps-missing — re-decide with
+          // depsOk:false so the explicit-vs-default branch lives in one place.
+          // initializeAsrtSandbox flips its active flag ONLY on success, so a
+          // throw leaves isAsrtSandboxActive() false and no capability published.
+          const failDecision = decideSandboxGate({
+            settingOn,
+            explicitEnv,
+            platform: process.platform,
+            depsOk: false,
+          });
+          const cause = initErr instanceof Error ? initErr.message : String(initErr);
+          if (failDecision.action === "abort") {
+            // EXPLICIT opt-in — fail-closed even on init failure.
+            log.error(
+              "boot: OS tool sandbox is ON via LVIS_SANDBOX_ENABLED=1 but ASRT initialization failed — refusing to start. " +
+                `Cause: ${cause}`,
+            );
+            throw initErr;
+          }
+          // DEFAULT / settings-on (or Windows) — GRACEFUL degrade, non-bricking.
+          log.warn(
+            "boot: OS tool sandbox is ON by default but ASRT initialization failed — " +
+              "tools run with NO OS isolation (unsandboxed, isolation=none) this session. " +
+              "(Set LVIS_SANDBOX_ENABLED=1 to make this fail-closed instead.) " +
+              `Cause: ${cause}`,
+          );
+          // sandboxActive stays false.
         }
+      }
     } else if (process.platform === "darwin") {
       log.info(
         "boot: OS tool sandbox gated off (enable via Settings → 권한 'OS 도구 샌드박스' or LVIS_SANDBOX_ENABLED=1)",
+      );
+    }
+
+    // Flag-interlock warning (no hard interlock — the flags stay independent).
+    // Keyed on the ACTUAL sandbox-active state so it fires on EVERY
+    // sandbox-inactive path: gate off, OR the new DEGRADED path (gate ON by
+    // default but the sandbox could not activate). The explicit-abort path never
+    // reaches here (boot already threw). `hostClassifiesRisk` gates plugin tools
+    // at the effect boundary, which does NOT contain off-hostApi mutations
+    // (direct node:fs / bare fetch / detached async frames) — only the OS sandbox
+    // does. Warn LOUDLY once so the operator sees the uncontained residual; we
+    // deliberately do NOT block (the flags remain independently togglable).
+    if (
+      shouldWarnHostClassifyInterlock({
+        hostClassifiesRisk: settingsService.get("features")?.hostClassifiesRisk ?? false,
+        sandboxActive,
+      })
+    ) {
+      log.warn(
+        "boot: hostClassifiesRisk is ON but the OS tool sandbox (osToolSandbox / LVIS_SANDBOX_ENABLED) is NOT active — " +
+          "effect-boundary classification does NOT contain off-hostApi mutations (direct node:fs, bare fetch, " +
+          "detached async frames) without the OS sandbox. For that residual, host-classify WITHOUT the sandbox is " +
+          "weaker than the pre-exec ask it replaces. Install/enable the OS sandbox to contain it, or keep the " +
+          "pre-exec ask (turn hostClassifiesRisk off) until the sandbox is active.",
       );
     }
   }
