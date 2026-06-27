@@ -1,0 +1,235 @@
+{
+  "id": "work-assistant",
+  "name": "LVIS Work Assistant",
+  "version": "0.10.3",
+  "icon": "HandHelping",
+  "installPolicy": "admin",
+  "dependencies": [
+    {
+      "pluginId": "ms-graph",
+      "required": false
+    },
+    {
+      "pluginId": "meeting",
+      "required": false
+    },
+    {
+      "pluginId": "lge-api",
+      "required": false
+    }
+  ],
+  "pluginAccess": {
+    "plugins": [
+      {
+        "pluginId": "ms-graph",
+        "tools": [
+          "msgraph_calendar_today",
+          "msgraph_calendar_list",
+          "msgraph_email_list"
+        ],
+        "events": [
+          "email.new",
+          "calendar.event.upcoming",
+          "calendar.event.starting",
+          "calendar.event.conflict.detected",
+          "calendar.event.added",
+          "ms-graph.auth.changed"
+        ]
+      },
+      {
+        "pluginId": "meeting",
+        "tools": [
+          "meeting_session_detail",
+          "meeting_list_preps",
+          "meeting_bulk_upsert_preps",
+          "meeting_register_scheduled_meetings",
+          "meeting_open_prep",
+          "meeting_open_floating_window"
+        ],
+        "events": [
+          "meeting.summary.created",
+          "meeting.ended"
+        ]
+      },
+      {
+        "pluginId": "lge-api",
+        "events": [
+          "lge-api.video-conference.reserved"
+        ]
+      }
+    ]
+  },
+  "publisher": "LG Electronics IT",
+  "entry": "dist/hostPlugin.js",
+  "description": "사용자가 요청하기 전에 먼저 제안하는 LVIS 의 능동 업무 도우미. 다른 플러그인들과 신호를 주고받아 업무 흐름에 필요한 보조를 적시에 제공합니다.",
+  "tools": [
+    "work_assistant_generate_daily_briefing",
+    "work_assistant_list_detectors",
+    "work_assistant_set_detector_enabled"
+  ],
+  "uiCallable": [
+    "work_assistant_list_detectors",
+    "work_assistant_set_detector_enabled"
+  ],
+  "ui": [
+    {
+      "id": "detector-control",
+      "slot": "sidebar",
+      "kind": "embedded-module",
+      "displayName": "업무 도우미",
+      "title": "업무 도우미 스마트 감지 토글",
+      "description": "메일·일정·업무 마감·회의 등 업무 도우미의 감지기를 개별 ON/OFF 합니다.",
+      "entry": "dist/ui/detector-control.js",
+      "exportName": "default"
+    }
+  ],
+  "capabilities": [
+    "host:overlay",
+    "lifecycle-observer"
+  ],
+  "configSchema": {
+    "properties": {
+      "meetingDetectorAllowedSenderDomains": {
+        "type": "array",
+        "title": "회의 메일 허용 발신 도메인 목록",
+        "description": "proactive 회의/결재/액션/답장 감지가 활성화될 사내 메일 도메인 목록. 기본값 `[\"lge.com\"]` — LG 사내 메일을 즉시 감지. 빈 배열로 명시 설정하면 모든 메일이 무시됩니다 (fail-closed). 컨슈머 도메인(gmail.com 등)은 보안상 추가하지 마세요. 와일드카드 `*` 한 줄로 모든 발신자 통과 가능 — dev/personal 사용 한정 (prompt-injection 위험 ↑).",
+        "default": ["lge.com"],
+        "items": {
+          "type": "string"
+        }
+      },
+      "disabledDetectors": {
+        "type": "array",
+        "title": "비활성화된 스마트 감지 intent 목록",
+        "description": "사용자가 끈 스마트 감지 항목의 intent 문자열 목록 (예: 'mail-reply'). UI 토글이 이 배열을 직접 갱신합니다. 직접 편집 비권장 — UI 사용 권장.",
+        "default": [],
+        "items": {
+          "type": "string"
+        }
+      },
+      "osNotificationsEnabled": {
+        "type": "boolean",
+        "title": "OS 시스템 알림",
+        "description": "detector 가 fire 결정한 신호를 OS 네이티브 알림 (macOS Notification Center / Windows 알림) 으로 표시. title/body 는 정형 한국어만 — raw 메일 제목/발신자/회의 제목 등 사용자 콘텐츠는 절대 노출되지 않습니다. 끄면 LVIS 앱 안의 overlay/toast 만 표시.",
+        "default": true
+      },
+      "osNotificationIntents": {
+        "type": "array",
+        "title": "OS 알림을 받을 detector intent 목록",
+        "description": "OS 네이티브 알림으로 표시할 detector intent 목록. osNotificationsEnabled=true 일 때만 적용. 기본값은 11개 detector 전체. 특정 카테고리만 알림 받고 싶으면 이 배열에서 다른 intent 제거.",
+        "default": [
+          "mail-action",
+          "mail-approval",
+          "mail-meeting",
+          "mail-reply",
+          "meeting-summary",
+          "calendar-event-prep",
+          "work-item-due-soon",
+          "video-conference-prep-register",
+          "calendar-conflict-prep",
+          "meeting-room-suggest",
+          "webex-link-missing"
+        ],
+        "items": {
+          "type": "string"
+        }
+      }
+    }
+  },
+  "eventSubscriptions": [
+    "email.new",
+    "meeting.summary.created",
+    "meeting.ended",
+    "calendar.event.upcoming",
+    "calendar.event.starting",
+    "calendar.event.added",
+    "calendar.event.conflict.detected",
+    "work_board.work_item.due_soon",
+    "ms-graph.auth.changed",
+    "lge-api.video-conference.reserved"
+  ],
+  "emittedEvents": [
+    "work_assistant.alert.mail-action",
+    "work_assistant.alert.mail-approval",
+    "work_assistant.alert.mail-meeting",
+    "work_assistant.alert.mail-reply",
+    "work_assistant.alert.meeting-summary",
+    "work_assistant.alert.calendar-event-prep",
+    "work_assistant.alert.work-item-due-soon",
+    "work_assistant.alert.video-conference-prep-register",
+    "work_assistant.alert.calendar-conflict-prep",
+    "work_assistant.alert.meeting-room-suggest",
+    "work_assistant.alert.webex-link-missing"
+  ],
+  "notificationEvents": [
+    { "event": "work_assistant.alert.mail-action", "titleField": "title", "bodyField": "body" },
+    { "event": "work_assistant.alert.mail-approval", "titleField": "title", "bodyField": "body" },
+    { "event": "work_assistant.alert.mail-meeting", "titleField": "title", "bodyField": "body" },
+    { "event": "work_assistant.alert.mail-reply", "titleField": "title", "bodyField": "body" },
+    { "event": "work_assistant.alert.meeting-summary", "titleField": "title", "bodyField": "body" },
+    { "event": "work_assistant.alert.calendar-event-prep", "titleField": "title", "bodyField": "body", "bypassFocusGate": true },
+    { "event": "work_assistant.alert.work-item-due-soon", "titleField": "title", "bodyField": "body", "bypassFocusGate": true },
+    { "event": "work_assistant.alert.video-conference-prep-register", "titleField": "title", "bodyField": "body", "bypassFocusGate": true },
+    { "event": "work_assistant.alert.calendar-conflict-prep", "titleField": "title", "bodyField": "body" },
+    { "event": "work_assistant.alert.meeting-room-suggest", "titleField": "title", "bodyField": "body" },
+    { "event": "work_assistant.alert.webex-link-missing", "titleField": "title", "bodyField": "body" }
+  ],
+  "toolSchemas": {
+    "work_assistant_list_detectors": {
+      "description": "Work Assistant 의 모든 디텍터 목록을 반환합니다. 각 항목은 intent · 의존 플러그인 · 의존 충족 여부 · 활성/비활성 상태 정보를 포함하며 디텍터 토글 UI 의 데이터 소스입니다.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {},
+        "additionalProperties": false
+      }
+    },
+    "work_assistant_set_detector_enabled": {
+      "description": "특정 디텍터의 enabled 상태를 토글합니다. enabled=false 면 disabledDetectors 에 intent 추가, true 면 제거. 변경 즉시 dispatcher 가 재평가됩니다.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "intent": {
+            "type": "string",
+            "description": "디텍터 intent (예: 'mail-reply', 'calendar-event-prep')."
+          },
+          "enabled": {
+            "type": "boolean",
+            "description": "true 면 활성화, false 면 비활성화."
+          }
+        },
+        "required": [
+          "intent",
+          "enabled"
+        ],
+        "additionalProperties": false
+      }
+    },
+    "work_assistant_generate_daily_briefing": {
+      "description": "받은편지함 최근 20건 + 오늘~내일 일정 + detector 가 모은 메일/회의/일정 항목을 LLM 에 한 번에 전달해 풍성한 업무 브리핑을 생성합니다. summary 에는 (1) 핵심 요약 + (2) 메일/일정 기반 오늘 챙길 일 bullet 이 포함됩니다 — 답장 필요 메일, 미팅 사전준비, 충돌 일정, 마감 임박 등을 LLM 이 직접 판단해 surface. 사용 시기: 호스트 루틴이 wakeup, schedule, shutdown 트리거로 하루 시작 브리핑·주기적 업무 pulse·퇴근 요약을 만들 때. 사용 안 함: 사용자가 단일 메일/일정/회의 원문을 직접 요청하면 msgraph_email_*, msgraph_calendar_* 도구를 우선 호출하세요. 반환: { generatedAt, trigger, items[{category, priority, title, detail?}], summary }. ms-graph 호출 / LLM 호출 실패는 fail-soft — 가능한 컨텍스트만으로 summary 를 생성합니다.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "trigger": {
+            "type": "string",
+            "enum": [
+              "wakeup",
+              "schedule",
+              "shutdown"
+            ],
+            "description": "브리핑 생성 맥락. wakeup은 하루 시작 브리핑, schedule은 주기적 업무 pulse, shutdown은 퇴근/종료 요약입니다."
+          },
+          "nowIso": {
+            "type": "string",
+            "format": "date-time",
+            "description": "브리핑 기준 시각(ISO 8601). 생략하면 현재 시각을 사용합니다."
+          },
+          "prompt": {
+            "type": "string",
+            "description": "기본 브리핑 지시문을 대체할 선택 프롬프트. 운영 루틴별 말투/길이를 조정할 때만 사용하세요."
+          }
+        },
+        "additionalProperties": false
+      }
+    }
+  }
+}

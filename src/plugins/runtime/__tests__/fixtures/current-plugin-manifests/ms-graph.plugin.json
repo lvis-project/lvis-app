@@ -1,0 +1,787 @@
+{
+  "id": "ms-graph",
+  "name": "LVIS Microsoft 365",
+  "version": "0.3.36",
+  "icon": "Mail",
+  "installPolicy": "admin",
+  "publisher": "LG Electronics IT",
+  "entry": "dist/hostPlugin.js",
+  "description": "Microsoft Graph 통합 플러그인 — Outlook 이메일 + Outlook 캘린더 (calendar/email 두 플러그인을 통합). MS Graph API 기반 폴링 watcher, 답장 작성, 일정 충돌 감지, 반복 패턴 분석.",
+  "tools": [
+    "msgraph_calendar_append_body",
+    "msgraph_calendar_create",
+    "msgraph_calendar_delete",
+    "msgraph_calendar_detect_patterns",
+    "msgraph_calendar_find_by_time_range",
+    "msgraph_calendar_get",
+    "msgraph_calendar_list",
+    "msgraph_calendar_open_url",
+    "msgraph_calendar_open_viewer",
+    "msgraph_calendar_start_watcher",
+    "msgraph_calendar_today",
+    "msgraph_calendar_update",
+    "msgraph_email_analyze",
+    "msgraph_email_create_event",
+    "msgraph_email_get_notifications",
+    "msgraph_email_get_sent_replies",
+    "msgraph_email_get_sent_reply",
+    "msgraph_email_list",
+    "msgraph_email_list_sent",
+    "msgraph_email_read",
+    "msgraph_email_reply",
+    "msgraph_email_start_watcher",
+    "msgraph_email_open_url",
+    "msgraph_email_open_inbox",
+    "msgraph_email_compose_url",
+    "msgraph_list_environments",
+    "msgraph_set_environment"
+  ],
+  "capabilities": [
+    "calendar-source",
+    "mail-source",
+    "background-watcher",
+    "ms-graph-consumer",
+    "external-auth-consumer"
+  ],
+  "networkAccess": {
+    "allowedDomains": [
+      "login.microsoftonline.com",
+      "graph.microsoft.com"
+    ],
+    "reasoning": "MSAL token acquisition (login.microsoftonline.com) and Microsoft Graph API (graph.microsoft.com) egress via host-mediated fetch."
+  },
+  "auth": {
+    "label": "Microsoft 365",
+    "statusTool": "msgraph_status",
+    "loginTool": "msgraph_auth",
+    "logoutTool": "msgraph_signout",
+    "partitionDomains": [
+      "outlook.office.com",
+      "outlook.office365.com",
+      "outlook.live.com",
+      "login.live.com",
+      "login.microsoftonline.com"
+    ]
+  },
+  "uiCallable": [
+    "msgraph_status",
+    "msgraph_auth",
+    "msgraph_signout",
+    "msgraph_list_environments",
+    "msgraph_set_environment",
+    "msgraph_calendar_today",
+    "msgraph_calendar_open_url",
+    "msgraph_calendar_open_viewer",
+    "msgraph_email_list",
+    "msgraph_email_open_url",
+    "msgraph_email_open_inbox",
+    "msgraph_email_compose_url"
+  ],
+  "ui": [
+    {
+      "id": "outlook-control",
+      "slot": "sidebar",
+      "kind": "embedded-module",
+      "displayName": "Outlook",
+      "title": "Outlook (Microsoft 365)",
+      "description": "Microsoft 365 인증 상태 + Outlook 받은편지함 바로 열기 — agent-hub 패턴의 detached magnetic-snap window.",
+      "entry": "dist/ui/outlook-control.js",
+      "exportName": "default",
+      "window": {
+        "width": 360,
+        "height": 480,
+        "minWidth": 280,
+        "minHeight": 360,
+        "resizable": true
+      }
+    }
+  ],
+  "configSchema": {
+    "properties": {
+      "environment": {
+        "type": "string",
+        "title": "기본 MS 환경",
+        "description": "Microsoft 환경 (external=공용 엔드포인트 / corporate=LG 사내 테넌트). 기본값은 external 이지만 cold-boot 시 사내망 DNS 신호가 감지되면 corporate 가 자동 적용됩니다. 명시 corporate 또는 플러그인 패널 1-클릭(savedEnv) 이 자동 감지보다 우선합니다.",
+        "enum": [
+          "external",
+          "corporate"
+        ],
+        "default": "external"
+      },
+      "externalClientId": {
+        "type": "string",
+        "title": "External 앱 Client ID",
+        "description": "Azure AD 공용 엔드포인트용 앱 등록 Client ID (GUID 형식). 비워두면 번들 기본값을 사용합니다.",
+        "default": "1d74a3f8-4c0f-473f-8d8d-e64efea32355",
+        "pattern": "^$|^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$"
+      },
+      "corporateClientId": {
+        "type": "string",
+        "title": "Corporate 앱 Client ID",
+        "description": "LG Electronics 테넌트용 앱 등록 Client ID (GUID 형식). 비워두면 번들 기본값을 사용합니다.",
+        "default": "6c03089a-96c8-4515-bc01-4fd7a0936cea",
+        "pattern": "^$|^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$"
+      },
+      "corporateTenantId": {
+        "type": "string",
+        "title": "Corporate Tenant ID",
+        "description": "LG Electronics Azure AD 디렉터리(테넌트) ID (GUID 형식). 비워두면 번들 기본값을 사용합니다.",
+        "default": "5069cde4-642a-45c0-8094-d0c2dec10be3",
+        "pattern": "^$|^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$"
+      },
+      "emailWatcherIntervalMs": {
+        "type": "integer",
+        "title": "이메일 감시 폴링 간격 (ms)",
+        "description": "이메일 watcher 폴링 주기(밀리초). 기본 30000 (30초).",
+        "default": 30000,
+        "minimum": 5000,
+        "maximum": 300000
+      },
+      "calendarWatcherIntervalMs": {
+        "type": "integer",
+        "title": "캘린더 감시 폴링 간격 (ms)",
+        "description": "캘린더 watcher 의 Microsoft Graph 전체 refresh 폴링 주기(밀리초). `checkUpcoming` 자체는 60초마다 도는 별개 timer 라 메모리에 이미 들어온 일정의 임박 알림은 1분 단위로 평가됨 — 이 값은 *외부* (Outlook 데스크톱/웹) 에서 새로 등록된 일정을 watcher 가 발견하기까지 걸리는 시간을 결정. 기본 60000 (1분) — 사용자가 일정 시작 5분 전에 등록해도 worst case 1분 안에 catch + 4분 전 알림 보장. 늘리면 Graph API quota 절약되지만 새 일정 catch 가 늦어짐.",
+        "default": 60000,
+        "minimum": 60000,
+        "maximum": 3600000
+      }
+    }
+  },
+  "startupTimeoutMs": 6500,
+  "eventSubscriptions": [],
+  "emittedEvents": [
+    "email.new",
+    "email.action.needed",
+    "email.watcher.poll.completed",
+    "email.watcher.seeding.started",
+    "email.watcher.seeding.completed",
+    "email.watcher.ready",
+    "calendar.event.added",
+    "calendar.event.upcoming",
+    "calendar.event.starting",
+    "calendar.event.conflict.detected",
+    "ms-graph.auth.changed"
+  ],
+  "pluginAccess": {
+    "plugins": []
+  },
+  "notificationEvents": [
+    {
+      "event": "email.new",
+      "titleField": "sender",
+      "bodyField": "subject"
+    },
+    {
+      "event": "email.action.needed",
+      "titleField": "subject",
+      "bodyField": "actionDescription"
+    }
+  ],
+  "keywords": [
+    {
+      "keyword": "이메일",
+      "skillId": "msgraph_email_list"
+    },
+    {
+      "keyword": "메일",
+      "skillId": "msgraph_email_list"
+    },
+    {
+      "keyword": "email",
+      "skillId": "msgraph_email_list"
+    },
+    {
+      "keyword": "받은메일",
+      "skillId": "msgraph_email_list"
+    },
+    {
+      "keyword": "메일요약",
+      "skillId": "msgraph_email_analyze"
+    },
+    {
+      "keyword": "태스크생성",
+      "skillId": "msgraph_email_analyze"
+    },
+    {
+      "keyword": "이메일분류",
+      "skillId": "msgraph_email_analyze"
+    },
+    {
+      "keyword": "메일확인",
+      "skillId": "msgraph_email_list"
+    },
+    {
+      "keyword": "Outlook",
+      "skillId": "msgraph_email_list"
+    }
+  ],
+  "toolSchemas": {
+    "msgraph_email_list": {
+      "description": "받은 편지함의 최근 이메일 목록(제목·발신자·요약)을 가져옵니다. 로그인 필요. 사용 시기: '메일 뭐 와있어', '최근 메일 정리' 같은 개괄 조회. 사용 안 함: 특정 메일 본문이 필요하면 msgraph_email_read, 분석은 msgraph_email_analyze. 반환: 이메일 배열(각 항목에 webLink 포함, 그리고 `isReplied?: boolean` enrichment — true 면 같은 conversation 에 본인이 보낸 더 늦은 메일이 있어 이미 답장한 메일. 14일 윈도우 sent-items cross-ref 기반 derived 값). 이메일 소개 시 webLink를 [Outlook에서 열기](webLink) 형태의 마크다운 링크로 포함해주세요.",
+      "inputSchema": {
+        "$schema": "http://json-schema.org/draft-07/schema#",
+        "type": "object",
+        "properties": {
+          "top": {
+            "type": "integer",
+            "minimum": 1,
+            "maximum": 100,
+            "description": "가져올 이메일 최대 건수 (기본값: 20)"
+          }
+        },
+        "additionalProperties": false
+      }
+    },
+    "msgraph_email_list_sent": {
+      "description": "보낸 편지함(Sent Items)의 최근 메일 목록을 가져옵니다. 로그인 필요. 사용 시기: '내가 보낸 메일', '아까 누구한테 보냈더라', '보낸 편지함 보여줘' 등 사용자가 자신이 보낸 메일을 회상/검색할 때. 사용 안 함: 받은 메일은 msgraph_email_list, 특정 메일 본문은 msgraph_email_read. 반환: 이메일 배열 — 각 항목에 `to: [{ name, address }]` (수신자), `from`은 빈 placeholder, `receivedAt`에는 sentDateTime이 들어감, `isRead`는 항상 true, `webLink` 포함. inbox 도구의 `isReplied` enrichment 는 적용되지 않음 (의미 없음). 이메일 소개 시 webLink를 [Outlook에서 열기](webLink) 형태의 마크다운 링크로 포함해주세요.",
+      "inputSchema": {
+        "$schema": "http://json-schema.org/draft-07/schema#",
+        "type": "object",
+        "properties": {
+          "top": {
+            "type": "integer",
+            "minimum": 1,
+            "maximum": 100,
+            "description": "가져올 이메일 최대 건수 (기본값: 20)"
+          }
+        },
+        "additionalProperties": false
+      }
+    },
+    "msgraph_email_read": {
+      "description": "특정 이메일 메시지의 전체 본문(HTML → 텍스트 변환) 과 헤더를 조회합니다. 로그인 필요. 사용 시기: msgraph_email_list 결과에서 얻은 id 로 본문 전체가 필요할 때. 사용 안 함: 액션 여부·마감일 추출이 목적이면 msgraph_email_analyze 를 바로. 반환 결과에 webLink 포함 — 메일 소개 시 [Outlook에서 열기](webLink) 링크를 함께 제시해주세요.",
+      "inputSchema": {
+        "$schema": "http://json-schema.org/draft-07/schema#",
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "string",
+            "description": "조회할 이메일의 Microsoft Graph 메시지 ID"
+          }
+        },
+        "required": [
+          "id"
+        ],
+        "additionalProperties": false
+      }
+    },
+    "msgraph_email_analyze": {
+      "description": "이메일을 분석해 액션 필요 여부·마감일·의도·우선순위를 추출합니다. LLM 키가 있으면 AI 분석, 없으면 키워드 분석. 로그인 필요. 사용 시기: '이 메일 중요해?', '답장 필요한 거 골라줘' 같은 판단이 필요할 때. 사용 안 함: 본문 확인만 필요하면 msgraph_email_read. 반환: { email, analysis }.",
+      "inputSchema": {
+        "$schema": "http://json-schema.org/draft-07/schema#",
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "string",
+            "description": "분석할 이메일의 Microsoft Graph 메시지 ID"
+          }
+        },
+        "required": [
+          "id"
+        ],
+        "additionalProperties": false
+      }
+    },
+    "msgraph_email_reply": {
+      "description": "⚠️ 직접 발송 — 사용 금지. 답장 초안은 반드시 msgraph_email_compose_url(to: 발신자, subject: 'RE: 제목', body: 초안)로 Outlook 작성창을 열어 사용자가 검토 후 직접 발송하게 하세요. 이 툴은 사용자가 명시적으로 '바로 보내줘'라고 요청하고 내용을 이미 확인한 경우에만 호출하세요.",
+      "inputSchema": {
+        "$schema": "http://json-schema.org/draft-07/schema#",
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "string",
+            "description": "답장할 원본 이메일의 Microsoft Graph 메시지 ID"
+          },
+          "body": {
+            "type": "string",
+            "description": "답장 본문 텍스트"
+          },
+          "subject": {
+            "type": "string",
+            "description": "답장 제목 (기록용, 선택 사항)"
+          },
+          "to": {
+            "type": "string",
+            "description": "수신자 이메일 주소 (기록용, 선택 사항)"
+          }
+        },
+        "required": [
+          "id",
+          "body"
+        ],
+        "additionalProperties": false
+      }
+    },
+    "msgraph_email_get_sent_replies": {
+      "description": "이번 세션에서 msgraph_email_reply 로 보낸 모든 답장의 기록 목록을 반환합니다. 사용 시기: '방금 보낸 답장 뭐였지?', '오늘 몇 통 답장했어?' 같이 세션 내 전송 이력이 필요할 때. 인자 없음. 각 항목: emailId, subject, to, body, sentAt.",
+      "inputSchema": {
+        "$schema": "http://json-schema.org/draft-07/schema#",
+        "type": "object",
+        "properties": {},
+        "additionalProperties": false
+      }
+    },
+    "msgraph_email_get_sent_reply": {
+      "description": "특정 원본 이메일 id 에 대해 이번 세션에서 보낸 답장 기록을 조회합니다. 사용 시기: '이 메일에 답장 보냈었나?' 같이 특정 메일에 대한 답장 여부가 궁금할 때. 없으면 null 반환. 여러 통을 한 번에 조회하려면 msgraph_email_get_sent_replies 를 쓰세요.",
+      "inputSchema": {
+        "$schema": "http://json-schema.org/draft-07/schema#",
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "string",
+            "description": "조회할 원본 이메일의 Microsoft Graph 메시지 ID"
+          }
+        },
+        "required": [
+          "id"
+        ],
+        "additionalProperties": false
+      }
+    },
+    "msgraph_email_start_watcher": {
+      "description": "새 이메일 도착을 주기적으로 폴링하는 감시자를 시작합니다. 로그인 필요. 사용 시기: 사용자가 능동적 새 메일 알림을 원할 때. 이미 실행 중이면 중복 호출 불필요 — msgraph_status 로 먼저 확인하세요.",
+      "inputSchema": {
+        "$schema": "http://json-schema.org/draft-07/schema#",
+        "type": "object",
+        "properties": {
+          "intervalMs": {
+            "type": "integer",
+            "minimum": 5000,
+            "description": "폴링 간격 밀리초 (기본값: 30000)"
+          }
+        },
+        "additionalProperties": false
+      }
+    },
+    "msgraph_email_open_url": {
+      "description": "이메일의 webLink를 기본 브라우저로 열어 Outlook Web에서 해당 메일을 표시합니다. 사용 시기: msgraph_email_list/read 결과의 webLink로 사용자가 Outlook에서 메일을 직접 보고 싶을 때. https만 허용.",
+      "inputSchema": {
+        "$schema": "http://json-schema.org/draft-07/schema#",
+        "type": "object",
+        "properties": {
+          "url": {
+            "type": "string",
+            "format": "uri",
+            "description": "열 Outlook 이메일 webLink (https 스킴만 허용)"
+          }
+        },
+        "required": [
+          "url"
+        ],
+        "additionalProperties": false
+      }
+    },
+    "msgraph_email_open_inbox": {
+      "description": "Outlook 받은편지함을 엽니다. 현재 로그인된 계정이 개인 MSA(outlook.live.com)이면 outlook.live.com 의 inbox, 회사 AAD 계정이면 outlook.office.com 의 inbox 로 자동 라우팅. 호스트의 webView.preferredFlow 설정에 따라 in-app webview 또는 시스템 브라우저로 표시. 플러그인 패널의 'Outlook' UI 가 인증 상태에서 클릭 시 호출.",
+      "inputSchema": {
+        "$schema": "http://json-schema.org/draft-07/schema#",
+        "type": "object",
+        "properties": {},
+        "additionalProperties": false
+      }
+    },
+    "msgraph_email_compose_url": {
+      "description": "Outlook Web 메일 작성 화면을 받는사람·제목·본문이 미리 채워진 상태로 엽니다. 사용 시기: 사용자가 새 메일 초안 작성을 요청할 때 — LLM이 내용을 구성한 뒤 이 툴로 Outlook 작성창을 열어 사용자가 직접 검토 후 발송하게 합니다. 답장 초안도 이 툴 사용. msgraph_email_reply는 사용자가 '바로 보내줘'라고 명시한 경우에만.",
+      "inputSchema": {
+        "$schema": "http://json-schema.org/draft-07/schema#",
+        "type": "object",
+        "properties": {
+          "to": {
+            "type": "string",
+            "description": "수신자 이메일 주소"
+          },
+          "subject": {
+            "type": "string",
+            "description": "메일 제목"
+          },
+          "body": {
+            "type": "string",
+            "description": "메일 본문"
+          },
+          "cc": {
+            "type": "string",
+            "description": "참조 이메일 주소 (선택)"
+          },
+          "bcc": {
+            "type": "string",
+            "description": "숨은참조 이메일 주소 (선택)"
+          }
+        },
+        "additionalProperties": false
+      }
+    },
+    "msgraph_email_get_notifications": {
+      "description": "감시자가 감지한 미처리(아직 사용자에게 안내되지 않은) 새 이메일 알림 목록을 반환합니다. 사용 시기: '새 메일 왔어?', '알림 확인' 같이 감시자가 잡은 건이 있는지 조회할 때. 인자 없음.",
+      "inputSchema": {
+        "$schema": "http://json-schema.org/draft-07/schema#",
+        "type": "object",
+        "properties": {},
+        "additionalProperties": false
+      }
+    },
+    "msgraph_email_create_event": {
+      "description": "이메일 분석 결과에서 파생된 새 Outlook 일정을 생성합니다(email 플러그인 편의 래퍼). 로그인 필요. 사용 시기: msgraph_email_analyze 결과에 'schedule meeting' 의도가 있을 때 바로 일정 등록. 사용 안 함: 메일과 무관한 일반 일정은 msgraph_calendar_create 를 사용. 입력 팁: start/end 는 KST ISO 8601.",
+      "inputSchema": {
+        "$schema": "http://json-schema.org/draft-07/schema#",
+        "type": "object",
+        "properties": {
+          "title": {
+            "type": "string",
+            "description": "일정 제목"
+          },
+          "start": {
+            "type": "string",
+            "format": "date-time",
+            "description": "일정 시작 시각 (ISO 8601, 예: 2026-04-18T09:00:00)"
+          },
+          "end": {
+            "type": "string",
+            "format": "date-time",
+            "description": "일정 종료 시각 (ISO 8601, 예: 2026-04-18T10:00:00)"
+          },
+          "body": {
+            "type": "string",
+            "description": "일정 본문/메모 (선택)"
+          },
+          "location": {
+            "type": "string",
+            "description": "장소 (선택)"
+          }
+        },
+        "required": [
+          "title",
+          "start",
+          "end"
+        ],
+        "additionalProperties": false
+      }
+    },
+    "msgraph_status": {
+      "description": "Microsoft Graph 인증 상태와 watcher 실행 여부를 반환합니다. 사용 시기: 캘린더 기능이 사용 가능한 상태인지 다른 calendar_* 도구 호출 전에 먼저 확인하고 싶을 때. 인자 없음. 반환: { authenticated, account?, watcherRunning }.",
+      "inputSchema": {
+        "$schema": "http://json-schema.org/draft-07/schema#",
+        "type": "object",
+        "properties": {},
+        "additionalProperties": false
+      }
+    },
+    "msgraph_signout": {
+      "description": "현재 활성 환경의 Microsoft 계정에서 로그아웃합니다. 플러그인 자체 토큰 캐시 + MSAL 캐시 둘 다 제거. watcher 도 정지. 사용 시기: 사용자가 명시적으로 '로그아웃' / '계정 변경' 을 요청할 때. 인자 없음. 반환: { signedOut: true, activeEnvironment }.",
+      "inputSchema": {
+        "$schema": "http://json-schema.org/draft-07/schema#",
+        "type": "object",
+        "properties": {},
+        "additionalProperties": false
+      }
+    },
+    "msgraph_list_environments": {
+      "description": "사용 가능한 MS 환경 목록 반환 (External / Corporate). 사용 시기: 채팅에서 '환경 뭐 있어?' 같은 발화 또는 호스트 설정 화면이 환경 선택 메뉴를 그릴 때. 인자 없음. 반환: 각 항목 { id, label, description, active }.",
+      "inputSchema": {
+        "$schema": "http://json-schema.org/draft-07/schema#",
+        "type": "object",
+        "properties": {},
+        "additionalProperties": false
+      }
+    },
+    "msgraph_set_environment": {
+      "description": "MS 환경(external | corporate) 을 1-클릭으로 전환. plugin state 에 영속화 → 재시작 후에도 유지. 다른 환경으로 바꾸면 watcher 가 정지하고 새 환경의 토큰으로 다시 시작 (해당 환경에 토큰이 없으면 미인증 상태 → 사용자 재로그인 필요). 사용 시기: 채팅에서 '회사 환경으로 바꿔줘' 같은 발화 또는 호스트 설정 화면의 환경 선택 UI 에서 호출.",
+      "inputSchema": {
+        "$schema": "http://json-schema.org/draft-07/schema#",
+        "type": "object",
+        "properties": {
+          "environment": {
+            "type": "string",
+            "enum": [
+              "external",
+              "corporate"
+            ],
+            "description": "전환할 환경 id"
+          }
+        },
+        "required": [
+          "environment"
+        ],
+        "additionalProperties": false
+      }
+    },
+    "msgraph_auth": {
+      "description": "Microsoft 계정으로 로그인합니다. 사용 시기: msgraph_status 가 authenticated=false 를 반환한 직후. 이미 인증된 경우 즉시 반환합니다(중복 호출 안전). 인자 없음. 반환: { authenticated, account? }.",
+      "inputSchema": {
+        "$schema": "http://json-schema.org/draft-07/schema#",
+        "type": "object",
+        "properties": {},
+        "additionalProperties": false
+      }
+    },
+    "msgraph_calendar_list": {
+      "description": "향후 N일간의 Outlook 일정 목록을 반환합니다. 로그인 필요. 사용 시기: '이번 주 일정', '앞으로 며칠 간 미팅' 같이 기간 기반 조회. 사용 안 함: 오늘만 필요하면 msgraph_calendar_today, 특정 일정 1건 상세는 msgraph_calendar_get. 반환: 일정 배열.",
+      "inputSchema": {
+        "$schema": "http://json-schema.org/draft-07/schema#",
+        "type": "object",
+        "properties": {
+          "days": {
+            "type": "integer",
+            "minimum": 1,
+            "maximum": 90,
+            "description": "조회할 일수 (기본값: 7)"
+          },
+          "top": {
+            "type": "integer",
+            "minimum": 1,
+            "maximum": 200,
+            "description": "최대 반환 건수 (기본값: 50)"
+          }
+        },
+        "additionalProperties": false
+      }
+    },
+    "msgraph_calendar_today": {
+      "description": "오늘의 Outlook 일정 목록을 반환합니다. 로그인 필요. 사용 시기: '오늘 뭐해', '오늘 미팅' 같은 당일 한정 조회. 사용 안 함: 기간 조회는 msgraph_calendar_list. 인자 없음.",
+      "inputSchema": {
+        "$schema": "http://json-schema.org/draft-07/schema#",
+        "type": "object",
+        "properties": {},
+        "additionalProperties": false
+      }
+    },
+    "msgraph_calendar_get": {
+      "description": "특정 일정 단건의 상세(본문·참석자 등) 를 조회합니다. 로그인 필요. 사용 시기: msgraph_calendar_list 또는 msgraph_calendar_today 결과에서 얻은 id 로 상세를 확인해야 할 때. ID를 모르면 msgraph_calendar_list/today 를 먼저 호출하세요.",
+      "inputSchema": {
+        "$schema": "http://json-schema.org/draft-07/schema#",
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "string",
+            "description": "조회할 일정의 Microsoft Graph 이벤트 ID"
+          }
+        },
+        "required": [
+          "id"
+        ],
+        "additionalProperties": false
+      }
+    },
+    "msgraph_calendar_create": {
+      "description": "Outlook 캘린더에 새 일정을 생성합니다. 로그인 필요. 사용 시기: 사용자가 새 회의/약속 생성을 명시적으로 요청할 때. 사용 안 함: 기존 일정 변경은 msgraph_calendar_update, 삭제는 msgraph_calendar_delete. 입력 팁: start/end 는 KST ISO 8601(+09:00) 로 전달, timeZone 은 기본 Asia/Seoul.",
+      "inputSchema": {
+        "$schema": "http://json-schema.org/draft-07/schema#",
+        "type": "object",
+        "properties": {
+          "title": {
+            "type": "string",
+            "description": "일정 제목"
+          },
+          "start": {
+            "type": "string",
+            "format": "date-time",
+            "description": "일정 시작 시각 (ISO 8601, 예: 2026-04-18T09:00:00)"
+          },
+          "end": {
+            "type": "string",
+            "format": "date-time",
+            "description": "일정 종료 시각 (ISO 8601, 예: 2026-04-18T10:00:00)"
+          },
+          "body": {
+            "type": "string",
+            "description": "일정 본문/메모 (선택)"
+          },
+          "location": {
+            "type": "string",
+            "description": "장소 (선택)"
+          },
+          "timeZone": {
+            "type": "string",
+            "description": "IANA 시간대 (선택, 예: Asia/Seoul)"
+          },
+          "attendees": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            },
+            "description": "참석자 이메일 주소 목록 (선택)"
+          }
+        },
+        "required": [
+          "title",
+          "start",
+          "end"
+        ],
+        "additionalProperties": false
+      }
+    },
+    "msgraph_calendar_update": {
+      "description": "기존 Outlook 일정을 수정합니다. 로그인 필요. 사용 시기: '회의 30분 미뤄줘', '장소 바꿔줘' 같이 기존 일정의 일부 필드만 바꿀 때. 수정할 필드만 전달하면 됩니다(id 는 필수). 사용 안 함: 새 일정은 msgraph_calendar_create, 취소는 msgraph_calendar_delete.",
+      "inputSchema": {
+        "$schema": "http://json-schema.org/draft-07/schema#",
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "string",
+            "description": "수정할 일정의 Microsoft Graph 이벤트 ID"
+          },
+          "title": {
+            "type": "string",
+            "description": "새 일정 제목 (선택)"
+          },
+          "start": {
+            "type": "string",
+            "format": "date-time",
+            "description": "새 시작 시각 (ISO 8601, 선택)"
+          },
+          "end": {
+            "type": "string",
+            "format": "date-time",
+            "description": "새 종료 시각 (ISO 8601, 선택)"
+          },
+          "body": {
+            "type": "string",
+            "description": "새 본문/메모 (선택)"
+          },
+          "location": {
+            "type": "string",
+            "description": "새 장소 (선택)"
+          },
+          "timeZone": {
+            "type": "string",
+            "description": "IANA 시간대 (선택)"
+          }
+        },
+        "required": [
+          "id"
+        ],
+        "additionalProperties": false
+      }
+    },
+    "msgraph_calendar_find_by_time_range": {
+      "description": "지정한 시간 범위(UTC) 안의 Outlook 일정 목록을 가져옵니다. 로그인 필요. 사용 시기: 미팅 요약을 캘린더 이벤트에 연결할 때 startedAt/endedAt 으로 해당 이벤트를 찾아야 할 때. 결과에서 id 를 얻어 msgraph_calendar_append_body 에 전달하세요.",
+      "inputSchema": {
+        "$schema": "http://json-schema.org/draft-07/schema#",
+        "type": "object",
+        "properties": {
+          "startUtc": {
+            "type": "string",
+            "description": "조회 시작 시각 (UTC ISO 8601, 예: 2026-05-03T01:00:00Z)"
+          },
+          "endUtc": {
+            "type": "string",
+            "description": "조회 종료 시각 (UTC ISO 8601)"
+          }
+        },
+        "required": [
+          "startUtc",
+          "endUtc"
+        ],
+        "additionalProperties": false
+      }
+    },
+    "msgraph_calendar_append_body": {
+      "description": "Outlook 캘린더 이벤트 본문 끝에 미팅 요약을 추가합니다. 기존 본문은 유지됩니다. 로그인 필요. 사용 시기: 미팅 종료 후 LVIS가 채팅에서 '캘린더에 요약 추가할까요?' 라고 물었을 때. markerId 는 sessionId 를 사용하세요 — 같은 markerId 로 중복 호출 시 자동 무시됩니다.",
+      "inputSchema": {
+        "$schema": "http://json-schema.org/draft-07/schema#",
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "string",
+            "description": "대상 Outlook 이벤트 ID (msgraph_calendar_find_by_time_range 로 조회)"
+          },
+          "summaryText": {
+            "type": "string",
+            "maxLength": 2000,
+            "description": "추가할 요약 텍스트(plain text). HTML 태그 포함 금지 — 플러그인이 자동으로 HTML로 변환합니다."
+          },
+          "markerId": {
+            "type": "string",
+            "description": "중복 방지용 고유 키. 같은 markerId 로 재호출하면 본문을 덮어쓰지 않고 무시됩니다. 미팅 sessionId 권장."
+          }
+        },
+        "required": [
+          "id",
+          "summaryText",
+          "markerId"
+        ],
+        "additionalProperties": false
+      }
+    },
+    "msgraph_calendar_delete": {
+      "description": "Outlook 일정을 영구 삭제합니다. 로그인 필요. 사용 시기: 사용자가 '일정 취소/삭제해줘'라고 명시적으로 요청할 때만. 되돌릴 수 없으므로 id 확인에 주의하고, 모호하면 msgraph_calendar_get 으로 먼저 일정 내용을 사용자에게 확인 받으세요.",
+      "inputSchema": {
+        "$schema": "http://json-schema.org/draft-07/schema#",
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "string",
+            "description": "삭제할 일정의 Microsoft Graph 이벤트 ID"
+          }
+        },
+        "required": [
+          "id"
+        ],
+        "additionalProperties": false
+      }
+    },
+    "msgraph_calendar_start_watcher": {
+      "description": "Outlook 일정 변경을 주기적으로 폴링하는 감시자를 시작합니다(15분/1분 전 알림 이벤트 발행). 로그인 필요. 사용 시기: 사용자가 능동적 미팅 알림을 원할 때. 이미 실행 중이면 중복 호출 불필요 — msgraph_status.watcherRunning 을 먼저 확인하세요.",
+      "inputSchema": {
+        "$schema": "http://json-schema.org/draft-07/schema#",
+        "type": "object",
+        "properties": {
+          "intervalMs": {
+            "type": "integer",
+            "minimum": 60000,
+            "description": "폴링 간격 밀리초 (기본값: 1800000 = 30분)"
+          }
+        },
+        "additionalProperties": false
+      }
+    },
+    "msgraph_calendar_open_url": {
+      "description": "외부 일정 링크(https만 허용)를 기본 브라우저로 엽니다. 사용 시기: msgraph_calendar_get 의 본문/메모에서 Teams/Zoom 등 미팅 참여 URL 을 발견하고 사용자가 '참여/열어줘'라고 요청했을 때. 다른 브라우저 탐색에는 사용하지 마세요.",
+      "inputSchema": {
+        "$schema": "http://json-schema.org/draft-07/schema#",
+        "type": "object",
+        "properties": {
+          "url": {
+            "type": "string",
+            "format": "uri",
+            "description": "열 URL (https 스킴만 허용)"
+          }
+        },
+        "required": [
+          "url"
+        ],
+        "additionalProperties": false
+      }
+    },
+    "msgraph_calendar_open_viewer": {
+      "description": "Outlook 웹 캘린더를 사용자 환경의 outlook 핸들러로 엽니다. 호스트의 webView.preferredFlow 설정에 따라 in-app webview 또는 시스템 브라우저로 라우팅 (호스트 SoT). 허용 호스트는 outlook.office.com / outlook.office365.com / outlook.live.com 만 — 그 외 URL 은 plugin 단에서 거부. 사용 시기: 다른 플러그인(예: agent-hub)이 사용자에게 'Outlook 캘린더 열기' surface 를 제공할 때 callTool 로 호출.",
+      "inputSchema": {
+        "$schema": "http://json-schema.org/draft-07/schema#",
+        "type": "object",
+        "properties": {
+          "url": {
+            "type": "string",
+            "format": "uri",
+            "description": "열 URL — outlook.* 콘텐츠 호스트만 허용 (outlook.office.com / outlook.office365.com / outlook.live.com). 생략 시 사용자의 MSAL tenant 에 따라 기본 캘린더 뷰가 자동 선택됨 (work=office.com, personal=live.com)."
+          }
+        },
+        "additionalProperties": false
+      }
+    },
+    "msgraph_calendar_detect_patterns": {
+      "description": "향후 일정에서 반복 패턴(예: 매주 금요일 팀 회의)을 감지합니다. 로그인 필요. 사용 시기: 사용자가 '반복 미팅 찾아봐', '내 일정 습관' 같이 패턴 분석을 명시적으로 요청할 때. 사용 안 함: 일반 일정 조회는 msgraph_calendar_list 를 먼저. 기본 28일, 최대 100건. 반환: { patterns: [...] }.",
+      "inputSchema": {
+        "$schema": "http://json-schema.org/draft-07/schema#",
+        "type": "object",
+        "properties": {
+          "days": {
+            "type": "integer",
+            "minimum": 1,
+            "maximum": 90,
+            "description": "패턴 감지 대상 기간(일) — 기본값 28"
+          }
+        },
+        "additionalProperties": false
+      }
+    }
+  }
+}
