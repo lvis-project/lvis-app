@@ -154,17 +154,22 @@ export interface FeatureFlags {
    * the plugin-declared category — a tool grading its own danger is not a
    * control (MCP spec: a server can lie).
    *
-   * The flag ships OFF with SHADOW MODE always active: the host-derived
-   * category is computed and logged against the declared category for every
-   * invocation so the divergence can be reconciled across plugins BEFORE the
-   * flag is ever flipped. Migration can therefore only TIGHTEN, never silently
-   * change live behaviour.
+   * The flag now ships ON (shadow-mode reconciliation completed before the
+   * flip): the host-derived category drives enforcement, with foreground
+   * plugin read-relaxation. A user can still turn it OFF in Settings, which
+   * restores the declared-category behaviour.
    */
   hostClassifiesRisk?: boolean;
   /**
    * OS tool sandbox — when `true` (and the platform is supported), shell and
    * tool spawns are confined by the Anthropic Sandbox Runtime (ASRT; macOS
-   * Seatbelt / Linux bwrap backends). Default `false` (opt-in).
+   * Seatbelt / Linux bwrap backends). Now ships `true` (default ON).
+   *
+   * Because the default is ON, the boot gate distinguishes how the ON-signal
+   * arrived (see boot.ts + boot/steps/sandbox-gate.ts): the DEFAULT/settings-on
+   * path degrades GRACEFULLY (loud warning, unsandboxed, non-bricking) when the
+   * sandbox cannot activate, whereas the EXPLICIT `LVIS_SANDBOX_ENABLED=1` env
+   * opt-in stays fail-closed (boot aborts rather than run unsandboxed).
    *
    * Orthogonal to {@link hostClassifiesRisk}: sandbox-enforcement (is the
    * action kernel-confined when it runs) and risk-classification (does the
@@ -177,10 +182,13 @@ export interface FeatureFlags {
    *     shared strict-union allow-list (loopback proxy floor).
    *   - Linux (bwrap via ASRT): filesystem + process + network egress
    *     confinement (same strict-union floor).
-   *   - Windows: fail-closed — runs unconfined; the toggle reflects this.
+   *   - Windows: srt-win network-only once installed; degrades non-bricking
+   *     (unsandboxed, loud warning) until the one-time install + re-login
+   *     completes — the toggle reflects this.
    *
-   * `LVIS_SANDBOX_ENABLED=1` remains an environment escape-hatch override, but
-   * this setting is the primary, user-discoverable control.
+   * `LVIS_SANDBOX_ENABLED=1` remains an environment escape-hatch override (and
+   * the explicit, fail-closed signal), but this setting is the primary,
+   * user-discoverable control.
    */
   osToolSandbox?: boolean;
 }
@@ -515,14 +523,20 @@ const DEFAULT_SETTINGS: AppSettings = {
     // chain. Any other path that wants to suppress the chain must set
     // this to `true` deliberately — no "missing key === skipped" trap.
     onboardingCompleted: false,
-    // Permission policy host-classifies-risk migration gate. Ships OFF —
-    // shadow mode logs host-derived vs declared category but enforcement
-    // still uses the declared category until this is deliberately flipped.
-    hostClassifiesRisk: false,
-    // OS tool sandbox. Ships OFF (opt-in) but user-visible — boot only
-    // registers the runner when this is true AND the platform runner is
-    // available.
-    osToolSandbox: false,
+    // Permission policy host-classifies-risk migration gate. Ships ON — the
+    // host derives the effective category from host-owned signals (foreground
+    // plugin read-relaxation included) instead of trusting the plugin-declared
+    // category. Shadow mode reconciliation completed before this flip; users
+    // can still opt out in Settings.
+    hostClassifiesRisk: true,
+    // OS tool sandbox. Ships ON — boot activates ASRT when this is true AND the
+    // platform sandbox can run. Because the default is ON, the boot gate makes
+    // the default/settings path GRACEFUL: if the sandbox cannot activate (Linux
+    // deps missing, init failure, Windows not-yet-installed) boot degrades to
+    // unsandboxed with a loud warning instead of aborting. The explicit
+    // `LVIS_SANDBOX_ENABLED=1` env opt-in stays fail-closed. See boot.ts +
+    // boot/steps/sandbox-gate.ts.
+    osToolSandbox: true,
   },
 };
 
