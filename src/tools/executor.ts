@@ -2189,6 +2189,78 @@ export class ToolExecutor {
           forceModal: true,
         };
       }
+      // ── Plugin-read auto-allow ↔ sandbox-fs-containment coupling ──────────
+      //
+      // The merged read-relaxation coupling (the block immediately below) only
+      // gates the `ask` path: it requires `this.sandboxFsContainedProvider()`
+      // before flipping a FOREGROUND PLUGIN `ask` (layer ≥ 3) to `allow`. But a
+      // plugin tool the host inspector classifies as `read` (inspectHostRisk →
+      // `"read"` for a read-only command-bearing arg) is auto-allowed DIRECTLY by
+      // the category × source × trust matrix — `categoryBasedDecision` returns
+      // `{ decision: "allow", layer: 6 }`, never an `ask` — so it SKIPS the
+      // relaxation block and its sandbox coupling entirely. That leaves its
+      // off-hostApi residual (direct `node:fs`, a bare `fetch`, or a detached
+      // async frame that escapes the tool-execute ALS scope) UNCONTAINED when the
+      // sandbox is not filesystem-contained — the exact gap the relaxation
+      // coupling (`isActiveSandboxFilesystemContained`) closes for the ask path.
+      // Close it for the read-auto-allow path too: when `hostClassifiesRisk` is
+      // ON and the active sandbox does NOT filesystem-contain the host, a plugin
+      // read auto-allow must NOT silently proceed — convert it to the pre-exec
+      // approval `ask` so the residual is gated, exactly mirroring the relaxation.
+      //
+      // MUTUAL EXCLUSIVITY — this fires only when `!sandboxFsContainedProvider()`;
+      // the relaxation below fires only when `sandboxFsContainedProvider()`. The
+      // two are mutually exclusive on the same signal and can never both fire on
+      // one invocation, so the ordering relative to the relaxation is immaterial
+      // (a `read` flipped here to `ask` is NOT re-relaxed below — that requires
+      // fs-containment, which is false on this path — so the ask stands).
+      //
+      // SCOPE — each clause load-bearing, mirroring the relaxation:
+      //   • FLAG ON only (`hostClassifiesRiskProvider()`). Flag OFF → the declared
+      //     category drives the decision and this coupling is skipped (byte-for-byte
+      //     unchanged), consistent with the relaxation being flag-gated.
+      //   • PLUGIN only (`source === "plugin"`). BUILTIN reads are host-trusted (no
+      //     off-hostApi-plugin residual) and MCP is host-derived `"network"` (never
+      //     `"read"`) + low-trust `ask` — both untouched.
+      //   • HOST-DERIVED READ only (`invocationCategory === "read"`). Under the flag
+      //     this is the inspector's positive-evidence read, not a self-declared one.
+      //   • CATEGORY-MATRIX AUTO-ALLOW only (`decision === "allow"`, `layer === 6`,
+      //     `getMode() !== "allow"`). An explicit user allow rule (layer 3) /
+      //     always-allow (layer 5) / `allow` mode (the user's deliberate global
+      //     opt-in, under which plugin WRITES are also un-relaxed and uncontained)
+      //     are deliberate grants left intact — just as the relaxation never
+      //     touches a standing `allow`; coupling reads but not writes in allow mode
+      //     would be asymmetric.
+      //   • FOREGROUND only (`headless !== true`). Mirrors the relaxation's
+      //     foreground scope: in a headless/routine lane a bare layer-6 `ask`
+      //     carries no `reviewer` route, so the headless ask handler would
+      //     HARD-DENY it — breaking legitimate routine reads and making headless
+      //     reads stricter than headless writes (which take the reviewer lane).
+      //     Headless plugin reads keep today's auto-allow, exactly as the
+      //     relaxation leaves the headless write lane untouched.
+      //   • NOT FILESYSTEM-CONTAINED only (`!sandboxFsContainedProvider()`).
+      //     macOS/Linux full-confine ASRT (`confines.filesystem === true`) → the
+      //     read auto-allows unchanged; a degraded / sandbox-off / Windows
+      //     network-only host → the pre-exec ask stands. Same fs-contained signal
+      //     the relaxation uses.
+      // Deny rules still win — they resolve to a layer-1 `deny` and never reach here.
+      if (
+        this.hostClassifiesRiskProvider() &&
+        source === "plugin" &&
+        invocationCategory === "read" &&
+        permissionResult.decision === "allow" &&
+        permissionResult.layer === 6 &&
+        invocationPermissionContext.headless !== true &&
+        this.permissionManager?.getMode() !== "allow" &&
+        !this.sandboxFsContainedProvider()
+      ) {
+        permissionResult = {
+          decision: "ask",
+          reason:
+            "plugin read auto-allow requires a filesystem-contained sandbox — pre-exec ask stands (hostClassifiesRisk)",
+          layer: permissionResult.layer,
+        };
+      }
       // ── Effect-boundary pre-exec relaxation (flag-gated, default OFF) ──────
       //
       // When `hostClassifiesRisk` is ON, a FIRST-PARTY PLUGIN tool in a
