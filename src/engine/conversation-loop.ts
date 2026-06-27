@@ -9,7 +9,7 @@
  */
 import { ConversationHistory, normalizeToolPairInvariant } from "./conversation-history.js";
 import { ToolExecutor, type ToolResult, type ToolUseBlock } from "../tools/executor.js";
-import { isAsrtSandboxActive } from "../permissions/asrt-sandbox.js";
+import { isActiveSandboxFilesystemContained } from "../permissions/sandbox-capability.js";
 import { HookRunner } from "../hooks/hook-runner.js";
 import type { LifecycleHookEvent } from "../hooks/script-hook-types.js";
 import { markStaleToolResults, estimateMessagesTokens, estimateTokens, getModelPreflightThreshold, getModelUsableContext, isContextLengthError } from "./auto-compact.js";
@@ -849,12 +849,14 @@ export class ConversationLoop {
       deps.scriptHookManager,
       deps.auditLogger,
       () => deps.settingsService.get("features")?.hostClassifiesRisk ?? false,
-      // Couple the foreground plugin read-relaxation to the OS sandbox being
-      // ACTIVE: the relaxation relies on the effect-boundary, which only
-      // contains off-hostApi mutations when the sandbox is active. On a degraded
-      // / sandbox-off host this is false → the relaxation does not fire and the
-      // pre-exec ask stands (see ToolExecutor.sandboxActiveProvider).
-      isAsrtSandboxActive,
+      // Couple the foreground plugin read-relaxation to the active OS sandbox
+      // FILESYSTEM-CONTAINING the host: the relaxation relies on the
+      // effect-boundary, which only contains the off-hostApi `node:fs` WRITE
+      // residual when the sandbox filesystem-contains. On a degraded,
+      // sandbox-off, or Windows network-only host (`confines.filesystem ===
+      // false`) this is false → the relaxation does not fire and the pre-exec
+      // ask stands (see ToolExecutor.sandboxFsContainedProvider).
+      isActiveSandboxFilesystemContained,
     );
     this.auditLogger = deps.auditLogger ?? new AuditLogger();
     this.refreshProvider();

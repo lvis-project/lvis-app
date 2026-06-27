@@ -11,10 +11,14 @@
  *     effect-gate AT THE MUTATION (deny → tool error, mutation not performed).
  *
  * Scope locked here (each is a separate cluster-review concern):
- *   • SANDBOX-ACTIVE COUPLING → the relaxation requires the OS sandbox to be
- *     ACTIVE (it relies on the effect-boundary, which only contains off-hostApi
- *     mutations under the sandbox). Sandbox active → relax; sandbox inactive
- *     (degraded / off) → the pre-exec ask stands (known-safe fallback).
+ *   • SANDBOX FILESYSTEM-CONTAINMENT COUPLING → the relaxation requires the
+ *     ACTIVE OS sandbox to FILESYSTEM-CONTAIN the host (`confines.filesystem ===
+ *     true`), not merely be active (it relies on the effect-boundary, which only
+ *     contains the off-hostApi `node:fs` WRITE residual when the sandbox
+ *     filesystem-contains). Filesystem-contained (mac/linux full-confine ASRT) →
+ *     relax; NOT filesystem-contained (degraded / off / Windows network-only
+ *     srt-win, `confines.filesystem === false`) → the pre-exec ask stands
+ *     (known-safe fallback).
  *   • FLAG OFF (default) → full pre-exec ask, byte-for-byte unchanged.
  *   • PLUGIN ONLY → MCP + builtin keep the pre-exec ask (not relaxed).
  *   • FOREGROUND ONLY → a headless plugin tool keeps the existing headless lane.
@@ -26,7 +30,7 @@
  *   • LAYER ≤ 2 HARD GATES NOT RELAXED → global strict mode (layer 2) still shows
  *     the pre-exec ask (the relaxation floor is layer ≥ 3).
  */
-import { describe, it, expect, beforeEach } from "vitest";
+import { describe, it, expect, beforeEach, afterEach } from "vitest";
 import { mkdtempSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -40,6 +44,11 @@ import {
   gateMutatingEffect,
   __resetEffectGrantsForTest,
 } from "../../permissions/effect-enforcement.js";
+import {
+  isActiveSandboxFilesystemContained,
+  setActiveSandboxCapability,
+  __resetActiveSandboxCapabilityForTest,
+} from "../../permissions/sandbox-capability.js";
 
 // ─── Helpers ─────────────────────────────────────────
 
@@ -200,11 +209,13 @@ function makeExecutor(
   flagEnabled: () => boolean,
   permMgr = new PermissionManager("/tmp/nonexistent-permissions.json"),
   scriptHookManager?: import("../../hooks/script-hook-manager.js").ScriptHookManager,
-  // Sandbox-active interlock (default ACTIVE — the macOS live-verified state).
-  // The relaxation requires BOTH the flag AND the sandbox active; existing
-  // relaxation assertions run with the sandbox active. The coupling tests below
-  // pass `() => false` to assert the degraded/sandbox-off fallback.
-  sandboxActive: () => boolean = () => true,
+  // Filesystem-containment interlock (default CONTAINED — the macOS/Linux
+  // live-verified full-confine state). The relaxation requires BOTH the flag AND
+  // the active sandbox FILESYSTEM-CONTAINING the host (`confines.filesystem ===
+  // true`); existing relaxation assertions run with the sandbox fs-contained.
+  // The coupling tests below pass `() => false` to assert the degraded /
+  // sandbox-off / Windows network-only fallback.
+  sandboxFsContained: () => boolean = () => true,
 ): { executor: ToolExecutor; permMgr: PermissionManager } {
   const registry = new ToolRegistry();
   registry.register(tool);
@@ -217,7 +228,7 @@ function makeExecutor(
     scriptHookManager,
     undefined,
     flagEnabled,
-    sandboxActive,
+    sandboxFsContained,
   );
   return { executor, permMgr };
 }
@@ -478,10 +489,11 @@ describe("plugin read-relaxation — operator perm-*.sh deny hook is preserved o
   });
 });
 
-describe("plugin read-relaxation — coupled to the OS sandbox being ACTIVE", () => {
-  it("flag ON + sandbox ACTIVE + foreground plugin ask → relaxed (NO modal, tool runs)", async () => {
-    // The baseline coupling assertion: with the sandbox active (macOS), the
-    // relaxation fires exactly as before — clean UX, unchanged.
+describe("plugin read-relaxation — coupled to the OS sandbox FILESYSTEM-CONTAINING the host", () => {
+  it("flag ON + sandbox FILESYSTEM-CONTAINED + foreground plugin ask → relaxed (NO modal, tool runs)", async () => {
+    // The baseline coupling assertion: with the active sandbox filesystem-
+    // contained (macOS/Linux full-confine ASRT), the relaxation fires exactly as
+    // before — clean UX, unchanged.
     const spy = { ran: false };
     const { gate, requests } = makeGate("deny-once");
     const { executor } = makeExecutor(
@@ -490,7 +502,7 @@ describe("plugin read-relaxation — coupled to the OS sandbox being ACTIVE", ()
       () => true,
       new PermissionManager("/tmp/nonexistent-permissions.json"),
       undefined,
-      () => true, // sandbox ACTIVE
+      () => true, // sandbox FILESYSTEM-CONTAINED
     );
 
     const [result] = await executor.executeAll(
@@ -504,11 +516,11 @@ describe("plugin read-relaxation — coupled to the OS sandbox being ACTIVE", ()
     expect(result.content).toContain("noeffect-ok");
   });
 
-  it("flag ON + sandbox INACTIVE + foreground plugin ask → NOT relaxed: the pre-exec ask is shown, tool NOT auto-allowed", async () => {
-    // On a degraded / sandbox-off host the effect-boundary cannot contain the
-    // off-hostApi mutation residual, so relaxing would be WEAKER than the
-    // pre-exec ask. The coupling clause keeps the pre-exec approval ask:
-    // on deny-once the tool never runs.
+  it("flag ON + sandbox NOT filesystem-contained + foreground plugin ask → NOT relaxed: the pre-exec ask is shown, tool NOT auto-allowed", async () => {
+    // On a degraded / sandbox-off / Windows network-only host the
+    // effect-boundary cannot contain the off-hostApi `node:fs` WRITE residual,
+    // so relaxing would be WEAKER than the pre-exec ask. The coupling clause
+    // keeps the pre-exec approval ask: on deny-once the tool never runs.
     const spy = { ran: false };
     const { gate, requests } = makeGate("deny-once");
     const { executor } = makeExecutor(
@@ -517,7 +529,7 @@ describe("plugin read-relaxation — coupled to the OS sandbox being ACTIVE", ()
       () => true,
       new PermissionManager("/tmp/nonexistent-permissions.json"),
       undefined,
-      () => false, // sandbox INACTIVE (degraded / off)
+      () => false, // sandbox NOT filesystem-contained (degraded / off / network-only)
     );
 
     const [result] = await executor.executeAll(
@@ -533,7 +545,39 @@ describe("plugin read-relaxation — coupled to the OS sandbox being ACTIVE", ()
     expect(result.is_error).toBe(true);
   });
 
-  it("flag OFF + sandbox INACTIVE → unchanged: the pre-exec ask is shown (relaxation inert regardless of sandbox)", async () => {
+  it("flag ON + a MUTATING plugin tool + sandbox NOT filesystem-contained → NOT auto-allowed: the pre-exec ask is shown, mutation NOT performed", async () => {
+    // Hardens the "no mutating plugin tool is auto-allowed without filesystem
+    // containment" invariant: a tool that WOULD reach a host WRITE chokepoint
+    // must still face the pre-exec ask when the sandbox does not filesystem-
+    // contain. On deny-once at the pre-exec ask the tool body never runs, so the
+    // mutation is never even attempted.
+    const state = { mutated: false };
+    const flagEnabled = (): boolean => true;
+    const { gate, requests } = makeGate("deny-once");
+    const { executor } = makeExecutor(
+      makePluginWriteTool(gate, flagEnabled, state),
+      gate,
+      flagEnabled,
+      new PermissionManager("/tmp/nonexistent-permissions.json"),
+      undefined,
+      () => false, // sandbox NOT filesystem-contained
+    );
+
+    const [result] = await executor.executeAll(
+      [{ id: "t1", name: "plugin_writer", input: {} }],
+      { sessionId: "s", permissionContext: userPermissionContext() },
+    );
+
+    // The pre-exec tool-level modal fired (category "tool", NOT the effect-gate
+    // "agent-action"): the relaxation did NOT fire, so the tool was gated BEFORE
+    // execution and the mutation chokepoint was never reached.
+    expect(requests).toHaveLength(1);
+    expect(requests[0]?.category).toBe("tool");
+    expect(state.mutated).toBe(false);
+    expect(result.is_error).toBe(true);
+  });
+
+  it("flag OFF + sandbox NOT filesystem-contained → unchanged: the pre-exec ask is shown (relaxation inert regardless of sandbox)", async () => {
     // Flag-OFF behaviour is independent of the sandbox state — the relaxation
     // block is skipped entirely, so the full pre-exec ask stands.
     const spy = { ran: false };
@@ -544,7 +588,110 @@ describe("plugin read-relaxation — coupled to the OS sandbox being ACTIVE", ()
       () => false,
       new PermissionManager("/tmp/nonexistent-permissions.json"),
       undefined,
-      () => false, // sandbox INACTIVE
+      () => false, // sandbox NOT filesystem-contained
+    );
+
+    const [result] = await executor.executeAll(
+      [{ id: "t1", name: "plugin_noeffect", input: {} }],
+      { sessionId: "s", permissionContext: userPermissionContext() },
+    );
+
+    expect(requests).toHaveLength(1);
+    expect(requests[0]?.category).toBe("tool");
+    expect(spy.ran).toBe(false);
+    expect(result.is_error).toBe(true);
+  });
+});
+
+// Confines-aware coupling wired through the REAL active-capability SOT. These
+// assert the production provider `isActiveSandboxFilesystemContained` (the same
+// active capability + filesystem-confinement truth the reviewer lane reads)
+// drives the relaxation correctly per substrate: a full-confine ASRT relaxes; a
+// Windows network-only ASRT (active, but `confines.filesystem === false`) does
+// NOT; an inactive sandbox does NOT.
+describe("plugin read-relaxation — confines-aware via the active-capability SOT", () => {
+  beforeEach(() => {
+    __resetActiveSandboxCapabilityForTest();
+  });
+  afterEach(() => {
+    __resetActiveSandboxCapabilityForTest();
+  });
+
+  it("active capability filesystem-contained (mac/linux full-confine) → relaxed (NO modal, tool runs)", async () => {
+    setActiveSandboxCapability({
+      kind: "asrt",
+      confidence: "verified",
+      platform: "linux",
+      reason: "ASRT (bwrap) active — fs+process+network contained",
+      confines: { filesystem: true, process: true, network: true },
+    });
+    const spy = { ran: false };
+    const { gate, requests } = makeGate("deny-once");
+    const { executor } = makeExecutor(
+      makePluginNoEffectTool(spy),
+      gate,
+      () => true,
+      new PermissionManager("/tmp/nonexistent-permissions.json"),
+      undefined,
+      isActiveSandboxFilesystemContained,
+    );
+
+    const [result] = await executor.executeAll(
+      [{ id: "t1", name: "plugin_noeffect", input: {} }],
+      { sessionId: "s", permissionContext: userPermissionContext() },
+    );
+
+    expect(requests).toHaveLength(0);
+    expect(spy.ran).toBe(true);
+    expect(result.is_error).toBeFalsy();
+    expect(result.content).toContain("noeffect-ok");
+  });
+
+  it("active capability NETWORK-ONLY (Windows srt-win, confines.filesystem === false) → NOT relaxed: pre-exec ask stands, tool NOT auto-allowed", async () => {
+    // The core fix: an ACTIVE network-only sandbox contains egress but NOT the
+    // off-hostApi FS-write residual, so the relaxation must NOT fire even though
+    // a sandbox is active.
+    setActiveSandboxCapability({
+      kind: "asrt",
+      confidence: "verified",
+      platform: "win32",
+      reason: "ASRT (srt-win) active — network egress contained, NO filesystem jail",
+      confines: { filesystem: false, process: false, network: true },
+    });
+    const spy = { ran: false };
+    const { gate, requests } = makeGate("deny-once");
+    const { executor } = makeExecutor(
+      makePluginNoEffectTool(spy),
+      gate,
+      () => true,
+      new PermissionManager("/tmp/nonexistent-permissions.json"),
+      undefined,
+      isActiveSandboxFilesystemContained,
+    );
+
+    const [result] = await executor.executeAll(
+      [{ id: "t1", name: "plugin_noeffect", input: {} }],
+      { sessionId: "s", permissionContext: userPermissionContext() },
+    );
+
+    expect(requests).toHaveLength(1);
+    expect(requests[0]?.category).toBe("tool");
+    expect(spy.ran).toBe(false);
+    expect(result.is_error).toBe(true);
+  });
+
+  it("no active capability (sandbox inactive, kind none) → NOT relaxed: pre-exec ask stands", async () => {
+    // No setActiveSandboxCapability → detectSandboxCapability reports kind none
+    // with no `confines` → isActiveSandboxFilesystemContained() is false.
+    const spy = { ran: false };
+    const { gate, requests } = makeGate("deny-once");
+    const { executor } = makeExecutor(
+      makePluginNoEffectTool(spy),
+      gate,
+      () => true,
+      new PermissionManager("/tmp/nonexistent-permissions.json"),
+      undefined,
+      isActiveSandboxFilesystemContained,
     );
 
     const [result] = await executor.executeAll(
