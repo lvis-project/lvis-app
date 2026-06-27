@@ -1625,14 +1625,21 @@ export async function initPluginRuntime(
         // reads and never prompt; flag OFF (default) is a pass-through. Placed
         // AFTER the capability + SSRF gates so only an egress that would actually
         // happen can prompt. Origin-only target (no path/query that can carry tokens).
-        await gateMutatingEffect({
-          pluginId,
-          methodPath: "hostFetch",
-          effect: methodEffect(methodSnapshot),
-          target: effectTarget,
-          approvalGate,
-          flagEnabled: hostClassifiesRiskEnabled,
-        });
+        //
+        // Flag-OFF short-circuit BEFORE the await: when `hostClassifiesRisk` is
+        // OFF (default) the gate is skipped entirely — not even an awaited
+        // already-resolved Promise (one microtask tick) — so the flag-OFF egress
+        // path is byte-for-byte today's behaviour with ZERO extra work.
+        if (hostClassifiesRiskEnabled()) {
+          await gateMutatingEffect({
+            pluginId,
+            methodPath: "hostFetch",
+            effect: methodEffect(methodSnapshot),
+            target: effectTarget,
+            approvalGate,
+            flagEnabled: hostClassifiesRiskEnabled,
+          });
+        }
         // The host-observed effect for this egress was recorded above from the
         // SAME verb snapshot that drives `decision` and pins the wire below, so
         // the recorded effect == decision.effect == the wire verb (no divergence).

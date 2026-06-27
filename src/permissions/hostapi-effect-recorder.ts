@@ -40,8 +40,15 @@ import { recordChokepoint, recordEffect, type EffectEntry } from "./effect-ledge
 
 const log = createLogger("hostapi-effect-recorder");
 
-/** Marks an already-instrumented object so a nested re-wrap is a no-op. */
-const INSTRUMENTED = Symbol("lvis.hostApiEffectInstrumented");
+/**
+ * Marks an already-instrumented object so a nested re-wrap is a no-op. Exported
+ * so the OUTER enforcement layer ({@link
+ * ../effect-enforcement.js#enforceMutatingEffects}) can PROPAGATE it onto its
+ * fresh wrapper object: the enforced output is a new object literal, so without
+ * re-stamping this non-enumerable symbol a later `instrumentEffectsByPath` over
+ * an already-enforced object would lose idempotence and double-wrap (re-record).
+ */
+export const INSTRUMENTED = Symbol("lvis.hostApiEffectInstrumented");
 
 /** One-time-per-path guard for the unmapped-method dev warning. */
 const warnedUnmappedPaths = new Set<string>();
