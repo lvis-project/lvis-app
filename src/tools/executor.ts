@@ -2172,6 +2172,66 @@ export class ToolExecutor {
           forceModal: true,
         };
       }
+      // ── Effect-boundary pre-exec relaxation (flag-gated, default OFF) ──────
+      //
+      // When `hostClassifiesRisk` is ON, a FIRST-PARTY PLUGIN tool in a
+      // FOREGROUND (interactive) context does NOT run the pre-exec blocking
+      // approval lane (the host-classify category ASK + the reviewer/modal that
+      // follows it). Instead the tool is allowed to EXECUTE, and the merged
+      // effect-boundary gate (bound around `tool.execute` below) is the ONLY
+      // gate: a plugin READ tool performs no mutating host-mediated effect →
+      // runs to completion with NO modal; a plugin WRITE tool trips the
+      // effect-gate AT THE MUTATION (foreground deny → tool error; headless
+      // fails closed). This replaces the imprecise default-strict pre-exec ASK
+      // (which the host inspector raises to `write` without positive read
+      // evidence, so it over-asks for genuine reads) with the precise,
+      // effect-observed gate.
+      //
+      // SCOPE — narrowed deliberately (each clause is load-bearing):
+      //   • PLUGIN ONLY (`source === "plugin"`). MCP tools are
+      //     `hostObservable:false` (not host-mediated) so the effect-gate never
+      //     sees their mutations — relaxing them would be a FAIL-OPEN; builtins
+      //     carry their own trusted host categories. Both keep the full pre-exec
+      //     ask (this branch is skipped for them).
+      //   • FOREGROUND ONLY (`headless !== true`). In a headless/routine lane a
+      //     plugin write would HARD-THROW at the effect-gate (which fails closed
+      //     with no approver) instead of taking the Phase-0 deferred/headless
+      //     lane, breaking legitimate routine writes — so headless keeps the
+      //     pre-exec lane untouched.
+      //   • ASK ONLY, layer ≥ 3, not `forceModal`. A `deny` (standing deny rule
+      //     or a persisted `deny-always`) is layer 1 and never an ask, so it is
+      //     untouched — explicit user deny still wins. The layer ≥ 3 floor
+      //     preserves the layer ≤ 2 hard gates (overlay-trigger mutation guard,
+      //     MCP/per-tool strict override, global strict mode) exactly as the
+      //     Store B memory-skip does; a per-invocation `forceModal` ask is never
+      //     relaxed.
+      //   • FLAG OFF (default) → this whole block is skipped: behaviour is
+      //     byte-for-byte today's full pre-exec ask. The condition is the FIRST
+      //     read, so the relaxed path is reachable only with the flag ON.
+      //
+      // HONEST RESIDUAL — this gates LLM-driven plugin actions over HOST-MEDIATED
+      // effects only. A plugin that mutates OFF the host API (direct `node:fs`,
+      // a bare `fetch`, or a detached async frame that escapes the tool-execute
+      // ALS scope) records NO effect → the effect-boundary sees a read → it runs
+      // with no gate. That residual is closed ONLY by the OS sandbox (ASRT) being
+      // default-ON (a separate track). It is NOT a regression: a first-party
+      // plugin already executes arbitrary in-process code today — this is an
+      // LLM-action gate over mediated effects, not an in-process jail.
+      if (
+        this.hostClassifiesRiskProvider() &&
+        source === "plugin" &&
+        invocationPermissionContext.headless !== true &&
+        permissionResult.decision === "ask" &&
+        permissionResult.layer >= 3 &&
+        permissionResult.forceModal !== true
+      ) {
+        permissionResult = {
+          decision: "allow",
+          reason:
+            "plugin foreground pre-exec ask relaxed — gated at the effect boundary (hostClassifiesRisk)",
+          layer: permissionResult.layer,
+        };
+      }
       const sandboxAttestation = {
         ...(tool.writesToOwnSandbox !== undefined
           ? { writesToOwnSandbox: tool.writesToOwnSandbox }

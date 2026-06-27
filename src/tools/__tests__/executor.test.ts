@@ -3601,9 +3601,16 @@ describe("ToolExecutor — #811 m2 lifecycle events (PostToolUseFailure / Permis
 describe("ToolExecutor — host-classifies-risk enforcement scope", () => {
   // A tool whose declared category ("write") diverges from what the inspector
   // derives from its args (a URL-shaped arg → "network"), wired through the
-  // foreground reviewer so the ENFORCED category surfaces in the reviewer's
+  // HEADLESS reviewer so the ENFORCED category surfaces in the reviewer's
   // ToolInvocationContext. Both categories reach the reviewer (neither is the
   // read-only short-circuit), so the observed category is unambiguous.
+  //
+  // The probe uses the HEADLESS lane deliberately: the effect-boundary pre-exec
+  // relaxation (flag ON + plugin + FOREGROUND) bypasses the reviewer/ask lane
+  // entirely, so a FOREGROUND plugin tool no longer invokes the reviewer. The
+  // headless lane is NOT relaxed (it keeps the Phase-0 reviewer lane), so it is
+  // where the enforced category still flows into the classifier — `resolveEnforcedCategory`
+  // re-derives the host category for plugins identically on both lanes.
   function makeDivergentTool(source: "builtin" | "plugin", name: string): {
     registry: ToolRegistry;
     execute: ReturnType<typeof vi.fn>;
@@ -3654,7 +3661,9 @@ describe("ToolExecutor — host-classifies-risk enforcement scope", () => {
       );
       await executor.executeAll(
         [{ id: `tu-${name}`, name, input: { endpoint: "https://example.com/api" } }],
-        { sessionId: `sess-${name}`, permissionContext: userPermissionContext() },
+        // Headless: the foreground plugin reviewer lane is relaxed under the flag,
+        // so the enforced category is observed via the (non-relaxed) headless lane.
+        { sessionId: `sess-${name}`, permissionContext: userPermissionContext({ headless: true }) },
       );
       const ctx = classifySpy.mock.calls[0]?.[0] as
         | import("../../permissions/reviewer/risk-classifier.js").ToolInvocationContext
