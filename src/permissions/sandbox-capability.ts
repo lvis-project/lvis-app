@@ -517,3 +517,32 @@ export function sandboxRelaxesCategory(
   // write / shell / read / meta — all filesystem-bearing effects.
   return cap.confines.filesystem === true;
 }
+
+/**
+ * Whether the ACTIVE OS sandbox FILESYSTEM-CONTAINS the host process.
+ *
+ * This is the gate the foreground plugin read-relaxation (ToolExecutor's
+ * effect-boundary block) consults. The relaxation removes the pre-exec ask
+ * whose job is to gate (among others) the off-hostApi `node:fs` WRITE residual,
+ * so it may fire ONLY when that residual is FILESYSTEM-CONTAINED by the OS
+ * sandbox — a bare "sandbox active" boolean is NOT sufficient, because the
+ * Windows srt-win substrate is NETWORK-ONLY (`confines.filesystem === false`):
+ * it contains egress but NOT the filesystem, so an active network-only sandbox
+ * does not contain the FS-write residual.
+ *
+ * Reads the SAME active capability the reviewer lane consults
+ * ({@link detectSandboxCapability}) and applies the SAME filesystem-confinement
+ * truth {@link sandboxRelaxesCategory} uses for filesystem-bearing categories
+ * (`confines.filesystem === true`):
+ *   - macOS / Linux ASRT (full-confine)   → true  (relaxation may fire)
+ *   - Windows srt-win ASRT (NETWORK-ONLY)  → false (FS-write residual uncontained)
+ *   - sandbox inactive (kind "none")       → false (no confines declared)
+ *
+ * RENDERER-SAFETY: like the rest of this module this is a pure read of the
+ * published capability snapshot — it never imports asrt-sandbox.js, so the
+ * main-process boot/conversation wiring can call it without pulling Node
+ * built-ins into a renderer bundle.
+ */
+export function isActiveSandboxFilesystemContained(): boolean {
+  return detectSandboxCapability().confines?.filesystem === true;
+}
