@@ -28,6 +28,7 @@ import { PluginRuntime } from "../../plugins/runtime.js";
 import type { PythonRuntimeBootstrapper } from "../../main/python-runtime.js";
 import { currentInvocationOrigin } from "../../plugins/runtime/origin-chain.js";
 import { instrumentEffectsByPath } from "../../permissions/hostapi-effect-recorder.js";
+import { enforceMutatingEffects, gateMutatingEffect } from "../../permissions/effect-enforcement.js";
 import { recordEffect } from "../../permissions/effect-ledger.js";
 import { methodEffect } from "../../permissions/effect-kind.js";
 import { startPluginDevWatcher } from "../../plugins/dev-watcher.js";
@@ -866,6 +867,13 @@ export async function initPluginRuntime(
   // the next plugin call without reload.
   const readAppPreference = buildAppPreferenceReader(settingsService, log);
 
+  // Effect-boundary enforcement — the live `hostClassifiesRisk` read, evaluated
+  // PER hostApi call so a Settings toggle is honoured without reload. Same SOT key
+  // the executor + conversation-loop providers read (boot.ts). When false
+  // (default) the enforcement wrapper is a pure pass-through.
+  const hostClassifiesRiskEnabled = (): boolean =>
+    settingsService.get("features")?.hostClassifiesRisk ?? false;
+
   // Plugin shutdown handler registry — fires on before-quit (see shared AuditLogger + hooks wiring).
   const pluginShutdownHandlers: Array<{ pluginId: string; handler: () => void | Promise<void> }> = [];
   let pluginShutdownRan = false;
@@ -1141,7 +1149,17 @@ export async function initPluginRuntime(
       // guarantee no method can be silently un-instrumented. `storage` is already
       // instrumented at its own construction boundary, so the wrapper's
       // idempotence guard leaves it untouched (no double-recording).
-      return instrumentEffectsByPath<PluginHostApi>({
+      //
+      // Effect-boundary ENFORCEMENT wraps the recorder as the OUTER layer: a
+      // host-classified WRITE awaits a user approval AT THE EFFECT (foreground) /
+      // fails closed (headless) before the mutation runs, but ONLY when
+      // `hostClassifiesRisk` is ON — flag OFF (default) is a byte-for-byte
+      // pass-through. OUTER (not inner) so the pure recorder is untouched and a
+      // DENIED effect is never recorded as a host-observed mutation. The lone
+      // verb-derived chokepoint (hostFetch) is gated INLINE in its closure from
+      // the single verb snapshot; the wrapper skips it.
+      return enforceMutatingEffects<PluginHostApi>(
+        instrumentEffectsByPath<PluginHostApi>({
       storage: createPluginStorage(pluginId, pluginDataDir, (msg, meta) => {
         try {
           bootAuditLogger.log({
@@ -1597,6 +1615,31 @@ export async function initPluginRuntime(
           throw new Error(decision.message);
         }
         const url = decision.url;
+        // Effect-boundary ENFORCEMENT — hostFetch is the lone VERB-derived
+        // chokepoint, so it is gated INLINE here (not by the generic
+        // wrapper) from the SAME single `methodSnapshot` that self-recorded the
+        // effect and pins the wire below — the gate's read/write class can never
+        // diverge from what is sent. A mutating verb (non GET/HEAD/OPTIONS) under
+        // an ON flag in the foreground awaits a user approval AT THE EFFECT before
+        // the egress; deny throws (the wire call is skipped). GET/HEAD/OPTIONS are
+        // reads and never prompt; flag OFF (default) is a pass-through. Placed
+        // AFTER the capability + SSRF gates so only an egress that would actually
+        // happen can prompt. Origin-only target (no path/query that can carry tokens).
+        //
+        // Flag-OFF short-circuit BEFORE the await: when `hostClassifiesRisk` is
+        // OFF (default) the gate is skipped entirely — not even an awaited
+        // already-resolved Promise (one microtask tick) — so the flag-OFF egress
+        // path is byte-for-byte today's behaviour with ZERO extra work.
+        if (hostClassifiesRiskEnabled()) {
+          await gateMutatingEffect({
+            pluginId,
+            methodPath: "hostFetch",
+            effect: methodEffect(methodSnapshot),
+            target: effectTarget,
+            approvalGate,
+            flagEnabled: hostClassifiesRiskEnabled,
+          });
+        }
         // The host-observed effect for this egress was recorded above from the
         // SAME verb snapshot that drives `decision` and pins the wire below, so
         // the recorded effect == decision.effect == the wire verb (no divergence).
@@ -2008,7 +2051,9 @@ export async function initPluginRuntime(
 
         return { accepted: true, source: decision.source, eventId };
       },
-    });
+        }),
+        { pluginId, approvalGate, flagEnabled: hostClassifiesRiskEnabled },
+      );
     },
   });
 
