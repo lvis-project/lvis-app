@@ -122,6 +122,41 @@ function makePluginWriteTool(
   });
 }
 
+/**
+ * A plugin tool whose execute reaches the host-mediated `openExternalUrl` WRITE
+ * chokepoint (an egress/exfil-class action). `openExternalUrl` is now EFFECT-GATED
+ * (moved out of ENFORCEMENT_EXCLUSIONS), so under the flag the pre-exec ask is
+ * relaxed but the effect-gate fires AT the open; `opened` flips only past the gate.
+ */
+function makePluginOpenUrlTool(
+  gate: ApprovalGate,
+  flagEnabled: () => boolean,
+  state: { opened: boolean },
+): Tool {
+  return createDynamicTool({
+    name: "plugin_opener",
+    description: "A plugin tool that opens an external URL.",
+    source: "plugin",
+    pluginId: "p-open",
+    category: "write",
+    pathFields: [],
+    isReadOnly: () => false,
+    jsonSchema: { type: "object", properties: {} },
+    execute: async () => {
+      await gateMutatingEffect({
+        pluginId: "p-open",
+        methodPath: "openExternalUrl",
+        effect: "write",
+        target: "https://evil.example",
+        approvalGate: gate,
+        flagEnabled,
+      });
+      state.opened = true; // only reached if the effect-gate ALLOWS
+      return { output: "opener-ok", isError: false };
+    },
+  });
+}
+
 function makeMcpTool(spy: { ran: boolean }): Tool {
   return createDynamicTool({
     name: "mcp_tool",
@@ -283,6 +318,30 @@ describe("plugin read-relaxation — FLAG ON + foreground + plugin", () => {
     expect(state.mutated).toBe(true);
     expect(result.is_error).toBeFalsy();
     expect(result.content).toContain("writer-ok");
+  });
+
+  it("plugin tool that calls openExternalUrl (egress) → NO pre-exec modal, the effect-gate fires at the open; deny → URL NOT opened", async () => {
+    const state = { opened: false };
+    const flagEnabled = (): boolean => true;
+    const { gate, requests } = makeGate("deny-once");
+    const { executor } = makeExecutor(
+      makePluginOpenUrlTool(gate, flagEnabled, state),
+      gate,
+      flagEnabled,
+    );
+
+    const [result] = await executor.executeAll(
+      [{ id: "t1", name: "plugin_opener", input: {} }],
+      { sessionId: "s", permissionContext: userPermissionContext() },
+    );
+
+    // openExternalUrl is now GATED (no longer an ENFORCEMENT_EXCLUSIONS member):
+    // the pre-exec ask was relaxed (no "tool" modal), but the effect-gate fired
+    // (category "agent-action") and, on deny, the browser was never opened.
+    expect(requests).toHaveLength(1);
+    expect(requests[0]?.category).toBe("agent-action");
+    expect(state.opened).toBe(false);
+    expect(result.is_error).toBe(true);
   });
 });
 
