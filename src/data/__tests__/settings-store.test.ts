@@ -238,13 +238,16 @@ describe("SettingsService role presets", () => {
     expect(service.get("features")?.idlePreferenceRefresh).toBe(true);
   });
 
-  it("ships the OS tool sandbox (ASRT) gate OFF by default", () => {
-    // The ASRT migration must not change runtime behavior on a fresh install:
-    // the boot gate is `features.osToolSandbox || LVIS_SANDBOX_ENABLED`, so the
-    // shipped default of this flag being false is what keeps the sandbox dormant
-    // until a user opts in.
+  it("ships hostClassifiesRisk + the OS tool sandbox (ASRT) gate ON by default", () => {
+    // Shipped defaults flip ON (shadow-mode reconciliation completed): the host
+    // classifies plugin risk, and the boot gate (`features.osToolSandbox ||
+    // LVIS_SANDBOX_ENABLED`) activates ASRT where it can. The default-on sandbox
+    // is GRACEFUL at boot — it degrades non-bricking when it cannot activate (see
+    // boot/steps/sandbox-gate.ts), so shipping it true does not brick deps-less
+    // hosts.
     const service = new SettingsService({ userDataPath });
-    expect(service.get("features")?.osToolSandbox ?? false).toBe(false);
+    expect(service.get("features")?.hostClassifiesRisk ?? false).toBe(true);
+    expect(service.get("features")?.osToolSandbox ?? false).toBe(true);
   });
 });
 
