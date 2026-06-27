@@ -758,17 +758,25 @@ export async function parsePluginJson(
     }
   }
 
-  // notificationEvents[i].event should be in eventSubscriptions (soft warn).
+  // notificationEvents[i].event must resolve to an event the plugin actually
+  // knows about: one it SUBSCRIBES to (eventSubscriptions → received via
+  // hostApi.onEvent) OR one it EMITS itself (emittedEvents → the plugin is the
+  // source, so it needs no subscription). A self-emitted notification event is
+  // legitimate and must NOT warn — restricting eventSubscriptions to the bare
+  // host broadcast is a deliberate hardening, so requiring a self-emitted event
+  // to also be subscribed would force a contract violation. Soft-warn only when
+  // the event is in NEITHER set (a dangling reference the plugin can't service).
   const subs = Array.isArray(parsed.eventSubscriptions) ? parsed.eventSubscriptions : [];
-  const subsTypes = new Set(
-    subs.map((s) => (typeof s === "string" ? s : (s as { type: string }).type)),
-  );
+  const knownTypes = new Set([
+    ...subs.map((s) => (typeof s === "string" ? s : (s as { type: string }).type)),
+    ...getDeclaredEmittedEvents(parsed as PluginManifest),
+  ]);
   const notifEvents = Array.isArray(parsed.notificationEvents) ? parsed.notificationEvents : [];
   for (let i = 0; i < notifEvents.length; i += 1) {
     const e = notifEvents[i]?.event;
-    if (typeof e === "string" && !subsTypes.has(e)) {
+    if (typeof e === "string" && !knownTypes.has(e)) {
       log.warn(
-        `Plugin manifest '${pid}': notificationEvents[${i}].event '${e}' not declared in eventSubscriptions — OS notification will still fire, but plugin won't receive the event via hostApi.onEvent`,
+        `Plugin manifest '${pid}': notificationEvents[${i}].event '${e}' not declared in eventSubscriptions or emittedEvents — OS notification will still fire, but the plugin neither subscribes to nor emits this event, so it cannot service it via hostApi.onEvent`,
       );
     }
   }
