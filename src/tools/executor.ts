@@ -2612,10 +2612,10 @@ export class ToolExecutor {
         // path `currentInvocationOrigin` relies on); a re-entrant callTool opens
         // its own ledger scope, so nested effects never double-count here.
         //
-        // Effect-boundary ENFORCEMENT (Phase 3) — bind the per-invocation gate
-        // context alongside the ledger so a host-classified WRITE reached during
-        // execute can ask AT THE EFFECT (foreground) or fail closed (headless).
-        // `headless` is the SAME signal that drives Phase 0's headless lane; the
+        // Effect-boundary ENFORCEMENT — bind the per-invocation gate context
+        // alongside the ledger so a host-classified WRITE reached during execute
+        // can ask AT THE EFFECT (foreground) or fail closed (headless).
+        // `headless` is the SAME signal that drives the pre-exec headless lane; the
         // fresh `onceGrants` set dedups N writes to one target within this call.
         // When `hostClassifiesRisk` is OFF (default) the gate is a pass-through,
         // so binding the context here is inert.

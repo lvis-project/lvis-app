@@ -867,10 +867,10 @@ export async function initPluginRuntime(
   // the next plugin call without reload.
   const readAppPreference = buildAppPreferenceReader(settingsService, log);
 
-  // Effect-boundary enforcement (Phase 3) — the live `hostClassifiesRisk` read,
-  // evaluated PER hostApi call so a Settings toggle is honoured without reload.
-  // Same SOT key the executor + conversation-loop providers read (boot.ts). When
-  // false (default) the enforcement wrapper is a pure pass-through.
+  // Effect-boundary enforcement — the live `hostClassifiesRisk` read, evaluated
+  // PER hostApi call so a Settings toggle is honoured without reload. Same SOT key
+  // the executor + conversation-loop providers read (boot.ts). When false
+  // (default) the enforcement wrapper is a pure pass-through.
   const hostClassifiesRiskEnabled = (): boolean =>
     settingsService.get("features")?.hostClassifiesRisk ?? false;
 
@@ -1150,10 +1150,10 @@ export async function initPluginRuntime(
       // instrumented at its own construction boundary, so the wrapper's
       // idempotence guard leaves it untouched (no double-recording).
       //
-      // Effect-boundary ENFORCEMENT (Phase 3) wraps the recorder as the OUTER
-      // layer: a host-classified WRITE awaits a user approval AT THE EFFECT
-      // (foreground) / fails closed (headless) before the mutation runs, but ONLY
-      // when `hostClassifiesRisk` is ON — flag OFF (default) is a byte-for-byte
+      // Effect-boundary ENFORCEMENT wraps the recorder as the OUTER layer: a
+      // host-classified WRITE awaits a user approval AT THE EFFECT (foreground) /
+      // fails closed (headless) before the mutation runs, but ONLY when
+      // `hostClassifiesRisk` is ON — flag OFF (default) is a byte-for-byte
       // pass-through. OUTER (not inner) so the pure recorder is untouched and a
       // DENIED effect is never recorded as a host-observed mutation. The lone
       // verb-derived chokepoint (hostFetch) is gated INLINE in its closure from
@@ -1615,8 +1615,8 @@ export async function initPluginRuntime(
           throw new Error(decision.message);
         }
         const url = decision.url;
-        // Effect-boundary ENFORCEMENT (Phase 3) — hostFetch is the lone
-        // VERB-derived chokepoint, so it is gated INLINE here (not by the generic
+        // Effect-boundary ENFORCEMENT — hostFetch is the lone VERB-derived
+        // chokepoint, so it is gated INLINE here (not by the generic
         // wrapper) from the SAME single `methodSnapshot` that self-recorded the
         // effect and pins the wire below — the gate's read/write class can never
         // diverge from what is sent. A mutating verb (non GET/HEAD/OPTIONS) under
