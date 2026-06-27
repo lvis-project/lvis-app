@@ -188,10 +188,33 @@ function patchNetworkAccessIntoLegacySdkSchema(schema: unknown): unknown {
   return schema;
 }
 
+// minAppVersion gate — `requires.minAppVersion`. Same compatibility seam as
+// networkAccess above: a legacy SDK pin (`package.json` lags `@lvis/plugin-sdk`)
+// whose schema's `requires` block predates `minAppVersion` would, under
+// `requires.additionalProperties:false`, reject every plugin that declares it
+// as an unknown property and silently drop the plugin at load. Inject the field
+// so host validation stays in lockstep with the SDK SoT until the pin is bumped.
+// The host owns the actual SemVer compare/gate (validateManifest's
+// `requires.minAppVersion` check). Mirrors lvis-plugin-sdk
+// schemas/plugin-manifest.schema.json `requires.properties.minAppVersion`.
+function patchMinAppVersionIntoLegacySdkSchema(schema: unknown): unknown {
+  const root = asObject(schema) as (JsonObject & { properties?: Record<string, unknown> }) | undefined;
+  const requires = asObject(root?.properties?.requires) as
+    | (JsonObject & { properties?: Record<string, unknown> })
+    | undefined;
+  if (!requires?.properties || requires.properties.minAppVersion !== undefined) return schema;
+  requires.properties.minAppVersion = {
+    type: "string",
+    pattern: "^(0|[1-9][0-9]*)\\.(0|[1-9][0-9]*)\\.(0|[1-9][0-9]*)$",
+  };
+  return schema;
+}
+
 export function patchHostCompatibilityIntoLegacySdkSchema(schema: unknown): unknown {
   patchHostSecretsIntoLegacySdkSchema(schema);
   patchCategoryOptionalIntoLegacySdkSchema(schema);
   patchNetworkAccessIntoLegacySdkSchema(schema);
+  patchMinAppVersionIntoLegacySdkSchema(schema);
   return schema;
 }
 
