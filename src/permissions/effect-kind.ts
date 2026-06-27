@@ -196,6 +196,19 @@ export function methodEffect(method: string): Effect {
 export interface HostApiEffectSpec {
   kind: ChokepointKind;
   selfRecorded?: boolean;
+  /**
+   * DECLARED async-ness of the hostApi method at this path (it returns a
+   * Promise). This is a CONTRACT property of the method, not a runtime guess —
+   * the effect-boundary ENFORCEMENT layer awaits a user modal, which is only
+   * possible at an ALREADY-async chokepoint, so it derives its gated set
+   * MECHANICALLY from the write-classified paths that declare `async: true`
+   * (see {@link writeClassifiedPaths} + `GATED_EFFECT_PATHS` in
+   * effect-enforcement.ts). A write-classified path that is NOT async (the lone
+   * one is `registerKeywords`) can never be gated by the await-based wrapper —
+   * it MUST be an explicit enforcement exclusion, and the enforcement
+   * completeness test fails if it is neither. The recorder ignores this field.
+   */
+  async?: boolean;
   targetFromArgs?: (args: readonly unknown[]) => string | undefined;
 }
 
@@ -259,13 +272,13 @@ export const HOSTAPI_EFFECT_BY_PATH: Record<string, HostApiEffectSpec> = {
   "storage.readJson": { kind: "storageRead", targetFromArgs: firstStringArg },
   "storage.list": { kind: "storageRead", targetFromArgs: firstStringArg },
   "storage.exists": { kind: "storageRead", targetFromArgs: firstStringArg },
-  "storage.write": { kind: "storageWrite", targetFromArgs: firstStringArg },
-  "storage.writeJson": { kind: "storageWrite", targetFromArgs: firstStringArg },
-  "storage.rm": { kind: "storageRm", targetFromArgs: firstStringArg },
-  "storage.mkdir": { kind: "storageMkdir", targetFromArgs: firstStringArg },
+  "storage.write": { kind: "storageWrite", async: true, targetFromArgs: firstStringArg },
+  "storage.writeJson": { kind: "storageWrite", async: true, targetFromArgs: firstStringArg },
+  "storage.rm": { kind: "storageRm", async: true, targetFromArgs: firstStringArg },
+  "storage.mkdir": { kind: "storageMkdir", async: true, targetFromArgs: firstStringArg },
   // ─── config.* ─────────────────────────────────────────────────────────────
   "config.get": { kind: "config.get", targetFromArgs: firstStringArg },
-  "config.set": { kind: "config.set", targetFromArgs: firstStringArg },
+  "config.set": { kind: "config.set", async: true, targetFromArgs: firstStringArg },
   "config.onChange": { kind: "config.onChange", targetFromArgs: firstStringArg },
   // ─── top-level reads / non-persisting signals ─────────────────────────────
   getSecret: { kind: "getSecret", targetFromArgs: cappedKeyArg },
@@ -279,27 +292,74 @@ export const HOSTAPI_EFFECT_BY_PATH: Record<string, HostApiEffectSpec> = {
   onShutdown: { kind: "onShutdown" },
   logEvent: { kind: "logEvent", targetFromArgs: firstStringArg },
   // ─── top-level writes (egress / persist / registry / session) ─────────────
+  // registerKeywords is the LONE SYNCHRONOUS write chokepoint (returns void) —
+  // deliberately NOT marked async, so the await-based enforcement wrapper can
+  // never gate it (a sync→async conversion is a contract break). It is an
+  // explicit enforcement exclusion instead; because it is still WRITE-classified
+  // the recorder marks any tool that calls it as mutating, so the pre-exec ask
+  // is retained (see effect-enforcement.ts ENFORCEMENT_EXCLUSIONS).
   registerKeywords: { kind: "registerKeywords" },
   // callLlm carries the prompt BODY to an external provider; target stays
   // undefined (the provider is not in args and the prompt is never a target).
-  callLlm: { kind: "callLlm" },
+  callLlm: { kind: "callLlm", async: true },
   // hostFetch is the ONLY verb-derived chokepoint: its read/write class comes
   // from the HTTP method, a plugin-controlled arg VALUE. `selfRecorded` keeps the
   // generic recorder from re-reading that value (which would diverge from the
   // wire); the hostFetch host closure snapshots the verb ONCE and records the
   // effect + target + pins the wire from that single read (plugin-runtime.ts).
-  hostFetch: { kind: "hostFetch", selfRecorded: true },
-  spawnWorker: { kind: "spawnWorker" },
-  openExternalUrl: { kind: "openExternalUrl", targetFromArgs: urlOriginArg },
-  openAuthWindow: { kind: "openAuthWindow", targetFromArgs: urlOriginFromOpts },
-  openAuthPartitionViewer: { kind: "openAuthPartitionViewer", targetFromArgs: urlOriginFromOpts },
-  clearAuthPartition: { kind: "clearAuthPartition", targetFromArgs: firstStringArg },
-  triggerConversation: { kind: "triggerConversation", targetFromArgs: objectStringField("source") },
+  // It is async but `selfRecorded`, so enforcement gates it INLINE in that same
+  // closure (an enforcement exclusion for the generic wrapper).
+  hostFetch: { kind: "hostFetch", selfRecorded: true, async: true },
+  spawnWorker: { kind: "spawnWorker", async: true },
+  openExternalUrl: { kind: "openExternalUrl", async: true, targetFromArgs: urlOriginArg },
+  openAuthWindow: { kind: "openAuthWindow", async: true, targetFromArgs: urlOriginFromOpts },
+  openAuthPartitionViewer: { kind: "openAuthPartitionViewer", async: true, targetFromArgs: urlOriginFromOpts },
+  clearAuthPartition: { kind: "clearAuthPartition", async: true, targetFromArgs: firstStringArg },
+  triggerConversation: { kind: "triggerConversation", async: true, targetFromArgs: objectStringField("source") },
   // ─── agentApproval.* ──────────────────────────────────────────────────────
   "agentApproval.request": {
     kind: "agentApprovalRequest",
+    async: true,
     targetFromArgs: objectStringField("scope"),
   },
   // No target — requestId is an internal correlation handle, not a pivot value.
-  "agentApproval.respond": { kind: "agentApprovalRespond" },
+  "agentApproval.respond": { kind: "agentApprovalRespond", async: true },
 };
+
+/**
+ * The host-observed effect CLASS for one hostApi method PATH, resolved from the
+ * SOT — `"verb-derived"` for the lone `selfRecorded` chokepoint (hostFetch,
+ * whose read/write depends on the HTTP verb at the wire), `undefined` for a path
+ * absent from the SOT. The read/write class for a static chokepoint comes from
+ * {@link CHOKEPOINT_EFFECT} (fail-closed `"write"` if a kind is somehow unmapped,
+ * mirroring the recorder), never from a plugin-controlled arg.
+ */
+export function pathEffectClass(path: string): Effect | "verb-derived" | undefined {
+  const spec = HOSTAPI_EFFECT_BY_PATH[path];
+  if (!spec) return undefined;
+  // hostFetch — verb-derived: it CAN be a write (any non GET/HEAD/OPTIONS), so
+  // it is treated as write-classified for completeness (it is enforcement-gated
+  // inline, not by the generic wrapper).
+  if (spec.selfRecorded) return "verb-derived";
+  return CHOKEPOINT_EFFECT[spec.kind as StaticChokepointKind] ?? "write";
+}
+
+/**
+ * MECHANICALLY-derived set of every hostApi method PATH whose host-observed
+ * effect is (or can be) a WRITE — the universe the effect-boundary ENFORCEMENT
+ * layer must account for. Every member must be either effect-gated
+ * (`GATED_EFFECT_PATHS`) or an explicit, documented enforcement exclusion
+ * (`ENFORCEMENT_EXCLUSIONS`); the enforcement completeness test asserts that
+ * partition is total, so a future write chokepoint added to
+ * {@link HOSTAPI_EFFECT_BY_PATH} can never silently ship UN-enforced (fail-closed
+ * by construction). Derived from {@link CHOKEPOINT_EFFECT} / verb-derived, never
+ * hand-maintained.
+ */
+export function writeClassifiedPaths(): ReadonlySet<string> {
+  const out = new Set<string>();
+  for (const path of Object.keys(HOSTAPI_EFFECT_BY_PATH)) {
+    const cls = pathEffectClass(path);
+    if (cls === "write" || cls === "verb-derived") out.add(path);
+  }
+  return out;
+}

@@ -19,10 +19,25 @@ import {
   gateMutatingEffect,
   runWithEffectGateContext,
   currentEffectGateContext,
-  GATED_ASYNC_WRITE_PATHS,
+  GATED_EFFECT_PATHS,
+  ENFORCEMENT_EXCLUSIONS,
   EffectBoundaryDeniedError,
   __resetEffectGrantsForTest,
 } from "../effect-enforcement.js";
+import {
+  writeClassifiedPaths,
+  CHOKEPOINT_EFFECT,
+  HOSTAPI_EFFECT_BY_PATH,
+} from "../effect-kind.js";
+import {
+  instrumentEffectsByPath,
+  INSTRUMENTED,
+} from "../hostapi-effect-recorder.js";
+import {
+  createEffectLedger,
+  runWithEffectLedger,
+  type EffectLedger,
+} from "../effect-ledger.js";
 
 beforeEach(() => {
   __resetEffectGrantsForTest();
@@ -276,7 +291,12 @@ describe("enforceMutatingEffects — a hostile arg getter cannot suppress the ga
       await api.triggerConversation(hostileSpec);
     });
     expect(requests).toHaveLength(1); // the gate fired despite the throwing getter
-    expect(requests[0].args).toEqual({ effect: "write", methodPath: "triggerConversation" }); // no target
+    // no target → a method-wide grant; the breadth marker is surfaced (M3).
+    expect(requests[0].args).toEqual({
+      effect: "write",
+      methodPath: "triggerConversation",
+      methodWide: true,
+    });
     expect(log).toEqual(["trigger"]);
   });
 });
@@ -327,7 +347,7 @@ describe("gateMutatingEffect — direct unit behaviour", () => {
   });
 });
 
-describe("GATED_ASYNC_WRITE_PATHS — curated async-only membership", () => {
+describe("GATED_EFFECT_PATHS — SOT-derived async-only membership", () => {
   it("contains the design's async write chokepoints and EXCLUDES the verb-derived hostFetch + sync writes", () => {
     for (const p of [
       "storage.write",
@@ -342,11 +362,301 @@ describe("GATED_ASYNC_WRITE_PATHS — curated async-only membership", () => {
       "triggerConversation",
       "agentApproval.request",
     ]) {
-      expect(GATED_ASYNC_WRITE_PATHS.has(p)).toBe(true);
+      expect(GATED_EFFECT_PATHS.has(p)).toBe(true);
     }
     // hostFetch self-gates inline (verb-derived); these are sync / pre-exec-covered.
     for (const p of ["hostFetch", "registerKeywords", "config.set", "openExternalUrl", "agentApproval.respond"]) {
-      expect(GATED_ASYNC_WRITE_PATHS.has(p)).toBe(false);
+      expect(GATED_EFFECT_PATHS.has(p)).toBe(false);
     }
+  });
+});
+
+describe("MAJOR-1 — the gated set is SOT-DERIVED + FAIL-CLOSED (not hand-curated)", () => {
+  it("every gated path is WRITE-classified + ASYNC in the SOT (never a read, never sync)", () => {
+    for (const p of GATED_EFFECT_PATHS) {
+      const spec = HOSTAPI_EFFECT_BY_PATH[p];
+      expect(spec, `gated path ${p} must exist in the SOT`).toBeDefined();
+      // write-classified: a static write (selfRecorded hostFetch is never gated here)
+      expect(CHOKEPOINT_EFFECT[spec.kind as keyof typeof CHOKEPOINT_EFFECT]).toBe("write");
+      // async: the await-based wrapper can only gate an already-async method
+      expect(spec.async, `gated path ${p} must be declared async`).toBe(true);
+    }
+  });
+
+  it("COMPLETENESS — gated ∪ exclusions PARTITIONS every write-classified path (fail-closed)", () => {
+    const writeClassified = new Set(writeClassifiedPaths());
+    const accountedFor = new Set<string>([
+      ...GATED_EFFECT_PATHS,
+      ...ENFORCEMENT_EXCLUSIONS.keys(),
+    ]);
+
+    // (a) Every write-classified path is either gated or explicitly excluded — a
+    // NEW write chokepoint added to the SOT can never silently ship un-enforced.
+    const unaccounted = [...writeClassified].filter((p) => !accountedFor.has(p));
+    expect(
+      unaccounted,
+      `write-classified path(s) that are NEITHER gated NOR explicitly excluded — gate them (async) or add to ENFORCEMENT_EXCLUSIONS: ${unaccounted.join(", ")}`,
+    ).toEqual([]);
+
+    // (b) No exclusion (or gated path) is fabricated — every accounted path is
+    // actually write-classified in the SOT (you cannot exclude a read / unknown).
+    const overReaching = [...accountedFor].filter((p) => !writeClassified.has(p));
+    expect(
+      overReaching,
+      `gated/excluded path(s) that are NOT write-classified in the SOT (stale entry?): ${overReaching.join(", ")}`,
+    ).toEqual([]);
+
+    // (c) The two sets are DISJOINT — a path is gated XOR excluded, never both.
+    const both = [...GATED_EFFECT_PATHS].filter((p) => ENFORCEMENT_EXCLUSIONS.has(p));
+    expect(both, `path(s) both gated AND excluded: ${both.join(", ")}`).toEqual([]);
+  });
+
+  it("each exclusion carries a documented one-line reason", () => {
+    for (const [path, reason] of ENFORCEMENT_EXCLUSIONS) {
+      expect(reason, `exclusion ${path} must document a reason`).toBeTruthy();
+      expect(reason.length).toBeGreaterThan(10);
+    }
+    // the five deliberate exclusions
+    expect([...ENFORCEMENT_EXCLUSIONS.keys()].sort()).toEqual(
+      ["agentApproval.respond", "config.set", "hostFetch", "openExternalUrl", "registerKeywords"].sort(),
+    );
+  });
+});
+
+describe("MAJOR-2 — registerKeywords cannot become a silent fail-open read at the flip", () => {
+  it("is an explicit exclusion AND is WRITE-classified + SYNC in the SOT", () => {
+    // excluded from gating (it is SYNC — cannot await a modal)…
+    expect(ENFORCEMENT_EXCLUSIONS.has("registerKeywords")).toBe(true);
+    expect(GATED_EFFECT_PATHS.has("registerKeywords")).toBe(false);
+    // …but still WRITE-classified, so the recorder marks any tool that calls it as
+    // mutating → Phase 4 never classifies that tool read → its pre-exec ask stays.
+    expect(CHOKEPOINT_EFFECT.registerKeywords).toBe("write");
+    // and it is SYNC (no `async` flag) — the structural reason it is excluded.
+    expect(HOSTAPI_EFFECT_BY_PATH.registerKeywords.async).toBeUndefined();
+  });
+
+  it("recording registerKeywords flips the ledger to mutating (Phase-4 keeps its pre-exec ask)", async () => {
+    const wrapped = instrumentEffectsByPath({ registerKeywords: (_kw: unknown): void => {} });
+    const ledger: EffectLedger = createEffectLedger("cid-kw");
+    await runWithEffectLedger(ledger, async () => {
+      wrapped.registerKeywords([{ keyword: "k", skillId: "s" }]);
+    });
+    // a tool that reaches registerKeywords records a WRITE → it is never a "read"
+    // tool → Phase 4 does not relax its pre-exec ask (the proof it is not fail-open).
+    expect(ledger.summary().hasMutatingEffect).toBe(true);
+  });
+});
+
+describe("M4 — headless NEVER honours a foreground-obtained grant (fail-closed before grant)", () => {
+  it("a foreground allow-always for descriptor D does NOT allow D in a later headless run", async () => {
+    const log: string[] = [];
+    const { gate, requests } = makeGate("allow-always");
+    const api = enforceMutatingEffects(makeApi(log), deps(gate, true));
+
+    // 1) FOREGROUND: bless the descriptor with an allow-always grant.
+    await runWithEffectGateContext({ headless: false, toolName: "fg" }, async () => {
+      await api.storage.write("a.txt", "1");
+    });
+    expect(requests).toHaveLength(1);
+    expect(log).toEqual(["write"]);
+
+    // 2) HEADLESS (unattended routine): the SAME descriptor must fail closed —
+    //    the foreground grant cannot bypass the headless lane.
+    let caught: unknown;
+    await runWithEffectGateContext({ headless: true, toolName: "routine" }, async () => {
+      try {
+        await api.storage.write("a.txt", "2");
+      } catch (err) {
+        caught = err;
+      }
+    });
+    expect(caught).toBeInstanceOf(EffectBoundaryDeniedError);
+    expect((caught as EffectBoundaryDeniedError).reason).toBe("headless");
+    expect(requests).toHaveLength(1); // no NEW modal (and the grant was NOT honoured)
+    expect(log).toEqual(["write"]); // the headless write did NOT run
+  });
+
+  it("a foreground allow-once does not leak into a headless invocation either", async () => {
+    const log: string[] = [];
+    const { gate } = makeGate("allow-once");
+    const api = enforceMutatingEffects(makeApi(log), deps(gate, true));
+    await runWithEffectGateContext({ headless: false, toolName: "fg" }, async () => {
+      await api.storage.write("a.txt", "1");
+    });
+    // onceGrants are invocation-scoped, so they cannot reach the headless call,
+    // but assert headless fails closed regardless.
+    await runWithEffectGateContext({ headless: true, toolName: "routine" }, async () => {
+      await expect(api.storage.write("a.txt", "2")).rejects.toBeInstanceOf(EffectBoundaryDeniedError);
+    });
+    expect(log).toEqual(["write"]); // only the foreground write ran
+  });
+});
+
+describe("M2 — object-field target is snapshotted ONCE at the gate (TOCTOU)", () => {
+  it("the modal/grant target is a SINGLE read; a stateful getter cannot diverge it", async () => {
+    const { gate, requests } = makeGate("allow-once");
+    // The real impl re-reads spec.source INDEPENDENTLY of the gate; assert the
+    // GATE pins its descriptor to ONE read (the first), so the modal + grant key
+    // can never disagree with each other.
+    const implSawSource: string[] = [];
+    const api = enforceMutatingEffects(
+      {
+        triggerConversation: async (spec: { source: string }): Promise<{ accepted: boolean }> => {
+          implSawSource.push(spec.source); // a SECOND, independent read by the impl
+          return { accepted: true };
+        },
+      },
+      deps(gate, true),
+    );
+
+    let reads = 0;
+    const statefulSpec = {
+      get source(): string {
+        reads += 1;
+        return `src-${reads}`; // a different value on every read
+      },
+    };
+
+    await runWithEffectGateContext({ headless: false, toolName: "t" }, async () => {
+      await api.triggerConversation(statefulSpec);
+    });
+
+    // The gate read the getter EXACTLY ONCE for its descriptor (the first read)…
+    expect(requests).toHaveLength(1);
+    expect(requests[0].args).toMatchObject({ methodPath: "triggerConversation", target: "src-1" });
+    // …and the impl's later independent read got a DIFFERENT value, proving the
+    // gate's displayed/granted target is pinned to a single snapshot (not re-read).
+    expect(implSawSource).toEqual(["src-2"]);
+  });
+});
+
+describe("M3 — target-less blanket grants surface a method-wide breadth marker", () => {
+  it("a write with NO target marks the descriptor methodWide; a target-scoped one omits it", async () => {
+    const log: string[] = [];
+    const { gate, requests } = makeGate("allow-once");
+    const api = enforceMutatingEffects(makeApi(log), deps(gate, true));
+    await runWithEffectGateContext({ headless: false, toolName: "t" }, async () => {
+      await api.callLlm("hi"); // no target → method-wide grant
+      await api.storage.write("a.txt", "x"); // target → scoped grant
+    });
+    expect(requests[0].args).toMatchObject({ methodPath: "callLlm", methodWide: true });
+    expect((requests[0].args as { target?: unknown }).target).toBeUndefined();
+    expect(requests[1].args).toMatchObject({ methodPath: "storage.write", target: "a.txt" });
+    expect((requests[1].args as { methodWide?: unknown }).methodWide).toBeUndefined();
+  });
+});
+
+describe("composed stack — enforceMutatingEffects(instrumentEffectsByPath(raw))", () => {
+  /** A raw hostApi-shaped object whose impls read `this` so we can prove binding. */
+  function makeRawApi(log: string[]) {
+    return {
+      marker: "ROOT",
+      callLlm: async function (this: { marker: string }, _p: unknown): Promise<string> {
+        log.push(`llm:${this.marker}`);
+        return "resp";
+      },
+      // a READ — never gated, always recorded
+      getInstalledPluginIds: function (this: { marker: string }): string[] {
+        log.push(`ids:${this.marker}`);
+        return [];
+      },
+      storage: {
+        marker: "STORAGE",
+        write: async function (this: { marker: string }, _rel: string): Promise<void> {
+          log.push(`write:${this.marker}`);
+        },
+      },
+    };
+  }
+
+  function composed(log: string[], gate: ApprovalGate, flag: boolean) {
+    return enforceMutatingEffects(
+      instrumentEffectsByPath(makeRawApi(log) as unknown as Record<string, unknown>),
+      deps(gate, flag),
+    ) as unknown as ReturnType<typeof makeRawApi>;
+  }
+
+  it("FLAG OFF — recorder records, NO gate, impls run with correct `this` binding", async () => {
+    const log: string[] = [];
+    const { gate, requests } = makeGate("deny-once");
+    const api = composed(log, gate, false);
+    const ledger = createEffectLedger("cid-off");
+    await runWithEffectLedger(ledger, () =>
+      runWithEffectGateContext({ headless: false, toolName: "t" }, async () => {
+        await api.callLlm("x");
+        await api.storage.write("a.txt");
+      }),
+    );
+    expect(requests).toHaveLength(0); // flag off → no modal
+    // `this` reached the RAW namespace objects through BOTH layers
+    expect(log).toEqual(["llm:ROOT", "write:STORAGE"]);
+    // the pure recorder still recorded both writes (untouched by enforcement)
+    expect(ledger.summary().effects.map((e) => e.kind)).toEqual(["callLlm", "storageWrite"]);
+  });
+
+  it("FLAG ON + ALLOW — order is gate → record → impl (OUTER over recorder)", async () => {
+    const log: string[] = [];
+    const { gate, requests } = makeGate("allow-once");
+    const api = composed(log, gate, true);
+    const ledger = createEffectLedger("cid-allow");
+    await runWithEffectLedger(ledger, () =>
+      runWithEffectGateContext({ headless: false, toolName: "t" }, async () => {
+        await api.callLlm("x");
+      }),
+    );
+    expect(requests).toHaveLength(1); // gated
+    expect(log).toEqual(["llm:ROOT"]); // impl ran after the allow
+    expect(ledger.summary().effects.map((e) => e.kind)).toEqual(["callLlm"]); // recorded
+  });
+
+  it("FLAG ON + DENY — a denied write is NEVER recorded (no phantom shadow row) and never runs", async () => {
+    const log: string[] = [];
+    const { gate, requests } = makeGate("deny-once");
+    const api = composed(log, gate, true);
+    const ledger = createEffectLedger("cid-deny");
+    await runWithEffectLedger(ledger, () =>
+      runWithEffectGateContext({ headless: false, toolName: "t" }, async () => {
+        await expect(api.callLlm("x")).rejects.toBeInstanceOf(EffectBoundaryDeniedError);
+      }),
+    );
+    expect(requests).toHaveLength(1); // it asked
+    expect(log).toEqual([]); // the impl never ran
+    // OUTER composition: the recorder sits INSIDE the gate, so a denied effect is
+    // never recorded — no phantom mutation row in the shadow dataset.
+    expect(ledger.summary().effects).toEqual([]);
+  });
+
+  it("a READ flows through both layers ungated and recorded", async () => {
+    const log: string[] = [];
+    const { gate, requests } = makeGate("deny-once");
+    const api = composed(log, gate, true);
+    const ledger = createEffectLedger("cid-read");
+    await runWithEffectLedger(ledger, () =>
+      runWithEffectGateContext({ headless: false, toolName: "t" }, async () => {
+        api.getInstalledPluginIds();
+      }),
+    );
+    expect(requests).toHaveLength(0); // reads never prompt
+    expect(log).toEqual(["ids:ROOT"]);
+    expect(ledger.summary().effects.map((e) => e.kind)).toEqual(["getInstalledPluginIds"]);
+  });
+});
+
+describe("INSTRUMENTED idempotence symbol is PROPAGATED through the enforced wrapper", () => {
+  it("the enforced output keeps INSTRUMENTED so a later instrument is a no-op (no double-wrap)", () => {
+    const { gate } = makeGate("deny-once");
+    const raw = {
+      callLlm: async (): Promise<string> => "x",
+      storage: { write: async (): Promise<void> => {} },
+    };
+    const instrumented = instrumentEffectsByPath(raw as unknown as Record<string, unknown>);
+    const enforced = enforceMutatingEffects(instrumented, deps(gate, false));
+
+    // the fresh enforced object still carries the recorder's idempotence symbol…
+    expect((enforced as Record<symbol, unknown>)[INSTRUMENTED]).toBe(true);
+    // …including nested namespaces…
+    expect(((enforced as { storage: Record<symbol, unknown> }).storage)[INSTRUMENTED]).toBe(true);
+    // …so re-instrumenting it is a no-op (returns the SAME object — no re-wrap).
+    expect(instrumentEffectsByPath(enforced)).toBe(enforced);
   });
 });
