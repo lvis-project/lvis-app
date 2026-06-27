@@ -2172,6 +2172,130 @@ export class ToolExecutor {
           forceModal: true,
         };
       }
+      // ── Effect-boundary pre-exec relaxation (flag-gated, default OFF) ──────
+      //
+      // When `hostClassifiesRisk` is ON, a FIRST-PARTY PLUGIN tool in a
+      // FOREGROUND (interactive) context does NOT run the pre-exec blocking
+      // approval lane (the host-classify category ASK + the reviewer/modal that
+      // follows it). Instead the tool is allowed to EXECUTE, and the merged
+      // effect-boundary gate (bound around `tool.execute` below) is the ONLY
+      // gate: a plugin READ tool performs no mutating host-mediated effect →
+      // runs to completion with NO modal; a plugin WRITE tool trips the
+      // effect-gate AT THE MUTATION (foreground deny → tool error; headless
+      // fails closed). This replaces the imprecise default-strict pre-exec ASK
+      // (which the host inspector raises to `write` without positive read
+      // evidence, so it over-asks for genuine reads) with the precise,
+      // effect-observed gate.
+      //
+      // SCOPE — narrowed deliberately (each clause is load-bearing):
+      //   • PLUGIN ONLY (`source === "plugin"`). MCP tools are
+      //     `hostObservable:false` (not host-mediated) so the effect-gate never
+      //     sees their mutations — relaxing them would be a FAIL-OPEN; builtins
+      //     carry their own trusted host categories. Both keep the full pre-exec
+      //     ask (this branch is skipped for them).
+      //   • FOREGROUND ONLY (`headless !== true`). In a headless/routine lane a
+      //     plugin write would HARD-THROW at the effect-gate (which fails closed
+      //     with no approver) instead of taking the host's deferred/headless
+      //     approval lane, breaking legitimate routine writes — so headless
+      //     keeps the pre-exec lane untouched.
+      //   • ASK ONLY, layer ≥ 3, not `forceModal`. A `deny` (standing deny rule
+      //     or a persisted `deny-always`) is layer 1 and never an ask, so it is
+      //     untouched — explicit user deny still wins. The layer ≥ 3 floor
+      //     preserves the layer ≤ 2 hard gates (overlay-trigger mutation guard,
+      //     MCP/per-tool strict override, global strict mode) exactly as the
+      //     Store B memory-skip does; a per-invocation `forceModal` ask is never
+      //     relaxed.
+      //   • FLAG OFF (default) → this whole block is skipped: behaviour is
+      //     byte-for-byte today's full pre-exec ask. The condition is the FIRST
+      //     read, so the relaxed path is reachable only with the flag ON.
+      //
+      // PERM-HOOK PRESERVATION — the relaxation flips the pre-exec ASK to `allow`
+      // BEFORE the `decision === "ask"` block below, which is the ONLY callsite of
+      // the operator's `perm-*.sh` (PermissionRequest) script hook. Without firing
+      // it here, an operator deny policy encoded in a `perm-*.sh` hook would be
+      // SILENTLY dropped under the flag for exactly the relaxed plugin calls. So on
+      // the relaxed path we run the SAME perm hook FIRST: a perm-hook DENY blocks
+      // the tool FAIL-CLOSED (no relaxation), identical to the ask lane's perm-hook
+      // deny handling below; a perm-hook allow / no-opinion proceeds with the
+      // relaxation (no modal), preserving the clean read-relaxation UX. (The
+      // always-on `pre-*.sh` hook still fires downstream regardless — but the
+      // perm-hook is a DISTINCT, separately-registrable deny surface, so it is
+      // restored here under the flag.) Done inside the relaxation branch so it runs
+      // only for the narrowed plugin/foreground/ask/layer≥3 set; for every other
+      // tool the perm hook still runs in its original ask-lane callsite.
+      //
+      // HONEST RESIDUAL — what this gate does NOT contain (NOT papered over).
+      //   NOTE: the relaxation below does NOT pre-classify read vs write — it flips
+      //   ANY foreground/plugin/layer≥3 `ask` to `allow`, so the pre-exec ask is
+      //   gone for EVERY relaxed plugin tool (a read AND a write tool). The ONLY
+      //   remaining gate under the flag is the effect-boundary. The residuals:
+      //   1. OFF-hostApi mutation. This gates LLM-driven plugin actions over
+      //      HOST-MEDIATED effects only. A plugin that mutates OFF the host API
+      //      (direct `node:fs`, a bare `fetch`, or a detached async frame that
+      //      escapes the tool-execute ALS scope) records NO effect → the
+      //      effect-boundary sees a read → it runs with no gate. Closed ONLY by the
+      //      OS sandbox (ASRT) being default-ON (a separate track). NOT a
+      //      regression: a first-party plugin already executes arbitrary in-process
+      //      code today — this is an LLM-action gate over mediated effects, not an
+      //      in-process jail.
+      //   2. The mediated excluded writes (ENFORCEMENT_EXCLUSIONS). The relaxation
+      //      removes the pre-exec ask, so these are gated ONLY at the effect-boundary
+      //      — and the excluded paths are by definition NOT generically gated there:
+      //        • openExternalUrl (system-browser egress / exfil-class) is now GATED
+      //          at the effect-boundary (moved OUT of the exclusions) — caught;
+      //        • hostFetch self-gates INLINE in its closure (same effect-gate) —
+      //          caught; the other gated async writes are caught generically;
+      //        • the THREE remaining exclusions run UNGATED under the flag, each
+      //          BOUNDED: registerKeywords = SYNC + start-only, not reachable during
+      //          tool.execute (no effect during a gated invocation); config.set =
+      //          the plugin's OWN config namespace (not user/external data);
+      //          agentApproval.respond = resolves HOST-OWNED approval machinery,
+      //          gating it with itself is circular (would deadlock).
+      //      This bounded-ungated set is enumerated (here + effect-enforcement.ts) —
+      //      it is NOT a hidden fail-open hole.
+      //   3. READ-SIDE exfiltration. Skipping the foreground reviewer for plugin
+      //      READ tools means a plugin read of sensitive data no longer gets a
+      //      pre-exec review. Exfiltration of what it read is contained ONLY by the
+      //      gated `hostFetch` verb chokepoint (Tier A deny-by-default network
+      //      allow-list) + the OS sandbox — NOT by a pre-exec ask. This is the UX
+      //      cost the flag deliberately buys; documented so the default-flip
+      //      decision weighs it.
+      if (
+        this.hostClassifiesRiskProvider() &&
+        source === "plugin" &&
+        invocationPermissionContext.headless !== true &&
+        permissionResult.decision === "ask" &&
+        permissionResult.layer >= 3 &&
+        permissionResult.forceModal !== true
+      ) {
+        const relaxedPermHook = await this.runScriptHook(
+          "perm",
+          toolUse.name,
+          source,
+          invocationCategory,
+          finalInput,
+          sessionId,
+          invocationPermissionContext,
+          tool.mcpServerId,
+          tool.pluginId,
+        );
+        if (relaxedPermHook.decision === "deny") {
+          // Operator perm-hook DENY wins over the relaxation — fail closed exactly
+          // as the ask lane does on a perm-hook deny.
+          const msg = t("be_executor.hookPermissionBlock", { reason: relaxedPermHook.reason });
+          const durationMs = Date.now() - startTime;
+          emitToolStart(callbacks, toolUse.name, finalInput, meta);
+          callbacks?.onToolEnd?.(toolUse.name, msg, true, meta, undefined, durationMs);
+          await this.auditToolCall(sessionId, toolUse.name, source, trust, finalInput, msg, true, startTime, { ...permissionResult, decision: "deny", reason: relaxedPermHook.reason }, Infinity, invocationPermissionContext, invocationCategory, executionCwd, undefined, undefined, hookChainFromDispatch("perm", relaxedPermHook));
+          return { tool_use_id: toolUse.id, content: msg, is_error: true, durationMs };
+        }
+        permissionResult = {
+          decision: "allow",
+          reason:
+            "plugin foreground pre-exec ask relaxed — gated at the effect boundary (hostClassifiesRisk)",
+          layer: permissionResult.layer,
+        };
+      }
       const sandboxAttestation = {
         ...(tool.writesToOwnSandbox !== undefined
           ? { writesToOwnSandbox: tool.writesToOwnSandbox }
