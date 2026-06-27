@@ -1,0 +1,613 @@
+{
+  "id": "local-indexer",
+  "name": "LVIS Local Indexer",
+  "version": "0.5.1",
+  "icon": "Database",
+  "publisher": "lvis-community",
+  "installPolicy": "admin",
+  "llmKeySource": "host",
+  "entry": "dist/hostPlugin.js",
+  "description": "Local Indexer 문서 파일 자동 인덱싱 및 문서 검색 플러그인. 폴더 감시(chokidar), PDF/Markdown 파싱, 한국어 형태소 분석(kiwi), FTS5 기반 검색. 인덱스 위치: 플러그인 데이터 디렉터리의 index/",
+  "python": {
+    "managedBy": "lvis-app",
+    "requirementsLock": "python-requirements.lock"
+  },
+  "tools": [
+    "index_scan",
+    "index_scan_cancel",
+    "index_scan_status",
+    "index_clear_warnings",
+    "index_documents",
+    "index_folders",
+    "index_folders_purge_orphans",
+    "index_refresh_folder",
+    "index_add_folder",
+    "index_add_folders",
+    "index_remove_folder",
+    "index_pick_folder",
+    "index_preview_folder",
+    "chat_preview",
+    "index_search",
+    "index_get_document",
+    "document_index_scan",
+    "index_get_settings",
+    "index_set_image_embedding"
+  ],
+  "capabilities": [
+    "worker-client",
+    "knowledge-index",
+    "document-indexer"
+  ],
+  "uiCallable": [
+    "index_scan",
+    "index_scan_cancel",
+    "index_scan_status",
+    "index_clear_warnings",
+    "index_documents",
+    "index_folders",
+    "index_refresh_folder",
+    "index_folders_purge_orphans",
+    "index_add_folders",
+    "index_remove_folder",
+    "index_pick_folder",
+    "index_preview_folder",
+    "index_get_settings",
+    "index_set_image_embedding"
+  ],
+  "startupTimeoutMs": 30000,
+  "eventSubscriptions": [
+    {
+      "type": "host.theme.changed"
+    }
+  ],
+  "toolSchemas": {
+    "index_scan": {
+      "description": "등록된 폴더를 즉시 스캔해 새 파일을 인덱싱합니다. 사용 시기: 사용자가 '문서 다시 인덱싱해줘', '방금 추가한 파일 반영해줘' 같이 최신화를 요청할 때, 또는 knowledge_search/chat_preview 결과가 예상보다 부족해 보일 때. 인자 없음. 반환: { indexed, totalIndexed, message }.",
+      "inputSchema": {
+        "$schema": "http://json-schema.org/draft-07/schema#",
+        "type": "object",
+        "properties": {},
+        "additionalProperties": false
+      }
+    },
+    "index_scan_cancel": {
+      "description": "진행 중인 문서 스캔에 대해 중단을 요청합니다. 사용 시기: 사용자가 스캔 중 중단 버튼을 누르거나 '인덱싱 멈춰줘'라고 요청했을 때. 사용 안 함: 스캔 상태만 확인하려면 index_scan_status. 반환: { canceled, message }. 실제 중단은 worker가 현재 파일 처리를 마친 뒤 반영될 수 있습니다.",
+      "inputSchema": {
+        "$schema": "http://json-schema.org/draft-07/schema#",
+        "type": "object",
+        "properties": {},
+        "additionalProperties": false
+      }
+    },
+    "index_documents": {
+      "description": "사용자가 파일 검색을 요청할 때 사용. 인덱싱된 문서 메타데이터를 페이지 단위로 반환합니다. 사용 시기: 어떤 문서가 검색 대상인지 목록이 필요할 때(특정 문서 지정 전). 사용 안 함: 내용 검색은 knowledge_search/chat_preview, 특정 문서 구조는 document_structure 를 사용. 인자: { limit?: integer (1~100, 기본 100), offset?: integer (≥0, 기본 0), full?: boolean (기본 false) }. 응답 (기본, LLM 용): { documents: Array<{doc_id, doc_name, type, path, status}>, total: number, hasMore: boolean }. 응답 (full=true, UI 표시용): documents 항목에 page_count, line_count 가 추가됨. hasMore=true 이면 offset 을 증가시켜 다음 페이지를 호출하세요. 서버측 hard cap(limit≤100) 이 있으므로 큰 limit 도 잘려 반환됩니다.",
+      "inputSchema": {
+        "$schema": "http://json-schema.org/draft-07/schema#",
+        "type": "object",
+        "properties": {
+          "limit": {
+            "type": "integer",
+            "minimum": 1,
+            "maximum": 100,
+            "default": 100,
+            "description": "이번 페이지에 포함할 최대 문서 수 (1~100, 기본 100). 서버측 hard cap 100 이라 더 큰 값을 보내도 잘립니다."
+          },
+          "offset": {
+            "type": "integer",
+            "minimum": 0,
+            "default": 0,
+            "description": "건너뛸 문서 수 (페이지네이션 커서). 첫 호출은 0, hasMore=true 이면 이전 호출의 offset + documents.length 를 다음 호출의 offset 으로 사용."
+          },
+          "full": {
+            "type": "boolean",
+            "default": false,
+            "description": "true 이면 응답 documents 항목에 page_count, line_count 가 추가됩니다. UI 의 카운트 표시용 — LLM function call 은 보통 인자를 생략해 page_count/line_count 가 없는 lean shape 을 받습니다 (응답 토큰 절감)."
+          }
+        },
+        "additionalProperties": false
+      }
+    },
+    "index_folders": {
+      "description": "현재 인덱싱 대상으로 등록된 폴더 경로 목록을 반환합니다. 사용 시기: '어떤 폴더가 인덱싱되고 있지?' 같이 설정 확인. 사용 안 함: 문서 목록은 index_documents. 인자 없음. 반환: { folders: string[] }.",
+      "inputSchema": {
+        "$schema": "http://json-schema.org/draft-07/schema#",
+        "type": "object",
+        "properties": {},
+        "additionalProperties": false
+      }
+    },
+    "index_folders_purge_orphans": {
+      "description": "등록된 인덱스 폴더 기준으로 더 이상 존재하지 않는 고아(orphan) 문서 인덱스 항목을 정리합니다. 사용 시기: 폴더 구조를 크게 바꿨거나 삭제된 파일이 검색 결과에 남아 있을 때 UI에서 정리 작업을 실행할 때. 인자 없음. 반환: { folders, summaries, purged }.",
+      "inputSchema": {
+        "$schema": "http://json-schema.org/draft-07/schema#",
+        "type": "object",
+        "properties": {},
+        "additionalProperties": false
+      }
+    },
+    "index_refresh_folder": {
+      "description": "등록된 특정 폴더 하나만 증분 갱신합니다. 사용 시기: 사용자가 '이 폴더만 다시 스캔해줘'라고 요청하거나 특정 폴더 변경만 빠르게 반영하고 싶을 때. 새 파일·변경 파일·삭제 파일만 조정하므로 전체 재스캔보다 가볍습니다. 사용 안 함: 모든 등록 폴더 갱신은 index_scan, 등록되지 않은 경로 즉시 인덱싱은 document_index_scan. 반환: { indexed, removed, failed, folder, message }.",
+      "inputSchema": {
+        "$schema": "http://json-schema.org/draft-07/schema#",
+        "type": "object",
+        "properties": {
+          "folder": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 4096,
+            "description": "갱신할 등록 폴더의 절대 경로. index_folders 결과에 포함된 경로를 전달하세요."
+          }
+        },
+        "required": [
+          "folder"
+        ],
+        "additionalProperties": false
+      },
+      "pathFields": [
+        "folder"
+      ]
+    },
+    "index_add_folder": {
+      "description": "인덱싱 대상 폴더를 추가합니다. 사용 시기: 사용자가 '이 폴더도 검색 대상에 추가해줘' 라고 명시적으로 요청할 때. 시스템 디렉토리나 민감 경로(~/.ssh, /etc 등)는 차단됩니다. 추가 후에는 index_scan 을 불러 인덱싱을 트리거하세요. 반환: { folders, added: boolean, message }.",
+      "inputSchema": {
+        "$schema": "http://json-schema.org/draft-07/schema#",
+        "type": "object",
+        "properties": {
+          "folder": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 4096,
+            "pattern": "^([A-Za-z]:[\\\\/]|/|~|\\.)",
+            "description": "추가할 폴더의 절대 경로 또는 ~ / 상대 경로 (예: /Users/ken/Documents). NUL 바이트는 호스트 측에서 거부됩니다."
+          }
+        },
+        "required": [
+          "folder"
+        ],
+        "additionalProperties": false
+      },
+      "pathFields": [
+        "folder"
+      ]
+    },
+    "index_add_folders": {
+      "description": "여러 인덱싱 대상 폴더를 한 번에 추가합니다. 사용 시기: UI 폴더 선택 모달에서 다중 선택 후 일괄 등록할 때 — N개를 한 번에 추가해도 rebuild는 1회만 수행해 부하를 줄입니다. 차단 경로(시스템/민감)나 고변동(Downloads 등)은 failures에 담겨 반환되며, 이미 등록된 폴더는 skipped로 분리됩니다. 반환: { folders, added: string[], skipped: { folder, reason }[], failures: { folder, error }[] }.",
+      "inputSchema": {
+        "$schema": "http://json-schema.org/draft-07/schema#",
+        "type": "object",
+        "properties": {
+          "folders": {
+            "type": "array",
+            "items": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 4096
+            },
+            "minItems": 1,
+            "maxItems": 200,
+            "description": "추가할 폴더 절대 경로 배열 (1~200개)"
+          }
+        },
+        "required": [
+          "folders"
+        ],
+        "additionalProperties": false
+      },
+      "pathFields": [
+        "folders"
+      ]
+    },
+    "index_remove_folder": {
+      "description": "인덱싱 대상에서 폴더를 제거합니다. 사용 시기: 사용자가 '이 폴더는 더 이상 검색하지 마' 라고 명시할 때만. 제거 시 해당 폴더의 이미 인덱싱된 문서는 검색에서 빠집니다. 반환: { folders, removed: boolean, message }.",
+      "inputSchema": {
+        "$schema": "http://json-schema.org/draft-07/schema#",
+        "type": "object",
+        "properties": {
+          "folder": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 4096,
+            "description": "제거할 폴더의 절대 경로 또는 상대 경로"
+          }
+        },
+        "required": [
+          "folder"
+        ],
+        "additionalProperties": false
+      },
+      "pathFields": [
+        "folder"
+      ]
+    },
+    "index_pick_folder": {
+      "description": "OS 네이티브 폴더 선택 다이얼로그(다중 선택 허용)를 띄워 사용자가 고른 폴더 경로 배열을 반환합니다. UI '폴더 추가' 버튼 전용 — webview 샌드박스가 dialog.showOpenDialog를 직접 호출하지 못하므로 호스트가 대신 띄웁니다. 인자 없음. 반환: { folders: string[], canceled: boolean }.",
+      "inputSchema": {
+        "$schema": "http://json-schema.org/draft-07/schema#",
+        "type": "object",
+        "properties": {},
+        "additionalProperties": false
+      }
+    },
+    "index_preview_folder": {
+      "description": "주어진 폴더를 walk 해 인덱싱 대상 파일들의 통계를 반환합니다. UI 폴더 추가 확인 모달용 — host 가 띄운 OS 폴더 선택 결과를 등록 전에 사용자에게 보여줄 때 사용. 반환: { folder, total, byType: {pdf:N,docx:M,...}, sample: string[] (basename, 최대 5개), error?: string }.",
+      "inputSchema": {
+        "$schema": "http://json-schema.org/draft-07/schema#",
+        "type": "object",
+        "properties": {
+          "folder": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 4096,
+            "description": "미리볼 폴더의 절대 경로"
+          }
+        },
+        "required": [
+          "folder"
+        ],
+        "additionalProperties": false
+      },
+      "pathFields": [
+        "folder"
+      ]
+    },
+    "chat_preview": {
+      "description": "자연어 질문을 인덱싱된 문서에서 BM25 로 검색해 미리보기 텍스트를 반환합니다. 사용 시기: 빠른 키워드-기반 1차 스크린 또는 UI 의 'preview' 영역이 필요할 때. 사용 안 함: 하이브리드(BM25+벡터) 정밀 검색은 knowledge_search 를 우선 사용. 반환: { question, documentCount, results, preview }.",
+      "inputSchema": {
+        "$schema": "http://json-schema.org/draft-07/schema#",
+        "type": "object",
+        "properties": {
+          "question": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 2000,
+            "description": "검색할 자연어 질문 (예: '보안 정책 문서에서 비밀번호 규정은?'). 최대 2000자."
+          }
+        },
+        "required": [
+          "question"
+        ],
+        "additionalProperties": false
+      }
+    },
+    "index_search": {
+      "description": "인덱싱된 문서를 BM25/벡터/하이브리드 모드로 검색합니다. (파일/이미지 찾기) 사용 시기: 호출자가 정밀도(하이브리드) 또는 모드를 직접 지정해 검색 결과 청크 목록이 필요할 때. 사용 안 함: 사람에게 보여줄 짧은 미리보기 문자열만 필요하면 chat_preview. 반환: { query, mode, topK, hits: [{ chunkId, docId, docName, page, score, source, path, snippet, rawText }] }. source는 'bm25'|'vector'|'hybrid' 중 하나로 정규화되어 반환됩니다.",
+      "inputSchema": {
+        "$schema": "http://json-schema.org/draft-07/schema#",
+        "type": "object",
+        "properties": {
+          "query": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 2000,
+            "description": "검색 질의어 (자연어 또는 키워드). 최대 2000자."
+          },
+          "mode": {
+            "type": "string",
+            "enum": [
+              "bm25",
+              "vector",
+              "hybrid"
+            ],
+            "default": "hybrid",
+            "description": "검색 방식. bm25=키워드 전용, vector=의미 검색(임베딩 설정 필요), hybrid=둘을 RRF로 결합."
+          },
+          "topK": {
+            "type": "integer",
+            "minimum": 1,
+            "maximum": 50,
+            "default": 10,
+            "description": "반환할 최대 청크 수 (1~50)."
+          }
+        },
+        "required": [
+          "query"
+        ],
+        "additionalProperties": false
+      }
+    },
+    "index_get_document": {
+      "description": "doc_id로 인덱싱된 문서의 메타데이터와 (옵션) 페이지 본문을 반환합니다. 사용 시기: 검색 히트(index_search)에서 받은 docId의 본문/페이지가 필요하거나, UI 결과 클릭 시 미리보기를 표시할 때 — 파일 재파싱 없이 인덱스 DB에서 바로 조회. 사용 안 함: 전체 문서 목록은 index_documents. 반환: { doc: { docId, docName, type, path, pageCount, lineCount, indexedAt, status }, pages: [{ page, content }] }.",
+      "inputSchema": {
+        "$schema": "http://json-schema.org/draft-07/schema#",
+        "type": "object",
+        "properties": {
+          "docId": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 256,
+            "description": "조회할 문서의 doc_id (index_documents/index_search 결과에서 얻은 값)."
+          },
+          "pages": {
+            "type": "string",
+            "maxLength": 200,
+            "pattern": "^[0-9,\\-\\s]{1,200}$",
+            "description": "조회할 페이지 범위. 예: '1', '1-3', '1-3,5'. 미지정 시 includeContent에 따름. 워커의 _PAGES_RE 와 동일 패턴."
+          },
+          "includeContent": {
+            "type": "boolean",
+            "default": false,
+            "description": "true이고 pages 미지정이면 처음 50페이지까지 본문을 함께 반환합니다."
+          }
+        },
+        "required": [
+          "docId"
+        ],
+        "additionalProperties": false
+      }
+    },
+    "index_scan_status": {
+      "description": "현재 진행 중이거나 마지막으로 실행된 문서 스캔 상태를 반환합니다. 사용 시기: UI 진행률 표시, 사용자의 '인덱싱 어디까지 됐어?' 질문, index_scan/document_index_scan 호출 직후 상태 확인. 사용 안 함: 문서 목록은 index_documents. 반환: { status, total, processed, indexed, failed, currentPath?, message?, warnings?: Array<{ kind, message, path?, docId?, error?, reason? }> }.",
+      "inputSchema": {
+        "$schema": "http://json-schema.org/draft-07/schema#",
+        "type": "object",
+        "properties": {},
+        "additionalProperties": false
+      }
+    },
+    "index_clear_warnings": {
+      "description": "Local Indexer UI에 표시 중인 최근 인덱싱 경고 버퍼를 비웁니다. 사용 시기: 사용자가 '인덱싱 경고' 섹션을 수동으로 비우거나 새 스캔 시작 전에 이전 경고를 초기화할 때. 반환: { cleared: true }.",
+      "inputSchema": {
+        "$schema": "http://json-schema.org/draft-07/schema#",
+        "type": "object",
+        "properties": {},
+        "additionalProperties": false
+      }
+    },
+    "document_index_scan": {
+      "description": "지정된 절대 경로 파일/폴더 목록을 Local Indexer로 즉시 인덱싱합니다. 사용 시기: 사용자가 파일/폴더를 앱에 드래그 앤 드롭했거나, 등록 폴더에 추가하지 않고 이번 대화에서만 특정 자료를 검색 가능하게 만들고 싶을 때. 사용 안 함: 지속적으로 감시할 폴더는 index_add_folder 후 index_scan. 반환: { indexed, failed, jobId, message }.",
+      "inputSchema": {
+        "$schema": "http://json-schema.org/draft-07/schema#",
+        "type": "object",
+        "properties": {
+          "paths": {
+            "type": "array",
+            "items": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 4096
+            },
+            "minItems": 1,
+            "maxItems": 200,
+            "description": "인덱싱할 파일 또는 폴더의 절대 경로 목록 (1~200개). NUL 바이트와 시스템 경로는 호스트 측에서 차단됩니다."
+          }
+        },
+        "required": [
+          "paths"
+        ],
+        "additionalProperties": false
+      },
+      "pathFields": [
+        "paths"
+      ]
+    },
+    "index_get_settings": {
+      "description": "Local Indexer 의 현재 설정(텍스트 임베딩/이미지 캡션) 스냅샷을 반환합니다. UI 토글 초기값 로딩 전용. 반환: { imageEmbeddingEnabled, imageCaptionProvider, imageCaptionModel, embeddingProvider, embeddingModel, hasApiKey }.",
+      "inputSchema": {
+        "$schema": "http://json-schema.org/draft-07/schema#",
+        "type": "object",
+        "properties": {},
+        "additionalProperties": false
+      }
+    },
+    "index_set_image_embedding": {
+      "description": "이미지 캡션 파이프라인 (이미지→캡션→텍스트 임베딩) 을 토글합니다. provider/model/endpoint/apiKey 는 호스트 plugin 설정에서만 변경 가능 — 이 도구는 enabled 토글만 받습니다. 변경된 설정은 다음 스캔부터 적용됩니다.",
+      "inputSchema": {
+        "$schema": "http://json-schema.org/draft-07/schema#",
+        "type": "object",
+        "properties": {
+          "enabled": {
+            "type": "boolean",
+            "description": "이미지 캡션 활성화 여부 (벡터화 자체는 텍스트 임베딩이며 이 토글은 이미지→캡션 단계의 on/off)"
+          }
+        },
+        "required": [
+          "enabled"
+        ],
+        "additionalProperties": false
+      }
+    }
+  },
+  "keywords": [
+    {
+      "keyword": "문서",
+      "skillId": "chat_preview"
+    },
+    {
+      "keyword": "인덱스",
+      "skillId": "index_scan"
+    },
+    {
+      "keyword": "검색",
+      "skillId": "chat_preview"
+    },
+    {
+      "keyword": "문서검색",
+      "skillId": "chat_preview"
+    },
+    {
+      "keyword": "PDF",
+      "skillId": "chat_preview"
+    },
+    {
+      "keyword": "파일검색",
+      "skillId": "chat_preview"
+    },
+    {
+      "keyword": "문서찾기",
+      "skillId": "chat_preview"
+    },
+    {
+      "keyword": "인덱싱",
+      "skillId": "index_scan"
+    },
+    {
+      "keyword": "파일인덱스",
+      "skillId": "index_scan"
+    }
+  ],
+  "notificationEvents": [
+    {
+      "event": "index.scan.completed",
+      "titleField": "title",
+      "bodyField": "message"
+    },
+    {
+      "event": "index.folders.changed",
+      "titleField": "folder",
+      "bodyField": "message"
+    }
+  ],
+  "ui": [
+    {
+      "id": "local-indexer-control",
+      "slot": "sidebar",
+      "kind": "embedded-module",
+      "displayName": "로컬 인덱서",
+      "title": "Local Indexer",
+      "description": "Local Indexer 문서 스캔/목록 확인과 채팅창 질문 전송을 제공합니다.",
+      "entry": "dist/ui/indexer-control.js",
+      "exportName": "mount"
+    }
+  ],
+  "configSchema": {
+    "properties": {
+      "embeddingProvider": {
+        "type": "string",
+        "title": "[임베딩] 프로바이더",
+        "description": "임베딩 API 프로바이더. openai=OpenAI(또는 OpenAI-호환 endpoint), azure=Azure OpenAI Service 의 임베딩 deployment.",
+        "enum": [
+          "openai",
+          "azure"
+        ],
+        "default": "openai"
+      },
+      "embeddingModel": {
+        "type": "string",
+        "title": "[임베딩] 모델",
+        "description": "임베딩 모델명. openai→모델 ID (예: text-embedding-3-small), azure→deployment 이름.",
+        "default": ""
+      },
+      "embeddingEndpoint": {
+        "type": "string",
+        "title": "[임베딩] endpoint URL",
+        "description": "Azure 리소스의 루트 URL 만 입력 — 예: https://<resource>.openai.azure.com/ 또는 https://<resource>.cognitiveservices.azure.com/. 워커가 /openai/deployments/<model>/embeddings 경로를 SDK 로 합성합니다. full URL 을 붙여 넣어도 path/query 는 자동 제거. openai 일 때는 OpenAI-호환 base URL (비워두면 api.openai.com 기본).",
+        "format": "uri",
+        "default": ""
+      },
+      "embeddingApiVersion": {
+        "type": "string",
+        "title": "[임베딩] api-version (Azure)",
+        "description": "Azure embeddings api-version 쿼리값 (예: 2023-05-15). 비워두면 워커 디폴트를 사용하고, full embedding URL을 붙여 넣은 경우 query의 api-version을 자동 추출합니다.",
+        "default": ""
+      },
+      "embeddingApiKey": {
+        "type": "string",
+        "title": "[임베딩] API 키",
+        "description": "임베딩 API 호출에 사용하는 키. Azure OpenAI 의 경우 리소스의 API 키.",
+        "format": "secret",
+        "default": ""
+      },
+      "imageEmbeddingEnabled": {
+        "type": "boolean",
+        "title": "[캡션] 이미지 캡션 활성화",
+        "description": "PPTX/PDF/DOCX/XLSX 내부 이미지와 단독 .jpg/.jpeg/.png 를 캡션 모델로 텍스트화한 뒤 텍스트 임베딩 파이프라인에 포함합니다. (벡터 자체는 텍스트 임베딩이며, 이 토글은 이미지→캡션 변환 단계의 활성화 여부입니다.) cloud provider 사용 시 API 호출 비용이 발생합니다.",
+        "default": false
+      },
+      "imageCaptionProvider": {
+        "type": "string",
+        "title": "[캡션] provider",
+        "description": "이미지 캡셔닝에 사용할 provider. openai=OpenAI Vision API. azure-openai-chat=Azure OpenAI 의 vision-capable deployment (gpt-4o-mini, gpt-5.4-mini 등) — 사내 Azure 사용자 권장.",
+        "enum": [
+          "openai",
+          "azure-openai-chat",
+          "azure-openai-responses"
+        ],
+        "default": "openai"
+      },
+      "imageCaptionModel": {
+        "type": "string",
+        "title": "[캡션] 모델",
+        "description": "캡션 모델명. 빈 값이면 provider 별 디폴트 사용 (openai→gpt-4.1-mini, azure→provider 기본값).",
+        "default": ""
+      },
+      "imageCaptionEndpoint": {
+        "type": "string",
+        "title": "[캡션] endpoint URL",
+        "description": "Azure 리소스의 루트 URL 만 입력 — 예: https://<resource>.openai.azure.com/. 워커가 /openai/deployments/<model>/chat/completions 경로를 자동 합성. full URL 을 붙여 넣어도 path/query 는 자동 제거. openai 일 때는 OpenAI-호환 base URL (비워두면 api.openai.com 기본).",
+        "format": "uri",
+        "default": ""
+      },
+      "imageCaptionApiVersion": {
+        "type": "string",
+        "title": "[캡션] api-version (Azure)",
+        "description": "Azure OpenAI chat completions api-version 쿼리값 (예: 2024-08-01-preview). 비워두면 워커 디폴트 적용 (vision-capable chat 의 안정 버전). openai provider 에서는 무시.",
+        "default": ""
+      },
+      "imageCaptionApiKey": {
+        "type": "string",
+        "title": "[캡션] API 키",
+        "description": "이미지 캡셔닝 호출에 사용하는 키. Azure AI Vision 의 경우 리소스의 'Ocp-Apim-Subscription-Key' 값.",
+        "format": "secret",
+        "default": ""
+      },
+      "realtimeWatch": {
+        "type": "boolean",
+        "title": "실시간 파일 감시 활성화",
+        "description": "chokidar 파일 감시자를 사용해 등록 폴더의 변경을 실시간으로 감지합니다.",
+        "default": false
+      },
+      "scanFolders": {
+        "type": "array",
+        "title": "자동 스캔 폴더 목록",
+        "description": "플러그인 부팅 시 자동으로 인덱싱할 폴더 경로 목록 (hostRoot 기준 상대 경로 또는 절대 경로).",
+        "default": [],
+        "items": {
+          "type": "string"
+        }
+      },
+      "allowedUncRoots": {
+        "type": "array",
+        "title": "UNC 네트워크 공유 허용 목록",
+        "description": "기본적으로 UNC 경로(\\\\server\\share\\...)는 보안상 인덱싱이 차단됩니다. 회사 네트워크 드라이브나 클라우드 PC 사용자 홈처럼 신뢰할 수 있는 UNC prefix 만 여기 명시적으로 등록하세요. 예: \\\\nas01.example.com\\users$. 등록된 prefix 로 시작하는 경로만 차단이 해제되며, \\\\?\\ / \\\\.\\ 장치 namespace 는 등록 여부와 무관하게 항상 차단됩니다. 각 항목은 런타임 normalizeUncRoot 로 정규화/검증되며 형태가 부적절한 항목(blanket \\\\, server-only, NUL 포함, 4096 자 초과 등)은 silent 하게 drop 됩니다.",
+        "default": [],
+        "items": {
+          "type": "string"
+        }
+      },
+      "apiKeySource": {
+        "type": "string",
+        "title": "API 키 소스",
+        "description": "OpenAI 호출 (embedding + image captioning) 에 사용할 API 키 출처. 'host' = LVIS host 의 active LLM vendor 키 사용 (사용자 입력 불필요), 'plugin' = 본 plugin 의 own apiKey 필드 사용.",
+        "enum": [
+          "host",
+          "plugin"
+        ],
+        "default": "host"
+      }
+    }
+  },
+  "requires": {
+    "minAppVersion": "0.4.1"
+  },
+  "hostSecrets": {
+    "read": [
+      "llm.apiKey.openai",
+      "llm.apiKey.azure-foundry"
+    ]
+  },
+  "networkAccess": {
+    "allowedDomains": [
+      "api.openai.com",
+      "openai.azure.com",
+      "cognitiveservices.azure.com"
+    ],
+    "reasoning": "워커의 임베딩/비전 캡셔닝 egress. 이 정적 allow-list는 디폴트 OpenAI/Azure 호스트(api.openai.com, *.openai.azure.com, *.cognitiveservices.azure.com — dot-boundary suffix-match)만 커버한다. 단, 워커 코드는 사용자가 지정하는 임의의 OpenAI-호환 endpoint도 호출할 수 있다(이미지 캡셔너의 base_url, 임베딩의 --embedding-endpoint). 사용자-설정 커스텀 endpoint는 그 host가 위 정적 suffix와 일치하거나 호스트 egress union에 편입된 경우에만 도달 가능하며, suffix에 맞지 않는 비-Azure 커스텀 endpoint는 strict-union 하에서 hard-deny될 수 있다."
+  },
+  "emittedEvents": [
+    "index.document.updated",
+    "index.folders.changed",
+    "index.scan.progress",
+    "index.scan.completed",
+    "index.warning"
+  ]
+}
