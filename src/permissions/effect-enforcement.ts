@@ -19,19 +19,31 @@
  *     a single boolean read then `Reflect.apply(original, …)` — no gate, no SOT
  *     lookup, no extra `await`, the identical return value / args / `this` / throw.
  *
- *  2. ASYNC-ONLY gating. Awaiting a user modal is async, so ONLY chokepoints that
- *     are ALREADY async ({@link GATED_ASYNC_WRITE_PATHS}) are gated here. A
- *     SYNCHRONOUS mutating chokepoint is NEVER converted to async (a contract
- *     break) — it stays covered by the pre-exec tool-level ask. hostFetch is the
- *     lone VERB-derived chokepoint: its read/write class depends on a
- *     plugin-controlled arg VALUE, so it is gated INLINE in its host closure from
- *     the SAME single verb snapshot that pins the wire (never re-read here), via
- *     {@link gateMutatingEffect} directly — the generic wrapper skips it.
+ *  2. SOT-DERIVED, FAIL-CLOSED, ASYNC-ONLY gating. The gated set
+ *     ({@link GATED_EFFECT_PATHS}) is NOT hand-curated — it is derived MECHANICALLY
+ *     from the SOT as { write-classified ASYNC paths } minus the explicit,
+ *     documented {@link ENFORCEMENT_EXCLUSIONS}. A future async WRITE chokepoint
+ *     added to the SOT (and forced into the recorder by its completeness test) is
+ *     therefore AUTOMATICALLY gated here too — it can never be RECORDED as a write
+ *     yet silently ship UN-enforced. The enforcement completeness test asserts the
+ *     gated set and the exclusions PARTITION every write-classified path, so a new
+ *     write MUST be consciously gated or excluded (fail-closed). Awaiting a modal
+ *     is async, so a SYNCHRONOUS mutating chokepoint (the lone one is
+ *     `registerKeywords`) is NEVER converted to async (a contract break) — it is an
+ *     explicit exclusion, still WRITE-classified, so the pre-exec tool-level ask is
+ *     retained. hostFetch is the lone VERB-derived chokepoint: its read/write class
+ *     depends on a plugin-controlled arg VALUE, so it is gated INLINE in its host
+ *     closure from the SAME single verb snapshot that pins the wire (never re-read
+ *     here), via {@link gateMutatingEffect} directly — an explicit exclusion of the
+ *     generic wrapper.
  *
- *  3. HEADLESS = NO modal. In a headless/routine invocation (no interactive
- *     approver) the gate must NOT call `requestAndWait`. It fails CLOSED (throws),
- *     never silently allows. Headless mutations are already gated by the host's
- *     headless lane; the effect-gate engages interactively only in the FOREGROUND.
+ *  3. HEADLESS = NO modal, EVALUATED BEFORE ANY GRANT. In a headless/routine
+ *     invocation (no interactive approver) the gate must NOT call `requestAndWait`.
+ *     It fails CLOSED (throws), never silently allows — and the headless check runs
+ *     BEFORE the remembered-grant short-circuit, so a grant blessed in the
+ *     FOREGROUND can never auto-allow the same descriptor in a later UNATTENDED
+ *     headless run. Headless mutations are already gated by the host's headless
+ *     lane; the effect-gate engages interactively only in the FOREGROUND.
  *
  * ── Composition ────────────────────────────────────────────────────────────────
  * Enforcement is applied as the OUTER layer over the recorder
@@ -61,62 +73,92 @@ import type { ApprovalGate, ApprovalChoice } from "./approval-gate.js";
 import {
   CHOKEPOINT_EFFECT,
   HOSTAPI_EFFECT_BY_PATH,
+  writeClassifiedPaths,
   type Effect,
   type StaticChokepointKind,
 } from "./effect-kind.js";
-import { isPlainNamespace } from "./hostapi-effect-recorder.js";
+import { isPlainNamespace, INSTRUMENTED } from "./hostapi-effect-recorder.js";
 
 /**
- * The host-mediated mutating chokepoint method PATHs that are ALREADY async and
- * are therefore gated by the generic enforcement wrapper. Curated to the
- * cross-boundary egress / persistence / auth-session / worker / overlay mutations.
- * Membership rationale per chokepoint:
+ * EXPLICIT, DOCUMENTED enforcement exclusions — paths that the SOT classifies as
+ * WRITE but that are DELIBERATELY not gated by the generic enforcement wrapper,
+ * each with a one-line reason. A path is here for exactly one of two structural
+ * reasons: it is SYNCHRONOUS (an await-based gate would break its contract), or it
+ * is gated elsewhere / by a different mechanism.
  *
- *   ── Gated here (async writes) ──
- *   storage.write / storage.writeJson / storage.rm / storage.mkdir
- *                              — plugin persistence mutations (Promise-returning).
- *   openAuthWindow             — persists auth cookies/session.
- *   openAuthPartitionViewer    — refreshes/persists partition cookies (silent SSO).
- *   clearAuthPartition         — destructively wipes a session partition.
- *   callLlm                    — body-bearing external LLM egress.
- *   spawnWorker                — spawns a host-mediated worker process.
- *   triggerConversation        — stages an overlay prompt into the host UI.
- *   agentApproval.request      — registers an issuer + creates a pending gate entry.
- *
- *   ── NOT gated here (covered by the pre-exec tool-level ask) ──
- *   hostFetch                  — async, but VERB-derived: gated INLINE in its host
- *                                closure from the single verb snapshot (see file
- *                                header) so the gate's read/write class can never
- *                                diverge from the wire. The generic wrapper skips it.
- *   registerKeywords           — SYNCHRONOUS registry mutation (returns void);
- *                                cannot await a modal without a contract break.
- *   config.set                 — async, but mutates the plugin's OWN config
- *                                namespace and already triggers a guarded reload;
- *                                left to the pre-exec ask to keep this layer's
- *                                surface to the cross-boundary mutations.
- *   openExternalUrl            — async, but already routed + audited through the
- *                                host link policy; left to the pre-exec ask.
- *   agentApproval.respond      — async, but it RESOLVES a pending approval; gating
- *                                the approval machinery with itself is circular.
- *
- * Every gated path is verified async by construction (see PluginHostApi); the
- * wrapper additionally derives the effect from the SOT and only gates a `write`,
- * so a future SOT drift that reclassified one of these to `read` fails SAFE
- * (pass-through, never a spurious read prompt).
+ * Later-stage enforcement basis (the seam the binding design must keep sound):
+ * the later stage that relaxes the pre-exec tool-level ask does so ONLY for tools
+ * the effect-boundary observes as READ (no mutating effect). EVERY excluded path
+ * below is still WRITE-classified in the SOT, so a tool that calls it PRODUCES a
+ * recorded write effect → that tool is NEVER classified read → the relaxation
+ * stage does NOT relax its pre-exec ask → the excluded mutation stays gated by the
+ * pre-exec tool-level ask. Excluded-but-recorded writes therefore keep their
+ * pre-exec gate precisely because they can never be classified read. This is why
+ * an exclusion here is NOT a fail-open hole.
  */
-export const GATED_ASYNC_WRITE_PATHS: ReadonlySet<string> = new Set([
-  "storage.write",
-  "storage.writeJson",
-  "storage.rm",
-  "storage.mkdir",
-  "openAuthWindow",
-  "openAuthPartitionViewer",
-  "clearAuthPartition",
-  "callLlm",
-  "spawnWorker",
-  "triggerConversation",
-  "agentApproval.request",
+export const ENFORCEMENT_EXCLUSIONS: ReadonlyMap<string, string> = new Map([
+  // SYNCHRONOUS registry mutation (returns void) — an await-based modal is a
+  // contract break, so it is never gated here. It is WRITE-classified, so any
+  // tool that reaches it records a write → the read-relaxation stage keeps that
+  // tool's pre-exec ask (it can never be classified read). Reachability finding:
+  // in every 1st-party plugin it is called only during plugin start()/activation
+  // (createPlugin/start), OUTSIDE any runWithEffectGateContext scope, so it is
+  // not a mutation during a gated invocation; even if a future tool handler
+  // called it, the recorded write keeps its pre-exec ask.
+  ["registerKeywords", "SYNC registry mutation — cannot await a modal; WRITE-classified so the read-relaxation stage keeps its pre-exec ask"],
+  // Mutates the plugin's OWN config namespace + already triggers a guarded
+  // reload. WRITE-classified → a tool that calls it records a write → the
+  // read-relaxation stage keeps its pre-exec ask.
+  ["config.set", "own-config namespace mutation + guarded reload; WRITE-classified so the read-relaxation stage keeps its pre-exec ask"],
+  // Already routed + audited through the host link policy. WRITE-classified →
+  // the read-relaxation stage keeps its pre-exec ask.
+  ["openExternalUrl", "already routed + audited via the host link policy; WRITE-classified so the read-relaxation stage keeps its pre-exec ask"],
+  // RESOLVES a pending approval — gating the approval machinery with itself is
+  // circular. WRITE-classified → the read-relaxation stage keeps its pre-exec ask.
+  ["agentApproval.respond", "resolves the approval machinery (gating it with itself is circular); WRITE-classified so the read-relaxation stage keeps its pre-exec ask"],
+  // The lone VERB-derived egress — gated INLINE in its host closure from the
+  // single verb snapshot that also self-records + pins the wire (so the gate's
+  // read/write class can never diverge from what is sent). The generic wrapper
+  // skips it precisely because it self-gates.
+  ["hostFetch", "verb-derived egress — gated INLINE in its closure from the single verb snapshot; the generic wrapper skips it"],
 ]);
+
+/**
+ * The effect-gated method PATHs — MECHANICALLY derived from the SOT, NOT a
+ * hand-curated list, so the set is FAIL-CLOSED: a future async WRITE chokepoint
+ * added to {@link HOSTAPI_EFFECT_BY_PATH} (and forced into the recorder by its
+ * completeness test) is AUTOMATICALLY gated here too — it can never be RECORDED as
+ * a write yet silently ship UN-enforced (the exact "manual enumeration leaks"
+ * defect the recorder spent rounds eliminating). The derivation is:
+ *
+ *     GATED_EFFECT_PATHS = { p ∈ writeClassifiedPaths()
+ *                            | p ∉ ENFORCEMENT_EXCLUSIONS ∧ HOSTAPI_EFFECT_BY_PATH[p].async }
+ *
+ * i.e. every WRITE-classified path that is ALREADY async and is NOT an explicit
+ * exclusion. The await-based wrapper can only gate an already-async method, so the
+ * `async` filter is load-bearing — a write-classified path that is neither async
+ * nor excluded (a sync write) is NOT silently dropped: it falls into NEITHER
+ * GATED_EFFECT_PATHS nor ENFORCEMENT_EXCLUSIONS, which the enforcement completeness
+ * test REJECTS (it asserts the two sets PARTITION writeClassifiedPaths()). That
+ * inverts the default to fail-closed: a new write chokepoint MUST be consciously
+ * gated (async) or excluded; it can never silently ship ungated.
+ *
+ * The wrapper additionally re-derives the effect from the SOT per call and only
+ * gates a `write`, so a future SOT drift reclassifying a member to `read` fails
+ * SAFE (pass-through, never a spurious read prompt).
+ */
+export const GATED_EFFECT_PATHS: ReadonlySet<string> = (() => {
+  const gated = new Set<string>();
+  for (const path of writeClassifiedPaths()) {
+    if (ENFORCEMENT_EXCLUSIONS.has(path)) continue;
+    // Only an ALREADY-async method can be gated by the await-based wrapper. A
+    // write-classified, non-excluded, NON-async path is a design gap the
+    // completeness test rejects — it is left out of the gated set here (it is
+    // also absent from the exclusions), so the partition assertion fails CI.
+    if (HOSTAPI_EFFECT_BY_PATH[path]?.async) gated.add(path);
+  }
+  return gated;
+})();
 
 /**
  * Per-invocation enforcement context, bound by the executor around `tool.execute`
@@ -171,9 +213,15 @@ export function currentEffectGateContext(): EffectGateContext | undefined {
  */
 const descriptorGrants = new Map<string, ApprovalChoice>();
 
-/** Stable, non-widening grant key for one effect descriptor. */
+/**
+ * Stable, non-widening grant key for one effect descriptor. The three components
+ * are JSON-encoded as a tuple so each is unambiguously escaped — a pluginId,
+ * methodPath, or target that itself contains the delimiter (or a quote) can never
+ * collide two distinct descriptors onto one key (which would widen a grant). A
+ * missing target is encoded as `null`, distinct from an empty-string target.
+ */
 function descriptorKey(pluginId: string, methodPath: string, target: string | undefined): string {
-  return `${pluginId} ${methodPath} ${target ?? ""}`;
+  return JSON.stringify([pluginId, methodPath, target ?? null]);
 }
 
 /** Thrown by the effect-gate when a mutating effect is denied; surfaced as a tool error. */
@@ -216,9 +264,13 @@ export interface EffectEnforcementDeps {
  *   2. effect !== "write"       → return (reads never prompt).
  *   3. no gate context bound    → return (a boot-time / out-of-invocation hostApi
  *                                 call is not a plugin-tool effect — nothing to gate).
- *   4. existing grant           → honour the remembered decision (allow → return;
- *                                 deny-always → throw) without a modal.
- *   5. headless                 → throw (fail-closed; a modal is impossible).
+ *   4. headless                 → throw (fail-closed; a modal is impossible). This is
+ *                                 evaluated BEFORE any grant short-circuit so a grant
+ *                                 blessed in the FOREGROUND can NEVER auto-allow the
+ *                                 same descriptor in a later UNATTENDED headless run
+ *                                 (headless never honours a foreground-obtained grant).
+ *   5. existing grant           → honour the remembered decision (allow → return;
+ *                                 deny-always → throw) without a modal. FOREGROUND only.
  *   6. foreground               → await `requestAndWait`; record the grant; allow or throw.
  */
 export async function gateMutatingEffect(params: {
@@ -237,10 +289,21 @@ export async function gateMutatingEffect(params: {
   // effect to gate and no approver — the pre-exec ask governs only tool invocations.
   if (!ctx) return;
 
+  // Headless lane: a modal is impossible — fail CLOSED (never silently allow).
+  // EVALUATED BEFORE the grant short-circuits below: a grant (allow-session /
+  // allow-always) obtained while the user WATCHED in the foreground must NOT
+  // later auto-allow the same descriptor in an unattended headless/routine run
+  // (CLAUDE.md: "Headless/routine 실행은 allow rule/auto mode 로 write/shell/network 를
+  // 우회하지 않는다"). In a headless context the gate ALWAYS throws, regardless of any
+  // prior foreground grant. Headless mutations remain gated by the pre-exec
+  // headless lane.
+  if (ctx.headless) {
+    throw new EffectBoundaryDeniedError(params.pluginId, params.methodPath, params.target, "headless");
+  }
+
   const key = descriptorKey(params.pluginId, params.methodPath, params.target);
 
-  // Honour a prior explicit decision for this exact descriptor (dedup) — this is a
-  // remembered user choice, not a silent allow, so it is honoured even headless.
+  // Honour a prior explicit FOREGROUND decision for this exact descriptor (dedup).
   if (ctx.onceGrants.has(key)) return;
   const remembered = descriptorGrants.get(key);
   if (remembered) {
@@ -248,11 +311,6 @@ export async function gateMutatingEffect(params: {
       throw new EffectBoundaryDeniedError(params.pluginId, params.methodPath, params.target, "denied");
     }
     return; // allow-session / allow-always
-  }
-
-  // Headless lane: a modal is impossible — fail CLOSED (never silently allow).
-  if (ctx.headless) {
-    throw new EffectBoundaryDeniedError(params.pluginId, params.methodPath, params.target, "headless");
   }
 
   // Foreground: ask at the effect boundary and await the user decision. The gate
@@ -266,10 +324,15 @@ export async function gateMutatingEffect(params: {
     // `meta` keeps the sandbox-capability row out of this non-execution modal.
     toolCategory: "meta",
     // NON-SECRET descriptor only (host-owned effect class + forensic target).
+    // When there is NO target the grant is METHOD-WIDE (any call to this method,
+    // e.g. callLlm / spawnWorker, that is allow-always'd). The `methodWide`
+    // breadth marker surfaces that to the renderer so the later effect-modal card
+    // can show "this allows the method for ALL targets" (target-scoped requests
+    // omit it). The marker carries no secret.
     args: {
       effect: params.effect,
       methodPath: params.methodPath,
-      ...(params.target !== undefined ? { target: params.target } : {}),
+      ...(params.target !== undefined ? { target: params.target } : { methodWide: true }),
     },
     reason: `Plugin "${params.pluginId}" is about to perform a host-mediated ${params.effect}: ${where}`,
     source: "plugin",
@@ -301,13 +364,20 @@ export async function gateMutatingEffect(params: {
 const ENFORCED = Symbol("lvis.hostApiEffectEnforced");
 
 /**
- * Wrap `target` so every gated async-write leaf (see {@link GATED_ASYNC_WRITE_PATHS})
+ * Wrap `target` so every gated async-write leaf (see {@link GATED_EFFECT_PATHS})
  * awaits {@link gateMutatingEffect} before delegating, while EVERY other leaf —
  * reads, sync methods, hostFetch, nested namespaces' non-gated methods — passes
  * through byte-for-byte. Apply as the OUTER layer over the recorder
  * (`enforceMutatingEffects(instrumentEffectsByPath(raw), deps)`); recursion mirrors
  * the recorder's traversal (own-enumerable keys, plain namespaces only) so the two
- * layers agree on the surface they cover. Idempotent via {@link ENFORCED}.
+ * layers agree on the surface they cover.
+ *
+ * Idempotent two ways: (a) via {@link ENFORCED}, an already-enforced object is
+ * returned untouched; (b) the recorder's non-enumerable {@link INSTRUMENTED}
+ * symbol is PROPAGATED onto the fresh enforced wrapper, so the enforced output is
+ * STILL recognised as instrumented and a later `instrumentEffectsByPath` over it
+ * is a no-op (no double-wrap / double-record). Without this, the enforced object —
+ * a fresh literal — would drop the recorder's idempotence symbol.
  *
  * @param target the (already recorder-instrumented) hostApi object or a namespace.
  * @param deps   pluginId + approvalGate + the live flag read.
@@ -325,7 +395,7 @@ export function enforceMutatingEffects<T extends object>(
     const value = (target as Record<string, unknown>)[key];
     const path = prefix ? `${prefix}.${key}` : key;
 
-    if (typeof value === "function" && GATED_ASYNC_WRITE_PATHS.has(path)) {
+    if (typeof value === "function" && GATED_EFFECT_PATHS.has(path)) {
       const original = value as (...callArgs: unknown[]) => unknown;
       wrapped[key] = function enforced(this: unknown, ...callArgs: unknown[]): unknown {
         // FLAG OFF — DIRECT pass-through: one boolean read then the identical
@@ -344,11 +414,22 @@ export function enforceMutatingEffects<T extends object>(
           const effect: Effect = spec
             ? CHOKEPOINT_EFFECT[spec.kind as StaticChokepointKind] ?? "write"
             : "write";
-          // Forensic target is best-effort + NON-SECRET, extracted AFTER the
-          // effect is fixed; a throwing getter costs only the descriptor.
-          let descriptorTarget: string | undefined;
+          // SNAPSHOT the forensic target to a primitive EXACTLY ONCE here (same
+          // TOCTOU class as the hostFetch verb fix). Object-field targets
+          // (triggerConversation.source, agentApproval.request.scope, openAuth*
+          // opts.url) are re-readable plugin getters; `targetFromArgs` invokes the
+          // getter a SINGLE time and the resulting `targetSnapshot` STRING is the
+          // sole value passed to the gate, so the descriptor SHOWN in the modal and
+          // the (pluginId, methodPath, target) GRANT KEY are pinned to ONE read and
+          // can never diverge from each other. (The real impl re-reads its own args
+          // independently, but the host-owned SOT already fixed the effect to
+          // `write` above, so a stateful getter can NOT flip write→read; the only
+          // residual is the forensic descriptor string, which this snapshot pins.)
+          // Best-effort + NON-SECRET, read AFTER the effect is fixed: a throwing
+          // getter costs only the descriptor, never the gate.
+          let targetSnapshot: string | undefined;
           try {
-            descriptorTarget = spec?.targetFromArgs?.(callArgs);
+            targetSnapshot = spec?.targetFromArgs?.(callArgs);
           } catch {
             /* best-effort target — the gate still fires on the SOT write */
           }
@@ -356,7 +437,7 @@ export function enforceMutatingEffects<T extends object>(
             pluginId: deps.pluginId,
             methodPath: path,
             effect,
-            target: descriptorTarget,
+            target: targetSnapshot,
             approvalGate: deps.approvalGate,
             flagEnabled: deps.flagEnabled,
           });
@@ -374,6 +455,14 @@ export function enforceMutatingEffects<T extends object>(
     }
   }
   Object.defineProperty(wrapped, ENFORCED, { value: true, enumerable: false });
+  // PROPAGATE the recorder's idempotence symbol onto the fresh enforced object so
+  // an enforced (and thus already-recorder-instrumented) object is still seen as
+  // INSTRUMENTED — a later `instrumentEffectsByPath` over it stays a no-op and
+  // can never double-wrap/double-record. Mirrors the recorder stamping it on its
+  // own wrapper; copied per-level so nested namespaces keep the guard too.
+  if ((target as Record<symbol, unknown>)[INSTRUMENTED]) {
+    Object.defineProperty(wrapped, INSTRUMENTED, { value: true, enumerable: false });
+  }
   return wrapped as T;
 }
 
