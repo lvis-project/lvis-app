@@ -2209,14 +2209,45 @@ export class ToolExecutor {
       //     byte-for-byte today's full pre-exec ask. The condition is the FIRST
       //     read, so the relaxed path is reachable only with the flag ON.
       //
-      // HONEST RESIDUAL — this gates LLM-driven plugin actions over HOST-MEDIATED
-      // effects only. A plugin that mutates OFF the host API (direct `node:fs`,
-      // a bare `fetch`, or a detached async frame that escapes the tool-execute
-      // ALS scope) records NO effect → the effect-boundary sees a read → it runs
-      // with no gate. That residual is closed ONLY by the OS sandbox (ASRT) being
-      // default-ON (a separate track). It is NOT a regression: a first-party
-      // plugin already executes arbitrary in-process code today — this is an
-      // LLM-action gate over mediated effects, not an in-process jail.
+      // PERM-HOOK PRESERVATION — the relaxation flips the pre-exec ASK to `allow`
+      // BEFORE the `decision === "ask"` block below, which is the ONLY callsite of
+      // the operator's `perm-*.sh` (PermissionRequest) script hook. Without firing
+      // it here, an operator deny policy encoded in a `perm-*.sh` hook would be
+      // SILENTLY dropped under the flag for exactly the relaxed plugin calls. So on
+      // the relaxed path we run the SAME perm hook FIRST: a perm-hook DENY blocks
+      // the tool FAIL-CLOSED (no relaxation), identical to the ask lane's perm-hook
+      // deny handling below; a perm-hook allow / no-opinion proceeds with the
+      // relaxation (no modal), preserving the clean read-relaxation UX. (The
+      // always-on `pre-*.sh` hook still fires downstream regardless — but the
+      // perm-hook is a DISTINCT, separately-registrable deny surface, so it is
+      // restored here under the flag.) Done inside the relaxation branch so it runs
+      // only for the narrowed plugin/foreground/ask/layer≥3 set; for every other
+      // tool the perm hook still runs in its original ask-lane callsite.
+      //
+      // HONEST RESIDUAL — what this gate does NOT contain (NOT papered over):
+      //   1. OFF-hostApi mutation. This gates LLM-driven plugin actions over
+      //      HOST-MEDIATED effects only. A plugin that mutates OFF the host API
+      //      (direct `node:fs`, a bare `fetch`, or a detached async frame that
+      //      escapes the tool-execute ALS scope) records NO effect → the
+      //      effect-boundary sees a read → it runs with no gate. Closed ONLY by the
+      //      OS sandbox (ASRT) being default-ON (a separate track). NOT a
+      //      regression: a first-party plugin already executes arbitrary in-process
+      //      code today — this is an LLM-action gate over mediated effects, not an
+      //      in-process jail.
+      //   2. The mediated SYNC / excluded writes (ENFORCEMENT_EXCLUSIONS:
+      //      registerKeywords, config.set, openExternalUrl, agentApproval.respond)
+      //      are NOT effect-gated (sync / circular / already-routed). They are NOT
+      //      a relaxation hole, though: each is WRITE-classified, so any tool that
+      //      calls them is itself classified `write` → its pre-exec decision is a
+      //      `write` ask that is never read-relaxed (this branch only fires for the
+      //      effect-observed read category) → its pre-exec ask STAYS.
+      //   3. READ-SIDE exfiltration. Skipping the foreground reviewer for plugin
+      //      READ tools means a plugin read of sensitive data no longer gets a
+      //      pre-exec review. Exfiltration of what it read is contained ONLY by the
+      //      gated `hostFetch` verb chokepoint (Tier A deny-by-default network
+      //      allow-list) + the OS sandbox — NOT by a pre-exec ask. This is the UX
+      //      cost the flag deliberately buys; documented so the default-flip
+      //      decision weighs it.
       if (
         this.hostClassifiesRiskProvider() &&
         source === "plugin" &&
@@ -2225,6 +2256,27 @@ export class ToolExecutor {
         permissionResult.layer >= 3 &&
         permissionResult.forceModal !== true
       ) {
+        const relaxedPermHook = await this.runScriptHook(
+          "perm",
+          toolUse.name,
+          source,
+          invocationCategory,
+          finalInput,
+          sessionId,
+          invocationPermissionContext,
+          tool.mcpServerId,
+          tool.pluginId,
+        );
+        if (relaxedPermHook.decision === "deny") {
+          // Operator perm-hook DENY wins over the relaxation — fail closed exactly
+          // as the ask lane does on a perm-hook deny.
+          const msg = t("be_executor.hookPermissionBlock", { reason: relaxedPermHook.reason });
+          const durationMs = Date.now() - startTime;
+          emitToolStart(callbacks, toolUse.name, finalInput, meta);
+          callbacks?.onToolEnd?.(toolUse.name, msg, true, meta, undefined, durationMs);
+          await this.auditToolCall(sessionId, toolUse.name, source, trust, finalInput, msg, true, startTime, { ...permissionResult, decision: "deny", reason: relaxedPermHook.reason }, Infinity, invocationPermissionContext, invocationCategory, executionCwd, undefined, undefined, hookChainFromDispatch("perm", relaxedPermHook));
+          return { tool_use_id: toolUse.id, content: msg, is_error: true, durationMs };
+        }
         permissionResult = {
           decision: "allow",
           reason:

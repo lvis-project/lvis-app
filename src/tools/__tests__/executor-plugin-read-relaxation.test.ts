@@ -16,6 +16,11 @@
  *   • FOREGROUND ONLY → a headless plugin tool keeps the existing headless lane.
  *   • DENY STILL WINS → a standing deny rule / a prior user deny-always still
  *     blocks under relaxation (it is a `deny`, never an `ask`).
+ *   • PERM-HOOK PRESERVED → an operator `perm-*.sh` deny still fires on the
+ *     relaxed path and blocks the tool fail-closed (the relaxation runs the perm
+ *     hook BEFORE finalizing the allow).
+ *   • LAYER ≤ 2 HARD GATES NOT RELAXED → global strict mode (layer 2) still shows
+ *     the pre-exec ask (the relaxation floor is layer ≥ 3).
  */
 import { describe, it, expect, beforeEach } from "vitest";
 import { mkdtempSync } from "node:fs";
@@ -155,6 +160,7 @@ function makeExecutor(
   gate: ApprovalGate,
   flagEnabled: () => boolean,
   permMgr = new PermissionManager("/tmp/nonexistent-permissions.json"),
+  scriptHookManager?: import("../../hooks/script-hook-manager.js").ScriptHookManager,
 ): { executor: ToolExecutor; permMgr: PermissionManager } {
   const registry = new ToolRegistry();
   registry.register(tool);
@@ -164,11 +170,29 @@ function makeExecutor(
     permMgr,
     undefined,
     gate,
-    undefined,
+    scriptHookManager,
     undefined,
     flagEnabled,
   );
   return { executor, permMgr };
+}
+
+/**
+ * A minimal ScriptHookManager stub whose PermissionRequest (`perm-*.sh`) dispatch
+ * always DENIES — models an operator deny policy encoded in a `perm-*.sh` hook.
+ * Only `runPermissionRequest` is stubbed: the relaxed-path perm-hook preservation
+ * fires it BEFORE finalizing the allow and (on deny) returns the tool error before
+ * any `pre`/`post` dispatch, so no other method is reached.
+ */
+function makeDenyPermHookManager(
+  calls: { permRan: boolean },
+): import("../../hooks/script-hook-manager.js").ScriptHookManager {
+  return {
+    runPermissionRequest: async () => {
+      calls.permRan = true;
+      return { decision: "deny" as const, reason: "operator perm-*.sh deny", results: [] };
+    },
+  } as unknown as import("../../hooks/script-hook-manager.js").ScriptHookManager;
 }
 
 beforeEach(() => {
@@ -350,6 +374,64 @@ describe("plugin read-relaxation — explicit deny still wins", () => {
 
     expect(spy.ran).toBe(false);
     expect(requests).toHaveLength(0);
+    expect(result.is_error).toBe(true);
+  });
+});
+
+describe("plugin read-relaxation — operator perm-*.sh deny hook is preserved on the relaxed path", () => {
+  it("flag ON + foreground + plugin + a perm hook that DENIES → tool is BLOCKED (not relaxed-allowed), no modal", async () => {
+    const spy = { ran: false };
+    // allow-once so that if the perm hook were SKIPPED and the (non-existent)
+    // pre-exec modal somehow fired, the tool would run — making a regression
+    // visible. With the fix the perm hook denies first and the tool never runs.
+    const { gate, requests } = makeGate("allow-once");
+    const calls = { permRan: false };
+    const { executor } = makeExecutor(
+      makePluginNoEffectTool(spy),
+      gate,
+      () => true,
+      new PermissionManager("/tmp/nonexistent-permissions.json"),
+      makeDenyPermHookManager(calls),
+    );
+
+    const [result] = await executor.executeAll(
+      [{ id: "t1", name: "plugin_noeffect", input: {} }],
+      { sessionId: "s", permissionContext: userPermissionContext() },
+    );
+
+    // The perm hook ran on the relaxed path and DENIED → fail-closed: tool blocked,
+    // tool body never executed, and no approval modal was shown (the relaxation
+    // path shows none; the perm-hook deny short-circuits before execution).
+    expect(calls.permRan).toBe(true);
+    expect(spy.ran).toBe(false);
+    expect(requests).toHaveLength(0);
+    expect(result.is_error).toBe(true);
+  });
+});
+
+describe("plugin read-relaxation — layer ≤ 2 hard gates are NOT relaxed", () => {
+  it("flag ON + foreground + plugin + global strict mode (layer 2) → the pre-exec ask is STILL shown, tool NOT relaxed", async () => {
+    const spy = { ran: false };
+    const { gate, requests } = makeGate("deny-once");
+    const permMgr = new PermissionManager("/tmp/nonexistent-permissions.json");
+    // Global strict mode is a layer-2 hard gate: checkDetailed returns
+    // { decision: "ask", layer: 2 }. The relaxation floor is layer ≥ 3, so the
+    // ask is NOT relaxed — the full pre-exec modal is shown exactly as today.
+    // Guards against a future checkDetailed layer renumber silently widening the
+    // relaxation past strict mode.
+    permMgr.setMode("strict");
+    const { executor } = makeExecutor(makePluginNoEffectTool(spy), gate, () => true, permMgr);
+
+    const [result] = await executor.executeAll(
+      [{ id: "t1", name: "plugin_noeffect", input: {} }],
+      { sessionId: "s", permissionContext: userPermissionContext() },
+    );
+
+    // The layer-2 strict ask survived the relaxation: the pre-exec tool modal
+    // (category "tool") fired and, on deny-once, the tool never executed.
+    expect(requests).toHaveLength(1);
+    expect(requests[0]?.category).toBe("tool");
+    expect(spy.ran).toBe(false);
     expect(result.is_error).toBe(true);
   });
 });
