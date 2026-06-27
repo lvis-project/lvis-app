@@ -60,6 +60,7 @@ import { RuleBasedRiskClassifier, maxVerdict } from "../permissions/reviewer/ris
 import { inspectHostRisk } from "../permissions/reviewer/host-risk-inspector.js";
 import { emitRiskShadowLog, emitEffectShadowLog } from "../permissions/reviewer/risk-shadow-log.js";
 import { createEffectLedger, runWithEffectLedger, currentEffectLedger, type EffectLedger } from "../permissions/effect-ledger.js";
+import { runWithEffectGateContext } from "../permissions/effect-enforcement.js";
 import { CHOKEPOINT_EFFECT } from "../permissions/effect-kind.js";
 import { resolveReviewerSandboxCapability } from "../permissions/sandbox-capability.js";
 // Store B — exact-tuple approval memory (args-scoped, session+persistent).
@@ -2610,7 +2611,23 @@ export class ToolExecutor {
         // AsyncLocalStorage propagates through the loopback transport (the same
         // path `currentInvocationOrigin` relies on); a re-entrant callTool opens
         // its own ledger scope, so nested effects never double-count here.
-        return runWithEffectLedger(effectLedger, () => tool.execute(finalInput, ctx));
+        //
+        // Effect-boundary ENFORCEMENT — bind the per-invocation gate context
+        // alongside the ledger so a host-classified WRITE reached during execute
+        // can ask AT THE EFFECT (foreground) or fail closed (headless).
+        // `headless` is the SAME signal that drives the pre-exec headless lane; the
+        // fresh `onceGrants` set dedups N writes to one target within this call.
+        // When `hostClassifiesRisk` is OFF (default) the gate is a pass-through,
+        // so binding the context here is inert.
+        return runWithEffectLedger(effectLedger, () =>
+          runWithEffectGateContext(
+            {
+              headless: invocationPermissionContext.headless === true,
+              toolName: toolUse.name,
+            },
+            () => tool.execute(finalInput, ctx),
+          ),
+        );
       },
       effectiveCeilingMs,
       abortSignal,
