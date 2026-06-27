@@ -1371,6 +1371,26 @@ export async function bootstrap(
       (settingsService.get("features")?.osToolSandbox ?? false) ||
       process.env["LVIS_SANDBOX_ENABLED"] === "1";
 
+    // Flag-interlock warning (no hard interlock — the flags stay independent).
+    // `hostClassifiesRisk` removes the foreground per-call human approval for
+    // plugin tools and gates them at the host-mediated effect boundary instead.
+    // That boundary does NOT observe off-hostApi mutations (direct node:fs / bare
+    // fetch / detached async frame) — only the OS sandbox (osToolSandbox / ASRT)
+    // contains that residual. Enabling host-classify ALONE (sandbox OFF) is
+    // therefore strictly weaker for that residual than today's pre-exec ask (which
+    // at least lets the user deny the call). Warn LOUDLY once at boot so the
+    // operator can make the default-flip decision with eyes open; we deliberately
+    // do NOT block — the flags remain independently togglable.
+    if ((settingsService.get("features")?.hostClassifiesRisk ?? false) && !sandboxOptIn) {
+      log.warn(
+        "boot: hostClassifiesRisk is ON but the OS tool sandbox (osToolSandbox / LVIS_SANDBOX_ENABLED) is OFF — " +
+          "effect-boundary classification does NOT contain off-hostApi mutations (direct node:fs, bare fetch, " +
+          "detached async frames) without the OS sandbox. For that residual, host-classify WITHOUT the sandbox is " +
+          "weaker than the pre-exec ask it replaces. Enable osToolSandbox to contain it, or keep the pre-exec ask " +
+          "(turn hostClassifiesRisk off) until the sandbox is on.",
+      );
+    }
+
     if (sandboxOptIn) {
       const deps = await checkAsrtDependencies();
       if (deps.errors.length > 0) {
