@@ -2195,9 +2195,9 @@ export class ToolExecutor {
       //     ask (this branch is skipped for them).
       //   • FOREGROUND ONLY (`headless !== true`). In a headless/routine lane a
       //     plugin write would HARD-THROW at the effect-gate (which fails closed
-      //     with no approver) instead of taking the Phase-0 deferred/headless
-      //     lane, breaking legitimate routine writes — so headless keeps the
-      //     pre-exec lane untouched.
+      //     with no approver) instead of taking the host's deferred/headless
+      //     approval lane, breaking legitimate routine writes — so headless
+      //     keeps the pre-exec lane untouched.
       //   • ASK ONLY, layer ≥ 3, not `forceModal`. A `deny` (standing deny rule
       //     or a persisted `deny-always`) is layer 1 and never an ask, so it is
       //     untouched — explicit user deny still wins. The layer ≥ 3 floor
