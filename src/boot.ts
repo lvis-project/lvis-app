@@ -134,10 +134,13 @@ import {
   createCallLlmForPlugin,
 } from "./boot/conversation.js";
 import { ToolExecutor } from "./tools/executor.js";
-// Static import is safe: asrt-sandbox.ts is side-effect-free at import time (it
-// only dynamically imports the ESM-only ASRT package inside functions). Used to
-// couple the foreground plugin read-relaxation to the sandbox being ACTIVE.
-import { isAsrtSandboxActive } from "./permissions/asrt-sandbox.js";
+// Confines-aware reader for the foreground plugin read-relaxation coupling. It
+// reads the published active-sandbox capability snapshot (no asrt-sandbox.js
+// import) and reports whether the active sandbox FILESYSTEM-CONTAINS the host
+// (`confines.filesystem === true`) — the same capability + truth the reviewer
+// lane's sandboxRelaxesCategory consults. A bare "sandbox active" boolean is
+// insufficient: the Windows srt-win sandbox is network-only.
+import { isActiveSandboxFilesystemContained } from "./permissions/sandbox-capability.js";
 import type { PluginToolInvocationContext } from "./plugins/runtime.js";
 import {
   currentInvocationOrigin,
@@ -902,12 +905,15 @@ export async function bootstrap(
     scriptHookManager,
     bootAuditLogger,
     () => settingsService.get("features")?.hostClassifiesRisk ?? false,
-    // Couple the foreground plugin read-relaxation to the OS sandbox being
-    // ACTIVE (evaluated per tool-call, after boot's sandbox gate has run). The
-    // relaxation relies on the effect-boundary, which only contains off-hostApi
-    // mutations when the sandbox is active; a degraded/sandbox-off host returns
-    // false here so the pre-exec ask stands (see ToolExecutor.sandboxActiveProvider).
-    isAsrtSandboxActive,
+    // Couple the foreground plugin read-relaxation to the active OS sandbox
+    // FILESYSTEM-CONTAINING the host (evaluated per tool-call, after boot's
+    // sandbox gate has run + published the active capability). The relaxation
+    // relies on the effect-boundary, which only contains the off-hostApi
+    // `node:fs` WRITE residual when the sandbox filesystem-contains; a degraded,
+    // sandbox-off, or Windows network-only host (`confines.filesystem === false`)
+    // returns false here so the pre-exec ask stands (see
+    // ToolExecutor.sandboxFsContainedProvider).
+    isActiveSandboxFilesystemContained,
   );
   const pluginSurfacePermissionScope = createPluginSurfacePermissionScope({
     readPersistedDirectories: () => readPermissionSettings().permissions.additionalDirectories,

@@ -17,6 +17,7 @@ vi.mock("electron", () => ({
 
 import { SettingsService } from "../settings-store.js";
 import { DEFAULT_BUNDLE_ID } from "../../shared/theme-bundles.js";
+import { setProcessPlatform } from "../../testing/process-platform.js";
 
 describe("SettingsService marketplace defaults", () => {
   let userDataPath: string;
@@ -240,9 +241,10 @@ describe("SettingsService role presets", () => {
 
   it("ships hostClassifiesRisk ON all-platform; osToolSandbox STAGED (macOS-first)", () => {
     // hostClassifiesRisk ships ON on EVERY platform (shadow-mode reconciliation
-    // completed). It is safe to ship on non-sandbox platforms because the
-    // foreground read-relaxation is coupled to the sandbox being ACTIVE — on a
-    // non-sandbox platform it falls back to the pre-exec ask.
+    // completed). It is safe to ship on non-sandbox / network-only platforms
+    // because the foreground read-relaxation is coupled to the active sandbox
+    // FILESYSTEM-CONTAINING the host — where it is not filesystem-contained it
+    // falls back to the pre-exec ask.
     //
     // osToolSandbox is STAGED: default ON on darwin (the live-verified-active
     // platform) and OFF on linux/win32 until the C/D-series QA is green (opt-in
@@ -254,6 +256,37 @@ describe("SettingsService role presets", () => {
       process.platform === "darwin",
     );
   });
+
+  // Platform-staged default TRUTH-TABLE — asserts the staged default EXPLICITLY
+  // per platform (true on darwin, false on linux AND win32), not by mirroring
+  // the impl expression. The default is evaluated at module-load from
+  // `process.platform`, so each case stubs the platform and re-imports the
+  // store with `vi.resetModules()` to recompute DEFAULT_SETTINGS, then reads the
+  // default through a fresh SettingsService (empty userDataPath → defaults).
+  it.each([
+    ["darwin", true],
+    ["linux", false],
+    ["win32", false],
+  ] as const)(
+    "osToolSandbox default on %s = %s (explicit staged truth-table)",
+    async (platform, expected) => {
+      const original = process.platform;
+      const dir = mkdtempSync(join(tmpdir(), "settings-store-truthtable-"));
+      try {
+        setProcessPlatform(platform);
+        vi.resetModules();
+        const { SettingsService: FreshSettingsService } = await import(
+          "../settings-store.js"
+        );
+        const service = new FreshSettingsService({ userDataPath: dir });
+        expect(service.get("features")?.osToolSandbox ?? false).toBe(expected);
+      } finally {
+        setProcessPlatform(original);
+        vi.resetModules();
+        rmSync(dir, { recursive: true, force: true });
+      }
+    },
+  );
 });
 
 describe("SettingsService LLM per-vendor patching", () => {
