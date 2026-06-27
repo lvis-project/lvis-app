@@ -507,7 +507,7 @@ describe("plugin read-relaxation — coupled to the OS sandbox being ACTIVE", ()
   it("flag ON + sandbox INACTIVE + foreground plugin ask → NOT relaxed: the pre-exec ask is shown, tool NOT auto-allowed", async () => {
     // On a degraded / sandbox-off host the effect-boundary cannot contain the
     // off-hostApi mutation residual, so relaxing would be WEAKER than the
-    // pre-exec ask. The coupling clause keeps the pre-exec ask (Phase-0 modal):
+    // pre-exec ask. The coupling clause keeps the pre-exec approval ask:
     // on deny-once the tool never runs.
     const spy = { ran: false };
     const { gate, requests } = makeGate("deny-once");
