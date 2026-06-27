@@ -542,9 +542,10 @@ const DEFAULT_SETTINGS: AppSettings = {
     // per-process so this is a one-time, single-expression evaluation.)
     //
     // Safe to stage independently of `hostClassifiesRisk` (which stays ON on all
-    // platforms): on a non-sandbox platform the foreground read-relaxation is
-    // coupled to the sandbox being ACTIVE (ToolExecutor.sandboxActiveProvider),
-    // so it falls back to the pre-exec ask there. When ON, boot activates ASRT
+    // platforms): on a non-sandbox (or Windows network-only) platform the
+    // foreground read-relaxation is coupled to the active sandbox FILESYSTEM-
+    // CONTAINING the host (ToolExecutor.sandboxFsContainedProvider), so it falls
+    // back to the pre-exec ask there. When ON, boot activates ASRT
     // if the platform sandbox can run, else the default/settings path DEGRADES
     // gracefully (loud warning, non-bricking); the explicit `LVIS_SANDBOX_ENABLED=1`
     // env opt-in stays fail-closed. See boot.ts + boot/steps/sandbox-gate.ts.

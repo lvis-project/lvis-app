@@ -730,18 +730,20 @@ export class ToolExecutor {
    */
   private readonly hostClassifiesRiskProvider: () => boolean;
   /**
-   * Sandbox-active interlock for the foreground plugin read-relaxation. The
-   * relaxation (see executeOne's effect-boundary block) removes the pre-exec
+   * Filesystem-containment interlock for the foreground plugin read-relaxation.
+   * The relaxation (see executeOne's effect-boundary block) removes the pre-exec
    * ask and relies on the host-mediated effect-boundary gate — but that
    * boundary only CONTAINS off-hostApi mutations (direct `node:fs` / bare
-   * `fetch` / detached async frames) when the OS sandbox is ACTIVE. On a host
-   * where the sandbox is INACTIVE (degraded / off) relaxing would be WEAKER
-   * than the pre-exec ask it replaces. So the relaxation fires ONLY when this
-   * returns `true` (mirrors {@link hostClassifiesRiskProvider}). Defaults to
+   * `fetch` / detached async frames) when the OS sandbox FILESYSTEM-CONTAINS the
+   * host. A bare "sandbox active" boolean is NOT enough: the Windows srt-win
+   * substrate is NETWORK-ONLY (`confines.filesystem === false`) — egress is
+   * contained but the off-hostApi `node:fs` WRITE residual is not. So the
+   * relaxation fires ONLY when this returns `true` (mirrors the reviewer SOT
+   * `sandboxRelaxesCategory` for filesystem-bearing categories). Defaults to
    * always-off so existing call sites / tests fall back to the known-safe
-   * pre-exec ask; boot wires it to {@link isAsrtSandboxActive}.
+   * pre-exec ask; boot wires it to {@link isActiveSandboxFilesystemContained}.
    */
-  private readonly sandboxActiveProvider: () => boolean;
+  private readonly sandboxFsContainedProvider: () => boolean;
   private readonly pendingReviewerAuthorizations = new Map<string, PendingReviewerAuthorization>();
 
   constructor(
@@ -753,7 +755,7 @@ export class ToolExecutor {
     scriptHookManager?: ScriptHookManager,
     auditLogger?: AuditLogger,
     hostClassifiesRiskProvider?: () => boolean,
-    sandboxActiveProvider?: () => boolean,
+    sandboxFsContainedProvider?: () => boolean,
   ) {
     this.toolRegistry = toolRegistry;
     this.hookRunner = hookRunner ?? new HookRunner();
@@ -763,7 +765,7 @@ export class ToolExecutor {
     this.bashAstValidator = bashAstValidator;
     this.scriptHookManager = scriptHookManager;
     this.hostClassifiesRiskProvider = hostClassifiesRiskProvider ?? (() => false);
-    this.sandboxActiveProvider = sandboxActiveProvider ?? (() => false);
+    this.sandboxFsContainedProvider = sandboxFsContainedProvider ?? (() => false);
     this.requirePermissionAuditChain = auditLogger?.isPermissionAuditChainReady() === true;
     this.warnIfShadowSinkUnwired(auditLogger === undefined);
   }
@@ -2220,15 +2222,23 @@ export class ToolExecutor {
       //     MCP/per-tool strict override, global strict mode) exactly as the
       //     Store B memory-skip does; a per-invocation `forceModal` ask is never
       //     relaxed.
-      //   • SANDBOX ACTIVE ONLY (`this.sandboxActiveProvider()`). The
-      //     effect-boundary only CONTAINS the off-hostApi mutation residual
-      //     (residual #1 below) when the OS sandbox is ACTIVE. On a host where
-      //     the sandbox is INACTIVE (degraded / gate off) the relaxation would
-      //     be WEAKER than the pre-exec ask it replaces, so it does NOT fire —
-      //     the existing pre-exec approval ask stands. This makes
-      //     `hostClassifiesRisk`-ON safe on every platform: macOS (sandbox
-      //     active) relaxes for the clean UX; a degraded/sandbox-off host
-      //     falls back to the known-safe ask.
+      //   • SANDBOX FILESYSTEM-CONTAINED ONLY (`this.sandboxFsContainedProvider()`).
+      //     The effect-boundary only CONTAINS the off-hostApi mutation residual
+      //     (residual #1 below) when the OS sandbox FILESYSTEM-CONTAINS the host.
+      //     This requires `confines.filesystem === true` on the ACTIVE sandbox
+      //     capability, NOT merely that some sandbox is active: the Windows
+      //     srt-win substrate is NETWORK-ONLY (`confines.filesystem === false`),
+      //     so an active network-only sandbox contains egress but NOT the
+      //     off-hostApi `node:fs` WRITE residual. On a host that is not
+      //     filesystem-contained (degraded / gate off / network-only) the
+      //     relaxation would be WEAKER than the pre-exec ask it replaces, so it
+      //     does NOT fire — the existing pre-exec approval ask stands. This
+      //     makes `hostClassifiesRisk`-ON safe on every platform: macOS / Linux
+      //     (filesystem-contained ASRT) relax for the clean UX; a degraded,
+      //     sandbox-off, or Windows network-only host falls back to the
+      //     known-safe ask. Mirrors the reviewer SOT `sandboxRelaxesCategory`,
+      //     which relaxes filesystem-bearing categories only when
+      //     `confines.filesystem === true`.
       //   • FLAG OFF (default) → this whole block is skipped: behaviour is
       //     byte-for-byte today's full pre-exec ask. The condition is the FIRST
       //     read, so the relaxed path is reachable only with the flag ON.
@@ -2258,13 +2268,17 @@ export class ToolExecutor {
       //      (direct `node:fs`, a bare `fetch`, or a detached async frame that
       //      escapes the tool-execute ALS scope) records NO effect → the
       //      effect-boundary sees a read → it runs with no gate. Closed ONLY by the
-      //      OS sandbox (ASRT). This relaxation now REQUIRES the sandbox to be
-      //      ACTIVE (the `sandboxActiveProvider()` clause above), so whenever the
-      //      relaxation is in effect this residual is ALWAYS contained by the
-      //      sandbox — a sandbox-inactive host does not relax (it keeps the
-      //      pre-exec ask). NOT a regression: a first-party plugin already executes
-      //      arbitrary in-process code today — this is an LLM-action gate over
-      //      mediated effects, not an in-process jail.
+      //      OS sandbox (ASRT) FILESYSTEM-CONTAINING the host. This relaxation now
+      //      REQUIRES the active sandbox to filesystem-contain (the
+      //      `sandboxFsContainedProvider()` clause above — `confines.filesystem
+      //      === true`), so whenever the relaxation is in effect this `node:fs`
+      //      WRITE residual is contained by the sandbox. A host that is NOT
+      //      filesystem-contained does not relax — including a Windows srt-win
+      //      NETWORK-ONLY sandbox (`confines.filesystem === false`): it is active
+      //      and contains egress, but the FS-write residual would be uncontained,
+      //      so the pre-exec ask stands there. NOT a regression: a first-party
+      //      plugin already executes arbitrary in-process code today — this is an
+      //      LLM-action gate over mediated effects, not an in-process jail.
       //   2. The mediated excluded writes (ENFORCEMENT_EXCLUSIONS). The relaxation
       //      removes the pre-exec ask, so these are gated ONLY at the effect-boundary
       //      — and the excluded paths are by definition NOT generically gated there:
@@ -2289,7 +2303,7 @@ export class ToolExecutor {
       //      decision weighs it.
       if (
         this.hostClassifiesRiskProvider() &&
-        this.sandboxActiveProvider() &&
+        this.sandboxFsContainedProvider() &&
         source === "plugin" &&
         invocationPermissionContext.headless !== true &&
         permissionResult.decision === "ask" &&
