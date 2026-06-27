@@ -1,0 +1,64 @@
+/**
+ * `requires.minAppVersion` schema-compatibility — the REAL SDK-schema validator
+ * path (not a permissive test schema). The pinned `@lvis/plugin-sdk` schema's
+ * `requires` block ships `additionalProperties:false` and (at the current pin)
+ * predates `minAppVersion`, so without the host compatibility patch
+ * (`patchMinAppVersionIntoLegacySdkSchema`) a manifest declaring
+ * `requires.minAppVersion` is rejected as an unknown property and the plugin is
+ * silently dropped at load — the local-indexer load failure. This test fails
+ * without the patch and passes with it (sibling to network-access-manifest).
+ */
+import { describe, it, expect, beforeEach, afterEach } from "vitest";
+import { mkdtemp, rm, writeFile } from "node:fs/promises";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
+import { buildManifestValidator, parsePluginJson } from "../manifest-validation.js";
+
+describe("manifest requires.minAppVersion — real SDK-schema validator path", () => {
+  let workDir: string;
+  beforeEach(async () => {
+    workDir = await mkdtemp(join(tmpdir(), "min-app-version-compat-"));
+  });
+  afterEach(async () => {
+    await rm(workDir, { recursive: true, force: true });
+  });
+
+  async function writeManifest(extra: Record<string, unknown>): Promise<string> {
+    const path = join(workDir, "plugin.json");
+    await writeFile(
+      path,
+      JSON.stringify({
+        id: "min-app-version-compat-test",
+        name: "Min App Version Compat Test",
+        description: "x",
+        version: "1.0.0",
+        entry: "dist/p.js",
+        tools: ["t_one"],
+        ...extra,
+      }),
+    );
+    return path;
+  }
+
+  it("accepts requires.minAppVersion under the real (additionalProperties:false) requires block — the local-indexer shape", async () => {
+    const validator = await buildManifestValidator();
+    const path = await writeManifest({ requires: { minAppVersion: "0.4.1" } });
+    const parsed = await parsePluginJson(path, validator);
+    expect(parsed.requires?.minAppVersion).toBe("0.4.1");
+  });
+
+  it("accepts requires.minAppVersion alongside capabilities", async () => {
+    const validator = await buildManifestValidator();
+    const path = await writeManifest({
+      requires: { capabilities: ["meeting-recorder"], minAppVersion: "1.4.0" },
+    });
+    const parsed = await parsePluginJson(path, validator);
+    expect(parsed.requires?.minAppVersion).toBe("1.4.0");
+  });
+
+  it("still rejects an unknown property inside requires (additionalProperties intact)", async () => {
+    const validator = await buildManifestValidator();
+    const path = await writeManifest({ requires: { minAppVersion: "1.4.0", bogusRequiresField: 1 } });
+    await expect(parsePluginJson(path, validator)).rejects.toThrow();
+  });
+});
