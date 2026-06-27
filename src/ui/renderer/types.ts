@@ -220,7 +220,9 @@ export type AppSettings = {
     /**
      * Permission policy host-classifies-risk migration gate. Mirrors the
      * main-process SOT in `src/data/settings-store.ts`
-     * `FeatureFlags.hostClassifiesRisk`. Default false (shadow mode only).
+     * `FeatureFlags.hostClassifiesRisk`. Default true (PR #1390 — host
+     * classifies plugin risk + foreground plugin read-relaxation enabled;
+     * shipped alongside the osToolSandbox default-on).
      */
     hostClassifiesRisk?: boolean;
     /**
