@@ -38,186 +38,6 @@ export const STABLE_SEMVER_RE =
 export const HOST_SECRETS_KEY_PATTERN = /^llm\.apiKey\.[a-z-]+$/;
 const log = createLogger("plugin-runtime");
 
-type JsonObject = Record<string, unknown>;
-
-function asObject(value: unknown): JsonObject | undefined {
-  return value && typeof value === "object" && !Array.isArray(value)
-    ? value as JsonObject
-    : undefined;
-}
-
-function patchHostSecretsIntoLegacySdkSchema(schema: unknown): unknown {
-  const root = asObject(schema) as (JsonObject & { properties?: Record<string, unknown> }) | undefined;
-  if (!root?.properties || root.properties.hostSecrets !== undefined) return schema;
-  root.properties.hostSecrets = {
-    type: "object",
-    additionalProperties: false,
-    properties: {
-      read: {
-        type: "array",
-        items: {
-          type: "string",
-          pattern: "^llm\\.apiKey\\.[a-z-]+$",
-        },
-      },
-    },
-  };
-  return schema;
-}
-
-function schemaHasHostSecrets(schema: unknown): boolean {
-  const root = asObject(schema);
-  const properties = asObject(root?.properties);
-  return properties?.hostSecrets !== undefined;
-}
-
-/**
- * Locate the `required` array that the SDK schema attaches to each toolSchemas
- * entry (`properties.toolSchemas.additionalProperties.required`). The SDK
- * references the per-tool shape inline today; if a future SDK build factors it
- * into a `$ref`, the pointer is resolved and only the referenced definition's
- * `required` array is returned — never a sibling schema's `required`.
- */
-function findToolSchemaRequiredArrays(schema: unknown): string[][] {
-  const found: string[][] = [];
-  const root = asObject(schema);
-  const properties = asObject(root?.properties);
-  const toolSchemas = asObject(properties?.toolSchemas);
-  const additional = asObject(toolSchemas?.additionalProperties);
-  const direct = additional?.required;
-  if (Array.isArray(direct) && direct.every((v) => typeof v === "string")) {
-    found.push(direct as string[]);
-  }
-  // Indirect: toolSchemas.additionalProperties may be a `$ref` into $defs.
-  // Resolve the pointer and patch ONLY the referenced definition's `required`,
-  // not every same-shaped def (which could touch unrelated schemas).
-  const refTarget = typeof additional?.$ref === "string" ? additional.$ref : undefined;
-  if (refTarget) {
-    const req = asObject(resolveJsonPointer(root, refTarget))?.required;
-    if (Array.isArray(req) && req.every((v) => typeof v === "string")) {
-      found.push(req as string[]);
-    }
-  }
-  return found;
-}
-
-/**
- * Resolve a local JSON Pointer `$ref` (e.g. `#/$defs/ToolSchema`) against the
- * root schema. Returns undefined for external refs or a path that does not
- * resolve. Handles the `~1`→`/` and `~0`→`~` pointer escapes.
- */
-function resolveJsonPointer(root: unknown, ref: string): unknown {
-  if (!ref.startsWith("#/")) return undefined;
-  let current: unknown = root;
-  for (const rawSegment of ref.slice(2).split("/")) {
-    const segment = rawSegment.replace(/~1/g, "/").replace(/~0/g, "~");
-    const obj = asObject(current);
-    if (!obj) return undefined;
-    current = obj[segment];
-  }
-  return current;
-}
-
-/**
- * Relax the SDK schema so a toolSchemas entry without `category` validates on
- * the host. The host owns risk classification (default-strict at runtime), so
- * it must tolerate a manifest that omits the declared category ahead of the SDK
- * schema dropping the field. Mutates `schema.properties.toolSchemas.
- * additionalProperties.required` in place, removing `"category"`. No-op when
- * the path or the entry is absent.
- */
-function patchCategoryOptionalIntoLegacySdkSchema(schema: unknown): unknown {
-  for (const required of findToolSchemaRequiredArrays(schema)) {
-    const idx = required.indexOf("category");
-    if (idx >= 0) required.splice(idx, 1);
-  }
-  return schema;
-}
-
-/**
- * True when the SDK schema still REQUIRES a `category` on each toolSchemas
- * entry — i.e. an unpatched schema that would reject a category-less manifest
- * at load.
- */
-function schemaRequiresToolCategory(schema: unknown): boolean {
-  return findToolSchemaRequiredArrays(schema).some((req) => req.includes("category"));
-}
-
-function schemaHasNetworkAccess(schema: unknown): boolean {
-  const root = asObject(schema);
-  const properties = asObject(root?.properties);
-  return properties?.networkAccess !== undefined;
-}
-
-// Tier A — networkAccess egress allow-list. Same compatibility seam as
-// hostSecrets above: a legacy SDK pin (`package.json` lags `@lvis/plugin-sdk`)
-// whose schema predates `networkAccess` would, under root
-// `additionalProperties:false`, reject every migrated plugin's manifest as an
-// unknown property and silently drop the plugin at load. Inject the field so
-// host validation stays in lockstep with the SDK SoT until the pin is bumped.
-// Mirrors lvis-plugin-sdk schemas/plugin-manifest.schema.json `networkAccess`.
-function patchNetworkAccessIntoLegacySdkSchema(schema: unknown): unknown {
-  const root = asObject(schema) as (JsonObject & { properties?: Record<string, unknown> }) | undefined;
-  if (!root?.properties || root.properties.networkAccess !== undefined) return schema;
-  root.properties.networkAccess = {
-    type: "object",
-    additionalProperties: false,
-    required: ["allowedDomains"],
-    properties: {
-      allowedDomains: {
-        type: "array",
-        minItems: 1,
-        maxItems: 16,
-        uniqueItems: true,
-        items: {
-          allOf: [
-            {
-              type: "string",
-              pattern: "^[a-z0-9]([a-z0-9-]{0,61}[a-z0-9])?(\\.[a-z0-9]([a-z0-9-]{0,61}[a-z0-9])?)+$",
-              minLength: 3,
-              maxLength: 253,
-            },
-            { not: { enum: ["com", "net", "org", "kr", "co.kr", "or.kr", "go.kr", "io", "ai", "dev", "app"] } },
-            { not: { type: "string", pattern: "(^|\\.)xn--" } },
-          ],
-        },
-      },
-      reasoning: { type: "string" },
-    },
-  };
-  return schema;
-}
-
-// minAppVersion gate — `requires.minAppVersion`. Same compatibility seam as
-// networkAccess above: a legacy SDK pin (`package.json` lags `@lvis/plugin-sdk`)
-// whose schema's `requires` block predates `minAppVersion` would, under
-// `requires.additionalProperties:false`, reject every plugin that declares it
-// as an unknown property and silently drop the plugin at load. Inject the field
-// so host validation stays in lockstep with the SDK SoT until the pin is bumped.
-// The host owns the actual SemVer compare/gate (validateManifest's
-// `requires.minAppVersion` check). Mirrors lvis-plugin-sdk
-// schemas/plugin-manifest.schema.json `requires.properties.minAppVersion`.
-function patchMinAppVersionIntoLegacySdkSchema(schema: unknown): unknown {
-  const root = asObject(schema) as (JsonObject & { properties?: Record<string, unknown> }) | undefined;
-  const requires = asObject(root?.properties?.requires) as
-    | (JsonObject & { properties?: Record<string, unknown> })
-    | undefined;
-  if (!requires?.properties || requires.properties.minAppVersion !== undefined) return schema;
-  requires.properties.minAppVersion = {
-    type: "string",
-    pattern: "^(0|[1-9][0-9]*)\\.(0|[1-9][0-9]*)\\.(0|[1-9][0-9]*)$",
-  };
-  return schema;
-}
-
-export function patchHostCompatibilityIntoLegacySdkSchema(schema: unknown): unknown {
-  patchHostSecretsIntoLegacySdkSchema(schema);
-  patchCategoryOptionalIntoLegacySdkSchema(schema);
-  patchNetworkAccessIntoLegacySdkSchema(schema);
-  patchMinAppVersionIntoLegacySdkSchema(schema);
-  return schema;
-}
-
 async function loadSdkManifestSchema(): Promise<unknown> {
   const schemaPath = createRequire(import.meta.url).resolve(
     "@lvis/plugin-sdk/schemas/plugin-manifest.schema.json",
@@ -247,26 +67,6 @@ function compileAjvValidator(schema: unknown): ValidateFunction {
   return ajv.compile(schema);
 }
 
-function wrapSdkValidatorWithHostCompatibility(
-  sdkValidator: ValidateFunction,
-  hostValidator: ValidateFunction,
-): ValidateFunction {
-  const wrapped = ((data: unknown) => {
-    if (sdkValidator(data)) {
-      wrapped.errors = null;
-      return true;
-    }
-    const sdkErrors = sdkValidator.errors ?? null;
-    if (hostValidator(data)) {
-      wrapped.errors = null;
-      return true;
-    }
-    wrapped.errors = hostValidator.errors ?? sdkErrors;
-    return false;
-  }) as ValidateFunction;
-  return wrapped;
-}
-
 export function normalizeInstallPolicy(
   source: Partial<Pick<PluginManifest, "installPolicy">> | undefined,
 ): InstallPolicy {
@@ -290,38 +90,22 @@ export function getDeclaredEmittedEvents(manifest: PluginManifest): string[] {
  *
  * PR #894 review B5 — when the SDK exposes a `compileManifestValidator()`
  * helper, prefer it so host + SDK never drift apart on AJV options. The
- * helper is intentionally optional; older SDK builds (pre-#893 follow-up)
- * fall through to the local AJV compile path with a one-shot warn so
+ * helper is intentionally optional; SDK builds without it fall through to the
+ * host-local AJV compile of the shipped schema with a one-shot warn so
  * operators see the drift signal in logs.
+ *
+ * As of @lvis/plugin-sdk v5.18.0 the manifest schema natively carries every
+ * host-required field (hostSecrets, networkAccess, requires.minAppVersion) and
+ * makes per-tool `category` optional, so the former legacy-schema compatibility
+ * patches are retired — the SDK schema is compiled verbatim.
  */
 export async function buildManifestValidator(): Promise<ValidateFunction> {
-  const sdkSchema = await loadSdkManifestSchema();
-  // Host-compat wrap is needed when the shipped SDK schema lags ANY host-
-  // required manifest field — missing hostSecrets, missing networkAccess (Tier
-  // A egress allow-list), or still mandating a per-tool `category`. Under root
-  // `additionalProperties:false` the SDK's own validator would reject migrated
-  // manifests, and the host classifies risk itself (default-strict) so a
-  // category-less manifest MUST still load. Wrap with the host-local validator
-  // (OR semantics) whenever any of these holds.
-  const hostCompatibilityNeeded =
-    !schemaHasHostSecrets(sdkSchema) ||
-    !schemaHasNetworkAccess(sdkSchema) ||
-    schemaRequiresToolCategory(sdkSchema);
-
   try {
     // Prefer SDK helper when available so AJV options stay in lockstep.
     type SdkModule = { compileManifestValidator?: () => ValidateFunction };
     const sdk = (await import("@lvis/plugin-sdk")) as unknown as SdkModule;
     if (typeof sdk.compileManifestValidator === "function") {
-      const sdkValidator = sdk.compileManifestValidator();
-      if (!hostCompatibilityNeeded) return sdkValidator;
-      log.warn(
-        "SDK manifest schema lacks host compatibility extensions — wrapping compileManifestValidator() with host-local AJV compatibility. Update @lvis/plugin-sdk to keep manifest validation in lockstep.",
-      );
-      return wrapSdkValidatorWithHostCompatibility(
-        sdkValidator,
-        compileAjvValidator(patchHostCompatibilityIntoLegacySdkSchema(sdkSchema)),
-      );
+      return sdk.compileManifestValidator();
     }
     log.warn(
       "SDK does not export compileManifestValidator() — falling back to host-local AJV compile. Update @lvis/plugin-sdk to keep manifest validation in lockstep.",
@@ -333,7 +117,7 @@ export async function buildManifestValidator(): Promise<ValidateFunction> {
     log.warn(`SDK validator import failed, using host-local AJV: ${(err as Error).message}`);
   }
   try {
-    return compileAjvValidator(patchHostCompatibilityIntoLegacySdkSchema(sdkSchema));
+    return compileAjvValidator(await loadSdkManifestSchema());
   } catch (err) {
     throw new Error(`SDK plugin manifest schema unavailable: ${(err as Error).message}`);
   }
