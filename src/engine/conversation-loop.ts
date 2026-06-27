@@ -9,6 +9,7 @@
  */
 import { ConversationHistory, normalizeToolPairInvariant } from "./conversation-history.js";
 import { ToolExecutor, type ToolResult, type ToolUseBlock } from "../tools/executor.js";
+import { isAsrtSandboxActive } from "../permissions/asrt-sandbox.js";
 import { HookRunner } from "../hooks/hook-runner.js";
 import type { LifecycleHookEvent } from "../hooks/script-hook-types.js";
 import { markStaleToolResults, estimateMessagesTokens, estimateTokens, getModelPreflightThreshold, getModelUsableContext, isContextLengthError } from "./auto-compact.js";
@@ -848,6 +849,12 @@ export class ConversationLoop {
       deps.scriptHookManager,
       deps.auditLogger,
       () => deps.settingsService.get("features")?.hostClassifiesRisk ?? false,
+      // Couple the foreground plugin read-relaxation to the OS sandbox being
+      // ACTIVE: the relaxation relies on the effect-boundary, which only
+      // contains off-hostApi mutations when the sandbox is active. On a degraded
+      // / sandbox-off host this is false → the relaxation does not fire and the
+      // pre-exec ask stands (see ToolExecutor.sandboxActiveProvider).
+      isAsrtSandboxActive,
     );
     this.auditLogger = deps.auditLogger ?? new AuditLogger();
     this.refreshProvider();

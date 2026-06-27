@@ -11,6 +11,10 @@
  *     effect-gate AT THE MUTATION (deny → tool error, mutation not performed).
  *
  * Scope locked here (each is a separate cluster-review concern):
+ *   • SANDBOX-ACTIVE COUPLING → the relaxation requires the OS sandbox to be
+ *     ACTIVE (it relies on the effect-boundary, which only contains off-hostApi
+ *     mutations under the sandbox). Sandbox active → relax; sandbox inactive
+ *     (degraded / off) → the pre-exec ask stands (known-safe fallback).
  *   • FLAG OFF (default) → full pre-exec ask, byte-for-byte unchanged.
  *   • PLUGIN ONLY → MCP + builtin keep the pre-exec ask (not relaxed).
  *   • FOREGROUND ONLY → a headless plugin tool keeps the existing headless lane.
@@ -196,6 +200,11 @@ function makeExecutor(
   flagEnabled: () => boolean,
   permMgr = new PermissionManager("/tmp/nonexistent-permissions.json"),
   scriptHookManager?: import("../../hooks/script-hook-manager.js").ScriptHookManager,
+  // Sandbox-active interlock (default ACTIVE — the macOS live-verified state).
+  // The relaxation requires BOTH the flag AND the sandbox active; existing
+  // relaxation assertions run with the sandbox active. The coupling tests below
+  // pass `() => false` to assert the degraded/sandbox-off fallback.
+  sandboxActive: () => boolean = () => true,
 ): { executor: ToolExecutor; permMgr: PermissionManager } {
   const registry = new ToolRegistry();
   registry.register(tool);
@@ -208,6 +217,7 @@ function makeExecutor(
     scriptHookManager,
     undefined,
     flagEnabled,
+    sandboxActive,
   );
   return { executor, permMgr };
 }
@@ -464,6 +474,87 @@ describe("plugin read-relaxation — operator perm-*.sh deny hook is preserved o
     expect(calls.permRan).toBe(true);
     expect(spy.ran).toBe(false);
     expect(requests).toHaveLength(0);
+    expect(result.is_error).toBe(true);
+  });
+});
+
+describe("plugin read-relaxation — coupled to the OS sandbox being ACTIVE", () => {
+  it("flag ON + sandbox ACTIVE + foreground plugin ask → relaxed (NO modal, tool runs)", async () => {
+    // The baseline coupling assertion: with the sandbox active (macOS), the
+    // relaxation fires exactly as before — clean UX, unchanged.
+    const spy = { ran: false };
+    const { gate, requests } = makeGate("deny-once");
+    const { executor } = makeExecutor(
+      makePluginNoEffectTool(spy),
+      gate,
+      () => true,
+      new PermissionManager("/tmp/nonexistent-permissions.json"),
+      undefined,
+      () => true, // sandbox ACTIVE
+    );
+
+    const [result] = await executor.executeAll(
+      [{ id: "t1", name: "plugin_noeffect", input: {} }],
+      { sessionId: "s", permissionContext: userPermissionContext() },
+    );
+
+    expect(requests).toHaveLength(0);
+    expect(spy.ran).toBe(true);
+    expect(result.is_error).toBeFalsy();
+    expect(result.content).toContain("noeffect-ok");
+  });
+
+  it("flag ON + sandbox INACTIVE + foreground plugin ask → NOT relaxed: the pre-exec ask is shown, tool NOT auto-allowed", async () => {
+    // On a degraded / sandbox-off host the effect-boundary cannot contain the
+    // off-hostApi mutation residual, so relaxing would be WEAKER than the
+    // pre-exec ask. The coupling clause keeps the pre-exec ask (Phase-0 modal):
+    // on deny-once the tool never runs.
+    const spy = { ran: false };
+    const { gate, requests } = makeGate("deny-once");
+    const { executor } = makeExecutor(
+      makePluginNoEffectTool(spy),
+      gate,
+      () => true,
+      new PermissionManager("/tmp/nonexistent-permissions.json"),
+      undefined,
+      () => false, // sandbox INACTIVE (degraded / off)
+    );
+
+    const [result] = await executor.executeAll(
+      [{ id: "t1", name: "plugin_noeffect", input: {} }],
+      { sessionId: "s", permissionContext: userPermissionContext() },
+    );
+
+    // The pre-exec tool-level modal fired (category "tool") and, on deny-once,
+    // the tool NEVER executed — the known-safe fallback, identical to flag-OFF.
+    expect(requests).toHaveLength(1);
+    expect(requests[0]?.category).toBe("tool");
+    expect(spy.ran).toBe(false);
+    expect(result.is_error).toBe(true);
+  });
+
+  it("flag OFF + sandbox INACTIVE → unchanged: the pre-exec ask is shown (relaxation inert regardless of sandbox)", async () => {
+    // Flag-OFF behaviour is independent of the sandbox state — the relaxation
+    // block is skipped entirely, so the full pre-exec ask stands.
+    const spy = { ran: false };
+    const { gate, requests } = makeGate("deny-once");
+    const { executor } = makeExecutor(
+      makePluginNoEffectTool(spy),
+      gate,
+      () => false,
+      new PermissionManager("/tmp/nonexistent-permissions.json"),
+      undefined,
+      () => false, // sandbox INACTIVE
+    );
+
+    const [result] = await executor.executeAll(
+      [{ id: "t1", name: "plugin_noeffect", input: {} }],
+      { sessionId: "s", permissionContext: userPermissionContext() },
+    );
+
+    expect(requests).toHaveLength(1);
+    expect(requests[0]?.category).toBe("tool");
+    expect(spy.ran).toBe(false);
     expect(result.is_error).toBe(true);
   });
 });

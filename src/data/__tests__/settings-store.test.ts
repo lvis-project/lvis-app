@@ -238,16 +238,21 @@ describe("SettingsService role presets", () => {
     expect(service.get("features")?.idlePreferenceRefresh).toBe(true);
   });
 
-  it("ships hostClassifiesRisk + the OS tool sandbox (ASRT) gate ON by default", () => {
-    // Shipped defaults flip ON (shadow-mode reconciliation completed): the host
-    // classifies plugin risk, and the boot gate (`features.osToolSandbox ||
-    // LVIS_SANDBOX_ENABLED`) activates ASRT where it can. The default-on sandbox
-    // is GRACEFUL at boot — it degrades non-bricking when it cannot activate (see
-    // boot/steps/sandbox-gate.ts), so shipping it true does not brick deps-less
-    // hosts.
+  it("ships hostClassifiesRisk ON all-platform; osToolSandbox STAGED (macOS-first)", () => {
+    // hostClassifiesRisk ships ON on EVERY platform (shadow-mode reconciliation
+    // completed). It is safe to ship on non-sandbox platforms because the
+    // foreground read-relaxation is coupled to the sandbox being ACTIVE — on a
+    // non-sandbox platform it falls back to the pre-exec ask.
+    //
+    // osToolSandbox is STAGED: default ON on darwin (the live-verified-active
+    // platform) and OFF on linux/win32 until the C/D-series QA is green (opt-in
+    // via Settings until then). The default is computed from process.platform,
+    // so this assertion tracks the runner's platform deterministically.
     const service = new SettingsService({ userDataPath });
     expect(service.get("features")?.hostClassifiesRisk ?? false).toBe(true);
-    expect(service.get("features")?.osToolSandbox ?? false).toBe(true);
+    expect(service.get("features")?.osToolSandbox ?? false).toBe(
+      process.platform === "darwin",
+    );
   });
 });
 

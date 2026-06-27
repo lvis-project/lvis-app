@@ -134,6 +134,10 @@ import {
   createCallLlmForPlugin,
 } from "./boot/conversation.js";
 import { ToolExecutor } from "./tools/executor.js";
+// Static import is safe: asrt-sandbox.ts is side-effect-free at import time (it
+// only dynamically imports the ESM-only ASRT package inside functions). Used to
+// couple the foreground plugin read-relaxation to the sandbox being ACTIVE.
+import { isAsrtSandboxActive } from "./permissions/asrt-sandbox.js";
 import type { PluginToolInvocationContext } from "./plugins/runtime.js";
 import {
   currentInvocationOrigin,
@@ -898,6 +902,12 @@ export async function bootstrap(
     scriptHookManager,
     bootAuditLogger,
     () => settingsService.get("features")?.hostClassifiesRisk ?? false,
+    // Couple the foreground plugin read-relaxation to the OS sandbox being
+    // ACTIVE (evaluated per tool-call, after boot's sandbox gate has run). The
+    // relaxation relies on the effect-boundary, which only contains off-hostApi
+    // mutations when the sandbox is active; a degraded/sandbox-off host returns
+    // false here so the pre-exec ask stands (see ToolExecutor.sandboxActiveProvider).
+    isAsrtSandboxActive,
   );
   const pluginSurfacePermissionScope = createPluginSurfacePermissionScope({
     readPersistedDirectories: () => readPermissionSettings().permissions.additionalDirectories,
@@ -1386,6 +1396,14 @@ export async function bootstrap(
     const settingOn = settingsService.get("features")?.osToolSandbox ?? false;
     const sandboxOptIn = settingOn || explicitEnv;
 
+    // Activation telemetry — which on-signal drove the gate. ONE event per boot
+    // is emitted (below) at the terminal outcome so real-world activate/degrade/
+    // abort/skip rates can be monitored before the Linux/Windows osToolSandbox
+    // default is flipped on (the staged rollout). explicit-env takes precedence
+    // (it is the fail-closed signal); else the default/settings flag; else off.
+    const sandboxGateOnSignal: "explicit-env" | "default-settings" | "off" =
+      explicitEnv ? "explicit-env" : settingOn ? "default-settings" : "off";
+
     // Tracks whether ASRT genuinely activated this boot. The interlock warning
     // below keys on THIS (not on `sandboxOptIn`), so the degraded path (gate ON,
     // sandbox inactive) still fires it. See shouldWarnHostClassifyInterlock.
@@ -1414,6 +1432,12 @@ export async function bootstrap(
           "Install the sandbox dependencies (Linux: bwrap, socat, ripgrep) or unset LVIS_SANDBOX_ENABLED. " +
           `Missing: ${deps.errors.join("; ")}`;
         log.error(message);
+        bootAuditLogger.logSandboxGate({
+          platform: process.platform,
+          onSignal: sandboxGateOnSignal,
+          outcome: "abort",
+          reason: decision.reason,
+        });
         throw new Error(message);
       } else if (decision.action === "degrade") {
         // DEFAULT / settings-on (NOT the explicit env) + the sandbox cannot
@@ -1444,6 +1468,12 @@ export async function bootstrap(
               `Missing: ${detail}`,
           );
         }
+        bootAuditLogger.logSandboxGate({
+          platform: process.platform,
+          onSignal: sandboxGateOnSignal,
+          outcome: "degrade",
+          reason: decision.reason,
+        });
       } else {
         // decision.action === "activate" — deps present, initialize ASRT. Wrapped
         // so a runtime init FAILURE degrades-or-aborts by the SAME explicit-vs-
@@ -1556,6 +1586,12 @@ export async function bootstrap(
             manifestAllowLists.length,
           );
           sandboxActive = true;
+          bootAuditLogger.logSandboxGate({
+            platform: process.platform,
+            onSignal: sandboxGateOnSignal,
+            outcome: "activate",
+            reason: decision.reason,
+          });
         } catch (initErr) {
           // Init FAILURE (initializeAsrtSandbox threw despite deps present) is the
           // SAME "cannot activate" condition as deps-missing — re-decide with
@@ -1575,6 +1611,12 @@ export async function bootstrap(
               "boot: OS tool sandbox is ON via LVIS_SANDBOX_ENABLED=1 but ASRT initialization failed — refusing to start. " +
                 `Cause: ${cause}`,
             );
+            bootAuditLogger.logSandboxGate({
+              platform: process.platform,
+              onSignal: sandboxGateOnSignal,
+              outcome: "abort",
+              reason: failDecision.reason,
+            });
             throw initErr;
           }
           // DEFAULT / settings-on (or Windows) — GRACEFUL degrade, non-bricking.
@@ -1584,13 +1626,31 @@ export async function bootstrap(
               "(Set LVIS_SANDBOX_ENABLED=1 to make this fail-closed instead.) " +
               `Cause: ${cause}`,
           );
+          bootAuditLogger.logSandboxGate({
+            platform: process.platform,
+            onSignal: sandboxGateOnSignal,
+            outcome: "degrade",
+            reason: failDecision.reason,
+          });
           // sandboxActive stays false.
         }
       }
-    } else if (process.platform === "darwin") {
-      log.info(
-        "boot: OS tool sandbox gated off (enable via Settings → 권한 'OS 도구 샌드박스' or LVIS_SANDBOX_ENABLED=1)",
-      );
+    } else {
+      // Gate OFF (neither on-signal set) → skip. On the staged rollout this is
+      // the Linux/Windows default-off path. Log the enable hint on darwin (where
+      // off is now a deliberate opt-out); emit the skip telemetry on EVERY
+      // platform so the off-rate is monitorable alongside activate/degrade/abort.
+      if (process.platform === "darwin") {
+        log.info(
+          "boot: OS tool sandbox gated off (enable via Settings → 권한 'OS 도구 샌드박스' or LVIS_SANDBOX_ENABLED=1)",
+        );
+      }
+      bootAuditLogger.logSandboxGate({
+        platform: process.platform,
+        onSignal: sandboxGateOnSignal,
+        outcome: "skip",
+        reason: "gate-off",
+      });
     }
 
     // Flag-interlock warning (no hard interlock — the flags stay independent).
