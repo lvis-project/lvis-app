@@ -163,9 +163,12 @@ export interface FeatureFlags {
   /**
    * OS tool sandbox — when `true` (and the platform is supported), shell and
    * tool spawns are confined by the Anthropic Sandbox Runtime (ASRT; macOS
-   * Seatbelt / Linux bwrap backends). Now ships `true` (default ON).
+   * Seatbelt / Linux bwrap backends). STAGED default (macOS-first): ships `true`
+   * on `darwin` and `false` on `linux`/`win32` (opt-in via Settings) until the
+   * C/D-series sandbox QA is green, after which the Linux/Windows default flips
+   * to `true`. See DEFAULT_SETTINGS for the convergence plan.
    *
-   * Because the default is ON, the boot gate distinguishes how the ON-signal
+   * Because the default is ON (on macOS), the boot gate distinguishes how the ON-signal
    * arrived (see boot.ts + boot/steps/sandbox-gate.ts): the DEFAULT/settings-on
    * path degrades GRACEFULLY (loud warning, unsandboxed, non-bricking) when the
    * sandbox cannot activate, whereas the EXPLICIT `LVIS_SANDBOX_ENABLED=1` env
@@ -529,14 +532,24 @@ const DEFAULT_SETTINGS: AppSettings = {
     // category. Shadow mode reconciliation completed before this flip; users
     // can still opt out in Settings.
     hostClassifiesRisk: true,
-    // OS tool sandbox. Ships ON — boot activates ASRT when this is true AND the
-    // platform sandbox can run. Because the default is ON, the boot gate makes
-    // the default/settings path GRACEFUL: if the sandbox cannot activate (Linux
-    // deps missing, init failure, Windows not-yet-installed) boot degrades to
-    // unsandboxed with a loud warning instead of aborting. The explicit
-    // `LVIS_SANDBOX_ENABLED=1` env opt-in stays fail-closed. See boot.ts +
-    // boot/steps/sandbox-gate.ts.
-    osToolSandbox: true,
+    // OS tool sandbox — STAGED rollout (macOS-first). Default ON on `darwin`
+    // (the live-verified-active platform) and OFF on `linux`/`win32` until the
+    // in-flight C/D-series sandbox QA is green; Linux/Windows users can still
+    // opt in via Settings → 권한 'OS 도구 샌드박스'. CONVERGENCE PLAN: the
+    // Linux/Windows default flips to `true` once the C/D-series QA passes —
+    // change this single expression to `true` then. (Computed from
+    // `process.platform` at default-construction; `process.platform` is stable
+    // per-process so this is a one-time, single-expression evaluation.)
+    //
+    // Safe to stage independently of `hostClassifiesRisk` (which stays ON on all
+    // platforms): on a non-sandbox (or Windows network-only) platform the
+    // foreground read-relaxation is coupled to the active sandbox FILESYSTEM-
+    // CONTAINING the host (ToolExecutor.sandboxFsContainedProvider), so it falls
+    // back to the pre-exec ask there. When ON, boot activates ASRT
+    // if the platform sandbox can run, else the default/settings path DEGRADES
+    // gracefully (loud warning, non-bricking); the explicit `LVIS_SANDBOX_ENABLED=1`
+    // env opt-in stays fail-closed. See boot.ts + boot/steps/sandbox-gate.ts.
+    osToolSandbox: process.platform === "darwin",
   },
 };
 

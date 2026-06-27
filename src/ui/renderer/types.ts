@@ -220,15 +220,18 @@ export type AppSettings = {
     /**
      * Permission policy host-classifies-risk migration gate. Mirrors the
      * main-process SOT in `src/data/settings-store.ts`
-     * `FeatureFlags.hostClassifiesRisk`. Default true (PR #1390 — host
-     * classifies plugin risk + foreground plugin read-relaxation enabled;
-     * shipped alongside the osToolSandbox default-on).
+     * `FeatureFlags.hostClassifiesRisk`. Default true on ALL platforms (PR #1390
+     * — host classifies plugin risk + foreground plugin read-relaxation). Safe
+     * all-platform because the read-relaxation is COUPLED to the OS sandbox
+     * being active: on a non-sandbox platform it falls back to the pre-exec ask.
      */
     hostClassifiesRisk?: boolean;
     /**
      * OS tool sandbox opt-in. Mirrors the main-process SOT in
-     * `src/data/settings-store.ts` `FeatureFlags.osToolSandbox`. Default
-     * false; takes effect only when a platform sandbox runner is available.
+     * `src/data/settings-store.ts` `FeatureFlags.osToolSandbox`. STAGED default
+     * (macOS-first): true on `darwin`, false on `linux`/`win32` (opt-in) until
+     * the C/D-series QA is green. Takes effect only when a platform sandbox
+     * runner is available.
      */
     osToolSandbox?: boolean;
   };

@@ -171,6 +171,37 @@ export interface AuditEntry {
   route?: string;
 }
 
+/**
+ * Boot-time OS-sandbox activation telemetry. ONE record per boot, written to the
+ * DEDICATED `<date>.sandbox-gate.jsonl` channel (mirrors the channel-separation
+ * convention of `*.permission-shadow.jsonl` / `*.sandbox.jsonl`). This lets the
+ * real-world sandbox activation success / degrade / abort / skip rates be
+ * monitored before the Linux/Windows `osToolSandbox` default is flipped on (the
+ * staged rollout — see settings-store DEFAULT_SETTINGS). Plain JSONL, NOT the
+ * HMAC-chained audit-grade channel.
+ */
+export interface SandboxGateAuditEntry {
+  /** ISO 8601 — stamped by {@link AuditLogger.logSandboxGate}. */
+  timestamp: string;
+  type: "sandbox_gate";
+  /** `process.platform` at boot. */
+  platform: NodeJS.Platform;
+  /**
+   * Which on-signal drove the gate decision:
+   *   - `explicit-env`     — `LVIS_SANDBOX_ENABLED=1` (deliberate, fail-closed).
+   *   - `default-settings` — the `osToolSandbox` setting / shipped default.
+   *   - `off`              — neither signal on (gate off → skip).
+   */
+  onSignal: "explicit-env" | "default-settings" | "off";
+  /** Terminal gate outcome — mirrors decideSandboxGate's action. */
+  outcome: "activate" | "degrade" | "abort" | "skip";
+  /**
+   * Stable machine reason from `decideSandboxGate` (SandboxGateReason). Absent
+   * on the gate-off skip path, which short-circuits before a decision is computed.
+   */
+  reason?: string;
+}
+
 export interface AuditRotationOptions {
   /** Rotate active .jsonl when it exceeds this size in bytes. Default: 10 MB. */
   maxBytes?: number;
@@ -201,6 +232,14 @@ export class AuditLogger {
    * non-HMAC channel — it is NOT tamper-evident / audit-grade.
    */
   private readonly permissionShadowLogFile: string;
+  /**
+   * OS-sandbox activation telemetry channel. Format `<date>.sandbox-gate.jsonl`.
+   * One record per boot ({@link logSandboxGate}). Kept separate from the
+   * canonical telemetry channel for the same reason as the shadow channel —
+   * channel-separation keeps the per-shape readers simple. Plain JSONL, NOT
+   * HMAC-chained.
+   */
+  private readonly sandboxGateLogFile: string;
   /** Permission policy — HMAC chain state. Wired via `setupPermissionAuditChain`. Null = uninitialized chain. */
   private permissionAuditSecret: string | null = null;
   /** Memoized last serialized line so each append knows the prevHash without re-reading the file. */
@@ -220,6 +259,7 @@ export class AuditLogger {
     this.logFile = join(this.auditDir, `${date}.jsonl`);
     this.permissionAuditLogFile = join(this.auditDir, `${date}.permission-audit.jsonl`);
     this.permissionShadowLogFile = join(this.auditDir, `${date}.permission-shadow.jsonl`);
+    this.sandboxGateLogFile = join(this.auditDir, `${date}.sandbox-gate.jsonl`);
   }
 
   log(entry: AuditEntry): void {
@@ -264,6 +304,39 @@ export class AuditLogger {
   /** Permission policy — accessor for the dedicated shadow channel file (tests). */
   getPermissionShadowLogFile(): string {
     return this.permissionShadowLogFile;
+  }
+
+  /**
+   * Append the ONE-per-boot OS-sandbox activation telemetry record to the
+   * dedicated `<date>.sandbox-gate.jsonl` channel. The caller (boot's sandbox
+   * gate) passes the resolved `{ platform, onSignal, outcome, reason }`; this
+   * method stamps `timestamp` + the `type` discriminant so the shape is
+   * controlled centrally. Same plain-JSONL + 0o600 hardening as {@link log};
+   * failures are swallowed — activation telemetry must never break boot (it runs
+   * on the abort path immediately before boot re-throws the fail-closed error).
+   */
+  logSandboxGate(event: Omit<SandboxGateAuditEntry, "timestamp" | "type">): void {
+    try {
+      const entry: SandboxGateAuditEntry = {
+        timestamp: new Date().toISOString(),
+        type: "sandbox_gate",
+        ...event,
+      };
+      const line = JSON.stringify(entry) + "\n";
+      appendFileSync(this.sandboxGateLogFile, line, { encoding: "utf-8", mode: 0o600 });
+      try {
+        chmodSync(this.sandboxGateLogFile, 0o600);
+      } catch {
+        // Non-fatal — chmod failure must not block telemetry writes.
+      }
+    } catch {
+      // Activation telemetry must never break boot.
+    }
+  }
+
+  /** Accessor for the dedicated sandbox-gate telemetry channel file (tests). */
+  getSandboxGateLogFile(): string {
+    return this.sandboxGateLogFile;
   }
 
   /**
