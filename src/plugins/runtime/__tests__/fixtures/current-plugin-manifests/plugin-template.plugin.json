@@ -1,0 +1,30 @@
+{
+  "id": "your-plugin-id",
+  "name": "Your Plugin Display Name",
+  "version": "0.1.1",
+  "publisher": "Your Org",
+  "entry": "dist/index.js",
+  "description": "LVIS 플러그인 템플릿입니다. 새 플러그인 생성 시 id/name/description/tools를 실제 기능에 맞게 바꾸고, 각 tool에는 사용 시기·사용하지 말아야 할 경우·입력 스키마·반환 형태를 toolSchemas에 선언하세요. 파일 인자가 있으면 pathFields도 선언하세요. (category는 호스트가 직접 분류하므로 선언하지 않습니다)",
+  "installPolicy": "user",
+  "tools": [],
+  "capabilities": [],
+  "toolSchemas": {},
+  "ui": [],
+  "configSchema": {
+    "properties": {
+      "exampleSetting": {
+        "type": "string",
+        "title": "예시 설정",
+        "description": "플러그인 설정 예시. 실제 플러그인에서는 이 항목을 제거하고 실제 설정을 정의하세요.",
+        "default": ""
+      },
+      "exampleSecret": {
+        "type": "string",
+        "title": "예시 시크릿",
+        "description": "format: secret 로 선언하면 호스트가 암호화 저장소(safeStorage)에 보관합니다.",
+        "format": "secret",
+        "default": ""
+      }
+    }
+  }
+}

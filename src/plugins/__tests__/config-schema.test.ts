@@ -25,7 +25,6 @@ import {
   stripSecretFields,
   compileConfigSchemaValidator,
 } from "../config-schema.js";
-import { patchHostCompatibilityIntoLegacySdkSchema } from "../runtime/manifest-validation.js";
 import {
   emitPluginConfigChange,
   subscribePluginConfigChange,
@@ -49,10 +48,11 @@ function buildAjv() {
 
 async function loadHostManifestSchema() {
   const raw = await readFile(SCHEMA_PATH, "utf-8");
-  // The host applies its compatibility relaxations (host secrets extension,
-  // optional per-tool category) before compiling the SDK schema, so tests
-  // validate against the same shape the runtime enforces.
-  return patchHostCompatibilityIntoLegacySdkSchema(JSON.parse(raw));
+  // As of @lvis/plugin-sdk v5.18.0 the manifest schema natively carries the
+  // host-required fields (hostSecrets, networkAccess) and makes per-tool
+  // `category` optional, so tests compile the SDK schema verbatim — the same
+  // shape the runtime enforces.
+  return JSON.parse(raw);
 }
 
 describe("US-B1 — host plugin.schema.json declares configSchema", () => {
