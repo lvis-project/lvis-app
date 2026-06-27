@@ -30,8 +30,10 @@
  *     write MUST be consciously gated or excluded (fail-closed). Awaiting a modal
  *     is async, so a SYNCHRONOUS mutating chokepoint (the lone one is
  *     `registerKeywords`) is NEVER converted to async (a contract break) — it is an
- *     explicit exclusion, still WRITE-classified, so the pre-exec tool-level ask is
- *     retained. hostFetch is the lone VERB-derived chokepoint: its read/write class
+ *     explicit exclusion, still WRITE-classified; under the pre-exec relaxation flag
+ *     it therefore runs UNGATED, but is BOUNDED (start-only, unreachable during
+ *     tool.execute — see {@link ENFORCEMENT_EXCLUSIONS}). hostFetch is the lone
+ *     VERB-derived chokepoint: its read/write class
  *     depends on a plugin-controlled arg VALUE, so it is gated INLINE in its host
  *     closure from the SAME single verb snapshot that pins the wire (never re-read
  *     here), via {@link gateMutatingEffect} directly — an explicit exclusion of the
@@ -86,41 +88,51 @@ import { isPlainNamespace, INSTRUMENTED } from "./hostapi-effect-recorder.js";
  * reasons: it is SYNCHRONOUS (an await-based gate would break its contract), or it
  * is gated elsewhere / by a different mechanism.
  *
- * Later-stage enforcement basis (the seam the binding design must keep sound):
- * the later stage that relaxes the pre-exec tool-level ask does so ONLY for tools
- * the effect-boundary observes as READ (no mutating effect). EVERY excluded path
- * below is still WRITE-classified in the SOT, so a tool that calls it PRODUCES a
- * recorded write effect → that tool is NEVER classified read → the relaxation
- * stage does NOT relax its pre-exec ask → the excluded mutation stays gated by the
- * pre-exec tool-level ask. Excluded-but-recorded writes therefore keep their
- * pre-exec gate precisely because they can never be classified read. This is why
- * an exclusion here is NOT a fail-open hole.
+ * Interaction with the pre-exec relaxation (the HONEST residual — NOT papered
+ * over): the relaxation stage skips the pre-exec ask for ALL foreground
+ * first-party plugin tools — it does NOT pre-classify read vs write (see
+ * executor.ts: the relaxation flips ANY foreground/plugin/layer≥3 `ask` to
+ * `allow`). So it is FALSE that an excluded write "keeps its pre-exec ask because
+ * the tool is write-classified": under the flag the pre-exec ask is gone for every
+ * relaxed plugin tool, and the ONLY remaining gate is the effect-boundary.
+ * Therefore the write-classified paths split into:
+ *   • GATED ({@link GATED_EFFECT_PATHS}, now incl. `openExternalUrl`) — caught at
+ *     the effect-gate (deny → blocked). `hostFetch` self-gates INLINE in its host
+ *     closure (a different mechanism, the SAME effect-gate). These are NOT ungated.
+ *   • The THREE remaining exclusions run UNGATED under the flag, each BOUNDED:
+ *       – `registerKeywords` — SYNC; start-only (createPlugin/start), never reached
+ *         during a gated tool.execute, so it produces NO effect mid-invocation.
+ *       – `config.set` — mutates the plugin's OWN config namespace (not
+ *         user/external data) + a guarded reload; bounded blast radius.
+ *       – `agentApproval.respond` — resolves HOST-OWNED approval machinery; gating
+ *         it with the same machinery is circular (would deadlock).
+ * That bounded-ungated set is the honest residual, enumerated here + in
+ * executor.ts — it is NOT a hidden fail-open hole (each item states why it is
+ * bounded). `openExternalUrl` (system-browser egress / exfil-class) was MOVED OUT
+ * of this set into the effect-gate precisely because it had genuine exposure.
  */
 export const ENFORCEMENT_EXCLUSIONS: ReadonlyMap<string, string> = new Map([
   // SYNCHRONOUS registry mutation (returns void) — an await-based modal is a
-  // contract break, so it is never gated here. It is WRITE-classified, so any
-  // tool that reaches it records a write → the read-relaxation stage keeps that
-  // tool's pre-exec ask (it can never be classified read). Reachability finding:
-  // in every 1st-party plugin it is called only during plugin start()/activation
-  // (createPlugin/start), OUTSIDE any runWithEffectGateContext scope, so it is
-  // not a mutation during a gated invocation; even if a future tool handler
-  // called it, the recorded write keeps its pre-exec ask.
-  ["registerKeywords", "SYNC registry mutation — cannot await a modal; WRITE-classified so the read-relaxation stage keeps its pre-exec ask"],
+  // contract break, so it is never gated here. Under the relaxation flag it runs
+  // UNGATED, but is BOUNDED: in every 1st-party plugin it is called only during
+  // plugin start()/activation (createPlugin/start), OUTSIDE any
+  // runWithEffectGateContext scope, so it produces NO effect during a gated
+  // tool.execute invocation — it is not reachable mid-execute.
+  ["registerKeywords", "SYNC registry mutation — cannot await a modal; start-only (createPlugin/start), not reachable during tool.execute → bounded ungated under the flag"],
   // Mutates the plugin's OWN config namespace + already triggers a guarded
-  // reload. WRITE-classified → a tool that calls it records a write → the
-  // read-relaxation stage keeps its pre-exec ask.
-  ["config.set", "own-config namespace mutation + guarded reload; WRITE-classified so the read-relaxation stage keeps its pre-exec ask"],
-  // Already routed + audited through the host link policy. WRITE-classified →
-  // the read-relaxation stage keeps its pre-exec ask.
-  ["openExternalUrl", "already routed + audited via the host link policy; WRITE-classified so the read-relaxation stage keeps its pre-exec ask"],
+  // reload. Under the relaxation flag it runs UNGATED, but is BOUNDED to the
+  // plugin's own config (not user/external data).
+  ["config.set", "own-config namespace mutation (not user/external data) + guarded reload → bounded ungated under the flag"],
   // RESOLVES a pending approval — gating the approval machinery with itself is
-  // circular. WRITE-classified → the read-relaxation stage keeps its pre-exec ask.
-  ["agentApproval.respond", "resolves the approval machinery (gating it with itself is circular); WRITE-classified so the read-relaxation stage keeps its pre-exec ask"],
+  // circular (would deadlock). Under the relaxation flag it runs UNGATED, BOUNDED
+  // by being confined to resolving HOST-OWNED approval state.
+  ["agentApproval.respond", "resolves host-owned approval machinery (gating it with itself is circular/deadlock) → bounded ungated under the flag"],
   // The lone VERB-derived egress — gated INLINE in its host closure from the
   // single verb snapshot that also self-records + pins the wire (so the gate's
-  // read/write class can never diverge from what is sent). The generic wrapper
-  // skips it precisely because it self-gates.
-  ["hostFetch", "verb-derived egress — gated INLINE in its closure from the single verb snapshot; the generic wrapper skips it"],
+  // read/write class can never diverge from what is sent). NOT ungated: it is
+  // caught at the SAME effect-gate, just inline. The generic wrapper skips it
+  // precisely because it self-gates.
+  ["hostFetch", "verb-derived egress — self-gated INLINE in its closure (same effect-gate, not ungated); the generic wrapper skips it"],
 ]);
 
 /**
