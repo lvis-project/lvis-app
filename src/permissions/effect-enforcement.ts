@@ -1,15 +1,17 @@
 /**
- * Effect-boundary ENFORCEMENT — Phase 3 of the host-classify completion design.
+ * Effect-boundary ENFORCEMENT — the enforcement stage of the host-classify
+ * completion design.
  *
- * Phase 1-2 (PR #1387) RECORD every host-mediated effect against a per-invocation
- * ledger ({@link instrumentEffectsByPath}, a PURE side-effect). This module adds a
- * SEPARATE, FLAG-GATED enforcement layer at the SAME chokepoint surface: when the
- * host-owned `hostClassifiesRisk` flag is ON and a plugin tool reaches a MUTATING
+ * The observability stage (the merged effect recorder, {@link
+ * instrumentEffectsByPath}) RECORDS every host-mediated effect against a
+ * per-invocation ledger as a PURE side-effect. This module adds a SEPARATE,
+ * FLAG-GATED enforcement layer at the SAME chokepoint surface: when the host-owned
+ * `hostClassifiesRisk` flag is ON and a plugin tool reaches a MUTATING
  * host-mediated effect, the user is asked to approve AT THE EFFECT (before the
  * mutation executes); a denial throws so the plugin handler surfaces a tool error;
  * reads never prompt.
  *
- * ── Three hard guarantees (the Phase 1-2 cluster review was brutal about
+ * ── Three hard guarantees (the recorder's cluster review was brutal about
  *    fail-open / behaviour-change) ──────────────────────────────────────────────
  *
  *  1. FLAG OFF = ZERO behaviour change. When {@link EffectEnforcementDeps.flagEnabled}
@@ -20,15 +22,15 @@
  *  2. ASYNC-ONLY gating. Awaiting a user modal is async, so ONLY chokepoints that
  *     are ALREADY async ({@link GATED_ASYNC_WRITE_PATHS}) are gated here. A
  *     SYNCHRONOUS mutating chokepoint is NEVER converted to async (a contract
- *     break) — it stays covered by Phase 0's pre-exec tool-level ask. hostFetch is
- *     the lone VERB-derived chokepoint: its read/write class depends on a
+ *     break) — it stays covered by the pre-exec tool-level ask. hostFetch is the
+ *     lone VERB-derived chokepoint: its read/write class depends on a
  *     plugin-controlled arg VALUE, so it is gated INLINE in its host closure from
  *     the SAME single verb snapshot that pins the wire (never re-read here), via
  *     {@link gateMutatingEffect} directly — the generic wrapper skips it.
  *
  *  3. HEADLESS = NO modal. In a headless/routine invocation (no interactive
  *     approver) the gate must NOT call `requestAndWait`. It fails CLOSED (throws),
- *     never silently allows. Headless mutations are already gated by Phase 0's
+ *     never silently allows. Headless mutations are already gated by the host's
  *     headless lane; the effect-gate engages interactively only in the FOREGROUND.
  *
  * ── Composition ────────────────────────────────────────────────────────────────
@@ -49,9 +51,9 @@
  * NEVER from a plugin-forgeable category/name/description. The effect (read vs
  * write) is decided from the SOT BEFORE any plugin-arg extraction, so a hostile or
  * stateful arg getter that throws can never flip the write or suppress the gate
- * (mirrors the Phase 1-2 fix). On deny the real impl is never invoked. The
- * confused-deputy nonce+HMAC defence is inherited for free by routing through
- * {@link ApprovalGate.requestAndWait}.
+ * (mirrors the recorder's suppression-resistance fix). On deny the real impl is
+ * never invoked. The confused-deputy nonce+HMAC defence is inherited for free by
+ * routing through {@link ApprovalGate.requestAndWait}.
  */
 import { randomUUID } from "node:crypto";
 import { AsyncLocalStorage } from "node:async_hooks";
@@ -66,8 +68,9 @@ import { isPlainNamespace } from "./hostapi-effect-recorder.js";
 
 /**
  * The host-mediated mutating chokepoint method PATHs that are ALREADY async and
- * are therefore gated by the generic enforcement wrapper. Curated to match the
- * Phase 3 design's enumerated async list. Membership rationale per chokepoint:
+ * are therefore gated by the generic enforcement wrapper. Curated to the
+ * cross-boundary egress / persistence / auth-session / worker / overlay mutations.
+ * Membership rationale per chokepoint:
  *
  *   ── Gated here (async writes) ──
  *   storage.write / storage.writeJson / storage.rm / storage.mkdir
@@ -80,7 +83,7 @@ import { isPlainNamespace } from "./hostapi-effect-recorder.js";
  *   triggerConversation        — stages an overlay prompt into the host UI.
  *   agentApproval.request      — registers an issuer + creates a pending gate entry.
  *
- *   ── NOT gated here (covered by Phase 0's pre-exec tool-level ask) ──
+ *   ── NOT gated here (covered by the pre-exec tool-level ask) ──
  *   hostFetch                  — async, but VERB-derived: gated INLINE in its host
  *                                closure from the single verb snapshot (see file
  *                                header) so the gate's read/write class can never
@@ -89,10 +92,10 @@ import { isPlainNamespace } from "./hostapi-effect-recorder.js";
  *                                cannot await a modal without a contract break.
  *   config.set                 — async, but mutates the plugin's OWN config
  *                                namespace and already triggers a guarded reload;
- *                                left to Phase 0 to keep this layer's surface to the
- *                                cross-boundary egress/persistence/auth mutations.
+ *                                left to the pre-exec ask to keep this layer's
+ *                                surface to the cross-boundary mutations.
  *   openExternalUrl            — async, but already routed + audited through the
- *                                host link policy; left to Phase 0.
+ *                                host link policy; left to the pre-exec ask.
  *   agentApproval.respond      — async, but it RESOLVES a pending approval; gating
  *                                the approval machinery with itself is circular.
  *
@@ -119,7 +122,7 @@ export const GATED_ASYNC_WRITE_PATHS: ReadonlySet<string> = new Set([
  * Per-invocation enforcement context, bound by the executor around `tool.execute`
  * (next to the effect ledger) and read by the effect-gate through
  * {@link AsyncLocalStorage}. Carries the host-owned FOREGROUND/headless signal
- * (the same `permissionContext.headless` that drives Phase 0's headless lane), the
+ * (the same `permissionContext.headless` that drives the host's headless lane), the
  * tool name for the modal, and an invocation-scoped `allow-once` grant set so N
  * writes to the same target inside ONE tool call pop at most one modal.
  */
@@ -161,16 +164,16 @@ export function currentEffectGateContext(): EffectGateContext | undefined {
  * instead, not here. The key is the host-owned descriptor only — a grant is NEVER
  * widened beyond its exact (plugin, method, target) descriptor.
  *
- * NOTE (Phase 3 scope): `allow-always` is held for the process lifetime here;
- * durable cross-restart persistence of effect grants is deferred to Phase 4 (which
- * also surfaces the flag flip for a user security decision). No behaviour depends
- * on persistence while the flag ships OFF by default.
+ * NOTE (current scope): `allow-always` is held for the process lifetime here;
+ * durable cross-restart persistence of effect grants is left to the later stage
+ * that also surfaces the flag flip for a user security decision. No behaviour
+ * depends on persistence while the flag ships OFF by default.
  */
 const descriptorGrants = new Map<string, ApprovalChoice>();
 
 /** Stable, non-widening grant key for one effect descriptor. */
 function descriptorKey(pluginId: string, methodPath: string, target: string | undefined): string {
-  return `${pluginId} ${methodPath} ${target ?? ""}`;
+  return `${pluginId} ${methodPath} ${target ?? ""}`;
 }
 
 /** Thrown by the effect-gate when a mutating effect is denied; surfaced as a tool error. */
@@ -231,7 +234,7 @@ export async function gateMutatingEffect(params: {
 
   const ctx = currentEffectGateContext();
   // Outside a gated tool invocation (boot, plugin lifecycle) there is no tool
-  // effect to gate and no approver — Phase 0 governs only tool invocations.
+  // effect to gate and no approver — the pre-exec ask governs only tool invocations.
   if (!ctx) return;
 
   const key = descriptorKey(params.pluginId, params.methodPath, params.target);
@@ -336,7 +339,7 @@ export function enforceMutatingEffects<T extends object>(
         return (async (): Promise<unknown> => {
           // Decide the effect from the host-owned SOT BEFORE touching any
           // plugin-controlled arg, so a throwing/stateful arg getter can never
-          // flip the write or suppress the gate (mirrors the Phase 1-2 fix).
+          // flip the write or suppress the gate (mirrors the recorder's fix).
           const spec = HOSTAPI_EFFECT_BY_PATH[path];
           const effect: Effect = spec
             ? CHOKEPOINT_EFFECT[spec.kind as StaticChokepointKind] ?? "write"

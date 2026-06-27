@@ -1,5 +1,5 @@
 /**
- * effect-enforcement.test.ts — Phase 3 effect-boundary ENFORCEMENT.
+ * effect-enforcement.test.ts — effect-boundary ENFORCEMENT.
  *
  * Covers the three hard guarantees and the security/UX properties:
  *   • FLAG OFF → no approval, executes exactly as today (byte-for-byte).
@@ -69,7 +69,7 @@ function makeApi(log: string[]) {
         return "data";
       },
     },
-    // a SYNC write chokepoint — NOT gated here (covered by Phase 0), must stay sync.
+    // a SYNC write chokepoint — NOT gated here (covered by the pre-exec ask), must stay sync.
     registerKeywords: (_kw: unknown): void => {
       log.push("kw");
     },
@@ -344,7 +344,7 @@ describe("GATED_ASYNC_WRITE_PATHS — curated async-only membership", () => {
     ]) {
       expect(GATED_ASYNC_WRITE_PATHS.has(p)).toBe(true);
     }
-    // hostFetch self-gates inline (verb-derived); these are sync / Phase-0-covered.
+    // hostFetch self-gates inline (verb-derived); these are sync / pre-exec-covered.
     for (const p of ["hostFetch", "registerKeywords", "config.set", "openExternalUrl", "agentApproval.respond"]) {
       expect(GATED_ASYNC_WRITE_PATHS.has(p)).toBe(false);
     }
