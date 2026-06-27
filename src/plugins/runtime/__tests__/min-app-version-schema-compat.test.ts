@@ -1,12 +1,11 @@
 /**
  * `requires.minAppVersion` schema-compatibility — the REAL SDK-schema validator
- * path (not a permissive test schema). The pinned `@lvis/plugin-sdk` schema's
- * `requires` block ships `additionalProperties:false` and (at the current pin)
- * predates `minAppVersion`, so without the host compatibility patch
- * (`patchMinAppVersionIntoLegacySdkSchema`) a manifest declaring
- * `requires.minAppVersion` is rejected as an unknown property and the plugin is
- * silently dropped at load — the local-indexer load failure. This test fails
- * without the patch and passes with it (sibling to network-access-manifest).
+ * path (not a permissive test schema). As of @lvis/plugin-sdk v5.18.0 the
+ * schema's `requires` block declares `minAppVersion` natively while keeping
+ * `additionalProperties:false`, so a manifest declaring `requires.minAppVersion`
+ * (the local-indexer shape) is accepted and an unknown `requires` field is still
+ * rejected — with no host compatibility patch (sibling to
+ * network-access-manifest).
  */
 import { describe, it, expect, beforeEach, afterEach } from "vitest";
 import { mkdtemp, rm, writeFile } from "node:fs/promises";
