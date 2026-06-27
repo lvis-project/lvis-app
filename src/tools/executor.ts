@@ -2225,7 +2225,7 @@ export class ToolExecutor {
       //     (residual #1 below) when the OS sandbox is ACTIVE. On a host where
       //     the sandbox is INACTIVE (degraded / gate off) the relaxation would
       //     be WEAKER than the pre-exec ask it replaces, so it does NOT fire —
-      //     the existing pre-exec ask (Phase-0 modal) stands. This makes
+      //     the existing pre-exec approval ask stands. This makes
       //     `hostClassifiesRisk`-ON safe on every platform: macOS (sandbox
       //     active) relaxes for the clean UX; a degraded/sandbox-off host
       //     falls back to the known-safe ask.
