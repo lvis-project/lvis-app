@@ -170,6 +170,33 @@ function makePluginOpenUrlTool(
   });
 }
 
+/**
+ * A plugin tool the HOST INSPECTOR classifies as `read` when the flag is ON:
+ * invoked with `{ command: "ls" }`, inspectHostRisk parses the read-only verb and
+ * returns `"read"` → categoryBasedDecision auto-allows it at layer 6 (NOT an ask),
+ * so it bypasses the relaxation block. With the flag OFF the DECLARED `"read"`
+ * category drives the (identical) auto-allow. `ran` flips only inside execute.
+ */
+function makePluginReadTool(spy: { ran: boolean }): Tool {
+  return createDynamicTool({
+    name: "plugin_reader",
+    description: "A plugin tool the host inspector classifies as a read.",
+    source: "plugin",
+    pluginId: "p-reader",
+    category: "read",
+    pathFields: [],
+    isReadOnly: () => true,
+    jsonSchema: {
+      type: "object",
+      properties: { command: { type: "string" } },
+    },
+    execute: async () => {
+      spy.ran = true;
+      return { output: "reader-ok", isError: false };
+    },
+  });
+}
+
 function makeMcpTool(spy: { ran: boolean }): Tool {
   return createDynamicTool({
     name: "mcp_tool",
@@ -199,6 +226,23 @@ function makeBuiltinWriteTool(spy: { ran: boolean }): Tool {
     execute: async () => {
       spy.ran = true;
       return { output: "builtin-ok", isError: false };
+    },
+  });
+}
+
+/** A builtin tool the inspector leaves as the trusted declared `read`. */
+function makeBuiltinReadTool(spy: { ran: boolean }): Tool {
+  return createDynamicTool({
+    name: "builtin_read",
+    description: "A builtin read tool.",
+    source: "builtin",
+    category: "read",
+    pathFields: [],
+    isReadOnly: () => true,
+    jsonSchema: { type: "object", properties: { command: { type: "string" } } },
+    execute: async () => {
+      spy.ran = true;
+      return { output: "builtin-read-ok", isError: false };
     },
   });
 }
@@ -699,6 +743,238 @@ describe("plugin read-relaxation — confines-aware via the active-capability SO
       { sessionId: "s", permissionContext: userPermissionContext() },
     );
 
+    expect(requests).toHaveLength(1);
+    expect(requests[0]?.category).toBe("tool");
+    expect(spy.ran).toBe(false);
+    expect(result.is_error).toBe(true);
+  });
+});
+
+// The READ-auto-allow ↔ sandbox-fs-containment coupling. A plugin tool the host
+// inspector classifies as `read` (`{ command: "ls" }`) is auto-allowed at layer 6
+// (NOT an `ask`), so it skips the relaxation block above. This coupling closes the
+// SAME off-hostApi residual the relaxation closes — when the sandbox is NOT
+// filesystem-contained, a plugin read auto-allow must instead show the pre-exec
+// ask. Mirrors the relaxation coupling exactly: flag-on + plugin + foreground +
+// not-fs-contained → ask; fs-contained → unchanged auto-allow.
+describe("plugin read auto-allow — coupled to sandbox FILESYSTEM-CONTAINMENT", () => {
+  it("flag ON + host-derived plugin read + sandbox FILESYSTEM-CONTAINED → auto-allows (NO modal, tool runs) — macOS/Linux unchanged", async () => {
+    const spy = { ran: false };
+    const { gate, requests } = makeGate("deny-once");
+    const { executor } = makeExecutor(
+      makePluginReadTool(spy),
+      gate,
+      () => true,
+      new PermissionManager("/tmp/nonexistent-permissions.json"),
+      undefined,
+      () => true, // sandbox FILESYSTEM-CONTAINED
+    );
+
+    const [result] = await executor.executeAll(
+      [{ id: "t1", name: "plugin_reader", input: { command: "ls" } }],
+      { sessionId: "s", permissionContext: userPermissionContext() },
+    );
+
+    // inspectHostRisk("ls") → "read" → layer-6 auto-allow; fs-contained means the
+    // coupling does NOT fire, so the read auto-allows exactly as before: no modal.
+    expect(requests).toHaveLength(0);
+    expect(spy.ran).toBe(true);
+    expect(result.is_error).toBeFalsy();
+    expect(result.content).toContain("reader-ok");
+  });
+
+  it("flag ON + host-derived plugin read + sandbox NOT filesystem-contained → now ASKS (pre-exec modal, deny → tool NOT run) — the hardening", async () => {
+    const spy = { ran: false };
+    const { gate, requests } = makeGate("deny-once");
+    const { executor } = makeExecutor(
+      makePluginReadTool(spy),
+      gate,
+      () => true,
+      new PermissionManager("/tmp/nonexistent-permissions.json"),
+      undefined,
+      () => false, // sandbox NOT filesystem-contained (degraded / off / network-only)
+    );
+
+    const [result] = await executor.executeAll(
+      [{ id: "t1", name: "plugin_reader", input: { command: "ls" } }],
+      { sessionId: "s", permissionContext: userPermissionContext() },
+    );
+
+    // The off-hostApi residual is uncontained without fs-containment → the read
+    // auto-allow is converted to the pre-exec ask (category "tool"); on deny-once
+    // the tool never executes. Was a silent auto-allow before this coupling.
+    expect(requests).toHaveLength(1);
+    expect(requests[0]?.category).toBe("tool");
+    expect(spy.ran).toBe(false);
+    expect(result.is_error).toBe(true);
+  });
+
+  it("flag ON + host-derived plugin read + sandbox NOT fs-contained + ALLOW at the ask → tool runs (the ask is the gate, not a hard block)", async () => {
+    const spy = { ran: false };
+    const { gate, requests } = makeGate("allow-once");
+    const { executor } = makeExecutor(
+      makePluginReadTool(spy),
+      gate,
+      () => true,
+      new PermissionManager("/tmp/nonexistent-permissions.json"),
+      undefined,
+      () => false, // NOT filesystem-contained
+    );
+
+    const [result] = await executor.executeAll(
+      [{ id: "t1", name: "plugin_reader", input: { command: "ls" } }],
+      { sessionId: "s", permissionContext: userPermissionContext() },
+    );
+
+    // The coupling produces a genuine user ask (not a deny): on allow-once the
+    // pre-exec modal fired exactly once and the read proceeds.
+    expect(requests).toHaveLength(1);
+    expect(requests[0]?.category).toBe("tool");
+    expect(spy.ran).toBe(true);
+    expect(result.is_error).toBeFalsy();
+    expect(result.content).toContain("reader-ok");
+  });
+
+  it("flag OFF + plugin read + sandbox NOT fs-contained → unchanged: auto-allows (NO modal) — flag-OFF byte-for-byte", async () => {
+    const spy = { ran: false };
+    const { gate, requests } = makeGate("deny-once");
+    const { executor } = makeExecutor(
+      makePluginReadTool(spy),
+      gate,
+      () => false, // flag OFF — declared "read" drives the (identical) auto-allow
+      new PermissionManager("/tmp/nonexistent-permissions.json"),
+      undefined,
+      () => false, // NOT filesystem-contained — irrelevant while the flag is OFF
+    );
+
+    const [result] = await executor.executeAll(
+      [{ id: "t1", name: "plugin_reader", input: { command: "ls" } }],
+      { sessionId: "s", permissionContext: userPermissionContext() },
+    );
+
+    expect(requests).toHaveLength(0);
+    expect(spy.ran).toBe(true);
+    expect(result.is_error).toBeFalsy();
+    expect(result.content).toContain("reader-ok");
+  });
+
+  it("flag ON + BUILTIN read + sandbox NOT fs-contained → unchanged: auto-allows (NO modal) — builtins are host-trusted, not coupled", async () => {
+    const spy = { ran: false };
+    const { gate, requests } = makeGate("deny-once");
+    const { executor } = makeExecutor(
+      makeBuiltinReadTool(spy),
+      gate,
+      () => true,
+      new PermissionManager("/tmp/nonexistent-permissions.json"),
+      undefined,
+      () => false, // NOT filesystem-contained
+    );
+
+    const [result] = await executor.executeAll(
+      [{ id: "t1", name: "builtin_read", input: { command: "ls" } }],
+      { sessionId: "s", permissionContext: userPermissionContext() },
+    );
+
+    // `source === "plugin"` excludes builtins → the coupling never fires; a
+    // builtin read auto-allows regardless of sandbox containment.
+    expect(requests).toHaveLength(0);
+    expect(spy.ran).toBe(true);
+    expect(result.is_error).toBeFalsy();
+    expect(result.content).toContain("builtin-read-ok");
+  });
+
+  it("flag ON + HEADLESS plugin read + sandbox NOT fs-contained → unchanged: auto-allows (NO modal, tool runs) — coupling is foreground-only", async () => {
+    const spy = { ran: false };
+    const { gate, requests } = makeGate("deny-once");
+    const { executor } = makeExecutor(
+      makePluginReadTool(spy),
+      gate,
+      () => true,
+      new PermissionManager("/tmp/nonexistent-permissions.json"),
+      undefined,
+      () => false, // NOT filesystem-contained
+    );
+
+    const [result] = await executor.executeAll(
+      [{ id: "t1", name: "plugin_reader", input: { command: "ls" } }],
+      { sessionId: "s", permissionContext: userPermissionContext({ headless: true }) },
+    );
+
+    // Foreground-only (mirrors the relaxation): a bare layer-6 ask in a headless
+    // lane would HARD-DENY (no reviewer route), breaking legitimate routine reads
+    // and making headless reads stricter than headless writes. So headless plugin
+    // reads keep today's auto-allow — no modal, tool runs.
+    expect(requests).toHaveLength(0);
+    expect(spy.ran).toBe(true);
+    expect(result.is_error).toBeFalsy();
+    expect(result.content).toContain("reader-ok");
+  });
+});
+
+describe("plugin read auto-allow coupling — confines-aware via the active-capability SOT", () => {
+  beforeEach(() => {
+    __resetActiveSandboxCapabilityForTest();
+  });
+  afterEach(() => {
+    __resetActiveSandboxCapabilityForTest();
+  });
+
+  it("active capability filesystem-contained (mac/linux full-confine) → plugin read auto-allows (NO modal)", async () => {
+    setActiveSandboxCapability({
+      kind: "asrt",
+      confidence: "verified",
+      platform: "linux",
+      reason: "ASRT (bwrap) active — fs+process+network contained",
+      confines: { filesystem: true, process: true, network: true },
+    });
+    const spy = { ran: false };
+    const { gate, requests } = makeGate("deny-once");
+    const { executor } = makeExecutor(
+      makePluginReadTool(spy),
+      gate,
+      () => true,
+      new PermissionManager("/tmp/nonexistent-permissions.json"),
+      undefined,
+      isActiveSandboxFilesystemContained,
+    );
+
+    const [result] = await executor.executeAll(
+      [{ id: "t1", name: "plugin_reader", input: { command: "ls" } }],
+      { sessionId: "s", permissionContext: userPermissionContext() },
+    );
+
+    expect(requests).toHaveLength(0);
+    expect(spy.ran).toBe(true);
+    expect(result.is_error).toBeFalsy();
+    expect(result.content).toContain("reader-ok");
+  });
+
+  it("active capability NETWORK-ONLY (Windows srt-win, confines.filesystem === false) → plugin read now ASKS (NOT silently auto-allowed)", async () => {
+    setActiveSandboxCapability({
+      kind: "asrt",
+      confidence: "verified",
+      platform: "win32",
+      reason: "ASRT (srt-win) active — network egress contained, NO filesystem jail",
+      confines: { filesystem: false, process: false, network: true },
+    });
+    const spy = { ran: false };
+    const { gate, requests } = makeGate("deny-once");
+    const { executor } = makeExecutor(
+      makePluginReadTool(spy),
+      gate,
+      () => true,
+      new PermissionManager("/tmp/nonexistent-permissions.json"),
+      undefined,
+      isActiveSandboxFilesystemContained,
+    );
+
+    const [result] = await executor.executeAll(
+      [{ id: "t1", name: "plugin_reader", input: { command: "ls" } }],
+      { sessionId: "s", permissionContext: userPermissionContext() },
+    );
+
+    // A network-only sandbox contains egress but NOT the off-hostApi FS residual,
+    // so the read auto-allow must convert to the pre-exec ask just like the relaxation.
     expect(requests).toHaveLength(1);
     expect(requests[0]?.category).toBe("tool");
     expect(spy.ran).toBe(false);
