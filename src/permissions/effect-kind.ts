@@ -295,9 +295,10 @@ export const HOSTAPI_EFFECT_BY_PATH: Record<string, HostApiEffectSpec> = {
   // registerKeywords is the LONE SYNCHRONOUS write chokepoint (returns void) —
   // deliberately NOT marked async, so the await-based enforcement wrapper can
   // never gate it (a sync→async conversion is a contract break). It is an
-  // explicit enforcement exclusion instead; because it is still WRITE-classified
-  // the recorder marks any tool that calls it as mutating, so the pre-exec ask
-  // is retained (see effect-enforcement.ts ENFORCEMENT_EXCLUSIONS).
+  // explicit enforcement exclusion instead; it stays WRITE-classified so the
+  // recorder marks any tool that calls it as mutating. Under the pre-exec
+  // relaxation flag it runs UNGATED, but is BOUNDED (start-only, not reachable
+  // during a gated tool.execute — see effect-enforcement.ts ENFORCEMENT_EXCLUSIONS).
   registerKeywords: { kind: "registerKeywords" },
   // callLlm carries the prompt BODY to an external provider; target stays
   // undefined (the provider is not in args and the prompt is never a target).

