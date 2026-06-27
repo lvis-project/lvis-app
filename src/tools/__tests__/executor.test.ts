@@ -3608,7 +3608,7 @@ describe("ToolExecutor — host-classifies-risk enforcement scope", () => {
   // The probe uses the HEADLESS lane deliberately: the effect-boundary pre-exec
   // relaxation (flag ON + plugin + FOREGROUND) bypasses the reviewer/ask lane
   // entirely, so a FOREGROUND plugin tool no longer invokes the reviewer. The
-  // headless lane is NOT relaxed (it keeps the Phase-0 reviewer lane), so it is
+  // headless lane is NOT relaxed (it keeps the existing reviewer lane), so it is
   // where the enforced category still flows into the classifier — `resolveEnforcedCategory`
   // re-derives the host category for plugins identically on both lanes.
   function makeDivergentTool(source: "builtin" | "plugin", name: string): {

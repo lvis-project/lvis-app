@@ -4,7 +4,7 @@
  * The FINAL phase of the host-classify completion: when `hostClassifiesRisk` is
  * ON, a FIRST-PARTY PLUGIN tool in a FOREGROUND context no longer runs the
  * pre-exec blocking approval lane. Instead it EXECUTES under effect-boundary
- * gating (the merged Phase-3 effect-gate is the only gate):
+ * gating (the merged effect-boundary gate is the only gate):
  *   • a plugin tool that performs NO mutating host-mediated effect runs to
  *     completion with ZERO modals;
  *   • a plugin tool that reaches a host-mediated WRITE chokepoint trips the
@@ -13,7 +13,7 @@
  * Scope locked here (each is a separate cluster-review concern):
  *   • FLAG OFF (default) → full pre-exec ask, byte-for-byte unchanged.
  *   • PLUGIN ONLY → MCP + builtin keep the pre-exec ask (not relaxed).
- *   • FOREGROUND ONLY → a headless plugin tool keeps the Phase-0 headless lane.
+ *   • FOREGROUND ONLY → a headless plugin tool keeps the existing headless lane.
  *   • DENY STILL WINS → a standing deny rule / a prior user deny-always still
  *     blocks under relaxation (it is a `deny`, never an `ask`).
  */
@@ -295,7 +295,7 @@ describe("plugin read-relaxation — NOT relaxed (scope guards)", () => {
     expect(result.is_error).toBe(true);
   });
 
-  it("flag ON + HEADLESS plugin tool → NOT relaxed: kept on the Phase-0 headless lane (no reviewer → blocked, tool does not execute)", async () => {
+  it("flag ON + HEADLESS plugin tool → NOT relaxed: kept on the existing headless lane (no reviewer → blocked, tool does not execute)", async () => {
     const spy = { ran: false };
     const { gate, requests } = makeGate("deny-once");
     // No reviewer wired → the headless lane denies a mutating plugin tool
