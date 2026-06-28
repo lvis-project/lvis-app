@@ -22,9 +22,10 @@ beforeEach(() => manifestIntegrityState.resetForTests());
 
 const PLUGIN_ID = "com.example.notes";
 
-function fakeRuntime(over: Partial<Pick<PluginRuntime, "isPluginEnabled" | "call">>): PluginRuntime {
+function fakeRuntime(over: Partial<Pick<PluginRuntime, "isPluginEnabled" | "isSessionActivated" | "call">>): PluginRuntime {
   return {
     isPluginEnabled: () => true,
+    isSessionActivated: () => false,
     call: vi.fn(async () => "ok"),
     ...over,
   } as unknown as PluginRuntime;
@@ -115,6 +116,80 @@ const MANIFEST: PluginManifest = {
     },
   },
 } as PluginManifest;
+
+describe("pluginRuntimeToolDelegate — Gate 4: session-scoped on-demand activation", () => {
+  it("registry-disabled + session-activated → tool call SUCCEEDS (gate relaxed)", async () => {
+    // This is the load-bearing end-to-end test the critic required:
+    // a disabled plugin that was session-activated via request_plugin must be
+    // EXECUTABLE (not just visible). Reverts to isError if the gate is reverted
+    // to only check isPluginEnabled.
+    const call = vi.fn(async () => ({ scanned: 42 }));
+    const delegate = pluginRuntimeToolDelegate(
+      fakeRuntime({ isPluginEnabled: () => false, isSessionActivated: () => true, call }),
+      PLUGIN_ID,
+    );
+    const out = await delegate("index_scan", { q: "test" });
+    // must NOT be an error
+    expect(out.isError).toBeUndefined();
+    // runtime.call must have been invoked (the gate did not block it)
+    expect(call).toHaveBeenCalled();
+    expect(out._meta?.[RAW_RESULT_META]).toEqual({ scanned: 42 });
+  });
+
+  it("[MUTATION] reverting gate → disabled+session-activated call WOULD fail", async () => {
+    // Documents that isSessionActivated is the load-bearing check: if the gate
+    // were reverted to `!isPluginEnabled` only, the test above would return
+    // isError:true and this assertion (for the relaxed path) would fail.
+    // The test above with isSessionActivated:()=>true + expect(out.isError).toBeUndefined()
+    // IS the mutation detector — it passes only when Gate 4 checks isSessionActivated.
+    const call = vi.fn(async () => "ok");
+    const delegate = pluginRuntimeToolDelegate(
+      fakeRuntime({ isPluginEnabled: () => false, isSessionActivated: () => false, call }),
+      PLUGIN_ID,
+    );
+    const out = await delegate("index_scan", {});
+    // Without session activation the original gate behavior is preserved
+    expect(out.isError).toBe(true);
+    expect(out.content[0].text).toContain("inactive");
+    expect(call).not.toHaveBeenCalled();
+  });
+
+  it("non-allow-listed disabled plugin (not session-activated) → STILL refused by gate", async () => {
+    const call = vi.fn(async () => "unreachable");
+    const delegate = pluginRuntimeToolDelegate(
+      fakeRuntime({ isPluginEnabled: () => false, isSessionActivated: () => false, call }),
+      PLUGIN_ID,
+    );
+    const out = await delegate("some_tool", {});
+    expect(out.isError).toBe(true);
+    expect(call).not.toHaveBeenCalled();
+  });
+
+  it("main chat: disabled plugin (no session activation) → REFUSED (behavior unchanged)", async () => {
+    // In main chat allowedPluginIds is undefined so no session activation occurs;
+    // isSessionActivated always returns false → gate closes identically to before.
+    const call = vi.fn(async () => "unreachable");
+    const delegate = pluginRuntimeToolDelegate(
+      fakeRuntime({ isPluginEnabled: () => false, isSessionActivated: () => false, call }),
+      PLUGIN_ID,
+    );
+    const out = await delegate("tool", {});
+    expect(out.isError).toBe(true);
+    expect(out.content[0].text).toContain("inactive");
+    expect(call).not.toHaveBeenCalled();
+  });
+
+  it("registry-ENABLED + session-activated → succeeds (enabled takes priority, no regression)", async () => {
+    const call = vi.fn(async () => "result");
+    const delegate = pluginRuntimeToolDelegate(
+      fakeRuntime({ isPluginEnabled: () => true, isSessionActivated: () => true, call }),
+      PLUGIN_ID,
+    );
+    const out = await delegate("tool", {});
+    expect(out.isError).toBeUndefined();
+    expect(call).toHaveBeenCalled();
+  });
+});
 
 describe("end-to-end: raw plugin value survives manifest → server → host → metadata.rawResult", () => {
   it("registered Tool surfaces metadata.rawResult from the plugin return value", async () => {

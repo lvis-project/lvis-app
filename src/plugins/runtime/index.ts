@@ -1887,6 +1887,39 @@ export class PluginRuntime {
   }
 
   /**
+   * Transient, non-persistent activation set for the current conversation
+   * session. A registry-disabled plugin that was on-demand activated by
+   * `request_plugin` in a routine session is recorded here so
+   * {@link pluginRuntimeToolDelegate} can allow its tool calls for the
+   * duration of the session.
+   *
+   * Lifecycle — managed by ConversationLoop:
+   *  - `setSessionActivated` is called immediately after session-activation
+   *    (the same event that records the id in ConversationLoop.sessionActivatedPluginIds).
+   *  - `clearSessionActivated` mirrors every `.sessionActivatedPluginIds.clear()`
+   *    call (both resetSession paths) so the set never leaks across sessions.
+   *
+   * INVARIANT: `setPluginEnabled` is NEVER called on this path — the plugin
+   * remains registry-disabled throughout.
+   */
+  private readonly sessionActivatedPluginIdsForRuntime = new Set<string>();
+
+  /** Returns true iff the plugin was on-demand session-activated this session. */
+  isSessionActivated(pluginId: string): boolean {
+    return this.sessionActivatedPluginIdsForRuntime.has(pluginId);
+  }
+
+  /** Record a plugin as session-activated (called by ConversationLoop on Gate 2 pass). */
+  setSessionActivated(pluginId: string): void {
+    this.sessionActivatedPluginIdsForRuntime.add(pluginId);
+  }
+
+  /** Clear all session activations (called by ConversationLoop on every session reset). */
+  clearSessionActivated(): void {
+    this.sessionActivatedPluginIdsForRuntime.clear();
+  }
+
+  /**
    * #1176 — toggle a plugin's active/inactive state. Persists `enabled` to the
    * registry atomically and updates the in-memory mirror. Deliberately does NOT
    * unload/reload the plugin: tool exposure is recomputed per turn from
