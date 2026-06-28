@@ -55,17 +55,26 @@ function buildTextIcon(rawText: string): ComponentType<LucideProps> {
   if (cached) return cached;
   const len = (text.length || 1) as 1 | 2 | 3 | 4;
   const fontSize = `${TEXT_FONT_SIZE_REM[len]}rem`;
-  function TextIcon({ className }: LucideProps) {
+  function TextIcon({ className, style }: LucideProps) {
+    const callerFontSize = style?.fontSize;
     return createElement(
       "span",
       {
-        className: `${className ?? ""} inline-flex items-center justify-center font-bold leading-none tracking-tight`.trim(),
+        // `overflow-hidden` clamps the glyph to the box the call-site sizes via
+        // `className` (e.g. the 28px plugin-grid avatar, or a 14px picker-row
+        // slot). Without it a text glyph tuned for the avatar would spill out
+        // of a smaller slot and collide with the adjacent label (the "EPEP"
+        // overlap in the slash picker).
+        className: `${className ?? ""} inline-flex items-center justify-center overflow-hidden font-bold leading-none tracking-tight`.trim(),
         // Screen readers should announce the badge text — e.g. "EP" — since
         // it carries the plugin's identity. The visual label below the
         // avatar may be the same or richer; double-announce is acceptable.
         "aria-label": text,
         role: "img",
-        style: { fontSize },
+        // Default font-size is tuned for the 28px avatar. Only fontSize is
+        // accepted from callers so manifest-controlled icon text cannot gain a
+        // broader style injection path through this host component.
+        style: { fontSize: callerFontSize ?? fontSize },
       },
       text,
     );
