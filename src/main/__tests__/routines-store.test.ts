@@ -12,7 +12,7 @@ import { describe, it, expect } from "vitest";
 import { mkdtempSync, rmSync, statSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { tmpdir, platform } from "node:os";
-import { RoutinesStore, MAX_PERSISTED_ROUTINES, MAX_LLM_SESSION_ROUTINES } from "../routines-store.js";
+import { RoutinesStore, MAX_PERSISTED_ROUTINES, MAX_LLM_SESSION_ROUTINES, MAX_ROUTINE_SOURCE_LENGTH } from "../routines-store.js";
 
 function tempStore() {
   const dir = mkdtempSync(join(tmpdir(), "lvis-rs-v2-"));
@@ -636,6 +636,104 @@ describe("RoutinesStore v2 — advanceMonthly originalDay preservation (C-critic
       expect(nextAt.getTime()).toBeGreaterThan(Date.now());
       // Day should be 28 (originalDay), not clamped higher
       expect(nextAt.getUTCDate()).toBe(28);
+    } finally {
+      cleanup();
+    }
+  });
+});
+
+describe("RoutinesStore v2 — source marker", () => {
+  it("persists the source marker through add() and a reload from disk", async () => {
+    const { store, dir, cleanup } = tempStore();
+    try {
+      const r = await store.add({
+        trigger: "schedule",
+        execution: "llm-session",
+        schedule: { at: futureIso(), repeat: { kind: "daily" } },
+        prePrompt: "nightly rescan",
+        source: "suggestion:local-indexer:nightly-rescan",
+      });
+      expect(r.source).toBe("suggestion:local-indexer:nightly-rescan");
+      // Reload through a fresh store instance to prove on-disk round-trip.
+      const reloaded = new RoutinesStore(join(dir, "routines.json"));
+      await reloaded.load();
+      const found = reloaded.list().find((x) => x.id === r.id);
+      expect(found?.source).toBe("suggestion:local-indexer:nightly-rescan");
+    } finally {
+      cleanup();
+    }
+  });
+
+  it("leaves source unset when omitted (manual creation)", async () => {
+    const { store, cleanup } = tempStore();
+    try {
+      const r = await store.add({
+        trigger: "schedule",
+        execution: "notification-only",
+        schedule: { at: futureIso() },
+        notificationTitle: "manual",
+      });
+      expect(r.source).toBeUndefined();
+    } finally {
+      cleanup();
+    }
+  });
+
+  it("collapses an empty / whitespace-only source to unset", async () => {
+    const { store, cleanup } = tempStore();
+    try {
+      const r = await store.add({
+        trigger: "schedule",
+        execution: "notification-only",
+        schedule: { at: futureIso() },
+        notificationTitle: "blank-source",
+        source: "   ",
+      });
+      expect(r.source).toBeUndefined();
+    } finally {
+      cleanup();
+    }
+  });
+
+  it("rejects a source longer than the cap", async () => {
+    const { store, cleanup } = tempStore();
+    try {
+      await expect(
+        store.add({
+          trigger: "schedule",
+          execution: "notification-only",
+          schedule: { at: futureIso() },
+          notificationTitle: "too-long",
+          source: "x".repeat(MAX_ROUTINE_SOURCE_LENGTH + 1),
+        }),
+      ).rejects.toThrow(/source must be a string of at most/);
+    } finally {
+      cleanup();
+    }
+  });
+
+  it("drops an on-disk record whose source exceeds the cap (tamper rejection)", async () => {
+    const { dir, cleanup } = tempStore();
+    try {
+      const filePath = join(dir, "routines.json");
+      writeFileSync(
+        filePath,
+        JSON.stringify({
+          version: 2,
+          routines: [
+            {
+              id: "tampered",
+              trigger: "schedule",
+              execution: "notification-only",
+              createdAt: new Date().toISOString(),
+              source: "y".repeat(MAX_ROUTINE_SOURCE_LENGTH + 1),
+            },
+          ],
+        }),
+      );
+      const store = new RoutinesStore(filePath);
+      await store.load();
+      expect(store.list()).toHaveLength(0);
     } finally {
       cleanup();
     }
