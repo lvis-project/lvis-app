@@ -135,6 +135,16 @@ describe("pluginIconFor", () => {
     expect(span?.className).toContain("inline-flex");
   });
 
+  it("iconText only accepts caller fontSize from style", () => {
+    const Icon = pluginIconFor({ iconText: "EP" });
+    const { container } = render(
+      <Icon className="h-7 w-7" style={{ color: "red", fontSize: "0.62rem" }} />,
+    );
+    const span = container.querySelector("span");
+    expect(span?.style.fontSize).toBe("0.62rem");
+    expect(span?.style.color).toBe("");
+  });
+
   it("iconText caches by text — same reference on repeated calls", () => {
     const first = pluginIconFor({ iconText: "EP" });
     const second = pluginIconFor({ iconText: "EP" });
