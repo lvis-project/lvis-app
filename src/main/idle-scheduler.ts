@@ -30,10 +30,16 @@
  *   P4: orphan cleanup (batch)
  *
  * ## Integration
- *   1. boot.ts: new IdleSchedulerService({ workerClient, powerMonitor });
+ *   1. boot.ts: new IdleSchedulerService({ powerMonitor });   // workerClient optional
  *   2. boot.ts: idleScheduler.start();
- *   3. hostPlugin.setIdleScheduler(idleScheduler);   // folderIndexer로 주입
- *   4. conversation-loop.ts runTurn() 말미: idleScheduler.signalConversation();
+ *   3. conversation-loop.ts runTurn() 말미: idleScheduler.signalConversation();
+ *   4. preference-refresh-service: idleScheduler.addStateChangeListener(...) on IDLE_SCAN.
+ *
+ * The optional `workerClient` powered an indexing-defer queue (drain index
+ * jobs during IDLE_SCAN). The local-indexer plugin now indexes eagerly in its
+ * background worker process, so boot.ts constructs the scheduler without a
+ * workerClient and the queue stays dormant; the remaining consumers use only
+ * the idle-state machine (powerMonitor + signalConversation + state listeners).
  *
  * ## Testability
  *   powerMonitor는 IdleSchedulerOptions.powerMonitor로 주입받아 mock 가능.
@@ -116,7 +122,13 @@ export function adaptPowerMonitor(pm: unknown): PowerMonitorLike {
 }
 
 export interface IdleSchedulerOptions {
-  workerClient: WorkerClientLite;
+  /**
+   * Index worker client used to drain the idle-deferral queue. Optional:
+   * when omitted (the local-indexer plugin now indexes eagerly in its own
+   * background worker) the queue stays dormant and only the idle-state
+   * machine runs for the remaining consumers.
+   */
+  workerClient?: WorkerClientLite;
   /** Electron powerMonitor (test에서는 FakePowerMonitor) */
   powerMonitor?: PowerMonitorLike;
   idleThresholdSec?: number; // default 60
@@ -389,12 +401,16 @@ export class IdleSchedulerService {
 
   private async _processOne(): Promise<void> {
     if (this.processing) return;
+    const wc = this.opts.workerClient;
+    // No index worker client wired → indexing runs eagerly in the plugin's
+    // background worker, not deferred through this queue. Nothing to drain.
+    if (!wc) return;
     const job = this.queue.shift();
     if (!job) return;
     this.processing = true;
     try {
-      await this.opts.workerClient.enqueue(job.filePath, job.mode, job.priority);
-      await this.opts.workerClient.processOne();
+      await wc.enqueue(job.filePath, job.mode, job.priority);
+      await wc.processOne();
       // chunk cooldown — THROTTLED는 느리게, IDLE_SCAN은 기본
       const cooldown =
         this.state === "THROTTLED" ? this.throttledCooldownMs : this.chunkCooldownMs;
