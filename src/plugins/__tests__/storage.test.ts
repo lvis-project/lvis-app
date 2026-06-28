@@ -8,6 +8,8 @@ import { join, sep } from "node:path";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { createPluginStorage } from "../storage.js";
 
+const dirLinkType = process.platform === "win32" ? "junction" : "dir";
+
 let dataDir: string;
 let outsideDir: string;
 
@@ -43,13 +45,15 @@ describe("createPluginStorage path guards", () => {
   });
 
   it("rejects writes through symlinks pointing outside the root", async () => {
-    // Create a real escape target inside outsideDir, then plant a symlink
-    // inside dataDir that points to outsideDir/escape.txt.
+    // Create a real escape target inside outsideDir, then plant a directory
+    // symlink/junction inside dataDir that points to outsideDir. Windows can
+    // create junctions without Developer Mode or SeCreateSymbolicLinkPrivilege,
+    // so this still exercises real reparse-point traversal locally.
     writeFileSync(join(outsideDir, "escape.txt"), "untouched", "utf-8");
-    symlinkSync(join(outsideDir, "escape.txt"), join(dataDir, "link-out.txt"));
+    symlinkSync(outsideDir, join(dataDir, "escape"), dirLinkType);
     const s = createPluginStorage("p", dataDir);
-    // The realpath of `link-out.txt` resolves outside the root → reject.
-    await expect(s.write("link-out.txt", "tampered")).rejects.toThrow(
+    // The realpath of `escape/escape.txt` resolves outside the root → reject.
+    await expect(s.write(join("escape", "escape.txt"), "tampered")).rejects.toThrow(
       /symlink escapes plugin storage root/,
     );
     // The escape target on disk must remain untouched.
@@ -60,12 +64,15 @@ describe("createPluginStorage path guards", () => {
   });
 
   it("rejects reads through symlinks pointing outside the root", async () => {
-    // Plant a symlink inside dataDir whose realpath escapes via outsideDir.
+    // Plant a directory symlink/junction inside dataDir whose realpath escapes
+    // via outsideDir.
     writeFileSync(join(outsideDir, "secret.txt"), "shhh", "utf-8");
-    symlinkSync(join(outsideDir, "secret.txt"), join(dataDir, "leak.txt"));
+    symlinkSync(outsideDir, join(dataDir, "escape"), dirLinkType);
     const s = createPluginStorage("p", dataDir);
-    await expect(s.read("leak.txt")).rejects.toThrow(/symlink escapes plugin storage root/);
-    await expect(s.readText("leak.txt")).rejects.toThrow(/symlink escapes plugin storage root/);
+    await expect(s.read(join("escape", "secret.txt"))).rejects.toThrow(/symlink escapes plugin storage root/);
+    await expect(s.readText(join("escape", "secret.txt"))).rejects.toThrow(
+      /symlink escapes plugin storage root/,
+    );
   });
 
   it("rejects writes whose existing ancestor is a symlink to outside", async () => {
@@ -73,7 +80,7 @@ describe("createPluginStorage path guards", () => {
     // existing ancestor (`escape/`) is a symlink whose realpath points
     // outside the root. The realpath check must climb up to the symlink
     // and reject before any write touches disk.
-    symlinkSync(outsideDir, join(dataDir, "escape"));
+    symlinkSync(outsideDir, join(dataDir, "escape"), dirLinkType);
     const s = createPluginStorage("p", dataDir);
     await expect(s.write("escape/payload.txt", "x")).rejects.toThrow(
       /symlink escapes plugin storage root/,
@@ -86,11 +93,16 @@ describe("createPluginStorage path guards", () => {
     // symlink. The host cannot validate where the symlink would resolve, so
     // it must fail closed — otherwise a plugin could plant a dangling link
     // whose target is created later out of band.
-    symlinkSync(join(outsideDir, "does-not-exist"), join(dataDir, "dangling.txt"));
+    const danglingRel = process.platform === "win32" ? join("dangling", "payload.txt") : "dangling.txt";
+    symlinkSync(
+      join(outsideDir, "does-not-exist"),
+      join(dataDir, process.platform === "win32" ? "dangling" : "dangling.txt"),
+      process.platform === "win32" ? "junction" : undefined,
+    );
     const s = createPluginStorage("p", dataDir);
-    await expect(s.write("dangling.txt", "x")).rejects.toThrow(/dangling symlink/);
-    await expect(s.read("dangling.txt")).rejects.toThrow(/dangling symlink/);
-    await expect(s.exists("dangling.txt")).rejects.toThrow(/dangling symlink/);
+    await expect(s.write(danglingRel, "x")).rejects.toThrow(/dangling symlink/);
+    await expect(s.read(danglingRel)).rejects.toThrow(/dangling symlink/);
+    await expect(s.exists(danglingRel)).rejects.toThrow(/dangling symlink/);
   });
 });
 

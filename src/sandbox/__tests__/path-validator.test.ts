@@ -18,6 +18,8 @@ import { join } from "node:path";
 import { homedir, tmpdir } from "node:os";
 import { validateSandboxPath } from "../path-validator.js";
 
+const dirLinkType = process.platform === "win32" ? "junction" : "dir";
+
 describe("validateSandboxPath", () => {
   let sandboxCwd: string;
   let outsideDir: string;
@@ -83,13 +85,14 @@ describe("validateSandboxPath", () => {
   });
 
   it("blocks symlink traversal when target is outside the sandbox", () => {
-    // Create a real file outside the sandbox.
-    const outsideTarget = join(outsideDir, "target.txt");
-    writeFileSync(outsideTarget, "sensitive");
+    // Use a directory link so Windows can exercise the same realpath escape
+    // defense via junctions even when the user lacks symlink privilege.
+    const outsideTarget = join(outsideDir, "target");
+    mkdirSync(outsideTarget);
 
-    // Plant a symlink inside the sandbox that points to the outside file.
+    // Plant a symlink/junction inside the sandbox that points outside.
     const symlinkInside = join(sandboxCwd, "escape");
-    symlinkSync(outsideTarget, symlinkInside);
+    symlinkSync(outsideTarget, symlinkInside, dirLinkType);
 
     // realpath follows the symlink → outside → denied.
     const result = validateSandboxPath(symlinkInside, sandboxCwd);
@@ -115,7 +118,7 @@ describe("validateSandboxPath", () => {
 
   it("allows a non-existent path when cwd is reached through a symlink alias", () => {
     const alias = join(outsideDir, "sandbox-alias");
-    symlinkSync(sandboxCwd, alias, "dir");
+    symlinkSync(sandboxCwd, alias, dirLinkType);
 
     const phantom = join(alias, "generated", "file.txt");
     const result = validateSandboxPath(phantom, alias);
@@ -126,7 +129,7 @@ describe("validateSandboxPath", () => {
     const outsideTarget = join(outsideDir, "target-dir");
     mkdirSync(outsideTarget);
     const symlinkInside = join(sandboxCwd, "escape-dir");
-    symlinkSync(outsideTarget, symlinkInside, "dir");
+    symlinkSync(outsideTarget, symlinkInside, dirLinkType);
 
     const phantom = join(symlinkInside, "future.txt");
     const result = validateSandboxPath(phantom, sandboxCwd);

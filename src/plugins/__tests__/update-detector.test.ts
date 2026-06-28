@@ -299,7 +299,11 @@ describe("PluginUpdateDetector", () => {
 
     const installedDir = resolve(tmpDir, "installed");
     await mkdir(installedDir, { recursive: true });
-    await symlink(outsideDir, resolve(installedDir, "local-indexer"), "dir");
+    await symlink(
+      outsideDir,
+      resolve(installedDir, "local-indexer"),
+      process.platform === "win32" ? "junction" : "dir",
+    );
 
     const registryPath = resolve(tmpDir, "registry.json");
     await writeFile(
