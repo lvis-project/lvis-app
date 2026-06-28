@@ -27,6 +27,7 @@ import {
   ManifestIntegrityViolation,
   manifestIntegrityState,
 } from "../permissions/manifest-integrity.js";
+import { sessionContext } from "../engine/session-context.js";
 
 /** Reserved `_meta` key carrying the plugin's raw (non-text) return value. */
 export const RAW_RESULT_META = "xyz.lvis/rawResult";
@@ -50,14 +51,26 @@ export function pluginRuntimeToolDelegate(
     const finalPayload = Object.keys(args).length > 0 ? args : undefined;
 
     // Gate 4 (authoritative execution gate): allow the call if the plugin is
-    // registry-enabled OR session-activated for the current session. Session
-    // activation is set by ConversationLoop after `request_plugin` clears the
-    // allow-list gate in a routine session — it is NEVER persistent
+    // registry-enabled OR session-activated for the CALLING session.
+    //
+    // Session activation is set by ConversationLoop after `request_plugin`
+    // clears the allow-list gate in a routine session — it is NEVER persistent
     // (setPluginEnabled is not called; registry remains enabled:false).
-    // A non-allow-listed disabled plugin is never session-activated, so this
-    // check is equivalent to the old single-condition gate for all plugins
-    // that were not on-demand activated this session.
-    if (!pluginRuntime.isPluginEnabled(pluginId) && !pluginRuntime.isSessionActivated(pluginId)) {
+    //
+    // The calling session ID is read from AsyncLocalStorage (set by
+    // ConversationLoop.runTurn around this.queryLoop). Per-session scoping
+    // guarantees that clearing session B (e.g. user starts a new main-chat
+    // conversation) never wipes session A's activation (e.g. an in-flight
+    // routine that activated local-indexer at 22:00).
+    //
+    // Fail-closed: if no session context is present (e.g. an out-of-band
+    // call from tests without ALS context), `sessionId` is undefined and the
+    // gate refuses — safe default.
+    const sessionId = sessionContext.getStore()?.sessionId;
+    if (
+      !pluginRuntime.isPluginEnabled(pluginId) &&
+      !(sessionId !== undefined && pluginRuntime.isSessionActivated(sessionId, pluginId))
+    ) {
       return errorOutcome(
         `Plugin '${pluginId}' is inactive; tool '${toolName}' is unavailable ` +
           `until the plugin is re-enabled.`,

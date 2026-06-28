@@ -80,6 +80,7 @@ import { isToolResultStubContent } from "../shared/tool-result-stub.js";
 import { createTracer, type ConversationTracer } from "../observability/conversation-trace.js";
 import { createLogger } from "../lib/logger.js";
 import { t } from "../i18n/index.js";
+import { sessionContext } from "./session-context.js";
 const log = createLogger("lvis");
 
 interface RequestProjectionContext {
@@ -494,18 +495,18 @@ export interface ConversationLoopDeps {
      */
     isPluginEnabled?(pluginId: string): boolean;
     /**
-     * Record a plugin as session-activated so the execution delegate
-     * ({@link pluginRuntimeToolDelegate} Gate 4) can allow its tool calls.
-     * Called immediately after on-demand activation of a registry-disabled
-     * plugin. NEVER persists enabled state — `setPluginEnabled` is NOT called.
+     * Record a plugin as session-activated for `sessionId` so Gate 4
+     * ({@link pluginRuntimeToolDelegate}) allows its tool calls for that
+     * session. NEVER persists enabled state — `setPluginEnabled` NOT called.
+     * Per-session scoping ensures session A's activation is never wiped by
+     * session B starting.
      */
-    setSessionActivated?(pluginId: string): void;
+    setSessionActivated?(sessionId: string, pluginId: string): void;
     /**
-     * Clear all session activations. Mirrors every
-     * `sessionActivatedPluginIds.clear()` so the execution gate never leaks
-     * activated state across sessions.
+     * Clear on-demand activations for `sessionId` ONLY. Does not affect
+     * any other session. Called at session-reset and routine loop completion.
      */
-    clearSessionActivated?(): void;
+    clearSessionActivated?(sessionId: string): void;
   };
   /**
    * Fixed-scope support for callers that already made a plugin-scope decision.
@@ -1225,7 +1226,7 @@ export class ConversationLoop {
     this.sessionPluginExpansions = 0;
     this.sessionToolSearches = 0;
     this.sessionActivatedPluginIds.clear();
-    this.deps.pluginRuntime?.clearSessionActivated?.();
+    this.deps.pluginRuntime?.clearSessionActivated?.(this.sessionId);
     this.lastTurnToolNames = null;
     this.compactNum = 0;
     this.rateLimitRecoveryAttempted = false;
@@ -1261,6 +1262,20 @@ export class ConversationLoop {
 
   getHistory(): ConversationHistory {
     return this.history;
+  }
+
+  /**
+   * Clear this session's on-demand plugin activations from PluginRuntime.
+   * Call after the session ends so the per-session Map entry doesn't
+   * accumulate as a stale entry from a discarded loop (e.g. after
+   * RoutineEngine discards the routine's ConversationLoop).
+   *
+   * ConversationLoop's own resetSession paths already call
+   * `clearSessionActivated(this.sessionId)` — this method covers the
+   * routine-fire path where the loop is discarded without a resetSession.
+   */
+  cleanupSession(): void {
+    this.deps.pluginRuntime?.clearSessionActivated?.(this.sessionId);
   }
 
   private readToolResultForChunk(toolUseId: string): ReadableToolResult | null {
@@ -1554,7 +1569,7 @@ export class ConversationLoop {
     this.sessionPluginExpansions = 0;
     this.sessionToolSearches = 0;
     this.sessionActivatedPluginIds.clear();
-    this.deps.pluginRuntime?.clearSessionActivated?.();
+    this.deps.pluginRuntime?.clearSessionActivated?.(this.sessionId);
     this.lastTurnToolNames = null;
     this.sessionAdditionalDirectories = [];
     this.turnAdditionalDirectories = [];
@@ -2037,22 +2052,31 @@ export class ConversationLoop {
     this.tracer.step("PROMPT_ASSEMBLE", { promptLen: systemPrompt.length, activePlugins: scope.activePluginIds.size });
     let result: Awaited<ReturnType<ConversationLoop["queryLoop"]>>;
     try {
-      result = await this.queryLoop(
-        systemPrompt,
-        scope,
-        callbacksForLoop,
-        turnSignal,
-        options?.originSource ?? null,
-        {
-          maxRounds: options?.maxRounds,
-          sessionIdOverride: options?.sessionIdOverride,
-          spawnDepth: options?.spawnDepth,
-          inputOrigin,
-          toolTrustOrigin,
-          permissionUserIntent,
-          permissionExplicitAuthorizationIntent,
-          rolePrompt: options?.rolePrompt,
-        },
+      // Establish per-session ALS context so Gate 4 (plugin-runtime-delegate)
+      // can consult the CALLING session's on-demand activation set. The context
+      // uses effectiveSessionId (respects sessionIdOverride for sub-agents) and
+      // propagates through all await chains inside queryLoop, including the
+      // in-process MCP loopback path (LoopbackTransport → PluginMcpServer →
+      // pluginRuntimeToolDelegate). Clearing session B never wipes session A's
+      // activation because the Map is keyed per sessionId.
+      result = await sessionContext.run({ sessionId: effectiveSessionId }, () =>
+        this.queryLoop(
+          systemPrompt,
+          scope,
+          callbacksForLoop,
+          turnSignal,
+          options?.originSource ?? null,
+          {
+            maxRounds: options?.maxRounds,
+            sessionIdOverride: options?.sessionIdOverride,
+            spawnDepth: options?.spawnDepth,
+            inputOrigin,
+            toolTrustOrigin,
+            permissionUserIntent,
+            permissionExplicitAuthorizationIntent,
+            rolePrompt: options?.rolePrompt,
+          },
+        ),
       );
     } finally {
       // Always clear the controller, even when `queryLoop` throws (provider
@@ -3101,7 +3125,11 @@ export class ConversationLoop {
           // this plugin's tool calls for the remainder of the session. This is
           // the ONLY way a registry-disabled plugin's tools become executable —
           // setPluginEnabled is deliberately NOT called (non-persistence invariant).
-          this.deps.pluginRuntime?.setSessionActivated?.(activated);
+          // Ordering invariant: this fires in the request_plugin interception block,
+          // BEFORE the remaining non-request_plugin tool calls are dispatched to the
+          // executor, so Gate 4 is already relaxed by the time index_scan (or any
+          // other plugin tool) reaches the delegate.
+          this.deps.pluginRuntime?.setSessionActivated?.(this.sessionId, activated);
           this.auditLogger.log({
             timestamp: new Date().toISOString(),
             sessionId: this.sessionId,

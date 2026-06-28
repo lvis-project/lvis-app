@@ -133,6 +133,12 @@ export class RoutineEngine {
     } catch (err) {
       log.warn("runRoutine error (id=%s): %s", input.id, err instanceof Error ? err.message : String(err));
       summary = t("be_routineEngine.runRoutineError", { message: err instanceof Error ? err.message : String(err) });
+    } finally {
+      // Clear this session's on-demand plugin activations from PluginRuntime.
+      // The routine loop is discarded after runTurn completes and never calls
+      // resetSession, so without this call the per-session Map entry would
+      // accumulate as a stale entry in the PluginRuntime singleton.
+      loop.cleanupSession();
     }
 
     return {
