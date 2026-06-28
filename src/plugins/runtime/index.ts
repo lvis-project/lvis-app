@@ -1887,36 +1887,59 @@ export class PluginRuntime {
   }
 
   /**
-   * Transient, non-persistent activation set for the current conversation
-   * session. A registry-disabled plugin that was on-demand activated by
-   * `request_plugin` in a routine session is recorded here so
-   * {@link pluginRuntimeToolDelegate} can allow its tool calls for the
-   * duration of the session.
+   * Transient, per-session on-demand activation map.
+   *
+   * Key   = sessionId  (a ConversationLoop instance's session UUID).
+   * Value = Set of plugin IDs on-demand activated in that session via
+   *         `request_plugin` while the plugin was registry-disabled.
+   *
+   * Using a Map instead of a flat Set scopes each session's activation state
+   * independently: clearing session A never affects session B. This is
+   * critical for concurrent loops (e.g. a routine running while the user
+   * has an active main-chat conversation — the user starting a new chat must
+   * not wipe the routine's activation mid-scan).
    *
    * Lifecycle — managed by ConversationLoop:
-   *  - `setSessionActivated` is called immediately after session-activation
-   *    (the same event that records the id in ConversationLoop.sessionActivatedPluginIds).
-   *  - `clearSessionActivated` mirrors every `.sessionActivatedPluginIds.clear()`
-   *    call (both resetSession paths) so the set never leaks across sessions.
+   *  - `setSessionActivated(sessionId, pluginId)` is called after Gate 2 pass
+   *    (same event that adds to ConversationLoop.sessionActivatedPluginIds).
+   *  - `clearSessionActivated(sessionId)` is called at BOTH session-reset
+   *    sites (resetSession + restore-from-checkpoint) for the OWN session,
+   *    and by ConversationLoop.cleanupSession() after routine loops finish.
    *
    * INVARIANT: `setPluginEnabled` is NEVER called on this path — the plugin
    * remains registry-disabled throughout.
    */
-  private readonly sessionActivatedPluginIdsForRuntime = new Set<string>();
+  private readonly sessionActivatedBySession = new Map<string, Set<string>>();
 
-  /** Returns true iff the plugin was on-demand session-activated this session. */
-  isSessionActivated(pluginId: string): boolean {
-    return this.sessionActivatedPluginIdsForRuntime.has(pluginId);
+  /**
+   * Returns true iff the plugin was on-demand session-activated in the given
+   * session. Gate 4 (pluginRuntimeToolDelegate) calls this with the session ID
+   * read from the ALS session context.
+   */
+  isSessionActivated(sessionId: string, pluginId: string): boolean {
+    return this.sessionActivatedBySession.get(sessionId)?.has(pluginId) ?? false;
   }
 
-  /** Record a plugin as session-activated (called by ConversationLoop on Gate 2 pass). */
-  setSessionActivated(pluginId: string): void {
-    this.sessionActivatedPluginIdsForRuntime.add(pluginId);
+  /**
+   * Record a plugin as session-activated for the given session.
+   * Called by ConversationLoop immediately after Gate 2 on-demand activation.
+   */
+  setSessionActivated(sessionId: string, pluginId: string): void {
+    let set = this.sessionActivatedBySession.get(sessionId);
+    if (!set) {
+      set = new Set<string>();
+      this.sessionActivatedBySession.set(sessionId, set);
+    }
+    set.add(pluginId);
   }
 
-  /** Clear all session activations (called by ConversationLoop on every session reset). */
-  clearSessionActivated(): void {
-    this.sessionActivatedPluginIdsForRuntime.clear();
+  /**
+   * Clear on-demand activations for `sessionId` ONLY — does NOT affect any
+   * other session's activation state. Called at session-reset and after
+   * routine loop completion (prevents stale Map entries from discarded loops).
+   */
+  clearSessionActivated(sessionId: string): void {
+    this.sessionActivatedBySession.delete(sessionId);
   }
 
   /**
