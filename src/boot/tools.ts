@@ -33,7 +33,7 @@ import type { AgentProfileStore } from "../main/agent-profile-store.js";
 import type { ApprovalGate } from "../permissions/approval-gate.js";
 import { HybridRetriever } from "../main/hybrid-retriever.js";
 import { MockCloudIndexAdapter } from "../main/cloud-index-adapter.js";
-import { IdleSchedulerService, adaptPowerMonitor, type WorkerClientLite } from "../main/idle-scheduler.js";
+import { IdleSchedulerService, adaptPowerMonitor } from "../main/idle-scheduler.js";
 import { fetchPublicHttpResponse } from "../core/network-guard.js";
 import { demoHostMapContainsHost } from "../main/demo-host-resolver.js";
 import { createLogger } from "../lib/logger.js";
@@ -305,11 +305,7 @@ export async function wireKnowledgeAndIdleScheduler(opts: {
         listDocuments: () => Promise<unknown>;
         getStructure: (docId: string) => Promise<unknown>;
         getPageContent: (docId: string, pages: string) => Promise<unknown>;
-        enqueue: (filePath: string, mode?: string, priority?: number) => Promise<unknown>;
-        processOne: (priority?: number) => Promise<unknown>;
-        getIndexerState: () => Promise<unknown>;
       };
-      setIdleScheduler?: (scheduler: IdleSchedulerService) => void;
     }>(workerClientPluginId)
       : undefined;
     const workerClient = knowledgePlugin?.getWorkerClient?.() as
@@ -317,9 +313,6 @@ export async function wireKnowledgeAndIdleScheduler(opts: {
           listDocuments: () => Promise<unknown>;
           getStructure: (docId: string) => Promise<unknown>;
           getPageContent: (docId: string, pages: string) => Promise<unknown>;
-          enqueue: (filePath: string, mode?: string, priority?: number) => Promise<unknown>;
-          processOne: (priority?: number) => Promise<unknown>;
-          getIndexerState: () => Promise<unknown>;
         }
       | undefined;
     if (workerClient) {
@@ -343,27 +336,19 @@ export async function wireKnowledgeAndIdleScheduler(opts: {
       knowledgeAvailable = true;
       log.info("boot: knowledge tools registered (%d tools)", knowledgeTools.length);
 
-      // §6.1 IdleScheduler: WorkerClient의 enqueue/processOne/getIndexerState를 WorkerClientLite shape으로 래핑
-      const idleWorkerAdapter: WorkerClientLite = {
-        enqueue: (filePath: string, mode?: string, priority?: number) =>
-          workerClient.enqueue(filePath, mode, priority) as never,
-        processOne: (priority?: number) => workerClient.processOne(priority) as never,
-        getIndexerState: () => workerClient.getIndexerState() as never,
-      };
+      // §6.1 IdleScheduler: idle/throttle state machine for the shared idle
+      // consumers (preference-refresh, post-turn signalling, conversation-loop).
+      // Indexing no longer defers through this scheduler — the local-indexer
+      // plugin's FolderAutoIndexer indexes eagerly in its background worker
+      // process — so the scheduler is constructed without an index worker
+      // client and only drives idle-state notifications.
       // Electron powerMonitor lazy import — test 환경에서 electron 로드 회피
       try {
         const { powerMonitor } = await import("electron");
         idleScheduler = new IdleSchedulerService({
-          workerClient: idleWorkerAdapter,
           powerMonitor: adaptPowerMonitor(powerMonitor),
         });
         idleScheduler.start();
-        if (typeof knowledgePlugin?.setIdleScheduler === "function") {
-          knowledgePlugin.setIdleScheduler(idleScheduler);
-          log.info("boot: idle-scheduler wired to worker-client plugin");
-        } else {
-          log.warn("boot: worker-client plugin setIdleScheduler() not available");
-        }
       } catch (err) {
         log.warn(
           "boot: idle-scheduler setup failed (non-fatal): %s",
