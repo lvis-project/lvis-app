@@ -56,6 +56,7 @@ function buildTextIcon(rawText: string): ComponentType<LucideProps> {
   const len = (text.length || 1) as 1 | 2 | 3 | 4;
   const fontSize = `${TEXT_FONT_SIZE_REM[len]}rem`;
   function TextIcon({ className, style }: LucideProps) {
+    const callerFontSize = style?.fontSize;
     return createElement(
       "span",
       {
@@ -70,10 +71,10 @@ function buildTextIcon(rawText: string): ComponentType<LucideProps> {
         // avatar may be the same or richer; double-announce is acceptable.
         "aria-label": text,
         role: "img",
-        // Default font-size is tuned for the 28px avatar; a call-site rendering
-        // the glyph in a smaller slot (e.g. the picker row) passes its own
-        // `style.fontSize` to scale the text to that slot. Caller style wins.
-        style: { fontSize, ...style },
+        // Default font-size is tuned for the 28px avatar. Only fontSize is
+        // accepted from callers so manifest-controlled icon text cannot gain a
+        // broader style injection path through this host component.
+        style: { fontSize: callerFontSize ?? fontSize },
       },
       text,
     );
