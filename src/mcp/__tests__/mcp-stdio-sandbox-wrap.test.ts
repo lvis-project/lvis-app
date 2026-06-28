@@ -27,9 +27,14 @@ import { homedir } from "node:os";
 const spawnMock = vi.fn<
   (cmd: string, args?: readonly string[], opts?: unknown) => unknown
 >();
+const execFileSyncMock = vi.fn<
+  (cmd: string, args?: readonly string[], opts?: unknown) => string
+>();
 vi.mock("node:child_process", () => ({
   spawn: (cmd: string, args?: readonly string[], opts?: unknown) =>
     spawnMock(cmd, args, opts),
+  execFileSync: (cmd: string, args?: readonly string[], opts?: unknown) =>
+    execFileSyncMock(cmd, args, opts),
 }));
 
 // ─── ASRT mock — gate + wrap controllable per test ──────────
@@ -100,6 +105,17 @@ function handshakeResponses(serverName: string): FakeChildProcess["responses"] {
 
 beforeEach(() => {
   spawnMock.mockReset();
+  execFileSyncMock.mockReset();
+  execFileSyncMock.mockImplementation((cmd, args) => {
+    const script = Array.isArray(args) ? args[args.length - 1] : undefined;
+    if (String(cmd).includes("\\Git\\") && script === "printf __lvis_shell_ok__") {
+      return "__lvis_shell_ok__";
+    }
+    if (cmd === "where") {
+      return "C:\\Program Files\\Git\\usr\\bin\\sh.exe";
+    }
+    throw new Error(`unexpected execFileSync in MCP ASRT wrap test: ${cmd}`);
+  });
   wrapWorkerCommandMock.mockReset();
   cleanupMock.mockClear();
   gateActive = false;
