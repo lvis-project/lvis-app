@@ -30,6 +30,8 @@ export const en = {
     "Notification body when execution=notification-only",
   "be_routineSchedule.allowedPluginsDescription":
     "List of plugin IDs to expose in execution=llm-session routines. If omitted or [], no plugin tools are available.",
+  "be_routineSchedule.sourceDescription":
+    "Optional origin marker for idempotency. Only set this when a system prompt explicitly instructs you to (format 'suggestion:<pluginId>:<intent>'). Leave unset for ordinary user-requested routines.",
 } as const;
 export const ko: Record<keyof typeof en, string> = {
   "be_routineSchedule.toolDescription":
@@ -62,4 +64,6 @@ export const ko: Record<keyof typeof en, string> = {
     "execution=notification-only 시 알림 본문",
   "be_routineSchedule.allowedPluginsDescription":
     "execution=llm-session 루틴에서 노출할 플러그인 id 목록. 미지정 또는 []이면 플러그인 도구를 사용하지 않습니다.",
+  "be_routineSchedule.sourceDescription":
+    "멱등성용 출처 마커(선택). 시스템 프롬프트가 명시적으로 지시할 때만 설정하십시오(형식 'suggestion:<pluginId>:<intent>'). 일반 사용자 요청 루틴에서는 미설정.",
 };

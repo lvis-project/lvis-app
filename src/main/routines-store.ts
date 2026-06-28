@@ -22,6 +22,7 @@ const log = createLogger("lvis");
 export {
   MAX_PERSISTED_ROUTINES,
   MAX_LLM_SESSION_ROUTINES,
+  MAX_ROUTINE_SOURCE_LENGTH,
   type RoutineExecution,
   type RepeatKind,
   type RoutineRepeat,
@@ -37,7 +38,7 @@ import type {
   RoutineScope,
   AddRoutineInput,
 } from "../shared/routines-types.js";
-import { MAX_PERSISTED_ROUTINES, MAX_LLM_SESSION_ROUTINES } from "../shared/routines-types.js";
+import { MAX_PERSISTED_ROUTINES, MAX_LLM_SESSION_ROUTINES, MAX_ROUTINE_SOURCE_LENGTH } from "../shared/routines-types.js";
 import { openFeatureNamespace } from "./storage/feature-namespace.js";
 
 /** Maximum allowed distance into the future for schedule.at (parity with RemindersStore). */
@@ -64,6 +65,7 @@ function isValidRecord(r: unknown): r is RoutineRecord {
   if (x.lastResultAcknowledgedAt !== undefined && typeof x.lastResultAcknowledgedAt !== "string") return false;
   if (x.lastRoutineSessionId !== undefined && typeof x.lastRoutineSessionId !== "string") return false;
   if (x.dismissedAt !== undefined && typeof x.dismissedAt !== "string") return false;
+  if (x.source !== undefined && (typeof x.source !== "string" || x.source.length > MAX_ROUTINE_SOURCE_LENGTH)) return false;
   if (x.scope !== undefined && !isValidRoutineScope(x.scope)) return false;
   return true;
 }
@@ -285,6 +287,20 @@ export class RoutinesStore {
         );
       }
     }
+
+    // Idempotency identity — validate the optional `source` marker length cap
+    // (SOT). Empty/whitespace-only collapses to unset so it never matches a
+    // real suggestion marker in hasRoutineBySource.
+    let normalizedSource: string | undefined;
+    if (input.source !== undefined) {
+      if (typeof input.source !== "string" || input.source.length > MAX_ROUTINE_SOURCE_LENGTH) {
+        throw new Error(
+          `RoutinesStore.add: source must be a string of at most ${MAX_ROUTINE_SOURCE_LENGTH} characters`,
+        );
+      }
+      const trimmedSource = input.source.trim();
+      normalizedSource = trimmedSource.length > 0 ? trimmedSource : undefined;
+    }
     // Permission policy Layer 4 — `scope` is the canonical shape. When omitted, default
     // to deny-all so new call sites cannot accidentally expose plugins.
     const ID_RE = /^[a-z0-9][a-z0-9_.-]*$/i;
@@ -336,6 +352,7 @@ export class RoutinesStore {
       notificationBody: input.notificationBody,
       scope: normalizedScope,
       createdAt: new Date().toISOString(),
+      ...(normalizedSource !== undefined ? { source: normalizedSource } : {}),
     };
 
     return withFileLock(this.filePath, async () => {

@@ -34,11 +34,23 @@ type RequestablePluginCatalogCard = {
   loadStatus?: "loaded" | "preparing" | "failed" | "disabled";
 };
 
-function isRequestablePluginCatalogCard(card: RequestablePluginCatalogCard): boolean {
-  if (card.active === false) return false;
+function isRequestablePluginCatalogCard(
+  card: RequestablePluginCatalogCard,
+  activatablePluginIds?: ReadonlySet<string>,
+): boolean {
+  // A card with no exposable tools or no runtime instance can never be put
+  // into turn scope, regardless of allow-listing.
   if (card.runtimeLoaded === false) return false;
-  if (card.loadStatus && card.loadStatus !== "loaded") return false;
   if (card.sampleTools.length === 0) return false;
+  // Session-scoped on-demand activation — an allow-listed plugin the user has
+  // toggled OFF is still activatable via request_plugin for THIS session
+  // (its tools stay registered; only the per-turn scope hides them). List it as
+  // requestable so the routine LLM can ask for it. Main chat passes no
+  // allow-list ⇒ empty set ⇒ this branch never fires and disabled cards stay
+  // hidden (behaviour unchanged).
+  if (activatablePluginIds?.has(card.id)) return true;
+  if (card.active === false) return false;
+  if (card.loadStatus && card.loadStatus !== "loaded") return false;
   return true;
 }
 
@@ -87,6 +99,14 @@ export interface SystemPromptBuilderDeps {
    * request_plugin candidate catalog provider. Empty/undefined omits the section.
    */
   getPluginCards?: () => RequestablePluginCatalogCard[];
+  /**
+   * Session-scoped on-demand activation allow-list. Plugin ids returned here are
+   * treated as requestable in the catalog even when the user has toggled them
+   * OFF (registry `enabled:false`), because the session can activate them via
+   * request_plugin for its lifetime only. Routine sessions pass their
+   * `allowedPluginIds`; main chat omits this (⇒ disabled plugins stay hidden).
+   */
+  getActivatablePluginIds?: () => ReadonlySet<string>;
   /**
    * Lightweight skill catalog provider. Only name/description are surfaced
    * here; full bodies stay behind `skill_load`.
@@ -630,7 +650,7 @@ export class SystemPromptBuilder {
     // LLM이 "이 턴에 필요한 플러그인"을 판단해 request_plugin 호출 가능하도록
     // system prompt에 힌트를 노출. 현재 턴 scope에 이미 들어온 plugin과
     // 사용자/registry가 비활성화한 plugin은 제외한다.
-    const { getPluginCards } = deps;
+    const { getPluginCards, getActivatablePluginIds } = deps;
     this.sources.push({
       id: 65,
       name: "Requestable Plugin Catalog",
@@ -639,7 +659,8 @@ export class SystemPromptBuilder {
         const cards = getPluginCards?.() ?? [];
         if (cards.length === 0) return "";
         const active = this.toolScope?.activePluginIds ?? new Set<string>();
-        const inactive = cards.filter((c) => !active.has(c.id) && isRequestablePluginCatalogCard(c));
+        const activatable = getActivatablePluginIds?.();
+        const inactive = cards.filter((c) => !active.has(c.id) && isRequestablePluginCatalogCard(c, activatable));
         if (inactive.length === 0) return "";
         const lines: string[] = [
           t("be_systemPromptBuilder.requestablePluginCatalogHeader"),

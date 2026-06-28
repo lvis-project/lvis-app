@@ -464,6 +464,15 @@ export async function bootstrap(
   // mainWindow getter and the registered plugins).
   const permissionManager = await createPermissionManager();
 
+  // Routines SOT — constructed BEFORE initPluginRuntime because the per-plugin
+  // HostApi factory (built inside initPluginRuntime's startAll) wires
+  // `hostApi.hasRoutineBySource` against this store. The RoutinesScheduler is
+  // still created below with the rest of the workflow services.
+  const routinesStore = new RoutinesStore();
+  await routinesStore.load().catch((err) => {
+    log.warn("boot: routines load failed (non-fatal): %s", (err as Error).message);
+  });
+
   const {
     pluginRuntime,
     deploymentGuard,
@@ -492,16 +501,15 @@ export async function bootstrap(
     // resolveApiKey host implementation can abort outstanding bearers when
     // permission rules change.
     permissionManager,
+    // Idempotency SOT for `hostApi.hasRoutineBySource` (constructed above).
+    routinesStore,
   });
 
   // Workflow system tools (S1+S2) — services constructed up-front so the
   // tool registry can register them in one pass below. Late bindings
   // (subAgentRunner, askUserQuestionGate) hop through closures so the
   // ConversationLoop / BrowserWindow are available before the tool fires.
-  const routinesStore = new RoutinesStore();
-  await routinesStore.load().catch((err) => {
-    log.warn("boot: routines load failed (non-fatal): %s", (err as Error).message);
-  });
+  // (routinesStore is constructed above — it must exist before initPluginRuntime.)
   const routinesScheduler = new RoutinesScheduler(routinesStore);
 
   // Work board persistence (~/.lvis/work-board/board.json). One-shot,

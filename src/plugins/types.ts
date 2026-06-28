@@ -1198,6 +1198,20 @@ export interface PluginHostApi {
   triggerConversation(spec: ConversationTriggerSpec): Promise<ConversationTriggerResult>;
 
   /**
+   * Idempotency SOT query for suggestion-derived routines. Resolves `true` iff a
+   * persisted routine carries an exactly-matching {@link RoutineRecord.source}
+   * marker.
+   *
+   * LEAST-PRIVILEGE / least-surface: `source` MUST begin with
+   * `suggestion:<callerPluginId>:` — the host returns `false` for any probe
+   * outside the caller's own prefix, so plugin A cannot detect plugin B's
+   * routines. The result is a plain boolean: no enumeration, no routine
+   * contents, no cross-plugin surface. A plugin uses this as its "propose
+   * once" gate (e.g. "have I already created my nightly-rescan routine?").
+   */
+  hasRoutineBySource(source: string): Promise<boolean>;
+
+  /**
    * §8 Agent Approval System — main-process–side approval management.
    *
    * Plugins use this namespace to interact with the host's §8 ApprovalGate
