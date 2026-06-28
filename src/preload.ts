@@ -74,7 +74,7 @@ import {
 import {
   FONT_SIZE_SCALE_VALUES,
   isValidFontFamilyOverride,
-} from "./data/settings-store.js";
+} from "./shared/appearance-font.js";
 import {
   INITIAL_APP_MODE_ARG_PREFIX,
   isAppMode,
