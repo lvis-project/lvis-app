@@ -308,3 +308,45 @@ describe("SystemPromptBuilder — todo_session_write batching guidance (TPM roun
     );
   });
 });
+
+describe("SystemPromptBuilder — Requestable Plugin Catalog (Gate 1: session-scoped activation)", () => {
+  const disabledCard = {
+    id: "local-indexer",
+    name: "Local Indexer",
+    description: "문서 인덱서",
+    sampleTools: ["index_scan"],
+    active: false,
+    runtimeLoaded: true,
+    loadStatus: "disabled" as const,
+  };
+
+  function makeCatalogBuilder(opts: { activatable?: string[] }): SystemPromptBuilder {
+    return new SystemPromptBuilder({
+      memoryManager: {
+        getAgentsMd: () => "",
+        getMemoryIndex: () => "",
+        getUserPreferences: () => "",
+        getMemoryContext: () => "",
+      } as never,
+      toolRegistry: new ToolRegistry(),
+      getPluginCards: () => [disabledCard],
+      ...(opts.activatable
+        ? { getActivatablePluginIds: () => new Set(opts.activatable) }
+        : {}),
+    });
+  }
+
+  it("lists an allow-listed DISABLED plugin as requestable", () => {
+    const prompt = makeCatalogBuilder({ activatable: ["local-indexer"] }).build();
+    expect(prompt).toContain("사용 가능한 플러그인");
+    expect(prompt).toContain("local-indexer");
+    expect(prompt).toContain("index_scan");
+  });
+
+  it("hides a disabled plugin when it is NOT allow-listed (main chat unchanged)", () => {
+    const prompt = makeCatalogBuilder({}).build();
+    // No requestable catalog section is emitted for a disabled, non-allow-listed card.
+    expect(prompt).not.toContain("사용 가능한 플러그인");
+    expect(prompt).not.toContain("local-indexer");
+  });
+});

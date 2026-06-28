@@ -61,13 +61,21 @@ export function createSystemPromptBuilder(opts: {
    */
   getActiveSkillsSection?: (sessionId: string) => string;
   getAvailableSkills?: () => SkillCatalogEntry[];
+  /**
+   * Session-scoped on-demand activation allow-list — see
+   * {@link SystemPromptBuilderDeps.getActivatablePluginIds}. Routine sessions
+   * pass their `allowedPluginIds` so an allow-listed-but-disabled plugin shows
+   * as requestable; main chat omits it.
+   */
+  getActivatablePluginIds?: () => ReadonlySet<string>;
 }): SystemPromptBuilder {
-  const { memoryManager, toolRegistry, pluginRuntime, getActiveSkillsSection, getAvailableSkills } = opts;
+  const { memoryManager, toolRegistry, pluginRuntime, getActiveSkillsSection, getAvailableSkills, getActivatablePluginIds } = opts;
   return new SystemPromptBuilder({
     memoryManager,
     toolRegistry,
     // Option C — 비활성 plugin 카탈로그 공급.
     getPluginCards: () => pluginRuntime.listPluginCards(toolRegistry),
+    getActivatablePluginIds,
     getAvailableSkills,
     getActiveSkillsSection,
     // Tutorial-X4 — User Onboarding Context source. Renderer writes the
@@ -236,21 +244,11 @@ export function createRoutineConversationLoop(
   deps: RoutineConversationLoopDeps,
   opts: { scope?: import("../shared/routines-types.js").RoutineScope } = {},
 ): ConversationLoop {
-  // Layer 1 (UX hot-fix v3): each routine fire gets its *own* SystemPromptBuilder
-  // instance with routineMode=true so the LLM is instructed to append a
-  // <summary>…</summary> tag. A dedicated instance (not the shared main-chat
-  // builder) is used to prevent routineMode from leaking into main-chat turns
-  // even when concurrent routine fires and user chat turns overlap.
-  const routineSystemPromptBuilder = createSystemPromptBuilder({
-    memoryManager: deps.memoryManager,
-    toolRegistry: deps.toolRegistry,
-    pluginRuntime: deps.pluginRuntime,
-    // Skill overlay is interactive-only — routine sessions are headless.
-  });
-  routineSystemPromptBuilder.setRoutineMode(true);
   // Permission policy Layer 4 — translate the discriminated scope into the loop's
   // ConversationLoopDeps shape. The scope must already be normalized
-  // (no `inherit`) by the dispatcher before this factory runs.
+  // (no `inherit`) by the dispatcher before this factory runs. Computed BEFORE
+  // the prompt builder so the allow-list can be threaded into the requestable
+  // catalog predicate (session-scoped on-demand activation of disabled plugins).
   const scope = opts.scope;
   let allowedPluginIds: Set<string>;
   if (!scope || scope.pluginIds.mode === "inherit") {
@@ -263,6 +261,23 @@ export function createRoutineConversationLoop(
   } else {
     allowedPluginIds = new Set(scope.pluginIds.ids);
   }
+  // Layer 1 (UX hot-fix v3): each routine fire gets its *own* SystemPromptBuilder
+  // instance with routineMode=true so the LLM is instructed to append a
+  // <summary>…</summary> tag. A dedicated instance (not the shared main-chat
+  // builder) is used to prevent routineMode from leaking into main-chat turns
+  // even when concurrent routine fires and user chat turns overlap.
+  const routineSystemPromptBuilder = createSystemPromptBuilder({
+    memoryManager: deps.memoryManager,
+    toolRegistry: deps.toolRegistry,
+    pluginRuntime: deps.pluginRuntime,
+    // Session-scoped on-demand activation — surface allow-listed-but-disabled
+    // plugins in the requestable catalog so the routine LLM can request_plugin
+    // them. The session activates them non-persistently (registry stays
+    // enabled:false); main chat never sets this.
+    getActivatablePluginIds: () => allowedPluginIds,
+    // Skill overlay is interactive-only — routine sessions are headless.
+  });
+  routineSystemPromptBuilder.setRoutineMode(true);
   const forcedActivePluginIds = new Set(scope?.forcedPluginIds ?? []);
   const forcedActiveToolNames = new Set(
     deps.toolRegistry

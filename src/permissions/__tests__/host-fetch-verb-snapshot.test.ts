@@ -159,6 +159,7 @@ async function buildRealHostApi(): Promise<{
     clearAuthPartitionService: vi.fn(),
     shellOpenExternal: vi.fn(),
     approvalGate: { requestAndWait: vi.fn(), resolve: vi.fn() } as never,
+    routinesStore: { list: () => [] } as never,
   });
 
   const createHostApi = harness.capturedRuntimeOptions?.createHostApi as CreateHostApi | undefined;

@@ -7,7 +7,7 @@
  *   2. Unknown pluginId returns an error tool_result without mutating scope.
  *   3. MAX_PLUGIN_EXPANSION (=2) is enforced per turn.
  */
-import { describe, it, expect } from "vitest";
+import { describe, it, expect, vi } from "vitest";
 
 import { KeywordEngine } from "../../core/keyword-engine.js";
 import { RouteEngine } from "../../core/route-engine.js";
@@ -41,6 +41,9 @@ function makeLoop(opts: {
   forcedActiveToolNames?: string[];
   extraPluginTools?: Array<{ pluginId: string; name: string }>;
   deniedToolPatterns?: string[];
+  /** Spy wired onto the pluginRuntime mock to prove the session-activation
+   *  path never persists enabled state. */
+  setPluginEnabled?: (pluginId: string, enabled: boolean) => Promise<void>;
 }): ConversationLoop {
   const toolRegistry = new ToolRegistry();
   // request_plugin builtin (source=builtin so scope filter includes it)
@@ -125,6 +128,7 @@ function makeLoop(opts: {
     pluginRuntime: {
       listPluginIds: () => opts.availablePluginIds,
       isPluginEnabled: (pluginId: string) => !(opts.inactivePluginIds ?? []).includes(pluginId),
+      ...(opts.setPluginEnabled ? { setPluginEnabled: opts.setPluginEnabled } : {}),
     },
     ...(opts.allowedPluginIds ? { allowedPluginIds: new Set(opts.allowedPluginIds) } : {}),
     ...(opts.forcedActivePluginIds ? { forcedActivePluginIds: new Set(opts.forcedActivePluginIds) } : {}),
@@ -379,5 +383,117 @@ describe("ConversationLoop — request_plugin meta tool (Option C)", () => {
     await loop.runTurn("일반 질문", undefined, undefined, { inputOrigin: "user-keyboard" });
 
     expect(provider.observedToolNames[0]).toContain("meeting_start");
+  });
+});
+
+describe("ConversationLoop — session-scoped on-demand activation (Option C, disabled+allow-listed)", () => {
+  it("activates an allow-listed DISABLED plugin for the session WITHOUT persisting (non-persistent)", async () => {
+    const setPluginEnabled = vi.fn(async () => {});
+    const provider = new RecordingProvider([
+      // Turn 1, round 0: LLM requests the registry-disabled (but allow-listed) plugin.
+      [
+        { type: "tool_call", id: "tu-1", name: "request_plugin", input: { pluginId: "local-indexer" } },
+        { type: "message_complete", stopReason: "tool_use" },
+      ],
+      // Turn 1, round 1: same turn, post-activation — its tools must be loaded.
+      [
+        { type: "text_delta", text: "활성화 완료" },
+        { type: "message_complete", stopReason: "end_turn" },
+      ],
+      // Turn 2, round 0: NO new request_plugin — Gate 3 must keep the
+      // session-activated plugin in scope (carry-forward across turns).
+      [
+        { type: "text_delta", text: "다음 턴" },
+        { type: "message_complete", stopReason: "end_turn" },
+      ],
+    ]);
+    const loop = makeLoop({
+      provider,
+      availablePluginIds: ["local-indexer"],
+      inactivePluginIds: ["local-indexer"], // registry-disabled
+      allowedPluginIds: ["local-indexer"], // routine session allow-list
+      setPluginEnabled,
+    });
+
+    await loop.runTurn("야간 재스캔", undefined, undefined, { inputOrigin: "user-keyboard" });
+    await loop.runTurn("다시 확인", undefined, undefined, { inputOrigin: "user-keyboard" });
+
+    // Round 0 (before activation): the disabled plugin's tool is hidden.
+    expect(provider.observedToolNames[0]).not.toContain("index_scan_status");
+    // Round 1 (same turn, after session-activation): its tool IS callable.
+    expect(provider.observedToolNames[1]).toContain("index_scan_status");
+    // Round 2 (next turn, no re-request): still in scope — Gate 3 skipped the
+    // disabled-drop for the session-activated id.
+    expect(provider.observedToolNames[2]).toContain("index_scan_status");
+
+    // Activation succeeded (not an error tool_result).
+    const toolResult = loop.getHistory().getMessages()
+      .find((m) => m.role === "tool_result") as { isError?: boolean } | undefined;
+    expect(toolResult?.isError).not.toBe(true);
+
+    // NON-PERSISTENCE invariant: the session-activation path NEVER calls
+    // setPluginEnabled, so the registry entry stays enabled:false. If this path
+    // ever persisted, this assertion fails.
+    expect(setPluginEnabled).not.toHaveBeenCalled();
+  });
+
+  it("keeps a NON-allow-listed disabled plugin blocked at the request gate", async () => {
+    const provider = new RecordingProvider([
+      [
+        { type: "tool_call", id: "tu-1", name: "request_plugin", input: { pluginId: "com.example.meeting" } },
+        { type: "message_complete", stopReason: "tool_use" },
+      ],
+      [
+        { type: "text_delta", text: "blocked" },
+        { type: "message_complete", stopReason: "end_turn" },
+      ],
+    ]);
+    // local-indexer is allow-listed; meeting is disabled AND NOT allow-listed.
+    const loop = makeLoop({
+      provider,
+      availablePluginIds: ["local-indexer", "com.example.meeting"],
+      inactivePluginIds: ["local-indexer", "com.example.meeting"],
+      allowedPluginIds: ["local-indexer"],
+    });
+
+    await loop.runTurn("회의 시작", undefined, undefined, { inputOrigin: "user-keyboard" });
+
+    expect(provider.observedToolNames[0]).not.toContain("meeting_start");
+    const toolResult = loop.getHistory().getMessages()
+      .find((m) => m.role === "tool_result") as { content: string; isError?: boolean } | undefined;
+    expect(toolResult?.isError).toBe(true);
+    expect(toolResult?.content).toContain("알 수 없는 플러그인 ID");
+  });
+
+  it("main chat (allowedPluginIds undefined) cannot activate a disabled plugin — gates intact", async () => {
+    const setPluginEnabled = vi.fn(async () => {});
+    const provider = new RecordingProvider([
+      [
+        { type: "tool_call", id: "tu-1", name: "request_plugin", input: { pluginId: "local-indexer" } },
+        { type: "message_complete", stopReason: "tool_use" },
+      ],
+      [
+        { type: "text_delta", text: "blocked" },
+        { type: "message_complete", stopReason: "end_turn" },
+      ],
+    ]);
+    // No allowedPluginIds → main chat. The plugin is disabled.
+    const loop = makeLoop({
+      provider,
+      availablePluginIds: ["local-indexer"],
+      inactivePluginIds: ["local-indexer"],
+      setPluginEnabled,
+    });
+
+    await loop.runTurn("일반 질문", undefined, undefined, { inputOrigin: "user-keyboard" });
+
+    // Disabled plugin's tool never visible and request_plugin is rejected.
+    expect(provider.observedToolNames[0]).not.toContain("index_scan_status");
+    expect(provider.observedToolNames[1]).not.toContain("index_scan_status");
+    const toolResult = loop.getHistory().getMessages()
+      .find((m) => m.role === "tool_result") as { content: string; isError?: boolean } | undefined;
+    expect(toolResult?.isError).toBe(true);
+    expect(toolResult?.content).toContain("알 수 없는 플러그인 ID");
+    expect(setPluginEnabled).not.toHaveBeenCalled();
   });
 });
