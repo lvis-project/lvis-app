@@ -85,6 +85,20 @@ function makeNotificationFactoryStub(): {
   return { factory, calls };
 }
 
+function makeActivationRegistrationStub(): {
+  register: NonNullable<ConstructorParameters<typeof NotificationService>[0]["notificationActivationRegistration"]>;
+  getHandler: () => ((details: Electron.ActivationArguments) => void) | undefined;
+} {
+  let handler: ((details: Electron.ActivationArguments) => void) | undefined;
+  const register = vi.fn((next: (details: Electron.ActivationArguments) => void) => {
+    handler = next;
+  });
+  return {
+    register,
+    getHandler: () => handler,
+  };
+}
+
 describe("NotificationService — body truncation", () => {
   it("caps body at 80 chars and appends ellipsis", () => {
     const long = "x".repeat(120);
@@ -346,6 +360,27 @@ describe("NotificationService — click handler", () => {
         contextRef: { questionId: "q-42" },
       }),
     );
+  });
+
+  it("Windows activation callback restores/focuses the window without a stale renderer payload", () => {
+    const win = makeMockWindow({ focused: false, minimized: true });
+    const factoryStub = makeNotificationFactoryStub();
+    const activationStub = makeActivationRegistrationStub();
+    new NotificationService({
+      getMainWindow: () => win as unknown as Electron.BrowserWindow,
+      notificationFactory: factoryStub.factory,
+      notificationActivationRegistration: activationStub.register,
+      isReady: () => true,
+      isTestEnv: () => false,
+    });
+
+    expect(activationStub.register).toHaveBeenCalledTimes(1);
+    activationStub.getHandler()?.({ arguments: "", type: "click" });
+
+    expect(win.restore).toHaveBeenCalled();
+    expect(win.show).toHaveBeenCalled();
+    expect(win.focus).toHaveBeenCalled();
+    expect(win.webContents.send).not.toHaveBeenCalled();
   });
 });
 
