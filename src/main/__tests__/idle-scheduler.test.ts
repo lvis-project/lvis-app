@@ -409,4 +409,36 @@ describe("SECURITY_GATE: IdleSchedulerService 5-state", () => {
     sched.signalConversation();
     expect(sched.getState()).toBe("RUNNING");
   });
+
+  it("case 21: workerClient 없이 생성 — 상태 머신은 동작, _processOne은 안전한 no-op", async () => {
+    // boot.ts now constructs the scheduler without a workerClient because the
+    // local-indexer plugin indexes eagerly in its background worker. The shared
+    // idle-state machine must still work for preference-refresh / post-turn /
+    // conversation-loop consumers, and the (dormant) queue must never throw.
+    const pm = new FakePowerMonitor();
+    const sched = new IdleSchedulerService({
+      powerMonitor: pm,
+      tickIntervalMs: 1_000_000,
+      logger: () => {},
+    });
+    const seen: IdleState[] = [];
+    sched.addStateChangeListener((state) => seen.push(state));
+
+    // Idle conditions met → IDLE_SCAN; the listener fires for the transition.
+    pm.setIdleTime(120);
+    pm.onBatteryPower = false;
+    sched._testSetCpuEma(0.1);
+    sched._testTick();
+    expect(sched.getState()).toBe("IDLE_SCAN");
+    expect(seen).toContain("IDLE_SCAN");
+
+    // Draining with no workerClient is a safe no-op (no throw, queue untouched).
+    sched.enqueue({ filePath: "/a.md", mode: "md", priority: 0 });
+    await expect(sched._testProcessOne()).resolves.toBeUndefined();
+    expect(sched.getQueueLength()).toBe(1);
+
+    // signalConversation still drives the state machine.
+    sched.signalConversation();
+    expect(sched.getState()).toBe("RUNNING");
+  });
 });
