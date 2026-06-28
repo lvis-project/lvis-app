@@ -69,6 +69,7 @@ import type { KeywordEngine } from "../../core/keyword-engine.js";
 import type { ToolRegistry } from "../../tools/registry.js";
 import type { SettingsService } from "../../data/settings-store.js";
 import type { MemoryManager } from "../../memory/memory-manager.js";
+import type { RoutinesStore } from "../../main/routines-store.js";
 import { emitEvent, onEvent } from "../types.js";
 import { buildPluginConfigOverrides } from "../plugins.js";
 import { PluginLoopbackManager } from "../../mcp/plugin-loopback-manager.js";
@@ -822,6 +823,13 @@ export interface InitPluginRuntimeInput {
    * initPluginRuntime cannot be called.
    */
   approvalGate: import("../../permissions/approval-gate.js").ApprovalGate;
+  /**
+   * Routines SOT — backs the per-plugin `hostApi.hasRoutineBySource` idempotency
+   * query. Injected (not late-bound) because the per-plugin HostApi factory runs
+   * during `startAll()` inside this step, so the store must already exist; boot
+   * therefore constructs it BEFORE calling initPluginRuntime.
+   */
+  routinesStore: RoutinesStore;
 }
 
 export interface InitPluginRuntimeOutput {
@@ -860,6 +868,7 @@ export async function initPluginRuntime(
     shellOpenExternal,
     approvalGate,
     permissionManager,
+    routinesStore,
   } = input;
 
   // §B3 — host public preference reader, shared across all per-plugin HostApi
@@ -2050,6 +2059,21 @@ export async function initPluginRuntime(
         }
 
         return { accepted: true, source: decision.source, eventId };
+      },
+
+      // ─── Idempotency SOT query — hostApi.hasRoutineBySource() ───────────
+      // Least-privilege boolean probe scoped to the caller's own
+      // `suggestion:<pluginId>:` prefix. A plugin uses this as its "propose
+      // once" gate without ever seeing routine contents or another plugin's
+      // routines. The prefix check is the security boundary: an out-of-prefix
+      // source returns false with NO enumeration.
+      hasRoutineBySource: async (source: string): Promise<boolean> => {
+        if (typeof source !== "string" || source.length === 0) return false;
+        const callerPrefix = `suggestion:${pluginId}:`;
+        if (!source.startsWith(callerPrefix)) {
+          return false;
+        }
+        return routinesStore.list().some((r) => r.source === source);
       },
         }),
         { pluginId, approvalGate, flagEnabled: hostClassifiesRiskEnabled },

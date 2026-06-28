@@ -266,6 +266,7 @@ describe("initPluginRuntime partition policy", () => {
       openAuthPartitionViewerService: vi.fn(),
       shellOpenExternal: vi.fn(),
       approvalGate: {} as never,
+      routinesStore: { list: () => [] } as never,
     });
 
     const handler = vi.fn(async () => {});
@@ -322,6 +323,7 @@ describe("initPluginRuntime partition policy", () => {
       openAuthPartitionViewerService: vi.fn(),
       shellOpenExternal: vi.fn(),
       approvalGate: {} as never,
+      routinesStore: { list: () => [] } as never,
     });
 
     const onEnable = runtimeTestState.capturedRuntimeOptions?.onEnable as
@@ -394,6 +396,7 @@ describe("initPluginRuntime HostApi factory", () => {
       openAuthPartitionViewerService: vi.fn(),
       shellOpenExternal: vi.fn(),
       approvalGate: approvalGate as never,
+      routinesStore: { list: () => [] } as never,
     });
 
     const createHostApi = runtimeTestState.capturedRuntimeOptions?.createHostApi as
@@ -487,6 +490,7 @@ describe("initPluginRuntime HostApi factory", () => {
       openAuthPartitionViewerService: vi.fn(),
       shellOpenExternal: vi.fn(),
       approvalGate: approvalGate as never,
+      routinesStore: { list: () => [] } as never,
     });
 
     const createHostApi = runtimeTestState.capturedRuntimeOptions?.createHostApi as
@@ -575,6 +579,7 @@ describe("initPluginRuntime HostApi factory", () => {
       openAuthPartitionViewerService: vi.fn(),
       shellOpenExternal: vi.fn(),
       approvalGate: {} as never,
+      routinesStore: { list: () => [] } as never,
     });
 
     const createHostApi = runtimeTestState.capturedRuntimeOptions?.createHostApi as
@@ -657,6 +662,7 @@ describe("initPluginRuntime HostApi factory", () => {
       openAuthPartitionViewerService: vi.fn(),
       shellOpenExternal: vi.fn(),
       approvalGate: {} as never,
+      routinesStore: { list: () => [] } as never,
     });
     output.lateBinding.pluginToolInvokerRef.fn = invoker;
 
@@ -819,6 +825,7 @@ describe("initPluginRuntime HostApi factory", () => {
       openAuthPartitionViewerService: vi.fn(),
       shellOpenExternal: vi.fn(),
       approvalGate: { requestAndWait: vi.fn() } as never,
+      routinesStore: { list: () => [] } as never,
     });
 
     const createHostApi = runtimeTestState.capturedRuntimeOptions?.createHostApi as
@@ -898,6 +905,7 @@ describe("initPluginRuntime HostApi factory", () => {
       openAuthPartitionViewerService: vi.fn(),
       shellOpenExternal: vi.fn(),
       approvalGate: { requestAndWait: vi.fn() } as never,
+      routinesStore: { list: () => [] } as never,
     });
 
     const createHostApi = runtimeTestState.capturedRuntimeOptions?.createHostApi as
@@ -969,6 +977,7 @@ describe("initPluginRuntime HostApi factory", () => {
       openAuthPartitionViewerService: vi.fn(),
       shellOpenExternal: vi.fn(),
       approvalGate: { requestAndWait: vi.fn() } as never,
+      routinesStore: { list: () => [] } as never,
     });
 
     const createHostApi = runtimeTestState.capturedRuntimeOptions?.createHostApi as
@@ -1048,6 +1057,7 @@ describe("initPluginRuntime HostApi factory", () => {
       openAuthPartitionViewerService: vi.fn(),
       shellOpenExternal: vi.fn(),
       approvalGate: { requestAndWait: vi.fn() } as never,
+      routinesStore: { list: () => [] } as never,
     });
 
     const createHostApi = runtimeTestState.capturedRuntimeOptions?.createHostApi as
@@ -1074,5 +1084,89 @@ describe("initPluginRuntime HostApi factory", () => {
     await new Promise((resolve) => setTimeout(resolve, 0));
 
     expect(api.getSecret("llm.apiKey.openai")).toBeNull();
+  });
+});
+
+describe("hostApi.hasRoutineBySource — prefix-scoped idempotency probe", () => {
+  type HasRoutineHostApi = { hasRoutineBySource: (source: string) => Promise<boolean> };
+  type CreateHostApi = (
+    pluginId: string,
+    manifest: { id: string; config?: Record<string, unknown>; capabilities?: string[] },
+    pluginDataDir: string,
+  ) => HasRoutineHostApi;
+
+  async function buildHostApi(
+    pluginId: string,
+    records: Array<{ source?: string }>,
+  ): Promise<HasRoutineHostApi> {
+    runtimeTestState.capturedRuntimeOptions = null;
+    runtimeTestState.runtime.listPluginIds.mockReturnValue([]);
+    runtimeTestState.runtime.listPluginManifests.mockReturnValue([]);
+    await initPluginRuntime({
+      projectRoot: "/tmp/lvis-test/project",
+      settingsService: {
+        get: vi.fn((key: string) => {
+          if (key === "llm") return { provider: "openai" };
+          if (key === "pluginConfigs") return {};
+          return undefined;
+        }),
+        getSecret: vi.fn(() => undefined),
+        getPluginConfig: vi.fn(() => ({})),
+        setPluginConfig: vi.fn(),
+      } as never,
+      memoryManager: {} as never,
+      keywordEngine: { registerKeywords: vi.fn(), unregisterByPlugin: vi.fn() } as never,
+      toolRegistry: {
+        unregisterByPlugin: vi.fn(),
+        register: vi.fn(),
+        listAll: vi.fn(() => []),
+        listPluginIds: vi.fn(() => []),
+        replacePluginTools: vi.fn(),
+      } as never,
+      pythonPath: undefined,
+      bootAuditLogger: { log: vi.fn() } as never,
+      mainWindow: {} as never,
+      openAuthWindowService: vi.fn(),
+      openLinkWindowService: vi.fn(),
+      openAuthPartitionViewerService: vi.fn(),
+      shellOpenExternal: vi.fn(),
+      approvalGate: { requestAndWait: vi.fn() } as never,
+      routinesStore: { list: () => records } as never,
+    });
+    const createHostApi = runtimeTestState.capturedRuntimeOptions?.createHostApi as CreateHostApi | undefined;
+    expect(createHostApi).toBeDefined();
+    return createHostApi!(pluginId, { id: pluginId, config: {}, capabilities: [] }, mkdtempSync("/tmp/lvis-hasroutine-"));
+  }
+
+  const records = [
+    { source: "suggestion:local-indexer:nightly-rescan" },
+    { source: "suggestion:meeting:weekly-digest" },
+    { /* manual routine — no source */ },
+  ];
+
+  it("returns true ONLY for the caller's own matching source marker", async () => {
+    const api = await buildHostApi("local-indexer", records);
+    await expect(api.hasRoutineBySource("suggestion:local-indexer:nightly-rescan")).resolves.toBe(true);
+    // Same prefix, no matching record → false.
+    await expect(api.hasRoutineBySource("suggestion:local-indexer:does-not-exist")).resolves.toBe(false);
+  });
+
+  it("refuses to probe another plugin's routines (prefix scoping)", async () => {
+    const api = await buildHostApi("local-indexer", records);
+    // A real routine exists with this source, but it is NOT the caller's prefix.
+    await expect(api.hasRoutineBySource("suggestion:meeting:weekly-digest")).resolves.toBe(false);
+  });
+
+  it("scopes per caller — the meeting plugin sees only its own marker", async () => {
+    const api = await buildHostApi("meeting", records);
+    await expect(api.hasRoutineBySource("suggestion:meeting:weekly-digest")).resolves.toBe(true);
+    await expect(api.hasRoutineBySource("suggestion:local-indexer:nightly-rescan")).resolves.toBe(false);
+  });
+
+  it("rejects empty / non-suggestion sources without enumeration", async () => {
+    const api = await buildHostApi("local-indexer", records);
+    await expect(api.hasRoutineBySource("")).resolves.toBe(false);
+    await expect(api.hasRoutineBySource("local-indexer")).resolves.toBe(false);
+    await expect(api.hasRoutineBySource("suggestion:local-indexer")).resolves.toBe(false);
   });
 });

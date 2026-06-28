@@ -753,6 +753,18 @@ export class ConversationLoop {
   private lastTurnToolNames: Set<string> | null = null;
   /** Session-wide total of request_plugin activations (cap MAX_SESSION_PLUGIN_EXPANSION). */
   private sessionPluginExpansions = 0;
+  /**
+   * Session-scoped on-demand activation set — registry-DISABLED plugins that an
+   * allow-listed (routine) session activated via request_plugin for THIS
+   * session ONLY. {@link resolveToolScope} (Gate 3) skips the disabled-drop for
+   * these ids so their already-registered tools stay in scope, WITHOUT ever
+   * persisting `enabled=true` (setPluginEnabled is never called by this path —
+   * the registry stays `enabled:false`). Empty for main chat, where
+   * `allowedPluginIds === undefined` means Gate 2 never lets a disabled id reach
+   * activation. NON-PERSISTENT: lives only for the loop instance's lifetime and
+   * is cleared on session reset alongside `sessionPluginExpansions`.
+   */
+  private sessionActivatedPluginIds = new Set<string>();
   /** Session-wide total of tool_search promotions (cap MAX_TOOL_SEARCH_PER_SESSION). */
   private sessionToolSearches = 0;
   private sessionAdditionalDirectories: string[] = [];
@@ -1199,6 +1211,7 @@ export class ConversationLoop {
     this.lastContextInputProjectionTokens = 0;
     this.sessionPluginExpansions = 0;
     this.sessionToolSearches = 0;
+    this.sessionActivatedPluginIds.clear();
     this.lastTurnToolNames = null;
     this.compactNum = 0;
     this.rateLimitRecoveryAttempted = false;
@@ -1526,6 +1539,7 @@ export class ConversationLoop {
     this.lastContextInputProjectionTokens = 0;
     this.sessionPluginExpansions = 0;
     this.sessionToolSearches = 0;
+    this.sessionActivatedPluginIds.clear();
     this.lastTurnToolNames = null;
     this.sessionAdditionalDirectories = [];
     this.turnAdditionalDirectories = [];
@@ -3037,17 +3051,45 @@ export class ConversationLoop {
         id: tc.id, name: tc.name, input: tc.input,
       }));
 
+      // Snapshot the session-activation set so we can audit exactly the
+      // disabled plugins this turn newly session-activated (one event each).
+      const sessionActivatedBefore = new Set(this.sessionActivatedPluginIds);
       const pluginOutcome = handleRequestPlugin(toolUses, {
         turnExpansions: pluginExpansions,
         sessionExpansions: this.sessionPluginExpansions,
         activePluginIds: scope.activePluginIds,
         availablePluginIds: this.filterAllowedPluginIds(
           (this.deps.pluginRuntime?.listPluginIds() ?? [])
-            .filter((pluginId) => this.deps.pluginRuntime?.isPluginEnabled?.(pluginId) !== false),
+            // A registry-DISABLED plugin is normally excluded, but a
+            // session-scoped allow-list (routine `allowedPluginIds`) may
+            // on-demand activate it for THIS session. Main chat has
+            // `allowedPluginIds === undefined`, so the right-hand side is
+            // always false and disabled plugins stay excluded (unchanged).
+            .filter((pluginId) =>
+              this.deps.pluginRuntime?.isPluginEnabled?.(pluginId) !== false ||
+              this.deps.allowedPluginIds?.has(pluginId) === true),
         ),
+        sessionActivatedPluginIds: this.sessionActivatedPluginIds,
+        isPluginEnabled: (pluginId) =>
+          this.deps.pluginRuntime?.isPluginEnabled?.(pluginId) !== false,
       });
       pluginExpansions = pluginOutcome.nextTurnExpansions;
       this.sessionPluginExpansions = pluginOutcome.nextSessionExpansions;
+
+      // Audit each NEW session-scoped activation of a registry-DISABLED plugin.
+      // This path never persists enabled state (setPluginEnabled is not called),
+      // so the audit trail is the only durable record that a disabled plugin was
+      // exposed for the session — valuable for the permission/scope review.
+      for (const activated of this.sessionActivatedPluginIds) {
+        if (!sessionActivatedBefore.has(activated)) {
+          this.auditLogger.log({
+            timestamp: new Date().toISOString(),
+            sessionId: this.sessionId,
+            type: "info",
+            input: `session_activated_disabled_plugin pluginId=${activated} (non-persistent; registry stays enabled:false)`,
+          });
+        }
+      }
 
       // 활성화 성공했으면 tool schema 재빌드 + 추가된 tool 수 보고
       const rebuiltAfterPlugin = pluginOutcome.activatedPluginIds.length > 0;
@@ -3867,7 +3909,16 @@ export class ConversationLoop {
     const pluginRuntime = this.deps.pluginRuntime;
     if (pluginRuntime?.isPluginEnabled) {
       for (const pluginId of [...activePluginIds]) {
-        if (!pluginRuntime.isPluginEnabled(pluginId)) activePluginIds.delete(pluginId);
+        // Session-scoped on-demand activation — a disabled plugin that this
+        // session activated via request_plugin keeps its tools in scope for
+        // the session lifetime (its tools are already in getVisibleTools).
+        // The registry stays `enabled:false`; this is NON-PERSISTENT.
+        if (
+          !pluginRuntime.isPluginEnabled(pluginId) &&
+          !this.sessionActivatedPluginIds.has(pluginId)
+        ) {
+          activePluginIds.delete(pluginId);
+        }
       }
     }
 

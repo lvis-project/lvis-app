@@ -20,6 +20,14 @@ export const MAX_PERSISTED_ROUTINES = 50;
  */
 export const MAX_LLM_SESSION_ROUTINES = 10;
 
+/**
+ * Maximum length of the {@link RoutineRecord.source} marker. Caps the stored
+ * identity string so a malformed/oversized `source` cannot bloat the persisted
+ * routines file. Enforced both at the `routine_schedule` tool boundary and in
+ * `RoutinesStore.add` (the SOT).
+ */
+export const MAX_ROUTINE_SOURCE_LENGTH = 128;
+
 export type RoutineExecution = "llm-session" | "notification-only";
 
 /**
@@ -120,6 +128,14 @@ export interface RoutineRecord {
    * Survives app restarts so the same cron minute cannot re-fire after reboot.
    */
   lastFiredMinuteUTC?: string;
+  /**
+   * Origin of this routine — the idempotency identity used by callers (e.g. a
+   * plugin's "propose once" gate). Suggestion-derived routines use
+   * `suggestion:<pluginId>:<intent>` (e.g.
+   * `suggestion:local-indexer:nightly-rescan`); manual creation leaves it
+   * unset. Capped at {@link MAX_ROUTINE_SOURCE_LENGTH} chars where accepted.
+   */
+  source?: string;
 }
 
 export interface AddRoutineInput {
@@ -139,6 +155,13 @@ export interface AddRoutineInput {
    * at fire time.
    */
   scope?: RoutineScope;
+  /**
+   * Origin marker persisted onto the created routine — see
+   * {@link RoutineRecord.source}. Suggestion-derived routines use
+   * `suggestion:<pluginId>:<intent>`; manual creation leaves it unset. Capped
+   * at {@link MAX_ROUTINE_SOURCE_LENGTH} chars; the store rejects longer values.
+   */
+  source?: string;
 }
 
 /**
