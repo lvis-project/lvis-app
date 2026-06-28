@@ -58,6 +58,8 @@ const PICKER_TITLE_CLASS = "min-w-0 truncate text-xs leading-4";
 const PICKER_SUBTITLE_CLASS = "mt-0.5 min-w-0 truncate text-[11px] leading-3 text-muted-foreground";
 const PICKER_COUNT_CLASS =
   "ml-1 flex h-4 min-w-4 shrink-0 items-center justify-center rounded-full bg-muted px-1.5 text-[10px] leading-none text-muted-foreground";
+const PICKER_GROUP_CLASS =
+  "pt-1 [&_[cmdk-group-heading]]:px-3 [&_[cmdk-group-heading]]:pb-1 [&_[cmdk-group-heading]]:pt-1 [&_[cmdk-group-heading]]:text-sm [&_[cmdk-group-heading]]:font-semibold [&_[cmdk-group-heading]]:text-foreground";
 
 function PickerIconSlot({ children }: { children: ReactNode }) {
   return <span className={PICKER_ICON_SLOT_CLASS}>{children}</span>;
@@ -207,7 +209,10 @@ export function SlashPickerPanel({
       <CommandItem key={p.viewKey} className={PICKER_ROW_CLASS} value={p.label} onSelect={() => runPlugin(p)}>
         <PickerIconSlot>
           <Suspense fallback={<span className={PICKER_ICON_CLASS} />}>
-            <Icon className={`${PICKER_ICON_CLASS} text-muted-foreground`} />
+            <Icon
+              className={`${PICKER_ICON_CLASS} text-muted-foreground`}
+              style={p.iconText ? { fontSize: "0.62rem" } : undefined}
+            />
           </Suspense>
         </PickerIconSlot>
         <PickerText title={p.label} />
@@ -321,27 +326,43 @@ export function SlashPickerPanel({
 
           {/* Item lists — one group per visible category (drilled or searched). */}
           {visibleCategories.includes("command") && (searching || step === "command") && (
-            <CommandGroup heading={catLabel("command")} data-testid="slash-group-command">
+            <CommandGroup
+              className={PICKER_GROUP_CLASS}
+              heading={catLabel("command")}
+              data-testid="slash-group-command"
+            >
               {matchedCommands.map(renderCommandRow)}
             </CommandGroup>
           )}
           {visibleCategories.includes("shortcut") && (searching || step === "shortcut") && (
-            <CommandGroup heading={catLabel("shortcut")} data-testid="slash-group-shortcut">
+            <CommandGroup
+              className={PICKER_GROUP_CLASS}
+              heading={catLabel("shortcut")}
+              data-testid="slash-group-shortcut"
+            >
               {matchedActions.map(renderActionRow)}
             </CommandGroup>
           )}
           {visibleCategories.includes("plugin") && (searching || step === "plugin") && (
-            <CommandGroup heading={catLabel("plugin")} data-testid="slash-group-plugin">
+            <CommandGroup
+              className={PICKER_GROUP_CLASS}
+              heading={catLabel("plugin")}
+              data-testid="slash-group-plugin"
+            >
               {matchedPlugins.map(renderPluginRow)}
             </CommandGroup>
           )}
           {visibleCategories.includes("mcp") && (searching || step === "mcp") && (
-            <CommandGroup heading={catLabel("mcp")} data-testid="slash-group-mcp">
+            <CommandGroup className={PICKER_GROUP_CLASS} heading={catLabel("mcp")} data-testid="slash-group-mcp">
               {matchedMcpTools.map(renderMcpRow)}
             </CommandGroup>
           )}
           {visibleCategories.includes("skills") && (searching || step === "skills") && (
-            <CommandGroup heading={catLabel("skills")} data-testid="slash-group-skills">
+            <CommandGroup
+              className={PICKER_GROUP_CLASS}
+              heading={catLabel("skills")}
+              data-testid="slash-group-skills"
+            >
               {matchedSkills.map(renderSkillRow)}
             </CommandGroup>
           )}
