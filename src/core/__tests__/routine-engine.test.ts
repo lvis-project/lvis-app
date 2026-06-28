@@ -12,6 +12,7 @@ function makeLoop(opts: { text?: string; throws?: boolean } = {}) {
       if (opts.throws) throw new Error("loop crashed");
       return { text: opts.text ?? "루틴 완료 메시지", toolCalls: [], route: "llm" };
     }),
+    cleanupSession: vi.fn(),
     dispose: vi.fn(),
   };
 }
@@ -62,6 +63,7 @@ describe("RoutineEngine.runRoutine", () => {
       getSessionId: vi.fn(() => "test-session-id"),
       startRoutineConversation: vi.fn(async () => "test-session-id"),
       runTurn: vi.fn(async () => ({ text: "", toolCalls: [], route: "llm" })),
+      cleanupSession: vi.fn(),
       dispose: vi.fn(),
     };
     const engine = new RoutineEngine({ createConversationLoop: () => loop as any });

@@ -26,6 +26,18 @@ export interface PluginExpansionState {
   activePluginIds: Set<string>;
   /** 실제 등록된 plugin id 목록 (런타임 질의 결과). */
   availablePluginIds: string[];
+  /**
+   * Session-scoped on-demand activation sink. When a registry-DISABLED plugin
+   * (per {@link isPluginEnabled}) is activated, its id is recorded here so the
+   * caller's scope resolver skips the disabled-drop for THIS session only —
+   * never persisting enabled state (setPluginEnabled is NOT called). A
+   * disabled id can only reach the activation branch if it already passed the
+   * caller's allow-list gate (it would not be in {@link availablePluginIds}
+   * otherwise). Omitted for main chat.
+   */
+  sessionActivatedPluginIds?: Set<string>;
+  /** Registry active-state predicate; `false` ⇒ the plugin is disabled. */
+  isPluginEnabled?: (pluginId: string) => boolean;
 }
 
 export interface PluginExpansionOutcome {
@@ -94,6 +106,13 @@ export function handleRequestPlugin(
       });
     } else {
       state.activePluginIds.add(pluginId);
+      // Session-scoped on-demand activation — a registry-disabled plugin that
+      // cleared the caller's allow-list gate (else it would not be in
+      // availablePluginIds) is activated for THIS session only. Record it so
+      // the scope resolver keeps its tools WITHOUT persisting enabled=true.
+      if (state.isPluginEnabled?.(pluginId) === false) {
+        state.sessionActivatedPluginIds?.add(pluginId);
+      }
       turnExpansions += 1;
       sessionExpansions += 1;
       activatedPluginIds.push(pluginId);
