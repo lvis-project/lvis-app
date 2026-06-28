@@ -23,7 +23,7 @@
  *
  * Test-mode hard-guard: NODE_ENV === "test" or !app.isReady() → no-op.
  */
-import type { BrowserWindow } from "electron";
+import type { ActivationArguments, BrowserWindow } from "electron";
 import type { AuditLogger } from "../audit/audit-logger.js";
 import { createLogger } from "../lib/logger.js";
 import { stripMarkdown } from "../shared/strip-markdown.js";
@@ -156,6 +156,10 @@ export interface NotificationLike {
   on(event: "click", handler: () => void): void;
 }
 
+export type NotificationActivationRegistration = (
+  handler: (details: ActivationArguments) => void,
+) => void;
+
 export interface NotificationServiceOptions {
   /** Live BrowserWindow getter. Service tolerates null (e.g. window closed). */
   getMainWindow: () => BrowserWindow | null;
@@ -171,6 +175,15 @@ export interface NotificationServiceOptions {
     silent: boolean;
     urgency: "normal" | "critical" | "low";
   }) => NotificationLike;
+  /**
+   * Windows Action Center activation bridge. Electron's per-instance
+   * `notification.on("click")` is not enough for persisted/cold-start
+   * notifications and may also fire alongside this central handler.
+   *
+   * `undefined`: register the default Electron handler when using the default
+   * notification factory. `null`: explicitly disable registration in tests.
+   */
+  notificationActivationRegistration?: NotificationActivationRegistration | null;
   isReady?: () => boolean;
   /**
    * Test override of NODE_ENV check. Default: read process.env.NODE_ENV.
@@ -239,6 +252,23 @@ function defaultNotificationFactory(opts: {
   };
 }
 
+function defaultNotificationActivationRegistration(
+  handler: (details: ActivationArguments) => void,
+): void {
+  if (process.platform !== "win32") return;
+  try {
+    // eslint-disable-next-line @typescript-eslint/no-require-imports
+    const { Notification } = require("electron") as typeof import("electron");
+    if (typeof Notification.handleActivation !== "function") return;
+    Notification.handleActivation(handler);
+  } catch (err) {
+    log.warn(
+      "notification activation handler registration failed: %s",
+      (err as Error).message,
+    );
+  }
+}
+
 function defaultIsReady(): boolean {
   try {
     // eslint-disable-next-line @typescript-eslint/no-require-imports
@@ -298,6 +328,22 @@ export class NotificationService {
     this.isReady = opts.isReady ?? defaultIsReady;
     this.isTestEnv = opts.isTestEnv ?? defaultIsTestEnv;
     this.isAnyWindowFocused = opts.isAnyWindowFocused ?? defaultIsAnyWindowFocused;
+
+    const activationRegistration =
+      opts.notificationActivationRegistration ??
+      (opts.notificationFactory ? null : defaultNotificationActivationRegistration);
+    if (activationRegistration && !this.isTestEnv()) {
+      try {
+        activationRegistration((details) => {
+          this.handleNotificationActivation(details);
+        });
+      } catch (err) {
+        log.warn(
+          "notification activation handler registration failed: %s",
+          (err as Error).message,
+        );
+      }
+    }
   }
 
   fire(opts: FireOptions): void {
@@ -413,22 +459,10 @@ export class NotificationService {
         urgency: urgent ? "critical" : "normal",
       });
       n.on("click", () => {
-        const win = this.getMainWindow();
-        if (!win || win.isDestroyed()) return;
-        try {
-          if (win.isMinimized()) win.restore();
-          win.show();
-          win.focus();
-          win.webContents.send(IPC_NOTIFICATION_CLICKED, {
-            kind: opts.kind,
-            contextRef: opts.contextRef,
-          });
-        } catch (err) {
-          log.warn(
-            "notification click handler failed: %s",
-            (err as Error).message,
-          );
-        }
+        this.restoreMainWindowFromNotification({
+          kind: opts.kind,
+          contextRef: opts.contextRef,
+        });
       });
       n.show();
     } catch (err) {
@@ -437,6 +471,32 @@ export class NotificationService {
       // the lifecycle event that fired it.
       log.warn(
         "OS notification fire failed: %s",
+        (err as Error).message,
+      );
+    }
+  }
+
+  private handleNotificationActivation(details: ActivationArguments): void {
+    void details;
+    this.restoreMainWindowFromNotification();
+  }
+
+  private restoreMainWindowFromNotification(payload?: {
+    kind: NotificationKind;
+    contextRef?: NotificationContextRef;
+  }): void {
+    const win = this.getMainWindow();
+    if (!win || win.isDestroyed()) return;
+    try {
+      if (win.isMinimized()) win.restore();
+      win.show();
+      win.focus();
+      if (payload) {
+        win.webContents.send(IPC_NOTIFICATION_CLICKED, payload);
+      }
+    } catch (err) {
+      log.warn(
+        "notification click handler failed: %s",
         (err as Error).message,
       );
     }
