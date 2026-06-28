@@ -493,6 +493,19 @@ export interface ConversationLoopDeps {
      * Used by {@link resolveToolScope} to drop inactive plugins from scope.
      */
     isPluginEnabled?(pluginId: string): boolean;
+    /**
+     * Record a plugin as session-activated so the execution delegate
+     * ({@link pluginRuntimeToolDelegate} Gate 4) can allow its tool calls.
+     * Called immediately after on-demand activation of a registry-disabled
+     * plugin. NEVER persists enabled state — `setPluginEnabled` is NOT called.
+     */
+    setSessionActivated?(pluginId: string): void;
+    /**
+     * Clear all session activations. Mirrors every
+     * `sessionActivatedPluginIds.clear()` so the execution gate never leaks
+     * activated state across sessions.
+     */
+    clearSessionActivated?(): void;
   };
   /**
    * Fixed-scope support for callers that already made a plugin-scope decision.
@@ -1212,6 +1225,7 @@ export class ConversationLoop {
     this.sessionPluginExpansions = 0;
     this.sessionToolSearches = 0;
     this.sessionActivatedPluginIds.clear();
+    this.deps.pluginRuntime?.clearSessionActivated?.();
     this.lastTurnToolNames = null;
     this.compactNum = 0;
     this.rateLimitRecoveryAttempted = false;
@@ -1540,6 +1554,7 @@ export class ConversationLoop {
     this.sessionPluginExpansions = 0;
     this.sessionToolSearches = 0;
     this.sessionActivatedPluginIds.clear();
+    this.deps.pluginRuntime?.clearSessionActivated?.();
     this.lastTurnToolNames = null;
     this.sessionAdditionalDirectories = [];
     this.turnAdditionalDirectories = [];
@@ -3082,6 +3097,11 @@ export class ConversationLoop {
       // exposed for the session — valuable for the permission/scope review.
       for (const activated of this.sessionActivatedPluginIds) {
         if (!sessionActivatedBefore.has(activated)) {
+          // Mirror into PluginRuntime so Gate 4 (plugin-runtime-delegate) allows
+          // this plugin's tool calls for the remainder of the session. This is
+          // the ONLY way a registry-disabled plugin's tools become executable —
+          // setPluginEnabled is deliberately NOT called (non-persistence invariant).
+          this.deps.pluginRuntime?.setSessionActivated?.(activated);
           this.auditLogger.log({
             timestamp: new Date().toISOString(),
             sessionId: this.sessionId,
