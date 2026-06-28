@@ -8,7 +8,7 @@
  * cross-category result list so the user can still match everything at once.
  * Lazy-loaded (cmdk) so the app does not import the Command palette at startup.
  */
-import { Suspense, useCallback, useEffect, useRef, useState } from "react";
+import { Suspense, useCallback, useEffect, useRef, useState, type ReactNode } from "react";
 import type { KeyboardEvent as ReactKeyboardEvent } from "react";
 import { ChevronLeft, ChevronRight } from "lucide-react";
 import {
@@ -47,6 +47,37 @@ interface SlashPickerPanelProps {
   onSelectPlugin: (viewKey: string) => void;
   onInsert: (cmd: string) => void;
   onClose: () => void;
+}
+
+const PICKER_ROW_CLASS = "min-h-8 gap-2.5 px-2 py-1.5";
+const PICKER_BACK_ROW_CLASS = "min-h-7 gap-2.5 px-2 py-1 text-accent";
+const PICKER_ICON_SLOT_CLASS = "flex h-4 w-4 shrink-0 items-center justify-center text-muted-foreground";
+const PICKER_ICON_CLASS = "h-3.5 w-3.5 shrink-0";
+const PICKER_TEXT_STACK_CLASS = "flex min-w-0 flex-1 flex-col justify-center";
+const PICKER_TITLE_CLASS = "min-w-0 truncate text-xs leading-4";
+const PICKER_SUBTITLE_CLASS = "mt-0.5 min-w-0 truncate text-[11px] leading-3 text-muted-foreground";
+const PICKER_COUNT_CLASS =
+  "ml-1 flex h-4 min-w-4 shrink-0 items-center justify-center rounded-full bg-muted px-1.5 text-[10px] leading-none text-muted-foreground";
+
+function PickerIconSlot({ children }: { children: ReactNode }) {
+  return <span className={PICKER_ICON_SLOT_CLASS}>{children}</span>;
+}
+
+function PickerText({
+  title,
+  subtitle,
+  titleClassName = "",
+}: {
+  title: ReactNode;
+  subtitle?: ReactNode;
+  titleClassName?: string;
+}) {
+  return (
+    <div className={PICKER_TEXT_STACK_CLASS}>
+      <span className={`${PICKER_TITLE_CLASS} ${titleClassName}`.trim()}>{title}</span>
+      {subtitle ? <span className={PICKER_SUBTITLE_CLASS}>{subtitle}</span> : null}
+    </div>
+  );
 }
 
 export function SlashPickerPanel({
@@ -150,52 +181,67 @@ export function SlashPickerPanel({
   const renderCommandRow = (c: SlashCommand) => (
     <CommandItem
       key={c.cmd}
-      className="gap-2.5"
+      className={PICKER_ROW_CLASS}
       value={`${c.cmd} ${t(c.labelKey)}`}
       onSelect={() => runSlash(c.cmd)}
     >
-      <span className="font-mono text-xs text-muted-foreground w-28 shrink-0">{c.cmd}</span>
-      <span className="min-w-0 flex-1 truncate text-xs">{t(c.labelKey)}</span>
+      <PickerIconSlot>
+        <CATEGORY_ICON.command className={PICKER_ICON_CLASS} />
+      </PickerIconSlot>
+      <PickerText title={c.cmd} subtitle={t(c.labelKey)} titleClassName="font-mono" />
     </CommandItem>
   );
 
   const renderActionRow = (a: QuickAction) => (
-    <CommandItem key={a.id} className="gap-2.5" value={a.label} onSelect={() => runAction(a)}>
-      <span className="min-w-0 flex-1 truncate text-xs">{a.label}</span>
+    <CommandItem key={a.id} className={PICKER_ROW_CLASS} value={a.label} onSelect={() => runAction(a)}>
+      <PickerIconSlot>
+        <CATEGORY_ICON.shortcut className={PICKER_ICON_CLASS} />
+      </PickerIconSlot>
+      <PickerText title={a.label} />
     </CommandItem>
   );
 
   const renderPluginRow = (p: PluginEntry) => {
     const Icon = pluginIconFor({ icon: p.icon, iconText: p.iconText });
     return (
-      <CommandItem key={p.viewKey} className="gap-2.5" value={p.label} onSelect={() => runPlugin(p)}>
-        <Suspense fallback={<span className="h-3.5 w-3.5 shrink-0" />}>
-          <Icon className="h-3.5 w-3.5 shrink-0 text-muted-foreground" />
-        </Suspense>
-        <span className="min-w-0 flex-1 truncate text-xs">{p.label}</span>
+      <CommandItem key={p.viewKey} className={PICKER_ROW_CLASS} value={p.label} onSelect={() => runPlugin(p)}>
+        <PickerIconSlot>
+          <Suspense fallback={<span className={PICKER_ICON_CLASS} />}>
+            <Icon className={`${PICKER_ICON_CLASS} text-muted-foreground`} />
+          </Suspense>
+        </PickerIconSlot>
+        <PickerText title={p.label} />
       </CommandItem>
     );
   };
 
   const McpIcon = CATEGORY_ICON.mcp;
   const renderMcpRow = (m: McpToolEntry) => (
-    <CommandItem key={`${m.serverId}/${m.name}`} value={`${m.name} ${m.serverId}`} onSelect={() => runText(m.name)}>
-      <McpIcon className="h-3.5 w-3.5 shrink-0 text-muted-foreground" />
-      <div className="flex min-w-0 flex-1 flex-col">
-        <span className="font-mono text-xs">{m.name}</span>
-        <span className="text-[11px] text-muted-foreground line-clamp-1">{m.serverId}</span>
-      </div>
+    <CommandItem
+      key={`${m.serverId}/${m.name}`}
+      className={PICKER_ROW_CLASS}
+      value={`${m.name} ${m.serverId}`}
+      onSelect={() => runText(m.name)}
+    >
+      <PickerIconSlot>
+        <McpIcon className={PICKER_ICON_CLASS} />
+      </PickerIconSlot>
+      <PickerText title={m.name} subtitle={m.serverId} titleClassName="font-mono" />
     </CommandItem>
   );
 
   const SkillIcon = CATEGORY_ICON.skills;
   const renderSkillRow = (s: SkillEntry) => (
-    <CommandItem key={s.name} value={`${s.name} ${s.description}`} onSelect={() => runText(s.name)}>
-      <SkillIcon className="h-3.5 w-3.5 shrink-0 text-muted-foreground" />
-      <div className="flex min-w-0 flex-1 flex-col">
-        <span className="text-xs">{s.name}</span>
-        <span className="text-[11px] text-muted-foreground line-clamp-1">{s.description}</span>
-      </div>
+    <CommandItem
+      key={s.name}
+      className={PICKER_ROW_CLASS}
+      value={`${s.name} ${s.description}`}
+      onSelect={() => runText(s.name)}
+    >
+      <PickerIconSlot>
+        <SkillIcon className={PICKER_ICON_CLASS} />
+      </PickerIconSlot>
+      <PickerText title={s.name} subtitle={s.description} />
     </CommandItem>
   );
 
@@ -240,21 +286,17 @@ export function SlashPickerPanel({
                 return (
                   <CommandItem
                     key={c}
+                    className={PICKER_ROW_CLASS}
                     value={catLabel(c)}
                     onSelect={() => setStep(c)}
                     data-testid={`slash-picker-cat-${c}`}
                   >
-                    <Icon className="h-3.5 w-3.5 shrink-0 text-muted-foreground" />
-                    <div className="flex min-w-0 flex-1 flex-col">
-                      <span className="text-xs">{catLabel(c)}</span>
-                      <span className="text-[11px] text-muted-foreground line-clamp-1">
-                        {catDescription(c)}
-                      </span>
-                    </div>
-                    <span className="ml-1 rounded-full bg-muted px-1.5 text-[10px] text-muted-foreground">
-                      {counts[c]}
-                    </span>
-                    <ChevronRight className="h-3.5 w-3.5 shrink-0 text-muted-foreground" />
+                    <PickerIconSlot>
+                      <Icon className={PICKER_ICON_CLASS} />
+                    </PickerIconSlot>
+                    <PickerText title={catLabel(c)} subtitle={catDescription(c)} />
+                    <span className={PICKER_COUNT_CLASS}>{counts[c]}</span>
+                    <ChevronRight className={`${PICKER_ICON_CLASS} text-muted-foreground`} />
                   </CommandItem>
                 );
               })}
@@ -269,10 +311,10 @@ export function SlashPickerPanel({
             <CommandItem
               value="__back__"
               onSelect={() => setStep(null)}
-              className="gap-2.5 text-accent"
+              className={PICKER_BACK_ROW_CLASS}
               data-testid="slash-picker-back"
             >
-              <ChevronLeft className="h-3.5 w-3.5 shrink-0" />
+              <ChevronLeft className={PICKER_ICON_CLASS} />
               <span className="min-w-0 flex-1 truncate text-xs font-semibold">{catLabel(step)}</span>
             </CommandItem>
           )}
