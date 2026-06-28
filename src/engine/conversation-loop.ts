@@ -80,6 +80,7 @@ import { isToolResultStubContent } from "../shared/tool-result-stub.js";
 import { createTracer, type ConversationTracer } from "../observability/conversation-trace.js";
 import { createLogger } from "../lib/logger.js";
 import { t } from "../i18n/index.js";
+import { sessionContext } from "./session-context.js";
 const log = createLogger("lvis");
 
 interface RequestProjectionContext {
@@ -493,6 +494,19 @@ export interface ConversationLoopDeps {
      * Used by {@link resolveToolScope} to drop inactive plugins from scope.
      */
     isPluginEnabled?(pluginId: string): boolean;
+    /**
+     * Record a plugin as session-activated for `sessionId` so Gate 4
+     * ({@link pluginRuntimeToolDelegate}) allows its tool calls for that
+     * session. NEVER persists enabled state — `setPluginEnabled` NOT called.
+     * Per-session scoping ensures session A's activation is never wiped by
+     * session B starting.
+     */
+    setSessionActivated?(sessionId: string, pluginId: string): void;
+    /**
+     * Clear on-demand activations for `sessionId` ONLY. Does not affect
+     * any other session. Called at session-reset and routine loop completion.
+     */
+    clearSessionActivated?(sessionId: string): void;
   };
   /**
    * Fixed-scope support for callers that already made a plugin-scope decision.
@@ -753,6 +767,18 @@ export class ConversationLoop {
   private lastTurnToolNames: Set<string> | null = null;
   /** Session-wide total of request_plugin activations (cap MAX_SESSION_PLUGIN_EXPANSION). */
   private sessionPluginExpansions = 0;
+  /**
+   * Session-scoped on-demand activation set — registry-DISABLED plugins that an
+   * allow-listed (routine) session activated via request_plugin for THIS
+   * session ONLY. {@link resolveToolScope} (Gate 3) skips the disabled-drop for
+   * these ids so their already-registered tools stay in scope, WITHOUT ever
+   * persisting `enabled=true` (setPluginEnabled is never called by this path —
+   * the registry stays `enabled:false`). Empty for main chat, where
+   * `allowedPluginIds === undefined` means Gate 2 never lets a disabled id reach
+   * activation. NON-PERSISTENT: lives only for the loop instance's lifetime and
+   * is cleared on session reset alongside `sessionPluginExpansions`.
+   */
+  private sessionActivatedPluginIds = new Set<string>();
   /** Session-wide total of tool_search promotions (cap MAX_TOOL_SEARCH_PER_SESSION). */
   private sessionToolSearches = 0;
   private sessionAdditionalDirectories: string[] = [];
@@ -1199,6 +1225,8 @@ export class ConversationLoop {
     this.lastContextInputProjectionTokens = 0;
     this.sessionPluginExpansions = 0;
     this.sessionToolSearches = 0;
+    this.sessionActivatedPluginIds.clear();
+    this.deps.pluginRuntime?.clearSessionActivated?.(this.sessionId);
     this.lastTurnToolNames = null;
     this.compactNum = 0;
     this.rateLimitRecoveryAttempted = false;
@@ -1234,6 +1262,20 @@ export class ConversationLoop {
 
   getHistory(): ConversationHistory {
     return this.history;
+  }
+
+  /**
+   * Clear this session's on-demand plugin activations from PluginRuntime.
+   * Call after the session ends so the per-session Map entry doesn't
+   * accumulate as a stale entry from a discarded loop (e.g. after
+   * RoutineEngine discards the routine's ConversationLoop).
+   *
+   * ConversationLoop's own resetSession paths already call
+   * `clearSessionActivated(this.sessionId)` — this method covers the
+   * routine-fire path where the loop is discarded without a resetSession.
+   */
+  cleanupSession(): void {
+    this.deps.pluginRuntime?.clearSessionActivated?.(this.sessionId);
   }
 
   private readToolResultForChunk(toolUseId: string): ReadableToolResult | null {
@@ -1526,6 +1568,8 @@ export class ConversationLoop {
     this.lastContextInputProjectionTokens = 0;
     this.sessionPluginExpansions = 0;
     this.sessionToolSearches = 0;
+    this.sessionActivatedPluginIds.clear();
+    this.deps.pluginRuntime?.clearSessionActivated?.(this.sessionId);
     this.lastTurnToolNames = null;
     this.sessionAdditionalDirectories = [];
     this.turnAdditionalDirectories = [];
@@ -2008,22 +2052,31 @@ export class ConversationLoop {
     this.tracer.step("PROMPT_ASSEMBLE", { promptLen: systemPrompt.length, activePlugins: scope.activePluginIds.size });
     let result: Awaited<ReturnType<ConversationLoop["queryLoop"]>>;
     try {
-      result = await this.queryLoop(
-        systemPrompt,
-        scope,
-        callbacksForLoop,
-        turnSignal,
-        options?.originSource ?? null,
-        {
-          maxRounds: options?.maxRounds,
-          sessionIdOverride: options?.sessionIdOverride,
-          spawnDepth: options?.spawnDepth,
-          inputOrigin,
-          toolTrustOrigin,
-          permissionUserIntent,
-          permissionExplicitAuthorizationIntent,
-          rolePrompt: options?.rolePrompt,
-        },
+      // Establish per-session ALS context so Gate 4 (plugin-runtime-delegate)
+      // can consult the CALLING session's on-demand activation set. The context
+      // uses effectiveSessionId (respects sessionIdOverride for sub-agents) and
+      // propagates through all await chains inside queryLoop, including the
+      // in-process MCP loopback path (LoopbackTransport → PluginMcpServer →
+      // pluginRuntimeToolDelegate). Clearing session B never wipes session A's
+      // activation because the Map is keyed per sessionId.
+      result = await sessionContext.run({ sessionId: effectiveSessionId }, () =>
+        this.queryLoop(
+          systemPrompt,
+          scope,
+          callbacksForLoop,
+          turnSignal,
+          options?.originSource ?? null,
+          {
+            maxRounds: options?.maxRounds,
+            sessionIdOverride: options?.sessionIdOverride,
+            spawnDepth: options?.spawnDepth,
+            inputOrigin,
+            toolTrustOrigin,
+            permissionUserIntent,
+            permissionExplicitAuthorizationIntent,
+            rolePrompt: options?.rolePrompt,
+          },
+        ),
       );
     } finally {
       // Always clear the controller, even when `queryLoop` throws (provider
@@ -3037,17 +3090,54 @@ export class ConversationLoop {
         id: tc.id, name: tc.name, input: tc.input,
       }));
 
+      // Snapshot the session-activation set so we can audit exactly the
+      // disabled plugins this turn newly session-activated (one event each).
+      const sessionActivatedBefore = new Set(this.sessionActivatedPluginIds);
       const pluginOutcome = handleRequestPlugin(toolUses, {
         turnExpansions: pluginExpansions,
         sessionExpansions: this.sessionPluginExpansions,
         activePluginIds: scope.activePluginIds,
         availablePluginIds: this.filterAllowedPluginIds(
           (this.deps.pluginRuntime?.listPluginIds() ?? [])
-            .filter((pluginId) => this.deps.pluginRuntime?.isPluginEnabled?.(pluginId) !== false),
+            // A registry-DISABLED plugin is normally excluded, but a
+            // session-scoped allow-list (routine `allowedPluginIds`) may
+            // on-demand activate it for THIS session. Main chat has
+            // `allowedPluginIds === undefined`, so the right-hand side is
+            // always false and disabled plugins stay excluded (unchanged).
+            .filter((pluginId) =>
+              this.deps.pluginRuntime?.isPluginEnabled?.(pluginId) !== false ||
+              this.deps.allowedPluginIds?.has(pluginId) === true),
         ),
+        sessionActivatedPluginIds: this.sessionActivatedPluginIds,
+        isPluginEnabled: (pluginId) =>
+          this.deps.pluginRuntime?.isPluginEnabled?.(pluginId) !== false,
       });
       pluginExpansions = pluginOutcome.nextTurnExpansions;
       this.sessionPluginExpansions = pluginOutcome.nextSessionExpansions;
+
+      // Audit each NEW session-scoped activation of a registry-DISABLED plugin.
+      // This path never persists enabled state (setPluginEnabled is not called),
+      // so the audit trail is the only durable record that a disabled plugin was
+      // exposed for the session — valuable for the permission/scope review.
+      for (const activated of this.sessionActivatedPluginIds) {
+        if (!sessionActivatedBefore.has(activated)) {
+          // Mirror into PluginRuntime so Gate 4 (plugin-runtime-delegate) allows
+          // this plugin's tool calls for the remainder of the session. This is
+          // the ONLY way a registry-disabled plugin's tools become executable —
+          // setPluginEnabled is deliberately NOT called (non-persistence invariant).
+          // Ordering invariant: this fires in the request_plugin interception block,
+          // BEFORE the remaining non-request_plugin tool calls are dispatched to the
+          // executor, so Gate 4 is already relaxed by the time index_scan (or any
+          // other plugin tool) reaches the delegate.
+          this.deps.pluginRuntime?.setSessionActivated?.(this.sessionId, activated);
+          this.auditLogger.log({
+            timestamp: new Date().toISOString(),
+            sessionId: this.sessionId,
+            type: "info",
+            input: `session_activated_disabled_plugin pluginId=${activated} (non-persistent; registry stays enabled:false)`,
+          });
+        }
+      }
 
       // 활성화 성공했으면 tool schema 재빌드 + 추가된 tool 수 보고
       const rebuiltAfterPlugin = pluginOutcome.activatedPluginIds.length > 0;
@@ -3867,7 +3957,16 @@ export class ConversationLoop {
     const pluginRuntime = this.deps.pluginRuntime;
     if (pluginRuntime?.isPluginEnabled) {
       for (const pluginId of [...activePluginIds]) {
-        if (!pluginRuntime.isPluginEnabled(pluginId)) activePluginIds.delete(pluginId);
+        // Session-scoped on-demand activation — a disabled plugin that this
+        // session activated via request_plugin keeps its tools in scope for
+        // the session lifetime (its tools are already in getVisibleTools).
+        // The registry stays `enabled:false`; this is NON-PERSISTENT.
+        if (
+          !pluginRuntime.isPluginEnabled(pluginId) &&
+          !this.sessionActivatedPluginIds.has(pluginId)
+        ) {
+          activePluginIds.delete(pluginId);
+        }
       }
     }
 

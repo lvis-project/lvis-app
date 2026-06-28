@@ -143,6 +143,8 @@ export function createNoopHostApi(
       reason: "loop_unavailable",
       source: typeof spec?.source === "string" ? spec.source : "",
     }),
+    // No routines SOT in a noop context — no routine can match any source.
+    hasRoutineBySource: async () => false,
     agentApproval: {
       request: async () => "deny-once" as const,
       respond: async () => {},

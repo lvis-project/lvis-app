@@ -33,6 +33,7 @@ import { t } from "../i18n/index.js";
 import { createDynamicTool, type Tool } from "./base.js";
 import type { RoutinesStore } from "../main/routines-store.js";
 import type { RoutineExecution, RoutineRepeat, RoutineSchedule } from "../main/routines-store.js";
+import { MAX_ROUTINE_SOURCE_LENGTH } from "../main/routines-store.js";
 import { isValidCronExpression } from "../routines/cron-evaluator.js";
 
 const DATE_ONLY_RE = /^(\d{4})-(\d{2})-(\d{2})$/;
@@ -185,6 +186,10 @@ export function createRoutineScheduleTool(store: RoutinesStore): Tool {
           description: t("be_routineSchedule.allowedPluginsDescription"),
           items: { type: "string" },
         },
+        source: {
+          type: "string",
+          description: t("be_routineSchedule.sourceDescription"),
+        },
       },
     },
     execute: async (rawInput) => {
@@ -248,6 +253,18 @@ export function createRoutineScheduleTool(store: RoutinesStore): Tool {
         };
       }
 
+      // Idempotency identity marker (e.g. `suggestion:<pluginId>:<intent>`).
+      // Optional; empty/whitespace collapses to unset. The store re-validates
+      // the cap as the SOT — the early check just returns a clean tool error.
+      const rawSource = typeof a.source === "string" ? a.source.trim() : undefined;
+      if (rawSource !== undefined && rawSource.length > MAX_ROUTINE_SOURCE_LENGTH) {
+        return {
+          output: JSON.stringify({ error: `source must be at most ${MAX_ROUTINE_SOURCE_LENGTH} characters` }),
+          isError: true,
+        };
+      }
+      const source = rawSource && rawSource.length > 0 ? rawSource : undefined;
+
       // Permission policy Layer 4 — translate the LLM-facing `allowedPlugins` field
       // into the canonical `scope` discriminated union. Missing or []
       // both mean explicit deny-all; non-empty means explicit allow-list.
@@ -269,6 +286,7 @@ export function createRoutineScheduleTool(store: RoutinesStore): Tool {
             forcedPluginIds: [],
             directories: [],
           },
+          ...(source !== undefined ? { source } : {}),
         });
         return {
           output: JSON.stringify({ routineId: record.id, schedule: record.schedule }),

@@ -77,6 +77,7 @@ export type ChokepointKind =
   | "onPluginsChanged" // self-subscription to lifecycle events (auto-cleaned)
   | "onShutdown" // registers a shutdown observer (host-scoped cleanup)
   | "getInstalledPluginIds" // reads the loaded-plugin id list
+  | "hasRoutineBySource" // prefix-scoped boolean probe of the routines SOT
   | "getAppPreference" // reads an allow-listed host preference
   | "resolveApiKey" // leases/reads a host-managed credential (no persisted mutation)
   | "logEvent" // routes to the host AuditLogger (the telemetry channel itself)
@@ -137,6 +138,7 @@ export const CHOKEPOINT_EFFECT: Record<StaticChokepointKind, Effect> = {
   onPluginsChanged: "read",
   onShutdown: "read",
   getInstalledPluginIds: "read",
+  hasRoutineBySource: "read",
   getAppPreference: "read",
   resolveApiKey: "read",
   logEvent: "read",
@@ -283,6 +285,8 @@ export const HOSTAPI_EFFECT_BY_PATH: Record<string, HostApiEffectSpec> = {
   // ─── top-level reads / non-persisting signals ─────────────────────────────
   getSecret: { kind: "getSecret", targetFromArgs: cappedKeyArg },
   getInstalledPluginIds: { kind: "getInstalledPluginIds" },
+  // Idempotency SOT probe — `source` arg is a non-secret forensic descriptor.
+  hasRoutineBySource: { kind: "hasRoutineBySource", targetFromArgs: firstStringArg },
   getAppPreference: { kind: "getAppPreference", targetFromArgs: firstStringArg },
   resolveApiKey: { kind: "resolveApiKey", targetFromArgs: objectStringField("purpose") },
   callTool: { kind: "callTool", targetFromArgs: firstStringArg },
