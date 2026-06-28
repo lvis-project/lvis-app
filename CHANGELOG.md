@@ -1,5 +1,42 @@
 # Changelog
 
+## v0.4.2 — 2026-06-29
+
+사용자 가시성 높은 안정화 릴리즈 — Windows 알림 활성화, 업데이트 설치 fallback, slash picker 레이아웃, 플러그인/권한 경계, Windows 로컬 검증 경로를 함께 정리했다.
+
+### 앱 안정성 / Windows
+
+- **Windows 시스템 알림 클릭 경로 복구** (PR #1398) — Windows toast activation 이 새 Electron error 창으로 열리지 않고 기존 앱 activation 경로로 처리되도록 정렬했다.
+- **unsigned updater fallback 복구** (PR #1379) — 서명되지 않은 내부 빌드에서 업데이트 적용 버튼이 dead-end 가 되지 않도록 수동 설치 fallback 경로를 제공한다.
+- **Windows 로컬 검증 경로 복구** (PR #1399) — symlink 권한이 없는 Windows 계정에서도 junction 기반 reparse-point 테스트로 실제 path escape 방어를 검증한다. pre-push hook 의 `typecheck` / 전체 `test` / `build` 가 Windows 로컬에서 통과한다.
+
+### UI / 입력 경험
+
+- **Slash picker root / 2-depth 레이아웃 정렬** (PR #1324) — 1-depth category row 와 command/shortcut/plugin/skills 2-depth row 의 icon slot, text stack, count badge, heading spacing 을 통일했다.
+- **preload blank-screen 회귀 수정** (PR #1324) — preload 가 main-process logger/pino transport 를 renderer sandbox 로 끌어오지 않도록 appearance font guard import 를 preload-safe shared module 로 이동했다.
+- **플러그인 text icon clipping 방지** (PR #1324) — `iconText` 기반 플러그인 배지가 slash picker row 안에서 잘리지 않도록 작은 slot 에 맞춰 스케일하고, caller style override 는 `fontSize` 로 제한했다.
+
+### 플러그인 / 루틴 / 권한
+
+- **루틴 source marker + on-demand plugin activation** (PR #1397) — 루틴이 어떤 source 에서 활성화됐는지 추적하고, 세션 단위로 필요한 disabled plugin 을 안전하게 on-demand 활성화할 수 있게 했다.
+- **local-indexer eager indexing 정리** (PR #1396) — boot 경로에서 local-indexer 를 idle scheduler 에 묶지 않도록 정리해 indexing 시작 조건을 더 예측 가능하게 했다.
+- **plugin SDK v5.18.0 반영** (PR #1395) — manifest compatibility host patch 일부를 제거하고 SDK 네이티브 동작으로 정렬했다.
+- **notificationEvents self-emitted warning 정리** (PR #1394) — 플러그인이 자체 emit 한 notification event 에 대해 불필요한 warning 을 내지 않도록 했다.
+- **plugin read auto-allow / sandbox coupling 보강** (PR #1388–#1393) — host-observed effect boundary, read relaxation, sandbox containment, hostFetch verb snapshot, plugin tool category propagation 을 정렬해 권한 relaxation 이 비격리 경로로 새지 않게 했다.
+
+### LLM / 업데이트
+
+- **OpenAI-compatible vendor 확장** (PR #1380–#1382) — OpenAI-compatible provider, Nemotron model option, full quantized model name 표시를 추가했다.
+- **finish_reason=length auto-continue** (PR #1384) — vLLM 계열 provider 에서 길이 제한으로 중단된 응답을 자동 continuation 할 수 있게 했다.
+- **AI SDK v7 계열 업데이트** (PR #1385) — provider SDK major 업데이트를 반영했다.
+
+### 검증
+
+- Local Windows (`pwsh`): `bun install --frozen-lockfile`, `bun run typecheck`, `bun run test` (557 files / 7090 pass / 31 skipped), `bun run build`, `bun run check:test-quality` 통과.
+- PR #1399 pre-push hook: `typecheck`, 전체 `test`, `build` 우회 없이 통과.
+- Remote main (`d2463003`): CI / CodeQL green.
+- PR #1324: CDP runtime + visual verification 완료 (`window.lvisApi` 노출, `#root` 렌더링, slash picker root/2-depth screenshots, preload SharedArrayBuffer/lvisApi initialization error 없음).
+
 ## v0.4.1 — 2026-06-26
 
 전부 **default-OFF** 인 OS 샌드박스 인프라 릴리즈 — `LVIS_SANDBOX_ENABLED`(또는 features.osToolSandbox)를 켜기 전에는 런타임 동작이 v0.4.0 과 동일하다.
