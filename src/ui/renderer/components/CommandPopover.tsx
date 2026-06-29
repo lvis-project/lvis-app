@@ -48,7 +48,7 @@ export function CommandPopover({ actions, onInsert, open, onOpenChange }: Comman
             </Button>
           </PopoverTrigger>
         </TooltipTrigger>
-        <TooltipContent side="top">Ctrl/Cmd + K</TooltipContent>
+        <TooltipContent side="top">{t("commandPopover.shortcutHint")}</TooltipContent>
       </Tooltip>
 
       {open && (

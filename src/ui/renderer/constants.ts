@@ -56,18 +56,18 @@ const VENDOR_UI: Record<LLMVendor, VendorUiMeta> = {
   copilot: { label: "GitHub Copilot", placeholder: "ghp_...", needsBaseUrl: false },
   "azure-foundry": {
     label: "Azure AI Foundry",
-    placeholder: "Azure API key...",
+    get placeholder() { return t("constants.vendorAzureFoundryPlaceholder"); },
     needsBaseUrl: true,
     baseUrlPlaceholder: "https://{resource}.openai.azure.com/openai/v1/",
   },
   "vertex-ai": {
     label: "Google Vertex AI",
-    placeholder: "service account (unused — uses ADC)",
+    get placeholder() { return t("constants.vendorVertexAiPlaceholder"); },
     needsBaseUrl: false,
   },
   "openai-compatible": {
-    label: "Custom (OpenAI-compatible)",
-    placeholder: "API key (or any value if unauthenticated)",
+    get label() { return t("constants.vendorOpenAiCompatibleLabel"); },
+    get placeholder() { return t("constants.vendorOpenAiCompatiblePlaceholder"); },
     needsBaseUrl: true,
     baseUrlPlaceholder: "http://10.231.108.187:8001/v1",
   },
@@ -84,7 +84,7 @@ export const WEB_PROVIDERS: { id: string; label: string; readonly placeholder: s
   { id: "duckduckgo", label: "DuckDuckGo", get placeholder() { return t("constants.webProviderDuckDuckGoPlaceholder"); }, needsKey: false },
   { id: "tavily", label: "Tavily AI", placeholder: "tvly-...", needsKey: true },
   { id: "serper", label: "Serper.dev", get placeholder() { return t("constants.webProviderSerperPlaceholder"); }, needsKey: true },
-  { id: "google", label: "Google Search", placeholder: "API Key...", needsKey: true },
+  { id: "google", label: "Google Search", get placeholder() { return t("constants.webProviderGooglePlaceholder"); }, needsKey: true },
 ];
 
 // Reasoning effort slider steps. Budget values are chosen to land cleanly in
@@ -93,10 +93,10 @@ export const WEB_PROVIDERS: { id: string; label: string; readonly placeholder: s
 // ≤16000=high, >16000=max) in vercel/adapter.ts. Keep values in sync if those
 // thresholds change.
 export const REASONING_EFFORT_STEPS = [
-  { label: "Low", budget: 2000 },
-  { label: "Medium", budget: 6000 },
-  { label: "High", budget: 12_000 },
-  { label: "Max", budget: 24_000 },
+  { get label() { return t("constants.reasoningEffortLow"); }, budget: 2000 },
+  { get label() { return t("constants.reasoningEffortMedium"); }, budget: 6000 },
+  { get label() { return t("constants.reasoningEffortHigh"); }, budget: 12_000 },
+  { get label() { return t("constants.reasoningEffortMax"); }, budget: 24_000 },
 ] as const;
 
 export function budgetToEffortIndex(budget: number): number {

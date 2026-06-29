@@ -454,7 +454,7 @@ export function McpTab() {
                           )}
                           {cfg?.auth && (
                             <Badge variant="outline" className="text-[10px] px-1.5 py-0">
-                              auth:{cfg.auth}
+                              {t("mcpTab.authBadge", { auth: cfg.auth })}
                             </Badge>
                           )}
                         </div>
@@ -478,7 +478,7 @@ export function McpTab() {
                         )}
                         {cfg?.transport === "http" && cfg.url && (
                           <p className="mt-0.5 text-[10px] text-muted-foreground font-mono line-clamp-1 [overflow-wrap:anywhere]">
-                            URL: {cfg.url}
+                            {t("mcpTab.urlLabel")} {cfg.url}
                           </p>
                         )}
                       </div>
@@ -521,7 +521,7 @@ export function McpTab() {
                       <div className="mt-3 flex items-end gap-2 border-t pt-3">
                         <div className="min-w-0 flex-1 space-y-1">
                           <Label htmlFor={`${id}-api-key-update`} className="text-xs">
-                            API Key (write-only)
+                            {t("mcpTab.apiKeyWriteOnlyLabel")}
                           </Label>
                           <Input
                             id={`${id}-api-key-update`}
@@ -529,10 +529,10 @@ export function McpTab() {
                             className="h-7 text-xs font-mono"
                             placeholder={
                               cfg?.transport === "stdio" && cfg.apiKeyEnv
-                                ? `${cfg.apiKeyEnv}=...`
-                                : cfg?.transport === "http" && cfg.apiKeyHeader
-                                  ? `${cfg.apiKeyHeader}: ...`
-                                  : "API key"
+                                  ? `${cfg.apiKeyEnv}=...`
+                                  : cfg?.transport === "http" && cfg.apiKeyHeader
+                                    ? `${cfg.apiKeyHeader}: ...`
+                                    : t("mcpTab.apiKeyPlaceholder")
                             }
                             value={credentialApiKey}
                             onChange={(event) => setCredentialApiKey(event.target.value)}
@@ -580,7 +580,7 @@ export function McpTab() {
                 {/* Transport */}
                 <div className="space-y-1">
                   <Label htmlFor={formIds.transport} className="text-xs">
-                    Transport *
+                    {t("mcpTab.transportLabel")}
                   </Label>
                   <NativeSelect
                     id={formIds.transport}
@@ -600,7 +600,7 @@ export function McpTab() {
               <div className="grid grid-cols-2 gap-3">
                 <div className="space-y-1">
                   <Label htmlFor={formIds.auth} className="text-xs">
-                    Auth
+                    {t("mcpTab.authLabel")}
                   </Label>
                   <NativeSelect
                     id={formIds.auth}
@@ -613,18 +613,18 @@ export function McpTab() {
                   >
                     <NativeSelectOption value="none">{t("mcpTab.authNone")}</NativeSelectOption>
                     <NativeSelectOption value="sso">SSO</NativeSelectOption>
-                    <NativeSelectOption value="api-key">API Key</NativeSelectOption>
+                    <NativeSelectOption value="api-key">{t("mcpTab.authApiKey")}</NativeSelectOption>
                   </NativeSelect>
                 </div>
                 <div className="space-y-1">
                   <Label htmlFor={formIds.apiKey} className="text-xs">
-                    API Key (write-only)
+                    {t("mcpTab.apiKeyWriteOnlyLabel")}
                   </Label>
                   <Input
                     id={formIds.apiKey}
                     type="password"
                     className="h-7 text-xs font-mono"
-                    placeholder="sk-..."
+                    placeholder={t("mcpTab.apiKeyPlaceholder")}
                     value={form.apiKey}
                     onChange={(e) => setForm((f) => ({ ...f, apiKey: e.target.value }))}
                   />
@@ -635,7 +635,7 @@ export function McpTab() {
                 <>
                   <div className="space-y-1">
                     <Label htmlFor={formIds.command} className="text-xs">
-                      Command *
+                      {t("mcpTab.commandRequiredLabel")}
                     </Label>
                     <Input
                       id={formIds.command}
@@ -662,7 +662,7 @@ export function McpTab() {
                   </div>
                   <div className="space-y-1">
                     <Label htmlFor={formIds.env} className="text-xs">
-                      Env (KEY=value, write-only)
+                      {t("mcpTab.envWriteOnlyLabel")}
                     </Label>
                     <Textarea
                       id={formIds.env}
@@ -677,7 +677,7 @@ export function McpTab() {
                 <>
                   <div className="space-y-1">
                     <Label htmlFor={formIds.url} className="text-xs">
-                      URL *
+                      {t("mcpTab.urlRequiredLabel")}
                     </Label>
                     <Input
                       id={formIds.url}
@@ -702,7 +702,7 @@ export function McpTab() {
                   </div>
                   <div className="space-y-1">
                     <Label htmlFor={formIds.headers} className="text-xs">
-                      Headers (HEADER: value, write-only)
+                      {t("mcpTab.headersWriteOnlyLabel")}
                     </Label>
                     <Textarea
                       id={formIds.headers}

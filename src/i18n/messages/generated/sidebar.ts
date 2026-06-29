@@ -5,6 +5,9 @@ export const en = {
   "sidebar.expand": "Expand Sidebar",
   "sidebar.pluginsLabel": "Plugins",
   "sidebar.marketplace": "Marketplace",
+  "sidebar.authRequiredAriaLabel": "Authentication required",
+  "sidebar.exportMarkdown": "Markdown (.md)",
+  "sidebar.exportJson": "JSON (.json)",
 } as const;
 export const ko: Record<keyof typeof en, string> = {
   "sidebar.ariaLabel": "기본 탐색",
@@ -12,4 +15,7 @@ export const ko: Record<keyof typeof en, string> = {
   "sidebar.expand": "사이드바 열기",
   "sidebar.pluginsLabel": "플러그인",
   "sidebar.marketplace": "마켓플레이스",
+  "sidebar.authRequiredAriaLabel": "인증 필요",
+  "sidebar.exportMarkdown": "Markdown (.md)",
+  "sidebar.exportJson": "JSON (.json)",
 };
