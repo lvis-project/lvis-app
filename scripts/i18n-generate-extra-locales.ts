@@ -31,6 +31,9 @@ const requestedLocales = new Set(
 );
 
 const MANUAL_OVERRIDES: Record<string, Record<string, string>> = {
+  zh: {
+    "be_conversationLoop.cmdHelp": "LVIS 命令：\n/new — 开始新对话\n/sessions — 已保存会话列表\n/load <ID> — 恢复会话\n/compact — 压缩对话历史\n/remember <content> — 保存记忆\n/memory — 用户记忆列表\n/vendor — 当前供应商/令牌信息\n/tools — 已注册工具列表\n/permission — 当前权限模式\n/permission mode <strict|default|auto|allow> --durable — 更改权限模式\n/permission dir <list|allow|deny> [path] — 管理允许目录\n/permission reviewer <show|mode|fallback|interactive> [value] — 审核器设置\n/permission audit <show|verify> — 权限审计查询/验证\n/permission hooks <list|accept|disable|reject> [name] — 脚本钩子信任管理\n/help — 此帮助",
+  },
   es: {
     "auditPanel.integrityChainBroken": "Cadena de auditoría rota: {file}{lineHint}",
     "be_conversationLoop.permissionDirError": "Error de permiso de directorio: {error}{warnings}{ack}",
@@ -72,6 +75,8 @@ const SLASH_COMMAND_RE = /(?<![A-Za-z0-9])\/[A-Za-z][A-Za-z0-9_-]*/g;
 const ENV_RE = /\$[A-Za-z_][A-Za-z0-9_]*/g;
 const WINDOWS_PATH_RE = /[A-Za-z]:\\[^\s"'<>]+/g;
 const TOKEN_RE = /__LVISKEEP(\d+)__/g;
+const DAMAGED_TOKEN_RE = /_*\s*LVISKEEP\s*(\d+)\s*_*/gi;
+const SENTINEL_LEAK_RE = /LVISKEEP\s*\d+/i;
 
 function protect(text: string): { text: string; values: string[] } {
   const values: string[] = [];
@@ -98,8 +103,7 @@ function protect(text: string): { text: string; values: string[] } {
 
 function restore(text: string, values: string[]): string {
   return text
-    .replace(/_+\s*LVISKEEP\s*(\d+)\s*_+/gi, (_match, index) => `__LVISKEEP${index}__`)
-    .replace(/\bLVISKEEP\s*(\d+)\b/gi, (_match, index) => `__LVISKEEP${index}__`)
+    .replace(DAMAGED_TOKEN_RE, (_match, index) => `__LVISKEEP${index}__`)
     .replace(TOKEN_RE, (_match, index) => values[Number(index)] ?? _match);
 }
 
@@ -203,8 +207,12 @@ function validate(locale: string, translated: Record<string, string>): void {
   }
   const placeholderMismatches: string[] = [];
   const tagMismatches: string[] = [];
+  const sentinelLeaks: string[] = [];
   for (const [key, source] of entries) {
     const target = translated[key] ?? "";
+    if (SENTINEL_LEAK_RE.test(target)) {
+      sentinelLeaks.push(key);
+    }
     if (JSON.stringify(placeholders(source)) !== JSON.stringify(placeholders(target))) {
       placeholderMismatches.push(key);
     }
@@ -217,6 +225,9 @@ function validate(locale: string, translated: Record<string, string>): void {
   }
   if (tagMismatches.length > 0) {
     throw new Error(`${locale}: tag mismatch in ${tagMismatches.slice(0, 10).join(", ")}`);
+  }
+  if (sentinelLeaks.length > 0) {
+    throw new Error(`${locale}: leaked protected token in ${sentinelLeaks.slice(0, 10).join(", ")}`);
   }
 }
 
