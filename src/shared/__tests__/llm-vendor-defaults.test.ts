@@ -19,7 +19,6 @@ describe("isLLMVendor", () => {
   it("rejects unknown strings", () => {
     expect(isLLMVendor("anthropic")).toBe(false);
     expect(isLLMVendor("unknown-vendor")).toBe(false);
-    expect(isLLMVendor("ollama")).toBe(false);
     expect(isLLMVendor("")).toBe(false);
   });
 
@@ -64,6 +63,17 @@ describe("LLMVendorSettings — #893 top-level authMode promotion", () => {
 });
 
 describe("LLM vendor defaults", () => {
+  it("keeps provider count in the Cline-scale range", () => {
+    // Cline had 49 built-in provider IDs when this expansion was mirrored
+    // (2026-06-29). LVIS intentionally skips subscription/CLI-only providers,
+    // but keeps the OpenAI-compatible preset surface broad enough to be
+    // comparable rather than a small handful of hardcoded vendors.
+    expect(LLM_VENDORS.length).toBeGreaterThanOrEqual(40);
+    expect(isLLMVendor("openrouter")).toBe(true);
+    expect(isLLMVendor("ollama")).toBe(true);
+    expect(isLLMVendor("lmstudio")).toBe(true);
+  });
+
   it("uses gpt-5.4-mini as the OpenAI default model", () => {
     expect(LLM_VENDOR_DEFAULTS.openai.model).toBe("gpt-5.4-mini");
   });

@@ -14,14 +14,14 @@ const MAIN_WINDOW_BOTTOM_GAP = 24;
 const MAIN_WINDOW_RIGHT_GAP = 10;
 
 /**
- * Action-mode window size — a centered working canvas. SoT shared by the
- * initial-bounds path (createWindow, when the persisted mode is "action") and
+ * Work-mode window size — a centered working canvas. SoT shared by the
+ * initial-bounds path (createWindow, when the persisted mode is "work") and
  * the runtime resize-for-mode tween (window-manager). Centralized here so the
  * two code paths cannot drift to different dimensions.
  */
 // Golden-ratio landscape: height 768, width = round(768 × φ) = 1243 (φ≈1.618).
-export const ACTION_MODE_WIDTH = 1243;
-export const ACTION_MODE_HEIGHT = 768;
+export const WORK_MODE_WIDTH = 1243;
+export const WORK_MODE_HEIGHT = 768;
 
 function initialMainWindowY(
   workArea: WorkAreaBounds,
@@ -52,15 +52,15 @@ export function computeInitialMainWindowBounds(
 }
 
 /**
- * Action-mode bounds: centered {@link ACTION_MODE_WIDTH}×{@link ACTION_MODE_HEIGHT}
+ * Work-mode bounds: centered {@link WORK_MODE_WIDTH}×{@link WORK_MODE_HEIGHT}
  * canvas, clamped to the work area. Used both for the initial window bounds when
- * the persisted mode is "action" and for the resize-for-mode tween target.
+ * the persisted mode is "work" and for the resize-for-mode tween target.
  */
-export function computeActionModeBounds(
+export function computeWorkModeBounds(
   workArea: WorkAreaBounds
 ): { x: number; y: number; width: number; height: number } {
-  const width = Math.min(workArea.width, ACTION_MODE_WIDTH);
-  const height = Math.min(workArea.height, ACTION_MODE_HEIGHT);
+  const width = Math.min(workArea.width, WORK_MODE_WIDTH);
+  const height = Math.min(workArea.height, WORK_MODE_HEIGHT);
   return {
     x: Math.round(workArea.x + (workArea.width - width) / 2),
     y: Math.round(workArea.y + (workArea.height - height) / 2),

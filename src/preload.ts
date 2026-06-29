@@ -77,7 +77,7 @@ import {
 } from "./shared/appearance-font.js";
 import {
   INITIAL_APP_MODE_ARG_PREFIX,
-  isAppMode,
+  normalizeAppMode,
   type InitialAppMode,
 } from "./shared/initial-app-mode.js";
 
@@ -174,7 +174,7 @@ if (lvisInitialTheme && typeof document !== "undefined") {
 // Main passes the persisted workspace mode into the main BrowserWindow via
 // `webPreferences.additionalArguments` so the renderer can seed its first React
 // render from the saved value — the shell paints the correct mode layout on
-// frame 0 instead of mounting in "action" and tweening to "chat" post-mount
+// frame 0 instead of mounting in "work" and tweening to "chat" post-mount
 // (which would be a visible wrong-mode flash). Wire format SoT lives in
 // `src/shared/initial-app-mode.ts`. See main.ts:initialAppModeArgs().
 function readInitialAppModeArg(): InitialAppMode | null {
@@ -184,7 +184,7 @@ function readInitialAppModeArg(): InitialAppMode | null {
     );
     if (!arg) return null;
     const value = arg.slice(INITIAL_APP_MODE_ARG_PREFIX.length);
-    return isAppMode(value) ? value : null;
+    return normalizeAppMode(value);
   } catch {
     return null;
   }
@@ -1681,7 +1681,7 @@ const api = {
         Array<{ windowId: number; viewKey: string; snapped: boolean }>
       >,
     /**
-     * Close ALL detached windows (fired on the action-mode transition so every
+     * Close ALL detached windows (fired on the work-mode transition so every
      * view re-renders inline). Auth/login windows are excluded by the main
      * process — they are never tracked as detached tabs.
      */
@@ -1695,10 +1695,10 @@ const api = {
       >,
     /**
      * Resize the main window to match the current workspace mode.
-     * "action" → centered 800×600 on the primary work area;
+     * "work" → centered work canvas on the primary work area;
      * "chat" → the right-docked initial bounds (computeInitialMainWindowBounds).
      */
-    resizeForMode: async (mode: "chat" | "action") =>
+    resizeForMode: async (mode: "chat" | "work") =>
       ipcRenderer.invoke("lvis:window:resize-for-mode", mode) as Promise<
         { ok: true } | { ok: false; error: string }
       >,
@@ -1784,7 +1784,7 @@ contextBridge.exposeInMainWorld("__lvisInitialTheme", lvisInitialTheme);
 // `sidebarCollapsed` state synchronously on mount (frame-0 correct layout, no
 // wrong-mode flash). `null` when main passed no prime (cold-boot before
 // settings, or non-Electron test harness) — the renderer then defaults to
-// "action" exactly as before.
+// "work", the historical inline layout.
 contextBridge.exposeInMainWorld("__lvisInitialAppMode", lvisInitialAppMode);
 
 contextBridge.exposeInMainWorld("lvisApi", api);

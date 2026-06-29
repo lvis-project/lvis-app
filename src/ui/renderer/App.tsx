@@ -33,7 +33,7 @@ import { LoginModal } from "./components/LoginModal.js";
 import { LLM_VENDORS } from "../../shared/llm-vendor-defaults.js";
 import { buildQuickActions } from "./components/command-actions.js";
 import { MainToolbar, type AppMode } from "./MainToolbar.js";
-import { DEFAULT_APP_MODE, isAppMode } from "../../shared/initial-app-mode.js";
+import { DEFAULT_APP_MODE, normalizeAppMode } from "../../shared/initial-app-mode.js";
 import { Sidebar } from "./components/Sidebar.js";
 import { useAppUpdate } from "./hooks/use-app-update.js";
 import { DevToolsPanel } from "./components/DevToolsPanel.js";
@@ -111,16 +111,16 @@ function extractPluginAuthErrorCode(err: unknown): string | null {
  * renderer loaded (preload exposes it as `window.__lvisInitialAppMode`, mirror
  * of the `__lvisInitialTheme` prime). Reading it here — at `useState`
  * initializer time, before first paint — means the shell renders the correct
- * mode layout on frame 0 instead of mounting in "action" and tweening to the
+ * mode layout on frame 0 instead of mounting in "work" and tweening to the
  * restored mode in a post-mount effect (the wrong-mode flash).
  *
- * `DEFAULT_APP_MODE` ("action") covers the non-Electron test harness and the
+ * `DEFAULT_APP_MODE` ("work") covers the non-Electron test harness and the
  * cold-boot-before-settings window — both legitimate first-run defaults.
  */
 function readInitialAppMode(): AppMode {
   if (typeof window === "undefined") return DEFAULT_APP_MODE;
   const raw = (window as { __lvisInitialAppMode?: unknown }).__lvisInitialAppMode;
-  return isAppMode(raw) ? raw : DEFAULT_APP_MODE;
+  return normalizeAppMode(raw) ?? DEFAULT_APP_MODE;
 }
 
 export function App() {
@@ -258,13 +258,13 @@ export function App() {
   const tourCompleted =
     chainStage === "done" && chainState.completionReason === "chain";
   const [activeView, setActiveView] = useState("home");
-  // Inline-settings (action mode): which tab SettingsContent opens on, and the
+  // Inline-settings (work mode): which tab SettingsContent opens on, and the
   // view to return to via the back-to-home affordance. In chat mode Settings
   // detaches to its own BrowserWindow instead (see onOpenSettings), so these
-  // only drive the action-mode activeView==="settings" inline render.
+  // only drive the work-mode activeView==="settings" inline render.
   const [settingsTab, setSettingsTab] = useState("general");
   const settingsReturnViewRef = useRef("home");
-  // Workspace mode (Chat / Action). Default "action" preserves the historical
+  // Workspace mode (Chat / Work). Default "work" preserves the historical
   // inline behavior: built-in + plugin views render inline in the main area and
   // the sidebar defaults expanded. In "chat" mode, selecting a detachable view
   // opens it in a separate window while the main area stays the chat. appMode
@@ -273,15 +273,15 @@ export function App() {
   // Seed from the persisted workspace mode injected by the main process
   // (preload's `window.__lvisInitialAppMode`). Reading it at initializer time
   // — before first paint — makes the shell render the saved mode's layout on
-  // frame 0 (expanded rail for action, collapsed for chat) with no wrong-mode
-  // flash followed by a post-mount tween. Defaults to "action" on first run /
+  // frame 0 (expanded rail for work, collapsed for chat) with no wrong-mode
+  // flash followed by a post-mount tween. Defaults to "work" on first run /
   // non-Electron harness.
   const [appMode, setAppModeState] = useState<AppMode>(readInitialAppMode);
   // Sidebar collapse is owned by the shell (the floating-card Sidebar reads it
   // as a prop and never manages its own state). Seeded from the same persisted
   // mode so the rail starts at the correct width on frame 0 (no post-mount
   // width tween). The rail width is coupled to appMode on each transition (see
-  // the effect below): action expands it, chat collapses it — a per-transition
+  // the effect below): work expands it, chat collapses it — a per-transition
   // default, NOT a lock.
   const [sidebarCollapsed, setSidebarCollapsed] = useState(() => readInitialAppMode() === "chat");
   // Persist appMode to host settings and update local state. Guarded against
@@ -298,7 +298,7 @@ export function App() {
       return next;
     });
   }, [api]);
-  // appMode drives the rail's default width on each mode transition: action
+  // appMode drives the rail's default width on each mode transition: work
   // mode expands it (wide working layout — inline views need the room), chat
   // mode collapses it to the focused icon rail (views detach to windows). This
   // makes toggling visibly widen/narrow the shell. It is a per-transition
@@ -323,7 +323,7 @@ export function App() {
     }
     void api.window?.resizeForMode?.(appMode);
   }, [appMode, api]);
-  // Action mode is the inline workspace: every view renders in the main tab,
+  // Work mode is the inline workspace: every view renders in the main tab,
   // so any windows that were detached in chat mode must close on the
   // transition. The login/auth window is ALWAYS a separate window
   // regardless of mode and is excluded by the main process (auth windows are
@@ -331,7 +331,7 @@ export function App() {
   // solely on stable refs (appMode + the stable api) and never sets state, so
   // it cannot re-trigger itself (#1312 render-loop guard).
   useEffect(() => {
-    if (appMode !== "action") return;
+    if (appMode !== "work") return;
     void api.window?.closeAllDetached?.();
   }, [appMode, api]);
   const [commandPopoverOpen, setCommandPopoverOpen] = useState(false);
@@ -815,7 +815,7 @@ export function App() {
           }
         };
 
-        // appMode is the SOLE authority for inline-vs-detached. Action keeps
+        // appMode is the SOLE authority for inline-vs-detached. Work keeps
         // plugin views inline; chat pops plugin views into detached windows.
         if (!loginTool || authState === "authed") {
           clearPluginAuthError(view.pluginId);
@@ -864,7 +864,7 @@ export function App() {
         return;
       }
       // Chat mode: built-in detachable views open in a separate window; home
-      // (and every action-mode path) stays inline.
+      // (and every work-mode path) stays inline.
       if (
         appMode === "chat" &&
         (key === "work-board" ||
@@ -954,7 +954,7 @@ export function App() {
     setActiveView("home");
   }, [activeView, activePluginView]);
 
-  // Inline settings exists only in action mode. Switching to chat mode while it
+  // Inline settings exists only in work mode. Switching to chat mode while it
   // is open returns to home so chat mode's detached-Settings contract holds (a
   // subsequent sidebar Settings click then opens the detached BrowserWindow).
   useEffect(() => {
@@ -1085,7 +1085,7 @@ export function App() {
   }, [api, chainStage, markOnboardingCompleted]);
 
   // appMode is the SOLE authority for inline-vs-detached, mirroring the other
-  // views (업무보드/루틴/메모리/별표 + plugin views). In action mode Settings
+  // views (업무보드/루틴/메모리/별표 + plugin views). In work mode Settings
   // joins that inline pattern: setActiveView("settings") + MainContent renders
   // SettingsContent inline. In chat mode Settings keeps the existing detached
   // BrowserWindow path untouched. Re-selecting Settings while already on the
@@ -1810,6 +1810,7 @@ export function App() {
             onActivateHome={() => setActiveView("home")}
             onJumpToSession={handleLoadSessionAndRefresh}
             onRefreshSessions={refreshSessions}
+            appMode={appMode}
             chatContextValue={chatContextValue}
             onAsk={(q, intent, opts) => handleAsk(q, "default", intent, opts)}
             /* opts 의 inputOrigin / injectHint 가 그대로 handleAsk 4번째
@@ -1831,6 +1832,7 @@ export function App() {
             onResolveAskQuestion={dismissAskQuestion}
             plugins={pluginEntries}
             onSelectPlugin={handleViewSelect}
+            onOpenApprovalQueue={() => setDeferredQueueOpen(true)}
             commandActions={commandActions}
             commandPopoverOpen={commandPopoverOpen}
             onCommandPopoverOpenChange={setCommandPopoverOpen}

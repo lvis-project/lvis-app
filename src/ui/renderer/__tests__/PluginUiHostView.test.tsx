@@ -102,6 +102,18 @@ describe("PluginUiHostView — loading state", () => {
     expect(getByText(/Plugin webview 자산 URL을 lvisApi에서 찾을 수 없습니다/)).toBeTruthy();
   });
 
+  it("renders inline plugin views without host card or nested border chrome", () => {
+    stubLvisApi();
+    const { container, getByText } = render(<PluginUiHostView view={makeView()} />);
+
+    expect(getByText("미팅")).toBeTruthy();
+    expect(getByText("회의 세션 테스트")).toBeTruthy();
+    expect(container.querySelector("webview")).toBeTruthy();
+    expect(container.querySelector(".bg-card")).toBeNull();
+    expect(container.querySelector(".text-card-foreground")).toBeNull();
+    expect(container.querySelector(".border")).toBeNull();
+  });
+
   it("shows auth error banner above inline plugin content", () => {
     stubLvisApi("", "file:///preload.cjs");
     const { getByText } = render(

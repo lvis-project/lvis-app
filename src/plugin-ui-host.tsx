@@ -17,7 +17,6 @@
  * did-attach registration handshake and the shell's first entry-url lookup.
  */
 import { useCallback, useEffect, useRef, useState } from "react";
-import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "./components/ui/card.js";
 import { t } from "./i18n/index.js";
 import { pluginPartitionName } from "./shared/plugin-partition.js";
 
@@ -360,21 +359,27 @@ export function PluginUiHostView({
   }
 
   const authErrorBanner = authError ? (
-    <div className="mb-3 rounded-md border border-destructive/30 bg-destructive/10 px-3 py-2 text-xs text-destructive">
+    <div className="mb-2 rounded-md bg-destructive/10 px-3 py-2 text-xs text-destructive">
       {authError}
     </div>
   ) : null;
 
-  // Default: render with Card chrome (for inline plugin views)
+  // Default: inline plugin views use flat page chrome. The webview is already
+  // its own framed surface, so host-level Card/border chrome creates a visible
+  // box-inside-box regression across every plugin view.
   return (
-    <Card className="mx-auto flex min-h-0 min-w-0 flex-1 w-full max-w-6xl flex-col overflow-hidden">
-      <CardHeader>
-        <CardTitle>{view ? getPluginViewLabel(view) : t("be_pluginUiHost.pluginUiTitle")}</CardTitle>
-        <CardDescription>{view?.extension.description ?? t("be_pluginUiHost.pluginUiLoadingDesc")}</CardDescription>
-      </CardHeader>
-      <CardContent className="flex min-h-0 flex-1 flex-col">
+    <div className="mx-auto flex min-h-0 min-w-0 flex-1 w-full max-w-6xl flex-col overflow-hidden">
+      <header className="shrink-0 px-2 pb-3 pt-1">
+        <h2 className="text-xl font-semibold leading-8 tracking-tight">
+          {view ? getPluginViewLabel(view) : t("be_pluginUiHost.pluginUiTitle")}
+        </h2>
+        <p className="mt-1 text-sm text-muted-foreground">
+          {view?.extension.description ?? t("be_pluginUiHost.pluginUiLoadingDesc")}
+        </p>
+      </header>
+      <div className="flex min-h-0 flex-1 flex-col px-2 pb-2">
         {authErrorBanner}
-        <div className="relative h-full w-full overflow-hidden rounded-md border bg-input-bar">
+        <div className="relative h-full w-full overflow-hidden">
           <div className="h-full overflow-hidden">
             {content}
           </div>
@@ -384,7 +389,7 @@ export function PluginUiHostView({
             </div>
           ) : null}
         </div>
-      </CardContent>
-    </Card>
+      </div>
+    </div>
   );
 }

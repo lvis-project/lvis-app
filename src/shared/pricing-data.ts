@@ -39,6 +39,22 @@ export type PricingVendor =
   | "vertex-ai"
   | "openai-compatible";
 
+const PRICING_VENDORS = new Set<string>([
+  "claude",
+  "openai",
+  "gemini",
+  "copilot",
+  "azure-foundry",
+  "vertex-ai",
+  "openai-compatible",
+]);
+
+export function toPricingVendor(vendor: string): PricingVendor {
+  return PRICING_VENDORS.has(vendor)
+    ? vendor as PricingVendor
+    : "openai-compatible";
+}
+
 /** $ per 1M tokens, plus context window metadata. */
 export interface ModelPricing {
   inputPer1M: number;
@@ -393,9 +409,9 @@ export interface UsageForCost {
  */
 export function normalizeAiSdkUsageForCost<T extends UsageForCost | undefined>(
   usage: T,
-  vendor: PricingVendor,
+  vendor: string,
 ): T {
-  if (!usage || vendor !== "claude") return usage;
+  if (!usage || toPricingVendor(vendor) !== "claude") return usage;
   const input = Number.isFinite(usage.inputTokens) ? usage.inputTokens : 0;
   const cacheRead = Number.isFinite(usage.cacheReadTokens) ? (usage.cacheReadTokens ?? 0) : 0;
   const cacheWrite = Number.isFinite(usage.cacheWriteTokens) ? (usage.cacheWriteTokens ?? 0) : 0;
@@ -419,7 +435,7 @@ export function normalizeAiSdkUsageForCost<T extends UsageForCost | undefined>(
 export function computeCost(
   usage: UsageForCost,
   pricing: ModelPricing,
-  vendor: PricingVendor,
+  vendor: string,
 ): number {
   // Clamp non-finite + negative inputs to 0 — token usage is monotonic, so a
   // negative value indicates upstream malformed data; letting it through
@@ -435,7 +451,7 @@ export function computeCost(
   const per1M = (tokens: number, rate: number): number =>
     (tokens / 1_000_000) * rate;
 
-  switch (vendor) {
+  switch (toPricingVendor(vendor)) {
     case "claude": {
       // Anthropic raw shape — `input_tokens` 는 fresh-only, cache 가 가산.
       // ratio 정책은 `anthropicCacheRates` 한 곳.

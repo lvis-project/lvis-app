@@ -41,8 +41,8 @@ describe("readPersistedAppModeSync", () => {
     rmSync(userDataPath, { recursive: true, force: true });
   });
 
-  it("defaults to 'action' when no settings file exists", () => {
-    expect(readPersistedAppModeSync(userDataPath)).toBe("action");
+  it("defaults to 'work' when no settings file exists", () => {
+    expect(readPersistedAppModeSync(userDataPath)).toBe("work");
   });
 
   it("reads back a 'chat' mode the SettingsService persisted (writer/reader agree on path)", async () => {
@@ -51,33 +51,42 @@ describe("readPersistedAppModeSync", () => {
     expect(readPersistedAppModeSync(userDataPath)).toBe("chat");
   });
 
-  it("reads back a 'action' mode the SettingsService persisted", async () => {
+  it("reads back a 'work' mode the SettingsService persisted", async () => {
     const service = new SettingsService({ userDataPath });
     await service.patch({ system: { appMode: "chat" } });
-    await service.patch({ system: { appMode: "action" } });
-    expect(readPersistedAppModeSync(userDataPath)).toBe("action");
+    await service.patch({ system: { appMode: "work" } });
+    expect(readPersistedAppModeSync(userDataPath)).toBe("work");
   });
 
-  it("defaults to 'action' on a malformed appMode value", () => {
+  it("normalizes legacy 'action' on disk to 'work'", () => {
+    writeFileSync(
+      join(userDataPath, "lvis-settings.json"),
+      JSON.stringify({ system: { appMode: "action" } }),
+      "utf-8",
+    );
+    expect(readPersistedAppModeSync(userDataPath)).toBe("work");
+  });
+
+  it("defaults to 'work' on a malformed appMode value", () => {
     writeFileSync(
       join(userDataPath, "lvis-settings.json"),
       JSON.stringify({ system: { appMode: "not-a-mode" } }),
       "utf-8",
     );
-    expect(readPersistedAppModeSync(userDataPath)).toBe("action");
+    expect(readPersistedAppModeSync(userDataPath)).toBe("work");
   });
 
-  it("defaults to 'action' on a corrupt (non-JSON) settings file", () => {
+  it("defaults to 'work' on a corrupt (non-JSON) settings file", () => {
     writeFileSync(join(userDataPath, "lvis-settings.json"), "{ not json", "utf-8");
-    expect(readPersistedAppModeSync(userDataPath)).toBe("action");
+    expect(readPersistedAppModeSync(userDataPath)).toBe("work");
   });
 
-  it("defaults to 'action' when system block is absent (legacy settings.json)", () => {
+  it("defaults to 'work' when system block is absent (legacy settings.json)", () => {
     writeFileSync(
       join(userDataPath, "lvis-settings.json"),
       JSON.stringify({ marketplace: { backend: "real-cloud" } }),
       "utf-8",
     );
-    expect(readPersistedAppModeSync(userDataPath)).toBe("action");
+    expect(readPersistedAppModeSync(userDataPath)).toBe("work");
   });
 });

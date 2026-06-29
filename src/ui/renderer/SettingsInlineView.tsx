@@ -5,10 +5,10 @@ import { SettingsContent } from "./SettingsContent.js";
 import type { LvisApi } from "./types.js";
 
 /**
- * SettingsInlineView — the action-mode inline host for SettingsContent.
+ * SettingsInlineView — the work-mode inline host for SettingsContent.
  *
  * appMode is the sole authority for inline-vs-detached (mirroring 업무보드 /
- * 루틴 / 메모리 / 별표 + plugin views): in action mode the sidebar Settings
+ * 루틴 / 메모리 / 별표 + plugin views): in work mode the sidebar Settings
  * item routes here via setActiveView("settings") + MainContent, instead of
  * the chat-mode detached BrowserWindow path (api.openSettingsWindow).
  *

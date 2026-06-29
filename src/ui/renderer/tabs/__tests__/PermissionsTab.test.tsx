@@ -713,10 +713,9 @@ describe("PermissionsTab hook quarantine notice", () => {
 describe("PermissionsTab — handleWindowsInstall error-shape robustness", () => {
   /**
    * When sandboxWindowsInstall returns an error shape (ok: false), the handler
-   * must NOT leave the toggle half-enabled. It should revert sandboxEnabled to
-   * false, persist osToolSandbox=false, and show an error banner — identical
-   * behavior to a cancellation, but with an error message instead of the
-   * cancelled banner.
+   * must keep the user's opt-in setting enabled and keep the consent panel
+   * visible so the install can be retried. The UI surfaces the error separately
+   * from the persisted desire to enable ASRT.
    */
   function installApiWithWindows(overrides: {
     sandboxWindowsInstall?: ReturnType<typeof vi.fn>;
@@ -790,7 +789,7 @@ describe("PermissionsTab — handleWindowsInstall error-shape robustness", () =>
     return { lvis, updateSettings };
   }
 
-  it("reverts toggle + persists osToolSandbox=false + shows error banner on ok:false error shape", async () => {
+  it("keeps opt-in enabled and shows error banner on ok:false error shape", async () => {
     const { updateSettings } = installApiWithWindows({
       sandboxWindowsInstall: vi.fn(async () => ({
         ok: false as const,
@@ -812,14 +811,33 @@ describe("PermissionsTab — handleWindowsInstall error-shape robustness", () =>
       fireEvent.click(screen.getByText("지금 설치"));
     });
 
-    // osToolSandbox must be reverted to false (same as cancel).
-    expect(updateSettings).toHaveBeenCalledWith({ features: { osToolSandbox: false } });
+    // osToolSandbox must not be reverted to false; the user opted in and the
+    // consent panel remains the place to retry/follow instructions.
+    expect(updateSettings).not.toHaveBeenCalledWith({ features: { osToolSandbox: false } });
 
     // An error banner must appear (the i18n key osSandboxWindowsInstallError
     // wraps the detail: "Windows 샌드박스 설치 오류: {message}").
     expect(screen.getByText(/srt-win returned non-zero/)).toBeTruthy();
 
-    // The consent panel must no longer be visible (toggle reverted → sandboxEnabled=false).
-    expect(screen.queryByTestId("os-sandbox-windows-consent")).toBeNull();
+    // The consent panel must remain visible (toggle stays enabled).
+    expect(screen.getByTestId("os-sandbox-windows-consent")).toBeTruthy();
+  });
+
+  it("keeps opt-in enabled when UAC is cancelled so the user can retry", async () => {
+    const { updateSettings } = installApiWithWindows({
+      sandboxWindowsInstall: vi.fn(async () => ({ cancelled: true })),
+    });
+
+    await act(async () => {
+      render(<PermissionsTab />);
+    });
+
+    await act(async () => {
+      fireEvent.click(screen.getByText("지금 설치"));
+    });
+
+    expect(updateSettings).not.toHaveBeenCalledWith({ features: { osToolSandbox: false } });
+    expect(screen.getByTestId("os-sandbox-windows-install-cancelled")).toBeTruthy();
+    expect(screen.getByTestId("os-sandbox-windows-consent")).toBeTruthy();
   });
 });

@@ -225,7 +225,7 @@ describe("WindowManager IPC — validateSender guard", () => {
       const detached = injectChild(wm, 21, "routines");
       const authWin = injectChild(wm, 22, "memory");
       // Tag the auth window's webContents as auth-owned — mirrors what
-      // auth-window-service does at creation time. The action-mode sweep MUST
+      // auth-window-service does at creation time. The work-mode sweep MUST
       // skip it: the login/auth window is always a separate window.
       markAsAuthOwned(authWin.webContents as never);
       const handler = handleMap.get("lvis:window:close-all-detached")!;
@@ -346,7 +346,7 @@ describe("WindowManager IPC — validateSender guard", () => {
 
     it("returns UNAUTHORIZED_FRAME and audits for unauthorized sender", async () => {
       const handler = handleMap.get("lvis:window:resize-for-mode")!;
-      const result = await handler(unauthorizedEvent(), "action");
+      const result = await handler(unauthorizedEvent(), "work");
       expect(result).toEqual(UNAUTHORIZED_FRAME);
       expect(auditLogger.log).toHaveBeenCalledOnce();
     });
@@ -364,16 +364,16 @@ describe("WindowManager IPC — validateSender guard", () => {
     it("returns main-window-not-found when no main window is registered", async () => {
       fromId.mockReturnValue(null);
       const handler = handleMap.get("lvis:window:resize-for-mode")!;
-      const result = await handler(trustedEvent(), "action");
+      const result = await handler(trustedEvent(), "work");
       expect(result).toEqual({ ok: false, error: "main-window-not-found" });
     });
 
-    it("centers a 1243×768 window on the work area for action mode", async () => {
+    it("centers a 1243×768 window on the work area for work mode", async () => {
       const main = makeMainWindow();
       wm.registerMainWindow(main as never);
       fromId.mockReturnValue(main);
       const handler = handleMap.get("lvis:window:resize-for-mode")!;
-      const result = await handler(trustedEvent(), "action");
+      const result = await handler(trustedEvent(), "work");
       expect(result).toEqual({ ok: true });
       // The tween emits intermediate setBounds frames; flush it to completion.
       flushTween();
@@ -391,7 +391,7 @@ describe("WindowManager IPC — validateSender guard", () => {
       expect(result).toEqual({ ok: true });
       flushTween();
       // chat mode uses computeInitialMainWindowBounds — a right-docked,
-      // narrower-than-action bounds (not centered, not 800 wide). The final
+      // narrower-than-work bounds (not centered, not 800 wide). The final
       // landing bounds must match that geometry exactly.
       const bounds = lastBounds(main);
       expect(bounds.width).toBeLessThan(800);
@@ -403,13 +403,13 @@ describe("WindowManager IPC — validateSender guard", () => {
       wm.registerMainWindow(main as never);
       fromId.mockReturnValue(main);
       const handler = handleMap.get("lvis:window:resize-for-mode")!;
-      // Start an action tween, advance partway, then switch to chat mid-flight.
-      await handler(trustedEvent(), "action");
+      // Start a work tween, advance partway, then switch to chat mid-flight.
+      await handler(trustedEvent(), "work");
       vi.advanceTimersByTime(48); // a few frames in, not yet settled
       await handler(trustedEvent(), "chat");
       flushTween();
       // The latest (chat) target wins: final bounds are the chat geometry,
-      // never the abandoned action 1243×768.
+      // never the abandoned work 1243×768.
       const bounds = lastBounds(main);
       expect(bounds.width).toBeLessThan(800);
       expect(bounds).not.toEqual({ x: 339, y: 156, width: 1243, height: 768 });

@@ -30,7 +30,7 @@ import { lvisHome } from "../shared/lvis-home.js";
 import { resolveAppIconPath } from "./app-icon.js";
 import {
   computeInitialMainWindowBounds,
-  computeActionModeBounds,
+  computeWorkModeBounds,
 } from "./main-window-bounds.js";
 
 /**
@@ -329,7 +329,7 @@ export class WindowManager {
   private _mainMoveTimer: ReturnType<typeof setTimeout> | null = null;
   /**
    * Active resize-for-mode tween interval. At most one tween runs at a time —
-   * a new tween cancels any in-flight one so rapid chat↔action toggling does
+   * a new tween cancels any in-flight one so rapid chat↔work toggling does
    * not overlap animations; the latest target always wins and lands exactly.
    */
   private _resizeTween: ReturnType<typeof setInterval> | null = null;
@@ -641,8 +641,8 @@ export class WindowManager {
   }
 
   /**
-   * Close EVERY detached tab this manager tracks. Used by action mode (the
-   * sole inline-vs-detached authority): switching to action sweeps all open
+   * Close EVERY detached tab this manager tracks. Used by work mode (the
+   * sole inline-vs-detached authority): switching to work sweeps all open
    * detached windows shut so every view re-renders inline in the main tab.
    *
    * Auth/login windows are EXPLICITLY out of scope and MUST NOT be closed
@@ -652,7 +652,7 @@ export class WindowManager {
    * `getDetachedWindows()` (which is derived solely from `_children`), an auth
    * window can never be reached. The guard below is defense-in-depth so a
    * future change that (incorrectly) routes an auth window through `_children`
-   * still cannot have it swept away by an action-mode transition: the
+   * still cannot have it swept away by a work-mode transition: the
    * login/auth window is ALWAYS a separate window regardless of appMode.
    */
   closeAllDetached(): void {
@@ -679,7 +679,7 @@ export class WindowManager {
    * smooth uniformly on every platform.
    *
    * Cancellation: any in-flight tween (`_resizeTween`) is cleared before a new
-   * one starts, so rapid chat↔action toggling never overlaps animations — the
+   * one starts, so rapid chat↔work toggling never overlaps animations — the
    * latest target wins and still lands EXACTLY on `target` (the final step
    * snaps to the precise integer bounds rather than an interpolated value).
    */
@@ -1118,7 +1118,7 @@ export class WindowManager {
     });
 
     // Close all detached tabs — fired by the host renderer when appMode
-    // transitions to "action" so every view re-renders inline. State-mutating
+    // transitions to "work" so every view re-renders inline. State-mutating
     // and host-only: validateHostRendererSender rejects plugin UI shells,
     // mirroring resize-for-mode. Auth/login windows are excluded by
     // closeAllDetached() itself (they are not tracked in `_children`).
@@ -1174,7 +1174,7 @@ export class WindowManager {
     });
 
     // Resize the main window to match the active workspace mode.
-    //   action → centered 1243×768 (golden ratio, clamped to the work area), the focused
+    //   work → centered 1243×768 (golden ratio, clamped to the work area), the focused
     //            working canvas where inline views need room.
     //   chat   → the 기존 right-docked initial bounds (the same geometry the
     //            window boots with), computed from the primary work area.
@@ -1185,17 +1185,17 @@ export class WindowManager {
         auditUnauthorized(auditLogger, "lvis:window:resize-for-mode", event);
         return UNAUTHORIZED_FRAME;
       }
-      if (mode !== "chat" && mode !== "action") {
+      if (mode !== "chat" && mode !== "work") {
         return { ok: false, error: "invalid-mode" };
       }
       const main = this.getMainWindow();
       if (!main || main.isDestroyed()) return { ok: false, error: "main-window-not-found" };
 
       const { workArea } = screen.getPrimaryDisplay();
-      if (mode === "action") {
+      if (mode === "work") {
         // Manual easeOut tween (uniform on every platform). The native animate
         // flag is macOS-only and is intentionally NOT passed anymore.
-        this.animateBoundsTo(main, computeActionModeBounds(workArea));
+        this.animateBoundsTo(main, computeWorkModeBounds(workArea));
       } else {
         this.animateBoundsTo(main, computeInitialMainWindowBounds(workArea));
       }
