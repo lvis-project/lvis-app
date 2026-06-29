@@ -1909,8 +1909,6 @@ export function App() {
               the ring / permission / model cells. */}
         </main>
         <ActionPanel
-          actions={commandActions}
-          activeView={activeView}
           open={actionPanelOpen}
           onOpenChange={setActionPanelOpen}
           currentSessionId={currentSessionId}
@@ -1919,9 +1917,6 @@ export function App() {
           sessions={sessions}
           onOpenSession={handleLoadSessionAndRefresh}
           streaming={streaming}
-          askQuestionCount={askQuestions.length}
-          plugins={pluginEntries}
-          onSelectPlugin={handleViewSelect}
           subAgentSpawns={subAgentSpawns}
           loadedSkills={loadedSkills}
           statusItems={statusPersistent}
