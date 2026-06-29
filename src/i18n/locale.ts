@@ -1,18 +1,16 @@
 /**
  * i18n locale definitions — single source of truth for supported languages.
  *
- * LVIS ships a global build with English as the default UI language. Korean
- * is the first fully-translated secondary locale; additional locales can ship
- * with English fallback while their surface catalogs are completed. The app reads the active locale
- * from `settings.appearance.language` (see {@link ../data/settings-store}),
- * defaulting to {@link DEFAULT_LOCALE} when unset or invalid.
+ * LVIS ships a global build with English as the default UI language. Supported
+ * locales must have complete catalogs; a partially translated locale that
+ * mostly falls back to English reads as a broken language switcher.
  *
  * This module is intentionally dependency-free so it can be imported from the
  * Electron main process, the renderer, and vitest without pulling in React or
  * Node-only APIs.
  */
 
-/** All locales LVIS can render its UI in. */
+/** Locales LVIS can render without broad English fallback. */
 export const SUPPORTED_LOCALES = ["en", "ko", "ja", "zh", "es", "fr", "de"] as const;
 
 /** A supported UI locale code (BCP-47 primary subtag). */
