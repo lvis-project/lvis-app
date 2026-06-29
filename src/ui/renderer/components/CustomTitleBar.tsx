@@ -2,7 +2,7 @@
  * CustomTitleBar — cross-platform custom window chrome, now the single top
  * band that also hosts the app toolbar content.
  *
- * The band content (sidebar-collapse toggle, Chat/Action mode, Dev badge,
+ * The band content (sidebar-collapse toggle, Chat/Work mode, Dev badge,
  * search / star / export) is passed in as `children` and rendered in the
  * band's left + middle, LEFT of the native window controls. There is no
  * separate toolbar row below the band — the toolbar lives IN the band.
@@ -89,7 +89,7 @@ function getWindowBridge(): {
 
 export interface CustomTitleBarProps {
   /**
-   * Band content — the app toolbar cluster (collapse toggle, Chat/Action mode,
+   * Band content — the app toolbar cluster (collapse toggle, Chat/Work mode,
    * Dev badge, search / star / export). Rendered in the band's left + middle,
    * LEFT of the native window controls. Interactive controls inside must wrap
    * themselves `WebkitAppRegion: "no-drag"`; the band itself is a drag region

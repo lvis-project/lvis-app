@@ -151,7 +151,12 @@
     "icon": "build/icon.png",
     "electronLanguages": [
       "en-US",
-      "ko"
+      "ko",
+      "ja",
+      "zh-CN",
+      "es",
+      "fr",
+      "de"
     ],
     "afterPack": "scripts/electron-after-pack.cjs",
     "artifactName": "${productName}-${version}-${os}-${arch}.${ext}",

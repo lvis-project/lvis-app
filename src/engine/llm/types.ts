@@ -12,12 +12,18 @@
 // settings store uses to validate `provider` at IPC boundaries. We
 // re-export here so existing engine-side callers keep their import
 // path while the type definition cannot drift between modules.
-import { LLM_VENDOR_DEFAULTS, type LLMVendor } from "../../shared/llm-vendor-defaults.js";
+import {
+  LLM_VENDOR_DEFAULTS,
+  OPENAI_COMPATIBLE_PRESET_VENDOR_IDS,
+  OPENAI_COMPATIBLE_VENDOR_PRESETS,
+  type LLMVendor,
+  type OpenAICompatiblePresetVendor,
+} from "../../shared/llm-vendor-defaults.js";
 import type { ProviderErrorDiagnostics } from "./provider-error-diagnostics.js";
 export type { LLMVendor };
 export { LLM_VENDORS, isLLMVendor } from "../../shared/llm-vendor-defaults.js";
 
-export const LLM_VENDOR_LABELS: Record<LLMVendor, string> = {
+const CORE_LLM_VENDOR_LABELS: Record<Exclude<LLMVendor, OpenAICompatiblePresetVendor>, string> = {
   claude: "Anthropic Claude",
   openai: "OpenAI",
   gemini: "Google Gemini",
@@ -26,6 +32,16 @@ export const LLM_VENDOR_LABELS: Record<LLMVendor, string> = {
   "vertex-ai": "Google Vertex AI",
   "openai-compatible": "Custom (OpenAI-compatible)",
 };
+
+export const LLM_VENDOR_LABELS: Record<LLMVendor, string> = {
+  ...CORE_LLM_VENDOR_LABELS,
+  ...Object.fromEntries(
+    OPENAI_COMPATIBLE_PRESET_VENDOR_IDS.map((vendor) => [
+      vendor,
+      OPENAI_COMPATIBLE_VENDOR_PRESETS[vendor].label,
+    ]),
+  ),
+} as Record<LLMVendor, string>;
 
 export const LLM_DEFAULT_MODELS: Record<LLMVendor, string> = Object.freeze(
   Object.fromEntries(

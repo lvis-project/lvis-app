@@ -13,7 +13,7 @@
  */
 import "../../../../../test/renderer/setup.js";
 import { describe, it, expect, vi } from "vitest";
-import { act, fireEvent, render } from "@testing-library/react";
+import { act, fireEvent, render, screen } from "@testing-library/react";
 import { useState } from "react";
 import { LlmTab, type FallbackEntry } from "../LlmTab.js";
 import { VENDORS } from "../../constants.js";
@@ -123,6 +123,23 @@ describe("LlmTab — top-level login toggle UI", () => {
     expect(container.querySelector('[data-testid="llm-model-select"]')).not.toBeNull();
     // Login section NOT shown in manual mode.
     expect(container.querySelector('[data-testid="llm-tab:login-section"]')).toBeNull();
+  });
+
+  it("renders a searchable scroll-constrained provider dropdown", async () => {
+    const { container } = render(<Harness initialAuthMode="manual" />);
+    const vendorTrigger = container.querySelector("#vendor-select") as HTMLElement | null;
+    expect(vendorTrigger).not.toBeNull();
+
+    fireEvent.mouseDown(vendorTrigger!);
+    fireEvent.keyDown(vendorTrigger!, { key: "ArrowDown" });
+
+    const search = await screen.findByTestId("llm-tab:vendor-search");
+    expect(search).toHaveAttribute("placeholder", "공급자 검색...");
+    expect(screen.getByTestId("llm-tab:vendor-content")).toHaveClass("max-h-[386px]");
+
+    fireEvent.change(search, { target: { value: "openrouter" } });
+    expect(screen.getByText("OpenRouter")).toBeInTheDocument();
+    expect(screen.queryByText("Google Gemini")).toBeNull();
   });
 
   it("host-resolver map textarea is disabled in login mode", () => {

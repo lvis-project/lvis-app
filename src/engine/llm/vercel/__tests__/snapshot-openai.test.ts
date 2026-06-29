@@ -619,6 +619,60 @@ describe("VercelUnifiedProvider openai-compatible", () => {
     vi.doUnmock("@ai-sdk/openai-compatible");
   });
 
+  it("routes Cline-style preset vendors through createOpenAICompatible", async () => {
+    vi.resetModules();
+    const compatFactory = vi.fn(() => ({ __mock: "openrouter" }));
+    const createCompatSpy = vi.fn(() => compatFactory);
+
+    vi.doMock("ai", async () => {
+      const actual = await vi.importActual<typeof import("ai")>("ai");
+      return {
+        ...actual,
+        streamText: vi.fn(() => ({
+          stream: (async function* () {
+            yield { type: "text-delta", id: "t1", text: "ok" };
+            yield {
+              type: "finish",
+              finishReason: "stop",
+              totalUsage: { inputTokens: 1, outputTokens: 1 },
+            };
+          })(),
+        })),
+      };
+    });
+    vi.doMock("@ai-sdk/openai-compatible", () => ({
+      createOpenAICompatible: createCompatSpy,
+    }));
+
+    const { VercelUnifiedProvider } = await import("../adapter.js");
+    const provider = new VercelUnifiedProvider(
+      "openrouter",
+      "or-key",
+      "https://openrouter.ai/api/v1",
+    );
+
+    await collect(
+      provider.streamTurn({
+        model: "anthropic/claude-sonnet-4.6",
+        systemPrompt: "sys",
+        messages: [{ role: "user", content: "hi" }],
+      }),
+    );
+
+    expect(provider.vendor).toBe("openrouter");
+    expect(createCompatSpy).toHaveBeenCalledWith(
+      expect.objectContaining({
+        baseURL: "https://openrouter.ai/api/v1",
+        apiKey: "or-key",
+        name: "lvis-compat",
+      }),
+    );
+    expect(compatFactory).toHaveBeenCalledWith("anthropic/claude-sonnet-4.6");
+
+    vi.doUnmock("ai");
+    vi.doUnmock("@ai-sdk/openai-compatible");
+  });
+
   it("forwards enable_thinking per request via chat_template_kwargs (multi-user toggle)", async () => {
     vi.resetModules();
     const streamTextSpy = vi.fn(() => ({

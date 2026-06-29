@@ -1,5 +1,8 @@
 import type { ReactNode } from "react";
+import { ArrowLeft } from "lucide-react";
 import { PluginUiHostView } from "../../plugin-ui-host.js";
+import { Button } from "../../components/ui/button.js";
+import { useTranslation } from "../../i18n/react.js";
 import type { getApi } from "./api-client.js";
 import { ChatContextProvider, type ChatContextValue } from "./context/ChatContext.js";
 import { ChatView } from "./ChatView.js";
@@ -13,6 +16,7 @@ import { StarredView } from "./components/StarredView.js";
 import { SettingsInlineView } from "./SettingsInlineView.js";
 import type { SessionSummary } from "./hooks/use-sessions.js";
 import type { UserKeyboardIntentSnapshot } from "../../shared/chat-origin.js";
+import type { AppMode } from "./MainToolbar.js";
 
 type Api = ReturnType<typeof getApi>;
 type PluginView = Parameters<typeof PluginUiHostView>[0]["view"];
@@ -21,7 +25,7 @@ type StarredItem = Parameters<typeof StarredView>[0]["starred"][number];
 export interface MainContentProps {
   activeView: string;
   api: Api;
-  // inline settings (action mode) — chat mode detaches Settings to its own
+  // inline settings (work mode) — chat mode detaches Settings to its own
   // BrowserWindow and never routes through this branch.
   settingsTab: string;
   onSettingsSaved: () => void;
@@ -34,6 +38,7 @@ export interface MainContentProps {
   sessions: SessionSummary[];
   refreshStarred: () => void;
   // navigation
+  appMode: AppMode;
   onActivateHome: () => void;
   onJumpToSession: (sessionId: string) => void | boolean | Promise<void | boolean>;
   onRefreshSessions: () => void | Promise<void>;
@@ -65,6 +70,7 @@ export interface MainContentProps {
   // plugins — surfaced inside the SlashPicker plugin category
   plugins: PluginEntry[];
   onSelectPlugin: (viewKey: string) => void;
+  onOpenApprovalQueue?: () => void;
   // command popover
   commandActions: QuickAction[];
   commandPopoverOpen: boolean;
@@ -79,9 +85,38 @@ export interface MainContentProps {
   statusBar?: Parameters<typeof ChatView>[0]["statusBar"];
 }
 
-function MainPaneShell({ children, padded = true }: { children: ReactNode; padded?: boolean }) {
+function PageBackBar({ onBack }: { onBack: () => void }) {
+  const { t } = useTranslation();
+  return (
+    <div className="flex shrink-0 items-center gap-2 px-1 pb-2">
+      <Button
+        variant="ghost"
+        size="sm"
+        onClick={onBack}
+        className="gap-2"
+        data-testid="main-content-back"
+      >
+        <ArrowLeft className="size-4" aria-hidden="true" />
+        {t("settingsContent.backToHome")}
+      </Button>
+    </div>
+  );
+}
+
+function MainPaneShell({
+  children,
+  padded = true,
+  backToHome = false,
+  onBack,
+}: {
+  children: ReactNode;
+  padded?: boolean;
+  backToHome?: boolean;
+  onBack?: () => void;
+}) {
   return (
     <div className={padded ? "flex min-h-0 min-w-0 flex-1 flex-col overflow-hidden p-4" : "flex min-h-0 min-w-0 flex-1 flex-col overflow-hidden"}>
+      {backToHome && onBack ? <PageBackBar onBack={onBack} /> : null}
       {children}
     </div>
   );
@@ -113,6 +148,8 @@ function HomeChatPane(props: MainContentProps) {
         onResolveAskQuestion={props.onResolveAskQuestion}
         plugins={props.plugins}
         onSelectPlugin={props.onSelectPlugin}
+        appMode={props.appMode}
+        onOpenApprovalQueue={props.onOpenApprovalQueue}
         currentSessionKind={props.currentSessionKind}
         currentSessionTitle={props.currentSessionTitle}
         sessions={props.sessions}
@@ -138,7 +175,7 @@ export function MainContent(props: MainContentProps): ReactNode {
 
   if (activeView === "memory") {
     return (
-      <MainPaneShell>
+      <MainPaneShell backToHome onBack={props.onActivateHome}>
         <MemorySearchPanel
           api={api}
           onOpenSession={async (sessionId) => {
@@ -153,7 +190,7 @@ export function MainContent(props: MainContentProps): ReactNode {
 
   if (activeView === "starred") {
     return (
-      <MainPaneShell>
+      <MainPaneShell backToHome onBack={props.onActivateHome}>
         <StarredView
           api={api}
           starred={props.starred}
@@ -168,7 +205,7 @@ export function MainContent(props: MainContentProps): ReactNode {
 
   if (activeView === "routines") {
     return (
-      <MainPaneShell>
+      <MainPaneShell backToHome onBack={props.onActivateHome}>
         <RoutinePanel
           api={api}
           onOpenSession={(sessionId) => {
@@ -197,7 +234,7 @@ export function MainContent(props: MainContentProps): ReactNode {
 
   if (activeView === "work-board") {
     return (
-      <MainPaneShell>
+      <MainPaneShell backToHome onBack={props.onActivateHome}>
         <WorkBoardPanel api={api} />
       </MainPaneShell>
     );
@@ -212,7 +249,7 @@ export function MainContent(props: MainContentProps): ReactNode {
   }
 
   return (
-    <MainPaneShell>
+    <MainPaneShell backToHome onBack={props.onActivateHome}>
       <PluginUiHostView
         view={props.activePluginView ?? null}
         authError={props.pluginAuthError ?? null}
