@@ -79,13 +79,20 @@ function toolSourceLabel(tool: ToolItem): string | null {
 }
 
 function ToolSourceBadge({ tool }: { tool: ToolItem }) {
+  const { t } = useTranslation();
   const label = toolSourceLabel(tool);
   if (!label) return null;
+  const title = tool.category
+    ? t("toolGroupCard.toolSourceWithCategoryTitle", {
+      source: label,
+      category: tool.category,
+    })
+    : t("toolGroupCard.toolSourceTitle", { source: label });
   return (
     <Badge
       variant="outline"
       className="max-w-[160px] shrink-0 truncate px-1 py-0 font-mono text-[9px]"
-      title={`tool source: ${label}${tool.category ? `, category: ${tool.category}` : ""}`}
+      title={title}
       data-testid="tool-source"
     >
       {label}

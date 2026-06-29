@@ -526,7 +526,7 @@ export function LoginModalConversational({
     <Dialog open={open} onOpenChange={handleDialogOpenChange}>
       <DialogContent size="sm" data-testid="login-modal" data-variant="conversational">
         <DialogHeader>
-          <DialogTitle>LVIS — Welcome</DialogTitle>
+          <DialogTitle>{t("loginModalConversational.dialogTitle")}</DialogTitle>
         </DialogHeader>
 
         {/* System line — quiet status row that frames the modal as a

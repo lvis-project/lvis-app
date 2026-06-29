@@ -175,8 +175,7 @@ export function App() {
     // update guide. Tell the user to finish up, quit, then update per the guide.
     statusPushToast({
       severity: "warning",
-      message:
-        "작업을 마무리하고 종료 후 업데이트를 진행하세요. 홈페이지에 나와있는 가이드에 따라 진행해 주세요.",
+      message: t("app.manualInstallRequiredToast"),
       ttlMs: 20000,
     });
   });

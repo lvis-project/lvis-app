@@ -12,6 +12,7 @@ import { RoutinePanel } from "../components/RoutinePanel.js";
 import { SessionTodoPanel } from "../components/SessionTodoPanel.js";
 import { SubAgentCard } from "../components/SubAgentCard.js";
 import { SkillBadge } from "../components/SkillBadge.js";
+import { t } from "../../../i18n/runtime.js";
 import type { LvisApi } from "../types.js";
 
 function fakeApi(overrides: Partial<LvisApi> = {}): LvisApi {
@@ -754,6 +755,6 @@ describe("SkillBadge", () => {
         <SkillBadge name="report-writing" description="reports" />
       </TooltipProvider>,
     );
-    expect(container.textContent).toContain("Skill loaded: report-writing");
+    expect(container.textContent).toContain(t("skillBadge.loadedLabel", { name: "report-writing" }));
   });
 });

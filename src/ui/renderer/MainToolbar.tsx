@@ -141,8 +141,8 @@ export function MainToolbar({
                 size="sm"
                 className="h-7 gap-1 px-2 text-[10.5px] font-mono text-warning"
                 onClick={onOpenDevTools}
-                title="Dev Tools (Cmd/Ctrl+Shift+D)"
-                aria-label="Dev Tools (Cmd/Ctrl+Shift+D)"
+                title={t("mainToolbar.devToolsTitle")}
+                aria-label={t("mainToolbar.devToolsTitle")}
                 data-testid="dev-tools-toggle"
               >
                 <Wrench className="h-3 w-3" />

@@ -9,6 +9,7 @@ import { render, fireEvent, waitFor } from "@testing-library/react";
 import type { ReactNode } from "react";
 import { ToolGroupCard } from "../components/ToolGroupCard.js";
 import type { ChatEntry } from "../../../lib/chat-stream-state.js";
+import { t } from "../../../i18n/runtime.js";
 
 vi.mock("../../../components/ui/scroll-area.js", () => ({
   ScrollArea: ({ children, className }: { children: ReactNode; className?: string }) => (
@@ -620,7 +621,7 @@ describe("ToolGroupCard", () => {
     });
     const { container } = render(<ToolGroupCard group={group} />);
     expect(container.textContent).toContain("src/foo.ts");
-    expect(container.textContent).toContain("Edit");
+    expect(container.textContent).toContain(t("fileEditDiff.verbEdit"));
     expect(container.textContent).toContain("const y = 2;");
     expect(container.textContent).toContain("const y = 3;");
   });
@@ -650,7 +651,7 @@ describe("ToolGroupCard", () => {
     expect(container.textContent).toContain("ALPHA");
     expect(container.textContent).toContain("beta");
     expect(container.textContent).toContain("BETA");
-    expect(container.textContent).toContain("next hunk");
+    expect(container.textContent).toContain(t("fileEditDiff.nextHunk"));
   });
 
   it("single write_file (existing): renders before and after", () => {
@@ -675,7 +676,7 @@ describe("ToolGroupCard", () => {
       ],
     });
     const { container } = render(<ToolGroupCard group={group} />);
-    expect(container.textContent).toContain("Write");
+    expect(container.textContent).toContain(t("fileEditDiff.verbWrite"));
     expect(container.textContent).toContain("before");
     expect(container.textContent).toContain("after");
   });
@@ -701,7 +702,7 @@ describe("ToolGroupCard", () => {
       ],
     });
     const { container } = render(<ToolGroupCard group={group} />);
-    expect(container.textContent).toContain("Create");
+    expect(container.textContent).toContain(t("fileEditDiff.verbCreate"));
     expect(container.textContent).toContain("hello");
   });
 
@@ -726,7 +727,7 @@ describe("ToolGroupCard", () => {
       ],
     });
     const { container } = render(<ToolGroupCard group={group} />);
-    expect(container.textContent).toContain("truncated");
+    expect(container.textContent).toContain(t("fileEditDiff.truncatedLabel"));
   });
 });
 
