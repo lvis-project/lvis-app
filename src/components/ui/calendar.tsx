@@ -1,26 +1,40 @@
 import * as React from "react";
 import { ChevronLeft, ChevronRight } from "lucide-react";
 import { DayPicker } from "react-day-picker";
-import { ko } from "date-fns/locale";
+import { de, enUS, es, fr, ja, ko, zhCN } from "date-fns/locale";
 
 import { cn } from "../../lib/utils.js";
+import { useTranslation } from "../../i18n/react.js";
 import { buttonVariants } from "./button.js";
 
 export type CalendarProps = React.ComponentProps<typeof DayPicker>;
 
+const DATE_FNS_LOCALES = {
+  en: enUS,
+  ko,
+  ja,
+  zh: zhCN,
+  es,
+  fr,
+  de,
+} as const;
+
 /**
  * shadcn-style Calendar wrapper around react-day-picker v9, customized to
- * the app theme tokens, ko-KR + Sunday-first.
+ * the app theme tokens and active app locale, Sunday-first.
  */
 export function Calendar({
   className,
   classNames,
+  locale: localeOverride,
   showOutsideDays = true,
   ...props
 }: CalendarProps) {
+  const { locale } = useTranslation();
+
   return (
     <DayPicker
-      locale={ko}
+      locale={localeOverride ?? DATE_FNS_LOCALES[locale]}
       weekStartsOn={0}
       showOutsideDays={showOutsideDays}
       className={cn("relative p-3", className)}

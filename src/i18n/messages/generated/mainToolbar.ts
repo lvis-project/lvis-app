@@ -1,6 +1,7 @@
 // AUTO-GENERATED — i18n migration. Source: src/ui/renderer/MainToolbar.tsx. Do not edit by hand.
 export const en = {
   "mainToolbar.home": "Home",
+  "mainToolbar.devToolsTitle": "Dev Tools (Cmd/Ctrl+Shift+D)",
   "mainToolbar.devToolsTooltip": "Dev Tools — Preflight threshold adjustment (Cmd/Ctrl+Shift+D)",
   "mainToolbar.unifiedSearch": "Unified Search (Cmd/Ctrl+F)",
   "mainToolbar.sessionStar": "Star current session",
@@ -37,6 +38,7 @@ export const en = {
 } as const;
 export const ko: Record<keyof typeof en, string> = {
   "mainToolbar.home": "홈",
+  "mainToolbar.devToolsTitle": "Dev Tools (Cmd/Ctrl+Shift+D)",
   "mainToolbar.devToolsTooltip": "Dev Tools — Preflight 임계 조절 (Cmd/Ctrl+Shift+D)",
   "mainToolbar.unifiedSearch": "통합 검색 (Cmd/Ctrl+F)",
   "mainToolbar.sessionStar": "현재 세션 즐겨찾기",

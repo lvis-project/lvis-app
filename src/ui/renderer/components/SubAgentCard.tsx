@@ -67,7 +67,7 @@ export function SubAgentCard({ spawn }: { spawn: SubAgentSpawn }) {
         <Bot className="h-3 w-3" />
         <span className="min-w-0 truncate font-medium" title={spawn.title}>{displayTitle}</span>
         <Badge variant="outline" className="shrink-0 px-1 py-0 text-[10px]">
-          {spawn.turns.length} turn
+          {t("subAgentCard.turnCount", { count: String(spawn.turns.length) })}
         </Badge>
         {spawn.status === "running" ? (
           <Loader2 className="ml-auto h-3 w-3 shrink-0 animate-spin" />
@@ -82,12 +82,14 @@ export function SubAgentCard({ spawn }: { spawn: SubAgentSpawn }) {
       </button>
       {open && (
         <div className="min-w-0 space-y-1 border-t px-3 py-1.5">
-          {spawn.turns.map((t) => (
-            <div key={t.turn} className="min-w-0 rounded border border-dashed/50 px-2 py-1">
-              <div className="text-[10px] uppercase opacity-60">Turn {t.turn}</div>
-              {t.text && (
+          {spawn.turns.map((turn) => (
+            <div key={turn.turn} className="min-w-0 rounded border border-dashed/50 px-2 py-1">
+              <div className="text-[10px] uppercase opacity-60">
+                {t("subAgentCard.turnHeading", { turn: String(turn.turn) })}
+              </div>
+              {turn.text && (
                 <div className="mt-1 whitespace-pre-wrap break-words text-[11px] opacity-80 [overflow-wrap:anywhere]">
-                  {t.text}
+                  {turn.text}
                 </div>
               )}
             </div>
@@ -99,7 +101,7 @@ export function SubAgentCard({ spawn }: { spawn: SubAgentSpawn }) {
                 {spawn.summary}
               </div>
               <div className="mt-1 text-[10px] opacity-60">
-                tool calls: {spawn.toolCallCount}
+                {t("subAgentCard.toolCalls", { count: String(spawn.toolCallCount) })}
               </div>
             </div>
           )}

@@ -2,7 +2,8 @@
  * i18n locale definitions — single source of truth for supported languages.
  *
  * LVIS ships a global build with English as the default UI language. Korean
- * is a fully-translated secondary locale. The app reads the active locale
+ * is the first fully-translated secondary locale; additional locales can ship
+ * with English fallback while their surface catalogs are completed. The app reads the active locale
  * from `settings.appearance.language` (see {@link ../data/settings-store}),
  * defaulting to {@link DEFAULT_LOCALE} when unset or invalid.
  *
@@ -12,7 +13,7 @@
  */
 
 /** All locales LVIS can render its UI in. */
-export const SUPPORTED_LOCALES = ["en", "ko"] as const;
+export const SUPPORTED_LOCALES = ["en", "ko", "ja", "zh", "es", "fr", "de"] as const;
 
 /** A supported UI locale code (BCP-47 primary subtag). */
 export type Locale = (typeof SUPPORTED_LOCALES)[number];
@@ -27,6 +28,11 @@ export const DEFAULT_LOCALE: Locale = "en";
 export const LOCALE_INFO: Record<Locale, { nativeName: string; englishName: string }> = {
   en: { nativeName: "English", englishName: "English" },
   ko: { nativeName: "한국어", englishName: "Korean" },
+  ja: { nativeName: "日本語", englishName: "Japanese" },
+  zh: { nativeName: "简体中文", englishName: "Chinese (Simplified)" },
+  es: { nativeName: "Español", englishName: "Spanish" },
+  fr: { nativeName: "Français", englishName: "French" },
+  de: { nativeName: "Deutsch", englishName: "German" },
 };
 
 /** Type guard: is `value` one of the supported locale codes? */

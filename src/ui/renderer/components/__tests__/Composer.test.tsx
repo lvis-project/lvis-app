@@ -4,6 +4,7 @@ import { describe, it, expect, vi } from "vitest";
 import { render, fireEvent, screen, act } from "@testing-library/react";
 import { useRef, useState } from "react";
 import { Composer, type ComposerHandle } from "../Composer.js";
+import { t } from "../../../../i18n/runtime.js";
 import type {
   Attachment,
   ImageAttachment,
@@ -240,7 +241,7 @@ describe("Composer", () => {
     const ghost = screen.getByTestId("suggested-replies-ghost");
     expect(ghost).toBeTruthy();
     expect(ghost.textContent).toContain("네");
-    expect(ghost.textContent).toContain("Tab to fill");
+    expect(ghost.textContent).toContain(t("suggestedRepliesGhost.tabToFill"));
   });
 
   it("suppresses the fallback placeholder while ghost text is visible", () => {

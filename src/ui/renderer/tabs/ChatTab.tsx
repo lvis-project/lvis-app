@@ -82,7 +82,7 @@ export function ChatTab({
             setStreamSmoothing(value as "none" | "word" | "char");
             onImmediateChange?.();
           }}
-          aria-label="Stream smoothing"
+          aria-label={t("chatTab.streamSmoothingTitle")}
         >
           {(["none", "word", "char"] as const).map((opt) => (
             <Label key={opt} className="flex items-center gap-1">

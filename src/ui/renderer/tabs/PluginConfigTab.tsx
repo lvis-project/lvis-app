@@ -952,7 +952,7 @@ export function PluginConfigTab() {
                       />
                       <Input
                         className="h-7 text-xs font-mono flex-1"
-                        placeholder="value (string / JSON)"
+                        placeholder={t("pluginConfigTab.valuePlaceholder")}
                         value={newValue}
                         onChange={(e) => setNewValue(e.target.value)}
                       />

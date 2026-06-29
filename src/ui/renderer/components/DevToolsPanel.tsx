@@ -38,7 +38,7 @@ export function DevToolsPanel({ api, open, onClose }: DevToolsPanelProps) {
 
   const refreshStatus = useCallback(async () => {
     if (api.dev === undefined) {
-      setError("dev API unavailable");
+      setError(t("devToolsPanel.devApiUnavailable"));
       return;
     }
     const res = await api.dev.getPreflightStatus();
@@ -55,7 +55,7 @@ export function DevToolsPanel({ api, open, onClose }: DevToolsPanelProps) {
     });
     setSliderValue(res.runtimeOverride ?? res.envOverride ?? Math.min(res.effective, 100_000));
     setError(null);
-  }, [api]);
+  }, [api, t]);
 
   useEffect(() => {
     if (open) void refreshStatus();
@@ -108,7 +108,7 @@ export function DevToolsPanel({ api, open, onClose }: DevToolsPanelProps) {
       className="fixed right-4 top-14 z-50 w-[360px] rounded-lg border bg-card p-4 shadow-xl"
     >
       <div className="flex items-center justify-between gap-2">
-        <h3 className="text-sm font-semibold">LVIS Dev Tools</h3>
+        <h3 className="text-sm font-semibold">{t("devToolsPanel.title")}</h3>
         <Button
           type="button"
           variant="ghost"
@@ -125,9 +125,9 @@ export function DevToolsPanel({ api, open, onClose }: DevToolsPanelProps) {
 
       <div className="mt-4 space-y-2">
         <div className="flex items-center justify-between gap-2">
-          <label className="text-xs font-medium">Preflight threshold</label>
+          <label className="text-xs font-medium">{t("devToolsPanel.preflightThresholdLabel")}</label>
           <span className="text-xs font-mono tabular-nums">
-            {sliderValue.toLocaleString()} tokens
+            {t("devToolsPanel.tokensValue", { count: sliderValue.toLocaleString() })}
           </span>
         </div>
         <Slider
@@ -137,7 +137,7 @@ export function DevToolsPanel({ api, open, onClose }: DevToolsPanelProps) {
           value={[sliderValue]}
           onValueChange={handleSliderChange}
           onValueCommit={handleSliderCommit}
-          aria-label="Preflight threshold"
+          aria-label={t("devToolsPanel.preflightThresholdLabel")}
         />
         <div className="flex items-center justify-between text-[10px] text-muted-foreground">
           <span>500</span>
@@ -146,18 +146,18 @@ export function DevToolsPanel({ api, open, onClose }: DevToolsPanelProps) {
       </div>
 
       <div className="mt-3 space-y-1 rounded-md border bg-muted/(--opacity-muted) p-2 text-[10.5px]">
-        <Row label="Provider/Model" value={status ? `${status.provider}/${status.model}` : "—"} />
+        <Row label={t("devToolsPanel.providerModelLabel")} value={status ? `${status.provider}/${status.model}` : "—"} />
         <Row
-          label="Effective trigger"
-          value={status ? `${status.effective.toLocaleString()} tokens` : "—"}
+          label={t("devToolsPanel.effectiveTriggerLabel")}
+          value={status ? t("devToolsPanel.tokensValue", { count: status.effective.toLocaleString() }) : "—"}
         />
         <Row
-          label="Runtime override"
-          value={status?.runtimeOverride !== null && status?.runtimeOverride !== undefined ? `${status.runtimeOverride.toLocaleString()}` : "(none)"}
+          label={t("devToolsPanel.runtimeOverrideLabel")}
+          value={status?.runtimeOverride !== null && status?.runtimeOverride !== undefined ? `${status.runtimeOverride.toLocaleString()}` : t("devToolsPanel.noneValue")}
         />
         <Row
-          label="Env (LVIS_DEV_PREFLIGHT_OVERRIDE)"
-          value={status?.envOverride !== null && status?.envOverride !== undefined ? `${status.envOverride.toLocaleString()}` : "(unset)"}
+          label={t("devToolsPanel.envOverrideLabel")}
+          value={status?.envOverride !== null && status?.envOverride !== undefined ? `${status.envOverride.toLocaleString()}` : t("devToolsPanel.unsetValue")}
         />
       </div>
 
