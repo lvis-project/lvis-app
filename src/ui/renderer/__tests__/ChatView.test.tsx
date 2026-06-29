@@ -101,6 +101,65 @@ describe("ChatView", () => {
     });
   });
 
+  it("restores chat scroll position after navigating away and back", async () => {
+    const scrollMetrics = installDeterministicScrollMetrics();
+    vi.stubGlobal("requestAnimationFrame", (cb: FrameRequestCallback) => {
+      cb(0);
+      return 1;
+    });
+    vi.stubGlobal("cancelAnimationFrame", vi.fn());
+
+    try {
+      const { container } = await renderApp({
+        currentSession: "sess-scroll-restore",
+        mainActiveState: {
+          mainActiveSessionId: "sess-scroll-restore",
+          mainActiveMode: "resume",
+          updatedAt: new Date().toISOString(),
+        },
+        history: {
+          sessionId: "sess-scroll-restore",
+          messages: [
+            { index: 0, role: "user", content: "스크롤 복원 질문" },
+            { index: 1, role: "assistant", content: "스크롤 복원 답변" },
+          ],
+        },
+      });
+
+      const viewport = await waitFor(() => {
+        expect(container.textContent).toContain("스크롤 복원 답변");
+        const el = container.querySelector(".lvis-chat-scroll [data-radix-scroll-area-viewport]");
+        expect(el).not.toBeNull();
+        return el as HTMLElement;
+      });
+
+      await waitFor(() => expect(scrollMetrics.assignedScrollTop).toBe(2400));
+
+      scrollMetrics.setAssignedScrollTop(720);
+      await act(async () => {
+        fireEvent.scroll(viewport);
+      });
+
+      await act(async () => {
+        fireEvent.click(container.querySelector('[data-testid="sidebar-settings"]')!);
+      });
+      await waitFor(() =>
+        expect(container.querySelector('[data-testid="settings-sidebar-heading"]')).toBeTruthy(),
+      );
+
+      await act(async () => {
+        fireEvent.click(container.querySelector('[data-testid="settings-inline-back"]')!);
+      });
+
+      await waitFor(() => {
+        expect(container.querySelector(".lvis-chat-scroll [data-radix-scroll-area-viewport]")).not.toBeNull();
+        expect(scrollMetrics.assignedScrollTop).toBe(720);
+      });
+    } finally {
+      scrollMetrics.restore();
+    }
+  });
+
   it("hides the empty-state hint while suggested replies are visible", async () => {
     const { container, emitChatStream } = await renderApp({ hasApiKey: true });
     await waitFor(() => {
