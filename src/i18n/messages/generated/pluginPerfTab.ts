@@ -15,6 +15,7 @@ export const en = {
   "pluginPerfTab.colAvgMs": "Avg ms",
   "pluginPerfTab.colLastCall": "Last Call",
   "pluginPerfTab.chartLabel": "Average Execution Time (ms)",
+  "pluginPerfTab.chartAriaLabel": "Average execution milliseconds per plugin",
 } as const;
 export const ko: Record<keyof typeof en, string> = {
   "pluginPerfTab.pageTitle": "플러그인 성능",
@@ -32,4 +33,5 @@ export const ko: Record<keyof typeof en, string> = {
   "pluginPerfTab.colAvgMs": "평균 ms",
   "pluginPerfTab.colLastCall": "마지막 호출",
   "pluginPerfTab.chartLabel": "평균 실행 시간 (ms)",
+  "pluginPerfTab.chartAriaLabel": "플러그인별 평균 실행 시간 밀리초",
 };

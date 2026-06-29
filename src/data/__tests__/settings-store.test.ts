@@ -680,7 +680,7 @@ describe("SettingsService system locale detection", () => {
   });
 
   it("fresh install with unsupported systemLocale falls back to 'en'", () => {
-    const service = new SettingsService({ userDataPath, systemLocale: "fr-FR" });
+    const service = new SettingsService({ userDataPath, systemLocale: "it-IT" });
     expect(service.get("appearance").language).toBe("en");
   });
 

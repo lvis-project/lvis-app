@@ -27,10 +27,10 @@ function errorRateBadgeClass(rate: number): string {
 }
 
 /** Simple SVG bar chart — avg exec ms per plugin (max width 80px). */
-function BarChart({ rows }: { rows: Row[] }) {
+function BarChart({ rows, ariaLabel }: { rows: Row[]; ariaLabel: string }) {
   const maxAvg = Math.max(...rows.map((r) => avgExecMs(r.stats)), 1);
   return (
-    <svg width="100%" height={rows.length * 20 + 8} aria-label="avg exec ms per plugin">
+    <svg width="100%" height={rows.length * 20 + 8} aria-label={ariaLabel}>
       {rows.map((r, i) => {
         const avg = avgExecMs(r.stats);
         const barWidth = (avg / maxAvg) * 80;
@@ -140,7 +140,7 @@ export function PluginPerfTab({ api }: { api: LvisApi }) {
 
             <div className="space-y-1">
               <p className="text-xs font-medium">{t("pluginPerfTab.chartLabel")}</p>
-              <BarChart rows={rows} />
+              <BarChart rows={rows} ariaLabel={t("pluginPerfTab.chartAriaLabel")} />
             </div>
           </>
         )}

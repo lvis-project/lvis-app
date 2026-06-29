@@ -53,7 +53,10 @@ function formatProjectedCost(v: { cost: number; hasUnknownCost: boolean }): stri
 }
 
 function formatCacheBreakdown(v: { cacheReadTokens?: number; cacheWriteTokens?: number }): string {
-  return `cache r ${formatTokens(v.cacheReadTokens ?? 0)} / w ${formatTokens(v.cacheWriteTokens ?? 0)}`;
+  return t("usageDashboard.cacheBreakdown", {
+    read: formatTokens(v.cacheReadTokens ?? 0),
+    write: formatTokens(v.cacheWriteTokens ?? 0),
+  });
 }
 
 function buildCsvRows(summary: UsageSummaryShape): Array<Record<string, string | number>> {
@@ -193,7 +196,12 @@ export function UsageDashboard({ api }: { api: LvisApi }) {
             <CardHeader className="pb-1 pt-3 px-3"><CardTitle className="text-xs text-muted-foreground">{label}</CardTitle></CardHeader>
             <CardContent className="space-y-0.5 px-3 pb-3">
               <div className="text-lg font-semibold">{formatTokens(v.totalTokens)}</div>
-              <div className="text-xs text-muted-foreground">in {formatTokens(v.inputTokens)} / out {formatTokens(v.outputTokens)}</div>
+              <div className="text-xs text-muted-foreground">
+                {t("usageDashboard.tokenInOut", {
+                  input: formatTokens(v.inputTokens),
+                  output: formatTokens(v.outputTokens),
+                })}
+              </div>
               <div className="text-xs text-muted-foreground">{formatCacheBreakdown(v)}</div>
               <div className="text-xs font-medium">{formatCostWithUnknown(v)}</div>
             </CardContent>

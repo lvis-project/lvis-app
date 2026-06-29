@@ -5,7 +5,7 @@
  * fragment files in this directory (`<namespace>.ts`, each exporting `en`/`ko`
  * objects) and merges them here.
  *
- * Fragments: 179
+ * Fragments: 181
  */
 import { en as en_app, ko as ko_app } from "./app.js";
 import { en as en_appearanceTab, ko as ko_appearanceTab } from "./appearanceTab.js";
@@ -152,6 +152,7 @@ import { en as en_sessionTodoPanel, ko as ko_sessionTodoPanel } from "./sessionT
 import { en as en_settingsContent, ko as ko_settingsContent } from "./settingsContent.js";
 import { en as en_settingsWindow, ko as ko_settingsWindow } from "./settingsWindow.js";
 import { en as en_sidebar, ko as ko_sidebar } from "./sidebar.js";
+import { en as en_skillBadge, ko as ko_skillBadge } from "./skillBadge.js";
 import { en as en_slashPicker, ko as ko_slashPicker } from "./slashPicker.js";
 import { en as en_solarizedLight, ko as ko_solarizedLight } from "./solarizedLight.js";
 import { en as en_sparkline, ko as ko_sparkline } from "./sparkline.js";
@@ -160,6 +161,7 @@ import { en as en_starredView, ko as ko_starredView } from "./starredView.js";
 import { en as en_statusBar, ko as ko_statusBar } from "./statusBar.js";
 import { en as en_subAgentCard, ko as ko_subAgentCard } from "./subAgentCard.js";
 import { en as en_suggestedRepliesChipRow, ko as ko_suggestedRepliesChipRow } from "./suggestedRepliesChipRow.js";
+import { en as en_suggestedRepliesGhost, ko as ko_suggestedRepliesGhost } from "./suggestedRepliesGhost.js";
 import { en as en_summaryToast, ko as ko_summaryToast } from "./summaryToast.js";
 import { en as en_tokenCostBadge, ko as ko_tokenCostBadge } from "./tokenCostBadge.js";
 import { en as en_tokenProgressRing, ko as ko_tokenProgressRing } from "./tokenProgressRing.js";
@@ -333,6 +335,7 @@ export const generatedEn: Record<string, string> = {
   ...en_settingsContent,
   ...en_settingsWindow,
   ...en_sidebar,
+  ...en_skillBadge,
   ...en_slashPicker,
   ...en_solarizedLight,
   ...en_sparkline,
@@ -341,6 +344,7 @@ export const generatedEn: Record<string, string> = {
   ...en_statusBar,
   ...en_subAgentCard,
   ...en_suggestedRepliesChipRow,
+  ...en_suggestedRepliesGhost,
   ...en_summaryToast,
   ...en_tokenCostBadge,
   ...en_tokenProgressRing,
@@ -515,6 +519,7 @@ export const generatedKo: Record<string, string> = {
   ...ko_settingsContent,
   ...ko_settingsWindow,
   ...ko_sidebar,
+  ...ko_skillBadge,
   ...ko_slashPicker,
   ...ko_solarizedLight,
   ...ko_sparkline,
@@ -523,6 +528,7 @@ export const generatedKo: Record<string, string> = {
   ...ko_statusBar,
   ...ko_subAgentCard,
   ...ko_suggestedRepliesChipRow,
+  ...ko_suggestedRepliesGhost,
   ...ko_summaryToast,
   ...ko_tokenCostBadge,
   ...ko_tokenProgressRing,

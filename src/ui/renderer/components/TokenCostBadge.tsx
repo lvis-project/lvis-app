@@ -184,48 +184,48 @@ function TokenCostBadgeImpl({
         </button>
       </TooltipTrigger>
       <TooltipContent side="top" className="text-xs tabular-nums">
-        <div className="text-[10px] uppercase tracking-wider opacity-60 mb-1">turn breakdown</div>
+        <div className="text-[10px] uppercase tracking-wider opacity-60 mb-1">{t("tokenCostBadge.breakdownTitle")}</div>
         <div className="space-y-0.5">
           <div className="flex justify-between gap-3">
-            <span>fresh in (1.0×):</span>
+            <span>{t("tokenCostBadge.freshInputLabel")}</span>
             <span>{freshInputTokens.toLocaleString()}</span>
           </div>
           {cacheReadTokens > 0 && (
             <div className="flex justify-between gap-3 text-success">
-              <span>cache read (0.1×):</span>
+              <span>{t("tokenCostBadge.cacheReadLabel")}</span>
               <span>{cacheReadTokens.toLocaleString()}</span>
             </div>
           )}
           {cacheWriteTokens > 0 && (
             <div className="flex justify-between gap-3 text-warning">
-              <span>cache write (1.25×):</span>
+              <span>{t("tokenCostBadge.cacheWriteLabel")}</span>
               <span>{cacheWriteTokens.toLocaleString()}</span>
             </div>
           )}
           <div className="flex justify-between gap-3">
-            <span>output:</span>
+            <span>{t("tokenCostBadge.outputLabel")}</span>
             <span>{tokensOut.toLocaleString()}</span>
           </div>
         </div>
         <div className="mt-1 border-t border-border/(--opacity-medium) pt-1 space-y-0.5">
           <div className="flex justify-between gap-3 font-semibold">
-            <span>fresh + output:</span>
+            <span>{t("tokenCostBadge.freshPlusOutputLabel")}</span>
             <span>{headlineTokens.toLocaleString()}</span>
           </div>
           <div className="flex justify-between gap-3 opacity-70">
-            <span>projected next input:</span>
+            <span>{t("tokenCostBadge.projectedNextInputLabel")}</span>
             <span>{tokensIn.toLocaleString()}</span>
           </div>
           {cost !== null && (
             <div className="flex justify-between gap-3 font-semibold text-success pt-0.5 border-t border-border/(--opacity-medium)">
-              <span>≈ cost:</span>
+              <span>{t("tokenCostBadge.estimatedCostLabel")}</span>
               <span>{formatCost(cost)}</span>
             </div>
           )}
           {cost === null && (
             <div className="flex justify-between gap-3 font-semibold text-muted-foreground pt-0.5 border-t border-border/(--opacity-medium)">
-              <span>cost:</span>
-              <span>pricing unknown</span>
+              <span>{t("tokenCostBadge.costLabel")}</span>
+              <span>{t("tokenCostBadge.pricingUnknownLabel")}</span>
             </div>
           )}
         </div>
