@@ -403,16 +403,20 @@ describe("PluginMarketplaceService managed bootstrap", () => {
           },
           {
             id: "work-assistant",
-            name: "Work Proactive",
+            name: "Work Assistant",
             description: "fixture",
             packageSpec: "file:./plugin-src/work-assistant",
             packageName: "@lvis/plugin-work-assistant",
-            tools: ["work_assistant_generate_wakeup_briefing"],
+            tools: [
+              "work_assistant_generate_daily_briefing",
+              "work_assistant_list_detectors",
+              "work_assistant_set_detector_enabled",
+            ],
             installPolicy: "user",
             dependencies: [
-              { pluginId: "calendar", required: true },
-              { pluginId: "email", required: true },
-              { pluginId: "meeting", required: true },
+              { pluginId: "calendar", required: false },
+              { pluginId: "email", required: false },
+              { pluginId: "meeting", required: false },
             ],
             pluginAccess: {
               plugins: [
@@ -421,11 +425,10 @@ describe("PluginMarketplaceService managed bootstrap", () => {
                 { pluginId: "meeting", events: ["meeting.summary.created", "meeting.ended"] },
               ],
             },
-            capabilities: ["work-assistant-provider"],
-            requires: { capabilities: ["calendar-source"] },
+            capabilities: ["host:overlay", "lifecycle-observer"],
             toolSchemas: {
-              work_assistant_generate_wakeup_briefing: {
-                description: "Generate wakeup briefing",
+              work_assistant_generate_daily_briefing: {
+                description: "Generate daily briefing",
                 inputSchema: {
                   type: "object",
                   properties: {},
@@ -467,9 +470,9 @@ describe("PluginMarketplaceService managed bootstrap", () => {
     const manifest = JSON.parse(await readFile(absoluteManifestPath, "utf-8"));
     expect(manifest.installPolicy).toBe("user");
     expect(manifest.dependencies).toEqual([
-      { pluginId: "calendar", required: true },
-      { pluginId: "email", required: true },
-      { pluginId: "meeting", required: true },
+      { pluginId: "calendar", required: false },
+      { pluginId: "email", required: false },
+      { pluginId: "meeting", required: false },
     ]);
     expect(manifest.pluginAccess).toEqual({
       plugins: [
@@ -478,10 +481,10 @@ describe("PluginMarketplaceService managed bootstrap", () => {
         { pluginId: "meeting", events: ["meeting.summary.created", "meeting.ended"] },
       ],
     });
-    expect(manifest.requires).toEqual({ capabilities: ["calendar-source"] });
-    expect(manifest.capabilities).toEqual(["work-assistant-provider"]);
-    expect(manifest.toolSchemas?.work_assistant_generate_wakeup_briefing?.description).toBe(
-      "Generate wakeup briefing",
+    expect(manifest.requires).toBeUndefined();
+    expect(manifest.capabilities).toEqual(["host:overlay", "lifecycle-observer"]);
+    expect(manifest.toolSchemas?.work_assistant_generate_daily_briefing?.description).toBe(
+      "Generate daily briefing",
     );
   });
 
