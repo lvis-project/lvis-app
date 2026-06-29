@@ -14,6 +14,7 @@
 // smooth when CSS class state flips (e.g. typing → empty). `prefers-
 // reduced-motion` opt-outs are honored by Tailwind's `motion-safe:` variant.
 import type { ReactElement } from "react";
+import { useTranslation } from "../../../i18n/react.js";
 
 interface Props {
   text: string | null;
@@ -21,6 +22,7 @@ interface Props {
 }
 
 export function SuggestedRepliesGhost({ text, visible }: Props): ReactElement | null {
+  const { t } = useTranslation();
   if (!visible || !text) return null;
   return (
     <div
@@ -30,7 +32,7 @@ export function SuggestedRepliesGhost({ text, visible }: Props): ReactElement | 
     >
       <span className="truncate">{text}</span>
       <span className="ml-auto whitespace-nowrap pl-2 text-[10px] opacity-70">
-        Tab to fill
+        {t("suggestedRepliesGhost.tabToFill")}
       </span>
     </div>
   );

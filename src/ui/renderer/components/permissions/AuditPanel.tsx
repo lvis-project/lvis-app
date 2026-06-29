@@ -162,7 +162,7 @@ export function AuditPanel({
     <aside
       className="fixed right-0 top-0 z-50 flex h-full w-[480px] flex-col border-l bg-background shadow-xl"
       data-testid="audit-panel"
-      aria-label="Permission audit panel"
+      aria-label={t("auditPanel.panelAriaLabel")}
     >
       <header className="flex items-center justify-between border-b px-3 py-2">
         <h2 className="text-sm font-semibold">{t("auditPanel.title")}</h2>
@@ -170,7 +170,7 @@ export function AuditPanel({
           variant="ghost"
           size="sm"
           onClick={onClose}
-          aria-label="Close audit panel"
+          aria-label={t("auditPanel.closeAriaLabel")}
           data-testid="audit-panel-close"
         >
           ×

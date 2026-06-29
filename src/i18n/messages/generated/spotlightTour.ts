@@ -4,10 +4,12 @@ export const en = {
   "spotlightTour.skip": "Skip",
   "spotlightTour.complete": "Done",
   "spotlightTour.next": "Next →",
+  "spotlightTour.shortcutAriaLabel": "shortcut: {label}",
 } as const;
 export const ko: Record<keyof typeof en, string> = {
   "spotlightTour.stepUnit": "단계",
   "spotlightTour.skip": "건너뛰기",
   "spotlightTour.complete": "완료",
   "spotlightTour.next": "다음 →",
+  "spotlightTour.shortcutAriaLabel": "단축키: {label}",
 };

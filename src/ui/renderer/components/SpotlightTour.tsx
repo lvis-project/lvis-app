@@ -637,7 +637,7 @@ export function SpotlightTour({
             {currentStep.keyHint.map((label) => (
               <kbd
                 key={label}
-                aria-label={`shortcut: ${label}`}
+                aria-label={t("spotlightTour.shortcutAriaLabel", { label })}
                 className="font-mono text-[11px]"
                 style={{
                   background: "hsl(var(--kbd-bg))",

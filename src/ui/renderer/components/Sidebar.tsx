@@ -239,6 +239,7 @@ function PluginNavItem({
   onSelect: (key: string) => void;
   collapsed: boolean;
 }) {
+  const { t } = useTranslation();
   const viewKey = toViewKey(view);
   const label = getPluginViewLabel(view);
   const IconComponent = pluginIconFor({
@@ -249,7 +250,7 @@ function PluginNavItem({
   const trailingSlot = isUnauthed ? (
     <span
       className="h-1.5 w-1.5 rounded-full bg-destructive"
-      aria-label="인증 필요"
+      aria-label={t("sidebar.authRequiredAriaLabel")}
     />
   ) : null;
 
@@ -424,8 +425,12 @@ function ClusterStrip({
           <TooltipContent side="bottom">{t("mainToolbar.export")}</TooltipContent>
         </Tooltip>
         <DropdownMenuContent align="start" className="w-[180px]">
-          <DropdownMenuItem data-testid="toolbar-export-markdown" onClick={() => void onExport("markdown")}>Markdown (.md)</DropdownMenuItem>
-          <DropdownMenuItem data-testid="toolbar-export-json" onClick={() => void onExport("json")}>JSON (.json)</DropdownMenuItem>
+          <DropdownMenuItem data-testid="toolbar-export-markdown" onClick={() => void onExport("markdown")}>
+            {t("sidebar.exportMarkdown")}
+          </DropdownMenuItem>
+          <DropdownMenuItem data-testid="toolbar-export-json" onClick={() => void onExport("json")}>
+            {t("sidebar.exportJson")}
+          </DropdownMenuItem>
         </DropdownMenuContent>
       </DropdownMenu>
     </div>

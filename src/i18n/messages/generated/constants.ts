@@ -7,6 +7,13 @@ export const en = {
   // WEB_PROVIDERS placeholders
   "constants.webProviderDuckDuckGoPlaceholder": "No key required",
   "constants.webProviderSerperPlaceholder": "Enter key...",
+  "constants.webProviderGooglePlaceholder": "API Key...",
+
+  // VENDOR_UI labels/placeholders
+  "constants.vendorAzureFoundryPlaceholder": "Azure API key...",
+  "constants.vendorVertexAiPlaceholder": "service account (unused — uses ADC)",
+  "constants.vendorOpenAiCompatibleLabel": "Custom (OpenAI-compatible)",
+  "constants.vendorOpenAiCompatiblePlaceholder": "API key (or any value if unauthenticated)",
 
   // EXEC_MODE_OPTIONS
   "constants.execModeDefaultLabel": "Confirm writes",
@@ -17,6 +24,12 @@ export const en = {
   "constants.execModeAutoDesc": "Low-risk operations are processed with an audit trail; automated (headless) execution and interactive chat are both verified by the permission reviewer",
   "constants.execModeAllowLabel": "Allow all",
   "constants.execModeAllowDesc": "Tools outside hard blocks are auto-allowed; access outside allowed directories requires separate approval",
+
+  // REASONING_EFFORT_STEPS
+  "constants.reasoningEffortLow": "Low",
+  "constants.reasoningEffortMedium": "Medium",
+  "constants.reasoningEffortHigh": "High",
+  "constants.reasoningEffortMax": "Max",
 } as const;
 export const ko: Record<keyof typeof en, string> = {
   // SOURCE_BADGE
@@ -26,6 +39,13 @@ export const ko: Record<keyof typeof en, string> = {
   // WEB_PROVIDERS placeholders
   "constants.webProviderDuckDuckGoPlaceholder": "키 불필요",
   "constants.webProviderSerperPlaceholder": "키 입력...",
+  "constants.webProviderGooglePlaceholder": "API 키...",
+
+  // VENDOR_UI labels/placeholders
+  "constants.vendorAzureFoundryPlaceholder": "Azure API 키...",
+  "constants.vendorVertexAiPlaceholder": "서비스 계정 (미사용 — ADC 사용)",
+  "constants.vendorOpenAiCompatibleLabel": "사용자 지정 (OpenAI 호환)",
+  "constants.vendorOpenAiCompatiblePlaceholder": "API 키 (인증이 없으면 임의 값 가능)",
 
   // EXEC_MODE_OPTIONS
   "constants.execModeDefaultLabel": "쓰기 확인",
@@ -36,4 +56,10 @@ export const ko: Record<keyof typeof en, string> = {
   "constants.execModeAutoDesc": "저위험 작업은 감사 기록으로 처리하고 자동(헤드리스) 실행과 대화형 채팅 모두를 권한 리뷰어가 검증",
   "constants.execModeAllowLabel": "모두 허용",
   "constants.execModeAllowDesc": "하드 차단 밖 도구는 자동 허용하고 허용 디렉터리 밖 접근은 별도 승인",
+
+  // REASONING_EFFORT_STEPS
+  "constants.reasoningEffortLow": "낮음",
+  "constants.reasoningEffortMedium": "보통",
+  "constants.reasoningEffortHigh": "높음",
+  "constants.reasoningEffortMax": "최대",
 };

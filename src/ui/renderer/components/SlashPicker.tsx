@@ -71,7 +71,7 @@ export function SlashPicker({
             </Button>
           </PopoverTrigger>
         </TooltipTrigger>
-        <TooltipContent side="top">Ctrl/Cmd + K</TooltipContent>
+        <TooltipContent side="top">{t("commandPopover.shortcutHint")}</TooltipContent>
       </Tooltip>
 
       {open && (

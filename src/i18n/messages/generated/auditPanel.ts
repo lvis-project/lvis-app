@@ -1,6 +1,8 @@
 // AUTO-GENERATED — i18n migration. Source: src/ui/renderer/components/permissions/AuditPanel.tsx. Do not edit by hand.
 export const en = {
   "auditPanel.title": "Permission Audit Log",
+  "auditPanel.panelAriaLabel": "Permission audit panel",
+  "auditPanel.closeAriaLabel": "Close audit panel",
   "auditPanel.reVerifyButton": "Re-verify",
   "auditPanel.filterDecisionLabel": "Decision",
   "auditPanel.filterAll": "All",
@@ -18,6 +20,8 @@ export const en = {
 } as const;
 export const ko: Record<keyof typeof en, string> = {
   "auditPanel.title": "권한 감사 로그",
+  "auditPanel.panelAriaLabel": "권한 감사 패널",
+  "auditPanel.closeAriaLabel": "권한 감사 패널 닫기",
   "auditPanel.reVerifyButton": "다시 검증",
   "auditPanel.filterDecisionLabel": "결정",
   "auditPanel.filterAll": "전체",

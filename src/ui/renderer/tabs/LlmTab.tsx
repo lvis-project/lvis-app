@@ -479,7 +479,7 @@ export function LlmTab(props: LlmTabProps) {
             {vendor !== "vertex-ai" && (vendorInfo.needsBaseUrl || vendor === "openai" || vendor === "copilot") && (
               <div className="space-y-2">
                 <Label className="text-sm font-medium">
-                  Endpoint (baseUrl){vendorInfo.needsBaseUrl ? " *" : ` (${t("llmTab.optional")})`}
+                  {t("llmTab.endpointBaseUrlLabel")}{vendorInfo.needsBaseUrl ? " *" : ` (${t("llmTab.optional")})`}
                 </Label>
                 <Input
                   data-testid="llm-base-url-input"
@@ -507,13 +507,13 @@ export function LlmTab(props: LlmTabProps) {
             )}
             {vendor === "vertex-ai" && (
               <div className="space-y-2 rounded-md border p-3">
-                <p className="text-sm font-medium">Google Vertex AI</p>
+                <p className="text-sm font-medium">{t("llmTab.vertexTitle")}</p>
                 <p className="text-[11px] text-muted-foreground">
                   {t("llmTab.vertexAuthDesc1")}<code>gcloud auth application-default login</code>{t("llmTab.vertexAuthDesc2")}
                   {t("llmTab.vertexAuthDesc3")}<code>GOOGLE_APPLICATION_CREDENTIALS</code>{t("llmTab.vertexAuthDesc4")}
                 </p>
                 <div className="space-y-1">
-                  <Label className="text-xs text-muted-foreground">GCP Project ID *</Label>
+                  <Label className="text-xs text-muted-foreground">{t("llmTab.gcpProjectIdLabel")}</Label>
                   <Input
                     value={vertexProject}
                     onChange={(e) => setVertexProject(e.target.value)}
@@ -522,7 +522,9 @@ export function LlmTab(props: LlmTabProps) {
                   />
                 </div>
                 <div className="space-y-1">
-                  <Label className="text-xs text-muted-foreground">Location (region) — {t("llmTab.optional")}</Label>
+                  <Label className="text-xs text-muted-foreground">
+                    {t("llmTab.vertexLocationLabel", { optional: t("llmTab.optional") })}
+                  </Label>
                   <Input
                     value={vertexLocation}
                     onChange={(e) => setVertexLocation(e.target.value)}
@@ -648,7 +650,7 @@ export function LlmTab(props: LlmTabProps) {
 
       {/* Section B — Extended Thinking / Reasoning */}
       <SettingsSection
-        title="Extended Thinking / Reasoning"
+        title={t("llmTab.thinkingTitle")}
         badge={<ImmediateBadge />}
         actions={
           <Switch
@@ -657,7 +659,7 @@ export function LlmTab(props: LlmTabProps) {
               setEnableThinking(c);
               onImmediateChange?.();
             }}
-            aria-label="Extended Thinking / Reasoning"
+            aria-label={t("llmTab.thinkingTitle")}
           />
         }
         id="llm-thinking"
@@ -670,10 +672,12 @@ export function LlmTab(props: LlmTabProps) {
           {enableThinking && (
             <div className="space-y-2">
               <div className="flex items-center justify-between">
-                <Label className="text-xs text-muted-foreground">Reasoning Effort</Label>
+                <Label className="text-xs text-muted-foreground">{t("llmTab.reasoningEffortLabel")}</Label>
                 <span className="text-xs font-medium tabular-nums">
                   {REASONING_EFFORT_STEPS[budgetToEffortIndex(thinkingBudget)]!.label}
-                  <span className="ml-2 text-muted-foreground">· {thinkingBudget.toLocaleString()} tokens</span>
+                  <span className="ml-2 text-muted-foreground">
+                    · {t("llmTab.reasoningBudgetTokens", { count: thinkingBudget.toLocaleString() })}
+                  </span>
                 </span>
               </div>
               <Slider
@@ -685,7 +689,7 @@ export function LlmTab(props: LlmTabProps) {
                   setThinkingBudget(REASONING_EFFORT_STEPS[value ?? 0]!.budget);
                   onImmediateChange?.();
                 }}
-                aria-label="Reasoning effort"
+                aria-label={t("llmTab.reasoningEffortAriaLabel")}
               />
               <div className="flex justify-between text-[10px] text-muted-foreground">
                 {REASONING_EFFORT_STEPS.map((s) => (

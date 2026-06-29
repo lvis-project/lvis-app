@@ -1,5 +1,13 @@
 // AUTO-GENERATED — i18n migration. Source: src/ui/renderer/components/FileEditDiff.tsx. Do not edit by hand.
 export const en = {
+  "fileEditDiff.verbEdit": "Edit",
+  "fileEditDiff.verbPatch": "Patch",
+  "fileEditDiff.verbWrite": "Write",
+  "fileEditDiff.verbCreate": "Create",
+  "fileEditDiff.addedLinesAriaLabel": "Added {count} lines",
+  "fileEditDiff.removedLinesAriaLabel": "Removed {count} lines",
+  "fileEditDiff.truncatedLabel": "truncated",
+  "fileEditDiff.nextHunk": "next hunk",
   "fileEditDiff.truncatedTitle": "Long file preview has been truncated",
   "fileEditDiff.noChanges": "No changes.",
   "fileEditDiff.diffFileLost": "Diff file has been lost (unavailable after session restart).",
@@ -12,6 +20,14 @@ export const en = {
   "fileEditDiff.viewFullDiff": "View full diff",
 } as const;
 export const ko: Record<keyof typeof en, string> = {
+  "fileEditDiff.verbEdit": "수정",
+  "fileEditDiff.verbPatch": "패치",
+  "fileEditDiff.verbWrite": "쓰기",
+  "fileEditDiff.verbCreate": "생성",
+  "fileEditDiff.addedLinesAriaLabel": "{count}줄 추가",
+  "fileEditDiff.removedLinesAriaLabel": "{count}줄 삭제",
+  "fileEditDiff.truncatedLabel": "잘림",
+  "fileEditDiff.nextHunk": "다음 hunk",
   "fileEditDiff.truncatedTitle": "긴 파일은 미리보기가 잘렸습니다",
   "fileEditDiff.noChanges": "변경된 내용 없음.",
   "fileEditDiff.diffFileLost": "diff 파일이 소실되었습니다 (세션 재시작 후 불가).",

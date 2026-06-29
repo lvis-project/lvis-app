@@ -23,7 +23,12 @@ describe("locale", () => {
   it("isLocale only accepts supported codes", () => {
     expect(isLocale("en")).toBe(true);
     expect(isLocale("ko")).toBe(true);
-    expect(isLocale("fr")).toBe(false);
+    expect(isLocale("ja")).toBe(true);
+    expect(isLocale("zh")).toBe(true);
+    expect(isLocale("es")).toBe(true);
+    expect(isLocale("fr")).toBe(true);
+    expect(isLocale("de")).toBe(true);
+    expect(isLocale("it")).toBe(false);
     expect(isLocale(null)).toBe(false);
   });
 
@@ -31,6 +36,7 @@ describe("locale", () => {
     expect(normalizeLocale("en-US")).toBe("en");
     expect(normalizeLocale("ko_KR")).toBe("ko");
     expect(normalizeLocale("KO")).toBe("ko");
+    expect(normalizeLocale("fr-FR")).toBe("fr");
     expect(normalizeLocale("xx")).toBe("en");
     expect(normalizeLocale(undefined)).toBe("en");
   });
@@ -39,8 +45,8 @@ describe("locale", () => {
     // Electron's getPreferredSystemLanguages() returns BCP-47 tags like these.
     expect(normalizeLocale("ko-KR")).toBe("ko");
     expect(normalizeLocale("en-GB")).toBe("en");
-    expect(normalizeLocale("zh-Hans-CN")).toBe("en"); // unsupported primary → English
-    expect(normalizeLocale("ja-JP")).toBe("en");       // unsupported primary → English
+    expect(normalizeLocale("zh-Hans-CN")).toBe("zh");
+    expect(normalizeLocale("ja-JP")).toBe("ja");
   });
 });
 
@@ -63,9 +69,13 @@ describe("translate", () => {
   it("returns the locale-specific string", () => {
     expect(translate("en", "common.cancel")).toBe("Cancel");
     expect(translate("ko", "common.cancel")).toBe("취소");
+    expect(translate("ja", "common.cancel")).toBe("キャンセル");
+    expect(translate("fr", "common.cancel")).toBe("Annuler");
   });
 
   it("falls back to English then to the key on a miss", () => {
+    expect(translate("ja", "settings.appearance.language.saved")).toBe("言語を更新しました。");
+    expect(translate("ja", "chatTab.streamSmoothingTitle")).toBe("Stream Smoothing");
     // A key absent everywhere returns itself (debuggable, not blank).
     expect(translate("ko", "totally.unknown.key")).toBe("totally.unknown.key");
   });
@@ -83,5 +93,7 @@ describe("runtime t()", () => {
   it("normalizes the locale passed to setLocale", () => {
     setLocale("ko-KR");
     expect(getLocale()).toBe("ko");
+    setLocale("de-DE");
+    expect(getLocale()).toBe("de");
   });
 });
