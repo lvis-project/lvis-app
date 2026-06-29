@@ -12,7 +12,7 @@ import { useTranslation } from "../../i18n/react.js";
  * The search / star / export controls + the collapse toggle no longer live
  * here — they moved into the floating sidebar's CLUSTER STRIP next to the
  * traffic lights (see Sidebar.tsx). This band now hosts only the right-aligned
- * controls: the app-update badge, the Dev badge, and the Chat/Action mode
+ * controls: the app-update badge, the Dev badge, and the Chat/Work mode
  * toggle.
  */
 function NoDrag({ children, className }: { children: React.ReactNode; className?: string }) {
@@ -47,11 +47,11 @@ export type AppUpdateBadgeState = UpdateState;
 
 /**
  * Workspace mode. MainToolbar owns this type because it hosts the toggle UI;
- * App.tsx imports it. "action" (default) renders built-in + plugin views
+ * App.tsx imports it. "work" (default) renders built-in + plugin views
  * inline in the main area with the sidebar expanded; "chat" pops detachable
  * views into separate windows so the main area stays the chat.
  */
-export type AppMode = "chat" | "action";
+export type AppMode = "chat" | "work";
 
 /**
  * Dev mode 감지 — preload (`src/preload.ts`) 가 `window.__lvisDevMode` 를
@@ -68,9 +68,9 @@ export interface MainToolbarProps {
   activeView: string;
   streaming: boolean;
   hasApiKey: boolean | null;
-  /** Current workspace mode (Chat / Action). Drives the segmented toggle. */
+  /** Current workspace mode (Chat / Work). Drives the segmented toggle. */
   appMode: AppMode;
-  /** Fired when the user picks a segment in the Chat/Action toggle. */
+  /** Fired when the user picks a segment in the Chat/Work toggle. */
   onToggleAppMode: (mode: AppMode) => void;
   /** Dev mode 만 사용 — clicking the wrench opens the floating DevToolsPanel. */
   onOpenDevTools?: () => void;
@@ -155,8 +155,8 @@ export function MainToolbar({
         </NoDrag>
       )}
 
-      {/* ── Workspace mode (Chat / Action) — pinned to the FAR-RIGHT end of the
-          top bar. Action keeps views inline (sidebar expanded); Chat pops
+      {/* ── Workspace mode (Chat / Work) — pinned to the FAR-RIGHT end of the
+          top bar. Work keeps views inline (sidebar expanded); Chat pops
           detachable views into windows. */}
       <NoDrag>
         <AppModeToggle mode={appMode} onToggle={onToggleAppMode} />
@@ -166,7 +166,7 @@ export function MainToolbar({
 }
 
 /**
- * Workspace mode segmented control — two compact segments ("채팅" / "액션").
+ * Workspace mode segmented control — two compact segments ("채팅" / "업무").
  * The active segment is filled (`bg-primary` / `text-primary-foreground`); the
  * inactive segment is muted with an accent hover. Token classes only.
  */
@@ -200,7 +200,7 @@ function AppModeToggle({ mode, onToggle }: { mode: AppMode; onToggle: (mode: App
       data-testid="app-mode-toggle"
     >
       {segment("chat", t("appMode.chat"), t("appMode.chatAriaLabel"))}
-      {segment("action", t("appMode.action"), t("appMode.actionAriaLabel"))}
+      {segment("work", t("appMode.work"), t("appMode.workAriaLabel"))}
     </div>
   );
 }

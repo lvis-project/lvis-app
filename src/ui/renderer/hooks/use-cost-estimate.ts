@@ -5,6 +5,7 @@ import {
   computeCost,
   lookupBillablePricingOptional,
   lookupPricing,
+  toPricingVendor,
   type ModelPricing,
   type PricingVendor,
 } from "../../../shared/pricing-data.js";
@@ -113,21 +114,6 @@ export function useCostEstimate(params: {
   }, [costEstimate.pricingKnown, costEstimate.total]);
 
   return { costEstimate, costBadgeClass };
-}
-
-const PRICING_VENDORS = new Set<PricingVendor>([
-  "claude",
-  "openai",
-  "gemini",
-  "copilot",
-  "azure-foundry",
-  "vertex-ai",
-]);
-
-function toPricingVendor(vendor: string): PricingVendor {
-  return PRICING_VENDORS.has(vendor as PricingVendor)
-    ? vendor as PricingVendor
-    : "openai";
 }
 
 function computeEstimatedCost(

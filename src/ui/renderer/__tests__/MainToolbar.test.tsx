@@ -9,7 +9,7 @@ function defaultProps(overrides: Partial<Parameters<typeof MainToolbar>[0]> = {}
     activeView: "home",
     streaming: false,
     hasApiKey: true as boolean | null,
-    appMode: "action" as const,
+    appMode: "work" as const,
     onToggleAppMode: vi.fn(),
     ...overrides,
   };
@@ -25,7 +25,7 @@ function renderWithProvider(props: Parameters<typeof MainToolbar>[0]) {
 
 describe("MainToolbar", () => {
   // The band now hosts ONLY the right-aligned controls (app-update badge, Dev
-  // badge, Chat/Action mode toggle). The search / star / export controls + the
+  // badge, Chat/Work mode toggle). The search / star / export controls + the
   // collapse toggle moved into the floating sidebar's cluster strip next to the
   // traffic lights (see Sidebar.tsx / Sidebar tests).
   it("no longer renders a hamburger / more-menu trigger", () => {
@@ -55,11 +55,13 @@ describe("MainToolbar", () => {
     expect(screen.queryByTestId("sidebar-collapse-toggle")).toBeNull();
   });
 
-  // The Chat/Action mode toggle stays on the band, wired to appMode.
-  it("renders the Chat/Action mode toggle and fires onToggleAppMode", () => {
+  // The Chat/Work mode toggle stays on the band, wired to appMode.
+  it("renders the Chat/Work mode toggle and fires onToggleAppMode", () => {
     const onToggleAppMode = vi.fn();
-    renderWithProvider(defaultProps({ appMode: "action", onToggleAppMode }));
+    renderWithProvider(defaultProps({ appMode: "work", onToggleAppMode }));
     expect(screen.getByTestId("app-mode-toggle")).toBeTruthy();
+    expect(screen.getByText("업무")).toBeTruthy();
+    expect(screen.queryByText("액션")).toBeNull();
     fireEvent.click(screen.getByTestId("app-mode-chat"));
     expect(onToggleAppMode).toHaveBeenCalledWith("chat");
   });
