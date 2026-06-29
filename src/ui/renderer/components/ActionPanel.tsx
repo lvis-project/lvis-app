@@ -1,0 +1,391 @@
+import {
+  Boxes,
+  Cable,
+  FilePenLine,
+  FileText,
+  Globe2,
+  PanelRightClose,
+  PanelRightOpen,
+  Sparkles,
+  Wrench,
+  type LucideIcon,
+} from "lucide-react";
+import { type ReactNode } from "react";
+import { useTranslation } from "../../../i18n/react.js";
+import { Button } from "../../../components/ui/button.js";
+import { Tooltip, TooltipContent, TooltipTrigger } from "../../../components/ui/tooltip.js";
+
+export interface ActionPanelActivityItem {
+  id: string;
+  label: string;
+  detail?: string;
+  target?: string;
+  status?: "running" | "done" | "error";
+}
+
+export interface ActionPanelActivityState {
+  readFileCount: number;
+  writtenFileCount: number;
+  mcpCallCount: number;
+  pluginCallCount: number;
+  toolCallCount: number;
+  fetchedPageCount: number;
+  readFiles: ActionPanelActivityItem[];
+  writtenFiles: ActionPanelActivityItem[];
+  pluginCalls: ActionPanelActivityItem[];
+  mcpCalls: ActionPanelActivityItem[];
+  fetchedPages: ActionPanelActivityItem[];
+}
+
+export interface ActionPanelProps {
+  open: boolean;
+  onOpenChange: (open: boolean) => void;
+  activity: ActionPanelActivityState;
+  onOpenExternalUrl?: (url: string) => void;
+}
+
+const ACTIVITY_PREVIEW_LIMIT = 5;
+const INVOCATION_PREVIEW_LIMIT = 10;
+
+function statusClass(status: ActionPanelActivityItem["status"]): string {
+  switch (status) {
+    case "running":
+      return "bg-warning/(--opacity-faint) text-warning";
+    case "error":
+      return "bg-destructive/(--opacity-faint) text-destructive";
+    case "done":
+      return "bg-success/(--opacity-faint) text-success";
+    default:
+      return "bg-muted text-muted-foreground";
+  }
+}
+
+function statusLabel(status: ActionPanelActivityItem["status"], t: ReturnType<typeof useTranslation>["t"]): string {
+  if (status === "running") return t("actionPanel.status.running");
+  if (status === "error") return t("actionPanel.status.error");
+  if (status === "done") return t("actionPanel.status.done");
+  return "";
+}
+
+function ActivitySection({
+  title,
+  icon: Icon,
+  items,
+  onOpenItem,
+  web = false,
+}: {
+  title: string;
+  icon: LucideIcon;
+  items: ActionPanelActivityItem[];
+  onOpenItem?: (target: string) => void;
+  web?: boolean;
+}) {
+  const { t } = useTranslation();
+  const visibleItems = items.slice(0, ACTIVITY_PREVIEW_LIMIT);
+  if (visibleItems.length === 0) return null;
+
+  return (
+    <section className="border-t border-border px-3 py-2.5">
+      <div className="mb-1.5 flex min-w-0 items-center justify-between gap-2">
+        <div className="flex min-w-0 items-center gap-2">
+          <Icon className="h-3.5 w-3.5 shrink-0 text-primary" aria-hidden="true" />
+          <h3 className="truncate text-[11px] font-semibold uppercase tracking-normal text-muted-foreground">
+            {title}
+          </h3>
+        </div>
+        <span className="shrink-0 rounded-full bg-muted px-1.5 py-0.5 text-[10px] font-medium tabular-nums text-muted-foreground">
+          {visibleItems.length}
+        </span>
+      </div>
+      <ul className="space-y-1">
+        {visibleItems.map((item) => {
+          const label = statusLabel(item.status, t);
+          const titleText = item.detail ? `${item.label}\n${item.detail}` : item.label;
+          const rowContent = (
+            <>
+              {web ? (
+                <Globe2 className="mt-0.5 h-3.5 w-3.5 shrink-0 text-muted-foreground" aria-hidden="true" />
+              ) : (
+                <Icon className="mt-0.5 h-3.5 w-3.5 shrink-0 text-muted-foreground" aria-hidden="true" />
+              )}
+              <span className="min-w-0 flex-1">
+                <span className="block truncate leading-4 text-foreground">{item.label}</span>
+                {!web && item.detail && (
+                  <span className="block truncate text-[10px] leading-4 text-muted-foreground">
+                    {item.detail}
+                  </span>
+                )}
+              </span>
+              {label && (
+                <span className={`mt-0.5 shrink-0 rounded px-1.5 py-0.5 text-[10px] ${statusClass(item.status)}`}>
+                  {label}
+                </span>
+              )}
+            </>
+          );
+          return (
+            <li key={item.id}>
+              {item.target && onOpenItem ? (
+                <button
+                  type="button"
+                  className="flex w-full min-w-0 items-start gap-2 rounded-md bg-muted/(--opacity-faint) px-2 py-1.5 text-left text-xs hover:bg-accent focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+                  data-testid={`action-panel-activity-${item.id}`}
+                  title={titleText}
+                  onClick={() => onOpenItem(item.target!)}
+                >
+                  {rowContent}
+                </button>
+              ) : (
+                <div
+                  className="flex min-w-0 items-start gap-2 rounded-md bg-muted/(--opacity-faint) px-2 py-1.5 text-xs"
+                  data-testid={`action-panel-activity-${item.id}`}
+                  title={titleText}
+                >
+                  {rowContent}
+                </div>
+              )}
+            </li>
+          );
+        })}
+      </ul>
+    </section>
+  );
+}
+
+interface ActivityStat {
+  icon: LucideIcon;
+  label: string;
+  count: number;
+}
+
+function DashboardStat({
+  icon: Icon,
+  label,
+  count,
+}: ActivityStat) {
+  return (
+    <div className="min-w-0 bg-card px-1.5 py-1">
+      <div className="flex items-center justify-center gap-1">
+        <Icon className="h-2.5 w-2.5 shrink-0 text-muted-foreground" aria-hidden="true" />
+        <span className="font-mono text-[10px] font-medium tabular-nums">{count}</span>
+      </div>
+      <span className="mt-0.5 block truncate text-center text-[8px] leading-3 text-muted-foreground">
+        {label}
+      </span>
+    </div>
+  );
+}
+
+function StatsDashboard({ stats }: { stats: ActivityStat[] }) {
+  if (stats.length === 0) return null;
+  return (
+    <div className="shrink-0 border-b border-border px-3 py-1.5">
+      <div className="grid grid-cols-6 gap-px overflow-hidden rounded-md border border-border bg-border">
+        {stats.map((stat) => (
+          <DashboardStat key={stat.label} icon={stat.icon} label={stat.label} count={stat.count} />
+        ))}
+      </div>
+    </div>
+  );
+}
+
+function CompactDashboardStat({
+  icon: Icon,
+  label,
+}: ActivityStat) {
+  return (
+    <Tooltip>
+      <TooltipTrigger asChild>
+        <div
+          className="flex h-7 w-7 items-center justify-center rounded-md bg-muted/(--opacity-faint) text-muted-foreground hover:bg-accent hover:text-foreground"
+          aria-label={label}
+        >
+          <Icon className="h-3.5 w-3.5" aria-hidden="true" />
+        </div>
+      </TooltipTrigger>
+      <TooltipContent side="left">{label}</TooltipContent>
+    </Tooltip>
+  );
+}
+
+function InvocationIconStrip({
+  title,
+  icon: Icon,
+  items,
+}: {
+  title: string;
+  icon: LucideIcon;
+  items: ActionPanelActivityItem[];
+}) {
+  const visibleItems = items.slice(0, INVOCATION_PREVIEW_LIMIT);
+  if (visibleItems.length === 0) return null;
+  return (
+    <section className="border-t border-border px-3 py-2.5">
+      <div className="mb-1.5 flex min-w-0 items-center justify-between gap-2">
+        <div className="flex min-w-0 items-center gap-2">
+          <Icon className="h-3.5 w-3.5 shrink-0 text-primary" aria-hidden="true" />
+          <h3 className="truncate text-[11px] font-semibold uppercase tracking-normal text-muted-foreground">
+            {title}
+          </h3>
+        </div>
+        <span className="shrink-0 rounded-full bg-muted px-1.5 py-0.5 text-[10px] font-medium tabular-nums text-muted-foreground">
+          {visibleItems.length}
+        </span>
+      </div>
+      <div className="grid grid-cols-5 gap-1.5" data-testid={`action-panel-icon-strip-${title}`}>
+        {visibleItems.map((item) => (
+          <Tooltip key={item.id}>
+            <TooltipTrigger asChild>
+              <div
+                className="flex h-8 min-w-0 items-center justify-center rounded-md bg-muted/(--opacity-faint) text-muted-foreground hover:bg-accent hover:text-foreground"
+                title={item.detail ? `${item.label}\n${item.detail}` : item.label}
+              >
+                <Icon className="h-3.5 w-3.5" aria-hidden="true" />
+              </div>
+            </TooltipTrigger>
+            <TooltipContent side="bottom">
+              <div className="max-w-56">
+                <div className="truncate font-medium">{item.label}</div>
+                {item.detail ? <div className="truncate text-muted-foreground">{item.detail}</div> : null}
+              </div>
+            </TooltipContent>
+          </Tooltip>
+        ))}
+      </div>
+    </section>
+  );
+}
+
+function FloatingPanel({ children }: { children: ReactNode }) {
+  const { t } = useTranslation();
+
+  return (
+    <aside
+      aria-label={t("actionPanel.title")}
+      className="absolute right-3 top-3 z-40 flex w-[23rem] max-w-[calc(100vw-2rem)] flex-col overflow-hidden rounded-xl border border-border bg-card/(--opacity-solid) text-card-foreground shadow-2xl backdrop-blur"
+      data-testid="action-panel"
+      style={{ maxHeight: "min(34rem, calc(100vh - 7rem))" }}
+    >
+      {children}
+    </aside>
+  );
+}
+
+export function ActionPanel({
+  open,
+  onOpenChange,
+  activity,
+  onOpenExternalUrl,
+}: ActionPanelProps) {
+  const { t } = useTranslation();
+  const allStats = [
+    { icon: Wrench, label: t("actionPanel.toolCallsTitle"), count: activity.toolCallCount },
+    { icon: Boxes, label: t("actionPanel.pluginCallsTitle"), count: activity.pluginCallCount },
+    { icon: Cable, label: t("actionPanel.mcpCallsTitle"), count: activity.mcpCallCount },
+    { icon: FileText, label: t("actionPanel.readFilesTitle"), count: activity.readFileCount },
+    { icon: FilePenLine, label: t("actionPanel.writtenFilesTitle"), count: activity.writtenFileCount },
+    { icon: Globe2, label: t("actionPanel.fetchedPagesTitle"), count: activity.fetchedPageCount },
+  ];
+  const populatedStats = allStats.filter((stat) => stat.count > 0);
+
+  if (!open) {
+    return (
+      <aside
+        aria-label={t("actionPanel.title")}
+        className="absolute right-3 top-3 z-40"
+        data-testid="action-panel-rail"
+      >
+        <div
+          className="flex w-11 max-w-[calc(100vw-2rem)] flex-col items-center gap-1.5 rounded-xl border border-border bg-card/(--opacity-solid) p-1.5 text-card-foreground shadow-xl backdrop-blur"
+          data-testid="action-panel-summary"
+        >
+          <Tooltip>
+            <TooltipTrigger asChild>
+              <Button
+                type="button"
+                variant="secondary"
+                size="icon"
+                className="h-8 w-8 shrink-0 rounded-lg border border-border bg-card"
+                aria-label={t("actionPanel.openAriaLabel")}
+                aria-expanded={false}
+                data-testid="action-panel-open"
+                onClick={() => onOpenChange(true)}
+              >
+                <PanelRightOpen className="h-4 w-4" />
+              </Button>
+            </TooltipTrigger>
+            <TooltipContent side="left">{t("actionPanel.openTooltip")}</TooltipContent>
+          </Tooltip>
+          <div className="flex min-w-0 flex-col items-center gap-1" data-testid="action-panel-summary-list">
+            {populatedStats.map((stat) => (
+              <CompactDashboardStat key={stat.label} icon={stat.icon} label={stat.label} count={stat.count} />
+            ))}
+          </div>
+        </div>
+      </aside>
+    );
+  }
+
+  return (
+    <FloatingPanel>
+      <div className="flex h-12 shrink-0 items-center justify-between gap-2 border-b border-border px-4">
+        <div className="flex min-w-0 items-center gap-2">
+          <Sparkles className="h-4 w-4 shrink-0 text-primary" aria-hidden="true" />
+          <div className="min-w-0">
+            <h2 className="truncate text-sm font-semibold leading-5">{t("actionPanel.title")}</h2>
+            <p className="truncate text-[11px] leading-4 text-muted-foreground">{t("actionPanel.subtitle")}</p>
+          </div>
+        </div>
+        <Tooltip>
+          <TooltipTrigger asChild>
+            <Button
+              type="button"
+              variant="ghost"
+              size="icon"
+              className="h-8 w-8 shrink-0"
+              aria-label={t("actionPanel.closeAriaLabel")}
+              aria-expanded={true}
+              data-testid="action-panel-close"
+              onClick={() => onOpenChange(false)}
+            >
+              <PanelRightClose className="h-4 w-4" />
+            </Button>
+          </TooltipTrigger>
+          <TooltipContent side="left">{t("actionPanel.closeTooltip")}</TooltipContent>
+        </Tooltip>
+      </div>
+
+      <StatsDashboard stats={allStats} />
+
+      <div className="min-h-0 flex-1 overflow-y-auto">
+        <InvocationIconStrip
+          title={t("actionPanel.pluginCallsTitle")}
+          icon={Boxes}
+          items={activity.pluginCalls}
+        />
+        <InvocationIconStrip
+          title={t("actionPanel.mcpCallsTitle")}
+          icon={Cable}
+          items={activity.mcpCalls}
+        />
+        <ActivitySection
+          title={t("actionPanel.readFilesTitle")}
+          icon={FileText}
+          items={activity.readFiles}
+        />
+        <ActivitySection
+          title={t("actionPanel.writtenFilesTitle")}
+          icon={FilePenLine}
+          items={activity.writtenFiles}
+        />
+        <ActivitySection
+          title={t("actionPanel.fetchedPagesTitle")}
+          icon={Globe2}
+          items={activity.fetchedPages}
+          onOpenItem={onOpenExternalUrl}
+          web
+        />
+      </div>
+    </FloatingPanel>
+  );
+}

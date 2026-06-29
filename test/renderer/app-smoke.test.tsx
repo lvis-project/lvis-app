@@ -6,7 +6,9 @@
  */
 import "./setup.js";
 import { describe, it, expect, vi, afterEach } from "vitest";
-import { act, fireEvent, waitFor } from "@testing-library/react";
+import { act, fireEvent, render, waitFor } from "@testing-library/react";
+import { TooltipProvider } from "../../src/components/ui/tooltip.js";
+import { ActionPanel } from "../../src/ui/renderer/components/ActionPanel.js";
 import { renderApp } from "./render-app.js";
 
 describe("App smoke (Phase 1 infra)", () => {
@@ -88,6 +90,116 @@ describe("App smoke (Phase 1 infra)", () => {
     expect(api.addStarred).toHaveBeenCalledWith(entry);
     const list = await api.listStarred();
     expect(Array.isArray(list)).toBe(true);
+  });
+
+  it("renders a closable right action panel", async () => {
+    const { container, api } = await renderApp();
+    await waitFor(() => expect(api.getSettings).toHaveBeenCalled());
+
+    expect(container.querySelector('[data-testid="action-panel"]')).toBeTruthy();
+    expect(container.textContent).toContain("도구 활동");
+    expect(container.textContent).toContain("카테고리별 최신 5개");
+    expect(container.querySelector('[role="tablist"]')).toBeFalsy();
+
+    await act(async () => {
+      fireEvent.click(container.querySelector('[data-testid="action-panel-close"]')!);
+    });
+
+    expect(container.querySelector('[data-testid="action-panel"]')).toBeFalsy();
+    expect(container.querySelector('[data-testid="action-panel-rail"]')).toBeTruthy();
+    expect(container.querySelector('[data-testid="action-panel-summary"]')).toBeTruthy();
+    expect(container.querySelector('[data-testid="action-panel-summary-list"]')?.className).toContain("flex-col");
+    expect(container.querySelector('[data-testid="action-panel-summary"]')?.textContent?.trim()).toBe("");
+    expect(container.textContent).not.toContain("아직 읽은 파일이 없습니다.");
+
+    await act(async () => {
+      fireEvent.click(container.querySelector('[data-testid="action-panel-open"]')!);
+    });
+
+    expect(container.querySelector('[data-testid="action-panel"]')).toBeTruthy();
+  });
+
+  it("does not duplicate primary sidebar navigation in the right action panel", async () => {
+    const { container, api } = await renderApp();
+    await waitFor(() => expect(api.getSettings).toHaveBeenCalled());
+
+    expect(container.textContent).not.toContain("최근 세션");
+    expect(container.textContent).not.toContain("연결된 액션");
+    expect(container.textContent).not.toContain("플러그인 뷰");
+    expect(container.textContent).not.toContain("워크 보드");
+  });
+
+  it("keeps expanded action panel counters visible while hiding empty detail rows", async () => {
+    const { container, api } = await renderApp();
+    await waitFor(() => expect(api.getSettings).toHaveBeenCalled());
+
+    expect(container.textContent).toContain("읽은 파일");
+    expect(container.textContent).toContain("쓴 파일");
+    expect(container.textContent).toContain("MCP 호출");
+    expect(container.textContent).toContain("플러그인 호출");
+    expect(container.textContent).toContain("도구 호출");
+    expect(container.textContent).toContain("웹 출처");
+    expect(container.textContent).not.toContain("아직 읽은 파일이 없습니다.");
+    expect(container.querySelector('[data-testid^="action-panel-activity-"]')).toBeFalsy();
+  });
+
+  it("surfaces populated action panel activity and only opens URL targets", () => {
+    const readFiles = Array.from({ length: 6 }, (_, index) => ({
+      id: `read-${index}`,
+      label: `latest-read-${index}`,
+      target: `C:\\tmp\\latest-read-${index}.md`,
+    }));
+    const openUrl = vi.fn();
+    const { container } = render(
+      <TooltipProvider>
+        <ActionPanel
+          open
+          onOpenChange={vi.fn()}
+          onOpenExternalUrl={openUrl}
+          activity={{
+            readFileCount: readFiles.length,
+            writtenFileCount: 1,
+            mcpCallCount: 1,
+            pluginCallCount: 1,
+            toolCallCount: 4,
+            fetchedPageCount: 1,
+            readFiles,
+            writtenFiles: [{
+              id: "write-1",
+              label: "C:\\tmp\\written.md",
+              target: "C:\\tmp\\written.md",
+            }],
+            pluginCalls: [{ id: "plugin-1", label: "plugin_tool", detail: "plugin-a" }],
+            mcpCalls: [{ id: "mcp-1", label: "mcp_tool", detail: "server-a" }],
+            fetchedPages: [{
+              id: "web-1",
+              label: "https://example.com",
+              detail: "https://example.com/full/path?q=1",
+              target: "https://example.com/full/path?q=1",
+            }],
+          }}
+        />
+      </TooltipProvider>,
+    );
+
+    expect(container.textContent).toContain("읽은 파일");
+    expect(container.textContent).toContain("쓴 파일");
+    expect(container.textContent).toContain("MCP 호출");
+    expect(container.textContent).toContain("플러그인 호출");
+    expect(container.textContent).toContain("도구 호출");
+    expect(container.textContent).toContain("웹 출처");
+    expect(container.textContent).toContain("latest-read-0");
+    expect(container.textContent).toContain("latest-read-4");
+    expect(container.textContent).not.toContain("latest-read-5");
+    expect(container.textContent).toContain("https://example.com");
+    expect(container.textContent).not.toContain("/full/path");
+
+    const readRow = container.querySelector('[data-testid="action-panel-activity-read-0"]')!;
+    expect(readRow.tagName).toBe("DIV");
+    fireEvent.click(readRow);
+    expect(openUrl).not.toHaveBeenCalled();
+    fireEvent.click(container.querySelector('[data-testid="action-panel-activity-web-1"]')!);
+    expect(openUrl).toHaveBeenCalledWith("https://example.com/full/path?q=1");
   });
 });
 

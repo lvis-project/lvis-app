@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useMemo, useReducer, useRef, useState } from "react";
 import { useTranslation } from "../../i18n/react.js";
 import { debugLog, isDebugStreamEnabled } from "../../lib/debug-stream.js";
+import type { ChatEntry, ToolEntryItem } from "../../lib/chat-stream-state.js";
 import {
   composeImportedTriggerOutgoing,
   composeOutgoing as composeOutgoingUtil,
@@ -37,6 +38,11 @@ import { DEFAULT_APP_MODE, normalizeAppMode } from "../../shared/initial-app-mod
 import { Sidebar } from "./components/Sidebar.js";
 import { useAppUpdate } from "./hooks/use-app-update.js";
 import { DevToolsPanel } from "./components/DevToolsPanel.js";
+import {
+  ActionPanel,
+  type ActionPanelActivityItem,
+  type ActionPanelActivityState,
+} from "./components/ActionPanel.js";
 import { MainContent } from "./MainContent.js";
 import { useStatusBar, type NotificationToastMeta } from "./hooks/use-status-bar.js";
 import { useSettings } from "./hooks/use-settings.js";
@@ -77,6 +83,133 @@ import { normalizeSettingsTab } from "../../shared/settings-tabs.js";
 // ─── App ────────────────────────────────────────────
 
 const SAFE_PLUGIN_AUTH_ERROR_CODE = /^[A-Za-z0-9][A-Za-z0-9._:-]{0,80}$/;
+const ACTION_PANEL_ACTIVITY_LIMIT = 5;
+const ACTION_PANEL_ICON_LIMIT = 10;
+const FILE_CHANGE_TOOL_NAMES = new Set(["edit_file", "apply_patch", "write_file"]);
+const READ_TOOL_PATTERN = /(^|[._:-])(read|open|cat|grep|rg|search|find|list|glob)([._:-]|$)/i;
+const TERMINAL_TOOL_PATTERN = /(^|[._:-])(shell|bash|cmd|powershell|terminal|exec|run)([._:-]|$)/i;
+const BROWSER_TOOL_PATTERN = /(browser|playwright|screenshot|chrome|viewport|open_url|web_page|web_fetch|fetch)/i;
+const ACTION_PANEL_PATH_KEYS = new Set([
+  "path",
+  "paths",
+  "file",
+  "files",
+  "filepath",
+  "filepaths",
+  "filename",
+  "filenames",
+  "target",
+  "targets",
+]);
+
+function isFileChangeTool(tool: ToolEntryItem): boolean {
+  return FILE_CHANGE_TOOL_NAMES.has(tool.name) || tool.category === "write";
+}
+
+function isReadTool(tool: ToolEntryItem): boolean {
+  return tool.category === "read" || READ_TOOL_PATTERN.test(tool.name);
+}
+
+function isTerminalTool(tool: ToolEntryItem): boolean {
+  return tool.category === "shell" || TERMINAL_TOOL_PATTERN.test(tool.name);
+}
+
+function isBrowserTool(tool: ToolEntryItem): boolean {
+  return tool.category === "network" || BROWSER_TOOL_PATTERN.test(tool.name);
+}
+
+function isPluginTool(tool: ToolEntryItem): boolean {
+  return tool.source === "plugin" || Boolean(tool.pluginId);
+}
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return Boolean(value) && typeof value === "object" && !Array.isArray(value);
+}
+
+function looksLikeUrl(value: string): boolean {
+  return /^https?:\/\//i.test(value.trim());
+}
+
+function looksLikeFilePath(value: string): boolean {
+  const trimmed = value.trim();
+  if (!trimmed || looksLikeUrl(trimmed)) return false;
+  return /^[A-Za-z]:[\\/]/.test(trimmed) ||
+    trimmed.startsWith("~/") ||
+    trimmed.startsWith("./") ||
+    trimmed.startsWith("../") ||
+    trimmed.includes("/") ||
+    trimmed.includes("\\") ||
+    /\.[A-Za-z0-9]{1,12}$/.test(trimmed);
+}
+
+function collectUrls(value: unknown, depth = 0): string[] {
+  if (depth > 4 || value == null) return [];
+  if (typeof value === "string") return looksLikeUrl(value) ? [value.trim()] : [];
+  if (Array.isArray(value)) return value.flatMap((item) => collectUrls(item, depth + 1));
+  if (!isRecord(value)) return [];
+  return Object.values(value).flatMap((item) => collectUrls(item, depth + 1));
+}
+
+function collectPathStrings(value: unknown, depth = 0): string[] {
+  if (depth > 4 || value == null) return [];
+  if (typeof value === "string") return looksLikeFilePath(value) ? [value.trim()] : [];
+  if (Array.isArray(value)) return value.flatMap((item) => collectPathStrings(item, depth + 1));
+  if (!isRecord(value)) return [];
+
+  const out: string[] = [];
+  for (const [key, child] of Object.entries(value)) {
+    const normalizedKey = key.toLowerCase();
+    if (ACTION_PANEL_PATH_KEYS.has(normalizedKey)) {
+      out.push(...collectPathStrings(child, depth + 1));
+    } else if (normalizedKey === "patch" && typeof child === "string") {
+      out.push(...extractPatchPaths(child));
+    } else if (depth < 2) {
+      out.push(...collectPathStrings(child, depth + 1));
+    }
+  }
+  return out;
+}
+
+function extractPatchPaths(patch: string): string[] {
+  const paths: string[] = [];
+  const pattern = /^\*\*\* (?:Add|Update|Delete) File: (.+)$/gm;
+  let match: RegExpExecArray | null;
+  while ((match = pattern.exec(patch)) !== null) {
+    const value = match[1]?.trim();
+    if (value) paths.push(value);
+  }
+  return paths;
+}
+
+function addUniqueActivity(
+  list: ActionPanelActivityItem[],
+  item: ActionPanelActivityItem,
+  limit = ACTION_PANEL_ACTIVITY_LIMIT,
+): void {
+  if (list.length >= limit) return;
+  const key = `${item.label}\u0000${item.detail ?? ""}`;
+  if (list.some((existing) => `${existing.label}\u0000${existing.detail ?? ""}` === key)) return;
+  list.push(item);
+}
+
+function formatToolSource(tool: ToolEntryItem): string {
+  const parts = [
+    tool.source && tool.source !== "builtin" ? tool.source : null,
+    tool.mcpServerId ? tool.mcpServerId : null,
+    tool.pluginId ? tool.pluginId : null,
+    tool.category ? tool.category : null,
+  ].filter((part): part is string => Boolean(part));
+  return parts.join(" · ");
+}
+
+function formatUrlOrigin(value: string): string {
+  try {
+    const url = new URL(value);
+    return url.origin;
+  } catch {
+    return value;
+  }
+}
 
 function stringField(value: unknown, key: "code" | "error" | "message"): string | null {
   if (!value || typeof value !== "object") return null;
@@ -284,6 +417,7 @@ export function App() {
   // the effect below): work expands it, chat collapses it — a per-transition
   // default, NOT a lock.
   const [sidebarCollapsed, setSidebarCollapsed] = useState(() => readInitialAppMode() === "chat");
+  const [actionPanelOpen, setActionPanelOpen] = useState(true);
   // Persist appMode to host settings and update local state. Guarded against
   // no-op writes (same mode) so a re-render or repeated toggle never fires a
   // redundant IPC write. Stable identity (useCallback with only `api`) so it is
@@ -1498,6 +1632,108 @@ export function App() {
     [pluginViews, handleNewChat, handleViewSelect, onOpenSettings],
   );
 
+  const actionPanelActivity = useMemo<ActionPanelActivityState>(() => {
+    const activity: ActionPanelActivityState = {
+      readFileCount: 0,
+      writtenFileCount: 0,
+      mcpCallCount: 0,
+      pluginCallCount: 0,
+      toolCallCount: 0,
+      fetchedPageCount: 0,
+      readFiles: [],
+      writtenFiles: [],
+      pluginCalls: [],
+      mcpCalls: [],
+      fetchedPages: [],
+    };
+    const visibleEntries = entries as ChatEntry[];
+    const readFileKeys = new Set<string>();
+    const writtenFileKeys = new Set<string>();
+    const fetchedPageKeys = new Set<string>();
+
+    for (let entryIndex = visibleEntries.length - 1; entryIndex >= 0; entryIndex -= 1) {
+      const entry = visibleEntries[entryIndex];
+      if (entry.kind !== "tool_group") continue;
+
+      for (let toolIndex = entry.tools.length - 1; toolIndex >= 0; toolIndex -= 1) {
+        const tool = entry.tools[toolIndex];
+        const source = formatToolSource(tool);
+        const sourceDetail = source || (isTerminalTool(tool) ? "terminal" : isBrowserTool(tool) ? "web" : undefined);
+
+        activity.toolCallCount += 1;
+        if (isPluginTool(tool)) {
+          activity.pluginCallCount += 1;
+          addUniqueActivity(activity.pluginCalls, {
+            id: `plugin:${tool.toolUseId}`,
+            label: tool.name,
+            detail: tool.pluginId ?? sourceDetail,
+            status: tool.status,
+          }, ACTION_PANEL_ICON_LIMIT);
+        }
+
+        if (tool.source === "mcp" || tool.mcpServerId) {
+          activity.mcpCallCount += 1;
+          addUniqueActivity(activity.mcpCalls, {
+            id: `mcp:${tool.toolUseId}`,
+            label: tool.name,
+            detail: tool.mcpServerId ?? sourceDetail,
+            status: tool.status,
+          }, ACTION_PANEL_ICON_LIMIT);
+        }
+
+        if (isBrowserTool(tool)) {
+          for (const url of new Set(collectUrls(tool.input))) {
+            if (!fetchedPageKeys.has(url)) {
+              fetchedPageKeys.add(url);
+              activity.fetchedPageCount += 1;
+            }
+            addUniqueActivity(activity.fetchedPages, {
+              id: `url:${tool.toolUseId}:${url}`,
+              label: formatUrlOrigin(url),
+              detail: url,
+              target: url,
+              status: tool.status,
+            });
+          }
+        }
+
+        if (isFileChangeTool(tool)) {
+          for (const path of new Set(collectPathStrings(tool.input))) {
+            if (!writtenFileKeys.has(path)) {
+              writtenFileKeys.add(path);
+              activity.writtenFileCount += 1;
+            }
+            addUniqueActivity(activity.writtenFiles, {
+              id: `write:${tool.toolUseId}:${path}`,
+              label: path,
+              detail: tool.name,
+              status: tool.status,
+            });
+          }
+        } else if (isReadTool(tool)) {
+          for (const path of new Set(collectPathStrings(tool.input))) {
+            if (!readFileKeys.has(path)) {
+              readFileKeys.add(path);
+              activity.readFileCount += 1;
+            }
+            addUniqueActivity(activity.readFiles, {
+              id: `read:${tool.toolUseId}:${path}`,
+              label: path,
+              detail: tool.name,
+              status: tool.status,
+            });
+          }
+        }
+      }
+    }
+
+    return activity;
+  }, [entries]);
+
+  const openActionPanelUrl = useCallback((url: string) => {
+    void api.openExternalUrl(url);
+  }, [api]);
+
   const onNewChat = useCallback(() => { void handleNewChat(); }, [handleNewChat]);
   const handleMarketplaceAnnouncementDismiss = useCallback(
     (id: number) => {
@@ -1798,6 +2034,7 @@ export function App() {
           <MainContent
             activeView={activeView}
             api={api}
+            appMode={appMode}
             settingsTab={settingsTab}
             onSettingsSaved={handleInlineSettingsSaved}
             onCloseSettings={handleCloseInlineSettings}
@@ -1810,7 +2047,6 @@ export function App() {
             onActivateHome={() => setActiveView("home")}
             onJumpToSession={handleLoadSessionAndRefresh}
             onRefreshSessions={refreshSessions}
-            appMode={appMode}
             chatContextValue={chatContextValue}
             onAsk={(q, intent, opts) => handleAsk(q, "default", intent, opts)}
             /* opts 의 inputOrigin / injectHint 가 그대로 handleAsk 4번째
@@ -1853,6 +2089,12 @@ export function App() {
               the composer. The composer's own status sub-row keeps showing
               the ring / permission / model cells. */}
         </main>
+        <ActionPanel
+          open={actionPanelOpen}
+          onOpenChange={setActionPanelOpen}
+          activity={actionPanelActivity}
+          onOpenExternalUrl={openActionPanelUrl}
+        />
         </div>
       </div>
 
