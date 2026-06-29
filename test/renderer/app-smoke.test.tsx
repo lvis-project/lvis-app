@@ -95,6 +95,9 @@ describe("App smoke (Phase 1 infra)", () => {
     await waitFor(() => expect(api.getSettings).toHaveBeenCalled());
 
     expect(container.querySelector('[data-testid="action-panel"]')).toBeTruthy();
+    expect(container.querySelector('[data-testid="action-panel-tab-work"]')).toBeTruthy();
+    expect(container.querySelector('[data-testid="action-panel-tab-tools"]')).toBeTruthy();
+    expect(container.querySelector('[data-testid="action-panel-tab-status"]')).toBeTruthy();
 
     await act(async () => {
       fireEvent.click(container.querySelector('[data-testid="action-panel-close"]')!);
@@ -122,6 +125,25 @@ describe("App smoke (Phase 1 infra)", () => {
       expect(container.querySelector('[data-testid="settings-sidebar-heading"]')).toBeTruthy(),
     );
     expect(api.openSettingsWindow).not.toHaveBeenCalled();
+  });
+
+  it("surfaces tools and status workspaces in the right action panel", async () => {
+    const { container, api } = await renderApp();
+    await waitFor(() => expect(api.getSettings).toHaveBeenCalled());
+
+    await act(async () => {
+      fireEvent.click(container.querySelector('[data-testid="action-panel-tab-tools"]')!);
+    });
+    expect(container.querySelector('[data-testid="action-panel-tabpanel-tools"]')).toBeTruthy();
+    expect(container.textContent).toContain("플러그인 뷰");
+    expect(container.textContent).toContain("서브에이전트");
+
+    await act(async () => {
+      fireEvent.click(container.querySelector('[data-testid="action-panel-tab-status"]')!);
+    });
+    expect(container.querySelector('[data-testid="action-panel-tabpanel-status"]')).toBeTruthy();
+    expect(container.textContent).toContain("컨텍스트");
+    expect(container.textContent).toContain("큐");
   });
 });
 
