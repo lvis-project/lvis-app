@@ -1209,6 +1209,10 @@ export class ConversationLoop {
     // C2(c): drop the previous session's loaded skills so a fresh chat
     // starts with a clean overlay. Tests / stubs without overlay omit this.
     this.deps.skillOverlay?.clear(this.sessionId);
+    // Clear the OLD session's on-demand plugin activations BEFORE reassigning
+    // sessionId. Clearing after the reassignment would key on the NEW id and
+    // orphan the OLD session's Map entry.
+    this.deps.pluginRuntime?.clearSessionActivated?.(this.sessionId);
     this.sessionId = crypto.randomUUID();
     this.sessionKind = kind;
     this.sessionRoutineId = null;
@@ -1226,7 +1230,6 @@ export class ConversationLoop {
     this.sessionPluginExpansions = 0;
     this.sessionToolSearches = 0;
     this.sessionActivatedPluginIds.clear();
-    this.deps.pluginRuntime?.clearSessionActivated?.(this.sessionId);
     this.lastTurnToolNames = null;
     this.compactNum = 0;
     this.rateLimitRecoveryAttempted = false;
@@ -1552,6 +1555,10 @@ export class ConversationLoop {
       });
     }
 
+    // Clear the OLD session's on-demand plugin activations BEFORE reassigning
+    // sessionId. Clearing after the reassignment would key on the NEW id and
+    // orphan the OLD session's Map entry.
+    this.deps.pluginRuntime?.clearSessionActivated?.(this.sessionId);
     this.sessionId = sessionId;
     // #811 m2 — switched-into session ⇒ SessionStart re-fires on its next turn.
     this.sessionStartFiredFor = null;
@@ -1569,7 +1576,6 @@ export class ConversationLoop {
     this.sessionPluginExpansions = 0;
     this.sessionToolSearches = 0;
     this.sessionActivatedPluginIds.clear();
-    this.deps.pluginRuntime?.clearSessionActivated?.(this.sessionId);
     this.lastTurnToolNames = null;
     this.sessionAdditionalDirectories = [];
     this.turnAdditionalDirectories = [];
@@ -2514,6 +2520,18 @@ export class ConversationLoop {
     let knowledgeCallCount = 0;
     let roundIndex = 0;
     let toolTrustOrigin = bounds.toolTrustOrigin;
+    // Single source for the session key used by on-demand plugin activation.
+    // This MUST equal the value wrapped in `sessionContext.run({ sessionId })`
+    // at the runTurn call site (i.e. `options.sessionIdOverride ?? this.sessionId`,
+    // exposed here as `bounds.sessionIdOverride ?? this.sessionId`). Gate 4
+    // (plugin-runtime-delegate) reads the activation set via
+    // `sessionContext.getStore()?.sessionId`, so the WRITE
+    // (`setSessionActivated`) and the CLEAR must key on the SAME id — otherwise
+    // a caller passing BOTH `allowedPluginIds` AND a `sessionIdOverride` would
+    // write under one id and the delegate would read another, silently refusing
+    // the activated tool. Today these coincide, but keying on one source removes
+    // the future-coincidence dependency.
+    const effectiveSessionId = bounds.sessionIdOverride ?? this.sessionId;
     // C3(a): assistant-round counter — used by the maxRounds break below.
     let assistantRoundsRun = 0;
     // finish_reason=length CONTINUATION carry. While a logical answer is being
@@ -3129,10 +3147,14 @@ export class ConversationLoop {
           // BEFORE the remaining non-request_plugin tool calls are dispatched to the
           // executor, so Gate 4 is already relaxed by the time index_scan (or any
           // other plugin tool) reaches the delegate.
-          this.deps.pluginRuntime?.setSessionActivated?.(this.sessionId, activated);
+          // Key on `effectiveSessionId` (the value wrapped in sessionContext.run),
+          // NOT this.sessionId, so the WRITE matches the delegate's
+          // sessionContext.getStore()?.sessionId READ even when a caller passes
+          // both allowedPluginIds and a sessionIdOverride.
+          this.deps.pluginRuntime?.setSessionActivated?.(effectiveSessionId, activated);
           this.auditLogger.log({
             timestamp: new Date().toISOString(),
-            sessionId: this.sessionId,
+            sessionId: effectiveSessionId,
             type: "info",
             input: `session_activated_disabled_plugin pluginId=${activated} (non-persistent; registry stays enabled:false)`,
           });
