@@ -211,15 +211,6 @@ function formatUrlOrigin(value: string): string {
   }
 }
 
-function formatFaviconUrl(value: string): string | undefined {
-  try {
-    const url = new URL(value);
-    return `${url.origin}/favicon.ico`;
-  } catch {
-    return undefined;
-  }
-}
-
 function stringField(value: unknown, key: "code" | "error" | "message"): string | null {
   if (!value || typeof value !== "object") return null;
   const field = (value as Record<string, unknown>)[key];
@@ -1701,7 +1692,6 @@ export function App() {
               label: formatUrlOrigin(url),
               detail: url,
               target: url,
-              iconUrl: formatFaviconUrl(url),
               status: tool.status,
             });
           }
@@ -1717,7 +1707,6 @@ export function App() {
               id: `write:${tool.toolUseId}:${path}`,
               label: path,
               detail: tool.name,
-              target: path,
               status: tool.status,
             });
           }
@@ -1731,7 +1720,6 @@ export function App() {
               id: `read:${tool.toolUseId}:${path}`,
               label: path,
               detail: tool.name,
-              target: path,
               status: tool.status,
             });
           }
@@ -1741,10 +1729,6 @@ export function App() {
 
     return activity;
   }, [entries]);
-
-  const openActionPanelPath = useCallback((filePath: string) => {
-    void api.openExternalPath(filePath);
-  }, [api]);
 
   const openActionPanelUrl = useCallback((url: string) => {
     void api.openExternalUrl(url);
@@ -2110,7 +2094,6 @@ export function App() {
           open={actionPanelOpen}
           onOpenChange={setActionPanelOpen}
           activity={actionPanelActivity}
-          onOpenExternalPath={openActionPanelPath}
           onOpenExternalUrl={openActionPanelUrl}
         />
         </div>

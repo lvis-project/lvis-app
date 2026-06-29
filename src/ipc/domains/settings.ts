@@ -3,8 +3,6 @@
  * Covers: lvis:settings:*, lvis:shell:open-external, lvis:telemetry:consent-answer
  */
 import { app, ipcMain } from "electron";
-import { homedir } from "node:os";
-import { isAbsolute, resolve } from "node:path";
 import { validateExternalUrl } from "../../shared/external-url.js";
 import { SETTINGS } from "../../shared/ipc-channels.js";
 import { validateSender, validateHostRendererSender, UNAUTHORIZED_FRAME, auditUnauthorized } from "../gated.js";
@@ -226,26 +224,6 @@ export function registerSettingsHandlers(deps: IpcDeps): void {
     try {
       await shell.openExternal(validated.url);
       return { ok: true };
-    } catch (err) {
-      return { ok: false, error: "open-failed", message: (err as Error)?.message };
-    }
-  });
-
-  ipcMain.handle("lvis:shell:open-path", async (e, rawPath: unknown) => {
-    if (!validateSender(e)) { auditUnauthorized(auditLogger, "lvis:shell:open-path", e); return UNAUTHORIZED_FRAME; }
-    if (typeof rawPath !== "string") return { ok: false, error: "invalid-path", message: "path must be a string" };
-    const trimmed = rawPath.trim();
-    if (!trimmed || trimmed.includes("\0") || /^[A-Za-z][A-Za-z0-9+.-]*:\/\//.test(trimmed)) {
-      return { ok: false, error: "invalid-path", message: "path must be a local filesystem path" };
-    }
-    const { shell } = await import("electron");
-    const expandedPath = trimmed.startsWith("~/") || trimmed.startsWith("~\\")
-      ? resolve(homedir(), trimmed.slice(2))
-      : trimmed;
-    const filePath = isAbsolute(expandedPath) ? expandedPath : resolve(process.cwd(), expandedPath);
-    try {
-      const message = await shell.openPath(filePath);
-      return message ? { ok: false, error: "open-failed", message } : { ok: true };
     } catch (err) {
       return { ok: false, error: "open-failed", message: (err as Error)?.message };
     }
