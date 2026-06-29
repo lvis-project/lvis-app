@@ -367,7 +367,7 @@ export function ChatView({ api, onAsk, onEditSave, onFork, onToggleStar, onRetry
     ? "mx-auto w-full max-w-[58rem] px-6 lg:px-8"
     : "w-full max-w-full px-4";
   const dockColumnClass = blogLayout
-    ? "mx-auto w-full max-w-[58rem] min-w-0 px-6 lg:px-8"
+    ? "mx-auto w-full max-w-[58rem] min-w-0"
     : "w-full max-w-full min-w-0";
   const {
     entries, streaming, editingEntryIdx, setEditingEntryIdx, editBusy,
