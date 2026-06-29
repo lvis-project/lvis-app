@@ -313,6 +313,8 @@ export interface ChatViewProps {
   onRoutineAcknowledge?: (routineId: string, firedAt: string) => void;
   /** Toast surface rendered directly above the composer input. */
   statusBar?: StatusBarProps;
+  /** Constrain transcript and composer to a centered reading column. */
+  blogLayout?: boolean;
 }
 
 function AskUserAnswerBubble({
@@ -353,7 +355,7 @@ function AskUserAnswerBubble({
   );
 }
 
-export function ChatView({ api, onAsk, onEditSave, onFork, onToggleStar, onRetryEffort, onContinueFromLastUser, isEntryStarred, onAbort, onGuide, onGuideError, onFeedback, subAgentSpawns, loadedSkills, hasAskQuestions, askQuestions, onResolveAskQuestion, plugins, onSelectPlugin, appMode = "work", onOpenApprovalQueue, currentSessionKind = "main", currentSessionTitle, sessions, onLoadSession, onRefreshSessions, commandActions, commandPopoverOpen, onCommandPopoverOpenChange, onPluginPrimaryAction, onRoutineAcknowledge, statusBar }: ChatViewProps) {
+export function ChatView({ api, onAsk, onEditSave, onFork, onToggleStar, onRetryEffort, onContinueFromLastUser, isEntryStarred, onAbort, onGuide, onGuideError, onFeedback, subAgentSpawns, loadedSkills, hasAskQuestions, askQuestions, onResolveAskQuestion, plugins, onSelectPlugin, appMode = "work", onOpenApprovalQueue, currentSessionKind = "main", currentSessionTitle, sessions, onLoadSession, onRefreshSessions, commandActions, commandPopoverOpen, onCommandPopoverOpenChange, onPluginPrimaryAction, onRoutineAcknowledge, statusBar, blogLayout = false }: ChatViewProps) {
   const { t } = useTranslation();
   // We still need the api for SessionTodoPanel; obtain it via singleton.
   const workflowApi = getApi();
@@ -361,6 +363,12 @@ export function ChatView({ api, onAsk, onEditSave, onFork, onToggleStar, onRetry
   const composerRef = useRef<ComposerHandle | null>(null);
   const suggestedReplies = useSuggestedReplies();
   const suggestedRepliesActive = hasActiveSuggestedReplies(suggestedReplies);
+  const readingColumnClass = blogLayout
+    ? "mx-auto w-full max-w-[58rem] px-6 lg:px-8"
+    : "w-full max-w-full px-4";
+  const dockColumnClass = blogLayout
+    ? "mx-auto w-full max-w-[58rem] min-w-0"
+    : "w-full max-w-full min-w-0";
   const {
     entries, streaming, editingEntryIdx, setEditingEntryIdx, editBusy,
     question, setQuestion, chatEndRef, currentSessionId,
@@ -1883,7 +1891,7 @@ export function ChatView({ api, onAsk, onEditSave, onFork, onToggleStar, onRetry
           {currentSessionTitle ? <span className="ml-2 text-muted-foreground">{currentSessionTitle}</span> : null}
         </div>
       )}
-      <ScrollArea type="always" className="lvis-chat-scroll h-full min-h-0 min-w-0 max-w-full" viewportRef={scrollViewportRef}><div className="min-w-0 w-full max-w-full overflow-x-hidden space-y-4 px-4 py-5">
+      <ScrollArea type="always" className="lvis-chat-scroll h-full min-h-0 min-w-0 max-w-full" viewportRef={scrollViewportRef}><div className={`min-w-0 overflow-x-hidden space-y-4 py-5 ${readingColumnClass}`}>
         {/* Today's date badge stays a selector for explicit session loads only.
             currentSessionEntries enables in-session day jumping via
             SessionCalendarPopover Step 4 — pass entries with createdAt + index.
@@ -1984,14 +1992,14 @@ export function ChatView({ api, onAsk, onEditSave, onFork, onToggleStar, onRetry
           the composer. The composer box (border + bg-input-bar) still reads as a
           distinct surface on its own. */}
       <div className="relative z-30 w-full max-w-full min-w-0 overflow-visible">
-        <div className="w-full max-w-full min-w-0" data-testid="session-todo-dock">
+        <div className={dockColumnClass} data-testid="session-todo-dock">
           <SessionTodoPanel api={workflowApi} sessionId={currentSessionId} />
           <MessageQueuePanel
             store={messageQueueStore}
             onSendNow={handleMessageQueueSendNow}
           />
         </div>
-        <div className="w-full max-w-full min-w-0 overflow-x-hidden pb-1">
+        <div className={`${dockColumnClass} overflow-x-hidden pb-1`}>
           {/* §8 agent-approval surface — interactive natural-language approval
               chip. Renders directly above the composer (the position its own
               contract describes); self-hides unless the draft expresses an
