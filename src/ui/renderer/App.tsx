@@ -37,6 +37,7 @@ import { DEFAULT_APP_MODE, normalizeAppMode } from "../../shared/initial-app-mod
 import { Sidebar } from "./components/Sidebar.js";
 import { useAppUpdate } from "./hooks/use-app-update.js";
 import { DevToolsPanel } from "./components/DevToolsPanel.js";
+import { ActionPanel } from "./components/ActionPanel.js";
 import { MainContent } from "./MainContent.js";
 import { useStatusBar, type NotificationToastMeta } from "./hooks/use-status-bar.js";
 import { useSettings } from "./hooks/use-settings.js";
@@ -284,6 +285,7 @@ export function App() {
   // the effect below): work expands it, chat collapses it — a per-transition
   // default, NOT a lock.
   const [sidebarCollapsed, setSidebarCollapsed] = useState(() => readInitialAppMode() === "chat");
+  const [actionPanelOpen, setActionPanelOpen] = useState(true);
   // Persist appMode to host settings and update local state. Guarded against
   // no-op writes (same mode) so a re-render or repeated toggle never fires a
   // redundant IPC write. Stable identity (useCallback with only `api`) so it is
@@ -1853,6 +1855,11 @@ export function App() {
               the composer. The composer's own status sub-row keeps showing
               the ring / permission / model cells. */}
         </main>
+        <ActionPanel
+          actions={commandActions}
+          open={actionPanelOpen}
+          onOpenChange={setActionPanelOpen}
+        />
         </div>
       </div>
 
