@@ -159,14 +159,17 @@ function CompactDashboardStat({
     <Tooltip>
       <TooltipTrigger asChild>
         <div
-          className="flex min-w-0 items-center justify-center gap-1 rounded-md bg-muted/(--opacity-faint) px-1.5 py-1.5"
+          className="flex min-w-0 items-center gap-2 rounded-md bg-muted/(--opacity-faint) px-2 py-1.5"
           aria-label={`${label}: ${count}`}
         >
           <Icon className="h-3 w-3 shrink-0 text-muted-foreground" aria-hidden="true" />
+          <span className="min-w-0 flex-1 truncate text-[11px] leading-4 text-muted-foreground">
+            {label}
+          </span>
           <span className="font-mono text-[11px] font-semibold tabular-nums">{count}</span>
         </div>
       </TooltipTrigger>
-      <TooltipContent side="bottom">{label}</TooltipContent>
+      <TooltipContent side="left">{label}</TooltipContent>
     </Tooltip>
   );
 }
@@ -205,31 +208,36 @@ export function ActionPanel({ open, onOpenChange, activity }: ActionPanelProps) 
         data-testid="action-panel-rail"
       >
         <div
-          className="flex w-[18.5rem] max-w-[calc(100vw-2rem)] items-center gap-1.5 rounded-xl border border-border bg-card/95 p-2 text-card-foreground shadow-xl backdrop-blur"
+          className="flex w-[13.5rem] max-w-[calc(100vw-2rem)] flex-col gap-1.5 rounded-xl border border-border bg-card/95 p-2 text-card-foreground shadow-xl backdrop-blur"
           data-testid="action-panel-summary"
         >
-          <div className="grid min-w-0 flex-1 grid-cols-6 gap-1">
+          <div className="flex min-w-0 items-center justify-between gap-2 px-1">
+            <span className="truncate text-[11px] font-semibold text-muted-foreground">
+              {t("actionPanel.title")}
+            </span>
+            <Tooltip>
+              <TooltipTrigger asChild>
+                <Button
+                  type="button"
+                  variant="secondary"
+                  size="icon"
+                  className="h-7 w-7 shrink-0 rounded-lg border border-border bg-card"
+                  aria-label={t("actionPanel.openAriaLabel")}
+                  aria-expanded={false}
+                  data-testid="action-panel-open"
+                  onClick={() => onOpenChange(true)}
+                >
+                  <PanelRightOpen className="h-3.5 w-3.5" />
+                </Button>
+              </TooltipTrigger>
+              <TooltipContent side="left">{t("actionPanel.openTooltip")}</TooltipContent>
+            </Tooltip>
+          </div>
+          <div className="flex min-w-0 flex-col gap-1" data-testid="action-panel-summary-list">
             {stats.map((stat) => (
               <CompactDashboardStat key={stat.label} icon={stat.icon} label={stat.label} count={stat.count} />
             ))}
           </div>
-          <Tooltip>
-            <TooltipTrigger asChild>
-              <Button
-                type="button"
-                variant="secondary"
-                size="icon"
-                className="h-8 w-8 shrink-0 rounded-lg border border-border bg-card"
-                aria-label={t("actionPanel.openAriaLabel")}
-                aria-expanded={false}
-                data-testid="action-panel-open"
-                onClick={() => onOpenChange(true)}
-              >
-                <PanelRightOpen className="h-4 w-4" />
-              </Button>
-            </TooltipTrigger>
-            <TooltipContent side="left">{t("actionPanel.openTooltip")}</TooltipContent>
-          </Tooltip>
         </div>
       </aside>
     );
