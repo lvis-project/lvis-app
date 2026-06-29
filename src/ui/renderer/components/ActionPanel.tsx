@@ -280,7 +280,7 @@ function FloatingPanel({ children }: { children: ReactNode }) {
   return (
     <aside
       aria-label={t("actionPanel.title")}
-      className="absolute right-3 top-3 z-40 flex w-[23rem] max-w-[calc(100vw-2rem)] flex-col overflow-hidden rounded-xl border border-border bg-card/95 text-card-foreground shadow-2xl backdrop-blur"
+      className="absolute right-3 top-3 z-40 flex w-[23rem] max-w-[calc(100vw-2rem)] flex-col overflow-hidden rounded-xl border border-border bg-card/(--opacity-solid) text-card-foreground shadow-2xl backdrop-blur"
       data-testid="action-panel"
       style={{ maxHeight: "min(34rem, calc(100vh - 7rem))" }}
     >
@@ -315,7 +315,7 @@ export function ActionPanel({
         data-testid="action-panel-rail"
       >
         <div
-          className="flex w-11 max-w-[calc(100vw-2rem)] flex-col items-center gap-1.5 rounded-xl border border-border bg-card/95 p-1.5 text-card-foreground shadow-xl backdrop-blur"
+          className="flex w-11 max-w-[calc(100vw-2rem)] flex-col items-center gap-1.5 rounded-xl border border-border bg-card/(--opacity-solid) p-1.5 text-card-foreground shadow-xl backdrop-blur"
           data-testid="action-panel-summary"
         >
           <Tooltip>
