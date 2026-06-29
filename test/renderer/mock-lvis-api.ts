@@ -438,6 +438,7 @@ export function makeMockLvisApi(overrides: ApiOverrides = {}): {
       return () => set!.delete(handler);
     }),
     openExternalUrl: vi.fn(async () => ({ ok: true })),
+    openExternalPath: vi.fn(async () => ({ ok: true })),
     window: {
       openDetached: vi.fn(async () => ({ ok: true, windowId: 1 })),
       closeDetached: vi.fn(async () => ({ ok: true })),

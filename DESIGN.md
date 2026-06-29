@@ -12,9 +12,9 @@
 - Avoid: marketing-style hero layouts, duplicate navigation, decorative panels, and full-height surfaces when a compact work widget is enough.
 
 ## Product goals
-- Goals: keep the main chat usable while exposing recent tool activity; make file, MCP, plugin, tool, and web activity scannable at a glance.
+- Goals: keep the main chat usable while exposing recent tool activity; make file, MCP, plugin, tool, and web source activity scannable at a glance.
 - Non-goals: replace the primary sidebar, reproduce all historical activity, or add another full workspace navigator.
-- Success signals: action-mode chat reads as a centered blog column; the floating panel shows counts when collapsed, shows details when expanded, and limits each detail list to the latest five items.
+- Success signals: action-mode chat reads as a centered blog column; the floating panel shows populated counts when collapsed, shows details when expanded, hides empty groups, and limits each detail list to the latest five items.
 
 ## Personas and jobs
 - Primary personas: developers and agent operators using LVIS for iterative work.
@@ -24,7 +24,7 @@
 ## Information architecture
 - Primary navigation: existing left sidebar remains the route/navigation owner.
 - Core routes/screens: home chat, action/plugin surfaces, settings, marketplace, memory, routines.
-- Content hierarchy: right action panel contains compact counts in collapsed state; expanded state adds a header and recent activity sections for files, MCP calls, and fetched pages.
+- Content hierarchy: right action panel contains populated icons only in collapsed state; expanded state adds a slim fixed counter dashboard including zero counts, icon strips for plugin/MCP calls, and recent activity sections for files and web sources.
 
 ## Design principles
 - Principle 1: Preserve chat as the primary canvas; in action mode, use a centered reading column so the floating right panel sits in side whitespace rather than becoming a full layout column.
@@ -42,7 +42,7 @@
 ## Components
 - Existing components to reuse: `Button`, `Tooltip`, existing theme tokens, lucide icons.
 - New/changed components: `ActionPanel` as a floating right panel with compact activity sections.
-- Variants and states: open detail panel, collapsed count dashboard, empty activity, running/done/error tool status.
+- Variants and states: open detail panel, collapsed count dashboard, hidden empty groups, running/done/error tool status.
 - Token/component ownership: renderer components own layout; shared UI components own base controls.
 
 ## Accessibility
@@ -67,7 +67,7 @@
 
 ## Content voice
 - Tone: concise, operational, and literal.
-- Terminology: use "read files", "written files", "MCP calls", "plugin calls", "tool calls", and "fetched web pages".
+- Terminology: use "read files", "written files", "MCP calls", "plugin calls", "tool calls", and "web sources".
 - Microcopy rules: avoid tutorial copy inside the panel; labels should identify data, not explain the feature.
 
 ## Implementation constraints

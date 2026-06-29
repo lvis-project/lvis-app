@@ -109,6 +109,7 @@ describe("App smoke (Phase 1 infra)", () => {
     expect(container.querySelector('[data-testid="action-panel-rail"]')).toBeTruthy();
     expect(container.querySelector('[data-testid="action-panel-summary"]')).toBeTruthy();
     expect(container.querySelector('[data-testid="action-panel-summary-list"]')?.className).toContain("flex-col");
+    expect(container.querySelector('[data-testid="action-panel-summary"]')?.textContent?.trim()).toBe("");
     expect(container.textContent).not.toContain("아직 읽은 파일이 없습니다.");
 
     await act(async () => {
@@ -128,7 +129,7 @@ describe("App smoke (Phase 1 infra)", () => {
     expect(container.textContent).not.toContain("워크 보드");
   });
 
-  it("surfaces tool activity sections in the right action panel", async () => {
+  it("keeps expanded action panel counters visible while hiding empty detail rows", async () => {
     const { container, api } = await renderApp();
     await waitFor(() => expect(api.getSettings).toHaveBeenCalled());
 
@@ -137,39 +138,69 @@ describe("App smoke (Phase 1 infra)", () => {
     expect(container.textContent).toContain("MCP 호출");
     expect(container.textContent).toContain("플러그인 호출");
     expect(container.textContent).toContain("도구 호출");
-    expect(container.textContent).toContain("Fetch한 웹페이지");
-    expect(container.textContent).not.toContain("아직 도구 호출이 없습니다.");
+    expect(container.textContent).toContain("웹 출처");
+    expect(container.textContent).not.toContain("아직 읽은 파일이 없습니다.");
+    expect(container.querySelector('[data-testid^="action-panel-activity-"]')).toBeFalsy();
   });
 
-  it("limits each action panel section to the latest five items", () => {
+  it("surfaces populated action panel activity and opens file/url targets", () => {
     const readFiles = Array.from({ length: 6 }, (_, index) => ({
       id: `read-${index}`,
       label: `latest-read-${index}`,
+      target: `C:\\tmp\\latest-read-${index}.md`,
     }));
+    const openPath = vi.fn();
+    const openUrl = vi.fn();
     const { container } = render(
       <TooltipProvider>
         <ActionPanel
           open
           onOpenChange={vi.fn()}
+          onOpenExternalPath={openPath}
+          onOpenExternalUrl={openUrl}
           activity={{
             readFileCount: readFiles.length,
-            writtenFileCount: 0,
-            mcpCallCount: 0,
-            pluginCallCount: 0,
-            toolCallCount: 0,
-            fetchedPageCount: 0,
+            writtenFileCount: 1,
+            mcpCallCount: 1,
+            pluginCallCount: 1,
+            toolCallCount: 4,
+            fetchedPageCount: 1,
             readFiles,
-            writtenFiles: [],
-            mcpCalls: [],
-            fetchedPages: [],
+            writtenFiles: [{
+              id: "write-1",
+              label: "C:\\tmp\\written.md",
+              target: "C:\\tmp\\written.md",
+            }],
+            pluginCalls: [{ id: "plugin-1", label: "plugin_tool", detail: "plugin-a" }],
+            mcpCalls: [{ id: "mcp-1", label: "mcp_tool", detail: "server-a" }],
+            fetchedPages: [{
+              id: "web-1",
+              label: "https://example.com",
+              detail: "https://example.com/full/path?q=1",
+              target: "https://example.com/full/path?q=1",
+              iconUrl: "https://example.com/favicon.ico",
+            }],
           }}
         />
       </TooltipProvider>,
     );
 
+    expect(container.textContent).toContain("읽은 파일");
+    expect(container.textContent).toContain("쓴 파일");
+    expect(container.textContent).toContain("MCP 호출");
+    expect(container.textContent).toContain("플러그인 호출");
+    expect(container.textContent).toContain("도구 호출");
+    expect(container.textContent).toContain("웹 출처");
     expect(container.textContent).toContain("latest-read-0");
     expect(container.textContent).toContain("latest-read-4");
     expect(container.textContent).not.toContain("latest-read-5");
+    expect(container.textContent).toContain("https://example.com");
+    expect(container.textContent).not.toContain("/full/path");
+
+    fireEvent.click(container.querySelector('[data-testid="action-panel-activity-read-0"]')!);
+    expect(openPath).toHaveBeenCalledWith("C:\\tmp\\latest-read-0.md");
+    fireEvent.click(container.querySelector('[data-testid="action-panel-activity-web-1"]')!);
+    expect(openUrl).toHaveBeenCalledWith("https://example.com/full/path?q=1");
   });
 });
 
