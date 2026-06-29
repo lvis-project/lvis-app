@@ -6,7 +6,9 @@
  */
 import "./setup.js";
 import { describe, it, expect, vi, afterEach } from "vitest";
-import { act, fireEvent, waitFor } from "@testing-library/react";
+import { act, fireEvent, render, waitFor } from "@testing-library/react";
+import { TooltipProvider } from "../../src/components/ui/tooltip.js";
+import { ActionPanel } from "../../src/ui/renderer/components/ActionPanel.js";
 import { renderApp } from "./render-app.js";
 
 describe("App smoke (Phase 1 infra)", () => {
@@ -95,9 +97,9 @@ describe("App smoke (Phase 1 infra)", () => {
     await waitFor(() => expect(api.getSettings).toHaveBeenCalled());
 
     expect(container.querySelector('[data-testid="action-panel"]')).toBeTruthy();
-    expect(container.querySelector('[data-testid="action-panel-tab-work"]')).toBeTruthy();
-    expect(container.querySelector('[data-testid="action-panel-tab-tools"]')).toBeTruthy();
-    expect(container.querySelector('[data-testid="action-panel-tab-status"]')).toBeTruthy();
+    expect(container.textContent).toContain("도구 활동");
+    expect(container.textContent).toContain("카테고리별 최신 5개");
+    expect(container.querySelector('[role="tablist"]')).toBeFalsy();
 
     await act(async () => {
       fireEvent.click(container.querySelector('[data-testid="action-panel-close"]')!);
@@ -105,6 +107,8 @@ describe("App smoke (Phase 1 infra)", () => {
 
     expect(container.querySelector('[data-testid="action-panel"]')).toBeFalsy();
     expect(container.querySelector('[data-testid="action-panel-rail"]')).toBeTruthy();
+    expect(container.querySelector('[data-testid="action-panel-summary"]')).toBeTruthy();
+    expect(container.textContent).not.toContain("아직 읽은 파일이 없습니다.");
 
     await act(async () => {
       fireEvent.click(container.querySelector('[data-testid="action-panel-open"]')!);
@@ -113,47 +117,58 @@ describe("App smoke (Phase 1 infra)", () => {
     expect(container.querySelector('[data-testid="action-panel"]')).toBeTruthy();
   });
 
-  it("opens review controls from the right action panel", async () => {
+  it("does not duplicate primary sidebar navigation in the right action panel", async () => {
     const { container, api } = await renderApp();
     await waitFor(() => expect(api.getSettings).toHaveBeenCalled());
 
-    expect(container.textContent).not.toContain("검토 큐");
-
-    await act(async () => {
-      fireEvent.click(container.querySelector('[data-testid="action-panel-tab-status"]')!);
-    });
-
-    await act(async () => {
-      fireEvent.click(container.querySelector('[data-testid="action-panel-review-queue"]')!);
-    });
-
-    await waitFor(() =>
-      expect(document.querySelector('[data-testid="deferred-queue-dialog"]')).toBeTruthy(),
-    );
+    expect(container.textContent).not.toContain("최근 세션");
+    expect(container.textContent).not.toContain("연결된 액션");
+    expect(container.textContent).not.toContain("플러그인 뷰");
+    expect(container.textContent).not.toContain("워크 보드");
   });
 
-  it("surfaces tools and status workspaces in the right action panel", async () => {
+  it("surfaces tool activity sections in the right action panel", async () => {
     const { container, api } = await renderApp();
     await waitFor(() => expect(api.getSettings).toHaveBeenCalled());
 
-    await act(async () => {
-      fireEvent.click(container.querySelector('[data-testid="action-panel-tab-tools"]')!);
-    });
-    expect(container.querySelector('[data-testid="action-panel-tabpanel-tools"]')).toBeTruthy();
-    expect(container.textContent).toContain("로드된 스킬");
-    expect(container.textContent).toContain("서브에이전트");
-    expect(container.textContent).toContain("실행 영역");
-    expect(container.textContent).not.toContain("플러그인 뷰");
-    expect(container.textContent).not.toContain("연결된 액션");
+    expect(container.textContent).toContain("읽은 파일");
+    expect(container.textContent).toContain("쓴 파일");
+    expect(container.textContent).toContain("MCP 호출");
+    expect(container.textContent).toContain("플러그인 호출");
+    expect(container.textContent).toContain("도구 호출");
+    expect(container.textContent).toContain("Fetch한 웹페이지");
+    expect(container.textContent).not.toContain("아직 도구 호출이 없습니다.");
+  });
 
-    await act(async () => {
-      fireEvent.click(container.querySelector('[data-testid="action-panel-tab-status"]')!);
-    });
-    expect(container.querySelector('[data-testid="action-panel-tabpanel-status"]')).toBeTruthy();
-    expect(container.textContent).toContain("컨텍스트");
-    expect(container.textContent).toContain("검토 게이트");
-    expect(container.textContent).toContain("알림");
-    expect(container.textContent).not.toContain("큐");
+  it("limits each action panel section to the latest five items", () => {
+    const readFiles = Array.from({ length: 6 }, (_, index) => ({
+      id: `read-${index}`,
+      label: `latest-read-${index}`,
+    }));
+    const { container } = render(
+      <TooltipProvider>
+        <ActionPanel
+          open
+          onOpenChange={vi.fn()}
+          activity={{
+            readFileCount: readFiles.length,
+            writtenFileCount: 0,
+            mcpCallCount: 0,
+            pluginCallCount: 0,
+            toolCallCount: 0,
+            fetchedPageCount: 0,
+            readFiles,
+            writtenFiles: [],
+            mcpCalls: [],
+            fetchedPages: [],
+          }}
+        />
+      </TooltipProvider>,
+    );
+
+    expect(container.textContent).toContain("latest-read-0");
+    expect(container.textContent).toContain("latest-read-4");
+    expect(container.textContent).not.toContain("latest-read-5");
   });
 });
 

@@ -1,234 +1,248 @@
 import {
-  Activity,
-  Bot,
   Boxes,
-  CheckCircle2,
-  CircleAlert,
-  Clock3,
-  FileDiff,
+  Cable,
+  FilePenLine,
+  FileText,
   Globe2,
-  Gauge,
-  Layers3,
-  MonitorPlay,
   PanelRightClose,
   PanelRightOpen,
-  RotateCcw,
-  ShieldCheck,
   Sparkles,
-  SquareTerminal,
   Wrench,
+  type LucideIcon,
 } from "lucide-react";
-import { useCallback, useMemo, useState, type ReactNode } from "react";
+import type { ReactNode } from "react";
 import { useTranslation } from "../../../i18n/react.js";
 import { Button } from "../../../components/ui/button.js";
 import { Tooltip, TooltipContent, TooltipTrigger } from "../../../components/ui/tooltip.js";
-import type { PersistentItem, ToastItem } from "../hooks/use-status-bar.js";
-import type { SessionSummary } from "../hooks/use-sessions.js";
-import type { SkillBadgeProps } from "./SkillBadge.js";
-import type { SubAgentSpawn } from "./SubAgentCard.js";
 
-type ActionPanelTab = "work" | "tools" | "status";
-
-export interface ActionPanelContextState {
-  usedTokens: number;
-  effectiveBudget: number;
-  contextOverflowPct: number;
-  tpmPct: number;
-  isTpmOverflow: boolean;
-  llmVendor: string;
-  llmModel: string;
+export interface ActionPanelActivityItem {
+  id: string;
+  label: string;
+  detail?: string;
+  status?: "running" | "done" | "error";
 }
 
-export interface ActionPanelExecutionState {
-  approvalCount: number;
-  permissionReviewCount: number;
-  runningToolCount: number;
-  failedToolCount: number;
+export interface ActionPanelActivityState {
+  readFileCount: number;
+  writtenFileCount: number;
+  mcpCallCount: number;
+  pluginCallCount: number;
   toolCallCount: number;
-  fileChangeCount: number;
-  terminalToolCount: number;
-  browserToolCount: number;
-  pluginUiResultCount: number;
-  checkpointCount: number;
+  fetchedPageCount: number;
+  readFiles: ActionPanelActivityItem[];
+  writtenFiles: ActionPanelActivityItem[];
+  mcpCalls: ActionPanelActivityItem[];
+  fetchedPages: ActionPanelActivityItem[];
 }
 
 export interface ActionPanelProps {
   open: boolean;
   onOpenChange: (open: boolean) => void;
-  currentSessionId: string;
-  currentSessionKind: "main" | "routine";
-  currentSessionTitle?: string;
-  sessions: SessionSummary[];
-  onOpenSession: (sessionId: string) => void | boolean | Promise<void | boolean>;
-  streaming: boolean;
-  subAgentSpawns: SubAgentSpawn[];
-  loadedSkills: SkillBadgeProps[];
-  statusItems: PersistentItem[];
-  visibleToast: ToastItem | null;
-  pendingToastCount: number;
-  context: ActionPanelContextState;
-  execution: ActionPanelExecutionState;
-  onOpenDeferredQueue: () => void;
+  activity: ActionPanelActivityState;
 }
 
-const TAB_ORDER: ActionPanelTab[] = ["work", "tools", "status"];
+const ACTIVITY_PREVIEW_LIMIT = 5;
 
-function percent(value: number): number {
-  if (!Number.isFinite(value)) return 0;
-  return Math.max(0, Math.min(100, Math.round(value)));
-}
-
-function shortId(value: string): string {
-  if (!value) return "-";
-  return value.length > 8 ? value.slice(0, 8) : value;
-}
-
-function formatTokens(value: number): string {
-  if (!Number.isFinite(value) || value <= 0) return "0";
-  if (value >= 1_000_000) return `${(value / 1_000_000).toFixed(1)}m`;
-  if (value >= 1_000) return `${(value / 1_000).toFixed(1)}k`;
-  return String(Math.round(value));
-}
-
-function formatSessionTime(value: string): string {
-  const date = new Date(value);
-  if (Number.isNaN(date.getTime())) return "";
-  return date.toLocaleString(undefined, {
-    month: "short",
-    day: "numeric",
-    hour: "2-digit",
-    minute: "2-digit",
-  });
-}
-
-function statusTone(severity: PersistentItem["severity"] | ToastItem["severity"]): string {
-  switch (severity) {
-    case "success":
-      return "border-success/(--opacity-medium) bg-success/(--opacity-faint) text-success";
-    case "warning":
-      return "border-warning/(--opacity-medium) bg-warning/(--opacity-faint) text-warning";
+function statusClass(status: ActionPanelActivityItem["status"]): string {
+  switch (status) {
+    case "running":
+      return "bg-warning/(--opacity-faint) text-warning";
     case "error":
-      return "border-destructive/(--opacity-medium) bg-destructive/(--opacity-faint) text-destructive";
+      return "bg-destructive/(--opacity-faint) text-destructive";
+    case "done":
+      return "bg-success/(--opacity-faint) text-success";
     default:
-      return "border-info/(--opacity-medium) bg-info/(--opacity-faint) text-info";
+      return "bg-muted text-muted-foreground";
   }
 }
 
-function TabIcon({ tab }: { tab: ActionPanelTab }) {
-  if (tab === "tools") return <Boxes className="h-3.5 w-3.5" aria-hidden="true" />;
-  if (tab === "status") return <Gauge className="h-3.5 w-3.5" aria-hidden="true" />;
-  return <Layers3 className="h-3.5 w-3.5" aria-hidden="true" />;
+function statusLabel(status: ActionPanelActivityItem["status"], t: ReturnType<typeof useTranslation>["t"]): string {
+  if (status === "running") return t("actionPanel.status.running");
+  if (status === "error") return t("actionPanel.status.error");
+  if (status === "done") return t("actionPanel.status.done");
+  return "";
 }
 
-function Section({
+function ActivitySection({
   title,
-  count,
-  children,
+  emptyLabel,
+  icon: Icon,
+  items,
 }: {
   title: string;
-  count?: number;
-  children: ReactNode;
+  emptyLabel: string;
+  icon: LucideIcon;
+  items: ActionPanelActivityItem[];
 }) {
+  const { t } = useTranslation();
+  const visibleItems = items.slice(0, ACTIVITY_PREVIEW_LIMIT);
+
   return (
-    <section className="min-w-0 border-b border-border px-3 py-3 last:border-b-0">
-      <div className="mb-2 flex min-w-0 items-center justify-between gap-2">
-        <h3 className="truncate text-[11px] font-semibold uppercase tracking-normal text-muted-foreground">
-          {title}
-        </h3>
-        {typeof count === "number" && (
-          <span className="shrink-0 rounded bg-muted px-1.5 py-0.5 text-[10px] text-muted-foreground">
-            {count}
-          </span>
-        )}
+    <section className="px-3 py-2.5">
+      <div className="mb-1.5 flex min-w-0 items-center justify-between gap-2">
+        <div className="flex min-w-0 items-center gap-2">
+          <Icon className="h-3.5 w-3.5 shrink-0 text-primary" aria-hidden="true" />
+          <h3 className="truncate text-[11px] font-semibold uppercase tracking-normal text-muted-foreground">
+            {title}
+          </h3>
+        </div>
+        <span className="shrink-0 rounded-full bg-muted px-1.5 py-0.5 text-[10px] font-medium tabular-nums text-muted-foreground">
+          {visibleItems.length}
+        </span>
       </div>
-      {children}
+      {visibleItems.length > 0 ? (
+        <ul className="space-y-1">
+          {visibleItems.map((item) => {
+            const label = statusLabel(item.status, t);
+            return (
+              <li
+                key={item.id}
+                className="flex min-w-0 items-start gap-2 rounded-md bg-muted/(--opacity-faint) px-2 py-1.5 text-xs hover:bg-accent"
+              >
+                <span className="mt-1.5 h-1.5 w-1.5 shrink-0 rounded-full bg-muted-foreground/(--opacity-medium)" />
+                <span className="min-w-0 flex-1">
+                  <span className="block truncate leading-4 text-foreground">{item.label}</span>
+                  {item.detail && (
+                    <span className="block truncate text-[10px] leading-4 text-muted-foreground">
+                      {item.detail}
+                    </span>
+                  )}
+                </span>
+                {label && (
+                  <span className={`mt-0.5 shrink-0 rounded px-1.5 py-0.5 text-[10px] ${statusClass(item.status)}`}>
+                    {label}
+                  </span>
+                )}
+              </li>
+            );
+          })}
+        </ul>
+      ) : (
+        <p className="rounded-md border border-dashed border-border px-2 py-1.5 text-[11px] text-muted-foreground">
+          {emptyLabel}
+        </p>
+      )}
     </section>
   );
 }
 
-export function ActionPanel({
-  open,
-  onOpenChange,
-  currentSessionId,
-  currentSessionKind,
-  currentSessionTitle,
-  sessions,
-  onOpenSession,
-  streaming,
-  subAgentSpawns,
-  loadedSkills,
-  statusItems,
-  visibleToast,
-  pendingToastCount,
-  context,
-  execution,
-  onOpenDeferredQueue,
-}: ActionPanelProps) {
+interface ActivityStat {
+  icon: LucideIcon;
+  label: string;
+  count: number;
+}
+
+function DashboardStat({
+  icon: Icon,
+  label,
+  count,
+}: ActivityStat) {
+  return (
+    <div className="min-w-0 rounded-md bg-muted/(--opacity-faint) px-2 py-1.5">
+      <div className="flex items-center justify-between gap-1">
+        <Icon className="h-3 w-3 shrink-0 text-muted-foreground" aria-hidden="true" />
+        <span className="font-mono text-[12px] font-semibold tabular-nums">{count}</span>
+      </div>
+      <span className="mt-0.5 block truncate text-[9px] leading-3 text-muted-foreground">
+        {label}
+      </span>
+    </div>
+  );
+}
+
+function CompactDashboardStat({
+  icon: Icon,
+  label,
+  count,
+}: ActivityStat) {
+  return (
+    <Tooltip>
+      <TooltipTrigger asChild>
+        <div
+          className="flex min-w-0 items-center justify-center gap-1 rounded-md bg-muted/(--opacity-faint) px-1.5 py-1.5"
+          aria-label={`${label}: ${count}`}
+        >
+          <Icon className="h-3 w-3 shrink-0 text-muted-foreground" aria-hidden="true" />
+          <span className="font-mono text-[11px] font-semibold tabular-nums">{count}</span>
+        </div>
+      </TooltipTrigger>
+      <TooltipContent side="bottom">{label}</TooltipContent>
+    </Tooltip>
+  );
+}
+
+function FloatingPanel({ children }: { children: ReactNode }) {
   const { t } = useTranslation();
-  const [activeTab, setActiveTab] = useState<ActionPanelTab>("work");
 
-  const runningSubagents = useMemo(
-    () => subAgentSpawns.filter((spawn) => spawn.status === "running").length,
-    [subAgentSpawns],
+  return (
+    <aside
+      aria-label={t("actionPanel.title")}
+      className="absolute right-3 top-3 z-40 flex w-[23rem] max-w-[calc(100vw-2rem)] flex-col overflow-hidden rounded-xl border border-border bg-card/95 text-card-foreground shadow-2xl backdrop-blur"
+      data-testid="action-panel"
+      style={{ maxHeight: "min(34rem, calc(100vh - 7rem))" }}
+    >
+      {children}
+    </aside>
   );
-  const recentSessions = useMemo(
-    () => sessions.filter((session) => session.id !== currentSessionId).slice(0, 5),
-    [currentSessionId, sessions],
-  );
-  const contextPct = percent(context.contextOverflowPct);
-  const tpmPct = percent(context.tpmPct);
+}
 
-  const openSession = useCallback((sessionId: string) => {
-    void Promise.resolve(onOpenSession(sessionId)).catch((err) => {
-      console.error("[action-panel] open session failed", err);
-    });
-  }, [onOpenSession]);
+export function ActionPanel({ open, onOpenChange, activity }: ActionPanelProps) {
+  const { t } = useTranslation();
+  const stats = [
+    { icon: Wrench, label: t("actionPanel.toolCallsTitle"), count: activity.toolCallCount },
+    { icon: Boxes, label: t("actionPanel.pluginCallsTitle"), count: activity.pluginCallCount },
+    { icon: Cable, label: t("actionPanel.mcpCallsTitle"), count: activity.mcpCallCount },
+    { icon: FileText, label: t("actionPanel.readFilesTitle"), count: activity.readFileCount },
+    { icon: FilePenLine, label: t("actionPanel.writtenFilesTitle"), count: activity.writtenFileCount },
+    { icon: Globe2, label: t("actionPanel.fetchedPagesTitle"), count: activity.fetchedPageCount },
+  ];
 
   if (!open) {
     return (
       <aside
-        aria-label={t("actionPanel.railAriaLabel")}
-        className="flex w-12 shrink-0 flex-col items-center border-l border-border bg-card/80 pt-2 text-card-foreground"
+        aria-label={t("actionPanel.title")}
+        className="absolute right-3 top-3 z-40"
         data-testid="action-panel-rail"
       >
-        <Tooltip>
-          <TooltipTrigger asChild>
-            <Button
-              type="button"
-              variant="ghost"
-              size="icon"
-              className="h-8 w-8"
-              aria-label={t("actionPanel.openAriaLabel")}
-              aria-expanded={false}
-              data-testid="action-panel-open"
-              onClick={() => onOpenChange(true)}
-            >
-              <PanelRightOpen className="h-4 w-4" />
-            </Button>
-          </TooltipTrigger>
-          <TooltipContent side="left">{t("actionPanel.openTooltip")}</TooltipContent>
-        </Tooltip>
+        <div
+          className="flex w-[18.5rem] max-w-[calc(100vw-2rem)] items-center gap-1.5 rounded-xl border border-border bg-card/95 p-2 text-card-foreground shadow-xl backdrop-blur"
+          data-testid="action-panel-summary"
+        >
+          <div className="grid min-w-0 flex-1 grid-cols-6 gap-1">
+            {stats.map((stat) => (
+              <CompactDashboardStat key={stat.label} icon={stat.icon} label={stat.label} count={stat.count} />
+            ))}
+          </div>
+          <Tooltip>
+            <TooltipTrigger asChild>
+              <Button
+                type="button"
+                variant="secondary"
+                size="icon"
+                className="h-8 w-8 shrink-0 rounded-lg border border-border bg-card"
+                aria-label={t("actionPanel.openAriaLabel")}
+                aria-expanded={false}
+                data-testid="action-panel-open"
+                onClick={() => onOpenChange(true)}
+              >
+                <PanelRightOpen className="h-4 w-4" />
+              </Button>
+            </TooltipTrigger>
+            <TooltipContent side="left">{t("actionPanel.openTooltip")}</TooltipContent>
+          </Tooltip>
+        </div>
       </aside>
     );
   }
 
   return (
-    <aside
-      aria-label={t("actionPanel.panelAriaLabel")}
-      className="flex w-[22rem] max-w-[40vw] shrink-0 flex-col border-l border-border bg-card text-card-foreground shadow-[-12px_0_30px_rgba(15,23,42,0.08)]"
-      data-testid="action-panel"
-    >
-      <div className="flex h-12 shrink-0 items-center justify-between gap-2 border-b border-border px-3">
+    <FloatingPanel>
+      <div className="flex h-12 shrink-0 items-center justify-between gap-2 border-b border-border px-4">
         <div className="flex min-w-0 items-center gap-2">
           <Sparkles className="h-4 w-4 shrink-0 text-primary" aria-hidden="true" />
           <div className="min-w-0">
             <h2 className="truncate text-sm font-semibold leading-5">{t("actionPanel.title")}</h2>
-            <p className="truncate text-[11px] leading-4 text-muted-foreground">
-              {t("actionPanel.subtitle", {
-                agentCount: runningSubagents,
-                toolCount: execution.runningToolCount,
-              })}
-            </p>
+            <p className="truncate text-[11px] leading-4 text-muted-foreground">{t("actionPanel.subtitle")}</p>
           </div>
         </div>
         <Tooltip>
@@ -250,259 +264,38 @@ export function ActionPanel({
         </Tooltip>
       </div>
 
-      <div className="grid shrink-0 grid-cols-3 border-b border-border p-1" role="tablist" aria-label={t("actionPanel.tabsAriaLabel")}>
-        {TAB_ORDER.map((tab) => (
-          <button
-            key={tab}
-            type="button"
-            role="tab"
-            aria-selected={activeTab === tab}
-            className={`flex h-8 items-center justify-center gap-1.5 rounded text-xs transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring ${
-              activeTab === tab
-                ? "bg-primary text-primary-foreground"
-                : "text-muted-foreground hover:bg-accent hover:text-foreground"
-            }`}
-            data-testid={`action-panel-tab-${tab}`}
-            onClick={() => setActiveTab(tab)}
-          >
-            <TabIcon tab={tab} />
-            <span className="truncate">{t(`actionPanel.tab.${tab}`)}</span>
-          </button>
+      <div className="grid shrink-0 grid-cols-3 gap-1.5 border-b border-border px-3 py-2">
+        {stats.map((stat) => (
+          <DashboardStat key={stat.label} icon={stat.icon} label={stat.label} count={stat.count} />
         ))}
       </div>
 
-      <div className="min-h-0 flex-1 overflow-y-auto" role="tabpanel" data-testid={`action-panel-tabpanel-${activeTab}`}>
-        {activeTab === "work" && (
-          <>
-            <Section title={t("actionPanel.currentWorkTitle")}>
-              <div className="rounded-md border border-border bg-background px-3 py-2">
-                <div className="flex items-center justify-between gap-2">
-                  <div className="min-w-0">
-                    <div className="truncate text-sm font-medium">
-                      {currentSessionTitle || t("actionPanel.untitledSession")}
-                    </div>
-                    <div className="mt-1 truncate text-[11px] text-muted-foreground">
-                      {t("actionPanel.sessionMeta", {
-                        kind: t(`actionPanel.sessionKind.${currentSessionKind}`),
-                        id: shortId(currentSessionId),
-                      })}
-                    </div>
-                  </div>
-                  <span className={`shrink-0 rounded px-2 py-1 text-[11px] ${streaming ? "bg-warning/(--opacity-faint) text-warning" : "bg-success/(--opacity-faint) text-success"}`}>
-                    {streaming ? t("actionPanel.statusStreaming") : t("actionPanel.statusIdle")}
-                  </span>
-                </div>
-              </div>
-            </Section>
-
-            <Section title={t("actionPanel.sessionsTitle")} count={recentSessions.length}>
-              {recentSessions.length > 0 ? (
-                <ul className="flex flex-col gap-1">
-                  {recentSessions.map((session, index) => (
-                    <li key={session.id}>
-                      <button
-                        type="button"
-                        className="flex min-h-10 w-full items-center gap-2 rounded-md px-2 py-1.5 text-left text-sm hover:bg-accent focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
-                        data-testid={`action-panel-session-${index}`}
-                        onClick={() => openSession(session.id)}
-                      >
-                        <Clock3 className="h-3.5 w-3.5 shrink-0 text-muted-foreground" aria-hidden="true" />
-                        <span className="min-w-0 flex-1">
-                          <span className="block truncate">{session.title || t("actionPanel.untitledSession")}</span>
-                          <span className="block truncate text-[11px] text-muted-foreground">
-                            {formatSessionTime(session.modifiedAt)}
-                          </span>
-                        </span>
-                      </button>
-                    </li>
-                  ))}
-                </ul>
-              ) : (
-                <p className="text-xs text-muted-foreground">{t("actionPanel.noRecentSessions")}</p>
-              )}
-            </Section>
-          </>
-        )}
-
-        {activeTab === "tools" && (
-          <>
-            <Section title={t("actionPanel.skillsTitle")} count={loadedSkills.length}>
-              {loadedSkills.length > 0 ? (
-                <ul className="flex flex-col gap-1">
-                  {loadedSkills.slice(0, 6).map((skill, index) => (
-                    <li key={`${skill.name}:${index}`} className="flex min-w-0 items-start gap-2 rounded-md bg-muted px-2 py-1.5 text-xs">
-                      <Sparkles className="mt-0.5 h-3.5 w-3.5 shrink-0 text-primary" aria-hidden="true" />
-                      <span className="min-w-0">
-                        <span className="block truncate font-medium">{skill.name}</span>
-                        <span className="block truncate text-muted-foreground">{skill.description}</span>
-                      </span>
-                    </li>
-                  ))}
-                </ul>
-              ) : (
-                <p className="text-xs text-muted-foreground">{t("actionPanel.noSkills")}</p>
-              )}
-            </Section>
-
-            <Section title={t("actionPanel.agentsTitle")} count={subAgentSpawns.length}>
-              {subAgentSpawns.length > 0 ? (
-                <ul className="flex flex-col gap-1">
-                  {subAgentSpawns.slice(0, 6).map((spawn) => (
-                    <li key={spawn.spawnId} className="flex min-w-0 items-center gap-2 rounded-md border border-border px-2 py-1.5 text-xs">
-                      <Bot className={`h-3.5 w-3.5 shrink-0 ${spawn.status === "error" ? "text-destructive" : spawn.status === "running" ? "text-warning" : "text-success"}`} aria-hidden="true" />
-                      <span className="min-w-0 flex-1">
-                        <span className="block truncate font-medium">{spawn.title}</span>
-                        <span className="block truncate text-muted-foreground">
-                          {t("actionPanel.agentStatus", {
-                            status: t(`actionPanel.agentStatus.${spawn.status}`),
-                            turns: spawn.turns.length,
-                            tools: spawn.toolCallCount,
-                          })}
-                        </span>
-                      </span>
-                    </li>
-                  ))}
-                </ul>
-              ) : (
-                <p className="text-xs text-muted-foreground">{t("actionPanel.noAgents")}</p>
-              )}
-            </Section>
-
-            <Section title={t("actionPanel.executionSurfacesTitle")}>
-              <div className="grid grid-cols-2 gap-1.5">
-                <div className="flex min-h-10 items-center gap-2 rounded-md bg-muted px-2 py-2 text-xs">
-                  <SquareTerminal className="h-3.5 w-3.5 shrink-0 text-muted-foreground" aria-hidden="true" />
-                  <span className="min-w-0 flex-1 truncate">{t("actionPanel.terminalSurfaceLabel")}</span>
-                  <span className="font-medium">{execution.terminalToolCount}</span>
-                </div>
-                <div className="flex min-h-10 items-center gap-2 rounded-md bg-muted px-2 py-2 text-xs">
-                  <Globe2 className="h-3.5 w-3.5 shrink-0 text-muted-foreground" aria-hidden="true" />
-                  <span className="min-w-0 flex-1 truncate">{t("actionPanel.browserSurfaceLabel")}</span>
-                  <span className="font-medium">{execution.browserToolCount}</span>
-                </div>
-                <div className="flex min-h-10 items-center gap-2 rounded-md bg-muted px-2 py-2 text-xs">
-                  <MonitorPlay className="h-3.5 w-3.5 shrink-0 text-muted-foreground" aria-hidden="true" />
-                  <span className="min-w-0 flex-1 truncate">{t("actionPanel.sidebarSurfaceLabel")}</span>
-                  <span className="font-medium">{execution.pluginUiResultCount}</span>
-                </div>
-                <div className="flex min-h-10 items-center gap-2 rounded-md bg-muted px-2 py-2 text-xs">
-                  <Wrench className="h-3.5 w-3.5 shrink-0 text-muted-foreground" aria-hidden="true" />
-                  <span className="min-w-0 flex-1 truncate">{t("actionPanel.toolStreamLabel")}</span>
-                  <span className="font-medium">{execution.toolCallCount}</span>
-                </div>
-              </div>
-            </Section>
-          </>
-        )}
-
-        {activeTab === "status" && (
-          <>
-            <Section title={t("actionPanel.contextTitle")}>
-              <div className="space-y-3 rounded-md border border-border bg-background p-3">
-                <div>
-                  <div className="mb-1 flex justify-between gap-2 text-xs">
-                    <span className="truncate">{t("actionPanel.contextBudget")}</span>
-                    <span className="shrink-0 text-muted-foreground">
-                      {formatTokens(context.usedTokens)} / {formatTokens(context.effectiveBudget)}
-                    </span>
-                  </div>
-                  <div className="h-2 overflow-hidden rounded-full bg-muted">
-                    <div
-                      className={`h-full ${contextPct >= 90 ? "bg-destructive" : contextPct >= 70 ? "bg-warning" : "bg-primary"}`}
-                      style={{ width: `${contextPct}%` }}
-                    />
-                  </div>
-                </div>
-                <div>
-                  <div className="mb-1 flex justify-between gap-2 text-xs">
-                    <span className="truncate">{t("actionPanel.tpmBudget")}</span>
-                    <span className="shrink-0 text-muted-foreground">{tpmPct}%</span>
-                  </div>
-                  <div className="h-2 overflow-hidden rounded-full bg-muted">
-                    <div
-                      className={`h-full ${context.isTpmOverflow ? "bg-destructive" : tpmPct >= 70 ? "bg-warning" : "bg-success"}`}
-                      style={{ width: `${tpmPct}%` }}
-                    />
-                  </div>
-                </div>
-                <div className="grid grid-cols-2 gap-1 text-xs">
-                  <div className="rounded bg-muted px-2 py-1">
-                    <div className="text-muted-foreground">{t("actionPanel.vendorLabel")}</div>
-                    <div className="truncate font-medium">{context.llmVendor}</div>
-                  </div>
-                  <div className="rounded bg-muted px-2 py-1">
-                    <div className="text-muted-foreground">{t("actionPanel.modelLabel")}</div>
-                    <div className="truncate font-medium">{context.llmModel}</div>
-                  </div>
-                </div>
-              </div>
-            </Section>
-
-            <Section title={t("actionPanel.statusItemsTitle")} count={statusItems.length}>
-              {statusItems.length > 0 ? (
-                <ul className="flex flex-col gap-1">
-                  {statusItems.map((item) => (
-                    <li key={item.id} className={`min-w-0 rounded-md border px-2 py-1.5 text-xs ${statusTone(item.severity)}`}>
-                      <div className="flex min-w-0 items-center gap-2">
-                        {item.severity === "error" ? <CircleAlert className="h-3.5 w-3.5 shrink-0" /> : <CheckCircle2 className="h-3.5 w-3.5 shrink-0" />}
-                        <span className="min-w-0 truncate font-medium">{item.label || item.a11yLabel || item.id}</span>
-                      </div>
-                      {item.value && <div className="mt-0.5 truncate pl-5 opacity-80">{item.value}</div>}
-                    </li>
-                  ))}
-                </ul>
-              ) : (
-                <p className="text-xs text-muted-foreground">{t("actionPanel.noStatusItems")}</p>
-              )}
-            </Section>
-
-            <Section title={t("actionPanel.reviewGatesTitle")}>
-              <div className="grid grid-cols-2 gap-1.5">
-                <button
-                  type="button"
-                  className="flex items-center gap-2 rounded-md bg-muted px-2 py-2 text-left text-xs hover:bg-accent focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
-                  aria-label={t("actionPanel.openReviewQueue")}
-                  data-testid="action-panel-review-queue"
-                  onClick={onOpenDeferredQueue}
-                >
-                  <ShieldCheck className="h-3.5 w-3.5 shrink-0 text-warning" aria-hidden="true" />
-                  <span className="min-w-0 flex-1 truncate">{t("actionPanel.approvalsLabel")}</span>
-                  <span className="font-medium">{execution.approvalCount}</span>
-                </button>
-                <div className="flex items-center gap-2 rounded-md bg-muted px-2 py-2 text-xs">
-                  <Activity className="h-3.5 w-3.5 shrink-0 text-muted-foreground" aria-hidden="true" />
-                  <span className="min-w-0 flex-1 truncate">{t("actionPanel.permissionReviewLabel")}</span>
-                  <span className="font-medium">{execution.permissionReviewCount}</span>
-                </div>
-                <div className="flex items-center gap-2 rounded-md bg-muted px-2 py-2 text-xs">
-                  <FileDiff className="h-3.5 w-3.5 shrink-0 text-success" aria-hidden="true" />
-                  <span className="min-w-0 flex-1 truncate">{t("actionPanel.fileChangesLabel")}</span>
-                  <span className="font-medium">{execution.fileChangeCount}</span>
-                </div>
-                <div className="flex items-center gap-2 rounded-md bg-muted px-2 py-2 text-xs">
-                  <RotateCcw className="h-3.5 w-3.5 shrink-0 text-primary" aria-hidden="true" />
-                  <span className="min-w-0 flex-1 truncate">{t("actionPanel.checkpointsLabel")}</span>
-                  <span className="font-medium">{execution.checkpointCount}</span>
-                </div>
-              </div>
-            </Section>
-
-            <Section title={t("actionPanel.toastTitle")} count={visibleToast ? pendingToastCount + 1 : pendingToastCount}>
-              {visibleToast ? (
-                <div className={`rounded-md border px-2 py-1.5 text-xs ${statusTone(visibleToast.severity)}`}>
-                  <div className="flex items-center gap-2">
-                    <Activity className="h-3.5 w-3.5 shrink-0" aria-hidden="true" />
-                    <span className="min-w-0 truncate font-medium">{visibleToast.message}</span>
-                  </div>
-                </div>
-              ) : (
-                <p className="text-xs text-muted-foreground">{t("actionPanel.noToasts")}</p>
-              )}
-            </Section>
-
-          </>
-        )}
+      <div className="min-h-0 flex-1 overflow-y-auto">
+        <ActivitySection
+          title={t("actionPanel.readFilesTitle")}
+          emptyLabel={t("actionPanel.noReadFiles")}
+          icon={FileText}
+          items={activity.readFiles}
+        />
+        <ActivitySection
+          title={t("actionPanel.writtenFilesTitle")}
+          emptyLabel={t("actionPanel.noWrittenFiles")}
+          icon={FilePenLine}
+          items={activity.writtenFiles}
+        />
+        <ActivitySection
+          title={t("actionPanel.mcpCallsTitle")}
+          emptyLabel={t("actionPanel.noMcpCalls")}
+          icon={Cable}
+          items={activity.mcpCalls}
+        />
+        <ActivitySection
+          title={t("actionPanel.fetchedPagesTitle")}
+          emptyLabel={t("actionPanel.noFetchedPages")}
+          icon={Globe2}
+          items={activity.fetchedPages}
+        />
       </div>
-    </aside>
+    </FloatingPanel>
   );
 }
