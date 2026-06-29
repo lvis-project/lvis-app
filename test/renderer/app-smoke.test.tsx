@@ -57,7 +57,7 @@ describe("App smoke (Phase 1 infra)", () => {
     expect(api.starredList).toHaveBeenCalledTimes(1);
   });
 
-  it("opens settings inline (action mode) from the API key prompt", async () => {
+  it("opens settings inline (work mode) from the API key prompt", async () => {
     const { container, api } = await renderApp({ hasApiKey: false });
     await waitFor(() => expect(api.getSettings).toHaveBeenCalled());
     await waitFor(() => expect(container.textContent).toContain("API 키 설정 필요"));
@@ -70,7 +70,7 @@ describe("App smoke (Phase 1 infra)", () => {
       fireEvent.click(settingsButton!);
     });
 
-    // Default appMode is "action" — Settings renders INLINE in the main area
+    // Default appMode is "work" — Settings renders INLINE in the main area
     // (same setActiveView + MainContent path as 업무보드/루틴/메모리/별표), so
     // the detached BrowserWindow IPC must NOT fire and chat must not send.
     await waitFor(() =>
@@ -91,7 +91,7 @@ describe("App smoke (Phase 1 infra)", () => {
   });
 });
 
-describe("Settings inline (action mode) vs detached (chat mode)", () => {
+describe("Settings inline (work mode) vs detached (chat mode)", () => {
   it("renders Settings inline, marks the sidebar item active, and returns home", async () => {
     const { container, api } = await renderApp();
     await waitFor(() => expect(api.getSettings).toHaveBeenCalled());

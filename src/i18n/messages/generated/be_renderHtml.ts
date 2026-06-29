@@ -26,7 +26,7 @@ export const ko: Record<keyof typeof en, string> = {
     "차트·대시보드·인터랙티브 데모·표·다이어그램처럼 마크다운으로 표현하기 어려운 결과에 사용하세요. 라이브러리가 필요하면 코드 전체를 인라인으로 포함시켜야 합니다. " +
     "디자인 가이드: 현재 LVIS 앱 테마 색상과 어울리도록 페이지를 구성하세요. 배경·텍스트·강조색은 가능하면 CSS 변수 hsl(var(--background)), hsl(var(--foreground)), hsl(var(--primary)), hsl(var(--muted)), hsl(var(--border)) 등을 사용하고, 카드/차트/버튼은 앱의 차분한 작업형 UI 톤에 맞춰 과한 그라데이션보다 명확한 계층·여백·대비를 우선하세요.",
   "be_renderHtml.propHtmlDescription":
-    "완전한 HTML 조각 또는 <html> 문서. 인라인 <script>와 on* 이벤트는 허용됩니다. <iframe>/<object>/<embed>/<meta http-equiv=refresh>, <script src=...> 외부 로드, <a href=외부URL>은 자동 제거됩니다. 현재 앱 테마 토큰(--background, --foreground, --primary, --muted, --border 등)을 기준으로 페이지 색상을 맞추세요.",
+    "완전한 HTML 조각 또는 <html> 문서. 인라인 <script>와 on* 이벤트는 허용됩니다. <iframe>/<object>/<embed>/<meta http-equiv=refresh>, <script src=...> 외부 로드, <a href=external-URL>은 자동 제거됩니다. 현재 앱 테마 토큰(--background, --foreground, --primary, --muted, --border 등)을 기준으로 페이지 색상을 맞추세요.",
   "be_renderHtml.propTitleDescription": "HTML 창 제목 (60자 이내).",
   "be_renderHtml.propHeightDescription":
     "프리뷰 높이(px). 기본 {default}, 범위 {min}-{max}.",

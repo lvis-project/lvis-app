@@ -46,3 +46,24 @@ test('LLM tab: authMode toggle wraps provider configuration under login', async 
 
   await closeSettingsWindow(app, settingsWindow);
 });
+
+test('LLM tab: provider dropdown is searchable and scroll constrained', async ({
+  app,
+  mainWindow,
+  t,
+}) => {
+  const settingsWindow = await openSettingsWindow(app, mainWindow, 'llm');
+
+  await settingsWindow.locator('#vendor-select').click();
+
+  const search = settingsWindow.getByTestId('llm-tab:vendor-search');
+  await expect(search).toBeVisible();
+  await expect(search).toHaveAttribute('placeholder', t('llmTab.vendorSearchPlaceholder'));
+  await expect(settingsWindow.getByTestId('llm-tab:vendor-content')).toHaveClass(/max-h-\[386px\]/);
+
+  await search.fill('openrouter');
+  await expect(settingsWindow.getByRole('option', { name: 'OpenRouter' })).toBeVisible();
+  await expect(settingsWindow.getByRole('option', { name: 'Google Gemini' })).toHaveCount(0);
+
+  await closeSettingsWindow(app, settingsWindow);
+});

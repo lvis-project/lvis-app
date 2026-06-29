@@ -32,9 +32,9 @@ export const en = {
   "mainToolbar.skipUpdateAriaLabel": "Skip update v{version} until the next version",
   "appMode.groupAriaLabel": "Workspace mode",
   "appMode.chat": "Chat",
-  "appMode.action": "Action",
+  "appMode.work": "Work",
   "appMode.chatAriaLabel": "Chat mode — detachable views open in separate windows",
-  "appMode.actionAriaLabel": "Action mode — views render inline with the sidebar expanded",
+  "appMode.workAriaLabel": "Work mode — views render inline with the sidebar expanded",
 } as const;
 export const ko: Record<keyof typeof en, string> = {
   "mainToolbar.home": "홈",
@@ -67,9 +67,9 @@ export const ko: Record<keyof typeof en, string> = {
   "mainToolbar.applyUpdate": "v{version} 적용",
   "mainToolbar.skipUpdateTitle": "v{version}은 다음 버전까지 건너뛰기",
   "mainToolbar.skipUpdateAriaLabel": "업데이트 v{version} 다음 버전까지 건너뛰기",
-  "appMode.groupAriaLabel": "작업 모드",
+  "appMode.groupAriaLabel": "워크스페이스 모드",
   "appMode.chat": "채팅",
-  "appMode.action": "액션",
+  "appMode.work": "업무",
   "appMode.chatAriaLabel": "채팅 모드 — 분리 가능한 뷰가 별도 창으로 열립니다",
-  "appMode.actionAriaLabel": "액션 모드 — 뷰가 인라인으로 표시되고 사이드바가 펼쳐집니다",
+  "appMode.workAriaLabel": "업무 모드 — 뷰가 인라인으로 표시되고 사이드바가 펼쳐집니다",
 };

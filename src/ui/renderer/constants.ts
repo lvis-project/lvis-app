@@ -27,6 +27,9 @@ import {
   LLM_VENDOR_DEFAULTS,
   LLM_VENDOR_MODEL_OPTIONS,
   LLM_VENDORS,
+  OPENAI_COMPATIBLE_PRESET_VENDOR_IDS,
+  OPENAI_COMPATIBLE_VENDOR_PRESETS,
+  type OpenAICompatiblePresetVendor,
   type LLMVendor,
 } from "../../shared/llm-vendor-defaults.js";
 import { t } from "../../i18n/runtime.js";
@@ -49,7 +52,7 @@ interface VendorUiMeta {
   baseUrlPlaceholder?: string;
 }
 
-const VENDOR_UI: Record<LLMVendor, VendorUiMeta> = {
+const CORE_VENDOR_UI: Record<Exclude<LLMVendor, OpenAICompatiblePresetVendor>, VendorUiMeta> = {
   claude: { label: "Anthropic Claude", placeholder: "sk-ant-...", needsBaseUrl: false },
   openai: { label: "OpenAI", placeholder: "sk-...", needsBaseUrl: false },
   gemini: { label: "Google Gemini", placeholder: "AIza...", needsBaseUrl: false },
@@ -71,6 +74,26 @@ const VENDOR_UI: Record<LLMVendor, VendorUiMeta> = {
     needsBaseUrl: true,
     baseUrlPlaceholder: "http://10.231.108.187:8001/v1",
   },
+};
+
+const PRESET_VENDOR_UI = Object.fromEntries(
+  OPENAI_COMPATIBLE_PRESET_VENDOR_IDS.map((id) => {
+    const preset = OPENAI_COMPATIBLE_VENDOR_PRESETS[id];
+    return [
+      id,
+      {
+        label: preset.label,
+        placeholder: preset.apiKeyPlaceholder,
+        needsBaseUrl: true,
+        baseUrlPlaceholder: preset.baseUrl,
+      } satisfies VendorUiMeta,
+    ];
+  }),
+) as Record<OpenAICompatiblePresetVendor, VendorUiMeta>;
+
+const VENDOR_UI: Record<LLMVendor, VendorUiMeta> = {
+  ...CORE_VENDOR_UI,
+  ...PRESET_VENDOR_UI,
 };
 
 export const VENDORS = LLM_VENDORS.map((id) => ({
