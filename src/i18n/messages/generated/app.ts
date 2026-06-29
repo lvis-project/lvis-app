@@ -39,7 +39,7 @@ export const ko: Record<keyof typeof en, string> = {
   "app.pluginAuthLoginFailedNoCode": "플러그인 로그인에 실패했습니다. {detail}",
   "app.pluginAuthLoginFailedNonCorpNetwork": "사내망 또는 VPN 연결이 필요합니다. 사내망에 연결한 뒤 다시 시도하세요.",
   "app.pluginAuthLoginFailedGeneric": "플러그인 페이지를 열고 다시 로그인해 주세요.",
-  "app.loadCommandUsage": "사용법: /load <세션ID>",
+  "app.loadCommandUsage": "사용법: /load <sessionId>",
   "app.sessionNotFound": "세션을 찾을 수 없습니다: {requested}",
   "app.visionNotSupportedConfirm": "현재 모델({llmModel})은 이미지를 지원하지 않습니다.\n이미지는 전달되지 않고 파일 경로 / 텍스트만 전송됩니다.\n\n그래도 전송하시겠습니까? 취소하면 모델을 바꾼 뒤 다시 시도할 수 있습니다.",
   "app.thinkingStatus": "생각 중...",
