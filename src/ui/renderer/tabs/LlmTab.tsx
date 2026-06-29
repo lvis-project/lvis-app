@@ -1,4 +1,4 @@
-import { useCallback, useState } from "react";
+import { useCallback, useMemo, useState } from "react";
 import { Badge } from "../../../components/ui/badge.js";
 import { Button } from "../../../components/ui/button.js";
 import { Input } from "../../../components/ui/input.js";
@@ -7,6 +7,7 @@ import { RadioGroup, RadioGroupItem } from "../../../components/ui/radio-group.j
 import {
   Select,
   SelectContent,
+  SelectGroup,
   SelectItem,
   SelectTrigger,
   SelectValue,
@@ -43,6 +44,117 @@ export interface FallbackEntry {
  * the provider picker.
  */
 const DEMO_VENDOR_VALUE = "__demo__";
+const VENDOR_SCROLL_THRESHOLD = 10;
+const VENDOR_SELECT_MAX_HEIGHT = "max-h-[386px]";
+
+interface ProviderSelectProps {
+  value: string;
+  onValueChange: (value: string) => void;
+  includeDemo?: boolean;
+  triggerId?: string;
+  triggerClassName?: string;
+  triggerTestId?: string;
+  placeholder?: string;
+}
+
+function normalizeProviderSearch(value: string): string {
+  return value.trim().toLocaleLowerCase();
+}
+
+function ProviderSelect({
+  value,
+  onValueChange,
+  includeDemo = false,
+  triggerId,
+  triggerClassName,
+  triggerTestId,
+  placeholder,
+}: ProviderSelectProps) {
+  const { t } = useTranslation();
+  const [query, setQuery] = useState("");
+  const demoLabel = t("llmTab.demoVendor");
+
+  const options = useMemo(
+    () => [
+      ...(includeDemo
+        ? [{
+            id: DEMO_VENDOR_VALUE,
+            label: demoLabel,
+            searchText: `${DEMO_VENDOR_VALUE} ${demoLabel}`,
+          }]
+        : []),
+      ...VENDORS.map((vendor) => ({
+        id: vendor.id,
+        label: vendor.label,
+        searchText: `${vendor.id} ${vendor.label}`,
+      })),
+    ],
+    [demoLabel, includeDemo],
+  );
+
+  const normalizedQuery = normalizeProviderSearch(query);
+  const filteredOptions = useMemo(
+    () => normalizedQuery
+      ? options.filter((option) => normalizeProviderSearch(option.searchText).includes(normalizedQuery))
+      : options,
+    [normalizedQuery, options],
+  );
+  const scrollClassName = options.length > VENDOR_SCROLL_THRESHOLD
+    ? VENDOR_SELECT_MAX_HEIGHT
+    : "";
+
+  return (
+    <Select
+      value={value}
+      onValueChange={(nextValue) => {
+        onValueChange(nextValue);
+        setQuery("");
+      }}
+      onOpenChange={(open) => {
+        if (!open) setQuery("");
+      }}
+    >
+      <SelectTrigger
+        id={triggerId}
+        className={triggerClassName}
+        data-testid={triggerTestId}
+      >
+        <SelectValue placeholder={placeholder} />
+      </SelectTrigger>
+      <SelectContent
+        className={`min-w-64 ${scrollClassName}`}
+        data-testid="llm-tab:vendor-content"
+      >
+        <div className="sticky top-0 z-10 border-b border-border/(--opacity-medium) bg-popover p-2">
+          <Input
+            value={query}
+            onChange={(event) => setQuery(event.target.value)}
+            onKeyDown={(event) => event.stopPropagation()}
+            onPointerDown={(event) => event.stopPropagation()}
+            onClick={(event) => event.stopPropagation()}
+            placeholder={t("llmTab.vendorSearchPlaceholder")}
+            aria-label={t("llmTab.vendorSearchAriaLabel")}
+            data-testid="llm-tab:vendor-search"
+            className="h-8 text-xs"
+          />
+        </div>
+        <SelectGroup className="p-1" data-testid="llm-tab:vendor-options">
+          {filteredOptions.length > 0 ? (
+            filteredOptions.map((option) => (
+              <SelectItem key={option.id} value={option.id}>
+                {option.label}
+              </SelectItem>
+            ))
+          ) : (
+            <div className="px-2 py-3 text-center text-xs text-muted-foreground">
+              {t("llmTab.vendorNoResults")}
+            </div>
+          )}
+        </SelectGroup>
+      </SelectContent>
+    </Select>
+  );
+}
 
 export interface LlmTabProps {
   api: LvisApi;
@@ -453,17 +565,14 @@ export function LlmTab(props: LlmTabProps) {
               {t("llmTab.vendor")}
               {!isLoginMode && <ImmediateBadge />}
             </Label>
-            <Select value={displayVendor} onValueChange={handleVendorChange}>
-              <SelectTrigger id="vendor-select" className="w-full">
-                <SelectValue placeholder={t("llmTab.vendorPlaceholder")} />
-              </SelectTrigger>
-              <SelectContent>
-                <SelectItem value={DEMO_VENDOR_VALUE}>{t("llmTab.demoVendor")}</SelectItem>
-                {VENDORS.map((v) => (
-                  <SelectItem key={v.id} value={v.id}>{v.label}</SelectItem>
-                ))}
-              </SelectContent>
-            </Select>
+            <ProviderSelect
+              value={displayVendor}
+              onValueChange={handleVendorChange}
+              includeDemo
+              triggerId="vendor-select"
+              triggerClassName="w-full"
+              placeholder={t("llmTab.vendorPlaceholder")}
+            />
           </div>
           {/* Provider detail form — disabled when authMode === "login". */}
           <div
@@ -734,7 +843,7 @@ export function LlmTab(props: LlmTabProps) {
                 const fallbackModelOptions = modelOptionsFor(entry.provider, fallbackModelValue);
                 return (
                   <div key={idx} className="flex gap-2">
-                    <Select
+                    <ProviderSelect
                       value={entry.provider}
                       onValueChange={(value) => {
                         const nextVendorInfo = getVendorInfo(value);
@@ -746,14 +855,8 @@ export function LlmTab(props: LlmTabProps) {
                         };
                         setFallbackChain(next);
                       }}
-                    >
-                      <SelectTrigger className="w-36 text-xs">
-                        <SelectValue />
-                      </SelectTrigger>
-                      <SelectContent>
-                        {VENDORS.map((v) => <SelectItem key={v.id} value={v.id}>{v.label}</SelectItem>)}
-                      </SelectContent>
-                    </Select>
+                      triggerClassName="w-36 text-xs"
+                    />
                     <Select
                       value={fallbackModelValue}
                       onValueChange={(value) => {

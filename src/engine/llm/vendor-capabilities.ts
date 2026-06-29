@@ -17,6 +17,7 @@
  *   - Azure Foundry / Vertex AI — defer to underlying model name.
  */
 import type { LLMVendor } from "./types.js";
+import { isOpenAICompatibleVendor } from "../../shared/llm-vendor-defaults.js";
 
 const NON_VISION_MODEL_PATTERNS = [
   /^o1(-mini|-preview)?$/i,
@@ -58,6 +59,9 @@ export function supportsVision(vendor: LLMVendor, model: string): boolean {
     case "copilot":
       return /^(gpt-4|gpt-5|claude-)/i.test(m);
     default:
+      if (isOpenAICompatibleVendor(vendor)) {
+        return /^(gpt-4|gpt-5|claude-|gemini-|qwen|kimi|glm|mimo|llama|meta-llama|nvidia\/)/i.test(m);
+      }
       // Defense-in-depth: callers occasionally `as LLMVendor`-cast a raw
       // string (settings load, IPC inputs). An unexpected vendor would
       // otherwise yield undefined at runtime and violate the declared

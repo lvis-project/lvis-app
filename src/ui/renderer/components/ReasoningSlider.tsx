@@ -2,7 +2,7 @@
  * ReasoningSlider — compact reasoning control for the composer status sub-row
  * (between the vendor·model cell and the online-status dot).
  *
- * The status row shows only a small TRIGGER ("추론 {level}" + chevron). Clicking
+ * The status row shows only a small TRIGGER (lightbulb + level + chevron). Clicking
  * it opens a popover that holds the actual 4-step slider — the row stays
  * uncluttered and the slider has room to be usable.
  *
@@ -16,7 +16,7 @@
  * through the renderer api — the same self-contained pattern ThinkingButton used.
  */
 import { useCallback, useEffect, useState } from "react";
-import { ChevronDown } from "lucide-react";
+import { ChevronDown, Lightbulb } from "lucide-react";
 import { Popover, PopoverContent, PopoverTrigger } from "../../../components/ui/popover.js";
 import { useTranslation } from "../../../i18n/react.js";
 import { getApi } from "../api-client.js";
@@ -114,10 +114,14 @@ export function ReasoningSlider({ enabled, onToggle }: ReasoningSliderProps) {
           type="button"
           data-testid="reasoning-slider"
           data-level={level}
+          aria-label={`${reasoningLabel}: ${levelLabels[level]}`}
           title={`${reasoningLabel}: ${levelLabels[level]}`}
           className="flex shrink-0 items-center gap-0.5 cursor-pointer hover:opacity-80 focus:outline-none focus-visible:ring-1 focus-visible:ring-ring"
         >
-          <span className="shrink-0">{reasoningLabel}</span>
+          <Lightbulb
+            className={`h-3 w-3 shrink-0 ${level > 0 ? "text-primary" : "text-muted-foreground"}`}
+            aria-hidden="true"
+          />
           <span className={`shrink-0 tabular-nums ${level > 0 ? "text-primary" : ""}`}>
             {levelLabels[level]}
           </span>

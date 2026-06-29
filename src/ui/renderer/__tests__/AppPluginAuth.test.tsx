@@ -252,7 +252,7 @@ describe("App plugin auth routing", () => {
     );
 
     // Chat mode routes the selection through openDetached so the failure path
-    // under test is reachable (action mode would render inline, never detaching).
+    // under test is reachable (work mode would render inline, never detaching).
     await user.click(screen.getByTestId("app-mode-chat"));
 
     await selectPluginView(user, "Token Plugin");
@@ -315,8 +315,8 @@ describe("App plugin auth routing", () => {
     });
   });
 
-  it("navigates an unauthenticated plugin view inline in action mode even with no loginTool (no silent abort)", async () => {
-    // BUG 3 regression: action mode must render EVERY plugin view inline,
+  it("navigates an unauthenticated plugin view inline in work mode even with no loginTool (no silent abort)", async () => {
+    // BUG 3 regression: work mode must render EVERY plugin view inline,
     // including an unauthed plugin whose card has no loginTool (or whose cards
     // have not yet populated). The old code silently `return`ed, stranding the
     // user on their previous view. The fix navigates inline regardless; the
@@ -356,7 +356,7 @@ describe("App plugin auth routing", () => {
       tool === "nlt_status" ? { authenticated: false } : { ok: true },
     );
 
-    // Default appMode is action — selection must navigate inline. The picker
+    // Default appMode is work — selection must navigate inline. The picker
     // closing is the observable navigation side-effect (handleViewSelect ran to
     // completion instead of bailing out early).
     await selectPluginView(user, "No-LoginTool Plugin");

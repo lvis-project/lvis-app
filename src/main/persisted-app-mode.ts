@@ -14,13 +14,14 @@
  */
 import { existsSync, readFileSync } from "node:fs";
 import { settingsFilePath } from "../data/settings-store.js";
-import { DEFAULT_APP_MODE, isAppMode, type InitialAppMode } from "../shared/initial-app-mode.js";
+import { DEFAULT_APP_MODE, normalizeAppMode, type InitialAppMode } from "../shared/initial-app-mode.js";
 
 /**
  * Read `system.appMode` from the persisted settings file. Returns
- * {@link DEFAULT_APP_MODE} ("action") when the file is absent, unreadable, the
+ * {@link DEFAULT_APP_MODE} ("work") when the file is absent, unreadable, the
  * field is missing, or its value is not a valid mode — all legitimate first-run
- * / pre-migration defaults, not bug-papering fallbacks.
+ * / pre-migration defaults, not bug-papering fallbacks. Legacy `"action"`
+ * values from older builds are normalized to `"work"`.
  */
 export function readPersistedAppModeSync(userDataPath: string): InitialAppMode {
   const settingsPath = settingsFilePath(userDataPath);
@@ -30,7 +31,7 @@ export function readPersistedAppModeSync(userDataPath: string): InitialAppMode {
     const parsed = JSON.parse(raw) as Record<string, unknown>;
     const system = parsed.system as Record<string, unknown> | undefined;
     const mode = system?.appMode;
-    return isAppMode(mode) ? mode : DEFAULT_APP_MODE;
+    return normalizeAppMode(mode) ?? DEFAULT_APP_MODE;
   } catch {
     // Corrupt settings file — the async settings-service path surfaces the
     // parse error later; here we just default the window mode.

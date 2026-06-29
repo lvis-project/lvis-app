@@ -7,7 +7,7 @@
  * Mirrors the theme-prime contract in `src/shared/initial-theme.ts`: the main
  * process passes the persisted workspace mode into every new main BrowserWindow
  * via `webPreferences.additionalArguments` so the renderer's FIRST React render
- * already paints the correct mode layout (expanded rail for action, collapsed
+ * already paints the correct mode layout (expanded rail for work, collapsed
  * rail for chat) — no flash of the wrong mode followed by a post-mount tween.
  *
  * Keeping the prefix + value set in one module ensures main, preload, and the
@@ -21,17 +21,30 @@ export const INITIAL_APP_MODE_ARG_PREFIX = "--lvis-initial-app-mode=";
  * renderer all validate against the same union. The renderer's `AppMode`
  * (`MainToolbar.tsx`) is the structurally identical UI-facing alias.
  */
-export type InitialAppMode = "chat" | "action";
+export type InitialAppMode = "chat" | "work";
 
-export const APP_MODES: readonly InitialAppMode[] = ["chat", "action"];
+export const APP_MODES: readonly InitialAppMode[] = ["chat", "work"];
 
 /**
- * Default workspace mode on first run (no persisted value yet). `"action"`
+ * Legacy persisted / argv value from builds before the Action → Work rename.
+ * Boundary readers normalize it to `"work"`; app internals should not store or
+ * compare against this literal.
+ */
+export const LEGACY_ACTION_APP_MODE = "action";
+
+/**
+ * Default workspace mode on first run (no persisted value yet). `"work"`
  * preserves the historical inline behavior. This is a legitimate first-run
  * default, not a bug-papering fallback.
  */
-export const DEFAULT_APP_MODE: InitialAppMode = "action";
+export const DEFAULT_APP_MODE: InitialAppMode = "work";
+
+export function normalizeAppMode(value: unknown): InitialAppMode | null {
+  if (value === "chat" || value === "work") return value;
+  if (value === LEGACY_ACTION_APP_MODE) return "work";
+  return null;
+}
 
 export function isAppMode(value: unknown): value is InitialAppMode {
-  return value === "chat" || value === "action";
+  return value === "chat" || value === "work";
 }

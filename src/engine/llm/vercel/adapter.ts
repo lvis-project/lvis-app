@@ -17,6 +17,7 @@ import type {
   StreamTurnParams,
   ToolSchema,
 } from "../types.js";
+import { isOpenAICompatibleVendor } from "../../../shared/llm-vendor-defaults.js";
 import { genericToModelMessages } from "./message-mapper.js";
 import { fullStreamToStreamEvent } from "./stream-mapper.js";
 import { mapAiSdkErrorToLvis } from "./error-mapper.js";
@@ -28,13 +29,8 @@ import {
 } from "../../../shared/tool-name-aliases.js";
 import { TOOL_SEARCH_TOOL_NAME } from "../../../tools/registry.js";
 
-/**
- * Vendor slot recognised by VercelUnifiedProvider. Extends LLMVendor with
- * the not-yet-core "openai-compatible" string so the adapter can accept it
- * directly without bloating the core LLMVendor union (that change is
- * tracked separately — settings surface + UI dropdown must follow).
- */
-export type VercelVendor = LLMVendor | "openai-compatible";
+/** Vendor slot recognised by VercelUnifiedProvider. */
+export type VercelVendor = LLMVendor;
 
 const COPILOT_BASE_URL = "https://models.github.ai/inference";
 /**
@@ -169,10 +165,7 @@ export class VercelUnifiedProvider implements LLMProvider {
     customFetch?: typeof fetch,
     extras: VercelProviderExtras = {},
   ) {
-    // Expose a core-compatible vendor on the interface; "openai-compatible"
-    // is reported as "openai" so downstream vendor-gated logic keeps working.
-    // "azure-foundry" and "vertex-ai" are first-class LLMVendor values.
-    this.vendor = (vendor === "openai-compatible" ? "openai" : vendor) as LLMVendor;
+    this.vendor = vendor;
     this.vendorSlot = vendor;
     this.apiKey = apiKey;
     this.baseUrl = baseUrl;
@@ -247,7 +240,7 @@ export class VercelUnifiedProvider implements LLMProvider {
       // under providerOptions[name] into the request body, so each request
       // carries its own flag — multi-user safe: the server is stateless, so
       // one user with thinking ON and another with it OFF never interfere.
-      if (slot === "openai-compatible") {
+      if (isOpenAICompatibleVendor(slot)) {
         const compatOptions: Record<string, unknown> = {
           chat_template_kwargs: {
             enable_thinking: params.enableThinking === true,
@@ -430,10 +423,10 @@ export class VercelUnifiedProvider implements LLMProvider {
       return openai.chat(modelId);
     }
 
-    if (slot === "openai-compatible") {
+    if (isOpenAICompatibleVendor(slot)) {
       if (!this.baseUrl) {
         throw new Error(
-          "VercelUnifiedProvider(openai-compatible): baseUrl is required",
+          `VercelUnifiedProvider(${slot}): baseUrl is required`,
         );
       }
       const compat = createOpenAICompatible({

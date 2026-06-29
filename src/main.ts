@@ -61,13 +61,13 @@ import { forceKillManagedChildProcesses } from "./main/managed-child-processes.j
 import { scrubPackagedProcessEnv } from "./main/packaged-env-scrub.js";
 import {
   computeInitialMainWindowBounds,
-  computeActionModeBounds,
+  computeWorkModeBounds,
   MAIN_WINDOW_MIN_HEIGHT,
   MAIN_WINDOW_MIN_WIDTH,
 } from "./main/main-window-bounds.js";
 import {
   INITIAL_APP_MODE_ARG_PREFIX,
-  isAppMode,
+  normalizeAppMode,
   type InitialAppMode,
 } from "./shared/initial-app-mode.js";
 import { readPersistedAppModeSync } from "./main/persisted-app-mode.js";
@@ -293,22 +293,23 @@ const rendererIndexUrl = () => pathToFileURL(resolve(__dirname, "..", "index.htm
  * service exists (re-create on macOS re-activation, recovery paths) we prefer
  * its in-memory value so an unsaved-to-disk in-session change is honored.
  *
- * Defaulting to "action" when nothing is persisted is the legitimate first-run
+ * Defaulting to "work" when nothing is persisted is the legitimate first-run
  * default, not a bug-papering fallback.
  */
 function readPersistedAppMode(): InitialAppMode {
   const live = services?.settingsService.getAll().system?.appMode;
-  if (isAppMode(live)) return live;
+  const normalizedLive = normalizeAppMode(live);
+  if (normalizedLive !== null) return normalizedLive;
   return readPersistedAppModeSync(app.getPath("userData"));
 }
 
 function initialMainWindowBounds(): { x: number; y: number; width: number; height: number } {
   const { workArea } = screen.getPrimaryDisplay();
   // Size the window to match the persisted mode at CREATION time so the OS
-  // window never opens chat-shaped then animates to action (or vice-versa)
-  // after the renderer mounts. action → centered 800×600; chat → right-docked.
-  return readPersistedAppMode() === "action"
-    ? computeActionModeBounds(workArea)
+  // window never opens chat-shaped then animates to work (or vice-versa)
+  // after the renderer mounts. work → centered canvas; chat → right-docked.
+  return readPersistedAppMode() === "work"
+    ? computeWorkModeBounds(workArea)
     : computeInitialMainWindowBounds(workArea);
 }
 
