@@ -84,6 +84,7 @@ import { normalizeSettingsTab } from "../../shared/settings-tabs.js";
 
 const SAFE_PLUGIN_AUTH_ERROR_CODE = /^[A-Za-z0-9][A-Za-z0-9._:-]{0,80}$/;
 const ACTION_PANEL_ACTIVITY_LIMIT = 5;
+const ACTION_PANEL_ICON_LIMIT = 10;
 const FILE_CHANGE_TOOL_NAMES = new Set(["edit_file", "apply_patch", "write_file"]);
 const READ_TOOL_PATTERN = /(^|[._:-])(read|open|cat|grep|rg|search|find|list|glob)([._:-]|$)/i;
 const TERMINAL_TOOL_PATTERN = /(^|[._:-])(shell|bash|cmd|powershell|terminal|exec|run)([._:-]|$)/i;
@@ -201,13 +202,21 @@ function formatToolSource(tool: ToolEntryItem): string {
   return parts.join(" · ");
 }
 
-function formatUrlLabel(value: string): string {
+function formatUrlOrigin(value: string): string {
   try {
     const url = new URL(value);
-    const path = `${url.pathname}${url.search}`.replace(/\/$/, "");
-    return path ? `${url.hostname}${path}` : url.hostname;
+    return url.origin;
   } catch {
     return value;
+  }
+}
+
+function formatFaviconUrl(value: string): string | undefined {
+  try {
+    const url = new URL(value);
+    return `${url.origin}/favicon.ico`;
+  } catch {
+    return undefined;
   }
 }
 
@@ -1642,6 +1651,7 @@ export function App() {
       fetchedPageCount: 0,
       readFiles: [],
       writtenFiles: [],
+      pluginCalls: [],
       mcpCalls: [],
       fetchedPages: [],
     };
@@ -1660,7 +1670,15 @@ export function App() {
         const sourceDetail = source || (isTerminalTool(tool) ? "terminal" : isBrowserTool(tool) ? "web" : undefined);
 
         activity.toolCallCount += 1;
-        if (isPluginTool(tool)) activity.pluginCallCount += 1;
+        if (isPluginTool(tool)) {
+          activity.pluginCallCount += 1;
+          addUniqueActivity(activity.pluginCalls, {
+            id: `plugin:${tool.toolUseId}`,
+            label: tool.name,
+            detail: tool.pluginId ?? sourceDetail,
+            status: tool.status,
+          }, ACTION_PANEL_ICON_LIMIT);
+        }
 
         if (tool.source === "mcp" || tool.mcpServerId) {
           activity.mcpCallCount += 1;
@@ -1669,7 +1687,7 @@ export function App() {
             label: tool.name,
             detail: tool.mcpServerId ?? sourceDetail,
             status: tool.status,
-          });
+          }, ACTION_PANEL_ICON_LIMIT);
         }
 
         if (isBrowserTool(tool)) {
@@ -1680,8 +1698,10 @@ export function App() {
             }
             addUniqueActivity(activity.fetchedPages, {
               id: `url:${tool.toolUseId}:${url}`,
-              label: formatUrlLabel(url),
+              label: formatUrlOrigin(url),
               detail: url,
+              target: url,
+              iconUrl: formatFaviconUrl(url),
               status: tool.status,
             });
           }
@@ -1697,6 +1717,7 @@ export function App() {
               id: `write:${tool.toolUseId}:${path}`,
               label: path,
               detail: tool.name,
+              target: path,
               status: tool.status,
             });
           }
@@ -1710,6 +1731,7 @@ export function App() {
               id: `read:${tool.toolUseId}:${path}`,
               label: path,
               detail: tool.name,
+              target: path,
               status: tool.status,
             });
           }
@@ -1719,6 +1741,14 @@ export function App() {
 
     return activity;
   }, [entries]);
+
+  const openActionPanelPath = useCallback((filePath: string) => {
+    void api.openExternalPath(filePath);
+  }, [api]);
+
+  const openActionPanelUrl = useCallback((url: string) => {
+    void api.openExternalUrl(url);
+  }, [api]);
 
   const onNewChat = useCallback(() => { void handleNewChat(); }, [handleNewChat]);
   const handleMarketplaceAnnouncementDismiss = useCallback(
@@ -2080,6 +2110,8 @@ export function App() {
           open={actionPanelOpen}
           onOpenChange={setActionPanelOpen}
           activity={actionPanelActivity}
+          onOpenExternalPath={openActionPanelPath}
+          onOpenExternalUrl={openActionPanelUrl}
         />
         </div>
       </div>
