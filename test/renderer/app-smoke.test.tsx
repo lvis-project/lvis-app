@@ -108,6 +108,7 @@ describe("App smoke (Phase 1 infra)", () => {
     expect(container.querySelector('[data-testid="action-panel"]')).toBeFalsy();
     expect(container.querySelector('[data-testid="action-panel-rail"]')).toBeTruthy();
     expect(container.querySelector('[data-testid="action-panel-summary"]')).toBeTruthy();
+    expect(container.querySelector('[data-testid="action-panel-summary-list"]')?.className).toContain("flex-col");
     expect(container.textContent).not.toContain("아직 읽은 파일이 없습니다.");
 
     await act(async () => {
