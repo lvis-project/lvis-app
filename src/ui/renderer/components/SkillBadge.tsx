@@ -5,6 +5,7 @@
  */
 import { Sparkles } from "lucide-react";
 import { Tooltip, TooltipContent, TooltipTrigger } from "../../../components/ui/tooltip.js";
+import { useTranslation } from "../../../i18n/react.js";
 
 export interface SkillBadgeProps {
   name: string;
@@ -22,6 +23,7 @@ function clip(value: string): string {
 }
 
 export function SkillBadge({ name, description }: SkillBadgeProps) {
+  const { t } = useTranslation();
   const displayName = clip(name);
   const displayDescription = clip(description);
   return (
@@ -32,11 +34,11 @@ export function SkillBadge({ name, description }: SkillBadgeProps) {
           className="inline-flex items-center gap-1 rounded-full border border-action-view/(--opacity-medium) bg-action-view/(--opacity-subtle) px-2 py-0.5 text-[11px] text-action-view"
         >
           <Sparkles className="h-3 w-3" />
-          Skill loaded: {displayName}
+          {t("skillBadge.loadedLabel", { name: displayName })}
         </span>
       </TooltipTrigger>
       <TooltipContent className="text-xs">
-        {displayDescription || `Skill ${displayName} loaded.`}
+        {displayDescription || t("skillBadge.loadedFallback", { name: displayName })}
       </TooltipContent>
     </Tooltip>
   );

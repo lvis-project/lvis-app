@@ -74,7 +74,7 @@ export function TokenProgressRing({
       className="flex h-[26px] w-[26px] shrink-0 items-center justify-center rounded-md bg-input-bar hover:bg-muted/(--opacity-strong) transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-foreground focus-visible:ring-offset-1"
       data-testid="token-progress-ring"
       title={t("tokenProgressRing.projectedInputTitle")}
-      aria-label={`Projected input ${pct} percent`}
+      aria-label={t("tokenProgressRing.projectedInputAriaLabel", { pct: String(pct) })}
       role="img"
       tabIndex={0}
     >
@@ -131,35 +131,37 @@ export function TokenProgressRing({
         className="min-w-[220px] p-3 text-xs tabular-nums"
         data-testid="token-progress-ring-detail"
       >
-        <div className="mb-1 text-[10px] uppercase tracking-wider opacity-60">projected input</div>
+        <div className="mb-1 text-[10px] uppercase tracking-wider opacity-60">
+          {t("tokenProgressRing.projectedInputHeading")}
+        </div>
         <div className="space-y-0.5">
           <div className="flex justify-between gap-3">
-            <span>next request:</span>
+            <span>{t("tokenProgressRing.nextRequestLabel")}</span>
             <span>{used.toLocaleString()}</span>
           </div>
           <div className="flex justify-between gap-3">
-            <span>{isTpmBound ? "effective limit (TPM):" : "effective limit:"}</span>
+            <span>{isTpmBound ? t("tokenProgressRing.effectiveLimitTpmLabel") : t("tokenProgressRing.effectiveLimitLabel")}</span>
             <span>{displayBudget.toLocaleString()}</span>
           </div>
           <div className="flex justify-between gap-3">
-            <span>remaining:</span>
+            <span>{t("tokenProgressRing.remainingLabel")}</span>
             <span>{remaining.toLocaleString()}</span>
           </div>
         </div>
         <div className="mt-1 border-t border-border/(--opacity-medium) pt-1 space-y-0.5">
           <div className="flex justify-between gap-3 font-semibold">
-            <span>usage:</span>
+            <span>{t("tokenProgressRing.usageLabel")}</span>
             <span>{pct}%</span>
           </div>
           {typeof contextBudget === "number" && contextBudget > 0 && contextBudget !== displayBudget && (
             <div className="flex justify-between gap-3 opacity-70">
-              <span>context window:</span>
+              <span>{t("tokenProgressRing.contextWindowLabel")}</span>
               <span>{contextBudget.toLocaleString()} ({contextPct}%)</span>
             </div>
           )}
           {typeof tpmPct === "number" && (
             <div className={`flex justify-between gap-3 ${isTpmBound ? "text-warning" : "opacity-70"}`}>
-              <span>TPM:</span>
+              <span>{t("tokenProgressRing.tpmLabel")}</span>
               <span>{tpmLimit!.toLocaleString()} ({tpmPct}%)</span>
             </div>
           )}

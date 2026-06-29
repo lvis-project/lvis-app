@@ -3,6 +3,7 @@ import "../../../../../test/renderer/setup.js";
 import { describe, it, expect } from "vitest";
 import { render } from "@testing-library/react";
 import { TooltipProvider } from "../../../../components/ui/tooltip.js";
+import { t } from "../../../../i18n/runtime.js";
 import { TokenProgressRing } from "../TokenProgressRing.js";
 
 function renderWithProvider(ui: React.ReactElement) {
@@ -19,7 +20,10 @@ describe("TokenProgressRing", () => {
   it("has aria-label describing projected input", () => {
     const { getByTestId } = renderWithProvider(<TokenProgressRing used={500} budget={1000} />);
     const ring = getByTestId("token-progress-ring");
-    expect(ring).toHaveAttribute("aria-label", "Projected input 50 percent");
+    expect(ring).toHaveAttribute(
+      "aria-label",
+      t("tokenProgressRing.projectedInputAriaLabel", { pct: "50" }),
+    );
   });
 
   it("has role=img", () => {
@@ -31,6 +35,6 @@ describe("TokenProgressRing", () => {
   it("exposes a compact native hint label like the cost badge", () => {
     const { getByTestId } = renderWithProvider(<TokenProgressRing used={250} budget={1000} />);
     const ring = getByTestId("token-progress-ring");
-    expect(ring).toHaveAttribute("title", "다음 요청 입력 예측");
+    expect(ring).toHaveAttribute("title", t("tokenProgressRing.projectedInputTitle"));
   });
 });

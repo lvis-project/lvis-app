@@ -45,6 +45,7 @@ export const en = {
   "loginModalConversational.checklistSandboxDone": "Sandbox ready",
 
   // JSX — dialog header / session bar
+  "loginModalConversational.dialogTitle": "LVIS — Welcome",
   "loginModalConversational.sessionStart": "LVIS · Authentication session started",
 
   // JSX — greeting bubble
@@ -130,6 +131,7 @@ export const ko: Record<keyof typeof en, string> = {
   "loginModalConversational.checklistSandboxDone": "sandbox 준비 완료",
 
   // JSX — dialog header / session bar
+  "loginModalConversational.dialogTitle": "LVIS — 환영합니다",
   "loginModalConversational.sessionStart": "LVIS · 인증 세션 시작",
 
   // JSX — greeting bubble

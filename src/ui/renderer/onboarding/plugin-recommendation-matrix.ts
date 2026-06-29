@@ -20,7 +20,7 @@ import { t } from "../../../i18n/runtime.js";
 export interface PluginRecommendation {
   /** Stable identifier — matches plugin id where applicable, or `chat-basics` for the fallback. */
   pluginId: string;
-  /** Korean label shown in the chip body (emoji는 별도 필드). */
+  /** Label shown in the chip body (emoji는 별도 필드). */
   label: string;
   /** Leading emoji in the chip. */
   emoji: string;
@@ -36,7 +36,7 @@ export interface PluginRecommendation {
 interface MatrixRow {
   pluginId: string;
   /** Plain label string for entries with an English label, or omit in favour of labelKey. */
-  label: string;
+  label?: string;
   /** i18n key to resolve at call time (used when the label requires translation). */
   labelKey?: string;
   emoji: string;
@@ -69,7 +69,6 @@ const MATRIX: MatrixRow[] = [
     // marketplace slug is `lvis-plugin-work-assistant`. Display label is
     // the user-facing 업무 도우미 brand.
     pluginId: "work-assistant",
-    label: "work assistant",
     labelKey: "pluginRecommendationMatrix.workAssistantLabel",
     emoji: "💼",
     keywords: ["업무", "할일", "todo", "task", "proactive", "assistant", "일정"],
@@ -77,7 +76,7 @@ const MATRIX: MatrixRow[] = [
   },
   {
     pluginId: "ms-graph",
-    label: "calendar (MS Graph)",
+    labelKey: "pluginRecommendationMatrix.msGraphLabel",
     emoji: "📅",
     keywords: ["일정", "이메일", "메일", "캘린더", "calendar", "outlook", "email", "ms graph", "msgraph"],
     marketplaceSlug: "lvis-plugin-ms-graph",
@@ -118,7 +117,7 @@ export function inferRecommendedPlugins(intro: string): PluginRecommendation[] {
       seen.add(row.pluginId);
       hits.push({
         pluginId: row.pluginId,
-        label: row.labelKey ? t(row.labelKey) : row.label,
+        label: row.labelKey ? t(row.labelKey) : (row.label ?? row.pluginId),
         emoji: row.emoji,
         marketplaceSlug: row.marketplaceSlug,
       });

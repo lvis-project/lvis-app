@@ -6,6 +6,7 @@ import { describe, it, expect, vi, afterEach } from "vitest";
 import { render, screen, waitFor, fireEvent } from "@testing-library/react";
 import React from "react";
 import { makeMockLvisApi } from "./mock-lvis-api.js";
+import { t } from "../../src/i18n/runtime.js";
 
 afterEach(() => {
   vi.unstubAllGlobals();
@@ -72,7 +73,7 @@ describe("UsageDashboard", () => {
     await renderDashboard();
     await waitFor(() => {
       expect(screen.getByText("claude")).toBeTruthy();
-      expect(screen.getAllByText(/cache r/).length).toBeGreaterThan(0);
+      expect(screen.getAllByText(new RegExp(t("usageDashboard.colCache"))).length).toBeGreaterThan(0);
     });
   });
 

@@ -25,17 +25,17 @@ import { useTranslation } from "../../../i18n/react.js";
 
 // ─── Main inline diff component (edit_file / apply_patch / write_file inline) ─
 
-const VERB_BY_TOOL: Record<FileEditDiffData["tool"], string> = {
-  edit_file: "Edit",
-  apply_patch: "Patch",
-  write_file: "Write",
+const VERB_KEY_BY_TOOL: Record<FileEditDiffData["tool"], string> = {
+  edit_file: "fileEditDiff.verbEdit",
+  apply_patch: "fileEditDiff.verbPatch",
+  write_file: "fileEditDiff.verbWrite",
 };
 
 export function FileEditDiff({ data }: { data: FileEditDiffData }) {
   const { t } = useTranslation();
   const [open, setOpen] = useState(true);
   const totals = computeLineTotals(data.hunks);
-  const verb = data.isNewFile ? "Create" : VERB_BY_TOOL[data.tool];
+  const verb = t(data.isNewFile ? "fileEditDiff.verbCreate" : VERB_KEY_BY_TOOL[data.tool]);
   const Icon = data.isNewFile ? FilePlus2 : FilePenLine;
 
   return (
@@ -66,18 +66,28 @@ export function FileEditDiff({ data }: { data: FileEditDiffData }) {
         </span>
         <span className="ml-auto flex shrink-0 items-center gap-2 text-[10px] text-muted-foreground">
           {totals.added > 0 && (
-            <span className="text-success" aria-label={`Added ${totals.added} lines`}>
+            <span
+              className="text-success"
+              aria-label={t("fileEditDiff.addedLinesAriaLabel", {
+                count: String(totals.added),
+              })}
+            >
               +{totals.added}
             </span>
           )}
           {totals.removed > 0 && (
-            <span className="text-destructive" aria-label={`Removed ${totals.removed} lines`}>
+            <span
+              className="text-destructive"
+              aria-label={t("fileEditDiff.removedLinesAriaLabel", {
+                count: String(totals.removed),
+              })}
+            >
               −{totals.removed}
             </span>
           )}
           {data.truncated && (
             <span className="text-warning" title={t("fileEditDiff.truncatedTitle")}>
-              truncated
+              {t("fileEditDiff.truncatedLabel")}
             </span>
           )}
         </span>
@@ -112,6 +122,7 @@ function DiffHunk({
   startLine: number;
   separator: boolean;
 }) {
+  const { t } = useTranslation();
   const removed = hunk.oldText.length > 0 ? hunk.oldText.split("\n") : [];
   const added = hunk.newText.length > 0 ? hunk.newText.split("\n") : [];
   let line = startLine;
@@ -119,7 +130,7 @@ function DiffHunk({
     <>
       {separator && (
         <div className="border-t border-dashed border-border/(--opacity-strong) bg-muted/(--opacity-light) px-3 py-0.5 text-[10px] text-muted-foreground">
-          @@ next hunk
+          @@ {t("fileEditDiff.nextHunk")}
         </div>
       )}
       {removed.map((text, i) => {
