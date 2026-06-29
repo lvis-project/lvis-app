@@ -2047,7 +2047,6 @@ export function App() {
             onActivateHome={() => setActiveView("home")}
             onJumpToSession={handleLoadSessionAndRefresh}
             onRefreshSessions={refreshSessions}
-            appMode={appMode}
             chatContextValue={chatContextValue}
             onAsk={(q, intent, opts) => handleAsk(q, "default", intent, opts)}
             /* opts 의 inputOrigin / injectHint 가 그대로 handleAsk 4번째
