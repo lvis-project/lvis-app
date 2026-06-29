@@ -1,4 +1,4 @@
-import { Fragment, useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { Fragment, useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import { useTranslation } from "../../i18n/react.js";
 import { flushSync } from "react-dom";
 import { ChevronDown, KeyRound, Pencil, Star, GitBranch } from "lucide-react";
@@ -40,6 +40,7 @@ import { getApi } from "./api-client.js";
 import { highlightText } from "./utils/html-preview.js";
 import { useChatContext } from "./context/ChatContext.js";
 import { InputActionBar } from "./components/InputActionBar.js";
+import type { AppMode } from "./MainToolbar.js";
 import { useInputStatusRow } from "./hooks/use-input-status-row.js";
 import { Composer, type ComposerHandle } from "./components/Composer.js";
 import { useSuggestedReplies } from "./hooks/use-suggested-replies.js";
@@ -65,6 +66,7 @@ import { lookupBillablePricingOptional } from "../../shared/pricing-data.js";
 import type { LLMVendor } from "../../shared/llm-vendor-defaults.js";
 
 const CHAT_BOTTOM_THRESHOLD_PX = 96;
+const MAX_SAVED_CHAT_SCROLL_POSITIONS = 24;
 const KOREA_DATE_KEY_FORMATTER = new Intl.DateTimeFormat("en-US", {
   timeZone: "Asia/Seoul",
   year: "numeric",
@@ -74,6 +76,30 @@ const KOREA_DATE_KEY_FORMATTER = new Intl.DateTimeFormat("en-US", {
 
 type ImportedTriggerEntry = Extract<ChatEntry, { kind: "imported_trigger" }>;
 type ToolGroupEntry = Extract<ChatEntry, { kind: "tool_group" }>;
+type SavedChatScrollPosition = {
+  sessionId: string | null;
+  top: number;
+  bottomGap: number;
+  entryCount: number;
+  updatedAt: number;
+};
+
+const savedChatScrollPositions = new Map<string, SavedChatScrollPosition>();
+let lastSavedChatScrollPosition: SavedChatScrollPosition | null = null;
+
+function clampScrollTop(top: number, viewport: HTMLElement): number {
+  const maxTop = Math.max(0, viewport.scrollHeight - viewport.clientHeight);
+  return Math.max(0, Math.min(top, maxTop));
+}
+
+function pruneSavedChatScrollPositions(): void {
+  if (savedChatScrollPositions.size <= MAX_SAVED_CHAT_SCROLL_POSITIONS) return;
+  const oldestKeys = [...savedChatScrollPositions.entries()]
+    .sort((a, b) => a[1].updatedAt - b[1].updatedAt)
+    .slice(0, savedChatScrollPositions.size - MAX_SAVED_CHAT_SCROLL_POSITIONS)
+    .map(([key]) => key);
+  for (const key of oldestKeys) savedChatScrollPositions.delete(key);
+}
 
 function isTurnStartEntry(entry: ChatEntry | undefined): boolean {
   return entry?.kind === "user" || entry?.kind === "imported_trigger";
@@ -265,6 +291,10 @@ export interface ChatViewProps {
   plugins: PluginEntry[];
   /** Navigate to a plugin view */
   onSelectPlugin: (viewKey: string) => void;
+  /** Workspace mode; chat mode compacts the footer model label. */
+  appMode?: AppMode;
+  /** Opens the deferred approval queue dialog from the footer approval count. */
+  onOpenApprovalQueue?: () => void;
   currentSessionKind?: "main" | "routine";
   currentSessionTitle?: string;
   sessions?: SessionSummary[];
@@ -323,7 +353,7 @@ function AskUserAnswerBubble({
   );
 }
 
-export function ChatView({ api, onAsk, onEditSave, onFork, onToggleStar, onRetryEffort, onContinueFromLastUser, isEntryStarred, onAbort, onGuide, onGuideError, onFeedback, subAgentSpawns, loadedSkills, hasAskQuestions, askQuestions, onResolveAskQuestion, plugins, onSelectPlugin, currentSessionKind = "main", currentSessionTitle, sessions, onLoadSession, onRefreshSessions, commandActions, commandPopoverOpen, onCommandPopoverOpenChange, onPluginPrimaryAction, onRoutineAcknowledge, statusBar }: ChatViewProps) {
+export function ChatView({ api, onAsk, onEditSave, onFork, onToggleStar, onRetryEffort, onContinueFromLastUser, isEntryStarred, onAbort, onGuide, onGuideError, onFeedback, subAgentSpawns, loadedSkills, hasAskQuestions, askQuestions, onResolveAskQuestion, plugins, onSelectPlugin, appMode = "work", onOpenApprovalQueue, currentSessionKind = "main", currentSessionTitle, sessions, onLoadSession, onRefreshSessions, commandActions, commandPopoverOpen, onCommandPopoverOpenChange, onPluginPrimaryAction, onRoutineAcknowledge, statusBar }: ChatViewProps) {
   const { t } = useTranslation();
   // We still need the api for SessionTodoPanel; obtain it via singleton.
   const workflowApi = getApi();
@@ -625,6 +655,67 @@ export function ChatView({ api, onAsk, onEditSave, onFork, onToggleStar, onRetry
     if (!viewport) return true;
     return viewport.scrollHeight - viewport.scrollTop - viewport.clientHeight <= CHAT_BOTTOM_THRESHOLD_PX;
   }, [scrollViewportRef]);
+
+  const saveScrollPosition = useCallback((
+    viewport: HTMLElement | null = scrollViewportRef.current,
+    options: { preserveAwayFromBottom?: boolean } = {},
+  ) => {
+    if (!viewport) return;
+    const snapshot: SavedChatScrollPosition = {
+      sessionId: currentSessionId ?? null,
+      top: viewport.scrollTop,
+      bottomGap: Math.max(0, viewport.scrollHeight - viewport.scrollTop - viewport.clientHeight),
+      entryCount: entries.length,
+      updatedAt: Date.now(),
+    };
+    if (
+      options.preserveAwayFromBottom === true &&
+      snapshot.bottomGap <= CHAT_BOTTOM_THRESHOLD_PX &&
+      lastSavedChatScrollPosition &&
+      lastSavedChatScrollPosition.bottomGap > CHAT_BOTTOM_THRESHOLD_PX &&
+      lastSavedChatScrollPosition.entryCount === snapshot.entryCount &&
+      lastSavedChatScrollPosition.sessionId === snapshot.sessionId
+    ) {
+      return;
+    }
+    lastSavedChatScrollPosition = snapshot;
+    if (!currentSessionId) return;
+    savedChatScrollPositions.set(currentSessionId, snapshot);
+    pruneSavedChatScrollPositions();
+  }, [currentSessionId, entries.length, scrollViewportRef]);
+
+  const restoredSessionScrollRef = useRef<string | null>(null);
+
+  useLayoutEffect(() => {
+    const viewport = scrollViewportRef.current;
+    if (!viewport || !currentSessionId) return;
+    if (restoredSessionScrollRef.current === currentSessionId) return;
+
+    const saved = savedChatScrollPositions.get(currentSessionId)
+      ?? (lastSavedChatScrollPosition?.entryCount === entries.length ? lastSavedChatScrollPosition : undefined);
+    if (saved && entries.length === 0 && viewport.scrollHeight <= viewport.clientHeight) {
+      return;
+    }
+
+    const applyRestore = () => {
+      const targetTop = saved
+        ? viewport.scrollHeight - viewport.clientHeight - saved.bottomGap
+        : viewport.scrollHeight;
+      viewport.scrollTop = clampScrollTop(targetTop, viewport);
+      const bottomGap = Math.max(0, viewport.scrollHeight - viewport.scrollTop - viewport.clientHeight);
+      const nearBottom = bottomGap <= CHAT_BOTTOM_THRESHOLD_PX;
+      pinnedToBottomRef.current = nearBottom;
+      setShowJumpToBottom(!nearBottom);
+      saveScrollPosition(viewport);
+    };
+
+    applyRestore();
+    previousEntryCountRef.current = entries.length;
+    previousSessionIdRef.current = currentSessionId;
+    restoredSessionScrollRef.current = currentSessionId;
+    const frame = window.requestAnimationFrame(applyRestore);
+    return () => window.cancelAnimationFrame(frame);
+  }, [currentSessionId, entries.length, saveScrollPosition, scrollViewportRef]);
 
   const cancelAutoBottomPin = useCallback(() => {
     if (autoBottomPinFrameRef.current === null) return;
@@ -1133,11 +1224,15 @@ export function ChatView({ api, onAsk, onEditSave, onFork, onToggleStar, onRetry
       pinnedToBottomRef.current = nearBottom;
       if (!nearBottom) cancelAutoBottomPin();
       setShowJumpToBottom(!nearBottom);
+      saveScrollPosition(viewport);
     };
     onScroll();
     viewport.addEventListener("scroll", onScroll, { passive: true });
-    return () => viewport.removeEventListener("scroll", onScroll);
-  }, [cancelAutoBottomPin, isNearBottom, scrollViewportRef]);
+    return () => {
+      saveScrollPosition(viewport, { preserveAwayFromBottom: true });
+      viewport.removeEventListener("scroll", onScroll);
+    };
+  }, [cancelAutoBottomPin, isNearBottom, saveScrollPosition, scrollViewportRef]);
 
   useEffect(() => {
     const previousEntryCount = previousEntryCountRef.current;
@@ -1976,8 +2071,10 @@ export function ChatView({ api, onAsk, onEditSave, onFork, onToggleStar, onRetry
             enableThinkingChat={enableThinkingChat}
             onToggleThinking={toggleThinking}
             statusRow={inputStatusRow}
+            appMode={appMode}
             onOpenModelSettings={onOpenModelSettings}
             onOpenPermissions={onOpenInputPermissions}
+            onOpenApprovalQueue={onOpenApprovalQueue}
           />
             </div>
           </div>

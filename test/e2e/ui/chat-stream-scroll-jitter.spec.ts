@@ -243,4 +243,46 @@ test.describe("chat stream bottom-follow jitter", () => {
       await teardownSeededElectron(ctx);
     }
   });
+
+  test("restores the chat scroll position after leaving home and returning", async () => {
+    const ctx = await launchChatScrollProbe();
+    try {
+      expect(await emitAndSample(
+        ctx.page,
+        longChunks("restore-position-line", 44).map((text) => ({ type: "text_delta", text })),
+        { waitForBottom: true },
+      )).toBe(true);
+      await ctx.page.waitForFunction((selector) => {
+        const viewport = document.querySelector<HTMLElement>(selector);
+        if (!viewport) return false;
+        return viewport.scrollHeight - viewport.scrollTop - viewport.clientHeight <= 2;
+      }, CHAT_VIEWPORT_SELECTOR);
+
+      const before = await ctx.page.evaluate((selector) => {
+        const viewport = document.querySelector<HTMLElement>(selector);
+        if (!viewport) return { scrollTop: -1, bottomGap: -1 };
+        viewport.scrollTop = Math.max(0, viewport.scrollHeight - viewport.clientHeight - 260);
+        viewport.dispatchEvent(new Event("scroll", { bubbles: true }));
+        return {
+          scrollTop: viewport.scrollTop,
+          bottomGap: Math.max(0, viewport.scrollHeight - viewport.scrollTop - viewport.clientHeight),
+        };
+      }, CHAT_VIEWPORT_SELECTOR);
+      expect(before.bottomGap).toBeGreaterThan(120);
+      await expect(ctx.page.getByTestId("jump-to-bottom")).toBeVisible();
+
+      await ctx.page.getByTestId("sidebar-memory").click();
+      await expect(ctx.page.getByTestId("main-content-back")).toBeVisible({ timeout: 10_000 });
+      await ctx.page.getByTestId("main-content-back").click();
+      await expect(ctx.page.locator(CHAT_VIEWPORT_SELECTOR)).toBeVisible({ timeout: 10_000 });
+
+      await expect.poll(async () => (await readViewport(ctx.page)).bottomGap, { timeout: 5_000 })
+        .toBeGreaterThan(120);
+      const restored = await readViewport(ctx.page);
+      expect(Math.abs(restored.bottomGap - before.bottomGap)).toBeLessThanOrEqual(8);
+      await expect(ctx.page.getByTestId("jump-to-bottom")).toBeVisible();
+    } finally {
+      await teardownSeededElectron(ctx);
+    }
+  });
 });
