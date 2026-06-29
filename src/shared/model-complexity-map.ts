@@ -28,16 +28,22 @@
  *     `LLM_VENDOR_MODEL_OPTIONS[vendor]` for that vendor — verified by
  *     the unit test under `__tests__/`.
  *
+ * Cline-scale provider expansion note:
+ *   - OpenAI-compatible preset vendors use their configured default model for
+ *     all three tiers. Those endpoints are heterogeneous and user-routed, so a
+ *     hardcoded low/mid/high catalog would be more misleading than useful.
+ *
  * Cross-importer boundary:
  *   - Imported by `SubAgentRunner` (engine) and `agent-profile-store`
  *     (main). Pure / browser-safe — no Electron / Node imports.
- *   - When a new vendor lands in `LLM_VENDORS`, this map MUST be
- *     extended in the same PR. The compile-time `Record<LLMVendor, ...>`
- *     constraint guarantees the typecheck fails until each new vendor
- *     declares its tiers.
+ *   - When a new vendor needs real tier semantics, add it to
+ *     `EXPLICIT_MODEL_COMPLEXITY_MAP`. Otherwise the runtime coverage test
+ *     verifies that the vendor falls back to its selectable default model.
  */
 import {
+  LLM_VENDOR_DEFAULTS,
   LLM_VENDOR_MODEL_OPTIONS,
+  LLM_VENDORS,
   type LLMVendor,
 } from "./llm-vendor-defaults.js";
 
@@ -75,9 +81,9 @@ export function isModelComplexityLevel(
  *   - high: deep-reasoning model for analysis / multi-step planning
  *     (e.g. `planner`'s 7-dimension clarity scoring loop).
  */
-export const MODEL_COMPLEXITY_MAP: Readonly<
+const EXPLICIT_MODEL_COMPLEXITY_MAP: Partial<
   Record<LLMVendor, Readonly<Record<ModelComplexityLevel, string>>>
-> = Object.freeze({
+> = {
   claude: Object.freeze({
     low: "claude-haiku-4-5",
     mid: "claude-sonnet-4-6",
@@ -116,7 +122,25 @@ export const MODEL_COMPLEXITY_MAP: Readonly<
     mid: "Qwen3.6-35B-A3B-NVFP4",
     high: "Qwen3.6-35B-A3B-NVFP4",
   }),
-});
+};
+
+function defaultComplexityMapForVendor(
+  vendor: LLMVendor,
+): Readonly<Record<ModelComplexityLevel, string>> {
+  const model = LLM_VENDOR_DEFAULTS[vendor].model;
+  return Object.freeze({ low: model, mid: model, high: model });
+}
+
+export const MODEL_COMPLEXITY_MAP: Readonly<
+  Record<LLMVendor, Readonly<Record<ModelComplexityLevel, string>>>
+> = Object.freeze(
+  Object.fromEntries(
+    LLM_VENDORS.map((vendor) => [
+      vendor,
+      EXPLICIT_MODEL_COMPLEXITY_MAP[vendor] ?? defaultComplexityMapForVendor(vendor),
+    ]),
+  ) as Record<LLMVendor, Readonly<Record<ModelComplexityLevel, string>>>,
+);
 
 /**
  * Resolve `(vendor, level)` to a concrete model ID. Returns `null` when

@@ -26,6 +26,7 @@ import {
   isValidFontFamilyOverride,
 } from "../shared/appearance-font.js";
 import { DEFAULT_LOCALE, normalizeLocale, type Locale } from "../i18n/index.js";
+import { DEFAULT_APP_MODE, normalizeAppMode, type InitialAppMode } from "../shared/initial-app-mode.js";
 import { createLogger } from "../lib/logger.js";
 const log = createLogger("settings");
 
@@ -329,18 +330,18 @@ export interface WebViewSettings {
 export type SystemCloseBehavior = "hide-to-tray" | "quit";
 
 /**
- * Workspace mode persisted across restarts. `"action"` is the inline working
- * layout (expanded sidebar, centered 800×600 window); `"chat"` is the focused
+ * Workspace mode persisted across restarts. `"work"` is the inline working
+ * layout (expanded sidebar, centered work canvas); `"chat"` is the focused
  * chat layout (collapsed icon rail, right-docked window). Persisted here so the
  * renderer can seed its first render from the saved value (no flash of the
  * wrong mode) and the main process can size the window correctly at creation.
  * SoT for the value union lives in `src/shared/initial-app-mode.ts`.
  */
-export type SystemAppMode = "chat" | "action";
+export type SystemAppMode = InitialAppMode;
 
 export interface SystemSettings {
   closeBehavior: SystemCloseBehavior;
-  /** Persisted workspace mode (chat vs action). Default "action". */
+  /** Persisted workspace mode (chat vs work). Default "work". */
   appMode: SystemAppMode;
 }
 
@@ -511,7 +512,7 @@ const DEFAULT_SETTINGS: AppSettings = {
   },
   system: {
     closeBehavior: "hide-to-tray",
-    appMode: "action",
+    appMode: DEFAULT_APP_MODE,
   },
   plugins: {},
   pluginConfigs: {},
@@ -716,8 +717,9 @@ export class SettingsService {
         );
       }
       const rawAppMode = partial.system.appMode;
-      if (typeof rawAppMode === "string" && (VALID_APP_MODES as readonly string[]).includes(rawAppMode)) {
-        next.appMode = rawAppMode as SystemAppMode;
+      const normalizedAppMode = normalizeAppMode(rawAppMode);
+      if (normalizedAppMode !== null) {
+        next.appMode = normalizedAppMode;
       } else if (rawAppMode !== undefined) {
         log.warn(
           `system.appMode patch ignored (received ${JSON.stringify(rawAppMode)}), keeping %s`,
@@ -1237,7 +1239,6 @@ function normalizeWebView(input: unknown): WebViewSettings {
 }
 
 const VALID_CLOSE_BEHAVIORS: readonly SystemCloseBehavior[] = ["hide-to-tray", "quit"];
-const VALID_APP_MODES: readonly SystemAppMode[] = ["chat", "action"];
 
 function normalizeSystem(input: unknown): SystemSettings {
   if (!input || typeof input !== "object" || Array.isArray(input)) {
@@ -1261,8 +1262,9 @@ function normalizeSystem(input: unknown): SystemSettings {
     );
   }
   const rawAppMode = obj.appMode;
-  if (typeof rawAppMode === "string" && (VALID_APP_MODES as readonly string[]).includes(rawAppMode)) {
-    result.appMode = rawAppMode as SystemAppMode;
+  const normalizedAppMode = normalizeAppMode(rawAppMode);
+  if (normalizedAppMode !== null) {
+    result.appMode = normalizedAppMode;
   } else if (rawAppMode !== undefined) {
     log.warn(
       `system.appMode invalid (received ${JSON.stringify(rawAppMode)}), using default %s`,

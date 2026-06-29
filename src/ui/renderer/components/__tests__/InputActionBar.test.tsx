@@ -131,6 +131,7 @@ describe("InputActionBar (unified bar)", () => {
     expect(trailing.querySelector("[data-testid='thinking-button']")).toBeNull();
     const statusRow = getByTestId("iab-status-row");
     expect(statusRow.querySelector("[data-testid='reasoning-slider']")).toBeTruthy();
+    expect(statusRow.querySelector("[data-testid='reasoning-slider'] svg")).toBeTruthy();
   });
 
   it("does NOT render the legacy PluginGridButton (plugins live in the sidebar + slash picker)", () => {
@@ -255,6 +256,7 @@ describe("InputActionBar (unified bar)", () => {
     const row = getByTestId("iab-status-row");
     expect(row).toBeTruthy();
     expect(getByTestId("iab-status-model").textContent).toContain("OpenAI · gpt-5.4");
+    expect(getByTestId("iab-status-model").querySelector("svg")).toBeTruthy();
     // The TokenProgressRing widget now lives in the status row.
     const ringHost = getByTestId("iab-status-ring");
     expect(ringHost.querySelector("[data-testid='ring-slot']")).toBeTruthy();
@@ -263,6 +265,14 @@ describe("InputActionBar (unified bar)", () => {
     expect(permission.compareDocumentPosition(ringHost) & Node.DOCUMENT_POSITION_PRECEDING).toBeTruthy();
     // The separate context-percent text cell is gone.
     expect(row.querySelector("[data-testid='iab-status-context']")).toBeNull();
+  });
+
+  it("hides the vendor prefix from the model cell in chat mode", () => {
+    const { getByTestId } = renderBar({ appMode: "chat" });
+    const model = getByTestId("iab-status-model");
+    expect(model.textContent).toContain("gpt-5.4");
+    expect(model.textContent).not.toContain("OpenAI");
+    expect(model.getAttribute("title")).toBe("OpenAI · gpt-5.4");
   });
 
   it("colors the permission text per mode (no pill/outline)", () => {
@@ -308,5 +318,19 @@ describe("InputActionBar (unified bar)", () => {
     const pending = getByTestId("iab-status-pending");
     const permission = getByTestId("iab-status-permission");
     expect(pending.compareDocumentPosition(permission) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+    expect(getByTestId("permission-pending-badge").textContent).toContain("2");
+  });
+
+  it("opens the deferred approval queue from the pending-approval button", () => {
+    const onOpenApprovalQueue = vi.fn();
+    const onOpenPermissions = vi.fn();
+    const { getByTestId } = renderBar({
+      statusRow: { ...defaultStatusRow, permissionMode: "auto", pendingApprovals: 2 },
+      onOpenApprovalQueue,
+      onOpenPermissions,
+    });
+    fireEvent.click(getByTestId("iab-status-pending"));
+    expect(onOpenApprovalQueue).toHaveBeenCalledTimes(1);
+    expect(onOpenPermissions).not.toHaveBeenCalled();
   });
 });

@@ -705,7 +705,7 @@ export function Sidebar({
           viewKey="settings"
           label={t("mainToolbar.settings")}
           icon={<KeyRound className={`h-4 w-4 ${hasApiKey === false ? "text-destructive" : ""}`} />}
-          // Active when settings render inline (action mode). Marketplace stays
+          // Active when settings render inline (work mode). Marketplace stays
           // false — it's an overlay launcher that never sets activeView.
           isActive={activeView === "settings"}
           onClick={onOpenSettings}

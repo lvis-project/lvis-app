@@ -21,7 +21,7 @@
  * Spec: docs/blueprints/composer-redesign-message-queue.md
  */
 import { useCallback, useEffect, useRef, type MouseEvent, type ReactNode } from "react";
-import { HelpCircle, Paperclip, Square, User } from "lucide-react";
+import { Brain, HelpCircle, Paperclip, Square, User } from "lucide-react";
 import { Button } from "../../../components/ui/button.js";
 import { Popover, PopoverContent, PopoverTrigger } from "../../../components/ui/popover.js";
 import { Tooltip, TooltipContent, TooltipTrigger } from "../../../components/ui/tooltip.js";
@@ -82,10 +82,14 @@ export interface InputActionBarProps {
   // Status sub-row.
   /** Resolved model / permission / active fields (from useInputStatusRow). */
   statusRow: InputStatusRow;
+  /** Workspace mode controls compact status-row model labeling. */
+  appMode?: "chat" | "work";
   /** Opens Settings → LLM when the model cell is clicked. */
   onOpenModelSettings?: () => void;
   /** Opens Settings → Permissions when the permission cell is clicked. */
   onOpenPermissions?: () => void;
+  /** Opens the deferred approval queue dialog. Separate from permission settings. */
+  onOpenApprovalQueue?: () => void;
 }
 
 function attachButtonLabel(
@@ -138,8 +142,10 @@ export function InputActionBar({
   enableThinkingChat,
   onToggleThinking,
   statusRow,
+  appMode = "work",
   onOpenModelSettings,
   onOpenPermissions,
+  onOpenApprovalQueue,
 }: InputActionBarProps) {
   const { t } = useTranslation();
   const assistantMenuRequestIdRef = useRef<string | null>(null);
@@ -270,9 +276,11 @@ export function InputActionBar({
       {/* ── STATUS SUB-ROW ──────────────────────────────────────────── */}
       <StatusSubRow
         statusRow={statusRow}
+        appMode={appMode}
         ringSlot={ringSlot}
         onOpenModelSettings={onOpenModelSettings}
         onOpenPermissions={onOpenPermissions}
+        onOpenApprovalQueue={onOpenApprovalQueue}
         enableThinkingChat={enableThinkingChat}
         onToggleThinking={onToggleThinking}
       />
@@ -291,16 +299,20 @@ export function InputActionBar({
  */
 function StatusSubRow({
   statusRow,
+  appMode,
   ringSlot,
   onOpenModelSettings,
   onOpenPermissions,
+  onOpenApprovalQueue,
   enableThinkingChat,
   onToggleThinking,
 }: {
   statusRow: InputStatusRow;
+  appMode: "chat" | "work";
   ringSlot: ReactNode;
   onOpenModelSettings?: () => void;
   onOpenPermissions?: () => void;
+  onOpenApprovalQueue?: () => void;
   enableThinkingChat: boolean;
   onToggleThinking: (next: boolean) => void | Promise<void>;
 }) {
@@ -309,6 +321,7 @@ function StatusSubRow({
   // Mode label ONLY — the pending-approval count is now its own separate
   // button before the permission cell (no longer appended to the label text).
   const permissionLabel = t(PERMISSION_LABEL_KEYS[permissionMode]);
+  const displayModel = appMode === "chat" ? stripVendorPrefix(vendorModel) : vendorModel;
 
   return (
     <div
@@ -316,7 +329,7 @@ function StatusSubRow({
       className="flex min-w-0 flex-nowrap items-center gap-1.5 px-3 pb-1.5 text-[11px] text-muted-foreground"
     >
       {/* Status sub-row order (user): ring on the LEFT; then a right-aligned
-          cluster — [대기 승인 N] · permission(mode only) · vendor·model ·
+          cluster — [대기 승인 N] · permission(mode only) · model ·
           추론 slider · active-dot. */}
 
       {/* Token progress ring — leftmost. */}
@@ -328,22 +341,28 @@ function StatusSubRow({
         {/* Pending approvals — its OWN button, BEFORE the permission cell. */}
         {pendingApprovals > 0 && (
           <>
-            {onOpenPermissions ? (
+            {onOpenApprovalQueue ? (
               <button
                 type="button"
-                onClick={onOpenPermissions}
+                onClick={onOpenApprovalQueue}
                 data-testid="iab-status-pending"
                 className="shrink-0 rounded-full border border-warning px-1.5 tabular-nums text-warning hover:opacity-80 focus:outline-none focus-visible:ring-1 focus-visible:ring-ring"
-                title={t("permissionModeBadge.queueButtonLabel", { pendingText: "" })}
+                title={t("permissionModeBadge.queueButtonLabel", {
+                  pendingText: t("permissionModeBadge.pendingTextCount", { count: pendingApprovals }),
+                })}
               >
-                {t("permissionModeBadge.queueLabelCount", { count: pendingApprovals })}
+                <span data-testid="permission-pending-badge">
+                  {t("permissionModeBadge.queueLabelCount", { count: pendingApprovals })}
+                </span>
               </button>
             ) : (
               <span
                 data-testid="iab-status-pending"
                 className="shrink-0 rounded-full border border-warning px-1.5 tabular-nums text-warning"
               >
-                {t("permissionModeBadge.queueLabelCount", { count: pendingApprovals })}
+                <span data-testid="permission-pending-badge">
+                  {t("permissionModeBadge.queueLabelCount", { count: pendingApprovals })}
+                </span>
               </span>
             )}
             <span className="shrink-0 opacity-30" aria-hidden="true">·</span>
@@ -375,20 +394,26 @@ function StatusSubRow({
 
         <span className="shrink-0 opacity-30" aria-hidden="true">·</span>
 
-        {/* Vendor · model. */}
+        {/* Model — brain icon + compact label; chat mode hides vendor prefix. */}
         {onOpenModelSettings ? (
           <button
             type="button"
             onClick={onOpenModelSettings}
             data-testid="iab-status-model"
-            className="min-w-0 shrink truncate text-left hover:opacity-80 focus:outline-none focus-visible:ring-1 focus-visible:ring-ring"
+            className="inline-flex min-w-0 shrink items-center gap-1 text-left hover:opacity-80 focus:outline-none focus-visible:ring-1 focus-visible:ring-ring"
             title={vendorModel}
           >
-            {vendorModel}
+            <Brain className="h-3 w-3 shrink-0 text-muted-foreground" aria-hidden="true" />
+            <span className="min-w-0 truncate">{displayModel}</span>
           </button>
         ) : (
-          <span data-testid="iab-status-model" className="min-w-0 shrink truncate" title={vendorModel}>
-            {vendorModel}
+          <span
+            data-testid="iab-status-model"
+            className="inline-flex min-w-0 shrink items-center gap-1"
+            title={vendorModel}
+          >
+            <Brain className="h-3 w-3 shrink-0 text-muted-foreground" aria-hidden="true" />
+            <span className="min-w-0 truncate">{displayModel}</span>
           </span>
         )}
 
@@ -408,6 +433,13 @@ function StatusSubRow({
       </div>
     </div>
   );
+}
+
+function stripVendorPrefix(vendorModel: string): string {
+  const marker = " · ";
+  const idx = vendorModel.indexOf(marker);
+  if (idx < 0) return vendorModel;
+  return vendorModel.slice(idx + marker.length);
 }
 
 /**

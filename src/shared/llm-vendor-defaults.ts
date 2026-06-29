@@ -7,6 +7,301 @@
  * Pure, browser-safe — no Electron / Node imports.
  */
 
+export const OPENAI_COMPATIBLE_PRESET_VENDOR_IDS = [
+  "openrouter",
+  "deepseek",
+  "xai",
+  "together",
+  "fireworks",
+  "groq",
+  "poolside",
+  "cerebras",
+  "sambanova",
+  "nebius",
+  "baseten",
+  "requesty",
+  "litellm",
+  "huggingface",
+  "vercel-ai-gateway",
+  "v0",
+  "aihubmix",
+  "hicap",
+  "nousResearch",
+  "huawei-cloud-maas",
+  "wandb",
+  "xiaomi",
+  "kilo",
+  "zai",
+  "zai-coding-plan",
+  "qwen",
+  "qwen-code",
+  "doubao",
+  "mistral",
+  "moonshot",
+  "asksage",
+  "ollama",
+  "lmstudio",
+  "oca",
+] as const;
+
+export type OpenAICompatiblePresetVendor =
+  (typeof OPENAI_COMPATIBLE_PRESET_VENDOR_IDS)[number];
+
+export interface OpenAICompatibleVendorPreset {
+  label: string;
+  apiKeyPlaceholder: string;
+  baseUrl: string;
+  defaultModel: string;
+  modelOptions: readonly string[];
+}
+
+export const OPENAI_COMPATIBLE_VENDOR_PRESETS: Readonly<
+  Record<OpenAICompatiblePresetVendor, OpenAICompatibleVendorPreset>
+> = Object.freeze({
+  openrouter: {
+    label: "OpenRouter",
+    apiKeyPlaceholder: "sk-or-...",
+    baseUrl: "https://openrouter.ai/api/v1",
+    defaultModel: "anthropic/claude-sonnet-4.6",
+    modelOptions: ["anthropic/claude-sonnet-4.6", "openai/gpt-5.4"],
+  },
+  deepseek: {
+    label: "DeepSeek",
+    apiKeyPlaceholder: "sk-...",
+    baseUrl: "https://api.deepseek.com/v1",
+    defaultModel: "deepseek-v4-flash",
+    modelOptions: ["deepseek-v4-flash", "deepseek-chat", "deepseek-reasoner"],
+  },
+  xai: {
+    label: "xAI",
+    apiKeyPlaceholder: "xai-...",
+    baseUrl: "https://api.x.ai/v1",
+    defaultModel: "grok-4.20-0309-non-reasoning",
+    modelOptions: ["grok-4.20-0309-non-reasoning", "grok-4"],
+  },
+  together: {
+    label: "Together AI",
+    apiKeyPlaceholder: "tog_...",
+    baseUrl: "https://api.together.xyz/v1",
+    defaultModel: "Qwen/Qwen3.5-397B-A17B",
+    modelOptions: ["Qwen/Qwen3.5-397B-A17B", "meta-llama/Llama-3.3-70B-Instruct-Turbo"],
+  },
+  fireworks: {
+    label: "Fireworks AI",
+    apiKeyPlaceholder: "fw_...",
+    baseUrl: "https://api.fireworks.ai/inference/v1",
+    defaultModel: "accounts/fireworks/models/kimi-k2p6",
+    modelOptions: ["accounts/fireworks/models/kimi-k2p6"],
+  },
+  groq: {
+    label: "Groq",
+    apiKeyPlaceholder: "gsk_...",
+    baseUrl: "https://api.groq.com/openai/v1",
+    defaultModel: "moonshotai/kimi-k2-instruct-0905",
+    modelOptions: ["moonshotai/kimi-k2-instruct-0905", "llama-3.3-70b-versatile"],
+  },
+  poolside: {
+    label: "Poolside",
+    apiKeyPlaceholder: "ps_...",
+    baseUrl: "https://inference.poolside.ai/v1",
+    defaultModel: "poolside/laguna-m.1",
+    modelOptions: ["poolside/laguna-m.1"],
+  },
+  cerebras: {
+    label: "Cerebras",
+    apiKeyPlaceholder: "csk-...",
+    baseUrl: "https://api.cerebras.ai/v1",
+    defaultModel: "zai-glm-4.7",
+    modelOptions: ["zai-glm-4.7", "llama3.1-8b"],
+  },
+  sambanova: {
+    label: "SambaNova",
+    apiKeyPlaceholder: "sambanova-...",
+    baseUrl: "https://api.sambanova.ai/v1",
+    defaultModel: "Meta-Llama-3.3-70B-Instruct",
+    modelOptions: ["Meta-Llama-3.3-70B-Instruct"],
+  },
+  nebius: {
+    label: "Nebius",
+    apiKeyPlaceholder: "nebius_...",
+    baseUrl: "https://api.studio.nebius.ai/v1",
+    defaultModel: "nvidia/nemotron-3-super-120b-a12b",
+    modelOptions: ["nvidia/nemotron-3-super-120b-a12b"],
+  },
+  baseten: {
+    label: "Baseten",
+    apiKeyPlaceholder: "baseten_...",
+    baseUrl: "https://model-api.baseten.co/v1",
+    defaultModel: "deepseek-ai/DeepSeek-V3.1",
+    modelOptions: ["deepseek-ai/DeepSeek-V3.1"],
+  },
+  requesty: {
+    label: "Requesty",
+    apiKeyPlaceholder: "rq_...",
+    baseUrl: "https://router.requesty.ai/v1",
+    defaultModel: "openai/gpt-5.4",
+    modelOptions: ["openai/gpt-5.4", "anthropic/claude-sonnet-4.6"],
+  },
+  litellm: {
+    label: "LiteLLM",
+    apiKeyPlaceholder: "sk-...",
+    baseUrl: "http://localhost:4000/v1",
+    defaultModel: "gpt-5.4",
+    modelOptions: ["gpt-5.4", "claude-sonnet-4-6"],
+  },
+  huggingface: {
+    label: "Hugging Face",
+    apiKeyPlaceholder: "hf_...",
+    baseUrl: "https://router.huggingface.co/v1",
+    defaultModel: "MiniMaxAI/MiniMax-M2.5",
+    modelOptions: ["MiniMaxAI/MiniMax-M2.5"],
+  },
+  "vercel-ai-gateway": {
+    label: "Vercel AI Gateway",
+    apiKeyPlaceholder: "vck_...",
+    baseUrl: "https://ai-gateway.vercel.sh/v1",
+    defaultModel: "alibaba/qwen3.6-plus",
+    modelOptions: ["alibaba/qwen3.6-plus", "anthropic/claude-sonnet-4.6", "openai/gpt-5.4"],
+  },
+  v0: {
+    label: "Vercel V0",
+    apiKeyPlaceholder: "v0_...",
+    baseUrl: "https://api.v0.dev/v1",
+    defaultModel: "v0-1.5-md",
+    modelOptions: ["v0-1.5-md"],
+  },
+  aihubmix: {
+    label: "AI Hub Mix",
+    apiKeyPlaceholder: "sk-...",
+    baseUrl: "https://api.aihubmix.com/v1",
+    defaultModel: "gpt-5.4-mini",
+    modelOptions: ["gpt-5.4-mini", "claude-sonnet-4-6"],
+  },
+  hicap: {
+    label: "HiCap",
+    apiKeyPlaceholder: "hicap_...",
+    baseUrl: "https://api.hicap.ai/v1",
+    defaultModel: "hicap-pro",
+    modelOptions: ["hicap-pro"],
+  },
+  nousResearch: {
+    label: "Nous Research",
+    apiKeyPlaceholder: "nr_...",
+    baseUrl: "https://inference-api.nousresearch.com/v1",
+    defaultModel: "DeepHermes-3-Llama-3-3-70B-Preview",
+    modelOptions: ["DeepHermes-3-Llama-3-3-70B-Preview"],
+  },
+  "huawei-cloud-maas": {
+    label: "Huawei Cloud MaaS",
+    apiKeyPlaceholder: "huawei_...",
+    baseUrl: "https://infer-modelarts.cn-southwest-2.myhuaweicloud.com/v1",
+    defaultModel: "DeepSeek-R1",
+    modelOptions: ["DeepSeek-R1"],
+  },
+  wandb: {
+    label: "W&B by CoreWeave",
+    apiKeyPlaceholder: "wandb_...",
+    baseUrl: "https://api.inference.wandb.ai/v1",
+    defaultModel: "nvidia/NVIDIA-Nemotron-3-Super-120B-A12B-FP8",
+    modelOptions: ["nvidia/NVIDIA-Nemotron-3-Super-120B-A12B-FP8"],
+  },
+  xiaomi: {
+    label: "Xiaomi",
+    apiKeyPlaceholder: "mi_...",
+    baseUrl: "https://api.xiaomimimo.com/v1",
+    defaultModel: "mimo-v2-omni",
+    modelOptions: ["mimo-v2-omni"],
+  },
+  kilo: {
+    label: "Kilo Gateway",
+    apiKeyPlaceholder: "kilo_...",
+    baseUrl: "https://api.kilo.ai/api/gateway",
+    defaultModel: "gpt-5.4",
+    modelOptions: ["gpt-5.4", "claude-sonnet-4-6"],
+  },
+  zai: {
+    label: "Z.AI",
+    apiKeyPlaceholder: "zhipu_...",
+    baseUrl: "https://api.z.ai/api/paas/v4",
+    defaultModel: "glm-5v-turbo",
+    modelOptions: ["glm-5v-turbo", "glm-4.7"],
+  },
+  "zai-coding-plan": {
+    label: "Z.AI Coding Plan",
+    apiKeyPlaceholder: "zhipu_...",
+    baseUrl: "https://api.z.ai/api/coding/paas/v4",
+    defaultModel: "glm-5.2",
+    modelOptions: ["glm-5.2"],
+  },
+  qwen: {
+    label: "Alibaba Qwen",
+    apiKeyPlaceholder: "sk-...",
+    baseUrl: "https://dashscope.aliyuncs.com/compatible-mode/v1",
+    defaultModel: "qwen-plus-latest",
+    modelOptions: ["qwen-plus-latest", "qwen3-max", "qwen3-coder-plus"],
+  },
+  "qwen-code": {
+    label: "Alibaba Qwen Code",
+    apiKeyPlaceholder: "sk-...",
+    baseUrl: "https://dashscope.aliyuncs.com/compatible-mode/v1",
+    defaultModel: "qwen3-coder-plus",
+    modelOptions: ["qwen3-coder-plus", "qwen-plus-latest"],
+  },
+  doubao: {
+    label: "Doubao",
+    apiKeyPlaceholder: "ark_...",
+    baseUrl: "https://ark.cn-beijing.volces.com/api/v3",
+    defaultModel: "doubao-1-5-pro-256k-250115",
+    modelOptions: ["doubao-1-5-pro-256k-250115"],
+  },
+  mistral: {
+    label: "Mistral",
+    apiKeyPlaceholder: "mistral_...",
+    baseUrl: "https://api.mistral.ai/v1",
+    defaultModel: "mistral-medium-latest",
+    modelOptions: ["mistral-medium-latest", "codestral-latest"],
+  },
+  moonshot: {
+    label: "Moonshot",
+    apiKeyPlaceholder: "sk-...",
+    baseUrl: "https://api.moonshot.ai/v1",
+    defaultModel: "kimi-k2-0905-preview",
+    modelOptions: ["kimi-k2-0905-preview"],
+  },
+  asksage: {
+    label: "AskSage",
+    apiKeyPlaceholder: "asksage_...",
+    baseUrl: "https://api.asksage.ai/server",
+    defaultModel: "gpt-5.4-mini",
+    modelOptions: ["gpt-5.4-mini"],
+  },
+  ollama: {
+    label: "Ollama",
+    apiKeyPlaceholder: "ollama",
+    baseUrl: "http://localhost:11434/v1",
+    defaultModel: "llama3.3",
+    modelOptions: ["llama3.3", "qwen3", "gpt-oss"],
+  },
+  lmstudio: {
+    label: "LM Studio",
+    apiKeyPlaceholder: "lm-studio",
+    baseUrl: "http://localhost:1234/v1",
+    defaultModel: "local-model",
+    modelOptions: ["local-model"],
+  },
+  oca: {
+    label: "Oracle Code Assist",
+    apiKeyPlaceholder: "oca_...",
+    baseUrl: "https://code.aiservice.us-chicago-1.oci.oraclecloud.com/20250206/app/litellm",
+    defaultModel: "anthropic/claude-3-7-sonnet-20250219",
+    modelOptions: ["anthropic/claude-3-7-sonnet-20250219"],
+  },
+});
+
+const OPENAI_COMPATIBLE_PRESET_VENDOR_SET = new Set<string>(
+  OPENAI_COMPATIBLE_PRESET_VENDOR_IDS,
+);
+
 export const LLM_VENDORS = [
   "claude",
   "openai",
@@ -15,6 +310,7 @@ export const LLM_VENDORS = [
   "azure-foundry",
   "vertex-ai",
   "openai-compatible",
+  ...OPENAI_COMPATIBLE_PRESET_VENDOR_IDS,
 ] as const;
 
 export type LLMVendor = (typeof LLM_VENDORS)[number];
@@ -57,6 +353,16 @@ export function isLLMVendor(v: unknown): v is LLMVendor {
   );
 }
 
+export function isOpenAICompatiblePresetVendor(
+  v: unknown,
+): v is OpenAICompatiblePresetVendor {
+  return typeof v === "string" && OPENAI_COMPATIBLE_PRESET_VENDOR_SET.has(v);
+}
+
+export function isOpenAICompatibleVendor(v: LLMVendor): boolean {
+  return v === "openai-compatible" || isOpenAICompatiblePresetVendor(v);
+}
+
 /**
  * Per-vendor configuration block. Every vendor's block in `LLMSettings.vendors`
  * carries its own complete copy of these fields, so switching the active
@@ -89,7 +395,7 @@ export interface LLMVendorSettings {
 
 const RETIRED_LLM_MODEL_IDS = new Set(["gpt-4o"]);
 
-const DEFAULT_MODEL: Record<LLMVendor, string> = {
+const CORE_DEFAULT_MODEL = {
   claude: "claude-sonnet-4-6",
   openai: "gpt-5.4-mini",
   gemini: "gemini-2.5-flash",
@@ -97,10 +403,19 @@ const DEFAULT_MODEL: Record<LLMVendor, string> = {
   "azure-foundry": "gpt-5.4-mini",
   "vertex-ai": "gemini-2.5-flash",
   "openai-compatible": "Qwen3.6-35B-A3B-NVFP4",
-};
+} as const;
 
-export const LLM_VENDOR_MODEL_OPTIONS: Readonly<Record<LLMVendor, readonly string[]>> =
-  Object.freeze({
+const DEFAULT_MODEL: Record<LLMVendor, string> = Object.freeze({
+  ...CORE_DEFAULT_MODEL,
+  ...Object.fromEntries(
+    OPENAI_COMPATIBLE_PRESET_VENDOR_IDS.map((vendor) => [
+      vendor,
+      OPENAI_COMPATIBLE_VENDOR_PRESETS[vendor].defaultModel,
+    ]),
+  ),
+} as Record<LLMVendor, string>);
+
+const CORE_VENDOR_MODEL_OPTIONS = {
     claude: [
       "claude-sonnet-4-6",
       "claude-opus-4-6",
@@ -151,7 +466,20 @@ export const LLM_VENDOR_MODEL_OPTIONS: Readonly<Record<LLMVendor, readonly strin
     // and routes by model id. The list seeds the dropdown with the known LVIS
     // cluster models; users point baseUrl at their own gateway/server.
     "openai-compatible": ["Qwen3.6-35B-A3B-NVFP4", "Nemotron-3-Nano-30B-A3B-FP8"],
-  });
+  } as const;
+
+const PRESET_VENDOR_MODEL_OPTIONS = Object.fromEntries(
+  OPENAI_COMPATIBLE_PRESET_VENDOR_IDS.map((vendor) => [
+    vendor,
+    OPENAI_COMPATIBLE_VENDOR_PRESETS[vendor].modelOptions,
+  ]),
+) as Record<OpenAICompatiblePresetVendor, readonly string[]>;
+
+export const LLM_VENDOR_MODEL_OPTIONS: Readonly<Record<LLMVendor, readonly string[]>> =
+  Object.freeze({
+    ...CORE_VENDOR_MODEL_OPTIONS,
+    ...PRESET_VENDOR_MODEL_OPTIONS,
+  }) as unknown as Readonly<Record<LLMVendor, readonly string[]>>;
 
 /**
  * True when `model` is a selectable model ID for `vendor` per
@@ -181,8 +509,12 @@ export function normalizeLlmVendorModel(vendor: LLMVendor, model: string): strin
 
 function defaultBlock(vendor: LLMVendor): LLMVendorSettings {
   const model = DEFAULT_MODEL[vendor];
+  const preset = isOpenAICompatiblePresetVendor(vendor)
+    ? OPENAI_COMPATIBLE_VENDOR_PRESETS[vendor]
+    : null;
   return {
     model,
+    ...(preset ? { baseUrl: preset.baseUrl } : {}),
     enableThinking: true,
     thinkingBudgetTokens: 10_000,
   };

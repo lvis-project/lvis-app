@@ -462,7 +462,7 @@ export interface PluginUiExtension {
   /**
    * Detached-window geometry hints. Used only when the host opens this
    * extension in a magnetic-snap BrowserWindow; the decision to detach is
-   * owned solely by the app's mode (appMode: chat detaches, action stays
+   * owned solely by the app's mode (appMode: chat detaches, work stays
    * inline), NOT by the plugin. Width/height are initial defaults; saved
    * user bounds still win.
    */

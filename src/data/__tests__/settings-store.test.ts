@@ -470,7 +470,7 @@ describe("SettingsService system — close behavior (PR #1032)", () => {
 
   it("defaults closeBehavior to 'hide-to-tray' on a fresh install", () => {
     const service = new SettingsService({ userDataPath });
-    expect(service.get("system")).toEqual({ closeBehavior: "hide-to-tray", appMode: "action" });
+    expect(service.get("system")).toEqual({ closeBehavior: "hide-to-tray", appMode: "work" });
   });
 
   it("applies default 'hide-to-tray' when system field is absent on disk (legacy settings.json)", () => {
@@ -480,16 +480,16 @@ describe("SettingsService system — close behavior (PR #1032)", () => {
       "utf-8",
     );
     const service = new SettingsService({ userDataPath });
-    expect(service.get("system")).toEqual({ closeBehavior: "hide-to-tray", appMode: "action" });
+    expect(service.get("system")).toEqual({ closeBehavior: "hide-to-tray", appMode: "work" });
   });
 
   it("round-trips a 'quit' preference across restart", async () => {
     const service = new SettingsService({ userDataPath });
     await service.patch({ system: { closeBehavior: "quit" } });
-    expect(service.get("system")).toEqual({ closeBehavior: "quit", appMode: "action" });
+    expect(service.get("system")).toEqual({ closeBehavior: "quit", appMode: "work" });
 
     const reloaded = new SettingsService({ userDataPath });
-    expect(reloaded.get("system")).toEqual({ closeBehavior: "quit", appMode: "action" });
+    expect(reloaded.get("system")).toEqual({ closeBehavior: "quit", appMode: "work" });
   });
 
   // Critic M1 — schema-invalid value on disk falls back to default for THIS
@@ -510,7 +510,7 @@ describe("SettingsService system — close behavior (PR #1032)", () => {
       "utf-8",
     );
     const service = new SettingsService({ userDataPath });
-    expect(service.get("system")).toEqual({ closeBehavior: "hide-to-tray", appMode: "action" });
+    expect(service.get("system")).toEqual({ closeBehavior: "hide-to-tray", appMode: "work" });
     expect(service.get("chat").systemPrompt).toBe("preserved-prompt");
     expect(service.get("chat").autoCompact).toBe(false);
     expect(service.get("marketplace").cloudBaseUrl).toBe("https://preserved.example");
@@ -523,7 +523,7 @@ describe("SettingsService system — close behavior (PR #1032)", () => {
       "utf-8",
     );
     const service = new SettingsService({ userDataPath });
-    expect(service.get("system")).toEqual({ closeBehavior: "hide-to-tray", appMode: "action" });
+    expect(service.get("system")).toEqual({ closeBehavior: "hide-to-tray", appMode: "work" });
   });
 
   // Critic N1 — patch-merge must NOT clobber a valid prior preference when
@@ -555,9 +555,9 @@ describe("SettingsService system — workspace appMode", () => {
     rmSync(userDataPath, { recursive: true, force: true });
   });
 
-  it("defaults appMode to 'action' on a fresh install", () => {
+  it("defaults appMode to 'work' on a fresh install", () => {
     const service = new SettingsService({ userDataPath });
-    expect(service.get("system").appMode).toBe("action");
+    expect(service.get("system").appMode).toBe("work");
   });
 
   it("round-trips a 'chat' appMode across restart", async () => {
@@ -577,7 +577,23 @@ describe("SettingsService system — workspace appMode", () => {
     );
     const service = new SettingsService({ userDataPath });
     // closeBehavior preserved; appMode falls back to default — neither clobbers the other.
-    expect(service.get("system")).toEqual({ closeBehavior: "quit", appMode: "action" });
+    expect(service.get("system")).toEqual({ closeBehavior: "quit", appMode: "work" });
+  });
+
+  it("normalizes legacy 'action' appMode on disk to 'work'", () => {
+    writeFileSync(
+      join(userDataPath, "lvis-settings.json"),
+      JSON.stringify({ system: { closeBehavior: "quit", appMode: "action" } }),
+      "utf-8",
+    );
+    const service = new SettingsService({ userDataPath });
+    expect(service.get("system")).toEqual({ closeBehavior: "quit", appMode: "work" });
+  });
+
+  it("normalizes a legacy 'action' appMode patch to 'work'", async () => {
+    const service = new SettingsService({ userDataPath });
+    await service.patch({ system: { appMode: "action" as never } });
+    expect(service.get("system").appMode).toBe("work");
   });
 
   it("ignores invalid appMode patch and preserves prior 'chat' preference", async () => {
