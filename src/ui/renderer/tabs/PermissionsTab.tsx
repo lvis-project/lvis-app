@@ -387,21 +387,19 @@ export function PermissionsTab() {
     try {
       const result = await window.lvis.permission.sandboxWindowsInstall();
       if (result.cancelled) {
-        // UAC dismissed — not an error. Revert the toggle + setting and show the
-        // cancelled banner. The user can re-opt-in to re-attempt.
+        // UAC dismissed — not an error. Keep the user's opt-in setting ON so
+        // the Windows consent panel remains visible and they can retry instead
+        // of seeing the toggle immediately snap back off.
         setWindowsInstallCancelled(true);
-        setSandboxEnabled(false);
-        setWindowsStatus(null);
-        await getApi().updateSettings({ features: { osToolSandbox: false } });
+        setWindowsStatus(await window.lvis.permission.sandboxWindowsStatus());
         return;
       }
       // Defensive: an error shape from the IPC (install threw or returned ok:false).
-      // Revert to the same safe state as a cancellation so the toggle is never
-      // left half-enabled. Show an error banner with the reason.
+      // Keep the user's opt-in setting ON and leave the consent panel available
+      // so a transient installer failure can be retried without re-enabling the
+      // setting first.
       if ("ok" in result && result.ok === false) {
-        setSandboxEnabled(false);
-        setWindowsStatus(null);
-        await getApi().updateSettings({ features: { osToolSandbox: false } });
+        setWindowsStatus(await window.lvis.permission.sandboxWindowsStatus());
         const detail = (result as { ok: false; message?: string; error?: string }).message
           ?? (result as { ok: false; message?: string; error?: string }).error
           ?? "unknown error";
