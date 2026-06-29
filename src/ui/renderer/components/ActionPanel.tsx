@@ -10,7 +10,7 @@ import {
   Wrench,
   type LucideIcon,
 } from "lucide-react";
-import { useState, type ReactNode } from "react";
+import { type ReactNode } from "react";
 import { useTranslation } from "../../../i18n/react.js";
 import { Button } from "../../../components/ui/button.js";
 import { Tooltip, TooltipContent, TooltipTrigger } from "../../../components/ui/tooltip.js";
@@ -20,7 +20,6 @@ export interface ActionPanelActivityItem {
   label: string;
   detail?: string;
   target?: string;
-  iconUrl?: string;
   status?: "running" | "done" | "error";
 }
 
@@ -42,7 +41,6 @@ export interface ActionPanelProps {
   open: boolean;
   onOpenChange: (open: boolean) => void;
   activity: ActionPanelActivityState;
-  onOpenExternalPath?: (filePath: string) => void;
   onOpenExternalUrl?: (url: string) => void;
 }
 
@@ -106,7 +104,7 @@ function ActivitySection({
           const rowContent = (
             <>
               {web ? (
-                <Favicon src={item.iconUrl} label={item.label} />
+                <Globe2 className="mt-0.5 h-3.5 w-3.5 shrink-0 text-muted-foreground" aria-hidden="true" />
               ) : (
                 <Icon className="mt-0.5 h-3.5 w-3.5 shrink-0 text-muted-foreground" aria-hidden="true" />
               )}
@@ -151,22 +149,6 @@ function ActivitySection({
         })}
       </ul>
     </section>
-  );
-}
-
-function Favicon({ src, label }: { src?: string; label: string }) {
-  const [failed, setFailed] = useState(false);
-  if (!src || failed) {
-    return <Globe2 className="mt-0.5 h-3.5 w-3.5 shrink-0 text-muted-foreground" aria-hidden="true" />;
-  }
-  return (
-    <img
-      src={src}
-      alt=""
-      className="mt-0.5 h-3.5 w-3.5 shrink-0 rounded-sm"
-      title={label}
-      onError={() => setFailed(true)}
-    />
   );
 }
 
@@ -293,7 +275,6 @@ export function ActionPanel({
   open,
   onOpenChange,
   activity,
-  onOpenExternalPath,
   onOpenExternalUrl,
 }: ActionPanelProps) {
   const { t } = useTranslation();
@@ -391,13 +372,11 @@ export function ActionPanel({
           title={t("actionPanel.readFilesTitle")}
           icon={FileText}
           items={activity.readFiles}
-          onOpenItem={onOpenExternalPath}
         />
         <ActivitySection
           title={t("actionPanel.writtenFilesTitle")}
           icon={FilePenLine}
           items={activity.writtenFiles}
-          onOpenItem={onOpenExternalPath}
         />
         <ActivitySection
           title={t("actionPanel.fetchedPagesTitle")}

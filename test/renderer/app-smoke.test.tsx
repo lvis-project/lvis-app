@@ -143,20 +143,18 @@ describe("App smoke (Phase 1 infra)", () => {
     expect(container.querySelector('[data-testid^="action-panel-activity-"]')).toBeFalsy();
   });
 
-  it("surfaces populated action panel activity and opens file/url targets", () => {
+  it("surfaces populated action panel activity and only opens URL targets", () => {
     const readFiles = Array.from({ length: 6 }, (_, index) => ({
       id: `read-${index}`,
       label: `latest-read-${index}`,
       target: `C:\\tmp\\latest-read-${index}.md`,
     }));
-    const openPath = vi.fn();
     const openUrl = vi.fn();
     const { container } = render(
       <TooltipProvider>
         <ActionPanel
           open
           onOpenChange={vi.fn()}
-          onOpenExternalPath={openPath}
           onOpenExternalUrl={openUrl}
           activity={{
             readFileCount: readFiles.length,
@@ -178,7 +176,6 @@ describe("App smoke (Phase 1 infra)", () => {
               label: "https://example.com",
               detail: "https://example.com/full/path?q=1",
               target: "https://example.com/full/path?q=1",
-              iconUrl: "https://example.com/favicon.ico",
             }],
           }}
         />
@@ -197,8 +194,10 @@ describe("App smoke (Phase 1 infra)", () => {
     expect(container.textContent).toContain("https://example.com");
     expect(container.textContent).not.toContain("/full/path");
 
-    fireEvent.click(container.querySelector('[data-testid="action-panel-activity-read-0"]')!);
-    expect(openPath).toHaveBeenCalledWith("C:\\tmp\\latest-read-0.md");
+    const readRow = container.querySelector('[data-testid="action-panel-activity-read-0"]')!;
+    expect(readRow.tagName).toBe("DIV");
+    fireEvent.click(readRow);
+    expect(openUrl).not.toHaveBeenCalled();
     fireEvent.click(container.querySelector('[data-testid="action-panel-activity-web-1"]')!);
     expect(openUrl).toHaveBeenCalledWith("https://example.com/full/path?q=1");
   });
