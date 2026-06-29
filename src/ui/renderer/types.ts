@@ -527,12 +527,6 @@ export type LvisApi = {
     protocol?: string;
     message?: string;
   }>;
-  /** Open a local filesystem path with the OS default app. Main-side rejects URLs. */
-  openExternalPath: (filePath: string) => Promise<{
-    ok: boolean;
-    error?: string;
-    message?: string;
-  }>;
   /** #FU259 — MCP catalog (filtered to plugin_type === "mcp"). */
   listMcpCatalog: () => Promise<Array<{
     id: string;

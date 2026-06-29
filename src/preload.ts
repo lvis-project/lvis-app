@@ -596,12 +596,6 @@ const api = {
       protocol?: string;
       message?: string;
     }>,
-  openExternalPath: async (filePath: string) =>
-    ipcRenderer.invoke("lvis:shell:open-path", filePath) as Promise<{
-      ok: boolean;
-      error?: string;
-      message?: string;
-    }>,
   // #FU259 — MCP marketplace catalog + install
   listMcpCatalog: async () => ipcRenderer.invoke("lvis:mcp:catalog:list"),
   installMcpFromMarketplace: async (slug: string) =>
