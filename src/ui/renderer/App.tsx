@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useMemo, useReducer, useRef, useState } from "react";
 import { useTranslation } from "../../i18n/react.js";
 import { debugLog, isDebugStreamEnabled } from "../../lib/debug-stream.js";
+import type { ChatEntry, ToolEntryItem } from "../../lib/chat-stream-state.js";
 import {
   composeImportedTriggerOutgoing,
   composeOutgoing as composeOutgoingUtil,
@@ -78,6 +79,21 @@ import { normalizeSettingsTab } from "../../shared/settings-tabs.js";
 // ─── App ────────────────────────────────────────────
 
 const SAFE_PLUGIN_AUTH_ERROR_CODE = /^[A-Za-z0-9][A-Za-z0-9._:-]{0,80}$/;
+const FILE_CHANGE_TOOL_NAMES = new Set(["edit_file", "apply_patch", "write_file"]);
+const TERMINAL_TOOL_PATTERN = /(^|[._:-])(shell|bash|cmd|powershell|terminal|exec|run)([._:-]|$)/i;
+const BROWSER_TOOL_PATTERN = /(browser|playwright|screenshot|chrome|viewport|open_url|web_page)/i;
+
+function isFileChangeTool(tool: ToolEntryItem): boolean {
+  return FILE_CHANGE_TOOL_NAMES.has(tool.name) || tool.category === "write";
+}
+
+function isTerminalTool(tool: ToolEntryItem): boolean {
+  return tool.category === "shell" || TERMINAL_TOOL_PATTERN.test(tool.name);
+}
+
+function isBrowserTool(tool: ToolEntryItem): boolean {
+  return BROWSER_TOOL_PATTERN.test(tool.name);
+}
 
 function stringField(value: unknown, key: "code" | "error" | "message"): string | null {
   if (!value || typeof value !== "object") return null;
@@ -1500,6 +1516,43 @@ export function App() {
     [pluginViews, handleNewChat, handleViewSelect, onOpenSettings],
   );
 
+  const actionPanelExecution = useMemo(() => {
+    const metrics = {
+      approvalCount: approvalQueue.length,
+      permissionReviewCount: 0,
+      runningToolCount: 0,
+      failedToolCount: 0,
+      toolCallCount: 0,
+      fileChangeCount: 0,
+      terminalToolCount: 0,
+      browserToolCount: 0,
+      pluginUiResultCount: 0,
+      checkpointCount: 0,
+    };
+
+    for (const entry of entries as ChatEntry[]) {
+      if (entry.kind === "checkpoint") {
+        metrics.checkpointCount += 1;
+      } else if (entry.kind === "permission_review") {
+        if (entry.status === "reviewing" || entry.status === "needs_approval") {
+          metrics.permissionReviewCount += 1;
+        }
+      } else if (entry.kind === "tool_group") {
+        for (const tool of entry.tools) {
+          metrics.toolCallCount += 1;
+          if (tool.status === "running") metrics.runningToolCount += 1;
+          if (tool.status === "error") metrics.failedToolCount += 1;
+          if (isFileChangeTool(tool)) metrics.fileChangeCount += 1;
+          if (isTerminalTool(tool)) metrics.terminalToolCount += 1;
+          if (isBrowserTool(tool)) metrics.browserToolCount += 1;
+          if (tool.uiPayload) metrics.pluginUiResultCount += 1;
+        }
+      }
+    }
+
+    return metrics;
+  }, [approvalQueue.length, entries]);
+
   const onNewChat = useCallback(() => { void handleNewChat(); }, [handleNewChat]);
   const handleMarketplaceAnnouncementDismiss = useCallback(
     (id: number) => {
@@ -1857,8 +1910,34 @@ export function App() {
         </main>
         <ActionPanel
           actions={commandActions}
+          activeView={activeView}
           open={actionPanelOpen}
           onOpenChange={setActionPanelOpen}
+          currentSessionId={currentSessionId}
+          currentSessionKind={currentSessionKind}
+          currentSessionTitle={currentSessionTitle}
+          sessions={sessions}
+          onOpenSession={handleLoadSessionAndRefresh}
+          streaming={streaming}
+          askQuestionCount={askQuestions.length}
+          plugins={pluginEntries}
+          onSelectPlugin={handleViewSelect}
+          subAgentSpawns={subAgentSpawns}
+          loadedSkills={loadedSkills}
+          statusItems={statusPersistent}
+          visibleToast={statusVisibleToast}
+          pendingToastCount={statusPendingCount}
+          execution={actionPanelExecution}
+          onOpenDeferredQueue={() => setDeferredQueueOpen(true)}
+          context={{
+            usedTokens: usedTokens ?? 0,
+            effectiveBudget: effectiveBudget ?? contextBudget ?? 0,
+            contextOverflowPct: contextOverflowPct ?? 0,
+            tpmPct: tpmPct ?? 0,
+            isTpmOverflow: Boolean(isTpmOverflow),
+            llmVendor: llmVendor || "-",
+            llmModel: llmModel || "-",
+          }}
         />
         </div>
       </div>
