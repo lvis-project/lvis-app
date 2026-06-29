@@ -113,18 +113,23 @@ describe("App smoke (Phase 1 infra)", () => {
     expect(container.querySelector('[data-testid="action-panel"]')).toBeTruthy();
   });
 
-  it("runs connected actions from the right action panel", async () => {
+  it("opens review controls from the right action panel", async () => {
     const { container, api } = await renderApp();
     await waitFor(() => expect(api.getSettings).toHaveBeenCalled());
 
+    expect(container.textContent).not.toContain("검토 큐");
+
     await act(async () => {
-      fireEvent.click(container.querySelector('[data-testid="action-panel-item-settings"]')!);
+      fireEvent.click(container.querySelector('[data-testid="action-panel-tab-status"]')!);
+    });
+
+    await act(async () => {
+      fireEvent.click(container.querySelector('[data-testid="action-panel-review-queue"]')!);
     });
 
     await waitFor(() =>
-      expect(container.querySelector('[data-testid="settings-sidebar-heading"]')).toBeTruthy(),
+      expect(document.querySelector('[data-testid="deferred-queue-dialog"]')).toBeTruthy(),
     );
-    expect(api.openSettingsWindow).not.toHaveBeenCalled();
   });
 
   it("surfaces tools and status workspaces in the right action panel", async () => {
@@ -135,15 +140,20 @@ describe("App smoke (Phase 1 infra)", () => {
       fireEvent.click(container.querySelector('[data-testid="action-panel-tab-tools"]')!);
     });
     expect(container.querySelector('[data-testid="action-panel-tabpanel-tools"]')).toBeTruthy();
-    expect(container.textContent).toContain("플러그인 뷰");
+    expect(container.textContent).toContain("로드된 스킬");
     expect(container.textContent).toContain("서브에이전트");
+    expect(container.textContent).toContain("실행 영역");
+    expect(container.textContent).not.toContain("플러그인 뷰");
+    expect(container.textContent).not.toContain("연결된 액션");
 
     await act(async () => {
       fireEvent.click(container.querySelector('[data-testid="action-panel-tab-status"]')!);
     });
     expect(container.querySelector('[data-testid="action-panel-tabpanel-status"]')).toBeTruthy();
     expect(container.textContent).toContain("컨텍스트");
-    expect(container.textContent).toContain("큐");
+    expect(container.textContent).toContain("검토 게이트");
+    expect(container.textContent).toContain("알림");
+    expect(container.textContent).not.toContain("큐");
   });
 });
 

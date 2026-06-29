@@ -9,12 +9,9 @@ import {
   Globe2,
   Gauge,
   Layers3,
-  ListChecks,
-  MessageSquare,
   MonitorPlay,
   PanelRightClose,
   PanelRightOpen,
-  Play,
   RotateCcw,
   ShieldCheck,
   Sparkles,
@@ -27,8 +24,6 @@ import { Button } from "../../../components/ui/button.js";
 import { Tooltip, TooltipContent, TooltipTrigger } from "../../../components/ui/tooltip.js";
 import type { PersistentItem, ToastItem } from "../hooks/use-status-bar.js";
 import type { SessionSummary } from "../hooks/use-sessions.js";
-import type { PluginEntry } from "./PluginGridButton.js";
-import type { QuickAction } from "./CommandPopover.js";
 import type { SkillBadgeProps } from "./SkillBadge.js";
 import type { SubAgentSpawn } from "./SubAgentCard.js";
 
@@ -58,8 +53,6 @@ export interface ActionPanelExecutionState {
 }
 
 export interface ActionPanelProps {
-  actions: QuickAction[];
-  activeView: string;
   open: boolean;
   onOpenChange: (open: boolean) => void;
   currentSessionId: string;
@@ -68,9 +61,6 @@ export interface ActionPanelProps {
   sessions: SessionSummary[];
   onOpenSession: (sessionId: string) => void | boolean | Promise<void | boolean>;
   streaming: boolean;
-  askQuestionCount: number;
-  plugins: PluginEntry[];
-  onSelectPlugin: (viewKey: string) => void;
   subAgentSpawns: SubAgentSpawn[];
   loadedSkills: SkillBadgeProps[];
   statusItems: PersistentItem[];
@@ -157,8 +147,6 @@ function Section({
 }
 
 export function ActionPanel({
-  actions,
-  activeView,
   open,
   onOpenChange,
   currentSessionId,
@@ -167,9 +155,6 @@ export function ActionPanel({
   sessions,
   onOpenSession,
   streaming,
-  askQuestionCount,
-  plugins,
-  onSelectPlugin,
   subAgentSpawns,
   loadedSkills,
   statusItems,
@@ -192,25 +177,12 @@ export function ActionPanel({
   );
   const contextPct = percent(context.contextOverflowPct);
   const tpmPct = percent(context.tpmPct);
-  const attentionCount =
-    askQuestionCount + execution.approvalCount + execution.failedToolCount + pendingToastCount;
-
-  const runAction = useCallback((action: QuickAction) => {
-    void Promise.resolve(action.run()).catch((err) => {
-      console.error("[action-panel] action failed", err);
-    });
-  }, []);
 
   const openSession = useCallback((sessionId: string) => {
     void Promise.resolve(onOpenSession(sessionId)).catch((err) => {
       console.error("[action-panel] open session failed", err);
     });
   }, [onOpenSession]);
-
-  const openWorkBoard = useCallback(() => {
-    const action = actions.find((candidate) => candidate.id === "work-board") ?? actions[0];
-    if (action) runAction(action);
-  }, [actions, runAction]);
 
   if (!open) {
     return (
@@ -253,8 +225,8 @@ export function ActionPanel({
             <h2 className="truncate text-sm font-semibold leading-5">{t("actionPanel.title")}</h2>
             <p className="truncate text-[11px] leading-4 text-muted-foreground">
               {t("actionPanel.subtitle", {
-                actionCount: actions.length,
-                pluginCount: plugins.length,
+                agentCount: runningSubagents,
+                toolCount: execution.runningToolCount,
               })}
             </p>
           </div>
@@ -320,75 +292,7 @@ export function ActionPanel({
                     {streaming ? t("actionPanel.statusStreaming") : t("actionPanel.statusIdle")}
                   </span>
                 </div>
-                <div className="mt-3 grid grid-cols-3 gap-1 text-center text-[11px]">
-                  <div className="rounded bg-muted px-1 py-1">
-                    <div className="font-medium">{askQuestionCount}</div>
-                    <div className="truncate text-muted-foreground">{t("actionPanel.askQueueMetric")}</div>
-                  </div>
-                  <div className="rounded bg-muted px-1 py-1">
-                    <div className="font-medium">{runningSubagents}</div>
-                    <div className="truncate text-muted-foreground">{t("actionPanel.agentMetric")}</div>
-                  </div>
-                  <div className="rounded bg-muted px-1 py-1">
-                    <div className="font-medium">{attentionCount}</div>
-                    <div className="truncate text-muted-foreground">{t("actionPanel.attentionMetric")}</div>
-                  </div>
-                </div>
               </div>
-            </Section>
-
-            <Section title={t("actionPanel.controlsTitle")}>
-              <div className="grid grid-cols-2 gap-1.5">
-                <button
-                  type="button"
-                  className="flex min-h-10 items-center gap-2 rounded-md border border-border px-2 py-1.5 text-left text-xs hover:bg-accent focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
-                  data-testid="action-panel-review-queue"
-                  onClick={onOpenDeferredQueue}
-                >
-                  <ShieldCheck className="h-3.5 w-3.5 shrink-0 text-warning" aria-hidden="true" />
-                  <span className="min-w-0 flex-1 truncate">{t("actionPanel.openReviewQueue")}</span>
-                  <span className="font-medium">{execution.approvalCount}</span>
-                </button>
-                <button
-                  type="button"
-                  className="flex min-h-10 items-center gap-2 rounded-md border border-border px-2 py-1.5 text-left text-xs hover:bg-accent focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
-                  data-testid="action-panel-work-board"
-                  onClick={openWorkBoard}
-                >
-                  <ListChecks className="h-3.5 w-3.5 shrink-0 text-primary" aria-hidden="true" />
-                  <span className="min-w-0 flex-1 truncate">{t("actionPanel.openWorkBoard")}</span>
-                  <Play className="h-3.5 w-3.5 shrink-0 text-muted-foreground" aria-hidden="true" />
-                </button>
-              </div>
-            </Section>
-
-            <Section title={t("actionPanel.actionsTitle")} count={actions.length}>
-              <ul className="flex flex-col gap-1" aria-label={t("actionPanel.actionListAriaLabel")}>
-                {actions.map((action, index) => {
-                  const isActive = action.id === activeView || action.id === `v:${activeView}`;
-                  return (
-                    <li key={action.id}>
-                      <button
-                        type="button"
-                        aria-current={isActive ? "page" : undefined}
-                        className={`group flex min-h-10 w-full items-center gap-2 rounded-md border px-2.5 py-2 text-left text-sm transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring ${
-                          isActive
-                            ? "border-primary bg-primary/(--opacity-faint)"
-                            : "border-transparent hover:border-border hover:bg-accent"
-                        }`}
-                        data-testid={`action-panel-item-${action.id}`}
-                        onClick={() => runAction(action)}
-                      >
-                        <span className="flex h-6 w-6 shrink-0 items-center justify-center rounded bg-muted text-[11px] font-medium text-muted-foreground group-hover:text-foreground">
-                          {index + 1}
-                        </span>
-                        <span className="min-w-0 flex-1 truncate">{action.label}</span>
-                        <Play className="h-3.5 w-3.5 shrink-0 text-muted-foreground opacity-70" aria-hidden="true" />
-                      </button>
-                    </li>
-                  );
-                })}
-              </ul>
             </Section>
 
             <Section title={t("actionPanel.sessionsTitle")} count={recentSessions.length}>
@@ -422,29 +326,6 @@ export function ActionPanel({
 
         {activeTab === "tools" && (
           <>
-            <Section title={t("actionPanel.pluginsTitle")} count={plugins.length}>
-              {plugins.length > 0 ? (
-                <div className="grid grid-cols-2 gap-1.5">
-                  {plugins.map((plugin) => (
-                    <button
-                      key={plugin.viewKey}
-                      type="button"
-                      className="flex min-h-10 items-center gap-2 rounded-md border border-border px-2 py-1.5 text-left text-xs hover:bg-accent focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
-                      data-testid={`action-panel-plugin-${plugin.viewKey}`}
-                      onClick={() => onSelectPlugin(plugin.viewKey)}
-                    >
-                      <span className={`flex h-6 w-6 shrink-0 items-center justify-center rounded bg-muted text-[10px] font-semibold ${plugin.unauthed ? "text-warning" : "text-muted-foreground"}`}>
-                        {plugin.iconText || plugin.label.slice(0, 2).toUpperCase()}
-                      </span>
-                      <span className="min-w-0 flex-1 truncate">{plugin.label}</span>
-                    </button>
-                  ))}
-                </div>
-              ) : (
-                <p className="text-xs text-muted-foreground">{t("actionPanel.noPlugins")}</p>
-              )}
-            </Section>
-
             <Section title={t("actionPanel.skillsTitle")} count={loadedSkills.length}>
               {loadedSkills.length > 0 ? (
                 <ul className="flex flex-col gap-1">
@@ -577,11 +458,17 @@ export function ActionPanel({
 
             <Section title={t("actionPanel.reviewGatesTitle")}>
               <div className="grid grid-cols-2 gap-1.5">
-                <div className="flex items-center gap-2 rounded-md bg-muted px-2 py-2 text-xs">
+                <button
+                  type="button"
+                  className="flex items-center gap-2 rounded-md bg-muted px-2 py-2 text-left text-xs hover:bg-accent focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+                  aria-label={t("actionPanel.openReviewQueue")}
+                  data-testid="action-panel-review-queue"
+                  onClick={onOpenDeferredQueue}
+                >
                   <ShieldCheck className="h-3.5 w-3.5 shrink-0 text-warning" aria-hidden="true" />
                   <span className="min-w-0 flex-1 truncate">{t("actionPanel.approvalsLabel")}</span>
                   <span className="font-medium">{execution.approvalCount}</span>
-                </div>
+                </button>
                 <div className="flex items-center gap-2 rounded-md bg-muted px-2 py-2 text-xs">
                   <Activity className="h-3.5 w-3.5 shrink-0 text-muted-foreground" aria-hidden="true" />
                   <span className="min-w-0 flex-1 truncate">{t("actionPanel.permissionReviewLabel")}</span>
@@ -613,30 +500,6 @@ export function ActionPanel({
               )}
             </Section>
 
-            <Section title={t("actionPanel.queueTitle")}>
-              <div className="grid grid-cols-2 gap-1.5">
-                <div className="flex items-center gap-2 rounded-md bg-muted px-2 py-2 text-xs">
-                  <MessageSquare className="h-3.5 w-3.5 shrink-0 text-muted-foreground" aria-hidden="true" />
-                  <span className="min-w-0 flex-1 truncate">{t("actionPanel.askQueueLabel")}</span>
-                  <span className="font-medium">{askQuestionCount}</span>
-                </div>
-                <div className="flex items-center gap-2 rounded-md bg-muted px-2 py-2 text-xs">
-                  <ListChecks className="h-3.5 w-3.5 shrink-0 text-muted-foreground" aria-hidden="true" />
-                  <span className="min-w-0 flex-1 truncate">{t("actionPanel.statusQueueLabel")}</span>
-                  <span className="font-medium">{pendingToastCount}</span>
-                </div>
-                <div className="flex items-center gap-2 rounded-md bg-muted px-2 py-2 text-xs">
-                  <Bot className="h-3.5 w-3.5 shrink-0 text-muted-foreground" aria-hidden="true" />
-                  <span className="min-w-0 flex-1 truncate">{t("actionPanel.agentQueueLabel")}</span>
-                  <span className="font-medium">{runningSubagents}</span>
-                </div>
-                <div className="flex items-center gap-2 rounded-md bg-muted px-2 py-2 text-xs">
-                  <Wrench className="h-3.5 w-3.5 shrink-0 text-muted-foreground" aria-hidden="true" />
-                  <span className="min-w-0 flex-1 truncate">{t("actionPanel.toolQueueLabel")}</span>
-                  <span className="font-medium">{execution.runningToolCount}</span>
-                </div>
-              </div>
-            </Section>
           </>
         )}
       </div>
