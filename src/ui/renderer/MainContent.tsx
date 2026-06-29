@@ -161,6 +161,7 @@ function HomeChatPane(props: MainContentProps) {
         onPluginPrimaryAction={props.onPluginPrimaryAction}
         onRoutineAcknowledge={props.onRoutineAcknowledge}
         statusBar={props.statusBar}
+        blogLayout={props.appMode === "work"}
       />
     </ChatContextProvider>
   );
