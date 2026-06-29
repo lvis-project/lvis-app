@@ -89,6 +89,40 @@ describe("App smoke (Phase 1 infra)", () => {
     const list = await api.listStarred();
     expect(Array.isArray(list)).toBe(true);
   });
+
+  it("renders a closable right action panel", async () => {
+    const { container, api } = await renderApp();
+    await waitFor(() => expect(api.getSettings).toHaveBeenCalled());
+
+    expect(container.querySelector('[data-testid="action-panel"]')).toBeTruthy();
+
+    await act(async () => {
+      fireEvent.click(container.querySelector('[data-testid="action-panel-close"]')!);
+    });
+
+    expect(container.querySelector('[data-testid="action-panel"]')).toBeFalsy();
+    expect(container.querySelector('[data-testid="action-panel-rail"]')).toBeTruthy();
+
+    await act(async () => {
+      fireEvent.click(container.querySelector('[data-testid="action-panel-open"]')!);
+    });
+
+    expect(container.querySelector('[data-testid="action-panel"]')).toBeTruthy();
+  });
+
+  it("runs connected actions from the right action panel", async () => {
+    const { container, api } = await renderApp();
+    await waitFor(() => expect(api.getSettings).toHaveBeenCalled());
+
+    await act(async () => {
+      fireEvent.click(container.querySelector('[data-testid="action-panel-item-settings"]')!);
+    });
+
+    await waitFor(() =>
+      expect(container.querySelector('[data-testid="settings-sidebar-heading"]')).toBeTruthy(),
+    );
+    expect(api.openSettingsWindow).not.toHaveBeenCalled();
+  });
 });
 
 describe("Settings inline (work mode) vs detached (chat mode)", () => {

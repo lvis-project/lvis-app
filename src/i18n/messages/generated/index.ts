@@ -5,8 +5,9 @@
  * fragment files in this directory (`<namespace>.ts`, each exporting `en`/`ko`
  * objects) and merges them here.
  *
- * Fragments: 181
+ * Fragments: 182
  */
+import { en as en_actionPanel, ko as ko_actionPanel } from "./actionPanel.js";
 import { en as en_app, ko as ko_app } from "./app.js";
 import { en as en_appearanceTab, ko as ko_appearanceTab } from "./appearanceTab.js";
 import { en as en_approvalQueueStatus, ko as ko_approvalQueueStatus } from "./approvalQueueStatus.js";
@@ -190,6 +191,7 @@ import { en as en_workBoard, ko as ko_workBoard } from "./workBoard.js";
 import { en as en_workGroup, ko as ko_workGroup } from "./workGroup.js";
 
 export const generatedEn: Record<string, string> = {
+  ...en_actionPanel,
   ...en_app,
   ...en_appearanceTab,
   ...en_approvalQueueStatus,
@@ -374,6 +376,7 @@ export const generatedEn: Record<string, string> = {
 };
 
 export const generatedKo: Record<string, string> = {
+  ...ko_actionPanel,
   ...ko_app,
   ...ko_appearanceTab,
   ...ko_approvalQueueStatus,
