@@ -509,7 +509,7 @@ export function Sidebar({
         data-testid="sidebar-card"
         data-surface={collapsed ? "bare" : "card"}
         className={[
-          "flex min-h-0 flex-col transition-[width] duration-200 ease-out motion-reduce:transition-none",
+          "flex min-h-0 flex-col transition-[width] duration-[var(--motion-base)] ease-[var(--motion-ease-out)] motion-reduce:transition-none",
           collapsed
             ? // Bare region: width hugs its widest child (the cluster strip,
               // ≈144px); no surface tokens — transparent, on the band. `items-start`
@@ -523,7 +523,7 @@ export function Sidebar({
               // bottom (matching the full-height aside + the collapsed rail's
               // flex-1 body), so the surface reaches near the window bottom
               // instead of collapsing to content height.
-              "w-56 flex-1 min-h-0 overflow-hidden rounded-2xl border border-border bg-card shadow-2xl",
+              "lvis-surface-raised w-56 flex-1 min-h-0 overflow-hidden rounded-2xl bg-card",
         ].join(" ")}
       >
         {/* ── Cluster strip — [펼침/닫힘 toggle] → [검색] → [즐겨찾기] → [내보내기],
@@ -554,7 +554,7 @@ export function Sidebar({
               // lights; the rail does NOT inherit that clearance. `mt-2.5`
               // (≈10px) gives the rail card adequate top margin below the band so
               // it is not flush against the cluster strip in chat mode.
-              "mt-2.5 w-14 flex min-h-0 flex-1 flex-col overflow-hidden rounded-2xl border border-border bg-card shadow-2xl"
+              "lvis-surface-raised mt-2.5 w-14 flex min-h-0 flex-1 flex-col overflow-hidden rounded-2xl bg-card"
             : "flex min-h-0 flex-1 flex-col overflow-hidden"
         }
       >

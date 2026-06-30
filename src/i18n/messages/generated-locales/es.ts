@@ -998,6 +998,7 @@ export const esMessages: Record<string, string> = {
   "errorBoundary.fullFallback": "Error de renderizado",
   "errorBoundary.reloadButton": "Recargar",
   "errorBoundary.retryButton": "Rever",
+  "executiveGraphite.description": "Carcasa oscura + superficies de grafito cálido + acento de trabajo verde azulado",
   "fileEditDiff.addedLinesAriaLabel": "Se agregaron líneas {count}",
   "fileEditDiff.collapse": "Colapsar",
   "fileEditDiff.diffFileLost": "El archivo de diferencias se perdió (no está disponible después de reiniciar la sesión).",

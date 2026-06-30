@@ -40,8 +40,8 @@ const REQUIRED_TOKEN_KEYS: ReadonlyArray<keyof BundleTokens> = [
 const HSL_TRIPLE_RE = /^\d+(?:\.\d+)?\s+\d+(?:\.\d+)?%\s+\d+(?:\.\d+)?%/;
 
 describe("bundle registry", () => {
-  it("exports exactly 13 bundles", () => {
-    expect(BUNDLES).toHaveLength(13);
+  it("exports exactly 14 bundles", () => {
+    expect(BUNDLES).toHaveLength(14);
   });
 
   it("all bundle IDs are unique", () => {
@@ -163,5 +163,15 @@ describe("forest bundle invariants", () => {
   it("primary is teal hsl(170 70% 45%)", () => {
     const f = findBundle("forest")!;
     expect(f.tokens.primary).toBe("170 70% 45%");
+  });
+});
+
+describe("executive graphite bundle invariants", () => {
+  it("uses restrained graphite surfaces with a teal work accent", () => {
+    const g = findBundle("executive-graphite")!;
+    expect(g.shell).toBe("dark");
+    expect(g.tokens.background).toBe("24 8% 8%");
+    expect(g.tokens.primary).toBe("174 65% 45%");
+    expect(g.tokens["action-branch"]).toBe("38 86% 62%");
   });
 });

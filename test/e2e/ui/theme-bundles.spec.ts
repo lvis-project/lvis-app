@@ -69,6 +69,6 @@ test('every theme bundle resolves to a paintable surface', async ({ mainWindow }
   const distinct = Array.from(bgs.values()).filter((bg) => bg !== tokyoBg);
   expect(
     distinct.length,
-    'at least 8 of 12 bundles should produce a bg different from tokyo-night',
+    'at least 8 bundles should produce a bg different from tokyo-night',
   ).toBeGreaterThanOrEqual(8);
 });

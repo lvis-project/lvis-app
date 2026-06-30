@@ -998,6 +998,7 @@ export const frMessages: Record<string, string> = {
   "errorBoundary.fullFallback": "Erreur de rendu",
   "errorBoundary.reloadButton": "Recharger",
   "errorBoundary.retryButton": "Réessayer",
+  "executiveGraphite.description": "Coque sombre + surfaces graphite chaudes + accent de travail bleu sarcelle",
   "fileEditDiff.addedLinesAriaLabel": "Ajout des lignes {count}",
   "fileEditDiff.collapse": "Effondrement",
   "fileEditDiff.diffFileLost": "Le fichier Diff a été perdu (indisponible après le redémarrage de la session).",
