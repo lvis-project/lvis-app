@@ -2,7 +2,6 @@ import { useState } from "react";
 import { Input } from "../../../components/ui/input.js";
 import { Tabs, TabsList, TabsTrigger, TabsContent } from "../../../components/ui/tabs.js";
 import { ScrollArea } from "../../../components/ui/scroll-area.js";
-import { CardContent, CardDescription, CardHeader, CardTitle } from "../../../components/ui/card.js";
 import { useMemorySearch, type NoteResult, type SessionResult } from "../hooks/use-memory-search.js";
 import type { LvisApi } from "../types.js";
 import { t } from "../../../i18n/runtime.js";
@@ -112,11 +111,11 @@ export function MemorySearchPanel({ api, onOpenSession }: MemorySearchPanelProps
 
   return (
     <div className="mx-auto flex min-h-0 min-w-0 flex-1 w-full max-w-6xl flex-col overflow-hidden">
-      <CardHeader className="pb-4">
-        <CardTitle>{t("memorySearchPanel.panelTitle")}</CardTitle>
-        <CardDescription>{t("memorySearchPanel.panelDescription")}</CardDescription>
-      </CardHeader>
-      <CardContent className="flex min-h-0 min-w-0 flex-1 flex-col gap-3">
+      <div className="pb-4">
+        <h2 className="text-xl font-semibold tracking-normal text-foreground">{t("memorySearchPanel.panelTitle")}</h2>
+        <p className="mt-1 text-sm text-muted-foreground">{t("memorySearchPanel.panelDescription")}</p>
+      </div>
+      <div className="flex min-h-0 min-w-0 flex-1 flex-col gap-3">
         <Input
           placeholder={t("memorySearchPanel.searchPlaceholder")}
           value={query}
@@ -194,7 +193,7 @@ export function MemorySearchPanel({ api, onOpenSession }: MemorySearchPanelProps
             </ScrollArea>
           </TabsContent>
         </Tabs>
-      </CardContent>
+      </div>
     </div>
   );
 }

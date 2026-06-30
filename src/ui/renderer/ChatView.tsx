@@ -1940,7 +1940,7 @@ export function ChatView({ api, onAsk, onEditSave, onFork, onToggleStar, onRetry
           type="button"
           size="sm"
           variant="secondary"
-          className="absolute bottom-4 right-5 z-20 h-8 rounded-full border border-border/(--opacity-strong) bg-card/(--opacity-solid) px-3 text-xs shadow-md backdrop-blur"
+          className="lvis-surface-raised absolute bottom-4 right-5 z-20 h-8 rounded-full bg-card/(--opacity-solid) px-3 text-xs backdrop-blur"
           onClick={() => scrollChatToBottom("smooth")}
           data-testid="jump-to-bottom"
         >
@@ -2009,9 +2009,8 @@ export function ChatView({ api, onAsk, onEditSave, onFork, onToggleStar, onRetry
               (action row + status sub-row). The window StatusBar is
               notifications-only; the model / permission / active / context%
               cells live in the bar's status sub-row.
-              `border` (not `ring`): the dock's overflow-x-hidden forces
-              overflow-y:auto, which clips a ring's top edge; a border paints
-              inside the box so all four edges render. */}
+              `lvis-surface-raised` paints the edge as an inset hairline so
+              the dock's overflow handling cannot clip the composer edge. */}
           <div className="relative mx-3 mb-2 pt-9">
             {statusBar && (statusBar.visibleToast !== null || statusBar.persistent.length > 0) ? (
               <div
@@ -2021,7 +2020,7 @@ export function ChatView({ api, onAsk, onEditSave, onFork, onToggleStar, onRetry
                 <StatusBar {...statusBar} />
               </div>
             ) : null}
-            <div className="relative z-10 rounded-xl bg-input-bar shadow-md overflow-hidden border border-border">
+            <div className="lvis-surface-raised relative z-10 rounded-xl bg-input-bar overflow-hidden">
           <Composer
             ref={composerRef}
             text={question}

@@ -1,8 +1,5 @@
 import type { ReactNode } from "react";
-import { ArrowLeft } from "lucide-react";
 import { PluginUiHostView } from "../../plugin-ui-host.js";
-import { Button } from "../../components/ui/button.js";
-import { useTranslation } from "../../i18n/react.js";
 import type { getApi } from "./api-client.js";
 import { ChatContextProvider, type ChatContextValue } from "./context/ChatContext.js";
 import { ChatView } from "./ChatView.js";
@@ -14,6 +11,7 @@ import { RoutinePanel } from "./components/RoutinePanel.js";
 import { WorkBoardPanel } from "./components/WorkBoardPanel.js";
 import { StarredView } from "./components/StarredView.js";
 import { SettingsInlineView } from "./SettingsInlineView.js";
+import { PageShell } from "./components/PageShell.js";
 import type { SessionSummary } from "./hooks/use-sessions.js";
 import type { UserKeyboardIntentSnapshot } from "../../shared/chat-origin.js";
 import type { AppMode } from "./MainToolbar.js";
@@ -85,24 +83,6 @@ export interface MainContentProps {
   statusBar?: Parameters<typeof ChatView>[0]["statusBar"];
 }
 
-function PageBackBar({ onBack }: { onBack: () => void }) {
-  const { t } = useTranslation();
-  return (
-    <div className="flex shrink-0 items-center gap-2 px-1 pb-2">
-      <Button
-        variant="ghost"
-        size="sm"
-        onClick={onBack}
-        className="gap-2"
-        data-testid="main-content-back"
-      >
-        <ArrowLeft className="size-4" aria-hidden="true" />
-        {t("settingsContent.backToHome")}
-      </Button>
-    </div>
-  );
-}
-
 function MainPaneShell({
   children,
   padded = true,
@@ -115,10 +95,16 @@ function MainPaneShell({
   onBack?: () => void;
 }) {
   return (
-    <div className={padded ? "flex min-h-0 min-w-0 flex-1 flex-col overflow-hidden p-4" : "flex min-h-0 min-w-0 flex-1 flex-col overflow-hidden"}>
-      {backToHome && onBack ? <PageBackBar onBack={onBack} /> : null}
+    <PageShell
+      padded={padded}
+      maxWidth={padded ? "6xl" : "none"}
+      onBack={backToHome ? onBack : undefined}
+      backTestId="main-content-back"
+      contentClassName="flex min-h-0 min-w-0 flex-1 flex-col"
+      data-testid="main-pane-shell"
+    >
       {children}
-    </div>
+    </PageShell>
   );
 }
 
@@ -250,11 +236,10 @@ export function MainContent(props: MainContentProps): ReactNode {
   }
 
   return (
-    <MainPaneShell backToHome onBack={props.onActivateHome}>
-      <PluginUiHostView
-        view={props.activePluginView ?? null}
-        authError={props.pluginAuthError ?? null}
-      />
-    </MainPaneShell>
+    <PluginUiHostView
+      view={props.activePluginView ?? null}
+      authError={props.pluginAuthError ?? null}
+      onBack={props.onActivateHome}
+    />
   );
 }
