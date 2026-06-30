@@ -1,5 +1,30 @@
 # Changelog
 
+## v0.4.3 — 2026-07-01
+
+UI shell, localization, navigation, and action-panel polish release. This patch ships the post-v0.4.2 page-shell reconstruction and mode/control refinements that were merged after the v0.4.2 tag.
+
+### UI / Navigation
+
+- **Shared page shell reconstruction** (PR #1406) — plugin-host pages now use the shared page chrome, flatter plugin host surfaces, page back navigation, and restored scroll position when moving away and returning.
+- **Sidebar and action-panel chrome cleanup** (PR #1407, #1408) — sidebar collapse and right action-panel controls use simpler chevron affordances without nested box chrome, with chat-mode visibility and collapsed defaults aligned to the intended layout.
+- **Right action panel expansion** (PR #1403) — adds the right-side action activity panel foundation and refines collapsed counts, floating action activity interactions, opacity token usage, and duplicate prop/content cleanup.
+
+### i18n / Settings
+
+- **Seven-locale catalog support** (PR #1401, #1405) — UI strings were tokenized and full seven-locale catalogs were added, with generated sentinel leak protection.
+- **Work mode and provider control alignment** (PR #1405) — app mode naming and provider controls are aligned around Work mode, reducing action/work naming drift.
+- **ASRT setting persistence** (PR #1405) — ASRT opt-in now remains enabled after installer abort paths instead of immediately reverting.
+
+### Plugins / Routines
+
+- **Work assistant routine cleanup** (PR #1404) — removes the legacy work-assistant wakeup fixture and aligns the briefing routine path with the current plugin behavior.
+
+### 검증
+
+- Remote main (`7d1a1ca3`): CI / CodeQL green.
+- Local release prep: `package.json` bumped to `0.4.3`; changelog records `v0.4.2..HEAD` user-facing changes.
+
 ## v0.4.2 — 2026-06-29
 
 사용자 가시성 높은 안정화 릴리즈 — Windows 알림 활성화, 업데이트 설치 fallback, slash picker 레이아웃, 플러그인/권한 경계, Windows 로컬 검증 경로를 함께 정리했다.
