@@ -1,11 +1,11 @@
 import {
   Boxes,
   Cable,
+  ChevronLeft,
+  ChevronRight,
   FilePenLine,
   FileText,
   Globe2,
-  PanelRightClose,
-  PanelRightOpen,
   Sparkles,
   Wrench,
   type LucideIcon,
@@ -303,15 +303,15 @@ export function ActionPanel({
             <TooltipTrigger asChild>
               <Button
                 type="button"
-                variant="secondary"
+                variant="ghost"
                 size="icon"
-                className="h-8 w-8 shrink-0 rounded-lg border border-border bg-card"
+                className="h-8 w-8 shrink-0 text-muted-foreground hover:text-foreground"
                 aria-label={t("actionPanel.openAriaLabel")}
                 aria-expanded={false}
                 data-testid="action-panel-open"
                 onClick={() => onOpenChange(true)}
               >
-                <PanelRightOpen className="h-4 w-4" />
+                <ChevronLeft className="h-4 w-4" />
               </Button>
             </TooltipTrigger>
             <TooltipContent side="left">{t("actionPanel.openTooltip")}</TooltipContent>
@@ -348,7 +348,7 @@ export function ActionPanel({
               data-testid="action-panel-close"
               onClick={() => onOpenChange(false)}
             >
-              <PanelRightClose className="h-4 w-4" />
+              <ChevronRight className="h-4 w-4" />
             </Button>
           </TooltipTrigger>
           <TooltipContent side="left">{t("actionPanel.closeTooltip")}</TooltipContent>
