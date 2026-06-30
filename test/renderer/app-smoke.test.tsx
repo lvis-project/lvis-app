@@ -92,19 +92,12 @@ describe("App smoke (Phase 1 infra)", () => {
     expect(Array.isArray(list)).toBe(true);
   });
 
-  it("renders a closable right action panel", async () => {
+  it("renders a collapsible right action panel that defaults to the rail", async () => {
     const { container, api } = await renderApp();
     await waitFor(() => expect(api.getSettings).toHaveBeenCalled());
 
-    expect(container.querySelector('[data-testid="action-panel"]')).toBeTruthy();
-    expect(container.textContent).toContain("도구 활동");
-    expect(container.textContent).toContain("카테고리별 최신 5개");
-    expect(container.querySelector('[role="tablist"]')).toBeFalsy();
-
-    await act(async () => {
-      fireEvent.click(container.querySelector('[data-testid="action-panel-close"]')!);
-    });
-
+    // The 도구 활동 panel defaults to its collapsed rail on a fresh launch — the
+    // full expanded card is NOT auto-shown.
     expect(container.querySelector('[data-testid="action-panel"]')).toBeFalsy();
     expect(container.querySelector('[data-testid="action-panel-rail"]')).toBeTruthy();
     expect(container.querySelector('[data-testid="action-panel-summary"]')).toBeTruthy();
@@ -112,11 +105,23 @@ describe("App smoke (Phase 1 infra)", () => {
     expect(container.querySelector('[data-testid="action-panel-summary"]')?.textContent?.trim()).toBe("");
     expect(container.textContent).not.toContain("아직 읽은 파일이 없습니다.");
 
+    // Open it from the rail → full card appears.
     await act(async () => {
       fireEvent.click(container.querySelector('[data-testid="action-panel-open"]')!);
     });
 
     expect(container.querySelector('[data-testid="action-panel"]')).toBeTruthy();
+    expect(container.textContent).toContain("도구 활동");
+    expect(container.textContent).toContain("카테고리별 최신 5개");
+    expect(container.querySelector('[role="tablist"]')).toBeFalsy();
+
+    // Close it again → back to the collapsed rail.
+    await act(async () => {
+      fireEvent.click(container.querySelector('[data-testid="action-panel-close"]')!);
+    });
+
+    expect(container.querySelector('[data-testid="action-panel"]')).toBeFalsy();
+    expect(container.querySelector('[data-testid="action-panel-rail"]')).toBeTruthy();
   });
 
   it("does not duplicate primary sidebar navigation in the right action panel", async () => {
@@ -132,6 +137,12 @@ describe("App smoke (Phase 1 infra)", () => {
   it("keeps expanded action panel counters visible while hiding empty detail rows", async () => {
     const { container, api } = await renderApp();
     await waitFor(() => expect(api.getSettings).toHaveBeenCalled());
+
+    // The panel defaults to the collapsed rail; open it to inspect the expanded
+    // card's counters.
+    await act(async () => {
+      fireEvent.click(container.querySelector('[data-testid="action-panel-open"]')!);
+    });
 
     expect(container.textContent).toContain("읽은 파일");
     expect(container.textContent).toContain("쓴 파일");
