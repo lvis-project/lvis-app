@@ -19,6 +19,25 @@ const __dirname = dirname(fileURLToPath(import.meta.url));
 const root = resolve(__dirname, "..");
 const fallbackAppAsar = resolve(root, "release", "linux-arm64-unpacked", "resources", "app.asar");
 const maxAppAsarMb = Number(process.env.LVIS_MAX_APP_ASAR_MB ?? "100");
+const packageJson = JSON.parse(readFileSync(resolve(root, "package.json"), "utf8"));
+
+function configuredElectronLanguages() {
+  const languages = packageJson?.build?.electronLanguages;
+  if (!Array.isArray(languages) || languages.length === 0) return ["en-US", "ko"];
+  return languages.filter((language) => typeof language === "string" && language.length > 0);
+}
+
+function macLocaleBundleNames(language) {
+  if (language === "en-US") return ["en.lproj"];
+  if (language === "zh-CN") return ["zh_CN.lproj", "zh-Hans.lproj"];
+  return [`${language.split("-")[0]}.lproj`];
+}
+
+const configuredLanguages = configuredElectronLanguages();
+const requiredPakLocales = new Set(["en-US.pak", "ko.pak"]);
+const allowedPakLocales = new Set(configuredLanguages.map((language) => `${language}.pak`));
+const requiredMacLocales = new Set(["en.lproj", "ko.lproj"]);
+const allowedMacLocales = new Set(configuredLanguages.flatMap(macLocaleBundleNames));
 
 function fail(message, samples = []) {
   process.stderr.write(`[package-footprint] ERROR: ${message}\n`);
@@ -112,15 +131,14 @@ function validateMacElectronLocales() {
     fail(`Electron framework locale resources directory missing: ${localeResourcesDir}`);
   }
 
-  const expectedLocales = new Set(["en.lproj", "ko.lproj"]);
   const localeDirs = readdirSync(localeResourcesDir, { withFileTypes: true })
     .filter((entry) => entry.isDirectory() && entry.name.endsWith(".lproj"))
     .map((entry) => entry.name);
-  const missingLocales = [...expectedLocales].filter(
+  const missingLocales = [...requiredMacLocales].filter(
     (entry) => !existsSync(resolve(localeResourcesDir, entry, "locale.pak")),
   );
   if (missingLocales.length > 0) fail("required Electron locale bundles missing", missingLocales);
-  const unexpectedLocales = localeDirs.filter((entry) => !expectedLocales.has(entry));
+  const unexpectedLocales = localeDirs.filter((entry) => !allowedMacLocales.has(entry));
   if (unexpectedLocales.length > 0) fail("unexpected Electron locale bundles leaked into package", unexpectedLocales);
   return localeDirs.length;
 }
@@ -128,11 +146,10 @@ function validateMacElectronLocales() {
 function validatePakElectronLocales() {
   const localesDir = resolve(appOutDir, "locales");
   if (!existsSync(localesDir)) fail(`Electron locales directory missing: ${localesDir}`);
-  const expectedLocales = new Set(["en-US.pak", "ko.pak"]);
   const localeFiles = readdirSync(localesDir).filter((entry) => entry.endsWith(".pak"));
-  const missingLocales = [...expectedLocales].filter((entry) => !localeFiles.includes(entry));
+  const missingLocales = [...requiredPakLocales].filter((entry) => !localeFiles.includes(entry));
   if (missingLocales.length > 0) fail("required Electron locale files missing", missingLocales);
-  const unexpectedLocales = localeFiles.filter((entry) => !expectedLocales.has(entry));
+  const unexpectedLocales = localeFiles.filter((entry) => !allowedPakLocales.has(entry));
   if (unexpectedLocales.length > 0) fail("unexpected Electron locale files leaked into package", unexpectedLocales);
   return localeFiles.length;
 }

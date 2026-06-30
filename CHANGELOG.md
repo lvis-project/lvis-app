@@ -1,5 +1,18 @@
 # Changelog
 
+## v0.4.4 — 2026-07-01
+
+Packaging fix-forward for the failed `v0.4.3` tag.
+
+### Packaging
+
+- **Installer footprint guard follows supported Electron locales** — package footprint validation now reads `build.electronLanguages` from `package.json` as the allowed Electron locale set, while still requiring the base English/Korean runtime locales. This keeps the guard aligned with the seven-locale UI build and prevents `de`, `es`, `fr`, `ja`, and `zh-CN` Electron runtime locale files from being treated as leaks.
+
+### 검증
+
+- `v0.4.3` tag-push installer run failed in `scripts/check-package-footprint.mjs` after all three platform builds detected newly included Electron locale assets.
+- Fix-forward release target: `v0.4.4`.
+
 ## v0.4.3 — 2026-07-01
 
 UI shell, localization, navigation, and action-panel polish release. This patch ships the post-v0.4.2 page-shell reconstruction and mode/control refinements that were merged after the v0.4.2 tag.
