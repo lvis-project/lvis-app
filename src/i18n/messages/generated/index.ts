@@ -5,7 +5,7 @@
  * fragment files in this directory (`<namespace>.ts`, each exporting `en`/`ko`
  * objects) and merges them here.
  *
- * Fragments: 183
+ * Fragments: 184
  */
 import { en as en_actionPanel, ko as ko_actionPanel } from "./actionPanel.js";
 import { en as en_app, ko as ko_app } from "./app.js";
@@ -75,6 +75,7 @@ import { en as en_bootstrapStatusBanner, ko as ko_bootstrapStatusBanner } from "
 import { en as en_bottomActionRow, ko as ko_bottomActionRow } from "./bottomActionRow.js";
 import { en as en_catppuccinLatte, ko as ko_catppuccinLatte } from "./catppuccinLatte.js";
 import { en as en_catppuccinMocha, ko as ko_catppuccinMocha } from "./catppuccinMocha.js";
+import { en as en_chatPreviewRail, ko as ko_chatPreviewRail } from "./chatPreviewRail.js";
 import { en as en_chatTab, ko as ko_chatTab } from "./chatTab.js";
 import { en as en_chatView, ko as ko_chatView } from "./chatView.js";
 import { en as en_checkpointDivider, ko as ko_checkpointDivider } from "./checkpointDivider.js";
@@ -260,6 +261,7 @@ export const generatedEn: Record<string, string> = {
   ...en_bottomActionRow,
   ...en_catppuccinLatte,
   ...en_catppuccinMocha,
+  ...en_chatPreviewRail,
   ...en_chatTab,
   ...en_chatView,
   ...en_checkpointDivider,
@@ -446,6 +448,7 @@ export const generatedKo: Record<string, string> = {
   ...ko_bottomActionRow,
   ...ko_catppuccinLatte,
   ...ko_catppuccinMocha,
+  ...ko_chatPreviewRail,
   ...ko_chatTab,
   ...ko_chatView,
   ...ko_checkpointDivider,
