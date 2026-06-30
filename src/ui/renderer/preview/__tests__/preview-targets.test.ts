@@ -3,16 +3,6 @@ import type { ChatEntry } from "../../../../lib/chat-stream-state.js";
 import type { Attachment } from "../../types/attachments.js";
 import { collectChatPreviewModel } from "../preview-targets.js";
 
-function toolGroup(tools: Extract<ChatEntry, { kind: "tool_group" }>["tools"]): ChatEntry {
-  return {
-    kind: "tool_group",
-    groupId: "g1",
-    groupIds: ["g1"],
-    status: "done",
-    tools,
-  };
-}
-
 describe("collectChatPreviewModel", () => {
   it("collects attachment files and tool file paths without granting tool paths external-open rights", () => {
     const attachments: Attachment[] = [
@@ -27,17 +17,23 @@ describe("collectChatPreviewModel", () => {
       },
     ];
     const entries: ChatEntry[] = [
-      toolGroup([
-        {
-          toolUseId: "read-1",
-          name: "read_file",
-          displayOrder: 0,
-          status: "done",
-          category: "read",
-          input: { path: "C:\\workspace\\report.md" },
-          result: "# Report",
-        },
-      ]),
+      {
+        kind: "tool_group",
+        groupId: "g1",
+        groupIds: ["g1"],
+        status: "done",
+        tools: [
+          {
+            toolUseId: "read-1",
+            name: "read_file",
+            displayOrder: 0,
+            status: "done",
+            category: "read",
+            input: { path: "C:\\workspace\\report.md" },
+            result: "# Report",
+          },
+        ],
+      },
     ];
 
     const model = collectChatPreviewModel({ entries, attachments });
@@ -66,53 +62,59 @@ describe("collectChatPreviewModel", () => {
 
   it("collects render_html, write diffs, urls, json, and MCP app payloads", () => {
     const entries: ChatEntry[] = [
-      toolGroup([
-        {
-          toolUseId: "html-1",
-          name: "render_html",
-          displayOrder: 0,
-          status: "done",
-          input: {},
-          result: JSON.stringify({ kind: "lvis.render_html", title: "Dashboard", html: "<h1>Hi</h1>", height: 320 }),
-        },
-        {
-          toolUseId: "write-1",
-          name: "write_file",
-          displayOrder: 1,
-          status: "done",
-          category: "write",
-          input: { path: "C:\\workspace\\out.json" },
-          result: JSON.stringify({
-            kind: "lvis.write_file",
-            path: "C:\\workspace\\out.json",
-            before: "{}",
-            after: "{\"ok\":true}",
-          }),
-        },
-        {
-          toolUseId: "web-1",
-          name: "web_fetch",
-          displayOrder: 2,
-          status: "done",
-          category: "network",
-          input: { url: "https://example.com/docs" },
-          result: "{\"status\":200}",
-        },
-        {
-          toolUseId: "app-1",
-          name: "mcp_app",
-          displayOrder: 3,
-          status: "done",
-          input: {},
-          result: "done",
-          uiPayload: {
-            serverId: "server-a",
-            resourceUri: "ui://server-a/card",
-            slot: "sidebar",
-            title: "Plugin Card",
+      {
+        kind: "tool_group",
+        groupId: "g1",
+        groupIds: ["g1"],
+        status: "done",
+        tools: [
+          {
+            toolUseId: "html-1",
+            name: "render_html",
+            displayOrder: 0,
+            status: "done",
+            input: {},
+            result: JSON.stringify({ kind: "lvis.render_html", title: "Dashboard", html: "<h1>Hi</h1>", height: 320 }),
           },
-        },
-      ]),
+          {
+            toolUseId: "write-1",
+            name: "write_file",
+            displayOrder: 1,
+            status: "done",
+            category: "write",
+            input: { path: "C:\\workspace\\out.json" },
+            result: JSON.stringify({
+              kind: "lvis.write_file",
+              path: "C:\\workspace\\out.json",
+              before: "{}",
+              after: "{\"ok\":true}",
+            }),
+          },
+          {
+            toolUseId: "web-1",
+            name: "web_fetch",
+            displayOrder: 2,
+            status: "done",
+            category: "network",
+            input: { url: "https://example.com/docs" },
+            result: "{\"status\":200}",
+          },
+          {
+            toolUseId: "app-1",
+            name: "mcp_app",
+            displayOrder: 3,
+            status: "done",
+            input: {},
+            result: "done",
+            uiPayload: {
+              serverId: "server-a",
+              resourceUri: "ui://server-a/card",
+              slot: "sidebar",
+              title: "Plugin Card",
+            },
+          },
+        ],
+      },
     ];
 
     const model = collectChatPreviewModel({ entries, attachments: [] });
@@ -138,31 +140,37 @@ describe("collectChatPreviewModel", () => {
   it("promotes a repeated tool file entry to write when a later diff touches the same path", () => {
     const path = "C:\\workspace\\report.md";
     const entries: ChatEntry[] = [
-      toolGroup([
-        {
-          toolUseId: "read-1",
-          name: "read_file",
-          displayOrder: 0,
-          status: "done",
-          category: "read",
-          input: { path },
-          result: "# Before",
-        },
-        {
-          toolUseId: "write-1",
-          name: "write_file",
-          displayOrder: 1,
-          status: "done",
-          category: "write",
-          input: { path },
-          result: JSON.stringify({
-            kind: "lvis.write_file",
-            path,
-            before: "# Before\n",
-            after: "# After\n",
-          }),
-        },
-      ]),
+      {
+        kind: "tool_group",
+        groupId: "g1",
+        groupIds: ["g1"],
+        status: "done",
+        tools: [
+          {
+            toolUseId: "read-1",
+            name: "read_file",
+            displayOrder: 0,
+            status: "done",
+            category: "read",
+            input: { path },
+            result: "# Before",
+          },
+          {
+            toolUseId: "write-1",
+            name: "write_file",
+            displayOrder: 1,
+            status: "done",
+            category: "write",
+            input: { path },
+            result: JSON.stringify({
+              kind: "lvis.write_file",
+              path,
+              before: "# Before\n",
+              after: "# After\n",
+            }),
+          },
+        ],
+      },
     ];
 
     const model = collectChatPreviewModel({ entries, attachments: [] });
