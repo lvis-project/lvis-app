@@ -1,9 +1,8 @@
 /**
  * WorkBoardPanel — native personal work board (kanban) for the host app.
  *
- * Mirrors RoutinePanel's structure (outer Card + CardHeader action + a
- * scrollable body) but lays the body out as a 3-column kanban over the
- * WorkItem lifecycle: 예정(planned) / 진행 중(in_progress) / 완료(completed).
+ * Native 3-column kanban over the WorkItem lifecycle:
+ * 예정(planned) / 진행 중(in_progress) / 완료(completed).
  *
  * State source: `window.lvisApi` (passed in as `api`). The panel lists items
  * once on mount and then refreshes on every `onWorkBoardItemChanged` event so
@@ -23,7 +22,6 @@ import { t } from "../../../i18n/runtime.js";
 import { MARKDOWN_REMARK_PLUGINS } from "../utils/markdown-plugins.js";
 import { Badge } from "../../../components/ui/badge.js";
 import { Button } from "../../../components/ui/button.js";
-import { CardContent, CardDescription, CardHeader, CardTitle } from "../../../components/ui/card.js";
 import { Checkbox } from "../../../components/ui/checkbox.js";
 import { Input } from "../../../components/ui/input.js";
 import { Label } from "../../../components/ui/label.js";
@@ -1321,35 +1319,33 @@ export function WorkBoardPanel({ api }: WorkBoardPanelProps) {
         className="mx-auto flex min-h-0 min-w-0 flex-1 w-full max-w-6xl flex-col overflow-hidden"
         data-testid="work-board-panel"
       >
-        <CardHeader>
-          <div className="flex items-center justify-between">
-            <div>
-              <CardTitle>{t("workBoard.panelTitle")}</CardTitle>
-              <CardDescription>{t("workBoard.panelDescription")}</CardDescription>
-            </div>
-            <div className="flex items-center gap-2">
-              <Badge variant="outline" title={t("workBoard.panelTitle")}>
-                {items.length}/{MAX_ITEMS}
-              </Badge>
-              {capReached && (
-                <span className="text-xs text-destructive">{t("workBoard.capReachedLabel")}</span>
-              )}
-              <Button
-                size="sm"
-                variant="outline"
-                disabled={capReached}
-                onClick={() => setShowCreate(true)}
-                data-testid="work-board-add"
-              >
-                {t("workBoard.addItemButton")}
-              </Button>
-              <Button size="sm" variant="outline" onClick={() => void refresh()}>
-                {t("workBoard.refreshButton")}
-              </Button>
-            </div>
+        <div className="flex flex-col gap-3 pb-4 sm:flex-row sm:items-start sm:justify-between">
+          <div className="min-w-0">
+            <h2 className="text-xl font-semibold tracking-normal text-foreground">{t("workBoard.panelTitle")}</h2>
+            <p className="mt-1 text-sm text-muted-foreground">{t("workBoard.panelDescription")}</p>
           </div>
-        </CardHeader>
-        <CardContent className="flex min-h-0 flex-1 flex-col gap-4 overflow-y-auto">
+          <div className="flex items-center gap-2">
+            <Badge variant="outline" title={t("workBoard.panelTitle")}>
+              {items.length}/{MAX_ITEMS}
+            </Badge>
+            {capReached && (
+              <span className="text-xs text-destructive">{t("workBoard.capReachedLabel")}</span>
+            )}
+            <Button
+              size="sm"
+              variant="outline"
+              disabled={capReached}
+              onClick={() => setShowCreate(true)}
+              data-testid="work-board-add"
+            >
+              {t("workBoard.addItemButton")}
+            </Button>
+            <Button size="sm" variant="outline" onClick={() => void refresh()}>
+              {t("workBoard.refreshButton")}
+            </Button>
+          </div>
+        </div>
+        <div className="flex min-h-0 flex-1 flex-col gap-4 overflow-y-auto">
           <div className="grid min-h-0 gap-3 sm:grid-cols-3">
             <BoardColumn
               heading={t("workBoard.columnPlanned")}
@@ -1394,7 +1390,7 @@ export function WorkBoardPanel({ api }: WorkBoardPanelProps) {
           <div className="border-t pt-4">
             <ReportsSection api={api} />
           </div>
-        </CardContent>
+        </div>
       </div>
 
       {showCreate && (
