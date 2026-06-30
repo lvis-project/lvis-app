@@ -1,0 +1,40 @@
+{
+  "$schema": "https://unpkg.com/knip@6.23.0/schema.json",
+  // Code-diet baseline (#1410).
+  //
+  // Keep structural debt visible as warnings while failing on new dependency
+  // drift, unresolved imports, and undeclared OS command usage. Runtime and
+  // packaging dependencies below are loaded through Electron, esbuild externals,
+  // package scripts, or optional guarded require() calls that Knip cannot infer.
+  "rules": {
+    "files": "warn",
+    "dependencies": "warn",
+    "devDependencies": "warn",
+    "exports": "warn",
+    "types": "warn",
+    "duplicates": "warn",
+    "unlisted": "error",
+    "unresolved": "error",
+    "binaries": "error"
+  },
+  "ignoreDependencies": [
+    "@sentry/electron",
+    "@types/better-sqlite3",
+    "better-sqlite3",
+    "electron-builder",
+    "electron-updater",
+    "pino-pretty",
+    "shadcn"
+  ],
+  "ignoreBinaries": [
+    "lsof",
+    "mountvol",
+    "pgrep",
+    "plutil",
+    "powershell.exe",
+    "python3",
+    "subst",
+    "taskkill",
+    "where"
+  ]
+}

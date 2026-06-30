@@ -37,6 +37,7 @@
     "plugins:enable": "tsx scripts/plugins-cli.ts enable",
     "plugins:disable": "tsx scripts/plugins-cli.ts disable",
     "test": "vitest run",
+    "check:knip": "bunx knip --config knip.jsonc --reporter compact",
     "check:test-duplicates": "node scripts/check-test-duplicates.mjs",
     "test:coverage": "vitest run --coverage",
     "check:test-coverage": "node scripts/run-test-coverage-gate.mjs",
