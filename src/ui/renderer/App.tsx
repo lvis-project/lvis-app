@@ -683,6 +683,22 @@ export function App() {
     currentSessionId, currentSessionKind, currentSessionTitle, sessions, refreshSessionId, refreshSessions,
     handleLoadSession: sessionLoad, handleFork: sessionFork,
   } = useSessions(api, applyInitialSession);
+  const attachmentSessionScopeRef = useRef<{ initialized: boolean; sessionId?: string }>({
+    initialized: false,
+    sessionId: undefined,
+  });
+
+  useEffect(() => {
+    const scope = attachmentSessionScopeRef.current;
+    if (!scope.initialized) {
+      scope.initialized = true;
+      scope.sessionId = currentSessionId;
+      return;
+    }
+    if (scope.sessionId === currentSessionId) return;
+    scope.sessionId = currentSessionId;
+    setAttachments([]);
+  }, [currentSessionId]);
 
   const handleOpenRoutineSession = useCallback(
     async (sessionId: string) => {
