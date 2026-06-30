@@ -4,7 +4,6 @@ import type { LvisTokenName } from "../../../shared/plugin-ui-tokens.js";
 // Derives the full set of --lvis-* CSS custom properties from an active ThemeBundle.
 // Values are literal HSL strings so plugins can apply them without needing any of
 // the host's --p-* palette or var() chain.
-const _H = (h: number, s: number, l: number) => `hsl(${h}, ${s}%, ${l}%)`;
 // Tailwind alpha syntax: "H S% L% / A" or "H S% L% / A%". Capture alpha
 // optionally so bundle tokens that opt into translucent values still wrap to a
 // valid `hsl()` for plugin webviews (which cannot consume bare triples).
@@ -43,8 +42,8 @@ const _INVARIANT: Partial<Record<LvisTokenName, string>> = {
   "--lvis-space-2":         "0.5rem",
   "--lvis-space-3":         "0.75rem",
   "--lvis-space-4":         "1rem",
-  "--lvis-motion-fast":     "150ms",
-  "--lvis-motion-normal":   "200ms",
+  "--lvis-motion-fast":     "120ms",
+  "--lvis-motion-normal":   "180ms",
 };
 
 /**
@@ -101,7 +100,7 @@ export function bundleToPluginTokens(bundle: ThemeBundle): Record<LvisTokenName,
     "--lvis-warning":         warning,
     "--lvis-warning-fg":      tripleToHsl(t["warning-foreground"]),
     "--lvis-success":         success,
-    "--lvis-success-fg":      _H(210, 40, 98),  // invariant — no component surfaces success-fg yet
+    "--lvis-success-fg":      tripleToHsl(t["success-foreground"]),
     "--lvis-border":          tripleToHsl(t.border),
     "--lvis-ring":            ring,
     "--lvis-radius":          "0.6rem",

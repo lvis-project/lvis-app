@@ -126,7 +126,7 @@
    covers the spinner; cellPulse dims installing cells so they read as "busy".
    Plugin icon hover color is handled via Tailwind group/peer — no extra class.
 ────────────────────────────────────────────────────────────────────────────── */
-.plugin-cell { transition: all 120ms ease; }
+.plugin-cell { transition: all var(--motion-fast) var(--motion-ease-standard); }
 @keyframes cellPulse { 0%, 100% { opacity: 0.85; } 50% { opacity: 1; } }
 .cell-installing { animation: cellPulse 1.6s ease-in-out infinite; }
 
@@ -176,26 +176,23 @@
   /* Card shell — elevation + subtle primary tint */
   .fqp-card-shell {
     background-color: hsl(var(--card));
-    box-shadow:
-      0 4px 6px -1px rgb(0 0 0 / 0.4),
-      0 10px 15px -3px rgb(0 0 0 / 0.3),
-      0 0 0 1px hsl(var(--primary) / 0.12);
+    box-shadow: var(--elevation-floating);
   }
 
   /* Slot enter/exit — top-sheet */
   .fqp-slot-enter-top {
-    animation: fqp-slide-in-top 250ms cubic-bezier(0.22, 1, 0.36, 1) both;
+    animation: fqp-slide-in-top var(--motion-slow) var(--motion-ease-out) both;
   }
   .fqp-slot-exit-top {
-    animation: fqp-slide-out-top 200ms cubic-bezier(0.55, 0, 1, 0.45) both;
+    animation: fqp-slide-out-top var(--motion-base) var(--motion-ease-standard) both;
   }
 
   /* Slot enter/exit — bottom-sheet */
   .fqp-slot-enter-bottom {
-    animation: fqp-slide-in-bottom 250ms cubic-bezier(0.22, 1, 0.36, 1) both;
+    animation: fqp-slide-in-bottom var(--motion-slow) var(--motion-ease-out) both;
   }
   .fqp-slot-exit-bottom {
-    animation: fqp-slide-out-bottom 200ms cubic-bezier(0.55, 0, 1, 0.45) both;
+    animation: fqp-slide-out-bottom var(--motion-base) var(--motion-ease-standard) both;
   }
 }
 
@@ -203,19 +200,18 @@
 @media (prefers-reduced-motion: reduce) {
   .fqp-slot-enter-top,
   .fqp-slot-enter-bottom {
-    animation: fqp-fade-in 200ms ease both;
+    animation: fqp-fade-in var(--motion-base) var(--motion-ease-standard) both;
   }
   .fqp-slot-exit-top,
   .fqp-slot-exit-bottom {
-    animation: fqp-fade-out 200ms ease both;
+    animation: fqp-fade-out var(--motion-base) var(--motion-ease-standard) both;
   }
 }
 
 /* ─── lvis-anim-* — shared micro-interaction primitives ────────────────────
    Reusable keyframes + utility classes for chat message entry, toggle pops,
    star throbs, banner slides, modal stagger, and expand/collapse height
-   transitions. All animations are ≤200ms and use the same easing curve
-   (cubic-bezier(0.22, 1, 0.36, 1) — "ease-out-quart") so motion feels
+   transitions. Animations use shared motion tokens so timing/easing feels
    coherent across surfaces.
 
    Re-trigger pattern: components apply these classes via React `key` props
@@ -223,7 +219,7 @@
    restarting the CSS animation. See AssistantCard / TurnActionBar / Star
    button usage for the canonical pattern.
 
-   prefers-reduced-motion: collapses every variant into a 150ms opacity
+   prefers-reduced-motion: collapses every variant into a fast opacity
    fade-in so the surface still acknowledges the change without translate
    or scale jumps. */
 @keyframes lvis-message-in {
@@ -271,13 +267,17 @@
 }
 
 @layer components {
-  .lvis-anim-message-in  { animation: lvis-message-in 180ms cubic-bezier(0.22, 1, 0.36, 1) both; }
-  .lvis-anim-pop         { animation: lvis-pop 180ms cubic-bezier(0.22, 1, 0.36, 1) both; }
-  .lvis-anim-star        { animation: lvis-star-throb 200ms cubic-bezier(0.22, 1, 0.36, 1) both; }
-  .lvis-anim-fade-in     { animation: lvis-fade-in 150ms ease-out both; }
-  .lvis-anim-slide-down  { animation: lvis-slide-down 180ms cubic-bezier(0.22, 1, 0.36, 1) both; }
-  .lvis-anim-slide-up    { animation: lvis-slide-up 180ms cubic-bezier(0.22, 1, 0.36, 1) both; }
-  .lvis-anim-zoom-in     { animation: lvis-zoom-in 180ms cubic-bezier(0.22, 1, 0.36, 1) both; }
+  .lvis-anim-message-in  { animation: lvis-message-in var(--motion-base) var(--motion-ease-out) both; }
+  .lvis-anim-pop         { animation: lvis-pop var(--motion-base) var(--motion-ease-out) both; }
+  .lvis-anim-star        { animation: lvis-star-throb var(--motion-slow) var(--motion-ease-out) both; }
+  .lvis-anim-fade-in     { animation: lvis-fade-in var(--motion-fast) var(--motion-ease-out) both; }
+  .lvis-anim-slide-down  { animation: lvis-slide-down var(--motion-base) var(--motion-ease-out) both; }
+  .lvis-anim-slide-up    { animation: lvis-slide-up var(--motion-base) var(--motion-ease-out) both; }
+  .lvis-anim-zoom-in     { animation: lvis-zoom-in var(--motion-base) var(--motion-ease-out) both; }
+
+  .lvis-surface-hairline { box-shadow: var(--surface-hairline); }
+  .lvis-surface-raised   { box-shadow: var(--elevation-raised); }
+  .lvis-surface-floating { box-shadow: var(--elevation-floating); }
 
   /* Marquee: viewport clips, track holds the duplicated content and scrolls.
      Duration is set inline by MarqueeText (proportional to overflow width) via
@@ -304,8 +304,8 @@
     max-height: 0;
     opacity: 0;
     transition:
-      max-height 200ms cubic-bezier(0.22, 1, 0.36, 1),
-      opacity 180ms ease-out;
+      max-height var(--motion-slow) var(--motion-ease-out),
+      opacity var(--motion-base) var(--motion-ease-out);
   }
   .lvis-anim-expand[data-expanded="true"] {
     max-height: var(--expand-max-h, 1200px);
@@ -313,13 +313,13 @@
   }
 
   /* Hover overlay smoothing — Radix data-state and bare hover targets get
-     a 150ms color transition by default so theme-bound surface swaps don't
+     a fast color transition by default so theme-bound surface swaps don't
      pop. Components that already declare `transition-colors` get the same
      duration. */
   .lvis-anim-hover {
     transition-property: background-color, color, border-color, opacity;
-    transition-duration: 150ms;
-    transition-timing-function: cubic-bezier(0.22, 1, 0.36, 1);
+    transition-duration: var(--motion-fast);
+    transition-timing-function: var(--motion-ease-out);
   }
 }
 
@@ -327,16 +327,16 @@
    open, fades + zoom-out on close. The DialogOverlay (theme backdrop) fades
    independently so the backdrop blur appears before the card content lands. */
 [data-radix-dialog-overlay][data-state="open"] {
-  animation: lvis-fade-in 150ms ease-out both;
+  animation: lvis-fade-in var(--motion-fast) var(--motion-ease-out) both;
 }
 [data-radix-dialog-overlay][data-state="closed"] {
-  animation: lvis-fade-in 150ms ease-out reverse both;
+  animation: lvis-fade-in var(--motion-fast) var(--motion-ease-out) reverse both;
 }
 [data-radix-dialog-content][data-state="open"] {
-  animation: lvis-zoom-in 180ms cubic-bezier(0.22, 1, 0.36, 1) both;
+  animation: lvis-zoom-in var(--motion-base) var(--motion-ease-out) both;
 }
 [data-radix-dialog-content][data-state="closed"] {
-  animation: lvis-zoom-in 150ms cubic-bezier(0.22, 1, 0.36, 1) reverse both;
+  animation: lvis-zoom-in var(--motion-fast) var(--motion-ease-out) reverse both;
 }
 
 @media (prefers-reduced-motion: reduce) {
@@ -346,10 +346,10 @@
   .lvis-anim-slide-down,
   .lvis-anim-slide-up,
   .lvis-anim-zoom-in {
-    animation: lvis-fade-in 150ms ease-out both;
+    animation: lvis-fade-in var(--motion-fast) var(--motion-ease-out) both;
   }
   .lvis-anim-expand {
-    transition: opacity 150ms ease-out;
+    transition: opacity var(--motion-fast) var(--motion-ease-out);
   }
   .lvis-anim-hover {
     transition-duration: 0ms;
@@ -361,11 +361,11 @@
   }
   [data-radix-dialog-overlay][data-state="open"],
   [data-radix-dialog-content][data-state="open"] {
-    animation: lvis-fade-in 150ms ease-out both;
+    animation: lvis-fade-in var(--motion-fast) var(--motion-ease-out) both;
   }
   [data-radix-dialog-overlay][data-state="closed"],
   [data-radix-dialog-content][data-state="closed"] {
-    animation: lvis-fade-in 150ms ease-out reverse both;
+    animation: lvis-fade-in var(--motion-fast) var(--motion-ease-out) reverse both;
   }
 }
 
@@ -378,14 +378,9 @@
  *  (Tier B shell + chat surface + Tier C code + action) in one place.
  *  No combinatorial overlays — one selector, one outcome.
  *
- *  Thirteen built-in bundles, with Cherry Blossom as the default light shell:
- *    1. cherry-blossom — light shell + cherry red + blossom surfaces
- *    2. tokyo-night    — dark shell + blue accent
- *    3. midnight       — dark shell + magenta accent
- *    4. forest         — light shell + teal accent
- *    5. violet-light   — light shell + warm-grey + vivid purple
- *    6. violet-dark    — dark shell  + warm-grey-1 + vivid purple
- *    7. high-contrast  — black bg + yellow primary (accessibility)
+ *  Built-in bundles are registered in src/shared/theme-bundles.ts, with
+ *  Cherry Blossom as the default light shell. CSS block order keeps the
+ *  pre-hydration default near the end for easy comparison with its fallback.
  *
  *  Token tiers:
  *    A. PRIMITIVE tokens (--p-*) — raw HSL triples, single source of truth
@@ -458,6 +453,15 @@
 
     /* Shape — does not vary by theme */
     --radius: 0.6rem;
+
+    /* Motion — product-wide interaction timing. Reference systems converge on
+     * short, purposeful micro-motion; these variables keep durations/easing
+     * consistent without creating another component API. */
+    --motion-fast: 120ms;
+    --motion-base: 180ms;
+    --motion-slow: 220ms;
+    --motion-ease-out: cubic-bezier(0.22, 1, 0.36, 1);
+    --motion-ease-standard: cubic-bezier(0.2, 0, 0, 1);
   }
 
   /* ── Tier B-derived: composite tokens ─────────────────────────────────
@@ -504,6 +508,20 @@
     --chip-stack-3: linear-gradient(135deg, hsl(var(--chart-3) / 0.55), hsl(var(--chart-3)));
     --chip-stack-4: linear-gradient(135deg, hsl(var(--chart-4) / 0.55), hsl(var(--chart-4)));
     --chip-stack-5: linear-gradient(135deg, hsl(var(--chart-5) / 0.55), hsl(var(--chart-5)));
+
+    /* Surface/elevation — inspired by Linear/Raycast/Vercel references:
+     * hierarchy should read through hairlines and tiny stacked shadows, not
+     * heavy floating cards. These tokens are intentionally theme-relative. */
+    --surface-hairline: inset 0 0 0 1px hsl(var(--border));
+    --surface-hairline-strong: inset 0 0 0 1px hsl(var(--ui-line) / 0.42);
+    --elevation-raised:
+      0 1px 1px hsl(var(--overlay) / 0.10),
+      0 6px 18px hsl(var(--overlay) / 0.12),
+      var(--surface-hairline);
+    --elevation-floating:
+      0 1px 1px hsl(var(--overlay) / 0.12),
+      0 12px 34px hsl(var(--overlay) / 0.20),
+      var(--surface-hairline-strong);
   }
 
   /* ── Bundle token blocks ──────────────────────────────────────────────
@@ -1199,7 +1217,64 @@
     color-scheme: dark;
   }
 
-  /* ── 13. cherry-blossom ── light + splash key red + brand magenta ───── */
+  /* ── 13. executive-graphite ─ dark + warm graphite + teal work accent ── */
+  :root[data-theme-bundle="executive-graphite"] {
+    --ui-line:                  42 20% 62%;
+    --background:               24 8% 8%;
+    --foreground:               42 20% 92%;
+    --card:                     24 7% 12%;
+    --card-foreground:          42 20% 92%;
+    --popover:                  28 8% 16%;
+    --popover-foreground:       42 20% 92%;
+    --primary:                  174 65% 45%;
+    --primary-foreground:       24 8% 7%;
+    --secondary:                28 7% 19%;
+    --secondary-foreground:     42 20% 92%;
+    --muted:                    28 7% 17%;
+    --muted-foreground:         42 12% 72%;
+    --accent:                   35 32% 24%;
+    --accent-foreground:        42 20% 92%;
+    --destructive:              2 72% 62%;
+    --destructive-foreground:   24 8% 7%;
+    --warning:                  38 86% 62%;
+    --warning-foreground:       24 8% 7%;
+    --success:                  145 55% 48%;
+    --success-foreground:       24 8% 7%;
+    --info:                     202 75% 62%;
+    --info-foreground:          24 8% 7%;
+    --emphasis:                 42 82% 66%;
+    --emphasis-foreground:      24 8% 7%;
+    --border:                   28 7% 24%;
+    --input:                    28 7% 24%;
+    --ring:                     174 65% 55%;
+    --message-user-bg:          174 65% 45%;
+    --message-user-fg:          24 8% 7%;
+    --input-bar-bg:             24 7% 12%;
+    --overlay:                  24 8% 4%;
+    --hover-overlay:            42 20% 92%;
+    --focus-ring:               174 65% 58%;
+    --link-fg:                  174 65% 58%;
+    --selection-bg:             174 65% 45%;
+    --selection-fg:             24 8% 7%;
+    --scrollbar-thumb:          28 7% 28%;
+    --scrollbar-track:          24 7% 12%;
+    --kbd-bg:                   28 8% 16%;
+    --kbd-border:               28 7% 28%;
+    --code-bg:                  24 8% 6%;
+    --code-fg:                  42 20% 92%;
+    --code-border:              28 7% 24%;
+    --chart-1:                  174 65% 45%;
+    --chart-2:                  38 86% 62%;
+    --chart-3:                  260 45% 68%;
+    --chart-4:                  202 75% 62%;
+    --chart-5:                  2 72% 62%;
+    --action-view:              174 65% 45%;
+    --action-branch:            38 86% 62%;
+    --action-compact:           260 45% 68%;
+    color-scheme: dark;
+  }
+
+  /* ── 14. cherry-blossom ── light + splash key red + brand magenta ───── */
   :root[data-theme-bundle="cherry-blossom"] {
     --ui-line:                  343 52% 43%;
     --background:               0 0% 100%;
@@ -1318,7 +1393,9 @@
    * Respects prefers-reduced-motion — no flicker on first paint or OS toggle.
    */
   :root {
-    transition: background-color 150ms ease, color 150ms ease;
+    transition:
+      background-color var(--motion-fast) var(--motion-ease-standard),
+      color var(--motion-fast) var(--motion-ease-standard);
   }
   @media (prefers-reduced-motion: reduce) {
     :root {
@@ -1448,7 +1525,9 @@
     gap: 0.5rem;
     cursor: pointer;
     border-radius: 0.625rem;
-    transition: box-shadow 180ms ease, transform 180ms ease;
+    transition:
+      box-shadow var(--motion-base) var(--motion-ease-standard),
+      transform var(--motion-base) var(--motion-ease-standard);
   }
 
   .lvis-theme-card:focus-visible {
@@ -1467,7 +1546,9 @@
     box-shadow:
       0 1px 2px -1px rgb(0 0 0 / 0.16),
       0 2px 4px -2px rgb(0 0 0 / 0.12);
-    transition: box-shadow 180ms ease, border-color 180ms ease;
+    transition:
+      box-shadow var(--motion-base) var(--motion-ease-standard),
+      border-color var(--motion-base) var(--motion-ease-standard);
   }
 
   .lvis-theme-card[data-selected="true"] .lvis-theme-card-mock {
@@ -1600,7 +1681,7 @@
     font-size: 0.78rem;
     font-weight: 500;
     color: hsl(var(--muted-foreground));
-    transition: color 180ms ease;
+    transition: color var(--motion-base) var(--motion-ease-standard);
   }
   .lvis-theme-card[data-selected="true"] .lvis-theme-card-label {
     color: hsl(var(--foreground));
@@ -1620,7 +1701,9 @@
     line-height: 1;
     opacity: 0;
     transform: scale(0.8);
-    transition: opacity 180ms ease, transform 180ms ease;
+    transition:
+      opacity var(--motion-base) var(--motion-ease-standard),
+      transform var(--motion-base) var(--motion-ease-standard);
   }
   .lvis-theme-card[data-selected="true"] .lvis-theme-card-checkmark {
     opacity: 1;

@@ -1,0 +1,71 @@
+import type { ThemeBundle } from "./types.js";
+import { t } from "../../../../i18n/runtime.js";
+
+/**
+ * Executive Graphite — low-chroma dark productivity theme.
+ *
+ * Inspired by the reference audit: Linear/Raycast surface ladders, Vercel's
+ * hairline-led elevation, and VoltAgent's developer-product restraint. The
+ * palette keeps chrome warm graphite and reserves teal/amber for active work.
+ */
+export const executiveGraphiteBundle: ThemeBundle = {
+  id: "executive-graphite",
+  name: "Executive Graphite",
+  description: t("executiveGraphite.description"),
+  shell: "dark",
+  highContrast: false,
+  tokens: {
+    background:               "24 8% 8%",
+    foreground:               "42 20% 92%",
+    card:                     "24 7% 12%",
+    "card-foreground":        "42 20% 92%",
+    popover:                  "28 8% 16%",
+    "popover-foreground":     "42 20% 92%",
+    primary:                  "174 65% 45%",
+    "primary-foreground":     "24 8% 7%",
+    secondary:                "28 7% 19%",
+    "secondary-foreground":   "42 20% 92%",
+    muted:                    "28 7% 17%",
+    "muted-foreground":       "42 12% 72%",
+    accent:                   "35 32% 24%",
+    "accent-foreground":      "42 20% 92%",
+    destructive:              "2 72% 62%",
+    "destructive-foreground": "24 8% 7%",
+    warning:                  "38 86% 62%",
+    "warning-foreground":     "24 8% 7%",
+    success:                  "145 55% 48%",
+    "success-foreground":     "24 8% 7%",
+    info:                     "202 75% 62%",
+    "info-foreground":        "24 8% 7%",
+    emphasis:                 "42 82% 66%",
+    "emphasis-foreground":    "24 8% 7%",
+    border:                   "28 7% 24%",
+    input:                    "28 7% 24%",
+    ring:                     "174 65% 55%",
+    "ui-line":                "42 20% 62%",
+    "message-user-bg":        "174 65% 45%",
+    "message-user-fg":        "24 8% 7%",
+    "input-bar-bg":           "24 7% 12%",
+    overlay:                  "24 8% 4%",
+    "hover-overlay":          "42 20% 92%",
+    "focus-ring":             "174 65% 58%",
+    "link-fg":                "174 65% 58%",
+    "selection-bg":           "174 65% 45%",
+    "selection-fg":           "24 8% 7%",
+    "scrollbar-thumb":        "28 7% 28%",
+    "scrollbar-track":        "24 7% 12%",
+    "kbd-bg":                 "28 8% 16%",
+    "kbd-border":             "28 7% 28%",
+    "code-bg":                "24 8% 6%",
+    "code-fg":                "42 20% 92%",
+    "code-border":            "28 7% 24%",
+    "chart-1":                "174 65% 45%",
+    "chart-2":                "38 86% 62%",
+    "chart-3":                "260 45% 68%",
+    "chart-4":                "202 75% 62%",
+    "chart-5":                "2 72% 62%",
+    "action-view":            "174 65% 45%",
+    "action-branch":          "38 86% 62%",
+    "action-compact":         "260 45% 68%",
+  },
+};

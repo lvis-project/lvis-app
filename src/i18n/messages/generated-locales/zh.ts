@@ -998,6 +998,7 @@ export const zhMessages: Record<string, string> = {
   "errorBoundary.fullFallback": "渲染错误",
   "errorBoundary.reloadButton": "重新加载",
   "errorBoundary.retryButton": "重试",
+  "executiveGraphite.description": "深色外壳 + 暖石墨表面 + 青绿色工作强调色",
   "fileEditDiff.addedLinesAriaLabel": "添加了 {count} 行",
   "fileEditDiff.collapse": "坍塌",
   "fileEditDiff.diffFileLost": "Diff 文件已丢失（会话重新启动后不可用）。",
