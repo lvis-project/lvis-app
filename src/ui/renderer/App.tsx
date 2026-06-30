@@ -1888,6 +1888,7 @@ export function App() {
           onOpenSettings={() => onOpenSettings()}
           onNewChat={onNewChat}
           streaming={streaming}
+          appMode={appMode}
           onOpenMarketplace={onOpenMarketplace}
           marketplaceUrlReady={marketplaceUrlReady}
           collapsed={sidebarCollapsed}
