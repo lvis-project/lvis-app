@@ -16,7 +16,7 @@ export function SettingsPageHeader({ title, description }: SettingsPageHeaderPro
           = 24` text box top. Both end at the same baseline.
           h2 uses `leading-9` so its line-box (36px) matches the sidebar
           trigger row height. */}
-      <h2 className="text-xl font-semibold leading-9 tracking-tight">{title}</h2>
+      <h2 className="text-xl font-semibold leading-9 tracking-normal">{title}</h2>
       {description ? (
         <p className="text-sm text-muted-foreground">{description}</p>
       ) : null}

@@ -1,6 +1,5 @@
 import { X as XIcon } from "lucide-react";
 import { Button } from "../../../components/ui/button.js";
-import { CardContent, CardDescription, CardHeader, CardTitle } from "../../../components/ui/card.js";
 import { Badge } from "../../../components/ui/badge.js";
 import { ScrollArea } from "../../../components/ui/scroll-area.js";
 import type { LvisApi } from "../types.js";
@@ -35,14 +34,14 @@ export function StarredView({
   const { t } = useTranslation();
   return (
     <div className="mx-auto flex min-h-0 min-w-0 flex-1 w-full max-w-6xl flex-col overflow-hidden">
-      <CardHeader>
-        <div className="flex items-center justify-between">
-          <CardTitle>{t("starredView.title")}</CardTitle>
-          <Button size="sm" variant="outline" onClick={() => void refreshStarred()}>{t("starredView.refresh")}</Button>
+      <div className="flex flex-col gap-3 pb-4 sm:flex-row sm:items-start sm:justify-between">
+        <div className="min-w-0">
+          <h2 className="text-xl font-semibold tracking-normal text-foreground">{t("starredView.title")}</h2>
+          <p className="mt-1 text-sm text-muted-foreground">{t("starredView.description")}</p>
         </div>
-        <CardDescription>{t("starredView.description")}</CardDescription>
-      </CardHeader>
-      <CardContent className="flex min-h-0 flex-1 flex-col gap-4">
+        <Button size="sm" variant="outline" onClick={() => void refreshStarred()}>{t("starredView.refresh")}</Button>
+      </div>
+      <div className="flex min-h-0 flex-1 flex-col gap-4">
         <section className="flex min-h-0 flex-col rounded-lg border bg-muted/(--opacity-light) shadow-sm">
           <div className="flex items-center justify-between rounded-t-lg border-b bg-muted/(--opacity-medium) px-3 py-2">
             <h3 className="text-xs font-semibold uppercase tracking-wider text-muted-foreground">{t("starredView.title")}</h3>
@@ -81,7 +80,7 @@ export function StarredView({
             )}
           </ScrollArea>
         </section>
-      </CardContent>
+      </div>
     </div>
   );
 }
