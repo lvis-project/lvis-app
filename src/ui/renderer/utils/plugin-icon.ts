@@ -65,7 +65,7 @@ function buildTextIcon(rawText: string): ComponentType<LucideProps> {
         // slot). Without it a text glyph tuned for the avatar would spill out
         // of a smaller slot and collide with the adjacent label (the "EPEP"
         // overlap in the slash picker).
-        className: `${className ?? ""} inline-flex items-center justify-center overflow-hidden font-bold leading-none tracking-tight`.trim(),
+        className: `${className ?? ""} inline-flex items-center justify-center overflow-hidden font-bold leading-none tracking-normal`.trim(),
         // Screen readers should announce the badge text — e.g. "EP" — since
         // it carries the plugin's identity. The visual label below the
         // avatar may be the same or richer; double-announce is acceptable.

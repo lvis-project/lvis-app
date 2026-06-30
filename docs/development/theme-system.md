@@ -4,18 +4,20 @@
 > **Source of truth:** `src/styles.css` (tokens) + `src/ui/renderer/theme/` (provider).
 
 The LVIS app ships with a single semantic-token theme system. Components do
-**not** hard-code colors, spacing, or border radii. They consume *semantic*
-tokens (`bg-background`, `text-foreground`, `text-muted-foreground`,
-`bg-primary`, …), and a theme variant is a CSS-only remapping of those
-tokens to underlying primitives.
+**not** hard-code reusable colors, focus rings, motion timings, or surface
+elevation. They consume *semantic* tokens (`bg-background`,
+`text-foreground`, `text-muted-foreground`, `bg-primary`, ...), and a theme
+variant is a CSS-only remapping of those tokens to underlying primitives.
 
 This means:
 
 - Switching themes requires zero component changes.
-- Adding a new theme variant is **one** PR that touches CSS + a single
-  TypeScript type union.
-- Plugins that render inside the host webview will eventually consume the
-  same semantic tokens (deferred — handled by a follow-up PR).
+- Adding a new theme variant is **one** PR that touches the bundle registry,
+  a `ThemeBundle` module, CSS token mapping, and the bundle description i18n
+  entry.
+- Plugins that render inside the host webview consume derived plugin-ui tokens
+  for common tinted surfaces and focus affordances; deeper plugin surface
+  migration continues incrementally.
 
 ---
 
@@ -53,7 +55,7 @@ rebuild.
 
 The user picks a bundle via Settings → 테마. Built-in bundle ids are defined
 in `src/shared/theme-bundles.ts`; the fresh-install default is
-`tokyo-night`. `followSystem` is a separate boolean, not a bundle id. When it
+`cherry-blossom`. `followSystem` is a separate boolean, not a bundle id. When it
 is enabled and the selected bundle is one of the violet light/dark pair, the
 renderer resolves the active bundle from `prefers-color-scheme` and follows OS
 changes live.
@@ -138,7 +140,9 @@ Use case: "I want a 'sepia' bundle for night reading."
    every semantic token. Copy from a similar bundle and tune.
 4. AppearanceTab renders from the bundle registry; no separate options list
    should be hard-coded.
-5. Run `bun run typecheck && bun run test`.
+5. Add the bundle description key under `src/i18n/messages/generated/` and
+   regenerate the catalog.
+6. Run `bun run typecheck && bun run test`.
 
 Done. No component edits.
 
@@ -174,6 +178,9 @@ Rules:
   `text-warning bg-warning/20` for warnings, `text-success` for success.
 - **Focus rings:** `ring-ring` + `ring-offset-background` (already wired
   into `<Button>`, `<Input>`, etc.).
+- **Page chrome:** top-level renderer pages, plugin pages, and settings-style
+  surfaces use `PageShell`; section grouping inside those pages uses
+  `PageSection`, not nested `<Card>` wrappers.
 
 Anti-patterns:
 
@@ -199,6 +206,7 @@ When in doubt, copy from `<Button>` or `<Card>`.
 | Input | `src/components/ui/input.tsx` | semantic |
 | Dialog | `src/components/ui/dialog.tsx` | semantic |
 | Card / Popover / Tabs / Tooltip / Dropdown / ScrollArea / Separator | `src/components/ui/*` | all semantic — these are the shadcn primitives every other surface composes from |
+| PageShell / PageSection | `src/ui/renderer/components/PageShell.tsx` | canonical top-level page chrome and unframed section grouping |
 | Settings dialog | `src/ui/renderer/SettingsDialog.tsx` | composed from semantic primitives |
 | Settings tabs (Privacy, Audit, Roles, …) | `src/ui/renderer/tabs/*.tsx` | already semantic |
 
@@ -251,9 +259,9 @@ Rules:
 - TODO panel, floating question window, plugin install policy chips —
   parallel UX-track PRs own these surfaces; the migration there will land
   on top of this token base.
-- Spacing/typography tokens — only color tokens are formalized in the
-  initial pass. The existing Tailwind defaults (`p-3`, `text-sm`, …) are
-  serving us well; promote them to tokens when there's a semantic reason
+- Spacing/typography tokens — colors, motion, and surface elevation are now
+  formalized. The existing Tailwind spacing/type utilities (`p-3`, `text-sm`,
+  ...) remain acceptable until a repeated semantic layout need emerges
   (e.g. `gap-card`, `gap-section`).
 
 ---
@@ -278,7 +286,7 @@ Seven derived tokens were added to the plugin-ui contract
 (`src/shared/plugin-ui-tokens.ts`) to eliminate the 79 cross-plugin
 `color-mix()` reinventions found across the `--pm-*`, `--accent-bg`, and
 `--ah-*` namespaces in meeting / local-indexer / agent-hub. Drift across
-13 theme bundles is the primary risk this addresses.
+14 theme bundles is the primary risk this addresses.
 
 All values are pre-computed by `bundleToPluginTokens()` in
 `src/ui/renderer/theme/plugin-token-map.ts` using `color-mix(in srgb, …)`
@@ -298,11 +306,49 @@ token payload. Plugins reference them via `var(--lvis-primary-bg-subtle)` etc.
 **high-contrast** bundle receives elevated mix percentages (24% subtle / 40%
 strong / 14% hover) to meet WCAG AA+ contrast requirements on black backgrounds.
 
-Follow-up migration PRs for meeting, local-indexer, and agent-hub will replace
-their private color-mix derivations with these host-provided tokens.
+Follow-up migration PRs for meeting, local-indexer, and agent-hub can replace
+their remaining private color-mix derivations with these host-provided tokens.
 
-**Box-shadow elevation tokens (follow-up):** `--lvis-elevation-shadow-soft` and
-`--lvis-elevation-shadow-strong` (full `box-shadow` offset+blur+color values) are
-intentionally deferred to a separate PR. Meeting plugin's `--pm-toggle-hover-shadow`
-and `--pm-toggle-selected-shadow` remain as-is until that elevation family lands.
-This keeps the current 7-token set's scope tight while documenting the gap.
+## 12. Surface elevation and motion tokens
+
+The reference audit across Linear, Raycast, Vercel, and VoltAgent showed that
+LVIS should read hierarchy through hairlines and restrained stacked elevation,
+not through heavy shadows or nested boxes. The host now exposes product-wide
+surface and motion primitives in `src/styles.css`.
+
+| Token / utility | Semantic intent |
+|-----------------|-----------------|
+| `--surface-hairline` | Theme-relative one-pixel surface outline |
+| `--surface-hairline-strong` | Slightly stronger outline for floating panels |
+| `--elevation-raised` | Compact raised surface: panel rails, persistent widgets |
+| `--elevation-floating` | Floating panel surface: popovers, tool panels, overlays |
+| `.lvis-surface-hairline` | Utility for hairline-only surfaces |
+| `.lvis-surface-raised` | Utility for `--elevation-raised` |
+| `.lvis-surface-floating` | Utility for `--elevation-floating` |
+| `--motion-fast` | Immediate micro-interactions |
+| `--motion-base` | Default UI transitions |
+| `--motion-slow` | Reserved for larger layout transitions |
+| `--motion-ease-out` | Enter/settle easing |
+| `--motion-ease-standard` | General state-change easing |
+
+Migration rule: new floating panels and compact rails should prefer
+`lvis-surface-floating` or `lvis-surface-raised` instead of raw
+`shadow-xl`/`shadow-2xl`. Local hard-coded shadows should remain only when
+they deliberately model a domain-specific effect and pass design review.
+
+`prefers-reduced-motion` remains authoritative. Animation utilities keep their
+existing names, but their durations now resolve through the shared motion
+tokens so future tuning is product-wide rather than component-local.
+
+Plugin webviews receive the same timing direction through the host token
+payload: `--lvis-motion-fast` maps to the host fast timing, and
+`--lvis-motion-normal` maps to the host base timing.
+
+## 13. Executive Graphite bundle
+
+`executive-graphite` is a low-chroma dark productivity bundle added after the
+reference audit. It keeps warm graphite chrome as the default surface language
+and reserves teal for active work, amber for branching/caution, and lavender
+for compact secondary emphasis. Its purpose is to give LVIS one intentionally
+restrained theme that demonstrates the full semantic token contract rather
+than another colorful skin.

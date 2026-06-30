@@ -5,7 +5,7 @@
  * fragment files in this directory (`<namespace>.ts`, each exporting `en`/`ko`
  * objects) and merges them here.
  *
- * Fragments: 182
+ * Fragments: 183
  */
 import { en as en_actionPanel, ko as ko_actionPanel } from "./actionPanel.js";
 import { en as en_app, ko as ko_app } from "./app.js";
@@ -95,6 +95,7 @@ import { en as en_deferredQueuePanel, ko as ko_deferredQueuePanel } from "./defe
 import { en as en_detachedView, ko as ko_detachedView } from "./detachedView.js";
 import { en as en_devToolsPanel, ko as ko_devToolsPanel } from "./devToolsPanel.js";
 import { en as en_errorBoundary, ko as ko_errorBoundary } from "./errorBoundary.js";
+import { en as en_executiveGraphite, ko as ko_executiveGraphite } from "./executiveGraphite.js";
 import { en as en_fileEditDiff, ko as ko_fileEditDiff } from "./fileEditDiff.js";
 import { en as en_firstTaskProposals, ko as ko_firstTaskProposals } from "./firstTaskProposals.js";
 import { en as en_forest, ko as ko_forest } from "./forest.js";
@@ -279,6 +280,7 @@ export const generatedEn: Record<string, string> = {
   ...en_detachedView,
   ...en_devToolsPanel,
   ...en_errorBoundary,
+  ...en_executiveGraphite,
   ...en_fileEditDiff,
   ...en_firstTaskProposals,
   ...en_forest,
@@ -464,6 +466,7 @@ export const generatedKo: Record<string, string> = {
   ...ko_detachedView,
   ...ko_devToolsPanel,
   ...ko_errorBoundary,
+  ...ko_executiveGraphite,
   ...ko_fileEditDiff,
   ...ko_firstTaskProposals,
   ...ko_forest,

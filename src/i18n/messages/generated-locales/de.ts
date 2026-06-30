@@ -998,6 +998,7 @@ export const deMessages: Record<string, string> = {
   "errorBoundary.fullFallback": "Rendering-Fehler",
   "errorBoundary.reloadButton": "Neu laden",
   "errorBoundary.retryButton": "Wiederholen",
+  "executiveGraphite.description": "Dunkle Hülle + warme Graphitflächen + blaugrüner Arbeitsakzent",
   "fileEditDiff.addedLinesAriaLabel": "{count} Zeilen hinzugefügt",
   "fileEditDiff.collapse": "Zusammenbruch",
   "fileEditDiff.diffFileLost": "Die Diff-Datei ist verloren gegangen (nach Neustart der Sitzung nicht verfügbar).",

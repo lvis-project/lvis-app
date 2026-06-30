@@ -8,7 +8,6 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import { t } from "../../../i18n/runtime.js";
 import { Badge } from "../../../components/ui/badge.js";
 import { Button } from "../../../components/ui/button.js";
-import { CardContent, CardDescription, CardHeader, CardTitle } from "../../../components/ui/card.js";
 import { Checkbox } from "../../../components/ui/checkbox.js";
 import { Input } from "../../../components/ui/input.js";
 import { Label } from "../../../components/ui/label.js";
@@ -705,37 +704,35 @@ export function RoutinePanel({ api, onOpenSession }: RoutinePanelProps) {
         className="mx-auto flex min-h-0 min-w-0 flex-1 w-full max-w-6xl flex-col overflow-hidden"
         data-testid="routine-panel"
       >
-        <CardHeader>
-          <div className="flex items-center justify-between">
-            <div>
-              <CardTitle>{t("routinePanel.panelTitle")}</CardTitle>
-              <CardDescription>{t("routinePanel.panelDescription")}</CardDescription>
-            </div>
-            <div className="flex items-center gap-2">
-              <Badge variant="outline" title={t("routinePanel.totalRoutineBadgeTitle")}>
-                {routines.length}/{MAX_PERSISTED_ROUTINES}
-              </Badge>
-              <Badge variant="outline" title={t("routinePanel.llmRoutineBadgeTitle")}>
-                LLM {llmCount}/{MAX_LLM_SESSION_ROUTINES}
-              </Badge>
-              {totalCapReached && (
-                <span className="text-xs text-destructive">{t("routinePanel.capReachedLabel")}</span>
-              )}
-              <Button
-                size="sm"
-                variant="outline"
-                disabled={totalCapReached}
-                onClick={() => setShowAddModal(true)}
-              >
-                {t("routinePanel.addRoutineButton")}
-              </Button>
-              <Button size="sm" variant="outline" onClick={() => void refresh()}>
-                {t("routinePanel.refreshButton")}
-              </Button>
-            </div>
+        <div className="flex flex-col gap-3 pb-4 sm:flex-row sm:items-start sm:justify-between">
+          <div className="min-w-0">
+            <h2 className="text-xl font-semibold tracking-normal text-foreground">{t("routinePanel.panelTitle")}</h2>
+            <p className="mt-1 text-sm text-muted-foreground">{t("routinePanel.panelDescription")}</p>
           </div>
-        </CardHeader>
-        <CardContent className="flex min-h-0 flex-1 flex-col gap-3">
+          <div className="flex items-center gap-2">
+            <Badge variant="outline" title={t("routinePanel.totalRoutineBadgeTitle")}>
+              {routines.length}/{MAX_PERSISTED_ROUTINES}
+            </Badge>
+            <Badge variant="outline" title={t("routinePanel.llmRoutineBadgeTitle")}>
+              LLM {llmCount}/{MAX_LLM_SESSION_ROUTINES}
+            </Badge>
+            {totalCapReached && (
+              <span className="text-xs text-destructive">{t("routinePanel.capReachedLabel")}</span>
+            )}
+            <Button
+              size="sm"
+              variant="outline"
+              disabled={totalCapReached}
+              onClick={() => setShowAddModal(true)}
+            >
+              {t("routinePanel.addRoutineButton")}
+            </Button>
+            <Button size="sm" variant="outline" onClick={() => void refresh()}>
+              {t("routinePanel.refreshButton")}
+            </Button>
+          </div>
+        </div>
+        <div className="flex min-h-0 flex-1 flex-col gap-3">
           <div className="grid min-h-0 flex-1 gap-3 lg:grid-cols-[minmax(0,1fr)_minmax(240px,0.72fr)]">
             <section className="flex min-h-0 flex-col gap-2 rounded-lg border bg-muted/(--opacity-light) shadow-sm" data-testid="routine-list-section">
               <div className="flex items-center justify-between rounded-t-lg border-b bg-muted/(--opacity-medium) px-3 py-2">
@@ -796,7 +793,7 @@ export function RoutinePanel({ api, onOpenSession }: RoutinePanelProps) {
               </ScrollArea>
             </section>
           </div>
-        </CardContent>
+        </div>
       </div>
 
       {showAddModal && (
