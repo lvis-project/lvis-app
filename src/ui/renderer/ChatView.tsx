@@ -1,7 +1,7 @@
 import { Fragment, useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import { useTranslation } from "../../i18n/react.js";
 import { flushSync } from "react-dom";
-import { ChevronDown, KeyRound, Pencil, Star, GitBranch } from "lucide-react";
+import { ChevronDown, GitBranch, KeyRound, PanelRightOpen, Pencil, Star } from "lucide-react";
 import { Button } from "../../components/ui/button.js";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "../../components/ui/card.js";
 import { ScrollArea } from "../../components/ui/scroll-area.js";
@@ -31,6 +31,7 @@ import { PermissionReviewStatusCard } from "./components/PermissionReviewStatusC
 import { DeferredApprovalChip } from "./components/DeferredApprovalChip.js";
 import { TurnActionBar } from "./components/TurnActionBar.js";
 import { StatusBar, type StatusBarProps } from "./components/StatusBar.js";
+import { ChatPreviewRail } from "./components/ChatPreviewRail.js";
 // TurnSummaryFooter 컴포넌트는 2026-05-07 폐기. 토큰 정보는 TurnActionBar 의
 // TokenCostBadge (provider-truth, 토글 + tooltip breakdown) 가 단일 source 로
 // 표시. 시간 정보는 WorkGroup 헤더의 ⏱ T 가 흡수. turn_summary entry 는
@@ -64,6 +65,7 @@ import { MARKDOWN_REMARK_PLUGINS } from "./utils/markdown-plugins.js";
 import { parseImportedTriggerEnvelope } from "../../shared/overlay-trigger-source.js";
 import { lookupBillablePricingOptional } from "../../shared/pricing-data.js";
 import type { LLMVendor } from "../../shared/llm-vendor-defaults.js";
+import { collectChatPreviewModel } from "./preview/preview-targets.js";
 
 const CHAT_BOTTOM_THRESHOLD_PX = 96;
 const MAX_SAVED_CHAT_SCROLL_POSITIONS = 24;
@@ -568,6 +570,38 @@ export function ChatView({ api, onAsk, onEditSave, onFork, onToggleStar, onRetry
     () => viewMode ? entries.slice(0, viewMode.slicedRangeEnd) : entries,
     [entries, viewMode],
   );
+  const previewModel = useMemo(
+    () => collectChatPreviewModel({ entries: visibleEntries, attachments }),
+    [attachments, visibleEntries],
+  );
+  const hasPreviewArtifacts = previewModel.targets.length > 0 || previewModel.files.length > 0;
+  const previewTargetIdKey = useMemo(
+    () => previewModel.targets.map((target) => target.id).join("\u0001"),
+    [previewModel.targets],
+  );
+  const [previewRailOpen, setPreviewRailOpen] = useState(false);
+  const [selectedPreviewId, setSelectedPreviewId] = useState<string | null>(null);
+
+  useEffect(() => {
+    setSelectedPreviewId(null);
+  }, [currentSessionId]);
+
+  useEffect(() => {
+    if (!hasPreviewArtifacts) {
+      setPreviewRailOpen(false);
+      setSelectedPreviewId(null);
+    }
+  }, [hasPreviewArtifacts]);
+
+  useEffect(() => {
+    if (previewModel.targets.length === 0) {
+      setSelectedPreviewId(null);
+      return;
+    }
+    if (selectedPreviewId && previewModel.targets.some((target) => target.id === selectedPreviewId)) return;
+    setSelectedPreviewId(previewModel.targets[0]?.id ?? null);
+  }, [previewModel.targets, previewTargetIdKey, selectedPreviewId]);
+
   const hasActiveStreamingEntry = useMemo(
     () => visibleEntries.some((entry) => "streaming" in entry && entry.streaming === true),
     [visibleEntries],
@@ -1803,6 +1837,18 @@ export function ChatView({ api, onAsk, onEditSave, onFork, onToggleStar, onRetry
         onRoutineAcknowledge={onRoutineAcknowledge}
       />
       <div className="relative min-h-0 min-w-0 max-w-full flex-1 overflow-hidden">
+      {previewRailOpen && (
+        <button
+          type="button"
+          className="absolute inset-0 z-30 bg-background/(--opacity-strong) backdrop-blur-[1px] lg:hidden"
+          aria-label={t("chatPreviewRail.close")}
+          onClick={() => {
+            setPreviewRailOpen(false);
+          }}
+        />
+      )}
+      <div className={`grid h-full min-h-0 min-w-0 ${previewRailOpen && hasPreviewArtifacts ? "lg:grid-cols-[minmax(0,1fr)_minmax(20rem,24rem)]" : "grid-cols-1"}`}>
+      <div className="relative min-h-0 min-w-0 overflow-hidden">
       {/* Checkpoint view-mode banner — sticky at the top of the chat scroll area */}
       <ViewModeBanner viewMode={viewMode} onExit={() => { void handleExitView(); }} />
       {/* Fork-success toast — auto-dismisses after 3 s */}
@@ -1891,6 +1937,23 @@ export function ChatView({ api, onAsk, onEditSave, onFork, onToggleStar, onRetry
           {currentSessionTitle ? <span className="ml-2 text-muted-foreground">{currentSessionTitle}</span> : null}
         </div>
       )}
+      {hasPreviewArtifacts && !previewRailOpen && (
+        <Button
+          type="button"
+          size="sm"
+          variant="secondary"
+          className="lvis-surface-raised absolute right-5 top-4 z-30 h-8 rounded-full bg-card/(--opacity-solid) px-3 text-xs backdrop-blur"
+          title={t("chatPreviewRail.open")}
+          aria-label={t("chatPreviewRail.open")}
+          onClick={() => {
+            setPreviewRailOpen(true);
+          }}
+          data-testid="chat-preview-open"
+        >
+          <PanelRightOpen className="mr-1 h-3.5 w-3.5" />
+          {t("chatPreviewRail.openShort", { count: previewModel.targets.length })}
+        </Button>
+      )}
       <ScrollArea type="always" className="lvis-chat-scroll h-full min-h-0 min-w-0 max-w-full" viewportRef={scrollViewportRef}><div className={`min-w-0 overflow-x-hidden space-y-4 py-5 ${readingColumnClass}`}>
         {/* Today's date badge stays a selector for explicit session loads only.
             currentSessionEntries enables in-session day jumping via
@@ -1948,6 +2011,22 @@ export function ChatView({ api, onAsk, onEditSave, onFork, onToggleStar, onRetry
           {t("chatView.jumpToBottom")}
         </Button>
       )}
+      </div>
+      {previewRailOpen && hasPreviewArtifacts ? (
+        <ChatPreviewRail
+          api={api}
+          sessionId={currentSessionId}
+          targets={previewModel.targets}
+          files={previewModel.files}
+          selectedId={selectedPreviewId}
+          onSelect={setSelectedPreviewId}
+          onClose={() => {
+            setPreviewRailOpen(false);
+          }}
+          className="absolute inset-y-0 right-0 z-40 flex w-[min(24rem,calc(100%-1rem))] shadow-2xl lg:static lg:z-auto lg:w-auto lg:shadow-none"
+        />
+      ) : null}
+      </div>
       </div>
       {contextOverflowPct >= 0.95 && (
         <div className="flex w-full max-w-full items-center gap-2 border-t bg-destructive/(--opacity-subtle) px-3 py-1.5 text-xs text-destructive">
