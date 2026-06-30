@@ -998,6 +998,7 @@ export const jaMessages: Record<string, string> = {
   "errorBoundary.fullFallback": "レンダリングエラー",
   "errorBoundary.reloadButton": "リロード",
   "errorBoundary.retryButton": "リトライ",
+  "executiveGraphite.description": "ダークシェル + 温かみのあるグラファイト面 + ティールのワークアクセント",
   "fileEditDiff.addedLinesAriaLabel": "{count} 行を追加",
   "fileEditDiff.collapse": "崩壊",
   "fileEditDiff.diffFileLost": "差分ファイルが失われました (セッションの再起動後は使用できなくなります)。",

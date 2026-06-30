@@ -19,6 +19,7 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { t } from "./i18n/index.js";
 import { pluginPartitionName } from "./shared/plugin-partition.js";
+import { PageShell } from "./ui/renderer/components/PageShell.js";
 
 export type PluginUiExtensionView = {
   pluginId: string;
@@ -124,10 +125,12 @@ export function PluginUiHostView({
   view,
   showChrome = true,
   authError = null,
+  onBack,
 }: {
   view: PluginUiExtensionView | null;
   showChrome?: boolean;
   authError?: string | null;
+  onBack?: () => void;
 }) {
   const [errorText, setErrorText] = useState<string | null>(null);
   const [loading, setLoading] = useState(false);
@@ -335,7 +338,7 @@ export function PluginUiHostView({
     }
   }
 
-  // When showChrome=false, render bare content without CardHeader (for detached views)
+  // When showChrome=false, render bare content without host page chrome (for detached views).
   if (!showChrome) {
     return (
       <div className="relative h-full w-full overflow-hidden">
@@ -364,32 +367,28 @@ export function PluginUiHostView({
     </div>
   ) : null;
 
-  // Default: inline plugin views use flat page chrome. The webview is already
-  // its own framed surface, so host-level Card/border chrome creates a visible
-  // box-inside-box regression across every plugin view.
+  // Default: inline plugin views use the shared page shell. The webview is
+  // already its own framed surface, so host-level Card/border chrome creates a
+  // visible box-inside-box regression across every plugin view.
   return (
-    <div className="mx-auto flex min-h-0 min-w-0 flex-1 w-full max-w-6xl flex-col overflow-hidden">
-      <header className="shrink-0 px-2 pb-3 pt-1">
-        <h2 className="text-xl font-semibold leading-8 tracking-tight">
-          {view ? getPluginViewLabel(view) : t("be_pluginUiHost.pluginUiTitle")}
-        </h2>
-        <p className="mt-1 text-sm text-muted-foreground">
-          {view?.extension.description ?? t("be_pluginUiHost.pluginUiLoadingDesc")}
-        </p>
-      </header>
-      <div className="flex min-h-0 flex-1 flex-col px-2 pb-2">
-        {authErrorBanner}
-        <div className="relative h-full w-full overflow-hidden">
-          <div className="h-full overflow-hidden">
-            {content}
-          </div>
-          {loading ? (
-            <div className="absolute inset-0 z-10 flex items-center justify-center bg-input-bar text-xs text-muted-foreground">
-              {t("be_pluginUiHost.loading")}
-            </div>
-          ) : null}
+    <PageShell
+      title={view ? getPluginViewLabel(view) : t("be_pluginUiHost.pluginUiTitle")}
+      description={view?.extension.description ?? t("be_pluginUiHost.pluginUiLoadingDesc")}
+      onBack={onBack}
+      backTestId="plugin-page-back"
+      contentClassName="flex min-h-0 flex-1 flex-col px-2 pb-2"
+    >
+      {authErrorBanner}
+      <div className="relative h-full w-full overflow-hidden">
+        <div className="h-full overflow-hidden">
+          {content}
         </div>
+        {loading ? (
+          <div className="absolute inset-0 z-10 flex items-center justify-center bg-input-bar text-xs text-muted-foreground">
+            {t("be_pluginUiHost.loading")}
+          </div>
+        ) : null}
       </div>
-    </div>
+    </PageShell>
   );
 }
