@@ -1,4 +1,4 @@
-import type { HookTrustRow } from "../../../../hooks/hook-trust-store.js";
+import type { HookTrustRow } from "../../../../hooks/hook-trust-commands.js";
 
 export function makeHookTrustRow(name: string): HookTrustRow {
   return {
