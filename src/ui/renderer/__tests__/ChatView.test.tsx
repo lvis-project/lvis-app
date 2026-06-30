@@ -76,6 +76,15 @@ describe("ChatView", () => {
     });
   });
 
+  it("does not show the preview rail trigger when there are no artifacts", async () => {
+    const { container } = await renderApp({ hasApiKey: true });
+    await waitFor(() => {
+      expect(container.textContent).toContain("LVIS 에이전트가 준비되었습니다");
+    });
+    expect(container.querySelector('[data-testid="chat-preview-open"]')).toBeNull();
+    expect(container.querySelector('[data-testid="chat-preview-rail"]')).toBeNull();
+  });
+
   it("keeps the message queue test hook closed when LVIS_E2E is set without dev mode", async () => {
     delete (window as unknown as { __lvis_message_queue_store__?: unknown }).__lvis_message_queue_store__;
     await renderApp({ hasApiKey: true, lvisEnv: { isDev: false, isE2E: true } });
@@ -727,6 +736,159 @@ describe("ChatView", () => {
     await waitFor(() => {
       expect(container.textContent).toContain("other session probe");
       expect(container.textContent).not.toContain("current session probe");
+    });
+  });
+
+  it("keeps the preview rail closed by default and opens it without unmounting chat scroll", async () => {
+    const now = new Date().toISOString();
+    const { container } = await renderApp({
+      currentSession: "preview-session",
+      mainActiveState: {
+        mainActiveSessionId: "preview-session",
+        mainActiveMode: "resume",
+        updatedAt: now,
+      },
+      history: {
+        sessionId: "preview-session",
+        messages: [
+          { index: 0, role: "user", content: "프리뷰 확인" },
+          {
+            index: 1,
+            role: "assistant",
+            content: "",
+            thought: "파일을 읽고 결과를 확인합니다.",
+            toolCalls: [
+              {
+                id: "preview-tool",
+                name: "read_file",
+                input: { path: "C:\\workspace\\lvis\\report.md" },
+              },
+            ],
+          },
+          {
+            index: 2,
+            role: "tool_result",
+            toolUseId: "preview-tool",
+            toolName: "read_file",
+            content: "# Report\nPreview content",
+          },
+          { index: 3, role: "assistant", content: "프리뷰 가능한 파일이 있습니다." },
+        ],
+      },
+    });
+
+    await waitFor(() => {
+      expect(container.textContent).toContain("프리뷰 가능한 파일이 있습니다.");
+      expect(container.querySelector(".lvis-chat-scroll [data-radix-scroll-area-viewport]")).not.toBeNull();
+    });
+
+    const openButton = await waitFor(() => {
+      const button = container.querySelector('[data-testid="chat-preview-open"]') as HTMLButtonElement | null;
+      expect(button).not.toBeNull();
+      return button!;
+    });
+    expect(container.querySelector('[data-testid="chat-preview-rail"]')).toBeNull();
+
+    await act(async () => {
+      fireEvent.click(openButton);
+    });
+
+    await waitFor(() => {
+      expect(container.querySelector('[data-testid="chat-preview-rail"]')).not.toBeNull();
+      expect(container.querySelector(".lvis-chat-scroll [data-radix-scroll-area-viewport]")).not.toBeNull();
+      expect(container.textContent).toContain("report.md");
+    });
+  });
+
+  it("clears draft attachment preview artifacts when switching sessions", async () => {
+    const now = new Date().toISOString();
+    const { container, api } = await renderApp({
+      currentSession: "session-a",
+      sessions: [
+        { id: "session-a", modifiedAt: now, title: "Session A" },
+        { id: "session-b", modifiedAt: now, title: "Session B" },
+      ],
+      mainActiveState: {
+        mainActiveSessionId: "session-a",
+        mainActiveMode: "resume",
+        updatedAt: now,
+      },
+      history: {
+        sessionId: "session-a",
+        messages: [
+          { index: 0, role: "user", content: "A 질문" },
+          { index: 1, role: "assistant", content: "A 답변" },
+        ],
+      },
+      historyBySession: {
+        "session-b": {
+          messages: [
+            { index: 0, role: "user", content: "B 질문" },
+            { index: 1, role: "assistant", content: "B 답변" },
+          ],
+        },
+      },
+    });
+    const lvis = window.lvis as unknown as {
+      attach: {
+        openFile: ReturnType<typeof vi.fn>;
+        readImage: ReturnType<typeof vi.fn>;
+        saveClipboardImage: ReturnType<typeof vi.fn>;
+        openExternal: ReturnType<typeof vi.fn>;
+      };
+    };
+    lvis.attach = {
+      openFile: vi.fn(async () => ({
+        canceled: false,
+        rejected: [],
+        files: [
+          {
+            path: "C:\\workspace\\draft-only.md",
+            name: "draft-only.md",
+            ext: "md",
+            bytes: 512,
+            isImage: false,
+          },
+        ],
+      })),
+      readImage: vi.fn(async () => ({ ok: false, error: "not image" })),
+      saveClipboardImage: vi.fn(async () => ({ ok: false })),
+      openExternal: vi.fn(async () => ({ ok: true })),
+    };
+
+    await waitFor(() => {
+      expect(container.textContent).toContain("A 답변");
+      expect(container.querySelector('[data-testid="chat-preview-open"]')).toBeNull();
+    });
+
+    await act(async () => {
+      fireEvent.click(container.querySelector('[data-testid="iab-attach-button"]')!);
+    });
+
+    await waitFor(() => {
+      expect(container.textContent).toContain("[File #1]");
+      expect(container.querySelector('[data-testid="chat-preview-open"]')).not.toBeNull();
+    });
+
+    const loadSessionHandler = await waitFor(() => {
+      const calls = (api.window.onLoadSessionInMain as unknown as ReturnType<typeof vi.fn>).mock.calls;
+      expect(calls.length).toBeGreaterThan(0);
+      const handler = calls[0]?.[0] as ((sessionId: string) => Promise<unknown>) | undefined;
+      expect(typeof handler).toBe("function");
+      return handler!;
+    });
+
+    await act(async () => {
+      await loadSessionHandler("session-b");
+    });
+
+    await waitFor(() => {
+      expect(api.chatSessionHistory).toHaveBeenCalledWith("session-b");
+      expect(container.textContent).toContain("B 답변");
+      expect(container.querySelector('[data-testid="attachment-chip"]')).toBeNull();
+      expect(container.querySelector('[data-testid="attachment-chip-collapsed"]')).toBeNull();
+      expect(container.querySelector('[data-testid="chat-preview-open"]')).toBeNull();
+      expect(container.querySelector('[data-testid="chat-preview-rail"]')).toBeNull();
     });
   });
 
