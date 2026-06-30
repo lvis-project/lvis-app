@@ -49,6 +49,19 @@ describe("tripleToHsl — alpha channel support (issue #616)", () => {
 });
 
 describe("bundleToPluginTokens — derived value snapshot (architect fix #4)", () => {
+  it("keeps plugin motion tokens aligned to host motion timings", () => {
+    const tokens = bundleToPluginTokens(tokyoNightBundle);
+
+    expect(tokens["--lvis-motion-fast"]).toBe("120ms");
+    expect(tokens["--lvis-motion-normal"]).toBe("180ms");
+  });
+
+  it("derives --lvis-success-fg from the active bundle", () => {
+    const tokens = bundleToPluginTokens(violetDarkBundle);
+
+    expect(tokens["--lvis-success-fg"]).toBe("hsl(0, 0%, 5%)");
+  });
+
   it("derives --lvis-primary-bg-subtle correctly per shell mode", () => {
     const light = bundleToPluginTokens(violetLightBundle);
     const dark  = bundleToPluginTokens(violetDarkBundle);
