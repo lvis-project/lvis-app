@@ -52,7 +52,7 @@ export function OnboardingHeader({
   const avatarSize =
     size === "lg" ? "h-10 w-10 text-base" : "h-7 w-7 text-[11px]";
   const titleClass =
-    size === "lg" ? "text-sm font-semibold tracking-tight" : "text-sm font-medium";
+    size === "lg" ? "text-sm font-semibold tracking-normal" : "text-sm font-medium";
   return (
     <DialogHeader className={cn("px-6 pt-6 pb-3 space-y-0", className)}>
       <div className="flex items-center gap-2">

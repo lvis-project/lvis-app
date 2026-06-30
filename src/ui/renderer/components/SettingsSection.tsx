@@ -1,5 +1,5 @@
 import { type ReactNode } from "react";
-import { cn } from "../../../lib/utils.js";
+import { PageSection } from "./PageShell.js";
 
 export interface SettingsSectionProps {
   title: string;
@@ -24,28 +24,15 @@ export function SettingsSection({
   children,
 }: SettingsSectionProps) {
   return (
-    <section
+    <PageSection
       id={id}
-      className={cn(
-        "rounded-lg border bg-card p-6 space-y-5",
-        className,
-      )}
+      title={title}
+      description={description}
+      badge={badge}
+      actions={actions}
+      className={className}
     >
-      <header className="space-y-1">
-        <div className="flex items-start justify-between gap-3">
-          <div className="space-y-1">
-            <h3 className="flex items-center gap-2 text-base font-semibold">
-              {title}
-              {badge}
-            </h3>
-            {description ? (
-              <p className="text-sm text-muted-foreground">{description}</p>
-            ) : null}
-          </div>
-          {actions ? <div className="shrink-0">{actions}</div> : null}
-        </div>
-      </header>
-      <div className="space-y-3">{children}</div>
-    </section>
+      {children}
+    </PageSection>
   );
 }
