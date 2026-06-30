@@ -1,81 +1,167 @@
 # Design
 
 ## Source of truth
-- Status: Draft
+- Status: Active
 - Last refreshed: 2026-06-30 (Asia/Seoul)
-- Primary product surfaces: LVIS desktop renderer, chat workspace, action workspace, right-side tool activity panel.
-- Evidence reviewed: `src/ui/renderer/components/ActionPanel.tsx`, `src/ui/renderer/components/ToolGroupCard.tsx`, `src/ui/renderer/components/OverlayCard.tsx`, `src/ui/renderer/theme/`, `docs/blueprints/composer-redesign-mockup.html`.
+- Primary product surfaces: LVIS desktop renderer, chat workspace, work mode, plugin pages, settings, marketplace, right-side action/activity surfaces.
+- Evidence reviewed:
+  - External index: `https://github.com/voltagent/awesome-design-md`
+  - Downloaded reference docs via `getdesign`: Linear, Raycast, Vercel, VoltAgent
+  - Local token system: `src/styles.css`, `src/shared/theme-bundles.ts`, `src/ui/renderer/theme/`
+  - Local component surfaces: `src/ui/renderer/components/ActionPanel.tsx`, `Sidebar.tsx`, `MainContent.tsx`, `InputActionBar.tsx`, plugin host pages
+  - Local docs: `docs/development/theme-system.md`
 
 ## Brand
-- Personality: calm, technical, work-focused.
-- Trust signals: visible state, compact operational metadata, stable layout that avoids covering active work.
-- Avoid: marketing-style hero layouts, duplicate navigation, decorative panels, and full-height surfaces when a compact work widget is enough.
+- Personality: calm, technical, high-agency, and work-focused.
+- Product feel: an operator workbench, not a marketing page. The app should feel dense, clear, and stable under long-running agent work.
+- Trust signals: visible state, accurate side-effect reporting, preserved position/context, restrained interaction feedback, and clear boundaries between navigation, work canvas, plugins, and settings.
+- Avoid: decorative cards, nested boxes, one-note color palettes, gradient blobs, hero composition, oversized headings inside tool surfaces, and heavy shadows as the primary hierarchy tool.
 
 ## Product goals
-- Goals: keep the main chat usable while exposing recent tool activity; make file, MCP, plugin, tool, and web source activity scannable at a glance.
-- Non-goals: replace the primary sidebar, reproduce all historical activity, or add another full workspace navigator.
-- Success signals: action-mode chat reads as a centered blog column; the floating panel shows populated counts when collapsed, shows details when expanded, hides empty groups, and limits each detail list to the latest five items.
+- Give users a reliable desktop agent environment where chat, work mode, tools, plugins, settings, and local status can coexist without visual noise.
+- Make side effects and system state legible: files read/written, plugin calls, MCP calls, model/mode, approvals, indexing, and permissions.
+- Keep repeated workflows efficient: navigation must preserve context, controls must remain compact, and plugin pages must share one host-level layout grammar.
+- Support localized UI as a first-class path, including Japanese and Chinese, without falling back to English for newly added product text.
+- Make theme work predictable by routing colors, surfaces, focus, and motion through product tokens rather than component-local reinvention.
 
 ## Personas and jobs
-- Primary personas: developers and agent operators using LVIS for iterative work.
-- User jobs: monitor what the agent read, wrote, called through MCP/plugins/tools, and fetched without leaving the chat.
-- Key contexts of use: long-running coding sessions, MCP/plugin work, and review of recent side effects.
+- Primary personas: developers, AI-workflow operators, plugin builders, and reviewers using LVIS for iterative desktop work.
+- User jobs:
+  - Continue a task while understanding what the agent is doing.
+  - Inspect plugin/system state without losing chat or scroll context.
+  - Switch between chat and work modes without semantic ambiguity.
+  - Configure model, provider, reasoning, approvals, language, and theme with minimal hunting.
+  - Review recent side effects quickly during or after a run.
 
 ## Information architecture
-- Primary navigation: existing left sidebar remains the route/navigation owner.
-- Core routes/screens: home chat, action/plugin surfaces, settings, marketplace, memory, routines.
-- Content hierarchy: right action panel contains populated icons only in collapsed state; expanded state adds a slim fixed counter dashboard including zero counts, icon strips for plugin/MCP calls, and recent activity sections for files and web sources.
+- Primary navigation: left sidebar owns app-wide routes and plugin entry points.
+- Primary canvas: route content owns the main work area. Page bodies should not be wrapped in extra decorative boxes when the page itself is already a surface.
+- Top/page navigation: first-depth plugin or settings pages may expose a simple back control when leaving the current page should return to the previous route.
+- Chat/work mode: mode controls are operational state, not navigation. Internal values and displayed labels must remain aligned.
+- Secondary surfaces: action panels, popovers, command pickers, and inspectors float above the canvas only when they are temporary or auxiliary.
 
 ## Design principles
-- Principle 1: Preserve chat as the primary canvas; in action mode, use a centered reading column so the floating right panel sits in side whitespace rather than becoming a full layout column.
-- Principle 2: Favor recent, high-signal operational facts over complete logs.
-- Tradeoffs: compact rows reduce detail depth but keep the panel usable during active chat work.
+1. Product UI is the reference.
+   - Use real app state and real product surfaces. Do not add abstract decoration to make a screen look designed.
+2. Hierarchy comes from tokens and layout.
+   - Prefer whitespace, hairlines, semantic surfaces, and restrained elevation. Avoid box-in-box layouts unless the inner box is a distinct repeated item, modal, or framed tool.
+3. Accent color means work.
+   - Reserve primary accent for active work, selected state, send/confirm actions, and important live state. Status colors remain literal: success, warning, destructive, info.
+4. Motion acknowledges, it does not perform.
+   - Motion should confirm state changes and help orientation. It should not distract from text, code, or tool output.
+5. Token-first implementation.
+   - New colors, shadows, focus rings, and motion values must enter through shared tokens when they represent reusable UI language.
+6. Localization is a product requirement.
+   - New user-facing strings must include generated catalog coverage and generated locale entries for supported languages.
 
 ## Visual language
-- Color: reuse theme tokens such as `bg-card`, `bg-muted`, `text-muted-foreground`, `border-border`, and `text-primary`.
-- Typography: small, dense labels and tabular counts; no viewport-scaled type.
-- Spacing/layout rhythm: compact 8-12px internal rhythm with a bounded floating right panel and centered chat column.
-- Shape/radius/elevation: 8-12px radius and restrained shadow for tool surfaces.
-- Motion: keep existing transition patterns; avoid attention-heavy animation for passive monitoring.
-- Imagery/iconography: use lucide icons for categories and open/close controls.
+- Color:
+  - Components consume semantic tokens (`bg-card`, `text-foreground`, `border-border`, `text-primary`, etc.).
+  - Theme bundles map semantic tokens to palettes. Components do not consume primitive palette values directly.
+  - The new `executive-graphite` bundle is the reference restrained dark theme: warm graphite chrome, teal work accent, amber branch/caution accent, and limited secondary emphasis.
+- Typography:
+  - Use system UI text for renderer surfaces and monospace only for code, paths, commands, counters, and technical metadata.
+  - No viewport-scaled type and no negative letter spacing in app UI.
+  - Compact panels use compact headings; hero-scale type belongs only to real hero surfaces, which the app generally should not need.
+- Spacing/layout rhythm:
+  - Prefer dense 4/8/12/16px rhythm.
+  - Toolbars and panels should have stable dimensions so counters, icons, hover states, and localized text do not resize the layout.
+  - Page sections are full-width bands or unframed layouts with constrained inner content, not floating cards inside cards.
+- Shape/radius/elevation:
+  - Product cards stay at 8px radius or less unless an existing primitive requires otherwise.
+  - Floating auxiliary surfaces may use 12px radius when they need clear separation.
+  - Elevation uses `--surface-hairline`, `--elevation-raised`, and `--elevation-floating` rather than raw `shadow-xl`/`shadow-2xl`.
+- Motion:
+  - Use `--motion-fast`, `--motion-base`, `--motion-slow`, `--motion-ease-out`, and `--motion-ease-standard`.
+  - `prefers-reduced-motion` is authoritative.
+- Imagery/iconography:
+  - Use lucide icons for actions and categories when available.
+  - Avoid visible text where a familiar icon plus tooltip communicates the control more cleanly.
 
 ## Components
-- Existing components to reuse: `Button`, `Tooltip`, existing theme tokens, lucide icons.
-- New/changed components: `ActionPanel` as a floating right panel with compact activity sections.
-- Variants and states: open detail panel, collapsed count dashboard, hidden empty groups, running/done/error tool status.
-- Token/component ownership: renderer components own layout; shared UI components own base controls.
+- Existing components to reuse: shadcn primitives in `src/components/ui/*`, theme provider, semantic token utilities, lucide icons, existing tooltip/popover/dialog primitives.
+- Canonical app surfaces:
+  - Sidebar: route ownership and plugin entry points.
+  - Main canvas: route-owned work surface with minimal host framing through `PageShell`.
+  - ActionPanel: floating operational activity surface.
+  - Command picker: search and 1st/2nd-depth command navigation.
+  - Settings and plugin pages: dense product configuration surfaces using the same `PageShell` chrome.
+  - PageSection: unframed settings/page bands for section grouping; do not wrap these bands in Card chrome.
+- Variants and states:
+  - Hover: subtle semantic surface tint, never layout shift.
+  - Active/selected: primary or route-specific accent with accessible foreground.
+  - Focus: shared ring token, always visible for keyboard users.
+  - Empty/loading/error/success: literal operational state, not decorative copy.
+- Token/component ownership:
+  - Shared primitives own focus, disabled state, base radius, and control structure.
+  - Feature components own domain layout and data density.
+  - Theme bundles own palette choices, not component behavior.
+
+## Token System Assessment
+- Decision: keep the existing semantic token and bundle registry architecture. It is structurally sound and already supports multi-theme contrast tests.
+- Required improvement: evolve the system beyond color. The previous gap was elevation and motion, which caused local shadow/timing choices to drift across panels and plugin surfaces.
+- Implemented direction:
+  - Add product-wide motion tokens in `src/styles.css`.
+  - Add surface/elevation tokens and utilities in `src/styles.css`.
+  - Add `executive-graphite` as a reference-quality restrained theme bundle.
+  - Update `docs/development/theme-system.md` so future work follows the new token contract.
+- Not needed now:
+  - Replacing the theme bundle model.
+  - Adding a new design-token package.
+  - Moving every spacing utility to CSS variables before a repeated semantic need exists.
+- Future migration target:
+  - Replace remaining raw `shadow-xl`/`shadow-2xl` in floating panels with `lvis-surface-*` utilities.
+  - Continue replacing route-local page chrome with `PageShell`/`PageSection` when new top-level surfaces are added.
 
 ## Accessibility
-- Target standard: keyboard and screen-reader accessible desktop UI.
-- Keyboard/focus behavior: open/close controls are buttons with labels and expanded state.
-- Contrast/readability: rely on theme contrast tests and semantic foreground/background tokens.
-- Screen-reader semantics: expose the panel as an `aside` with an accessible label.
-- Reduced motion and sensory considerations: no required motion for understanding state.
+- Target standard: keyboard and screen-reader accessible desktop UI with WCAG AA contrast for text and meaningful controls.
+- Keyboard/focus behavior: every visible command must be reachable by keyboard and expose a clear focus state.
+- Contrast/readability: theme contrast tests are required for every shipped bundle.
+- Screen-reader semantics: panels use landmarks/labels when they carry independent meaning.
+- Reduced motion: all nonessential motion must collapse to near-zero duration under reduced-motion preference.
+- Localization: UI must remain stable for Japanese, Chinese, Korean, English, Spanish, French, and German strings.
 
 ## Responsive behavior
-- Supported breakpoints/devices: desktop Electron windows with resizable width.
-- Layout adaptations: open panel floats in the right side area; closed state keeps only a compact count dashboard.
-- Touch/hover differences: hover is enhancement only; core actions remain clickable buttons.
+- Supported devices: desktop Electron windows with resizable width, including narrow laptop layouts.
+- Layout adaptations:
+  - Primary navigation may compact, but it must not duplicate route ownership.
+  - Floating panels must clamp to viewport width and height.
+  - Text inside controls must wrap or truncate intentionally without overlapping adjacent controls.
+- Touch/hover differences: hover is enhancement only; all essential actions remain click/keyboard accessible.
 
 ## Interaction states
-- Loading: running tools use status labels rather than skeletons.
-- Empty: each category has a compact empty state.
-- Error: failed tools use destructive status styling.
-- Success: completed tools use success status styling.
-- Disabled: inherited from shared button states.
-- Offline/slow network, if applicable: fetched-page list remains empty unless web activity is observed.
+- Loading: use compact progress or status text near the affected control.
+- Empty: state what is empty, not how the feature works.
+- Error: use destructive semantics and include the next actionable recovery when available.
+- Success: use success semantics sparingly; avoid celebratory motion.
+- Disabled: preserve legibility and explain disabled controls through tooltip or adjacent status only when the reason is not obvious.
+- Offline/slow network: keep local app navigation responsive and isolate remote failure to the affected operation.
 
 ## Content voice
-- Tone: concise, operational, and literal.
-- Terminology: use "read files", "written files", "MCP calls", "plugin calls", "tool calls", and "web sources".
-- Microcopy rules: avoid tutorial copy inside the panel; labels should identify data, not explain the feature.
+- Tone: concise, operational, literal.
+- Terminology:
+  - Use "Work" for the former action mode, including internal values.
+  - Use "Chat" for conversation-only mode.
+  - Use "provider", "model", "reasoning", "approval", "plugin", "MCP", and "local indexer" consistently.
+- Microcopy rules:
+  - Do not add tutorial text inside normal app surfaces.
+  - Labels identify the data or action.
+  - Tooltips can explain icon-only controls or unavailable actions.
 
 ## Implementation constraints
-- Framework/styling system: React, TypeScript, Tailwind utility classes, existing LVIS UI components.
-- Design-token constraints: no new palette or bespoke token layer for this panel.
-- Performance constraints: derive activity from existing chat entries and cap rendered detail lists at five items per category.
-- Compatibility constraints: keep existing smoke tests and renderer build passing.
-- Test/screenshot expectations: smoke tests should verify panel presence, close/open behavior, no sidebar duplication, and tool activity sections.
+- Framework/styling system: React, TypeScript, Tailwind v4 utilities, CSS variables in `src/styles.css`, existing shadcn primitives.
+- Design-token constraints:
+  - No component-local palette values for reusable UI language.
+  - No raw heavy shadow utilities for new floating surfaces when `lvis-surface-*` applies.
+  - No new dependency for design tokens without a concrete migration need.
+- Performance constraints:
+  - Theme switching must remain runtime CSS-variable based.
+  - Repeated panels should cap rendered detail lists and avoid layout reflow from dynamic counters.
+- Compatibility constraints:
+  - Keep Electron renderer build, theme bundle tests, contrast tests, and i18n parity tests passing.
+- Test/screenshot expectations:
+  - Theme changes require bundle invariant tests and contrast coverage.
+  - Layout changes require targeted component/e2e smoke or visual inspection when practical.
 
 ## Open questions
-- [ ] Decide whether future sessions need persisted activity history beyond the current chat stream.
+- Should typography scale tokens be promoted once Japanese/Chinese visual QA identifies repeated density adjustments?
