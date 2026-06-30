@@ -417,7 +417,10 @@ export function App() {
   // the effect below): work expands it, chat collapses it — a per-transition
   // default, NOT a lock.
   const [sidebarCollapsed, setSidebarCollapsed] = useState(() => readInitialAppMode() === "chat");
-  const [actionPanelOpen, setActionPanelOpen] = useState(true);
+  // The 도구 활동 (Tool Activity) panel defaults to its collapsed rail: on a
+  // fresh launch the full expanded card should not auto-show — the user opens it
+  // on demand. (Only rendered in work mode; see the appMode gate at its mount.)
+  const [actionPanelOpen, setActionPanelOpen] = useState(false);
   // Persist appMode to host settings and update local state. Guarded against
   // no-op writes (same mode) so a re-render or repeated toggle never fires a
   // redundant IPC write. Stable identity (useCallback with only `api`) so it is
@@ -1888,7 +1891,6 @@ export function App() {
           onOpenSettings={() => onOpenSettings()}
           onNewChat={onNewChat}
           streaming={streaming}
-          appMode={appMode}
           onOpenMarketplace={onOpenMarketplace}
           marketplaceUrlReady={marketplaceUrlReady}
           collapsed={sidebarCollapsed}
@@ -2090,12 +2092,17 @@ export function App() {
               the composer. The composer's own status sub-row keeps showing
               the ring / permission / model cells. */}
         </main>
-        <ActionPanel
-          open={actionPanelOpen}
-          onOpenChange={setActionPanelOpen}
-          activity={actionPanelActivity}
-          onOpenExternalUrl={openActionPanelUrl}
-        />
+        {/* The 도구 활동 panel is a work-mode affordance only. In chat mode the
+            shell is the focused conversation surface, so the panel (and its
+            collapsed rail) is omitted from the DOM entirely. */}
+        {appMode !== "chat" && (
+          <ActionPanel
+            open={actionPanelOpen}
+            onOpenChange={setActionPanelOpen}
+            activity={actionPanelActivity}
+            onOpenExternalUrl={openActionPanelUrl}
+          />
+        )}
         </div>
       </div>
 
