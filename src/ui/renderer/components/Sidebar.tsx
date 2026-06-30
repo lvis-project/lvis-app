@@ -1,12 +1,12 @@
 import { Suspense } from "react";
 import {
-  ChevronsLeft,
-  ChevronsRight,
   Database,
   Download,
   Home,
   KanbanSquare,
   KeyRound,
+  PanelLeftClose,
+  PanelLeftOpen,
   Plus,
   Repeat2,
   Search,
@@ -21,7 +21,6 @@ import { useTranslation } from "../../../i18n/react.js";
 import { getPluginViewLabel, toViewKey } from "../api-client.js";
 import { pluginIconFor } from "../utils/plugin-icon.js";
 import type { PluginUiExtension } from "../types.js";
-import type { AppMode } from "../MainToolbar.js";
 
 // ─── Types ───────────────────────────────────────────────────────────────────
 
@@ -38,12 +37,6 @@ export interface SidebarProps {
   onOpenSettings: () => void;
   onNewChat: () => void;
   streaming: boolean;
-  /**
-   * Current app mode. The collapse toggle is a work-mode affordance only — in
-   * chat mode the rail is always collapsed by the shell, so the toggle button
-   * does not render at all (the cluster keeps search/star/export).
-   */
-  appMode: AppMode;
   /**
    * Change 3: Marketplace jump button. Opens the plugin marketplace overlay.
    * Moved from PluginGridButton (InputActionBar) → Sidebar so marketplace is
@@ -328,7 +321,6 @@ function SectionDivider({ collapsed, label }: { collapsed: boolean; label?: stri
 // card surface still paints behind the lights — the OS draws the lights ON TOP
 // of the webview, so that is purely cosmetic backing, not a collision.
 function ClusterStrip({
-  appMode,
   collapsed,
   leadClearance,
   onToggleCollapse,
@@ -337,7 +329,6 @@ function ClusterStrip({
   onToggleCurrentSessionStar,
   onExport,
 }: {
-  appMode: AppMode;
   collapsed: boolean;
   /** True on darwin — left-pad the first button past the OS traffic lights. */
   leadClearance: boolean;
@@ -358,32 +349,24 @@ function ClusterStrip({
       ].join(" ")}
       data-testid="sidebar-cluster"
     >
-      {/* 펼침/닫힘 — shell-owned collapse toggle. Leftmost, next to the lights.
-          Work-mode only: in chat mode the shell pins the rail collapsed, so the
-          toggle has nothing to control and is omitted entirely. The glyph is a
-          bare directional chevron (no enclosing panel rectangle) so the icon
-          reads as a clean affordance against the card surface rather than a
-          boxed/active control — a left chevron when expanded (→ will collapse),
-          a right chevron when collapsed (→ will expand). */}
-      {appMode !== "chat" && (
-        <Tooltip>
-          <TooltipTrigger asChild>
-            <Button
-              variant="ghost"
-              size="icon"
-              className="h-6 w-6 aspect-square p-0 shrink-0 text-muted-foreground hover:text-foreground"
-              onClick={onToggleCollapse}
-              title={collapsed ? t("mainToolbar.expandSidebar") : t("mainToolbar.collapseSidebar")}
-              aria-label={collapsed ? t("mainToolbar.expandSidebar") : t("mainToolbar.collapseSidebar")}
-              aria-pressed={!collapsed}
-              data-testid="sidebar-collapse-toggle"
-            >
-              {collapsed ? <ChevronsRight className="h-4 w-4" /> : <ChevronsLeft className="h-4 w-4" />}
-            </Button>
-          </TooltipTrigger>
-          <TooltipContent side="bottom">{collapsed ? t("mainToolbar.expandSidebar") : t("mainToolbar.collapseSidebar")}</TooltipContent>
-        </Tooltip>
-      )}
+      {/* 펼침/닫힘 — shell-owned collapse toggle. Leftmost, next to the lights. */}
+      <Tooltip>
+        <TooltipTrigger asChild>
+          <Button
+            variant="ghost"
+            size="icon"
+            className="h-6 w-6 aspect-square p-0 shrink-0 text-muted-foreground hover:text-foreground"
+            onClick={onToggleCollapse}
+            title={collapsed ? t("mainToolbar.expandSidebar") : t("mainToolbar.collapseSidebar")}
+            aria-label={collapsed ? t("mainToolbar.expandSidebar") : t("mainToolbar.collapseSidebar")}
+            aria-pressed={!collapsed}
+            data-testid="sidebar-collapse-toggle"
+          >
+            {collapsed ? <PanelLeftOpen className="h-4 w-4" /> : <PanelLeftClose className="h-4 w-4" />}
+          </Button>
+        </TooltipTrigger>
+        <TooltipContent side="bottom">{collapsed ? t("mainToolbar.expandSidebar") : t("mainToolbar.collapseSidebar")}</TooltipContent>
+      </Tooltip>
 
       {/* 검색 — unified search. Tour anchor "chat-history". */}
       <Tooltip>
@@ -465,7 +448,6 @@ export function Sidebar({
   onOpenSettings,
   onNewChat,
   streaming,
-  appMode,
   onOpenMarketplace,
   marketplaceUrlReady = false,
   collapsed,
@@ -549,7 +531,6 @@ export function Sidebar({
             is expanded this is the card's top strip; when collapsed it stands bare
             in the band. Always rendered — never hidden in either state. */}
         <ClusterStrip
-          appMode={appMode}
           collapsed={collapsed}
           leadClearance={darwinTopClearance}
           onToggleCollapse={onToggleCollapse}
