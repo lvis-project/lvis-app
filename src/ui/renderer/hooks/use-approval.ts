@@ -1,6 +1,8 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { approvalQueueReducer } from "../../../lib/approval-queue-reducer.js";
-import type { ApprovalChoice, ApprovalRequest } from "../types.js";
+import type { ApprovalChoice, ApprovalDecision, ApprovalRequest } from "../types.js";
+
+export type ApprovalDecisionExtras = Pick<ApprovalDecision, "elicitationContent">;
 
 /**
  * Approval queue hook.
@@ -54,7 +56,7 @@ export function useApproval() {
    * bug where the user sees the same modal twice. See Fix 5 (PR #97).
    */
   const decide = useCallback(
-    async (choice: ApprovalChoice, pattern?: string) => {
+    async (choice: ApprovalChoice, pattern?: string, extras?: ApprovalDecisionExtras) => {
       if (inFlightRef.current) return;
       const current = queueRef.current[0];
       if (!current) return;
@@ -80,6 +82,9 @@ export function useApproval() {
           // and are forcibly downgraded to deny-once.
           nonce: current.nonce,
           hmac: current.hmac,
+          ...(extras && "elicitationContent" in extras
+            ? { elicitationContent: extras.elicitationContent }
+            : {}),
         });
       } catch (err) {
         // Log only — do NOT re-push. See JSDoc above.
