@@ -1152,6 +1152,8 @@ export type ApprovalDecision = {
   requestId: string;
   choice: ApprovalChoice;
   rememberPattern?: string;
+  /** One-shot MCP elicitation form content returned with an allow decision. */
+  elicitationContent?: Record<string, unknown>;
   /** Echoed nonce from the matching ApprovalRequest (confused-deputy defense). */
   nonce?: string;
   /** Echoed HMAC from the matching ApprovalRequest (confused-deputy defense). */

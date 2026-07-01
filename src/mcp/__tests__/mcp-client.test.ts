@@ -1463,7 +1463,12 @@ describe("McpClient — 2026-07-28 RC stateless handshake (#1230)", () => {
     const uiResult = {
       resultType: "complete",
       content: [{ type: "text", text: "x" }],
-      _meta: { ui: { resourceUri: "ui://app/p.html" } },
+      _meta: {
+        ui: {
+          resourceUri: "ui://app/p.html",
+          csp: { connectSrc: ["https://api.example.com"] },
+        },
+      },
     };
     const discoverWithApps = {
       ...RC_DISCOVER_RESULT,
@@ -1478,7 +1483,10 @@ describe("McpClient — 2026-07-28 RC stateless handshake (#1230)", () => {
       return new Response("unexpected", { status: 500 });
     });
     await withApps.client.connect();
-    expect((await withApps.client.callTool("q", {})).uiPayload?.resourceUri).toBe("ui://app/p.html");
+    expect((await withApps.client.callTool("q", {})).uiPayload).toMatchObject({
+      resourceUri: "ui://app/p.html",
+      csp: { connectSrc: ["https://api.example.com"] },
+    });
     await withApps.client.disconnect();
 
     // Same _meta.ui from a server that did NOT advertise Apps → ignored (gate).
