@@ -5,7 +5,7 @@
  * to call from any process. The stateful, ergonomic wrappers (`t`, current
  * locale) live in {@link ./runtime}.
  */
-import { DEFAULT_LOCALE, type Locale } from "./locale.js";
+import type { Locale } from "./locale.js";
 import { messages, type Messages } from "./messages/index.js";
 
 /** Values that can be interpolated into a message placeholder. */
@@ -35,7 +35,7 @@ export function interpolate(template: string, vars?: TranslationVars): string {
  */
 export function translate(locale: Locale, key: string, vars?: TranslationVars): string {
   const active: Messages | undefined = messages[locale];
-  const fallback: Messages = messages[DEFAULT_LOCALE];
+  const fallback: Messages = messages.en;
   const template = active?.[key] ?? fallback[key] ?? key;
   return interpolate(template, vars);
 }

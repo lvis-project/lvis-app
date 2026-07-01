@@ -8,7 +8,7 @@
 import { app } from "electron";
 import type { BrowserWindow } from "electron";
 import { SettingsService } from "../data/settings-store.js";
-import { setLocale } from "../i18n/index.js";
+import { DEFAULT_LOCALE, normalizeLocale, setLocale, tryLoadLocaleMessages } from "../i18n/index.js";
 import { MemoryManager } from "../memory/memory-manager.js";
 import { KeywordEngine } from "../core/keyword-engine.js";
 import { RouteEngine } from "../core/route-engine.js";
@@ -34,6 +34,14 @@ export interface CoreServices {
   keywordEngine: KeywordEngine;
   toolRegistry: ToolRegistry;
   routeEngine: RouteEngine;
+}
+
+export async function applyBootLocale(
+  settingsService: Pick<SettingsService, "get">,
+): Promise<void> {
+  const bootLocale = normalizeLocale(settingsService.get("appearance").language);
+  const loaded = await tryLoadLocaleMessages(bootLocale);
+  setLocale(loaded ? bootLocale : DEFAULT_LOCALE);
 }
 
 export async function bootstrapCoreServices(mainWindow: BrowserWindow): Promise<CoreServices> {
@@ -64,7 +72,7 @@ export async function bootstrapCoreServices(mainWindow: BrowserWindow): Promise<
   // Set the main-process UI locale from persisted settings (or system-detected
   // locale on fresh install) so dialog titles, native menus, tray, and
   // notifications render in the user's language. See src/i18n.
-  setLocale(settingsService.get("appearance").language);
+  await applyBootLocale(settingsService);
 
   // §14.2 Audit log rotation + retention — boot-time check + 1h interval
   const auditLogger = new AuditLogger();

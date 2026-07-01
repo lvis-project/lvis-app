@@ -1,6 +1,13 @@
-import { afterEach, beforeEach, describe, expect, it } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { DEFAULT_LOCALE, SUPPORTED_LOCALES, isLocale, normalizeLocale } from "../locale.js";
-import { messages } from "../messages/index.js";
+import {
+  __resetLazyLocaleMessagesForTest,
+  __setLocaleLoaderForTest,
+  isLocaleMessagesLoaded,
+  loadAllLocaleMessages,
+  loadLocaleMessages,
+  messages,
+} from "../messages/index.js";
 import { interpolate, translate } from "../translate.js";
 import { getLocale, setLocale, t } from "../runtime.js";
 
@@ -18,11 +25,13 @@ beforeEach(() => {
   // the runtime locale to Korean for backend assertions, so reset to the
   // default here to test the real default-locale behavior.
   setLocale(DEFAULT_LOCALE);
+  __resetLazyLocaleMessagesForTest();
 });
 
 afterEach(() => {
   // Reset module-level locale so tests don't leak ordering dependencies.
   setLocale(DEFAULT_LOCALE);
+  __resetLazyLocaleMessagesForTest();
 });
 
 describe("locale", () => {
@@ -76,7 +85,54 @@ describe("interpolate", () => {
 });
 
 describe("translate", () => {
-  it("returns the locale-specific string", () => {
+  it("keeps extra generated locales lazy until explicitly loaded", () => {
+    expect(isLocaleMessagesLoaded("en")).toBe(true);
+    expect(isLocaleMessagesLoaded("ko")).toBe(true);
+    expect(isLocaleMessagesLoaded("ja")).toBe(false);
+    expect(isLocaleMessagesLoaded("zh")).toBe(false);
+  });
+
+  it("coalesces concurrent lazy locale loads", async () => {
+    const catalog = { ...messages.en, "common.cancel": "Concurrent OK" };
+    const loader = vi.fn(() => Promise.resolve(catalog));
+    const restore = __setLocaleLoaderForTest("ja", loader);
+
+    try {
+      const first = loadLocaleMessages("ja");
+      const second = loadLocaleMessages("ja");
+
+      const [firstCatalog, secondCatalog] = await Promise.all([first, second]);
+
+      expect(loader).toHaveBeenCalledTimes(1);
+      expect(firstCatalog).toBe(secondCatalog);
+      expect(firstCatalog).toBe(catalog);
+      expect(isLocaleMessagesLoaded("ja")).toBe(true);
+    } finally {
+      restore();
+    }
+  });
+
+  it("clears a failed pending lazy locale load so a retry can succeed", async () => {
+    const retryCatalog = { ...messages.en, "common.cancel": "Retry OK" };
+    const loader = vi.fn()
+      .mockRejectedValueOnce(new Error("temporary chunk failure"))
+      .mockResolvedValueOnce(retryCatalog);
+    const restore = __setLocaleLoaderForTest("ja", loader);
+
+    try {
+      await expect(loadLocaleMessages("ja")).rejects.toThrow("temporary chunk failure");
+      expect(isLocaleMessagesLoaded("ja")).toBe(false);
+
+      await expect(loadLocaleMessages("ja")).resolves.toBe(retryCatalog);
+      expect(loader).toHaveBeenCalledTimes(2);
+      expect(translate("ja", "common.cancel")).toBe("Retry OK");
+    } finally {
+      restore();
+    }
+  });
+
+  it("returns the locale-specific string", async () => {
+    await Promise.all(SUPPORTED_LOCALES.map((locale) => loadLocaleMessages(locale)));
     expect(translate("en", "common.cancel")).toBe("Cancel");
     expect(translate("ko", "common.cancel")).toBe("취소");
     expect(translate("ja", "common.cancel")).toBe("キャンセル");
@@ -92,35 +148,39 @@ describe("translate", () => {
     expect(translate("ko", "totally.unknown.key")).toBe("totally.unknown.key");
   });
 
-  it("ships complete catalogs for every supported locale", () => {
-    const englishKeys = Object.keys(messages.en).sort();
+  it("ships complete catalogs for every supported locale", async () => {
+    const catalogs = await loadAllLocaleMessages();
+    const englishKeys = Object.keys(catalogs.en).sort();
     for (const locale of SUPPORTED_LOCALES) {
-      expect(Object.keys(messages[locale]).sort(), locale).toEqual(englishKeys);
+      expect(Object.keys(catalogs[locale]).sort(), locale).toEqual(englishKeys);
     }
   });
 
-  it("preserves placeholder and tag parity in every supported locale", () => {
+  it("preserves placeholder and tag parity in every supported locale", async () => {
+    const catalogs = await loadAllLocaleMessages();
     for (const locale of SUPPORTED_LOCALES) {
-      for (const [key, english] of Object.entries(messages.en)) {
-        expect(sortedMatches(messages[locale][key] ?? "", PLACEHOLDER_RE), `${locale}:${key}:placeholders`)
+      for (const [key, english] of Object.entries(catalogs.en)) {
+        expect(sortedMatches(catalogs[locale][key] ?? "", PLACEHOLDER_RE), `${locale}:${key}:placeholders`)
           .toEqual(sortedMatches(english, PLACEHOLDER_RE));
-        expect(sortedMatches(messages[locale][key] ?? "", TAG_RE), `${locale}:${key}:tags`)
+        expect(sortedMatches(catalogs[locale][key] ?? "", TAG_RE), `${locale}:${key}:tags`)
           .toEqual(sortedMatches(english, TAG_RE));
-        expect(sortedMatches(messages[locale][key] ?? "", SLASH_COMMAND_RE), `${locale}:${key}:slashCommands`)
+        expect(sortedMatches(catalogs[locale][key] ?? "", SLASH_COMMAND_RE), `${locale}:${key}:slashCommands`)
           .toEqual(sortedMatches(english, SLASH_COMMAND_RE));
       }
     }
   });
 
-  it("does not expose generated protection sentinels", () => {
+  it("does not expose generated protection sentinels", async () => {
+    const catalogs = await loadAllLocaleMessages();
     for (const locale of SUPPORTED_LOCALES) {
-      for (const [key, value] of Object.entries(messages[locale])) {
+      for (const [key, value] of Object.entries(catalogs[locale])) {
         expect(value, `${locale}:${key}`).not.toMatch(SENTINEL_LEAK_RE);
       }
     }
   });
 
-  it("does not expose Japanese and Chinese as English fallback catalogs", () => {
+  it("does not expose Japanese and Chinese as English fallback catalogs", async () => {
+    await Promise.all([loadLocaleMessages("ja"), loadLocaleMessages("zh")]);
     expect(translate("ja", "chatTab.streamSmoothingTitle")).not.toBe("Stream Smoothing");
     expect(translate("zh", "chatTab.streamSmoothingTitle")).not.toBe("Stream Smoothing");
   });
