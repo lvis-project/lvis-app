@@ -12,7 +12,7 @@ import { createLogger } from "../../lib/logger.js";
 const log = createLogger("sandbox");
 
 /**
- * M1 — uiCallable safety: inverted model.
+ * M1 — uiActions safety: inverted model.
  *
  * Rather than maintain a blocklist of destructive verbs (which grows stale
  * whenever a plugin invents a new mutating verb like `_revoke`, `_truncate`,
@@ -20,7 +20,7 @@ const log = createLogger("sandbox");
  * read-like verbs. Anything that is not clearly a read (_get, _list,
  * _search, _read, _show, _query, _preview, _count, _status, _find,
  * _describe, _inspect) is treated as mutating and can only be exposed via
- * uiCallable when the plugin is managed AND signed.
+ * uiActions when the plugin is managed AND signed.
  *
  * Legacy blocklist export retained for backwards-compat (tests may import).
  */

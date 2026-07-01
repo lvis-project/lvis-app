@@ -1,7 +1,7 @@
 {
   "id": "work-assistant",
   "name": "LVIS Work Assistant",
-  "version": "0.10.3",
+  "version": "0.10.5",
   "icon": "HandHelping",
   "installPolicy": "admin",
   "dependencies": [
@@ -67,10 +67,6 @@
     "work_assistant_list_detectors",
     "work_assistant_set_detector_enabled"
   ],
-  "uiCallable": [
-    "work_assistant_list_detectors",
-    "work_assistant_set_detector_enabled"
-  ],
   "ui": [
     {
       "id": "detector-control",
@@ -93,7 +89,9 @@
         "type": "array",
         "title": "회의 메일 허용 발신 도메인 목록",
         "description": "proactive 회의/결재/액션/답장 감지가 활성화될 사내 메일 도메인 목록. 기본값 `[\"lge.com\"]` — LG 사내 메일을 즉시 감지. 빈 배열로 명시 설정하면 모든 메일이 무시됩니다 (fail-closed). 컨슈머 도메인(gmail.com 등)은 보안상 추가하지 마세요. 와일드카드 `*` 한 줄로 모든 발신자 통과 가능 — dev/personal 사용 한정 (prompt-injection 위험 ↑).",
-        "default": ["lge.com"],
+        "default": [
+          "lge.com"
+        ],
         "items": {
           "type": "string"
         }
@@ -162,17 +160,64 @@
     "work_assistant.alert.webex-link-missing"
   ],
   "notificationEvents": [
-    { "event": "work_assistant.alert.mail-action", "titleField": "title", "bodyField": "body" },
-    { "event": "work_assistant.alert.mail-approval", "titleField": "title", "bodyField": "body" },
-    { "event": "work_assistant.alert.mail-meeting", "titleField": "title", "bodyField": "body" },
-    { "event": "work_assistant.alert.mail-reply", "titleField": "title", "bodyField": "body" },
-    { "event": "work_assistant.alert.meeting-summary", "titleField": "title", "bodyField": "body" },
-    { "event": "work_assistant.alert.calendar-event-prep", "titleField": "title", "bodyField": "body", "bypassFocusGate": true },
-    { "event": "work_assistant.alert.work-item-due-soon", "titleField": "title", "bodyField": "body", "bypassFocusGate": true },
-    { "event": "work_assistant.alert.video-conference-prep-register", "titleField": "title", "bodyField": "body", "bypassFocusGate": true },
-    { "event": "work_assistant.alert.calendar-conflict-prep", "titleField": "title", "bodyField": "body" },
-    { "event": "work_assistant.alert.meeting-room-suggest", "titleField": "title", "bodyField": "body" },
-    { "event": "work_assistant.alert.webex-link-missing", "titleField": "title", "bodyField": "body" }
+    {
+      "event": "work_assistant.alert.mail-action",
+      "titleField": "title",
+      "bodyField": "body"
+    },
+    {
+      "event": "work_assistant.alert.mail-approval",
+      "titleField": "title",
+      "bodyField": "body"
+    },
+    {
+      "event": "work_assistant.alert.mail-meeting",
+      "titleField": "title",
+      "bodyField": "body"
+    },
+    {
+      "event": "work_assistant.alert.mail-reply",
+      "titleField": "title",
+      "bodyField": "body"
+    },
+    {
+      "event": "work_assistant.alert.meeting-summary",
+      "titleField": "title",
+      "bodyField": "body"
+    },
+    {
+      "event": "work_assistant.alert.calendar-event-prep",
+      "titleField": "title",
+      "bodyField": "body",
+      "bypassFocusGate": true
+    },
+    {
+      "event": "work_assistant.alert.work-item-due-soon",
+      "titleField": "title",
+      "bodyField": "body",
+      "bypassFocusGate": true
+    },
+    {
+      "event": "work_assistant.alert.video-conference-prep-register",
+      "titleField": "title",
+      "bodyField": "body",
+      "bypassFocusGate": true
+    },
+    {
+      "event": "work_assistant.alert.calendar-conflict-prep",
+      "titleField": "title",
+      "bodyField": "body"
+    },
+    {
+      "event": "work_assistant.alert.meeting-room-suggest",
+      "titleField": "title",
+      "bodyField": "body"
+    },
+    {
+      "event": "work_assistant.alert.webex-link-missing",
+      "titleField": "title",
+      "bodyField": "body"
+    }
   ],
   "toolSchemas": {
     "work_assistant_list_detectors": {
@@ -231,5 +276,9 @@
         "additionalProperties": false
       }
     }
+  },
+  "uiActions": {
+    "work_assistant_list_detectors": {},
+    "work_assistant_set_detector_enabled": {}
   }
 }

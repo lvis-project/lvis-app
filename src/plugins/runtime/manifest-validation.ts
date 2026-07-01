@@ -328,32 +328,52 @@ export async function parsePluginJson(
     }
   }
 
-  // §B-3 — uiCallable structural validation. UI-callable methods may be
+  // §B-3 — UI action structural validation. UI action methods may be
   // runtime-only and therefore do not need to appear in tools[]; tools[] is
   // the LLM-facing registration surface.
-  const uiCallable = Array.isArray(parsed.uiCallable) ? parsed.uiCallable : [];
-  for (let i = 0; i < uiCallable.length; i += 1) {
-    const method = uiCallable[i];
-    if (typeof method !== "string") {
+  const uiActionsRaw: unknown = parsed.uiActions;
+  const uiActionNames: string[] = [];
+  if (uiActionsRaw !== undefined) {
+    if (
+      uiActionsRaw === null ||
+      typeof uiActionsRaw !== "object" ||
+      Array.isArray(uiActionsRaw)
+    ) {
       fail(
-        `uiCallable[${i}]`,
-        "must be a string",
-        `"uiCallable": ["summary_get"]`,
+        "uiActions",
+        "must be an object keyed by UI-invokable runtime method name",
+        `"uiActions": { "summary_get": { "description": "Fetch the visible summary" } }`,
       );
     }
-    if (!TOOL_NAME_PATTERN.test(method)) {
-      throw new Error(
-        `Invalid UI-callable method name '${method}' in plugin '${pid}' at 'uiCallable[${i}]' (${path}): ` +
-        `method names must match ^[a-zA-Z_][a-zA-Z0-9_]*$ (start with letter/underscore, then letters/digits/underscores). ` +
-        `Example: "uiCallable": ["sample_upload_chunk"] (not "sample.upload.chunk")`,
-      );
+    const uiActions = uiActionsRaw as Record<string, unknown>;
+    for (const [method, spec] of Object.entries(uiActions)) {
+      if (!TOOL_NAME_PATTERN.test(method)) {
+        throw new Error(
+          `Invalid UI action method name '${method}' in plugin '${pid}' at 'uiActions.${method}' (${path}): ` +
+          `method names must match ^[a-zA-Z_][a-zA-Z0-9_]*$ (start with letter/underscore, then letters/digits/underscores). ` +
+          `Example: "uiActions": { "sample_upload_chunk": {} } (not "sample.upload.chunk")`,
+        );
+      }
+      if (
+        spec === null ||
+        typeof spec !== "object" ||
+        Array.isArray(spec)
+      ) {
+        fail(
+          `uiActions.${method}`,
+          "must be an object",
+          `"uiActions": { "${method}": { "description": "User-triggered action" } }`,
+        );
+      }
+      uiActionNames.push(method);
     }
   }
+  const uiInvokable = new Set(uiActionNames);
 
   // Plugin auth UI surface (architecture.md §9.4a) — auth.{statusTool,
-  // loginTool, logoutTool?} must all be members of uiCallable[]. AJV cannot
-  // express cross-array membership without a custom keyword, so this lives
-  // alongside the other hand-rolled cross-field checks.
+  // loginTool, logoutTool?} must all be members of uiActions. AJV cannot express
+  // cross-surface membership without a custom
+  // keyword, so this lives alongside the other hand-rolled cross-field checks.
   if (parsed.auth) {
     const authToolKeys: Array<"statusTool" | "loginTool" | "logoutTool"> = [
       "statusTool",
@@ -370,11 +390,11 @@ export async function parsePluginJson(
           `"auth": { "statusTool": "ms_status", "loginTool": "ms_login" }`,
         );
       }
-      if (!uiCallable.includes(value)) {
+      if (!uiInvokable.has(value)) {
         fail(
           `auth.${key}`,
-          `tool '${value}' is not declared in uiCallable[]`,
-        `add "${value}" to uiCallable[] so the host UI surface can invoke it`,
+          `tool '${value}' is not declared in uiActions`,
+        `add "${value}" to uiActions so the host UI surface can invoke it`,
         );
       }
     }
@@ -410,13 +430,13 @@ export async function parsePluginJson(
 
     // architecture.md §9.4a: auth is a HOST-managed lifecycle, not an LLM
     // capability. The auth tools (statusTool/loginTool/logoutTool) are invoked
-    // only through the host UI surface (callFromUi, gated by uiCallable[]) and
+    // only through the host UI surface (callFromUi, gated by uiActions) and
     // must NOT appear in tools[] — tools[] is the LLM-facing registration
     // surface, and listing an auth tool there would expose sign-in/sign-out as
-    // an agent-callable tool. They belong in uiCallable[] only.
+    // an agent-callable tool. They belong in uiActions only.
     //
     // Hard fail: both shipped auth plugins (lge-api, ms-graph) are migrated —
-    // their auth tools live in uiCallable[] only, never tools[] — so rejecting
+    // their auth tools live in uiActions only, never tools[] — so rejecting
     // can no longer break a mid-migration plugin. This is the SOLE guard against
     // a regression silently re-exposing auth as an LLM tool: `tools[]` is
     // projected to the model verbatim (manifestToolsToMcpTools), and there is no
@@ -434,7 +454,7 @@ export async function parsePluginJson(
       fail(
         "tools",
         `auth tool(s) ${names} must not appear in tools[] — auth is a host-managed lifecycle, not an LLM-callable tool`,
-        `remove ${names} from tools[] (keep them in uiCallable[] only). See architecture.md §9.4a`,
+        `remove ${names} from tools[] (keep them in uiActions only). See architecture.md §9.4a`,
       );
     }
   }
@@ -453,19 +473,18 @@ export async function parsePluginJson(
   }
 
   // A toolSchemas entry must back either an LLM tool (tools[]) OR a UI-only
-  // method (uiCallable[]). Auth methods (login/logout/status) are uiCallable —
+  // method (uiActions). Auth methods (login/logout/status) are UI-invokable —
   // NOT LLM tools (host-managed auth lifecycle) — yet keep a schema so the host
   // can render the auth surface and validate the UI's payload (e.g. the login
-  // `force` flag). Allowing uiCallable here is what lets auth live outside
+  // `force` flag). Allowing UI-invokable methods here is what lets auth live outside
   // tools[] without dropping its schema.
   const schemaKeys = parsed.toolSchemas ? Object.keys(parsed.toolSchemas) : [];
-  const uiCallableKeys = Array.isArray(parsed.uiCallable) ? parsed.uiCallable : [];
   for (const k of schemaKeys) {
-    if (!parsed.tools.includes(k) && !uiCallableKeys.includes(k)) {
+    if (!parsed.tools.includes(k) && !uiInvokable.has(k)) {
       fail(
         `toolSchemas['${k}']`,
-        `key not in tools[] or uiCallable[]`,
-        `remove the key or add '${k}' to tools[] or uiCallable[]`,
+        `key not in tools[] or uiActions`,
+        `remove the key or add '${k}' to tools[] or uiActions`,
       );
     }
   }

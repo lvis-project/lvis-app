@@ -69,7 +69,7 @@ export function PluginAuthSection({
     } catch (err) {
       // Generic user-facing copy + log raw error to the console for support
       // triage. Avoids leaking IPC reject internals (e.g.
-      // "Method 'x' is not UI-callable for plugin 'y'") into the badge UI.
+      // "Method 'x' is not declared as a UI action for plugin 'y'") into the badge UI.
       console.error(`[plugin-auth] ${pluginId} loginTool ${auth.loginTool} failed`, err);
       setLocalError(t("pluginAuthSection.loginError"));
     } finally {

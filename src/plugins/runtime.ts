@@ -12,6 +12,7 @@ export { resolvePluginEntryPath } from "./runtime/sandbox.js";
 // Main class + interfaces
 export {
   PluginRuntime,
+  declaredUiInvokableMethods,
   normalizeInstallPolicy,
   getDeclaredEmittedEvents,
 } from "./runtime/index.js";

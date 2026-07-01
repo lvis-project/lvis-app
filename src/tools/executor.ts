@@ -310,6 +310,13 @@ export interface ToolPermissionContext {
    */
   trustOrigin: ToolTrustOrigin;
   /**
+   * True when a plugin invocation is rooted in a direct plugin panel/renderer
+   * user action. This suppresses the normal foreground agent approval modal for
+   * plugin tools only; Layer 1 denies, Layer 2 hard asks, forceModal asks, and
+   * operator perm-hook denies still apply.
+   */
+  pluginPanelUserAction?: boolean;
+  /**
    * Recent user-authored turn text. Used only to provide reviewer context
    * and prefill the high-risk approval purpose field; plugin/file origins
    * should leave this absent.
@@ -2407,6 +2414,39 @@ export class ToolExecutor {
           decision: "allow",
           reason:
             "plugin foreground pre-exec ask relaxed — gated at the effect boundary (hostClassifiesRisk)",
+          layer: permissionResult.layer,
+        };
+      }
+      if (
+        source === "plugin" &&
+        invocationPermissionContext.pluginPanelUserAction === true &&
+        invocationPermissionContext.headless !== true &&
+        permissionResult.decision === "ask" &&
+        permissionResult.layer >= 3 &&
+        permissionResult.forceModal !== true
+      ) {
+        const panelPermHook = await this.runScriptHook(
+          "perm",
+          toolUse.name,
+          source,
+          invocationCategory,
+          finalInput,
+          sessionId,
+          invocationPermissionContext,
+          tool.mcpServerId,
+          tool.pluginId,
+        );
+        if (panelPermHook.decision === "deny") {
+          const msg = t("be_executor.hookPermissionBlock", { reason: panelPermHook.reason });
+          const durationMs = Date.now() - startTime;
+          emitToolStart(callbacks, toolUse.name, finalInput, meta);
+          callbacks?.onToolEnd?.(toolUse.name, msg, true, meta, undefined, durationMs);
+          await this.auditToolCall(sessionId, toolUse.name, source, trust, finalInput, msg, true, startTime, { ...permissionResult, decision: "deny", reason: panelPermHook.reason }, Infinity, invocationPermissionContext, invocationCategory, executionCwd, undefined, undefined, hookChainFromDispatch("perm", panelPermHook));
+          return { tool_use_id: toolUse.id, content: msg, is_error: true, durationMs };
+        }
+        permissionResult = {
+          decision: "allow",
+          reason: "plugin panel user action - standard agent approval modal suppressed",
           layer: permissionResult.layer,
         };
       }

@@ -84,8 +84,14 @@ import { t } from "../../i18n/index.js";
 const log = createLogger("plugin-runtime");
 const START_FAILURE_STOP_TIMEOUT_MS = 2_000;
 
+export function declaredUiInvokableMethods(
+  manifest: Pick<PluginManifest, "uiActions">,
+): string[] {
+  return manifest.uiActions ? Object.keys(manifest.uiActions) : [];
+}
+
 function declaredRuntimeMethods(manifest: PluginManifest): string[] {
-  return [...new Set([...(manifest.tools ?? []), ...(manifest.uiCallable ?? [])])];
+  return [...new Set([...(manifest.tools ?? []), ...declaredUiInvokableMethods(manifest)])];
 }
 
 export type { InstallPolicy };
@@ -1770,8 +1776,8 @@ export class PluginRuntime {
   }
 
   /**
-   * Invoke a plugin method from the renderer, enforcing the uiCallable allowlist
-   * so only explicitly declared methods are reachable via the IPC bridge.
+   * Invoke a plugin method from the renderer, enforcing the UI invocation
+   * allowlist so only explicitly declared methods are reachable via the IPC bridge.
    */
   async callFromUi(method: string, payload?: unknown): Promise<unknown> {
     const entry = this.methodMap.get(method);
@@ -1781,11 +1787,11 @@ export class PluginRuntime {
     }
     const plugin = this.plugins.get(entry.pluginId);
     this.throwIfPluginNotStarted(entry.pluginId);
-    const uiCallable = plugin?.manifest.uiCallable ?? [];
-    if (!uiCallable.includes(method)) {
+    const uiInvokable = plugin ? declaredUiInvokableMethods(plugin.manifest) : [];
+    if (!uiInvokable.includes(method)) {
       throw new Error(
-        `Method '${method}' is not UI-callable for plugin '${entry.pluginId}'. ` +
-        `Declare it in manifest.uiCallable[] to allow renderer invocation.`,
+        `Method '${method}' is not declared as a UI action for plugin '${entry.pluginId}'. ` +
+        `Declare it in manifest.uiActions to allow renderer invocation.`,
       );
     }
     if (!this.toolInvocationDelegate) {

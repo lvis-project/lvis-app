@@ -962,6 +962,7 @@ export async function bootstrap(
             // honoured and the reviewer lane is not re-engaged.
             headless: effectiveOrigin !== "ui",
             trustOrigin: "plugin-emitted",
+            pluginPanelUserAction: effectiveOrigin === "ui",
           }),
         },
       );
