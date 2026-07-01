@@ -27,6 +27,7 @@ import type {
 } from "../../shared/render-html-preview.js";
 import type { SessionTodoItem } from "../../shared/session-todo.js";
 import type { MarketplaceAnnouncementPayload } from "../../shared/marketplace-announcements.js";
+import type { NetworkAccessAcknowledgement } from "../../shared/network-access.js";
 import type {
   SandboxCapabilityInfo,
   SandboxConfinement,
@@ -60,6 +61,11 @@ export type MarketplaceItem = {
   mcpAuth?: {
     mode: "none" | "api-key" | "sso" | "oauth";
     transport?: "stdio" | "http";
+  };
+  networkAccess?: {
+    allowedDomains: string[];
+    reasoning?: string;
+    allowPrivateNetworks?: boolean;
   };
 };
 
@@ -122,6 +128,12 @@ export type PluginCardSummary = {
   configSchema?: PluginConfigSchemaSummary;
   /** Optional declarative auth contract for the host UI surface. */
   auth?: PluginAuthSummary;
+  /** Declarative egress disclosure copied from the plugin manifest. */
+  networkAccess?: {
+    allowedDomains: string[];
+    reasoning?: string;
+    allowPrivateNetworks?: boolean;
+  };
   /** Marketplace request slugs that should collapse onto this installed plugin. */
   installAliases?: string[];
 };
@@ -288,6 +300,10 @@ export type UsageSummaryShape = {
 export type PluginMarketplaceActionResult =
   | { ok: true; pluginId: string; installed?: true; uninstalled?: true; version?: string }
   | { ok: false; error: string; message?: string };
+
+export type PluginMarketplaceInstallOptions = {
+  networkAccessAcknowledgement?: NetworkAccessAcknowledgement;
+};
 
 export type LvisApi = {
   /**
@@ -838,7 +854,13 @@ export type LvisApi = {
   onWorkBoardRunFailed: (
     handler: (payload: { itemId: number; reason: string; at: string }) => void,
   ) => () => void;
-  onMarketplaceUpdatesAvailable: (h: (updates: Array<{ pluginId: string; pluginName?: string; installedVersion: string; latestVersion: string }>) => void) => () => void;
+  onMarketplaceUpdatesAvailable: (h: (updates: Array<{
+    pluginId: string;
+    pluginName?: string;
+    installedVersion: string;
+    latestVersion: string;
+    networkAccess?: MarketplaceItem["networkAccess"];
+  }>) => void) => () => void;
   /**
    * Marketplace announcement stream — the host pushes the currently-active,
    * not-yet-dismissed announcements whenever the announcement poller runs.
@@ -1481,7 +1503,11 @@ export type LvisPluginsApi = {
 };
 
 export type LvisHostMarketplaceApi = {
-  installMarketplacePlugin: (id: string, expectedVersion?: string) => Promise<PluginMarketplaceActionResult>;
+  installMarketplacePlugin: (
+    id: string,
+    expectedVersion?: string,
+    options?: PluginMarketplaceInstallOptions,
+  ) => Promise<PluginMarketplaceActionResult>;
   uninstallMarketplacePlugin: (id: string) => Promise<PluginMarketplaceActionResult>;
   installMarketplaceAgent?: (slug: string) => Promise<PluginMarketplaceActionResult>;
   uninstallMarketplaceAgent?: (slug: string) => Promise<PluginMarketplaceActionResult>;

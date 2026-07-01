@@ -2673,4 +2673,7 @@ export const frMessages: Record<string, string> = {
   "workGroup.stepCount": "{count} étapes",
   "workGroup.work": "Travail",
   "workGroup.working": "Fonctionnement...",
+  "pluginInstallDialog.allowPrivateNetworks": "This grant can reach private network addresses when an allowed domain resolves there.",
+  "pluginInstallDialog.allowedDomainsLabel": "Allowed domains",
+  "pluginInstallDialog.networkAccessTitle": "Network access requested",
 };

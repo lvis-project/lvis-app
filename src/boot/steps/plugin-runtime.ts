@@ -1658,7 +1658,7 @@ export async function initPluginRuntime(
             timestamp: new Date().toISOString(),
             sessionId: "plugin",
             type: "tool_call",
-            input: `[plugin:${pluginId}] host_fetch ${url.protocol}//${url.host}${url.pathname} method=${decision.method} effect=${decision.effect}`,
+            input: `[plugin:${pluginId}] host_fetch ${url.origin} method=${decision.method} effect=${decision.effect}`,
           });
         } catch { /* audit must not break host */ }
         // redirect:"error" — a plugin egress path must not silently follow

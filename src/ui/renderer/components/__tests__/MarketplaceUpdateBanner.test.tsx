@@ -41,7 +41,37 @@ describe("MarketplaceUpdateBanner", () => {
     );
 
     screen.getByTestId("marketplace-update-action").click();
-    await vi.waitFor(() => expect(onUpdate).toHaveBeenCalledWith("meeting", "0.5.24"));
+    await vi.waitFor(() => expect(onUpdate).toHaveBeenCalledWith("meeting", "0.5.24", undefined));
+  });
+
+  it("requires networkAccess disclosure before updating a network-enabled plugin", async () => {
+    const onUpdate = vi.fn(async () => undefined);
+    render(
+      <MarketplaceUpdateBanner
+        updates={[{
+          ...update("network-plug", "Network Plug", "2.0.0"),
+          networkAccess: {
+            allowedDomains: ["api.example.com"],
+            reasoning: "Needs API access to sync user data.",
+          },
+        }]}
+        onDismiss={vi.fn()}
+        onSkip={vi.fn()}
+        onUpdate={onUpdate}
+      />,
+    );
+
+    screen.getByTestId("marketplace-update-action").click();
+    await vi.waitFor(() => expect(screen.getByTestId("plugin-install-network-access").textContent).toContain("Needs API access"));
+    expect(onUpdate).not.toHaveBeenCalled();
+
+    screen.getByRole("button", { name: "설치" }).click();
+
+    await vi.waitFor(() => expect(onUpdate).toHaveBeenCalledWith(
+      "network-plug",
+      "2.0.0",
+      { networkAccessAcknowledgement: { allowedDomains: ["api.example.com"] } },
+    ));
   });
   it("falls back to plugin id when a display name is missing", () => {
     render(

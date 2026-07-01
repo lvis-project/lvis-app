@@ -873,7 +873,17 @@ const api = {
     }>,
 
   // ─── Marketplace update notifications (S8) ───────
-  onMarketplaceUpdatesAvailable: (handler: (updates: Array<{ pluginId: string; pluginName?: string; installedVersion: string; latestVersion: string }>) => void) => {
+  onMarketplaceUpdatesAvailable: (handler: (updates: Array<{
+    pluginId: string;
+    pluginName?: string;
+    installedVersion: string;
+    latestVersion: string;
+    networkAccess?: {
+      allowedDomains: string[];
+      reasoning?: string;
+      allowPrivateNetworks?: boolean;
+    };
+  }>) => void) => {
     const listener = (_event: unknown, updates: Parameters<typeof handler>[0]) => handler(updates);
     ipcRenderer.on("marketplace:updates-available", listener);
     return () => ipcRenderer.removeListener("marketplace:updates-available", listener);
@@ -1812,8 +1822,15 @@ contextBridge.exposeInMainWorld("lvisHost", {
     if (hostMarketplaceApiClaimed) return null;
     hostMarketplaceApiClaimed = true;
     return {
-      installMarketplacePlugin: async (pluginId: string, expectedVersion?: string) =>
-        normalizePluginActionResult(await ipcRenderer.invoke("lvis:plugins:install", pluginId, expectedVersion ? { expectedVersion } : undefined)),
+      installMarketplacePlugin: async (
+        pluginId: string,
+        expectedVersion?: string,
+        options?: { networkAccessAcknowledgement?: unknown },
+      ) =>
+        normalizePluginActionResult(await ipcRenderer.invoke("lvis:plugins:install", pluginId, {
+          ...(expectedVersion ? { expectedVersion } : {}),
+          ...(options?.networkAccessAcknowledgement ? { networkAccessAcknowledgement: options.networkAccessAcknowledgement } : {}),
+        })),
       uninstallMarketplacePlugin: async (pluginId: string) =>
         normalizePluginActionResult(await ipcRenderer.invoke("lvis:plugins:uninstall", pluginId)),
       installMarketplaceAgent: async (slug: string) =>

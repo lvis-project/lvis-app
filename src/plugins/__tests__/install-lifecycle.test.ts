@@ -148,6 +148,35 @@ describe("installMarketplacePluginWithLifecycle", () => {
     ]);
   });
 
+  it("passes the renderer networkAccess acknowledgement into the marketplace install boundary", async () => {
+    const runtime = makeRuntime();
+    const marketplace = makeMarketplace();
+    marketplace.list.mockResolvedValue([
+      {
+        id: "p",
+        slug: "lvis-plugin-p",
+        version: "2.0.0",
+        networkAccess: {
+          allowedDomains: ["api.example.com"],
+          reasoning: "Syncs data.",
+        },
+      },
+    ]);
+
+    await installMarketplacePluginWithLifecycle({
+      requestedPluginId: "p",
+      networkAccessAcknowledgement: { allowedDomains: ["api.example.com"] },
+      pluginRuntime: runtime,
+      pluginMarketplace: marketplace,
+    });
+
+    expect(marketplace.install).toHaveBeenCalledWith(
+      "p",
+      expect.any(Function),
+      { networkAccessAcknowledgement: { allowedDomains: ["api.example.com"] } },
+    );
+  });
+
   it("pre-stops an installed plugin even when it is not currently loaded", async () => {
     const runtime = makeRuntime();
     const marketplace = makeMarketplace();
@@ -206,7 +235,11 @@ describe("installMarketplacePluginWithLifecycle", () => {
 
     expect(result).toEqual({ pluginId: "p", installed: true });
     expect(marketplace.getLiveCatalogVersion).toHaveBeenCalledWith("p");
-    expect(marketplace.install).toHaveBeenCalledWith("p", expect.any(Function));
+    expect(marketplace.install).toHaveBeenCalledWith(
+      "p",
+      expect.any(Function),
+      { networkAccessAcknowledgement: undefined },
+    );
   });
 
 
