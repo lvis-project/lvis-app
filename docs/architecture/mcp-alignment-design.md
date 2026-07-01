@@ -229,9 +229,9 @@ the generic-command-hooks milestone, which build on the hook-expansion matcher
 infra (`docs/architecture/hook-runtime-expansion-design.md`) and touch the live
 executor path (`tools/executor.ts` fire points) — a focused effort of its own.
 
-**`untrusted-stdio-isolation` (4) — serving core DONE; spawner/sandbox/artifact
+**`untrusted-stdio-isolation` (4) — experimental serving core DONE; spawner/sandbox/artifact
 gated.** `stdio-framing.ts` (`frameMessage` + `StdioFrameDecoder`, byte-accurate
-Content-Length) + `stdio-server-loop.ts` (`StdioServerLoop`) implement the
+Content-Length) + `experimental/stdio-server-loop.ts` (`StdioServerLoop`) implement the
 subprocess-side serving core: read framed JSON-RPC → dispatch to the SAME
 `PluginMcpServer` → write framed response (tested over in-memory paired streams; a
 thrown handler → -32603, loop survives). Remaining (gated above this loop): the
@@ -330,12 +330,13 @@ were actually implementable once the open decisions were made autonomously:
   migrated plugins; typecheck + full build green). Only ACTIVATION (populating
   `LOOPBACK_MIGRATED_PLUGIN_IDS`) is gated — the installed in-house plugins ship
   `category:null` and would fail closed in both paths, so no valid pilot exists.
-- **M4 out-of-process spawner DONE** — `StdioChildTransport` spawns a real
+- **M4 out-of-process spawner DONE (experimental-isolated)** — `StdioChildTransport` spawns a real
   subprocess plugin server; a REAL `node`-subprocess test proves discover +
   register + call round-trip + crash containment (mid-call exit → isError, not a
   hang). Decision: the spawnable unit is the plugin entry under `node` (no new
   signed format for the mechanism); OS sandbox is an additive `sandboxWrap`
-  command-prefix layer.
+  command-prefix layer. The code lives under `src/mcp/experimental/` until a
+  production feature flag or plugin-runtime wiring promotes it.
 - **M8 Apps permission gate DONE** — the host honors `_meta.ui` only from a server
   that advertised `io.modelcontextprotocol/ui` at discovery (pinned to the
   2026-01-26 snapshot). The renderer ui:// iframe CSP is the second layer.

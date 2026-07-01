@@ -6,7 +6,7 @@
  */
 import { describe, it, expect } from "vitest";
 import { resolve } from "node:path";
-import { StdioChildTransport } from "../stdio-child-transport.js";
+import { StdioChildTransport } from "../experimental/stdio-child-transport.js";
 import { PluginMcpHost } from "../plugin-mcp-host.js";
 import { ToolRegistry } from "../../tools/registry.js";
 
