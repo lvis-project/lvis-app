@@ -1,6 +1,7 @@
 /**
- * `StdioChildTransport` — the host (client) side of the out-of-process plugin
- * path (mcp-alignment-design.md §3.1, `untrusted-stdio-isolation`).
+ * Experimental `StdioChildTransport` — the host (client) side of the
+ * out-of-process plugin path (mcp-alignment-design.md §3.1,
+ * `untrusted-stdio-isolation`).
  *
  * Spawns a subprocess that runs {@link StdioServerLoop} + a `PluginMcpServer` and
  * frames RC JSON-RPC over its stdin/stdout (the same byte-accurate Content-Length
@@ -17,8 +18,8 @@
  * boundary here is the containment primitive it builds on.
  */
 import { spawn, type ChildProcess } from "node:child_process";
-import { frameMessage, StdioFrameDecoder } from "./stdio-framing.js";
-import type { JsonRpcMessage, JsonRpcResponse, McpTransport } from "./mcp-client.js";
+import { frameMessage, StdioFrameDecoder } from "../stdio-framing.js";
+import type { JsonRpcMessage, JsonRpcResponse, McpTransport } from "../mcp-client.js";
 
 export interface StdioChildOptions {
   cwd?: string;
