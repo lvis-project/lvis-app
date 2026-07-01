@@ -674,6 +674,7 @@ export interface PluginMarketplaceItem {
   keywords?: Array<{ keyword: string; skillId: string }>;
   uiActions?: Record<string, PluginUiActionSpec>;
   auth?: PluginAuthSpec;
+  networkAccess?: PluginManifest["networkAccess"];
   emittedEvents?: string[];
   /**
    * Mirrors `PluginManifest.notificationEvents` so marketplace cards can

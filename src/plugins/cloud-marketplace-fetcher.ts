@@ -25,6 +25,7 @@ import type { MarketplaceHttp } from "./marketplace-installer.js";
 import type { MarketplaceFetcher } from "./marketplace-fetcher.js";
 import type { MarketplaceAnnouncement } from "../shared/marketplace-announcements.js";
 import { isMarketplaceAnnouncementLevel } from "../shared/marketplace-announcements.js";
+import { mapNetworkAccessGrant } from "../shared/network-access.js";
 import type {
   McpAuthMetadata,
   PluginMarketplaceItem,
@@ -97,6 +98,9 @@ interface ServerCatalogRow {
   /** Safe MCP auth/login metadata from lvis-marketplace. */
   mcp_auth?: unknown;
   mcpAuth?: unknown;
+  network_access?: unknown;
+  networkAccess?: unknown;
+  manifest?: unknown;
 }
 
 /** Loose shape for an announcement row returned by the server. */
@@ -517,6 +521,14 @@ export class CloudMarketplaceFetcher implements MarketplaceFetcher, MarketplaceH
       }
     }
     if (row.publisher) item.publisher = row.publisher;
+
+    const manifestRow = row.manifest && typeof row.manifest === "object" && !Array.isArray(row.manifest)
+      ? row.manifest as Record<string, unknown>
+      : undefined;
+    const networkAccess = mapNetworkAccessGrant(
+      row.network_access ?? row.networkAccess ?? manifestRow?.network_access ?? manifestRow?.networkAccess,
+    );
+    if (networkAccess) item.networkAccess = networkAccess;
 
     // S8: expose version and channel for update detection
     if (version) item.version = version;

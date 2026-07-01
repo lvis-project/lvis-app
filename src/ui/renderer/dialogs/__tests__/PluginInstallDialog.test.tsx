@@ -65,6 +65,34 @@ describe("PluginInstallDialog — admin consent gate (#1098)", () => {
     expect(onConfirm).toHaveBeenCalledWith("meeting");
   });
 
+  it("shows networkAccess reasoning and allowed domains before install", () => {
+    const onConfirm = vi.fn();
+    render(
+      <PluginInstallDialog
+        target={item({
+          installPolicy: "user",
+          networkAccess: {
+            allowedDomains: ["graph.microsoft.com", "login.microsoftonline.com"],
+            reasoning: "Calendar sync needs Microsoft Graph access.",
+          },
+        })}
+        working={false}
+        onClose={vi.fn()}
+        onConfirm={onConfirm}
+      />,
+    );
+
+    const disclosure = screen.getByTestId("plugin-install-network-access");
+    expect(disclosure.textContent).toContain("네트워크 접근 요청");
+    expect(disclosure.textContent).toContain("Calendar sync needs Microsoft Graph access.");
+    expect(disclosure.textContent).toContain("graph.microsoft.com");
+    expect(disclosure.textContent).toContain("login.microsoftonline.com");
+    const installBtn = screen.getByRole("button", { name: "설치" }) as HTMLButtonElement;
+    expect(installBtn.disabled).toBe(false);
+    fireEvent.click(installBtn);
+    expect(onConfirm).toHaveBeenCalledWith("meeting");
+  });
+
   it("re-arms consent when reopened for a different admin plugin", () => {
     const onConfirm = vi.fn();
     const { rerender } = render(
