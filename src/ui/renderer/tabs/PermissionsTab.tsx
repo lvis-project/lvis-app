@@ -528,6 +528,9 @@ export function PermissionsTab() {
     return <div className="py-4 text-sm text-destructive">{error}</div>;
   }
 
+  const sandboxPotentialReason = sandboxCapability?.potentialReason ?? sandboxCapability?.reason ?? "";
+  const sandboxRuntimeReason = sandboxCapability?.runtime?.reason ?? "";
+
   return (
     <div className="pr-1">
       <div className="space-y-6">
@@ -725,9 +728,14 @@ export function PermissionsTab() {
                       : t("permissionsTab.osSandboxCapabilityOther")}
               </p>
               <p className="italic">{t("permissionsTab.osSandboxRestartNote")}</p>
-              {sandboxCapability.reason ? (
-                <p data-testid="os-sandbox-detection-reason">
-                  {t("permissionsTab.osSandboxDetectionReason", { reason: sandboxCapability.reason })}
+              {sandboxPotentialReason ? (
+                <p data-testid="os-sandbox-potential-reason">
+                  {t("permissionsTab.osSandboxPotentialReason", { reason: sandboxPotentialReason })}
+                </p>
+              ) : null}
+              {sandboxRuntimeReason ? (
+                <p data-testid="os-sandbox-runtime-reason">
+                  {t("permissionsTab.osSandboxRuntimeReason", { reason: sandboxRuntimeReason })}
                 </p>
               ) : null}
             </div>
