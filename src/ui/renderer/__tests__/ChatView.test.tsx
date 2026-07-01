@@ -274,6 +274,123 @@ describe("ChatView", () => {
     });
   });
 
+  it("keeps a fast auto-approved permission review card visible for a minimum dwell after tool start", async () => {
+    const { container, emitChatStream } = await renderApp({ hasApiKey: true });
+    await submitChatMessage(container, "빠른 자동 승인 확인");
+
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date("2026-07-01T00:00:00Z"));
+    try {
+      await act(async () => {
+        emitChatStream({
+          type: "permission_review",
+          reviewStatus: "reviewing",
+          name: "safe_tool",
+          toolCategory: "read",
+          source: "plugin",
+          groupId: "g-dwell",
+          toolUseId: "t-dwell",
+          displayOrder: 0,
+          verdictLevel: "low",
+        });
+      });
+      expect(container.querySelector('[data-testid="permission-review-status-card"]')).not.toBeNull();
+
+      await act(async () => {
+        emitChatStream({
+          type: "permission_review",
+          reviewStatus: "auto_approved",
+          name: "safe_tool",
+          toolCategory: "read",
+          source: "plugin",
+          groupId: "g-dwell",
+          toolUseId: "t-dwell",
+          displayOrder: 0,
+          verdictLevel: "low",
+        });
+      });
+      expect(container.querySelector('[data-testid="permission-review-status-card"]')?.getAttribute("data-status")).toBe("auto_approved");
+
+      await act(async () => {
+        emitChatStream({
+          type: "tool_start",
+          name: "safe_tool",
+          groupId: "g-dwell",
+          toolUseId: "t-dwell",
+        });
+      });
+
+      const card = container.querySelector('[data-testid="permission-review-status-card"]');
+      expect(card).not.toBeNull();
+      expect(card?.getAttribute("data-status")).toBe("auto_approved");
+      expect(container.textContent).toContain("safe_tool");
+
+      await act(async () => {
+        vi.advanceTimersByTime(699);
+      });
+      expect(container.querySelector('[data-testid="permission-review-status-card"]')).not.toBeNull();
+
+      await act(async () => {
+        vi.advanceTimersByTime(1);
+      });
+      expect(container.querySelector('[data-testid="permission-review-status-card"]')).toBeNull();
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it("lets tool completion own the final state even when the permission review dwell is pending", async () => {
+    const { container, emitChatStream } = await renderApp({ hasApiKey: true });
+    await submitChatMessage(container, "빠른 도구 완료 확인");
+
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date("2026-07-01T00:00:00Z"));
+    try {
+      await act(async () => {
+        emitChatStream({
+          type: "permission_review",
+          reviewStatus: "auto_approved",
+          name: "safe_tool",
+          toolCategory: "read",
+          source: "plugin",
+          groupId: "g-dwell-done",
+          toolUseId: "t-dwell-done",
+          displayOrder: 0,
+          verdictLevel: "low",
+        });
+      });
+      expect(container.querySelector('[data-testid="permission-review-status-card"]')?.getAttribute("data-status")).toBe("auto_approved");
+
+      await act(async () => {
+        emitChatStream({
+          type: "tool_start",
+          name: "safe_tool",
+          groupId: "g-dwell-done",
+          toolUseId: "t-dwell-done",
+        });
+      });
+      expect(container.querySelector('[data-testid="permission-review-status-card"]')).not.toBeNull();
+
+      await act(async () => {
+        emitChatStream({
+          type: "tool_end",
+          name: "safe_tool",
+          groupId: "g-dwell-done",
+          toolUseId: "t-dwell-done",
+          result: "done",
+        });
+      });
+
+      expect(container.querySelector('[data-testid="permission-review-status-card"]')).toBeNull();
+      await act(async () => {
+        vi.advanceTimersByTime(700);
+      });
+      expect(container.querySelector('[data-testid="permission-review-status-card"]')).toBeNull();
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
   it("clears permission reviewer status on stream done without a tool start", async () => {
     const { container, emitChatStream } = await renderApp({ hasApiKey: true });
     await submitChatMessage(container, "상태 정리 확인");
