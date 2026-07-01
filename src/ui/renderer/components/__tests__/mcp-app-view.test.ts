@@ -1,6 +1,7 @@
 import { describe, expect, it, vi } from "vitest";
 import type { McpUiPayload } from "../../../../mcp/types.js";
 import { createMcpAppBridge } from "../McpAppView.js";
+import { buildMcpCsp, wrapWithCsp } from "../mcp-app-csp.js";
 
 function makePayload(): McpUiPayload {
   return {
@@ -128,5 +129,35 @@ describe("createMcpAppBridge", () => {
     bridge.detach();
     expect(removeEventListener).toHaveBeenCalledWith("message", bridge.handleWindowMessage);
     expect(webview.removeEventListener).toHaveBeenCalledWith("ipc-message", bridge.handleIpcMessage);
+  });
+});
+
+describe("McpAppView CSP", () => {
+  it("injects metadata CSP additions into the host-built document policy", () => {
+    const wrapped = wrapWithCsp("<html><head></head><body>app</body></html>", {
+      connectSrc: ["https://api.example.com/v1"],
+      imgSrc: ["https://images.example.com", "data:"],
+    });
+
+    expect(wrapped).toContain("Content-Security-Policy");
+    expect(wrapped).toContain("connect-src https://api.example.com");
+    expect(wrapped).toContain("img-src data: blob: https: https://images.example.com");
+  });
+
+  it("ignores unsafe metadata CSP sources and locked boundary directives", () => {
+    const csp = buildMcpCsp({
+      connectSrc: ["*", "https:", "http://api.example.com", "https://safe.example.com"],
+      scriptSrc: ["'unsafe-eval'", "https://cdn.example.com"],
+      "frame-ancestors": ["https://evil.example.com"],
+    });
+
+    expect(csp).toContain("connect-src https://safe.example.com");
+    expect(csp).toContain("script-src 'unsafe-inline' https://cdn.jsdelivr.net https://unpkg.com https://cdnjs.cloudflare.com https://cdn.example.com");
+    expect(csp).toContain("frame-ancestors 'none'");
+    expect(csp).not.toContain("http://api.example.com");
+    expect(csp).not.toMatch(/connect-src[^;]*\bhttps:(?:\s|;|")/);
+    expect(csp).not.toContain("unsafe-eval");
+    expect(csp).not.toContain("evil.example.com");
+    expect(csp).not.toContain("*");
   });
 });

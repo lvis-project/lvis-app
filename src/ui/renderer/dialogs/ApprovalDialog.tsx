@@ -1,10 +1,15 @@
 import { OutOfAllowedDirCard } from "../components/permissions/OutOfAllowedDirCard.js";
 import { ToolApprovalDialog } from "../components/ToolApprovalDialog.js";
+import type { ApprovalDecisionExtras } from "../hooks/use-approval.js";
 import type { ApprovalChoice, ApprovalRequest } from "../types.js";
 
 export interface ApprovalDialogProps {
   queue: ApprovalRequest[];
-  onDecide: (choice: ApprovalChoice, pattern?: string) => void | Promise<void>;
+  onDecide: (
+    choice: ApprovalChoice,
+    pattern?: string,
+    extras?: ApprovalDecisionExtras,
+  ) => void | Promise<void>;
 }
 
 /**
@@ -30,7 +35,13 @@ export function ApprovalDialog({ queue, onDecide }: ApprovalDialogProps) {
       open={queue.length > 0}
       request={request}
       pendingCount={queue.length}
-      onDecide={(choice, pattern) => void onDecide(choice, pattern)}
+      onDecide={(choice, pattern, extras) => {
+        if (extras === undefined) {
+          void onDecide(choice, pattern);
+        } else {
+          void onDecide(choice, pattern, extras);
+        }
+      }}
     />
   );
 }
