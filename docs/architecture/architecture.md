@@ -1219,12 +1219,31 @@ lvis-app/src/
 │   └── runtime.ts, registry.ts, marketplace.ts, deployment-guard.ts, types.ts
 │
 ├── contract/      # #1409 public wire contract SOT
-│   └── app-contract.ts (CHANNELS + PUBLIC_CHANNELS allowlist + gesture 분류),
+│   └── app-contract.ts (CHANNELS + PUBLIC_CHANNELS allowlist + gesture 분류
+│       + INTERNAL_HOST_CHANNELS out-of-tree 분류),
 │       events.ts (AppEvent union), trust-origin.ts
-│       # api/ · cli/ · sdk/ external surfaces coming
+│
+├── api/           # #1409 C12 external surface — in-process dispatcher
+│   └── local-api.ts  # dispatch({channel,args,origin}) over PUBLIC_CHANNELS;
+│                     #  same contract as the renderer, non-renderer TrustOrigin.
+│                     #  localhost network server = #1409 follow-up
+├── sdk/           # #1409 C12 narrow typed LvisClient facade over local-api
+│   └── index.ts      # read+send only; mutating gesture-gated ops omitted
+├── cli/           # #1409 C12 command table + runCommand(argv, client)
+│   └── commands.ts   # scaffold; no process entrypoint / bin (follow-up)
 │
 ├── data/, main/, lib/, components/ui/, ui/, __tests__/
 ```
+
+**External surfaces (`api/` · `sdk/` · `cli/`, #1409 C12)** — thin in-process
+consumers that speak the SAME `contract/` wire contract as the renderer, but
+over a non-renderer `TrustOrigin` (`local-api` / `cli`). `api/local-api.ts`
+dispatches only `PUBLIC_CHANNELS` to the C10 `ipc/handlers/*` and fails closed
+on non-public + gesture-gated mutating channels; `sdk/index.ts` is a narrow
+typed `LvisClient` (read+send only); `cli/commands.ts` is a command table over
+the SDK. Deps are injected — no real services constructed. The localhost
+network server, a `package.json` bin/entrypoint, and authenticated-authz for
+privileged external mutation are the documented #1409 follow-ups.
 
 #### 4.6.2 Module Boundary Rules
 
