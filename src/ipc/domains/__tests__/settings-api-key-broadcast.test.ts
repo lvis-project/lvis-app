@@ -570,6 +570,79 @@ describe("Minor-1: broadcastSettingsSnapshot helper — all mutation handlers ca
 
     expect(win.webContents.send).toHaveBeenCalledWith(SETTINGS.updated, snapshot);
   });
+
+  it("loads and applies a lazy main-process locale before broadcasting settings:update", async () => {
+    const win = makeWindow();
+    const snapshot = {
+      appearance: { language: "ja" },
+      llm: { provider: "openai", vendors: { "azure-foundry": { baseUrl: null } } },
+      marketplace: { cloudAllowPrivateNetwork: false },
+    };
+    const baseDeps = makeDeps([win]);
+    const deps = {
+      ...baseDeps,
+      settingsService: {
+        ...baseDeps.settingsService,
+        getAll: vi.fn(() => snapshot),
+        get: vi.fn((key: string) =>
+          key === "marketplace"
+            ? snapshot.marketplace
+            : snapshot.llm,
+        ),
+        patch: vi.fn(async (p: unknown) => p),
+      },
+    };
+    const { setLocale, getLocale, translate } = await import("../../../i18n/index.js");
+    setLocale("en");
+
+    const { registerSettingsHandlers } = await import("../settings.js");
+    registerSettingsHandlers(deps as never);
+
+    await invoke("lvis:settings:update", { appearance: { language: "ja" } });
+
+    expect(getLocale()).toBe("ja");
+    expect(translate("ja", "settings.appearance.language.title")).toBe("言語");
+    expect(win.webContents.send).toHaveBeenCalledWith(SETTINGS.updated, snapshot);
+  });
+
+  it("keeps the current main-process locale and still broadcasts when lazy locale loading fails", async () => {
+    const win = makeWindow();
+    const snapshot = {
+      appearance: { language: "ja" },
+      llm: { provider: "openai", vendors: { "azure-foundry": { baseUrl: null } } },
+      marketplace: { cloudAllowPrivateNetwork: false },
+    };
+    const baseDeps = makeDeps([win]);
+    const deps = {
+      ...baseDeps,
+      settingsService: {
+        ...baseDeps.settingsService,
+        getAll: vi.fn(() => snapshot),
+        get: vi.fn((key: string) =>
+          key === "marketplace"
+            ? snapshot.marketplace
+            : snapshot.llm,
+        ),
+        patch: vi.fn(async (p: unknown) => p),
+      },
+    };
+    const { setLocale, getLocale } = await import("../../../i18n/index.js");
+    const { __setLocaleLoaderForTest } = await import("../../../i18n/messages/index.js");
+    const restore = __setLocaleLoaderForTest("ja", () => Promise.reject(new Error("missing chunk")));
+    setLocale("ko");
+
+    try {
+      const { registerSettingsHandlers } = await import("../settings.js");
+      registerSettingsHandlers(deps as never);
+
+      await invoke("lvis:settings:update", { appearance: { language: "ja" } });
+
+      expect(getLocale()).toBe("ko");
+      expect(win.webContents.send).toHaveBeenCalledWith(SETTINGS.updated, snapshot);
+    } finally {
+      restore();
+    }
+  });
 });
 
 // ─── Minor-4 R2: settings:update rejects non-string baseUrl ──────────────────

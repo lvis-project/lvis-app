@@ -11,7 +11,12 @@
  * `window.lvisApi` is absent it simply renders children at the English default.
  */
 import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from "react";
-import { DEFAULT_LOCALE, normalizeLocale, type Locale } from "../../../i18n/index.js";
+import {
+  DEFAULT_LOCALE,
+  normalizeLocale,
+  tryLoadLocaleMessages,
+  type Locale,
+} from "../../../i18n/index.js";
 import { I18nProvider } from "../../../i18n/react.js";
 import { getApi } from "../api-client.js";
 import type { LvisApi } from "../types.js";
@@ -29,23 +34,34 @@ export function I18nSettingsProvider({ children }: { children: ReactNode }) {
   const api = useMemo(() => tryGetApi(), []);
   const [locale, setLocaleState] = useState<Locale>(DEFAULT_LOCALE);
   const mountedRef = useRef(true);
+  const localeRequestRef = useRef(0);
   useEffect(() => () => { mountedRef.current = false; }, []);
+
+  const applyLocale = useCallback(async (next: Locale) => {
+    const requestId = ++localeRequestRef.current;
+    const loaded = await tryLoadLocaleMessages(next);
+    if (!mountedRef.current || requestId !== localeRequestRef.current) return;
+    if (!loaded) return;
+    setLocaleState(next);
+  }, []);
 
   // Hydrate from persisted settings on mount.
   useEffect(() => {
     if (!api) return;
     let cancelled = false;
+    const requestAtStart = localeRequestRef.current;
     void (async () => {
       try {
         const settings = await api.getSettings();
         if (cancelled || !mountedRef.current) return;
-        setLocaleState(normalizeLocale(settings.appearance?.language));
+        if (localeRequestRef.current !== requestAtStart) return;
+        await applyLocale(normalizeLocale(settings.appearance?.language));
       } catch {
         /* ignore — render continues at the English default */
       }
     })();
     return () => { cancelled = true; };
-  }, [api]);
+  }, [api, applyLocale]);
 
   // Cross-window sync: a language change in the settings window broadcasts to
   // every renderer so the main window re-localizes without a restart.
@@ -53,20 +69,20 @@ export function I18nSettingsProvider({ children }: { children: ReactNode }) {
     if (!api?.onSettingsUpdated) return;
     return api.onSettingsUpdated((settings) => {
       if (!mountedRef.current) return;
-      setLocaleState(normalizeLocale(settings.appearance?.language));
+      void applyLocale(normalizeLocale(settings.appearance?.language));
     });
-  }, [api]);
+  }, [api, applyLocale]);
 
   const setLocale = useCallback(
     (next: Locale) => {
-      setLocaleState(next);
+      void applyLocale(next);
       if (api) {
         void api
           .updateSettings({ appearance: { schemaVersion: 2, language: next } })
           .catch(() => { /* ignore — local state already reflects the choice */ });
       }
     },
-    [api],
+    [api, applyLocale],
   );
 
   return (
