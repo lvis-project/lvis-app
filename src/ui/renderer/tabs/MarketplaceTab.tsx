@@ -13,6 +13,10 @@ import { SettingsPageHeader } from "../components/SettingsPageHeader.js";
 import { SettingsSection } from "../components/SettingsSection.js";
 import { PluginInstallDialog } from "../dialogs/PluginInstallDialog.js";
 import { useTranslation } from "../../../i18n/react.js";
+import {
+  buildNetworkAccessAcknowledgement,
+  hasNetworkAccessDisclosure,
+} from "../../../shared/network-access.js";
 
 export interface MarketplaceTabProps {
   api: LvisApi;
@@ -50,8 +54,8 @@ export function MarketplaceTab(props: MarketplaceTabProps) {
   const [packageStatus, setPackageStatus] = useState(() => t("marketplaceTab.statusLoading"));
   const [filter, setFilter] = useState<"all" | MarketplacePackageType>("all");
   const [workingSlug, setWorkingSlug] = useState<string | null>(null);
-  // #1098 — admin-policy plugin pending an explicit UAC consent before install.
-  const [adminConsentTarget, setAdminConsentTarget] = useState<MarketplaceItem | null>(null);
+  // #1098/#1279 — plugin installs that need explicit pre-install disclosure.
+  const [installDialogTarget, setInstallDialogTarget] = useState<MarketplaceItem | null>(null);
 
   // URL has an explicit "저장" button — typing only updates a local draft;
   // the parent setter (and marketplace endpoint switchover) fire when Save
@@ -148,8 +152,15 @@ export function MarketplaceTab(props: MarketplaceTabProps) {
       ? packages
       : packages.filter((item) => (item.pluginType ?? "plugin") === filter)
   ), [filter, packages]);
+  const needsInstallDisclosure = useCallback((item: MarketplaceItem): boolean => {
+    if ((item.pluginType ?? "plugin") !== "plugin") return false;
+    return item.installPolicy === "admin" || hasNetworkAccessDisclosure(item.networkAccess);
+  }, []);
 
-  const installPackage = useCallback(async (item: MarketplaceItem) => {
+  const installPackage = useCallback(async (
+    item: MarketplaceItem,
+    options: { networkAccessAcknowledged?: boolean } = {},
+  ) => {
     const packageType = item.pluginType ?? "plugin";
     setWorkingSlug(item.id);
     try {
@@ -163,7 +174,13 @@ export function MarketplaceTab(props: MarketplaceTabProps) {
         const result = await getHostMarketplaceApi().installMarketplaceSkill?.(item.id);
         if (!result?.ok) throw new Error(result?.message ?? result?.error ?? "Skill install API unavailable");
       } else {
-        const result = await getHostMarketplaceApi().installMarketplacePlugin(item.id);
+        const result = await getHostMarketplaceApi().installMarketplacePlugin(
+          item.id,
+          undefined,
+          options.networkAccessAcknowledged
+            ? { networkAccessAcknowledgement: buildNetworkAccessAcknowledgement(item.networkAccess) }
+            : undefined,
+        );
         if (!result.ok) throw new Error(result.message ?? result.error);
       }
       await refreshPackages();
@@ -302,11 +319,10 @@ export function MarketplaceTab(props: MarketplaceTabProps) {
                         void uninstallPackage(item);
                         return;
                       }
-                      // #1098 — admin-policy plugin installs gain system-wide
-                      // privileges; gate them behind explicit consent. Other
-                      // packages (user plugins, MCP, agents, skills) stay 1-click.
-                      if (packageType === "plugin" && item.installPolicy === "admin") {
-                        setAdminConsentTarget(item);
+                      // #1098/#1279 — admin-policy and networkAccess plugins
+                      // show install-time disclosures before the install starts.
+                      if (needsInstallDisclosure(item)) {
+                        setInstallDialogTarget(item);
                         return;
                       }
                       void installPackage(item);
@@ -455,13 +471,13 @@ export function MarketplaceTab(props: MarketplaceTabProps) {
       </SettingsSection>
 
       <PluginInstallDialog
-        target={adminConsentTarget}
-        working={workingSlug === adminConsentTarget?.id}
-        onClose={() => setAdminConsentTarget(null)}
+        target={installDialogTarget}
+        working={workingSlug === installDialogTarget?.id}
+        onClose={() => setInstallDialogTarget(null)}
         onConfirm={async (id) => {
-          const item = adminConsentTarget?.id === id ? adminConsentTarget : null;
-          setAdminConsentTarget(null);
-          if (item) await installPackage(item);
+          const item = installDialogTarget?.id === id ? installDialogTarget : null;
+          setInstallDialogTarget(null);
+          if (item) await installPackage(item, { networkAccessAcknowledged: true });
         }}
       />
     </div>

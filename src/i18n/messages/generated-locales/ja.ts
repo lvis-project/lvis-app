@@ -2673,4 +2673,7 @@ export const jaMessages: Record<string, string> = {
   "workGroup.stepCount": "{count} ステップ",
   "workGroup.work": "仕事",
   "workGroup.working": "働く...",
+  "pluginInstallDialog.allowPrivateNetworks": "This grant can reach private network addresses when an allowed domain resolves there.",
+  "pluginInstallDialog.allowedDomainsLabel": "Allowed domains",
+  "pluginInstallDialog.networkAccessTitle": "Network access requested",
 };

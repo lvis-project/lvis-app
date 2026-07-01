@@ -14,6 +14,7 @@ import { isAbsolute, relative, resolve, dirname } from "node:path";
 import type { MarketplaceFetcher } from "./marketplace-fetcher.js";
 import { readPluginRegistry } from "./registry.js";
 import { createLogger } from "../lib/logger.js";
+import type { NetworkAccessGrant } from "../shared/network-access.js";
 const log = createLogger("update-detector");
 
 export interface UpdateInfo {
@@ -21,6 +22,7 @@ export interface UpdateInfo {
   pluginName: string;
   installedVersion: string;
   latestVersion: string;
+  networkAccess?: NetworkAccessGrant;
 }
 
 /**
@@ -83,6 +85,7 @@ export class PluginUpdateDetector {
             pluginName: catalogEntry.name || entry.id,
             installedVersion,
             latestVersion: catalogEntry.version,
+            ...(catalogEntry.networkAccess ? { networkAccess: catalogEntry.networkAccess } : {}),
           });
         }
       }

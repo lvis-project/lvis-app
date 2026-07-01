@@ -40,6 +40,7 @@ import {
 import { uninstallPluginWithLifecycle } from "../../plugins/uninstall-lifecycle.js";
 import { IncompatibleAppVersionError, INCOMPATIBLE_APP_VERSION_CODE } from "../../plugins/types.js";
 import { lvisHome } from "../../shared/lvis-home.js";
+import type { NetworkAccessAcknowledgement } from "../../shared/network-access.js";
 const log = createLogger("lvis");
 const MARKETPLACE_PING_TIMEOUT_MS = 15_000;
 const MARKETPLACE_PING_CACHE_TTL_MS = 10_000;
@@ -58,6 +59,19 @@ function asPlainRecord(value: unknown): Record<string, unknown> {
     return value as Record<string, unknown>;
   }
   return {};
+}
+
+function parseNetworkAccessAcknowledgement(value: unknown): NetworkAccessAcknowledgement | undefined {
+  const input = asPlainRecord(value);
+  const rawDomains = input.allowedDomains;
+  if (!Array.isArray(rawDomains)) return undefined;
+  const allowedDomains = rawDomains
+    .filter((entry): entry is string => typeof entry === "string" && entry.trim().length > 0)
+    .map((entry) => entry.trim());
+  return {
+    allowedDomains,
+    ...(input.allowPrivateNetworks === true ? { allowPrivateNetworks: true as const } : {}),
+  };
 }
 
 function sanitizeNotificationContextRef(value: unknown): NotificationContextRef | undefined {
@@ -409,6 +423,9 @@ export function registerPluginsHandlers(deps: IpcDeps): void {
     const lifecycleSlug = pluginId;
     const installOptions = asPlainRecord(options);
     const expectedVersionValue = installOptions.expectedVersion;
+    const networkAccessAcknowledgement = parseNetworkAccessAcknowledgement(
+      installOptions.networkAccessAcknowledgement,
+    );
     if (expectedVersionValue !== undefined && typeof expectedVersionValue !== "string") {
       throw new Error("expectedVersion must be a string when provided");
     }
@@ -423,6 +440,7 @@ export function registerPluginsHandlers(deps: IpcDeps): void {
         requestedPluginId: pluginId,
         eventSlug: lifecycleSlug,
         expectedVersion,
+        networkAccessAcknowledgement,
         pluginRuntime,
         pluginMarketplace,
         broadcastInstallProgress: (payload) =>

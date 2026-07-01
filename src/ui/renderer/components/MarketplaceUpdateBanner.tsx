@@ -1,11 +1,17 @@
 // S8 — Non-blocking banner shown when plugin updates are available.
 
-import { useState } from "react";
+import { useRef, useState } from "react";
 import { X } from "lucide-react";
 import { Button } from "../../../components/ui/button.js";
 import type { PluginUpdateInfo } from "../hooks/use-marketplace-updates.js";
 import { MarqueeText } from "./MarqueeText.js";
 import { useTranslation } from "../../../i18n/react.js";
+import { PluginInstallDialog } from "../dialogs/PluginInstallDialog.js";
+import type { MarketplaceItem, PluginMarketplaceInstallOptions } from "../types.js";
+import {
+  buildNetworkAccessAcknowledgement,
+  hasNetworkAccessDisclosure,
+} from "../../../shared/network-access.js";
 
 /**
  * Renders a compact banner listing plugins with available updates.
@@ -26,11 +32,17 @@ export function MarketplaceUpdateBanner({
   updates: PluginUpdateInfo[];
   onDismiss: () => void;
   onSkip: () => void | Promise<void>;
-  onUpdate: (pluginId: string, expectedVersion?: string) => Promise<void>;
+  onUpdate: (
+    pluginId: string,
+    expectedVersion?: string,
+    options?: PluginMarketplaceInstallOptions,
+  ) => Promise<void>;
 }) {
   const { t } = useTranslation();
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [pendingDisclosureUpdate, setPendingDisclosureUpdate] = useState<PluginUpdateInfo | null>(null);
+  const disclosureResolveRef = useRef<((confirmed: boolean) => void) | null>(null);
 
   if (updates.length === 0) return null;
 
@@ -48,7 +60,20 @@ export function MarketplaceUpdateBanner({
     const failures: string[] = [];
     for (const u of updates) {
       try {
-        await onUpdate(u.pluginId, u.latestVersion);
+        if (hasNetworkAccessDisclosure(u.networkAccess)) {
+          const confirmed = await requestNetworkAccessDisclosure(u);
+          if (!confirmed) {
+            failures.push(`${u.pluginId}: network access disclosure cancelled`);
+            continue;
+          }
+        }
+        await onUpdate(
+          u.pluginId,
+          u.latestVersion,
+          hasNetworkAccessDisclosure(u.networkAccess)
+            ? { networkAccessAcknowledgement: buildNetworkAccessAcknowledgement(u.networkAccess) }
+            : undefined,
+        );
       } catch (e) {
         failures.push(`${u.pluginId}: ${(e as Error).message}`);
       }
@@ -62,40 +87,62 @@ export function MarketplaceUpdateBanner({
   };
 
   return (
-    <div
-      className="flex h-11 items-center justify-between gap-2 overflow-hidden bg-popover border border-info/(--opacity-medium) text-info text-sm px-4 py-1.5 rounded-md mx-2 mt-2 shadow-lg lvis-anim-slide-down"
-      data-testid="marketplace-update-banner"
-    >
-      <span className="min-w-0 flex-1" title={label}>
-        <span className="block truncate leading-4">{summary}</span>
-        <MarqueeText text={details} className="text-[11px] leading-3 text-info/(--opacity-emphatic)" />
-        {error ? <span className="ml-2 text-destructive">{t("marketplaceUpdateBanner.partialFailure", { error })}</span> : null}
-      </span>
-      <div className="flex shrink-0 items-center gap-1">
-        <Button
-          variant="default"
-          size="sm"
-          onClick={() => void handleUpdate()}
-          disabled={busy}
-          data-testid="marketplace-update-action"
-          className="h-7 text-[12px]"
-        >
-          {busy ? t("marketplaceUpdateBanner.updating") : t("marketplaceUpdateBanner.updateButton")}
-        </Button>
-        <Button
-          variant="ghost"
-          size="sm"
-          onClick={() => void onSkip()}
-          disabled={busy}
-          aria-label={t("marketplaceUpdateBanner.skipAriaLabel")}
-          title={t("marketplaceUpdateBanner.skipTitle")}
-          className="text-info hover:text-info/(--opacity-intense) h-auto p-1"
-        >
-          <X className="h-3.5 w-3.5" />
-        </Button>
+    <>
+      <div
+        className="flex h-11 items-center justify-between gap-2 overflow-hidden bg-popover border border-info/(--opacity-medium) text-info text-sm px-4 py-1.5 rounded-md mx-2 mt-2 shadow-lg lvis-anim-slide-down"
+        data-testid="marketplace-update-banner"
+      >
+        <span className="min-w-0 flex-1" title={label}>
+          <span className="block truncate leading-4">{summary}</span>
+          <MarqueeText text={details} className="text-[11px] leading-3 text-info/(--opacity-emphatic)" />
+          {error ? <span className="ml-2 text-destructive">{t("marketplaceUpdateBanner.partialFailure", { error })}</span> : null}
+        </span>
+        <div className="flex shrink-0 items-center gap-1">
+          <Button
+            variant="default"
+            size="sm"
+            onClick={() => void handleUpdate()}
+            disabled={busy}
+            data-testid="marketplace-update-action"
+            className="h-7 text-[12px]"
+          >
+            {busy ? t("marketplaceUpdateBanner.updating") : t("marketplaceUpdateBanner.updateButton")}
+          </Button>
+          <Button
+            variant="ghost"
+            size="sm"
+            onClick={() => void onSkip()}
+            disabled={busy}
+            aria-label={t("marketplaceUpdateBanner.skipAriaLabel")}
+            title={t("marketplaceUpdateBanner.skipTitle")}
+            className="text-info hover:text-info/(--opacity-intense) h-auto p-1"
+          >
+            <X className="h-3.5 w-3.5" />
+          </Button>
+        </div>
       </div>
-    </div>
+      <PluginInstallDialog
+        target={pendingDisclosureUpdate ? updateToDialogTarget(pendingDisclosureUpdate) : null}
+        working={false}
+        onClose={() => finishDisclosure(false)}
+        onConfirm={() => finishDisclosure(true)}
+      />
+    </>
   );
+
+  function requestNetworkAccessDisclosure(update: PluginUpdateInfo): Promise<boolean> {
+    return new Promise((resolve) => {
+      disclosureResolveRef.current = resolve;
+      setPendingDisclosureUpdate(update);
+    });
+  }
+
+  function finishDisclosure(confirmed: boolean): void {
+    const resolve = disclosureResolveRef.current;
+    disclosureResolveRef.current = null;
+    setPendingDisclosureUpdate(null);
+    resolve?.(confirmed);
+  }
 }
 
 function formatUpdateLabel(update: PluginUpdateInfo): string {
@@ -103,4 +150,18 @@ function formatUpdateLabel(update: PluginUpdateInfo): string {
   const name =
     displayName === update.pluginId ? displayName : `${displayName} (${update.pluginId})`;
   return `${name} → ${update.latestVersion}`;
+}
+
+function updateToDialogTarget(update: PluginUpdateInfo): MarketplaceItem {
+  return {
+    id: update.pluginId,
+    name: update.pluginName?.trim() || update.pluginId,
+    description: "",
+    packageSpec: "",
+    installed: true,
+    enabled: true,
+    pluginType: "plugin",
+    installPolicy: "user",
+    networkAccess: update.networkAccess,
+  };
 }

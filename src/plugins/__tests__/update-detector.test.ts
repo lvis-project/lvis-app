@@ -25,7 +25,11 @@ function makeFetcher(plugins: PluginMarketplaceItem[]): MarketplaceFetcher {
   };
 }
 
-function makeCatalogPlugin(id: string, version: string): PluginMarketplaceItem {
+function makeCatalogPlugin(
+  id: string,
+  version: string,
+  overrides: Partial<PluginMarketplaceItem> = {},
+): PluginMarketplaceItem {
   return {
     id,
     name: id,
@@ -34,7 +38,8 @@ function makeCatalogPlugin(id: string, version: string): PluginMarketplaceItem {
     packageSpec: `@lvis/${id}@${version}`,
     packageName: `@lvis/${id}`,
     tools: [],
-    version
+    version,
+    ...overrides,
   };
 }
 
@@ -153,6 +158,30 @@ describe("PluginUpdateDetector", () => {
       pluginName: "local-indexer",
       installedVersion: "1.0.0",
       latestVersion: "1.1.0"
+    });
+  });
+
+  it("includes networkAccess metadata for update disclosure", async () => {
+    const registryPath = await setupRegistry([{ id: "network-plug", version: "1.0.0" }]);
+    const fetcher = makeFetcher([
+      makeCatalogPlugin("network-plug", "2.0.0", {
+        networkAccess: {
+          allowedDomains: ["api.example.com"],
+          reasoning: "Syncs data.",
+        },
+      }),
+    ]);
+    const detector = new PluginUpdateDetector(registryPath, fetcher);
+
+    const updates = await detector.checkForUpdates();
+
+    expect(updates[0]).toMatchObject({
+      pluginId: "network-plug",
+      latestVersion: "2.0.0",
+      networkAccess: {
+        allowedDomains: ["api.example.com"],
+        reasoning: "Syncs data.",
+      },
     });
   });
 

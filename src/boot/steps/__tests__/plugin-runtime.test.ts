@@ -32,6 +32,13 @@ const runtimeTestState = vi.hoisted(() => ({
   },
 }));
 
+const dnsTestState = vi.hoisted(() => ({
+  lookup: vi.fn<(
+    host: string,
+    opts: unknown,
+  ) => Promise<Array<{ address: string; family: number }>>>(),
+}));
+
 vi.mock("electron", () => ({
   app: {
     getPath: vi.fn(() => "/tmp/lvis-test"),
@@ -44,6 +51,12 @@ vi.mock("electron", () => ({
   }),
   shell: {
     openExternal: vi.fn(),
+  },
+}));
+
+vi.mock("node:dns", () => ({
+  promises: {
+    lookup: dnsTestState.lookup,
   },
 }));
 
@@ -90,6 +103,7 @@ import { emitEvent } from "../../types.js";
 beforeEach(() => {
   runtimeTestState.readPluginRegistry.mockReset();
   runtimeTestState.readPluginRegistry.mockResolvedValue({ version: 1, plugins: [] });
+  dnsTestState.lookup.mockReset();
 });
 
 describe("auditApprovalViolation (Group C — audit logger try-catch swallow)", () => {
@@ -356,6 +370,182 @@ describe("initPluginRuntime partition policy", () => {
 });
 
 describe("initPluginRuntime HostApi factory", () => {
+  type HostFetchManifest = {
+    id: string;
+    config?: Record<string, unknown>;
+    capabilities?: string[];
+    networkAccess?: {
+      allowedDomains: string[];
+      allowPrivateNetworks?: boolean;
+    };
+  };
+  type HostFetchApi = {
+    hostFetch: (input: string | URL, init?: RequestInit) => Promise<Response>;
+  };
+  type HostFetchCreateHostApi = (
+    pluginId: string,
+    manifest: HostFetchManifest,
+    pluginDataDir: string,
+  ) => HostFetchApi;
+
+  async function buildHostFetchApi(options: {
+    pluginId?: string;
+    manifest?: HostFetchManifest;
+    networkFetch?: typeof fetch;
+    bootAuditLogger?: { log: ReturnType<typeof vi.fn> };
+  } = {}): Promise<{
+    api: HostFetchApi;
+    networkFetch: typeof fetch;
+    bootAuditLogger: { log: ReturnType<typeof vi.fn> };
+  }> {
+    runtimeTestState.capturedRuntimeOptions = null;
+    const pluginId = options.pluginId ?? "host-fetch-plugin";
+    const manifest = options.manifest ?? {
+      id: pluginId,
+      config: {},
+      capabilities: ["external-auth-consumer"],
+      networkAccess: { allowedDomains: ["api.example.com"] },
+    };
+    const networkFetch = options.networkFetch
+      ?? vi.fn(async () => new Response("ok", { status: 200 }));
+    const bootAuditLogger = options.bootAuditLogger ?? { log: vi.fn() };
+
+    await initPluginRuntime({
+      projectRoot: "/tmp/lvis-test/project",
+      settingsService: {
+        get: vi.fn((key: string) => {
+          if (key === "llm") return { provider: "openai" };
+          if (key === "pluginConfigs") return {};
+          return undefined;
+        }),
+        getSecret: vi.fn(() => undefined),
+        getPluginConfig: vi.fn(() => ({})),
+        setPluginConfig: vi.fn(),
+      } as never,
+      memoryManager: {} as never,
+      keywordEngine: {
+        registerKeywords: vi.fn(),
+        unregisterByPlugin: vi.fn(),
+      } as never,
+      toolRegistry: {
+        unregisterByPlugin: vi.fn(),
+        register: vi.fn(),
+        listAll: vi.fn(() => []),
+        listPluginIds: vi.fn(() => []),
+        replacePluginTools: vi.fn(),
+      } as never,
+      pythonPath: undefined,
+      bootAuditLogger: bootAuditLogger as never,
+      mainWindow: {} as never,
+      networkFetch: networkFetch as typeof fetch,
+      openAuthWindowService: vi.fn(),
+      openLinkWindowService: vi.fn(),
+      openAuthPartitionViewerService: vi.fn(),
+      shellOpenExternal: vi.fn(),
+      approvalGate: { requestAndWait: vi.fn() } as never,
+      routinesStore: { list: () => [] } as never,
+    });
+
+    const createHostApi = runtimeTestState.capturedRuntimeOptions?.createHostApi as
+      | HostFetchCreateHostApi
+      | undefined;
+    expect(createHostApi).toBeDefined();
+    const api = createHostApi!(
+      pluginId,
+      manifest,
+      mkdtempSync("/tmp/lvis-hostfetch-data-"),
+    );
+    return { api, networkFetch, bootAuditLogger };
+  }
+
+  it("hostFetch denies non-allowlisted hosts and emits hostname-only audit detail", async () => {
+    const { api, networkFetch, bootAuditLogger } = await buildHostFetchApi();
+
+    await expect(
+      api.hostFetch("https://evil.example:9443/secrets"),
+    ).rejects.toThrow("evil.example is not in networkAccess.allowedDomains");
+
+    expect(dnsTestState.lookup).not.toHaveBeenCalled();
+    expect(networkFetch).not.toHaveBeenCalled();
+    expect(bootAuditLogger.log).toHaveBeenCalledWith(expect.objectContaining({
+      type: "error",
+      input: "[plugin:host-fetch-plugin] host_fetch_denied https://evil.example not in networkAccess.allowedDomains",
+    }));
+  });
+
+  it("hostFetch denies plugins missing external-auth-consumer before URL policy evaluation", async () => {
+    const { api, networkFetch, bootAuditLogger } = await buildHostFetchApi({
+      manifest: {
+        id: "host-fetch-plugin",
+        config: {},
+        capabilities: [],
+        networkAccess: { allowedDomains: ["api.example.com"] },
+      },
+    });
+
+    await expect(
+      api.hostFetch("https://api.example.com/v1/me"),
+    ).rejects.toThrow("capability not declared: external-auth-consumer");
+
+    expect(dnsTestState.lookup).not.toHaveBeenCalled();
+    expect(networkFetch).not.toHaveBeenCalled();
+    expect(bootAuditLogger.log).toHaveBeenCalledWith(expect.objectContaining({
+      type: "error",
+      input: "[plugin:host-fetch-plugin] host_fetch_denied capability external-auth-consumer not declared",
+    }));
+  });
+
+  it("hostFetch pins redirect:error even when plugin init requests redirect:follow", async () => {
+    dnsTestState.lookup.mockResolvedValueOnce([{ address: "93.184.216.34", family: 4 }]);
+    const { api, networkFetch, bootAuditLogger } = await buildHostFetchApi();
+
+    await expect(
+      api.hostFetch("https://api.example.com/v1/me", {
+        method: "GET",
+        redirect: "follow",
+      }),
+    ).resolves.toBeInstanceOf(Response);
+
+    expect(networkFetch).toHaveBeenCalledWith(
+      "https://api.example.com/v1/me",
+      expect.objectContaining({
+        method: "GET",
+        redirect: "error",
+      }),
+    );
+    expect(bootAuditLogger.log).toHaveBeenCalledWith(expect.objectContaining({
+      type: "tool_call",
+      input: "[plugin:host-fetch-plugin] host_fetch https://api.example.com method=GET effect=read",
+    }));
+    const auditInputs = bootAuditLogger.log.mock.calls
+      .map(([entry]) => entry?.input)
+      .filter((input): input is string => typeof input === "string");
+    expect(auditInputs.join("\n")).not.toContain("/v1/me");
+  });
+
+  it("hostFetch propagates redirect:error rejection for allowed-host 3xx responses", async () => {
+    dnsTestState.lookup.mockResolvedValueOnce([{ address: "93.184.216.34", family: 4 }]);
+    const redirectingFetch = vi.fn(async (_url: RequestInfo | URL, init?: RequestInit) => {
+      if (init?.redirect === "error") {
+        throw new TypeError("redirect mode is error");
+      }
+      return new Response(null, {
+        status: 302,
+        headers: { location: "https://api.example.com/next" },
+      });
+    });
+    const { api } = await buildHostFetchApi({ networkFetch: redirectingFetch as typeof fetch });
+
+    await expect(
+      api.hostFetch("https://api.example.com/redirect", { redirect: "follow" }),
+    ).rejects.toThrow("redirect mode is error");
+
+    expect(redirectingFetch).toHaveBeenCalledWith(
+      "https://api.example.com/redirect",
+      expect.objectContaining({ redirect: "error" }),
+    );
+  });
+
   it("rejects agentApproval.request before prompting when the manifest has not declared the scope", async () => {
     runtimeTestState.capturedRuntimeOptions = null;
     runtimeTestState.runtime.getApprovedPluginAccess.mockReturnValue({
