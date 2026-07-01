@@ -34,7 +34,12 @@ import {
 import type {
   SandboxWindowsStatusInfo,
   SandboxWindowsInstallResult,
+  SandboxRuntimeCapabilityInfo,
 } from "../../shared/sandbox-capability-info.js";
+import {
+  detectSandboxCapability,
+  type SandboxCapability,
+} from "../../permissions/sandbox-capability.js";
 
 function validateRulePatternInput(pattern: unknown): { ok: true; pattern: string } | { ok: false; error: string; message: string } {
   if (typeof pattern !== "string") {
@@ -78,6 +83,31 @@ function broadcastPermissionModeChanged(deps: IpcDeps, mode: string): void {
   for (const win of windows) {
     sendToWindow(win, PERMISSIONS.modeChanged, { mode });
   }
+}
+
+function runtimeKindFromCapability(
+  capability: SandboxCapability,
+): SandboxRuntimeCapabilityInfo["kind"] {
+  if (capability.kind === "none") return "none";
+  if (
+    capability.confines?.filesystem &&
+    capability.confines.process &&
+    capability.confines.network
+  ) {
+    return "full";
+  }
+  return "partial";
+}
+
+function runtimeInfoFromCapability(
+  capability: SandboxCapability,
+): SandboxRuntimeCapabilityInfo {
+  const kind = runtimeKindFromCapability(capability);
+  return {
+    available: kind !== "none",
+    kind,
+    reason: capability.reason,
+  };
 }
 
 const REVIEW_SUGGESTION_WINDOW_MS = 5 * 60 * 1000;
@@ -184,10 +214,11 @@ export function registerPermissionsHandlers(deps: IpcDeps): void {
 
   // read-only, sender guard optional — honest OS sandbox capability for the
   // current platform. `available`/`kind` report the PLATFORM's potential
-  // (macOS/Linux can confine, Windows/others cannot), NOT whether a runner is
-  // currently registered — registration is boot-time + opt-in, so reporting
-  // the platform potential lets the toggle show "not available on this
-  // platform" rather than reading as unavailable merely because it's off.
+  // (macOS/Linux can fully confine, Windows can partially confine network
+  // egress, others cannot), NOT whether a runner is currently registered —
+  // registration is boot-time + opt-in, so reporting the platform potential
+  // lets the toggle show "not available on this platform" rather than reading
+  // as unavailable merely because it's off.
   // `enabled` separately reflects the current setting.
   ipcMain.handle(PERMISSIONS.sandboxCapability, async () => {
     const { sandboxConfinementForPlatform } = await import(
@@ -218,11 +249,9 @@ export function registerPermissionsHandlers(deps: IpcDeps): void {
           : "none";
     const available = kind !== "none";
     // Meaningful, platform-honest reason surfaced to the UI alongside the
-    // capability (PermissionsTab `osSandboxDetectionReason` renders it when
-    // non-empty). ASRT confines fs + process + network egress on macOS
-    // (Seatbelt) and Linux (bwrap); network egress ONLY on Windows (srt-win);
-    // other platforms are fail-closed.
-    const reason =
+    // capability. This describes PLATFORM POTENTIAL only. Runtime registration
+    // is boot-time + opt-in, so it is reported separately below.
+    const potentialReason =
       platform === "darwin"
         ? "ASRT (Seatbelt) confines filesystem, process, and network egress when enabled"
         : platform === "linux"
@@ -230,12 +259,15 @@ export function registerPermissionsHandlers(deps: IpcDeps): void {
           : platform === "win32"
             ? "ASRT (srt-win) confines network egress only — NO filesystem jail; needs a one-time admin install + relogin"
             : "OS sandbox is fail-closed on this platform; tools run unconfined";
+    const runtime = runtimeInfoFromCapability(detectSandboxCapability());
     return {
       platform,
       enabled,
       available,
       kind,
-      reason,
+      reason: potentialReason,
+      potentialReason,
+      runtime,
       confines: sandboxConfinementForPlatform(platform, kind),
     };
   });

@@ -74,6 +74,16 @@ export interface SandboxWindowsInstallResult {
   ready?: boolean;
 }
 
+/** Runtime snapshot returned to the renderer for startup/runtime honesty. */
+export interface SandboxRuntimeCapabilityInfo {
+  /** Whether the current process has an active sandbox runner registered. */
+  available: boolean;
+  /** Runtime confinement strength observed in this process, not platform potential. */
+  kind: "full" | "partial" | "none";
+  /** Human-readable reason from the runtime SOT. */
+  reason: string;
+}
+
 /** Capability snapshot returned to the renderer for the settings toggle. */
 export interface SandboxCapabilityInfo {
   platform: NodeJS.Platform;
@@ -81,13 +91,17 @@ export interface SandboxCapabilityInfo {
   enabled: boolean;
   /** Whether THIS PLATFORM can confine tools (its potential), independent of
    * whether a runner is currently registered — so the toggle can be shown
-   * before the user opts in. macOS/Linux → true, Windows/others → false. */
+   * before the user opts in. macOS/Linux/Windows → true, others → false. */
   available: boolean;
-  /** The platform's confinement strength ("full" Linux | "partial" macOS |
+  /** The platform's confinement strength ("full" macOS/Linux | "partial" Windows |
    * "none"), derived from the platform, not from a registered runner. */
   kind: "full" | "partial" | "none";
-  /** Human-readable reason from runner detection (e.g. missing binary). */
+  /** Back-compat summary. Prefer `potentialReason` and `runtime.reason`. */
   reason: string;
+  /** Human-readable reason for this platform's potential capability. */
+  potentialReason?: string;
+  /** Last runtime SOT snapshot for the current process. */
+  runtime?: SandboxRuntimeCapabilityInfo;
   /** What the sandbox actually confines on this platform when active. */
   confines: SandboxConfinement;
 }
