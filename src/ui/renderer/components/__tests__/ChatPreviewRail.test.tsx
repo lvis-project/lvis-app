@@ -176,7 +176,14 @@ describe("ChatSidePanel", () => {
       />,
     );
 
+    expect(screen.queryByTestId("chat-side-panel-file-split-layout")).toBeNull();
+    expect(screen.getByTestId("chat-side-panel-file-empty")).toHaveTextContent(/workspace|파일/i);
+
     fireEvent.click(screen.getByTestId("chat-side-panel-mode-browser"));
+    expect(screen.getByTestId("chat-side-panel-tab-actions")).toBeTruthy();
+    expect(screen.getByTestId("chat-side-panel-add-file-browser-tab")).toBeTruthy();
+    expect(screen.getByTestId("chat-side-panel-add-browser-tab")).toBeTruthy();
+    expect(screen.getByTestId("chat-side-panel-add-terminal-tab")).toBeTruthy();
     expect(screen.getAllByText("Artifact dashboard").length).toBeGreaterThanOrEqual(1);
     expect(screen.getAllByText("example.com/docs").length).toBeGreaterThanOrEqual(1);
     expect(screen.getByTestId("chat-side-panel-browser-viewer")).toBeTruthy();

@@ -2172,7 +2172,7 @@ export function ChatView({ api, onAsk, onEditSave, onFork, onToggleStar, onRetry
           onClose={() => {
             setPreviewRailOpen(false);
           }}
-          className="relative z-40 flex w-[min(30rem,50vw)] shrink-0 self-stretch"
+          className="relative z-40 flex w-[clamp(28rem,44vw,42rem)] max-w-[calc(100vw-12rem)] shrink-0 self-stretch"
         />
       ) : null}
     </div>
