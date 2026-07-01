@@ -1,9 +1,11 @@
-import { useCallback, useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import type { UserApprovalScope, UserApprovalVerdict } from "../../../shared/permissions-events.js";
 import { Badge } from "../../../components/ui/badge.js";
 import { Button } from "../../../components/ui/button.js";
+import { Checkbox } from "../../../components/ui/checkbox.js";
 import { Input } from "../../../components/ui/input.js";
 import { Label } from "../../../components/ui/label.js";
+import { NativeSelect, NativeSelectOption } from "../../../components/ui/native-select.js";
 import { RadioGroup, RadioGroupItem } from "../../../components/ui/radio-group.js";
 import {
   Dialog,
@@ -13,6 +15,7 @@ import {
   DialogTitle,
 } from "../../../components/ui/dialog.js";
 import { SOURCE_BADGE } from "../constants.js";
+import type { ApprovalDecisionExtras } from "../hooks/use-approval.js";
 import type { ApprovalChoice, ApprovalRequest } from "../types.js";
 import { canonicalStringify as canonicalStringifyForRenderer } from "../../../shared/canonical-json.js";
 import { isNonUserTrustOrigin, trustOriginLabel } from "../utils/trust-origin-label.js";
@@ -42,6 +45,215 @@ import { isWeakSandbox } from "../../../permissions/sandbox-capability.js";
 import { useTranslation } from "../../../i18n/react.js";
 import { t } from "../../../i18n/runtime.js";
 
+type ElicitationFieldKind = "string" | "number" | "integer" | "boolean";
+type ElicitationFormValue = string | boolean;
+
+type ElicitationEnumOption = {
+  key: string;
+  label: string;
+  value: unknown;
+};
+
+type ElicitationField = {
+  name: string;
+  label: string;
+  description?: string;
+  kind: ElicitationFieldKind;
+  required: boolean;
+  defaultValue?: unknown;
+  enumOptions?: ElicitationEnumOption[];
+};
+
+type ElicitationSchemaParseResult =
+  | { supported: true; fields: ElicitationField[] }
+  | { supported: false; fields: [] };
+
+const MAX_ELICITATION_FIELDS = 12;
+const ELICITATION_FIELD_NAME_RE = /^[A-Za-z_][A-Za-z0-9_.-]{0,63}$/;
+const INTEGER_INPUT_RE = /^[+-]?\d+$/;
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return Boolean(value) && typeof value === "object" && !Array.isArray(value);
+}
+
+function scalarLabel(value: unknown): string {
+  if (value === null) return "null";
+  if (typeof value === "string" || typeof value === "number" || typeof value === "boolean") {
+    return String(value);
+  }
+  return "";
+}
+
+function buildEnumOptions(raw: unknown): ElicitationEnumOption[] | undefined {
+  if (raw === undefined) return undefined;
+  if (!Array.isArray(raw) || raw.length === 0) return undefined;
+  const options = raw
+    .map((value, index): ElicitationEnumOption | null => {
+      const label = scalarLabel(value);
+      return label.length > 0 ? { key: String(index), label, value } : null;
+    })
+    .filter((option): option is ElicitationEnumOption => option !== null);
+  return options.length === raw.length ? options : undefined;
+}
+
+function normalizeElicitationKind(rawType: unknown): ElicitationFieldKind | undefined {
+  if (rawType === "boolean" || rawType === "number" || rawType === "integer") {
+    return rawType;
+  }
+  if (rawType === "string") return "string";
+  return undefined;
+}
+
+function parseElicitationFields(args: unknown): ElicitationSchemaParseResult {
+  if (!isRecord(args)) return { supported: false, fields: [] };
+  const schema = isRecord(args.requestedSchema) ? args.requestedSchema : null;
+  if (!schema || schema.type !== "object" || !isRecord(schema.properties)) {
+    return { supported: false, fields: [] };
+  }
+  const propertyEntries = Object.entries(schema.properties);
+  if (propertyEntries.length > MAX_ELICITATION_FIELDS) return { supported: false, fields: [] };
+  if (
+    schema.required !== undefined &&
+    (!Array.isArray(schema.required) || !schema.required.every((name) => typeof name === "string"))
+  ) {
+    return { supported: false, fields: [] };
+  }
+  const required = new Set(
+    Array.isArray(schema.required)
+      ? schema.required.filter((name): name is string => typeof name === "string")
+      : [],
+  );
+  const fields: ElicitationField[] = [];
+  for (const [name, rawProperty] of propertyEntries) {
+    if (!ELICITATION_FIELD_NAME_RE.test(name) || !isRecord(rawProperty)) {
+      return { supported: false, fields: [] };
+    }
+    const property = rawProperty;
+    const title = typeof property.title === "string" && property.title.trim().length > 0
+      ? property.title.trim()
+      : name;
+    const description = typeof property.description === "string" && property.description.trim().length > 0
+      ? property.description.trim()
+      : undefined;
+    const enumOptions = buildEnumOptions(property.enum);
+    if (property.enum !== undefined && !enumOptions) return { supported: false, fields: [] };
+    const declaredKind = normalizeElicitationKind(property.type);
+    if (property.type !== undefined && !declaredKind) return { supported: false, fields: [] };
+    const kind = enumOptions ? declaredKind ?? "string" : declaredKind;
+    if (!kind) return { supported: false, fields: [] };
+    fields.push({
+      name,
+      label: title,
+      ...(description ? { description } : {}),
+      kind,
+      required: required.has(name),
+      defaultValue: property.default,
+      ...(enumOptions ? { enumOptions } : {}),
+    });
+  }
+  for (const requiredName of required) {
+    if (!fields.some((field) => field.name === requiredName)) {
+      return { supported: false, fields: [] };
+    }
+  }
+  return { supported: true, fields };
+}
+
+function initialElicitationValues(fields: readonly ElicitationField[]): Record<string, ElicitationFormValue> {
+  const values: Record<string, ElicitationFormValue> = {};
+  for (const field of fields) {
+    if (field.enumOptions) {
+      const defaultIndex = field.enumOptions.findIndex((option) => option.value === field.defaultValue);
+      values[field.name] = defaultIndex >= 0 ? String(defaultIndex) : "";
+    } else if (field.kind === "boolean") {
+      values[field.name] = typeof field.defaultValue === "boolean" ? field.defaultValue : false;
+    } else if (typeof field.defaultValue === "string" || typeof field.defaultValue === "number") {
+      values[field.name] = String(field.defaultValue);
+    } else {
+      values[field.name] = "";
+    }
+  }
+  return values;
+}
+
+function isNumericFieldInvalid(field: ElicitationField, value: ElicitationFormValue | undefined): boolean {
+  if (field.kind !== "number" && field.kind !== "integer") return false;
+  if (typeof value !== "string" || value.trim().length === 0) return false;
+  const trimmed = value.trim();
+  if (field.kind === "integer" && !INTEGER_INPUT_RE.test(trimmed)) return true;
+  const parsed = Number(trimmed);
+  if (!Number.isFinite(parsed)) return true;
+  return field.kind === "integer" && !Number.isInteger(parsed);
+}
+
+function isRequiredElicitationValueMissing(
+  field: ElicitationField,
+  value: ElicitationFormValue | undefined,
+): boolean {
+  if (!field.required) return false;
+  if (field.kind === "boolean") return typeof value !== "boolean";
+  return typeof value !== "string" || value.trim().length === 0;
+}
+
+function isElicitationFormInvalid(
+  fields: readonly ElicitationField[],
+  values: Record<string, ElicitationFormValue>,
+): boolean {
+  return fields.some((field) =>
+    isRequiredElicitationValueMissing(field, values[field.name]) ||
+    isNumericFieldInvalid(field, values[field.name]),
+  );
+}
+
+function buildElicitationContent(
+  fields: readonly ElicitationField[],
+  values: Record<string, ElicitationFormValue>,
+): Record<string, unknown> {
+  const content: Record<string, unknown> = {};
+  for (const field of fields) {
+    const raw = values[field.name];
+    if (field.enumOptions) {
+      const option = typeof raw === "string"
+        ? field.enumOptions.find((candidate) => candidate.key === raw)
+        : undefined;
+      if (option) content[field.name] = option.value;
+      continue;
+    }
+    if (field.kind === "boolean") {
+      if (typeof raw === "boolean") content[field.name] = raw;
+      continue;
+    }
+    if (typeof raw !== "string" || raw.trim().length === 0) {
+      if (field.required) content[field.name] = "";
+      continue;
+    }
+    const trimmed = raw.trim();
+    if (field.kind === "integer") {
+      content[field.name] = Number(trimmed);
+    } else if (field.kind === "number") {
+      content[field.name] = Number(trimmed);
+    } else {
+      content[field.name] = raw;
+    }
+  }
+  return content;
+}
+
+function isMcpElicitationRequest(request: ApprovalRequest | null): boolean {
+  return Boolean(
+    request &&
+      request.source === "mcp" &&
+      request.kind === "agent-action" &&
+      request.toolName.startsWith("mcp:") &&
+      request.toolName.endsWith(":elicitation"),
+  );
+}
+
+function hasRequestedElicitationSchema(request: ApprovalRequest | null): boolean {
+  const args = request?.args;
+  return isRecord(args) && args.requestedSchema !== undefined;
+}
+
 export function ToolApprovalDialog({
   open,
   request,
@@ -51,7 +263,11 @@ export function ToolApprovalDialog({
   open: boolean;
   request: ApprovalRequest | null;
   pendingCount?: number;
-  onDecide: (choice: ApprovalChoice, pattern?: string) => void;
+  onDecide: (
+    choice: ApprovalChoice,
+    pattern?: string,
+    extras?: ApprovalDecisionExtras,
+  ) => void;
 }) {
   const { t: tHook } = useTranslation();
   const [expanded, setExpanded] = useState(false);
@@ -65,12 +281,23 @@ export function ToolApprovalDialog({
     request.approvalPurpose.confidence === "sufficient"
       ? request.approvalPurpose.text.trim()
       : "";
+  const elicitationParse = useMemo(
+    () => parseElicitationFields(request?.args),
+    [request?.args],
+  );
+  const elicitationFields = elicitationParse.fields;
+  const isMcpElicitation = isMcpElicitationRequest(request);
+  const hasElicitationSchema = isMcpElicitation && hasRequestedElicitationSchema(request);
+  const isElicitationForm = isMcpElicitation && elicitationFields.length > 0;
+  const isUnsupportedElicitationForm = hasElicitationSchema && !elicitationParse.supported;
+  const [elicitationValues, setElicitationValues] = useState<Record<string, ElicitationFormValue>>({});
 
   // Reset NL/scope state when a new request arrives.
   useEffect(() => {
     setNlJustification(suggestedPurpose);
     setScopeChoice("session");
-  }, [request?.id, suggestedPurpose]);
+    setElicitationValues(initialElicitationValues(elicitationFields));
+  }, [request?.id, suggestedPurpose, elicitationFields]);
 
   const finalVerdict = request?.reviewerVerdict?.level ?? riskLevelForCategory(request?.toolCategory ?? "meta");
 
@@ -83,8 +310,18 @@ export function ToolApprovalDialog({
     }
   }, [open, finalVerdict, suggestedPurpose.length]);
 
-  // Approve is disabled for HIGH when NL field is empty.
-  const approveDisabled = finalVerdict === "high" && nlJustification.trim().length === 0;
+  const elicitationInvalid = isElicitationFormInvalid(elicitationFields, elicitationValues);
+  const elicitationContent = useMemo(
+    () => buildElicitationContent(elicitationFields, elicitationValues),
+    [elicitationFields, elicitationValues],
+  );
+
+  // Approve is disabled for HIGH when NL field is empty, and for incomplete
+  // MCP elicitation forms.
+  const approveDisabled =
+    (finalVerdict === "high" && nlJustification.trim().length === 0) ||
+    isUnsupportedElicitationForm ||
+    elicitationInvalid;
 
   // Wrap onDecide("allow-*") to record durable approval before deciding.
   //
@@ -99,10 +336,14 @@ export function ToolApprovalDialog({
   // Fire-and-await pattern: onDecide is called synchronously so the UI
   // responds immediately; the record IPC is awaited in the background so
   // test assertions on onDecide do not need to drain microtask queues.
-  const handleApprove = useCallback(async (choice: ApprovalChoice, pattern?: string) => {
+  const handleApprove = useCallback(async (
+    choice: ApprovalChoice,
+    pattern?: string,
+    extras?: ApprovalDecisionExtras,
+  ) => {
     let recordPromise: Promise<unknown> | undefined;
     const isDurable = choice === "allow-session" || choice === "allow-always";
-    if (request && isDurable) {
+    if (request && isDurable && !isMcpElicitation) {
       // canonicalStringify: sort object keys so {a,b} and {b,a} produce the
       // same string — matching how dispatchReviewer builds the lookup key.
       const canonicalArgs = canonicalStringifyForRenderer(request.args ?? {});
@@ -129,19 +370,31 @@ export function ToolApprovalDialog({
       });
     }
     // Call onDecide synchronously so the UI responds immediately.
-    onDecide(choice, pattern);
+    if (extras === undefined) {
+      onDecide(choice, pattern);
+    } else {
+      onDecide(choice, pattern, extras);
+    }
     // Await the record promise in the background (non-blocking for the user).
     await recordPromise;
-  }, [request, finalVerdict, nlJustification, onDecide]);
+  }, [request, finalVerdict, nlJustification, onDecide, isMcpElicitation]);
 
   // The primary Approve button grants for the scope selected in the radio
   // group: "이 세션만" → durable session grant, "영구 허용" → persistent.
   // HIGH verdict forces session (no persistent grant for HIGH-risk actions).
   // This is the durable choice that the memory store records.
   const primaryApproveChoice: ApprovalChoice =
-    finalVerdict !== "high" && scopeChoice === "persistent"
-      ? "allow-always"
-      : "allow-session";
+    isMcpElicitation
+      ? "allow-once"
+      : (finalVerdict !== "high" && scopeChoice === "persistent"
+          ? "allow-always"
+          : "allow-session");
+  const approvalExtras = useMemo<ApprovalDecisionExtras | undefined>(
+    () => hasElicitationSchema && elicitationParse.supported
+      ? { elicitationContent }
+      : undefined,
+    [hasElicitationSchema, elicitationParse.supported, elicitationContent],
+  );
 
   // 키보드 단축키 (disabled for HIGH when NL field empty)
   useEffect(() => {
@@ -150,7 +403,7 @@ export function ToolApprovalDialog({
       if (isTextEntryShortcutTarget(e.target)) return;
       if (e.key.toLowerCase() === "a" && !e.metaKey && !e.ctrlKey) {
         e.preventDefault();
-        if (!approveDisabled) void handleApprove(primaryApproveChoice);
+        if (!approveDisabled) void handleApprove(primaryApproveChoice, undefined, approvalExtras);
       } else if (e.key.toLowerCase() === "d" && !e.metaKey && !e.ctrlKey) {
         e.preventDefault();
         onDecide("deny-once");
@@ -158,7 +411,7 @@ export function ToolApprovalDialog({
     };
     window.addEventListener("keydown", handler);
     return () => window.removeEventListener("keydown", handler);
-  }, [open, request, onDecide, approveDisabled, handleApprove, primaryApproveChoice]);
+  }, [open, request, onDecide, approveDisabled, handleApprove, primaryApproveChoice, approvalExtras]);
 
   if (!request) return null;
 
@@ -313,6 +566,103 @@ export function ToolApprovalDialog({
               </div>
             )}
 
+            {isElicitationForm && (
+              <div
+                className="mt-3 rounded-md border bg-background p-3"
+                data-testid="mcp-elicitation-form"
+              >
+                <p className="mb-2 text-xs font-semibold">Requested fields</p>
+                <div className="grid gap-3">
+                  {elicitationFields.map((field) => {
+                    const inputId = `mcp-elicitation-${field.name}`;
+                    const value = elicitationValues[field.name];
+                    const invalid =
+                      isRequiredElicitationValueMissing(field, value) ||
+                      isNumericFieldInvalid(field, value);
+                    return (
+                      <div key={field.name} className="grid gap-1.5">
+                        <Label htmlFor={inputId} className="text-xs">
+                          {field.label}
+                          {field.required && <span className="ml-1 text-destructive">*</span>}
+                        </Label>
+                        {field.enumOptions ? (
+                          <NativeSelect
+                            id={inputId}
+                            size="sm"
+                            className="w-full"
+                            value={typeof value === "string" ? value : ""}
+                            aria-invalid={invalid || undefined}
+                            data-testid={`mcp-elicitation-field-${field.name}`}
+                            onChange={(event) => {
+                              const nextValue = event.target.value;
+                              setElicitationValues((current) => ({
+                                ...current,
+                                [field.name]: nextValue,
+                              }));
+                            }}
+                          >
+                            <NativeSelectOption value="">Select...</NativeSelectOption>
+                            {field.enumOptions.map((option) => (
+                              <NativeSelectOption key={option.key} value={option.key}>
+                                {option.label}
+                              </NativeSelectOption>
+                            ))}
+                          </NativeSelect>
+                        ) : field.kind === "boolean" ? (
+                          <div className="flex items-center gap-2">
+                            <Checkbox
+                              id={inputId}
+                              checked={value === true}
+                              data-testid={`mcp-elicitation-field-${field.name}`}
+                              onCheckedChange={(checked) => {
+                                setElicitationValues((current) => ({
+                                  ...current,
+                                  [field.name]: checked === true,
+                                }));
+                              }}
+                            />
+                            <Label htmlFor={inputId} className="text-xs font-normal">
+                              True
+                            </Label>
+                          </div>
+                        ) : (
+                          <Input
+                            id={inputId}
+                            type={field.kind === "string" ? "text" : "number"}
+                            step={field.kind === "integer" ? "1" : "any"}
+                            value={typeof value === "string" ? value : ""}
+                            aria-invalid={invalid || undefined}
+                            data-testid={`mcp-elicitation-field-${field.name}`}
+                            onChange={(event) => {
+                              const nextValue = event.target.value;
+                              setElicitationValues((current) => ({
+                                ...current,
+                                [field.name]: nextValue,
+                              }));
+                            }}
+                          />
+                        )}
+                        {field.description && (
+                          <p className="text-[11px] text-muted-foreground">
+                            {field.description}
+                          </p>
+                        )}
+                      </div>
+                    );
+                  })}
+                </div>
+              </div>
+            )}
+
+            {isUnsupportedElicitationForm && (
+              <div
+                className="mt-3 rounded-md border border-destructive/(--opacity-muted) bg-destructive/(--opacity-faint) p-3 text-xs text-destructive"
+                data-testid="mcp-elicitation-unsupported"
+              >
+                Requested form schema is not supported.
+              </div>
+            )}
+
             <details className="min-w-0 rounded-md border bg-muted/(--opacity-light)">
               <summary className="cursor-pointer px-3 py-2 text-xs font-semibold">
                 {tHook("toolApprovalDialog.showFullInput")}
@@ -335,7 +685,7 @@ export function ToolApprovalDialog({
           </div>
 
           {/* Scope selector — LOW/MEDIUM only (HIGH is always session) */}
-          {finalVerdict !== "high" && (
+          {finalVerdict !== "high" && !isMcpElicitation && (
             <div className="mt-3">
               <p className="mb-1.5 text-xs font-semibold">{tHook("toolApprovalDialog.approvalScope")}</p>
               <RadioGroup
@@ -356,14 +706,16 @@ export function ToolApprovalDialog({
           )}
 
           <div className="mt-4 flex flex-wrap justify-end gap-2 border-t pt-3">
-            <Button
-              size="sm"
-              variant="outline"
-              className="border-destructive text-destructive hover:bg-destructive/(--opacity-soft)"
-              onClick={() => onDecide("deny-always", request.toolName)}
-            >
-              {tHook("toolApprovalDialog.denyAlways")}
-            </Button>
+            {!isMcpElicitation && (
+              <Button
+                size="sm"
+                variant="outline"
+                className="border-destructive text-destructive hover:bg-destructive/(--opacity-soft)"
+                onClick={() => onDecide("deny-always", request.toolName)}
+              >
+                {tHook("toolApprovalDialog.denyAlways")}
+              </Button>
+            )}
             <Button
               size="sm"
               variant="outline"
@@ -372,20 +724,22 @@ export function ToolApprovalDialog({
             >
               {tHook("toolApprovalDialog.denyOnce")}
             </Button>
-            <Button
-              size="sm"
-              variant="outline"
-              onClick={() => void handleApprove("allow-always", request.toolName)}
-              disabled={approveDisabled}
-              title={approveDisabled ? tHook("toolApprovalDialog.enterReason") : undefined}
-              aria-describedby={approveDisabled ? "nl-justification-hint" : undefined}
-            >
-              {tHook("toolApprovalDialog.allowAlways")}
-            </Button>
+            {!isMcpElicitation && (
+              <Button
+                size="sm"
+                variant="outline"
+                onClick={() => void handleApprove("allow-always", request.toolName)}
+                disabled={approveDisabled}
+                title={approveDisabled ? tHook("toolApprovalDialog.enterReason") : undefined}
+                aria-describedby={approveDisabled ? "nl-justification-hint" : undefined}
+              >
+                {tHook("toolApprovalDialog.allowAlways")}
+              </Button>
+            )}
             <Button
               size="sm"
               variant="default"
-              onClick={() => void handleApprove(primaryApproveChoice)}
+              onClick={() => void handleApprove(primaryApproveChoice, undefined, approvalExtras)}
               disabled={approveDisabled}
               title={approveDisabled ? tHook("toolApprovalDialog.enterReason") : tHook("toolApprovalDialog.shortcutA")}
               aria-describedby={approveDisabled ? "nl-justification-hint" : undefined}

@@ -274,6 +274,22 @@ export type ValidationResult =
  */
 export type McpUiSlot = "chat" | "sidebar" | "tool-result";
 
+export interface McpUiCspPolicy {
+  /**
+   * Host-sanitized renderer CSP additions. Keys may be camelCase here; the
+   * renderer also tolerates kebab-case wire keys from `_meta.ui.csp`.
+   */
+  scriptSrc?: string[];
+  styleSrc?: string[];
+  imgSrc?: string[];
+  fontSrc?: string[];
+  connectSrc?: string[];
+  mediaSrc?: string[];
+  frameSrc?: string[];
+  workerSrc?: string[];
+  [directive: string]: unknown;
+}
+
 /**
  * Payload produced by an MCP tool that declares a UI extension.
  *
@@ -297,4 +313,6 @@ export interface McpUiPayload {
   height?: number;
   /** Human-readable title shown in the webview title bar. */
   title?: string;
+  /** Optional `_meta.ui.csp` renderer policy. Sanitized by `McpAppView`. */
+  csp?: McpUiCspPolicy;
 }
