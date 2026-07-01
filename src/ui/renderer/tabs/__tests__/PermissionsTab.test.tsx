@@ -141,7 +141,13 @@ function installApi(disabledBatches: HookTrustRow[][]) {
         enabled: false,
         available: true,
         kind: "full" as const,
-        reason: "",
+        reason: "ASRT (bwrap) confines filesystem, process, and network egress when enabled",
+        potentialReason: "ASRT (bwrap) confines filesystem, process, and network egress when enabled",
+        runtime: {
+          available: false,
+          kind: "none" as const,
+          reason: "no OS sandbox configured for the host process",
+        },
         confines: { filesystem: true, process: true, network: true },
       })),
     },
@@ -710,6 +716,100 @@ describe("PermissionsTab hook quarantine notice", () => {
   });
 });
 
+describe("PermissionsTab — OS sandbox toggle and capability rendering", () => {
+  function settingsApi() {
+    return window.lvisApi as unknown as {
+      getSettings: ReturnType<typeof vi.fn>;
+      updateSettings: ReturnType<typeof vi.fn>;
+    };
+  }
+
+  it("rolls back optimistic enable when settings IPC returns an error", async () => {
+    const api = installApi([[]]);
+    settingsApi().updateSettings.mockResolvedValueOnce({
+      ok: false as const,
+      error: "persist-failed",
+      message: "저장 실패",
+    });
+
+    await act(async () => {
+      render(<PermissionsTab />);
+    });
+
+    const toggle = screen.getByTestId("os-sandbox-toggle");
+    expect(toggle).toHaveAttribute("aria-checked", "false");
+
+    await act(async () => {
+      fireEvent.click(toggle);
+    });
+
+    expect(settingsApi().updateSettings).toHaveBeenCalledWith({
+      features: { osToolSandbox: true },
+    });
+    expect(api.permission.sandboxCapability).toHaveBeenCalledTimes(1);
+    expect(toggle).toHaveAttribute("aria-checked", "false");
+    expect(screen.getByText("저장 실패")).toBeTruthy();
+  });
+
+  it("renders platform potential, runtime reason, and restart note as separate branches", async () => {
+    const api = installApi([[]]);
+    api.permission.sandboxCapability.mockResolvedValueOnce({
+      platform: "linux" as NodeJS.Platform,
+      enabled: true,
+      available: true,
+      kind: "full" as const,
+      reason: "legacy summary",
+      potentialReason: "platform can confine filesystem, process, and network",
+      runtime: {
+        available: true,
+        kind: "full" as const,
+        reason: "ASRT runtime registered at startup",
+      },
+      confines: { filesystem: true, process: true, network: true },
+    });
+    settingsApi().getSettings.mockResolvedValueOnce({ features: { osToolSandbox: true } });
+
+    await act(async () => {
+      render(<PermissionsTab />);
+    });
+
+    expect(screen.getByTestId("os-sandbox-potential-reason")).toHaveTextContent(
+      "platform can confine filesystem, process, and network",
+    );
+    expect(screen.getByTestId("os-sandbox-runtime-reason")).toHaveTextContent(
+      "ASRT runtime registered at startup",
+    );
+    expect(screen.getByText(/변경 사항은 앱을 재시작한 후 적용됩니다/)).toBeTruthy();
+  });
+
+  it("renders the unavailable branch and disables the toggle for unsupported platforms", async () => {
+    const api = installApi([[]]);
+    api.permission.sandboxCapability.mockResolvedValueOnce({
+      platform: "freebsd" as NodeJS.Platform,
+      enabled: false,
+      available: false,
+      kind: "none" as const,
+      reason: "OS sandbox is fail-closed on this platform; tools run unconfined",
+      potentialReason: "OS sandbox is fail-closed on this platform; tools run unconfined",
+      runtime: {
+        available: false,
+        kind: "none" as const,
+        reason: "no OS sandbox configured for the host process",
+      },
+      confines: { filesystem: false, process: false, network: false },
+    });
+
+    await act(async () => {
+      render(<PermissionsTab />);
+    });
+
+    expect(screen.getByTestId("os-sandbox-unavailable")).toHaveTextContent("freebsd");
+    expect(screen.getByTestId("os-sandbox-toggle")).toBeDisabled();
+    expect(screen.queryByTestId("os-sandbox-potential-reason")).toBeNull();
+    expect(screen.queryByTestId("os-sandbox-runtime-reason")).toBeNull();
+  });
+});
+
 describe("PermissionsTab — handleWindowsInstall error-shape robustness", () => {
   /**
    * When sandboxWindowsInstall returns an error shape (ok: false), the handler
@@ -763,9 +863,15 @@ describe("PermissionsTab — handleWindowsInstall error-shape robustness", () =>
           platform: "win32" as NodeJS.Platform,
           enabled: true,
           available: true,
-          kind: "full" as const,
-          reason: "",
-          confines: { filesystem: true, process: true, network: true },
+          kind: "partial" as const,
+          reason: "ASRT (srt-win) confines network egress only — NO filesystem jail; needs a one-time admin install + relogin",
+          potentialReason: "ASRT (srt-win) confines network egress only — NO filesystem jail; needs a one-time admin install + relogin",
+          runtime: {
+            available: false,
+            kind: "none" as const,
+            reason: "no OS sandbox configured for the host process",
+          },
+          confines: { filesystem: false, process: false, network: true },
         })),
         sandboxWindowsStatus: overrides.sandboxWindowsStatus ?? vi.fn(async () => windowsStatus),
         sandboxWindowsInstall: overrides.sandboxWindowsInstall ?? vi.fn(async () => ({ cancelled: true })),

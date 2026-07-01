@@ -217,11 +217,17 @@ describe("sandboxCapability win32 reconcile", () => {
       platform: string;
       available: boolean;
       kind: string;
+      potentialReason: string;
+      runtime: { available: boolean; kind: string; reason: string };
       confines: { filesystem: boolean; process: boolean; network: boolean };
     };
     expect(result.platform).toBe("win32");
     expect(result.available).toBe(true);
     expect(result.kind).toBe("partial");
+    expect(result.potentialReason).toContain("srt-win");
+    expect(result.runtime.available).toBe(false);
+    expect(result.runtime.kind).toBe("none");
+    expect(result.runtime.reason).toContain("no OS sandbox configured");
     // Network-only — the asymmetric relaxation seam: egress confined, FS not.
     expect(result.confines).toEqual({ filesystem: false, process: false, network: true });
   });
@@ -232,10 +238,42 @@ describe("sandboxCapability win32 reconcile", () => {
     const result = (await invoke(PERMISSIONS.sandboxCapability, null)) as {
       available: boolean;
       kind: string;
+      potentialReason: string;
       confines: { filesystem: boolean; process: boolean; network: boolean };
     };
     expect(result.available).toBe(true);
     expect(result.kind).toBe("full");
+    expect(result.potentialReason).toContain("Seatbelt");
     expect(result.confines).toEqual({ filesystem: true, process: true, network: true });
+  });
+
+  it("reports active runtime separately from platform potential when ASRT is registered", async () => {
+    setProcessPlatform("linux");
+    const { setActiveSandboxCapability, __resetActiveSandboxCapabilityForTest } =
+      await import("../../../permissions/sandbox-capability.js");
+    setActiveSandboxCapability({
+      kind: "asrt",
+      confidence: "verified",
+      platform: "linux",
+      reason: "ASRT runtime registered at boot",
+      confines: { filesystem: true, process: true, network: true },
+    });
+    try {
+      await setup();
+      const result = (await invoke(PERMISSIONS.sandboxCapability, null)) as {
+        available: boolean;
+        kind: string;
+        runtime: { available: boolean; kind: string; reason: string };
+      };
+      expect(result.available).toBe(true);
+      expect(result.kind).toBe("full");
+      expect(result.runtime).toEqual({
+        available: true,
+        kind: "full",
+        reason: "ASRT runtime registered at boot",
+      });
+    } finally {
+      __resetActiveSandboxCapabilityForTest();
+    }
   });
 });
