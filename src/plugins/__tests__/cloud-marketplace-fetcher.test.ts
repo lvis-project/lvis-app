@@ -80,6 +80,10 @@ describe("CloudMarketplaceFetcher (public-network path)", () => {
           installPolicy: "user",
           dependencies: ["calendar"],
           publisher: "Acme",
+          network_access: {
+            allowed_domains: ["api.acme.example", "login.acme.example"],
+            reasoning: "Syncs notes with the Acme workspace API.",
+          },
         },
       ]),
     );
@@ -99,6 +103,10 @@ describe("CloudMarketplaceFetcher (public-network path)", () => {
       installPolicy: "user",
       dependencies: ["calendar"],
       publisher: "Acme",
+      networkAccess: {
+        allowedDomains: ["api.acme.example", "login.acme.example"],
+        reasoning: "Syncs notes with the Acme workspace API.",
+      },
     });
 
     // Verify URL + Bearer header behavior

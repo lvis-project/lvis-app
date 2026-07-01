@@ -22,6 +22,12 @@ export interface PluginInstallDialogProps {
 export function PluginInstallDialog({ target, onClose, onConfirm, working }: PluginInstallDialogProps) {
   const { t } = useTranslation();
   const isAdmin = target?.installPolicy === "admin";
+  const networkAccess = target?.networkAccess;
+  const allowedDomains = Array.isArray(networkAccess?.allowedDomains)
+    ? networkAccess.allowedDomains.map((domain) => domain.trim()).filter((domain) => domain.length > 0)
+    : [];
+  const reasoning = networkAccess?.reasoning?.trim();
+  const hasNetworkAccessDisclosure = allowedDomains.length > 0 || !!reasoning;
   const [consented, setConsented] = useState(false);
 
   // Re-arm consent every time the dialog opens for a different plugin so a prior
@@ -53,6 +59,39 @@ export function PluginInstallDialog({ target, onClose, onConfirm, working }: Plu
               />
               <span>{t("pluginInstallDialog.adminConsent")}</span>
             </label>
+          </div>
+        )}
+        {target && hasNetworkAccessDisclosure && (
+          <div
+            className="space-y-2 rounded-md border bg-muted/(--opacity-subtle) p-3 text-xs"
+            data-testid="plugin-install-network-access"
+          >
+            <div className="font-medium">{t("pluginInstallDialog.networkAccessTitle")}</div>
+            {reasoning && (
+              <p className="leading-relaxed text-muted-foreground">{reasoning}</p>
+            )}
+            {allowedDomains.length > 0 && (
+              <div className="space-y-1">
+                <div className="text-[11px] font-medium text-muted-foreground">
+                  {t("pluginInstallDialog.allowedDomainsLabel")}
+                </div>
+                <ul className="flex flex-wrap gap-1">
+                  {allowedDomains.map((domain) => (
+                    <li
+                      key={domain}
+                      className="rounded border bg-background px-1.5 py-0.5 font-mono text-[10px]"
+                    >
+                      {domain}
+                    </li>
+                  ))}
+                </ul>
+              </div>
+            )}
+            {networkAccess?.allowPrivateNetworks === true && (
+              <p className="leading-relaxed text-warning">
+                {t("pluginInstallDialog.allowPrivateNetworks")}
+              </p>
+            )}
           </div>
         )}
         <DialogFooter>

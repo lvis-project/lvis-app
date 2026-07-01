@@ -1,4 +1,5 @@
 import { isAppUpdateInstallRequested } from "../main/app-update-install-intent.js";
+import type { NetworkAccessAcknowledgement, NetworkAccessGrant } from "../shared/network-access.js";
 
 const inflightInstallLocks = new Map<string, Promise<unknown>>();
 let pendingPluginInstallOperations = 0;
@@ -25,7 +26,13 @@ type MarketplaceInstallerProgressEvent =
 type MarketplaceInstallProgressPayload =
   | { slug: string; phase: MarketplaceInstallProgressPhase }
   | { slug: string; phase: "downloading"; bytesDownloaded: number; bytesTotal: number | null };
-type MarketplaceLifecycleCatalogItem = { id: string; slug?: string; installed?: boolean; version?: string };
+type MarketplaceLifecycleCatalogItem = {
+  id: string;
+  slug?: string;
+  installed?: boolean;
+  version?: string;
+  networkAccess?: NetworkAccessGrant;
+};
 
 class InstalledPluginVersionMismatchError extends Error {
   constructor(
@@ -61,6 +68,7 @@ interface PluginInstallMarketplace extends PluginLifecycleMarketplace {
   install(
     pluginId: string,
     onProgress?: (event: MarketplaceInstallerProgressEvent) => void,
+    options?: { networkAccessAcknowledgement?: NetworkAccessAcknowledgement },
   ): Promise<{ pluginId: string; installed: true }>;
 }
 
@@ -113,6 +121,7 @@ export async function installMarketplacePluginWithLifecycle(options: {
   eventSlug?: string;
   lifecyclePluginId?: string;
   expectedVersion?: string;
+  networkAccessAcknowledgement?: NetworkAccessAcknowledgement;
   pluginRuntime: PluginInstallRuntime;
   pluginMarketplace: PluginInstallMarketplace;
   broadcastInstallProgress?: (payload: MarketplaceInstallProgressPayload) => void;
@@ -125,6 +134,7 @@ export async function installMarketplacePluginWithLifecycle(options: {
     eventSlug,
     lifecyclePluginId,
     expectedVersion,
+    networkAccessAcknowledgement,
     pluginRuntime,
     pluginMarketplace,
     broadcastInstallProgress,
@@ -173,6 +183,8 @@ export async function installMarketplacePluginWithLifecycle(options: {
         } else {
           broadcastInstallProgress?.({ slug: progressSlug, phase: evt.phase });
         }
+      }, {
+        networkAccessAcknowledgement,
       });
       const installedPluginId = result.pluginId === requestedPluginId ? resolvedLifecyclePluginId : result.pluginId;
       restorePluginId = installedPluginId;
