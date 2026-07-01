@@ -43,3 +43,9 @@ export type ManifestSnapshot = {
   manifest: PluginManifest;
   approvedPluginAccess?: PluginAccessSpec;
 };
+
+/**
+ * Outcome of a single-plugin instantiation + start attempt. Internal to the
+ * runtime domain — not part of the public runtime export surface.
+ */
+export type SinglePluginStartResult = "started" | "deferred" | "failed" | "cancelled";
