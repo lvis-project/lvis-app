@@ -84,9 +84,18 @@ src/
 
   contract/                   — #1409 public wire contract SOT: app-contract.ts
                                 (channel names + PUBLIC_CHANNELS allowlist +
-                                gesture classification + session addressing),
+                                gesture classification + session addressing +
+                                INTERNAL_HOST_CHANNELS out-of-tree classification),
                                 events.ts (AppEvent union), trust-origin.ts.
-                                api/cli/sdk external surfaces coming.
+
+  api/                        — #1409 C12 external surface: local-api.ts
+                                dispatch({channel,args,origin}) over the same
+                                contract as the renderer, non-renderer TrustOrigin;
+                                network server is the #1409 follow-up.
+  sdk/                        — #1409 C12 narrow typed LvisClient facade over
+                                local-api (read+send only; mutating ops omitted).
+  cli/                        — #1409 C12 command table + runCommand(argv, client);
+                                scaffold only — no process bin/entrypoint (follow-up).
 
   mcp/                        — Model Context Protocol client (unchanged)
 
