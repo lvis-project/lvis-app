@@ -60,24 +60,17 @@ import type { SubAgentSpawn } from "./components/SubAgentCard.js";
 import type { SkillBadgeProps } from "./components/SkillBadge.js";
 import type { SessionSummary } from "./hooks/use-sessions.js";
 import type { UserKeyboardIntentSnapshot } from "../../shared/chat-origin.js";
-import ReactMarkdown from "react-markdown";
-import { MARKDOWN_REMARK_PLUGINS } from "./utils/markdown-plugins.js";
-import { parseImportedTriggerEnvelope } from "../../shared/overlay-trigger-source.js";
+import { ImportedTriggerCard } from "./components/ImportedTriggerCard.js";
+import { AskUserAnswerBubble } from "./components/AskUserAnswerBubble.js";
+import { bottomFollowSignature, entryRenderRevision, subAgentRevision } from "./utils/chat-entry-revision.js";
+import { getKoreaDateKey } from "./utils/korea-date-key.js";
+import { classifyTurnEntries, isTurnStartEntry } from "./utils/classify-turn-entries.js";
 import { lookupBillablePricingOptional } from "../../shared/pricing-data.js";
 import type { LLMVendor } from "../../shared/llm-vendor-defaults.js";
 import { collectChatPreviewModel } from "./preview/preview-targets.js";
 
 const CHAT_BOTTOM_THRESHOLD_PX = 96;
 const MAX_SAVED_CHAT_SCROLL_POSITIONS = 24;
-const KOREA_DATE_KEY_FORMATTER = new Intl.DateTimeFormat("en-US", {
-  timeZone: "Asia/Seoul",
-  year: "numeric",
-  month: "2-digit",
-  day: "2-digit",
-});
-
-type ImportedTriggerEntry = Extract<ChatEntry, { kind: "imported_trigger" }>;
-type ToolGroupEntry = Extract<ChatEntry, { kind: "tool_group" }>;
 type SavedChatScrollPosition = {
   sessionId: string | null;
   top: number;
@@ -101,157 +94,6 @@ function pruneSavedChatScrollPositions(): void {
     .slice(0, savedChatScrollPositions.size - MAX_SAVED_CHAT_SCROLL_POSITIONS)
     .map(([key]) => key);
   for (const key of oldestKeys) savedChatScrollPositions.delete(key);
-}
-
-function isTurnStartEntry(entry: ChatEntry | undefined): boolean {
-  return entry?.kind === "user" || entry?.kind === "imported_trigger";
-}
-
-function textRevision(text: string | undefined): string {
-  if (!text) return "0:0";
-  let hash = 0x811c9dc5;
-  for (let i = 0; i < text.length; i++) {
-    hash ^= text.charCodeAt(i);
-    hash = Math.imul(hash, 0x01000193);
-  }
-  return `${text.length}:${hash >>> 0}`;
-}
-
-function valueRevision(value: unknown): string {
-  if (value === undefined) return "undefined";
-  if (value === null) return "null";
-  if (typeof value !== "object") return textRevision(String(value));
-  if (Array.isArray(value)) {
-    return textRevision(`[${value.map(valueRevision).join(",")}]`);
-  }
-  const objectValue = value as Record<string, unknown>;
-  return textRevision(`{${Object.keys(objectValue)
-    .sort()
-    .map((key) => `${key}:${valueRevision(objectValue[key])}`)
-    .join(",")}}`);
-}
-
-function subAgentRevision(spawn: SubAgentSpawn): string {
-  return [
-    spawn.spawnId,
-    textRevision(spawn.title),
-    spawn.status,
-    spawn.toolCallCount,
-    textRevision(spawn.summary),
-    textRevision(spawn.errorMessage),
-    spawn.turns
-      .map((turn) => `${turn.turn}:${turn.toolCallCount}:${textRevision(turn.text)}`)
-      .join("|"),
-  ].join(":");
-}
-
-function toolGroupRevision(group: ToolGroupEntry, spawnRevisions: string[]): string {
-  return [
-    group.groupId,
-    group.groupIds.join(","),
-    group.status,
-    group.tools
-      .map((tool) => [
-        tool.toolUseId,
-        tool.name,
-        tool.displayOrder,
-        tool.status,
-        valueRevision(tool.input),
-        textRevision(tool.result),
-        tool.source ?? "",
-        tool.category ?? "",
-        tool.pluginId ?? "",
-        tool.mcpServerId ?? "",
-        tool.durationMs ?? "",
-        tool.startedAt ?? "",
-        valueRevision(tool.uiPayload),
-      ].join(":"))
-      .join("|"),
-    spawnRevisions.join(","),
-  ].join("#");
-}
-
-function entryRenderRevision(params: {
-  entry: ChatEntry;
-  idx: number;
-  searchHighlight: string;
-  starred: boolean;
-  spawnRevisions?: string[];
-}): string {
-  const { entry, idx, searchHighlight, starred, spawnRevisions = [] } = params;
-  switch (entry.kind) {
-    case "reasoning":
-      return `${idx}:reasoning:${textRevision(entry.text)}:${entry.streaming ? "1" : "0"}`;
-    case "assistant":
-      return `${idx}:assistant:${textRevision(entry.text)}:${entry.streaming ? "1" : "0"}:${entry.phase ?? ""}:${entry.systemNotice ?? ""}:${textRevision(searchHighlight)}:${starred ? "1" : "0"}`;
-    case "permission_review":
-      return [
-        idx,
-        "permission_review",
-        entry.toolUseId,
-        entry.groupId,
-        entry.displayOrder,
-        entry.status,
-        entry.verdictLevel ?? "",
-        entry.toolName,
-        entry.source ?? "",
-        entry.toolCategory ?? "",
-        textRevision(entry.reason),
-        valueRevision(entry.approvalPurpose),
-      ].join(":");
-    case "tool_group":
-      return `${idx}:tool_group:${toolGroupRevision(entry, spawnRevisions)}`;
-    case "ask_user_answer":
-      return `${idx}:ask_user_answer:${entry.dismissed ? "1" : "0"}:${entry.rows.map((row) => `${row.label}:${textRevision(row.value)}`).join("|")}`;
-    default:
-      return `${idx}:${entry.kind}`;
-  }
-}
-
-function bottomFollowSignature(entries: ChatEntry[]): string {
-  const last = entries.at(-1);
-  if (!last) return "empty";
-  switch (last.kind) {
-    case "user":
-    case "system":
-      return `${entries.length}:${last.kind}:${last.text.length}`;
-    case "reasoning":
-    case "assistant":
-      return `${entries.length}:${last.kind}:${last.text.length}:${last.streaming ? "streaming" : "done"}`;
-    case "tool_group":
-      return `${entries.length}:tool_group:${last.status}:${last.tools
-        .map((tool) => `${tool.toolUseId}:${tool.status}:${tool.result?.length ?? 0}:${tool.durationMs ?? ""}`)
-        .join("|")}`;
-    case "turn_summary":
-      return `${entries.length}:turn_summary:${last.tokensIn}:${last.tokensOut}:${last.toolCount}`;
-    case "checkpoint":
-      return `${entries.length}:checkpoint:${last.compactNum ?? ""}:${last.freedTokens}`;
-    default:
-      return `${entries.length}:${last.kind}`;
-  }
-}
-
-function ImportedTriggerCard({ entry }: { entry: ImportedTriggerEntry }) {
-  // Parse envelope source tag to confirm overlay trigger provenance.
-  // title + summary fields are already clean (set at insert time).
-  const envelopeSource = parseImportedTriggerEnvelope(entry.prompt);
-  return (
-    <div
-      className="mx-3 my-1 rounded border border-action-view/(--opacity-light) bg-action-view/(--opacity-faint) px-3 py-2 text-xs"
-    >
-      <div className="flex min-w-0 items-center gap-1 text-action-view font-medium">
-        <span className="shrink-0">●</span>
-        <span className="min-w-0 break-words [overflow-wrap:anywhere]">{envelopeSource ?? entry.summary.slice(0, 60)}</span>
-      </div>
-      {entry.summary && (
-        <div className="mt-1 text-muted-foreground prose prose-sm lvis-prose max-w-none break-words [overflow-wrap:anywhere]">
-          <ReactMarkdown remarkPlugins={MARKDOWN_REMARK_PLUGINS}>
-            {entry.summary}
-          </ReactMarkdown>
-        </div>
-      )}
-    </div>
-  );
 }
 
 /**
@@ -317,44 +159,6 @@ export interface ChatViewProps {
   statusBar?: StatusBarProps;
   /** Constrain transcript and composer to a centered reading column. */
   blogLayout?: boolean;
-}
-
-function AskUserAnswerBubble({
-  entry,
-}: {
-  entry: Extract<ChatEntry, { kind: "ask_user_answer" }>;
-}) {
-  const { t } = useTranslation();
-  if (entry.dismissed) {
-    return (
-      <div
-        className="ml-auto w-fit min-w-0 max-w-[75%] rounded-lg border border-border/(--opacity-strong) border-l-2 border-l-muted-foreground/(--opacity-strong) bg-card/(--opacity-intense) px-3 py-2 text-xs text-muted-foreground shadow-sm"
-        data-testid="ask-user-answer-bubble"
-      >
-        <div className="text-[10.5px] text-muted-foreground/(--opacity-intense)">{t("chatView.askAnswerSkippedLabel")}</div>
-        <div className="whitespace-pre-wrap break-words [overflow-wrap:anywhere]">{t("chatView.askAnswerSkippedProceed")}</div>
-      </div>
-    );
-  }
-
-  return (
-    <div
-      className="ml-auto w-fit min-w-0 max-w-[75%] rounded-lg border border-border/(--opacity-strong) border-l-2 border-l-message-user bg-card/(--opacity-near) px-3 py-2.5 text-xs text-card-foreground shadow-sm"
-      data-testid="ask-user-answer-bubble"
-    >
-      <div className="mb-1 text-[10.5px] text-muted-foreground">
-        {entry.rows.length > 1 ? t("chatView.askAnswerMyAnswerMultiple", { count: entry.rows.length }) : t("chatView.askAnswerMyAnswerSingle")}
-      </div>
-      <div className="space-y-0.5">
-        {entry.rows.map((row, idx) => (
-          <div key={`${idx}:${row.label}`} className="flex min-w-0 items-baseline gap-2">
-            <span className="w-[4.5rem] shrink-0 truncate text-[10.5px] text-muted-foreground">{row.label}</span>
-            <span className="min-w-0 flex-1 whitespace-pre-wrap break-words text-[12px] [overflow-wrap:anywhere]">{row.value}</span>
-          </div>
-        ))}
-      </div>
-    </div>
-  );
 }
 
 export function ChatView({ api, onAsk, onEditSave, onFork, onToggleStar, onRetryEffort, onContinueFromLastUser, isEntryStarred, onAbort, onGuide, onGuideError, onFeedback, subAgentSpawns, loadedSkills, hasAskQuestions, askQuestions, onResolveAskQuestion, plugins, onSelectPlugin, appMode = "work", onOpenApprovalQueue, currentSessionKind = "main", currentSessionTitle, sessions, onLoadSession, onRefreshSessions, commandActions, commandPopoverOpen, onCommandPopoverOpenChange, onPluginPrimaryAction, onRoutineAcknowledge, statusBar, blogLayout = false }: ChatViewProps) {
@@ -1348,65 +1152,8 @@ export function ChatView({ api, onAsk, onEditSave, onFork, onToggleStar, onRetry
   // Use visibleEntries (sliced in view-mode, full list otherwise).
   const activeEntries = visibleEntries;
 
-  // Last turn-start index: user messages and imported overlay prompts both
-  // own the assistant/tool/summary output that follows them.
-  let lastTurnStartIdx = -1;
-  for (let k = activeEntries.length - 1; k >= 0; k--) {
-    if (isTurnStartEntry(activeEntries[k])) { lastTurnStartIdx = k; break; }
-  }
-
-  type EntryClass = "intermediate" | "live" | "final";
-  const entryClassMap = new Map<number, EntryClass>();
-  const finalTurnStartMap = new Map<number, number>(); // final idx → turn-start idx
-  const entryTurnStartMap = new Map<number, number>(); // classified idx → turn-start idx
-
-  let turnStart = -1;
-  for (let i = 0; i < activeEntries.length; i++) {
-    const e = activeEntries[i];
-    if (!e) continue;
-    if (isTurnStartEntry(e)) { turnStart = i; continue; }
-    if (e.kind !== "assistant" && e.kind !== "reasoning" && e.kind !== "tool_group" && e.kind !== "permission_review") continue;
-
-    let nextTurnStartIdx = activeEntries.length;
-    for (let j = i + 1; j < activeEntries.length; j++) {
-      if (isTurnStartEntry(activeEntries[j])) { nextTurnStartIdx = j; break; }
-    }
-
-    const subsequentTurnEntries = activeEntries.slice(i + 1, nextTurnStartIdx);
-    const hasSubsequent = subsequentTurnEntries.some(
-      (ne) => ne.kind === "assistant" || ne.kind === "tool_group" || ne.kind === "reasoning" || ne.kind === "permission_review",
-    );
-    const hasSubsequentWork = subsequentTurnEntries.some(
-      (ne) => ne.kind === "tool_group" || ne.kind === "reasoning" || ne.kind === "permission_review",
-    );
-
-    const myTurnStart = turnStart >= 0 ? turnStart : 0;
-    entryTurnStartMap.set(i, myTurnStart);
-    const isActiveTurnEntry = myTurnStart === lastTurnStartIdx && streaming;
-    const hasPriorWork = activeEntries.slice(myTurnStart + 1, i).some(
-      (pe) => pe.kind === "tool_group" || pe.kind === "reasoning" || pe.kind === "permission_review",
-    );
-
-    if (e.kind === "assistant") {
-      if (e.phase === "work") {
-        entryClassMap.set(i, "intermediate");
-      } else if (e.phase === "final" && !isActiveTurnEntry) {
-        entryClassMap.set(i, "final");
-        finalTurnStartMap.set(i, myTurnStart);
-      } else if (!hasSubsequent && !isActiveTurnEntry) {
-        entryClassMap.set(i, "final");
-        finalTurnStartMap.set(i, myTurnStart);
-      } else if (isActiveTurnEntry || hasSubsequentWork || hasPriorWork) {
-        entryClassMap.set(i, "intermediate");
-      } else {
-        entryClassMap.set(i, "live");
-      }
-    } else if (hasSubsequent || isActiveTurnEntry) {
-      entryClassMap.set(i, "intermediate");
-    } else {
-      entryClassMap.set(i, "live");
-    }
-  }
+  const { lastTurnStartIdx, entryClassMap, finalTurnStartMap, entryTurnStartMap } =
+    classifyTurnEntries(activeEntries, streaming);
 
   const rendered: React.ReactNode[] = [];
   let i = 0;
@@ -2181,10 +1928,4 @@ export function ChatView({ api, onAsk, onEditSave, onFork, onToggleStar, onRetry
       ) : null}
     </div>
   );
-}
-
-function getKoreaDateKey(date: Date): string {
-  const parts = KOREA_DATE_KEY_FORMATTER.formatToParts(date);
-  const get = (type: string) => parts.find((part) => part.type === type)?.value ?? "";
-  return `${get("year")}-${get("month")}-${get("day")}`;
 }
