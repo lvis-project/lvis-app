@@ -1,0 +1,115 @@
+{
+  "schemaVersion": 1,
+  "lastReviewed": "2026-07-01",
+  "minSupportedAppVersion": "0.4.4",
+  "policy": {
+    "migrationRetention": {
+      "minimumDaysAfterIntroduction": 90,
+      "minimumReleasedAppVersionsAfterIntroduction": 2,
+      "requiresDataPreservationTest": true
+    },
+    "experimentalDormancy": {
+      "reviewAfterDays": 60,
+      "deleteOrPromoteAfterDays": 120,
+      "isolationRule": "Use an experimental/ source path or an explicit featureFlag until production-wired."
+    }
+  },
+  "entries": [
+    {
+      "id": "work-board-legacy-plugin-board-migration",
+      "kind": "migration",
+      "status": "active",
+      "owner": "work-board",
+      "introduced": "2026-06-16",
+      "introducedBy": "1fb58736a465af3746d97170e5ac8970c891bdd7",
+      "rationale": "Copies a single legacy plugin-owned board from ~/.lvis/plugins/*/data/board.json into the host-owned work-board namespace without moving or deleting the source.",
+      "codeReferences": [
+        "src/boot.ts",
+        "src/boot/steps/work-board-migration.ts"
+      ],
+      "dataPreservationTests": [
+        "src/boot/steps/__tests__/work-board-migration.test.ts"
+      ],
+      "validation": [
+        "bun test src/boot/steps/__tests__/work-board-migration.test.ts"
+      ],
+      "sunsetNotBefore": "2026-09-14",
+      "sunsetCriteria": [
+        "At least two released app versions have shipped after the migration first shipped.",
+        "Support telemetry or release notes show no supported downgrade/import path still creates the legacy plugin board.",
+        "The removal PR keeps a regression test proving existing host work-board data is never overwritten or deleted."
+      ]
+    },
+    {
+      "id": "permission-reviewer-disabled-mode-migration",
+      "kind": "migration",
+      "status": "active",
+      "owner": "permissions",
+      "introduced": "2026-05-17",
+      "introducedBy": "c36f806e8168802fa807099e5b5fcadfda02f9fa",
+      "rationale": "Rewrites pre-#664 reviewer mode disabled to strict so old fail-closed settings do not silently become pass-through LOW after upgrade.",
+      "codeReferences": [
+        "src/permissions/permission-settings-store.ts",
+        "docs/architecture/permission-policy-design.md"
+      ],
+      "dataPreservationTests": [
+        "src/permissions/__tests__/permission-settings-store-664-migration.test.ts"
+      ],
+      "validation": [
+        "bun test src/permissions/__tests__/permission-settings-store-664-migration.test.ts"
+      ],
+      "sunsetNotBefore": "2026-08-15",
+      "sunsetCriteria": [
+        "At least two released app versions have shipped after the migration first shipped.",
+        "The project has an explicit migration sunset issue confirming old settings files are outside the supported upgrade floor.",
+        "The removal PR proves deliberate post-marker disabled settings remain pass-through LOW."
+      ]
+    },
+    {
+      "id": "permission-allowed-directories-alias-convergence",
+      "kind": "legacy-compatibility",
+      "status": "active",
+      "owner": "permissions",
+      "introduced": "2026-05-17",
+      "introducedBy": "c36f806e8168802fa807099e5b5fcadfda02f9fa",
+      "rationale": "The canonical settings key is permissions.additionalDirectories. Read-time ignores the old allowedDirectories alias; write-time removes the alias so files converge.",
+      "codeReferences": [
+        "src/permissions/permission-settings-store.ts"
+      ],
+      "dataPreservationTests": [
+        "src/permissions/__tests__/permission-slash.test.ts"
+      ],
+      "validation": [
+        "bun test src/permissions/__tests__/permission-slash.test.ts"
+      ],
+      "sunsetNotBefore": "2026-08-15",
+      "sunsetCriteria": [
+        "No supported settings writer emits permissions.allowedDirectories.",
+        "The removal PR keeps the canonical additionalDirectories round-trip tests."
+      ]
+    },
+    {
+      "id": "mcp-stdio-out-of-process-transport",
+      "kind": "dormant-experimental",
+      "status": "experimental-isolated",
+      "owner": "mcp",
+      "introduced": "2026-06-06",
+      "introducedBy": "a91b0b1941164ba50e71b8807e00ec3802fc63f9",
+      "rationale": "The stdio framing loop and child transport are tested foundations for untrusted out-of-process plugins, but the production plugin runtime does not wire them yet.",
+      "codeReferences": [
+        "src/mcp/experimental/stdio-server-loop.ts",
+        "src/mcp/experimental/stdio-child-transport.ts"
+      ],
+      "dataPreservationTests": [],
+      "validation": [
+        "bun test src/mcp/__tests__/stdio-server-loop.test.ts src/mcp/__tests__/stdio-child-transport.test.ts"
+      ],
+      "reviewAfter": "2026-08-05",
+      "deleteOrPromoteAfter": "2026-10-04",
+      "sunsetCriteria": [
+        "Promote only with an explicit feature flag or production plugin-runtime wiring plus sandbox coverage.",
+        "Delete if no production wiring or feature flag exists by the deleteOrPromoteAfter date."
+      ]
+    }
+  ]
+}

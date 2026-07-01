@@ -5,7 +5,7 @@
 import { describe, it, expect, vi } from "vitest";
 import { PassThrough } from "node:stream";
 import { frameMessage, StdioFrameDecoder } from "../stdio-framing.js";
-import { StdioServerLoop, type StdioRequestHandler } from "../stdio-server-loop.js";
+import { StdioServerLoop, type StdioRequestHandler } from "../experimental/stdio-server-loop.js";
 import { PluginMcpServer, type PluginToolDelegate } from "../plugin-mcp-server.js";
 import type { PluginManifest } from "../../plugins/types.js";
 
