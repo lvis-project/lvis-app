@@ -43,4 +43,28 @@ describe("WorkGroup memo boundary", () => {
     expect(screen.getByText("rebuilt")).toBeTruthy();
     expect(childRenders).toBe(2);
   });
+
+  it("collapses internal open state when streaming ends even while forceOpen keeps content visible", () => {
+    const view = render(
+      <WorkGroup stepCount={1} streaming revision="streaming" forceOpen>
+        <div>transient review</div>
+      </WorkGroup>,
+    );
+
+    expect(screen.getByText("transient review")).toBeTruthy();
+
+    view.rerender(
+      <WorkGroup stepCount={1} streaming={false} revision="settled-forced" forceOpen>
+        <div>transient review</div>
+      </WorkGroup>,
+    );
+    expect(screen.getByText("transient review")).toBeTruthy();
+
+    view.rerender(
+      <WorkGroup stepCount={1} streaming={false} revision="settled-unforced">
+        <div>transient review</div>
+      </WorkGroup>,
+    );
+    expect(screen.queryByText("transient review")).toBeNull();
+  });
 });

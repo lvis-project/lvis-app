@@ -1603,6 +1603,7 @@ export function ChatView({ api, onAsk, onEditSave, onFork, onToggleStar, onRetry
       }
       const groupEntries: { idx: number; node: React.ReactNode }[] = [];
       const groupRevisions: string[] = [];
+      let groupHasPermissionReview = false;
 
       while (i < activeEntries.length) {
         const e = activeEntries[i];
@@ -1619,6 +1620,9 @@ export function ChatView({ api, onAsk, onEditSave, onFork, onToggleStar, onRetry
           }
         } else if (e.kind === "permission_review") {
           if (cls === "intermediate") {
+            if (e.status === "reviewing" || e.status === "auto_approved") {
+              groupHasPermissionReview = true;
+            }
             groupRevisions.push(entryRenderRevision({ entry: e, idx: i, searchHighlight, starred: false }));
             groupEntries.push({
               idx: i,
@@ -1707,6 +1711,7 @@ export function ChatView({ api, onAsk, onEditSave, onFork, onToggleStar, onRetry
             streaming={groupIsActiveTurn}
             turnDurationMs={groupSummary?.turnDurationMs}
             revision={[currentSessionId, ...groupRevisions].join("||")}
+            forceOpen={groupHasPermissionReview}
           >
             {groupEntries.map((ge) => (
               <div key={ge.idx} data-chat-entry-index={ge.idx}>

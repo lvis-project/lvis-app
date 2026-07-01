@@ -198,6 +198,7 @@ export type ChatEntry =
       groupId: string;
       toolUseId: string;
       displayOrder: number;
+      createdAt?: number;
       verdictLevel?: PermissionReviewRiskLevel;
       reason?: string;
       approvalPurpose?: ApprovalPurposeSuggestion;
@@ -641,6 +642,14 @@ export function upsertPermissionReview(
   },
 ): ChatEntry[] {
   const next = [...entries];
+  const idx = findLastIdx(
+    next,
+    (candidate): candidate is PermissionReviewEntry =>
+      candidate.kind === "permission_review" &&
+      candidate.toolUseId === payload.toolUseId,
+  );
+  const previous = idx >= 0 ? next[idx] : undefined;
+  const previousCreatedAt = previous?.kind === "permission_review" ? previous.createdAt : undefined;
   const entry: PermissionReviewEntry = {
     kind: "permission_review",
     status: payload.status,
@@ -648,18 +657,13 @@ export function upsertPermissionReview(
     groupId: payload.groupId,
     toolUseId: payload.toolUseId,
     displayOrder: payload.displayOrder ?? 0,
+    createdAt: previousCreatedAt ?? Date.now(),
     ...(payload.toolCategory ? { toolCategory: payload.toolCategory } : {}),
     ...(payload.source ? { source: payload.source } : {}),
     ...(payload.verdictLevel ? { verdictLevel: payload.verdictLevel } : {}),
     ...(payload.reason ? { reason: payload.reason } : {}),
     ...(payload.approvalPurpose ? { approvalPurpose: payload.approvalPurpose } : {}),
   };
-  const idx = findLastIdx(
-    next,
-    (candidate): candidate is PermissionReviewEntry =>
-      candidate.kind === "permission_review" &&
-      candidate.toolUseId === payload.toolUseId,
-  );
   if (idx >= 0) {
     next[idx] = entry;
     return next;
