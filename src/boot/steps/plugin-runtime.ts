@@ -23,7 +23,7 @@ import { pluginPartitionName } from "../../shared/plugin-partition.js";
 import { onEvent as onHostEvent } from "../types.js";
 import { normalizeAllowedHosts } from "../../main/host-allow-list.js";
 import { evaluateHostFetch } from "../../main/host-fetch-guard.js";
-import { AuditLogger, type AuditEntry } from "../../audit/audit-logger.js";
+import { AuditLogger } from "../../audit/audit-logger.js";
 import { PluginRuntime } from "../../plugins/runtime.js";
 import type { PythonRuntimeBootstrapper } from "../../main/python-runtime.js";
 import { currentInvocationOrigin } from "../../plugins/runtime/origin-chain.js";
@@ -49,16 +49,13 @@ import { canEmitEvent, requiredCapabilityForEmit } from "../../plugins/capabilit
 import { OVERLAY_V1 } from "../../shared/ipc-channels.js";
 import { sendToWindow } from "../../ipc/safe-send.js";
 import { resolvePluginPaths } from "../../plugins/plugin-paths.js";
-import { stripLeadingSlash } from "../../shared/slash-sanitizer.js";
 import {
   emitPluginConfigChange,
   subscribePluginConfigChange,
 } from "../../plugins/config-change-bus.js";
-import { OVERLAY_TRIGGER_SOURCE_PATTERN, isOverlayTriggerOrigin } from "../../shared/overlay-trigger-source.js";
 import type {
   ApprovalChoice,
   AuthWindowCookie,
-  ConversationTriggerResult,
   ConversationTriggerSpec,
   OpenAuthWindowBaseOptions,
   OpenAuthWindowFinalUrlResult,
@@ -75,7 +72,6 @@ import { buildPluginConfigOverrides } from "../plugins.js";
 import { PluginLoopbackManager } from "../../mcp/plugin-loopback-manager.js";
 import { t } from "../../i18n/index.js";
 import { createLogger } from "../../lib/logger.js";
-import { stripUntrustedTags } from "../../lib/strip-untrusted-tags.js";
 import { plog, PluginPhase } from "../../plugins/lifecycle-log.js";
 import { incrementHostSecretCounter, sanitizeKeyPrefix } from "../../telemetry/host-secret-counters.js";
 import { canonicalJSON } from "../../plugins/whitelist/canonical-json.js";
@@ -86,636 +82,55 @@ import {
   type ResolveApiKeyVendor,
 } from "../../main/host-api/resolve-api-key.js";
 import {
-  ApprovalIssuerRegistry,
   verifyApprovalRequestScope,
   verifyApprovalResponder,
-  ApprovalOriginError,
 } from "../../permissions/agent-action-requester.js";
 import { spawnWorker } from "../../permissions/worker-spawn.js";
+
+// ── C5 extraction — pure/self-contained clusters now live under
+//    ./plugin-runtime/*; imported here for the C6 orchestrator body and
+//    re-exported below so the public contract stays importable from this path.
+import { declaresHostManagedPythonRuntime } from "./plugin-runtime/manifest.js";
+import { approvalIssuerRegistry, auditApprovalViolation } from "./plugin-runtime/approval-gating.js";
+import { buildAppPreferenceReader } from "./plugin-runtime/app-preference.js";
+import { routeExternalUrl } from "./plugin-runtime/external-url.js";
+import {
+  deriveOverlaySummaryForDisplay,
+  evaluateTriggerSpec,
+  formatPluginPendingPrompt,
+  triggerConversationDedupe,
+  triggerConversationRateLimiter,
+  triggerDenyAuditThrottle,
+} from "./plugin-runtime/trigger-gate.js";
 const log = createLogger("lvis");
 
-export function declaresHostManagedPythonRuntime(manifest: PluginManifest): boolean {
-  const pluginManifest = manifest as PluginManifest & {
-    python?: { managedBy?: unknown; requirementsLock?: unknown };
-    pythonRequirementsLock?: unknown;
-    runtime?: { python?: { requirementsLock?: unknown } };
-    config?: { pythonRequirementsLock?: unknown };
-  };
-  return pluginManifest.python?.managedBy === "lvis-app" ||
-    typeof pluginManifest.python?.requirementsLock === "string" ||
-    typeof pluginManifest.pythonRequirementsLock === "string" ||
-    typeof pluginManifest.runtime?.python?.requirementsLock === "string" ||
-    typeof pluginManifest.config?.pythonRequirementsLock === "string";
-}
-
-/**
- * AC1.5 audit helper — logs an approval violation then re-throws the original
- * error. Extracted so the try-catch logic can be unit-tested without wiring the
- * full initPluginRuntime context.
- *
- * Guarantees: if `auditLogger.log` throws, that error is swallowed (non-fatal)
- * and `err` is still re-thrown to the caller.
- *
- * @internal — exported for testing only; production code calls this via the
- *             `respond()` closure inside initPluginRuntime.
- */
-export function auditApprovalViolation(
-  err: unknown,
-  auditLogger: { log(entry: AuditEntry): void },
-  pluginId: string,
-  requestId: string,
-): never {
-  try {
-    auditLogger.log({
-      timestamp: new Date().toISOString(),
-      sessionId: "approval-gating",
-      type: "error",
-      input: err instanceof ApprovalOriginError
-        ? `[${err.code}] plugin='${pluginId}' requestId='${requestId}' ${err.message}`
-        : `[approval-gating] plugin='${pluginId}' requestId='${requestId}' ${String(err)}`,
-    });
-  } catch (auditErr) {
-    log.warn(
-      "approval-gating audit log failed (non-fatal): %s",
-      (auditErr as Error).message,
-    );
-  }
-  throw err;
-}
-
-/**
- * §8 P0 security — shared issuer registry for agent approval origin gating.
- * Instantiated once per boot (module-level singleton). Records
- * (requestId → issuerPluginId + scope) at request time so the respond path
- * can verify cross-plugin attacks and scope violations.
- */
-export const approvalIssuerRegistry = new ApprovalIssuerRegistry();
-
-/**
- * §B3 — Explicit allowlist of host preference keys readable by plugins via
- * `hostApi.getAppPreference(key)`. Adding a new entry is a deliberate API
- * surface change: it must be reviewed for "does this leak host-private
- * state?" (secrets, auth tokens, plugin configs all stay OFF this list).
- *
- * Reader logic in `buildAppPreferenceReader()` must be updated in lockstep —
- * a key on this list with no reader returns `undefined` (safe failure).
- */
-export const HOST_PUBLIC_PREFERENCE_KEYS = [
-  "webView.preferredFlow",
-] as const;
-
-export type HostPublicPreferenceKey = (typeof HOST_PUBLIC_PREFERENCE_KEYS)[number];
-
-function isHostPublicPreferenceKey(key: string): key is HostPublicPreferenceKey {
-  return (HOST_PUBLIC_PREFERENCE_KEYS as readonly string[]).includes(key);
-}
-
-/**
- * §B3 — Build the reader closure used by every plugin's
- * `hostApi.getAppPreference`. Reads run live against `settingsService` so a
- * settings toggle is visible on the next call.
- *
- * Per-plugin warn dedupe: at most one warn line per (pluginId, key) per
- * runtime — prevents log floods when a plugin polls a denied key.
- */
-/**
- * §B3 — Stable persistent partition for the in-app external-link viewer.
- *
- * Without `persist:`, every link window starts with empty cookies, so SSO
- * portals (outlook.office.com, calendar webLinks, etc.) re-prompt for login
- * on every open. A shared `persist:` partition lets the user log in once
- * per external service and keep the session across the app's lifetime.
- *
- * A SHARED partition (not per-plugin) is intentional: cookies are
- * origin-scoped by the browser, so two plugins both opening
- * outlook.office.com SHOULD see the same logged-in session — that's the
- * whole point. Per-plugin partitions would force re-login each time a
- * different plugin opened the same host. The viewer is sandboxed
- * (`sandbox: true`, `contextIsolation: true`, `nodeIntegration: false`)
- * and cookies are never read back into plugin code, so a plugin cannot
- * exfiltrate another service's session through this partition.
- */
-export const EXTERNAL_LINK_PARTITION = "persist:lvis-external-link";
-
-/**
- * §B3 — Internal routing for `hostApi.openExternalUrl`. Extracted so it can
- * be unit-tested with stubbed services without standing up a full
- * initPluginRuntime context.
- *
- * Behavior:
- *  - Validates URL shape + scheme (http(s) only).
- *  - Reads `settings.webView.preferredFlow` LIVE on every call.
- *  - Audits with origin+path only (no full URL — query may carry secrets).
- *  - `"system-browser"` → `shellOpenExternal`.
- *  - anything else (default `"in-app"`) → light viewer with a stable
- *    persistent partition so SSO sessions survive between opens.
- */
-export async function routeExternalUrl(input: {
-  url: string;
-  pluginId: string;
-  settingsService: Pick<SettingsService, "get">;
-  bootAuditLogger: { log: (entry: AuditEntry) => void };
-  openLinkWindowService: (
-    opts: { url: string; windowTitle?: string; persistPartition?: string },
-  ) => Promise<void>;
-  shellOpenExternal: (url: string) => Promise<void>;
-}): Promise<void> {
-  const { url, pluginId, settingsService, bootAuditLogger, openLinkWindowService, shellOpenExternal } = input;
-  if (typeof url !== "string" || url.length === 0) {
-    throw new Error(`[plugin:${pluginId}] openExternalUrl: url must be a non-empty string`);
-  }
-  let parsed: URL;
-  try {
-    parsed = new URL(url);
-  } catch {
-    throw new Error(`[plugin:${pluginId}] openExternalUrl: invalid URL`);
-  }
-  if (parsed.protocol !== "http:" && parsed.protocol !== "https:") {
-    throw new Error(
-      `[plugin:${pluginId}] openExternalUrl: only http(s) URLs are allowed (got ${parsed.protocol})`,
-    );
-  }
-  const safeUrlForLog = `${parsed.origin}${parsed.pathname}`;
-  const flow = settingsService.get("webView")?.preferredFlow ?? "in-app";
-
-  try {
-    bootAuditLogger.log({
-      timestamp: new Date().toISOString(),
-      sessionId: "plugin",
-      type: "tool_call",
-      input: `[plugin:${pluginId}] openExternalUrl flow=${flow} url=${safeUrlForLog}`,
-    });
-  } catch { /* audit must not break host */ }
-
-  if (flow === "system-browser") {
-    await shellOpenExternal(url);
-    return;
-  }
-  await openLinkWindowService({ url, persistPartition: EXTERNAL_LINK_PARTITION });
-}
-
-export function buildAppPreferenceReader(
-  settingsService: SettingsService,
-  warnLogger: { warn: (msg: string) => void },
-): (pluginId: string, key: string) => unknown {
-  const warnedPerPlugin = new Map<string, Set<string>>();
-  const recordWarn = (pluginId: string, key: string) => {
-    let set = warnedPerPlugin.get(pluginId);
-    if (!set) {
-      set = new Set();
-      warnedPerPlugin.set(pluginId, set);
-    }
-    if (set.has(key)) return false;
-    set.add(key);
-    return true;
-  };
-
-  return (pluginId, key) => {
-    if (typeof key !== "string" || key.length === 0) {
-      if (recordWarn(pluginId, String(key))) {
-        warnLogger.warn(
-          `plugin:${pluginId} getAppPreference: invalid key`,
-        );
-      }
-      return undefined;
-    }
-    if (!isHostPublicPreferenceKey(key)) {
-      if (recordWarn(pluginId, key)) {
-        warnLogger.warn(
-          `plugin:${pluginId} getAppPreference: key not on host public allowlist key=${key}`,
-        );
-      }
-      return undefined;
-    }
-    switch (key) {
-      case "webView.preferredFlow":
-        return settingsService.get("webView")?.preferredFlow;
-      default: {
-        // Exhaustiveness: if a key is added to HOST_PUBLIC_PREFERENCE_KEYS but
-        // not wired here, fall through and warn so it's caught in tests.
-        const _exhaustive: never = key;
-        void _exhaustive;
-        return undefined;
-      }
-    }
-  };
-}
-
-/**
- * In-memory dedupe for `hostApi.triggerConversation()`. A plugin can set
- * `dedupeKey` on a trigger spec to suppress repeats from the same observation
- * (e.g., the same mail re-emitting events). Keyed per pluginId so two plugins
- * cannot collide. TTL is intentionally short — long-term suppression should
- * live in the plugin, not the host.
- */
-export const TRIGGER_CONVERSATION_DEDUPE_TTL_MS = 5 * 60 * 1000;
-
-export class TriggerConversationDedupe {
-  private readonly seen = new Map<string, number>();
-  private key(pluginId: string, dedupeKey: string): string {
-    return `${pluginId}::${dedupeKey}`;
-  }
-  has(pluginId: string, dedupeKey: string): boolean {
-    const key = this.key(pluginId, dedupeKey);
-    const seenAt = this.seen.get(key);
-    if (seenAt === undefined) return false;
-    if (Date.now() - seenAt > TRIGGER_CONVERSATION_DEDUPE_TTL_MS) {
-      this.seen.delete(key);
-      return false;
-    }
-    return true;
-  }
-  record(pluginId: string, dedupeKey: string): void {
-    // True LRU: delete-then-set refreshes Map insertion order so a frequently
-    // re-recorded key won't be evicted as "oldest" when capping. Map#set on
-    // an existing key would otherwise leave the original insertion position.
-    const key = this.key(pluginId, dedupeKey);
-    if (this.seen.has(key)) this.seen.delete(key);
-    this.seen.set(key, Date.now());
-    if (this.seen.size > 256) {
-      // Cap unbounded growth; drop the oldest recorded key. Cheap for the
-      // small N expected.
-      const oldestKey = this.seen.keys().next().value;
-      if (oldestKey !== undefined) this.seen.delete(oldestKey);
-    }
-  }
-}
-
-const ALLOWED_VISIBILITIES: ReadonlySet<"silent" | "summary-only" | "user-visible"> = new Set([
-  "silent",
-  "summary-only",
-  "user-visible",
-] as const);
-const ALLOWED_PRIORITIES: ReadonlySet<"low" | "normal" | "high"> = new Set([
-  "low",
-  "normal",
-  "high",
-] as const);
-/** Bound dedupeKey length so a malicious / buggy plugin cannot bloat audit logs. */
-const MAX_DEDUPE_KEY_LEN = 128;
-/** Bound source length — same reason. dedupeKey was bounded; review caught source. */
-const MAX_SOURCE_LEN = 128;
-/**
- * Bound prompt length. The host trusts the plugin's templated-only contract
- * (a comment in `types.ts`) but offers no enforcement; capping prevents an
- * accidental whole-mail dump from blowing past the LLM context. 4 KB is
- * generous for templated suggestions and tight enough to reject a body.
- */
-const MAX_PROMPT_LEN = 4096;
-// `SOURCE_PATTERN` is the strict shape required for the `source` field
-// of every overlay trigger spec. It's the SAME pattern used by the
-// keyword engine, the trigger executor envelope, the IPC bridge's
-// originSource detection, and the permission manager's overlay-trigger
-// origin override — see `shared/overlay-trigger-source.ts` for the single
-// definition. Without this gate, malformed sources (`overlay:`,
-// `overlay:_x`, `overlay:Bad/Path`) could flow into audit logs and
-// system prompts where loose substrings would be confusing.
-
-/**
- * Per-plugin rate limit for `triggerConversation()`. A plugin that omits
- * `dedupeKey` (or rotates it per call) is otherwise unbounded and could
- * stage N concurrent overlay prompts. Token bucket capped at 6 calls / 60
- * seconds per plugin (sustained), with
- * burst of 3 — picked so the demo scenarios (one-meeting-mail, one-task-
- * deadline) do not throttle but a tight loop adversary is stopped early.
- */
-export const TRIGGER_CONVERSATION_RATE_LIMIT_WINDOW_MS = 60_000;
-export const TRIGGER_CONVERSATION_RATE_LIMIT_MAX_CALLS = 6;
-
-/**
- * Plugin overlay prompts have plugin provenance even after the user clicks the
- * overlay action. They must never dispatch host slash commands such as
- * `/load`, `/compact`, or `/permission`; those are user-keyboard only.
- */
-export function sanitizePluginPendingPrompt(prompt: string): string {
-  return stripLeadingSlash(prompt);
-}
-
-export function formatPluginPendingPrompt(prompt: string, source: string): string {
-  if (!isOverlayTriggerOrigin(source)) {
-    throw new Error(`invalid overlay trigger source for pending prompt: ${source}`);
-  }
-  return `<imported-from-proactive source="${source}">\n${sanitizePluginPendingPrompt(prompt)}\n</imported-from-proactive>`;
-}
-
-export const OVERLAY_SUMMARY_DISPLAY_CAP = 2_000;
-
-/**
- * Build the user-visible overlay preview. The full prompt still flows through
- * `pendingPrompt`; this display string is bounded and stripped of
- * plugin-authored `<untrusted-*>` wrappers before reaching renderer chrome.
- */
-export function deriveOverlaySummaryForDisplay(
-  spec: Pick<ConversationTriggerSpec, "prompt" | "summary">,
-): string {
-  const rawSummary = spec.summary != null ? spec.summary : spec.prompt;
-  const stripped = stripUntrustedTags(rawSummary);
-  if (stripped.length > OVERLAY_SUMMARY_DISPLAY_CAP) {
-    const marker = t("be_pluginRuntime.overlaySummaryTruncationMarker");
-    const cap = OVERLAY_SUMMARY_DISPLAY_CAP - marker.length;
-    return stripped.slice(0, cap) + marker;
-  }
-  return stripped;
-}
-
-export class TriggerConversationRateLimiter {
-  private readonly windowMs: number;
-  private readonly maxCalls: number;
-  private readonly recent = new Map<string, number[]>();
-
-  constructor(
-    windowMs: number = TRIGGER_CONVERSATION_RATE_LIMIT_WINDOW_MS,
-    maxCalls: number = TRIGGER_CONVERSATION_RATE_LIMIT_MAX_CALLS,
-  ) {
-    this.windowMs = windowMs;
-    this.maxCalls = maxCalls;
-  }
-
-  /**
-   * True when adding one more call would exceed the cap. Compacts the
-   * underlying map entry as a side-effect — without this the entry would
-   * grow unboundedly during sustained denial loops.
-   */
-  isOverCap(pluginId: string, now: number = Date.now()): boolean {
-    const calls = this.recent.get(pluginId) ?? [];
-    const cutoff = now - this.windowMs;
-    const fresh = calls.filter((t) => t >= cutoff);
-    if (fresh.length !== calls.length) this.recent.set(pluginId, fresh);
-    return fresh.length >= this.maxCalls;
-  }
-
-  record(pluginId: string, now: number = Date.now()): void {
-    const calls = this.recent.get(pluginId) ?? [];
-    const cutoff = now - this.windowMs;
-    const fresh = calls.filter((t) => t >= cutoff);
-    fresh.push(now);
-    this.recent.set(pluginId, fresh);
-  }
-}
-
-const triggerConversationRateLimiter = new TriggerConversationRateLimiter();
-
-/**
- * Suppress a flood of identical denial audit rows. Without this, a plugin in
- * a tight loop with always-bad input (e.g. invalid source) hits the gate
- * before the rate limiter `record` runs (denials don't consume cap), so it
- * could write thousands of audit rows / second. We log the first denial of
- * a (pluginId, reason) pair, then suppress identical follow-ups for 60s and
- * emit one consolidated "...denials suppressed" line at expiry.
- */
-const TRIGGER_DENY_AUDIT_WINDOW_MS = 60_000;
-
-export class TriggerDenyAuditThrottle {
-  private readonly windowMs: number;
-  private readonly state = new Map<string, { suppressedSince: number; count: number }>();
-
-  constructor(windowMs: number = TRIGGER_DENY_AUDIT_WINDOW_MS) {
-    this.windowMs = windowMs;
-  }
-
-  /**
-   * Returns whether the caller should write the audit row right now.
-   * - First seen → returns true, marks suppression window open.
-   * - Within open window → returns false, increments suppressed count.
-   * - Window expired → returns true (with a "suppressed N" hint via
-   *   {@link drainSuppressed}).
-   */
-  shouldEmit(pluginId: string, reason: string, now: number = Date.now()): boolean {
-    const key = `${pluginId}::${reason}`;
-    const entry = this.state.get(key);
-    if (entry === undefined) {
-      this.state.set(key, { suppressedSince: now, count: 0 });
-      return true;
-    }
-    if (now - entry.suppressedSince >= this.windowMs) {
-      // Window expired — emit again, and the caller can summarize the
-      // suppressed period via drainSuppressed().
-      this.state.set(key, { suppressedSince: now, count: 0 });
-      return true;
-    }
-    entry.count += 1;
-    return false;
-  }
-
-  /**
-   * Returns the count of suppressed events since the last emit for this key
-   * and resets the counter (caller appends `... +N suppressed` to the audit
-   * row). Returns 0 if the most recent decision was an emit.
-   */
-  drainSuppressed(pluginId: string, reason: string): number {
-    const entry = this.state.get(`${pluginId}::${reason}`);
-    if (!entry) return 0;
-    const n = entry.count;
-    entry.count = 0;
-    return n;
-  }
-}
-
-const triggerDenyAuditThrottle = new TriggerDenyAuditThrottle();
-
-/**
- * Pure decision function for the `triggerConversation` gate. Extracted from
- * createHostApi so production code and tests share one implementation —
- * any future drift would have to be intentional.
- *
- * Returns either:
- *   { kind: "deny", result }      — fully-formed ConversationTriggerResult
- *                                   the host should return; audit row has
- *                                   already been written.
- *   { kind: "allow", result, ... } — caller should stage an overlay item
- *                                   with the normalized fields.
- *
- * The function ALSO writes the success / deny audit rows so the caller
- * stays simple (no double-bookkeeping).
- */
-export interface EvaluateTriggerSpecInput {
-  spec: ConversationTriggerSpec | undefined | null;
-  pluginId: string;
-  capabilities: readonly string[];
-  dedupe: TriggerConversationDedupe;
-  rateLimiter: TriggerConversationRateLimiter;
-  /** Burst-suppress identical denial audit rows. */
-  denyAuditThrottle?: TriggerDenyAuditThrottle;
-  auditLogger: { log(entry: AuditEntry): void };
-  now?: () => number;
-}
-
-export type EvaluateTriggerSpecOutcome =
-  | { kind: "deny"; result: ConversationTriggerResult }
-  | {
-      kind: "allow";
-      result: ConversationTriggerResult;
-      source: string;
-      visibility: "silent" | "summary-only" | "user-visible";
-      priority: "low" | "normal" | "high";
-    };
-
-export function evaluateTriggerSpec(
-  input: EvaluateTriggerSpecInput,
-): EvaluateTriggerSpecOutcome {
-  const {
-    spec,
-    pluginId,
-    capabilities,
-    dedupe,
-    rateLimiter,
-    auditLogger,
-  } = input;
-  const denyAuditThrottle = input.denyAuditThrottle;
-  const now = input.now ?? Date.now;
-
-  // NEVER slice-before-validate: slicing a too-long source could turn
-  // obviously-bad input into a passing prefix. Reject outright (below)
-  // so the regex sees the original.
-  const source = typeof spec?.source === "string" ? spec.source : "";
-  const { visibility, priority, dedupeKey } = normalizeTriggerSpecFields(
-    spec ?? ({} as ConversationTriggerSpec),
-  );
-
-  const auditDeny = (reasonInput: string) => {
-    // Reason key is the first `reason=<value>` token, used to throttle
-    // identical denials per-(pluginId, reason). Different reasons (e.g.
-    // capability_denied vs invalid_source) get independent windows.
-    const reasonKey = (/reason=([a-z_]+)/.exec(reasonInput)?.[1]) ?? "unknown";
-    if (denyAuditThrottle && !denyAuditThrottle.shouldEmit(pluginId, reasonKey, now())) {
-      return;
-    }
-    const suppressed = denyAuditThrottle?.drainSuppressed(pluginId, reasonKey) ?? 0;
-    try {
-      auditLogger.log({
-        timestamp: new Date(now()).toISOString(),
-        sessionId: "plugin",
-        type: "error",
-        input:
-          `[plugin:${pluginId}] trigger_conversation_denied ${reasonInput}` +
-          (suppressed > 0 ? ` (+${suppressed} suppressed)` : ""),
-      });
-    } catch { /* audit must not break host */ }
-  };
-
-  if (!capabilities.includes("host:overlay")) {
-    auditDeny("reason=capability_denied");
-    return {
-      kind: "deny",
-      result: { accepted: false, reason: "capability_denied", source: "" },
-    };
-  }
-  // A too-long source is rejected outright; the regex sees the original
-  // string (no slice-before-validate). Same for prompt length.
-  if (source.length > MAX_SOURCE_LEN || !OVERLAY_TRIGGER_SOURCE_PATTERN.test(source)) {
-    auditDeny(`reason=invalid_source source=${source.slice(0, 32) || "<empty>"}`);
-    return {
-      kind: "deny",
-      // Echo only the first 32 chars so a malicious 10MB source cannot
-      // pin into the caller-visible result either.
-      result: { accepted: false, reason: "invalid_source", source: source.slice(0, 32) },
-    };
-  }
-  if (typeof spec?.prompt !== "string" || spec.prompt.trim().length === 0) {
-    auditDeny(`reason=invalid_source source=${source} (empty prompt)`);
-    return {
-      kind: "deny",
-      result: { accepted: false, reason: "invalid_source", source },
-    };
-  }
-  if (spec.prompt.length > MAX_PROMPT_LEN) {
-    auditDeny(`reason=invalid_source source=${source} (prompt>${MAX_PROMPT_LEN})`);
-    return {
-      kind: "deny",
-      result: { accepted: false, reason: "invalid_source", source },
-    };
-  }
-  if (rateLimiter.isOverCap(pluginId, now())) {
-    auditDeny("reason=rate_limited");
-    return {
-      kind: "deny",
-      result: { accepted: false, reason: "rate_limited", source },
-    };
-  }
-  if (dedupeKey && dedupe.has(pluginId, dedupeKey)) {
-    auditDeny(`reason=duplicate dedupeKey=${dedupeKey}`);
-    return {
-      kind: "deny",
-      result: { accepted: false, reason: "duplicate", source },
-    };
-  }
-
-  // Allow path — record both bookkeeping operations BEFORE returning so the
-  // caller never gets an "accepted=true" without the dedupe + rate window
-  // having advanced.
-  if (dedupeKey) dedupe.record(pluginId, dedupeKey);
-  rateLimiter.record(pluginId, now());
-
-  // Compose the success audit row with sanitized contextKeys — key names
-  // can carry PII so we accept only keys matching a strict identifier shape
-  // and report a count for the rest. Single audit row per accepted trigger;
-  // the loop-side trigger row would be redundant.
-  let contextSuffix = "";
-  if (spec?.context) {
-    const KEY_SHAPE = /^[a-zA-Z_][a-zA-Z0-9_]{0,32}$/;
-    const allKeys = Object.keys(spec.context);
-    const okKeys = allKeys.filter((k) => KEY_SHAPE.test(k));
-    const badCount = allKeys.length - okKeys.length;
-    const parts: string[] = [];
-    if (okKeys.length > 0) parts.push(`contextKeys=${okKeys.slice(0, 8).join(",")}`);
-    if (badCount > 0) parts.push(`contextKeysOmitted=${badCount}`);
-    if (parts.length > 0) contextSuffix = ` ${parts.join(" ")}`;
-  }
-  try {
-    auditLogger.log({
-      timestamp: new Date(now()).toISOString(),
-      sessionId: "plugin",
-      type: "tool_call",
-      input:
-        `[plugin:${pluginId}] trigger_conversation source=${source} ` +
-        `visibility=${visibility} priority=${priority}` +
-        (dedupeKey ? ` dedupeKey=${dedupeKey}` : "") +
-        contextSuffix,
-    });
-  } catch { /* audit must not break host */ }
-
-  return {
-    kind: "allow",
-    result: { accepted: true, source },
-    source,
-    visibility,
-    priority,
-  };
-}
-
-/**
- * Normalize plugin-supplied trigger fields to known/safe values BEFORE they
- * flow into audit logs or downstream pipelines. Unknown enum values fall
- * back to defaults. Non-string dedupeKey is dropped.
- */
-export function normalizeTriggerSpecFields(spec: ConversationTriggerSpec): {
-  visibility: "silent" | "summary-only" | "user-visible";
-  priority: "low" | "normal" | "high";
-  dedupeKey: string | undefined;
-} {
-  const visibility = ALLOWED_VISIBILITIES.has(
-    spec.visibility as "silent" | "summary-only" | "user-visible",
-  )
-    ? (spec.visibility as "silent" | "summary-only" | "user-visible")
-    : "summary-only";
-  const priority = ALLOWED_PRIORITIES.has(
-    spec.priority as "low" | "normal" | "high",
-  )
-    ? (spec.priority as "low" | "normal" | "high")
-    : "normal";
-  let dedupeKey: string | undefined;
-  if (typeof spec.dedupeKey === "string") {
-    const trimmed = spec.dedupeKey.trim();
-    if (trimmed.length > 0) {
-      dedupeKey = trimmed.length > MAX_DEDUPE_KEY_LEN
-        ? trimmed.slice(0, MAX_DEDUPE_KEY_LEN)
-        : trimmed;
-    }
-  }
-  return { visibility, priority, dedupeKey };
-}
-
-const triggerConversationDedupe = new TriggerConversationDedupe();
+// ── C5 re-exports — preserve this module path's public export contract. ──────
+export { declaresHostManagedPythonRuntime } from "./plugin-runtime/manifest.js";
+export { approvalIssuerRegistry, auditApprovalViolation } from "./plugin-runtime/approval-gating.js";
+export {
+  HOST_PUBLIC_PREFERENCE_KEYS,
+  buildAppPreferenceReader,
+} from "./plugin-runtime/app-preference.js";
+export type { HostPublicPreferenceKey } from "./plugin-runtime/app-preference.js";
+export { EXTERNAL_LINK_PARTITION, routeExternalUrl } from "./plugin-runtime/external-url.js";
+export {
+  TRIGGER_CONVERSATION_DEDUPE_TTL_MS,
+  TriggerConversationDedupe,
+  TRIGGER_CONVERSATION_RATE_LIMIT_WINDOW_MS,
+  TRIGGER_CONVERSATION_RATE_LIMIT_MAX_CALLS,
+  sanitizePluginPendingPrompt,
+  formatPluginPendingPrompt,
+  OVERLAY_SUMMARY_DISPLAY_CAP,
+  deriveOverlaySummaryForDisplay,
+  TriggerConversationRateLimiter,
+  TriggerDenyAuditThrottle,
+  evaluateTriggerSpec,
+  normalizeTriggerSpecFields,
+} from "./plugin-runtime/trigger-gate.js";
+export type {
+  EvaluateTriggerSpecInput,
+  EvaluateTriggerSpecOutcome,
+} from "./plugin-runtime/trigger-gate.js";
 
 /** Late-binding container the ConversationLoop fills in after it exists. */
 export interface LateBindingRefs {
