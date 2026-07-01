@@ -1,22 +1,30 @@
 #!/usr/bin/env node
 /**
- * check-no-inline-channels.mjs — #1409 C2 CI guard
+ * check-no-inline-channels.mjs — #1409 C2 + C11 CI guard
  *
- * The chat / plugins / settings IPC domains must reference channel names ONLY
+ * The chat / plugins / settings IPC domains AND the preload bundle
+ * (`src/preload.ts` + `src/preload/*.ts`) must reference channel names ONLY
  * through the `src/contract/` SOT (`CHANNELS.*`), never as raw `"lvis:..."`
- * string literals. This scans exactly those three files and fails the build if
- * an inline channel literal reappears (regression guard for the C2 sweep).
+ * string literals. This scans those files and fails the build if an inline
+ * channel literal reappears (regression guard for the C2 + C11 sweeps).
  *
- * Scope is intentionally narrow: preload / other domains are swept in later
- * commits (C11+). Run standalone with `node scripts/check-no-inline-channels.mjs`.
+ * The preload surface split (#1409 C11 / #1411) moved the host bridge into
+ * `src/preload/{public-surface,internal-surface,gesture-intent}.ts`; the whole
+ * `src/preload/` directory is scanned so a new submodule is covered
+ * automatically. Run standalone with `node scripts/check-no-inline-channels.mjs`.
  */
-import { readFileSync } from "node:fs";
+import { readFileSync, readdirSync } from "node:fs";
 import { join } from "node:path";
 
 const TARGETS = [
   "src/ipc/domains/chat.ts",
   "src/ipc/domains/plugins.ts",
   "src/ipc/domains/settings.ts",
+  "src/preload.ts",
+  // Every TS module in the preload surface split (public/internal/gesture).
+  ...readdirSync(join(process.cwd(), "src/preload"))
+    .filter((f) => f.endsWith(".ts"))
+    .map((f) => `src/preload/${f}`),
 ];
 
 // A quoted channel literal: an opening quote immediately followed by `lvis:`.
