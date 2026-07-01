@@ -40,6 +40,7 @@ import {
   detectSandboxCapability,
   type SandboxCapability,
 } from "../../permissions/sandbox-capability.js";
+import { handleGetMode } from "../handlers/permissions.js";
 
 function validateRulePatternInput(pattern: unknown): { ok: true; pattern: string } | { ok: false; error: string; message: string } {
   if (typeof pattern !== "string") {
@@ -207,10 +208,7 @@ export function registerPermissionsHandlers(deps: IpcDeps): void {
   const reviewSuggestionTracker = createPermissionReviewSuggestionTracker();
 
   // read-only, sender guard optional
-  ipcMain.handle(PERMISSIONS.getMode, () => {
-    const mode = conversationLoop.permissionManager?.getMode() ?? "default";
-    return { mode };
-  });
+  ipcMain.handle(PERMISSIONS.getMode, () => handleGetMode(deps));
 
   // read-only, sender guard optional — honest OS sandbox capability for the
   // current platform. `available`/`kind` report the PLATFORM's potential

@@ -3,20 +3,22 @@
  * Covers: lvis:chat:*, lvis:memory:*, lvis:starred:*, lvis:feedback:submit,
  *         lvis:ask-user-question:respond
  * Note: routine v2 channels (lvis:routines:v2:*) are handled in misc.ts.
+ *
+ * C10 (#1409): the PUBLIC chat channels (send / sessions / get-history /
+ * session-history) delegate to transport-agnostic pure handlers in
+ * `../handlers/chat.ts`; this module keeps only the thin `ipcMain.handle`
+ * wrappers (trust boundary + webContents sink construction) and the
+ * internal / session-scoped handlers inline. The `lvis:chat:stream` fan-out is
+ * published through a {@link ChatStreamSink} so a future in-process api/cli/sdk
+ * can subscribe to the exact same frames the renderer receives.
  */
 import { ipcMain } from "electron";
 import type { WebContents } from "electron";
 import { t } from "../../i18n/index.js";
-import type { ChatInputOrigin, ChatSendPayload } from "../../shared/chat-origin.js";
-import { isChatSendInputOrigin } from "../../shared/chat-origin.js";
 import type { ActiveRolePrompt } from "../../data/role-presets.js";
-import { PERSONA_PROMPT_ID_ALLOWLIST } from "../../main/persona-prompt-store.js";
-import { redactForLLM } from "../../audit/dlp-filter.js";
 import type { GenericMessage } from "../../engine/llm/types.js";
 import { userContentText } from "../../engine/llm/types.js";
-import { serializeHistoryMessage } from "../../shared/chat-history.js";
-import type { ConversationLoop, TurnResult } from "../../engine/conversation-loop.js";
-import { parseImportedTriggerEnvelope } from "../../shared/overlay-trigger-source.js";
+import type { TurnResult } from "../../engine/conversation-loop.js";
 import type { ChatUtteranceMode } from "../../shared/chat-utterance.js";
 import { validateSender, UNAUTHORIZED_FRAME, auditUnauthorized } from "../gated.js";
 import { CHANNELS } from "../../contract/app-contract.js";
@@ -25,19 +27,24 @@ import { sendToWebContents } from "../safe-send.js";
 import { createLogger } from "../../lib/logger.js";
 import { readDiffSidecar, isSafeId } from "../../tools/write-diff-cache.js";
 import { isToolResultStubContent } from "../../shared/tool-result-stub.js";
-import {
-  createStreamingFilter,
-  stripSuggestedReplies,
-} from "../../engine/suggested-replies.js";
-import type { SessionKind } from "../../memory/memory-manager.js";
 import type { LLMSettings } from "../../data/settings-store.js";
+import {
+  runStreamedTurn,
+  STREAM_TURN_OPTIONS,
+  type ChatStreamSink,
+} from "../handlers/chat-stream.js";
+import {
+  handleChatSend,
+  handleChatSessions,
+  handleChatGetHistory,
+  handleChatSessionHistory,
+  isSafeSessionId,
+  personaPromptIdFromUserMessage,
+  resolvePersonaRolePrompt,
+  sanitizeOutgoingInput,
+  markMainActiveAfterTurn,
+} from "../handlers/chat.js";
 const log = createLogger("chat");
-const SESSION_KIND_VALUES = new Set<SessionKind | "all">(["main", "routine", "all"]);
-const SESSION_ID_REGEX = /^[a-zA-Z0-9_\-]+$/;
-
-function isSafeSessionId(sessionId: unknown): sessionId is string {
-  return typeof sessionId === "string" && SESSION_ID_REGEX.test(sessionId);
-}
 
 /**
  * Stable signature of EVERY vendor block's configured `baseUrl` (order-stable
@@ -80,56 +87,6 @@ function removeOrphanToolUse(messages: GenericMessage[]): GenericMessage[] {
   return result;
 }
 
-function normalizePersonaPromptId(
-  inputOrigin: ChatInputOrigin,
-  value: unknown,
-): { ok: true; personaPromptId?: string } | { ok: false; error: string } {
-  if (value === undefined || value === null) return { ok: true };
-  if (inputOrigin !== "user-keyboard") {
-    return { ok: false, error: "persona-prompt-origin-restricted" };
-  }
-  if (typeof value !== "string") return { ok: false, error: "invalid-persona-prompt-id" };
-  const id = value.trim();
-  if (!PERSONA_PROMPT_ID_ALLOWLIST.test(id) || id === "default") {
-    return { ok: false, error: "invalid-persona-prompt-id" };
-  }
-  return { ok: true, personaPromptId: id };
-}
-
-function personaPromptIdFromUserMessage(
-  message: GenericMessage | undefined,
-): { ok: true; personaPromptId?: string } | { ok: false; error: string } {
-  if (!message || message.role !== "user") return { ok: true };
-  const value = message.meta?.activePersonaPrompt;
-  if (value === undefined || value === null) return { ok: true };
-  if (!value || typeof value !== "object" || Array.isArray(value)) {
-    return { ok: false, error: "invalid-persona-prompt-id" };
-  }
-  return normalizePersonaPromptId("user-keyboard", (value as { id?: unknown }).id);
-}
-
-async function resolvePersonaRolePrompt(
-  personaPromptStore: IpcDeps["personaPromptStore"],
-  personaPromptId: string | undefined,
-): Promise<{ ok: true; rolePrompt?: ActiveRolePrompt } | { ok: false; error: string }> {
-  if (!personaPromptId) return { ok: true };
-  if (!personaPromptStore) return { ok: false, error: "persona-prompt-not-found" };
-  try {
-    const prompt = await personaPromptStore.get(personaPromptId);
-    if (!prompt) return { ok: false, error: "persona-prompt-not-found" };
-    return {
-      ok: true,
-      rolePrompt: {
-        id: prompt.id,
-        name: prompt.name,
-        systemPromptAdd: prompt.systemPromptAdd,
-      },
-    };
-  } catch {
-    return { ok: false, error: "invalid-persona-prompt-id" };
-  }
-}
-
 function entryOrdinalToHistoryIndex(history: GenericMessage[], ordinal: number): number {
   if (ordinal < 0) return -1;
   let count = 0;
@@ -140,202 +97,6 @@ function entryOrdinalToHistoryIndex(history: GenericMessage[], ordinal: number):
     }
   }
   return -1;
-}
-
-/**
- * Validate the multimodal content-parts payload that arrives over IPC. The
- * renderer is trusted but the preload bridge is a `unknown[]` boundary, so
- * we type-narrow each entry here to protect downstream message-mapper code
- * from malformed payloads (missing fields, wrong tags, non-string data).
- *
- * Returns the validated array when at least one entry survived narrowing,
- * or `undefined` when nothing valid is present. The `undefined` form lets
- * the caller drop the `attachments` field from the runTurn options spread
- * entirely (the conversation loop treats absent and empty as equivalent
- * "no parts" — emitting an empty array would be technically valid but adds
- * noise to logs and ruins the option-spread shape).
- *
- * Unknown entries are dropped silently rather than rejecting the whole
- * turn — mirrors how `sanitizeOutgoingInput` handles partial PII redaction.
- */
-function validateUserContentParts(
-  raw: unknown,
-): import("../../engine/llm/types.js").UserContentPart[] | undefined {
-  if (raw === undefined || raw === null) return undefined;
-  if (!Array.isArray(raw)) return undefined;
-  const out: import("../../engine/llm/types.js").UserContentPart[] = [];
-  for (const item of raw) {
-    if (typeof item !== "object" || item === null) continue;
-    const t = (item as { type?: unknown }).type;
-    if (t === "text") {
-      const text = (item as { text?: unknown }).text;
-      if (typeof text === "string") out.push({ type: "text", text });
-      continue;
-    }
-    if (t === "image") {
-      const image = (item as { image?: unknown }).image;
-      const mimeType = (item as { mimeType?: unknown }).mimeType;
-      if (typeof image !== "string") continue;
-      out.push({
-        type: "image",
-        image,
-        ...(typeof mimeType === "string" ? { mimeType } : {}),
-      });
-      continue;
-    }
-    if (t === "file") {
-      const data = (item as { data?: unknown }).data;
-      const mimeType = (item as { mimeType?: unknown }).mimeType;
-      if (typeof data !== "string" || typeof mimeType !== "string") continue;
-      out.push({ type: "file", data, mimeType });
-      continue;
-    }
-    // Unknown tag → drop
-  }
-  return out.length > 0 ? out : undefined;
-}
-
-async function runStreamedTurn(
-  conversationLoop: ConversationLoop,
-  input: string,
-  webContents: WebContents | undefined,
-  channel: string,
-  streamId: number,
-    options: {
-    attachments?: import("../../engine/llm/types.js").UserContentPart[];
-    inputOrigin: ChatInputOrigin;
-    rolePrompt?: ActiveRolePrompt;
-  },
-): Promise<TurnResult> {
-  const send = (payload: unknown) => sendToWebContents(webContents, channel, { streamId, ...((payload as Record<string, unknown>) ?? {}) }, log);
-  const originSource = options.inputOrigin === "plugin-emitted"
-    ? parseImportedTriggerEnvelope(input)
-    : null;
-  // Per-turn streaming filter for the <suggested_replies> block. Withholds
-  // chunks that could be (or are) part of the trailing tag, surfaces the
-  // parsed list when the turn ends. See
-  // `docs/architecture/proposals/suggested-replies-ghost-text.md`.
-  const suggestedRepliesFilter = createStreamingFilter();
-  const result = await conversationLoop.runTurn(
-    input,
-    {
-      onReasoningDelta: (text) => send({ type: "reasoning_delta", text }),
-      onTextDelta: (text) => {
-        const visible = suggestedRepliesFilter.feed(text);
-        if (visible) send({ type: "text_delta", text: visible });
-      },
-      onAssistantRound: ({ roundIndex, text, thought, stopReason, hasToolCalls }) =>
-        send({
-          type: "assistant_round",
-          roundIndex,
-          text: stripSuggestedReplies(text),
-          thought,
-          stopReason,
-          hasToolCalls,
-        }),
-      onToolStart: (name, toolInput, meta) =>
-        send({
-          type: "tool_start",
-          name,
-          input: toolInput,
-          groupId: meta.groupId,
-          toolUseId: meta.toolUseId,
-          displayOrder: meta.displayOrder,
-          source: meta.source,
-          toolCategory: meta.category,
-          pluginId: meta.pluginId,
-          mcpServerId: meta.mcpServerId,
-        }),
-      onPermissionReview: (event) =>
-        send({
-          type: "permission_review",
-          reviewStatus: event.status,
-          name: event.toolName,
-          toolCategory: event.toolCategory,
-          source: event.source,
-          groupId: event.groupId,
-          toolUseId: event.toolUseId,
-          displayOrder: event.displayOrder,
-          verdictLevel: event.verdictLevel,
-          reason: event.reason,
-          approvalPurpose: event.approvalPurpose,
-        }),
-      onToolEnd: (name, toolResult, isError, meta, uiPayload, durationMs) =>
-        send({
-          type: "tool_end",
-          name,
-          result: toolResult,
-          isError,
-          groupId: meta.groupId,
-          toolUseId: meta.toolUseId,
-          displayOrder: meta.displayOrder,
-          source: meta.source,
-          toolCategory: meta.category,
-          pluginId: meta.pluginId,
-          mcpServerId: meta.mcpServerId,
-          ...(uiPayload && { uiPayload }),
-          durationMs,
-        }),
-      onError: (error, systemNotice) =>
-        send({ type: "error", error, ...(systemNotice ? { systemNotice } : {}) }),
-      onPermissionModeChanged: (mode) => send({ type: "permission_mode_changed", mode }),
-      onCompactStarted: ({ triggerSource, estimatedBefore, preflight }) =>
-        send({
-          type: "compact_started",
-          triggerSource,
-          estimatedBefore,
-          preflight,
-        }),
-      onRecoveryExhausted: () =>
-        send({ type: "recovery_exhausted" }),
-      onCompactOccurred: ({ removedMessages, freedTokens, estimatedAfter, trigger, summary, compactNum, compactStatus, truncatedDir }) =>
-        send({
-          type: "compact_notice",
-          removedMessages,
-          freedTokens,
-          estimatedAfter,
-          ...(trigger !== undefined ? { trigger } : {}),
-          ...(summary !== undefined ? { summary } : {}),
-          ...(compactNum !== undefined ? { compactNum } : {}),
-          ...(compactStatus !== undefined ? { compactStatus } : {}),
-          ...(truncatedDir !== undefined ? { truncatedDir } : {}),
-        }),
-      onTurnSummary: ({ turnDurationMs, toolCount, cumulativeToolMs, tokensIn, freshInputTokens, tokensOut, cacheReadTokens, cacheWriteTokens, vendorProvider, vendorModel, usageByModel, breakdown }) =>
-        send({
-          type: "turn_summary",
-          turnDurationMs,
-          toolCount,
-          cumulativeToolMs,
-          tokensIn,
-          freshInputTokens,
-          tokensOut,
-          ...(cacheReadTokens !== undefined ? { cacheReadTokens } : {}),
-          ...(cacheWriteTokens !== undefined ? { cacheWriteTokens } : {}),
-          vendorProvider,
-          vendorModel,
-          ...(usageByModel !== undefined ? { usageByModel } : {}),
-          ...(breakdown ? { breakdown } : {}),
-        }),
-      onLlmStatus: (status) => send({ type: "llm_status", ...status }),
-      onFallback: (from, to) => sendToWebContents(webContents, CHANNELS.chat.fallback, { from, to }, log),
-      onGuidanceInjected: (text) => send({ type: "guidance_injected", text }),
-      onGuidanceDropped: (text) => send({ type: "guidance_dropped", text }),
-    },
-    undefined,
-    {
-      ...(originSource ? { originSource } : {}),
-      ...(options.attachments && options.attachments.length > 0
-        ? { attachments: options.attachments }
-        : {}),
-      inputOrigin: options.inputOrigin,
-      ...(options.rolePrompt ? { rolePrompt: options.rolePrompt } : {}),
-    },
-  );
-  const { trailing, suggestedReplies } = suggestedRepliesFilter.finish();
-  if (trailing) send({ type: "text_delta", text: trailing });
-  send({ type: "suggested_replies", replies: suggestedReplies });
-  send({ type: "done", ...(result.route === "command" ? { route: "command" } : {}) });
-  return result;
 }
 
 export function registerChatHandlers(deps: IpcDeps): void {
@@ -351,6 +112,12 @@ export function registerChatHandlers(deps: IpcDeps): void {
     personaPromptStore,
     getMainWindow,
   } = deps;
+
+  // Build a ChatStreamSink bound to a specific webContents. The IPC sink is a
+  // byte-identical wrapper over the pre-C10 `sendToWebContents` fan-out; a
+  // future api/cli surface supplies its own sink over the same frames.
+  const buildSink = (wc: WebContents | undefined): ChatStreamSink =>
+    (channel, payload) => sendToWebContents(wc, channel, payload, log);
 
   // read-only, sender guard optional
   ipcMain.handle(CHANNELS.chat.hasProvider, () => conversationLoop.hasProvider());
@@ -371,149 +138,40 @@ export function registerChatHandlers(deps: IpcDeps): void {
     activeStreamTurn = turnPromise;
     return turnPromise;
   };
-  const streamTurnOptions = {
-    inputOrigin: "user-keyboard" as const,
-  };
-  const markMainActiveAfterTurn = async (input: string) => {
-    if (conversationLoop.getSessionKind() !== "main") return;
-    if (conversationLoop.getHistory().length > 0) {
-      await memoryManager.markMainActiveResume(conversationLoop.getSessionId());
-      return;
-    }
-    if (input.trim() === "/new") {
-      await memoryManager.markMainActiveFresh();
-    }
-  };
   const allocateStreamId = () => ++nextStreamId;
-  const sanitizeOutgoingInput = (input: string, webContents: WebContents | undefined) => {
-    let effective = input;
-    const privacy = settingsService.get("privacy");
-    if (privacy?.piiRedactEnabled && typeof input === "string") {
-      const r = redactForLLM(input);
-      if (r.totalCount > 0) {
-        effective = r.redacted;
-        sendToWebContents(webContents, CHANNELS.chat.stream, {
-          type: "redact_notice",
-          count: r.totalCount,
-          byKind: r.counts,
-        }, log);
-        log.warn({ counts: r.counts }, `user draft redacted — count=${r.totalCount}`);
-      }
-    }
-    return effective;
-  };
   const streamTurn = async (
     input: string,
     attachments?: import("../../engine/llm/types.js").UserContentPart[],
     rolePrompt?: ActiveRolePrompt,
   ) => {
     const win = getMainWindow();
+    const sink = buildSink(win?.webContents);
     const streamId = allocateStreamId();
     return trackStreamTurn(async () => {
       const result = await runStreamedTurn(
         conversationLoop,
         input,
-        win?.webContents,
-        CHANNELS.chat.stream,
+        sink,
         streamId,
         {
-          ...streamTurnOptions,
+          ...STREAM_TURN_OPTIONS,
           ...(attachments && attachments.length > 0 ? { attachments } : {}),
           ...(rolePrompt ? { rolePrompt } : {}),
         },
       );
-      await markMainActiveAfterTurn(input);
+      await markMainActiveAfterTurn(deps, input);
       return result;
     });
   };
 
-  const parseChatSendPayload = (
-    payload: unknown,
-  ): { ok: true; payload: ChatSendPayload } | { ok: false; error: string } => {
-    if (!payload || typeof payload !== "object" || Array.isArray(payload)) {
-      return { ok: false, error: "invalid-payload" };
-    }
-    const candidate = payload as {
-      input?: unknown;
-      attachments?: unknown;
-      inputOrigin?: unknown;
-      userActivation?: unknown;
-      personaPromptId?: unknown;
-    };
-    if (typeof candidate.input !== "string") {
-      return { ok: false, error: "invalid-input" };
-    }
-    if (!isChatSendInputOrigin(candidate.inputOrigin)) {
-      return { ok: false, error: "missing-input-origin" };
-    }
-    if (candidate.inputOrigin === "user-keyboard" && candidate.userActivation !== true) {
-      return { ok: false, error: "user-keyboard-required" };
-    }
-    const originSource = parseImportedTriggerEnvelope(candidate.input);
-    if (candidate.inputOrigin === "plugin-emitted" && !originSource) {
-      return { ok: false, error: "missing-plugin-envelope" };
-    }
-    const personaPrompt = normalizePersonaPromptId(candidate.inputOrigin, candidate.personaPromptId);
-    if (!personaPrompt.ok) return { ok: false, error: personaPrompt.error };
-    return {
-      ok: true,
-      payload: {
-        input: candidate.input,
-        attachments: candidate.attachments,
-        inputOrigin: candidate.inputOrigin,
-        ...(candidate.userActivation === true ? { userActivation: true } : {}),
-        ...(personaPrompt.personaPromptId ? { personaPromptId: personaPrompt.personaPromptId } : {}),
-      },
-    };
-  };
-
-  ipcMain.handle(CHANNELS.chat.send, async (
-    e,
-    payload: unknown,
-  ) => {
+  // PUBLIC lvis:chat:send — thin wrapper: trust boundary + sink construction,
+  // logic in handlers/chat.ts. The stream/redact/fallback frames the renderer
+  // receives are byte-identical to the pre-C10 fan-out.
+  ipcMain.handle(CHANNELS.chat.send, async (e, payload: unknown) => {
     if (!validateSender(e)) { auditUnauthorized(auditLogger, CHANNELS.chat.send, e); return UNAUTHORIZED_FRAME; }
-    const parsed = parseChatSendPayload(payload);
-    if (!parsed.ok) return { ok: false, error: parsed.error };
-    const { input, attachments, inputOrigin, personaPromptId } = parsed.payload;
-    const personaPrompt = await resolvePersonaRolePrompt(personaPromptStore, personaPromptId);
-    if (!personaPrompt.ok) return { ok: false, error: personaPrompt.error };
-    // queue-auto inputOrigin path 는 사용자 명시 입력 누적 의 자동 인입.
-    // user gesture context 밖 (IPC stream done event 트리거) 라 audit 추가
-    // 필요 — security forensics 에서 user-keyboard turn 과 구분 가능해야 함
-    // (critic Round 2 M2). guide 와 동일 패턴.
-    if (inputOrigin === "queue-auto") {
-      auditLogger.log({
-        timestamp: new Date().toISOString(),
-        sessionId: conversationLoop.getSessionId(),
-        type: "info",
-        input: `chat:utterance:queue-auto:start:len=${input.length}`,
-      });
-    }
-    // IPC payload validation — the renderer is trusted but a corrupt
-    // preload bridge or a stray `unknown[]` cast could deliver malformed
-    // parts. We validate the shape here so the conversation loop never
-    // sees garbage.
-    const validated = validateUserContentParts(attachments);
     const win = getMainWindow();
-    const effective = sanitizeOutgoingInput(input, win?.webContents);
-    const streamId = allocateStreamId();
-    return trackStreamTurn(async () => {
-      const result = await runStreamedTurn(
-        conversationLoop,
-        effective,
-        win?.webContents,
-        CHANNELS.chat.stream,
-        streamId,
-        {
-          ...streamTurnOptions,
-          attachments: validated,
-          inputOrigin,
-          ...(personaPrompt.rolePrompt ? { rolePrompt: personaPrompt.rolePrompt } : {}),
-        },
-      );
-      await markMainActiveAfterTurn(effective);
-      return result;
-    });
+    const sink = buildSink(win?.webContents);
+    return handleChatSend(deps, payload, { sink, allocateStreamId, trackStreamTurn });
   });
 
   // "guide" — non-interrupting mid-stream direction adjustment. Queues
@@ -544,7 +202,7 @@ export function registerChatHandlers(deps: IpcDeps): void {
     // implicitly (sanitizeOutgoingInput sends to the host webContents
     // directly — renderer surfaces under the current streaming context).
     const win = getMainWindow();
-    const effective = sanitizeOutgoingInput(input, win?.webContents);
+    const effective = sanitizeOutgoingInput(settingsService, buildSink(win?.webContents), input);
     const queueResult = conversationLoop.queueGuidance(effective);
     if (queueResult === "queued") {
       // Audit successful guide as a mutating state transition (parity with
@@ -586,43 +244,14 @@ export function registerChatHandlers(deps: IpcDeps): void {
     return { ok: true };
   });
 
-  // read-only, sender guard optional
+  // PUBLIC lvis:chat:sessions — read-only; sender guard optional. On rejection
+  // returns the same shape (active id + empty list) as before; logic delegated.
   ipcMain.handle(CHANNELS.chat.sessions, (e, opts?: { limit?: unknown; before?: unknown; beforeId?: unknown; after?: unknown; kind?: unknown; routineId?: unknown }) => {
     if (!validateSender(e)) {
       auditUnauthorized(auditLogger, CHANNELS.chat.sessions, e);
       return { current: conversationLoop.getSessionId(), sessions: [] };
     }
-    const limit = typeof opts?.limit === "number" && Number.isFinite(opts.limit)
-      ? Math.max(1, Math.min(100, Math.floor(opts.limit)))
-      : 20;
-    const beforeTime = typeof opts?.before === "string" ? Date.parse(opts.before) : Number.NaN;
-    const before = Number.isNaN(beforeTime) ? undefined : new Date(beforeTime);
-    const afterTime = typeof opts?.after === "string" ? Date.parse(opts.after) : Number.NaN;
-    const after = Number.isNaN(afterTime) ? undefined : new Date(afterTime);
-    const beforeId = isSafeSessionId(opts?.beforeId)
-      ? opts.beforeId
-      : undefined;
-    const kind = SESSION_KIND_VALUES.has(opts?.kind as SessionKind | "all")
-      ? opts?.kind as SessionKind | "all"
-      : "main";
-    const routineId = typeof opts?.routineId === "string" ? opts.routineId : undefined;
-    const sessions = memoryManager
-      .listSessionsPage({ kind, ...(routineId ? { routineId } : {}), limit, ...(before ? { before } : {}), ...(beforeId ? { beforeId } : {}), ...(after ? { after } : {}) })
-      .map((s) => ({
-        id: s.id,
-        modifiedAt: s.modifiedAt.toISOString(),
-        title: s.title,
-        sessionKind: s.sessionKind,
-        ...(s.routineId ? { routineId: s.routineId } : {}),
-        ...(s.routineTitle ? { routineTitle: s.routineTitle } : {}),
-        ...(s.routineFiredAt ? { routineFiredAt: s.routineFiredAt } : {}),
-        ...(s.branchedFromCompactNum !== undefined ? { branchedFromCompactNum: s.branchedFromCompactNum } : {}),
-        ...(s.branchedAt ? { branchedAt: s.branchedAt } : {}),
-      }));
-    return {
-      current: conversationLoop.getSessionId(),
-      sessions,
-    };
+    return handleChatSessions(deps, opts);
   });
 
   ipcMain.handle(CHANNELS.chat.compact, (e) => {
@@ -663,21 +292,9 @@ export function registerChatHandlers(deps: IpcDeps): void {
     return result;
   });
 
-  // read-only, sender guard optional
-  ipcMain.handle(CHANNELS.chat.getHistory, () => {
-    const messages = conversationLoop.getHistory().getMessages() as GenericMessage[];
-    const currentListEntry = memoryManager
-      .listSessions({ kind: "all", limit: Number.POSITIVE_INFINITY })
-      .find((session) => session.id === conversationLoop.getSessionId());
-    return {
-      sessionId: conversationLoop.getSessionId(),
-      sessionTitle: currentListEntry?.title,
-      sessionKind: conversationLoop.getSessionKind(),
-      ...(conversationLoop.getSessionRoutineId() ? { routineId: conversationLoop.getSessionRoutineId() } : {}),
-      ...(conversationLoop.getSessionRoutineTitle() ? { routineTitle: conversationLoop.getSessionRoutineTitle() } : {}),
-      messages: messages.map(serializeHistoryMessage),
-    };
-  });
+  // PUBLIC lvis:chat:get-history — read-only, sender guard optional. Returns the
+  // active session's serialized history; logic delegated.
+  ipcMain.handle(CHANNELS.chat.getHistory, () => handleChatGetHistory(deps));
 
   ipcMain.handle(CHANNELS.chat.mainActiveState, (e) => {
     if (!validateSender(e)) {
@@ -687,7 +304,9 @@ export function registerChatHandlers(deps: IpcDeps): void {
     return memoryManager.loadMainActiveSessionState();
   });
 
-  // read-only: load messages for any session by id (does NOT change active session)
+  // PUBLIC lvis:chat:session-history — read-only: load messages for any session
+  // by id (does NOT change active session). Delegated; the unauthorized frame
+  // keeps the success-path shape so callers always read `result.ok`/`.messages`.
   ipcMain.handle(CHANNELS.chat.sessionHistory, (e, sessionId: string) => {
     if (!validateSender(e)) {
       auditUnauthorized(auditLogger, CHANNELS.chat.sessionHistory, e);
@@ -697,63 +316,7 @@ export function registerChatHandlers(deps: IpcDeps): void {
       // to widen the type and check before reading.
       return { ok: false, messages: [], error: "unauthorized-frame" as const };
     }
-    if (!isSafeSessionId(sessionId)) {
-      return { ok: false, messages: [] };
-    }
-    // loadSession() reads the session JSONL via readFileSync; IO/parse errors
-    // propagate as throws. Catch them here so a corrupted session file or
-    // missing path doesn't reject the IPC call (which would surface as a
-    // renderer-side rejection rather than an empty result).
-    let loaded: unknown;
-    try {
-      loaded = memoryManager.loadSession(sessionId);
-    } catch {
-      return { ok: false, messages: [] };
-    }
-    if (!Array.isArray(loaded)) return { ok: false, messages: [] };
-    const raw = loaded.filter(
-      (m): m is GenericMessage =>
-        m != null && typeof m === "object" && "role" in m && "content" in m,
-    );
-    // Surface the rolling-summary preamble length so the renderer
-    // can prepend a `kind: "session_resume"` marker. We do not return the
-    // preamble text — it is system-prompt material, not chat history, and
-    // returning it would leak it into a UI surface that should only show a
-    // disclosure ("요약 N자 적용") rather than the verbatim summary.
-    let preambleChars = 0;
-    let sessionKind: SessionKind = "main";
-    let sessionTitle: string | undefined;
-    let routineId: string | undefined;
-    let routineTitle: string | undefined;
-    let routineFiredAt: string | undefined;
-    try {
-      const meta = memoryManager.loadSessionMetadata(sessionId);
-      if (meta) {
-        sessionKind = meta.sessionKind ?? "main";
-        sessionTitle = meta.title;
-        routineId = meta.routineId;
-        routineTitle = meta.routineTitle;
-        routineFiredAt = meta.routineFiredAt;
-        preambleChars = typeof meta.summaryPreamble === "string" ? meta.summaryPreamble.length : 0;
-      }
-    } catch {
-      // Metadata file missing/corrupt — fall through with empty session-resume hint.
-    }
-    if (!sessionTitle) {
-      sessionTitle = memoryManager
-        .listSessions({ kind: "all", limit: Number.POSITIVE_INFINITY })
-        .find((session) => session.id === sessionId)?.title;
-    }
-    return {
-      ok: true,
-      sessionKind,
-      ...(sessionTitle ? { sessionTitle } : {}),
-      ...(routineId ? { routineId } : {}),
-      ...(routineTitle ? { routineTitle } : {}),
-      ...(routineFiredAt ? { routineFiredAt } : {}),
-      messages: raw.map(serializeHistoryMessage),
-      preambleChars,
-    };
+    return handleChatSessionHistory(deps, sessionId);
   });
 
   ipcMain.handle(CHANNELS.chat.editResend, async (e, messageIndex: number, newText: string) => {
