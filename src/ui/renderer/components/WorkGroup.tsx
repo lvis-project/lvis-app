@@ -22,13 +22,15 @@ interface WorkGroupProps {
    * not rerender just because the active group changed.
    */
   revision: string;
+  /** Keep transient status surfaces visible while the owning event is still within its dwell window. */
+  forceOpen?: boolean;
 }
 
 // Monotonic per-instance id so multiple WorkGroups in one turn can be
 // distinguished in the debug logs without relying on React internals.
 let __wgInstanceCounter = 0;
 
-function WorkGroupImpl({ stepCount, streaming, children, turnDurationMs }: WorkGroupProps) {
+function WorkGroupImpl({ stepCount, streaming, children, turnDurationMs, forceOpen = false }: WorkGroupProps) {
   // Past-turn WorkGroups always receive streaming=false from first render,
   // so they must start closed. Active-turn WorkGroups start open and
   // auto-close when the true→false transition fires in the effect below.
@@ -37,6 +39,7 @@ function WorkGroupImpl({ stepCount, streaming, children, turnDurationMs }: WorkG
   const [open, setOpen] = useState(streaming);
   const prevStreaming = useRef(streaming);
   const hasChildren = Children.count(children) > 0;
+  const displayOpen = forceOpen || open;
 
   // Diagnostic-only: stable per-instance id (mount-time only). Lets the user
   // correlate "WG[3] mount", "WG[3] render", "WG[3] effect" across logs.
@@ -67,7 +70,8 @@ function WorkGroupImpl({ stepCount, streaming, children, turnDurationMs }: WorkG
         wgId,
         streaming,
         prevStreaming: prevStreaming.current,
-        open,
+        open: displayOpen,
+        forceOpen,
         willCollapse,
       });
     }
@@ -75,12 +79,12 @@ function WorkGroupImpl({ stepCount, streaming, children, turnDurationMs }: WorkG
       setOpen(false);
     }
     prevStreaming.current = streaming;
-  }, [streaming]);
+  }, [displayOpen, forceOpen, streaming]);
 
   // Diagnostic: only active streaming groups log render churn. Historical
   // groups used to spam the console on every active-turn delta in dev mode.
   if (debugStreamEnabled && streaming) {
-    debugLog("WG", "render", { wgId, streaming, open, stepCount });
+    debugLog("WG", "render", { wgId, streaming, open: displayOpen, forceOpen, stepCount });
   }
 
   return (
@@ -114,12 +118,12 @@ function WorkGroupImpl({ stepCount, streaming, children, turnDurationMs }: WorkG
           <span className="shrink-0 opacity-50 tabular-nums">⏱ {formatDuration(turnDurationMs)}</span>
         )}
         {!streaming && (
-          open
+          displayOpen
             ? <ChevronDown className="h-3 w-3 flex-shrink-0 opacity-50" />
             : <ChevronRight className="h-3 w-3 flex-shrink-0 opacity-50" />
         )}
       </button>
-      {open && hasChildren && (
+      {displayOpen && hasChildren && (
         <div className="min-w-0 space-y-1.5 pl-1 pt-1 text-foreground">
           {children}
         </div>
@@ -132,5 +136,6 @@ export const WorkGroup = memo(WorkGroupImpl, (prev, next) => (
   prev.stepCount === next.stepCount &&
   prev.streaming === next.streaming &&
   prev.turnDurationMs === next.turnDurationMs &&
-  prev.revision === next.revision
+  prev.revision === next.revision &&
+  prev.forceOpen === next.forceOpen
 ));
