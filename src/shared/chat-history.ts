@@ -11,6 +11,10 @@ export type SerializedHistoryToolCall = {
   id: string;
   name: string;
   input?: Record<string, unknown>;
+  source?: "builtin" | "plugin" | "mcp";
+  category?: "read" | "write" | "shell" | "network" | "meta";
+  pluginId?: string;
+  mcpServerId?: string;
 };
 
 /**

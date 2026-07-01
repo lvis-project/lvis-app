@@ -32,6 +32,13 @@ import {
 import { ensureCorporateCa } from "./main/corp-ca-loader.js";
 import { isAuthOwned } from "./main/auth-window-registry.js";
 import { isLinkOwned } from "./main/link-window-registry.js";
+import {
+  attachSideBrowserWebview,
+  configureSideBrowserWebviewAttach,
+  installSideBrowserPartitionPolicy,
+  isSideBrowserContents,
+  takePendingSideBrowserSrc,
+} from "./main/side-browser-webview.js";
 import { shouldBlockGlobalWebviewNavigation } from "./main/webview-navigation-policy.js";
 import { installHtmlPreviewPartitionBlock, installPluginPartitionPolicy } from "./main/html-preview-partition.js";
 import { registerPluginAssetProtocolScheme } from "./main/plugin-asset-protocol.js";
@@ -1652,6 +1659,25 @@ function createWindow(options: { showBootstrapSplash?: boolean } = {}) {
     }
   });
 
+  const pendingSideBrowserWebviews: string[] = [];
+  win.webContents.on("will-attach-webview", (event, webPreferences, params) => {
+    const result = configureSideBrowserWebviewAttach({
+      event,
+      webPreferences: webPreferences as Record<string, unknown>,
+      params,
+      enqueueAllowedSrc: (src) => pendingSideBrowserWebviews.push(src),
+    });
+    if (result === "blocked") {
+      log.warn({ src: params.src, partition: params.partition }, "blocked side browser webview attach");
+    }
+  });
+  win.webContents.on("did-attach-webview", (_event, contents) => {
+    const src = takePendingSideBrowserSrc(pendingSideBrowserWebviews, contents.getURL());
+    if (!src || !isSideBrowserContents(contents)) return;
+    attachSideBrowserWebview(contents);
+    log.debug({ src, webContentsId: contents.id }, "side browser webview attached");
+  });
+
   // 외부 URL → 시스템 브라우저로 리다이렉트 (앱 내 탐색 방지)
   // window.open() 차단
   win.webContents.setWindowOpenHandler(({ url }) => {
@@ -1872,6 +1898,7 @@ if (!gotSingleInstanceLock) {
   app.whenReady().then(() => {
     applyRuntimeAppIcon();
     installHtmlPreviewPartitionBlock();
+    installSideBrowserPartitionPolicy();
     void main().catch((error) => {
       log.error({ err: error }, "bootstrap failed");
       app.quit();
