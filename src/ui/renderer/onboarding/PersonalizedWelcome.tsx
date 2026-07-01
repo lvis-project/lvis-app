@@ -29,6 +29,17 @@ import { OnboardingHeader } from "./OnboardingCard.js";
 import type { AiProviderPingIpcResult } from "../../../shared/ai-provider-ping.js";
 import { t } from "../../../i18n/runtime.js";
 import { useTranslation } from "../../../i18n/react.js";
+import type { BootstrapStatusEvent } from "../hooks/use-bootstrap-status.js";
+import {
+  FirstRunReadinessPanel,
+  normalizeProviderProbe,
+  type FirstRunProviderProbe,
+} from "./FirstRunReadinessPanel.js";
+import type {
+  PluginReadinessSummary,
+  RuntimeCounts,
+  RuntimeEnv,
+} from "./first-run-readiness.js";
 
 export interface PersonalizedWelcomeProps {
   open: boolean;
@@ -42,19 +53,26 @@ export interface PersonalizedWelcomeProps {
    * re-render does not re-fire the mount-time ping effect.
    */
   pingAiProvider: () => Promise<AiProviderPingIpcResult>;
+  /** Lightweight runtime inventory for the first-run readiness checklist. */
+  getRuntimeCounts?: () => Promise<RuntimeCounts>;
+  /** Host/platform inventory for Windows-specific repair guidance. */
+  getRuntimeEnv?: () => Promise<RuntimeEnv>;
+  pluginSummary?: PluginReadinessSummary;
+  marketplaceUrlReady?: boolean;
+  bootstrapStatus?: BootstrapStatusEvent | null;
+  onRetryBootstrap?: () => Promise<void> | void;
   /** Fires when the user presses "예, 시작할게요 →". */
   onContinue: () => void;
 }
 
-type PingState =
-  | { status: "loading" }
-  | {
-      status: "success";
-      vendor: string;
-      model: string;
-      latencyMs: number;
-    }
-  | { status: "failure"; reason: string };
+const EMPTY_PLUGIN_SUMMARY: PluginReadinessSummary = {
+  installed: 0,
+  loaded: 0,
+  preparing: 0,
+  failed: 0,
+  disabled: 0,
+  activeTools: 0,
+};
 
 function pingFailureMessage(reason: string): string {
   if (reason === "not-configured") {
@@ -94,6 +112,12 @@ export function PersonalizedWelcome({
   nickname,
   introduction,
   pingAiProvider,
+  getRuntimeCounts,
+  getRuntimeEnv,
+  pluginSummary = EMPTY_PLUGIN_SUMMARY,
+  marketplaceUrlReady = false,
+  bootstrapStatus = null,
+  onRetryBootstrap,
   onContinue,
 }: PersonalizedWelcomeProps) {
   const { t } = useTranslation();
@@ -112,7 +136,10 @@ export function PersonalizedWelcome({
     return t("personalizedWelcome.introWithIntroduction", { introduction: trimmed });
   }, [introduction, t]);
 
-  const [pingState, setPingState] = useState<PingState>({ status: "loading" });
+  const [pingState, setPingState] = useState<FirstRunProviderProbe>({ status: "loading" });
+  const [runtimeCounts, setRuntimeCounts] = useState<RuntimeCounts | null>(null);
+  const [runtimeCountsError, setRuntimeCountsError] = useState<string | null>(null);
+  const [runtimeEnv, setRuntimeEnv] = useState<RuntimeEnv | null>(null);
 
   // Ping is fire-and-forget but we cancel the state setter on unmount so
   // a slow IPC response doesn't update an unmounted component. We only
@@ -131,20 +158,7 @@ export function PersonalizedWelcome({
         // unauthorized-frame envelope `{ok: false, error}` or the
         // AiProviderPingResult union (configured + online | configured +
         // offline | not-configured).
-        if ("ok" in result) {
-          setPingState({ status: "failure", reason: result.error });
-          return;
-        }
-        if (result.configured && result.online) {
-          setPingState({
-            status: "success",
-            vendor: result.vendor,
-            model: result.model,
-            latencyMs: result.latencyMs,
-          });
-          return;
-        }
-        setPingState({ status: "failure", reason: result.error });
+        setPingState(normalizeProviderProbe(result));
       } catch (err) {
         if (cancelledRef.current) return;
         setPingState({ status: "failure", reason: "ipc-failed" });
@@ -156,6 +170,34 @@ export function PersonalizedWelcome({
       cancelledRef.current = true;
     };
   }, [open, pingAiProvider]);
+
+  useEffect(() => {
+    if (!open) return;
+    let cancelled = false;
+    setRuntimeCounts(null);
+    setRuntimeCountsError(null);
+    if (getRuntimeCounts) {
+      void getRuntimeCounts()
+        .then((counts) => {
+          if (!cancelled) setRuntimeCounts(counts);
+        })
+        .catch((err) => {
+          if (!cancelled) setRuntimeCountsError((err as Error).message || "runtime-counts-failed");
+        });
+    }
+    if (getRuntimeEnv) {
+      void getRuntimeEnv()
+        .then((env) => {
+          if (!cancelled) setRuntimeEnv(env);
+        })
+        .catch(() => {
+          if (!cancelled) setRuntimeEnv(null);
+        });
+    }
+    return () => {
+      cancelled = true;
+    };
+  }, [getRuntimeCounts, getRuntimeEnv, open]);
 
   const handleContinue = useCallback(() => {
     if (pingState.status === "loading") return;
@@ -219,6 +261,17 @@ export function PersonalizedWelcome({
               {pingFailureMessage(pingState.reason)}
             </div>
           )}
+
+          <FirstRunReadinessPanel
+            providerProbe={pingState}
+            runtimeCounts={runtimeCounts}
+            runtimeCountsError={runtimeCountsError}
+            runtimeEnv={runtimeEnv}
+            pluginSummary={pluginSummary}
+            marketplaceUrlReady={marketplaceUrlReady}
+            bootstrapStatus={bootstrapStatus}
+            onRetryBootstrap={onRetryBootstrap}
+          />
 
           <Button
             type="button"
