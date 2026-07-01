@@ -558,6 +558,7 @@ function FileBrowserWorkspace({
     [filteredFiles, selectedId],
   );
   const selectedFileTarget = selectedFile?.previewTargetId ? targetById.get(selectedFile.previewTargetId) ?? null : null;
+  const hasFiles = filteredFiles.length > 0;
 
   useEffect(() => {
     if (selectedFile?.previewTargetId && selectedFile.previewTargetId !== selectedId) {
@@ -577,13 +578,18 @@ function FileBrowserWorkspace({
   };
 
   return (
-    <div className="flex h-full min-h-0 flex-col" data-testid="chat-side-panel-file-browser">
+    <div className="flex h-full min-h-0 w-full min-w-0 flex-col overflow-hidden" data-testid="chat-side-panel-file-browser">
       <SearchInput query={query} setQuery={setQuery} placeholder={t("chatPreviewRail.searchPlaceholder")} />
+      {!hasFiles ? (
+        <div className="min-h-0 flex-1 overflow-auto p-3" data-testid="chat-side-panel-file-empty">
+          <EmptyState>{t("chatPreviewRail.noFiles")}</EmptyState>
+        </div>
+      ) : (
       <div
         ref={splitLayoutRef}
-        className="grid min-h-0 flex-1"
+        className="grid min-h-0 w-full min-w-0 flex-1 overflow-hidden"
         data-testid="chat-side-panel-file-split-layout"
-        style={{ gridTemplateRows: `${treePanePercent}% 0.5rem minmax(0, 1fr)` }}
+        style={{ gridTemplateRows: `${treePanePercent}% 0.75rem minmax(0, 1fr)` }}
       >
         <div className="min-h-0 overflow-auto border-b p-2" data-testid="chat-side-panel-file-tree">
           {tree.length > 0 ? (
@@ -604,7 +610,7 @@ function FileBrowserWorkspace({
           aria-label={t("chatPreviewRail.resizeFilePanels")}
           tabIndex={0}
           data-testid="chat-side-panel-file-splitter"
-          className="group flex cursor-row-resize items-center px-2 outline-none"
+          className="group flex cursor-row-resize touch-none select-none items-center px-2 outline-none"
           onPointerDown={(event) => {
             event.preventDefault();
             event.currentTarget.setPointerCapture?.(event.pointerId);
@@ -638,7 +644,7 @@ function FileBrowserWorkspace({
             }
           }}
         >
-          <span className="h-px w-full bg-border transition-colors group-hover:bg-primary group-focus-visible:bg-primary" />
+          <span className="h-0.5 w-full rounded-full bg-border transition-colors group-hover:bg-primary group-focus-visible:bg-primary" />
         </div>
         <div className="min-h-0 overflow-auto p-3">
           {selectedFileTarget ? (
@@ -662,6 +668,7 @@ function FileBrowserWorkspace({
           )}
         </div>
       </div>
+      )}
     </div>
   );
 }
@@ -781,7 +788,7 @@ function BrowserWorkspace({
   };
 
   return (
-    <div className="flex h-full min-h-0 flex-col" data-testid="chat-side-panel-browser-workspace">
+    <div className="flex h-full min-h-0 w-full min-w-0 flex-col overflow-hidden" data-testid="chat-side-panel-browser-workspace">
       <form
         className="flex shrink-0 items-center gap-2 border-b px-3 py-2"
         onSubmit={(event) => {
@@ -837,7 +844,7 @@ function BrowserWorkspace({
           <EmptyState>{t("chatPreviewRail.noBrowserTargets")}</EmptyState>
         )}
       </div>
-      <div className="min-h-0 flex-1 overflow-hidden">
+      <div className="min-h-0 w-full min-w-0 flex-1 overflow-hidden">
         {displayedTarget?.kind === "html" ? (
           <BrowserDocumentViewer target={displayedTarget} />
         ) : displayedTarget?.kind === "url" ? (
@@ -876,7 +883,7 @@ function TerminalWorkspace({
   }, [onSelect, selectedId, selectedTarget]);
 
   return (
-    <div className="flex h-full min-h-0 flex-col" data-testid="chat-side-panel-terminal-workspace">
+    <div className="flex h-full min-h-0 w-full min-w-0 flex-col overflow-hidden" data-testid="chat-side-panel-terminal-workspace">
       <SearchInput query={query} setQuery={setQuery} placeholder={t("chatPreviewRail.terminalSearchPlaceholder")} />
       <div className="max-h-32 shrink-0 overflow-auto border-b p-2">
         {filteredTargets.length > 0 ? (
@@ -914,7 +921,7 @@ function SearchInput({
           value={query}
           onChange={(event) => setQuery(event.target.value)}
           placeholder={placeholder}
-          className="h-8 pl-7 text-xs"
+          className="h-8 w-full pl-7 text-xs"
         />
       </div>
     </div>
@@ -980,9 +987,9 @@ function ListDetailWorkspace({
   onSelect: (id: string) => void;
 }) {
   return (
-    <div className="flex h-full min-h-0 flex-col">
+    <div className="flex h-full min-h-0 w-full min-w-0 flex-col overflow-hidden">
       <SearchInput query={query} setQuery={setQuery} placeholder={placeholder} />
-      <div className="grid min-h-0 flex-1 grid-rows-[minmax(10rem,0.85fr)_minmax(14rem,1.15fr)]">
+      <div className="grid min-h-0 w-full min-w-0 flex-1 grid-rows-[minmax(10rem,0.85fr)_minmax(14rem,1.15fr)] overflow-hidden">
         <div className="min-h-0 overflow-auto border-b p-2">
           {rows.length > 0 ? (
             <TargetRows targets={rows} selectedId={selectedTarget?.id} rowTestId={rowTestId} onSelect={onSelect} />
@@ -1164,7 +1171,7 @@ export function ChatSidePanel({
       data-testid="chat-side-panel"
       className={`min-h-0 min-w-0 border-l border-border/(--opacity-strong) bg-background/(--opacity-solid) backdrop-blur ${className}`}
     >
-      <div data-testid="chat-preview-rail" className="flex h-full min-h-0 flex-col">
+      <div data-testid="chat-preview-rail" className="flex h-full min-h-0 w-full min-w-0 flex-col overflow-hidden">
         <div className="flex h-12 shrink-0 items-center gap-2 border-b px-3">
           <PanelRightClose className="h-4 w-4 text-muted-foreground" />
           <div className="min-w-0 flex-1">
@@ -1174,31 +1181,14 @@ export function ChatSidePanel({
             </div>
           </div>
           <div className="flex shrink-0 items-center gap-1">
-            <AddTabButton
-              icon={Folder}
-              label={t("chatPreviewRail.addFileBrowserTab")}
-              testId="chat-side-panel-add-file-browser-tab"
-              onClick={() => addTab("file-browser")}
-            />
-            <AddTabButton
-              icon={Globe}
-              label={t("chatPreviewRail.addBrowserTab")}
-              testId="chat-side-panel-add-browser-tab"
-              onClick={() => addTab("browser")}
-            />
-            <AddTabButton
-              icon={Terminal}
-              label={t("chatPreviewRail.addTerminalTab")}
-              testId="chat-side-panel-add-terminal-tab"
-              onClick={() => addTab("terminal")}
-            />
             <Button type="button" size="icon-xs" variant="ghost" title={t("chatPreviewRail.close")} aria-label={t("chatPreviewRail.close")} onClick={onClose}>
               <X className="h-4 w-4" />
             </Button>
           </div>
         </div>
 
-        <div className="shrink-0 overflow-x-auto border-b px-2 py-1" role="tablist" aria-label={t("chatPreviewRail.tabsLabel")}>
+        <div className="flex min-w-0 shrink-0 items-center gap-2 border-b px-2 py-1">
+          <div className="min-w-0 flex-1 overflow-x-auto [scrollbar-width:none] [&::-webkit-scrollbar]:hidden" role="tablist" aria-label={t("chatPreviewRail.tabsLabel")}>
           <div className="flex min-w-max gap-1">
             {tabs.map((tab) => {
               const Icon = tabIcon(tab.kind);
@@ -1243,6 +1233,27 @@ export function ChatSidePanel({
                 </button>
               );
             })}
+          </div>
+          </div>
+          <div className="flex shrink-0 items-center gap-1 border-l pl-2" data-testid="chat-side-panel-tab-actions">
+            <AddTabButton
+              icon={Folder}
+              label={t("chatPreviewRail.addFileBrowserTab")}
+              testId="chat-side-panel-add-file-browser-tab"
+              onClick={() => addTab("file-browser")}
+            />
+            <AddTabButton
+              icon={Globe}
+              label={t("chatPreviewRail.addBrowserTab")}
+              testId="chat-side-panel-add-browser-tab"
+              onClick={() => addTab("browser")}
+            />
+            <AddTabButton
+              icon={Terminal}
+              label={t("chatPreviewRail.addTerminalTab")}
+              testId="chat-side-panel-add-terminal-tab"
+              onClick={() => addTab("terminal")}
+            />
           </div>
         </div>
 

@@ -243,6 +243,11 @@ test.describe("chat preview rail", () => {
       const openButton = ctx.page.getByTestId("chat-preview-open");
       await expect(openButton).toBeVisible({ timeout: 20_000 });
       await expect(ctx.page.getByTestId("chat-preview-rail")).toHaveCount(0);
+      const closedActionRailBox = await ctx.page.getByTestId("action-panel-rail").boundingBox();
+      const closedPreviewButtonBox = await openButton.boundingBox();
+      expect(closedActionRailBox).not.toBeNull();
+      expect(closedPreviewButtonBox).not.toBeNull();
+      expect(closedActionRailBox!.y).toBeGreaterThanOrEqual(closedPreviewButtonBox!.y + closedPreviewButtonBox!.height + 4);
 
       await openButton.click();
       const panel = ctx.page.getByTestId("chat-side-panel");
@@ -256,12 +261,26 @@ test.describe("chat preview rail", () => {
       await expect(ctx.page.getByTestId("chat-side-panel-mode-terminal")).toBeVisible();
       await expect(ctx.page.getByTestId("chat-side-panel-file-tree")).toBeVisible();
       await expect(ctx.page.getByTestId("chat-side-panel-file-splitter")).toBeVisible();
+      const splitLayout = ctx.page.getByTestId("chat-side-panel-file-split-layout");
+      const splitter = ctx.page.getByTestId("chat-side-panel-file-splitter");
+      const splitBeforeDrag = await splitLayout.evaluate((element) => (element as HTMLElement).style.gridTemplateRows);
+      const splitterBox = await splitter.boundingBox();
+      expect(splitterBox).not.toBeNull();
+      await ctx.page.mouse.move(splitterBox!.x + splitterBox!.width / 2, splitterBox!.y + splitterBox!.height / 2);
+      await ctx.page.mouse.down();
+      await ctx.page.mouse.move(splitterBox!.x + splitterBox!.width / 2, splitterBox!.y + 80, { steps: 4 });
+      await ctx.page.mouse.up();
+      await expect.poll(async () => splitLayout.evaluate((element) => (element as HTMLElement).style.gridTemplateRows)).not.toBe(splitBeforeDrag);
 
       const tabCountBefore = await ctx.page.getByRole("tab").count();
       await ctx.page.getByTestId("chat-side-panel-add-browser-tab").click();
       await expect(ctx.page.getByRole("tab")).toHaveCount(tabCountBefore + 1);
 
       await ctx.page.getByTestId("chat-side-panel-mode-browser").click();
+      await expect(ctx.page.getByTestId("chat-side-panel-tab-actions")).toBeVisible();
+      await expect(ctx.page.getByTestId("chat-side-panel-add-file-browser-tab")).toBeVisible();
+      await expect(ctx.page.getByTestId("chat-side-panel-add-browser-tab")).toBeVisible();
+      await expect(ctx.page.getByTestId("chat-side-panel-add-terminal-tab")).toBeVisible();
       await expect(rail).toContainText("Artifact dashboard");
       await expect(rail).toContainText(sideBrowserHost);
       await expect(ctx.page.getByTestId("chat-side-panel-browser-viewer")).toBeVisible();
