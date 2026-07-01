@@ -9,8 +9,9 @@
  * Run after `scripts/i18n-build-catalog.mjs`:  bunx tsx scripts/i18n-dump-maps.ts
  */
 import { mkdirSync, writeFileSync } from "node:fs";
-import { messages } from "../src/i18n/messages/index.js";
+import { loadAllLocaleMessages } from "../src/i18n/messages/index.js";
 
+const messages = await loadAllLocaleMessages();
 const en = messages.en;
 const ko = messages.ko;
 
