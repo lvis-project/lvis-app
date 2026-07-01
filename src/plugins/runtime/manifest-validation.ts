@@ -13,6 +13,7 @@ import * as AddFormatsModule from "ajv-formats";
 import type { ValidateFunction } from "ajv";
 import type { PluginManifest, InstallPolicy } from "../types.js";
 import { createLogger } from "../../lib/logger.js";
+import { normalizeAllowedHosts } from "../../main/host-allow-list.js";
 
 // Re-exported here so manifest/plugin-loading consumers can import the
 // minAppVersion gate error + IPC code alongside the other manifest contracts.
@@ -154,6 +155,32 @@ export async function parsePluginJson(
 
   if (!validator) {
     throw new Error("SDK plugin manifest validator is required");
+  }
+
+  const networkAccessRaw: unknown = parsed.networkAccess;
+  if (
+    networkAccessRaw &&
+    typeof networkAccessRaw === "object" &&
+    !Array.isArray(networkAccessRaw)
+  ) {
+    const allowedDomainsRaw = (networkAccessRaw as { allowedDomains?: unknown }).allowedDomains;
+    if (
+      Array.isArray(allowedDomainsRaw) &&
+      allowedDomainsRaw.every((entry): entry is string => typeof entry === "string")
+    ) {
+      try {
+        parsed.networkAccess = {
+          ...parsed.networkAccess,
+          allowedDomains: normalizeAllowedHosts(allowedDomainsRaw),
+        };
+      } catch (err) {
+        fail(
+          "networkAccess.allowedDomains",
+          err instanceof Error ? err.message : String(err),
+          `"networkAccess": { "allowedDomains": ["api.example.com"], "reasoning": "Why this plugin needs host-mediated egress." }`,
+        );
+      }
+    }
   }
 
   if (Array.isArray(parsed.ui)) {
