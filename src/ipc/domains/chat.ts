@@ -19,6 +19,7 @@ import type { ConversationLoop, TurnResult } from "../../engine/conversation-loo
 import { parseImportedTriggerEnvelope } from "../../shared/overlay-trigger-source.js";
 import type { ChatUtteranceMode } from "../../shared/chat-utterance.js";
 import { validateSender, UNAUTHORIZED_FRAME, auditUnauthorized } from "../gated.js";
+import { CHANNELS } from "../../contract/app-contract.js";
 import type { IpcDeps } from "../types.js";
 import { sendToWebContents } from "../safe-send.js";
 import { createLogger } from "../../lib/logger.js";
@@ -316,7 +317,7 @@ async function runStreamedTurn(
           ...(breakdown ? { breakdown } : {}),
         }),
       onLlmStatus: (status) => send({ type: "llm_status", ...status }),
-      onFallback: (from, to) => sendToWebContents(webContents, "lvis:chat:fallback", { from, to }, log),
+      onFallback: (from, to) => sendToWebContents(webContents, CHANNELS.chat.fallback, { from, to }, log),
       onGuidanceInjected: (text) => send({ type: "guidance_injected", text }),
       onGuidanceDropped: (text) => send({ type: "guidance_dropped", text }),
     },
@@ -352,10 +353,10 @@ export function registerChatHandlers(deps: IpcDeps): void {
   } = deps;
 
   // read-only, sender guard optional
-  ipcMain.handle("lvis:chat:has-provider", () => conversationLoop.hasProvider());
-  ipcMain.handle("lvis:llm:ping", async (e) => {
+  ipcMain.handle(CHANNELS.chat.hasProvider, () => conversationLoop.hasProvider());
+  ipcMain.handle(CHANNELS.llm.ping, async (e) => {
     if (!validateSender(e)) {
-      auditUnauthorized(auditLogger, "lvis:llm:ping", e);
+      auditUnauthorized(auditLogger, CHANNELS.llm.ping, e);
       return UNAUTHORIZED_FRAME;
     }
     return conversationLoop.pingProvider();
@@ -391,7 +392,7 @@ export function registerChatHandlers(deps: IpcDeps): void {
       const r = redactForLLM(input);
       if (r.totalCount > 0) {
         effective = r.redacted;
-        sendToWebContents(webContents, "lvis:chat:stream", {
+        sendToWebContents(webContents, CHANNELS.chat.stream, {
           type: "redact_notice",
           count: r.totalCount,
           byKind: r.counts,
@@ -413,7 +414,7 @@ export function registerChatHandlers(deps: IpcDeps): void {
         conversationLoop,
         input,
         win?.webContents,
-        "lvis:chat:stream",
+        CHANNELS.chat.stream,
         streamId,
         {
           ...streamTurnOptions,
@@ -466,11 +467,11 @@ export function registerChatHandlers(deps: IpcDeps): void {
     };
   };
 
-  ipcMain.handle("lvis:chat:send", async (
+  ipcMain.handle(CHANNELS.chat.send, async (
     e,
     payload: unknown,
   ) => {
-    if (!validateSender(e)) { auditUnauthorized(auditLogger, "lvis:chat:send", e); return UNAUTHORIZED_FRAME; }
+    if (!validateSender(e)) { auditUnauthorized(auditLogger, CHANNELS.chat.send, e); return UNAUTHORIZED_FRAME; }
     const parsed = parseChatSendPayload(payload);
     if (!parsed.ok) return { ok: false, error: parsed.error };
     const { input, attachments, inputOrigin, personaPromptId } = parsed.payload;
@@ -501,7 +502,7 @@ export function registerChatHandlers(deps: IpcDeps): void {
         conversationLoop,
         effective,
         win?.webContents,
-        "lvis:chat:stream",
+        CHANNELS.chat.stream,
         streamId,
         {
           ...streamTurnOptions,
@@ -529,9 +530,9 @@ export function registerChatHandlers(deps: IpcDeps): void {
   // ended between the active-turn check and the enqueue (critic MAJOR #2 /
   // code-reviewer MAJOR #3). The IPC return value drives the renderer's
   // "keep typed text vs. clear" decision.
-  ipcMain.handle("lvis:chat:guide", async (e, input: string) => {
+  ipcMain.handle(CHANNELS.chat.guide, async (e, input: string) => {
     if (!validateSender(e)) {
-      auditUnauthorized(auditLogger, "lvis:chat:guide", e);
+      auditUnauthorized(auditLogger, CHANNELS.chat.guide, e);
       return UNAUTHORIZED_FRAME;
     }
     if (typeof input !== "string" || input.trim().length === 0) {
@@ -565,8 +566,8 @@ export function registerChatHandlers(deps: IpcDeps): void {
     return { ok: false, error: queueResult };
   });
 
-  ipcMain.handle("lvis:chat:abort", async (e) => {
-    if (!validateSender(e)) { auditUnauthorized(auditLogger, "lvis:chat:abort", e); return UNAUTHORIZED_FRAME; }
+  ipcMain.handle(CHANNELS.chat.abort, async (e) => {
+    if (!validateSender(e)) { auditUnauthorized(auditLogger, CHANNELS.chat.abort, e); return UNAUTHORIZED_FRAME; }
     conversationLoop.abortCurrentTurn();
     if (activeStreamTurn) {
       try {
@@ -578,17 +579,17 @@ export function registerChatHandlers(deps: IpcDeps): void {
     return { ok: true };
   });
 
-  ipcMain.handle("lvis:chat:new", async (e) => {
-    if (!validateSender(e)) { auditUnauthorized(auditLogger, "lvis:chat:new", e); return UNAUTHORIZED_FRAME; }
+  ipcMain.handle(CHANNELS.chat.new, async (e) => {
+    if (!validateSender(e)) { auditUnauthorized(auditLogger, CHANNELS.chat.new, e); return UNAUTHORIZED_FRAME; }
     conversationLoop.newConversation();
     await memoryManager.markMainActiveFresh();
     return { ok: true };
   });
 
   // read-only, sender guard optional
-  ipcMain.handle("lvis:chat:sessions", (e, opts?: { limit?: unknown; before?: unknown; beforeId?: unknown; after?: unknown; kind?: unknown; routineId?: unknown }) => {
+  ipcMain.handle(CHANNELS.chat.sessions, (e, opts?: { limit?: unknown; before?: unknown; beforeId?: unknown; after?: unknown; kind?: unknown; routineId?: unknown }) => {
     if (!validateSender(e)) {
-      auditUnauthorized(auditLogger, "lvis:chat:sessions", e);
+      auditUnauthorized(auditLogger, CHANNELS.chat.sessions, e);
       return { current: conversationLoop.getSessionId(), sessions: [] };
     }
     const limit = typeof opts?.limit === "number" && Number.isFinite(opts.limit)
@@ -624,17 +625,17 @@ export function registerChatHandlers(deps: IpcDeps): void {
     };
   });
 
-  ipcMain.handle("lvis:chat:compact", (e) => {
-    if (!validateSender(e)) { auditUnauthorized(auditLogger, "lvis:chat:compact", e); return UNAUTHORIZED_FRAME; }
+  ipcMain.handle(CHANNELS.chat.compact, (e) => {
+    if (!validateSender(e)) { auditUnauthorized(auditLogger, CHANNELS.chat.compact, e); return UNAUTHORIZED_FRAME; }
     // Wire onCompactStarted/onCompactOccurred so slash-/compact also shows
     // the "자동 압축 중..." StatusBar indicator (parity with token preflight
     // path which gets it via runStreamedTurn callbacks). streamId is omitted
     // because manualCompact runs outside the per-turn stream.
     return conversationLoop.manualCompact({
       onCompactStarted: ({ triggerSource, estimatedBefore, preflight }) =>
-        sendToWebContents(e.sender, "lvis:chat:stream", { type: "compact_started", triggerSource, estimatedBefore, preflight }, log),
+        sendToWebContents(e.sender, CHANNELS.chat.stream, { type: "compact_started", triggerSource, estimatedBefore, preflight }, log),
       onCompactOccurred: ({ removedMessages, freedTokens, estimatedAfter, trigger, summary, compactNum, compactStatus, truncatedDir }) =>
-        sendToWebContents(e.sender, "lvis:chat:stream", {
+        sendToWebContents(e.sender, CHANNELS.chat.stream, {
           type: "compact_notice",
           removedMessages,
           freedTokens,
@@ -648,8 +649,8 @@ export function registerChatHandlers(deps: IpcDeps): void {
     });
   });
 
-  ipcMain.handle("lvis:chat:session-resume", async (e, sessionId: string) => {
-    if (!validateSender(e)) { auditUnauthorized(auditLogger, "lvis:chat:session-resume", e); return UNAUTHORIZED_FRAME; }
+  ipcMain.handle(CHANNELS.chat.sessionResume, async (e, sessionId: string) => {
+    if (!validateSender(e)) { auditUnauthorized(auditLogger, CHANNELS.chat.sessionResume, e); return UNAUTHORIZED_FRAME; }
     if (!isSafeSessionId(sessionId)) {
       return { ok: false, compacted: false, compactedAt: null, removedMessageCount: 0 };
     }
@@ -663,7 +664,7 @@ export function registerChatHandlers(deps: IpcDeps): void {
   });
 
   // read-only, sender guard optional
-  ipcMain.handle("lvis:chat:get-history", () => {
+  ipcMain.handle(CHANNELS.chat.getHistory, () => {
     const messages = conversationLoop.getHistory().getMessages() as GenericMessage[];
     const currentListEntry = memoryManager
       .listSessions({ kind: "all", limit: Number.POSITIVE_INFINITY })
@@ -678,18 +679,18 @@ export function registerChatHandlers(deps: IpcDeps): void {
     };
   });
 
-  ipcMain.handle("lvis:chat:main-active-state", (e) => {
+  ipcMain.handle(CHANNELS.chat.mainActiveState, (e) => {
     if (!validateSender(e)) {
-      auditUnauthorized(auditLogger, "lvis:chat:main-active-state", e);
+      auditUnauthorized(auditLogger, CHANNELS.chat.mainActiveState, e);
       return null;
     }
     return memoryManager.loadMainActiveSessionState();
   });
 
   // read-only: load messages for any session by id (does NOT change active session)
-  ipcMain.handle("lvis:chat:session-history", (e, sessionId: string) => {
+  ipcMain.handle(CHANNELS.chat.sessionHistory, (e, sessionId: string) => {
     if (!validateSender(e)) {
-      auditUnauthorized(auditLogger, "lvis:chat:session-history", e);
+      auditUnauthorized(auditLogger, CHANNELS.chat.sessionHistory, e);
       // Keep the shape consistent with the success path — renderer always
       // reads `result.messages` and `result.ok`. Returning the bare
       // UNAUTHORIZED_FRAME (which omits `messages`) would force every caller
@@ -755,8 +756,8 @@ export function registerChatHandlers(deps: IpcDeps): void {
     };
   });
 
-  ipcMain.handle("lvis:chat:edit-resend", async (e, messageIndex: number, newText: string) => {
-    if (!validateSender(e)) { auditUnauthorized(auditLogger, "lvis:chat:edit-resend", e); return UNAUTHORIZED_FRAME; }
+  ipcMain.handle(CHANNELS.chat.editResend, async (e, messageIndex: number, newText: string) => {
+    if (!validateSender(e)) { auditUnauthorized(auditLogger, CHANNELS.chat.editResend, e); return UNAUTHORIZED_FRAME; }
     if (typeof messageIndex !== "number" || messageIndex < 0) return { ok: false, error: "invalid-index" };
     if (typeof newText !== "string" || newText.trim().length === 0) return { ok: false, error: "empty-text" };
     const history = conversationLoop.getHistory().getMessages() as GenericMessage[];
@@ -771,8 +772,8 @@ export function registerChatHandlers(deps: IpcDeps): void {
     return { ok: true, result };
   });
 
-  ipcMain.handle("lvis:chat:fork", async (e, messageIndex: number) => {
-    if (!validateSender(e)) { auditUnauthorized(auditLogger, "lvis:chat:fork", e); return UNAUTHORIZED_FRAME; }
+  ipcMain.handle(CHANNELS.chat.fork, async (e, messageIndex: number) => {
+    if (!validateSender(e)) { auditUnauthorized(auditLogger, CHANNELS.chat.fork, e); return UNAUTHORIZED_FRAME; }
     const current = conversationLoop.getHistory().getMessages() as GenericMessage[];
     let upto = current.length;
     if (typeof messageIndex === "number" && messageIndex >= 0) {
@@ -852,19 +853,19 @@ export function registerChatHandlers(deps: IpcDeps): void {
     }
   };
 
-  ipcMain.handle("lvis:chat:continue-last-user", async (e, payload: unknown) => {
-    if (!validateSender(e)) { auditUnauthorized(auditLogger, "lvis:chat:continue-last-user", e); return UNAUTHORIZED_FRAME; }
+  ipcMain.handle(CHANNELS.chat.continueLastUser, async (e, payload: unknown) => {
+    if (!validateSender(e)) { auditUnauthorized(auditLogger, CHANNELS.chat.continueLastUser, e); return UNAUTHORIZED_FRAME; }
     const p = payload as { sessionId?: unknown };
     if (typeof p?.sessionId !== "string") return { ok: false, error: "invalid-args" };
     if (p.sessionId !== conversationLoop.getSessionId()) return { ok: false, error: "session-mismatch" };
     return continueFromLastUserTurn({ requireTerminalUser: true, restoreOnFailure: true });
   });
 
-  ipcMain.handle("lvis:chat:retry-effort", async (
+  ipcMain.handle(CHANNELS.chat.retryEffort, async (
     e,
     opts?: { thinkingBudgetTokens?: number; enableThinking?: boolean },
   ) => {
-    if (!validateSender(e)) { auditUnauthorized(auditLogger, "lvis:chat:retry-effort", e); return UNAUTHORIZED_FRAME; }
+    if (!validateSender(e)) { auditUnauthorized(auditLogger, CHANNELS.chat.retryEffort, e); return UNAUTHORIZED_FRAME; }
     const prevLlm = settingsService.get("llm");
     const provider = prevLlm.provider;
     const prevBlock = prevLlm.vendors[provider];
@@ -903,8 +904,8 @@ export function registerChatHandlers(deps: IpcDeps): void {
     }
   });
 
-  ipcMain.handle("lvis:chat:export", async (e, format: "markdown" | "json") => {
-    if (!validateSender(e)) { auditUnauthorized(auditLogger, "lvis:chat:export", e); return UNAUTHORIZED_FRAME; }
+  ipcMain.handle(CHANNELS.chat.export, async (e, format: "markdown" | "json") => {
+    if (!validateSender(e)) { auditUnauthorized(auditLogger, CHANNELS.chat.export, e); return UNAUTHORIZED_FRAME; }
     const { dialog } = await import("electron");
     const { writeFile } = await import("node:fs/promises");
     const win = getMainWindow();
@@ -957,8 +958,8 @@ export function registerChatHandlers(deps: IpcDeps): void {
 
   // ─── Checkpoint View + Branch ─────────────────────────
 
-  ipcMain.handle("lvis:chat:enter-checkpoint-view", (e, payload: unknown) => {
-    if (!validateSender(e)) { auditUnauthorized(auditLogger, "lvis:chat:enter-checkpoint-view", e); return UNAUTHORIZED_FRAME; }
+  ipcMain.handle(CHANNELS.chat.enterCheckpointView, (e, payload: unknown) => {
+    if (!validateSender(e)) { auditUnauthorized(auditLogger, CHANNELS.chat.enterCheckpointView, e); return UNAUTHORIZED_FRAME; }
     const p = payload as { sessionId?: unknown; compactNum?: unknown };
     if (typeof p?.sessionId !== "string" || !Number.isSafeInteger(p?.compactNum) || (p.compactNum as number) < 0) {
       return { error: "invalid-args" };
@@ -971,14 +972,14 @@ export function registerChatHandlers(deps: IpcDeps): void {
     return result;
   });
 
-  ipcMain.handle("lvis:chat:exit-checkpoint-view", (e) => {
-    if (!validateSender(e)) { auditUnauthorized(auditLogger, "lvis:chat:exit-checkpoint-view", e); return UNAUTHORIZED_FRAME; }
+  ipcMain.handle(CHANNELS.chat.exitCheckpointView, (e) => {
+    if (!validateSender(e)) { auditUnauthorized(auditLogger, CHANNELS.chat.exitCheckpointView, e); return UNAUTHORIZED_FRAME; }
     conversationLoop.exitViewMode();
     return { ok: true };
   });
 
-  ipcMain.handle("lvis:chat:branch-from-checkpoint", async (e, payload: unknown) => {
-    if (!validateSender(e)) { auditUnauthorized(auditLogger, "lvis:chat:branch-from-checkpoint", e); return UNAUTHORIZED_FRAME; }
+  ipcMain.handle(CHANNELS.chat.branchFromCheckpoint, async (e, payload: unknown) => {
+    if (!validateSender(e)) { auditUnauthorized(auditLogger, CHANNELS.chat.branchFromCheckpoint, e); return UNAUTHORIZED_FRAME; }
     if (activeStreamTurn) return { error: "streaming-active" };
     const p = payload as { sessionId?: unknown; compactNum?: unknown };
     if (typeof p?.sessionId !== "string" || !Number.isSafeInteger(p?.compactNum) || (p.compactNum as number) < 0) {
@@ -995,21 +996,21 @@ export function registerChatHandlers(deps: IpcDeps): void {
   });
 
   // ─── Memory ─────────────────────────────────────
-  ipcMain.handle("lvis:memory:entries:list", (e) => {
-    if (!validateSender(e)) { auditUnauthorized(auditLogger, "lvis:memory:entries:list", e); return UNAUTHORIZED_FRAME; }
+  ipcMain.handle(CHANNELS.memory.entriesList, (e) => {
+    if (!validateSender(e)) { auditUnauthorized(auditLogger, CHANNELS.memory.entriesList, e); return UNAUTHORIZED_FRAME; }
     return memoryManager.listMemoryEntries();
   });
-  ipcMain.handle("lvis:memory:entries:save", async (e, title: string, content: string) => {
-    if (!validateSender(e)) { auditUnauthorized(auditLogger, "lvis:memory:entries:save", e); return UNAUTHORIZED_FRAME; }
+  ipcMain.handle(CHANNELS.memory.entriesSave, async (e, title: string, content: string) => {
+    if (!validateSender(e)) { auditUnauthorized(auditLogger, CHANNELS.memory.entriesSave, e); return UNAUTHORIZED_FRAME; }
     return memoryManager.saveMemory(title, content);
   });
-  ipcMain.handle("lvis:memory:entries:delete", async (e, filename: string) => {
-    if (!validateSender(e)) { auditUnauthorized(auditLogger, "lvis:memory:entries:delete", e); return UNAUTHORIZED_FRAME; }
+  ipcMain.handle(CHANNELS.memory.entriesDelete, async (e, filename: string) => {
+    if (!validateSender(e)) { auditUnauthorized(auditLogger, CHANNELS.memory.entriesDelete, e); return UNAUTHORIZED_FRAME; }
     await memoryManager.deleteMemory(filename);
     return undefined;
   });
-  ipcMain.handle("lvis:memory:entries:search", (e, query: string) => {
-    if (!validateSender(e)) { auditUnauthorized(auditLogger, "lvis:memory:entries:search", e); return UNAUTHORIZED_FRAME; }
+  ipcMain.handle(CHANNELS.memory.entriesSearch, (e, query: string) => {
+    if (!validateSender(e)) { auditUnauthorized(auditLogger, CHANNELS.memory.entriesSearch, e); return UNAUTHORIZED_FRAME; }
     return memoryManager.searchMemoryEntries(query).map((note) => ({
       filename: note.filename,
       title: note.title,
@@ -1018,16 +1019,16 @@ export function registerChatHandlers(deps: IpcDeps): void {
       updatedAt: note.updatedAt ?? new Date().toISOString(),
     }));
   });
-  ipcMain.handle("lvis:memory:index:get", (e) => {
-    if (!validateSender(e)) { auditUnauthorized(auditLogger, "lvis:memory:index:get", e); return UNAUTHORIZED_FRAME; }
+  ipcMain.handle(CHANNELS.memory.indexGet, (e) => {
+    if (!validateSender(e)) { auditUnauthorized(auditLogger, CHANNELS.memory.indexGet, e); return UNAUTHORIZED_FRAME; }
     return memoryManager.getMemoryIndex();
   });
-  ipcMain.handle("lvis:memory:index:update-if-unchanged", async (e, expectedContent: string, nextContent: string) => {
-    if (!validateSender(e)) { auditUnauthorized(auditLogger, "lvis:memory:index:update-if-unchanged", e); return UNAUTHORIZED_FRAME; }
+  ipcMain.handle(CHANNELS.memory.indexUpdateIfUnchanged, async (e, expectedContent: string, nextContent: string) => {
+    if (!validateSender(e)) { auditUnauthorized(auditLogger, CHANNELS.memory.indexUpdateIfUnchanged, e); return UNAUTHORIZED_FRAME; }
     return memoryManager.updateMemoryIndexIfUnchanged(expectedContent, nextContent);
   });
-  ipcMain.handle("lvis:memory:index:sections:update", async (e, sections: unknown) => {
-    if (!validateSender(e)) { auditUnauthorized(auditLogger, "lvis:memory:index:sections:update", e); return UNAUTHORIZED_FRAME; }
+  ipcMain.handle(CHANNELS.memory.indexSectionsUpdate, async (e, sections: unknown) => {
+    if (!validateSender(e)) { auditUnauthorized(auditLogger, CHANNELS.memory.indexSectionsUpdate, e); return UNAUTHORIZED_FRAME; }
     if (!sections || typeof sections !== "object" || Array.isArray(sections)) {
       return { ok: false, error: "invalid-memory-sections" };
     }
@@ -1044,32 +1045,32 @@ export function registerChatHandlers(deps: IpcDeps): void {
     });
     return { ok: true };
   });
-  ipcMain.handle("lvis:memory:sessions:list", (e) => {
-    if (!validateSender(e)) { auditUnauthorized(auditLogger, "lvis:memory:sessions:list", e); return UNAUTHORIZED_FRAME; }
+  ipcMain.handle(CHANNELS.memory.sessionsList, (e) => {
+    if (!validateSender(e)) { auditUnauthorized(auditLogger, CHANNELS.memory.sessionsList, e); return UNAUTHORIZED_FRAME; }
     return memoryManager.listSessionEntries();
   });
-  ipcMain.handle("lvis:memory:sessions:search", (e, query: string) => {
-    if (!validateSender(e)) { auditUnauthorized(auditLogger, "lvis:memory:sessions:search", e); return UNAUTHORIZED_FRAME; }
+  ipcMain.handle(CHANNELS.memory.sessionsSearch, (e, query: string) => {
+    if (!validateSender(e)) { auditUnauthorized(auditLogger, CHANNELS.memory.sessionsSearch, e); return UNAUTHORIZED_FRAME; }
     return memoryManager.searchSessions(query);
   });
-  ipcMain.handle("lvis:memory:agents-md:get", (e) => {
-    if (!validateSender(e)) { auditUnauthorized(auditLogger, "lvis:memory:agents-md:get", e); return UNAUTHORIZED_FRAME; }
+  ipcMain.handle(CHANNELS.memory.agentsMdGet, (e) => {
+    if (!validateSender(e)) { auditUnauthorized(auditLogger, CHANNELS.memory.agentsMdGet, e); return UNAUTHORIZED_FRAME; }
     return memoryManager.getAgentsMd();
   });
-  ipcMain.handle("lvis:memory:agents-md:update", async (e, content: string) => {
-    if (!validateSender(e)) { auditUnauthorized(auditLogger, "lvis:memory:agents-md:update", e); return UNAUTHORIZED_FRAME; }
+  ipcMain.handle(CHANNELS.memory.agentsMdUpdate, async (e, content: string) => {
+    if (!validateSender(e)) { auditUnauthorized(auditLogger, CHANNELS.memory.agentsMdUpdate, e); return UNAUTHORIZED_FRAME; }
     return memoryManager.updateAgentsMd(content);
   });
-  ipcMain.handle("lvis:memory:user-prefs:get", (e) => {
-    if (!validateSender(e)) { auditUnauthorized(auditLogger, "lvis:memory:user-prefs:get", e); return UNAUTHORIZED_FRAME; }
+  ipcMain.handle(CHANNELS.memory.userPrefsGet, (e) => {
+    if (!validateSender(e)) { auditUnauthorized(auditLogger, CHANNELS.memory.userPrefsGet, e); return UNAUTHORIZED_FRAME; }
     return memoryManager.getUserPreferences();
   });
-  ipcMain.handle("lvis:memory:user-prefs:update", async (e, content: string) => {
-    if (!validateSender(e)) { auditUnauthorized(auditLogger, "lvis:memory:user-prefs:update", e); return UNAUTHORIZED_FRAME; }
+  ipcMain.handle(CHANNELS.memory.userPrefsUpdate, async (e, content: string) => {
+    if (!validateSender(e)) { auditUnauthorized(auditLogger, CHANNELS.memory.userPrefsUpdate, e); return UNAUTHORIZED_FRAME; }
     return memoryManager.updateUserPreferences(content);
   });
-  ipcMain.handle("lvis:memory:user-prefs:refresh", async (e) => {
-    if (!validateSender(e)) { auditUnauthorized(auditLogger, "lvis:memory:user-prefs:refresh", e); return UNAUTHORIZED_FRAME; }
+  ipcMain.handle(CHANNELS.memory.userPrefsRefresh, async (e) => {
+    if (!validateSender(e)) { auditUnauthorized(auditLogger, CHANNELS.memory.userPrefsRefresh, e); return UNAUTHORIZED_FRAME; }
     if (!preferenceRefreshService) {
       return { ok: false, error: "preference-refresh-service-unavailable" };
     }
@@ -1088,12 +1089,12 @@ export function registerChatHandlers(deps: IpcDeps): void {
 
   // ─── Starred messages ────────────────────────────────────
   // read-only, sender guard optional
-  ipcMain.handle("lvis:starred:list", () => {
+  ipcMain.handle(CHANNELS.starred.list, () => {
     if (!starredStore) return [];
     return starredStore.list();
   });
-  ipcMain.handle("lvis:starred:add", (e, entry: { sessionId?: string; messageIndex: number; role: string; text: string }) => {
-    if (!validateSender(e)) { auditUnauthorized(auditLogger, "lvis:starred:add", e); return UNAUTHORIZED_FRAME; }
+  ipcMain.handle(CHANNELS.starred.add, (e, entry: { sessionId?: string; messageIndex: number; role: string; text: string }) => {
+    if (!validateSender(e)) { auditUnauthorized(auditLogger, CHANNELS.starred.add, e); return UNAUTHORIZED_FRAME; }
     if (!starredStore) return { ok: false, error: "no-starred-store" };
     if (typeof entry?.messageIndex !== "number" || entry.messageIndex < -1) return { ok: false, error: "invalid-index" };
     if (typeof entry?.text !== "string") return { ok: false, error: "invalid-text" };
@@ -1101,8 +1102,8 @@ export function registerChatHandlers(deps: IpcDeps): void {
     const record = starredStore.add({ sessionId, messageIndex: entry.messageIndex, role: entry.role, text: entry.text });
     return { ok: true, entry: record };
   });
-  ipcMain.handle("lvis:starred:remove", (e, opts: { id?: string; sessionId?: string; messageIndex?: number }) => {
-    if (!validateSender(e)) { auditUnauthorized(auditLogger, "lvis:starred:remove", e); return UNAUTHORIZED_FRAME; }
+  ipcMain.handle(CHANNELS.starred.remove, (e, opts: { id?: string; sessionId?: string; messageIndex?: number }) => {
+    if (!validateSender(e)) { auditUnauthorized(auditLogger, CHANNELS.starred.remove, e); return UNAUTHORIZED_FRAME; }
     if (!starredStore) return { ok: false, error: "no-starred-store" };
     if (opts?.id) return { ok: starredStore.remove(opts.id) };
     if (opts?.sessionId && typeof opts.messageIndex === "number") {
@@ -1112,8 +1113,8 @@ export function registerChatHandlers(deps: IpcDeps): void {
   });
 
   // ─── Message feedback ────────────────────────────────────────────────────
-  ipcMain.handle("lvis:feedback:submit", async (e, payload: { sessionId: string; messageIndex: number; rating: "up" | "down"; reason?: string }) => {
-    if (!validateSender(e)) { auditUnauthorized(auditLogger, "lvis:feedback:submit", e); return UNAUTHORIZED_FRAME; }
+  ipcMain.handle(CHANNELS.feedback.submit, async (e, payload: { sessionId: string; messageIndex: number; rating: "up" | "down"; reason?: string }) => {
+    if (!validateSender(e)) { auditUnauthorized(auditLogger, CHANNELS.feedback.submit, e); return UNAUTHORIZED_FRAME; }
     const { sessionId, messageIndex, rating, reason } = payload ?? {};
     if (
       typeof sessionId !== "string" ||
@@ -1155,10 +1156,10 @@ export function registerChatHandlers(deps: IpcDeps): void {
   //   - message is a disk stub and no matching artifact is available
   // lineCount is computed here so the renderer never has to split on "\n".
   ipcMain.handle(
-    "lvis:chat:get-verbatim-tool-result",
+    CHANNELS.chat.getVerbatimToolResult,
     (e, { sessionId, toolUseId }: { sessionId: string; toolUseId: string }) => {
       if (!validateSender(e)) {
-        auditUnauthorized(auditLogger, "lvis:chat:get-verbatim-tool-result", e);
+        auditUnauthorized(auditLogger, CHANNELS.chat.getVerbatimToolResult, e);
         return null;
       }
       if (sessionId !== conversationLoop.getSessionId()) return null;
@@ -1194,10 +1195,10 @@ export function registerChatHandlers(deps: IpcDeps): void {
   //   - sessionId / toolUseId fail safe-id validation (no path separators)
   //   - sidecar file not found or unreadable
   ipcMain.handle(
-    "lvis:chat:get-write-diff",
+    CHANNELS.chat.getWriteDiff,
     async (e, payload: unknown): Promise<{ before: string; after: string } | null> => {
       if (!validateSender(e)) {
-        auditUnauthorized(auditLogger, "lvis:chat:get-write-diff", e);
+        auditUnauthorized(auditLogger, CHANNELS.chat.getWriteDiff, e);
         return null;
       }
       const p = (payload ?? {}) as Record<string, unknown>;
@@ -1211,9 +1212,9 @@ export function registerChatHandlers(deps: IpcDeps): void {
   );
 
   // ─── ask_user_question response ─────────────────────────────────────────
-  ipcMain.handle("lvis:ask-user-question:respond", (e, response: unknown) => {
+  ipcMain.handle(CHANNELS.askUserQuestion.respond, (e, response: unknown) => {
     if (!validateSender(e)) {
-      auditUnauthorized(auditLogger, "lvis:ask-user-question:respond", e);
+      auditUnauthorized(auditLogger, CHANNELS.askUserQuestion.respond, e);
       return UNAUTHORIZED_FRAME;
     }
     if (!askUserQuestionGate) {
