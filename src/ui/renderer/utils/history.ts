@@ -149,6 +149,10 @@ export function historyToEntries(
             name: toolCall.name,
             displayOrder,
             input: toolCall.input,
+            source: toolCall.source,
+            category: toolCall.category,
+            pluginId: toolCall.pluginId,
+            mcpServerId: toolCall.mcpServerId,
           });
         });
       }

@@ -1,4 +1,4 @@
-import { Fragment, useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
+import { Fragment, useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import { useTranslation } from "../../i18n/react.js";
 import { flushSync } from "react-dom";
 import { ChevronDown, GitBranch, KeyRound, PanelRightOpen, Pencil, Star } from "lucide-react";
@@ -31,7 +31,7 @@ import { PermissionReviewStatusCard } from "./components/PermissionReviewStatusC
 import { DeferredApprovalChip } from "./components/DeferredApprovalChip.js";
 import { TurnActionBar } from "./components/TurnActionBar.js";
 import { StatusBar, type StatusBarProps } from "./components/StatusBar.js";
-import { ChatPreviewRail } from "./components/ChatPreviewRail.js";
+import { ChatSidePanel } from "./components/ChatSidePanel.js";
 // TurnSummaryFooter 컴포넌트는 2026-05-07 폐기. 토큰 정보는 TurnActionBar 의
 // TokenCostBadge (provider-truth, 토글 + tooltip breakdown) 가 단일 source 로
 // 표시. 시간 정보는 WorkGroup 헤더의 ⏱ T 가 흡수. turn_summary entry 는
@@ -315,6 +315,8 @@ export interface ChatViewProps {
   onRoutineAcknowledge?: (routineId: string, firedAt: string) => void;
   /** Toast surface rendered directly above the composer input. */
   statusBar?: StatusBarProps;
+  /** Floating activity affordance anchored to the chat column, not the side panel. */
+  actionPanelSlot?: ReactNode;
   /** Constrain transcript and composer to a centered reading column. */
   blogLayout?: boolean;
 }
@@ -357,7 +359,7 @@ function AskUserAnswerBubble({
   );
 }
 
-export function ChatView({ api, onAsk, onEditSave, onFork, onToggleStar, onRetryEffort, onContinueFromLastUser, isEntryStarred, onAbort, onGuide, onGuideError, onFeedback, subAgentSpawns, loadedSkills, hasAskQuestions, askQuestions, onResolveAskQuestion, plugins, onSelectPlugin, appMode = "work", onOpenApprovalQueue, currentSessionKind = "main", currentSessionTitle, sessions, onLoadSession, onRefreshSessions, commandActions, commandPopoverOpen, onCommandPopoverOpenChange, onPluginPrimaryAction, onRoutineAcknowledge, statusBar, blogLayout = false }: ChatViewProps) {
+export function ChatView({ api, onAsk, onEditSave, onFork, onToggleStar, onRetryEffort, onContinueFromLastUser, isEntryStarred, onAbort, onGuide, onGuideError, onFeedback, subAgentSpawns, loadedSkills, hasAskQuestions, askQuestions, onResolveAskQuestion, plugins, onSelectPlugin, appMode = "work", onOpenApprovalQueue, currentSessionKind = "main", currentSessionTitle, sessions, onLoadSession, onRefreshSessions, commandActions, commandPopoverOpen, onCommandPopoverOpenChange, onPluginPrimaryAction, onRoutineAcknowledge, statusBar, actionPanelSlot, blogLayout = false }: ChatViewProps) {
   const { t } = useTranslation();
   // We still need the api for SessionTodoPanel; obtain it via singleton.
   const workflowApi = getApi();
@@ -1827,11 +1829,14 @@ export function ChatView({ api, onAsk, onEditSave, onFork, onToggleStar, onRetry
 
   return (
     <div
-      className={`relative flex min-h-0 min-w-0 w-full flex-1 flex-col overflow-hidden ${
-        previewRailVisible ? "lg:pr-96" : ""
-      }`}
+      className="relative flex min-h-0 min-w-0 w-full flex-1 flex-row overflow-hidden"
       data-testid="chat-view-root"
     >
+      <div
+        className="relative flex min-h-0 min-w-0 flex-1 flex-col overflow-hidden"
+        data-testid="chat-main-column"
+      >
+      {actionPanelSlot}
       {hasApiKey === false && (
         <div className="absolute inset-x-4 top-1/2 z-10 flex -translate-y-1/2 justify-center">
           <Card className="w-full max-w-[400px]"><CardHeader className="text-center"><KeyRound className="mx-auto mb-2 h-10 w-10 text-muted-foreground" /><CardTitle>{t("chatView.noApiKeyTitle")}</CardTitle><CardDescription>{t("chatView.noApiKeyDescription")}</CardDescription></CardHeader>
@@ -1844,16 +1849,6 @@ export function ChatView({ api, onAsk, onEditSave, onFork, onToggleStar, onRetry
         onPluginPrimaryAction={onPluginPrimaryAction ?? noopPluginPrimaryAction}
         onRoutineAcknowledge={onRoutineAcknowledge}
       />
-      {previewRailVisible && (
-        <button
-          type="button"
-          className="absolute inset-0 z-30 bg-background/(--opacity-strong) backdrop-blur-[1px] lg:hidden"
-          aria-label={t("chatPreviewRail.close")}
-          onClick={() => {
-            setPreviewRailOpen(false);
-          }}
-        />
-      )}
       <div className="relative min-h-0 min-w-0 max-w-full flex-1 overflow-hidden">
       <div className="grid h-full min-h-0 min-w-0 grid-cols-1">
       <div className="relative min-h-0 min-w-0 overflow-hidden">
@@ -2165,8 +2160,9 @@ export function ChatView({ api, onAsk, onEditSave, onFork, onToggleStar, onRetry
           onResolved={onResolveAskQuestion}
         />
       </div>
+      </div>
       {previewRailVisible ? (
-        <ChatPreviewRail
+        <ChatSidePanel
           api={api}
           sessionId={currentSessionId}
           targets={previewModel.targets}
@@ -2176,7 +2172,7 @@ export function ChatView({ api, onAsk, onEditSave, onFork, onToggleStar, onRetry
           onClose={() => {
             setPreviewRailOpen(false);
           }}
-          className="absolute inset-y-0 right-0 z-50 flex w-[min(24rem,calc(100%-1rem))] shadow-2xl lg:w-96 lg:shadow-none"
+          className="relative z-40 flex w-[min(30rem,50vw)] shrink-0 self-stretch"
         />
       ) : null}
     </div>
