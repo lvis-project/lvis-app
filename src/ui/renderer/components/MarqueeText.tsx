@@ -70,10 +70,12 @@ export function MarqueeText({
       const overflow = contentWidth - viewportWidth;
       if (overflow > 1) {
         setOverflowing(true);
-        // ~40px/sec scroll, plus the baked-in end pauses (16% of the keyframe).
+        // ~40px/sec while moving. The keyframe reserves 16% of the cycle for
+        // edge pauses, so include that idle time instead of shortening travel.
         const PX_PER_SEC = 40;
+        const MOVING_KEYFRAME_RATIO = 0.84;
         const travel = contentWidth + 24; // content + gap between the two copies
-        setDurationSec(Math.max(6, travel / PX_PER_SEC));
+        setDurationSec(Math.max(8, travel / PX_PER_SEC / MOVING_KEYFRAME_RATIO));
       } else {
         setOverflowing(false);
       }
@@ -95,7 +97,7 @@ export function MarqueeText({
   );
 
   const rootClassName = overflowing
-    ? `relative lvis-marquee-viewport block min-w-0 ${className ?? ""}`
+    ? `relative lvis-marquee-viewport lvis-marquee-fade block min-w-0 ${className ?? ""}`
     : `relative block min-w-0 truncate ${className ?? ""}`;
 
   return (

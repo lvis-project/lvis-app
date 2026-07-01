@@ -106,6 +106,8 @@ export function makeMockLvisApi(overrides: ApiOverrides = {}): {
   emitPluginInstallProgress: (payload: unknown) => void;
   emitPluginInstallResult: (payload: unknown) => void;
   emitPluginRuntimeUpdated: (payload: { pluginId: string }) => void;
+  emitNotificationToast: (payload: unknown) => void;
+  emitNotificationClicked: (payload: unknown) => void;
 } {
   let settings = overrides.settings ?? DEFAULT_SETTINGS;
   let personaPrompts = overrides.personaPrompts ?? [];
@@ -155,6 +157,8 @@ export function makeMockLvisApi(overrides: ApiOverrides = {}): {
   const pluginInstallProgressHandlers = new Set<(payload: unknown) => void>();
   const pluginInstallResultHandlers = new Set<(payload: unknown) => void>();
   const pluginRuntimeUpdatedHandlers = new Set<(payload: { pluginId: string }) => void>();
+  const notificationToastHandlers = new Set<(payload: unknown) => void>();
+  const notificationClickedHandlers = new Set<(payload: unknown) => void>();
   const sessionTodoHandlers = new Set<(payload: unknown) => void>();
 
   const api: MockLvisApi = {
@@ -366,6 +370,15 @@ export function makeMockLvisApi(overrides: ApiOverrides = {}): {
       return () => chatStreamHandlers.delete(h);
     }),
     onChatFallback: vi.fn((_h: (payload: { from: string; to: string }) => void) => () => {}),
+    onNotificationToast: vi.fn((handler: (payload: unknown) => void) => {
+      notificationToastHandlers.add(handler);
+      return () => notificationToastHandlers.delete(handler);
+    }),
+    onNotificationClicked: vi.fn((handler: (payload: unknown) => void) => {
+      notificationClickedHandlers.add(handler);
+      return () => notificationClickedHandlers.delete(handler);
+    }),
+    notifyClick: vi.fn(async () => ({ ok: true })),
 
     starredList: vi.fn(async () => starred),
     listStarred: vi.fn(async () => starred),
@@ -587,6 +600,8 @@ export function makeMockLvisApi(overrides: ApiOverrides = {}): {
     emitPluginInstallProgress: (payload) => pluginInstallProgressHandlers.forEach((h) => h(payload)),
     emitPluginInstallResult: (payload) => pluginInstallResultHandlers.forEach((h) => h(payload)),
     emitPluginRuntimeUpdated: (payload) => pluginRuntimeUpdatedHandlers.forEach((h) => h(payload)),
+    emitNotificationToast: (payload) => notificationToastHandlers.forEach((h) => h(payload)),
+    emitNotificationClicked: (payload) => notificationClickedHandlers.forEach((h) => h(payload)),
   };
 }
 
