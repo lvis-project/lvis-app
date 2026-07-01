@@ -56,7 +56,7 @@ import type { HookResult } from "../audit/audit-schema.js";
 import { maskSensitiveData } from "../audit/dlp-filter.js";
 import type { RiskVerdict } from "../permissions/reviewer/risk-classifier.js";
 import { emitEffectShadowLog } from "../permissions/reviewer/risk-shadow-log.js";
-import { createEffectLedger, runWithEffectLedger, currentEffectLedger, type EffectLedger } from "../permissions/effect-ledger.js";
+import { runWithEffectLedger, type EffectLedger } from "../permissions/effect-ledger.js";
 import { runWithEffectGateContext } from "../permissions/effect-enforcement.js";
 import { CHOKEPOINT_EFFECT } from "../permissions/effect-kind.js";
 import { resolveReviewerSandboxCapability } from "../permissions/sandbox-capability.js";
@@ -98,6 +98,12 @@ import {
   dispatchReviewerForInteractiveAuto as dispatchReviewerForInteractiveAutoImpl,
 } from "./pipeline/reviewer-dispatch.js";
 import { AuditWriter } from "./pipeline/audit-writer.js";
+// ── C8 pipeline decomposition — the per-invocation mutable-state contract +
+// initial-state factory + the self-contained user-abort helper. The two
+// SECURITY-CRITICAL sandbox filesystem-containment relaxation blocks and their
+// mutable locals stay INLINE in executeOne (byte-identical). See
+// ./pipeline/invocation-context.ts for what was deliberately left inline.
+import { createInvocationContext, returnUserAbort } from "./pipeline/invocation-context.js";
 const log = createLogger("executor");
 /**
  * One-time guard for the shadow-sink construction warning. Process-wide so the
@@ -654,38 +660,27 @@ export class ToolExecutor {
     if (tool.pluginId) meta.pluginId = tool.pluginId;
     if (tool.mcpServerId) meta.mcpServerId = tool.mcpServerId;
 
-    const returnUserAbort = async (input: Record<string, unknown>): Promise<ToolResult> => {
-      const msg = t("be_executor.toolExecutionCancelled");
-      const durationMs = Date.now() - startTime;
-      const abortedPermission: PermissionCheckResult = {
-        decision: "deny",
-        reason: "user aborted turn",
-        layer: 0,
-      };
-      emitToolStart(callbacks, toolUse.name, input, meta);
-      callbacks?.onToolEnd?.(toolUse.name, msg, true, meta, undefined, durationMs);
-      await this.auditToolCall(
-        sessionId,
-        toolUse.name,
-        source,
-        trust,
-        input,
-        msg,
-        true,
-        startTime,
-        abortedPermission,
-        Infinity,
-        permissionContext,
-        invocationCategory,
-        executionCwd,
-        undefined,
-        "user-abort",
-      );
-      return { tool_use_id: toolUse.id, content: msg, is_error: true, durationMs };
-    };
+    // ── C8: user-abort terminal helper moved to ./pipeline/invocation-context.ts.
+    // Its wide capture surface (source/trust/invocationCategory/meta/callbacks/…)
+    // is threaded via a named-field deps object; `this.auditWriter` is passed
+    // directly (executeOne's private auditToolCall was a pure pass-through).
+    const abortDeps = (input: Record<string, unknown>): Parameters<typeof returnUserAbort>[0] => ({
+      input,
+      toolUse,
+      meta,
+      callbacks,
+      source,
+      trust,
+      invocationCategory,
+      sessionId,
+      permissionContext,
+      executionCwd,
+      startTime,
+      auditWriter: this.auditWriter,
+    });
 
     if (abortSignal?.aborted) {
-      return returnUserAbort(toolUse.input);
+      return returnUserAbort(abortDeps(toolUse.input));
     }
 
     const foldedExecutionCwd = caseFoldForMatch(canonicalizePathForMatch(executionCwd));
@@ -747,20 +742,20 @@ export class ToolExecutor {
     const approvalPurpose = buildApprovalPurposeSuggestion(finalInput, invocationPermissionContext);
     const reviewerInput = maskToolInputForDisplay(finalInput);
     if (abortSignal?.aborted) {
-      return returnUserAbort(finalInput);
+      return returnUserAbort(abortDeps(finalInput));
     }
-    // Within-round freshness: when the caller provided a getter we read
-    // the *current* additional-directories view at the top of this
-    // executeOne (rather than the snapshot taken when executeAll() was
-    // dispatched). This makes an `allow-once`/`allow-session` grant
-    // applied by an earlier tool visible to later tools in the same
-    // ordered run.
-    const baseAdditionalDirectories: readonly string[] =
-      invocationPermissionContext.getAdditionalDirectories?.()
-      ?? invocationPermissionContext.additionalDirectories
-      ?? [];
-    let invocationAllowedScope = buildAllowedScope(baseAdditionalDirectories);
-    let invocationRuntimeAllowedDirectories = buildRuntimeAllowedDirectories(baseAdditionalDirectories);
+    // ── C8: initial per-invocation state (see ./pipeline/invocation-context.ts).
+    // The factory builds the Layer-1 allowed scope + runtime allowed dirs + the
+    // parent/own effect ledgers exactly as the former inline initializers did,
+    // including the within-round freshness read of additionalDirectories.
+    // `invocationAllowedScope` / `invocationRuntimeAllowedDirectories` stay `let`
+    // LOCALS here (not context fields): applyApprovedDirectory reassigns them and
+    // the sandbox-relaxation blocks below read them inline — boxing them would
+    // force edits inside those byte-identical trust-boundary blocks.
+    const initialState = createInvocationContext(invocationPermissionContext);
+    const baseAdditionalDirectories = initialState.baseAdditionalDirectories;
+    let invocationAllowedScope = initialState.allowedScope;
+    let invocationRuntimeAllowedDirectories = initialState.runtimeAllowedDirectories;
     // Permission policy host-classifies-risk — shadow mode (always) + enforced
     // category (flag-gated). The declared category resolved above is the input;
     // when the flag is off this is a no-op and `invocationCategory` is unchanged.
@@ -768,18 +763,10 @@ export class ToolExecutor {
     // the host-derived one (flag on) — the effect shadow reconciles the declared
     // category against the host-observed effect summary post-execution.
     const declaredCategoryForEffectShadow = invocationCategory;
-    // Capture any AMBIENT (parent) ledger BEFORE opening this invocation's own
-    // ledger. For a top-level tool this is undefined; for a re-entrant
-    // `callTool(M)` it is the OUTER wrapper's ledger, so a MUTATING inner tool
-    // can propagate a child-mutation marker back onto the wrapper (a
-    // read-declared wrapper that mutates via delegation must not look like a read).
-    const parentEffectLedger = currentEffectLedger();
-    // Per-invocation effect ledger (observability only — no enforcement). A
-    // fresh ledger per executeOne; bound to the async chain around Step 6 so the
-    // in-process plugin hostApi closures record their host-mediated effects here.
-    // Created BEFORE resolveEnforcedCategory so its correlationId threads into
-    // BOTH the category shadow (here) and the effect shadow (post-exec).
-    const effectLedger: EffectLedger = createEffectLedger();
+    // Parent (ambient) + per-invocation effect ledgers — created in the factory
+    // (parent captured BEFORE own; full rationale lives in invocation-context.ts).
+    const parentEffectLedger = initialState.parentEffectLedger;
+    const effectLedger: EffectLedger = initialState.effectLedger;
     invocationCategory = this.resolveEnforcedCategory(
       tool,
       invocationCategory,
