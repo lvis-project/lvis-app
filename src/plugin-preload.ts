@@ -89,9 +89,17 @@ function unwrapEnvelope(reply: unknown): unknown {
   throw new Error("plugin-call-malformed-envelope");
 }
 
+function hasActiveUserActivation(): boolean {
+  return globalThis.navigator?.userActivation?.isActive === true;
+}
+
 contextBridge.exposeInMainWorld("lvisPlugin", {
   callTool: async (name: string, args?: unknown): Promise<unknown> =>
-    unwrapEnvelope(await ipcRenderer.invoke("lvis:plugin:call-tool", name, args)),
+    unwrapEnvelope(
+      await ipcRenderer.invoke("lvis:plugin:call-tool", name, args, {
+        userAction: hasActiveUserActivation(),
+      }),
+    ),
 
   emitEvent: async (type: string, data?: unknown): Promise<void> => {
     unwrapEnvelope(await ipcRenderer.invoke("lvis:plugin:emit-event", type, data));

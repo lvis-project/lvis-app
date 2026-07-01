@@ -318,7 +318,7 @@ describe("US-B1 regression — baseline manifest WITHOUT configSchema still vali
       publisher: "Test fixture",
       entry: "dist/index.js",
       tools: ["meeting_start", "meeting_stop"],
-      uiCallable: ["meeting_start"],
+      uiActions: { meeting_start: {} },
       capabilities: ["meeting-recorder"],
       eventSubscriptions: ["calendar.event.started"],
       toolSchemas: {

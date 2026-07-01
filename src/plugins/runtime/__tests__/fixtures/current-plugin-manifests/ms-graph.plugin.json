@@ -1,7 +1,7 @@
 {
   "id": "ms-graph",
   "name": "LVIS Microsoft 365",
-  "version": "0.3.36",
+  "version": "0.3.37",
   "icon": "Mail",
   "installPolicy": "admin",
   "publisher": "LG Electronics IT",
@@ -63,20 +63,6 @@
       "login.microsoftonline.com"
     ]
   },
-  "uiCallable": [
-    "msgraph_status",
-    "msgraph_auth",
-    "msgraph_signout",
-    "msgraph_list_environments",
-    "msgraph_set_environment",
-    "msgraph_calendar_today",
-    "msgraph_calendar_open_url",
-    "msgraph_calendar_open_viewer",
-    "msgraph_email_list",
-    "msgraph_email_open_url",
-    "msgraph_email_open_inbox",
-    "msgraph_email_compose_url"
-  ],
   "ui": [
     {
       "id": "outlook-control",
@@ -783,5 +769,19 @@
         "additionalProperties": false
       }
     }
+  },
+  "uiActions": {
+    "msgraph_status": {},
+    "msgraph_auth": {},
+    "msgraph_signout": {},
+    "msgraph_list_environments": {},
+    "msgraph_set_environment": {},
+    "msgraph_calendar_today": {},
+    "msgraph_calendar_open_url": {},
+    "msgraph_calendar_open_viewer": {},
+    "msgraph_email_list": {},
+    "msgraph_email_open_url": {},
+    "msgraph_email_open_inbox": {},
+    "msgraph_email_compose_url": {}
   }
 }

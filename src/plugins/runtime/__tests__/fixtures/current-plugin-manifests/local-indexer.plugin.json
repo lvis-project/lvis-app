@@ -1,7 +1,7 @@
 {
   "id": "local-indexer",
   "name": "LVIS Local Indexer",
-  "version": "0.5.1",
+  "version": "0.5.19",
   "icon": "Database",
   "publisher": "lvis-community",
   "installPolicy": "admin",
@@ -13,46 +13,19 @@
     "requirementsLock": "python-requirements.lock"
   },
   "tools": [
-    "index_scan",
-    "index_scan_cancel",
-    "index_scan_status",
-    "index_clear_warnings",
-    "index_documents",
-    "index_folders",
-    "index_folders_purge_orphans",
-    "index_refresh_folder",
-    "index_add_folder",
-    "index_add_folders",
-    "index_remove_folder",
-    "index_pick_folder",
-    "index_preview_folder",
-    "chat_preview",
     "index_search",
+    "index_scan",
+    "index_folders",
+    "index_documents",
     "index_get_document",
-    "document_index_scan",
-    "index_get_settings",
-    "index_set_image_embedding"
+    "index_scan_status"
   ],
   "capabilities": [
     "worker-client",
     "knowledge-index",
-    "document-indexer"
-  ],
-  "uiCallable": [
-    "index_scan",
-    "index_scan_cancel",
-    "index_scan_status",
-    "index_clear_warnings",
-    "index_documents",
-    "index_folders",
-    "index_refresh_folder",
-    "index_folders_purge_orphans",
-    "index_add_folders",
-    "index_remove_folder",
-    "index_pick_folder",
-    "index_preview_folder",
-    "index_get_settings",
-    "index_set_image_embedding"
+    "document-indexer",
+    "host:overlay",
+    "lifecycle-observer"
   ],
   "startupTimeoutMs": 30000,
   "eventSubscriptions": [
@@ -62,13 +35,35 @@
   ],
   "toolSchemas": {
     "index_scan": {
-      "description": "등록된 폴더를 즉시 스캔해 새 파일을 인덱싱합니다. 사용 시기: 사용자가 '문서 다시 인덱싱해줘', '방금 추가한 파일 반영해줘' 같이 최신화를 요청할 때, 또는 knowledge_search/chat_preview 결과가 예상보다 부족해 보일 때. 인자 없음. 반환: { indexed, totalIndexed, message }.",
+      "description": "문서를 인덱싱합니다. 세 가지 모드를 인자로 구분합니다: (1) 인자 없음 → 등록된 모든 폴더를 즉시 스캔해 새/변경 파일을 인덱싱 (사용자가 '문서 다시 인덱싱해줘', '방금 추가한 파일 반영해줘' 같이 최신화를 요청할 때, 또는 index_search 결과가 부족해 보일 때). 반환: { indexed, totalIndexed, message }. (2) folder 지정 → 등록된 그 폴더 하나만 증분 갱신(새/변경/삭제 파일만 조정, 전체 재스캔보다 가벼움). 반환: { folder, indexed, removed, failed, message }. (3) paths 지정 → 등록 폴더에 추가하지 않고 지정한 절대 경로 파일/폴더를 즉시 인덱싱(드래그앤드롭 등 이번 대화 한정 자료). 반환: { indexed, failed, jobId, message }. folder 와 paths 를 동시에 주지 마세요 — paths 가 우선합니다.",
       "inputSchema": {
         "$schema": "http://json-schema.org/draft-07/schema#",
         "type": "object",
-        "properties": {},
+        "properties": {
+          "folder": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 4096,
+            "description": "증분 갱신할 등록 폴더의 절대 경로. index_folders 결과에 포함된 경로를 전달하세요. 미지정 시 모든 등록 폴더를 스캔합니다."
+          },
+          "paths": {
+            "type": "array",
+            "items": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 4096
+            },
+            "minItems": 1,
+            "maxItems": 200,
+            "description": "등록 폴더에 추가하지 않고 즉시 인덱싱할 파일 또는 폴더의 절대 경로 목록 (1~200개). NUL 바이트와 시스템 경로는 호스트 측에서 차단됩니다."
+          }
+        },
         "additionalProperties": false
-      }
+      },
+      "pathFields": [
+        "folder",
+        "paths"
+      ]
     },
     "index_scan_cancel": {
       "description": "진행 중인 문서 스캔에 대해 중단을 요청합니다. 사용 시기: 사용자가 스캔 중 중단 버튼을 누르거나 '인덱싱 멈춰줘'라고 요청했을 때. 사용 안 함: 스캔 상태만 확인하려면 index_scan_status. 반환: { canceled, message }. 실제 중단은 worker가 현재 파일 처리를 마친 뒤 반영될 수 있습니다.",
@@ -80,7 +75,7 @@
       }
     },
     "index_documents": {
-      "description": "사용자가 파일 검색을 요청할 때 사용. 인덱싱된 문서 메타데이터를 페이지 단위로 반환합니다. 사용 시기: 어떤 문서가 검색 대상인지 목록이 필요할 때(특정 문서 지정 전). 사용 안 함: 내용 검색은 knowledge_search/chat_preview, 특정 문서 구조는 document_structure 를 사용. 인자: { limit?: integer (1~100, 기본 100), offset?: integer (≥0, 기본 0), full?: boolean (기본 false) }. 응답 (기본, LLM 용): { documents: Array<{doc_id, doc_name, type, path, status}>, total: number, hasMore: boolean }. 응답 (full=true, UI 표시용): documents 항목에 page_count, line_count 가 추가됨. hasMore=true 이면 offset 을 증가시켜 다음 페이지를 호출하세요. 서버측 hard cap(limit≤100) 이 있으므로 큰 limit 도 잘려 반환됩니다.",
+      "description": "사용자가 파일 검색을 요청할 때 사용. 인덱싱된 문서 메타데이터를 페이지 단위로 반환합니다. 사용 시기: 어떤 문서가 검색 대상인지 목록이 필요할 때(특정 문서 지정 전). 사용 안 함: 내용 검색은 knowledge_search/chat_preview, 특정 문서 구조는 document_structure 를 사용. 인자: { limit?: integer (1~100, 기본 100), offset?: integer (≥0, 기본 0), full?: boolean (기본 false) }. 응답 (기본, LLM 용): { documents: Array<{doc_id, doc_name, type, path, status, content_state}>, total: number, hasMore: boolean }. status 는 항상 'indexed'(목록에 보이는 문서). content_state 는 내용 품질을 구분: 'ok'(텍스트+벡터 정상), 'empty'(파싱은 됐으나 추출 텍스트 없음), 'embed_failed'(텍스트는 색인됐으나 임베딩 누락 → 의미 검색 불가, 키워드 검색만 가능). 'empty'/'embed_failed' 문서가 보이면 사용자에게 재색인이나 본문 부재를 안내하세요. 응답 (full=true, UI 표시용): documents 항목에 page_count, line_count 가 추가됨. hasMore=true 이면 offset 을 증가시켜 다음 페이지를 호출하세요. 서버측 hard cap(limit≤100) 이 있으므로 큰 limit 도 잘려 반환됩니다.",
       "inputSchema": {
         "$schema": "http://json-schema.org/draft-07/schema#",
         "type": "object",
@@ -108,74 +103,28 @@
       }
     },
     "index_folders": {
-      "description": "현재 인덱싱 대상으로 등록된 폴더 경로 목록을 반환합니다. 사용 시기: '어떤 폴더가 인덱싱되고 있지?' 같이 설정 확인. 사용 안 함: 문서 목록은 index_documents. 인자 없음. 반환: { folders: string[] }.",
-      "inputSchema": {
-        "$schema": "http://json-schema.org/draft-07/schema#",
-        "type": "object",
-        "properties": {},
-        "additionalProperties": false
-      }
-    },
-    "index_folders_purge_orphans": {
-      "description": "등록된 인덱스 폴더 기준으로 더 이상 존재하지 않는 고아(orphan) 문서 인덱스 항목을 정리합니다. 사용 시기: 폴더 구조를 크게 바꿨거나 삭제된 파일이 검색 결과에 남아 있을 때 UI에서 정리 작업을 실행할 때. 인자 없음. 반환: { folders, summaries, purged }.",
-      "inputSchema": {
-        "$schema": "http://json-schema.org/draft-07/schema#",
-        "type": "object",
-        "properties": {},
-        "additionalProperties": false
-      }
-    },
-    "index_refresh_folder": {
-      "description": "등록된 특정 폴더 하나만 증분 갱신합니다. 사용 시기: 사용자가 '이 폴더만 다시 스캔해줘'라고 요청하거나 특정 폴더 변경만 빠르게 반영하고 싶을 때. 새 파일·변경 파일·삭제 파일만 조정하므로 전체 재스캔보다 가볍습니다. 사용 안 함: 모든 등록 폴더 갱신은 index_scan, 등록되지 않은 경로 즉시 인덱싱은 document_index_scan. 반환: { indexed, removed, failed, folder, message }.",
+      "description": "인덱싱 대상 폴더를 관리합니다. action 으로 동작을 구분합니다: (1) action 'list'(기본, 인자 생략 가능) → 현재 등록된 폴더 목록/상태를 반환 ('어떤 폴더가 인덱싱되고 있지?'). 반환: { folders, summaries }. (2) action 'add' + folder(단일) 또는 folders(다중 배열) → 인덱싱 대상 폴더 추가. 시스템/민감 경로(~/.ssh, /etc 등)와 다른 사용자 홈은 차단됩니다. 추가 후 index_scan 으로 인덱싱을 트리거하세요. 단일 추가 반환: { folders, added: boolean, message, summary }; 다중 추가 반환: { folders, added: string[], skipped, failures }. (3) action 'remove' + folder → 인덱싱 대상에서 폴더 제거(해당 폴더 문서는 검색에서 빠짐). 반환: { folders, removed: boolean, message }. 사용 안 함: 문서 목록은 index_documents.",
       "inputSchema": {
         "$schema": "http://json-schema.org/draft-07/schema#",
         "type": "object",
         "properties": {
-          "folder": {
+          "action": {
             "type": "string",
-            "minLength": 1,
-            "maxLength": 4096,
-            "description": "갱신할 등록 폴더의 절대 경로. index_folders 결과에 포함된 경로를 전달하세요."
-          }
-        },
-        "required": [
-          "folder"
-        ],
-        "additionalProperties": false
-      },
-      "pathFields": [
-        "folder"
-      ]
-    },
-    "index_add_folder": {
-      "description": "인덱싱 대상 폴더를 추가합니다. 사용 시기: 사용자가 '이 폴더도 검색 대상에 추가해줘' 라고 명시적으로 요청할 때. 시스템 디렉토리나 민감 경로(~/.ssh, /etc 등)는 차단됩니다. 추가 후에는 index_scan 을 불러 인덱싱을 트리거하세요. 반환: { folders, added: boolean, message }.",
-      "inputSchema": {
-        "$schema": "http://json-schema.org/draft-07/schema#",
-        "type": "object",
-        "properties": {
+            "enum": [
+              "list",
+              "add",
+              "remove"
+            ],
+            "default": "list",
+            "description": "수행할 동작. list=등록 폴더 조회(기본), add=폴더 추가(folder 또는 folders 필요), remove=폴더 제거(folder 필요)."
+          },
           "folder": {
             "type": "string",
             "minLength": 1,
             "maxLength": 4096,
             "pattern": "^([A-Za-z]:[\\\\/]|/|~|\\.)",
-            "description": "추가할 폴더의 절대 경로 또는 ~ / 상대 경로 (예: /Users/ken/Documents). NUL 바이트는 호스트 측에서 거부됩니다."
-          }
-        },
-        "required": [
-          "folder"
-        ],
-        "additionalProperties": false
-      },
-      "pathFields": [
-        "folder"
-      ]
-    },
-    "index_add_folders": {
-      "description": "여러 인덱싱 대상 폴더를 한 번에 추가합니다. 사용 시기: UI 폴더 선택 모달에서 다중 선택 후 일괄 등록할 때 — N개를 한 번에 추가해도 rebuild는 1회만 수행해 부하를 줄입니다. 차단 경로(시스템/민감)나 고변동(Downloads 등)은 failures에 담겨 반환되며, 이미 등록된 폴더는 skipped로 분리됩니다. 반환: { folders, added: string[], skipped: { folder, reason }[], failures: { folder, error }[] }.",
-      "inputSchema": {
-        "$schema": "http://json-schema.org/draft-07/schema#",
-        "type": "object",
-        "properties": {
+            "description": "add(단일) 또는 remove 대상 폴더의 절대 경로 또는 ~ / 상대 경로 (예: /Users/ken/Documents). NUL 바이트는 호스트 측에서 거부됩니다."
+          },
           "folders": {
             "type": "array",
             "items": {
@@ -185,39 +134,24 @@
             },
             "minItems": 1,
             "maxItems": 200,
-            "description": "추가할 폴더 절대 경로 배열 (1~200개)"
+            "description": "action 'add' 다중 추가용 폴더 절대 경로 배열 (1~200개). N개를 한 번에 추가해도 rebuild 는 1회만 수행합니다."
           }
         },
-        "required": [
-          "folders"
-        ],
         "additionalProperties": false
       },
       "pathFields": [
+        "folder",
         "folders"
       ]
     },
-    "index_remove_folder": {
-      "description": "인덱싱 대상에서 폴더를 제거합니다. 사용 시기: 사용자가 '이 폴더는 더 이상 검색하지 마' 라고 명시할 때만. 제거 시 해당 폴더의 이미 인덱싱된 문서는 검색에서 빠집니다. 반환: { folders, removed: boolean, message }.",
+    "index_folders_purge_orphans": {
+      "description": "등록된 인덱스 폴더 기준으로 더 이상 존재하지 않는 고아(orphan) 문서 인덱스 항목을 정리합니다. 사용 시기: 폴더 구조를 크게 바꿨거나 삭제된 파일이 검색 결과에 남아 있을 때 UI에서 정리 작업을 실행할 때. 인자 없음. 반환: { folders, summaries, purged }.",
       "inputSchema": {
         "$schema": "http://json-schema.org/draft-07/schema#",
         "type": "object",
-        "properties": {
-          "folder": {
-            "type": "string",
-            "minLength": 1,
-            "maxLength": 4096,
-            "description": "제거할 폴더의 절대 경로 또는 상대 경로"
-          }
-        },
-        "required": [
-          "folder"
-        ],
+        "properties": {},
         "additionalProperties": false
-      },
-      "pathFields": [
-        "folder"
-      ]
+      }
     },
     "index_pick_folder": {
       "description": "OS 네이티브 폴더 선택 다이얼로그(다중 선택 허용)를 띄워 사용자가 고른 폴더 경로 배열을 반환합니다. UI '폴더 추가' 버튼 전용 — webview 샌드박스가 dialog.showOpenDialog를 직접 호출하지 못하므로 호스트가 대신 띄웁니다. 인자 없음. 반환: { folders: string[], canceled: boolean }.",
@@ -250,27 +184,8 @@
         "folder"
       ]
     },
-    "chat_preview": {
-      "description": "자연어 질문을 인덱싱된 문서에서 BM25 로 검색해 미리보기 텍스트를 반환합니다. 사용 시기: 빠른 키워드-기반 1차 스크린 또는 UI 의 'preview' 영역이 필요할 때. 사용 안 함: 하이브리드(BM25+벡터) 정밀 검색은 knowledge_search 를 우선 사용. 반환: { question, documentCount, results, preview }.",
-      "inputSchema": {
-        "$schema": "http://json-schema.org/draft-07/schema#",
-        "type": "object",
-        "properties": {
-          "question": {
-            "type": "string",
-            "minLength": 1,
-            "maxLength": 2000,
-            "description": "검색할 자연어 질문 (예: '보안 정책 문서에서 비밀번호 규정은?'). 최대 2000자."
-          }
-        },
-        "required": [
-          "question"
-        ],
-        "additionalProperties": false
-      }
-    },
     "index_search": {
-      "description": "인덱싱된 문서를 BM25/벡터/하이브리드 모드로 검색합니다. (파일/이미지 찾기) 사용 시기: 호출자가 정밀도(하이브리드) 또는 모드를 직접 지정해 검색 결과 청크 목록이 필요할 때. 사용 안 함: 사람에게 보여줄 짧은 미리보기 문자열만 필요하면 chat_preview. 반환: { query, mode, topK, hits: [{ chunkId, docId, docName, page, score, source, path, snippet, rawText }] }. source는 'bm25'|'vector'|'hybrid' 중 하나로 정규화되어 반환됩니다.",
+      "description": "인덱싱된 문서를 검색합니다 (파일/이미지 찾기). mode 로 동작이 갈립니다: vector/hybrid(기본 hybrid) → 정밀 검색 결과 청크 목록을 반환: { query, mode, topK, hits: [{ chunkId, docId, docName, page, score, source, path, snippet, rawText }] } (source 는 'bm25'|'vector'|'hybrid' 로 정규화). bm25 → 빠른 키워드 1차 스크린 + 사람이 읽을 미리보기 문자열을 반환: { question, documentCount, results, preview } (topK 무시, 최대 5건). 정밀도가 필요하면 hybrid, 짧은 미리보기 문자열만 필요하면 bm25 를 쓰세요.",
       "inputSchema": {
         "$schema": "http://json-schema.org/draft-07/schema#",
         "type": "object",
@@ -289,7 +204,7 @@
               "hybrid"
             ],
             "default": "hybrid",
-            "description": "검색 방식. bm25=키워드 전용, vector=의미 검색(임베딩 설정 필요), hybrid=둘을 RRF로 결합."
+            "description": "검색 방식. bm25=키워드 전용 미리보기(documentCount/preview 문자열 반환, topK 무시·최대 5건), vector=의미 검색(임베딩 설정 필요, hits 반환), hybrid=둘을 RRF로 결합(hits 반환)."
           },
           "topK": {
             "type": "integer",
@@ -306,7 +221,7 @@
       }
     },
     "index_get_document": {
-      "description": "doc_id로 인덱싱된 문서의 메타데이터와 (옵션) 페이지 본문을 반환합니다. 사용 시기: 검색 히트(index_search)에서 받은 docId의 본문/페이지가 필요하거나, UI 결과 클릭 시 미리보기를 표시할 때 — 파일 재파싱 없이 인덱스 DB에서 바로 조회. 사용 안 함: 전체 문서 목록은 index_documents. 반환: { doc: { docId, docName, type, path, pageCount, lineCount, indexedAt, status }, pages: [{ page, content }] }.",
+      "description": "doc_id로 인덱싱된 문서의 메타데이터와 (옵션) 페이지 본문을 반환합니다. 사용 시기: 검색 히트(index_search)에서 받은 docId의 본문/페이지가 필요하거나, UI 결과 클릭 시 미리보기를 표시할 때 — 파일 재파싱 없이 인덱스 DB에서 바로 조회. 사용 안 함: 전체 문서 목록은 index_documents. 반환: { doc: { docId, docName, type, path, pageCount, lineCount, indexedAt, status, contentState }, pages: [{ page, content }] }. contentState 는 'ok' | 'empty' | 'embed_failed' — 'empty'(추출 텍스트 없음) 또는 'embed_failed'(임베딩 누락, 의미 검색 불가)이면 사용자에게 본문 부재/재색인을 안내하세요.",
       "inputSchema": {
         "$schema": "http://json-schema.org/draft-07/schema#",
         "type": "object",
@@ -353,33 +268,6 @@
         "additionalProperties": false
       }
     },
-    "document_index_scan": {
-      "description": "지정된 절대 경로 파일/폴더 목록을 Local Indexer로 즉시 인덱싱합니다. 사용 시기: 사용자가 파일/폴더를 앱에 드래그 앤 드롭했거나, 등록 폴더에 추가하지 않고 이번 대화에서만 특정 자료를 검색 가능하게 만들고 싶을 때. 사용 안 함: 지속적으로 감시할 폴더는 index_add_folder 후 index_scan. 반환: { indexed, failed, jobId, message }.",
-      "inputSchema": {
-        "$schema": "http://json-schema.org/draft-07/schema#",
-        "type": "object",
-        "properties": {
-          "paths": {
-            "type": "array",
-            "items": {
-              "type": "string",
-              "minLength": 1,
-              "maxLength": 4096
-            },
-            "minItems": 1,
-            "maxItems": 200,
-            "description": "인덱싱할 파일 또는 폴더의 절대 경로 목록 (1~200개). NUL 바이트와 시스템 경로는 호스트 측에서 차단됩니다."
-          }
-        },
-        "required": [
-          "paths"
-        ],
-        "additionalProperties": false
-      },
-      "pathFields": [
-        "paths"
-      ]
-    },
     "index_get_settings": {
       "description": "Local Indexer 의 현재 설정(텍스트 임베딩/이미지 캡션) 스냅샷을 반환합니다. UI 토글 초기값 로딩 전용. 반환: { imageEmbeddingEnabled, imageCaptionProvider, imageCaptionModel, embeddingProvider, embeddingModel, hasApiKey }.",
       "inputSchema": {
@@ -410,7 +298,7 @@
   "keywords": [
     {
       "keyword": "문서",
-      "skillId": "chat_preview"
+      "skillId": "index_search"
     },
     {
       "keyword": "인덱스",
@@ -418,23 +306,23 @@
     },
     {
       "keyword": "검색",
-      "skillId": "chat_preview"
+      "skillId": "index_search"
     },
     {
       "keyword": "문서검색",
-      "skillId": "chat_preview"
+      "skillId": "index_search"
     },
     {
       "keyword": "PDF",
-      "skillId": "chat_preview"
+      "skillId": "index_search"
     },
     {
       "keyword": "파일검색",
-      "skillId": "chat_preview"
+      "skillId": "index_search"
     },
     {
       "keyword": "문서찾기",
-      "skillId": "chat_preview"
+      "skillId": "index_search"
     },
     {
       "keyword": "인덱싱",
@@ -583,11 +471,25 @@
           "plugin"
         ],
         "default": "host"
+      },
+      "maxFileSize": {
+        "type": "integer",
+        "title": "최대 파일 크기 (바이트)",
+        "description": "이 크기를 초과하는 파일은 파싱 없이 status='failed' 로 기록됩니다 (무시/silent skip 아님 — 사용자에게 명시적 실패로 표면화). 기본값 52428800 = 50 MB. 0 으로 설정하면 제한 없음.",
+        "default": 52428800,
+        "minimum": 0
+      },
+      "maxChunksPerDoc": {
+        "type": "integer",
+        "title": "문서당 최대 청크 수",
+        "description": "단일 문서에서 생성할 수 있는 최대 청크 수. 초과 시 앞쪽 청크를 유지하고 나머지를 잘라냅니다 (IndexResult.errors[] 에 경고 기록, 인덱싱은 계속). 기본값 2000.",
+        "default": 2000,
+        "minimum": 1
       }
     }
   },
   "requires": {
-    "minAppVersion": "0.4.1"
+    "minAppVersion": "0.4.2"
   },
   "hostSecrets": {
     "read": [
@@ -601,7 +503,7 @@
       "openai.azure.com",
       "cognitiveservices.azure.com"
     ],
-    "reasoning": "워커의 임베딩/비전 캡셔닝 egress. 이 정적 allow-list는 디폴트 OpenAI/Azure 호스트(api.openai.com, *.openai.azure.com, *.cognitiveservices.azure.com — dot-boundary suffix-match)만 커버한다. 단, 워커 코드는 사용자가 지정하는 임의의 OpenAI-호환 endpoint도 호출할 수 있다(이미지 캡셔너의 base_url, 임베딩의 --embedding-endpoint). 사용자-설정 커스텀 endpoint는 그 host가 위 정적 suffix와 일치하거나 호스트 egress union에 편입된 경우에만 도달 가능하며, suffix에 맞지 않는 비-Azure 커스텀 endpoint는 strict-union 하에서 hard-deny될 수 있다."
+    "reasoning": "워커의 임베딩/비전 캡셔닝 egress. 이 정적 allow-list는 디폴트 OpenAI/Azure 호스트(api.openai.com, *.openai.azure.com, *.cognitiveservices.azure.com — dot-boundary suffix-match)만 커버한다. host-mediated egress broker(P3 ⑬, src/egressBroker.ts) 도입 후, 워커는 provider 키를 보유하지 않고 loopback broker(<base>/egress/embedding, <base>/egress/caption)로만 egress하며, 실제 provider 호출은 호스트-측 broker가 채널별로 upstream을 고정(isTrustedEndpointUrl + SSRF-검증된 커스텀 endpoint)하고 실 키를 inject한다. 따라서 워커가 임의 host를 지정할 수 없고, 사용자-설정 커스텀 OpenAI-호환 endpoint(이미지 캡셔너의 base_url, 임베딩의 --embedding-endpoint)는 broker의 host-측 allow-list에서만 도달 가능하다 — suffix에 맞지 않는 비-Azure 커스텀 endpoint는 strict-union 하에서 hard-deny될 수 있다."
   },
   "emittedEvents": [
     "index.document.updated",
@@ -609,5 +511,18 @@
     "index.scan.progress",
     "index.scan.completed",
     "index.warning"
-  ]
+  ],
+  "uiActions": {
+    "index_scan": {},
+    "index_scan_cancel": {},
+    "index_scan_status": {},
+    "index_clear_warnings": {},
+    "index_documents": {},
+    "index_folders": {},
+    "index_folders_purge_orphans": {},
+    "index_pick_folder": {},
+    "index_preview_folder": {},
+    "index_get_settings": {},
+    "index_set_image_embedding": {}
+  }
 }

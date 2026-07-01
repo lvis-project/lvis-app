@@ -934,9 +934,16 @@ export function registerPluginsHandlers(deps: IpcDeps): void {
   // read-only, sender guard optional
   ipcMain.handle("lvis:plugins:perf-stats", () => pluginRuntime.getPerfStats());
 
-  ipcMain.handle("lvis:plugins:call", (e, method: string, payload?: unknown) => {
-    if (!validateSender(e)) { auditUnauthorized(auditLogger, "lvis:plugins:call", e); return UNAUTHORIZED_FRAME; }
-    return pluginRuntime.callFromUi(method, payload);
+  ipcMain.handle("lvis:plugins:call", (
+    e,
+    method: string,
+    payload?: unknown,
+    options?: { userAction?: boolean },
+  ) => {
+    if (!validateHostRendererSender(e)) { auditUnauthorized(auditLogger, "lvis:plugins:call", e); return UNAUTHORIZED_FRAME; }
+    return pluginRuntime.callFromUi(method, payload, {
+      userAction: options?.userAction === true,
+    });
   });
 
   // ─── MCP ──────────────────────────────────────
@@ -1364,35 +1371,40 @@ export function registerPluginsHandlers(deps: IpcDeps): void {
     return { ok: true as const, theme: getLastThemePayload() };
   });
 
-  ipcMain.handle("lvis:plugin:call-tool", async (e, method: string, payload?: unknown) => {
-    const binding = resolvePluginFromSender(e);
-    if (!binding) {
-      auditUnauthorized(auditLogger, "lvis:plugin:call-tool", e);
-      return UNAUTHORIZED_FRAME;
-    }
-    if (typeof method !== "string" || !method.trim()) {
-      return { ok: false, error: "invalid-method" };
-    }
-    const ownerPluginId = pluginRuntime.resolveToolOwner(method);
-    if (!ownerPluginId) {
-      return { ok: false, error: `Plugin method not found: ${method}` };
-    }
-    if (ownerPluginId !== binding.pluginId) {
-      auditLogger.log({
-        timestamp: new Date().toISOString(),
-        sessionId: "plugin-frame",
-        type: "error",
-        input: `[plugin:${binding.pluginId}] cross-plugin call denied: method='${method}' owner='${ownerPluginId}'`,
-      });
-      return { ok: false, error: "cross-plugin-call-denied" };
-    }
-    try {
-      const result = await pluginRuntime.callFromUi(method, payload);
-      return { ok: true, result };
-    } catch (err) {
-      return { ok: false, error: (err as Error).message };
-    }
-  });
+  ipcMain.handle(
+    "lvis:plugin:call-tool",
+    async (e, method: string, payload?: unknown, options?: { userAction?: boolean }) => {
+      const binding = resolvePluginFromSender(e);
+      if (!binding) {
+        auditUnauthorized(auditLogger, "lvis:plugin:call-tool", e);
+        return UNAUTHORIZED_FRAME;
+      }
+      if (typeof method !== "string" || !method.trim()) {
+        return { ok: false, error: "invalid-method" };
+      }
+      const ownerPluginId = pluginRuntime.resolveToolOwner(method);
+      if (!ownerPluginId) {
+        return { ok: false, error: `Plugin method not found: ${method}` };
+      }
+      if (ownerPluginId !== binding.pluginId) {
+        auditLogger.log({
+          timestamp: new Date().toISOString(),
+          sessionId: "plugin-frame",
+          type: "error",
+          input: `[plugin:${binding.pluginId}] cross-plugin call denied: method='${method}' owner='${ownerPluginId}'`,
+        });
+        return { ok: false, error: "cross-plugin-call-denied" };
+      }
+      try {
+        const result = await pluginRuntime.callFromUi(method, payload, {
+          userAction: options?.userAction === true,
+        });
+        return { ok: true, result };
+      } catch (err) {
+        return { ok: false, error: (err as Error).message };
+      }
+    },
+  );
 
   // ─── Plugin webview config bridge (#B1 — bridge.config namespace) ─────────
   // Plugin UI webviews call these via `bridge.config.get/set(key)` to read/

@@ -196,6 +196,37 @@ describe("preload — plugin webview asset URLs", () => {
     }));
   });
 
+  it("does not trust renderer-minted plugin userAction flags", async () => {
+    const api = await loadLvisApi();
+    const callPluginMethod = api["callPluginMethod"] as (
+      method: string,
+      payload?: unknown,
+      options?: { userAction?: boolean },
+    ) => Promise<unknown>;
+
+    await callPluginMethod("sample_ui_action", { id: 1 }, { userAction: true });
+
+    expect(mockInvoke).toHaveBeenCalledWith("lvis:plugins:call", "sample_ui_action", { id: 1 }, {
+      userAction: false,
+    });
+  });
+
+  it("forwards plugin userAction only during active browser user activation", async () => {
+    mockUserActivation.isActive = true;
+    const api = await loadLvisApi();
+    const callPluginMethod = api["callPluginMethod"] as (
+      method: string,
+      payload?: unknown,
+      options?: { userAction?: boolean },
+    ) => Promise<unknown>;
+
+    await callPluginMethod("sample_ui_action", undefined, { userAction: true });
+
+    expect(mockInvoke).toHaveBeenCalledWith("lvis:plugins:call", "sample_ui_action", undefined, {
+      userAction: true,
+    });
+  });
+
   it("consumes captured chat user-intent tokens exactly once", async () => {
     mockUserActivation.isActive = true;
     const api = await loadLvisApi();
