@@ -53,6 +53,11 @@ import { LVIS_LOGO_PATH, LVIS_LOGO_VIEW_BOX } from "./shared/lvis-logo.js";
 import { getLvisAppVersion } from "./shared/app-version.js";
 import { normalizeSettingsTab } from "./shared/settings-tabs.js";
 import { installMarketplacePluginWithLifecycle } from "./plugins/install-lifecycle.js";
+import {
+  buildNetworkAccessAcknowledgement,
+  hasNetworkAccessDisclosure,
+  type NetworkAccessGrant,
+} from "./shared/network-access.js";
 import { ensureWorkspaceCwd } from "./main/ensure-workspace-cwd.js";
 import { uninstallPluginWithLifecycle } from "./plugins/uninstall-lifecycle.js";
 import { lvisHome } from "./shared/lvis-home.js";
@@ -433,7 +438,13 @@ const lvisDevWarn = (msg: string, obj?: object) => {
 async function resolveMarketplaceActionTarget(
   activeServices: AppServices,
   slug: string,
-): Promise<{ pluginId: string; name: string; installed?: boolean; isManaged?: boolean }> {
+): Promise<{
+  pluginId: string;
+  name: string;
+  installed?: boolean;
+  isManaged?: boolean;
+  networkAccess?: NetworkAccessGrant;
+}> {
   try {
     const catalogItems = await activeServices.pluginMarketplace.list();
     const item = catalogItems.find((candidate) => candidate.id === slug || candidate.slug === slug);
@@ -442,6 +453,7 @@ async function resolveMarketplaceActionTarget(
       name: item?.name ?? slug,
       installed: item?.installed,
       isManaged: item?.isManaged,
+      networkAccess: item?.networkAccess,
     };
   } catch (err) {
     lvisDevWarn("[lvis] marketplace target lookup failed; falling back to slug", {
@@ -450,6 +462,28 @@ async function resolveMarketplaceActionTarget(
     });
     return { pluginId: slug, name: slug };
   }
+}
+
+function appendNetworkAccessDisclosureDetail(
+  detail: string,
+  networkAccess: NetworkAccessGrant | undefined,
+): string {
+  if (!hasNetworkAccessDisclosure(networkAccess)) return detail;
+  const acknowledgement = buildNetworkAccessAcknowledgement(networkAccess);
+  const lines = [
+    detail,
+    "",
+    t("pluginInstallDialog.networkAccessTitle"),
+  ];
+  const reasoning = networkAccess?.reasoning?.trim();
+  if (reasoning) lines.push(reasoning);
+  if (acknowledgement?.allowedDomains.length) {
+    lines.push(`${t("pluginInstallDialog.allowedDomainsLabel")}: ${acknowledgement.allowedDomains.join(", ")}`);
+  }
+  if (acknowledgement?.allowPrivateNetworks === true) {
+    lines.push(t("pluginInstallDialog.allowPrivateNetworks"));
+  }
+  return lines.join("\n");
 }
 
 type MarketplacePackageType = "plugin" | "mcp" | "agent" | "skill";
@@ -895,6 +929,7 @@ async function handleLvisUri(url: string) {
     return;
   }
 
+  const target = await resolveMarketplaceActionTarget(activeServices, params.slug);
   lvisDevLog("[lvis] handleLvisUri: showing confirmation dialog", { slug: params.slug });
   const { response } = await dialog.showMessageBox(win, {
     type: "question",
@@ -902,11 +937,15 @@ async function handleLvisUri(url: string) {
     defaultId: 1,
     cancelId: 1,
     message: t("be_main.pluginInstallMsg", { slug: params.slug }),
-    detail: t("be_main.pluginInstallDetail"),
+    detail: appendNetworkAccessDisclosureDetail(
+      t("be_main.pluginInstallDetail"),
+      target.networkAccess,
+    ),
   });
   lvisDevLog("[lvis] handleLvisUri: dialog response", { slug: params.slug, response });
   if (response !== 0) return;
   lvisDevLog("[lvis] handleLvisUri: starting install", { slug: params.slug });
+  const networkAccessAcknowledgement = buildNetworkAccessAcknowledgement(target.networkAccess);
   let installProgressSlug = params.slug;
   void (async () => {
     const catalogItems = await activeServices.pluginMarketplace.list();
@@ -920,6 +959,7 @@ async function handleLvisUri(url: string) {
       requestedPluginId: params.slug,
       eventSlug: installLockId,
       lifecyclePluginId: installLockId,
+      networkAccessAcknowledgement,
       pluginRuntime: activeServices.pluginRuntime,
       pluginMarketplace: activeServices.pluginMarketplace,
       broadcastInstallProgress: (payload) =>

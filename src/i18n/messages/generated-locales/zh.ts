@@ -2694,4 +2694,7 @@ export const zhMessages: Record<string, string> = {
   "workGroup.stepCount": "{count} 步骤",
   "workGroup.work": "工作",
   "workGroup.working": "在职的...",
+  "pluginInstallDialog.allowPrivateNetworks": "This grant can reach private network addresses when an allowed domain resolves there.",
+  "pluginInstallDialog.allowedDomainsLabel": "Allowed domains",
+  "pluginInstallDialog.networkAccessTitle": "Network access requested",
 };
