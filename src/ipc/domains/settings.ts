@@ -6,6 +6,7 @@ import { app, ipcMain } from "electron";
 import { validateExternalUrl } from "../../shared/external-url.js";
 import { SETTINGS } from "../../shared/ipc-channels.js";
 import { validateSender, validateHostRendererSender, UNAUTHORIZED_FRAME, auditUnauthorized } from "../gated.js";
+import { CHANNELS } from "../../contract/app-contract.js";
 import { sendToWindow } from "../safe-send.js";
 import { normalizeLocale, setLocale, tryLoadLocaleMessages } from "../../i18n/index.js";
 import type { IpcDeps } from "../types.js";
@@ -60,10 +61,10 @@ export function registerSettingsHandlers(deps: IpcDeps): void {
   const { settingsService, conversationLoop, auditLogger } = deps;
 
   // read-only — no sender guard needed
-  ipcMain.handle("lvis:settings:get", () => settingsService.getAll());
+  ipcMain.handle(CHANNELS.settings.get, () => settingsService.getAll());
 
-  ipcMain.handle("lvis:settings:update", async (e, partial) => {
-    if (!validateSender(e)) { auditUnauthorized(auditLogger, "lvis:settings:update", e); return UNAUTHORIZED_FRAME; }
+  ipcMain.handle(CHANNELS.settings.update, async (e, partial) => {
+    if (!validateSender(e)) { auditUnauthorized(auditLogger, CHANNELS.settings.update, e); return UNAUTHORIZED_FRAME; }
     const llmPatch = (partial as Record<string, unknown> | null | undefined)
       ?.llm as Record<string, unknown> | undefined;
     if (
@@ -168,8 +169,8 @@ export function registerSettingsHandlers(deps: IpcDeps): void {
     return result;
   });
 
-  ipcMain.handle("lvis:settings:set-api-key", async (e, vendor: string, apiKey: string) => {
-    if (!validateSender(e)) { auditUnauthorized(auditLogger, "lvis:settings:set-api-key", e); return UNAUTHORIZED_FRAME; }
+  ipcMain.handle(CHANNELS.settings.setApiKey, async (e, vendor: string, apiKey: string) => {
+    if (!validateSender(e)) { auditUnauthorized(auditLogger, CHANNELS.settings.setApiKey, e); return UNAUTHORIZED_FRAME; }
     await settingsService.setSecret(`llm.apiKey.${vendor}`, apiKey);
     conversationLoop.refreshProvider();
     // MAJOR-2: rewire reviewer when provider key changes so cacheScope refreshes.
@@ -182,13 +183,13 @@ export function registerSettingsHandlers(deps: IpcDeps): void {
   });
 
   // read-only — sender guard optional
-  ipcMain.handle("lvis:settings:has-api-key", (_e, vendor?: string) => {
+  ipcMain.handle(CHANNELS.settings.hasApiKey, (_e, vendor?: string) => {
     const v = vendor ?? settingsService.get("llm").provider;
     return settingsService.getSecret(`llm.apiKey.${v}`) !== null;
   });
 
-  ipcMain.handle("lvis:settings:delete-api-key", async (e, vendor: string) => {
-    if (!validateSender(e)) { auditUnauthorized(auditLogger, "lvis:settings:delete-api-key", e); return UNAUTHORIZED_FRAME; }
+  ipcMain.handle(CHANNELS.settings.deleteApiKey, async (e, vendor: string) => {
+    if (!validateSender(e)) { auditUnauthorized(auditLogger, CHANNELS.settings.deleteApiKey, e); return UNAUTHORIZED_FRAME; }
     await settingsService.deleteSecret(`llm.apiKey.${vendor}`);
     conversationLoop.refreshProvider();
     // MAJOR-2: rewire reviewer when provider key is removed so cacheScope refreshes.
@@ -200,27 +201,27 @@ export function registerSettingsHandlers(deps: IpcDeps): void {
   });
 
   // ─── Marketplace API Key ──────────────────────
-  ipcMain.handle("lvis:settings:marketplace:set-api-key", async (e, apiKey: string) => {
-    if (!validateSender(e)) { auditUnauthorized(auditLogger, "lvis:settings:marketplace:set-api-key", e); return UNAUTHORIZED_FRAME; }
+  ipcMain.handle(CHANNELS.settings.marketplaceSetApiKey, async (e, apiKey: string) => {
+    if (!validateSender(e)) { auditUnauthorized(auditLogger, CHANNELS.settings.marketplaceSetApiKey, e); return UNAUTHORIZED_FRAME; }
     await settingsService.setSecret("marketplace.apiKey", apiKey);
     await broadcastSettingsSnapshot(deps);
     return { ok: true };
   });
 
-  ipcMain.handle("lvis:settings:marketplace:has-api-key", () =>
+  ipcMain.handle(CHANNELS.settings.marketplaceHasApiKey, () =>
     settingsService.getSecret("marketplace.apiKey") != null,
   );
 
-  ipcMain.handle("lvis:settings:marketplace:delete-api-key", async (e) => {
-    if (!validateSender(e)) { auditUnauthorized(auditLogger, "lvis:settings:marketplace:delete-api-key", e); return UNAUTHORIZED_FRAME; }
+  ipcMain.handle(CHANNELS.settings.marketplaceDeleteApiKey, async (e) => {
+    if (!validateSender(e)) { auditUnauthorized(auditLogger, CHANNELS.settings.marketplaceDeleteApiKey, e); return UNAUTHORIZED_FRAME; }
     await settingsService.deleteSecret("marketplace.apiKey");
     await broadcastSettingsSnapshot(deps);
     return { ok: true };
   });
 
   // ─── Shell external link ───────────────────────────
-  ipcMain.handle("lvis:shell:open-external", async (e, url: unknown) => {
-    if (!validateSender(e)) { auditUnauthorized(auditLogger, "lvis:shell:open-external", e); return UNAUTHORIZED_FRAME; }
+  ipcMain.handle(CHANNELS.shell.openExternal, async (e, url: unknown) => {
+    if (!validateSender(e)) { auditUnauthorized(auditLogger, CHANNELS.shell.openExternal, e); return UNAUTHORIZED_FRAME; }
     const { shell } = await import("electron");
     const validated = validateExternalUrl(url);
     if (!validated.ok) return validated;
@@ -233,20 +234,20 @@ export function registerSettingsHandlers(deps: IpcDeps): void {
   });
 
   // ─── Web Search Keys ───────────────────────────
-  ipcMain.handle("lvis:settings:set-web-api-key", async (e, provider: string, apiKey: string) => {
-    if (!validateSender(e)) { auditUnauthorized(auditLogger, "lvis:settings:set-web-api-key", e); return UNAUTHORIZED_FRAME; }
+  ipcMain.handle(CHANNELS.settings.setWebApiKey, async (e, provider: string, apiKey: string) => {
+    if (!validateSender(e)) { auditUnauthorized(auditLogger, CHANNELS.settings.setWebApiKey, e); return UNAUTHORIZED_FRAME; }
     await settingsService.setSecret(`web.apiKey.${provider}`, apiKey);
     await broadcastSettingsSnapshot(deps);
     return { ok: true };
   });
 
   // read-only — sender guard optional
-  ipcMain.handle("lvis:settings:has-web-api-key", (_e, provider: string) => {
+  ipcMain.handle(CHANNELS.settings.hasWebApiKey, (_e, provider: string) => {
     return settingsService.getSecret(`web.apiKey.${provider}`) !== null;
   });
 
-  ipcMain.handle("lvis:settings:delete-web-api-key", async (e, provider: string) => {
-    if (!validateSender(e)) { auditUnauthorized(auditLogger, "lvis:settings:delete-web-api-key", e); return UNAUTHORIZED_FRAME; }
+  ipcMain.handle(CHANNELS.settings.deleteWebApiKey, async (e, provider: string) => {
+    if (!validateSender(e)) { auditUnauthorized(auditLogger, CHANNELS.settings.deleteWebApiKey, e); return UNAUTHORIZED_FRAME; }
     await settingsService.deleteSecret(`web.apiKey.${provider}`);
     await broadcastSettingsSnapshot(deps);
     return { ok: true };
@@ -291,8 +292,8 @@ export function registerSettingsHandlers(deps: IpcDeps): void {
   });
 
   // ─── Telemetry consent ────────────────────────
-  ipcMain.handle("lvis:telemetry:consent-answer", async (e, accepted: boolean) => {
-    if (!validateSender(e)) { auditUnauthorized(auditLogger, "lvis:telemetry:consent-answer", e); return UNAUTHORIZED_FRAME; }
+  ipcMain.handle(CHANNELS.telemetry.consentAnswer, async (e, accepted: boolean) => {
+    if (!validateSender(e)) { auditUnauthorized(auditLogger, CHANNELS.telemetry.consentAnswer, e); return UNAUTHORIZED_FRAME; }
     await settingsService.patch({
       telemetry: {
         ...settingsService.get("telemetry"),
