@@ -20,7 +20,7 @@
 ### 1.2 Non-Goal
 
 - 새로운 plugin repo 생성 금지 (D4: 기존 `lvis-plugin-agent-hub` 활용 확정).
-- detached BrowserWindow 모드 추가 금지 (D1: host viewport slot 만). 기존 manifest 의 `"window.defaultMode": "detached"` 설정은 본 계획 안에서 `"embedded"` 로 변경하거나 제거한다.
+- detached BrowserWindow 모드 추가 금지 (D1: host viewport slot 만). 기존 manifest 의 detached-window 설정은 본 계획 안에서 제거한다.
 - ms-graph 외 외부 calendar/email source 추가 금지.
 - 별도 background coordinator 연동 금지. 필요한 제안은 `host:overlay` 경로만 사용한다.
 - backend hub server (Agent Hub FastAPI) 의 endpoint / contract 변경 금지 — 본 plan 은 client side only.
@@ -37,7 +37,7 @@
 
 | 경로 | 역할 | v3 대비 상태 |
 |------|------|----|
-| `plugin.json` | manifest, 22 tools, configSchema 6 keys | tools 충분. UI slot `kind=embedded-module` + `window.defaultMode=detached` — **수정 필요** |
+| `plugin.json` | manifest, 22 tools, configSchema 6 keys | tools 충분. UI slot `kind=embedded-module` + detached-window 설정 — **제거 필요** |
 | `src/hostPlugin.ts` | runtime entry, handler wiring, polling lifecycle | 골격 그대로 활용 가능 |
 | `src/types.ts` | `AgentHubConfig`, `WorkLogPayload`, `ApprovalRequestResponse` 등 backend wire types | 그대로 활용 |
 | `src/hubClient.ts` | FastAPI 호출 래퍼 (`/api/v1/work-logs`, `/api/v1/approval-requests`, `/api/v1/team-channels` 등) | 그대로 활용 |
@@ -70,11 +70,11 @@ const today = await context.hostApi.callTool<unknown[]>("msgraph_calendar_today"
   "displayName": "업무 보드",
   "entry": "dist/ui/agent-hub-panel.js",
   "exportName": "mount",
-  "window": { "defaultMode": "detached" }
+  "window": { "width": 960, "height": 720 }
 }]
 ```
 
-→ Lane 1 에서 이 ui entry 를 v3 의 3-row layout 으로 갈아끼우고 `window.defaultMode` 를 제거 (D1 결정).
+→ Lane 1 에서 이 ui entry 를 v3 의 3-row layout 으로 갈아끼우고 detached-window 설정을 제거 (D1 결정).
 
 **근거 인용 (`src/hostPlugin.ts` L96-108) — config merge 패턴:**
 
@@ -332,14 +332,14 @@ export type ApprovalChoice = "allow-once" | "allow-always" | "deny-once" | "deny
     "agent_hub_decide_approval_with_host"    // §8 ApprovalGate bridge wrapper
   ],
 
-  "uiCallable": [
+  "uiActions": {
     /* ... 기존 ... */
-    "agent_hub_my_work_board_v3",
-    "agent_hub_team_board_v3",
-    "agent_hub_today_team_schedule",
-    "agent_hub_briefing_summarize",
-    "agent_hub_decide_approval_with_host"
-  ],
+    "agent_hub_my_work_board_v3": {},
+    "agent_hub_team_board_v3": {},
+    "agent_hub_today_team_schedule": {},
+    "agent_hub_briefing_summarize": {},
+    "agent_hub_decide_approval_with_host": {}
+  },
 
   "ui": [
     {
@@ -351,7 +351,7 @@ export type ApprovalChoice = "allow-once" | "allow-always" | "deny-once" | "deny
       "description": "마이워크/팀보드 v3 — 3-row 압축 layout",
       "entry": "dist/ui/agent-hub-panel-v3.js",     // ★ NEW entry — v2.1 panel 과 병행
       "exportName": "mount"
-      /* ★ window.defaultMode 제거 — D1 결정에 따라 host viewport slot 만 */
+      /* ★ detached-window 설정 제거 — D1 결정에 따라 host viewport slot 만 */
     }
   ],
 
@@ -429,8 +429,8 @@ export type ApprovalChoice = "allow-once" | "allow-always" | "deny-once" | "deny
 |------|------|----------|
 | `version` 0.2.0 bump | Lane 1 | manifest + package.json + RELEASING.md |
 | `pluginAccess.plugins[].tools` 2건 추가 | Lane 4 | manifest + AJV schema sweep |
-| 신규 5 tool 추가 + uiCallable 5건 | Lane 3+4+5 | tool handler 파일 + manifest 동기 |
-| `ui.entry` 변경 + `window.defaultMode` 제거 | Lane 1, Lane 6 | manifest + tsup config + UI bundle 출력 경로 |
+| 신규 5 tool 추가 + uiActions 5건 | Lane 3+4+5 | tool handler 파일 + manifest 동기 |
+| `ui.entry` 변경 + detached-window 설정 제거 | Lane 1, Lane 6 | manifest + tsup config + UI bundle 출력 경로 |
 | `configSchema` 4 key 추가 | Lane 1 + Lane 7 | manifest + hostPlugin.ts configSchemaKeys + Zustand store reader |
 | `emittedEvents` 2건 추가 | Lane 3, Lane 5 | manifest + emit site |
 
@@ -498,7 +498,7 @@ export type ApprovalChoice = "allow-once" | "allow-always" | "deny-once" | "deny
 
 ### 5.3 `agent_hub_today_team_schedule`
 
-- **호출 source.** Direct (UI). LLM tool catalog 에는 노출하지 않음 (uiCallable only — v3 layout 데이터 fetcher 라 LLM 이 부르면 토큰 낭비).
+- **호출 source.** Direct (UI). LLM tool catalog 에는 노출하지 않음 (uiActions only — v3 layout 데이터 fetcher 라 LLM 이 부르면 토큰 낭비).
 - **Input.**
   ```ts
   { teamCode?: string; date?: string /* ISO date, default today KST */; }
@@ -757,7 +757,7 @@ _lvis-plugin-agent-hub 측:_
 
 _lvis-app 측:_
 - `docs/architecture/architecture.md` §10 / §10.1 갱신 — Agent Hub plugin v0.2.0 의 v3 IA 반영. 기존 §10.0 readiness status 도 update (Pilot → v3 GA 직전).
-- (선택) `src/__tests__/plugin-loading.test.ts` — agent-hub 0.2.0 의 manifest snapshot 이 host AJV 통과하는지 확인. 새 tool 5건 + uiCallable 5건 + window.defaultMode 제거 path.
+- (선택) `src/__tests__/plugin-loading.test.ts` — agent-hub 0.2.0 의 manifest snapshot 이 host AJV 통과하는지 확인. 새 tool 5건 + uiActions 5건 + detached-window 설정 제거 path.
 
 _lvis-marketplace 측:_
 - catalog entry 의 `versions` 항목에 `0.2.0` 추가. publish manifest 의 `dependencies[].pluginId="ms-graph"` `required=true` flip 이 marketplace UI 에 노출되게 한다 (사용자가 ms-graph 안 깔았을 때 install 막힘).
@@ -993,9 +993,9 @@ Deliverables (one PR titled "feat(agent-hub): v0.2.0 manifest + build skeleton f
    - pluginAccess.plugins[0].tools: keep existing + DO NOT add msgraph_calendar_list
      yet (Lane 4 will add). Keep ms-graph entry as-is for now.
    - tools[]: append the 5 new tool names listed in Section 4
-   - uiCallable[]: append same 5 names
+   - uiActions object: add the same 5 names as keys with `{}` specs
    - ui[0].entry: dist/ui/agent-hub-panel.js → dist/ui/agent-hub-panel-v3.js
-   - ui[0]: REMOVE the "window": { "defaultMode": "detached" } block
+   - ui[0]: REMOVE the detached-window settings block
    - configSchema.properties: add the 4 new keys per Section 4
      (appBarToggleDefault / llmBriefingMaxTokens / cardScrollMaxHeight /
       riskColorOverride)
@@ -1123,7 +1123,7 @@ Done = PR merged + build artifact verified + RELEASING.md notes present.
 
 | 결정 | 의미 | plan 내 위치 |
 |------|------|------|
-| D1 | Plugin UI 호스팅 = host viewport slot, detached BrowserWindow 아님 | manifest `window.defaultMode` 제거 (Section 4, Lane 1) |
+| D1 | Plugin UI 호스팅 = host viewport slot, detached BrowserWindow 아님 | manifest detached-window 설정 제거 (Section 4, Lane 1) |
 | D2 | MS Graph = lvis-plugin-ms-graph 의 method 를 HostApi callTool | Section 5.3, Lane 4 의 manifest pluginAccess 갱신 |
 | D3 | Approval = host §8 ApprovalGate 와 bridge | Section 2 A3 + Section 5.5 + Lane 5 |
 | D4 | 기존 lvis-plugin-agent-hub repo 활용 | Section 1.2 non-goal + 모든 lane 의 격리 path |

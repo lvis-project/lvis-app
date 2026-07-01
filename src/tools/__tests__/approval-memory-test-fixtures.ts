@@ -2,11 +2,13 @@ import { createDynamicTool, type Tool } from "../base.js";
 
 export function makeWriteProbeTool(
   executeSpy: (input: unknown) => Promise<unknown>,
+  options: Partial<Pick<Tool, "source" | "pluginId">> = {},
 ): Tool {
   return createDynamicTool({
     name: "write_probe",
     description: "write probe",
-    source: "builtin",
+    source: options.source ?? "builtin",
+    pluginId: options.pluginId,
     category: "write",
     pathFields: ["path"],
     jsonSchema: {

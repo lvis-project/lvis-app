@@ -1,7 +1,7 @@
 {
   "id": "lge-api",
   "name": "LVIS EP",
-  "version": "0.17.23",
+  "version": "0.17.24",
   "publisher": "LG Electronics IT",
   "installPolicy": "admin",
   "description": "EP(사내 포털 (EP)) SSO 세션을 이용해 LGE 사내 시설/회의실 예약, 빈 회의실 추천, LGenie 기반 사내 정책/규정 Q&A, 그리고 근태(출퇴근/연차/원격근무)와 일일 주차 신청까지 단일 로그인으로 제공하는 사내 포털 플러그인. 호스트: space.lge.com (EP), app.eaip.lge.com (LGenie), attendance.lge.com (근태), lgsp.co.kr (주차).",
@@ -53,27 +53,6 @@
     "lge-api.auth.changed",
     "lge-api.ui.open-request",
     "lge-api.video-conference.reserved"
-  ],
-  "uiCallable": [
-    "lge_login",
-    "lge_status",
-    "lge_profile_info",
-    "lge_signout",
-    "lge_meeting_list",
-    "lge_meeting_availability",
-    "lge_meeting_suggest",
-    "lge_meeting_reserve",
-    "lge_parking_list",
-    "lge_attendance_request_types",
-    "lge_video_conference_reserve",
-    "lge_attendance_clock",
-    "lge_attendance_today",
-    "lge_attendance_remote_work_request",
-    "lge_parking_apply",
-    "lge_parking_vehicle_register",
-    "lge_lgenie_query",
-    "lge_approval_count",
-    "lge_approval_open"
   ],
   "ui": [
     {
@@ -1379,5 +1358,26 @@
       }
     }
   },
-  "startupTimeoutMs": 5000
+  "startupTimeoutMs": 5000,
+  "uiActions": {
+    "lge_login": {},
+    "lge_status": {},
+    "lge_profile_info": {},
+    "lge_signout": {},
+    "lge_meeting_list": {},
+    "lge_meeting_availability": {},
+    "lge_meeting_suggest": {},
+    "lge_meeting_reserve": {},
+    "lge_parking_list": {},
+    "lge_attendance_request_types": {},
+    "lge_video_conference_reserve": {},
+    "lge_attendance_clock": {},
+    "lge_attendance_today": {},
+    "lge_attendance_remote_work_request": {},
+    "lge_parking_apply": {},
+    "lge_parking_vehicle_register": {},
+    "lge_lgenie_query": {},
+    "lge_approval_count": {},
+    "lge_approval_open": {}
+  }
 }

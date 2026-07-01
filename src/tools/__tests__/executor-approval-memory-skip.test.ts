@@ -18,6 +18,8 @@
  *   (f) overlay-trigger mutating + prior approval → ask wins (layer 2 hard
  *       gate is never memory-skipped)
  *   (g) headless path is unchanged — Store B is foreground-only
+ *   (h) plugin panel user action suppresses the normal agent approval modal
+ *       for foreground plugin asks, while hard/forceModal asks still prompt
  */
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 import { mkdtempSync, rmSync } from "node:fs";
@@ -434,6 +436,114 @@ describe("ToolExecutor — explicit-approval memory skips the foreground modal (
     expect(executeSpy).not.toHaveBeenCalled();
     // Store B is foreground-only — never consulted on the headless path.
     expect(lookupApprovalMock).not.toHaveBeenCalled();
+  });
+
+  it("(h) plugin panel user action suppresses normal foreground plugin ask", async () => {
+    const executeSpy = vi.fn(async () => "wrote");
+    const registry = new ToolRegistry();
+    registry.register(makeWriteProbeTool(executeSpy, { source: "plugin", pluginId: "meeting" }));
+
+    const permMgr = pmReturning({ decision: "ask", reason: "needs confirm", layer: 6 });
+    const requestAndWait = vi.fn();
+    const executor = new ToolExecutor(
+      registry,
+      undefined,
+      permMgr,
+      undefined,
+      { requestAndWait } as never,
+    );
+
+    const result = await executor.executeAll(
+      [{ id: "tu-plugin-panel", name: "write_probe", input: { path: join(dir, "file.txt") } }],
+      {
+        sessionId: "sess-plugin-panel",
+        permissionContext: userPermissionContext({
+          additionalDirectories: [dir],
+          pluginPanelUserAction: true,
+          trustOrigin: "plugin-emitted",
+        }),
+      },
+    );
+
+    expect(result[0].is_error).toBeUndefined();
+    expect(executeSpy).toHaveBeenCalledTimes(1);
+    expect(requestAndWait).not.toHaveBeenCalled();
+    expect(lookupApprovalMock).not.toHaveBeenCalled();
+  });
+
+  it("(h2) plugin panel user action does not suppress layer-2 hard asks", async () => {
+    const executeSpy = vi.fn(async () => "wrote");
+    const registry = new ToolRegistry();
+    registry.register(makeWriteProbeTool(executeSpy, { source: "plugin", pluginId: "meeting" }));
+
+    const permMgr = pmReturning({ decision: "ask", reason: "hard gate", layer: 2 });
+    const requestAndWait = vi.fn(async (req: { id: string }) => ({
+      requestId: req.id,
+      choice: "deny-once" as const,
+    }));
+    const executor = new ToolExecutor(
+      registry,
+      undefined,
+      permMgr,
+      undefined,
+      { requestAndWait } as never,
+    );
+
+    const result = await executor.executeAll(
+      [{ id: "tu-plugin-panel-hard", name: "write_probe", input: { path: join(dir, "file.txt") } }],
+      {
+        sessionId: "sess-plugin-panel-hard",
+        permissionContext: userPermissionContext({
+          additionalDirectories: [dir],
+          pluginPanelUserAction: true,
+          trustOrigin: "plugin-emitted",
+        }),
+      },
+    );
+
+    expect(requestAndWait).toHaveBeenCalledTimes(1);
+    expect(executeSpy).not.toHaveBeenCalled();
+    expect(result[0].is_error).toBe(true);
+  });
+
+  it("(h3) plugin panel user action does not suppress forceModal asks", async () => {
+    const executeSpy = vi.fn(async () => "wrote");
+    const registry = new ToolRegistry();
+    registry.register(makeWriteProbeTool(executeSpy, { source: "plugin", pluginId: "meeting" }));
+
+    const permMgr = pmReturning({
+      decision: "ask",
+      reason: "explicit per-invocation confirmation",
+      layer: 6,
+      forceModal: true,
+    });
+    const requestAndWait = vi.fn(async (req: { id: string }) => ({
+      requestId: req.id,
+      choice: "deny-once" as const,
+    }));
+    const executor = new ToolExecutor(
+      registry,
+      undefined,
+      permMgr,
+      undefined,
+      { requestAndWait } as never,
+    );
+
+    const result = await executor.executeAll(
+      [{ id: "tu-plugin-panel-force", name: "write_probe", input: { path: join(dir, "file.txt") } }],
+      {
+        sessionId: "sess-plugin-panel-force",
+        permissionContext: userPermissionContext({
+          additionalDirectories: [dir],
+          pluginPanelUserAction: true,
+          trustOrigin: "plugin-emitted",
+        }),
+      },
+    );
+
+    expect(requestAndWait).toHaveBeenCalledTimes(1);
+    expect(executeSpy).not.toHaveBeenCalled();
+    expect(result[0].is_error).toBe(true);
   });
 
   afterEach(() => {

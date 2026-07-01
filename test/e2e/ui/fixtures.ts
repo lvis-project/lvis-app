@@ -38,7 +38,7 @@ type E2eManifest = {
   version?: unknown;
   pluginAccess?: unknown;
   tools?: unknown;
-  uiCallable?: unknown;
+  uiActions?: unknown;
   hostSecrets?: { read?: unknown };
   toolSchemas?: Record<string, unknown>;
   ui?: unknown;
@@ -71,7 +71,7 @@ function prepareE2eManifest(manifest: E2eManifest, enableDemoKeyProbe: boolean):
     ...base,
     hostSecrets: { read: hostSecretReads },
     tools: addUniqueString(base.tools, E2E_RESOLVE_DEMO_KEY_TOOL),
-    uiCallable: addUniqueString(base.uiCallable, E2E_RESOLVE_DEMO_KEY_TOOL),
+    uiActions: addUniqueString(base.uiActions, E2E_RESOLVE_DEMO_KEY_TOOL),
     toolSchemas: {
       ...(base.toolSchemas ?? {}),
       [E2E_RESOLVE_DEMO_KEY_TOOL]: {

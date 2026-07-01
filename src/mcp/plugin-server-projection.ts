@@ -135,7 +135,7 @@ export function toolSchemaToMcpTool(
 /**
  * Project the manifest's declared tools to MCP `Tool[]`. A `tools[]` entry with
  * no matching `toolSchemas` entry is skipped (UI-only runtime methods live in
- * `uiCallable[]`, not `toolSchemas`, and are not model-callable MCP tools).
+ * `uiActions`, not `toolSchemas`, and are not model-callable MCP tools).
  */
 export function manifestToolsToMcpTools(manifest: PluginManifest): McpToolProjection[] {
   const schemas = manifest.toolSchemas ?? {};
