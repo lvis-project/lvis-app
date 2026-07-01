@@ -41,6 +41,7 @@ import {
 import { uninstallPluginWithLifecycle } from "../../plugins/uninstall-lifecycle.js";
 import { IncompatibleAppVersionError, INCOMPATIBLE_APP_VERSION_CODE } from "../../plugins/types.js";
 import { lvisHome } from "../../shared/lvis-home.js";
+import { handlePluginCards, handleMarketplaceList } from "../handlers/plugins.js";
 const log = createLogger("lvis");
 const MARKETPLACE_PING_TIMEOUT_MS = 15_000;
 const MARKETPLACE_PING_CACHE_TTL_MS = 10_000;
@@ -613,7 +614,7 @@ export function registerPluginsHandlers(deps: IpcDeps): void {
   });
 
   // read-only, sender guard optional
-  ipcMain.handle(CHANNELS.plugins.cards, () => pluginRuntime.listPluginCards(deps.toolRegistry));
+  ipcMain.handle(CHANNELS.plugins.cards, () => handlePluginCards(deps));
 
   ipcMain.handle(CHANNELS.runtime.counts, (e) => {
     if (!validateSender(e)) { auditUnauthorized(auditLogger, CHANNELS.runtime.counts, e); return UNAUTHORIZED_FRAME; }
@@ -640,7 +641,7 @@ export function registerPluginsHandlers(deps: IpcDeps): void {
   });
 
   // read-only, sender guard optional
-  ipcMain.handle(CHANNELS.plugins.marketplaceList, () => pluginMarketplace.list());
+  ipcMain.handle(CHANNELS.plugins.marketplaceList, () => handleMarketplaceList(deps));
 
   ipcMain.handle(CHANNELS.agents.list, async (e) => {
     if (!validateSender(e)) {
