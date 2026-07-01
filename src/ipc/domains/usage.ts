@@ -5,21 +5,18 @@
 import { ipcMain } from "electron";
 import { validateSender, UNAUTHORIZED_FRAME, auditUnauthorized } from "../gated.js";
 import type { IpcDeps } from "../types.js";
+import { handleUsageSummary, handleUsageRange } from "../handlers/usage.js";
 
 export function registerUsageHandlers(deps: IpcDeps): void {
   const { auditLogger } = deps;
 
   // read-only, sender guard optional
-  ipcMain.handle("lvis:usage:summary", async (_e, days?: number) => {
-    const { getUsageSummary } = await import("../../engine/usage-stats.js");
-    return getUsageSummary(typeof days === "number" ? days : 60);
-  });
+  ipcMain.handle("lvis:usage:summary", async (_e, days?: number) => handleUsageSummary(days));
 
   // read-only; sender guard optional but added for cross-window consistency
   ipcMain.handle("lvis:usage:range", async (e, opts: { dateFrom: string; dateTo: string }) => {
     if (!validateSender(e)) { auditUnauthorized(auditLogger, "lvis:usage:range", e); return UNAUTHORIZED_FRAME; }
-    const { getUsageRange } = await import("../../engine/usage-stats.js");
-    return getUsageRange(opts);
+    return handleUsageRange(opts);
   });
 
   ipcMain.handle("lvis:usage:export-csv", async (e, rows: Array<Record<string, string | number>>) => {
