@@ -81,6 +81,7 @@ export interface MainContentProps {
   /** Called when a completed routine overlay result has been seen or dismissed. */
   onRoutineAcknowledge?: (routineId: string, firedAt: string) => void;
   statusBar?: Parameters<typeof ChatView>[0]["statusBar"];
+  actionPanelSlot?: Parameters<typeof ChatView>[0]["actionPanelSlot"];
 }
 
 function MainPaneShell({
@@ -147,6 +148,7 @@ function HomeChatPane(props: MainContentProps) {
         onPluginPrimaryAction={props.onPluginPrimaryAction}
         onRoutineAcknowledge={props.onRoutineAcknowledge}
         statusBar={props.statusBar}
+        actionPanelSlot={props.actionPanelSlot}
         blogLayout={props.appMode === "work"}
       />
     </ChatContextProvider>

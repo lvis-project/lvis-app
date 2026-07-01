@@ -150,6 +150,19 @@ export function buildRenderHtmlCspMeta(allowScripts: boolean): string {
   return `<meta http-equiv="Content-Security-Policy" content="${escapeMetaAttribute(directives)}">`;
 }
 
+function buildRenderHtmlInlineFrameCspMeta(allowScripts: boolean): string {
+  const directives = [
+    "default-src 'none'",
+    allowScripts ? "script-src 'unsafe-inline' 'unsafe-eval'" : "",
+    "style-src 'unsafe-inline' data:",
+    "img-src data:",
+    "font-src data:",
+    "base-uri 'none'",
+    "form-action 'none'",
+  ].filter(Boolean).join("; ");
+  return `<meta http-equiv="Content-Security-Policy" content="${escapeMetaAttribute(directives)}">`;
+}
+
 function extractTagInner(html: string, tagName: "head" | "body"): string | null {
   const match = new RegExp(`<${tagName}\\b[^>]*>([\\s\\S]*?)<\\/${tagName}>`, "i").exec(html);
   return match?.[1] ?? null;
@@ -178,6 +191,19 @@ export function wrapRenderHtmlDocument(
 ): string {
   const cspMeta = buildRenderHtmlCspMeta(allowScripts);
   const themeStyle = buildRenderHtmlThemeStyle(themeTokens);
+  const { head, body } = extractRenderHtmlDocumentParts(html);
+  return `<!doctype html><html><head>${cspMeta}${themeStyle}${head}</head><body>${body}</body></html>`;
+}
+
+export function wrapRenderHtmlInlineFrameDocument(
+  html: string,
+  options: {
+    allowScripts?: boolean;
+    themeTokens?: RenderHtmlThemeTokens;
+  } = {},
+): string {
+  const cspMeta = buildRenderHtmlInlineFrameCspMeta(options.allowScripts ?? false);
+  const themeStyle = buildRenderHtmlThemeStyle(options.themeTokens);
   const { head, body } = extractRenderHtmlDocumentParts(html);
   return `<!doctype html><html><head>${cspMeta}${themeStyle}${head}</head><body>${body}</body></html>`;
 }
