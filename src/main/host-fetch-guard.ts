@@ -25,7 +25,7 @@
  * install), mirroring the MCP per-server `allowPrivateNetworks` flag. It is
  * NOT an unconditional skip: absent/false ⇒ private targets are rejected.
  */
-import { normalizeAllowedHosts, urlHostMatchesAllowList } from "./host-allow-list.js";
+import { urlHostMatchesAllowList } from "./host-allow-list.js";
 import {
   validateHttpUrl,
   ensurePublicHttpUrl,
@@ -80,7 +80,10 @@ export interface HostFetchGuardInput {
    * host-observed {@link HostFetchAllow.effect}; it does not gate egress.
    */
   method?: string;
-  /** `manifest.networkAccess.allowedDomains` — deny-by-default when empty. */
+  /**
+   * Normalized `manifest.networkAccess.allowedDomains`, validated at manifest
+   * load / host API creation. Deny-by-default when empty.
+   */
   allowedDomains: string[];
   /**
    * `manifest.networkAccess.allowPrivateNetworks` — the declarative,
@@ -141,32 +144,20 @@ export async function evaluateHostFetch(
     return deny(
       pluginId,
       "non-https",
-      `non-https scheme ${url.protocol}//${url.host}`,
+      `non-https scheme ${url.protocol}//${url.hostname}`,
       `hostFetch denied: only https is permitted (got ${url.protocol})`,
     );
   }
 
   // Deny-by-default allow-list (complete mediation): the plugin may only reach
-  // hosts declared in `manifest.networkAccess.allowedDomains`. Absent/empty ⇒
-  // no egress. A malformed list is a hard reject.
-  let allowedEgressHosts: string[];
-  try {
-    allowedEgressHosts = normalizeAllowedHosts(allowedDomains);
-  } catch (err) {
-    const reason = err instanceof Error ? err.message : String(err);
-    return deny(
-      pluginId,
-      "malformed-allowlist",
-      `invalid networkAccess.allowedDomains — ${reason}`,
-      `hostFetch rejected: invalid networkAccess.allowedDomains — ${reason}`,
-    );
-  }
-  if (!urlHostMatchesAllowList(url.hostname, allowedEgressHosts)) {
+  // hosts declared in `manifest.networkAccess.allowedDomains`. The list has
+  // already been normalized/validated before this hot path.
+  if (!urlHostMatchesAllowList(url.hostname, allowedDomains)) {
     return deny(
       pluginId,
       "not-allowlisted",
-      `${url.protocol}//${url.host} not in networkAccess.allowedDomains`,
-      `hostFetch denied: ${url.host} is not in networkAccess.allowedDomains (deny-by-default)`,
+      `${url.protocol}//${url.hostname} not in networkAccess.allowedDomains`,
+      `hostFetch denied: ${url.hostname} is not in networkAccess.allowedDomains (deny-by-default)`,
     );
   }
 
@@ -182,7 +173,7 @@ export async function evaluateHostFetch(
     return deny(
       pluginId,
       "ssrf-blocked",
-      `${url.protocol}//${url.host} ${reason}`,
+      `${url.protocol}//${url.hostname} ${reason}`,
       `hostFetch denied: ${reason}`,
     );
   }

@@ -46,6 +46,12 @@ describe("PluginMcpHost — first-party loopback registration + round-trip", () 
   it("registers plugin tools under natural names with plugin authority from _meta", async () => {
     const delegate: PluginToolDelegate = vi.fn(async (name, args) => ({
       content: [{ type: "text", text: `${name}:${JSON.stringify(args)}` }],
+      _meta: {
+        ui: {
+          resourceUri: "ui://notes/read.html",
+          csp: { connectSrc: ["https://api.example.com"] },
+        },
+      },
     }));
     const registry = new ToolRegistry();
     const host = PluginMcpHost.loopback(MANIFEST, delegate, registry);
@@ -69,7 +75,16 @@ describe("PluginMcpHost — first-party loopback registration + round-trip", () 
     // tools/call round-trips host → loopback → server → delegate → back.
     const result = await read!.execute({ path: "/a.md" }, {} as never);
     expect(delegate).toHaveBeenCalledWith("notes_read", { path: "/a.md" });
-    expect(result).toEqual({ output: 'notes_read:{"path":"/a.md"}', isError: false });
+    expect(result).toMatchObject({
+      output: 'notes_read:{"path":"/a.md"}',
+      isError: false,
+      metadata: {
+        uiPayload: {
+          resourceUri: "ui://notes/read.html",
+          csp: { connectSrc: ["https://api.example.com"] },
+        },
+      },
+    });
   });
 
   it("surfaces a thrown delegate as an isError tool result (not a host throw)", async () => {
