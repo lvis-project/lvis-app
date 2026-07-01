@@ -7,19 +7,22 @@ import { validateExternalUrl } from "../../shared/external-url.js";
 import { SETTINGS } from "../../shared/ipc-channels.js";
 import { validateSender, validateHostRendererSender, UNAUTHORIZED_FRAME, auditUnauthorized } from "../gated.js";
 import { sendToWindow } from "../safe-send.js";
-import { setLocale } from "../../i18n/index.js";
+import { normalizeLocale, setLocale, tryLoadLocaleMessages } from "../../i18n/index.js";
 import type { IpcDeps } from "../types.js";
 import type { LLMSettings } from "../../data/settings-store.js";
 
 /** Minor-1: extracted helper — 6 handlers share identical 5-line broadcast. */
-function broadcastSettingsSnapshot(deps: IpcDeps): void {
+async function broadcastSettingsSnapshot(deps: IpcDeps): Promise<void> {
   const snapshot = deps.settingsService.getAll();
   // Keep the main-process UI locale in sync with the persisted language so
   // dialogs/menus/notifications shown after a language switch use it too.
   // Optional-chain `appearance` — a partial snapshot (e.g. a test double or a
   // pre-migration settings file) must not crash the broadcast. setLocale
   // coerces undefined to the English default.
-  setLocale(snapshot.appearance?.language);
+  const nextLocale = normalizeLocale(snapshot.appearance?.language);
+  if (await tryLoadLocaleMessages(nextLocale)) {
+    setLocale(nextLocale);
+  }
   for (const win of deps.getAppWindows?.() ?? []) {
     sendToWindow(win, SETTINGS.updated, snapshot);
   }
@@ -143,7 +146,7 @@ export function registerSettingsHandlers(deps: IpcDeps): void {
         }
         conversationLoop.refreshProvider();
         deps.refreshActiveLlmWildcard?.();
-        broadcastSettingsSnapshot(deps);
+        await broadcastSettingsSnapshot(deps);
         return { ok: false, error: "reviewer-rewire-failed", message };
       }
     }
@@ -161,7 +164,7 @@ export function registerSettingsHandlers(deps: IpcDeps): void {
     if (vendorBaseUrlSignature(newLlm) !== prevVendorBaseUrlSig) {
       deps.refreshSandboxNetworkConfig?.();
     }
-    broadcastSettingsSnapshot(deps);
+    await broadcastSettingsSnapshot(deps);
     return result;
   });
 
@@ -174,7 +177,7 @@ export function registerSettingsHandlers(deps: IpcDeps): void {
     // #893 — refresh plugin wildcard with the new key for the active vendor.
     deps.refreshActiveLlmWildcard?.();
     // Broadcast settings snapshot so reviewer tab can auto-unlock without a full reload.
-    broadcastSettingsSnapshot(deps);
+    await broadcastSettingsSnapshot(deps);
     return { ok: true };
   });
 
@@ -192,7 +195,7 @@ export function registerSettingsHandlers(deps: IpcDeps): void {
     deps.rewireReviewerAgent?.();
     // #893 — refresh plugin wildcard so the now-missing key is cleared.
     deps.refreshActiveLlmWildcard?.();
-    broadcastSettingsSnapshot(deps);
+    await broadcastSettingsSnapshot(deps);
     return { ok: true };
   });
 
@@ -200,7 +203,7 @@ export function registerSettingsHandlers(deps: IpcDeps): void {
   ipcMain.handle("lvis:settings:marketplace:set-api-key", async (e, apiKey: string) => {
     if (!validateSender(e)) { auditUnauthorized(auditLogger, "lvis:settings:marketplace:set-api-key", e); return UNAUTHORIZED_FRAME; }
     await settingsService.setSecret("marketplace.apiKey", apiKey);
-    broadcastSettingsSnapshot(deps);
+    await broadcastSettingsSnapshot(deps);
     return { ok: true };
   });
 
@@ -211,7 +214,7 @@ export function registerSettingsHandlers(deps: IpcDeps): void {
   ipcMain.handle("lvis:settings:marketplace:delete-api-key", async (e) => {
     if (!validateSender(e)) { auditUnauthorized(auditLogger, "lvis:settings:marketplace:delete-api-key", e); return UNAUTHORIZED_FRAME; }
     await settingsService.deleteSecret("marketplace.apiKey");
-    broadcastSettingsSnapshot(deps);
+    await broadcastSettingsSnapshot(deps);
     return { ok: true };
   });
 
@@ -233,7 +236,7 @@ export function registerSettingsHandlers(deps: IpcDeps): void {
   ipcMain.handle("lvis:settings:set-web-api-key", async (e, provider: string, apiKey: string) => {
     if (!validateSender(e)) { auditUnauthorized(auditLogger, "lvis:settings:set-web-api-key", e); return UNAUTHORIZED_FRAME; }
     await settingsService.setSecret(`web.apiKey.${provider}`, apiKey);
-    broadcastSettingsSnapshot(deps);
+    await broadcastSettingsSnapshot(deps);
     return { ok: true };
   });
 
@@ -245,7 +248,7 @@ export function registerSettingsHandlers(deps: IpcDeps): void {
   ipcMain.handle("lvis:settings:delete-web-api-key", async (e, provider: string) => {
     if (!validateSender(e)) { auditUnauthorized(auditLogger, "lvis:settings:delete-web-api-key", e); return UNAUTHORIZED_FRAME; }
     await settingsService.deleteSecret(`web.apiKey.${provider}`);
-    broadcastSettingsSnapshot(deps);
+    await broadcastSettingsSnapshot(deps);
     return { ok: true };
   });
 
@@ -278,7 +281,7 @@ export function registerSettingsHandlers(deps: IpcDeps): void {
     }
     // Persist the new map before relaunch so the next boot reads it.
     await settingsService.patch({ llm: { hostResolverMap } });
-    broadcastSettingsSnapshot(deps);
+    await broadcastSettingsSnapshot(deps);
     // Arm and execute the relaunch. `app.relaunch()` queues the new process
     // then `app.exit(0)` terminates the current one — same pattern used by
     // the demo activation path in demo.ts.

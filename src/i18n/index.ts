@@ -15,4 +15,11 @@ export {
 } from "./locale.js";
 export { getLocale, onLocaleChange, setLocale, t } from "./runtime.js";
 export { interpolate, translate, type TranslationVars } from "./translate.js";
-export type { MessageKey, Messages } from "./messages/index.js";
+export {
+  isLocaleMessagesLoaded,
+  loadAllLocaleMessages,
+  loadLocaleMessages,
+  tryLoadLocaleMessages,
+  type MessageKey,
+  type Messages,
+} from "./messages/index.js";
