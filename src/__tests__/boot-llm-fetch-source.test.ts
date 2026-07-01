@@ -24,13 +24,16 @@ describe("boot LLM fetch wiring regression guards", () => {
 
   it("scopes Electron fetch injection to Azure Foundry providers", async () => {
     const bootSource = await readSource("../boot.ts");
-    const loopSource = await readSource("../engine/conversation-loop.ts");
+    // The turn provider factory moved out of conversation-loop.ts into
+    // engine/turn/provider.ts (C9 decomposition); the azure-foundry fetch
+    // scoping is preserved there as a free fn (`deps.llmFetch`, not `this.deps`).
+    const providerSource = await readSource("../engine/turn/provider.ts");
 
     expect(bootSource).toContain(
       '...(llmVendor === "azure-foundry" ? { fetch: llmFetch } : {}),',
     );
-    expect(loopSource).toContain('config.vendor === "azure-foundry" && this.deps.llmFetch');
-    expect(loopSource).toContain("createLoopProvider,");
+    expect(providerSource).toContain('config.vendor === "azure-foundry" && deps.llmFetch');
+    expect(providerSource).toContain("createLoopProvider,");
   });
 
   it("keeps routine and interactive loops on the shared guarded fetch path", async () => {
