@@ -81,8 +81,14 @@ describe("MarqueeText", () => {
     expect(el).toHaveAttribute("data-marquee", "animate");
     expect(el.className).toContain("relative");
     expect(el.className).toContain("lvis-marquee-viewport");
+    expect(el.className).toContain("lvis-marquee-fade");
     expect(el).toHaveAttribute("tabindex", "0");
-    expect(el.querySelector(".lvis-marquee-track")).not.toBeNull();
+    const track = el.querySelector(".lvis-marquee-track") as HTMLElement | null;
+    expect(track).not.toBeNull();
+    const duration = Number.parseFloat(
+      track?.style.getPropertyValue("--lvis-marquee-duration") ?? "0",
+    );
+    expect(duration).toBeGreaterThan(18);
     // The text appears twice (visible copy + aria-hidden duplicate) for the loop.
     const copies = Array.from(el.querySelectorAll("span")).filter((s) =>
       s.textContent?.includes("a very long announcement body that overflows"),

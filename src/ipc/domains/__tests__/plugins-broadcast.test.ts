@@ -41,6 +41,10 @@ function invoke(channel: string, ...args: unknown[]): Promise<unknown> {
 function makeWindow(options: { destroyed?: boolean } = {}) {
   return {
     isDestroyed: vi.fn(() => options.destroyed ?? false),
+    isMinimized: vi.fn(() => false),
+    restore: vi.fn(),
+    show: vi.fn(),
+    focus: vi.fn(),
     webContents: {
       isDestroyed: vi.fn(() => false),
       send: vi.fn(),
@@ -574,5 +578,48 @@ describe("plugins IPC lifecycle broadcast", () => {
       { slug: "agent-hub", success: true },
     );
     expect(destroyedWindow.webContents.send).not.toHaveBeenCalled();
+  });
+
+  it("forwards in-app notification detail clicks back to the renderer", async () => {
+    const { appWindows } = await setup();
+    const handler = handlers.get("lvis:notification:clicked");
+    expect(handler).toBeDefined();
+
+    await Promise.resolve(handler!(
+      { senderFrame: { url: "file:///tmp/lvis/index.html" } },
+      {
+        kind: "ask-user",
+        contextRef: {
+          questionId: "q-1",
+          ignored: "not-forwarded",
+        },
+      },
+    ));
+
+    expect(appWindows[0].show).toHaveBeenCalled();
+    expect(appWindows[0].focus).toHaveBeenCalled();
+    expect(appWindows[0].webContents.send).toHaveBeenCalledWith(
+      "lvis:notification:clicked",
+      { kind: "ask-user", contextRef: { questionId: "q-1" } },
+    );
+  });
+
+  it("rejects notification detail clicks from plugin UI frames", async () => {
+    const { appWindows } = await setup();
+    const handler = handlers.get("lvis:notification:clicked");
+    expect(handler).toBeDefined();
+
+    const result = await Promise.resolve(handler!(
+      { senderFrame: { url: "file:///tmp/lvis/plugin-ui-shell.html" } },
+      { kind: "ask-user", contextRef: { questionId: "q-1" } },
+    ));
+
+    expect(result).toEqual({ ok: false, error: "unauthorized-frame" });
+    expect(appWindows[0].show).not.toHaveBeenCalled();
+    expect(appWindows[0].focus).not.toHaveBeenCalled();
+    expect(appWindows[0].webContents.send).not.toHaveBeenCalledWith(
+      "lvis:notification:clicked",
+      expect.anything(),
+    );
   });
 });

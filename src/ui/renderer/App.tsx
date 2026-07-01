@@ -1051,6 +1051,32 @@ export function App() {
     ],
   );
 
+  useEffect(() => {
+    if (typeof api.onNotificationClicked !== "function") return undefined;
+    return api.onNotificationClicked((payload) => {
+      const contextRef = payload.contextRef;
+      if (contextRef?.sessionId) {
+        setActiveView("home");
+        void handleLoadSessionAndRefresh(contextRef.sessionId);
+        return;
+      }
+      if (payload.kind === "approval" || contextRef?.approvalId) {
+        setActiveView("home");
+        if (approvalQueue.length === 0) setDeferredQueueOpen(true);
+        return;
+      }
+      if (payload.kind === "routine" || contextRef?.routineId) {
+        handleViewSelect("routines");
+        return;
+      }
+      if (payload.kind === "ask-user" || contextRef?.questionId) {
+        setActiveView("home");
+        return;
+      }
+      setActiveView("home");
+    });
+  }, [api, approvalQueue.length, handleLoadSessionAndRefresh, handleViewSelect]);
+
   // Auth gate drain — when a plugin the user selected while unauthed
   // transitions to authed (the usePluginAuthStatuses hook updates the map on
   // `${id}.auth.changed` or a manual refresh), open the panel/page that was

@@ -285,6 +285,22 @@
      steady speed rather than a fixed wall-clock loop. Hovering or keyboard
      focus pauses it. */
   .lvis-marquee-viewport { overflow: hidden; }
+  .lvis-marquee-fade {
+    -webkit-mask-image: linear-gradient(
+      to right,
+      transparent,
+      #000 0.875rem,
+      #000 calc(100% - 0.875rem),
+      transparent
+    );
+    mask-image: linear-gradient(
+      to right,
+      transparent,
+      #000 0.875rem,
+      #000 calc(100% - 0.875rem),
+      transparent
+    );
+  }
   .lvis-marquee-track {
     display: inline-flex;
     flex-wrap: nowrap;
