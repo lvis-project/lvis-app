@@ -58,8 +58,8 @@ interface UseStatusBarOptions {
  */
 const TOAST_QUEUE_CAP = 50;
 const TOAST_MARQUEE_CHAR_THRESHOLD = 48;
-const TOAST_MARQUEE_BASE_TTL_MS = 2500;
-const TOAST_MARQUEE_MS_PER_CHAR = 220;
+const TOAST_MARQUEE_BASE_TTL_MS = 4000;
+const TOAST_MARQUEE_MS_PER_CHAR = 280;
 const TOAST_MARQUEE_MAX_TTL_MS = 45_000;
 
 function resolveToastTtlMs(message: string, requestedTtlMs: number): number {
