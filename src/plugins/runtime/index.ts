@@ -84,8 +84,14 @@ import { t } from "../../i18n/index.js";
 const log = createLogger("plugin-runtime");
 const START_FAILURE_STOP_TIMEOUT_MS = 2_000;
 
+export function declaredUiInvokableMethods(
+  manifest: Pick<PluginManifest, "uiActions">,
+): string[] {
+  return manifest.uiActions ? Object.keys(manifest.uiActions) : [];
+}
+
 function declaredRuntimeMethods(manifest: PluginManifest): string[] {
-  return [...new Set([...(manifest.tools ?? []), ...(manifest.uiCallable ?? [])])];
+  return [...new Set([...(manifest.tools ?? []), ...declaredUiInvokableMethods(manifest)])];
 }
 
 export type { InstallPolicy };
@@ -170,6 +176,12 @@ export interface PluginToolInvocationContext {
   origin: "plugin" | "ui";
   callerPluginId?: string;
   ownerPluginId?: string;
+  /**
+   * True only when the renderer call was made during an active browser user
+   * activation. Renderer-provided booleans are not trusted directly; preload
+   * derives this from `navigator.userActivation.isActive`.
+   */
+  userAction?: boolean;
   /**
    * Issue #664 P2 — UI-origin chain propagation.
    *
@@ -1770,10 +1782,10 @@ export class PluginRuntime {
   }
 
   /**
-   * Invoke a plugin method from the renderer, enforcing the uiCallable allowlist
-   * so only explicitly declared methods are reachable via the IPC bridge.
+   * Invoke a plugin method from the renderer, enforcing the UI invocation
+   * allowlist so only explicitly declared methods are reachable via the IPC bridge.
    */
-  async callFromUi(method: string, payload?: unknown): Promise<unknown> {
+  async callDeclaredUiAction(method: string, payload?: unknown): Promise<unknown> {
     const entry = this.methodMap.get(method);
     if (!entry) {
       this.throwIfToolOwnerNotReady(method);
@@ -1781,11 +1793,37 @@ export class PluginRuntime {
     }
     const plugin = this.plugins.get(entry.pluginId);
     this.throwIfPluginNotStarted(entry.pluginId);
-    const uiCallable = plugin?.manifest.uiCallable ?? [];
-    if (!uiCallable.includes(method)) {
+    const uiInvokable = plugin ? declaredUiInvokableMethods(plugin.manifest) : [];
+    if (!uiInvokable.includes(method)) {
       throw new Error(
-        `Method '${method}' is not UI-callable for plugin '${entry.pluginId}'. ` +
-        `Declare it in manifest.uiCallable[] to allow renderer invocation.`,
+        `Method '${method}' is not declared as a UI action for plugin '${entry.pluginId}'. ` +
+        `Declare it in manifest.uiActions to allow renderer invocation.`,
+      );
+    }
+    this.auditLog?.("info", "plugin_ui_action_invoked", {
+      pluginId: entry.pluginId,
+      method,
+    });
+    return this.call(method, payload);
+  }
+
+  async callFromUi(
+    method: string,
+    payload?: unknown,
+    options?: { userAction?: boolean },
+  ): Promise<unknown> {
+    const entry = this.methodMap.get(method);
+    if (!entry) {
+      this.throwIfToolOwnerNotReady(method);
+      throw new Error(`Plugin method not found: ${method}`);
+    }
+    const plugin = this.plugins.get(entry.pluginId);
+    this.throwIfPluginNotStarted(entry.pluginId);
+    const uiInvokable = plugin ? declaredUiInvokableMethods(plugin.manifest) : [];
+    if (!uiInvokable.includes(method)) {
+      throw new Error(
+        `Method '${method}' is not declared as a UI action for plugin '${entry.pluginId}'. ` +
+        `Declare it in manifest.uiActions to allow renderer invocation.`,
       );
     }
     if (!this.toolInvocationDelegate) {
@@ -1794,6 +1832,7 @@ export class PluginRuntime {
     return this.toolInvocationDelegate(method, payload, {
       origin: "ui",
       ownerPluginId: entry.pluginId,
+      userAction: options?.userAction === true,
     });
   }
 
