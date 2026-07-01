@@ -915,6 +915,9 @@ describe("ChatView", () => {
       expect(container.querySelector(".lvis-chat-scroll [data-radix-scroll-area-viewport]")).not.toBeNull();
       expect(container.textContent).toContain("report.md");
     });
+    expect(container.querySelector('[data-testid="chat-view-root"]')?.className).toContain("lg:pr-96");
+    expect(container.querySelector('[data-testid="chat-preview-rail"]')?.className).toContain("absolute");
+    expect(container.querySelector('[data-testid="input-action-bar"]')).not.toBeNull();
   });
 
   it("clears draft attachment preview artifacts when switching sessions", async () => {
