@@ -1,9 +1,13 @@
+// @vitest-environment jsdom
 import "../../../../../test/renderer/setup.js";
 import { fireEvent, render, screen, waitFor } from "@testing-library/react";
+import { useState, type ReactElement } from "react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import type { LvisApi } from "../../types.js";
 import type { ChatPreviewTarget, WorkspaceFileItem } from "../../preview/preview-targets.js";
-import { ChatPreviewRail } from "../ChatPreviewRail.js";
+import { TooltipProvider } from "../../../../components/ui/tooltip.js";
+import { LVIS_SIDE_BROWSER_PARTITION } from "../../../../shared/side-browser.js";
+import { ChatSidePanel } from "../ChatSidePanel.js";
 
 function api(): LvisApi {
   return {
@@ -12,7 +16,42 @@ function api(): LvisApi {
   } as unknown as LvisApi;
 }
 
-describe("ChatPreviewRail", () => {
+function renderPanel(ui: ReactElement) {
+  return render(
+    <TooltipProvider>
+      {ui}
+    </TooltipProvider>,
+  );
+}
+
+function StatefulPanel({
+  api,
+  sessionId,
+  targets,
+  files,
+  initialSelectedId,
+}: {
+  api: LvisApi;
+  sessionId?: string;
+  targets: ChatPreviewTarget[];
+  files: WorkspaceFileItem[];
+  initialSelectedId: string | null;
+}) {
+  const [selectedId, setSelectedId] = useState(initialSelectedId);
+  return (
+    <ChatSidePanel
+      api={api}
+      sessionId={sessionId}
+      targets={targets}
+      files={files}
+      selectedId={selectedId}
+      onSelect={setSelectedId}
+      onClose={vi.fn()}
+    />
+  );
+}
+
+describe("ChatSidePanel", () => {
   afterEach(() => {
     vi.unstubAllGlobals();
   });
@@ -52,8 +91,8 @@ describe("ChatPreviewRail", () => {
       },
     ];
 
-    render(
-      <ChatPreviewRail
+    renderPanel(
+      <ChatSidePanel
         api={api()}
         sessionId="session-1"
         targets={targets}
@@ -64,18 +103,105 @@ describe("ChatPreviewRail", () => {
       />,
     );
 
+    expect(screen.getByTestId("chat-side-panel")).toBeTruthy();
     expect(screen.getByTestId("chat-preview-rail")).toBeTruthy();
-    expect(screen.getAllByText("report.md")).toHaveLength(2);
-    expect(screen.getByText("metrics.json")).toBeTruthy();
+    expect(screen.getByTestId("chat-side-panel-file-tree")).toBeTruthy();
+    expect(screen.getAllByText("report.md").length).toBeGreaterThanOrEqual(1);
+    expect(screen.queryByText("metrics.json")).toBeNull();
 
     const search = screen.getByPlaceholderText(/검색|Search/i);
-    fireEvent.change(search, { target: { value: "metrics" } });
-    expect(screen.getAllByText("report.md")).toHaveLength(1);
-    expect(screen.getByText("metrics.json")).toBeTruthy();
+    fireEvent.change(search, { target: { value: "report" } });
+    expect(screen.getByTestId("chat-side-panel-file-tree")).toHaveTextContent("report.md");
+    expect(screen.getByText("C:\\workspace\\report.md")).toBeTruthy();
 
-    fireEvent.change(search, { target: { value: "" } });
-    fireEvent.click(screen.getByRole("button", { name: /파일 1|Files 1/i }));
-    expect(screen.getByText("C:/workspace/report.md")).toBeTruthy();
+    fireEvent.click(screen.getByTestId("chat-side-panel-mode-preview"));
+    const previewSearch = screen.getByPlaceholderText(/검색|Search/i);
+    fireEvent.change(previewSearch, { target: { value: "metrics" } });
+    expect(screen.queryByText("report.md")).toBeNull();
+    expect(screen.getAllByText("metrics.json").length).toBeGreaterThanOrEqual(1);
+
+    fireEvent.click(screen.getByTestId("chat-side-panel-mode-files"));
+    expect(screen.getByTestId("chat-side-panel-file-tree")).toHaveTextContent("report.md");
+    const splitLayout = screen.getByTestId("chat-side-panel-file-split-layout") as HTMLElement;
+    const splitter = screen.getByTestId("chat-side-panel-file-splitter");
+    expect(splitLayout.style.gridTemplateRows).toContain("45%");
+    fireEvent.keyDown(splitter, { key: "ArrowDown" });
+    expect(splitLayout.style.gridTemplateRows).toContain("50%");
+    fireEvent.keyDown(splitter, { key: "Home" });
+    expect(splitLayout.style.gridTemplateRows).toContain("22%");
+    fireEvent.keyDown(splitter, { key: "End" });
+    expect(splitLayout.style.gridTemplateRows).toContain("72%");
+    fireEvent.click(screen.getByTestId("chat-side-panel-add-browser-tab"));
+    expect(screen.getAllByRole("tab").length).toBeGreaterThanOrEqual(5);
+  });
+
+  it("separates browser artifacts from files and general previews", () => {
+    const targets: ChatPreviewTarget[] = [
+      {
+        id: "html-1",
+        kind: "html",
+        title: "Artifact dashboard",
+        subtitle: "render_html",
+        sourceLabel: "builtin",
+        createdOrder: 0,
+        payload: { html: "<main>Preview OK</main>", title: "Artifact dashboard", height: 200 },
+      },
+      {
+        id: "url-1",
+        kind: "url",
+        title: "example.com/docs",
+        subtitle: "web_fetch",
+        sourceLabel: "builtin",
+        createdOrder: 1,
+        url: "https://example.com/docs",
+      },
+      {
+        id: "json-1",
+        kind: "json",
+        title: "metrics.json",
+        sourceLabel: "builtin",
+        createdOrder: 2,
+        value: { ok: true },
+        raw: "{\"ok\":true}",
+      },
+    ];
+
+    const { container } = renderPanel(
+      <StatefulPanel
+        api={api()}
+        sessionId="session-1"
+        targets={targets}
+        files={[]}
+        initialSelectedId="html-1"
+      />,
+    );
+
+    fireEvent.click(screen.getByTestId("chat-side-panel-mode-browser"));
+    expect(screen.getAllByText("Artifact dashboard").length).toBeGreaterThanOrEqual(1);
+    expect(screen.getAllByText("example.com/docs").length).toBeGreaterThanOrEqual(1);
+    expect(screen.getByTestId("chat-side-panel-browser-viewer")).toBeTruthy();
+    expect(screen.getByTestId("chat-side-panel-browser-frame")).toBeTruthy();
+    expect(screen.queryByText("metrics.json")).toBeNull();
+
+    const addressInput = screen.getByTestId("chat-side-panel-browser-address") as HTMLInputElement;
+    fireEvent.change(addressInput, { target: { value: "google.com" } });
+    fireEvent.click(screen.getByTestId("chat-side-panel-browser-go"));
+    const manualWebview = container.querySelector('[data-testid="chat-side-panel-browser-webview"]');
+    expect(manualWebview).not.toBeNull();
+    expect(manualWebview?.getAttribute("src")).toBe("https://google.com/");
+
+    fireEvent.click(screen.getAllByTestId("chat-side-panel-browser-row")[1]!);
+    const webview = container.querySelector('[data-testid="chat-side-panel-browser-webview"]');
+    expect(webview).not.toBeNull();
+    expect(webview?.getAttribute("src")).toBe("https://example.com/docs");
+    expect(webview?.getAttribute("partition")).toBe(LVIS_SIDE_BROWSER_PARTITION);
+    expect(webview?.getAttribute("webpreferences")).toContain("javascript=yes");
+    expect(webview?.hasAttribute("allowpopups")).toBe(false);
+
+    fireEvent.click(screen.getByTestId("chat-side-panel-mode-preview"));
+    expect(screen.queryByText("Artifact dashboard")).toBeNull();
+    expect(screen.queryByText("example.com/docs")).toBeNull();
+    expect(screen.getAllByText("metrics.json").length).toBeGreaterThanOrEqual(1);
   });
 
   it("renders MCP app payloads through McpAppView", async () => {
@@ -108,8 +234,8 @@ describe("ChatPreviewRail", () => {
       },
     ];
 
-    const { container } = render(
-      <ChatPreviewRail
+    const { container } = renderPanel(
+      <ChatSidePanel
         api={api()}
         sessionId="session-1"
         targets={targets}
@@ -120,6 +246,7 @@ describe("ChatPreviewRail", () => {
       />,
     );
 
+    fireEvent.click(screen.getByTestId("chat-side-panel-mode-preview"));
     await waitFor(() => {
       expect(readUiResource).toHaveBeenCalledWith("server-a", "ui://server-a/card");
     });

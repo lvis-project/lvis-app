@@ -89,7 +89,8 @@ const ACTION_PANEL_ICON_LIMIT = 10;
 const FILE_CHANGE_TOOL_NAMES = new Set(["edit_file", "apply_patch", "write_file"]);
 const READ_TOOL_PATTERN = /(^|[._:-])(read|open|cat|grep|rg|search|find|list|glob)([._:-]|$)/i;
 const TERMINAL_TOOL_PATTERN = /(^|[._:-])(shell|bash|cmd|powershell|terminal|exec|run)([._:-]|$)/i;
-const BROWSER_TOOL_PATTERN = /(browser|playwright|screenshot|chrome|viewport|open_url|web_page|web_fetch|fetch)/i;
+const BROWSER_TOOL_PATTERN = /(browser|playwright|screenshot|chrome|viewport|open_url|web_page|web_fetch|web_search|web_patch|fetch)/i;
+const ACTION_PANEL_URL_PATTERN = /\bhttps?:\/\/[^\s"'<>]+/gi;
 const ACTION_PANEL_PATH_KEYS = new Set([
   "path",
   "paths",
@@ -145,7 +146,11 @@ function looksLikeFilePath(value: string): boolean {
 
 function collectUrls(value: unknown, depth = 0): string[] {
   if (depth > 4 || value == null) return [];
-  if (typeof value === "string") return looksLikeUrl(value) ? [value.trim()] : [];
+  if (typeof value === "string") {
+    const trimmed = value.trim();
+    if (looksLikeUrl(trimmed)) return [trimmed.replace(/[),.;]+$/g, "")];
+    return Array.from(value.matchAll(ACTION_PANEL_URL_PATTERN), (match) => match[0].replace(/[),.;]+$/g, ""));
+  }
   if (Array.isArray(value)) return value.flatMap((item) => collectUrls(item, depth + 1));
   if (!isRecord(value)) return [];
   return Object.values(value).flatMap((item) => collectUrls(item, depth + 1));
@@ -1732,7 +1737,7 @@ export function App() {
         }
 
         if (isBrowserTool(tool)) {
-          for (const url of new Set(collectUrls(tool.input))) {
+          for (const url of new Set([...collectUrls(tool.input), ...collectUrls(tool.result)])) {
             if (!fetchedPageKeys.has(url)) {
               fetchedPageKeys.add(url);
               activity.fetchedPageCount += 1;
@@ -1779,6 +1784,13 @@ export function App() {
 
     return activity;
   }, [entries]);
+  const actionPanelHasActivity =
+    actionPanelActivity.toolCallCount > 0 ||
+    actionPanelActivity.pluginCallCount > 0 ||
+    actionPanelActivity.mcpCallCount > 0 ||
+    actionPanelActivity.readFileCount > 0 ||
+    actionPanelActivity.writtenFileCount > 0 ||
+    actionPanelActivity.fetchedPageCount > 0;
 
   const openActionPanelUrl = useCallback((url: string) => {
     void api.openExternalUrl(url);
@@ -2133,23 +2145,20 @@ export function App() {
               onToastClick: handleStatusToastClick,
               onToastDismiss: (toast) => statusRemoveToast(toast.id),
             }}
+            actionPanelSlot={(appMode !== "chat" || actionPanelHasActivity) ? (
+              <ActionPanel
+                open={actionPanelOpen}
+                onOpenChange={setActionPanelOpen}
+                activity={actionPanelActivity}
+                onOpenExternalUrl={openActionPanelUrl}
+              />
+            ) : null}
           />
           </ErrorBoundary>
           {/* StatusBar notifications render inside ChatView, directly above
               the composer. The composer's own status sub-row keeps showing
               the ring / permission / model cells. */}
         </main>
-        {/* The 도구 활동 panel is a work-mode affordance only. In chat mode the
-            shell is the focused conversation surface, so the panel (and its
-            collapsed rail) is omitted from the DOM entirely. */}
-        {appMode !== "chat" && (
-          <ActionPanel
-            open={actionPanelOpen}
-            onOpenChange={setActionPanelOpen}
-            activity={actionPanelActivity}
-            onOpenExternalUrl={openActionPanelUrl}
-          />
-        )}
         </div>
       </div>
 

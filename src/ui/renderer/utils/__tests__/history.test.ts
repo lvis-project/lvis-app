@@ -61,6 +61,41 @@ describe("historyToEntries", () => {
     expect(entries.at(-1)).toMatchObject({ kind: "assistant", text: "일정이 없습니다." });
   });
 
+  it("preserves persisted tool routing metadata for activity panels", () => {
+    const entries = historyToEntries([
+      { index: 0, role: "user", content: "플러그인으로 찾아줘" },
+      {
+        index: 1,
+        role: "assistant",
+        content: "",
+        toolCalls: [
+          {
+            id: "t1",
+            name: "meeting_lookup",
+            input: { query: "standup" },
+            source: "plugin",
+            category: "network",
+            pluginId: "meeting",
+          },
+        ],
+      },
+      { index: 2, role: "tool_result", toolUseId: "t1", toolName: "meeting_lookup", content: "https://example.com/meeting" },
+    ]);
+
+    expect(entries[1]).toMatchObject({
+      kind: "tool_group",
+      tools: [
+        {
+          toolUseId: "t1",
+          name: "meeting_lookup",
+          source: "plugin",
+          category: "network",
+          pluginId: "meeting",
+        },
+      ],
+    });
+  });
+
   it("does not create blank assistant bubbles for whitespace-only structural rounds", () => {
     const entries = historyToEntries([
       { index: 0, role: "user", content: "도구만 먼저 써줘" },
