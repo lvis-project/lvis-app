@@ -581,6 +581,7 @@ export function ChatView({ api, onAsk, onEditSave, onFork, onToggleStar, onRetry
   );
   const [previewRailOpen, setPreviewRailOpen] = useState(false);
   const [selectedPreviewId, setSelectedPreviewId] = useState<string | null>(null);
+  const previewRailVisible = previewRailOpen && hasPreviewArtifacts;
 
   useEffect(() => {
     setSelectedPreviewId(null);
@@ -1826,7 +1827,9 @@ export function ChatView({ api, onAsk, onEditSave, onFork, onToggleStar, onRetry
 
   return (
     <div
-      className="relative flex min-h-0 min-w-0 w-full flex-1 flex-col overflow-hidden"
+      className={`relative flex min-h-0 min-w-0 w-full flex-1 flex-col overflow-hidden ${
+        previewRailVisible ? "lg:pr-96" : ""
+      }`}
       data-testid="chat-view-root"
     >
       {hasApiKey === false && (
@@ -1841,8 +1844,7 @@ export function ChatView({ api, onAsk, onEditSave, onFork, onToggleStar, onRetry
         onPluginPrimaryAction={onPluginPrimaryAction ?? noopPluginPrimaryAction}
         onRoutineAcknowledge={onRoutineAcknowledge}
       />
-      <div className="relative min-h-0 min-w-0 max-w-full flex-1 overflow-hidden">
-      {previewRailOpen && (
+      {previewRailVisible && (
         <button
           type="button"
           className="absolute inset-0 z-30 bg-background/(--opacity-strong) backdrop-blur-[1px] lg:hidden"
@@ -1852,7 +1854,8 @@ export function ChatView({ api, onAsk, onEditSave, onFork, onToggleStar, onRetry
           }}
         />
       )}
-      <div className={`grid h-full min-h-0 min-w-0 ${previewRailOpen && hasPreviewArtifacts ? "lg:grid-cols-[minmax(0,1fr)_minmax(20rem,24rem)]" : "grid-cols-1"}`}>
+      <div className="relative min-h-0 min-w-0 max-w-full flex-1 overflow-hidden">
+      <div className="grid h-full min-h-0 min-w-0 grid-cols-1">
       <div className="relative min-h-0 min-w-0 overflow-hidden">
       {/* Checkpoint view-mode banner — sticky at the top of the chat scroll area */}
       <ViewModeBanner viewMode={viewMode} onExit={() => { void handleExitView(); }} />
@@ -2017,20 +2020,6 @@ export function ChatView({ api, onAsk, onEditSave, onFork, onToggleStar, onRetry
         </Button>
       )}
       </div>
-      {previewRailOpen && hasPreviewArtifacts ? (
-        <ChatPreviewRail
-          api={api}
-          sessionId={currentSessionId}
-          targets={previewModel.targets}
-          files={previewModel.files}
-          selectedId={selectedPreviewId}
-          onSelect={setSelectedPreviewId}
-          onClose={() => {
-            setPreviewRailOpen(false);
-          }}
-          className="absolute inset-y-0 right-0 z-40 flex w-[min(24rem,calc(100%-1rem))] shadow-2xl lg:static lg:z-auto lg:w-auto lg:shadow-none"
-        />
-      ) : null}
       </div>
       </div>
       {contextOverflowPct >= 0.95 && (
@@ -2176,6 +2165,20 @@ export function ChatView({ api, onAsk, onEditSave, onFork, onToggleStar, onRetry
           onResolved={onResolveAskQuestion}
         />
       </div>
+      {previewRailVisible ? (
+        <ChatPreviewRail
+          api={api}
+          sessionId={currentSessionId}
+          targets={previewModel.targets}
+          files={previewModel.files}
+          selectedId={selectedPreviewId}
+          onSelect={setSelectedPreviewId}
+          onClose={() => {
+            setPreviewRailOpen(false);
+          }}
+          className="absolute inset-y-0 right-0 z-50 flex w-[min(24rem,calc(100%-1rem))] shadow-2xl lg:w-96 lg:shadow-none"
+        />
+      ) : null}
     </div>
   );
 }
