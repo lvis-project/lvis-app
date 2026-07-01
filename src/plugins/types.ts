@@ -121,11 +121,11 @@ export interface PluginAccessSpec {
 export interface PluginAuthSpec {
   /** Human-readable label shown next to the badge (defaults to plugin `name`). */
   label?: string;
-  /** uiCallable tool returning {@link PluginAuthStatus}. */
+  /** uiActions tool returning {@link PluginAuthStatus}. */
   statusTool: string;
-  /** uiCallable tool the host invokes when the user clicks 로그인. */
+  /** uiActions tool the host invokes when the user clicks 로그인. */
   loginTool: string;
-  /** Optional uiCallable tool the host invokes when the user clicks 로그아웃. */
+  /** Optional uiActions tool the host invokes when the user clicks 로그아웃. */
   logoutTool?: string;
   /**
    * Hostname allow-list (suffix-match) for `hostApi.openAuthPartitionViewer`.
@@ -160,6 +160,11 @@ export interface PluginAuthStatus {
   account?: string;
 }
 
+export interface PluginUiActionSpec {
+  /** Short human-readable action description for tooling/catalogues. */
+  description?: string;
+}
+
 export interface EventSubscriptionHint {
   category: "task" | "note" | "session" | "meeting" | "email" | "calendar" | "system";
   priority: "high" | "medium" | "low";
@@ -180,7 +185,7 @@ export interface PluginManifest {
   entry: string;
   /**
    * LLM에 노출되는 도구 이름 배열. `^[a-zA-Z_][a-zA-Z0-9_]*$` 필수 — 도트/하이픈 금지.
-   * UI 전용 runtime method는 여기에 넣지 말고 `uiCallable[]`에만 선언한다.
+   * UI 전용 runtime method는 여기에 넣지 말고 `uiActions`에 선언한다.
    */
   tools: string[];
   /** 플러그인 한 줄 설명 — LLM 카탈로그 및 UI에 표시. MUST 필드. */
@@ -232,16 +237,16 @@ export interface PluginManifest {
    */
   eventSubscriptions?: string[] | EventSubscription[];
   /**
-   * UI가 ipcRenderer 를 통해 직접 호출할 수 있는 plugin method 의 allowlist.
-   * 이 배열에 없는 method 는 `lvis:plugins:call` IPC 를 통해 호출할 수 없다.
-   * (ConversationLoop 의 permission/scope/expansion cap 을 우회하는 경로 차단.)
+   * Plugin panel/user-interface action surface. Keys are runtime method names
+   * the renderer may invoke directly as user-initiated UI actions. This is
+   * separate from `tools[]`, which remains the LLM-facing surface.
    */
-  uiCallable?: string[];
+  uiActions?: Record<string, PluginUiActionSpec>;
   /**
    * Optional declarative auth contract — see architecture.md §9.4a "Plugin-Owned
    * OAuth — Host UI Surface". Lets the host render a generic 미인증 / signed-in
    * badge + login/logout button in Settings → 플러그인 설정. The three referenced
-   * tools must also appear in `uiCallable[]` (cross-validated in
+   * tools must also appear in `uiActions` (cross-validated in
    * `manifest-validation.ts`). On state transitions the plugin SHOULD emit
    * `<pluginId>.auth.changed` so the host UI can refresh without polling.
    */
@@ -455,7 +460,7 @@ export interface PluginUiExtension {
    * kind="action" 전용. 플러그인 패널 아이콘 클릭 시 host 가 직접 디스패치할
    * plugin tool 이름. action entry 는 panel webview 를 *생성하지 않고*
    * 곧바로 `api.callPluginMethod(tool)` 만 호출한다. tool 은 manifest의
-   * `uiCallable[]` 에 등록되어야 하며, runtime/index.ts 의 callFromUi
+   * `uiActions` 에 등록되어야 하며, runtime/index.ts 의 callFromUi
    * 게이트가 그대로 enforce 한다.
    */
   tool?: string;
@@ -667,7 +672,7 @@ export interface PluginMarketplaceItem {
   ui?: PluginUiExtension[];
   capabilities?: string[];
   keywords?: Array<{ keyword: string; skillId: string }>;
-  uiCallable?: string[];
+  uiActions?: Record<string, PluginUiActionSpec>;
   auth?: PluginAuthSpec;
   emittedEvents?: string[];
   /**

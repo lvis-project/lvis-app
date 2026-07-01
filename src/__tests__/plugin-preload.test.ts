@@ -7,7 +7,7 @@
  *
  * We load the preload once and capture its contextBridge registrations.
  */
-import { describe, expect, it, vi, beforeAll } from "vitest";
+import { beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
 
 // ─── Capture contextBridge registrations ─────────────────────────────────────
 
@@ -46,6 +46,13 @@ beforeAll(async () => {
   await import("../plugin-preload.js");
 });
 
+beforeEach(() => {
+  mockInvoke.mockReset();
+  mockOn.mockReset();
+  mockRemoveListener.mockReset();
+  vi.unstubAllGlobals();
+});
+
 // ─── Positive / negative contract tests ───────────────────────────────────────
 
 describe("plugin-preload bridge", () => {
@@ -81,6 +88,24 @@ describe("plugin-preload bridge", () => {
       "lvis:plugin:call-tool",
       "sample_plugin_status",
       { verbose: true },
+      { userAction: false },
+    );
+  });
+
+  it("callTool forwards active user activation without letting plugin code supply pluginId", async () => {
+    const bridge = exposed.get("lvisPlugin") as {
+      callTool: (name: string, args?: unknown) => Promise<unknown>;
+    };
+    vi.stubGlobal("navigator", { userActivation: { isActive: true } });
+    mockInvoke.mockResolvedValueOnce({ ok: true, result: "ok" });
+
+    await bridge.callTool("sample_plugin_run", { id: 1 });
+
+    expect(mockInvoke).toHaveBeenCalledWith(
+      "lvis:plugin:call-tool",
+      "sample_plugin_run",
+      { id: 1 },
+      { userAction: true },
     );
   });
 

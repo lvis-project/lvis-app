@@ -927,7 +927,7 @@ export function App() {
         const view = pluginViews.find((v) => toViewKey(v) === key);
         if (!view) return;
         // kind="action" entries never open a panel/window — host directly
-        // dispatches the declared tool. uiCallable allowlist is enforced
+        // dispatches the declared tool. uiActions allowlist is enforced
         // downstream in runtime/index.ts:callFromUi. Active view state is
         // intentionally NOT changed so the user stays on whatever they
         // were looking at (chat / settings / etc.). slot==="sidebar" 는
@@ -951,7 +951,7 @@ export function App() {
           pluginActionInflightRef.current.add(inflightKey);
           void (async () => {
             try {
-              await api.callPluginMethod(actionTool);
+              await api.callPluginMethod(actionTool, undefined, { userAction: true });
             } catch (err) {
               // Raw err.message 는 OAuth refresh-token / Bearer header fragment
               // 가 포함될 수 있어 사용자 chat 영역에 그대로 노출하지 않는다.
@@ -1002,7 +1002,7 @@ export function App() {
         pluginAuthLoginInflightRef.current.add(inflightKey);
         void (async () => {
           try {
-            await api.callPluginMethod(loginTool);
+            await api.callPluginMethod(loginTool, undefined, { userAction: true });
             refreshPluginAuthStatus(view.pluginId);
           } catch (err) {
             // Raw err.message may carry OAuth/Bearer fragments — keep raw in
