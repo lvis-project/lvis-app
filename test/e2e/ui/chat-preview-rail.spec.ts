@@ -1,4 +1,5 @@
 import { test, expect, type Page } from "@playwright/test";
+import { createServer, type Server } from "node:http";
 import {
   buildLlmSettings,
   builtMainExists,
@@ -12,7 +13,7 @@ type JsonObject = Record<string, unknown>;
 const READ_PATH = "C:\\workspace\\lvis\\src\\notes.md";
 const WRITE_PATH = "C:\\workspace\\lvis\\src\\report.md";
 
-function buildPreviewRows(): JsonObject[] {
+function buildPreviewRows(sideBrowserUrl = "https://example.com/docs"): JsonObject[] {
   const now = Date.now() - 10_000;
   return [
     {
@@ -47,7 +48,21 @@ function buildPreviewRows(): JsonObject[] {
         {
           id: "preview-web",
           name: "web_fetch",
-          input: { url: "https://example.com/docs" },
+          category: "network",
+          input: { url: sideBrowserUrl },
+        },
+        {
+          id: "preview-search",
+          name: "web_search",
+          category: "network",
+          input: { q: "lvis side panel" },
+        },
+        {
+          id: "preview-plugin",
+          name: "meeting_lookup",
+          source: "plugin",
+          pluginId: "meeting",
+          input: { query: "standup" },
         },
       ],
       createdAt: now + 100,
@@ -87,8 +102,22 @@ function buildPreviewRows(): JsonObject[] {
       role: "tool_result",
       toolUseId: "preview-web",
       toolName: "web_fetch",
-      content: JSON.stringify({ status: 200, title: "Example docs", ok: true }),
+      content: JSON.stringify({ status: 200, title: "Example docs", ok: true, url: sideBrowserUrl }),
       createdAt: now + 500,
+    },
+    {
+      role: "tool_result",
+      toolUseId: "preview-search",
+      toolName: "web_search",
+      content: `Search result: https://search.example.test/lvis-side-panel and ${sideBrowserUrl}`,
+      createdAt: now + 550,
+    },
+    {
+      role: "tool_result",
+      toolUseId: "preview-plugin",
+      toolName: "meeting_lookup",
+      content: JSON.stringify({ ok: true, title: "Standup" }),
+      createdAt: now + 575,
     },
     {
       role: "assistant",
@@ -96,6 +125,83 @@ function buildPreviewRows(): JsonObject[] {
       createdAt: now + 600,
     },
   ];
+}
+
+async function createSideBrowserTarget(): Promise<{ url: string; close: () => Promise<void> }> {
+  const externalUrl = process.env.LVIS_SIDE_BROWSER_TEST_URL;
+  if (externalUrl) {
+    const parsed = new URL(externalUrl);
+    if (parsed.protocol !== "http:" && parsed.protocol !== "https:") {
+      throw new Error(`LVIS_SIDE_BROWSER_TEST_URL must be http(s): ${externalUrl}`);
+    }
+    return { url: parsed.toString(), close: async () => {} };
+  }
+
+  const server = createServer((_req, res) => {
+    res.writeHead(200, { "content-type": "text/html; charset=utf-8" });
+    res.end("<!doctype html><html><body><main><h1>Side Browser OK</h1></main></body></html>");
+  });
+  await new Promise<void>((resolve, reject) => {
+    server.once("error", reject);
+    server.listen(0, "127.0.0.1", resolve);
+  });
+  const address = server.address();
+  if (!address || typeof address === "string") {
+    await closeServer(server);
+    throw new Error("failed to allocate side browser server port");
+  }
+  return {
+    url: `http://127.0.0.1:${address.port}/docs`,
+    close: () => closeServer(server),
+  };
+}
+
+function closeServer(server: Server): Promise<void> {
+  return new Promise((resolve, reject) => {
+    server.close((err) => {
+      if (err) reject(err);
+      else resolve();
+    });
+  });
+}
+
+async function captureSideBrowserGuest(ctx: SeededElectronContext, expectedUrl: string) {
+  return ctx.app.evaluate(async ({ webContents }, url) => {
+    const expected = new URL(url);
+    const candidates = webContents.getAllWebContents().filter((contents) => contents.getType() === "webview");
+    const guest = candidates.find((contents) => {
+      try {
+        const current = new URL(contents.getURL());
+        return current.href === expected.href || current.host === expected.host;
+      } catch {
+        return false;
+      }
+    });
+    if (!guest) return null;
+    await guest.executeJavaScript("document.readyState", true).catch(() => undefined);
+    const text = await guest.executeJavaScript(
+      "document.body ? document.body.innerText.slice(0, 1200) : ''",
+      true,
+    ).catch((err: unknown) => `executeJavaScript failed: ${err instanceof Error ? err.message : String(err)}`);
+    const image = await guest.capturePage();
+    return {
+      url: guest.getURL(),
+      title: guest.getTitle(),
+      text,
+      pngBase64: image.toPNG().toString("base64"),
+    };
+  }, expectedUrl);
+}
+
+async function waitForSideBrowserGuestCapture(ctx: SeededElectronContext, expectedUrl: string) {
+  const deadline = Date.now() + 20_000;
+  let lastProbe: Awaited<ReturnType<typeof captureSideBrowserGuest>> = null;
+  while (Date.now() < deadline) {
+    lastProbe = await captureSideBrowserGuest(ctx, expectedUrl);
+    if (lastProbe && lastProbe.pngBase64.length > 1_000) return lastProbe;
+    await ctx.page.waitForTimeout(500);
+  }
+  throw new Error(`side browser guest capture did not become ready: ${JSON.stringify(lastProbe)}`);
 }
 
 async function readCdpProbe(page: Page) {
@@ -114,14 +220,18 @@ test.describe("chat preview rail", () => {
   test.skip(!builtMainExists(), "dist/src/main/main.js not built; run bun run build first");
 
   test("opens a side-by-side artifact rail and workspace file browser under CDP", async () => {
-    const ctx: SeededElectronContext = await launchSeededElectron({
-      settings: buildLlmSettings("openai", "gpt-5.4-mini"),
-      sessionTitle: "preview rail e2e",
-      historyRows: buildPreviewRows(),
-      userDataPrefix: "lvis-preview-rail-user-data-",
-      homePrefix: "lvis-preview-rail-home-",
-    });
+    const sideBrowser = await createSideBrowserTarget();
+    let ctx: SeededElectronContext | null = null;
     try {
+      ctx = await launchSeededElectron({
+        settings: buildLlmSettings("openai", "gpt-5.4-mini"),
+        sessionTitle: "preview rail e2e",
+        historyRows: buildPreviewRows(sideBrowser.url),
+        userDataPrefix: "lvis-preview-rail-user-data-",
+        homePrefix: "lvis-preview-rail-home-",
+      });
+      const sideBrowserHost = new URL(sideBrowser.url).host;
+      const sideBrowserOrigin = new URL(sideBrowser.url).origin;
       await ctx.page.setViewportSize({ width: 1280, height: 860 });
       await ctx.page.waitForFunction(
         () => typeof (window as unknown as { __lvisChatStream?: { _emit?: unknown } })
@@ -135,45 +245,158 @@ test.describe("chat preview rail", () => {
       await expect(ctx.page.getByTestId("chat-preview-rail")).toHaveCount(0);
 
       await openButton.click();
+      const panel = ctx.page.getByTestId("chat-side-panel");
       const rail = ctx.page.getByTestId("chat-preview-rail");
+      await expect(panel).toBeVisible({ timeout: 10_000 });
       await expect(rail).toBeVisible({ timeout: 10_000 });
-      await expect(rail).toContainText("Artifact dashboard");
       await expect(rail).toContainText("report.md");
-      await expect(rail).toContainText("example.com/docs");
+      await expect(ctx.page.getByTestId("chat-side-panel-mode-files")).toBeVisible();
+      await expect(ctx.page.getByTestId("chat-side-panel-mode-preview")).toBeVisible();
+      await expect(ctx.page.getByTestId("chat-side-panel-mode-browser")).toBeVisible();
+      await expect(ctx.page.getByTestId("chat-side-panel-mode-terminal")).toBeVisible();
+      await expect(ctx.page.getByTestId("chat-side-panel-file-tree")).toBeVisible();
+      await expect(ctx.page.getByTestId("chat-side-panel-file-splitter")).toBeVisible();
+
+      const tabCountBefore = await ctx.page.getByRole("tab").count();
+      await ctx.page.getByTestId("chat-side-panel-add-browser-tab").click();
+      await expect(ctx.page.getByRole("tab")).toHaveCount(tabCountBefore + 1);
+
+      await ctx.page.getByTestId("chat-side-panel-mode-browser").click();
+      await expect(rail).toContainText("Artifact dashboard");
+      await expect(rail).toContainText(sideBrowserHost);
+      await expect(ctx.page.getByTestId("chat-side-panel-browser-viewer")).toBeVisible();
+      await expect(ctx.page.getByTestId("chat-side-panel-browser-frame")).toBeVisible();
+      await expect(ctx.page.frameLocator('[data-testid="chat-side-panel-browser-frame"]').getByText("Preview OK")).toBeVisible();
+      const browserProbe = await readCdpProbe(ctx.page);
+      await test.info().attach("chat-side-panel-browser-cdp.png", {
+        contentType: "image/png",
+        body: Buffer.from(browserProbe.screenshot.data, "base64"),
+      });
+      expect(browserProbe.screenshot.data.length).toBeGreaterThan(20_000);
+
+      await ctx.page.getByTestId("chat-side-panel-browser-address").fill(sideBrowser.url);
+      await ctx.page.getByTestId("chat-side-panel-browser-go").click();
+      const directBrowserWebview = ctx.page.getByTestId("chat-side-panel-browser-webview");
+      await expect(directBrowserWebview).toBeVisible();
+      await expect(directBrowserWebview).toHaveAttribute("src", sideBrowser.url);
+
+      await ctx.page.setViewportSize({ width: 900, height: 860 });
+      await expect(panel).not.toHaveCSS("position", "absolute");
+      const narrowRootBox = await ctx.page.getByTestId("chat-view-root").boundingBox();
+      const narrowMainBox = await ctx.page.getByTestId("chat-main-column").boundingBox();
+      const narrowRailBox = await panel.boundingBox();
+      expect(narrowRootBox).not.toBeNull();
+      expect(narrowMainBox).not.toBeNull();
+      expect(narrowRailBox).not.toBeNull();
+      expect(Math.abs((narrowRailBox!.x + narrowRailBox!.width) - (narrowRootBox!.x + narrowRootBox!.width))).toBeLessThanOrEqual(2);
+      expect(narrowRailBox!.x).toBeGreaterThanOrEqual(narrowMainBox!.x + narrowMainBox!.width - 2);
+      expect(
+        await ctx.page.locator('button[aria-label="사이드 패널 닫기"]').evaluateAll((buttons) =>
+          buttons.some((button) => button.className.includes("absolute inset-0")),
+        ),
+      ).toBe(false);
+      await ctx.page.setViewportSize({ width: 1280, height: 860 });
+
+      await ctx.page.getByTestId("chat-side-panel-browser-row").nth(1).click();
+      const browserWebview = ctx.page.getByTestId("chat-side-panel-browser-webview");
+      await expect(browserWebview).toBeVisible();
+      await expect(browserWebview).toHaveAttribute("src", sideBrowser.url);
+      await expect(browserWebview).toHaveAttribute("partition", "persist:lvis-side-browser");
+      await expect(browserWebview).toHaveAttribute("webpreferences", /javascript=yes/);
+      await ctx.page.waitForFunction((expectedUrl) => {
+        const view = document.querySelector('[data-testid="chat-side-panel-browser-webview"]') as
+          | (HTMLElement & { getURL?: () => string })
+          | null;
+        return Boolean(view && (view.getURL?.() === expectedUrl || view.getAttribute("src") === expectedUrl));
+      }, sideBrowser.url);
+      const urlProbe = await readCdpProbe(ctx.page);
+      await test.info().attach("chat-side-panel-url-webview-cdp.png", {
+        contentType: "image/png",
+        body: Buffer.from(urlProbe.screenshot.data, "base64"),
+      });
+      expect(urlProbe.screenshot.data.length).toBeGreaterThan(20_000);
+      const capturedGuest = await waitForSideBrowserGuestCapture(ctx, sideBrowser.url);
+      expect(new URL(capturedGuest.url).host).toBe(sideBrowserHost);
+      expect(`${capturedGuest.title}\n${capturedGuest.text}`.trim().length).toBeGreaterThan(0);
+      const expectedSideBrowserHostname = new URL(sideBrowser.url).hostname;
+      if (expectedSideBrowserHostname === "www.google.com" || expectedSideBrowserHostname === "google.com") {
+        expect(`${capturedGuest.title}\n${capturedGuest.text}`).toMatch(/Google|Search/i);
+      }
+      await test.info().attach("chat-side-panel-url-guest-webview.txt", {
+        contentType: "text/plain",
+        body: Buffer.from(`${capturedGuest.url}\n${capturedGuest.title}\n\n${capturedGuest.text}`),
+      });
+      await test.info().attach("chat-side-panel-url-guest-webview.png", {
+        contentType: "image/png",
+        body: Buffer.from(capturedGuest.pngBase64, "base64"),
+      });
+
+      await ctx.page.getByTestId("chat-side-panel-mode-preview").click();
+      await expect(rail).not.toContainText("Artifact dashboard");
+      await expect(rail).not.toContainText(sideBrowserHost);
 
       const chatBox = await ctx.page.locator(".lvis-chat-scroll").boundingBox();
       const rootBox = await ctx.page.getByTestId("chat-view-root").boundingBox();
+      const mainColumnBox = await ctx.page.getByTestId("chat-main-column").boundingBox();
       const actionBarBox = await ctx.page.getByTestId("input-action-bar").boundingBox();
-      const railBox = await rail.boundingBox();
+      const railBox = await panel.boundingBox();
       expect(chatBox).not.toBeNull();
       expect(rootBox).not.toBeNull();
+      expect(mainColumnBox).not.toBeNull();
       expect(actionBarBox).not.toBeNull();
       expect(railBox).not.toBeNull();
       expect(railBox!.width).toBeGreaterThanOrEqual(300);
       expect(railBox!.x).toBeGreaterThan(chatBox!.x + chatBox!.width - 8);
       expect(railBox!.x).toBeGreaterThan(actionBarBox!.x + actionBarBox!.width - 8);
+      expect(Math.abs((railBox!.x + railBox!.width) - (rootBox!.x + rootBox!.width))).toBeLessThanOrEqual(2);
+      expect(Math.abs(chatBox!.width - mainColumnBox!.width)).toBeLessThanOrEqual(2);
+      expect(Math.abs(actionBarBox!.width - mainColumnBox!.width)).toBeLessThanOrEqual(48);
       expect(Math.abs(railBox!.height - rootBox!.height)).toBeLessThanOrEqual(2);
+      await expect(panel).not.toHaveCSS("position", "absolute");
 
       const actionRailBox = await ctx.page.getByTestId("action-panel-rail").boundingBox();
+      const actionOpenBox = await ctx.page.getByTestId("action-panel-open").boundingBox();
       expect(actionRailBox).not.toBeNull();
+      expect(actionOpenBox).not.toBeNull();
+      expect(actionRailBox!.x + actionRailBox!.width).toBeLessThanOrEqual(railBox!.x - 2);
       const topElementOwner = await ctx.page.evaluate(({ x, y }) => {
         const element = document.elementFromPoint(x, y);
         return {
-          previewRail: Boolean(element?.closest('[data-testid="chat-preview-rail"]')),
+          previewRail: Boolean(element?.closest('[data-testid="chat-side-panel"]')),
           actionRail: Boolean(element?.closest('[data-testid="action-panel-rail"]')),
         };
       }, {
-        x: actionRailBox!.x + actionRailBox!.width / 2,
-        y: actionRailBox!.y + actionRailBox!.height / 2,
+        x: actionOpenBox!.x + actionOpenBox!.width / 2,
+        y: actionOpenBox!.y + actionOpenBox!.height / 2,
       });
-      expect(topElementOwner.previewRail).toBe(true);
-      expect(topElementOwner.actionRail).toBe(false);
+      expect(topElementOwner.previewRail).toBe(false);
+      expect(topElementOwner.actionRail).toBe(true);
 
-      await ctx.page.getByTestId("chat-preview-files-tab").click();
+      await ctx.page.getByTestId("action-panel-open").click();
+      const actionPanel = ctx.page.getByTestId("action-panel");
+      await expect(actionPanel).toBeVisible();
+      await expect(actionPanel).toContainText("meeting_lookup");
+      await expect(actionPanel).toContainText("meeting");
+      await expect(actionPanel).toContainText(READ_PATH);
+      await expect(actionPanel).toContainText(WRITE_PATH);
+      await expect(actionPanel).toContainText(sideBrowserOrigin);
+      await expect(actionPanel).toContainText("https://search.example.test");
+      const openActionPanelBox = await actionPanel.boundingBox();
+      expect(openActionPanelBox).not.toBeNull();
+      expect(openActionPanelBox!.x + openActionPanelBox!.width).toBeLessThanOrEqual(railBox!.x - 2);
+      const actionPanelProbe = await readCdpProbe(ctx.page);
+      await test.info().attach("action-panel-cdp.png", {
+        contentType: "image/png",
+        body: Buffer.from(actionPanelProbe.screenshot.data, "base64"),
+      });
+      await ctx.page.getByTestId("action-panel-close").click();
+      await expect(ctx.page.getByTestId("action-panel-rail")).toBeVisible();
+
+      await ctx.page.getByTestId("chat-side-panel-mode-files").click();
       await expect(rail).toContainText("notes.md");
       await expect(rail).toContainText("report.md");
       await ctx.page.getByTestId("chat-preview-search").fill("report");
-      const filteredFileRows = rail.getByTestId("chat-preview-file-row");
+      const filteredFileRows = rail.getByTestId("chat-side-panel-file-tree-file");
       await expect(filteredFileRows).toHaveCount(1);
       await expect(filteredFileRows.first()).toContainText("report.md");
       await expect(filteredFileRows.first()).not.toContainText("notes.md");
@@ -190,7 +413,11 @@ test.describe("chat preview rail", () => {
       expect(typeof metrics.TaskDuration).toBe("number");
       expect(screenshot.data.length).toBeGreaterThan(20_000);
     } finally {
-      await teardownSeededElectron(ctx);
+      try {
+        if (ctx) await teardownSeededElectron(ctx);
+      } finally {
+        await sideBrowser.close();
+      }
     }
   });
 });
