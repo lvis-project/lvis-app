@@ -780,7 +780,13 @@ const api = {
   // ({ ok, pluginId, enabled } | { ok:false, error, message }).
   setPluginEnabled: async (pluginId: string, enabled: boolean) =>
     ipcRenderer.invoke("lvis:plugins:set-enabled", pluginId, enabled),
-  callPluginMethod: async (method: string, payload?: unknown) => ipcRenderer.invoke("lvis:plugins:call", method, payload),
+  callPluginMethod: async (
+    method: string,
+    payload?: unknown,
+    options?: { userAction?: boolean },
+  ) => ipcRenderer.invoke("lvis:plugins:call", method, payload, {
+    userAction: options?.userAction === true && navigator.userActivation?.isActive === true,
+  }),
 
   // ─── Plugin Performance (Observability) ──────────
   plugins: {

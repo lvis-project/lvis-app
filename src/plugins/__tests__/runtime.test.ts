@@ -365,9 +365,19 @@ describe("PluginRuntime.disable", () => {
     await writeTestPluginRegistry({ registryPath }, [{ id: "ui-actions", manifestPath, enabled: true }]);
     const runtime = makeRuntime();
     await runtime.startAll();
-    runtime.setToolInvocationDelegate((method, payload) => runtime.call(method, payload));
+    const delegate = vi.fn((method, payload) => runtime.call(method, payload));
+    runtime.setToolInvocationDelegate(delegate);
 
-    await expect(runtime.callFromUi("uic_get")).resolves.toBe("public-ok");
+    await expect(runtime.callFromUi("uic_get", undefined, { userAction: true })).resolves.toBe("public-ok");
+    expect(delegate).toHaveBeenCalledWith(
+      "uic_get",
+      undefined,
+      expect.objectContaining({
+        origin: "ui",
+        ownerPluginId: "ui-actions",
+        userAction: true,
+      }),
+    );
     await expect(runtime.callFromUi("uic_private")).rejects.toThrow(
       /not declared as a UI action/,
     );
