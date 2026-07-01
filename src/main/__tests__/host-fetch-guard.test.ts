@@ -42,6 +42,23 @@ describe("evaluateHostFetch — allow-list + scheme gating", () => {
     expect(lookupMock).not.toHaveBeenCalled();
   });
 
+  it("reports allow-list denials by hostname, not host:port", async () => {
+    const decision = await evaluateHostFetch({
+      pluginId: "p",
+      rawUrl: "https://evil.com:8443/x",
+      allowedDomains: ALLOW,
+    });
+    expect(decision.ok).toBe(false);
+    if (!decision.ok) {
+      expect(decision.reason).toBe("not-allowlisted");
+      expect(decision.detail).toBe("https://evil.com not in networkAccess.allowedDomains");
+      expect(decision.message).toContain("evil.com is not in networkAccess.allowedDomains");
+      expect(decision.detail).not.toContain(":8443");
+      expect(decision.message).not.toContain(":8443");
+    }
+    expect(lookupMock).not.toHaveBeenCalled();
+  });
+
   it("denies cleartext http even for an allow-listed host", async () => {
     const decision = await evaluateHostFetch({
       pluginId: "p",

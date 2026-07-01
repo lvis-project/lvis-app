@@ -194,6 +194,7 @@ interface McpToolCallResult {
       slot?: string;
       height?: number;
       title?: string;
+      csp?: McpUiPayload["csp"];
     };
     [key: string]: unknown;
   };
@@ -630,6 +631,7 @@ export class McpClient {
         slot: (uiMeta.slot as McpUiPayload["slot"]) ?? "chat",
         height: uiMeta.height,
         title: uiMeta.title,
+        csp: uiMeta.csp,
       };
     }
     return { text, uiPayload };

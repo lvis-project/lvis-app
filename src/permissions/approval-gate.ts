@@ -209,6 +209,12 @@ export interface ApprovalDecision {
   /** allow-always / deny-always 일 때 영구화 패턴 (기본: 도구 이름 exact) */
   rememberPattern?: string;
   /**
+   * One-shot structured content captured by renderer-only approval surfaces.
+   * Currently used for MCP `elicitation/create` form-mode requests; never
+   * persisted in the user-approval memory store.
+   */
+  elicitationContent?: Record<string, unknown>;
+  /**
    * Nonce originally issued with the {@link ApprovalRequest}. The
    * renderer echoes it back verbatim. Missing or mismatched values cause
    * the decision to be rejected and treated as deny-once.

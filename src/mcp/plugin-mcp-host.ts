@@ -55,7 +55,13 @@ interface RcToolCallResult {
   content: Array<{ type: string; text?: string; [key: string]: unknown }>;
   isError?: boolean;
   _meta?: {
-    ui?: { resourceUri?: string; slot?: string; height?: number; title?: string };
+    ui?: {
+      resourceUri?: string;
+      slot?: string;
+      height?: number;
+      title?: string;
+      csp?: McpUiPayload["csp"];
+    };
     [key: string]: unknown;
   };
 }
@@ -227,6 +233,7 @@ export class PluginMcpHost {
           slot: (uiMeta.slot as McpUiPayload["slot"]) ?? "chat",
           height: uiMeta.height,
           title: uiMeta.title,
+          csp: uiMeta.csp,
         }
       : undefined;
     // Box the raw plugin return value iff the server included it (success path),

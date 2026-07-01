@@ -14,10 +14,9 @@
  *  - `sampling/createMessage` and `roots/list` are DEPRECATED upstream (§8
  *    SEP-2577) and the host does not implement them → a thrown typed error, never
  *    a fabricated response.
- *  - v1 is CONSENT-only: the approval gate yields accept/decline; structured
- *    form-field capture (returning `content` matching `requestedSchema`) needs a
- *    dedicated elicitation form UI and is a documented follow-up. URL-mode
- *    elicitation (consent to open a URL) is fully served by accept/decline.
+ *  - URL-mode elicitation is consent-only. Form-mode elicitation forwards
+ *    `requestedSchema` to the renderer approval UI and returns the captured
+ *    one-shot `content` with the accept decision.
  *
  * Trust: the request payload comes from an untrusted external server, so the
  * approval is raised with `trustOrigin: "plugin-emitted"` (never reaches the
@@ -35,6 +34,21 @@ export interface ElicitResult {
 }
 
 const ELICITATION_METHOD = "elicitation/create";
+const MAX_ELICITATION_FIELDS = 12;
+const ELICITATION_FIELD_NAME_RE = /^[A-Za-z_][A-Za-z0-9_.-]{0,63}$/;
+
+type JsonScalar = string | number | boolean | null;
+type ElicitationSchemaFieldKind = "string" | "number" | "integer" | "boolean";
+
+type SupportedElicitationProperty = {
+  kind?: ElicitationSchemaFieldKind;
+  required: boolean;
+  enumValues?: readonly JsonScalar[];
+};
+
+type SupportedElicitationSchema = {
+  properties: Map<string, SupportedElicitationProperty>;
+};
 
 /** The single approval-gate method this resolver depends on (keeps it test-seam-able). */
 export interface ElicitationApprovalGate {
@@ -49,6 +63,108 @@ function isElicitation(request: Record<string, unknown>): boolean {
     typeof request.message === "string" &&
     (request.mode === "form" || request.mode === "url" || request.requestedSchema !== undefined)
   );
+}
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return Boolean(value) && typeof value === "object" && !Array.isArray(value);
+}
+
+function isJsonScalar(value: unknown): value is JsonScalar {
+  if (value === null) return true;
+  if (typeof value === "number") return Number.isFinite(value);
+  return typeof value === "string" || typeof value === "boolean";
+}
+
+function supportedKind(value: unknown): ElicitationSchemaFieldKind | undefined {
+  if (value === "string" || value === "number" || value === "integer" || value === "boolean") {
+    return value;
+  }
+  return undefined;
+}
+
+function parseEnumValues(value: unknown): readonly JsonScalar[] | undefined {
+  if (value === undefined) return undefined;
+  if (!Array.isArray(value)) return undefined;
+  if (value.length === 0) return undefined;
+  if (!value.every(isJsonScalar)) return undefined;
+  return value;
+}
+
+function parseSupportedElicitationSchema(rawSchema: unknown): SupportedElicitationSchema | undefined {
+  if (!isRecord(rawSchema) || rawSchema.type !== "object" || !isRecord(rawSchema.properties)) {
+    return undefined;
+  }
+
+  const entries = Object.entries(rawSchema.properties);
+  if (entries.length > MAX_ELICITATION_FIELDS) return undefined;
+
+  let requiredNames: Set<string>;
+  if (rawSchema.required === undefined) {
+    requiredNames = new Set();
+  } else if (Array.isArray(rawSchema.required) && rawSchema.required.every((name) => typeof name === "string")) {
+    requiredNames = new Set(rawSchema.required);
+  } else {
+    return undefined;
+  }
+
+  const properties = new Map<string, SupportedElicitationProperty>();
+  for (const [name, rawProperty] of entries) {
+    if (!ELICITATION_FIELD_NAME_RE.test(name) || !isRecord(rawProperty)) return undefined;
+    const enumValues = parseEnumValues(rawProperty.enum);
+    if (rawProperty.enum !== undefined && enumValues === undefined) return undefined;
+    const kind = supportedKind(rawProperty.type);
+    if (rawProperty.type !== undefined && !kind) return undefined;
+    if (!enumValues && !kind) return undefined;
+    properties.set(name, {
+      ...(kind ? { kind } : {}),
+      required: requiredNames.has(name),
+      ...(enumValues ? { enumValues } : {}),
+    });
+  }
+
+  for (const requiredName of requiredNames) {
+    if (!properties.has(requiredName)) return undefined;
+  }
+
+  return { properties };
+}
+
+function hasOwnRecordKey(value: Record<string, unknown>, key: string): boolean {
+  return Object.prototype.hasOwnProperty.call(value, key);
+}
+
+function isValidFieldValue(value: unknown, field: SupportedElicitationProperty): boolean {
+  if (field.enumValues) {
+    return field.enumValues.some((candidate) => Object.is(candidate, value));
+  }
+  if (field.kind === "string") return typeof value === "string";
+  if (field.kind === "boolean") return typeof value === "boolean";
+  if (field.kind === "number") return typeof value === "number" && Number.isFinite(value);
+  if (field.kind === "integer") {
+    return typeof value === "number" && Number.isFinite(value) && Number.isInteger(value);
+  }
+  return false;
+}
+
+function validateElicitationContent(
+  schema: SupportedElicitationSchema,
+  content: Record<string, unknown>,
+): boolean {
+  for (const name of Object.keys(content)) {
+    if (!schema.properties.has(name)) return false;
+  }
+  for (const [name, field] of schema.properties) {
+    if (!hasOwnRecordKey(content, name)) {
+      if (field.required) return false;
+      continue;
+    }
+    if (!isValidFieldValue(content[name], field)) return false;
+  }
+  return true;
+}
+
+function shouldValidateFormContent(request: Record<string, unknown>): boolean {
+  return request.mode === "form" || (request.mode !== "url" && request.requestedSchema !== undefined);
 }
 
 /**
@@ -92,15 +208,18 @@ export function createElicitationResolverFactory(deps: {
         mode: "default",
       });
 
-      const accepted =
-        decision.choice === "allow-once" ||
-        decision.choice === "allow-session" ||
-        decision.choice === "allow-always";
+      if (decision.choice !== "allow-once") return { action: "decline" };
 
-      // v1 consent-only: an accept carries empty content (no form-capture UI yet).
-      // The user's consent decision IS the gathered input for URL-mode; form-field
-      // capture against requestedSchema is a documented follow-up.
-      return accepted ? { action: "accept", content: {} } : { action: "decline" };
+      if (shouldValidateFormContent(request)) {
+        const schema = parseSupportedElicitationSchema(request.requestedSchema);
+        if (!schema || !isRecord(decision.elicitationContent)) return { action: "decline" };
+        if (!validateElicitationContent(schema, decision.elicitationContent)) {
+          return { action: "decline" };
+        }
+        return { action: "accept", content: decision.elicitationContent };
+      }
+
+      return { action: "accept", content: {} };
     };
   };
 }
