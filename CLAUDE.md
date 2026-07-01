@@ -82,6 +82,12 @@ src/
     tool-registry.ts          — §6.4 Unified tool registry (deprecated by tools/base.ts eventually)
     overlay-trigger-source.ts — overlay trigger source contract
 
+  contract/                   — #1409 public wire contract SOT: app-contract.ts
+                                (channel names + PUBLIC_CHANNELS allowlist +
+                                gesture classification + session addressing),
+                                events.ts (AppEvent union), trust-origin.ts.
+                                api/cli/sdk external surfaces coming.
+
   mcp/                        — Model Context Protocol client (unchanged)
 
   plugins/                    — Plugin runtime (was plugin-runtime/)

@@ -1218,6 +1218,11 @@ lvis-app/src/
 ├── plugins/       # 플러그인 런타임
 │   └── runtime.ts, registry.ts, marketplace.ts, deployment-guard.ts, types.ts
 │
+├── contract/      # #1409 public wire contract SOT
+│   └── app-contract.ts (CHANNELS + PUBLIC_CHANNELS allowlist + gesture 분류),
+│       events.ts (AppEvent union), trust-origin.ts
+│       # api/ · cli/ · sdk/ external surfaces coming
+│
 ├── data/, main/, lib/, components/ui/, ui/, __tests__/
 ```
 
