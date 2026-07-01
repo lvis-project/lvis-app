@@ -5,7 +5,7 @@
  *  1. validateSender() allows trusted frames (file://, localhost) and rejects
  *     untrusted origins.
  *  2. Every channel classified as mutating or sensitive in the channel manifest has
- *     a validateSender() guard present in the IPC domain source files
+ *     a sender guard present in the IPC domain source files
  *     (src/ipc/domains/*). Public read-only channels are excluded.
  */
 import { readFileSync } from "node:fs";
@@ -148,7 +148,7 @@ describe("validateSender", () => {
 
 // ─── Source-level guard audit ────────────────────────────────────────────────
 
-describe("ipc-bridge.ts — mutating/sensitive channels have validateSender guard", () => {
+describe("ipc-bridge.ts — mutating/sensitive channels have a sender guard", () => {
   // ipc-bridge.ts is now a thin re-export shim; all handler source lives in
   // src/ipc/domains/*. Aggregate the full source so the channel + guard checks
   // remain valid against the actual implementation files.
@@ -219,9 +219,10 @@ describe("ipc-bridge.ts — mutating/sensitive channels have validateSender guar
   };
 
   for (const channel of gatedChannels) {
-    it(`${channel} has validateSender guard`, () => {
+    it(`${channel} has sender guard`, () => {
       // Find the ipcMain.handle block for this channel and check that
-      // validateSender appears between this channel registration and the next.
+      // a trusted-frame sender guard appears between this channel registration
+      // and the next.
       const channelPattern = handlePatternFor(channel);
       const channelIdx = source.search(channelPattern);
       expect(channelIdx, `channel "${channel}" not found in ipc-bridge.ts`).toBeGreaterThan(-1);
@@ -236,8 +237,8 @@ describe("ipc-bridge.ts — mutating/sensitive channels have validateSender guar
 
       expect(
         snippet,
-        `channel "${channel}" (${CHANNEL_MANIFEST[channel]}) is missing validateSender guard`,
-      ).toContain("validateSender(");
+        `channel "${channel}" (${CHANNEL_MANIFEST[channel]}) is missing sender guard`,
+      ).toMatch(/\bvalidate(?:HostRenderer)?Sender\(/);
     });
   }
 
