@@ -18,6 +18,7 @@ import { createElement, useEffect, useMemo, useRef, useState } from "react";
 import type { McpUiPayload } from "../../../mcp/types.js";
 import { Loader2, AlertCircle } from "lucide-react";
 import { useTranslation } from "../../../i18n/react.js";
+import { wrapWithCsp } from "./mcp-app-csp.js";
 
 type BridgeMessage = { jsonrpc?: string; id?: number; method?: string; params?: unknown };
 type BridgeEventSource = MessageEventSource | null | undefined;
@@ -28,33 +29,6 @@ type BridgeWebview = EventTarget & {
   executeJavaScript?: (code: string) => Promise<unknown>;
   contentWindow?: BridgeEventSource;
 };
-
-// ─── CSP helper ─────────────────────────────────────
-// MCP App 렌더러는 외부 CDN(jsdelivr, unpkg, cdnjs 등)에서
-// Chart.js 같은 라이브러리를 로드할 수 있도록 허용합니다.
-
-function buildMcpCsp(): string {
-  const directives = [
-    "default-src 'none'",
-    "script-src 'unsafe-inline' https://cdn.jsdelivr.net https://unpkg.com https://cdnjs.cloudflare.com",
-    "style-src 'unsafe-inline' data: https://cdn.jsdelivr.net https://unpkg.com https://cdnjs.cloudflare.com https://fonts.googleapis.com",
-    "img-src data: blob: https:",
-    "font-src data: https://fonts.gstatic.com https://cdn.jsdelivr.net https://unpkg.com",
-    "connect-src 'none'",
-    "base-uri 'none'",
-    "form-action 'none'",
-    "frame-ancestors 'none'",
-  ].join("; ");
-  return `<meta http-equiv="Content-Security-Policy" content="${directives}">`;
-}
-
-function wrapWithCsp(html: string): string {
-  const cspMeta = buildMcpCsp();
-  if (/<head[^>]*>/i.test(html)) {
-    return html.replace(/<head[^>]*>/i, (m) => `${m}${cspMeta}`);
-  }
-  return `<!doctype html><html><head>${cspMeta}</head><body>${html}</body></html>`;
-}
 
 // ─── AppBridge injection ─────────────────────────────
 
@@ -181,7 +155,7 @@ export function McpAppView({ payload }: { payload: McpUiPayload }) {
       .then((html) => {
         if (cancelled) return;
         const withBridge = injectBridge(html, payload);
-        setHtmlContent(wrapWithCsp(withBridge));
+        setHtmlContent(wrapWithCsp(withBridge, payload.csp));
       })
       .catch((err) => {
         if (cancelled) return;
@@ -189,7 +163,7 @@ export function McpAppView({ payload }: { payload: McpUiPayload }) {
       });
 
     return () => { cancelled = true; };
-  }, [payload.serverId, payload.resourceUri]);
+  }, [payload]);
 
   // Wire up the webview sandbox attributes
   useEffect(() => {

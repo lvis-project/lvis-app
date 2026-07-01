@@ -60,6 +60,18 @@ describe("manifest networkAccess (Tier A) — real SDK-schema validator path", (
     ]);
   });
 
+  it("normalizes networkAccess.allowedDomains at manifest load", async () => {
+    const validator = await buildManifestValidator();
+    const path = await writeManifest({
+      networkAccess: {
+        allowedDomains: [".API.EXAMPLE.COM", "api.example.com"],
+        reasoning: "Host-mediated API access.",
+      },
+    });
+    const parsed = await parsePluginJson(path, validator);
+    expect(parsed.networkAccess?.allowedDomains).toEqual(["api.example.com"]);
+  });
+
   it("rejects a bare public-suffix domain ('com')", async () => {
     const validator = await buildManifestValidator();
     const path = await writeManifest({ networkAccess: { allowedDomains: ["com"] } });
