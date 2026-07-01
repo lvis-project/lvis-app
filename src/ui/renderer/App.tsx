@@ -23,6 +23,7 @@ import { PostTourFirstTask } from "./onboarding/PostTourFirstTask.js";
 import { ScenarioShowcase } from "./onboarding/ScenarioShowcase.js";
 import { PersonalizedWelcome } from "./onboarding/PersonalizedWelcome.js";
 import { PluginShowcase } from "./onboarding/PluginShowcase.js";
+import { summarizePluginReadiness } from "./onboarding/first-run-readiness.js";
 import {
   initialOnboardingChainState,
   onboardingChainReducer,
@@ -818,6 +819,10 @@ export function App() {
 
   // Track in-flight plugin installs for the grid overlay spinner.
   const installingPlugins = useInstallingPlugins(api);
+  const firstRunPluginSummary = useMemo(
+    () => summarizePluginReadiness(pluginCards),
+    [pluginCards],
+  );
 
   const hasPreparingPlugin = useMemo(() => {
     if (pluginCards.some((card) => card.loadStatus === "preparing")) return true;
@@ -2240,6 +2245,12 @@ export function App() {
         nickname={memorySeedNickname}
         introduction={memorySeedIntroduction}
         pingAiProvider={api.pingAiProvider}
+        getRuntimeCounts={api.getRuntimeCounts}
+        getRuntimeEnv={api.getRuntimeEnv}
+        pluginSummary={firstRunPluginSummary}
+        marketplaceUrlReady={marketplaceUrlReady}
+        bootstrapStatus={bootstrapStatus}
+        onRetryBootstrap={retryBootstrap}
         onContinue={() =>
           dispatchChain({ type: "personalized-welcome-accept" })
         }
