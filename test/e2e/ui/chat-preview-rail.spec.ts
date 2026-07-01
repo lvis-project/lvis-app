@@ -142,11 +142,32 @@ test.describe("chat preview rail", () => {
       await expect(rail).toContainText("example.com/docs");
 
       const chatBox = await ctx.page.locator(".lvis-chat-scroll").boundingBox();
+      const rootBox = await ctx.page.getByTestId("chat-view-root").boundingBox();
+      const actionBarBox = await ctx.page.getByTestId("input-action-bar").boundingBox();
       const railBox = await rail.boundingBox();
       expect(chatBox).not.toBeNull();
+      expect(rootBox).not.toBeNull();
+      expect(actionBarBox).not.toBeNull();
       expect(railBox).not.toBeNull();
       expect(railBox!.width).toBeGreaterThanOrEqual(300);
       expect(railBox!.x).toBeGreaterThan(chatBox!.x + chatBox!.width - 8);
+      expect(railBox!.x).toBeGreaterThan(actionBarBox!.x + actionBarBox!.width - 8);
+      expect(Math.abs(railBox!.height - rootBox!.height)).toBeLessThanOrEqual(2);
+
+      const actionRailBox = await ctx.page.getByTestId("action-panel-rail").boundingBox();
+      expect(actionRailBox).not.toBeNull();
+      const topElementOwner = await ctx.page.evaluate(({ x, y }) => {
+        const element = document.elementFromPoint(x, y);
+        return {
+          previewRail: Boolean(element?.closest('[data-testid="chat-preview-rail"]')),
+          actionRail: Boolean(element?.closest('[data-testid="action-panel-rail"]')),
+        };
+      }, {
+        x: actionRailBox!.x + actionRailBox!.width / 2,
+        y: actionRailBox!.y + actionRailBox!.height / 2,
+      });
+      expect(topElementOwner.previewRail).toBe(true);
+      expect(topElementOwner.actionRail).toBe(false);
 
       await ctx.page.getByTestId("chat-preview-files-tab").click();
       await expect(rail).toContainText("notes.md");
