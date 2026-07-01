@@ -3,7 +3,7 @@
  *
  * Verifies the contract documented in architecture.md §9.4a "Plugin-Owned
  * OAuth — Host UI Surface": when a manifest declares `auth`, the three
- * referenced tool names must all live in `uiCallable[]` so the same gate
+ * referenced tool names must all live in `uiActions[]` so the same gate
  * runs at load time.
  */
 import { afterEach, beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
@@ -90,18 +90,18 @@ describe("manifest validation — auth cross-field", () => {
       description: "auth fixture",
       publisher: "tests",
       entry: "dist/hostPlugin.js",
-      // Migrated shape: auth tools live in uiCallable[] ONLY, never tools[]
+      // Migrated shape: auth tools live in uiActions[] ONLY, never tools[]
       // (tools[] is the LLM-facing surface). The leak-rejection test overrides
       // `tools` explicitly to re-introduce the pre-migration violation.
       tools: [],
-      uiCallable: ["test_status", "test_login", "test_signout"],
+      uiActions: { test_status: {}, test_login: {}, test_signout: {} },
       ...extra,
     };
     await mkdir(testDir, { recursive: true });
     await writeFile(manifestPath, JSON.stringify(base, null, 2), "utf-8");
   }
 
-  it("accepts manifest with auth tools all in uiCallable", async () => {
+  it("accepts manifest with auth tools all in uiActions", async () => {
     await writeManifest({
       auth: {
         label: "Test Account",
@@ -129,9 +129,9 @@ describe("manifest validation — auth cross-field", () => {
     expect(parsed.auth?.logoutTool).toBeUndefined();
   });
 
-  it("rejects auth.statusTool not in uiCallable[]", async () => {
+  it("rejects auth.statusTool not in uiActions[]", async () => {
     await writeManifest({
-      uiCallable: ["test_login", "test_signout"], // statusTool missing
+      uiActions: { test_login: {}, test_signout: {} }, // statusTool missing
       auth: {
         statusTool: "test_status",
         loginTool: "test_login",
@@ -140,13 +140,13 @@ describe("manifest validation — auth cross-field", () => {
     });
     const validator = TEST_VALIDATOR;
     await expect(parsePluginJson(manifestPath, validator)).rejects.toThrow(
-      /auth\.statusTool.*not declared in uiCallable/,
+      /auth\.statusTool.*not declared in uiActions/,
     );
   });
 
-  it("rejects auth.loginTool not in uiCallable[]", async () => {
+  it("rejects auth.loginTool not in uiActions[]", async () => {
     await writeManifest({
-      uiCallable: ["test_status", "test_signout"], // loginTool missing
+      uiActions: { test_status: {}, test_signout: {} }, // loginTool missing
       auth: {
         statusTool: "test_status",
         loginTool: "test_login",
@@ -155,13 +155,13 @@ describe("manifest validation — auth cross-field", () => {
     });
     const validator = TEST_VALIDATOR;
     await expect(parsePluginJson(manifestPath, validator)).rejects.toThrow(
-      /auth\.loginTool.*not declared in uiCallable/,
+      /auth\.loginTool.*not declared in uiActions/,
     );
   });
 
-  it("rejects auth.logoutTool not in uiCallable[] when declared", async () => {
+  it("rejects auth.logoutTool not in uiActions[] when declared", async () => {
     await writeManifest({
-      uiCallable: ["test_status", "test_login"], // logoutTool missing
+      uiActions: { test_status: {}, test_login: {} }, // logoutTool missing
       auth: {
         statusTool: "test_status",
         loginTool: "test_login",
@@ -170,7 +170,7 @@ describe("manifest validation — auth cross-field", () => {
     });
     const validator = TEST_VALIDATOR;
     await expect(parsePluginJson(manifestPath, validator)).rejects.toThrow(
-      /auth\.logoutTool.*not declared in uiCallable/,
+      /auth\.logoutTool.*not declared in uiActions/,
     );
   });
 
@@ -291,20 +291,20 @@ describe("manifest validation — auth cross-field", () => {
 
   // Defense-in-depth — security review MED #1.
   // The cross-field validator only enforces `auth.{statusTool,loginTool,
-  // logoutTool} ⊂ uiCallable[]`, which means a manifest could route an
-  // arbitrary uiCallable name (including a destructive one) through the
-  // host-rendered "로그인" button. Today the broader `uiCallable` allow-
+  // logoutTool} ⊂ uiActions[]`, which means a manifest could route an
+  // arbitrary uiActions name (including a destructive one) through the
+  // host-rendered "로그인" button. Today the broader `uiActions` allow-
   // list itself does not block destructive verbs (per §2.2 — naming is
   // plugin-author responsibility, host has no name-based gate). These
   // tests pin the *current* posture so any future tightening of the
   // host's destructive-name rule is also surfaced through the auth slot.
   it("does not currently reject destructive-looking tool names in auth (host posture is plugin-author responsibility per §2.2)", async () => {
     await writeManifest({
-      // Auth tools stay in uiCallable[] only (migrated shape); the point of this
+      // Auth tools stay in uiActions[] only (migrated shape); the point of this
       // test is that a destructive-looking NAME is not name-gated by the host,
       // not the tools[] placement rule.
       tools: [],
-      uiCallable: ["test_status", "test_email_delete"],
+      uiActions: { test_status: {}, test_email_delete: {} },
       auth: {
         statusTool: "test_status",
         loginTool: "test_email_delete",
@@ -317,7 +317,7 @@ describe("manifest validation — auth cross-field", () => {
 
   // architecture.md §9.4a: auth is a host-managed lifecycle, not an LLM
   // capability. Auth tools (statusTool/loginTool/logoutTool) must live in
-  // uiCallable[] ONLY — never in tools[], which is the LLM-facing surface
+  // uiActions[] ONLY — never in tools[], which is the LLM-facing surface
   // (projected verbatim to the model). Hard fail: both shipped auth plugins are
   // migrated, so rejecting at load is the sole guard against a regression
   // silently re-exposing auth as an LLM tool (there is no CI gate for it).
@@ -339,13 +339,13 @@ describe("manifest validation — auth cross-field", () => {
     );
   });
 
-  it("does NOT warn when auth tools are only in uiCallable[] (migrated state)", async () => {
+  it("does NOT warn when auth tools are only in uiActions[] (migrated state)", async () => {
     const warnSpy = vi.spyOn(console, "warn").mockImplementation(() => undefined);
     try {
       await writeManifest({
-        // tools[] holds only non-auth tools; auth tools live in uiCallable[].
+        // tools[] holds only non-auth tools; auth tools live in uiActions[].
         tools: ["test_other"],
-        uiCallable: ["test_status", "test_login", "test_signout"],
+        uiActions: { test_status: {}, test_login: {}, test_signout: {} },
         emittedEvents: ["test-plugin.auth.changed"],
         auth: {
           statusTool: "test_status",

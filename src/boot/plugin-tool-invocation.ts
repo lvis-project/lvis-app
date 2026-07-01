@@ -1,4 +1,8 @@
-import type { PluginRuntime, PluginToolInvocationContext } from "../plugins/runtime.js";
+import {
+  declaredUiInvokableMethods,
+  type PluginRuntime,
+  type PluginToolInvocationContext,
+} from "../plugins/runtime.js";
 
 type RuntimeManifestView = Pick<PluginRuntime, "listPluginManifests">;
 
@@ -17,6 +21,7 @@ export function isUiOnlyRuntimeInvocation(
     .listPluginManifests()
     .find((candidate) => candidate.pluginId === ownerPluginId);
   const manifest = entry?.manifest;
-  return manifest?.uiCallable?.includes(toolName) === true
+  return manifest != null
+    && declaredUiInvokableMethods(manifest).includes(toolName)
     && manifest.tools?.includes(toolName) !== true;
 }
