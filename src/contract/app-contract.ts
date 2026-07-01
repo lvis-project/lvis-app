@@ -103,6 +103,9 @@ export const CHANNELS = {
   },
   askUserQuestion: {
     respond: "lvis:ask-user-question:respond",
+    // Request + timeout events (main → renderer).
+    request: "lvis:ask-user-question:request",
+    timeout: "lvis:ask-user-question:timeout",
   },
   plugins: {
     install: "lvis:plugins:install",
@@ -125,9 +128,12 @@ export const CHANNELS = {
     installResult: "lvis:plugins:install-result",
     uninstallResult: "lvis:plugins:uninstall-result",
     enabledChanged: "lvis:plugins:enabled-changed",
+    runtimeUpdated: "lvis:plugins:runtime-updated",
   },
   bootstrap: {
     retry: "lvis:bootstrap:retry",
+    // Lifecycle status event (main → renderer).
+    status: "lvis:bootstrap:status",
   },
   runtime: {
     counts: "lvis:runtime:counts",
@@ -187,6 +193,8 @@ export const CHANNELS = {
   },
   notification: {
     clicked: "lvis:notification:clicked",
+    // In-app toast push (main → renderer).
+    toast: "lvis:notification:toast",
   },
   settings: {
     get: "lvis:settings:get",
@@ -211,6 +219,112 @@ export const CHANNELS = {
     summary: "lvis:usage:summary",
     range: "lvis:usage:range",
     exportCsv: "lvis:usage:export-csv",
+  },
+  // ── preload-swept channel groups (C11: #1409 + #1411) ──────────────────────
+  // Added so the preload surfaces (public/internal) reference the contract SOT
+  // instead of inline `"lvis:*"` literals. Byte-identical to the strings the
+  // preload previously inlined; registered-handler groups are cross-checked by
+  // the channel-inventory snapshot.
+  auth: {
+    loginMockup: "lvis:auth:login-mockup",
+    progress: "lvis:auth:progress",
+    logoutBroadcast: "lvis:auth:logout-broadcast",
+    reactivateBroadcast: "lvis:auth:reactivate-broadcast",
+    logoutReset: "lvis:auth:logout-reset",
+    reactivateDemo: "lvis:auth:reactivate-demo",
+  },
+  demo: {
+    status: "lvis:demo:status",
+    activate: "lvis:demo:activate",
+    activateEmbedded: "lvis:demo:activate-embedded",
+    relaunchAfterActivation: "lvis:demo:relaunch-after-activation",
+    clear: "lvis:demo:clear",
+  },
+  tour: {
+    getState: "lvis:tour:get-state",
+    markComplete: "lvis:tour:mark-complete",
+    dismiss: "lvis:tour:dismiss",
+    start: "lvis:tour:start",
+  },
+  onboarding: {
+    contextSet: "lvis:onboarding:context:set",
+  },
+  settingsWindow: {
+    open: "lvis:settings-window:open",
+    saved: "lvis:settings-window:saved",
+    tab: "lvis:settings-window:tab",
+  },
+  prompts: {
+    listSummaries: "lvis:prompts:list-summaries",
+    list: "lvis:prompts:list",
+    save: "lvis:prompts:save",
+    delete: "lvis:prompts:delete",
+    updated: "lvis:prompts:updated",
+  },
+  trigger: {
+    started: "lvis:trigger:started",
+    completed: "lvis:trigger:completed",
+    failed: "lvis:trigger:failed",
+    expired: "lvis:trigger:expired",
+    imported: "lvis:trigger:imported",
+    dismiss: "lvis:trigger:dismiss",
+    import: "lvis:trigger:import",
+  },
+  update: {
+    state: "lvis:update:state",
+    getState: "lvis:update:get-state",
+    downloadNow: "lvis:update:download-now",
+    installNow: "lvis:update:install-now",
+    skipVersion: "lvis:update:skip-version",
+  },
+  app: {
+    info: "lvis:app:info",
+  },
+  approval: {
+    request: "lvis:approval:request",
+  },
+  dlp: {
+    stats: "lvis:dlp:stats",
+  },
+  audit: {
+    search: "lvis:audit:search",
+    stats: "lvis:audit:stats",
+  },
+  view: {
+    activate: "lvis:view:activate",
+  },
+  sessionTodo: {
+    list: "lvis:session-todo:list",
+    clear: "lvis:session-todo:clear",
+    changed: "lvis:session-todo:changed",
+  },
+  agentSpawn: {
+    event: "lvis:agent-spawn:event",
+  },
+  skillLoad: {
+    event: "lvis:skill-load:event",
+  },
+  window: {
+    openDetached: "lvis:window:open-detached",
+    closeDetached: "lvis:window:close-detached",
+    listDetached: "lvis:window:list-detached",
+    closeAllDetached: "lvis:window:close-all-detached",
+    loadSessionInMain: "lvis:window:load-session-in-main",
+    loadSessionInMainResult: "lvis:window:load-session-in-main-result",
+    resizeForMode: "lvis:window:resize-for-mode",
+    openHtmlPreview: "lvis:window:open-html-preview",
+    snapEdge: "lvis:window:snap-edge",
+    detachedNavigate: "lvis:detached:navigate",
+  },
+  dev: {
+    setPreflightOverride: "lvis:dev:setPreflightOverride",
+    getPreflightStatus: "lvis:dev:getPreflightStatus",
+  },
+  attach: {
+    openFile: "lvis:attach:openFile",
+    readImage: "lvis:attach:readImage",
+    saveClipboardImage: "lvis:attach:saveClipboardImage",
+    openExternal: "lvis:attach:openExternal",
   },
 } as const;
 
