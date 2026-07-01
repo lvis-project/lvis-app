@@ -159,6 +159,8 @@ export const en = {
   "permissionsTab.osSandboxCapabilityWindows": "Windows (srt-win via ASRT): when the OS sandbox is ON, only NETWORK egress is confined (WFP filters + a restricted-token job route the child through the loopback proxy). The filesystem and processes are NOT confined on Windows (ASRT has no Windows FS jail). Network egress is deny-by-default, limited to the union of installed plugins' declared allow-lists. When the OS sandbox is OFF (default), tools run unconfined.",
   "permissionsTab.osSandboxRestartNote": "Changes take effect after restarting the app — the ASRT sandbox is initialized at startup.",
   "permissionsTab.osSandboxDetectionReason": "Startup check: {reason}",
+  "permissionsTab.osSandboxPotentialReason": "Platform potential: {reason}",
+  "permissionsTab.osSandboxRuntimeReason": "Current runtime: {reason}",
   "permissionsTab.osSandboxToggleFailed": "Failed to change the OS tool sandbox setting.",
   "permissionsTab.osSandboxToggleError": "Error changing the OS tool sandbox setting: {message}",
   // Windows srt-win consent flow
@@ -352,6 +354,8 @@ export const ko: Record<keyof typeof en, string> = {
   "permissionsTab.osSandboxCapabilityWindows": "Windows(srt-win via ASRT): OS 샌드박스가 켜지면 NETWORK 송신만 격리합니다 (WFP 필터 + restricted-token job 이 자식 프로세스를 loopback proxy 로 라우팅). Windows 에서는 파일시스템과 프로세스가 격리되지 않습니다 (ASRT 에 Windows 파일시스템 jail 없음). 네트워크 송신은 기본 차단이며 설치된 플러그인이 선언한 허용 목록의 합집합으로만 허용됩니다. OS 샌드박스가 꺼져 있으면(기본값) 도구는 격리 없이 실행됩니다.",
   "permissionsTab.osSandboxRestartNote": "변경 사항은 앱을 재시작한 후 적용됩니다 — ASRT 샌드박스는 시작 시 초기화됩니다.",
   "permissionsTab.osSandboxDetectionReason": "시작 시 점검: {reason}",
+  "permissionsTab.osSandboxPotentialReason": "플랫폼 잠재 지원: {reason}",
+  "permissionsTab.osSandboxRuntimeReason": "현재 런타임: {reason}",
   "permissionsTab.osSandboxToggleFailed": "OS 도구 샌드박스 설정을 변경하지 못했습니다.",
   "permissionsTab.osSandboxToggleError": "OS 도구 샌드박스 설정 변경 중 오류: {message}",
   "permissionsTab.osSandboxWindowsConsentHeading": "Windows 1회 설정 필요",
