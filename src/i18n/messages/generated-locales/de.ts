@@ -2673,4 +2673,7 @@ export const deMessages: Record<string, string> = {
   "workGroup.stepCount": "{count} Schritte",
   "workGroup.work": "Arbeiten",
   "workGroup.working": "Arbeiten...",
+  "pluginInstallDialog.allowPrivateNetworks": "This grant can reach private network addresses when an allowed domain resolves there.",
+  "pluginInstallDialog.allowedDomainsLabel": "Allowed domains",
+  "pluginInstallDialog.networkAccessTitle": "Network access requested",
 };

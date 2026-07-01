@@ -2673,4 +2673,7 @@ export const esMessages: Record<string, string> = {
   "workGroup.stepCount": "{count} pasos",
   "workGroup.work": "Trabajar",
   "workGroup.working": "Laboral...",
+  "pluginInstallDialog.allowPrivateNetworks": "This grant can reach private network addresses when an allowed domain resolves there.",
+  "pluginInstallDialog.allowedDomainsLabel": "Allowed domains",
+  "pluginInstallDialog.networkAccessTitle": "Network access requested",
 };
