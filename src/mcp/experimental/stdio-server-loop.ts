@@ -1,6 +1,7 @@
 /**
- * `StdioServerLoop` — the subprocess-side serving core of the out-of-process
- * plugin path (mcp-alignment-design.md §3.1, `untrusted-stdio-isolation`).
+ * Experimental `StdioServerLoop` — the subprocess-side serving core of the
+ * out-of-process plugin path (mcp-alignment-design.md §3.1,
+ * `untrusted-stdio-isolation`).
  *
  * This is what runs INSIDE a spawned, sandboxed plugin process: it reads
  * Content-Length-framed JSON-RPC requests from an input stream (the subprocess's
@@ -22,7 +23,7 @@
  * not take the whole server down).
  */
 import type { Readable, Writable } from "node:stream";
-import { frameMessage, StdioFrameDecoder } from "./stdio-framing.js";
+import { frameMessage, StdioFrameDecoder } from "../stdio-framing.js";
 
 const RPC_INTERNAL_ERROR = -32603;
 
