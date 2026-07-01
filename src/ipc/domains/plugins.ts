@@ -17,7 +17,12 @@ import { shouldBlockPluginSecretRead, validateApiKeyLikeSecretValue } from "../.
 import { emitPluginConfigChange, SECRET_REDACTED_SENTINEL } from "../../plugins/config-change-bus.js";
 import { runManagedBootstrap } from "../../boot/managed-marketplace.js";
 import { isDevModeUnlocked } from "../../boot/dev-flags.js";
-import { NOTIFICATION_KINDS } from "../../main/notification-service.js";
+import {
+  IPC_NOTIFICATION_CLICKED,
+  NOTIFICATION_KINDS,
+  type NotificationContextRef,
+  type NotificationKind,
+} from "../../main/notification-service.js";
 import { validateSender, validateHostRendererSender, UNAUTHORIZED_FRAME, auditUnauthorized, validatePluginFrame } from "../gated.js";
 import type { IpcDeps } from "../types.js";
 import { sendToWindow } from "../safe-send.js";
@@ -53,6 +58,18 @@ function asPlainRecord(value: unknown): Record<string, unknown> {
     return value as Record<string, unknown>;
   }
   return {};
+}
+
+function sanitizeNotificationContextRef(value: unknown): NotificationContextRef | undefined {
+  const input = asPlainRecord(value);
+  const contextRef: NotificationContextRef = {};
+  for (const key of ["sessionId", "routineId", "questionId", "approvalId"] as const) {
+    const candidate = input[key];
+    if (typeof candidate === "string" && candidate.length > 0) {
+      contextRef[key] = candidate.slice(0, 256);
+    }
+  }
+  return Object.keys(contextRef).length > 0 ? contextRef : undefined;
 }
 
 /**
@@ -1547,7 +1564,7 @@ export function registerPluginsHandlers(deps: IpcDeps): void {
 
   // ─── Notifications ──────────────────────────────────────────────────────
   ipcMain.handle("lvis:notification:clicked", (e, payload: unknown) => {
-    if (!validateSender(e)) {
+    if (!validateHostRendererSender(e)) {
       auditUnauthorized(auditLogger, "lvis:notification:clicked", e);
       return UNAUTHORIZED_FRAME;
     }
@@ -1565,12 +1582,20 @@ export function registerPluginsHandlers(deps: IpcDeps): void {
       });
       return { ok: false, error: "invalid-payload" };
     }
+    const clickPayload: { kind: NotificationKind; contextRef?: NotificationContextRef } = {
+      kind: kind as NotificationKind,
+    };
+    const contextRef = sanitizeNotificationContextRef(
+      (payload as { contextRef?: unknown } | null | undefined)?.contextRef,
+    );
+    if (contextRef) clickPayload.contextRef = contextRef;
     const win = getMainWindow();
     if (win && !win.isDestroyed()) {
       try {
         if (win.isMinimized()) win.restore();
         win.show();
         win.focus();
+        win.webContents.send(IPC_NOTIFICATION_CLICKED, clickPayload);
       } catch (err) {
         log.warn(
           "notification:clicked focus failed: %s",
