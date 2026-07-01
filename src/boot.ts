@@ -152,7 +152,10 @@ import { registerPluginEventBridge } from "./boot/steps/ipc-bridge.js";
 import { wireAnnouncementCheck, wireReleasePrep, wireUpdateCheck } from "./boot/steps/post-boot.js";
 import { wireReviewerAgent } from "./boot/steps/reviewer-wiring.js";
 import { wireHookSystem } from "./boot/steps/hook-system-wiring.js";
-import { isUiOnlyRuntimeInvocation } from "./boot/plugin-tool-invocation.js";
+import {
+  isUiOnlyRuntimeInvocation,
+  uiOnlyRuntimeInvocationRequiresUserAction,
+} from "./boot/plugin-tool-invocation.js";
 import { createPluginSurfacePermissionScope } from "./boot/plugin-surface-permissions.js";
 import { readPermissionSettings } from "./permissions/permission-settings-store.js";
 import { migrateCanonicalization } from "./permissions/user-approval-store.js";
@@ -944,7 +947,13 @@ export async function bootstrap(
     return runWithInvocationOrigin(context.origin, context.parentOrigin, async () => {
       const effectiveOrigin = currentInvocationOrigin() ?? context.origin;
       if (isUiOnlyRuntimeInvocation(pluginRuntime, toolName, context, effectiveOrigin)) {
-        return pluginRuntime.call(toolName, toPluginToolInput(payload));
+        if (
+          uiOnlyRuntimeInvocationRequiresUserAction(pluginRuntime, toolName, context) &&
+          context.userAction !== true
+        ) {
+          throw new Error(`UI action '${toolName}' requires an active user activation`);
+        }
+        return pluginRuntime.callDeclaredUiAction(toolName, toPluginToolInput(payload));
       }
 
       const [result] = await pluginSurfaceExecutor.executeAll(
@@ -962,7 +971,7 @@ export async function bootstrap(
             // honoured and the reviewer lane is not re-engaged.
             headless: effectiveOrigin !== "ui",
             trustOrigin: "plugin-emitted",
-            pluginPanelUserAction: effectiveOrigin === "ui",
+            pluginPanelUserAction: effectiveOrigin === "ui" && context.userAction === true,
           }),
         },
       );

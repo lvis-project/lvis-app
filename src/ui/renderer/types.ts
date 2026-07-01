@@ -674,7 +674,11 @@ export type LvisApi = {
   >;
   listPluginUiExtensions: () => Promise<PluginUiExtension[]>;
   readPluginUiModule: (pluginId: string, viewId: string) => Promise<string>;
-  callPluginMethod: (m: string, p?: unknown) => Promise<unknown>;
+  callPluginMethod: (
+    m: string,
+    p?: unknown,
+    options?: { userAction?: boolean },
+  ) => Promise<unknown>;
   /**
    * Subscribe to plugin-emitted events forwarded by the host event bridge
    * (`boot/steps/ipc-bridge.ts` → `lvis:plugin:event`). Plugin must declare
