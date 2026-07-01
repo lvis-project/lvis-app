@@ -507,8 +507,8 @@ LVIS 플러그인에는 **세 개의 독립 네임스페이스**가 있습니다
 
 1. **`tools[]` 와 `uiActions` 는 별도 surface** — `tools[]` 는 LLM 카탈로그, `uiActions` 는 renderer IPC allowlist 입니다. 같은 메서드를 양쪽에 둘 수도 있고, UI 전용 메서드는 `uiActions` 에만 둘 수 있습니다.
 2. **auth 메서드는 `uiActions` 전용** — `auth.statusTool`, `auth.loginTool`, `auth.logoutTool` 은 모두 `uiActions` 에 있어야 하며 `tools[]` 에 있으면 로드 거부됩니다.
-3. **도구 이름 제한 없음** — 접미사(`_delete`, `_send` 등)로 `uiActions` 등록을 막지 않습니다. 어떤 메서드든 플러그인의 판단에 따라 렌더러에서 직접 호출되도록 노출할 수 있습니다.
-4. **파괴적 동작을 uiActions로 노출하는 플러그인은 자체 UI에서 확인 다이얼로그를 구현해야 합니다** (예: "정말 삭제하시겠습니까?"). 호스트는 이를 강제하지 않으며, 코드 리뷰·마켓플레이스 심사 단계에서 검증합니다.
+3. **도구 이름 제한 없음** — 접미사(`_delete`, `_send` 등)로 `uiActions` 등록을 막지 않습니다. 어떤 메서드든 플러그인의 판단에 따라 렌더러에서 호출되도록 노출할 수 있지만, auth status polling 을 제외한 UI-only action 은 host preload 가 확인한 active user activation 이 있어야 실행됩니다.
+4. **파괴적 동작을 uiActions로 노출하는 플러그인은 자체 UI에서 확인 다이얼로그를 구현해야 합니다** (예: "정말 삭제하시겠습니까?"). 호스트는 active user activation 과 allowlist/audit 경계만 강제하며, 도메인별 확인 문구와 상세 UX 는 코드 리뷰·마켓플레이스 심사 단계에서 검증합니다.
 5. AI(ConversationLoop)가 개시한 도구 호출은 별개로 `ApprovalGate` / `PermissionManager` 의 확인 UX 를 거칩니다 — uiActions 정책과 무관하게 그대로 유지됩니다.
 5. 실제 위험 작업(파일시스템 민감 경로, 샌드박스 탈출 등)은 호스트의 `sensitive-paths.ts` · 샌드박스 계층에서 차단합니다. 이름 패턴이 아닌 작업의 실체로 막습니다.
 

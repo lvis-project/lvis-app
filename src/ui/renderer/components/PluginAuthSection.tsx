@@ -63,7 +63,7 @@ export function PluginAuthSection({
           throw new Error(result.error?.trim() || "detached login window failed");
         }
       } else {
-        await api.callPluginMethod(auth.loginTool);
+        await api.callPluginMethod(auth.loginTool, undefined, { userAction: true });
         onRefresh();
       }
     } catch (err) {
@@ -82,7 +82,7 @@ export function PluginAuthSection({
     setLocalError(null);
     setWorking(true);
     try {
-      await api.callPluginMethod(auth.logoutTool);
+      await api.callPluginMethod(auth.logoutTool, undefined, { userAction: true });
       onRefresh();
     } catch (err) {
       console.error(`[plugin-auth] ${pluginId} logoutTool ${auth.logoutTool} failed`, err);
