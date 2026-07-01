@@ -117,6 +117,89 @@ describe("PersonalizedWelcome", () => {
     expect(cta.disabled).toBe(false);
   });
 
+  it("renders first-run readiness inventory for provider, runtime, plugins, marketplace, and Windows", async () => {
+    const { pingAiProvider } = personalizedWelcomeApi(async () => ({
+      configured: true,
+      online: true,
+      vendor: "openai",
+      model: "gpt-5.4-mini",
+      latencyMs: 81,
+    }));
+    render(
+      <PersonalizedWelcome
+        open
+        pingAiProvider={pingAiProvider}
+        getRuntimeCounts={async () => ({ tools: 7, plugins: 2, mcps: 1 })}
+        getRuntimeEnv={async () => ({ platform: "win32", hostname: "desk", user: "ken" })}
+        pluginSummary={{
+          installed: 2,
+          loaded: 2,
+          preparing: 0,
+          failed: 0,
+          disabled: 0,
+          activeTools: 7,
+        }}
+        marketplaceUrlReady
+        onContinue={() => {}}
+      />,
+    );
+
+    await waitFor(() => {
+      const readiness = screen.getByTestId("first-run-readiness");
+      expect(readiness.textContent).toContain("openai");
+      expect(readiness.textContent).toContain("gpt-5.4-mini");
+      expect(readiness.textContent).toContain("도구 7개");
+      expect(readiness.textContent).toContain("플러그인 2개");
+      expect(readiness.textContent).toContain("활성 도구 7개");
+      expect(readiness.textContent).toContain("Marketplace URL");
+      expect(readiness.textContent).toContain("Windows 복구 참고");
+    });
+  });
+
+  it("surfaces a Windows bootstrap repair hint and retries bootstrap on demand", async () => {
+    const retryBootstrap = vi.fn();
+    const { pingAiProvider } = personalizedWelcomeApi(async () => ({
+      configured: true,
+      online: true,
+      vendor: "openai",
+      model: "gpt-5.4-mini",
+      latencyMs: 81,
+    }));
+    render(
+      <PersonalizedWelcome
+        open
+        pingAiProvider={pingAiProvider}
+        getRuntimeCounts={async () => ({ tools: 0, plugins: 1, mcps: 0 })}
+        getRuntimeEnv={async () => ({ platform: "win32", hostname: "desk", user: "ken" })}
+        pluginSummary={{
+          installed: 1,
+          loaded: 0,
+          preparing: 0,
+          failed: 1,
+          disabled: 0,
+          activeTools: 0,
+        }}
+        marketplaceUrlReady={false}
+        bootstrapStatus={{
+          phase: "complete",
+          installed: [],
+          failed: [{ id: "local-indexer", error: "EPERM: file is locked" }],
+        }}
+        onRetryBootstrap={retryBootstrap}
+        onContinue={() => {}}
+      />,
+    );
+
+    await waitFor(() => {
+      expect(screen.getByTestId("first-run-readiness").textContent).toContain(
+        "Windows 파일 잠금",
+      );
+    });
+
+    fireEvent.click(screen.getByTestId("first-run-readiness:retry-bootstrap"));
+    expect(retryBootstrap).toHaveBeenCalledTimes(1);
+  });
+
   it("ping failure (not-configured): surfaces warning but keeps continue enabled (fallback path)", async () => {
     const { pingAiProvider } = personalizedWelcomeApi(async () => ({
       configured: false,
