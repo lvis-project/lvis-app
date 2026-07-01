@@ -18,9 +18,8 @@
  * - 순서 고정: 1→8 순차
  * - 실패 격리: Step 6 실패가 Step 8을 건너뛰지 않음
  */
-import { createHash, randomUUID } from "node:crypto";
+import { randomUUID } from "node:crypto";
 import { statSync } from "node:fs";
-import { homedir } from "node:os";
 import { resolve as pathResolve } from "node:path";
 import type { ToolRegistry } from "./registry.js";
 import type {
@@ -51,44 +50,55 @@ import {
 import { dispatchPermissionDirCommand } from "../permissions/permission-slash.js";
 import { HookRunner } from "../hooks/hook-runner.js";
 import type { ScriptHookManager, HookDispatchResult } from "../hooks/script-hook-manager.js";
-import type { HookTrustOrigin, ScriptHookInvocationResult } from "../hooks/script-hook-types.js";
+import type { HookTrustOrigin } from "../hooks/script-hook-types.js";
 import { AuditLogger } from "../audit/audit-logger.js";
-import type { PermissionAuditEntryInput, HookResult } from "../audit/audit-schema.js";
+import type { HookResult } from "../audit/audit-schema.js";
 import { maskSensitiveData } from "../audit/dlp-filter.js";
-import type { RiskVerdict, ToolInvocationContext } from "../permissions/reviewer/risk-classifier.js";
-import { RuleBasedRiskClassifier, maxVerdict } from "../permissions/reviewer/risk-classifier.js";
-import { inspectHostRisk } from "../permissions/reviewer/host-risk-inspector.js";
-import { emitRiskShadowLog, emitEffectShadowLog } from "../permissions/reviewer/risk-shadow-log.js";
+import type { RiskVerdict } from "../permissions/reviewer/risk-classifier.js";
+import { emitEffectShadowLog } from "../permissions/reviewer/risk-shadow-log.js";
 import { createEffectLedger, runWithEffectLedger, currentEffectLedger, type EffectLedger } from "../permissions/effect-ledger.js";
 import { runWithEffectGateContext } from "../permissions/effect-enforcement.js";
 import { CHOKEPOINT_EFFECT } from "../permissions/effect-kind.js";
 import { resolveReviewerSandboxCapability } from "../permissions/sandbox-capability.js";
-// Store B — exact-tuple approval memory (args-scoped, session+persistent).
-// See ./executor.ts foreground modal-skip block + user-approval-store.ts.
-import { lookupApproval, canonicalStringify } from "../permissions/user-approval-store.js";
-import type { UserApprovalVerdict } from "../shared/permissions-events.js";
-import { buildSandboxAuditEntry } from "../audit/sandbox-audit.js";
-import { emitSandboxAudit } from "../audit/sandbox-audit-sink.js";
 import { lvisHome } from "../shared/lvis-home.js";
-import { detectApprovalIntent } from "../permissions/approval-intent.js";
 import type {
   ApprovalPurposeSuggestion,
   PermissionReviewEvent,
 } from "../shared/permission-review-status.js";
 import { BashAstValidator } from "../main/bash-ast-validator.js";
-import {
-  findShellPathPolicyViolation,
-  type ShellPathPolicyViolation,
-} from "./shell-path-policy.js";
 import { createLogger } from "../lib/logger.js";
 import {
   TOOL_RESULT_CHUNK_READER_METADATA_KEY,
   type ToolResultChunkReader,
 } from "./tool-result-chunk.js";
 import { t } from "../i18n/index.js";
+// ── C7 pipeline decomposition — behavior-preserving extracted units.
+// executor.ts remains the orchestrator (executeAll/executeOne bodies + the
+// 7-export barrel); these compose the LOW/MEDIUM-risk clusters. See
+// ./pipeline/*.ts. The HIGHEST-risk executeOne closures stay here (C8).
+import { extractTargetFilePaths, shellPathPolicyViolation } from "./pipeline/path-extraction.js";
+import { buildApprovalPurposeSuggestion } from "./pipeline/approval-purpose.js";
+import {
+  hookChainFromDispatch,
+  mergeHookChains,
+  redactAskUserAuditOutput,
+} from "./pipeline/audit-entries.js";
+import {
+  approvalCacheKeyFor,
+  emitToolStart,
+  maskToolInputForDisplay,
+  summarizeInputForDeferred,
+} from "./pipeline/display-mask.js";
+import { RateLimiter } from "./pipeline/rate-limiter.js";
+import { ReviewerAuthorizationStore } from "./pipeline/reviewer-authorization-store.js";
+import { resolveEnforcedCategory as resolveEnforcedCategoryImpl } from "./pipeline/risk-classification.js";
+import { tryUserApprovalMemorySkip as tryUserApprovalMemorySkipImpl } from "./pipeline/approval-memory-skip.js";
+import {
+  dispatchReviewerForHeadless as dispatchReviewerForHeadlessImpl,
+  dispatchReviewerForInteractiveAuto as dispatchReviewerForInteractiveAutoImpl,
+} from "./pipeline/reviewer-dispatch.js";
+import { AuditWriter } from "./pipeline/audit-writer.js";
 const log = createLogger("executor");
-const REVIEWER_AUTHORIZATION_TTL_MS = 10 * 60 * 1000;
-const REVIEWER_AUTHORIZATION_MAX_PENDING = 64;
 /**
  * One-time guard for the shadow-sink construction warning. Process-wide so the
  * permission-shadow reconciliation dataset's deliverability is flagged at most
@@ -107,126 +117,11 @@ export interface ToolCallMeta {
   mcpServerId?: string;
 }
 
-/**
- * Extract absolute filesystem target paths from a tool's declared
- * `pathFields` contract. Used so {@link ApprovalGate}'s
- * §S1 sensitive-path hard-block can actually run against the path the
- * tool is about to touch. Returns an empty list when a tool declares no
- * path fields; built-in shell tools enforce command operands inside their
- * own native execution surface.
- */
-function extractTargetFilePaths(
-  tool: import("./base.js").Tool,
-  input: unknown,
-  cwd: string,
-): string[] {
-  if (!input || typeof input !== "object") return [];
-  const obj = input as Record<string, unknown>;
-  const fields = new Set<string>(tool.pathFields ?? []);
-  const paths: string[] = [];
-  for (const field of fields) {
-    const candidate = getDottedFieldValue(obj, field);
-    const values = Array.isArray(candidate) ? candidate : [candidate];
-    for (const value of values) {
-      if (typeof value !== "string" || value.length === 0) continue;
-      try {
-        paths.push(resolveToolPathForPermission(value, cwd));
-      } catch {
-        // Tool schema validation owns argument-type failures.
-      }
-    }
-  }
-  return [...new Set(paths)];
-}
-
-function getDottedFieldValue(input: Record<string, unknown>, field: string): unknown {
-  let current: unknown = input;
-  for (const segment of field.split(".")) {
-    if (segment.length === 0) return undefined;
-    if (!current || typeof current !== "object" || Array.isArray(current)) return undefined;
-    current = (current as Record<string, unknown>)[segment];
-  }
-  return current;
-}
-
-function resolveToolPathForPermission(value: string, cwd: string): string {
-  const expanded = value === "~"
-    ? homedir()
-    : value.startsWith("~/") || value.startsWith("~\\")
-      ? pathResolve(homedir(), value.slice(2))
-      : value;
-  return pathResolve(pathResolve(cwd), expanded);
-}
-
-function summarizeInputForDeferred(input: Record<string, unknown>): string {
-  try {
-    return maskSensitiveData(JSON.stringify(input)).masked.slice(0, 1000);
-  } catch {
-    return "[unserializable input]";
-  }
-}
-
 function resolveInvocationCategory(
   tool: import("./base.js").Tool,
   finalInput: Record<string, unknown>,
 ): ToolCategory {
   return tool.categoryForInput?.(finalInput) ?? tool.category;
-}
-
-function shellPathPolicyViolation(
-  finalInput: Record<string, unknown>,
-  sandboxRoot: string,
-  allowedDirectories: readonly string[],
-): ShellPathPolicyViolation | null {
-  const command = finalInput.command;
-  if (typeof command !== "string" || command.length === 0) {
-    return { kind: "invalid-path", reason: "Shell path policy: missing command string" };
-  }
-  const cwdValue = finalInput.cwd;
-  if (cwdValue !== undefined && typeof cwdValue !== "string") {
-    return { kind: "invalid-path", reason: "Shell path policy: cwd must be a string when provided" };
-  }
-  const resolvedCwd = cwdValue
-    ? pathResolve(sandboxRoot, cwdValue)
-    : sandboxRoot;
-  return findShellPathPolicyViolation(
-    command,
-    resolvedCwd,
-    sandboxRoot,
-    allowedDirectories,
-  );
-}
-
-/**
- * Redact every `freeText` field from an `ask_user_question` tool result
- * before it is written to the audit log. Result shape (one card,
- * 1–4 questions):
- *   {"answers":[{"choice":"…"},{"freeText":"…"}],"dismissed":false}
- * We keep choice/dismissed but replace each non-empty freeText with a
- * placeholder so user-typed PII never lands in the audit trail. Falls
- * back to the original content when JSON parsing fails (e.g. error
- * responses).
- */
-function redactAskUserAuditOutput(rawOutput: string): string {
-  try {
-    const parsed = JSON.parse(rawOutput) as Record<string, unknown>;
-    const answers = Array.isArray(parsed.answers) ? (parsed.answers as unknown[]) : null;
-    if (!answers) return rawOutput;
-    let touched = false;
-    const redacted = answers.map((entry) => {
-      if (!entry || typeof entry !== "object") return entry;
-      const a = entry as Record<string, unknown>;
-      if (typeof a.freeText === "string" && a.freeText.length > 0) {
-        touched = true;
-        return { ...a, freeText: `[redacted ${a.freeText.length} chars]` };
-      }
-      return a;
-    });
-    if (!touched) return rawOutput;
-    return JSON.stringify({ ...parsed, answers: redacted });
-  } catch {
-    return rawOutput;
-  }
 }
 
 export interface ToolUseBlock {
@@ -366,349 +261,6 @@ export interface ExecuteOptions {
   permissionContext?: ToolPermissionContext;
 }
 
-interface PendingReviewerAuthorization {
-  expiresAt: number;
-  verdict: RiskVerdict;
-}
-
-function maskDisplayValue(value: unknown): unknown {
-  if (typeof value === "string") {
-    return maskSensitiveData(value).masked;
-  }
-  if (Array.isArray(value)) {
-    return value.map((item) => maskDisplayValue(item));
-  }
-  if (value && typeof value === "object") {
-    return Object.fromEntries(
-      Object.entries(value as Record<string, unknown>).map(([key, item]) => [key, maskDisplayValue(item)]),
-    );
-  }
-  return value;
-}
-
-function maskToolInputForDisplay(input: Record<string, unknown>): Record<string, unknown> {
-  return maskDisplayValue(input) as Record<string, unknown>;
-}
-
-function approvalCacheKeyFor(
-  tool: import("./base.js").Tool,
-  input: Record<string, unknown>,
-  cwd: string,
-): string | undefined {
-  const rawKey = tool.approvalCacheKey?.(input, { cwd });
-  if (rawKey === undefined) return undefined;
-  const key = rawKey.trim();
-  if (!key) {
-    throw new Error(`approvalCacheKey for ${tool.name} returned an empty key`);
-  }
-  return `${tool.name}:${key}`;
-}
-
-function emitToolStart(
-  callbacks: ToolExecutorCallbacks | undefined,
-  name: string,
-  input: Record<string, unknown>,
-  meta: ToolCallMeta,
-): void {
-  callbacks?.onToolStart?.(name, maskToolInputForDisplay(input), meta);
-}
-
-function emitPermissionReview(
-  callbacks: ToolExecutorCallbacks | undefined,
-  event: PermissionReviewEvent,
-): void {
-  callbacks?.onPermissionReview?.(event);
-}
-
-function cleanApprovalPurposeText(value: unknown, maxLength = 180): string | undefined {
-  if (typeof value !== "string") return undefined;
-  const normalized = value
-    .replace(/<[^>]*>/g, " ")
-    .replace(/[\u0000-\u001f\u007f]/g, " ")
-    .replace(/\s+/g, " ")
-    .trim();
-  if (!normalized || normalized.startsWith("/")) return undefined;
-  return normalized.length > maxLength
-    ? `${normalized.slice(0, Math.max(0, maxLength - 1))}…`
-    : normalized;
-}
-
-function purposeSentenceFromIntent(intent: string): string {
-  const text = intent.replace(/[.!?。！？]+$/u, "").trim();
-  return maskSensitiveData(t("be_executor.purposeSentence", { text })).masked;
-}
-
-function pickPurposeFromToolInput(input: Record<string, unknown>): string | undefined {
-  const keys = [
-    "purpose",
-    "intent",
-    "reason",
-    "task",
-    "summary",
-    "query",
-    "prompt",
-    "message",
-    "text",
-    "description",
-  ];
-  for (const key of keys) {
-    const value = cleanApprovalPurposeText(input[key]);
-    if (value) return value;
-  }
-  return undefined;
-}
-
-function buildApprovalPurposeSuggestion(
-  finalInput: Record<string, unknown>,
-  context: ToolPermissionContext,
-): ApprovalPurposeSuggestion | undefined {
-  const userIntent = cleanApprovalPurposeText(context.userIntent, 220);
-  if (userIntent) {
-    return {
-      text: purposeSentenceFromIntent(userIntent),
-      source: "conversation",
-      confidence: "sufficient",
-    };
-  }
-
-  const toolPurpose = pickPurposeFromToolInput(finalInput);
-  if (!toolPurpose) return undefined;
-  return {
-    text: purposeSentenceFromIntent(toolPurpose),
-    source: "tool-input",
-    confidence: "insufficient",
-  };
-}
-
-function auditTrustOrigin(context?: ToolPermissionContext): HookTrustOrigin {
-  return context?.trustOrigin ?? "unknown";
-}
-
-function auditDirectoryForInput(
-  tool: import("./base.js").Tool | undefined,
-  input: Record<string, unknown>,
-  cwd: string,
-  canonicalTargetFilePath?: string,
-): string | undefined {
-  if (tool) {
-    if (canonicalTargetFilePath) return canonicalTargetFilePath;
-    if (tool.category === "shell" && typeof input.cwd === "string" && input.cwd.length > 0) {
-      return resolveToolPathForPermission(input.cwd, cwd);
-    }
-  }
-  return undefined;
-}
-
-function permissionAuditBase(args: {
-  toolName: string;
-  tool?: import("./base.js").Tool;
-  source: ToolSource;
-  category: ToolCategory;
-  trustOrigin: HookTrustOrigin;
-}): Pick<
-  Extract<PermissionAuditEntryInput, { decision: "allow" }>,
-  "ts" | "auditId" | "trustOrigin" | "tool" | "source" | "category"
-> {
-  return {
-    ts: new Date().toISOString(),
-    auditId: randomUUID(),
-    trustOrigin: args.trustOrigin,
-    tool: args.toolName,
-    source: args.source,
-    category: args.category,
-  };
-}
-
-/**
- * Derive the `failureReason` discriminant from a fail-closed
- * {@link ScriptHookInvocationResult}. Only a denying result that failed for an
- * operational reason (timeout / nonzero exit / spawn-error / bad output) carries
- * one; a clean `{action:"deny"}` verdict from a hook that ran fine returns
- * `undefined` (it denied on policy, not on failure).
- */
-function hookFailureReason(
-  r: ScriptHookInvocationResult,
-): HookResult["failureReason"] | undefined {
-  if (r.timedOut) return "timeout";
-  if (r.decision !== "deny") return undefined;
-  if (r.reason.startsWith("hook spawn error:")) return "spawn-error";
-  if (r.reason.startsWith("failed to serialise hook payload:")) return "spawn-error";
-  if (r.reason.startsWith("shell unavailable:")) return "spawn-error";
-  if (r.reason.startsWith("hook exited non-zero:")) return "nonzero-exit";
-  if (r.reason === "hook stdout not valid {action,reason} JSON") return "bad-output";
-  return undefined;
-}
-
-/**
- * Map a runtime {@link HookDispatchResult} (pre / post / perm) into the audit
- * {@link HookResult}[] surface (#811 cluster-review follow-up). Each per-script
- * invocation result becomes one forensic row carrying its `decision`/`reason`,
- * the `source` discriminant (`.sh` vs config), the `commandIdentity` anchor, and
- * a `failureReason` when the hook failed closed. Returns `undefined` when the
- * dispatch ran no matching hooks so non-hook audit rows stay clean (`hookChain`
- * remains absent).
- */
-function hookChainFromDispatch(
-  event: "pre" | "post" | "perm",
-  dispatch: HookDispatchResult | undefined,
-): HookResult[] | undefined {
-  if (!dispatch || dispatch.results.length === 0) return undefined;
-  return dispatch.results.map((r): HookResult => {
-    const failureReason = hookFailureReason(r);
-    return {
-      hookName: r.hookPath,
-      // `hookChainFromDispatch` only handles the tool-use events, so the narrow
-      // pre|post|perm projection comes straight from the `event` param. (The
-      // runner's `r.hookType` widened to `HookEvent` for the lifecycle surface.)
-      hookType: event,
-      action: r.decision,
-      reason: r.reason,
-      durationMs: r.durationMs,
-      // `event` today equals `hookType`; kept explicit so the closed-set surface
-      // is populated for forward-compat readers.
-      event,
-      handlerType: "command",
-      commandIdentity: r.commandIdentity,
-      source: r.source,
-      decision: r.decision,
-      ...(failureReason !== undefined ? { failureReason } : {}),
-    };
-  });
-}
-
-/**
- * Concatenate two optional hook chains (e.g. the pre + post rows on the success
- * path) into one, dropping empty/absent inputs. Returns `undefined` when both
- * are empty so the audit row's `hookChain` stays absent for non-hook calls.
- */
-function mergeHookChains(
-  ...chains: Array<HookResult[] | undefined>
-): HookResult[] | undefined {
-  const merged = chains.filter((c): c is HookResult[] => c !== undefined).flat();
-  return merged.length > 0 ? merged : undefined;
-}
-
-function permissionAuditEntryFromToolCall(args: {
-  toolName: string;
-  tool?: import("./base.js").Tool;
-  source: ToolSource;
-  category: ToolCategory;
-  input: Record<string, unknown>;
-  permission: PermissionCheckResult | undefined;
-  rateLimitRemaining: number;
-  trustOrigin: HookTrustOrigin;
-  cwd: string;
-  auditDirectory?: string;
-  hookChain?: HookResult[];
-}): PermissionAuditEntryInput {
-  const base = permissionAuditBase(args);
-  if (args.permission?.deferred) {
-    return {
-      ...base,
-      decision: "deferred",
-      reviewerVerdict: args.permission.deferred.reviewerVerdict,
-      queueId: args.permission.deferred.queueId,
-    };
-  }
-  if (args.permission?.decision === "deny") {
-    const denyReasons = args.permission.denyReasons?.length
-      ? args.permission.denyReasons
-      : [{
-        layer: args.permission.layer,
-        reason: args.permission.reason,
-        source: "tool-executor",
-      }];
-    return {
-      ...base,
-      decision: "deny",
-      denyReasons,
-      ...(args.hookChain ? { hookChain: args.hookChain } : {}),
-    };
-  }
-  const auditDirectory = auditDirectoryForInput(args.tool, args.input, args.cwd, args.auditDirectory);
-  const allowEntry: Extract<PermissionAuditEntryInput, { decision: "allow" }> = {
-    ...base,
-    decision: "allow",
-    layer: args.permission?.layer ?? 6,
-  };
-  if (args.permission?.reviewer?.verdict) {
-    allowEntry.reviewer = args.permission.reviewer.verdict;
-  }
-  if (auditDirectory) {
-    allowEntry.directory = auditDirectory;
-    allowEntry.directoryAllowed = true;
-  }
-  if (Number.isFinite(args.rateLimitRemaining)) {
-    allowEntry.rateLimitRemaining = args.rateLimitRemaining;
-  }
-  if (args.hookChain) {
-    allowEntry.hookChain = args.hookChain;
-  }
-  return allowEntry;
-}
-
-function permissionAuditAskEntryFromToolCall(args: {
-  toolName: string;
-  tool?: import("./base.js").Tool;
-  source: ToolSource;
-  category: ToolCategory;
-  input: Record<string, unknown>;
-  permission: PermissionCheckResult;
-  trustOrigin: HookTrustOrigin;
-  cwd: string;
-  auditDirectory?: string;
-}): PermissionAuditEntryInput {
-  const auditDirectory = auditDirectoryForInput(args.tool, args.input, args.cwd, args.auditDirectory);
-  const askEntry: Extract<PermissionAuditEntryInput, { decision: "ask" }> = {
-    ...permissionAuditBase(args),
-    decision: "ask",
-    layer: args.permission.layer,
-    reason: args.permission.reason,
-  };
-  if (auditDirectory) {
-    askEntry.directory = auditDirectory;
-  }
-  return askEntry;
-}
-
-// ─── Rate Limiter (tool-governance.md §9) ──────────
-
-interface RateBucket {
-  tokens: number;
-  lastRefill: number;
-}
-
-class RateLimiter {
-  /** Trust별 분당 제한: high=무제한, medium=60, low=20 */
-  private static LIMITS: Record<TrustLevel, number> = { high: Infinity, medium: 60, low: 20 };
-  private readonly buckets = new Map<string, RateBucket>();
-
-  check(toolName: string, trust: TrustLevel): { allowed: boolean; remaining: number } {
-    const limit = RateLimiter.LIMITS[trust];
-    if (limit === Infinity) return { allowed: true, remaining: Infinity };
-
-    const key = `${trust}:${toolName}`;
-    const now = Date.now();
-    let bucket = this.buckets.get(key);
-
-    if (!bucket) {
-      bucket = { tokens: limit, lastRefill: now };
-      this.buckets.set(key, bucket);
-    }
-
-    // 토큰 리필 (1분당 limit 토큰)
-    const elapsed = (now - bucket.lastRefill) / 60_000;
-    bucket.tokens = Math.min(limit, bucket.tokens + elapsed * limit);
-    bucket.lastRefill = now;
-
-    if (bucket.tokens < 1) {
-      return { allowed: false, remaining: 0 };
-    }
-    bucket.tokens -= 1;
-    return { allowed: true, remaining: Math.floor(bucket.tokens) };
-  }
-}
-
 // ─── Executor ──────────────────────────────────────
 
 export class ToolExecutor {
@@ -744,7 +296,8 @@ export class ToolExecutor {
    * pre-exec ask; boot wires it to {@link isActiveSandboxFilesystemContained}.
    */
   private readonly sandboxFsContainedProvider: () => boolean;
-  private readonly pendingReviewerAuthorizations = new Map<string, PendingReviewerAuthorization>();
+  private readonly reviewerAuthorizations = new ReviewerAuthorizationStore();
+  private readonly auditWriter: AuditWriter;
 
   constructor(
     toolRegistry: ToolRegistry,
@@ -767,6 +320,12 @@ export class ToolExecutor {
     this.hostClassifiesRiskProvider = hostClassifiesRiskProvider ?? (() => false);
     this.sandboxFsContainedProvider = sandboxFsContainedProvider ?? (() => false);
     this.requirePermissionAuditChain = auditLogger?.isPermissionAuditChainReady() === true;
+    this.auditWriter = new AuditWriter(
+      this.auditLogger,
+      this.toolRegistry,
+      this.scriptHookManager,
+      this.requirePermissionAuditChain,
+    );
     this.warnIfShadowSinkUnwired(auditLogger === undefined);
   }
 
@@ -818,40 +377,6 @@ export class ToolExecutor {
     return "default";
   }
 
-  private reviewerAuthorizationKey(input: {
-    sessionId: string;
-    toolName: string;
-    source: ToolSource;
-    finalInput: Record<string, unknown>;
-    context: ToolPermissionContext;
-  }): string {
-    const components = [
-      input.sessionId,
-      input.toolName,
-      input.source,
-      canonicalStringify(input.finalInput),
-      input.context.trustOrigin,
-      input.context.approvalCacheKey ?? "",
-    ];
-    return createHash("sha256").update(components.join("\0")).digest("hex");
-  }
-
-  private prunePendingReviewerAuthorizations(now = Date.now()): void {
-    for (const [key, pending] of this.pendingReviewerAuthorizations) {
-      if (pending.expiresAt <= now) {
-        this.pendingReviewerAuthorizations.delete(key);
-      }
-    }
-  }
-
-  private capPendingReviewerAuthorizations(): void {
-    while (this.pendingReviewerAuthorizations.size >= REVIEWER_AUTHORIZATION_MAX_PENDING) {
-      const oldestKey = this.pendingReviewerAuthorizations.keys().next().value;
-      if (!oldestKey) return;
-      this.pendingReviewerAuthorizations.delete(oldestKey);
-    }
-  }
-
   private recordPendingReviewerAuthorization(input: {
     sessionId: string | undefined;
     toolName: string;
@@ -860,21 +385,7 @@ export class ToolExecutor {
     context: ToolPermissionContext;
     verdict: RiskVerdict;
   }): void {
-    if (input.context.headless === true) return;
-    if (!input.sessionId) return;
-    const now = Date.now();
-    this.prunePendingReviewerAuthorizations(now);
-    const key = this.reviewerAuthorizationKey({ ...input, sessionId: input.sessionId });
-    if (!this.pendingReviewerAuthorizations.has(key)) {
-      this.capPendingReviewerAuthorizations();
-    }
-    this.pendingReviewerAuthorizations.set(
-      key,
-      {
-        expiresAt: now + REVIEWER_AUTHORIZATION_TTL_MS,
-        verdict: input.verdict,
-      },
-    );
+    this.reviewerAuthorizations.record(input);
   }
 
   private consumePendingReviewerAuthorization(input: {
@@ -884,24 +395,7 @@ export class ToolExecutor {
     finalInput: Record<string, unknown>;
     context: ToolPermissionContext;
   }): PermissionCheckResult | null {
-    if (input.context.headless === true) return null;
-    if (!input.sessionId) return null;
-    const intent = detectApprovalIntent(input.context.explicitAuthorizationIntent ?? "");
-    if (intent.kind !== "approve") return null;
-    const now = Date.now();
-    this.prunePendingReviewerAuthorizations(now);
-    const key = this.reviewerAuthorizationKey({ ...input, sessionId: input.sessionId });
-    const pending = this.pendingReviewerAuthorizations.get(key);
-    if (!pending) return null;
-    this.pendingReviewerAuthorizations.delete(key);
-    return {
-      decision: "allow",
-      reason:
-        `explicit user authorization (${intent.matchedPhrase}) after reviewer ` +
-        `${pending.verdict.level}: ${pending.verdict.reason}`,
-      layer: 5,
-      reviewer: { route: "foreground-auto", verdict: pending.verdict },
-    };
+    return this.reviewerAuthorizations.consume(input);
   }
 
   getHookRunner(): HookRunner {
@@ -930,45 +424,15 @@ export class ToolExecutor {
     allowedDirectories: readonly string[],
     correlationId: string,
   ): ToolCategory {
-    // Only plugin/MCP tools carry an UNTRUSTED declared category worth
-    // re-deriving. `meta` control-flow primitives (which route through
-    // `decisionOverride`, not the category matrix) and builtins (trusted, known
-    // categories the inspector cannot re-derive — it would default-strict a
-    // read-only builtin to write) are self-consistent: their host-derived
-    // category IS the declared one. Skipping inspection for them means they
-    // never diverge, so they produce no shadow-log noise on every invocation.
-    const eligibleForHostDerivation =
-      (tool.source === "plugin" || tool.source === "mcp") &&
-      declaredCategory !== "meta";
-
-    const hostDerivedCategory = eligibleForHostDerivation
-      ? inspectHostRisk({
-          source: tool.source,
-          finalInput,
-          pathFields: tool.pathFields ?? [],
-          allowedDirectories,
-        })
-      : declaredCategory;
-
-    const enforced = this.hostClassifiesRiskProvider();
-    emitRiskShadowLog(
-      {
-        toolName: tool.name,
-        source: tool.source,
-        ...(tool.pluginId ? { pluginId: tool.pluginId } : {}),
-        declaredCategory,
-        hostDerivedCategory,
-        enforced,
-        // Same id as the post-exec effect shadow for THIS invocation → the
-        // category shadow and the effect shadow join on this key.
-        correlationId,
-      },
-      this.auditLogger,
-    );
-
-    return enforced && eligibleForHostDerivation
-      ? hostDerivedCategory
-      : declaredCategory;
+    return resolveEnforcedCategoryImpl({
+      tool,
+      declaredCategory,
+      finalInput,
+      allowedDirectories,
+      correlationId,
+      hostClassifiesRisk: this.hostClassifiesRiskProvider(),
+      auditLogger: this.auditLogger,
+    });
   }
 
   private async runScriptHook(
@@ -1019,18 +483,7 @@ export class ToolExecutor {
     context: ToolPermissionContext,
     payload: import("../hooks/script-hook-manager.js").LifecycleEventPayload,
   ): Promise<HookDispatchResult | undefined> {
-    if (!this.scriptHookManager) return undefined;
-    try {
-      return await this.scriptHookManager.runLifecycleEvent(
-        event,
-        sessionId ?? "unknown",
-        context.trustOrigin as HookTrustOrigin,
-        payload,
-      );
-    } catch {
-      // Defensive: observe-only events must never break a tool call.
-      return undefined;
-    }
+    return this.auditWriter.fireLifecycleEvent(event, sessionId, context, payload);
   }
 
   private async dispatchReviewerForHeadless(
@@ -1053,120 +506,24 @@ export class ToolExecutor {
     | { allowed: true; permissionResult: PermissionCheckResult }
     | { allowed: false; message: string; permissionResult: PermissionCheckResult }
   > {
-    if (this.permissionManager?.getMode() === "strict") {
-      const reason = "strict mode requires explicit user approval";
-      const verdict: RiskVerdict = { level: "high", reason };
-      const deferredId = await this.permissionManager.getDeferredQueue()?.append({
-        toolName,
-        source,
-        category,
-        inputSummary: summarizeInputForDeferred(finalInput),
-        evaluationContext,
-        verdict,
-      });
-      return {
-        allowed: false,
-        message:
-          t("be_executor.permHoldStrictHeadless", { toolName, source }) +
-          (deferredId ? ` (deferredId=${deferredId})` : ""),
-        permissionResult: {
-          decision: "deny",
-          reason: "strict headless requires explicit approval",
-          layer: 5,
-          reviewer: { route: "headless", verdict },
-          ...(deferredId ? { deferred: { queueId: deferredId, reviewerVerdict: verdict } } : {}),
-        },
-      };
-    }
-
-    if (!this.permissionManager?.hasReviewer()) {
-      return {
-        allowed: false,
-        message: t("be_executor.permBlockHeadlessNoReviewer", { toolName, source }),
-        permissionResult: {
-          decision: "deny",
-          reason: "headless reviewer not wired",
-          layer: 5,
-        },
-      };
-    }
-    emitPermissionReview(callbacks, {
-      status: "reviewing",
+    return dispatchReviewerForHeadlessImpl(
+      this.permissionManager,
       toolName,
-      toolCategory: category,
       source,
-      ...meta,
-      ...(approvalPurpose ? { approvalPurpose } : {}),
-    });
-    const reviewer = await this.permissionManager.dispatchReviewer(
-      toolName,
-      {
-        source,
-        category,
-        pathFields,
-        finalInput,
-        cacheIdentityInput,
-        allowedDirectories,
-        sensitivePathsAdjacent,
-        trustOrigin: context.trustOrigin,
-        evaluationContext,
-        ...(context.userIntent ? { conversationContext: { recentUserMessage: context.userIntent } } : {}),
-        ...(context.approvalCacheKey ? { approvalCacheKey: context.approvalCacheKey } : {}),
-        ...(sandboxAttestation.writesToOwnSandbox !== undefined
-          ? { writesToOwnSandbox: sandboxAttestation.writesToOwnSandbox }
-          : {}),
-        ...(sandboxAttestation.ownerPluginSandboxRoot !== undefined
-          ? { ownerPluginSandboxRoot: sandboxAttestation.ownerPluginSandboxRoot }
-          : {}),
-        // worker-egress PR1: thread the MCP server id so the reviewer reports the
-        // genuine asrt capability for a wrapped external MCP worker (and the
-        // verdict cache scopes by the correct substrate).
-        ...(meta.mcpServerId !== undefined ? { mcpServerId: meta.mcpServerId } : {}),
-      },
-      {
-        allowedPluginIds: context.allowedPluginIds
-          ? [...context.allowedPluginIds]
-          : undefined,
-        additionalDirectories: context.additionalDirectories ?? [],
-      },
-      { defer: "medium-high", abortSignal },
+      category,
+      pathFields,
+      finalInput,
+      cacheIdentityInput,
+      allowedDirectories,
+      sensitivePathsAdjacent,
+      context,
+      evaluationContext,
+      sandboxAttestation,
+      callbacks,
+      meta,
+      approvalPurpose,
+      abortSignal,
     );
-    emitPermissionReview(callbacks, {
-      status: reviewer.verdict.level === "low" ? "auto_approved" : "needs_approval",
-      toolName,
-      toolCategory: category,
-      source,
-      ...meta,
-      verdictLevel: reviewer.verdict.level,
-      reason: reviewer.verdict.reason,
-      ...(approvalPurpose ? { approvalPurpose } : {}),
-    });
-    if (reviewer.verdict.level !== "low") {
-      return {
-        allowed: false,
-        message:
-          t("be_executor.permHoldReviewer", { toolName, source, reason: reviewer.verdict.reason }) +
-          (reviewer.deferredId ? ` (deferredId=${reviewer.deferredId})` : ""),
-        permissionResult: {
-          decision: "deny",
-          reason: `reviewer ${reviewer.verdict.level}: ${reviewer.verdict.reason}`,
-          layer: 5,
-          reviewer: { route: "headless", verdict: reviewer.verdict },
-          ...(reviewer.deferredId
-            ? { deferred: { queueId: reviewer.deferredId, reviewerVerdict: reviewer.verdict } }
-            : {}),
-        },
-      };
-    }
-    return {
-      allowed: true,
-      permissionResult: {
-        decision: "allow",
-        reason: `reviewer ${reviewer.verdict.level}: ${reviewer.verdict.reason}`,
-        layer: 5,
-        reviewer: { route: "headless", verdict: reviewer.verdict },
-      },
-    };
   }
 
   private async dispatchReviewerForInteractiveAuto(
@@ -1186,159 +543,27 @@ export class ToolExecutor {
     approvalPurpose: ApprovalPurposeSuggestion | undefined,
     abortSignal?: AbortSignal,
   ): Promise<PermissionCheckResult | null> {
-    if (context.headless === true) return null;
-    // Issue #690 — the gate is EITHER legacy `auto` exec mode OR the
-    // interactive auto-approve setting. PermissionManager.categoryBasedDecision
-    // only sets `reviewer.route='foreground-auto'` when one of those is
-    // true, so reaching here implies opt-in, but check explicitly to
-    // stay robust against future producers that set the route directly.
-    const mgr = this.permissionManager;
-    if (!mgr) return null;
-    if (mgr.getMode() !== "auto" && mgr.getInteractiveAutoApprove() === "off") {
-      return null;
-    }
-    if (category !== "write" && category !== "shell" && category !== "network") {
-      return null;
-    }
-    if (!mgr.hasReviewer()) {
-      return {
-        decision: "ask",
-        reason: "auto-review reviewer unavailable — explicit user approval required",
-        layer: 5,
-      };
-    }
-
-    emitPermissionReview(callbacks, {
-      status: "reviewing",
+    return dispatchReviewerForInteractiveAutoImpl(
+      this.permissionManager,
       toolName,
-      toolCategory: category,
       source,
-      ...meta,
-      ...(approvalPurpose ? { approvalPurpose } : {}),
-    });
-
-    let reviewer: Awaited<ReturnType<PermissionManager["dispatchReviewer"]>>;
-    try {
-      reviewer = await mgr.dispatchReviewer(
-        toolName,
-        {
-          source,
-          category,
-          pathFields,
-          finalInput,
-          cacheIdentityInput,
-          allowedDirectories,
-          sensitivePathsAdjacent,
-          trustOrigin: context.trustOrigin,
-          evaluationContext,
-          ...(context.userIntent ? { conversationContext: { recentUserMessage: context.userIntent } } : {}),
-          ...(context.approvalCacheKey ? { approvalCacheKey: context.approvalCacheKey } : {}),
-          ...(sandboxAttestation.writesToOwnSandbox !== undefined
-            ? { writesToOwnSandbox: sandboxAttestation.writesToOwnSandbox }
-            : {}),
-          ...(sandboxAttestation.ownerPluginSandboxRoot !== undefined
-            ? { ownerPluginSandboxRoot: sandboxAttestation.ownerPluginSandboxRoot }
-            : {}),
-          // worker-egress PR1: thread the MCP server id (see headless dispatch).
-          ...(meta.mcpServerId !== undefined ? { mcpServerId: meta.mcpServerId } : {}),
-        },
-        {
-          allowedPluginIds: context.allowedPluginIds
-            ? [...context.allowedPluginIds]
-            : undefined,
-          additionalDirectories: context.additionalDirectories ?? [],
-        },
-        { defer: "none", abortSignal },
-      );
-    } catch (err) {
-      emitPermissionReview(callbacks, {
-        status: "failed",
-        toolName,
-        toolCategory: category,
-        source,
-        ...meta,
-        reason: err instanceof Error ? err.message : String(err),
-        ...(approvalPurpose ? { approvalPurpose } : {}),
-      });
-      throw err;
-    }
-
-    emitPermissionReview(callbacks, {
-      status: reviewer.verdict.level === "low" ? "auto_approved" : "needs_approval",
-      toolName,
-      toolCategory: category,
-      source,
-      ...meta,
-      verdictLevel: reviewer.verdict.level,
-      reason: reviewer.verdict.reason,
-      ...(approvalPurpose ? { approvalPurpose } : {}),
-    });
-
-    if (reviewer.verdict.level === "low") {
-      return {
-        decision: "allow",
-        reason: `reviewer low: ${reviewer.verdict.reason}`,
-        layer: 5,
-        reviewer: { route: "foreground-auto", verdict: reviewer.verdict },
-      };
-    }
-    // Foreground non-LOW verdict → route to the user approval modal rather
-    // than silently hard-denying. The user is the authority: the
-    // ToolApprovalDialog renders the reviewer verdict (HIGH forces a
-    // session-only grant requiring NL justification), so a HIGH-risk action
-    // ASKS and only executes on an explicit user allow. Pre-fix this branch
-    // returned "deny" with a "no approval popup was opened" reason, which —
-    // with plugin tool categories removed (host-classifies-risk incomplete) —
-    // silently blocked every plugin tool that defaulted to category "write".
-    // deny-by-default is preserved: a deny-once at the modal yields a blocked
-    // tool result; only allow lets the effect run.
-    return {
-      decision: "ask",
-      reason: `reviewer ${reviewer.verdict.level}: ${reviewer.verdict.reason}`,
-      layer: 5,
-      reviewer: { route: "foreground-auto", verdict: reviewer.verdict },
-    };
+      category,
+      pathFields,
+      finalInput,
+      cacheIdentityInput,
+      allowedDirectories,
+      sensitivePathsAdjacent,
+      context,
+      evaluationContext,
+      sandboxAttestation,
+      callbacks,
+      meta,
+      approvalPurpose,
+      abortSignal,
+    );
   }
 
-  /**
-   * Store B explicit-approval memory skip for the foreground modal path.
-   *
-   * Background — two approval stores, asymmetric reads (root cause of the
-   * "I chose 'allow this session' but the modal keeps reappearing" bug):
-   *   • Store A — durable glob allow/deny rules + the `alwaysAllowed` Set,
-   *     managed by PermissionsTab and consulted by the SYNC
-   *     {@link PermissionManager.checkDetailed} (Layers 3 glob / 5 exact).
-   *     Only the dialog's `allow-always` choice writes here
-   *     (addAlwaysAllowedPersist).
-   *   • Store B — exact-tuple user-approval memory written by
-   *     ToolApprovalDialog for DURABLE choices only (allow-session /
-   *     allow-always — allow-once never records, so "this time" cannot
-   *     widen into a remembered grant) via the
-   *     `userApprovalRecord` IPC. Keyed on the canonical
-   *     (toolName, args, source, trustOrigin?, approvalCacheKey?) tuple.
-   *
-   * Pre-fix, the foreground ask path never read Store B — only the reviewer
-   * lane ({@link PermissionManager.dispatchReviewer}) did. So a "session"
-   * approval was recorded but never honored on re-entry through the modal
-   * path. This method mirrors the reviewer lane's lookup so a prior,
-   * non-revoked session/persistent approval skips the modal.
-   *
-   * The lookup args MUST match what ToolApprovalDialog stored:
-   * `canonicalStringify(finalInput)` (the dialog records
-   * `canonicalStringify(request.args)` where `request.args === finalInput`).
-   * The IPC handler re-canonicalizes the same way, so identity is stable.
-   *
-   * Verdict escalation guard: re-run the rule classifier and take
-   * `maxVerdict(ruleVerdict, storedVerdict)`. If the fresh rule verdict now
-   * EXCEEDS the stored verdict (args mutated into something more dangerous),
-   * re-prompt instead of auto-allowing — same principle as the reviewer
-   * lane's max() composition. A legacy entry with `verdictAtApproval == null`
-   * (provenance lost) is rejected → re-prompt (mirrors the dispatchReviewer
-   * fail-closed gate).
-   *
-   * @returns an `allow` {@link PermissionCheckResult} when the modal should be
-   *   skipped, or `null` to fall through to the modal.
-   */
+  /** Store B explicit-approval memory skip — see ./pipeline/approval-memory-skip.ts. */
   private async tryUserApprovalMemorySkip(
     toolName: string,
     source: ToolSource,
@@ -1352,128 +577,19 @@ export class ToolExecutor {
     sandboxAttestation: { writesToOwnSandbox?: boolean; ownerPluginSandboxRoot?: string },
     mcpServerId?: string,
   ): Promise<PermissionCheckResult | null> {
-    // Identity = exactly what ToolApprovalDialog stored (canonical finalInput).
-    const canonicalArgs = canonicalStringify(finalInput);
-    const approval = await lookupApproval(
-      toolName,
-      canonicalArgs,
-      source,
-      context.trustOrigin,
-      approvalCacheKey,
-    ).catch(() => null); // storage failure must never block tool execution
-
-    // No active (non-revoked) approval → fall through to the modal.
-    if (!approval) return null;
-
-    // Legacy-null guard: an entry without a recorded verdict has lost its
-    // provenance. Treat as a miss and re-prompt (fail-closed) — mirrors the
-    // dispatchReviewer gate. A null can never be silently coerced to a level.
-    if (approval.verdictAtApproval == null) {
-      console.warn(
-        `[permission] foreground memory skip — legacy entry without verdictAtApproval, forcing fresh approval (tool=${toolName}, scope=${approval.scope})`,
-        { event: "legacy-null-verdict", toolName, scope: approval.scope },
-      );
-      return null;
-    }
-
-    // Verdict escalation guard. Re-run the deterministic rule classifier on
-    // the CURRENT args; if it now ranks higher than the stored verdict, the
-    // invocation became more dangerous since approval — re-prompt.
-    // Substrate-aware (NOT process-global): a plugin/MCP or in-process builtin
-    // call resolves to a "none" capability so the audit + any sandbox-sensitive
-    // rule reflect that this call's effects are NOT ASRT-isolated — except a
-    // genuinely ASRT-wrapped external MCP worker (worker-egress PR1, keyed on id).
-    const sandboxCapability = resolveReviewerSandboxCapability(source, toolName, mcpServerId);
-    const ctx: ToolInvocationContext = {
+    return tryUserApprovalMemorySkipImpl(
       toolName,
       source,
       category,
       pathFields,
-      trustOrigin: context.trustOrigin,
       finalInput,
       allowedDirectories,
       sensitivePathsAdjacent,
-      sandboxCapability,
-      ...(context.userIntent ? { conversationContext: { recentUserMessage: context.userIntent } } : {}),
-      ...(sandboxAttestation.writesToOwnSandbox !== undefined
-        ? { writesToOwnSandbox: sandboxAttestation.writesToOwnSandbox }
-        : {}),
-      ...(sandboxAttestation.ownerPluginSandboxRoot !== undefined
-        ? { ownerPluginSandboxRoot: sandboxAttestation.ownerPluginSandboxRoot }
-        : {}),
-    };
-    const ruleVerdict = new RuleBasedRiskClassifier().classify(ctx);
-    const storedLevel: UserApprovalVerdict = approval.verdictAtApproval;
-    const composed = maxVerdict(ruleVerdict, {
-      level: storedLevel,
-      reason: "stored approval verdict at approval time",
-    });
-    if (composed.level !== storedLevel) {
-      // Fresh rule verdict exceeded the stored one → escalation, re-prompt.
-      console.warn(
-        `[permission] foreground memory skip — fresh rule verdict (${ruleVerdict.level}) exceeds stored (${storedLevel}), forcing fresh approval (tool=${toolName})`,
-        { event: "memory-skip-escalation", toolName, ruleVerdict: ruleVerdict.level, storedLevel },
-      );
-      return null;
-    }
-
-    // Memory hit — skip the modal. Emit an audit entry recording the skip so
-    // forensics can see the auto-allow + its provenance. Swallow-on-failure:
-    // an audit write must never block tool execution.
-    try {
-      const auditEntry = buildSandboxAuditEntry({
-        tool: {
-          name: toolName,
-          // emitSandboxAudit's sink trusts callers to pass DLP-redacted
-          // fields (sandbox-audit-sink.ts DLP note) — mask before writing.
-          args: maskSensitiveData(JSON.stringify(finalInput)).masked,
-          source,
-        },
-        sandbox: {
-          kind: sandboxCapability.kind,
-          confidence: sandboxCapability.confidence,
-          // No sandbox run — this is a memory skip (the tool has not executed
-          // yet). The zero telemetry below reflects "not measured", not "0ms".
-          events: [],
-          spawnLatencyMs: 0,
-          overheadPercent: 0,
-        },
-        reviewer: {
-          // ruleVerdict is the fresh deterministic classification of the
-          // current args; finalVerdict is the composed max(rule, stored).
-          ruleVerdict: ruleVerdict.level,
-          // No LLM call on the memory-skip path — record null rather than a
-          // composed level so the audit does not imply the classifier ran.
-          llmVerdict: null,
-          finalVerdict: composed.level,
-          compositionRulesTriggered: [],
-          userApprovalUsed: {
-            memoryHit: true,
-            // Stored justification is user/LLM-authored free text — DLP-mask
-            // it like every other audit field (the sink does not re-redact).
-            nlJustification:
-              approval.nlJustification === null
-                ? null
-                : maskSensitiveData(approval.nlJustification).masked,
-            verdictAtApproval: approval.verdictAtApproval,
-          },
-        },
-      });
-      emitSandboxAudit(auditEntry).catch(() => {
-        // intentionally swallowed — audit failure must not block execution
-      });
-    } catch {
-      // building the audit entry must never block tool execution
-    }
-
-    console.info(
-      `[permission] foreground memory-hit auto-approve: ${toolName} (scope=${approval.scope}, verdict=${storedLevel})`,
+      context,
+      approvalCacheKey,
+      sandboxAttestation,
+      mcpServerId,
     );
-    return {
-      decision: "allow",
-      reason: `prior user approval (scope=${approval.scope})`,
-      layer: 5,
-    };
   }
 
   /** 복수 tool_use 순서 실행.
@@ -3073,17 +2189,8 @@ export class ToolExecutor {
     };
   }
 
-  // ─── Audit (불변 — 항상 실행) ────────────────────
+  // ─── Audit (불변 — 항상 실행) — chokepoint owned by AuditWriter ────
 
-  /**
-   * Emit an `AuditAllow` row when the user resolves an out-of-allowed-dir
-   * approval (allow-once / allow-session / allow-always) — or when
-   * `propagateGrantScope` had to degrade a session-intent grant to turn
-   * scope because the session callback was unwired. Decoupled from
-   * `auditToolCall` so the per-tool audit row can stay focused on
-   * execution outcome while the directory-grant decision lives in a
-   * dedicated forensic row tied to the dialog click.
-   */
   private async auditPermissionGrant(args: {
     toolName: string;
     source: ToolSource;
@@ -3092,38 +2199,7 @@ export class ToolExecutor {
     grantLifetime: "turn" | "session" | "always" | "degraded-to-turn";
     permissionContext?: ToolPermissionContext;
   }): Promise<void> {
-    if (!this.auditLogger.isPermissionAuditChainReady()) {
-      if (this.requirePermissionAuditChain) {
-        throw new Error("permission audit chain is not initialized");
-      }
-      return;
-    }
-    const entry: PermissionAuditEntryInput = {
-      decision: "allow",
-      ts: new Date().toISOString(),
-      auditId: randomUUID(),
-      tool: args.toolName,
-      source: args.source,
-      category: args.category,
-      directory: args.directory,
-      directoryAllowed: true,
-      grantLifetime: args.grantLifetime,
-      layer: 1,
-      trustOrigin: auditTrustOrigin(args.permissionContext),
-    };
-    try {
-      await this.auditLogger.appendPermissionAuditEntry(entry);
-    } catch (err) {
-      if (this.requirePermissionAuditChain) {
-        throw err;
-      }
-      log.warn(
-        "permission grant audit append failed for %s (%s): %s",
-        args.toolName,
-        args.grantLifetime,
-        err instanceof Error ? err.message : String(err),
-      );
-    }
+    return this.auditWriter.auditPermissionGrant(args);
   }
 
   private async auditPermissionAsk(
@@ -3136,36 +2212,16 @@ export class ToolExecutor {
     permissionContext?: ToolPermissionContext,
     auditDirectory?: string,
   ): Promise<void> {
-    const tool = this.toolRegistry.findByName(toolName);
-    const entry = permissionAuditAskEntryFromToolCall({
+    return this.auditWriter.auditPermissionAsk(
       toolName,
-      tool,
       source,
       category,
       input,
       permission,
-      trustOrigin: auditTrustOrigin(permissionContext),
       cwd,
+      permissionContext,
       auditDirectory,
-    });
-    if (!this.auditLogger.isPermissionAuditChainReady()) {
-      if (this.requirePermissionAuditChain) {
-        throw new Error("permission audit chain is not initialized");
-      }
-      return;
-    }
-    try {
-      await this.auditLogger.appendPermissionAuditEntry(entry);
-    } catch (err) {
-      if (this.requirePermissionAuditChain) {
-        throw err;
-      }
-      log.warn(
-        "permission ask audit append failed for %s: %s",
-        toolName,
-        err instanceof Error ? err.message : String(err),
-      );
-    }
+    );
   }
 
   private async auditToolCall(
@@ -3186,92 +2242,23 @@ export class ToolExecutor {
     terminationReason?: "ok" | "ceiling" | "user-abort" | "error",
     hookChain?: HookResult[],
   ): Promise<void> {
-    // ── #811 m2: PermissionDenied (NON-BLOCKING) ──
-    // `auditToolCall` is the single chokepoint every tool-deny path funnels
-    // through, so firing here observes the deny EXACTLY ONCE where it is
-    // finalized. OBSERVE-ONLY: the lifecycle hook's verdict is recorded but the
-    // deny stands regardless (control flow already returned the deny result).
-    // A user-abort is a CANCEL, not a permission denial — exclude it so a policy
-    // hook never sees false "denied" signals. `denyReason.reason` carries the
-    // finalized reason so a hook can discriminate the remaining cases (e.g.
-    // tool-not-found) itself — restoring forensic granularity beyond the layer.
-    if (
-      permission?.decision === "deny" &&
-      permissionContext !== undefined &&
-      terminationReason !== "user-abort"
-    ) {
-      await this.fireLifecycleEvent(
-        "PermissionDenied",
-        sessionId,
-        permissionContext,
-        {
-          toolName,
-          denyReason: { layer: permission.layer, source: "tool-executor", reason: permission.reason },
-        },
-      );
-    }
-    try {
-      const inputText = JSON.stringify(input);
-      const auditInput = maskSensitiveData(inputText).masked;
-      this.auditLogger.log({
-        timestamp: new Date().toISOString(),
-        sessionId: sessionId ?? "unknown",
-        type: "tool_call",
-        input: auditInput.slice(0, 500),
-        output: output.slice(0, 1024),
-        toolCalls: [{
-          name: toolName,
-          isError,
-          source,
-          trust,
-          executionTimeMs: Date.now() - startTime,
-          permissionDecision: permission?.deferred ? "deferred" : permission?.decision ?? "allow",
-          permissionReason: permission?.reason,
-          rateLimitRemaining,
-          ...(terminationReason ? { terminationReason } : {}),
-        }],
-      });
-    } catch (err) {
-      log.warn(
-        "general tool audit failed for %s: %s",
-        toolName,
-        err instanceof Error ? err.message : String(err),
-      );
-    }
-    if (!category || !cwd) {
-      return;
-    }
-    const tool = this.toolRegistry.findByName(toolName);
-    const entry = permissionAuditEntryFromToolCall({
+    return this.auditWriter.auditToolCall(
+      sessionId,
       toolName,
-      tool,
       source,
-      category,
+      trust,
       input,
+      output,
+      isError,
+      startTime,
       permission,
       rateLimitRemaining,
-      trustOrigin: auditTrustOrigin(permissionContext),
+      permissionContext,
+      category,
       cwd,
       auditDirectory,
-      ...(hookChain ? { hookChain } : {}),
-    });
-    if (!this.auditLogger.isPermissionAuditChainReady()) {
-      if (this.requirePermissionAuditChain) {
-        throw new Error("permission audit chain is not initialized");
-      }
-      return;
-    }
-    try {
-      await this.auditLogger.appendPermissionAuditEntry(entry);
-    } catch (err) {
-      if (this.requirePermissionAuditChain) {
-        throw err;
-      }
-      log.warn(
-        "permission audit append failed for %s: %s",
-        toolName,
-        err instanceof Error ? err.message : String(err),
-      );
-    }
+      terminationReason,
+      hookChain,
+    );
   }
 }
