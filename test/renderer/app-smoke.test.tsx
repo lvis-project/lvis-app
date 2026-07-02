@@ -226,19 +226,21 @@ describe("App smoke (Phase 1 infra)", () => {
     expect(container.querySelector('[data-testid^="action-panel-activity-"]')).toBeFalsy();
   });
 
-  it("surfaces populated action panel activity and only opens URL targets", () => {
+  it("surfaces populated action panel activity and routes rows in-app", () => {
     const readFiles = Array.from({ length: 6 }, (_, index) => ({
       id: `read-${index}`,
       label: `latest-read-${index}`,
       target: `C:\\tmp\\latest-read-${index}.md`,
     }));
-    const openUrl = vi.fn();
+    const openItem = vi.fn();
+    const openInSystemApp = vi.fn();
     const { container } = render(
       <TooltipProvider>
         <ActionPanel
           open
           onOpenChange={vi.fn()}
-          onOpenExternalUrl={openUrl}
+          onOpenItem={openItem}
+          onOpenItemInSystemApp={openInSystemApp}
           activity={{
             readFileCount: readFiles.length,
             writtenFileCount: 1,
@@ -277,12 +279,16 @@ describe("App smoke (Phase 1 infra)", () => {
     expect(container.textContent).toContain("https://example.com");
     expect(container.textContent).not.toContain("/full/path");
 
+    // Read-file rows now carry a target → they are clickable buttons that route
+    // the file in-app (web=false); no local path ever reaches a system opener.
     const readRow = container.querySelector('[data-testid="action-panel-activity-read-0"]')!;
-    expect(readRow.tagName).toBe("DIV");
+    expect(readRow.tagName).toBe("BUTTON");
     fireEvent.click(readRow);
-    expect(openUrl).not.toHaveBeenCalled();
+    expect(openItem).toHaveBeenLastCalledWith("C:\\tmp\\latest-read-0.md", false);
+    expect(openInSystemApp).not.toHaveBeenCalled();
+    // Web rows route in-app with web=true.
     fireEvent.click(container.querySelector('[data-testid="action-panel-activity-web-1"]')!);
-    expect(openUrl).toHaveBeenCalledWith("https://example.com/full/path?q=1");
+    expect(openItem).toHaveBeenLastCalledWith("https://example.com/full/path?q=1", true);
   });
 });
 
