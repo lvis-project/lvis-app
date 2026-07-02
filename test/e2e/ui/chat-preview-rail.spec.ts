@@ -240,14 +240,17 @@ test.describe("chat preview rail", () => {
         { timeout: 20_000 },
       );
 
-      const openButton = ctx.page.getByTestId("chat-preview-open");
+      const openButton = ctx.page.getByTestId("chat-side-panel-toggle");
       await expect(openButton).toBeVisible({ timeout: 20_000 });
+      await expect(ctx.page.getByTestId("chat-preview-open")).toHaveCount(0);
       await expect(ctx.page.getByTestId("chat-preview-rail")).toHaveCount(0);
       const closedActionRailBox = await ctx.page.getByTestId("action-panel-rail").boundingBox();
-      const closedPreviewButtonBox = await openButton.boundingBox();
+      const modeToggleBox = await ctx.page.getByTestId("app-mode-toggle").boundingBox();
+      const sidePanelButtonBox = await openButton.boundingBox();
       expect(closedActionRailBox).not.toBeNull();
-      expect(closedPreviewButtonBox).not.toBeNull();
-      expect(closedActionRailBox!.y).toBeGreaterThanOrEqual(closedPreviewButtonBox!.y + closedPreviewButtonBox!.height + 4);
+      expect(modeToggleBox).not.toBeNull();
+      expect(sidePanelButtonBox).not.toBeNull();
+      expect(sidePanelButtonBox!.x).toBeGreaterThanOrEqual(modeToggleBox!.x + modeToggleBox!.width);
 
       await openButton.click();
       const panel = ctx.page.getByTestId("chat-side-panel");

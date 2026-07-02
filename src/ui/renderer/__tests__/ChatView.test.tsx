@@ -900,10 +900,11 @@ describe("ChatView", () => {
     });
 
     const openButton = await waitFor(() => {
-      const button = container.querySelector('[data-testid="chat-preview-open"]') as HTMLButtonElement | null;
+      const button = container.querySelector('[data-testid="chat-side-panel-toggle"]') as HTMLButtonElement | null;
       expect(button).not.toBeNull();
       return button!;
     });
+    expect(container.querySelector('[data-testid="chat-preview-open"]')).toBeNull();
     expect(container.querySelector('[data-testid="chat-preview-rail"]')).toBeNull();
 
     await act(async () => {
@@ -990,6 +991,7 @@ describe("ChatView", () => {
     await waitFor(() => {
       expect(container.textContent).toContain("A 답변");
       expect(container.querySelector('[data-testid="chat-preview-open"]')).toBeNull();
+      expect(container.querySelector('[data-testid="chat-preview-rail"]')).toBeNull();
     });
 
     await act(async () => {
@@ -998,7 +1000,17 @@ describe("ChatView", () => {
 
     await waitFor(() => {
       expect(container.textContent).toContain("[File #1]");
-      expect(container.querySelector('[data-testid="chat-preview-open"]')).not.toBeNull();
+      expect(container.querySelector('[data-testid="chat-preview-open"]')).toBeNull();
+      expect(container.querySelector('[data-testid="chat-side-panel-toggle"]')).not.toBeNull();
+    });
+
+    await act(async () => {
+      fireEvent.click(container.querySelector('[data-testid="chat-side-panel-toggle"]')!);
+    });
+
+    await waitFor(() => {
+      expect(container.querySelector('[data-testid="chat-preview-rail"]')).not.toBeNull();
+      expect(container.textContent).toContain("draft-only.md");
     });
 
     const loadSessionHandler = await waitFor(() => {
@@ -1019,7 +1031,7 @@ describe("ChatView", () => {
       expect(container.querySelector('[data-testid="attachment-chip"]')).toBeNull();
       expect(container.querySelector('[data-testid="attachment-chip-collapsed"]')).toBeNull();
       expect(container.querySelector('[data-testid="chat-preview-open"]')).toBeNull();
-      expect(container.querySelector('[data-testid="chat-preview-rail"]')).toBeNull();
+      expect(container.textContent).not.toContain("draft-only.md");
     });
   });
 

@@ -1,7 +1,7 @@
 import { Fragment, useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import { useTranslation } from "../../i18n/react.js";
 import { flushSync } from "react-dom";
-import { ChevronDown, GitBranch, KeyRound, PanelRightOpen, Pencil, Star } from "lucide-react";
+import { ChevronDown, GitBranch, KeyRound, Pencil, Star } from "lucide-react";
 import { Button } from "../../components/ui/button.js";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "../../components/ui/card.js";
 import { ScrollArea } from "../../components/ui/scroll-area.js";
@@ -317,6 +317,9 @@ export interface ChatViewProps {
   statusBar?: StatusBarProps;
   /** Floating activity affordance anchored to the chat column, not the side panel. */
   actionPanelSlot?: ReactNode;
+  /** Controlled right-side work panel state, toggled from the title bar. */
+  sidePanelOpen?: boolean;
+  onSidePanelOpenChange?: (open: boolean) => void;
   /** Constrain transcript and composer to a centered reading column. */
   blogLayout?: boolean;
 }
@@ -359,7 +362,7 @@ function AskUserAnswerBubble({
   );
 }
 
-export function ChatView({ api, onAsk, onEditSave, onFork, onToggleStar, onRetryEffort, onContinueFromLastUser, isEntryStarred, onAbort, onGuide, onGuideError, onFeedback, subAgentSpawns, loadedSkills, hasAskQuestions, askQuestions, onResolveAskQuestion, plugins, onSelectPlugin, appMode = "work", onOpenApprovalQueue, currentSessionKind = "main", currentSessionTitle, sessions, onLoadSession, onRefreshSessions, commandActions, commandPopoverOpen, onCommandPopoverOpenChange, onPluginPrimaryAction, onRoutineAcknowledge, statusBar, actionPanelSlot, blogLayout = false }: ChatViewProps) {
+export function ChatView({ api, onAsk, onEditSave, onFork, onToggleStar, onRetryEffort, onContinueFromLastUser, isEntryStarred, onAbort, onGuide, onGuideError, onFeedback, subAgentSpawns, loadedSkills, hasAskQuestions, askQuestions, onResolveAskQuestion, plugins, onSelectPlugin, appMode = "work", onOpenApprovalQueue, currentSessionKind = "main", currentSessionTitle, sessions, onLoadSession, onRefreshSessions, commandActions, commandPopoverOpen, onCommandPopoverOpenChange, onPluginPrimaryAction, onRoutineAcknowledge, statusBar, actionPanelSlot, sidePanelOpen = false, onSidePanelOpenChange, blogLayout = false }: ChatViewProps) {
   const { t } = useTranslation();
   // We still need the api for SessionTodoPanel; obtain it via singleton.
   const workflowApi = getApi();
@@ -576,25 +579,16 @@ export function ChatView({ api, onAsk, onEditSave, onFork, onToggleStar, onRetry
     () => collectChatPreviewModel({ entries: visibleEntries, attachments }),
     [attachments, visibleEntries],
   );
-  const hasPreviewArtifacts = previewModel.targets.length > 0 || previewModel.files.length > 0;
   const previewTargetIdKey = useMemo(
     () => previewModel.targets.map((target) => target.id).join("\u0001"),
     [previewModel.targets],
   );
-  const [previewRailOpen, setPreviewRailOpen] = useState(false);
   const [selectedPreviewId, setSelectedPreviewId] = useState<string | null>(null);
-  const previewRailVisible = previewRailOpen && hasPreviewArtifacts;
+  const previewRailVisible = sidePanelOpen;
 
   useEffect(() => {
     setSelectedPreviewId(null);
   }, [currentSessionId]);
-
-  useEffect(() => {
-    if (!hasPreviewArtifacts) {
-      setPreviewRailOpen(false);
-      setSelectedPreviewId(null);
-    }
-  }, [hasPreviewArtifacts]);
 
   useEffect(() => {
     if (previewModel.targets.length === 0) {
@@ -1940,23 +1934,6 @@ export function ChatView({ api, onAsk, onEditSave, onFork, onToggleStar, onRetry
           {currentSessionTitle ? <span className="ml-2 text-muted-foreground">{currentSessionTitle}</span> : null}
         </div>
       )}
-      {hasPreviewArtifacts && !previewRailOpen && (
-        <Button
-          type="button"
-          size="sm"
-          variant="secondary"
-          className="lvis-surface-raised absolute right-5 top-4 z-30 h-8 rounded-full bg-card/(--opacity-solid) px-3 text-xs backdrop-blur"
-          title={t("chatPreviewRail.open")}
-          aria-label={t("chatPreviewRail.open")}
-          onClick={() => {
-            setPreviewRailOpen(true);
-          }}
-          data-testid="chat-preview-open"
-        >
-          <PanelRightOpen className="mr-1 h-3.5 w-3.5" />
-          {t("chatPreviewRail.openShort", { count: previewModel.targets.length })}
-        </Button>
-      )}
       <ScrollArea type="always" className="lvis-chat-scroll h-full min-h-0 min-w-0 max-w-full" viewportRef={scrollViewportRef}><div className={`min-w-0 overflow-x-hidden space-y-4 py-5 ${readingColumnClass}`}>
         {/* Today's date badge stays a selector for explicit session loads only.
             currentSessionEntries enables in-session day jumping via
@@ -2170,7 +2147,7 @@ export function ChatView({ api, onAsk, onEditSave, onFork, onToggleStar, onRetry
           selectedId={selectedPreviewId}
           onSelect={setSelectedPreviewId}
           onClose={() => {
-            setPreviewRailOpen(false);
+            onSidePanelOpenChange?.(false);
           }}
           className="relative z-40 flex w-[clamp(28rem,44vw,42rem)] max-w-[calc(100vw-12rem)] shrink-0 self-stretch"
         />
