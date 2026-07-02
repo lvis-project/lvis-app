@@ -776,6 +776,8 @@ export const deMessages: Record<string, string> = {
   "chatPreviewRail.resizePanel": "Arbeitsbereichsleiste anpassen",
   "chatPreviewRail.pinTab": "Tab anheften",
   "chatPreviewRail.contentUnavailable": "Dieses Element ist nicht mehr verfügbar.",
+  "chatPreviewRail.diagramRendering": "Diagramm wird gerendert…",
+  "chatPreviewRail.diagramRenderFailed": "Dieses Diagramm konnte nicht gerendert werden.",
   "chatPreviewRail.terminalSearchPlaceholder": "Terminalausgabe suchen",
   "chatPreviewRail.browserAddressPlaceholder": "URL eingeben",
   "chatPreviewRail.browserGo": "Öffnen",

@@ -776,6 +776,8 @@ export const jaMessages: Record<string, string> = {
   "chatPreviewRail.resizePanel": "ワークスペースパネルのサイズを調整",
   "chatPreviewRail.pinTab": "タブを固定",
   "chatPreviewRail.contentUnavailable": "この項目は利用できなくなりました。",
+  "chatPreviewRail.diagramRendering": "ダイアグラムを描画中…",
+  "chatPreviewRail.diagramRenderFailed": "このダイアグラムを描画できませんでした。",
   "chatPreviewRail.terminalSearchPlaceholder": "ターミナル出力を検索",
   "chatPreviewRail.browserAddressPlaceholder": "URL を入力",
   "chatPreviewRail.browserGo": "移動",
