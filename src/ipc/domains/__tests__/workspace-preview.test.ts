@@ -1,5 +1,5 @@
 import { afterAll, beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
-import { mkdtempSync, mkdirSync, rmSync, writeFileSync } from "node:fs";
+import { mkdtempSync, mkdirSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
 import { tmpdir, homedir } from "node:os";
 import { join } from "node:path";
 
@@ -116,6 +116,38 @@ describe("preview:read-file handler", () => {
     };
     expect(res).toMatchObject({ ok: false, error: "binary-file" });
   });
+
+  it("rejects a symlink whose real target escapes the allowed root", async () => {
+    // A symlink INSIDE the allowed root that points OUT of it must not become a
+    // read hole: the guard realpath's the link before the boundary check, so the
+    // escaped target is what gets validated (and rejected).
+    const outside = mkdtempSync(join(tmpdir(), "lvis-ws-symlink-outside-"));
+    writeFileSync(join(outside, "secret.txt"), "escaped secret");
+    const link = join(root, "escape-link.txt");
+    symlinkSync(join(outside, "secret.txt"), link);
+    const res = (await invoke(CHANNELS.preview.readFile, OK_FRAME, link)) as {
+      ok: boolean;
+      error?: string;
+    };
+    expect(res).toMatchObject({ ok: false, error: "path-not-allowed" });
+    rmSync(link, { force: true });
+    rmSync(outside, { recursive: true, force: true });
+  });
+
+  it("writes an audit entry for a successful preview read", async () => {
+    const log = (deps as unknown as { auditLogger: { log: ReturnType<typeof vi.fn> } }).auditLogger.log;
+    log.mockClear();
+    const res = (await invoke(CHANNELS.preview.readFile, OK_FRAME, join(root, "docs", "architecture.md"))) as {
+      ok: boolean;
+    };
+    expect(res.ok).toBe(true);
+    expect(log).toHaveBeenCalledWith(
+      expect.objectContaining({
+        type: "info",
+        input: expect.stringContaining(CHANNELS.preview.readFile),
+      }),
+    );
+  });
 });
 
 describe("workspace handlers", () => {
@@ -169,5 +201,52 @@ describe("workspace handlers", () => {
     const res = (await invoke(CHANNELS.workspace.pickRoot, OK_FRAME)) as { ok: boolean; canceled?: boolean };
     expect(res).toMatchObject({ ok: true, canceled: true });
     expect(addAllowedDirectoryPersistMock).not.toHaveBeenCalled();
+  });
+
+  it("pickRoot does NOT persist an adjacency-warned path until it is acknowledged", async () => {
+    // A directory whose path carries a `.git` segment trips an adjacency warning
+    // (not a hard deny) — the pick must be withheld from the read allow-list
+    // until the renderer confirms.
+    const base = mkdtempSync(join(tmpdir(), "lvis-ws-warn-"));
+    const warnDir = join(base, ".git");
+    mkdirSync(warnDir);
+    showOpenDialogMock.mockResolvedValue({ canceled: false, filePaths: [warnDir] });
+
+    const first = (await invoke(CHANNELS.workspace.pickRoot, OK_FRAME)) as {
+      ok: boolean;
+      requiresAcknowledgement?: boolean;
+      pendingPath?: string;
+      warnings?: string[];
+      added?: string;
+    };
+    expect(first.ok).toBe(true);
+    expect(first.requiresAcknowledgement).toBe(true);
+    expect(first.pendingPath).toBe(warnDir);
+    expect((first.warnings ?? []).length).toBeGreaterThan(0);
+    expect(first.added).toBeUndefined();
+    expect(addAllowedDirectoryPersistMock).not.toHaveBeenCalled();
+
+    // Second, explicit confirmation persists WITHOUT reopening the dialog.
+    showOpenDialogMock.mockClear();
+    const second = (await invoke(CHANNELS.workspace.pickRoot, OK_FRAME, { acknowledgePath: warnDir })) as {
+      ok: boolean;
+      added?: string;
+    };
+    expect(second).toMatchObject({ ok: true, added: warnDir });
+    expect(showOpenDialogMock).not.toHaveBeenCalled();
+    expect(addAllowedDirectoryPersistMock).toHaveBeenCalledWith(warnDir);
+
+    rmSync(base, { recursive: true, force: true });
+  });
+
+  it("listDir omits Layer 0 sensitive entries inside an allowed root", async () => {
+    writeFileSync(join(root, ".env"), "SECRET=1\n");
+    const res = (await invoke(CHANNELS.workspace.listDir, OK_FRAME, root)) as {
+      ok: boolean;
+      entries?: Array<{ name: string }>;
+    };
+    expect(res.ok).toBe(true);
+    expect(res.entries?.some((e) => e.name === ".env")).toBe(false);
+    rmSync(join(root, ".env"), { force: true });
   });
 });

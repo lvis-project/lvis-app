@@ -10,7 +10,7 @@
  * so the two never diverge — extracting them here makes that equality a
  * compile-time fact instead of a copy-paste that rots.
  */
-import { createReadStream } from "node:fs";
+import { createReadStream, realpathSync } from "node:fs";
 import { homedir } from "node:os";
 import { isAbsolute, join, resolve as pathResolve } from "node:path";
 import { createInterface } from "node:readline";
@@ -65,7 +65,19 @@ export function assertReadableFilePath(
 ): AssertReadableResult {
   if (isGlobPattern(inputPath)) return { ok: false, error: "not-a-file" };
   const expanded = expandTilde(inputPath);
-  const resolved = isAbsolute(expanded) ? pathResolve(expanded) : pathResolve(cwd, expanded);
+  const lexical = isAbsolute(expanded) ? pathResolve(expanded) : pathResolve(cwd, expanded);
+  // Resolve symlinks up-front so the guard checks AND the eventual stat/read
+  // operate on the SAME canonical target — closes the check-vs-read TOCTOU gap
+  // where a symlink could point inside an allowed root at validation time and be
+  // swapped out afterwards, and catches a symlink whose real target is a Layer 0
+  // sensitive file. A not-yet-existing path throws → keep the lexical form so the
+  // downstream stat still yields a clean not-a-file/read-failed.
+  let resolved = lexical;
+  try {
+    resolved = realpathSync.native(lexical);
+  } catch {
+    resolved = lexical;
+  }
   const sensitive = isSensitivePath(caseFoldForMatch(canonicalizePathForMatch(resolved)));
   if (sensitive) return { ok: false, error: "sensitive-path" };
   const check = validateSandboxPath(resolved, cwd, [...extraAllowed]);

@@ -16,6 +16,7 @@
 import { ipcMain } from "electron";
 import { promises as fs } from "node:fs";
 import { validateSender, auditUnauthorized } from "../gated.js";
+import { redactFsPath } from "../../audit/dlp-filter.js";
 import { CHANNELS } from "../../contract/app-contract.js";
 import type { IpcDeps } from "../types.js";
 import {
@@ -106,6 +107,20 @@ export function registerPreviewHandlers(deps: IpcDeps): void {
           return { ok: false, error: "binary-file", path: resolved, bytes: stat.size, message: "binary file" };
         }
         const window = await readTextFileWindow(resolved, 0, PREVIEW_LINE_LIMIT);
+        // Audit the preview read the same way a `read_file` tool call is audited
+        // — a file left the sandbox boundary for display. The path is redacted
+        // (username stripped) via the shared DLP filter, consistent with the
+        // frame-guard audit above.
+        auditLogger.log({
+          timestamp: new Date().toISOString(),
+          sessionId: "preview-read",
+          type: "info",
+          input: JSON.stringify({
+            channel: CHANNELS.preview.readFile,
+            path: redactFsPath(resolved),
+            bytes: stat.size,
+          }),
+        });
         return {
           ok: true,
           content: window.lines.join("\n"),
