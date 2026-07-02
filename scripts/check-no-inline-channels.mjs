@@ -23,18 +23,26 @@
 import { readFileSync, readdirSync } from "node:fs";
 import { join } from "node:path";
 
+/** Read the top-level `.ts` modules of a directory (subdirs like `__tests__/`
+ *  are excluded by the `.endsWith(".ts")` filter). */
+const tsModulesIn = (dir) =>
+  readdirSync(join(process.cwd(), dir))
+    .filter((f) => f.endsWith(".ts"))
+    .map((f) => `${dir}/${f}`);
+
 const TARGETS = [
   // Every IPC domain module (read dynamically so a new domain is covered
-  // automatically). `__tests__/` is a subdirectory, not a `.ts` file, so it
-  // is excluded from the `.endsWith(".ts")` filter.
-  ...readdirSync(join(process.cwd(), "src/ipc/domains"))
-    .filter((f) => f.endsWith(".ts"))
-    .map((f) => `src/ipc/domains/${f}`),
+  // automatically).
+  ...tsModulesIn("src/ipc/domains"),
   "src/preload.ts",
   // Every TS module in the preload surface split (public/internal/gesture).
-  ...readdirSync(join(process.cwd(), "src/preload"))
-    .filter((f) => f.endsWith(".ts"))
-    .map((f) => `src/preload/${f}`),
+  ...tsModulesIn("src/preload"),
+  // The external-surface stack (#1409/#1436): contract consumers must never
+  // re-inline a wire literal — dispatcher, HTTP server, SDK facade, CLI.
+  // (src/contract itself is the SOT where the literals are DEFINED — excluded.)
+  ...tsModulesIn("src/api"),
+  ...tsModulesIn("src/sdk"),
+  ...tsModulesIn("src/cli"),
 ];
 
 // A quoted channel literal: an opening quote immediately followed by `lvis:`.
