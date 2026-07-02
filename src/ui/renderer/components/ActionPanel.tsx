@@ -52,6 +52,11 @@ export interface ActionPanelProps {
    * web URL (→ browser tab) from a local file path (→ file-browser preview).
    */
   onOpenItem?: (target: string, web: boolean) => void;
+  /**
+   * Double-click a row → open (and keep) the item as a pinned tab (VS Code
+   * preview-tab model: single-click = ephemeral, double-click = pinned).
+   */
+  onOpenItemPinned?: (target: string, web: boolean) => void;
   /** Right-click "open in system app". Only offered for web rows (see §5). */
   onOpenItemInSystemApp?: (target: string, web: boolean) => void;
 }
@@ -83,6 +88,7 @@ function ActivitySection({
   icon: Icon,
   items,
   onOpenItem,
+  onOpenItemPinned,
   onOpenItemInSystemApp,
   web = false,
 }: {
@@ -90,6 +96,7 @@ function ActivitySection({
   icon: LucideIcon;
   items: ActionPanelActivityItem[];
   onOpenItem?: (target: string, web: boolean) => void;
+  onOpenItemPinned?: (target: string, web: boolean) => void;
   onOpenItemInSystemApp?: (target: string, web: boolean) => void;
   web?: boolean;
 }) {
@@ -149,6 +156,7 @@ function ActivitySection({
                       data-testid={`action-panel-activity-${item.id}`}
                       title={titleText}
                       onClick={() => onOpenItem(item.target!, web)}
+                      onDoubleClick={() => (onOpenItemPinned ?? onOpenItem)(item.target!, web)}
                     >
                       {rowContent}
                     </button>
@@ -267,6 +275,7 @@ export function ActionPanel({
   onOpenChange,
   activity,
   onOpenItem,
+  onOpenItemPinned,
   onOpenItemInSystemApp,
 }: ActionPanelProps) {
   const { t } = useTranslation();
@@ -365,6 +374,7 @@ export function ActionPanel({
           icon={FileText}
           items={activity.readFiles}
           onOpenItem={onOpenItem}
+          onOpenItemPinned={onOpenItemPinned}
           onOpenItemInSystemApp={onOpenItemInSystemApp}
         />
         <ActivitySection
@@ -372,6 +382,7 @@ export function ActionPanel({
           icon={FilePenLine}
           items={activity.writtenFiles}
           onOpenItem={onOpenItem}
+          onOpenItemPinned={onOpenItemPinned}
           onOpenItemInSystemApp={onOpenItemInSystemApp}
         />
         <ActivitySection
@@ -379,6 +390,7 @@ export function ActionPanel({
           icon={Globe2}
           items={activity.fetchedPages}
           onOpenItem={onOpenItem}
+          onOpenItemPinned={onOpenItemPinned}
           onOpenItemInSystemApp={onOpenItemInSystemApp}
           web
         />

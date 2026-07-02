@@ -193,6 +193,18 @@ export function ChatView({ api, onAsk, onEditSave, onFork, onToggleStar, onRetry
     () => previewModel.targets.map((target) => target.id).join("\u0001"),
     [previewModel.targets],
   );
+  const previewTargetIds = useMemo(
+    () => new Set(previewModel.targets.map((target) => target.id)),
+    [previewModel.targets],
+  );
+  // Latest resolvable target-id set, read (non-reactively) by the session-switch
+  // prune effect. handleLoadSession applies the new session's entries and the
+  // new session id in one batched commit, so this ref already reflects the new
+  // session by the time the prune effect fires.
+  const previewTargetIdsRef = useRef(previewTargetIds);
+  useEffect(() => {
+    previewTargetIdsRef.current = previewTargetIds;
+  }, [previewTargetIds]);
   const [selectedPreviewId, setSelectedPreviewId] = useState<string | null>(null);
   // Workspace-tab store lifted out of ChatSidePanel. ChatSidePanel is unmounted
   // whenever the rail closes / the view leaves home / the session switches
@@ -218,17 +230,22 @@ export function ChatView({ api, onAsk, onEditSave, onFork, onToggleStar, onRetry
   // authorized OS-open channel, so that menu item is hidden for files).
   const actionPanelActivity = useMemo(() => computeActionPanelActivity(entries), [entries]);
 
-  const routeActivityItem = useCallback((target: string, web: boolean) => {
+  // Route an ActionPanel item into the workspace rail. Single-click (`ephemeral`)
+  // opens it in the one reusable preview slot; double-click (`pinned`) opens and
+  // keeps it as a durable tab — the VS Code preview-tab model the workspace-tab
+  // store documents (single = ephemeral, double = pinned).
+  const routeActivity = useCallback((target: string, web: boolean, mode: "ephemeral" | "pinned") => {
+    const open = mode === "pinned" ? workspaceTabs.openPinned : workspaceTabs.openInEphemeral;
     if (web) {
       const safe = normalizeBrowserNavigationUrl(target);
       if (!safe) return;
-      workspaceTabs.openInEphemeral({ source: "browser", url: safe });
+      open({ source: "browser", url: safe });
     } else {
       const fileTarget = previewModel.targets.find(
         (candidate) => "path" in candidate && candidate.path === target,
       );
       if (fileTarget) {
-        workspaceTabs.openInEphemeral({ source: "preview", targetId: fileTarget.id });
+        open({ source: "preview", targetId: fileTarget.id });
       } else {
         // No preview-target for this path — open the file-browser container so
         // the user can still locate it in the tree.
@@ -237,6 +254,14 @@ export function ChatView({ api, onAsk, onEditSave, onFork, onToggleStar, onRetry
     }
     onSidePanelOpenChange?.(true);
   }, [workspaceTabs, previewModel.targets, onSidePanelOpenChange]);
+  const routeActivityItem = useCallback(
+    (target: string, web: boolean) => routeActivity(target, web, "ephemeral"),
+    [routeActivity],
+  );
+  const routeActivityItemPinned = useCallback(
+    (target: string, web: boolean) => routeActivity(target, web, "pinned"),
+    [routeActivity],
+  );
 
   const openActivityItemInSystemApp = useCallback((target: string, web: boolean) => {
     if (web) {
@@ -250,6 +275,19 @@ export function ChatView({ api, onAsk, onEditSave, onFork, onToggleStar, onRetry
   useEffect(() => {
     setSelectedPreviewId(null);
   }, [currentSessionId]);
+
+  // Prune stale preview/content tabs when the session changes. The workspace-tab
+  // store lives at ChatView (surviving the panel's unmount), so without this the
+  // prior session's session-scoped preview tabs would linger as dead
+  // `content-unavailable` placeholders and accumulate on every switch. Browser
+  // (url) content tabs + launcher container tabs are session-independent and are
+  // kept by the store. Depends only on the session id + the stable prune fn, so
+  // it runs on switch — not on every intra-session target change (which would
+  // wrongly close a tab whose target id was reclassified mid-stream).
+  const { pruneContentTabs } = workspaceTabs;
+  useEffect(() => {
+    pruneContentTabs((targetId) => previewTargetIdsRef.current.has(targetId));
+  }, [currentSessionId, pruneContentTabs]);
 
   useEffect(() => {
     if (previewModel.targets.length === 0) {
@@ -494,6 +532,7 @@ export function ChatView({ api, onAsk, onEditSave, onFork, onToggleStar, onRetry
           onOpenChange={(open) => onActionPanelOpenChange?.(open)}
           activity={actionPanelActivity}
           onOpenItem={routeActivityItem}
+          onOpenItemPinned={routeActivityItemPinned}
           onOpenItemInSystemApp={openActivityItemInSystemApp}
         />
       ) : null}
