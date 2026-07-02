@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useTranslation } from "../../i18n/react.js";
 import { ChevronDown, KeyRound } from "lucide-react";
 import { Button } from "../../components/ui/button.js";
@@ -34,6 +34,9 @@ import { isTurnStartEntry } from "./utils/classify-turn-entries.js";
 import { collectChatPreviewModel } from "./preview/preview-targets.js";
 import { useWorkspaceTabs } from "./preview/workspace-tabs.js";
 import { useSidePanelWidth } from "./hooks/use-side-panel-width.js";
+import { normalizeBrowserNavigationUrl } from "./preview/url-safety.js";
+import { ActionPanel } from "./components/ActionPanel.js";
+import { computeActionPanelActivity } from "./utils/action-panel-activity.js";
 import { useChatScroll } from "./hooks/use-chat-scroll.js";
 import { usePermissionToasts } from "./hooks/use-permission-toasts.js";
 import { useCheckpointView } from "./hooks/use-checkpoint-view.js";
@@ -104,8 +107,9 @@ export interface ChatViewProps {
   onRoutineAcknowledge?: (routineId: string, firedAt: string) => void;
   /** Toast surface rendered directly above the composer input. */
   statusBar?: StatusBarProps;
-  /** Floating activity affordance anchored to the chat column, not the side panel. */
-  actionPanelSlot?: ReactNode;
+  /** Controlled Tool Activity (ActionPanel) open state — work mode only. */
+  actionPanelOpen?: boolean;
+  onActionPanelOpenChange?: (open: boolean) => void;
   /** Controlled right-side work panel state, toggled from the title bar. */
   sidePanelOpen?: boolean;
   onSidePanelOpenChange?: (open: boolean) => void;
@@ -113,7 +117,7 @@ export interface ChatViewProps {
   blogLayout?: boolean;
 }
 
-export function ChatView({ api, onAsk, onEditSave, onFork, onToggleStar, onRetryEffort, onContinueFromLastUser, isEntryStarred, onAbort, onGuide, onGuideError, onFeedback, subAgentSpawns, loadedSkills, hasAskQuestions, askQuestions, onResolveAskQuestion, plugins, onSelectPlugin, appMode = "work", onOpenApprovalQueue, currentSessionKind = "main", currentSessionTitle, sessions, onLoadSession, onRefreshSessions, commandActions, commandPopoverOpen, onCommandPopoverOpenChange, onPluginPrimaryAction, onRoutineAcknowledge, statusBar, actionPanelSlot, sidePanelOpen = false, onSidePanelOpenChange, blogLayout = false }: ChatViewProps) {
+export function ChatView({ api, onAsk, onEditSave, onFork, onToggleStar, onRetryEffort, onContinueFromLastUser, isEntryStarred, onAbort, onGuide, onGuideError, onFeedback, subAgentSpawns, loadedSkills, hasAskQuestions, askQuestions, onResolveAskQuestion, plugins, onSelectPlugin, appMode = "work", onOpenApprovalQueue, currentSessionKind = "main", currentSessionTitle, sessions, onLoadSession, onRefreshSessions, commandActions, commandPopoverOpen, onCommandPopoverOpenChange, onPluginPrimaryAction, onRoutineAcknowledge, statusBar, actionPanelOpen = false, onActionPanelOpenChange, sidePanelOpen = false, onSidePanelOpenChange, blogLayout = false }: ChatViewProps) {
   const { t } = useTranslation();
   // We still need the api for SessionTodoPanel; obtain it via singleton.
   const workflowApi = getApi();
@@ -198,6 +202,42 @@ export function ChatView({ api, onAsk, onEditSave, onFork, onToggleStar, onRetry
   // owned next to the tab store so it survives ChatSidePanel unmount.
   const { sidePanelWidth, setSidePanelWidth, commitSidePanelWidth } = useSidePanelWidth(api);
   const previewRailVisible = sidePanelOpen;
+
+  // Tool Activity (ActionPanel) — co-located here (§6.10.7) so its open-actions
+  // reach the workspace store / preview model / side-panel toggle that also
+  // live at ChatView level. Left-click routes items in-app; right-click offers
+  // "open in system app" (web only — tool-derived local paths have no
+  // authorized OS-open channel, so that menu item is hidden for files).
+  const actionPanelActivity = useMemo(() => computeActionPanelActivity(entries), [entries]);
+
+  const routeActivityItem = useCallback((target: string, web: boolean) => {
+    if (web) {
+      const safe = normalizeBrowserNavigationUrl(target);
+      if (!safe) return;
+      workspaceTabs.openInEphemeral({ source: "browser", url: safe });
+    } else {
+      const fileTarget = previewModel.targets.find(
+        (candidate) => "path" in candidate && candidate.path === target,
+      );
+      if (fileTarget) {
+        workspaceTabs.openInEphemeral({ source: "preview", targetId: fileTarget.id });
+      } else {
+        // No preview-target for this path — open the file-browser container so
+        // the user can still locate it in the tree.
+        workspaceTabs.addTab("file-browser");
+      }
+    }
+    onSidePanelOpenChange?.(true);
+  }, [workspaceTabs, previewModel.targets, onSidePanelOpenChange]);
+
+  const openActivityItemInSystemApp = useCallback((target: string, web: boolean) => {
+    if (web) {
+      const safe = normalizeBrowserNavigationUrl(target);
+      if (safe) void api.openExternalUrl(safe);
+    }
+    // Local paths: no authorized OS-open channel for tool-derived paths
+    // (c04f3b0f) — the menu item is not shown for files, so this is a no-op.
+  }, [api]);
 
   useEffect(() => {
     setSelectedPreviewId(null);
@@ -439,7 +479,15 @@ export function ChatView({ api, onAsk, onEditSave, onFork, onToggleStar, onRetry
         className="relative flex min-h-0 min-w-0 flex-1 flex-col overflow-hidden"
         data-testid="chat-main-column"
       >
-      {actionPanelSlot}
+      {appMode !== "chat" ? (
+        <ActionPanel
+          open={actionPanelOpen}
+          onOpenChange={(open) => onActionPanelOpenChange?.(open)}
+          activity={actionPanelActivity}
+          onOpenItem={routeActivityItem}
+          onOpenItemInSystemApp={openActivityItemInSystemApp}
+        />
+      ) : null}
       {hasApiKey === false && (
         <div className="absolute inset-x-4 top-1/2 z-10 flex -translate-y-1/2 justify-center">
           <Card className="w-full max-w-[400px]"><CardHeader className="text-center"><KeyRound className="mx-auto mb-2 h-10 w-10 text-muted-foreground" /><CardTitle>{t("chatView.noApiKeyTitle")}</CardTitle><CardDescription>{t("chatView.noApiKeyDescription")}</CardDescription></CardHeader>

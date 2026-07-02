@@ -1,6 +1,9 @@
 // AUTO-GENERATED — i18n migration. Source: src/ui/renderer/components/ActionPanel.tsx. Do not edit by hand.
 export const en = {
   "actionPanel.title": "Tool Activity",
+  "actionPanel.openInSystemApp": "Open in system app",
+  "actionPanel.copyUrl": "Copy link",
+  "actionPanel.copyPath": "Copy path",
   "actionPanel.subtitle": "Latest 5 per category",
   "actionPanel.openAriaLabel": "Open tool activity panel",
   "actionPanel.closeAriaLabel": "Close tool activity panel",
@@ -23,6 +26,9 @@ export const en = {
 } as const;
 export const ko: Record<keyof typeof en, string> = {
   "actionPanel.title": "도구 활동",
+  "actionPanel.openInSystemApp": "시스템 앱으로 열기",
+  "actionPanel.copyUrl": "링크 복사",
+  "actionPanel.copyPath": "경로 복사",
   "actionPanel.subtitle": "카테고리별 최신 5개",
   "actionPanel.openAriaLabel": "도구 활동 패널 열기",
   "actionPanel.closeAriaLabel": "도구 활동 패널 닫기",

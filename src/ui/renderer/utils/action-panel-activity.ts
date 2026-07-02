@@ -218,6 +218,7 @@ export function computeActionPanelActivity(entries: ChatEntry[]): ActionPanelAct
             id: `write:${tool.toolUseId}:${path}`,
             label: path,
             detail: tool.name,
+            target: path,
             status: tool.status,
           });
         }
@@ -231,6 +232,7 @@ export function computeActionPanelActivity(entries: ChatEntry[]): ActionPanelAct
             id: `read:${tool.toolUseId}:${path}`,
             label: path,
             detail: tool.name,
+            target: path,
             status: tool.status,
           });
         }
