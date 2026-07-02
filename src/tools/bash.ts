@@ -38,7 +38,10 @@ import {
   isAsrtSandboxActive,
   wrapToolCommand,
   cleanupAsrtSandboxAfterCommand,
+  getDefaultSensitiveReadDenyPaths,
+  getDefaultSensitiveWriteDenyPaths,
 } from "../permissions/asrt-sandbox.js";
+import { isActiveSandboxShellContained } from "../permissions/sandbox-capability.js";
 import { deriveSandboxWritePaths } from "../permissions/sandbox-write-jail.js";
 import { TOOL_TIMEOUT_POLICY } from "../shared/tool-timeout-policy.js";
 import { trackManagedChildProcess } from "../main/managed-child-processes.js";
@@ -141,6 +144,15 @@ export class BashTool extends ZodTool<typeof BashToolInputSchema> {
     // skipped and we fall through to the plain `spawnWithTimeout` path,
     // unchanged from pre-migration behavior.
     if (isAsrtSandboxActive()) {
+      if (!isActiveSandboxShellContained()) {
+        return {
+          output:
+            "spawn failed: ASRT shell tools require filesystem and process isolation; " +
+            "the active sandbox is only partially confined.",
+          isError: true,
+          metadata: { sandboxed: true },
+        };
+      }
       // Write-jail = canonicalized union of the owner plugin sandbox root
       // (when plugin-owned) and the in-scope allowed directories
       // (cwd ∪ user-authorized extras). cwd stays readable but is no
@@ -188,8 +200,11 @@ interface SpawnResult {
  * `{ argv, env }` for the OS-confined wrapper (macOS Seatbelt profile, Linux
  * bwrap+seccomp) and the host spawns it here with `shell: false` (the wrapper
  * argv already contains the shell invocation; a second shell would double-parse
- * the command). After exit, {@link cleanupAsrtSandboxAfterCommand} releases the
- * per-command proxy/helper state.
+ * the command). Windows ASRT is not shell-contained and cannot accept the
+ * per-exec allowRead/allowWrite grants this path needs, so executeTyped refuses
+ * before reaching this function on win32. After exit,
+ * {@link cleanupAsrtSandboxAfterCommand} releases the per-command proxy/helper
+ * state.
  *
  * Filesystem jail (per-command, trust-safe — see asrt-sandbox.PerCommandFilesystem):
  *   - `allowWrite: writePaths` — the namespace-scoped write-jail derived by
@@ -220,23 +235,23 @@ export async function spawnWithSandbox(
   // tree (cwd + write paths). Omitting denyRead when HOME is unset avoids
   // denying nothing-meaningful; the write paths are always re-allowed for read.
   const allowRead = [resolvedCwd, ...writePaths];
+  const denyRead = [
+    ...getDefaultSensitiveReadDenyPaths(),
+    ...(home !== undefined && home !== "" ? [home] : []),
+  ];
   const filesystem = {
     allowWrite: [...writePaths],
     allowRead,
-    ...(home !== undefined && home !== "" ? { denyRead: [home] } : {}),
+    denyRead,
+    denyWrite: getDefaultSensitiveWriteDenyPaths(),
   };
 
   // binShell threading: the bash tool runs a POSIX shell command. On
   // mac/linux ASRT defaults to `/bin/bash` for the `-c` wrapper, so we leave
-  // binShell undefined (unchanged behaviour). On win32 ASRT would otherwise
-  // default to `cmd` — wrong for a POSIX command — so we hand it the ABSOLUTE
-  // Git Bash / sh.exe path resolved by {@link resolveShell}. ASRT's
-  // `parseWindowsBinShell` requires the bash path to be ABSOLUTE; the resolved
-  // shell may be a bare `sh`/`bash` from PATH (not absolute), in which case we
-  // leave binShell undefined and let ASRT resolve the inner shell rather than
-  // throw on a relative path. The resolved shell path is trusted host
-  // shell-detection (never workspace content), satisfying the binShell trust
-  // requirement.
+  // binShell undefined (unchanged behaviour). The win32 branch below is
+  // defensive only: executeTyped refuses partial Windows ASRT before this
+  // function because shell execution requires process isolation and per-exec
+  // allow grants.
   let binShell: string | undefined;
   if (process.platform === "win32") {
     try {

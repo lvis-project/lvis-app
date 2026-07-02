@@ -65,6 +65,8 @@ export async function tryUserApprovalMemorySkip(
   approvalCacheKey: string | undefined,
   sandboxAttestation: { writesToOwnSandbox?: boolean; ownerPluginSandboxRoot?: string },
   mcpServerId?: string,
+  workerId?: string,
+  pluginId?: string,
 ): Promise<PermissionCheckResult | null> {
   // Identity = exactly what ToolApprovalDialog stored (canonical finalInput).
   const canonicalArgs = canonicalStringify(finalInput);
@@ -96,8 +98,15 @@ export async function tryUserApprovalMemorySkip(
   // Substrate-aware (NOT process-global): a plugin/MCP or in-process builtin
   // call resolves to a "none" capability so the audit + any sandbox-sensitive
   // rule reflect that this call's effects are NOT ASRT-isolated — except a
-  // genuinely ASRT-wrapped external MCP worker (worker-egress PR1, keyed on id).
-  const sandboxCapability = resolveReviewerSandboxCapability(source, toolName, mcpServerId);
+  // genuinely ASRT-wrapped external MCP worker (worker-egress PR1, keyed on id)
+  // or host-spawned plugin worker (keyed on pluginId + workerId).
+  const sandboxCapability = resolveReviewerSandboxCapability(
+    source,
+    toolName,
+    mcpServerId,
+    workerId,
+    pluginId,
+  );
   const ctx: ToolInvocationContext = {
     toolName,
     source,

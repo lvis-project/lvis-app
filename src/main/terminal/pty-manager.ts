@@ -10,10 +10,10 @@
  *   user-typed commands with NO per-command AST validation and NO reviewer gate
  *   (that is the nature of an interactive shell). The ONLY load-bearing control
  *   is therefore the OS sandbox confinement. So this module FAILS CLOSED: it
- *   refuses to spawn unless the active sandbox FILESYSTEM-CONTAINS the host
- *   (`isActiveSandboxFilesystemContained()` — macOS/Linux ASRT). On a
- *   degraded / gate-off / Windows-network-only host the FS-write + secret-read
- *   residual would be uncontained, which is strictly worse than a one-shot bash
+ *   refuses to spawn unless the active sandbox contains shell effects
+ *   (`isActiveSandboxShellContained()` — filesystem + process confinement). On
+ *   a degraded / gate-off / Windows fs+network partial host, subprocess/process
+ *   residuals remain uncontained, which is strictly worse than a one-shot bash
  *   tool, so we do NOT plain-spawn (No-Fallback rule). See PR body §security.
  *
  * The wrap contract mirrors {@link ../../permissions/worker-spawn.ts} exactly:
@@ -45,7 +45,7 @@ import {
   cleanupAsrtSandboxAfterCommand,
   isAsrtSandboxActive,
 } from "../../permissions/asrt-sandbox.js";
-import { isActiveSandboxFilesystemContained } from "../../permissions/sandbox-capability.js";
+import { isActiveSandboxShellContained } from "../../permissions/sandbox-capability.js";
 import { deriveSandboxWritePaths } from "../../permissions/sandbox-write-jail.js";
 import { canonicalizePathForMatch } from "../../permissions/sensitive-paths.js";
 
@@ -204,17 +204,17 @@ export async function spawnTerminal(options: SpawnTerminalOptions): Promise<Spaw
   }
 
   // ── FAIL CLOSED: an interactive arbitrary-command shell may spawn ONLY when
-  // the active OS sandbox filesystem-contains the host. No plain-spawn fallback
-  // (No-Fallback rule) — a terminal outside FS confinement is strictly more
-  // dangerous than a one-shot bash tool. ──
-  if (!isAsrtSandboxActive() || !isActiveSandboxFilesystemContained()) {
+  // the active OS sandbox contains shell effects (filesystem + process). No
+  // plain-spawn fallback (No-Fallback rule) — a terminal outside shell
+  // confinement is strictly more dangerous than a one-shot bash tool. ──
+  if (!isAsrtSandboxActive() || !isActiveSandboxShellContained()) {
     return {
       ok: false,
       reason: "not-fs-contained",
       message:
-        "Terminal requires the OS tool sandbox with filesystem isolation active " +
+        "Terminal requires the OS tool sandbox with filesystem and process isolation active " +
         "(Settings → Permissions). Unavailable on a degraded / disabled / " +
-        "network-only sandbox host.",
+        "partial sandbox host.",
     };
   }
 

@@ -7,8 +7,8 @@
  * log.warn|error|throw); THIS module owns only the BRANCH CHOICE.
  *
  * The gate has two independent on-signals:
- *   - settingOn   — `features.osToolSandbox` (now DEFAULT true; also the
- *                   Settings → 권한 toggle). The "ship it on" signal.
+ *   - settingOn   — `features.osToolSandbox` (staged default: macOS ON,
+ *                   Linux/Windows opt-in; also the Settings → 권한 toggle).
  *   - explicitEnv — `LVIS_SANDBOX_ENABLED=1`. A deliberate power-user/CI
  *                   "I really mean it" override.
  *
@@ -19,13 +19,13 @@
  *     unsandboxed under that name would be the exact silent-downgrade the
  *     no-fallback rule forbids. (Windows is exempt — see below.)
  *   - DEFAULT / settings-on (`settingOn`, NOT `explicitEnv`) + sandbox can't
- *     activate → DEGRADE (non-bricking). With the flag now shipping ON, a host
- *     missing the Linux deps must NOT brick; it degrades to the SAME runtime
- *     posture as sandbox-OFF (a known-safe state) with a LOUD warning, leaving
+ *     activate → DEGRADE (non-bricking). Staged/default-enabled hosts must not
+ *     brick when deps are missing; they degrade to the SAME runtime posture as
+ *     sandbox-OFF (a known-safe state) with a LOUD warning, leaving
  *     `isAsrtSandboxActive()` false.
  *   - Windows deps-missing → always DEGRADE regardless of `explicitEnv`:
- *     srt-win needs a one-time UAC install + re-login the user CANNOT complete
- *     before boot, so a throw would permanently brick first-run. The explicit
+ *     srt-win needs a one-time UAC install the user CANNOT complete before
+ *     boot reaches the consent UI, so a throw would permanently brick first-run. The explicit
  *     fail-closed cannot apply where it leaves no recoverable state.
  *
  * "Can't activate" covers BOTH deps-missing (checkAsrtDependencies reported
@@ -44,7 +44,7 @@ export type SandboxGateReason =
   | "abort-explicit-cannot-activate";
 
 export interface SandboxGateInputs {
-  /** `features.osToolSandbox` — the shipped default (now true) or Settings toggle. */
+  /** `features.osToolSandbox` — staged default value or Settings toggle. */
   settingOn: boolean;
   /** `LVIS_SANDBOX_ENABLED=1` — the deliberate, fail-closed env override. */
   explicitEnv: boolean;
@@ -76,7 +76,7 @@ export function decideSandboxGate(input: SandboxGateInputs): SandboxGateDecision
   // From here the sandbox cannot activate (deps missing or init failed).
   if (input.platform === "win32") {
     // Windows is always non-bricking — even an explicit opt-in cannot abort
-    // because the one-time install + re-login is unreachable before boot.
+    // because the one-time UAC setup is unreachable before boot reaches the UI.
     return { action: "degrade", reason: "degrade-windows-not-installed" };
   }
   if (input.explicitEnv) {
@@ -97,10 +97,9 @@ export function decideSandboxGate(input: SandboxGateInputs): SandboxGateDecision
  * the operator must be warned the residual is uncontained.
  *
  * Keyed on the ACTUAL sandbox-active state (not the `!optIn` proxy the
- * pre-default-on code used): with the default now ON, `optIn` is true on the
- * degraded path while the sandbox is inactive, so the old proxy would wrongly
- * stay silent. This fires on every sandbox-inactive path, the degraded one
- * included.
+ * older `!optIn` proxy): a settings-enabled degraded path has `optIn === true`
+ * while the sandbox is inactive, so the old proxy would wrongly stay silent.
+ * This fires on every sandbox-inactive path, the degraded one included.
  */
 export function shouldWarnHostClassifyInterlock(input: {
   hostClassifiesRisk: boolean;
