@@ -147,7 +147,7 @@ export function detectSandboxCapability(): SandboxCapability {
  * substrate is NOT ASRT-wrapped:
  *   - `mcp` tools run in the LONG-LIVED MCP worker. EXTERNAL stdio servers
  *     are wrapped via `wrapWorkerCommand` in `StdioTransport.openWrapped`
- *     (worker-egress PR1) when the gate is ON; per-server confinement is
+ *     when the gate is ON; per-server confinement is
  *     reported through the wrapped-registry below. Plugin loopback servers
  *     use `LoopbackTransport` (in-process) — not ASRT-wrapped.
  *   - other `builtin` tools (read_file, write_file, list_files, …) run
@@ -157,7 +157,7 @@ const ASRT_WRAPPED_SHELL_TOOLS: ReadonlySet<string> = new Set(["bash", "powershe
 
 /**
  * The set of EXTERNAL MCP stdio server ids whose worker was ACTUALLY spawned
- * through the ASRT wrap in THIS process (worker-egress PR1).
+ * through the ASRT wrap in THIS process.
  *
  * Populated by {@link markMcpServerWrapped} from `StdioTransport.openWrapped`
  * only on the wrapped path, and cleared by {@link unmarkMcpServerWrapped} on
@@ -243,10 +243,9 @@ const _wrappedPluginWorkerIds = new Set<string>();
  * workerId)` must map 1:1 to the key — e.g. `("a:b","c")` must NOT collide with
  * `("a","b:c")`.
  *
- * TODO(human): return a collision-free key string from `pluginId` + `workerId`.
- * Pick a scheme that round-trips uniquely (a delimiter that can't appear in a
- * sanitized segment, or a length-prefixed / encoded join). This is the contract
- * PR D-3 consumes when it threads `pluginId` into the reviewer resolver below.
+ * This key is live for the marker registry, but plugin-worker reviewer
+ * relaxation remains inert until a host-owned Tool producer sets both
+ * `pluginId` and `workerId` for a call path that actually uses spawnWorker.
  */
 function pluginWorkerKey(pluginId: string, workerId: string): string {
   // Length-prefix the pluginId so the (pluginId, workerId) split is unambiguous
@@ -321,13 +320,14 @@ export function __resetWrappedPluginWorkersForTest(): void {
  *     {@link detectSandboxCapability} (the ASRT-wrapped shell path; `asrt`
  *     when the gate is ON, already `none` when it is OFF).
  *   - `mcp` + the originating server was ACTUALLY wrapped through ASRT
- *     (worker-egress PR1: gate ON + {@link isAsrtSandboxActive} +
- *     {@link isMcpServerWrapped}) → the genuine {@link detectSandboxCapability}
+ *     (gate ON + {@link isAsrtSandboxActive} + {@link isMcpServerWrapped}) →
+ *     the genuine {@link detectSandboxCapability}
  *     (the wrapped worker IS confined — mac/linux full, win32 partial).
  *   - `plugin` + the originating worker was ACTUALLY wrapped through ASRT
- *     (worker-confinement PR D-1: gate ON + {@link isPluginWorkerWrapped}) →
- *     the genuine {@link detectSandboxCapability} (the host-spawned plugin
- *     worker IS confined; see {@link spawnWorker}). Requires `workerId`.
+ *     (gate ON + {@link isPluginWorkerWrapped}) → the genuine
+ *     {@link detectSandboxCapability} (the host-spawned plugin worker IS
+ *     confined; see {@link spawnWorker}). Requires `workerId` from a host-owned
+ *     Tool descriptor; manifest `_meta.workerId` alone is not accepted.
  *   - everything else (UNWRAPPED plugin, UNWRAPPED mcp, other builtin) → a
  *     forced `none` capability so {@link isWeakSandbox} treats the call as WEAK
  *     and the reviewer cannot relax.
@@ -342,8 +342,8 @@ export function __resetWrappedPluginWorkersForTest(): void {
  *                     Required to report `asrt` for an `mcp` call; omitted ⇒ the
  *                     call resolves to `none` (the historical default), so every
  *                     pre-existing call site keeps its exact behaviour.
- * @param workerId     Originating plugin-worker id, threaded from the plugin
- *                     tool descriptor (PR D-3 wires the producer). Required to
+ * @param workerId     Originating plugin-worker id from a host-owned Tool
+ *                     descriptor whose call path is worker-backed. Required to
  *                     report `asrt` for a `plugin` call; omitted ⇒ the call
  *                     resolves to `none` (the historical default for plugin
  *                     tools), so every pre-existing call site is unchanged.
@@ -379,7 +379,7 @@ export function resolveReviewerSandboxCapability(
       };
     }
   }
-  // worker-egress PR1: a wrapped external MCP stdio worker genuinely runs under
+  // A wrapped external MCP stdio worker genuinely runs under
   // ASRT — report its real capability so the reviewer composition reflects the
   // actual confinement (and not the false `none` the unwrapped worker earned).
   //
@@ -408,6 +408,77 @@ export function resolveReviewerSandboxCapability(
         ? "in-process builtin tool — not ASRT-wrapped (isolation=none)"
         : "plugin/MCP worker not ASRT-wrapped (isolation=none)",
     confines: { filesystem: false, process: false, network: false },
+  };
+}
+
+export interface ReviewerSandboxCacheState {
+  readonly source: ToolSource;
+  readonly substrate: "host-shell" | "plugin-worker" | "mcp-worker" | "in-process";
+  readonly wrapped: boolean;
+  readonly mcpServerId?: string;
+  readonly pluginId?: string;
+  readonly workerId?: string;
+  readonly capability: {
+    readonly kind: SandboxKind;
+    readonly confidence: SandboxConfidence;
+    readonly platform: NodeJS.Platform;
+    readonly confines?: SandboxConfinement;
+  };
+}
+
+/**
+ * Cache-invalidation identity for reviewer sandbox composition.
+ *
+ * The reviewer cache may store a verdict relaxed because a long-lived MCP or
+ * plugin worker is ASRT-wrapped. That relaxation is valid only while the exact
+ * worker remains wrapped in THIS process. Fold the live wrap marker into the
+ * invalidation key so an un-wrap turns the previous relaxed verdict stale
+ * before any future producer can make plugin-worker relaxation live.
+ */
+export function resolveReviewerSandboxCacheState(
+  source: ToolSource,
+  toolName: string,
+  mcpServerId?: string,
+  workerId?: string,
+  pluginId?: string,
+): ReviewerSandboxCacheState {
+  const capability = resolveReviewerSandboxCapability(
+    source,
+    toolName,
+    mcpServerId,
+    workerId,
+    pluginId,
+  );
+  const substrate = (() => {
+    if (source === "builtin" && ASRT_WRAPPED_SHELL_TOOLS.has(toolName)) {
+      return "host-shell" as const;
+    }
+    if (source === "mcp") return "mcp-worker" as const;
+    if (source === "plugin") return "plugin-worker" as const;
+    return "in-process" as const;
+  })();
+  const wrapped =
+    substrate === "host-shell"
+      ? capability.kind === "asrt"
+      : substrate === "mcp-worker" && mcpServerId !== undefined
+        ? isMcpServerWrapped(mcpServerId) && capability.kind === "asrt"
+        : substrate === "plugin-worker" && pluginId !== undefined && workerId !== undefined
+          ? isPluginWorkerWrapped(pluginId, workerId) && capability.kind === "asrt"
+          : false;
+
+  return {
+    source,
+    substrate,
+    wrapped,
+    ...(mcpServerId !== undefined ? { mcpServerId } : {}),
+    ...(pluginId !== undefined ? { pluginId } : {}),
+    ...(workerId !== undefined ? { workerId } : {}),
+    capability: {
+      kind: capability.kind,
+      confidence: capability.confidence,
+      platform: capability.platform,
+      ...(capability.confines !== undefined ? { confines: capability.confines } : {}),
+    },
   };
 }
 
@@ -497,10 +568,12 @@ export function isWeakSandbox(cap: SandboxCapability): boolean {
  *     - `read` / `write` / `meta` → confines.filesystem
  *     - `shell`                 → confines.filesystem AND confines.process
  *
- * Behaviour invariant (dormancy): a full-confine ASRT relaxes ALL categories,
- * making this IDENTICAL to today's `isWeakSandbox(cap) === false` (relax all).
- * The only capability the category gating bites is a PARTIAL-confine one, which
- * no producer emits yet — so wiring this in is a no-op on mac/linux.
+ * Behaviour invariant: a full-confine ASRT relaxes ALL categories, matching the
+ * historical `isWeakSandbox(cap) === false` behavior. A partial-confine ASRT
+ * relaxes only the categories covered by its declared dimensions. This actively
+ * applies on Windows ASRT 0.0.63+ (`filesystem + network`, no process): network
+ * and filesystem-bearing read/write/meta calls may relax, but shell calls may
+ * not relax because process isolation is absent.
  */
 export function sandboxRelaxesCategory(
   cap: SandboxCapability,

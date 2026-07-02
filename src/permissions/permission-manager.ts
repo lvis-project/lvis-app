@@ -31,7 +31,10 @@ import {
   type RiskVerdict,
   type ToolInvocationContext,
 } from "./reviewer/risk-classifier.js";
-import { resolveReviewerSandboxCapability } from "./sandbox-capability.js";
+import {
+  resolveReviewerSandboxCacheState,
+  resolveReviewerSandboxCapability,
+} from "./sandbox-capability.js";
 import type { PermissionEvaluationContext } from "./evaluation-context.js";
 import type { VerdictCache } from "./reviewer/verdict-cache.js";
 import type { DeferredQueue } from "./reviewer/deferred-queue.js";
@@ -168,7 +171,7 @@ export interface ReviewerDispatchInput {
    */
   ownerPluginSandboxRoot?: string;
   /**
-   * worker-egress PR1 — originating external MCP stdio server id (from
+   * Originating external MCP stdio server id (from
    * `Tool.mcpServerId`). Threaded so the reviewer reports the GENUINE asrt
    * capability for a server whose worker was actually ASRT-wrapped (and so the
    * verdict cache scopes by the real substrate). Omitted for non-MCP calls.
@@ -733,13 +736,14 @@ export class PermissionManager {
     // ON. The ASRT sandbox publishes its capability at boot via
     // setActiveSandboxCapability; the host-shell path then sees the active
     // kind/confidence while non-wrapped substrates stay "none".
-    const sandboxScope = resolveReviewerSandboxCapability(
+    const sandboxCacheState = resolveReviewerSandboxCacheState(
       input.source,
       toolName,
       input.mcpServerId,
       input.workerId,
       input.pluginId,
     );
+    const sandboxScope = sandboxCacheState.capability;
     const cacheCtx = {
       allowedDirectories: input.allowedDirectories,
       scope: {
@@ -748,6 +752,7 @@ export class PermissionManager {
         sandboxKind: sandboxScope.kind,
         sandboxConfidence: sandboxScope.confidence,
       },
+      sandboxWrapState: sandboxCacheState,
     };
 
     // ── User-approval memory hit ──────────────────────────────────────────
