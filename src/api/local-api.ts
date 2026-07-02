@@ -4,9 +4,9 @@
  * A transport-agnostic boundary that lets a NON-renderer origin (the local API,
  * a CLI companion, or the typed SDK facade) invoke the SAME app contract the
  * renderer uses — by routing to the pure `handle*` functions extracted in C10
- * (`src/ipc/handlers/*`). It proves the contract works over a non-renderer
- * {@link TrustOrigin} without a real network server (the localhost server is the
- * documented #1409 follow-up).
+ * (`src/ipc/handlers/*`). It is transport-agnostic: the loopback HTTP+SSE
+ * server (`src/api/http-server.ts`, #1436) and the in-process SDK/CLI both
+ * dispatch through this same seam.
  *
  * The dispatcher is the security seam. It is FAIL-CLOSED on two independent
  * axes before it ever reaches a handler:
@@ -183,9 +183,11 @@ export function createLocalApi(deps: LocalApiDeps): LocalApi {
   ): Promise<unknown> {
     switch (channel) {
       case PERMISSIONS.setMode:
+        // Wire contract is exactly `{mode}` — a bare or mis-shaped payload falls
+        // through as `undefined` and the handler rejects it with `invalid-mode`.
         return handleSetPermissionMode(
           ipc,
-          (args as { mode?: unknown } | undefined)?.mode ?? args,
+          (args as { mode?: unknown } | undefined)?.mode,
           { source: "local-api-approval", trustOrigin: origin, explicitUserAction: true },
         );
       default: {
