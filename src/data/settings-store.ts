@@ -343,6 +343,16 @@ export interface SystemSettings {
   closeBehavior: SystemCloseBehavior;
   /** Persisted workspace mode (chat vs work). Default "work". */
   appMode: SystemAppMode;
+  /**
+   * Opt-in loopback HTTP+SSE server for the CLI / automation surface
+   * (#1409 external API, #1436 lifecycle wiring). Default OFF — the app
+   * never opens a listener socket unless the user turns this on here OR the
+   * environment sets `LVIS_LOCAL_API=1`. When enabled, the server binds
+   * 127.0.0.1 on an ephemeral port and requires a per-boot bearer secret
+   * (persisted for the CLI under `~/.lvis/local-api/`). Independent of every
+   * other flag: it only controls whether the aux transport is started.
+   */
+  localApiServer?: boolean;
 }
 
 /**
@@ -513,6 +523,9 @@ const DEFAULT_SETTINGS: AppSettings = {
   system: {
     closeBehavior: "hide-to-tray",
     appMode: DEFAULT_APP_MODE,
+    // Opt-in loopback API server — OFF by default (also enabled by env
+    // LVIS_LOCAL_API=1). #1409/#1436.
+    localApiServer: false,
   },
   plugins: {},
   pluginConfigs: {},
@@ -724,6 +737,15 @@ export class SettingsService {
         log.warn(
           `system.appMode patch ignored (received ${JSON.stringify(rawAppMode)}), keeping %s`,
           this.settings.system.appMode,
+        );
+      }
+      const rawLocalApi = partial.system.localApiServer;
+      if (typeof rawLocalApi === "boolean") {
+        next.localApiServer = rawLocalApi;
+      } else if (rawLocalApi !== undefined) {
+        log.warn(
+          `system.localApiServer patch ignored (received ${JSON.stringify(rawLocalApi)}), keeping %s`,
+          this.settings.system.localApiServer,
         );
       }
       this.settings.system = next;
@@ -1244,7 +1266,7 @@ function normalizeSystem(input: unknown): SystemSettings {
   if (!input || typeof input !== "object" || Array.isArray(input)) {
     return { ...DEFAULT_SETTINGS.system };
   }
-  const obj = input as { closeBehavior?: unknown; appMode?: unknown };
+  const obj = input as { closeBehavior?: unknown; appMode?: unknown; localApiServer?: unknown };
   // Each field is normalized independently: a missing/invalid field falls
   // back to its default while a valid sibling is preserved (mirrors the
   // per-field patch path in `update`).
@@ -1269,6 +1291,15 @@ function normalizeSystem(input: unknown): SystemSettings {
     log.warn(
       `system.appMode invalid (received ${JSON.stringify(rawAppMode)}), using default %s`,
       DEFAULT_SETTINGS.system.appMode,
+    );
+  }
+  const rawLocalApi = obj.localApiServer;
+  if (typeof rawLocalApi === "boolean") {
+    result.localApiServer = rawLocalApi;
+  } else if (rawLocalApi !== undefined) {
+    log.warn(
+      `system.localApiServer invalid (received ${JSON.stringify(rawLocalApi)}), using default %s`,
+      DEFAULT_SETTINGS.system.localApiServer,
     );
   }
   return result;
