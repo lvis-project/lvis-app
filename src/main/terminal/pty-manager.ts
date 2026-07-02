@@ -19,24 +19,35 @@
  * The wrap contract mirrors {@link ../../permissions/worker-spawn.ts} exactly:
  *   `wrapWorkerCommand(cmdline, { filesystem })` returns `{ argv, env }`; the
  *   host spawns `argv[0]` with `argv.slice(1)` — here through `pty.spawn` so the
- *   inner shell gets a real controlling TTY. Per-command `denyRead` REPLACES the
- *   shared boot floor in ASRT, so we RESTATE `getDefaultSensitiveReadDenyPaths()`
- *   (else the shell regains read of `~/.ssh` / `~/.lvis/secrets` / …).
+ *   inner shell gets a real controlling TTY. Per-command `denyRead`/`denyWrite`
+ *   REPLACE the shared boot floors in ASRT, so we RESTATE
+ *   `getDefaultSensitiveReadDenyPaths()` (else the shell regains read of
+ *   `~/.ssh` / `~/.lvis/secrets` / …) AND `getDefaultSensitiveWriteDenyPaths()`
+ *   (else the shell could WRITE `~/.zshrc` / `~/.ssh` / `~/.config` /
+ *   `~/Library/LaunchAgents` / cron — persistence/re-exec that later runs
+ *   OUTSIDE the sandbox; cluster-review MAJOR).
+ *
+ * WRITE-JAIL ANCHOR: the cwd anchors the write-jail, so it DEFAULTS to the
+ * workspace root (process.cwd(), anchored to `~/.lvis/workspace` at boot), NEVER
+ * `$HOME` — a `$HOME`-anchored jail would let the shell write those persistence
+ * files even before the `denyWrite` floor. A renderer-supplied cwd is validated
+ * (absolute + within the workspace root) before it anchors the jail.
  */
-import { homedir } from "node:os";
-import { isAbsolute, resolve as pathResolve } from "node:path";
+import { isAbsolute } from "node:path";
 import type { IPty } from "node-pty";
 import { createLogger } from "../../lib/logger.js";
 import { shellQuote } from "../../lib/shell-resolver.js";
 import { buildSandboxedChildEnv } from "../../tools/safe-env.js";
 import {
   getDefaultSensitiveReadDenyPaths,
+  getDefaultSensitiveWriteDenyPaths,
   wrapWorkerCommand,
   cleanupAsrtSandboxAfterCommand,
   isAsrtSandboxActive,
 } from "../../permissions/asrt-sandbox.js";
 import { isActiveSandboxFilesystemContained } from "../../permissions/sandbox-capability.js";
 import { deriveSandboxWritePaths } from "../../permissions/sandbox-write-jail.js";
+import { canonicalizePathForMatch } from "../../permissions/sensitive-paths.js";
 
 const log = createLogger("lvis");
 
@@ -47,6 +58,12 @@ const RING_MAX_BYTES = 256 * 1024;
 const MIN_DIM = 1;
 const MAX_COLS = 1000;
 const MAX_ROWS = 1000;
+/** Anti-DoS: max concurrent PTY sessions across all tabs. A new spawn past this
+ * is refused so an arbitrary/looping tabId can never spawn unbounded PTYs. */
+const MAX_TERMINALS = 16;
+/** Anti-DoS: max bytes accepted for a single {@link writeTerminal} (keystroke /
+ * paste) forward. An oversized write is dropped rather than streamed to the PTY. */
+const MAX_INPUT_BYTES = 1024 * 1024;
 
 export interface SpawnTerminalOptions {
   readonly tabId: string;
@@ -57,7 +74,11 @@ export interface SpawnTerminalOptions {
 
 export type SpawnTerminalResult =
   | { ok: true; tabId: string; replayed: boolean }
-  | { ok: false; reason: "not-fs-contained" | "bad-request" | "spawn-failed"; message: string };
+  | {
+      ok: false;
+      reason: "not-fs-contained" | "bad-request" | "spawn-failed" | "too-many-terminals";
+      message: string;
+    };
 
 /** main→renderer emitter. Registered ONCE by the terminal IPC domain, which
  * fans out to the app window(s) via safe-send. Kept as an injected sink so this
@@ -112,6 +133,34 @@ function resolveLoginShell(): string {
   const envShell = process.env.SHELL;
   if (typeof envShell === "string" && isAbsolute(envShell)) return envShell;
   return process.platform === "darwin" ? "/bin/zsh" : "/bin/bash";
+}
+
+/**
+ * Resolve + VALIDATE the working directory that ANCHORS the write-jail.
+ *
+ * Default (no request): the workspace root — `process.cwd()`, anchored to
+ * `~/.lvis/workspace` at boot (ensureWorkspaceCwd) — NEVER `$HOME`, whose jail
+ * would let the shell write shell-rc / login-agent persistence files. A
+ * renderer-supplied cwd is a trust-sensitive input (it widens the write-jail),
+ * so it is honored ONLY when it is absolute, canonicalizes cleanly, and stays
+ * WITHIN the workspace root; anything else is REJECTED (No-Fallback: never
+ * silently substitute an out-of-root cwd). Canonicalization uses the SAME helper
+ * as {@link deriveSandboxWritePaths} so the validated path and the derived jail
+ * see bit-identical strings.
+ */
+function resolveTerminalCwd(
+  requested: string | undefined,
+): { ok: true; cwd: string } | { ok: false; message: string } {
+  const root = canonicalizePathForMatch(process.cwd());
+  if (requested === undefined) return { ok: true, cwd: root };
+  if (typeof requested !== "string" || !isAbsolute(requested)) {
+    return { ok: false, message: "terminal cwd must be an absolute path" };
+  }
+  const canonical = canonicalizePathForMatch(requested);
+  if (canonical !== root && !canonical.startsWith(`${root}/`)) {
+    return { ok: false, message: "terminal cwd must be within the workspace root" };
+  }
+  return { ok: true, cwd: canonical };
 }
 
 /** The command string ASRT runs under its `-c` wrapper: exec the interactive
@@ -169,28 +218,45 @@ export async function spawnTerminal(options: SpawnTerminalOptions): Promise<Spaw
     };
   }
 
+  // Anti-DoS: bound concurrent PTYs. A remount of an EXISTING tab was replayed
+  // above and does not reach here; only a genuinely NEW session counts.
+  if (sessions.size >= MAX_TERMINALS) {
+    return {
+      ok: false,
+      reason: "too-many-terminals",
+      message: `Too many terminal sessions open (max ${MAX_TERMINALS}). Close one and retry.`,
+    };
+  }
+
+  // cwd ANCHORS the write-jail: default = workspace root, never $HOME; a
+  // renderer-supplied cwd is validated absolute + within the workspace root.
+  const resolvedCwd = resolveTerminalCwd(options.cwd);
+  if (!resolvedCwd.ok) {
+    return { ok: false, reason: "bad-request", message: resolvedCwd.message };
+  }
+  const cwd = resolvedCwd.cwd;
+
   const cols = clampDim(options.cols, 80, MAX_COLS);
   const rows = clampDim(options.rows, 24, MAX_ROWS);
 
-  // cwd: user-driven, defaults to home. Must be an absolute existing-ish path;
-  // it anchors the filesystem write-jail below.
-  const cwd =
-    typeof options.cwd === "string" && isAbsolute(options.cwd)
-      ? pathResolve(options.cwd)
-      : homedir();
-
   // Filesystem jail (mirrors worker-spawn): write = cwd ∪ authorized dirs;
-  // read = jail ∪ cwd; denyRead = the RESTATED shared sensitive floor (a
+  // read = jail ∪ cwd; denyRead = the RESTATED shared sensitive read floor (a
   // per-command denyRead REPLACES ASRT's boot floor, so omit-it-and-leak).
+  // denyWrite = the RESTATED sensitive WRITE floor (shell-rc / ~/.ssh / ~/.config
+  // / LaunchAgents / cron persistence + the read floor): ASRT applies it as
+  // denyWithinAllow with PRECEDENCE over allowWrite, so even if the write-jail
+  // ever covers $HOME the shell can never write these re-exec vectors
+  // (cluster-review MAJOR).
   const allowWrite = deriveSandboxWritePaths({ allowedDirectories: [cwd] });
   const allowRead = [cwd, ...allowWrite];
   const denyRead = getDefaultSensitiveReadDenyPaths();
+  const denyWrite = getDefaultSensitiveWriteDenyPaths();
 
   let wrapped = false;
   try {
     const cmdline = buildShellCommand();
     const { argv, env } = await wrapWorkerCommand(cmdline, {
-      filesystem: { allowWrite, allowRead, denyRead },
+      filesystem: { allowWrite, allowRead, denyRead, denyWrite },
     });
     wrapped = true;
 
@@ -259,11 +325,18 @@ export async function spawnTerminal(options: SpawnTerminalOptions): Promise<Spaw
   }
 }
 
-/** Forward user keystrokes to the PTY. No-op for an unknown/exited tab. */
+/** Forward user keystrokes to the PTY. No-op for an unknown/exited tab. An
+ * oversized single write (> {@link MAX_INPUT_BYTES}) is DROPPED — a hostile or
+ * buggy renderer must not flood an unbounded buffer into the shell (anti-DoS). */
 export function writeTerminal(tabId: string, data: string): void {
   const session = sessions.get(tabId);
   if (!session || session.exited) return;
   if (typeof data !== "string") return;
+  const bytes = Buffer.byteLength(data, "utf-8");
+  if (bytes > MAX_INPUT_BYTES) {
+    log.warn({ tabId, bytes, max: MAX_INPUT_BYTES }, "terminal: dropped oversized input write");
+    return;
+  }
   session.pty.write(data);
 }
 
