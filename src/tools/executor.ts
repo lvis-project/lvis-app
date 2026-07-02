@@ -865,7 +865,7 @@ export class ToolExecutor {
           // plugin/MCP or in-process builtin call honestly shows "none" rather
           // than the process-global "asrt" that only the host-shell path earns
           // — and the GENUINE asrt for an ASRT-wrapped external MCP worker
-          // (worker-egress PR1), keyed on its specific server id.
+          // keyed on its specific server id.
           sandboxCapability: resolveReviewerSandboxCapability(
             source,
             toolUse.name,
@@ -1790,7 +1790,7 @@ export class ToolExecutor {
             // Substrate-aware: plugin/MCP + in-process builtins show "none"
             // (their effects are not ASRT-wrapped); only bash/powershell may
             // show the active "asrt" when the gate is ON — plus a genuinely
-            // ASRT-wrapped external MCP worker (worker-egress PR1), keyed on id.
+            // ASRT-wrapped external MCP worker, keyed on id.
             sandboxCapability: resolveReviewerSandboxCapability(
               source,
               toolUse.name,

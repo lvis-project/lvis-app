@@ -190,7 +190,7 @@ export function parseClaudeDesktopConfig(raw: string): ClaudeDesktopImportResult
       if (Object.keys(cleaned).length > 0) env = cleaned;
     }
 
-    // NOTE (worker-egress PR1): `sandboxRoot` is deliberately NOT set here. The
+    // NOTE: `sandboxRoot` is deliberately NOT set here. The
     // filesystem-jail root for the ASRT-wrapped stdio worker is HOST-derived at
     // connect time (`McpManager.connectServer` → `~/.lvis/mcp/<id>/sandbox/`),
     // never from imported/persisted config — a config-supplied jail root would
