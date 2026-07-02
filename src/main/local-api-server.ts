@@ -29,16 +29,17 @@
  * write path into `~/.lvis/local-api/` — this module never touches `fs`
  * directly, so the 0o700 dir / 0o600 file / atomic-write contract cannot drift.
  */
-import { randomBytes } from "node:crypto";
+import { randomBytes, randomUUID } from "node:crypto";
 import type { BrowserWindow } from "electron";
 import type { AppServices } from "../boot.js";
 import type { SettingsService } from "../data/settings-store.js";
 import type { IpcDeps } from "../ipc/types.js";
 import type { ChatSendContext } from "../ipc/handlers/chat.js";
 import type { TurnResult } from "../engine/conversation-loop.js";
-import { createLocalApi } from "../api/local-api.js";
+import { createLocalApi, type ExternalMutationApprover } from "../api/local-api.js";
 import { startLocalApiHttpServer, type LocalApiHttpServer } from "../api/http-server.js";
 import { createStreamBroadcaster } from "../api/stream-broadcaster.js";
+import type { ApprovalGate } from "../permissions/approval-gate.js";
 import { openFeatureNamespace } from "./storage/feature-namespace.js";
 import { createLogger } from "../lib/logger.js";
 
@@ -111,6 +112,67 @@ function buildChatSendContext(sink: ChatSendContext["sink"]): ChatSendContext {
 }
 
 /**
+ * Build the #1409 approval-mediated external-mutation approver over the live
+ * {@link ApprovalGate}. Returns `undefined` when no gate is available (boot
+ * without a conversation surface) — the dispatcher then keeps its byte-identical
+ * fail-closed default (gesture-gated channels rejected).
+ *
+ * The request MIRRORS the existing agent-action call sites (work-board-engine /
+ * agent-action-requester): `category: "agent-action"`, `toolName: <channel>`,
+ * `toolCategory: "meta"`, a fresh `randomUUID()` id, `createdAt: Date.now()`, and
+ * `trustOrigin: <external origin>`. The `reason` is renderer-facing Korean per
+ * the IPC-language convention. `requireExplicit` is NOT (and CANNOT be) passed
+ * here — the gate's signature is `Omit<ApprovalRequest, "requireExplicit">` and
+ * it derives `requireExplicit` from the active policy
+ * (`PolicyFile.requireExplicitApproval`). The gate ALWAYS shows this modal
+ * because the request is an `agent-action` (its `isReadOnly` short-circuit
+ * explicitly excludes `kind === "agent-action"`, so it is never auto-approved).
+ * We only ever treat an `allow-*` choice as approval and NEVER persist an
+ * allow-always exception for this path — the caller reads only `.choice` and
+ * drops `rememberPattern`, so even an `allow-always` click grants exactly this
+ * one mutation and nothing durable.
+ *
+ * Fail-closed: any error/timeout inside `requestAndWait` (the gate resolves
+ * `deny-once` on timeout / send-failure) is treated as DENIED; a thrown error is
+ * caught, logged (English, no secrets), and returned as `false`.
+ */
+export function buildExternalMutationApprover(
+  approvalGate: ApprovalGate | undefined,
+  emit: (message: string) => void,
+): ExternalMutationApprover | undefined {
+  if (!approvalGate) return undefined;
+  return async ({ channel, args, origin }) => {
+    try {
+      const decision = await approvalGate.requestAndWait({
+        id: randomUUID(),
+        category: "agent-action",
+        kind: "agent-action",
+        toolName: channel,
+        toolCategory: "meta",
+        args,
+        reason: "외부 CLI/API가 권한 모드 변경을 요청했습니다. 허용하시겠습니까?",
+        source: "builtin",
+        createdAt: Date.now(),
+        trustOrigin: origin,
+      });
+      // Mirror the agent-action call sites: only an `allow-*` choice approves;
+      // deny-once / deny-always (and the gate's timeout/send-failure deny-once)
+      // are all rejections. rememberPattern is ignored — no persisted grant.
+      return decision.choice.startsWith("allow");
+    } catch (err) {
+      // Fail-closed: an unexpected gate throw is a denial. One English line, no
+      // secrets (channel + origin only).
+      emit(
+        `[local-api] external-mutation approval errored channel=${channel} origin=${origin}: ${
+          err instanceof Error ? err.message : String(err)
+        } → denied`,
+      );
+      return false;
+    }
+  };
+}
+
+/**
  * Start the loopback local API server IFF the gate is on. Returns `{ port }` on
  * success, or `null` when the gate is off (no socket, no disk write).
  *
@@ -141,7 +203,11 @@ export async function maybeStartLocalApiServer(input: {
   const broadcaster = createStreamBroadcaster();
   const chatSendContext = buildChatSendContext(broadcaster.sink);
 
-  const api = createLocalApi({ ipc, chatSendContext });
+  // #1409 approval-mediated external-mutation gate. Undefined when no
+  // ApprovalGate is available → the dispatcher keeps its fail-closed default.
+  const externalMutationApprover = buildExternalMutationApprover(services.approvalGate, emit);
+
+  const api = createLocalApi({ ipc, chatSendContext, externalMutationApprover });
 
   // Fresh per-boot bearer secret (64 hex chars). Never logged.
   const secret = randomBytes(32).toString("hex");

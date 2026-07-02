@@ -227,11 +227,19 @@ export interface AuditModeChange extends AuditCommon {
   toMode: PermissionMode;
   durable: boolean;
   /**
-   * Present when a built-in user action is the explicit confirmation surface
-   * for a durable mode change, so no secondary tool approval dialog was shown.
+   * Present when an explicit user action is the confirmation surface for a
+   * durable mode change, so no secondary tool approval dialog was shown:
+   *   - `"settings-ui"` / `"builtin-slash"` — a first-party renderer user action
+   *     (Settings toggle / built-in `/permission mode` slash).
+   *   - `"local-api-approval"` — an external origin (local-api / cli, #1409)
+   *     initiated the change and the user consented via the in-app ApprovalGate
+   *     modal at the transport-lifecycle layer BEFORE the handler ran. The
+   *     `trustOrigin` field stays on the permission axis (`"user-keyboard"`,
+   *     the human's Allow click), so `confirmationSource` is the sole forensic
+   *     marker that the request was externally initiated.
    * Historical rows omit this field.
    */
-  confirmationSource?: "settings-ui" | "builtin-slash";
+  confirmationSource?: "settings-ui" | "builtin-slash" | "local-api-approval";
 }
 
 /**

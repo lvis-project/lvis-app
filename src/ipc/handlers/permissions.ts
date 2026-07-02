@@ -22,6 +22,7 @@ import type {
   PermissionModeApprovalBypass,
 } from "../../permissions/permission-mode-apply.js";
 import type { PermissionModeCommand } from "../../permissions/permission-slash.js";
+import { isExternalOrigin, type TrustOrigin } from "../../contract/trust-origin.js";
 
 /** PUBLIC `lvis:permission:get-mode` — current permission mode (read-only). */
 export function handleGetMode(deps: IpcDeps): { mode: string } {
@@ -40,6 +41,46 @@ export interface SetPermissionModeBypass {
   source: string;
   trustOrigin: string;
   explicitUserAction: boolean;
+}
+
+/**
+ * Narrow the transport-agnostic {@link SetPermissionModeBypass} into the strict
+ * {@link PermissionModeApprovalBypass} that lets `applyPermissionModeCommand`
+ * skip the in-app approval modal. This is the ONLY place the strict bypass is
+ * built, so the trust conditions live in one auditable spot. Anything that does
+ * not match a recognized surface returns `undefined` → the normal ApprovalGate
+ * ask runs (fail-closed).
+ *
+ * Two accepted surfaces:
+ *   - RENDERER built-in: `source ∈ {settings-ui, builtin-slash}` AND
+ *     `trustOrigin === "user-keyboard"` AND `explicitUserAction`. Byte-identical
+ *     to the prior inline check — the renderer path is unchanged.
+ *   - #1409 EXTERNAL approval: `source === "local-api-approval"` AND
+ *     `trustOrigin` is an {@link import("../../contract/trust-origin.js").ExternalOrigin}
+ *     (local-api / cli) AND `explicitUserAction`. The user ALREADY consented via
+ *     the in-app ApprovalGate modal built in `src/main/local-api-server.ts`
+ *     BEFORE this handler ran; honoring the bypass here is what prevents a
+ *     SECOND modal for the same mutation. It is never a silent bypass — the
+ *     lifecycle only constructs this shape after observing a real "allow"
+ *     ApprovalGate decision.
+ */
+function resolveApprovalBypass(
+  bypass: SetPermissionModeBypass,
+): PermissionModeApprovalBypass | undefined {
+  if (bypass.explicitUserAction !== true) return undefined;
+  if (
+    (bypass.source === "settings-ui" || bypass.source === "builtin-slash") &&
+    bypass.trustOrigin === "user-keyboard"
+  ) {
+    return { source: bypass.source, trustOrigin: "user-keyboard", explicitUserAction: true };
+  }
+  if (bypass.source === "local-api-approval") {
+    const origin = bypass.trustOrigin as TrustOrigin;
+    if (isExternalOrigin(origin)) {
+      return { source: "local-api-approval", trustOrigin: origin, explicitUserAction: true };
+    }
+  }
+  return undefined;
 }
 
 function isParseError<T>(value: T | { ok: false; error: string }): value is { ok: false; error: string } {
@@ -87,12 +128,7 @@ export async function handleSetPermissionMode(
   const pm = deps.conversationLoop.permissionManager;
   if (!pm) return { ok: false, error: "no-permission-manager", message: "permission manager not initialized" };
   const { applyPermissionModeCommand } = await import("../../permissions/permission-mode-apply.js");
-  const approvalBypass: PermissionModeApprovalBypass | undefined =
-    bypass.explicitUserAction === true &&
-    bypass.trustOrigin === "user-keyboard" &&
-    (bypass.source === "settings-ui" || bypass.source === "builtin-slash")
-      ? { source: bypass.source, trustOrigin: "user-keyboard", explicitUserAction: true }
-      : undefined;
+  const approvalBypass = resolveApprovalBypass(bypass);
   const result = await applyPermissionModeCommand(parsed, {
     permissionManager: pm,
     approvalGate: deps.approvalGate,
