@@ -1144,20 +1144,51 @@ Phase 3 리팩터 기준 `lvis-app/src/` 모듈 경계다. Phase 1~2의 `src/age
 
 #### 4.6.1 Canonical Directory Map
 
+> **Phase 4 (host structure alignment, #1409 + #1411) landed** — the seven
+> orchestration mega-files were decomposed into per-responsibility subdirs
+> (`engine/turn/`, `tools/pipeline/`, `plugins/runtime/`, `boot/steps/` +
+> `boot/context.ts`/`boot/assemble-services.ts`, `ipc/handlers/`, `src/main/`
+> modules, `preload/` split) behind byte-identical public contracts, and the
+> `contract/` firewall + thin `api/`·`cli/`·`sdk/` surfaces were added. Each
+> mega-file now stays as a thin orchestrator/composition-root that re-exports or
+> assembles its extracted units. Full rationale + per-file plan:
+> [`docs/blueprints/phase4-host-structure-alignment.md`](../blueprints/phase4-host-structure-alignment.md).
+
 ```
 lvis-app/src/
-├── main.ts, boot.ts, preload.ts, ipc-bridge.ts,
-│   plugin-ui-host.tsx                                        # 엔트리 / 브릿지
+├── main.ts        # thin Electron entry — single-instance/whenReady/main() only;
+│                  #  setup extracted to src/main/* (C17: app-state, main-window,
+│                  #  app-menu, app-tray, settings-window, lvis-deep-link, corp-ca-runtime,
+│                  #  bootstrap-splash, early-boot-env, app-shutdown, main-paths)
+├── boot.ts        # thin bootstrap orchestrator — builds BootContext, runs ordered
+│                  #  steps, returns assembleAppServices(ctx) (C18)
+├── boot/          # context.ts, assemble-services.ts, steps/* (sandbox-init,
+│                  #  network-fetch-setup, audit-notification, mcp-setup, marketplace-setup,
+│                  #  work-board-setup, workflow-stores, routines-wiring,
+│                  #  reviewer-permission-wiring, conversation-wiring, plugin-tool-executor,
+│                  #  plugin-runtime.ts barrel + plugin-runtime/* host-api-factory/lifecycle)
+├── preload.ts     # webpack entry — composes preload/{gesture-intent,public-surface,
+│                  #  internal-surface} + exposes the byte-identical window.* worlds (C11)
+├── ipc/           # index.ts + domains/* (thin ipcMain.handle wrappers) +
+│                  #  handlers/* (transport-agnostic pure impls, C10) + gated.ts
+├── ipc-bridge.ts, plugin-ui-host.tsx                          # 엔트리 / 브릿지
 │
 ├── renderer.tsx   # minimal entry — mounts ui/renderer/App.tsx
-├── ui/renderer/   # Renderer composition root (Phase 1~4.6 split 완료)
-│   ├── App.tsx                  # composition root
-│   ├── ChatView.tsx, SettingsDialog.tsx, MainToolbar.tsx
+├── ui/renderer/   # Renderer composition root (Phase 1~4.6 split 완료; Phase 4 App/ChatView 분해)
+│   ├── App.tsx                  # composition root — wires domain hooks + renders
+│   │                            #  AppProviders > AppShell(children) + AppDialogs (C16)
+│   ├── AppProviders.tsx, AppShell.tsx, AppDialogs.tsx   # App presentational split
+│   ├── ChatView.tsx             # composition root — calls ChatView hooks + renders
+│   │                            #  ChatTranscript + ChatComposerDock (C15)
+│   ├── SettingsDialog.tsx, MainToolbar.tsx
 │   ├── context/                 # ChatContext (state provider for ChatView subtree)
-│   ├── hooks/                   # 14 domain hooks (settings, chat-state, briefing,
-│   │                            #  approval, search, context-budget, cost-estimate,
-│   │                            #  sessions, starred, plugin-marketplace, role-presets,
-│   │                            #  app-bootstrap, indexed-docs, marketplace-updates)
+│   ├── state/                   # chat-scroll-store (module scroll singletons)
+│   ├── hooks/                   # domain hooks — 14 original + Phase-4 App/ChatView hooks
+│   │                            #  (use-app-mode, use-routine-overlay, use-send-message,
+│   │                            #   use-plugin-view-routing, use-onboarding-chain-controller,
+│   │                            #   use-chat-scroll, use-message-queue, use-attachment-picker,
+│   │                            #   use-permission-toasts, use-checkpoint-view,
+│   │                            #   use-transcript-entries, use-plugin-lifecycle-refresh, …)
 │   ├── components/              # BriefingCard, AssistantCard, UserMessageEditor,
 │   │                            #  ReasoningCard, ToolApprovalDialog, ToolGroupCard,
 │   │                            #  UnifiedSearchPanel, Sparkline, UsageDashboard,
@@ -1170,18 +1201,30 @@ lvis-app/src/
 │   │                            #  RolesTab, AuditTab, PluginPerfTab,
 │   │                            #  McpTab, PluginConfigTab, MarketplaceTab
 │   │                            #  (RoutinePanel → components/ as built-in view)
-│   ├── utils/                   # cost-format, html-preview, history, compose
+│   ├── utils/                   # cost-format, html-preview, history, compose,
+│   │                            #  action-panel-activity, plugin-auth-error,
+│   │                            #  read-initial-app-mode, chat-entry-revision,
+│   │                            #  korea-date-key, classify-turn-entries
 │   └── types.ts, constants.ts, api-client.ts
 │
-├── engine/        # 에이전트 루프 + LLM 프로바이더
-│   ├── conversation-loop.ts, conversation-history.ts, auto-compact.ts
-│   └── llm/       # claude / openai / gemini provider + factory
+├── engine/        # 에이전트 루프 + LLM 프로바이더 (UI-free core)
+│   ├── conversation-loop.ts     # thin class shell + assembler + re-export facade
+│   ├── conversation-history.ts, auto-compact.ts
+│   ├── turn/     # §4.5 turn units (C9): types, trust-origin, context-carrier,
+│   │            #  tool-exposure, tool-scope, provider, lifecycle-hooks,
+│   │            #  compaction, session, commands, loop-context, run-turn, query-loop,
+│   │            #  stream-collector, plugin-expansion, tool-search, knowledge-cap
+│   └── llm/      # provider abstraction + factory (vendor-agnostic)
 │
 ├── tools/         # 1-file-per-tool
 │   ├── base.ts
-│   ├── executor.ts
-│   ├── knowledge-search.ts
-│   ├── bash.ts
+│   ├── executor.ts              # ToolExecutor facade + executeAll/executeOne orchestrator
+│   ├── executor-ceiling.ts      # runWithCeiling AbortController helper (SOT)
+│   ├── pipeline/ # §4.5.6 pipeline units (C7/C8): path-extraction, approval-purpose,
+│   │            #  audit-entries, display-mask, rate-limiter, reviewer-authorization-store,
+│   │            #  reviewer-dispatch, approval-memory-skip, risk-classification,
+│   │            #  audit-writer, invocation-context
+│   ├── knowledge-search.ts, bash.ts
 │   └── untrusted-banner.ts
 │
 ├── prompts/       # 시스템 프롬프트 조립
@@ -1216,7 +1259,12 @@ lvis-app/src/
 ├── mcp/           # Model Context Protocol 클라이언트
 │
 ├── plugins/       # 플러그인 런타임
-│   └── runtime.ts, registry.ts, marketplace.ts, deployment-guard.ts, types.ts
+│   ├── runtime.ts               # re-export shim (verbatim surface)
+│   ├── runtime/  # PluginRuntime class + collaborators (C4): index (orchestrator),
+│   │            #  perf-stats, config-overrides, preparation, lifecycle-timeout,
+│   │            #  access-control, cards, plugin-loader, manifest-validation,
+│   │            #  origin-chain, sandbox, snapshots, types
+│   └── registry.ts, marketplace.ts, deployment-guard.ts, types.ts
 │
 ├── contract/      # #1409 public wire contract SOT
 │   └── app-contract.ts (CHANNELS + PUBLIC_CHANNELS allowlist + gesture 분류

@@ -1,10 +1,19 @@
 # Phase 4 — Host Structure Alignment (#1409 SDK/API/CLI boundary + #1411 mega-file decomposition)
 
-> Status: **In progress** (single-PR, atomic commits, branch `refactor/host-structure-alignment`).
+> Status: **Landed** (single-PR, atomic commits C0–C19, branch `refactor/host-structure-alignment`).
 > Supersedes the "first refactor target" framing of #1411 with a full, dependency-ordered
 > decomposition, and lands the #1409 contract firewall that makes both safe in one PR.
 > Extends (does not replace) `docs/architecture/architecture.md` §4.6 and
 > `docs/blueprints/phase3-folder-refactor-plan.md`.
+>
+> **Result (mega-file LOC, before → after thin orchestrator):**
+> conversation-loop 4328→836 · executor 3277→2251 (+11 pipeline units) ·
+> plugins/runtime/index 2381→2060 (+7 collaborators) · boot/steps/plugin-runtime 2203→549 ·
+> App 2338→796 · ChatView 2190→700 · main 1987→392 · boot 1795→402.
+> All public contracts byte-identical; `contract/` + `api|cli|sdk/` added. Every discovered
+> issue was handled inline (no backlog). Follow-ups (explicitly deferred, documented below):
+> the localhost API server + `cli` process bin + authenticated non-renderer authz for
+> privileged mutation (§4 boundary map), and thinning App.tsx further toward <300.
 
 ## 1. Why (both issues, one root problem)
 
