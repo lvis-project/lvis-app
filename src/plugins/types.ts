@@ -308,6 +308,13 @@ export interface PluginManifest {
       /** Filesystem argument names that must be checked against allowed directories. */
       pathFields?: string[];
       /**
+       * Host-spawned worker identity for tools whose side effects run in a
+       * long-lived worker started through `hostApi.spawnWorker`. When present,
+       * the host pairs it with this manifest's `id` so the reviewer can resolve
+       * the real ASRT substrate for that specific worker.
+       */
+      workerId?: string;
+      /**
        * Issue #664 P1 — sandbox-write self-attestation. When true AND the
        * runtime verifies that every resolved `pathFields` value stays
        * inside the owning plugin's sandbox root
@@ -860,8 +867,10 @@ export interface PluginWorkerSpec {
 
 /**
  * The handle `PluginHostApi.spawnWorker` resolves to. `socketPath` is the
- * host-side UDS path to connect to, or `null` on the legacy (gate-OFF / win32)
+ * host-side UDS path to connect to, or `null` on the legacy gate-OFF
  * plain-spawn path — `null` signals the caller to use the legacy TCP channel.
+ * Windows with ASRT active fails before spawn until a Windows control-channel
+ * design exists.
  */
 export interface SpawnedPluginWorker {
   readonly socketPath: string | null;
@@ -1042,8 +1051,9 @@ export interface PluginHostApi {
    *
    * Returns a handle whose `socketPath` is the host-side path to connect to
    * (undici `Agent({ connect: { socketPath } })` / `http.request({ socketPath })`)
-   * — or `null` when the worker was plain-spawned (gate OFF, or Windows where
-   * this UDS control-channel primitive falls back to legacy TCP).
+   * — or `null` when the worker was plain-spawned (gate OFF). Windows with
+   * ASRT active fails closed because this UDS control-channel primitive has no
+   * Windows equivalent.
    *
    * OPTIONAL: undefined on host builds that predate this primitive — guard with
    * `typeof hostApi.spawnWorker === "function"`, mirroring `resolveApiKey?`.

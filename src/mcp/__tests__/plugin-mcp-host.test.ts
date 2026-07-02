@@ -32,6 +32,7 @@ const MANIFEST: PluginManifest = {
       description: "Save a note",
       category: "write",
       pathFields: ["path"],
+      workerId: "notes-worker",
       writesToOwnSandbox: true,
       inputSchema: {
         type: "object",
@@ -70,6 +71,7 @@ describe("PluginMcpHost — first-party loopback registration + round-trip", () 
 
     const save = registry.findByName("notes_save");
     expect(save?.category).toBe("write");
+    expect(save?.workerId).toBe("notes-worker");
     expect(save?.writesToOwnSandbox).toBe(true);
 
     // tools/call round-trips host → loopback → server → delegate → back.

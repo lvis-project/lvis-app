@@ -24,6 +24,7 @@ const BASE_MANIFEST: PluginManifest = {
       description: "Export the transcript to a path",
       category: "write",
       pathFields: ["path"],
+      workerId: "export-worker",
       writesToOwnSandbox: true,
       version: "3.0.0",
       deprecatedSince: "2.0.0",
@@ -79,10 +80,12 @@ describe("plugin-server-projection — toolSchema → MCP Tool (#1230 §3.3)", (
   it("carries optional policy fields in _meta only when present", () => {
     const start = toolSchemaToMcpTool("meeting_start", BASE_MANIFEST.toolSchemas!.meeting_start, "2.1.0");
     expect(start._meta["xyz.lvis/pathFields"]).toBeUndefined();
+    expect(start._meta["xyz.lvis/workerId"]).toBeUndefined();
     expect(start._meta["xyz.lvis/writesToOwnSandbox"]).toBeUndefined();
 
     const exp = toolSchemaToMcpTool("meeting_export", BASE_MANIFEST.toolSchemas!.meeting_export, "2.1.0");
     expect(exp._meta["xyz.lvis/pathFields"]).toEqual(["path"]);
+    expect(exp._meta["xyz.lvis/workerId"]).toBe("export-worker");
     expect(exp._meta["xyz.lvis/writesToOwnSandbox"]).toBe(true);
     expect(exp._meta["xyz.lvis/deprecatedSince"]).toBe("2.0.0");
     expect(exp._meta["xyz.lvis/replacedBy"]).toBe("meeting_export_v2");
