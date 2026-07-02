@@ -1718,6 +1718,14 @@ const api = {
       ipcRenderer.invoke("lvis:window:resize-for-mode", mode) as Promise<
         { ok: true } | { ok: false; error: string }
       >,
+    /**
+     * Resize the chat-mode main window for the right-side work panel. Opening
+     * adds side-panel width; closing restores the normal chat bounds.
+     */
+    resizeForSidePanel: async (open: boolean) =>
+      ipcRenderer.invoke("lvis:window:resize-for-side-panel", open) as Promise<
+        { ok: true } | { ok: false; error: string }
+      >,
     /** Open a render_html result in an isolated BrowserWindow. */
     openHtmlPreview: async (payload: OpenHtmlPreviewWindowPayload) =>
       ipcRenderer.invoke("lvis:window:open-html-preview", payload) as Promise<OpenHtmlPreviewWindowResult>,
