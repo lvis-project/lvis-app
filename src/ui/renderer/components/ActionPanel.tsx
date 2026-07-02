@@ -213,7 +213,7 @@ function FloatingPanel({ children }: { children: ReactNode }) {
   return (
     <aside
       aria-label={t("actionPanel.title")}
-      className="lvis-surface-floating absolute right-4 top-14 z-50 flex w-[23rem] max-w-[calc(100vw-2rem)] flex-col overflow-hidden rounded-xl bg-card/(--opacity-solid) text-card-foreground backdrop-blur"
+      className="lvis-surface-floating absolute right-4 top-2 z-50 flex w-[23rem] max-w-[calc(100vw-2rem)] flex-col overflow-hidden rounded-xl bg-card/(--opacity-solid) text-card-foreground backdrop-blur"
       data-testid="action-panel"
       style={{ maxHeight: "min(34rem, calc(100vh - 7rem))" }}
     >
@@ -243,7 +243,7 @@ export function ActionPanel({
     return (
       <aside
         aria-label={t("actionPanel.title")}
-        className="pointer-events-none absolute right-4 top-14 z-50"
+        className="pointer-events-none absolute right-4 top-2 z-50"
         data-testid="action-panel-rail"
       >
         <div
