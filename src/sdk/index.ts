@@ -105,9 +105,12 @@ export interface LvisClient {
 /**
  * Wrap a {@link LocalApi} dispatcher as a typed {@link LvisClient}. `origin`
  * defaults to `local-api` (the in-process SDK surface); the CLI constructs a
- * client with `cli`.
+ * client with `cli`. The parameter accepts any failure-code union
+ * (`LocalApi<string>`) so both the in-process dispatcher (narrow codes) and a
+ * transport client (widened codes) plug in without casts — the facade only
+ * ever reads `.error` as a string to build {@link LvisClientError}.
  */
-export function createLvisClient(api: LocalApi, origin: ExternalOrigin = "local-api"): LvisClient {
+export function createLvisClient(api: LocalApi<string>, origin: ExternalOrigin = "local-api"): LvisClient {
   async function call(channel: string, args?: unknown): Promise<unknown> {
     const result = await api.dispatch({ channel, args, origin });
     if (!result.ok) throw new LvisClientError(result.error, channel);
