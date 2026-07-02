@@ -44,6 +44,7 @@ function invoke(channel: string, url: string, ...args: unknown[]): Promise<unkno
 
 const OK_FRAME = "file:///app/index.html";
 const EVIL_FRAME = "https://evil.example.com/x";
+const dirLinkType = process.platform === "win32" ? "junction" : "dir";
 
 let root: string;
 
@@ -123,14 +124,14 @@ describe("preview:read-file handler", () => {
     // escaped target is what gets validated (and rejected).
     const outside = mkdtempSync(join(tmpdir(), "lvis-ws-symlink-outside-"));
     writeFileSync(join(outside, "secret.txt"), "escaped secret");
-    const link = join(root, "escape-link.txt");
-    symlinkSync(join(outside, "secret.txt"), link);
-    const res = (await invoke(CHANNELS.preview.readFile, OK_FRAME, link)) as {
+    const link = join(root, "escape-link");
+    symlinkSync(outside, link, dirLinkType);
+    const res = (await invoke(CHANNELS.preview.readFile, OK_FRAME, join(link, "secret.txt"))) as {
       ok: boolean;
       error?: string;
     };
     expect(res).toMatchObject({ ok: false, error: "path-not-allowed" });
-    rmSync(link, { force: true });
+    rmSync(link, { recursive: true, force: true });
     rmSync(outside, { recursive: true, force: true });
   });
 

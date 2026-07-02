@@ -12,13 +12,13 @@
  *   - gate ON (mac/linux) → registerWorkerUnixSocketDir(socketDir) called BEFORE
  *     the wrap (the UDS allow is SHARED-config, not per-command); wrapWorkerCommand
  *     called with allowWrite=[socketDir,…] (FS jail only — no per-command UDS
- *     option, which is inert in ASRT 0.0.59); spawn gets the wrapped argv
+ *     option, which is inert in current ASRT); spawn gets the wrapped argv
  *     (shell:false, stdin ignored); socketPath non-null; the worker is marked
  *     wrapped so the reviewer reports genuine asrt for its plugin tool.
  *   - udsArgName injection (arg form + env form).
  *   - idempotent any-exit cleanup → unmark + cleanup once on exit (and stop()
  *     does not double-run); reviewer falls back to none after.
- *   - win32 + gate ON → LEGACY plain spawn (no UDS fabrication), socketPath null.
+ *   - win32 + gate ON → fail closed before spawn (no unwrapped TCP fallback).
  */
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 import { EventEmitter } from "node:events";
@@ -77,6 +77,14 @@ vi.mock("../asrt-sandbox.js", () => ({
   unregisterWorkerUnixSocketDir: (dir: string) => unregisterUdsMock(dir),
   // The host-secret read floor restated on the worker wrap (#1365 SOT).
   getDefaultSensitiveReadDenyPaths: () => ["/home/u/.lvis/secrets", "/home/u/.ssh"],
+  // The persistence-vector write floor restated on the worker wrap (#1449 SOT).
+  getDefaultSensitiveWriteDenyPaths: () => [
+    "/home/u/.lvis/secrets",
+    "/home/u/.ssh",
+    "/home/u/.zshrc",
+    "/home/u/.config",
+    "/home/u/Library/LaunchAgents",
+  ],
 }));
 
 // Module imports AFTER the mocks.
@@ -197,7 +205,7 @@ describe("spawnWorker — gate ON (macOS)", () => {
     expect(unlinkSyncMock).toHaveBeenCalledWith(socketPath);
 
     // The UDS allow is registered on the SHARED config (NOT per-command — that
-    // channel is inert in ASRT 0.0.59).
+    // channel is inert in current ASRT).
     expect(registerUdsMock).toHaveBeenCalledWith(socketDir);
 
     // The per-command wrap carries ONLY the FS jail (socketDir first); there is
@@ -205,7 +213,7 @@ describe("spawnWorker — gate ON (macOS)", () => {
     expect(wrapWorkerCommandMock).toHaveBeenCalledTimes(1);
     const [cmdline, options] = wrapWorkerCommandMock.mock.calls[0] as [
       string,
-      { filesystem: { allowWrite: string[]; allowRead: string[]; denyRead?: string[] }; allowUnixSocketPath?: string; allowAllUnixSockets?: boolean },
+      { filesystem: { allowWrite: string[]; allowRead: string[]; denyRead?: string[]; denyWrite?: string[] }; allowUnixSocketPath?: string; allowAllUnixSockets?: boolean },
     ];
     expect(options.filesystem.allowWrite[0]).toBe(socketDir);
     expect(options.filesystem.allowWrite).toContain("/data/index");
@@ -217,6 +225,13 @@ describe("spawnWorker — gate ON (macOS)", () => {
     // worker. Non-empty array here proves the #1365 floor is carried.
     expect(Array.isArray(options.filesystem.denyRead)).toBe(true);
     expect(options.filesystem.denyRead?.length ?? 0).toBeGreaterThan(0);
+    // The sensitive write floor is also restated — a per-command denyWrite
+    // REPLACES the shared boot floor, so worker/MCP wraps must carry it just as
+    // the terminal does (#1449).
+    expect(options.filesystem.denyWrite).toContain("/home/u/.zshrc");
+    expect(options.filesystem.denyWrite).toContain("/home/u/.ssh");
+    expect(options.filesystem.denyWrite).toContain("/home/u/.config");
+    expect(options.filesystem.denyWrite).toContain("/home/u/Library/LaunchAgents");
     // The udsArgName was injected EXACTLY once (a duplicated injection would feed
     // the worker `--uds <path> --uds <path>` and break its arg contract).
     expect(cmdline).toContain("--uds");
@@ -394,29 +409,26 @@ describe("spawnWorker — idempotent any-exit cleanup", () => {
   });
 });
 
-// ─── Windows + gate ON → legacy plain spawn (no UDS) ────────
+// ─── Windows + gate ON → fail closed (no unwrapped fallback) ─
 
 describe("spawnWorker — Windows with gate ON", () => {
-  it("uses the LEGACY plain-spawn path (no wrap, no UDS, socketPath null)", async () => {
+  it("fails closed before spawn because the UDS control channel has no Windows equivalent", async () => {
     withPlatform("win32");
     gateActive = true;
-    const child = new StubWorkerChild();
-    spawnMock.mockReturnValueOnce(child);
 
-    const worker = await spawnWorker({
-      pluginId: "local-indexer",
-      workerId: "embed",
-      command: "C:/worker.exe",
-      args: ["--serve"],
-    });
+    await expect(
+      spawnWorker({
+        pluginId: "local-indexer",
+        workerId: "embed",
+        command: "C:/worker.exe",
+        args: ["--serve"],
+      }),
+    ).rejects.toThrow(/Windows.*disabled|control-channel/i);
 
-    // No fabrication: no wrap, no UDS dir, socketPath null.
+    // No fabrication and no unwrapped TCP fallback while ASRT is active.
     expect(wrapWorkerCommandMock).not.toHaveBeenCalled();
     expect(mkdirMock).not.toHaveBeenCalled();
-    expect(worker.socketPath).toBeNull();
-    const [cmd, args] = spawnMock.mock.calls[0] as [string, string[]];
-    expect(cmd).toBe("C:/worker.exe");
-    expect(args).toEqual(["--serve"]);
+    expect(spawnMock).not.toHaveBeenCalled();
     expect(isPluginWorkerWrapped("local-indexer", "embed")).toBe(false);
   });
 });

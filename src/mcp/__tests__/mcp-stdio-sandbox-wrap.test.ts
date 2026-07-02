@@ -3,8 +3,9 @@
  *
  * Confines EXTERNAL MCP stdio servers (the ones StdioTransport spawns) under the
  * ASRT sandbox: filesystem jail (write-confined to the host-derived per-server
- * sandbox root + the CENTRALIZED sensitive-read DENY-LIST — secrets, session/
- * routine history, ~/.ssh, ~/.aws, etc.) + the shared strict-union network
+ * sandbox root + the CENTRALIZED sensitive read/write DENY-LISTS — secrets,
+ * session/routine history, ~/.ssh, ~/.aws, shell rc, LaunchAgents, etc.) +
+ * the shared strict-union network
  * (enforced by the boot config, not per command). Gate DEFAULT-OFF.
  *
  * These tests stub ASRT (`wrapWorkerCommand`) + `child_process.spawn` to assert
@@ -12,7 +13,7 @@
  * macOS runtime smoke run separately). Covered:
  *   - gate OFF  → plain spawn, args UNCHANGED, no wrap, reviewer reports `none`.
  *   - gate ON   → wrapWorkerCommand called with the FS jail (allowWrite=[root],
- *                 denyRead = the centralized sensitive deny-list), spawn receives the wrapped
+ *                 denyRead/denyWrite = centralized sensitive deny-lists), spawn receives the wrapped
  *                 argv with shell:false + stdin pipe; per-platform env preserves
  *                 the secret-stripped base + the apiKey and overlays ASRT proxy
  *                 keys on win32.
@@ -44,8 +45,8 @@ const wrapWorkerCommandMock = vi.fn<
 >();
 const cleanupMock = vi.fn(() => Promise.resolve());
 vi.mock("../../permissions/asrt-sandbox.js", async () => {
-  // Use the REAL getDefaultSensitiveReadDenyPaths so the wrap test asserts the
-  // genuine centralized deny-list (not a re-implementation that could drift).
+  // Use the REAL default sensitive path helpers so the wrap test asserts the
+  // genuine centralized deny-lists (not a re-implementation that could drift).
   const actual = await vi.importActual<
     typeof import("../../permissions/asrt-sandbox.js")
   >("../../permissions/asrt-sandbox.js");
@@ -55,6 +56,7 @@ vi.mock("../../permissions/asrt-sandbox.js", async () => {
       wrapWorkerCommandMock(command, options),
     cleanupAsrtSandboxAfterCommand: () => cleanupMock(),
     getDefaultSensitiveReadDenyPaths: actual.getDefaultSensitiveReadDenyPaths,
+    getDefaultSensitiveWriteDenyPaths: actual.getDefaultSensitiveWriteDenyPaths,
   };
 });
 
@@ -62,7 +64,10 @@ vi.mock("../../permissions/asrt-sandbox.js", async () => {
 import { McpClient } from "../mcp-client.js";
 // Resolves to the mock export above (which delegates to the REAL impl via
 // vi.importActual), so the assertion checks the genuine deny-list.
-import { getDefaultSensitiveReadDenyPaths } from "../../permissions/asrt-sandbox.js";
+import {
+  getDefaultSensitiveReadDenyPaths,
+  getDefaultSensitiveWriteDenyPaths,
+} from "../../permissions/asrt-sandbox.js";
 import { ToolRegistry } from "../../tools/registry.js";
 import {
   resolveReviewerSandboxCapability,
@@ -81,6 +86,11 @@ import {
 import type { McpStdioServerConfig } from "../types.js";
 
 // ─── Shared helpers ─────────────────────────────────────────
+
+const REAL_PLATFORM = process.platform;
+function withPlatform(platform: NodeJS.Platform): void {
+  Object.defineProperty(process, "platform", { value: platform, configurable: true });
+}
 
 function handshakeResponses(serverName: string): FakeChildProcess["responses"] {
   return {
@@ -104,6 +114,7 @@ function handshakeResponses(serverName: string): FakeChildProcess["responses"] {
 }
 
 beforeEach(() => {
+  withPlatform("darwin");
   spawnMock.mockReset();
   execFileSyncMock.mockReset();
   execFileSyncMock.mockImplementation((cmd, args) => {
@@ -124,6 +135,7 @@ beforeEach(() => {
 });
 
 afterEach(() => {
+  withPlatform(REAL_PLATFORM);
   __resetActiveSandboxCapabilityForTest();
   __resetWrappedMcpServersForTest();
 });
@@ -200,7 +212,7 @@ describe("StdioTransport ASRT wrap — gate ON", () => {
     expect(wrapWorkerCommandMock).toHaveBeenCalledTimes(1);
     const [cmdline, options] = wrapWorkerCommandMock.mock.calls[0] as [
       string,
-      { filesystem: { allowWrite: string[]; allowRead: string[]; denyRead: string[] } },
+      { filesystem: { allowWrite: string[]; allowRead: string[]; denyRead: string[]; denyWrite: string[] } },
     ];
     // Command + args are shell-quoted (defensive against spaces/injection).
     expect(cmdline).toContain("'lvis-mcp-fs'");
@@ -219,6 +231,13 @@ describe("StdioTransport ASRT wrap — gate ON", () => {
     expect(options.filesystem.denyRead).toContain(join(lvisHome(), "sessions"));
     expect(options.filesystem.denyRead).toContain(join(homedir(), ".ssh"));
     expect(options.filesystem.denyRead).toContain(join(homedir(), ".aws"));
+    // The worker wrap also applies the CENTRALIZED sensitive write DENY-LIST.
+    // Per-command denyWrite replaces the boot floor, so #1449 requires this to
+    // be restated wherever wrapWorkerCommand carries a filesystem jail.
+    const sensitiveWrite = getDefaultSensitiveWriteDenyPaths();
+    expect(options.filesystem.denyWrite).toEqual(sensitiveWrite);
+    expect(options.filesystem.denyWrite).toContain(join(homedir(), ".ssh"));
+    expect(options.filesystem.denyWrite).toContain(join(homedir(), ".config"));
 
     // spawn ran the WRAPPED argv with shell:false + a writable stdin pipe.
     const [spawnedCmd, spawnedArgs, spawnOpts] = spawnMock.mock.calls[0] as [
@@ -276,13 +295,13 @@ describe("StdioTransport ASRT wrap — gate ON", () => {
     await client.disconnect();
   });
 
-  it("win32-shape: overlays ONLY the ASRT proxy keys, preserves apiKey + strips host secrets", async () => {
+  it("overlays ONLY the ASRT proxy keys, preserves apiKey + strips host secrets", async () => {
     gateActive = true;
     const sandboxRoot = join(lvisHome(), "mcp", "secure", "sandbox");
     const fake = new FakeChildProcess();
     fake.responses = handshakeResponses("secure");
-    // win32 shape: ASRT returns a proxy-CARRYING env (NOT process.env). It also
-    // includes a host secret that must NOT propagate (it is not allow-listed).
+    // Simulate an ASRT env carrying proxy keys plus a host secret that must NOT
+    // propagate (it is not allow-listed).
     wrapWorkerCommandMock.mockResolvedValueOnce({
       argv: ["C:/Git/bin/bash.exe", "-c", "wrapped"],
       env: {
@@ -382,6 +401,32 @@ describe("StdioTransport ASRT wrap — gate ON", () => {
     await client.disconnect();
     expect(cleanupMock).toHaveBeenCalledTimes(1); // still exactly once
     expect(isMcpServerWrapped("crash")).toBe(false); // still gone
+  });
+
+  it("win32 fails closed before passing unsupported per-exec allow grants to ASRT", async () => {
+    withPlatform("win32");
+    gateActive = true;
+    const sandboxRoot = join(lvisHome(), "mcp", "fs", "sandbox");
+
+    const gov = governanceWithPolicy(
+      buildPolicy([stdioApproval("fs", "lvis-mcp-fs")]),
+    );
+    const client = new McpClient(
+      {
+        id: "fs",
+        transport: "stdio",
+        command: "lvis-mcp-fs",
+        args: ["--root", "/tmp"],
+        sandboxRoot,
+      },
+      gov,
+      new ToolRegistry(),
+    );
+
+    await expect(client.connect()).rejects.toThrow(/allowRead\/allowWrite grants per exec/i);
+    expect(wrapWorkerCommandMock).not.toHaveBeenCalled();
+    expect(spawnMock).not.toHaveBeenCalled();
+    expect(isMcpServerWrapped("fs")).toBe(false);
   });
 });
 

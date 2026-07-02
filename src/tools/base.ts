@@ -57,6 +57,12 @@ export interface Tool {
    */
   readonly decisionOverride?: ToolDecisionOverride;
   readonly pluginId?: string;
+  /**
+   * Host-spawned plugin worker identity for plugin tools whose side effects run
+   * in a long-lived worker. Paired with `pluginId` so the permission reviewer
+   * can resolve the real ASRT substrate for that specific worker.
+   */
+  readonly workerId?: string;
   readonly mcpServerId?: string;
   /**
    * Manifest-declared filesystem path fields. Used by the executor's
@@ -139,6 +145,7 @@ export abstract class ZodTool<TSchema extends z.ZodTypeAny = z.ZodTypeAny>
   abstract readonly category: ToolCategory;
   readonly decisionOverride?: ToolDecisionOverride;
   readonly pluginId?: string;
+  readonly workerId?: string;
   readonly mcpServerId?: string;
   /** Issue #664 P1 — sandbox-write self-attestation (see {@link Tool.writesToOwnSandbox}). */
   readonly writesToOwnSandbox?: boolean;
@@ -189,6 +196,7 @@ export interface DynamicToolSpec {
   categoryForInput?: (input: unknown) => ToolCategory;
   decisionOverride?: ToolDecisionOverride;
   pluginId?: string;
+  workerId?: string;
   mcpServerId?: string;
   pathFields?: readonly string[];
   /** Issue #664 P1 — sandbox-write self-attestation (see {@link Tool.writesToOwnSandbox}). */
@@ -226,6 +234,7 @@ export function createDynamicTool(spec: DynamicToolSpec): Tool {
     categoryForInput: spec.categoryForInput,
     decisionOverride: spec.decisionOverride,
     pluginId: spec.pluginId,
+    workerId: spec.workerId,
     mcpServerId: spec.mcpServerId,
     pathFields: spec.pathFields,
     writesToOwnSandbox: spec.writesToOwnSandbox,

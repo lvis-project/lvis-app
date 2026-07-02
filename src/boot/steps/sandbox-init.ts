@@ -12,8 +12,8 @@
  * the `{ argv, env }` it spawns itself.
  *
  * Gate: the user-facing `osToolSandbox` feature flag (Settings → 권한) OR the
- * `LVIS_SANDBOX_ENABLED=1` env escape-hatch. Both now DEFAULT ON (osToolSandbox
- * ships true). Because the default is ON, the gate distinguishes HOW the
+ * `LVIS_SANDBOX_ENABLED=1` env escape-hatch. `osToolSandbox` is still staged
+ * (macOS default ON, Linux/Windows opt-in), and the gate distinguishes HOW the
  * on-signal arrived (decideSandboxGate in boot/steps/sandbox-gate.ts):
  *   - EXPLICIT env (`LVIS_SANDBOX_ENABLED=1`): a deliberate power-user/CI
  *     signal — stays FAIL-CLOSED (abort) when the sandbox can't activate.
@@ -44,24 +44,18 @@ export async function initSandboxGate(ctx: BootContext): Promise<void> {
   //     / socat / ripgrep missing) the branch depends on the on-signal: the
   //     EXPLICIT env opt-in FAIL-CLOSES (THROW, no unsandboxed plain spawn —
   //     no-fallback rule), while the DEFAULT/settings-on path DEGRADES gracefully
-  //     (loud warn + unsandboxed, non-bricking). A throw on the default path
-  //     would brick every Linux host without the deps now that the flag ships ON.
-  //   - Windows (srt-win.exe): NETWORK-only sandbox (WFP + restricted-token; NO
-  //     filesystem jail in ASRT 0.0.59). srt-win is BUNDLED (asarUnpack vendor/**),
-  //     so there is no download — but it needs a one-time UAC install + a
-  //     re-login before its discriminator group is enabled in the token, which
-  //     `checkAsrtDependencies()` → ASRT `checkWindowsDependencies` reports as
-  //     errors until the group is 'ready' AND the WFP filter set is installed.
+  //     (loud warn + unsandboxed, non-bricking). A throw on the staged default
+  //     path would brick hosts before they can repair missing deps.
+  //   - Windows (srt-win.exe): filesystem + network sandbox (dedicated
+  //     `srt-sandbox` user ACL backend + WFP; no process isolation). srt-win is
+  //     BUNDLED (asarUnpack vendor/**), so there is no download — but it needs a
+  //     one-time UAC install before the sandbox user and WFP filter set are ready.
   //     Windows does NOT hard-throw on deps-missing: a throw would BRICK the
-  //     first run (the user cannot complete the install/relogin before boot even
+  //     first run (the user cannot complete the install before boot even
   //     reaches the prompt). Instead we keep `isAsrtSandboxActive()` FALSE (host
   //     shell tools run UNSANDBOXED — isolation=none) and emit a LOUD signal so
-  //     the gap is visible. The install/relogin UX is a separate follow-up;
-  //     until it lands, an opted-in Windows host with the sandbox not yet
-  //     installed runs tools with NO OS isolation, by design, with this warning.
-  //     When win32 IS ready → initialize ASRT normally and publish a
-  //     NETWORK-ONLY capability (confines.filesystem === false), which is what
-  //     makes the reviewer's per-category relaxation bite on Windows.
+  //     the gap is visible. When win32 IS ready → initialize ASRT normally and
+  //     publish a PARTIAL capability (filesystem + network, process=false).
   {
     const {
       initializeAsrtSandbox,
@@ -115,7 +109,7 @@ export async function initSandboxGate(ctx: BootContext): Promise<void> {
         // delivering isolation=none. Throw so boot aborts loudly. Reachable ONLY
         // for the explicit env opt-in: the DEFAULT/settings-on path degrades
         // instead (decideSandboxGate), and Windows never aborts (a throw would
-        // brick first-run before the install/relogin can happen).
+        // brick first-run before the install can happen).
         const message =
           "boot: OS tool sandbox is ON via LVIS_SANDBOX_ENABLED=1 but its dependencies are missing — refusing to start. " +
           "Install the sandbox dependencies (Linux: bwrap, socat, ripgrep) or unset LVIS_SANDBOX_ENABLED. " +
@@ -130,22 +124,22 @@ export async function initSandboxGate(ctx: BootContext): Promise<void> {
         throw new Error(message);
       } else if (decision.action === "degrade") {
         // DEFAULT / settings-on (NOT the explicit env) + the sandbox cannot
-        // activate (Linux deps missing, or Windows srt-win not installed/relogged).
+        // activate (Linux deps missing, or Windows srt-win not installed).
         // GRACEFUL, non-bricking: keep the sandbox INACTIVE (isAsrtSandboxActive()
         // stays false → host shell tools run via the plain spawn path,
         // isolation=none) and never publish a capability, so the reviewer/UI SOT
         // honestly reports kind="none". This is the SAME runtime posture as
-        // sandbox-OFF, a known-safe state. We do NOT abort because the flag now
-        // ships ON: a host missing the deps must degrade, not brick. LOUD on
-        // purpose so the gap is never silent. (Set LVIS_SANDBOX_ENABLED=1 to make
-        // mac/linux fail-closed instead.)
+        // sandbox-OFF, a known-safe state. We do NOT abort on staged/default
+        // settings paths: a host missing deps must degrade, not brick. LOUD on
+        // purpose so the gap is never silent. (Set LVIS_SANDBOX_ENABLED=1 to
+        // make mac/linux fail-closed instead.)
         const detail = deps.errors.join("; ");
         if (process.platform === "win32") {
           log.warn(
-            "boot: OS tool sandbox is ON but the Windows network sandbox (srt-win) is NOT installed/relogged — " +
+            "boot: OS tool sandbox is ON but the Windows sandbox (srt-win) is NOT ready — " +
               "tools run with NO OS isolation until setup completes. " +
-              "Complete the one-time install + re-login (the in-app setup flow is a follow-up). " +
-              "Windows is NETWORK-ONLY (no filesystem jail) even once installed. " +
+              "Complete the one-time administrator install, then restart the app. " +
+              "Windows confines filesystem + network, but not process isolation. " +
               `Detail: ${detail}`,
           );
         } else {
@@ -172,7 +166,7 @@ export async function initSandboxGate(ctx: BootContext): Promise<void> {
             log.warn("boot: ASRT dependency warnings: %s", deps.warnings.join("; "));
           }
           // ENFORCED network model (corrects WIRING-A #1356 — see asrt-sandbox.ts
-          // NETWORK ENFORCEMENT MODEL header). ASRT 0.0.59's filterNetworkRequest
+          // NETWORK ENFORCEMENT MODEL header). ASRT's filterNetworkRequest
           // reads ONLY the SHARED config; the per-command customConfig.network is
           // inert for allow/deny. So we set the SHARED config here to:
           //   strictAllowlist: true  ⇒ GLOBAL hard-deny on any out-of-allow-list
@@ -237,25 +231,21 @@ export async function initSandboxGate(ctx: BootContext): Promise<void> {
           //
           // Per-platform confinement (HONEST, not hardcoded full):
           //   - macOS (Seatbelt) / Linux (bwrap): full — fs + process + network.
-          //   - Windows (srt-win): NETWORK-ONLY — confines.filesystem === false.
-          //     This PARTIAL-confine capability is what exercises the reviewer's
-          //     sandboxRelaxesCategory live: it relaxes `network` but NOT
-          //     `write`/`shell`/`read` (filesystem-bearing) categories.
-          // `sandboxConfinementForPlatform(platform, "full")` returns the
-          // network-only shape for win32 and the full shape for mac/linux.
+          //   - Windows (srt-win): partial — filesystem + network, no process.
           const asrtBackend =
             process.platform === "darwin"
               ? "Seatbelt"
               : process.platform === "win32"
                 ? "srt-win"
                 : "bwrap";
+          const confinementKind = process.platform === "win32" ? "partial" : "full";
           const confines = sandboxConfinementForPlatform(
             process.platform,
-            "full",
+            confinementKind,
           );
           const reason =
             process.platform === "win32"
-              ? `ASRT (${asrtBackend}) active — network egress contained, NO filesystem jail`
+              ? `ASRT (${asrtBackend}) active — filesystem + network contained, process isolation unavailable`
               : `ASRT (${asrtBackend}) active — fs+process+network contained`;
           setActiveSandboxCapability({
             kind: "asrt",
@@ -263,8 +253,7 @@ export async function initSandboxGate(ctx: BootContext): Promise<void> {
             platform: process.platform,
             reason,
             // Machine-checkable confinement for the host-shell substrate. Full
-            // on mac/linux; network-only on Windows (srt-win has no FS jail in
-            // ASRT 0.0.59) — see sandboxConfinementForPlatform.
+            // on mac/linux; partial on Windows — see sandboxConfinementForPlatform.
             confines,
           });
           log.info(

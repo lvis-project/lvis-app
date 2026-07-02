@@ -119,6 +119,7 @@ export function toolSchemaToMcpTool(
     [`${LVIS_META_PREFIX}version`]: entry.version ?? manifestVersion,
   };
   if (entry.pathFields !== undefined) meta[`${LVIS_META_PREFIX}pathFields`] = entry.pathFields;
+  if (entry.workerId !== undefined) meta[`${LVIS_META_PREFIX}workerId`] = entry.workerId;
   if (entry.writesToOwnSandbox !== undefined) meta[`${LVIS_META_PREFIX}writesToOwnSandbox`] = entry.writesToOwnSandbox;
   if (entry.deprecatedSince !== undefined) meta[`${LVIS_META_PREFIX}deprecatedSince`] = entry.deprecatedSince;
   if (entry.replacedBy !== undefined) meta[`${LVIS_META_PREFIX}replacedBy`] = entry.replacedBy;

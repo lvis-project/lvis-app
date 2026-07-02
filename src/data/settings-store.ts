@@ -187,9 +187,9 @@ export interface FeatureFlags {
    *     shared strict-union allow-list (loopback proxy floor).
    *   - Linux (bwrap via ASRT): filesystem + process + network egress
    *     confinement (same strict-union floor).
-   *   - Windows: srt-win network-only once installed; degrades non-bricking
-   *     (unsandboxed, loud warning) until the one-time install + re-login
-   *     completes — the toggle reflects this.
+   *   - Windows: srt-win confines filesystem + network once installed; process
+   *     isolation is unavailable. It degrades non-bricking (unsandboxed, loud
+   *     warning) until the one-time administrator install completes.
    *
    * `LVIS_SANDBOX_ENABLED=1` remains an environment escape-hatch override (and
    * the explicit, fail-closed signal), but this setting is the primary,
@@ -564,7 +564,7 @@ const DEFAULT_SETTINGS: AppSettings = {
     // per-process so this is a one-time, single-expression evaluation.)
     //
     // Safe to stage independently of `hostClassifiesRisk` (which stays ON on all
-    // platforms): on a non-sandbox (or Windows network-only) platform the
+    // platforms): on a non-sandbox (or non-filesystem-confined) platform the
     // foreground read-relaxation is coupled to the active sandbox FILESYSTEM-
     // CONTAINING the host (ToolExecutor.sandboxFsContainedProvider), so it falls
     // back to the pre-exec ask there. When ON, boot activates ASRT

@@ -113,6 +113,7 @@ describe("createDynamicTool", () => {
       source: "plugin",
       category: "write",
       pluginId: "lvis-plugin-meeting",
+      workerId: "meeting-worker",
       jsonSchema: { type: "object", properties: {} },
       execute: executeSpy,
     });
@@ -122,6 +123,7 @@ describe("createDynamicTool", () => {
     expect(tool.source).toBe("plugin");
     expect(tool.category).toBe("write");
     expect(tool.pluginId).toBe("lvis-plugin-meeting");
+    expect(tool.workerId).toBe("meeting-worker");
     expect(tool.toJsonSchema()).toEqual({ type: "object", properties: {} });
   });
 
@@ -191,6 +193,7 @@ describe("ToolRegistry with Tool instances", () => {
         description: "",
         source: "plugin",
         pluginId: "lvis-plugin-meeting",
+        workerId: "meeting-worker",
         category: "read",
         jsonSchema: { type: "object" },
         execute: async () => ({ output: "", isError: false }),
@@ -201,6 +204,7 @@ describe("ToolRegistry with Tool instances", () => {
     expect(found).toBeDefined();
     expect(found?.source).toBe("plugin");
     expect(found?.pluginId).toBe("lvis-plugin-meeting");
+    expect(found?.workerId).toBe("meeting-worker");
     expect(found?.category).toBe("read");
   });
 

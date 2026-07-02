@@ -47,9 +47,9 @@ export type SandboxKind =
   | "none"
   /** OS isolation provided by the Anthropic Sandbox Runtime (ASRT). Backend is
    * bwrap on Linux, Seatbelt on macOS (both full-confine), and srt-win on
-   * Windows (NETWORK-ONLY — no filesystem jail). All report as a single `asrt`
-   * kind; the per-substrate `confines` field distinguishes full vs network-only,
-   * which is what {@link sandboxRelaxesCategory} reads for Windows. */
+   * Windows (filesystem + network, no process isolation). All report as a
+   * single `asrt` kind; the per-substrate `confines` field distinguishes full
+   * vs partial, which is what {@link sandboxRelaxesCategory} reads. */
   | "asrt"
   /** OS-level isolation present but evidence quality is PARTIAL. */
   | "partial"
@@ -226,7 +226,7 @@ export function __resetWrappedMcpServersForTest(): void {
  * This is the per-worker "wrapped" signal {@link resolveReviewerSandboxCapability}
  * consults so a plugin tool call reports the GENUINE asrt capability ONLY for a
  * worker that is genuinely confined — an unwrapped worker (gate off, wrap
- * failed, win32 legacy path, or a plugin with no host-spawned worker) stays
+ * failed, Windows ASRT fail-closed path, or a plugin with no host-spawned worker) stays
  * `none`. Membership is necessary but NOT sufficient: the resolver also
  * re-checks {@link detectSandboxCapability} so a torn-down sandbox cannot leave
  * a stale `asrt` report (the #1359/#1364 no-leak invariant).
@@ -323,7 +323,7 @@ export function __resetWrappedPluginWorkersForTest(): void {
  *   - `mcp` + the originating server was ACTUALLY wrapped through ASRT
  *     (worker-egress PR1: gate ON + {@link isAsrtSandboxActive} +
  *     {@link isMcpServerWrapped}) → the genuine {@link detectSandboxCapability}
- *     (the wrapped worker IS confined — mac/linux full, win32 network-only).
+ *     (the wrapped worker IS confined — mac/linux full, win32 partial).
  *   - `plugin` + the originating worker was ACTUALLY wrapped through ASRT
  *     (worker-confinement PR D-1: gate ON + {@link isPluginWorkerWrapped}) →
  *     the genuine {@link detectSandboxCapability} (the host-spawned plugin
@@ -421,11 +421,11 @@ export function resolveReviewerSandboxCapability(
  *
  * When the capability declares {@link SandboxCapability.confines}, the
  * per-dimension confinement is appended so the reviewer LLM sees an HONEST
- * picture of what is (and is NOT) jailed — e.g. a Windows network-only ASRT
- * confines egress but not the filesystem, and the LLM must not relax a
- * filesystem-write risk on the strength of a network jail:
+ * picture of what is (and is NOT) jailed — e.g. Windows ASRT confines
+ * filesystem + network but not process, and the LLM must not relax shell risk
+ * on the strength of filesystem/network confinement alone:
  *
- *   "executionSandbox=asrt (verified, win32) confines[net:✓ fs:✗ proc:✗] — …"
+ *   "executionSandbox=asrt (verified, win32) confines[net:✓ fs:✓ proc:✗] — …"
  *
  * The suffix is omitted when `confines` is absent (legacy/`none` capabilities)
  * so the historical grep-stable strings are preserved.
@@ -490,13 +490,12 @@ export function isWeakSandbox(cap: SandboxCapability): boolean {
  *   {@link isWeakSandbox} is confines-BLIND — it returns "strong" for ANY
  *   verified non-none ASRT capability, which is correct only while every ASRT
  *   substrate is FULL-confine (mac/linux: {filesystem, process, network} all
- *   true). A NETWORK-ONLY ASRT (Windows: confines.filesystem === false) is
- *   genuinely strong for egress but provides NO filesystem jail — so the
- *   reviewer must NOT relax a filesystem-WRITE risk on its strength. This gates
- *   the relaxation on the dimension that actually covers the category:
- *     - `network`                       → confines.network
- *     - `write` / `shell` / `read` / `meta` (all filesystem-bearing effects)
- *                                        → confines.filesystem
+ *   true). Windows ASRT is partial: filesystem + network are confined, process
+ *   isolation is not. This gates relaxation on the dimensions that actually
+ *   cover each category:
+ *     - `network`               → confines.network
+ *     - `read` / `write` / `meta` → confines.filesystem
+ *     - `shell`                 → confines.filesystem AND confines.process
  *
  * Behaviour invariant (dormancy): a full-confine ASRT relaxes ALL categories,
  * making this IDENTICAL to today's `isWeakSandbox(cap) === false` (relax all).
@@ -514,7 +513,10 @@ export function sandboxRelaxesCategory(
   // mac/linux-verified ASRT (published with full confines) are unaffected.
   if (!cap.confines) return true;
   if (category === "network") return cap.confines.network === true;
-  // write / shell / read / meta — all filesystem-bearing effects.
+  if (category === "shell") {
+    return cap.confines.filesystem === true && cap.confines.process === true;
+  }
+  // write / read / meta — filesystem-bearing effects.
   return cap.confines.filesystem === true;
 }
 
@@ -525,18 +527,17 @@ export function sandboxRelaxesCategory(
  * effect-boundary block) consults. The relaxation removes the pre-exec ask
  * whose job is to gate (among others) the off-hostApi `node:fs` WRITE residual,
  * so it may fire ONLY when that residual is FILESYSTEM-CONTAINED by the OS
- * sandbox — a bare "sandbox active" boolean is NOT sufficient, because the
- * Windows srt-win substrate is NETWORK-ONLY (`confines.filesystem === false`):
- * it contains egress but NOT the filesystem, so an active network-only sandbox
- * does not contain the FS-write residual.
+ * sandbox — a bare "sandbox active" boolean is NOT sufficient. Windows srt-win
+ * is partial, but ASRT 0.0.63+ does provide filesystem ACL confinement, so this
+ * signal can be true on Windows once the sandbox is ready.
  *
  * Reads the SAME active capability the reviewer lane consults
  * ({@link detectSandboxCapability}) and applies the SAME filesystem-confinement
  * truth {@link sandboxRelaxesCategory} uses for filesystem-bearing categories
  * (`confines.filesystem === true`):
- *   - macOS / Linux ASRT (full-confine)   → true  (relaxation may fire)
- *   - Windows srt-win ASRT (NETWORK-ONLY)  → false (FS-write residual uncontained)
- *   - sandbox inactive (kind "none")       → false (no confines declared)
+ *   - macOS / Linux ASRT (full-confine)           → true
+ *   - Windows srt-win ASRT (fs+network partial)   → true
+ *   - sandbox inactive (kind "none")              → false
  *
  * RENDERER-SAFETY: like the rest of this module this is a pure read of the
  * published capability snapshot — it never imports asrt-sandbox.js, so the
@@ -545,4 +546,30 @@ export function sandboxRelaxesCategory(
  */
 export function isActiveSandboxFilesystemContained(): boolean {
   return detectSandboxCapability().confines?.filesystem === true;
+}
+
+/**
+ * Whether the active sandbox is strong enough for an arbitrary interactive
+ * shell surface. A shell can create subprocesses and persistence hooks, so it
+ * follows the same category rule as {@link sandboxRelaxesCategory}: filesystem
+ * AND process confinement must both be true.
+ */
+export function isActiveSandboxShellContained(): boolean {
+  return sandboxRelaxesCategory(detectSandboxCapability(), "shell");
+}
+
+/**
+ * Whether the foreground plugin effect-boundary can stand in for the removed
+ * pre-exec ask.
+ *
+ * This is narrower than {@link isActiveSandboxFilesystemContained}: Windows
+ * ASRT 0.0.63 can filesystem-contain ASRT-wrapped host shell commands, but the
+ * current Windows plugin worker path is still the legacy unwrapped spawn path.
+ * Until that worker substrate is upgraded, do not use Windows partial ASRT as
+ * proof that off-hostApi plugin `node:fs` residuals are contained.
+ */
+export function isActiveSandboxFilesystemContainedForPluginEffects(): boolean {
+  const cap = detectSandboxCapability();
+  if (cap.platform === "win32") return false;
+  return cap.confines?.filesystem === true;
 }

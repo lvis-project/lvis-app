@@ -53,13 +53,14 @@ import {
   wrapWorkerCommand,
   cleanupAsrtSandboxAfterCommand,
   getDefaultSensitiveReadDenyPaths,
+  getDefaultSensitiveWriteDenyPaths,
 } from "../permissions/asrt-sandbox.js";
 import { buildSandboxedChildEnv } from "../tools/safe-env.js";
 import {
   markMcpServerWrapped,
   unmarkMcpServerWrapped,
 } from "../permissions/sandbox-capability.js";
-import { shellQuote, resolveShell } from "../lib/shell-resolver.js";
+import { shellQuote } from "../lib/shell-resolver.js";
 import { t } from "../i18n/index.js";
 const log = createLogger("mcp-client");
 
@@ -1106,9 +1107,11 @@ class StdioTransport implements McpTransport {
     // route this long-lived stdio worker through ASRT's wrapWorkerCommand so its
     // egress is enforced by the SAME global strict-union allow-list as host tools
     // and its writes are confined to the per-server filesystem jail. ASRT is
-    // stdio-transparent: it wraps as `[shell, -c, <wrapped>]` (mac/linux) / a real
-    // argv (win32); a child spawned with inherited stdio:["pipe","pipe","pipe"]
-    // passes stdin/stdout through, so MCP's Content-Length framing survives.
+    // stdio-transparent on mac/linux: it wraps as `[shell, -c, <wrapped>]`;
+    // a child spawned with inherited stdio:["pipe","pipe","pipe"] passes
+    // stdin/stdout through, so MCP's Content-Length framing survives. Windows
+    // is fail-closed in openWrapped until ASRT can apply the per-server
+    // allowRead/allowWrite grants this path needs.
     // Gate OFF ⇒ the plain spawn below is UNCHANGED.
     if (isAsrtSandboxActive()) {
       try {
@@ -1143,7 +1146,7 @@ class StdioTransport implements McpTransport {
    * ({@link getDefaultSensitiveReadDenyPaths}) — secrets, session/routine
    * history, `~/.ssh`, `~/.aws`, etc. — so a wrapped worker cannot read them.
    * This is a deny-list of known-sensitive subpaths, NOT a read-allow jail:
-   * ASRT 0.0.59's read model is deny-only, so a path not on the list stays
+   * ASRT's read model is deny-only, so a path not on the list stays
    * readable (the worker still needs cwd / its sandbox root / tmp). Network
    * egress is governed by the SHARED boot config (strict union allow-list), not
    * per command. Only invoked when {@link isAsrtSandboxActive}.
@@ -1152,6 +1155,16 @@ class StdioTransport implements McpTransport {
     spawnCommand: { command: string; args: string[] },
     baseEnv: NodeJS.ProcessEnv,
   ): Promise<void> {
+    if (process.platform === "win32") {
+      throw new Error(
+        "[mcp-client] ASRT-wrapped MCP stdio on Windows is disabled because " +
+          "ASRT 0.0.63 cannot apply per-server filesystem.allowRead/allowWrite " +
+          "grants per exec; only denyRead/denyWrite are supported. Keep MCP " +
+          "stdio fail-closed until the Windows session-grant/control-channel " +
+          "work in #1367 lands.",
+      );
+    }
+
     // FAIL-CLOSED filesystem jail (deny-by-default A.a): the host populates
     // `sandboxRoot` at connect time. If it is somehow still absent (e.g. a
     // direct StdioTransport construction in a test), grant NO writable path at
@@ -1180,6 +1193,11 @@ class StdioTransport implements McpTransport {
     // No userDataDir arg here — mcp-client does not import electron. The
     // fallback per-platform derivation (XDG-aware on Linux) provides coverage.
     const denyRead = getDefaultSensitiveReadDenyPaths();
+    // denyWrite is likewise per-command and replaces the shared boot floor.
+    // Restate the centralized persistence-vector floor so an authorized MCP
+    // sandboxRoot cannot write shell rc files, credential dirs, LaunchAgents, or
+    // cron-like re-exec hooks if a future config broadens allowWrite.
+    const denyWrite = getDefaultSensitiveWriteDenyPaths();
 
     // Assemble the command string DEFENSIVELY: shell-quote the resolved binary
     // and every arg so a path with spaces / metacharacters cannot mis-split or
@@ -1188,35 +1206,8 @@ class StdioTransport implements McpTransport {
       .map((part) => shellQuote(part))
       .join(" ");
 
-    // binShell: mirror bash.ts — on win32 hand ASRT the ABSOLUTE Git Bash / sh
-    // path so the POSIX-quoted command string is interpreted by a POSIX shell on
-    // every platform (ASRT defaults to `cmd` on win32, which would mis-parse
-    // single-quoted cmdlines). On mac/linux leave it undefined (ASRT uses bash).
-    // FAIL CLOSED on win32: if Git Bash is not resolvable, throw rather than
-    // silently falling back to cmd.exe — cmd.exe mis-parses POSIX single-quoting
-    // and would run an incorrectly split command in an unconfined shell.
-    let binShell: string | undefined;
-    if (process.platform === "win32") {
-      let resolvedShell: string | undefined;
-      try {
-        const candidate = resolveShell().cmd;
-        if (/^[A-Za-z]:[\\/]/.test(candidate)) resolvedShell = candidate;
-      } catch {
-        // resolveShell() threw — fall through to fail-closed error below.
-      }
-      if (resolvedShell === undefined) {
-        throw new Error(
-          "[mcp-client] ASRT-wrapped MCP requires Git Bash (or a POSIX shell) on Windows — " +
-            "cmd.exe cannot interpret the POSIX-single-quoted command string safely. " +
-            "Install Git for Windows and ensure git-bash.exe is resolvable.",
-        );
-      }
-      binShell = resolvedShell;
-    }
-
     const { argv, env } = await wrapWorkerCommand(cmdline, {
-      filesystem: { allowWrite, allowRead, denyRead },
-      ...(binShell !== undefined ? { binShell } : {}),
+      filesystem: { allowWrite, allowRead, denyRead, denyWrite },
     });
 
     const [cmd, ...args] = argv;

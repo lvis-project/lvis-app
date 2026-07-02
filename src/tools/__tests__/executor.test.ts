@@ -42,6 +42,12 @@ import {
   canonicalizePathForMatch,
   caseFoldForMatch,
 } from "../../permissions/sensitive-paths.js";
+import {
+  __resetActiveSandboxCapabilityForTest,
+  __resetWrappedPluginWorkersForTest,
+  markPluginWorkerWrapped,
+  setActiveSandboxCapability,
+} from "../../permissions/sandbox-capability.js";
 import { makeMockWebContents } from "../../__tests__/test-helpers.js";
 
 // ─── Helpers ─────────────────────────────────────────
@@ -2668,6 +2674,76 @@ describe("ToolExecutor — Layer 1 allowed-directories", () => {
     }
   });
 
+  it("threads plugin worker identity through headless reviewer dispatch", async () => {
+    setActiveSandboxCapability({
+      kind: "asrt",
+      confidence: "verified",
+      platform: "darwin",
+      reason: "ASRT active for plugin workers",
+      confines: { filesystem: true, process: true, network: true },
+    });
+    markPluginWorkerWrapped("ms-graph", "graph-worker");
+    const dir = mkdtempSync(join(tmpdir(), "lvis-executor-worker-reviewer-"));
+    try {
+      const executeSpy = vi.fn(async () => ({ output: "sent", isError: false }));
+      const registry = new ToolRegistry();
+      registry.register(createDynamicTool({
+        name: "graph_worker_send",
+        description: "Sends a Graph message from the plugin worker.",
+        source: "plugin",
+        pluginId: "ms-graph",
+        workerId: "graph-worker",
+        category: "network",
+        jsonSchema: {
+          type: "object",
+          properties: { endpoint: { type: "string" } },
+        },
+        execute: executeSpy,
+      }));
+
+      const seenSandbox: string[] = [];
+      const classifier: RiskClassifier = {
+        classify: vi.fn((ctx) => {
+          seenSandbox.push(ctx.sandboxCapability.reason);
+          return { level: "low", reason: "wrapped plugin worker allowed" };
+        }),
+      };
+      const queue = new DeferredQueue(join(dir, "deferred-queue.jsonl"));
+      const permMgr = new PermissionManager(join(dir, "permissions.json"));
+      permMgr.setMode("auto");
+      permMgr.setReviewer({
+        classifier,
+        cache: new VerdictCache(join(dir, "reviewer-cache.jsonl")),
+        deferredQueue: queue,
+      });
+      const executor = new ToolExecutor(registry, undefined, permMgr);
+
+      const results = await executor.executeAll(
+        [{
+          id: "tu-worker-headless",
+          name: "graph_worker_send",
+          input: { endpoint: "https://graph.microsoft.com/v1.0/me/sendMail" },
+        }],
+        {
+          sessionId: "sess-worker-headless",
+          permissionContext: userPermissionContext({
+            headless: true,
+            trustOrigin: "llm-tool-arg",
+          }),
+        },
+      );
+
+      expect(results[0].is_error).not.toBe(true);
+      expect(executeSpy).toHaveBeenCalledOnce();
+      expect(classifier.classify).toHaveBeenCalledOnce();
+      expect(seenSandbox[0]).toContain("plugin worker 'ms-graph/graph-worker' ASRT-wrapped");
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+      __resetActiveSandboxCapabilityForTest();
+      __resetWrappedPluginWorkersForTest();
+    }
+  });
+
   it("does not let reviewer LOW downgrade hard overlay or low-trust MCP asks", async () => {
     const dir = mkdtempSync(join(tmpdir(), "lvis-executor-hard-ask-"));
     try {
@@ -3156,6 +3232,68 @@ describe("ToolExecutor — Layer 1 allowed-directories", () => {
     expect(requestSpy).toHaveBeenCalledWith(
       expect.objectContaining({ approvalCacheKey: expectedCacheKey }),
     );
+  });
+
+  it("approvalRequest carries the genuine ASRT capability for a wrapped plugin worker", async () => {
+    setActiveSandboxCapability({
+      kind: "asrt",
+      confidence: "verified",
+      platform: "darwin",
+      reason: "ASRT active for plugin workers",
+      confines: { filesystem: true, process: true, network: true },
+    });
+    markPluginWorkerWrapped("test-plugin", "worker-main");
+    try {
+      const registry = new ToolRegistry();
+      registry.register(createDynamicTool({
+        name: "plugin_worker_write",
+        description: "Plugin worker write probe.",
+        source: "plugin",
+        pluginId: "test-plugin",
+        workerId: "worker-main",
+        category: "write",
+        jsonSchema: {
+          type: "object",
+          properties: { value: { type: "string" } },
+        },
+        execute: async () => ({ output: "ok", isError: false }),
+      }));
+
+      const permMgr = new PermissionManager("/tmp/nonexistent-permissions-worker-cap.json");
+      permMgr.checkDetailed = () => ({ decision: "ask", reason: "worker capability regression", layer: 5 });
+
+      const requestSpy = vi.fn(async (req: { id: string }) => ({
+        requestId: req.id,
+        choice: "deny-once" as const,
+      }));
+      const executor = new ToolExecutor(
+        registry,
+        undefined,
+        permMgr,
+        undefined,
+        { requestAndWait: requestSpy } as never,
+      );
+
+      await executor.executeAll(
+        [{ id: "tu-plugin-worker-cap", name: "plugin_worker_write", input: { value: "x" } }],
+        {
+          sessionId: "sess-plugin-worker-cap",
+          permissionContext: userPermissionContext({ trustOrigin: "llm-tool-arg" }),
+        },
+      );
+
+      expect(requestSpy).toHaveBeenCalledWith(
+        expect.objectContaining({
+          sandboxCapability: expect.objectContaining({
+            kind: "asrt",
+            reason: expect.stringContaining("plugin worker 'test-plugin/worker-main' ASRT-wrapped"),
+          }),
+        }),
+      );
+    } finally {
+      __resetActiveSandboxCapabilityForTest();
+      __resetWrappedPluginWorkersForTest();
+    }
   });
 
   it.skipIf(process.platform === "win32")("approvalRequest carries sufficient approvalPurpose from user intent", async () => {
