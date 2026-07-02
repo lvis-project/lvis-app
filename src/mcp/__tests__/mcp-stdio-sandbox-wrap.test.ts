@@ -87,6 +87,11 @@ import type { McpStdioServerConfig } from "../types.js";
 
 // ─── Shared helpers ─────────────────────────────────────────
 
+const REAL_PLATFORM = process.platform;
+function withPlatform(platform: NodeJS.Platform): void {
+  Object.defineProperty(process, "platform", { value: platform, configurable: true });
+}
+
 function handshakeResponses(serverName: string): FakeChildProcess["responses"] {
   return {
     "server/discover": (id) => ({
@@ -109,6 +114,7 @@ function handshakeResponses(serverName: string): FakeChildProcess["responses"] {
 }
 
 beforeEach(() => {
+  withPlatform("darwin");
   spawnMock.mockReset();
   execFileSyncMock.mockReset();
   execFileSyncMock.mockImplementation((cmd, args) => {
@@ -129,6 +135,7 @@ beforeEach(() => {
 });
 
 afterEach(() => {
+  withPlatform(REAL_PLATFORM);
   __resetActiveSandboxCapabilityForTest();
   __resetWrappedMcpServersForTest();
 });
@@ -288,13 +295,13 @@ describe("StdioTransport ASRT wrap — gate ON", () => {
     await client.disconnect();
   });
 
-  it("win32-shape: overlays ONLY the ASRT proxy keys, preserves apiKey + strips host secrets", async () => {
+  it("overlays ONLY the ASRT proxy keys, preserves apiKey + strips host secrets", async () => {
     gateActive = true;
     const sandboxRoot = join(lvisHome(), "mcp", "secure", "sandbox");
     const fake = new FakeChildProcess();
     fake.responses = handshakeResponses("secure");
-    // win32 shape: ASRT returns a proxy-CARRYING env (NOT process.env). It also
-    // includes a host secret that must NOT propagate (it is not allow-listed).
+    // Simulate an ASRT env carrying proxy keys plus a host secret that must NOT
+    // propagate (it is not allow-listed).
     wrapWorkerCommandMock.mockResolvedValueOnce({
       argv: ["C:/Git/bin/bash.exe", "-c", "wrapped"],
       env: {
@@ -394,6 +401,32 @@ describe("StdioTransport ASRT wrap — gate ON", () => {
     await client.disconnect();
     expect(cleanupMock).toHaveBeenCalledTimes(1); // still exactly once
     expect(isMcpServerWrapped("crash")).toBe(false); // still gone
+  });
+
+  it("win32 fails closed before passing unsupported per-exec allow grants to ASRT", async () => {
+    withPlatform("win32");
+    gateActive = true;
+    const sandboxRoot = join(lvisHome(), "mcp", "fs", "sandbox");
+
+    const gov = governanceWithPolicy(
+      buildPolicy([stdioApproval("fs", "lvis-mcp-fs")]),
+    );
+    const client = new McpClient(
+      {
+        id: "fs",
+        transport: "stdio",
+        command: "lvis-mcp-fs",
+        args: ["--root", "/tmp"],
+        sandboxRoot,
+      },
+      gov,
+      new ToolRegistry(),
+    );
+
+    await expect(client.connect()).rejects.toThrow(/allowRead\/allowWrite grants per exec/i);
+    expect(wrapWorkerCommandMock).not.toHaveBeenCalled();
+    expect(spawnMock).not.toHaveBeenCalled();
+    expect(isMcpServerWrapped("fs")).toBe(false);
   });
 });
 
