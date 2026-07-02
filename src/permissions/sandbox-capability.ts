@@ -421,6 +421,7 @@ export interface ReviewerSandboxCacheState {
   readonly capability: {
     readonly kind: SandboxKind;
     readonly confidence: SandboxConfidence;
+    readonly reason: string;
     readonly platform: NodeJS.Platform;
     readonly confines?: SandboxConfinement;
   };
@@ -476,6 +477,7 @@ export function resolveReviewerSandboxCacheState(
     capability: {
       kind: capability.kind,
       confidence: capability.confidence,
+      reason: capability.reason,
       platform: capability.platform,
       ...(capability.confines !== undefined ? { confines: capability.confines } : {}),
     },
