@@ -1259,6 +1259,12 @@ export interface ChatSidePanelProps {
   onWidthChange: (px: number) => void;
   /** Persist width (drag-end / keyboard step). */
   onWidthCommit: (px: number) => void;
+  /**
+   * Docked variant applies the persisted width + drag handle. The narrow-screen
+   * drawer variant sets this false: the sheet controls width (w-full), so the
+   * inline width and left splitter are dropped.
+   */
+  resizable?: boolean;
   className?: string;
 }
 
@@ -1274,6 +1280,7 @@ export function ChatSidePanel({
   width,
   onWidthChange,
   onWidthCommit,
+  resizable = true,
   className = "",
 }: ChatSidePanelProps) {
   const { t } = useTranslation();
@@ -1356,9 +1363,10 @@ export function ChatSidePanel({
     <aside
       ref={asideRef}
       data-testid="chat-side-panel"
-      style={{ width: `${width}px` }}
+      style={resizable ? { width: `${width}px` } : undefined}
       className={`min-h-0 min-w-0 border-l border-border/(--opacity-strong) bg-background/(--opacity-solid) backdrop-blur ${className}`}
     >
+      {resizable ? (
       <div
         role="separator"
         aria-orientation="vertical"
@@ -1413,6 +1421,7 @@ export function ChatSidePanel({
       >
         <span className="h-full w-0.5 rounded-full bg-border transition-colors group-hover:bg-primary group-focus-visible:bg-primary" />
       </div>
+      ) : null}
       <div data-testid="chat-preview-rail" className="flex h-full min-h-0 w-full min-w-0 flex-col overflow-hidden">
         <div className="flex h-12 shrink-0 items-center gap-2 border-b px-3">
           <PanelRightClose className="h-4 w-4 text-muted-foreground" />
