@@ -27,8 +27,8 @@
  * {@link ChatSendContext} (stream plumbing) for `chat send`.
  *
  * This module is part of the main tsc project (unlike preload): it must be
- * fully type-clean. It imports the contract SOT from `src/contract/` — never
- * inline `"lvis:*"` literals.
+ * fully type-clean. It imports the contract SOT from `src/contract/` — wire
+ * channel names are never inlined here (enforced by check-no-inline-channels).
  */
 import {
   CHANNELS,
@@ -73,10 +73,17 @@ export interface LocalApiRequest {
   origin: Exclude<ExternalOrigin, never>;
 }
 
-/** Result of a dispatch — a defined success/failure envelope (no throws). */
-export type LocalApiResult =
+/**
+ * Result of a dispatch — a defined success/failure envelope (no throws).
+ *
+ * Generic over the failure-code union so a TRANSPORT implementation (the CLI's
+ * HTTP client) can honestly extend the in-process codes with transport-level
+ * ones (`unauthorized` / `server-unavailable` / …) instead of casting. The
+ * default keeps every in-process consumer exactly as narrow as before.
+ */
+export type LocalApiResult<E extends string = LocalApiErrorCode> =
   | { ok: true; data: unknown }
-  | { ok: false; error: LocalApiErrorCode };
+  | { ok: false; error: E };
 
 /** Injected dependencies — the same wiring the IPC registrars receive. */
 export interface LocalApiDeps {
@@ -90,9 +97,13 @@ export interface LocalApiDeps {
   chatSendContext: ChatSendContext;
 }
 
-/** The in-process external-surface dispatcher. */
-export interface LocalApi {
-  dispatch(req: LocalApiRequest): Promise<LocalApiResult>;
+/**
+ * The external-surface dispatcher contract. Generic over the failure-code
+ * union (see {@link LocalApiResult}); the in-process dispatcher uses the
+ * default, a transport client may widen it.
+ */
+export interface LocalApi<E extends string = LocalApiErrorCode> {
+  dispatch(req: LocalApiRequest): Promise<LocalApiResult<E>>;
 }
 
 /**
