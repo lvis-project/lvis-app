@@ -83,14 +83,12 @@ import {
   buildPolicy,
   FakeChildProcess,
 } from "./test-helpers.js";
+import { withPlatformForTest } from "../../__tests__/test-helpers.js";
 import type { McpStdioServerConfig } from "../types.js";
 
 // ─── Shared helpers ─────────────────────────────────────────
 
 const REAL_PLATFORM = process.platform;
-function withPlatform(platform: NodeJS.Platform): void {
-  Object.defineProperty(process, "platform", { value: platform, configurable: true });
-}
 
 function handshakeResponses(serverName: string): FakeChildProcess["responses"] {
   return {
@@ -114,7 +112,7 @@ function handshakeResponses(serverName: string): FakeChildProcess["responses"] {
 }
 
 beforeEach(() => {
-  withPlatform("darwin");
+  withPlatformForTest("darwin");
   spawnMock.mockReset();
   execFileSyncMock.mockReset();
   execFileSyncMock.mockImplementation((cmd, args) => {
@@ -135,7 +133,7 @@ beforeEach(() => {
 });
 
 afterEach(() => {
-  withPlatform(REAL_PLATFORM);
+  withPlatformForTest(REAL_PLATFORM);
   __resetActiveSandboxCapabilityForTest();
   __resetWrappedMcpServersForTest();
 });
@@ -404,7 +402,7 @@ describe("StdioTransport ASRT wrap — gate ON", () => {
   });
 
   it("win32 fails closed before passing unsupported per-exec allow grants to ASRT", async () => {
-    withPlatform("win32");
+    withPlatformForTest("win32");
     gateActive = true;
     const sandboxRoot = join(lvisHome(), "mcp", "fs", "sandbox");
 
