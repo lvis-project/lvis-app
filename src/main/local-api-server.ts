@@ -135,13 +135,33 @@ function buildChatSendContext(sink: ChatSendContext["sink"]): ChatSendContext {
  * Fail-closed: any error/timeout inside `requestAndWait` (the gate resolves
  * `deny-once` on timeout / send-failure) is treated as DENIED; a thrown error is
  * caught, logged (English, no secrets), and returned as `false`.
+ *
+ * ATTENTION-DoS HARDENING (security MINOR-1, #1441 cluster review), fail-closed:
+ * an in-flight cap prevents an external caller from flooding the user with
+ * concurrent ApprovalGate modals for the same approver instance. While a
+ * previous external-mutation approval is still pending, a new ask returns
+ * `false` IMMEDIATELY — WITHOUT calling `approvalGate.requestAndWait` again —
+ * so the user only ever faces one live external-mutation prompt at a time.
+ * Once the in-flight decision resolves (allow OR deny, and even on a thrown
+ * gate error), the guard releases and the next request asks normally. The
+ * guard is simple per-approver-instance closure state (module-closure, not
+ * module-global) — correct because exactly one approver is built per server
+ * lifecycle (see `maybeStartLocalApiServer`).
  */
 export function buildExternalMutationApprover(
   approvalGate: ApprovalGate | undefined,
   emit: (message: string) => void,
 ): ExternalMutationApprover | undefined {
   if (!approvalGate) return undefined;
+  let pending = false;
   return async ({ channel, args, origin }) => {
+    if (pending) {
+      emit(
+        `[local-api] external mutation approval already pending — denying concurrent request channel=${channel} origin=${origin}`,
+      );
+      return false;
+    }
+    pending = true;
     try {
       const decision = await approvalGate.requestAndWait({
         id: randomUUID(),
@@ -168,6 +188,8 @@ export function buildExternalMutationApprover(
         } → denied`,
       );
       return false;
+    } finally {
+      pending = false;
     }
   };
 }
