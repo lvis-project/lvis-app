@@ -82,6 +82,8 @@ export interface MainContentProps {
   onRoutineAcknowledge?: (routineId: string, firedAt: string) => void;
   statusBar?: Parameters<typeof ChatView>[0]["statusBar"];
   actionPanelSlot?: Parameters<typeof ChatView>[0]["actionPanelSlot"];
+  sidePanelOpen?: Parameters<typeof ChatView>[0]["sidePanelOpen"];
+  onSidePanelOpenChange?: Parameters<typeof ChatView>[0]["onSidePanelOpenChange"];
 }
 
 function MainPaneShell({
@@ -149,6 +151,8 @@ function HomeChatPane(props: MainContentProps) {
         onRoutineAcknowledge={props.onRoutineAcknowledge}
         statusBar={props.statusBar}
         actionPanelSlot={props.actionPanelSlot}
+        sidePanelOpen={props.sidePanelOpen}
+        onSidePanelOpenChange={props.onSidePanelOpenChange}
         blogLayout={props.appMode === "work"}
       />
     </ChatContextProvider>

@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { computeInitialMainWindowBounds } from "../main-window-bounds.js";
+import { CHAT_SIDE_PANEL_WIDTH, computeChatModeSidePanelBounds, computeInitialMainWindowBounds } from "../main-window-bounds.js";
 
 describe("computeInitialMainWindowBounds", () => {
   it("keeps the default macOS placement at the upper-right of the work area", () => {
@@ -36,5 +36,16 @@ describe("computeInitialMainWindowBounds", () => {
     );
 
     expect(bounds).toEqual({ x: 30, y: 0, width: 460, height: 650 });
+  });
+
+  it("expands chat bounds by the side-panel width while keeping the right edge docked on Windows", () => {
+    const workArea = { x: 0, y: 0, width: 1920, height: 1080 };
+    const chat = computeInitialMainWindowBounds(workArea, "win32");
+    const expanded = computeChatModeSidePanelBounds(workArea, "win32");
+
+    expect(expanded.width).toBe(chat.width + CHAT_SIDE_PANEL_WIDTH);
+    expect(expanded.height).toBe(chat.height);
+    expect(expanded.y).toBe(chat.y);
+    expect(expanded.x + expanded.width).toBe(chat.x + chat.width);
   });
 });

@@ -124,6 +124,78 @@ describe("App smoke (Phase 1 infra)", () => {
     expect(container.querySelector('[data-testid="action-panel-rail"]')).toBeTruthy();
   });
 
+  it("hides tool activity in chat mode and opens the side panel from the title bar", async () => {
+    const { container, api, emitChatStream } = await renderApp();
+    await waitFor(() => expect(api.getSettings).toHaveBeenCalled());
+    const windowApi = api.window as unknown as {
+      resizeForSidePanel: ReturnType<typeof vi.fn>;
+    };
+
+    await act(async () => {
+      emitChatStream({
+        type: "tool_start",
+        name: "read_file",
+        groupId: "g1",
+        toolUseId: "t1",
+        toolCategory: "read",
+        input: { path: "C:\\tmp\\readme.md" },
+      });
+      emitChatStream({
+        type: "tool_end",
+        name: "read_file",
+        groupId: "g1",
+        toolUseId: "t1",
+        toolCategory: "read",
+        result: "ok",
+      });
+    });
+    expect(container.querySelector('[data-testid="action-panel-rail"]')).toBeTruthy();
+
+    await act(async () => {
+      fireEvent.click(container.querySelector('[data-testid="app-mode-chat"]')!);
+    });
+    await waitFor(() => expect(windowApi.resizeForSidePanel).toHaveBeenCalledWith(false));
+    expect(container.querySelector('[data-testid="action-panel-rail"]')).toBeFalsy();
+    expect(container.querySelector('[data-testid="action-panel"]')).toBeFalsy();
+    expect(container.querySelector('[data-testid="chat-preview-open"]')).toBeFalsy();
+
+    await act(async () => {
+      fireEvent.click(container.querySelector('[data-testid="chat-side-panel-toggle"]')!);
+    });
+    await waitFor(() => expect(windowApi.resizeForSidePanel).toHaveBeenLastCalledWith(true));
+    expect(container.querySelector('[data-testid="chat-side-panel"]')).toBeTruthy();
+
+    await act(async () => {
+      fireEvent.click(container.querySelector('[data-testid="chat-side-panel-toggle"]')!);
+    });
+    await waitFor(() => expect(windowApi.resizeForSidePanel).toHaveBeenLastCalledWith(false));
+    expect(container.querySelector('[data-testid="chat-side-panel"]')).toBeFalsy();
+  });
+
+  it("opens the chat side panel from non-home inline views instead of latching invisible state", async () => {
+    const { container, api } = await renderApp();
+    await waitFor(() => expect(api.getSettings).toHaveBeenCalled());
+
+    await act(async () => {
+      fireEvent.click(container.querySelector('[data-testid="sidebar-settings"]')!);
+    });
+    await waitFor(() =>
+      expect(container.querySelector('[data-testid="settings-sidebar-heading"]')).toBeTruthy(),
+    );
+    expect(container.querySelector('[data-testid="chat-side-panel"]')).toBeFalsy();
+    expect(container.querySelector('[data-testid="chat-side-panel-toggle"]')?.getAttribute("aria-pressed")).toBe("false");
+
+    await act(async () => {
+      fireEvent.click(container.querySelector('[data-testid="chat-side-panel-toggle"]')!);
+    });
+
+    await waitFor(() => {
+      expect(container.querySelector('[data-testid="settings-sidebar-heading"]')).toBeFalsy();
+      expect(container.querySelector('[data-testid="chat-side-panel"]')).toBeTruthy();
+    });
+    expect(container.querySelector('[data-testid="chat-side-panel-toggle"]')?.getAttribute("aria-pressed")).toBe("true");
+  });
+
   it("does not duplicate primary sidebar navigation in the right action panel", async () => {
     const { container, api } = await renderApp();
     await waitFor(() => expect(api.getSettings).toHaveBeenCalled());

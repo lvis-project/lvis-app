@@ -1,4 +1,4 @@
-import { ArrowDownToLine, Download, RefreshCw, Wrench, X } from "lucide-react";
+import { ArrowDownToLine, Download, PanelRightClose, PanelRightOpen, RefreshCw, Wrench, X } from "lucide-react";
 import { Button } from "../../components/ui/button.js";
 import { Tooltip, TooltipContent, TooltipTrigger } from "../../components/ui/tooltip.js";
 import { useTranslation } from "../../i18n/react.js";
@@ -12,8 +12,8 @@ import { useTranslation } from "../../i18n/react.js";
  * The search / star / export controls + the collapse toggle no longer live
  * here — they moved into the floating sidebar's CLUSTER STRIP next to the
  * traffic lights (see Sidebar.tsx). This band now hosts only the right-aligned
- * controls: the app-update badge, the Dev badge, and the Chat/Work mode
- * toggle.
+   * controls: the app-update badge, the Dev badge, the Chat/Work mode toggle,
+   * and the right-side work-panel toggle.
  */
 function NoDrag({ children, className }: { children: React.ReactNode; className?: string }) {
   return (
@@ -72,6 +72,10 @@ export interface MainToolbarProps {
   appMode: AppMode;
   /** Fired when the user picks a segment in the Chat/Work toggle. */
   onToggleAppMode: (mode: AppMode) => void;
+  /** Whether the right-side work panel is open. */
+  sidePanelOpen: boolean;
+  /** Toggle the right-side work panel. */
+  onToggleSidePanel: () => void;
   /** Dev mode 만 사용 — clicking the wrench opens the floating DevToolsPanel. */
   onOpenDevTools?: () => void;
   /** Latest app-update state from the main process. */
@@ -94,6 +98,8 @@ export function MainToolbar({
   hasApiKey: _hasApiKey,
   appMode,
   onToggleAppMode,
+  sidePanelOpen,
+  onToggleSidePanel,
   onOpenDevTools,
   appUpdateState = { kind: "idle" },
   appUpdateInFlight = false,
@@ -160,6 +166,27 @@ export function MainToolbar({
           detachable views into windows. */}
       <NoDrag>
         <AppModeToggle mode={appMode} onToggle={onToggleAppMode} />
+      </NoDrag>
+
+      <NoDrag>
+        <Tooltip>
+          <TooltipTrigger asChild>
+            <Button
+              type="button"
+              variant="ghost"
+              size="icon-xs"
+              className="h-7 w-7 rounded-lg text-muted-foreground hover:bg-accent hover:text-foreground"
+              title={sidePanelOpen ? t("chatPreviewRail.close") : t("chatPreviewRail.open")}
+              aria-label={sidePanelOpen ? t("chatPreviewRail.close") : t("chatPreviewRail.open")}
+              aria-pressed={sidePanelOpen}
+              onClick={onToggleSidePanel}
+              data-testid="chat-side-panel-toggle"
+            >
+              {sidePanelOpen ? <PanelRightClose className="h-4 w-4" /> : <PanelRightOpen className="h-4 w-4" />}
+            </Button>
+          </TooltipTrigger>
+          <TooltipContent side="bottom">{sidePanelOpen ? t("chatPreviewRail.close") : t("chatPreviewRail.open")}</TooltipContent>
+        </Tooltip>
       </NoDrag>
     </div>
   );
