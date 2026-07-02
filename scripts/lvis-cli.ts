@@ -14,9 +14,12 @@
  *
  * Exit codes:
  *   0 — usage printed (no args / help), or a command succeeded.
- *   2 — server not running, or an unknown command (usage → stderr).
+ *   2 — server not running, an unknown command, or a command usage error (e.g.
+ *       `permission:set-mode` with no `<mode>`) — usage text → stderr.
  *   1 — a dispatch was rejected (LvisClientError) — including a server that went
- *       away mid-flight (surfaces as the `server-unavailable` transport code).
+ *       away mid-flight (surfaces as the `server-unavailable` transport code),
+ *       or an approval-mediated mutation the user declined (surfaces as the
+ *       `external-mutation-denied` code, e.g. `permission:set-mode`).
  *
  * The entry is NOT exercised as a subprocess in tests (slow/flaky) — it stays
  * thin enough that the transport + command-table tests cover the real logic.
