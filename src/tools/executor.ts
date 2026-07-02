@@ -120,6 +120,7 @@ export interface ToolCallMeta {
   source?: ToolSource;
   category?: ToolCategory;
   pluginId?: string;
+  workerId?: string;
   mcpServerId?: string;
 }
 
@@ -589,6 +590,8 @@ export class ToolExecutor {
     approvalCacheKey: string | undefined,
     sandboxAttestation: { writesToOwnSandbox?: boolean; ownerPluginSandboxRoot?: string },
     mcpServerId?: string,
+    workerId?: string,
+    pluginId?: string,
   ): Promise<PermissionCheckResult | null> {
     return tryUserApprovalMemorySkipImpl(
       toolName,
@@ -602,6 +605,8 @@ export class ToolExecutor {
       approvalCacheKey,
       sandboxAttestation,
       mcpServerId,
+      workerId,
+      pluginId,
     );
   }
 
@@ -665,6 +670,7 @@ export class ToolExecutor {
     meta.source = source;
     meta.category = invocationCategory;
     if (tool.pluginId) meta.pluginId = tool.pluginId;
+    if (tool.workerId) meta.workerId = tool.workerId;
     if (tool.mcpServerId) meta.mcpServerId = tool.mcpServerId;
 
     // ── C8: user-abort terminal helper moved to ./pipeline/invocation-context.ts.
@@ -860,7 +866,13 @@ export class ToolExecutor {
           // than the process-global "asrt" that only the host-shell path earns
           // — and the GENUINE asrt for an ASRT-wrapped external MCP worker
           // (worker-egress PR1), keyed on its specific server id.
-          sandboxCapability: resolveReviewerSandboxCapability(source, toolUse.name, tool.mcpServerId),
+          sandboxCapability: resolveReviewerSandboxCapability(
+            source,
+            toolUse.name,
+            tool.mcpServerId,
+            tool.workerId,
+            tool.pluginId,
+          ),
           evaluationContext: makeEvaluationContext({
             pathFields: reviewerPathFields,
             targetFilePaths: [outOfAllowedTarget.filePath],
@@ -1579,6 +1591,8 @@ export class ToolExecutor {
             approvalCacheKey,
             sandboxAttestation,
             tool.mcpServerId,
+            tool.workerId,
+            tool.pluginId,
           );
           if (memorySkip) {
             permissionResult = memorySkip;
@@ -1741,6 +1755,8 @@ export class ToolExecutor {
           approvalCacheKey,
           sandboxAttestation,
           tool.mcpServerId,
+          tool.workerId,
+          tool.pluginId,
         );
         if (memorySkip) {
           permissionResult = memorySkip;
@@ -1775,7 +1791,13 @@ export class ToolExecutor {
             // (their effects are not ASRT-wrapped); only bash/powershell may
             // show the active "asrt" when the gate is ON — plus a genuinely
             // ASRT-wrapped external MCP worker (worker-egress PR1), keyed on id.
-            sandboxCapability: resolveReviewerSandboxCapability(source, toolUse.name, tool.mcpServerId),
+            sandboxCapability: resolveReviewerSandboxCapability(
+              source,
+              toolUse.name,
+              tool.mcpServerId,
+              tool.workerId,
+              tool.pluginId,
+            ),
             evaluationContext,
           };
 
