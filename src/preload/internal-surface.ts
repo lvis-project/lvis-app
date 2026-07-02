@@ -1744,6 +1744,12 @@ export function buildLvisNamespaceExtras() {
       ipcRenderer.invoke(CHANNELS.workspace.pickRoot, opts),
     listDir: (dirPath: string) =>
       ipcRenderer.invoke(CHANNELS.workspace.listDir, dirPath),
+    removeRoot: (dirPath: string) =>
+      ipcRenderer.invoke(CHANNELS.workspace.removeRoot, dirPath),
+    reveal: (targetPath: string) =>
+      ipcRenderer.invoke(CHANNELS.workspace.reveal, targetPath),
+    addRootByPath: (rawPath: string) =>
+      ipcRenderer.invoke(CHANNELS.workspace.addRootByPath, rawPath),
   },
   };
 }

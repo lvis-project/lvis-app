@@ -1672,6 +1672,31 @@ export interface LvisWorkspaceApi {
     error?: "unauthorized" | "path-not-allowed" | "sensitive-path" | "not-a-dir" | "read-failed";
     message?: string;
   }>;
+  /** Remove an additional project root from the read allow-list. Never the default root. */
+  removeRoot: (path: string) => Promise<{
+    ok: boolean;
+    removed?: string;
+    roots?: Array<{ path: string; isDefault: boolean }>;
+    error?: "unauthorized" | "invalid-path" | "not-an-additional-root" | "cannot-remove-default";
+    message?: string;
+  }>;
+  /** Reveal a scope-revalidated file/folder in the OS file manager (location only, never opens it). */
+  reveal: (path: string) => Promise<{
+    ok: boolean;
+    error?: "unauthorized" | "path-not-allowed" | "sensitive-path" | "not-found" | "reveal-failed";
+    message?: string;
+  }>;
+  /** Add a project root from a drag-dropped path — always gated through the ackToken confirmation. */
+  addRootByPath: (path: string) => Promise<{
+    ok: boolean;
+    requiresAcknowledgement?: boolean;
+    pendingPath?: string;
+    ackToken?: string;
+    warnings?: string[];
+    roots?: Array<{ path: string; isDefault: boolean }>;
+    error?: string;
+    message?: string;
+  }>;
 }
 
 export interface LvisUiApi {
