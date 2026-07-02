@@ -71,4 +71,98 @@ describe("useWorkspaceTabs", () => {
     act(() => result.current.closeTab(tabId));
     expect(tabId in result.current.browserUrlByTab).toBe(false);
   });
+
+  it("addTab creates a pinned container tab (content null)", () => {
+    const { result } = renderHook(() => useWorkspaceTabs());
+    act(() => result.current.addTab("terminal"));
+    const tab = result.current.tabs.at(-1)!;
+    expect(tab.mode).toBe("pinned");
+    expect(tab.content).toBeNull();
+  });
+
+  const A = { source: "preview", targetId: "a" } as const;
+  const B = { source: "browser", url: "https://b.example/" } as const;
+
+  const ephemeralCount = (tabs: { mode: string }[]) => tabs.filter((t) => t.mode === "ephemeral").length;
+
+  it("openInEphemeral opens a single ephemeral content tab", () => {
+    const { result } = renderHook(() => useWorkspaceTabs());
+    act(() => result.current.openInEphemeral(A));
+    expect(result.current.tabs).toHaveLength(1);
+    const tab = result.current.tabs[0]!;
+    expect(tab.mode).toBe("ephemeral");
+    expect(tab.content).toEqual(A);
+    expect(result.current.activeTabId).toBe(tab.id);
+  });
+
+  it("openInEphemeral replaces the ephemeral slot in place (no second ephemeral)", () => {
+    const { result } = renderHook(() => useWorkspaceTabs());
+    act(() => result.current.openInEphemeral(A));
+    const firstId = result.current.tabs[0]!.id;
+    act(() => result.current.openInEphemeral(B));
+    expect(result.current.tabs).toHaveLength(1);
+    expect(result.current.tabs[0]!.id).toBe(firstId);
+    expect(result.current.tabs[0]!.content).toEqual(B);
+    expect(result.current.tabs[0]!.mode).toBe("ephemeral");
+  });
+
+  it("openInEphemeral of the same content re-activates without creating a tab", () => {
+    const { result } = renderHook(() => useWorkspaceTabs());
+    act(() => result.current.openInEphemeral(A));
+    act(() => result.current.openInEphemeral(A));
+    expect(result.current.tabs).toHaveLength(1);
+  });
+
+  it("promoteToPinned frees the ephemeral slot so the next open appends", () => {
+    const { result } = renderHook(() => useWorkspaceTabs());
+    act(() => result.current.openInEphemeral(A));
+    const id = result.current.tabs[0]!.id;
+    act(() => result.current.promoteToPinned(id));
+    expect(result.current.tabs[0]!.mode).toBe("pinned");
+    act(() => result.current.openInEphemeral(B));
+    expect(result.current.tabs).toHaveLength(2);
+    expect(ephemeralCount(result.current.tabs)).toBe(1);
+  });
+
+  it("openPinned appends a pinned tab and leaves the ephemeral slot untouched", () => {
+    const { result } = renderHook(() => useWorkspaceTabs());
+    act(() => result.current.openInEphemeral(A));
+    act(() => result.current.openPinned(B));
+    expect(result.current.tabs).toHaveLength(2);
+    expect(ephemeralCount(result.current.tabs)).toBe(1);
+  });
+
+  it("openPinned of existing ephemeral content promotes it (no new tab)", () => {
+    const { result } = renderHook(() => useWorkspaceTabs());
+    act(() => result.current.openInEphemeral(A));
+    act(() => result.current.openPinned(A));
+    expect(result.current.tabs).toHaveLength(1);
+    expect(result.current.tabs[0]!.mode).toBe("pinned");
+  });
+
+  it("openInEphemeral of pinned content keeps it pinned (no demote)", () => {
+    const { result } = renderHook(() => useWorkspaceTabs());
+    act(() => result.current.openPinned(A));
+    act(() => result.current.openInEphemeral(A));
+    expect(result.current.tabs[0]!.mode).toBe("pinned");
+  });
+
+  it("replacing an ephemeral browser tab drops its manual url", () => {
+    const { result } = renderHook(() => useWorkspaceTabs());
+    act(() => result.current.openInEphemeral(B));
+    const id = result.current.tabs[0]!.id;
+    act(() => result.current.setBrowserTabUrl(id, "https://manual.example/"));
+    act(() => result.current.openInEphemeral(A));
+    expect(id in result.current.browserUrlByTab).toBe(false);
+  });
+
+  it("keeps at most one ephemeral tab across a mixed sequence (invariant)", () => {
+    const { result } = renderHook(() => useWorkspaceTabs());
+    act(() => result.current.openInEphemeral(A));
+    act(() => result.current.addTab("terminal"));
+    act(() => result.current.openInEphemeral(B));
+    act(() => result.current.openPinned({ source: "preview", targetId: "c" }));
+    act(() => result.current.openInEphemeral({ source: "preview", targetId: "d" }));
+    expect(ephemeralCount(result.current.tabs)).toBeLessThanOrEqual(1);
+  });
 });
