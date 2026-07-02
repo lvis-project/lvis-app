@@ -151,6 +151,8 @@ export async function tryUserApprovalMemorySkip(
         // fields (sandbox-audit-sink.ts DLP note) — mask before writing.
         args: maskSensitiveData(JSON.stringify(finalInput)).masked,
         source,
+        trustOrigin: context.trustOrigin,
+        ...(approvalCacheKey ? { approvalCacheKey } : {}),
       },
       sandbox: {
         kind: sandboxCapability.kind,
