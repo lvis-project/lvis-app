@@ -14,8 +14,11 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 
 import {
+  assertPerExecFilesystemSupported,
+  buildPerCommandSandboxCustomConfig,
   buildSandboxConfig,
   DEFAULT_WINDOWS_PROXY_PORT_RANGE,
+  hasPerExecFilesystemAllowGrants,
 } from "../asrt-sandbox.js";
 import {
   sandboxRelaxesCategory,
@@ -180,6 +183,83 @@ describe("windows sandbox — binShell threading (the double-shell fix)", () => 
     // AND passed binShell=undefined → ASRT defaulted to cmd → cmd /c "powershell
     // …". Now powershell.ts passes 'powershell' + the bare command instead.
     expect(parseWindowsBinShell(undefined)).toEqual({ kind: "cmd" });
+  });
+});
+
+describe("windows sandbox — per-exec filesystem grant guard", () => {
+  it("rejects non-empty per-exec allowRead/allowWrite on win32 before ASRT sees it", () => {
+    forcePlatform("win32");
+
+    expect(hasPerExecFilesystemAllowGrants({ allowWrite: ["C:\\repo"] })).toBe(true);
+    expect(() =>
+      assertPerExecFilesystemSupported(
+        { allowRead: ["C:\\repo"], denyRead: ["C:\\secret"] },
+        "test-wrap",
+      ),
+    ).toThrow(/does not support per-exec filesystem\.allowRead\/allowWrite/i);
+    expect(() =>
+      assertPerExecFilesystemSupported(
+        { allowWrite: ["C:\\repo"], denyWrite: ["C:\\Users\\u\\.ssh"] },
+        "test-wrap",
+      ),
+    ).toThrow(/does not support per-exec filesystem\.allowRead\/allowWrite/i);
+  });
+
+  it("permits Windows per-exec deny-only slices and empty allow arrays", () => {
+    forcePlatform("win32");
+
+    expect(hasPerExecFilesystemAllowGrants({ denyRead: ["C:\\secret"] })).toBe(false);
+    expect(() =>
+      assertPerExecFilesystemSupported(
+        {
+          allowRead: [],
+          allowWrite: [],
+          denyRead: ["C:\\secret"],
+          denyWrite: ["C:\\Users\\u\\.ssh"],
+        },
+        "test-wrap",
+      ),
+    ).not.toThrow();
+  });
+
+  it("permits per-exec allow grants off Windows", () => {
+    forcePlatform("linux");
+
+    expect(() =>
+      assertPerExecFilesystemSupported(
+        { allowWrite: ["/tmp/repo"], allowRead: ["/tmp/repo"] },
+        "test-wrap",
+      ),
+    ).not.toThrow();
+  });
+
+  it("does not materialize omitted filesystem fields as empty arrays", () => {
+    const config = buildPerCommandSandboxCustomConfig({
+      denyRead: ["/home/u/.ssh"],
+      denyWrite: ["/home/u/.config"],
+    });
+    const fs = config?.filesystem as Record<string, unknown>;
+
+    expect(fs).toEqual({
+      denyRead: ["/home/u/.ssh"],
+      denyWrite: ["/home/u/.config"],
+    });
+    expect(Object.prototype.hasOwnProperty.call(fs, "allowRead")).toBe(false);
+    expect(Object.prototype.hasOwnProperty.call(fs, "allowWrite")).toBe(false);
+  });
+
+  it("keeps explicitly empty allow arrays when the caller intentionally overrides them", () => {
+    const config = buildPerCommandSandboxCustomConfig({
+      allowRead: [],
+      allowWrite: [],
+      denyRead: ["/home/u/.ssh"],
+    });
+    const fs = config?.filesystem as Record<string, unknown>;
+
+    expect(fs.allowRead).toEqual([]);
+    expect(fs.allowWrite).toEqual([]);
+    expect(fs.denyRead).toEqual(["/home/u/.ssh"]);
+    expect(Object.prototype.hasOwnProperty.call(fs, "denyWrite")).toBe(false);
   });
 });
 
