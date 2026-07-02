@@ -1,12 +1,19 @@
 #!/usr/bin/env node
 /**
- * check-no-inline-channels.mjs — #1409 C2 + C11 CI guard
+ * check-no-inline-channels.mjs — #1409 C2 + C11 + M1 CI guard
  *
- * The chat / plugins / settings IPC domains AND the preload bundle
+ * EVERY `src/ipc/domains/*.ts` IPC domain AND the preload bundle
  * (`src/preload.ts` + `src/preload/*.ts`) must reference channel names ONLY
  * through the `src/contract/` SOT (`CHANNELS.*`), never as raw `"lvis:..."`
  * string literals. This scans those files and fails the build if an inline
- * channel literal reappears (regression guard for the C2 + C11 sweeps).
+ * channel literal reappears (regression guard for the C2 + C11 + M1 sweeps).
+ *
+ * The domain directory is read dynamically (M1: cluster-review finding —
+ * previously only the C2-swept chat/plugins/settings domains were guarded, so
+ * the remaining domains could re-author `lvis:*` literals independently). The
+ * `__tests__/` subdirectory is excluded automatically (it is a directory, not
+ * a `.ts` file) — domain behavior tests legitimately assert on literal
+ * channel strings.
  *
  * The preload surface split (#1409 C11 / #1411) moved the host bridge into
  * `src/preload/{public-surface,internal-surface,gesture-intent}.ts`; the whole
@@ -17,9 +24,12 @@ import { readFileSync, readdirSync } from "node:fs";
 import { join } from "node:path";
 
 const TARGETS = [
-  "src/ipc/domains/chat.ts",
-  "src/ipc/domains/plugins.ts",
-  "src/ipc/domains/settings.ts",
+  // Every IPC domain module (read dynamically so a new domain is covered
+  // automatically). `__tests__/` is a subdirectory, not a `.ts` file, so it
+  // is excluded from the `.endsWith(".ts")` filter.
+  ...readdirSync(join(process.cwd(), "src/ipc/domains"))
+    .filter((f) => f.endsWith(".ts"))
+    .map((f) => `src/ipc/domains/${f}`),
   "src/preload.ts",
   // Every TS module in the preload surface split (public/internal/gesture).
   ...readdirSync(join(process.cwd(), "src/preload"))

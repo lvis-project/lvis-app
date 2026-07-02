@@ -110,7 +110,15 @@ import {
   CONTRACT_VERSION,
   PUBLIC_CHANNELS,
   CHANNEL_GESTURE,
+  CHANNELS,
 } from "../app-contract.js";
+// M1 — exported domain channel consts, redefined to source from CHANNELS.
+import {
+  AUTH_LOGOUT_RESET_CHANNEL,
+  AUTH_REACTIVATE_DEMO_CHANNEL,
+} from "../../ipc/domains/demo.js";
+import { TOUR_START_CHANNEL } from "../../ipc/domains/tour.js";
+import { PROMPTS_UPDATED } from "../../ipc/domains/prompts.js";
 
 // Mirrors channel-inventory.test.ts — enumerated so `{ ...services }` carries a
 // live nested proxy for each field (no registrar destructure resolves undefined).
@@ -243,5 +251,26 @@ describe("#1409 contract version + public-surface freeze", () => {
       expect(inventory.has(channel), `gesture:required channel not registered: ${channel}`).toBe(true);
       expect(publicSet.has(channel), `gesture:required channel leaked into PUBLIC_CHANNELS: ${channel}`).toBe(false);
     }
+  });
+});
+
+// M1 — binding assertion. The remaining in-tree IPC domains previously
+// authored their exported channel consts (`AUTH_LOGOUT_RESET_CHANNEL`, …) as
+// independent `"lvis:*"` literals, diverging from the CHANNELS SOT. They are
+// now redefined to source from CHANNELS; this test binds the two authorings so
+// a future rename of either side fails HERE (a fast, deterministic unit test)
+// instead of silently breaking a cross-window renderer flow at runtime.
+describe("#1409 M1 — domain channel consts bind to their CHANNELS twins", () => {
+  it("AUTH_LOGOUT_RESET_CHANNEL === CHANNELS.auth.logoutReset", () => {
+    expect(AUTH_LOGOUT_RESET_CHANNEL).toBe(CHANNELS.auth.logoutReset);
+  });
+  it("AUTH_REACTIVATE_DEMO_CHANNEL === CHANNELS.auth.reactivateDemo", () => {
+    expect(AUTH_REACTIVATE_DEMO_CHANNEL).toBe(CHANNELS.auth.reactivateDemo);
+  });
+  it("TOUR_START_CHANNEL === CHANNELS.tour.start", () => {
+    expect(TOUR_START_CHANNEL).toBe(CHANNELS.tour.start);
+  });
+  it("PROMPTS_UPDATED === CHANNELS.prompts.updated", () => {
+    expect(PROMPTS_UPDATED).toBe(CHANNELS.prompts.updated);
   });
 });
