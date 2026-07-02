@@ -20,6 +20,7 @@ import {
   __resetActiveSandboxCapabilityForTest,
   __resetWrappedPluginWorkersForTest,
   markPluginWorkerWrapped,
+  unmarkPluginWorkerWrapped,
   setActiveSandboxCapability,
 } from "../sandbox-capability.js";
 
@@ -154,6 +155,47 @@ describe("PermissionManager.dispatchReviewer", () => {
     const second = await pm.dispatchReviewer("fs_write", input);
     expect(second.cacheReason).toBe("hit");
     expect(second.verdict).toEqual(first.verdict);
+  });
+
+  it("does not replay a plugin-worker relaxed verdict after the worker un-wraps", async () => {
+    setActiveSandboxCapability({
+      kind: "asrt",
+      confidence: "verified",
+      platform: "darwin",
+      reason: "ASRT active",
+      confines: { filesystem: true, process: true, network: true },
+    });
+    const classifier: RiskClassifier = {
+      classify: vi.fn((ctx: ToolInvocationContext): RiskVerdict => (
+        ctx.sandboxCapability.kind === "asrt"
+          ? { level: "low", reason: "wrapped worker relaxation" }
+          : { level: "high", reason: "unwrapped worker must re-review" }
+      )),
+    };
+    pm.setReviewer({ classifier, cache, deferredQueue: queue });
+    const input = {
+      source: "plugin" as const,
+      category: "network" as const,
+      pathFields: [],
+      pluginId: "local-indexer",
+      workerId: "embed",
+      finalInput: { url: "https://api.example.com/index" },
+      allowedDirectories: [],
+      sensitivePathsAdjacent: [],
+      trustOrigin: "llm-tool-arg" as const,
+      conversationContext: { recentUserMessage: "인덱스 상태를 확인해줘." },
+    };
+
+    markPluginWorkerWrapped("local-indexer", "embed");
+    const wrapped = await pm.dispatchReviewer("index_fetch", input);
+    expect(wrapped.cacheReason).toBe("miss-not-found");
+    expect(wrapped.verdict.level).toBe("low");
+
+    unmarkPluginWorkerWrapped("local-indexer", "embed");
+    const unwrapped = await pm.dispatchReviewer("index_fetch", input);
+    expect(unwrapped.cacheReason).toBe("miss-stale");
+    expect(unwrapped.verdict.level).toBe("high");
+    expect(classifier.classify).toHaveBeenCalledTimes(2);
   });
 
   it("partitions reviewer cache by trustOrigin and approvalCacheKey", async () => {
