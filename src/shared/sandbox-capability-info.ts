@@ -110,10 +110,10 @@ export interface SandboxCapabilityInfo {
 
 /**
  * Compute the per-platform confinement profile — a pure (no-I/O) mapping of
- * `(platform, kind)` to what is confined. `kind` reflects the platform's
- * confinement STRENGTH (the caller derives it from the platform, not from a
- * registered runner), so this describes the platform's POTENTIAL confinement;
- * `"none"` reports nothing confined.
+ * `(platform, kind)` to what is confined. `kind` is authoritative: `"full"`
+ * means every dimension is confined, `"partial"` means a known weaker profile,
+ * and `"none"` reports nothing confined. Unsupported platforms fail closed even
+ * if a non-none kind is passed.
  */
 export function sandboxConfinementForPlatform(
   platform: NodeJS.Platform,
@@ -122,14 +122,10 @@ export function sandboxConfinementForPlatform(
   if (kind === "none") {
     return { filesystem: false, process: false, network: false };
   }
-  if (platform === "darwin") {
-    // Seatbelt via ASRT confines fs + process; network egress is contained by
-    // ASRT's loopback proxy + global strict-union allow-list (REAL floor, not
-    // the old sandbox-exec fake floor).
-    return { filesystem: true, process: true, network: true };
+  if (platform !== "darwin" && platform !== "linux" && platform !== "win32") {
+    return { filesystem: false, process: false, network: false };
   }
-  if (platform === "linux") {
-    // bwrap via ASRT confines fs + pid + net.
+  if (kind === "full") {
     return { filesystem: true, process: true, network: true };
   }
   if (platform === "win32") {
@@ -139,6 +135,7 @@ export function sandboxConfinementForPlatform(
     // substrate remains partial.
     return { filesystem: true, process: false, network: true };
   }
-  // Anything else: fail-closed, no sandbox.
-  return { filesystem: false, process: false, network: false };
+  // Generic partial profile for any future non-Windows partial backend:
+  // filesystem + network may be present, but process isolation is not claimed.
+  return { filesystem: true, process: false, network: true };
 }
