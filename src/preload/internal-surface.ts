@@ -322,6 +322,53 @@ export function buildInternalApiSurface() {
       return () => ipcRenderer.removeListener(CHANNELS.auth.reactivateDemo, listener);
     },
   },
+  // ─── Interactive PTY terminal (#1444) ────────────────
+  // Host-renderer-only surface. spawn/input/resize/kill are invokes; onData /
+  // onExit subscribe to main→renderer events and return an unsubscribe fn (the
+  // settings.updated / auth.progress pattern). All channels are INTERNAL — an
+  // external origin can never reach them (fail-closed isPublicChannel).
+  terminal: {
+    spawn: async (payload: { tabId: string; cwd?: string; cols?: number; rows?: number }) =>
+      ipcRenderer.invoke(CHANNELS.terminal.spawn, payload) as Promise<
+        | { ok: true; tabId: string; replayed: boolean }
+        | { ok: false; reason: string; message: string }
+      >,
+    input: async (tabId: string, data: string) =>
+      ipcRenderer.invoke(CHANNELS.terminal.input, { tabId, data }) as Promise<
+        { ok: true } | { ok: false; error: string }
+      >,
+    resize: async (tabId: string, cols: number, rows: number) =>
+      ipcRenderer.invoke(CHANNELS.terminal.resize, { tabId, cols, rows }) as Promise<
+        { ok: true } | { ok: false; error: string }
+      >,
+    kill: async (tabId: string) =>
+      ipcRenderer.invoke(CHANNELS.terminal.kill, { tabId }) as Promise<
+        { ok: true } | { ok: false; error: string }
+      >,
+    onData: (handler: (payload: { tabId: string; chunk: string }) => void) => {
+      const listener = (_event: unknown, payload: { tabId?: unknown; chunk?: unknown }) => {
+        if (typeof payload?.tabId !== "string" || typeof payload?.chunk !== "string") return;
+        handler({ tabId: payload.tabId, chunk: payload.chunk });
+      };
+      ipcRenderer.on(CHANNELS.terminal.data, listener);
+      return () => ipcRenderer.removeListener(CHANNELS.terminal.data, listener);
+    },
+    onExit: (handler: (payload: { tabId: string; exitCode: number; signal?: number }) => void) => {
+      const listener = (
+        _event: unknown,
+        payload: { tabId?: unknown; exitCode?: unknown; signal?: unknown },
+      ) => {
+        if (typeof payload?.tabId !== "string" || typeof payload?.exitCode !== "number") return;
+        handler({
+          tabId: payload.tabId,
+          exitCode: payload.exitCode,
+          ...(typeof payload?.signal === "number" ? { signal: payload.signal } : {}),
+        });
+      };
+      ipcRenderer.on(CHANNELS.terminal.exit, listener);
+      return () => ipcRenderer.removeListener(CHANNELS.terminal.exit, listener);
+    },
+  },
   /**
    * Demo activation bridge. `status` reads main's captured demo state after
    * packaged env scrub. `activate` receives a pasted `LVIS-DEMO:v1:<...>`

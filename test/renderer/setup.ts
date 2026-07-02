@@ -74,6 +74,9 @@ if (typeof window !== "undefined") {
   }
   if (!window.ResizeObserver) {
     window.ResizeObserver = class ResizeObserver {
+      // Match the real ResizeObserver(callback) signature so production
+      // `new ResizeObserver(cb)` is not flagged as a superfluous argument.
+      constructor(_callback: ResizeObserverCallback) {}
       observe() {}
       unobserve() {}
       disconnect() {}

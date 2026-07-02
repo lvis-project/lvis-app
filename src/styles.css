@@ -12,6 +12,11 @@
  *   per-bundle CSS-variable values defined below. */
 @import "tailwindcss";
 
+/* xterm.js base stylesheet (#1444 workspace terminal). The renderer has no
+ * webpack css-loader, so xterm's required layout CSS is pulled into the single
+ * Tailwind-built stylesheet here rather than via a TSX `import "…/xterm.css"`. */
+@import "@xterm/xterm/css/xterm.css";
+
 @plugin "@tailwindcss/typography";
 
 @source "./**/*.{ts,tsx,html}";
