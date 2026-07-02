@@ -257,11 +257,12 @@ test.describe("chat preview rail", () => {
       const rail = ctx.page.getByTestId("chat-preview-rail");
       await expect(panel).toBeVisible({ timeout: 10_000 });
       await expect(rail).toBeVisible({ timeout: 10_000 });
+      // Redesigned rail opens EMPTY to the launcher (no default tabs, no mode
+      // toggles). Open the file-browser surface from the launcher to review files.
+      await expect(ctx.page.getByTestId("chat-side-panel-launcher")).toBeVisible();
+      await ctx.page.getByTestId("chat-side-panel-launcher-file-browser").click();
+      await expect(ctx.page.getByTestId("chat-side-panel-tab-file-browser")).toBeVisible();
       await expect(rail).toContainText("report.md");
-      await expect(ctx.page.getByTestId("chat-side-panel-mode-files")).toBeVisible();
-      await expect(ctx.page.getByTestId("chat-side-panel-mode-preview")).toBeVisible();
-      await expect(ctx.page.getByTestId("chat-side-panel-mode-browser")).toBeVisible();
-      await expect(ctx.page.getByTestId("chat-side-panel-mode-terminal")).toBeVisible();
       await expect(ctx.page.getByTestId("chat-side-panel-file-tree")).toBeVisible();
       await expect(ctx.page.getByTestId("chat-side-panel-file-splitter")).toBeVisible();
       const splitLayout = ctx.page.getByTestId("chat-side-panel-file-split-layout");
@@ -275,15 +276,16 @@ test.describe("chat preview rail", () => {
       await ctx.page.mouse.up();
       await expect.poll(async () => splitLayout.evaluate((element) => (element as HTMLElement).style.gridTemplateRows)).not.toBe(splitBeforeDrag);
 
+      // Open a browser surface via the single "+" launcher dropdown (the old
+      // per-kind add buttons + mode toggles are gone; one SOT list drives both
+      // the empty-state launcher and this menu).
       const tabCountBefore = await ctx.page.getByRole("tab").count();
-      await ctx.page.getByTestId("chat-side-panel-add-browser-tab").click();
+      const addTabTrigger = ctx.page.getByTestId("chat-side-panel-add-tab");
+      await addTabTrigger.dispatchEvent("pointerdown");
+      await ctx.page.getByTestId("chat-side-panel-launcher-menu-browser").click();
       await expect(ctx.page.getByRole("tab")).toHaveCount(tabCountBefore + 1);
-
-      await ctx.page.getByTestId("chat-side-panel-mode-browser").click();
+      await expect(ctx.page.getByTestId("chat-side-panel-tab-browser")).toBeVisible();
       await expect(ctx.page.getByTestId("chat-side-panel-tab-actions")).toBeVisible();
-      await expect(ctx.page.getByTestId("chat-side-panel-add-file-browser-tab")).toBeVisible();
-      await expect(ctx.page.getByTestId("chat-side-panel-add-browser-tab")).toBeVisible();
-      await expect(ctx.page.getByTestId("chat-side-panel-add-terminal-tab")).toBeVisible();
       await expect(rail).toContainText("Artifact dashboard");
       await expect(rail).toContainText(sideBrowserHost);
       await expect(ctx.page.getByTestId("chat-side-panel-browser-viewer")).toBeVisible();
@@ -302,23 +304,8 @@ test.describe("chat preview rail", () => {
       await expect(directBrowserWebview).toBeVisible();
       await expect(directBrowserWebview).toHaveAttribute("src", sideBrowser.url);
 
-      await ctx.page.setViewportSize({ width: 900, height: 860 });
-      await expect(panel).not.toHaveCSS("position", "absolute");
-      const narrowRootBox = await ctx.page.getByTestId("chat-view-root").boundingBox();
-      const narrowMainBox = await ctx.page.getByTestId("chat-main-column").boundingBox();
-      const narrowRailBox = await panel.boundingBox();
-      expect(narrowRootBox).not.toBeNull();
-      expect(narrowMainBox).not.toBeNull();
-      expect(narrowRailBox).not.toBeNull();
-      expect(Math.abs((narrowRailBox!.x + narrowRailBox!.width) - (narrowRootBox!.x + narrowRootBox!.width))).toBeLessThanOrEqual(2);
-      expect(narrowRailBox!.x).toBeGreaterThanOrEqual(narrowMainBox!.x + narrowMainBox!.width - 2);
-      expect(
-        await ctx.page.locator('button[aria-label="사이드 패널 닫기"]').evaluateAll((buttons) =>
-          buttons.some((button) => button.className.includes("absolute inset-0")),
-        ),
-      ).toBe(false);
-      await ctx.page.setViewportSize({ width: 1280, height: 860 });
-
+      // The narrow-screen drawer fallback is covered by workspace-rail-redesign.spec.ts;
+      // this spec stays at a docked viewport to exercise the side-by-side geometry.
       await ctx.page.getByTestId("chat-side-panel-browser-row").nth(1).click();
       const browserWebview = ctx.page.getByTestId("chat-side-panel-browser-webview");
       await expect(browserWebview).toBeVisible();
@@ -353,7 +340,12 @@ test.describe("chat preview rail", () => {
         body: Buffer.from(capturedGuest.pngBase64, "base64"),
       });
 
-      await ctx.page.getByTestId("chat-side-panel-mode-preview").click();
+      // Open a preview surface via the "+" dropdown; it lists non-browser,
+      // non-file targets only, so the html artifact + fetched host drop out.
+      const addPreviewTrigger = ctx.page.getByTestId("chat-side-panel-add-tab");
+      await addPreviewTrigger.dispatchEvent("pointerdown");
+      await ctx.page.getByTestId("chat-side-panel-launcher-menu-preview").click();
+      await expect(ctx.page.getByTestId("chat-side-panel-tab-preview")).toBeVisible();
       await expect(rail).not.toContainText("Artifact dashboard");
       await expect(rail).not.toContainText(sideBrowserHost);
 
@@ -414,7 +406,8 @@ test.describe("chat preview rail", () => {
       await ctx.page.getByTestId("action-panel-close").click();
       await expect(ctx.page.getByTestId("action-panel-rail")).toBeVisible();
 
-      await ctx.page.getByTestId("chat-side-panel-mode-files").click();
+      // Switch back to the earlier file-browser tab (still open) to filter files.
+      await ctx.page.getByTestId("chat-side-panel-tab-file-browser").click();
       await expect(rail).toContainText("notes.md");
       await expect(rail).toContainText("report.md");
       await ctx.page.getByTestId("chat-preview-search").fill("report");
