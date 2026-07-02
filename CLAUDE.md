@@ -113,14 +113,21 @@ src/
                                 INTERNAL_HOST_CHANNELS out-of-tree classification),
                                 events.ts (AppEvent union), trust-origin.ts.
 
-  api/                        — #1409 C12 external surface: local-api.ts
+  api/                        — #1409 external surface (#1436): local-api.ts
                                 dispatch({channel,args,origin}) over the same
-                                contract as the renderer, non-renderer TrustOrigin;
-                                network server is the #1409 follow-up.
-  sdk/                        — #1409 C12 narrow typed LvisClient facade over
-                                local-api (read+send only; mutating ops omitted).
-  cli/                        — #1409 C12 command table + runCommand(argv, client);
-                                scaffold only — no process bin/entrypoint (follow-up).
+                                contract as the renderer (fail-closed); http-server.ts
+                                loopback node:http transport (127.0.0.1, Bearer secret,
+                                POST /v1/dispatch + GET /v1/events SSE + /v1/health);
+                                stream-broadcaster.ts (chat-stream fan-out). Opt-in
+                                lifecycle: src/main/local-api-server.ts (Settings
+                                system.localApiServer or LVIS_LOCAL_API=1, default OFF;
+                                discovery ~/.lvis/local-api/server.json via
+                                openFeatureNamespace; closed in app-shutdown).
+  sdk/                        — #1409 narrow typed LvisClient facade over any
+                                LocalApi<string> (read+send only; mutating ops omitted).
+  cli/                        — #1409 CLI (#1436): commands.ts table + http-client.ts
+                                HTTP transport; entry scripts/lvis-cli.ts
+                                (`bun run cli -- <command>`). Thin client, zero agent logic.
 
   mcp/                        — Model Context Protocol client (unchanged)
 
