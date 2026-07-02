@@ -14,6 +14,12 @@ import { type ReactNode } from "react";
 import { useTranslation } from "../../../i18n/react.js";
 import { Button } from "../../../components/ui/button.js";
 import { Tooltip, TooltipContent, TooltipTrigger } from "../../../components/ui/tooltip.js";
+import {
+  ContextMenu,
+  ContextMenuContent,
+  ContextMenuItem,
+  ContextMenuTrigger,
+} from "../../../components/ui/context-menu.js";
 
 export interface ActionPanelActivityItem {
   id: string;
@@ -41,7 +47,18 @@ export interface ActionPanelProps {
   open: boolean;
   onOpenChange: (open: boolean) => void;
   activity: ActionPanelActivityState;
-  onOpenExternalUrl?: (url: string) => void;
+  /**
+   * Left-click a row → route the item in-app (§6.10.5). `web` distinguishes a
+   * web URL (→ browser tab) from a local file path (→ file-browser preview).
+   */
+  onOpenItem?: (target: string, web: boolean) => void;
+  /**
+   * Double-click a row → open (and keep) the item as a pinned tab (VS Code
+   * preview-tab model: single-click = ephemeral, double-click = pinned).
+   */
+  onOpenItemPinned?: (target: string, web: boolean) => void;
+  /** Right-click "open in system app". Only offered for web rows (see §5). */
+  onOpenItemInSystemApp?: (target: string, web: boolean) => void;
 }
 
 const ACTIVITY_PREVIEW_LIMIT = 5;
@@ -71,12 +88,16 @@ function ActivitySection({
   icon: Icon,
   items,
   onOpenItem,
+  onOpenItemPinned,
+  onOpenItemInSystemApp,
   web = false,
 }: {
   title: string;
   icon: LucideIcon;
   items: ActionPanelActivityItem[];
-  onOpenItem?: (target: string) => void;
+  onOpenItem?: (target: string, web: boolean) => void;
+  onOpenItemPinned?: (target: string, web: boolean) => void;
+  onOpenItemInSystemApp?: (target: string, web: boolean) => void;
   web?: boolean;
 }) {
   const { t } = useTranslation();
@@ -122,18 +143,45 @@ function ActivitySection({
               )}
             </>
           );
+          const canCopy = Boolean(item.target);
+          const canOpenInSystemApp = Boolean(item.target && web && onOpenItemInSystemApp);
           return (
             <li key={item.id}>
               {item.target && onOpenItem ? (
-                <button
-                  type="button"
-                  className="flex w-full min-w-0 items-start gap-2 rounded-md bg-muted/(--opacity-faint) px-2 py-1.5 text-left text-xs hover:bg-accent focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
-                  data-testid={`action-panel-activity-${item.id}`}
-                  title={titleText}
-                  onClick={() => onOpenItem(item.target!)}
-                >
-                  {rowContent}
-                </button>
+                <ContextMenu>
+                  <ContextMenuTrigger asChild>
+                    <button
+                      type="button"
+                      className="flex w-full min-w-0 items-start gap-2 rounded-md bg-muted/(--opacity-faint) px-2 py-1.5 text-left text-xs hover:bg-accent focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+                      data-testid={`action-panel-activity-${item.id}`}
+                      title={titleText}
+                      onClick={() => onOpenItem(item.target!, web)}
+                      onDoubleClick={() => (onOpenItemPinned ?? onOpenItem)(item.target!, web)}
+                    >
+                      {rowContent}
+                    </button>
+                  </ContextMenuTrigger>
+                  {canOpenInSystemApp || canCopy ? (
+                    <ContextMenuContent className="min-w-[10rem]" data-testid="action-panel-context-menu">
+                      {canOpenInSystemApp ? (
+                        <ContextMenuItem
+                          data-testid="action-panel-open-in-system-app"
+                          onSelect={() => onOpenItemInSystemApp?.(item.target!, web)}
+                        >
+                          {t("actionPanel.openInSystemApp")}
+                        </ContextMenuItem>
+                      ) : null}
+                      {canCopy ? (
+                        <ContextMenuItem
+                          data-testid="action-panel-copy-target"
+                          onSelect={() => void navigator.clipboard?.writeText(item.target!)}
+                        >
+                          {t(web ? "actionPanel.copyUrl" : "actionPanel.copyPath")}
+                        </ContextMenuItem>
+                      ) : null}
+                    </ContextMenuContent>
+                  ) : null}
+                </ContextMenu>
               ) : (
                 <div
                   className="flex min-w-0 items-start gap-2 rounded-md bg-muted/(--opacity-faint) px-2 py-1.5 text-xs"
@@ -226,7 +274,9 @@ export function ActionPanel({
   open,
   onOpenChange,
   activity,
-  onOpenExternalUrl,
+  onOpenItem,
+  onOpenItemPinned,
+  onOpenItemInSystemApp,
 }: ActionPanelProps) {
   const { t } = useTranslation();
   const allStats = [
@@ -323,17 +373,25 @@ export function ActionPanel({
           title={t("actionPanel.readFilesTitle")}
           icon={FileText}
           items={activity.readFiles}
+          onOpenItem={onOpenItem}
+          onOpenItemPinned={onOpenItemPinned}
+          onOpenItemInSystemApp={onOpenItemInSystemApp}
         />
         <ActivitySection
           title={t("actionPanel.writtenFilesTitle")}
           icon={FilePenLine}
           items={activity.writtenFiles}
+          onOpenItem={onOpenItem}
+          onOpenItemPinned={onOpenItemPinned}
+          onOpenItemInSystemApp={onOpenItemInSystemApp}
         />
         <ActivitySection
           title={t("actionPanel.fetchedPagesTitle")}
           icon={Globe2}
           items={activity.fetchedPages}
-          onOpenItem={onOpenExternalUrl}
+          onOpenItem={onOpenItem}
+          onOpenItemPinned={onOpenItemPinned}
+          onOpenItemInSystemApp={onOpenItemInSystemApp}
           web
         />
       </div>

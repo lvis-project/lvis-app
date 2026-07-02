@@ -2,6 +2,7 @@ import { safeStorage } from "electron";
 import { closeSync, existsSync, fchmodSync, fstatSync, mkdirSync, openSync, readFileSync, writeFileSync } from "node:fs";
 import { dirname, resolve } from "node:path";
 import { withFileLock } from "../lib/with-file-lock.js";
+import { SIDE_PANEL_DEFAULT_WIDTH, SIDE_PANEL_MIN_WIDTH } from "../shared/side-panel.js";
 import {
   sanitizePluginConfig,
   sanitizePluginConfigKey,
@@ -353,6 +354,12 @@ export interface SystemSettings {
    * other flag: it only controls whether the aux transport is started.
    */
   localApiServer?: boolean;
+  /**
+   * Persisted width (px) of the docked ChatSidePanel workspace rail, set by the
+   * left-edge drag handle. Durable shell-layout preference; clamped to
+   * [SIDE_PANEL_MIN_WIDTH, viewport) at drag time in the renderer. Default 448.
+   */
+  sidePanelWidth?: number;
 }
 
 /**
@@ -526,6 +533,7 @@ const DEFAULT_SETTINGS: AppSettings = {
     // Opt-in loopback API server — OFF by default (also enabled by env
     // LVIS_LOCAL_API=1). #1409/#1436.
     localApiServer: false,
+    sidePanelWidth: SIDE_PANEL_DEFAULT_WIDTH,
   },
   plugins: {},
   pluginConfigs: {},
@@ -746,6 +754,15 @@ export class SettingsService {
         log.warn(
           `system.localApiServer patch ignored (received ${JSON.stringify(rawLocalApi)}), keeping %s`,
           this.settings.system.localApiServer,
+        );
+      }
+      const rawSidePanelWidth = partial.system.sidePanelWidth;
+      if (typeof rawSidePanelWidth === "number" && Number.isFinite(rawSidePanelWidth)) {
+        next.sidePanelWidth = Math.max(SIDE_PANEL_MIN_WIDTH, Math.round(rawSidePanelWidth));
+      } else if (rawSidePanelWidth !== undefined) {
+        log.warn(
+          `system.sidePanelWidth patch ignored (received ${JSON.stringify(rawSidePanelWidth)}), keeping %s`,
+          this.settings.system.sidePanelWidth,
         );
       }
       this.settings.system = next;
@@ -1266,7 +1283,7 @@ function normalizeSystem(input: unknown): SystemSettings {
   if (!input || typeof input !== "object" || Array.isArray(input)) {
     return { ...DEFAULT_SETTINGS.system };
   }
-  const obj = input as { closeBehavior?: unknown; appMode?: unknown; localApiServer?: unknown };
+  const obj = input as { closeBehavior?: unknown; appMode?: unknown; localApiServer?: unknown; sidePanelWidth?: unknown };
   // Each field is normalized independently: a missing/invalid field falls
   // back to its default while a valid sibling is preserved (mirrors the
   // per-field patch path in `update`).
@@ -1300,6 +1317,15 @@ function normalizeSystem(input: unknown): SystemSettings {
     log.warn(
       `system.localApiServer invalid (received ${JSON.stringify(rawLocalApi)}), using default %s`,
       DEFAULT_SETTINGS.system.localApiServer,
+    );
+  }
+  const rawSidePanelWidth = obj.sidePanelWidth;
+  if (typeof rawSidePanelWidth === "number" && Number.isFinite(rawSidePanelWidth)) {
+    result.sidePanelWidth = Math.max(SIDE_PANEL_MIN_WIDTH, Math.round(rawSidePanelWidth));
+  } else if (rawSidePanelWidth !== undefined) {
+    log.warn(
+      `system.sidePanelWidth invalid (received ${JSON.stringify(rawSidePanelWidth)}), using default %s`,
+      SIDE_PANEL_DEFAULT_WIDTH,
     );
   }
   return result;

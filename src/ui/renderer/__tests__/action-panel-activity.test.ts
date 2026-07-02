@@ -142,5 +142,10 @@ describe("computeActionPanelActivity", () => {
     expect(activity.readFiles[0]?.label).toBe("/b.ts");
     expect(activity.fetchedPages[0]?.label).toBe("https://x.com");
     expect(activity.fetchedPages[0]?.target).toBe("https://x.com/page");
+    // Read/written rows carry their path as `target` so ActionPanel can route
+    // them to an in-app preview (§6.10.5). No opener is triggered — the target
+    // is only a routing key.
+    expect(activity.writtenFiles[0]?.target).toBe("/a.ts");
+    expect(activity.readFiles[0]?.target).toBe("/b.ts");
   });
 });

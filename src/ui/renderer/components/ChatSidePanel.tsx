@@ -1,5 +1,5 @@
 import { createElement, useEffect, useMemo, useRef, useState, type ReactElement } from "react";
-import type { WorkspaceTabKind, WorkspaceTabsStore } from "../preview/workspace-tabs.js";
+import type { WorkspaceTab, WorkspaceTabKind, WorkspaceTabsStore } from "../preview/workspace-tabs.js";
 import {
   WORKSPACE_TAB_LAUNCHER,
   matchesLauncherShortcut,
@@ -17,6 +17,7 @@ import {
   Image,
   LayoutGrid,
   PanelRightClose,
+  Pin,
   Plug,
   Plus,
   Search,
@@ -38,8 +39,11 @@ import {
 import { useTranslation } from "../../../i18n/react.js";
 import { wrapRenderHtmlInlineFrameDocument } from "../../../shared/render-html-preview.js";
 import { LVIS_SIDE_BROWSER_PARTITION } from "../../../shared/side-browser.js";
+import { SIDE_PANEL_MIN_WIDTH } from "../../../shared/side-panel.js";
 import type { LvisApi } from "../types.js";
 import type { ChatPreviewTarget, WorkspaceFileItem } from "../preview/preview-targets.js";
+import { normalizeBrowserNavigationUrl } from "../preview/url-safety.js";
+import { PreviewContent } from "../preview/preview-renderers.js";
 import { FileEditDiff } from "./FileEditDiff.js";
 import { ToolPayloadBlock } from "./ToolPayloadBlock.js";
 import { McpAppView } from "./McpAppView.js";
@@ -60,19 +64,6 @@ const FILE_TREE_MAX_PERCENT = 72;
 
 function clampNumber(value: number, min: number, max: number): number {
   return Math.min(max, Math.max(min, value));
-}
-
-function normalizeBrowserNavigationUrl(value: string): string | null {
-  const trimmed = value.trim();
-  if (!trimmed) return null;
-  const candidate = /^[a-z][a-z0-9+.-]*:\/\//i.test(trimmed) ? trimmed : `https://${trimmed}`;
-  try {
-    const url = new URL(candidate);
-    if ((url.protocol !== "http:" && url.protocol !== "https:") || url.username || url.password) return null;
-    return url.toString();
-  } catch {
-    return null;
-  }
 }
 
 function targetIcon(kind: ChatPreviewTarget["kind"]) {
@@ -333,6 +324,9 @@ function PreviewBody({
         <div className="rounded-md border bg-muted/(--opacity-muted) px-3 py-2 font-mono text-[11px] [overflow-wrap:anywhere]">
           {target.path}
         </div>
+        {target.inlineText ? (
+          <PreviewContent descriptor={{ text: target.inlineText, path: target.path }} />
+        ) : null}
         <div className="flex flex-wrap gap-2">
           {target.canOpenExternal ? (
             <Button type="button" size="sm" variant="outline" onClick={() => void window.lvis.attach.openExternal(target.path)}>
@@ -340,9 +334,9 @@ function PreviewBody({
               <span>{t("chatPreviewRail.openFile")}</span>
             </Button>
           ) : null}
-          <CopyButton value={rawText} />
+          <CopyButton value={target.inlineText ?? rawText} />
         </div>
-        {!target.canOpenExternal ? (
+        {!target.canOpenExternal && !target.inlineText ? (
           <div className="text-[11px] text-muted-foreground">{t("chatPreviewRail.pathOnlyHint")}</div>
         ) : null}
       </div>
@@ -393,7 +387,7 @@ function PreviewBody({
       {target.kind === "tool-result" && target.isStub && loadedStub == null && !loadError ? (
         <div className="text-xs text-muted-foreground">{t("chatPreviewRail.loadingFullResult")}</div>
       ) : null}
-      <TextBlock text={rawText} />
+      <PreviewContent descriptor={{ text: rawText, filename: target.title }} />
       <CopyButton value={rawText} />
     </div>
   );
@@ -425,14 +419,11 @@ function BrowserDocumentViewer({ target }: { target: Extract<ChatPreviewTarget, 
 
 function UrlDocumentViewer({ api, target }: { api: LvisApi; target: Extract<ChatPreviewTarget, { kind: "url" }> }) {
   const { t } = useTranslation();
-  const url = useMemo(() => {
-    try {
-      const parsed = new URL(target.url);
-      return parsed.protocol === "http:" || parsed.protocol === "https:" ? parsed.toString() : null;
-    } catch {
-      return null;
-    }
-  }, [target.url]);
+  // Single URL-safety SOT (rejects non-http(s) + credential-laden urls). This is
+  // the viewer boundary the url-safety header documents — it must not diverge
+  // from the store / main-process checks, so it calls the shared validator
+  // rather than re-implementing a weaker inline protocol-only check.
+  const url = useMemo(() => normalizeBrowserNavigationUrl(target.url), [target.url]);
 
   if (!url) {
     return (
@@ -1042,6 +1033,89 @@ function tabTestId(kind: WorkspaceTabKind): string {
 }
 
 /**
+ * Tab label: container tabs show `{kind} {ordinal}` (e.g. "Browser 2"); content
+ * tabs show the item they point at (preview-target title, or the URL host).
+ */
+function tabLabel(
+  tab: WorkspaceTab,
+  targetById: Map<string, ChatPreviewTarget>,
+  t: (key: string) => string,
+): string {
+  if (!tab.content) return `${t(tabLabelKey(tab.kind))} ${tab.ordinal}`;
+  if (tab.content.source === "browser") {
+    try {
+      return new URL(tab.content.url).hostname || tab.content.url;
+    } catch {
+      return tab.content.url;
+    }
+  }
+  return targetById.get(tab.content.targetId)?.title ?? t(tabLabelKey("preview"));
+}
+
+/**
+ * Renders a CONTENT tab — a tab that points at one specific item. Browser
+ * content reuses the sandboxed webview shell (`UrlDocumentViewer`); preview
+ * content renders its target via the shared detail/body pair. Unlike container
+ * tabs it does not carry the per-kind list — it shows exactly one thing.
+ */
+function ContentTabView({
+  api,
+  sessionId,
+  tab,
+  targetById,
+}: {
+  api: LvisApi;
+  sessionId?: string;
+  tab: WorkspaceTab;
+  targetById: Map<string, ChatPreviewTarget>;
+}) {
+  const { t } = useTranslation();
+  const content = tab.content;
+  // Memoized synthetic url target for browser content tabs — rebuilding it every
+  // render would remount the sandboxed webview on unrelated re-renders. The url
+  // is already store-validated (normalizeContentRef) and re-validated by the
+  // shared url-safety SOT inside UrlDocumentViewer; `new URL` here only derives
+  // the display title, not a safety gate.
+  const browserTarget = useMemo<Extract<ChatPreviewTarget, { kind: "url" }> | null>(() => {
+    if (content?.source !== "browser") return null;
+    let title: string;
+    try {
+      title = new URL(content.url).hostname || content.url;
+    } catch {
+      title = content.url;
+    }
+    return {
+      id: `content-browser:${tab.id}`,
+      kind: "url",
+      title,
+      sourceLabel: t("chatPreviewRail.manualUrlSource"),
+      createdOrder: Number.MAX_SAFE_INTEGER,
+      url: content.url,
+    };
+  }, [content, tab.id, t]);
+  if (!content) return null;
+  if (browserTarget) {
+    return <UrlDocumentViewer api={api} target={browserTarget} />;
+  }
+  const target = content.source === "preview" ? targetById.get(content.targetId) : undefined;
+  if (!target) {
+    return (
+      <div className="p-4 text-xs text-muted-foreground" data-testid="chat-side-panel-content-unavailable" data-tab-id={tab.id}>
+        {t("chatPreviewRail.contentUnavailable")}
+      </div>
+    );
+  }
+  return (
+    <div className="h-full min-h-0 overflow-auto p-3" data-testid="chat-side-panel-content-view" data-tab-id={tab.id}>
+      <div className="space-y-3">
+        <DetailHeader target={target} />
+        <PreviewBody api={api} sessionId={sessionId} target={target} />
+      </div>
+    </div>
+  );
+}
+
+/**
  * The launcher item list (§6.10.3), rendered from the single SOT
  * `WORKSPACE_TAB_LAUNCHER` in `command-actions.ts`. It is used in TWO places —
  * the empty-state picker (`WorkspaceLauncher`) and the tab-bar "+" dropdown
@@ -1184,6 +1258,18 @@ export interface ChatSidePanelProps {
    * level so tab state survives.
    */
   workspaceTabs: WorkspaceTabsStore;
+  /** Docked panel width (px), owned by ChatView (useSidePanelWidth). */
+  width: number;
+  /** Drag-live width update — state only, no persist. */
+  onWidthChange: (px: number) => void;
+  /** Persist width (drag-end / keyboard step). */
+  onWidthCommit: (px: number) => void;
+  /**
+   * Docked variant applies the persisted width + drag handle. The narrow-screen
+   * drawer variant sets this false: the sheet controls width (w-full), so the
+   * inline width and left splitter are dropped.
+   */
+  resizable?: boolean;
   className?: string;
 }
 
@@ -1196,15 +1282,44 @@ export function ChatSidePanel({
   onSelect,
   onClose,
   workspaceTabs,
+  width,
+  onWidthChange,
+  onWidthCommit,
+  resizable = true,
   className = "",
 }: ChatSidePanelProps) {
   const { t } = useTranslation();
+  const asideRef = useRef<HTMLElement | null>(null);
+  const resizeCleanupRef = useRef<(() => void) | null>(null);
+  // Latest width, read by the drag-end cleanup closure (non-reactive) so the
+  // persisted value is exact.
+  const widthRef = useRef(width);
+  useEffect(() => {
+    widthRef.current = width;
+  }, [width]);
+  // Release any in-flight pointer capture on unmount (mirrors the file-tree
+  // splitter cleanup) so a drag crossing an unmount boundary leaks no listeners.
+  useEffect(() => () => resizeCleanupRef.current?.(), []);
+
+  // Compute the clamped docked width for a pointer x, or null if the panel is
+  // not mounted. Pure — it never touches React state (see the drag handler).
+  const widthForClientX = (clientX: number): number | null => {
+    const el = asideRef.current;
+    if (!el) return null;
+    const rect = el.getBoundingClientRect();
+    // 12rem viewport margin == the max-w-[calc(100vw-12rem)] safety cap.
+    const max = Math.max(SIDE_PANEL_MIN_WIDTH, window.innerWidth - 192);
+    // Panel is right-docked: the right edge is fixed, dragging the left edge
+    // leftwards widens it.
+    return clampNumber(Math.round(rect.right - clientX), SIDE_PANEL_MIN_WIDTH, max);
+  };
   const {
     tabs,
     activeTabId,
     browserUrlByTab,
     setActiveTabId,
     addTab,
+    promoteToPinned,
     closeTab,
     setBrowserTabUrl,
   } = workspaceTabs;
@@ -1252,17 +1367,90 @@ export function ChatSidePanel({
 
   return (
     <aside
+      ref={asideRef}
       data-testid="chat-side-panel"
+      style={resizable ? { width: `${width}px` } : undefined}
       className={`min-h-0 min-w-0 border-l border-border/(--opacity-strong) bg-background/(--opacity-solid) backdrop-blur ${className}`}
     >
+      {resizable ? (
+      <div
+        role="separator"
+        aria-orientation="vertical"
+        aria-label={t("chatPreviewRail.resizePanel")}
+        aria-valuenow={Math.round(width)}
+        aria-valuemin={SIDE_PANEL_MIN_WIDTH}
+        aria-valuemax={Math.round(Math.max(SIDE_PANEL_MIN_WIDTH, window.innerWidth - 192))}
+        tabIndex={0}
+        data-testid="chat-side-panel-width-splitter"
+        className="group absolute inset-y-0 left-0 z-50 flex w-2 -translate-x-1/2 cursor-col-resize touch-none select-none items-center justify-center outline-none"
+        onPointerDown={(event) => {
+          event.preventDefault();
+          event.currentTarget.setPointerCapture?.(event.pointerId);
+          resizeCleanupRef.current?.();
+          const el = asideRef.current;
+          let raf = 0;
+          // A drag applies width straight to the panel DOM (coalesced via rAF)
+          // and records it in widthRef — NOT React state — so a pointermove does
+          // not re-render the whole ChatView tree every frame. The final width is
+          // pushed to React state + persisted once on release.
+          const apply = (clientX: number) => {
+            const next = widthForClientX(clientX);
+            if (next == null) return;
+            widthRef.current = next;
+            if (raf) return;
+            raf = requestAnimationFrame(() => {
+              raf = 0;
+              if (el) el.style.width = `${widthRef.current}px`;
+            });
+          };
+          apply(event.clientX);
+          const onMove = (moveEvent: PointerEvent) => apply(moveEvent.clientX);
+          const cleanup = () => {
+            window.removeEventListener("pointermove", onMove);
+            window.removeEventListener("pointerup", cleanup);
+            window.removeEventListener("pointercancel", cleanup);
+            if (raf) cancelAnimationFrame(raf);
+            resizeCleanupRef.current = null;
+            onWidthChange(widthRef.current);
+            onWidthCommit(widthRef.current);
+          };
+          resizeCleanupRef.current = cleanup;
+          window.addEventListener("pointermove", onMove);
+          window.addEventListener("pointerup", cleanup);
+          window.addEventListener("pointercancel", cleanup);
+        }}
+        onKeyDown={(event) => {
+          const max = Math.max(SIDE_PANEL_MIN_WIDTH, window.innerWidth - 192);
+          const STEP = 16;
+          if (event.key === "ArrowLeft") {
+            event.preventDefault();
+            const v = clampNumber(width + STEP, SIDE_PANEL_MIN_WIDTH, max);
+            onWidthChange(v);
+            onWidthCommit(v);
+          } else if (event.key === "ArrowRight") {
+            event.preventDefault();
+            const v = clampNumber(width - STEP, SIDE_PANEL_MIN_WIDTH, max);
+            onWidthChange(v);
+            onWidthCommit(v);
+          } else if (event.key === "Home") {
+            event.preventDefault();
+            onWidthChange(SIDE_PANEL_MIN_WIDTH);
+            onWidthCommit(SIDE_PANEL_MIN_WIDTH);
+          } else if (event.key === "End") {
+            event.preventDefault();
+            onWidthChange(max);
+            onWidthCommit(max);
+          }
+        }}
+      >
+        <span className="h-full w-0.5 rounded-full bg-border transition-colors group-hover:bg-primary group-focus-visible:bg-primary" />
+      </div>
+      ) : null}
       <div data-testid="chat-preview-rail" className="flex h-full min-h-0 w-full min-w-0 flex-col overflow-hidden">
         <div className="flex h-12 shrink-0 items-center gap-2 border-b px-3">
           <PanelRightClose className="h-4 w-4 text-muted-foreground" />
           <div className="min-w-0 flex-1">
             <div className="truncate text-sm font-semibold">{t("chatPreviewRail.title")}</div>
-            <div className="truncate text-[11px] text-muted-foreground">
-              {t("chatPreviewRail.subtitle", { targets: targets.length, files: files.length })}
-            </div>
           </div>
           <div className="flex shrink-0 items-center gap-1">
             <Button type="button" size="icon-xs" variant="ghost" title={t("chatPreviewRail.close")} aria-label={t("chatPreviewRail.close")} onClick={onClose}>
@@ -1278,41 +1466,55 @@ export function ChatSidePanel({
             {tabs.map((tab) => {
               const Icon = tabIcon(tab.kind);
               const active = tab.id === activeTab?.id;
-              const label = t(tabLabelKey(tab.kind));
+              const label = tabLabel(tab, targetById, t);
+              const isEphemeral = tab.mode === "ephemeral";
               return (
-                <button
+                // Layout wrapper only (role="presentation"): the pin/close
+                // controls are SIBLINGS of the tab button, never nested inside
+                // it — an interactive-in-interactive tree is invalid HTML and an
+                // a11y violation. Each is a real <button> with native keyboard
+                // activation; being siblings, their clicks don't select the tab.
+                <div
                   key={tab.id}
-                  type="button"
-                  role="tab"
-                  aria-selected={active}
-                  data-testid={tabTestId(tab.kind)}
-                  className={`flex h-8 min-w-0 items-center gap-1 rounded-md px-2 text-xs transition-colors ${
+                  role="presentation"
+                  data-tab-id={tab.id}
+                  data-tab-mode={tab.mode}
+                  className={`group flex h-8 min-w-0 items-center gap-1 rounded-md px-2 text-xs transition-colors ${
                     active ? "bg-primary/(--opacity-subtle) text-primary" : "text-muted-foreground hover:bg-muted/(--opacity-muted) hover:text-foreground"
                   }`}
-                  onClick={() => setActiveTabId(tab.id)}
                 >
-                  <Icon className="h-3.5 w-3.5 shrink-0" aria-hidden="true" />
-                  <span className="max-w-24 truncate">{`${label} ${tab.ordinal}`}</span>
-                  <span
-                    role="button"
-                    tabIndex={0}
+                  <button
+                    type="button"
+                    role="tab"
+                    aria-selected={active}
+                    data-testid={tab.content ? "chat-side-panel-tab" : tabTestId(tab.kind)}
+                    className="flex min-w-0 items-center gap-1 rounded-sm text-inherit focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-primary"
+                    onClick={() => setActiveTabId(tab.id)}
+                    onDoubleClick={() => promoteToPinned(tab.id)}
+                  >
+                    <Icon className="h-3.5 w-3.5 shrink-0" aria-hidden="true" />
+                    <span className={`max-w-24 truncate ${isEphemeral ? "italic" : ""}`}>{label}</span>
+                  </button>
+                  {isEphemeral ? (
+                    <button
+                      type="button"
+                      aria-label={t("chatPreviewRail.pinTab")}
+                      data-testid="chat-side-panel-pin-tab"
+                      className="ml-0.5 rounded p-0.5 hover:bg-background/(--opacity-muted) focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-primary"
+                      onClick={() => promoteToPinned(tab.id)}
+                    >
+                      <Pin className="h-3 w-3" />
+                    </button>
+                  ) : null}
+                  <button
+                    type="button"
                     aria-label={t("chatPreviewRail.closeTab")}
-                    className="ml-0.5 rounded p-0.5 hover:bg-background/(--opacity-muted)"
-                    onClick={(event) => {
-                      event.stopPropagation();
-                      closeTab(tab.id);
-                    }}
-                    onKeyDown={(event) => {
-                      if (event.key === "Enter" || event.key === " ") {
-                        event.preventDefault();
-                        event.stopPropagation();
-                        closeTab(tab.id);
-                      }
-                    }}
+                    className="ml-0.5 rounded p-0.5 hover:bg-background/(--opacity-muted) focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-primary"
+                    onClick={() => closeTab(tab.id)}
                   >
                     <X className="h-3 w-3" />
-                  </span>
-                </button>
+                  </button>
+                </div>
               );
             })}
           </div>
@@ -1323,9 +1525,11 @@ export function ChatSidePanel({
         </div>
         ) : null}
 
-        <div className="min-h-0 flex-1 overflow-hidden" data-active-tab-kind={activeTab?.kind}>
+        <div className="min-h-0 flex-1 overflow-hidden" data-active-tab-kind={activeTab?.kind} data-active-tab-mode={activeTab?.mode}>
           {activeTab == null ? (
             <WorkspaceLauncher onOpen={addTab} />
+          ) : activeTab.content ? (
+            <ContentTabView api={api} sessionId={sessionId} tab={activeTab} targetById={targetById} />
           ) : activeTab.kind === "file-browser" ? (
             <FileBrowserWorkspace
               api={api}
