@@ -29,6 +29,13 @@ vi.mock("../../../permissions/asrt-sandbox.js", () => ({
   wrapWorkerCommand: (command: string, options?: unknown) => wrapWorkerCommandMock(command, options),
   cleanupAsrtSandboxAfterCommand: () => cleanupMock(),
   getDefaultSensitiveReadDenyPaths: () => ["/home/u/.lvis/secrets", "/home/u/.ssh"],
+  getDefaultSensitiveWriteDenyPaths: () => [
+    "/home/u/.lvis/secrets",
+    "/home/u/.ssh",
+    "/home/u/.zshrc",
+    "/home/u/.config",
+    "/home/u/Library/LaunchAgents",
+  ],
 }));
 
 // ─── filesystem-containment gate ────────────────────────────
@@ -97,6 +104,13 @@ import {
   __terminalSessionCountForTest,
   type TerminalEmit,
 } from "../pty-manager.js";
+// REAL canonicalizer (NOT mocked) — the module resolves the default terminal cwd
+// to `canonicalizePathForMatch(process.cwd())` (the workspace-root anchor) and
+// validates a renderer-supplied cwd against it, so the test computes the same.
+import { canonicalizePathForMatch } from "../../../permissions/sensitive-paths.js";
+
+/** The workspace root the module anchors the write-jail to by default. */
+const ROOT = canonicalizePathForMatch(process.cwd());
 
 let emitted: Array<{ event: string; payload: unknown }> = [];
 const emit: TerminalEmit = (event, payload) => emitted.push({ event, payload });
@@ -142,29 +156,49 @@ describe("pty-manager fail-closed", () => {
 });
 
 describe("pty-manager happy path (fs-contained)", () => {
-  it("wraps with the restated sensitive denyRead floor + a cwd write jail and spawns the wrapped argv", async () => {
-    const res = await spawnTerminal({ tabId: "terminal:1", cwd: "/work/proj", cols: 120, rows: 40 });
+  it("wraps with the restated read+write sensitive floors + a workspace-anchored cwd jail and spawns the wrapped argv", async () => {
+    // No cwd supplied (the production renderer path) → default = workspace root.
+    const res = await spawnTerminal({ tabId: "terminal:1", cols: 120, rows: 40 });
     expect(res.ok).toBe(true);
     if (res.ok) expect(res.replayed).toBe(false);
 
     expect(wrapWorkerCommandMock).toHaveBeenCalledTimes(1);
-    const [, options] = wrapWorkerCommandMock.mock.calls[0] as [string, { filesystem: { allowWrite: string[]; allowRead: string[]; denyRead: string[] } }];
+    const [, options] = wrapWorkerCommandMock.mock.calls[0] as [
+      string,
+      { filesystem: { allowWrite: string[]; allowRead: string[]; denyRead: string[]; denyWrite: string[] } },
+    ];
     // denyRead floor is RESTATED (per-command denyRead REPLACES the ASRT boot floor).
     expect(options.filesystem.denyRead).toContain("/home/u/.lvis/secrets");
     expect(options.filesystem.denyRead).toContain("/home/u/.ssh");
-    // write jail anchored on cwd.
-    expect(options.filesystem.allowWrite).toContain("/work/proj");
-    expect(options.filesystem.allowRead).toContain("/work/proj");
+    // denyWrite FLOOR is RESTATED (per-command denyWrite REPLACES the boot floor) —
+    // shell-rc / ~/.ssh / ~/.config / LaunchAgents persistence vectors are denied.
+    expect(options.filesystem.denyWrite).toContain("/home/u/.zshrc");
+    expect(options.filesystem.denyWrite).toContain("/home/u/.ssh");
+    expect(options.filesystem.denyWrite).toContain("/home/u/.config");
+    expect(options.filesystem.denyWrite).toContain("/home/u/Library/LaunchAgents");
+    // write jail anchored on the WORKSPACE ROOT — NOT $HOME (cluster-review MAJOR).
+    expect(options.filesystem.allowWrite).toContain(ROOT);
+    expect(options.filesystem.allowRead).toContain(ROOT);
 
     // spawned the WRAPPED argv[0] + argv.slice(1).
     expect(ptySpawnMock).toHaveBeenCalledTimes(1);
     const [cmd, args, opts] = ptySpawnMock.mock.calls[0] as [string, string[], { cwd: string; env: Record<string, string>; cols: number; rows: number }];
     expect(cmd).toBe("sandbox-exec");
     expect(args[0]).toBe("-p");
-    expect(opts.cwd).toBe("/work/proj");
+    expect(opts.cwd).toBe(ROOT);
     expect(opts.cols).toBe(120);
     expect(opts.rows).toBe(40);
     expect(opts.env.TERM).toBe("xterm-256color");
+  });
+
+  it("honors a renderer-supplied cwd that is WITHIN the workspace root", async () => {
+    const inside = `${ROOT}/proj`;
+    const res = await spawnTerminal({ tabId: "terminal:1", cwd: inside });
+    expect(res.ok).toBe(true);
+    const spawnArgs = ptySpawnMock.mock.calls[0] as [string, string[], { cwd: string }];
+    expect(spawnArgs[2].cwd).toBe(inside);
+    const [, options] = wrapWorkerCommandMock.mock.calls[0] as [string, { filesystem: { allowWrite: string[] } }];
+    expect(options.filesystem.allowWrite).toContain(inside);
   });
 
   it("streams pty output to the emitter and buffers it for replay", async () => {
@@ -220,5 +254,65 @@ describe("pty-manager lifecycle", () => {
     const killed = killAllTerminals();
     expect(killed).toBe(2);
     expect(__terminalSessionCountForTest()).toBe(0);
+  });
+});
+
+describe("pty-manager cwd validation (write-jail anchor)", () => {
+  it("defaults the cwd to the workspace root when none is supplied (never $HOME)", async () => {
+    const res = await spawnTerminal({ tabId: "terminal:1" });
+    expect(res.ok).toBe(true);
+    const spawnArgs = ptySpawnMock.mock.calls[0] as [string, string[], { cwd: string }];
+    expect(spawnArgs[2].cwd).toBe(ROOT);
+  });
+
+  it("rejects a renderer-supplied cwd OUTSIDE the workspace root (no $HOME write-jail)", async () => {
+    const res = await spawnTerminal({ tabId: "terminal:1", cwd: "/etc" });
+    expect(res.ok).toBe(false);
+    if (!res.ok) expect(res.reason).toBe("bad-request");
+    // No PTY spawned for a rejected cwd.
+    expect(ptySpawnMock).not.toHaveBeenCalled();
+  });
+
+  it("rejects a relative (non-absolute) cwd", async () => {
+    const res = await spawnTerminal({ tabId: "terminal:1", cwd: "relative/path" });
+    expect(res.ok).toBe(false);
+    if (!res.ok) expect(res.reason).toBe("bad-request");
+    expect(ptySpawnMock).not.toHaveBeenCalled();
+  });
+});
+
+describe("pty-manager anti-DoS caps", () => {
+  it("refuses to spawn past the concurrent-session cap", async () => {
+    const MAX = 16;
+    for (let i = 0; i < MAX; i++) {
+      const res = await spawnTerminal({ tabId: `terminal:${i}` });
+      expect(res.ok).toBe(true);
+    }
+    expect(__terminalSessionCountForTest()).toBe(MAX);
+    const over = await spawnTerminal({ tabId: "terminal:overflow" });
+    expect(over.ok).toBe(false);
+    if (!over.ok) expect(over.reason).toBe("too-many-terminals");
+    // No extra PTY spawned past the cap.
+    expect(ptySpawnMock).toHaveBeenCalledTimes(MAX);
+  });
+
+  it("replaying an EXISTING tab at the cap is still allowed (does not count as new)", async () => {
+    const MAX = 16;
+    for (let i = 0; i < MAX; i++) await spawnTerminal({ tabId: `terminal:${i}` });
+    // Remount of an existing tab replays — must NOT be rejected by the cap.
+    const replay = await spawnTerminal({ tabId: "terminal:0" });
+    expect(replay.ok).toBe(true);
+    if (replay.ok) expect(replay.replayed).toBe(true);
+  });
+
+  it("drops an oversized single input write instead of streaming it to the PTY", async () => {
+    await spawnTerminal({ tabId: "terminal:1" });
+    const huge = "x".repeat(1024 * 1024 + 1); // 1 byte over the cap
+    writeTerminal("terminal:1", huge);
+    expect(lastPty?.written).not.toContain(huge);
+    expect(lastPty?.written.length ?? 0).toBe(0);
+    // A normal write still passes.
+    writeTerminal("terminal:1", "ls\n");
+    expect(lastPty?.written).toContain("ls\n");
   });
 });
