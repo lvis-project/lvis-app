@@ -1112,6 +1112,8 @@ export const esMessages: Record<string, string> = {
   "firstTaskProposals.workAssistantCta": "Organizar la bandeja de entrada",
   "firstTaskProposals.workAssistantHeadline": "¿Organizamos tus tareas para hoy?",
   "forest.description": "Carcasa de luz + acento verde azulado + código de luz",
+  "formatIpcError.ackExpired": "La confirmación de la carpeta caducó. Elija la carpeta de nuevo.",
+  "formatIpcError.ackUnknown": "Esa confirmación de la carpeta ya no es válida. Elija la carpeta de nuevo.",
   "formatIpcError.addFailed": "No se pudo agregar la regla.",
   "formatIpcError.alreadyResolved": "El artículo ya ha sido procesado.",
   "formatIpcError.alreadyResolving": "El artículo ya se está procesando.",

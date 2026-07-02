@@ -1693,7 +1693,7 @@ export function buildLvisNamespaceExtras() {
   },
   workspace: {
     listRoots: () => ipcRenderer.invoke(CHANNELS.workspace.listRoots),
-    pickRoot: (opts?: { acknowledgePath?: string }) =>
+    pickRoot: (opts?: { ackToken?: string }) =>
       ipcRenderer.invoke(CHANNELS.workspace.pickRoot, opts),
     listDir: (dirPath: string) =>
       ipcRenderer.invoke(CHANNELS.workspace.listDir, dirPath),

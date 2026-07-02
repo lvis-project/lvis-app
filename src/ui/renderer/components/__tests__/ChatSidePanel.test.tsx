@@ -550,14 +550,15 @@ describe("ChatSidePanel", () => {
   });
 
   it("requires acknowledgement before persisting a folder with adjacency warnings", async () => {
-    const pickRoot = vi.fn(async (opts?: { acknowledgePath?: string }) => {
-      if (opts?.acknowledgePath) {
+    const pickRoot = vi.fn(async (opts?: { ackToken?: string }) => {
+      if (opts?.ackToken) {
+        // Main resolves the token to its bound path — the renderer never names it.
         return {
           ok: true as const,
-          added: opts.acknowledgePath,
+          added: "/ws/.git",
           roots: [
             { path: "/ws", isDefault: true },
-            { path: opts.acknowledgePath, isDefault: false },
+            { path: "/ws/.git", isDefault: false },
           ],
         };
       }
@@ -565,6 +566,7 @@ describe("ChatSidePanel", () => {
         ok: true as const,
         requiresAcknowledgement: true as const,
         pendingPath: "/ws/.git",
+        ackToken: "tok-abc",
         warnings: ["path contains '.git' segment — secrets may be exposed if added"],
         roots: [{ path: "/ws", isDefault: true }],
       };
@@ -586,15 +588,15 @@ describe("ChatSidePanel", () => {
     fireEvent.click(screen.getByTestId("chat-side-panel-launcher-file-browser"));
     fireEvent.click(screen.getByTestId("chat-side-panel-add-root"));
 
-    // Phase 1: warning banner appears; the pick was NOT persisted (no ack yet).
+    // Warning banner appears; the pick was NOT persisted (no ack yet).
     await screen.findByTestId("chat-side-panel-root-warning");
     expect(pickRoot).toHaveBeenCalledTimes(1);
     expect(pickRoot).toHaveBeenLastCalledWith();
 
-    // Phase 2: confirm → pickRoot re-invoked WITH the acknowledged path.
+    // Confirm → pickRoot re-invoked with the one-time TOKEN (never a path).
     fireEvent.click(screen.getByTestId("chat-side-panel-root-warning-confirm"));
     await waitFor(() => expect(pickRoot).toHaveBeenCalledTimes(2));
-    expect(pickRoot).toHaveBeenLastCalledWith({ acknowledgePath: "/ws/.git" });
+    expect(pickRoot).toHaveBeenLastCalledWith({ ackToken: "tok-abc" });
     await waitFor(() => expect(screen.queryByTestId("chat-side-panel-root-warning")).toBeNull());
   });
 });

@@ -1112,6 +1112,8 @@ export const deMessages: Record<string, string> = {
   "firstTaskProposals.workAssistantCta": "Posteingang organisieren",
   "firstTaskProposals.workAssistantHeadline": "Sollen wir Ihre Aufgaben für heute organisieren?",
   "forest.description": "Helle Schale + blaugrüner Akzent + Lichtcode",
+  "formatIpcError.ackExpired": "Die Ordnerbestätigung ist abgelaufen. Bitte wählen Sie den Ordner erneut aus.",
+  "formatIpcError.ackUnknown": "Diese Ordnerbestätigung ist nicht mehr gültig. Bitte wählen Sie den Ordner erneut aus.",
   "formatIpcError.addFailed": "Die Regel konnte nicht hinzugefügt werden.",
   "formatIpcError.alreadyResolved": "Der Artikel wurde bereits bearbeitet.",
   "formatIpcError.alreadyResolving": "Der Artikel wird bereits bearbeitet.",
