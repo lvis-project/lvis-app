@@ -7,13 +7,21 @@
  * so an in-process SDK consumer gets renderer-parity data without touching the
  * electron transport.
  *
- * MUTATING gesture-gated operations (permission set-mode, policy set,
- * sandbox-install, …) are INTENTIONALLY ABSENT from this facade. api/cli/sdk
- * origins have no user-keyboard gesture, so those channels can never be
- * satisfied — the dispatcher fails them closed with
- * `gesture-required-origin-unsupported`. Rather than surface a method that can
- * only ever throw, the facade omits them entirely; authenticated-authz for
- * privileged external mutation is the documented #1409 follow-up.
+ * MUTATING gesture-gated operations (policy set, sandbox-install, …) are
+ * INTENTIONALLY ABSENT from this facade. api/cli/sdk origins have no
+ * user-keyboard gesture, so those channels can never be satisfied — the
+ * dispatcher fails them closed with `gesture-required-origin-unsupported`.
+ * Rather than surface a method that can only ever throw, the facade omits
+ * them entirely.
+ *
+ * ONE EXCEPTION (US-104): {@link LvisClient.setPermissionMode} — the
+ * approval-mediated external mutation (`PERMISSIONS.setMode`, the sole entry
+ * in the contract's `EXTERNAL_MUTATION_CHANNELS` allowlist, landed #1409). It
+ * routes through the SAME dispatcher channel; the dispatcher surfaces an
+ * in-app ApprovalGate consent to the user BEFORE applying the mutation, and a
+ * decline / timeout resolves as the dispatcher's `external-mutation-denied`
+ * code — which this facade throws as a normal {@link LvisClientError}, exactly
+ * like every other rejected dispatch.
  *
  * Part of the main tsc project — fully type-clean, contract-typed, no `as any`.
  */
@@ -31,7 +39,7 @@ import type {
   handleChatSend,
 } from "../ipc/handlers/chat.js";
 import type { handlePluginCards, handleMarketplaceList } from "../ipc/handlers/plugins.js";
-import type { handleGetMode } from "../ipc/handlers/permissions.js";
+import type { handleGetMode, handleSetPermissionMode } from "../ipc/handlers/permissions.js";
 import type { handleUsageSummary, handleUsageRange } from "../ipc/handlers/usage.js";
 
 // ─── Contract-derived result + query types ──────────────────────────────────
@@ -54,6 +62,8 @@ export type ListPluginsResult = Awaited<ReturnType<typeof handlePluginCards>>;
 export type ListMarketplaceResult = Awaited<ReturnType<typeof handleMarketplaceList>>;
 /** Current permission mode, read-only ({@link handleGetMode}). */
 export type PermissionModeResult = ReturnType<typeof handleGetMode>;
+/** Applied permission mode after an approval-mediated set ({@link handleSetPermissionMode}). */
+export type SetPermissionModeResult = Awaited<ReturnType<typeof handleSetPermissionMode>>;
 /** Rolling usage summary ({@link handleUsageSummary}). */
 export type UsageSummaryResult = Awaited<ReturnType<typeof handleUsageSummary>>;
 /** Usage aggregated over an explicit date range ({@link handleUsageRange}). */
@@ -96,6 +106,14 @@ export interface LvisClient {
   listMarketplace(): Promise<ListMarketplaceResult>;
   /** Read the current permission mode (mutation is not on this facade). */
   getPermissionMode(): Promise<PermissionModeResult>;
+  /**
+   * Set the permission mode (US-104). APPROVAL-GATED: the host shows an
+   * in-app ApprovalGate consent dialog to the user before the mutation is
+   * applied. If the user declines, or the request times out, the dispatcher
+   * rejects with the `external-mutation-denied` code, which surfaces here as
+   * a thrown {@link LvisClientError} (same as every other rejected dispatch).
+   */
+  setPermissionMode(mode: string): Promise<SetPermissionModeResult>;
   /** Rolling usage summary over `days` (default handler value applies). */
   getUsageSummary(days?: number): Promise<UsageSummaryResult>;
   /** Usage aggregated over an explicit date range. */
@@ -139,6 +157,9 @@ export function createLvisClient(api: LocalApi<string>, origin: ExternalOrigin =
     },
     async getPermissionMode() {
       return (await call(PERMISSIONS.getMode)) as PermissionModeResult;
+    },
+    async setPermissionMode(mode) {
+      return (await call(PERMISSIONS.setMode, { mode })) as SetPermissionModeResult;
     },
     async getUsageSummary(days) {
       return (await call(CHANNELS.usage.summary, days)) as UsageSummaryResult;
